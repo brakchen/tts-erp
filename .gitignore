@@ -1,0 +1,53 @@
+# ─── Secrets ─────────────────────────────────────────
+.env
+.env.local
+*.pem
+*.key
+
+# ─── Logs ────────────────────────────────────────────
+logs/
+*.log
+cron.log
+cleanup.log
+
+# ─── Python cache ───────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ─── Python build / install ─────────────────────────
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# ─── Test artifacts ─────────────────────────────────
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.nox/
+
+# ─── IDE / editor ──────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# ─── Backup files (older versions preserved in setup/) ───
+*.bak
+*.bak.*
+
+# ─── tdd/ specific ──────────────────────────────────
+# Keep tdd/ in git, but exclude any env there
+tdd/.env
+
+# ─── Misc stray paths ───────────────────────────────
+# Stray "F:" directory left over from an earlier scp path-mangling experiment
+/F:
+/F:/
