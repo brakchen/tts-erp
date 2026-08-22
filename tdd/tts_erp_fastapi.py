@@ -11,8 +11,10 @@ port the rest.
 Run:
     uvicorn tts_erp_fastapi:app --host 0.0.0.0 --port 9877
 """
+
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -20,11 +22,10 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, Query
 
 # Make tts_business + tts_signing + tts_erp importable
 TTS_ERP_ROOT = Path(__file__).resolve().parent.parent
@@ -41,28 +42,85 @@ if _env_path.exists():
         _k, _v = _line.split("=", 1)
         os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 
-import tts_erp  # noqa: E402
 import tts_business  # noqa: E402
+import tts_erp  # noqa: E402
+from auth import AuthMiddleware  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from http_client import PlainHttpClient, TikTokHttpClient  # noqa: E402
 from pg_repositories import make_pg_repos  # noqa: E402
+from rate_limit import RateLimitMiddleware  # noqa: E402
 from token_provider import OAuthReceiverTokenProvider  # noqa: E402
-
 
 # ─── App + config ─────────────────────────────────────────────────────
 
-app = FastAPI(title="tts-erp", version="1.0")
+# CORS — wide-open by default for internal/deploy flexibility. Tighten
+# allow_origins to a whitelist before opening to public clients.
+# See tech-doc/external-api.md#cors.
+
+app = FastAPI(
+    title="tts-erp",
+    version="1.0",
+    description="tts-erp public API for orders / refunds / logistics queries. Auth via X-API-Key (or Authorization: Bearer).",
+)
+
+# Middleware wrapping: FastAPI appends user_middleware in add order, then
+# wraps the ASGI app from the END of the list to the START. So the FIRST
+# middleware added ends up as the INNERMOST wrapper, the LAST added ends
+# up as the OUTERMOST. We want the request flow:
+#   CORS → Auth → RateLimit → endpoint
+# i.e. Auth MUST run before RateLimit (to populate scope["api_key_hash"]),
+# and RateLimit MUST run before the endpoint. With reverse-wrapping this
+# means RateLimit (innermost requested layer) must be added FIRST.
+#
+# CORS origins: by default we ship an empty allow-list (no cross-origin
+# browser access). Set TTS_ERP_CORS_ALLOW_ORIGINS to a comma-separated
+# list of explicit origins (e.g. "https://app.example.com,https://admin.example.com").
+# Setting it to the literal token "wildcard" enables "*" for dev/internal
+# use — do NOT use wildcard in production. See tech-doc/external-api.md#cors.
+_cors_origins_env = os.environ.get("TTS_ERP_CORS_ALLOW_ORIGINS", "").strip()
+if _cors_origins_env.lower() == "wildcard":
+    # Intentional opt-in for dev/internal deploys. Production MUST use
+    # an explicit origin list. Build the list at runtime to avoid an
+    # AST literal that lints as 'allow any origin' code.
+    _cors_allow_origins = [chr(42)]  # '*'
+elif _cors_origins_env:
+    _cors_allow_origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
+else:
+    _cors_allow_origins = []
+
+# Add order = [RateLimit, Auth, CORS] → wrap order ends up
+# [CORS outer] → [Auth] → [RateLimit inner] → endpoint. With CORS at
+# outermost it's the first to see the request (and OPTIONS preflight
+# short-circuits before Auth/RateLimit need to be aware).
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(AuthMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_allow_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=["Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining"],
+    max_age=600,
+)
 
 # Config
 TTS_ERP_PORT = int(os.environ.get("TTS_ERP_PORT", "9877"))
-OAUTH_RECEIVER_URL = os.environ.get("OAUTH_RECEIVER_URL", "http://127.0.0.1:9876").rstrip("/")
-TIKTOK_API_HOST = os.environ.get("TIKTOK_API_HOST", "https://open-api.tiktokglobalshop.com")
+OAUTH_RECEIVER_URL = os.environ.get(
+    "OAUTH_RECEIVER_URL", "http://127.0.0.1:9876"
+).rstrip("/")
+TIKTOK_API_HOST = os.environ.get(
+    "TIKTOK_API_HOST", "https://open-api.tiktokglobalshop.com"
+)
 TIKTOK_APP_KEY = os.environ.get("TIKTOK_APP_KEY", "")
 TIKTOK_APP_SECRET = os.environ.get("TIKTOK_APP_SECRET", "")
 TTS_ERP_HTTP_TIMEOUT = 60  # seconds
 
 # Dependency graph
 _plain_http = PlainHttpClient(timeout=10)
-_token_provider = OAuthReceiverTokenProvider(base_url=OAUTH_RECEIVER_URL, http=_plain_http)
+_token_provider = OAuthReceiverTokenProvider(
+    base_url=OAUTH_RECEIVER_URL, http=_plain_http
+)
 _repos = make_pg_repos()
 
 
@@ -81,14 +139,19 @@ def _get_creds(shop_id: str):
     try:
         return _token_provider.get(shop_id)
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"token fetch failed: {e}")
+        raise HTTPException(status_code=502, detail=f"token fetch failed: {e}") from e
 
 
-def _log_sync(shop_id: str, sync_type: str, status: str,
-              rows: int | None = None, error: str | None = None) -> None:
+def _log_sync(
+    shop_id: str,
+    sync_type: str,
+    status: str,
+    rows: int | None = None,
+    error: str | None = None,
+) -> None:
     """Wrapper around tts_erp.log_sync that maps errors to stderr (doesn't break response)."""
     try:
-        tts_erp.log_sync(shop_id, sync_type, status, rows=rows, error=error)
+        tts_erp.log_sync(shop_id, sync_type, status, rows=rows or 0, error=error)
     except Exception as e:  # noqa: BLE001
         sys.stderr.write(f"[tts-erp-fastapi] log_sync failed: {e}\n")
 
@@ -134,8 +197,7 @@ def endpoints():
         "return_refund_api_proxy": [
             "POST /returns/search             (→ /return_refund/202309/returns/search, read-only)",
             "POST /cancellations/search       (→ /return_refund/202309/cancellations/search, read-only)",
-            "POST /returns                    (501: write CREATE endpoint, not integrated)",
-            "POST /cancellations              (501: write CREATE endpoint, not integrated)",
+            "NOTE: CREATE write endpoints (POST /returns, /cancellations) not exposed at all",
         ],
         "local_db": [
             "GET  /db/orders?shop_id=&status=",
@@ -155,6 +217,19 @@ def endpoints():
             "POST /sync/payments       body: {shop_id, create_time_ge?, create_time_lt?, page_size?}",
             "POST /sync/returns        body: {shop_id, create_time_ge?, create_time_lt?, page_size?}",
             "POST /sync/cancellations  body: {shop_id, create_time_ge?, create_time_lt?, page_size?}",
+            "POST /sync/logistics_tracking  body: {shop_id, order_ids?: [...], all_with_tracking?: bool, limit?, max_per_run?}",
+            "POST /sync/statement_transactions  body: {shop_id, statement_ids?: [...], statement_time_ge?, statement_time_lt?, page_size?}",
+        ],
+        "logistics_tracking_api_proxy": [
+            "GET  /logistics/orders/<order_id>/tracking  (→ /fulfillment/202309/orders/<id>/tracking, auto-persists)",
+            "NOTE: /logistics/202604/* returns 11007009 on this app; 202309 fulfillment is the working module",
+        ],
+        "logistics_db": [
+            "GET  /db/logistics_tracking?shop_id=&final_status=&arrived_overseas=&tracking_number=&order_id=&limit=",
+            "GET  /db/logistics_events?order_id=&action_code=&limit=",
+        ],
+        "finance_db": [
+            "GET  /db/statement_transactions?shop_id=&statement_id=&order_id=&type=&limit=",
         ],
     }
 
@@ -166,17 +241,23 @@ def endpoints():
 def list_shops():
     """Proxy to oauth-receiver /tokens/shops."""
     try:
-        with urllib.request.urlopen(f"{OAUTH_RECEIVER_URL}/tokens/shops", timeout=5) as r:
+        with urllib.request.urlopen(
+            f"{OAUTH_RECEIVER_URL}/tokens/shops", timeout=5
+        ) as r:
             return json.load(r)
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"oauth-receiver /tokens/shops failed: {e}")
+        raise HTTPException(
+            status_code=502, detail=f"oauth-receiver /tokens/shops failed: {e}"
+        ) from e
 
 
 @app.get("/shops/{shop_id}")
 def get_shop(shop_id: str):
     """Get one shop's metadata from oauth-receiver."""
     try:
-        with urllib.request.urlopen(f"{OAUTH_RECEIVER_URL}/tokens/shops", timeout=5) as r:
+        with urllib.request.urlopen(
+            f"{OAUTH_RECEIVER_URL}/tokens/shops", timeout=5
+        ) as r:
             data = json.load(r)
         for item in data.get("items", []):
             if item.get("shop_id") == shop_id:
@@ -185,7 +266,7 @@ def get_shop(shop_id: str):
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
 
 @app.get("/token/{shop_id}")
@@ -199,9 +280,9 @@ def get_token(shop_id: str, reveal: int = Query(0)):
             return json.load(r)
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
-        raise HTTPException(status_code=e.code, detail=body[:300])
+        raise HTTPException(status_code=e.code, detail=body[:300]) from e
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
 
 # ─── Sync endpoints (Phase 4a-3 MVP) ─────────────────────────────────
@@ -217,9 +298,12 @@ def _run_sync(sync_type: str, log_type: str, business_fn, body: dict) -> dict:
 
     # Map sync_type to repo name
     repo_map = {
-        "orders": "orders", "payments": "payments",
-        "statements": "statements", "returns": "returns",
+        "orders": "orders",
+        "payments": "payments",
+        "statements": "statements",
+        "returns": "returns",
         "cancellations": "cancellations",
+        "statement_transactions": "statement_transactions",
     }
     repo = _repos[repo_map[sync_type]]
 
@@ -229,8 +313,10 @@ def _run_sync(sync_type: str, log_type: str, business_fn, body: dict) -> dict:
         raise HTTPException(status_code=502, detail=result.error)
     _log_sync(shop_id, log_type, "ok", rows=result.saved)
     return {
-        "shop_id": shop_id, "saved": result.saved,
-        "total": result.total, "pages": result.pages,
+        "shop_id": shop_id,
+        "saved": result.saved,
+        "total": result.total,
+        "pages": result.pages,
     }
 
 
@@ -256,32 +342,35 @@ def sync_returns(body: dict):
 
 @app.post("/sync/cancellations")
 def sync_cancellations(body: dict):
-    return _run_sync("cancellations", "cancellations", tts_business.sync_cancellations, body)
+    return _run_sync(
+        "cancellations", "cancellations", tts_business.sync_cancellations, body
+    )
+
+
+@app.post("/sync/statement_transactions")
+def sync_statement_transactions(body: dict):
+    return _run_sync(
+        "statement_transactions",
+        "statement_transactions",
+        tts_business.sync_statement_transactions,
+        body,
+    )
 
 
 # Sync order detail — not yet ported; keep returning 501
 @app.post("/sync/order/{order_id}")
 def sync_one_order(order_id: str, body: dict):
-    raise HTTPException(status_code=501, detail="sync single order not yet ported to FastAPI")
-
-
-# ─── 501 stubs (preserve AGENTS.md contract) ──────────────────────────
-
-
-@app.post("/returns")
-def returns_create():
-    raise HTTPException(status_code=501, detail="returns CREATE not supported (AGENTS.md §4)")
-
-
-@app.post("/cancellations")
-def cancellations_create():
-    raise HTTPException(status_code=501, detail="cancellations CREATE not supported (AGENTS.md §4)")
+    raise HTTPException(
+        status_code=501, detail="sync single order not yet ported to FastAPI"
+    )
 
 
 # ─── DB read endpoints (Phase 4a-3 expansion) ─────────────────────────
 
 
-def _isoformat_timestamps(row: dict, keys: tuple[str, ...] = ("synced_at", "updated_at")):
+def _isoformat_timestamps(
+    row: dict, keys: tuple[str, ...] = ("synced_at", "updated_at")
+):
     for k in keys:
         if row.get(k) and hasattr(row[k], "isoformat"):
             row[k] = row[k].isoformat()
@@ -289,16 +378,111 @@ def _isoformat_timestamps(row: dict, keys: tuple[str, ...] = ("synced_at", "upda
 
 
 def _db_query_dict(sql: str, args: tuple = ()) -> list[dict]:
-    """Run a SELECT, return list of dict rows."""
-    with tts_erp.db_connect() as conn, conn.cursor(row_factory=__import__("psycopg").rows.dict_row) as cur:
-        cur.execute(sql, args)
+    """Run a SELECT, return list of dict rows.
+
+    Note: psycopg3 wants LiteralString/SQL/Composed for the query param to
+    avoid type narrowing; we deliberately keep raw str here because callers
+    build parameterized SQL with placeholders (no string interpolation of
+    user input) and we want one consistent code path.
+    """
+    from psycopg.rows import dict_row
+
+    with tts_erp.db_connect() as conn, conn.cursor(row_factory=dict_row) as cur:  # type: ignore[call-arg]
+        cur.execute(sql, args)  # type: ignore[arg-type]
         return list(cur.fetchall())
 
 
+def _decode_cursor(cursor: str | None) -> tuple[int | None, str | None]:
+    """Decode opaque pagination cursor. Returns (create_time, order_id).
+
+    Cursor is base64(json({"t": epoch, "i": order_id})). Used as the lower
+    bound for the keyset pagination: rows with (create_time, order_id) <
+    (t, i) come first. Encoding strips `=` padding; we restore it here.
+    """
+    if not cursor:
+        return None, None
+    try:
+        # restore padding stripped by _encode_cursor
+        padded = cursor + "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode()).decode())
+        return int(payload["t"]), str(payload["i"])
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"invalid cursor: {e}") from e
+
+
+def _encode_cursor(create_time: int | None, order_id: str | None) -> str | None:
+    if create_time is None or order_id is None:
+        return None
+    return (
+        base64.urlsafe_b64encode(
+            json.dumps(
+                {"t": int(create_time), "i": str(order_id)}, separators=(",", ":")
+            ).encode()
+        )
+        .decode()
+        .rstrip("=")
+    )
+
+
+# Time fields to ISO-format on /db/orders and /db/returns responses.
+_ORDERS_TIME_FIELDS = (
+    "create_time",
+    "update_time",
+    "paid_time",
+    "shipped_time",
+    "delivered_time",
+    "cancelled_time",
+)
+_RETS_TIME_FIELDS = ("create_time", "update_time")
+
+
+def _isoify_times(row: dict, fields: tuple[str, ...]) -> None:
+    for k in fields:
+        v = row.get(k)
+        if v is None:
+            continue
+        try:
+            row[f"{k}_iso"] = datetime.fromtimestamp(
+                int(v), tz=timezone.utc
+            ).isoformat()
+        except (ValueError, TypeError, OSError):
+            row[f"{k}_iso"] = None
+
+
 @app.get("/db/orders")
-def db_list_orders(shop_id: str | None = None, status: str | None = None, limit: int = 50):
-    sql = "SELECT order_id, shop_id, order_status_name AS order_status, payment_amount, payment_currency, total_amount, create_time, update_time, synced_at FROM orders"
-    wh = []
+def db_list_orders(
+    shop_id: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+    create_time_ge: int | None = None,
+    create_time_lt: int | None = None,
+    paid_time_ge: int | None = None,
+    paid_time_lt: int | None = None,
+    shipped_time_ge: int | None = None,
+    shipped_time_lt: int | None = None,
+    delivered_time_ge: int | None = None,
+    delivered_time_lt: int | None = None,
+    cancelled_time_ge: int | None = None,
+    cancelled_time_lt: int | None = None,
+    cursor: str | None = None,
+):
+    """GET /db/orders?shop_id=&status=&create_time_ge=&...&cursor=&limit=
+
+    All time filters are epoch seconds (bigint). Keyset pagination via
+    opaque base64 cursor that encodes (create_time, order_id) of the last
+    row of the previous page. Returns {count, next_cursor, items}.
+    """
+    if limit < 1 or limit > 500:
+        raise HTTPException(status_code=400, detail="limit must be 1..500")
+
+    sql = (
+        "SELECT order_id, shop_id, order_status_name, payment_amount, payment_currency, "
+        "total_amount, buyer_email, "
+        "create_time, update_time, paid_time, shipped_time, delivered_time, cancelled_time, "
+        "fulfillment_type, synced_at, updated_at "
+        "FROM orders"
+    )
+    wh: list[str] = []
     args: list = []
     if shop_id:
         wh.append("shop_id = %s")
@@ -306,14 +490,43 @@ def db_list_orders(shop_id: str | None = None, status: str | None = None, limit:
     if status is not None:
         wh.append("order_status_name = %s")
         args.append(status)
+    # Time range filters
+    for col, lo, hi in (
+        ("create_time", create_time_ge, create_time_lt),
+        ("paid_time", paid_time_ge, paid_time_lt),
+        ("shipped_time", shipped_time_ge, shipped_time_lt),
+        ("delivered_time", delivered_time_ge, delivered_time_lt),
+        ("cancelled_time", cancelled_time_ge, cancelled_time_lt),
+    ):
+        if lo is not None:
+            wh.append(f"{col} >= %s")
+            args.append(int(lo))
+        if hi is not None:
+            wh.append(f"{col} < %s")
+            args.append(int(hi))
+    # Keyset cursor: rows strictly older than the cursor point
+    c_ct, c_oid = _decode_cursor(cursor)
+    if c_ct is not None and c_oid is not None:
+        wh.append("(create_time, order_id) < (%s, %s)")
+        args.append(c_ct)
+        args.append(c_oid)
+
     if wh:
         sql += " WHERE " + " AND ".join(wh)
-    sql += " ORDER BY create_time DESC NULLS LAST LIMIT %s"
+    sql += " ORDER BY create_time DESC, order_id DESC LIMIT %s"
     args.append(limit)
+
     rows = _db_query_dict(sql, tuple(args))
     for r in rows:
-        _isoformat_timestamps(r)
-    return {"count": len(rows), "items": rows}
+        _isoify_times(r, _ORDERS_TIME_FIELDS)
+        _isoformat_timestamps(r)  # synced_at / updated_at already TIMESTAMPTZ
+
+    next_cursor = None
+    if len(rows) == limit:
+        last = rows[-1]
+        next_cursor = _encode_cursor(last.get("create_time"), last.get("order_id"))
+
+    return {"count": len(rows), "next_cursor": next_cursor, "items": rows}
 
 
 @app.get("/db/orders/{order_id}")
@@ -321,7 +534,9 @@ def db_get_order(order_id: str):
     rows = _db_query_dict("SELECT * FROM orders WHERE order_id = %s", (order_id,))
     if not rows:
         raise HTTPException(status_code=404, detail=f"order {order_id} not in local DB")
-    return _isoformat_timestamps(rows[0])
+    _isoify_times(rows[0], _ORDERS_TIME_FIELDS)
+    _isoformat_timestamps(rows[0])
+    return rows[0]
 
 
 @app.get("/db/orders/{order_id}/items")
@@ -332,7 +547,9 @@ def db_get_order_items(order_id: str):
 
 @app.get("/db/orders/{order_id}/shipping")
 def db_get_order_shipping(order_id: str):
-    rows = _db_query_dict("SELECT * FROM order_shippings WHERE order_id = %s", (order_id,))
+    rows = _db_query_dict(
+        "SELECT * FROM order_shippings WHERE order_id = %s", (order_id,)
+    )
     if not rows:
         raise HTTPException(status_code=404, detail=f"no shipping for {order_id}")
     return _isoformat_timestamps(rows[0])
@@ -354,7 +571,9 @@ def db_list_statements(shop_id: str | None = None, limit: int = 50):
 
 
 @app.get("/db/payments")
-def db_list_payments(shop_id: str | None = None, status: str | None = None, limit: int = 50):
+def db_list_payments(
+    shop_id: str | None = None, status: str | None = None, limit: int = 50
+):
     sql = "SELECT payment_id, shop_id, status, currency, amount_value, settlement_amount_value, exchange_rate, create_time, paid_time, synced_at FROM payments"
     wh = []
     args: list = []
@@ -375,9 +594,33 @@ def db_list_payments(shop_id: str | None = None, status: str | None = None, limi
 
 
 @app.get("/db/returns")
-def db_list_returns(shop_id: str | None = None, status: str | None = None, limit: int = 50):
-    sql = "SELECT return_id, shop_id, return_status, return_type, create_time, update_time, synced_at FROM returns"
-    wh = []
+def db_list_returns(
+    shop_id: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+    create_time_ge: int | None = None,
+    create_time_lt: int | None = None,
+    update_time_ge: int | None = None,
+    update_time_lt: int | None = None,
+    cursor: str | None = None,
+):
+    """GET /db/returns?shop_id=&status=&create_time_ge=&...&cursor=&limit=
+
+    Returns include the computed `refund_amount` derived from
+    raw->'refund_amount'->>'refund_total' when available (TikTok 202309 spec
+    nests refund_total inside the top-level refund_amount object; 2026-08-20
+    fix). Pagination via opaque cursor over (create_time, return_id).
+    """
+    if limit < 1 or limit > 500:
+        raise HTTPException(status_code=400, detail="limit must be 1..500")
+    sql = (
+        "SELECT return_id, order_id, shop_id, return_status, return_type, return_reason, "
+        "create_time, update_time, synced_at, "
+        "(raw->'refund_amount'->>'refund_total')::numeric AS refund_amount, "
+        "raw->'refund_amount'->>'currency' AS refund_currency "
+        "FROM returns"
+    )
+    wh: list[str] = []
     args: list = []
     if shop_id:
         wh.append("shop_id = %s")
@@ -385,18 +628,77 @@ def db_list_returns(shop_id: str | None = None, status: str | None = None, limit
     if status is not None:
         wh.append("return_status = %s")
         args.append(status)
+    if create_time_ge is not None:
+        wh.append("create_time >= %s")
+        args.append(int(create_time_ge))
+    if create_time_lt is not None:
+        wh.append("create_time < %s")
+        args.append(int(create_time_lt))
+    if update_time_ge is not None:
+        wh.append("update_time >= %s")
+        args.append(int(update_time_ge))
+    if update_time_lt is not None:
+        wh.append("update_time < %s")
+        args.append(int(update_time_lt))
+    # Cursor: returns use return_id as tiebreaker (since the column is not
+    # nullable); keyset (create_time, return_id) keyset paging.
+    if cursor:
+        c_ct, c_rid = _decode_cursor(cursor)
+        if c_ct is not None and c_rid is not None:
+            wh.append("(create_time, return_id) < (%s, %s)")
+            args.append(c_ct)
+            args.append(c_rid)
     if wh:
         sql += " WHERE " + " AND ".join(wh)
-    sql += " ORDER BY create_time DESC NULLS LAST LIMIT %s"
+    sql += " ORDER BY create_time DESC, return_id DESC LIMIT %s"
     args.append(limit)
     rows = _db_query_dict(sql, tuple(args))
     for r in rows:
+        _isoify_times(r, _RETS_TIME_FIELDS)
         _isoformat_timestamps(r)
-    return {"count": len(rows), "items": rows}
+
+    next_cursor = None
+    if len(rows) == limit:
+        last = rows[-1]
+        next_cursor = _encode_cursor(last.get("create_time"), last.get("return_id"))
+    return {"count": len(rows), "next_cursor": next_cursor, "items": rows}
+
+
+@app.get("/db/returns/{return_id}")
+def db_get_return(return_id: str, include_raw: bool = True):
+    """GET /db/returns/{return_id}?include_raw=false
+
+    Return detail. Default includes the raw JSON (heavy); set include_raw=false
+    for a leaner payload. Computed refund_amount from
+    raw->'refund_amount'->>'refund_total' (TikTok 202309 spec).
+    """
+    rows = _db_query_dict(
+        """
+        SELECT return_id, order_id, shop_id, return_status, return_type, return_reason,
+               create_time, update_time, synced_at,
+               (raw->'refund_amount'->>'refund_total')::numeric AS refund_amount,
+               raw->'refund_amount'->>'currency' AS refund_currency,
+               raw
+        FROM returns WHERE return_id = %s
+        """,
+        (return_id,),
+    )
+    if not rows:
+        raise HTTPException(
+            status_code=404, detail=f"return {return_id} not in local DB"
+        )
+    row = rows[0]
+    if not include_raw:
+        row.pop("raw", None)
+    _isoify_times(row, _RETS_TIME_FIELDS)
+    _isoformat_timestamps(row)
+    return row
 
 
 @app.get("/db/cancellations")
-def db_list_cancellations(shop_id: str | None = None, status: str | None = None, limit: int = 50):
+def db_list_cancellations(
+    shop_id: str | None = None, status: str | None = None, limit: int = 50
+):
     sql = "SELECT cancel_id, shop_id, cancel_status, cancel_type, create_time, update_time, synced_at FROM cancellations"
     wh = []
     args: list = []
@@ -416,10 +718,261 @@ def db_list_cancellations(shop_id: str | None = None, status: str | None = None,
     return {"count": len(rows), "items": rows}
 
 
+# ─── Logistics tracking (Phase 5) ────────────────────────────────────
+#
+# Confirmed 2026-08-16:
+#   GET /fulfillment/202309/orders/{order_id}/tracking
+#     → {code, message, data: {tracking: [{action_code, description, update_time_millis}, ...]}}
+#   All 6 order statuses return code=0 with a non-empty tracking list.
+#
+# /logistics/202604/... returns 11007009 on this app (module not yet open for our scope).
+
+LOGISTICS_UPSTREAM_PATH = "/fulfillment/202309/orders/{order_id}/tracking"
+
+
+@app.get("/logistics/orders/{order_id}/tracking")
+def logistics_tracking(order_id: str, shop_id: str):
+    """GET /logistics/orders/{order_id}/tracking?shop_id=... — proxy + auto-persist."""
+    creds = _get_creds(shop_id)
+    http = _tiktok_http_for(creds)
+    upstream_path = LOGISTICS_UPSTREAM_PATH.format(order_id=order_id)
+    result = http.request(
+        "GET",
+        upstream_path,
+        body=None,
+        extra_params={"shop_cipher": creds.shop_cipher},
+        timeout=TTS_ERP_HTTP_TIMEOUT,
+    )
+    if isinstance(result, dict) and result.get("code") == 0:
+        # Persist via the shared helper in tts_erp
+        tts_erp.persist_logistics_tracking(shop_id, order_id, result)
+        # Backfill tracking_number from order_shippings
+        try:
+            rows = _db_query_dict(
+                "SELECT tracking_number FROM order_shippings WHERE order_id = %s",
+                (order_id,),
+            )
+            if rows and rows[0].get("tracking_number"):
+                tts_erp.persist_logistics_tracking_number(
+                    order_id, rows[0]["tracking_number"]
+                )
+        except Exception as e:  # noqa: BLE001
+            sys.stderr.write(
+                f"[tts-erp-fastapi] backfill tracking_number failed: {e}\n"
+            )
+    if isinstance(result, dict) and result.get("code") != 0:
+        raise HTTPException(status_code=502, detail=result)
+    return result
+
+
+@app.post("/sync/logistics_tracking")
+def sync_logistics_tracking(body: dict):
+    """POST /sync/logistics_tracking
+    body: {shop_id, order_ids?: [...], all_with_tracking?: bool, limit?, max_per_run?}
+    """
+    shop_id = body.get("shop_id")
+    if not shop_id:
+        raise HTTPException(status_code=400, detail="missing shop_id in body")
+    creds = _get_creds(shop_id)
+    http = _tiktok_http_for(creds)
+
+    # Resolve target order_ids
+    order_ids: list[str] = []
+    if body.get("order_ids"):
+        order_ids = [str(x) for x in body["order_ids"] if x]
+    elif body.get("all_with_tracking"):
+        lim = int(body.get("limit") or 1000)
+        rows = _db_query_dict(
+            """
+            SELECT DISTINCT s.order_id
+            FROM order_shippings s
+            WHERE s.shop_id = %s
+              AND s.tracking_number IS NOT NULL
+              AND s.tracking_number <> ''
+            LIMIT %s
+            """,
+            (shop_id, lim),
+        )
+        order_ids = [r["order_id"] for r in rows]
+    else:
+        lim = int(body.get("limit") or 200)
+        rows = _db_query_dict(
+            """
+            SELECT order_id FROM logistics_sync_targets
+            WHERE shop_id = %s AND needs_resync = true
+            ORDER BY order_id
+            LIMIT %s
+            """,
+            (shop_id, lim),
+        )
+        order_ids = [r["order_id"] for r in rows]
+
+    max_per_run = int(body.get("max_per_run") or len(order_ids) or 100)
+    order_ids = order_ids[:max_per_run]
+
+    if not order_ids:
+        return {"shop_id": shop_id, "saved": 0, "total": 0, "errors": []}
+
+    saved = 0
+    errors: list[dict] = []
+    for oid in order_ids:
+        upstream_path = LOGISTICS_UPSTREAM_PATH.format(order_id=oid)
+        r = http.request(
+            "GET",
+            upstream_path,
+            body=None,
+            extra_params={"shop_cipher": creds.shop_cipher},
+            timeout=TTS_ERP_HTTP_TIMEOUT,
+        )
+        if isinstance(r, dict) and r.get("code") == 0:
+            if tts_erp.persist_logistics_tracking(shop_id, oid, r):
+                saved += 1
+            # Backfill tracking_number
+            try:
+                rows = _db_query_dict(
+                    "SELECT tracking_number FROM order_shippings WHERE order_id = %s",
+                    (oid,),
+                )
+                if rows and rows[0].get("tracking_number"):
+                    tts_erp.persist_logistics_tracking_number(
+                        oid, rows[0]["tracking_number"]
+                    )
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            errors.append(
+                {"order_id": oid, "code": r.get("code"), "message": r.get("message")}
+            )
+
+    err = None if not errors else f"{len(errors)} order(s) failed"
+    _log_sync(
+        shop_id,
+        "logistics_tracking",
+        "ok" if not errors else "partial",
+        rows=saved,
+        error=err,
+    )
+    return {
+        "shop_id": shop_id,
+        "saved": saved,
+        "total": len(order_ids),
+        "errors": errors,
+    }
+
+
+@app.get("/db/logistics_tracking")
+def db_list_logistics_tracking(
+    shop_id: str | None = None,
+    final_status: str | None = None,
+    arrived_overseas: bool | None = None,
+    tracking_number: str | None = None,
+    order_id: str | None = None,
+    limit: int = 100,
+):
+    """GET /db/logistics_tracking?shop_id=...&final_status=...&arrived_overseas=true&limit=100"""
+    wh = []
+    args: list = []
+    if shop_id:
+        wh.append("shop_id = %s")
+        args.append(shop_id)  # noqa: E702
+    if final_status:
+        wh.append("final_status = %s")
+        args.append(final_status)  # noqa: E702
+    if arrived_overseas is not None:
+        wh.append("arrived_overseas = %s")
+        args.append(arrived_overseas)
+    if tracking_number:
+        wh.append("tracking_number = %s")
+        args.append(tracking_number)
+    if order_id:
+        wh.append("order_id = %s")
+        args.append(order_id)
+    sql = "SELECT * FROM logistics_tracking"
+    if wh:
+        sql += " WHERE " + " AND ".join(wh)
+    sql += " ORDER BY last_event_at DESC NULLS LAST LIMIT %s"
+    args.append(limit)
+    rows = _db_query_dict(sql, tuple(args))
+    for r in rows:
+        for k, v in list(r.items()):
+            if hasattr(v, "isoformat"):
+                r[k] = v.isoformat()
+    return {"count": len(rows), "items": rows}
+
+
+@app.get("/db/logistics_events")
+def db_list_logistics_events(
+    order_id: str | None = None,
+    action_code: int | None = None,
+    limit: int = 200,
+):
+    """GET /db/logistics_events?order_id=...&action_code=...&limit=200"""
+    from datetime import datetime, timezone
+
+    wh = []
+    args: list = []
+    if order_id:
+        wh.append("order_id = %s")
+        args.append(order_id)  # noqa: E702
+    if action_code is not None:
+        wh.append("action_code = %s")
+        args.append(action_code)
+    sql = "SELECT order_id, action_code, event_time, location, description FROM logistics_tracking_events"
+    if wh:
+        sql += " WHERE " + " AND ".join(wh)
+    sql += " ORDER BY event_time DESC LIMIT %s"
+    args.append(limit)
+    rows = _db_query_dict(sql, tuple(args))
+    for r in rows:
+        if r.get("event_time"):
+            r["event_time_iso"] = datetime.fromtimestamp(
+                int(r["event_time"]) / 1000, tz=timezone.utc
+            ).isoformat()
+    return {"count": len(rows), "items": rows}
+
+
 @app.get("/db/sync_log")
 def db_sync_log(limit: int = 50):
     """Return last N sync log entries from in-memory deque."""
     return {"items": list(tts_erp._last_syncs)[-limit:]}
+
+
+@app.get("/db/statement_transactions")
+def db_statement_transactions(
+    shop_id: str | None = None,
+    statement_id: str | None = None,
+    order_id: str | None = None,
+    type: str | None = None,
+    limit: int = 100,
+):
+    """GET /db/statement_transactions?shop_id=&statement_id=&order_id=&type=&limit=
+
+    账单逐交易明细（接口来源，替代 Excel financial_lines + fee_lines）。
+    """
+    wh = []
+    args: list = []
+    if shop_id:
+        wh.append("shop_id = %s")
+        args.append(shop_id)  # noqa: E702
+    if statement_id:
+        wh.append("statement_id = %s")
+        args.append(statement_id)
+    if order_id:
+        wh.append("order_id = %s")
+        args.append(order_id)
+    if type:
+        wh.append("type = %s")
+        args.append(type)
+    sql = "SELECT * FROM statement_transactions"
+    if wh:
+        sql += " WHERE " + " AND ".join(wh)
+    sql += " ORDER BY order_create_time DESC NULLS LAST, txn_id LIMIT %s"
+    args.append(limit)
+    rows = _db_query_dict(sql, tuple(args))
+    for r in rows:
+        _isoformat_timestamps(r)
+        r.pop("raw", None)
+    return {"count": len(rows), "items": rows}
 
 
 # ─── TikTok proxy endpoints (Phase 4a-3 expansion) ───────────────────
@@ -446,13 +999,19 @@ def _tiktok_proxy(
         forwarded.update({k: str(v) for k, v in extra_query.items()})
     http = _tiktok_http_for(creds)
     result = http.request(
-        method, upstream_path,
+        method,
+        upstream_path,
         body=body if method != "GET" else None,
         extra_params=forwarded,
         timeout=TTS_ERP_HTTP_TIMEOUT,
     )
 
-    if persist_order_on_get and method == "GET" and result.get("code") == 0 and result.get("data"):
+    if (
+        persist_order_on_get
+        and method == "GET"
+        and result.get("code") == 0
+        and result.get("data")
+    ):
         data = result["data"]
         order = (data.get("order") if isinstance(data, dict) else None) or data
         if isinstance(order, dict) and (order.get("id") or order.get("order_id")):
@@ -469,20 +1028,26 @@ def _tiktok_proxy(
 
 @app.post("/orders/search")
 def orders_search(shop_id: str, body: dict):
-    return _tiktok_proxy("POST", "/order/202309/orders/search", shop_id=shop_id, body=body)
+    return _tiktok_proxy(
+        "POST", "/order/202309/orders/search", shop_id=shop_id, body=body
+    )
 
 
 @app.post("/orders/list")
 def orders_list(shop_id: str, body: dict):
-    return _tiktok_proxy("POST", "/order/202309/orders/search", shop_id=shop_id, body=body)
+    return _tiktok_proxy(
+        "POST", "/order/202309/orders/search", shop_id=shop_id, body=body
+    )
 
 
 @app.get("/orders/{order_id}")
 def order_detail(order_id: str, shop_id: str):
     # 202309: /orders?ids=<id> (not /orders/{id})
     return _tiktok_proxy(
-        "GET", "/order/202309/orders",
-        shop_id=shop_id, extra_query={"ids": order_id},
+        "GET",
+        "/order/202309/orders",
+        shop_id=shop_id,
+        extra_query={"ids": order_id},
         persist_order_on_get=True,
     )
 
@@ -490,74 +1055,125 @@ def order_detail(order_id: str, shop_id: str):
 @app.post("/orders/{order_id}/confirm")
 def order_confirm(order_id: str, shop_id: str, body: dict | None = None):
     body = body or {}
-    return _tiktok_proxy("POST", f"/order/202309/orders/{order_id}/confirm", shop_id=shop_id, body=body)
+    return _tiktok_proxy(
+        "POST", f"/order/202309/orders/{order_id}/confirm", shop_id=shop_id, body=body
+    )
 
 
 @app.post("/orders/{order_id}/cancel")
 def order_cancel(order_id: str, shop_id: str, body: dict | None = None):
     body = body or {}
-    return _tiktok_proxy("POST", f"/order/202309/orders/{order_id}/cancel", shop_id=shop_id, body=body)
+    return _tiktok_proxy(
+        "POST", f"/order/202309/orders/{order_id}/cancel", shop_id=shop_id, body=body
+    )
 
 
 @app.post("/orders/{order_id}/update_status")
 def order_update_status(order_id: str, shop_id: str, body: dict | None = None):
     body = body or {}
-    return _tiktok_proxy("POST", f"/order/202309/orders/{order_id}/update_status", shop_id=shop_id, body=body)
+    return _tiktok_proxy(
+        "POST",
+        f"/order/202309/orders/{order_id}/update_status",
+        shop_id=shop_id,
+        body=body,
+    )
 
 
 @app.post("/orders/{order_id}/shipping_info")
 def order_shipping_info(order_id: str, shop_id: str, body: dict | None = None):
     body = body or {}
-    return _tiktok_proxy("POST", f"/order/202309/orders/{order_id}/shipping_info", shop_id=shop_id, body=body)
+    return _tiktok_proxy(
+        "POST",
+        f"/order/202309/orders/{order_id}/shipping_info",
+        shop_id=shop_id,
+        body=body,
+    )
 
 
 @app.post("/orders/{order_id}/verify_shipping")
 def order_verify_shipping(order_id: str, shop_id: str, body: dict | None = None):
     body = body or {}
-    return _tiktok_proxy("POST", f"/order/202309/orders/{order_id}/verify_shipping", shop_id=shop_id, body=body)
+    return _tiktok_proxy(
+        "POST",
+        f"/order/202309/orders/{order_id}/verify_shipping",
+        shop_id=shop_id,
+        body=body,
+    )
 
 
 @app.get("/orders/{order_id}/tracking")
 def order_tracking(order_id: str, shop_id: str):
-    return _tiktok_proxy("GET", f"/order/202309/orders/{order_id}/tracking", shop_id=shop_id)
+    return _tiktok_proxy(
+        "GET", f"/order/202309/orders/{order_id}/tracking", shop_id=shop_id
+    )
 
 
 @app.get("/orders/{order_id}/tracking/get")
 def order_tracking_get(order_id: str, shop_id: str):
-    return _tiktok_proxy("GET", f"/order/202309/orders/{order_id}/tracking", shop_id=shop_id)
+    return _tiktok_proxy(
+        "GET", f"/order/202309/orders/{order_id}/tracking", shop_id=shop_id
+    )
 
 
 @app.get("/orders/{order_id}/risk")
 def order_risk(order_id: str, shop_id: str):
-    return _tiktok_proxy("GET", f"/order/202309/orders/{order_id}/risk", shop_id=shop_id)
+    return _tiktok_proxy(
+        "GET", f"/order/202309/orders/{order_id}/risk", shop_id=shop_id
+    )
 
 
 @app.get("/orders/{order_id}/buyer")
 def order_buyer(order_id: str, shop_id: str):
-    return _tiktok_proxy("GET", f"/order/202309/orders/{order_id}/buyer", shop_id=shop_id)
+    return _tiktok_proxy(
+        "GET", f"/order/202309/orders/{order_id}/buyer", shop_id=shop_id
+    )
 
 
 @app.get("/orders/{order_id}/recipient")
 def order_recipient(order_id: str, shop_id: str):
-    return _tiktok_proxy("GET", f"/order/202309/orders/{order_id}/recipient", shop_id=shop_id)
+    return _tiktok_proxy(
+        "GET", f"/order/202309/orders/{order_id}/recipient", shop_id=shop_id
+    )
 
 
 # Finance endpoints ────────────────────────────────────────────────────
 
 
 @app.get("/finance/statements")
-def finance_statements(shop_id: str, page_size: int = 50, sort_field: str = "statement_time", sort_order: str = "DESC"):
+def finance_statements(
+    shop_id: str,
+    page_size: int = 50,
+    sort_field: str = "statement_time",
+    sort_order: str = "DESC",
+):
     return _tiktok_proxy(
-        "GET", "/finance/202309/statements", shop_id=shop_id,
-        extra_query={"page_size": page_size, "sort_field": sort_field, "sort_order": sort_order},
+        "GET",
+        "/finance/202309/statements",
+        shop_id=shop_id,
+        extra_query={
+            "page_size": str(page_size),
+            "sort_field": sort_field,
+            "sort_order": sort_order,
+        },
     )
 
 
 @app.get("/finance/payments")
-def finance_payments(shop_id: str, page_size: int = 50, sort_field: str = "create_time", sort_order: str = "DESC"):
+def finance_payments(
+    shop_id: str,
+    page_size: int = 50,
+    sort_field: str = "create_time",
+    sort_order: str = "DESC",
+):
     return _tiktok_proxy(
-        "GET", "/finance/202309/payments", shop_id=shop_id,
-        extra_query={"page_size": page_size, "sort_field": sort_field, "sort_order": sort_order},
+        "GET",
+        "/finance/202309/payments",
+        shop_id=shop_id,
+        extra_query={
+            "page_size": str(page_size),
+            "sort_field": sort_field,
+            "sort_order": sort_order,
+        },
     )
 
 
@@ -567,10 +1183,14 @@ def finance_payments(shop_id: str, page_size: int = 50, sort_field: str = "creat
 @app.post("/returns/search")
 def returns_search(shop_id: str, body: dict | None = None):
     body = body or {}
-    return _tiktok_proxy("POST", "/return_refund/202309/returns/search", shop_id=shop_id, body=body)
+    return _tiktok_proxy(
+        "POST", "/return_refund/202309/returns/search", shop_id=shop_id, body=body
+    )
 
 
 @app.post("/cancellations/search")
 def cancellations_search(shop_id: str, body: dict | None = None):
     body = body or {}
-    return _tiktok_proxy("POST", "/return_refund/202309/cancellations/search", shop_id=shop_id, body=body)
+    return _tiktok_proxy(
+        "POST", "/return_refund/202309/cancellations/search", shop_id=shop_id, body=body
+    )

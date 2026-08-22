@@ -1,5 +1,80 @@
 # tts-erp CHANGELOG
 
+## 2026-08-18 — 财务明细切换接口数据源，Excel 数据全量删除
+
+### Added
+- **`statement_transactions` 表 + `POST /sync/statement_transactions` + `GET /db/statement_transactions`**：账单内逐交易明细，数据源 `GET /finance/202309/statements/{id}/statement_transactions`（2026-08-18 `probe_finance_txns.py` 实测，58 字段/条含 order_id，`sort_field` 只接受 `order_create_time`）。52 个金额字段全建 NUMERIC 显式列 + raw jsonb
+- cron 第 7 个同步计划 `stmt_txns`（statement_time_ge 时间窗口，与 statements 同机制）
+- TDD：`tdd/test_sync_statement_transactions.py` 9 用例（persist 4 + business 5，fake http/repo）
+- 顺带探明的 Finance API 面：`withdrawals?types=WITHDRAW` 可用（未接）；`transactions/unsettled` 全版本 404；`202501` 只开放两个 statement_transactions 端点（SKU 级 fee_tax_breakdown 比 202309 更细，未接）
+
+### 对账验证（删除前的放行条件）
+- 全量回填 189 条（25 个账单 / 33 页），逐单抽查 10/10：`customer_payment`/`fee_amount` 与 Excel **分毫不差**
+- 佣金/实际运费/商家运费逐项一致；增值税/交易手续费/订单处理手续费 API 对 VN 店铺**不拆分**（含在 fee_amount 里，对应字段为 0）
+- Excel 自身费用纵表对不上账（单行 total_fee -194,753 ≠ fee 行合计 -220,053），所谓独有细分质量存疑 → 实际信息损失≈0
+
+### Removed（用户确认）
+- **Excel 数据全删**：6 张表（sku/erp_orders/erp_order_items/return_items/financial_lines/fee_lines）+ 5 张表的 75 个 xls_ 列 + `v_order_recon` 视图 + `/db/finance/*` 4 端点 + `merge_tiktok.sh/sql` + `tdd/test_finance_merge.py`
+- **`schan_db.tiktok` schema 一并 DROP CASCADE**（同日早些时候还用它做过对账源）
+- 唯一不可再生数据：financial_lines 的 estimated_settle/unsettle_reason（接口 unsettled 端点不存在）；源头 Excel 在 Windows 工作站，要恢复需重跑 ETL
+- schema.sql 同步移除全部 Excel DDL（重放 0 错误）
+
+### Notes
+- pytest：152 passed（149 + 9 新增 − 6 删除）
+- final_smoke：8 条 sync 路由，`/db/statement_transactions` 冒烟替换 finance 冒烟
+
+## 2026-08-17（晚二）— 物流追踪 bug 修复 + cron 接入物流同步
+
+### Fixed
+- **`persist_logistics_tracking` first/last 事件写反**（tts_erp.py）：TikTok 返回的 tracking 列表是**最新事件在前**，旧实现取 `events[0]`/`events[-1]` 当 first/last，导致 `logistics_tracking` 汇总表 `first_event_at`/`last_event_at`/`last_action_code`/`last_description` 全部写反（last_description 恒为 "Order placed."）。改为按 `update_time_millis` 排序后取首尾；既有 18 行已用 `logistics_tracking_events` 明细回填修正
+- TDD：`tdd/test_logistics_tracking.py` 3 个用例（最新在前 / 最旧在前 / 缺时间戳容错）
+
+### Added
+- **cron 接入物流同步**（sync_cron.py 第 6 个 plan）：之前 `/sync/logistics_tracking` 端点存在但**从不在 cron 里**，只手动跑过 2 次（8-16 晚），导致 8-15 起的新订单（有运单号）一直没有物流数据
+- 目标选择 `logistics_target_ids()`：有运单号、且（未同步过物流 OR final_status 非终态）的订单；终态 = `DELIVERED`/`RETURNED_TO_SELLER`，单轮上限 300
+
+### Notes
+- pytest：149 passed（新增 3）
+
+## 2026-08-17（晚）— API key 鉴权系统上线（shadow 阶段）
+
+按 `tech-doc/api-key-auth-design.md` 实施（TDD：先 test_auth.py 15 个用例，后 auth.py）。
+
+### Added
+- **`tdd/auth.py`**：`AuthMiddleware`，Bearer key 鉴权，三级角色 readonly/readwrite/admin，路径规则默认拒绝（未分类路径=admin 级），60s 进程内缓存，`last_used_at` 1h 节流更新
+- **`api_keys` 表**（schema.sql）：只存 SHA-256 哈希 + prefix；**`api_keys.py` CLI**：create/list/revoke/rotate，完整 key 只在创建时打印一次
+- **三档模式** `.env TTS_ERP_AUTH_MODE=off|shadow|enforce`；当前部署为 **shadow**（放行 + 记 would-deny 日志）
+- 调用方全部带 key：`sync_cron.py`（读 `.env TTS_ERP_SERVICE_KEY`）、`final_smoke.py`、`regression_check.py`、`test_e2e.py`；enforce 模式下 smoke 会断言无 key 请求 401
+- 已建 key：`cron-sync`（readwrite，在 .env）、`schan-admin`（admin，人工持有）
+
+### 切换 enforce 的步骤（观察期后执行）
+1. 观察 `grep would-deny logs/stderr.log` 应只剩历史记录、无新增合法调用被拒
+2. `.env` 改 `TTS_ERP_AUTH_MODE=enforce` → `bash restart.sh`
+3. `python3 final_smoke.py`（末尾会断言无 key 401）+ 等一轮 cron 实测
+4. 回滚：`.env` 改回 `shadow` 或 `off` → restart（30 秒级）
+
+## 2026-08-17 — Excel 财务数据融合（schan_db.tiktok → tts_erp.public）
+
+### Added
+- **schan_db.tiktok 全量融合进 public schema**（`merge_tiktok.sh` + `merge_tiktok.sql`，幂等可重跑）：
+  - 冲突表只补 `xls_` 前缀列（不覆盖 API 同步列）：orders(+29 列, 270 行)、order_items(+12 列, 278 源行)、payments(+9 列, 5 行)、statements(+7 列, 25 行)、returns(+14 列, 11 行)
+  - 新建 6 张 Excel 独有表：sku(152)、erp_orders(230)、erp_order_items(230)、return_items(11)、financial_lines(267)、fee_lines(1375)，ID 统一转 TEXT 遵循 tts_erp 惯例，不设指向既有表的 FK（保证可重跑）
+  - `v_order_recon` 视图：API 实时订单 × Excel 财务行，订单级 实结/预计 对账
+- **4 个只读端点**：`GET /db/finance/lines`（order_id/statement_id/source 过滤）、`GET /db/finance/fees`（支持 `aggregate=true` 按费用名聚合）、`GET /db/finance/sku`（q 模糊搜索）、`GET /db/finance/recon`
+- `tdd/test_finance_merge.py`：6 tests（TEST_ 哨兵数据，模块自清）
+- schema.sql 回写欠账：logistics_tracking / logistics_tracking_events / logistics_sync_targets 3 张 Phase 5 表
+
+### Notes
+- tiktok.orders 里 2 行 `stub:` 调整单占位行**未**并入 orders（非真实订单）
+- 刷新路径：Windows 工作站重新 ETL 到 schan_db.tiktok 后跑 `bash merge_tiktok.sh`
+- 回滚：DROP 6 张新表 + v_order_recon + 各表 xls_ 列（merge_tiktok.sh 末尾有模板）
+- pytest：131 passed（新增 6）
+
+### Removed（同日）
+- **删除 `POST /returns` 和 `POST /cancellations` 两个 501 占位端点**（用户确认）：原本恒返 501 的护栏桩，现整个移除，调用得到无路由 404。AGENTS.md §4 的禁令从「不要写转发逻辑」改为「不要接（端点已删除）」
+- `final_smoke.py` 的「501 protection」段替换为 `/db/finance` 冒烟
+- 注意：`POST /sync/order/<id>` 的 501 桩保留（那是未移植功能，与 CREATE 护栏无关）
+
 ## 2026-08-16 — FastAPI migration + TDD coverage
 
 ### Changed

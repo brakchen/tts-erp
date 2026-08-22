@@ -43,6 +43,29 @@ class PgStatementRepository:
         return tts_erp.persist_statement(shop_id, statement_raw)
 
 
+class PgStatementTransactionRepository:
+    """Wraps tts_erp.persist_statement_transaction + statements 表查询。"""
+
+    def upsert(self, shop_id: str, statement_id: str, txn_raw: dict) -> bool:
+        return tts_erp.persist_statement_transaction(shop_id, statement_id, txn_raw)
+
+    def list_statement_ids(self, shop_id: str, *, statement_time_ge=None,
+                           statement_time_lt=None, limit: int = 1000) -> list[str]:
+        sql = "SELECT statement_id FROM statements WHERE shop_id = %s"
+        args: list = [shop_id]
+        if statement_time_ge is not None:
+            sql += " AND statement_time >= %s"
+            args.append(int(statement_time_ge))
+        if statement_time_lt is not None:
+            sql += " AND statement_time < %s"
+            args.append(int(statement_time_lt))
+        sql += " ORDER BY statement_time DESC LIMIT %s"
+        args.append(int(limit))
+        with tts_erp.db_connect() as conn, conn.cursor() as cur:
+            cur.execute(sql, args)
+            return [r[0] for r in cur.fetchall()]
+
+
 class PgReturnRepository:
     """Wraps tts_erp.persist_return."""
 
@@ -67,6 +90,7 @@ def make_pg_repos(db_url: str | None = None) -> dict:
         "orders": PgOrderRepository(),
         "payments": PgPaymentRepository(),
         "statements": PgStatementRepository(),
+        "statement_transactions": PgStatementTransactionRepository(),
         "returns": PgReturnRepository(),
         "cancellations": PgCancellationRepository(),
     }

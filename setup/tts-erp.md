@@ -230,22 +230,26 @@ TikTok Partner API 的 HMAC-SHA256 签名规则（**实测**）：
 
 ## 进程管理
 
+**2026-08-18 起由 systemd user 单元托管**（`~/.config/systemd/user/tts-erp.service`，
+`WantedBy=default.target` + `Linger=yes`，**开机自启**，无需登录；`.env` 由 `EnvironmentFile` 加载，
+`After=oauth-receiver.service` 保证在 token 服务之后启动，崩溃自动 `Restart=always`）：
+
 ```bash
 # 状态
-pgrep -af tts_erp.py
+systemctl --user status tts-erp.service
 ss -tlnp | grep 9877
 curl -s http://127.0.0.1:9877/healthz
 
-# 重启
-bash /home/schan/tts-erp/restart.sh
+# 重启 / 停止 / 禁用开机自启
+systemctl --user restart tts-erp.service   # = bash /home/schan/tts-erp/restart.sh
+systemctl --user stop tts-erp.service
+systemctl --user disable tts-erp.service
 
-# 完整重启 + 看错误
-pkill -9 -f tts_erp.py; sleep 1
-cd /home/schan/tts-erp
-set -a; . ./.env; set +a
-nohup python3 -u tts_erp.py >> logs/stdout.log 2>> logs/stderr.log < /dev/null &
-disown
+# systemd 层日志（业务日志仍是 logs/{stdout,stderr}.log）
+journalctl --user -u tts-erp -n 50
 ```
+
+旧的 `pkill + nohup` 手动方式已废弃——直接起进程会和 systemd 单元抢 9877 端口。
 
 ## 已知偏差
 
@@ -304,15 +308,19 @@ disown
 
 **已知 36009009 路径**（不存在）：
 - `/finance/202309/statements/{id}`（无 detail endpoint）
-- `/finance/202309/statements/{id}/transactions`
 - `/finance/202309/statements/{id}/orders`
 - `/finance/202309/statements/{id}/refunds`
 - `/finance/202309/statements/{id}/download`
-- `/finance/202309/transactions`
+- `/finance/202309/transactions`、`/finance/202309/transactions/unsettled`（2026-08-18 全版本实测 404）
 - `/finance/202309/settlements`
 - `/finance/202309/balance`
 
-→ 202309 spec 只能 list+filter，没有 detail / sub-records / download 端点。
+**2026-08-18 实测更正**：账单子记录端点**存在**，叫 `statement_transactions` 不是 `transactions`：
+- `GET /finance/202309/statements/{id}/statement_transactions?sort_field=order_create_time&sort_order=DESC` ✅（58 字段/条含 order_id，sort_field 必填且只接受 `order_create_time`）
+- `GET /finance/202309/orders/{order_id}/statement_transactions` ✅（单订单 + SKU 级明细）
+- `GET /finance/202501/orders/{order_id}/statement_transactions` ✅（订单汇总 + `sku_transactions.fee_tax_breakdown` 更细费用分类；202501 只开放这两个端点）
+- `GET /finance/202309/withdrawals?types=WITHDRAW` ✅（types 必填）
+- 注意：增值税/交易手续费/订单处理手续费对 VN 店铺不拆分（含在 fee_amount，对应字段恒 0）
 
 ## TikTok /return_refund/202309 字段名（实测已知坑）
 

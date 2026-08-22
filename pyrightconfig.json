@@ -1,0 +1,19 @@
+{
+  "include": [
+    "tts_erp.py",
+    "wanshifu",
+    "tests"
+  ],
+  "exclude": [
+    ".venv",
+    "__pycache__"
+  ],
+  "extraPaths": [
+    "."
+  ],
+  "reportMissingImports": "none",
+  "reportMissingTypeStubs": "none",
+  "reportUnknownMemberType": "none",
+  "pythonVersion": "3.10",
+  "pythonPlatform": "Linux"
+}

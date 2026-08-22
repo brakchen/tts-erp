@@ -3,13 +3,27 @@
 import json
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 BASE = "http://127.0.0.1:9877"
 SHOP = "7494763368967603447"
 
 
+def _api_key():
+    p = Path("/home/schan/tts-erp/.env")
+    if p.exists():
+        for line in p.read_text(encoding="utf-8").splitlines():
+            if line.startswith("TTS_ERP_SERVICE_KEY="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    return None
+
+
+_HEADERS = {"Authorization": f"Bearer {_api_key()}"} if _api_key() else {}
+
+
 def get(path):
-    with urllib.request.urlopen(f"{BASE}{path}", timeout=5) as r:
+    req = urllib.request.Request(f"{BASE}{path}", headers=_HEADERS)
+    with urllib.request.urlopen(req, timeout=5) as r:
         return json.load(r)
 
 

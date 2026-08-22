@@ -1,34 +1,20 @@
 #!/bin/bash
-# Restart tts-erp service (FastAPI version since 2026-08-16)
+# Restart tts-erp service (managed by systemd --user since 2026-08-18).
+# The unit loads .env via EnvironmentFile and runs uvicorn from tdd/;
+# logs still go to logs/{stdout,stderr}.log.
 set -e
 cd /home/schan/tts-erp
 
-echo "killing old tts_erp + uvicorn processes..."
-pkill -9 -f "tts_erp.py" 2>/dev/null || true
-pkill -9 -f "uvicorn.*tts_erp_fastapi" 2>/dev/null || true
-sleep 1
+PORT="$(grep -E '^TTS_ERP_PORT=' .env | cut -d= -f2)"
+PORT="${PORT:-9877}"
 
-echo "loading .env..."
-set -a
-. ./.env
-set +a
-
-# Ensure log dir exists
-mkdir -p logs
-
-# Choose port: TTS_ERP_PORT env var (default 9877)
-PORT="${TTS_ERP_PORT:-9877}"
-
-echo "starting FastAPI on port $PORT..."
-cd /home/schan/tts-erp/tdd
-nohup python3 -m uvicorn tts_erp_fastapi:app --host 0.0.0.0 --port "$PORT" \
-    >> /home/schan/tts-erp/logs/stdout.log 2>> /home/schan/tts-erp/logs/stderr.log < /dev/null &
-disown
+echo "restarting via systemd --user..."
+systemctl --user restart tts-erp.service
 sleep 2
 
 echo
-echo "=== process ==="
-pgrep -af "uvicorn.*tts_erp_fastapi" | grep -v "bash\|pgrep\|restart" || echo "NO_PID"
+echo "=== service ==="
+systemctl --user --no-pager status tts-erp.service | head -5
 echo
 echo "=== port ==="
 ss -tlnp | grep "$PORT" || echo "NO_PORT"

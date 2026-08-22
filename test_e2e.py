@@ -2,9 +2,19 @@
 import json
 import time
 import urllib.request
+from pathlib import Path
 
 BASE = "http://127.0.0.1:9877"
 SHOP_ID = "7494763368967603447"  # Bridge nook VN
+
+
+def _api_key():
+    p = Path("/home/schan/tts-erp/.env")
+    if p.exists():
+        for line in p.read_text(encoding="utf-8").splitlines():
+            if line.startswith("TTS_ERP_SERVICE_KEY="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    return None
 
 
 def req(method, path, body=None):
@@ -13,8 +23,11 @@ def req(method, path, body=None):
         data = json.dumps(body).encode("utf-8")
     else:
         data = None
-    req = urllib.request.Request(BASE + path, method=method, data=data,
-                                 headers={"Accept": "application/json", "Content-Type": "application/json"})
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    key = _api_key()
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    req = urllib.request.Request(BASE + path, method=method, data=data, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=180) as r:
             text = r.read().decode("utf-8")

@@ -239,6 +239,80 @@ def _persist_simple(repo, shop_id: str, items: list[dict[str, Any]]) -> int:
     return saved
 
 
+def sync_statement_transactions(
+    creds: Creds,
+    body: dict[str, Any],
+    *,
+    http: HttpClient,
+    repo,  # StatementTransactionRepository
+) -> SyncResult:
+    """Sync 账单内逐交易明细 via /finance/202309/statements/{sid}/statement_transactions。
+
+    替代 Excel financial_lines + fee_lines 的接口数据源（2026-08-18 probe 确认，
+    58 字段/条含 order_id，sort_field 只接受 order_create_time）。
+
+    body:
+      {shop_id, statement_ids?: [...], statement_time_ge?, statement_time_lt?, page_size?}
+    显式给 statement_ids 就逐个拉；否则按 statement_time 窗口从本地 statements 表选。
+    单个 statement 拉取失败不中断其他 statement（部分失败记 error，全败才 error）。
+    """
+    page_size = int(body.get("page_size") or 100)
+
+    statement_ids: list[str] = []
+    if body.get("statement_ids"):
+        statement_ids = [str(s) for s in body["statement_ids"] if s]
+    else:
+        statement_ids = repo.list_statement_ids(
+            creds.shop_id,
+            statement_time_ge=body.get("statement_time_ge"),
+            statement_time_lt=body.get("statement_time_lt"),
+        )
+
+    if not statement_ids:
+        return SyncResult(saved=0, total=0, pages=0)
+
+    saved = 0
+    total = 0
+    pages = 0
+    errors: list[str] = []
+    for sid in statement_ids:
+        extra_params: dict[str, str] = {
+            "shop_cipher": creds.shop_cipher,
+            "page_size": str(min(page_size, 100)),
+            "sort_field": "order_create_time",
+            "sort_order": "DESC",
+        }
+        next_token: str | None = None
+        stmt_pages = 0
+        while stmt_pages < _MAX_PAGES:
+            if next_token:
+                extra_params["page_token"] = next_token
+            r = http.request(
+                "GET", f"/finance/202309/statements/{sid}/statement_transactions",
+                body=None, extra_params=extra_params,
+            )
+            if r.get("code") != 0:
+                errors.append(f"{sid}: {r.get('message', 'unknown')}")
+                break
+            data = r.get("data") or {}
+            txns = data.get("statement_transactions") or []
+            total += len(txns)
+            for txn in txns:
+                if repo.upsert(creds.shop_id, sid, txn):
+                    saved += 1
+            stmt_pages += 1
+            pages += 1
+            next_token = data.get("next_page_token")
+            if not next_token:
+                break
+
+    if errors and saved == 0:
+        return SyncResult(saved=0, total=total, pages=pages,
+                          error="; ".join(errors)[:400])
+    return SyncResult(saved=saved, total=total, pages=pages,
+                      error=("; ".join(errors)[:400] if errors else None))
+
+
 def sync_returns(
     creds: Creds,
     body: dict[str, Any],

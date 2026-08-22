@@ -36,6 +36,21 @@ class StatementRepository(Protocol):
     def upsert(self, shop_id: str, statement_raw: dict[str, Any]) -> bool: ...
 
 
+class StatementTransactionRepository(Protocol):
+    """账单内逐交易明细（statement_transactions 表）。"""
+
+    def upsert(self, shop_id: str, statement_id: str, txn_raw: dict[str, Any]) -> bool: ...
+
+    def list_statement_ids(
+        self,
+        shop_id: str,
+        *,
+        statement_time_ge: int | None = None,
+        statement_time_lt: int | None = None,
+        limit: int = 1000,
+    ) -> list[str]: ...
+
+
 class ReturnRepository(Protocol):
     def upsert(self, shop_id: str, return_raw: dict[str, Any]) -> bool: ...
 
