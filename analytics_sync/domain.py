@@ -12,7 +12,9 @@ Layering:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import hashlib
+import json
+from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
 from typing import Any, Protocol
@@ -131,8 +133,6 @@ class AnalyticsRepository(Protocol):
 # whitespace, exact string values after trimming. We canonicalize the
 # five fields explicitly rather than running json.dumps with sort_keys,
 # because we also need to coerce page to int and day to ISO string.
-import hashlib
-import json
 
 
 def canonical_json_for_key(
@@ -142,11 +142,25 @@ def canonical_json_for_key(
     storage_key: StorageKey | str,
     campaign_id: str,
     day: date | str,
-    page: int,
+    page: int | str,
 ) -> str:
-    """Return the canonical JSON string used as input to sha256."""
+    """Return the canonical JSON string used as input to sha256.
+
+    `page` is coerced to int (so `1` and `"1"` produce the same hash).
+    `day` is coerced to ISO `YYYY-MM-DD` if a `date` object is passed.
+    String fields are stripped. Keys are sorted (ASCII); separators are
+    `(",", ":")` to remove insignificant whitespace; non-ASCII characters
+    are passed through verbatim (ensure_ascii=False).
+    """
     storage_key_str = storage_key.value if isinstance(storage_key, StorageKey) else storage_key
     day_str = day.isoformat() if isinstance(day, date) else day
+    try:
+        page_int = int(page)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"page must be coercible to int (got {page!r}); "
+            "see protocol §2 — page is a positive integer"
+        ) from exc
     return json.dumps(
         {
             "sellerId": seller_id.strip(),
@@ -154,7 +168,7 @@ def canonical_json_for_key(
             "storageKey": storage_key_str,
             "campaignId": campaign_id.strip(),
             "day": day_str,
-            "page": int(page),
+            "page": page_int,
         },
         ensure_ascii=False,
         sort_keys=True,
@@ -169,9 +183,14 @@ def compute_idempotency_key(
     storage_key: StorageKey | str,
     campaign_id: str,
     day: date | str,
-    page: int,
+    page: int | str,
 ) -> str:
-    """sha256 hex digest of canonical_json_for_key(...)."""
+    """sha256 hex digest of canonical_json_for_key(...).
+
+    `page` accepts both int and str (e.g. 1 vs "1"); `int()` is applied
+    inside canonical_json_for_key before hashing so the two are
+    interchangeable.
+    """
     payload = canonical_json_for_key(
         seller_id=seller_id,
         advertiser_id=advertiser_id,

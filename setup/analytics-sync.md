@@ -249,7 +249,7 @@ function canonicalKeyFor(p: {
 
 ```python
 compute_idempotency_key("seller-1", "adv-1", "productAnalyses", "campaign-1", "2026-08-23", 1)
-# → "ce1ba2e1e144ef9c153a4e94f7eb0f200f289a9393d743750adedfa21c16d180"
+# → "73b716cce7f8b2c4220b1be3e5ab6327c3a963eaf424af84412402ef8607dae3"
 ```
 
 如果你的 key 不匹配这个，server 会返回 `rejected[].code = "SCHEMA_INVALID"`。

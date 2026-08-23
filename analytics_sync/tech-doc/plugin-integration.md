@@ -125,7 +125,7 @@ compute_idempotency_key(
     day="2026-08-23",
     page=1,
 )
-# → "ce1ba2e1e144ef9c153a4e94f7eb0f200f289a9393d743750adedfa21c16d180"
+# → "73b716cce7f8b2c4220b1be3e5ab6327c3a963eaf424af84412402ef8607dae3"
 ```
 
 If your key doesn't match, the server rejects with `SCHEMA_INVALID` —
@@ -215,14 +215,14 @@ defined.
 ## 6. Retryable vs non-retryable HTTP errors
 
 | HTTP | Code in body | Meaning | Plugin action |
-|------|--------------|---------|---------------|
-| 200  | 0              | Parsed; check per-record outcomes | See §5 |
-| 400  | `MALFORMED_JSON` / `SCHEMA_INVALID` / `UNSUPPORTED_PROTOCOL_VERSION` | Client bug | Do NOT retry. Surface error. Stop sync until fixed. |
-| 401  | —              | Missing/invalid Bearer token | Do NOT retry. Token needs to be reissued / reconfigured. |
-| 403  | `SCOPE_DENIED`  | Token not authorized for this scope | Do NOT retry. Token needs new scopes. |
-| 413  | `PAYLOAD_TOO_LARGE` | Body > 2 MB | Split the batch; the protocol mandates ≤ 100 records per request and ≤ 2 MB total. |
-| 429  | `RATE_LIMITED`  | Per-token rate limit | Read `Retry-After` header (seconds). Wait, then retry the entire batch (records are idempotent). |
-| 5xx  | `INTERNAL_ERROR` | Server failure | Bounded exponential backoff (e.g. 1s, 2s, 4s, 8s, give up). Records are idempotent so retry is safe. |
+| ------ | -------------- | --------- | --------------- |
+| 200 | 0 | Parsed; check per-record outcomes | See §5 |
+| 400 | `MALFORMED_JSON` / `SCHEMA_INVALID` / `UNSUPPORTED_PROTOCOL_VERSION` | Client bug | Do NOT retry. Surface error. Stop sync until fixed. |
+| 401 | — | Missing/invalid Bearer token | Do NOT retry. Token needs to be reissued / reconfigured. |
+| 403 | `SCOPE_DENIED` | Token not authorized for this scope | Do NOT retry. Token needs new scopes. |
+| 413 | `PAYLOAD_TOO_LARGE` | Body > 2 MB | Split the batch; the protocol mandates ≤ 100 records per request and ≤ 2 MB total. |
+| 429 | `RATE_LIMITED` | Per-token rate limit | Read `Retry-After` header (seconds). Wait, then retry the entire batch (records are idempotent). |
+| 5xx | `INTERNAL_ERROR` | Server failure | Bounded exponential backoff (e.g. 1s, 2s, 4s, 8s, give up). Records are idempotent so retry is safe. |
 
 ---
 

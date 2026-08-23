@@ -1,5 +1,24 @@
 # tts-erp CHANGELOG
 
+## 2026-08-23 (doc fix) — analytics_sync 幂等键参考向量勘误
+
+### Fixed
+- **plugin-integration.md 和 setup/analytics-sync.md 的 idempotencyKey 参考向量从 `ce1ba2e1...` 改为 `73b716cc...`**（原是手抄错误，算法从未产出过 `ce1ba2...`）
+- **domain.py**: `canonical_json_for_key` 和 `compute_idempotency_key` 接受 `page: int | str`（`1` 和 `"1"` 同等），更贴近插件端实际行为
+- **domain.py**: `import hashlib` / `import json` 移到文件顶部
+- **tests/test_idempotency.py**: 新增 6 条锁住正确算法的回归测试（reference vector、page int/str 等价、单字段变化、trim 幂等）
+
+### Added
+- `test_reference_canonical_json_is_locked` —— 锁住 canonical JSON 字节串
+- `test_reference_hash_is_locked` —— 锁住标准输入下 sha256 = `73b716cc...`，并反向断言不是 `ce1ba2...`（防意外回滚）
+- `test_page_int_and_string_produce_same_hash` —— `page=1` ≡ `page="1"`
+- `test_page_changes_produce_different_hashes` —— 分页键必须随 page 变
+- `test_each_field_change_produces_different_hash` —— 5 个字段任一变化都改 hash（防止静默忽略）
+- `test_string_fields_are_trimmed_before_hashing` —— 首尾空格不影响 hash
+
+### Migration
+- **不需要迁移**：算法从未变过，只是文档里手抄的参考值错了。没有生产数据使用错 hash。协议版本无需升级。
+
 ## 2026-08-23 (refactor) — analytics_sync 鉴权统一到 api_keys
 
 ### Changed
