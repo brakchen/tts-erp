@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import HTMLResponse, JSONResponse
 
 # Make tts_business + tts_signing + tts_erp importable
 TTS_ERP_ROOT = Path(__file__).resolve().parent.parent
@@ -173,6 +174,38 @@ def healthz():
     return {"status": "ok", "ts": time.time(), "version": "TtsErp/1.0-fastapi"}
 
 
+# ─── TikTok OAuth redirect URL placeholder ─────────────────────────────
+# TikTok's developer portal requires an Advertiser redirect URL on the
+# app config page. After a user authorizes our app, TikTok redirects
+# their browser to this URL. We expose a tiny public endpoint so the
+# redirect succeeds without exposing any internal surface.
+#
+# Auth: deliberately NO Bearer required — TikTok's browser redirect
+# carries no Authorization header.
+#
+# This is just a landing page. The actual auth_code exchange (if needed)
+# happens through oauth-receiver (:9876). The route name is fixed by
+# the Advertiser redirect URL config in TikTok's developer portal.
+@app.get("/ads-monitor")
+def ads_monitor():
+    """TikTok OAuth redirect target.
+
+    Returns a small success page so the post-authorization browser
+    redirect resolves cleanly. Public endpoint; no auth.
+    """
+    return HTMLResponse(
+        "<!DOCTYPE html>"
+        "<html><head><title>Authorized</title></head>"
+        "<body style=\"font-family:sans-serif;max-width:480px;margin:80px auto;"
+        "text-align:center;color:#222\">"
+        "<h1 style=\"color:#2c8a4a\">✓ Authorization successful</h1>"
+        "<p>You can close this window and return to TikTok.</p>"
+        "<p style=\"color:#888;font-size:12px\">tts-erp / oauth-receiver</p>"
+        "</body></html>",
+        media_type="text/html",
+    )
+
+
 @app.get("/endpoints")
 def endpoints():
     """Return full endpoint list — matches stdlib tts_erp.py schema for compatibility."""
@@ -243,6 +276,9 @@ def endpoints():
         "analytics_sync": [
             "GET  /v1/analytics/sync/cursor?sellerId=&advertiserId=&storageKey=&campaignId=&pageSize=",
             "POST /v1/analytics/sync/batches         (Bearer token, per-seller scope, idempotent)",
+        ],
+        "oauth_redirect": [
+            "GET  /ads-monitor                       (TikTok OAuth Advertiser redirect target; PUBLIC, no auth)",
         ],
         "analytics_sync_auth_notes": {
             "token_table": "api_keys (unified with tts-erp; sync tokens have role=readwrite)",
@@ -1231,6 +1267,7 @@ _bearer_scheme = _HTTPBearer(
 )
 _original_openapi = app.openapi
 
+
 def _openapi_with_bearer():
     schema = _original_openapi()
     components = schema.setdefault("components", {})
@@ -1246,5 +1283,6 @@ def _openapi_with_bearer():
     # enforces at runtime; this is purely the OpenAPI declaration.
     schema["security"] = [{"BearerAuth": []}]
     return schema
+
 
 app.openapi = _openapi_with_bearer

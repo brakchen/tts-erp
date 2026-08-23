@@ -29,7 +29,7 @@ _LEVEL_NAME = {v: k for k, v in ROLE_LEVEL.items()}
 
 CACHE_TTL = 60.0
 # key_hash -> (role_level, scopes_tuple, monotonic_deadline)
-_cache: dict[str, tuple[int, tuple[str, ...], float]] = {}
+_cache: dict[str, tuple[int | None, tuple[str, ...], float]] = {}
 
 EXEMPT_PATHS = {
     "/healthz",
@@ -38,6 +38,7 @@ EXEMPT_PATHS = {
     "/docs",
     "/redoc",
     "/docs/oauth2-redirect",
+    "/ads-monitor",  # TikTok OAuth Advertiser redirect target; public
 }
 ORDER_WRITE_VERBS = {
     "confirm",
@@ -82,8 +83,13 @@ def _sha256(s: str) -> str:
     return hashlib.sha256(s.encode()).hexdigest()
 
 
-def _db_lookup(key_hash: str) -> tuple[int, tuple[str, ...]] | None:
-    """Return (role_level, scopes_tuple) for a valid key, else None."""
+def _db_lookup(key_hash: str) -> tuple[int | None, tuple[str, ...]] | None:
+    """Return (role_level, scopes_tuple) for a valid key, else None.
+
+    role_level is int | None because ROLE_LEVEL.get() returns None for
+    unknown roles — in practice the api_keys.role column has a CHECK
+    constraint, so this is defensive typing.
+    """
     with tts_erp.db_connect() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT role, enabled, expires_at, last_used_at, key_hash, scopes"
@@ -112,7 +118,7 @@ def _db_lookup(key_hash: str) -> tuple[int, tuple[str, ...]] | None:
         return ROLE_LEVEL.get(role), tuple(scopes or ())
 
 
-def lookup_role(key: str) -> tuple[int, tuple[str, ...]] | None:
+def lookup_role(key: str) -> tuple[int | None, tuple[str, ...]] | None:
     """Cached role+scopes lookup. Cache TTL is 60s; revocation propagates
     within that window. Returns None for invalid keys."""
     key_hash = _sha256(key)
