@@ -75,7 +75,7 @@ def _cleanup_test_data(db_url: str):
         "DELETE FROM analytics_cursors WHERE seller_id LIKE 'TEST_%'",
         "DELETE FROM analytics_shop_timezones WHERE seller_id LIKE 'TEST_%'",
         "DELETE FROM analytics_sync_tokens WHERE key_prefix LIKE 'TEST_%' OR name LIKE 'TEST_%'",
-        "DELETE FROM analytics_audit_log WHERE key_prefix LIKE 'TEST_%' OR path LIKE '%TEST_%'",
+        "DELETE FROM analytics_audit_log WHERE key_prefix LIKE 'TEST_%' OR path LIKE '%TEST_%' OR path LIKE '%TEST_%'",
     ]
     conn = psycopg.connect(db_url)
     try:
@@ -127,5 +127,7 @@ def fastapi_client(db_url: str):
     from fastapi.testclient import TestClient
     from analytics_sync.app import app
     from analytics_sync import auth as auth_mod
+    from analytics_sync import rate_limit as rl_mod
     auth_mod.clear_cache()
+    rl_mod.reset_buckets()
     return TestClient(app)

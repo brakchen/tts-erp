@@ -1,5 +1,34 @@
 # tts-erp CHANGELOG
 
+## 2026-08-23 — analytics_sync 后端服务（Chrome 插件替代 CloudBase）
+
+### Added
+- **`analytics_sync/` 包**：独立 FastAPI 后端，端口 9878，替代已退役的 CloudBase 分析上传路径。插件（`tk-adv-cost-monitor`）每日拉 cursor 决定补传区间，批量上传分析明细
+- **2 个端点**：
+  - `GET /v1/analytics/sync/cursor?sellerId=&advertiserId=&storageKey=&campaignId=&pageSize=` — 返回每个 `(storageKey, campaignId)` 的 `latestCompletedDay` / 权威 `nextRequiredDay`（空时返回 bootstrap 日期 = today - 30 天）
+  - `POST /v1/analytics/sync/batches` — 幂等批量上传，最多 100 条 / 2 MB；accepted/rejected 部分成功
+- **Schema（5 张表，幂等 CREATE IF NOT EXISTS）**：
+  - `analytics_records` — raw 响应 JSON + 规范化字段，`UNIQUE(idempotency_key)`
+  - `analytics_cursors` — `(seller, advertiser, storageKey, campaignId)` → `latest_completed_day`，原子 UPSERT + `GREATEST()` 防回退
+  - `analytics_shop_timezones` — 每店铺 IANA 时区，默认 `Asia/Shanghai`
+  - `analytics_sync_tokens` — Bearer token 只存 SHA-256 + 16 字符前缀
+  - `analytics_audit_log` — requestId 审计轨迹，无密钥
+- **鉴权 / 限流 / Scope 校验**：
+  - `auth.py`：Bearer / X-Sync-Token，中间件 + 60s 缓存；scope 语法 `seller:<id>` / `advertiser:<id>` / `*`，空 scopes 默认无限制
+  - `rate_limit.py`：每 token prefix 滑窗 60s 限流（默认 100/min），429 带 `Retry-After`
+- **CLI `analytics_sync_tokens.py`**：create / list / revoke / rotate（仿 `api_keys.py`）
+- **错误契约**：400/401/403/413/429/5xx 全部带 `{code, message, requestId, retryable}`，永不回显 token / cookie / header
+- **OpenAPI 3.1 正式规范**：`analytics_sync/tech-doc/openapi.yaml`
+- **设计文档**：`analytics_sync/tech-doc/architecture.md`（架构 + 14 个协议歧义解决）/ `plugin-integration.md`（插件对接说明）/ `compatibility.md`（版本演进 + 保留策略）/ `analytics-sync.md`（API 契约 + curl 示例）
+- **保留策略**：`analytics_sync/retention.sql`（90 天 records / 30 天 audit log）
+- **测试 63 个全过**：canonical key 推导（10）+ auth（7）+ batches（12）+ cursor（6）+ 并发去重（2）+ 跨店隔离（3）+ 错误路径（6：413 / 5xx / audit / 信息泄露防护）+ 限流（5）+ scope 校验（12）
+
+### Notes
+- 端口 9878（区别于 tts-erp 的 9877 和 oauth-receiver 的 9876）
+- PG 数据库沿用 `tts_erp`，表名前缀 `analytics_*` 隔离
+- 启动命令：`uvicorn analytics_sync.app:app --host 0.0.0.0 --port 9878`
+- 协议文档（任务输入）位于 conversation 记录；正式 OpenAPI 在 `tech-doc/openapi.yaml`
+
 ## 2026-08-18 — 财务明细切换接口数据源，Excel 数据全量删除
 
 ### Added
