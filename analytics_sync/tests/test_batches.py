@@ -288,8 +288,9 @@ def test_idempotency_key_mismatch_returns_rejected(fastapi_client, sync_token):
     assert r["retryable"] is False
 
 
-def test_oversized_batch_returns_413(fastapi_client, sync_token):
-    """Batch over MAX_BATCH_RECORDS → 413 PAYLOAD_TOO_LARGE."""
+def test_too_many_records_returns_400(fastapi_client, sync_token):
+    """Batch over MAX_BATCH_RECORDS → 400 SCHEMA_INVALID (not 413 — that's
+    reserved for body size). The plugin must split the batch."""
     headers = {"Authorization": f"Bearer {sync_token}"}
     seller = "TEST_too_big"
     records = [
@@ -301,10 +302,8 @@ def test_oversized_batch_returns_413(fastapi_client, sync_token):
         "scope": {"sellerId": seller, "advertiserId": "adv"},
         "records": records,
     }, headers=headers)
-    # Pydantic catches the >100 with min_length/max_length validator,
-    # so the response code is 400 (schema invalid), not 413.
-    assert resp.status_code in (400, 413)
-    assert resp.json()["code"] in ("SCHEMA_INVALID", "PAYLOAD_TOO_LARGE")
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "SCHEMA_INVALID"
 
 
 def test_malformed_json_returns_400(fastapi_client, sync_token):
