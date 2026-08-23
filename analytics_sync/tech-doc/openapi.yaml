@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: analytics_sync
-  version: 0.2.0
+  version: 0.3.0
   summary: Analytics data sync backend for the Chrome extension
   description: |
     Replaces the retired CloudBase analytics upload path used by the
@@ -158,9 +158,9 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      bearerFormat: anlsync_<prefix>_<32-char urlsafe>
+      bearerFormat: ttserp_<role>_<32-char urlsafe> (role is `ro`/`rw`/`admin`)
       description: |
-        Sync token issued by `analytics_sync_tokens.py create`. The
+        Sync token issued by `api_keys.py create`. The
         plaintext is shown ONCE at creation. Headers accepted:
 
         - `Authorization: Bearer <token>`

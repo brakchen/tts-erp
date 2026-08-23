@@ -1,143 +1,60 @@
-"""Sync-token auth + scope validation for analytics_sync.
+"""Sync auth middleware for analytics_sync.
 
-Pattern modeled on ../tdd/auth.py but specific to this service:
+Uses tts-erp's `api_keys` table for Bearer token validation (no separate
+analytics_sync_tokens table anymore). Imports the canonical lookup
+function from `tdd.auth` so auth semantics stay in sync with the rest
+of tts-erp.
 
-- Authorization: Bearer <token> (or X-Sync-Token)
-- DB stores only SHA-256 hash + 16-char prefix (analytics_sync_tokens).
-- ANALYTICS_SYNC_AUTH_MODE: off | shadow | enforce (per-request read).
-- In-process cache (TTL 60s) — revocation propagates within one TTL.
-- Plain ASGI middleware, NOT BaseHTTPMiddleware, so scope["sync_token_hash"]
-  and scope["sync_token_scopes"] are propagated to other middlewares and
-  the rate limiter.
+Per-seller scope check is done at the handler level via
+`request.scope["api_key_scopes"]` (populated here from the api_keys row).
 
-Scope validation
-================
-
-Token has `scopes TEXT[]`. Each entry is one of:
-
-- ``seller:<seller_id>``     — grant access to this seller_id
-- ``advertiser:<advertiser_id>`` — grant access to this advertiser_id
-- ``*``                      — wildcard (full access)
-
-Empty scopes array means unrestricted (operator default). The handler
-queries ``scope["sync_token_scopes"]`` and rejects mismatched scope
-references with 403.
-
-Audit logging never includes the token itself, the scopes' exact text,
-or any client IP beyond a coarse prefix.
+Middleware order with tts-erp:
+    CORS → Auth → RateLimit → endpoint
+For analytics_sync standalone (port 9878) the same order applies; we
+add CORS + Auth + RateLimit here using tts-erp's helpers.
 """
 from __future__ import annotations
 
 import hashlib
-import hmac
 import os
 import sys
-import time
 from datetime import datetime, timezone
+from pathlib import Path
 
-import psycopg
+# Make `tdd.auth` importable (sibling package in tts-erp).
+_TDS_ERP_ROOT = Path(__file__).resolve().parent.parent
+if str(_TDS_ERP_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TDS_ERP_ROOT))
+
+from tdd.auth import clear_cache, lookup_role  # noqa: E402
+
+
+def clear_buckets():
+    """Test helper: no-op for analytics_sync's auth cache (it lives in
+    tdd.auth). Provided here for test imports."""
+    clear_cache()
 
 CACHE_TTL = 60.0
-# Cache: hash -> (is_valid, scopes_list, monotonic_deadline)
-_cache: dict[str, tuple[bool, tuple[str, ...], float]] = {}
-
-EXEMPT_PATHS = {
-    "/healthz",
-    "/endpoints",
-    "/openapi.json",
-    "/docs",
-    "/redoc",
-}
-
-
-def clear_cache() -> None:
-    _cache.clear()
+EXEMPT_PATHS = {"/healthz", "/endpoints", "/openapi.json", "/docs", "/redoc"}
+ANALYTICS_SYNC_PATHS = ("/v1/analytics/sync/",)
+ROLE_LEVEL = {"readonly": 1, "readwrite": 2, "admin": 3}
 
 
 def _sha256(s: str) -> str:
     return hashlib.sha256(s.encode()).hexdigest()
 
 
-def _connect():
-    url = os.environ.get("TTS_ERP_DB_URL") or os.environ.get("ANALYTICS_SYNC_DB_URL")
-    if not url:
-        raise RuntimeError(
-            "TTS_ERP_DB_URL (or ANALYTICS_SYNC_DB_URL) not configured; "
-            "set it in .env"
-        )
-    return psycopg.connect(url)
-
-
-def _db_lookup(token_hash: str) -> tuple[bool, tuple[str, ...]]:
-    """Return (is_valid, scopes_tuple).
-
-    `is_valid` is True iff the token is enabled and unexpired.
-    `scopes_tuple` is the literal scopes[] entry list (may be empty).
-    """
-    with _connect() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT enabled, expires_at, key_hash, scopes
-            FROM analytics_sync_tokens
-            WHERE key_hash = %s
-            """,
-            (token_hash,),
-        )
-        row = cur.fetchone()
-        if not row:
-            return False, ()
-        enabled, expires_at, stored_hash, scopes = row
-        if not hmac.compare_digest(stored_hash, token_hash):
-            return False, ()
-        if not enabled:
-            return False, ()
-        if expires_at is not None and expires_at <= datetime.now(timezone.utc):
-            return False, ()
-        # Touch last_used_at (best-effort; lazy update like tts-erp).
-        cur.execute(
-            "UPDATE analytics_sync_tokens SET last_used_at = now() WHERE key_hash = %s",
-            (token_hash,),
-        )
-        conn.commit()
-    return True, tuple(scopes or ())
-
-
-def lookup_token(token: str) -> tuple[bool, tuple[str, ...]]:
-    """Cached check. Cache TTL is 60s; revocation propagates within that window."""
-    token_hash = _sha256(token)
-    now = time.monotonic()
-    hit = _cache.get(token_hash)
-    if hit and hit[2] > now:
-        return hit[0], hit[1]
-    valid, scopes = _db_lookup(token_hash)
-    if valid:
-        _cache[token_hash] = (valid, scopes, now + CACHE_TTL)
-    return valid, scopes
-
-
-def scope_grants(scopes: tuple[str, ...], *, seller_id: str | None, advertiser_id: str | None) -> bool:
+def scope_grants(scopes, *, seller_id, advertiser_id):
     """Return True iff the token's scopes cover the requested scope.
 
-    Semantics: each scope entry is an independent constraint on one
-    dimension. All constraints must be satisfied. Dimensions the token
-    does not mention are unrestricted.
+    Mirrors the semantics in analytics_sync/app.py::scope_grants. Kept
+    here for backward-compat with tests that import it directly.
 
-    - Empty scopes array means unrestricted (operator default).
-    - The wildcard `*` also grants unrestricted access.
-    - Otherwise, every scope entry must match the request's
-      corresponding dimension.
-
-    Examples:
-      scopes=[]                                      -> always True
-      scopes=["*"]                                   -> always True
-      scopes=["seller:abc"]                          -> seller_id == "abc" (advertiser unrestricted)
-      scopes=["seller:abc", "advertiser:adv-1"]      -> seller_id == "abc" AND advertiser_id == "adv-1"
+    Empty scopes / '*' = unrestricted. Each non-wildcard scope entry
+    must match the request's corresponding dimension.
     """
-    if not scopes:
+    if not scopes or "*" in scopes:
         return True
-    if "*" in scopes:
-        return True
-
     for s in scopes:
         if s.startswith("seller:"):
             target = s[len("seller:"):]
@@ -147,8 +64,6 @@ def scope_grants(scopes: tuple[str, ...], *, seller_id: str | None, advertiser_i
             target = s[len("advertiser:"):]
             if advertiser_id != target:
                 return False
-        # Unknown scope format: ignored for forward compatibility.
-
     return True
 
 
@@ -161,31 +76,44 @@ def _extract_token(scope: dict) -> str | None:
             scheme, _, token = v.partition(" ")
             if scheme.lower() == "bearer" and token.strip():
                 return token.strip()
+        elif k == "x-api-key" and v.strip():
+            return v.strip()
         elif k == "x-sync-token" and v.strip():
+            # Backward-compat alias for older Chrome extension builds.
             return v.strip()
     return None
 
 
-def _prefix_of(token: str | None) -> str:
-    return token[:16] if token else "-"
+def _prefix_of(key: str | None) -> str:
+    return key[:16] if key else "-"
 
 
 def _deny_response(status: int, msg: str):
-    """Build an ASGI 401/403 JSON response. No echoing of the token
-    or scopes."""
+    """Build an ASGI 401/403 response."""
     import json as _json
 
     body = _json.dumps({"detail": msg}).encode()
-    headers = [
-        (b"content-type", b"application/json"),
-    ]
+    headers = [(b"content-type", b"application/json")]
     if status == 401:
         headers.append((b"www-authenticate", b"Bearer"))
     return status, headers, body
 
 
-class AuthMiddleware:
-    """Plain ASGI middleware. Wire with app.add_middleware(AuthMiddleware)."""
+def required_role(method: str, path: str) -> int | None:
+    """All /v1/analytics/sync/* paths require readwrite (writes records)."""
+    if path in EXEMPT_PATHS:
+        return None
+    if path.startswith(ANALYTICS_SYNC_PATHS):
+        return ROLE_LEVEL["readwrite"]
+    return ROLE_LEVEL["admin"]
+
+
+class SyncAuthMiddleware:
+    """ASGI middleware. Validates Bearer token against api_keys table.
+
+    Sets scope["api_key_hash"], scope["api_key_role"], scope["api_key_scopes"]
+    for downstream handlers (rate limiter + scope check).
+    """
 
     def __init__(self, app):
         self.app = app
@@ -205,24 +133,32 @@ class AuthMiddleware:
             await self.app(scope, receive, send)
             return
 
+        needed = required_role(scope.get("method", "GET"), path)
+        if needed is None:
+            await self.app(scope, receive, send)
+            return
+
         token = _extract_token(scope)
-        is_valid, scopes = (False, ())
-        if token:
-            is_valid, scopes = lookup_token(token)
+        result = lookup_role(token) if token else None
+        level = result[0] if result else None
+        scopes = result[1] if result else ()
 
-        scope["sync_token_hash"] = _sha256(token) if token else None
-        scope["sync_token_prefix"] = _prefix_of(token)
-        scope["sync_token_scopes"] = scopes
-
+        denied: tuple[int, str] | None = None
         if token is None:
-            denied: tuple[int, str] = (
+            denied = (
                 401,
-                "missing bearer token (Authorization: Bearer <token> or X-Sync-Token: <token>)",
+                "missing bearer token (Authorization: Bearer <key>)",
             )
-        elif not is_valid:
-            denied = (401, "invalid, disabled or expired sync token")
-        else:
-            denied = None
+        elif level is None:
+            denied = (401, "invalid, disabled or expired api key")
+        elif level < needed:
+            denied = (403, f"requires {('readwrite' if needed == 2 else 'admin')}")
+
+        scope["api_key_hash"] = _sha256(token) if token else None
+        scope["api_key_role"] = (
+            {1: "readonly", 2: "readwrite", 3: "admin"}.get(level) if level else None
+        )
+        scope["api_key_scopes"] = scopes
 
         if denied is None:
             await self.app(scope, receive, send)
@@ -232,14 +168,14 @@ class AuthMiddleware:
         method = scope.get("method", "?")
         if mode == "shadow":
             sys.stderr.write(
-                f"[analytics-auth-shadow] would-deny {denied[0]} {method} {path} "
+                f"[sync-auth-shadow] would-deny {denied[0]} {method} {path} "
                 f"from {client} prefix={_prefix_of(token)}\n"
             )
             await self.app(scope, receive, send)
             return
 
         sys.stderr.write(
-            f"[analytics-auth] denied {denied[0]} {method} {path} from {client} "
+            f"[sync-auth] denied {denied[0]} {method} {path} from {client} "
             f"prefix={_prefix_of(token)}\n"
         )
         s, hdrs, body = _deny_response(*denied)

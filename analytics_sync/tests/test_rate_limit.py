@@ -60,13 +60,13 @@ def test_different_tokens_have_independent_buckets(fastapi_client, db_url):
     clear_cache()
 
     def mint_token(label: str) -> str:
-        plaintext = f"anlsync_TEST_{secrets.token_urlsafe(16)}"
+        plaintext = f"ttserp_rw_TEST_{secrets.token_urlsafe(16)}"
         h = hashlib.sha256(plaintext.encode()).hexdigest()
         import psycopg
         with psycopg.connect(db_url) as conn, conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO analytics_sync_tokens (key_prefix, key_hash, name, enabled) "
-                "VALUES (%s, %s, %s, true)",
+                "INSERT INTO api_keys (key_prefix, key_hash, name, role, scopes, enabled) "
+                "VALUES (%s, %s, %s, 'readwrite', ARRAY[]::TEXT[], true)",
                 (plaintext[:16], h, f"TEST_rl_{label}"),
             )
             conn.commit()

@@ -14,8 +14,9 @@ docker exec -i postgres psql -U postgres -d tts_erp \
     < analytics_sync/schema.sql
 
 # 2. Issue a sync token (plaintext shown ONCE)
-python3 analytics_sync/analytics_sync_tokens.py create \
-    --name chrome-ext-prod --expires-days 365
+# Uses tts-erp's unified api_keys table; --scopes is optional per-seller restriction.
+python3 api_keys.py create \
+    --name chrome-ext-prod --role readwrite --expires-days 365
 
 # 3. Run the service
 TTS_ERP_DB_URL=postgresql://postgres:...@127.0.0.1:5432/tts_erp \
@@ -45,7 +46,7 @@ analytics_sync/
 ├── rate_limit.py                      # per-token sliding-window rate limiter
 ├── domain.py                          # pure types: Scope, Record, CursorEntry, …
 ├── pg_repositories.py                 # PG-backed implementation
-├── analytics_sync_tokens.py           # operator CLI: create/list/revoke/rotate
+├── analytics_sync_tokens.py           # (removed 2026-08-23 refactor; use api_keys.py)
 ├── conftest.py                        # pytest fixtures
 ├── pytest.ini
 ├── tech-doc/

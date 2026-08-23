@@ -2,8 +2,13 @@
 -- Run as: docker exec -i postgres psql -U postgres -d tts_erp < analytics_sync/schema.sql
 --
 -- This service lives inside the tts-erp PostgreSQL database (same pattern
--- as miaoshou_* and api_keys tables). All tables are namespaced with
+-- as miaoshou_* tables). All analytics tables are namespaced with
 -- `analytics_*` to keep them isolated from tts-erp's own data.
+--
+-- Bearer tokens for analytics_sync are NOT stored here — they share
+-- tts-erp's `api_keys` table (with the `scopes` column for per-seller
+-- restriction). Use `python3 api_keys.py create --role readwrite
+-- --scopes "seller:..."` to issue a Chrome extension sync token.
 --
 -- Idempotent: every CREATE uses IF NOT EXISTS. Safe to re-apply on a
 -- populated database.
@@ -87,25 +92,8 @@ CREATE TABLE IF NOT EXISTS analytics_shop_timezones (
 );
 
 
--- ─── Sync tokens ─────────────────────────────────────────────────────
--- Bearer tokens used by the Chrome extension. Plaintext is shown ONCE
--- at create/rotate time and never stored. SHA-256 hex digest lives in
--- key_hash; key_prefix (first 16 chars) is the operator-facing id.
-CREATE TABLE IF NOT EXISTS analytics_sync_tokens (
-    id           BIGSERIAL    PRIMARY KEY,
-    key_prefix   TEXT         NOT NULL,
-    key_hash     TEXT         NOT NULL,
-    name         TEXT,
-    scopes       TEXT[]       NOT NULL DEFAULT ARRAY[]::TEXT[],
-    enabled      BOOLEAN      NOT NULL DEFAULT TRUE,
-    created_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    last_used_at TIMESTAMPTZ,
-    expires_at   TIMESTAMPTZ,
-    CONSTRAINT uq_analytics_sync_tokens_prefix UNIQUE (key_prefix)
-);
-
-CREATE INDEX IF NOT EXISTS idx_analytics_sync_tokens_enabled
-    ON analytics_sync_tokens (enabled) WHERE enabled;
+-- (Sync tokens table removed in 2026-08-23 refactor; see api_keys table
+-- in schema.sql at the repo root.)
 
 
 -- ─── Audit log ───────────────────────────────────────────────────────

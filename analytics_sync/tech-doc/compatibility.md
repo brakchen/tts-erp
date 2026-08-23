@@ -125,13 +125,13 @@ Don't prune them.
 Forever. Same reason as cursors — these are operator-set or
 plugin-learned state.
 
-### `analytics_sync_tokens`
+### `api_keys`
 
 Forever (revoked or not). Revocation is `enabled = false`. Operators
 can hard-delete with:
 
 ```sql
-DELETE FROM analytics_sync_tokens
+DELETE FROM api_keys
 WHERE enabled = false
   AND created_at < now() - INTERVAL '180 days';
 ```

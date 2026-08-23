@@ -1,13 +1,9 @@
-"""Per-token rate limiter for analytics_sync.
+"""Per-api-key rate limiter for analytics_sync.
 
-Sliding-window counter, in-process. Bucketed by token prefix so a single
-noisy token cannot starve other tokens. Resets are cooperative; the
-window is bounded by ANALYTICS_SYNC_RATE_LIMIT_PER_MIN (default 100).
+Sliding 60s window bucketed by `api_key_hash` (set by SyncAuthMiddleware).
+Same semantics as tts-erp/tdd/rate_limit.py but standalone for analytics_sync.
 
 Returned response includes Retry-After in seconds (integer ≥ 1).
-
-For multi-instance deployments, swap this for a Redis-backed counter;
-the call signature (allow(key) → RetryAfter | None) is unchanged.
 """
 from __future__ import annotations
 
@@ -16,19 +12,17 @@ import sys
 import time
 from collections import deque
 
-DEFAULT_PER_MIN = 100
-WINDOW_SECONDS = 60.0
+DEFAULT_LIMIT = 100
+WINDOW_S = 60.0
 
 
-def _per_min() -> int:
+def _limit() -> int:
     try:
-        return max(1, int(os.environ.get("ANALYTICS_SYNC_RATE_LIMIT_PER_MIN", DEFAULT_PER_MIN)))
+        return max(1, int(os.environ.get("ANALYTICS_SYNC_RATE_LIMIT_PER_MIN", DEFAULT_LIMIT)))
     except ValueError:
-        return DEFAULT_PER_MIN
+        return DEFAULT_LIMIT
 
 
-# Buckets keyed by token prefix. In production this is one process;
-# a multi-worker uvicorn deployment would need a shared store.
 _buckets: dict[str, deque[float]] = {}
 
 
@@ -38,31 +32,20 @@ def reset_buckets() -> None:
 
 
 def allow(key: str) -> tuple[bool, int]:
-    """Return (is_allowed, retry_after_seconds).
-
-    `retry_after_seconds` is meaningful only when is_allowed is False.
-    """
-    if key == "-" or not key:
-        # Anonymous traffic: still rate-limit, but bucket by remote IP
-        # rather than token prefix.
-        pass
     now = time.monotonic()
-    cutoff = now - WINDOW_SECONDS
+    cutoff = now - WINDOW_S
     bucket = _buckets.setdefault(key, deque())
-    # Drop expired entries.
     while bucket and bucket[0] < cutoff:
         bucket.popleft()
-    limit = _per_min()
-    if len(bucket) >= limit:
-        # Retry-After = ceil(seconds until oldest entry falls out of window).
-        retry_after = max(1, int(WINDOW_SECONDS - (now - bucket[0])) + 1)
+    quota = _limit()
+    if len(bucket) >= quota:
+        retry_after = max(1, int(WINDOW_S - (now - bucket[0])) + 1)
         return False, retry_after
     bucket.append(now)
     return True, 0
 
 
-def _deny(retry_after: int):
-    """Build an ASGI 429 response with Retry-After header."""
+def _deny_response(retry_after: int):
     import json as _json
 
     body = _json.dumps(
@@ -80,11 +63,7 @@ def _deny(retry_after: int):
     return 429, headers, body
 
 
-class RateLimitMiddleware:
-    """Plain ASGI middleware. Wire after AuthMiddleware so we can bucket
-    by token prefix (set on scope["sync_token_prefix"] by AuthMiddleware).
-    """
-
+class SyncRateLimitMiddleware:
     def __init__(self, app):
         self.app = app
 
@@ -95,26 +74,23 @@ class RateLimitMiddleware:
 
         path = scope["path"]
         method = scope["method"]
-        # Exempt healthz / endpoints / docs so health checks don't burn quota.
         if path in {"/healthz", "/endpoints", "/openapi.json", "/docs", "/redoc"}:
             await self.app(scope, receive, send)
             return
 
-        bucket_key = scope.get("sync_token_prefix")
+        bucket_key = scope.get("api_key_hash")
         if not bucket_key:
-            # No auth context → use remote IP so unauthenticated traffic
-            # is also rate-limited (defense against 401-flooding).
             client = scope.get("client") or ("?", 0)
             bucket_key = f"ip:{client[0]}"
 
-        is_allowed, retry_after = allow(bucket_key)
-        if not is_allowed:
+        ok, retry_after = allow(bucket_key)
+        if not ok:
             client = (scope.get("client") or ("?",))[0]
             sys.stderr.write(
-                f"[analytics-rl] 429 {method} {path} from {client} "
+                f"[sync-rl] 429 {method} {path} from {client} "
                 f"bucket={bucket_key[:16]} retry_after={retry_after}s\n"
             )
-            s, hdrs, body = _deny(retry_after)
+            s, hdrs, body = _deny_response(retry_after)
             await send({"type": "http.response.start", "status": s, "headers": hdrs})
             await send({"type": "http.response.body", "body": body})
             return

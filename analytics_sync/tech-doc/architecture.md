@@ -59,7 +59,7 @@ make consistent decisions when the protocol evolves.
 │  analytics_records        │   raw + normalized, UNIQUE(idempotency_key)
 │  analytics_cursors        │   per (seller, advertiser, storageKey, campaignId)
 │  analytics_shop_timezones │   per seller IANA TZ
-│  analytics_sync_tokens    │   Bearer tokens (SHA-256 hash + prefix)
+│  api_keys    │   Bearer tokens (SHA-256 hash + prefix)
 │  analytics_audit_log      │   by requestId, no secrets
 └───────────────────────────┘
 ```
@@ -85,7 +85,7 @@ pg_repositories.py   PG-backed implementations
 auth.py              sync-token auth middleware (Bearer / X-Sync-Token)
 rate_limit.py        per-token sliding-window rate limiter
 app.py               FastAPI handlers, request validation, partial success
-analytics_sync_tokens.py   operator CLI for token issuance
+api_keys.py   operator CLI for token issuance
 ```
 
 Each layer is independently testable: `domain.py` and `auth.scope_grants`

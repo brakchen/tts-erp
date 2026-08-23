@@ -88,8 +88,8 @@ def seller_scoped_token(db_url: str):
     with psycopg.connect(db_url) as conn, conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO analytics_sync_tokens (key_prefix, key_hash, name, scopes, enabled)
-            VALUES (%s, %s, %s, %s, true)
+            INSERT INTO api_keys (key_prefix, key_hash, name, role, scopes, enabled)
+            VALUES (%s, %s, %s, 'readwrite', %s, true)
             """,
             (plaintext[:16], h, "TEST_scoped", ["seller:TEST_scoped_seller"]),
         )

@@ -32,8 +32,8 @@ def test_disabled_token_returns_401(fastapi_client, db_url):
     h = hashlib.sha256(plaintext.encode()).hexdigest()
     with psycopg.connect(db_url) as conn, conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO analytics_sync_tokens (key_prefix, key_hash, name, enabled) "
-            "VALUES (%s, %s, %s, false)",
+            "INSERT INTO api_keys (key_prefix, key_hash, name, role, scopes, enabled) "
+            "VALUES (%s, %s, %s, 'readwrite', ARRAY[]::TEXT[], false)",
             (plaintext[:16], h, "TEST_disabled"),
         )
         conn.commit()

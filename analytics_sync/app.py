@@ -1,25 +1,16 @@
-"""FastAPI application for analytics_sync.
+"""analytics_sync handlers — mounted under tts-erp FastAPI at /v1/analytics/sync.
 
-Endpoints (per protocol):
-    GET  /v1/analytics/sync/cursor
-    POST /v1/analytics/sync/batches
+Routes go through tts-erp's AuthMiddleware (api_keys table) and
+RateLimitMiddleware (per api_key_hash). This module provides only
+handlers + Pydantic models.
 
-Plus ops endpoints (auth-exempt):
-    GET  /healthz
-    GET  /endpoints
+Per-seller scope check is enforced inside each handler by reading
+`request.scope["api_key_scopes"]` (populated by tts-erp/auth.py).
+No middleware of our own.
 
-Run:
+Run standalone (NOT recommended):
     uvicorn analytics_sync.app:app --host 0.0.0.0 --port 9878
-
-Middleware order (FastAPI wraps in reverse; add = innermost-first):
-
-    1. RateLimitMiddleware  (innermost — bucket by token prefix)
-    2. AuthMiddleware       (sets sync_token_prefix/scope/sync_token_scopes)
-    3. CORS                 (outermost — preflight short-circuit)
-
-Scope validation: token's scopes[] is read off `scope["sync_token_scopes"]`
-by handler-level checks. We do NOT pass scopes through URL params (per
-protocol §3 — only sync-token Bearer).
+In production, always mount under tts-erp via include_router.
 """
 from __future__ import annotations
 
@@ -33,7 +24,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, Query, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
@@ -48,7 +39,6 @@ if _env_path.exists():
         _k, _v = _line.split("=", 1)
         os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 
-from .auth import AuthMiddleware, scope_grants
 from .domain import (
     Record,
     Scope,
@@ -61,7 +51,6 @@ from .pg_repositories import (
     fetch_timezone,
     write_audit,
 )
-from .rate_limit import RateLimitMiddleware
 
 
 # ─── Config ────────────────────────────────────────────────────────────
@@ -75,64 +64,36 @@ MAX_BODY_BYTES = 2 * 1024 * 1024  # 2 MB per protocol §5
 MAX_RESPONSE_DATA_BYTES = 256 * 1024  # cap individual response_data JSON
 
 
-# ─── App + middleware ─────────────────────────────────────────────────
-
-app = FastAPI(
-    title="analytics-sync",
-    version="0.2.0",
-    description="Analytics data sync backend for the Chrome extension. Replaces the retired CloudBase path.",
-)
-
-# Add order = [RateLimit, Auth, CORS] → wrap order ends up
-# [Auth outer] → [RateLimit inner] → endpoint. Auth must run first so
-# rate limiter can bucket by token prefix. (No CORS for MVP — internal.)
-app.add_middleware(RateLimitMiddleware)
-app.add_middleware(AuthMiddleware)
+# ─── Scope-grant helper (also used by tests) ──────────────────────────
 
 
-# ─── Ops endpoints ────────────────────────────────────────────────────
+def scope_grants(scopes, *, seller_id, advertiser_id):
+    """Return True iff the token's scopes cover the requested scope.
+
+    Empty scopes / wildcard '*' = unrestricted. Otherwise each scope
+    entry must match the request's corresponding dimension.
+
+    Mirrors tts-erp/api_keys.py `scopes` semantics (see api_keys CLI
+    `--scopes` flag).
+    """
+    if not scopes or "*" in scopes:
+        return True
+    for s in scopes:
+        if s.startswith("seller:"):
+            target = s[len("seller:"):]
+            if seller_id != target:
+                return False
+        elif s.startswith("advertiser:"):
+            target = s[len("advertiser:"):]
+            if advertiser_id != target:
+                return False
+    return True
 
 
-@app.get("/healthz")
-def healthz() -> dict[str, Any]:
-    return {"status": "ok", "service": "analytics-sync", "version": "0.2.0"}
+# ─── Router (mounted under /v1/analytics/sync by tts-erp) ─────────────
 
 
-@app.get("/endpoints")
-def endpoints() -> dict[str, Any]:
-    return {
-        "service": "analytics-sync",
-        "version": "0.2.0",
-        "protocol_version": PROTOCOL_VERSION,
-        "endpoints": [
-            {
-                "method": "GET",
-                "path": "/v1/analytics/sync/cursor",
-                "description": "Latest persisted day per (scope, storageKey, campaignId).",
-                "auth": "Bearer (sync token)",
-                "scope": "tokens must grant access to sellerId/advertiserId in query",
-            },
-            {
-                "method": "POST",
-                "path": "/v1/analytics/sync/batches",
-                "description": "Idempotent batch upload.",
-                "auth": "Bearer (sync token)",
-                "scope": "tokens must grant access to sellerId/advertiserId in body",
-                "limits": {
-                    "max_records": MAX_BATCH_RECORDS,
-                    "max_body_bytes": MAX_BODY_BYTES,
-                },
-            },
-        ],
-        "error_contract": {
-            "400": "malformed JSON or schema invalid; retryable=false",
-            "401": "missing or invalid bearer token; retryable=false",
-            "403": "scope mismatch; retryable=false",
-            "413": "request body exceeds 2MB; retryable=false (split the batch)",
-            "429": "rate limited; retryable=true; check Retry-After header",
-            "5xx": "server error; retryable=true with bounded backoff",
-        },
-    }
+router = APIRouter()
 
 
 # ─── Models ───────────────────────────────────────────────────────────
@@ -177,7 +138,7 @@ class BatchRequest(BaseModel):
 # ─── Cursor endpoint ──────────────────────────────────────────────────
 
 
-@app.get("/v1/analytics/sync/cursor")
+@router.get("/cursor")
 def get_cursor(
     request: Request,
     sellerId: str = Query(min_length=1, max_length=128),
@@ -197,8 +158,10 @@ def get_cursor(
     request_id = _request_id_from_headers(request)
     key_prefix = _key_prefix(request)
 
-    # Scope check (skip when auth mode=off; in tests/off-mode scopes=()).
-    if not scope_grants(_scopes(request), seller_id=sellerId, advertiser_id=advertiserId):
+    if not scope_grants(
+        tuple(_scopes(request)),
+        seller_id=sellerId, advertiser_id=advertiserId,
+    ):
         write_audit(
             request_id=request_id,
             endpoint="cursor",
@@ -211,7 +174,7 @@ def get_cursor(
         return _error_response(
             status=403,
             code="SCOPE_DENIED",
-            message="sync token does not grant access to this scope",
+            message="api key does not grant access to this scope",
             request_id=request_id,
             retryable=False,
         )
@@ -270,7 +233,7 @@ def get_cursor(
 # ─── Batch endpoint ───────────────────────────────────────────────────
 
 
-@app.post("/v1/analytics/sync/batches")
+@router.post("/batches")
 async def post_batches(request: Request) -> JSONResponse:
     """Idempotent batch upload with per-record outcomes.
 
@@ -282,7 +245,6 @@ async def post_batches(request: Request) -> JSONResponse:
     method = "POST"
     path = "/v1/analytics/sync/batches"
 
-    # Content-Length pre-check (fast path).
     cl = request.headers.get("content-length")
     if cl is not None:
         try:
@@ -297,7 +259,7 @@ async def post_batches(request: Request) -> JSONResponse:
                     method=method, path=path,
                 )
         except ValueError:
-            pass  # malformed content-length → fall through to body read
+            pass
 
     body_bytes = await request.body()
     if len(body_bytes) > MAX_BODY_BYTES:
@@ -348,15 +310,36 @@ async def post_batches(request: Request) -> JSONResponse:
             method=method, path=path,
         )
 
-    # Per-record validation: idempotency key must match the canonical
-    # server-computed value.
+    if not scope_grants(
+        tuple(_scopes(request)),
+        seller_id=payload.scope.sellerId,
+        advertiser_id=payload.scope.advertiserId,
+    ):
+        write_audit(
+            request_id=payload.requestId,
+            endpoint="batches",
+            method=method,
+            path=path,
+            status=403,
+            key_prefix=key_prefix,
+            records_in=len(payload.records),
+            records_ok=0,
+            records_rej=0,
+            error_code="SCOPE_DENIED",
+        )
+        return _error_response(
+            status=403,
+            code="SCOPE_DENIED",
+            message="api key does not grant access to this scope",
+            request_id=payload.requestId,
+            retryable=False,
+        )
+
     accepted: list[dict[str, str]] = []
     rejected: list[dict[str, Any]] = []
     valid_records: list[Record] = []
 
     for idx, rec_in in enumerate(payload.records):
-        # Cap individual response payloads to avoid one chatty record
-        # blowing the table.
         try:
             response_size = len(json.dumps(rec_in.response, ensure_ascii=False).encode())
         except (TypeError, ValueError):
@@ -415,33 +398,6 @@ async def post_batches(request: Request) -> JSONResponse:
             )
         )
 
-    # Scope check now that we know the request body.
-    if not scope_grants(
-        _scopes(request),
-        seller_id=payload.scope.sellerId,
-        advertiser_id=payload.scope.advertiserId,
-    ):
-        write_audit(
-            request_id=payload.requestId,
-            endpoint="batches",
-            method=method,
-            path=path,
-            status=403,
-            key_prefix=key_prefix,
-            records_in=len(payload.records),
-            records_ok=0,
-            records_rej=len(rejected),
-            error_code="SCOPE_DENIED",
-        )
-        return _error_response(
-            status=403,
-            code="SCOPE_DENIED",
-            message="sync token does not grant access to this scope",
-            request_id=payload.requestId,
-            retryable=False,
-        )
-
-    # Persist + advance cursors.
     scope = Scope(
         seller_id=payload.scope.sellerId,
         advertiser_id=payload.scope.advertiserId,
@@ -503,34 +459,6 @@ async def post_batches(request: Request) -> JSONResponse:
     )
 
 
-# ─── Exception handlers ───────────────────────────────────────────────
-
-
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception):
-    """Last-resort handler. Logs a sanitized message and returns 500.
-    We never echo the request body or any token/header.
-    """
-    sys.stderr.write(f"[analytics-sync] unhandled exception on {request.url.path}: {type(exc).__name__}: {exc}\n")
-    sys.stderr.write(traceback.format_exc())
-    write_audit(
-        request_id=_request_id_from_headers(request),
-        endpoint="unknown",
-        method=request.method,
-        path=request.url.path,
-        status=500,
-        key_prefix=_key_prefix(request),
-        error_code=type(exc).__name__,
-    )
-    return _error_response(
-        status=500,
-        code="INTERNAL_ERROR",
-        message="an internal error occurred; see server logs",
-        request_id=_request_id_from_headers(request),
-        retryable=True,
-    )
-
-
 # ─── Helpers ──────────────────────────────────────────────────────────
 
 
@@ -551,7 +479,6 @@ def _encode_cursor(page_size: int, total: int) -> str | None:
 
 
 def _request_id_from_headers(request: Request) -> str:
-    """Pull X-Request-Id if supplied; otherwise mint a UUID."""
     rid = request.headers.get("x-request-id")
     if rid:
         return rid[:128]
@@ -560,16 +487,15 @@ def _request_id_from_headers(request: Request) -> str:
 
 
 def _key_prefix(request: Request) -> str | None:
-    """Best-effort read of the current request's token prefix from the
-    ASGI scope (set by AuthMiddleware). Returns None when called outside
-    a request (e.g., handler unit tests) or when auth mode is 'off'."""
-    return request.scope.get("sync_token_prefix")  # type: ignore[no-any-return]
+    """Read the api key's 16-char prefix from ASGI scope (set by
+    tts-erp's AuthMiddleware). None if request is unauthenticated."""
+    return request.scope.get("api_key_hash") and request.scope.get("api_key_hash")[:16]
 
 
 def _scopes(request: Request) -> tuple[str, ...]:
-    """Read the token's scopes tuple from ASGI scope state. Empty tuple
-    means unrestricted (or auth mode=off)."""
-    return request.scope.get("sync_token_scopes", ())  # type: ignore[no-any-return]
+    """Read the api key's scopes tuple from ASGI scope (set by
+    tts-erp's AuthMiddleware). Empty tuple means unrestricted."""
+    return request.scope.get("api_key_scopes", ())  # type: ignore[no-any-return]
 
 
 def _error_response(
@@ -610,8 +536,6 @@ def _audit_and_error(
     method: str,
     path: str,
 ) -> JSONResponse:
-    """Audit-then-error helper. Single-shot pattern used by all early-return
-    paths in post_batches."""
     write_audit(
         request_id=request_id,
         endpoint="batches",
@@ -625,3 +549,61 @@ def _audit_and_error(
         status=status, code=code, message=message,
         request_id=request_id, retryable=retryable,
     )
+
+
+# ─── Standalone FastAPI app (port 9878) ────────────────────────────────
+# Exposed for `uvicorn analytics_sync.app:app`. When mounted under
+# tts-erp via include_router, the parent's auth + rate-limit apply and
+# this app instance is unused.
+
+from fastapi import FastAPI as _FastAPI  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware as _CORS  # noqa: E402
+from .auth import SyncAuthMiddleware  # noqa: E402
+from .rate_limit import SyncRateLimitMiddleware  # noqa: E402
+
+app = _FastAPI(
+    title="analytics_sync",
+    version="0.3.0",
+    description="Analytics data sync backend. Standalone port 9878; unified auth via tts-erp api_keys.",
+)
+
+_cors_origins_env = os.environ.get("ANALYTICS_SYNC_CORS_ALLOW_ORIGINS", "").strip()
+if _cors_origins_env.lower() == "wildcard":
+    _cors_allow_origins = ["*"]
+elif _cors_origins_env:
+    _cors_allow_origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
+else:
+    _cors_allow_origins = []
+
+# Order: CORS outer → RateLimit → Auth → endpoint.
+app.add_middleware(SyncRateLimitMiddleware)
+app.add_middleware(SyncAuthMiddleware)
+app.add_middleware(
+    _CORS,
+    allow_origins=_cors_allow_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
+# Mount the analytics router under /v1/analytics/sync.
+app.include_router(router, prefix="/v1/analytics/sync")
+
+
+@app.get("/healthz")
+def _healthz():
+    return {"status": "ok", "service": "analytics-sync", "version": "0.3.0"}
+
+
+@app.get("/endpoints")
+def _endpoints():
+    return {
+        "service": "analytics-sync",
+        "version": "0.3.0",
+        "protocol_version": PROTOCOL_VERSION,
+        "auth": "shared with tts-erp (api_keys table; ANALYTICS_SYNC_AUTH_MODE)",
+        "endpoints": [
+            {"method": "GET", "path": "/v1/analytics/sync/cursor"},
+            {"method": "POST", "path": "/v1/analytics/sync/batches"},
+        ],
+    }
