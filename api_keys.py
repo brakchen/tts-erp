@@ -49,16 +49,22 @@ def _sha256(s: str) -> str:
     return hashlib.sha256(s.encode()).hexdigest()
 
 
-def _insert_key(conn, name: str, role: str, expires_days: int | None) -> str:
+def _insert_key(
+    conn,
+    name: str | None,
+    role: str,
+    scopes: list[str],
+    expires_days: int | None,
+) -> str:
     key = f"ttserp_{ROLE_PREFIX[role]}_{secrets.token_urlsafe(24)}"
     expires_at = None
     if expires_days:
         expires_at = datetime.now(timezone.utc) + timedelta(days=expires_days)
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO api_keys (key_hash, key_prefix, name, role, expires_at)"
-            " VALUES (%s, %s, %s, %s, %s)",
-            (_sha256(key), key[:16], name, role, expires_at),
+            "INSERT INTO api_keys (key_hash, key_prefix, name, role, scopes, expires_at)"
+            " VALUES (%s, %s, %s, %s, %s, %s)",
+            (_sha256(key), key[:16], name, role, scopes, expires_at),
         )
     conn.commit()
     return key
@@ -66,10 +72,14 @@ def _insert_key(conn, name: str, role: str, expires_days: int | None) -> str:
 
 def cmd_create(args) -> None:
     with _connect() as conn:
-        key = _insert_key(conn, args.name, args.role, args.expires_days)
-    print(f"name    : {args.name}")
+        key = _insert_key(conn, args.name, args.role, args.scopes or [], args.expires_days)
+    print(f"name    : {args.name or '-'}")
     print(f"role    : {args.role}")
     print(f"prefix  : {key[:16]}")
+    if args.scopes:
+        print(f"scopes  : {','.join(args.scopes)}")
+    else:
+        print(f"scopes  : (none — token grants full access)")
     if args.expires_days:
         print(f"expires : in {args.expires_days} days")
     print()
@@ -79,19 +89,19 @@ def cmd_create(args) -> None:
 def cmd_list(_args) -> None:
     with _connect() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT key_prefix, name, role, enabled, created_at, last_used_at, expires_at"
+            "SELECT key_prefix, name, role, scopes, enabled, created_at, last_used_at, expires_at"
             " FROM api_keys ORDER BY id"
         )
         rows = cur.fetchall()
     if not rows:
         print("(no api keys)")
         return
-    print(f"{'PREFIX':<18} {'NAME':<20} {'ROLE':<10} {'ON':<3} {'CREATED':<19} {'LAST_USED':<19} {'EXPIRES':<19}")
-    for prefix, name, role, enabled, created, last_used, expires in rows:
-        fmt = "%Y-%m-%d %H:%M:%S"
+    fmt = "%Y-%m-%d %H:%M:%S"
+    print(f"{'PREFIX':<18} {'NAME':<20} {'ROLE':<10} {'SCOPES':<22} {'ON':<3} {'CREATED':<19} {'LAST_USED':<19} {'EXPIRES':<19}")
+    for prefix, name, role, scopes, enabled, created, last_used, expires in rows:
         print(
-            f"{prefix:<18} {name:<20} {role:<10} {'Y' if enabled else 'N':<3} "
-            f"{created.strftime(fmt):<19} "
+            f"{prefix:<18} {(name or '-'):<20} {role:<10} {','.join(scopes or []):<22} "
+            f"{'Y' if enabled else 'N':<3} {created.strftime(fmt):<19} "
             f"{(last_used.strftime(fmt) if last_used else '-'):<19} "
             f"{(expires.strftime(fmt) if expires else '-'):<19}"
         )
@@ -125,9 +135,20 @@ def cmd_rotate(args) -> None:
         if not row:
             sys.exit(f"NOT FOUND or already revoked: {args.prefix}")
         name, role = row
-        key = _insert_key(conn, name, role, args.expires_days)
+        # Default: copy scopes from old key. Explicit --scopes overrides.
+        if args.scopes is not None:
+            scopes = args.scopes
+        else:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT scopes FROM api_keys WHERE key_prefix = %s",
+                    (args.prefix,),
+                )
+                scopes = cur.fetchone()[0] or []
+        key = _insert_key(conn, name, role, list(scopes), args.expires_days)
         _revoke(conn, args.prefix)
     print(f"rotated: {args.prefix} -> new key for name={name} role={role}")
+    print(f"scopes  : {','.join(scopes) or '(none)'}")
     print()
     print(f"API KEY (shown ONCE, store it now):  {key}")
 
@@ -140,6 +161,17 @@ def main() -> None:
     p = sub.add_parser("create", help="create a new key (printed once)")
     p.add_argument("--name", required=True, help="purpose label, e.g. cron-sync")
     p.add_argument("--role", required=True, choices=sorted(ROLE_PREFIX))
+    p.add_argument(
+        "--scopes",
+        nargs="*",
+        default=[],
+        help=(
+            "Optional scope strings for analytics_sync per-seller restriction. "
+            "Format: 'seller:<id>' or 'advertiser:<id>'. "
+            "Empty (default) = unrestricted. Examples: "
+            "--scopes seller:shop-1 --scopes advertiser:adv-1"
+        ),
+    )
     p.add_argument("--expires-days", type=int, default=None)
     p.set_defaults(fn=cmd_create)
 
@@ -152,6 +184,8 @@ def main() -> None:
 
     p = sub.add_parser("rotate", help="create a fresh key with same name/role, revoke the old one")
     p.add_argument("--prefix", required=True)
+    p.add_argument("--scopes", nargs="*", default=None,
+                   help="Override scopes on the new key (default: copy from old)")
     p.add_argument("--expires-days", type=int, default=None)
     p.set_defaults(fn=cmd_rotate)
 

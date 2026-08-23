@@ -56,7 +56,7 @@ single source of dedup truth.
 ## 3. Authentication
 
 - `Authorization: Bearer <token>` (preferred) or `X-Sync-Token: <token>`
-- Tokens are 40+ char random URLsafed strings prefixed `anlsync_`
+- Tokens are 40+ char random URLsafed strings prefixed `ttserp_<role>_` (e.g. `ttserp_rw_` for readwrite sync tokens)
 - DB stores only the SHA-256 hex digest plus a 16-char prefix
 - `ANALYTICS_SYNC_AUTH_MODE`: `off` | `shadow` (log would-deny) | `enforce`
   (default `enforce`)
@@ -210,7 +210,7 @@ All error envelopes carry `{code, message, requestId, retryable}` and
 | `analytics_records` | Raw response JSON + normalized scope columns. Unique index on `idempotency_key`. |
 | `analytics_cursors` | Per-`(seller, advertiser, storageKey, campaignId)` latest-day. |
 | `analytics_shop_timezones` | Per-seller canonical IANA TZ. |
-| `analytics_sync_tokens` | Bearer tokens (SHA-256 hash + 16-char prefix only). |
+| `api_keys` | Bearer tokens (SHA-256 hash + 16-char prefix only). |
 | `analytics_audit_log` | requestId-keyed audit trail (no secrets). |
 
 Schema is in [`schema.sql`](../schema.sql). Apply with:
@@ -248,15 +248,15 @@ regress the cursor.
 Assume `$TOKEN` was minted by:
 
 ```bash
-python3 analytics_sync/analytics_sync_tokens.py create --name chrome-ext-prod
-# SYNC TOKEN (shown ONCE, store it now):  anlsync_yzJlb2irGUNeENv8uF-_WgDMoJvwekYk
+python3 api_keys.py create --name chrome-ext-prod --role readwrite --expires-days 365
+# SYNC TOKEN (shown ONCE, store it now):  ttserp_rw_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 ### Healthz (no auth)
 
 ```bash
 curl -s http://127.0.0.1:9878/healthz
-# {"status":"ok","service":"analytics-sync","version":"0.1.0"}
+# {"status":"ok","service":"analytics-sync","version":"0.3.0"}
 ```
 
 ### Cursor

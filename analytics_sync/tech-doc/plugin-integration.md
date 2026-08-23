@@ -63,7 +63,7 @@ in the extension:
 ## 2. Required headers on every request
 
 ```http
-Authorization: Bearer anlsync_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Authorization: Bearer ttserp_rw_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 Content-Type: application/json
 X-Request-Id: <uuid>            # echoed back, surfaces in audit log
 X-Protocol-Version: 1
@@ -359,7 +359,7 @@ Wrap calls in a retry policy that:
 When the operator issues a token via:
 
 ```bash
-python3 analytics_sync/analytics_sync_tokens.py create \
+python3 api_keys.py create \
     --name chrome-ext-prod \
     --expires-days 365
 ```
@@ -373,7 +373,7 @@ For multi-shop deployments, issue one token per shop with the
 `--scopes` argument restricting it to that seller:
 
 ```bash
-python3 analytics_sync/analytics_sync_tokens.py create \
+python3 api_keys.py create \
     --name chrome-ext-shop-42 \
     --scopes "seller:shop-42-id"
 ```

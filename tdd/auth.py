@@ -28,9 +28,8 @@ ROLE_LEVEL = {"readonly": 1, "readwrite": 2, "admin": 3}
 _LEVEL_NAME = {v: k for k, v in ROLE_LEVEL.items()}
 
 CACHE_TTL = 60.0
-_cache: dict[
-    str, tuple[int, float]
-] = {}  # key_hash -> (role_level, monotonic deadline)
+# key_hash -> (role_level, scopes_tuple, monotonic_deadline)
+_cache: dict[str, tuple[int, tuple[str, ...], float]] = {}
 
 EXEMPT_PATHS = {
     "/healthz",
@@ -78,16 +77,18 @@ def _sha256(s: str) -> str:
     return hashlib.sha256(s.encode()).hexdigest()
 
 
-def _db_lookup(key_hash: str) -> int | None:
+def _db_lookup(key_hash: str) -> tuple[int, tuple[str, ...]] | None:
+    """Return (role_level, scopes_tuple) for a valid key, else None."""
     with tts_erp.db_connect() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT role, enabled, expires_at, last_used_at, key_hash FROM api_keys WHERE key_hash = %s",
+            "SELECT role, enabled, expires_at, last_used_at, key_hash, scopes"
+            " FROM api_keys WHERE key_hash = %s",
             (key_hash,),
         )
         row = cur.fetchone()
         if not row:
             return None
-        role, enabled, expires_at, last_used_at, stored_hash = row
+        role, enabled, expires_at, last_used_at, stored_hash, scopes = row
         if not hmac.compare_digest(stored_hash, key_hash):
             return None
         if not enabled:
@@ -103,19 +104,21 @@ def _db_lookup(key_hash: str) -> int | None:
                 "UPDATE api_keys SET last_used_at = now() WHERE key_hash = %s",
                 (key_hash,),
             )
-        return ROLE_LEVEL.get(role)
+        return ROLE_LEVEL.get(role), tuple(scopes or ())
 
 
-def lookup_role(key: str) -> int | None:
+def lookup_role(key: str) -> tuple[int, tuple[str, ...]] | None:
+    """Cached role+scopes lookup. Cache TTL is 60s; revocation propagates
+    within that window. Returns None for invalid keys."""
     key_hash = _sha256(key)
     now = time.monotonic()
     hit = _cache.get(key_hash)
-    if hit and hit[1] > now:
-        return hit[0]
-    level = _db_lookup(key_hash)
-    if level is not None:
-        _cache[key_hash] = (level, now + CACHE_TTL)
-    return level
+    if hit and hit[2] > now:
+        return hit[0], hit[1]
+    result = _db_lookup(key_hash)
+    if result is not None:
+        _cache[key_hash] = (result[0], result[1], now + CACHE_TTL)
+    return result
 
 
 def _extract_key(scope: dict) -> str | None:
@@ -174,7 +177,9 @@ class AuthMiddleware:
             return
 
         key = _extract_key(scope)
-        level = lookup_role(key) if key else None
+        result = lookup_role(key) if key else None
+        level = result[0] if result else None
+        scopes = result[1] if result else ()
 
         denied: tuple[int, str] | None = None
         if key is None:
@@ -187,9 +192,11 @@ class AuthMiddleware:
         elif level < needed:
             denied = (403, f"requires {_LEVEL_NAME[needed]}")
 
-        # Populate scope for downstream middlewares (rate limiter reads api_key_hash).
+        # Populate scope for downstream middlewares (rate limiter reads api_key_hash;
+        # analytics_sync handlers read api_key_scopes for per-seller checks).
         scope["api_key_hash"] = _sha256(key) if key else None
         scope["api_key_role"] = _LEVEL_NAME[level] if level is not None else None
+        scope["api_key_scopes"] = scopes
 
         if denied is None:
             await self.app(scope, receive, send)

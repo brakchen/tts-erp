@@ -1,5 +1,24 @@
 # tts-erp CHANGELOG
 
+## 2026-08-23 (refactor) — analytics_sync 鉴权统一到 api_keys
+
+### Changed
+- **删除 `analytics_sync_tokens` 表**（2026-08-23 早上刚加的，现在不用了）；Chrome 扩展的 sync token 直接走 tts-erp 的 `api_keys` 表
+- **`api_keys` 表加 `scopes TEXT[]` 列**（`NOT NULL DEFAULT '{}'`），保留空的 scope 表示无限制；Chrome 扩展用 `--scopes "seller:<id>"` 拿受限 token
+- **`api_keys.py` CLI 加 `--scopes` flag**；`rotate` 默认拷贝老 key 的 scopes
+- **`tdd/auth.py::lookup_role` 返回值改为 `(role_level, scopes_tuple)`**，在 `scope["api_key_scopes"]` 暴露给下游；Cache key/value shape 同步调整
+- **`tdd/auth.py::required_role`**：analytics_sync 路径要求 `readwrite`（默认 fallback 是 admin，太严）
+- **`analytics_sync/auth.py`** 重写：从 `tdd.auth.lookup_role` 读 api_keys；保留 scope_grants / X-Sync-Token 兼容
+- **`analytics_sync/app.py`** 的所有 handler 改用 `request.scope["api_key_scopes"]` 做 per-seller 校验
+- **路由挂载策略**：保留 analytics_sync 独立 FastAPI 进程（端口 9878），不再尝试 mount 到 tts_erp_fastapi（后者当前未跑通，跨进程共享 auth 中间件成本高，独立进程 + 共享 api_keys 表 已足够达到"统一鉴权"）
+
+### Removed
+- `analytics_sync/analytics_sync_tokens.py` CLI（用 `api_keys.py create` 替代，文档里说明 `--scopes` 用法）
+- `analytics_sync_tokens` 表的所有引用
+
+### Tests
+- 63/63 仍通过：所有 fixture 改为向 `api_keys` 插 readwrite 临时 token
+
 ## 2026-08-23 — analytics_sync 后端服务（Chrome 插件替代 CloudBase）
 
 ### Added
