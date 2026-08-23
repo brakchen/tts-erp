@@ -1109,8 +1109,6 @@ def persist_shop(
         return False
 
 
-
-
 def persist_miaoshou_shop(platform: str, site: str, shop) -> bool:
     """Insert or update a 妙手 ERP shop in the DB.
 
@@ -1118,6 +1116,7 @@ def persist_miaoshou_shop(platform: str, site: str, shop) -> bool:
         shop: Shop Pydantic model from miaoshou SDK
     """
     import json as _json
+
     try:
         with db_connect() as conn, conn.cursor() as cur:
             cur.execute(
@@ -1140,9 +1139,17 @@ def persist_miaoshou_shop(platform: str, site: str, shop) -> bool:
                         synced_at          = now()
                 """),
                 (
-                    shop.shopId, platform, site, shop.platformShopName, shop.shopNick,
-                    shop.parentShopId, shop.isCb, shop.isCnsc, shop.status,
-                    shop.gmtExpire, shop.gmtLastAuth,
+                    shop.shopId,
+                    platform,
+                    site,
+                    shop.platformShopName,
+                    shop.shopNick,
+                    shop.parentShopId,
+                    shop.isCb,
+                    shop.isCnsc,
+                    shop.status,
+                    shop.gmtExpire,
+                    shop.gmtLastAuth,
                     _json.dumps(shop.model_dump(), ensure_ascii=False),
                 ),
             )
@@ -1150,6 +1157,7 @@ def persist_miaoshou_shop(platform: str, site: str, shop) -> bool:
     except Exception as e:  # noqa: BLE001
         log.error("[tts-erp] persist_miaoshou_shop failed: %s", e)
         return False
+
 
 def log_sync(
     shop_id: str, sync_type: str, status: str, rows: int = 0, error: str | None = None
@@ -1317,7 +1325,7 @@ class Handler(BaseHTTPRequestHandler):
                             "POST /sync/returns        body: {shop_id, create_time_ge?, create_time_lt?, page_size?}",
                             "POST /sync/cancellations  body: {shop_id, create_time_ge?, create_time_lt?, page_size?}",
                             "POST /sync/logistics_tracking  body: {shop_id, order_ids?: [...], all_with_tracking?: bool, limit?, max_per_run?}",
-                                                    "POST /sync/miaoshou_shops        query: {platform, site, page_no?, page_size?}",
+                            "POST /sync/miaoshou_shops        query: {platform, site, page_no?, page_size?}",
                         ],
                     },
                 )
@@ -1776,32 +1784,34 @@ class Handler(BaseHTTPRequestHandler):
             page_no: 当前页码（默认 1）
             page_size: 每页数量（默认 100）
         """
+
         def _q(key, default=None):
             v = params.get(key)
             if isinstance(v, list):
                 return v[0] if v else default
             return v if v is not None else default
 
-        platform = _q('platform', 'tiktok')
-        site = _q('site', 'VN')
+        platform = _q("platform", "tiktok")
+        site = _q("site", "VN")
         try:
-            page_no = int(_q('page_no', '1') or 1)
-            page_size = int(_q('page_size', '100') or 100)
+            page_no = int(_q("page_no", "1") or 1)
+            page_size = int(_q("page_size", "100") or 100)
         except (TypeError, ValueError):
-            return self._send(400, {'_error': 'page_no/page_size must be int'})
+            return self._send(400, {"_error": "page_no/page_size must be int"})
 
         try:
             from miaoshou import MiaoshouErpClient
+
             client = MiaoshouErpClient.from_env()
         except Exception as e:  # noqa: BLE001
-            return self._send(500, {'_error': f'create MiaoshouErpClient failed: {e}'})
+            return self._send(500, {"_error": f"create MiaoshouErpClient failed: {e}"})
 
         try:
             result = client.shops.list(
                 platform=platform, site=site, page_no=page_no, page_size=page_size
             )
         except Exception as e:  # noqa: BLE001
-            return self._send(502, {'_error': f'miaoshou api error: {e}'})
+            return self._send(502, {"_error": f"miaoshou api error: {e}"})
 
         shops = result.data.shopList if result.data else []
         saved = 0
@@ -1809,42 +1819,46 @@ class Handler(BaseHTTPRequestHandler):
             if persist_miaoshou_shop(platform, site, shop):
                 saved += 1
 
-        log_sync(f"{platform}:{site}", 'miaoshou_shops', 'ok', rows=saved)
-        return self._send(200, {
-            'platform': platform,
-            'site': site,
-            'saved': saved,
-            'total_in_page': len(shops),
-        })
+        log_sync(f"{platform}:{site}", "miaoshou_shops", "ok", rows=saved)
+        return self._send(
+            200,
+            {
+                "platform": platform,
+                "site": site,
+                "saved": saved,
+                "total_in_page": len(shops),
+            },
+        )
 
     def _db_list_miaoshou_shops(self, params: dict):
         """GET /db/miaoshou_shops?platform=&site=&limit="""
+
         def _q(key, default=None):
             v = params.get(key)
             if isinstance(v, list):
                 return v[0] if v else default
             return v if v is not None else default
 
-        platform = _q('platform')
-        site = _q('site')
+        platform = _q("platform")
+        site = _q("site")
         try:
-            limit = int(_q('limit', '100') or 100)
+            limit = int(_q("limit", "100") or 100)
         except (TypeError, ValueError):
-            return self._send(400, {'_error': 'limit must be int'})
+            return self._send(400, {"_error": "limit must be int"})
 
         wh = []
         args: list = []
         if platform:
-            wh.append('platform = %s')
+            wh.append("platform = %s")
             args.append(platform)
         if site:
-            wh.append('site = %s')
+            wh.append("site = %s")
             args.append(site)
 
-        sql_query = 'SELECT * FROM miaoshou_shops'
+        sql_query = "SELECT * FROM miaoshou_shops"
         if wh:
-            sql_query += ' WHERE ' + ' AND '.join(wh)
-        sql_query += ' ORDER BY synced_at DESC NULLS LAST LIMIT %s'
+            sql_query += " WHERE " + " AND ".join(wh)
+        sql_query += " ORDER BY synced_at DESC NULLS LAST LIMIT %s"
         args.append(limit)
 
         try:
@@ -1856,12 +1870,11 @@ class Handler(BaseHTTPRequestHandler):
                 rows = cur.fetchall()
             for r in rows:
                 for k, v in list(r.items()):
-                    if hasattr(v, 'isoformat'):
+                    if hasattr(v, "isoformat"):
                         r[k] = v.isoformat()
-            return self._send(200, {'count': len(rows), 'items': rows})
+            return self._send(200, {"count": len(rows), "items": rows})
         except Exception as e:  # noqa: BLE001
-            return self._send(500, {'_error': str(e)})
-
+            return self._send(500, {"_error": str(e)})
 
     def _db_list_orders(self, params: dict):
         shop_id = (params.get("shop_id") or [None])[0]

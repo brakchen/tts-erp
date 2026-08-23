@@ -134,12 +134,23 @@ class CollectBoxDetailShopInfo(BaseModel):
 
 
 class SearchCollectBoxDetailData(BaseModel):
+    """妙手 search_collect_box_list 的 data 字段.
+
+    API 实际返回：data 是单 object（含当前 item 的扁平字段） + data.detailList 是整页 list。
+    这里只保留 detailList（同步需要），其他扁平字段靠 extra="allow" 透传不报错。
+    """
+    model_config = ConfigDict(extra="allow")
+    detailList: list["CollectBoxDetailDetail"] = Field(default_factory=list)
+
+class CollectBoxDetailDetail(BaseModel):
+    """公共采集箱详情项（list 元素，18 字段全在顶层）."""
     model_config = ConfigDict(extra="allow")
     collectBoxDetailId: str | None = None
     itemNum: str | None = None
     stock: str | None = None
     price: str | None = None
     thumbnail: str | None = None
+    listThumbnail: str | None = None
     gmtCreate: str | None = None
     editModel: str | None = None
     commonCollectBoxDetailId: str | None = None
@@ -151,9 +162,7 @@ class SearchCollectBoxDetailData(BaseModel):
     copyType: str | None = None
     collectBoxGroupId: str | None = None
     collectBoxGroupName: str | None = None
-    collectBoxDetailShopList: list[CollectBoxDetailShopInfo] = Field(
-        default_factory=list
-    )
+    collectBoxDetailShopList: list[dict] | None = None
     isSupportReplicateProduct: bool | None = None
 
 

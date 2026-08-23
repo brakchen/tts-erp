@@ -10,6 +10,7 @@ Layering:
     ↓
     app.py               (FastAPI handlers)
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -152,7 +153,9 @@ def canonical_json_for_key(
     `(",", ":")` to remove insignificant whitespace; non-ASCII characters
     are passed through verbatim (ensure_ascii=False).
     """
-    storage_key_str = storage_key.value if isinstance(storage_key, StorageKey) else storage_key
+    storage_key_str = (
+        storage_key.value if isinstance(storage_key, StorageKey) else storage_key
+    )
     day_str = day.isoformat() if isinstance(day, date) else day
     try:
         page_int = int(page)

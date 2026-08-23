@@ -43,14 +43,15 @@ if _env_path.exists():
         os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 
 import tts_business  # noqa: E402
-import tts_erp  # noqa: E402
-from analytics_sync.app import router as analytics_sync_router  # noqa: E402
 from auth import AuthMiddleware  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from http_client import PlainHttpClient, TikTokHttpClient  # noqa: E402
 from pg_repositories import make_pg_repos  # noqa: E402
 from rate_limit import RateLimitMiddleware  # noqa: E402
 from token_provider import OAuthReceiverTokenProvider  # noqa: E402
+
+import tts_erp  # noqa: E402
+from analytics_sync.app import router as analytics_sync_router  # noqa: E402
 
 # ─── App + config ─────────────────────────────────────────────────────
 
@@ -1213,3 +1214,37 @@ def cancellations_search(shop_id: str, body: dict | None = None):
     return _tiktok_proxy(
         "POST", "/return_refund/202309/cancellations/search", shop_id=shop_id, body=body
     )
+
+
+# ─── OpenAPI: Bearer auth scheme ──────────────────────────────────────
+# 2026-08-23: AuthMiddleware enforces Bearer at request time, but the
+# OpenAPI spec was missing the securitySchemes declaration so API
+# consumers (Postman, codegen, etc.) couldn't see auth requirements.
+# Add it globally so /openapi.json documents both tts-erp and the
+# analytics_sync sub-router as requiring Bearer.
+from fastapi.security import HTTPBearer as _HTTPBearer
+
+_bearer_scheme = _HTTPBearer(
+    bearerFormat="ttserp_<role>_<32-char urlsafe>",
+    auto_error=False,
+    description="API key issued via `python3 api_keys.py create --role readwrite`",
+)
+_original_openapi = app.openapi
+
+def _openapi_with_bearer():
+    schema = _original_openapi()
+    components = schema.setdefault("components", {})
+    schemes = components.setdefault("securitySchemes", {})
+    schemes["BearerAuth"] = {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "ttserp_<role>_<32-char urlsafe>",
+        "description": "API key issued via `python3 api_keys.py create`",
+    }
+    # Apply globally so every endpoint (including the analytics_sync
+    # sub-router at /v1/analytics/sync/*) declares auth. AuthMiddleware
+    # enforces at runtime; this is purely the OpenAPI declaration.
+    schema["security"] = [{"BearerAuth": []}]
+    return schema
+
+app.openapi = _openapi_with_bearer

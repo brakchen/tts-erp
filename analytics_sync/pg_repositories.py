@@ -239,17 +239,22 @@ def fetch_cursor_page(
 def fetch_timezone(seller_id: str) -> str:
     """Return the canonical IANA timezone for this seller.
 
-    Seeds the row with Asia/Shanghai if missing (last-write-wins on the
-    advertiser_id column).
+    Seeds the row with Asia/Shanghai if missing. If the stored value is
+    not a valid IANA identifier (e.g. corrupted row, manual edit, or a
+    future server deployment where the TZ column default changed),
+    falls back to Asia/Shanghai rather than passing the garbage string
+    to the ZoneInfo constructor (which would raise).
     """
+    from zoneinfo import ZoneInfo as _ZI
+    default_tz = "Asia/Shanghai"
     with connect() as conn, conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO analytics_shop_timezones (seller_id, advertiser_id, timezone)
-            VALUES (%s, '', 'Asia/Shanghai')
+            VALUES (%s, '', %s)
             ON CONFLICT (seller_id) DO NOTHING
             """,
-            (seller_id,),
+            (seller_id, default_tz),
         )
         cur.execute(
             "SELECT timezone FROM analytics_shop_timezones WHERE seller_id = %s",
@@ -257,7 +262,21 @@ def fetch_timezone(seller_id: str) -> str:
         )
         row = cur.fetchone()
         conn.commit()
-    return row[0] if row else "Asia/Shanghai"
+    tz_str = row[0] if row else default_tz
+    # Validate: a garbage TZ in the DB would crash _today_in_tz (ZoneInfo
+    # raises). Repair the row + fall back rather than 500-ing every
+    # request that touches that seller.
+    try:
+        _ZI(tz_str)
+    except Exception:
+        with connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE analytics_shop_timezones SET timezone = %s WHERE seller_id = %s",
+                (default_tz, seller_id),
+            )
+            conn.commit()
+        return default_tz
+    return tz_str
 
 
 # ─── Audit log helper ─────────────────────────────────────────────────
