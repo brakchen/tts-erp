@@ -280,9 +280,10 @@ def persist_order(shop_id: str, order_raw: dict) -> bool:
                     order_status_name,
                     _decimal(payment_amount),
                     _str(payment_currency),
-                    _decimal(
-                        payment.get("total_amount") or order_raw.get("total_amount")
-                    ),
+                    # total_amount lives nested under payment in 202309 spec.
+                    # order_raw.total_amount at top-level does NOT exist —
+                    # removing the OR-fallback (fix: dead-code cleanup).
+                    _decimal(payment.get("total_amount")),
                     _str(order_raw.get("buyer_email")),
                     _str(order_raw.get("buyer_message") or order_raw.get("buyer_note")),
                     _int(order_raw.get("create_time")),
