@@ -62,6 +62,11 @@ def required_role(method: str, path: str) -> int | None:
         return ROLE_LEVEL["admin"]
     if path.startswith("/sync/"):
         return ROLE_LEVEL["readwrite"]
+    # analytics_sync: Chrome extension uploads records (write) and
+    # queries cursors (read). readwrite is sufficient; per-seller
+    # scope is checked at the handler level via scope["api_key_scopes"].
+    if path.startswith("/v1/analytics/sync/"):
+        return ROLE_LEVEL["readwrite"]
     if path.startswith("/orders/"):
         if method == "POST":
             last = path.rstrip("/").rsplit("/", 1)[-1]

@@ -44,6 +44,7 @@ if _env_path.exists():
 
 import tts_business  # noqa: E402
 import tts_erp  # noqa: E402
+from analytics_sync.app import router as analytics_sync_router  # noqa: E402
 from auth import AuthMiddleware  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from http_client import PlainHttpClient, TikTokHttpClient  # noqa: E402
@@ -158,6 +159,13 @@ def _log_sync(
 
 # ─── Health / meta ────────────────────────────────────────────────────
 
+# Mount the analytics_sync service under tts-erp at /v1/analytics/sync.
+# Auth (Bearer / api_keys table), rate limiting, and scope checks are
+# handled by tts-erp's existing middleware chain — analytics_sync's
+# router reads api_key scopes from ASGI scope. Routes are auto-registered
+# in /openapi.json via FastAPI's include_router.
+app.include_router(analytics_sync_router, prefix="/v1/analytics/sync")
+
 
 @app.get("/healthz")
 def healthz():
@@ -231,6 +239,17 @@ def endpoints():
         "finance_db": [
             "GET  /db/statement_transactions?shop_id=&statement_id=&order_id=&type=&limit=",
         ],
+        "analytics_sync": [
+            "GET  /v1/analytics/sync/cursor?sellerId=&advertiserId=&storageKey=&campaignId=&pageSize=",
+            "POST /v1/analytics/sync/batches         (Bearer token, per-seller scope, idempotent)",
+        ],
+        "analytics_sync_auth_notes": {
+            "token_table": "api_keys (unified with tts-erp; sync tokens have role=readwrite)",
+            "scope_check": "per-seller via api_keys.scopes[]; 403 SCOPE_DENIED on mismatch",
+            "401_when": "missing or invalid Bearer token",
+            "403_when": "token valid but sellerId/advertiserId not in scopes[]",
+            "no_admin_required": "readwrite is sufficient; admin is NOT required",
+        },
     }
 
 
