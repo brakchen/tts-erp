@@ -15,9 +15,10 @@ Layering:
     ↓ uses
     tts_signing.py      (HMAC signing + raw HTTP)
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 
@@ -32,6 +33,7 @@ class Creds:
     short-lived; shop_cipher is the encrypted-shop identifier used
     as a query param.
     """
+
     access_token: str
     shop_cipher: str
     region: str = ""  # e.g. "VN", "US"; not used by signing but kept for callers
@@ -45,6 +47,7 @@ class SyncResult:
     Invariant: error is None → ok; error is not None → failed.
     saved/total/pages may be 0 on error.
     """
+
     saved: int
     total: int
     pages: int
@@ -109,6 +112,7 @@ class TokenProvider(Protocol):
 
 class TokenError(Exception):
     """Raised when TokenProvider cannot return valid creds for a shop."""
+
     def __init__(self, message: str, status: int = 502):
         super().__init__(message)
         self.status = status  # HTTP status to return to the caller
