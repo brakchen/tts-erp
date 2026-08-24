@@ -55,6 +55,7 @@ log = logging.getLogger("tts-erp-fastapi")
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from http_client import PlainHttpClient, TikTokHttpClient  # noqa: E402
 from pg_repositories import make_pg_repos  # noqa: E402
+from tts_erp import _safe_int  # noqa: E402  -- per-request int() hardening
 from rate_limit import RateLimitMiddleware  # noqa: E402
 from token_provider import OAuthReceiverTokenProvider  # noqa: E402
 
@@ -563,10 +564,10 @@ def db_list_orders(
     ):
         if lo is not None:
             wh.append(f"{col} >= %s")
-            args.append(int(lo))
+            args.append(_safe_int(lo, default=0, source="qs." + field))
         if hi is not None:
             wh.append(f"{col} < %s")
-            args.append(int(hi))
+            args.append(_safe_int(hi, default=0, source="qs." + field))
     # Keyset cursor: rows strictly older than the cursor point
     c_ct, c_oid = _decode_cursor(cursor)
     if c_ct is not None and c_oid is not None:
@@ -693,16 +694,16 @@ def db_list_returns(
         args.append(status)
     if create_time_ge is not None:
         wh.append("create_time >= %s")
-        args.append(int(create_time_ge))
+        args.append(_safe_int(create_time_ge, source="qs.create_time_ge"))
     if create_time_lt is not None:
         wh.append("create_time < %s")
-        args.append(int(create_time_lt))
+        args.append(_safe_int(create_time_lt, source="qs.create_time_lt"))
     if update_time_ge is not None:
         wh.append("update_time >= %s")
-        args.append(int(update_time_ge))
+        args.append(_safe_int(update_time_ge, source="qs.update_time_ge"))
     if update_time_lt is not None:
         wh.append("update_time < %s")
-        args.append(int(update_time_lt))
+        args.append(_safe_int(update_time_lt, source="qs.update_time_lt"))
     # Cursor: returns use return_id as tiebreaker (since the column is not
     # nullable); keyset (create_time, return_id) keyset paging.
     if cursor:
@@ -844,7 +845,7 @@ def sync_logistics_tracking(body: dict):
     if body.get("order_ids"):
         order_ids = [str(x) for x in body["order_ids"] if x]
     elif body.get("all_with_tracking"):
-        lim = int(body.get("limit") or 1000)
+        lim = _safe_int(body.get("limit"), default=1000, source="body.limit")
         rows = _db_query_dict(
             """
             SELECT DISTINCT s.order_id
@@ -858,7 +859,7 @@ def sync_logistics_tracking(body: dict):
         )
         order_ids = [r["order_id"] for r in rows]
     else:
-        lim = int(body.get("limit") or 200)
+        lim = _safe_int(body.get("limit"), default=200, source="body.limit")
         rows = _db_query_dict(
             """
             SELECT order_id FROM logistics_sync_targets
@@ -870,7 +871,7 @@ def sync_logistics_tracking(body: dict):
         )
         order_ids = [r["order_id"] for r in rows]
 
-    max_per_run = int(body.get("max_per_run") or len(order_ids) or 100)
+    max_per_run = _safe_int(body.get("max_per_run"), default=(len(order_ids) or 100), source="body.max_per_run")
     order_ids = order_ids[:max_per_run]
 
     if not order_ids:
@@ -989,7 +990,7 @@ def db_list_logistics_events(
     for r in rows:
         if r.get("event_time"):
             r["event_time_iso"] = datetime.fromtimestamp(
-                int(r["event_time"]) / 1000, tz=timezone.utc
+                _safe_int(r["event_time"], default=0, source="db.event_time") / 1000, tz=timezone.utc
             ).isoformat()
     return {"count": len(rows), "items": rows}
 

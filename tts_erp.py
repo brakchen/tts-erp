@@ -826,7 +826,7 @@ def _classify_tracking_status(events: list) -> tuple[str, bool]:
     if not events:
         return "NO_DATA", False
     codes = [
-        int(e.get("action_code") or 0)
+        _safe_int(e.get("action_code"), default=0, source="event.action_code")
         for e in events
         if e.get("action_code") is not None
     ]
@@ -927,7 +927,7 @@ def persist_logistics_tracking(shop_id: str, order_id: str, resp: dict) -> bool:
     def first_ts(code):
         for ev in timed_events:
             try:
-                if int(ev.get("action_code") or 0) == code:
+                if _safe_int(ev.get("action_code"), default=0, source="event.action_code") == code:
                     return ts_of(ev)
             except (TypeError, ValueError):
                 continue
@@ -1532,6 +1532,35 @@ def _int(v) -> int | None:
         return None
 
 
+def _safe_int(value, default: int = 0, source: str = "unknown") -> int:
+    """Coerce per-request input to int without raising 500 on bad input.
+
+    Use for query-string / body params from external clients — invalid input
+    should default + log, not 500. For env-var startup-time ints, keep plain
+    int() so misconfiguration fails fast.
+
+    Args:
+        value: Raw value from request (str, int, None, etc.).
+        default: Returned when value is None/empty/can't parse.
+        source: Where the value came from (for log attribution).
+
+    Returns:
+        ``int(value)`` on success, else ``default``.
+    """
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        log.warning(
+            "safe_int: invalid value %r from %s, using default %s",
+            value,
+            source,
+            default,
+        )
+        return default
+
+
 def _str(v) -> str | None:
     if v is None:
         return None
@@ -1563,7 +1592,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _read_json_body(self) -> dict:
-        n = int(self.headers.get("Content-Length") or 0)
+        n = _safe_int(self.headers.get("Content-Length"), default=0, source="http.Content-Length")
         if n == 0:
             return {}
         body = self.rfile.read(n).decode("utf-8", errors="replace")
@@ -1941,7 +1970,7 @@ class Handler(BaseHTTPRequestHandler):
         shop_id = body.get("shop_id")
         if not shop_id:
             return self._send(400, {"_error": "missing shop_id in body"})
-        page_size = int(body.get("page_size") or 50)
+        page_size = _safe_int(body.get("page_size"), default=50, source="body.page_size")
         order_status = body.get("order_status")
         create_time_ge = body.get("create_time_ge")
         create_time_lt = body.get("create_time_lt")
@@ -1967,9 +1996,9 @@ class Handler(BaseHTTPRequestHandler):
             # TikTok expects string, not int (per 36009004 type validation)
             search_body["order_status"] = str(order_status)
         if create_time_ge is not None:
-            search_body["create_time_ge"] = int(create_time_ge)
+            search_body["create_time_ge"] = _safe_int(create_time_ge, source="qs.create_time_ge")
         if create_time_lt is not None:
-            search_body["create_time_lt"] = int(create_time_lt)
+            search_body["create_time_lt"] = _safe_int(create_time_lt, source="qs.create_time_lt")
 
         # First page
         first = tiktok_request(
@@ -2086,8 +2115,8 @@ class Handler(BaseHTTPRequestHandler):
         platform = _q("platform", "tiktok")
         site = _q("site", "VN")
         try:
-            page_no = int(_q("page_no", "1") or 1)
-            page_size = int(_q("page_size", "100") or 100)
+            page_no = _safe_int(_q("page_no", "1"), default=1, source="qs.page_no")
+            page_size = _safe_int(_q("page_size", "100"), default=100, source="qs.page_size")
         except (TypeError, ValueError):
             return self._send(400, {"_error": "page_no/page_size must be int"})
 
@@ -2139,7 +2168,7 @@ class Handler(BaseHTTPRequestHandler):
         platform = _q("platform", "tiktok")
         site = _q("site")
         try:
-            page_size = int(_q("page_size", "20") or 20)
+            page_size = _safe_int(_q("page_size", "20"), default=20, source="qs.page_size")
         except (TypeError, ValueError):
             return self._send(400, {"_error": "page_size must be int"})
 
@@ -2170,7 +2199,7 @@ class Handler(BaseHTTPRequestHandler):
                     else []
                 )
                 if page_no == 1 and result and result.data and result.data.total is not None:
-                    total = int(result.data.total)
+                    total = _safe_int(result.data.total, default=0, source="sdk.total")
                 if not templates:
                     break
                 for t in templates:
@@ -2215,7 +2244,7 @@ class Handler(BaseHTTPRequestHandler):
         platform = _q("platform", "tiktok")
         status = _q("status")
         try:
-            page_size = int(_q("page_size", "50") or 50)
+            page_size = _safe_int(_q("page_size", "50"), default=50, source="qs.page_size")
         except (TypeError, ValueError):
             return self._send(400, {"_error": "page_size must be int"})
 
@@ -2273,7 +2302,7 @@ class Handler(BaseHTTPRequestHandler):
         platform = _q("platform", "tiktok")
         status = _q("status")
         try:
-            page_size = int(_q("page_size", "20") or 20)
+            page_size = _safe_int(_q("page_size", "20"), default=20, source="qs.page_size")
         except (TypeError, ValueError):
             return self._send(400, {"_error": "page_size must be int"})
 
@@ -2304,7 +2333,7 @@ class Handler(BaseHTTPRequestHandler):
                     else []
                 )
                 if page_no == 1 and result and result.data and result.data.total is not None:
-                    total = int(result.data.total)
+                    total = _safe_int(result.data.total, default=0, source="sdk.total")
                 if not tasks:
                     break
                 for t in tasks:
@@ -2344,7 +2373,7 @@ class Handler(BaseHTTPRequestHandler):
         platform = _q("platform")
         site = _q("site")
         try:
-            limit = int(_q("limit", "100") or 100)
+            limit = _safe_int(_q("limit", "100"), default=100, source="qs.limit")
         except (TypeError, ValueError):
             return self._send(400, {"_error": "limit must be int"})
 
@@ -2381,7 +2410,7 @@ class Handler(BaseHTTPRequestHandler):
     def _db_list_orders(self, params: dict):
         shop_id = (params.get("shop_id") or [None])[0]
         status = (params.get("status") or [None])[0]
-        limit = int((params.get("limit") or ["50"])[0])
+        limit = _safe_int((params.get("limit") or ["50"])[0], default=50, source="qs.limit")
         try:
             with (
                 db_connect() as conn,
@@ -2517,7 +2546,7 @@ class Handler(BaseHTTPRequestHandler):
         shop_id = body.get("shop_id")
         if not shop_id:
             return self._send(400, {"_error": "missing shop_id in body"})
-        page_size = int(body.get("page_size") or 50)
+        page_size = _safe_int(body.get("page_size"), default=50, source="body.page_size")
         statement_time_ge = body.get("statement_time_ge")
         statement_time_lt = body.get("statement_time_lt")
 
@@ -2533,9 +2562,9 @@ class Handler(BaseHTTPRequestHandler):
             "sort_order": "DESC",
         }
         if statement_time_ge is not None:
-            extra_params["statement_time_ge"] = str(int(statement_time_ge))
+            extra_params["statement_time_ge"] = str(_safe_int(statement_time_ge, source="body.statement_time_ge"))
         if statement_time_lt is not None:
-            extra_params["statement_time_lt"] = str(int(statement_time_lt))
+            extra_params["statement_time_lt"] = str(_safe_int(statement_time_lt, source="body.statement_time_lt"))
 
         first = tiktok_request(
             "GET",
@@ -2593,7 +2622,7 @@ class Handler(BaseHTTPRequestHandler):
         shop_id = body.get("shop_id")
         if not shop_id:
             return self._send(400, {"_error": "missing shop_id in body"})
-        page_size = int(body.get("page_size") or 50)
+        page_size = _safe_int(body.get("page_size"), default=50, source="body.page_size")
         create_time_ge = body.get("create_time_ge")
         create_time_lt = body.get("create_time_lt")
 
@@ -2609,9 +2638,9 @@ class Handler(BaseHTTPRequestHandler):
             "sort_order": "DESC",
         }
         if create_time_ge is not None:
-            extra_params["create_time_ge"] = str(int(create_time_ge))
+            extra_params["create_time_ge"] = str(_safe_int(create_time_ge, source="body.create_time_ge"))
         if create_time_lt is not None:
-            extra_params["create_time_lt"] = str(int(create_time_lt))
+            extra_params["create_time_lt"] = str(_safe_int(create_time_lt, source="body.create_time_lt"))
 
         first = tiktok_request(
             "GET",
@@ -2668,7 +2697,7 @@ class Handler(BaseHTTPRequestHandler):
     # ----- Local DB reads for finance -----
     def _db_list_statements(self, params: dict):
         shop_id = (params.get("shop_id") or [None])[0]
-        limit = int((params.get("limit") or ["50"])[0])
+        limit = _safe_int((params.get("limit") or ["50"])[0], default=50, source="qs.limit")
         try:
             with (
                 db_connect() as conn,
@@ -2693,7 +2722,7 @@ class Handler(BaseHTTPRequestHandler):
     def _db_list_payments(self, params: dict):
         shop_id = (params.get("shop_id") or [None])[0]
         status = (params.get("status") or [None])[0]
-        limit = int((params.get("limit") or ["50"])[0])
+        limit = _safe_int((params.get("limit") or ["50"])[0], default=50, source="qs.limit")
         try:
             with (
                 db_connect() as conn,
@@ -2756,7 +2785,7 @@ class Handler(BaseHTTPRequestHandler):
         # (TikTok returns 98001004 "Value Out Of Range" if >50).
         extra_params: dict[str, str] = {
             "shop_cipher": shop_cipher,
-            "page_size": str(min(max(int(body.get("page_size") or 50), 10), 50)),
+            "page_size": str(min(max(_safe_int(body.get("page_size"), default=50, source="body.page_size"), 10), 50)),
             "sort_field": "create_time",
             "sort_order": "DESC",
         }
@@ -2775,7 +2804,7 @@ class Handler(BaseHTTPRequestHandler):
         # for time filters in some versions).
         for k in ("create_time_ge", "create_time_lt"):
             if k in upstream_body and k not in extra_params:
-                extra_params[k] = str(int(upstream_body.pop(k)))
+                extra_params[k] = str(_safe_int(upstream_body.pop(k), source="body." + k))
 
         upstream_path = f"/return_refund/202309/{kind}/search"
         result = tiktok_request(
@@ -2795,7 +2824,7 @@ class Handler(BaseHTTPRequestHandler):
         shop_id = body.get("shop_id")
         if not shop_id:
             return self._send(400, {"_error": "missing shop_id in body"})
-        page_size = int(body.get("page_size") or 50)
+        page_size = _safe_int(body.get("page_size"), default=50, source="body.page_size")
 
         creds = self._require_shop_token(shop_id)
         if isinstance(creds, dict) and creds.get("_error"):
@@ -2810,9 +2839,9 @@ class Handler(BaseHTTPRequestHandler):
             "sort_order": "DESC",
         }
         if body.get("create_time_ge") is not None:
-            extra_params["create_time_ge"] = str(int(body["create_time_ge"]))
+            extra_params["create_time_ge"] = str(_safe_int(body["create_time_ge"], source="body.create_time_ge"))
         if body.get("create_time_lt") is not None:
-            extra_params["create_time_lt"] = str(int(body["create_time_lt"]))
+            extra_params["create_time_lt"] = str(_safe_int(body["create_time_lt"], source="body.create_time_lt"))
 
         first = tiktok_request(
             "POST",
@@ -2872,7 +2901,7 @@ class Handler(BaseHTTPRequestHandler):
         shop_id = body.get("shop_id")
         if not shop_id:
             return self._send(400, {"_error": "missing shop_id in body"})
-        page_size = int(body.get("page_size") or 50)
+        page_size = _safe_int(body.get("page_size"), default=50, source="body.page_size")
 
         creds = self._require_shop_token(shop_id)
         if isinstance(creds, dict) and creds.get("_error"):
@@ -2887,9 +2916,9 @@ class Handler(BaseHTTPRequestHandler):
             "sort_order": "DESC",
         }
         if body.get("create_time_ge") is not None:
-            extra_params["create_time_ge"] = str(int(body["create_time_ge"]))
+            extra_params["create_time_ge"] = str(_safe_int(body["create_time_ge"], source="body.create_time_ge"))
         if body.get("create_time_lt") is not None:
-            extra_params["create_time_lt"] = str(int(body["create_time_lt"]))
+            extra_params["create_time_lt"] = str(_safe_int(body["create_time_lt"], source="body.create_time_lt"))
 
         first = tiktok_request(
             "POST",
@@ -2947,7 +2976,7 @@ class Handler(BaseHTTPRequestHandler):
     def _db_list_returns(self, params: dict):
         shop_id = (params.get("shop_id") or [None])[0]
         status = (params.get("status") or [None])[0]
-        limit = int((params.get("limit") or ["50"])[0])
+        limit = _safe_int((params.get("limit") or ["50"])[0], default=50, source="qs.limit")
         try:
             with (
                 db_connect() as conn,
@@ -2978,7 +3007,7 @@ class Handler(BaseHTTPRequestHandler):
     def _db_list_cancellations(self, params: dict):
         shop_id = (params.get("shop_id") or [None])[0]
         status = (params.get("status") or [None])[0]
-        limit = int((params.get("limit") or ["50"])[0])
+        limit = _safe_int((params.get("limit") or ["50"])[0], default=50, source="qs.limit")
         try:
             with (
                 db_connect() as conn,
@@ -3087,7 +3116,7 @@ class Handler(BaseHTTPRequestHandler):
         if body.get("order_ids"):
             order_ids = [str(x) for x in body["order_ids"] if x]
         elif body.get("all_with_tracking"):
-            lim = int(body.get("limit") or 1000)
+            lim = _safe_int(body.get("limit"), default=1000, source="body.limit")
             with db_connect() as conn, conn.cursor() as cur:
                 cur.execute(
                     sql.SQL("""
@@ -3102,7 +3131,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 order_ids = [r[0] for r in cur.fetchall()]
         else:
-            lim = int(body.get("limit") or 200)
+            lim = _safe_int(body.get("limit"), default=200, source="body.limit")
             with db_connect() as conn, conn.cursor() as cur:
                 cur.execute(
                     sql.SQL("""
@@ -3115,7 +3144,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 order_ids = [r[0] for r in cur.fetchall()]
 
-        max_per_run = int(body.get("max_per_run") or len(order_ids) or 100)
+        max_per_run = _safe_int(body.get("max_per_run"), default=(len(order_ids) or 100), source="body.max_per_run")
         order_ids = order_ids[:max_per_run]
 
         if not order_ids:
@@ -3187,7 +3216,7 @@ class Handler(BaseHTTPRequestHandler):
         arrived = (params.get("arrived_overseas") or [None])[0]
         tracking_number = (params.get("tracking_number") or [None])[0]
         order_id = (params.get("order_id") or [None])[0]
-        limit = int((params.get("limit") or ["100"])[0])
+        limit = _safe_int((params.get("limit") or ["100"])[0], default=100, source="qs.limit")
 
         wh = []
         args: list = []
@@ -3232,7 +3261,7 @@ class Handler(BaseHTTPRequestHandler):
         """GET /db/logistics_events?order_id=...&action_code=...&limit=200"""
         order_id = (params.get("order_id") or [None])[0]
         action_code = (params.get("action_code") or [None])[0]
-        limit = int((params.get("limit") or ["200"])[0])
+        limit = _safe_int((params.get("limit") or ["200"])[0], default=200, source="qs.limit")
         wh = []
         args: list = []
         if order_id:
@@ -3241,7 +3270,7 @@ class Handler(BaseHTTPRequestHandler):
         if action_code:
             try:
                 wh.append("action_code = %s")
-                args.append(int(action_code))
+                args.append(_safe_int(action_code, default=0, source="db.action_code"))
             except ValueError:
                 return self._send(400, {"_error": "action_code must be int"})
         sql_query = "SELECT order_id, action_code, event_time, location, description FROM logistics_tracking_events"

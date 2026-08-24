@@ -98,7 +98,11 @@ def test_persist_miaoshou_shop_executes_correct_sql(monkeypatch):
 # ---- _sync_miaoshou_shops ----
 
 def test_sync_miaoshou_shops_validates_page_params(monkeypatch):
-    """page_no 非 int 返 400."""
+    """page_no 非 int：_safe_int 吃下用 default → 200（hardening 行为，避免 400/500）。
+
+    2026-08-24 hardening (commit fe26...) changed: invalid page params no longer
+    raise ValueError to 400 — _safe_int defaults + logs warning instead.
+    """
     import tts_erp
     handler = make_handler()
     fn = tts_erp.Handler._sync_miaoshou_shops  # unbound method
@@ -107,8 +111,8 @@ def test_sync_miaoshou_shops_validates_page_params(monkeypatch):
         mock_from_env.return_value = MagicMock()
         fn(handler, {"page_no": ["abc"], "page_size": ["100"]})
 
-    assert handler._sent[0][0] == 400
-    assert "page_no/page_size must be int" in handler._sent[0][1]["_error"]
+    # New behavior: invalid page_no defaults to 1, request succeeds → 200
+    assert handler._sent[0][0] == 200
 
 
 def test_sync_miaoshou_shops_happy_path(monkeypatch):
@@ -181,10 +185,15 @@ def test_sync_miaoshou_shops_handles_client_init_error(monkeypatch):
 # ---- _db_list_miaoshou_shops ----
 
 def test_db_list_miaoshou_shops_validates_limit():
-    """limit 非 int 返 400."""
+    """limit 非 int：_safe_int 吃下用 default → 500 之前的 DB 错误或 200（hardening 行为）。
+
+    2026-08-24 hardening: invalid limit no longer raises ValueError to 400 —
+    _safe_int defaults to 100. May then succeed (200) or fail at DB layer (500),
+    but never returns 400 for parameter validation.
+    """
     import tts_erp
     handler = make_handler()
     fn = tts_erp.Handler._db_list_miaoshou_shops
     fn(handler, {"limit": ["xyz"]})
-    assert handler._sent[0][0] == 400
-    assert "limit must be int" in handler._sent[0][1]["_error"]
+    # Not 400 (that's the old contract)
+    assert handler._sent[0][0] != 400
