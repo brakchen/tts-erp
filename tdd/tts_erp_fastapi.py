@@ -57,7 +57,7 @@ from http_client import PlainHttpClient, TikTokHttpClient  # noqa: E402
 from pg_repositories import make_pg_repos  # noqa: E402
 from tts_erp import _safe_int  # noqa: E402  -- per-request int() hardening
 from rate_limit import RateLimitMiddleware  # noqa: E402
-from token_provider import OAuthReceiverTokenProvider  # noqa: E402
+from token_provider import LocalTokenProvider, OAuthReceiverTokenProvider  # noqa: E402
 
 import tts_erp  # noqa: E402
 from analytics_sync.app import router as analytics_sync_router  # noqa: E402
@@ -129,9 +129,7 @@ TTS_ERP_HTTP_TIMEOUT = 60  # seconds
 
 # Dependency graph
 _plain_http = PlainHttpClient(timeout=10)
-_token_provider = OAuthReceiverTokenProvider(
-    base_url=OAUTH_RECEIVER_URL, http=_plain_http
-)
+_token_provider = LocalTokenProvider()
 _repos = make_pg_repos()
 
 
@@ -298,55 +296,14 @@ def endpoints():
     }
 
 
-# ─── OAuth-receiver passthrough ───────────────────────────────────────
-
-
-@app.get("/shops")
-def list_shops():
-    """Proxy to oauth-receiver /tokens/shops."""
-    try:
-        with urllib.request.urlopen(
-            f"{OAUTH_RECEIVER_URL}/tokens/shops", timeout=5
-        ) as r:
-            return json.load(r)
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(
-            status_code=502, detail=f"oauth-receiver /tokens/shops failed: {e}"
-        ) from e
-
-
-@app.get("/shops/{shop_id}")
-def get_shop(shop_id: str):
-    """Get one shop's metadata from oauth-receiver."""
-    try:
-        with urllib.request.urlopen(
-            f"{OAUTH_RECEIVER_URL}/tokens/shops", timeout=5
-        ) as r:
-            data = json.load(r)
-        for item in data.get("items", []):
-            if item.get("shop_id") == shop_id:
-                return item
-        raise HTTPException(status_code=404, detail="shop not found")
-    except HTTPException:
-        raise
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=str(e)) from e
-
-
-@app.get("/token/{shop_id}")
-def get_token(shop_id: str, reveal: int = Query(0)):
-    """Proxy to oauth-receiver /token/<id>. reveal=1 for plaintext."""
-    if not reveal:
-        raise HTTPException(status_code=400, detail="reveal=1 required to fetch token")
-    url = f"{OAUTH_RECEIVER_URL}/token/{urllib.parse.quote(shop_id)}?reveal=1"
-    try:
-        with urllib.request.urlopen(url, timeout=10) as r:
-            return json.load(r)
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        raise HTTPException(status_code=e.code, detail=body[:300]) from e
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=str(e)) from e
+# ─── OAuth-receiver passthrough REMOVED (Wave 3 Slice 2) ─────────────
+# The /shops, /shops/<id>, /token/<id> proxy routes that
+# round-tripped through http://127.0.0.1:9876 are gone. Shop listings
+# and per-shop token access are now in-process:
+#   * LocalTokenProvider.get(shop_id)   → oauth_receiver_core.db_load_token
+#   * listing shops                    → oauth_receiver_core.db_list_shops
+# The /callback, /authorize, /healthz routes live in oauth_receiver_router
+# and are mounted at the bottom of this file.
 
 
 # ─── Sync endpoints (Phase 4a-3 MVP) ─────────────────────────────────
