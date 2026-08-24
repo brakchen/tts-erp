@@ -42,17 +42,13 @@ if _env_path.exists():
 
 import logging  # noqa: E402
 
-from miaoshou import MiaoshouApiResponse  # noqa: E402
-
 import tts_business  # noqa: E402
 from auth import AuthMiddleware  # noqa: E402
 
-log = logging.getLogger("tts-erp-fastapi")
-import tts_erp  # noqa: E402
-from analytics_sync.app import router as analytics_sync_router  # noqa: E402
-from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
-from tts_erp import _safe_int  # noqa: E402  -- per-request int() hardening
+from miaoshou import MiaoshouApiResponse  # noqa: E402
 
+log = logging.getLogger("tts-erp-fastapi")
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from http_client import TikTokHttpClient  # noqa: E402
 from oauth_receiver_router import (  # noqa: E402  -- Wave 3 Slice 3
     router as oauth_router,
@@ -60,6 +56,10 @@ from oauth_receiver_router import (  # noqa: E402  -- Wave 3 Slice 3
 from pg_repositories import make_pg_repos  # noqa: E402
 from rate_limit import RateLimitMiddleware  # noqa: E402
 from token_provider import LocalTokenProvider  # noqa: E402
+
+import tts_erp  # noqa: E402
+from analytics_sync.app import router as analytics_sync_router  # noqa: E402
+from tts_erp import _safe_int  # noqa: E402  -- per-request int() hardening
 
 # ─── App + config ─────────────────────────────────────────────────────
 

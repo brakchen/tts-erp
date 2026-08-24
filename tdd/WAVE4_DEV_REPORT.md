@@ -10,7 +10,7 @@
 ## Per-slice summary
 
 | Slice | Description | Tests | Status | Commit |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | 1 | `/callback` exempt | 2 added | GREEN | `ebbf5ab` |
 | 2 | `/authorize` exempt | 2 added | GREEN | `ebbf5ab` |
 | 3 | Remove dead `/token/*` admin rule | 1 added (grep-guard) | GREEN | `d8673e8` |
@@ -38,6 +38,7 @@ EXEMPT_PATHS = {
 ```
 
 Sorted output:
+
 ```
 ['/ads-monitor', '/authorize', '/callback', '/docs',
  '/docs/oauth2-redirect', '/endpoints', '/healthz',
