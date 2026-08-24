@@ -9,6 +9,7 @@ Exposes ONLY 3 endpoints (contract per /home/schan/merge-design.md §3.1):
 All business logic lives in oauth_receiver_core; this router is glue.
 The parent app does app.include_router(router).
 """
+
 from __future__ import annotations
 
 import html
@@ -32,9 +33,7 @@ def _html_page(title: str, headline_html: str, body_html: str) -> str:
     safe_title = html.escape(title)
     return (
         "<!DOCTYPE html>\n"
-        '<html><head><meta charset="utf-8"><title>'
-        + safe_title
-        + "</title>\n"
+        '<html><head><meta charset="utf-8"><title>' + safe_title + "</title>\n"
         "<style>\n"
         "body{font-family:-apple-system,Segoe UI,sans-serif;"
         "max-width:720px;margin:60px auto;padding:0 16px;"
@@ -77,15 +76,18 @@ def _render_authorize_html(cfg: dict, registered_state: str, auth_url: str) -> s
         "Authorize with " + cfg["label"],
         '<span class="ok">State token registered.</span>',
         (
-            "<p>State token <code>" + html.escape(registered_state)
+            "<p>State token <code>"
+            + html.escape(registered_state)
             + "</code> registered. Open the URL below to start the OAuth flow.</p>"
             "<p><strong>Authorize URL:</strong></p>"
             "<pre>" + html.escape(auth_url) + "</pre>"
-            '<p><a class="btn" href="' + html.escape(auth_url)
+            '<p><a class="btn" href="'
+            + html.escape(auth_url)
             + '">Open in browser →</a></p>'
             "<p>Or copy and paste into a browser. After authorization, the "
             "provider will redirect to <code>"
-            + html.escape(cfg["redirect_uri"]) + "</code> with "
+            + html.escape(cfg["redirect_uri"])
+            + "</code> with "
             "<code>?code=...&amp;state=...</code>.</p>"
         ),
     )
@@ -100,8 +102,11 @@ def _render_callback_token(result: dict) -> HTMLResponse:
 
     state_color = "ok" if state_status == "matched" else "warn"
     state_line = (
-        '<br><span class="' + state_color + '">state validation: '
-        + html.escape(state_status) + "</span>"
+        '<br><span class="'
+        + state_color
+        + '">state validation: '
+        + html.escape(state_status)
+        + "</span>"
         if state != "(none)"
         else ""
     )
@@ -113,13 +118,17 @@ def _render_callback_token(result: dict) -> HTMLResponse:
             "<h3>✓ Auto token exchange</h3>"
             '<p><span class="ok">Token obtained automatically.</span></p>'
             "<p><strong>access_token:</strong></p><pre>"
-            + html.escape(str(d.get("access_token", ""))) + "</pre>"
+            + html.escape(str(d.get("access_token", "")))
+            + "</pre>"
             "<p><strong>refresh_token:</strong></p><pre>"
-            + html.escape(str(d.get("refresh_token", ""))) + "</pre>"
+            + html.escape(str(d.get("refresh_token", "")))
+            + "</pre>"
             "<p><strong>shop_cipher:</strong> <code>"
-            + html.escape(str(d.get("shop_cipher", ""))) + "</code></p>"
+            + html.escape(str(d.get("shop_cipher", "")))
+            + "</code></p>"
             "<p><strong>shop_region:</strong> <code>"
-            + html.escape(str(d.get("shop_region", ""))) + "</code></p>"
+            + html.escape(str(d.get("shop_region", "")))
+            + "</code></p>"
             "<p><strong>access_token expires at:</strong> <code>"
             + html.escape(str(d.get("access_token_expire_in", "")))
             + "</code> (unix ts, ~7 days from now)</p>"
@@ -141,12 +150,14 @@ def _render_callback_token(result: dict) -> HTMLResponse:
         title,
         '<span class="ok">Authorization code received.</span> ' + state_line,
         (
-            "<p><strong>code:</strong></p><pre>"
-            + html.escape(str(code)) + "</pre>"
-            "<p><strong>state:</strong> <code>" + html.escape(str(state))
+            "<p><strong>code:</strong></p><pre>" + html.escape(str(code)) + "</pre>"
+            "<p><strong>state:</strong> <code>"
+            + html.escape(str(state))
             + "</code></p>"
-            "<p><strong>provider:</strong> <code>" + html.escape(provider)
-            + "</code></p>" + auto_html
+            "<p><strong>provider:</strong> <code>"
+            + html.escape(provider)
+            + "</code></p>"
+            + auto_html
         ),
     )
     return HTMLResponse(content=body)
@@ -158,7 +169,8 @@ def _render_callback_error(result: dict) -> HTMLResponse:
     body = _html_page(
         "OAuth Error",
         '<span class="err">Provider returned error: <code>'
-        + html.escape(str(err)) + "</code></span>",
+        + html.escape(str(err))
+        + "</code></span>",
         (
             "<p>state: <code>"
             + html.escape(str(state) if state else "(none)")
@@ -206,7 +218,9 @@ def authorize(
     }
 
     if format == "html":
-        return HTMLResponse(content=_render_authorize_html(cfg, registered_state, auth_url))
+        return HTMLResponse(
+            content=_render_authorize_html(cfg, registered_state, auth_url)
+        )
 
     # Browser context → HTML landing page (matches original stdlib behavior).
     accept = request.headers.get("accept", "")
@@ -229,9 +243,7 @@ def callback(
     provider: str = Query("tiktok"),
 ) -> Any:
     """TikTok OAuth redirect target (PUBLIC — TikTok servers hit this)."""
-    result = oc.handle_callback(
-        code=code, state=state, provider=provider, error=error
-    )
+    result = oc.handle_callback(code=code, state=state, provider=provider, error=error)
 
     if not result["handled"]:
         return HTMLResponse(content=_help_page_html("/callback"))
@@ -249,9 +261,7 @@ def _oauth_receiver_section() -> dict:
     try:
         cfg = oc.provider_config("tiktok")
     except Exception as e:  # noqa: BLE001
-        raise RuntimeError(
-            "oauth_receiver_core not initialized: " + str(e)
-        ) from e
+        raise RuntimeError("oauth_receiver_core not initialized: " + str(e)) from e
 
     providers: dict = {}
     if cfg:
@@ -287,8 +297,7 @@ def _tts_erp_section() -> dict:
         section["db_ok"] = bool(_db_ready())
     except Exception as e:  # noqa: BLE001
         print(
-            "[oauth-receiver/healthz] tts_erp._db_ready unavailable: "
-            + str(e),
+            "[oauth-receiver/healthz] tts_erp._db_ready unavailable: " + str(e),
             file=sys.stderr,
         )
     try:
@@ -297,8 +306,7 @@ def _tts_erp_section() -> dict:
         section["last_sync_at"] = _last_sync_at()
     except Exception as e:  # noqa: BLE001
         print(
-            "[oauth-receiver/healthz] tts_erp._last_sync_at unavailable: "
-            + str(e),
+            "[oauth-receiver/healthz] tts_erp._last_sync_at unavailable: " + str(e),
             file=sys.stderr,
         )
     return section

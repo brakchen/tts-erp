@@ -98,7 +98,7 @@ class HttpClient(Protocol):
 class TokenProvider(Protocol):
     """Source of access_token + shop_cipher for a given shop_id.
 
-    Production: OAuthReceiverTokenProvider (HTTP call to oauth-receiver).
+    Production: LocalTokenProvider (in-process call to oauth_receiver_core).
     Test: FakeTokenProvider (returns a fixed Creds).
     """
 

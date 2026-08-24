@@ -13,12 +13,13 @@ Out of TDD scope (documented for clarity, not aspirational coverage):
 - BaseHTTPRequestHandler routing: framework concern, not business logic
 - HTTP frame format: framework concern, not business logic
 """
+
 from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 import psycopg
 import pytest
@@ -104,8 +105,13 @@ def _cleanup_test_shop_ids(db_url: str):
     """
     yield
     cleanup_tables = [
-        "orders", "order_items", "order_shippings",
-        "payments", "statements", "returns", "cancellations",
+        "orders",
+        "order_items",
+        "order_shippings",
+        "payments",
+        "statements",
+        "returns",
+        "cancellations",
     ]
     conn = psycopg.connect(db_url)
     try:
@@ -115,3 +121,89 @@ def _cleanup_test_shop_ids(db_url: str):
         conn.commit()
     finally:
         conn.close()
+
+
+# ─── OAuth-receiver fixtures (shared by test_oauth_receiver_core + adversarial) ─
+
+
+_OAUTH_RECEIVER_ENV = Path("/home/schan/oauth-receiver/.env")
+
+
+def _load_oauth_env(monkeypatch: pytest.MonkeyPatch) -> str | None:
+    """Inject OAUTH_DB_URL + OAUTH_DB_ENCRYPTION_KEY from oauth-receiver/.env.
+
+    Returns the OAUTH_DB_URL or None if .env not present.
+    """
+    if not _OAUTH_RECEIVER_ENV.exists():
+        return None
+    db_url = None
+    for line in _OAUTH_RECEIVER_ENV.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line.startswith("OAUTH_DB_URL="):
+            db_url = line.split("=", 1)[1].strip()
+            monkeypatch.setenv("OAUTH_DB_URL", db_url)
+        if line.startswith("OAUTH_DB_ENCRYPTION_KEY="):
+            monkeypatch.setenv("OAUTH_DB_ENCRYPTION_KEY", line.split("=", 1)[1].strip())
+    return db_url
+
+
+@pytest.fixture()
+def fernet_key(monkeypatch: pytest.MonkeyPatch):
+    """Inject a fresh Fernet key per test. Resets module cache."""
+    from cryptography.fernet import Fernet
+
+    import oauth_receiver_core as oc
+
+    key = Fernet.generate_key().decode("ascii")
+    monkeypatch.setenv("OAUTH_DB_ENCRYPTION_KEY", key)
+    oc._reset_for_testing()
+    yield key
+    oc._reset_for_testing()
+
+
+@pytest.fixture()
+def no_fernet(monkeypatch: pytest.MonkeyPatch):
+    """Tests needing get_fernet() to return None (missing key)."""
+    import oauth_receiver_core as oc
+
+    monkeypatch.delenv("OAUTH_DB_ENCRYPTION_KEY", raising=False)
+    oc._reset_for_testing()
+    yield
+    oc._reset_for_testing()
+
+
+@pytest.fixture()
+def oauth_db_url(monkeypatch: pytest.MonkeyPatch):
+    """OAUTH_DB_URL from oauth-receiver/.env. Skip if .env not present."""
+    import oauth_receiver_core as oc
+
+    db_url = _load_oauth_env(monkeypatch)
+    if not db_url:
+        pytest.skip("oauth-receiver .env not present or OAUTH_DB_URL missing")
+    oc._reset_for_testing()
+    yield db_url
+    oc._reset_for_testing()
+
+
+@pytest.fixture()
+def oauth_db_conn(oauth_db_url: str) -> Iterator[psycopg.Connection]:
+    """Connection to oauth_receiver DB; rolled back at teardown."""
+    conn = psycopg.connect(oauth_db_url)
+    try:
+        yield conn
+    finally:
+        conn.rollback()
+        conn.close()
+
+
+@pytest.fixture()
+def clean_test_shops(oauth_db_conn: psycopg.Connection):
+    """Delete TEST_ rows AND __default__ before/after the test."""
+    with oauth_db_conn.cursor() as cur:
+        cur.execute("DELETE FROM oauth_tokens WHERE shop_id LIKE 'TEST_%'")
+        cur.execute("DELETE FROM oauth_tokens WHERE shop_id = '__default__'")
+    yield
+    with oauth_db_conn.cursor() as cur:
+        cur.execute("DELETE FROM oauth_tokens WHERE shop_id LIKE 'TEST_%'")
+        cur.execute("DELETE FROM oauth_tokens WHERE shop_id = '__default__'")
+    oauth_db_conn.commit()

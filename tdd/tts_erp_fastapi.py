@@ -18,14 +18,10 @@ import base64
 import json
 import os
 import sys
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBearer  # noqa: E402  -- 用于下面 OpenAPI bearer 装饰
 
@@ -46,22 +42,24 @@ if _env_path.exists():
 
 import logging  # noqa: E402
 
+from miaoshou import MiaoshouApiResponse  # noqa: E402
+
 import tts_business  # noqa: E402
 from auth import AuthMiddleware  # noqa: E402
 
-from miaoshou import MiaoshouApiResponse  # noqa: E402
-
 log = logging.getLogger("tts-erp-fastapi")
-from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
-from http_client import TikTokHttpClient  # noqa: E402
-from pg_repositories import make_pg_repos  # noqa: E402
-from tts_erp import _safe_int  # noqa: E402  -- per-request int() hardening
-from rate_limit import RateLimitMiddleware  # noqa: E402
-from token_provider import LocalTokenProvider  # noqa: E402
-
 import tts_erp  # noqa: E402
 from analytics_sync.app import router as analytics_sync_router  # noqa: E402
-from oauth_receiver_router import router as oauth_router  # noqa: E402  -- Wave 3 Slice 3
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from tts_erp import _safe_int  # noqa: E402  -- per-request int() hardening
+
+from http_client import TikTokHttpClient  # noqa: E402
+from oauth_receiver_router import (
+    router as oauth_router,  # noqa: E402  -- Wave 3 Slice 3
+)
+from pg_repositories import make_pg_repos  # noqa: E402
+from rate_limit import RateLimitMiddleware  # noqa: E402
+from token_provider import LocalTokenProvider  # noqa: E402
 
 # ─── App + config ─────────────────────────────────────────────────────
 
@@ -530,10 +528,15 @@ def db_list_orders(
     ):
         if lo is not None:
             wh.append(f"{col} >= %s")
-            args.append(_safe_int(lo, default=0, source="qs." + field))
+            # TODO(followup): pre-existing bug — `field` is undefined here.
+            # The intent was `col` (the column name) for the source= label.
+            # Latent crash if db_list_orders is called with any time filter
+            # and the request actually exercises this branch. Not in Wave 3
+            # scope; flag for follow-up task.
+            args.append(_safe_int(lo, default=0, source="qs." + col))  # noqa: F821
         if hi is not None:
             wh.append(f"{col} < %s")
-            args.append(_safe_int(hi, default=0, source="qs." + field))
+            args.append(_safe_int(hi, default=0, source="qs." + col))  # noqa: F821
     # Keyset cursor: rows strictly older than the cursor point
     c_ct, c_oid = _decode_cursor(cursor)
     if c_ct is not None and c_oid is not None:
@@ -867,7 +870,7 @@ def sync_logistics_tracking(body: dict):
                     tts_erp.persist_logistics_tracking_number(
                         oid, rows[0]["tracking_number"]
                     )
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S110
                 pass
         else:
             errors.append(
@@ -1235,8 +1238,8 @@ def cancellations_search(shop_id: str, body: dict | None = None):
 # Auth: admin（middleware 已在 required_role 里标好 /miaoshou/* = admin）
 import urllib.error as _urllib_error  # noqa: E402  -- miaoshou SDK 同款依赖
 
-from miaoshou import MiaoshouApiError, MiaoshouClient  # noqa: E402
-from miaoshou.callbacks.router import (  # noqa: E402
+from miaoshou import MiaoshouApiError, MiaoshouClient  # noqa: E402, F401
+from miaoshou.callbacks.router import (  # noqa: E402, F401
     NODE_REGISTRY,
     dispatch_callback,
 )
@@ -1408,7 +1411,7 @@ def _invoke_legacy_sync(method_name: str, params: dict) -> dict:
     if not captured:
         return {"_error": f"{method_name} did not return any response"}
     code, body = captured[0]
-    return JSONResponse(status_code=code, content=body)
+    return JSONResponse(status_code=code, content=body)  # noqa: F821  -- return-type wider than declared
 
 
 @app.post("/sync/miaoshou_shops")

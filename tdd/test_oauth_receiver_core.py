@@ -3,6 +3,7 @@
 Vertical slices — one test file covers all functions but tests are
 organized by slice with progressive RED/GREEN commits per slice.
 """
+
 from __future__ import annotations
 
 # Test sentinel secrets are intentionally literal so round-trip assertions
@@ -10,7 +11,6 @@ from __future__ import annotations
 # tell the difference between a real secret and an obvious test fixture
 # like "ROW_AT_abc123", so silence at file level.
 # ruff: noqa: S105, S106, SLF001
-
 import json
 import os
 import time
@@ -228,9 +228,7 @@ class TestStoreLoadRoundTrip:
         oc.db_init()
         assert oc.db_load_token("TEST_NONEXISTENT", "tiktok") is None
 
-    def test_store_upserts_existing_row(
-        self, oauth_db_url, clean_test_shops
-    ):
+    def test_store_upserts_existing_row(self, oauth_db_url, clean_test_shops):
         oc.db_init()
         oc.db_store_token(
             "TEST_SHOP_002",
@@ -286,15 +284,11 @@ class TestStoreLoadRoundTrip:
         oc.db_init()
         # Per spec: missing access_token OR refresh_token → return False without writing
         assert (
-            oc.db_store_token(
-                "TEST_SHOP_004", "tiktok", {"refresh_token": "RT"}
-            )
+            oc.db_store_token("TEST_SHOP_004", "tiktok", {"refresh_token": "RT"})
             is False
         )
         assert (
-            oc.db_store_token(
-                "TEST_SHOP_004", "tiktok", {"access_token": "AT"}
-            )
+            oc.db_store_token("TEST_SHOP_004", "tiktok", {"access_token": "AT"})
             is False
         )
 
@@ -303,9 +297,7 @@ class TestStoreLoadRoundTrip:
 
 
 class TestListShops:
-    def test_list_returns_all_stored_shops(
-        self, oauth_db_url, clean_test_shops
-    ):
+    def test_list_returns_all_stored_shops(self, oauth_db_url, clean_test_shops):
         oc.db_init()
         for sid in ("TEST_SHOP_A", "TEST_SHOP_B", "TEST_SHOP_C"):
             oc.db_store_token(
@@ -318,9 +310,7 @@ class TestListShops:
         for sid in ("TEST_SHOP_A", "TEST_SHOP_B", "TEST_SHOP_C"):
             assert sid in sids
 
-    def test_list_does_not_decrypt_secrets(
-        self, oauth_db_url, clean_test_shops
-    ):
+    def test_list_does_not_decrypt_secrets(self, oauth_db_url, clean_test_shops):
         oc.db_init()
         oc.db_store_token(
             "TEST_SHOP_LIST",
@@ -332,11 +322,11 @@ class TestListShops:
         # list returns metadata only — no access/refresh token columns
         assert "access_token" not in target
         assert "refresh_token" not in target
-        assert "access_token_encrypted" not in target  # opaque encrypted bytes not exposed
+        assert (
+            "access_token_encrypted" not in target
+        )  # opaque encrypted bytes not exposed
 
-    def test_list_filters_by_provider(
-        self, oauth_db_url, clean_test_shops
-    ):
+    def test_list_filters_by_provider(self, oauth_db_url, clean_test_shops):
         oc.db_init()
         oc.db_store_token(
             "TEST_PROV_A", "tiktok", {"access_token": "AT", "refresh_token": "RT"}
@@ -385,9 +375,7 @@ class TestCallTokenEndpoint:
         assert result["code"] == -1
         assert "not configured" in result["message"]
 
-    def test_mock_mode_returns_success_without_network(
-        self, monkeypatch, fernet_key
-    ):
+    def test_mock_mode_returns_success_without_network(self, monkeypatch, fernet_key):
         monkeypatch.setenv("TIKTOK_MOCK", "1")
         oc._reset_for_testing()
         result = oc.call_token_endpoint("tiktok", "authorized_code", code="TEST_CODE")
@@ -552,7 +540,9 @@ class TestHandleCallbackLogic:
         monkeypatch.setenv("TIKTOK_MOCK", "1")
         oc._reset_for_testing()
         result = oc.handle_callback(
-            code="CODE_1", state="never_seen", provider="tiktok",
+            code="CODE_1",
+            state="never_seen",
+            provider="tiktok",
             registered_states={},
         )
         assert result["kind"] == "token"
@@ -573,7 +563,9 @@ class TestHandleCallbackLogic:
         monkeypatch.setenv("TIKTOK_MOCK", "1")
         oc._reset_for_testing()
         result = oc.handle_callback(
-            code="CODE_1", state="incoming", provider="tiktok",
+            code="CODE_1",
+            state="incoming",
+            provider="tiktok",
             registered_states={"different": self._state_meta()},
         )
         assert result["kind"] == "token"
@@ -617,9 +609,7 @@ class TestRefreshWithToken:
         monkeypatch.setenv("TIKTOK_MOCK", "1")
         oc._reset_for_testing()
         oc.db_init()
-        result = oc.refresh_with_token(
-            refresh_token="RT_OLD", provider="tiktok"
-        )
+        result = oc.refresh_with_token(refresh_token="RT_OLD", provider="tiktok")
         assert result["ok"] is True
         # save_token_result uses data["shop_id"] when no shop_id arg is passed;
         # mock response returns shop_id="MOCK_SHOP_12345".
@@ -717,9 +707,7 @@ class TestFetchShops:
             "request_id": "REQ_FAKE",
         }
 
-    def test_fetch_shops_calls_authorization_endpoint(
-        self, monkeypatch, fernet_key
-    ):
+    def test_fetch_shops_calls_authorization_endpoint(self, monkeypatch, fernet_key):
         monkeypatch.setenv("TIKTOK_APP_KEY", "K_APP")
         monkeypatch.setenv("TIKTOK_APP_SECRET", "K_SECRET")
         monkeypatch.setenv("TIKTOK_API_HOST", "https://open-api.tiktokglobalshop.com")
@@ -765,9 +753,7 @@ class TestFetchShops:
         headers_lower = {k.lower(): v for k, v in captured["headers"].items()}
         assert headers_lower.get("x-tts-access-token") == "AT_VALID"
 
-    def test_fetch_shops_caches_for_one_hour(
-        self, monkeypatch, fernet_key
-    ):
+    def test_fetch_shops_caches_for_one_hour(self, monkeypatch, fernet_key):
         monkeypatch.setenv("TIKTOK_APP_KEY", "K")
         monkeypatch.setenv("TIKTOK_APP_SECRET", "K")
         monkeypatch.setenv("TIKTOK_API_HOST", "https://open-api.tiktokglobalshop.com")
@@ -804,9 +790,7 @@ class TestFetchShops:
         assert result2["cached"] is True
         assert result2["shops"][0]["id"] == "S1"
 
-    def test_fetch_shops_force_refresh_bypasses_cache(
-        self, monkeypatch, fernet_key
-    ):
+    def test_fetch_shops_force_refresh_bypasses_cache(self, monkeypatch, fernet_key):
         monkeypatch.setenv("TIKTOK_APP_KEY", "K")
         monkeypatch.setenv("TIKTOK_APP_SECRET", "K")
         monkeypatch.setenv("TIKTOK_API_HOST", "https://open-api.tiktokglobalshop.com")
@@ -856,7 +840,9 @@ class TestFetchShops:
         )
         result = oc.fetch_shops(provider="tiktok", force_refresh=True)
         assert "error" in result
-        assert "scheme" in result["error"].lower() or "refusing" in result["error"].lower()
+        assert (
+            "scheme" in result["error"].lower() or "refusing" in result["error"].lower()
+        )
 
     def test_fetch_shops_persists_per_shop_rows(
         self, monkeypatch, fernet_key, oauth_db_url, clean_test_shops

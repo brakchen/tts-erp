@@ -7,6 +7,7 @@ The router exposes ONLY 3 endpoints:
 
 All business logic lives in oauth_receiver_core; the router is glue.
 """
+
 from __future__ import annotations
 
 import time
@@ -44,20 +45,22 @@ def mock_provider(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         oc,
         "provider_config",
-        lambda name: {
-            "label": "TikTok Shop Partner",
-            "authorize_url": "https://auth.tiktok-shops.com/oauth/authorize",
-            "token_url": "https://auth.tiktok-shops.com/api/v2/token/get",
-            "refresh_token_url": "https://auth.tiktok-shops.com/api/v2/token/refresh",
-            "app_key": "test_app_key_123",
-            "app_secret": "test_app_secret_456",
-            "redirect_uri": "https://100feb74.r31.cpolar.top/callback",
-            "auth_host": "https://auth.tiktok-shops.com",
-            "api_host": "https://open-api.tiktokglobalshop.com",
-            "mock": True,  # forces mock-mode token response
-        }
-        if name == "tiktok"
-        else None,
+        lambda name: (
+            {
+                "label": "TikTok Shop Partner",
+                "authorize_url": "https://auth.tiktok-shops.com/oauth/authorize",
+                "token_url": "https://auth.tiktok-shops.com/api/v2/token/get",
+                "refresh_token_url": "https://auth.tiktok-shops.com/api/v2/token/refresh",
+                "app_key": "test_app_key_123",
+                "app_secret": "test_app_secret_456",
+                "redirect_uri": "https://100feb74.r31.cpolar.top/callback",
+                "auth_host": "https://auth.tiktok-shops.com",
+                "api_host": "https://open-api.tiktokglobalshop.com",
+                "mock": True,  # forces mock-mode token response
+            }
+            if name == "tiktok"
+            else None
+        ),
     )
 
 
@@ -66,9 +69,7 @@ def mock_provider(monkeypatch: pytest.MonkeyPatch):
 
 def test_router_registers_exactly_three_routes():
     """Wave 2 contract: router exposes ONLY /authorize, /callback, /healthz."""
-    paths = sorted(
-        getattr(r, "path", "") for r in router_mod.router.routes
-    )
+    paths = sorted(getattr(r, "path", "") for r in router_mod.router.routes)
     assert paths == ["/authorize", "/callback", "/healthz"]
 
 
@@ -113,9 +114,7 @@ def test_authorize_with_explicit_state_reuses_it(client, mock_provider):
 
 def test_authorize_browser_accept_returns_html(client, mock_provider):
     """Browser with text/html Accept header gets the HTML landing page."""
-    r = client.get(
-        "/authorize", headers={"Accept": "text/html,application/xhtml+xml"}
-    )
+    r = client.get("/authorize", headers={"Accept": "text/html,application/xhtml+xml"})
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/html")
     body = r.text
@@ -151,7 +150,9 @@ def test_callback_no_code_returns_help_page_html(client):
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/html")
     # Help page has the status/help content
-    assert "Authorize" in r.text or "help" in r.text.lower() or "status" in r.text.lower()
+    assert (
+        "Authorize" in r.text or "help" in r.text.lower() or "status" in r.text.lower()
+    )
 
 
 def test_callback_error_param_returns_400_html(client):
@@ -163,9 +164,7 @@ def test_callback_error_param_returns_400_html(client):
     assert "OAuth Error" in r.text or "error" in r.text.lower()
 
 
-def test_callback_code_with_matched_state_returns_success_html(
-    client, mock_provider
-):
+def test_callback_code_with_matched_state_returns_success_html(client, mock_provider):
     """code + state that matches registered state → success HTML page."""
     # Register a state via /authorize first
     ar = client.get("/authorize")
@@ -220,9 +219,7 @@ def test_callback_expired_state_is_rejected_not_matched(client, mock_provider):
     assert state in oc._states
 
 
-def test_callback_rejects_expired_state_in_core_handle_callback(
-    client, mock_provider
-):
+def test_callback_rejects_expired_state_in_core_handle_callback(client, mock_provider):
     """Direct unit test of the core helper: handle_callback must mark expired
     states as state_status='expired' instead of 'matched'."""
     state = oc.register_state("tiktok")
@@ -321,6 +318,7 @@ def test_healthz_returns_200_even_when_oauth_db_unavailable(
 def test_healthz_503_when_core_init_failed(client, monkeypatch):
     """If oauth_receiver_core.db_init would raise (no DB URL etc.), /healthz
     must surface this as a 503 so monitoring can alert."""
+
     # Simulate "core init failed" by making provider_config raise
     def _boom(_name: str):
         raise RuntimeError("OAUTH_DB_URL not configured")
@@ -331,13 +329,15 @@ def test_healthz_503_when_core_init_failed(client, monkeypatch):
     assert r.status_code == 503
     body = r.json()
     assert body["status"] == "down"
-    assert "oauth_receiver" in body.get("error", "").lower() or "init" in body.get(
-        "error", ""
-    ).lower()
+    assert (
+        "oauth_receiver" in body.get("error", "").lower()
+        or "init" in body.get("error", "").lower()
+    )
 
 
 def test_healthz_503_when_db_unreachable(client, monkeypatch):
     """Connection-level DB failure → 503 (matches merge-design §3.3)."""
+
     def _boom(_name: str):
         raise RuntimeError("psycopg.OperationalError: could not connect")
 
