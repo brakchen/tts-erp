@@ -39,6 +39,8 @@ EXEMPT_PATHS = {
     "/redoc",
     "/docs/oauth2-redirect",
     "/ads-monitor",  # TikTok OAuth Advertiser redirect target; public
+    "/callback",  # Wave 4: TikTok OAuth redirect target (protocol contract)
+    "/authorize",  # Wave 4: OAuth browser-flow entrypoint (CSRF state)
 }
 ORDER_WRITE_VERBS = {
     "confirm",
