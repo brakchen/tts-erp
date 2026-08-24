@@ -1417,6 +1417,115 @@ def miaoshou_outbound(domain: str, method: str, body: dict | None = None):
     return JSONResponse(status_code=status_code, content=payload)
 
 
+# ─── MiaoshouErpClient sync + DB reads（从 tts_erp.py legacy handler 迁移）──────────
+# 2026-08-24: 补 2026-08-17 批次承诺但未实现的 3 个 sync 路由（price templates、
+# collect box details、move collect tasks）+ GET /db/miaoshou_shops。
+# 实现复用 legacy tts_erp.Handler._sync_miaoshou_* / _db_list_miaoshou_*。
+# Auth: readwrite（middleware 已在 tdd/auth.py 把 /sync/* / /db/* 标 readwrite）。
+def _invoke_legacy_sync(method_name: str, params: dict) -> dict:
+    """调用 legacy tts_erp.Handler 上的 sync/db 方法，返回 (status_code, body).
+
+    Args:
+        method_name: Handler 上的方法名（如 '_sync_miaoshou_price_templates'）
+        params: query dict（与 legacy Handler 期望的格式一致：scalar str）
+    """
+    captured: list[tuple[int, dict]] = []
+
+    class _StubHandler:
+        def _send(self, code, obj):
+            captured.append((code, obj))
+
+    handler = _StubHandler()
+    unbound = tts_erp.Handler.__dict__[method_name]
+    unbound(handler, params)
+    if not captured:
+        return {"_error": f"{method_name} did not return any response"}
+    code, body = captured[0]
+    return JSONResponse(status_code=code, content=body)
+
+
+@app.post("/sync/miaoshou_shops")
+def sync_miaoshou_shops(
+    platform: str = "tiktok",
+    site: str = "VN",
+    page_no: str = "1",
+    page_size: str = "100",
+):
+    return _invoke_legacy_sync(
+        "_sync_miaoshou_shops",
+        {
+            "platform": platform,
+            "site": site,
+            "page_no": page_no,
+            "page_size": page_size,
+        },
+    )
+
+
+@app.post("/sync/miaoshou_price_templates")
+def sync_miaoshou_price_templates(
+    platform: str = "tiktok",
+    site: str = "",
+    page_size: str = "20",
+):
+    return _invoke_legacy_sync(
+        "_sync_miaoshou_price_templates",
+        {
+            "platform": platform,
+            "site": site,
+            "page_size": page_size,
+        },
+    )
+
+
+@app.post("/sync/miaoshou_collect_box_details")
+def sync_miaoshou_collect_box_details(
+    platform: str = "tiktok",
+    page_size: str = "50",
+    status: str = "",
+):
+    return _invoke_legacy_sync(
+        "_sync_miaoshou_collect_box_details",
+        {
+            "platform": platform,
+            "page_size": page_size,
+            "status": status,
+        },
+    )
+
+
+@app.post("/sync/miaoshou_move_collect_tasks")
+def sync_miaoshou_move_collect_tasks(
+    platform: str = "tiktok",
+    page_size: str = "20",
+    status: str = "",
+):
+    return _invoke_legacy_sync(
+        "_sync_miaoshou_move_collect_tasks",
+        {
+            "platform": platform,
+            "page_size": page_size,
+            "status": status,
+        },
+    )
+
+
+@app.get("/db/miaoshou_shops")
+def db_miaoshou_shops(
+    platform: str = "",
+    site: str = "",
+    limit: str = "100",
+):
+    return _invoke_legacy_sync(
+        "_db_list_miaoshou_shops",
+        {
+            "platform": platform,
+            "site": site,
+            "limit": limit,
+        },
+    )
+
+
 # ─── OpenAPI: Bearer auth scheme ──────────────────────────────────────
 # 2026-08-23: AuthMiddleware enforces Bearer at request time, but the
 # OpenAPI spec was missing the securitySchemes declaration so API
