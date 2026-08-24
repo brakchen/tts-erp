@@ -61,6 +61,7 @@ from token_provider import LocalTokenProvider, OAuthReceiverTokenProvider  # noq
 
 import tts_erp  # noqa: E402
 from analytics_sync.app import router as analytics_sync_router  # noqa: E402
+from oauth_receiver_router import router as oauth_router  # noqa: E402  -- Wave 3 Slice 3
 
 # ─── App + config ─────────────────────────────────────────────────────
 
@@ -173,6 +174,16 @@ def _log_sync(
 # router reads api_key scopes from ASGI scope. Routes are auto-registered
 # in /openapi.json via FastAPI's include_router.
 app.include_router(analytics_sync_router, prefix="/v1/analytics/sync")
+
+# Mount the oauth_receiver_router (Wave 3 Slice 3). Exposes exactly 3
+# routes at root prefix:
+#   GET /authorize  — build TikTok authorize URL, register CSRF state
+#   GET /callback   — TikTok OAuth redirect target (PUBLIC; MUST keep working)
+#   GET /healthz    — merged health check (oauth_receiver + tts_erp + miaoshou)
+# See oauth_receiver_router.py and oauth_receiver_core.py.
+# NOTE: this adds a SECOND /healthz alongside tts-erp's own. Slice 4
+# deletes tts-erp's /healthz so the oauth one becomes canonical.
+app.include_router(oauth_router)
 
 
 @app.get("/healthz")
