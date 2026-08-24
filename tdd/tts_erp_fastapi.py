@@ -53,11 +53,11 @@ from miaoshou import MiaoshouApiResponse  # noqa: E402
 
 log = logging.getLogger("tts-erp-fastapi")
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
-from http_client import PlainHttpClient, TikTokHttpClient  # noqa: E402
+from http_client import TikTokHttpClient  # noqa: E402
 from pg_repositories import make_pg_repos  # noqa: E402
 from tts_erp import _safe_int  # noqa: E402  -- per-request int() hardening
 from rate_limit import RateLimitMiddleware  # noqa: E402
-from token_provider import LocalTokenProvider, OAuthReceiverTokenProvider  # noqa: E402
+from token_provider import LocalTokenProvider  # noqa: E402
 
 import tts_erp  # noqa: E402
 from analytics_sync.app import router as analytics_sync_router  # noqa: E402
@@ -118,9 +118,6 @@ app.add_middleware(
 
 # Config
 TTS_ERP_PORT = int(os.environ.get("TTS_ERP_PORT", "9877"))
-OAUTH_RECEIVER_URL = os.environ.get(
-    "OAUTH_RECEIVER_URL", "http://127.0.0.1:9876"
-).rstrip("/")
 TIKTOK_API_HOST = os.environ.get(
     "TIKTOK_API_HOST", "https://open-api.tiktokglobalshop.com"
 )
@@ -129,7 +126,6 @@ TIKTOK_APP_SECRET = os.environ.get("TIKTOK_APP_SECRET", "")
 TTS_ERP_HTTP_TIMEOUT = 60  # seconds
 
 # Dependency graph
-_plain_http = PlainHttpClient(timeout=10)
 _token_provider = LocalTokenProvider()
 _repos = make_pg_repos()
 

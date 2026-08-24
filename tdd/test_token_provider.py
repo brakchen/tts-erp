@@ -1,48 +1,17 @@
-"""TDD test suite for token providers.
+"""TDD test suite for ``LocalTokenProvider``.
 
-Two providers live here:
+Production token provider that calls ``oauth_receiver_core.db_load_token``
+in-process. After Wave 3, this is the only provider the FastAPI app uses —
+no HTTP, no ``OAUTH_RECEIVER_URL`` env var.
 
-* ``LocalTokenProvider`` — production. After Wave 3, tts-erp calls
-  ``oauth_receiver_core.db_load_token`` in-process; no HTTP, no
-  ``OAUTH_RECEIVER_URL`` env var.
-
-* ``OAuthReceiverTokenProvider`` — legacy HTTP-based provider kept
-  temporarily during the Wave 3 migration for any external scripts that
-  may still import it; scheduled for removal in Slice 5.
-
-The Wave 3 tests focus on ``LocalTokenProvider``. The legacy class is
-still smoke-tested so callers that haven't migrated don't crash
-unexpectedly.
+The legacy ``OAuthReceiverTokenProvider`` (HTTP-based) was deleted in
+Slice 5 along with these tests; nothing in the merged app imports it.
 """
 from __future__ import annotations
 
 import pytest
 
 from domain import Creds, TokenError
-
-# ─── LocalTokenProvider ──────────────────────────────────────────────
-
-
-class FakeCore:
-    """In-memory stand-in for oauth_receiver_core used by LocalTokenProvider.
-
-    The real LocalTokenProvider does ``import oauth_receiver_core`` at
-    call time, so we patch ``oauth_receiver_core.db_load_token`` in tests
-    rather than subclassing. This Fake is kept around for the few tests
-    that exercise the module boundary directly.
-    """
-
-    def __init__(self, rows):
-        # rows: dict[shop_id] -> dict (decrypted token row, or None for missing)
-        self._rows = dict(rows)
-
-    def db_load_token(self, shop_id, provider="tiktok"):
-        row = self._rows.get(shop_id)
-        if row is None:
-            return None
-        if provider != "tiktok":
-            return None
-        return dict(row)
 
 
 class TestLocalTokenProvider:
@@ -67,7 +36,7 @@ class TestLocalTokenProvider:
         creds = tp.get("shop-local")
 
         assert isinstance(creds, Creds)
-        assert creds.access_token == "tok-local"
+        assert creds.access_token == "tok-local"  # noqa: S105  (test fixture, not a real token)
         assert creds.shop_cipher == "cipher-local"
         assert creds.shop_id == "shop-local"
         assert creds.region == "US"
@@ -159,7 +128,7 @@ class TestLocalTokenProvider:
 
         # Must not raise.
         creds = LocalTokenProvider().get("shop-1")
-        assert creds.access_token == "t"
+        assert creds.access_token == "t"  # noqa: S105  (test fixture)
 
     def test_local_provider_constructor_takes_no_args(self):
         """LocalTokenProvider() has zero-arg constructor — there is no
@@ -176,15 +145,19 @@ class TestLocalTokenProvider:
             f"LocalTokenProvider.__init__ must have only `self` param, got {params}"
         )
 
-    def test_local_provider_does_not_read_oa_uth_receiver_url_env(self, monkeypatch):
-        """LocalTokenProvider must not depend on OAUTH_RECEIVER_URL env
-        var at runtime. Patching the env var to a bogus value must not
-        break the provider.
+    def test_local_provider_does_not_read_env_vars_at_runtime(self, monkeypatch):
+        """LocalTokenProvider must not depend on any env var at runtime.
+        We pick a deliberately bogus env var name to prove the provider
+        does not look up any legacy config knob.
+
+        After Slice 5 the legacy ``OAUTH_RECEIVER_URL`` is gone; this
+        test intentionally uses a different name to avoid being coupled
+        to the specific legacy var. The contract is: no env var lookup.
         """
         import oauth_receiver_core
         from token_provider import LocalTokenProvider
 
-        monkeypatch.setenv("OAUTH_RECEIVER_URL", "http://does-not-exist.invalid:0")
+        monkeypatch.setenv("TTS_ERP_LEGACY_OAUTH_HOST", "http://does-not-exist.invalid:0")
         monkeypatch.setattr(
             oauth_receiver_core,
             "db_load_token",
@@ -192,103 +165,4 @@ class TestLocalTokenProvider:
         )
 
         creds = LocalTokenProvider().get("shop-x")
-        assert creds.access_token == "t"
-
-
-# ─── OAuthReceiverTokenProvider (legacy, kept until Slice 5) ──────────
-
-
-class FakeHttp:
-    """Plain http client fake. Records calls; replays canned responses."""
-
-    def __init__(self, responses):
-        self._responses = list(responses)
-        self.calls = []
-
-    def request(self, method, url, *, body=None, extra_params=None, timeout=None):
-        self.calls.append({
-            "method": method, "url": url, "body": body,
-            "extra_params": extra_params, "timeout": timeout,
-        })
-        if not self._responses:
-            raise AssertionError(f"FakeHttp exhausted on call #{len(self.calls)}: {method} {url}")
-        return self._responses.pop(0)
-
-
-class TestOAuthReceiverTokenProvider:
-    """Smoke tests for the legacy HTTP-based provider. These exist so
-    scripts that haven't migrated don't break. Slice 5 deletes the class.
-    """
-
-    def test_get_creds_calls_reveal_endpoint(self):
-        http = FakeHttp([{
-            "access_token": "tok-abc",
-            "shop_cipher": "cipher-xyz",
-            "shop_region": "VN",
-            "shop_id": "shop-1",
-        }])
-        from token_provider import OAuthReceiverTokenProvider
-        tp = OAuthReceiverTokenProvider(base_url="http://oauth:9876", http=http)
-
-        creds = tp.get("shop-1")
-
-        assert creds.access_token == "tok-abc"
-        assert creds.shop_cipher == "cipher-xyz"
-        assert creds.region == "VN"
-        assert creds.shop_id == "shop-1"
-        assert http.calls[0]["method"] == "GET"
-        assert "http://oauth:9876/token/shop-1" in http.calls[0]["url"]
-        assert "reveal=1" in http.calls[0]["url"]
-
-    def test_shop_id_is_url_escaped(self):
-        http = FakeHttp([{"access_token": "t", "shop_cipher": "c", "shop_region": "VN"}])
-        from token_provider import OAuthReceiverTokenProvider
-        tp = OAuthReceiverTokenProvider(base_url="http://oauth:9876", http=http)
-
-        tp.get("shop/with/slashes")
-
-        assert "shop%2Fwith%2Fslashes" in http.calls[0]["url"]
-
-    def test_raises_token_error_on_http_error(self):
-        http = FakeHttp([{"_error": True, "_http_status": 404, "_body": "shop not found"}])
-        from token_provider import OAuthReceiverTokenProvider
-        tp = OAuthReceiverTokenProvider(base_url="http://oauth:9876", http=http)
-
-        with pytest.raises(TokenError) as exc:
-            tp.get("missing-shop")
-        assert exc.value.status == 502
-
-    def test_raises_token_error_on_missing_access_token(self):
-        http = FakeHttp([{"shop_cipher": "c", "shop_region": "VN"}])
-        from token_provider import OAuthReceiverTokenProvider
-        tp = OAuthReceiverTokenProvider(base_url="http://oauth:9876", http=http)
-
-        with pytest.raises(TokenError) as exc:
-            tp.get("shop-x")
-        assert "access_token" in str(exc.value)
-
-    def test_raises_token_error_on_missing_shop_cipher(self):
-        http = FakeHttp([{"access_token": "t", "shop_region": "VN"}])
-        from token_provider import OAuthReceiverTokenProvider
-        tp = OAuthReceiverTokenProvider(base_url="http://oauth:9876", http=http)
-
-        with pytest.raises(TokenError) as exc:
-            tp.get("shop-x")
-        assert "shop_cipher" in str(exc.value)
-
-    def test_region_default_empty_when_missing(self):
-        http = FakeHttp([{"access_token": "t", "shop_cipher": "c"}])
-        from token_provider import OAuthReceiverTokenProvider
-        tp = OAuthReceiverTokenProvider(base_url="http://oauth:9876", http=http)
-
-        creds = tp.get("shop-x")
-        assert creds.region == ""
-
-    def test_trailing_slash_in_base_url_handled(self):
-        http = FakeHttp([{"access_token": "t", "shop_cipher": "c"}])
-        from token_provider import OAuthReceiverTokenProvider
-        tp = OAuthReceiverTokenProvider(base_url="http://oauth:9876/", http=http)
-
-        tp.get("shop-x")
-        assert "//token" not in http.calls[0]["url"]
-        assert http.calls[0]["url"].count("://") == 1
+        assert creds.access_token == "t"  # noqa: S105  (test fixture)
