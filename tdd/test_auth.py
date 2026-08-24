@@ -14,8 +14,8 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from tts_erp_fastapi import app
 import auth
+from tts_erp_fastapi import app
 
 # Well-known test keys (full key only lives in this file; DB holds SHA-256)
 KEY_RO = "ttserp_ro_TESTreadonlykey000000000000"
@@ -163,6 +163,125 @@ def test_healthz_exempt(client, auth_keys, monkeypatch):
     monkeypatch.setenv("TTS_ERP_AUTH_MODE", "enforce")
     r = client.get("/healthz")
     assert r.status_code == 200
+
+
+# ─── Wave 4: /callback and /authorize are PUBLIC (OAuth protocol contract) ─
+
+
+def test_callback_exempt_no_key(client, auth_keys, monkeypatch):
+    """Wave 4 Slice 1: /callback is the TikTok OAuth redirect target.
+    Must be reachable without an API key under enforce mode.
+    """
+    monkeypatch.setenv("TTS_ERP_AUTH_MODE", "enforce")
+    r = client.get("/callback?code=test&state=test")
+    assert r.status_code == 200
+    assert r.headers.get("www-authenticate") != "Bearer"  # not a 401
+
+
+def test_callback_exempt_with_bogus_key_still_200(client, auth_keys, monkeypatch):
+    """A junk Authorization header must not flip /callback into 401.
+
+    /callback is exempt, so the key (good or bad) is irrelevant.
+    """
+    monkeypatch.setenv("TTS_ERP_AUTH_MODE", "enforce")
+    r = client.get(
+        "/callback?code=test&state=test",
+        headers={"Authorization": "Bearer totally-not-a-real-key"},
+    )
+    assert r.status_code == 200
+
+
+def test_authorize_exempt_no_key(client, auth_keys, monkeypatch):
+    """Wave 4 Slice 2: /authorize is the OAuth browser-flow entrypoint.
+    Must be reachable without an API key.
+    """
+    monkeypatch.setenv("TTS_ERP_AUTH_MODE", "enforce")
+    r = client.get("/authorize")
+    assert r.status_code == 200
+    assert r.headers.get("www-authenticate") != "Bearer"
+
+
+def test_authorize_exempt_invalid_key_still_200(client, auth_keys, monkeypatch):
+    """A junk Authorization header must not flip /authorize into 401."""
+    monkeypatch.setenv("TTS_ERP_AUTH_MODE", "enforce")
+    r = client.get(
+        "/authorize",
+        headers={"Authorization": "Bearer junk-junk-junk"},
+    )
+    assert r.status_code == 200
+
+
+def test_no_dead_token_rule_in_source():
+    """Wave 4 Slice 3: the /token/* admin rule in auth.py is dead code
+    (Wave 3 Slice 2 deleted the /token/{shop_id} proxy route). Removing
+    the rule keeps the policy table consistent with reality.
+    """
+    import pathlib
+
+    src = pathlib.Path(__file__).with_name("auth.py").read_text(encoding="utf-8")
+    assert 'path.startswith("/token/")' not in src, (
+        "dead /token/* admin rule still in auth.py — remove it"
+    )
+    assert '"/token/"' not in src, "stray /token/ literal left in auth.py"
+
+
+def test_all_designed_public_paths_are_exempt():
+    """Wave 4 Slice 4: EXEMPT_PATHS contains exactly the 9 paths required by
+    merge-design.md §3.2 (order-insensitive). Adding new public endpoints
+    must be deliberate.
+    """
+    expected = {
+        "/healthz",
+        "/endpoints",
+        "/openapi.json",
+        "/docs",
+        "/redoc",
+        "/docs/oauth2-redirect",
+        "/ads-monitor",
+        "/callback",
+        "/authorize",
+    }
+    assert expected == auth.EXEMPT_PATHS, (
+        f"EXEMPT_PATHS drift.\n"
+        f"  got     : {sorted(auth.EXEMPT_PATHS)}\n"
+        f"  expected: {sorted(expected)}\n"
+        f"  extra   : {sorted(auth.EXEMPT_PATHS - expected)}\n"
+        f"  missing : {sorted(expected - auth.EXEMPT_PATHS)}"
+    )
+
+
+def test_protected_paths_require_key_under_enforce(client, auth_keys, monkeypatch):
+    """Wave 4 Slice 4: protected paths (not in EXEMPT_PATHS) still require
+    an API key. Each row covers a different policy branch in required_role().
+    """
+    monkeypatch.setenv("TTS_ERP_AUTH_MODE", "enforce")
+
+    # /sync/* requires readwrite
+    assert client.post("/sync/orders", json={}).status_code == 401
+    # /db/* requires readonly
+    assert client.get("/db/orders?limit=1").status_code == 401
+    # /v1/analytics/sync/* requires readwrite
+    assert client.get("/v1/analytics/sync/cursor").status_code == 401
+    # /miaoshou/* defaults to admin (no explicit rule)
+    assert client.post("/miaoshou/callback/all", json={}).status_code == 401
+
+
+def test_protected_paths_pass_with_admin_key(client, auth_keys, monkeypatch):
+    """Sanity: same protected paths with a valid admin key are not 401.
+    Business-layer errors (400 / 200) are fine — proves auth let them through.
+    """
+    monkeypatch.setenv("TTS_ERP_AUTH_MODE", "enforce")
+    headers = _auth(KEY_ADMIN)
+
+    r = client.get("/db/orders?limit=1", headers=headers)
+    assert r.status_code == 200
+
+    r = client.get("/v1/analytics/sync/cursor", headers=headers)
+    # 422 (missing required query params) is OK — it proves auth let
+    # the request through; FastAPI validation 422'd the empty query.
+    assert r.status_code not in (401, 403), (
+        f"auth blocked valid admin key: {r.status_code}"
+    )
 
 
 def test_disabled_key_401(client, auth_keys, monkeypatch):
