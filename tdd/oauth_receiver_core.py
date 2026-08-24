@@ -41,6 +41,7 @@ Test helpers (intentionally not part of public contract):
     _append_token_history_for_test(d)
     _clear_token_history_for_test()
 """
+
 from __future__ import annotations
 
 # Pre-existing lint suppression rationale (preserved from the original):
@@ -769,24 +770,33 @@ def handle_callback(
     states = registered_states if registered_states is not None else _states
     if state:
         if state in states:
-            state_status = "matched"
-            states.pop(state, None)
+            meta = states[state]
+            # MEDIUM fix from WAVE1_QA_REPORT.md:
+            # Reject expired states even if purge hasn't run yet.
+            # Defense-in-depth: do NOT pop and do NOT auto-exchange.
+            if (meta["ts"] + _state_ttl()) < time.time():
+                state_status = "expired"
+            else:
+                state_status = "matched"
+                states.pop(state, None)
         elif any(s != state for s in states):
             state_status = "mismatched"
         else:
             state_status = "not_registered"
 
-    # Auto-exchange
-    cfg = provider_config(provider)
+    # Auto-exchange (skipped for expired states — MEDIUM fix from
+    # WAVE1_QA_REPORT.md: defense-in-depth against state-replay window).
     auto_token_result: dict | None = None
-    if cfg and (cfg.get("app_key") or cfg.get("mock")):
-        response = call_token_endpoint(provider, "authorized_code", code=code)
-        auto_token_result = save_token_result(
-            provider,
-            "authorized_code",
-            {"code": code, "app_key": cfg.get("app_key", "MOCK")},
-            response,
-        )
+    if state_status != "expired":
+        cfg = provider_config(provider)
+        if cfg and (cfg.get("app_key") or cfg.get("mock")):
+            response = call_token_endpoint(provider, "authorized_code", code=code)
+            auto_token_result = save_token_result(
+                provider,
+                "authorized_code",
+                {"code": code, "app_key": cfg.get("app_key", "MOCK")},
+                response,
+            )
 
     return {
         "handled": True,
@@ -852,7 +862,11 @@ def refresh_shop_token(shop_id: str, provider: str = "tiktok") -> dict:
         }
     rt = row.get("refresh_token")
     if not rt:
-        return {"ok": False, "error": "no refresh_token on file for this shop", "status": 400}
+        return {
+            "ok": False,
+            "error": "no refresh_token on file for this shop",
+            "status": 400,
+        }
     cfg = provider_config(provider)
     response = call_token_endpoint(provider, "refresh_token", refresh=rt)
     result = save_token_result(
