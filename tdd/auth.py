@@ -61,8 +61,6 @@ def clear_cache() -> None:
 def required_role(method: str, path: str) -> int | None:
     if path in EXEMPT_PATHS:
         return None
-    if path.startswith("/token/"):
-        return ROLE_LEVEL["admin"]
     if path.startswith("/sync/"):
         return ROLE_LEVEL["readwrite"]
     # analytics_sync: Chrome extension uploads records (write) and
