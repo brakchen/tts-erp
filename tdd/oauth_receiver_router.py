@@ -17,11 +17,10 @@ import os
 import time
 from typing import Any
 
+import oauth_receiver_core as oc
 import psycopg
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-
-import oauth_receiver_core as oc
 
 router = APIRouter()
 

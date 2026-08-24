@@ -10,6 +10,7 @@
 **最终可用的端点**（2026-08-16 实测）：
 
 ### Order 模块
+
 - `POST /orders/search` ✅ — 拉取订单列表（body 只放过滤条件，paging/sort 全在 query string）
 - `GET /orders/<id>` ✅ — 拉取单个订单（内部转发到 `/order/202309/orders?ids=<id>`，因为 path 版的 `/orders/{id}` 返回 36009009）
 - `POST /sync/orders` ✅ — 拉取并入库
@@ -20,6 +21,7 @@
 - `/orders/list` ❌ → 36009009 "Invalid path"（路径不存在，所有 list 走 /orders/search）
 
 ### Finance / Statement 模块（get-statements-202309）— 2026-08-16 新增
+
 - `GET /finance/statements?shop_id=X&page_size=50&sort_field=statement_time&sort_order=DESC` ✅ — 拉对账单
 - `GET /finance/payments?shop_id=X&page_size=50&sort_field=create_time&sort_order=DESC` ✅ — 拉付款记录
 - `POST /sync/statements` / `POST /sync/payments` ✅ — 拉取并入库（自动翻页）
@@ -60,6 +62,7 @@
 **根因**：TikTok 把 paging/sort 参数都放在 query string。Body 只能放过滤条件。
 
 **已确认工作**（probe_alt.py 2026-08-16）：
+
 ```python
 # 正确：
 extra_params = {"page_size": "10", "sort_field": "create_time", "sort_order": "DESC"}
@@ -128,6 +131,7 @@ int 100 → 36009004 "param order_status type invalid. actual type:int64, expect
 ### 8. 202309 Order 模块是只读
 
 实测 2026-08-16 全部下列端点都返回 36009009 "Invalid path"：
+
 - `cancel` / `confirm` / `update_status` / `shipping_info` / `verify_shipping`（写）
 - `tracking` / `risk` / `buyer` / `recipient` / `tracking/get`（读）
 
@@ -145,6 +149,7 @@ GET /finance/202309/payments    →  data.payments[]      ✓
 ```
 
 全部 detail / sub-records / download 端点 36009009：
+
 ```
 /finance/202309/statements/{id}                          → 36009009
 /finance/202309/statements/{id}/transactions             → 36009009
@@ -161,10 +166,12 @@ GET /finance/202309/payments    →  data.payments[]      ✓
 **最新更新**（v1.3）：2026-08-16 晚，用户改回原意，要求接入 return_refund/202309 接口（reject/approve/accept 等高危写入**不接**）。完成情况：
 
 **实际存在的端点**（probe_refund_v3/v5/v6 实测）：
+
 - `POST /return_refund/202309/returns/search`        ✅ 列表，14 rows / 2 pages 已入库
 - `POST /return_refund/202309/cancellations/search`  ✅ 列表，75 rows / 2 pages 已入库
 
 **确认不存在的端点**（不接）：
+
 - `/return_refund/202309/returns/{id}`              → 36009009 (no path)
 - `/return_refund/202309/cancellations/{id}`        → 36009009 (no path)
 - `/return_refund/202309/returns/list`              → 36009009
@@ -172,6 +179,7 @@ GET /finance/202309/payments    →  data.payments[]      ✓
 - `/fulfillment/202309/*`                            → 36009009
 
 **确认存在但不接的 WRITE 端点**（按用户要求 reject/approve/accept 等动作一律不接）：
+
 - `POST /return_refund/202309/returns`              (CREATE return request — 需要 order_id + return_reason)
 - `POST /return_refund/202309/cancellations`        (CREATE cancellation request — 需要 order_id)
 - POST 详情子端点（`/returns/<id>/{approve,reject,cancel,seller_response,evidence_file,dispute}` 等）
@@ -181,6 +189,7 @@ GET /finance/202309/payments    →  data.payments[]      ✓
 `tts-erp` 对 `POST /returns` 和 `POST /cancellations` 一律返 **501 Not Implemented** + 友好说明。
 
 **Schema 新增**（schema.sql，2 张新表）：
+
 ```sql
 CREATE TABLE returns (
     return_id TEXT PRIMARY KEY,    -- TikTok "return_id" 字段（不是 "id"！）
@@ -196,6 +205,7 @@ CREATE TABLE cancellations (
 ```
 
 **新端点**（tts_erp v1.3）：
+
 - `POST /returns/search`       body: `{shop_id, ...filters}` → 代理
 - `POST /cancellations/search` body: `{shop_id, ...filters}` → 代理
 - `POST /sync/returns`         body: `{shop_id, create_time_ge?, create_time_lt?, page_size?}`
@@ -204,6 +214,7 @@ CREATE TABLE cancellations (
 - `GET /db/cancellations?shop_id=&status=&limit=`
 
 **字段名关键差异**（与 finance 模式不同）：
+
 - `returns.search` 响应数组在 `data.return_orders`，主键是 `return_id`（不是 `id`！）
 - `cancellations.search` 响应数组在 `data.cancellations`，主键是 `cancel_id`（不是 `id`）
 - paging 走 query string（page_size/sort_field/sort_order），body 只放过滤条件
@@ -216,6 +227,7 @@ CREATE TABLE cancellations (
 注意：order / finance 端点的上限是 100（**不能**用 50 当默认值，TikTok 会觉得"用得不够"）。
 
 **取消 vs 退货的业务差异**：
+
 - 取消（cancellations）：发货前的 order 取消，由 buyer/seller 主动发起。所有 75 条记录都是 `CANCELLATION_REQUEST_COMPLETE`。
 - 退货（returns）：发货后 buyer 申请退款/退货，需要走物流寄回 + 平台审核。14 条记录分布：
   - 11 `RETURN_OR_REFUND_REQUEST_COMPLETE`（仅退款，无需退货）
@@ -230,6 +242,7 @@ TikTok Shop 支持 order 状态变化的 webhook 推送（order.created, order.p
 这需要公网回调（已有 cpolar 隧道）+ TikTok webhook 签名验证 + 入库逻辑。
 
 **怎么开始**：
+
 - 在 tts-erp 加 `POST /webhook/tiktok` 端点
 - 用 `TIKTOK_APP_SECRET` 验证 `x-tts-signature` header
 - 根据事件类型更新 `orders` 表
@@ -252,6 +265,7 @@ curl -X POST http://127.0.0.1:9877/sync/orders \
 ```
 
 **怎么开始**：
+
 - 加 `last_synced_at` 时间戳到 `shops` 表
 - 写个简单的 cron 调 `/sync/orders` 用 `create_time_ge`
 - 或者直接在 `tts-erp` 加个 `/sync/incremental` 端点
@@ -261,6 +275,7 @@ curl -X POST http://127.0.0.1:9877/sync/orders \
 ### 3. app_secret 暴露在聊天记录
 
 ⚠️ **app_secret 已经在多个聊天记录里出现过**。强烈建议在所有功能验证后**去 TikTok Partner Center 重置一次**。同时：
+
 - 重置后要更新 `/home/schan/oauth-receiver/.env` 和 `/home/schan/tts-erp/.env`
 - 因为 access_token 是按 app_secret+access_token 算的，app_secret 一变 → 必须全部重新走 OAuth 授权流（用 cpolar 走 `/authorize`）
 
@@ -275,12 +290,13 @@ curl -X POST http://127.0.0.1:9877/sync/orders \
 1. **位置错位 (positional args)**：`build_signed_url(api_host, path, app_key, app_secret, extra_params, body, timeout)` 第 6 个是 `body` 不是 `timeout`。调用时 positional 传 `timeout` 到了 `body` 位置，导致 `canonical += 30`（int）。**修复**：全部用 keyword args。
 2. **Pattern 选错**：
    - `{secret}{path}{kv}{secret}` ❌ (106001)
-   - `{secret}{path}{kv}{secret}{body}` ❌ (106001) 
+   - `{secret}{path}{kv}{secret}{body}` ❌ (106001)
    - `{secret}{path}{kv}{body}{secret}` ✅ (通过！)
 3. **body SHA256 哈希**：试过 SHA256(body) 也不行，必须是 raw JSON
 4. **URL encoding**：不要对 body 做 URL encoding，原 JSON 字符串
 
 最终 canonical（实测通过）：
+
 ```
 c90503.../order/202309/orders/searchapp_key==REDACTED_APP_KEY==shop_cipherROW_...Entimestamp1786875581{"page_size": 10}c90503...
 ```
@@ -293,6 +309,7 @@ c90503.../order/202309/orders/searchapp_key==REDACTED_APP_KEY==shop_cipherROW_..
 4. **最终方案**：只保留 `restart.sh`（之前还备 `start.py` 兜底，但 `restart.sh` 工作稳定后 `start.py` 已删）
 
 **推荐启动方式**：
+
 ```bash
 bash /home/schan/tts-erp/restart.sh
 ```
@@ -315,7 +332,7 @@ TIKTOK_APP_KEY      ==REDACTED_APP_KEY==
 TIKTOK_APP_SECRET   ==REDACTED_APP_SECRET==  ← 重置
 TIKTOK_API_HOST     https://open-api.tiktokglobalshop.com
 TTS_ERP_DB_URL      postgresql://postgres:==REDACTED_DB_PASS==@127.0.0.1:5432/tts_erp  ← 改密码
-TIKTOK_REDIRECT_URI https://100feb74.r31.cpolar.top/callback   (in oauth-receiver)
+TIKTOK_REDIRECT_URI http://daqiang.nat100.top/callback   (in oauth-receiver)
 ```
 
 ⚠️ **app_secret 和 DB 密码都已经在多个聊天记录里出现过**。强烈建议在所有功能验证后**去 TikTok Partner Center + Postgres 各自重置一次**。

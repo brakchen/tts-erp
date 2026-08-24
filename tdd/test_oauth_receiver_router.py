@@ -12,12 +12,11 @@ from __future__ import annotations
 
 import time
 
+import oauth_receiver_core as oc
+import oauth_receiver_router as router_mod
 import pytest
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
-
-import oauth_receiver_core as oc
-import oauth_receiver_router as router_mod
 
 # ─── Test fixtures ─────────────────────────────────────────────────────
 
@@ -53,7 +52,7 @@ def mock_provider(monkeypatch: pytest.MonkeyPatch):
                 "refresh_token_url": "https://auth.tiktok-shops.com/api/v2/token/refresh",
                 "app_key": "test_app_key_123",
                 "app_secret": "test_app_secret_456",
-                "redirect_uri": "https://100feb74.r31.cpolar.top/callback",
+                "redirect_uri": "http://daqiang.nat100.top/callback",
                 "auth_host": "https://auth.tiktok-shops.com",
                 "api_host": "https://open-api.tiktokglobalshop.com",
                 "mock": True,  # forces mock-mode token response
@@ -96,7 +95,7 @@ def test_authorize_happy_path_returns_json(client, mock_provider):
     assert body["authorize_url"].startswith(
         "https://auth.tiktok-shops.com/oauth/authorize?"
     )
-    assert body["redirect_uri"] == "https://100feb74.r31.cpolar.top/callback"
+    assert body["redirect_uri"] == "http://daqiang.nat100.top/callback"
     assert body["configured"] is True
     assert "hint" in body
     # authorize_url must include the registered state for CSRF pairing
@@ -353,19 +352,33 @@ def test_healthz_503_when_db_unreachable(client, monkeypatch):
 # ImportError and `db_ok` was permanently False. These tests pin the
 # contract: db_ok MUST reflect actual DB connectivity (probed in-process).
 
-def test_healthz_tts_erp_db_ok_true_when_psycopg_connects(
-    client, monkeypatch
-):
+
+def test_healthz_tts_erp_db_ok_true_when_psycopg_connects(client, monkeypatch):
     """Regression: db_ok must be True when the probe succeeds."""
+
     class _FakeCursor:
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
-        def execute(self, *a, **k): pass
-        def fetchone(self): return (1,)
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, *a, **k):
+            pass
+
+        def fetchone(self):
+            return (1,)
+
     class _FakeConn:
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
-        def cursor(self): return _FakeCursor()
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def cursor(self):
+            return _FakeCursor()
+
     monkeypatch.setattr(router_mod.psycopg, "connect", lambda *a, **k: _FakeConn())
     monkeypatch.setenv("TTS_ERP_DB_URL", "postgresql://x:x@127.0.0.1:5432/x")
 
@@ -374,12 +387,12 @@ def test_healthz_tts_erp_db_ok_true_when_psycopg_connects(
     assert r.json()["components"]["tts_erp"]["db_ok"] is True
 
 
-def test_healthz_tts_erp_db_ok_false_when_psycopg_raises(
-    client, monkeypatch
-):
+def test_healthz_tts_erp_db_ok_false_when_psycopg_raises(client, monkeypatch):
     """When the probe fails, db_ok is False — must NOT crash."""
+
     def _fail(*a, **k):
         raise RuntimeError("connection refused")
+
     monkeypatch.setattr(router_mod.psycopg, "connect", _fail)
     monkeypatch.setenv("TTS_ERP_DB_URL", "postgresql://x:x@127.0.0.1:9/x")
 
@@ -388,9 +401,7 @@ def test_healthz_tts_erp_db_ok_false_when_psycopg_raises(
     assert r.json()["components"]["tts_erp"]["db_ok"] is False
 
 
-def test_healthz_tts_erp_db_ok_false_when_TTS_ERP_DB_URL_unset(
-    client, monkeypatch
-):
+def test_healthz_tts_erp_db_ok_false_when_TTS_ERP_DB_URL_unset(client, monkeypatch):
     """If TTS_ERP_DB_URL env var is missing, db_ok is False (no crash)."""
     monkeypatch.delenv("TTS_ERP_DB_URL", raising=False)
 

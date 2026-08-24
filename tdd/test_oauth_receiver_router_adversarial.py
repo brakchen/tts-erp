@@ -13,12 +13,11 @@ Run with: python3 -m pytest test_oauth_receiver_router_adversarial.py -v
 
 from __future__ import annotations
 
+import oauth_receiver_core as oc
+import oauth_receiver_router as router_mod
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-import oauth_receiver_core as oc
-import oauth_receiver_router as router_mod
 
 # ─── Fixtures (mirror the dev test fixtures for consistency) ─────────
 
@@ -45,7 +44,7 @@ def mock_provider(monkeypatch: pytest.MonkeyPatch):
                 "refresh_token_url": "https://auth.tiktok-shops.com/api/v2/token/refresh",
                 "app_key": "test_app_key_123",
                 "app_secret": "test_app_secret_456",
-                "redirect_uri": "https://100feb74.r31.cpolar.top/callback",
+                "redirect_uri": "http://daqiang.nat100.top/callback",
                 "auth_host": "https://auth.tiktok-shops.com",
                 "api_host": "https://open-api.tiktokglobalshop.com",
                 "mock": True,

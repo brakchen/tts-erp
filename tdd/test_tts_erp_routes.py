@@ -17,7 +17,7 @@ live in ``oauth_receiver_core`` and are reached by tts-erp through
 in-process function calls (``LocalTokenProvider``) — not via HTTP.
 
 TikTok Shop's OAuth redirect URL is registered as
-``https://100feb74.r31.cpolar.top/callback``, so ``GET /callback`` is
+``http://daqiang.nat100.top/callback``, so ``GET /callback`` is
 a critical surface that MUST keep working after the merge.
 
 Route-count progression (Slice 2 → 3 → 4):
@@ -36,7 +36,6 @@ from __future__ import annotations
 
 import pytest
 from fastapi.routing import APIRoute, Mount
-
 from tts_erp_fastapi import app
 
 
