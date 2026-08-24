@@ -1,4 +1,4 @@
-"""tts_erp Handler 路由层 wanshifu 集成测试 —— 不启动真实服务."""
+"""tts_erp Handler 路由层 miaoshou 集成测试 —— 不启动真实服务."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def test_unsupported_domain_returns_404(handler_stub):
     _miaoshou_call_endpoint(handler_stub, "unknown/thing", {})
     code, body = handler_stub._sent[0]
     assert code == 404
-    assert "unknown wanshifu domain" in body["_error"]
+    assert "unknown miaoshou domain" in body["_error"]
 
 
 def test_malformed_path_returns_400(handler_stub):

@@ -18,6 +18,7 @@ class of bug that an integration gap could let through. Sections:
   9. Cross-shop isolation — same campaign_id, different sellers
  10. Edge cases       — unicode, dates, oversize, empty
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -66,8 +67,15 @@ def _mint_token(
                      scopes     = EXCLUDED.scopes,
                      enabled    = EXCLUDED.enabled,
                      expires_at = EXCLUDED.expires_at""",
-                (plaintext[:16], _hash_token(plaintext), name, role, scopes or [],
-                 enabled, expires_at),
+                (
+                    plaintext[:16],
+                    _hash_token(plaintext),
+                    name,
+                    role,
+                    scopes or [],
+                    enabled,
+                    expires_at,
+                ),
             )
         conn.commit()
     finally:
@@ -91,11 +99,15 @@ def _disable_token(plaintext: str):
 def _idempotency_key(seller, adv, skey, camp, day, page) -> str:
     canonical = json.dumps(
         {
-            "sellerId": seller, "advertiserId": adv,
-            "storageKey": skey, "campaignId": camp,
-            "day": day, "page": page,
+            "sellerId": seller,
+            "advertiserId": adv,
+            "storageKey": skey,
+            "campaignId": camp,
+            "day": day,
+            "page": page,
         },
-        sort_keys=True, separators=(",", ":"),
+        sort_keys=True,
+        separators=(",", ":"),
     )
     return hashlib.sha256(canonical.encode()).hexdigest()
 
@@ -103,6 +115,7 @@ def _idempotency_key(seller, adv, skey, camp, day, page) -> str:
 def _insert_record_via_pg(seller, adv, skey, camp, day, page, body=None):
     """Direct PG insert for isolation tests (bypasses the API)."""
     import psycopg.types.json
+
     key = _idempotency_key(seller, adv, skey, camp, day, page)
     json_body = psycopg.types.json.Jsonb(body) if body is not None else None
     conn = psycopg.connect(DB_URL)
@@ -115,8 +128,7 @@ def _insert_record_via_pg(seller, adv, skey, camp, day, page, body=None):
                     request_body, response_data, source, captured_at)
                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, '/x', 'POST', %s, '{}', 'background_poll', now())
                    ON CONFLICT (idempotency_key) DO NOTHING""",
-                (key, "uuid-" + key[:8], seller, adv, skey, camp, day, page,
-                 json_body),
+                (key, "uuid-" + key[:8], seller, adv, skey, camp, day, page, json_body),
             )
             cur.execute(
                 """INSERT INTO analytics_cursors
@@ -145,11 +157,19 @@ def _session_cleanup():
     try:
         with conn.cursor() as cur:
             # Hardcoded cleanup statements — no user input flows here.
-            cur.execute("DELETE FROM analytics_records WHERE seller_id LIKE 'TEST_sync_int%'")  # noqa: S608
-            cur.execute("DELETE FROM analytics_cursors WHERE seller_id LIKE 'TEST_sync_int%'")  # noqa: S608
-            cur.execute("DELETE FROM analytics_shop_timezones WHERE seller_id LIKE 'TEST_sync_int%'")  # noqa: S608
+            cur.execute(
+                "DELETE FROM analytics_records WHERE seller_id LIKE 'TEST_sync_int%'"
+            )  # noqa: S608
+            cur.execute(
+                "DELETE FROM analytics_cursors WHERE seller_id LIKE 'TEST_sync_int%'"
+            )  # noqa: S608
+            cur.execute(
+                "DELETE FROM analytics_shop_timezones WHERE seller_id LIKE 'TEST_sync_int%'"
+            )  # noqa: S608
             cur.execute("DELETE FROM api_keys WHERE name LIKE 'TEST_sync_int%'")  # noqa: S608
-            cur.execute("DELETE FROM analytics_audit_log WHERE key_prefix LIKE 'anlsync%%' OR key_prefix LIKE 'ttserp_rw_TEST_%%'")  # noqa: S608
+            cur.execute(
+                "DELETE FROM analytics_audit_log WHERE key_prefix LIKE 'anlsync%%' OR key_prefix LIKE 'ttserp_rw_TEST_%%'"
+            )  # noqa: S608
     finally:
         conn.close()
 
@@ -195,7 +215,7 @@ def test_required_role_recognises_analytics_sync_paths():
         ("POST", "/v1/analytics/sync/batches"),
         ("GET", "/v1/analytics/sync/cursor?sellerId=x&advertiserId=y"),
         ("POST", "/v1/analytics/sync/batches/"),  # trailing slash
-        ("GET", "/V1/Analytics/Sync/Cursor"),     # case-sensitive (FastAPI normalises)
+        ("GET", "/V1/Analytics/Sync/Cursor"),  # case-sensitive (FastAPI normalises)
     ]
     for method, path in cases:
         if not path.startswith("/v1/analytics/sync/"):
@@ -238,6 +258,7 @@ def test_analytics_sync_routes_appear_in_openapi():
 
 def test_openapi_cursor_has_required_query_params():
     from tts_erp_fastapi import app
+
     spec = app.openapi()
     params = spec["paths"]["/v1/analytics/sync/cursor"]["get"].get("parameters", [])
     names = {p["name"] for p in params}
@@ -251,6 +272,7 @@ def test_openapi_batches_has_security_scheme():
     """The batches endpoint must declare Bearer auth — both as operation
     security (preferred) and/or as global default security."""
     from tts_erp_fastapi import app
+
     spec = app.openapi()
 
     # Method-level OR global security must include BearerAuth.
@@ -258,8 +280,7 @@ def test_openapi_batches_has_security_scheme():
     method_security = post.get("security") or []
     global_security = spec.get("security") or []
     has_bearer = any(
-        "BearerAuth" in (entry or {})
-        for entry in (method_security + global_security)
+        "BearerAuth" in (entry or {}) for entry in (method_security + global_security)
     )
     assert has_bearer, (
         f"Bearer auth not declared on batches endpoint. "
@@ -300,7 +321,10 @@ def test_endpoints_lists_analytics_sync_auth_notes():
         f"missing or empty no_admin_required: {notes.get('no_admin_required')!r}"
     )
     assert "readwrite" in notes.get("no_admin_required", "")
-    assert notes.get("token_table") == "api_keys (unified with tts-erp; sync tokens have role=readwrite)"
+    assert (
+        notes.get("token_table")
+        == "api_keys (unified with tts-erp; sync tokens have role=readwrite)"
+    )
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -341,9 +365,7 @@ def test_expired_token_returns_401(mounted_client):
         "/v1/analytics/sync/cursor?sellerId=x&advertiserId=y",
         headers={"Authorization": f"Bearer {tok}"},
     )
-    assert r.status_code == 401, (
-        f"expired token returned {r.status_code}, expected 401"
-    )
+    assert r.status_code == 401, f"expired token returned {r.status_code}, expected 401"
 
 
 def test_readonly_role_cannot_access_analytics_sync(mounted_client):
@@ -437,9 +459,7 @@ def test_seller_scope_token_rejects_other_seller(mounted_client):
     )
     assert r.status_code == 403
     body = r.json()
-    assert body.get("code") == "SCOPE_DENIED", (
-        f"expected code=SCOPE_DENIED, got {body}"
-    )
+    assert body.get("code") == "SCOPE_DENIED", f"expected code=SCOPE_DENIED, got {body}"
 
 
 def test_scope_check_applies_to_batches_endpoint_too(mounted_client):
@@ -450,25 +470,30 @@ def test_scope_check_applies_to_batches_endpoint_too(mounted_client):
     """
     seller = "TEST_sync_int_scope_batches"
     tok = _mint_token(scopes=[f"seller:{seller}"])
-    key = _idempotency_key(seller, "adv", "productAnalyses", "c-1",
-                           "2026-08-23", 1)
+    key = _idempotency_key(seller, "adv", "productAnalyses", "c-1", "2026-08-23", 1)
     body = {
         "protocolVersion": 1,
         "requestId": "req-scope-batch",
         "scope": {"sellerId": "OTHER-SHOP", "advertiserId": "adv"},  # MISMATCH
-        "records": [{
-            "idempotencyKey": key,
-            "storageKey": "productAnalyses",
-            "campaignId": "c-1",
-            "day": "2026-08-23",
-            "page": 1,
-            "endpoint": "/x", "method": "POST", "response": {},
-            "source": "x", "capturedAt": "2026-08-23T00:00:00Z",
-            "schemaVersion": 1,
-        }],
+        "records": [
+            {
+                "idempotencyKey": key,
+                "storageKey": "productAnalyses",
+                "campaignId": "c-1",
+                "day": "2026-08-23",
+                "page": 1,
+                "endpoint": "/x",
+                "method": "POST",
+                "response": {},
+                "source": "x",
+                "capturedAt": "2026-08-23T00:00:00Z",
+                "schemaVersion": 1,
+            }
+        ],
     }
     r = mounted_client.post(
-        "/v1/analytics/sync/batches", json=body,
+        "/v1/analytics/sync/batches",
+        json=body,
         headers={"Authorization": f"Bearer {tok}"},
     )
     assert r.status_code == 403, (
@@ -613,8 +638,9 @@ def test_batch_insert_then_duplicate(mounted_client):
     tok = _mint_token()
     seller = "TEST_sync_int_batch"
     try:
-        rec = _make_batch_record(seller, "adv", "productAnalyses", "c-1",
-                                 "2026-08-23", 1)
+        rec = _make_batch_record(
+            seller, "adv", "productAnalyses", "c-1", "2026-08-23", 1
+        )
         r1 = _post_batch(mounted_client, tok, seller, "adv", [rec])
         assert r1.status_code == 200
         assert r1.json()["data"]["accepted"][0]["status"] == "inserted"
@@ -631,8 +657,9 @@ def test_batch_same_key_twice_in_same_request(mounted_client):
     tok = _mint_token()
     seller = "TEST_sync_int_double"
     try:
-        rec1 = _make_batch_record(seller, "adv", "productAnalyses",
-                                  "c-1", "2026-08-23", 1)
+        rec1 = _make_batch_record(
+            seller, "adv", "productAnalyses", "c-1", "2026-08-23", 1
+        )
         rec2 = dict(rec1)  # identical idempotencyKey
         rec2["sourceRecordId"] = "uuid-different"  # otherwise identical
         r = _post_batch(mounted_client, tok, seller, "adv", [rec1, rec2])
@@ -656,8 +683,9 @@ def test_batch_all_invalid_records(mounted_client):
     tok = _mint_token()
     seller = "TEST_sync_int_all_bad"
     try:
-        bad_rec = _make_batch_record(seller, "adv", "productAnalyses",
-                                     "c-1", "2026-08-23", 1)
+        bad_rec = _make_batch_record(
+            seller, "adv", "productAnalyses", "c-1", "2026-08-23", 1
+        )
         bad_rec["idempotencyKey"] = "f" * 64  # wrong key
         bad_rec2 = dict(bad_rec)
         bad_rec2["page"] = 2  # different page but still bad key
@@ -678,10 +706,12 @@ def test_batch_mixed_valid_invalid_cursor_advances_only_for_inserted(mounted_cli
     tok = _mint_token()
     seller = "TEST_sync_int_mixed"
     try:
-        good = _make_batch_record(seller, "adv", "productAnalyses",
-                                  "c-mix", "2026-08-23", 1)
-        bad = _make_batch_record(seller, "adv", "productAnalyses",
-                                 "c-mix", "2026-08-23", 2)
+        good = _make_batch_record(
+            seller, "adv", "productAnalyses", "c-mix", "2026-08-23", 1
+        )
+        bad = _make_batch_record(
+            seller, "adv", "productAnalyses", "c-mix", "2026-08-23", 2
+        )
         bad["idempotencyKey"] = "0" * 64
         r = _post_batch(mounted_client, tok, seller, "adv", [good, bad])
         assert r.status_code == 200
@@ -710,8 +740,9 @@ def test_batch_response_data_size_limit(mounted_client):
     tok = _mint_token()
     seller = "TEST_sync_int_huge"
     try:
-        rec = _make_batch_record(seller, "adv", "productAnalyses",
-                                 "c-1", "2026-08-23", 1)
+        rec = _make_batch_record(
+            seller, "adv", "productAnalyses", "c-1", "2026-08-23", 1
+        )
         rec["response"] = {"junk": "x" * (300 * 1024)}  # >256 KB
         r = _post_batch(mounted_client, tok, seller, "adv", [rec])
         assert r.status_code == 200
@@ -756,8 +787,7 @@ def test_batch_too_many_records_returns_400(mounted_client):
     tok = _mint_token()
     seller = "TEST_sync_int_too_many"
     records = [
-        _make_batch_record(seller, "adv", "productAnalyses",
-                           "c-1", "2026-08-23", p)
+        _make_batch_record(seller, "adv", "productAnalyses", "c-1", "2026-08-23", p)
         for p in range(1, 102)
     ]
     r = _post_batch(mounted_client, tok, seller, "adv", records)
@@ -775,8 +805,9 @@ def test_batch_empty_records_returns_400(mounted_client):
 
 def test_batch_bad_storage_key_returns_400(mounted_client):
     tok = _mint_token()
-    rec = _make_batch_record("TEST_sync_int", "adv", "productAnalyses",
-                             "c-1", "2026-08-23", 1)
+    rec = _make_batch_record(
+        "TEST_sync_int", "adv", "productAnalyses", "c-1", "2026-08-23", 1
+    )
     rec["storageKey"] = "wrongKey"
     # Recompute idem key (the validator now knows storageKey, but the
     # request will be rejected at Pydantic level before that).
@@ -787,8 +818,9 @@ def test_batch_bad_storage_key_returns_400(mounted_client):
 
 def test_batch_page_zero_returns_400(mounted_client):
     tok = _mint_token()
-    rec = _make_batch_record("TEST_sync_int", "adv", "productAnalyses",
-                             "c-1", "2026-08-23", 1)
+    rec = _make_batch_record(
+        "TEST_sync_int", "adv", "productAnalyses", "c-1", "2026-08-23", 1
+    )
     rec["page"] = 0
     r = _post_batch(mounted_client, tok, "TEST_sync_int", "adv", [rec])
     assert r.status_code == 400
@@ -796,15 +828,17 @@ def test_batch_page_zero_returns_400(mounted_client):
 
 def test_batch_unsupported_protocol_version_returns_400(mounted_client):
     tok = _mint_token()
-    rec = _make_batch_record("TEST_sync_int", "adv", "productAnalyses",
-                             "c-1", "2026-08-23", 1)
+    rec = _make_batch_record(
+        "TEST_sync_int", "adv", "productAnalyses", "c-1", "2026-08-23", 1
+    )
     body = {
         "protocolVersion": 2,  # future
         "scope": {"sellerId": "TEST_sync_int", "advertiserId": "adv"},
         "records": [rec],
     }
     r = mounted_client.post(
-        "/v1/analytics/sync/batches", json=body,
+        "/v1/analytics/sync/batches",
+        json=body,
         headers={"Authorization": f"Bearer {tok}"},
     )
     assert r.status_code == 400
@@ -815,13 +849,17 @@ def test_idempotency_key_server_matches_canonical_algorithm(mounted_client):
     """Lock: server computes key with sha256(canonical_json), page coerced
     to int, string fields trimmed, ASCII-sorted keys, compact separators."""
     from analytics_sync.domain import compute_idempotency_key
+
     tok = _mint_token()
     seller = "TEST_sync_int_canon"
     try:
         canonical = compute_idempotency_key(
-            seller_id=seller, advertiser_id="adv",
-            storage_key="productAnalyses", campaign_id="c-1",
-            day="2026-08-23", page=1,
+            seller_id=seller,
+            advertiser_id="adv",
+            storage_key="productAnalyses",
+            campaign_id="c-1",
+            day="2026-08-23",
+            page=1,
         )
         rec = {
             "idempotencyKey": canonical,
@@ -829,8 +867,11 @@ def test_idempotency_key_server_matches_canonical_algorithm(mounted_client):
             "campaignId": "c-1",
             "day": "2026-08-23",
             "page": 1,
-            "endpoint": "/x", "method": "POST", "response": {},
-            "source": "x", "capturedAt": "2026-08-23T00:00:00Z",
+            "endpoint": "/x",
+            "method": "POST",
+            "response": {},
+            "source": "x",
+            "capturedAt": "2026-08-23T00:00:00Z",
             "schemaVersion": 1,
             "sourceRecordId": "uuid-canon",
         }
@@ -847,8 +888,9 @@ def test_idempotency_key_mismatch_returns_rejected_not_inserted(mounted_client):
     tok = _mint_token()
     seller = "TEST_sync_int_mismatch"
     try:
-        rec = _make_batch_record(seller, "adv", "productAnalyses",
-                                 "c-1", "2026-08-23", 1)
+        rec = _make_batch_record(
+            seller, "adv", "productAnalyses", "c-1", "2026-08-23", 1
+        )
         rec["idempotencyKey"] = "0" * 64  # wrong
         r = _post_batch(mounted_client, tok, seller, "adv", [rec])
         assert r.status_code == 200
@@ -877,7 +919,10 @@ def test_error_envelopes_never_leak_token(mounted_client):
 
     endpoints = [
         ("GET", "/v1/analytics/sync/cursor?sellerId=x&advertiserId=y"),
-        ("GET", "/v1/analytics/sync/cursor?sellerId=shopA&advertiserId=a"),  # scope test
+        (
+            "GET",
+            "/v1/analytics/sync/cursor?sellerId=shopA&advertiserId=a",
+        ),  # scope test
         ("POST", "/v1/analytics/sync/batches"),
     ]
     # Mint a token with restricted scope so seller mismatch becomes a real error.
@@ -885,7 +930,9 @@ def test_error_envelopes_never_leak_token(mounted_client):
 
     for method, path in endpoints:
         if method == "GET" and "shopA" in path:
-            r = mounted_client.get(path, headers={"Authorization": f"Bearer {scoped_tok}"})
+            r = mounted_client.get(
+                path, headers={"Authorization": f"Bearer {scoped_tok}"}
+            )
         else:
             r = mounted_client.request(method, path, headers=headers)
         body = r.text
@@ -902,14 +949,13 @@ def test_500_response_does_not_echo_exception_detail(mounted_client, monkeypatch
     def boom(*args, **kwargs):
         raise RuntimeError("SECRET_INTERNAL_STACK_DETAIL_DO_NOT_LEAK")
 
-    monkeypatch.setattr(
-        pg_repositories.PgAnalyticsRepository, "upsert_records", boom
-    )
+    monkeypatch.setattr(pg_repositories.PgAnalyticsRepository, "upsert_records", boom)
     tok = _mint_token()
     seller = "TEST_sync_int_500"
     try:
-        rec = _make_batch_record(seller, "adv", "productAnalyses",
-                                 "c-1", "2026-08-23", 1)
+        rec = _make_batch_record(
+            seller, "adv", "productAnalyses", "c-1", "2026-08-23", 1
+        )
         r = _post_batch(mounted_client, tok, seller, "adv", [rec])
         assert r.status_code == 500
         body = r.text
@@ -932,10 +978,12 @@ def test_cursor_does_not_leak_other_sellers_cursors(mounted_client):
     seller_b = "TEST_sync_int_iso_B"
     shared_camp = "shared-campaign-id"
     try:
-        _insert_record_via_pg(seller_a, "adv", "productAnalyses",
-                              shared_camp, "2026-08-23", 1)
-        _insert_record_via_pg(seller_b, "adv", "productAnalyses",
-                              shared_camp, "2026-08-23", 1)
+        _insert_record_via_pg(
+            seller_a, "adv", "productAnalyses", shared_camp, "2026-08-23", 1
+        )
+        _insert_record_via_pg(
+            seller_b, "adv", "productAnalyses", shared_camp, "2026-08-23", 1
+        )
         tok = _mint_token()
         # Seller A's cursor: only A's row.
         r = mounted_client.get(
@@ -981,11 +1029,13 @@ def test_idempotency_key_includes_seller_in_canonical_computation(mounted_client
     seller_b = "TEST_sync_int_iso_can_B"
     hand_crafted_key = "f" * 64  # arbitrary valid hex, same on both sides
     try:
-        rec_a = _make_batch_record(seller_a, "adv", "productAnalyses",
-                                   "c-1", "2026-08-23", 1)
+        rec_a = _make_batch_record(
+            seller_a, "adv", "productAnalyses", "c-1", "2026-08-23", 1
+        )
         rec_a["idempotencyKey"] = hand_crafted_key
-        rec_b = _make_batch_record(seller_b, "adv", "productAnalyses",
-                                   "c-1", "2026-08-23", 1)
+        rec_b = _make_batch_record(
+            seller_b, "adv", "productAnalyses", "c-1", "2026-08-23", 1
+        )
         rec_b["idempotencyKey"] = hand_crafted_key
         tok = _mint_token()
         r1 = _post_batch(mounted_client, tok, seller_a, "adv", [rec_a])
@@ -1062,8 +1112,9 @@ def test_day_in_far_future_accepted(mounted_client):
     tok = _mint_token()
     seller = "TEST_sync_int_future"
     try:
-        rec = _make_batch_record(seller, "adv", "productAnalyses",
-                                 "c-1", "2099-12-31", 1)
+        rec = _make_batch_record(
+            seller, "adv", "productAnalyses", "c-1", "2099-12-31", 1
+        )
         r = _post_batch(mounted_client, tok, seller, "adv", [rec])
         assert r.status_code == 200
         assert r.json()["data"]["accepted"][0]["status"] == "inserted"
@@ -1078,8 +1129,9 @@ def test_request_id_in_body_matches_header(mounted_client):
     custom_id = f"req-test-{secrets.token_hex(6)}"
     seller = "TEST_sync_int_reqid"
     try:
-        rec = _make_batch_record(seller, "adv", "productAnalyses",
-                                 "c-1", "2026-08-23", 1)
+        rec = _make_batch_record(
+            seller, "adv", "productAnalyses", "c-1", "2026-08-23", 1
+        )
         body = {
             "protocolVersion": 1,
             "requestId": custom_id,
@@ -1087,7 +1139,8 @@ def test_request_id_in_body_matches_header(mounted_client):
             "records": [rec],
         }
         r = mounted_client.post(
-            "/v1/analytics/sync/batches", json=body,
+            "/v1/analytics/sync/batches",
+            json=body,
             headers={"Authorization": f"Bearer {tok}"},
         )
         assert r.status_code == 200
@@ -1112,8 +1165,9 @@ def test_use_real_app_not_analytics_sync_standalone():
 
     # tts_erp_fastapi.app has CORS middleware and an analytics_sync router
     # mounted under /v1/analytics/sync.
-    middleware_classes = {getattr(m.cls, "__name__", str(m.cls))
-                          for m in app.user_middleware}
+    middleware_classes = {
+        getattr(m.cls, "__name__", str(m.cls)) for m in app.user_middleware
+    }
     assert "CORSMiddleware" in middleware_classes, (
         "tts_erp_fastapi app lacks CORS — wrong app being tested?"
     )

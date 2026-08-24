@@ -10,10 +10,11 @@ upload returns a "duplicate" outcome without aborting the batch.
 Cursor advance is conditional: latest_completed_day = GREATEST(existing,
 new_day). This is idempotent and never regresses.
 """
+
 from __future__ import annotations
 
 import os
-from datetime import date, datetime, timezone
+from datetime import date
 from typing import Any
 
 import psycopg
@@ -24,7 +25,6 @@ from .domain import (
     BatchResult,
     CursorEntry,
     Record,
-    RejectedRecord,
     Scope,
     StorageKey,
     compute_idempotency_key,
@@ -36,8 +36,7 @@ def connect() -> psycopg.Connection:
     url = os.environ.get("TTS_ERP_DB_URL") or os.environ.get("ANALYTICS_SYNC_DB_URL")
     if not url:
         raise RuntimeError(
-            "TTS_ERP_DB_URL (or ANALYTICS_SYNC_DB_URL) not configured; "
-            "set it in .env"
+            "TTS_ERP_DB_URL (or ANALYTICS_SYNC_DB_URL) not configured; set it in .env"
         )
     return psycopg.connect(url)
 
@@ -102,7 +101,9 @@ class PgAnalyticsRepository(AnalyticsRepository):
                             scope.shop_name,
                             rec.endpoint,
                             rec.method,
-                            psycopg.types.json.Jsonb(rec.request_body) if rec.request_body is not None else None,
+                            psycopg.types.json.Jsonb(rec.request_body)
+                            if rec.request_body is not None
+                            else None,
                             psycopg.types.json.Jsonb(rec.response),
                             rec.source,
                             rec.captured_at,
@@ -114,14 +115,24 @@ class PgAnalyticsRepository(AnalyticsRepository):
                     inserted = cur.fetchone() is not None
                     if inserted:
                         accepted.append(
-                            AcceptedRecord(idempotency_key=rec.idempotency_key, status="inserted")
+                            AcceptedRecord(
+                                idempotency_key=rec.idempotency_key, status="inserted"
+                            )
                         )
                         advance_keys.add(
-                            (scope.seller_id, scope.advertiser_id, rec.storage_key, rec.campaign_id, rec.day)
+                            (
+                                scope.seller_id,
+                                scope.advertiser_id,
+                                rec.storage_key,
+                                rec.campaign_id,
+                                rec.day,
+                            )
                         )
                     else:
                         accepted.append(
-                            AcceptedRecord(idempotency_key=rec.idempotency_key, status="duplicate")
+                            AcceptedRecord(
+                                idempotency_key=rec.idempotency_key, status="duplicate"
+                            )
                         )
 
                 # Atomic cursor advance. Only days corresponding to
@@ -246,6 +257,7 @@ def fetch_timezone(seller_id: str) -> str:
     to the ZoneInfo constructor (which would raise).
     """
     from zoneinfo import ZoneInfo as _ZI
+
     default_tz = "Asia/Shanghai"
     with connect() as conn, conn.cursor() as cur:
         cur.execute(
@@ -323,6 +335,7 @@ def write_audit(
             conn.commit()
     except Exception as exc:  # pragma: no cover — best-effort
         import sys
+
         sys.stderr.write(f"[analytics-sync] audit write failed: {exc!r}\n")
 
 

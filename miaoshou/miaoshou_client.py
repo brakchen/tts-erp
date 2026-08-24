@@ -18,6 +18,7 @@ import json
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
@@ -87,6 +88,52 @@ class MiaoshouApiError(RuntimeError):
         self.message = message
         self.data = data
         super().__init__(f"[code={code}] {message}")
+
+
+def safe_http_post_json(url: str, body_bytes: bytes, timeout: int) -> str:
+    """SSRF-safe HTTP POST：发送 JSON body，返回响应原文字符串。
+
+    只允许 http/https scheme（防御 file://、ftp:// 等不该开的 scheme
+    被 urllib.request.urlopen 打开）。调用者传入的 url 必须事先可信赖
+    （本 SDK 中 url 只由 PROD_BASE/TEST_BASE 常量 + 受控 path 拼接生成，
+    不接受外部输入）。
+
+    Args:
+        url: 完整 URL，必须是 http/https。
+        body_bytes: POST body（JSON 编码后 utf-8 bytes）。
+        timeout: 超时秒数。
+
+    Returns:
+        响应 body 原文（已 utf-8 decode）。
+
+    Raises:
+        MiaoshouApiError: URL scheme 不是 http/https。
+        urllib.error.HTTPError: 上游 4xx/5xx（由调用者捕获）。
+    """
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise MiaoshouApiError(
+            0,
+            f"refused non-http(s) URL scheme: {parsed.scheme!r} (url={url[:120]})",
+            None,
+        )
+    # SECURITY NOTE — 已知 scanner false positive:
+    # opengrep/Semgrep 的 `urllib.open-urlopen` 规则不会做 data flow 跟踪，
+    # 在 urlopen 调用点一律报警，即使上游已严格 scheme 白名单。
+    # Runtime 是安全的：
+    #   - url 仅由模块常量 PROD_BASE/TEST_BASE + SDK path prefix 拼接生成
+    #   - 上方 ensure scheme ∈ {http, https}，否则 raise MiaoshouApiError
+    #   - 不会到达本行
+    # 决策：接受 scanner 报警，不 refactor（refactor 会破坏 tests/miaoshou/
+    # test_endpoints_happy.py 对 urllib.request.urlopen 的 mock 层）。
+    req = urllib.request.Request(
+        url,
+        data=body_bytes,
+        method="POST",
+        headers={"Content-Type": "application/json;charset=UTF-8"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as http_resp:
+        return http_resp.read().decode("utf-8")
 
 
 class MiaoshouClient:
@@ -203,21 +250,14 @@ class MiaoshouClient:
 
         if os.environ.get("MIAOSHOU_DEBUG_SIGN") == "1":
             print(
-                f"[wanshifu-debug] url={url}\n  envelope.sign={envelope['sign']}\n"
+                f"[miaoshou-debug] url={url}\n  envelope.sign={envelope['sign']}\n"
                 f"  busData={envelope['busData']}",
                 file=sys.stderr,
             )
 
         body_bytes = json.dumps(envelope, ensure_ascii=False).encode("utf-8")
-        req = urllib.request.Request(
-            url,
-            data=body_bytes,
-            method="POST",
-            headers={"Content-Type": "application/json;charset=UTF-8"},
-        )
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as http_resp:
-                raw = http_resp.read().decode("utf-8")
+            raw = safe_http_post_json(url, body_bytes, self.timeout)
         except urllib.error.HTTPError as e:
             # 4xx/5xx 走 httpx 异常
             raw_body = e.read().decode("utf-8", errors="replace")[:300]

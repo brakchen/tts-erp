@@ -1,4 +1,4 @@
-"""wanshifu.callbacks 单元测试 —— 17 个节点 + /callback/all 派发."""
+"""miaoshou.callbacks 单元测试 —— 17 个节点 + /callback/all 派发."""
 
 from __future__ import annotations
 

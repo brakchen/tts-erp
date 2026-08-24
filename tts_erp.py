@@ -1509,7 +1509,7 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 )
 
-            # ---- Wanshifu / 妙手开放平台代理 ----
+            # ---- 妙手 / 万师傅开放平台代理 ----
             # 路径设计：
             #   POST /miaoshou/<domain>/<method>            → client.<domain>.<method>(**body)
             #   POST /miaoshou/callback/<node-alias>        → 解析 callback payload
@@ -1519,12 +1519,12 @@ class Handler(BaseHTTPRequestHandler):
                 if rest == "all":
                     raw = body
                     order_status = str(raw.get("orderStatus", ""))
-                    from wanshifu.callbacks.router import dispatch_callback
+                    from miaoshou.callbacks.router import dispatch_callback
 
                     status_code, body_out = dispatch_callback(order_status, raw)
                     return self._send(status_code, body_out)
                 # 单节点路径
-                from wanshifu.callbacks.router import NODE_REGISTRY
+                from miaoshou.callbacks.router import NODE_REGISTRY
 
                 target = next(
                     (
@@ -1545,7 +1545,7 @@ class Handler(BaseHTTPRequestHandler):
                 order_status = target
                 raw = dict(body)
                 raw["orderStatus"] = order_status
-                from wanshifu.callbacks.router import dispatch_callback
+                from miaoshou.callbacks.router import dispatch_callback
 
                 status_code, body_out = dispatch_callback(order_status, raw)
                 return self._send(status_code, body_out)
@@ -2835,7 +2835,7 @@ def _miaoshou_call_endpoint(handler, rest: str, body: dict) -> None:
         return handler._send(
             404,
             {
-                "_error": f"unknown wanshifu domain: {domain}",
+                "_error": f"unknown miaoshou domain: {domain}",
                 "supported_domains": sorted(_MIAOSHOU_DOMAINS),
             },
         )
@@ -2868,18 +2868,18 @@ def _miaoshou_call_endpoint(handler, rest: str, body: dict) -> None:
                 "code": e.code,
                 "message": e.message,
                 "data": e.data,
-                "_error": f"wanshifu {domain}.{method} returned non-200",
+                "_error": f"miaoshou {domain}.{method} returned non-200",
             },
         )
     except urllib.error.URLError as e:
         return handler._send(
             502,
             {
-                "_error": f"wanshifu {domain}.{method} 网络错误: {e.reason}",
+                "_error": f"miaoshou {domain}.{method} 网络错误: {e.reason}",
             },
         )
     except Exception as e:  # noqa: BLE001
-        log.error(f"[tts-erp] wanshifu {domain}.{method} 异常: {e}\n")
+        log.error(f"[tts-erp] miaoshou {domain}.{method} 异常: {e}\n")
         return handler._send(500, {"_error": str(e)})
     return handler._send(
         200,

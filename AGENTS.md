@@ -10,6 +10,9 @@
 - **下游**：TikTok Shop Open API (`open-api.tiktokglobalshop.com`)
 - **存储**：PostgreSQL `tts_erp` 数据库（`postgres` 容器，端口 5432）
 - **对外端口**：`9877`
+- **公网域名**（用户已配 NAT 穿透）：`daqiang.nat100.top` —— **已 strip 9877 端口**，访问任何 endpoint 用 `http://daqiang.nat100.top/<path>` 而不是 `http://daqiang.nat100.top:9877/<path>`
+  - 给用户的 deploy URL / TikTok 填的 redirect URL / 文档里的 curl 示例 — 一律 strip 端口
+  - 业务代码 / curl 跑本地用 `http://127.0.0.1:9877/...` 仍然带端口（直连本机）
 
 代理 + 持久化，业务代码**完全不用关心**：
 
@@ -94,6 +97,7 @@ curl "http://127.0.0.1:9877/orders/search?shop_id=7494763368967603447" -d '...'
 | 端点 | 用途 |
 | ----------------------------------------------- | ------------------------------- |
 | `GET /healthz` | 健康检查 |
+| `GET /ads-monitor` | TikTok OAuth 授权回跳落地页（公开，无 auth） |
 | `GET /endpoints` | 完整端点清单 |
 | `GET /shops` | 列出已授权 shops |
 | `GET /shops/<shop_id>` | 单个 shop 元数据 |
@@ -111,6 +115,7 @@ curl "http://127.0.0.1:9877/orders/search?shop_id=7494763368967603447" -d '...'
 | `GET /orders/<id>/risk?shop_id=X` | 风控检查 |
 | `GET /orders/<id>/buyer?shop_id=X` | 买家信息 |
 | `GET /orders/<id>/recipient?shop_id=X` | 收货地址 |
+| `GET /logistics/orders/<id>/tracking?shop_id=X` | 物流追踪聚合视图（区别于 `/orders/<id>/tracking`：聚合 `logistics_tracking` + `logistics_events`） |
 | `GET /finance/statements?shop_id=X&page_size=50&sort_field=statement_time&sort_order=DESC` | 对账单列表（202309 spec 唯一可用 Finance 端点） |
 | `GET /finance/payments?shop_id=X&page_size=50&sort_field=create_time&sort_order=DESC` | 付款记录列表 |
 | `POST /returns/search`     body: `{shop_id, ...filters}` | 退货/退款列表（→ `/return_refund/202309/returns/search`） |
@@ -122,17 +127,20 @@ curl "http://127.0.0.1:9877/orders/search?shop_id=7494763368967603447" -d '...'
 | `GET /db/statements?shop_id=X&limit=` | 本地 DB 对账单 |
 | `GET /db/payments?shop_id=X&status=&limit=` | 本地 DB 付款记录 |
 | `GET /db/returns?shop_id=X&status=&limit=` | 本地 DB 退货记录 |
+| `GET /db/returns/<id>` | 本地 DB 单退货详情（带 `refund_amount` 计算字段，源 `raw->'refund'->>'refund_total'`） |
 | `GET /db/cancellations?shop_id=X&status=&limit=` | 本地 DB 取消记录 |
 | `GET /db/sync_log` | 同步历史 |
 | `GET /db/statement_transactions?shop_id=&statement_id=&order_id=&type=&limit=` | 账单逐交易明细（58 字段，替代已删的 Excel 财务表） |
-| `POST /sync/orders`                            body: `{shop_id, order_status?, create_time_ge?, create_time_lt?, page_size?}` |
+| `GET /db/logistics_tracking` | 本地 DB 物流追踪表（按 `order_id` 维度汇总） |
+| `GET /db/logistics_events` | 本地 DB 物流事件表（原始逐事件流，按 `update_time_millis` 排序） |
+| `POST /sync/orders` | body: `{shop_id, order_status?, create_time_ge?, create_time_lt?, page_size?}` |
 | `POST /sync/order/<id>` | 单订单详情同步 |
-| `POST /sync/statements`                        body: `{shop_id, statement_time_ge?, statement_time_lt?, page_size?}` |
-| `POST /sync/payments`                          body: `{shop_id, create_time_ge?, create_time_lt?, page_size?}` |
-| `POST /sync/returns`                           body: `{shop_id, create_time_ge?, create_time_lt?, page_size?}` |
-| `POST /sync/cancellations`                     body: `{shop_id, create_time_ge?, create_time_lt?, page_size?}` |
-| `POST /sync/logistics_tracking`                body: `{shop_id, order_ids?, all_with_tracking?, limit?, max_per_run?}`（cron 每 10 分钟自动追活跃运单） |
-| `POST /sync/statement_transactions`            body: `{shop_id, statement_ids?, statement_time_ge?, statement_time_lt?, page_size?}`（账单逐交易明细） |
+| `POST /sync/statements` | body: `{shop_id, statement_time_ge?, statement_time_lt?, page_size?}` |
+| `POST /sync/payments` | body: `{shop_id, create_time_ge?, create_time_lt?, page_size?}` |
+| `POST /sync/returns` | body: `{shop_id, create_time_ge?, create_time_lt?, page_size?}` |
+| `POST /sync/cancellations` | body: `{shop_id, create_time_ge?, create_time_lt?, page_size?}` |
+| `POST /sync/logistics_tracking` | body: `{shop_id, order_ids?, all_with_tracking?, limit?, max_per_run?}`（cron 每 10 分钟自动追活跃运单） |
+| `POST /sync/statement_transactions` | body: `{shop_id, statement_ids?, statement_time_ge?, statement_time_lt?, page_size?}`（账单逐交易明细） |
 
 ## 4. 改代码时的 do / don't
 
@@ -144,10 +152,11 @@ curl "http://127.0.0.1:9877/orders/search?shop_id=7494763368967603447" -d '...'
 - 看 `logs/stderr.log` 抓 traceback
 - 用 `TTS_DEBUG_SIGN=1` env var 看 canonical string 排查签名问题
 - 改 schema 走 schema.sql，`IF NOT EXISTS` 兼容老库
+- **优先复用成熟开源组件**：GitHub 上有维护活跃、star 数高（成熟领域 ≥ 5k、新兴领域 ≥ 1k）、license 友好的现成方案时，**优先用**，不要裸写 / 自己强制实现 —— 典型场景：HTTP 代理 / 网关、限流、熔断、retry/backoff、分布式锁、定时任务、对象存储 SDK、消息队列、数据库迁移、auth/JWT、参数校验、structlog 类日志、metrics/prom client 等。理由：(a) 现成组件已踩过生产坑、坑更少；(b) 维护/升级是社区分摊；(c) 业务代码更聚焦 domain logic。**评估开源时的护栏**：(a) 引入前查最后一次 release 是否在 1 年内 + issues 关闭率 ≥ 80%；(b) 优先选有公司/组织背书（如 Starlette/FastAPI/httpx/structlog/sqlalchemy/alembic/pydantic 这类），避免个人小项目单点故障；(c) 真没有合适开源时再考虑自研，自研时要留出能替换的 seam（接口层、依赖注入）。
 
 ### DON'T
 
-- ❌ 不要在 tts_erp.py 里直连 PG `oauth_tokens` 表（**只能**走 oauth-receiver HTTP API）
+- ❌ 不要在 **任何 service 文件里**（`tts_erp.py` legacy / `tdd/tts_erp_fastapi.py` 当前 / cron 脚本）直连 PG `oauth_tokens` 表（**只能**走 oauth-receiver HTTP API）
 - ❌ 不要在 .env 里写 app_secret 给客户端调用者（明文暴露，app_secret 应只服务自己用）
 - ❌ 不要在 canonical 里 URL-encode body（用 raw JSON 字符串）
 - ❌ 不要改 `_db_load_token` 直接返回（它本来就是 oauth-receiver 的职责）
@@ -171,20 +180,32 @@ curl "http://127.0.0.1:9877/orders/search?shop_id=7494763368967603447" -d '...'
 
 ## 6. 文件清单
 
-| 路径                                            | 用途                                       |
-|-------------------------------------------------|--------------------------------------------|
-| `tts_erp.py`                                    | 主服务（路由 + 业务逻辑）                  |
-| `tts_signing.py`                                | HMAC 签名 + HTTP 客户端（**可独立复用**）    |
-| `schema.sql`                                    | PG 表结构（13 张表，全部 API 同步来源；2026-08-18 删除 Excel 融合表/xls_ 列/对账视图）|
-| `tdd/auth.py`                                   | API key 鉴权中间件（2026-08-17，设计见 `tech-doc/api-key-auth-design.md`）|
-| `api_keys.py`                                   | API key 管理 CLI（create/list/revoke/rotate）|
-| `.env`                                         | 配置（0600，含 app_key/secret/DB URL）     |
-| `restart.sh`                                   | 重启脚本                                   |
-| `setup/tts-erp.md`                             | 用户向 setup 文档（服务介绍）              |
-| `AGENTS.md`                                    | 本文件 —— AI agent 操作指南                |
-| `README.md`                                    | 人类使用说明                               |
-| `handoff.md`                                   | 跨 session 交接笔记                        |
-| `tests/test_e2e.py`                            | 端到端冒烟测试（scp 到 server 后跑）        |
+| 路径 | 用途 |
+| ------------------------------------------------- | -------------------------------------------- |
+| **`tdd/tts_erp_fastapi.py`** | **主服务（FastAPI app，systemd 启动的实际服务，监听 9877）** |
+| `tts_erp.py` | **legacy** stdlib `BaseHTTPRequestHandler` 服务（迁移中，**当前未运行**，只保留给 cron 脚本 `import` 用；不要在这里加新代码） |
+| `tts_signing.py` | HMAC 签名 + HTTP 客户端（**可独立复用**） |
+| `tdd/auth.py` | API key 鉴权中间件（2026-08-17，设计见 `tech-doc/api-key-auth-design.md`） |
+| `tdd/rate_limit.py` | sliding-window 限流中间件（key-id 桶，默认 100/min） |
+| `tdd/conftest.py` | pytest fixtures：事务回滚隔离 + `TEST_%` 哨兵 |
+| `tdd/domain.py` / `tdd/http_client.py` / `tdd/repositories.py` / `tdd/pg_repositories.py` / `tdd/token_provider.py` / `tdd/tts_business.py` | 业务层 + 数据访问层（FastAPI handler 依赖注入） |
+| **`miaoshou/`** | 万师傅/妙手 SDK 包（独立模块；FastAPI 路由代理调用，2026-08-24 迁完） |
+| `miaoshou/miaoshou_client.py` / `miaoshou/miaoshou_erp_client.py` / `miaoshou/miaoshou_signing.py` | 出站客户端 + MD5/HMAC 签名（`_call()` 走 `safe_http_post_json` helper，scheme 白名单防 SSRF） |
+| `miaoshou/endpoints/` | 12 个出站 endpoint 模块（按 domain 划分：orders/fees/refunds/arbitrations/closes/complaints/queries/accounts/products/logistics/aftersales/tests） |
+| `miaoshou/callbacks/router.py` / `miaoshou/callbacks/payloads.py` | 18 个回调 node + `dispatch_callback()` |
+| `schema.sql` | PG 表结构（**16 张表**：11 TikTok 同步 + 1 api_keys + 4 miaoshou；2026-08-18 删除 Excel 融合表/xls_ 列/对账视图） |
+| `api_keys.py` | API key 管理 CLI（create/list/revoke/rotate） |
+| `sync_cron.py` | 同步 cron 主入口（订单/对账/付款/退货/取消/物流），由 `run_sync_cron.sh` 调度 |
+| `.env` | 配置（0600，含 app_key/secret/DB URL） |
+| `restart.sh` | 重启脚本（内部走 `systemctl --user restart tts-erp.service`） |
+| `setup/tts-erp.md` | 用户向 setup 文档（服务介绍） |
+| **`tech-doc/`** | 设计文档目录（api-key-auth-design / external-api 等） |
+| `AGENTS.md` | 本文件 —— AI agent 操作指南 |
+| `README.md` | 人类使用说明 |
+| `handoff.md` | 跨 session 交接笔记 |
+| `CHANGELOG.md` | 变更日志（按日期分批记录重要变更） |
+| `tests/test_e2e.py` / `tests/test_e2e_finance.py` | 端到端冒烟测试（scp 到 server 后跑） |
+| `tests/miaoshou/` | miaoshou SDK 单测（96 个 test，覆盖 signing / client / callbacks / handler routing / 36 出站 endpoint） |
 
 ## 7. 部署 / 启动
 
@@ -299,41 +320,54 @@ These endpoints (and their semantics) may break without notice:
 
 External clients should NOT depend on these.
 
-
 ## 10. 万师傅 / 妙手开放平台（apifox fd54e57e-9b98-4c34-bada-306221c39e68）
 
 apifox 文档标题“妙手开放平台”，实际底层 endpoint 指向 `openapi.wanshifu.com`。
-集成代码在 `wanshifu/` 下（独立包，**不**单独起服务，走 tts_erp 的 :9877）。
+集成代码在 **`miaoshou/`** 下（独立 SDK 包，`miaoshou_client.py` + `miaoshou_erp_client.py` + `miaoshou_signing.py`，**不**单独起服务，走 tts_erp 的 :9877）。
 
 ### 10.1 接入
 
 - 申请：user.wanshifu.com（生产）/ test-user.wanshifu.com（测试）→ 账号安全 → 管理授权 → 新增授权 → 拿 `licenseId` + `companySecret`。
-- 配置：写到 tts-erp `.env`（`MIAOSHOU_LICENSE_ID` / `MIAOSHOU_COMPANY_SECRET` / `MIAOSHOU_ENV`）。
-- SDK：`from wanshifu import MiaoshouClient`；也可直接 `curl POST :9877/miaoshou/<domain>/<method>`。
+- 配置：写到 tts-erp `.env`（`MIAOSHOU_LICENSE_ID` / `MIAOSHOU_COMPANY_SECRET` / `MIAOSHOU_ENV` / `MIAOSHOU_HTTP_TIMEOUT`）。
+- SDK：`from miaoshou import MiaoshouClient, MiaoshouErpClient`；也可直接 `curl POST :9877/miaoshou/<domain>/<method>`。
 - 调试：`MIAOSHOU_DEBUG_SIGN=1` 在 stderr 打 canonical + sign。
 
 ### 10.2 路由
 
-- `POST /miaoshou/<domain>/<method>` body 转 SDK 方法 `**kwargs`（36 个出站接口）
-- `POST /miaoshou/callback/<node-alias>` 17 个回调节器（每个一个 node-alias，按 orderStatus 字段自动派发）
+路由全部已迁到 FastAPI（`tdd/tts_erp_fastapi.py`）。生产 :9877 直接可用。
+
+- `POST /miaoshou/<domain>/<method>` body 转 SDK 方法 `**kwargs`（36 个出站接口，domain ∈ orders/fees/refunds/arbitrations/closes/complaints/queries/accounts/products/logistics/aftersales/tests）
+- `POST /miaoshou/callback/<node-alias>` 18 个回调节器（每个一个 node-alias，按 orderStatus 字段自动派发）
 - `POST /miaoshou/callback/all` 按 orderStatus 字段自动选 model
-- code!=200 → `MiaoshouApiError` → tts_erp handler 回 `502`（不静默吞错）
-- HTTP 错误 / 网络异常 / 参数错 → handler 回 `400` / `502` / `500`
+
+错误处理（统一在 `_miaoshou_outbound_call` / `dispatch_callback`）：
+
+- 未支持的 domain / method → 404 + supported 列表
+- body 字段名与 SDK 方法签名不符（`TypeError`） → 400 + 提示匹配 SDK 签名
+- 上游 MiaoshouApiError（业务 code != 200） → 502 + 透传 code/message/data（不静默吞错）
+- 网络错误（URLError） → 502
+- 未预期异常 → 500 + 日志
+
+Auth: admin role（middleware 已在 `tdd/auth.py` `required_role` 把 `/miaoshou/*` 默认归 admin）。
+
+测试覆盖：`tdd/test_miaoshou_routes.py`（11 passed + 1 skipped因 Mock auto-create child attr 限制，未知 method 路径靠生产 MiaoshouClient 真实 class 行为覆盖）。
+
+⚠️ **Legacy cleanup pending**: `tts_erp.py` 里 `do_POST` 还保留了 `from miaoshou.callbacks.router import dispatch_callback`（已修对路径名，不再 `wanshifu`）和 `_miaoshou_call_endpoint` 这些 **已 dead** 的处理器（FastAPI 接管后不会被请求触达）。建议 follow-up 任务：删 legacy 处理代码 + 修可能重复的 `_sync_miaoshou_*` / `_db_list_miaoshou_*`（这些属于 MiaoshouErpClient sync 路线，FastAPI 尚未迁移，2026-08-17 批次承诺的 collect_box / price_template / move_collect_tasks sync 仍缺 `persist_*` 函数 — 与本次任务正交，独立 scope）。
 
 ### 10.3 签名（apifox doc-824327）
 
-```
+```text
 busData = base64(json.dumps(business_params, ensure_ascii=False))
 sign    = MD5(busData + companySecret).upper()
 ```
 
 请求 envelope 含 `licenseId / companySecret / sign / busData / timestamp`（毫秒）。
-详情见 `wanshifu/SIGNING.md`，锁定签名向量在 `tests/miaoshou/test_signing.py::test_build_sign_doc_824327_vector`。
+签名实现见 `miaoshou/miaoshou_signing.py`（**没有独立的 `SIGNING.md` 文件**，所有签名规范都在 AGENTS.md 本节），锁定签名向量在 `tests/miaoshou/test_signing.py::test_build_sign_doc_824327_vector`。
 
 ### 10.4 测试
 
-```
+```shell
 .venv/bin/pytest tests/miaoshou/ -q
 ```
 
-122 个用例覆盖 signing / client / callbacks / handler routing / 36 个出站 endpoint。
+**96 个 test function**（15 个文件：`test_signing` / `test_client` / `test_callbacks` / `test_handler_routing` / `test_endpoints_happy` / `test_sync_routes` / `test_sync_shops` / `test_bug_fixes` / `test_erp_bugfixes` / `test_regression_guards` / `test_round2_bugfixes` / `test_round3_bugfixes` / `test_round4_ensure_ascii` / `test_round5_retry_edge_cases` / `test_round6_signature_per_attempt`），覆盖 signing / client / callbacks / handler routing / 36 出站 endpoint。

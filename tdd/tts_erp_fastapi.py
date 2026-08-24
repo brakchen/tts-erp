@@ -27,6 +27,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.security import HTTPBearer  # noqa: E402  -- 用于下面 OpenAPI bearer 装饰
 
 # Make tts_business + tts_signing + tts_erp importable
 TTS_ERP_ROOT = Path(__file__).resolve().parent.parent
@@ -43,8 +44,14 @@ if _env_path.exists():
         _k, _v = _line.split("=", 1)
         os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 
+import logging  # noqa: E402
+
 import tts_business  # noqa: E402
 from auth import AuthMiddleware  # noqa: E402
+
+from miaoshou import MiaoshouApiResponse  # noqa: E402
+
+log = logging.getLogger("tts-erp-fastapi")
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from http_client import PlainHttpClient, TikTokHttpClient  # noqa: E402
 from pg_repositories import make_pg_repos  # noqa: E402
@@ -196,11 +203,11 @@ def ads_monitor():
     return HTMLResponse(
         "<!DOCTYPE html>"
         "<html><head><title>Authorized</title></head>"
-        "<body style=\"font-family:sans-serif;max-width:480px;margin:80px auto;"
-        "text-align:center;color:#222\">"
-        "<h1 style=\"color:#2c8a4a\">✓ Authorization successful</h1>"
+        '<body style="font-family:sans-serif;max-width:480px;margin:80px auto;'
+        'text-align:center;color:#222">'
+        '<h1 style="color:#2c8a4a">✓ Authorization successful</h1>'
         "<p>You can close this window and return to TikTok.</p>"
-        "<p style=\"color:#888;font-size:12px\">tts-erp / oauth-receiver</p>"
+        '<p style="color:#888;font-size:12px">tts-erp / oauth-receiver</p>'
         "</body></html>",
         media_type="text/html",
     )
@@ -1252,15 +1259,172 @@ def cancellations_search(shop_id: str, body: dict | None = None):
     )
 
 
+# ─── miaoshou (万师傅 / 妙手) 开放平台代理 ─────────────────────────────────────
+# 2026-08-24: 从 legacy tts_erp.py 迁移过来。
+# 路由：
+#   POST /miaoshou/{domain}/{method}      → MiaoshouClient.<domain>.<method>(**body)
+#   POST /miaoshou/callback/{node-alias}  → NODE_REGISTRY 查找 + dispatch_callback
+#   POST /miaoshou/callback/all           → 按 body.orderStatus 字段自动派发
+# Auth: admin（middleware 已在 required_role 里标好 /miaoshou/* = admin）
+import urllib.error as _urllib_error  # noqa: E402  -- miaoshou SDK 同款依赖
+
+from miaoshou import MiaoshouApiError, MiaoshouClient  # noqa: E402
+from miaoshou.callbacks.router import (  # noqa: E402
+    NODE_REGISTRY,
+    dispatch_callback,
+)
+
+# MiaoshouClient 上挂的 12 个 domain（与 legacy _MIAOSHOU_DOMAINS 一致；
+# collection_box / tk_collect_box 属于 MiaoshouErpClient，不在此处）
+_MIAOSHOU_DOMAINS: frozenset[str] = frozenset(
+    {
+        "orders",
+        "fees",
+        "refunds",
+        "arbitrations",
+        "closes",
+        "complaints",
+        "queries",
+        "accounts",
+        "products",
+        "logistics",
+        "aftersales",
+        "tests",
+    }
+)
+
+_miaoshou_client_cache: dict[str, MiaoshouClient] = {}
+
+
+def _miaoshou_client() -> MiaoshouClient:
+    """懒创建 MiaoshouClient（按 license_id+env 缓存，避免重复构造）。"""
+    cache_key = (
+        f"{os.environ.get('MIAOSHOU_LICENSE_ID', '')}"
+        f"|{os.environ.get('MIAOSHOU_ENV', 'test')}"
+    )
+    client = _miaoshou_client_cache.get(cache_key)
+    if client is None:
+        client = MiaoshouClient.from_env()
+        _miaoshou_client_cache[cache_key] = client
+    return client
+
+
+def _miaoshou_outbound_call(domain: str, method: str, body: dict) -> tuple[int, dict]:
+    """核心出站调度: domain.method(**body) → (http_status, response_body).
+
+    返回壳 ``{code, message, data, _error?}``：
+    - 200: 业务成功，透传 SDK 返回值
+    - 400: body 字段名错（TypeError）
+    - 404: 未知 domain 或 method
+    - 502: 上游 MiaoshouApiError / 网络错误
+    - 500: 未预期异常
+    """
+    if domain not in _MIAOSHOU_DOMAINS:
+        return 404, {
+            "_error": f"unknown miaoshou domain: {domain}",
+            "supported_domains": sorted(_MIAOSHOU_DOMAINS),
+        }
+    try:
+        client = _miaoshou_client()
+        ep = getattr(client, domain)
+        fn = getattr(ep, method, None)
+        if fn is None or not callable(fn):
+            return 404, {
+                "_error": f"unknown method: {domain}.{method}",
+                "supported_methods": [m for m in dir(ep) if not m.startswith("_")],
+            }
+        resp: MiaoshouApiResponse = fn(**body) if body else fn()  # type: ignore[assignment]
+    except TypeError as e:
+        return 400, {
+            "_error": f"参数错误 ({domain}.{method}): {e}",
+            "hint": "body 字段名需匹配 SDK 方法签名",
+        }
+    except MiaoshouApiError as e:
+        return 502, {
+            "code": e.code,
+            "message": e.message,
+            "data": e.data,
+            "_error": f"miaoshou {domain}.{method} returned non-200",
+        }
+    except _urllib_error.URLError as e:
+        return 502, {
+            "_error": f"miaoshou {domain}.{method} 网络错误: {e.reason}",
+        }
+    except Exception as e:  # noqa: BLE001
+        log.error(f"[tts-erp] miaoshou {domain}.{method} 异常: {e}\n")
+        return 500, {"_error": str(e)}
+    return 200, {
+        "code": resp.code,
+        "message": resp.message,
+        "data": resp.data,
+    }
+
+
+@app.post("/miaoshou/callback/all")
+def miaoshou_callback_all(body: dict | None = None):
+    """POST /miaoshou/callback/all → 按 body.orderStatus 字段自动派发。
+
+    ⚠️ 必须在 /miaoshou/{domain}/{method} 之前注册：
+    FastAPI 按注册顺序匹配路由，否则 outbound 路由会先吃
+    路径参数 (domain="callback", method="all") 然后返 "unknown domain"。
+    """
+    body = body or {}
+    order_status = str(body.get("orderStatus", ""))
+    status_code, payload = dispatch_callback(order_status, body)
+    return JSONResponse(status_code=status_code, content=payload)
+
+
+@app.post("/miaoshou/callback/{node_alias}")
+def miaoshou_callback_node(node_alias: str, body: dict | None = None):
+    """POST /miaoshou/callback/<node-alias> → NODE_REGISTRY 查 orderStatus → dispatch_callback.
+
+    节点别名从 NODE_REGISTRY 查找（如 service-node / rush-order 等）；
+    未匹配返回 404 + supported 列表。
+
+    ⚠️ 必须在 /miaoshou/{domain}/{method} 之前注册（同 callback/all 注释）。
+    """
+    body = body or {}
+    target = next(
+        (
+            order_status
+            for order_status, (_, alias) in NODE_REGISTRY.items()
+            if alias == node_alias
+        ),
+        None,
+    )
+    if target is None:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "_error": f"unknown miaoshou callback node: {node_alias}",
+                "supported": [alias for _, alias in NODE_REGISTRY.values()],
+            },
+        )
+    raw = dict(body)
+    raw["orderStatus"] = target  # 让 dispatch_callback 拿到正确的 status
+    status_code, payload = dispatch_callback(target, raw)
+    return JSONResponse(status_code=status_code, content=payload)
+
+
+@app.post("/miaoshou/{domain}/{method}")
+def miaoshou_outbound(domain: str, method: str, body: dict | None = None):
+    """POST /miaoshou/<domain>/<method> → MiaoshouClient.<domain>.<method>(**body).
+
+    ⚠️ 必须注册在 /miaoshou/callback/* 之后（见 callback 路由注释），
+    否则会被该路由先吃。
+    """
+    status_code, payload = _miaoshou_outbound_call(domain, method, body or {})
+    return JSONResponse(status_code=status_code, content=payload)
+
+
 # ─── OpenAPI: Bearer auth scheme ──────────────────────────────────────
 # 2026-08-23: AuthMiddleware enforces Bearer at request time, but the
 # OpenAPI spec was missing the securitySchemes declaration so API
 # consumers (Postman, codegen, etc.) couldn't see auth requirements.
 # Add it globally so /openapi.json documents both tts-erp and the
 # analytics_sync sub-router as requiring Bearer.
-from fastapi.security import HTTPBearer as _HTTPBearer
 
-_bearer_scheme = _HTTPBearer(
+_bearer_scheme = HTTPBearer(
     bearerFormat="ttserp_<role>_<32-char urlsafe>",
     auto_error=False,
     description="API key issued via `python3 api_keys.py create --role readwrite`",
