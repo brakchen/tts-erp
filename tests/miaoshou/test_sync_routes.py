@@ -274,15 +274,18 @@ def test_sync_methods_call_sdk_with_correct_params():
         )
 
     # 验每个 SDK 调用收到正确参数
+    # 注：platform 不传给 SDK 方法（MiaoshouErpClient tk_collect_box.* 方法不接受
+    # platform kwarg）；platform 仅用于：1) persist_miaoshou_*_template/detail/task
+    # 的第一参数，2) log_sync 标记，3) 响应 payload。
     assert captured[0][0] == "price_template"
-    assert captured[0][1]["platform"] == "shopee"
+    assert "platform" not in captured[0][1], "platform should not be in SDK kwargs"
     assert captured[0][1]["site"] == "PH"
     assert captured[0][1]["page_size"] == 100
     assert captured[1][0] == "collect_box"
-    assert captured[1][1]["platform"] == "tiktok"
+    assert "platform" not in captured[1][1], "platform should not be in SDK kwargs"
     assert captured[1][1]["page_size"] == 30
     assert captured[1][1]["status"] == "normal"
     assert captured[2][0] == "move_collect"
-    assert captured[2][1]["platform"] == "tiktok"
+    assert "platform" not in captured[2][1], "platform should not be in SDK kwargs"
     assert captured[2][1]["page_size"] == 10
     assert captured[2][1]["status"] == "success"

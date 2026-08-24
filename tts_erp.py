@@ -2186,7 +2186,6 @@ class Handler(BaseHTTPRequestHandler):
         try:
             while page_no <= max_pages:
                 sdk_kwargs: dict = {
-                    "platform": platform,
                     "page_no": page_no,
                     "page_size": page_size,
                 }
@@ -2257,7 +2256,6 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             sdk_kwargs: dict = {
-                "platform": platform,
                 "page_no": 1,
                 "page_size": page_size,
             }
@@ -2320,7 +2318,6 @@ class Handler(BaseHTTPRequestHandler):
         try:
             while page_no <= max_pages:
                 sdk_kwargs: dict = {
-                    "platform": platform,
                     "page_no": page_no,
                     "page_size": page_size,
                 }
