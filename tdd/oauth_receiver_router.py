@@ -315,9 +315,7 @@ def _tts_erp_section() -> dict:
             cur.execute("SELECT 1")
             cur.fetchone()
             section["db_ok"] = True
-            cur.execute(
-                "SELECT EXTRACT(EPOCH FROM MAX(finished_at)) FROM sync_log"
-            )
+            cur.execute("SELECT EXTRACT(EPOCH FROM MAX(finished_at)) FROM sync_log")
             row = cur.fetchone()
             if row and row[0] is not None:
                 section["last_sync_at"] = float(row[0])
