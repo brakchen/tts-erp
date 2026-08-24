@@ -1,4 +1,4 @@
-"""万师傅开放平台（妙手开放平台 · apifox fd54e57e...）同步 HTTP 客户端.
+"""妙手开放平台（apifox fd54e57e...）同步 HTTP 客户端.
 
 与 tts-erp 风格一致：仅依赖标准库（urllib），不引入 httpx/ requests。
 
@@ -27,7 +27,7 @@ from typing_extensions import Self
 
 from .miaoshou_signing import build_envelope, now_ms
 
-# 万师傅 / 妙手开放平台 base URL（实际指向 openapi.wanshifu.com）
+# 妙手开放平台 base URL（实际指向 openapi.wanshifu.com）
 PROD_BASE = "https://openapi.wanshifu.com"
 TEST_BASE = "https://openapi.wanshifu.com"
 
@@ -60,7 +60,7 @@ class EnvConfig:
 
 @dataclass
 class MiaoshouApiResponse:
-    """万师傅 API 统一响应壳。
+    """妙手 API 统一响应壳。
 
     绝大多数 endpoint 返回::
         { "code": 200, "message": "ok", "data": {...} }
@@ -81,7 +81,7 @@ class MiaoshouApiResponse:
 
 
 class MiaoshouApiError(RuntimeError):
-    """万师傅接口返回非 200 业务码。"""
+    """妙手接口返回非 200 业务码。"""
 
     def __init__(self, code: int, message: str, data: Any | None = None):
         self.code = code
@@ -146,7 +146,7 @@ def safe_http_post_json(url: str, body_bytes: bytes, timeout: int) -> str:
 
 
 class MiaoshouClient:
-    """万师傅 / 妙手开放平台同步客户端。
+    """妙手开放平台同步客户端。
 
     用法::
 

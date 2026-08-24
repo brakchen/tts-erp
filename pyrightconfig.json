@@ -1,7 +1,7 @@
 {
   "include": [
     "tts_erp.py",
-    "wanshifu",
+    "miaoshou",
     "tests"
   ],
   "exclude": [

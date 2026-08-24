@@ -1,7 +1,7 @@
-"""万师傅 / 妙手开放平台签名算法.
+"""妙手开放平台签名算法.
 
 两种签名：
-- MD5（万师傅开放平台 doc-824327）：``base64(json)+secret`` → MD5 hex upper
+- MD5（妙手开放平台 doc-824327）：``base64(json)+secret`` → MD5 hex upper
 - HMAC-SHA256（妙手 ERP 开放平台）：见 ``hmac_sha256_sign`` 文档
 """
 
@@ -19,7 +19,7 @@ _md5 = hashlib.md5  # nosec B324 — protocol-mandated MD5 signature
 
 
 def build_sign(business_params: dict[str, Any], company_secret: str) -> str:
-    """计算妙手 / 万师傅开放平台的 MD5 签名字符串（apifox doc-824327）。"""
+    """计算妙手开放平台的 MD5 签名字符串（apifox doc-824327）。"""
     bus_data = base64.b64encode(
         json.dumps(business_params, ensure_ascii=False).encode("utf-8")
     ).decode("ascii")
@@ -49,7 +49,7 @@ def build_envelope(
     license_id: str,
     timestamp_ms: int | None = None,
 ) -> dict[str, Any]:
-    """构造发送给万师傅的 envelope。"""
+    """构造发送给妙手的 envelope。"""
     bus_data = base64.b64encode(
         json.dumps(business_params, ensure_ascii=False).encode("utf-8")
     ).decode("ascii")

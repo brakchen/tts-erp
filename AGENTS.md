@@ -189,7 +189,7 @@ curl "http://127.0.0.1:9877/orders/search?shop_id=7494763368967603447" -d '...'
 | `tdd/rate_limit.py` | sliding-window 限流中间件（key-id 桶，默认 100/min） |
 | `tdd/conftest.py` | pytest fixtures：事务回滚隔离 + `TEST_%` 哨兵 |
 | `tdd/domain.py` / `tdd/http_client.py` / `tdd/repositories.py` / `tdd/pg_repositories.py` / `tdd/token_provider.py` / `tdd/tts_business.py` | 业务层 + 数据访问层（FastAPI handler 依赖注入） |
-| **`miaoshou/`** | 万师傅/妙手 SDK 包（独立模块；FastAPI 路由代理调用，2026-08-24 迁完） |
+| **`miaoshou/`** | 妙手 SDK 包（独立模块；FastAPI 路由代理调用，2026-08-24 迁完） |
 | `miaoshou/miaoshou_client.py` / `miaoshou/miaoshou_erp_client.py` / `miaoshou/miaoshou_signing.py` | 出站客户端 + MD5/HMAC 签名（`_call()` 走 `safe_http_post_json` helper，scheme 白名单防 SSRF） |
 | `miaoshou/endpoints/` | 12 个出站 endpoint 模块（按 domain 划分：orders/fees/refunds/arbitrations/closes/complaints/queries/accounts/products/logistics/aftersales/tests） |
 | `miaoshou/callbacks/router.py` / `miaoshou/callbacks/payloads.py` | 18 个回调 node + `dispatch_callback()` |
@@ -320,7 +320,7 @@ These endpoints (and their semantics) may break without notice:
 
 External clients should NOT depend on these.
 
-## 10. 万师傅 / 妙手开放平台（apifox fd54e57e-9b98-4c34-bada-306221c39e68）
+## 10. 妙手开放平台（apifox fd54e57e-9b98-4c34-bada-306221c39e68）
 
 apifox 文档标题“妙手开放平台”，实际底层 endpoint 指向 `openapi.wanshifu.com`。
 集成代码在 **`miaoshou/`** 下（独立 SDK 包，`miaoshou_client.py` + `miaoshou_erp_client.py` + `miaoshou_signing.py`，**不**单独起服务，走 tts_erp 的 :9877）。

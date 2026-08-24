@@ -1,5 +1,43 @@
 # tts-erp CHANGELOG
 
+## 2026-08-24 (chore) — 妙手/万师傅 命名统一 + pyrightconfig.json 修复
+
+### Changed
+
+- **统一称呼为「妙手」**（消除项目里的「万师傅」残留，与 `miaoshou/` 目录名对齐）：
+  - `miaoshou/__init__.py` / `miaoshou/miaoshou_client.py` / `miaoshou/miaoshou_signing.py` / `miaoshou/endpoints/__init__.py`：docstring + 注释中的「万师傅」→「妙手」
+  - `tdd/tts_erp_fastapi.py`：§miaoshou 区段注释
+  - `AGENTS.md`：§10 章节标题（"万师傅 / 妙手开放平台" → "妙手开放平台"）+ §6 文件清单表行
+- **`pyrightconfig.json`**：`include` 列表里的 `"wanshifu"` → `"miaoshou"`（**功能性 bug 修复**：之前指向不存在的目录，pyright 完全没扫 miaoshou 包，顺 import 链也没扫 `tdd/tts_erp_fastapi.py`）
+
+### Notes
+
+- `wanshifu` 仅保留在合法上游 URL（`openapi.wanshifu.com` / `user.wanshifu.com` / `test-user.wanshifu.com`）
+- AGENTS.md §10 line 355 的自指注释（"不再 `wanshifu`"）保留 —— 它说的是历史重命名本身
+
+## 2026-08-24 (fix) — tts_erp_fastapi.py 3 处 latent bug
+
+修 pyrightconfig.json 后 pi-lens 终于扫到了 `tdd/tts_erp_fastapi.py`，暴露了 3 个先前被遮蔽的问题。
+
+### Fixed
+
+- **`TTS_ERP_PORT = int(os.environ.get(...))` (L118)** — 加 try/except ValueError fallback 到 `9877`，env 配错不再让启动崩溃
+- **`_encode_cursor` (L447)** — `int(create_time)` + `json.dumps()` 包 try/except `(TypeError, ValueError)` → 返 None，cursor 编码失败不再 500
+- **`_invoke_legacy_sync` (L1419)** — 签名 `-> dict` 改为 `-> dict | JSONResponse`，error 路径返 `JSONResponse(500, ...)` 而非 `{"_error": ...}`
+
+### Behavior change（明确告知）
+
+- **5 个 miaoshou sync/db 端点**的 error 响应从 `200 + {"_error": "..."}` 改为 `500 + {"_error": "..."}`：
+  `/sync/miaoshou_shops`、`/sync/miaoshou_price_templates`、`/sync/miaoshou_collect_box_details`、`/sync/miaoshou_move_collect_tasks`、`/db/miaoshou_shops`
+- 之前 200+_error 是 bug（应返 4xx/5xx），现在 500 是诚实表达。已通过 restart.sh + 烟雾测验证。
+
+### Tests
+
+- `pytest tests/miaoshou/` → **179 passed**
+- `pytest tdd/test_tts_erp_routes.py tdd/test_miaoshou_routes.py tdd/test_auth.py` → **59 passed, 1 skipped**（已知限制，AGENTS.md 已记）
+- `restart.sh` + `GET /healthz` → OK
+- 烟雾测：`GET /db/miaoshou_shops`、`POST /sync/miaoshou_shops`、`GET /db/orders?cursor=...` → 200
+
 ## 2026-08-23 (doc fix) — analytics_sync 幂等键参考向量勘误
 
 ### Fixed

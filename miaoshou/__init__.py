@@ -1,14 +1,14 @@
-"""妙手 / 万师傅开放平台 SDK.
+"""妙手开放平台 SDK.
 
 来自 apifox 文档 fd54e57e-9b98-4c34-bada-306221c39e68（标题"妙手开放平台"）。
 
 两个客户端：
-- ``MiaoshouClient``：万师傅开放平台（MD5 签名，``openapi.wanshifu.com``）
+- ``MiaoshouClient``：妙手开放平台（MD5 签名，``openapi.wanshifu.com``）
 - ``MiaoshouErpClient``：妙手 ERP 开放平台（HMAC-SHA256 签名，``api.91miaoshou.com``）
 
 用法::
 
-    # 万师傅：服务单（安装/维修/搬运等）
+    # 妙手：服务单（安装/维修/搬运等）
     from miaoshou import MiaoshouClient
     with MiaoshouClient.from_env() as client:
         resp = client.orders.batch_create_async(order_list=[{
@@ -44,7 +44,7 @@ from .miaoshou_signing import (
 )
 
 __all__ = [  # noqa: RUF022
-    # 万师傅客户端（MD5）
+    # 妙手客户端（MD5）
     "EnvConfig",
     "MiaoshouApiError",
     "MiaoshouApiResponse",

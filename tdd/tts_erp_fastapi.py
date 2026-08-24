@@ -115,7 +115,10 @@ app.add_middleware(
 )
 
 # Config
-TTS_ERP_PORT = int(os.environ.get("TTS_ERP_PORT", "9877"))
+try:
+    TTS_ERP_PORT = int(os.environ.get("TTS_ERP_PORT", "9877"))
+except ValueError:
+    TTS_ERP_PORT = 9877
 TIKTOK_API_HOST = os.environ.get(
     "TIKTOK_API_HOST", "https://open-api.tiktokglobalshop.com"
 )
@@ -441,15 +444,13 @@ def _decode_cursor(cursor: str | None) -> tuple[int | None, str | None]:
 def _encode_cursor(create_time: int | None, order_id: str | None) -> str | None:
     if create_time is None or order_id is None:
         return None
-    return (
-        base64.urlsafe_b64encode(
-            json.dumps(
-                {"t": int(create_time), "i": str(order_id)}, separators=(",", ":")
-            ).encode()
-        )
-        .decode()
-        .rstrip("=")
-    )
+    try:
+        payload = json.dumps(
+            {"t": int(create_time), "i": str(order_id)}, separators=(",", ":")
+        ).encode()
+    except (TypeError, ValueError):
+        return None
+    return base64.urlsafe_b64encode(payload).decode().rstrip("=")
 
 
 # Time fields to ISO-format on /db/orders and /db/returns responses.
@@ -1234,7 +1235,7 @@ def cancellations_search(shop_id: str, body: dict | None = None):
     )
 
 
-# ─── miaoshou (万师傅 / 妙手) 开放平台代理 ─────────────────────────────────────
+# ─── miaoshou 妙手开放平台代理 ─────────────────────────────────────
 # 2026-08-24: 从 legacy tts_erp.py 迁移过来。
 # 路由：
 #   POST /miaoshou/{domain}/{method}      → MiaoshouClient.<domain>.<method>(**body)
@@ -1397,7 +1398,7 @@ def miaoshou_outbound(domain: str, method: str, body: dict | None = None):
 # collect box details、move collect tasks）+ GET /db/miaoshou_shops。
 # 实现复用 legacy tts_erp.Handler._sync_miaoshou_* / _db_list_miaoshou_*。
 # Auth: readwrite（middleware 已在 tdd/auth.py 把 /sync/* / /db/* 标 readwrite）。
-def _invoke_legacy_sync(method_name: str, params: dict) -> dict:
+def _invoke_legacy_sync(method_name: str, params: dict) -> dict | JSONResponse:
     """调用 legacy tts_erp.Handler 上的 sync/db 方法，返回 (status_code, body).
 
     Args:
@@ -1414,9 +1415,12 @@ def _invoke_legacy_sync(method_name: str, params: dict) -> dict:
     unbound = tts_erp.Handler.__dict__[method_name]
     unbound(handler, params)
     if not captured:
-        return {"_error": f"{method_name} did not return any response"}
+        return JSONResponse(
+            status_code=500,
+            content={"_error": f"{method_name} did not return any response"},
+        )
     code, body = captured[0]
-    return JSONResponse(status_code=code, content=body)  # noqa: F821  -- return-type wider than declared
+    return JSONResponse(status_code=code, content=body)
 
 
 @app.post("/sync/miaoshou_shops")
