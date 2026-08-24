@@ -17,6 +17,7 @@ import os
 import time
 from typing import Any
 
+import psycopg
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
@@ -283,32 +284,28 @@ def _oauth_receiver_section() -> dict:
 def _tts_erp_section() -> dict:
     """Best-effort — never raises.
 
-    Missing tts_erp symbols during a cold-start (or while we're running
-    tests that don't load the full app) is not an error — healthz must
-    still return a valid response. Log to stderr so the silent fallback
-    is at least visible in operations.
+    The merge-design §3.3 spec asks for a `tts_erp.db_ok` boolean, but
+    `tts_erp.py` never exposed a `_db_ready()` helper. Probing the DB
+    directly with `psycopg.connect` is the honest, dependency-free
+    answer — and it matches what the oauth_receiver section already
+    does for its own DB. ~5 lines, no `_db_ready` indirection.
+
+    The previous implementation `from tts_erp import _db_ready` raised
+    ImportError on every cold start, was silently swallowed by
+    `except Exception`, and permanently returned db_ok=False — a lie
+    (DB was reachable, /db/orders returned rows).
     """
-    import sys
-
     section: dict = {"db_ok": False, "last_sync_at": None}
+    url = os.environ.get("TTS_ERP_DB_URL")
+    if not url:
+        return section
     try:
-        from tts_erp import _db_ready  # type: ignore[import-not-found]
-
-        section["db_ok"] = bool(_db_ready())
+        with psycopg.connect(url, connect_timeout=2) as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.fetchone()
+        section["db_ok"] = True
     except Exception as e:  # noqa: BLE001
-        print(
-            "[oauth-receiver/healthz] tts_erp._db_ready unavailable: " + str(e),
-            file=sys.stderr,
-        )
-    try:
-        from tts_erp import _last_sync_at  # type: ignore[import-not-found]
-
-        section["last_sync_at"] = _last_sync_at()
-    except Exception as e:  # noqa: BLE001
-        print(
-            "[oauth-receiver/healthz] tts_erp._last_sync_at unavailable: " + str(e),
-            file=sys.stderr,
-        )
+        print(f"[oauth-receiver/healthz] tts_erp DB probe failed: {e}")
     return section
 
 

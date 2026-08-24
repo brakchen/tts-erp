@@ -345,3 +345,55 @@ def test_healthz_503_when_db_unreachable(client, monkeypatch):
 
     r = client.get("/healthz")
     assert r.status_code == 503
+
+
+# ─── /healthz tts_erp.db_ok — regression for missing _db_ready() bug ──
+# The original implementation imported `from tts_erp import _db_ready`
+# but that symbol never existed; `except Exception` swallowed the
+# ImportError and `db_ok` was permanently False. These tests pin the
+# contract: db_ok MUST reflect actual DB connectivity (probed in-process).
+
+def test_healthz_tts_erp_db_ok_true_when_psycopg_connects(
+    client, monkeypatch
+):
+    """Regression: db_ok must be True when the probe succeeds."""
+    class _FakeCursor:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, *a, **k): pass
+        def fetchone(self): return (1,)
+    class _FakeConn:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def cursor(self): return _FakeCursor()
+    monkeypatch.setattr(router_mod.psycopg, "connect", lambda *a, **k: _FakeConn())
+    monkeypatch.setenv("TTS_ERP_DB_URL", "postgresql://x:x@127.0.0.1:5432/x")
+
+    r = client.get("/healthz")
+    assert r.status_code == 200
+    assert r.json()["components"]["tts_erp"]["db_ok"] is True
+
+
+def test_healthz_tts_erp_db_ok_false_when_psycopg_raises(
+    client, monkeypatch
+):
+    """When the probe fails, db_ok is False — must NOT crash."""
+    def _fail(*a, **k):
+        raise RuntimeError("connection refused")
+    monkeypatch.setattr(router_mod.psycopg, "connect", _fail)
+    monkeypatch.setenv("TTS_ERP_DB_URL", "postgresql://x:x@127.0.0.1:9/x")
+
+    r = client.get("/healthz")
+    assert r.status_code == 200
+    assert r.json()["components"]["tts_erp"]["db_ok"] is False
+
+
+def test_healthz_tts_erp_db_ok_false_when_TTS_ERP_DB_URL_unset(
+    client, monkeypatch
+):
+    """If TTS_ERP_DB_URL env var is missing, db_ok is False (no crash)."""
+    monkeypatch.delenv("TTS_ERP_DB_URL", raising=False)
+
+    r = client.get("/healthz")
+    assert r.status_code == 200
+    assert r.json()["components"]["tts_erp"]["db_ok"] is False
