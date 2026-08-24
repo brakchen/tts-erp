@@ -4,6 +4,7 @@ Hermetic: inserts its own TEST_-named keys into api_keys (committed, since the
 middleware opens its own DB connections) and deletes them afterwards.
 Auth mode is controlled per-test via monkeypatch on TTS_ERP_AUTH_MODE.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -40,11 +41,46 @@ def auth_keys(db_url):
                 "INSERT INTO api_keys (key_hash, key_prefix, name, role, enabled, expires_at)"
                 " VALUES (%s, %s, %s, %s, %s, %s)",
                 [
-                    (_sha256(KEY_RO), KEY_RO[:16], "TEST_auth_ro", "readonly", True, None),
-                    (_sha256(KEY_RW), KEY_RW[:16], "TEST_auth_rw", "readwrite", True, None),
-                    (_sha256(KEY_ADMIN), KEY_ADMIN[:16], "TEST_auth_admin", "admin", True, None),
-                    (_sha256(KEY_DISABLED), KEY_DISABLED[:16], "TEST_auth_disabled", "readonly", False, None),
-                    (_sha256(KEY_EXPIRED), KEY_EXPIRED[:16], "TEST_auth_expired", "readonly", True, past),
+                    (
+                        _sha256(KEY_RO),
+                        KEY_RO[:16],
+                        "TEST_auth_ro",
+                        "readonly",
+                        True,
+                        None,
+                    ),
+                    (
+                        _sha256(KEY_RW),
+                        KEY_RW[:16],
+                        "TEST_auth_rw",
+                        "readwrite",
+                        True,
+                        None,
+                    ),
+                    (
+                        _sha256(KEY_ADMIN),
+                        KEY_ADMIN[:16],
+                        "TEST_auth_admin",
+                        "admin",
+                        True,
+                        None,
+                    ),
+                    (
+                        _sha256(KEY_DISABLED),
+                        KEY_DISABLED[:16],
+                        "TEST_auth_disabled",
+                        "readonly",
+                        False,
+                        None,
+                    ),
+                    (
+                        _sha256(KEY_EXPIRED),
+                        KEY_EXPIRED[:16],
+                        "TEST_auth_expired",
+                        "readonly",
+                        True,
+                        past,
+                    ),
                 ],
             )
         conn.commit()
@@ -85,7 +121,9 @@ def test_enforce_malformed_header_401(client, auth_keys, monkeypatch):
 
 def test_enforce_forged_key_401(client, auth_keys, monkeypatch):
     monkeypatch.setenv("TTS_ERP_AUTH_MODE", "enforce")
-    r = client.get("/db/orders?limit=1", headers=_auth("ttserp_ro_forged000000000000000000"))
+    r = client.get(
+        "/db/orders?limit=1", headers=_auth("ttserp_ro_forged000000000000000000")
+    )
     assert r.status_code == 401
 
 
@@ -115,11 +153,10 @@ def test_readwrite_passes_auth_on_sync(client, auth_keys, monkeypatch):
     assert r.status_code == 400
 
 
-def test_admin_passes_auth_on_token(client, auth_keys, monkeypatch):
-    monkeypatch.setenv("TTS_ERP_AUTH_MODE", "enforce")
-    # reveal=0 → business-layer 400 proves auth let it through.
-    r = client.get("/token/7494763368967603447", headers=_auth(KEY_ADMIN))
-    assert r.status_code == 400
+# Wave 3 merge: the legacy `/token/{shop_id}` proxy route was deleted
+# (token fetch now goes through LocalTokenProvider in-process).
+# This test removed in feature/oauth-merge commit; admin-role coverage
+# is exercised by other tests below (e.g. test_admin_required_for_xxx).
 
 
 def test_healthz_exempt(client, auth_keys, monkeypatch):

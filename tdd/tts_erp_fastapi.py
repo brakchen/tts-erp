@@ -54,8 +54,8 @@ from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from tts_erp import _safe_int  # noqa: E402  -- per-request int() hardening
 
 from http_client import TikTokHttpClient  # noqa: E402
-from oauth_receiver_router import (
-    router as oauth_router,  # noqa: E402  -- Wave 3 Slice 3
+from oauth_receiver_router import (  # noqa: E402  -- Wave 3 Slice 3
+    router as oauth_router,
 )
 from pg_repositories import make_pg_repos  # noqa: E402
 from rate_limit import RateLimitMiddleware  # noqa: E402
@@ -840,7 +840,11 @@ def sync_logistics_tracking(body: dict):
         )
         order_ids = [r["order_id"] for r in rows]
 
-    max_per_run = _safe_int(body.get("max_per_run"), default=(len(order_ids) or 100), source="body.max_per_run")
+    max_per_run = _safe_int(
+        body.get("max_per_run"),
+        default=(len(order_ids) or 100),
+        source="body.max_per_run",
+    )
     order_ids = order_ids[:max_per_run]
 
     if not order_ids:
@@ -959,7 +963,8 @@ def db_list_logistics_events(
     for r in rows:
         if r.get("event_time"):
             r["event_time_iso"] = datetime.fromtimestamp(
-                _safe_int(r["event_time"], default=0, source="db.event_time") / 1000, tz=timezone.utc
+                _safe_int(r["event_time"], default=0, source="db.event_time") / 1000,
+                tz=timezone.utc,
             ).isoformat()
     return {"count": len(rows), "items": rows}
 
