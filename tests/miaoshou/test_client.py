@@ -1,6 +1,6 @@
 """miaoshou_client 单元测试.
 
-不打真实网络，用 monkeypatch 替换 urllib.request.urlopen。
+不打真实网络，用 monkeypatch 替换 http.client.HTTPSConnection。
 """
 
 from __future__ import annotations
@@ -58,51 +58,36 @@ def test_timeout_invalid(monkeypatch):
 # ---- _call ----
 
 
-def _make_urlopen_response(payload: dict, status: int = 200):
-    """构造 urllib.request.urlopen 的返回值。"""
+def _make_https_response(payload: dict):
+    """构造 http.client connection.getresponse() 的返回值。"""
     body = json.dumps(payload).encode("utf-8")
     resp = MagicMock()
     resp.read.return_value = body
-    resp.__enter__ = lambda s: s
-    resp.__exit__ = lambda s, *a: None
     return resp
-
-
-def _assert_envelope(urlopen_call, expected_sign: str):
-    """断言 urlopen 收到的请求体 envelope 结构正确。"""
-    request = urlopen_call.args[0]
-    body = request.data
-    payload = json.loads(body.decode("utf-8"))
-    assert set(payload.keys()) == {
-        "licenseId",
-        "companySecret",
-        "sign",
-        "busData",
-        "timestamp",
-    }
-    assert isinstance(payload["timestamp"], int)
-    assert len(payload["sign"]) == 32
-    assert payload["sign"] == expected_sign
-    # busData base64 解码后等价于某 JSON
-    decoded = json.loads(base64.b64decode(payload["busData"]).decode("utf-8"))
-    return decoded
 
 
 def test_call_returns_api_response(monkeypatch):
     c = MiaoshouClient(license_id="LIC", company_secret="SECRET")
-    fake_resp = _make_urlopen_response(
+    fake_resp = _make_https_response(
         {"code": 200, "message": "ok", "data": {"orderId": "X"}}
     )
-    with patch("urllib.request.urlopen", return_value=fake_resp) as m:
+    call_log: list[dict] = []
+    fake_conn = MagicMock()
+    fake_conn.getresponse.return_value = fake_resp
+
+    def fake_request(method, url_path, body=None, headers=None):
+        call_log.append({"method": method, "url_path": url_path, "body": body, "headers": headers})
+
+    fake_conn.request.side_effect = fake_request
+    with patch("http.client.HTTPSConnection", return_value=fake_conn):
         resp = c.orders.batch_create_async(order_list=[{"orderId": "O1"}])
-        # envelope 验证（在 with 块内，m.call_args 还在）
-        request = m.call_args.args[0]
-        body = request.data
-        payload = json.loads(body.decode("utf-8"))
-        assert payload["licenseId"] == "LIC"
-        assert len(payload["sign"]) == 32
-        decoded = json.loads(base64.b64decode(payload["busData"]).decode("utf-8"))
-        assert decoded == {"orderList": [{"orderId": "O1"}]}
+    assert len(call_log) == 1
+    body = call_log[0]["body"]
+    payload = json.loads(body.decode("utf-8"))
+    assert payload["licenseId"] == "LIC"
+    assert len(payload["sign"]) == 32
+    decoded = json.loads(base64.b64decode(payload["busData"]).decode("utf-8"))
+    assert decoded == {"orderList": [{"orderId": "O1"}]}
     assert resp.ok
     assert resp.code == 200
     assert resp.data == {"orderId": "X"}
@@ -110,11 +95,13 @@ def test_call_returns_api_response(monkeypatch):
 
 def test_call_business_error(monkeypatch):
     c = MiaoshouClient(license_id="LIC", company_secret="SECRET")
-    fake_resp = _make_urlopen_response(
+    fake_resp = _make_https_response(
         {"code": 500, "message": "参数错误", "data": None}
     )
+    fake_conn = MagicMock()
+    fake_conn.getresponse.return_value = fake_resp
     with (
-        patch("urllib.request.urlopen", return_value=fake_resp),
+        patch("http.client.HTTPSConnection", return_value=fake_conn),
         pytest.raises(MiaoshouApiError) as exc,
     ):
         c.orders.batch_create_async(order_list=[])
@@ -142,8 +129,10 @@ def test_call_http_error(monkeypatch):
         hdrs={},  # type: ignore[arg-type]
         fp=BytesIO(b""),
     )
+    fake_conn = MagicMock()
+    fake_conn.getresponse.side_effect = err
     with (
-        patch("urllib.request.urlopen", side_effect=err),
+        patch("http.client.HTTPSConnection", return_value=fake_conn),
         pytest.raises(MiaoshouApiError) as exc,
     ):
         c.orders.batch_create_async(order_list=[])
@@ -152,9 +141,11 @@ def test_call_http_error(monkeypatch):
 
 def test_call_unparseable_response(monkeypatch):
     c = MiaoshouClient(license_id="LIC", company_secret="SECRET")
-    fake_resp = _make_urlopen_response({"code": "not-an-int", "message": "x"})
+    fake_resp = _make_https_response({"code": "not-an-int", "message": "x"})
+    fake_conn = MagicMock()
+    fake_conn.getresponse.return_value = fake_resp
     with (
-        patch("urllib.request.urlopen", return_value=fake_resp),
+        patch("http.client.HTTPSConnection", return_value=fake_conn),
         pytest.raises(MiaoshouApiError) as exc,
     ):
         c.orders.batch_create_async(order_list=[])

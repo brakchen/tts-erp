@@ -180,13 +180,36 @@ CASES = [
 ]
 
 
-def _make_urlopen_response():
+def _make_https_response():
+ """伪造 http.client HTTPResponse-like 对象 — 给 fake connection 的 getresponse()."""
  body = json.dumps({"code": 200, "message": "ok", "data": {}}).encode("utf-8")
  resp = MagicMock()
  resp.read.return_value = body
- resp.__enter__ = lambda s: s
- resp.__exit__ = lambda s, *a: None
  return resp
+
+
+def _make_https_connection_factory(call_log):
+ """返回 factory 用来 patch http.client.HTTPSConnection / HTTPConnection.
+
+ 把每次 .request(method, url_path, body, headers) 调用参数写到 call_log，
+ 让 test 能从外部断言 URL / headers / body。
+ """
+ def factory(host, port=None, timeout=None, **_):
+  conn = MagicMock()
+  def fake_request(method, url_path, body=None, headers=None):
+   call_log.append({
+    "host": host,
+    "port": port,
+    "method": method,
+    "url_path": url_path,
+    "body": body,
+    "headers": headers,
+   })
+  conn.request.side_effect = fake_request
+  resp = _make_https_response()
+  conn.getresponse.return_value = resp
+  return conn
+ return factory
 
 
 @pytest.mark.parametrize("ns,method,kwargs,expected_url", CASES)
@@ -198,22 +221,29 @@ def test_endpoint_happy_path(ns, method, kwargs, expected_url):
  4. 返回 MiaoshouApiResponse 且 ok
  """
  c = MiaoshouClient(license_id="LIC", company_secret="SECRET")
- fake_resp = _make_urlopen_response()
- with patch("urllib.request.urlopen", return_value=fake_resp) as m:
+ call_log = []
+ factory = _make_https_connection_factory(call_log)
+ # 同时 patch HTTPSConnection + HTTPConnection（scheme 是 http 时 fallback）
+ with (
+  patch("http.client.HTTPSConnection", side_effect=factory),
+  patch("http.client.HTTPConnection", side_effect=factory),
+ ):
   fn = getattr(getattr(c, ns), method)
   resp = fn(**kwargs)
 
  assert isinstance(resp, MiaoshouApiResponse)
  assert resp.ok
 
- # URL 断言（以 suffix 结尾，因为 full_url 含 base + path_prefix + path）
- req = m.call_args.args[0]
- assert req.full_url.endswith(expected_url), (
-  f"URL 后缀不匹配\n  实测: {req.full_url}\n  期望 suffix: {expected_url}"
+ # URL 断言：call_log 里 host + url_path 合起来是 full URL
+ assert len(call_log) == 1, f"应恰好 1 次 HTTP call，实测 {len(call_log)}"
+ entry = call_log[0]
+ full_url = f"https://{entry['host']}{entry['url_path']}"
+ assert full_url.endswith(expected_url), (
+  f"URL 后缀不匹配\n  实测: {full_url}\n  期望 suffix: {expected_url}"
  )
 
  # envelope 断言
- body = req.data
+ body = entry["body"]
  payload = json.loads(body.decode("utf-8"))
  assert set(payload.keys()) == {
   "licenseId",
@@ -244,9 +274,12 @@ def test_endpoint_business_error_returns_502(ns, method, kwargs, _):
  fake_resp.read.return_value = json.dumps(
   {"code": 500, "message": "服务端拒绝", "data": None}
  ).encode("utf-8")
- fake_resp.__enter__ = lambda s: s
- fake_resp.__exit__ = lambda s, *a: None
- with patch("urllib.request.urlopen", return_value=fake_resp):
+ fake_conn = MagicMock()
+ fake_conn.getresponse.return_value = fake_resp
+ with (
+  patch("http.client.HTTPSConnection", return_value=fake_conn),
+  patch("http.client.HTTPConnection", return_value=fake_conn),
+ ):
   fn = getattr(getattr(c, ns), method)
   with pytest.raises(MiaoshouApiError) as exc:
    fn(**kwargs)
