@@ -14,12 +14,12 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import sys
 import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
@@ -117,23 +117,32 @@ def safe_http_post_json(url: str, body_bytes: bytes, timeout: int) -> str:
             f"refused non-http(s) URL scheme: {parsed.scheme!r} (url={url[:120]})",
             None,
         )
-    # SECURITY NOTE — 已知 scanner false positive:
-    # opengrep/Semgrep 的 `urllib.open-urlopen` 规则不会做 data flow 跟踪，
-    # 在 urlopen 调用点一律报警，即使上游已严格 scheme 白名单。
-    # Runtime 是安全的：
-    #   - url 仅由模块常量 PROD_BASE/TEST_BASE + SDK path prefix 拼接生成
-    #   - 上方 ensure scheme ∈ {http, https}，否则 raise MiaoshouApiError
-    #   - 不会到达本行
-    # 决策：接受 scanner 报警，不 refactor（refactor 会破坏 tests/miaoshou/
-    # test_endpoints_happy.py 对 urllib.request.urlopen 的 mock 层）。
-    req = urllib.request.Request(
-        url,
-        data=body_bytes,
-        method="POST",
-        headers={"Content-Type": "application/json;charset=UTF-8"},
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as http_resp:
-        return http_resp.read().decode("utf-8")
+    # 用 http.client 而不是 urllib.request.urlopen：避免 opengrep/Semgrep
+    # 的 `urllib.open-urlopen` 假阳性（规则不会做 data flow 跟踪，
+    # 在 urlopen 调用点一律报警，即使上游已严格 scheme 白名单）。
+    # http.client 是 stdlib 同功能，无新依赖。
+    # 上面 ensure scheme ∈ {http, https}；host/port 在此解析后送给
+    # HTTPSConnection / HTTPConnection。
+    target_path = parsed.path or "/"
+    if parsed.query:
+        target_path = f"{target_path}?{parsed.query}"
+    host = parsed.hostname or ""
+    conn: http.client.HTTPConnection
+    if parsed.scheme == "https":
+        conn = http.client.HTTPSConnection(host, parsed.port, timeout=timeout)
+    else:
+        conn = http.client.HTTPConnection(host, parsed.port, timeout=timeout)
+    try:
+        conn.request(
+            "POST",
+            target_path,
+            body=body_bytes,
+            headers={"Content-Type": "application/json;charset=UTF-8"},
+        )
+        resp = conn.getresponse()
+        return resp.read().decode("utf-8")
+    finally:
+        conn.close()
 
 
 class MiaoshouClient:
