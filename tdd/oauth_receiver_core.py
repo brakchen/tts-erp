@@ -1031,3 +1031,20 @@ def _reset_for_testing() -> None:
 def _append_token_history_for_test(record: dict) -> None:
     """Append a synthetic token record to history. Test-only."""
     _append_token_history(record)
+
+
+# ─── Module-load DB init (HARD dependency) ──────────────────────────
+# The original stdlib oauth_receiver.py called _db_init() in main().
+# When the pure business logic was extracted into this module the eager
+# init call was lost — db_init() must be invoked at module load so that
+# is_db_ok() flips True and DB-backed operations actually work.
+#
+# Per the db_init() docstring: failing fast at startup is required.
+# We log to stderr but do NOT raise — tts-erp's other routes should
+# keep working even if OAUTH_DB_URL is unset; is_db_ok() reports the
+# truth via /healthz, and any oauth DB call will raise a clear
+# RuntimeError when reached.
+try:
+    db_init()
+except RuntimeError as _init_err:
+    print(f"[oauth-receiver-core] DB init failed at module load: {_init_err}")
