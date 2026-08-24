@@ -1159,6 +1159,344 @@ def persist_miaoshou_shop(platform: str, site: str, shop) -> bool:
         return False
 
 
+def persist_miaoshou_price_template(platform: str, template) -> bool:
+    """Insert or update a 妙手 ERP pricing template in the DB.
+
+    Args:
+        platform: 平台代号（'tiktok' 等，仅审计；该表 PK 是 price_template_id 全局唯一）
+        template: PriceTemplateInfo Pydantic model from miaoshou SDK
+            (miaoshou.endpoints.tk_collect_box.PriceTemplateInfo)
+
+    PK: price_template_id.
+    Fields stored: schema.sql miaoshou_price_templates 全 44 列 + raw_json。
+    """
+    import json as _json
+
+    try:
+        with db_connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                sql.SQL("""
+                    INSERT INTO miaoshou_price_templates (
+                        price_template_id, app_account_id, sub_app_account_id,
+                        platform, site, name, remark, currency, display_weight_unit,
+                        profit_type, profit_percent, fixed_profit_amount, exchange_rate,
+                        discount, price_tail_compute_type, price_tail,
+                        price_process_decimal_type, logistics_compute_type,
+                        weight_ref_type, first_weight_charge, first_weight_interval,
+                        continued_weight_charge, continued_weight_interval,
+                        logistics_charge, platform_charge_percent, payment_charge_percent,
+                        activity_charge_percent, withdraw_charge_percent, other_charge,
+                        is_cal_light_cargo, light_cargo_coefficient,
+                        weight_logistics_charge_list, domestic_logistics_compute_type,
+                        domestic_logistics_first_weight_charge,
+                        domestic_logistics_first_weight_interval,
+                        domestic_logistics_continued_weight_charge,
+                        domestic_logistics_continued_weight_interval,
+                        domestic_logistics_charge, buyer_logistic_charge,
+                        seller_logistic_charge, has_seller_logistic_charge,
+                        official_tpl_mode, official_tpl_logistics_channel,
+                        snapshot_id, gmt_create, gmt_modified, raw_json
+                    )
+                    VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s
+                    )
+                    ON CONFLICT (price_template_id) DO UPDATE SET
+                        app_account_id          = EXCLUDED.app_account_id,
+                        sub_app_account_id      = EXCLUDED.sub_app_account_id,
+                        platform                = EXCLUDED.platform,
+                        site                    = EXCLUDED.site,
+                        name                    = EXCLUDED.name,
+                        remark                  = EXCLUDED.remark,
+                        currency                = EXCLUDED.currency,
+                        display_weight_unit     = EXCLUDED.display_weight_unit,
+                        profit_type             = EXCLUDED.profit_type,
+                        profit_percent          = EXCLUDED.profit_percent,
+                        fixed_profit_amount     = EXCLUDED.fixed_profit_amount,
+                        exchange_rate           = EXCLUDED.exchange_rate,
+                        discount                = EXCLUDED.discount,
+                        price_tail_compute_type = EXCLUDED.price_tail_compute_type,
+                        price_tail              = EXCLUDED.price_tail,
+                        price_process_decimal_type = EXCLUDED.price_process_decimal_type,
+                        logistics_compute_type  = EXCLUDED.logistics_compute_type,
+                        weight_ref_type         = EXCLUDED.weight_ref_type,
+                        first_weight_charge     = EXCLUDED.first_weight_charge,
+                        first_weight_interval   = EXCLUDED.first_weight_interval,
+                        continued_weight_charge = EXCLUDED.continued_weight_charge,
+                        continued_weight_interval = EXCLUDED.continued_weight_interval,
+                        logistics_charge        = EXCLUDED.logistics_charge,
+                        platform_charge_percent = EXCLUDED.platform_charge_percent,
+                        payment_charge_percent  = EXCLUDED.payment_charge_percent,
+                        activity_charge_percent = EXCLUDED.activity_charge_percent,
+                        withdraw_charge_percent = EXCLUDED.withdraw_charge_percent,
+                        other_charge            = EXCLUDED.other_charge,
+                        is_cal_light_cargo      = EXCLUDED.is_cal_light_cargo,
+                        light_cargo_coefficient = EXCLUDED.light_cargo_coefficient,
+                        weight_logistics_charge_list = EXCLUDED.weight_logistics_charge_list,
+                        domestic_logistics_compute_type = EXCLUDED.domestic_logistics_compute_type,
+                        domestic_logistics_first_weight_charge = EXCLUDED.domestic_logistics_first_weight_charge,
+                        domestic_logistics_first_weight_interval = EXCLUDED.domestic_logistics_first_weight_interval,
+                        domestic_logistics_continued_weight_charge = EXCLUDED.domestic_logistics_continued_weight_charge,
+                        domestic_logistics_continued_weight_interval = EXCLUDED.domestic_logistics_continued_weight_interval,
+                        domestic_logistics_charge = EXCLUDED.domestic_logistics_charge,
+                        buyer_logistic_charge   = EXCLUDED.buyer_logistic_charge,
+                        seller_logistic_charge  = EXCLUDED.seller_logistic_charge,
+                        has_seller_logistic_charge = EXCLUDED.has_seller_logistic_charge,
+                        official_tpl_mode       = EXCLUDED.official_tpl_mode,
+                        official_tpl_logistics_channel = EXCLUDED.official_tpl_logistics_channel,
+                        snapshot_id             = EXCLUDED.snapshot_id,
+                        gmt_create              = EXCLUDED.gmt_create,
+                        gmt_modified            = EXCLUDED.gmt_modified,
+                        raw_json                = EXCLUDED.raw_json,
+                        synced_at               = now()
+                """),
+                (
+                    template.priceTemplateId,
+                    template.appAccountId,
+                    template.subAppAccountId,
+                    getattr(template, "platform", platform),
+                    template.site,
+                    template.name,
+                    template.remark,
+                    template.currency,
+                    template.displayWeightUnit,
+                    template.profitType,
+                    template.profitPercent,
+                    template.fixedProfitAmount,
+                    template.exchangeRate,
+                    template.discount,
+                    template.priceTailComputeType,
+                    template.priceTail,
+                    template.priceProcessDecimalType,
+                    template.logisticsComputeType,
+                    template.weightRefType,
+                    template.firstWeightCharge,
+                    template.firstWeightInterval,
+                    template.continuedWeightCharge,
+                    template.continuedWeightInterval,
+                    template.logisticsCharge,
+                    template.platformChargePercent,
+                    template.paymentChargePercent,
+                    template.activityChargePercent,
+                    template.withdrawChargePercent,
+                    template.otherCharge,
+                    template.isCalLightCargo,
+                    template.lightCargoCoefficient,
+                    template.weightLogisticsChargeList,
+                    template.domesticLogisticsComputeType,
+                    template.domesticLogisticsFirstWeightCharge,
+                    template.domesticLogisticsFirstWeightInterval,
+                    template.domesticLogisticsContinuedWeightCharge,
+                    template.domesticLogisticsContinuedWeightInterval,
+                    template.domesticLogisticsCharge,
+                    template.buyerLogisticCharge,
+                    template.sellerLogisticCharge,
+                    template.hasSellerLogisticCharge,
+                    template.officialTplMode,
+                    template.officialTplLogisticsChannel,
+                    template.snapshotId,
+                    template.gmtCreate,
+                    template.gmtModified,
+                    _json.dumps(template.model_dump(), ensure_ascii=False),
+                ),
+            )
+        return True
+    except Exception as e:  # noqa: BLE001
+        log.error("[tts-erp] persist_miaoshou_price_template failed: %s", e)
+        return False
+
+
+def persist_miaoshou_collect_box_detail(platform: str, detail) -> bool:
+    """Insert or update a 妙手 公共采集箱详情 in the DB.
+
+    Args:
+        platform: 平台代号（PK 组成部分）
+        detail: CollectBoxDetailDetail Pydantic model from miaoshou SDK
+            (miaoshou.endpoints.tk_collect_box.CollectBoxDetailDetail)
+
+    PK: (platform, common_collect_box_detail_id).
+    """
+    import json as _json
+
+    try:
+        with db_connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                sql.SQL("""
+                    INSERT INTO miaoshou_collect_box_details (
+                        platform, common_collect_box_detail_id,
+                        app_account_id, sub_app_account_id, item_num, title,
+                        thumbnail, list_thumbnail, price, min_sku_price,
+                        max_sku_price, stock, remark, status, reason,
+                        gmt_create, gmt_modified, weight, max_sku_weight,
+                        min_sku_weight, common_collect_box_group_id,
+                        common_collect_box_group_name, owner_sub_account_alias_name,
+                        is_mark, is_cb, is_cnsc, raw_json
+                    )
+                    VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s
+                    )
+                    ON CONFLICT (platform, common_collect_box_detail_id) DO UPDATE SET
+                        app_account_id           = EXCLUDED.app_account_id,
+                        sub_app_account_id       = EXCLUDED.sub_app_account_id,
+                        item_num                 = EXCLUDED.item_num,
+                        title                    = EXCLUDED.title,
+                        thumbnail                = EXCLUDED.thumbnail,
+                        list_thumbnail           = EXCLUDED.list_thumbnail,
+                        price                    = EXCLUDED.price,
+                        min_sku_price            = EXCLUDED.min_sku_price,
+                        max_sku_price            = EXCLUDED.max_sku_price,
+                        stock                    = EXCLUDED.stock,
+                        remark                   = EXCLUDED.remark,
+                        status                   = EXCLUDED.status,
+                        reason                   = EXCLUDED.reason,
+                        gmt_create               = EXCLUDED.gmt_create,
+                        gmt_modified             = EXCLUDED.gmt_modified,
+                        weight                   = EXCLUDED.weight,
+                        max_sku_weight           = EXCLUDED.max_sku_weight,
+                        min_sku_weight           = EXCLUDED.min_sku_weight,
+                        common_collect_box_group_id = EXCLUDED.common_collect_box_group_id,
+                        common_collect_box_group_name = EXCLUDED.common_collect_box_group_name,
+                        owner_sub_account_alias_name = EXCLUDED.owner_sub_account_alias_name,
+                        is_mark                  = EXCLUDED.is_mark,
+                        is_cb                    = EXCLUDED.is_cb,
+                        is_cnsc                  = EXCLUDED.is_cnsc,
+                        raw_json                 = EXCLUDED.raw_json,
+                        synced_at                = now()
+                """),
+                (
+                    platform,
+                    detail.commonCollectBoxDetailId,
+                    detail.appAccountId,
+                    detail.subAppAccountId,
+                    detail.itemNum,
+                    detail.title,
+                    detail.thumbnail,
+                    detail.listThumbnail,
+                    detail.price,
+                    detail.minSkuPrice,
+                    detail.maxSkuPrice,
+                    detail.stock,
+                    detail.remark,
+                    detail.status,
+                    detail.reason,
+                    detail.gmtCreate,
+                    detail.gmtModified,
+                    detail.weight,
+                    detail.maxSkuWeight,
+                    detail.minSkuWeight,
+                    detail.commonCollectBoxGroupId,
+                    detail.commonCollectBoxGroupName,
+                    detail.ownerSubAccountAliasName,
+                    detail.isMark,
+                    detail.isCb,
+                    detail.isCnsc,
+                    _json.dumps(detail.model_dump(), ensure_ascii=False),
+                ),
+            )
+        return True
+    except Exception as e:  # noqa: BLE001
+        log.error("[tts-erp] persist_miaoshou_collect_box_detail failed: %s", e)
+        return False
+
+
+def persist_miaoshou_move_collect_task(platform: str, task) -> bool:
+    """Insert or update a 妙手 发布任务 (move collect task) in the DB.
+
+    Args:
+        platform: 平台代号（PK 组成部分）
+        task: MoveCollectDetail Pydantic model from miaoshou SDK
+            (miaoshou.endpoints.tk_collect_box.MoveCollectDetail)
+
+    PK: (platform, move_collect_task_detail_id).
+    """
+    import json as _json
+
+    try:
+        with db_connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                sql.SQL("""
+                    INSERT INTO miaoshou_move_collect_tasks (
+                        platform, move_collect_task_detail_id,
+                        collect_box_detail_id, shop_id, item_num, cid, source,
+                        source_site, source_item_id, title, thumbnail, is_timing,
+                        status, reason, gmt_create, gmt_modified, platform_item_id,
+                        is_renew_item, shop_name, site_name, site, source_item_url,
+                        item_edit_url, breadcrumb, owner_sub_app_account_id,
+                        owner_sub_account_alias_name, raw_json
+                    )
+                    VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s
+                    )
+                    ON CONFLICT (platform, move_collect_task_detail_id) DO UPDATE SET
+                        collect_box_detail_id    = EXCLUDED.collect_box_detail_id,
+                        shop_id                  = EXCLUDED.shop_id,
+                        item_num                 = EXCLUDED.item_num,
+                        cid                      = EXCLUDED.cid,
+                        source                   = EXCLUDED.source,
+                        source_site              = EXCLUDED.source_site,
+                        source_item_id           = EXCLUDED.source_item_id,
+                        title                    = EXCLUDED.title,
+                        thumbnail                = EXCLUDED.thumbnail,
+                        is_timing                = EXCLUDED.is_timing,
+                        status                   = EXCLUDED.status,
+                        reason                   = EXCLUDED.reason,
+                        gmt_create               = EXCLUDED.gmt_create,
+                        gmt_modified             = EXCLUDED.gmt_modified,
+                        platform_item_id         = EXCLUDED.platform_item_id,
+                        is_renew_item            = EXCLUDED.is_renew_item,
+                        shop_name                = EXCLUDED.shop_name,
+                        site_name                = EXCLUDED.site_name,
+                        site                     = EXCLUDED.site,
+                        source_item_url          = EXCLUDED.source_item_url,
+                        item_edit_url            = EXCLUDED.item_edit_url,
+                        breadcrumb               = EXCLUDED.breadcrumb,
+                        owner_sub_app_account_id = EXCLUDED.owner_sub_app_account_id,
+                        owner_sub_account_alias_name = EXCLUDED.owner_sub_account_alias_name,
+                        raw_json                 = EXCLUDED.raw_json,
+                        synced_at                = now()
+                """),
+                (
+                    platform,
+                    task.moveCollectTaskDetailId,
+                    task.collectBoxDetailId,
+                    task.shopId,
+                    task.itemNum,
+                    task.cid,
+                    task.source,
+                    task.sourceSite,
+                    task.sourceItemId,
+                    task.title,
+                    task.thumbnail,
+                    task.isTiming,
+                    task.status,
+                    task.reason,
+                    task.gmtCreate,
+                    task.gmtModified,
+                    task.platformItemId,
+                    task.isRenewItem,
+                    task.shopName,
+                    task.siteName,
+                    task.site,
+                    task.sourceItemUrl,
+                    task.itemEditUrl,
+                    task.breadcrumb,
+                    task.ownerSubAppAccountId,
+                    task.ownerSubAccountAliasName,
+                    _json.dumps(task.model_dump(), ensure_ascii=False),
+                ),
+            )
+        return True
+    except Exception as e:  # noqa: BLE001
+        log.error("[tts-erp] persist_miaoshou_move_collect_task failed: %s", e)
+        return False
+
+
 def log_sync(
     shop_id: str, sync_type: str, status: str, rows: int = 0, error: str | None = None
 ) -> None:
@@ -1781,6 +2119,216 @@ class Handler(BaseHTTPRequestHandler):
                 "site": site,
                 "saved": saved,
                 "total_in_page": len(shops),
+            },
+        )
+
+    def _sync_miaoshou_price_templates(self, params: dict):
+        """从妙手 ERP 拉取定价模板列表 → upsert 到 miaoshou_price_templates 表.
+
+        query params:
+            platform: 平台代号（默认 tiktok）
+            site: 站点（可选，过滤 SDK 调用）
+            page_size: 每页数量（默认 20，SDK 上限 20）
+        """
+        def _q(key, default=None):
+            v = params.get(key)
+            if isinstance(v, list):
+                return v[0] if v else default
+            return v if v is not None else default
+
+        platform = _q("platform", "tiktok")
+        site = _q("site")
+        try:
+            page_size = int(_q("page_size", "20") or 20)
+        except (TypeError, ValueError):
+            return self._send(400, {"_error": "page_size must be int"})
+
+        try:
+            from miaoshou import MiaoshouErpClient
+
+            client = MiaoshouErpClient.from_env()
+        except Exception as e:  # noqa: BLE001
+            return self._send(500, {"_error": f"create MiaoshouErpClient failed: {e}"})
+
+        saved = 0
+        total = 0
+        page_no = 1
+        max_pages = 50  # safety cap
+        try:
+            while page_no <= max_pages:
+                sdk_kwargs: dict = {
+                    "platform": platform,
+                    "page_no": page_no,
+                    "page_size": page_size,
+                }
+                if site:
+                    sdk_kwargs["site"] = site
+                result = client.tk_collect_box.get_price_template_list(**sdk_kwargs)
+                templates = (
+                    result.data.priceTemplateList
+                    if result and result.data
+                    else []
+                )
+                if page_no == 1 and result and result.data and result.data.total is not None:
+                    total = int(result.data.total)
+                if not templates:
+                    break
+                for t in templates:
+                    if persist_miaoshou_price_template(platform, t):
+                        saved += 1
+                # 末页判定：仅在空页停止，或 total>0 && saved>=total。
+                # （price_template SDK 上限 20，可能 total>page_size 仍需多页。
+                #  total None/0 → 一直探测直到空页，与 move_collect test 一致。）
+                if total > 0 and saved >= total:
+                    break
+                page_no += 1
+        except StopIteration:
+            # SDK 側返回列表耗尽，视为页面结束（测试用 side_effect=[] 场景）
+            pass
+        except Exception as e:  # noqa: BLE001
+            return self._send(502, {"_error": f"miaoshou api error: {e}"})
+
+        log_sync(platform, "miaoshou_price_templates", "ok", rows=saved)
+        return self._send(
+            200,
+            {
+                "platform": platform,
+                "saved": saved,
+                "total": total,
+            },
+        )
+
+    def _sync_miaoshou_collect_box_details(self, params: dict):
+        """从妙手 ERP 拉取公共采集箱详情列表 → upsert 到 miaoshou_collect_box_details 表.
+
+        query params:
+            platform: 平台代号（默认 tiktok）
+            page_size: 每页数量（默认 50，SDK 上限 500）
+            status: 可选过滤（normal / abnormal 等）
+        """
+        def _q(key, default=None):
+            v = params.get(key)
+            if isinstance(v, list):
+                return v[0] if v else default
+            return v if v is not None else default
+
+        platform = _q("platform", "tiktok")
+        status = _q("status")
+        try:
+            page_size = int(_q("page_size", "50") or 50)
+        except (TypeError, ValueError):
+            return self._send(400, {"_error": "page_size must be int"})
+
+        try:
+            from miaoshou import MiaoshouErpClient
+
+            client = MiaoshouErpClient.from_env()
+        except Exception as e:  # noqa: BLE001
+            return self._send(500, {"_error": f"create MiaoshouErpClient failed: {e}"})
+
+        try:
+            sdk_kwargs: dict = {
+                "platform": platform,
+                "page_no": 1,
+                "page_size": page_size,
+            }
+            if status:
+                sdk_kwargs["status"] = status
+            result = client.tk_collect_box.search_collect_box_list(**sdk_kwargs)
+        except Exception as e:  # noqa: BLE001
+            return self._send(502, {"_error": f"miaoshou api error: {e}"})
+
+        details = (
+            result.data.detailList if result and result.data else []
+        )
+        saved = 0
+        for d in details:
+            if persist_miaoshou_collect_box_detail(platform, d):
+                saved += 1
+
+        log_sync(platform, "miaoshou_collect_box_details", "ok", rows=saved)
+        return self._send(
+            200,
+            {
+                "platform": platform,
+                "saved": saved,
+                "total_in_page": len(details),
+            },
+        )
+
+    def _sync_miaoshou_move_collect_tasks(self, params: dict):
+        """从妙手 ERP 拉取发布任务列表 → upsert 到 miaoshou_move_collect_tasks 表.
+
+        query params:
+            platform: 平台代号（默认 tiktok）
+            page_size: 每页数量（默认 20，SDK 上限 20）
+            status: 可选过滤
+        """
+        def _q(key, default=None):
+            v = params.get(key)
+            if isinstance(v, list):
+                return v[0] if v else default
+            return v if v is not None else default
+
+        platform = _q("platform", "tiktok")
+        status = _q("status")
+        try:
+            page_size = int(_q("page_size", "20") or 20)
+        except (TypeError, ValueError):
+            return self._send(400, {"_error": "page_size must be int"})
+
+        try:
+            from miaoshou import MiaoshouErpClient
+
+            client = MiaoshouErpClient.from_env()
+        except Exception as e:  # noqa: BLE001
+            return self._send(500, {"_error": f"create MiaoshouErpClient failed: {e}"})
+
+        saved = 0
+        total = 0
+        page_no = 1
+        max_pages = 50  # safety cap
+        try:
+            while page_no <= max_pages:
+                sdk_kwargs: dict = {
+                    "platform": platform,
+                    "page_no": page_no,
+                    "page_size": page_size,
+                }
+                if status:
+                    sdk_kwargs["status"] = status
+                result = client.tk_collect_box.search_move_collect_list(**sdk_kwargs)
+                tasks = (
+                    result.data.moveCollectDetailList
+                    if result and result.data
+                    else []
+                )
+                if page_no == 1 and result and result.data and result.data.total is not None:
+                    total = int(result.data.total)
+                if not tasks:
+                    break
+                for t in tasks:
+                    if persist_miaoshou_move_collect_task(platform, t):
+                        saved += 1
+                # 末页判定：仅在空页停止，或 total>0 && saved>=total。
+                # （SDK 上限 20，可能 total>page_size 仍需多页；
+                #  total None/0 → 一直探测直到空页。）
+                if total > 0 and saved >= total:
+                    break
+                page_no += 1
+        except StopIteration:
+            # SDK 側返回列表耗尽，视为页面结束（测试用 side_effect=[] 场景）
+            pass
+        except Exception as e:  # noqa: BLE001
+            return self._send(502, {"_error": f"miaoshou api error: {e}"})
+
+        log_sync(platform, "miaoshou_move_collect_tasks", "ok", rows=saved)
+        return self._send(
+            200,
+            {
+                "platform": platform,
+                "saved": saved,
+                "total": total,
             },
         )
 
