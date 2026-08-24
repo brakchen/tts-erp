@@ -187,14 +187,21 @@ class TestOauthRouterMounted:
         )
 
     def test_oauth_healthz_mounted(self):
-        """After Slice 3 both tts-erp and oauth-receiver /healthz are
-        registered. Slice 4 deletes the tts-erp one."""
+        """oauth-receiver's /healthz is mounted.
+
+        Note: at Slice 3 there were 2 /healthz routes (oauth + tts-erp).
+        Slice 4 deletes the tts-erp one, so by the time this test runs
+        alongside Slice 4 tests, there should be exactly 1. But this
+        test asserts the oauth one is there, not how many total.
+        """
         paths = _app_route_paths()
-        healthz_count = sum(1 for p in paths if p == "/healthz")
-        assert healthz_count == 2, (
-            f"Expected 2 /healthz routes (oauth + tts-erp pre-Slice-4), "
-            f"got {healthz_count}. Routes: {sorted(paths)}"
+        assert "/healthz" in paths, (
+            f"/healthz not mounted at all. Routes: {sorted(paths)}"
         )
+        # At Slice 3 there's a duplicate; at Slice 4 there's one. The
+        # canonical /healthz (oauth-router's merged one) is verified
+        # separately in TestOauthHealthzCanonical.
+        assert sum(1 for p in paths if p == "/healthz") >= 1
 
     def test_no_route_collision(self):
         """App must load — FastAPI raises at import time if two routes
@@ -231,14 +238,62 @@ class TestOauthRouterMounted:
 # ─── Belt-and-braces route counts ──────────────────────────────────
 
 
-class TestRouteCounts:
-    def test_post_slice3_route_count_is_55(self):
-        """After Slice 2: 50 APIRoute.
-        After Slice 3 (mount adds analytics_sync's 2 + oauth_router's 3): 55.
-        After Slice 4 (delete tts-erp's /healthz, dedup'd in HTTP layer): 54.
-        """
+class TestOauthHealthzCanonical:
+    """Slice 4: tts-erp's /healthz is deleted; oauth-receiver's
+    /healthz (which reports merged oauth_receiver + tts_erp + miaoshou
+    state) is the canonical one."""
+
+    def test_only_one_healthz_route(self):
+        """After Slice 4 only 1 /healthz remains — the oauth-router one."""
         paths = _app_route_paths()
-        assert len(paths) == 55, (
-            f"Expected 55 APIRoute paths after Slice 3 mount; got {len(paths)}.\n"
+        healthz_count = sum(1 for p in paths if p == "/healthz")
+        assert healthz_count == 1, (
+            f"Expected exactly 1 /healthz route (oauth-router's); got "
+            f"{healthz_count}. Routes: {sorted(paths)}"
+        )
+
+    def test_healthz_returns_oauth_receiver_section(self):
+        r = _hit("GET", "/healthz")
+        assert r.status_code == 200, f"/healthz returned {r.status_code}"
+        body = r.json()
+        assert "components" in body, f"missing 'components' in /healthz: {body}"
+        assert "oauth_receiver" in body["components"], (
+            f"missing oauth_receiver section: {list(body['components'].keys())}"
+        )
+
+    def test_healthz_returns_tts_erp_section(self):
+        r = _hit("GET", "/healthz")
+        assert r.status_code == 200
+        body = r.json()
+        assert "tts_erp" in body["components"], (
+            f"missing tts_erp section: {list(body['components'].keys())}"
+        )
+
+    def test_healthz_returns_miaoshou_section(self):
+        r = _hit("GET", "/healthz")
+        assert r.status_code == 200
+        body = r.json()
+        assert "miaoshou" in body["components"], (
+            f"missing miaoshou section: {list(body['components'].keys())}"
+        )
+
+    def test_healthz_includes_version_marker(self):
+        """Merged healthz reports version 'tts-erp+oauth-receiver/1.0'."""
+        r = _hit("GET", "/healthz")
+        body = r.json()
+        assert "tts-erp" in body.get("version", ""), (
+            f"version marker missing tts-erp: {body.get('version')}"
+        )
+        assert "oauth-receiver" in body.get("version", ""), (
+            f"version marker missing oauth-receiver: {body.get('version')}"
+        )
+
+
+class TestRouteCounts:
+    def test_post_slice4_route_count_is_54(self):
+        """After Slice 3: 55 APIRoute. After Slice 4 (delete 1 /healthz): 54."""
+        paths = _app_route_paths()
+        assert len(paths) == 54, (
+            f"Expected 54 APIRoute paths after Slice 4; got {len(paths)}.\n"
             f"Full list: {sorted(paths)}"
         )

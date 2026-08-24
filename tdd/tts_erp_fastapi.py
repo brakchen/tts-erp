@@ -186,9 +186,11 @@ app.include_router(analytics_sync_router, prefix="/v1/analytics/sync")
 app.include_router(oauth_router)
 
 
-@app.get("/healthz")
-def healthz():
-    return {"status": "ok", "ts": time.time(), "version": "TtsErp/1.0-fastapi"}
+# NOTE: Wave 3 Slice 4 deleted the tts-erp GET /healthz handler. The
+# canonical /healthz is now served by oauth_receiver_router (mounted
+# above), which returns merged status with oauth_receiver + tts_erp +
+# miaoshou sections. See oauth_receiver_router.healthz for the
+# implementation.
 
 
 # ─── TikTok OAuth redirect URL placeholder ─────────────────────────────
