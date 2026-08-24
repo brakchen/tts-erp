@@ -408,3 +408,87 @@ def test_healthz_tts_erp_db_ok_false_when_TTS_ERP_DB_URL_unset(client, monkeypat
     r = client.get("/healthz")
     assert r.status_code == 200
     assert r.json()["components"]["tts_erp"]["db_ok"] is False
+
+
+# ─── /healthz tts_erp.last_sync_at — same family of bug as db_ok ─────
+# Spec (merge-design §3.3): last_sync_at is the unix timestamp of the
+# most recent successful sync_log row. Previously the router imported
+# `from tts_erp import _last_sync_at` which never existed, so the field
+# was permanently None. Probe MAX(created_at) directly.
+
+def test_healthz_tts_erp_last_sync_at_returns_unix_float(client, monkeypatch):
+    """When sync_log has rows, last_sync_at is the unix timestamp float."""
+
+    class _FakeCursor:
+        def __init__(self, results):
+            self._results = list(results)
+            self._idx = 0
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, *a, **k): pass
+        def fetchone(self):
+            r = self._results[self._idx]
+            self._idx += 1
+            return r
+    class _FakeConn:
+        def __init__(self, results):
+            self._cursor = _FakeCursor(results)
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def cursor(self): return self._cursor
+    # Two queries on the same connection: SELECT 1 then MAX(created_at)
+    monkeypatch.setattr(router_mod.psycopg, "connect",
+                        lambda *a, **k: _FakeConn([(1,), (1756000000.0,)]))
+    monkeypatch.setenv("TTS_ERP_DB_URL", "postgresql://x:x@127.0.0.1:5432/x")
+
+    r = client.get("/healthz")
+    assert r.status_code == 200
+    tts = r.json()["components"]["tts_erp"]
+    assert tts["db_ok"] is True
+    assert tts["last_sync_at"] == 1756000000.0
+
+
+def test_healthz_tts_erp_last_sync_at_none_when_sync_log_empty(client, monkeypatch):
+    """Empty sync_log table → MAX returns NULL → last_sync_at is None."""
+
+    class _FakeCursor:
+        def __init__(self, results):
+            self._results = list(results)
+            self._idx = 0
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, *a, **k): pass
+        def fetchone(self):
+            r = self._results[self._idx]
+            self._idx += 1
+            return r
+    class _FakeConn:
+        def __init__(self, results):
+            self._cursor = _FakeCursor(results)
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def cursor(self): return self._cursor
+    # MAX on empty table returns NULL (psycopg returns None)
+    monkeypatch.setattr(router_mod.psycopg, "connect",
+                        lambda *a, **k: _FakeConn([(1,), (None,)]))
+    monkeypatch.setenv("TTS_ERP_DB_URL", "postgresql://x:x@127.0.0.1:5432/x")
+
+    r = client.get("/healthz")
+    assert r.status_code == 200
+    tts = r.json()["components"]["tts_erp"]
+    assert tts["db_ok"] is True
+    assert tts["last_sync_at"] is None
+
+
+def test_healthz_tts_erp_last_sync_at_none_when_psycopg_raises(client, monkeypatch):
+    """Connection failure → db_ok is False, last_sync_at is None (no crash)."""
+    def _fail(*a, **k):
+        raise RuntimeError("connection refused")
+    monkeypatch.setattr(router_mod.psycopg, "connect", _fail)
+    monkeypatch.setenv("TTS_ERP_DB_URL", "postgresql://x:x@127.0.0.1:9/x")
+
+    r = client.get("/healthz")
+    assert r.status_code == 200
+    tts = r.json()["components"]["tts_erp"]
+    assert tts["db_ok"] is False
+    assert tts["last_sync_at"] is None

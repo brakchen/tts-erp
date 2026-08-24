@@ -283,16 +283,28 @@ def _oauth_receiver_section() -> dict:
 def _tts_erp_section() -> dict:
     """Best-effort — never raises.
 
-    The merge-design §3.3 spec asks for a `tts_erp.db_ok` boolean, but
-    `tts_erp.py` never exposed a `_db_ready()` helper. Probing the DB
-    directly with `psycopg.connect` is the honest, dependency-free
-    answer — and it matches what the oauth_receiver section already
-    does for its own DB. ~5 lines, no `_db_ready` indirection.
+    The merge-design §3.3 spec asks for `tts_erp.db_ok` (boolean) and
+    `tts_erp.last_sync_at` (unix timestamp of the most recent successful
+    sync). `tts_erp.py` exposed neither helper — probing the DB directly
+    via `psycopg.connect` is the honest, dependency-free answer.
 
-    The previous implementation `from tts_erp import _db_ready` raised
-    ImportError on every cold start, was silently swallowed by
-    `except Exception`, and permanently returned db_ok=False — a lie
-    (DB was reachable, /db/orders returned rows).
+    Two queries on one open connection (efficient + atomic):
+      1. `SELECT 1`                    → liveness → db_ok
+      2. `SELECT EXTRACT(EPOCH FROM MAX(finished_at)) FROM sync_log`
+                                        → last_sync_at (None if table empty)
+
+    NOTE on column name: production DB has `started_at` + `finished_at`
+    columns (the schema.sql still shows the older `created_at` name —
+    schema drift, separate issue). `finished_at` is the right column
+    to use for "when did the last sync complete"; `started_at` would
+    mislead on long-running syncs.
+
+    The previous implementation `from tts_erp import _db_ready` /
+    `from tts_erp import _last_sync_at` raised ImportError on every
+    cold start, was silently swallowed by `except Exception`, and
+    permanently returned db_ok=False / last_sync_at=None — both lies
+    (DB was reachable, sync_log was actively being written by
+    /sync/* endpoints).
     """
     section: dict = {"db_ok": False, "last_sync_at": None}
     url = os.environ.get("TTS_ERP_DB_URL")
@@ -302,7 +314,13 @@ def _tts_erp_section() -> dict:
         with psycopg.connect(url, connect_timeout=2) as conn, conn.cursor() as cur:
             cur.execute("SELECT 1")
             cur.fetchone()
-        section["db_ok"] = True
+            section["db_ok"] = True
+            cur.execute(
+                "SELECT EXTRACT(EPOCH FROM MAX(finished_at)) FROM sync_log"
+            )
+            row = cur.fetchone()
+            if row and row[0] is not None:
+                section["last_sync_at"] = float(row[0])
     except Exception as e:  # noqa: BLE001
         print(f"[oauth-receiver/healthz] tts_erp DB probe failed: {e}")
     return section

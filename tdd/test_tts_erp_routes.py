@@ -32,6 +32,7 @@ Sub-app routes (e.g. ``analytics_sync`` mounted under /v1/analytics/sync)
 are verified via HTTP, not route introspection (FastAPI ≥0.116 defers
 flattening these routes into ``app.routes``).
 """
+
 from __future__ import annotations
 
 import pytest
@@ -103,7 +104,9 @@ class TestDeletedProxyRoutes:
 
     def test_no_shops_route_in_merged_app(self):
         paths = _app_route_paths()
-        assert "/shops" not in paths, f"/shops still registered. Routes: {sorted(paths)}"
+        assert "/shops" not in paths, (
+            f"/shops still registered. Routes: {sorted(paths)}"
+        )
 
     def test_no_shops_with_id_route_in_merged_app(self):
         paths = _app_route_paths()
@@ -206,6 +209,7 @@ class TestOauthRouterMounted:
         """App must load — FastAPI raises at import time if two routes
         share path+method."""
         from fastapi import FastAPI
+
         assert isinstance(app, FastAPI)
 
     def test_authorize_returns_200(self):
