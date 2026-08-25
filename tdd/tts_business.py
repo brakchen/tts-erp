@@ -8,12 +8,14 @@ Each function:
 HTTP framework code (FastAPI handler, BaseHTTPRequestHandler) and PG
 connection management live elsewhere. This module is pure.
 """
+
 from __future__ import annotations
 
+import random
+import time
 from typing import Any
 
 from domain import Creds, HttpClient, SyncResult
-
 
 # Maximum pages to fetch in one sync call. Safety cap to avoid
 # runaway pagination if TikTok keeps returning next_page_token.
@@ -41,6 +43,8 @@ def sync_orders(
     order_status = body.get("order_status")
     create_time_ge = body.get("create_time_ge")
     create_time_lt = body.get("create_time_lt")
+    update_time_ge = body.get("update_time_ge")
+    update_time_lt = body.get("update_time_lt")
 
     extra_params: dict[str, str] = {
         "shop_cipher": creds.shop_cipher,
@@ -56,14 +60,22 @@ def sync_orders(
         search_body["create_time_ge"] = int(create_time_ge)
     if create_time_lt is not None:
         search_body["create_time_lt"] = int(create_time_lt)
+    # L1 watermark: see sync_returns — same pattern, identical semantics
+    if update_time_ge is not None:
+        search_body["update_time_ge"] = int(update_time_ge)
+    if update_time_lt is not None:
+        search_body["update_time_lt"] = int(update_time_lt)
 
     first = http.request(
-        "POST", "/order/202309/orders/search",
+        "POST",
+        "/order/202309/orders/search",
         body=search_body if search_body else None,
         extra_params=extra_params,
     )
     if first.get("code") != 0:
-        return SyncResult(saved=0, total=0, pages=0, error=str(first.get("message", "unknown")))
+        return SyncResult(
+            saved=0, total=0, pages=0, error=str(first.get("message", "unknown"))
+        )
 
     data = first.get("data") or {}
     order_list = data.get("order_list") or data.get("orders") or data.get("list") or []
@@ -75,7 +87,8 @@ def sync_orders(
     while next_token and pages < _MAX_PAGES:
         extra_params["page_token"] = next_token
         nxt = http.request(
-            "POST", "/order/202309/orders/search",
+            "POST",
+            "/order/202309/orders/search",
             body=search_body if search_body else None,
             extra_params=extra_params,
         )
@@ -88,6 +101,11 @@ def sync_orders(
                 saved += 1
         next_token = d.get("next_page_token") or d.get("page_token")
         pages += 1
+        # Anti-burst jitter: orders pagination can run 13 pages back-to-back
+        # within ~60s. Spread each page by 0.5-1.5s so /order/202309/orders/search
+        # doesn't see the same shop hammering the same endpoint in burst.
+        if next_token:
+            time.sleep(random.uniform(0.5, 1.5))
 
     return SyncResult(saved=saved, total=total, pages=pages)
 
@@ -130,12 +148,15 @@ def sync_payments(
         extra_params["create_time_lt"] = str(int(create_time_lt))
 
     first = http.request(
-        "GET", "/finance/202309/payments",
-        body=None, extra_params=extra_params,
+        "GET",
+        "/finance/202309/payments",
+        body=None,
+        extra_params=extra_params,
     )
     if first.get("code") != 0:
-        return SyncResult(saved=0, total=0, pages=0,
-                          error=str(first.get("message", "unknown")))
+        return SyncResult(
+            saved=0, total=0, pages=0, error=str(first.get("message", "unknown"))
+        )
 
     data = first.get("data") or {}
     pays = data.get("payments") or []
@@ -147,8 +168,10 @@ def sync_payments(
     while next_token and pages < _MAX_PAGES:
         extra_params["page_token"] = next_token
         nxt = http.request(
-            "GET", "/finance/202309/payments",
-            body=None, extra_params=extra_params,
+            "GET",
+            "/finance/202309/payments",
+            body=None,
+            extra_params=extra_params,
         )
         if nxt.get("code") != 0:
             break
@@ -198,12 +221,15 @@ def sync_statements(
         extra_params["statement_time_lt"] = str(int(statement_time_lt))
 
     first = http.request(
-        "GET", "/finance/202309/statements",
-        body=None, extra_params=extra_params,
+        "GET",
+        "/finance/202309/statements",
+        body=None,
+        extra_params=extra_params,
     )
     if first.get("code") != 0:
-        return SyncResult(saved=0, total=0, pages=0,
-                          error=str(first.get("message", "unknown")))
+        return SyncResult(
+            saved=0, total=0, pages=0, error=str(first.get("message", "unknown"))
+        )
 
     data = first.get("data") or {}
     stmts = data.get("statements") or []
@@ -215,8 +241,10 @@ def sync_statements(
     while next_token and pages < _MAX_PAGES:
         extra_params["page_token"] = next_token
         nxt = http.request(
-            "GET", "/finance/202309/statements",
-            body=None, extra_params=extra_params,
+            "GET",
+            "/finance/202309/statements",
+            body=None,
+            extra_params=extra_params,
         )
         if nxt.get("code") != 0:
             break
@@ -288,8 +316,10 @@ def sync_statement_transactions(
             if next_token:
                 extra_params["page_token"] = next_token
             r = http.request(
-                "GET", f"/finance/202309/statements/{sid}/statement_transactions",
-                body=None, extra_params=extra_params,
+                "GET",
+                f"/finance/202309/statements/{sid}/statement_transactions",
+                body=None,
+                extra_params=extra_params,
             )
             if r.get("code") != 0:
                 errors.append(f"{sid}: {r.get('message', 'unknown')}")
@@ -307,10 +337,15 @@ def sync_statement_transactions(
                 break
 
     if errors and saved == 0:
-        return SyncResult(saved=0, total=total, pages=pages,
-                          error="; ".join(errors)[:400])
-    return SyncResult(saved=saved, total=total, pages=pages,
-                      error=("; ".join(errors)[:400] if errors else None))
+        return SyncResult(
+            saved=0, total=total, pages=pages, error="; ".join(errors)[:400]
+        )
+    return SyncResult(
+        saved=saved,
+        total=total,
+        pages=pages,
+        error=("; ".join(errors)[:400] if errors else None),
+    )
 
 
 def sync_returns(
@@ -329,6 +364,8 @@ def sync_returns(
     page_size = int(body.get("page_size") or 50)
     create_time_ge = body.get("create_time_ge")
     create_time_lt = body.get("create_time_lt")
+    update_time_ge = body.get("update_time_ge")
+    update_time_lt = body.get("update_time_lt")
 
     extra_params: dict[str, str] = {
         "shop_cipher": creds.shop_cipher,
@@ -341,15 +378,24 @@ def sync_returns(
         filter_body["create_time_ge"] = int(create_time_ge)
     if create_time_lt is not None:
         filter_body["create_time_lt"] = int(create_time_lt)
+    # L1 watermark: cron may pass update_time_* instead of create_time_*
+    # when local MAX(update_time) is known (incremental sync). The two
+    # filters are mutually exclusive in practice — cron chooses one.
+    if update_time_ge is not None:
+        filter_body["update_time_ge"] = int(update_time_ge)
+    if update_time_lt is not None:
+        filter_body["update_time_lt"] = int(update_time_lt)
 
     first = http.request(
-        "POST", "/return_refund/202309/returns/search",
+        "POST",
+        "/return_refund/202309/returns/search",
         body=filter_body if filter_body else None,
         extra_params=extra_params,
     )
     if first.get("code") != 0:
-        return SyncResult(saved=0, total=0, pages=0,
-                          error=str(first.get("message", "unknown")))
+        return SyncResult(
+            saved=0, total=0, pages=0, error=str(first.get("message", "unknown"))
+        )
 
     data = first.get("data") or {}
     items = data.get("return_orders") or data.get("returns") or data.get("list") or []
@@ -361,7 +407,8 @@ def sync_returns(
     while next_token and pages < _MAX_PAGES:
         extra_params["page_token"] = next_token
         nxt = http.request(
-            "POST", "/return_refund/202309/returns/search",
+            "POST",
+            "/return_refund/202309/returns/search",
             body=filter_body if filter_body else None,
             extra_params=extra_params,
         )
@@ -391,6 +438,8 @@ def sync_cancellations(
     page_size = int(body.get("page_size") or 50)
     create_time_ge = body.get("create_time_ge")
     create_time_lt = body.get("create_time_lt")
+    update_time_ge = body.get("update_time_ge")
+    update_time_lt = body.get("update_time_lt")
 
     extra_params: dict[str, str] = {
         "shop_cipher": creds.shop_cipher,
@@ -403,15 +452,22 @@ def sync_cancellations(
         filter_body["create_time_ge"] = int(create_time_ge)
     if create_time_lt is not None:
         filter_body["create_time_lt"] = int(create_time_lt)
+    # L1 watermark: see sync_returns — same pattern, identical semantics
+    if update_time_ge is not None:
+        filter_body["update_time_ge"] = int(update_time_ge)
+    if update_time_lt is not None:
+        filter_body["update_time_lt"] = int(update_time_lt)
 
     first = http.request(
-        "POST", "/return_refund/202309/cancellations/search",
+        "POST",
+        "/return_refund/202309/cancellations/search",
         body=filter_body if filter_body else None,
         extra_params=extra_params,
     )
     if first.get("code") != 0:
-        return SyncResult(saved=0, total=0, pages=0,
-                          error=str(first.get("message", "unknown")))
+        return SyncResult(
+            saved=0, total=0, pages=0, error=str(first.get("message", "unknown"))
+        )
 
     data = first.get("data") or {}
     items = data.get("cancellations") or data.get("list") or []
@@ -423,7 +479,8 @@ def sync_cancellations(
     while next_token and pages < _MAX_PAGES:
         extra_params["page_token"] = next_token
         nxt = http.request(
-            "POST", "/return_refund/202309/cancellations/search",
+            "POST",
+            "/return_refund/202309/cancellations/search",
             body=filter_body if filter_body else None,
             extra_params=extra_params,
         )
