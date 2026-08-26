@@ -4,6 +4,70 @@ This document is the **stable public API contract** for the tts-erp FastAPI
 service (port 9877). Internal-only endpoints (sync, token, oauth-receiver
 passthrough) are listed in `GET /endpoints` but NOT covered here.
 
+## TL;DR — quick reference for agents
+
+All endpoints below are served by the FastAPI service at
+`http://127.0.0.1:9877` (or `http://daqiang.nat100.top` from outside, **port
+already stripped** at the NAT layer). Every endpoint other than the
+explicitly-public ones requires `Authorization: Bearer <key>` or
+`X-API-Key: <key>`.
+
+| What you want | Endpoint | Role | Time fields |
+| --- | --- | --- | --- |
+| Service liveness / version | `GET /healthz` | public | — |
+| Discover every route | `GET /endpoints` | public | — |
+| Auto-generated schema | `GET /openapi.json`, `/docs`, `/redoc` | public | — |
+| List orders | `GET /db/orders` | readonly | `create_time`, `paid_time`, `shipped_time`, `delivered_time`, `cancelled_time` (epoch sec) |
+| Get one order + items + shipping | `GET /db/orders/{id}` (+ `/items`, `/shipping`) | readonly | epoch + ISO |
+| List refunds / cancellations | `GET /db/returns`, `/db/cancellations` | readonly | `create_time`, `update_time` |
+| Get one refund (with computed `refund_amount`) | `GET /db/returns/{id}` | readonly | epoch + ISO |
+| List statements / payments | `GET /db/statements`, `/db/payments` | readonly | `statement_time` |
+| Per-statement fee breakdown (58 fields) | `GET /db/statement_transactions` | readonly | epoch |
+| Logistics tracking summary | `GET /db/logistics_tracking` | readonly | — |
+| Logistics event stream (per order) | `GET /db/logistics_events` | readonly | milliseconds |
+| Live tracking (TikTok proxy, auto-persists) | `GET /logistics/orders/{id}/tracking?shop_id=X` | readonly | — |
+| Sync ingest state | `GET /db/sync_log` | admin (default) | ISO |
+| Analytics cursor (for `tk-adv-cost-monitor`) | `GET /v1/analytics/sync/cursor` | readwrite + scope | `latestCompletedDay` / `nextRequiredDay` (date) |
+
+Key gotchas (read these before writing code):
+
+- **Epoch seconds, not millis**, on `/db/*` (BIGINT in DB). Response includes
+  matching `_iso` UTC strings for convenience. **`/db/logistics_events` is
+  the exception** — it uses **milliseconds** because the source API does.
+- Pagination on `/db/orders` and `/db/returns` is **keyset** via opaque
+  base64 `cursor`. Pass the previous response's `next_cursor` as-is.
+  `limit` is 1..500 (default 50).
+- `cursor` is opaque (do not parse). Invalid cursor → 400.
+- Refunds expose computed `refund_amount` (numeric) + `refund_currency`
+  (string), derived from `raw->'refund_amount'->>'refund_total'` /
+  `raw->'refund_amount'->>'currency'` (TikTok 202309 spec; **note the
+  nested object, not `raw->'refund'`** — this changed on 2026-08-20). NULL
+  when raw has no refund_amount object.
+- All auth modes: see [Authentication](#authentication) below.
+
+Minimal recipe — first call:
+
+```bash
+KEY=$(cat ~/.tts-erp-key)        # mint with: python3 api_keys.py create --role readonly --name agent-x
+curl -sS -H "X-API-Key: $KEY" \
+  "http://127.0.0.1:9877/db/orders?shop_id=7494763368967603447&limit=2"
+```
+
+Minimal recipe — paginate to end:
+
+```bash
+URL="http://127.0.0.1:9877/db/orders?shop_id=7494763368967603447&limit=200"
+while : ; do
+  RESP=$(curl -sS -H "X-API-Key: $KEY" "$URL")
+  echo "$RESP" | jq -r '.items[] | [.order_id, .order_status_name, .create_time_iso] | @tsv'
+  CURSOR=$(echo "$RESP" | jq -r '.next_cursor // ""')
+  [ -z "$CURSOR" ] && break
+  URL="$URL&cursor=$CURSOR"
+done
+```
+
+For full request/response schemas, see the **Endpoints** section below.
+
 ## Authentication
 
 Every request to a non-public endpoint must carry an API key. Two header
@@ -168,8 +232,13 @@ Order shipping info (`order_shippings` table).
 Local-DB returns list. Same pagination contract as `/db/orders`. Each item
 includes the computed field:
 
-- `refund_amount` — `numeric`, derived from `raw->'refund'->>'refund_total'`.
-  NULL when raw doesn't have a refund object.
+- `refund_amount` — `numeric`, derived from
+  `raw->'refund_amount'->>'refund_total'` (TikTok 202309 spec; **note the
+  nested object, not `raw->'refund'`** — this changed on 2026-08-20 when
+  the wrong path was corrected). NULL when raw doesn't have a
+  `refund_amount` object.
+- `refund_currency` — string, from `raw->'refund_amount'->>'currency'`. NULL
+  when no refund_amount object.
 
 Query parameters (plus standard `limit`, `cursor`, `shop_id`, `status`):
 
@@ -206,6 +275,36 @@ Per-order event list (timestamps in **milliseconds**, unlike other tables).
 | `event_time_iso` | string | computed UTC ISO |
 | `description`, `location` | string | |
 
+#### `GET /logistics/orders/{order_id}/tracking?shop_id=X`
+
+**Live** tracking (proxies the TikTok `/fulfillment/202309/orders/<id>/tracking`
+endpoint) AND auto-persists the result into `logistics_tracking` /
+`logistics_events`, AND backfills `tracking_number` from
+`order_shippings` if present. This is the right endpoint when you want
+the freshest possible tracking data — `/db/logistics_tracking` is the
+persisted view (cron refreshes every 10 min).
+
+Returns the upstream TikTok envelope (`code`, `data.tracking`, etc.)
+verbatim. If `code != 0`, the endpoint returns HTTP 502 with the upstream
+payload in `detail`.
+
+Query parameters:
+
+| name | type | notes |
+| --- | --- | --- |
+| `order_id` | path | required |
+| `shop_id` | string | required |
+
+```bash
+curl -H "X-API-Key: $KEY" \
+  "http://127.0.0.1:9877/logistics/orders/585627776242845445/tracking?shop_id=7494763368967603447"
+```
+
+> Note: this is **different** from `GET /db/logistics_tracking` (persisted,
+> maybe stale by up to 10 min) and from `GET /orders/{id}/tracking` (also
+> a TikTok proxy but does NOT persist). Use this endpoint when you want
+> the live data plus a side-effect refresh of the persisted view.
+
 ### Finance
 
 #### `GET /db/statements`
@@ -227,20 +326,144 @@ Statement transaction detail (fee breakdowns). Parameters: `shop_id`,
 
 Cancel list. Parameters: `shop_id`, `status`, `limit`.
 
+### Analytics Sync
+
+Mounted under tts-erp at `/v1/analytics/sync/*`. Powers the
+`tk-adv-cost-monitor` Chrome extension. Auth requires **readwrite**
+role plus a per-seller scope grant (api_key's `scopes` array).
+Full protocol lives in
+[`analytics_sync/tech-doc/analytics-sync.md`](../analytics_sync/tech-doc/analytics-sync.md);
+this section is the agent-facing quick reference.
+
+#### `GET /v1/analytics/sync/cursor`
+
+Returns the latest-day state for every `(storageKey, campaignId)` pair
+known for the scope. `nextRequiredDay` is authoritative for the daily
+job scheduler.
+
+Query parameters (all required except `storageKey` / `campaignId` /
+`cursor` / `pageSize`):
+
+| name | type | notes |
+| --- | --- | --- |
+| `sellerId` | string | required, ≤ 128 chars |
+| `advertiserId` | string | required, ≤ 128 chars |
+| `storageKey` | enum | optional; one of `productAnalyses`, `sessionAnalyses`, `campaignChangeLogs` |
+| `campaignId` | string | optional, ≤ 128 chars |
+| `cursor` | string | optional, opaque (reserved for future use) |
+| `pageSize` | int | optional, 1..100, default 50 |
+
+Response:
+
+```json
+{
+  "code": 0,
+  "requestId": "req-…",
+  "data": {
+    "timezone": "Asia/Shanghai",
+    "items": [
+      {
+        "storageKey": "productAnalyses",
+        "campaignId": "campaign-1",
+        "latestCompletedDay": "2026-08-22",
+        "nextRequiredDay": "2026-08-23"
+      }
+    ],
+    "nextCursor": null
+  }
+}
+```
+
+`nextRequiredDay = max(latestCompletedDay + 1 day, today_in_shop_tz − bootstrap_lookback_days)`.
+If `latestCompletedDay` is NULL, returns `today_in_shop_tz − 30 days`
+(configurable via env `ANALYTICS_SYNC_BOOTSTRAP_LOOKBACK_DAYS`).
+
+`403 SCOPE_DENIED` if the api_key's `scopes[]` doesn't cover the
+requested `(sellerId, advertiserId)`.
+
+#### `POST /v1/analytics/sync/batches`
+
+Idempotent batch upload (≤ 100 records / 2 MB body). The server
+**recomputes** the canonical idempotency key from each record and
+rejects any record whose client-sent `idempotencyKey` doesn't match the
+recomputed one — the DB unique constraint is the single source of
+dedup truth.
+
+Request body:
+
+```json
+{
+  "protocolVersion": 1,
+  "requestId": "req-…",
+  "scope": {"sellerId": "seller-1", "advertiserId": "adv-1", "shopName": "demo-shop"},
+  "records": [
+    {
+      "idempotencyKey": "<64-char lowercase hex>",
+      "storageKey": "productAnalyses",
+      "campaignId": "campaign-1",
+      "day": "2026-08-23",
+      "page": 1,
+      "endpoint": "/oec_ads/...",
+      "method": "POST",
+      "response": {"data": []},
+      "source": "background_poll",
+      "capturedAt": "2026-08-23T03:00:00.000Z"
+    }
+  ]
+}
+```
+
+Success response (`code: 0`):
+
+```json
+{
+  "code": 0,
+  "requestId": "req-…",
+  "data": {
+    "accepted": [
+      {"idempotencyKey": "...", "status": "inserted"},
+      {"idempotencyKey": "...", "status": "duplicate"}
+    ],
+    "rejected": [
+      {"idempotencyKey": "...", "code": "SCHEMA_INVALID", "message": "...", "retryable": false}
+    ]
+  }
+}
+```
+
+`inserted` and `duplicate` are **both successes**. `rejected[*].retryable = false`
+means do NOT retry unchanged — surface the error to a human.
+
+Errors:
+
+| code | meaning | retry? |
+| --- | --- | --- |
+| 400 | malformed JSON / schema invalid / unsupported protocol version | no |
+| 401 | missing or invalid Bearer token | no |
+| 403 | scope mismatch (`SCOPE_DENIED`) | no |
+| 413 | body > 2 MB | no (split batch) |
+| 429 | rate limited | yes (after `Retry-After`) |
+
 ### Misc
 
 #### `GET /healthz`
 
-Public. Returns `{status, ts, version}`.
+Public (auth-exempt, rate-limit-exempt). Returns `{status, ts, version}`.
 
 #### `GET /endpoints`
 
-Public. Lists every endpoint registered.
+Public. Lists every endpoint registered (both external-stable AND
+internal-only — useful as a discovery surface for ops).
 
-#### `GET /openapi.json`
+#### `GET /openapi.json` / `GET /docs` / `GET /redoc`
 
-Public (in production deployment via reverse proxy; auth mode default may
-restrict). Auto-generated OpenAPI schema for all routes.
+Public. Auto-generated OpenAPI 3.1 schema (`/openapi.json`), Swagger UI
+(`/docs`), ReDoc UI (`/redoc`). All three are in `EXEMPT_PATHS` in
+`tdd/auth.py`, so they bypass both auth and rate limit.
+
+> Production hardening: if you don't want browsers poking at the schema,
+> restrict these three at the reverse proxy. The service itself does not
+> gate them.
 
 ## Error responses
 
@@ -301,6 +524,15 @@ Current contract is v1 (no version prefix in the URL).
 
 ## Examples
 
+### Analytics cursor poll (Chrome extension pattern)
+
+```bash
+# Get the next day to upload for every campaign of seller-1 / adv-1
+curl -sS -H "X-API-Key: $KEY" \
+  "http://127.0.0.1:9877/v1/analytics/sync/cursor?sellerId=seller-1&advertiserId=adv-1&pageSize=100" \
+  | jq -r '.data.items[] | [.storageKey, .campaignId, .nextRequiredDay] | @tsv'
+```
+
 ### Daily summary
 
 ```bash
@@ -335,23 +567,37 @@ curl -H "X-API-Key: $KEY" \
 
 ## Stability matrix
 
-| endpoint | status |
+Stable external endpoints (safe to build dashboards on):
+
+| endpoint | role | stability |
+| --- | --- | --- |
+| `GET /healthz` | public | stable |
+| `GET /endpoints` | public | stable |
+| `GET /openapi.json`, `/docs`, `/redoc` | public | stable (consider proxy-restricting in prod) |
+| `GET /db/orders` | readonly | v1 |
+| `GET /db/orders/{id}` | readonly | v1 |
+| `GET /db/orders/{id}/items` | readonly | v1 |
+| `GET /db/orders/{id}/shipping` | readonly | v1 |
+| `GET /db/returns` | readonly | v1 |
+| `GET /db/returns/{id}` | readonly | v1 |
+| `GET /db/cancellations` | readonly | v1 |
+| `GET /db/statements` | readonly | v1 |
+| `GET /db/payments` | readonly | v1 |
+| `GET /db/statement_transactions` | readonly | v1 |
+| `GET /db/logistics_tracking` | readonly | v1 |
+| `GET /db/logistics_events` | readonly | v1 |
+| `GET /logistics/orders/{id}/tracking` | readonly | v1 (writes to DB; counts as a query+side-effect) |
+| `GET /v1/analytics/sync/cursor` | readwrite + scope | v1 |
+| `POST /v1/analytics/sync/batches` | readwrite + scope | v1 |
+
+Internal-only (may break without notice — do NOT build dashboards on
+these):
+
+| endpoint | notes |
 | --- | --- |
-| `GET /healthz` | stable, public |
-| `GET /endpoints` | stable, public |
-| `GET /db/orders` | stable, v1 |
-| `GET /db/orders/{id}` | stable, v1 |
-| `GET /db/orders/{id}/items` | stable, v1 |
-| `GET /db/orders/{id}/shipping` | stable, v1 |
-| `GET /db/returns` | stable, v1 |
-| `GET /db/returns/{id}` | stable, v1 |
-| `GET /db/cancellations` | stable, v1 |
-| `GET /db/statements` | stable, v1 |
-| `GET /db/payments` | stable, v1 |
-| `GET /db/statement_transactions` | stable, v1 |
-| `GET /db/logistics_tracking` | stable, v1 |
-| `GET /db/logistics_events` | stable, v1 |
-| `POST /sync/*` | internal, NOT external-stable |
-| `POST /orders/*` (TikTok proxy) | internal, NOT external-stable |
-| `GET /finance/*` (TikTok proxy) | internal, NOT external-stable |
-| `GET /token/{shop_id}` | admin-only, internal |
+| `POST /sync/*` | cron-driven data ingest |
+| `POST /orders/*` (TikTok proxy) | live writes to TikTok; side-effects |
+| `GET /finance/*` (TikTok proxy) | live upstream calls |
+| `GET /token/{shop_id}` | admin-only, reveals plaintext tokens |
+| `GET /db/sync_log` | admin-only, in-process mirror |
+| `GET /miaoshou/*` | Wanshifu/Miaoshou SDK proxy (separate domain; admin role by default) |

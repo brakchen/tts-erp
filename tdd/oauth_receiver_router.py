@@ -274,7 +274,14 @@ def _oauth_receiver_section() -> dict:
 
     return {
         "db_ok": oc.is_db_ok(),
-        "token_count": len(oc._token_history),
+        # token_count = rows in oauth_tokens (DB truth), NOT in-memory
+        # operation history. Bug history: 2026-08-25 healthz reported 0
+        # after restart because `_token_history` was the empty deque; fixed by
+        # switching to oc.db_count_shops() which does SELECT COUNT(*).
+        "token_count": oc.db_count_shops(),
+        # active_states = pending OAuth CSRF state tokens. In-memory is
+        # correct here — state tokens are short-lived and intentionally
+        # not persisted (cleared on callback/purge_expired_states).
         "active_states": len(oc._states),
         "providers": providers,
     }

@@ -18,6 +18,7 @@ import base64
 import json
 import os
 import sys
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -67,10 +68,43 @@ from tts_erp import _safe_int  # noqa: E402  -- per-request int() hardening
 # allow_origins to a whitelist before opening to public clients.
 # See tech-doc/external-api.md#cors.
 
+
+@asynccontextmanager
+async def _run_startup_backfill(_app):  # noqa: ARG001
+    """Best-effort backfill of tts_erp.shops from oauth_tokens on startup.
+
+    Why: tts_erp.shops was found empty in 2026-08-25 because FastAPI
+    never inherited the legacy `persist_shop` call (done in
+    _proxy_order). This startup hook ensures the table stays warm.
+
+    Best-effort: never raises. Logs to stderr on failure so ops can
+    diagnose from `journalctl --user -u tts-erp`.
+    """
+    try:
+        from _backfill import run_startup_backfill_if_configured
+
+        written = run_startup_backfill_if_configured()
+        if written is None:
+            sys.stderr.write(
+                "[startup] shops backfill skipped (OAUTH_DB_URL or "
+                "TTS_ERP_DB_URL not set)\n"
+            )
+        elif written:
+            sys.stderr.write(
+                f"[startup] shops backfill: wrote {written} row(s) to "
+                "tts_erp.shops from oauth_tokens\n"
+            )
+        # written == 0 is fine — no shops authorized yet, nothing to do.
+    except Exception as e:  # noqa: BLE001
+        sys.stderr.write(f"[startup] shops backfill failed (non-fatal): {e}\n")
+    yield
+
+
 app = FastAPI(
     title="tts-erp",
     version="1.0",
     description="tts-erp public API for orders / refunds / logistics queries. Auth via X-API-Key (or Authorization: Bearer).",
+    lifespan=_run_startup_backfill,
 )
 
 # Middleware wrapping: FastAPI appends user_middleware in add order, then
@@ -228,10 +262,14 @@ def endpoints():
     return {
         "service": "tts-erp",
         "version": "1.0-fastapi",
-        "passthrough": [
-            "GET /shops",
-            "GET /shops/<shop_id>",
-            "GET /token/<shop_id>?reveal=1",
+        # Wave 3 Slice 2 removed the OAuth-receiver passthrough routes
+        # (/shops, /shops/<id>, /token/<id>) — shop listings and per-shop
+        # token access are now in-process via oauth_receiver_core.
+        # See CHANGELOG 2026-08-24 (sync_cron fix) for migration notes.
+        "passthrough_removed": [
+            "GET /shops           → now via oauth_receiver_core.db_list_shops()",
+            "GET /shops/<shop_id> → now via oauth_receiver_core.db_load_token()",
+            "GET /token/<shop_id> → now via oauth_receiver_core.db_load_token()",
         ],
         "orders_api_proxy": [
             "POST /orders/search              (paging/sort in query string)",
@@ -976,6 +1014,29 @@ def db_sync_log(limit: int = 50):
     return {"items": list(tts_erp._last_syncs)[-limit:]}
 
 
+# ─── Admin / repair endpoints (admin role via AuthMiddleware) ────────
+
+
+@app.post("/admin/shops/backfill")
+def admin_shops_backfill():
+    """Re-sync oauth_receiver.oauth_tokens → tts_erp.shops.
+
+    Repairs the data drift where tts_erp.shops is empty even though
+    shops exist in oauth_receiver. Idempotent. Returns rows_written.
+
+    Auth: admin role required (see auth.py required_role: unmatched
+    paths default to admin).
+    """
+    from _backfill import backfill_shops_from_oauth  # local import: avoid startup cost
+
+    rows = backfill_shops_from_oauth(
+        oauth_db_url=os.environ.get("OAUTH_DB_URL", ""),
+        tts_db_url=os.environ.get("TTS_ERP_DB_URL", ""),
+        only_test_rows=False,
+    )
+    return {"rows_written": rows, "source": "oauth_tokens", "target": "tts_erp.shops"}
+
+
 @app.get("/db/statement_transactions")
 def db_statement_transactions(
     shop_id: str | None = None,
@@ -1055,6 +1116,23 @@ def _tiktok_proxy(
         order = (data.get("order") if isinstance(data, dict) else None) or data
         if isinstance(order, dict) and (order.get("id") or order.get("order_id")):
             tts_erp.persist_order(shop_id, order)
+            # Mirror the legacy tts_erp._proxy_order behavior: also refresh
+            # shop metadata (name/region/seller_type). Without this, the
+            # tts_erp.shops table drifts to empty because legacy called
+            # persist_shop on every detail fetch. FastAPI never inherited
+            # this — fixed 2026-08-25 (see AGENTS.md data-drift section).
+            try:
+                tts_erp.persist_shop(
+                    shop_id,
+                    name=order.get("shop_name"),
+                    region=creds.region or None,
+                    cipher=creds.shop_cipher,
+                    seller_type=order.get("seller_type"),
+                )
+            except Exception as e:  # noqa: BLE001
+                sys.stderr.write(
+                    f"[tts-erp-fastapi] persist_shop({shop_id}) failed: {e}\n"
+                )
 
     if result.get("code") == 0:
         return result

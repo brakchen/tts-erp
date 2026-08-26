@@ -1,7 +1,24 @@
 # handoff.md — tts-erp 跨 session 交接笔记
 
-> 上次 session: 2026-08-16
-> 上次 session 主题: 从 0 搭起来整个 tts-erp 服务 + 修通 /orders/search + 接入 get-statements-202309
+> 上次 session: 2026-08-25
+> 上次 session 主题: 修 3 个 drift —— /healthz 撒谎、tts_erp.shops 空、schema.sql 过时
+
+## TL;DR (2026-08-25)
+
+三个 drift 全部修完，e2e smoke + 单元测试全部绿：
+
+1. **`/healthz` 不再撒谎** —— `oauth_receiver.token_count` 现在从 `oauth_tokens` 表真实 `SELECT COUNT(*)` 读，不再是 in-memory `_token_history`（永远 0）。
+2. **`tts_erp.shops` 被填充** —— FastAPI startup lifespan + `POST /admin/shops/backfill` 都触发 backfill，幂等。`_tiktok_proxy` 在订单详情路径上也调 `persist_shop`（双保险）。
+3. **`schema.sql` 重新生成** —— `scripts/regen_schema.py` 从真实 PG 拉出含 **24 张表** 的 schema（1 oauth_receiver + 23 tts_erp），fresh DB clean apply **0 errors**。
+
+新文件：
+
+- `tdd/_backfill.py` — `backfill_shops_from_oauth()` 幂等函数
+- `scripts/regen_schema.py` — schema.sql 重新生成工具
+- `tdd/test_healthz_token_count_fix.py` — 4 healthz 测试
+- `tdd/test_shops_backfill.py` — 3 backfill 测试
+
+## 上次 session (2026-08-16) 主题
 
 ## TL;DR
 
@@ -44,8 +61,8 @@
 | 路径                                                | 说明                                |
 |-----------------------------------------------------|-------------------------------------|
 | `http://127.0.0.1:9877/healthz`                    | tts-erp 健康检查                   |
-| `http://127.0.0.1:9877/shops`                      | 列出 shops（代理到 oauth）         |
-| `http://127.0.0.1:9877/token/<id>?reveal=1`         | 拿 token + cipher                  |
+| ~~`http://127.0.0.1:9877/shops`~~                  | ~~列出 shops（代理到 oauth）~~ **Wave 3 Slice 2 后已删除**（调 oauth_receiver_core.db_list_shops in-process） |
+| `http://127.0.0.1:9877/token/<id>?reveal=1`         | 拿 token + cipher（同上，in-process） |
 | `http://127.0.0.1:9877/sync/orders`                 | POST body {shop_id, ...}，从 TikTok 拉单入库 |
 | `http://127.0.0.1:9877/orders/search?shop_id=X&page_size=10` | 直接代理到 TikTok（page_size 在 URL） |
 | `http://127.0.0.1:9877/db/orders?shop_id=X&status=AWAITING_SHIPMENT` | 本地 DB 订单列表 |

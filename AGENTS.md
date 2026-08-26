@@ -96,12 +96,13 @@ curl "http://127.0.0.1:9877/orders/search?shop_id=7494763368967603447" -d '...'
 
 | 端点 | 用途 |
 | ----------------------------------------------- | ------------------------------- |
-| `GET /healthz` | 健康检查 |
+| `GET /healthz` | 健康检查（`oauth_receiver.token_count` 2026-08-25 修复：之前用 in-memory deque 永远 0，现走 `SELECT COUNT(*) FROM oauth_tokens`） |
 | `GET /ads-monitor` | TikTok OAuth 授权回跳落地页（公开，无 auth） |
 | `GET /endpoints` | 完整端点清单 |
-| `GET /shops` | 列出已授权 shops |
-| `GET /shops/<shop_id>` | 单个 shop 元数据 |
-| `GET /token/<shop_id>?reveal=1` | 拿 token + cipher (代理) |
+| ~~`GET /shops`~~ | **404**（Wave 3 Slice 2 2026-08-18 删除，改走 `oauth_receiver_core.db_list_shops()` in-process） |
+| ~~`GET /shops/<shop_id>`~~ | **404**（同上，Wave 3 Slice 2 删） |
+| ~~`GET /token/<shop_id>?reveal=1`~~ | **404**（同上，Wave 3 Slice 2 删） |
+| `POST /admin/shops/backfill` | **2026-08-25 新增** —— admin 角色；从 `oauth_tokens` 幂等回写 `tts_erp.shops` |
 | `POST /orders/search?shop_id=X` | 搜索订单 |
 | `POST /orders/list?shop_id=X` | 订单列表 |
 | `GET /orders/<id>?shop_id=X` | 订单详情 |
@@ -177,6 +178,8 @@ curl "http://127.0.0.1:9877/orders/search?shop_id=7494763368967603447" -d '...'
 | `psycopg.OperationalError`         | PG 容器 down / 网络不通                | `docker exec postgres pg_isready`              |
 | 物流汇总 first/last 写反、last_description 恒 "Order placed." | TikTok tracking 列表是**最新事件在前**，旧代码按列表位置取首尾（2026-08-17 已修为按 update_time_millis 排序） | 重跑 `POST /sync/logistics_tracking` 刷新；cron 已接入每 10 分钟自动追 |
 | 物流数据多日不更新                  | `/sync/logistics_tracking` 之前不在 sync_cron 的 SYNC_PLANS 里（2026-08-17 已接入） | 手动触发：`curl -X POST :9877/sync/logistics_tracking -d '{"shop_id":"X","all_with_tracking":true}'` |
+| `/healthz` 报 `oauth_receiver.token_count: 0` 但 `oauth_tokens` 表有行 | healthz 用了 `len(oc._token_history)`（进程内 deque，重启后为 0），不是 DB 行数（2026-08-25 修复为 `SELECT COUNT(*)`） | 已修；部署后新版本应自动报真实数。不需手动修复 |
+| `tts_erp.shops` 表为空但 `oauth_receiver.oauth_tokens` 有 shop | FastAPI 接管订单路由后未继承 legacy `_proxy_order` 的 `persist_shop` 调用（2026-08-25 修复） | 重启服务即可，startup lifespan 会自动 backfill。手动触发：`curl -X POST -H "Authorization: Bearer <admin_key>" :9877/admin/shops/backfill` |
 
 ## 6. 文件清单
 
@@ -269,8 +272,11 @@ adding or changing any external-facing endpoint.
   responses include matching `_iso` fields in UTC ISO-8601.
 - **Refunds**: `GET /db/returns` and `GET /db/returns/{id}` both expose a
   computed `refund_amount` field derived from
-  `raw->'refund'->>'refund_total'`. It is **NULL** when the raw JSON
-  has no refund object (this happens for AWAITING returns, not yet closed).
+  `raw->'refund_amount'->>'refund_total'` (TikTok 202309 spec — **note the
+  nested object**, not `raw->'refund'`; corrected 2026-08-20) plus
+  `refund_currency` from `raw->'refund_amount'->>'currency'`. Both are
+  **NULL** when the raw JSON has no `refund_amount` object (happens for
+  AWAITING returns, not yet closed).
 
 ### 9.2 Creating an external API key
 
@@ -317,8 +323,13 @@ These endpoints (and their semantics) may break without notice:
 - `POST /orders/*`, `GET /finance/*` — TikTok API proxy
 - `GET /token/{shop_id}` — admin-only token reveal
 - `GET /db/sync_log` — in-memory mirror
+- `GET /miaoshou/*` — Wanshifu/Miaoshou SDK proxy (separate domain)
 
 External clients should NOT depend on these.
+
+The full table (with role requirements + v1 status for every endpoint)
+is at the bottom of [`tech-doc/external-api.md`](tech-doc/external-api.md)
+under **Stability matrix**.
 
 ## 10. 妙手开放平台（apifox fd54e57e-9b98-4c34-bada-306221c39e68）
 

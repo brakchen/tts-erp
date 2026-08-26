@@ -1,5 +1,75 @@
 # tts-erp CHANGELOG
 
+## 2026-08-25 (fix) — /healthz 撒谎 + tts_erp.shops 空 + schema.sql 严重过时
+
+### 三件据 drift 被发现（读 /db/orders 时磕到）
+
+1. **`/healthz` 报 `oauth_receiver.token_count: 0`，但 `oauth_tokens` 表实际有 2 行。**
+   - 根因：`oauth_receiver_router._oauth_receiver_section()` 用了 `len(oc._token_history)`（进程内 deque，记最近 N 次 token-exchange），不是 DB 行数。重启后 deque 为空 → 监控永远错报。
+   - 修复：加 `oauth_receiver_core.db_count_shops()` 走 `SELECT COUNT(*)`，healthz 改用这个。
+
+2. **`tts_erp.shops` 表 0 行，但 `oauth_receiver.oauth_tokens` 有 2 行（Bridge nook VN + MOCK_SHOP_12345 US）。**
+   - 根因：legacy `tts_erp.py._proxy_order` 每个订单详情 GET 后会调 `persist_shop`。FastAPI 接管订单路由后**完全没继承这一步**——shops 表从未被回写。
+   - 修复：
+     - `tdd/_backfill.py` 加 `backfill_shops_from_oauth()`（幂等）
+     - FastAPI startup lifespan 自动跑一次
+     - `POST /admin/shops/backfill`（admin 角色）手动触发
+     - `_tiktok_proxy` 在 `persist_order_on_get=True` 路径上**也调** `persist_shop`（双保险）
+
+3. **`schema.sql` 严重过时**：实际 DB 有 **24 张表**（schema.sql 只列了 16），缺 `analytics_*/logistics_*/statement_transactions` 等 7 张；`orders` 表列名是 `order_status_name`（AGENTS.md 写的 `order_status` 是错的）。
+   - 根因：手写 schema.sql，没人维护。
+   - 修复：`scripts/regen_schema.py` 从真实 PG 拉 schema，自动转 IF NOT EXISTS 幂等化、剔 \restrict 串、合并双 DB dump。
+   - 验证：fresh DB clean apply 0 errors；二次 apply 报错都是 "already exists"（PG 限制 ADD CONSTRAINT 不支持 IF NOT EXISTS，header 已说明）。
+
+### Files changed
+
+- `tdd/oauth_receiver_core.py` — 加 `db_count_shops()`
+- `tdd/oauth_receiver_router.py` — healthz 用 `db_count_shops()`
+- `tdd/_backfill.py` (new) — `backfill_shops_from_oauth()` + `run_startup_backfill_if_configured()`
+- `tdd/tts_erp_fastapi.py` — lifespan hook + `POST /admin/shops/backfill` + `_tiktok_proxy` 补 `persist_shop`
+- `scripts/regen_schema.py` (new) — schema.sql 重新生成脚本
+- `schema.sql` — 重新生成（1143 行，含两个 DB 的全部 24 张表）
+- `tdd/test_healthz_token_count_fix.py` (new) — 4 个 healthz 测试
+- `tdd/test_shops_backfill.py` (new) — 3 个 backfill 测试
+- `tdd/test_tts_erp_routes.py` — 路由计数 54→55
+
+## 2026-08-24 (fix) — sync_cron 每 10 分钟死循环 2h9min (Wave 3 Slice 2 遗留 bug)
+
+### Symptom
+
+`cron.service` 状态、`*/10 * * * *` crontab、`run_sync_cron.sh` wrapper 全部正常,服务也在跑,**但 `sync_log` 2 小时 9 分钟没新条目**。cron 每轮都死于第一步:
+
+```
+discover_shops failed: /shops failed: {'_http_status': 404, '_error': True, 'detail': 'Not Found'}
+```
+
+`/healthz` / `/endpoints` / `/db/*` 都 200,只有 `sync_log` 停摆——**外部不可见**。
+
+### Root cause
+
+Wave 3 Slice 2 (2026-08-18 批次) 删除了 `GET /shops`、`/shops/<id>`、`/token/<id>` 三个 oauth-receiver 代理路由,改为 in-process 调 `oauth_receiver_core.db_list_shops()`。**`sync_cron.py:discover_shops()` 没跟着改**——还在调 HTTP `/shops`。路由不存在 → 404 → cron 异常退出。
+
+### Fixed
+
+- **`sync_cron.py:discover_shops(base_url, api_key)` → `discover_shops(provider="tiktok")`**：直接 in-process 调 `oauth_receiver_core.db_list_shops(provider="tiktok")`,与 FastAPI app 走相同代码路径。`is_db_ok()` 为 False 时返 `[]`(不抛异常)。
+- **`sync_cron.py` top imports**: 加 `tdd` 到 `sys.path`(让 `oauth_receiver_core` 可导入)+ 模块加载前注入 `OAUTH_DB_URL/OAUTH_DB_ENCRYPTION_KEY/OAUTH_DB_TABLE` 到 `os.environ`(否则 oauth_receiver_core 的 module-load `db_init()` 拿到空 env → `_db_ok=False` → `db_list_shops` 返 [])
+- **`sync_cron.py` `main()`**: 调 `discover_shops()`(不再传 `base_url, api_key`)
+- **`tdd/tts_erp_fastapi.py` `/endpoints` 文档**: 把误导的 `passthrough: [GET /shops, /shops/<id>, /token/<id>]` 改为 `passthrough_removed`, 指向 `oauth_receiver_core` 的 in-process 函数(这三条路由自 Wave 3 Slice 2 起就不存在,文档残留至今才暴露)
+
+### Tests
+
+- `pytest tdd/test_sync_cron_discover.py` → **6 passed** (新增测试,锁定 `discover_shops` 不发 HTTP、走 oauth_receiver_core,过滤 provider,DB 不可达返 [])
+- 手动 `python3 sync_cron.py`: discovered **2 shops** (`MOCK_SHOP_12345` + `7494763368967603447`), 7 个 sync plan (orders/payments/statements/returns/cancellations/logistics/stmt_txns) 全部执行完毕, `sync_log` 新增 20+ 条 `status=ok` 行
+- `bash restart.sh` + `curl /healthz` → `db_ok: true, last_sync_at: 1787570517` ✓
+- `curl /endpoints | jq '.passthrough_removed'` → 3 行迁移说明 ✓
+
+### Notes
+
+- **Cron 调度本身无需改**:`*/10 * * * *` + `run_sync_cron.sh` 调 `python3 sync_cron.py`,下个 tick 自动 pick up 新代码,**无需 restart 任何服务**
+- 下一次 cron 触发后, `logs/tts-erp-cron.log` 应该出现 `discovered N shop(s)` 而不是 `discover_shops failed: /shops failed: 404`
+- `MOCK_SHOP_12345` 同步仍然 502 `Invalid shop_cipher`(预期内, mock shop 在 oauth_tokens 里没真正 token)
+- 同样路径(`oauth_receiver_core` in-process)的 FastAPI app 一直 OK, 因为它在 cwd=`tdd/` 下启动且 `EnvironmentFile` 自动注入所有 `OAUTH_*` env; cron 需手动 `setdefault`,详见 commit diff
+
 ## 2026-08-24 (chore) — 妙手/万师傅 命名统一 + pyrightconfig.json 修复
 
 ### Changed

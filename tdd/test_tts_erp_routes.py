@@ -293,10 +293,11 @@ class TestOauthHealthzCanonical:
 
 
 class TestRouteCounts:
-    def test_post_slice4_route_count_is_54(self):
-        """After Slice 3: 55 APIRoute. After Slice 4 (delete 1 /healthz): 54."""
+    def test_post_slice4_route_count_is_55(self):
+        """After Slice 3: 55 APIRoute. After Slice 4 (delete 1 /healthz): 54.
+        After 2026-08-25 repair (add /admin/shops/backfill): 55."""
         paths = _app_route_paths()
-        assert len(paths) == 54, (
-            f"Expected 54 APIRoute paths after Slice 4; got {len(paths)}.\n"
-            f"Full list: {sorted(paths)}"
+        assert len(paths) == 55, (
+            f"Expected 55 APIRoute paths after 2026-08-25 admin/backfill add; "
+            f"got {len(paths)}.\nFull list: {sorted(paths)}"
         )

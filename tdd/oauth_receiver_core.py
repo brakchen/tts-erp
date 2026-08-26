@@ -429,6 +429,36 @@ def db_list_shops(provider: str | None = None) -> list[dict]:
         return []
 
 
+def db_count_shops(provider: str | None = None) -> int:
+    """Count rows in oauth_tokens. Cheap COUNT(*) — does not decrypt.
+
+    Used by healthz to report a truthful `token_count`. The previous
+    implementation read `len(_token_history)` (an in-memory deque of
+    recent token-exchange events), which was always 0 after a restart.
+    """
+    if not _db_ok:
+        return 0
+    tbl = pg_sql.Identifier(_oauth_db_table())
+    try:
+        with _db_connect() as conn, conn.cursor() as cur:
+            if provider:
+                cur.execute(
+                    pg_sql.SQL("SELECT COUNT(*) FROM {} WHERE provider = %s").format(
+                        tbl
+                    ),
+                    (provider,),
+                )
+            else:
+                cur.execute(pg_sql.SQL("SELECT COUNT(*) FROM {}").format(tbl))
+            row = cur.fetchone()
+            return int(row[0]) if row else 0
+    except Exception as e:  # noqa: BLE001
+        import sys
+
+        print(f"[oauth_receiver_core] db_count_shops failed: {e}", file=sys.stderr)
+        return 0
+
+
 def db_delete_token(shop_id: str, provider: str) -> bool:
     if not _db_ok:
         return False
