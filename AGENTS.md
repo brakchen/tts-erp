@@ -186,7 +186,7 @@ curl "http://127.0.0.1:9877/orders/search?shop_id=7494763368967603447" -d '...'
 | 路径 | 用途 |
 | ------------------------------------------------- | -------------------------------------------- |
 | **`tdd/tts_erp_fastapi.py`** | **主服务（FastAPI app，systemd 启动的实际服务，监听 9877）** |
-| `tts_erp.py` | **legacy** stdlib `BaseHTTPRequestHandler` 服务（迁移中，**当前未运行**，只保留给 cron 脚本 `import` 用；不要在这里加新代码） |
+| `tts_erp.py` | **共享 helper 模块**（Wave 4.1 起）：`db_connect`（连接池）、`persist_*`（订单/明细/物流/对账/退货/取消/妙手）、`log_sync`、类型 coercion、`_env_int`。原 stdlib `BaseHTTPRequestHandler` 服务 + Handler 类 + `main()` 已删除；该文件不再启动 HTTP 服务，跑 `python3 tts_erp.py` 会打印提示用 `bash restart.sh`。 |
 | `tts_signing.py` | HMAC 签名 + HTTP 客户端（**可独立复用**） |
 | `tdd/auth.py` | API key 鉴权中间件（2026-08-17，设计见 `tech-doc/api-key-auth-design.md`） |
 | `tdd/rate_limit.py` | sliding-window 限流中间件（key-id 桶，默认 100/min） |
@@ -368,7 +368,7 @@ Auth: admin role（middleware 已在 `tdd/auth.py` `required_role` 把 `/miaosho
 
 测试覆盖：`tdd/test_miaoshou_routes.py`（11 passed + 1 skipped因 Mock auto-create child attr 限制，未知 method 路径靠生产 MiaoshouClient 真实 class 行为覆盖）。
 
-⚠️ **Legacy cleanup pending**: `tts_erp.py` 里 `do_POST` 还保留了 `from miaoshou.callbacks.router import dispatch_callback`（已修对路径名，不再 `wanshifu`）和 `_miaoshou_call_endpoint` 这些 **已 dead** 的处理器（FastAPI 接管后不会被请求触达）。建议 follow-up 任务：删 legacy 处理代码 + 修可能重复的 `_sync_miaoshou_*` / `_db_list_miaoshou_*`（这些属于 MiaoshouErpClient sync 路线，FastAPI 尚未迁移，2026-08-17 批次承诺的 collect_box / price_template / move_collect_tasks sync 仍缺 `persist_*` 函数 — 与本次任务正交，独立 scope）。
+⚠️ **Legacy cleanup pending**（部分完成 2026-08-27 / Wave 4.1）: 5 个 Handler `_sync_miaoushou_*` / `_db_list_miaoushou_shops` 方法已抽到 `tdd/miaoshou_sync.py` 模块级函数（返回 `(code, body)` 元组）；`_invoke_legacy_sync` 改为直接调模块函数（`getattr` 兑底 501）；`tts_erp.py` 删了 Handler 类 + `main()` + `_proxy_get`（3512 → 1691 行）。剩余 `do_POST` 里的 `dispatch_callback` / `_miaoshou_call_endpoint` 仍是 dead 状态（独立 follow-up）。
 
 ### 10.3 签名（apifox doc-824327）
 
