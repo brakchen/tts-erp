@@ -2,6 +2,7 @@
 
 不打真实网络，用 monkeypatch 替换 http.client.HTTPSConnection。
 """
+# ruff: noqa: S105 S106 -- 本文件所有 "SECRET"/"ttserp_..." 字符串都是测试假凭证
 
 from __future__ import annotations
 
@@ -171,3 +172,22 @@ def test_all_endpoint_namespaces_present():
     ]
     for ns in namespaces:
         assert hasattr(c, ns), f"missing namespace: {ns}"
+
+
+def test_call_http_502_html_reports_real_status(monkeypatch):
+    """W4.2: http.client does NOT raise on 4xx/5xx — the old except
+    urllib.error.HTTPError path was dead code, so a CDN 502 HTML page was
+    misreported as code=0 '无法解析响应'. The real status must surface."""
+    c = MiaoshouClient(license_id="LIC", company_secret="SECRET")
+    resp = MagicMock()
+    resp.status = 502
+    resp.read.return_value = b"<html>Bad Gateway</html>"
+    fake_conn = MagicMock()
+    fake_conn.getresponse.return_value = resp
+    with (
+        patch("http.client.HTTPSConnection", return_value=fake_conn),
+        pytest.raises(MiaoshouApiError) as exc,
+    ):
+        c.orders.batch_create_async(order_list=[])
+    assert exc.value.code == 502
+    assert "502" in str(exc.value)

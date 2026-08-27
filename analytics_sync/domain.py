@@ -29,6 +29,12 @@ class StorageKey(str, Enum):
     CAMPAIGN_CHANGE_LOGS = "campaignChangeLogs"
 
 
+# Default IANA timezone for sellers without an explicit setting.
+# Single source of truth — app.py and pg_repositories.py both import
+# from here (W4.3: pg_repositories used to hardcode the same literal).
+DEFAULT_TIMEZONE = "Asia/Shanghai"
+
+
 # Sentinel pattern: server-side compute of the canonical idempotency key
 # must produce the exact same hex string the plugin sent. Trimming rules
 # below are part of the protocol; do NOT change without bumping the

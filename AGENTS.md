@@ -152,7 +152,7 @@ curl "http://127.0.0.1:9877/orders/search?shop_id=7494763368967603447" -d '...'
 - 改完跑 `python3 /tmp/test_tts_erp.py` (test_e2e.py 副本) 端到端验证
 - 看 `logs/stderr.log` 抓 traceback
 - 用 `TTS_DEBUG_SIGN=1` env var 看 canonical string 排查签名问题
-- 改 schema 走 schema.sql，`IF NOT EXISTS` 兼容老库
+- 改 schema 走 schema_tts_erp.sql / schema_oauth.sql（按库拆分），`IF NOT EXISTS` 兼容老库
 - **优先复用成熟开源组件**：GitHub 上有维护活跃、star 数高（成熟领域 ≥ 5k、新兴领域 ≥ 1k）、license 友好的现成方案时，**优先用**，不要裸写 / 自己强制实现 —— 典型场景：HTTP 代理 / 网关、限流、熔断、retry/backoff、分布式锁、定时任务、对象存储 SDK、消息队列、数据库迁移、auth/JWT、参数校验、structlog 类日志、metrics/prom client 等。理由：(a) 现成组件已踩过生产坑、坑更少；(b) 维护/升级是社区分摊；(c) 业务代码更聚焦 domain logic。**评估开源时的护栏**：(a) 引入前查最后一次 release 是否在 1 年内 + issues 关闭率 ≥ 80%；(b) 优先选有公司/组织背书（如 Starlette/FastAPI/httpx/structlog/sqlalchemy/alembic/pydantic 这类），避免个人小项目单点故障；(c) 真没有合适开源时再考虑自研，自研时要留出能替换的 seam（接口层、依赖注入）。
 
 ### DON'T
@@ -196,7 +196,7 @@ curl "http://127.0.0.1:9877/orders/search?shop_id=7494763368967603447" -d '...'
 | `miaoshou/miaoshou_client.py` / `miaoshou/miaoshou_erp_client.py` / `miaoshou/miaoshou_signing.py` | 出站客户端 + MD5/HMAC 签名（`_call()` 走 `safe_http_post_json` helper，scheme 白名单防 SSRF） |
 | `miaoshou/endpoints/` | 12 个出站 endpoint 模块（按 domain 划分：orders/fees/refunds/arbitrations/closes/complaints/queries/accounts/products/logistics/aftersales/tests） |
 | `miaoshou/callbacks/router.py` / `miaoshou/callbacks/payloads.py` | 18 个回调 node + `dispatch_callback()` |
-| `schema.sql` | PG 表结构（**16 张表**：11 TikTok 同步 + 1 api_keys + 4 miaoshou；2026-08-18 删除 Excel 融合表/xls_ 列/对账视图） |
+| `schema_tts_erp.sql` / `schema_oauth.sql` | PG 表结构（按库拆分，2026-08-27 Wave 2；`python3 scripts/regen_schema.py` 重新生成） |
 | `api_keys.py` | API key 管理 CLI（create/list/revoke/rotate） |
 | `sync_cron.py` | 同步 cron 主入口（订单/对账/付款/退货/取消/物流），由 `run_sync_cron.sh` 调度 |
 | `.env` | 配置（0600，含 app_key/secret/DB URL） |
@@ -221,7 +221,7 @@ scp F:\path\to\tts-erp\* schan@192.168.47.130:/home/schan/tts-erp/
 ssh schan@192.168.47.130 "chmod 600 /home/schan/tts-erp/.env && chmod +x /home/schan/tts-erp/restart.sh"
 
 # PG schema (幂等)
-cat schema.sql | docker exec -i postgres psql -U postgres -d tts_erp
+cat schema_tts_erp.sql | docker exec -i postgres psql -U postgres -d tts_erp
 
 # 启动（systemd --user 托管，开机自启；restart.sh 内部走 systemctl --user restart）
 ssh schan@192.168.47.130 "bash /home/schan/tts-erp/restart.sh"
@@ -244,6 +244,11 @@ journalctl --user -u tts-erp -n 50           # systemd 日志（业务日志仍�
 
 `oauth-receiver` 已经配了 cron（`0 2 * * *`）每天凌晨 2 点调 `/token/<shop_id>/refresh`。
 **不要**在 tts-erp 这边再加一个，tts-erp 永远不该主动续期 token（不归它管）。
+
+验证过的真实配置（2026-08-27 crontab -l）：续期归 `~/oauth-receiver/refresh_tokens.sh`
+管，打的是**独立** oauth-receiver 服务（:9876，`~/oauth-receiver/`，有自己的
+`/token/<id>/refresh` 路由）——与本仓库 `tdd/oauth_receiver_core.py` 的 in-process
+副本是两回事。本仓的 `refresh_shop_token()` 无生产调用方，属预期。
 
 ## 9. External API Guide (2026-08-20)
 

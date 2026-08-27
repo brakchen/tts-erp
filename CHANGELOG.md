@@ -1,5 +1,55 @@
 # tts-erp CHANGELOG
 
+## 2026-08-27 (fix) — Review remediation Waves 1-4（可用性 / 数据正确性 / schema / 测试基建）
+
+按 `plans/review-remediation-2026-08.md` 执行的三路 review 修复：
+
+### Wave 1 — 止血（commit `ec9bf77`）
+- **auth**: `lookup_role` 移出 event loop（`anyio.to_thread`）；无效 key 负缓存（20s）；
+  PG down fail-closed 503；被拒请求计入限流桶（暴力枚举不再免限流）。
+- **analytics_sync**: `post_batches` 不再在 event loop 上跑同步 psycopg；`nextCursor`
+  在真分页落地前恒 null（之前是假分页，客户端会死循环）；`fetch_timezone` 改 read-first。
+- **persist_shop**: 不再把明文 `shop_cipher` 落库（凭证单源在 oauth-receiver）。
+- **_get_creds**: `TokenError.status` 透传（404=店铺未授权 vs 502=上游故障）；
+  意外错误返回固定文案 502，内部细节只进日志。
+- **sync_cron**: `http_json` 补捕 `TimeoutError/OSError`（一次慢调用不再炸整轮）；
+  oauth DB down 退出码 4（之前静默 exit 0）；物流 plan 分批 ≤80 单/次；`flock` 防重叠。
+- **tts_business**: payments/statements 中途分页失败置 `error`（窗口不再越过缺口前进）；
+  裸 `int()` 全部改 `_body_int`/`_body_int_opt`（脏输入不再 500）。
+- **sync_logistics_tracking**: PG advisory lock（重叠返 409）+ `max_per_run` 硬上限 100 + jitter。
+
+### Wave 2 — Schema housekeeping（commit `aa53b9d`）
+- 删重复/冗余索引 ×4；`idx_logistics_tracking_overseas` 改部分索引。
+- 新增 `idx_orders_shop_ct`（/db/orders 分页走 Index-Only-Scan）、
+  `idx_order_shippings_tracking`（cron 每 10 分钟热路径不再全表扫）、
+  `idx_orders_status`、`idx_stmt_txns_type`。
+- `DROP TABLE logistics_events`（死表，零写入方）；`DROP COLUMN shops.shop_cipher`。
+- 清理两库互灌：tts_erp 库的空 `oauth_tokens` + oauth_receiver 库的 23 张空业务表。
+- `sync_log` retention 单一入口（trigger 委托 `cleanup_sync_log(60)`）。
+- crontab 挂上 analytics_records(90d) / analytics_audit_log(30d) 每日清理。
+- `regen_schema.py` 拆成 `schema_oauth.sql` + `schema_tts_erp.sql`（不再一文件灌两库）。
+- `order_shippings.raw` 只存物流子集（不再复制整单 JSON）。
+
+### Wave 3 — 结构性（commits `0566571`, `8af34f9`, `ed81fc5`）
+- **连接池**：`db_connect()` 走 `psycopg_pool.ConnectionPool`（min 1 / max 10），
+  同步批次不再每查询一次 connect/close。
+- **tiktok_request**：429/5xx/网络错误有界重试（指数退避+jitter，上限 2 次）；
+  4xx 立即返回不浪费配额。
+- **/sync/order/{id}**：从 501 变为实现（body.shop_id → 本地 orders 表 → 404）。
+- **_invoke_legacy_sync**：`getattr` + 501 兑底（legacy 方法被删时不再 KeyError→500）。
+- 删 `PlainHttpClient`（生产零引用）。
+
+### Wave 4 — 杂项 + 测试基建
+- **miaoshou**：`_call` 的 HTTP 错误透传真实状态码（`http.client` 不抛异常，
+  之前 CDN 502 被误报为 code=0 "无法解析响应"）。
+- **analytics_sync scope_grants**：同维度多值改 OR 语义；未知 scope 前缀 fail-closed。
+- **DEFAULT_TIMEZONE** 移到 `analytics_sync/domain.py` 单一来源。
+- **oauth state**：`not_registered`/`mismatched` 仍放行的行为加了 WARNING 日志 +
+  注释说明（若需严格 CSRF 拦截，改 `handle_callback` 一处即可）。
+- **测试基建**：修 `test_oa_uath_receiver_url_removed.py` 弹 sys.modules 不恢复
+  导致的 pytest session fixture 级联崩溃（tdd/ 从 129 passed + 372 errors 修复为
+  491 passed + 0 errors）。
+
 ## 2026-08-27 (feat) — analytics_sync protocolVersion 2：页级完整性 cursor
 
 ### 问题

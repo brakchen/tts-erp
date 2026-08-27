@@ -140,6 +140,16 @@ def safe_http_post_json(url: str, body_bytes: bytes, timeout: int) -> str:
             headers={"Content-Type": "application/json;charset=UTF-8"},
         )
         resp = conn.getresponse()
+        # W4.2: http.client does NOT raise on 4xx/5xx — check status
+        # explicitly so a CDN 502 HTML page surfaces as its real status
+        # instead of a misleading code=0 "无法解析响应" downstream.
+        # getattr default 200: test doubles may not set .status.
+        status = getattr(resp, "status", 200)
+        if isinstance(status, int) and status >= 400:
+            body_preview = resp.read().decode("utf-8", errors="replace")[:300]
+            raise MiaoshouApiError(
+                status, f"HTTP {status}: {body_preview}", None
+            )
         return resp.read().decode("utf-8")
     finally:
         conn.close()

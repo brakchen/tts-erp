@@ -1,12 +1,8 @@
 """tts-erp FastAPI application.
 
-Listens on port 9877 (production) or 9878 (test). Replaces the stdlib
-BaseHTTPRequestHandler implementation in tts_erp.py.
-
-Phase 4a-3 MVP: implements the 5 sync endpoints + healthz + oauth-receiver
-passthrough. Other endpoints (TikTok proxy, /db/* reads) are still served
-by tts_erp.py on 9877 during the migration. After verification we'll
-port the rest.
+Listens on port 9877 (production). This IS the production service —
+the stdlib BaseHTTPRequestHandler implementation in tts_erp.py is legacy
+(cron imports only) and being retired (Wave 4).
 
 Run:
     uvicorn tts_erp_fastapi:app --host 0.0.0.0 --port 9877
@@ -56,7 +52,7 @@ log = logging.getLogger("tts-erp-fastapi")
 from domain import TokenError  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from http_client import TikTokHttpClient  # noqa: E402
-from oauth_receiver_router import (
+from oauth_receiver_router import (  # noqa: E402
     router as oauth_router,
 )
 from pg_repositories import make_pg_repos  # noqa: E402
@@ -69,8 +65,8 @@ from tts_erp import _safe_int  # noqa: E402
 
 # ─── App + config ─────────────────────────────────────────────────────
 
-# CORS — wide-open by default for internal/deploy flexibility. Tighten
-# allow_origins to a whitelist before opening to public clients.
+# CORS — default deny (empty allow-origins). Set TTS_ERP_CORS_ALLOW_ORIGINS
+# to a comma-list of explicit origins, or "wildcard" for dev/internal.
 # See tech-doc/external-api.md#cors.
 
 

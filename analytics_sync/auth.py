@@ -18,7 +18,6 @@ from __future__ import annotations
 import hashlib
 import os
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 # Make `tdd.auth` importable (sibling package in tts-erp).
@@ -47,24 +46,15 @@ def _sha256(s: str) -> str:
 def scope_grants(scopes, *, seller_id, advertiser_id):
     """Return True iff the token's scopes cover the requested scope.
 
-    Mirrors the semantics in analytics_sync/app.py::scope_grants. Kept
-    here for backward-compat with tests that import it directly.
+    Delegates to analytics_sync.app.scope_grants (single implementation).
+    Kept here for backward-compat with tests that import it directly.
 
-    Empty scopes / '*' = unrestricted. Each non-wildcard scope entry
-    must match the request's corresponding dimension.
+    Semantics (W4.3): empty/'*' = unrestricted; multiple entries in one
+    dimension are OR'd; unknown prefixes fail closed.
     """
-    if not scopes or "*" in scopes:
-        return True
-    for s in scopes:
-        if s.startswith("seller:"):
-            target = s[len("seller:"):]
-            if seller_id != target:
-                return False
-        elif s.startswith("advertiser:"):
-            target = s[len("advertiser:"):]
-            if advertiser_id != target:
-                return False
-    return True
+    from .app import scope_grants as _impl
+
+    return _impl(scopes, seller_id=seller_id, advertiser_id=advertiser_id)
 
 
 def _extract_token(scope: dict) -> str | None:

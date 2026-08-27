@@ -442,7 +442,7 @@ def main() -> int:
         for shop_id in shops:
             for plan in SYNC_PLANS:
                 key = plan["key"]
-                summary.setdefault(key, {"ok": 0, "err": 0, "saved": 0, "shop_err": 0})
+                summary.setdefault(key, {"ok": 0, "err": 0, "saved": 0})
 
                 if plan["time_field"]:
                     # L1 watermark optimization: for plans with watermark

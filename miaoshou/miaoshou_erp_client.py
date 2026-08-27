@@ -22,8 +22,10 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any
+from typing import Any, TypeVar
 
+from pydantic import BaseModel as _BaseModel
+from pydantic import ValidationError as _ValidationError
 from typing_extensions import Self
 
 from .miaoshou_client import MiaoshouApiError
@@ -161,7 +163,7 @@ class MiaoshouErpClient:
                 "x-sign": signature,
                 **extra_headers,
             }
-            req = urllib.request.Request(url, data=body_bytes, method="POST", headers=headers)
+            req = urllib.request.Request(url, data=body_bytes, method="POST", headers=headers)  # noqa: S310 -- url from operator-configured base, not user input
 
             if os.environ.get("MIAOSHOU_DEBUG_SIGN") == "1":
                 print(
@@ -175,7 +177,7 @@ class MiaoshouErpClient:
                 )
 
             try:
-                with urllib.request.urlopen(req, timeout=self.timeout) as http_resp:
+                with urllib.request.urlopen(req, timeout=self.timeout) as http_resp:  # noqa: S310 -- operator-configured URL
                     raw = http_resp.read().decode("utf-8")
                 last_network_err = None
                 http_err = None
@@ -231,10 +233,7 @@ class MiaoshouErpClient:
             ) from e  # type: ignore[name-defined]
 
 
-from pydantic import BaseModel as _BaseModel
-from pydantic import ValidationError as _ValidationError
-
-_T = __import__("typing").TypeVar("_T", bound=_BaseModel)
+_T = TypeVar("_T", bound=_BaseModel)
 
 
 def _safe_validate(payload: dict, model_cls: type[_T]) -> _T:

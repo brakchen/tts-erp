@@ -23,6 +23,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from .domain import (
+    DEFAULT_TIMEZONE,
     AcceptedRecord,
     AnalyticsRepository,
     BatchResult,
@@ -267,7 +268,7 @@ class PgAnalyticsRepository(AnalyticsRepository):
                         SET advertiser_id = EXCLUDED.advertiser_id,
                             updated_at = now()
                     """,
-                    (scope.seller_id, scope.advertiser_id, "Asia/Shanghai"),
+                    (scope.seller_id, scope.advertiser_id, DEFAULT_TIMEZONE),
                 )
 
             conn.commit()
@@ -518,7 +519,7 @@ def fetch_timezone(seller_id: str) -> str:
     """
     from zoneinfo import ZoneInfo as _ZI
 
-    default_tz = "Asia/Shanghai"
+    default_tz = DEFAULT_TIMEZONE
     with connect() as conn, conn.cursor() as cur:
         # Read-first: the INSERT below is a no-op for 99.99% of calls, so
         # don't pay a write (WAL + lock) on every GET /cursor (W1.8).

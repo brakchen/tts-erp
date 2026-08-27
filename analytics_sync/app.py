@@ -47,6 +47,7 @@ from pydantic import BaseModel, Field, field_validator  # noqa: E402
 
 from .auth import SyncAuthMiddleware  # noqa: E402
 from .domain import (  # noqa: E402
+    DEFAULT_TIMEZONE,
     Record,
     Scope,
     StorageKey,
@@ -66,7 +67,6 @@ PROTOCOL_VERSION = 2
 SUPPORTED_PROTOCOL_VERSIONS = {1, 2}
 PROTOCOL_VERSION_HEADER = "X-Protocol-Version"
 DEFAULT_BOOTSTRAP_LOOKBACK_DAYS = 30
-DEFAULT_TIMEZONE = "Asia/Shanghai"
 MAX_BATCH_RECORDS = 100
 MAX_BODY_BYTES = 2 * 1024 * 1024  # 2 MB per protocol §5
 MAX_RESPONSE_DATA_BYTES = 256 * 1024  # cap individual response_data JSON
@@ -78,24 +78,26 @@ MAX_RESPONSE_DATA_BYTES = 256 * 1024  # cap individual response_data JSON
 def scope_grants(scopes, *, seller_id, advertiser_id):
     """Return True iff the token's scopes cover the requested scope.
 
-    Empty scopes / wildcard '*' = unrestricted. Otherwise each scope
-    entry must match the request's corresponding dimension.
+    Empty scopes / wildcard '*' = unrestricted. Within one dimension,
+    multiple entries are OR'd (any match grants). Unknown prefixes
+    (typos like 'seler:x') fail closed — silently ignoring them would
+    make a misspelled scope entry a no-op that looks like it works.
 
     Mirrors tts-erp/api_keys.py `scopes` semantics (see api_keys CLI
     `--scopes` flag).
     """
     if not scopes or "*" in scopes:
         return True
-    for s in scopes:
-        if s.startswith("seller:"):
-            target = s[len("seller:") :]
-            if seller_id != target:
-                return False
-        elif s.startswith("advertiser:"):
-            target = s[len("advertiser:") :]
-            if advertiser_id != target:
-                return False
-    return True
+    seller_grants = [s[len("seller:") :] for s in scopes if s.startswith("seller:")]
+    advertiser_grants = [
+        s[len("advertiser:") :] for s in scopes if s.startswith("advertiser:")
+    ]
+    known = len(seller_grants) + len(advertiser_grants)
+    if known != len(scopes):
+        return False  # unknown prefix present → fail closed
+    if seller_grants and seller_id not in seller_grants:
+        return False
+    return not (advertiser_grants and advertiser_id not in advertiser_grants)
 
 
 # ─── Router (mounted under /v1/analytics/sync by tts-erp) ─────────────

@@ -107,6 +107,8 @@ class ShopEndpoint:
         max_pages = 10
         all_shops: list[dict] = []
         current_page = page_no
+        payload: dict = {}
+        data: dict = {}
         for _ in range(max_pages):
             payload = self._c._call_erp(
                 path="/open/v1/product/shop/shop/get_shop_list",

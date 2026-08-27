@@ -54,6 +54,7 @@ import json  # nosemgrep
 import math  # nosemgrep
 import os  # nosemgrep
 import secrets  # nosemgrep
+import sys  # nosemgrep
 import time  # nosemgrep
 import urllib.error  # nosemgrep
 import urllib.parse  # nosemgrep
@@ -830,6 +831,21 @@ def handle_callback(
 
     # Auto-exchange (skipped for expired states — MEDIUM fix from
     # WAVE1_QA_REPORT.md: defense-in-depth against state-replay window).
+    #
+    # NOTE (W4.3, flagged for owner review): `not_registered` and
+    # `mismatched` states STILL auto-exchange and persist the token.
+    # Rationale for the current behavior: the OAuth redirect race
+    # (browser callback arriving before the state write is visible) makes
+    # strict rejection lose real authorizations; a stored token for a
+    # valid code is low-risk since TikTok already issued it to OUR app.
+    # If this should be strict-CSRF instead, block on state_status not in
+    # ("matched",) here.
+    if state_status in ("not_registered", "mismatched"):
+        print(
+            f"[oauth-receiver-core] WARNING: auto-exchanging token with "
+            f"state_status={state_status} (provider={provider})",
+            file=sys.stderr,
+        )
     auto_token_result: dict | None = None
     if state_status != "expired":
         cfg = provider_config(provider)
