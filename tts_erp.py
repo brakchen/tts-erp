@@ -91,8 +91,8 @@ import os
 import sys
 
 sys.path.insert(0, "/home/schan/setup/lib")
+import contextlib
 import json
-import sys
 import time
 import urllib.error
 import urllib.parse
@@ -144,10 +144,56 @@ _last_syncs: deque[dict] = deque(maxlen=50)
 
 
 # ---------- DB helpers ----------
+# W3.1: pooled connections. Previously every query opened a fresh PG
+# connection (sync_orders 50 pages × 50 orders = 2500 connect/close per
+# tick). psycopg_pool is the officially maintained pool for psycopg3.
+#
+# Usage stays `with db_connect() as conn:` — the pool's connection()
+# context manager has identical semantics (commit on clean exit, rollback
+# on exception, connection returned to pool instead of closed).
+_pool = None
+
+
+def _get_pool():
+    """Lazy pool singleton — module import must not require a live DB."""
+    global _pool
+    if _pool is None:
+        if not TTS_ERP_DB_URL:
+            raise RuntimeError("TTS_ERP_DB_URL not configured")
+        from psycopg_pool import ConnectionPool
+
+        _pool = ConnectionPool(
+            TTS_ERP_DB_URL,
+            min_size=1,
+            max_size=10,
+            kwargs={"connect_timeout": 5},
+            # Don't block module import / first request on pool warmup
+            open=False,
+        )
+        _pool.open()
+        # Pool spawns worker threads; close them at interpreter exit so
+        # short-lived processes (pytest, scripts) don't die with
+        # PythonFinalizationError noise on stderr.
+        import atexit
+
+        atexit.register(db_pool_close_for_test)
+    return _pool
+
+
 def db_connect():
     if not TTS_ERP_DB_URL:
         raise RuntimeError("TTS_ERP_DB_URL not configured")
-    return psycopg.connect(TTS_ERP_DB_URL, connect_timeout=5)
+    return _get_pool().connection()
+
+
+def db_pool_close_for_test():
+    """Dispose the pool (atexit + tests). Never raises."""
+    global _pool
+    if _pool is not None:
+        # Interpreter-shutdown race is harmless — suppress it.
+        with contextlib.suppress(Exception):
+            _pool.close()
+        _pool = None
 
 
 def db_init():
