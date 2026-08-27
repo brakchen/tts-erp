@@ -209,9 +209,12 @@ def get_cursor(
     )
 
     page = entries[:pageSize]
-    next_cursor = (
-        _encode_cursor(pageSize, len(entries)) if len(entries) > pageSize else None
-    )
+    # W1.8: nextCursor is NOT implemented (fetch_cursor_page returns all
+    # rows; the incoming `cursor` param is ignored). Emitting a cursor the
+    # server can't consume would send clients into an infinite loop
+    # re-fetching page 1 — stay null until real keyset pagination lands
+    # (Wave 3.5). Current unit counts are far below pageSize anyway.
+    next_cursor = None
 
     write_audit(
         request_id=request_id,
@@ -635,7 +638,9 @@ def _safe_int(value: str | None, default: int) -> int:
 
 
 def _encode_cursor(page_size: int, total: int) -> str | None:
-    """Opaque base64-encoded cursor. MVP: a simple offset hint."""
+    """Opaque base64-encoded cursor. UNUSED since W1.8: nextCursor is
+    always null until real keyset pagination is implemented (Wave 3.5).
+    Kept for the Wave 3.5 implementation to build on."""
     if total <= page_size:
         return None
     payload = json.dumps(

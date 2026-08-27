@@ -10,8 +10,10 @@ silently fail when oauth DB is unreachable (graceful empty list).
 from __future__ import annotations
 
 from contextlib import suppress
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
+
+import psycopg
 
 import sync_cron
 
@@ -219,14 +221,14 @@ class TestWatermarkValue:
     def test_returns_max_value_when_rows_exist(self):
         from sync_cron import watermark_value
 
-        conn = _FakeConn((1_750_000_000,))
+        conn = cast(psycopg.Connection, _FakeConn((1_750_000_000,)))
         result = watermark_value(conn, "shop-1", "returns", "update_time")
         assert result == 1_750_000_000
 
     def test_returns_none_for_empty_table(self):
         from sync_cron import watermark_value
 
-        conn = _FakeConn((None,))
+        conn = cast(psycopg.Connection, _FakeConn((None,)))
         result = watermark_value(conn, "shop-1", "returns", "update_time")
         assert result is None
 
@@ -235,9 +237,10 @@ class TestWatermarkValue:
 
         from sync_cron import watermark_value
 
-        conn = _FakeConn((123,))
+        fake = _FakeConn((123,))
+        conn = cast(psycopg.Connection, fake)
         watermark_value(conn, "shop-XYZ", "returns", "update_time")
-        sql_obj, params = conn._cursor.executed[0]
+        sql_obj, params = fake._cursor.executed[0]
         # Critical safety contract: shop_id is parameterized (%s), not
         # inlined into the SQL string. SQL injection via shop_id is impossible.
         assert params == ("shop-XYZ",)
@@ -433,3 +436,43 @@ def test_discover_shops_filters_only_mock_prefix_not_substring():
     # MOCK_SHOP_12345 has prefix MOCK_ → filtered
     # MOCKERY_BAKERY_999 has prefix MOCKERY_ → kept (not a MOCK_ sentinel)
     assert result == ["MOCKERY_BAKERY_999"]
+
+
+# ─── W1.5: http_json timeout resilience + DB-down exit code ──────────
+
+
+def test_http_json_catches_timeout():
+    """Python 3.10+ urlopen timeout raises TimeoutError (OSError subclass),
+    NOT URLError. It must be caught so one slow call doesn't kill the
+    whole cron tick."""
+
+    def raise_timeout(req, timeout=None):
+        raise TimeoutError("timed out")
+
+    with patch.object(sync_cron.urllib.request, "urlopen", raise_timeout):
+        result = sync_cron.http_json("POST", "http://127.0.0.1:9877/x", {"a": 1})
+    assert result["_error"] is True
+
+
+def test_http_json_catches_socket_timeout():
+    """socket.timeout (also an OSError) must be caught too."""
+
+    def raise_sock_timeout(req, timeout=None):
+        raise TimeoutError("timed out")
+
+    with patch.object(sync_cron.urllib.request, "urlopen", raise_sock_timeout):
+        result = sync_cron.http_json("GET", "http://127.0.0.1:9877/x")
+    assert result["_error"] is True
+
+
+def test_main_returns_nonzero_when_oauth_db_down(tmp_path, monkeypatch):
+    """DB down must be distinguishable from 'no shops' via exit code.
+    Monitoring watches exit codes; silent 0 = blind (2026-08-23 incident:
+    34h of silent no-op runs)."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("TTS_ERP_DB_URL=postgresql://x\nTTS_ERP_SERVICE_KEY=k\n")
+    monkeypatch.setattr(sync_cron, "ENV_FILE", env_file)
+    with patch.object(sync_cron, "oauth_receiver_core") as mock_oc:
+        mock_oc.is_db_ok.return_value = False
+        rc = sync_cron.main()
+    assert rc != 0

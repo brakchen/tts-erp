@@ -195,3 +195,64 @@ def test_backfill_handles_missing_oauth_db_gracefully(db_url: str, monkeypatch):
         only_test_rows=True,
     )
     assert rows == 0
+
+
+def test_persist_shop_never_writes_cipher(db_url: str):
+    """W1.3: persist_shop must NOT persist the plaintext shop_cipher.
+
+    shop_cipher is a live signing credential; its single source of truth
+    is oauth_receiver (encrypted bytea). The backfill path already writes
+    NULL (tdd/_backfill.py); the order-detail path must align. Column
+    itself is dropped in Wave 2.
+    """
+    import psycopg
+
+    import tts_erp
+
+    conn = psycopg.connect(db_url)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM shops WHERE shop_id LIKE 'TEST_%'")
+        conn.commit()
+
+        ok = tts_erp.persist_shop(
+            "TEST_SHOP_CIPHER",
+            name="Cipher Shop",
+            region="VN",
+            cipher="PLAINTEXT_SECRET_SHOULD_NOT_BE_STORED",
+            seller_type="CROSS_BORDER",
+        )
+        assert ok is True
+
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT shop_cipher FROM shops WHERE shop_id = 'TEST_SHOP_CIPHER'"
+            )
+            row = cur.fetchone()
+        assert row is not None
+        assert row[0] is None, f"shop_cipher leaked to DB: {row[0]!r}"
+
+        # Upsert path with a new cipher must also stay NULL
+        ok = tts_erp.persist_shop(
+            "TEST_SHOP_CIPHER",
+            name="Cipher Shop v2",
+            region="US",
+            cipher="ANOTHER_SECRET",
+            seller_type="CROSS_BORDER",
+        )
+        assert ok is True
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT shop_name, shop_region, shop_cipher FROM shops"
+                " WHERE shop_id = 'TEST_SHOP_CIPHER'"
+            )
+            row = cur.fetchone()
+        assert row is not None
+        assert row[0] == "Cipher Shop v2"
+        assert row[1] == "US"
+        assert row[2] is None
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM shops WHERE shop_id LIKE 'TEST_%'")
+        conn.commit()
+        conn.close()

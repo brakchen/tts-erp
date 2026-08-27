@@ -169,6 +169,13 @@ SYNC_PLANS = [
 LOGISTICS_FINAL_STATUSES = ("DELIVERED", "RETURNED_TO_SELLER")
 # 每轮物流追踪的订单数上限（防御，正常远达不到）
 LOGISTICS_TARGET_LIMIT = 300
+# W1.6: server caps max_per_run at 100 and each order costs one serial
+# upstream call (up to 60s timeout). cron's HTTP_TIMEOUT is 180s, so a
+# single call carrying >80 orders is guaranteed to time out client-side
+# while uvicorn keeps writing — cron logs err, sync_log logs ok, and the
+# next tick refetches the same orders. Batch into ≤80-order calls so the
+# per-call budget stays inside HTTP_TIMEOUT.
+LOGISTICS_BATCH_SIZE = 80
 
 
 # ─── HTTP 客户端 ──────────────────────────────────────────────────────
@@ -199,6 +206,12 @@ def http_json(
         return {"_http_status": e.code, "_error": True, **payload}
     except urllib.error.URLError as e:
         return {"_error": True, "_reason": f"URLError: {e.reason}"}
+    except (TimeoutError, OSError) as e:
+        # W1.5: Python 3.10+ urlopen timeout raises TimeoutError /
+        # socket.timeout (both OSError subclasses), NOT URLError. Without
+        # this catch a single slow call escapes the per-plan loop and
+        # kills the whole cron tick (all remaining plans skipped).
+        return {"_error": True, "_reason": f"{type(e).__name__}: {e}"}
 
 
 # ─── 业务函数 ────────────────────────────────────────────────────────
@@ -396,6 +409,15 @@ def main() -> int:
     log.info("tts-erp base = %s", base_url)
 
     # 1) 发现 shops（in-process via oauth_receiver_core; Wave 3 Slice 2）
+    # W1.5: oauth DB down must NOT look like "no shops" — the 2026-08-23
+    # incident ran silently for 34h because both paths logged the same
+    # and exited 0. Exit 4 so monitoring sees a hard failure.
+    if not oauth_receiver_core.is_db_ok():
+        log.error(
+            "oauth DB is not available (is_db_ok=False) — aborting tick; "
+            "this is NOT the same as 'no shops authorized'"
+        )
+        return 4
     try:
         shops = discover_shops()
     except Exception as e:
@@ -488,8 +510,45 @@ def main() -> int:
                         )
                         summary[key]["ok"] += 1
                         continue
-                    body = {"shop_id": shop_id, "order_ids": order_ids}
                     log.info("[%s] shop=%s targets=%d", key, shop_id, len(order_ids))
+                    # W1.6: batch into ≤LOGISTICS_BATCH_SIZE-order calls
+                    for bstart in range(0, len(order_ids), LOGISTICS_BATCH_SIZE):
+                        batch = order_ids[bstart : bstart + LOGISTICS_BATCH_SIZE]
+                        bbody = {"shop_id": shop_id, "order_ids": batch}
+                        time.sleep(random.uniform(2, 8))
+                        t0 = time.time()
+                        result = http_json(
+                            "POST",
+                            f"{base_url}{plan['path']}",
+                            bbody,
+                            timeout=HTTP_TIMEOUT,
+                            api_key=service_key,
+                        )
+                        dt = time.time() - t0
+                        if result.get("_error"):
+                            log.error(
+                                "[%s] shop=%s batch@%d FAIL in %.1fs — %s",
+                                key,
+                                shop_id,
+                                bstart,
+                                dt,
+                                json.dumps(result, ensure_ascii=False)[:400],
+                            )
+                            summary[key]["err"] += 1
+                            continue
+                        saved = result.get("saved", 0)
+                        log.info(
+                            "[%s] shop=%s batch@%d OK in %.1fs saved=%d/%d",
+                            key,
+                            shop_id,
+                            bstart,
+                            dt,
+                            saved,
+                            len(batch),
+                        )
+                        summary[key]["ok"] += 1
+                        summary[key]["saved"] += saved
+                    continue
                 # Anti-burst jitter: spread 6 plans across ~30s per tick
                 # so we don't fire 6 different TikTok endpoints inside 10s,
                 # which is what was triggering 429 "Too many requests".

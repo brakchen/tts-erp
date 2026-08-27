@@ -17,6 +17,31 @@ from typing import Any
 
 from domain import Creds, HttpClient, SyncResult
 
+
+def _body_int(value: Any, default: int) -> int:
+    """Parse an int from a sync-request body field.
+
+    Dirty client input (e.g. page_size="abc") must NOT raise ValueError
+    out of the business layer — that surfaces as an opaque 500. Fall
+    back to the default instead; the FastAPI/pydantic layer (Wave 3.3)
+    is where hard 422 validation lives.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _body_int_opt(value: Any) -> int | None:
+    """Optional-field variant: returns None for missing/garbage input so
+    the caller simply omits the filter from the upstream request."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
 # Maximum pages to fetch in one sync call. Safety cap to avoid
 # runaway pagination if TikTok keeps returning next_page_token.
 _MAX_PAGES = 50
@@ -39,12 +64,12 @@ def sync_orders(
     - Persists each order via repo.upsert()
     - Stops pagination if a page returns code != 0 (partial result OK)
     """
-    page_size = int(body.get("page_size") or 50)
+    page_size = _body_int(body.get("page_size"), 50)
     order_status = body.get("order_status")
-    create_time_ge = body.get("create_time_ge")
-    create_time_lt = body.get("create_time_lt")
-    update_time_ge = body.get("update_time_ge")
-    update_time_lt = body.get("update_time_lt")
+    create_time_ge = _body_int_opt(body.get("create_time_ge"))
+    create_time_lt = _body_int_opt(body.get("create_time_lt"))
+    update_time_ge = _body_int_opt(body.get("update_time_ge"))
+    update_time_lt = _body_int_opt(body.get("update_time_lt"))
 
     extra_params: dict[str, str] = {
         "shop_cipher": creds.shop_cipher,
@@ -57,14 +82,14 @@ def sync_orders(
         # TikTok expects string, not int (per 36009004 type validation)
         search_body["order_status"] = str(order_status)
     if create_time_ge is not None:
-        search_body["create_time_ge"] = int(create_time_ge)
+        search_body["create_time_ge"] = create_time_ge
     if create_time_lt is not None:
-        search_body["create_time_lt"] = int(create_time_lt)
+        search_body["create_time_lt"] = create_time_lt
     # L1 watermark: see sync_returns — same pattern, identical semantics
     if update_time_ge is not None:
-        search_body["update_time_ge"] = int(update_time_ge)
+        search_body["update_time_ge"] = update_time_ge
     if update_time_lt is not None:
-        search_body["update_time_lt"] = int(update_time_lt)
+        search_body["update_time_lt"] = update_time_lt
 
     first = http.request(
         "POST",
@@ -132,9 +157,9 @@ def sync_payments(
     ints (finance endpoint is lenient on type validation, unlike
     return_refund which strictly rejects string).
     """
-    page_size = int(body.get("page_size") or 50)
-    create_time_ge = body.get("create_time_ge")
-    create_time_lt = body.get("create_time_lt")
+    page_size = _body_int(body.get("page_size"), 50)
+    create_time_ge = _body_int_opt(body.get("create_time_ge"))
+    create_time_lt = _body_int_opt(body.get("create_time_lt"))
 
     extra_params: dict[str, str] = {
         "shop_cipher": creds.shop_cipher,
@@ -143,9 +168,9 @@ def sync_payments(
         "sort_order": "DESC",
     }
     if create_time_ge is not None:
-        extra_params["create_time_ge"] = str(int(create_time_ge))
+        extra_params["create_time_ge"] = str(create_time_ge)
     if create_time_lt is not None:
-        extra_params["create_time_lt"] = str(int(create_time_lt))
+        extra_params["create_time_lt"] = str(create_time_lt)
 
     first = http.request(
         "GET",
@@ -165,6 +190,11 @@ def sync_payments(
     total = data.get("total") or len(pays)
     next_token = data.get("next_page_token")
     pages = 1
+    # W1.5: a mid-pagination failure marks the whole sync FAILED (saved
+    # rows are kept). payments has no local watermark — the cron window
+    # is driven by sync_log status='ok', so reporting ok here would
+    # advance the window past the missed pages and silently drop data.
+    page_error: str | None = None
     while next_token and pages < _MAX_PAGES:
         extra_params["page_token"] = next_token
         nxt = http.request(
@@ -174,6 +204,7 @@ def sync_payments(
             extra_params=extra_params,
         )
         if nxt.get("code") != 0:
+            page_error = str(nxt.get("message", "unknown"))
             break
         d = nxt.get("data") or {}
         for p in d.get("payments") or []:
@@ -182,7 +213,7 @@ def sync_payments(
         next_token = d.get("next_page_token")
         pages += 1
 
-    return SyncResult(saved=saved, total=total, pages=pages)
+    return SyncResult(saved=saved, total=total, pages=pages, error=page_error)
 
 
 def _persist_payments(repo, shop_id: str, payments: list[dict[str, Any]]) -> int:
@@ -205,9 +236,9 @@ def sync_statements(
     GET endpoint. Uses statement_time_ge/lt (not create_time) as the
     time filter. Same shape as sync_payments.
     """
-    page_size = int(body.get("page_size") or 50)
-    statement_time_ge = body.get("statement_time_ge")
-    statement_time_lt = body.get("statement_time_lt")
+    page_size = _body_int(body.get("page_size"), 50)
+    statement_time_ge = _body_int_opt(body.get("statement_time_ge"))
+    statement_time_lt = _body_int_opt(body.get("statement_time_lt"))
 
     extra_params: dict[str, str] = {
         "shop_cipher": creds.shop_cipher,
@@ -216,9 +247,9 @@ def sync_statements(
         "sort_order": "DESC",
     }
     if statement_time_ge is not None:
-        extra_params["statement_time_ge"] = str(int(statement_time_ge))
+        extra_params["statement_time_ge"] = str(statement_time_ge)
     if statement_time_lt is not None:
-        extra_params["statement_time_lt"] = str(int(statement_time_lt))
+        extra_params["statement_time_lt"] = str(statement_time_lt)
 
     first = http.request(
         "GET",
@@ -238,6 +269,10 @@ def sync_statements(
     total = data.get("total") or len(stmts)
     next_token = data.get("next_page_token")
     pages = 1
+    # W1.5: same as sync_payments — a mid-pagination failure marks the
+    # whole sync FAILED (saved rows kept) so the sync_log-driven window
+    # does not advance past the missed pages.
+    page_error: str | None = None
     while next_token and pages < _MAX_PAGES:
         extra_params["page_token"] = next_token
         nxt = http.request(
@@ -247,6 +282,7 @@ def sync_statements(
             extra_params=extra_params,
         )
         if nxt.get("code") != 0:
+            page_error = str(nxt.get("message", "unknown"))
             break
         d = nxt.get("data") or {}
         for s in d.get("statements") or []:
@@ -255,7 +291,7 @@ def sync_statements(
         next_token = d.get("next_page_token")
         pages += 1
 
-    return SyncResult(saved=saved, total=total, pages=pages)
+    return SyncResult(saved=saved, total=total, pages=pages, error=page_error)
 
 
 def _persist_simple(repo, shop_id: str, items: list[dict[str, Any]]) -> int:
@@ -284,7 +320,7 @@ def sync_statement_transactions(
     显式给 statement_ids 就逐个拉；否则按 statement_time 窗口从本地 statements 表选。
     单个 statement 拉取失败不中断其他 statement（部分失败记 error，全败才 error）。
     """
-    page_size = int(body.get("page_size") or 100)
+    page_size = _body_int(body.get("page_size"), 100)
 
     statement_ids: list[str] = []
     if body.get("statement_ids"):
@@ -361,11 +397,11 @@ def sync_returns(
     type-checks query string here, unlike finance endpoints).
     page_size must be in [10, 50] or TikTok returns 98001004.
     """
-    page_size = int(body.get("page_size") or 50)
-    create_time_ge = body.get("create_time_ge")
-    create_time_lt = body.get("create_time_lt")
-    update_time_ge = body.get("update_time_ge")
-    update_time_lt = body.get("update_time_lt")
+    page_size = _body_int(body.get("page_size"), 50)
+    create_time_ge = _body_int_opt(body.get("create_time_ge"))
+    create_time_lt = _body_int_opt(body.get("create_time_lt"))
+    update_time_ge = _body_int_opt(body.get("update_time_ge"))
+    update_time_lt = _body_int_opt(body.get("update_time_lt"))
 
     extra_params: dict[str, str] = {
         "shop_cipher": creds.shop_cipher,
@@ -375,16 +411,16 @@ def sync_returns(
     }
     filter_body: dict[str, Any] = {}
     if create_time_ge is not None:
-        filter_body["create_time_ge"] = int(create_time_ge)
+        filter_body["create_time_ge"] = create_time_ge
     if create_time_lt is not None:
-        filter_body["create_time_lt"] = int(create_time_lt)
+        filter_body["create_time_lt"] = create_time_lt
     # L1 watermark: cron may pass update_time_* instead of create_time_*
     # when local MAX(update_time) is known (incremental sync). The two
     # filters are mutually exclusive in practice — cron chooses one.
     if update_time_ge is not None:
-        filter_body["update_time_ge"] = int(update_time_ge)
+        filter_body["update_time_ge"] = update_time_ge
     if update_time_lt is not None:
-        filter_body["update_time_lt"] = int(update_time_lt)
+        filter_body["update_time_lt"] = update_time_lt
 
     first = http.request(
         "POST",
@@ -435,11 +471,11 @@ def sync_cancellations(
 
     Same shape as sync_returns but different endpoint and response key.
     """
-    page_size = int(body.get("page_size") or 50)
-    create_time_ge = body.get("create_time_ge")
-    create_time_lt = body.get("create_time_lt")
-    update_time_ge = body.get("update_time_ge")
-    update_time_lt = body.get("update_time_lt")
+    page_size = _body_int(body.get("page_size"), 50)
+    create_time_ge = _body_int_opt(body.get("create_time_ge"))
+    create_time_lt = _body_int_opt(body.get("create_time_lt"))
+    update_time_ge = _body_int_opt(body.get("update_time_ge"))
+    update_time_lt = _body_int_opt(body.get("update_time_lt"))
 
     extra_params: dict[str, str] = {
         "shop_cipher": creds.shop_cipher,
@@ -449,14 +485,14 @@ def sync_cancellations(
     }
     filter_body: dict[str, Any] = {}
     if create_time_ge is not None:
-        filter_body["create_time_ge"] = int(create_time_ge)
+        filter_body["create_time_ge"] = create_time_ge
     if create_time_lt is not None:
-        filter_body["create_time_lt"] = int(create_time_lt)
+        filter_body["create_time_lt"] = create_time_lt
     # L1 watermark: see sync_returns — same pattern, identical semantics
     if update_time_ge is not None:
-        filter_body["update_time_ge"] = int(update_time_ge)
+        filter_body["update_time_ge"] = update_time_ge
     if update_time_lt is not None:
-        filter_body["update_time_lt"] = int(update_time_lt)
+        filter_body["update_time_lt"] = update_time_lt
 
     first = http.request(
         "POST",

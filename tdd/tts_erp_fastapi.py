@@ -17,10 +17,13 @@ from __future__ import annotations
 import base64
 import json
 import os
+import random
 import sys
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -49,6 +52,7 @@ from auth import AuthMiddleware  # noqa: E402
 from miaoshou import MiaoshouApiResponse  # noqa: E402
 
 log = logging.getLogger("tts-erp-fastapi")
+from domain import TokenError  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from http_client import TikTokHttpClient  # noqa: E402
 from oauth_receiver_router import (  # noqa: E402  -- Wave 3 Slice 3
@@ -176,11 +180,20 @@ def _tiktok_http_for(creds_provider) -> TikTokHttpClient:
 
 
 def _get_creds(shop_id: str):
-    """Fetch creds for a shop. Returns Creds or raises HTTPException(502)."""
+    """Fetch creds for a shop.
+
+    TokenError carries a semantic status (404 = shop not authorized →
+    caller should run OAuth; 502 = upstream failure) — pass it through.
+    Any other exception becomes a fixed-text 502; internal details go to
+    stderr only (never leaked to the client).
+    """
     try:
         return _token_provider.get(shop_id)
+    except TokenError as e:
+        raise HTTPException(status_code=e.status, detail=str(e)) from e
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"token fetch failed: {e}") from e
+        sys.stderr.write(f"[tts-erp-fastapi] token fetch failed: {type(e).__name__}: {e}\n")
+        raise HTTPException(status_code=502, detail="token fetch failed") from e
 
 
 def _log_sync(
@@ -198,6 +211,45 @@ def _log_sync(
 
 
 # ─── Health / meta ────────────────────────────────────────────────────
+
+# W1.6: /sync/logistics_tracking overlap guard. One slow run (hundreds of
+# serial upstream calls at up to 60s each) must not pile up with the next
+# cron tick or a manual trigger. PG advisory lock is the lightest mutex
+# available (no extra infra).
+_LOGISTICS_LOCK_KEY = 727001  # stable arbitrary int key for pg advisory lock
+LOGISTICS_MAX_PER_RUN_CAP = 100  # hard ceiling regardless of body.max_per_run
+
+
+def _try_advisory_lock(key: int) -> bool:
+    """Try to take a session-scoped PG advisory lock. Returns False if
+    another run holds it. The lock lives on ONE dedicated connection kept
+    in _ADVISORY_LOCK_CONNS until _release_advisory_lock."""
+    if key in _ADVISORY_LOCK_CONNS:
+        return False  # re-entrant call in same process
+    conn = tts_erp.db_connect()
+    with conn.cursor() as cur:
+        cur.execute("SELECT pg_try_advisory_lock(%s)", (key,))
+        row = cur.fetchone()
+        acquired = bool(row[0]) if row else False
+    if not acquired:
+        conn.close()
+        return False
+    _ADVISORY_LOCK_CONNS[key] = conn
+    return True
+
+
+def _release_advisory_lock(key: int) -> None:
+    conn = _ADVISORY_LOCK_CONNS.pop(key, None)
+    if conn is None:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT pg_advisory_unlock(%s)", (key,))
+    finally:
+        conn.close()
+
+
+_ADVISORY_LOCK_CONNS: dict[int, Any] = {}
 
 # Mount the analytics_sync service under tts-erp at /v1/analytics/sync.
 # Auth (Bearer / api_keys table), rate limiting, and scope checks are
@@ -841,10 +893,29 @@ def logistics_tracking(order_id: str, shop_id: str):
 def sync_logistics_tracking(body: dict):
     """POST /sync/logistics_tracking
     body: {shop_id, order_ids?: [...], all_with_tracking?: bool, limit?, max_per_run?}
+
+    W1.6: guarded by a PG advisory lock (409 on overlap) and a hard
+    max_per_run cap — one run is hundreds of serial upstream calls at up
+    to TTS_ERP_HTTP_TIMEOUT seconds each; without a cap a single request
+    can occupy a worker thread for hours and pile up with the next cron
+    tick.
     """
     shop_id = body.get("shop_id")
     if not shop_id:
         raise HTTPException(status_code=400, detail="missing shop_id in body")
+
+    if not _try_advisory_lock(_LOGISTICS_LOCK_KEY):
+        raise HTTPException(
+            status_code=409,
+            detail="another logistics_tracking sync is already running",
+        )
+    try:
+        return _sync_logistics_tracking_locked(body, shop_id)
+    finally:
+        _release_advisory_lock(_LOGISTICS_LOCK_KEY)
+
+
+def _sync_logistics_tracking_locked(body: dict, shop_id: str):
     creds = _get_creds(shop_id)
     http = _tiktok_http_for(creds)
 
@@ -879,10 +950,13 @@ def sync_logistics_tracking(body: dict):
         )
         order_ids = [r["order_id"] for r in rows]
 
-    max_per_run = _safe_int(
-        body.get("max_per_run"),
-        default=(len(order_ids) or 100),
-        source="body.max_per_run",
+    max_per_run = min(
+        _safe_int(
+            body.get("max_per_run"),
+            default=(len(order_ids) or 100),
+            source="body.max_per_run",
+        ),
+        LOGISTICS_MAX_PER_RUN_CAP,
     )
     order_ids = order_ids[:max_per_run]
 
@@ -891,7 +965,11 @@ def sync_logistics_tracking(body: dict):
 
     saved = 0
     errors: list[dict] = []
-    for oid in order_ids:
+    for i, oid in enumerate(order_ids):
+        if i > 0:
+            # Anti-burst jitter: serial upstream calls at full speed trip
+            # TikTok's 429 limiter (same rationale as sync_cron's sleep).
+            time.sleep(random.uniform(0.5, 1.5))
         upstream_path = LOGISTICS_UPSTREAM_PATH.format(order_id=oid)
         r = http.request(
             "GET",

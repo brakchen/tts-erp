@@ -1,12 +1,11 @@
 """TDD test suite for sync_payments business function."""
+
 from __future__ import annotations
 
 from typing import Any
 
 import pytest
-
 from domain import Creds
-
 
 # ─── Fakes (reused pattern; duplicated here for self-containment) ────
 
@@ -17,12 +16,19 @@ class FakeHttpClient:
         self.calls = []
 
     def request(self, method, path, *, body=None, extra_params=None, timeout=30):
-        self.calls.append({
-            "method": method, "path": path, "body": body,
-            "extra_params": dict(extra_params or {}), "timeout": timeout,
-        })
+        self.calls.append(
+            {
+                "method": method,
+                "path": path,
+                "body": body,
+                "extra_params": dict(extra_params or {}),
+                "timeout": timeout,
+            }
+        )
         if not self._responses:
-            raise AssertionError(f"FakeHttpClient exhausted on call #{len(self.calls)}: {method} {path}")
+            raise AssertionError(
+                f"FakeHttpClient exhausted on call #{len(self.calls)}: {method} {path}"
+            )
         return self._responses.pop(0)
 
 
@@ -44,11 +50,18 @@ class FakePaymentRepository:
 
 @pytest.fixture()
 def creds():
-    return Creds(access_token="tok", shop_cipher="cipher", region="VN", shop_id="shop-1")
+    return Creds(
+        access_token="tok", shop_cipher="cipher", region="VN", shop_id="shop-1"
+    )
 
 
 def make_payment(id: str, amount: str = "100.00", currency: str = "VND") -> dict:
-    return {"payment_id": id, "amount": amount, "currency": currency, "create_time": 1_700_000_000}
+    return {
+        "payment_id": id,
+        "amount": amount,
+        "currency": currency,
+        "create_time": 1_700_000_000,
+    }
 
 
 # ─── Tests ────────────────────────────────────────────────────────────
@@ -56,10 +69,17 @@ def make_payment(id: str, amount: str = "100.00", currency: str = "VND") -> dict
 
 class TestSyncPaymentsHappyPath:
     def test_single_page_saves_all(self, creds):
-        http = FakeHttpClient([{
-            "code": 0,
-            "data": {"payments": [make_payment("p1"), make_payment("p2")], "total": 2},
-        }])
+        http = FakeHttpClient(
+            [
+                {
+                    "code": 0,
+                    "data": {
+                        "payments": [make_payment("p1"), make_payment("p2")],
+                        "total": 2,
+                    },
+                }
+            ]
+        )
         repo = FakePaymentRepository()
         from tts_business import sync_payments
 
@@ -83,12 +103,25 @@ class TestSyncPaymentsHappyPath:
         assert result.pages == 1
 
     def test_multi_page_pagination(self, creds):
-        http = FakeHttpClient([
-            {"code": 0, "data": {"payments": [make_payment("p1"), make_payment("p2")],
-                                "total": 4, "next_page_token": "tok-1"}},
-            {"code": 0, "data": {"payments": [make_payment("p3"), make_payment("p4")],
-                                "total": 4}},
-        ])
+        http = FakeHttpClient(
+            [
+                {
+                    "code": 0,
+                    "data": {
+                        "payments": [make_payment("p1"), make_payment("p2")],
+                        "total": 4,
+                        "next_page_token": "tok-1",
+                    },
+                },
+                {
+                    "code": 0,
+                    "data": {
+                        "payments": [make_payment("p3"), make_payment("p4")],
+                        "total": 4,
+                    },
+                },
+            ]
+        )
         repo = FakePaymentRepository()
         from tts_business import sync_payments
 
@@ -101,8 +134,13 @@ class TestSyncPaymentsHappyPath:
 
     def test_pagination_caps_at_50(self, creds):
         responses = [
-            {"code": 0, "data": {"payments": [make_payment(f"p{i}")],
-                                "next_page_token": f"tok-{i}"}}
+            {
+                "code": 0,
+                "data": {
+                    "payments": [make_payment(f"p{i}")],
+                    "next_page_token": f"tok-{i}",
+                },
+            }
             for i in range(60)
         ]
         http = FakeHttpClient(responses)
@@ -115,17 +153,31 @@ class TestSyncPaymentsHappyPath:
         assert len(http.calls) == 50
 
     def test_pagination_breaks_on_subsequent_error(self, creds):
-        http = FakeHttpClient([
-            {"code": 0, "data": {"payments": [make_payment("p1")], "next_page_token": "tok-1"}},
-            {"code": 500, "message": "server error"},
-        ])
+        """W1.5: a mid-pagination failure must mark the whole sync as failed
+        (error set, saved rows kept) so the cron window does NOT advance
+        past the gap — payments has no local watermark, the window is
+        driven by sync_log status='ok'."""
+        http = FakeHttpClient(
+            [
+                {
+                    "code": 0,
+                    "data": {
+                        "payments": [make_payment("p1")],
+                        "next_page_token": "tok-1",
+                    },
+                },
+                {"code": 500, "message": "server error"},
+            ]
+        )
         repo = FakePaymentRepository()
         from tts_business import sync_payments
 
         result = sync_payments(creds, {"shop_id": creds.shop_id}, http=http, repo=repo)
 
-        assert result.ok
-        assert result.saved == 1
+        assert not result.ok
+        assert result.error is not None
+        assert "server error" in result.error
+        assert result.saved == 1  # partial data is kept
         assert result.pages == 1
 
 
@@ -147,11 +199,16 @@ class TestSyncPaymentsRequestShape:
         repo = FakePaymentRepository()
         from tts_business import sync_payments
 
-        sync_payments(creds, {
-            "shop_id": creds.shop_id,
-            "create_time_ge": 1_700_000_000,
-            "create_time_lt": 1_800_000_000,
-        }, http=http, repo=repo)
+        sync_payments(
+            creds,
+            {
+                "shop_id": creds.shop_id,
+                "create_time_ge": 1_700_000_000,
+                "create_time_lt": 1_800_000_000,
+            },
+            http=http,
+            repo=repo,
+        )
 
         ep = http.calls[0]["extra_params"]
         # Payments API accepts string in query string (finance endpoint is lenient)
@@ -176,8 +233,9 @@ class TestSyncPaymentsRequestShape:
         repo = FakePaymentRepository()
         from tts_business import sync_payments
 
-        sync_payments(creds, {"shop_id": creds.shop_id, "page_size": 500},
-                     http=http, repo=repo)
+        sync_payments(
+            creds, {"shop_id": creds.shop_id, "page_size": 500}, http=http, repo=repo
+        )
 
         assert http.calls[0]["extra_params"]["page_size"] == "100"
 
@@ -192,13 +250,24 @@ class TestSyncPaymentsErrors:
 
         assert not result.ok
         assert result.saved == 0
+        assert result.error is not None
         assert "auth fail" in result.error
 
     def test_payment_without_id_is_skipped(self, creds):
-        http = FakeHttpClient([{
-            "code": 0,
-            "data": {"payments": [make_payment("p1"), {"amount": "50"}, make_payment("p3")]},
-        }])
+        http = FakeHttpClient(
+            [
+                {
+                    "code": 0,
+                    "data": {
+                        "payments": [
+                            make_payment("p1"),
+                            {"amount": "50"},
+                            make_payment("p3"),
+                        ]
+                    },
+                }
+            ]
+        )
         repo = FakePaymentRepository()
         from tts_business import sync_payments
 
@@ -207,10 +276,20 @@ class TestSyncPaymentsErrors:
         assert result.saved == 2
 
     def test_repo_failure_does_not_stop_iteration(self, creds):
-        http = FakeHttpClient([{
-            "code": 0,
-            "data": {"payments": [make_payment("p1"), make_payment("p2"), make_payment("p3")]},
-        }])
+        http = FakeHttpClient(
+            [
+                {
+                    "code": 0,
+                    "data": {
+                        "payments": [
+                            make_payment("p1"),
+                            make_payment("p2"),
+                            make_payment("p3"),
+                        ]
+                    },
+                }
+            ]
+        )
         repo = FakePaymentRepository()
         repo.fail_payment_ids.add("p2")
         from tts_business import sync_payments
@@ -218,3 +297,37 @@ class TestSyncPaymentsErrors:
         result = sync_payments(creds, {"shop_id": creds.shop_id}, http=http, repo=repo)
 
         assert result.saved == 2
+
+
+class TestDirtyBodyInput:
+    """W1.5/W3.3-early: garbage types in the sync body must not crash the
+    business layer with ValueError (which surfaces as a 500). Non-numeric
+    page_size falls back to the default; non-numeric time filters are
+    dropped from the upstream request."""
+
+    def test_non_numeric_page_size_falls_back_to_default(self, creds):
+        http = FakeHttpClient([{"code": 0, "data": {"payments": []}}])
+        repo = FakePaymentRepository()
+        from tts_business import sync_payments
+
+        result = sync_payments(
+            creds, {"shop_id": creds.shop_id, "page_size": "abc"},
+            http=http, repo=repo,
+        )
+
+        assert result.ok
+        assert http.calls[0]["extra_params"]["page_size"] == "50"
+
+    def test_non_numeric_time_filter_is_dropped(self, creds):
+        http = FakeHttpClient([{"code": 0, "data": {"payments": []}}])
+        repo = FakePaymentRepository()
+        from tts_business import sync_payments
+
+        result = sync_payments(
+            creds,
+            {"shop_id": creds.shop_id, "create_time_ge": "not-a-number"},
+            http=http, repo=repo,
+        )
+
+        assert result.ok
+        assert "create_time_ge" not in http.calls[0]["extra_params"]

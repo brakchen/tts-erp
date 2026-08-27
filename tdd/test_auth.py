@@ -10,11 +10,11 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime, timedelta, timezone
 
+import auth
 import psycopg
 import pytest
+import rate_limit
 from fastapi.testclient import TestClient
-
-import auth
 from tts_erp_fastapi import app
 
 # Well-known test keys (full key only lives in this file; DB holds SHA-256)
@@ -334,3 +334,75 @@ def test_shadow_mode_allows_and_logs(client, auth_keys, monkeypatch, capsys):
 def test_off_mode_allows_everything(client, auth_keys, monkeypatch):
     monkeypatch.setenv("TTS_ERP_AUTH_MODE", "off")
     assert client.get("/db/orders?limit=1").status_code == 200
+
+
+# ─── W1.1: negative cache / DB-down 503 / denied-request rate limiting ───
+
+
+def test_invalid_key_is_negative_cached(client, auth_keys, monkeypatch):
+    """Invalid keys are cached (short TTL) so brute-force retries don't
+    hit PG on every request. Second 401 must not call _db_lookup again."""
+    monkeypatch.setenv("TTS_ERP_AUTH_MODE", "enforce")
+    calls = []
+    real = auth._db_lookup
+
+    def spy(key_hash):
+        calls.append(key_hash)
+        return real(key_hash)
+
+    monkeypatch.setattr(auth, "_db_lookup", spy)
+    forged = "ttserp_ro_forged000000000000000000"
+    assert client.get("/db/orders?limit=1", headers=_auth(forged)).status_code == 401
+    assert client.get("/db/orders?limit=1", headers=_auth(forged)).status_code == 401
+    assert len(calls) == 1
+
+
+def test_db_down_fails_closed_503(client, auth_keys, monkeypatch):
+    """PG unreachable during key lookup → fail-closed 503 (not 500 bubble,
+    not silent pass)."""
+    monkeypatch.setenv("TTS_ERP_AUTH_MODE", "enforce")
+
+    def boom(key_hash):
+        raise psycopg.OperationalError("connection refused")
+
+    monkeypatch.setattr(auth, "_db_lookup", boom)
+    auth.clear_cache()
+    r = client.get("/db/orders?limit=1", headers=_auth(KEY_RO))
+    assert r.status_code == 503
+
+
+def test_db_down_shadow_mode_passes_through(client, auth_keys, monkeypatch):
+    """Shadow mode observes only — a lookup failure must not block traffic."""
+    monkeypatch.setenv("TTS_ERP_AUTH_MODE", "shadow")
+
+    def boom(key_hash):
+        raise psycopg.OperationalError("connection refused")
+
+    monkeypatch.setattr(auth, "_db_lookup", boom)
+    auth.clear_cache()
+    r = client.get("/db/orders?limit=1", headers=_auth(KEY_RO))
+    assert r.status_code == 200
+
+
+def test_denied_requests_are_rate_limited(client, auth_keys, monkeypatch):
+    """Denied requests (401) short-circuit before RateLimitMiddleware, so
+    auth counts them into the shared per-key bucket itself. After the
+    limit, brute-force keys get 429 + Retry-After instead of 401."""
+    monkeypatch.setenv("TTS_ERP_AUTH_MODE", "enforce")
+    counter = rate_limit.shared_counter()
+    old_limit = counter.limit
+    counter.limit = 3
+    rate_limit.reset_shared()
+    try:
+        forged = "ttserp_ro_brute0000000000000000000"
+        codes = [
+            client.get("/db/orders?limit=1", headers=_auth(forged)).status_code
+            for _ in range(5)
+        ]
+        assert codes[:3] == [401, 401, 401]
+        assert codes[3:] == [429, 429]
+        r = client.get("/db/orders?limit=1", headers=_auth(forged))
+        assert r.headers.get("retry-after")
+    finally:
+        counter.limit = old_limit
+        rate_limit.reset_shared()

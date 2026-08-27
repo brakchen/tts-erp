@@ -7,6 +7,15 @@ Design: ../tech-doc/api-key-auth-design.md
 - Roles: readonly < readwrite < admin; path rules via required_role().
 - TTS_ERP_AUTH_MODE: off | shadow | enforce (read per request).
 - In-process cache (TTL 60s) — revocation takes effect within one TTL.
+  Invalid keys are negative-cached for NEG_CACHE_TTL (20s) so brute-force
+  retries don't hit PG on every request.
+- Key lookup runs in a worker thread (anyio.to_thread) — sync psycopg I/O
+  must not block the event loop. Lookup failure (PG down) fails closed
+  with 503 in enforce mode, passes through in shadow mode.
+- Denied requests (401/403) are counted into rate_limit's shared per-key
+  bucket: they short-circuit before RateLimitMiddleware, so without this
+  an attacker could brute-force keys unthrottled (each attempt = a new
+  PG connection). Over-limit denials get 429 + Retry-After.
 - Plain ASGI middleware (NOT BaseHTTPMiddleware) so scope["api_key_hash"]
   is propagated to other ASGI middlewares downstream. starlette <0.31's
   BaseHTTPMiddleware wraps requests in a fresh scope, which breaks state
@@ -22,13 +31,17 @@ import sys
 import time
 from datetime import datetime, timezone
 
+from anyio.to_thread import run_sync
+
 import tts_erp  # db_connect (repo root is on sys.path via tts_erp_fastapi)
 
 ROLE_LEVEL = {"readonly": 1, "readwrite": 2, "admin": 3}
 _LEVEL_NAME = {v: k for k, v in ROLE_LEVEL.items()}
 
 CACHE_TTL = 60.0
+NEG_CACHE_TTL = 20.0  # invalid-key negative cache: brute-force shield
 # key_hash -> (role_level, scopes_tuple, monotonic_deadline)
+# Negative entries store (None, (), deadline) and expire after NEG_CACHE_TTL.
 _cache: dict[str, tuple[int | None, tuple[str, ...], float]] = {}
 
 EXEMPT_PATHS = {
@@ -119,8 +132,10 @@ def _db_lookup(key_hash: str) -> tuple[int | None, tuple[str, ...]] | None:
 
 
 def lookup_role(key: str) -> tuple[int | None, tuple[str, ...]] | None:
-    """Cached role+scopes lookup. Cache TTL is 60s; revocation propagates
-    within that window. Returns None for invalid keys."""
+    """Cached role+scopes lookup. Valid keys cache for CACHE_TTL (60s);
+    invalid keys negative-cache for NEG_CACHE_TTL (20s) so brute-force
+    retries don't open a fresh PG connection per request. Returns None
+    for invalid keys. DB errors propagate (middleware maps to 503)."""
     key_hash = _sha256(key)
     now = time.monotonic()
     hit = _cache.get(key_hash)
@@ -129,6 +144,8 @@ def lookup_role(key: str) -> tuple[int | None, tuple[str, ...]] | None:
     result = _db_lookup(key_hash)
     if result is not None:
         _cache[key_hash] = (result[0], result[1], now + CACHE_TTL)
+    else:
+        _cache[key_hash] = (None, (), now + NEG_CACHE_TTL)
     return result
 
 
@@ -188,7 +205,27 @@ class AuthMiddleware:
             return
 
         key = _extract_key(scope)
-        result = lookup_role(key) if key else None
+        if key:
+            try:
+                # Sync psycopg I/O must not run on the event loop.
+                result = await run_sync(lookup_role, key)
+            except Exception as exc:
+                # Auth store unreachable — fail closed (503) in enforce
+                # mode; shadow mode observes only, so pass through.
+                sys.stderr.write(
+                    f"[auth] key lookup failed ({type(exc).__name__}): {exc}\n"
+                )
+                if mode == "shadow":
+                    await self.app(scope, receive, send)
+                    return
+                s, hdrs, body = _deny_response(503, "auth store unavailable")
+                await send(
+                    {"type": "http.response.start", "status": s, "headers": hdrs}
+                )
+                await send({"type": "http.response.body", "body": body})
+                return
+        else:
+            result = None
         level = result[0] if result else None
         scopes = result[1] if result else ()
 
@@ -223,6 +260,29 @@ class AuthMiddleware:
             return
 
         status, msg = denied
+        client = (scope.get("client") or ("?",))[0]
+        # Denied requests short-circuit before RateLimitMiddleware — count
+        # them here against the same shared per-key budget so brute-forcing
+        # keys is throttled. Bucket by key hash, or by client IP when the
+        # request carried no key at all.
+        # Lazy import: analytics_sync/auth.py imports this module in a
+        # context where tdd/ is not on sys.path, so a top-level
+        # `import rate_limit` would break that consumer.
+        import rate_limit
+
+        bucket_id = _sha256(key) if key else f"ip:{client}"
+        retry_after = rate_limit.shared_hit(bucket_id)
+        if retry_after is not None:
+            sys.stderr.write(
+                f"[rate-limit] 429 (auth-denied) bucket={bucket_id[:16]} "
+                f"path={path} retry_after={retry_after}s\n"
+            )
+            s, hdrs, body = rate_limit.too_many_response(
+                rate_limit.shared_counter().limit, retry_after
+            )
+            await send({"type": "http.response.start", "status": s, "headers": hdrs})
+            await send({"type": "http.response.body", "body": body})
+            return
         sys.stderr.write(
             f"[auth] denied {status} {method} {path} from {client} key_prefix={_prefix_of(key)}\n"
         )

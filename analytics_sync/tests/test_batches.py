@@ -48,7 +48,9 @@ def _make_record(
         "requestBody": {"campaign_id": campaign_id},
         "response": {"data": []},
         "source": "background_poll",
-        "capturedAt": datetime(2026, 8, day.day, 3, 0, 0, tzinfo=timezone.utc).isoformat(),
+        "capturedAt": datetime(
+            2026, 8, day.day, 3, 0, 0, tzinfo=timezone.utc
+        ).isoformat(),
         "schemaVersion": 1,
     }
     base.update(overrides)

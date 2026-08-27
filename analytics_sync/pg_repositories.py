@@ -519,20 +519,24 @@ def fetch_timezone(seller_id: str) -> str:
 
     default_tz = "Asia/Shanghai"
     with connect() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO analytics_shop_timezones (seller_id, advertiser_id, timezone)
-            VALUES (%s, '', %s)
-            ON CONFLICT (seller_id) DO NOTHING
-            """,
-            (seller_id, default_tz),
-        )
+        # Read-first: the INSERT below is a no-op for 99.99% of calls, so
+        # don't pay a write (WAL + lock) on every GET /cursor (W1.8).
         cur.execute(
             "SELECT timezone FROM analytics_shop_timezones WHERE seller_id = %s",
             (seller_id,),
         )
         row = cur.fetchone()
-        conn.commit()
+        if row is None:
+            cur.execute(
+                """
+                INSERT INTO analytics_shop_timezones (seller_id, advertiser_id, timezone)
+                VALUES (%s, '', %s)
+                ON CONFLICT (seller_id) DO NOTHING
+                """,
+                (seller_id, default_tz),
+            )
+            conn.commit()
+            row = (default_tz,)
     tz_str = row[0] if row else default_tz
     # Validate: a garbage TZ in the DB would crash _today_in_tz (ZoneInfo
     # raises). Repair the row + fall back rather than 500-ing every

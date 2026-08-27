@@ -301,3 +301,58 @@ class TestRouteCounts:
             f"Expected 55 APIRoute paths after 2026-08-25 admin/backfill add; "
             f"got {len(paths)}.\nFull list: {sorted(paths)}"
         )
+
+
+class TestGetCredsErrorSemantics:
+    """W1.4: _get_creds must pass TokenError.status through (404 = shop
+    not authorized) instead of flattening everything to 502; unexpected
+    exceptions become a fixed-text 502 that doesn't leak internals."""
+
+    def test_token_error_404_passes_through(self, monkeypatch):
+        import tts_erp_fastapi
+        from domain import TokenError
+
+        def raise_404(shop_id: str):
+            raise TokenError(f"no token for shop_id={shop_id}", status=404)
+
+        monkeypatch.setattr(tts_erp_fastapi._token_provider, "get", raise_404)
+        from fastapi.testclient import TestClient
+
+        r = TestClient(tts_erp_fastapi.app).get(
+            "/orders/TEST_ORDER_1", params={"shop_id": "TEST_SHOP_X"}
+        )
+        assert r.status_code == 404
+        assert "no token" in r.json()["detail"]
+
+    def test_token_error_default_502(self, monkeypatch):
+        import tts_erp_fastapi
+        from domain import TokenError
+
+        def raise_502(shop_id: str):
+            raise TokenError("upstream oauth broken")
+
+        monkeypatch.setattr(tts_erp_fastapi._token_provider, "get", raise_502)
+        from fastapi.testclient import TestClient
+
+        r = TestClient(tts_erp_fastapi.app).get(
+            "/orders/TEST_ORDER_1", params={"shop_id": "TEST_SHOP_X"}
+        )
+        assert r.status_code == 502
+
+    def test_unexpected_exception_is_fixed_text_502(self, monkeypatch):
+        import tts_erp_fastapi
+
+        def raise_boom(shop_id: str):
+            raise RuntimeError("psycopg.OperationalError: password auth failed for user x")
+
+        monkeypatch.setattr(tts_erp_fastapi._token_provider, "get", raise_boom)
+        from fastapi.testclient import TestClient
+
+        r = TestClient(tts_erp_fastapi.app).get(
+            "/orders/TEST_ORDER_1", params={"shop_id": "TEST_SHOP_X"}
+        )
+        assert r.status_code == 502
+        # Internal details must NOT leak to the client
+        assert "psycopg" not in r.text
+        assert "password" not in r.text
+        assert r.json()["detail"] == "token fetch failed"

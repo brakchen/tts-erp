@@ -161,19 +161,19 @@ def provider_config(name: str) -> dict | None:
 
 # ─── Fernet (lazy singleton) ──────────────────────────────────────────
 
-
-_fernet: Fernet | None | bool = False  # None=not configured, False=uninitialized
+_UNSET: Any = object()  # sentinel: uninitialized (distinct from None=not configured)
+_fernet: Fernet | None | Any = _UNSET
 
 
 def get_fernet() -> Fernet | None:
     """Lazy Fernet singleton. Returns None if not configured or invalid key.
 
-    Tri-state cache: False (uninitialized) → None/instance after first call.
+    Tri-state cache: _UNSET (uninitialized) → None/instance after first call.
     Tests use _reset_for_testing() to force re-initialization.
     """
     global _fernet
-    if _fernet is not False:
-        return _fernet  # type: ignore[return-value]
+    if _fernet is not _UNSET:
+        return _fernet
     key = _oauth_db_encryption_key()
     if not key:
         _fernet = None
@@ -232,10 +232,14 @@ def _db_connect():
 def db_init() -> None:
     """Verify DB connectivity and schema. Raises RuntimeError on any failure.
 
-    HARD dependency: failing fast at startup (rather than lazy-fallback at
-    first request) is required for the sync chain to be observable. A
-    silent fallback to "JSON only" left the system running with /tokens/shops
-    silently empty for 34h during the 2026-08-23 incident.
+    Callers decide the failure policy: the standalone oauth-receiver
+    service fails fast at startup (a silent fallback to "JSON only" left
+    the system running with /tokens/shops silently empty for 34h during
+    the 2026-08-23 incident); the module-load call below catches and
+    degrades to is_db_ok()=False instead, because tts-erp imports this
+    module in-process and must keep serving non-oauth routes even when
+    OAUTH_DB_URL is unreachable. sync_cron.main() checks is_db_ok() and
+    exits non-zero (W1.5), so the cron path stays fail-loud.
     """
     global _db_ok
     if not _oauth_db_url():
@@ -606,10 +610,10 @@ def _open_http_get(url: str, headers: dict | None = None, timeout: float = 15.0)
     ok, err = _assert_safe_http_url(url)
     if not ok:
         raise ValueError(err)
-    req = urllib.request.Request(url, method="GET")  # nosemgrep: urllib-urlopen
+    req = urllib.request.Request(url, method="GET")  # nosemgrep: urllib-urlopen  # noqa: S310
     for k, v in (headers or {}).items():
         req.add_header(k, v)
-    return urlopen(req, timeout=timeout)  # nosemgrep: urllib-urlopen
+    return urlopen(req, timeout=timeout)  # nosemgrep: urllib-urlopen  # noqa: S310
 
 
 # ─── Token endpoint caller ────────────────────────────────────────────
@@ -1051,7 +1055,7 @@ def _reset_for_testing() -> None:
     Test-only. Production code MUST NOT call this.
     """
     global _fernet, _db_ok
-    _fernet = False
+    _fernet = _UNSET
     _db_ok = False
     _token_history.clear()
     _shops_cache.clear()
@@ -1063,17 +1067,18 @@ def _append_token_history_for_test(record: dict) -> None:
     _append_token_history(record)
 
 
-# ─── Module-load DB init (HARD dependency) ──────────────────────────
+# ─── Module-load DB init ─────────────────────────────────────────────
 # The original stdlib oauth_receiver.py called _db_init() in main().
 # When the pure business logic was extracted into this module the eager
 # init call was lost — db_init() must be invoked at module load so that
 # is_db_ok() flips True and DB-backed operations actually work.
 #
-# Per the db_init() docstring: failing fast at startup is required.
-# We log to stderr but do NOT raise — tts-erp's other routes should
-# keep working even if OAUTH_DB_URL is unset; is_db_ok() reports the
-# truth via /healthz, and any oauth DB call will raise a clear
-# RuntimeError when reached.
+# We log to stderr but do NOT raise: tts_erp_fastapi imports this module
+# in-process, and a raise here would take down ALL of :9877 (orders,
+# finance, miaoshou, ...) when only the oauth DB is unreachable. The
+# failure stays observable: is_db_ok() reports the truth via /healthz,
+# any oauth DB call raises a clear RuntimeError when reached, and
+# sync_cron.main() exits non-zero on is_db_ok()=False (W1.5).
 try:
     db_init()
 except RuntimeError as _init_err:

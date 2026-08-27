@@ -15,6 +15,7 @@ Covers the acceptance matrix from the v2 spec:
     the v2-specific auth smoke)
 11. concurrent duplicate of the same page and concurrent last-page races
 """
+
 from __future__ import annotations
 
 import threading
@@ -33,8 +34,16 @@ from analytics_sync.pg_repositories import PgAnalyticsRepository
 # ─── Helpers ─────────────────────────────────────────────────────────
 
 
-def _make_v2_record(seller_id, advertiser_id, storage_key, campaign_id, day, page,
-                    expected_page_count, **overrides):
+def _make_v2_record(
+    seller_id,
+    advertiser_id,
+    storage_key,
+    campaign_id,
+    day,
+    page,
+    expected_page_count,
+    **overrides,
+):
     idem = compute_idempotency_key(
         seller_id=seller_id,
         advertiser_id=advertiser_id,
@@ -57,7 +66,9 @@ def _make_v2_record(seller_id, advertiser_id, storage_key, campaign_id, day, pag
         "requestBody": {"campaign_id": campaign_id},
         "response": {"data": []},
         "source": "background_poll",
-        "capturedAt": datetime(2026, 8, day.day, 3, 0, 0, tzinfo=timezone.utc).isoformat(),
+        "capturedAt": datetime(
+            2026, 8, day.day, 3, 0, 0, tzinfo=timezone.utc
+        ).isoformat(),
         "schemaVersion": 2,
     }
     base.update(overrides)
@@ -85,7 +96,9 @@ def _cursor(fastapi_client, token, seller, advertiser="adv-1"):
     return resp.json()["data"]["items"]
 
 
-def _cursor_for(fastapi_client, token, seller, storage_key, campaign_id, advertiser="adv-1"):
+def _cursor_for(
+    fastapi_client, token, seller, storage_key, campaign_id, advertiser="adv-1"
+):
     """Return the cursor item for the given unit, failing the test if absent."""
     items = _cursor(fastapi_client, token, seller, advertiser)
     for it in items:
@@ -101,8 +114,9 @@ def _cursor_for(fastapi_client, token, seller, storage_key, campaign_id, adverti
 
 def test_v2_single_page_day_advances_cursor(fastapi_client, sync_token):
     seller = "TEST_v2_single"
-    rec = _make_v2_record(seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1",
-                          date(2026, 8, 27), 1, 1)
+    rec = _make_v2_record(
+        seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1", date(2026, 8, 27), 1, 1
+    )
     resp = _post_v2(fastapi_client, sync_token, seller, [rec])
     assert resp.status_code == 200
     body = resp.json()
@@ -120,8 +134,9 @@ def test_v2_single_page_day_advances_cursor(fastapi_client, sync_token):
 
 def test_v2_page1_of_3_does_not_advance_cursor(fastapi_client, sync_token):
     seller = "TEST_v2_p1only"
-    rec = _make_v2_record(seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1",
-                          date(2026, 8, 27), 1, 3)
+    rec = _make_v2_record(
+        seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1", date(2026, 8, 27), 1, 3
+    )
     resp = _post_v2(fastapi_client, sync_token, seller, [rec])
     assert resp.status_code == 200
     assert resp.json()["data"]["accepted"][0]["status"] == "inserted"
@@ -139,8 +154,9 @@ def test_v2_page1_of_3_does_not_advance_cursor(fastapi_client, sync_token):
 def test_v2_all_3_pages_advance_cursor(fastapi_client, sync_token):
     seller = "TEST_v2_all3"
     records = [
-        _make_v2_record(seller, "adv-1", StorageKey.SESSION_ANALYSES, "c-1",
-                        date(2026, 8, 26), p, 3)
+        _make_v2_record(
+            seller, "adv-1", StorageKey.SESSION_ANALYSES, "c-1", date(2026, 8, 26), p, 3
+        )
         for p in (1, 2, 3)
     ]
     resp = _post_v2(fastapi_client, sync_token, seller, records)
@@ -160,26 +176,47 @@ def test_v2_out_of_order_pages(fastapi_client, sync_token):
     day = date(2026, 8, 25)
 
     # Page 2 first — day incomplete.
-    resp = _post_v2(fastapi_client, sync_token, seller, [
-        _make_v2_record(seller, "adv-1", StorageKey.CAMPAIGN_CHANGE_LOGS, "c-1", day, 2, 3),
-    ])
+    resp = _post_v2(
+        fastapi_client,
+        sync_token,
+        seller,
+        [
+            _make_v2_record(
+                seller, "adv-1", StorageKey.CAMPAIGN_CHANGE_LOGS, "c-1", day, 2, 3
+            ),
+        ],
+    )
     assert resp.status_code == 200
     item = _cursor_for(fastapi_client, sync_token, seller, "campaignChangeLogs", "c-1")
     assert item["latestCompletedDay"] is None
     assert item["nextRequiredDay"] == "2026-08-25"
 
     # Page 3 — still incomplete (page 1 missing).
-    resp = _post_v2(fastapi_client, sync_token, seller, [
-        _make_v2_record(seller, "adv-1", StorageKey.CAMPAIGN_CHANGE_LOGS, "c-1", day, 3, 3),
-    ])
+    resp = _post_v2(
+        fastapi_client,
+        sync_token,
+        seller,
+        [
+            _make_v2_record(
+                seller, "adv-1", StorageKey.CAMPAIGN_CHANGE_LOGS, "c-1", day, 3, 3
+            ),
+        ],
+    )
     assert resp.status_code == 200
     item = _cursor_for(fastapi_client, sync_token, seller, "campaignChangeLogs", "c-1")
     assert item["latestCompletedDay"] is None
 
     # Page 1 — completes the day.
-    resp = _post_v2(fastapi_client, sync_token, seller, [
-        _make_v2_record(seller, "adv-1", StorageKey.CAMPAIGN_CHANGE_LOGS, "c-1", day, 1, 3),
-    ])
+    resp = _post_v2(
+        fastapi_client,
+        sync_token,
+        seller,
+        [
+            _make_v2_record(
+                seller, "adv-1", StorageKey.CAMPAIGN_CHANGE_LOGS, "c-1", day, 1, 3
+            ),
+        ],
+    )
     assert resp.status_code == 200
     item = _cursor_for(fastapi_client, sync_token, seller, "campaignChangeLogs", "c-1")
     assert item["latestCompletedDay"] == "2026-08-25"
@@ -243,15 +280,29 @@ def test_v2_cross_batch_page_count_conflict_rejected(fastapi_client, sync_token)
     seller = "TEST_v2_conflict_xbatch"
     day = date(2026, 8, 22)
 
-    resp = _post_v2(fastapi_client, sync_token, seller, [
-        _make_v2_record(seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1", day, 1, 3),
-    ])
+    resp = _post_v2(
+        fastapi_client,
+        sync_token,
+        seller,
+        [
+            _make_v2_record(
+                seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1", day, 1, 3
+            ),
+        ],
+    )
     assert resp.status_code == 200
 
     # New batch with a different expectedPageCount for the same unit+day.
-    resp = _post_v2(fastapi_client, sync_token, seller, [
-        _make_v2_record(seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1", day, 2, 2),
-    ])
+    resp = _post_v2(
+        fastapi_client,
+        sync_token,
+        seller,
+        [
+            _make_v2_record(
+                seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1", day, 2, 2
+            ),
+        ],
+    )
     assert resp.status_code == 200
     body = resp.json()
     assert body["data"]["accepted"] == []
@@ -273,8 +324,12 @@ def test_v2_rejected_page_does_not_advance(fastapi_client, sync_token):
     complete the day."""
     seller = "TEST_v2_reject"
     day = date(2026, 8, 21)
-    good = _make_v2_record(seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1", day, 1, 2)
-    bad = _make_v2_record(seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1", day, 2, 2)
+    good = _make_v2_record(
+        seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1", day, 1, 2
+    )
+    bad = _make_v2_record(
+        seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1", day, 2, 2
+    )
     bad["idempotencyKey"] = "f" * 64  # breaks canonical-key check
 
     resp = _post_v2(fastapi_client, sync_token, seller, [good, bad])
@@ -293,10 +348,19 @@ def test_v2_missing_middle_page_blocks_advance(fastapi_client, sync_token):
     """Pages 1 and 3 of 3 uploaded; page 2 missing → day incomplete."""
     seller = "TEST_v2_gap_page"
     day = date(2026, 8, 20)
-    resp = _post_v2(fastapi_client, sync_token, seller, [
-        _make_v2_record(seller, "adv-1", StorageKey.SESSION_ANALYSES, "c-1", day, 1, 3),
-        _make_v2_record(seller, "adv-1", StorageKey.SESSION_ANALYSES, "c-1", day, 3, 3),
-    ])
+    resp = _post_v2(
+        fastapi_client,
+        sync_token,
+        seller,
+        [
+            _make_v2_record(
+                seller, "adv-1", StorageKey.SESSION_ANALYSES, "c-1", day, 1, 3
+            ),
+            _make_v2_record(
+                seller, "adv-1", StorageKey.SESSION_ANALYSES, "c-1", day, 3, 3
+            ),
+        ],
+    )
     assert resp.status_code == 200
     item = _cursor_for(fastapi_client, sync_token, seller, "sessionAnalyses", "c-1")
     assert item["latestCompletedDay"] is None
@@ -305,8 +369,9 @@ def test_v2_missing_middle_page_blocks_advance(fastapi_client, sync_token):
 
 def test_v2_page_exceeding_expected_rejected(fastapi_client, sync_token):
     seller = "TEST_v2_page_range"
-    rec = _make_v2_record(seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1",
-                          date(2026, 8, 20), 4, 3)
+    rec = _make_v2_record(
+        seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1", date(2026, 8, 20), 4, 3
+    )
     resp = _post_v2(fastapi_client, sync_token, seller, [rec])
     assert resp.status_code == 200
     body = resp.json()
@@ -318,8 +383,9 @@ def test_v2_page_exceeding_expected_rejected(fastapi_client, sync_token):
 def test_v2_missing_expected_page_count_rejected(fastapi_client, sync_token):
     """protocolVersion=2 without expectedPageCount → per-record SCHEMA_INVALID."""
     seller = "TEST_v2_no_epc"
-    rec = _make_v2_record(seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1",
-                          date(2026, 8, 20), 1, 1)
+    rec = _make_v2_record(
+        seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1", date(2026, 8, 20), 1, 1
+    )
     del rec["expectedPageCount"]
     resp = _post_v2(fastapi_client, sync_token, seller, [rec])
     assert resp.status_code == 200
@@ -335,14 +401,40 @@ def test_v2_earlier_missing_day_blocks_later_complete_day(fastapi_client, sync_t
     """Day 20 complete, day 21 incomplete (1 of 2 pages), day 22 complete.
     Cursor must stop at 20 and nextRequiredDay must be 21 — never 23."""
     seller = "TEST_v2_daygap"
-    resp = _post_v2(fastapi_client, sync_token, seller, [
-        _make_v2_record(seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1",
-                        date(2026, 8, 20), 1, 1),
-        _make_v2_record(seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1",
-                        date(2026, 8, 21), 1, 2),  # incomplete: page 2 missing
-        _make_v2_record(seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1",
-                        date(2026, 8, 22), 1, 1),
-    ])
+    resp = _post_v2(
+        fastapi_client,
+        sync_token,
+        seller,
+        [
+            _make_v2_record(
+                seller,
+                "adv-1",
+                StorageKey.PRODUCT_ANALYSES,
+                "c-1",
+                date(2026, 8, 20),
+                1,
+                1,
+            ),
+            _make_v2_record(
+                seller,
+                "adv-1",
+                StorageKey.PRODUCT_ANALYSES,
+                "c-1",
+                date(2026, 8, 21),
+                1,
+                2,
+            ),  # incomplete: page 2 missing
+            _make_v2_record(
+                seller,
+                "adv-1",
+                StorageKey.PRODUCT_ANALYSES,
+                "c-1",
+                date(2026, 8, 22),
+                1,
+                1,
+            ),
+        ],
+    )
     assert resp.status_code == 200
     assert len(resp.json()["data"]["accepted"]) == 3
 
@@ -351,10 +443,22 @@ def test_v2_earlier_missing_day_blocks_later_complete_day(fastapi_client, sync_t
     assert item["nextRequiredDay"] == "2026-08-21"
 
     # Completing day 21 lets the cursor roll through 22 as well.
-    resp = _post_v2(fastapi_client, sync_token, seller, [
-        _make_v2_record(seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1",
-                        date(2026, 8, 21), 2, 2),
-    ])
+    resp = _post_v2(
+        fastapi_client,
+        sync_token,
+        seller,
+        [
+            _make_v2_record(
+                seller,
+                "adv-1",
+                StorageKey.PRODUCT_ANALYSES,
+                "c-1",
+                date(2026, 8, 21),
+                2,
+                2,
+            ),
+        ],
+    )
     assert resp.status_code == 200
     item = _cursor_for(fastapi_client, sync_token, seller, "productAnalyses", "c-1")
     assert item["latestCompletedDay"] == "2026-08-22"
@@ -369,28 +473,33 @@ def test_v1_client_still_accepted_and_advances(fastapi_client, sync_token):
     advances the cursor exactly like before."""
     seller = "TEST_v2_v1compat"
     idem = compute_idempotency_key(
-        seller_id=seller, advertiser_id="adv-1",
-        storage_key=StorageKey.PRODUCT_ANALYSES, campaign_id="c-1",
-        day=date(2026, 8, 19), page=1,
+        seller_id=seller,
+        advertiser_id="adv-1",
+        storage_key=StorageKey.PRODUCT_ANALYSES,
+        campaign_id="c-1",
+        day=date(2026, 8, 19),
+        page=1,
     )
     resp = fastapi_client.post(
         "/v1/analytics/sync/batches",
         json={
             "protocolVersion": 1,
             "scope": {"sellerId": seller, "advertiserId": "adv-1"},
-            "records": [{
-                "idempotencyKey": idem,
-                "storageKey": "productAnalyses",
-                "campaignId": "c-1",
-                "day": "2026-08-19",
-                "page": 1,
-                "endpoint": "/test",
-                "method": "POST",
-                "response": {"data": []},
-                "source": "background_poll",
-                "capturedAt": "2026-08-19T03:00:00.000Z",
-                "schemaVersion": 1,
-            }],
+            "records": [
+                {
+                    "idempotencyKey": idem,
+                    "storageKey": "productAnalyses",
+                    "campaignId": "c-1",
+                    "day": "2026-08-19",
+                    "page": 1,
+                    "endpoint": "/test",
+                    "method": "POST",
+                    "response": {"data": []},
+                    "source": "background_poll",
+                    "capturedAt": "2026-08-19T03:00:00.000Z",
+                    "schemaVersion": 1,
+                }
+            ],
         },
         headers={"Authorization": f"Bearer {sync_token}"},
     )
@@ -410,35 +519,47 @@ def test_v1_record_does_not_falsely_complete_v2_day(fastapi_client, sync_token):
     day = date(2026, 8, 18)
 
     # v2 client declares 3 pages, uploads page 1 only.
-    resp = _post_v2(fastapi_client, sync_token, seller, [
-        _make_v2_record(seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1", day, 1, 3),
-    ])
+    resp = _post_v2(
+        fastapi_client,
+        sync_token,
+        seller,
+        [
+            _make_v2_record(
+                seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1", day, 1, 3
+            ),
+        ],
+    )
     assert resp.status_code == 200
 
     # v1 client uploads its (single-page) view of the same day.
     idem = compute_idempotency_key(
-        seller_id=seller, advertiser_id="adv-1",
-        storage_key=StorageKey.PRODUCT_ANALYSES, campaign_id="c-1",
-        day=day, page=1,
+        seller_id=seller,
+        advertiser_id="adv-1",
+        storage_key=StorageKey.PRODUCT_ANALYSES,
+        campaign_id="c-1",
+        day=day,
+        page=1,
     )
     resp = fastapi_client.post(
         "/v1/analytics/sync/batches",
         json={
             "protocolVersion": 1,
             "scope": {"sellerId": seller, "advertiserId": "adv-1"},
-            "records": [{
-                "idempotencyKey": idem,
-                "storageKey": "productAnalyses",
-                "campaignId": "c-1",
-                "day": day.isoformat(),
-                "page": 1,
-                "endpoint": "/test",
-                "method": "POST",
-                "response": {"data": []},
-                "source": "background_poll",
-                "capturedAt": "2026-08-18T03:00:00.000Z",
-                "schemaVersion": 1,
-            }],
+            "records": [
+                {
+                    "idempotencyKey": idem,
+                    "storageKey": "productAnalyses",
+                    "campaignId": "c-1",
+                    "day": day.isoformat(),
+                    "page": 1,
+                    "endpoint": "/test",
+                    "method": "POST",
+                    "response": {"data": []},
+                    "source": "background_poll",
+                    "capturedAt": "2026-08-18T03:00:00.000Z",
+                    "schemaVersion": 1,
+                }
+            ],
         },
         headers={"Authorization": f"Bearer {sync_token}"},
     )
@@ -452,8 +573,15 @@ def test_v1_record_does_not_falsely_complete_v2_day(fastapi_client, sync_token):
 
 
 def test_unsupported_protocol_version_3_rejected(fastapi_client, sync_token):
-    rec = _make_v2_record("TEST_v2_pv3", "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1",
-                          date(2026, 8, 18), 1, 1)
+    rec = _make_v2_record(
+        "TEST_v2_pv3",
+        "adv-1",
+        StorageKey.PRODUCT_ANALYSES,
+        "c-1",
+        date(2026, 8, 18),
+        1,
+        1,
+    )
     resp = fastapi_client.post(
         "/v1/analytics/sync/batches",
         json={
@@ -473,8 +601,15 @@ def test_unsupported_protocol_version_3_rejected(fastapi_client, sync_token):
 
 
 def test_v2_missing_token_401(fastapi_client):
-    rec = _make_v2_record("TEST_v2_auth", "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1",
-                          date(2026, 8, 18), 1, 1)
+    rec = _make_v2_record(
+        "TEST_v2_auth",
+        "adv-1",
+        StorageKey.PRODUCT_ANALYSES,
+        "c-1",
+        date(2026, 8, 18),
+        1,
+        1,
+    )
     resp = fastapi_client.post(
         "/v1/analytics/sync/batches",
         json={
@@ -487,8 +622,15 @@ def test_v2_missing_token_401(fastapi_client):
 
 
 def test_v2_scope_denied_403(fastapi_client, seller_scoped_token):
-    rec = _make_v2_record("TEST_other_seller", "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1",
-                          date(2026, 8, 18), 1, 1)
+    rec = _make_v2_record(
+        "TEST_other_seller",
+        "adv-1",
+        StorageKey.PRODUCT_ANALYSES,
+        "c-1",
+        date(2026, 8, 18),
+        1,
+        1,
+    )
     resp = fastapi_client.post(
         "/v1/analytics/sync/batches",
         json={
@@ -507,8 +649,12 @@ def test_v2_scope_denied_403(fastapi_client, seller_scoped_token):
 
 def _repo_record(seller, adv, skey, camp, day, page, expected):
     idem = compute_idempotency_key(
-        seller_id=seller, advertiser_id=adv,
-        storage_key=skey, campaign_id=camp, day=day, page=page,
+        seller_id=seller,
+        advertiser_id=adv,
+        storage_key=skey,
+        campaign_id=camp,
+        day=day,
+        page=page,
     )
     return Record(
         idempotency_key=idem,
@@ -588,7 +734,11 @@ def test_v2_concurrent_last_page_completion(db_url):
     for p in (1, 2):
         r = repo.upsert_records(
             scope,
-            [_repo_record(seller, "adv-1", StorageKey.SESSION_ANALYSES, "c-1", day, p, 3)],
+            [
+                _repo_record(
+                    seller, "adv-1", StorageKey.SESSION_ANALYSES, "c-1", day, p, 3
+                )
+            ],
             request_id=f"seed-{p}",
             **kwargs,
         )

@@ -115,8 +115,18 @@ from tts_signing import (
 )
 
 # ---------- Config ----------
-HOST = os.environ.get("TTS_ERP_HOST", "0.0.0.0")
-PORT = int(os.environ.get("TTS_ERP_PORT", "9877"))
+
+def _env_int(name: str, default: str) -> int:
+    """Parse an int env var with fallback — malformed operator config must
+    not crash module import (which would take down every dependent)."""
+    try:
+        return int(float(os.environ.get(name, default)))
+    except (TypeError, ValueError):
+        return int(float(default))
+
+
+HOST = os.environ.get("TTS_ERP_HOST", "0.0.0.0")  # noqa: S104 -- legacy server, container/NAT deploy requires all-interfaces bind
+PORT = _env_int("TTS_ERP_PORT", "9877")
 OAUTH_RECEIVER_URL = os.environ.get(
     "OAUTH_RECEIVER_URL", "http://127.0.0.1:9876"
 ).rstrip("/")
@@ -126,7 +136,7 @@ TIKTOK_API_HOST = os.environ.get(
     "TIKTOK_API_HOST", "https://open-api.tiktokglobalshop.com"
 )
 TTS_ERP_DB_URL = os.environ.get("TTS_ERP_DB_URL", "")
-TTS_ERP_HTTP_TIMEOUT = int(float(os.environ.get("TTS_ERP_HTTP_TIMEOUT", "30")))
+TTS_ERP_HTTP_TIMEOUT = _env_int("TTS_ERP_HTTP_TIMEOUT", "30")
 
 # In-memory last sync log (mirrored to PG via sync_log table)
 _last_syncs: deque[dict] = deque(maxlen=50)
@@ -174,7 +184,7 @@ def db_init():
 def fetch_shop_meta(shop_id: str) -> dict | None:
     """Get shop metadata (cipher, name, region) from oauth-receiver. No secrets."""
     try:
-        with urllib.request.urlopen(
+        with urllib.request.urlopen(  # noqa: S310 -- fixed internal oauth-receiver URL
             f"{OAUTH_RECEIVER_URL}/tokens/shops", timeout=5
         ) as r:
             data = json.load(r)
@@ -193,7 +203,7 @@ def fetch_token(shop_id: str, reveal: bool = False) -> dict | None:
         url += "?reveal=1"
     try:
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=10) as r:
+        with urllib.request.urlopen(req, timeout=10) as r:  # noqa: S310 -- OAUTH_RECEIVER_URL is operator-configured
             return json.load(r)
     except urllib.error.HTTPError as e:
         return {
@@ -539,7 +549,7 @@ def persist_statement_transaction(
     col_list = ", ".join(cols)
     placeholders = ", ".join(["%s"] * len(cols))
     updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols if c != "txn_id")
-    sql_query = f"""
+    sql_query = f"""  # noqa: S608 -- col_list/updates are built from hardcoded constant tuples, never user input
         INSERT INTO statement_transactions ({col_list})
         VALUES ({placeholders})
         ON CONFLICT (txn_id) DO UPDATE SET {updates}, synced_at = now()
@@ -1087,20 +1097,25 @@ def persist_shop(
     cipher: str | None,
     seller_type: str | None,
 ) -> bool:
+    # W1.3 (2026-08-27): the `cipher` parameter is accepted for call-site
+    # compatibility but NEVER persisted. shop_cipher is a live signing
+    # credential whose single source of truth is oauth_receiver
+    # (encrypted bytea) — tts_erp must not hold a plaintext copy.
+    # The shops.shop_cipher column itself is dropped in Wave 2.
+    del cipher
     try:
         with db_connect() as conn, conn.cursor() as cur:
             cur.execute(
                 sql.SQL("""
-                INSERT INTO shops (shop_id, shop_name, shop_region, shop_cipher, seller_type, last_seen_at)
-                VALUES (%s, %s, %s, %s, %s, now())
+                INSERT INTO shops (shop_id, shop_name, shop_region, seller_type, last_seen_at)
+                VALUES (%s, %s, %s, %s, now())
                 ON CONFLICT (shop_id) DO UPDATE SET
                     shop_name    = COALESCE(EXCLUDED.shop_name,    shops.shop_name),
                     shop_region  = COALESCE(EXCLUDED.shop_region,  shops.shop_region),
-                    shop_cipher  = COALESCE(EXCLUDED.shop_cipher,  shops.shop_cipher),
                     seller_type  = COALESCE(EXCLUDED.seller_type,  shops.seller_type),
                     last_seen_at = now()
             """),
-                (shop_id, name, region, cipher, seller_type),
+                (shop_id, name, region, seller_type),
             )
             conn.commit()
         return True
@@ -3178,8 +3193,10 @@ class Handler(BaseHTTPRequestHandler):
                         row = cur.fetchone()
                         if row and row[0]:
                             persist_logistics_tracking_number(oid, row[0])
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as _e:  # noqa: BLE001
+                    log.error(
+                        f"[tts-erp] tracking-number backfill failed for {oid}: {_e}\n"
+                    )
             else:
                 errors.append(
                     {
@@ -3299,7 +3316,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def _proxy_get(url: str):
     try:
-        with urllib.request.urlopen(url, timeout=5) as r:
+        with urllib.request.urlopen(url, timeout=5) as r:  # noqa: S310 -- internal proxy URLs only
             return json.load(r)
     except Exception as e:  # noqa: BLE001
         return {"_error": str(e)}
