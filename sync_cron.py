@@ -169,13 +169,16 @@ SYNC_PLANS = [
 LOGISTICS_FINAL_STATUSES = ("DELIVERED", "RETURNED_TO_SELLER")
 # 每轮物流追踪的订单数上限（防御，正常远达不到）
 LOGISTICS_TARGET_LIMIT = 300
-# W1.6: server caps max_per_run at 100 and each order costs one serial
-# upstream call (up to 60s timeout). cron's HTTP_TIMEOUT is 180s, so a
-# single call carrying >80 orders is guaranteed to time out client-side
-# while uvicorn keeps writing — cron logs err, sync_log logs ok, and the
-# next tick refetches the same orders. Batch into ≤80-order calls so the
-# per-call budget stays inside HTTP_TIMEOUT.
-LOGISTICS_BATCH_SIZE = 80
+# W1.6: server caps max_per_run at LOGISTICS_MAX_PER_RUN_CAP and each
+# order costs one serial upstream call (up to 60s timeout). cron's
+# HTTP_TIMEOUT is 180s. Empirically (2026-08-27) a 5-order batch runs
+# 11.63s → 2.33s/order on this shop; 80 × 2.33s = 186s ≈ HTTP_TIMEOUT,
+# which is exactly what the live logs showed: every cron round had
+# batch@0 FAIL in 180.0s and batch@80/160 FAIL in 0.0s with 409, while
+# the held PG advisory lock silently wedged the rest of the tick. Drop
+# to 40 so 40 × 3s (p95 headroom) = 120s ≪ 180s. Covered by
+# tdd/test_logistics_batch_size.py.
+LOGISTICS_BATCH_SIZE = 40
 
 
 # ─── HTTP 客户端 ──────────────────────────────────────────────────────

@@ -216,7 +216,10 @@ def _log_sync(
 # cron tick or a manual trigger. PG advisory lock is the lightest mutex
 # available (no extra infra).
 _LOGISTICS_LOCK_KEY = 727001  # stable arbitrary int key for pg advisory lock
-LOGISTICS_MAX_PER_RUN_CAP = 100  # hard ceiling regardless of body.max_per_run
+LOGISTICS_MAX_PER_RUN_CAP = 50  # hard ceiling regardless of body.max_per_run
+# W1.6: must be ≥ sync_cron.LOGISTICS_BATCH_SIZE (=40). Setting it
+# lower would silently truncate each batch (saved < total with no
+# error). Guarded by tdd/test_logistics_batch_size.py.
 
 
 def _try_advisory_lock(key: int) -> bool:
