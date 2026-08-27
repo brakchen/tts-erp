@@ -16,6 +16,7 @@ If any external script still imports ``OAuthReceiverTokenProvider``,
 they'll get an ImportError — that's intentional, that's the cleanup
 this slice is delivering.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -85,13 +86,25 @@ class TestOauthReceiverUrlRemoved:
         # than the one already bound into ``tts_erp_fastapi._token_provider``,
         # breaking the isinstance check via class identity mismatch.
         import sys as _sys
+
         dependents = [
             name
             for name, mod in list(_sys.modules.items())
             if mod is not None
             and getattr(mod, "__file__", None)
             and "tts-erp" in (mod.__file__ or "")
+            # Exclude pytest's own modules (conftest + test modules) —
+            # popping conftest from sys.modules breaks pytest's session
+            # fixture teardown ("Could not obtain a node for scope
+            # Scope.Session"), cascading into hundreds of setup errors.
+            and "/test_" not in (mod.__file__ or "")
+            and "conftest" not in (mod.__file__ or "")
         ]
+        # Snapshot before popping — restore in finally so later tests in
+        # this session still see the original module objects (popping
+        # without restore forces re-import → NEW class objects → breaks
+        # identity-sensitive tests AND pytest's fixture bookkeeping).
+        saved = {name: _sys.modules.get(name) for name in ["token_provider", *dependents]}
         _sys.modules.pop("token_provider", None)
         # Force the dependents to re-import on next access too — but
         # ONLY token_provider, not the dependents themselves. Restoring
@@ -101,8 +114,17 @@ class TestOauthReceiverUrlRemoved:
         for name in dependents:
             _sys.modules.pop(name, None)
 
-        with pytest.raises(ImportError) as exc:
-            from token_provider import OAuthReceiverTokenProvider  # noqa: F401, F821
+        try:
+            with pytest.raises(ImportError) as exc:
+                from token_provider import (  # noqa: F401
+                    OAuthReceiverTokenProvider,  # type: ignore[attr-defined]
+                )
+        finally:
+            for name, mod in saved.items():
+                if mod is not None:
+                    _sys.modules[name] = mod
+                else:
+                    _sys.modules.pop(name, None)
 
         # The error message should mention the missing name so users
         # who hit this in production get a clear hint.
@@ -143,13 +165,14 @@ class TestSlice5Smoke:
 
     def test_app_still_loads(self):
         from fastapi import FastAPI
-
         from tts_erp_fastapi import app
+
         assert isinstance(app, FastAPI)
 
     def test_token_provider_is_local(self):
         from token_provider import LocalTokenProvider
         from tts_erp_fastapi import _token_provider
+
         assert isinstance(_token_provider, LocalTokenProvider)
 
     def test_local_token_provider_still_works(self, monkeypatch):
@@ -161,7 +184,7 @@ class TestSlice5Smoke:
             oauth_receiver_core,
             "db_load_token",
             lambda shop_id, provider: {
-                "access_token": "tok-slice5",  # noqa: S105  (test fixture, not a real token)
+                "access_token": "tok-slice5",
                 "shop_cipher": "cipher-slice5",
                 "shop_region": "US",
                 "shop_id": shop_id,
@@ -169,5 +192,5 @@ class TestSlice5Smoke:
         )
 
         creds = _token_provider.get("shop-slice5")
-        assert creds.access_token == "tok-slice5"
+        assert creds.access_token == "tok-slice5"  # noqa: S105
         assert creds.shop_cipher == "cipher-slice5"

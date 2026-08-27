@@ -619,12 +619,14 @@ def persist_statement_transaction(
     col_list = ", ".join(cols)
     placeholders = ", ".join(["%s"] * len(cols))
     updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols if c != "txn_id")
-    # pi-lens-ignore: S608
-    sql_query = f"""  # noqa: S608 -- col_list/updates are built from hardcoded constant tuples, never user input
+    # noqa comment must NOT be on the f""" opening line — anything after
+    # the opening quotes becomes part of the SQL string (broke PG parsing
+    # with 'syntax error at or near "#"').
+    sql_query = f"""
         INSERT INTO statement_transactions ({col_list})
         VALUES ({placeholders})
         ON CONFLICT (txn_id) DO UPDATE SET {updates}, synced_at = now()
-    """
+    """  # noqa: S608 -- col_list/updates built from hardcoded constant tuples
     values = (
         [
             tid,
