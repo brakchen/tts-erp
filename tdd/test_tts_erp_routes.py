@@ -343,7 +343,9 @@ class TestGetCredsErrorSemantics:
         import tts_erp_fastapi
 
         def raise_boom(shop_id: str):
-            raise RuntimeError("psycopg.OperationalError: password auth failed for user x")
+            raise RuntimeError(
+                "psycopg.OperationalError: password auth failed for user x"
+            )
 
         monkeypatch.setattr(tts_erp_fastapi._token_provider, "get", raise_boom)
         from fastapi.testclient import TestClient

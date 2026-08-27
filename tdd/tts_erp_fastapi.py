@@ -192,7 +192,9 @@ def _get_creds(shop_id: str):
     except TokenError as e:
         raise HTTPException(status_code=e.status, detail=str(e)) from e
     except Exception as e:  # noqa: BLE001
-        sys.stderr.write(f"[tts-erp-fastapi] token fetch failed: {type(e).__name__}: {e}\n")
+        sys.stderr.write(
+            f"[tts-erp-fastapi] token fetch failed: {type(e).__name__}: {e}\n"
+        )
         raise HTTPException(status_code=502, detail="token fetch failed") from e
 
 
@@ -509,6 +511,7 @@ def _db_query_dict(sql: str, args: tuple = ()) -> list[dict]:
     from psycopg.rows import dict_row
 
     with tts_erp.db_connect() as conn, conn.cursor(row_factory=dict_row) as cur:  # type: ignore[call-arg]
+        # pi-lens-ignore: python-sql-injection
         cur.execute(sql, args)  # type: ignore[arg-type]
         return list(cur.fetchall())
 

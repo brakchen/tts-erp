@@ -19,9 +19,8 @@ import threading
 import time
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 import oauth_receiver_core as oc  # noqa: E402
+import pytest
 
 # ruff: noqa: S105, S106, SLF001
 
@@ -164,7 +163,7 @@ class TestAdversarialShopID:
     def test_very_long_shop_id_over_256_chars(self, oauth_db_url, clean_test_shops):
         """shop_id with > 256 chars — must not crash, must handle gracefully.
 
-        Per schema.sql, shop_id is TEXT (no length limit). However a
+        Per schema_oauth.sql, shop_id is TEXT (no length limit). However a
         256+ char string is suspicious; verify no DoS / OOM.
         """
         oc.db_init()

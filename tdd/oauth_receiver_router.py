@@ -301,7 +301,7 @@ def _tts_erp_section() -> dict:
                                         → last_sync_at (None if table empty)
 
     NOTE on column name: production DB has `started_at` + `finished_at`
-    columns (the schema.sql still shows the older `created_at` name —
+    columns (the schema_oauth.sql still shows the older `created_at` name —
     schema drift, separate issue). `finished_at` is the right column
     to use for "when did the last sync complete"; `started_at` would
     mislead on long-running syncs.

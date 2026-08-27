@@ -7,6 +7,7 @@ last_action_code / last_description 全部写反。
 
 正确行为：按 update_time_millis 时间戳推导 first/last，不依赖列表顺序。
 """
+
 from __future__ import annotations
 
 import psycopg
@@ -23,9 +24,21 @@ T_PLACED = 1_700_000_000_000
 T_PACKED = T_PLACED + 3_600_000
 T_DELIVERED = T_PLACED + 7_200_000
 
-EV_PLACED = {"action_code": 10101, "description": "Order placed.", "update_time_millis": T_PLACED}
-EV_PACKED = {"action_code": 20101, "description": "Packed by seller.", "update_time_millis": T_PACKED}
-EV_DELIVERED = {"action_code": 50101, "description": "Package delivered.", "update_time_millis": T_DELIVERED}
+EV_PLACED = {
+    "action_code": 10101,
+    "description": "Order placed.",
+    "update_time_millis": T_PLACED,
+}
+EV_PACKED = {
+    "action_code": 20101,
+    "description": "Packed by seller.",
+    "update_time_millis": T_PACKED,
+}
+EV_DELIVERED = {
+    "action_code": 50101,
+    "description": "Package delivered.",
+    "update_time_millis": T_DELIVERED,
+}
 
 # TikTok 真实返回顺序：最新在前
 EVENTS_NEWEST_FIRST = [EV_DELIVERED, EV_PACKED, EV_PLACED]
@@ -42,9 +55,15 @@ def _cleanup(db_url: str):
     conn = psycopg.connect(db_url)
     try:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM logistics_tracking_events WHERE order_id = %s", (ORDER_ID,))
-            cur.execute("DELETE FROM logistics_sync_targets WHERE order_id = %s", (ORDER_ID,))
-            cur.execute("DELETE FROM logistics_tracking WHERE order_id = %s", (ORDER_ID,))
+            cur.execute(
+                "DELETE FROM logistics_tracking_events WHERE order_id = %s", (ORDER_ID,)
+            )
+            cur.execute(
+                "DELETE FROM logistics_sync_targets WHERE order_id = %s", (ORDER_ID,)
+            )
+            cur.execute(
+                "DELETE FROM logistics_tracking WHERE order_id = %s", (ORDER_ID,)
+            )
         conn.commit()
     finally:
         conn.close()
@@ -54,7 +73,9 @@ def _fetch_summary(db_url: str) -> dict:
     conn = psycopg.connect(db_url)
     try:
         with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
-            cur.execute("SELECT * FROM logistics_tracking WHERE order_id = %s", (ORDER_ID,))
+            cur.execute(
+                "SELECT * FROM logistics_tracking WHERE order_id = %s", (ORDER_ID,)
+            )
             row = cur.fetchone()
     finally:
         conn.close()
@@ -64,7 +85,9 @@ def _fetch_summary(db_url: str) -> dict:
 
 def test_first_last_event_derived_by_timestamp_not_list_position(db_url: str):
     """TikTok 实际返回（最新在前）：first=最旧事件，last=最新事件。"""
-    ok = tts_erp.persist_logistics_tracking(SHOP_ID, ORDER_ID, _resp(EVENTS_NEWEST_FIRST))
+    ok = tts_erp.persist_logistics_tracking(
+        SHOP_ID, ORDER_ID, _resp(EVENTS_NEWEST_FIRST)
+    )
     assert ok
 
     row = _fetch_summary(db_url)
@@ -78,7 +101,9 @@ def test_first_last_event_derived_by_timestamp_not_list_position(db_url: str):
 
 def test_oldest_first_input_gives_same_result(db_url: str):
     """防御性：即便上游哪天改成最旧在前，落库结果也必须一致。"""
-    ok = tts_erp.persist_logistics_tracking(SHOP_ID, ORDER_ID, _resp(list(reversed(EVENTS_NEWEST_FIRST))))
+    ok = tts_erp.persist_logistics_tracking(
+        SHOP_ID, ORDER_ID, _resp(list(reversed(EVENTS_NEWEST_FIRST)))
+    )
     assert ok
 
     row = _fetch_summary(db_url)
@@ -90,7 +115,11 @@ def test_oldest_first_input_gives_same_result(db_url: str):
 def test_events_without_timestamp_fall_back_gracefully(db_url: str):
     """缺 update_time_millis 的事件不参与 first/last 推导，但也不能炸。"""
     events = [
-        {"action_code": 20101, "description": "Packed by seller.", "update_time_millis": T_PACKED},
+        {
+            "action_code": 20101,
+            "description": "Packed by seller.",
+            "update_time_millis": T_PACKED,
+        },
         {"action_code": 10101, "description": "Order placed."},  # 无时间戳
     ]
     ok = tts_erp.persist_logistics_tracking(SHOP_ID, ORDER_ID, _resp(events))
@@ -120,8 +149,11 @@ class TestSyncLogisticsTrackingGuard:
         from domain import Creds
 
         monkeypatch.setattr(
-            mod, "_get_creds",
-            lambda shop_id: Creds(access_token="t", shop_cipher="c", region="VN", shop_id=shop_id),  # noqa: S106 -- test double, not a real credential
+            mod,
+            "_get_creds",
+            lambda shop_id: Creds(
+                access_token="t", shop_cipher="c", region="VN", shop_id=shop_id
+            ),  # noqa: S106 -- test double, not a real credential
         )
 
         class _FakeHttp:
@@ -134,7 +166,8 @@ class TestSyncLogisticsTrackingGuard:
         # no jitter in tests
         monkeypatch.setattr(mod.time, "sleep", lambda s: None)
         monkeypatch.setattr(
-            mod, "_db_query_dict",
+            mod,
+            "_db_query_dict",
             lambda sql, args=(): [{"order_id": f"O{i}"} for i in range(n_orders)],
         )
         monkeypatch.setattr(mod.tts_erp, "persist_logistics_tracking", lambda *a: True)
@@ -153,8 +186,12 @@ class TestSyncLogisticsTrackingGuard:
         self._patch_common(mod, monkeypatch, n_orders=250)
         r = app.post(
             "/sync/logistics_tracking",
-            json={"shop_id": "TEST_SHOP_LOGISTICS", "all_with_tracking": True,
-                  "limit": 250, "max_per_run": 250},
+            json={
+                "shop_id": "TEST_SHOP_LOGISTICS",
+                "all_with_tracking": True,
+                "limit": 250,
+                "max_per_run": 250,
+            },
         )
         assert r.status_code == 200
         # 250 requested, but hard cap is 100
@@ -164,7 +201,9 @@ class TestSyncLogisticsTrackingGuard:
         app, mod = client
         self._patch_common(mod, monkeypatch, n_orders=2)
         released = []
-        monkeypatch.setattr(mod, "_release_advisory_lock", lambda key: released.append(key))
+        monkeypatch.setattr(
+            mod, "_release_advisory_lock", lambda key: released.append(key)
+        )
         r = app.post(
             "/sync/logistics_tracking",
             json={"shop_id": "TEST_SHOP_LOGISTICS", "order_ids": ["O1", "O2"]},
@@ -176,7 +215,9 @@ class TestSyncLogisticsTrackingGuard:
         app, mod = client
         self._patch_common(mod, monkeypatch)
         released = []
-        monkeypatch.setattr(mod, "_release_advisory_lock", lambda key: released.append(key))
+        monkeypatch.setattr(
+            mod, "_release_advisory_lock", lambda key: released.append(key)
+        )
 
         class _BoomHttp:
             def request(self, *a, **kw):

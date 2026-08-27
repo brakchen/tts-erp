@@ -268,7 +268,7 @@ def db_init() -> None:
             else:
                 raise RuntimeError(
                     f"DB store required but table '{_oauth_db_table()}' does not exist "
-                    f"— run schema.sql to create it"
+                    f"— run schema_oauth.sql to create it"
                 )
     except RuntimeError:
         raise
@@ -291,6 +291,7 @@ def db_store_token(shop_id: str, provider: str, data: dict) -> bool:
     tbl = pg_sql.Identifier(_oauth_db_table())
     try:
         with _db_connect() as conn, conn.cursor() as cur:
+            # pi-lens-ignore: python-sql-injection
             cur.execute(  # nosemgrep
                 pg_sql.SQL(
                     """
@@ -356,6 +357,7 @@ def db_load_token(shop_id: str, provider: str) -> dict | None:
     tbl = pg_sql.Identifier(_oauth_db_table())
     try:
         with _db_connect() as conn, conn.cursor(row_factory=dict_row) as cur:
+            # pi-lens-ignore: python-sql-injection
             cur.execute(  # nosemgrep
                 pg_sql.SQL(
                     """
@@ -413,6 +415,7 @@ def db_list_shops(provider: str | None = None) -> list[dict]:
     try:
         with _db_connect() as conn, conn.cursor(row_factory=dict_row) as cur:
             if provider:
+                # pi-lens-ignore: python-sql-injection
                 cur.execute(
                     pg_sql.SQL(
                         "SELECT {} FROM {} WHERE provider = %s ORDER BY updated_at DESC"
@@ -420,6 +423,7 @@ def db_list_shops(provider: str | None = None) -> list[dict]:
                     (provider,),
                 )
             else:
+                # pi-lens-ignore: python-sql-injection
                 cur.execute(
                     pg_sql.SQL("SELECT {} FROM {} ORDER BY updated_at DESC").format(
                         select_cols, tbl
@@ -446,6 +450,7 @@ def db_count_shops(provider: str | None = None) -> int:
     try:
         with _db_connect() as conn, conn.cursor() as cur:
             if provider:
+                # pi-lens-ignore: python-sql-injection
                 cur.execute(
                     pg_sql.SQL("SELECT COUNT(*) FROM {} WHERE provider = %s").format(
                         tbl
@@ -453,6 +458,7 @@ def db_count_shops(provider: str | None = None) -> int:
                     (provider,),
                 )
             else:
+                # pi-lens-ignore: python-sql-injection
                 cur.execute(pg_sql.SQL("SELECT COUNT(*) FROM {}").format(tbl))
             row = cur.fetchone()
             return int(row[0]) if row else 0
@@ -468,6 +474,7 @@ def db_delete_token(shop_id: str, provider: str) -> bool:
         return False
     try:
         with _db_connect() as conn, conn.cursor() as cur:
+            # pi-lens-ignore: python-sql-injection
             cur.execute(
                 pg_sql.SQL(
                     "DELETE FROM {} WHERE shop_id = %s AND provider = %s"
@@ -610,7 +617,10 @@ def _open_http_get(url: str, headers: dict | None = None, timeout: float = 15.0)
     ok, err = _assert_safe_http_url(url)
     if not ok:
         raise ValueError(err)
-    req = urllib.request.Request(url, method="GET")  # nosemgrep: urllib-urlopen  # noqa: S310
+    # pi-lens-ignore: S310
+    req = urllib.request.Request(
+        url, method="GET"
+    )  # nosemgrep: urllib-urlopen  # noqa: S310
     for k, v in (headers or {}).items():
         req.add_header(k, v)
     return urlopen(req, timeout=timeout)  # nosemgrep: urllib-urlopen  # noqa: S310

@@ -78,8 +78,8 @@ def backfill_shops_from_oauth(
             cur.executemany(  # nosemgrep: python.lang.security.audit.formatted-sql-query
                 """
                 INSERT INTO shops
-                    (shop_id, shop_name, shop_region, shop_cipher, seller_type, last_seen_at)
-                VALUES (%s, %s, %s, NULL, %s, now())
+                    (shop_id, shop_name, shop_region, seller_type, last_seen_at)
+                VALUES (%s, %s, %s, %s, now())
                 ON CONFLICT (shop_id) DO UPDATE SET
                     shop_name    = COALESCE(EXCLUDED.shop_name,    shops.shop_name),
                     shop_region  = COALESCE(EXCLUDED.shop_region,  shops.shop_region),

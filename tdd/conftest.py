@@ -117,7 +117,9 @@ def _cleanup_test_shop_ids(db_url: str):
     try:
         with conn.cursor() as cur:
             for tbl in cleanup_tables:
-                cur.execute(f"DELETE FROM {tbl} WHERE shop_id LIKE 'TEST_%'")
+                # tbl comes from the hardcoded cleanup_tables list above (never
+                # user input), so f-string interpolation is safe here.
+                cur.execute(f"DELETE FROM {tbl} WHERE shop_id LIKE 'TEST_%'")  # type: ignore[call-overload]
         conn.commit()
     finally:
         conn.close()
@@ -150,9 +152,8 @@ def _load_oauth_env(monkeypatch: pytest.MonkeyPatch) -> str | None:
 @pytest.fixture()
 def fernet_key(monkeypatch: pytest.MonkeyPatch):
     """Inject a fresh Fernet key per test. Resets module cache."""
+    import oauth_receiver_core as oc  # noqa: E402  -- intentional: fixture-local import keeps module import order stable
     from cryptography.fernet import Fernet
-
-    import oauth_receiver_core as oc
 
     key = Fernet.generate_key().decode("ascii")
     monkeypatch.setenv("OAUTH_DB_ENCRYPTION_KEY", key)

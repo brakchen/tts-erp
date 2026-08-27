@@ -298,6 +298,7 @@ def _recompute_completeness(
     TRUE iff analytics_daily_pages contains exactly the pages
     1..expected_page_count."""
     for unit_day in unit_days:
+        # pi-lens-ignore: python-sql-injection
         cur.execute(
             """
             SELECT expected_page_count

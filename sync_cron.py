@@ -292,6 +292,7 @@ def watermark_value(
       - 用 update_time_ge 替代 create_time_ge 做增量同步
     """
     with conn.cursor() as cur:
+        # pi-lens-ignore: python-sql-injection
         cur.execute(
             sql.SQL("SELECT MAX({col}) FROM {tbl} WHERE shop_id = %s").format(
                 col=sql.Identifier(column),

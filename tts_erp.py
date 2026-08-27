@@ -91,11 +91,6 @@ import os
 import sys
 
 sys.path.insert(0, "/home/schan/setup/lib")
-from log_helper import get_logger, setup_logging
-
-# Module-level logger (inherits from app logger set by main() or FastAPI)
-log = get_logger("tts-erp")
-
 import json
 import sys
 import time
@@ -107,6 +102,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import psycopg
 import psycopg.rows
+from log_helper import get_logger, setup_logging
 from psycopg import sql
 
 from tts_signing import (
@@ -114,7 +110,11 @@ from tts_signing import (
     tiktok_request,
 )
 
+# Module-level logger (inherits from app logger set by main() or FastAPI)
+log = get_logger("tts-erp")
+
 # ---------- Config ----------
+
 
 def _env_int(name: str, default: str) -> int:
     """Parse an int env var with fallback — malformed operator config must
@@ -125,7 +125,8 @@ def _env_int(name: str, default: str) -> int:
         return int(float(default))
 
 
-HOST = os.environ.get("TTS_ERP_HOST", "0.0.0.0")  # noqa: S104 -- legacy server, container/NAT deploy requires all-interfaces bind
+# pi-lens-ignore: S104
+HOST = os.environ.get("TTS_ERP_HOST", "0.0.0.0")
 PORT = _env_int("TTS_ERP_PORT", "9877")
 OAUTH_RECEIVER_URL = os.environ.get(
     "OAUTH_RECEIVER_URL", "http://127.0.0.1:9876"
@@ -167,11 +168,12 @@ def db_init():
                 "returns",
                 "cancellations",
             ):
+                # pi-lens-ignore: python-sql-injection
                 cur.execute(sql.SQL("SELECT to_regclass(%s)"), (tbl,))
                 row = cur.fetchone()
                 if row is None or row[0] is None:
                     log.error(
-                        f"[tts-erp] WARN: table '{tbl}' missing — run schema.sql\n"
+                        f"[tts-erp] WARN: table '{tbl}' missing — run schema_tts_erp.sql\n"
                     )
                     return False
         return True
@@ -184,7 +186,8 @@ def db_init():
 def fetch_shop_meta(shop_id: str) -> dict | None:
     """Get shop metadata (cipher, name, region) from oauth-receiver. No secrets."""
     try:
-        with urllib.request.urlopen(  # noqa: S310 -- fixed internal oauth-receiver URL
+        # pi-lens-ignore: S310
+        with urllib.request.urlopen(
             f"{OAUTH_RECEIVER_URL}/tokens/shops", timeout=5
         ) as r:
             data = json.load(r)
@@ -202,8 +205,10 @@ def fetch_token(shop_id: str, reveal: bool = False) -> dict | None:
     if reveal:
         url += "?reveal=1"
     try:
+        # pi-lens-ignore: S310
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=10) as r:  # noqa: S310 -- OAUTH_RECEIVER_URL is operator-configured
+        # pi-lens-ignore: S310
+        with urllib.request.urlopen(req, timeout=10) as r:
             return json.load(r)
     except urllib.error.HTTPError as e:
         return {
@@ -254,6 +259,7 @@ def persist_order(shop_id: str, order_raw: dict) -> bool:
             ) or order_raw.get("payment_currency")
 
             # Orders table — extract known fields, store raw for full fidelity
+            # pi-lens-ignore: python-sql-injection
             cur.execute(
                 sql.SQL("""
                 INSERT INTO orders
@@ -318,6 +324,7 @@ def persist_order(shop_id: str, order_raw: dict) -> bool:
 
             # Items
             for it in order_raw.get("line_items") or order_raw.get("items") or []:
+                # pi-lens-ignore: python-sql-injection
                 cur.execute(
                     sql.SQL("""
                     INSERT INTO order_items
@@ -374,6 +381,22 @@ def persist_order(shop_id: str, order_raw: dict) -> bool:
                 or (order_raw.get("fulfillment") or {}).get("shipping_provider_name")
             )
             if any([tracking, provider_id, provider_name]):
+                # W2.5: store only the shipping-relevant subset, not the
+                # whole order JSON — orders.raw already holds the full
+                # payload, so duplicating it here doubles storage for every
+                # order with shipping info.
+                shipping_raw = {
+                    k: v
+                    for k, v in {
+                        "tracking_number": tracking,
+                        "shipping_provider_id": provider_id,
+                        "shipping_provider_name": provider_name,
+                        "shipping": order_raw.get("shipping"),
+                        "fulfillment": order_raw.get("fulfillment"),
+                    }.items()
+                    if v is not None
+                }
+                # pi-lens-ignore: python-sql-injection
                 cur.execute(
                     sql.SQL("""
                     INSERT INTO order_shippings
@@ -393,7 +416,7 @@ def persist_order(shop_id: str, order_raw: dict) -> bool:
                         tracking,
                         provider_id,
                         provider_name,
-                        json.dumps(order_raw, ensure_ascii=False, default=str),
+                        json.dumps(shipping_raw, ensure_ascii=False, default=str),
                     ),
                 )
 
@@ -417,6 +440,7 @@ def persist_statement(shop_id: str, stmt_raw: dict) -> bool:
         return False
     try:
         with db_connect() as conn, conn.cursor() as cur:
+            # pi-lens-ignore: python-sql-injection
             cur.execute(
                 sql.SQL("""
                 INSERT INTO statements
@@ -549,6 +573,7 @@ def persist_statement_transaction(
     col_list = ", ".join(cols)
     placeholders = ", ".join(["%s"] * len(cols))
     updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols if c != "txn_id")
+    # pi-lens-ignore: S608
     sql_query = f"""  # noqa: S608 -- col_list/updates are built from hardcoded constant tuples, never user input
         INSERT INTO statement_transactions ({col_list})
         VALUES ({placeholders})
@@ -571,6 +596,7 @@ def persist_statement_transaction(
     )
     try:
         with db_connect() as conn, conn.cursor() as cur:
+            # pi-lens-ignore: python-sql-injection
             cur.execute(sql.SQL(sql_query), values)  # type: ignore[reportArgumentType]  # pyright strict: SQL accepts str but pyright types say LiteralString
             conn.commit()
         return True
@@ -598,6 +624,7 @@ def persist_payment(shop_id: str, pay_raw: dict) -> bool:
         before = pay_raw.get("payment_amount_before_exchange") or {}
         reserve = pay_raw.get("reserve_amount") or {}
         with db_connect() as conn, conn.cursor() as cur:
+            # pi-lens-ignore: python-sql-injection
             cur.execute(
                 sql.SQL("""
                 INSERT INTO payments
@@ -674,6 +701,7 @@ def persist_return(shop_id: str, return_raw: dict) -> bool:
         return False
     try:
         with db_connect() as conn, conn.cursor() as cur:
+            # pi-lens-ignore: python-sql-injection
             cur.execute(
                 sql.SQL("""
                 INSERT INTO returns
@@ -742,6 +770,7 @@ def persist_cancellation(shop_id: str, cancel_raw: dict) -> bool:
         return False
     try:
         with db_connect() as conn, conn.cursor() as cur:
+            # pi-lens-ignore: python-sql-injection
             cur.execute(
                 sql.SQL("""
                 INSERT INTO cancellations
@@ -937,7 +966,12 @@ def persist_logistics_tracking(shop_id: str, order_id: str, resp: dict) -> bool:
     def first_ts(code):
         for ev in timed_events:
             try:
-                if _safe_int(ev.get("action_code"), default=0, source="event.action_code") == code:
+                if (
+                    _safe_int(
+                        ev.get("action_code"), default=0, source="event.action_code"
+                    )
+                    == code
+                ):
                     return ts_of(ev)
             except (TypeError, ValueError):
                 continue
@@ -1607,7 +1641,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _read_json_body(self) -> dict:
-        n = _safe_int(self.headers.get("Content-Length"), default=0, source="http.Content-Length")
+        n = _safe_int(
+            self.headers.get("Content-Length"), default=0, source="http.Content-Length"
+        )
         if n == 0:
             return {}
         body = self.rfile.read(n).decode("utf-8", errors="replace")
@@ -1985,7 +2021,9 @@ class Handler(BaseHTTPRequestHandler):
         shop_id = body.get("shop_id")
         if not shop_id:
             return self._send(400, {"_error": "missing shop_id in body"})
-        page_size = _safe_int(body.get("page_size"), default=50, source="body.page_size")
+        page_size = _safe_int(
+            body.get("page_size"), default=50, source="body.page_size"
+        )
         order_status = body.get("order_status")
         create_time_ge = body.get("create_time_ge")
         create_time_lt = body.get("create_time_lt")
@@ -2011,9 +2049,13 @@ class Handler(BaseHTTPRequestHandler):
             # TikTok expects string, not int (per 36009004 type validation)
             search_body["order_status"] = str(order_status)
         if create_time_ge is not None:
-            search_body["create_time_ge"] = _safe_int(create_time_ge, source="qs.create_time_ge")
+            search_body["create_time_ge"] = _safe_int(
+                create_time_ge, source="qs.create_time_ge"
+            )
         if create_time_lt is not None:
-            search_body["create_time_lt"] = _safe_int(create_time_lt, source="qs.create_time_lt")
+            search_body["create_time_lt"] = _safe_int(
+                create_time_lt, source="qs.create_time_lt"
+            )
 
         # First page
         first = tiktok_request(
@@ -2131,7 +2173,9 @@ class Handler(BaseHTTPRequestHandler):
         site = _q("site", "VN")
         try:
             page_no = _safe_int(_q("page_no", "1"), default=1, source="qs.page_no")
-            page_size = _safe_int(_q("page_size", "100"), default=100, source="qs.page_size")
+            page_size = _safe_int(
+                _q("page_size", "100"), default=100, source="qs.page_size"
+            )
         except (TypeError, ValueError):
             return self._send(400, {"_error": "page_no/page_size must be int"})
 
@@ -2174,6 +2218,7 @@ class Handler(BaseHTTPRequestHandler):
             site: 站点（可选，过滤 SDK 调用）
             page_size: 每页数量（默认 20，SDK 上限 20）
         """
+
         def _q(key, default=None):
             v = params.get(key)
             if isinstance(v, list):
@@ -2183,7 +2228,9 @@ class Handler(BaseHTTPRequestHandler):
         platform = _q("platform", "tiktok")
         site = _q("site")
         try:
-            page_size = _safe_int(_q("page_size", "20"), default=20, source="qs.page_size")
+            page_size = _safe_int(
+                _q("page_size", "20"), default=20, source="qs.page_size"
+            )
         except (TypeError, ValueError):
             return self._send(400, {"_error": "page_size must be int"})
 
@@ -2208,11 +2255,14 @@ class Handler(BaseHTTPRequestHandler):
                     sdk_kwargs["site"] = site
                 result = client.tk_collect_box.get_price_template_list(**sdk_kwargs)
                 templates = (
-                    result.data.priceTemplateList
-                    if result and result.data
-                    else []
+                    result.data.priceTemplateList if result and result.data else []
                 )
-                if page_no == 1 and result and result.data and result.data.total is not None:
+                if (
+                    page_no == 1
+                    and result
+                    and result.data
+                    and result.data.total is not None
+                ):
                     total = _safe_int(result.data.total, default=0, source="sdk.total")
                 if not templates:
                     break
@@ -2249,6 +2299,7 @@ class Handler(BaseHTTPRequestHandler):
             page_size: 每页数量（默认 50，SDK 上限 500）
             status: 可选过滤（normal / abnormal 等）
         """
+
         def _q(key, default=None):
             v = params.get(key)
             if isinstance(v, list):
@@ -2258,7 +2309,9 @@ class Handler(BaseHTTPRequestHandler):
         platform = _q("platform", "tiktok")
         status = _q("status")
         try:
-            page_size = _safe_int(_q("page_size", "50"), default=50, source="qs.page_size")
+            page_size = _safe_int(
+                _q("page_size", "50"), default=50, source="qs.page_size"
+            )
         except (TypeError, ValueError):
             return self._send(400, {"_error": "page_size must be int"})
 
@@ -2280,9 +2333,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001
             return self._send(502, {"_error": f"miaoshou api error: {e}"})
 
-        details = (
-            result.data.detailList if result and result.data else []
-        )
+        details = result.data.detailList if result and result.data else []
         saved = 0
         for d in details:
             if persist_miaoshou_collect_box_detail(platform, d):
@@ -2306,6 +2357,7 @@ class Handler(BaseHTTPRequestHandler):
             page_size: 每页数量（默认 20，SDK 上限 20）
             status: 可选过滤
         """
+
         def _q(key, default=None):
             v = params.get(key)
             if isinstance(v, list):
@@ -2315,7 +2367,9 @@ class Handler(BaseHTTPRequestHandler):
         platform = _q("platform", "tiktok")
         status = _q("status")
         try:
-            page_size = _safe_int(_q("page_size", "20"), default=20, source="qs.page_size")
+            page_size = _safe_int(
+                _q("page_size", "20"), default=20, source="qs.page_size"
+            )
         except (TypeError, ValueError):
             return self._send(400, {"_error": "page_size must be int"})
 
@@ -2340,11 +2394,14 @@ class Handler(BaseHTTPRequestHandler):
                     sdk_kwargs["status"] = status
                 result = client.tk_collect_box.search_move_collect_list(**sdk_kwargs)
                 tasks = (
-                    result.data.moveCollectDetailList
-                    if result and result.data
-                    else []
+                    result.data.moveCollectDetailList if result and result.data else []
                 )
-                if page_no == 1 and result and result.data and result.data.total is not None:
+                if (
+                    page_no == 1
+                    and result
+                    and result.data
+                    and result.data.total is not None
+                ):
                     total = _safe_int(result.data.total, default=0, source="sdk.total")
                 if not tasks:
                     break
@@ -2422,7 +2479,9 @@ class Handler(BaseHTTPRequestHandler):
     def _db_list_orders(self, params: dict):
         shop_id = (params.get("shop_id") or [None])[0]
         status = (params.get("status") or [None])[0]
-        limit = _safe_int((params.get("limit") or ["50"])[0], default=50, source="qs.limit")
+        limit = _safe_int(
+            (params.get("limit") or ["50"])[0], default=50, source="qs.limit"
+        )
         try:
             with (
                 db_connect() as conn,
@@ -2558,7 +2617,9 @@ class Handler(BaseHTTPRequestHandler):
         shop_id = body.get("shop_id")
         if not shop_id:
             return self._send(400, {"_error": "missing shop_id in body"})
-        page_size = _safe_int(body.get("page_size"), default=50, source="body.page_size")
+        page_size = _safe_int(
+            body.get("page_size"), default=50, source="body.page_size"
+        )
         statement_time_ge = body.get("statement_time_ge")
         statement_time_lt = body.get("statement_time_lt")
 
@@ -2574,9 +2635,13 @@ class Handler(BaseHTTPRequestHandler):
             "sort_order": "DESC",
         }
         if statement_time_ge is not None:
-            extra_params["statement_time_ge"] = str(_safe_int(statement_time_ge, source="body.statement_time_ge"))
+            extra_params["statement_time_ge"] = str(
+                _safe_int(statement_time_ge, source="body.statement_time_ge")
+            )
         if statement_time_lt is not None:
-            extra_params["statement_time_lt"] = str(_safe_int(statement_time_lt, source="body.statement_time_lt"))
+            extra_params["statement_time_lt"] = str(
+                _safe_int(statement_time_lt, source="body.statement_time_lt")
+            )
 
         first = tiktok_request(
             "GET",
@@ -2634,7 +2699,9 @@ class Handler(BaseHTTPRequestHandler):
         shop_id = body.get("shop_id")
         if not shop_id:
             return self._send(400, {"_error": "missing shop_id in body"})
-        page_size = _safe_int(body.get("page_size"), default=50, source="body.page_size")
+        page_size = _safe_int(
+            body.get("page_size"), default=50, source="body.page_size"
+        )
         create_time_ge = body.get("create_time_ge")
         create_time_lt = body.get("create_time_lt")
 
@@ -2650,9 +2717,13 @@ class Handler(BaseHTTPRequestHandler):
             "sort_order": "DESC",
         }
         if create_time_ge is not None:
-            extra_params["create_time_ge"] = str(_safe_int(create_time_ge, source="body.create_time_ge"))
+            extra_params["create_time_ge"] = str(
+                _safe_int(create_time_ge, source="body.create_time_ge")
+            )
         if create_time_lt is not None:
-            extra_params["create_time_lt"] = str(_safe_int(create_time_lt, source="body.create_time_lt"))
+            extra_params["create_time_lt"] = str(
+                _safe_int(create_time_lt, source="body.create_time_lt")
+            )
 
         first = tiktok_request(
             "GET",
@@ -2709,7 +2780,9 @@ class Handler(BaseHTTPRequestHandler):
     # ----- Local DB reads for finance -----
     def _db_list_statements(self, params: dict):
         shop_id = (params.get("shop_id") or [None])[0]
-        limit = _safe_int((params.get("limit") or ["50"])[0], default=50, source="qs.limit")
+        limit = _safe_int(
+            (params.get("limit") or ["50"])[0], default=50, source="qs.limit"
+        )
         try:
             with (
                 db_connect() as conn,
@@ -2734,7 +2807,9 @@ class Handler(BaseHTTPRequestHandler):
     def _db_list_payments(self, params: dict):
         shop_id = (params.get("shop_id") or [None])[0]
         status = (params.get("status") or [None])[0]
-        limit = _safe_int((params.get("limit") or ["50"])[0], default=50, source="qs.limit")
+        limit = _safe_int(
+            (params.get("limit") or ["50"])[0], default=50, source="qs.limit"
+        )
         try:
             with (
                 db_connect() as conn,
@@ -2797,7 +2872,17 @@ class Handler(BaseHTTPRequestHandler):
         # (TikTok returns 98001004 "Value Out Of Range" if >50).
         extra_params: dict[str, str] = {
             "shop_cipher": shop_cipher,
-            "page_size": str(min(max(_safe_int(body.get("page_size"), default=50, source="body.page_size"), 10), 50)),
+            "page_size": str(
+                min(
+                    max(
+                        _safe_int(
+                            body.get("page_size"), default=50, source="body.page_size"
+                        ),
+                        10,
+                    ),
+                    50,
+                )
+            ),
             "sort_field": "create_time",
             "sort_order": "DESC",
         }
@@ -2816,7 +2901,9 @@ class Handler(BaseHTTPRequestHandler):
         # for time filters in some versions).
         for k in ("create_time_ge", "create_time_lt"):
             if k in upstream_body and k not in extra_params:
-                extra_params[k] = str(_safe_int(upstream_body.pop(k), source="body." + k))
+                extra_params[k] = str(
+                    _safe_int(upstream_body.pop(k), source="body." + k)
+                )
 
         upstream_path = f"/return_refund/202309/{kind}/search"
         result = tiktok_request(
@@ -2836,7 +2923,9 @@ class Handler(BaseHTTPRequestHandler):
         shop_id = body.get("shop_id")
         if not shop_id:
             return self._send(400, {"_error": "missing shop_id in body"})
-        page_size = _safe_int(body.get("page_size"), default=50, source="body.page_size")
+        page_size = _safe_int(
+            body.get("page_size"), default=50, source="body.page_size"
+        )
 
         creds = self._require_shop_token(shop_id)
         if isinstance(creds, dict) and creds.get("_error"):
@@ -2851,9 +2940,13 @@ class Handler(BaseHTTPRequestHandler):
             "sort_order": "DESC",
         }
         if body.get("create_time_ge") is not None:
-            extra_params["create_time_ge"] = str(_safe_int(body["create_time_ge"], source="body.create_time_ge"))
+            extra_params["create_time_ge"] = str(
+                _safe_int(body["create_time_ge"], source="body.create_time_ge")
+            )
         if body.get("create_time_lt") is not None:
-            extra_params["create_time_lt"] = str(_safe_int(body["create_time_lt"], source="body.create_time_lt"))
+            extra_params["create_time_lt"] = str(
+                _safe_int(body["create_time_lt"], source="body.create_time_lt")
+            )
 
         first = tiktok_request(
             "POST",
@@ -2913,7 +3006,9 @@ class Handler(BaseHTTPRequestHandler):
         shop_id = body.get("shop_id")
         if not shop_id:
             return self._send(400, {"_error": "missing shop_id in body"})
-        page_size = _safe_int(body.get("page_size"), default=50, source="body.page_size")
+        page_size = _safe_int(
+            body.get("page_size"), default=50, source="body.page_size"
+        )
 
         creds = self._require_shop_token(shop_id)
         if isinstance(creds, dict) and creds.get("_error"):
@@ -2928,9 +3023,13 @@ class Handler(BaseHTTPRequestHandler):
             "sort_order": "DESC",
         }
         if body.get("create_time_ge") is not None:
-            extra_params["create_time_ge"] = str(_safe_int(body["create_time_ge"], source="body.create_time_ge"))
+            extra_params["create_time_ge"] = str(
+                _safe_int(body["create_time_ge"], source="body.create_time_ge")
+            )
         if body.get("create_time_lt") is not None:
-            extra_params["create_time_lt"] = str(_safe_int(body["create_time_lt"], source="body.create_time_lt"))
+            extra_params["create_time_lt"] = str(
+                _safe_int(body["create_time_lt"], source="body.create_time_lt")
+            )
 
         first = tiktok_request(
             "POST",
@@ -2988,7 +3087,9 @@ class Handler(BaseHTTPRequestHandler):
     def _db_list_returns(self, params: dict):
         shop_id = (params.get("shop_id") or [None])[0]
         status = (params.get("status") or [None])[0]
-        limit = _safe_int((params.get("limit") or ["50"])[0], default=50, source="qs.limit")
+        limit = _safe_int(
+            (params.get("limit") or ["50"])[0], default=50, source="qs.limit"
+        )
         try:
             with (
                 db_connect() as conn,
@@ -3019,7 +3120,9 @@ class Handler(BaseHTTPRequestHandler):
     def _db_list_cancellations(self, params: dict):
         shop_id = (params.get("shop_id") or [None])[0]
         status = (params.get("status") or [None])[0]
-        limit = _safe_int((params.get("limit") or ["50"])[0], default=50, source="qs.limit")
+        limit = _safe_int(
+            (params.get("limit") or ["50"])[0], default=50, source="qs.limit"
+        )
         try:
             with (
                 db_connect() as conn,
@@ -3156,7 +3259,11 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 order_ids = [r[0] for r in cur.fetchall()]
 
-        max_per_run = _safe_int(body.get("max_per_run"), default=(len(order_ids) or 100), source="body.max_per_run")
+        max_per_run = _safe_int(
+            body.get("max_per_run"),
+            default=(len(order_ids) or 100),
+            source="body.max_per_run",
+        )
         order_ids = order_ids[:max_per_run]
 
         if not order_ids:
@@ -3230,7 +3337,9 @@ class Handler(BaseHTTPRequestHandler):
         arrived = (params.get("arrived_overseas") or [None])[0]
         tracking_number = (params.get("tracking_number") or [None])[0]
         order_id = (params.get("order_id") or [None])[0]
-        limit = _safe_int((params.get("limit") or ["100"])[0], default=100, source="qs.limit")
+        limit = _safe_int(
+            (params.get("limit") or ["100"])[0], default=100, source="qs.limit"
+        )
 
         wh = []
         args: list = []
@@ -3275,7 +3384,9 @@ class Handler(BaseHTTPRequestHandler):
         """GET /db/logistics_events?order_id=...&action_code=...&limit=200"""
         order_id = (params.get("order_id") or [None])[0]
         action_code = (params.get("action_code") or [None])[0]
-        limit = _safe_int((params.get("limit") or ["200"])[0], default=200, source="qs.limit")
+        limit = _safe_int(
+            (params.get("limit") or ["200"])[0], default=200, source="qs.limit"
+        )
         wh = []
         args: list = []
         if order_id:
@@ -3316,7 +3427,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def _proxy_get(url: str):
     try:
-        with urllib.request.urlopen(url, timeout=5) as r:  # noqa: S310 -- internal proxy URLs only
+        # pi-lens-ignore: S310
+        with urllib.request.urlopen(url, timeout=5) as r:
             return json.load(r)
     except Exception as e:  # noqa: BLE001
         return {"_error": str(e)}

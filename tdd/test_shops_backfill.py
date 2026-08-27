@@ -201,9 +201,10 @@ def test_persist_shop_never_writes_cipher(db_url: str):
     """W1.3: persist_shop must NOT persist the plaintext shop_cipher.
 
     shop_cipher is a live signing credential; its single source of truth
-    is oauth_receiver (encrypted bytea). The backfill path already writes
-    NULL (tdd/_backfill.py); the order-detail path must align. Column
-    itself is dropped in Wave 2.
+    is oauth_receiver (encrypted bytea). W1.3 stopped persist_shop from
+    writing the column; W2.2 dropped the column entirely. This test now
+    pins the post-W2 contract: the column is gone AND persist_shop still
+    works (with the legacy cipher kwarg accepted for call-site compat).
     """
     import psycopg
 
@@ -213,7 +214,15 @@ def test_persist_shop_never_writes_cipher(db_url: str):
     try:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM shops WHERE shop_id LIKE 'TEST_%'")
+            cur.execute(
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_name = 'shops' AND column_name = 'shop_cipher'"
+            )
+            row = cur.fetchone()
         conn.commit()
+        assert row is not None and row[0] == 0, (
+            "shops.shop_cipher column still exists — W2.2 drop not applied"
+        )
 
         ok = tts_erp.persist_shop(
             "TEST_SHOP_CIPHER",
@@ -224,15 +233,7 @@ def test_persist_shop_never_writes_cipher(db_url: str):
         )
         assert ok is True
 
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT shop_cipher FROM shops WHERE shop_id = 'TEST_SHOP_CIPHER'"
-            )
-            row = cur.fetchone()
-        assert row is not None
-        assert row[0] is None, f"shop_cipher leaked to DB: {row[0]!r}"
-
-        # Upsert path with a new cipher must also stay NULL
+        # Upsert path also works and updates non-secret fields
         ok = tts_erp.persist_shop(
             "TEST_SHOP_CIPHER",
             name="Cipher Shop v2",
@@ -243,14 +244,13 @@ def test_persist_shop_never_writes_cipher(db_url: str):
         assert ok is True
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT shop_name, shop_region, shop_cipher FROM shops"
+                "SELECT shop_name, shop_region FROM shops"
                 " WHERE shop_id = 'TEST_SHOP_CIPHER'"
             )
             row = cur.fetchone()
         assert row is not None
         assert row[0] == "Cipher Shop v2"
         assert row[1] == "US"
-        assert row[2] is None
     finally:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM shops WHERE shop_id LIKE 'TEST_%'")

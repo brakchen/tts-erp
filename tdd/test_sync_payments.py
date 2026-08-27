@@ -311,8 +311,10 @@ class TestDirtyBodyInput:
         from tts_business import sync_payments
 
         result = sync_payments(
-            creds, {"shop_id": creds.shop_id, "page_size": "abc"},
-            http=http, repo=repo,
+            creds,
+            {"shop_id": creds.shop_id, "page_size": "abc"},
+            http=http,
+            repo=repo,
         )
 
         assert result.ok
@@ -326,7 +328,8 @@ class TestDirtyBodyInput:
         result = sync_payments(
             creds,
             {"shop_id": creds.shop_id, "create_time_ge": "not-a-number"},
-            http=http, repo=repo,
+            http=http,
+            repo=repo,
         )
 
         assert result.ok

@@ -42,6 +42,7 @@ def _body_int_opt(value: Any) -> int | None:
     except (TypeError, ValueError):
         return None
 
+
 # Maximum pages to fetch in one sync call. Safety cap to avoid
 # runaway pagination if TikTok keeps returning next_page_token.
 _MAX_PAGES = 50
