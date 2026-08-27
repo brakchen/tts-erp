@@ -18,9 +18,158 @@
 
 ---
 
-## 1. 关系图(Mermaid ER)
+## 1. 关系图
 
-### 1.1 总体鸟瞰
+### 1.0 领域模型(DDD 视角)
+
+**这一节是业务视角**——领域实体 + 行为关系,不看数据库实现。
+下一节 §1.1 才是 schema ER,体现当前实现(包含待建表 / missing FK 标注)。
+
+```mermaid
+graph LR
+    %% ─── Bounded Contexts (subgraphs) ────────────────────────────
+    subgraph SC["<b>Shop 上下文</b>"]
+        Shop["<b>Shop</b><br/>TikTok Shop 店铺"]
+    end
+
+    subgraph OC["<b>Order 聚合</b>(订单生命周期)"]
+        Order["<b>Order</b><br/>订单聚合根"]
+        Item["<b>OrderItem</b><br/>订单项"]
+        Recipient["<b>Recipient</b><br/>收货人 ⚠️ 嵌入 raw"]
+        Payment["<b>Payment</b><br/>付款明细 ⚠️ 嵌入 raw"]
+        Shipment["<b>Shipment</b><br/>发货物流"]
+    end
+
+    subgraph AS["<b>After-sales 上下文</b>(售后)"]
+        Return["<b>Return</b><br/>退货/退款"]
+        ReturnItem["<b>ReturnLineItem</b><br/>退款项 ⚠️ 嵌入 raw"]
+        Cancel["<b>Cancellation</b><br/>订单取消"]
+        CancelItem["<b>CancellationLineItem</b><br/>取消项 ⚠️ 嵌入 raw"]
+    end
+
+    subgraph LC["<b>Logistics 上下文</b>"]
+        Track["<b>LogisticsTracking</b><br/>跟踪汇总"]
+        Event["<b>LogisticsEvent</b><br/>事件流"]
+    end
+
+    subgraph FC["<b>Finance 上下文</b>(对账/打款)"]
+        Stmt["<b>Statement</b><br/>对账单"]
+        StmtTxn["<b>StatementTransaction</b><br/>逐笔明细 (58 字段)"]
+        PayRec["<b>PaymentRecord</b><br/>打款记录"]
+    end
+
+    subgraph MS["<b>Miaoshou 上下文</b>(独立 SaaS)"]
+        MShop["<b>MiaoshouShop</b><br/>妙手店铺"]
+        CollBox["<b>CollectBox</b><br/>公共采集箱"]
+        Tpl["<b>PriceTemplate</b><br/>定价模板"]
+        Move["<b>MoveCollectTask</b><br/>搬家发布任务"]
+    end
+
+    %% ─── Order 聚合内部 ───────────────────────────────────────────
+    Order -->|"1..N<br/>包含"| Item
+    Order -.->|"1..1<br/>收货于 ⚠️"| Recipient
+    Order -.->|"1..1<br/>付款于 ⚠️"| Payment
+    Order -->|"1..1<br/>通过"| Shipment
+
+    %% ─── Shop 是聚合拥有者 ────────────────────────────────────────
+    Shop -->|"1..N<br/>拥有"| Order
+    Shop -->|"1..N<br/>对账"| Stmt
+    Shop -->|"1..N<br/>收款"| PayRec
+
+    %% ─── After-sales 触发 ──────────────────────────────────────────
+    Order -->|"0..N<br/>售后触发"| Return
+    Order -->|"0..N<br/>可被取消"| Cancel
+    Return -->|"1..N<br/>包含"| ReturnItem
+    Cancel -->|"1..N<br/>包含"|CancelItem
+
+    %% ─── Logistics 跟踪 ────────────────────────────────────────────
+    Shipment -.->|"N→1<br/>汇总到"| Track
+    Track -->|"1..N<br/>事件流"| Event
+
+    %% ─── Finance 对账归集 ──────────────────────────────────────────
+    Stmt -->|"1..N<br/>逐笔明细"| StmtTxn
+    StmtTxn -.->|"按 order_id<br/>归集到"| Order
+    PayRec -.->|"按 payment_id<br/>汇总自"| Stmt
+
+    %% ─── Miaoshou 内部流程 ─────────────────────────────────────────
+    MShop -->|"0..N<br/>商品入箱"| CollBox
+    MShop -->|"1..N<br/>定价"| Tpl
+    CollBox -.->|"0..N<br/>发布为"| Move
+
+    %% ─── 样式 ──────────────────────────────────────────────────────
+    classDef ctx fill:#f8f9fa,stroke:#495057,stroke-width:1px,color:#212529
+    classDef aggregate fill:#e7f5ff,stroke:#1971c2,stroke-width:2px,color:#0c4a6e
+    classDef proposed stroke-dasharray:5 5,fill:#fff8e1,stroke:#f59f00,color:#7c2d12
+    classDef external fill:#f3e8ff,stroke:#7c3aed,stroke-width:1px,color:#4c1d95
+
+    class SC,AS,LC,FC,MS ctx
+    class Order,Stmt,PayRec,Return,Cancel,Track aggregate
+    class Recipient,Payment,ReturnItem,CancelItem proposed
+    class MShop,CollBox,Tpl,Move external
+```
+
+#### 1.0.1 关键业务动词
+
+| 关系 | 含义 | 当前实现 | 备注 |
+|---|---|---|---|
+| Shop `拥有` Order | TikTok 一店多订单 | `orders.shop_id` (❌ 无 FK) | 跨所有子聚合的总根 |
+| Order `包含` OrderItem | 订单内多商品 | `order_items.(order_id, item_id)` PK | 聚合内部 |
+| Order `收货于` Recipient | 收货人(姓名/电话/地址) | `orders.raw.recipient_address` | **⚠️ 业务上 1:1 但 schema 嵌入 raw** |
+| Order `付款于` Payment | 付款明细(15 个金额字段) | `orders.raw.payment` | **⚠️ 业务上 1:1 但 schema 只提 2 列** |
+| Order `通过` Shipment 发货 | 物流商 + 运单号 | `order_shippings` 独立表 | ✓ 已拆 |
+| Order `售后触发` Return | 退款 | `returns.order_id` (❌ 无 FK) | |
+| Order `可被取消` Cancellation | 取消单 | `cancellations.order_id` (❌ 无 FK) | |
+| Statement `逐笔明细` StmtTxn | 对账单内的每笔交易 | `statement_transactions.statement_id` (❌ 无 FK) | **设计最干净**:58 字段全提列 |
+| StatementTxn `按 order_id 归集` Order | 财务 ↔ 业务订单 | `statement_transactions.order_id` (❌ 无 FK) | 对账业务核心 |
+| Shipment `汇总到` LogisticsTracking | 一订单一份跟踪汇总 | `logistics_tracking.order_id` PK | |
+| LogisticsTracking `事件流` LogisticsEvent | 一订单 N 个事件 | PK `(order_id, action_code, event_time)` | ✓ 已拆 |
+
+#### 1.0.2 Bounded Context 边界
+
+```
+┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
+│   Shop 上下文    │    │   Order 聚合     │    │  After-sales     │
+│   (店铺元数据)    │    │   (业务核心)      │    │   (售后)         │
+│                  │    │                  │    │                  │
+│  - Shop          │◄──►│  - Order         │◄──►│  - Return        │
+│  - MiaoshouShop  │    │  - OrderItem     │    │  - ReturnLineItem│
+│                  │    │  - Recipient ⚠️   │    │  - Cancellation  │
+└──────────────────┘    │  - Payment ⚠️    │    │  - CancelLineItem│
+        ▲               │  - Shipment      │    └──────────────────┘
+        │               └──────────────────┘             ▲
+        │                        ▲                       │
+        │                        │                       │
+        │               ┌────────┴─────────┐             │
+        │               │                  │             │
+        │               ▼                  ▼             │
+        │       ┌─────────────┐    ┌─────────────┐       │
+        │       │ Logistics  │    │  Finance    │       │
+        │       │  (物流)     │    │  (对账/打款)│       │
+        │       │             │    │             │       │
+        └──────►│ - Tracking  │    │ - Statement │◄──────┘
+                │ - Event     │    │ - StmtTxn   │
+                └─────────────┘    │ - PayRecord │
+                                   └─────────────┘
+```
+
+**核心交互**:
+- Shop 是所有聚合的 **tenant boundary**(一个店铺的所有订单 / 售后 / 对账都在它的命名空间下)
+- Order 聚合是 **业务事件流的核心节点** — Return / Cancellation / StatementTransaction 都通过 `order_id` 关联回它
+- Finance ↔ Order 是 **跨上下文集成**(anti-corruption layer 体现在:财务不直接改订单,只是按 order_id 归集)
+- Miaoshou 上下文 **完全独立**(不同 SaaS,不同业务流)
+
+#### 1.0.3 聚合根 vs 值对象 vs 实体
+
+| 类别 | 实体 | 备注 |
+|---|---|---|
+| **聚合根** | Shop, Order, Return, Cancellation, LogisticsTracking, Statement, PaymentRecord, MiaoshouShop | 都有自己的生命周期和唯一标识 |
+| **聚合内部实体** | OrderItem (Order 内部), ReturnLineItem (Return 内部), CancellationLineItem (Cancellation 内部), LogisticsEvent (LogisticsTracking 内部), StatementTransaction (Statement 内部), CollectBox, PriceTemplate, MoveCollectTask | 跟随聚合根生命周期 |
+| **值对象(嵌入聚合根)** | Recipient (Order 内), Payment (Order 内), Shipment (Order 内) | **目前嵌在 raw,但语义上是独立值对象** |
+| **跨聚合引用** | StatementTransaction.order_id → Order, Return.order_id → Order, Cancellation.order_id → Order | 通过 ID 引用,不持有对象 |
+
+---
+
+### 1.1 总体鸟瞰 (Database ER)
 
 ```mermaid
 erDiagram
