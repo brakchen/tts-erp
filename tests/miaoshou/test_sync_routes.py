@@ -96,9 +96,6 @@ def test_persist_miaoshou_move_collect_task_insert_upserts():
 # ===== 测 3 个 sync 方法 =====
 
 
-
-
-
 def test_sync_price_templates_paginates_until_empty():
     """🔵 _sync_miaoshou_price_templates：分页循环 + 空页停 + UPSERT 每条."""
     # mock SDK 客户端：3 个模板分 2 页
@@ -120,14 +117,17 @@ def test_sync_price_templates_paginates_until_empty():
     with (
         patch("miaoshou.MiaoshouErpClient.from_env", return_value=mock_client),
         patch.object(
-            m_sync, "persist_miaoshou_price_template",
+            m_sync,
+            "persist_miaoshou_price_template",
             lambda platform, t: persist_calls.append(t.priceTemplateId) or True,
         ),
     ):
-        code, body = m_sync.sync_miaoshou_price_templates({
-            "platform": 'tiktok',
-            "page_size": '2',
-        })
+        code, body = m_sync.sync_miaoshou_price_templates(
+            {
+                "platform": "tiktok",
+                "page_size": "2",
+            }
+        )
 
     assert persist_calls == [1, 2, 3]  # 全部 UPSERT
     # 应调 SDK 2 次（page1=full, page2=不满 → 停）
@@ -156,16 +156,19 @@ def test_sync_collect_box_details_calls_persist_for_each():
     with (
         patch("miaoshou.MiaoshouErpClient.from_env", return_value=mock_client),
         patch.object(
-            m_sync, "persist_miaoshou_collect_box_detail",
+            m_sync,
+            "persist_miaoshou_collect_box_detail",
             lambda platform, d: (
                 persist_calls.append((platform, d.commonCollectBoxDetailId)) or True
             ),
         ),
     ):
-        code, body = m_sync.sync_miaoshou_collect_box_details({
-            "platform": 'tiktok',
-            "page_size": '50',
-        })
+        code, body = m_sync.sync_miaoshou_collect_box_details(
+            {
+                "platform": "tiktok",
+                "page_size": "50",
+            }
+        )
 
     assert persist_calls == [("tiktok", 100), ("tiktok", 200)]
     assert code == 200
@@ -189,14 +192,17 @@ def test_sync_move_collect_tasks_stops_on_empty_page():
     with (
         patch("miaoshou.MiaoshouErpClient.from_env", return_value=mock_client),
         patch.object(
-            m_sync, "persist_miaoshou_move_collect_task",
+            m_sync,
+            "persist_miaoshou_move_collect_task",
             lambda platform, t: persist_calls.append(t.moveCollectTaskDetailId) or True,
         ),
     ):
-        code, body = m_sync.sync_miaoshou_move_collect_tasks({
-            "platform": 'tiktok',
-            "page_size": '20',
-        })
+        code, body = m_sync.sync_miaoshou_move_collect_tasks(
+            {
+                "platform": "tiktok",
+                "page_size": "20",
+            }
+        )
 
     assert persist_calls == ["T1"]  # 只 1 条
     assert (
@@ -232,24 +238,34 @@ def test_sync_methods_call_sdk_with_correct_params():
     with (
         patch("miaoshou.MiaoshouErpClient.from_env", return_value=mock_client),
         patch.object(m_sync, "persist_miaoshou_price_template", lambda *a, **kw: True),
-        patch.object(m_sync, "persist_miaoshou_collect_box_detail", lambda *a, **kw: True),
-        patch.object(m_sync, "persist_miaoshou_move_collect_task", lambda *a, **kw: True),
+        patch.object(
+            m_sync, "persist_miaoshou_collect_box_detail", lambda *a, **kw: True
+        ),
+        patch.object(
+            m_sync, "persist_miaoshou_move_collect_task", lambda *a, **kw: True
+        ),
     ):
-        m_sync.sync_miaoshou_price_templates({
-            "platform": 'shopee',
-            "site": 'PH',
-            "page_size": '100',
-        })
-        m_sync.sync_miaoshou_collect_box_details({
-            "platform": 'tiktok',
-            "page_size": '30',
-            "status": 'normal',
-        })
-        m_sync.sync_miaoshou_move_collect_tasks({
-            "platform": 'tiktok',
-            "page_size": '10',
-            "status": 'success',
-        })
+        m_sync.sync_miaoshou_price_templates(
+            {
+                "platform": "shopee",
+                "site": "PH",
+                "page_size": "100",
+            }
+        )
+        m_sync.sync_miaoshou_collect_box_details(
+            {
+                "platform": "tiktok",
+                "page_size": "30",
+                "status": "normal",
+            }
+        )
+        m_sync.sync_miaoshou_move_collect_tasks(
+            {
+                "platform": "tiktok",
+                "page_size": "10",
+                "status": "success",
+            }
+        )
 
     # 验每个 SDK 调用收到正确参数
     # 注：platform 不传给 SDK 方法（MiaoshouErpClient tk_collect_box.* 方法不接受

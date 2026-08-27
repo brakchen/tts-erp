@@ -1665,8 +1665,6 @@ def _decimal(v):
         return None
 
 
-
-
 # ---------- main ----------
 # tts_erp.py 之前是 stdlib BaseHTTPRequestHandler 服务（监听 9877）。
 # Wave 3 起 FastAPI (tdd/tts_erp_fastapi:app) 是生产服务；tts_erp.py 缩减为
@@ -1674,6 +1672,7 @@ def _decimal(v):
 # 老 stdlib main() 和 Handler 类已随 Wave 4.1 退役删除。
 if __name__ == "__main__":
     import sys
+
     print(
         "tts_erp.py is now a helper module; run the FastAPI service instead:\n"
         "  bash restart.sh  (or: uvicorn tts_erp_fastapi:app --port 9877)",

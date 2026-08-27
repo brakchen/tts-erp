@@ -5,6 +5,7 @@
 - 参数校验（page_no / page_size / limit 非 int → 400）
 - _sync_miaoshou_shops / _db_list_miaoshou_shops 调 SDK + 返 200
 """
+
 from __future__ import annotations
 
 import json
@@ -14,12 +15,18 @@ from tdd import miaoshou_sync as m_sync
 
 # ---- Shop 模型解析 ----
 
+
 def test_shop_model_parses_minimal_response():
     from miaoshou.endpoints.shop import Shop
-    s = Shop.model_validate({
-        "shopId": 123, "site": "VN",
-        "platformShopName": "Test", "platform": "tiktok",
-    })
+
+    s = Shop.model_validate(
+        {
+            "shopId": 123,
+            "site": "VN",
+            "platformShopName": "Test",
+            "platform": "tiktok",
+        }
+    )
     assert s.shopId == 123
     assert s.site == "VN"
     assert s.platform == "tiktok"
@@ -29,8 +36,10 @@ def test_shop_model_parses_minimal_response():
 
 # ---- mock Handler 工厂 ----
 
+
 def make_handler():
     """绕过 tts_erp.Handler.__init__（避免 psycopg + 业务 init），只挂 _send."""
+
     class _FakeHandler:
         def __init__(self):
             self._sent = []
@@ -49,6 +58,7 @@ def bind_unbound(tts_erp_mod, method_name):
 
 # ---- persist_miaoshou_shop SQL 正确性 ----
 
+
 def test_persist_miaoshou_shop_executes_correct_sql(monkeypatch):
     """验证 SQL 用了 INSERT ... ON CONFLICT ... DO UPDATE + 正确字段顺序."""
     from miaoshou.endpoints import shop as shop_mod
@@ -58,26 +68,46 @@ def test_persist_miaoshou_shop_executes_correct_sql(monkeypatch):
     class FakeCur:
         def execute(self, sql, params):
             captured.append((str(sql), params))
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
 
     class FakeConn:
         def cursor(self, row_factory=None):
             return FakeCur()
-        def commit(self): pass
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
+
+        def commit(self):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
 
     monkeypatch.setattr("tts_erp.db_connect", lambda: FakeConn())
 
-    shop = shop_mod.Shop.model_validate({
-        "shopId": 999, "site": "VN", "platformShopName": "Shop X",
-        "shopNick": "n", "platform": "tiktok", "parentShopId": 0,
-        "isCb": 1, "isCnsc": 0, "status": "ACTIVE",
-        "gmtExpire": "2030-01-01", "gmtLastAuth": "2025-01-01",
-    })
+    shop = shop_mod.Shop.model_validate(
+        {
+            "shopId": 999,
+            "site": "VN",
+            "platformShopName": "Shop X",
+            "shopNick": "n",
+            "platform": "tiktok",
+            "parentShopId": 0,
+            "isCb": 1,
+            "isCnsc": 0,
+            "status": "ACTIVE",
+            "gmtExpire": "2030-01-01",
+            "gmtLastAuth": "2025-01-01",
+        }
+    )
 
     import tts_erp
+
     assert tts_erp.persist_miaoshou_shop("tiktok", "VN", shop) is True
     assert len(captured) == 1
     sql, params = captured[0]
@@ -98,6 +128,7 @@ def test_persist_miaoshou_shop_executes_correct_sql(monkeypatch):
 
 
 # ---- _sync_miaoshou_shops ----
+
 
 def test_sync_miaoshou_shops_validates_page_params(monkeypatch):
     """page_no 非 int：_safe_int 吃下用 default → 200（hardening 行为，避免 400/500）。
@@ -123,7 +154,8 @@ def test_sync_miaoshou_shops_happy_path(monkeypatch):
     # Patch where it's used: miaoshou_sync imported persist_miaoshou_shop
     # by name at module load, so patching tts_erp.* has no effect.
     monkeypatch.setattr(
-        m_sync, "persist_miaoshou_shop",
+        m_sync,
+        "persist_miaoshou_shop",
         lambda platform, site, shop: persisted.append((platform, site, shop)) or True,
     )
     # Patch where it's used: miaoshou_sync imported it by name at module load,
@@ -138,10 +170,14 @@ def test_sync_miaoshou_shops_happy_path(monkeypatch):
     mock_client.shops.list.return_value = mock_result
 
     with patch("miaoshou.MiaoshouErpClient.from_env", return_value=mock_client):
-        code, body = fn({
-            "platform": ["tiktok"], "site": ["VN"],
-            "page_no": ["1"], "page_size": ["100"],
-        })
+        code, body = fn(
+            {
+                "platform": ["tiktok"],
+                "site": ["VN"],
+                "page_no": ["1"],
+                "page_size": ["100"],
+            }
+        )
 
     mock_client.shops.list.assert_called_once_with(
         platform="tiktok", site="VN", page_no=1, page_size=100
@@ -173,7 +209,9 @@ def test_sync_miaoshou_shops_handles_client_init_error(monkeypatch):
     """MiaoshouErpClient.from_env 抛错时返 500."""
     fn = m_sync.sync_miaoshou_shops
 
-    with patch("miaoshou.MiaoshouErpClient.from_env", side_effect=RuntimeError("bad creds")):
+    with patch(
+        "miaoshou.MiaoshouErpClient.from_env", side_effect=RuntimeError("bad creds")
+    ):
         code, body = fn({"platform": ["tiktok"], "site": ["VN"]})
 
     assert code == 500
@@ -181,6 +219,7 @@ def test_sync_miaoshou_shops_handles_client_init_error(monkeypatch):
 
 
 # ---- _db_list_miaoshou_shops ----
+
 
 def test_db_list_miaoshou_shops_validates_limit():
     """limit 非 int：_safe_int 吃下用 default → 500 之前的 DB 错误或 200（hardening 行为）。

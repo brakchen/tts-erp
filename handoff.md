@@ -383,7 +383,6 @@ ssh -i "..." schan@192.168.47.130 "curl -s 'http://127.0.0.1:9877/db/cancellatio
 ssh -i "..." schan@192.168.47.130 "tail -30 /home/schan/oauth-receiver/logs/cron-refresh.log"
 ```
 
-
 ## 2026-08-27 — Wave 4.1 (legacy retirement)
 
 - 5 个 Handler `_sync_miaoushou_*` / `_db_list_miaoushou_*` 抽到 `tdd/miaoshou_sync.py` 模块级函数（返回 (code, body)）。
@@ -391,3 +390,5 @@ ssh -i "..." schan@192.168.47.130 "tail -30 /home/schan/oauth-receiver/logs/cron
 - `tts_erp.py` 删了 Handler 类 + main() + _proxy_get()：3512 → 1691 行。文件现在是共享 helper 模块。
 - AGENTS.md L189 / L371 同步更新。
 - 剩余 follow-up（独立 scope）：`do_POST` 里 `from miaoshou.callbacks.router import dispatch_callback` + `_miaoshou_call_endpoint` 仍是 dead 状态。
+
+  **2026-08-27 后续（其他 session）**: 删了 `do_POST` 里的 `from miaoshou.callbacks.router import dispatch_callback` + `_miaoshou_call_endpoint`（160 行 dead code），并删了测该 dead code 的 `test_handler_routing.py`；AGENTS.md L371 同步标记为已完成。

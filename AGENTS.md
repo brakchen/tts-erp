@@ -368,7 +368,7 @@ Auth: admin role（middleware 已在 `tdd/auth.py` `required_role` 把 `/miaosho
 
 测试覆盖：`tdd/test_miaoshou_routes.py`（11 passed + 1 skipped因 Mock auto-create child attr 限制，未知 method 路径靠生产 MiaoshouClient 真实 class 行为覆盖）。
 
-⚠️ **Legacy cleanup pending**（部分完成 2026-08-27 / Wave 4.1）: 5 个 Handler `_sync_miaoushou_*` / `_db_list_miaoushou_shops` 方法已抽到 `tdd/miaoshou_sync.py` 模块级函数（返回 `(code, body)` 元组）；`_invoke_legacy_sync` 改为直接调模块函数（`getattr` 兑底 501）；`tts_erp.py` 删了 Handler 类 + `main()` + `_proxy_get`（3512 → 1691 行）。剩余 `do_POST` 里的 `dispatch_callback` / `_miaoshou_call_endpoint` 仍是 dead 状态（独立 follow-up）。
+⚠️ **Legacy cleanup status**（已完成 2026-08-27 / Wave 4.1 + 2026-08-24 其他 session）: 5 个 Handler `_sync_miaoushou_*` / `_db_list_miaoushou_shops` 方法已抽到 `tdd/miaoshou_sync.py` 模块级函数（返回 `(code, body)` 元组）；`_invoke_legacy_sync` 改为直接调模块函数（`getattr` 兑底 501）；`tts_erp.py` 删了 Handler 类 + `main()` + `_proxy_get`（3512 → 1691 行）。 2026-08-24 其他 session 删了 `do_POST` 里的 `dispatch_callback` / `_miaoshou_call_endpoint`（160 行 dead code），并删了测该 dead code 的 `test_handler_routing.py`；W4.1 留下的 `getattr` 501 兑底保留作为远期守望。
 
 ### 10.3 签名（apifox doc-824327）
 
