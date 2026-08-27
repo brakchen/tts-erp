@@ -64,6 +64,8 @@ class Record:
     source: str
     captured_at: datetime
     schema_version: int = 1
+    expected_page_count: int | None = None
+    protocol_version: int = 1
 
 
 @dataclass(frozen=True)
@@ -119,12 +121,15 @@ class AnalyticsRepository(Protocol):
         scope: Scope,
         records: list[Record],
         request_id: str | None,
+        *,
+        today_in_shop_tz: date,
+        bootstrap_day: date,
     ) -> BatchResult:
         """Insert records, advance cursors atomically.
 
         Returns per-record outcome. The cursor table is only updated
-        for records that returned status="inserted"; duplicates do
-        not regress the cursor.
+        inside the same transaction after records and daily pages are
+        durable, and only to the last contiguous complete day.
         """
         ...
 

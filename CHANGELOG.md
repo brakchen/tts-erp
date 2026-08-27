@@ -1,5 +1,42 @@
 # tts-erp CHANGELOG
 
+## 2026-08-27 (feat) — analytics_sync protocolVersion 2：页级完整性 cursor
+
+### 问题
+
+v1 协议下，客户端某天只传了第 1 页（共 3 页）时，服务端也会把该日标记为 complete
+并推进 cursor —— 多页数据尚未收齐就错误推进每日 cursor，后续页永远丢失。
+
+### 修复（v2 协议）
+
+- **每日数据单元** = `sellerId + advertiserId + storageKey + campaignId + day`。
+  仅当 `analytics_daily_pages` 中 `1..expectedPageCount` 全部页码齐后才标记 complete。
+- 新表 `analytics_daily_pages`（页级证据）+ `analytics_daily_completeness`
+  （每日聚合状态，避免 cursor 查询扫原始 JSON）；`analytics_records` 加
+  `expected_page_count` 列；`analytics_cursors` 加 `first_seen_day` 锚点列。
+- `latestCompletedDay` 只能是连续完整日期前缀的最后一天，不允许跳过较早缺失日期；
+  `nextRequiredDay` 为服务端权威值（latest+1 / first_seen / bootstrap 三段式）。
+- 页数冲突（同一单元同日 expectedPageCount 不一致，批内或跨批）→ 逐条 rejected
+  `PAGE_COUNT_CONFLICT`，`retryable=false`，cursor 不动。
+- 记录写入 + 完整性标记 + cursor 推进在**同一事务**内完成。
+- **v1 兼容**：v1 请求继续接受，每条记录视为 implicit `expectedPageCount=1`（单页日），
+  行为与旧版一致；v1 记录无法把 v2 声明的多页日错误标记为 complete（会撞
+  PAGE_COUNT_CONFLICT）。幂等键算法不变（expectedPageCount 不入键）。
+
+### Files changed
+
+- `analytics_sync/migration_v2.sql` (new) — 幂等迁移 + 存量数据回填
+- `analytics_sync/schema.sql` — 新表 + 新列 + 六列组合索引
+- `analytics_sync/domain.py` — Record 加 `expected_page_count` / `protocol_version`
+- `analytics_sync/pg_repositories.py` — upsert 重写：页跟踪 + 完整性重算 + 连续前缀 cursor
+- `analytics_sync/app.py` — 接受 protocolVersion 1/2，v2 校验，`result.rejected` 合并
+  （修复仓库层 rejected 被静默丢弃的 bug）
+- `analytics_sync/tests/test_protocol_v2.py` (new) — 19 个 v2 验收测试（含并发）
+- `analytics_sync/tests/test_batches.py` / `test_concurrency.py` — 适配新签名与连续前缀语义
+- `analytics_sync/tech-doc/openapi.yaml` / `analytics-sync.md` / `plugin-integration.md`
+  / `compatibility.md` — v2 契约与 v1↔v2 兼容策略文档
+- `tdd/test_analytics_sync_integration.py` — unsupported-version 测试改用 99
+
 ## 2026-08-25 (fix) — /healthz 撒谎 + tts_erp.shops 空 + schema.sql 严重过时
 
 ### 三件据 drift 被发现（读 /db/orders 时磕到）

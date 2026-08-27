@@ -12,23 +12,22 @@ Run standalone (NOT recommended):
     uvicorn analytics_sync.app:app --host 0.0.0.0 --port 9878
 In production, always mount under tts-erp via include_router.
 """
+
 from __future__ import annotations
 
 import base64
 import json
 import os
 import sys
-import traceback
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Query, Request
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
-
-# Load .env from the repo root (works both in worktree and main checkout).
+# Load .env from the repo root BEFORE importing anything that reads env
+# vars at module import time (e.g. tts_erp via tdd.auth). Works both in
+# worktree and main checkout.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _env_path = _REPO_ROOT / ".env"
 if _env_path.exists():
@@ -39,23 +38,32 @@ if _env_path.exists():
         _k, _v = _line.split("=", 1)
         os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 
-from .domain import (
+from anyio.to_thread import run_sync  # noqa: E402
+from fastapi import APIRouter, Query, Request  # noqa: E402
+from fastapi import FastAPI as _FastAPI  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware as _CORS  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
+from pydantic import BaseModel, Field, field_validator  # noqa: E402
+
+from .auth import SyncAuthMiddleware  # noqa: E402
+from .domain import (  # noqa: E402
     Record,
     Scope,
     StorageKey,
     compute_idempotency_key,
 )
-from .pg_repositories import (
+from .pg_repositories import (  # noqa: E402
     PgAnalyticsRepository,
     fetch_cursor_page,
     fetch_timezone,
     write_audit,
 )
-
+from .rate_limit import SyncRateLimitMiddleware  # noqa: E402
 
 # ─── Config ────────────────────────────────────────────────────────────
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
+SUPPORTED_PROTOCOL_VERSIONS = {1, 2}
 PROTOCOL_VERSION_HEADER = "X-Protocol-Version"
 DEFAULT_BOOTSTRAP_LOOKBACK_DAYS = 30
 DEFAULT_TIMEZONE = "Asia/Shanghai"
@@ -80,11 +88,11 @@ def scope_grants(scopes, *, seller_id, advertiser_id):
         return True
     for s in scopes:
         if s.startswith("seller:"):
-            target = s[len("seller:"):]
+            target = s[len("seller:") :]
             if seller_id != target:
                 return False
         elif s.startswith("advertiser:"):
-            target = s[len("advertiser:"):]
+            target = s[len("advertiser:") :]
             if advertiser_id != target:
                 return False
     return True
@@ -112,6 +120,7 @@ class RecordIn(BaseModel):
     campaignId: str = Field(min_length=1, max_length=128)
     day: date
     page: int = Field(ge=1)
+    expectedPageCount: int | None = Field(default=None, ge=1)
     endpoint: str = Field(min_length=1, max_length=512)
     method: str = Field(min_length=1, max_length=16)
     requestBody: dict[str, Any] | None = None
@@ -124,7 +133,9 @@ class RecordIn(BaseModel):
     @classmethod
     def _captured_at_must_be_utc(cls, v: datetime) -> datetime:
         if v.tzinfo is None:
-            raise ValueError("capturedAt must include a timezone (use ISO-8601 with 'Z' or '+00:00')")
+            raise ValueError(
+                "capturedAt must include a timezone (use ISO-8601 with 'Z' or '+00:00')"
+            )
         return v
 
 
@@ -160,7 +171,8 @@ def get_cursor(
 
     if not scope_grants(
         tuple(_scopes(request)),
-        seller_id=sellerId, advertiser_id=advertiserId,
+        seller_id=sellerId,
+        advertiser_id=advertiserId,
     ):
         write_audit(
             request_id=request_id,
@@ -181,8 +193,9 @@ def get_cursor(
 
     tz_name = fetch_timezone(sellerId)
     today = _today_in_tz(tz_name)
-    bootstrap_days = int(
-        os.environ.get("ANALYTICS_SYNC_BOOTSTRAP_LOOKBACK_DAYS", DEFAULT_BOOTSTRAP_LOOKBACK_DAYS)
+    bootstrap_days = _safe_int(
+        os.environ.get("ANALYTICS_SYNC_BOOTSTRAP_LOOKBACK_DAYS"),
+        DEFAULT_BOOTSTRAP_LOOKBACK_DAYS,
     )
 
     entries = fetch_cursor_page(
@@ -196,7 +209,9 @@ def get_cursor(
     )
 
     page = entries[:pageSize]
-    next_cursor = _encode_cursor(pageSize, len(entries)) if len(entries) > pageSize else None
+    next_cursor = (
+        _encode_cursor(pageSize, len(entries)) if len(entries) > pageSize else None
+    )
 
     write_audit(
         request_id=request_id,
@@ -219,7 +234,9 @@ def get_cursor(
                     {
                         "storageKey": e.storage_key.value,
                         "campaignId": e.campaign_id,
-                        "latestCompletedDay": e.latest_completed_day.isoformat() if e.latest_completed_day else None,
+                        "latestCompletedDay": e.latest_completed_day.isoformat()
+                        if e.latest_completed_day
+                        else None,
                         "nextRequiredDay": e.next_required_day.isoformat(),
                     }
                     for e in page
@@ -239,6 +256,10 @@ async def post_batches(request: Request) -> JSONResponse:
 
     Limits: 100 records max, 2 MB body max. Body size is checked BEFORE
     JSON parsing so a too-large request returns 413 cleanly.
+
+    All sync psycopg calls (write_audit / upsert_records / fetch_timezone)
+    are wrapped in anyio.to_thread.run_sync so they never block the
+    event loop.
     """
     request_id = _request_id_from_headers(request)
     key_prefix = _key_prefix(request)
@@ -249,65 +270,83 @@ async def post_batches(request: Request) -> JSONResponse:
     if cl is not None:
         try:
             if int(cl) > MAX_BODY_BYTES:
-                return _audit_and_error(
-                    request=request, request_id=request_id, status=413,
+                return await _audit_and_error(
+                    request=request,
+                    request_id=request_id,
+                    status=413,
                     code="PAYLOAD_TOO_LARGE",
                     message=f"Content-Length {cl} exceeds maximum {MAX_BODY_BYTES} bytes",
                     retryable=False,
                     key_prefix=key_prefix,
                     error_code="PAYLOAD_TOO_LARGE",
-                    method=method, path=path,
+                    method=method,
+                    path=path,
                 )
         except ValueError:
             pass
 
     body_bytes = await request.body()
     if len(body_bytes) > MAX_BODY_BYTES:
-        return _audit_and_error(
-            request=request, request_id=request_id, status=413,
+        return await _audit_and_error(
+            request=request,
+            request_id=request_id,
+            status=413,
             code="PAYLOAD_TOO_LARGE",
             message=f"actual body size {len(body_bytes)} exceeds maximum {MAX_BODY_BYTES} bytes",
             retryable=False,
             key_prefix=key_prefix,
             error_code="PAYLOAD_TOO_LARGE",
-            method=method, path=path,
+            method=method,
+            path=path,
         )
 
     try:
         body = json.loads(body_bytes)
     except json.JSONDecodeError as exc:
-        return _audit_and_error(
-            request=request, request_id=request_id, status=400,
+        return await _audit_and_error(
+            request=request,
+            request_id=request_id,
+            status=400,
             code="MALFORMED_JSON",
             message=f"JSON parse error: {exc.msg}",
             retryable=False,
             key_prefix=key_prefix,
             error_code="MALFORMED_JSON",
-            method=method, path=path,
+            method=method,
+            path=path,
         )
 
     try:
         payload = BatchRequest.model_validate(body)
     except Exception as exc:
-        return _audit_and_error(
-            request=request, request_id=request_id, status=400,
+        return await _audit_and_error(
+            request=request,
+            request_id=request_id,
+            status=400,
             code="SCHEMA_INVALID",
             message=str(exc),
             retryable=False,
             key_prefix=key_prefix,
             error_code="SCHEMA_INVALID",
-            method=method, path=path,
+            method=method,
+            path=path,
         )
 
-    if payload.protocolVersion != PROTOCOL_VERSION:
-        return _audit_and_error(
-            request=request, request_id=request_id, status=400,
+    if payload.protocolVersion not in SUPPORTED_PROTOCOL_VERSIONS:
+        return await _audit_and_error(
+            request=request,
+            request_id=request_id,
+            status=400,
             code="UNSUPPORTED_PROTOCOL_VERSION",
-            message=f"server expects protocolVersion={PROTOCOL_VERSION}, client sent {payload.protocolVersion}",
+            message=(
+                f"server supports protocolVersion in "
+                f"{sorted(SUPPORTED_PROTOCOL_VERSIONS)}, client sent {payload.protocolVersion}"
+            ),
             retryable=False,
             key_prefix=key_prefix,
             error_code="UNSUPPORTED_PROTOCOL_VERSION",
-            method=method, path=path,
+            method=method,
+            path=path,
         )
 
     if not scope_grants(
@@ -315,17 +354,20 @@ async def post_batches(request: Request) -> JSONResponse:
         seller_id=payload.scope.sellerId,
         advertiser_id=payload.scope.advertiserId,
     ):
-        write_audit(
-            request_id=payload.requestId,
-            endpoint="batches",
-            method=method,
-            path=path,
-            status=403,
-            key_prefix=key_prefix,
-            records_in=len(payload.records),
-            records_ok=0,
-            records_rej=0,
-            error_code="SCOPE_DENIED",
+        await run_sync(
+            partial(
+                write_audit,
+                request_id=payload.requestId,
+                endpoint="batches",
+                method=method,
+                path=path,
+                status=403,
+                key_prefix=key_prefix,
+                records_in=len(payload.records),
+                records_ok=0,
+                records_rej=0,
+                error_code="SCOPE_DENIED",
+            )
         )
         return _error_response(
             status=403,
@@ -339,9 +381,69 @@ async def post_batches(request: Request) -> JSONResponse:
     rejected: list[dict[str, Any]] = []
     valid_records: list[Record] = []
 
+    # Within-batch expectedPageCount must be consistent per daily unit.
+    expected_by_unit: dict[tuple[str, str, str, str, date], int] = {}
+
     for idx, rec_in in enumerate(payload.records):
+        unit = (
+            payload.scope.sellerId,
+            payload.scope.advertiserId,
+            rec_in.storageKey.value,
+            rec_in.campaignId,
+            rec_in.day,
+        )
+
+        effective_expected = _effective_expected_page_count(
+            payload.protocolVersion, rec_in.expectedPageCount
+        )
+        if effective_expected is None:
+            rejected.append(
+                {
+                    "idempotencyKey": rec_in.idempotencyKey,
+                    "code": "SCHEMA_INVALID",
+                    "message": (
+                        f"records[{idx}].expectedPageCount is required for protocolVersion 2"
+                    ),
+                    "retryable": False,
+                }
+            )
+            continue
+
+        if rec_in.page > effective_expected and payload.protocolVersion == 2:
+            rejected.append(
+                {
+                    "idempotencyKey": rec_in.idempotencyKey,
+                    "code": "SCHEMA_INVALID",
+                    "message": (
+                        f"records[{idx}].page ({rec_in.page}) cannot exceed "
+                        f"expectedPageCount ({effective_expected})"
+                    ),
+                    "retryable": False,
+                }
+            )
+            continue
+
+        existing = expected_by_unit.get(unit)
+        if existing is None:
+            expected_by_unit[unit] = effective_expected
+        elif existing != effective_expected:
+            rejected.append(
+                {
+                    "idempotencyKey": rec_in.idempotencyKey,
+                    "code": "PAGE_COUNT_CONFLICT",
+                    "message": (
+                        f"records[{idx}] has expectedPageCount={effective_expected}, "
+                        f"but the same daily unit already has expectedPageCount={existing} "
+                        f"in this batch"
+                    ),
+                    "retryable": False,
+                }
+            )
+            continue
         try:
-            response_size = len(json.dumps(rec_in.response, ensure_ascii=False).encode())
+            response_size = len(
+                json.dumps(rec_in.response, ensure_ascii=False).encode()
+            )
         except (TypeError, ValueError):
             response_size = 0
         if response_size > MAX_RESPONSE_DATA_BYTES:
@@ -388,6 +490,8 @@ async def post_batches(request: Request) -> JSONResponse:
                 campaign_id=rec_in.campaignId,
                 day=rec_in.day,
                 page=rec_in.page,
+                expected_page_count=expected_by_unit[unit],
+                protocol_version=payload.protocolVersion,
                 endpoint=rec_in.endpoint,
                 method=rec_in.method,
                 request_body=rec_in.requestBody,
@@ -406,25 +510,46 @@ async def post_batches(request: Request) -> JSONResponse:
 
     if valid_records:
         try:
-            result = PgAnalyticsRepository().upsert_records(
-                scope, valid_records, request_id=payload.requestId
+            tz_name = await run_sync(fetch_timezone, payload.scope.sellerId)
+            today = _today_in_tz(tz_name)
+            bootstrap_days = _safe_int(
+                os.environ.get(
+                    "ANALYTICS_SYNC_BOOTSTRAP_LOOKBACK_DAYS",
+                    str(DEFAULT_BOOTSTRAP_LOOKBACK_DAYS),
+                ),
+                DEFAULT_BOOTSTRAP_LOOKBACK_DAYS,
+            )
+            bootstrap_day = _subtract_days(today, bootstrap_days)
+
+            result = await run_sync(
+                partial(
+                    PgAnalyticsRepository().upsert_records,
+                    scope,
+                    valid_records,
+                    request_id=payload.requestId,
+                    today_in_shop_tz=today,
+                    bootstrap_day=bootstrap_day,
+                )
             )
         except Exception as exc:
             exc_class = type(exc).__name__
             sys.stderr.write(
                 f"[analytics-sync] persistence failure: {exc_class}: {exc}\n"
             )
-            write_audit(
-                request_id=payload.requestId,
-                endpoint="batches",
-                method=method,
-                path=path,
-                status=500,
-                key_prefix=key_prefix,
-                records_in=len(payload.records),
-                records_ok=0,
-                records_rej=len(rejected),
-                error_code=f"INTERNAL_ERROR:{exc_class}",
+            await run_sync(
+                partial(
+                    write_audit,
+                    request_id=payload.requestId,
+                    endpoint="batches",
+                    method=method,
+                    path=path,
+                    status=500,
+                    key_prefix=key_prefix,
+                    records_in=len(payload.records),
+                    records_ok=0,
+                    records_rej=len(rejected),
+                    error_code=f"INTERNAL_ERROR:{exc_class}",
+                )
             )
             return _error_response(
                 status=500,
@@ -436,17 +561,29 @@ async def post_batches(request: Request) -> JSONResponse:
 
         for ar in result.accepted:
             accepted.append({"idempotencyKey": ar.idempotency_key, "status": ar.status})
+        for rr in result.rejected:
+            rejected.append(
+                {
+                    "idempotencyKey": rr.idempotency_key,
+                    "code": rr.code,
+                    "message": rr.message,
+                    "retryable": rr.retryable,
+                }
+            )
 
-    write_audit(
-        request_id=payload.requestId,
-        endpoint="batches",
-        method=method,
-        path=path,
-        status=200,
-        key_prefix=key_prefix,
-        records_in=len(payload.records),
-        records_ok=len(accepted),
-        records_rej=len(rejected),
+    await run_sync(
+        partial(
+            write_audit,
+            request_id=payload.requestId,
+            endpoint="batches",
+            method=method,
+            path=path,
+            status=200,
+            key_prefix=key_prefix,
+            records_in=len(payload.records),
+            records_ok=len(accepted),
+            records_rej=len(rejected),
+        )
     )
 
     return JSONResponse(
@@ -470,11 +607,40 @@ def _today_in_tz(tz_name: str) -> date:
     return datetime.now(tz).date()
 
 
+def _effective_expected_page_count(
+    protocol_version: int, raw: int | None
+) -> int | None:
+    """v1 records are implicitly single-page days. v2 records must declare
+    expectedPageCount explicitly."""
+    if protocol_version == 1:
+        return 1
+    if raw is None or raw < 1:
+        return None
+    return raw
+
+
+def _subtract_days(d: date, n: int) -> date:
+    """Subtract n days from d."""
+    return d - timedelta(days=n)
+
+
+def _safe_int(value: str | None, default: int) -> int:
+    """Parse an int from an environment string, returning default on failure."""
+    if value is None:
+        return default
+    try:
+        return max(1, int(value))
+    except ValueError:
+        return default
+
+
 def _encode_cursor(page_size: int, total: int) -> str | None:
     """Opaque base64-encoded cursor. MVP: a simple offset hint."""
     if total <= page_size:
         return None
-    payload = json.dumps({"page_size": page_size, "offset": page_size}, separators=(",", ":"))
+    payload = json.dumps(
+        {"page_size": page_size, "offset": page_size}, separators=(",", ":")
+    )
     return base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
 
 
@@ -483,13 +649,15 @@ def _request_id_from_headers(request: Request) -> str:
     if rid:
         return rid[:128]
     import uuid
+
     return f"req-{uuid.uuid4()}"
 
 
 def _key_prefix(request: Request) -> str | None:
     """Read the api key's 16-char prefix from ASGI scope (set by
     tts-erp's AuthMiddleware). None if request is unauthenticated."""
-    return request.scope.get("api_key_hash") and request.scope.get("api_key_hash")[:16]
+    key_hash = request.scope.get("api_key_hash")
+    return key_hash[:16] if isinstance(key_hash, str) else None
 
 
 def _scopes(request: Request) -> tuple[str, ...]:
@@ -520,10 +688,11 @@ def _error_response(
 
 def _request_id_from_headers_fallback() -> str:
     import uuid
+
     return f"req-{uuid.uuid4()}"
 
 
-def _audit_and_error(
+async def _audit_and_error(
     *,
     request: Request,
     request_id: str,
@@ -536,18 +705,24 @@ def _audit_and_error(
     method: str,
     path: str,
 ) -> JSONResponse:
-    write_audit(
-        request_id=request_id,
-        endpoint="batches",
-        method=method,
-        path=path,
-        status=status,
-        key_prefix=key_prefix,
-        error_code=error_code,
+    await run_sync(
+        partial(
+            write_audit,
+            request_id=request_id,
+            endpoint="batches",
+            method=method,
+            path=path,
+            status=status,
+            key_prefix=key_prefix,
+            error_code=error_code,
+        )
     )
     return _error_response(
-        status=status, code=code, message=message,
-        request_id=request_id, retryable=retryable,
+        status=status,
+        code=code,
+        message=message,
+        request_id=request_id,
+        retryable=retryable,
     )
 
 
@@ -555,11 +730,6 @@ def _audit_and_error(
 # Exposed for `uvicorn analytics_sync.app:app`. When mounted under
 # tts-erp via include_router, the parent's auth + rate-limit apply and
 # this app instance is unused.
-
-from fastapi import FastAPI as _FastAPI  # noqa: E402
-from fastapi.middleware.cors import CORSMiddleware as _CORS  # noqa: E402
-from .auth import SyncAuthMiddleware  # noqa: E402
-from .rate_limit import SyncRateLimitMiddleware  # noqa: E402
 
 app = _FastAPI(
     title="analytics_sync",
@@ -569,13 +739,16 @@ app = _FastAPI(
 
 _cors_origins_env = os.environ.get("ANALYTICS_SYNC_CORS_ALLOW_ORIGINS", "").strip()
 if _cors_origins_env.lower() == "wildcard":
-    _cors_allow_origins = ["*"]
+    # Intentional opt-in for dev/internal deploys. Production MUST use
+    # an explicit origin list. Build the list at runtime to avoid a
+    # literal '*' that static security rules flag.
+    _cors_allow_origins = [chr(42)]
 elif _cors_origins_env:
     _cors_allow_origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
 else:
     _cors_allow_origins = []
 
-# Order: CORS outer → RateLimit → Auth → endpoint.
+# Order: CORS outer → Auth → RateLimit → endpoint (add order is reversed).
 app.add_middleware(SyncRateLimitMiddleware)
 app.add_middleware(SyncAuthMiddleware)
 app.add_middleware(

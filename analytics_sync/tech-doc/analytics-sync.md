@@ -4,6 +4,12 @@ Replaces the retired CloudBase analytics upload path. Receives analytics
 records from the Chrome extension (`tk-adv-cost-monitor`) and provides
 the daily-job cursor endpoint that drives those uploads.
 
+**Protocol versions**: the server accepts `protocolVersion` 1 and 2.
+v2 adds per-day page-completeness tracking (`expectedPageCount`) so the
+cursor only advances once a day's full page set is durably stored.
+See §4.3 for v2 semantics and [`compatibility.md`](compatibility.md) for
+the v1↔v2 policy.
+
 This document is the long-form companion to [`README.md`](../README.md);
 it covers the API contract, error semantics, env-var matrix, deployment
 guide, and a short compatibility note for protocol-version changes.
@@ -74,7 +80,7 @@ single source of dedup truth.
 Query parameters:
 
 | Param | Type | Required | Notes |
-|-------|------|----------|-------|
+| ------- | ------ | ---------- | ------- |
 | `sellerId` | string | yes | ≤ 128 chars |
 | `advertiserId` | string | yes | ≤ 128 chars |
 | `storageKey` | enum | no | filter to one dataset |
@@ -106,19 +112,28 @@ Response:
 `nextRequiredDay` is authoritative. Computation:
 
 ```text
-nextRequiredDay = max(latestCompletedDay + 1 day, today_in_shop_tz - bootstrap_lookback_days)
+if latestCompletedDay is not NULL:
+    nextRequiredDay = latestCompletedDay + 1 day
+elif the unit has any record (first_seen_day is not NULL):
+    nextRequiredDay = first_seen_day        # anchor day not yet complete
+else:
+    nextRequiredDay = bootstrap day         # today_in_shop_tz - lookback
 ```
 
-If `latestCompletedDay` is NULL, returns `today_in_shop_tz - 30 days`
-(configurable via `ANALYTICS_SYNC_BOOTSTRAP_LOOKBACK_DAYS`).
+`latestCompletedDay` is the last day of the **contiguous run of complete
+days** starting at the unit's first recorded day (`first_seen_day`). It
+never skips a missing or incomplete earlier day (§4.3).
+
+The bootstrap lookback defaults to 30 days, configurable via
+`ANALYTICS_SYNC_BOOTSTRAP_LOOKBACK_DAYS`.
 
 ### `POST /v1/analytics/sync/batches`
 
-Request:
+Request (protocolVersion 2 — v1 simply omits `expectedPageCount`):
 
 ```json
 {
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "requestId": "req-…",
   "scope": {
     "sellerId": "seller-1",
@@ -133,13 +148,14 @@ Request:
       "campaignId": "campaign-1",
       "day": "2026-08-23",
       "page": 1,
+      "expectedPageCount": 3,
       "endpoint": "/oec_ads/...",
       "method": "POST",
       "requestBody": { "campaign_id": "campaign-1" },
       "response": { "data": [] },
       "source": "background_poll",
       "capturedAt": "2026-08-23T03:00:00.000Z",
-      "schemaVersion": 1
+      "schemaVersion": 2
     }
   ]
 }
@@ -151,7 +167,12 @@ Limits:
 - Maximum 2 MB body (returns 413)
 - `storageKey` ∈ `{productAnalyses, sessionAnalyses, campaignChangeLogs}`
 - `day` is ISO date `YYYY-MM-DD`
-- `page` is positive int (≥ 1)
+- `page` is positive int (≥ 1); under v2 also `page <= expectedPageCount`
+- `expectedPageCount` (v2, required) is a positive int; all records for the
+  same `(sellerId, advertiserId, storageKey, campaignId, day)` unit must
+  agree on it — within one batch and against previously stored batches.
+  A mismatch is rejected per-record with `PAGE_COUNT_CONFLICT`
+  (`retryable: false`) and the cursor never advances.
 - `capturedAt` MUST include a timezone (`Z` or `+HH:MM`)
 - `idempotencyKey` MUST be exactly 64 lowercase hex chars
   AND must match the server's canonical computation
@@ -186,17 +207,57 @@ unchanged; surface the error in diagnostics.
 
 ---
 
+## 4.3 Daily completeness (protocolVersion 2)
+
+The server is the single source of truth for "is this day complete".
+A **daily unit** is:
+
+```text
+sellerId + advertiserId + storageKey + campaignId + day
+```
+
+A unit-day is **complete** iff the server has durably stored every page
+`1, 2, …, expectedPageCount` for it (tracked in `analytics_daily_pages`
+
+- `analytics_daily_completeness`). Until then the day is incomplete and
+the cursor must not advance past it.
+
+Consequences:
+
+1. Page 1 of 3 arrives → record stored, cursor stays.
+2. Page 2 arrives before page 1 → stored, cursor stays.
+3. Pages 1, 2, 3 all `inserted` or `duplicate` → day marked complete,
+   cursor advances (in the same transaction as the writes).
+4. A re-uploaded page returns `duplicate` and still counts toward
+   completeness.
+5. Conflicting `expectedPageCount` for the same day → per-record
+   `PAGE_COUNT_CONFLICT`, `retryable: false`, cursor unmoved.
+6. A page that fails, is rejected, or never arrives → the day stays
+   incomplete and the cursor stays.
+7. Records, completeness flags, and cursor updates commit in ONE
+   transaction — no torn state.
+8. `latestCompletedDay` is the last day of the contiguous complete
+   prefix starting at the unit's first recorded day; a missing earlier
+   day is never skipped.
+9. `nextRequiredDay` is the first day after `latestCompletedDay` that is
+   not yet complete — server-authoritative.
+10. With no records at all, the cursor returns the server-defined
+    bootstrap day (`today_in_shop_tz - ANALYTICS_SYNC_BOOTSTRAP_LOOKBACK_DAYS`);
+    the client must not substitute its own `queryRecentDays` heuristic.
+
+---
+
 ## 5. HTTP error contract
 
 | Code | Meaning | Retry? |
-|------|---------|--------|
-| 400  | Malformed JSON / schema invalid / unsupported protocol version | No |
-| 401  | Missing or invalid Bearer token | No (fix client config) |
-| 403  | (reserved for future scope mismatch) | No |
-| 409  | (reserved for true scope/idempotency conflict) | No |
-| 413  | Request body > 2 MB | No (split the batch) |
-| 429  | Rate limited (reserved; not yet implemented) | Yes (after Retry-After) |
-| 5xx  | Server error | Yes (bounded backoff) |
+| ------ | --------- | -------- |
+| 400 | Malformed JSON / schema invalid / unsupported protocol version | No |
+| 401 | Missing or invalid Bearer token | No (fix client config) |
+| 403 | (reserved for future scope mismatch) | No |
+| 409 | (reserved for true scope/idempotency conflict) | No |
+| 413 | Request body > 2 MB | No (split the batch) |
+| 429 | Rate limited (reserved; not yet implemented) | Yes (after Retry-After) |
+| 5xx | Server error | Yes (bounded backoff) |
 
 All error envelopes carry `{code, message, requestId, retryable}` and
 **never echo the request body, the token, or any request header**.
@@ -206,9 +267,11 @@ All error envelopes carry `{code, message, requestId, retryable}` and
 ## 6. Database tables
 
 | Table | Purpose |
-|-------|---------|
+| ------- | --------- |
 | `analytics_records` | Raw response JSON + normalized scope columns. Unique index on `idempotency_key`. |
-| `analytics_cursors` | Per-`(seller, advertiser, storageKey, campaignId)` latest-day. |
+| `analytics_daily_pages` | v2: one row per stored `(unit, day, page)` — the completeness evidence. |
+| `analytics_daily_completeness` | v2: per `(unit, day)` `expected_page_count` + `is_complete` aggregate. Avoids scanning raw JSON for cursor queries. |
+| `analytics_cursors` | Per-`(seller, advertiser, storageKey, campaignId)` latest contiguous complete day + `first_seen_day` anchor. |
 | `analytics_shop_timezones` | Per-seller canonical IANA TZ. |
 | `api_keys` | Bearer tokens (SHA-256 hash + 16-char prefix only). |
 | `analytics_audit_log` | requestId-keyed audit trail (no secrets). |
@@ -220,26 +283,30 @@ docker exec -i postgres psql -U postgres -d tts_erp < analytics_sync/schema.sql
 ```
 
 All `CREATE` statements are `IF NOT EXISTS`; safe to re-apply.
+Existing v1 installs upgrade in place with
+[`migration_v2.sql`](../migration_v2.sql) (idempotent; backfills daily
+completeness from `analytics_records` and treats every existing day as a
+single-page complete day).
 
 ### Cursor advance invariant
 
-Inside a single transaction, for every `(scope, storageKey, campaignId, day)`
-that returned `status="inserted"`:
+Everything happens inside ONE transaction per batch:
 
-```sql
-INSERT INTO analytics_cursors (...) VALUES (..., day, ...)
-ON CONFLICT (seller_id, advertiser_id, storage_key, campaign_id)
-DO UPDATE SET
-  latest_completed_day = GREATEST(
-    analytics_cursors.latest_completed_day,
-    EXCLUDED.latest_completed_day
-  ),
-  last_updated_at = now(),
-  request_id = EXCLUDED.request_id;
-```
+1. For every accepted record (inserted or duplicate), insert the raw row
+   into `analytics_records` (`ON CONFLICT (idempotency_key) DO NOTHING`),
+   upsert the unit-day's `expected_page_count` into
+   `analytics_daily_completeness`, and mark the page present in
+   `analytics_daily_pages`.
+2. Recompute each touched unit-day's `is_complete`:
+   complete iff the pages stored cover exactly `1..expected_page_count`.
+3. Recompute each touched unit's cursor: walk forward from the unit's
+   `first_seen_day` (earliest day with any record) while days are
+   complete; the last such day becomes `latest_completed_day`. The
+   update is advance-only (`GREATEST`-style guard) so a legacy v1 cursor
+   value never regresses.
 
-`GREATEST` ensures the cursor only ever advances; duplicates never
-regress the cursor.
+Duplicates therefore never move the cursor backwards, and a partially
+paged day never moves it forwards.
 
 ---
 
@@ -267,24 +334,24 @@ curl -s \
   "http://127.0.0.1:9878/v1/analytics/sync/cursor?sellerId=seller-1&advertiserId=adv-1"
 ```
 
-### Batch upload
+### Batch upload (protocolVersion 2)
 
 ```bash
 curl -s -X POST \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -H "X-Request-Id: req-001" \
-  -H "X-Protocol-Version: 1" \
+  -H "X-Protocol-Version: 2" \
   http://127.0.0.1:9878/v1/analytics/sync/batches \
   -d @batch.json
 ```
 
 `batch.json` (canonical `idempotencyKey` can be computed with the
-snippet in §8):
+snippet in §8; note `expectedPageCount` is NOT part of the key):
 
 ```json
 {
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "requestId": "req-001",
   "scope": { "sellerId": "seller-1", "advertiserId": "adv-1", "shopName": "demo-shop" },
   "records": [
@@ -295,13 +362,14 @@ snippet in §8):
       "campaignId": "campaign-1",
       "day": "2026-08-23",
       "page": 1,
+      "expectedPageCount": 3,
       "endpoint": "/oec_ads/shopping/v1/oec/stat/post_product_list",
       "method": "POST",
       "requestBody": { "campaign_id": "campaign-1" },
       "response": { "data": [] },
       "source": "background_poll",
       "capturedAt": "2026-08-23T03:00:00.000Z",
-      "schemaVersion": 1
+      "schemaVersion": 2
     }
   ]
 }
@@ -377,7 +445,7 @@ in doubt.)
 ## 9. Environment variables
 
 | Variable | Default | Required | Notes |
-|----------|---------|----------|-------|
+| ---------- | --------- | ---------- | ------- |
 | `TTS_ERP_DB_URL` | — | yes | PostgreSQL DSN. `ANALYTICS_SYNC_DB_URL` is also accepted (alias). |
 | `ANALYTICS_SYNC_AUTH_MODE` | `enforce` | no | `off` / `shadow` / `enforce`. |
 | `ANALYTICS_SYNC_BOOTSTRAP_LOOKBACK_DAYS` | `30` | no | Cursor bootstrap lookback in days. |
@@ -440,11 +508,23 @@ so they live alongside `miaoshou_*` and `api_keys`. Migration is one
 
 ## 11. Compatibility note (protocol versions)
 
-- `protocolVersion: 1` is the only version currently understood.
-  The server rejects other values with `400 UNSUPPORTED_PROTOCOL_VERSION`.
-- Bumping `protocolVersion`:
+- The server accepts `protocolVersion` **1 and 2**.
+  Any other value is rejected with `400 UNSUPPORTED_PROTOCOL_VERSION`.
+- **v1 compatibility policy**: a v1 request omits `expectedPageCount`;
+  every record is treated as an implicit single-page day
+  (`expectedPageCount=1`). A v1 record therefore completes its day on
+  first insert — identical to pre-v2 behavior. A v1 record for a day
+  that v2 has already declared multi-page is rejected with
+  `PAGE_COUNT_CONFLICT` (its implicit expectation conflicts with the
+  stored one), so v1 traffic can never falsely complete a v2 day.
+- **v2 enablement**: a client may switch to `protocolVersion: 2` as soon
+  as it (a) knows the true TikTok page count per day (from the response's
+  pagination metadata) and (b) populates `expectedPageCount` on every
+  record of a daily unit consistently. No server flag day is required;
+  both versions are accepted concurrently.
+- Bumping `protocolVersion` further:
   1. Add new fields as **optional** in the request schema.
-  2. Keep accepting version `1` for at least one release window.
+  2. Keep accepting older versions for at least one release window.
   3. Server can refuse version `N+1` until the client has caught up by
      returning `400 UNSUPPORTED_PROTOCOL_VERSION` with a clear message.
 - Idempotency-key derivation is part of the protocol and **must not

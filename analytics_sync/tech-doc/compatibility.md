@@ -18,7 +18,28 @@ is carried in:
 
 | Version | Status | Sunset |
 |---------|--------|--------|
-| 1       | Active | — |
+| 1       | Supported (legacy) | — (no date; re-evaluate once all extension builds are on v2) |
+| 2       | Active | — |
+
+### v1 ↔ v2 policy
+
+- **v1 records** omit `expectedPageCount`; the server treats each as an
+  implicit single-page day (`expectedPageCount=1`). First insert of a
+  v1 record completes its day — exactly the pre-v2 behavior.
+- **v2 records** must carry `expectedPageCount` ≥ 1 with
+  `1 <= page <= expectedPageCount`. A day is complete only once pages
+  `1..expectedPageCount` are all durably stored; the cursor advances to
+  the last day of the contiguous complete prefix only.
+- **Mixed-version day**: a record whose effective `expectedPageCount`
+  disagrees with the value already stored for that daily unit is
+  rejected with `PAGE_COUNT_CONFLICT` (`retryable=false`). In
+  particular, a v1 record can never "complete" a day that v2 declared
+  as multi-page.
+- **When can a client switch to v2?** As soon as it knows the real
+  TikTok page count per day (from response pagination metadata) and
+  can populate `expectedPageCount` consistently per daily unit. No
+  server-side flag day or coordinated rollout is required; both
+  versions are accepted concurrently on the same deployment.
 
 ### Bumping protocolVersion
 
@@ -91,7 +112,7 @@ via cron.
 ### `analytics_records`
 
 | Aspect | Value | Notes |
-|--------|-------|-------|
+| -------- | ------- | ------- |
 | Default retention | 90 days | Tunable via operator cron. |
 | Per-record size cap | 256 KB (`MAX_RESPONSE_DATA_BYTES`) | Records over cap are rejected at upload time. |
 | Compression | none | `JSONB` doesn't compress automatically. Operators may add TOAST settings. |
@@ -107,7 +128,8 @@ WHERE received_at < now() - INTERVAL '90 days';
 
 This deletes by `received_at` (when the row was ingested), not by
 `captured_at` (when the plugin saw the TikTok response). Use `captured_at`
-+ retention policy instead if you need "delete the data N days after
+
+- retention policy instead if you need "delete the data N days after
 the source event" semantics.
 
 ### `analytics_cursors`

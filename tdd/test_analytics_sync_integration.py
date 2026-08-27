@@ -832,7 +832,7 @@ def test_batch_unsupported_protocol_version_returns_400(mounted_client):
         "TEST_sync_int", "adv", "productAnalyses", "c-1", "2026-08-23", 1
     )
     body = {
-        "protocolVersion": 2,  # future
+        "protocolVersion": 99,  # unsupported (server accepts 1 and 2)
         "scope": {"sellerId": "TEST_sync_int", "advertiserId": "adv"},
         "records": [rec],
     }

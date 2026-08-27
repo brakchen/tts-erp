@@ -66,7 +66,7 @@ in the extension:
 Authorization: Bearer ttserp_rw_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 Content-Type: application/json
 X-Request-Id: <uuid>            # echoed back, surfaces in audit log
-X-Protocol-Version: 1
+X-Protocol-Version: 2           # or 1 for legacy builds
 ```
 
 `X-Client-Version: 0.4.28` (or whatever the extension's `package.json`
@@ -268,7 +268,7 @@ For the first sync (no records):
 
 ---
 
-## 8. Multiple pages per day
+## 8. Multiple pages per day (protocolVersion 2)
 
 The same `(scope, storageKey, campaignId, day)` may carry multiple
 `page` values when the underlying TikTok API paginates. Each page is a
@@ -280,8 +280,34 @@ record 2: idempotencyKey = sha256(…page=2)
 record 3: idempotencyKey = sha256(…page=3)
 ```
 
-Send them all in one batch (up to 100 records). The server dedupes per
-`(scope, storageKey, campaignId, day, page)`.
+Under **protocolVersion 2** each record must also carry
+`expectedPageCount` — the total number of pages the TikTok response
+spans for that daily unit (read it from the response's pagination
+metadata). Rules:
+
+- `1 <= page <= expectedPageCount`.
+- Every record of the same `(sellerId, advertiserId, storageKey,
+  campaignId, day)` unit must carry the SAME `expectedPageCount`,
+  across batches too. A mismatch is rejected with
+  `PAGE_COUNT_CONFLICT` (`retryable: false`) — fix the client's page
+  counting, do not retry unchanged.
+- The day only counts as **complete** once pages `1..expectedPageCount`
+  have all been accepted (`inserted` or `duplicate`). Until then the
+  server cursor will keep pointing at that day via `nextRequiredDay` —
+  do not mark the day done locally just because page 1 succeeded.
+- `expectedPageCount` is NOT part of the idempotency key; the key
+  formula is unchanged.
+
+Send all pages of a day in one batch when possible (up to 100 records).
+If a batch races itself or a previous attempt, `duplicate` outcomes are
+normal and still count toward completeness.
+
+### Legacy (protocolVersion 1)
+
+v1 requests omit `expectedPageCount`; each record is treated as an
+implicit single-page day. v1 remains accepted for older extension
+builds, but it cannot express multi-page completeness — upgrade to v2
+as soon as the daily job knows the real page count.
 
 ---
 
@@ -386,14 +412,16 @@ sends a wrong `sellerId`.
 
 ## 11. Compatibility
 
-When the protocol version bumps (e.g. to v2):
+The server speaks `protocolVersion` **1 and 2** concurrently; anything
+else gets `400 UNSUPPORTED_PROTOCOL_VERSION`.
 
-- The server will return `400 UNSUPPORTED_PROTOCOL_VERSION` if the
-  plugin sends `protocolVersion: 1` after sunset.
-- The plugin should be prepared to read the version from a config knob
-  or auto-discover via a future `/v1/analytics/sync/version` endpoint.
-- The `idempotencyKey` derivation will NOT change without a major
-  protocol version bump — it is the load-bearing dedup mechanism.
+- **v2 enablement checklist**: the extension may send
+  `protocolVersion: 2` once it (a) reads the true page count from the
+  TikTok response pagination metadata and (b) sets `expectedPageCount`
+  consistently on every record of a daily unit. No server-side flag
+  day is needed.
+- The `idempotencyKey` derivation does NOT change between versions —
+  it is the load-bearing dedup mechanism.
 
 See [`compatibility.md`](compatibility.md) for the full versioning
 policy.

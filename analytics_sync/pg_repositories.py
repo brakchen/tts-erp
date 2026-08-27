@@ -2,22 +2,25 @@
 
 Production implementation of AnalyticsRepository from domain.py.
 
-The batch upload path runs inside a single transaction so that records
-and cursor advances either all commit or all roll back. Each record is
-inserted with ON CONFLICT (idempotency_key) DO NOTHING so a duplicate
-upload returns a "duplicate" outcome without aborting the batch.
+The batch upload path runs inside a single transaction so that records,
+daily page tracking, completeness flags, and cursor advances either all
+commit or all roll back.
 
-Cursor advance is conditional: latest_completed_day = GREATEST(existing,
-new_day). This is idempotent and never regresses.
+v2 semantics:
+- Each record carries an expected_page_count (v1 records are treated as 1).
+- A day is "complete" only when analytics_daily_pages contains every page
+  in 1..expected_page_count for that (scope, storageKey, campaignId, day).
+- analytics_cursors.latest_completed_day is the LAST day of a contiguous
+  complete sequence starting at bootstrap_day; gaps prevent skipping.
 """
 
 from __future__ import annotations
 
 import os
-from datetime import date
-from typing import Any
+from datetime import date, timedelta
 
 import psycopg
+from psycopg.types.json import Jsonb
 
 from .domain import (
     AcceptedRecord,
@@ -25,6 +28,7 @@ from .domain import (
     BatchResult,
     CursorEntry,
     Record,
+    RejectedRecord,
     Scope,
     StorageKey,
     compute_idempotency_key,
@@ -47,15 +51,20 @@ class PgAnalyticsRepository(AnalyticsRepository):
         scope: Scope,
         records: list[Record],
         request_id: str | None,
+        *,
+        today_in_shop_tz: date,
+        bootstrap_day: date,
     ) -> BatchResult:
+        accepted: list[AcceptedRecord] = []
+        rejected: list[RejectedRecord] = []
+
         with connect() as conn:
             with conn.cursor() as cur:
-                accepted: list[AcceptedRecord] = []
-                # day per scope/storage/campaign that was *inserted* (not
-                # duplicate) → candidates for cursor advance.
-                advance_keys: set[tuple[str, str, StorageKey, str, date]] = set()
+                # Units/days whose completeness or cursor may need a refresh.
+                modified_unit_days: set[tuple[str, str, str, str, date]] = set()
 
                 for rec in records:
+                    # Safety net: recompute canonical idempotency key.
                     expected = compute_idempotency_key(
                         seller_id=scope.seller_id,
                         advertiser_id=scope.advertiser_id,
@@ -65,14 +74,79 @@ class PgAnalyticsRepository(AnalyticsRepository):
                         page=rec.page,
                     )
                     if expected != rec.idempotency_key:
-                        raise IdempotencyKeyMismatch(rec.idempotency_key, expected)
+                        rejected.append(
+                            RejectedRecord(
+                                idempotency_key=rec.idempotency_key,
+                                code="SCHEMA_INVALID",
+                                message=(
+                                    f"idempotencyKey mismatch: "
+                                    f"client={rec.idempotency_key[:16]}… "
+                                    f"server={expected[:16]}…"
+                                ),
+                                retryable=False,
+                            )
+                        )
+                        continue
 
+                    if rec.expected_page_count is None:
+                        rejected.append(
+                            RejectedRecord(
+                                idempotency_key=rec.idempotency_key,
+                                code="SCHEMA_INVALID",
+                                message="expectedPageCount is required for protocolVersion 2",
+                                retryable=False,
+                            )
+                        )
+                        continue
+
+                    unit_day = (
+                        scope.seller_id,
+                        scope.advertiser_id,
+                        rec.storage_key.value,
+                        rec.campaign_id,
+                        rec.day,
+                    )
+
+                    # Cross-batch page-count conflict: once a daily unit has
+                    # an expected_page_count, every record for that day must
+                    # agree. Lock the row so concurrent batches serialize.
+                    cur.execute(
+                        """
+                        SELECT expected_page_count
+                        FROM analytics_daily_completeness
+                        WHERE seller_id = %s AND advertiser_id = %s
+                          AND storage_key = %s AND campaign_id = %s AND day = %s
+                        FOR UPDATE
+                        """,
+                        unit_day,
+                    )
+                    row = cur.fetchone()
+                    stored_expected = row[0] if row else None  # type: ignore[index]
+                    if (
+                        stored_expected is not None
+                        and stored_expected != rec.expected_page_count
+                    ):
+                        rejected.append(
+                            RejectedRecord(
+                                idempotency_key=rec.idempotency_key,
+                                code="PAGE_COUNT_CONFLICT",
+                                message=(
+                                    f"expectedPageCount conflict for "
+                                    f"{rec.storage_key.value}/{rec.campaign_id}/{rec.day.isoformat()}: "
+                                    f"stored={stored_expected}, received={rec.expected_page_count}"
+                                ),
+                                retryable=False,
+                            )
+                        )
+                        continue
+
+                    # Upsert the raw record.
                     cur.execute(
                         """
                         INSERT INTO analytics_records (
                             idempotency_key, source_record_id,
                             seller_id, advertiser_id, storage_key, campaign_id,
-                            day, page, shop_name,
+                            day, page, shop_name, expected_page_count,
                             endpoint, method, request_body, response_data,
                             source, captured_at,
                             schema_version, protocol_version,
@@ -80,7 +154,7 @@ class PgAnalyticsRepository(AnalyticsRepository):
                         ) VALUES (
                             %s, %s,
                             %s, %s, %s, %s,
-                            %s, %s, %s,
+                            %s, %s, %s, %s,
                             %s, %s, %s, %s,
                             %s, %s,
                             %s, %s,
@@ -99,67 +173,91 @@ class PgAnalyticsRepository(AnalyticsRepository):
                             rec.day,
                             rec.page,
                             scope.shop_name,
+                            rec.expected_page_count,
                             rec.endpoint,
                             rec.method,
-                            psycopg.types.json.Jsonb(rec.request_body)
+                            Jsonb(rec.request_body)
                             if rec.request_body is not None
                             else None,
-                            psycopg.types.json.Jsonb(rec.response),
+                            Jsonb(rec.response),
                             rec.source,
                             rec.captured_at,
                             rec.schema_version,
-                            1,
+                            rec.protocol_version,
                             request_id,
                         ),
                     )
                     inserted = cur.fetchone() is not None
+
+                    # Track the page for completeness regardless of whether
+                    # the raw record was inserted or a duplicate. A duplicate
+                    # still means this page is durably stored.
                     if inserted:
                         accepted.append(
                             AcceptedRecord(
-                                idempotency_key=rec.idempotency_key, status="inserted"
-                            )
-                        )
-                        advance_keys.add(
-                            (
-                                scope.seller_id,
-                                scope.advertiser_id,
-                                rec.storage_key,
-                                rec.campaign_id,
-                                rec.day,
+                                idempotency_key=rec.idempotency_key,
+                                status="inserted",
                             )
                         )
                     else:
                         accepted.append(
                             AcceptedRecord(
-                                idempotency_key=rec.idempotency_key, status="duplicate"
+                                idempotency_key=rec.idempotency_key,
+                                status="duplicate",
                             )
                         )
 
-                # Atomic cursor advance. Only days corresponding to
-                # *inserted* records move the cursor; duplicates are
-                # already represented in the latest_completed_day either
-                # directly or via GREATEST, so this is a no-op for them.
-                for sid, aid, skey, cid, day in advance_keys:
+                    # Upsert expected_page_count for the daily unit. The first
+                    # record for a day wins; conflicts were rejected above.
                     cur.execute(
                         """
-                        INSERT INTO analytics_cursors (
-                            seller_id, advertiser_id, storage_key, campaign_id,
-                            latest_completed_day, last_updated_at, request_id
+                        INSERT INTO analytics_daily_completeness (
+                            seller_id, advertiser_id, storage_key, campaign_id, day,
+                            expected_page_count, is_complete, completed_at, last_recomputed_at
                         )
-                        VALUES (%s, %s, %s, %s, %s, now(), %s)
-                        ON CONFLICT (seller_id, advertiser_id, storage_key, campaign_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, FALSE, NULL, now())
+                        ON CONFLICT (seller_id, advertiser_id, storage_key, campaign_id, day)
                         DO UPDATE SET
-                            latest_completed_day = GREATEST(
-                                analytics_cursors.latest_completed_day,
-                                EXCLUDED.latest_completed_day
-                            ),
-                            last_updated_at = now(),
-                            request_id = EXCLUDED.request_id
+                            last_recomputed_at = now()
+                        WHERE analytics_daily_completeness.expected_page_count
+                              IS DISTINCT FROM EXCLUDED.expected_page_count
                         """,
-                        (sid, aid, skey.value, cid, day, request_id),
+                        (*unit_day, rec.expected_page_count),
                     )
 
-                # Upsert the shop timezone (last-write-wins) so we
+                    # Mark this page as present. ON CONFLICT DO NOTHING makes
+                    # duplicates harmless and lets concurrent batches race
+                    # safely.
+                    cur.execute(
+                        """
+                        INSERT INTO analytics_daily_pages (
+                            seller_id, advertiser_id, storage_key, campaign_id, day, page
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (
+                            seller_id, advertiser_id, storage_key, campaign_id, day, page
+                        ) DO NOTHING
+                        """,
+                        (*unit_day, rec.page),
+                    )
+
+                    modified_unit_days.add(unit_day)
+
+                # Recompute completeness for every touched unit/day.
+                _recompute_completeness(cur, modified_unit_days)
+
+                # Recompute cursors for every touched unit. latest_completed_day
+                # is the last day of the contiguous complete prefix starting
+                # at bootstrap_day; gaps cannot be skipped.
+                _recompute_cursors(
+                    cur,
+                    modified_unit_days,
+                    bootstrap_day=bootstrap_day,
+                    today_in_shop_tz=today_in_shop_tz,
+                    request_id=request_id,
+                )
+
+                # Upsert the shop timezone (last-write-wins) so cursor queries
                 # always have a row to read.
                 cur.execute(
                     """
@@ -173,7 +271,7 @@ class PgAnalyticsRepository(AnalyticsRepository):
                 )
 
             conn.commit()
-        return BatchResult(accepted=accepted, rejected=[])
+        return BatchResult(accepted=accepted, rejected=rejected)
 
 
 class IdempotencyKeyMismatch(Exception):
@@ -187,6 +285,156 @@ class IdempotencyKeyMismatch(Exception):
         )
         self.client_key = client_key
         self.canonical_key = canonical_key
+
+
+# ─── Completeness / cursor helpers ────────────────────────────────────
+
+
+def _recompute_completeness(
+    cur: psycopg.Cursor,
+    unit_days: set[tuple[str, str, str, str, date]],
+) -> None:
+    """For each (scope, storageKey, campaignId, day), mark is_complete
+    TRUE iff analytics_daily_pages contains exactly the pages
+    1..expected_page_count."""
+    for unit_day in unit_days:
+        cur.execute(
+            """
+            SELECT expected_page_count
+            FROM analytics_daily_completeness
+            WHERE seller_id = %s AND advertiser_id = %s
+              AND storage_key = %s AND campaign_id = %s AND day = %s
+            """,
+            unit_day,
+        )
+        row = cur.fetchone()
+        if not row:
+            continue
+        expected = row[0]
+
+        # A day is complete iff every page in [1, expected] is present.
+        # Extra pages beyond expected (possible for v1 rows where the
+        # implicit expectation is 1 but the client uploaded more pages)
+        # do not affect completeness.
+        cur.execute(
+            """
+            SELECT COUNT(DISTINCT page)
+            FROM analytics_daily_pages
+            WHERE seller_id = %s AND advertiser_id = %s
+              AND storage_key = %s AND campaign_id = %s AND day = %s
+              AND page BETWEEN 1 AND %s
+            """,
+            (*unit_day, expected),
+        )
+        row = cur.fetchone()
+        if row is None:
+            continue
+        (pages_in_range,) = row  # type: ignore[misc]
+        is_complete = pages_in_range is not None and pages_in_range == expected
+
+        cur.execute(
+            """
+            UPDATE analytics_daily_completeness
+            SET is_complete = %s,
+                completed_at = CASE WHEN %s THEN now() ELSE NULL END,
+                last_recomputed_at = now()
+            WHERE seller_id = %s AND advertiser_id = %s
+              AND storage_key = %s AND campaign_id = %s AND day = %s
+            """,
+            (is_complete, is_complete, *unit_day),
+        )
+
+
+def _recompute_cursors(
+    cur: psycopg.Cursor,
+    unit_days: set[tuple[str, str, str, str, date]],
+    *,
+    bootstrap_day: date,
+    today_in_shop_tz: date,
+    request_id: str | None,
+) -> None:
+    """Advance analytics_cursors to the last day of the contiguous complete
+    prefix, separately per (seller, advertiser, storage_key, campaign_id).
+
+    The contiguity chain is anchored at first_seen_day (the earliest day
+    with any record for the unit), not at bootstrap_day: a client is told
+    to start at bootstrap, and its first upload defines the anchor. Interior
+    gaps (missing or incomplete days after the anchor) block advancement.
+    The cursor never regresses: a legacy GREATEST-style value from the v1
+    era is kept until contiguous completeness catches up with it.
+    """
+    units: set[tuple[str, str, str, str]] = {
+        (sid, aid, skey, cid) for sid, aid, skey, cid, _ in unit_days
+    }
+
+    for sid, aid, skey, cid in units:
+        # Anchor: earliest day with any completeness row for this unit.
+        cur.execute(
+            """
+            SELECT MIN(day)
+            FROM analytics_daily_completeness
+            WHERE seller_id = %s AND advertiser_id = %s
+              AND storage_key = %s AND campaign_id = %s
+            """,
+            (sid, aid, skey, cid),
+        )
+        row = cur.fetchone()
+        first_seen: date | None = row[0] if row else None
+        if first_seen is None:
+            continue
+
+        # Read all complete days for this unit from the anchor forward.
+        cur.execute(
+            """
+            SELECT day
+            FROM analytics_daily_completeness
+            WHERE seller_id = %s AND advertiser_id = %s
+              AND storage_key = %s AND campaign_id = %s
+              AND day >= %s AND day <= %s
+              AND is_complete = TRUE
+            ORDER BY day
+            """,
+            (sid, aid, skey, cid, first_seen, today_in_shop_tz),
+        )
+        complete_days = {r[0] for r in cur.fetchall()}
+
+        latest_completed: date | None = None
+        current = first_seen
+        while current <= today_in_shop_tz and current in complete_days:
+            latest_completed = current
+            current += timedelta(days=1)
+
+        # Advance-only upsert. first_seen_day keeps the earliest anchor ever
+        # seen (a later backfill of an earlier day moves it backwards so the
+        # chain re-anchors; latest_completed_day itself never regresses).
+        cur.execute(
+            """
+            INSERT INTO analytics_cursors (
+                seller_id, advertiser_id, storage_key, campaign_id,
+                latest_completed_day, first_seen_day, last_updated_at, request_id
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, now(), %s)
+            ON CONFLICT (seller_id, advertiser_id, storage_key, campaign_id)
+            DO UPDATE SET
+                latest_completed_day = CASE
+                    WHEN EXCLUDED.latest_completed_day IS NULL
+                        THEN analytics_cursors.latest_completed_day
+                    WHEN analytics_cursors.latest_completed_day IS NULL
+                        THEN EXCLUDED.latest_completed_day
+                    ELSE GREATEST(
+                        analytics_cursors.latest_completed_day,
+                        EXCLUDED.latest_completed_day
+                    )
+                END,
+                first_seen_day = LEAST(
+                    analytics_cursors.first_seen_day,
+                    EXCLUDED.first_seen_day
+                ),
+                last_updated_at = now(),
+                request_id = EXCLUDED.request_id
+            """,
+            (sid, aid, skey, cid, latest_completed, first_seen, request_id),
+        )
 
 
 # ─── Cursor lookup helpers (used by app.py) ───────────────────────────
@@ -204,38 +452,49 @@ def fetch_cursor_page(
 ) -> list[CursorEntry]:
     """Read cursor rows and compute nextRequiredDay per row.
 
-    Pure SQL for the read + pure Python for the date arithmetic.
-    The timezone computation (today_in_shop_tz) is done by the caller
-    so the SQL stays portable.
+    Reads analytics_cursors (maintained transactionally by upsert_records).
+    nextRequiredDay is authoritative: the server, not the client, decides
+    the next day to sync.
     """
-    sql = [
-        "SELECT storage_key, campaign_id, latest_completed_day",
-        "FROM analytics_cursors",
-        "WHERE seller_id = %s AND advertiser_id = %s",
+    storage_key_value = storage_key.value if storage_key is not None else None
+    params = [
+        seller_id,
+        advertiser_id,
+        storage_key_value,
+        storage_key_value,
+        campaign_id,
+        campaign_id,
     ]
-    params: list[Any] = [seller_id, advertiser_id]
-    if storage_key is not None:
-        sql.append("AND storage_key = %s")
-        params.append(storage_key.value)
-    if campaign_id is not None:
-        sql.append("AND campaign_id = %s")
-        params.append(campaign_id)
 
     bootstrap_day = _subtract_days(today_in_shop_tz, bootstrap_lookback_days)
 
     with connect() as conn, conn.cursor() as cur:
-        cur.execute("\n".join(sql), params)
+        cur.execute(
+            """
+            SELECT storage_key, campaign_id, latest_completed_day, first_seen_day
+            FROM analytics_cursors
+            WHERE seller_id = %s
+              AND advertiser_id = %s
+              AND (%s::text IS NULL OR storage_key = %s)
+              AND (%s::text IS NULL OR campaign_id = %s)
+            """,
+            params,
+        )
         rows = cur.fetchall()
 
     entries: list[CursorEntry] = []
-    for storage_key_str, campaign_id_str, latest_completed_day in rows:
-        if latest_completed_day is None:
-            next_required = bootstrap_day
-        else:
+    for storage_key_str, campaign_id_str, latest_completed_day, first_seen_day in rows:
+        if latest_completed_day is not None:
             next_required = max(
                 _add_days(latest_completed_day, 1),
                 bootstrap_day,
             )
+        elif first_seen_day is not None:
+            # Records exist but the anchor day itself is not yet complete:
+            # the first day still missing pages is the next required day.
+            next_required = max(first_seen_day, bootstrap_day)
+        else:
+            next_required = bootstrap_day
         entries.append(
             CursorEntry(
                 storage_key=StorageKey(storage_key_str),

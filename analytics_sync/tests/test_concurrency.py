@@ -7,13 +7,13 @@ The protocol promises:
 - The cursor advance is atomic per (scope, storageKey, campaignId): the
   winning insert sets latest_completed_day, duplicates do not regress.
 """
+
 from __future__ import annotations
 
 import threading
 from datetime import date, datetime, timezone
 
 import psycopg
-import pytest
 
 from analytics_sync.domain import (
     Record,
@@ -24,11 +24,14 @@ from analytics_sync.domain import (
 from analytics_sync.pg_repositories import PgAnalyticsRepository
 
 
-def _make_record(seller, adv, skey, camp, day, page):
+def _make_record(seller, adv, skey, camp, day, page, expected_page_count=1):
     idem = compute_idempotency_key(
-        seller_id=seller, advertiser_id=adv,
-        storage_key=skey, campaign_id=camp,
-        day=day, page=page,
+        seller_id=seller,
+        advertiser_id=adv,
+        storage_key=skey,
+        campaign_id=camp,
+        day=day,
+        page=page,
     )
     return Record(
         idempotency_key=idem,
@@ -44,14 +47,18 @@ def _make_record(seller, adv, skey, camp, day, page):
         source="background_poll",
         captured_at=datetime(2026, 8, day.day, 3, 0, 0, tzinfo=timezone.utc),
         schema_version=1,
+        expected_page_count=expected_page_count,
     )
 
 
 def test_concurrent_duplicate_writes_have_exactly_one_insert(db_url):
     """N threads racing to insert the same idempotency_key: exactly one wins."""
     seller = "TEST_concurrent"
-    rec = _make_record(seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1", date(2026, 8, 23), 1)
+    day = date(2026, 8, 23)
+    rec = _make_record(seller, "adv-1", StorageKey.PRODUCT_ANALYSES, "c-1", day, 1)
     scope = Scope(seller_id=seller, advertiser_id="adv-1", shop_name=None)
+    # bootstrap_day == record day so a single complete day advances the cursor.
+    kwargs = {"today_in_shop_tz": date(2026, 8, 27), "bootstrap_day": day}
 
     n_threads = 8
     results: list[tuple[bool, str]] = []
@@ -62,7 +69,9 @@ def test_concurrent_duplicate_writes_have_exactly_one_insert(db_url):
         # Each thread opens its own connection (matches production path
         # — upsert_records opens its own connection per call).
         try:
-            r = PgAnalyticsRepository().upsert_records(scope, [rec], request_id=f"req-{threading.get_ident()}")
+            r = PgAnalyticsRepository().upsert_records(
+                scope, [rec], request_id=f"req-{threading.get_ident()}", **kwargs
+            )
             with lock:
                 results.append((True, r.accepted[0].status))
         except Exception as exc:
@@ -81,7 +90,9 @@ def test_concurrent_duplicate_writes_have_exactly_one_insert(db_url):
     assert len(successes) == n_threads, f"all threads must succeed; got {results}"
     # Exactly one inserted, the rest duplicate.
     assert statuses.count("inserted") == 1, f"expected 1 inserted, got {statuses}"
-    assert statuses.count("duplicate") == n_threads - 1, f"expected {n_threads - 1} duplicates, got {statuses}"
+    assert statuses.count("duplicate") == n_threads - 1, (
+        f"expected {n_threads - 1} duplicates, got {statuses}"
+    )
 
     # Verify cursor advanced exactly once.
     with psycopg.connect(db_url) as conn, conn.cursor() as cur:
@@ -99,9 +110,17 @@ def test_concurrent_distinct_records_all_insert(db_url):
     seller = "TEST_concurrent_distinct"
     scope = Scope(seller_id=seller, advertiser_id="adv-1", shop_name=None)
     records = [
-        _make_record(seller, "adv-1", StorageKey.SESSION_ANALYSES, "c-distinct", date(2026, 8, 22), p)
+        _make_record(
+            seller,
+            "adv-1",
+            StorageKey.SESSION_ANALYSES,
+            "c-distinct",
+            date(2026, 8, 22),
+            p,
+        )
         for p in range(1, 9)
     ]
+    kwargs = {"today_in_shop_tz": date(2026, 8, 27), "bootstrap_day": date(2026, 8, 22)}
 
     n_threads = len(records)
     results: list[str] = []
@@ -110,7 +129,9 @@ def test_concurrent_distinct_records_all_insert(db_url):
 
     def worker(rec):
         try:
-            r = PgAnalyticsRepository().upsert_records(scope, [rec], request_id=f"req-{threading.get_ident()}")
+            r = PgAnalyticsRepository().upsert_records(
+                scope, [rec], request_id=f"req-{threading.get_ident()}", **kwargs
+            )
             with lock:
                 results.append(r.accepted[0].status)
         finally:
