@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from tdd import miaoshou_sync as m_sync
 from tts_erp import (
     persist_miaoshou_collect_box_detail,
     persist_miaoshou_move_collect_task,
@@ -95,29 +96,11 @@ def test_persist_miaoshou_move_collect_task_insert_upserts():
 # ===== 测 3 个 sync 方法 =====
 
 
-class _FakeHandler:
-    """最小 Handler stub，不调真的 __init__."""
 
-    def __init__(self):
-        self._sent = []
-
-
-def _bind(method):
-    """从 tts_erp.Handler 取 unbound method，避免 __init__."""
-    from tts_erp import Handler
-
-    return Handler.__dict__[method]
-
-
-def _fake_query_params(**kw):
-    """构造 sync 方法的 params dict（_q 期望 scalar，不是 list）."""
-    return kw
 
 
 def test_sync_price_templates_paginates_until_empty():
     """🔵 _sync_miaoshou_price_templates：分页循环 + 空页停 + UPSERT 每条."""
-    from tts_erp import Handler
-
     # mock SDK 客户端：3 个模板分 2 页
     t1 = MagicMock(priceTemplateId=1)
     t1.model_dump.return_value = {"priceTemplateId": 1}
@@ -132,33 +115,31 @@ def test_sync_price_templates_paginates_until_empty():
     ]
 
     persist_calls = []
+    # Patch where it's used: miaoshou_sync imported persist_miaoshou_price_template
+    # by name at module load, so patching tts_erp.* has no effect.
     with (
         patch("miaoshou.MiaoshouErpClient.from_env", return_value=mock_client),
-        patch(
-            "tts_erp.persist_miaoshou_price_template",
+        patch.object(
+            m_sync, "persist_miaoshou_price_template",
             lambda platform, t: persist_calls.append(t.priceTemplateId) or True,
         ),
     ):
-        handler = Handler.__new__(Handler)
-        handler._sent = []
-        handler._send = lambda c, b: handler._sent.append((c, b)) or None
-        Handler._sync_miaoshou_price_templates(
-            handler, _fake_query_params(platform="tiktok", page_size="2")
-        )
+        code, body = m_sync.sync_miaoshou_price_templates({
+            "platform": 'tiktok',
+            "page_size": '2',
+        })
 
     assert persist_calls == [1, 2, 3]  # 全部 UPSERT
     # 应调 SDK 2 次（page1=full, page2=不满 → 停）
     assert mock_client.tk_collect_box.get_price_template_list.call_count == 2
     # 应返 200 + saved=3
-    assert handler._sent[0][0] == 200
-    assert handler._sent[0][1]["saved"] == 3
-    assert handler._sent[0][1]["total"] == 3
+    assert code == 200
+    assert body["saved"] == 3
+    assert body["total"] == 3
 
 
 def test_sync_collect_box_details_calls_persist_for_each():
     """🔵 _sync_miaoshou_collect_box_details：每条详情调 persist 一次."""
-    from tts_erp import Handler
-
     d1 = MagicMock(commonCollectBoxDetailId=100)
     d1.model_dump.return_value = {"commonCollectBoxDetailId": 100}
     d2 = MagicMock(commonCollectBoxDetailId=200)
@@ -170,31 +151,29 @@ def test_sync_collect_box_details_calls_persist_for_each():
     )
 
     persist_calls = []
+    # Patch where it's used: miaoshou_sync imported persist_miaoshou_collect_box_detail
+    # by name at module load, so patching tts_erp.* has no effect.
     with (
         patch("miaoshou.MiaoshouErpClient.from_env", return_value=mock_client),
-        patch(
-            "tts_erp.persist_miaoshou_collect_box_detail",
+        patch.object(
+            m_sync, "persist_miaoshou_collect_box_detail",
             lambda platform, d: (
                 persist_calls.append((platform, d.commonCollectBoxDetailId)) or True
             ),
         ),
     ):
-        handler = Handler.__new__(Handler)
-        handler._sent = []
-        handler._send = lambda c, b: handler._sent.append((c, b)) or None
-        Handler._sync_miaoshou_collect_box_details(
-            handler, _fake_query_params(platform="tiktok", page_size="50")
-        )
+        code, body = m_sync.sync_miaoshou_collect_box_details({
+            "platform": 'tiktok',
+            "page_size": '50',
+        })
 
     assert persist_calls == [("tiktok", 100), ("tiktok", 200)]
-    assert handler._sent[0][0] == 200
-    assert handler._sent[0][1]["saved"] == 2
+    assert code == 200
+    assert body["saved"] == 2
 
 
 def test_sync_move_collect_tasks_stops_on_empty_page():
     """🔵 _sync_miaoshou_move_collect_tasks：空页停止."""
-    from tts_erp import Handler
-
     t1 = MagicMock(moveCollectTaskDetailId="T1")
     t1.model_dump.return_value = {"moveCollectTaskDetailId": "T1"}
     mock_client = MagicMock()
@@ -205,31 +184,29 @@ def test_sync_move_collect_tasks_stops_on_empty_page():
     ]
 
     persist_calls = []
+    # Patch where it's used: miaoshou_sync imported persist_miaoshou_move_collect_task
+    # by name at module load, so patching tts_erp.* has no effect.
     with (
         patch("miaoshou.MiaoshouErpClient.from_env", return_value=mock_client),
-        patch(
-            "tts_erp.persist_miaoshou_move_collect_task",
+        patch.object(
+            m_sync, "persist_miaoshou_move_collect_task",
             lambda platform, t: persist_calls.append(t.moveCollectTaskDetailId) or True,
         ),
     ):
-        handler = Handler.__new__(Handler)
-        handler._sent = []
-        handler._send = lambda c, b: handler._sent.append((c, b)) or None
-        Handler._sync_miaoshou_move_collect_tasks(
-            handler, _fake_query_params(platform="tiktok", page_size="20")
-        )
+        code, body = m_sync.sync_miaoshou_move_collect_tasks({
+            "platform": 'tiktok',
+            "page_size": '20',
+        })
 
     assert persist_calls == ["T1"]  # 只 1 条
     assert (
         mock_client.tk_collect_box.search_move_collect_list.call_count == 2
     )  # 调 2 次
-    assert handler._sent[0][1]["saved"] == 1
+    assert body["saved"] == 1
 
 
 def test_sync_methods_call_sdk_with_correct_params():
     """🔵 3 个 sync 方法都把 platform/site/page_size 等参数正确传给 SDK."""
-    from tts_erp import Handler
-
     captured = []
 
     def make_capture(data_cls, data_inst, total=1):
@@ -254,24 +231,25 @@ def test_sync_methods_call_sdk_with_correct_params():
 
     with (
         patch("miaoshou.MiaoshouErpClient.from_env", return_value=mock_client),
-        patch("tts_erp.persist_miaoshou_price_template", lambda *a, **kw: True),
-        patch("tts_erp.persist_miaoshou_collect_box_detail", lambda *a, **kw: True),
-        patch("tts_erp.persist_miaoshou_move_collect_task", lambda *a, **kw: True),
+        patch.object(m_sync, "persist_miaoshou_price_template", lambda *a, **kw: True),
+        patch.object(m_sync, "persist_miaoshou_collect_box_detail", lambda *a, **kw: True),
+        patch.object(m_sync, "persist_miaoshou_move_collect_task", lambda *a, **kw: True),
     ):
-        handler = Handler.__new__(Handler)
-        handler._send = lambda c, b: None
-
-        Handler._sync_miaoshou_price_templates(
-            handler, _fake_query_params(platform="shopee", site="PH", page_size="100")
-        )
-        Handler._sync_miaoshou_collect_box_details(
-            handler,
-            _fake_query_params(platform="tiktok", page_size="30", status="normal"),
-        )
-        Handler._sync_miaoshou_move_collect_tasks(
-            handler,
-            _fake_query_params(platform="tiktok", page_size="10", status="success"),
-        )
+        m_sync.sync_miaoshou_price_templates({
+            "platform": 'shopee',
+            "site": 'PH',
+            "page_size": '100',
+        })
+        m_sync.sync_miaoshou_collect_box_details({
+            "platform": 'tiktok',
+            "page_size": '30',
+            "status": 'normal',
+        })
+        m_sync.sync_miaoshou_move_collect_tasks({
+            "platform": 'tiktok',
+            "page_size": '10',
+            "status": 'success',
+        })
 
     # 验每个 SDK 调用收到正确参数
     # 注：platform 不传给 SDK 方法（MiaoshouErpClient tk_collect_box.* 方法不接受

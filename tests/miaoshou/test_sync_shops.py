@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
+from tdd import miaoshou_sync as m_sync
+
 # ---- Shop 模型解析 ----
 
 def test_shop_model_parses_minimal_response():
@@ -103,30 +105,30 @@ def test_sync_miaoshou_shops_validates_page_params(monkeypatch):
     2026-08-24 hardening (commit fe26...) changed: invalid page params no longer
     raise ValueError to 400 — _safe_int defaults + logs warning instead.
     """
-    import tts_erp
-    handler = make_handler()
-    fn = tts_erp.Handler._sync_miaoshou_shops  # unbound method
+    fn = m_sync.sync_miaoshou_shops
 
     with patch("miaoshou.MiaoshouErpClient.from_env") as mock_from_env:
         mock_from_env.return_value = MagicMock()
-        fn(handler, {"page_no": ["abc"], "page_size": ["100"]})
+        code, body = fn({"page_no": ["abc"], "page_size": ["100"]})
 
     # New behavior: invalid page_no defaults to 1, request succeeds → 200
-    assert handler._sent[0][0] == 200
+    assert code == 200
 
 
 def test_sync_miaoshou_shops_happy_path(monkeypatch):
     """调 SDK → 拿到 shop → 调 persist → 返 200 + saved count."""
-    import tts_erp
-    handler = make_handler()
-    fn = tts_erp.Handler._sync_miaoshou_shops
+    fn = m_sync.sync_miaoshou_shops
 
     persisted = []
+    # Patch where it's used: miaoshou_sync imported persist_miaoshou_shop
+    # by name at module load, so patching tts_erp.* has no effect.
     monkeypatch.setattr(
-        "tts_erp.persist_miaoshou_shop",
+        m_sync, "persist_miaoshou_shop",
         lambda platform, site, shop: persisted.append((platform, site, shop)) or True,
     )
-    monkeypatch.setattr("tts_erp.log_sync", lambda *a, **kw: None)
+    # Patch where it's used: miaoshou_sync imported it by name at module load,
+    # so patching tts_erp.log_sync has no effect on the already-bound reference.
+    monkeypatch.setattr(m_sync, "log_sync", lambda *a, **kw: None)
 
     mock_shop = MagicMock()
     mock_shop.shopId = 12345
@@ -136,7 +138,7 @@ def test_sync_miaoshou_shops_happy_path(monkeypatch):
     mock_client.shops.list.return_value = mock_result
 
     with patch("miaoshou.MiaoshouErpClient.from_env", return_value=mock_client):
-        fn(handler, {
+        code, body = fn({
             "platform": ["tiktok"], "site": ["VN"],
             "page_no": ["1"], "page_size": ["100"],
         })
@@ -146,8 +148,8 @@ def test_sync_miaoshou_shops_happy_path(monkeypatch):
     )
     assert len(persisted) == 1
     assert persisted[0] == ("tiktok", "VN", mock_shop)
-    assert handler._sent[0][0] == 200
-    body = handler._sent[0][1]
+    assert code == 200
+    body = body
     assert body["platform"] == "tiktok"
     assert body["site"] == "VN"
     assert body["saved"] == 1
@@ -156,30 +158,26 @@ def test_sync_miaoshou_shops_happy_path(monkeypatch):
 
 def test_sync_miaoshou_shops_handles_sdk_error(monkeypatch):
     """SDK 抛错时返 502."""
-    import tts_erp
-    handler = make_handler()
-    fn = tts_erp.Handler._sync_miaoshou_shops
+    fn = m_sync.sync_miaoshou_shops
 
     mock_client = MagicMock()
     mock_client.shops.list.side_effect = RuntimeError("network timeout")
     with patch("miaoshou.MiaoshouErpClient.from_env", return_value=mock_client):
-        fn(handler, {"platform": ["tiktok"], "site": ["VN"]})
+        code, body = fn({"platform": ["tiktok"], "site": ["VN"]})
 
-    assert handler._sent[0][0] == 502
-    assert "network timeout" in handler._sent[0][1]["_error"]
+    assert code == 502
+    assert "network timeout" in body["_error"]
 
 
 def test_sync_miaoshou_shops_handles_client_init_error(monkeypatch):
     """MiaoshouErpClient.from_env 抛错时返 500."""
-    import tts_erp
-    handler = make_handler()
-    fn = tts_erp.Handler._sync_miaoshou_shops
+    fn = m_sync.sync_miaoshou_shops
 
     with patch("miaoshou.MiaoshouErpClient.from_env", side_effect=RuntimeError("bad creds")):
-        fn(handler, {"platform": ["tiktok"], "site": ["VN"]})
+        code, body = fn({"platform": ["tiktok"], "site": ["VN"]})
 
-    assert handler._sent[0][0] == 500
-    assert "bad creds" in handler._sent[0][1]["_error"]
+    assert code == 500
+    assert "bad creds" in body["_error"]
 
 
 # ---- _db_list_miaoshou_shops ----
@@ -191,9 +189,7 @@ def test_db_list_miaoshou_shops_validates_limit():
     _safe_int defaults to 100. May then succeed (200) or fail at DB layer (500),
     but never returns 400 for parameter validation.
     """
-    import tts_erp
-    handler = make_handler()
-    fn = tts_erp.Handler._db_list_miaoshou_shops
-    fn(handler, {"limit": ["xyz"]})
+    fn = m_sync.db_list_miaoshou_shops
+    code, body = fn({"limit": ["xyz"]})
     # Not 400 (that's the old contract)
-    assert handler._sent[0][0] != 400
+    assert code != 400

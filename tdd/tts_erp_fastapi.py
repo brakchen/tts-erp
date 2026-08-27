@@ -1587,34 +1587,21 @@ def miaoshou_outbound(domain: str, method: str, body: dict | None = None):
 # 实现复用 legacy tts_erp.Handler._sync_miaoshou_* / _db_list_miaoshou_*。
 # Auth: readwrite（middleware 已在 tdd/auth.py 把 /sync/* / /db/* 标 readwrite）。
 def _invoke_legacy_sync(method_name: str, params: dict) -> dict | JSONResponse:
-    """调用 legacy tts_erp.Handler 上的 sync/db 方法，返回 (status_code, body).
+    """调用 miaoshou_sync 模块级 sync/db 函数，包装为 JSONResponse.
 
-    Args:
-        method_name: Handler 上的方法名（如 '_sync_miaoshou_price_templates'）
-        params: query dict（与 legacy Handler 期望的格式一致：scalar str）
+    W4.1: 之前通过 tts_erp.Handler.__dict__[method_name] + _StubHandler
+    调 legacy 类方法；W4.1 把它们抽成 tdd/miaoshou_sync.py 的模块级函数
+    （返回 (code, body) 元组），这里直接调用。
     """
-    captured: list[tuple[int, dict]] = []
+    import miaoshou_sync
 
-    class _StubHandler:
-        def _send(self, code, obj):
-            captured.append((code, obj))
-
-    handler = _StubHandler()
-    # W3.3: getattr instead of __dict__[name] — a missing legacy method
-    # must return 501, not KeyError → 500, when legacy code is retired.
-    unbound = getattr(tts_erp.Handler, method_name, None)
-    if unbound is None:
+    fn = getattr(miaoshou_sync, method_name.lstrip("_"), None)
+    if fn is None:
         return JSONResponse(
             status_code=501,
             content={"_error": f"legacy handler {method_name} no longer exists"},
         )
-    unbound(handler, params)
-    if not captured:
-        return JSONResponse(
-            status_code=500,
-            content={"_error": f"{method_name} did not return any response"},
-        )
-    code, body = captured[0]
+    code, body = fn(params)
     return JSONResponse(status_code=code, content=body)
 
 
