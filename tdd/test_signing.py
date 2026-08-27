@@ -16,12 +16,10 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-from unittest.mock import patch, MagicMock
+import urllib.error
+from unittest.mock import MagicMock, patch
 
-import pytest
-
-from tts_signing import sign_request, build_signed_url, tiktok_request
-
+from tts_signing import build_signed_url, sign_request, tiktok_request
 
 # ─── sign_request canonical format ────────────────────────────────────
 
@@ -159,7 +157,7 @@ class TestBuildSignedUrl:
                 extra_params={"shop_cipher": "c"},
             )
         # Extract sign from URL
-        from urllib.parse import urlparse, parse_qs
+        from urllib.parse import parse_qs, urlparse
         qs = parse_qs(urlparse(url).query)
         sig = qs["sign"][0]
         # Recompute independently
@@ -244,7 +242,7 @@ class TestTiktokRequest:
     def test_http_error_returns_parsed_body(self):
         import urllib.error
         err = urllib.error.HTTPError(
-            "https://api.tiktok.com/foo", 401, "Unauthorized", {},
+            "https://api.tiktok.com/foo", 401, "Unauthorized", {},  # type: ignore[arg-type] -- dict hdrs fine in practice; test fake
             MagicMock(read=MagicMock(return_value=b'{"code": 401, "message": "auth fail"}'))
         )
         with patch("tts_signing.urllib.request.urlopen", side_effect=err):
@@ -280,3 +278,98 @@ class TestDebugSignEnv:
         captured = capsys.readouterr()
         assert "canonical=" in captured.err
         assert "sig=" in captured.err
+
+
+class TestTiktokRequestRetry:
+    """W3.2: bounded retry with backoff for 429 / 5xx HTTP errors and
+    network failures. 4xx business errors must NOT be retried."""
+
+    def _resp(self, payload: bytes):
+        r = MagicMock()
+        r.read.return_value = payload
+        r.__enter__ = lambda s: s
+        r.__exit__ = lambda s, *a: None
+        return r
+
+    def _http_error(self, code: int):
+        e = urllib.error.HTTPError("u", code, "msg", None, None)  # type: ignore[arg-type] -- None hdrs fine for test fake
+        e.read = lambda: json.dumps({"code": code, "message": f"HTTP {code}"}).encode()  # type: ignore[method-assign]
+        return e
+
+    def test_429_retried_then_succeeds(self):
+        import tts_signing
+
+        calls = {"n": 0}
+
+        def side_effect(req, timeout=30):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise self._http_error(429)
+            return self._resp(b'{"code": 0, "data": {}}')
+
+        with (
+            patch("tts_signing.urllib.request.urlopen", side_effect=side_effect),
+            patch.object(tts_signing.time, "sleep", lambda s: None),
+        ):
+            result = tiktok_request(
+                "GET", "https://api.tiktok.com", "/x",
+                access_token="t", app_key="ak", app_secret="sec",
+            )
+        assert result["code"] == 0
+        assert calls["n"] == 3
+
+    def test_500_retried_then_gives_up_after_3(self):
+        import tts_signing
+
+        calls = {"n": 0}
+
+        def side_effect(req, timeout=30):
+            calls["n"] += 1
+            raise self._http_error(500)
+
+        with (
+            patch("tts_signing.urllib.request.urlopen", side_effect=side_effect),
+            patch.object(tts_signing.time, "sleep", lambda s: None),
+        ):
+            result = tiktok_request(
+                "GET", "https://api.tiktok.com", "/x",
+                access_token="t", app_key="ak", app_secret="sec",
+            )
+        assert result["code"] == 500  # last error returned, not raised
+        assert calls["n"] == 3  # 1 initial + 2 retries
+
+    def test_400_not_retried(self):
+        calls = {"n": 0}
+
+        def side_effect(req, timeout=30):
+            calls["n"] += 1
+            raise self._http_error(400)
+
+        with patch("tts_signing.urllib.request.urlopen", side_effect=side_effect):
+            result = tiktok_request(
+                "GET", "https://api.tiktok.com", "/x",
+                access_token="t", app_key="ak", app_secret="sec",
+            )
+        assert calls["n"] == 1
+
+    def test_network_error_retried(self):
+        import tts_signing
+
+        calls = {"n": 0}
+
+        def side_effect(req, timeout=30):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise urllib.error.URLError("conn reset")
+            return self._resp(b'{"code": 0}')
+
+        with (
+            patch("tts_signing.urllib.request.urlopen", side_effect=side_effect),
+            patch.object(tts_signing.time, "sleep", lambda s: None),
+        ):
+            result = tiktok_request(
+                "GET", "https://api.tiktok.com", "/x",
+                access_token="t", app_key="ak", app_secret="sec",
+            )
+        assert result["code"] == 0
+        assert calls["n"] == 2

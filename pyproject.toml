@@ -10,3 +10,8 @@ addopts = "-ra -q"
 # (E402 import-after-env-load, S104/S310 urlopen audits, S608, S110)
 # is tracked there, not fixed piecemeal.
 "tts_erp.py" = ["E402", "S104", "S310", "S608", "S110"]
+# Test suites use hardcoded dummy credentials/tokens (access_token="t",
+# app_secret="sec", …) as fixtures — not real secrets by construction.
+"tdd/test_*.py" = ["S105", "S106"]
+"tests/**/*.py" = ["S105", "S106"]
+"analytics_sync/tests/*.py" = ["S105", "S106"]

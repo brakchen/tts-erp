@@ -1,14 +1,12 @@
 """Production HTTP client implementations.
 
 TikTokHttpClient: wraps tts_signing.tiktok_request (HMAC-signed calls to TikTok).
-PlainHttpClient: plain urllib wrapper for internal services (oauth-receiver).
 """
 from __future__ import annotations
 
-import json
 import urllib.error
-import urllib.request
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from tts_signing import tiktok_request
 
@@ -54,51 +52,3 @@ class TikTokHttpClient:
             extra_params=extra_params,
             timeout=timeout,
         )
-
-
-class PlainHttpClient:
-    """Plain HTTP client for internal services (oauth-receiver).
-
-    No signing, no auth headers. Just GET/POST with JSON body.
-    """
-
-    def __init__(self, *, timeout: int = 10):
-        self._timeout = timeout
-
-    def request(
-        self,
-        method: str,
-        url: str,
-        *,
-        body: dict | None = None,
-        extra_params: dict[str, str] | None = None,  # unused for plain HTTP
-        timeout: int | None = None,
-    ) -> dict[str, Any]:
-        # Append query string from extra_params
-        if extra_params:
-            from urllib.parse import urlencode
-            sep = "&" if "?" in url else "?"
-            url = f"{url}{sep}{urlencode(extra_params)}"
-
-        data = json.dumps(body).encode("utf-8") if body is not None else None
-        req = urllib.request.Request(
-            url,
-            method=method,
-            data=data,
-            headers={"Content-Type": "application/json", "Accept": "application/json"}
-            if data else {"Accept": "application/json"},
-        )
-        actual_timeout = timeout or self._timeout
-        try:
-            with urllib.request.urlopen(req, timeout=actual_timeout) as r:
-                return json.loads(r.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            return {
-                "_error": True,
-                "_http_status": e.code,
-                "_body": e.read().decode("utf-8", errors="replace")[:500],
-            }
-        except urllib.error.URLError as e:
-            return {"_error": True, "_reason": f"URLError: {e.reason}"}
-        except Exception as e:  # noqa: BLE001
-            return {"_error": True, "_reason": f"{type(e).__name__}: {e}"}

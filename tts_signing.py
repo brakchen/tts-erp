@@ -15,12 +15,20 @@ import hashlib
 import hmac
 import json
 import os
+import random
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any
+
+
+def _is_retryable_http(code: int) -> bool:
+    """Only transient statuses are worth retrying: 429 (rate limit) and 5xx.
+    4xx business errors (bad sign, missing scope) must return immediately —
+    retrying just burns rate-limit budget."""
+    return code == 429 or 500 <= code < 600
 
 
 def sign_request(app_secret: str, path: str, query_params: dict[str, str],
@@ -74,7 +82,7 @@ def build_signed_url(
 
     Returns (url, timestamp) so callers can log/debug.
     """
-    timestamp = str(int(time.time()))
+    timestamp = str(round(time.time()))
     params: dict[str, str] = {"app_key": app_key, "timestamp": timestamp}
     if extra_params:
         params.update({k: str(v) for k, v in extra_params.items()})
@@ -94,6 +102,7 @@ def tiktok_request(
     body: dict | None = None,
     extra_params: dict[str, str] | None = None,
     timeout: int = 30,
+    max_retries: int = 2,
 ) -> dict[str, Any]:
     """Call a TikTok Shop API endpoint with full signing + auth headers.
 
@@ -101,6 +110,11 @@ def tiktok_request(
     For POST: body is JSON-encoded, extra_params (like shop_cipher) go in query string.
 
     Returns parsed JSON response.
+
+    W3.2: bounded retry (max_retries, exponential backoff + jitter) for
+    transient failures — HTTP 429 / 5xx and network errors (URLError,
+    TimeoutError). 4xx business errors are returned immediately (retrying
+    an auth/sign error just burns rate-limit budget).
     """
     url, ts = build_signed_url(
         api_host, path, app_key, app_secret,
@@ -128,23 +142,35 @@ def tiktok_request(
             api_host, path, app_key, app_secret,
             extra_params=extra_params, body=body_str, timeout=timeout,
         )
-        req = urllib.request.Request(url, method=method, data=data, headers=headers)
-    else:
-        req = urllib.request.Request(url, method=method, data=data, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            raw = r.read().decode("utf-8")
-            return json.loads(raw)
-    except urllib.error.HTTPError as e:
+    req = urllib.request.Request(url, method=method, data=data, headers=headers)  # noqa: S310 -- api_host is operator-configured (TIKTOK_API_HOST), not user input
+
+    def _parse_http_error(e: urllib.error.HTTPError) -> dict[str, Any]:
         body_text = e.read().decode("utf-8", errors="replace")
         try:
             return json.loads(body_text)
         except json.JSONDecodeError:
             return {"code": e.code, "message": f"HTTP {e.code}", "_raw": body_text[:500]}
-    except urllib.error.URLError as e:
-        return {"code": -1, "message": f"network error: {e.reason}"}
-    except Exception as e:  # noqa: BLE001
-        return {"code": -1, "message": f"{type(e).__name__}: {e}"}
+
+    last_result: dict[str, Any] = {"code": -1, "message": "no attempt made"}
+    for attempt in range(1 + max_retries):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310 -- api_host is operator-configured (TIKTOK_API_HOST), not user input
+                raw = r.read().decode("utf-8")
+                return json.loads(raw)
+        except urllib.error.HTTPError as e:
+            last_result = _parse_http_error(e)
+            if not _is_retryable_http(e.code):
+                return last_result
+        except urllib.error.URLError as e:
+            last_result = {"code": -1, "message": f"network error: {e.reason}"}
+        except (TimeoutError, OSError) as e:
+            last_result = {"code": -1, "message": f"{type(e).__name__}: {e}"}
+        except Exception as e:  # noqa: BLE001
+            return {"code": -1, "message": f"{type(e).__name__}: {e}"}
+        if attempt < max_retries:
+            # Exponential backoff with jitter: ~0.5-1s, ~1-2s, ...
+            time.sleep(random.uniform(0.5, 1.0) * (2 ** attempt))
+    return last_result
 
 
 # Convenience: known endpoint paths (so we can validate they're implemented)

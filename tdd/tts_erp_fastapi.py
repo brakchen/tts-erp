@@ -25,9 +25,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import psycopg
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.security import HTTPBearer  # noqa: E402  -- 用于下面 OpenAPI bearer 装饰
+from fastapi.security import HTTPBearer
 
 # Make tts_business + tts_signing + tts_erp importable
 TTS_ERP_ROOT = Path(__file__).resolve().parent.parent
@@ -55,7 +56,7 @@ log = logging.getLogger("tts-erp-fastapi")
 from domain import TokenError  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from http_client import TikTokHttpClient  # noqa: E402
-from oauth_receiver_router import (  # noqa: E402  -- Wave 3 Slice 3
+from oauth_receiver_router import (
     router as oauth_router,
 )
 from pg_repositories import make_pg_repos  # noqa: E402
@@ -64,7 +65,7 @@ from token_provider import LocalTokenProvider  # noqa: E402
 
 import tts_erp  # noqa: E402
 from analytics_sync.app import router as analytics_sync_router  # noqa: E402
-from tts_erp import _safe_int  # noqa: E402  -- per-request int() hardening
+from tts_erp import _safe_int  # noqa: E402
 
 # ─── App + config ─────────────────────────────────────────────────────
 
@@ -74,7 +75,7 @@ from tts_erp import _safe_int  # noqa: E402  -- per-request int() hardening
 
 
 @asynccontextmanager
-async def _run_startup_backfill(_app):  # noqa: ARG001
+async def _run_startup_backfill(_app):
     """Best-effort backfill of tts_erp.shops from oauth_tokens on startup.
 
     Why: tts_erp.shops was found empty in 2026-08-25 because FastAPI
@@ -191,7 +192,7 @@ def _get_creds(shop_id: str):
         return _token_provider.get(shop_id)
     except TokenError as e:
         raise HTTPException(status_code=e.status, detail=str(e)) from e
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         sys.stderr.write(
             f"[tts-erp-fastapi] token fetch failed: {type(e).__name__}: {e}\n"
         )
@@ -225,10 +226,16 @@ LOGISTICS_MAX_PER_RUN_CAP = 100  # hard ceiling regardless of body.max_per_run
 def _try_advisory_lock(key: int) -> bool:
     """Try to take a session-scoped PG advisory lock. Returns False if
     another run holds it. The lock lives on ONE dedicated connection kept
-    in _ADVISORY_LOCK_CONNS until _release_advisory_lock."""
+    in _ADVISORY_LOCK_CONNS until _release_advisory_lock.
+
+    NOTE: deliberately NOT from the pool — db_connect() returns a pooled
+    context manager; a session-scoped lock needs a raw, long-lived
+    connection of its own."""
     if key in _ADVISORY_LOCK_CONNS:
         return False  # re-entrant call in same process
-    conn = tts_erp.db_connect()
+    if not tts_erp.TTS_ERP_DB_URL:
+        raise RuntimeError("TTS_ERP_DB_URL not configured")
+    conn = psycopg.connect(tts_erp.TTS_ERP_DB_URL, connect_timeout=5)
     with conn.cursor() as cur:
         cur.execute("SELECT pg_try_advisory_lock(%s)", (key,))
         row = cur.fetchone()
@@ -530,7 +537,7 @@ def _decode_cursor(cursor: str | None) -> tuple[int | None, str | None]:
         padded = cursor + "=" * (-len(cursor) % 4)
         payload = json.loads(base64.urlsafe_b64decode(padded.encode()).decode())
         return int(payload["t"]), str(payload["i"])
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         raise HTTPException(status_code=400, detail=f"invalid cursor: {e}") from e
 
 
@@ -627,10 +634,10 @@ def db_list_orders(
             # Latent crash if db_list_orders is called with any time filter
             # and the request actually exercises this branch. Not in Wave 3
             # scope; flag for follow-up task.
-            args.append(_safe_int(lo, default=0, source="qs." + col))  # noqa: F821
+            args.append(_safe_int(lo, default=0, source="qs." + col))
         if hi is not None:
             wh.append(f"{col} < %s")
-            args.append(_safe_int(hi, default=0, source="qs." + col))  # noqa: F821
+            args.append(_safe_int(hi, default=0, source="qs." + col))
     # Keyset cursor: rows strictly older than the cursor point
     c_ct, c_oid = _decode_cursor(cursor)
     if c_ct is not None and c_oid is not None:
@@ -1031,10 +1038,10 @@ def db_list_logistics_tracking(
     args: list = []
     if shop_id:
         wh.append("shop_id = %s")
-        args.append(shop_id)  # noqa: E702
+        args.append(shop_id)
     if final_status:
         wh.append("final_status = %s")
-        args.append(final_status)  # noqa: E702
+        args.append(final_status)
     if arrived_overseas is not None:
         wh.append("arrived_overseas = %s")
         args.append(arrived_overseas)
@@ -1070,7 +1077,7 @@ def db_list_logistics_events(
     args: list = []
     if order_id:
         wh.append("order_id = %s")
-        args.append(order_id)  # noqa: E702
+        args.append(order_id)
     if action_code is not None:
         wh.append("action_code = %s")
         args.append(action_code)
@@ -1134,7 +1141,7 @@ def db_statement_transactions(
     args: list = []
     if shop_id:
         wh.append("shop_id = %s")
-        args.append(shop_id)  # noqa: E702
+        args.append(shop_id)
     if statement_id:
         wh.append("statement_id = %s")
         args.append(statement_id)
@@ -1401,10 +1408,10 @@ def cancellations_search(shop_id: str, body: dict | None = None):
 #   POST /miaoshou/callback/{node-alias}  → NODE_REGISTRY 查找 + dispatch_callback
 #   POST /miaoshou/callback/all           → 按 body.orderStatus 字段自动派发
 # Auth: admin（middleware 已在 required_role 里标好 /miaoshou/* = admin）
-import urllib.error as _urllib_error  # noqa: E402  -- miaoshou SDK 同款依赖
+import urllib.error as _urllib_error  # noqa: E402
 
-from miaoshou import MiaoshouApiError, MiaoshouClient  # noqa: E402, F401
-from miaoshou.callbacks.router import (  # noqa: E402, F401
+from miaoshou import MiaoshouApiError, MiaoshouClient  # noqa: E402
+from miaoshou.callbacks.router import (
     NODE_REGISTRY,
     dispatch_callback,
 )
