@@ -489,10 +489,36 @@ def sync_statement_transactions(body: dict):
 
 # Sync order detail — not yet ported; keep returning 501
 @app.post("/sync/order/{order_id}")
-def sync_one_order(order_id: str, body: dict):
-    raise HTTPException(
-        status_code=501, detail="sync single order not yet ported to FastAPI"
+def sync_one_order(order_id: str, body: dict | None = None):
+    """Sync a single order's detail from TikTok and persist it.
+
+    shop_id resolution order (mirrors legacy tts_erp._do_sync_one):
+    1. body.shop_id if provided
+    2. local orders table lookup by order_id
+    3. 404 if neither works (TikTok requires shop-scoped credentials)
+    """
+    body = body or {}
+    shop_id = body.get("shop_id")
+    if not shop_id:
+        rows = _db_query_dict(
+            "SELECT shop_id FROM orders WHERE order_id = %s LIMIT 1",
+            (order_id,),
+        )
+        if not rows:
+            raise HTTPException(
+                status_code=404,
+                detail=f"order {order_id} not in local DB; pass shop_id in body",
+            )
+        shop_id = rows[0]["shop_id"]
+    # 202309 detail endpoint uses ?ids= in query, not /{order_id} in path
+    result = _tiktok_proxy(
+        "GET",
+        "/order/202309/orders",
+        shop_id=shop_id,
+        extra_query={"ids": order_id},
+        persist_order_on_get=True,
     )
+    return result
 
 
 # ─── DB read endpoints (Phase 4a-3 expansion) ─────────────────────────
@@ -1411,7 +1437,7 @@ def cancellations_search(shop_id: str, body: dict | None = None):
 import urllib.error as _urllib_error  # noqa: E402
 
 from miaoshou import MiaoshouApiError, MiaoshouClient  # noqa: E402
-from miaoshou.callbacks.router import (
+from miaoshou.callbacks.router import (  # noqa: E402
     NODE_REGISTRY,
     dispatch_callback,
 )
@@ -1578,7 +1604,14 @@ def _invoke_legacy_sync(method_name: str, params: dict) -> dict | JSONResponse:
             captured.append((code, obj))
 
     handler = _StubHandler()
-    unbound = tts_erp.Handler.__dict__[method_name]
+    # W3.3: getattr instead of __dict__[name] — a missing legacy method
+    # must return 501, not KeyError → 500, when legacy code is retired.
+    unbound = getattr(tts_erp.Handler, method_name, None)
+    if unbound is None:
+        return JSONResponse(
+            status_code=501,
+            content={"_error": f"legacy handler {method_name} no longer exists"},
+        )
     unbound(handler, params)
     if not captured:
         return JSONResponse(

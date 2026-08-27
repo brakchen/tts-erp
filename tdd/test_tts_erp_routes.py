@@ -358,3 +358,85 @@ class TestGetCredsErrorSemantics:
         assert "psycopg" not in r.text
         assert "password" not in r.text
         assert r.json()["detail"] == "token fetch failed"
+
+
+class TestSyncOneOrder:
+    """W3.3: /sync/order/{order_id} ported from legacy 501 stub.
+
+    shop_id resolution: body.shop_id → local orders table → 404.
+    """
+
+    @pytest.fixture()
+    def client(self, monkeypatch):
+        import tts_erp_fastapi
+        from fastapi.testclient import TestClient
+
+        monkeypatch.setenv("TTS_ERP_AUTH_MODE", "off")
+        return TestClient(tts_erp_fastapi.app), tts_erp_fastapi
+
+    def test_404_when_order_unknown_and_no_shop_id(self, client, monkeypatch):
+        app, mod = client
+        monkeypatch.setattr(mod, "_db_query_dict", lambda sql, args=(): [])
+        r = app.post("/sync/order/TEST_UNKNOWN_ORDER", json={})
+        assert r.status_code == 404
+        assert "not in local DB" in r.json()["detail"]
+
+    def test_uses_body_shop_id_without_db_lookup(self, client, monkeypatch):
+        app, mod = client
+        from domain import Creds
+
+        monkeypatch.setattr(
+            mod, "_get_creds",
+            lambda shop_id: Creds(access_token="t", shop_cipher="c", region="VN", shop_id=shop_id),  # noqa: S106 -- test fixture
+        )
+
+        def fail_db(sql, args=()):
+            raise AssertionError("DB lookup must not run when shop_id given")
+
+        monkeypatch.setattr(mod, "_db_query_dict", fail_db)
+
+        class _FakeHttp:
+            def request(self, method, path, *, body=None, extra_params=None, timeout=30):
+                assert extra_params is not None
+                assert extra_params["ids"] == "TEST_ORDER_42"
+                return {"code": 0, "data": {"order": {"id": "TEST_ORDER_42"}}}
+
+        monkeypatch.setattr(mod, "_tiktok_http_for", lambda creds: _FakeHttp())
+        monkeypatch.setattr(mod.tts_erp, "persist_order", lambda *a: True)
+        monkeypatch.setattr(mod.tts_erp, "persist_shop", lambda *a, **k: True)
+
+        r = app.post("/sync/order/TEST_ORDER_42", json={"shop_id": "TEST_SHOP_1"})
+        assert r.status_code == 200
+
+    def test_falls_back_to_db_shop_lookup(self, client, monkeypatch):
+        app, mod = client
+        from domain import Creds
+
+        monkeypatch.setattr(
+            mod, "_db_query_dict",
+            lambda sql, args=(): [{"shop_id": "TEST_SHOP_FROM_DB"}],
+        )
+        seen = {}
+
+        def _fake_creds(shop_id: str):
+            seen["shop_id"] = shop_id
+            return Creds(
+                access_token="t",  # noqa: S106 -- test fixture, not a real credential
+                shop_cipher="c",
+                region="VN",
+                shop_id=shop_id,
+            )
+
+        monkeypatch.setattr(mod, "_get_creds", _fake_creds)
+
+        class _FakeHttp:
+            def request(self, method, path, *, body=None, extra_params=None, timeout=30):
+                return {"code": 0, "data": {"order": {"id": "TEST_ORDER_9"}}}
+
+        monkeypatch.setattr(mod, "_tiktok_http_for", lambda creds: _FakeHttp())
+        monkeypatch.setattr(mod.tts_erp, "persist_order", lambda *a: True)
+        monkeypatch.setattr(mod.tts_erp, "persist_shop", lambda *a, **k: True)
+
+        r = app.post("/sync/order/TEST_ORDER_9", json={})
+        assert r.status_code == 200
+        assert seen["shop_id"] == "TEST_SHOP_FROM_DB"
