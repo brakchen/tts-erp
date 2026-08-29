@@ -66,6 +66,7 @@ def test_fernet_round_trip(fernet_key: str) -> None:
 
 def test_decrypt_with_wrong_key_fails(fernet_key: str) -> None:
     from cryptography.fernet import Fernet
+
     from tts_erp_v2.proxy.token_service import DecryptionError, encrypt
 
     # Encrypt with the test key.
@@ -95,12 +96,11 @@ def test_is_expired_respects_skew(fernet_key: str) -> None:
 
 def test_upsert_and_load_credentials(db_session, fernet_key: str) -> None:
     """Persist a row, then load it back and verify plaintext survives."""
+    from tts_erp_v2.db.models.integration import Credentials
     from tts_erp_v2.proxy.token_service import (
         load_credentials,
         upsert_credentials,
     )
-
-    from tts_erp_v2.db.models.integration import Credentials
 
     # Upsert initial.
     row = upsert_credentials(
@@ -127,7 +127,6 @@ def test_upsert_and_load_credentials(db_session, fernet_key: str) -> None:
     assert loaded.expires_at is not None
     # Ciphertext is NOT plaintext on disk — query the row directly to confirm.
     from sqlalchemy import select
-    from tts_erp_v2.db.models.integration import Credentials
     persisted = db_session.execute(
         select(Credentials).where(Credentials.external_account_id == "shop_TEST_001")
     ).scalar_one()
@@ -138,9 +137,9 @@ def test_upsert_and_load_credentials(db_session, fernet_key: str) -> None:
 def test_upsert_replaces_existing_row(db_session, fernet_key: str) -> None:
     """Re-upsert must update the same row (UNIQUE(provider, external_account_id))."""
     from sqlalchemy import select
-    from tts_erp_v2.proxy.token_service import upsert_credentials
 
     from tts_erp_v2.db.models.integration import Credentials
+    from tts_erp_v2.proxy.token_service import upsert_credentials
 
     upsert_credentials(
         db_session,
