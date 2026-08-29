@@ -69,30 +69,36 @@ shadow 观察模式；详见 `tech-doc/api-key-auth-design.md`）。key 分 read
 `GET /endpoints` 也可以拿到这列表。
 
 **OAuth 透传**（原样转发到 oauth-receiver:9876）
+
 - `GET /shops` 列出已授权 shops
 - `GET /shops/<shop_id>` 单个 shop 元数据
 - `GET /token/<shop_id>?reveal=1` 拿 token + cipher（明文 token，注意暴露面）
 
 **TikTok Order API 代理**（都要 `?shop_id=X`）
+
 - `POST /orders/search` / `POST /orders/list`
 - `GET  /orders/<order_id>`（详情，成功自动落库）
 - `POST /orders/<order_id>/{confirm,cancel,update_status,shipping_info,verify_shipping}` ⚠️ 写操作，直改真实店铺
 - `GET  /orders/<order_id>/{tracking,tracking/get,risk,buyer,recipient}`
 
 **TikTok Finance API 代理**
+
 - `GET /finance/statements?shop_id=X&page_size=50&sort_field=statement_time&sort_order=DESC`（sort_field 必填）
 - `GET /finance/payments?shop_id=X&page_size=50&sort_field=create_time&sort_order=DESC`
 
 **TikTok Return/Refund API 代理**（只读）
+
 - `POST /returns/search`       body: `{shop_id, ...}`
 - `POST /cancellations/search` body: `{shop_id, ...}`
 - CREATE 写端点（`POST /returns`、`/cancellations`）**不存在**——2026-08-17 起从代码删除，调用返 404
 
 **物流追踪**
+
 - `GET /logistics/orders/<order_id>/tracking?shop_id=X`（代理 + 自动落库）
 - `POST /sync/logistics_tracking` body: `{shop_id, order_ids?|all_with_tracking?, limit?, max_per_run?}`
 
 **本地 DB 读**
+
 - `GET /db/orders?shop_id=&status=&limit=` ｜ `/db/orders/<id>` ｜ `/items` ｜ `/shipping`
 - `GET /db/statements?shop_id=&limit=` ｜ `/db/payments?shop_id=&status=&limit=`
 - `GET /db/returns?shop_id=&status=&limit=` ｜ `/db/cancellations?shop_id=&status=&limit=`
@@ -100,14 +106,17 @@ shadow 观察模式；详见 `tech-doc/api-key-auth-design.md`）。key 分 read
 - `GET /db/sync_log`
 
 **财务 DB 读**（API 同步，2026-08-18 起替代 Excel 数据）
+
 - `GET /db/statement_transactions?shop_id=&statement_id=&order_id=&type=&limit=` 账单逐交易明细（58 字段/条：佣金/运费/税费/实收/实结）
 
 **同步**（TikTok → 本地；cron 每 10 分钟自动跑，见「定时同步」）
+
 - `POST /sync/{orders,statements,payments,returns,cancellations,statement_transactions}` body: `{shop_id, ...时间窗/分页参数}`
 - `POST /sync/logistics_tracking`
 - `POST /sync/order/<order_id>` 单订单同步 —— 未移植，恒 501
 
 **运维**
+
 - `GET /healthz` ｜ `GET /endpoints`
 
 ## 本地数据
@@ -131,6 +140,7 @@ token 续期归 oauth-receiver 管（每天 02:00），**tts-erp 侧不要再加
 ## 安装 / 部署
 
 服务已在 schan 服务器上运行：
+
 - 代码：`/home/schan/tts-erp/`（生产代码在 `tdd/tts_erp_fastapi.py`）
 - DB：`tts_erp` on `postgres` container
 - Token 源：`http://127.0.0.1:9876`（oauth-receiver）
@@ -211,6 +221,7 @@ TTS_DEBUG_SIGN=1 ...   # 看 stderr.log 里的 [tts-erp-debug] canonical 串，�
 ## 相关
 
 - `AGENTS.md` — AI agent 操作指南（单一真理源，改代码前必读）
+- `miaoshou/README.md` — 妙手集成：search_move_collect_list 字段语义、与 TikTok 数据的对应关系、实测结论
 - `CHANGELOG.md` — 变更历史
 - `handoff.md` — 跨 session 交接笔记
 - `/home/schan/setup/tts-erp-cron-sync.md` — cron 同步安装记录
