@@ -84,9 +84,7 @@ def _isolate_state(db_engine):
             delete(manual_costs_tbl).where(
                 manual_costs_tbl.c.channel_product_id.in_(
                     select_func(channel_products_tbl.c.id).where(
-                        channel_products_tbl.c.external_product_id.like(
-                            "TEST_%"
-                        )
+                        channel_products_tbl.c.external_product_id.like("TEST_%")
                     )
                 )
             )
@@ -101,9 +99,7 @@ def _isolate_state(db_engine):
                 channel_accounts_tbl.c.external_account_id.like("TEST_%")
             )
         )
-        conn.execute(
-            delete(api_keys_tbl).where(api_keys_tbl.c.name.like("TEST_%"))
-        )
+        conn.execute(delete(api_keys_tbl).where(api_keys_tbl.c.name.like("TEST_%")))
 
 
 def select_func(col):

@@ -54,7 +54,11 @@ class SlidingWindow:
 
     def _evict_old_keys(self) -> None:
         now = time.monotonic()
-        stale = [k for k, dq in self._buckets.items() if not dq or dq[-1] < now - EVICT_AFTER_S]
+        stale = [
+            k
+            for k, dq in self._buckets.items()
+            if not dq or dq[-1] < now - EVICT_AFTER_S
+        ]
         for k in stale:
             self._buckets.pop(k, None)
 
@@ -101,7 +105,9 @@ def reset_shared(limit: int | None = None) -> None:
         shared_counter(limit)
 
 
-def too_many_response(limit: int, retry_after: int) -> tuple[int, list[tuple[bytes, bytes]], bytes]:
+def too_many_response(
+    limit: int, retry_after: int
+) -> tuple[int, list[tuple[bytes, bytes]], bytes]:
     body = json.dumps(
         {
             "detail": f"rate limit exceeded: {limit} req/{WINDOW_S}s per api key",

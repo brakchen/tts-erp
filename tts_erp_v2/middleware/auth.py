@@ -178,7 +178,9 @@ def _prefix_of(key: str | None) -> str:
     return key[:16] if key else "-"
 
 
-def _deny_response(status: int, msg: str) -> tuple[int, list[tuple[bytes, bytes]], bytes]:
+def _deny_response(
+    status: int, msg: str
+) -> tuple[int, list[tuple[bytes, bytes]], bytes]:
     body = json.dumps({"detail": msg}).encode()
     headers: list[tuple[bytes, bytes]] = [(b"content-type", b"application/json")]
     if status == 401:
@@ -226,7 +228,9 @@ class AuthMiddleware:
                     await self.app(scope, receive, send)
                     return
                 s, hdrs, body = _deny_response(503, "auth store unavailable")
-                await send({"type": "http.response.start", "status": s, "headers": hdrs})
+                await send(
+                    {"type": "http.response.start", "status": s, "headers": hdrs}
+                )
                 await send({"type": "http.response.body", "body": body})
                 return
         else:
