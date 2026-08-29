@@ -3,26 +3,27 @@
 Returns dicts with normalized metric names. These power the §16
 acceptance KPI dashboard.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
-from tts_erp_v2.reporting import coverage
 
 from tts_erp_v2.db.models import (
     ChannelAccount,
     ChannelProduct,
     Credentials,
     LinkIssue,
-    ProductCostSnapshot,
-    ProductLink,
     ProcurementAccount,
     ProcurementProduct,
+    ProductCostSnapshot,
+    ProductLink,
     SalesOrder,
     SalesOrderLine,
 )
+from tts_erp_v2.reporting import coverage
 
 
 def _utc(year=2026, month=8, day=29):
@@ -30,10 +31,14 @@ def _utc(year=2026, month=8, day=29):
 
 
 def _acct(session):
-    cred = Credentials(provider="tiktok", external_account_id="TEST_TT_COV", ciphertext=b"\x00" * 32)
+    cred = Credentials(
+        provider="tiktok", external_account_id="TEST_TT_COV", ciphertext=b"\x00" * 32
+    )
     session.add(cred)
     session.flush()
-    a = ChannelAccount(platform="tiktok", external_account_id="TEST_TT_COV", credential_id=cred.id)
+    a = ChannelAccount(
+        platform="tiktok", external_account_id="TEST_TT_COV", credential_id=cred.id
+    )
     session.add(a)
     session.flush()
     return a
@@ -41,34 +46,52 @@ def _acct(session):
 
 # ─── 1. line-product resolution rate ─────────────────────────────────
 
+
 def test_line_product_resolution_rate(db_session):
     """order_line_product_resolution_rate = (lines with non-null
     channel_product_id) / total lines."""
     a = _acct(db_session)
     cp = ChannelProduct(
-        channel_account_id=a.id, external_product_id="TEST_RES_1",
-        title="TEST r", status="ACTIVE",
+        channel_account_id=a.id,
+        external_product_id="TEST_RES_1",
+        title="TEST r",
+        status="ACTIVE",
     )
     db_session.add(cp)
     db_session.flush()
     so = SalesOrder(
-        channel_account_id=a.id, external_order_id="TEST_SO_RES_1",
-        status="PAID", currency="USD",
-        payment_amount=Decimal("10"), paid_at=_utc(),
+        channel_account_id=a.id,
+        external_order_id="TEST_SO_RES_1",
+        status="PAID",
+        currency="USD",
+        payment_amount=Decimal("10"),
+        paid_at=_utc(),
     )
     db_session.add(so)
     db_session.flush()
     # 2 lines: 1 resolved, 1 unresolved
-    db_session.add(SalesOrderLine(
-        sales_order_id=so.id, external_line_id="L1",
-        channel_product_id=cp.id, quantity=Decimal("1"),
-        unit_price=Decimal("5"), currency="USD", line_status="NORMAL",
-    ))
-    db_session.add(SalesOrderLine(
-        sales_order_id=so.id, external_line_id="L2",
-        channel_product_id=None, quantity=Decimal("1"),
-        unit_price=Decimal("5"), currency="USD", line_status="NORMAL",
-    ))
+    db_session.add(
+        SalesOrderLine(
+            sales_order_id=so.id,
+            external_line_id="L1",
+            channel_product_id=cp.id,
+            quantity=Decimal("1"),
+            unit_price=Decimal("5"),
+            currency="USD",
+            line_status="NORMAL",
+        )
+    )
+    db_session.add(
+        SalesOrderLine(
+            sales_order_id=so.id,
+            external_line_id="L2",
+            channel_product_id=None,
+            quantity=Decimal("1"),
+            unit_price=Decimal("5"),
+            currency="USD",
+            line_status="NORMAL",
+        )
+    )
     db_session.flush()
 
     m = coverage.line_product_resolution_rate(db_session)
@@ -79,16 +102,19 @@ def test_line_product_resolution_rate(db_session):
 
 # ─── 2. spu linkage coverage ─────────────────────────────────────────
 
+
 def test_spu_linkage_coverage(db_session):
     """spu_linkage_coverage = channel_products that have at least one
     effective product_link / total active channel_products."""
     a = _acct(db_session)
     cp_linked = ChannelProduct(
-        channel_account_id=a.id, external_product_id="TEST_LINK_1",
+        channel_account_id=a.id,
+        external_product_id="TEST_LINK_1",
         status="ACTIVE",
     )
     cp_unlinked = ChannelProduct(
-        channel_account_id=a.id, external_product_id="TEST_NOLINK_1",
+        channel_account_id=a.id,
+        external_product_id="TEST_NOLINK_1",
         status="ACTIVE",
     )
     db_session.add_all([cp_linked, cp_unlinked])
@@ -96,13 +122,15 @@ def test_spu_linkage_coverage(db_session):
     # Seed a real procurement_account + procurement_product so the FK
     # on product_links.procurement_product_id is satisfied.
     pa_cred = Credentials(
-        provider="miaoshou", external_account_id="TEST_MS_COV",
+        provider="miaoshou",
+        external_account_id="TEST_MS_COV",
         ciphertext=b"\x00" * 32,
     )
     db_session.add(pa_cred)
     db_session.flush()
     pa = ProcurementAccount(
-        provider="miaoshou", external_account_id="TEST_MS_COV",
+        provider="miaoshou",
+        external_account_id="TEST_MS_COV",
         credential_id=pa_cred.id,
     )
     db_session.add(pa)
@@ -115,13 +143,15 @@ def test_spu_linkage_coverage(db_session):
     )
     db_session.add(pp)
     db_session.flush()
-    db_session.add(ProductLink(
-        procurement_product_id=pp.id,
-        channel_product_id=cp_linked.id,
-        relation_type="MIAOSHOU_PUBLISHED_TO_TIKTOK",
-        valid_from=_utc(),
-        valid_to=None,
-    ))
+    db_session.add(
+        ProductLink(
+            procurement_product_id=pp.id,
+            channel_product_id=cp_linked.id,
+            relation_type="MIAOSHOU_PUBLISHED_TO_TIKTOK",
+            valid_from=_utc(),
+            valid_to=None,
+        )
+    )
     db_session.flush()
 
     m = coverage.spu_linkage_coverage(db_session)
@@ -132,20 +162,25 @@ def test_spu_linkage_coverage(db_session):
 
 # ─── 3. conflict rate (link issues) ──────────────────────────────────
 
+
 def test_link_issue_rate(db_session):
     """conflict_rate = unresolved link issues / total channel_products."""
     a = _acct(db_session)
     cp = ChannelProduct(
-        channel_account_id=a.id, external_product_id="TEST_CONF_1", status="ACTIVE",
+        channel_account_id=a.id,
+        external_product_id="TEST_CONF_1",
+        status="ACTIVE",
     )
     db_session.add(cp)
     db_session.flush()
-    db_session.add(LinkIssue(
-        issue_type="AMBIGUOUS_SOURCE",
-        channel_product_id=cp.id,
-        status="OPEN",
-        candidate_count=2,
-    ))
+    db_session.add(
+        LinkIssue(
+            issue_type="AMBIGUOUS_SOURCE",
+            channel_product_id=cp.id,
+            status="OPEN",
+            candidate_count=2,
+        )
+    )
     db_session.flush()
 
     m = coverage.link_issue_rate(db_session)
@@ -156,27 +191,34 @@ def test_link_issue_rate(db_session):
 
 # ─── 4. cost-coverage rate ───────────────────────────────────────────
 
+
 def test_cost_coverage_rate(db_session):
     """cost_coverage_rate = active spus with effective cost snapshot /
     active spus total."""
     a = _acct(db_session)
     cp1 = ChannelProduct(
-        channel_account_id=a.id, external_product_id="TEST_COST_1", status="ACTIVE",
+        channel_account_id=a.id,
+        external_product_id="TEST_COST_1",
+        status="ACTIVE",
     )
     cp2 = ChannelProduct(
-        channel_account_id=a.id, external_product_id="TEST_COST_2", status="ACTIVE",
+        channel_account_id=a.id,
+        external_product_id="TEST_COST_2",
+        status="ACTIVE",
     )
     db_session.add_all([cp1, cp2])
     db_session.flush()
-    db_session.add(ProductCostSnapshot(
-        channel_product_id=cp1.id,
-        cost_method="MANUAL_ENTRY",
-        unit_cost=Decimal("5"),
-        currency="USD",
-        valid_from=_utc(),
-        valid_to=None,
-        calculation_version=1,
-    ))
+    db_session.add(
+        ProductCostSnapshot(
+            channel_product_id=cp1.id,
+            cost_method="MANUAL_ENTRY",
+            unit_cost=Decimal("5"),
+            currency="USD",
+            valid_from=_utc(),
+            valid_to=None,
+            calculation_version=1,
+        )
+    )
     db_session.flush()
 
     m = coverage.cost_coverage_rate(db_session)

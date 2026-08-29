@@ -7,6 +7,7 @@ ambiguity is surfaced to LinkIssue AMBIGUOUS_SOURCE.
 Each test inserts only TEST_-prefixed data; the session-end cleanup
 fixture purges without touching real rows.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -94,6 +95,7 @@ def _make_procurement_product(session, account, *, external_id="TEST_MS_PROD_1")
 
 # ─── 1. success task: evidence + product_link both written ──────────────
 
+
 def test_success_task_creates_evidence_and_product_link(db_session):
     """A SUCCESS move_collect task with platformItemId (TikTok SPU) yields
     one LinkEvidence row and one ProductLink row pointing to that SPU."""
@@ -119,24 +121,33 @@ def test_success_task_creates_evidence_and_product_link(db_session):
     assert n_links == 1
     assert n_evidence == 1
 
-    links = db_session.execute(
-        select(ProductLink).where(ProductLink.channel_product_id == cp.id)
-    ).scalars().all()
+    links = (
+        db_session.execute(
+            select(ProductLink).where(ProductLink.channel_product_id == cp.id)
+        )
+        .scalars()
+        .all()
+    )
     assert len(links) == 1
     link = links[0]
     assert link.procurement_product_id == pp.id
     assert link.relation_type == "MIAOSHOU_PUBLISHED_TO_TIKTOK"
     assert link.valid_to is None
 
-    evidences = db_session.execute(
-        select(LinkEvidence).where(LinkEvidence.product_link_id == link.id)
-    ).scalars().all()
+    evidences = (
+        db_session.execute(
+            select(LinkEvidence).where(LinkEvidence.product_link_id == link.id)
+        )
+        .scalars()
+        .all()
+    )
     assert len(evidences) == 1
     assert evidences[0].source_external_id == "TEST_TASK_1"
     assert evidences[0].evidence_type == "MOVE_COLLECT_TASK"
 
 
 # ─── 2. fail task: evidence only, no product_link ──────────────────────
+
 
 def test_fail_task_keeps_evidence_no_link(db_session):
     """FAIL tasks keep evidence but do NOT create a product_link.
@@ -176,6 +187,7 @@ def test_fail_task_keeps_evidence_no_link(db_session):
 # ─── 3. AMBIGUOUS_SOURCE: 2 valid miaoshou links to same channel_product
 #       ⇒ link_issues row, no AMBIGUOUS_SOURCE-state link
 
+
 def test_ambiguous_source_raises_issue_and_blocks_link(db_session):
     """Two valid product_links pointing to the same channel_product from
     different procurement products raises AMBIGUOUS_SOURCE and the second
@@ -208,9 +220,13 @@ def test_ambiguous_source_raises_issue_and_blocks_link(db_session):
     compute.process_move_collect_task(db_session, task=t1, **base_kwargs)
     compute.process_move_collect_task(db_session, task=t2, **base_kwargs)
 
-    links = db_session.execute(
-        select(ProductLink).where(ProductLink.channel_product_id == cp.id)
-    ).scalars().all()
+    links = (
+        db_session.execute(
+            select(ProductLink).where(ProductLink.channel_product_id == cp.id)
+        )
+        .scalars()
+        .all()
+    )
     assert len(links) == 2
 
     valid_links = [lnk for lnk in links if lnk.valid_to is None]
@@ -221,9 +237,13 @@ def test_ambiguous_source_raises_issue_and_blocks_link(db_session):
     assert valid_links[0].procurement_product_id == pp2.id
     assert superseded_links[0].procurement_product_id == pp1.id
 
-    issues = db_session.execute(
-        select(LinkIssue).where(LinkIssue.issue_type == "AMBIGUOUS_SOURCE")
-    ).scalars().all()
+    issues = (
+        db_session.execute(
+            select(LinkIssue).where(LinkIssue.issue_type == "AMBIGUOUS_SOURCE")
+        )
+        .scalars()
+        .all()
+    )
     assert len(issues) >= 1
     issue = issues[-1]
     assert issue.channel_product_id == cp.id
@@ -232,6 +252,7 @@ def test_ambiguous_source_raises_issue_and_blocks_link(db_session):
 
 
 # ─── 4. UNRESOLVED: task references unknown channel_product_id
+
 
 def test_task_with_unknown_channel_product_writes_issue(db_session):
     """A success task pointing to a channel_product that doesn't exist
@@ -264,6 +285,7 @@ def test_task_with_unknown_channel_product_writes_issue(db_session):
 
 # ─── 5. ALREADY_LINKED: re-processing same evidence idempotent
 
+
 def test_reprocessing_same_task_is_idempotent(db_session):
     """Re-running the same external_task_id does not create duplicate
     product_links. Either upsert on (procurement_product_id,
@@ -287,7 +309,13 @@ def test_reprocessing_same_task_is_idempotent(db_session):
     compute.process_move_collect_task(db_session, task=task, **base_kwargs)
     compute.process_move_collect_task(db_session, task=task, **base_kwargs)
 
-    links = db_session.execute(
-        select(ProductLink).where(ProductLink.relation_type == "MIAOSHOU_PUBLISHED_TO_TIKTOK")
-    ).scalars().all()
+    links = (
+        db_session.execute(
+            select(ProductLink).where(
+                ProductLink.relation_type == "MIAOSHOU_PUBLISHED_TO_TIKTOK"
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert len(links) == 1

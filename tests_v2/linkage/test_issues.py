@@ -4,6 +4,7 @@ These are pure functions returning ORM objects (or list thereof) that
 the link-compute job (or any operator dashboard) can persist. They do
 NOT touch the database on their own.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -16,6 +17,7 @@ def _ts() -> datetime:
 
 
 # ─── PRODUCT_LINK_MISSING ─────────────────────────────────────────────
+
 
 def test_detect_product_link_missing_returns_issue_payload():
     out = issues.detect_product_link_missing(
@@ -35,6 +37,7 @@ def test_detect_product_link_missing_returns_issue_payload():
 
 # ─── MULTIPLE_PRIMARY_LINKS ───────────────────────────────────────────
 
+
 def test_detect_multiple_primary_links_two_primaries():
     out = issues.detect_multiple_primary_links(
         channel_product_id=42,
@@ -48,11 +51,14 @@ def test_detect_multiple_primary_links_two_primaries():
 
 
 def test_detect_multiple_primary_links_zero_returns_none():
-    out = issues.detect_multiple_primary_links(channel_product_id=42, primary_link_ids=[])
+    out = issues.detect_multiple_primary_links(
+        channel_product_id=42, primary_link_ids=[]
+    )
     assert out is None
 
 
 # ─── AMBIGUOUS_SOURCE ─────────────────────────────────────────────────
+
 
 def test_detect_ambiguous_source_payload():
     out = issues.detect_ambiguous_source(
@@ -73,6 +79,7 @@ def test_detect_ambiguous_source_single_returns_none():
 
 
 # ─── generic helper ───────────────────────────────────────────────────
+
 
 def test_make_issue_base_fields():
     out = issues.make_issue(

@@ -5,13 +5,13 @@ PERIOD_AVERAGE_COST > WEIGHTED_AVERAGE_COST. 1688 collect listing cost
 is explicitly NOT a fallback. Products with no source produce NO
 snapshot and show up in the no-cost inventory.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import select
-from tts_erp_v2.reporting import cost_snapshots
 
 from tts_erp_v2.db.models import (
     ChannelAccount,
@@ -20,6 +20,7 @@ from tts_erp_v2.db.models import (
     ManualProductCost,
     ProductCostSnapshot,
 )
+from tts_erp_v2.reporting import cost_snapshots
 
 
 def _utc(year=2026, month=8, day=29):
@@ -27,10 +28,14 @@ def _utc(year=2026, month=8, day=29):
 
 
 def _make_channel_account(session, external_id="TEST_TT_SHOP_C"):
-    cred = Credentials(provider="tiktok", external_account_id=external_id, ciphertext=b"\x00" * 32)
+    cred = Credentials(
+        provider="tiktok", external_account_id=external_id, ciphertext=b"\x00" * 32
+    )
     session.add(cred)
     session.flush()
-    acct = ChannelAccount(platform="tiktok", external_account_id=external_id, credential_id=cred.id)
+    acct = ChannelAccount(
+        platform="tiktok", external_account_id=external_id, credential_id=cred.id
+    )
     session.add(acct)
     session.flush()
     return acct
@@ -49,6 +54,7 @@ def _make_channel_product(session, account, external_id, status="ACTIVE"):
 
 
 # ─── 1. priority: MANUAL_ENTRY wins ───────────────────────────────────
+
 
 def test_manual_entry_wins_over_purchase_order(db_session):
     """When both manual_product_costs AND purchase_order_lines exist for
@@ -84,6 +90,7 @@ def test_manual_entry_wins_over_purchase_order(db_session):
 
 # ─── 2. fallback to LATEST_PURCHASE_COST ──────────────────────────────
 
+
 def test_fallback_to_latest_purchase_cost_when_no_manual(db_session):
     """No manual cost ⇒ use purchase-order-derived LATEST_PURCHASE_COST."""
     ca = _make_channel_account(db_session)
@@ -101,6 +108,7 @@ def test_fallback_to_latest_purchase_cost_when_no_manual(db_session):
 
 # ─── 3. no source ⇒ NO snapshot ──────────────────────────────────────
 
+
 def test_no_source_produces_no_snapshot(db_session):
     """When both manual AND purchase-order inputs are missing, return
     None. Cost-snapshot job will then skip this SPU; it will appear in
@@ -116,13 +124,20 @@ def test_no_source_produces_no_snapshot(db_session):
     assert actual is None
 
     # No snapshot row should have been written by the resolver itself
-    snaps = db_session.execute(
-        select(ProductCostSnapshot).where(ProductCostSnapshot.channel_product_id == cp.id)
-    ).scalars().all()
+    snaps = (
+        db_session.execute(
+            select(ProductCostSnapshot).where(
+                ProductCostSnapshot.channel_product_id == cp.id
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert len(snaps) == 0
 
 
 # ─── 4. COLLECT_LISTING_COST is rejected ─────────────────────────────
+
 
 def test_collect_listing_cost_is_rejected_explicitly(db_session):
     """Passing the COLLECT_LISTING_COST method (1688 listing price) is
@@ -145,24 +160,33 @@ def test_collect_listing_cost_is_rejected_explicitly(db_session):
 
 # ─── 5. no-cost inventory query ───────────────────────────────────────
 
+
 def test_no_cost_inventory_lists_active_spus_without_snapshot(db_session):
     """active_spus_without_cost() returns active channel_products with no
     effective cost (no manual, no purchase_order unit cost)."""
     ca = _make_channel_account(db_session)
-    cp_active_no_cost = _make_channel_product(db_session, ca, "TEST_SPU_ACTIVE_NC", status="ACTIVE")
-    cp_active_with_cost = _make_channel_product(db_session, ca, "TEST_SPU_ACTIVE_OK", status="ACTIVE")
-    cp_inactive_no_cost = _make_channel_product(db_session, ca, "TEST_SPU_DELISTED", status="DELETED")
+    cp_active_no_cost = _make_channel_product(
+        db_session, ca, "TEST_SPU_ACTIVE_NC", status="ACTIVE"
+    )
+    cp_active_with_cost = _make_channel_product(
+        db_session, ca, "TEST_SPU_ACTIVE_OK", status="ACTIVE"
+    )
+    cp_inactive_no_cost = _make_channel_product(
+        db_session, ca, "TEST_SPU_DELISTED", status="DELETED"
+    )
     _ = (cp_active_no_cost, cp_inactive_no_cost)  # noqa: F841
 
     # cp_active_with_cost gets a manual entry
-    db_session.add(ManualProductCost(
-        channel_product_id=cp_active_with_cost.id,
-        unit_cost=Decimal("9.99"),
-        currency="USD",
-        valid_from=_utc(),
-        valid_to=None,
-        created_by="TEST_user",
-    ))
+    db_session.add(
+        ManualProductCost(
+            channel_product_id=cp_active_with_cost.id,
+            unit_cost=Decimal("9.99"),
+            currency="USD",
+            valid_from=_utc(),
+            valid_to=None,
+            created_by="TEST_user",
+        )
+    )
     db_session.flush()
 
     rows = cost_snapshots.active_spus_without_cost(db_session)
@@ -174,20 +198,23 @@ def test_no_cost_inventory_lists_active_spus_without_snapshot(db_session):
 
 # ─── 6. historical manual cost (valid_to set) is not picked up ────────
 
+
 def test_historical_manual_cost_not_picked_up(db_session):
     """An old manual cost (valid_to NOT NULL) must NOT be used. Only the
     effective row (valid_to IS NULL) counts."""
     ca = _make_channel_account(db_session)
     cp = _make_channel_product(db_session, ca, "TEST_SPU_HIST")
 
-    db_session.add(ManualProductCost(
-        channel_product_id=cp.id,
-        unit_cost=Decimal("2.00"),  # old cheap price
-        currency="USD",
-        valid_from=_utc(2025, 1, 1),
-        valid_to=_utc(2025, 6, 1),
-        created_by="TEST_user",
-    ))
+    db_session.add(
+        ManualProductCost(
+            channel_product_id=cp.id,
+            unit_cost=Decimal("2.00"),  # old cheap price
+            currency="USD",
+            valid_from=_utc(2025, 1, 1),
+            valid_to=_utc(2025, 6, 1),
+            created_by="TEST_user",
+        )
+    )
     db_session.flush()
 
     actual = cost_snapshots.resolve_unit_cost(
