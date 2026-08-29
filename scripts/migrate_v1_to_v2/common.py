@@ -18,6 +18,7 @@ from typing import Any
 
 import psycopg
 from sqlalchemy import create_engine
+from sqlalchemy.pool import NullPool
 from sqlalchemy.engine import Engine
 
 # Best-effort load of .env so the scripts work when invoked directly
@@ -138,7 +139,10 @@ def get_source_engine() -> Engine:
     scripts in this package never write to them.
     """
     url = _psycopg_url()
-    return create_engine(url, future=True, pool_pre_ping=True)
+    # NullPool: migration scripts are short-lived batch processes; a pooled
+    # engine per call site exhausts max_connections=100 when tests drive all
+    # scripts in one pytest process. Each use opens and closes its own conn.
+    return create_engine(url, future=True, pool_pre_ping=True, poolclass=NullPool)
 
 
 def get_target_engine() -> Engine:
@@ -147,7 +151,7 @@ def get_target_engine() -> Engine:
     Reads/writes the nine new schemas (integration/commerce/...).
     """
     url = _psycopg_url()
-    return create_engine(url, future=True, pool_pre_ping=True)
+    return create_engine(url, future=True, pool_pre_ping=True, poolclass=NullPool)
 
 
 def get_oauth_engine() -> Engine:
@@ -161,7 +165,7 @@ def get_oauth_engine() -> Engine:
     # Strip /<dbname> and replace with /oauth_receiver.
     new_path = "/oauth_receiver"
     oauth_url = urllib.parse.urlunparse(parsed._replace(path=new_path))
-    return create_engine(oauth_url, future=True, pool_pre_ping=True)
+    return create_engine(oauth_url, future=True, pool_pre_ping=True, poolclass=NullPool)
 
 
 def get_oauth_raw_connection() -> psycopg.Connection:
