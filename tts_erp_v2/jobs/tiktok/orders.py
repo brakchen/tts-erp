@@ -78,14 +78,28 @@ class ParseError(ValueError):
 # ─── Time conversion helpers (epoch seconds ↔ epoch milliseconds) ──
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    """Coerce to int without raising; ``None``/garbage → ``default``.
+
+    Defensive wrapper for epoch conversions — upstream fields and
+    stored watermarks are integers in practice, but a stray string or
+    float should degrade to ``default`` instead of crashing the whole
+    job page.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _epoch_seconds_to_utc(seconds: int | None) -> datetime | None:
     if seconds is None or seconds <= 0:
         return None
-    return datetime.fromtimestamp(int(seconds), tz=timezone.utc)
+    return datetime.fromtimestamp(_safe_int(seconds), tz=timezone.utc)
 
 
 def _epoch_ms_to_seconds(ms: int) -> int:
-    return int(ms) // 1000
+    return _safe_int(ms) // 1000
 
 
 # ─── Channel-account resolution ──────────────────────────────────
@@ -174,37 +188,66 @@ def _parse_order_payload(raw: dict[str, Any]) -> dict[str, Any]:
     (channel_account_id is filled in by the caller). Raises
     :class:`ParseError` when the row cannot be coerced (missing
     required fields).
+
+    TikTok 202309 field mapping (verified 2026-08-30 against live
+    /order/202309/orders/search responses):
+
+    * order id: ``id`` (NOT ``order_id``)
+    * money: nested ``payment`` object — ``payment.total_amount`` /
+      ``payment.sub_total`` / ``payment.original_total_product_price``
+      (there is NO ``payment_amount`` on the order anymore)
+    * ship timestamp: ``rts_time`` (NOT ``ship_time``)
     """
-    order_id = raw.get("order_id")
+    order_id = raw.get("order_id") or raw.get("id")
     if not order_id:
         raise ParseError("order_id missing from upstream order")
     update_time_s = raw.get("update_time")
     if update_time_s is None:
         raise ParseError(f"update_time missing from order {order_id}")
-    payment = raw.get("payment_amount") or {}
+    payment = raw.get("payment") or {}
+    # TikTok 202309: the payable total lives on the nested ``payment``
+    # object. Legacy v1 code read ``payment_amount.amount`` — that
+    # shape no longer exists.
+    payable = payment.get("total_amount") or payment.get("sub_total")
     return {
         "external_order_id": str(order_id),
-        "status": raw.get("order_status"),
+        "status": raw.get("status") or raw.get("order_status"),
         "currency": raw.get("currency") or payment.get("currency"),
-        "payment_amount": _to_decimal(payment.get("amount")),
+        "payment_amount": _to_decimal(payable),
         "total_amount": _to_decimal(
-            (raw.get("total_amount") or {}).get("amount")
+            payment.get("total_amount")
+            or payment.get("sub_total")
+            or (raw.get("total_amount") or {}).get("amount")
         ),
         "fulfillment_type": raw.get("fulfillment_type"),
         "source_created_at": _epoch_seconds_to_utc(raw.get("create_time")),
         "source_updated_at": _epoch_seconds_to_utc(update_time_s),
         "paid_at": _epoch_seconds_to_utc(raw.get("paid_time")),
-        "shipped_at": _epoch_seconds_to_utc(raw.get("ship_time")),
-        "delivered_at": _epoch_seconds_to_utc(raw.get("delivered_time")),
-        "cancelled_at": _epoch_seconds_to_utc(raw.get("cancel_time")),
+        "shipped_at": _epoch_seconds_to_utc(
+            raw.get("rts_time") or raw.get("ship_time")
+        ),
+        "delivered_at": _epoch_seconds_to_utc(
+            raw.get("delivered_time") or raw.get("delivery_time")
+        ),
+        "cancelled_at": _epoch_seconds_to_utc(
+            raw.get("cancel_time") or raw.get("cancelled_time")
+        ),
     }
 
 
 def _parse_line_payload(order_id: str, raw: dict[str, Any]) -> dict[str, Any]:
-    line_id = raw.get("line_id")
+    line_id = raw.get("line_id") or raw.get("id")
     if not line_id:
         raise ParseError(f"line_id missing from order {order_id} line")
-    sale_price = raw.get("sale_price") or {}
+    # TikTok 202309: ``sale_price`` is a plain numeric string
+    # (e.g. "553169"), NOT a ``{"amount": ...}`` object.
+    sale_price_raw = raw.get("sale_price")
+    if isinstance(sale_price_raw, dict):
+        sale_price = sale_price_raw.get("amount")
+        currency = sale_price_raw.get("currency") or raw.get("currency")
+    else:
+        sale_price = sale_price_raw
+        currency = raw.get("currency")
     return {
         "external_line_id": str(line_id),
         # channel_product_id / channel_product_variant_id stay NULL
@@ -214,11 +257,11 @@ def _parse_line_payload(order_id: str, raw: dict[str, Any]) -> dict[str, Any]:
         "external_variant_id_snapshot": raw.get("sku_id"),
         "product_name_snapshot": raw.get("product_name"),
         "variant_name_snapshot": raw.get("sku_name"),
-        "image_url_snapshot": raw.get("product_image_url"),
+        "image_url_snapshot": raw.get("sku_image") or raw.get("product_image_url"),
         "quantity": _to_decimal(raw.get("quantity")),
-        "unit_price": _to_decimal(sale_price.get("amount")),
-        "currency": sale_price.get("currency"),
-        "line_status": raw.get("line_status"),
+        "unit_price": _to_decimal(sale_price),
+        "currency": currency,
+        "line_status": raw.get("display_status") or raw.get("line_status"),
     }
 
 
@@ -360,7 +403,9 @@ def run(
 
     base_body: dict[str, Any] = {"page_size": page_size}
     if watermark_ms:
-        base_body["update_time_ge"] = _epoch_ms_to_seconds(int(watermark_ms))
+        base_body["update_time_ge"] = _epoch_ms_to_seconds(
+            _safe_int(watermark_ms)
+        )
 
     raw_orders = _walk_pages(proxy_call, base_body=base_body)
 
@@ -373,14 +418,14 @@ def run(
         rows_total += 1
         try:
             fields = _parse_order_payload(raw)
-        except ParseError as e:
+        except ParseError as exc:
             rows_failed += 1
             _record_issue(
                 session,
                 job_name=JOB_NAME,
                 issue_type="PARSE_ERROR",
                 external_id=str(raw.get("order_id") or "<unknown>"),
-                details={"error": str(e), "raw": _safe_truncate(raw)},
+                details={"error": str(exc), "raw": _safe_truncate(raw)},
             )
             continue
 
@@ -402,14 +447,14 @@ def run(
         for raw_line in raw.get("line_items") or []:
             try:
                 line_fields = _parse_line_payload(order_external_id, raw_line)
-            except ParseError as e:
+            except ParseError as exc:
                 _record_issue(
                     session,
                     job_name=JOB_NAME,
                     issue_type="PARSE_ERROR",
                     external_id=f"{order_external_id}:{raw_line.get('line_id')}",
                     details={
-                        "error": str(e),
+                        "error": str(exc),
                         "raw": _safe_truncate(raw_line),
                         "order_external_id": order_external_id,
                     },
@@ -423,8 +468,10 @@ def run(
             )
 
         rows_inserted += 1
-        update_ms = (fields.get("source_updated_at") and
-                     int(fields["source_updated_at"].timestamp() * 1000))
+        update_ms = (
+            fields.get("source_updated_at")
+            and _safe_int(fields["source_updated_at"].timestamp() * 1000)
+        )
         if update_ms and (max_update_time_ms is None or update_ms > max_update_time_ms):
             max_update_time_ms = update_ms
 
@@ -433,7 +480,8 @@ def run(
     # spuriously reset it to 0).
     new_cursor_ms: int | None = None
     if max_update_time_ms is not None and (
-        watermark_ms is None or max_update_time_ms > int(watermark_ms)
+        watermark_ms is None
+        or max_update_time_ms > _safe_int(watermark_ms)
     ):
         watermarks.set_cursor(
             session,
