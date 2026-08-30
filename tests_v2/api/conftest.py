@@ -32,6 +32,8 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import delete
+from sqlalchemy.orm import Session
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -57,29 +59,38 @@ def _isolate_state(db_engine):
     finishes (so subsequent tests don't see cached lookups). The DB
     cleanup runs at teardown only.
     """
-    from sqlalchemy import delete
-
-    from tts_erp_v2.db.base import Base
+    # Setup: wipe any TEST_ rows left over from a previous run, then
+    # clear cached middleware state so a freshly-inserted key is queried
+    # fresh rather than served from the in-process cache.
     from tts_erp_v2.middleware.auth import clear_cache
     from tts_erp_v2.middleware.rate_limit import reset_shared
 
-    api_keys_tbl = Base.metadata.tables["security.api_keys"]
-    manual_costs_tbl = Base.metadata.tables["procurement.manual_product_costs"]
-    channel_products_tbl = Base.metadata.tables["commerce.channel_products"]
-    channel_accounts_tbl = Base.metadata.tables["commerce.channel_accounts"]
-
-    # Setup: clear cached middleware state.
+    _wipe_test_rows(db_engine)
     clear_cache()
     reset_shared()
     yield
     # Teardown: clear cached middleware state again, then wipe rows.
     clear_cache()
     reset_shared()
+    _wipe_test_rows(db_engine)
+
+
+def _wipe_test_rows(db_engine) -> None:
+    """Delete every TEST_-prefixed row from the tables Lane E may touch.
+
+    Uses a direct ``db_engine.begin()`` connection so the wipe survives
+    the test-session savepoint (handlers commit inside the request and
+    their rows outlive the test's transactional rollback). Delete order
+    is child → parent to respect FKs.
+    """
+    from tts_erp_v2.db.base import Base
+
+    api_keys_tbl = Base.metadata.tables["security.api_keys"]
+    manual_costs_tbl = Base.metadata.tables["procurement.manual_product_costs"]
+    channel_products_tbl = Base.metadata.tables["commerce.channel_products"]
+    channel_accounts_tbl = Base.metadata.tables["commerce.channel_accounts"]
+
     with db_engine.begin() as conn:
-        # Delete in dependency order (child → parent). SQLAlchemy Core
-        # ``delete(Table).where(...)`` is the canonical parameterized
-        # shape — literal ``"TEST_%"`` flows through bound params, not
-        # string interpolation.
         conn.execute(
             delete(manual_costs_tbl).where(
                 manual_costs_tbl.c.channel_product_id.in_(
@@ -185,10 +196,17 @@ def _make_disabled(sess, prefix: str) -> str:
 
 
 def _key_fixture(make):
-    """Each test gets a fresh session + key, with autouse cleanup."""
+    """Each test gets a fresh API key, written with a REAL commit.
 
-    def _fixture(db_session) -> Iterator[str]:
-        key = make(db_session)
+    The app under test authenticates via its own connections, so the key
+    row must be truly committed (the shared ``db_session`` fixture is
+    savepoint-rolled-back and therefore invisible to the app). The
+    autouse ``_isolate_state`` cleanup wipes TEST_* rows afterwards.
+    """
+
+    def _fixture(db_engine) -> Iterator[str]:
+        with Session(db_engine) as sess:
+            key = make(sess)
         yield key
 
     return pytest.fixture()(_fixture)

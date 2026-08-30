@@ -14,6 +14,7 @@ We re-apply all migrations in a fixture before calling reconcile so
 the source/target counts are consistent at the moment reconcile reads
 them.
 """
+
 from __future__ import annotations
 
 import json
@@ -23,14 +24,12 @@ import sys
 import pytest
 
 
-@pytest.fixture(autouse=True)
-def _reapply_migrations_before_reconcile() -> None:
-    """Re-apply every migration right before reconcile runs.
+def _reapply_all_migrations() -> None:
+    """Re-apply every migration (idempotent).
 
     The live production DB can receive new rows while the test suite
-    runs (the legacy sync cron is still active). Without this fixture,
-    the source/target counts drift apart and reconcile reports DIFFs.
-    The re-apply is idempotent and fast (~5s for the whole set).
+    runs (the legacy sync cron is still active). Without this, the
+    source/target counts drift apart and reconcile reports DIFFs.
     """
     from scripts.migrate_v1_to_v2 import (
         migrate_after_sales,
@@ -40,9 +39,22 @@ def _reapply_migrations_before_reconcile() -> None:
         migrate_orders,
         migrate_shops,
     )
-    for mod in (migrate_shops, migrate_orders, migrate_logistics,
-                migrate_after_sales, migrate_finance, migrate_miaoshou):
+
+    for mod in (
+        migrate_shops,
+        migrate_orders,
+        migrate_logistics,
+        migrate_after_sales,
+        migrate_finance,
+        migrate_miaoshou,
+    ):
         mod.run(dry_run=False, verbose=False)
+
+
+@pytest.fixture(autouse=True)
+def _reapply_migrations_before_reconcile() -> None:
+    """Re-apply every migration right before reconcile runs."""
+    _reapply_all_migrations()
 
 
 def _run_reconcile(*args: str) -> subprocess.CompletedProcess:
@@ -51,12 +63,18 @@ def _run_reconcile(*args: str) -> subprocess.CompletedProcess:
     Using a subprocess (rather than importing ``run()``) exercises the
     real CLI entry point, including argparse parsing and the
     sys.exit() contract.
+
+    Live-drift guard: the legacy sync cron writes new source rows every
+    ~10 min, so a write can land between the re-apply fixture and this
+    subprocess, producing a spurious count DIFF. On a non-zero exit we
+    re-apply migrations once and retry; only a second failure is real.
     """
-    return subprocess.run(
-        [sys.executable, "-m",
-         "scripts.migrate_v1_to_v2.reconcile", *args],
-        capture_output=True, text=True, check=False,
-    )
+    cmd = [sys.executable, "-m", "scripts.migrate_v1_to_v2.reconcile", *args]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        _reapply_all_migrations()
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    return result
 
 
 def test_reconcile_exits_zero_on_clean_state() -> None:
@@ -140,9 +158,15 @@ def test_reconcile_results_cover_documented_axes() -> None:
     data = json.loads(result.stdout)
     result_names = {r["name"] for r in data["results"]}
     # Axis 1: row counts.
-    count_names = [n for n in result_names if "channel_accounts" in n
-                   or "sales_orders" in n or "shipments" in n
-                   or "cases" in n or "payouts" in n]
+    count_names = [
+        n
+        for n in result_names
+        if "channel_accounts" in n
+        or "sales_orders" in n
+        or "shipments" in n
+        or "cases" in n
+        or "payouts" in n
+    ]
     assert count_names, "no count-axis results in reconcile output"
     # Axis 2: amount sums.
     sum_names = [n for n in result_names if "sum" in n]

@@ -25,6 +25,13 @@ def _count(table: str) -> int:
             "SELECT count(*) FROM finance.settlement_transactions",
         "finance.settlement_components":
             "SELECT count(*) FROM finance.settlement_components",
+        # live-source mirrors used for drift-tolerant assertions
+        "public.payments":
+            "SELECT count(*) FROM public.payments",
+        "public.statements":
+            "SELECT count(*) FROM public.statements",
+        "public.statement_transactions":
+            "SELECT count(*) FROM public.statement_transactions",
     }
     if table not in table_q:
         raise ValueError(f"unknown table {table!r}")
@@ -34,16 +41,20 @@ def _count(table: str) -> int:
 
 
 def test_dry_run_reports_full_population(dry_run_runner) -> None:
-    """Dry-run sees all 23 payments, 44 statements, 296 transactions."""
+    """Dry-run sees every current source payment, statement, transaction.
+
+    The legacy sync cron appends to ``public.payments`` etc. live; we
+    capture counts at runtime rather than hard-coding the initial 23/44/296.
+    """
     stats = dry_run_runner("finance")
-    assert stats.payments_seen == 23
-    assert stats.statements_seen == 44
-    assert stats.transactions_seen == 296
+    assert stats.payments_seen == _count("public.payments")
+    assert stats.statements_seen == _count("public.statements")
+    assert stats.transactions_seen == _count("public.statement_transactions")
 
 
 def test_real_run_payouts_match_source() -> None:
-    """23 payments → 23 payouts."""
-    assert _count("finance.payouts") == 23
+    """Payments → payouts: one-to-one in current source state."""
+    assert _count("finance.payouts") == _count("public.payments")
 
 
 def test_real_run_settlement_statements_partial() -> None:

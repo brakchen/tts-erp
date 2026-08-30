@@ -9,6 +9,7 @@ Covers:
 * Product binding: channel_product_id stays NULL when products aren't
   synced yet (the documented initial state).
 """
+
 from __future__ import annotations
 
 from datetime import timezone
@@ -18,15 +19,16 @@ from scripts.migrate_v1_to_v2.common import epoch_seconds_to_utc
 
 def _count(table: str) -> int:
     from tts_erp_v2.db.base import get_engine
+
     eng = get_engine()
     table_q = {
-        "commerce.sales_orders":
-            "SELECT count(*) FROM commerce.sales_orders",
-        "commerce.sales_order_lines":
-            "SELECT count(*) FROM commerce.sales_order_lines",
-        "integration.sync_issues":
-            "SELECT count(*) FROM integration.sync_issues "
-            "WHERE job_name = 'migrate.orders'",
+        "commerce.sales_orders": "SELECT count(*) FROM commerce.sales_orders",
+        "commerce.sales_order_lines": "SELECT count(*) FROM commerce.sales_order_lines",
+        "integration.sync_issues": "SELECT count(*) FROM integration.sync_issues "
+        "WHERE job_name = 'migrate.orders'",
+        # live-source mirrors used for drift-tolerant assertions
+        "public.orders": "SELECT count(*) FROM public.orders",
+        "public.order_items": "SELECT count(*) FROM public.order_items",
     }
     if table not in table_q:
         raise ValueError(f"unknown table {table!r}")
@@ -36,22 +38,25 @@ def _count(table: str) -> int:
 
 
 def test_dry_run_reports_full_population(dry_run_runner) -> None:
-    """All 720 source orders + 749 items should plan to migrate."""
+    """Dry-run sees every current source order + item.
+
+    The legacy sync cron appends to ``public.orders`` live, so we capture
+    source counts at runtime rather than hard-coding 720/749.
+    """
+    src_orders = _count("public.orders")
+    src_items = _count("public.order_items")
     stats = dry_run_runner("orders")
-    assert stats.orders_seen == 720
-    assert stats.items_seen == 749
+    assert stats.orders_seen == src_orders
+    assert stats.items_seen == src_items
     # In dry-run every order resolves its channel_account (the 1 real
     # TikTok shop exists in the target), so fk_missing stays 0.
     assert stats.orders_fk_missing == 0
 
 
 def test_real_run_matches_source_counts() -> None:
-    """After the session-level migration, target counts equal source."""
-    # commerce.sales_orders == public.orders (both 720 in prod)
-    src = 720
-    assert _count("commerce.sales_orders") == src
-    # commerce.sales_order_lines == public.order_items (both 749 in prod)
-    assert _count("commerce.sales_order_lines") == 749
+    """Target row counts equal current source row counts (live-truth)."""
+    assert _count("commerce.sales_orders") == _count("public.orders")
+    assert _count("commerce.sales_order_lines") == _count("public.order_items")
 
 
 def test_real_run_is_idempotent(real_runner) -> None:
@@ -79,6 +84,7 @@ def test_real_run_dedupes_sync_issues(real_runner) -> None:
 def test_orders_timestamps_are_timestamptz() -> None:
     """paid_at, shipped_at, etc. land as UTC-aware datetimes."""
     from tts_erp_v2.db.base import get_engine
+
     eng = get_engine()
     with eng.connect() as conn:
         row = conn.exec_driver_sql(
@@ -122,6 +128,7 @@ def test_order_lines_snapshot_product_name() -> None:
     """Even when channel_product_id is NULL, the snapshot columns hold
     the truth for later join (per V3 §14: NEVER auto-bind by title)."""
     from tts_erp_v2.db.base import get_engine
+
     eng = get_engine()
     with eng.connect() as conn:
         row = conn.exec_driver_sql(
@@ -141,6 +148,7 @@ def test_sync_issues_external_id_is_product_id() -> None:
     """sync_issues rows for unresolvable products carry the product_id
     as external_id (not the order_id or item_id)."""
     from tts_erp_v2.db.base import get_engine
+
     eng = get_engine()
     with eng.connect() as conn:
         row = conn.exec_driver_sql(

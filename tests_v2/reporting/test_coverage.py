@@ -50,6 +50,7 @@ def _acct(session):
 def test_line_product_resolution_rate(db_session):
     """order_line_product_resolution_rate = (lines with non-null
     channel_product_id) / total lines."""
+    base = coverage.line_product_resolution_rate(db_session)
     a = _acct(db_session)
     cp = ChannelProduct(
         channel_account_id=a.id,
@@ -64,7 +65,7 @@ def test_line_product_resolution_rate(db_session):
         external_order_id="TEST_SO_RES_1",
         status="PAID",
         currency="USD",
-        payment_amount=Decimal("10"),
+        payment_amount=Decimal(10),
         paid_at=_utc(),
     )
     db_session.add(so)
@@ -75,8 +76,8 @@ def test_line_product_resolution_rate(db_session):
             sales_order_id=so.id,
             external_line_id="L1",
             channel_product_id=cp.id,
-            quantity=Decimal("1"),
-            unit_price=Decimal("5"),
+            quantity=Decimal(1),
+            unit_price=Decimal(5),
             currency="USD",
             line_status="NORMAL",
         )
@@ -86,8 +87,8 @@ def test_line_product_resolution_rate(db_session):
             sales_order_id=so.id,
             external_line_id="L2",
             channel_product_id=None,
-            quantity=Decimal("1"),
-            unit_price=Decimal("5"),
+            quantity=Decimal(1),
+            unit_price=Decimal(5),
             currency="USD",
             line_status="NORMAL",
         )
@@ -95,9 +96,12 @@ def test_line_product_resolution_rate(db_session):
     db_session.flush()
 
     m = coverage.line_product_resolution_rate(db_session)
-    assert m["total_lines"] == 2
-    assert m["resolved_lines"] == 1
-    assert m["rate"] == pytest.approx(0.5)
+    # baseline-delta: the dev DB may already hold migrated production rows
+    assert m["total_lines"] == base["total_lines"] + 2
+    assert m["resolved_lines"] == base["resolved_lines"] + 1
+    assert m["rate"] == pytest.approx(
+        (base["resolved_lines"] + 1) / (base["total_lines"] + 2)
+    )
 
 
 # ─── 2. spu linkage coverage ─────────────────────────────────────────
@@ -106,6 +110,7 @@ def test_line_product_resolution_rate(db_session):
 def test_spu_linkage_coverage(db_session):
     """spu_linkage_coverage = channel_products that have at least one
     effective product_link / total active channel_products."""
+    base = coverage.spu_linkage_coverage(db_session)
     a = _acct(db_session)
     cp_linked = ChannelProduct(
         channel_account_id=a.id,
@@ -155,9 +160,11 @@ def test_spu_linkage_coverage(db_session):
     db_session.flush()
 
     m = coverage.spu_linkage_coverage(db_session)
-    assert m["active_spus"] == 2
-    assert m["linked_spus"] == 1
-    assert m["rate"] == pytest.approx(0.5)
+    assert m["active_spus"] == base["active_spus"] + 2
+    assert m["linked_spus"] == base["linked_spus"] + 1
+    assert m["rate"] == pytest.approx(
+        (base["linked_spus"] + 1) / (base["active_spus"] + 2)
+    )
 
 
 # ─── 3. conflict rate (link issues) ──────────────────────────────────
@@ -165,6 +172,7 @@ def test_spu_linkage_coverage(db_session):
 
 def test_link_issue_rate(db_session):
     """conflict_rate = unresolved link issues / total channel_products."""
+    base = coverage.link_issue_rate(db_session)
     a = _acct(db_session)
     cp = ChannelProduct(
         channel_account_id=a.id,
@@ -184,9 +192,11 @@ def test_link_issue_rate(db_session):
     db_session.flush()
 
     m = coverage.link_issue_rate(db_session)
-    assert m["unresolved_issues"] == 1
-    assert m["active_spus"] == 1
-    assert m["rate"] == pytest.approx(1.0)
+    assert m["unresolved_issues"] == base["unresolved_issues"] + 1
+    assert m["active_spus"] == base["active_spus"] + 1
+    assert m["rate"] == pytest.approx(
+        (base["unresolved_issues"] + 1) / (base["active_spus"] + 1)
+    )
 
 
 # ─── 4. cost-coverage rate ───────────────────────────────────────────
@@ -195,6 +205,7 @@ def test_link_issue_rate(db_session):
 def test_cost_coverage_rate(db_session):
     """cost_coverage_rate = active spus with effective cost snapshot /
     active spus total."""
+    base = coverage.cost_coverage_rate(db_session)
     a = _acct(db_session)
     cp1 = ChannelProduct(
         channel_account_id=a.id,
@@ -212,7 +223,7 @@ def test_cost_coverage_rate(db_session):
         ProductCostSnapshot(
             channel_product_id=cp1.id,
             cost_method="MANUAL_ENTRY",
-            unit_cost=Decimal("5"),
+            unit_cost=Decimal(5),
             currency="USD",
             valid_from=_utc(),
             valid_to=None,
@@ -222,6 +233,8 @@ def test_cost_coverage_rate(db_session):
     db_session.flush()
 
     m = coverage.cost_coverage_rate(db_session)
-    assert m["active_spus"] == 2
-    assert m["costed_spus"] == 1
-    assert m["rate"] == pytest.approx(0.5)
+    assert m["active_spus"] == base["active_spus"] + 2
+    assert m["costed_spus"] == base["costed_spus"] + 1
+    assert m["rate"] == pytest.approx(
+        (base["costed_spus"] + 1) / (base["active_spus"] + 2)
+    )

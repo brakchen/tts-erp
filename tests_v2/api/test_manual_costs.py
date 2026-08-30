@@ -18,44 +18,49 @@ Per Lane E spec:
 from __future__ import annotations
 
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 
-def _seed_channel_product(db_session, external_id: str) -> int:
+def _seed_channel_product(db_engine, external_id: str) -> int:
     """Seed a channel_account + channel_product pair; return the product id.
 
-    Commits so the request handler (which uses its own session via
-    ``get_session``) can read the rows. The cleanup fixture wipes
-    TEST_-prefixed rows at teardown.
+    Uses a dedicated real-commit session because the request handler
+    reads via its own connection (the shared ``db_session`` fixture is
+    savepoint-rolled-back and therefore invisible to the handler). The
+    cleanup fixture wipes TEST_-prefixed rows at teardown.
     """
-    db_session.execute(
-        text(
-            "INSERT INTO commerce.channel_accounts "
-            "(platform, external_account_id, account_name, status) "
-            "VALUES ('tiktok', 'TEST_acct_for_costs', 'TEST acct', 'active')"
+    from sqlalchemy.orm import Session
+
+    with Session(db_engine) as sess:
+        sess.execute(
+            text(
+                "INSERT INTO commerce.channel_accounts "
+                "(platform, external_account_id, account_name, status) "
+                "VALUES ('tiktok', 'TEST_acct_for_costs', 'TEST acct', 'active')"
+            )
         )
-    )
-    acct_id = db_session.execute(
-        text(
-            "SELECT id FROM commerce.channel_accounts "
-            "WHERE external_account_id = 'TEST_acct_for_costs'"
+        acct_id = sess.execute(
+            text(
+                "SELECT id FROM commerce.channel_accounts "
+                "WHERE external_account_id = 'TEST_acct_for_costs'"
+            )
+        ).scalar()
+        sess.execute(
+            text(
+                "INSERT INTO commerce.channel_products "
+                "(channel_account_id, external_product_id, title, status) "
+                "VALUES (:acct, :ext, 'TEST title', 'active')"
+            ),
+            {"acct": acct_id, "ext": external_id},
         )
-    ).scalar()
-    db_session.execute(
-        text(
-            "INSERT INTO commerce.channel_products "
-            "(channel_account_id, external_product_id, title, status) "
-            "VALUES (:acct, :ext, 'TEST title', 'active')"
-        ),
-        {"acct": acct_id, "ext": external_id},
-    )
-    db_session.commit()
-    cp_id = db_session.execute(
-        text(
-            "SELECT id FROM commerce.channel_products "
-            "WHERE external_product_id = :ext"
-        ),
-        {"ext": external_id},
-    ).scalar()
+        sess.commit()
+        cp_id = sess.execute(
+            text(
+                "SELECT id FROM commerce.channel_products "
+                "WHERE external_product_id = :ext"
+            ),
+            {"ext": external_id},
+        ).scalar()
     return cp_id
 
 
@@ -116,10 +121,10 @@ def test_manual_costs_rejects_zero_or_negative(api_client, readwrite_key):
 
 
 def test_manual_costs_happy_path_writes_row(
-    api_client, readwrite_key, db_session
+    api_client, readwrite_key, db_engine
 ):
     """Successful POST inserts into procurement.manual_product_costs."""
-    cp_id = _seed_channel_product(db_session, "TEST_mc_happy")
+    cp_id = _seed_channel_product(db_engine, "TEST_mc_happy")
     r = api_client.post(
         "/v2/reporting/manual-costs",
         headers={"Authorization": f"Bearer {readwrite_key}"},
@@ -136,17 +141,18 @@ def test_manual_costs_happy_path_writes_row(
     assert body["currency"] == "USD"
     assert body["note"] == "first entry"
 
-    # Verify the row really is in the DB (inside this test's session,
-    # which is wrapped in db_session — but the POST commits via the
-    # handler, so we read back via a fresh statement).
-    row = db_session.execute(
-        text(
-            "SELECT unit_cost, currency, valid_to, note, created_by "
-            "FROM procurement.manual_product_costs "
-            "WHERE channel_product_id = :cp ORDER BY id DESC LIMIT 1"
-        ),
-        {"cp": cp_id},
-    ).first()
+    # Verify the row really is in the DB by reading back via a fresh
+    # session (the handler commits via its own session; our shared
+    # ``db_session`` fixture is savepoint-rolled-back).
+    with Session(db_engine) as verify_sess:
+        row = verify_sess.execute(
+            text(
+                "SELECT unit_cost, currency, valid_to, note, created_by "
+                "FROM procurement.manual_product_costs "
+                "WHERE channel_product_id = :cp ORDER BY id DESC LIMIT 1"
+            ),
+            {"cp": cp_id},
+        ).first()
     assert row is not None
     assert str(row.unit_cost).startswith("12.34")
     assert row.currency == "USD"
@@ -156,10 +162,10 @@ def test_manual_costs_happy_path_writes_row(
 
 
 def test_manual_costs_second_submission_closes_first(
-    api_client, readwrite_key, db_session
+    api_client, readwrite_key, db_engine
 ):
     """Submitting twice for the same SPU: first row's valid_to gets set."""
-    cp_id = _seed_channel_product(db_session, "TEST_mc_history")
+    cp_id = _seed_channel_product(db_engine, "TEST_mc_history")
 
     r1 = api_client.post(
         "/v2/reporting/manual-costs",
@@ -183,14 +189,15 @@ def test_manual_costs_second_submission_closes_first(
     )
     assert r2.status_code == 201
 
-    rows = db_session.execute(
-        text(
-            "SELECT id, unit_cost, valid_to FROM "
-            "procurement.manual_product_costs "
-            "WHERE channel_product_id = :cp ORDER BY id ASC"
-        ),
-        {"cp": cp_id},
-    ).all()
+    with Session(db_engine) as verify_sess:
+        rows = verify_sess.execute(
+            text(
+                "SELECT id, unit_cost, valid_to FROM "
+                "procurement.manual_product_costs "
+                "WHERE channel_product_id = :cp ORDER BY id ASC"
+            ),
+            {"cp": cp_id},
+        ).all()
     assert len(rows) == 2
     # First row (older): valid_to should now be set
     assert rows[0].valid_to is not None

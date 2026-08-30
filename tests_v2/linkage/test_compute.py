@@ -12,8 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select
-from tts_erp_v2.linkage import compute
+from sqlalchemy import func, select
 
 from tts_erp_v2.db.models import (
     ChannelAccount,
@@ -25,6 +24,7 @@ from tts_erp_v2.db.models import (
     ProcurementProduct,
     ProductLink,
 )
+from tts_erp_v2.linkage import compute
 
 
 def _utc(year=2026, month=8, day=29):
@@ -155,6 +155,7 @@ def test_fail_task_keeps_evidence_no_link(db_session):
     provenance for debugging."""
     ca = _make_channel_account(db_session)
     pa = _make_procurement_account(db_session)
+    links_before = db_session.execute(select(func.count(ProductLink.id))).scalar_one()
 
     task = {
         "external_task_id": "TEST_TASK_FAIL_1",
@@ -175,13 +176,22 @@ def test_fail_task_keeps_evidence_no_link(db_session):
     assert n_evidence == 1
 
     # link evidence must exist but product_link_id must be NULL (orphaned evidence)
-    evidences = db_session.execute(select(LinkEvidence)).scalars().all()
+    evidences = (
+        db_session.execute(
+            select(LinkEvidence).where(
+                LinkEvidence.source_external_id == "TEST_TASK_FAIL_1"
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert len(evidences) == 1
     assert evidences[0].product_link_id is None
-    assert evidences[0].source_external_id == "TEST_TASK_FAIL_1"
 
-    # no product_link row
-    assert db_session.execute(select(ProductLink)).scalars().first() is None
+    # no product_link row was created by this task (baseline-delta: the dev
+    # DB may already hold migrated production links)
+    after_links = db_session.execute(select(func.count(ProductLink.id))).scalar_one()
+    assert after_links == links_before
 
 
 # ─── 3. AMBIGUOUS_SOURCE: 2 valid miaoshou links to same channel_product
@@ -239,7 +249,10 @@ def test_ambiguous_source_raises_issue_and_blocks_link(db_session):
 
     issues = (
         db_session.execute(
-            select(LinkIssue).where(LinkIssue.issue_type == "AMBIGUOUS_SOURCE")
+            select(LinkIssue).where(
+                LinkIssue.issue_type == "AMBIGUOUS_SOURCE",
+                LinkIssue.channel_product_id == cp.id,
+            )
         )
         .scalars()
         .all()
