@@ -111,7 +111,7 @@ graph LR
 #### 1.0.1 关键业务动词
 
 | 关系 | 含义 | 当前实现 | 备注 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Shop `拥有` Order | TikTok 一店多订单 | `orders.shop_id` (❌ 无 FK) | 跨所有子聚合的总根 |
 | Order `包含` OrderItem | 订单内多商品 | `order_items.(order_id, item_id)` PK | 聚合内部 |
 | Order `收货于` Recipient | 收货人(姓名/电话/地址) | `orders.raw.recipient_address` | **⚠️ 业务上 1:1 但 schema 嵌入 raw** |
@@ -153,6 +153,7 @@ graph LR
 ```
 
 **核心交互**:
+
 - Shop 是所有聚合的 **tenant boundary**(一个店铺的所有订单 / 售后 / 对账都在它的命名空间下)
 - Order 聚合是 **业务事件流的核心节点** — Return / Cancellation / StatementTransaction 都通过 `order_id` 关联回它
 - Finance ↔ Order 是 **跨上下文集成**(anti-corruption layer 体现在:财务不直接改订单,只是按 order_id 归集)
@@ -161,7 +162,7 @@ graph LR
 #### 1.0.3 聚合根 vs 值对象 vs 实体
 
 | 类别 | 实体 | 备注 |
-|---|---|---|
+| --- | --- | --- |
 | **聚合根** | Shop, Order, Return, Cancellation, LogisticsTracking, Statement, PaymentRecord, MiaoshouShop | 都有自己的生命周期和唯一标识 |
 | **聚合内部实体** | OrderItem (Order 内部), ReturnLineItem (Return 内部), CancellationLineItem (Cancellation 内部), LogisticsEvent (LogisticsTracking 内部), StatementTransaction (Statement 内部), CollectBox, PriceTemplate, MoveCollectTask | 跟随聚合根生命周期 |
 | **值对象(嵌入聚合根)** | Recipient (Order 内), Payment (Order 内), Shipment (Order 内) | **目前嵌在 raw,但语义上是独立值对象** |
