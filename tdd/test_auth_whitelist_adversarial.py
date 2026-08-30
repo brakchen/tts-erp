@@ -6,13 +6,10 @@ Author: Wave 4 QA agent (third-party / adversarial review).
 """
 
 from __future__ import annotations
-
 import hashlib
-
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
-
 import auth
 from tts_erp_fastapi import app
 
@@ -37,9 +34,9 @@ def adv_keys(db_url):
     conn = psycopg.connect(db_url)
     try:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM api_keys WHERE name LIKE 'ADVERSARIAL_%'")
+            cur.execute("DELETE FROM security.api_keys WHERE name LIKE 'ADVERSARIAL_%'")
             cur.executemany(
-                "INSERT INTO api_keys (key_hash, key_prefix, name, role, enabled)"
+                "INSERT INTO security.api_keys (key_hash, key_prefix, name, role, status)"
                 " VALUES (%s, %s, %s, %s, %s)",
                 [
                     (
@@ -47,21 +44,21 @@ def adv_keys(db_url):
                         KEY_RO[:16],
                         "ADVERSARIAL_auth_ro",
                         "readonly",
-                        True,
+                        "active",
                     ),
                     (
                         _sha256(KEY_RW),
                         KEY_RW[:16],
                         "ADVERSARIAL_auth_rw",
                         "readwrite",
-                        True,
+                        "active",
                     ),
                     (
                         _sha256(KEY_ADMIN),
                         KEY_ADMIN[:16],
                         "ADVERSARIAL_auth_admin",
                         "admin",
-                        True,
+                        "active",
                     ),
                 ],
             )
@@ -70,7 +67,7 @@ def adv_keys(db_url):
         yield
     finally:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM api_keys WHERE name LIKE 'ADVERSARIAL_%'")
+            cur.execute("DELETE FROM security.api_keys WHERE name LIKE 'ADVERSARIAL_%'")
         conn.commit()
         conn.close()
         auth.clear_cache()

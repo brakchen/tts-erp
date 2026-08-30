@@ -8,7 +8,6 @@ Auth mode is controlled per-test via monkeypatch on TTS_ERP_AUTH_MODE.
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timedelta, timezone
 
 import auth
 import psycopg
@@ -33,53 +32,40 @@ def _sha256(s: str) -> str:
 def auth_keys(db_url):
     """Insert TEST_ api keys (own connection + commit) and clean up after."""
     conn = psycopg.connect(db_url)
-    past = datetime.now(timezone.utc) - timedelta(days=1)
     try:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM api_keys WHERE name LIKE 'TEST_%'")
+            cur.execute("DELETE FROM security.api_keys WHERE name LIKE 'TEST_%'")
             cur.executemany(
-                "INSERT INTO api_keys (key_hash, key_prefix, name, role, enabled, expires_at)"
-                " VALUES (%s, %s, %s, %s, %s, %s)",
+                "INSERT INTO security.api_keys (key_hash, key_prefix, name, role, status)"
+                " VALUES (%s, %s, %s, %s, %s)",
                 [
                     (
                         _sha256(KEY_RO),
                         KEY_RO[:16],
                         "TEST_auth_ro",
                         "readonly",
-                        True,
-                        None,
+                        "active",
                     ),
                     (
                         _sha256(KEY_RW),
                         KEY_RW[:16],
                         "TEST_auth_rw",
                         "readwrite",
-                        True,
-                        None,
+                        "active",
                     ),
                     (
                         _sha256(KEY_ADMIN),
                         KEY_ADMIN[:16],
                         "TEST_auth_admin",
                         "admin",
-                        True,
-                        None,
+                        "active",
                     ),
                     (
                         _sha256(KEY_DISABLED),
                         KEY_DISABLED[:16],
                         "TEST_auth_disabled",
                         "readonly",
-                        False,
-                        None,
-                    ),
-                    (
-                        _sha256(KEY_EXPIRED),
-                        KEY_EXPIRED[:16],
-                        "TEST_auth_expired",
-                        "readonly",
-                        True,
-                        past,
+                        "disabled",
                     ),
                 ],
             )
@@ -88,7 +74,7 @@ def auth_keys(db_url):
         yield
     finally:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM api_keys WHERE name LIKE 'TEST_%'")
+            cur.execute("DELETE FROM security.api_keys WHERE name LIKE 'TEST_%'")
         conn.commit()
         conn.close()
         auth.clear_cache()
@@ -312,7 +298,7 @@ def test_cache_delays_revocation_until_clear(client, auth_keys, db_url, monkeypa
     # Revoke directly in DB; cached entry still passes
     conn = psycopg.connect(db_url)
     with conn.cursor() as cur:
-        cur.execute("UPDATE api_keys SET enabled = false WHERE name = 'TEST_auth_ro'")
+        cur.execute("UPDATE security.api_keys SET status = 'disabled' WHERE name = 'TEST_auth_ro'")
     conn.commit()
     conn.close()
     assert client.get("/db/orders?limit=1", headers=_auth(KEY_RO)).status_code == 200

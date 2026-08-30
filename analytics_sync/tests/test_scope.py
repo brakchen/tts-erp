@@ -5,11 +5,9 @@ may act on. Empty scopes = unrestricted (operator default). `*` = wildcard.
 Otherwise, every reference must be matched by at least one scope entry.
 """
 from __future__ import annotations
-
 import hashlib
-import secrets
-
 import psycopg
+import secrets
 import pytest
 
 from analytics_sync.auth import scope_grants
@@ -88,10 +86,10 @@ def seller_scoped_token(db_url: str):
     with psycopg.connect(db_url) as conn, conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO api_keys (key_prefix, key_hash, name, role, scopes, enabled)
-            VALUES (%s, %s, %s, 'readwrite', %s, true)
+            INSERT INTO security.api_keys (key_prefix, key_hash, name, role, status)
+            VALUES (%s, %s, %s, 'readwrite', 'active')
             """,
-            (plaintext[:16], h, "TEST_scoped", ["seller:TEST_scoped_seller"]),
+            (plaintext[:16], h, "TEST_scoped"),
         )
         conn.commit()
     return plaintext

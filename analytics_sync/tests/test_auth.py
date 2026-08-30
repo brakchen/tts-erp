@@ -1,12 +1,8 @@
 """Tests for sync-token auth middleware (Bearer / X-Sync-Token)."""
 from __future__ import annotations
-
 import hashlib
-import os
-import secrets
-
 import psycopg
-import pytest
+import secrets
 
 
 def test_missing_token_returns_401(fastapi_client):
@@ -32,8 +28,8 @@ def test_disabled_token_returns_401(fastapi_client, db_url):
     h = hashlib.sha256(plaintext.encode()).hexdigest()
     with psycopg.connect(db_url) as conn, conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO api_keys (key_prefix, key_hash, name, role, scopes, enabled) "
-            "VALUES (%s, %s, %s, 'readwrite', ARRAY[]::TEXT[], false)",
+            "INSERT INTO security.api_keys (key_prefix, key_hash, name, role, status) "
+            "VALUES (%s, %s, %s, 'readwrite', 'disabled')",
             (plaintext[:16], h, "TEST_disabled"),
         )
         conn.commit()

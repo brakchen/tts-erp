@@ -36,17 +36,16 @@ def admin_key(db_url):
     conn = psycopg.connect(db_url)
     try:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM api_keys WHERE name LIKE 'TEST_miaoshou_%'")
+            cur.execute("DELETE FROM security.api_keys WHERE name LIKE 'TEST_miaoshou_%'")
             cur.execute(
-                "INSERT INTO api_keys (key_hash, key_prefix, name, role, enabled, expires_at)"
-                " VALUES (%s, %s, %s, %s, %s, %s)",
+                "INSERT INTO security.api_keys (key_hash, key_prefix, name, role, status)"
+                " VALUES (%s, %s, %s, %s, %s)",
                 (
                     _sha256(KEY_ADMIN),
                     KEY_ADMIN[:16],
                     "TEST_miaoshou_admin",
                     "admin",
-                    True,
-                    None,
+                    "active",
                 ),
             )
         conn.commit()
@@ -54,7 +53,7 @@ def admin_key(db_url):
         yield KEY_ADMIN
     finally:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM api_keys WHERE name LIKE 'TEST_miaoshou_%'")
+            cur.execute("DELETE FROM security.api_keys WHERE name LIKE 'TEST_miaoshou_%'")
         conn.commit()
         conn.close()
         auth.clear_cache()

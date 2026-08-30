@@ -5,11 +5,7 @@ with Retry-After. Anonymous traffic is bucketed by IP.
 """
 from __future__ import annotations
 
-import os
-import time
-
 import pytest
-from fastapi.testclient import TestClient
 
 from analytics_sync import rate_limit as rl
 
@@ -55,7 +51,9 @@ def test_over_limit_returns_429_with_retry_after(fastapi_client, sync_token):
 def test_different_tokens_have_independent_buckets(fastapi_client, db_url):
     """Token A's quota exhaustion does not affect token B."""
     # Mint two tokens via direct DB inserts.
-    import hashlib, secrets
+    import hashlib
+    import secrets
+
     from analytics_sync.auth import clear_cache
     clear_cache()
 
@@ -65,8 +63,8 @@ def test_different_tokens_have_independent_buckets(fastapi_client, db_url):
         import psycopg
         with psycopg.connect(db_url) as conn, conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO api_keys (key_prefix, key_hash, name, role, scopes, enabled) "
-                "VALUES (%s, %s, %s, 'readwrite', ARRAY[]::TEXT[], true)",
+                "INSERT INTO security.api_keys (key_prefix, key_hash, name, role, status) "
+                "VALUES (%s, %s, %s, 'readwrite', 'active')",
                 (plaintext[:16], h, f"TEST_rl_{label}"),
             )
             conn.commit()
@@ -114,7 +112,7 @@ def test_healthz_is_exempt_from_rate_limit(fastapi_client, sync_token):
 def test_allow_function_basic():
     """Unit test on the bucket primitive directly."""
     rl.reset_buckets()
-    for i in range(5):
+    for _ in range(5):
         ok, retry = rl.allow("test-key")
         assert ok is True
         assert retry == 0

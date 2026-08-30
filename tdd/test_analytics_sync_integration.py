@@ -88,7 +88,7 @@ def _disable_token(plaintext: str):
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "UPDATE api_keys SET enabled = false WHERE key_prefix = %s",
+                "UPDATE security.api_keys SET status = 'disabled' WHERE key_prefix = %s",
                 (plaintext[:16],),
             )
         conn.commit()
@@ -166,7 +166,7 @@ def _session_cleanup():
             cur.execute(
                 "DELETE FROM analytics_shop_timezones WHERE seller_id LIKE 'TEST_sync_int%'"
             )  # noqa: S608
-            cur.execute("DELETE FROM api_keys WHERE name LIKE 'TEST_sync_int%'")  # noqa: S608
+            cur.execute("DELETE FROM security.api_keys WHERE name LIKE 'TEST_sync_int%'")  # noqa: S608
             cur.execute(
                 "DELETE FROM analytics_audit_log WHERE key_prefix LIKE 'anlsync%%' OR key_prefix LIKE 'ttserp_rw_TEST_%%'"
             )  # noqa: S608

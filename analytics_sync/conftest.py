@@ -99,7 +99,7 @@ def _cleanup_test_data(db_url: str):
                 "DELETE FROM analytics_shop_timezones WHERE seller_id LIKE 'TEST_%'"
             )
             cur.execute(
-                "DELETE FROM api_keys WHERE name LIKE 'TEST_%' OR key_prefix LIKE 'ttserp_%%TEST%%'"
+                "DELETE FROM security.api_keys WHERE name LIKE 'TEST_%' OR key_prefix LIKE 'ttserp_%%TEST%%'"
             )
             cur.execute(
                 "DELETE FROM analytics_audit_log WHERE key_prefix LIKE 'ttserp_%%'"
@@ -126,13 +126,18 @@ def _insert_test_key(
     role_prefix = {"readonly": "ro", "readwrite": "rw", "admin": "admin"}[role]
     plaintext = f"ttserp_{role_prefix}_T" + secrets.token_urlsafe(24)
     h = hashlib.sha256(plaintext.encode()).hexdigest()
+    # V3 schema dropped the ``scopes`` and ``enabled`` columns; the
+    # function signature keeps them for back-compat with existing
+    # callers, but the SQL only writes the V3 columns. ``enabled``
+    # is mapped to ``status='active' | 'disabled'`` here.
+    status = "active" if enabled else "disabled"
     with psycopg.connect(db_url) as conn, conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO api_keys (key_prefix, key_hash, name, role, scopes, enabled)
-            VALUES (%s, %s, %s, %s, %s::TEXT[], %s)
+            INSERT INTO security.api_keys (key_prefix, key_hash, name, role, status)
+            VALUES (%s, %s, %s, %s, %s)
             """,
-            (plaintext[:16], h, name, role, scopes, enabled),
+            (plaintext[:16], h, name, role, status),
         )
         conn.commit()
     # Clear cache so the new token is recognized on first request.
@@ -170,10 +175,9 @@ def fastapi_client(db_url: str):
     os.environ["ANALYTICS_SYNC_AUTH_MODE"] = os.environ.get(
         "ANALYTICS_SYNC_AUTH_MODE", "enforce"
     )
-    from fastapi.testclient import TestClient
-
     from analytics_sync import rate_limit as rl_mod
     from analytics_sync.app import app
+    from fastapi.testclient import TestClient
     from tdd.auth import clear_cache as _auth_clear
 
     _auth_clear()
