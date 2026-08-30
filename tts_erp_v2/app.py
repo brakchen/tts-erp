@@ -33,6 +33,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from analytics_sync.app import router as analytics_sync_router
 from tts_erp_v2.api.v2 import auth, commerce, linkage, llm_context, pages, reporting
 from tts_erp_v2.middleware.access_log import AccessLogMiddleware
 from tts_erp_v2.middleware.auth import AuthMiddleware
@@ -46,6 +47,16 @@ def _build_routes(app: FastAPI) -> None:
     app.include_router(pages.router)
     app.include_router(llm_context.router)
     app.include_router(auth.router)  # browser login + session cookie
+    # analytics_sync (Chrome extension upload + cursor) — unified under
+    # tts-erp management per the 2026-08-30 refactor. Standalone port 9878
+    # is now retired. Auth + rate-limit are inherited from the parent
+    # app's middleware stack; the router's handlers read
+    # `request.scope["api_key_hash"]` / `request.scope["api_key_scopes"]`
+    # which AuthMiddleware populates above (see
+    # tts_erp_v2/middleware/auth.py:399-410).
+    app.include_router(
+        analytics_sync_router, prefix="/v1/analytics/sync"
+    )
 
 
 def build_app() -> FastAPI:
@@ -122,23 +133,17 @@ def _register_public_routes(app: FastAPI) -> None:
         The legacy public ``/db/*``, ``/orders/*``, ``/sync/*``, and
         ``/token/*`` endpoints are intentionally NOT exposed in v2
         (hard switch — see tech-doc/refactor-tech-plan-v2 §6).
+
+        Walks ``app.routes`` recursively so routers mounted via
+        ``include_router`` (commerce / linkage / reporting / pages /
+        llm_context / auth / analytics_sync) all surface. FastAPI 0.141
+        wraps every ``include_router`` child in a lazy ``_IncludedRouter``
+        proxy that has no ``path`` attribute — a flat walk would
+        silently drop every business route. See
+        ``tests_v2/api/test_endpoints_index.py`` for the regression
+        guard.
         """
-        items = []
-        for r in app.routes:
-            path = getattr(r, "path", None)
-            if not path:
-                continue
-            methods = getattr(r, "methods", None) or set()
-            if not methods:
-                continue
-            items.append(
-                {
-                    "path": path,
-                    "methods": sorted(methods - {"HEAD"}),
-                    "name": getattr(r, "name", None),
-                }
-            )
-        items.sort(key=lambda x: x["path"])
+        items = sorted(_walk_v2_routes(app.routes), key=lambda x: x["path"])
         return JSONResponse({"endpoints": items, "count": len(items)})
 
 
@@ -146,6 +151,48 @@ def _env_auth_mode() -> str:
     import os
 
     return os.environ.get("TTS_ERP_AUTH_MODE", "off")
+
+
+def _walk_v2_routes(routes, prefix=""):
+    """Yield ``{path, methods, name}`` for every routable entry under v2.
+
+    Recurses into ``_IncludedRouter.original_router.routes`` so business
+    routers mounted via ``include_router`` (``commerce``, ``linkage``,
+    ``reporting``, ``pages``, ``llm_context``, ``auth``,
+    ``analytics_sync``) all surface in the operator-facing /endpoints
+    index. FastAPI 0.141 wraps every include_router child in a lazy
+    ``_IncludedRouter`` proxy that has no ``path`` attribute — a flat
+    walk would silently drop every business route.
+
+    Tracks the prefix stack: ``include_router(router, prefix="/foo")``
+    stores ``prefix="/foo"`` on ``_IncludedRouter.include_context``
+    but leaves the child APIRoute ``.path`` un-prefixed. We re-apply
+    the prefix here so the operator sees the *public* path
+    (``/v1/analytics/sync/cursor``) rather than the *internal* one
+    (``/cursor``).
+
+    The recursion lives here (not on the app object) so it stays a pure
+    helper that tests can import without booting the whole app.
+    """
+    for r in routes:
+        # FastAPI 0.141+ lazy router wrapper from include_router().
+        if hasattr(r, "original_router") and hasattr(r.original_router, "routes"):
+            ctx = getattr(r, "include_context", None)
+            extra = getattr(ctx, "prefix", "") if ctx is not None else ""
+            child_prefix = prefix + extra
+            yield from _walk_v2_routes(r.original_router.routes, child_prefix)
+            continue
+        path = getattr(r, "path", None) or getattr(r, "path_format", None)
+        if not path:
+            continue
+        methods = getattr(r, "methods", None) or set()
+        if not methods:
+            continue
+        yield {
+            "path": prefix + path,
+            "methods": sorted(methods - {"HEAD"}),
+            "name": getattr(r, "name", None),
+        }
 
 
 # Module-level app for ``uvicorn tts_erp_v2.app:app``.

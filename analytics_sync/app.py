@@ -1,16 +1,25 @@
 """analytics_sync handlers — mounted under tts-erp FastAPI at /v1/analytics/sync.
 
-Routes go through tts-erp's AuthMiddleware (api_keys table) and
-RateLimitMiddleware (per api_key_hash). This module provides only
-handlers + Pydantic models.
+This module provides only handlers, Pydantic models, and pure helpers
+(scope_grants, _key_prefix, _scopes, _request_id_from_headers, etc).
+
+Mounted exclusively by ``tts_erp_v2.app:build_app()`` via
+``app.include_router(router, prefix="/v1/analytics/sync")``. Auth and
+rate-limiting are inherited from the v2 app's middleware stack:
+
+- ``tts_erp_v2.middleware.auth.AuthMiddleware`` populates
+  ``request.scope["api_key_hash"]`` and ``request.scope["api_key_scopes"]``
+  before each handler runs.
+- ``tts_erp_v2.middleware.rate_limit.RateLimitMiddleware`` buckets per
+  ``api_key_hash``.
+
+The standalone :9878 service was retired 2026-08-30; ``analytics_sync``
+no longer ships its own FastAPI app, auth middleware, or rate-limit
+middleware. See ``setup/analytics-sync.md`` for the new deployment
+topology (one process — ``tts-erp`` on :9877 — hosts every API).
 
 Per-seller scope check is enforced inside each handler by reading
-`request.scope["api_key_scopes"]` (populated by tts-erp/auth.py).
-No middleware of our own.
-
-Run standalone (NOT recommended):
-    uvicorn analytics_sync.app:app --host 0.0.0.0 --port 9878
-In production, always mount under tts-erp via include_router.
+``request.scope["api_key_scopes"]``.
 """
 
 from __future__ import annotations
@@ -40,12 +49,9 @@ if _env_path.exists():
 
 from anyio.to_thread import run_sync  # noqa: E402
 from fastapi import APIRouter, Query, Request  # noqa: E402
-from fastapi import FastAPI as _FastAPI  # noqa: E402
-from fastapi.middleware.cors import CORSMiddleware as _CORS  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
 from pydantic import BaseModel, Field, field_validator  # noqa: E402
 
-from .auth import SyncAuthMiddleware  # noqa: E402
 from .domain import (  # noqa: E402
     DEFAULT_TIMEZONE,
     Record,
@@ -59,7 +65,6 @@ from .pg_repositories import (  # noqa: E402
     fetch_timezone,
     write_audit,
 )
-from .rate_limit import SyncRateLimitMiddleware  # noqa: E402
 
 # ─── Config ────────────────────────────────────────────────────────────
 
@@ -731,59 +736,3 @@ async def _audit_and_error(
         request_id=request_id,
         retryable=retryable,
     )
-
-
-# ─── Standalone FastAPI app (port 9878) ────────────────────────────────
-# Exposed for `uvicorn analytics_sync.app:app`. When mounted under
-# tts-erp via include_router, the parent's auth + rate-limit apply and
-# this app instance is unused.
-
-app = _FastAPI(
-    title="analytics_sync",
-    version="0.3.0",
-    description="Analytics data sync backend. Standalone port 9878; unified auth via tts-erp api_keys.",
-)
-
-_cors_origins_env = os.environ.get("ANALYTICS_SYNC_CORS_ALLOW_ORIGINS", "").strip()
-if _cors_origins_env.lower() == "wildcard":
-    # Intentional opt-in for dev/internal deploys. Production MUST use
-    # an explicit origin list. Build the list at runtime to avoid a
-    # literal '*' that static security rules flag.
-    _cors_allow_origins = [chr(42)]
-elif _cors_origins_env:
-    _cors_allow_origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
-else:
-    _cors_allow_origins = []
-
-# Order: CORS outer → Auth → RateLimit → endpoint (add order is reversed).
-app.add_middleware(SyncRateLimitMiddleware)
-app.add_middleware(SyncAuthMiddleware)
-app.add_middleware(
-    _CORS,
-    allow_origins=_cors_allow_origins,
-    allow_credentials=False,
-    allow_methods=["GET", "POST"],
-    allow_headers=["*"],
-)
-
-# Mount the analytics router under /v1/analytics/sync.
-app.include_router(router, prefix="/v1/analytics/sync")
-
-
-@app.get("/healthz")
-def _healthz():
-    return {"status": "ok", "service": "analytics-sync", "version": "0.3.0"}
-
-
-@app.get("/endpoints")
-def _endpoints():
-    return {
-        "service": "analytics-sync",
-        "version": "0.3.0",
-        "protocol_version": PROTOCOL_VERSION,
-        "auth": "shared with tts-erp (api_keys table; ANALYTICS_SYNC_AUTH_MODE)",
-        "endpoints": [
-            {"method": "GET", "path": "/v1/analytics/sync/cursor"},
-            {"method": "POST", "path": "/v1/analytics/sync/batches"},
-        ],
-    }

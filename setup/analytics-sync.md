@@ -1,13 +1,14 @@
 # TikTok 广告分析同步服务 (analytics_sync)
 
-> schan 服务器 · `0.0.0.0:9878` (内网) · 与 tts-erp (9877) / oauth-receiver (9876) 平行
-> 独立 FastAPI 进程 · PostgreSQL 持久化 · Bearer token 鉴权 · 端口 9878
+> **v0.4.0 (2026-08-30)** · **统一挂到 tts-erp v2** (端口 9877) · 与 tts-erp 共进程 · 共享 tts-erp 的 AuthMiddleware / RateLimit / AccessLog
 >
-> v0.2.0 (2026-08-23) · **替代已退役的 CloudBase 分析上传路径** · Chrome 插件侧 (`tk-adv-cost-monitor`) 每日拉 cursor、批量上传
+> Chrome 插件侧 (`tk-adv-cost-monitor`) 每日拉 cursor、批量上传
 >
 > 上游：Chrome 扩展 (tk-adv-cost-monitor) 推 `productAnalyses` / `sessionAnalyses` / `campaignChangeLogs` 三类记录
 > 下游：（无，纯存储 + cursor 服务）
-> 存储：PostgreSQL `tts_erp` 数据库 · **5 张表**（analytics_*前缀，与 miaoshou_* / api_keys 共库）
+> 存储：PostgreSQL `tts_erp` 数据库 · **5 张表**（analytics_* 前缀，与 miaoshou_* / api_keys 共库）
+>
+> **变更背景**：原 standalone FastAPI 进程 (端口 9878) 于 2026-08-30 退役 — 路由现在通过 `tts_erp_v2.app:build_app()` 的 `include_router` 挂在 v2 app 上（`/v1/analytics/sync` 前缀）。nginx `services.conf` 同步新增 `/v1/analytics/sync/` location 反代到 127.0.0.1:9877。Chrome 扩展的 syncBaseUrl **零改动**——它原本就发 `http://daqiang.nat100.top/v1/analytics/sync/cursor`，之前一直 404 是因为 nginx 没有这条 location，现在自动走通。
 
 ## 是什么
 
@@ -26,50 +27,43 @@
 
 | 项目                  | 值                                                              |
 |-----------------------|-----------------------------------------------------------------|
-| 服务进程              | `python3 -m uvicorn analytics_sync.app:app` (cwd `analytics_sync/`) |
-| 端口                  | `0.0.0.0:9878` (TCP LISTEN)                                     |
-| 工作模式              | **enforce** (Bearer token 强制)                                 |
-| DB                    | `tts_erp` on `postgres` container :5432 · **5 张 analytic_* 表** |
-| Auth                  | Bearer / X-Sync-Token，60s 缓存，SHA-256 哈希 + 16 字符前缀         |
-| 测试覆盖              | **63/63 passed**（auth 7 + batches 12 + cursor 6 + idempotency 10 + concurrency 2 + isolation 3 + scope 12 + errors 6 + rate-limit 5） |
-| 协议版本              | `protocolVersion: 1`                                            |
-| OpenAPI 规范          | `analytics_sync/tech-doc/openapi.yaml`                          |
+| 服务进程              | `uvicorn tts_erp_v2.app:app` (systemd `tts-erp.service`，cwd `tdd/`) |
+| 端口                  | **`0.0.0.0:9877`** (与 tts-erp v2 业务 API 同进程)                 |
+| nginx 反代            | `/v1/analytics/sync/` → `127.0.0.1:9877`（见 `setup/nginx/conf.d/services.conf`）|
+| 工作模式              | 跟随 tts-erp v2 的 `TTS_ERP_AUTH_MODE`（默认 `enforce`）           |
+| Auth                  | tts-erp v2 `AuthMiddleware`（api_keys 表，Bearer / X-API-Key，60s TTL 缓存）|
+| RateLimit             | tts-erp v2 `RateLimitMiddleware`（默认 100/min/key，`TTS_ERP_RATE_LIMIT_PER_MIN` 可调）|
+| AccessLog             | tts-erp v2 `AccessLogMiddleware`（统一在 stdout 一行/请求）|
+| DB                    | `tts_erp` on `postgres` container :5432 · **5 张 analytic_* 表**（未变）|
+| 测试覆盖              | `tests_v2/api/test_analytics_sync_mount.py` 7/7 passed（挂载 + 鉴权契约） |
+| 协议版本              | `protocolVersion: 2`（v1 client 仍接受并 advance cursor） |
+| OpenAPI 规范          | `analytics_sync/tech-doc/openapi.yaml`（独立维护）|
 | 设计文档              | `analytics_sync/tech-doc/architecture.md`                       |
 
 ## 文件布局
 
 ```
 /home/schan/tts-erp/
-├── analytics_sync/                     # ← 本服务全部代码
+├── analytics_sync/                     # ← 路由 + 模型 + DB 仓库（不启动独立进程）
 │   ├── README.md                       # 操作 quick-start
 │   ├── schema.sql                      # 5 张表 + 索引（IF NOT EXISTS 幂等）
 │   ├── retention.sql                   # 90d records + 30d audit 清理
-│   ├── app.py                          # FastAPI 应用（路由 + 业务）
-│   ├── auth.py                         # Bearer + scope 校验中间件
-│   ├── rate_limit.py                   # 每 token 滑窗限流
+│   ├── migration_v2.sql                # 老 schema 迁移脚本（v0.1 → v0.2 + schema 扩展）
+│   ├── app.py                          # 唯一 APIRouter + handlers + Pydantic models
 │   ├── domain.py                       # 纯类型（Scope/Record/CursorEntry/StorageKey）
-│   ├── pg_repositories.py              # PG 实现（原子 upsert + cursor advance）
-│   ├── api_keys.py        # CLI: create / list / revoke / rotate
-│   ├── conftest.py                     # pytest 公共 fixture
-│   ├── pytest.ini
+│   ├── pg_repositories.py              # PG 实现（原子 upsert + cursor advance + 审计）
 │   ├── tech-doc/
-│   │   ├── analytics-sync.md          # API 契约 + curl 示例 + 部署
+│   │   ├── analytics-sync.md          # API 契约 + curl 示例
 │   │   ├── architecture.md            # 架构 + 14 个协议歧义解决
 │   │   ├── openapi.yaml               # OpenAPI 3.1 正式规范
 │   │   ├── plugin-integration.md      # Chrome 扩展对接说明
 │   │   └── compatibility.md          # 协议版本演进 + 保留策略
-│   └── tests/                          # 9 个测试文件，63 用例
-│       ├── test_auth.py
-│       ├── test_batches.py
-│       ├── test_concurrency.py
-│       ├── test_cursor.py
-│       ├── test_errors.py
-│       ├── test_idempotency.py
-│       ├── test_isolation.py
-│       ├── test_rate_limit.py
-│       └── test_scope.py
+├── tts_erp_v2/
+│   └── app.py                          # ← v2 app 在这里 include_router(analytics_sync_router,
+│                                        prefix="/v1/analytics/sync")
 └── setup/
-    └── analytics-sync.md              # ← 你正在看的这个文件
+    ├── analytics-sync.md              # ← 你正在看的这个文件
+    └── nginx/conf.d/services.conf     # ← nginx /v1/analytics/sync/ location
 ```
 
 ## PostgreSQL 表

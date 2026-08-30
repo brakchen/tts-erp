@@ -319,19 +319,21 @@ python3 api_keys.py create --name chrome-ext-prod --role readwrite --expires-day
 # SYNC TOKEN (shown ONCE, store it now):  ttserp_rw_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-### Healthz (no auth)
+### Healthz (no auth, lives on the v2 app)
 
 ```bash
-curl -s http://127.0.0.1:9878/healthz
-# {"status":"ok","service":"analytics-sync","version":"0.3.0"}
+curl -s http://127.0.0.1:9877/healthz
+# {"status":"ok","service":"tts-erp-v2","auth_mode":"enforce"}
 ```
 
-### Cursor
+### Cursor (via tts-erp v2 on :9877, or via public NAT domain)
 
 ```bash
 curl -s \
   -H "Authorization: Bearer $TOKEN" \
-  "http://127.0.0.1:9878/v1/analytics/sync/cursor?sellerId=seller-1&advertiserId=adv-1"
+  "http://127.0.0.1:9877/v1/analytics/sync/cursor?sellerId=seller-1&advertiserId=adv-1"
+# or public:
+# "http://daqiang.nat100.top/v1/analytics/sync/cursor?sellerId=seller-1&advertiserId=adv-1"
 ```
 
 ### Batch upload (protocolVersion 2)
@@ -342,7 +344,7 @@ curl -s -X POST \
   -H "Content-Type: application/json" \
   -H "X-Request-Id: req-001" \
   -H "X-Protocol-Version: 2" \
-  http://127.0.0.1:9878/v1/analytics/sync/batches \
+  http://127.0.0.1:9877/v1/analytics/sync/batches \
   -d @batch.json
 ```
 
@@ -381,7 +383,7 @@ snippet in §8; note `expectedPageCount` is NOT part of the key):
 curl -s -X POST \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  http://127.0.0.1:9878/v1/analytics/sync/batches \
+  http://127.0.0.1:9877/v1/analytics/sync/batches \
   -d '{"protocolVersion":1,"scope":{"sellerId":"s","advertiserId":"a"},"records":[{"idempotencyKey":"0000000000000000000000000000000000000000000000000000000000000000","storageKey":"productAnalyses","campaignId":"c","day":"2026-08-23","page":1,"endpoint":"/","method":"POST","response":{},"source":"x","capturedAt":"2026-08-23T00:00:00Z","schemaVersion":1}]}'
 ```
 
@@ -458,44 +460,54 @@ sibling services (tts-erp, miaoshou).
 
 ## 10. Deployment
 
+**As of 2026-08-30**, `analytics_sync` is **mounted into the
+`tts_erp_v2` FastAPI app** — there is no separate service to start or
+stop. The `tts-erp.service` user-level systemd unit loads the v2 app,
+which includes the analytics_sync router via
+`app.include_router(router, prefix="/v1/analytics/sync")`.
+
 ### Local dev
 
 ```bash
-TTS_ERP_DB_URL=postgresql://postgres:...@127.0.0.1:5432/tts_erp \
-ANALYTICS_SYNC_AUTH_MODE=enforce \
-uvicorn analytics_sync.app:app --host 0.0.0.0 --port 9878 --reload
+cd /home/schan/tts-erp
+TTS_ERP_DB_URL=... .venv/bin/python -m uvicorn \
+    tts_erp_v2.app:app --host 127.0.0.1 --port 9877 --reload
 ```
 
-### Production (systemd, mirroring tts-erp)
-
-A user-level systemd unit at
-`~/.config/systemd/user/analytics-sync.service`:
-
-```ini
-[Unit]
-Description=analytics_sync FastAPI
-After=network.target
-
-[Service]
-WorkingDirectory=/home/schan/tts-erp
-EnvironmentFile=/home/schan/tts-erp/.env
-ExecStart=/home/schan/tts-erp/.venv/bin/python -m uvicorn analytics_sync.app:app \
-    --host 0.0.0.0 --port 9878 --workers 1
-Restart=on-failure
-RestartSec=3
-
-[Install]
-WantedBy=default.target
-```
+### Production
 
 ```bash
-systemctl --user daemon-reload
-systemctl --user enable --now analytics-sync.service
-systemctl --user status analytics-sync.service
+systemctl --user status tts-erp.service
+systemctl --user restart tts-erp.service      # picks up code changes
+journalctl --user -u tts-erp -n 50            # logs
 ```
 
-`Linger=yes` is required for the user unit to survive logout — same
-constraint as `tts-erp.service`.
+The systemd unit is shared with v2 (see `AGENTS.md` §7.1 for the
+unit body). One `[Service]` block loads `tts_erp_v2.app:app` on
+port 9877; the analytics_sync router is included via the same
+`_build_routes()` function — no second unit, no second port.
+
+### nginx (NAT)
+
+`setup/nginx/conf.d/services.conf` has a `location /v1/analytics/sync/`
+block that proxies to `127.0.0.1:9877` (no prefix stripping — the v2
+app's mounted router prefix is preserved through nginx). Reload nginx
+after editing:
+
+```bash
+docker exec nginx-gw nginx -t             # syntax check
+docker exec nginx-gw nginx -s reload      # apply
+```
+
+Public access pattern:
+
+```text
+https://daqiang.nat100.top/v1/analytics/sync/cursor
+        ↓ (NAT → host:9899 → nginx)
+nginx location /v1/analytics/sync/ → http://127.0.0.1:9877
+        ↓ (full URI preserved — proxy_pass has no trailing /)
+tts_erp_v2.app → analytics_sync router @ /v1/analytics/sync
+```
 
 ### Postgres connection
 

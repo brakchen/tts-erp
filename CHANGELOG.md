@@ -1,10 +1,107 @@
 # tts-erp CHANGELOG
 
+## 2026-08-30 (refactor) — analytics_sync 统一到 tts-erp v2：standalone :9878 退役
+
+把 Chrome 扩展 (`tk-adv-cost-monitor`) 上传 / cursor 后端从独立 FastAPI 进程
+(:9878, `uvicorn analytics_sync.app:app`) 合并到 tts-erp v2 进程 (:9877)，
+统一鉴权 + 限流 + 访问日志，简化部署 / 调试 / 监控。
+
+### 触发事故
+
+- 2026-08-30 14:59:29 ~ 15:00:25 UTC（56 秒窗口）Chrome 扩展发起 54 次
+  `GET /v1/analytics/sync/cursor`，**全部 404**。nginx access.log 显示
+  `up="-"` `rt=0.000`，落到了 daqiangcn 静态站 fallback → 912 字节 HTML。
+- 根因：`nginx services.conf` 缺 `/v1/analytics/sync/` location；
+  即使补上 nginx 转发到 :9878，standalone 进程的 nginx 反代也不存在。
+- 客户端 syncBaseUrl 一直是 `http://daqiang.nat100.top/v1/analytics/sync/cursor`
+  （按 `:9878` 直连的 standalone 设计填的），**nginx 没接管 = 100% 失败**。
+
+### 修复
+
+- **`tts_erp_v2/app.py`**：`include_router(analytics_sync_router, prefix="/v1/analytics/sync")`，
+  router + handlers 从 `analytics_sync/app.py` 导入。v2 `AuthMiddleware` /
+  `RateLimitMiddleware` / `AccessLogMiddleware` 统一接管。
+- **`setup/nginx/conf.d/services.conf`**：新增 `location /v1/analytics/sync/`
+  → `proxy_pass http://127.0.0.1:9877`（无尾 `/`，URI 原样透传避免前缀被剥）。
+- **e2e 验证**：公网 `http://daqiang.nat100.top/v1/analytics/sync/cursor?...`
+  带 admin token 三种 storageKey 全部 HTTP 200，envelope 标准。
+
+### 退役内容
+
+- **进程**：standalone :9878 (PID 3269937, `uvicorn analytics_sync.app:app`)
+  kill，端口释放。
+- **模块**：
+  - `analytics_sync/auth.py`（`SyncAuthMiddleware` + 5 个 helper）删除
+  - `analytics_sync/rate_limit.py`（`SyncRateLimitMiddleware` + sliding window helper）整文件删除
+  - `analytics_sync/app.py:736-789`（`app = _FastAPI(...)` + 独立 `/healthz` + `/endpoints` + standalone 中间件挂载）删除
+- **测试**：`analytics_sync/tests/`（9 文件 + conftest.py）整目录删除
+  —— 测试对象是已死的 standalone app + 中间件。新 `tests_v2/api/test_analytics_sync_mount.py`
+  （7/7 passed）覆盖挂载 + 鉴权契约，handler 业务逻辑靠真实 Chrome 扩展流量验证。
+- **孤儿**：`pytest.ini`、`conftest.py`（无 tests/ 后无引用）、`.pytest_cache/`、`.ruff_cache/` 删除。
+- **文档**：`setup/analytics-sync.md` 顶部 + "当前状态" + "文件布局" 重写；
+  `analytics_sync/README.md` 全量重写；
+  `analytics_sync/tech-doc/analytics-sync.md` "## 7. Curl examples" + "## 10. Deployment" 重写。
+- **DB schema 不动**：5 张 `analytics_*` 表（`analytics_records` /
+  `analytics_cursors` / `analytics_shop_timezones` / `api_keys` /
+  `analytics_audit_log`）继续被路由使用。
+
+### 不变项
+
+- DB 表、5 张表结构、API 契约（`/v1/analytics/sync/cursor` GET + `/batches` POST）、
+  鉴权语义（Bearer / X-API-Key，api_keys 表，readwrite 角色）、限流策略
+  （每 key 100/min）、错误 envelope（`{code, message, requestId, retryable}`）、
+  Chrome 扩展 syncBaseUrl、nginx 公网入口 —— 全部不变。
+- v2 的 AuthMiddleware 早就知道 `/v1/analytics/sync/*` 是 readwrite
+  （`tts_erp_v2/middleware/auth.py:91`），无需改鉴权分类。
+
+### 客户端
+
+- Chrome 扩展 **零改动**。原 syncBaseUrl
+  `http://daqiang.nat100.top/v1/analytics/sync/cursor` 现在直接 200。
+- nginx 上**保留** `/tts/v1/analytics/sync/` 兜底（走 `/tts/` 旧 location，
+  剥离前缀后转 `/v1/analytics/sync/cursor` 给 :9877）—— 给任何习惯了
+  tts-erp 命名空间的老脚本。
+
+## 2026-08-30 (fix) — v2 `GET /endpoints` 递归修：暴露 `_IncludedRouter` 子路由
+
+`tts_erp_v2.app:build_app()` 通过 `include_router()` 挂载 7 个业务子路由
+（commerce / linkage / reporting / pages / llm_context / auth / analytics_sync）。
+FastAPI 0.141 把每个 `include_router` 子包成一个 lazy `_IncludedRouter`，
+其上没有 `path` 属性——原 `endpoints_index` 用 `for r in app.routes: if not path: continue`
+扁平遍历，**静默丢掉所有业务路由**，只返 FastAPI 元端点（`/docs`,
+`/openapi.json`, `/healthz`, `/endpoints` 等 6 条，count=6）。运维
+通过 `GET /endpoints` 看到的"v2 API 表面"完全是误导：以为挂了 v2 路由
+实际一个都没列出来。
+
+### 修复
+
+- **`tts_erp_v2/app.py`**：抽出 `_walk_v2_routes(routes, prefix="")` 纯 helper，
+  递归进入 `_IncludedRouter.original_router.routes`，并从
+  `_IncludedRouter.include_context.prefix` 拼回 `include_router(prefix=...)`
+  传的 prefix —— FastAPI 0.141 在子 APIRoute 上**不** 应用 prefix，
+  prefix 只存在 `_IncludedRouter.include_context`。`endpoints_index` 改为
+  `sorted(_walk_v2_routes(app.routes), key=lambda x: x["path"])`。
+- **`tests_v2/api/test_endpoints_index.py`**：6 个测试覆盖
+  - 200 status
+  - v2 业务路由在返回中（commerce / linkage / reporting / pages / llm / auth）
+  - **analytics_sync 在返回中**（`/v1/analytics/sync/cursor`、
+    `/v1/analytics/sync/batches`，regression guard）
+  - 含 path-param 的路由（`{order_id}`、`{issue_id}/resolve`）
+  - `count == len(endpoints)` 内部一致性 + `count > 6` 防止倒退
+  - 排除无 path 的内部 entry
+
+### 验证
+
+- 修后 `GET /tts/endpoints` 返 `count: 34`，含 7 个 analytics_sync / v2
+  路由 + 全部含 `{param}` 的路由。
+- v2 api 测试套件 69 passed（63 原有 + 6 新 endpoints_index），无回归。
+
 ## 2026-08-27 (fix) — Review remediation Waves 1-4（可用性 / 数据正确性 / schema / 测试基建）
 
 按 `plans/review-remediation-2026-08.md` 执行的三路 review 修复：
 
 ### Wave 1 — 止血（commit `ec9bf77`）
+
 - **auth**: `lookup_role` 移出 event loop（`anyio.to_thread`）；无效 key 负缓存（20s）；
   PG down fail-closed 503；被拒请求计入限流桶（暴力枚举不再免限流）。
 - **analytics_sync**: `post_batches` 不再在 event loop 上跑同步 psycopg；`nextCursor`
@@ -19,6 +116,7 @@
 - **sync_logistics_tracking**: PG advisory lock（重叠返 409）+ `max_per_run` 硬上限 100 + jitter。
 
 ### Wave 2 — Schema housekeeping（commit `aa53b9d`）
+
 - 删重复/冗余索引 ×4；`idx_logistics_tracking_overseas` 改部分索引。
 - 新增 `idx_orders_shop_ct`（/db/orders 分页走 Index-Only-Scan）、
   `idx_order_shippings_tracking`（cron 每 10 分钟热路径不再全表扫）、
@@ -31,6 +129,7 @@
 - `order_shippings.raw` 只存物流子集（不再复制整单 JSON）。
 
 ### Wave 3 — 结构性（commits `0566571`, `8af34f9`, `ed81fc5`）
+
 - **连接池**：`db_connect()` 走 `psycopg_pool.ConnectionPool`（min 1 / max 10），
   同步批次不再每查询一次 connect/close。
 - **tiktok_request**：429/5xx/网络错误有界重试（指数退避+jitter，上限 2 次）；
@@ -40,6 +139,7 @@
 - 删 `PlainHttpClient`（生产零引用）。
 
 ### Wave 4 — 杂项 + 测试基建
+
 - **miaoshou**：`_call` 的 HTTP 错误透传真实状态码（`http.client` 不抛异常，
   之前 CDN 502 被误报为 code=0 "无法解析响应"）。
 - **analytics_sync scope_grants**：同维度多值改 OR 语义；未知 scope 前缀 fail-closed。

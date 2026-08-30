@@ -31,19 +31,18 @@ make consistent decisions when the protocol evolves.
               │
               ▼
 ┌───────────────────────────┐
-│ analytics_sync (:9878)    │
+│ tts_erp_v2 (:9877)        │
 │  ┌─────────────────────┐  │
-│  │ FastAPI handlers    │  │
+│  │ analytics_sync      │  │   mounted via include_router
+│  │ router              │  │   (prefix="/v1/analytics/sync")
 │  │  - scope check      │  │
 │  │  - body-size check  │  │
 │  │  - canonical key    │  │
 │  │  - partial success  │  │
 │  └──────────┬──────────┘  │
-│             │             │
-│  ┌──────────▼──────────┐  │
-│  │ auth / rate-limit   │  │   plain ASGI middlewares
-│  │ middlewares         │  │
-│  └──────────┬──────────┘  │
+│             │             │   auth + rate-limit are inherited
+│             │             │   from tts_erp_v2.middleware.{auth,
+│             │             │   rate_limit} on the parent app
 │             │             │
 │  ┌──────────▼──────────┐  │
 │  │ pg_repositories     │  │
@@ -64,10 +63,18 @@ make consistent decisions when the protocol evolves.
 └───────────────────────────┘
 ```
 
-The service is a **sibling** to `tts-erp` (port 9877) and `miaoshou` —
-they share the same PostgreSQL container but live in separate FastAPI
-processes so they can be restarted, versioned, and rate-limited
-independently.
+The service is **mounted into** `tts-erp v2` (port 9877) via
+`app.include_router(router, prefix="/v1/analytics/sync")` and shares
+its process, auth middleware, and rate-limit middleware with the rest
+of the v2 business routes. nginx (`setup/nginx/conf.d/services.conf`)
+reverse-proxies `/v1/analytics/sync/` on the public NAT domain to
+`127.0.0.1:9877`.
+
+The previous standalone deployment on `:9878` (a separate FastAPI
+process with its own `SyncAuthMiddleware` / `SyncRateLimitMiddleware`)
+was retired 2026-08-30. The middleware is now inherited from the
+parent v2 app; the `auth.py` / `rate_limit.py` modules that used to
+live in this package no longer exist.
 
 ---
 
@@ -82,10 +89,14 @@ pg_repositories.py   PG-backed implementations
                      atomic upsert + cursor advance
         │
         ▼
-auth.py              sync-token auth middleware (Bearer / X-Sync-Token)
-rate_limit.py        per-token sliding-window rate limiter
-app.py               FastAPI handlers, request validation, partial success
-api_keys.py   operator CLI for token issuance
+app.py               APIRouter with /cursor (GET) and /batches (POST) handlers,
+                     request validation, partial success, pure helpers
+                     (scope_grants, _key_prefix, _scopes, _error_response)
+__init__.py          package docstring — points to the new architecture
+schema.sql           DB tables + indexes (idempotent CREATE TABLE IF NOT EXISTS)
+migration_v2.sql     one-shot schema upgrade for older deployments
+retention.sql        cron-friendly cleanup (90d records + 30d audit)
+README.md            operator quick-start + refactor history
 ```
 
 Each layer is independently testable: `domain.py` and `auth.scope_grants`
