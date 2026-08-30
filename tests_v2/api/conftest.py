@@ -76,6 +76,12 @@ def _isolate_state(db_engine, monkeypatch):
     # flag off, no NAT prefix). Individual tests may monkeypatch on top.
     monkeypatch.setenv("TTS_ERP_SESSION_SECURE", "0")
     monkeypatch.delenv("TTS_ERP_EXTERNAL_PREFIX", raising=False)
+    # Silence the access log middleware during tests — the api_client
+    # fixture builds the full v2 app, which means every TestClient
+    # request would otherwise write a structured line to stderr.
+    # Tests that explicitly assert on the access log can opt back in
+    # per-test (``monkeypatch.setenv('TTS_ERP_ACCESS_LOG', '1')``).
+    monkeypatch.setenv("TTS_ERP_ACCESS_LOG", "0")
     # Reset the login throttle too — the conftest's _isolate_state is
     # the only autouse that touches it, and it's per-test state.
     session_auth.reset_login_throttle()

@@ -28,15 +28,24 @@ Security notes:
 from __future__ import annotations
 
 import html as _html
+import logging
 
 from fastapi import APIRouter, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from tts_erp_v2.middleware import session_auth
+from tts_erp_v2.middleware.access_log import _key_prefix
 from tts_erp_v2.middleware.auth import ROLE_LEVEL, lookup_role, lookup_role_by_hash
 
 router = APIRouter(prefix="/v2/auth", tags=["auth"])
+
+# Dedicated logger for login-flow business events. Operators grep this
+# to answer "what key did the user just try?" without scraping the
+# access log (which has the key hash for SUCCESSFUL logins only —
+# the request body never reaches the access log, so failed-attempt
+# key correlation is impossible there).
+login_logger = logging.getLogger("tts_erp_v2.auth.login")
 
 DEFAULT_NEXT = "/v2/pages/manual-costs"
 _LEVEL_TO_NAME = {v: k for k, v in ROLE_LEVEL.items()}
@@ -76,8 +85,14 @@ def login_page(request: Request) -> HTMLResponse:
 @router.post("/login")
 def login(body: LoginBody, request: Request) -> Response:
     """Validate an API key and mint a session cookie."""
+    key_prefix = _key_prefix(body.key)
     retry_after = session_auth.login_throttle_hit(_client_bucket(request))
     if retry_after is not None:
+        login_logger.info(
+            "result=throttled key=%s retry_after=%d",
+            key_prefix,
+            retry_after,
+        )
         return JSONResponse(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             content={
@@ -86,6 +101,7 @@ def login(body: LoginBody, request: Request) -> Response:
             },
         )
     if not session_auth.session_secret_configured():
+        login_logger.warning("result=secret_not_configured")
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"detail": "TTS_ERP_SESSION_SECRET not configured"},
@@ -94,11 +110,21 @@ def login(body: LoginBody, request: Request) -> Response:
         result = lookup_role(body.key)
     except Exception as exc:  # noqa: BLE001 — auth store unreachable → fail closed
         # Auth store unreachable — mirror the middleware's fail-closed 503.
+        login_logger.warning(
+            "result=store_unavailable key=%s error=%s",
+            key_prefix,
+            type(exc).__name__,
+        )
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"detail": f"auth store unavailable: {type(exc).__name__}"},
         )
     if result is None:
+        # The most common failure mode in production: user pastes a
+        # stale or revoked key. The access log has the real client IP
+        # + status; this event is the only place the ATTEMPTED key
+        # shows up. Pair these two for a complete picture.
+        login_logger.info("result=invalid key=%s", key_prefix)
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
             content={"detail": "invalid, disabled or expired api key"},

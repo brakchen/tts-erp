@@ -6,8 +6,18 @@ in ``tts_erp_v2/api/v2/*.py``.
 Middleware order (FastAPI ``add_middleware`` wraps in REVERSE order,
 so the LAST ``add_middleware`` call is the OUTERMOST layer):
 
-    registration order = RateLimit → Auth → CORS
-    resulting order    = CORS → Auth → RateLimit  (per AGENTS.md §9.3)
+    registration order = RateLimit → Auth → CORS → AccessLog
+    resulting order    = AccessLog → CORS → Auth → RateLimit
+
+AccessLog is the outermost layer on purpose: it needs to see the
+FINAL response status and total request duration (after RateLimit
+short-circuits, after Auth sets the role context). It logs ONE
+structured line per request to stdout with the NGINX-equivalent
+context (real client IP via X-Forwarded-For, X-Forwarded-Proto,
+X-Forwarded-Prefix) plus the auth state, so operators don't have
+to ``docker exec nginx-gw cat /var/log/nginx/access.log`` to
+correlate a browser request to its handler outcome. See
+``tts_erp_v2/middleware/access_log.py`` for the format.
 
 Public routes:
 - ``GET /healthz`` — liveness probe (no auth)
@@ -24,6 +34,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from tts_erp_v2.api.v2 import auth, commerce, linkage, llm_context, pages, reporting
+from tts_erp_v2.middleware.access_log import AccessLogMiddleware
 from tts_erp_v2.middleware.auth import AuthMiddleware
 from tts_erp_v2.middleware.rate_limit import RateLimitMiddleware
 
@@ -51,7 +62,10 @@ def build_app() -> FastAPI:
     )
 
     # --- Middleware registration (LAST = OUTERMOST) ---
-    # Innermost first, then Auth (next layer out), then CORS outermost.
+    # Innermost first, then Auth (next layer out), then CORS, then
+    # AccessLog on the outside so it sees the final status + total
+    # duration. Per AGENTS.md §9.3, Auth must sit between RateLimit
+    # and the handler so the limiter can bucket by authenticated key.
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(AuthMiddleware)
     # CORS: default DENY (empty allow-origin). Operators set
@@ -64,6 +78,11 @@ def build_app() -> FastAPI:
         allow_headers=["Authorization", "X-API-Key", "Content-Type"],
         max_age=600,
     )
+    # Outermost: one structured line per request to stdout. The
+    # matching uvicorn default access log is suppressed at the
+    # systemd unit (--no-access-log) so we get exactly one line per
+    # request with every field an operator needs.
+    app.add_middleware(AccessLogMiddleware)
 
     _build_routes(app)
     _register_public_routes(app)
