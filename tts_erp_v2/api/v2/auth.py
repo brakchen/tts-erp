@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import html as _html
 import logging
+import sys
 
 from fastapi import APIRouter, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -46,6 +47,22 @@ router = APIRouter(prefix="/v2/auth", tags=["auth"])
 # the request body never reaches the access log, so failed-attempt
 # key correlation is impossible there).
 login_logger = logging.getLogger("tts_erp_v2.auth.login")
+
+# Same uvicorn-root-has-no-handler problem documented in
+# tts_erp_v2/middleware/access_log.py. Attach a stdout handler
+# explicitly so the structured event reaches logs/stdout.log
+# (via systemd's StandardOutput=append:). ``propagate=False`` keeps
+# the same line from also being emitted to stderr through the
+# lastResort handler. setLevel(INFO) for the same reason: without
+# it the default WARNING drops info-level records before the
+# handler runs.
+login_logger.setLevel(logging.INFO)
+if not any(isinstance(h, logging.StreamHandler) and h.stream is sys.stdout
+           for h in login_logger.handlers):
+    _stdout = logging.StreamHandler(sys.stdout)
+    _stdout.setFormatter(logging.Formatter("%(message)s"))
+    login_logger.addHandler(_stdout)
+    login_logger.propagate = False
 
 DEFAULT_NEXT = "/v2/pages/manual-costs"
 _LEVEL_TO_NAME = {v: k for k, v in ROLE_LEVEL.items()}

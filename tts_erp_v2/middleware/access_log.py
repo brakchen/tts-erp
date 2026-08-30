@@ -47,14 +47,39 @@ Design notes
 * Disabling: ``TTS_ERP_ACCESS_LOG=0`` (env). Tests set this so the
   test output isn't drowned in access lines.
 """
+
 from __future__ import annotations
 
 import hashlib
 import logging
 import os
+import sys
 import time
 
 logger = logging.getLogger("tts_erp_v2.access")
+
+# uvicorn's logging.config.dictConfig only attaches handlers to its
+# own loggers (uvicorn / uvicorn.error / uvicorn.access). The root
+# logger has no handler in that config, so any other logger that
+# only inherits from root would be a silent no-op. Attach a stdout
+# StreamHandler here so the structured line actually reaches
+# stdout (and via systemd's StandardOutput=append:, logs/stdout.log).
+# ``propagate=False`` prevents the same line from also being sent
+# to stderr through the lastResort handler.
+#
+# The level is also explicitly set: Python loggers default to WARNING,
+# and uvicorn's dictConfig doesn't touch our namespace, so without
+# an explicit setLevel, logger.info(...) is filtered BEFORE the
+# handler ever runs and the whole middleware is a no-op. (Bitten by
+# this in production 2026-08-30 — the service was running, requests
+# were being served, stdout.log was just empty for the new format.)
+logger.setLevel(logging.INFO)
+if not any(isinstance(h, logging.StreamHandler) and h.stream is sys.stdout
+           for h in logger.handlers):
+    _stdout = logging.StreamHandler(sys.stdout)
+    _stdout.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(_stdout)
+    logger.propagate = False
 
 # Env-var name to disable (used by tests and any operator who wants
 # a quieter stdout under a heavy-traffic incident).

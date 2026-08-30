@@ -6,10 +6,14 @@ together uvicorn's stdout line and ``docker exec nginx-gw cat
 /var/log/nginx/access.log``. These tests pin the format so we
 don't regress back to that pain.
 """
+
 from __future__ import annotations
+
 import logging
 import re
+
 import pytest
+
 from tts_erp_v2.middleware.access_log import (
     AccessLogMiddleware,
     _client_ip,
@@ -139,29 +143,57 @@ async def _noop_app(scope, receive, send):
 
 
 @pytest.mark.asyncio
-async def test_middleware_emits_one_structured_line_per_request(caplog):
+async def test_middleware_emits_one_structured_line_per_request():
     """The headline contract: every request produces exactly one
-    log line, on the named logger, with every key=value pair the
-    operator needs."""
-    caplog.set_level(logging.INFO, logger="tts_erp_v2.access")
-    mw = AccessLogMiddleware(_noop_app)
+    log record on the access logger, with every key=value pair the
+    operator needs.
 
-    sent: list[dict] = []
+    We attach a temporary capture handler directly to the
+    ``tts_erp_v2.access`` logger rather than using ``caplog`` or
+    ``capsys``/``capfd``. Three reasons:
+      * ``caplog`` attaches to the *root* logger; the middleware
+        sets ``propagate=False`` on the access logger specifically
+        to keep its line off stderr, so caplog never sees the record.
+      * ``capsys`` replaces ``sys.stdout`` at the Python level AFTER
+        the module-level ``StreamHandler(sys.stdout)`` has cached the
+        original reference; writes go to the orphaned stdout, not
+        what capsys is reading.
+      * ``capfd`` redirects fd 1 at the OS level, but the
+        StreamHandler's internal TextIOWrapper buffering means the
+        read can race the write. The captured output in the failure
+        report does show the line — just not in the test's ``out``
+        variable.
 
-    async def _capture_send(event):
-        sent.append(event)
+    Direct handler attachment sidesteps all three: the test
+    observes the exact same ``LogRecord`` the production StreamHandler
+    receives.
+    """
+    records: list[logging.LogRecord] = []
 
-    await mw(_make_scope(), receive=_noop_receive(), send=_capture_send)
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
 
-    access_lines = [
-        r.getMessage() for r in caplog.records
-        if r.name == "tts_erp_v2.access"
-    ]
-    assert len(access_lines) == 1, (
-        f"expected exactly one access log line, got {len(access_lines)}: "
-        f"{access_lines}"
+    access_logger = logging.getLogger("tts_erp_v2.access")
+    cap = _Capture()
+    access_logger.addHandler(cap)
+    try:
+        mw = AccessLogMiddleware(_noop_app)
+
+        sent: list[dict] = []
+
+        async def _capture_send(event):
+            sent.append(event)
+
+        await mw(_make_scope(), receive=_noop_receive(), send=_capture_send)
+    finally:
+        access_logger.removeHandler(cap)
+
+    assert len(records) == 1, (
+        f"expected exactly one access log record, got {len(records)}: "
+        f"{[r.getMessage() for r in records]}"
     )
-    line = access_lines[0]
+    line = records[0].getMessage()
     # Every field the operator promised in the docstring:
     assert "method=GET" in line
     assert "path=/v2/pages/manual-costs?shop_id=749" in line
@@ -180,25 +212,34 @@ async def test_middleware_emits_one_structured_line_per_request(caplog):
 
 
 @pytest.mark.asyncio
-async def test_middleware_disabled_via_env_emits_nothing(monkeypatch, caplog):
+async def test_middleware_disabled_via_env_emits_nothing(monkeypatch):
     """TTS_ERP_ACCESS_LOG=0 silences the middleware — used by the
     api_client conftest so test output isn't drowned."""
-    monkeypatch.setenv("TTS_ERP_ACCESS_LOG", "0")
-    caplog.set_level(logging.INFO, logger="tts_erp_v2.access")
-    mw = AccessLogMiddleware(_noop_app)
+    records: list[logging.LogRecord] = []
 
-    async def _capture_send(event):
-        pass
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
 
-    await mw(_make_scope(), receive=_noop_receive(), send=_capture_send)
-    access_lines = [
-        r.getMessage() for r in caplog.records
-        if r.name == "tts_erp_v2.access"
-    ]
-    assert access_lines == []
+    access_logger = logging.getLogger("tts_erp_v2.access")
+    cap = _Capture()
+    access_logger.addHandler(cap)
+    try:
+        monkeypatch.setenv("TTS_ERP_ACCESS_LOG", "0")
+        mw = AccessLogMiddleware(_noop_app)
+
+        async def _capture_send(event):
+            pass
+
+        await mw(_make_scope(), receive=_noop_receive(), send=_capture_send)
+    finally:
+        access_logger.removeHandler(cap)
+
+    assert records == []
 
 
 def _noop_receive():
     async def _r():
         return {"type": "http.request", "body": b"", "more_body": False}
+
     return _r
