@@ -519,6 +519,7 @@ class TestJobRegistry:
 class TestBuildScheduler:
     def test_registers_jobs_with_interval_triggers(self):
         from apscheduler.schedulers.blocking import BlockingScheduler
+
         from tts_erp_v2.sync_worker.scheduler import JOBS, build_scheduler
 
         sched = build_scheduler()

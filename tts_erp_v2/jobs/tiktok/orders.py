@@ -34,6 +34,7 @@ can be exercised end-to-end in tests with a fake. The production
 caller (scheduler / CLI) wraps ``TiktokShopClient`` + ``token_service``
 in a thin adapter that does the actual signing + token injection.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -397,15 +398,11 @@ def run(
 
     cursor_scope = scope or shop_id
     account = _ensure_channel_account(session, shop_id)
-    watermark_ms = watermarks.get_cursor(
-        session, job_name=JOB_NAME, scope=cursor_scope
-    )
+    watermark_ms = watermarks.get_cursor(session, job_name=JOB_NAME, scope=cursor_scope)
 
     base_body: dict[str, Any] = {"page_size": page_size}
     if watermark_ms:
-        base_body["update_time_ge"] = _epoch_ms_to_seconds(
-            _safe_int(watermark_ms)
-        )
+        base_body["update_time_ge"] = _epoch_ms_to_seconds(_safe_int(watermark_ms))
 
     raw_orders = _walk_pages(proxy_call, base_body=base_body)
 
@@ -468,9 +465,8 @@ def run(
             )
 
         rows_inserted += 1
-        update_ms = (
-            fields.get("source_updated_at")
-            and _safe_int(fields["source_updated_at"].timestamp() * 1000)
+        update_ms = fields.get("source_updated_at") and _safe_int(
+            fields["source_updated_at"].timestamp() * 1000
         )
         if update_ms and (max_update_time_ms is None or update_ms > max_update_time_ms):
             max_update_time_ms = update_ms
@@ -480,8 +476,7 @@ def run(
     # spuriously reset it to 0).
     new_cursor_ms: int | None = None
     if max_update_time_ms is not None and (
-        watermark_ms is None
-        or max_update_time_ms > _safe_int(watermark_ms)
+        watermark_ms is None or max_update_time_ms > _safe_int(watermark_ms)
     ):
         watermarks.set_cursor(
             session,

@@ -37,6 +37,7 @@ Usage::
 
 Exit code: 0 = all rows rewritten, 1 = some failed (rows_failed > 0).
 """
+
 from __future__ import annotations
 
 import json
@@ -99,9 +100,7 @@ def _decrypt(blob: bytes) -> str:
 
 def _rebuild(shop_id: str) -> tuple[str, int]:
     """Rebuild one shop's ciphertext. Returns (status, code)."""
-    legacy_conn = psycopg.connect(
-        os.environ["OAUTH_DB_URL"], connect_timeout=10
-    )
+    legacy_conn = psycopg.connect(os.environ["OAUTH_DB_URL"], connect_timeout=10)
     try:
         row = _legacy_row(legacy_conn, shop_id)
         if row is None:
@@ -151,7 +150,10 @@ def _rebuild(shop_id: str) -> tuple[str, int]:
             return f"round-trip access_token mismatch for {shop_id}", 1
         if check.shop_cipher != (plaintext_sc or None):
             return f"round-trip shop_cipher mismatch for {shop_id}", 1
-        return f"{shop_id}: OK (at_len={len(plaintext_at)}, rt={'yes' if plaintext_rt else 'no'}, sc={'yes' if plaintext_sc else 'no'})", 0
+        return (
+            f"{shop_id}: OK (at_len={len(plaintext_at)}, rt={'yes' if plaintext_rt else 'no'}, sc={'yes' if plaintext_sc else 'no'})",
+            0,
+        )
     except Exception as e:  # noqa: BLE001 — report + continue
         session.rollback()
         return f"{shop_id}: FAILED {type(e).__name__}: {e}", 1
@@ -188,7 +190,9 @@ def main() -> int:
         print(msg)
         failed += code
 
-    print(f"\n{'ALL OK' if failed == 0 else f'{failed} FAILED'} ({len(shop_ids)} shops)")
+    print(
+        f"\n{'ALL OK' if failed == 0 else f'{failed} FAILED'} ({len(shop_ids)} shops)"
+    )
     return 1 if failed else 0
 
 
