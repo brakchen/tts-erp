@@ -18,7 +18,6 @@ import hashlib
 import os
 import secrets
 import sys
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import psycopg
@@ -59,24 +58,49 @@ def _insert_key(
     conn,
     name: str | None,
     role: str,
-    scopes: list[str],
-    expires_days: int | None,
+    scopes: list[str],  # ignored: V3 dropped the scopes column
+    expires_days: int | None,  # ignored: V3 dropped the expires_at column
 ) -> str:
     key = f"ttserp_{ROLE_PREFIX[role]}_{secrets.token_urlsafe(24)}"
-    expires_at = None
-    if expires_days:
-        expires_at = datetime.now(timezone.utc) + timedelta(days=expires_days)
+    # .env's TTS_ERP_DB_URL is shared by both SQLAlchemy and raw psycopg.
+    # The V2 → V3 schema split moved api_keys to ``security.api_keys``
+    # and dropped the ``scopes`` / ``expires_at`` / ``enabled`` columns
+    # in favour of ``status`` (text) + ``rotated_to_key_hash``. The
+    # previous version of this function INSERTed into the unqualified
+    # ``api_keys`` table — which the V1 schema puts at ``public.api_keys``
+    # via Postgres' default ``search_path = "$user", public`` — and
+    # therefore wrote rows that the v2 app could never authenticate.
+    # The ``security.`` prefix below is mandatory.
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO api_keys (key_hash, key_prefix, name, role, scopes, expires_at)"
-            " VALUES (%s, %s, %s, %s, %s, %s)",
-            (_sha256(key), key[:16], name, role, scopes, expires_at),
+            "INSERT INTO security.api_keys "
+            "(key_hash, key_prefix, name, role, status) "
+            "VALUES (%s, %s, %s, %s, 'active')",
+            (_sha256(key), key[:16], name, role),
         )
     conn.commit()
     return key
 
 
 def cmd_create(args) -> None:
+    # ``scopes`` and ``expires_days`` flags are accepted (so any
+    # existing scripts in cron / setup docs don't break with
+    # "unrecognized argument" errors) but the values are no longer
+    # persisted — V3's security.api_keys has no such columns. Print
+    # a deprecation note if the caller passed them, so a future
+    # operator can spot the legacy flag in their stack.
+    if args.scopes:
+        print(
+            f"note: --scopes={args.scopes!r} is accepted for back-compat "
+            f"but no longer persisted (V3 security.api_keys has no scopes column).",
+            file=sys.stderr,
+        )
+    if args.expires_days:
+        print(
+            f"note: --expires-days={args.expires_days} is accepted for back-compat "
+            f"but no longer persisted (V3 has no expires_at column).",
+            file=sys.stderr,
+        )
     with _connect() as conn:
         key = _insert_key(
             conn, args.name, args.role, args.scopes or [], args.expires_days
@@ -84,21 +108,22 @@ def cmd_create(args) -> None:
     print(f"name    : {args.name or '-'}")
     print(f"role    : {args.role}")
     print(f"prefix  : {key[:16]}")
-    if args.scopes:
-        print(f"scopes  : {','.join(args.scopes)}")
-    else:
-        print("scopes  : (none — token grants full access)")
-    if args.expires_days:
-        print(f"expires : in {args.expires_days} days")
+    print("status  : active")
     print()
     print(f"API KEY (shown ONCE, store it now):  {key}")
 
 
 def cmd_list(_args) -> None:
+    # V3 schema: no scopes / expires_at / enabled columns. status
+    # is a text column ('active' / 'disabled'); the legacy "ON" column
+    # is replaced with STATUS. Same as the INSERT in _insert_key: the
+    # security. prefix is mandatory — without it the unqualified name
+    # resolves to public.api_keys (V1 dead table) via the default
+    # search_path.
     with _connect() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT key_prefix, name, role, scopes, enabled, created_at, last_used_at, expires_at"
-            " FROM api_keys ORDER BY id"
+            "SELECT key_prefix, name, role, status, created_at, last_used_at "
+            " FROM security.api_keys ORDER BY created_at, id"
         )
         rows = cur.fetchall()
     if not rows:
@@ -106,21 +131,24 @@ def cmd_list(_args) -> None:
         return
     fmt = "%Y-%m-%d %H:%M:%S"
     print(
-        f"{'PREFIX':<18} {'NAME':<20} {'ROLE':<10} {'SCOPES':<22} {'ON':<3} {'CREATED':<19} {'LAST_USED':<19} {'EXPIRES':<19}"
+        f"{'PREFIX':<18} {'NAME':<20} {'ROLE':<10} {'STATUS':<8} "
+        f"{'CREATED':<19} {'LAST_USED':<19}"
     )
-    for prefix, name, role, scopes, enabled, created, last_used, expires in rows:
+    for prefix, name, role, status, created, last_used in rows:
         print(
-            f"{prefix:<18} {(name or '-'):<20} {role:<10} {','.join(scopes or []):<22} "
-            f"{'Y' if enabled else 'N':<3} {created.strftime(fmt):<19} "
-            f"{(last_used.strftime(fmt) if last_used else '-'):<19} "
-            f"{(expires.strftime(fmt) if expires else '-'):<19}"
+            f"{prefix:<18} {(name or '-'):<20} {role:<10} {status:<8} "
+            f"{created.strftime(fmt):<19} "
+            f"{(last_used.strftime(fmt) if last_used else '-'):<19}"
         )
 
 
 def _revoke(conn, prefix: str) -> bool:
+    # V3 uses status='disabled' (text), not the V1 enabled=false (bool).
     with conn.cursor() as cur:
         cur.execute(
-            "UPDATE api_keys SET enabled = false WHERE key_prefix = %s", (prefix,)
+            "UPDATE security.api_keys SET status = 'disabled' "
+            "WHERE key_prefix = %s AND status <> 'disabled'",
+            (prefix,),
         )
         n = cur.rowcount
     conn.commit()
@@ -140,31 +168,20 @@ def cmd_rotate(args) -> None:
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT name, role FROM api_keys WHERE key_prefix = %s AND enabled = true",
+                "SELECT name, role FROM security.api_keys "
+                "WHERE key_prefix = %s AND status = 'active'",
                 (args.prefix,),
             )
             row = cur.fetchone()
         if not row:
             sys.exit(f"NOT FOUND or already revoked: {args.prefix}")
         name, role = row
-        # Default: copy scopes from old key. Explicit --scopes overrides.
-        if args.scopes is not None:
-            scopes = args.scopes
-        else:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT scopes FROM api_keys WHERE key_prefix = %s",
-                    (args.prefix,),
-                )
-                scopes_row = cur.fetchone()
-                # cur.fetchone() may return None (prefix just rotated
-                # out from under us, or the row's scopes column is
-                # NULL); either way, treat as "no scopes carried over".
-                scopes = (scopes_row[0] if scopes_row is not None else None) or []
-        key = _insert_key(conn, name, role, list(scopes), args.expires_days)
+        # V3 dropped the ``scopes`` column. ``--scopes`` is still
+        # accepted (no error) but not persisted; same for
+        # ``--expires-days``. The new key inherits name + role only.
+        key = _insert_key(conn, name, role, [], None)
         _revoke(conn, args.prefix)
     print(f"rotated: {args.prefix} -> new key for name={name} role={role}")
-    print(f"scopes  : {','.join(scopes) or '(none)'}")
     print()
     print(f"API KEY (shown ONCE, store it now):  {key}")
 
