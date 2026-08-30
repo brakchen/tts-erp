@@ -128,19 +128,10 @@ def _env_auth_mode() -> str:
 
 
 # Module-level app for ``uvicorn tts_erp_v2.app:app``.
-app: FastAPI | None = None
-
-
-def _get_app() -> FastAPI:
-    global app
-    if app is None:
-        app = build_app()
-    return app
-
-
-# Lazy ``app`` symbol: defer build_app() until first access so importing
-# this module without TTS_ERP_DB_URL configured doesn't crash.
-def __getattr__(name: str):
-    if name == "app":
-        return _get_app()
-    raise AttributeError(name)
+# Eagerly build so uvicorn gets a real FastAPI instance — a lazy
+# ``__getattr__`` shim works for test imports (``from app import app``)
+# but uvicorn's middleware stack re-imports / re-attributes the module
+# attr and ends up seeing ``None`` (the annotation default) instead of
+# the FastAPI callable, which crashes the ASGI dispatch with
+# ``TypeError: 'NoneType' object is not callable``.
+app: FastAPI = build_app()

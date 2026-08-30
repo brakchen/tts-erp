@@ -31,19 +31,22 @@ router = APIRouter(prefix="/v2/linkage", tags=["linkage"])
 
 
 # --- SQL constants (module-level, no interpolation) -----------------------
+# Each SELECT ends with ``FROM <table> ORDER BY ... LIMIT :limit OFFSET
+# :offset``. _q_optional() injects ``WHERE col = :col`` for each active
+# optional filter between FROM and ORDER BY. We deliberately do NOT
+# use ``IS NULL OR col = :param`` — psycopg can't infer the type of a
+# None-valued bind param and the query 500s with
+# ``ERROR: could not determine data type of parameter $1``.
 SQL_LIST_PRODUCT_LINKS = (
     "SELECT id, procurement_product_id, channel_product_id, relation_type, "
     "status, is_primary, valid_from, valid_to "
     "FROM linkage.product_links "
-    "WHERE (:channel_id IS NULL OR channel_product_id = :channel_id) "
-    "AND (:proc_id IS NULL OR procurement_product_id = :proc_id) "
     "ORDER BY id LIMIT :limit OFFSET :offset"
 )
 SQL_LIST_LINK_EVIDENCE = (
     "SELECT id, product_link_id, variant_link_id, evidence_type, "
     "source_table, source_external_id, observed_at "
     "FROM linkage.link_evidence "
-    "WHERE (:product_link_id IS NULL OR product_link_id = :product_link_id) "
     "ORDER BY id LIMIT :limit OFFSET :offset"
 )
 SQL_LIST_LINK_ISSUES = (
@@ -64,8 +67,8 @@ SQL_INSERT_LINK_OVERRIDE = (
 )
 SQL_CLOSE_OLD_OVERRIDES = (
     "UPDATE linkage.link_overrides SET valid_to = now() "
-    "WHERE channel_product_id = :channel_id "
-    "AND procurement_product_id = :proc_id "
+    "WHERE channel_product_id = CAST(:channel_id AS bigint) "
+    "AND procurement_product_id = CAST(:proc_id AS bigint) "
     "AND valid_to IS NULL "
     "AND id <> :keep_id"
 )
@@ -73,7 +76,7 @@ SQL_LIST_OVERRIDES = (
     "SELECT id, procurement_product_id, channel_product_id, decision, "
     "reason, valid_from, valid_to, created_by "
     "FROM linkage.link_overrides "
-    "WHERE (:channel_id IS NULL OR channel_product_id = :channel_id) "
+    "WHERE (:channel_id IS NULL OR channel_product_id = CAST(:channel_id AS bigint)) "
     "AND (:active_only = FALSE OR valid_to IS NULL) "
     "ORDER BY valid_from DESC LIMIT :limit OFFSET :offset"
 )
@@ -101,6 +104,51 @@ def _q(compiled_stmt, params: dict, sess: Session):
     string itself.
     """
     return sess.execute(compiled_stmt, params)
+
+
+def _q_optional(
+    base_sql: str,
+    optional_filters: dict[str, Any],
+    params: dict,
+    sess: Session,
+) -> Any:
+    """Build a SQL with ``WHERE col = :param`` for each non-None filter.
+
+    Replaces the ``IS NULL OR col = :param`` pattern, which psycopg
+    cannot type-infer when the param is ``None`` (PG returns
+    ``ERROR: could not determine data type of parameter $1`` and the
+    route 500s). Building the WHERE clause in Python side-steps the
+    type-inference issue entirely and the SQL is still bound-parameter
+    safe.
+
+    The ``base_sql`` must NOT contain ``IS NULL OR`` patterns — those
+    are added here only when the corresponding filter is non-None.
+    Pass the SQL as ``... FROM <table> ORDER BY ... LIMIT :limit ...``
+    and we'll insert ``WHERE col = :col`` before ORDER BY when needed.
+    """
+    clauses: list[str] = []
+    bind_params: dict = dict(params)
+    for col, value in optional_filters.items():
+        if value is None:
+            continue
+        clauses.append(f"{col} = :{col}")
+        bind_params[col] = value
+    if not clauses:
+        return sess.execute(text(base_sql), bind_params)
+    # Inject the WHERE between the FROM clause and the trailing
+    # ORDER BY. The base SQL ends with ``FROM <table>`` and the
+    # caller appends ``ORDER BY ... LIMIT ...``.
+    order_idx = base_sql.upper().find("ORDER BY")
+    if order_idx == -1:
+        raise RuntimeError(
+            "_q_optional expects a SQL with ORDER BY clause"
+        )
+    new_sql = (
+        base_sql[:order_idx]
+        + " WHERE " + " AND ".join(clauses) + " "
+        + base_sql[order_idx:]
+    )
+    return sess.execute(text(new_sql), bind_params)
 
 
 def _evidence_row(row: Any) -> LinkEvidenceOut:
@@ -162,14 +210,13 @@ def list_product_links(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> list[ProductLinkOut]:
-    rows = _q(
-        _STMT_LIST_PRODUCT_LINKS,
+    rows = _q_optional(
+        SQL_LIST_PRODUCT_LINKS,
         {
-            "channel_id": channel_product_id,
-            "proc_id": procurement_product_id,
-            "limit": limit,
-            "offset": offset,
+            "channel_product_id": channel_product_id,
+            "procurement_product_id": procurement_product_id,
         },
+        {"limit": limit, "offset": offset},
         sess,
     ).all()
     return [_product_link_row(r) for r in rows]
@@ -182,9 +229,10 @@ def list_link_evidence(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> list[LinkEvidenceOut]:
-    rows = _q(
-        _STMT_LIST_LINK_EVIDENCE,
-        {"product_link_id": product_link_id, "limit": limit, "offset": offset},
+    rows = _q_optional(
+        SQL_LIST_LINK_EVIDENCE,
+        {"product_link_id": product_link_id},
+        {"limit": limit, "offset": offset},
         sess,
     ).all()
     return [_evidence_row(r) for r in rows]
