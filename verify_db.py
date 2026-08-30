@@ -16,8 +16,9 @@ For V2 data verification, write a new diagnostic against the V3
 schema instead.
 """
 
-import psycopg
 import sys
+
+import psycopg
 
 from scripts._db_url import normalize_db_url
 

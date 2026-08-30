@@ -13,6 +13,7 @@ stdout — the operator's single source of truth for "who hit what,
 how, when, and what was the auth outcome" without having to cross-
 reference NGINX access logs.
 """
+
 __all__ = [
     "AccessLogMiddleware",
     "AuthMiddleware",
