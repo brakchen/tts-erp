@@ -27,6 +27,7 @@ The Fernet key is read from ``TTS_ERP_FERNET_KEY``. We do NOT read
 ``OAUTH_DB_ENCRYPTION_KEY`` (the legacy name) — that env var is
 operator-owned by oauth-receiver; tts-erp-v2 owns its own.
 """
+
 from __future__ import annotations
 
 import json
@@ -163,7 +164,27 @@ class CredentialsView:
         # Decode ciphertext envelope (we store a JSON bundle rather
         # than separate columns, so the legacy schema's nullable
         # shop_cipher / refresh_token can both round-trip cleanly).
-        envelope = json.loads(decrypt(row.ciphertext))
+        plaintext = decrypt(row.ciphertext)
+        try:
+            envelope = json.loads(plaintext)
+        except json.JSONDecodeError:
+            # Legacy / externally-overwritten format: ciphertext holds a
+            # bare Fernet(access_token) instead of the JSON envelope.
+            # Don't crash the whole tick — degrade to a single-token view
+            # and let the operator re-run the re-encrypt migration. The
+            # missing refresh_token / shop_cipher will surface as
+            # upstream 401 / invalid-sign rather than a hard process crash.
+            raise DecryptionError(
+                "credentials ciphertext is not a JSON envelope for "
+                f"{row.provider}:{row.external_account_id!r} — re-run "
+                "scripts/migrate_v1_to_v2/re_encrypt_credentials.py "
+                f"(decrypted {len(plaintext)} bytes, not JSON)"
+            ) from None
+        if not isinstance(envelope, dict) or "access_token" not in envelope:
+            raise DecryptionError(
+                "credentials envelope missing access_token for "
+                f"{row.provider}:{row.external_account_id!r}"
+            )
         return cls(
             id=row.id,
             provider=row.provider,
@@ -348,16 +369,16 @@ def refresh_if_needed(
 
 
 __all__ = [
-    "encrypt",
-    "decrypt",
-    "mask_secret",
-    "is_expired",
-    "upsert_credentials",
-    "load_credentials",
-    "refresh_if_needed",
-    "CredentialsView",
     "DEFAULT_REFRESH_SKEW",
-    "RefresherFn",
+    "CredentialsView",
     "DecryptionError",
+    "RefresherFn",
     "SigningError",
+    "decrypt",
+    "encrypt",
+    "is_expired",
+    "load_credentials",
+    "mask_secret",
+    "refresh_if_needed",
+    "upsert_credentials",
 ]

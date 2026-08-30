@@ -46,7 +46,18 @@ class ParseError(ValueError):
 def _epoch_seconds_to_utc(seconds: int | None):
     if seconds is None or seconds <= 0:
         return None
-    return datetime.fromtimestamp(int(seconds), tz=timezone.utc)
+    try:
+        return datetime.fromtimestamp(_safe_int(seconds), tz=timezone.utc)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    """Coerce to int without raising; ``None``/garbage → ``default``."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _to_decimal(v):
@@ -128,16 +139,22 @@ def _process_one_type(
     inserted = 0
     failed = 0
     for raw in raw_cases:
+        ext_case_id = str(
+            raw.get("id")
+            or raw.get("return_id")
+            or raw.get("cancel_id")
+            or "<unknown>"
+        )
         try:
             fields = _parse_case(case_type, raw)
-        except ParseError as e:
+        except ParseError as exc:
             failed += 1
             session.add(
                 SyncIssue(
                     job_name=JOB_NAME,
                     issue_type="PARSE_ERROR",
-                    external_id=str(raw.get("id") or raw.get("return_id") or raw.get("cancel_id") or "<unknown>"),
-                    details={"error": str(e), "case_type": case_type},
+                    external_id=ext_case_id,
+                    details={"error": str(exc), "case_type": case_type},
                 )
             )
             continue
@@ -250,7 +267,7 @@ def run(
     *,
     proxy_call: ProxyCall,
     shop_id: str,
-    page_size: int = 100,
+    page_size: int = 50,
     scope: str | None = None,
 ) -> JobResult:
     from tts_erp_v2.sync_worker import watermarks
@@ -272,7 +289,7 @@ def run(
     )
     base_body: dict[str, Any] = {"page_size": page_size}
     if watermark_ms:
-        base_body["update_time_ge"] = int(watermark_ms) // 1000
+        base_body["update_time_ge"] = _safe_int(watermark_ms) // 1000
 
     returns = _walk_pages(proxy_call, endpoint=RETURNS_ENDPOINT, base_body=base_body)
     cancellations = _walk_pages(
@@ -305,13 +322,14 @@ def run(
     for raw in (*returns, *cancellations):
         ts = _epoch_seconds_to_utc(raw.get("update_time"))
         if ts:
-            ms = int(ts.timestamp() * 1000)
+            ms = _safe_int(ts.timestamp() * 1000)
             if max_update_ms is None or ms > max_update_ms:
                 max_update_ms = ms
 
     new_cursor_ms: int | None = None
     if max_update_ms is not None and (
-        watermark_ms is None or max_update_ms > int(watermark_ms)
+        watermark_ms is None
+        or max_update_ms > _safe_int(watermark_ms)
     ):
         watermarks.set_cursor(
             session,

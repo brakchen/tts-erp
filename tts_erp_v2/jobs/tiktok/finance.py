@@ -38,11 +38,24 @@ from tts_erp_v2.db.models import (
 from tts_erp_v2.sync_worker.job_runner import JobResult
 
 JOB_NAME = "tiktok.finance"
-PAYOUTS_ENDPOINT = "/finance/202309/payments/list"
-STATEMENTS_ENDPOINT = "/finance/202309/settlements/search"
-STATEMENT_TRANSACTIONS_ENDPOINT = (
-    "/finance/202309/settlements/transactions"
+# TikTok 202309 finance endpoints (verified live 2026-08-30):
+#   GET /finance/202309/payments                     → data.payments
+#   GET /finance/202309/statements                   → data.statements
+#   GET /finance/202309/statements/{id}/statement_transactions
+#                                                    → data.statement_transactions
+# The old v2 paths (/payments/list, /settlements/search) 404.
+PAYOUTS_ENDPOINT = "/finance/202309/payments"
+STATEMENTS_ENDPOINT = "/finance/202309/statements"
+STATEMENT_TRANSACTIONS_TEMPLATE = (
+    "/finance/202309/statements/{statement_id}/statement_transactions"
 )
+
+#: sort_field per endpoint (required — TikTok returns 36009004 otherwise).
+_SORT_FIELDS = {
+    PAYOUTS_ENDPOINT: "create_time",
+    STATEMENTS_ENDPOINT: "statement_time",
+}
+_TXN_SORT_FIELD = "order_create_time"  # only allowed value for txns
 ProxyCall = Callable[..., dict]
 
 
@@ -82,7 +95,10 @@ class ParseError(ValueError):
 def _epoch_seconds_to_utc(seconds: int | None):
     if seconds is None or seconds <= 0:
         return None
-    return datetime.fromtimestamp(int(seconds), tz=timezone.utc)
+    try:
+        return datetime.fromtimestamp(_safe_int(seconds), tz=timezone.utc)
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 def _to_decimal(v) -> Decimal | None:
@@ -94,29 +110,48 @@ def _to_decimal(v) -> Decimal | None:
         return None
 
 
-def _walk_pages(proxy_call, *, endpoint: str, base_body: dict):
+def _safe_int(value: Any, default: int = 0) -> int:
+    """Coerce to int without raising; ``None``/garbage → ``default``."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _walk_pages(
+    proxy_call,
+    *,
+    endpoint: str,
+    base_body: dict,
+    items_key: str,
+    method: str = "GET",
+):
+    """Walk every page of a finance endpoint.
+
+    TikTok 202309 finance endpoints are GETs returning a top-level list
+    under ``data.<items_key>`` plus ``data.next_page_token``. sort_field
+    is required per endpoint (36009004 otherwise); we inject the default.
+    """
     collected: list[dict] = []
     next_token: str | None = None
     body = dict(base_body)
+    if "sort_field" not in body:
+        if "statement_transactions" in endpoint:
+            body["sort_field"] = _TXN_SORT_FIELD
+        elif endpoint in _SORT_FIELDS:
+            body["sort_field"] = _SORT_FIELDS[endpoint]
     while True:
         page_body = dict(body)
         if next_token:
-            page_body["next_page_token"] = next_token
-        resp = proxy_call("POST", endpoint, body=page_body)
+            page_body["page_token"] = next_token
+        resp = proxy_call(method, endpoint, body=page_body)
         code = resp.get("code", -1)
         if code != 0:
             raise UpstreamJobError(
                 f"{endpoint} non-zero code={code} message={resp.get('message')!r}"
             )
         data = resp.get("data") or {}
-        # be liberal: most finance endpoints expose a top-level list
-        items = (
-            data.get("payments")
-            or data.get("statements")
-            or data.get("transactions")
-            or []
-        )
-        collected.extend(items)
+        collected.extend(data.get(items_key) or [])
         next_token = data.get("next_page_token") or None
         if not next_token:
             break
@@ -292,9 +327,14 @@ def run(
     )
     base_body: dict[str, Any] = {"page_size": page_size}
     if watermark_ms:
-        base_body["update_time_ge"] = int(watermark_ms) // 1000
+        base_body["update_time_ge"] = _safe_int(watermark_ms) // 1000
 
-    raw_payouts = _walk_pages(proxy_call, endpoint=PAYOUTS_ENDPOINT, base_body=base_body)
+    raw_payouts = _walk_pages(
+        proxy_call,
+        endpoint=PAYOUTS_ENDPOINT,
+        base_body=base_body,
+        items_key="payments",
+    )
 
     total = 0
     inserted = 0
@@ -304,16 +344,19 @@ def run(
 
     for raw_p in raw_payouts:
         total += 1
+        ext_payout_id = str(
+            raw_p.get("payment_id") or raw_p.get("id") or "<unknown>"
+        )
         try:
             p_fields = _parse_payout(raw_p)
-        except ParseError as e:
+        except ParseError as exc:
             failed += 1
             session.add(
                 SyncIssue(
                     job_name=JOB_NAME,
                     issue_type="PARSE_ERROR",
-                    external_id=str(raw_p.get("payment_id") or raw_p.get("id") or "<unknown>"),
-                    details={"error": str(e), "section": "payouts"},
+                    external_id=ext_payout_id,
+                    details={"error": str(exc), "section": "payouts"},
                 )
             )
             continue
@@ -339,21 +382,25 @@ def run(
                 proxy_call,
                 endpoint=STATEMENTS_ENDPOINT,
                 base_body={**base_body, "payment_id": p_fields["external_payout_id"]},
+                items_key="statements",
             )
         except UpstreamJobError:
             raw_statements = []
 
         for raw_s in raw_statements:
+            ext_stmt_id = str(
+                raw_s.get("statement_id") or raw_s.get("id") or "<unknown>"
+            )
             try:
                 s_fields = _parse_statement(raw_s, payout_id=payout_id)
-            except ParseError as e:
+            except ParseError as exc:
                 failed += 1
                 session.add(
                     SyncIssue(
                         job_name=JOB_NAME,
                         issue_type="PARSE_ERROR",
-                        external_id=str(raw_s.get("statement_id") or raw_s.get("id") or "<unknown>"),
-                        details={"error": str(e), "section": "statements"},
+                        external_id=ext_stmt_id,
+                        details={"error": str(exc), "section": "statements"},
                     )
                 )
                 continue
@@ -375,32 +422,37 @@ def run(
             try:
                 raw_txns = _walk_pages(
                     proxy_call,
-                    endpoint=STATEMENT_TRANSACTIONS_ENDPOINT,
-                    base_body={
-                        "statement_id": s_fields["external_statement_id"],
-                        "page_size": page_size,
-                    },
+                    endpoint=STATEMENT_TRANSACTIONS_TEMPLATE.format(
+                        statement_id=s_fields["external_statement_id"]
+                    ),
+                    base_body={"page_size": page_size},
+                    items_key="statement_transactions",
                 )
             except UpstreamJobError:
                 raw_txns = []
 
             for raw_t in raw_txns:
+                ext_txn_id = str(
+                    raw_t.get("transaction_id") or raw_t.get("id") or "<unknown>"
+                )
                 try:
                     t_fields = _parse_transaction(raw_t)
-                except ParseError as e:
+                except ParseError as exc:
                     failed += 1
                     session.add(
                         SyncIssue(
                             job_name=JOB_NAME,
                             issue_type="PARSE_ERROR",
-                            external_id=str(raw_t.get("transaction_id") or raw_t.get("id") or "<unknown>"),
-                            details={"error": str(e), "section": "transactions"},
+                            external_id=ext_txn_id,
+                            details={"error": str(exc), "section": "transactions"},
                         )
                     )
                     continue
 
                 raw_t_row = RawRecord(
-                    endpoint=STATEMENT_TRANSACTIONS_ENDPOINT,
+                    endpoint=STATEMENT_TRANSACTIONS_TEMPLATE.format(
+                        statement_id=s_fields["external_statement_id"]
+                    ),
                     external_id=t_fields["external_transaction_id"],
                     payload=raw_t,
                 )
@@ -420,14 +472,17 @@ def run(
                 )
 
         inserted += 1
-        update_ms = (p_fields.get("source_updated_at")
-                     and int(p_fields["source_updated_at"].timestamp() * 1000))
+        update_ms = (
+            p_fields.get("source_updated_at")
+            and _safe_int(p_fields["source_updated_at"].timestamp() * 1000)
+        )
         if update_ms and (max_update_ms is None or update_ms > max_update_ms):
             max_update_ms = update_ms
 
     new_cursor_ms: int | None = None
     if max_update_ms is not None and (
-        watermark_ms is None or max_update_ms > int(watermark_ms)
+        watermark_ms is None
+        or max_update_ms > _safe_int(watermark_ms)
     ):
         watermarks.set_cursor(
             session,
@@ -450,7 +505,7 @@ __all__ = [
     "JOB_NAME",
     "PAYOUTS_ENDPOINT",
     "STATEMENTS_ENDPOINT",
-    "STATEMENT_TRANSACTIONS_ENDPOINT",
+    "STATEMENT_TRANSACTIONS_TEMPLATE",
     "_COMPONENT_COLUMNS",
     "ProxyCall",
     "UpstreamJobError",

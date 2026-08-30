@@ -421,6 +421,149 @@ class TestParseOrderPayload:
             _parse_order_payload({"id": ""})
 
 
+class TestFinanceEndpoints:
+    """tiktok.finance must use the live-verified 202309 endpoints
+    (GET, not POST) and read the real response keys.
+    """
+
+    def test_endpoints_are_get_paths(self):
+        from tts_erp_v2.jobs.tiktok.finance import (
+            PAYOUTS_ENDPOINT,
+            STATEMENTS_ENDPOINT,
+            STATEMENT_TRANSACTIONS_TEMPLATE,
+        )
+
+        assert PAYOUTS_ENDPOINT == "/finance/202309/payments"
+        assert STATEMENTS_ENDPOINT == "/finance/202309/statements"
+        assert STATEMENT_TRANSACTIONS_TEMPLATE.format(statement_id="123") == (
+            "/finance/202309/statements/123/statement_transactions"
+        )
+
+    def test_walk_pages_reads_statement_transactions_key(self):
+        """The statement-txns response puts rows under
+        ``data.statement_transactions`` (verified live 2026-08-30)."""
+        from tts_erp_v2.jobs.tiktok.finance import _walk_pages
+
+        calls: list[tuple] = []
+
+        def fake_proxy(method, path, *, body=None):
+            calls.append((method, path, body))
+            return {
+                "code": 0,
+                "data": {
+                    "statement_transactions": [{"id": "T1"}],
+                    "next_page_token": "",
+                },
+            }
+
+        items = _walk_pages(
+            fake_proxy,
+            endpoint="/finance/202309/statements/9/statement_transactions",
+            base_body={"page_size": 50},
+            items_key="statement_transactions",
+        )
+        assert [i["id"] for i in items] == ["T1"]
+        # GET method + sort_field injected for the txns endpoint.
+        assert calls[0][0] == "GET"
+        assert calls[0][2]["sort_field"] == "order_create_time"
+
+    def test_parse_statement_maps_202309_fields(self):
+        """Statement rows: id / statement_time / payment_id / currency."""
+        from tts_erp_v2.jobs.tiktok.finance import _parse_statement
+
+        fields = _parse_statement(
+            {
+                "id": "7679256775207683848",
+                "statement_time": 1784030587,
+                "payment_id": "P-1",
+                "currency": "USD",
+                "settlement_amount": "100.5",
+            },
+            payout_id=7,
+        )
+        assert fields["external_statement_id"] == "7679256775207683848"
+        assert fields["payout_id"] == 7
+        assert fields["currency"] == "USD"
+        assert fields["statement_time"] is not None
+
+
+class TestLogisticsTargets:
+    """tiktok.logistics must source targets from raw_records (the orders
+    payload already carries tracking_number / packages), NOT the
+    non-existent /order/202309/orders/shipments endpoint.
+    """
+
+    def _make_raw_row(self, oid: str, tracking: str):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            payload={
+                "id": oid,
+                "tracking_number": tracking,
+                "packages": [{"id": f"pkg-{oid}"}],
+                "shipping_provider_id": "7439297584469903122",
+            },
+            endpoint="/order/202309/orders/search",
+        )
+
+    def test_selects_orders_with_tracking(self):
+        from tts_erp_v2.jobs.tiktok.logistics import _select_tracking_targets
+
+        sess = MagicMock()
+        # Fake session.execute(select(RawRecord)).scalars().all()
+        rows = [
+            self._make_raw_row("111", "TN-1"),
+            self._make_raw_row("222", "TN-2"),
+            self._make_raw_row("333", ""),  # no tracking → excluded
+        ]
+        # .scalars().all() chain on the RawRecord select
+        sess.execute.return_value.scalars.return_value.all.return_value = rows
+
+        targets = _select_tracking_targets(sess, limit=50)
+        assert [t["external_order_id"] for t in targets] == ["111", "222"]
+        assert [t["tracking_number"] for t in targets] == ["TN-1", "TN-2"]
+
+    def test_empty_tracking_list_returns_empty(self):
+        from tts_erp_v2.jobs.tiktok.logistics import _select_tracking_targets
+
+        sess = MagicMock()
+        sess.execute.return_value.scalars.return_value.all.return_value = []
+        assert _select_tracking_targets(sess, limit=50) == []
+
+    def test_tracking_endpoint_path(self):
+        """Confirmed live: GET /fulfillment/202309/orders/{id}/tracking."""
+        from tts_erp_v2.jobs.tiktok.logistics import (
+            TRACKING_ENDPOINT_TEMPLATE,
+        )
+
+        assert TRACKING_ENDPOINT_TEMPLATE.format(order_id="585141176565663083") == (
+            "/fulfillment/202309/orders/585141176565663083/tracking"
+        )
+
+    def test_event_parse_uses_update_time_millis(self):
+        """TikTok tracking events: {action_code, description, update_time_millis}."""
+        from tts_erp_v2.jobs.tiktok.logistics import _parse_event
+
+        fields = _parse_event(
+            {
+                "action_code": 50101,
+                "description": "Your package was delivered!",
+                "update_time_millis": 1785150976000,
+            }
+        )
+        assert fields["external_event_key"] == "Your package was delivered!"
+        assert fields["action_code"] == 50101
+        assert fields["event_at"] is not None
+        assert fields["event_at"].timestamp() == 1785150976.0
+
+    def test_run_uses_tracking_endpoint_not_shipments(self):
+        """The job must NOT call the 404 endpoint anymore — the old
+        SHIPMENTS_ENDPOINT constant is gone entirely."""
+        from tts_erp_v2.jobs.tiktok import logistics as log_mod
+
+        assert not hasattr(log_mod, "SHIPMENTS_ENDPOINT")
+
+
 class TestEnumerateTiktokShops:
     """``scheduler._enumerate_tiktok_shops`` must:
     * read from ``integration.credentials WHERE provider='tiktok'``
@@ -519,7 +662,6 @@ class TestJobRegistry:
 class TestBuildScheduler:
     def test_registers_jobs_with_interval_triggers(self):
         from apscheduler.schedulers.blocking import BlockingScheduler
-
         from tts_erp_v2.sync_worker.scheduler import JOBS, build_scheduler
 
         sched = build_scheduler()

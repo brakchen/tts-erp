@@ -49,7 +49,19 @@ def _epoch_seconds_to_utc(seconds: int | None):
     if seconds is None or seconds <= 0:
         return None
     from datetime import datetime, timezone
-    return datetime.fromtimestamp(int(seconds), tz=timezone.utc)
+
+    try:
+        return datetime.fromtimestamp(_safe_int(seconds), tz=timezone.utc)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    """Coerce to int without raising; ``None``/garbage → ``default``."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _walk_pages(proxy_call, *, base_body):
@@ -76,7 +88,9 @@ def _walk_pages(proxy_call, *, base_body):
 
 
 def _parse_product(raw: dict) -> dict:
-    pid = raw.get("product_id")
+    # TikTok 202309 /product/202309/products/search returns ``id``
+    # (verified live 2026-08-30); ``product_id`` no longer exists.
+    pid = raw.get("product_id") or raw.get("id")
     if not pid:
         raise ParseError("product_id missing")
     return {
@@ -170,9 +184,9 @@ def run(
         session, job_name=JOB_NAME, scope=cursor_scope
     )
 
-    base_body: dict[str, Any] = {"page_size": page_size, "status": "ACTIVE"}
+    base_body: dict[str, Any] = {"page_size": page_size, "status": "ACTIVATE"}
     if watermark_ms:
-        base_body["update_time_ge"] = int(watermark_ms) // 1000
+        base_body["update_time_ge"] = _safe_int(watermark_ms) // 1000
 
     products = _walk_pages(proxy_call, base_body=base_body)
 
@@ -182,16 +196,17 @@ def run(
     max_update_ms: int | None = None
 
     for raw in products:
+        ext_product_id = str(raw.get("product_id") or raw.get("id") or "<unknown>")
         try:
             p_fields = _parse_product(raw)
-        except ParseError as e:
+        except ParseError as exc:
             rows_failed += 1
             session.add(
                 SyncIssue(
                     job_name=JOB_NAME,
                     issue_type="PARSE_ERROR",
-                    external_id=str(raw.get("product_id") or "<unknown>"),
-                    details={"error": str(e)},
+                    external_id=ext_product_id,
+                    details={"error": str(exc)},
                 )
             )
             continue
@@ -213,13 +228,13 @@ def run(
         for raw_v in raw.get("skus") or raw.get("variants") or []:
             try:
                 v_fields = _parse_variant(raw_v)
-            except ParseError as e:
+            except ParseError as exc:
                 session.add(
                     SyncIssue(
                         job_name=JOB_NAME,
                         issue_type="PARSE_ERROR",
                         external_id=f"{p_fields['external_product_id']}:<sku>",
-                        details={"error": str(e)},
+                        details={"error": str(exc)},
                     )
                 )
                 continue
@@ -231,14 +246,17 @@ def run(
             )
 
         rows_inserted += 1
-        update_ms = (p_fields.get("source_updated_at")
-                     and int(p_fields["source_updated_at"].timestamp() * 1000))
+        update_ms = (
+            p_fields.get("source_updated_at")
+            and _safe_int(p_fields["source_updated_at"].timestamp() * 1000)
+        )
         if update_ms and (max_update_ms is None or update_ms > max_update_ms):
             max_update_ms = update_ms
 
     new_cursor_ms: int | None = None
     if max_update_ms is not None and (
-        watermark_ms is None or max_update_ms > int(watermark_ms)
+        watermark_ms is None
+        or max_update_ms > _safe_int(watermark_ms)
     ):
         watermarks.set_cursor(
             session,

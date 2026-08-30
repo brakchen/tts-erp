@@ -1,16 +1,32 @@
-"""tiktok.logistics — shipments + tracking events.
+"""tiktok.logistics — tracking events for shipped orders.
 
-Two endpoints:
+Verified live on 2026-08-30 against the production shop:
 
-* shipments list → ``fulfillment.shipments``
-* tracking per shipment → ``fulfillment.tracking_events``
+* TikTok 202309 has **no** ``/order/202309/orders/shipments`` list
+  endpoint — that path returns ``UpstreamHttpError: Invalid path``.
+  The legacy endpoint that works is ``GET /fulfillment/202309/orders/
+  {order_id}/tracking`` → ``{ code, data: { tracking: [ {action_code,
+  description, update_time_millis} ] } }``.
+* The orders-search payload already carries ``tracking_number`` /
+  ``shipping_provider_id`` / ``packages``, so this job sources its
+  targets from ``integration.raw_records`` (the raw orders payloads)
+  instead of a non-existent shipments list.
 
-Upstream `logistics_tracking_event` rows use **epoch milliseconds** for
-``update_time_millis`` and ``event_time`` (V3 §14). Our migration
-already verified this; the job converts at the boundary.
+Data flow
+---------
+1. Select candidate orders from ``integration.raw_records`` whose
+   payload has a ``tracking_number`` and whose order is not already in a
+   terminal logistics state (DELIVERED / RETURNED_TO_SELLER).
+2. For each candidate: ``GET /fulfillment/202309/orders/{id}/tracking``.
+3. Upsert ``fulfillment.shipments`` (one row per package) and
+   ``fulfillment.tracking_events`` (one row per event; most-recent wins
+   via the unique ``(shipment_id, external_event_key)`` constraint).
+4. Advance the cursor watermark to the max ``update_time_millis`` seen.
 
-Cursor: epoch ms for the shipments list. Tracking events are fetched
-per-shipment on demand.
+Timestamps
+----------
+TikTok tracking events use **epoch milliseconds** (``update_time_millis``);
+we convert at the boundary to UTC ``datetime`` for storage (V3 §14).
 """
 from __future__ import annotations
 
@@ -33,8 +49,20 @@ from tts_erp_v2.db.models import (
 from tts_erp_v2.sync_worker.job_runner import JobResult
 
 JOB_NAME = "tiktok.logistics"
-SHIPMENTS_ENDPOINT = "/order/202309/orders/shipments"
-TRACKING_ENDPOINT = "/fulfillment/202309/tracking"
+
+#: Confirmed live 2026-08-30: this path returns code 0 + data.tracking.
+#: The old ``/fulfillment/202309/tracking/{tracking_number}`` shape 404s.
+TRACKING_ENDPOINT_TEMPLATE = "/fulfillment/202309/orders/{order_id}/tracking"
+
+#: Raw orders payloads carry tracking info; we source targets there.
+ORDERS_ENDPOINT = "/order/202309/orders/search"
+
+#: Terminal logistics states — tracking never changes after these.
+FINAL_STATUSES: tuple[str, ...] = ("DELIVERED", "RETURNED_TO_SELLER")
+
+#: Same cap as the legacy cron's LOGISTICS_TARGET_LIMIT.
+TARGET_LIMIT = 300
+
 ProxyCall = Callable[..., dict]
 
 
@@ -46,66 +74,40 @@ class ParseError(ValueError):
     pass
 
 
-def _epoch_ms_to_utc(ms: int | None):
+def _epoch_ms_to_utc(ms: int | None) -> datetime | None:
     if ms is None or ms <= 0:
         return None
-    return datetime.fromtimestamp(int(ms) / 1000.0, tz=timezone.utc)
+    try:
+        return datetime.fromtimestamp(int(ms) / 1000.0, tz=timezone.utc)
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
-def _walk_pages(proxy_call, *, endpoint: str, base_body: dict):
-    collected: list[dict] = []
-    next_token: str | None = None
-    body = dict(base_body)
-    while True:
-        page_body = dict(body)
-        if next_token:
-            page_body["next_page_token"] = next_token
-        resp = proxy_call("POST", endpoint, body=page_body)
-        code = resp.get("code", -1)
-        if code != 0:
-            raise UpstreamJobError(
-                f"{endpoint} non-zero code={code} message={resp.get('message')!r}"
-            )
-        data = resp.get("data") or {}
-        items = data.get("shipments") or data.get("packages") or []
-        collected.extend(items)
-        next_token = data.get("next_page_token") or None
-        if not next_token:
-            break
-    return collected
-
-
-def _parse_shipment(raw: dict) -> dict:
-    pkg_id = raw.get("package_id") or raw.get("id")
-    order_id = raw.get("order_id")
-    if not pkg_id or not order_id:
-        raise ParseError("package_id or order_id missing")
-    return {
-        "external_package_id": str(pkg_id),
-        "external_order_id": str(order_id),
-        "tracking_number": raw.get("tracking_number"),
-        "provider_id": raw.get("shipping_provider_id") or raw.get("provider_id"),
-        "provider_name": raw.get("shipping_provider_name") or raw.get("provider_name"),
-        "status": raw.get("status"),
-        "shipped_at": _epoch_ms_to_utc(raw.get("shipped_time_ms") or raw.get("shipped_time")),
-        "delivered_at": _epoch_ms_to_utc(raw.get("delivered_time_ms") or raw.get("delivered_time")),
-    }
+def _safe_int(value: Any, default: int = 0) -> int:
+    """Coerce to int without raising; ``None``/garbage → ``default``."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _parse_event(raw: dict) -> dict:
+    """Normalise one tracking event: {action_code, description,
+    update_time_millis}. The event key is the description (TikTok sends
+    no stable event id)."""
     ekey = raw.get("event_key") or raw.get("id") or raw.get("description")
     if not ekey:
         raise ParseError("event_key missing")
     return {
         "external_event_key": str(ekey),
         "action_code": raw.get("action_code"),
-        "event_at": _epoch_ms_to_utc(raw.get("event_time_ms") or raw.get("update_time_millis") or raw.get("event_time")),
+        "event_at": _epoch_ms_to_utc(raw.get("update_time_millis")),
         "description": raw.get("description"),
         "location": raw.get("location"),
     }
 
 
-def _resolve_order_id(session, account_id: int, external_order_id: str) -> int | None:
+def _resolve_order_id(session: Session, account_id: int, external_order_id: str) -> int | None:
     return session.execute(
         select(SalesOrder.id).where(
             SalesOrder.channel_account_id == account_id,
@@ -114,7 +116,9 @@ def _resolve_order_id(session, account_id: int, external_order_id: str) -> int |
     ).scalar_one_or_none()
 
 
-def _upsert_shipment(session, *, sales_order_id: int, fields: dict, raw_record_id: int) -> int:
+def _upsert_shipment(
+    session: Session, *, sales_order_id: int, fields: dict, raw_record_id: int
+) -> int:
     insert_values = {
         "sales_order_id": sales_order_id,
         **{k: v for k, v in fields.items() if k != "external_order_id"},
@@ -137,7 +141,7 @@ def _upsert_shipment(session, *, sales_order_id: int, fields: dict, raw_record_i
     return row.id
 
 
-def _upsert_event(session, *, shipment_id: int, fields: dict) -> None:
+def _upsert_event(session: Session, *, shipment_id: int, fields: dict) -> None:
     session.execute(
         pg_insert(TrackingEvent).values(
             shipment_id=shipment_id,
@@ -149,6 +153,76 @@ def _upsert_event(session, *, shipment_id: int, fields: dict) -> None:
     )
 
 
+def _select_tracking_targets(session: Session, *, limit: int = TARGET_LIMIT) -> list[dict]:
+    """Select orders that need a tracking refresh.
+
+    Sources from ``integration.raw_records`` (the raw orders-search
+    payloads) — the payload carries ``tracking_number`` /
+    ``shipping_provider_id`` / ``packages``. Orders already in a
+    terminal logistics state are excluded (their tracking never changes).
+    """
+    terminal_orders = (
+        select(SalesOrder.external_order_id)
+        .join(Shipment, Shipment.sales_order_id == SalesOrder.id)
+        .where(Shipment.status.in_(FINAL_STATUSES))
+    )
+    rows = session.execute(
+        select(RawRecord)
+        .where(RawRecord.endpoint == ORDERS_ENDPOINT)
+        .where(RawRecord.payload["id"].astext.not_in(terminal_orders))
+        .order_by(RawRecord.captured_at.desc())
+        .limit(limit)
+    ).scalars().all()
+
+    targets: list[dict] = []
+    for row in rows:
+        payload = row.payload if isinstance(row.payload, dict) else {}
+        oid = payload.get("id") or payload.get("order_id")
+        tracking = payload.get("tracking_number") or ""
+        if not oid or not tracking:
+            continue
+        packages = payload.get("packages") or []
+        pkg_id = packages[0].get("id") if packages and isinstance(packages[0], dict) else None
+        targets.append(
+            {
+                "external_order_id": str(oid),
+                "tracking_number": tracking,
+                "external_package_id": str(pkg_id) if pkg_id else str(oid),
+                "provider_id": payload.get("shipping_provider_id"),
+                "provider_name": payload.get("shipping_provider_name"),
+            }
+        )
+    return targets
+
+
+def _classify_status(action_codes: list[int | None]) -> str | None:
+    """Derive a shipment status from the tracking event action codes.
+
+    Mirrors the legacy classification in tts_erp.py (5-digit action codes
+    only; 6-digit special codes like 110101/cancel are ignored).
+    """
+    codes = [c for c in action_codes if isinstance(c, int) and 10000 <= c <= 99999]
+    if not codes:
+        return None
+    if 50101 in codes:
+        return "DELIVERED"
+    if 80101 in codes:
+        return "RETURNED_TO_SELLER"
+    if any(70000 <= c <= 79999 for c in codes):
+        return "DELIVERY_FAILED"
+    if any(38301 <= c <= 39999 for c in codes) or any(
+        40000 <= c <= 49999 for c in codes
+    ):
+        return "ARRIVED_DEST"
+    if any(34301 <= c <= 38299 for c in codes):
+        return "CROSS_BORDER"
+    if any(30201 <= c <= 34299 for c in codes):
+        return "IN_ORIGIN"
+    if 20101 in codes:
+        return "AWAITING_PICKUP"
+    return "PRE_PICKUP"
+
+
 def run(
     session: Session,
     *,
@@ -158,6 +232,22 @@ def run(
     scope: str | None = None,
     fetch_events: bool = True,
 ) -> JobResult:
+    """Sync tracking events for shipped orders of one shop.
+
+    Args:
+        session: SQLAlchemy session (the helper commits it).
+        proxy_call: callable doing signed GET + token injection.
+        shop_id: TikTok shop id (external_account_id).
+        page_size: cap on how many orders to process this tick
+            (mapped to TARGET_LIMIT).
+        scope: cursor scope (defaults to ``shop_id``).
+        fetch_events: when False, only upsert the shipment rows from the
+            order payload without calling the tracking endpoint.
+
+    Returns:
+        :class:`JobResult` with rows_total / rows_inserted / rows_failed
+        and the max event watermark (epoch ms).
+    """
     from tts_erp_v2.sync_worker import watermarks
 
     cursor_scope = scope or shop_id
@@ -175,12 +265,8 @@ def run(
     watermark_ms = watermarks.get_cursor(
         session, job_name=JOB_NAME, scope=cursor_scope
     )
-    base_body: dict[str, Any] = {"page_size": page_size}
-    if watermark_ms:
-        # shipments list uses epoch ms
-        base_body["update_time_ge_ms"] = int(watermark_ms)
-
-    raw_shipments = _walk_pages(proxy_call, endpoint=SHIPMENTS_ENDPOINT, base_body=base_body)
+    limit = page_size if page_size and page_size > 0 else TARGET_LIMIT
+    targets = _select_tracking_targets(session, limit=limit)
 
     total = 0
     inserted = 0
@@ -188,42 +274,77 @@ def run(
     events_written = 0
     max_update_ms: int | None = None
 
-    for raw in raw_shipments:
+    for target in targets:
         total += 1
-        try:
-            s_fields = _parse_shipment(raw)
-        except ParseError as e:
-            failed += 1
-            session.add(
-                SyncIssue(
-                    job_name=JOB_NAME,
-                    issue_type="PARSE_ERROR",
-                    external_id=str(raw.get("package_id") or raw.get("id") or "<unknown>"),
-                    details={"error": str(e), "section": "shipments"},
-                )
-            )
-            continue
-
-        so_id = _resolve_order_id(session, account.id, s_fields["external_order_id"])
+        oid = target["external_order_id"]
+        so_id = _resolve_order_id(session, account.id, oid)
         if so_id is None:
             session.add(
                 SyncIssue(
                     job_name=JOB_NAME,
                     issue_type="UNKNOWN_ORDER",
-                    external_id=s_fields["external_package_id"],
-                    details={"external_order_id": s_fields["external_order_id"]},
+                    external_id=target["external_package_id"],
+                    details={"external_order_id": oid},
                 )
             )
             failed += 1
             continue
 
+        event_times_ms: list[int] = []
+        action_codes: list[int | None] = []
+        raw_tracking: list[dict] = []
+        if fetch_events:
+            try:
+                resp = proxy_call(
+                    "GET",
+                    TRACKING_ENDPOINT_TEMPLATE.format(order_id=oid),
+                    body=None,
+                )
+                if resp.get("code") == 0:
+                    raw_tracking = (resp.get("data") or {}).get("tracking") or []
+                else:
+                    session.add(
+                        SyncIssue(
+                            job_name=JOB_NAME,
+                            issue_type="UPSTREAM_NONZERO",
+                            external_id=target["external_package_id"],
+                            details={
+                                "error": f"code={resp.get('code')} "
+                                f"msg={resp.get('message')!r}",
+                                "section": "tracking",
+                            },
+                        )
+                    )
+            except UpstreamJobError as e:
+                session.add(
+                    SyncIssue(
+                        job_name=JOB_NAME,
+                        issue_type="UPSTREAM_NONZERO",
+                        external_id=target["external_package_id"],
+                        details={"error": str(e), "section": "tracking"},
+                    )
+                )
+                failed += 1
+                continue
+
         raw_row = RawRecord(
-            endpoint=SHIPMENTS_ENDPOINT,
-            external_id=s_fields["external_package_id"],
-            payload=raw,
+            endpoint=TRACKING_ENDPOINT_TEMPLATE.format(order_id=oid),
+            external_id=target["external_package_id"],
+            payload=raw_tracking,
         )
         session.add(raw_row)
         session.flush()
+
+        s_fields = {
+            "external_package_id": target["external_package_id"],
+            "external_order_id": oid,
+            "tracking_number": target["tracking_number"],
+            "provider_id": target["provider_id"],
+            "provider_name": target["provider_name"],
+            "status": None,
+            "shipped_at": None,
+            "delivered_at": None,
+        }
         shipment_id = _upsert_shipment(
             session,
             sales_order_id=so_id,
@@ -231,68 +352,53 @@ def run(
             raw_record_id=raw_row.id,
         )
 
-        if fetch_events and s_fields.get("tracking_number"):
+        for raw_e in raw_tracking:
             try:
-                resp = proxy_call(
-                    "GET",
-                    f"{TRACKING_ENDPOINT}/{s_fields['tracking_number']}",
-                    body=None,
-                )
-                event_times_for_watermark: list[int] = []
-                if resp.get("code") == 0:
-                    for raw_e in (resp.get("data") or {}).get("events") or []:
-                        try:
-                            e_fields = _parse_event(raw_e)
-                        except ParseError as e:
-                            session.add(
-                                SyncIssue(
-                                    job_name=JOB_NAME,
-                                    issue_type="PARSE_ERROR",
-                                    external_id=f"{s_fields['external_package_id']}:<event>",
-                                    details={"error": str(e), "section": "tracking_events"},
-                                )
-                            )
-                            continue
-                        _upsert_event(session, shipment_id=shipment_id, fields=e_fields)
-                        events_written += 1
-                        etms = e_fields.get("event_time_ms") or (
-                            e_fields.get("event_at").timestamp() * 1000
-                            if e_fields.get("event_at") is not None
-                            else None
-                        )
-                        if isinstance(etms, (int, float)):
-                            event_times_for_watermark.append(int(etms))
-                # propagate event times to the outer watermark loop via fields
-                s_fields["_event_times"] = event_times_for_watermark
-            except UpstreamJobError as e:
+                e_fields = _parse_event(raw_e)
+            except ParseError as e:
                 session.add(
                     SyncIssue(
                         job_name=JOB_NAME,
-                        issue_type="UPSTREAM_NONZERO",
-                        external_id=s_fields["external_package_id"],
+                        issue_type="PARSE_ERROR",
+                        external_id=f"{target['external_package_id']}:<event>",
                         details={"error": str(e), "section": "tracking_events"},
                     )
                 )
+                continue
+            _upsert_event(session, shipment_id=shipment_id, fields=e_fields)
+            events_written += 1
+            action_codes.append(e_fields.get("action_code"))
+            if e_fields.get("event_at") is not None:
+                event_times_ms.append(
+                    _safe_int(e_fields["event_at"].timestamp() * 1000)
+                )
+
+        # Derive + persist the shipment status from the events we just
+        # wrote (most-recent-event semantics are covered by the upsert).
+        status = _classify_status(action_codes)
+        if status is not None:
+            session.execute(
+                pg_insert(Shipment)
+                .values(
+                    sales_order_id=so_id,
+                    external_package_id=target["external_package_id"],
+                    status=status,
+                )
+                .on_conflict_do_update(
+                    index_elements=["sales_order_id", "external_package_id"],
+                    set_={"status": status},
+                )
+            )
 
         inserted += 1
-        # Track the max update_time_ms we saw for the cursor advance.
-        # Include both shipment times AND any tracking event times so we
-        # don't miss late-arriving events on already-synced shipments.
-        candidate_times: list[int] = []
-        for ts in (s_fields.get("shipped_at"), s_fields.get("delivered_at")):
-            if ts is None:
-                continue
-            candidate_times.append(int(ts.timestamp() * 1000))
-        # tracking event times for this shipment (if any were fetched)
-        for event_time_ms in (s_fields.get("_event_times") or []):
-            candidate_times.append(int(event_time_ms))
-        for ms in candidate_times:
+        for ms in event_times_ms:
             if max_update_ms is None or ms > max_update_ms:
                 max_update_ms = ms
 
     new_cursor_ms: int | None = None
     if max_update_ms is not None and (
-        watermark_ms is None or max_update_ms > int(watermark_ms)
+        watermark_ms is None
+        or max_update_ms > _safe_int(watermark_ms)
     ):
         watermarks.set_cursor(
             session,
@@ -313,8 +419,9 @@ def run(
 __all__ = [
     "run",
     "JOB_NAME",
-    "SHIPMENTS_ENDPOINT",
-    "TRACKING_ENDPOINT",
+    "TRACKING_ENDPOINT_TEMPLATE",
+    "FINAL_STATUSES",
+    "TARGET_LIMIT",
     "ProxyCall",
     "UpstreamJobError",
     "ParseError",
