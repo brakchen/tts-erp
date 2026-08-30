@@ -57,8 +57,10 @@ login_logger = logging.getLogger("tts_erp_v2.auth.login")
 # it the default WARNING drops info-level records before the
 # handler runs.
 login_logger.setLevel(logging.INFO)
-if not any(isinstance(h, logging.StreamHandler) and h.stream is sys.stdout
-           for h in login_logger.handlers):
+if not any(
+    isinstance(h, logging.StreamHandler) and h.stream is sys.stdout
+    for h in login_logger.handlers
+):
     _stdout = logging.StreamHandler(sys.stdout)
     _stdout.setFormatter(logging.Formatter("%(message)s"))
     login_logger.addHandler(_stdout)

@@ -74,8 +74,10 @@ logger = logging.getLogger("tts_erp_v2.access")
 # this in production 2026-08-30 — the service was running, requests
 # were being served, stdout.log was just empty for the new format.)
 logger.setLevel(logging.INFO)
-if not any(isinstance(h, logging.StreamHandler) and h.stream is sys.stdout
-           for h in logger.handlers):
+if not any(
+    isinstance(h, logging.StreamHandler) and h.stream is sys.stdout
+    for h in logger.handlers
+):
     _stdout = logging.StreamHandler(sys.stdout)
     _stdout.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(_stdout)
