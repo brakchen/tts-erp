@@ -123,6 +123,8 @@ def _insert_test_key(
     """
     import hashlib
 
+    from scripts._db_url import normalize_db_url
+
     role_prefix = {"readonly": "ro", "readwrite": "rw", "admin": "admin"}[role]
     plaintext = f"ttserp_{role_prefix}_T" + secrets.token_urlsafe(24)
     h = hashlib.sha256(plaintext.encode()).hexdigest()
@@ -131,7 +133,10 @@ def _insert_test_key(
     # callers, but the SQL only writes the V3 columns. ``enabled``
     # is mapped to ``status='active' | 'disabled'`` here.
     status = "active" if enabled else "disabled"
-    with psycopg.connect(db_url) as conn, conn.cursor() as cur:
+    # ``db_url`` comes from .env in SQLAlchemy form
+    # (``postgresql+psycopg://...``); raw psycopg.connect only accepts
+    # the plain ``postgresql://`` scheme, so normalise first.
+    with psycopg.connect(normalize_db_url(db_url)) as conn, conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO security.api_keys (key_prefix, key_hash, name, role, status)
@@ -141,7 +146,7 @@ def _insert_test_key(
         )
         conn.commit()
     # Clear cache so the new token is recognized on first request.
-    from tdd.auth import clear_cache
+    from tts_erp_v2.middleware.auth import clear_cache
 
     clear_cache()
     return plaintext
@@ -179,7 +184,7 @@ def fastapi_client(db_url: str):
 
     from analytics_sync import rate_limit as rl_mod
     from analytics_sync.app import app
-    from tdd.auth import clear_cache as _auth_clear
+    from tts_erp_v2.middleware.auth import clear_cache as _auth_clear
 
     _auth_clear()
     rl_mod.reset_buckets()

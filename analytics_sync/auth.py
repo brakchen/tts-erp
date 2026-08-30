@@ -25,7 +25,7 @@ _TDS_ERP_ROOT = Path(__file__).resolve().parent.parent
 if str(_TDS_ERP_ROOT) not in sys.path:
     sys.path.insert(0, str(_TDS_ERP_ROOT))
 
-from tdd.auth import clear_cache, lookup_role  # noqa: E402
+from tts_erp_v2.middleware.auth import clear_cache, lookup_role  # noqa: E402
 
 
 def clear_buckets():
