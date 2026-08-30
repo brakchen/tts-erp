@@ -429,7 +429,15 @@ class AuthMiddleware:
             qs = scope.get("query_string", b"").decode("latin-1")
             next_value = path + (("?" + qs) if qs else "")
             prefix = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "")
-            location = f"/v2/auth/login?next={prefix}{next_value}"
+            # The login page itself lives behind the NGINX prefix in
+            # production (daqiang.nat100.top/tts/v2/auth/login), so the
+            # 302 Location must carry that prefix — otherwise the
+            # browser navigates to /v2/auth/login which NGINX has no
+            # location for (returns 404 / routes to the default site).
+            # The ``next`` value stays prefix-free; ``login_page`` in
+            # api/v2/auth.py prepends the prefix when rendering the
+            # form's hidden field, so the two consumers stay in sync.
+            location = f"{prefix}/v2/auth/login?next={next_value}"
             await send(
                 {
                     "type": "http.response.start",

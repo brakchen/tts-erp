@@ -14,9 +14,7 @@ Covers:
 """
 
 from __future__ import annotations
-
 import time
-
 from sqlalchemy import update
 
 from tts_erp_v2.db.base import Base
@@ -235,7 +233,7 @@ def test_browser_redirect_respects_external_prefix(api_client, monkeypatch):
         follow_redirects=False,
     )
     assert r.status_code == 302, r.text
-    assert r.headers["location"] == "/v2/auth/login?next=/tts/v2/pages/manual-costs"
+    assert r.headers["location"] == "/tts/v2/auth/login?next=/v2/pages/manual-costs"
 
 
 def test_api_accept_keeps_json_401(api_client):

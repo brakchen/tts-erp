@@ -13,6 +13,7 @@ Middleware order with tts-erp:
 For analytics_sync standalone (port 9878) the same order applies; we
 add CORS + Auth + RateLimit here using tts-erp's helpers.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -32,6 +33,7 @@ def clear_buckets():
     """Test helper: no-op for analytics_sync's auth cache (it lives in
     tdd.auth). Provided here for test imports."""
     clear_cache()
+
 
 CACHE_TTL = 60.0
 EXEMPT_PATHS = {"/healthz", "/endpoints", "/openapi.json", "/docs", "/redoc"}

@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import html as _html
 import logging
+import os
 import sys
 
 from fastapi import APIRouter, Request, Response, status
@@ -96,8 +97,12 @@ def _client_bucket(request: Request) -> str:
 
 @router.get("/login", response_class=HTMLResponse)
 def login_page(request: Request) -> HTMLResponse:
-    """Render the login form (public). Injects the validated ``next``."""
-    next_url = _valid_next(request.query_params.get("next"))
+    """Render the login form (public). Injects the validated ``next``
+    (prepended with the NGINX prefix so the post-login redirect lands
+    on a path NGINX actually serves)."""
+    raw_next = _valid_next(request.query_params.get("next"))
+    prefix = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "")
+    next_url = f"{prefix}{raw_next}" if prefix else raw_next
     return HTMLResponse(_LOGIN_HTML.replace("__NEXT__", _html.escape(next_url)))
 
 
