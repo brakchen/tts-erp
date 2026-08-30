@@ -69,6 +69,40 @@ def load_env(path: Path) -> dict[str, str]:
     return env
 
 
+def _normalize_db_url(url: str) -> str:
+    """Strip the SQLAlchemy ``+dialect`` suffix from a postgres URL.
+
+    ``.env`` carries a single ``TTS_ERP_DB_URL`` consumed by both
+    SQLAlchemy (v2 app / sync-worker; needs ``postgresql+psycopg://``)
+    and raw ``psycopg.connect()`` here in sync_cron. psycopg3's conninfo
+    parser rejects the ``+psycopg`` scheme with
+    ``ProgrammingError: missing "=" after "postgresql+psycopg://..."``.
+
+    The legacy cron (this script) is on its way out — the v2
+    sync-worker (APScheduler in ``tts-erp-sync.service``) supersedes it.
+    This helper is the minimal stop-gap that stops the every-10-min
+    crash spam while the crontab entry still exists. (2026-08-30)
+
+    Raises:
+        ValueError: empty URL or a scheme other than ``postgresql[+...]``.
+    """
+    if not url:
+        raise ValueError("TTS_ERP_DB_URL is empty")
+    if not url.startswith("postgresql"):
+        raise ValueError(
+            f"TTS_ERP_DB_URL must start with 'postgresql'; got {url[:40]!r}"
+        )
+    # postgresql+psycopg://...  ->  postgresql://...
+    # postgresql+asyncpg://... ->  postgresql://...
+    scheme_end = url.find("://")
+    if scheme_end <= 0:
+        raise ValueError(f"TTS_ERP_DB_URL missing '://': {url[:40]!r}")
+    scheme = url[:scheme_end]
+    if "+" in scheme:
+        return "postgresql://" + url[scheme_end + 3 :]
+    return url
+
+
 # Inject OAuth DB creds into os.environ BEFORE oauth_receiver_core is imported.
 # oauth_receiver_core's module-load db_init() reads OAUTH_DB_URL /
 # OAUTH_DB_ENCRYPTION_KEY / OAUTH_DB_TABLE; without them _db_ok stays False
@@ -405,6 +439,16 @@ def main() -> int:
     if not db_url:
         log.error("TTS_ERP_DB_URL missing in .env — abort")
         return 2
+    try:
+        db_url = _normalize_db_url(db_url)
+    except ValueError as e:
+        log.error("invalid TTS_ERP_DB_URL (%s) — abort", e)
+        return 2
+    log.info(
+        "legacy sync_cron: NOTE this script is superseded by tts-erp-sync.service "
+        "(APScheduler). See AGENTS.md / handoff.md; remove the crontab entry "
+        "when you've confirmed the v2 worker covers every SYNC_PLAN."
+    )
     if not service_key:
         log.warning(
             "TTS_ERP_SERVICE_KEY missing in .env — fine while auth is off/shadow, BREAKS under enforce"

@@ -476,3 +476,58 @@ def test_main_returns_nonzero_when_oauth_db_down(tmp_path, monkeypatch):
         mock_oc.is_db_ok.return_value = False
         rc = sync_cron.main()
     assert rc != 0
+
+
+# ─── _normalize_db_url tests ──────────────────────────────────────────
+# Added when .env TTS_ERP_DB_URL moved to SQLAlchemy format
+# (postgresql+psycopg://) but sync_cron was passing it raw to
+# psycopg.connect(), which rejects the +psycopg scheme. The helper
+# strips the dialect suffix so the legacy cron stops crashing every
+# 10 min. (2026-08-30)
+
+
+def test_normalize_strips_psycopg_dialect():
+    """The common case: .env uses postgresql+psycopg://... — strip to
+    plain postgresql:// for psycopg3's conninfo parser."""
+    from sync_cron import _normalize_db_url
+
+    assert (
+        _normalize_db_url("postgresql+psycopg://u:p@h:5432/d")
+        == "postgresql://u:p@h:5432/d"
+    )
+
+
+def test_normalize_passes_through_plain_postgres():
+    """A legacy postgresql:// URL is returned unchanged."""
+    from sync_cron import _normalize_db_url
+
+    assert (
+        _normalize_db_url("postgresql://u:p@h:5432/d")
+        == "postgresql://u:p@h:5432/d"
+    )
+
+
+def test_normalize_strips_other_dialects():
+    """Any '+dialect' suffix on the postgresql scheme is removed."""
+    from sync_cron import _normalize_db_url
+
+    assert (
+        _normalize_db_url("postgresql+asyncpg://u:p@h/d")
+        == "postgresql://u:p@h/d"
+    )
+
+
+def test_normalize_rejects_empty():
+    from sync_cron import _normalize_db_url
+
+    with __import__("pytest").raises(ValueError):
+        _normalize_db_url("")
+
+
+def test_normalize_rejects_non_postgres_scheme():
+    """A non-postgres scheme (e.g. sqlite, mysql) is NOT mangled —
+    we don't know what the caller meant, so refuse."""
+    from sync_cron import _normalize_db_url
+
+    with __import__("pytest").raises(ValueError):
+        _normalize_db_url("sqlite:///tmp/x.db")

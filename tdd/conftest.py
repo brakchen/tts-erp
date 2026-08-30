@@ -66,9 +66,29 @@ def _load_db_url() -> str:
     raise RuntimeError("TTS_ERP_DB_URL not in .env")
 
 
+def _normalize_db_url_for_psycopg(url: str) -> str:
+    """Strip SQLAlchemy ``+dialect`` from a postgres URL for raw psycopg.
+
+    ``.env`` carries a single ``TTS_ERP_DB_URL`` consumed by both
+    SQLAlchemy (which needs ``postgresql+psycopg://``) and the legacy
+    raw-psycopg fixtures here. psycopg3's conninfo parser rejects the
+    ``+psycopg`` scheme with ``ProgrammingError: missing "=" ...``.
+    Mirrors :func:`sync_cron._normalize_db_url`. (2026-08-30)
+    """
+    if not url.startswith("postgresql"):
+        return url
+    scheme_end = url.find("://")
+    if scheme_end <= 0:
+        return url
+    scheme = url[:scheme_end]
+    if "+" in scheme:
+        return "postgresql://" + url[scheme_end + 3 :]
+    return url
+
+
 @pytest.fixture(scope="session")
 def db_url() -> str:
-    return _load_db_url()
+    return _normalize_db_url_for_psycopg(_load_db_url())
 
 
 @pytest.fixture()
@@ -113,7 +133,7 @@ def _cleanup_test_shop_ids(db_url: str):
         "returns",
         "cancellations",
     ]
-    conn = psycopg.connect(db_url)
+    conn = psycopg.connect(_normalize_db_url_for_psycopg(db_url))
     try:
         with conn.cursor() as cur:
             for tbl in cleanup_tables:
