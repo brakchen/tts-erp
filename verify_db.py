@@ -1,33 +1,41 @@
 #!/usr/bin/env python3
 """Verify returns + cancellations data in DB: row counts, JSONB shape, status distribution."""
-import json
-import os
 import sys
-import urllib.parse
-import urllib.request
 
 import psycopg
+
+from scripts._db_url import normalize_db_url
 
 # Load .env for DB URL
 env_path = "/home/schan/tts-erp/.env"
 DB_URL = ""
-for ln in open(env_path):
-    ln = ln.strip()
-    if ln.startswith("TTS_ERP_DB_URL="):
-        DB_URL = ln.split("=", 1)[1]
-        break
+try:
+    with open(env_path, encoding="utf-8") as f:
+        for ln in f:
+            ln = ln.strip()
+            if ln.startswith("TTS_ERP_DB_URL="):
+                DB_URL = ln.split("=", 1)[1]
+                break
+except OSError as e:
+    sys.exit(f"cannot read {env_path}: {e}")
 
 if not DB_URL:
     sys.exit("TTS_ERP_DB_URL not set in .env")
+
+# .env stores the URL in SQLAlchemy form (postgresql+psycopg://...).
+# Raw psycopg.connect only accepts the plain postgresql:// scheme.
+DB_URL = normalize_db_url(DB_URL)
 
 SHOP = "7494763368967603447"
 
 with psycopg.connect(DB_URL) as c, c.cursor() as cur:
     # Total counts
     cur.execute("SELECT count(*) FROM returns WHERE shop_id=%s", (SHOP,))
-    print(f"returns: {cur.fetchone()[0]} rows for shop")
+    row = cur.fetchone()
+    print(f"returns: {row[0] if row else 0} rows for shop")
     cur.execute("SELECT count(*) FROM cancellations WHERE shop_id=%s", (SHOP,))
-    print(f"cancellations: {cur.fetchone()[0]} rows for shop")
+    row = cur.fetchone()
+    print(f"cancellations: {row[0] if row else 0} rows for shop")
 
     # Status distribution
     print("\nreturns by status:")

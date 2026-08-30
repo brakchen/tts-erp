@@ -10,7 +10,10 @@ Usage:
     python3 api_keys.py revoke --prefix ttserp_rw_Kx9vQ2mP
     python3 api_keys.py rotate --prefix ttserp_rw_Kx9vQ2mP
 """
+
 from __future__ import annotations
+
+from scripts._db_url import normalize_db_url
 
 import argparse
 import hashlib
@@ -42,7 +45,10 @@ def _connect() -> psycopg.Connection:
     url = os.environ.get("TTS_ERP_DB_URL")
     if not url:
         sys.exit("TTS_ERP_DB_URL not configured (check .env)")
-    return psycopg.connect(url)
+    # .env stores the URL in SQLAlchemy form (postgresql+psycopg://...).
+    # Raw psycopg.connect only accepts the plain postgresql:// scheme;
+    # normalize first or psycopg3 raises "missing '=' after ...+psycopg".
+    return psycopg.connect(normalize_db_url(url))
 
 
 def _sha256(s: str) -> str:
@@ -72,14 +78,16 @@ def _insert_key(
 
 def cmd_create(args) -> None:
     with _connect() as conn:
-        key = _insert_key(conn, args.name, args.role, args.scopes or [], args.expires_days)
+        key = _insert_key(
+            conn, args.name, args.role, args.scopes or [], args.expires_days
+        )
     print(f"name    : {args.name or '-'}")
     print(f"role    : {args.role}")
     print(f"prefix  : {key[:16]}")
     if args.scopes:
         print(f"scopes  : {','.join(args.scopes)}")
     else:
-        print(f"scopes  : (none — token grants full access)")
+        print("scopes  : (none — token grants full access)")
     if args.expires_days:
         print(f"expires : in {args.expires_days} days")
     print()
@@ -97,7 +105,9 @@ def cmd_list(_args) -> None:
         print("(no api keys)")
         return
     fmt = "%Y-%m-%d %H:%M:%S"
-    print(f"{'PREFIX':<18} {'NAME':<20} {'ROLE':<10} {'SCOPES':<22} {'ON':<3} {'CREATED':<19} {'LAST_USED':<19} {'EXPIRES':<19}")
+    print(
+        f"{'PREFIX':<18} {'NAME':<20} {'ROLE':<10} {'SCOPES':<22} {'ON':<3} {'CREATED':<19} {'LAST_USED':<19} {'EXPIRES':<19}"
+    )
     for prefix, name, role, scopes, enabled, created, last_used, expires in rows:
         print(
             f"{prefix:<18} {(name or '-'):<20} {role:<10} {','.join(scopes or []):<22} "
@@ -109,7 +119,9 @@ def cmd_list(_args) -> None:
 
 def _revoke(conn, prefix: str) -> bool:
     with conn.cursor() as cur:
-        cur.execute("UPDATE api_keys SET enabled = false WHERE key_prefix = %s", (prefix,))
+        cur.execute(
+            "UPDATE api_keys SET enabled = false WHERE key_prefix = %s", (prefix,)
+        )
         n = cur.rowcount
     conn.commit()
     return n > 0
@@ -144,7 +156,11 @@ def cmd_rotate(args) -> None:
                     "SELECT scopes FROM api_keys WHERE key_prefix = %s",
                     (args.prefix,),
                 )
-                scopes = cur.fetchone()[0] or []
+                scopes_row = cur.fetchone()
+                # cur.fetchone() may return None (prefix just rotated
+                # out from under us, or the row's scopes column is
+                # NULL); either way, treat as "no scopes carried over".
+                scopes = (scopes_row[0] if scopes_row is not None else None) or []
         key = _insert_key(conn, name, role, list(scopes), args.expires_days)
         _revoke(conn, args.prefix)
     print(f"rotated: {args.prefix} -> new key for name={name} role={role}")
@@ -182,10 +198,16 @@ def main() -> None:
     p.add_argument("--prefix", required=True)
     p.set_defaults(fn=cmd_revoke)
 
-    p = sub.add_parser("rotate", help="create a fresh key with same name/role, revoke the old one")
+    p = sub.add_parser(
+        "rotate", help="create a fresh key with same name/role, revoke the old one"
+    )
     p.add_argument("--prefix", required=True)
-    p.add_argument("--scopes", nargs="*", default=None,
-                   help="Override scopes on the new key (default: copy from old)")
+    p.add_argument(
+        "--scopes",
+        nargs="*",
+        default=None,
+        help="Override scopes on the new key (default: copy from old)",
+    )
     p.add_argument("--expires-days", type=int, default=None)
     p.set_defaults(fn=cmd_rotate)
 

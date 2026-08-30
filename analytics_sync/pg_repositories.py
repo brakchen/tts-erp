@@ -17,10 +17,17 @@ v2 semantics:
 from __future__ import annotations
 
 import os
+import sys
 from datetime import date, timedelta
+from pathlib import Path
 
 import psycopg
 from psycopg.types.json import Jsonb
+
+# Make scripts/ importable when this file is run as a module
+# (analytics_sync lives at the repo root, not inside scripts/).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from scripts._db_url import normalize_db_url  # noqa: E402
 
 from .domain import (
     DEFAULT_TIMEZONE,
@@ -43,7 +50,9 @@ def connect() -> psycopg.Connection:
         raise RuntimeError(
             "TTS_ERP_DB_URL (or ANALYTICS_SYNC_DB_URL) not configured; set it in .env"
         )
-    return psycopg.connect(url)
+    # .env stores the URL in SQLAlchemy form (postgresql+psycopg://...).
+    # Raw psycopg.connect only accepts the plain postgresql:// scheme.
+    return psycopg.connect(normalize_db_url(url))
 
 
 class PgAnalyticsRepository(AnalyticsRepository):

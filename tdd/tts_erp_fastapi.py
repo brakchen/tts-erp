@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import random
 import sys
@@ -23,6 +24,7 @@ from typing import Any
 
 import psycopg
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBearer
 
@@ -30,6 +32,11 @@ from fastapi.security import HTTPBearer
 TTS_ERP_ROOT = Path(__file__).resolve().parent.parent
 if str(TTS_ERP_ROOT) not in sys.path:
     sys.path.insert(0, str(TTS_ERP_ROOT))
+
+# Strip the SQLAlchemy +dialect suffix from .env DB URLs for raw
+# psycopg3 callers (this file is one of them). Same helper used by
+# sync_cron.py / api_keys.py / analytics_sync.pg_repositories.
+from scripts._db_url import normalize_db_url  # noqa: E402
 
 # Load .env
 _env_path = TTS_ERP_ROOT / ".env"
@@ -41,27 +48,27 @@ if _env_path.exists():
         _k, _v = _line.split("=", 1)
         os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 
-import logging  # noqa: E402
-
+# Local imports — sit below the sys.path + .env setup so the
+# `noqa: E402` (module-level-statement-before-import) suppression
+# is honest. Sorted alphabetically within this block; isort's
+# "first-party vs local" distinction collapses here because every
+# one of them is a sibling at the repo root.
 import tts_business  # noqa: E402
+import tts_erp  # noqa: E402
+from analytics_sync.app import router as analytics_sync_router  # noqa: E402
 from auth import AuthMiddleware  # noqa: E402
-
-from miaoshou import MiaoshouApiResponse  # noqa: E402
-
-log = logging.getLogger("tts-erp-fastapi")
 from domain import TokenError  # noqa: E402
-from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from http_client import TikTokHttpClient  # noqa: E402
+from miaoshou import MiaoshouApiResponse  # noqa: E402
 from oauth_receiver_router import (  # noqa: E402
     router as oauth_router,
 )
 from pg_repositories import make_pg_repos  # noqa: E402
 from rate_limit import RateLimitMiddleware  # noqa: E402
 from token_provider import LocalTokenProvider  # noqa: E402
-
-import tts_erp  # noqa: E402
-from analytics_sync.app import router as analytics_sync_router  # noqa: E402
 from tts_erp import _safe_int  # noqa: E402
+
+log = logging.getLogger("tts-erp-fastapi")
 
 # ─── App + config ─────────────────────────────────────────────────────
 
@@ -234,7 +241,7 @@ def _try_advisory_lock(key: int) -> bool:
         return False  # re-entrant call in same process
     if not tts_erp.TTS_ERP_DB_URL:
         raise RuntimeError("TTS_ERP_DB_URL not configured")
-    conn = psycopg.connect(tts_erp.TTS_ERP_DB_URL, connect_timeout=5)
+    conn = psycopg.connect(normalize_db_url(tts_erp.TTS_ERP_DB_URL), connect_timeout=5)
     with conn.cursor() as cur:
         cur.execute("SELECT pg_try_advisory_lock(%s)", (key,))
         row = cur.fetchone()
