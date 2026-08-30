@@ -64,7 +64,8 @@ Return / Refund / Cancellation API (return-refund-and-cancel-202309):
   POST /cancellations                         → 501 (CREATE write endpoint, NOT integrated per user instruction)
   NOTE: /return_refund/202309/<id> detail endpoints return 36009009 (no path)
   NOTE: /reverse/202309/* (reverse logistics) returns HTTP 404 at CDN — module not available
-  Confirmed via probe_refund_v3/v5/v6 2026-08-16.
+  Confirmed via one-off TikTok API probes on 2026-08-16 (scripts removed
+  in 2026-08-30 cleanup; see commit message for the field list).
 
 Local DB reads for returns/cancellations:
   GET  /db/returns?shop_id=&status=&limit=   returns table
@@ -527,8 +528,9 @@ def persist_statement(shop_id: str, stmt_raw: dict) -> bool:
 
 
 # /finance/202309/statements/{id}/statement_transactions 的全部金额字段
-# （2026-08-18 probe_finance_txns.py 实测枚举：58 字段里除 id/order_id/
-# order_create_time/type/currency 外全是 *_amount 字符串数字，费用为负值）
+# （2026-08-18 one-off probe enumerated 58 fields: 除 id/order_id/
+# order_create_time/type/currency 外全是 *_amount 字符串数字，费用为负值；
+# probe script removed in 2026-08-30 cleanup, see commit message）
 STMT_TXN_AMOUNT_FIELDS = (
     "actual_return_shipping_fee_amount",
     "actual_shipping_fee_amount",

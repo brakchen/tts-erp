@@ -155,6 +155,7 @@ commits），但 `:9877` 运行时已不再服务这些路径。生产读 / 写 
 - 用 `TTS_DEBUG_SIGN=1` env var 看 canonical string 排查签名问题
 - 改 schema 走 schema_tts_erp.sql / schema_oauth.sql（按库拆分），`IF NOT EXISTS` 兼容老库
 - **优先复用成熟开源组件**：GitHub 上有维护活跃、star 数高（成熟领域 ≥ 5k、新兴领域 ≥ 1k）、license 友好的现成方案时，**优先用**，不要裸写 / 自己强制实现 —— 典型场景：HTTP 代理 / 网关、限流、熔断、retry/backoff、分布式锁、定时任务、对象存储 SDK、消息队列、数据库迁移、auth/JWT、参数校验、structlog 类日志、metrics/prom client 等。理由：(a) 现成组件已踩过生产坑、坑更少；(b) 维护/升级是社区分摊；(c) 业务代码更聚焦 domain logic。**评估开源时的护栏**：(a) 引入前查最后一次 release 是否在 1 年内 + issues 关闭率 ≥ 80%；(b) 优先选有公司/组织背书（如 Starlette/FastAPI/httpx/structlog/sqlalchemy/alembic/pydantic 这类），避免个人小项目单点故障；(c) 真没有合适开源时再考虑自研，自研时要留出能替换的 seam（接口层、依赖注入）。
+- **一次性 / 临时脚本放 `scripts/`**（与 `scripts/migrate_v1_to_v2/`、`scripts/regen_schema.py` 同级）：debug 探测、一次性数据导出、smoke / regression 演练等跑一次就丢的小脚本都进这里，**根目录不放**。`scripts/` 里有 `__init__.py` 让它能被 pytest 收集；脚本名前缀 `oneoff_` / `probe_` / `smoke_` / `dump_` 自描述用途。不要把这类脚本 commit 到根目录或业务目录里。
 
 ### DON'T
 

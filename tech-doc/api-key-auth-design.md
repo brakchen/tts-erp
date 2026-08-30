@@ -143,7 +143,7 @@ python3 api_keys.py rotate --prefix ttserp_rw_Kx9vQ2mP         # = create 同名
 |---|---|
 | `sync_cron.py`（每 10 分钟 cron） | 从 env 读 `TTS_ERP_SERVICE_KEY`，所有 `/sync/*` 请求带 `Authorization: Bearer` |
 | `run_sync_cron.sh` | 无需改（已 source .env），`.env` 加一行 `TTS_ERP_SERVICE_KEY=ttserp_rw_...`（0600 权限不变） |
-| `final_smoke.py` / `regression_check.py` / `test_e2e.py` | 同样从 env 读 key 带 header；新增「无 key 应 401」断言 |
+| `test_e2e.py` | 同样从 env 读 key 带 header；新增「无 key 应 401」断言（`final_smoke.py` / `regression_check.py` 在 2026-08-30 cleanup 已删，调用方合并到 `tests/test_e2e*.py`） |
 | `tdd/` 测试 | 新增 `test_auth.py`（见 §8）；既有 TestClient 测试在 conftest 统一注入 admin key header |
 | 人工 curl / Windows 工作站 | 发一把 `readonly` 或 `readwrite` key，随用随带 header |
 | README / AGENTS.md / setup 文档 | 更新端点说明（标注所需角色）、`.env` 字段、故障排查表 |
@@ -203,7 +203,7 @@ python3 api_keys.py rotate --prefix ttserp_rw_Kx9vQ2mP         # = create 同名
 | `api_keys.py` | 新建：管理 CLI |
 | `schema.sql` | 新增 `api_keys` 表 |
 | `sync_cron.py` | 请求带 Authorization header |
-| `final_smoke.py` / `regression_check.py` / `test_e2e.py` | 带 key + 401 断言 |
+| `test_e2e.py` | 带 key + 401 断言（`final_smoke.py` / `regression_check.py` 2026-08-30 cleanup 已删） |
 | `.env` | `TTS_ERP_AUTH_MODE` + `TTS_ERP_SERVICE_KEY` |
 | `README.md` / `AGENTS.md` / `setup/tts-erp-cron-sync.md` | 文档同步 |
 
