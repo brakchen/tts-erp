@@ -6,11 +6,13 @@ Author: Wave 4 QA agent (third-party / adversarial review).
 """
 
 from __future__ import annotations
+
 import hashlib
+
+import auth
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
-import auth
 from tts_erp_fastapi import app
 
 # ─── fixtures ──────────────────────────────────────────────────────────

@@ -175,9 +175,10 @@ def fastapi_client(db_url: str):
     os.environ["ANALYTICS_SYNC_AUTH_MODE"] = os.environ.get(
         "ANALYTICS_SYNC_AUTH_MODE", "enforce"
     )
+    from fastapi.testclient import TestClient
+
     from analytics_sync import rate_limit as rl_mod
     from analytics_sync.app import app
-    from fastapi.testclient import TestClient
     from tdd.auth import clear_cache as _auth_clear
 
     _auth_clear()

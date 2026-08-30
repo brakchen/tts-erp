@@ -24,6 +24,7 @@ All test data uses ``name`` values starting with ``TEST_`` so the
 ``_isolate_state`` autouse in tests_v2/api/conftest.py wipes them
 on teardown without touching the user's real keys.
 """
+
 from __future__ import annotations
 
 import json
@@ -45,9 +46,7 @@ from scripts._db_url import normalize_db_url  # noqa: E402
 
 def _run_cli(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [str(REPO / ".venv" / "bin" / "python"),
-         str(REPO / "api_keys.py"),
-         *args],
+        [str(REPO / ".venv" / "bin" / "python"), str(REPO / "api_keys.py"), *args],
         cwd=REPO,
         capture_output=True,
         text=True,
@@ -58,9 +57,7 @@ def _run_cli(*args: str) -> subprocess.CompletedProcess:
 def _key_from_create_stdout(stdout: str) -> str:
     m = re.search(r"API KEY \(shown ONCE, store it now\):\s+(\S+)", stdout)
     if not m:
-        raise AssertionError(
-            f"could not parse key from create output:\n{stdout}"
-        )
+        raise AssertionError(f"could not parse key from create output:\n{stdout}")
     return m.group(1)
 
 
@@ -77,6 +74,7 @@ def _db_url() -> str:
 def test_name() -> str:
     """TEST_-prefixed name so the api_client conftest's wipe cleans up."""
     import time
+
     return f"TEST_api_keys_py_{int(time.time() * 1000) % 1_000_000_000}"
 
 
@@ -196,10 +194,15 @@ def test_v1_columns_scopes_and_expires_at_are_not_written(test_name, capsys):
     """
     proc = _run_cli(
         "create",
-        "--name", test_name,
-        "--role", "readwrite",
-        "--scopes", "seller:1", "advertiser:2",
-        "--expires-days", "30",
+        "--name",
+        test_name,
+        "--role",
+        "readwrite",
+        "--scopes",
+        "seller:1",
+        "advertiser:2",
+        "--expires-days",
+        "30",
     )
     assert proc.returncode == 0, proc.stderr
     out = proc.stdout
@@ -229,4 +232,5 @@ def test_v1_columns_scopes_and_expires_at_are_not_written(test_name, capsys):
 
 def _key_from_db_helper(plaintext_key: str) -> str:
     import hashlib
+
     return hashlib.sha256(plaintext_key.encode()).hexdigest()

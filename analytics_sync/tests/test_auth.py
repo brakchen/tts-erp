@@ -1,8 +1,11 @@
 """Tests for sync-token auth middleware (Bearer / X-Sync-Token)."""
+
 from __future__ import annotations
+
 import hashlib
-import psycopg
 import secrets
+
+import psycopg
 
 
 def test_missing_token_returns_401(fastapi_client):

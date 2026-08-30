@@ -298,7 +298,9 @@ def test_cache_delays_revocation_until_clear(client, auth_keys, db_url, monkeypa
     # Revoke directly in DB; cached entry still passes
     conn = psycopg.connect(db_url)
     with conn.cursor() as cur:
-        cur.execute("UPDATE security.api_keys SET status = 'disabled' WHERE name = 'TEST_auth_ro'")
+        cur.execute(
+            "UPDATE security.api_keys SET status = 'disabled' WHERE name = 'TEST_auth_ro'"
+        )
     conn.commit()
     conn.close()
     assert client.get("/db/orders?limit=1", headers=_auth(KEY_RO)).status_code == 200

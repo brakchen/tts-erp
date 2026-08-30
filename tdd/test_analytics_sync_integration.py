@@ -166,7 +166,9 @@ def _session_cleanup():
             cur.execute(
                 "DELETE FROM analytics_shop_timezones WHERE seller_id LIKE 'TEST_sync_int%'"
             )  # noqa: S608
-            cur.execute("DELETE FROM security.api_keys WHERE name LIKE 'TEST_sync_int%'")  # noqa: S608
+            cur.execute(
+                "DELETE FROM security.api_keys WHERE name LIKE 'TEST_sync_int%'"
+            )  # noqa: S608
             cur.execute(
                 "DELETE FROM analytics_audit_log WHERE key_prefix LIKE 'anlsync%%' OR key_prefix LIKE 'ttserp_rw_TEST_%%'"
             )  # noqa: S608

@@ -3,6 +3,7 @@
 Per-token sliding window, default 100 req/min. Exceeding returns 429
 with Retry-After. Anonymous traffic is bucketed by IP.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -55,12 +56,14 @@ def test_different_tokens_have_independent_buckets(fastapi_client, db_url):
     import secrets
 
     from analytics_sync.auth import clear_cache
+
     clear_cache()
 
     def mint_token(label: str) -> str:
         plaintext = f"ttserp_rw_TEST_{secrets.token_urlsafe(16)}"
         h = hashlib.sha256(plaintext.encode()).hexdigest()
         import psycopg
+
         with psycopg.connect(db_url) as conn, conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO security.api_keys (key_prefix, key_hash, name, role, status) "
