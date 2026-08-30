@@ -1,9 +1,23 @@
 #!/usr/bin/env python3
-"""Verify returns + cancellations data in DB: row counts, JSONB shape, status distribution."""
+"""Verify returns + cancellations data in DB: row counts, JSONB shape, status distribution.
 
-import sys
+DEPRECATED: this script reads the V1 legacy public.* tables
+(public.returns, public.cancellations, public.sync_log). It is
+intentionally V1-only — the V2 schema split moved that data into
+schema-scoped tables (after_sales.cases / after_sales.case_lines
+for returns + cancellations, integration.sync_jobs for sync_log).
+The unqualified table names below resolve to public.* via Postgres'
+default search_path ("$user", public), which is what we want for V1
+verification. Do NOT 'fix' them to security. / after_sales. / etc.
+— that would be the same search_path bug that hit api_keys.py
+(see commit 23bc484).
+
+For V2 data verification, write a new diagnostic against the V3
+schema instead.
+"""
 
 import psycopg
+import sys
 
 from scripts._db_url import normalize_db_url
 
