@@ -140,12 +140,12 @@ def _q_optional(
     # caller appends ``ORDER BY ... LIMIT ...``.
     order_idx = base_sql.upper().find("ORDER BY")
     if order_idx == -1:
-        raise RuntimeError(
-            "_q_optional expects a SQL with ORDER BY clause"
-        )
+        raise RuntimeError("_q_optional expects a SQL with ORDER BY clause")
     new_sql = (
         base_sql[:order_idx]
-        + " WHERE " + " AND ".join(clauses) + " "
+        + " WHERE "
+        + " AND ".join(clauses)
+        + " "
         + base_sql[order_idx:]
     )
     return sess.execute(text(new_sql), bind_params)
