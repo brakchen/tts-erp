@@ -13,8 +13,6 @@ Usage:
 
 from __future__ import annotations
 
-from scripts._db_url import normalize_db_url
-
 import argparse
 import hashlib
 import os
@@ -24,6 +22,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import psycopg
+
+from scripts._db_url import normalize_db_url
 
 ROOT = Path(__file__).resolve().parent
 ROLE_PREFIX = {"readonly": "ro", "readwrite": "rw", "admin": "admin"}

@@ -14,6 +14,7 @@ These tests pin that contract. They are unit tests on the helper
 plus a single integration smoke (``api_keys.py list``) that proves
 the wiring is end-to-end.
 """
+
 from __future__ import annotations
 
 import os
@@ -37,19 +38,13 @@ def test_normalize_strips_psycopg_dialect():
 
 def test_normalize_passes_through_plain_postgres():
     """A legacy postgresql:// URL is returned unchanged."""
-    assert (
-        normalize_db_url("postgresql://u:p@h:5432/d")
-        == "postgresql://u:p@h:5432/d"
-    )
+    assert normalize_db_url("postgresql://u:p@h:5432/d") == "postgresql://u:p@h:5432/d"
 
 
 def test_normalize_strips_other_dialects():
     """Any ``+dialect`` suffix on the postgresql scheme is removed.
     Defends against future SQLAlchemy drivers (asyncpg, psycopg2, ...)."""
-    assert (
-        normalize_db_url("postgresql+asyncpg://u:p@h/d")
-        == "postgresql://u:p@h/d"
-    )
+    assert normalize_db_url("postgresql+asyncpg://u:p@h/d") == "postgresql://u:p@h/d"
     assert (
         normalize_db_url("postgresql+psycopg2://legacy-host/x")
         == "postgresql://legacy-host/x"
@@ -111,8 +106,8 @@ def test_api_keys_list_runs_against_real_db(tmp_path, monkeypatch):
     # The list output should contain at least the header row.
     assert "PREFIX" in result.stdout
     # And — crucially — must NOT contain the tell-tale psycopg error.
-    assert "missing \"=\"" not in result.stdout
-    assert "missing \"=\"" not in result.stderr
+    assert 'missing "="' not in result.stdout
+    assert 'missing "="' not in result.stderr
 
 
 def test_verify_db_connects_and_prints_counts():
@@ -137,5 +132,5 @@ def test_verify_db_connects_and_prints_counts():
     # The script prints a "returns: N rows for shop" line on success.
     assert "returns:" in result.stdout
     assert "cancellations:" in result.stdout
-    assert "missing \"=\"" not in result.stdout
-    assert "missing \"=\"" not in result.stderr
+    assert 'missing "="' not in result.stdout
+    assert 'missing "="' not in result.stderr

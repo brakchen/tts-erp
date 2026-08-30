@@ -26,11 +26,11 @@ Design choices:
 
 from __future__ import annotations
 
-from scripts._db_url import normalize_db_url
-
 import sys
 
 import psycopg
+
+from scripts._db_url import normalize_db_url
 
 
 def backfill_shops_from_oauth(
@@ -74,7 +74,9 @@ def backfill_shops_from_oauth(
 
     try:
         with (
-            psycopg.connect(normalize_db_url(tts_db_url), connect_timeout=5) as tts_conn,
+            psycopg.connect(
+                normalize_db_url(tts_db_url), connect_timeout=5
+            ) as tts_conn,
             tts_conn.cursor() as cur,
         ):
             cur.executemany(  # nosemgrep: python.lang.security.audit.formatted-sql-query

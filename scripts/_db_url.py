@@ -22,6 +22,7 @@ Kept in ``scripts/`` (empty ``__init__.py``) so importing it is
 free of the v2 model/SQLAlchemy boot cost that ``tts_erp_v2.db``
 carries.
 """
+
 from __future__ import annotations
 
 
