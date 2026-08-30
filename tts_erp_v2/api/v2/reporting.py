@@ -236,8 +236,21 @@ def submit_manual_cost(
     Resolves the channel product by ``external_product_id``, closes
     any existing effective manual_cost row for the same SPU (history
     preserved via ``valid_to``), and inserts a fresh row.
+
+    CSRF guard: session-cookie auth is auto-attached by the browser, so
+    every cookie-authed mutating request must carry the
+    ``X-Requested-With: tts-erp`` custom header (the browser SOP blocks
+    cross-origin JS from setting it). Bearer-authed API clients are
+    exempt — they pick the header themselves and the request is
+    already a deliberate cross-site call.
     """
     require_role_at_least(request, "readwrite")
+    if request.scope.get("auth_method") == "cookie":
+        if request.headers.get("X-Requested-With") != "tts-erp":
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "cookie-authed POST must set header X-Requested-With: tts-erp (CSRF guard)",
+            )
     cp_row = sess.execute(  # noqa: S608
 
         _STMT_RESOLVE_CHANNEL_PRODUCT,

@@ -51,19 +51,34 @@ def _params_for_key(plaintext: str, role: str, status: str) -> dict:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_state(db_engine):
+def _isolate_state(db_engine, monkeypatch):
     """One autouse fixture: clear middleware state, then tear down test rows.
 
     Order matters: clear the auth cache BEFORE the test body runs (so a
     key inserted in the test body is queried fresh) and AFTER it
     finishes (so subsequent tests don't see cached lookups). The DB
     cleanup runs at teardown only.
+
+    Env isolation: reset the env vars this lane cares about so a
+    ``monkeypatch.setenv`` from one test can't leak into the next, and
+    so the production .env (TTS_ERP_SESSION_SECRET, etc.) doesn't bleed
+    behaviour into tests that didn't ask for it. ``monkeypatch.setenv``
+    in setup is undone automatically at teardown.
     """
     # Setup: wipe any TEST_ rows left over from a previous run, then
     # clear cached middleware state so a freshly-inserted key is queried
     # fresh rather than served from the in-process cache.
+    from tts_erp_v2.middleware import session_auth
     from tts_erp_v2.middleware.auth import clear_cache
     from tts_erp_v2.middleware.rate_limit import reset_shared
+
+    # Browser-login env knobs: defaults test assertions expect (Secure
+    # flag off, no NAT prefix). Individual tests may monkeypatch on top.
+    monkeypatch.setenv("TTS_ERP_SESSION_SECURE", "0")
+    monkeypatch.delenv("TTS_ERP_EXTERNAL_PREFIX", raising=False)
+    # Reset the login throttle too — the conftest's _isolate_state is
+    # the only autouse that touches it, and it's per-test state.
+    session_auth.reset_login_throttle()
 
     _wipe_test_rows(db_engine)
     clear_cache()

@@ -23,7 +23,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from tts_erp_v2.api.v2 import commerce, linkage, llm_context, pages, reporting
+from tts_erp_v2.api.v2 import auth, commerce, linkage, llm_context, pages, reporting
 from tts_erp_v2.middleware.auth import AuthMiddleware
 from tts_erp_v2.middleware.rate_limit import RateLimitMiddleware
 
@@ -34,6 +34,7 @@ def _build_routes(app: FastAPI) -> None:
     app.include_router(reporting.router)
     app.include_router(pages.router)
     app.include_router(llm_context.router)
+    app.include_router(auth.router)  # browser login + session cookie
 
 
 def build_app() -> FastAPI:

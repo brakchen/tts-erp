@@ -47,6 +47,12 @@ EXEMPT_PATHS = {
     "/docs",
     "/redoc",
     "/docs/oauth2-redirect",
+    # Browser login flow — these routes self-validate the API key (POST
+    # /login) or the session cookie (/me) without requiring a bearer.
+    # See tech-doc/browser-login-design.md §3.
+    "/v2/auth/login",
+    "/v2/auth/logout",
+    "/v2/auth/me",
 }
 
 # Path-level required role for the v2 app.
@@ -153,12 +159,32 @@ def _db_lookup(key_hash: str) -> tuple[int | None, tuple[str, ...]] | None:
         return level, ()
 
 
-def lookup_role(key: str) -> tuple[int | None, tuple[str, ...]] | None:
-    """Cached role+scopes lookup. DB errors propagate (middleware maps to 503)."""
-    key_hash = _sha256(key)
+def lookup_role_by_hash(key_hash: str) -> tuple[int | None, tuple[str, ...]] | None:
+    """Cached role+scopes lookup keyed by the API key's sha256 hash.
+
+    The browser login flow (tech-doc/browser-login-design.md §5) stores
+    only the key hash inside the session cookie, so it needs to re-check
+    the hash against ``security.api_keys`` per request. Sharing the same
+    cache + DB path as ``lookup_role`` means a freshly-revoked key kills
+    its sessions within one cache TTL (60 s positive / 20 s negative).
+
+    DB errors propagate (the middleware maps them to 503).
+
+    Returns:
+        ``(role_level, scopes)`` for a valid, active key; ``None`` for
+        any other case (no such key / disabled / expired / unknown
+        role). Negative cache hits return ``None`` — NOT ``(None, ())`` —
+        so callers can use a single ``is None`` check to mean "the key
+        is no good" instead of remembering to look at ``level``.
+    """
     now = time.monotonic()
     hit = _cache.get(key_hash)
     if hit and hit[2] > now:
+        if hit[0] is None:
+            # Negative cache hit — propagate as None so ``is None`` is
+            # the single uniform "key invalid" signal for every caller
+            # (middleware + login handler).
+            return None
         return hit[0], hit[1]
     result = _db_lookup(key_hash)
     if result is not None:
@@ -168,6 +194,15 @@ def lookup_role(key: str) -> tuple[int | None, tuple[str, ...]] | None:
     if result is None:
         return None
     return result
+
+
+def lookup_role(key: str) -> tuple[int | None, tuple[str, ...]] | None:
+    """Cached role+scopes lookup by plaintext API key.
+
+    Thin wrapper over :func:`lookup_role_by_hash` — kept for callers
+    that still hold the plaintext (login POST handler, scripts).
+    """
+    return lookup_role_by_hash(_sha256(key))
 
 
 def _extract_key(scope: dict) -> str | None:
@@ -182,6 +217,50 @@ def _extract_key(scope: dict) -> str | None:
         elif k == "x-api-key" and v.strip():
             return v.strip()
     return None
+
+
+def _extract_cookie(scope: dict, name: str) -> str | None:
+    """Return the value of cookie ``name`` from a request scope, or None.
+
+    ASGI's ``scope["headers"]`` arrives as a list of raw
+    ``(bytes, bytes)`` pairs; the ``Cookie`` header is a single string
+    with ``name=value; name=value`` segments. We only need one cookie
+    per request (the session cookie), so a linear scan is fine.
+    """
+    target = name.encode("latin-1")
+    for hk, hv in scope.get("headers") or []:
+        if hk.lower() != b"cookie":
+            continue
+        raw = hv.decode("latin-1")
+        for segment in raw.split(";"):
+            seg = segment.strip()
+            if not seg:
+                continue
+            eq = seg.find("=")
+            if eq <= 0:
+                continue
+            k, _, v = seg.partition("=")
+            if k.encode("latin-1") == target:
+                return v.strip()
+    return None
+
+
+def _accept_text_html(scope: dict) -> bool:
+    """True when the request looks like a browser navigation.
+
+    Browser-initiated GETs always send ``Accept: text/html, ...`` even
+    when the previous page was an SPA, because the navigation is a
+    document request. Programmatic clients (curl, fetch from JS that
+    is going to JSON-render the response) send ``Accept: */*`` or
+    ``Accept: application/json``. Used to decide between a 302 to the
+    login page and the existing JSON 401. See design doc §5 point 3.
+    """
+    for hk, hv in scope.get("headers") or []:
+        if hk.lower() == b"accept":
+            raw = hv.decode("latin-1").lower()
+            if "text/html" in raw:
+                return True
+    return False
 
 
 def _prefix_of(key: str | None) -> str:
@@ -226,13 +305,34 @@ class AuthMiddleware:
             await self.app(scope, receive, send)
             return
 
-        key = _extract_key(scope)
-        if key:
+        # --- Cookie-first auth (browser login flow). ---
+        # The login page mints a stateless session cookie carrying only
+        # the API key's sha256 hash; we re-check the hash against
+        # security.api_keys per request, so a revoked key kills its
+        # sessions within one cache TTL. Cookie auth wins over header
+        # auth so a browser with a valid session isn't double-charged
+        # by the rate limiter. See tech-doc/browser-login-design.md §5.
+        from tts_erp_v2.middleware import session_auth
+
+        cookie_raw = _extract_cookie(scope, session_auth.SESSION_COOKIE_NAME)
+        cookie_info = (
+            session_auth.verify_session_cookie(cookie_raw) if cookie_raw else None
+        )
+        # auth_state: 'none' → no credential presented at all;
+        # 'bearer' → header key validated against DB (result filled);
+        # 'cookie' → cookie key_hash validated against DB (result filled).
+        # 'invalid' → a credential was presented but the DB rejected it
+        # (revoked/disabled/expired). Filled below.
+        auth_state = "none"
+        key: str | None = None
+        result: tuple[int | None, tuple[str, ...]] | None = None
+        if cookie_info is not None:
+            kh = cookie_info["kh"]
             try:
-                result = await run_sync(lookup_role, key)
+                cookie_result = await run_sync(lookup_role_by_hash, kh)
             except Exception as exc:
                 sys.stderr.write(
-                    f"[auth] key lookup failed ({type(exc).__name__}): {exc}\n"
+                    f"[auth] cookie session lookup failed ({type(exc).__name__}): {exc}\n"
                 )
                 if mode == "shadow":
                     await self.app(scope, receive, send)
@@ -243,29 +343,104 @@ class AuthMiddleware:
                 )
                 await send({"type": "http.response.body", "body": body})
                 return
-        else:
-            result = None
+            if cookie_result is not None:
+                result = cookie_result
+                auth_state = "cookie"
+            else:
+                # Cookie signature + exp were valid, but the underlying
+                # key no longer lives in security.api_keys (revoked /
+                # disabled / expired). The credential is bad; fall back
+                # to header auth in case the caller also has a bearer,
+                # but ultimately mark invalid below.
+                auth_state = "invalid"
+
+        if auth_state != "cookie":
+            key = _extract_key(scope)
+            if key:
+                try:
+                    header_result = await run_sync(lookup_role, key)
+                except Exception as exc:
+                    sys.stderr.write(
+                        f"[auth] key lookup failed ({type(exc).__name__}): {exc}\n"
+                    )
+                    if mode == "shadow":
+                        await self.app(scope, receive, send)
+                        return
+                    s, hdrs, body = _deny_response(503, "auth store unavailable")
+                    await send(
+                        {"type": "http.response.start", "status": s, "headers": hdrs}
+                    )
+                    await send({"type": "http.response.body", "body": body})
+                    return
+                if header_result is not None:
+                    result = header_result
+                    auth_state = "bearer"
+                elif auth_state == "none":
+                    # Header credential was presented and DB rejected it.
+                    auth_state = "invalid"
+            # key may still be None if the request had no Authorization
+            # header — that's the common case for browser-cookie callers
+            # and is handled by the auth_state-based deny logic below.
+
         level = result[0] if result else None
         scopes = result[1] if result else ()
 
         denied: tuple[int, str] | None = None
-        if key is None:
+        if auth_state == "none":
             denied = (
                 401,
                 "missing bearer token (Authorization: Bearer <key> or X-API-Key: <key>)",
             )
-        elif level is None:
+        elif auth_state == "invalid":
             denied = (401, "invalid, disabled or expired api key")
-        elif level < needed:
+        elif level is not None and level < needed:
             denied = (403, f"requires {_LEVEL_NAME[needed]}")
 
         # Populate scope for downstream middlewares (rate limiter reads api_key_hash).
-        scope["api_key_hash"] = _sha256(key) if key else None
-        scope["api_key_role"] = _LEVEL_NAME[level] if level is not None else None
+        if auth_state == "cookie":
+            scope["api_key_hash"] = cookie_info["kh"] if cookie_info else None
+            scope["auth_method"] = "cookie"
+        elif auth_state == "bearer":
+            scope["api_key_hash"] = _sha256(key) if key else None
+            scope["auth_method"] = "bearer"
+        else:
+            scope["api_key_hash"] = None
+            scope["auth_method"] = None
+        scope["api_key_role"] = _LEVEL_NAME.get(level) if level is not None else None
         scope["api_key_scopes"] = scopes
 
         if denied is None:
             await self.app(scope, receive, send)
+            return
+
+        # --- Browser 302 redirect to the login page. ---
+        # A browser GET carries `Accept: text/html, ...`; an API client
+        # carries `Accept: */*` or `application/json`. The browser path
+        # is JSON-friendly (curl, fetch) for backwards compat; the
+        # browser path gets a 302 so the operator sees the login form,
+        # not a wall of JSON. TTS_ERP_EXTERNAL_PREFIX re-prepends the
+        # NAT proxy's /tts/... prefix inside the `next` value so the
+        # SPA reloads against the same public URL it started on.
+        if (
+            denied[0] == 401
+            and method == "GET"
+            and _accept_text_html(scope)
+        ):
+            qs = scope.get("query_string", b"").decode("latin-1")
+            next_value = path + (("?" + qs) if qs else "")
+            prefix = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "")
+            location = f"/v2/auth/login?next={prefix}{next_value}"
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 302,
+                    "headers": [
+                        (b"location", location.encode("latin-1")),
+                        (b"content-type", b"text/plain; charset=utf-8"),
+                    ],
+                }
+            )
+            await send({"type": "http.response.body", "body": b""})
             return
 
         client = (scope.get("client") or ("?",))[0]
@@ -282,7 +457,9 @@ class AuthMiddleware:
         # force is throttled. Lazy import to avoid cycle.
         from tts_erp_v2.middleware import rate_limit
 
-        bucket_id = _sha256(key) if key else f"ip:{client}"
+        bucket_id = _sha256(key) if key else (
+            cookie_info["kh"] if cookie_info else f"ip:{client}"
+        )
         retry_after = rate_limit.shared_hit(bucket_id)
         if retry_after is not None:
             sys.stderr.write(
