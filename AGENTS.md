@@ -94,54 +94,55 @@ curl "http://127.0.0.1:9877/orders/search?shop_id=7494763368967603447" -d '...'
 
 ## 3. 端点速查
 
+**v2 服务**（生产路径，2026-08-29 起）：所有读写走 `tts_erp_v2.app` 的 `/v2/*` 端点。详见
+[`tech-doc/external-api.md`](tech-doc/external-api.md)。下面只列概要 + 历史端点状态。
+
 | 端点 | 用途 |
 | ----------------------------------------------- | ------------------------------- |
-| `GET /healthz` | 健康检查（`oauth_receiver.token_count` 2026-08-25 修复：之前用 in-memory deque 永远 0，现走 `SELECT COUNT(*) FROM oauth_tokens`） |
+| `GET /healthz` | 健康检查（body 含 `service: "tts-erp-v2"` 指纹；v1 只返 `{"status":"ok"}`） |
 | `GET /ads-monitor` | TikTok OAuth 授权回跳落地页（公开，无 auth） |
 | `GET /endpoints` | 完整端点清单 |
-| ~~`GET /shops`~~ | **404**（Wave 3 Slice 2 2026-08-18 删除，改走 `oauth_receiver_core.db_list_shops()` in-process） |
-| ~~`GET /shops/<shop_id>`~~ | **404**（同上，Wave 3 Slice 2 删） |
-| ~~`GET /token/<shop_id>?reveal=1`~~ | **404**（同上，Wave 3 Slice 2 删） |
-| `POST /admin/shops/backfill` | **2026-08-25 新增** —— admin 角色；从 `oauth_tokens` 幂等回写 `tts_erp.shops` |
-| `POST /orders/search?shop_id=X` | 搜索订单 |
-| `POST /orders/list?shop_id=X` | 订单列表 |
-| `GET /orders/<id>?shop_id=X` | 订单详情 |
-| `POST /orders/<id>/confirm?shop_id=X` | 确认发货 |
-| `POST /orders/<id>/cancel?shop_id=X` | 取消订单 |
-| `POST /orders/<id>/update_status?shop_id=X` | 更新状态 |
-| `POST /orders/<id>/shipping_info?shop_id=X` | 添加物流 |
-| `POST /orders/<id>/verify_shipping?shop_id=X` | 校验物流 |
-| `GET /orders/<id>/tracking?shop_id=X` | 物流追踪 |
-| `GET /orders/<id>/tracking/get?shop_id=X` | 物流追踪详情 |
-| `GET /orders/<id>/risk?shop_id=X` | 风控检查 |
-| `GET /orders/<id>/buyer?shop_id=X` | 买家信息 |
-| `GET /orders/<id>/recipient?shop_id=X` | 收货地址 |
-| `GET /logistics/orders/<id>/tracking?shop_id=X` | 物流追踪聚合视图（区别于 `/orders/<id>/tracking`：聚合 `logistics_tracking` + `logistics_events`） |
-| `GET /finance/statements?shop_id=X&page_size=50&sort_field=statement_time&sort_order=DESC` | 对账单列表（202309 spec 唯一可用 Finance 端点） |
-| `GET /finance/payments?shop_id=X&page_size=50&sort_field=create_time&sort_order=DESC` | 付款记录列表 |
-| `POST /returns/search`     body: `{shop_id, ...filters}` | 退货/退款列表（→ `/return_refund/202309/returns/search`） |
-| `POST /cancellations/search` body: `{shop_id, ...filters}` | 取消列表（→ `/return_refund/202309/cancellations/search`） |
-| `GET /db/orders?shop_id=X&status=&limit=` | 本地 DB 订单列表 |
-| `GET /db/orders/<id>` | 本地 DB 单订单 |
-| `GET /db/orders/<id>/items` | 本地 DB 订单商品 |
-| `GET /db/orders/<id>/shipping` | 本地 DB 物流信息 |
-| `GET /db/statements?shop_id=X&limit=` | 本地 DB 对账单 |
-| `GET /db/payments?shop_id=X&status=&limit=` | 本地 DB 付款记录 |
-| `GET /db/returns?shop_id=X&status=&limit=` | 本地 DB 退货记录 |
-| `GET /db/returns/<id>` | 本地 DB 单退货详情（带 `refund_amount` 计算字段，源 `raw->'refund'->>'refund_total'`） |
-| `GET /db/cancellations?shop_id=X&status=&limit=` | 本地 DB 取消记录 |
-| `GET /db/sync_log` | 同步历史 |
-| `GET /db/statement_transactions?shop_id=&statement_id=&order_id=&type=&limit=` | 账单逐交易明细（58 字段，替代已删的 Excel 财务表） |
-| `GET /db/logistics_tracking` | 本地 DB 物流追踪表（按 `order_id` 维度汇总） |
-| `GET /db/logistics_events` | 本地 DB 物流事件表（原始逐事件流，按 `update_time_millis` 排序） |
-| `POST /sync/orders` | body: `{shop_id, order_status?, create_time_ge?, create_time_lt?, page_size?}` |
-| `POST /sync/order/<id>` | 单订单详情同步 |
-| `POST /sync/statements` | body: `{shop_id, statement_time_ge?, statement_time_lt?, page_size?}` |
-| `POST /sync/payments` | body: `{shop_id, create_time_ge?, create_time_lt?, page_size?}` |
-| `POST /sync/returns` | body: `{shop_id, create_time_ge?, create_time_lt?, page_size?}` |
-| `POST /sync/cancellations` | body: `{shop_id, create_time_ge?, create_time_lt?, page_size?}` |
-| `POST /sync/logistics_tracking` | body: `{shop_id, order_ids?, all_with_tracking?, limit?, max_per_run?}`（cron 每 10 分钟自动追活跃运单） |
-| `POST /sync/statement_transactions` | body: `{shop_id, statement_ids?, statement_time_ge?, statement_time_lt?, page_size?}`（账单逐交易明细） |
+| `GET /v2/pages/manual-costs?shop_id=X` | 人工成本填写页（HTML，readonly+） |
+| `GET /v2/commerce/sales-orders?shop_id=X&limit=` | 销售订单列表（v2 结构化） |
+| `GET /v2/commerce/sales-orders/<id>?shop_id=X` | 单订单详情 |
+| `GET /v2/commerce/channel-products?shop_id=X` | TikTok 渠道商品 |
+| `GET /v2/commerce/channel-accounts?shop_id=X` | 平台账为户列表 |
+| `GET /v2/linkage/product-links?shop_id=X` | 妙手采购↔TikTok 销售关联 |
+| `GET /v2/linkage/effective-product-links?shop_id=X` | 上述 + link_overrides 并集（view） |
+| `GET /v2/linkage/evidence?shop_id=X` | 关联 evidence 原始件 |
+| `GET /v2/linkage/issues?shop_id=X` | 未解决的关联问题 |
+| `POST /v2/linkage/overrides` | 人工覆盖 product_links（admin） |
+| `POST /v2/reporting/manual-costs` body: `{channel_product_external_id, unit_cost, currency, note?}` | 提交人工成本（readwrite） |
+| `GET /v2/reporting/cost-snapshots?shop_id=X` | 成本快照 |
+| `GET /v2/reporting/profit-daily?shop_id=X` | 日利润报表 |
+| `GET /v2/reporting/coverage?shop_id=X` | 成本覆盖率 |
+| `GET /v2/reporting/missing-cost-products` | 无采购价的在售 SPU（运营补填清单） |
+| `POST /v2/sync/orders` body: `{shop_id, order_status?, create_time_ge?, create_time_lt?, page_size?}` | ad-hoc 同步 |
+| `POST /v2/sync/order/<order_id>` | 单订单同步（ad-hoc） |
+| `POST /v2/sync/statements` / `/payments` / `/returns` / `/cancellations` / `/logistics_tracking` / `/statement_transactions` | ad-hoc 财务 / 售后 / 物流同步 |
+| `GET /endpoints` | v1 + v2 全部路由列表（由 v2 app 启动时 dump） |
+
+**legacy v1 端点状态**（2026-08-29 切换后）：
+
+| 端点 | 状态 |
+| --- | --- |
+| `~~GET /shops~~` | 404（v1 改走 `oauth_receiver_core.db_list_shops()` in-process） |
+| `~~GET /shops/<shop_id>~~` | 404（同上） |
+| `~~GET /token/<shop_id>?reveal=1~~` | 404（凭证单源迁入 `integration.credentials` + `proxy/token_service.py`） |
+| `POST /admin/shops/backfill` | 仍可用（admin role）—— 幂等回写 `integration.channel_accounts` |
+| `~~POST /orders/search~~` / `~~POST /orders/list~~` / `~~GET /orders/<id>~~` | 404（v2 读 `tts_erp_v2.proxy.tts_shop` 走 `GET /v2/commerce/sales-orders*`） |
+| `~~POST /orders/<id>/{confirm,cancel,update_status,shipping_info,verify_shipping}~~` | 404（v2 架构是只读分析，订单写操作全部拆除） |
+| `~~GET /orders/<id>/{tracking,tracking/get,risk,buyer,recipient}~~` | 404（v2 读 `tts_erp_v2.db.models.fulfillment`） |
+| `~~GET /finance/{statements,payments}~~` | 404（v2 走 `/v2/reporting/*`） |
+| `~~POST /returns/search~~` / `~~POST /cancellations/search~~` | 404（v2 走 `tts_erp_v2.jobs.tiktok.after_sales`） |
+| `~~GET /db/*~~`（24 个读端点） | 404（v2 不读 public.* 表，改为 `tts_erp_v2.api.v2.commerce/report/linkage`） |
+| `~~GET /db/sync_log~~` | 404（v2 同步历史在 `integration.sync_jobs`） |
+| `~~GET /miaoshou/<domain>/<method>~~` | 404（v2 走 `tts_erp_v2.proxy.miaoshou`，迁入 `tts_erp_v2/jobs/miaoshou/*`） |
+| `~~POST /miaoshou/callback/<node-alias>~~` | **保留**（妙手在服役，跳过会断 webhook） |
+
+**简言之**：v1 以 4 周观察期内的紧急回滚为目标留在 git history（`master` 之前的
+commits），但 `:9877` 运行时已不再服务这些路径。生产读 / 写 / 同步 / 报表 **全部**
+走 `/v2/*`。
 
 ## 4. 改代码时的 do / don't
 
@@ -157,13 +158,15 @@ curl "http://127.0.0.1:9877/orders/search?shop_id=7494763368967603447" -d '...'
 
 ### DON'T
 
-- ❌ 不要在 **任何 service 文件里**（`tts_erp.py` legacy / `tdd/tts_erp_fastapi.py` 当前 / cron 脚本）直连 PG `oauth_tokens` 表（**只能**走 oauth-receiver HTTP API）
+- ❌ 不要在 **任何 service 文件里**（`tts_erp_v2/**` / `tts_erp.py` legacy / `scripts/migrate_v1_to_v2/*`）直连 PG `oauth_tokens` 表 —— **只能**走 `tts_erp_v2.proxy.token_service` （in-process 调用 `oauth_receiver_core.decrypt_creds()`）
 - ❌ 不要在 .env 里写 app_secret 给客户端调用者（明文暴露，app_secret 应只服务自己用）
 - ❌ 不要在 canonical 里 URL-encode body（用 raw JSON 字符串）
 - ❌ 不要改 `_db_load_token` 直接返回（它本来就是 oauth-receiver 的职责）
 - ❌ 不要假设 `code: 0` 是唯一的 success —— TikTok 也会返回 `code: 105005` (scope 缺失) `code: 36009004` (字段缺失) 等
 - ❌ **不要**接 `POST /returns` / `POST /cancellations`（CREATE write endpoint，会在真实店铺创建退货/取消单）。
-     这两个端点 2026-08-17 起已从代码中**整个删除**（不再返回 501，而是无路由 404）。如果以后要接，单独 review。
+     这两个端点 2026-08-17 起已从代码中**整个删除**（不再返回 501，而是无路由 404）。v2 在 `tts_erp_v2/jobs/tiktok/after_sales.py` 只读，同上原则如果以后要接，单独 review。
+- ❌ **不要**在 v2 端点里读 `public.*` 表。v2 完全读新 9 schema。4 周观察期内 `public.*` 仅作 rollback safety，**是**旧代码路径，但 v2 代码不会直接查。
+- ❌ **不要**接 `POST /orders/<id>/{confirm,cancel,update_status,shipping_info,verify_shipping}`。v2 架构是只读分析，写操作已全部拆除。
 
 ## 5. 常见 bug + 修复
 

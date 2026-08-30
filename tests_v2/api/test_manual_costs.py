@@ -145,7 +145,7 @@ def test_manual_costs_happy_path_writes_row(
     # session (the handler commits via its own session; our shared
     # ``db_session`` fixture is savepoint-rolled-back).
     with Session(db_engine) as verify_sess:
-        row = verify_sess.execute(
+        row = verify_sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
             text(
                 "SELECT unit_cost, currency, valid_to, note, created_by "
                 "FROM procurement.manual_product_costs "
@@ -190,7 +190,7 @@ def test_manual_costs_second_submission_closes_first(
     assert r2.status_code == 201
 
     with Session(db_engine) as verify_sess:
-        rows = verify_sess.execute(
+        rows = verify_sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
             text(
                 "SELECT id, unit_cost, valid_to FROM "
                 "procurement.manual_product_costs "

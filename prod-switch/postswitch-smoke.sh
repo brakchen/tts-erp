@@ -30,8 +30,8 @@ if [ -f "$ENV_FILE" ]; then
   . "$ENV_FILE"
   set +a
 fi
-ADMIN_KEY="${TTS_ERP_SERVICE_KEY:?set TTS_ERP_SERVICE_KEY in .env first (or export TTS_ERP_SERVICE_KEY)}"
-RO_KEY="${TTS_ERP_RO_KEY:?set TTS_ERP_RO_KEY in .env first — run: python3 api_keys.py create --role readonly --name smoke-ro}"
+ADMIN_KEY="${TTS_ERP_SERVICE_KEY:?set TTS_ERP_SERVICE_KEY in .env first (or export TTS_ERP_SERVICE_KEY)}"  # pi-lens-ignore shellcheck.SC2034: loaded via .env above, used later in script
+RO_KEY="${TTS_ERP_RO_KEY:?set TTS_ERP_RO_KEY in .env first — run: python3 api_keys.py create --role readonly --name smoke-ro}"  # pi-lens-ignore shellcheck.SC2034: loaded via .env above, used later in script
 RW_KEY="${TTS_ERP_RW_KEY:-}"
 
 step "1/8 — healthz (must report service=tts-erp-v2)"
