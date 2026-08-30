@@ -61,6 +61,13 @@ _READONLY_PREFIXES = (
 _READWRITE_EXACT = {
     "/v2/reporting/manual-costs",  # POST only — GET below stays readonly
 }
+# Exact-match paths (no trailing slash) that are readonly. These don't
+# fit the prefix pattern above (which requires ``/v2/xxx/`` with slash).
+# Keep this list small — prefer adding a new prefix when adding a
+# sub-namespace.
+_READONLY_EXACT = {
+    "/v2/llm-context",  # GET — self-describing system + data dictionary for LLM agents
+}
 # All other /v2/* paths default to admin (defensive: unknown = privileged).
 
 
@@ -83,6 +90,9 @@ def required_role(method: str, path: str) -> int | None:
     # v2: manual-costs POST requires readwrite.
     if method.upper() == "POST" and p in _READWRITE_EXACT:
         return ROLE_LEVEL["readwrite"]
+    # v2: exact-match readonly paths (e.g. /v2/llm-context).
+    if p in _READONLY_EXACT:
+        return ROLE_LEVEL["readonly"]
     # v2: commerce/linkage/reporting GETs are readonly.
     for prefix in _READONLY_PREFIXES:
         if p.startswith(prefix):
