@@ -43,11 +43,28 @@ SQL_COST_SNAPSHOTS = (
     "ORDER BY calculated_at DESC NULLS LAST LIMIT :limit OFFSET :offset"
 )
 SQL_PROFIT_DAILY = (
-    "SELECT id, channel_product_id, on_date, revenue, cost, profit, currency "
+    # 2026-09-01: column-name repair (audit P1-2). The table columns
+    # are profit_date / gross_revenue / estimated_cogs /
+    # estimated_gross_profit (NOT on_date / revenue / cost / profit),
+    # so a straight SELECT was producing 500 with
+    # psycopg.errors.UndefinedColumn. The aliases below match the
+    # ProfitDailyOut pydantic schema. ``profit_date`` is a DATE so the
+    # filter is compared as text — PG coerces both sides implicitly
+    # but we CAST the bound param to date for the same reason
+    # cost-snapshots had to CAST (PG otherwise raises
+    # AmbiguousParameter when the param is NULL).
+    "SELECT id, channel_product_id, "
+    "       profit_date AS on_date, "
+    "       gross_revenue AS revenue, "
+    "       estimated_cogs AS cost, "
+    "       estimated_gross_profit AS profit, "
+    "       currency "
     "FROM reporting.product_profit_daily "
-    "WHERE (:channel_id IS NULL OR channel_product_id = :channel_id) "
-    "AND (:on_date IS NULL OR on_date = :on_date) "
-    "ORDER BY on_date DESC NULLS LAST LIMIT :limit OFFSET :offset"
+    "WHERE (CAST(:channel_id AS bigint) IS NULL "
+    "OR channel_product_id = CAST(:channel_id AS bigint)) "
+    "AND (CAST(:on_date AS date) IS NULL "
+    "OR profit_date = CAST(:on_date AS date)) "
+    "ORDER BY profit_date DESC NULLS LAST LIMIT :limit OFFSET :offset"
 )
 SQL_COVERAGE_REPORT = (
     "SELECT "
@@ -83,10 +100,21 @@ SQL_INSERT_MANUAL_COST = (
     "RETURNING id, channel_product_id, unit_cost, currency, valid_from, "
     "valid_to, note, created_by"
 )
-SQL_CLOSE_OLD_MANUAL_COSTS = (
+# 2026-09-01: close-old-then-insert sequence rewritten as a single
+# transaction (audit P1-6). The two-commit pattern used to drop the
+# UPDATE into a try/except + rollback, so a connection blip mid-handler
+# left the previous row's valid_to NULL and the new row's valid_to NULL
+# simultaneously — two effective manual costs per SPU. We now:
+#   1. UPDATE old rows first (within the same transaction)
+#   2. INSERT the new row
+#   3. commit once
+# The partial unique index uq_manual_costs_one_open (added in
+# migration 0003_manual_costs_one_open) is the DB-side safety net: even
+# if the application logic regresses, the index will reject a second
+# valid_to IS NULL row for the same channel_product_id.
+SQL_CLOSE_OLD_MANUAL_COSTS_BEFORE_INSERT = (
     "UPDATE procurement.manual_product_costs SET valid_to = now() "
-    "WHERE channel_product_id = :cp_id AND valid_to IS NULL "
-    "AND id <> :keep_id"
+    "WHERE channel_product_id = :cp_id AND valid_to IS NULL"
 )
 SQL_LIST_MISSING_COST_PRODUCTS = (
     "SELECT cp.id, cp.external_product_id, cp.title, cp.channel_account_id, "
@@ -143,7 +171,9 @@ _STMT_PROFIT_DAILY = text(SQL_PROFIT_DAILY)
 _STMT_COVERAGE_REPORT = text(SQL_COVERAGE_REPORT)
 _STMT_RESOLVE_CHANNEL_PRODUCT = text(SQL_RESOLVE_CHANNEL_PRODUCT)
 _STMT_INSERT_MANUAL_COST = text(SQL_INSERT_MANUAL_COST)
-_STMT_CLOSE_OLD_MANUAL_COSTS = text(SQL_CLOSE_OLD_MANUAL_COSTS)
+_STMT_CLOSE_OLD_MANUAL_COSTS_BEFORE_INSERT = text(
+    SQL_CLOSE_OLD_MANUAL_COSTS_BEFORE_INSERT
+)
 _STMT_LIST_MISSING_COST_PRODUCTS = text(SQL_LIST_MISSING_COST_PRODUCTS)
 _STMT_TOTAL_MISSING_PHOTO = text(SQL_TOTAL_MISSING_PHOTO)
 
@@ -343,6 +373,20 @@ def submit_manual_cost(
     created_by = f"api_key:{role}"
     valid_from = body.valid_from or datetime.now()
 
+    # 2026-09-01: close-old + insert in ONE transaction (audit P1-6).
+    # The previous two-commit pattern (insert+commit, then
+    # try/except: rollback the close) silently lost the UPDATE on any
+    # error path, leaving two rows with valid_to IS NULL for the same
+    # channel_product_id. The DB-side partial unique index
+    # uq_manual_costs_one_open (alembic 0003) is the safety net; the
+    # app-level guarantee below is that we flush the UPDATE before the
+    # INSERT, so a same-SPU race against another concurrent POST is
+    # rejected by the index rather than producing ghost rows.
+    # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() with bound :cp_id, no string interpolation
+    sess.execute(
+        _STMT_CLOSE_OLD_MANUAL_COSTS_BEFORE_INSERT,
+        {"cp_id": cp_id},
+    )
     new_row = sess.execute(
         _STMT_INSERT_MANUAL_COST,
         {
@@ -354,21 +398,13 @@ def submit_manual_cost(
             "created_by": created_by,
         },
     ).first()
-    sess.commit()
     if new_row is None:
+        sess.rollback()
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             "failed to insert manual cost",
         )
-    # Close old rows on the same SPU so only the new one is effective.
-    try:
-        sess.execute(
-            _STMT_CLOSE_OLD_MANUAL_COSTS,
-            {"cp_id": cp_id, "keep_id": new_row.id},
-        )
-        sess.commit()
-    except Exception:
-        sess.rollback()
+    sess.commit()
     return _manual_cost_row(new_row)
 
 

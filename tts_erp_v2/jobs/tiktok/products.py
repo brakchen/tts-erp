@@ -14,6 +14,7 @@ Pagination
 ----------
 ``next_page_token`` (same as orders). Empty/falsy token ends the loop.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -119,12 +120,20 @@ def _parse_variant(raw: dict) -> dict:
     }
 
 
-def _upsert_product(session, *, account_id: int, fields: dict, raw_record_id: int) -> int:
-    insert_values = {"channel_account_id": account_id, **fields, "raw_record_id": raw_record_id}
+def _upsert_product(
+    session, *, account_id: int, fields: dict, raw_record_id: int
+) -> int:
+    insert_values = {
+        "channel_account_id": account_id,
+        **fields,
+        "raw_record_id": raw_record_id,
+    }
     update_cols = {k: insert_values[k] for k in fields}
     update_cols["raw_record_id"] = raw_record_id
     session.execute(
-        pg_insert(ChannelProduct).values(**insert_values).on_conflict_do_update(
+        pg_insert(ChannelProduct)
+        .values(**insert_values)
+        .on_conflict_do_update(
             index_elements=["channel_account_id", "external_product_id"],
             set_=update_cols,
         )
@@ -180,11 +189,9 @@ def run(
             f"channel_accounts row missing for tiktok shop_id={shop_id!r}"
         )
 
-    watermark_ms = watermarks.get_cursor(
-        session, job_name=JOB_NAME, scope=cursor_scope
-    )
+    watermark_ms = watermarks.get_cursor(session, job_name=JOB_NAME, scope=cursor_scope)
 
-    base_body: dict[str, Any] = {"page_size": page_size, "status": "ACTIVATE"}
+    base_body: dict[str, Any] = {"page_size": page_size}
     if watermark_ms:
         base_body["update_time_ge"] = _safe_int(watermark_ms) // 1000
 
@@ -246,17 +253,15 @@ def run(
             )
 
         rows_inserted += 1
-        update_ms = (
-            p_fields.get("source_updated_at")
-            and _safe_int(p_fields["source_updated_at"].timestamp() * 1000)
+        update_ms = p_fields.get("source_updated_at") and _safe_int(
+            p_fields["source_updated_at"].timestamp() * 1000
         )
         if update_ms and (max_update_ms is None or update_ms > max_update_ms):
             max_update_ms = update_ms
 
     new_cursor_ms: int | None = None
     if max_update_ms is not None and (
-        watermark_ms is None
-        or max_update_ms > _safe_int(watermark_ms)
+        watermark_ms is None or max_update_ms > _safe_int(watermark_ms)
     ):
         watermarks.set_cursor(
             session,
