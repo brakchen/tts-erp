@@ -44,6 +44,7 @@ def _env(**overrides):
         "MINIO_REGION": "us-east-1",
         "MINIO_PRESIGN_EXPIRY_SECONDS": "900",
         "MINIO_PUBLIC_BASE_URL": "",
+        "MINIO_PUBLIC_HOST": "",
     }
     base.update(overrides)
     return base
@@ -181,6 +182,97 @@ def test_presign_get_respects_custom_expiry(monkeypatch):
         )
     delta = expires_at - datetime.now(UTC)
     assert 5 <= delta.total_seconds() <= 15
+
+
+# --- public_host rewriting (browser-reachable presigned URLs) -----------
+
+
+def test_presign_put_rewrites_host_when_public_host_set(monkeypatch):
+    """With MINIO_PUBLIC_HOST, the browser-side URL points at the public host.
+
+    Regression (2026-08-31): SDK signs against the LAN endpoint, so the
+    browser received 127.0.0.1:9000 and failed to PUT when the operator
+    was on the public internet. MINIO_PUBLIC_HOST swaps just the
+    scheme/host/port (and optional path prefix) — the signature query is
+    untouched so the upload still authorises.
+    """
+    for k, v in _env(MINIO_PUBLIC_HOST="https://daqiang.nat100.top/minio").items():
+        monkeypatch.setenv(k, v)
+    with patch("tts_erp_v2.storage.minio_client.Minio") as Mock:
+        instance = Mock.return_value
+        instance.presigned_put_object.return_value = (
+            "http://127.0.0.1:9000/tts-erp-spu-images/k.jpg"
+            "?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=abc"
+        )
+        client = MinioClient.from_env()
+        url = client.presign_put("k.jpg", "image/jpeg")
+    assert url == (
+        "https://daqiang.nat100.top/minio/tts-erp-spu-images/k.jpg"
+        "?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=abc"
+    )
+
+
+def test_presign_get_rewrites_host_when_public_host_set(monkeypatch):
+    for k, v in _env(MINIO_PUBLIC_HOST="https://cdn.example.com").items():
+        monkeypatch.setenv(k, v)
+    with patch("tts_erp_v2.storage.minio_client.Minio") as Mock:
+        instance = Mock.return_value
+        instance.presigned_get_object.return_value = (
+            "http://127.0.0.1:9000/k.jpg?X-Amz-Signature=xyz"
+        )
+        client = MinioClient.from_env()
+        url, _ = client.presign_get("k.jpg")
+    # No path prefix on the public host this time.
+    assert url == "https://cdn.example.com/k.jpg?X-Amz-Signature=xyz"
+
+
+def test_presign_put_unchanged_when_public_host_unset(monkeypatch):
+    """Backward compat: unset MINIO_PUBLIC_HOST keeps SDK's URL verbatim."""
+    for k, v in _env().items():
+        monkeypatch.setenv(k, v)
+    with patch("tts_erp_v2.storage.minio_client.Minio") as Mock:
+        instance = Mock.return_value
+        instance.presigned_put_object.return_value = (
+            "http://127.0.0.1:9000/k?sig=a"
+        )
+        client = MinioClient.from_env()
+        url = client.presign_put("k", "image/jpeg")
+    assert url == "http://127.0.0.1:9000/k?sig=a"
+
+
+def test_rewrite_presigned_host_helper_examples():
+    """Direct unit coverage for the URL rewrite helper.
+
+    The path-prefix case is the regression we actually hit: NGINX
+    routes /minio/* to MinIO, so the public host carries /minio and
+    the SDK's /<bucket>/<key> must splice in below it.
+    """
+    from tts_erp_v2.storage.minio_client import _rewrite_presigned_host
+
+    # path prefix
+    out = _rewrite_presigned_host(
+        "http://127.0.0.1:9000/bucket/k?X-Amz-Signature=abc",
+        "https://daqiang.nat100.top/minio",
+    )
+    assert out == "https://daqiang.nat100.top/minio/bucket/k?X-Amz-Signature=abc"
+
+    # no path prefix
+    out = _rewrite_presigned_host(
+        "http://10.0.0.5:9000/k?sig=1",
+        "https://cdn.example.com",
+    )
+    assert out == "https://cdn.example.com/k?sig=1"
+
+    # scheme swap (http endpoint -> https public host)
+    out = _rewrite_presigned_host("http://x/k", "https://y")
+    assert out == "https://y/k"
+
+    # trailing slash on prefix is tolerated
+    out = _rewrite_presigned_host(
+        "http://x/b/k?q=1",
+        "https://y/minio/",
+    )
+    assert out == "https://y/minio/b/k?q=1"
 
 
 # --- stat / remove --------------------------------------------------------

@@ -14,6 +14,7 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlparse, urlunparse
 
 from minio import Minio
 from minio.error import S3Error
@@ -52,6 +53,46 @@ class _Config:
     region: str
     presign_expiry: timedelta
     public_base_url: str | None
+    # When set, presigned URLs returned to the browser swap the SDK's
+    # ``endpoint`` host for this public scheme+host[:port][/path] prefix
+    # — so the browser can reach MinIO via an NGINX ingress instead of
+    # the LAN-only endpoint the SDK uses for server-side calls.
+    # See tech-doc/procurement-ui-redesign.md §5.
+    public_host: str | None
+
+
+def _rewrite_presigned_host(sdk_url: str, public_host: str) -> str:
+    """Swap the scheme + host[:port] of a presigned URL and prepend a path.
+
+    The SDK signs requests against ``endpoint`` (server-side only). When
+    a browser needs the same URL it must point at the NGINX-fronted
+    public host — same path, same signature query string, only the
+    scheme/host/port (and any path prefix) change.
+
+    >>> _rewrite_presigned_host(
+    ...     "http://127.0.0.1:9000/bucket/k?X-Amz-Signature=abc",
+    ...     "https://daqiang.nat100.top/minio",
+    ... )
+    'https://daqiang.nat100.top/minio/bucket/k?X-Amz-Signature=abc'
+    >>> _rewrite_presigned_host(
+    ...     "http://127.0.0.1:9000/bucket/k?X-Amz-Signature=abc",
+    ...     "https://cdn.example.com",
+    ... )
+    'https://cdn.example.com/bucket/k?X-Amz-Signature=abc'
+    """
+    sdk_parts = urlparse(sdk_url)
+    pub_parts = urlparse(public_host)
+    # If the public host has a path prefix (e.g. /minio), splice it in.
+    prefix = pub_parts.path.rstrip("/")
+    new_path = prefix + sdk_parts.path
+    return urlunparse((
+        pub_parts.scheme,
+        pub_parts.netloc,
+        new_path,
+        sdk_parts.params,
+        sdk_parts.query,
+        sdk_parts.fragment,
+    ))
 
 
 def _read_config() -> _Config:
@@ -89,6 +130,7 @@ def _read_config() -> _Config:
             f"(got {expiry_seconds})."
         )
     base = os.environ.get("MINIO_PUBLIC_BASE_URL", "").strip()
+    public_host = os.environ.get("MINIO_PUBLIC_HOST", "").strip() or None
     return _Config(
         endpoint=required["MINIO_ENDPOINT"],
         access_key=required["MINIO_ACCESS_KEY"],
@@ -98,6 +140,7 @@ def _read_config() -> _Config:
         region=required["MINIO_REGION"],
         presign_expiry=timedelta(seconds=expiry_seconds),
         public_base_url=base or None,
+        public_host=public_host,
     )
 
 
@@ -181,11 +224,12 @@ class MinioClient:
         ``response-content-type`` is a GET-only override param, so we
         pass no extra query params. The browser just PUTs the bytes.
         """
-        return self._sdk.presigned_put_object(
+        url = self._sdk.presigned_put_object(
             self._config.bucket,
             object_key,
             expires=expiry or self._config.presign_expiry,
         )
+        return self._publicise(url)
 
     def presign_get(
         self,
@@ -198,12 +242,19 @@ class MinioClient:
             object_key,
             expires=expiry or self._config.presign_expiry,
         )
+        url = self._publicise(url)
         expires_at = datetime.now(UTC) + (
             expiry or self._config.presign_expiry
         )
         return url, expires_at
 
     # -- object inspection / removal ------------------------------------
+
+    def _publicise(self, sdk_url: str) -> str:
+        """Rewrite an SDK-generated presigned URL for browser access."""
+        if not self._config.public_host:
+            return sdk_url
+        return _rewrite_presigned_host(sdk_url, self._config.public_host)
 
     def stat(self, object_key: str) -> dict:
         """HEAD the object and return ``{size, content_type, etag}``.
