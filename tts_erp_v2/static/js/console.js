@@ -52,8 +52,8 @@
   // of a dozen). Contract: every interpolated value MUST go through esc()
   // first; all static parts are constant strings in this file.
   function html(el, markup) {
-    el.innerHTML = markup;
-  } // pi-lens-ignore: no-inner-html-js
+    el.innerHTML = markup; // pi-lens-ignore: no-inner-html-js
+  }
   // Unwrap API responses that may be either a bare array (legacy) or a
   // { items: [...], total_...: N } envelope (current). 2026-08-31: the
   // backend rolled out the envelope and the JS used to crash with
@@ -89,6 +89,23 @@
       credentials: "include", // session cookie
       headers: headers,
       body: opts.body,
+    }).then((r) => {
+      // 429 from the rate limiter carries Retry-After (seconds). Surface
+      // it as a structured field on the error so errorRow() can render a
+      // live countdown instead of a generic "重试" link. Without this,
+      // rapid clicks on the same tab create a retry storm where every
+      // retry attempt also gets 429 and the bucket never drains.
+      if (r.status === 429) {
+        var raw = r.headers.get("Retry-After");
+        var ra = parseInt(raw || "60", 10);
+        if (!Number.isFinite(ra) || ra < 1) ra = 60;
+        if (ra > 300) ra = 300; // cap so a runaway counter doesn't lock the UI for minutes
+        var err = new Error("HTTP 429 \u9650\u6d41\u4e2d");
+        err.statusCode = 429;
+        err.retryAfter = ra;
+        throw err;
+      }
+      return r;
     });
   }
 
@@ -100,9 +117,8 @@
   function loadShops() {
     return api("/v2/commerce/channel-accounts?platform=tiktok&limit=500")
       .then((r) => {
-        // pi-lens-ignore: no-open-redirect-js
         if (r.status === 401) {
-          window.location.href = loginUrl();
+          window.location.href = loginUrl(); // pi-lens-ignore: no-open-redirect-js
           return null;
         }
         if (!r.ok) throw new Error("shops HTTP " + r.status);
@@ -219,11 +235,57 @@
   }
   function errorRow(e, retry) {
     var tbody = $("#grid-rows");
+    // 429 path: show a live countdown, then enable the manual retry link
+    // once the bucket is expected to have room again. We deliberately do
+    // NOT auto-fire the retry — if the user has navigated to a different
+    // tab in the meantime, an auto-retry would clobber their current view.
+    var ra = e && e.retryAfter;
+    if (typeof ra === "number" && ra > 0) {
+      var tr = document.createElement("tr");
+      tbody.innerHTML = ""; // pi-lens-ignore: no-inner-html-js
+      tbody.appendChild(tr);
+      var startedAt = Date.now();
+      function renderWaiting() {
+        html(
+          tr,
+          '<td colspan="6" class="text-warning small">\u9650\u6d41\u4e2d\uff0c' +
+            '<span class="rl-cd">' +
+            ra +
+            "</span>s \u540e\u53ef\u91cd\u8bd5</td>",
+        );
+      }
+      function renderReady() {
+        html(
+          tr,
+          '<td colspan="6" class="text-secondary small">\u9650\u6d41\u7a7a\u95f2\u00b7' +
+            '<a href="#" data-retry>\u70b9\u51fb\u91cd\u8bd5</a></td>',
+        );
+        tr.querySelector("[data-retry]").addEventListener("click", function (ev) {
+          ev.preventDefault();
+          retry();
+        });
+      }
+      renderWaiting();
+      var iv = setInterval(function () {
+        var remain = Math.max(
+          0,
+          ra - Math.floor((Date.now() - startedAt) / 1000),
+        );
+        var cd = tr.querySelector(".rl-cd");
+        if (cd) cd.textContent = String(remain);
+        if (remain <= 0) {
+          clearInterval(iv);
+          renderReady();
+        }
+      }, 1000);
+      return;
+    }
+    // Non-429: original "重试" link behaviour.
     html(
       tbody,
-      '<tr><td colspan="6" class="text-secondary">错误：' +
+      '<tr><td colspan="6" class="text-secondary">\u9519\u8bef\uff1a' +
         esc(e.message) +
-        ' · <a href="#" data-retry>重试</a></td></tr>',
+        ' \u00b7 <a href="#" data-retry>\u91cd\u8bd5</a></td></tr>',
     );
     tbody.querySelector("[data-retry]").addEventListener("click", (ev) => {
       ev.preventDefault();
