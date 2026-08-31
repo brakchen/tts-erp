@@ -126,24 +126,109 @@ def test_manual_costs_page_v2_no_inline_event_handlers(api_client, readonly_key)
 
 
 def test_manual_costs_page_v2_uses_design_token_variables(api_client, readonly_key):
-    """No raw hex values in the page HTML — colors must come from CSS tokens.
+    """No raw hex values OUTSIDE the inline <style> block.
 
-    Design doc §2.3 enumerates 7 named hex tokens. The HTML shell may
-    not introduce one-off colors; everything renders via class hooks
-    that the CSS file resolves. We grep for stray `#` hex literals in
-    the HTML body (excluding the /static/ asset URLs).
+    Design doc §2.3 enumerates 7 named hex tokens. The inline <style>
+    block is allowed to define them (token declarations are the
+    legitimate source of hex), but element attributes, inline style="…"
+    attributes, and other non-CSS sites must NOT carry one-off colors.
+    Everything that needs to render a colour must reference a class
+    that resolves through :root { --accent: … } etc.
+    """
+    import re
+
+    r = api_client.get(
+        "/v2/pages/manual-costs",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    body = r.text
+    # Strip the inline <style>…</style> block before scanning — token
+    # declarations live there, that's fine.
+    stripped = re.sub(r"<style[\s\S]*?</style>", "", body)
+    # Also strip the <link rel="stylesheet" href="…"> reference itself
+    # (no hex inside but defensive).
+    stripped = re.sub(r'<link\s+rel="stylesheet"[^>]*>', "", stripped)
+    hex_colors = re.findall(r"#[0-9A-Fa-f]{6}\b", stripped)
+    assert not hex_colors, (
+        f"raw hex colors leaked into HTML outside <style>: {hex_colors}"
+    )
+
+
+def test_manual_costs_page_v2_signature_counter_present(api_client, readonly_key):
+    """The signature oversized queue counter element must render.
+
+    The .op-counter block (with id="op-counter", the .op-counter-num
+    span, and the .op-counter-label "待处理") is the page's primary
+    visual element. JS populates .op-counter-num with the pending
+    total on first API response.
     """
     r = api_client.get(
         "/v2/pages/manual-costs",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     body = r.text
-    # Cheap but effective: the page itself must not carry a color hex.
-    # CSS asset contents are not loaded here so we can't grep them.
-    import re
+    assert 'id="op-counter"' in body, "signature counter section missing"
+    assert 'id="op-counter-num"' in body, "signature counter num span missing"
+    assert "op-counter-label" in body, "counter label class missing"
+    assert "待处理" in body, "counter label text '待处理' missing"
+    # Industrial-console fingerprints in the inline <style>
+    assert "--paper:" in body, "paper token not declared"
+    assert "--accent:" in body, "accent token not declared"
+    assert "--mono:" in body, "monospace font stack not declared"
+    # Border-radius zero is part of the aesthetic (no rounded corners)
+    assert "border-radius: 0" in body, "expected flat (zero radius) design"
 
-    hex_colors = re.findall(r"#[0-9A-Fa-f]{6}\b", body)
-    assert not hex_colors, f"raw hex colors leaked into HTML: {hex_colors}"
+
+def test_console_js_uses_redesign_class_names():
+    """console.js row HTML must use the op-* class hooks from the redesign.
+
+    Regression guard so the next refactor doesn't regress the page to
+    raw Bootstrap classes (which the CSS no longer styles).
+    """
+    from pathlib import Path
+
+    js = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "console.js"
+    )
+    src = js.read_text(encoding="utf-8")
+    for cls in (
+        "op-td-sku",
+        "op-td-cost",
+        "op-input-cost",
+        "op-select-currency",
+        "op-dropzone",
+        "op-btn-primary",
+        "op-loading",
+    ):
+        assert cls in src, f"console.js missing class hook: {cls!r}"
+
+
+def test_console_js_populates_signature_counter():
+    """console.js loadPending must populate #op-counter-num on success.
+
+    The signature counter is purely JS-driven — without the population
+    step the page would render '·' forever.
+    """
+    from pathlib import Path
+
+    js = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "console.js"
+    )
+    src = js.read_text(encoding="utf-8")
+    assert '"#op-counter-num"' in src or "#op-counter-num" in src, (
+        "console.js does not target #op-counter-num"
+    )
+    assert 'data-state' in src and '"ready"' in src, (
+        "console.js does not flip counter data-state to ready on success"
+    )
 
 
 def test_manual_costs_page_v2_self_hosted_font_hint(api_client, readonly_key):

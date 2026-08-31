@@ -20,11 +20,12 @@
   // Same-origin path prefix only ("" or "/tts"); anything else isn't ours.
   if (!/^\/[a-z0-9/_-]*$/i.test(PREFIX)) PREFIX = "";
 
-  // Bootstrap text classes for per-row status feedback.
+  // Per-row status colour tokens (resolved against the CSS palette).
   var STATUS_CLASSES = {
-    "is-ok": "text-success",
-    "is-err": "text-danger",
-    "is-saving": "text-secondary",
+    "is-ok": "is-ok",
+    "is-err": "is-err",
+    "is-saving": "is-saving",
+    "is-rate-limit": "is-rate-limit",
   };
 
   // ---------- small helpers ----------
@@ -204,10 +205,10 @@
 
   function setActiveTab(name) {
     currentTab = name;
-    $$(".tab").forEach((btn) => {
+    $$(".op-tab").forEach((btn) => {
       var isActive = btn.getAttribute("data-tab") === name;
       btn.setAttribute("aria-selected", isActive ? "true" : "false");
-      btn.classList.toggle("active", isActive); // Bootstrap .nav-link.active
+      btn.classList.toggle("op-tab-active", isActive);
     });
     refreshActiveTab();
   }
@@ -219,17 +220,10 @@
 
   // ---------- shared row rendering bits ----------
   function loadingRow() {
-    return (
-      '<tr><td colspan="6" class="placeholder-glow mb-0">' +
-      '<span class="placeholder col-12"></span></td></tr>'
-    );
+    return '<tr><td colspan="6" class="op-loading">加载中…</td></tr>';
   }
   function emptyRow(text) {
-    return (
-      '<tr><td colspan="6" class="text-center text-secondary py-5 fst-italic">' +
-      text +
-      "</td></tr>"
-    );
+    return '<tr><td colspan="6" class="op-empty">' + text + "</td></tr>";
   }
   function errorRow(e, retry) {
     var tbody = $("#grid-rows");
@@ -246,7 +240,7 @@
       function renderWaiting() {
         html(
           tr,
-          '<td colspan="6" class="text-warning small">\u9650\u6d41\u4e2d\uff0c' +
+          '<td colspan="6" class="op-loading is-rate-limit">\u9650\u6d41\u4e2d\uff0c' +
             '<span class="rl-cd">' +
             ra +
             "</span>s \u540e\u53ef\u91cd\u8bd5</td>",
@@ -281,7 +275,7 @@
     // Non-429: original "重试" link behaviour.
     html(
       tbody,
-      '<tr><td colspan="6" class="text-secondary">\u9519\u8bef\uff1a' +
+      '<tr><td colspan="6" class="op-error">\u9519\u8bef\uff1a' +
         esc(e.message) +
         ' \u00b7 <a href="#" data-retry>\u91cd\u8bd5</a></td></tr>',
     );
@@ -326,6 +320,17 @@
             ? payload.total_missing_photo
             : items.length;
         setBadge("badge-pending", total);
+        // Signature counter: the oversized mono number at the top
+        // of the page. Always reflects the pending queue total —
+        // stable across tab switches so the operator's KPI
+        // doesn't flicker when they click between 待处理 / 最近提交.
+        var counter = $("#op-counter");
+        var num = $("#op-counter-num");
+        if (num) num.textContent = String(total);
+        if (counter) {
+          counter.setAttribute("data-state", "ready");
+          counter.setAttribute("aria-busy", "false");
+        }
       })
       .catch(function (e) {
         errorRow(e, loadPending);
@@ -346,34 +351,35 @@
       tr.dataset.acct = String(getActiveAccountId() || "");
       html(
         tr,
-        '<td class="font-monospace small" data-label="SKU">' +
+        '<td class="op-td-sku" data-label="SKU" title="' +
+          esc(it.external_product_id || "") +
+          '">' +
           esc(it.external_product_id || "—") +
           "</td>" +
-          '<td data-label="标题">' +
+          '<td class="op-td-title" data-label="标题">' +
           esc(it.title || "") +
           "</td>" +
-          '<td class="text-end" data-label="单位成本">' +
-          '<div class="d-inline-flex align-items-center gap-2">' +
-          '<input type="number" class="form-control form-control-sm font-monospace text-end" style="width: 110px" step="0.0001" min="0.0001" data-k="unit_cost" placeholder="0.0000">' +
-          '<select class="form-select form-select-sm w-auto font-monospace" data-k="currency">' +
+          '<td class="op-td-cost" data-label="单位成本">' +
+          '<span class="op-cost-input">' +
+          '<input type="number" class="op-input-cost" step="0.0001" min="0.0001" data-k="unit_cost" placeholder="0.0000" aria-label="单位成本">' +
+          '<select class="op-select-currency" data-k="currency" aria-label="货币">' +
           "<option>USD</option><option>CNY</option><option selected>VND</option><option>EUR</option>" +
           "</select>" +
-          "</div>" +
+          "</span>" +
           "</td>" +
           '<td data-label="备注">' +
-          '<input type="text" class="form-control form-control-sm" data-k="note" maxlength="500" placeholder="（可选）">' +
+          '<input type="text" class="op-input-note" data-k="note" maxlength="500" placeholder="（可选）" aria-label="备注">' +
           "</td>" +
           '<td data-label="图片">' +
-          '<label class="d-inline-block border rounded px-3 py-2 text-secondary small" style="border-style: dashed; cursor: pointer; min-width: 180px" data-act="dropzone">' +
-          '📷 拖入或点击选择<input type="file" accept="image/*" class="d-none">' +
+          '<label class="op-dropzone" data-act="dropzone">' +
+          "📷 拖入或点击选择" +
+          '<input type="file" accept="image/*" class="d-none">' +
           "</label>" +
-          '<div class="d-flex gap-2 flex-wrap mt-2" data-gallery></div>' +
+          '<div class="op-gallery" data-gallery></div>' +
           "</td>" +
-          '<td data-label="操作">' +
-          '<div class="d-inline-flex align-items-center gap-2">' +
-          '<button class="btn btn-sm btn-primary" data-act="submit">提交</button>' +
-          '<span class="row-status small font-monospace"></span>' +
-          "</div>" +
+          '<td class="op-td-action" data-label="操作">' +
+          '<button class="op-btn-primary" data-act="submit">提交</button>' +
+          '<span class="row-status"></span>' +
           "</td>",
       );
       var drop = tr.querySelector('[data-act="dropzone"]');
@@ -390,14 +396,14 @@
       });
       drop.addEventListener("dragover", function (ev) {
         ev.preventDefault();
-        drop.classList.add("border-danger", "text-danger");
+        drop.classList.add("is-drag");
       });
       drop.addEventListener("dragleave", function () {
-        drop.classList.remove("border-danger", "text-danger");
+        drop.classList.remove("is-drag");
       });
       drop.addEventListener("drop", function (ev) {
         ev.preventDefault();
-        drop.classList.remove("border-danger", "text-danger");
+        drop.classList.remove("is-drag");
         var f =
           ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
         if (f) {
@@ -422,10 +428,10 @@
         .then(function (list) {
           (list || []).slice(0, 4).forEach(function (im) {
             var img = document.createElement("img");
-            img.className = "img-thumbnail";
-            img.style.width = "48px";
-            img.style.height = "48px";
-            img.style.objectFit = "cover";
+            img.alt = esc(im.filename || "");
+            img.title = esc(im.filename || "") + " · " + fmtBytes(im.size_bytes);
+            img.src = im.url;
+            // Width/height/object-fit handled by .op-gallery img in CSS
             img.src = im.url;
             img.alt = esc(im.filename || "");
             img.title =
@@ -573,22 +579,22 @@
       var tr = document.createElement("tr");
       html(
         tr,
-        '<td class="font-monospace small" data-label="时间">' +
+        '<td class="op-td-sku" data-label="时间">' +
           esc(fmtDate(it.calculated_at)) +
           "</td>" +
-          '<td class="font-monospace small" data-label="渠道商品">' +
+          '<td class="op-td-sku" data-label="渠道商品">' +
           esc(it.channel_product_id) +
           "</td>" +
           '<td data-label="成本方法">' +
           esc(it.cost_method || "—") +
           "</td>" +
-          '<td class="font-monospace small text-end" data-label="单位成本">' +
+          '<td class="op-td-cost" data-label="单位成本">' +
           esc(it.unit_cost) +
           "</td>" +
-          '<td class="font-monospace small" data-label="货币">' +
+          '<td class="op-td-sku" data-label="货币">' +
           esc(it.currency || "—") +
           "</td>" +
-          '<td class="font-monospace small" data-label="版本">v' +
+          '<td class="op-td-sku" data-label="版本">v' +
           esc(it.calculation_version || 1) +
           "</td>",
       );
@@ -602,8 +608,7 @@
     var s = tr.querySelector(".row-status");
     if (!s) return;
     s.textContent = text;
-    s.className =
-      "row-status small font-monospace " + (STATUS_CLASSES[cls] || "");
+    s.className = "row-status " + (STATUS_CLASSES[cls] || "");
   }
 
   // Client-side row filter for the search box (matches SKU / title text).
