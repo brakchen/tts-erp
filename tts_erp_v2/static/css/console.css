@@ -4,6 +4,31 @@
    Type families: IBM Plex Serif / IBM Plex Sans / JetBrains Mono.
    Self-hosted under /static/fonts/ — no Google Fonts CDN leak. */
 
+/* ---------- self-hosted fonts (SIL OFL, see fonts/NOTICE.md) ----------
+   Plex Sans + JetBrains Mono are variable files — declare the full wght
+   range so weight 400/500/600 all resolve from one download. */
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: swap;
+  src: url("/static/fonts/ibm-plex-sans-var.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Serif";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/static/fonts/ibm-plex-serif-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("/static/fonts/jetbrains-mono-var.woff2") format("woff2");
+}
+
 /* ---------- design tokens ---------- */
 :root {
   --ink:        #1B1F23;

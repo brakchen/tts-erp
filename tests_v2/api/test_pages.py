@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import pytest
 
-
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
 
@@ -35,6 +34,33 @@ def test_manual_costs_page_returns_200_with_html(api_client, readonly_key):
     # Token-paste UI must stay gone.
     assert "API token" not in body
     assert "mc_token" not in body
+
+
+def test_self_hosted_fonts_exist_and_are_wired():
+    """console.css declares @font-face for every woff2 under static/fonts.
+
+    Regression guard (2026-08-31): the redesign shipped referencing IBM Plex /
+    JetBrains Mono with NO font files and NO @font-face — everything fell
+    back to system fonts and the page lost its entire typographic identity.
+    """
+    import re
+    from pathlib import Path
+
+    static = Path(__file__).resolve().parents[2] / "tts_erp_v2" / "static"
+    css = (static / "css" / "console.css").read_text(encoding="utf-8")
+    font_files = sorted(p.name for p in (static / "fonts").glob("*.woff2"))
+    # All three design-token families must be present.
+    assert any("plex-sans" in f for f in font_files), font_files
+    assert any("plex-serif" in f for f in font_files), font_files
+    assert any("jetbrains-mono" in f for f in font_files), font_files
+    # Every woff2 on disk must be referenced by an @font-face src URL,
+    # and every src URL must resolve to a real, non-trivial file.
+    srcs = re.findall(r'url\("(/static/fonts/[^"]+\.woff2)"\)', css)
+    assert srcs, "no @font-face src urls found in console.css"
+    referenced = {s.rsplit("/", 1)[-1] for s in srcs}
+    assert referenced == set(font_files), (referenced, font_files)
+    for name in font_files:
+        assert (static / "fonts" / name).stat().st_size > 10_000, name
 
 
 def test_manual_costs_page_requires_some_auth(api_client):
