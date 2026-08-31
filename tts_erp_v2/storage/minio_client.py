@@ -12,12 +12,40 @@ from __future__ import annotations
 import logging
 import os
 import re
+import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlparse, urlunparse
 
 from minio import Minio
 from minio.error import S3Error
+
+# 2026-09-01: warn at startup when MINIO_ENDPOINT looks LAN-only but
+# MINIO_PUBLIC_HOST is unset — otherwise the browser receives a
+# presigned URL pointing at 127.0.0.1 / a private IP and silently
+# fails to upload. Tuple covers loopback + RFC1918 ranges.
+_LAN_PREFIXES = (
+    "127.",
+    "localhost",
+    "10.",
+    "192.168.",
+    "172.16.",
+    "172.17.",
+    "172.18.",
+    "172.19.",
+    "172.20.",
+    "172.21.",
+    "172.22.",
+    "172.23.",
+    "172.24.",
+    "172.25.",
+    "172.26.",
+    "172.27.",
+    "172.28.",
+    "172.29.",
+    "172.30.",
+    "172.31.",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +164,24 @@ def _read_config() -> _Config:
         )
     base = os.environ.get("MINIO_PUBLIC_BASE_URL", "").strip()
     public_host = os.environ.get("MINIO_PUBLIC_HOST", "").strip() or None
+    # 2026-09-01: warn at startup when the SDK endpoint looks LAN-only
+    # (127.0.0.1, localhost, or a private RFC1918 IP) but no public
+    # host is configured. The browser receives a presigned URL
+    # pointing at the LAN endpoint and silently fails the upload.
+    # This is the failure mode the user hit via daqiang.nat100.top
+    # where MINIO_PUBLIC_HOST was empty and the URL kept its
+    # 127.0.0.1:9000 host (unreachable from the browser).
+    if public_host is None and required["MINIO_ENDPOINT"]:
+        ep = required["MINIO_ENDPOINT"].lower()
+        if ep.startswith(_LAN_PREFIXES):
+            sys.stderr.write(
+                "[minio] MINIO_ENDPOINT looks LAN-only ("
+                f"{required['MINIO_ENDPOINT']!r}) but MINIO_PUBLIC_HOST "
+                "is unset. Presigned URLs the browser receives will "
+                "point at the LAN address and fail. Set MINIO_PUBLIC_HOST "
+                "to the public URL the browser can reach "
+                "(e.g. https://daqiang.nat100.top/tts).\n"
+            )
     return _Config(
         endpoint=required["MINIO_ENDPOINT"],
         access_key=required["MINIO_ACCESS_KEY"],
