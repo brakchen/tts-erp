@@ -5,6 +5,8 @@ These cover:
   * Mock-shop filter.
   * iter_batches behavior.
   * DryRunSink accumulation.
+  * Production-migration kill-switch
+    (``is_prod_migration_allowed`` / ``require_prod_guard``)
 
 They run without any DB connection so they exercise edge cases safely.
 """
@@ -16,14 +18,16 @@ import pytest
 
 from scripts.migrate_v1_to_v2.common import (
     MOCK_SHOP_ID,
+    PROD_GUARD_ENV,
     DryRunSink,
     epoch_ms_to_utc,
     epoch_seconds_to_utc,
     gmt8_string_to_utc,
+    is_prod_migration_allowed,
     is_real_shop_id,
     iter_batches,
+    require_prod_guard,
 )
-
 
 pytestmark = [pytest.mark.domain_migration, pytest.mark.layer_integration, pytest.mark.slow]
 
@@ -240,3 +244,99 @@ class TestDryRunSink:
         # Empty report should still be well-formed.
         out = sink.report()
         assert "DRY-RUN PLAN:" in out
+
+
+# ─── prod migration kill-switch ────────────────────────────────────
+#
+# These tests verify the 2026-08-30 incident guard:
+# ``is_prod_migration_allowed`` / ``require_prod_guard`` together refuse
+# to write to the production DB unless ``TTS_ERP_ALLOW_PROD_MIGRATION=1``
+# is set in the environment. They use ``monkeypatch.setenv`` /
+# ``monkeypatch.delenv`` so they're hermetic and don't depend on the
+# actual process env. Each test restores the previous state automatically
+# (monkeypatch fixture lifecycle).
+
+
+class TestIsProdMigrationAllowed:
+    """is_prod_migration_allowed: env var → bool predicate."""
+
+    def test_unset_returns_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv(PROD_GUARD_ENV, raising=False)
+        assert is_prod_migration_allowed() is False
+
+    def test_set_to_one_returns_true(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv(PROD_GUARD_ENV, "1")
+        assert is_prod_migration_allowed() is True
+
+    def test_set_to_empty_string_returns_false(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Empty string is unset-equivalent. Belt-and-braces against
+        # ``export TTS_ERP_ALLOW_PROD_MIGRATION=``.
+        monkeypatch.setenv(PROD_GUARD_ENV, "")
+        assert is_prod_migration_allowed() is False
+
+    def test_set_to_truthy_non_one_returns_false(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Shell truthiness ("true", "yes", "on") is NOT accepted — the
+        # explicit "1" literal avoids accidental opt-in via accidental
+        # shell truthiness. This is the security-critical property.
+        for value in ("true", "True", "TRUE", "yes", "on", "0", "2", " "):
+            monkeypatch.setenv(PROD_GUARD_ENV, value)
+            assert is_prod_migration_allowed() is False, (
+                f"value {value!r} should NOT enable prod migrations"
+            )
+
+
+class TestRequireProdGuard:
+    """require_prod_guard: refuse non-dry-run writes without the env var."""
+
+    def test_dry_run_skips_check(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Even with the env var unset, dry_run=True must be a no-op
+        # (it doesn't write, so the kill-switch doesn't apply).
+        monkeypatch.delenv(PROD_GUARD_ENV, raising=False)
+        # No SystemExit raised.
+        require_prod_guard(dry_run=True, action="dry-run test")
+
+    def test_real_run_with_env_var_succeeds(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv(PROD_GUARD_ENV, "1")
+        # No SystemExit raised.
+        require_prod_guard(dry_run=False, action="real-run with opt-in")
+
+    def test_real_run_without_env_var_exits_2(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+    ) -> None:
+        monkeypatch.delenv(PROD_GUARD_ENV, raising=False)
+        with pytest.raises(SystemExit) as excinfo:
+            require_prod_guard(
+                dry_run=False, action="migrate_shops.run() against prod",
+            )
+        # Exit code 2 distinguishes the kill-switch refusal from per-script
+        # error codes (0 / 1).
+        assert excinfo.value.code == 2
+        # The reason is printed to stderr so the operator sees what to fix.
+        captured = capsys.readouterr()
+        assert "REFUSED" in captured.err
+        assert "TTS_ERP_ALLOW_PROD_MIGRATION=1" in captured.err
+        assert "migrate_shops.run()" in captured.err
+
+    def test_real_run_with_truthy_non_one_exits_2(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # "yes" / "true" / etc. must NOT enable the guard — the explicit
+        # "1" literal is the only valid opt-in. This is the property the
+        # test above documents; this test pins it at the function level.
+        for value in ("true", "yes", "on", "0"):
+            monkeypatch.setenv(PROD_GUARD_ENV, value)
+            with pytest.raises(SystemExit) as excinfo:
+                require_prod_guard(dry_run=False, action="real-run")
+            assert excinfo.value.code == 2, (
+                f"value {value!r} must NOT bypass the guard"
+            )

@@ -135,6 +135,33 @@ If you want to call `pytest` directly:
   (CLI `-m` overrides addopts) or `scripts/test.sh all` / `migration`.
   Delete the dir together with `scripts/migrate_v1_to_v2/` when the
   rollback observation window closes (~2026-09-26).
+- **Migration tests require an explicit opt-in env var (2026-08-31).**
+  Even with `-m domain_migration`, the entire `tests_v2/migration/`
+  directory is skipped unless `TTS_ERP_ALLOW_PROD_MIGRATION=1` is set in
+  the environment. The check is enforced at three layers:
+
+    1. **Module-level skip** in `tests_v2/migration/conftest.py` —
+       `pytest.skip(allow_module_level=True)` blocks collection of any
+       test in the directory unless the env var is set.
+    2. **Session-scoped fixture** (`_ensure_migrations_applied`) —
+       re-checks the env var at the top of the fixture as
+       defense-in-depth (so a future regression that removes the
+       module-level skip still leaves the fixture gated).
+    3. **Per-script guard** — every `run(dry_run=False)` in
+       `scripts/migrate_v1_to_v2/migrate_*.py` and
+       `re_encrypt_credentials.main()` calls
+       `scripts.migrate_v1_to_v2.common.require_prod_guard(dry_run=False)`,
+       which raises `SystemExit(2)` if the env var is unset. dry_run
+       paths skip the check.
+
+  The SQL itself is also locked down: `migrate_shops._UPSERT_CREDENTIAL`
+  no longer overwrites `ciphertext` / `company_secret_ciphertext` on
+  `ON CONFLICT DO UPDATE` (only the initial INSERT writes them). See
+  `tests_v2/migration/test_migrate_shops.py::TestUpsertCredentialSql`
+  for the string-level assertion. This closes the loop on the 2026-08-30
+  incident where an autouse test fixture overwrote the v2 JSON-envelope
+  `integration.credentials.ciphertext` with the legacy
+  `Fernet(raw_access_token)` format and broke the sync worker for ~22h.
 
 ## Mapping files to domains
 

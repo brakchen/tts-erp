@@ -51,6 +51,7 @@ from sqlalchemy import select
 # Make the repo importable from a script run at repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+from scripts.migrate_v1_to_v2.common import require_prod_guard
 from tts_erp_v2.db.base import get_engine, get_session_factory  # noqa: E402
 from tts_erp_v2.db.models.integration import Credentials  # noqa: E402
 from tts_erp_v2.proxy.token_service import (  # noqa: E402
@@ -162,6 +163,11 @@ def _rebuild(shop_id: str) -> tuple[str, int]:
 
 
 def main() -> int:
+    # 2026-08-30 incident guard: this script always rewrites ciphertext
+    # in place (no dry_run mode), so it requires explicit opt-in via the
+    # kill-switch. We pass dry_run=False so the guard refuses on missing
+    # env var — there's no safe path that writes to the prod DB.
+    require_prod_guard(dry_run=False, action="re_encrypt_credentials.main()")
     _load_env()
     if not os.environ.get("OAUTH_DB_URL"):
         print("OAUTH_DB_URL not set in .env — abort", file=sys.stderr)

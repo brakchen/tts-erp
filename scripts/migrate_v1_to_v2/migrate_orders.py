@@ -53,6 +53,7 @@ from scripts.migrate_v1_to_v2.common import (
     epoch_seconds_to_utc,
     get_source_engine,
     get_target_engine,
+    require_prod_guard,
 )
 
 
@@ -232,6 +233,9 @@ _CLEAR_MIGRATE_ISSUES = (
 
 def run(dry_run: bool = False, batch_size: int = 500,
         verbose: bool = True) -> MigrationStats:
+    # 2026-08-30 incident guard: refuse to write to prod unless the
+    # kill-switch is set. dry_run=True skips the check.
+    require_prod_guard(dry_run, action="migrate_orders.run()")
     stats = MigrationStats()
     sink = DryRunSink()
     source = get_source_engine()

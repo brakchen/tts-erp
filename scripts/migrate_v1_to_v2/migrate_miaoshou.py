@@ -68,6 +68,7 @@ from scripts.migrate_v1_to_v2.common import (
     get_source_engine,
     get_target_engine,
     gmt8_string_to_utc,
+    require_prod_guard,
 )
 
 
@@ -194,6 +195,9 @@ _CLEAR_PRIOR_EVIDENCE = (
 
 def run(dry_run: bool = False, batch_size: int = 500,
         verbose: bool = True) -> MigrationStats:
+    # 2026-08-30 incident guard: refuse to write to prod unless the
+    # kill-switch is set. dry_run=True skips the check.
+    require_prod_guard(dry_run, action="migrate_miaoshou.run()")
     _ = batch_size
     stats = MigrationStats()
     sink = DryRunSink()

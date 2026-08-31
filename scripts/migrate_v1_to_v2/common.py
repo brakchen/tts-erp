@@ -1,15 +1,17 @@
 """Shared helpers for v1 → v2 migration scripts.
 
-Three concerns live here:
+Four concerns live here:
   1. Time conversion (epoch seconds, epoch milliseconds, GMT+8 text)
   2. Database connection helpers (source DB, target DB, oauth DB)
   3. Batching + dry-run reporting utilities
+  4. Production-migration kill-switch (``TTS_ERP_ALLOW_PROD_MIGRATION``)
 
 Anything script-specific stays in its own ``migrate_*.py`` module.
 """
 from __future__ import annotations
 
 import os
+import sys
 import urllib.parse
 from collections.abc import Iterable, Iterator
 from datetime import datetime, timedelta, timezone
@@ -18,8 +20,8 @@ from typing import Any
 
 import psycopg
 from sqlalchemy import create_engine
-from sqlalchemy.pool import NullPool
 from sqlalchemy.engine import Engine
+from sqlalchemy.pool import NullPool
 
 # Best-effort load of .env so the scripts work when invoked directly
 # (without going through ``tts_erp_v2.db.base`` / tests_v2 conftest).
@@ -49,6 +51,66 @@ def is_real_shop_id(shop_id: str | None) -> bool:
     rejected — those would violate NOT NULL constraints downstream.
     """
     return bool(shop_id) and shop_id != MOCK_SHOP_ID
+
+
+# ─── prod migration kill-switch ──────────────────────────────────────
+#
+# 2026-08-30 incident: ``tests_v2/migration/conftest._ensure_migrations_applied``
+# used to be ``autouse=True``, so any pytest run under ``tests_v2/`` replayed
+# ``migrate_shops.run(dry_run=False)`` against the PRODUCTION database and
+# overwrote ``integration.credentials.ciphertext`` with the legacy
+# (non-JSON-envelope) format. ``load_credentials()`` then started throwing
+# ``json.decoder.JSONDecodeError`` in the sync worker; full sync outage
+# for ~22 hours.
+#
+# The fixture was made opt-in afterwards, but the scripts themselves had
+# no second line of defense — a future ``autouse=True`` regression or a
+# stray ``scripts/test.sh migration`` invocation could replay the same
+# disaster. This guard closes that loop: every ``run(dry_run=False)`` and
+# ``re_encrypt_credentials.main()`` refuses to write to the prod DB unless
+# the operator explicitly sets the env var.
+
+PROD_GUARD_ENV = "TTS_ERP_ALLOW_PROD_MIGRATION"
+
+
+def is_prod_migration_allowed() -> bool:
+    """Return True iff the prod-migration kill-switch is set.
+
+    True only when ``$TTS_ERP_ALLOW_PROD_MIGRATION == "1"``. Any other
+    value (unset, empty string, ``"true"``, ``"yes"``, ``"0"``) is
+    treated as NOT allowed — the explicit ``"1"`` literal avoids
+    accidental opt-in via shell truthiness.
+    """
+    return os.environ.get(PROD_GUARD_ENV) == "1"
+
+
+def require_prod_guard(dry_run: bool, *, action: str) -> None:
+    """Refuse to write to the production DB unless the kill-switch is set.
+
+    dry-run paths (``dry_run=True``) skip the check — they don't write.
+    Real runs require ``$TTS_ERP_ALLOW_PROD_MIGRATION == "1"``; otherwise
+    the function prints the refusal reason on stderr and raises
+    ``SystemExit(2)``. Exit code 2 keeps it distinguishable from the
+    per-script exit codes (0 / 1) and matches the convention used by
+    ``re_encrypt_credentials.main()``.
+    """
+    if dry_run:
+        return
+    if is_prod_migration_allowed():
+        return
+    print(
+        f"REFUSED: {action} would write to the production DB.\n"
+        f"  Set the env var to opt in: export {PROD_GUARD_ENV}=1\n"
+        f"  (dry_run=True does not require this gate.)\n"
+        f"  Background: 2026-08-30 incident — autouse test fixture "
+        f"overwrote\n"
+        f"  integration.credentials.ciphertext with the legacy format and "
+        f"broke\n"
+        f"  the sync worker. This guard requires explicit opt-in for "
+        f"every real run.",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
 
 
 # ─── time conversion ──────────────────────────────────────────────────

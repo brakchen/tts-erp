@@ -14,7 +14,6 @@ import pytest
 
 from scripts.migrate_v1_to_v2.common import MOCK_SHOP_ID
 
-
 pytestmark = [
     pytest.mark.domain_migration,
     pytest.mark.layer_integration,
@@ -128,3 +127,147 @@ def test_channel_account_links_to_credential() -> None:
     assert row[0] is not None, (
         "real shop's channel_account should be linked to a credentials row"
     )
+
+
+# ─── 2026-08-30 incident guard tests ───────────────────────────────
+#
+# These pin the SQL and the run() guard so a future regression cannot
+# re-introduce the legacy ciphertext overwrite. They are pure string /
+# function-level assertions (no DB) so they're cheap and safe to run.
+
+
+class TestUpsertCredentialSql:
+    """_UPSERT_CREDENTIAL must not overwrite ciphertext on conflict.
+
+    On 2026-08-30, the previous ``ON CONFLICT DO UPDATE SET ciphertext =
+    EXCLUDED.ciphertext, ...`` overwrote the v2 JSON-envelope ciphertext
+    with the legacy Fernet(raw_access_token) format during a test run,
+    breaking the sync worker. The VALUES clause still writes ciphertext
+    on the *initial* INSERT, but on conflict the existing bytes must be
+    preserved.
+    """
+
+    def test_ciphertext_not_in_update_clause(self) -> None:
+        from scripts.migrate_v1_to_v2.migrate_shops import _UPSERT_CREDENTIAL
+        # The UPDATE clause is everything after ``DO UPDATE SET`` and
+        # before ``RETURNING``. No form of ``ciphertext = ...`` may
+        # appear there — EXCLUDED.ciphertext is exactly the form that
+        # caused the incident.
+        upper = _UPSERT_CREDENTIAL.upper()
+        update_start = upper.index("DO UPDATE SET")
+        returning_idx = upper.index("RETURNING")
+        update_clause = upper[update_start:returning_idx]
+        assert "EXCLUDED.CIPHERTEXT" not in update_clause, (
+            "_UPSERT_CREDENTIAL must NOT overwrite ciphertext on conflict "
+            "— see 2026-08-30 incident."
+        )
+        # Also ensure no bare ``CIPHERTEXT = `` assignment is in the
+        # update clause (catches a future fix that uses the table name
+        # instead of EXCLUDED).
+        assert "CIPHERTEXT     =" not in update_clause, (
+            "_UPSERT_CREDENTIAL UPDATE clause must not assign ciphertext"
+        )
+
+    def test_company_secret_not_in_update_clause(self) -> None:
+        from scripts.migrate_v1_to_v2.migrate_shops import _UPSERT_CREDENTIAL
+        upper = _UPSERT_CREDENTIAL.upper()
+        update_start = upper.index("DO UPDATE SET")
+        returning_idx = upper.index("RETURNING")
+        update_clause = upper[update_start:returning_idx]
+        # Same property for company_secret_ciphertext — only the
+        # initial INSERT writes it.
+        assert "COMPANY_SECRET_CIPHERTEXT" not in update_clause, (
+            "_UPSERT_CREDENTIAL must NOT overwrite "
+            "company_secret_ciphertext on conflict."
+        )
+
+    def test_ciphertext_in_initial_insert(self) -> None:
+        # Sanity check: the VALUES clause DOES include ciphertext, so
+        # the first INSERT writes it. The fix only restricts the
+        # conflict path.
+        from scripts.migrate_v1_to_v2.migrate_shops import _UPSERT_CREDENTIAL
+        assert "%(CIPHERTEXT)S" in _UPSERT_CREDENTIAL.upper().replace(
+            " ", ""
+        ), "VALUES clause must still write ciphertext on initial INSERT"
+
+    def test_metadata_columns_still_updated(self) -> None:
+        # The fix only restricts ciphertext; account_label, expires_at,
+        # granted_scopes, extra, updated_at must still be updated.
+        from scripts.migrate_v1_to_v2.migrate_shops import _UPSERT_CREDENTIAL
+        upper = _UPSERT_CREDENTIAL.upper()
+        update_start = upper.index("DO UPDATE SET")
+        returning_idx = upper.index("RETURNING")
+        update_clause = upper[update_start:returning_idx]
+        for col in (
+            "ACCOUNT_LABEL", "EXPIRES_AT", "GRANTED_SCOPES", "EXTRA",
+            "UPDATED_AT",
+        ):
+            assert col in update_clause, (
+                f"metadata column {col} must still be refreshed on conflict"
+            )
+
+
+class TestMigrateShopsRunGuard:
+    """run(dry_run=False) must exit 2 without TTS_ERP_ALLOW_PROD_MIGRATION.
+
+    No DB is touched — the guard fires before any engine / connection is
+    even created (see require_prod_guard implementation). These tests
+    pin the contract so a future regression that removes the guard
+    call gets caught immediately.
+    """
+
+    def test_real_run_without_env_var_exits_2(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+    ) -> None:
+        # Belt-and-braces: also unset TTS_ERP_DB_URL so a regression
+        # that bypasses the guard would fail at engine construction
+        # with a clear error rather than silently write to a real DB.
+        monkeypatch.delenv("TTS_ERP_ALLOW_PROD_MIGRATION", raising=False)
+        monkeypatch.delenv("TTS_ERP_DB_URL", raising=False)
+        from scripts.migrate_v1_to_v2 import migrate_shops
+        with pytest.raises(SystemExit) as excinfo:
+            migrate_shops.run(dry_run=False, batch_size=10, verbose=False)
+        assert excinfo.value.code == 2
+        captured = capsys.readouterr()
+        assert "REFUSED" in captured.err
+        assert "TTS_ERP_ALLOW_PROD_MIGRATION=1" in captured.err
+
+    def test_real_run_with_env_var_proceeds_to_db(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # With the env var set AND TTS_ERP_DB_URL unset, the guard
+        # passes and the script tries to construct an engine — which
+        # then raises a clear error (not SystemExit 2). This proves
+        # the guard is the gating mechanism and not just an incidental
+        # env check somewhere downstream.
+        monkeypatch.setenv("TTS_ERP_ALLOW_PROD_MIGRATION", "1")
+        monkeypatch.delenv("TTS_ERP_DB_URL", raising=False)
+        from scripts.migrate_v1_to_v2 import migrate_shops
+        with pytest.raises(RuntimeError) as excinfo:
+            migrate_shops.run(dry_run=False, batch_size=10, verbose=False)
+        # The error must come from the engine layer (DB URL missing),
+        # NOT from SystemExit 2 (the guard).
+        assert "TTS_ERP_DB_URL" in str(excinfo.value) or "configured" in str(
+            excinfo.value,
+        ), (
+            f"expected DB URL error, got: {excinfo.value!r}"
+        )
+
+    def test_dry_run_does_not_require_env_var(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # dry_run=True must not trigger the guard. With TTS_ERP_DB_URL
+        # unset AND no env var, the guard passes and the script then
+        # tries to construct an engine — raising the DB URL error.
+        # We assert it's the DB error, not SystemExit 2.
+        monkeypatch.delenv("TTS_ERP_ALLOW_PROD_MIGRATION", raising=False)
+        monkeypatch.delenv("TTS_ERP_DB_URL", raising=False)
+        from scripts.migrate_v1_to_v2 import migrate_shops
+        with pytest.raises(RuntimeError) as excinfo:
+            migrate_shops.run(dry_run=True, batch_size=10, verbose=False)
+        assert "TTS_ERP_DB_URL" in str(excinfo.value) or "configured" in str(
+            excinfo.value,
+        ), (
+            f"dry_run should bypass guard and reach DB layer; got: "
+            f"{excinfo.value!r}"
+        )

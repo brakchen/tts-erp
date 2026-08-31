@@ -44,6 +44,7 @@ from scripts.migrate_v1_to_v2.common import (
     get_target_engine,
     is_real_shop_id,
     iter_batches,
+    require_prod_guard,
 )
 
 
@@ -130,6 +131,19 @@ _UPSERT_ACCOUNT = (
 )
 
 
+# SECURITY (2026-08-30): ``ciphertext`` and ``company_secret_ciphertext``
+# are intentionally EXCLUDED from the ON CONFLICT update list. Once the
+# v2 JSON-envelope format is stored, a re-migration must NEVER downgrade
+# the column back to the legacy ``Fernet(raw_access_token)`` format
+# from ``oauth_receiver.oauth_tokens``. See the incident: an autouse
+# test fixture replayed ``migrate_shops.run(dry_run=False)`` against the
+# prod DB and overwrote ``integration.credentials.ciphertext`` byte-
+# identically with the legacy 312-byte blob, breaking the sync worker
+# for ~22 hours. The VALUES clause above still writes ciphertext on the
+# *initial* INSERT; on CONFLICT (already-v2 row) we keep the existing
+# bytes and only refresh the metadata columns (account_label /
+# expires_at / scopes / extra). ``company_secret_ciphertext`` follows
+# the same rule.
 _UPSERT_CREDENTIAL = (
     "INSERT INTO integration.credentials "
     "    (provider, external_account_id, account_label, "
@@ -145,7 +159,6 @@ _UPSERT_CREDENTIAL = (
     "     COALESCE(%(updated_at)s, now())) "
     "ON CONFLICT (provider, external_account_id) DO UPDATE SET "
     "    account_label  = EXCLUDED.account_label, "
-    "    ciphertext     = EXCLUDED.ciphertext, "
     "    expires_at     = COALESCE(EXCLUDED.expires_at, "
     "                             integration.credentials.expires_at), "
     "    granted_scopes = EXCLUDED.granted_scopes, "
@@ -216,6 +229,9 @@ def _upsert_credential(
 
 def run(dry_run: bool = False, batch_size: int = 500,
         verbose: bool = True) -> MigrationStats:
+    # 2026-08-30 incident guard: refuse to write to prod unless the
+    # kill-switch is set. dry_run=True skips the check.
+    require_prod_guard(dry_run, action="migrate_shops.run()")
     stats = MigrationStats()
     sink = DryRunSink()
     source = get_source_engine()
