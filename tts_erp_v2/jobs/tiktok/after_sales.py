@@ -25,8 +25,8 @@ from tts_erp_v2.db.models import (
     RawRecord,
     SalesOrder,
     SalesOrderLine,
-    SyncIssue,
 )
+from tts_erp_v2.jobs.runner import record_sync_issue
 from tts_erp_v2.sync_worker.job_runner import JobResult
 
 JOB_NAME = "tiktok.after_sales"
@@ -69,6 +69,80 @@ def _to_decimal(v):
         return None
 
 
+def _parse_case_refund(raw_refund: Any) -> tuple[Decimal | None, str | None]:
+    """Extract (refund_amount, currency) from a case-level ``refund_amount`` blob.
+
+    TikTok cancellation payloads put ``refund_amount`` at the *case* level
+    (payload top-level key) with this shape::
+
+        {"amount": "686850", "currency": "VND"}           # older API shape
+        {"currency": "VND", "refund_total": "686850",     # newer API shape
+         "refund_tax": "...", "refund_subtotal": "...",
+         "refund_shipping_fee": "0"}
+
+    We accept either ``amount`` (the documented field) or ``refund_total``
+    (the production-observed field — TikTok is inconsistent) and pull
+    ``currency`` from the same dict. A non-dict input (string, None,
+    malformed list) yields (None, None) — callers handle that by leaving
+    the column NULL. Strict typing defends against bad payloads;
+    the audit (2026-08-31) saw a handful of cancel payloads where
+    upstream returned ``"refund_amount": "0"`` as a bare string.
+    """
+    if not isinstance(raw_refund, dict):
+        return None, None
+    amount_raw = raw_refund.get("amount") or raw_refund.get("refund_total")
+    currency = raw_refund.get("currency")
+    return _to_decimal(amount_raw), currency if isinstance(currency, str) else None
+
+
+def _resolve_case_line_key(raw_line: dict) -> tuple[str | None, str | None]:
+    """Resolve (external_case_line_id, sales_order_line_key) from a raw line.
+
+    Two return values:
+
+    * ``external_case_line_id`` — the case-side identifier we store on
+      ``after_sales.case_lines.external_case_line_id``. We prefer the
+      case-side id (``cancel_line_item_id`` / ``return_line_item_id``)
+      when present because it's unique per case and stable across
+      re-syncs of the same payload. Falls back to the same key the
+      order-side lookup uses.
+    * ``sales_order_line_key`` — the value we pass to the
+      ``sales_order_lines.external_line_id = ?`` lookup, OR ``None`` if
+      the only available identifier is a ``sku_id`` (which requires the
+      variant-snapshot path).
+
+    The resolution chain mirrors the audit's specification:
+
+      line_id → id → sku_id
+
+    …plus the production-observed ``order_line_item_id`` (which is
+    equivalent to ``line_id`` on the live TikTok API). When only
+    ``sku_id`` is set, ``sales_order_line_key`` is ``None`` and the
+    caller must resolve via ``external_variant_id_snapshot``.
+    """
+    case_side_id = (
+        raw_line.get("cancel_line_item_id")
+        or raw_line.get("return_line_item_id")
+    )
+    order_side_id = (
+        raw_line.get("order_line_item_id")
+        or raw_line.get("line_id")
+        or raw_line.get("id")
+    )
+    sku_id = raw_line.get("sku_id")
+
+    external_id = case_side_id or order_side_id or sku_id
+    if external_id is None:
+        return None, None
+    if order_side_id is not None:
+        # Order-side id resolves against sales_order_lines.external_line_id.
+        return str(external_id), str(order_side_id)
+    if sku_id is not None:
+        # sku-only path: caller must do the variant-snapshot lookup.
+        return str(external_id), None
+    return str(external_id), None
+
+
 def _walk_pages(proxy_call, *, endpoint: str, base_body: dict) -> list[dict]:
     collected: list[dict] = []
     next_token: str | None = None
@@ -102,6 +176,7 @@ def _parse_case(case_type: str, raw: dict) -> dict:
         or raw.get("related_order_id")
         or raw.get("order", {}).get("order_id")
     )
+    case_refund_amount, case_currency = _parse_case_refund(raw.get("refund_amount"))
     return {
         "case_type": case_type,
         "external_case_id": str(cid),
@@ -111,6 +186,8 @@ def _parse_case(case_type: str, raw: dict) -> dict:
         "reason_text": raw.get("reason_text"),
         "created_at_source": _epoch_seconds_to_utc(raw.get("create_time")),
         "updated_at_source": _epoch_seconds_to_utc(raw.get("update_time")),
+        "refund_amount": case_refund_amount,
+        "currency": case_currency,
     }
 
 
@@ -149,26 +226,27 @@ def _process_one_type(
             fields = _parse_case(case_type, raw)
         except ParseError as exc:
             failed += 1
-            session.add(
-                SyncIssue(
-                    job_name=JOB_NAME,
-                    issue_type="PARSE_ERROR",
-                    external_id=ext_case_id,
-                    details={"error": str(exc), "case_type": case_type},
-                )
+            record_sync_issue(
+                session,
+                job_name=JOB_NAME,
+                issue_type="PARSE_ERROR",
+                external_id=ext_case_id,
+                details={"error": str(exc), "case_type": case_type},
             )
             continue
 
         so_id = _resolve_sales_order_id(session, account_id, fields["external_order_id"])
         if so_id is None:
-            # V3 §14 — surface unknown order as a sync_issue, not silent drop
-            session.add(
-                SyncIssue(
-                    job_name=JOB_NAME,
-                    issue_type="UNKNOWN_ORDER",
-                    external_id=fields["external_case_id"],
-                    details={"external_order_id": fields["external_order_id"]},
-                )
+            # V3 §14 — surface unknown order as a sync_issue, not silent drop.
+            # ``record_sync_issue`` dedups on (job_name, issue_type,
+            # external_id, resolved_at IS NULL) so the same failing order
+            # does not accumulate a fresh row every 15-min tick.
+            record_sync_issue(
+                session,
+                job_name=JOB_NAME,
+                issue_type="UNKNOWN_ORDER",
+                external_id=fields["external_case_id"],
+                details={"external_order_id": fields["external_order_id"]},
             )
             failed += 1
             continue
@@ -205,49 +283,67 @@ def _process_one_type(
         for raw_line in (
             raw.get("return_line_items") or raw.get("cancel_line_items") or []
         ):
-            ext_line_id = raw_line.get("line_id") or raw_line.get("id")
-            if not ext_line_id:
-                session.add(
-                    SyncIssue(
-                        job_name=JOB_NAME,
-                        issue_type="PARSE_ERROR",
-                        external_id=f"{fields['external_case_id']}:<line>",
-                        details={"error": "line_id missing"},
-                    )
+            external_case_line_id, order_line_key = _resolve_case_line_key(raw_line)
+            if external_case_line_id is None:
+                # Truly nothing usable on the line. Should be rare now
+                # that we accept sku_id as a last resort, but guard anyway.
+                record_sync_issue(
+                    session,
+                    job_name=JOB_NAME,
+                    issue_type="PARSE_ERROR",
+                    external_id=f"{fields['external_case_id']}:<line>",
+                    details={"error": "line_id missing"},
                 )
                 continue
             line_values = {
                 "case_id": case_row.id,
-                "external_case_line_id": str(ext_line_id),
+                "external_case_line_id": external_case_line_id,
                 "quantity": _to_decimal(raw_line.get("quantity")),
                 "refund_amount": _to_decimal(
                     (raw_line.get("refund_amount") or {}).get("amount")
+                    or (raw_line.get("refund_amount") or {}).get("refund_total")
                 ),
                 "currency": (raw_line.get("refund_amount") or {}).get("currency"),
                 "should_replenish_stock": raw_line.get("restock"),
             }
             # Resolve sales_order_line_id (NOT NULL FK on case_lines).
-            # The line is keyed by (sales_order_id, external_line_id).
-            sol_id = session.execute(
-                select(SalesOrderLine.id).where(
-                    SalesOrderLine.sales_order_id == so_id,
-                    SalesOrderLine.external_line_id == str(ext_line_id),
-                )
-            ).scalar_one_or_none()
+            # Two paths depending on which id the payload surfaced:
+            #   1. order_line_key set → lookup sales_order_lines.external_line_id
+            #      = order_line_key AND sales_order_id = so_id
+            #   2. order_line_key is None → the only id we have is a
+            #      sku_id, so look up via external_variant_id_snapshot.
+            if order_line_key is not None:
+                sol_id = session.execute(
+                    select(SalesOrderLine.id).where(
+                        SalesOrderLine.sales_order_id == so_id,
+                        SalesOrderLine.external_line_id == order_line_key,
+                    )
+                ).scalar_one_or_none()
+                lookup_path = "external_line_id"
+                lookup_value = order_line_key
+            else:
+                sol_id = session.execute(
+                    select(SalesOrderLine.id).where(
+                        SalesOrderLine.sales_order_id == so_id,
+                        SalesOrderLine.external_variant_id_snapshot == raw_line.get("sku_id"),
+                    )
+                ).scalar_one_or_none()
+                lookup_path = "external_variant_id_snapshot"
+                lookup_value = raw_line.get("sku_id")
             if sol_id is None:
                 # The case's line references a sales_order_line that
                 # hasn't been synced yet — surface as a sync_issue and
                 # skip rather than crash the page.
-                session.add(
-                    SyncIssue(
-                        job_name=JOB_NAME,
-                        issue_type="UNKNOWN_LINE",
-                        external_id=f"{fields['external_case_id']}:{ext_line_id}",
-                        details={
-                            "sales_order_id": so_id,
-                            "external_line_id": str(ext_line_id),
-                        },
-                    )
+                record_sync_issue(
+                    session,
+                    job_name=JOB_NAME,
+                    issue_type="UNKNOWN_LINE",
+                    external_id=f"{fields['external_case_id']}:{external_case_line_id}",
+                    details={
+                        "sales_order_id": so_id,
+                        "lookup_path": lookup_path,
+                        "lookup_value": str(lookup_value) if lookup_value is not None else None,
+                    },
                 )
                 continue
             line_values["sales_order_line_id"] = sol_id
