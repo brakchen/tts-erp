@@ -40,7 +40,8 @@ from collections.abc import Callable
 
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.proxy.token_service import load_credentials
+from tts_erp_v2.proxy.errors import AuthenticationError
+from tts_erp_v2.proxy.token_service import load_credentials, refresh_if_needed
 from tts_erp_v2.proxy.tts_shop.client import (
     DEFAULT_API_HOST,
     TiktokShopClient,
@@ -93,6 +94,74 @@ def _resolve_app_credentials() -> tuple[str, str, str]:
 _CLIENT_CACHE: dict[str, TiktokShopClient] = {}
 
 
+def _reactive_refresh(session: Session, shop_id: str):
+    """Call :func:`refresh_if_needed` to rotate the shop's TikTok token.
+
+    Used by :func:`proxy_call` when the upstream returns
+    401/AuthenticationError. The refresher reads the current
+    ``refresh_token`` from the encrypted credentials row, calls the
+    TikTok refresh endpoint, and writes the new ciphertext back. Any
+    failure here surfaces as the original :class:`AuthenticationError`
+    so the caller's ``sync_jobs`` row is marked 'failed' with the
+    correct root cause.
+
+    Returns the post-refresh :class:`CredentialsView` so the caller
+    can use the freshly-rotated tokens without re-querying the DB
+    (saves one round-trip; also keeps the reactive path resilient
+    against transaction visibility if refresh was committed in a
+    nested SAVEPOINT).
+
+    Args:
+        session: open SQLAlchemy session (NOT closed by this helper).
+        shop_id: TikTok ``external_account_id`` to refresh.
+
+    Raises:
+        AuthenticationError: when the refresh itself fails
+            (translates to a re-raised ``AuthenticationError`` so the
+            job_runner's failure mode stays typed).
+    """
+    from tts_erp_v2.proxy.tiktok_auth import refresh_tiktok_token
+
+    current_rt = _current_refresh_token(session, shop_id)
+
+    def _refresher(_p: str, _eid: str) -> dict:
+        return refresh_tiktok_token(refresh_token=current_rt)
+
+    try:
+        view = refresh_if_needed(
+            session,
+            provider="tiktok",
+            external_account_id=shop_id,
+            refresher=_refresher,
+        )
+        return view
+    except Exception as e:  # noqa: BLE001
+        log.warning(
+            "reactive_refresh: refresh_if_needed failed for shop=%s: %s",
+            shop_id,
+            e,
+        )
+        # Re-raise as AuthenticationError so the proxy_call retry
+        # propagates a typed error (not a generic Exception) up to
+        # run_with_sync_job.
+        raise AuthenticationError(
+            f"reactive refresh failed for shop={shop_id!r}: {e}"
+        ) from e
+
+
+def _current_refresh_token(session: Session, shop_id: str) -> str:
+    """Read the *current* plaintext refresh_token from the encrypted row.
+
+    Used by the refresher lambda in :func:`_reactive_refresh` so the
+    lambda stays a tiny inline callable rather than a closure that
+    captures `session`.
+    """
+    view = load_credentials(session, "tiktok", shop_id)
+    if view is None or not view.refresh_token:
+        return ""
+    return view.refresh_token
+
+
 def _get_client(app_key: str, app_secret: str, api_host: str) -> TiktokShopClient:
     cached = _CLIENT_CACHE.get(app_key)
     if cached is not None:
@@ -128,39 +197,85 @@ def build_proxy_call(
 
         # AGENTS.md §2.3: shop_cipher is always in the query string.
         extra_params: dict[str, str] = {"shop_cipher": view.shop_cipher or ""}
-        # TikTok 202309: page_size / sort_* / page_token live in the
-        # QUERY STRING. Lift them out of the job-provided body; everything
-        # else (filters / ids) stays in the body.
-        request_body: dict[str, object] = {}
-        for key, value in (body or {}).items():
-            if key in QUERY_STRING_KEYS:
+        access_token = view.access_token
+
+        if method.upper() == "POST":
+            # TikTok 202309: page_size / sort_* / page_token live in the
+            # QUERY STRING. Lift them out of the job-provided body;
+            # everything else (filters / ids) stays in the body. POST
+            # body is JSON-serialised so only primitive dict values are
+            # safe to keep here.
+            request_body: dict[str, object] = {}
+            for key, value in (body or {}).items():
+                if key in QUERY_STRING_KEYS:
+                    query_key: str = key
+                    if key in _TOKEN_ALIAS:
+                        query_key = _TOKEN_ALIAS[key]
+                    extra_params[query_key] = str(value)
+                else:
+                    request_body[key] = value
+            try:
+                result = client.post(
+                    path=path,
+                    access_token=access_token,
+                    body=request_body or None,
+                    extra_params=extra_params,
+                )
+            except AuthenticationError:
+                # Reactive refresh on 401 — POST path. Same retry budget
+                # as GET (one attempt). Failure propagates as-is so the
+                # caller's run_with_sync_job marks the job 'failed'.
+                view = _reactive_refresh(session, shop_id)
+                if view is None:
+                    raise RuntimeError(
+                        f"reactive refresh returned no view for "
+                        f"provider=tiktok external_account_id={shop_id!r}"
+                    ) from None
+                extra_params["shop_cipher"] = view.shop_cipher or ""
+                result = client.post(
+                    path=path,
+                    access_token=view.access_token,
+                    body=request_body or None,
+                    extra_params=extra_params,
+                )
+            return result.payload
+
+        if method.upper() == "GET":
+            # GET — TikTok 202309 reads every parameter from the query
+            # string. Lift **all** body keys to the query (not just the
+            # pagination whitelist) so business filters like
+            # ``payment_id`` actually reach the upstream. This is the
+            # fix for the finance 24× duplication bug (2026-08-30).
+            for key, value in (body or {}).items():
                 query_key: str = key
                 if key in _TOKEN_ALIAS:
                     query_key = _TOKEN_ALIAS[key]
                 extra_params[query_key] = str(value)
-            else:
-                request_body[key] = value
-        access_token = view.access_token
+            try:
+                result = client.get(
+                    path=path,
+                    access_token=access_token,
+                    extra_params=extra_params,
+                )
+            except AuthenticationError:
+                view = _reactive_refresh(session, shop_id)
+                if view is None:
+                    raise RuntimeError(
+                        f"reactive refresh returned no view for "
+                        f"provider=tiktok external_account_id={shop_id!r}"
+                    ) from None
+                extra_params["shop_cipher"] = view.shop_cipher or ""
+                result = client.get(
+                    path=path,
+                    access_token=view.access_token,
+                    extra_params=extra_params,
+                )
+            return result.payload
 
-        if method.upper() == "POST":
-            result = client.post(
-                path=path,
-                access_token=access_token,
-                body=request_body or None,
-                extra_params=extra_params,
-            )
-        elif method.upper() == "GET":
-            result = client.get(
-                path=path,
-                access_token=access_token,
-                extra_params=extra_params,
-            )
-        else:
-            raise ValueError(
-                f"unsupported HTTP method for proxy_call: {method!r} "
-                f"(path={path!r}, shop_id={shop_id!r})"
-            )
-        return result.payload
+        raise ValueError(
+            f"unsupported HTTP method for proxy_call: {method!r} "
+            f"(path={path!r}, shop_id={shop_id!r})"
+        )
 
     return proxy_call
 

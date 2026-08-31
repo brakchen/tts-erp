@@ -27,7 +27,9 @@ import importlib
 import logging
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -204,11 +206,42 @@ def _run_token_refresh_job(
     spec: JobSpec,
     session_factory: sessionmaker[Session],
 ) -> None:
-    """Run ``token.refresh`` once. No per-shop fan-out."""
+    """Run ``token.refresh`` once. No per-shop fan-out.
+
+    Wires the production TikTok refresher registry into the job so the
+    no-op stub in :mod:`tts_erp_v2.jobs.token_refresh` is replaced by
+    a real HTTP call to ``/api/v2/token/refresh``. Miaoshou still
+    receives a no-op refresher (per AGENTS.md §10.2 — no v2 Miaoshou
+    refresh path).
+
+    Commit contract: the sync_jobs row written by
+    :func:`sync_token_refresh`'s ``run_job`` context manager MUST be
+    durable, so we explicitly ``commit()`` on the success path AND on
+    any exception path before the session is closed. Without the
+    explicit commit, the outer transaction is rolled back by the
+    session-close → integration.sync_jobs shows zero rows for
+    ``token.refresh`` (the production observation that drove this fix).
+    """
     mod = importlib.import_module(spec.module_path)
+    # Lazy import: avoid hard dependency when scheduler.py is imported
+    # just for the JOBS registry (e.g. ``list`` mode).
+    from tts_erp_v2.proxy.tiktok_auth import build_token_registry
+
+    registry = build_token_registry(session_factory=session_factory)
+
     session = session_factory()
     try:
-        result = mod.sync_token_refresh(session)
+        result = mod.sync_token_refresh(session, registry=registry)
+        # ``sync_token_refresh`` writes the sync_jobs row inside its
+        # ``run_job`` context manager but does NOT commit (the
+        # context manager is decorator-style; it expects the caller
+        # to own the transaction). Commit here so the bookkeeping
+        # row is durable even if APScheduler restarts immediately.
+        try:
+            session.commit()
+        except Exception:  # noqa: BLE001 — boundary
+            log.exception("[%s] commit() failed after successful run", spec.job_name)
+            session.rollback()
         log.info(
             "[%s] ok scanned=%d refreshed=%d skipped=%d failed=%d issues=%d",
             spec.job_name,
@@ -219,9 +252,15 @@ def _run_token_refresh_job(
             result.get("issues", 0),
         )
     except Exception:  # noqa: BLE001 — boundary
-        # ``sync_token_refresh`` wraps itself in ``run_job`` so the
-        # sync_jobs row is already marked 'failed' before this except
-        # fires. Log + swallow so APScheduler keeps firing the next tick.
+        # The exception fired BEFORE the sync_jobs row was committed
+        # (or DURING the commit). Roll back the inner transaction
+        # first, then write a sentinel 'failed' sync_jobs row in a
+        # NEW transaction so operators still see the tick happened.
+        try:
+            session.rollback()
+        except Exception:  # noqa: BLE001
+            log.exception("[%s] rollback during error path failed", spec.job_name)
+        _record_failed_tick(session_factory, spec, "tick raised")
         log.exception("[%s] tick failed", spec.job_name)
     finally:
         session.close()
@@ -234,6 +273,44 @@ def _enumerate_tiktok_shops_in_factory(
     session = session_factory()
     try:
         return _enumerate_tiktok_shops(session)
+    finally:
+        session.close()
+
+
+def _record_failed_tick(
+    session_factory: sessionmaker[Session],
+    spec: JobSpec,
+    reason: str,
+) -> None:
+    """Write a sentinel 'failed' sync_jobs row in a fresh transaction.
+
+    Used by :func:`_run_token_refresh_job`'s exception path when the
+    inner :func:`sync_token_refresh` raised before its own
+    ``run_job`` context manager could mark the row. Operators MUST be
+    able to see the tick happened even when the inner code crashed —
+    silent loss of bookkeeping is exactly the bug this whole
+    Lane-1 fix is meant to eliminate.
+    """
+    from tts_erp_v2.db.models.integration import SyncJob
+
+    session = session_factory()
+    try:
+        row = SyncJob(
+            job_name=spec.job_name,
+            status="failed",
+            started_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(timezone.utc),
+            error_message=reason[:2000],
+        )
+        session.add(row)
+        session.commit()
+    except Exception:  # noqa: BLE001
+        log.exception(
+            "[%s] could not write sentinel failed sync_jobs row",
+            spec.job_name,
+        )
+        with suppress(Exception):
+            session.rollback()
     finally:
         session.close()
 

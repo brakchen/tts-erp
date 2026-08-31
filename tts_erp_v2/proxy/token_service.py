@@ -31,6 +31,7 @@ operator-owned by oauth-receiver; tts-erp-v2 owns its own.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -44,6 +45,8 @@ from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models.integration import Credentials
 from tts_erp_v2.proxy.errors import DecryptionError, SigningError
+
+log = logging.getLogger("tts_erp_v2.proxy.token_service")
 
 # ---- Fernet singleton (lazy) ---------------------------------------
 
@@ -174,12 +177,27 @@ class CredentialsView:
             # and let the operator re-run the re-encrypt migration. The
             # missing refresh_token / shop_cipher will surface as
             # upstream 401 / invalid-sign rather than a hard process crash.
-            raise DecryptionError(
+            log.warning(
                 "credentials ciphertext is not a JSON envelope for "
-                f"{row.provider}:{row.external_account_id!r} — re-run "
-                "scripts/migrate_v1_to_v2/re_encrypt_credentials.py "
-                f"(decrypted {len(plaintext)} bytes, not JSON)"
-            ) from None
+                "%s:%r — degrading to bare access_token view; "
+                "re-run scripts/migrate_v1_to_v2/re_encrypt_credentials.py "
+                "to repair (decrypted %d bytes, not JSON)",
+                row.provider,
+                row.external_account_id,
+                len(plaintext),
+            )
+            return cls(
+                id=row.id,
+                provider=row.provider,
+                external_account_id=row.external_account_id,
+                account_label=row.account_label,
+                access_token=plaintext,
+                refresh_token=None,
+                shop_cipher=None,
+                expires_at=row.expires_at,
+                granted_scopes=row.granted_scopes,
+                extra=row.extra,
+            )
         if not isinstance(envelope, dict) or "access_token" not in envelope:
             raise DecryptionError(
                 "credentials envelope missing access_token for "
