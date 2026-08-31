@@ -1,5 +1,15 @@
 # Procurement UI redesign — manual cost entry + SPU image upload
 
+> **⚠ SUPERSEDED 2026-08-31 (same day, user decision)**: the custom
+> design-system CSS (`console.css`, §2.3 tokens, IBM Plex typography, FILED
+> stamp) was **dropped in favor of Bootstrap 5.3.8** (self-hosted at
+> `/static/vendor/`, MIT). Rationale: hand-rolled CSS shipped broken twice
+> in one day (missing font files; absolute asset paths that 404'd behind
+> the NGINX `/tts` prefix). §2's aesthetic direction no longer applies;
+> §3 backend contracts remain accurate. The JS keeps plain-DOM logic but
+> renders Bootstrap classes only, and derives the public path prefix from
+> `location.pathname`.
+
 > Feature branch: `feature/procurement-ui` · worktree: `~/tts-erp.procurement`
 > Owner: schan · Date: 2026-08-31
 > Status: implementation in progress

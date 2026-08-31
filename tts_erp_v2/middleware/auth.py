@@ -67,7 +67,7 @@ _READONLY_PREFIXES = (
     # POST upload-url / {id}/confirm and DELETE /{id} are classified
     # by the _READWRITE_EXACT entries below.
     "/v2/spu-images/",
-    # Operator-console static assets (console.css / console.js). Not under
+    # Operator-console static assets (vendor/bootstrap / js/console.js). Not under
     # /v2/; any authenticated session may fetch them.
     "/static/",
 )

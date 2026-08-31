@@ -23,19 +23,21 @@ def test_manual_costs_page_v2_returns_200_html(api_client, readonly_key):
 
 
 def test_manual_costs_page_v2_references_static_assets(api_client, readonly_key):
-    """Page HTML must link to /static/css/console.css and /static/js/console.js.
+    """Page HTML must link Bootstrap (vendored) + console.js, prefix-relative.
 
-    Inline CSS/JS is removed in the v2 redesign (per design doc §6) so
-    the page must reference external assets. No CDN-served frameworks —
-    the /static/ prefix is mounted by the v2 app via StaticFiles.
+    Styling is Bootstrap 5.3.8 self-hosted at /static/vendor/ (2026-08-31:
+    the custom console.css design system was dropped per user decision).
+    All asset paths must be RELATIVE (../../static/...) so the page works
+    behind the NGINX /tts prefix as well as on :9877 directly.
     """
     r = api_client.get(
         "/v2/pages/manual-costs",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     body = r.text
-    assert "/static/css/console.css" in body, "missing CSS link"
-    assert "/static/js/console.js" in body, "missing JS link"
+    assert "../../static/vendor/bootstrap.min.css" in body, "missing Bootstrap CSS link"
+    assert "../../static/js/console.js" in body, "missing JS link"
+    assert "/static/css/console.css" not in body, "retired custom stylesheet still linked"
 
 
 def test_manual_costs_page_v2_has_three_operational_tabs(api_client, readonly_key):
@@ -82,23 +84,22 @@ def test_manual_costs_page_v2_drops_token_paste_block(api_client, readonly_key):
     assert "mc_token" not in body, "legacy localStorage key still referenced"
 
 
-def test_manual_costs_page_v2_includes_stamp_element(api_client, readonly_key):
-    """Page template must declare the .filed-stamp element used by JS.
+def test_manual_costs_page_v2_asset_paths_prefix_safe(api_client, readonly_key):
+    """No root-absolute asset hrefs/srcs — regression guard for the 404.
 
-    The JS injects and animates this on successful submission (design
-    doc §2.5 signature element). We declare the class once in the
-    template's stylesheet scope (CSS lives in /static/css/console.css),
-    so the HTML reference is only via the className the JS will set.
+    2026-08-31: absolute /static/... links 404'd behind the NGINX /tts
+    prefix (daqiang.nat100.top/static/... has no route), leaving the page
+    completely unstyled in production. The page is served at
+    /v2/pages/manual-costs, so ../../static/ resolves to the deployment
+    root under any prefix.
     """
     r = api_client.get(
         "/v2/pages/manual-costs",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     body = r.text
-    # The class is referenced from JS — present in the page via the JS
-    # asset path. We assert the JS asset is wired; the actual class
-    # selector lives in the external stylesheet.
-    assert "/static/js/console.js" in body
+    assert 'href="/' not in body, "root-absolute href found"
+    assert 'src="/' not in body, "root-absolute src found"
 
 
 def test_manual_costs_page_v2_no_inline_event_handlers(api_client, readonly_key):

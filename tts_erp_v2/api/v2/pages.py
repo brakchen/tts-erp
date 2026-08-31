@@ -1,16 +1,18 @@
 """/v2/pages/* — server-rendered HTML pages (no SPA framework).
 
 The manual-costs page (the only Lane E page) renders a static HTML shell.
-All CSS / JS lives in ``tts_erp_v2/static/`` (mounted by the v2 app via
-``StaticFiles`` under ``/static/``). The JS does the runtime work; the
-server-side response is markup only.
+Styling is **Bootstrap 5.3.8**, self-hosted at ``/static/vendor/bootstrap.min.css``
+(MIT — see ``static/vendor/NOTICE.md``); behaviour lives in
+``/static/js/console.js``. No custom design system, no CDN links.
+
+Asset paths are RELATIVE (``../../static/…``) so the page works both on
+``127.0.0.1:9877`` directly and behind the NGINX ``/tts`` prefix
+(2026-08-31: absolute ``/static/…`` links 404'd behind the prefix).
 
 Auth classification: the page is ``readonly``-equivalent for the GET
 (handler does no DB writes). The page JS calls write endpoints
 (``/v2/reporting/manual-costs``, ``/v2/spu-images/*``) — those require
 a readwrite or admin session via the ``/v2/auth/login`` cookie flow.
-
-Design rationale: ``tech-doc/procurement-ui-redesign.md`` §2.
 """
 
 from __future__ import annotations
@@ -47,61 +49,73 @@ _PAGE_HTML = """<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>tts-erp · procurement</title>
-  <link rel="stylesheet" href="/static/css/console.css">
+  <!-- Relative path: resolves to /static/... locally and /tts/static/...
+       behind the NGINX prefix. Do not make this absolute. -->
+  <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
 </head>
 <body>
-  <header class="console-header" role="banner">
-    <div class="brand">tts-erp<span class="dot"></span>procurement</div>
-    <div class="right">
-      <label class="shop-switcher" for="shop-switcher">shop
-        <select id="shop-switcher" name="channel_account_id" aria-label="active shop"></select>
-      </label>
-      <span class="ops" id="ops-identity"></span>
+  <nav class="navbar bg-white border-bottom sticky-top">
+    <div class="container-fluid px-3 px-lg-4">
+      <span class="navbar-brand mb-0">tts-erp · procurement</span>
+      <div class="d-flex align-items-center gap-3">
+        <label class="d-flex align-items-center gap-2 small text-secondary mb-0" for="shop-switcher">shop
+          <select id="shop-switcher" name="channel_account_id" class="form-select form-select-sm w-auto" aria-label="active shop"></select>
+        </label>
+        <span class="small text-secondary" id="ops-identity"></span>
+      </div>
     </div>
-  </header>
+  </nav>
 
-  <main class="workbench" role="main">
-    <nav class="tabs" role="tablist" aria-label="workbench tabs">
-      <button class="tab" type="button" role="tab" data-tab="needs_cost" aria-selected="true" aria-controls="grid-rows">
-        Needs cost <span class="badge" id="badge-cost">·</span>
-      </button>
-      <button class="tab" type="button" role="tab" data-tab="needs_photo" aria-selected="false" aria-controls="grid-rows">
-        Needs photo <span class="badge" id="badge-photo">·</span>
-      </button>
-      <button class="tab" type="button" role="tab" data-tab="recent" aria-selected="false" aria-controls="grid-rows">
-        Recently filed <span class="badge" id="badge-recent">·</span>
-      </button>
-    </nav>
+  <main class="container-fluid px-3 px-lg-4 py-3" style="max-width: 1280px">
+    <ul class="nav nav-tabs" role="tablist" aria-label="workbench tabs">
+      <li class="nav-item" role="presentation">
+        <button class="tab nav-link active" type="button" role="tab" data-tab="needs_cost" aria-selected="true" aria-controls="grid-rows">
+          Needs cost <span class="badge text-bg-secondary" id="badge-cost">·</span>
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="tab nav-link" type="button" role="tab" data-tab="needs_photo" aria-selected="false" aria-controls="grid-rows">
+          Needs photo <span class="badge text-bg-secondary" id="badge-photo">·</span>
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="tab nav-link" type="button" role="tab" data-tab="recent" aria-selected="false" aria-controls="grid-rows">
+          Recently filed <span class="badge text-bg-secondary" id="badge-recent">·</span>
+        </button>
+      </li>
+    </ul>
 
-    <div class="filters">
+    <div class="d-flex align-items-center gap-2 my-3 small text-secondary">
       <label for="filter-search">search</label>
-      <input type="search" id="filter-search" placeholder="SKU or title" aria-label="filter rows">
+      <input type="search" id="filter-search" class="form-control form-control-sm" style="max-width: 220px" placeholder="SKU or title" aria-label="filter rows">
       <label for="filter-limit">page</label>
-      <select id="filter-limit" aria-label="rows per page">
+      <select id="filter-limit" class="form-select form-select-sm w-auto" aria-label="rows per page">
         <option>25</option>
         <option selected>50</option>
         <option>100</option>
       </select>
     </div>
 
-    <table class="grid" aria-live="polite">
-      <thead>
-        <tr id="grid-head-cost">
-          <th class="sku" scope="col">SKU</th>
-          <th scope="col">Title</th>
-          <th class="code" scope="col">State</th>
-          <th class="money" scope="col">Unit cost</th>
-          <th scope="col">Note</th>
-          <th scope="col">Action</th>
-        </tr>
-      </thead>
-      <tbody id="grid-rows">
-        <tr><td colspan="6" class="empty">loading shops…</td></tr>
-      </tbody>
-    </table>
+    <div class="table-responsive">
+      <table class="table table-hover align-middle" aria-live="polite">
+        <thead>
+          <tr id="grid-head-cost">
+            <th scope="col">SKU</th>
+            <th scope="col">Title</th>
+            <th scope="col">State</th>
+            <th scope="col" class="text-end">Unit cost</th>
+            <th scope="col">Note</th>
+            <th scope="col">Action</th>
+          </tr>
+        </thead>
+        <tbody id="grid-rows">
+          <tr><td colspan="6" class="text-secondary">loading shops…</td></tr>
+        </tbody>
+      </table>
+    </div>
   </main>
 
-  <script src="/static/js/console.js" defer></script>
+  <script src="../../static/js/console.js" defer></script>
 </body>
 </html>
 """

@@ -68,7 +68,7 @@ def _build_routes(app: FastAPI) -> None:
     # tts_erp_v2/middleware/auth.py:399-410).
     app.include_router(analytics_sync_router, prefix="/v1/analytics/sync")
 
-    # Operator-console static assets (console.css / console.js). Auth is
+    # Operator-console static assets (vendor/bootstrap.min.css / js/console.js). Auth is
     # readonly-level via the "/static/" prefix in middleware/auth.py —
     # any authenticated session passes; anonymous requests get 401.
     app.mount(

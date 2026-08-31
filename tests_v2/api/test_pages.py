@@ -1,9 +1,9 @@
 """Server-rendered page tests (Lane E v2/pages/manual-costs).
 
 2026-08-31 (feature/procurement-ui): the page was redesigned as a thin
-HTML shell that links ``/static/css/console.css`` + ``/static/js/console.js``
-— all endpoint URLs and the workbench DOM now live in the static assets.
-The detailed redesign assertions (tab labels, static refs, no token-paste
+HTML shell that links static assets — Bootstrap 5.3.8 (vendored at
+``/static/vendor/bootstrap.min.css``) + ``/static/js/console.js``.
+The detailed shell assertions (tab labels, static refs, no token-paste
 block) live in ``tests_v2/api/test_manual_costs_page_v2.py``.
 
 This file keeps the two load-bearing contract checks:
@@ -29,38 +29,16 @@ def test_manual_costs_page_returns_200_with_html(api_client, readonly_key):
     body = r.text
     # The page is a shell; endpoint URLs and the grid DOM live in
     # /static/js/console.js (see test_manual_costs_page_v2.py).
-    assert "/static/css/console.css" in body
-    assert "/static/js/console.js" in body
+    # Asset paths are RELATIVE so the page works both on :9877 directly
+    # and behind the NGINX /tts prefix (2026-08-31: absolute /static/...
+    # links 404'd publicly — the unstyled page looked broken).
+    assert "../../static/vendor/bootstrap.min.css" in body
+    assert "../../static/js/console.js" in body
+    assert 'href="/static/' not in body
+    assert 'src="/static/' not in body
     # Token-paste UI must stay gone.
     assert "API token" not in body
     assert "mc_token" not in body
-
-
-def test_self_hosted_fonts_exist_and_are_wired():
-    """console.css declares @font-face for every woff2 under static/fonts.
-
-    Regression guard (2026-08-31): the redesign shipped referencing IBM Plex /
-    JetBrains Mono with NO font files and NO @font-face — everything fell
-    back to system fonts and the page lost its entire typographic identity.
-    """
-    import re
-    from pathlib import Path
-
-    static = Path(__file__).resolve().parents[2] / "tts_erp_v2" / "static"
-    css = (static / "css" / "console.css").read_text(encoding="utf-8")
-    font_files = sorted(p.name for p in (static / "fonts").glob("*.woff2"))
-    # All three design-token families must be present.
-    assert any("plex-sans" in f for f in font_files), font_files
-    assert any("plex-serif" in f for f in font_files), font_files
-    assert any("jetbrains-mono" in f for f in font_files), font_files
-    # Every woff2 on disk must be referenced by an @font-face src URL,
-    # and every src URL must resolve to a real, non-trivial file.
-    srcs = re.findall(r'url\("(/static/fonts/[^"]+\.woff2)"\)', css)
-    assert srcs, "no @font-face src urls found in console.css"
-    referenced = {s.rsplit("/", 1)[-1] for s in srcs}
-    assert referenced == set(font_files), (referenced, font_files)
-    for name in font_files:
-        assert (static / "fonts" / name).stat().st_size > 10_000, name
 
 
 def test_manual_costs_page_requires_some_auth(api_client):
