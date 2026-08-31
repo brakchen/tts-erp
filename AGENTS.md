@@ -149,6 +149,7 @@ commits），但 `:9877` 运行时已不再服务这些路径。生产读 / 写 
 ### DO
 
 - **TDD：先写/改 `tdd/test_*.py`，再实现到通过**；约定见 `tdd/conftest.py`（事务回滚隔离、`TEST_%` 哨兵）
+- **跑测试默认跳过 migration 域**：`pyproject.toml addopts` 带 `-m 'not domain_migration'` —— `tests_v2/migration/` 会直接读写生产库且全量跑时卡锁（详见 `tech-doc/test-domains.md`）。要跑它用 `scripts/test.sh migration` 或 `pytest -m domain_migration tests_v2/migration`（CLI `-m` 覆盖 addopts）。日常全量用 `scripts/test.sh fast`
 - 改完调 `bash /home/schan/tts-erp/restart.sh` 验证 healthz 200
 - 改完跑 `python3 /tmp/test_tts_erp.py` (test_e2e.py 副本) 端到端验证
 - 看 `logs/stderr.log` 抓 traceback

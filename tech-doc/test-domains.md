@@ -121,6 +121,16 @@ If you want to call `pytest` directly:
   opt-in. Running `scripts/test.sh migration` will exercise dry-run
   paths without rewriting production data. To actually apply migrations,
   request `_ensure_migrations_applied` explicitly in a one-off script.
+- **Migration tests are excluded by default (2026-08-31).**
+  `pyproject.toml addopts` carries `-m 'not domain_migration'` — bare
+  `pytest` skips the whole dir. Rationale: `test_reconcile.py` re-applies
+  every migration against the PROD DB per test (autouse), and in
+  full-suite runs blocks indefinitely on locks held by earlier tests
+  (no `statement_timeout`), hanging the suite at ~60%. To run them
+  deliberately: `pytest -m domain_migration tests_v2/migration`
+  (CLI `-m` overrides addopts) or `scripts/test.sh all` / `migration`.
+  Delete the dir together with `scripts/migrate_v1_to_v2/` when the
+  rollback observation window closes (~2026-09-26).
 
 ## Mapping files to domains
 

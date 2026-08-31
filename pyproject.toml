@@ -21,7 +21,7 @@ dependencies = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests", "tests_v2"]
-addopts = "-ra -q"
+addopts = "-ra -q -m 'not domain_migration'"
 asyncio_mode = "auto"
 markers = [
     # Business-domain markers — run only one slice of the suite.
@@ -34,7 +34,7 @@ markers = [
     "domain_reporting: 报表 (profit / coverage / cost)",
     "domain_api: FastAPI 路由 / auth / middleware",
     "domain_proxy: 出站代理层 (signing, token_service)",
-    "domain_migration: v1→v2 数据迁移",
+    "domain_migration: v1→v2 数据迁移 —— 一次性脚本测试，直接读写生产库，默认从 addopts 排除；显式 `pytest -m domain_migration` 才跑（CLI -m 覆盖 addopts）。回滚观察期结束（~2026-09-26）后连同 scripts/migrate_v1_to_v2/ 一起删除",
     "domain_middleware: 中间件 (access_log 等)",
     "domain_sync: 同步 worker",
     "domain_models: 模型 smoke 测试",
