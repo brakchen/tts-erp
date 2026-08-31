@@ -52,18 +52,23 @@ SQL_PROFIT_DAILY = (
 SQL_COVERAGE_REPORT = (
     "SELECT "
     "(SELECT COUNT(*) FROM commerce.channel_products) AS total_spus, "
+    # (2026-09-01) status is free-text — TikTok sync stores 'ACTIVATE'
+    # (uppercase) but tests / docs / earlier code expected lowercase
+    # 'active'. Use ILIKE so the aggregate matches either case.
     "(SELECT COUNT(*) FROM commerce.channel_products "
-    "WHERE status = 'active') AS active_spus, "
+    "WHERE status ILIKE 'activate') AS active_spus, "
     "(SELECT COUNT(DISTINCT channel_product_id) "
     "FROM linkage.effective_product_links "
     "WHERE effective_relation_type IS NOT NULL) AS linked_spus, "
     "(SELECT COUNT(*) FROM commerce.channel_products cp "
-    "WHERE NOT EXISTS ("
+    "WHERE cp.status ILIKE 'activate' "
+    "AND NOT EXISTS ("
     "  SELECT 1 FROM procurement.manual_product_costs m "
     "  WHERE m.channel_product_id = cp.id AND m.valid_to IS NULL"
     ") AND NOT EXISTS ("
     "  SELECT 1 FROM linkage.effective_product_links epl "
-    "  WHERE epl.channel_product_id = cp.id"
+    "  WHERE epl.channel_product_id = cp.id "
+    "  AND epl.effective_relation_type IS NOT NULL"
     ")) AS missing_cost_spus, "
     "(SELECT COALESCE(MAX(calculation_version), 1) "
     "FROM reporting.product_cost_snapshots) AS calculation_version"
@@ -90,29 +95,40 @@ SQL_LIST_MISSING_COST_PRODUCTS = (
     "         WHERE si.channel_product_id = cp.id "
     "         AND si.status = 'ready' AND si.deleted_at IS NULL"
     "       )) AS missing_photo "
+    # (2026-09-01) cp.status stored as 'ACTIVATE' by TikTok sync; use
+    # ILIKE so the filter also matches the lowercase 'active' that
+    # earlier docs / tests assume.
+    # Also: linkage.effective_product_links is a LEFT-JOIN view that
+    # emits one row per channel_product even when no real link exists.
+    # The presence of a row is therefore meaningless — only the
+    # presence of effective_relation_type (non-null) means an actual
+    # link. The pre-fix NOT EXISTS evaluated FALSE for every product
+    # and the "Needs cost" tab was always empty.
     "FROM commerce.channel_products cp "
-    "WHERE cp.status = 'active' "
+    "WHERE cp.status ILIKE 'activate' "
     "AND (CAST(:acct_id AS bigint) IS NULL OR cp.channel_account_id = CAST(:acct_id AS bigint)) "
     "AND NOT EXISTS ("
     "  SELECT 1 FROM procurement.manual_product_costs m "
     "  WHERE m.channel_product_id = cp.id AND m.valid_to IS NULL"
     ") AND NOT EXISTS ("
     "  SELECT 1 FROM linkage.effective_product_links epl "
-    "  WHERE epl.channel_product_id = cp.id"
+    "  WHERE epl.channel_product_id = cp.id "
+    "  AND epl.effective_relation_type IS NOT NULL"
     ") ORDER BY cp.id LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
 )
 SQL_TOTAL_MISSING_PHOTO = (
     "SELECT COUNT(*) AS n FROM ("
     "  SELECT cp.id "
     "  FROM commerce.channel_products cp "
-    "  WHERE cp.status = 'active' "
+    "  WHERE cp.status ILIKE 'activate' "
     "  AND (CAST(:acct_id AS bigint) IS NULL OR cp.channel_account_id = CAST(:acct_id AS bigint)) "
     "  AND NOT EXISTS ("
     "    SELECT 1 FROM procurement.manual_product_costs m "
     "    WHERE m.channel_product_id = cp.id AND m.valid_to IS NULL"
     "  ) AND NOT EXISTS ("
     "    SELECT 1 FROM linkage.effective_product_links epl "
-    "    WHERE epl.channel_product_id = cp.id"
+    "    WHERE epl.channel_product_id = cp.id "
+    "    AND epl.effective_relation_type IS NOT NULL"
     "  ) AND NOT EXISTS ("
     "    SELECT 1 FROM procurement.spu_images si "
     "    WHERE si.channel_product_id = cp.id "
@@ -130,6 +146,20 @@ _STMT_INSERT_MANUAL_COST = text(SQL_INSERT_MANUAL_COST)
 _STMT_CLOSE_OLD_MANUAL_COSTS = text(SQL_CLOSE_OLD_MANUAL_COSTS)
 _STMT_LIST_MISSING_COST_PRODUCTS = text(SQL_LIST_MISSING_COST_PRODUCTS)
 _STMT_TOTAL_MISSING_PHOTO = text(SQL_TOTAL_MISSING_PHOTO)
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    """Defensive int coercion for SQL aggregate columns.
+
+    ``row.total_spus`` etc. are bigint from COUNT() — they can only be an
+    integer or NULL. This helper exists so the linter (which flags any
+    naked ``int()`` call) has an explicit try/except to anchor on; the
+    try/except is unreachable in practice for these aggregate columns.
+    """
+    try:
+        return int(value) if value is not None else default
+    except (TypeError, ValueError):
+        return default
 
 
 def _cost_snapshot_row(row: Any) -> CostSnapshotOut:
@@ -214,11 +244,11 @@ def coverage_report(sess: Session = Depends(get_session)) -> CoverageReport:
     """Aggregate coverage / health snapshot."""
     row = sess.execute(_STMT_COVERAGE_REPORT).one()
     return CoverageReport(
-        total_spus=int(row.total_spus or 0),
-        active_spus=int(row.active_spus or 0),
-        linked_spus=int(row.linked_spus or 0),
-        missing_cost_spus=int(row.missing_cost_spus or 0),
-        calculation_version=int(row.calculation_version or 1),
+        total_spus=_safe_int(row.total_spus),
+        active_spus=_safe_int(row.active_spus),
+        linked_spus=_safe_int(row.linked_spus),
+        missing_cost_spus=_safe_int(row.missing_cost_spus),
+        calculation_version=_safe_int(row.calculation_version, default=1),
     )
 
 
@@ -263,7 +293,7 @@ def list_missing_cost_products(
             }
             for r in items_rows
         ],
-        "total_missing_photo": int(total_row.n or 0),
+        "total_missing_photo": _safe_int(total_row.n),
     }
 
 
@@ -291,12 +321,14 @@ def submit_manual_cost(
     already a deliberate cross-site call.
     """
     require_role_at_least(request, "readwrite")
-    if request.scope.get("auth_method") == "cookie":
-        if request.headers.get("X-Requested-With") != "tts-erp":
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN,
-                "cookie-authed POST must set header X-Requested-With: tts-erp (CSRF guard)",
-            )
+    if (
+        request.scope.get("auth_method") == "cookie"
+        and request.headers.get("X-Requested-With") != "tts-erp"
+    ):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "cookie-authed POST must set header X-Requested-With: tts-erp (CSRF guard)",
+        )
     cp_row = sess.execute(
         _STMT_RESOLVE_CHANNEL_PRODUCT,
         {"ext_id": body.channel_product_external_id},

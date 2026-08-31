@@ -15,9 +15,133 @@ product. We test the *contract* changes here (response shape + filter
 plumbing + photo column presence) rather than asserting specific item
 counts, so the tests stay valid regardless of the legacy view's
 data-state quirks.
+
+Regression coverage added 2026-09-01 — both bugs reproduced the
+"Needs cost tab empty" symptom in production:
+- ``cp.status = 'active'`` missed TikTok's actual ``'ACTIVATE'``
+  (uppercase) — fixed by switching to ILIKE.
+- ``NOT EXISTS (... effective_product_links ...)`` was tautologically
+  false because the view is a LEFT JOIN that emits one row per
+  channel_product regardless of link presence — fixed by adding
+  ``AND epl.effective_relation_type IS NOT NULL``.
 """
 
 from __future__ import annotations
+
+import pytest
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+
+@pytest.fixture()
+def seed_unmatched_active_product(db_engine):
+    """Seed a channel_account + channel_product that should appear in the
+    missing-cost-products list.
+
+    Reproduces the production data shape: ``status='ACTIVATE'`` (TikTok's
+    actual value) plus NO manual cost and NO ``effective_relation_type``
+    link. The seeded product must be returned by the endpoint, proving
+    both the case-insensitive status filter and the
+    ``effective_relation_type IS NOT NULL`` filter work.
+    """
+    ext_acct = "TEST_acct_for_missing_cost"
+    ext_prod = "TEST_prod_for_missing_cost"
+    with Session(db_engine) as sess:
+        sess.execute(
+            text(
+                "INSERT INTO commerce.channel_accounts "
+                "(platform, external_account_id, account_name, status) "
+                "VALUES ('tiktok', :ext, 'TEST acct', 'active')"
+            ),
+            {"ext": ext_acct},
+        )
+        acct_id = sess.execute(
+            text(
+                "SELECT id FROM commerce.channel_accounts "
+                "WHERE external_account_id = :ext"
+            ),
+            {"ext": ext_acct},
+        ).scalar()
+        # IMPORTANT: status='ACTIVATE' (uppercase) — same as production
+        # data; this is the case the original ``= 'active'`` filter missed.
+        sess.execute(
+            text(
+                "INSERT INTO commerce.channel_products "
+                "(channel_account_id, external_product_id, title, status) "
+                "VALUES (:acct, :ext, 'TEST title', 'ACTIVATE')"
+            ),
+            {"acct": acct_id, "ext": ext_prod},
+        )
+        sess.commit()
+    yield {"channel_account_id": acct_id, "external_product_id": ext_prod}
+
+
+def test_status_activate_is_included(api_client, readonly_key, seed_unmatched_active_product):
+    """Regression: TikTok-stored 'ACTIVATE' must be picked up.
+
+    Before the fix, ``WHERE cp.status = 'active'`` (lowercase) silently
+    filtered out every product in production. The Needs cost tab was
+    therefore always empty.
+    """
+    r = api_client.get(
+        "/v2/reporting/missing-cost-products"
+        f"?channel_account_id={seed_unmatched_active_product['channel_account_id']}"
+        "&limit=200",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    ext_ids = [row["external_product_id"] for row in r.json()["items"]]
+    assert seed_unmatched_active_product["external_product_id"] in ext_ids
+
+
+def test_unlinked_product_survives_left_join_view(
+    api_client, readonly_key, seed_unmatched_active_product
+):
+    """Regression: the LEFT-JOIN view emits one row per channel_product
+    regardless of whether a real link exists. Without filtering on
+    ``effective_relation_type IS NOT NULL``, ``NOT EXISTS (... epl ...)``
+    was tautologically false and the product was wrongly treated as
+    already linked (so excluded from the missing-cost list).
+
+    The fixture creates a product with NO manual cost and NO link at all,
+    so it must appear. The fix filters out the LEFT-JOIN phantom rows.
+    """
+    r = api_client.get(
+        "/v2/reporting/missing-cost-products"
+        f"?channel_account_id={seed_unmatched_active_product['channel_account_id']}"
+        "&limit=200",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    items = r.json()["items"]
+    cp_id = None
+    for row in items:
+        if row["external_product_id"] == seed_unmatched_active_product["external_product_id"]:
+            cp_id = row["channel_product_id"]
+            break
+    assert cp_id is not None, "seeded product should appear in items"
+    # Sanity-check the view really does emit a phantom row for this
+    # product (proving the test setup actually exercises the LEFT JOIN).
+    # Without that phantom row, this regression test would pass even on
+    # the unfixed code.
+    from sqlalchemy import create_engine as _ce
+    # Use a fresh connection so we don't depend on the handler's session.
+    with _ce(__import__("os").environ["TTS_ERP_DB_URL"]).connect() as conn:
+        phantom = conn.execute(
+            text(
+                "SELECT effective_relation_type FROM linkage.effective_product_links "
+                "WHERE channel_product_id = :cp"
+            ),
+            {"cp": cp_id},
+        ).first()
+    assert phantom is not None, (
+        "expected the LEFT-JOIN view to emit at least one phantom row "
+        "for the seeded product — otherwise the regression test cannot "
+        "distinguish fixed from broken code"
+    )
+    assert phantom[0] is None, (
+        f"expected NULL effective_relation_type on phantom row, got {phantom[0]!r}"
+    )
 
 
 def test_response_shape_no_filter(api_client, readonly_key):
