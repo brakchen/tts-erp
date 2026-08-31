@@ -1,10 +1,15 @@
 """Tests for tts_erp_v2.jobs.miaoshou.collect_box."""
 from __future__ import annotations
 
+import pytest
+
 from sqlalchemy import select
 
 from tts_erp_v2.db.models.integration import SyncJob
 from tts_erp_v2.jobs.miaoshou.collect_box import sync_collect_box
+
+
+pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
 
 
 def _box_payload(detail_id: str, *, status: str = "success") -> dict:

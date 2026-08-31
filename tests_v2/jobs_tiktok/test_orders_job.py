@@ -24,6 +24,8 @@ import pytest
 from sqlalchemy import select
 from tts_erp_v2.jobs.tiktok.orders import run as run_orders
 
+pytestmark = [pytest.mark.domain_commerce, pytest.mark.layer_integration]
+
 from tts_erp_v2.db.models import (
     ChannelAccount,
     Credentials,

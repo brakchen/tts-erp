@@ -26,6 +26,9 @@ from tts_erp_v2.db.models import (
 from tts_erp_v2.reporting import coverage
 
 
+pytestmark = [pytest.mark.domain_reporting, pytest.mark.layer_integration]
+
+
 def _utc(year=2026, month=8, day=29):
     return datetime(year, month, day, tzinfo=timezone.utc)
 

@@ -14,6 +14,8 @@ from miaoshou import (  # type: ignore[reportMissingImports]
  MiaoshouClient,
 )
 
+pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_unit]
+
 # 每个测试用例： (namespace, method, kwargs, expected_url_suffix)
 CASES = [
  # ---- 订单域 ----

@@ -23,6 +23,9 @@ from tts_erp_v2.middleware.access_log import (
     _truncate_ua,
 )
 
+
+pytestmark = [pytest.mark.domain_middleware, pytest.mark.layer_integration]
+
 # ─── pure helpers — no app, no DB, no network
 
 

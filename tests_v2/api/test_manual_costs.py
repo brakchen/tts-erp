@@ -17,8 +17,12 @@ Per Lane E spec:
 
 from __future__ import annotations
 
+import pytest
+
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
 
 def _seed_channel_product(db_engine, external_id: str) -> int:

@@ -11,7 +11,17 @@ Covers:
 
 from __future__ import annotations
 
+import pytest
+
 from datetime import timezone
+
+
+pytestmark = [
+    pytest.mark.domain_logistics,
+    pytest.mark.domain_migration,
+    pytest.mark.layer_integration,
+    pytest.mark.slow,
+]
 
 
 def _count(table: str) -> int:

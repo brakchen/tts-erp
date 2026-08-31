@@ -11,6 +11,8 @@ from miaoshou.callbacks.router import (  # type: ignore[reportMissingImports]
     path_for_order_status,
 )
 
+pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_unit]
+
 
 def test_node_registry_count():
     """17+1（aftersale 拆 wait+process）= 18 个节点."""

@@ -9,7 +9,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 from tts_erp_v2.linkage import issues
+
+
+pytestmark = [pytest.mark.domain_linkage, pytest.mark.layer_integration]
 
 
 def _ts() -> datetime:

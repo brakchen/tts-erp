@@ -11,6 +11,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 
+import pytest
+
 from sqlalchemy import select
 
 from tts_erp_v2.db.models import (
@@ -21,6 +23,9 @@ from tts_erp_v2.db.models import (
     ProductCostSnapshot,
 )
 from tts_erp_v2.reporting import cost_snapshots
+
+
+pytestmark = [pytest.mark.domain_reporting, pytest.mark.domain_finance, pytest.mark.layer_integration]
 
 
 def _utc(year=2026, month=8, day=29):

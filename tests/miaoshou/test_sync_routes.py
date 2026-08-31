@@ -1,15 +1,41 @@
-"""Round 7 - 3 new persist functions + 3 new sync routes tests."""
+"""Round 7 - 3 new persist functions + 3 new sync routes tests.
+
+⚠️  SKIPPED 2026-08-31 — these tests target the retired ``tdd/``
+codebase's ``miaoshou_sync`` module (sync_miaoshou_price_templates /
+sync_miaoshou_collect_box_details / sync_miaoshou_move_collect_tasks)
+and the legacy ``tts_erp.persist_miaoshou_*`` helpers. After Wave 4.1
+``tdd/`` was deleted; the modern equivalents live under
+``tts_erp_v2.jobs.miaoshou.{collect_box,move_collect}.sync_*`` but
+have different (async) signatures and don't preserve the original
+``(code, body)`` return contract. These tests need a rewrite to
+target the v2 jobs — tracked as a follow-up.
+"""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+import pytest
 
-from tdd import miaoshou_sync as m_sync
-from tts_erp import (
-    persist_miaoshou_collect_box_detail,
-    persist_miaoshou_move_collect_task,
-    persist_miaoshou_price_template,
-)
+# TODO: port to tts_erp_v2.jobs.miaoshou.{collect_box,move_collect}.sync_*
+# (modern equivalents have async signatures + sync_jobs lifecycle, so this
+# is not a 1:1 translation — needs new test design).
+pytestmark = [
+    pytest.mark.domain_miaoshou,
+    pytest.mark.layer_integration,
+    pytest.mark.skip(
+        reason="miaoshou_sync retired with tdd/ codebase; tests need rewrite to "
+        "tts_erp_v2.jobs.miaoshou.{collect_box,move_collect,shops}.sync_*"
+    ),
+]
+
+# (original imports retained below so the rewrite has its starting point)
+# from unittest.mock import MagicMock, patch
+#
+# from tdd import miaoshou_sync as m_sync
+# from tts_erp import (
+#     persist_miaoshou_collect_box_detail,
+#     persist_miaoshou_move_collect_task,
+#     persist_miaoshou_price_template,
+# )
 
 # ===== 测 3 个 persist 函数 =====
 

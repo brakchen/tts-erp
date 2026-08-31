@@ -10,10 +10,15 @@ goodsPurchaseOrderList + total.
 """
 from __future__ import annotations
 
+import pytest
+
 from sqlalchemy import select
 
 from tts_erp_v2.db.models.integration import SyncJob
 from tts_erp_v2.jobs.miaoshou.purchase_orders import sync_purchase_orders
+
+
+pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
 
 
 def test_sync_purchase_orders_empty_path(

@@ -14,6 +14,10 @@ bug 修复历史：
 
 from __future__ import annotations
 
+import pytest
+
+pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_unit]
+
 import io
 import json
 import urllib.error

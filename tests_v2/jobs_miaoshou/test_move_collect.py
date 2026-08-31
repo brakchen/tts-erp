@@ -23,6 +23,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import pytest
+
 from sqlalchemy import select
 
 from tts_erp_v2.db.models.integration import (
@@ -32,6 +34,10 @@ from tts_erp_v2.db.models.integration import (
 )
 from tts_erp_v2.db.models.linkage import LinkEvidence
 from tts_erp_v2.jobs.miaoshou.move_collect import sync_move_collect
+
+
+pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
+
 
 # ---- helpers --------------------------------------------------------
 

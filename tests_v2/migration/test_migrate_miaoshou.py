@@ -12,6 +12,16 @@ Covers:
 """
 from __future__ import annotations
 
+import pytest
+
+
+pytestmark = [
+    pytest.mark.domain_miaoshou,
+    pytest.mark.domain_migration,
+    pytest.mark.layer_integration,
+    pytest.mark.slow,
+]
+
 
 def _count(table: str) -> int:
     from tts_erp_v2.db.base import get_engine

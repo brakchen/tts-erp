@@ -7,7 +7,11 @@ import hmac
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from miaoshou.miaoshou_erp_client import MiaoshouErpClient
+
+pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_unit]
 
 
 def test_body_json_uses_ensure_ascii_true():

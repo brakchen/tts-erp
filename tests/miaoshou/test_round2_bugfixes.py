@@ -12,6 +12,8 @@ import pytest
 from miaoshou.miaoshou_client import MiaoshouApiError
 from miaoshou.miaoshou_erp_client import MiaoshouErpClient
 
+pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_unit]
+
 # ===== bug 1: from_env 接受空字符串 =====
 
 

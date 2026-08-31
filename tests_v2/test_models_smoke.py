@@ -11,6 +11,9 @@ import pytest
 from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
 
+
+pytestmark = [pytest.mark.domain_models, pytest.mark.layer_integration]
+
 from tts_erp_v2.db.models import (
     ApiKey,
     AccountLink,

@@ -23,6 +23,11 @@ its paths without any further code change.
 """
 from __future__ import annotations
 
+import pytest
+
+
+pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
+
 
 def _path_set(payload: dict) -> set[str]:
     """Collect the ``path`` field of every entry in /endpoints' items list."""

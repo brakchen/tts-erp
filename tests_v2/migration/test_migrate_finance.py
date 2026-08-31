@@ -10,7 +10,17 @@ Covers:
 """
 from __future__ import annotations
 
+import pytest
+
 from scripts.migrate_v1_to_v2.migrate_finance import _COMPONENT_COLUMNS
+
+
+pytestmark = [
+    pytest.mark.domain_finance,
+    pytest.mark.domain_migration,
+    pytest.mark.layer_integration,
+    pytest.mark.slow,
+]
 
 
 def _count(table: str) -> int:

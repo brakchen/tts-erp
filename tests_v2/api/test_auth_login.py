@@ -17,11 +17,14 @@ from __future__ import annotations
 
 import time
 
+import pytest
 from sqlalchemy import update
 
 from tts_erp_v2.db.base import Base
 from tts_erp_v2.middleware import session_auth
 from tts_erp_v2.middleware.auth import clear_cache
+
+pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
 
 def _login(client, key: str, *, expect: int = 200):

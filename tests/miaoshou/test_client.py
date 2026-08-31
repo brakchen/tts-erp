@@ -14,6 +14,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_unit]
+
 from miaoshou import (  # type: ignore[reportMissingImports]
     EnvConfig,
     MiaoshouApiError,

@@ -20,6 +20,9 @@ from tts_erp_v2.jobs.tiktok import finance as finance_job
 from tts_erp_v2.sync_worker.job_runner import run_with_sync_job
 
 
+pytestmark = [pytest.mark.domain_finance, pytest.mark.layer_integration]
+
+
 class FakeProxy:
     """Routes by endpoint suffix. payout page drives statements → transactions cascade."""
 

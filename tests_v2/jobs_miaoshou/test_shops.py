@@ -1,10 +1,15 @@
 """Tests for tts_erp_v2.jobs.miaoshou.shops."""
 from __future__ import annotations
 
+import pytest
+
 from sqlalchemy import select
 
 from tts_erp_v2.db.models.integration import SyncJob
 from tts_erp_v2.jobs.miaoshou.shops import sync_shops
+
+
+pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
 
 
 def _shop_payload(shop_id: str, *, name: str = "TEST shop") -> dict:
