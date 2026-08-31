@@ -63,6 +63,13 @@ _READONLY_PREFIXES = (
     "/v2/linkage/",
     "/v2/reporting/",
     "/v2/pages/",
+    # SPU image reads — GET /v2/spu-images[/...] → readonly.
+    # POST upload-url / {id}/confirm and DELETE /{id} are classified
+    # by the _READWRITE_EXACT entries below.
+    "/v2/spu-images/",
+    # Operator-console static assets (console.css / console.js). Not under
+    # /v2/; any authenticated session may fetch them.
+    "/static/",
 )
 _READWRITE_EXACT = {
     "/v2/reporting/manual-costs",  # POST only — GET below stays readonly
@@ -73,6 +80,7 @@ _READWRITE_EXACT = {
 # sub-namespace.
 _READONLY_EXACT = {
     "/v2/llm-context",  # GET — self-describing system + data dictionary for LLM agents
+    "/v2/spu-images",  # GET — list ready images (no trailing slash in router)
 }
 # All other /v2/* paths default to admin (defensive: unknown = privileged).
 
@@ -95,6 +103,24 @@ def required_role(method: str, path: str) -> int | None:
         return None
     # v2: manual-costs POST requires readwrite.
     if method.upper() == "POST" and p in _READWRITE_EXACT:
+        return ROLE_LEVEL["readwrite"]
+    # v2: POST under /v2/spu-images/upload-url or /v2/spu-images/{id}/confirm
+    # requires readwrite. The upload-url path is exact; the confirm path
+    # is variable. We special-case both so we don't have to introduce a
+    # method+prefix matcher (the current _READWRITE_EXACT is exact-only).
+    if method.upper() == "POST" and p == "/v2/spu-images/upload-url":
+        return ROLE_LEVEL["readwrite"]
+    if (
+        method.upper() == "POST"
+        and p.startswith("/v2/spu-images/")
+        and p.endswith("/confirm")
+    ):
+        return ROLE_LEVEL["readwrite"]
+    # v2: DELETE under /v2/spu-images/{id} requires readwrite.
+    if (
+        method.upper() == "DELETE"
+        and p.startswith("/v2/spu-images/")
+    ):
         return ROLE_LEVEL["readwrite"]
     # v2: exact-match readonly paths (e.g. /v2/llm-context).
     if p in _READONLY_EXACT:

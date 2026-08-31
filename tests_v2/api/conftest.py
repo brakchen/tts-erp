@@ -104,14 +104,31 @@ def _wipe_test_rows(db_engine) -> None:
     their rows outlive the test's transactional rollback). Delete order
     is child → parent to respect FKs.
     """
+    from sqlalchemy import text as _text
+
     from tts_erp_v2.db.base import Base
 
     api_keys_tbl = Base.metadata.tables["security.api_keys"]
     manual_costs_tbl = Base.metadata.tables["procurement.manual_product_costs"]
     channel_products_tbl = Base.metadata.tables["commerce.channel_products"]
     channel_accounts_tbl = Base.metadata.tables["commerce.channel_accounts"]
+    # 2026-08-31 procurement.spu_images — RESTRICT FK from channel_products
+    # requires this wipe first. See tech-doc/procurement-ui-redesign.md §9.
+    # Table is created by schema_storage.sql and not registered as an ORM
+    # model, so we wipe via raw text() with the same TEST_-prefixed scope.
+    spu_images_wipe = _text(
+        "DELETE FROM procurement.spu_images "
+        "WHERE channel_product_id IN ("
+        "  SELECT id FROM commerce.channel_products "
+        "  WHERE external_product_id LIKE 'TEST_%'"
+        ") OR channel_account_id IN ("
+        "  SELECT id FROM commerce.channel_accounts "
+        "  WHERE external_account_id LIKE 'TEST_%'"
+        ")"
+    )
 
     with db_engine.begin() as conn:
+        conn.execute(spu_images_wipe)
         conn.execute(
             delete(manual_costs_tbl).where(
                 manual_costs_tbl.c.channel_product_id.in_(

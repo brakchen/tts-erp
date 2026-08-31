@@ -29,12 +29,23 @@ All other routes go through v2 routers and require auth.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from analytics_sync.app import router as analytics_sync_router
-from tts_erp_v2.api.v2 import auth, commerce, linkage, llm_context, pages, reporting
+from tts_erp_v2.api.v2 import (
+    auth,
+    commerce,
+    linkage,
+    llm_context,
+    pages,
+    reporting,
+    spu_images,
+)
 from tts_erp_v2.middleware.access_log import AccessLogMiddleware
 from tts_erp_v2.middleware.auth import AuthMiddleware
 from tts_erp_v2.middleware.rate_limit import RateLimitMiddleware
@@ -44,6 +55,7 @@ def _build_routes(app: FastAPI) -> None:
     app.include_router(commerce.router)
     app.include_router(linkage.router)
     app.include_router(reporting.router)
+    app.include_router(spu_images.router)  # SPU image upload (presigned MinIO)
     app.include_router(pages.router)
     app.include_router(llm_context.router)
     app.include_router(auth.router)  # browser login + session cookie
@@ -54,8 +66,15 @@ def _build_routes(app: FastAPI) -> None:
     # `request.scope["api_key_hash"]` / `request.scope["api_key_scopes"]`
     # which AuthMiddleware populates above (see
     # tts_erp_v2/middleware/auth.py:399-410).
-    app.include_router(
-        analytics_sync_router, prefix="/v1/analytics/sync"
+    app.include_router(analytics_sync_router, prefix="/v1/analytics/sync")
+
+    # Operator-console static assets (console.css / console.js). Auth is
+    # readonly-level via the "/static/" prefix in middleware/auth.py —
+    # any authenticated session passes; anonymous requests get 401.
+    app.mount(
+        "/static",
+        StaticFiles(directory=Path(__file__).parent / "static"),
+        name="static",
     )
 
 

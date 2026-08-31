@@ -1,7 +1,22 @@
 # handoff.md — tts-erp 跨 session 交接笔记
 
-> 上次 session: 2026-08-25
-> 上次 session 主题: 修 3 个 drift —— /healthz 撒谎、tts_erp.shops 空、schema.sql 过时
+> 上次 session: 2026-08-31（接力 2026-08-30 pi-web 卡死的 session）
+> 上次 session 主题: Procurement console redesign + SPU image storage（worktree `~/tts-erp.procurement`, branch `feature/procurement-ui`）
+
+## TL;DR (2026-08-31)
+
+procurement UI 重做 + MinIO SPU 图片存储全部落地并提交到 `feature/procurement-ui`：
+
+1. **Backend**：`tts_erp_v2/storage/minio_client.py` + `/v2/spu-images/*`（presigned upload/confirm/list/delete）+ `procurement.spu_images` 表（`schema_storage.sql`，**生产库还没 apply**）。
+2. **Frontend**：`/v2/pages/manual-costs` 壳页面 + `/static/console.{css,js}`（shop switcher + 三 tab 工作台）。
+3. **修了两个集成 bug**：`/endpoints` 在 FastAPI ≥0.141 lazy router 下丢路由（`_iter_resolved_routes`）；`GET /v2/spu-images` 无 filter 时 `AmbiguousParameter` 500（`CAST(:cp_id AS bigint)`）。
+
+**预存在的基线问题（master 上同样复现，与本分支无关，还没修）**：
+- `tests_v2/sync_worker` + `tests_v2/test_models_smoke.py::test_sync_jobs_lifecycle` 失败 —— 真库 `sync_cursors`/`sync_jobs` 有重复行。
+- `tests_v2/migration` 跑到 ~59% hang 住（怀疑等 DB 锁）。
+- `tests_v2/jobs_tiktok` 5 个失败。
+
+**还没做**：branch 还没 merge 回 master；`schema_storage.sql` 还没在生产 PG apply；主 worktree（`/home/schan/tts-erp`）有另一 session 的 analytics_sync WIP 未提交（`analytics_sync/app.py`、`middleware/auth.py`、`tests_v2/api/test_auth_login.py` 等），不要混进本分支。
 
 ## TL;DR (2026-08-25)
 

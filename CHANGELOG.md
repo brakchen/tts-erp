@@ -1,5 +1,43 @@
 # tts-erp CHANGELOG
 
+## 2026-08-31 (feature) — Procurement console redesign + SPU image storage（branch `feature/procurement-ui`）
+
+设计文档：`tech-doc/procurement-ui-redesign.md`（design tokens + API contracts）。
+
+### Backend — MinIO + `/v2/spu-images/*`
+- 新 `tts_erp_v2/storage/minio_client.py`：`MinioClient.from_env()` 包装 minio SDK
+  （presigned PUT/GET、bucket 自举、head/stat）；配置走 `.env` `MINIO_*` 块。
+- 新 `tts_erp_v2/api/v2/spu_images.py`：
+  - `POST /v2/spu-images/upload-url`（readwrite）— 签发 presigned PUT，落 `awaiting_upload` 行
+  - `POST /v2/spu-images/{id}/confirm`（readwrite）— head 校验对象存在后置 `ready`
+  - `GET /v2/spu-images[?channel_product_id=]`（readonly）— ready 列表 + presigned GET URL
+  - `DELETE /v2/spu-images/{id}`（readwrite）— 软删
+  - Cookie 会话下的 mutation 带 CSRF guard（与 manual-costs POST 同款）
+- 新 `tts_erp_v2/storage/schema_storage.sql`：`procurement.spu_images` 表。
+- **fix**: `GET /v2/spu-images` 不带 filter 时 `CAST(:cp_id AS bigint)` 修
+  `AmbiguousParameter` 500（回归测试 `test_list_without_channel_product_id_returns_all_ready`）。
+- `pyproject.toml`：补 `[project]` 依赖清单（含 `minio>=7.2`），uv/pip 可解析。
+
+### Frontend — operator console 重做
+- `tts_erp_v2/api/v2/pages.py` 重写：`/v2/pages/manual-costs` 改为壳页面
+  （shop switcher + 三 tab 工作台：Needs cost / Needs photo / Recently filed）。
+- 新 `tts_erp_v2/static/{css/console.css,js/console.js}`：`/static/` 挂载
+  （readonly 级 auth，匿名 401；浏览器走 cookie 登录流）。
+- `middleware/auth.py`：`/static/` 归 readonly 前缀；`/v2/spu-images*` 按
+  GET=readonly / mutation=readwrite 分类。
+
+### 顺带修复
+- **`/endpoints` 懒加载路由**：FastAPI ≥0.141 `include_router` 变 lazy，
+  `app.routes` 里是 `_IncludedRouter` 占位符导致 introspection 丢路由/出 `None` path；
+  本分支初版用 `_iter_resolved_routes()`，merge 时统一到 master 的
+  `_walk_v2_routes()`（前缀拼回 + 递归，2026-08-30 fix 条目）。
+
+### 测试
+- 新 `tests_v2/storage/test_minio_client.py`（mock MinIO）、
+  `tests_v2/api/test_spu_images.py`（20 tests，fake MinIO + 真 PG）、
+  `tests_v2/api/test_manual_costs_page_v2.py`、`test_missing_cost_photos.py`。
+- `tests_v2/api/test_pages.py` 适配新壳页面 + `/endpoints` 懒加载回归。
+
 ## 2026-08-30 (refactor) — analytics_sync 统一到 tts-erp v2：standalone :9878 退役
 
 把 Chrome 扩展 (`tk-adv-cost-monitor`) 上传 / cursor 后端从独立 FastAPI 进程

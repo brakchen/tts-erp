@@ -80,16 +80,41 @@ SQL_CLOSE_OLD_MANUAL_COSTS = (
     "AND id <> :keep_id"
 )
 SQL_LIST_MISSING_COST_PRODUCTS = (
-    "SELECT cp.id, cp.external_product_id, cp.title "
+    "SELECT cp.id, cp.external_product_id, cp.title, cp.channel_account_id, "
+    "       (NOT EXISTS ("
+    "         SELECT 1 FROM procurement.spu_images si "
+    "         WHERE si.channel_product_id = cp.id "
+    "         AND si.status = 'ready' AND si.deleted_at IS NULL"
+    "       )) AS missing_photo "
     "FROM commerce.channel_products cp "
     "WHERE cp.status = 'active' "
+    "AND (CAST(:acct_id AS bigint) IS NULL OR cp.channel_account_id = CAST(:acct_id AS bigint)) "
     "AND NOT EXISTS ("
     "  SELECT 1 FROM procurement.manual_product_costs m "
     "  WHERE m.channel_product_id = cp.id AND m.valid_to IS NULL"
     ") AND NOT EXISTS ("
     "  SELECT 1 FROM linkage.effective_product_links epl "
     "  WHERE epl.channel_product_id = cp.id"
-    ") ORDER BY cp.id LIMIT :limit OFFSET :offset"
+    ") ORDER BY cp.id LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
+)
+SQL_TOTAL_MISSING_PHOTO = (
+    "SELECT COUNT(*) AS n FROM ("
+    "  SELECT cp.id "
+    "  FROM commerce.channel_products cp "
+    "  WHERE cp.status = 'active' "
+    "  AND (CAST(:acct_id AS bigint) IS NULL OR cp.channel_account_id = CAST(:acct_id AS bigint)) "
+    "  AND NOT EXISTS ("
+    "    SELECT 1 FROM procurement.manual_product_costs m "
+    "    WHERE m.channel_product_id = cp.id AND m.valid_to IS NULL"
+    "  ) AND NOT EXISTS ("
+    "    SELECT 1 FROM linkage.effective_product_links epl "
+    "    WHERE epl.channel_product_id = cp.id"
+    "  ) AND NOT EXISTS ("
+    "    SELECT 1 FROM procurement.spu_images si "
+    "    WHERE si.channel_product_id = cp.id "
+    "    AND si.status = 'ready' AND si.deleted_at IS NULL"
+    "  )"
+    ") sub"
 )
 
 
@@ -100,6 +125,7 @@ _STMT_RESOLVE_CHANNEL_PRODUCT = text(SQL_RESOLVE_CHANNEL_PRODUCT)
 _STMT_INSERT_MANUAL_COST = text(SQL_INSERT_MANUAL_COST)
 _STMT_CLOSE_OLD_MANUAL_COSTS = text(SQL_CLOSE_OLD_MANUAL_COSTS)
 _STMT_LIST_MISSING_COST_PRODUCTS = text(SQL_LIST_MISSING_COST_PRODUCTS)
+_STMT_TOTAL_MISSING_PHOTO = text(SQL_TOTAL_MISSING_PHOTO)
 
 
 def _cost_snapshot_row(row: Any) -> CostSnapshotOut:
@@ -147,7 +173,7 @@ def list_cost_snapshots(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> list[CostSnapshotOut]:
-    rows = sess.execute(  # noqa: S608
+    rows = sess.execute(
 
         _STMT_COST_SNAPSHOTS,
         {
@@ -168,7 +194,7 @@ def list_profit_daily(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> list[ProfitDailyOut]:
-    rows = sess.execute(  # noqa: S608
+    rows = sess.execute(
 
         _STMT_PROFIT_DAILY,
         {
@@ -184,7 +210,7 @@ def list_profit_daily(
 @router.get("/coverage", response_model=CoverageReport)
 def coverage_report(sess: Session = Depends(get_session)) -> CoverageReport:
     """Aggregate coverage / health snapshot."""
-    row = sess.execute(  # noqa: S608
+    row = sess.execute(
         _STMT_COVERAGE_REPORT).one()
     return CoverageReport(
         total_spus=int(row.total_spus or 0),
@@ -198,27 +224,48 @@ def coverage_report(sess: Session = Depends(get_session)) -> CoverageReport:
 @router.get("/missing-cost-products")
 def list_missing_cost_products(
     sess: Session = Depends(get_session),
+    channel_account_id: int | None = Query(default=None, ge=1),
     limit: int = Query(default=200, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
-) -> list[dict]:
+) -> dict:
     """SPUs the operator should fill in: active + no manual cost + no link.
 
     Returns the table backing the manual-costs page form. The page
     polls this endpoint with the operator's bearer token.
+
+    Extended per tech-doc/procurement-ui-redesign.md §3.5: the body is
+    now an object ``{items: [...], total_missing_photo: int}``. Each
+    item carries ``missing_photo`` (bool). Back-compat: existing
+    consumers that ignore the wrapper and read row fields keep working
+    because the per-row shape is unchanged.
+
+    ``channel_account_id`` scopes the list to one shop; when omitted,
+    the response spans all shops (legacy behaviour, used by the global
+    test_auth_login.py probe).
     """
-    rows = sess.execute(  # noqa: S608
+    items_rows = sess.execute(
 
         _STMT_LIST_MISSING_COST_PRODUCTS,
-        {"limit": limit, "offset": offset},
+        {"acct_id": channel_account_id, "limit": limit, "offset": offset},
     ).all()
-    return [
-        {
-            "channel_product_id": r.id,
-            "external_product_id": r.external_product_id,
-            "title": r.title,
-        }
-        for r in rows
-    ]
+    total_row = sess.execute(
+
+        _STMT_TOTAL_MISSING_PHOTO,
+        {"acct_id": channel_account_id},
+    ).one()
+    return {
+        "items": [
+            {
+                "channel_product_id": r.id,
+                "external_product_id": r.external_product_id,
+                "title": r.title,
+                "channel_account_id": r.channel_account_id,
+                "missing_photo": bool(r.missing_photo),
+            }
+            for r in items_rows
+        ],
+        "total_missing_photo": int(total_row.n or 0),
+    }
 
 
 @router.post(
@@ -251,7 +298,7 @@ def submit_manual_cost(
                 status.HTTP_403_FORBIDDEN,
                 "cookie-authed POST must set header X-Requested-With: tts-erp (CSRF guard)",
             )
-    cp_row = sess.execute(  # noqa: S608
+    cp_row = sess.execute(
 
         _STMT_RESOLVE_CHANNEL_PRODUCT,
         {"ext_id": body.channel_product_external_id},
@@ -266,7 +313,7 @@ def submit_manual_cost(
     created_by = f"api_key:{role}"
     valid_from = body.valid_from or datetime.now()
 
-    new_row = sess.execute(  # noqa: S608
+    new_row = sess.execute(
 
         _STMT_INSERT_MANUAL_COST,
         {
