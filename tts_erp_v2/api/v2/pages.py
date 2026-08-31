@@ -69,13 +69,8 @@ _PAGE_HTML = """<!doctype html>
   <main class="container-fluid px-3 px-lg-4 py-3" style="max-width: 1280px">
     <ul class="nav nav-tabs" role="tablist" aria-label="工作台标签页">
       <li class="nav-item" role="presentation">
-        <button class="tab nav-link active" type="button" role="tab" data-tab="needs_cost" aria-selected="true" aria-controls="grid-rows">
-          待填成本 <span class="badge text-bg-secondary" id="badge-cost">·</span>
-        </button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button class="tab nav-link" type="button" role="tab" data-tab="needs_photo" aria-selected="false" aria-controls="grid-rows">
-          待传图片 <span class="badge text-bg-secondary" id="badge-photo">·</span>
+        <button class="tab nav-link active" type="button" role="tab" data-tab="pending" aria-selected="true" aria-controls="grid-rows">
+          待处理 <span class="badge text-bg-secondary" id="badge-pending">·</span>
         </button>
       </li>
       <li class="nav-item" role="presentation">
