@@ -12,9 +12,9 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
-
 from sqlalchemy import select
 
+from tts_erp_v2.db.constants import ACTIVE_PRODUCT_STATUS
 from tts_erp_v2.db.models import (
     ChannelAccount,
     ChannelProduct,
@@ -24,8 +24,11 @@ from tts_erp_v2.db.models import (
 )
 from tts_erp_v2.reporting import cost_snapshots
 
-
-pytestmark = [pytest.mark.domain_reporting, pytest.mark.domain_finance, pytest.mark.layer_integration]
+pytestmark = [
+    pytest.mark.domain_reporting,
+    pytest.mark.domain_finance,
+    pytest.mark.layer_integration,
+]
 
 
 def _utc(year=2026, month=8, day=29):
@@ -46,7 +49,7 @@ def _make_channel_account(session, external_id="TEST_TT_SHOP_C"):
     return acct
 
 
-def _make_channel_product(session, account, external_id, status="ACTIVE"):
+def _make_channel_product(session, account, external_id, status=ACTIVE_PRODUCT_STATUS):
     p = ChannelProduct(
         channel_account_id=account.id,
         external_product_id=external_id,
@@ -170,12 +173,8 @@ def test_no_cost_inventory_lists_active_spus_without_snapshot(db_session):
     """active_spus_without_cost() returns active channel_products with no
     effective cost (no manual, no purchase_order unit cost)."""
     ca = _make_channel_account(db_session)
-    cp_active_no_cost = _make_channel_product(
-        db_session, ca, "TEST_SPU_ACTIVE_NC", status="ACTIVE"
-    )
-    cp_active_with_cost = _make_channel_product(
-        db_session, ca, "TEST_SPU_ACTIVE_OK", status="ACTIVE"
-    )
+    cp_active_no_cost = _make_channel_product(db_session, ca, "TEST_SPU_ACTIVE_NC")
+    cp_active_with_cost = _make_channel_product(db_session, ca, "TEST_SPU_ACTIVE_OK")
     cp_inactive_no_cost = _make_channel_product(
         db_session, ca, "TEST_SPU_DELISTED", status="DELETED"
     )

@@ -12,6 +12,7 @@ source exists, the resolver returns None and the snapshot job simply
 doesn't write a row. The SPU then appears in
 ``active_spus_without_cost()`` so the operator can fill the manual form.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ from decimal import Decimal
 from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
+from tts_erp_v2.db.constants import ACTIVE_PRODUCT_STATUS
 from tts_erp_v2.db.models import (
     ChannelProduct,
     ManualProductCost,
@@ -109,7 +111,7 @@ def active_spus_without_cost(session: Session) -> list[tuple[str, int]]:
     )
     rows = session.execute(
         select(ChannelProduct.external_product_id, ChannelProduct.id)
-        .where(ChannelProduct.status == "ACTIVE")
+        .where(ChannelProduct.status == ACTIVE_PRODUCT_STATUS)
         .where(~cp_with_manual)
         .order_by(ChannelProduct.external_product_id)
     ).all()
@@ -129,9 +131,13 @@ def rebuild_snapshots(
     aggregator when it ships in Lane C / Lane F; the default skips the
     purchase-order branch."""
     rows_written = 0
-    spus = session.execute(
-        select(ChannelProduct).where(ChannelProduct.status == "ACTIVE")
-    ).scalars().all()
+    spus = (
+        session.execute(
+            select(ChannelProduct).where(ChannelProduct.status == ACTIVE_PRODUCT_STATUS)
+        )
+        .scalars()
+        .all()
+    )
     for cp in spus:
         po_cost, po_currency = (None, None)
         if purchase_order_lookup is not None:
