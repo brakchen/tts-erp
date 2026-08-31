@@ -89,10 +89,44 @@ def clear_cache() -> None:
     _cache.clear()
 
 
+def _strip_external_prefix(path: str) -> str:
+    """Remove the TTS_ERP_EXTERNAL_PREFIX from the front of a request path.
+
+    2026-09-01: NGINX in production was observed forwarding some routes
+    with the /tts/... prefix intact (not stripped by ``proxy_pass ... /;``)
+    while stripping the prefix for others. The downstream routing logic
+    was matching against canonical internal paths (e.g. ``/v2/auth/login``)
+    and missed the prefixed forms, producing a redirect loop: each 302
+    Location carried the prefixed path as the ``next`` value, the browser
+    re-fetched that path, NGINX forwarded it again, the middleware 401'd
+    it, and so on.
+
+    Stripping here makes classification idempotent — the same internal
+    path matches regardless of whether NGINX (or any other reverse proxy)
+    chose to strip the prefix on a given request. The cost is one
+    string-prefix check per request.
+    """
+    raw_prefix = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "")
+    if not raw_prefix:
+        return path
+    # Normalise: ensure prefix ends with "/" so ``/tts`` matches ``/tts/...``
+    # but not ``/ttsfoo``. The env value is the operator's choice; we
+    # don't second-guess its content beyond that.
+    prefix = raw_prefix if raw_prefix.endswith("/") else raw_prefix + "/"
+    if path.startswith(prefix):
+        remainder = path[len(prefix):]
+        return "/" + remainder if not remainder.startswith("/") else remainder
+    return path
+
+
 def required_role(method: str, path: str) -> int | None:
     """Return the minimum role level for ``(method, path)``, or None if exempt."""
     # Strip query string if any.
     p = path.split("?", 1)[0]
+    # 2026-09-01: strip the external prefix (TTS_ERP_EXTERNAL_PREFIX) so
+    # classification is correct whether or not the upstream proxy chose
+    # to forward the prefixed form. See _strip_external_prefix.
+    p = _strip_external_prefix(p)
     if p in EXEMPT_PATHS:
         return None
     # analytics_sync is readwrite (Chrome extension uploads).
@@ -316,6 +350,33 @@ class AuthMiddleware:
             await self.app(scope, receive, send)
             return
 
+        # 2026-09-01: NGINX in production was observed forwarding some
+        # routes with the TTS_ERP_EXTERNAL_PREFIX intact (not stripped
+        # by ``proxy_pass ... /;``) while stripping the prefix for
+        # others. The auth middleware classified against canonical
+        # internal paths, the router matched the prefixed form, and
+        # the 302 Location compounded the prefix on each redirect —
+        # producing an infinite loop on daqiang.nat100.top. Rewriting
+        # scope["path"] (and scope["raw_path"]) to the internal form
+        # here makes every downstream layer — auth, router, access
+        # log — see the same canonical path. No-op when the upstream
+        # proxy already stripped.
+        external_prefix = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "")
+        if external_prefix:
+            normalized = (
+                external_prefix
+                if external_prefix.endswith("/")
+                else external_prefix + "/"
+            )
+            req_path = scope.get("path", "")
+            if req_path.startswith(normalized):
+                stripped = req_path[len(normalized):]
+                scope["path"] = "/" + stripped if not stripped.startswith("/") else stripped
+                # FastAPI uses raw_path for the actual route match; keep
+                # it in sync so /v2/auth/login (no prefix) registers.
+                if scope.get("raw_path"):
+                    scope["raw_path"] = scope["path"].encode("latin-1")
+
         mode = os.environ.get("TTS_ERP_AUTH_MODE", "off")
         if mode == "off":
             await self.app(scope, receive, send)
@@ -446,7 +507,14 @@ class AuthMiddleware:
         # SPA reloads against the same public URL it started on.
         if denied[0] == 401 and method == "GET" and _accept_text_html(scope):
             qs = scope.get("query_string", b"").decode("latin-1")
-            next_value = path + (("?" + qs) if qs else "")
+            # 2026-09-01: use the INTERNAL path (prefix-stripped) as the
+            # ``next`` value. The login page prepends the prefix when
+            # rendering the form's hidden field, so passing the prefixed
+            # form here would double-stack on every redirect. The Location
+            # header below still uses the prefix so the browser lands
+            # on the correct public URL.
+            internal_path = _strip_external_prefix(path)
+            next_value = internal_path + (("?" + qs) if qs else "")
             prefix = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "")
             # The login page itself lives behind the NGINX prefix in
             # production (daqiang.nat100.top/tts/v2/auth/login), so the
