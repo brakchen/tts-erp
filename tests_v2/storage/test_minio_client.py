@@ -22,7 +22,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from minio.error import S3Error
+from minio.error import S3Error  # noqa: I001 — intentionally after `import pytest` for isort black profile
 
 from tts_erp_v2.storage.minio_client import (
     MinioClient,
@@ -425,3 +425,103 @@ def test_build_object_key_zero_pads_date():
         on_date=datetime(2026, 3, 5, tzinfo=UTC),
     )
     assert "/2026-03-05/" in key
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-01: regression coverage for the LAN-endpoint-without-public-host
+# startup warning. This is the failure mode the operator hit on
+# daqiang.nat100.top: MINIO_ENDPOINT was 127.0.0.1:9000 (server-only,
+# reachable from the app on the LAN) and MINIO_PUBLIC_HOST was empty,
+# so presigned URLs the browser received kept pointing at 127.0.0.1
+# and uploads failed silently. The warning makes this misconfig visible
+# the first time the app starts.
+# ---------------------------------------------------------------------------
+
+
+def test_lan_endpoint_warns_when_public_host_unset(capsys, monkeypatch):
+    """LAN-looking endpoint + empty MINIO_PUBLIC_HOST → stderr warning.
+
+    Loopback and RFC1918 are the two prefix families that mean "the
+    browser cannot reach this directly". The warning is a one-liner
+    on stderr so an ops engineer grepping logs sees it immediately.
+    """
+    from tts_erp_v2.storage import minio_client as mc
+
+    monkeypatch.setattr(mc, "_LAN_PREFIXES", ("127.",))  # narrow for test
+    for k, v in _env(MINIO_ENDPOINT="127.0.0.1:9000", MINIO_PUBLIC_HOST="").items():
+        monkeypatch.setenv(k, v)
+    with patch("tts_erp_v2.storage.minio_client.Minio"):
+        MinioClient.from_env()
+    err = capsys.readouterr().err
+    assert "[minio]" in err
+    assert "MINIO_PUBLIC_HOST" in err
+    assert "127.0.0.1:9000" in err
+
+
+def test_lan_endpoint_quiet_when_public_host_set(capsys, monkeypatch):
+    """LAN endpoint + populated MINIO_PUBLIC_HOST → no warning.
+
+    The warning is only for the misconfig, not for the production
+    setup where the endpoint is LAN-internal but the public_host
+    correctly points at the NGINX ingress.
+    """
+    from tts_erp_v2.storage import minio_client as mc
+
+    monkeypatch.setattr(mc, "_LAN_PREFIXES", ("127.",))
+    for k, v in _env(
+        MINIO_ENDPOINT="127.0.0.1:9000",
+        MINIO_PUBLIC_HOST="https://daqiang.nat100.top/tts",
+    ).items():
+        monkeypatch.setenv(k, v)
+    with patch("tts_erp_v2.storage.minio_client.Minio"):
+        MinioClient.from_env()
+    err = capsys.readouterr().err
+    assert "[minio]" not in err
+
+
+def test_public_endpoint_no_warning_even_without_public_host(capsys, monkeypatch):
+    """Public-looking endpoint + empty MINIO_PUBLIC_HOST → no warning.
+
+    If the operator runs the app on a box where MINIO_ENDPOINT is
+    itself public (e.g. a real bucket hostname), no rewriting is
+    needed and the warning is a false positive. The check is
+    suffix-based, so we only fire when the endpoint actually looks
+    like a LAN address.
+    """
+    for k, v in _env(
+        MINIO_ENDPOINT="s3.us-east-1.amazonaws.com",
+        MINIO_PUBLIC_HOST="",
+    ).items():
+        monkeypatch.setenv(k, v)
+    with patch("tts_erp_v2.storage.minio_client.Minio"):
+        MinioClient.from_env()
+    err = capsys.readouterr().err
+    assert "[minio]" not in err
+
+
+def test_rewritten_url_uses_prefixed_public_host(monkeypatch):
+    """End-to-end: the presigned URL the browser receives is the
+    NGINX-fronted path with the /tts prefix, not the LAN endpoint.
+    This is the exact URL shape the operator reported as broken.
+    """
+    for k, v in _env(
+        MINIO_ENDPOINT="127.0.0.1:9000",
+        MINIO_PUBLIC_HOST="https://daqiang.nat100.top/tts",
+    ).items():
+        monkeypatch.setenv(k, v)
+    with patch("tts_erp_v2.storage.minio_client.Minio") as Mock:
+        instance = Mock.return_value
+        instance.presigned_put_object.return_value = (
+            "http://127.0.0.1:9000/tts-erp-spu-images/shops/314/spus/1349/"
+            "2026-08-31/467-abc.jpg?X-Amz-Signature=178e9efa5144"
+        )
+        client = MinioClient.from_env()
+        url = client.presign_put(
+            "shops/314/spus/1349/2026-08-31/467-abc.jpg",
+            "image/jpeg",
+        )
+    assert url.startswith(
+        "https://daqiang.nat100.top/tts/tts-erp-spu-images/shops/314/"
+    )
+    assert "X-Amz-Signature=178e9efa5144" in url
+    assert "127.0.0.1" not in url
