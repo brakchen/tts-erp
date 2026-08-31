@@ -29,11 +29,22 @@ All other routes go through v2 routers and require auth.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
-from tts_erp_v2.api.v2 import auth, commerce, linkage, llm_context, pages, reporting
+from tts_erp_v2.api.v2 import (
+    auth,
+    commerce,
+    linkage,
+    llm_context,
+    pages,
+    reporting,
+    spu_images,
+)
 from tts_erp_v2.middleware.access_log import AccessLogMiddleware
 from tts_erp_v2.middleware.auth import AuthMiddleware
 from tts_erp_v2.middleware.rate_limit import RateLimitMiddleware
@@ -43,9 +54,19 @@ def _build_routes(app: FastAPI) -> None:
     app.include_router(commerce.router)
     app.include_router(linkage.router)
     app.include_router(reporting.router)
+    app.include_router(spu_images.router)  # SPU image upload (presigned MinIO)
     app.include_router(pages.router)
     app.include_router(llm_context.router)
     app.include_router(auth.router)  # browser login + session cookie
+
+    # Operator-console static assets (console.css / console.js). Auth is
+    # readonly-level via the "/static/" prefix in middleware/auth.py —
+    # any authenticated session passes; anonymous requests get 401.
+    app.mount(
+        "/static",
+        StaticFiles(directory=Path(__file__).parent / "static"),
+        name="static",
+    )
 
 
 def build_app() -> FastAPI:
@@ -124,7 +145,7 @@ def _register_public_routes(app: FastAPI) -> None:
         (hard switch — see tech-doc/refactor-tech-plan-v2 §6).
         """
         items = []
-        for r in app.routes:
+        for r in _iter_resolved_routes(app):
             path = getattr(r, "path", None)
             if not path:
                 continue
@@ -140,6 +161,26 @@ def _register_public_routes(app: FastAPI) -> None:
             )
         items.sort(key=lambda x: x["path"])
         return JSONResponse({"endpoints": items, "count": len(items)})
+
+
+def _iter_resolved_routes(app: FastAPI):
+    """Yield concrete routes, expanding lazy ``_IncludedRouter`` wrappers.
+
+    FastAPI ≥0.141 makes ``include_router`` lazy: ``app.routes`` contains
+    ``_IncludedRouter`` placeholders instead of copied ``APIRoute``s until
+    the router is resolved (startup/first-match). Introspection endpoints
+    like ``/endpoints`` therefore see only the eagerly-added routes. The
+    wrapped router's ``original_router.routes`` carry full prefixed paths,
+    so expand those here. Older FastAPI versions have no such wrapper and
+    fall through unchanged.
+    """
+    for r in app.routes:
+        if getattr(r, "methods", None):
+            yield r
+            continue
+        orig = getattr(r, "original_router", None)
+        if orig is not None:
+            yield from orig.routes
 
 
 def _env_auth_mode() -> str:

@@ -1,24 +1,21 @@
 """Server-rendered page tests (Lane E v2/pages/manual-costs).
 
-The page is a single HTMLResponse with inline JS — we just assert:
-- GET returns 200 + content-type text/html
-- The response body contains the table grid, the form row template,
-  and a fetch() call to /v2/reporting/missing-cost-products
-- The page is exempt from auth (auth middleware lets it through as
-  GET /v2/pages/manual-costs falls under /v2/* → readonly role required,
-  but the page itself is readonly-safe because it does no DB writes;
-  we verify the page works with a readwrite key in enforce mode).
+2026-08-31 (feature/procurement-ui): the page was redesigned as a thin
+HTML shell that links ``/static/css/console.css`` + ``/static/js/console.js``
+— all endpoint URLs and the workbench DOM now live in the static assets.
+The detailed redesign assertions (tab labels, static refs, no token-paste
+block) live in ``tests_v2/api/test_manual_costs_page_v2.py``.
 
-The page lives at /v2/pages/manual-costs (mounted by pages.router with
-prefix /v2/pages). The required-role for any /v2/* path is readonly,
-so any bearer key (even readonly) can fetch the page.
+This file keeps the two load-bearing contract checks:
+- GET returns 200 + text/html and links the static assets
+- No Authorization header → 401 (any /v2/* path requires readonly+)
 """
 
 from __future__ import annotations
 
 
 def test_manual_costs_page_returns_200_with_html(api_client, readonly_key):
-    """GET the page → 200 text/html containing the form grid."""
+    """GET the page → 200 text/html shell linking the static assets."""
     r = api_client.get(
         "/v2/pages/manual-costs",
         headers={"Authorization": f"Bearer {readonly_key}"},
@@ -26,16 +23,37 @@ def test_manual_costs_page_returns_200_with_html(api_client, readonly_key):
     assert r.status_code == 200, r.text
     assert r.headers["content-type"].startswith("text/html"), r.headers
     body = r.text
-    # Sanity: key DOM elements the operator UI relies on.
-    assert "<table" in body
-    assert 'id="rows"' in body
-    assert "/v2/reporting/missing-cost-products" in body
-    assert "/v2/reporting/manual-costs" in body
-    assert "channel_product_id" in body
-    assert "external_product_id" in body
+    # The page is a shell; endpoint URLs and the grid DOM live in
+    # /static/js/console.js (see test_manual_costs_page_v2.py).
+    assert "/static/css/console.css" in body
+    assert "/static/js/console.js" in body
+    # Token-paste UI must stay gone.
+    assert "API token" not in body
+    assert "mc_token" not in body
 
 
 def test_manual_costs_page_requires_some_auth(api_client):
     """No Authorization header → 401 (any /v2/* path requires readonly+)."""
     r = api_client.get("/v2/pages/manual-costs")
     assert r.status_code == 401, r.text
+
+
+def test_endpoints_index_lists_included_router_routes(api_client):
+    """/endpoints must expand FastAPI ≥0.141 lazy _IncludedRouter wrappers.
+
+    Regression guard for the 2026-08-31 finding: FastAPI 0.141 makes
+    include_router lazy, so a naive ``app.routes`` iteration sees only the
+    eagerly-added public routes. The operator index must still list every
+    v2 route (prod restart with the new FastAPI would otherwise degrade
+    /endpoints to 6 entries).
+    """
+    r = api_client.get("/endpoints")
+    assert r.status_code == 200, r.text
+    paths = {e["path"] for e in r.json()["endpoints"]}
+    # Representative routes from every included router.
+    assert "/v2/pages/manual-costs" in paths
+    assert "/v2/reporting/manual-costs" in paths
+    assert "/v2/commerce/channel-accounts" in paths
+    assert "/v2/spu-images/upload-url" in paths
+    assert "/v2/spu-images/{image_id}/confirm" in paths
+    assert "/v2/auth/login" in paths
