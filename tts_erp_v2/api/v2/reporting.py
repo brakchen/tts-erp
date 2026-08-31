@@ -32,8 +32,14 @@ SQL_COST_SNAPSHOTS = (
     "SELECT id, channel_product_id, cost_method, unit_cost, currency, "
     "calculation_version, calculated_at "
     "FROM reporting.product_cost_snapshots "
-    "WHERE (:channel_id IS NULL OR channel_product_id = :channel_id) "
-    "AND (:method IS NULL OR cost_method = :method) "
+    # (2026-08-31) The optional-filter pattern (:param IS NULL OR col = :param)
+    # used to fire psycopg.errors.AmbiguousParameter — when :param is NULL,
+    # PG cannot infer its type and refuses to plan the query. Explicit CASTs
+    # pin the parameter types to the column types (channel_id bigint,
+    # method text) so the WHERE evaluates cleanly with either bound value.
+    "WHERE (CAST(:channel_id AS bigint) IS NULL "
+    "OR channel_product_id = :channel_id) "
+    "AND (CAST(:method AS text) IS NULL OR cost_method = :method) "
     "ORDER BY calculated_at DESC NULLS LAST LIMIT :limit OFFSET :offset"
 )
 SQL_PROFIT_DAILY = (
