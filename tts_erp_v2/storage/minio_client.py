@@ -5,6 +5,14 @@ imports ``minio`` directly. That keeps the surface narrow and makes
 unit tests trivial (patch ``tts_erp_v2.storage.minio_client.Minio``).
 
 Spec: tech-doc/procurement-ui-redesign.md §5.
+
+NGINX requirement (verified 2026-09-01): the reverse proxy that
+forwards presigned URLs to MinIO must rewrite the upstream
+`Host` header to the SDK endpoint (``127.0.0.1:9000``). The
+SigV4 signature covers the `host` header (X-Amz-SignedHeaders=host),
+and the SDK signs against the local endpoint — not the public
+hostname. Without this rewrite MinIO returns 403. See
+~/setup/nginx/conf.d/services.conf for the canonical location block.
 """
 
 from __future__ import annotations
