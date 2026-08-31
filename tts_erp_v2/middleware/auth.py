@@ -117,10 +117,7 @@ def required_role(method: str, path: str) -> int | None:
     ):
         return ROLE_LEVEL["readwrite"]
     # v2: DELETE under /v2/spu-images/{id} requires readwrite.
-    if (
-        method.upper() == "DELETE"
-        and p.startswith("/v2/spu-images/")
-    ):
+    if method.upper() == "DELETE" and p.startswith("/v2/spu-images/"):
         return ROLE_LEVEL["readwrite"]
     # v2: exact-match readonly paths (e.g. /v2/llm-context).
     if p in _READONLY_EXACT:

@@ -5,6 +5,7 @@
 设计文档：`tech-doc/procurement-ui-redesign.md`（design tokens + API contracts）。
 
 ### Backend — MinIO + `/v2/spu-images/*`
+
 - 新 `tts_erp_v2/storage/minio_client.py`：`MinioClient.from_env()` 包装 minio SDK
   （presigned PUT/GET、bucket 自举、head/stat）；配置走 `.env` `MINIO_*` 块。
 - 新 `tts_erp_v2/api/v2/spu_images.py`：
@@ -19,6 +20,7 @@
 - `pyproject.toml`：补 `[project]` 依赖清单（含 `minio>=7.2`），uv/pip 可解析。
 
 ### Frontend — operator console 重做
+
 - `tts_erp_v2/api/v2/pages.py` 重写：`/v2/pages/manual-costs` 改为壳页面
   （shop switcher + 三 tab 工作台：Needs cost / Needs photo / Recently filed）。
 - 新 `tts_erp_v2/static/{css/console.css,js/console.js}`：`/static/` 挂载
@@ -27,12 +29,14 @@
   GET=readonly / mutation=readwrite 分类。
 
 ### 顺带修复
+
 - **`/endpoints` 懒加载路由**：FastAPI ≥0.141 `include_router` 变 lazy，
   `app.routes` 里是 `_IncludedRouter` 占位符导致 introspection 丢路由/出 `None` path；
   本分支初版用 `_iter_resolved_routes()`，merge 时统一到 master 的
   `_walk_v2_routes()`（前缀拼回 + 递归，2026-08-30 fix 条目）。
 
 ### 测试
+
 - 新 `tests_v2/storage/test_minio_client.py`（mock MinIO）、
   `tests_v2/api/test_spu_images.py`（20 tests，fake MinIO + 真 PG）、
   `tests_v2/api/test_manual_costs_page_v2.py`、`test_missing_cost_photos.py`。

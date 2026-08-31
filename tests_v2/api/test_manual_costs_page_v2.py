@@ -169,7 +169,13 @@ def test_console_js_unwraps_api_envelope():
     """
     from pathlib import Path
 
-    js = Path(__file__).resolve().parents[2] / "tts_erp_v2" / "static" / "js" / "console.js"
+    js = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "console.js"
+    )
     src = js.read_text(encoding="utf-8")
     assert "function unwrap(payload)" in src, "unwrap helper missing from console.js"
     # All three load functions must pipe their payload through unwrap().

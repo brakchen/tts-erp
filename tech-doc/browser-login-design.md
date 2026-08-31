@@ -1,6 +1,9 @@
 # Browser 登录页设计（v2 · 2026 版）
 
-> 状态：**待评审**。目标：让运营同学能用浏览器打开 `manual-costs` 页面并填写成本，
+> 状态：**已实施**（2026-08-31 前上线）。实现：`tts_erp_v2/api/v2/auth.py`（login/logout/me +
+> 登录页 HTML）+ `tts_erp_v2/middleware/session_auth.py`（HMAC 会话 cookie `tts_session`）+
+> `tts_erp_v2/middleware/auth.py`（cookie 优先鉴权 + 浏览器 302 重定向）。
+> 目标：让运营同学能用浏览器打开 `manual-costs` 页面并填写成本，
 > 而不是收到 401 JSON。设计原则：**API key 系统仍是唯一凭证源，不引入用户/密码账号体系**；
 > 登录页只是把「API key」兑换成「浏览器会话 cookie」的一层薄封装。
 

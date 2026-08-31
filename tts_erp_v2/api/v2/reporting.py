@@ -68,9 +68,7 @@ SQL_COVERAGE_REPORT = (
     "(SELECT COALESCE(MAX(calculation_version), 1) "
     "FROM reporting.product_cost_snapshots) AS calculation_version"
 )
-SQL_RESOLVE_CHANNEL_PRODUCT = (
-    "SELECT id FROM commerce.channel_products WHERE external_product_id = :ext_id LIMIT 1"
-)
+SQL_RESOLVE_CHANNEL_PRODUCT = "SELECT id FROM commerce.channel_products WHERE external_product_id = :ext_id LIMIT 1"
 SQL_INSERT_MANUAL_COST = (
     "INSERT INTO procurement.manual_product_costs ("
     "channel_product_id, unit_cost, currency, valid_from, valid_to, "
@@ -180,7 +178,6 @@ def list_cost_snapshots(
     offset: int = Query(default=0, ge=0),
 ) -> list[CostSnapshotOut]:
     rows = sess.execute(
-
         _STMT_COST_SNAPSHOTS,
         {
             "channel_id": channel_product_id,
@@ -201,7 +198,6 @@ def list_profit_daily(
     offset: int = Query(default=0, ge=0),
 ) -> list[ProfitDailyOut]:
     rows = sess.execute(
-
         _STMT_PROFIT_DAILY,
         {
             "channel_id": channel_product_id,
@@ -216,8 +212,7 @@ def list_profit_daily(
 @router.get("/coverage", response_model=CoverageReport)
 def coverage_report(sess: Session = Depends(get_session)) -> CoverageReport:
     """Aggregate coverage / health snapshot."""
-    row = sess.execute(
-        _STMT_COVERAGE_REPORT).one()
+    row = sess.execute(_STMT_COVERAGE_REPORT).one()
     return CoverageReport(
         total_spus=int(row.total_spus or 0),
         active_spus=int(row.active_spus or 0),
@@ -250,12 +245,10 @@ def list_missing_cost_products(
     test_auth_login.py probe).
     """
     items_rows = sess.execute(
-
         _STMT_LIST_MISSING_COST_PRODUCTS,
         {"acct_id": channel_account_id, "limit": limit, "offset": offset},
     ).all()
     total_row = sess.execute(
-
         _STMT_TOTAL_MISSING_PHOTO,
         {"acct_id": channel_account_id},
     ).one()
@@ -305,7 +298,6 @@ def submit_manual_cost(
                 "cookie-authed POST must set header X-Requested-With: tts-erp (CSRF guard)",
             )
     cp_row = sess.execute(
-
         _STMT_RESOLVE_CHANNEL_PRODUCT,
         {"ext_id": body.channel_product_external_id},
     ).first()
@@ -320,7 +312,6 @@ def submit_manual_cost(
     valid_from = body.valid_from or datetime.now()
 
     new_row = sess.execute(
-
         _STMT_INSERT_MANUAL_COST,
         {
             "cp_id": cp_id,
@@ -347,6 +338,7 @@ def submit_manual_cost(
     except Exception:
         sess.rollback()
     return _manual_cost_row(new_row)
+
 
 def _q(compiled_stmt, params, db):
     """Allowlisted execute helper; SQL is module-level, params are bound."""

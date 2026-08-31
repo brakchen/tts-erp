@@ -12,7 +12,12 @@
 
 > Feature branch: `feature/procurement-ui` · worktree: `~/tts-erp.procurement`
 > Owner: schan · Date: 2026-08-31
-> Status: implementation in progress
+> Status: **已实现并合入 master**（merge `aca4389`，2026-08-31；后续样式修正见
+> `dee1e8d` / `2cd0d6b`）。As-built 差异：
+> - 静态资源最终为 `tts_erp_v2/static/js/console.js` + `static/vendor/bootstrap.min.css`
+>   （后续 commit 改为自托管 Bootstrap，**没有**落地 §2.3 的 `/static/fonts/` 自托管字体
+>   和 §6 的 `static/css/console.css`）；
+> - 其余后端契约（§3 端点、§4 `procurement.spu_images` 表、§7 角色矩阵）均按本文落地。
 
 ## 1. What & why
 
@@ -29,7 +34,7 @@ need:
 Constraints (from `AGENTS.md`):
 
 - tts-erp is a FastAPI app — no SPA framework, no Jinja (server-rendered HTML
-  + plain inline JS, per `tts_erp_v2/api/v2/pages.py` precedent).
+  - plain inline JS, per `tts_erp_v2/api/v2/pages.py` precedent).
 - v2 endpoint conventions: `/v2/<domain>/<resource>` (see
   `tech-doc/external-api.md`), bearer/cookie auth, role gates in
   `tts_erp_v2/middleware/auth.py::required_role`.
@@ -64,7 +69,7 @@ receipt.
 
 | Token        | Hex       | Use                                                     |
 |--------------|-----------|---------------------------------------------------------|
-| `ink`        | `#1B1F23` | primary text, table headers, form labels                 |
+| `ink`        | `#1B1F23` | primary text, table headers, form labels                  |
 | `graphite`   | `#5C6470` | secondary text, captions, helper text                   |
 | `paper`      | `#E8E2D5` | page background (warm ledger tint, never the loud color)|
 | `slip`       | `#FFFFFF` | card / table-row background                              |
@@ -79,9 +84,9 @@ receipt.
 | Mono     | JetBrains Mono   | SKU codes, currency amounts, sizes, byte counts — all numeric & code data |
 
 Type scale: 11px mono · 13px body · 15px subhead · 22px h2 · 32px h1.
-Table leading 1.4; prose leading 1.55. IBM Plex and JetBrains Mono are
-self-hosted from `/static/fonts/` (no Google Fonts dependency, no third-party
-CDN leak of operator IP).
+Table leading 1.4; prose leading 1.55. ~~IBM Plex and JetBrains Mono are
+self-hosted from `/static/fonts/`~~（as-built：未落地——后续 commit `2cd0d6b`
+改为自托管 Bootstrap `static/vendor/bootstrap.min.css`，无第三方 CDN 依赖）
 
 ### 2.4 Layout
 
@@ -318,10 +323,11 @@ directly. Easier to mock in tests.
 
 ## 6. Frontend contracts
 
-The page HTML template lives in `tts_erp_v2/api/v2/pages.py` but the CSS
-and JS move to `tts_erp_v2/static/css/console.css` and
+The page HTML template lives in `tts_erp_v2/api/v2/pages.py`; JS lives in
 `tts_erp_v2/static/js/console.js` — referenced via `/static/...` and
 mounted by `app.mount("/static", StaticFiles(directory=...))`.
+（as-built：样式走自托管 `static/vendor/bootstrap.min.css`，本文原先规划的
+`static/css/console.css` 未落地。）
 
 The page JS layer has three top-level functions (no framework, no build
 step):

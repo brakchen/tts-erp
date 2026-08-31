@@ -34,6 +34,7 @@ from tts_erp_v2.storage.minio_client import (
 
 # --- env helpers ----------------------------------------------------------
 
+
 def _env(**overrides):
     base = {
         "MINIO_ENDPOINT": "127.0.0.1:9000",
@@ -52,9 +53,12 @@ def _env(**overrides):
 
 # --- helpers --------------------------------------------------------------
 
+
 def _s3error(code: str, message: str = "x") -> S3Error:
     """Construct an S3Error without doing a real HTTP call."""
-    response = SimpleNamespace(status=404, headers={}, reason="Not Found", read=lambda *a, **k: b"")
+    response = SimpleNamespace(
+        status=404, headers={}, reason="Not Found", read=lambda *a, **k: b""
+    )
     return S3Error(
         response=response,
         code=code,
@@ -77,11 +81,18 @@ def test_init_requires_all_env(monkeypatch):
         MinioClient.from_env()
 
 
-@pytest.mark.parametrize("missing", [
-    "MINIO_ENDPOINT", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY",
-    "MINIO_BUCKET", "MINIO_SECURE", "MINIO_REGION",
-    "MINIO_PRESIGN_EXPIRY_SECONDS",
-])
+@pytest.mark.parametrize(
+    "missing",
+    [
+        "MINIO_ENDPOINT",
+        "MINIO_ACCESS_KEY",
+        "MINIO_SECRET_KEY",
+        "MINIO_BUCKET",
+        "MINIO_SECURE",
+        "MINIO_REGION",
+        "MINIO_PRESIGN_EXPIRY_SECONDS",
+    ],
+)
 def test_init_missing_one_required_field(monkeypatch, missing):
     env = _env()
     env.pop(missing)
@@ -141,7 +152,9 @@ def test_presign_put_delegates_with_content_type(monkeypatch):
         )
         client = MinioClient.from_env()
         url = client.presign_put(
-            "shops/1/spus/2/x.jpg", "image/jpeg", expiry=timedelta(seconds=30),
+            "shops/1/spus/2/x.jpg",
+            "image/jpeg",
+            expiry=timedelta(seconds=30),
         )
     assert url.startswith("http://127.0.0.1:9000/")
     # SDK 7.2+ presigned_put_object takes only (bucket, object, expires).
@@ -178,7 +191,8 @@ def test_presign_get_respects_custom_expiry(monkeypatch):
         instance.presigned_get_object.return_value = "http://x"
         client = MinioClient.from_env()
         _, expires_at = client.presign_get(
-            "k", expiry=timedelta(seconds=10),
+            "k",
+            expiry=timedelta(seconds=10),
         )
     delta = expires_at - datetime.now(UTC)
     assert 5 <= delta.total_seconds() <= 15
@@ -232,9 +246,7 @@ def test_presign_put_unchanged_when_public_host_unset(monkeypatch):
         monkeypatch.setenv(k, v)
     with patch("tts_erp_v2.storage.minio_client.Minio") as Mock:
         instance = Mock.return_value
-        instance.presigned_put_object.return_value = (
-            "http://127.0.0.1:9000/k?sig=a"
-        )
+        instance.presigned_put_object.return_value = "http://127.0.0.1:9000/k?sig=a"
         client = MinioClient.from_env()
         url = client.presign_put("k", "image/jpeg")
     assert url == "http://127.0.0.1:9000/k?sig=a"
@@ -282,7 +294,9 @@ def test_stat_returns_normalised_dict(monkeypatch):
     for k, v in _env().items():
         monkeypatch.setenv(k, v)
     fake = SimpleNamespace(
-        size=1024, content_type="image/jpeg", etag="d41d8cd98f00b204e9800998ecf8427e",
+        size=1024,
+        content_type="image/jpeg",
+        etag="d41d8cd98f00b204e9800998ecf8427e",
     )
     with patch("tts_erp_v2.storage.minio_client.Minio") as Mock:
         instance = Mock.return_value
@@ -290,7 +304,9 @@ def test_stat_returns_normalised_dict(monkeypatch):
         client = MinioClient.from_env()
         out = client.stat("k")
     assert out == {
-        "size": 1024, "content_type": "image/jpeg", "etag": "d41d8cd98f00b204e9800998ecf8427e",
+        "size": 1024,
+        "content_type": "image/jpeg",
+        "etag": "d41d8cd98f00b204e9800998ecf8427e",
     }
 
 
@@ -350,15 +366,18 @@ def test_public_url_or_none_returns_url_when_set(monkeypatch):
 # --- slugify_filename -----------------------------------------------------
 
 
-@pytest.mark.parametrize("raw,expected", [
-    ("packing-slip-front.jpg", "packing-slip-front"),
-    ("My Photo (2).JPG", "my-photo-2"),
-    ("   ___   ", "image"),
-    ("foo/bar.png", "foo-bar"),
-    ("a" * 200, "a" * 64),
-    ("image with spaces & symbols!.webp", "image-with-spaces-symbols"),
-    ("中文图片.jpg", "image"),  # non-ascii -> default to 'image'
-])
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("packing-slip-front.jpg", "packing-slip-front"),
+        ("My Photo (2).JPG", "my-photo-2"),
+        ("   ___   ", "image"),
+        ("foo/bar.png", "foo-bar"),
+        ("a" * 200, "a" * 64),
+        ("image with spaces & symbols!.webp", "image-with-spaces-symbols"),
+        ("中文图片.jpg", "image"),  # non-ascii -> default to 'image'
+    ],
+)
 def test_slugify_filename(raw, expected):
     assert slugify_filename(raw) == expected
 
@@ -374,8 +393,11 @@ def test_slugify_filename_empty_after_strip_returns_image():
 
 def test_build_object_key_layout():
     key = build_object_key(
-        account_id=7, product_id=1234, image_id=555,
-        slug="packing-slip-front", ext="jpg",
+        account_id=7,
+        product_id=1234,
+        image_id=555,
+        slug="packing-slip-front",
+        ext="jpg",
         on_date=datetime(2026, 8, 31, tzinfo=UTC),
     )
     assert key == "shops/7/spus/1234/2026-08-31/555-packing-slip-front.jpg"
@@ -383,15 +405,23 @@ def test_build_object_key_layout():
 
 def test_build_object_key_default_ext_lowercase():
     key = build_object_key(
-        account_id=1, product_id=2, image_id=3,
-        slug="x", ext=".JPG", on_date=datetime(2026, 1, 1, tzinfo=UTC),
+        account_id=1,
+        product_id=2,
+        image_id=3,
+        slug="x",
+        ext=".JPG",
+        on_date=datetime(2026, 1, 1, tzinfo=UTC),
     )
     assert key.endswith("/3-x.jpg")
 
 
 def test_build_object_key_zero_pads_date():
     key = build_object_key(
-        account_id=1, product_id=2, image_id=3,
-        slug="x", ext="png", on_date=datetime(2026, 3, 5, tzinfo=UTC),
+        account_id=1,
+        product_id=2,
+        image_id=3,
+        slug="x",
+        ext="png",
+        on_date=datetime(2026, 3, 5, tzinfo=UTC),
     )
     assert "/2026-03-05/" in key

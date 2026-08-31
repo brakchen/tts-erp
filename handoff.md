@@ -12,6 +12,7 @@ procurement UI 重做 + MinIO SPU 图片存储全部落地并提交到 `feature/
 3. **修了两个集成 bug**：`/endpoints` 在 FastAPI ≥0.141 lazy router 下丢路由（`_iter_resolved_routes`）；`GET /v2/spu-images` 无 filter 时 `AmbiguousParameter` 500（`CAST(:cp_id AS bigint)`）。
 
 **预存在的基线问题（master 上同样复现，与本分支无关，还没修）**：
+
 - `tests_v2/sync_worker` + `tests_v2/test_models_smoke.py::test_sync_jobs_lifecycle` 失败 —— 真库 `sync_cursors`/`sync_jobs` 有重复行。
 - `tests_v2/migration` 跑到 ~59% hang 住（怀疑等 DB 锁）。
 - `tests_v2/jobs_tiktok` 5 个失败。

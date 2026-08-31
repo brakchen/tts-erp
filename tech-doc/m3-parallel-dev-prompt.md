@@ -1,5 +1,7 @@
 # tts-erp 重构 · MiniMax M3 多 sub-agent 并行开发任务书
 
+> 状态：**已执行完毕**（7 个 lane 已全部合入，v2 已于 2026-08-29 切流生产；本文留作过程记录）。
+>
 > 这是一份自包含的开发任务书。你（MiniMax M3）是总协调 agent，负责把任务拆给多个
 > sub-agent 在不同 git worktree 中并行开发，最后按序合并、验证、清理 worktree。
 > 严格按本文档执行，不要自由发挥架构决策——所有决策已定稿，你的工作是实现。
@@ -55,7 +57,7 @@
 1. `AGENTS.md` — 现有系统操作指南（签名规则、端点、坑）
 2. `tech-doc/refactor-tech-plan-v2.md` — **技术方案定稿，本任务的上游真理**
 3. `tech-doc/data-model-target-v3.md` — **数据模型定稿（九 schema 全部表定义）**
-4. `tech-doc/data-model-survey.md` — 现有 25 张表的 DDL + demo 数据 + 关联分析
+4. `tech-doc/_archive/data-model-survey-v1.md` — 现有 25 张表的 DDL + demo 数据 + 关联分析（2026-08-30 归档改名）
 5. `miaoshou/README.md` — 妙手核心接口字段映射与实测结论
 
 方案与本文档冲突时，以方案文档为准并上报，不要自行改设计。

@@ -1,7 +1,7 @@
 # TikTok Shop 销售与妙手采购数据模型重构方案
 
 版本：V3  
-状态：领域模型方案  
+状态：领域模型方案（**已落地**，2026-08-29 切流；as-built 补记见文末附录 A）  
 系统定位：TikTok Shop 销售数据与妙手采购数据的整合分析系统
 
 ## 1. 系统定位
@@ -1033,3 +1033,22 @@ TikTok订单行
 ```
 
 系统可以形成商品级经营分析，但在没有订单—采购批次关系的情况下，不应声称能够追踪某个订单的真实采购批次或精确成本。
+
+---
+
+## 附录 A：As-built 补记（落地后与正文的差异）
+
+正文 §5-§11 的表结构已按本文落地（九 schema + `linkage.effective_product_links` VIEW）。
+实施过程中新增了两张正文未含的表：
+
+1. **`procurement.manual_product_costs`**（2026-08-29，refactor plan V2 §3.2 / 决策 12）：
+   人工填写的 SPU 成本——`id identity PK、channel_product_id FK、unit_cost numeric(20,4)、
+   currency、valid_from、valid_to NULL、note、created_by、created_at`；同一 SPU 同时只有
+   一条有效记录（新提交自动关闭上一条的 `valid_to`），填写历史全保留。成本口径中
+   `MANUAL_ENTRY` 优先级最高。
+2. **`procurement.spu_images`**（2026-08-31，`tech-doc/procurement-ui-redesign.md` §4）：
+   SPU 参考图（MinIO 对象键 + 状态机 `awaiting_upload/ready/failed` + 软删 `deleted_at`），
+   配合 `/v2/spu-images/*` 端点与人工成本填写页使用。
+
+另：§8.3 的 `reporting.shipment_tracking_summary` 按「可重建投影」选项落地为**表**（不是视图），
+与 refactor plan V2 §3.2「reporting.* 用可重建表」一致。

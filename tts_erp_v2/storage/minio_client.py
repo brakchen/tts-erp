@@ -27,12 +27,14 @@ MAX_SIZE_BYTES = 8 * 1024 * 1024
 
 # Allowed content types for direct browser uploads. Strict allowlist —
 # if we need more types later we extend explicitly.
-ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset({
-    "image/jpeg",
-    "image/png",
-    "image/webp",
-    "image/gif",
-})
+ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset(
+    {
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/gif",
+    }
+)
 
 
 class MinioConfigError(RuntimeError):
@@ -85,14 +87,16 @@ def _rewrite_presigned_host(sdk_url: str, public_host: str) -> str:
     # If the public host has a path prefix (e.g. /minio), splice it in.
     prefix = pub_parts.path.rstrip("/")
     new_path = prefix + sdk_parts.path
-    return urlunparse((
-        pub_parts.scheme,
-        pub_parts.netloc,
-        new_path,
-        sdk_parts.params,
-        sdk_parts.query,
-        sdk_parts.fragment,
-    ))
+    return urlunparse(
+        (
+            pub_parts.scheme,
+            pub_parts.netloc,
+            new_path,
+            sdk_parts.params,
+            sdk_parts.query,
+            sdk_parts.fragment,
+        )
+    )
 
 
 def _read_config() -> _Config:
@@ -103,13 +107,15 @@ def _read_config() -> _Config:
         "MINIO_BUCKET": os.environ.get("MINIO_BUCKET", "").strip(),
         "MINIO_SECURE": os.environ.get("MINIO_SECURE", "").strip().lower(),
         "MINIO_REGION": os.environ.get("MINIO_REGION", "").strip(),
-        "MINIO_PRESIGN_EXPIRY_SECONDS":
-            os.environ.get("MINIO_PRESIGN_EXPIRY_SECONDS", "").strip(),
+        "MINIO_PRESIGN_EXPIRY_SECONDS": os.environ.get(
+            "MINIO_PRESIGN_EXPIRY_SECONDS", ""
+        ).strip(),
     }
     missing = [k for k, v in required.items() if not v]
     if missing:
         raise MinioConfigError(
-            "MinIO not configured: missing env vars " + ", ".join(missing)
+            "MinIO not configured: missing env vars "
+            + ", ".join(missing)
             + ". See tech-doc/procurement-ui-redesign.md §5."
         )
     if required["MINIO_SECURE"] not in {"true", "false"}:
@@ -126,8 +132,7 @@ def _read_config() -> _Config:
         ) from e
     if expiry_seconds <= 0:
         raise MinioConfigError(
-            "MINIO_PRESIGN_EXPIRY_SECONDS must be > 0 "
-            f"(got {expiry_seconds})."
+            f"MINIO_PRESIGN_EXPIRY_SECONDS must be > 0 (got {expiry_seconds})."
         )
     base = os.environ.get("MINIO_PUBLIC_BASE_URL", "").strip()
     public_host = os.environ.get("MINIO_PUBLIC_HOST", "").strip() or None
@@ -243,9 +248,7 @@ class MinioClient:
             expires=expiry or self._config.presign_expiry,
         )
         url = self._publicise(url)
-        expires_at = datetime.now(UTC) + (
-            expiry or self._config.presign_expiry
-        )
+        expires_at = datetime.now(UTC) + (expiry or self._config.presign_expiry)
         return url, expires_at
 
     # -- object inspection / removal ------------------------------------

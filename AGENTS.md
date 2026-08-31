@@ -4,41 +4,49 @@
 
 ## 1. 服务是什么
 
-`tts-erp` 是 TikTok Shop Partner **Order API + Finance API + Return/Refund API** 的 HTTP 代理 + 本地持久化服务。
+`tts-erp`（v2，2026-08-29 起）是 TikTok Shop 销售 + 妙手采购的**本地分析库 + 只读 API + 定时同步**系统。
 
-- **上游**：`oauth-receiver` (`:9876`)，专门管 token 加密 + 续期
-- **下游**：TikTok Shop Open API (`open-api.tiktokglobalshop.com`)
-- **存储**：PostgreSQL `tts_erp` 数据库（`postgres` 容器，端口 5432）
-- **对外端口**：`9877`
+- **下游数据源**：TikTok Shop Open API (`open-api.tiktokglobalshop.com`) + 妙手开放平台 (`openapi.wanshifu.com`)
+- **凭证**：自持在 `integration.credentials` 表（Fernet 加密，key = `.env TTS_ERP_FERNET_KEY`），
+  加解密统一走 `tts_erp_v2/proxy/token_service.py`
+- **存储**：PostgreSQL `tts_erp` 数据库（`postgres` 容器，端口 5432），9 schema / 36 表 + 1 view
+- **对外端口**：`9877`（FastAPI 只读分析端点 + 人工成本填写页）
+- **同步**：独立进程 `tts-erp-sync.service`（APScheduler，`python -m tts_erp_v2.sync_worker.main`）
+- **oauth-receiver (`:9876`)**：v2 不再调用它，仅 4 周回滚观察期内保留
 - **公网域名**（用户已配 NAT 穿透）：`daqiang.nat100.top` —— **已 strip 9877 端口**，访问任何 endpoint 用 `http://daqiang.nat100.top/<path>` 而不是 `http://daqiang.nat100.top:9877/<path>`
   - 给用户的 deploy URL / TikTok 填的 redirect URL / 文档里的 curl 示例 — 一律 strip 端口
   - 业务代码 / curl 跑本地用 `http://127.0.0.1:9877/...` 仍然带端口（直连本机）
 
-代理 + 持久化，业务代码**完全不用关心**：
+读数据直接 `curl http://127.0.0.1:9877/v2/...` 查本地库即可。打上游 TikTok 的唯一路径是
+sync-worker 的 jobs（经 `tts_erp_v2/proxy/tts_shop`），它们内部处理：
 
 - HMAC-SHA256 签名
 - `x-tts-access-token` header
 - `shop_cipher` 放 query 哪个位置
 - 翻页 / `next_page_token`
-- 过期 token 续期
-
-业务代码直接 `curl http://127.0.0.1:9877/...` 就行。
+- 过期 token 续期（`token.refresh` job，每 6h）
 
 ## 2. 必读 — 关键设计决策
 
-### 2.1 Token 来源**不**直读 PG，必须走 oauth-receiver
+### 2.1 凭证单源：`integration.credentials` + `proxy/token_service.py`
 
 ```python
 # ✓ 正确
-tok = fetch_token(shop_id, reveal=True)  # HTTP call to oauth-receiver
-access_token = tok["access_token"]
-shop_cipher = tok["shop_cipher"]
+from tts_erp_v2.proxy.token_service import load_credentials
+cred = load_credentials(session, provider="tiktok", external_account_id=shop_id)
+access_token = cred.access_token   # 已解密
+shop_cipher = cred.shop_cipher
 
 # ✗ 错误
-# conn.execute("SELECT access_token_encrypted FROM oauth_tokens WHERE shop_id=...")  # NO
+# 直连 oauth_receiver 库的 oauth_tokens 表      # NO（v1 遗物）
+# HTTP 调 :9876 oauth-receiver 拿 token        # NO（v2 不跨进程）
+# 自己拿 Fernet key 解密 integration.credentials # NO（绕过统一实现）
 ```
 
-**为什么**：oauth-receiver 是 auth 的 single source of truth。tts-erp 不持有密钥、不解密密文、不和加密层耦合。
+**为什么**：v2 凭证自持在 `integration.credentials`（Fernet 加密的 JSON envelope，
+key = `.env TTS_ERP_FERNET_KEY`）。加解密 / 掩码 / upsert / 续期的唯一实现是
+`tts_erp_v2/proxy/token_service.py`
+（`encrypt` / `decrypt` / `load_credentials` / `upsert_credentials` / `refresh_if_needed`）。
 
 ### 2.2 HMAC 签名（最常出错）
 
@@ -64,33 +72,43 @@ sign = hmac.new(secret.encode(), canonical.encode(), hashlib.sha256).hexdigest()
 - 不放 body 也不放结尾 secret
 - URL-encode body
 
+实现见 `tts_erp_v2/proxy/tts_shop/signing.py`（`TTS_DEBUG_SIGN=1` 在 stderr 打 canonical）。
+
 ### 2.3 shop_cipher 永远在 query
 
 不论 GET/POST，`shop_cipher` 都是 query 参数：
 
-```
+```text
 GET  /order/202309/orders/<id>?app_key=...&shop_cipher=...&timestamp=...&sign=...
 POST /order/202309/orders/search?app_key=...&shop_cipher=...&timestamp=...&sign=...
 body: {...}
 ```
 
-### 2.4 每个 TikTok 请求都要带 shop_id
+### 2.4 v2 端点用内部 id，不用 shop_id
 
-我们的代理端点统一要求 `?shop_id=XXX`：
+v1 的 `?shop_id=XXX` 代理透传已整体拆除。v2 读端点的过滤参数是**内部主键**
+（`channel_account_id` / `channel_product_id`）：
 
 ```bash
-curl "http://127.0.0.1:9877/orders/search?shop_id=7494763368967603447" -d '...'
+# 先查内部 id（external_account_id 即 TikTok shop_id）
+curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" "http://127.0.0.1:9877/v2/commerce/channel-accounts"
+# → 生产店铺 7494763368967603447 = channel_account_id 314
+
+curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" \
+  "http://127.0.0.1:9877/v2/commerce/sales-orders?channel_account_id=314&limit=5"
 ```
 
-内部会自动用 shop_id 拿 token + cipher，签名，发请求。
+传 `?shop_id=` 不会报错，会被 FastAPI **静默忽略**（返回全量不过滤）——最常见的误用。
+同步也不再接受 HTTP 触发：由 `tts-erp-sync.service` 按 `integration.credentials`
+里的账户全量调度。
 
-### 2.5 API key 鉴权（2026-08-17 起，设计文档 `tech-doc/api-key-auth-design.md`）
+### 2.5 API key 鉴权（2026-08-17 上线，**2026-08-20 起 enforce**；设计文档 `tech-doc/api-key-auth-design.md`）
 
-- 除 `/healthz`、`/endpoints` 外所有端点需要 `Authorization: Bearer <key>`（当前为 shadow 模式：放行但记 would-deny 日志；enforce 后无 key 401、角色不够 403）
-- 三级角色：`readonly`（/db/*、GET 代理、search）< `readwrite`（+ /sync/*、订单写操作）< `admin`（+ /token/*）
-- key 管理走 `python3 api_keys.py create/list/revoke/rotate`；**库里只有 SHA-256 哈希**，完整 key 只在创建时打印一次
-- 模式开关：`.env TTS_ERP_AUTH_MODE=off|shadow|enforce`；cron/脚本用 `.env TTS_ERP_SERVICE_KEY`
-- 新加端点时**必须**在 `tdd/auth.py` 的 `required_role()` 里分类（未匹配路径默认按 admin 拦截）
+- 除豁免路径（`/healthz`、`/endpoints`、`/openapi.json`、`/docs`、`/redoc`、`/docs/oauth2-redirect`、`/v2/auth/{login,logout,me}`）外所有端点需要 `Authorization: Bearer <key>` 或 `X-API-Key: <key>`；无 key 401、角色不够 403
+- 浏览器另有会话 cookie 登录：`POST /v2/auth/login` 用 API key 换 `tts_session` cookie（见 `tech-doc/browser-login-design.md`）；cookie 会话做 mutation 必须带 `X-Requested-With: tts-erp`（CSRF 闸）
+- 三级角色：`readonly` < `readwrite` < `admin`；分类逻辑在 **`tts_erp_v2/middleware/auth.py::required_role()`**（未匹配路径默认按 admin 拦截）；个别端点在 handler 内再校验（`POST /v2/linkage/overrides`=admin、`issues/{id}/resolve`=readwrite）
+- key 管理走 `python3 api_keys.py create/list/revoke/rotate`（`revoke --prefix` / `rotate --prefix`）；表里只有 SHA-256 哈希（`security.api_keys`），完整 key 只在创建时打印一次
+- 模式开关：`.env TTS_ERP_AUTH_MODE=off|shadow|enforce`（生产 = enforce）；cron/脚本用 `.env TTS_ERP_SERVICE_KEY`
 
 ## 3. 端点速查
 
@@ -99,28 +117,29 @@ curl "http://127.0.0.1:9877/orders/search?shop_id=7494763368967603447" -d '...'
 
 | 端点 | 用途 |
 | ----------------------------------------------- | ------------------------------- |
-| `GET /healthz` | 健康检查（body 含 `service: "tts-erp-v2"` 指纹；v1 只返 `{"status":"ok"}`） |
-| `GET /ads-monitor` | TikTok OAuth 授权回跳落地页（公开，无 auth） |
-| `GET /endpoints` | 完整端点清单 |
-| `GET /v2/pages/manual-costs?shop_id=X` | 人工成本填写页（HTML，readonly+） |
-| `GET /v2/commerce/sales-orders?shop_id=X&limit=` | 销售订单列表（v2 结构化） |
-| `GET /v2/commerce/sales-orders/<id>?shop_id=X` | 单订单详情 |
-| `GET /v2/commerce/channel-products?shop_id=X` | TikTok 渠道商品 |
-| `GET /v2/commerce/channel-accounts?shop_id=X` | 平台账为户列表 |
-| `GET /v2/linkage/product-links?shop_id=X` | 妙手采购↔TikTok 销售关联 |
-| `GET /v2/linkage/effective-product-links?shop_id=X` | 上述 + link_overrides 并集（view） |
-| `GET /v2/linkage/evidence?shop_id=X` | 关联 evidence 原始件 |
-| `GET /v2/linkage/issues?shop_id=X` | 未解决的关联问题 |
-| `POST /v2/linkage/overrides` | 人工覆盖 product_links（admin） |
-| `POST /v2/reporting/manual-costs` body: `{channel_product_external_id, unit_cost, currency, note?}` | 提交人工成本（readwrite） |
-| `GET /v2/reporting/cost-snapshots?shop_id=X` | 成本快照 |
-| `GET /v2/reporting/profit-daily?shop_id=X` | 日利润报表 |
-| `GET /v2/reporting/coverage?shop_id=X` | 成本覆盖率 |
-| `GET /v2/reporting/missing-cost-products` | 无采购价的在售 SPU（运营补填清单） |
-| `POST /v2/sync/orders` body: `{shop_id, order_status?, create_time_ge?, create_time_lt?, page_size?}` | ad-hoc 同步 |
-| `POST /v2/sync/order/<order_id>` | 单订单同步（ad-hoc） |
-| `POST /v2/sync/statements` / `/payments` / `/returns` / `/cancellations` / `/logistics_tracking` / `/statement_transactions` | ad-hoc 财务 / 售后 / 物流同步 |
-| `GET /endpoints` | v1 + v2 全部路由列表（由 v2 app 启动时 dump） |
+| `GET /healthz` | 健康检查（`{status, service:"tts-erp-v2", auth_mode}`，公开） |
+| `GET /endpoints` | 全部路由清单（公开） |
+| `GET\|POST /v2/auth/login`、`POST /v2/auth/logout`、`GET /v2/auth/me` | 浏览器会话登录（公开；API key 换 `tts_session` cookie） |
+| `GET /v2/pages/manual-costs?channel_account_id=` | 人工成本填写页（HTML，readonly+） |
+| `GET /v2/commerce/channel-accounts` / `/{account_id}` / `/{account_id}/order-stats` | 平台账户列表 / 详情 / 订单统计 |
+| `GET /v2/commerce/channel-products` / `/{product_id}` / `/{product_id}/variants` | TikTok 渠道商品 / 详情 / SKU 变体 |
+| `GET /v2/commerce/sales-orders` / `/{order_id}` / `/{order_id}/lines` | 销售订单列表 / 详情 / 明细行 |
+| `GET /v2/linkage/{product-links,evidence,issues,overrides}` | 妙手采购↔TikTok 销售关联读（readonly） |
+| `POST /v2/linkage/issues/{issue_id}/resolve` | 标记关联问题已解决（readwrite，handler 内校验） |
+| `POST /v2/linkage/overrides` | 人工覆盖 product_links（admin，handler 内校验） |
+| `POST /v2/reporting/manual-costs` | 提交人工成本（readwrite） |
+| `GET /v2/reporting/{cost-snapshots,profit-daily,coverage,missing-cost-products}` | 成本快照 / 日利润 / 覆盖率 / 待补成本清单 |
+| `GET /v2/spu-images`、`POST /v2/spu-images/upload-url`、`POST /v2/spu-images/{image_id}/confirm`、`GET\|DELETE /v2/spu-images/{image_id}` | SPU 参考图（MinIO presign 上传） |
+| `GET /v2/llm-context` | 给 LLM agent 的上下文包（experimental） |
+| `GET /v1/analytics/sync/{batches,cursor}` | analytics-sync 批次 / 游标（内部） |
+
+**已拆除、不要再找**：
+
+- 没有 `POST /v2/sync/*` —— ad-hoc 同步 HTTP 触发已随 v1 拆除，同步全部由
+  `tts-erp-sync.service` 调度（频率见 `tts_erp_v2/sync_worker/scheduler.py` 的 `JOBS`）
+- 没有 `/v2/linkage/effective-product-links` —— 那只是 DB 层 view，无 HTTP 端点
+- 没有任何 `/miaoshou/*` 路由 —— 出站代理和回调端点都未挂进 v2（见 §10.2）
+- 读端点过滤参数是内部 id（`channel_account_id` 等），`shop_id` 会被静默忽略（见 §2.4）
 
 **legacy v1 端点状态**（2026-08-29 切换后）：
 
@@ -129,7 +148,7 @@ curl "http://127.0.0.1:9877/orders/search?shop_id=7494763368967603447" -d '...'
 | `~~GET /shops~~` | 404（v1 改走 `oauth_receiver_core.db_list_shops()` in-process） |
 | `~~GET /shops/<shop_id>~~` | 404（同上） |
 | `~~GET /token/<shop_id>?reveal=1~~` | 404（凭证单源迁入 `integration.credentials` + `proxy/token_service.py`） |
-| `POST /admin/shops/backfill` | 仍可用（admin role）—— 幂等回写 `integration.channel_accounts` |
+| `~~POST /admin/shops/backfill~~` | 404（随 v1 一起拆除；backfill 逻辑不再需要——v2 启动无此路由） |
 | `~~POST /orders/search~~` / `~~POST /orders/list~~` / `~~GET /orders/<id>~~` | 404（v2 读 `tts_erp_v2.proxy.tts_shop` 走 `GET /v2/commerce/sales-orders*`） |
 | `~~POST /orders/<id>/{confirm,cancel,update_status,shipping_info,verify_shipping}~~` | 404（v2 架构是只读分析，订单写操作全部拆除） |
 | `~~GET /orders/<id>/{tracking,tracking/get,risk,buyer,recipient}~~` | 404（v2 读 `tts_erp_v2.db.models.fulfillment`） |
@@ -138,7 +157,7 @@ curl "http://127.0.0.1:9877/orders/search?shop_id=7494763368967603447" -d '...'
 | `~~GET /db/*~~`（24 个读端点） | 404（v2 不读 public.* 表，改为 `tts_erp_v2.api.v2.commerce/report/linkage`） |
 | `~~GET /db/sync_log~~` | 404（v2 同步历史在 `integration.sync_jobs`） |
 | `~~GET /miaoshou/<domain>/<method>~~` | 404（v2 走 `tts_erp_v2.proxy.miaoshou`，迁入 `tts_erp_v2/jobs/miaoshou/*`） |
-| `~~POST /miaoshou/callback/<node-alias>~~` | **保留**（妙手在服役，跳过会断 webhook） |
+| `~~POST /miaoshou/callback/<node-alias>~~` | 404（payload 模型保留在 `miaoshou/callbacks/`，但**未挂进 v2 app**；webhook 当前无入口，见 §10.2） |
 
 **简言之**：v1 以 4 周观察期内的紧急回滚为目标留在 git history（`master` 之前的
 commits），但 `:9877` 运行时已不再服务这些路径。生产读 / 写 / 同步 / 报表 **全部**
@@ -148,10 +167,10 @@ commits），但 `:9877` 运行时已不再服务这些路径。生产读 / 写 
 
 ### DO
 
-- **TDD：先写/改 `tdd/test_*.py`，再实现到通过**；约定见 `tdd/conftest.py`（事务回滚隔离、`TEST_%` 哨兵）
+- **TDD：先写/改测试，再实现到通过**；v2 测试在 `tests_v2/`（共享 fixtures 在 `tests_v2/conftest.py`：事务回滚隔离、`TEST_%` 哨兵），妙手 SDK 测试在 `tests/miaoshou/`
 - **跑测试默认跳过 migration 域**：`pyproject.toml addopts` 带 `-m 'not domain_migration'` —— `tests_v2/migration/` 会直接读写生产库且全量跑时卡锁（详见 `tech-doc/test-domains.md`）。要跑它用 `scripts/test.sh migration` 或 `pytest -m domain_migration tests_v2/migration`（CLI `-m` 覆盖 addopts）。日常全量用 `scripts/test.sh fast`
-- 改完调 `bash /home/schan/tts-erp/restart.sh` 验证 healthz 200
-- 改完跑 `python3 /tmp/test_tts_erp.py` (test_e2e.py 副本) 端到端验证
+- 改完调 `bash /home/schan/tts-erp/restart.sh` 验证 healthz 200（注意：只重启 `tts-erp.service`；改了 `jobs/` / `sync_worker/` 要另跑 `systemctl --user restart tts-erp-sync.service`）
+- 改完跑 `python3 test_e2e.py`（仓库根，端到端冒烟，需服务在跑）
 - 看 `logs/stderr.log` 抓 traceback
 - 用 `TTS_DEBUG_SIGN=1` env var 看 canonical string 排查签名问题
 - 改 schema 走 schema_tts_erp.sql / schema_oauth.sql（按库拆分），`IF NOT EXISTS` 兼容老库
@@ -160,10 +179,10 @@ commits），但 `:9877` 运行时已不再服务这些路径。生产读 / 写 
 
 ### DON'T
 
-- ❌ 不要在 **任何 service 文件里**（`tts_erp_v2/**` / `tts_erp.py` legacy / `scripts/migrate_v1_to_v2/*`）直连 PG `oauth_tokens` 表 —— **只能**走 `tts_erp_v2.proxy.token_service` （in-process 调用 `oauth_receiver_core.decrypt_creds()`）
+- ❌ 不要直连 oauth_receiver 库的 `oauth_tokens` 表，也不要 HTTP 调 :9876 拿 token —— v2 凭证在 `integration.credentials`，**只能**走 `tts_erp_v2.proxy.token_service`（Fernet 加解密自持，`encrypt/decrypt/load_credentials/refresh_if_needed`）
 - ❌ 不要在 .env 里写 app_secret 给客户端调用者（明文暴露，app_secret 应只服务自己用）
 - ❌ 不要在 canonical 里 URL-encode body（用 raw JSON 字符串）
-- ❌ 不要改 `_db_load_token` 直接返回（它本来就是 oauth-receiver 的职责）
+- ❌ 不要绕过 `token_service` 自己拿 Fernet key 解密 credentials（统一实现才有掩码/续期/降级逻辑）
 - ❌ 不要假设 `code: 0` 是唯一的 success —— TikTok 也会返回 `code: 105005` (scope 缺失) `code: 36009004` (字段缺失) 等
 - ❌ **不要**接 `POST /returns` / `POST /cancellations`（CREATE write endpoint，会在真实店铺创建退货/取消单）。
      这两个端点 2026-08-17 起已从代码中**整个删除**（不再返回 501，而是无路由 404）。v2 在 `tts_erp_v2/jobs/tiktok/after_sales.py` 只读，同上原则如果以后要接，单独 review。
@@ -177,43 +196,39 @@ commits），但 `:9877` 运行时已不再服务这些路径。生产读 / 写 
 | `106001 invalid sign`               | 签名格式错（最常见）                  | 看 `TTS_DEBUG_SIGN=1` 输出的 canonical 串，对比 2.2 节 |
 | `105005 Access denied`              | app 没勾对应 scope                    | Partner Center 改 app scope + 重新授权         |
 | `36009004 PageSize is required`     | body 字段名/格式错                    | 查 TikTok API 文档的 Request Body 章节         |
-| `/db/orders` 返回 500              | TTS_ERP_DB_URL 没配                   | `.env` 里加 TTS_ERP_DB_URL                    |
-| `/token/<id>` 返 404              | oauth-receiver 里没这个 shop          | 走一次 /authorize + /callback                 |
-| `TTS_ERP_DB_URL not configured`     | 同上                                  | 配 .env                                       |
+| v2 端点传 `?shop_id=` 数据没过滤     | v2 只认内部 id，`shop_id` 被静默忽略    | 先 `GET /v2/commerce/channel-accounts` 查 `channel_account_id`（§2.4） |
+| `TTS_ERP_DB_URL not configured`     | `.env` 缺 DB URL                      | 配 .env                                       |
 | `psycopg.OperationalError`         | PG 容器 down / 网络不通                | `docker exec postgres pg_isready`              |
-| 物流汇总 first/last 写反、last_description 恒 "Order placed." | TikTok tracking 列表是**最新事件在前**，旧代码按列表位置取首尾（2026-08-17 已修为按 update_time_millis 排序） | 重跑 `POST /sync/logistics_tracking` 刷新；cron 已接入每 10 分钟自动追 |
-| 物流数据多日不更新                  | `/sync/logistics_tracking` 之前不在 sync_cron 的 SYNC_PLANS 里（2026-08-17 已接入） | 手动触发：`curl -X POST :9877/sync/logistics_tracking -d '{"shop_id":"X","all_with_tracking":true}'` |
-| `/healthz` 报 `oauth_receiver.token_count: 0` 但 `oauth_tokens` 表有行 | healthz 用了 `len(oc._token_history)`（进程内 deque，重启后为 0），不是 DB 行数（2026-08-25 修复为 `SELECT COUNT(*)`） | 已修；部署后新版本应自动报真实数。不需手动修复 |
-| `tts_erp.shops` 表为空但 `oauth_receiver.oauth_tokens` 有 shop | FastAPI 接管订单路由后未继承 legacy `_proxy_order` 的 `persist_shop` 调用（2026-08-25 修复） | 重启服务即可，startup lifespan 会自动 backfill。手动触发：`curl -X POST -H "Authorization: Bearer <admin_key>" :9877/admin/shops/backfill` |
+| 物流数据多日不更新                  | 先查 `integration.sync_jobs` 里 `tiktok.logistics` 是否按 10min 在跑（`tts-erp-sync.service` 是否 active） | `systemctl --user status tts-erp-sync.service`；历史 bug：TikTok tracking 列表是**最新事件在前**，取首尾必须按 `update_time_millis` 排序（2026-08-17 已修） |
 
 ## 6. 文件清单
 
 | 路径 | 用途 |
 | ------------------------------------------------- | -------------------------------------------- |
-| **`tdd/tts_erp_fastapi.py`** | **主服务（FastAPI app，systemd 启动的实际服务，监听 9877）** |
-| `tts_erp.py` | **共享 helper 模块**（Wave 4.1 起）：`db_connect`（连接池）、`persist_*`（订单/明细/物流/对账/退货/取消/妙手）、`log_sync`、类型 coercion、`_env_int`。原 stdlib `BaseHTTPRequestHandler` 服务 + Handler 类 + `main()` 已删除；该文件不再启动 HTTP 服务，跑 `python3 tts_erp.py` 会打印提示用 `bash restart.sh`。 |
-| `tts_signing.py` | HMAC 签名 + HTTP 客户端（**可独立复用**） |
-| `tdd/auth.py` | API key 鉴权中间件（2026-08-17，设计见 `tech-doc/api-key-auth-design.md`） |
-| `tdd/rate_limit.py` | sliding-window 限流中间件（key-id 桶，默认 100/min） |
-| `tdd/conftest.py` | pytest fixtures：事务回滚隔离 + `TEST_%` 哨兵 |
-| `tdd/domain.py` / `tdd/http_client.py` / `tdd/repositories.py` / `tdd/pg_repositories.py` / `tdd/token_provider.py` / `tdd/tts_business.py` | 业务层 + 数据访问层（FastAPI handler 依赖注入） |
-| **`miaoshou/`** | 妙手 SDK 包（独立模块；FastAPI 路由代理调用，2026-08-24 迁完） |
-| `miaoshou/miaoshou_client.py` / `miaoshou/miaoshou_erp_client.py` / `miaoshou/miaoshou_signing.py` | 出站客户端 + MD5/HMAC 签名（`_call()` 走 `safe_http_post_json` helper，scheme 白名单防 SSRF） |
-| `miaoshou/endpoints/` | 12 个出站 endpoint 模块（按 domain 划分：orders/fees/refunds/arbitrations/closes/complaints/queries/accounts/products/logistics/aftersales/tests） |
-| `miaoshou/callbacks/router.py` / `miaoshou/callbacks/payloads.py` | 18 个回调 node + `dispatch_callback()` |
-| `schema_tts_erp.sql` / `schema_oauth.sql` | PG 表结构（按库拆分，2026-08-27 Wave 2；`python3 scripts/regen_schema.py` 重新生成） |
-| `api_keys.py` | API key 管理 CLI（create/list/revoke/rotate） |
-| `sync_cron.py` | 同步 cron 主入口（订单/对账/付款/退货/取消/物流），由 `run_sync_cron.sh` 调度 |
-| `.env` | 配置（0600，含 app_key/secret/DB URL） |
-| `restart.sh` | 重启脚本（内部走 `systemctl --user restart tts-erp.service`） |
-| `setup/tts-erp.md` | 用户向 setup 文档（服务介绍） |
-| **`tech-doc/`** | 设计文档目录（api-key-auth-design / external-api 等） |
-| `AGENTS.md` | 本文件 —— AI agent 操作指南 |
-| `README.md` | 人类使用说明 |
-| `handoff.md` | 跨 session 交接笔记 |
-| `CHANGELOG.md` | 变更日志（按日期分批记录重要变更） |
-| `tests/test_e2e.py` / `tests/test_e2e_finance.py` | 端到端冒烟测试（scp 到 server 后跑） |
-| `tests/miaoshou/` | miaoshou SDK 单测（96 个 test，覆盖 signing / client / callbacks / handler routing / 36 出站 endpoint） |
+| **`tts_erp_v2/app.py`** | **主服务**（FastAPI `build_app()` 工厂；`tts-erp.service` 跑 `uvicorn tts_erp_v2.app:app`，监听 9877） |
+| `tts_erp_v2/api/v2/` | 路由：commerce / linkage / reporting / pages / spu_images / auth / llm_context |
+| `tts_erp_v2/middleware/` | `auth.py`（API key + 角色矩阵）、`session_auth.py`（cookie 会话）、`rate_limit.py`、`access_log.py` |
+| `tts_erp_v2/proxy/` | 出站层：`tts_shop/`（TikTok 签名 + 客户端）、`miaoshou/`、`token_service.py`（凭证 Fernet 加解密 + 续期） |
+| `tts_erp_v2/jobs/` | 同步 job：`tiktok/*`（6 个）、`miaoshou/*`（4 个，**未注册调度**）、`token_refresh.py`、`runner.py` |
+| `tts_erp_v2/sync_worker/` | APScheduler worker（`scheduler.py` 的 `JOBS` 注册表；独立跑在 `tts-erp-sync.service`） |
+| `tts_erp_v2/db/models/` | 9 schema SQLAlchemy 模型 |
+| `tts_erp_v2/linkage/` / `reporting/` / `storage/` | 关联计算 / 成本利润重算 / MinIO 对象存储 |
+| `api_keys.py` | API key 管理 CLI（create/list/revoke/rotate；表在 `security.api_keys`） |
+| `schema_tts_erp.sql` / `schema_oauth.sql` | PG 表结构（按库拆分；`python3 scripts/regen_schema.py` 重新生成） |
+| **`miaoshou/`** | 妙手 SDK 包（客户端 + MD5 签名 + 36 出站 endpoint + 18 回调 payload；**无 HTTP 路由**，进程内被 jobs 用） |
+| `conftest.py` | pytest 根 conftest（仅 path 引导；业务 fixtures 在 `tests_v2/conftest.py`） |
+| `tests_v2/` | v2 测试套件（api / jobs_* / linkage / middleware / proxy / reporting / storage / sync_worker / migration 域） |
+| `tests/miaoshou/` | 妙手 SDK 单测（91 个 test function，15 文件） |
+| `test_e2e.py` / `test_e2e_finance.py` | 端到端冒烟（仓库根；需服务在跑） |
+| `.env` | 配置（0600，含 app_key/secret/DB URL/Fernet key/MinIO） |
+| `restart.sh` | 重启脚本（只重启 `tts-erp.service`；sync-worker 要单独 restart） |
+| `prod-switch/` | v1→v2 切换演练 6 脚本（preflight / switch / install-sync-worker / postswitch-smoke / observe-archive / rollback） |
+| `sync_cron.py` / `run_sync_cron.sh` | **legacy**：v1 cron 同步，已被 `tts-erp-sync.service` 取代（脚本内自注 superseded），无调用方，观察期后删 |
+| `tts_erp.py` / `tts_signing.py` | **legacy**：v1 stdlib 服务遗物（v2 不 import；签名实现以 `tts_erp_v2/proxy/tts_shop/signing.py` 为准） |
+| `tdd/` | **已废弃**：v1 FastAPI 服务 / 中间件已删除，仅剩 Wave 1-4 开发/QA 报告留档 |
+| `tech-doc/` | 设计文档目录（`external-api.md` 是端点活契约） |
+| `setup/` | 用户向 setup 文档（`tts-erp.md` / `analytics-sync.md`）+ schema 备份 |
+| `AGENTS.md` / `README.md` / `handoff.md` / `CHANGELOG.md` | 本文件 / 人类说明 / 跨 session 交接 / 变更日志 |
 
 ## 7. 部署 / 启动
 
@@ -232,35 +247,39 @@ cat schema_tts_erp.sql | docker exec -i postgres psql -U postgres -d tts_erp
 ssh schan@192.168.47.130 "bash /home/schan/tts-erp/restart.sh"
 ```
 
-## 7.1 进程托管（2026-08-18 起）
+## 7.1 进程托管（2026-08-18 起；v2 切流后 3 个服务）
 
-两个服务都由 **systemd user 单元**托管（`~/.config/systemd/user/`，`Linger=yes` 已开，开机自启，无需登录）：
+都由 **systemd user 单元**托管（`~/.config/systemd/user/`，`Linger=yes` 已开，开机自启，无需登录）：
 
-- `tts-erp.service` — `uvicorn tts_erp_fastapi:app`（cwd `tdd/`），`EnvironmentFile=.env`，`After=oauth-receiver.service`
-- `oauth-receiver.service` — 见 oauth-receiver 的 setup 文档
+- `tts-erp.service` — `.venv/bin/python -m uvicorn tts_erp_v2.app:app --host $TTS_ERP_HOST --port $TTS_ERP_PORT`
+  （cwd = 仓库根），`EnvironmentFile=.env`
+- `tts-erp-sync.service` — `.venv/bin/python -m tts_erp_v2.sync_worker.main`
+  （APScheduler sync-worker；安装脚本 `prod-switch/install-sync-worker.sh`）
+- `oauth-receiver.service` — 仅 4 周回滚观察期保留（见 oauth-receiver 的 setup 文档）
 
 ```bash
-systemctl --user status tts-erp.service      # 状态
-systemctl --user restart tts-erp.service     # 重启（= restart.sh）
-journalctl --user -u tts-erp -n 50           # systemd 日志（业务日志仍看 logs/）
+systemctl --user status tts-erp.service       # API 状态
+systemctl --user status tts-erp-sync.service  # sync-worker 状态
+systemctl --user restart tts-erp.service      # = restart.sh（只重启 API）
+systemctl --user restart tts-erp-sync.service # 改了 jobs/ 或 sync_worker/ 后必须单独跑这个
+journalctl --user -u tts-erp -n 50            # systemd 日志（业务日志仍看 logs/）
 ```
 
-## 8. Token 续期 cron
+## 8. Token 续期
 
-`oauth-receiver` 已经配了 cron（`0 2 * * *`）每天凌晨 2 点调 `/token/<shop_id>/refresh`。
-**不要**在 tts-erp 这边再加一个，tts-erp 永远不该主动续期 token（不归它管）。
+v2 起 token 续期由 **sync-worker 的 `token.refresh` job**（每 6h，见
+`tts_erp_v2/sync_worker/scheduler.py` JOBS）进程内完成：
+`tts_erp_v2/jobs/token_refresh.py` 扫 `integration.credentials` 里临近过期的行，
+调 `proxy/token_service.refresh_if_needed()` 续期并重新加密写回。不再依赖
+oauth-receiver 的 HTTP 续期端点；oauth-receiver :9876 仅在 4 周回滚观察期内保留。
+v1 的 `refresh_shop_token()` / `tdd/oauth_receiver_core.py` 已随 v1 代码删除。
 
-验证过的真实配置（2026-08-27 crontab -l）：续期归 `~/oauth-receiver/refresh_tokens.sh`
-管，打的是**独立** oauth-receiver 服务（:9876，`~/oauth-receiver/`，有自己的
-`/token/<id>/refresh` 路由）——与本仓库 `tdd/oauth_receiver_core.py` 的 in-process
-副本是两回事。本仓的 `refresh_shop_token()` 无生产调用方，属预期。
+## 9. External API Guide (2026-08-20 起 enforce；v2 已重写）
 
-## 9. External API Guide (2026-08-20)
-
-The FastAPI service at `:9877` exposes **stable external API contracts** for
-clients (dashboards, BI tools, internal apps) to query orders, refunds, and
-logistics. The full contract — auth, rate limiting, CORS, pagination, every
-endpoint's schema and curl examples — lives in:
+The FastAPI service at `:9877` exposes **stable external API contracts** under
+`/v2/*` for clients (dashboards, BI tools, internal apps) to query orders,
+linkage, and cost/profit reporting. The full contract — auth, rate limiting,
+CORS, pagination, every endpoint's schema and curl examples — lives in:
 
 **[`tech-doc/external-api.md`](tech-doc/external-api.md)** — read this before
 adding or changing any external-facing endpoint.
@@ -269,31 +288,33 @@ adding or changing any external-facing endpoint.
 
 - **Auth**: `Authorization: Bearer <key>` **or** `X-API-Key: <key>`.
   Default mode is `enforce` (since 2026-08-20). Keys are stored as
-  SHA-256 hashes only; the plaintext is shown ONCE on creation.
-  Roles: `readonly` < `readwrite` < `admin`.
-- **Rate limit**: 100 req/min/key, sliding window. Override via env
+  SHA-256 hashes only (`security.api_keys`); the plaintext is shown ONCE on creation.
+  Roles: `readonly` < `readwrite` < `admin`. Exempt paths: `/healthz`,
+  `/endpoints`, `/openapi.json`, `/docs`, `/redoc`, `/docs/oauth2-redirect`,
+  `/v2/auth/{login,logout,me}`.
+- **Browser sessions**: `POST /v2/auth/login` exchanges an API key for an
+  `tts_session` cookie. Cookie-authed mutations must carry
+  `X-Requested-With: tts-erp` (CSRF gate).
+- **Rate limit**: 100 req/60s/key, sliding window. Override via env
   `TTS_ERP_RATE_LIMIT_PER_MIN=…`. 429 + Retry-After on overflow.
 - **CORS**: default **deny** (empty allow-origin list). Set
   `TTS_ERP_CORS_ALLOW_ORIGINS` to a comma-list of explicit origins, or
   the literal token `wildcard` for dev/internal deploys.
-- **Pagination**: opaque base64 cursors on `/db/orders` and `/db/returns`.
-  `limit` is 1..500 (default 50). `next_cursor` is null on the last page.
-- **Timestamps**: query params are **epoch seconds** (BIGINT in DB);
-  responses include matching `_iso` fields in UTC ISO-8601.
-- **Refunds**: `GET /db/returns` and `GET /db/returns/{id}` both expose a
-  computed `refund_amount` field derived from
-  `raw->'refund_amount'->>'refund_total'` (TikTok 202309 spec — **note the
-  nested object**, not `raw->'refund'`; corrected 2026-08-20) plus
-  `refund_currency` from `raw->'refund_amount'->>'currency'`. Both are
-  **NULL** when the raw JSON has no `refund_amount` object (happens for
-  AWAITING returns, not yet closed).
+- **Filtering**: v2 read endpoints take **internal ids**
+  (`channel_account_id`, `channel_product_id`), NOT `shop_id` — a stray
+  `?shop_id=` is silently ignored (see §2.4).
+- **Pagination**: `limit`/`offset` on list endpoints. `limit` is 1..500
+  (default 100; 200 on `missing-cost-products`). No cursor pagination in v2.
+- **Timestamps**: ISO-8601 UTC strings in responses.
+- **Money**: decimal columns serialize as JSON strings (e.g. `"1187324.0000"`)
+  to avoid float drift — parse as Decimal client-side.
 
 ### 9.2 Creating an external API key
 
 ```bash
 python3 api_keys.py create --role readonly --name "external-orders-reader"
 python3 api_keys.py list
-python3 api_keys.py disable --key-prefix "ttserp_ro_…"
+python3 api_keys.py revoke --prefix "ttserp_ro_…"   # 吊销；rotate --prefix 轮换
 ```
 
 The plaintext key is printed ONCE — store it before the prompt scrolls away.
@@ -301,11 +322,12 @@ The plaintext key is printed ONCE — store it before the prompt scrolls away.
 ### 9.3 Middleware order (do not change without thought)
 
 FastAPI `add_middleware` wraps in reverse, so add order = innermost-first.
-Current order in `tts_erp_fastapi.py`:
+Current order in `tts_erp_v2/app.py::build_app()`:
 
 1. `RateLimitMiddleware` (innermost requested layer)
 2. `AuthMiddleware`
-3. `CORSMiddleware` (outermost)
+3. `CORSMiddleware`
+4. `AccessLogMiddleware` (outermost — sees final status + duration)
 
 Auth runs BEFORE RateLimit — so the rate limiter can bucket by key. If
 you add a new middleware, place it accordingly; do not put auth at the
@@ -313,29 +335,23 @@ outermost or rate limiting breaks (key_id will be None).
 
 ### 9.4 Validation harness
 
-`/tmp/verify_external_api.sh` (or re-run from scratch with the script in
-this repo's tooling) exercises:
+- `bash prod-switch/postswitch-smoke.sh` — 7 步生产冒烟（healthz / auth 401 /
+  v2 读端点 / 页面 / sync_jobs 新鲜度）
+- `.venv/bin/pytest tests_v2/ -q` — 含 `tests_v2/middleware/`（auth/ratelimit/
+  session）与 `tests_v2/api/` 的端点契约测试
 
-- 401 / 200 / 403 transitions
-- CORS preflight
-- Time-range filtering
-- Cursor pagination (next_cursor + invalid cursor → 400)
-- Rate limit burst (110 reqs → 100×200 + 10×429)
-- `/db/returns/{id}` detail + `include_raw=false`
-
-Run after any change to `tts_erp_fastapi.py`, `auth.py`, or `rate_limit.py`.
+Run after any change to `tts_erp_v2/app.py`, `tts_erp_v2/middleware/*`.
 
 ### 9.5 What is NOT external-stable
 
 These endpoints (and their semantics) may break without notice:
 
-- `POST /sync/*` — internal cron-driven data ingest
-- `POST /orders/*`, `GET /finance/*` — TikTok API proxy
-- `GET /token/{shop_id}` — admin-only token reveal
-- `GET /db/sync_log` — in-memory mirror
-- `GET /miaoshou/*` — Wanshifu/Miaoshou SDK proxy (separate domain)
+- `GET /v1/analytics/sync/*` — analytics-sync 内部 ingest 契约
+- `GET /v2/llm-context` — experimental LLM 上下文包
+- `POST /v2/linkage/overrides` 等 mutation 端点的 body 字段可能随表单演进
 
-External clients should NOT depend on these.
+External clients should NOT depend on these. Miaoshou 已无任何 HTTP 面
+（见 §10.2），不要等它回来。
 
 The full table (with role requirements + v1 status for every endpoint)
 is at the bottom of [`tech-doc/external-api.md`](tech-doc/external-api.md)
@@ -350,30 +366,23 @@ apifox 文档标题“妙手开放平台”，实际底层 endpoint 指向 `open
 
 - 申请：user.wanshifu.com（生产）/ test-user.wanshifu.com（测试）→ 账号安全 → 管理授权 → 新增授权 → 拿 `licenseId` + `companySecret`。
 - 配置：写到 tts-erp `.env`（`MIAOSHOU_LICENSE_ID` / `MIAOSHOU_COMPANY_SECRET` / `MIAOSHOU_ENV` / `MIAOSHOU_HTTP_TIMEOUT`）。
-- SDK：`from miaoshou import MiaoshouClient, MiaoshouErpClient`；也可直接 `curl POST :9877/miaoshou/<domain>/<method>`。
+- SDK：`from miaoshou import MiaoshouClient, MiaoshouErpClient`（进程内调用；v2 已无 `/miaoshou/*` HTTP 路由，见 §10.2）。
 - 调试：`MIAOSHOU_DEBUG_SIGN=1` 在 stderr 打 canonical + sign。
 
-### 10.2 路由
+### 10.2 进程内使用（v2 无 HTTP 路由）
 
-路由全部已迁到 FastAPI（`tdd/tts_erp_fastapi.py`）。生产 :9877 直接可用。
+v2 app **没有挂载任何 `/miaoshou/*` 路由**——v1 的 `POST /miaoshou/<domain>/<method>`
+出站代理和 `POST /miaoshou/callback/<node-alias>` 回调端点已随 v1 一起拆除（实测 404）。
+现在的使用方式：
 
-- `POST /miaoshou/<domain>/<method>` body 转 SDK 方法 `**kwargs`（36 个出站接口，domain ∈ orders/fees/refunds/arbitrations/closes/complaints/queries/accounts/products/logistics/aftersales/tests）
-- `POST /miaoshou/callback/<node-alias>` 18 个回调节器（每个一个 node-alias，按 orderStatus 字段自动派发）
-- `POST /miaoshou/callback/all` 按 orderStatus 字段自动选 model
+- **出站**：`tts_erp_v2/jobs/miaoshou/*`（shops / collect_box / move_collect /
+  purchase_orders 4 个 job）进程内调 SDK（经 `tts_erp_v2/proxy/miaoshou/`）落
+  `procurement.*`。⚠️ **这 4 个 job 目前未注册进 sync-worker 调度**（`scheduler.py`
+  的 `JOBS` 无条目），生产不自动跑；要跑得手动触发 job 函数或补注册。
+- **回调**：payload 模型 + `dispatch_callback()` 保留在 `miaoshou/callbacks/`，
+  但没有 HTTP 入口——妙手若推送 webhook 当前会 404。要恢复需在 v2 app 挂路由（单独评审）。
 
-错误处理（统一在 `_miaoshou_outbound_call` / `dispatch_callback`）：
-
-- 未支持的 domain / method → 404 + supported 列表
-- body 字段名与 SDK 方法签名不符（`TypeError`） → 400 + 提示匹配 SDK 签名
-- 上游 MiaoshouApiError（业务 code != 200） → 502 + 透传 code/message/data（不静默吞错）
-- 网络错误（URLError） → 502
-- 未预期异常 → 500 + 日志
-
-Auth: admin role（middleware 已在 `tdd/auth.py` `required_role` 把 `/miaoshou/*` 默认归 admin）。
-
-测试覆盖：`tdd/test_miaoshou_routes.py`（11 passed + 1 skipped因 Mock auto-create child attr 限制，未知 method 路径靠生产 MiaoshouClient 真实 class 行为覆盖）。
-
-⚠️ **Legacy cleanup status**（已完成 2026-08-27 / Wave 4.1 + 2026-08-24 其他 session）: 5 个 Handler `_sync_miaoushou_*` / `_db_list_miaoushou_shops` 方法已抽到 `tdd/miaoshou_sync.py` 模块级函数（返回 `(code, body)` 元组）；`_invoke_legacy_sync` 改为直接调模块函数（`getattr` 兑底 501）；`tts_erp.py` 删了 Handler 类 + `main()` + `_proxy_get`（3512 → 1691 行）。 2026-08-24 其他 session 删了 `do_POST` 里的 `dispatch_callback` / `_miaoshou_call_endpoint`（160 行 dead code），并删了测该 dead code 的 `test_handler_routing.py`；W4.1 留下的 `getattr` 501 兑底保留作为远期守望。
+错误处理 / 重试在 SDK 层（`miaoshou/miaoshou_client.py`）。
 
 ### 10.3 签名（apifox doc-824327）
 
@@ -388,7 +397,9 @@ sign    = MD5(busData + companySecret).upper()
 ### 10.4 测试
 
 ```shell
-.venv/bin/pytest tests/miaoshou/ -q
+.venv/bin/pytest tests/miaoshou/ -q        # SDK 单测：91 个 test function（15 文件）
+.venv/bin/pytest tests_v2/jobs_miaoshou/ -q  # v2 妙手 job 测试
 ```
 
-**96 个 test function**（15 个文件：`test_signing` / `test_client` / `test_callbacks` / `test_handler_routing` / `test_endpoints_happy` / `test_sync_routes` / `test_sync_shops` / `test_bug_fixes` / `test_erp_bugfixes` / `test_regression_guards` / `test_round2_bugfixes` / `test_round3_bugfixes` / `test_round4_ensure_ascii` / `test_round5_retry_edge_cases` / `test_round6_signature_per_attempt`），覆盖 signing / client / callbacks / handler routing / 36 出站 endpoint。
+覆盖 signing / client / callbacks / 36 出站 endpoint；签名锁定向量在
+`tests/miaoshou/test_signing.py::test_build_sign_doc_824327_vector`。

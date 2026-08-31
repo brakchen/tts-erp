@@ -1,8 +1,17 @@
 # tts-erp 重构技术方案 V2（定稿）
 
 > 版本：V2 · 2026-08-29（替代 V1，所有评审决策已并入正文）
+> **实施状态：已完成**——v2 已于 2026-08-29 切流生产（`:9877` 跑 `tts_erp_v2.app:app`）。
+> As-built 与本文的差异：
+> - 代码布局落在 `tts_erp_v2/` 包内（`app.py` / `api/v2/` / `proxy/` / `sync_worker/` /
+>   `db/models/`），不是 §2.2 画的顶层 `app/` `proxy/` 目录；
+> - sync-worker 实际注册的 job 及频率以 `tts_erp_v2/sync_worker/scheduler.py` 的
+>   `JOBS` 为准（6 个 tiktok job + token.refresh；妙手 4 个 job 与 link-compute /
+>   cost-snapshots 重算**未接入调度**，与 §4.1 的计划表不同）；
+> - `/miaoshou/callback/*` 未挂进 v2 app（代码保留在 `miaoshou/callbacks/`，实测 404）。
+>
 > 上游输入：架构决策（§1）+ 数据模型 V3（`tech-doc/data-model-target-v3.md`）
-> 现状基线：`tech-doc/data-model-survey.md`（全表 DDL + demo + 关联分析）
+> 现状基线：`tech-doc/_archive/data-model-survey-v1.md`（全表 DDL + demo + 关联分析；2026-08-30 归档改名）
 > 妙手接口实测：`miaoshou/README.md`（search_move_collect_list 字段映射 + 关联结论）
 
 ---

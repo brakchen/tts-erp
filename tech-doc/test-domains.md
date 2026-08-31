@@ -7,7 +7,7 @@ for the full ~10k LOC run.
 ## Why split?
 
 - **Speed.** A typical `pytest` over everything takes minutes because
-  the suite touches 35 migration tables + the FastAPI app + SDKs. A
+  the suite touches 36 migration tables + the FastAPI app + SDKs. A
   single domain (`domain_commerce`, `domain_api`, …) usually runs in
   single-digit seconds.
 - **Signal-to-noise.** A failure in `domain_finance` shouldn't block
@@ -98,6 +98,7 @@ If you want to call `pytest` directly:
 - **`pytest -m ""` runs nothing.** An empty marker expression is treated
   as "no tests selected", not "all tests". If you mean "all tests", drop
   the `-m` flag entirely:
+
   ```bash
   # WRONG: collects 0 tests
   .venv/bin/pytest -m ""
@@ -106,13 +107,16 @@ If you want to call `pytest` directly:
   .venv/bin/pytest
   .venv/bin/pytest -m "not slow and not requires_service"
   ```
+
 - **`requires_db` vs `requires_service` are separate.** Most `tests_v2/`
   tests need a Postgres reachable via `TTS_ERP_DB_URL`. The `domain_e2e`
   suite additionally needs `:9877` running locally. Run them with:
+
   ```bash
   scripts/test.sh e2e                    # :9877 must be up
   TTS_ERP_DB_URL=... scripts/test.sh migration   # PG must be reachable
   ```
+
 - **Worktrees.** `chore/*` worktrees don't carry their own `.venv` — the
   script falls back to `/home/schan/tts-erp/.venv/bin/pytest` when
   `./.venv/bin/pytest` is missing.

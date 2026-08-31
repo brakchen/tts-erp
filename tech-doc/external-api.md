@@ -1,72 +1,77 @@
 # tts-erp External API Guide
 
 This document is the **stable public API contract** for the tts-erp FastAPI
-service (port 9877). Internal-only endpoints (sync, token, oauth-receiver
-passthrough) are listed in `GET /endpoints` but NOT covered here.
+service (port 9877). The authoritative live route list is `GET /endpoints`;
+this document explains semantics, auth, and conventions.
+
+> **2026-08-29 hard switch**: all legacy v1 endpoints — `/db/*`, `/orders/*`,
+> `/finance/*`, `/sync/*`, `/token/*`, `/miaoshou/*` — were **deleted** and
+> now return 404. This guide covers only the live v2 contract. The v1-era
+> version of this document is in git history.
 
 ## TL;DR — quick reference for agents
 
-All endpoints below are served by the FastAPI service at
-`http://127.0.0.1:9877` (or `http://daqiang.nat100.top` from outside, **port
-already stripped** at the NAT layer). Every endpoint other than the
-explicitly-public ones requires `Authorization: Bearer <key>` or
-`X-API-Key: <key>`.
+All endpoints are served at `http://127.0.0.1:9877` (or
+`http://daqiang.nat100.top` from outside — the NAT layer strips the port;
+browser traffic may additionally sit under a `/tts` prefix handled by nginx).
+Every endpoint other than the explicitly-public ones requires
+`Authorization: Bearer <key>` or `X-API-Key: <key>` — or a browser session
+cookie (see [Browser session login](#browser-session-login)).
 
-| What you want | Endpoint | Role | Time fields |
-| --- | --- | --- | --- |
-| Service liveness / version | `GET /healthz` | public | — |
-| Discover every route | `GET /endpoints` | public | — |
-| Auto-generated schema | `GET /openapi.json`, `/docs`, `/redoc` | public | — |
-| List orders | `GET /db/orders` | readonly | `create_time`, `paid_time`, `shipped_time`, `delivered_time`, `cancelled_time` (epoch sec) |
-| Get one order + items + shipping | `GET /db/orders/{id}` (+ `/items`, `/shipping`) | readonly | epoch + ISO |
-| List refunds / cancellations | `GET /db/returns`, `/db/cancellations` | readonly | `create_time`, `update_time` |
-| Get one refund (with computed `refund_amount`) | `GET /db/returns/{id}` | readonly | epoch + ISO |
-| List statements / payments | `GET /db/statements`, `/db/payments` | readonly | `statement_time` |
-| Per-statement fee breakdown (58 fields) | `GET /db/statement_transactions` | readonly | epoch |
-| Logistics tracking summary | `GET /db/logistics_tracking` | readonly | — |
-| Logistics event stream (per order) | `GET /db/logistics_events` | readonly | milliseconds |
-| Live tracking (TikTok proxy, auto-persists) | `GET /logistics/orders/{id}/tracking?shop_id=X` | readonly | — |
-| Sync ingest state | `GET /db/sync_log` | admin (default) | ISO |
-| Analytics cursor (for `tk-adv-cost-monitor`) | `GET /v1/analytics/sync/cursor` | readwrite + scope | `latestCompletedDay` / `nextRequiredDay` (date) |
+| What you want | Endpoint | Role |
+| --- | --- | --- |
+| Service liveness / fingerprint | `GET /healthz` | public |
+| Discover every route | `GET /endpoints` | public |
+| Auto-generated schema | `GET /openapi.json`, `/docs`, `/redoc` | public |
+| LLM-oriented system + data dictionary | `GET /v2/llm-context` | readonly |
+| List shops (→ internal `channel_account_id`) | `GET /v2/commerce/channel-accounts` | readonly |
+| List / get TikTok products (SPU) | `GET /v2/commerce/channel-products[/{id}[/variants]]` | readonly |
+| List / get orders (+ lines) | `GET /v2/commerce/sales-orders[/{id}[/lines]]` | readonly |
+| Per-shop order aggregate | `GET /v2/commerce/channel-accounts/{id}/order-stats` | readonly |
+| 妙手↔TikTok product links | `GET /v2/linkage/product-links` | readonly |
+| Link evidence (raw) | `GET /v2/linkage/evidence` | readonly |
+| Link issues queue | `GET /v2/linkage/issues` | readonly |
+| Resolve a link issue | `POST /v2/linkage/issues/{id}/resolve` | readwrite (handler-enforced) |
+| List / create manual link overrides | `GET` / `POST /v2/linkage/overrides` | readonly / **admin** (handler-enforced) |
+| Cost snapshots | `GET /v2/reporting/cost-snapshots` | readonly |
+| Daily profit | `GET /v2/reporting/profit-daily` | readonly |
+| Coverage / health snapshot | `GET /v2/reporting/coverage` | readonly |
+| Active SPUs missing a cost | `GET /v2/reporting/missing-cost-products` | readonly |
+| Submit a manual cost | `POST /v2/reporting/manual-costs` | readwrite |
+| Operator console (HTML) | `GET /v2/pages/manual-costs` | readonly (browser → 302 login) |
+| SPU image list / upload / delete | `GET /v2/spu-images`, `POST /v2/spu-images/upload-url`, `POST /v2/spu-images/{id}/confirm`, `DELETE /v2/spu-images/{id}` | readonly / readwrite |
+| Browser login / logout / whoami | `GET\|POST /v2/auth/login`, `POST /v2/auth/logout`, `GET /v2/auth/me` | public |
+| Analytics cursor / batch upload (Chrome ext) | `GET /v1/analytics/sync/cursor`, `POST /v1/analytics/sync/batches` | readwrite + scope |
 
 Key gotchas (read these before writing code):
 
-- **Epoch seconds, not millis**, on `/db/*` (BIGINT in DB). Response includes
-  matching `_iso` UTC strings for convenience. **`/db/logistics_events` is
-  the exception** — it uses **milliseconds** because the source API does.
-- Pagination on `/db/orders` and `/db/returns` is **keyset** via opaque
-  base64 `cursor`. Pass the previous response's `next_cursor` as-is.
-  `limit` is 1..500 (default 50).
-- `cursor` is opaque (do not parse). Invalid cursor → 400.
-- Refunds expose computed `refund_amount` (numeric) + `refund_currency`
-  (string), derived from `raw->'refund_amount'->>'refund_total'` /
-  `raw->'refund_amount'->>'currency'` (TikTok 202309 spec; **note the
-  nested object, not `raw->'refund'`** — this changed on 2026-08-20). NULL
-  when raw has no refund_amount object.
-- All auth modes: see [Authentication](#authentication) below.
+- **Filter by internal ids, not shop_id.** v2 list endpoints take
+  `channel_account_id` / `channel_product_id` (internal bigint PKs).
+  Resolve a TikTok `shop_id` once via
+  `GET /v2/commerce/channel-accounts?platform=tiktok` →
+  `external_account_id`. Passing `?shop_id=` is **silently ignored**
+  (FastAPI drops unknown query params) and you get an unfiltered list.
+- **Pagination is `limit` + `offset`** (no cursors in v2). `limit` is
+  1..500, default 100 (200 on `missing-cost-products`).
+- **Money is a string.** `numeric(20,4)` columns serialize as JSON strings
+  (`"1187324.0000"`) to avoid float drift — parse with a decimal type.
+- **Timestamps are ISO-8601 UTC strings** (`timestamptz` in DB), e.g.
+  `2026-08-30T13:33:37Z`. `profit-daily`'s `on_date` filter accepts a date
+  or datetime.
+- Cookie-authed mutations (browser session) must send
+  `X-Requested-With: tts-erp` (CSRF guard). Header-key clients are exempt.
 
 Minimal recipe — first call:
 
 ```bash
 KEY=$(cat ~/.tts-erp-key)        # mint with: python3 api_keys.py create --role readonly --name agent-x
+# resolve the shop's internal account id once
 curl -sS -H "X-API-Key: $KEY" \
-  "http://127.0.0.1:9877/db/orders?shop_id=7494763368967603447&limit=2"
+  "http://127.0.0.1:9877/v2/commerce/channel-accounts?platform=tiktok"
+# → [{"id":314,"external_account_id":"7494763368967603447",...}]
+curl -sS -H "X-API-Key: $KEY" \
+  "http://127.0.0.1:9877/v2/commerce/sales-orders?channel_account_id=314&limit=2"
 ```
-
-Minimal recipe — paginate to end:
-
-```bash
-URL="http://127.0.0.1:9877/db/orders?shop_id=7494763368967603447&limit=200"
-while : ; do
-  RESP=$(curl -sS -H "X-API-Key: $KEY" "$URL")
-  echo "$RESP" | jq -r '.items[] | [.order_id, .order_status_name, .create_time_iso] | @tsv'
-  CURSOR=$(echo "$RESP" | jq -r '.next_cursor // ""')
-  [ -z "$CURSOR" ] && break
-  URL="$URL&cursor=$CURSOR"
-done
-```
-
-For full request/response schemas, see the **Endpoints** section below.
 
 ## Authentication
 
@@ -81,24 +86,55 @@ Authorization: Bearer <your-api-key>
 X-API-Key: <your-api-key>
 ```
 
-`Authorization` takes precedence if both are present. Keys are 32+ chars,
-prefixed by role (`ttserp_rw_…` for readwrite, `ttserp_admin_…` for
-admin, `ttserp_ro_…` for readonly).
+`Authorization` takes precedence if both are present. Keys are prefixed by
+role (`ttserp_ro_…` readonly, `ttserp_rw_…` readwrite, `ttserp_admin_…`
+admin). Roles are linearly ordered `readonly < readwrite < admin`; the
+path classification lives in
+`tts_erp_v2/middleware/auth.py::required_role()` — unmatched paths default
+to **admin** (fail-closed). A few write endpoints
+(`POST /v2/linkage/overrides`, `POST /v2/linkage/issues/{id}/resolve`)
+enforce their role **inside the handler** on top of the middleware.
+
+Public (auth-exempt) paths: `/healthz`, `/endpoints`, `/openapi.json`,
+`/docs`, `/redoc`, `/docs/oauth2-redirect`, `/v2/auth/login`,
+`/v2/auth/logout`, `/v2/auth/me`.
 
 **Errors**:
 
-- `401 missing bearer token` — no header sent
-- `401 invalid, disabled or expired api key` — header present but key not
-  recognised (typo, disabled, or expired)
-- `403 requires <role>` — key is recognised but lacks the role for this path
+- `401 missing bearer token` — no credential sent
+- `401 invalid, disabled or expired api key` — credential not recognised
+- `403 requires <role>` — key recognised but lacks the role for this path
 
-In `enforce` mode (production), the service returns the error. In `shadow`
-mode, the error is logged to stderr and the request is still served. In
-`off` mode auth is bypassed entirely (development only).
+The mode is set by env `TTS_ERP_AUTH_MODE=off|shadow|enforce`. In
+`enforce` (production default since 2026-08-20) the service returns the
+error; in `shadow` the would-deny is only logged; `off` bypasses auth
+entirely (development only).
+
+## Browser session login
+
+For human operators there is a thin cookie layer on top of the API-key
+system (design: [`browser-login-design.md`](browser-login-design.md)):
+
+- `GET /v2/auth/login` — public HTML form.
+- `POST /v2/auth/login` — body `{"key": "...", "next": "/v2/pages/manual-costs"}`;
+  validates the key against `security.api_keys`, sets an HMAC-signed
+  `HttpOnly` session cookie `tts_session` (12 h fixed TTL; the cookie
+  stores only the key hash, re-validated against the DB per request —
+  revoking the key kills the session within the cache TTL).
+- `POST /v2/auth/logout` — clears the cookie.
+- `GET /v2/auth/me` — `{authenticated, role}` for the current cookie.
+
+Browser navigations (`Accept: text/html`) that fail auth get a **302** to
+`/v2/auth/login?next=...` instead of a JSON 401. Cookie-authed
+POST/DELETE requests must carry `X-Requested-With: tts-erp` (CSRF guard;
+double-checked with `SameSite=Lax` + default-deny CORS).
 
 ## Rate Limiting
 
-Sliding-window per API key. Default: **100 requests per 60 seconds**.
+Sliding-window per API key (or per session key-hash for cookie traffic).
+Default: **100 requests per 60 seconds**, configurable via env
+`TTS_ERP_RATE_LIMIT_PER_MIN`. Anonymous requests (public paths) pass
+through unbucketed.
 
 Over-quota responses:
 
@@ -112,226 +148,105 @@ Content-Type: application/json
 {"detail":"rate limit exceeded: 100 req/60s per api key","retry_after_s":47}
 ```
 
-Configure the per-key limit via env: `TTS_ERP_RATE_LIMIT_PER_MIN=200`.
-
-Note: the `/healthz` endpoint is exempt from rate limiting (it is also
-auth-exempt).
-
 ## CORS
 
 Default: **no browser cross-origin access allowed** (empty allow-origin
 list). To enable specific origins, set:
 
-```
+```dotenv
 TTS_ERP_CORS_ALLOW_ORIGINS=https://app.example.com,https://admin.example.com
 ```
 
 For dev/internal deploys, `TTS_ERP_CORS_ALLOW_ORIGINS=wildcard` enables
 `*` — do not use in production.
 
-## Pagination
-
-All list endpoints (`GET /db/orders`, `GET /db/returns`) support keyset
-pagination via opaque base64 cursors:
-
-```
-GET /db/orders?limit=100   → 200 {count, next_cursor, items}
-GET /db/orders?limit=100&cursor=<next_cursor>   → next page
-```
-
-Cursors encode `(create_time, order_id)` for orders or
-`(create_time, return_id)` for returns. Stop when `next_cursor` is `null`
-on the response.
-
-`limit` is 1..500 (default 50). Invalid cursor → 400. Out-of-range limit
-→ 400.
-
-## Timestamps
-
-- Query parameters that take a time range (`create_time_ge`,
-  `paid_time_lt`, etc.) are **unix epoch seconds** (BIGINT in the DB).
-- Response objects include `_iso` suffixed fields (e.g. `create_time_iso`)
-  for convenience. These are ISO-8601 UTC strings.
-- `synced_at` and `updated_at` are returned as ISO-8601 strings (these
-  columns are `TIMESTAMPTZ` in the DB; original format is preserved).
-
 ## Endpoints
 
-### Orders
+### Commerce (`/v2/commerce/*`, all readonly GET)
 
-#### `GET /db/orders`
+All list endpoints accept `limit` (1..500, default 100) + `offset` (≥0).
 
-Local-DB orders list. Returns a JSON object `{count, next_cursor, items}`
-where each item has:
-
-| field | type | notes |
+| Endpoint | Extra query params | Returns |
 | --- | --- | --- |
-| `order_id` | string | PK |
-| `shop_id` | string | FK |
-| `order_status_name` | string | one of AWAITING_SHIPMENT / AWAITING_COLLECTION / IN_TRANSIT / DELIVERED / COMPLETED / CANCELLED |
-| `payment_amount` | numeric | |
-| `payment_currency` | string | |
-| `total_amount` | numeric | |
-| `buyer_email` | string | |
-| `create_time` | integer | epoch seconds |
-| `create_time_iso` | string | UTC ISO |
-| `update_time`, `paid_time`, `shipped_time`, `delivered_time`, `cancelled_time` | integer | epoch seconds + corresponding `_iso` strings |
-| `fulfillment_type` | string | |
-| `synced_at`, `updated_at` | string | TIMESTAMPTZ ISO |
+| `GET /v2/commerce/channel-accounts` | `platform` (e.g. `tiktok`) | list of `{id, platform, external_account_id, account_name, region, seller_type, status, synced_at}` |
+| `GET /v2/commerce/channel-accounts/{account_id}` | — | one account; 404 if unknown |
+| `GET /v2/commerce/channel-accounts/{account_id}/order-stats` | — | `{order_count, payment_amount_sum}` aggregate (0/0 when empty) |
+| `GET /v2/commerce/channel-products` | `channel_account_id`, `status` | SPU list: `{id, channel_account_id, external_product_id, title, status, source_created_at, source_updated_at}` |
+| `GET /v2/commerce/channel-products/{product_id}` | — | one SPU; 404 if unknown |
+| `GET /v2/commerce/channel-products/{product_id}/variants` | — | SKU list: `{id, channel_product_id, external_variant_id, seller_sku, variant_name}` |
+| `GET /v2/commerce/sales-orders` | `channel_account_id`, `status` | order list: `{id, channel_account_id, external_order_id, status, currency, payment_amount, total_amount, source_created_at, source_updated_at, paid_at}` |
+| `GET /v2/commerce/sales-orders/{order_id}` | — | one order (internal `id`, **not** `external_order_id`); 404 if unknown |
+| `GET /v2/commerce/sales-orders/{order_id}/lines` | — | order lines: `{id, sales_order_id, external_line_id, channel_product_id, channel_product_variant_id, quantity, unit_price}` |
 
-Query parameters:
+### Linkage (`/v2/linkage/*`)
 
-| name | type | notes |
+| Endpoint | Role | Query params / body |
 | --- | --- | --- |
-| `shop_id` | string | required for filtering (use the actual shop_id) |
-| `status` | string | exact match on `order_status_name` |
-| `limit` | int | 1..500, default 50 |
-| `create_time_ge`, `create_time_lt` | epoch | inclusive / exclusive |
-| `paid_time_ge`, `paid_time_lt` | epoch | inclusive / exclusive |
-| `shipped_time_ge`, `shipped_time_lt` | epoch | inclusive / exclusive |
-| `delivered_time_ge`, `delivered_time_lt` | epoch | inclusive / exclusive |
-| `cancelled_time_ge`, `cancelled_time_lt` | epoch | inclusive / exclusive |
-| `cursor` | string | opaque, from previous response `next_cursor` |
+| `GET /v2/linkage/product-links` | readonly | `channel_product_id`, `procurement_product_id`, `limit`, `offset` |
+| `GET /v2/linkage/evidence` | readonly | `product_link_id`, `limit`, `offset` |
+| `GET /v2/linkage/issues` | readonly | `unresolved_only` (default true), `limit`, `offset` |
+| `POST /v2/linkage/issues/{issue_id}/resolve` | readwrite (handler-enforced) | — ; 200 `{id, status:"resolved"}`, 404 if missing/already resolved |
+| `GET /v2/linkage/overrides` | readonly | `channel_product_id`, `active_only` (default true), `limit`, `offset` |
+| `POST /v2/linkage/overrides` | **admin** (handler-enforced) | body `{"channel_product_id": int, "procurement_product_id": int \| null, "decision": "ALLOW"\|"DENY"\|"PRIMARY", "reason"?: str, "valid_from"?: datetime}` → 201 |
 
-Example:
+Note: the merged "effective links" view exists only at the DB layer
+(`linkage.effective_product_links`); there is **no** HTTP endpoint for it —
+`GET /v2/linkage/product-links` + `/overrides` are the HTTP surface.
 
-```bash
-curl -H "X-API-Key: $KEY" \
-  "http://127.0.0.1:9877/db/orders?shop_id=7494763368967603447&limit=2"
-```
+### Reporting (`/v2/reporting/*`)
 
-```json
-{
-  "count": 2,
-  "next_cursor": "eyJ0IjoxNzg3MjM1ODA5LCJpIjoiNTg1NjQzNjI5NDY1MjA3OTE3In0",
-  "items": [...]
-}
-```
-
-#### `GET /db/orders/{order_id}`
-
-Single order detail (SELECT * FROM orders). 404 if not in local DB.
-
-```bash
-curl -H "X-API-Key: $KEY" \
-  "http://127.0.0.1:9877/db/orders/585627776242845445"
-```
-
-#### `GET /db/orders/{order_id}/items`
-
-Order line items (`order_items` table).
-
-#### `GET /db/orders/{order_id}/shipping`
-
-Order shipping info (`order_shippings` table).
-
-### Refunds
-
-#### `GET /db/returns`
-
-Local-DB returns list. Same pagination contract as `/db/orders`. Each item
-includes the computed field:
-
-- `refund_amount` — `numeric`, derived from
-  `raw->'refund_amount'->>'refund_total'` (TikTok 202309 spec; **note the
-  nested object, not `raw->'refund'`** — this changed on 2026-08-20 when
-  the wrong path was corrected). NULL when raw doesn't have a
-  `refund_amount` object.
-- `refund_currency` — string, from `raw->'refund_amount'->>'currency'`. NULL
-  when no refund_amount object.
-
-Query parameters (plus standard `limit`, `cursor`, `shop_id`, `status`):
-
-| name | type |
-| --- | --- |
-| `create_time_ge`, `create_time_lt` | epoch |
-| `update_time_ge`, `update_time_lt` | epoch |
-
-#### `GET /db/returns/{return_id}?include_raw=true`
-
-Single return detail. `include_raw=false` omits the heavy `raw` JSON.
-
-```bash
-curl -H "X-API-Key: $KEY" \
-  "http://127.0.0.1:9877/db/returns/4042016489520465323"
-```
-
-### Logistics
-
-#### `GET /db/logistics_tracking`
-
-Query parameters: `shop_id`, `final_status`, `arrived_overseas`,
-`tracking_number`, `order_id`, `limit` (1..500, default 100).
-
-#### `GET /db/logistics_events`
-
-Per-order event list (timestamps in **milliseconds**, unlike other tables).
-
-| name | type | notes |
+| Endpoint | Role | Query params / body |
 | --- | --- | --- |
-| `order_id` | string | |
-| `action_code` | int | |
-| `event_time` | int | milliseconds |
-| `event_time_iso` | string | computed UTC ISO |
-| `description`, `location` | string | |
+| `GET /v2/reporting/cost-snapshots` | readonly | `channel_product_id`, `cost_method`, `limit`, `offset` |
+| `GET /v2/reporting/profit-daily` | readonly | `channel_product_id`, `on_date`, `limit`, `offset` |
+| `GET /v2/reporting/coverage` | readonly | — → `{total_spus, active_spus, linked_spus, missing_cost_spus, calculation_version}` |
+| `GET /v2/reporting/missing-cost-products` | readonly | `channel_account_id`, `limit` (default 200), `offset` → `{items: [{channel_product_id, external_product_id, title, channel_account_id, missing_photo}], total_missing_photo}` |
+| `POST /v2/reporting/manual-costs` | readwrite | body `{"channel_product_external_id": str, "unit_cost": decimal>0, "currency": "VND", "valid_from"?: datetime, "note"?: str}` → 201 `ManualCostOut`; auto-closes the previous effective row for the SPU |
 
-#### `GET /logistics/orders/{order_id}/tracking?shop_id=X`
+Cost semantics: `MANUAL_ENTRY` (this endpoint) > 妙手采购单 > (1688 采集标价
+**禁用**). See `tech-doc/refactor-tech-plan-v2.md` §6 decisions 10/12.
 
-**Live** tracking (proxies the TikTok `/fulfillment/202309/orders/<id>/tracking`
-endpoint) AND auto-persists the result into `logistics_tracking` /
-`logistics_events`, AND backfills `tracking_number` from
-`order_shippings` if present. This is the right endpoint when you want
-the freshest possible tracking data — `/db/logistics_tracking` is the
-persisted view (cron refreshes every 10 min).
+> Caveat (2026-08-31): the rebuild jobs behind `cost_snapshots` /
+> `profit_daily` are not wired into the sync-worker scheduler yet, so
+> those two tables are empty and the GETs return `[]` — expected, not a
+> bug in your client.
 
-Returns the upstream TikTok envelope (`code`, `data.tracking`, etc.)
-verbatim. If `code != 0`, the endpoint returns HTTP 502 with the upstream
-payload in `detail`.
+### Pages
 
-Query parameters:
-
-| name | type | notes |
+| Endpoint | Role | Notes |
 | --- | --- | --- |
-| `order_id` | path | required |
-| `shop_id` | string | required |
+| `GET /v2/pages/manual-costs` | readonly | Server-rendered operator console (shop switcher + needs-cost / needs-photo / recently-filed tabs). Browser without a session → 302 to `/v2/auth/login`. Static assets under `/static/*` are readonly-classified too. |
 
-```bash
-curl -H "X-API-Key: $KEY" \
-  "http://127.0.0.1:9877/logistics/orders/585627776242845445/tracking?shop_id=7494763368967603447"
-```
+### SPU images (`/v2/spu-images/*`)
 
-> Note: this is **different** from `GET /db/logistics_tracking` (persisted,
-> maybe stale by up to 10 min) and from `GET /orders/{id}/tracking` (also
-> a TikTok proxy but does NOT persist). Use this endpoint when you want
-> the live data plus a side-effect refresh of the persisted view.
+Presigned MinIO upload flow (server never proxies bytes; design:
+[`procurement-ui-redesign.md`](procurement-ui-redesign.md)):
 
-### Finance
+1. `POST /v2/spu-images/upload-url` (readwrite) — body
+   `{"channel_account_id", "channel_product_id", "filename", "content_type", "size_bytes"≤8MiB}`
+   → 201 `{image_id, object_key, upload_url, upload_expires_at, required_headers}`.
+2. Browser PUTs the file to `upload_url` directly.
+3. `POST /v2/spu-images/{image_id}/confirm` (readwrite) — server HEAD-verifies
+   the object → `{status: "ready", url, ...}`; 409 `UPLOAD_NOT_FOUND` if the
+   PUT never landed.
+4. `GET /v2/spu-images?channel_product_id=X` (readonly) — ready images with
+   presigned GET URLs.
+5. `DELETE /v2/spu-images/{image_id}` (readwrite) — soft-delete, 204,
+   idempotent.
 
-#### `GET /db/statements`
+### LLM context
 
-Statement summary list. Parameters: `shop_id`, `limit` (1..500, default 50).
+`GET /v2/llm-context` (readonly) — self-describing system + data dictionary
+for LLM agents, generated from the live PG schema. `?format=md` (default)
+returns `text/markdown`; `?format=json` returns
+`{schema_version, generated_at, key_role, markdown, sections}`.
 
-#### `GET /db/payments`
+### Analytics Sync (`/v1/analytics/sync/*`)
 
-Outgoing payments list. Parameters: `shop_id`, `status`, `limit`.
-
-#### `GET /db/statement_transactions`
-
-Statement transaction detail (fee breakdowns). Parameters: `shop_id`,
-`statement_id`, `order_id`, `type`, `limit` (1..500, default 100).
-
-### Cancellations
-
-#### `GET /db/cancellations`
-
-Cancel list. Parameters: `shop_id`, `status`, `limit`.
-
-### Analytics Sync
-
-Mounted under tts-erp at `/v1/analytics/sync/*`. Powers the
-`tk-adv-cost-monitor` Chrome extension. Auth requires **readwrite**
-role plus a per-seller scope grant (api_key's `scopes` array).
-Full protocol lives in
+Mounted under tts-erp at `/v1/analytics/sync/*` (the standalone :9878
+process was retired 2026-08-30). Powers the `tk-adv-cost-monitor` Chrome
+extension. Auth requires **readwrite** role plus a per-seller scope grant
+(the api_key's `scopes` array). Full protocol lives in
 [`analytics_sync/tech-doc/analytics-sync.md`](../analytics_sync/tech-doc/analytics-sync.md);
 this section is the agent-facing quick reference.
 
@@ -341,8 +256,7 @@ Returns the latest-day state for every `(storageKey, campaignId)` pair
 known for the scope. `nextRequiredDay` is authoritative for the daily
 job scheduler.
 
-Query parameters (all required except `storageKey` / `campaignId` /
-`cursor` / `pageSize`):
+Query parameters:
 
 | name | type | notes |
 | --- | --- | --- |
@@ -448,156 +362,136 @@ Errors:
 
 #### `GET /healthz`
 
-Public (auth-exempt, rate-limit-exempt). Returns `{status, ts, version}`.
+Public (auth-exempt; anonymous so also unbucketed by the rate limiter).
+Returns the service fingerprint, e.g.:
+
+```json
+{"status":"ok","service":"tts-erp-v2","auth_mode":"enforce"}
+```
+
+`service: "tts-erp-v2"` is how smoke tests tell v2 apart from the retired
+v1 service (which returned a bare `{"status":"ok"}`).
 
 #### `GET /endpoints`
 
-Public. Lists every endpoint registered (both external-stable AND
-internal-only — useful as a discovery surface for ops).
+Public. Lists every registered route (`{path, methods, name}`) — useful
+as a discovery surface for ops.
 
 #### `GET /openapi.json` / `GET /docs` / `GET /redoc`
 
-Public. Auto-generated OpenAPI 3.1 schema (`/openapi.json`), Swagger UI
-(`/docs`), ReDoc UI (`/redoc`). All three are in `EXEMPT_PATHS` in
-`tdd/auth.py`, so they bypass both auth and rate limit.
+Public. Auto-generated OpenAPI schema + Swagger UI + ReDoc UI. All are in
+`EXEMPT_PATHS` in `tts_erp_v2/middleware/auth.py`.
 
 > Production hardening: if you don't want browsers poking at the schema,
-> restrict these three at the reverse proxy. The service itself does not
-> gate them.
+> restrict these at the reverse proxy. The service itself does not gate
+> them.
 
 ## Error responses
 
 | status | meaning |
 | --- | --- |
-| 400 | malformed query (invalid cursor, bad time range, bad limit, missing required field) |
-| 401 | missing / invalid / expired api key |
-| 403 | key lacks required role |
+| 400 | malformed query / body validation failed |
+| 401 | missing / invalid / expired credential |
+| 403 | key lacks required role (or analytics scope) |
 | 404 | resource not in local DB |
+| 409 | domain conflict (e.g. SPU image confirm before upload) |
 | 429 | rate limit exceeded (see Rate Limiting) |
-| 502 | upstream TikTok / oauth-receiver error |
 | 500 | unexpected server error |
 
-All error responses are JSON: `{"detail": "<message>"}`.
-
-## OpenAPI / Swagger UI
-
-The FastAPI service auto-publishes OpenAPI 3.1 at:
-
-- `GET /openapi.json` — schema
-- `GET /docs` — Swagger UI (interactive)
-- `GET /redoc` — ReDoc UI
-
-By default these are gated by `TTS_ERP_AUTH_MODE=shadow` (so they're
-reachable during pre-production). For production hardening, restrict them
-at the reverse proxy.
+Standard FastAPI error responses are JSON: `{"detail": "<message>"}`.
+The analytics_sync sub-API uses its own envelope
+(`{code, message, requestId, retryable}`) — see its protocol doc.
 
 ## Creating / managing API keys
 
-Use `api_keys.py`:
+Use `api_keys.py` (talks to PG directly, table `security.api_keys`):
 
 ```bash
 # create a readonly key
 python3 api_keys.py create --role readonly --name "external-orders-reader"
 
-# create a readwrite key (for sync endpoints)
+# create a readwrite key (for sync / mutation endpoints)
 python3 api_keys.py create --role readwrite --name "external-sync"
 
-# list all keys
+# list all keys (prefix/role/usage — never hashes or plaintext)
 python3 api_keys.py list
 
-# disable (revoke) a key
-python3 api_keys.py disable --key-prefix "ttserp_ro_abc123"
+# disable a key
+python3 api_keys.py revoke --prefix "ttserp_ro_abc123"
+
+# rotate: mint a fresh key with same name/role, revoke the old one
+python3 api_keys.py rotate --prefix "ttserp_ro_abc123"
 ```
 
 The full key is shown ONCE on creation. Store it securely.
 
 ## Versioning
 
-External endpoints follow semantic stability:
-
-- A new query parameter is **backwards-compatible** (old clients ignore).
-- A new response field is **backwards-compatible**.
-- Removing a field, renaming a field, or changing the meaning of an
-  existing field is a **breaking change** and requires a new API version.
-
-Current contract is v1 (no version prefix in the URL).
+- New business endpoints ship under `/v2/...`. A new query parameter or
+  response field is backwards-compatible; removing/renaming/changing the
+  meaning of a field is a breaking change and requires a new version
+  prefix.
+- `/v1/analytics/sync/*` keeps its v1 envelope for the deployed Chrome
+  extension — that contract is frozen at protocolVersion 1.
 
 ## Examples
+
+### Resolve a shop and list its recent orders
+
+```bash
+KEY=$(cat ~/.tts-erp-key)
+ACCT=$(curl -sS -H "X-API-Key: $KEY" \
+  "http://127.0.0.1:9877/v2/commerce/channel-accounts?platform=tiktok" \
+  | jq -r '.[0].id')
+curl -sS -H "X-API-Key: $KEY" \
+  "http://127.0.0.1:9877/v2/commerce/sales-orders?channel_account_id=$ACCT&limit=20" \
+  | jq -r '.[] | [.external_order_id, .status, .payment_amount, .currency] | @tsv'
+```
+
+### Submit a manual cost for an SPU
+
+```bash
+curl -sS -X POST -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"channel_product_external_id":"1730000000000000001","unit_cost":"12.40","currency":"VND","note":"1688 议价后价"}' \
+  "http://127.0.0.1:9877/v2/reporting/manual-costs"
+```
 
 ### Analytics cursor poll (Chrome extension pattern)
 
 ```bash
-# Get the next day to upload for every campaign of seller-1 / adv-1
 curl -sS -H "X-API-Key: $KEY" \
   "http://127.0.0.1:9877/v1/analytics/sync/cursor?sellerId=seller-1&advertiserId=adv-1&pageSize=100" \
   | jq -r '.data.items[] | [.storageKey, .campaignId, .nextRequiredDay] | @tsv'
 ```
 
-### Daily summary
-
-```bash
-# UTC+7 today 00:00 = epoch <get from python>
-GE=$(python3 -c "from datetime import datetime, timezone, timedelta; print(int(datetime.now(timezone(timedelta(hours=7))).replace(hour=0,minute=0,second=0,microsecond=0).timestamp()))")
-LT=$(($GE + 86400))
-
-curl -H "X-API-Key: $KEY" \
-  "http://127.0.0.1:9877/db/orders?shop_id=7494763368967603447&create_time_ge=$GE&create_time_lt=$LT&limit=500"
-```
-
-### Page through all returns
-
-```bash
-URL="http://127.0.0.1:9877/db/returns?shop_id=7494763368967603447&limit=200"
-while : ; do
-  RESP=$(curl -s -H "X-API-Key: $KEY" "$URL")
-  echo "$RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); [print(it['return_id'], it['refund_amount']) for it in d['items']]"
-  CURSOR=$(echo "$RESP" | python3 -c "import json,sys; v=json.load(sys.stdin).get('next_cursor'); print(v or '')")
-  [ -z "$CURSOR" ] && break
-  URL="http://127.0.0.1:9877/db/returns?shop_id=7494763368967603447&limit=200&cursor=$CURSOR"
-done
-```
-
-### Refund amount detail for one return
-
-```bash
-curl -H "X-API-Key: $KEY" \
-  "http://127.0.0.1:9877/db/returns/4042016489520465323?include_raw=false" \
-  | python3 -c "import json,sys; d=json.load(sys.stdin); print('refund_amount:', d.get('refund_amount')); print('currency:', d.get('refund_currency'))"
-```
-
 ## Stability matrix
 
-Stable external endpoints (safe to build dashboards on):
+Stable external endpoints (safe to build dashboards / agents on):
 
 | endpoint | role | stability |
 | --- | --- | --- |
 | `GET /healthz` | public | stable |
 | `GET /endpoints` | public | stable |
 | `GET /openapi.json`, `/docs`, `/redoc` | public | stable (consider proxy-restricting in prod) |
-| `GET /db/orders` | readonly | v1 |
-| `GET /db/orders/{id}` | readonly | v1 |
-| `GET /db/orders/{id}/items` | readonly | v1 |
-| `GET /db/orders/{id}/shipping` | readonly | v1 |
-| `GET /db/returns` | readonly | v1 |
-| `GET /db/returns/{id}` | readonly | v1 |
-| `GET /db/cancellations` | readonly | v1 |
-| `GET /db/statements` | readonly | v1 |
-| `GET /db/payments` | readonly | v1 |
-| `GET /db/statement_transactions` | readonly | v1 |
-| `GET /db/logistics_tracking` | readonly | v1 |
-| `GET /db/logistics_events` | readonly | v1 |
-| `GET /logistics/orders/{id}/tracking` | readonly | v1 (writes to DB; counts as a query+side-effect) |
-| `GET /v1/analytics/sync/cursor` | readwrite + scope | v1 |
-| `POST /v1/analytics/sync/batches` | readwrite + scope | v1 |
+| `GET /v2/commerce/*` | readonly | v2 |
+| `GET /v2/linkage/*` (GETs) | readonly | v2 |
+| `POST /v2/linkage/issues/{id}/resolve` | readwrite | v2 |
+| `POST /v2/linkage/overrides` | admin | v2 |
+| `GET /v2/reporting/*` | readonly | v2 |
+| `POST /v2/reporting/manual-costs` | readwrite | v2 |
+| `GET /v2/pages/manual-costs` | readonly | v2 (HTML — not a machine contract) |
+| `GET /v2/spu-images`, upload/confirm/delete | readonly / readwrite | v2 |
+| `GET /v2/llm-context` | readonly | v2 (content evolves with the schema) |
+| `GET\|POST /v2/auth/*` | public | v2 |
+| `GET /v1/analytics/sync/cursor`, `POST /v1/analytics/sync/batches` | readwrite + scope | v1 (frozen) |
 
-Internal-only (may break without notice — do NOT build dashboards on
-these):
+Retired (404 since the 2026-08-29 hard switch — do NOT build on these;
+they exist only in git history):
 
-| endpoint | notes |
-| --- | --- |
-| `POST /sync/*` | cron-driven data ingest |
-| `POST /orders/*` (TikTok proxy) | live writes to TikTok; side-effects |
-| `GET /finance/*` (TikTok proxy) | live upstream calls |
-| `GET /token/{shop_id}` | admin-only, reveals plaintext tokens |
-| `GET /db/sync_log` | admin-only, in-process mirror |
-| `GET /miaoshou/*` | Wanshifu/Miaoshou SDK proxy (separate domain; admin role by default) |
+`GET /db/*` (24 read endpoints), `POST /orders/*` (search + write
+proxies), `GET /orders/{id}/*`, `GET /finance/*`, `POST /sync/*`,
+`GET /token/{shop_id}`, `GET /shops*`, `POST /returns/search`,
+`POST /cancellations/search`, `GET /miaoshou/{domain}/{method}`,
+`POST /miaoshou/callback/*` (dispatcher code remains in
+`miaoshou/callbacks/` but no route is mounted in the v2 app).

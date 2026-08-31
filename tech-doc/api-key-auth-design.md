@@ -1,8 +1,20 @@
 # tts-erp API Key 鉴权系统 · 技术方案
 
 > 版本：v1.1 · 2026-08-17
-> 状态：**已实施，当前处于 shadow 观察期**（`.env TTS_ERP_AUTH_MODE=shadow`；切 enforce 步骤见 CHANGELOG 2026-08-17（晚）条目）
+> 状态：**已实施，2026-08-20 起为 enforce**（生产 `.env TTS_ERP_AUTH_MODE=enforce`，
+> `/healthz` 实测 `auth_mode:"enforce"`；shadow 观察期已于当日结束）
 > 适用范围：`/home/schan/tts-erp/`（FastAPI on uvicorn，端口 9877）
+>
+> **As-built 差异（2026-08-29 v2 切流后）**：
+>
+> - 中间件现位于 `tts_erp_v2/middleware/auth.py`（本文 §5.4 的 `tdd/auth.py` 是 v1 位置，已退役）；
+>   v2 另有 `tts_erp_v2/middleware/session_auth.py` 提供浏览器会话 cookie（见 browser-login-design.md）。
+> - `api_keys` 表已迁入 **`security.api_keys`**（九 schema 之一）；本文 §5.2 的 `schema.sql`
+>   已于 2026-08-27 拆分为 `schema_tts_erp.sql` / `schema_oauth.sql`。
+> - 豁免清单现为 `/healthz`、`/endpoints`、`/openapi.json`、`/docs`、`/redoc`、
+>   `/docs/oauth2-redirect`、`/v2/auth/{login,logout,me}`（见 v2 中间件 `EXEMPT_PATHS`）。
+> - §5.3 / §6 的端点矩阵基于 v1 路由（`/db/*`、`/orders/*` 等），这些路由已随 v2 硬切换删除；
+>   现行端点-角色矩阵以 `tts_erp_v2/middleware/auth.py::required_role()` 为准。
 
 ---
 
@@ -37,7 +49,7 @@ tts-erp 当前**无任何鉴权**且监听 `0.0.0.0:9877`。局域网内任何�
 ## 3. 威胁模型
 
 | 威胁 | 缓解 |
-|---|---|
+| --- | --- |
 | 局域网内未授权访问（蹭网设备、被入侵的同网段主机） | 全端点强制 Bearer key |
 | AI agent / 脚本误调危险写端点 | 角色隔离：只读 key 物理上无法触发写操作（403） |
 | 明文 token 被顺手牵羊 | `/token/*` 仅 admin 角色；admin key 只人工持有，不落任何脚本 |
@@ -96,7 +108,7 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys (key_prefix);
 ### 5.3 角色-端点矩阵（中间件按路径前缀匹配，默认拒绝）
 
 | 角色 | 允许的路径 |
-|---|---|
+| --- | --- |
 | （豁免） | `GET /healthz`、`GET /endpoints`（监控/发现需要；endpoints 清单不含敏感数据） |
 | `readonly` | 全部 `GET /db/*`；GET 代理：`/orders/<id>`、`/orders/<id>/{tracking,tracking/get,risk,buyer,recipient}`、`/finance/*`、`/logistics/orders/*`；`GET /shops*`；只读搜索 `POST /returns/search`、`POST /cancellations/search`、`POST /orders/search`、`POST /orders/list` |
 | `readwrite` | readonly 全部 + 店铺写操作 `POST /orders/<id>/{confirm,cancel,update_status,shipping_info,verify_shipping}` + 全部 `POST /sync/*` |
@@ -140,7 +152,7 @@ python3 api_keys.py rotate --prefix ttserp_rw_Kx9vQ2mP         # = create 同名
 ## 6. 调用方改造点（迁移清单）
 
 | 调用方 | 改造 |
-|---|---|
+| --- | --- |
 | `sync_cron.py`（每 10 分钟 cron） | 从 env 读 `TTS_ERP_SERVICE_KEY`，所有 `/sync/*` 请求带 `Authorization: Bearer` |
 | `run_sync_cron.sh` | 无需改（已 source .env），`.env` 加一行 `TTS_ERP_SERVICE_KEY=ttserp_rw_...`（0600 权限不变） |
 | `test_e2e.py` | 同样从 env 读 key 带 header；新增「无 key 应 401」断言（`final_smoke.py` / `regression_check.py` 在 2026-08-30 cleanup 已删，调用方合并到 `tests/test_e2e*.py`） |
@@ -178,11 +190,11 @@ python3 api_keys.py rotate --prefix ttserp_rw_Kx9vQ2mP         # = create 同名
 ## 9. 风险与权衡
 
 | 风险 | 评估 | 缓解 |
-|---|---|---|
+| --- | --- | --- |
 | 缓存导致吊销延迟 ≤60s | 低（内网、低 QPS） | 文档化；必要时加 `POST /admin/flush_cache`（admin） |
 | enforce 后 cron 断流 | 中 | shadow 阶段兜底观察；cron 日志监控 `sync_log` 表 error |
 | key 明文落 `.env`（cron 服务 key） | 可接受 | .env 本就 0600 且已含 DB 密码/app_secret，同级 |
-| 每请求多一次哈希+（缓存未命中时）一次 SELECT |  negligible | SHA-256 <1µs；缓存命中后零 DB 往返 |
+| 每请求多一次哈希+（缓存未命中时）一次 SELECT | negligible | SHA-256 <1µs；缓存命中后零 DB 往返 |
 
 ## 10. 后续增强（本方案不做，列出备查）
 
@@ -195,7 +207,7 @@ python3 api_keys.py rotate --prefix ttserp_rw_Kx9vQ2mP         # = create 同名
 ## 11. 文件改动清单（实施时）
 
 | 文件 | 动作 |
-|---|---|
+| --- | --- |
 | `tdd/auth.py` | 新建：AuthMiddleware + 角色矩阵 + 缓存 |
 | `tdd/tts_erp_fastapi.py` | 挂载中间件（~3 行） |
 | `tdd/test_auth.py` | 新建：§8 测试 |
