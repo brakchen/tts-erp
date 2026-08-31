@@ -242,6 +242,12 @@ def get_cursor(
                 "timezone": tz_name,
                 "items": [
                     {
+                        # sellerId/advertiserId are echoed per row: the
+                        # Chrome extension's parseCursor strictly matches
+                        # items on the requested scope (2026-08-30 protocol
+                        # alignment — do not drop these fields).
+                        "sellerId": sellerId,
+                        "advertiserId": advertiserId,
                         "storageKey": e.storage_key.value,
                         "campaignId": e.campaign_id,
                         "latestCompletedDay": e.latest_completed_day.isoformat()
@@ -717,6 +723,20 @@ async def _audit_and_error(
     method: str,
     path: str,
 ) -> JSONResponse:
+    """One-line stderr diagnostic so ops can tell WHICH field/rule failed
+    without asking the client — the audit table only stores the error
+    code (2026-08-30 incident: real Chrome-extension traffic returned
+    SCHEMA_INVALID for hours with no field detail anywhere server-side).
+    ``message`` is a Pydantic/JSON-parse description (field names +
+    truncated input values); it never contains headers, tokens, or the
+    request body. Newlines are flattened to keep the line grep-friendly.
+    """
+    safe_message = " ".join(str(message).split())[:500]
+    sys.stderr.write(
+        f"[analytics-sync] reject status={status} code={code} "
+        f"request_id={request_id} key_prefix={key_prefix or '-'} "
+        f"method={method} path={path} message={safe_message}\n"
+    )
     await run_sync(
         partial(
             write_audit,

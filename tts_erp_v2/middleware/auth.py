@@ -447,11 +447,7 @@ class AuthMiddleware:
         # not a wall of JSON. TTS_ERP_EXTERNAL_PREFIX re-prepends the
         # NAT proxy's /tts/... prefix inside the `next` value so the
         # SPA reloads against the same public URL it started on.
-        if (
-            denied[0] == 401
-            and method == "GET"
-            and _accept_text_html(scope)
-        ):
+        if denied[0] == 401 and method == "GET" and _accept_text_html(scope):
             qs = scope.get("query_string", b"").decode("latin-1")
             next_value = path + (("?" + qs) if qs else "")
             prefix = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "")
@@ -491,8 +487,10 @@ class AuthMiddleware:
         # force is throttled. Lazy import to avoid cycle.
         from tts_erp_v2.middleware import rate_limit
 
-        bucket_id = _sha256(key) if key else (
-            cookie_info["kh"] if cookie_info else f"ip:{client}"
+        bucket_id = (
+            _sha256(key)
+            if key
+            else (cookie_info["kh"] if cookie_info else f"ip:{client}")
         )
         retry_after = rate_limit.shared_hit(bucket_id)
         if retry_after is not None:

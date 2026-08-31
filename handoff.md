@@ -16,7 +16,7 @@ procurement UI 重做 + MinIO SPU 图片存储全部落地并提交到 `feature/
 - `tests_v2/migration` 跑到 ~59% hang 住（怀疑等 DB 锁）。
 - `tests_v2/jobs_tiktok` 5 个失败。
 
-**还没做**：branch 还没 merge 回 master；`schema_storage.sql` 还没在生产 PG apply；主 worktree（`/home/schan/tts-erp`）有另一 session 的 analytics_sync WIP 未提交（`analytics_sync/app.py`、`middleware/auth.py`、`tests_v2/api/test_auth_login.py` 等），不要混进本分支。
+**已收尾（2026-08-31）**：已 merge 回 master（`aca4389`，/endpoints 冲突取 master 的 `_walk_v2_routes`）；`schema_storage.sql` 已 apply（幂等）；MINIO_* 配置已入主 `.env`；生产 :9877 已重启并冒烟通过（/endpoints count=38，spu-images 路由在线）。worktree `~/tts-erp.procurement` 已删。主 worktree 仍有另一 session 的 analytics_sync WIP 未提交（`analytics_sync/app.py`、`middleware/auth.py`、`tests_v2/api/test_auth_login.py` 等）。
 
 ## TL;DR (2026-08-25)
 

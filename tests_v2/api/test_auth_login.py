@@ -14,7 +14,9 @@ Covers:
 """
 
 from __future__ import annotations
+
 import time
+
 from sqlalchemy import update
 
 from tts_erp_v2.db.base import Base

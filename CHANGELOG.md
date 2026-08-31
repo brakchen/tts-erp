@@ -38,6 +38,50 @@
   `tests_v2/api/test_manual_costs_page_v2.py`、`test_missing_cost_photos.py`。
 - `tests_v2/api/test_pages.py` 适配新壳页面 + `/endpoints` 懒加载回归。
 
+## 2026-08-30 (fix) — analytics_sync 400 SCHEMA_INVALID 盲区的可观测性修复 + 客户端协议错配定位
+
+### 事故
+
+2026-08-30 17:39 ~ 19:18 UTC，Chrome 扩展真实流量（key_prefix
+`c8b767dafb9432b6` / `af2690c861ab0385`，seller `7494763368967603447`）
+`POST /v1/analytics/sync/batches` **100% 返回 400 SCHEMA_INVALID**；
+cursor GET 同期全部 200。audit 表只有 error_code 没有 Pydantic message，
+access log 只有 body 字节数 → 服务端无法定位是哪个字段校验失败。
+
+### 根因（客户端协议错配）
+
+客户端 `chrome-plugins/ads-data-sync/src/core/analytics-sync-v2.ts` 的
+`AnalyticsSyncRecord` 只发 `{idempotencyKey, storageKey, campaignId, day,
+page, expectedPageCount, payload}`；服务端 `RecordIn` 另外要求
+`endpoint / method / response / source / capturedAt` 五个 required 字段。
+`BatchRequest.model_validate()` 抛 5×"Field required" → 400。
+字节数吻合：客户端结构 385 B + 真实 payload ≈ 194 B = 观测到的 579 B。
+另发现 cursor 协议同样错配：客户端 `parseCursor` 要求 items 元素含
+sellerId/advertiserId，服务端 items 只含
+`{storageKey, campaignId, latestCompletedDay, nextRequiredDay}` →
+客户端永远拿到 null cursor（不导致 400，但导致永远全量重采）。
+
+### 修复（本次提交）
+
+- **`analytics_sync/app.py::_audit_and_error`**：所有 4xx/413 拒绝额外写一行
+  stderr 诊断（`[analytics-sync] reject status=… code=… request_id=…
+  key_prefix=… message=<截断 500 字符的 Pydantic message>`）。message 只含
+  字段名 + Pydantic input_value 截断值，不回显 body / Authorization。
+- **新增 `tests_v2/api/test_analytics_sync_errors.py`**（5 个用例）：
+  SCHEMA_INVALID / MALFORMED_JSON / UNSUPPORTED_PROTOCOL_VERSION /
+  PAYLOAD_TOO_LARGE 都写 stderr；且不泄露 token / body。
+
+### 后续（部分已落地）
+
+- ~~cursor items 需补 sellerId/advertiserId~~：**已于 2026-08-30 修复**
+  （`get_cursor` items 每行回显请求 scope；测试
+  `test_cursor_items_include_scope_fields` 锁定契约；客户端 parseCursor
+  保持严格校验不放宽）。
+- 客户端 record schema 对齐在 `chrome-plugins/ads-data-sync` **0.2.0**
+  落地：上传完整 RecordIn 字段（endpoint/method/requestBody/response/
+  source/capturedAt/schemaVersion），旧本地记录（仅有 payload）标记
+  LOCAL_RECORD_INVALID 不再重试，等待重采覆盖。
+
 ## 2026-08-30 (refactor) — analytics_sync 统一到 tts-erp v2：standalone :9878 退役
 
 把 Chrome 扩展 (`tk-adv-cost-monitor`) 上传 / cursor 后端从独立 FastAPI 进程
