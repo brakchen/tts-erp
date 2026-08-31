@@ -26,6 +26,9 @@ from tts_erp_v2.sync_worker.job_runner import (
 )
 
 
+pytestmark = [pytest.mark.domain_sync, pytest.mark.layer_integration]
+
+
 def _make_credential(session, external_id="TEST_TT_CRED_RUNNER") -> Credentials:
     """Seed a real Credentials row so the FK in sync_jobs.credential_id is valid."""
     cred = Credentials(

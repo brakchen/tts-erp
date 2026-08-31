@@ -1,7 +1,35 @@
 [tool.pytest.ini_options]
 pythonpath = ["."]
-testpaths = ["tests"]
+testpaths = ["tests", "tests_v2"]
 addopts = "-ra -q"
+asyncio_mode = "auto"
+markers = [
+    # Business-domain markers — run only one slice of the suite.
+    "domain_miaoshou: 妙手 SDK / callbacks / jobs / silent truncation",
+    "domain_commerce: TikTok 订单/商品同步 (orders_job, order_detail_job, products_job)",
+    "domain_finance: 财务/对账 + 利润/成本报表",
+    "domain_logistics: 物流追踪 (logistics_job)",
+    "domain_after_sales: 退货/取消 (after_sales_job + migrate_after_sales)",
+    "domain_linkage: 关联分析 (linkage/*)",
+    "domain_reporting: 报表 (profit / coverage / cost)",
+    "domain_api: FastAPI 路由 / auth / middleware",
+    "domain_proxy: 出站代理层 (signing, token_service)",
+    "domain_migration: v1→v2 数据迁移",
+    "domain_middleware: 中间件 (access_log 等)",
+    "domain_sync: 同步 worker",
+    "domain_models: 模型 smoke 测试",
+    "domain_token_refresh: token 续期",
+    "domain_sdk: SDK 自身测试 (miaoshou/endpoints/test_tools.py)",
+    "domain_e2e: 需要 live :9877 服务的端到端 smoke",
+    # Layer markers — orthogonal to domain.
+    "layer_unit: pure helpers, no DB / no fixtures",
+    "layer_integration: uses DB / fixtures / TestClient (default)",
+    # Prerequisite flags — match against pytest -m to opt out.
+    "requires_db: needs TTS_ERP_DB_URL env var",
+    "requires_service: needs live :9877 service running",
+    # Misc.
+    "slow: takes >1s per test — skipped by `-m 'not slow'`",
+]
 
 [tool.ruff.lint.per-file-ignores]
 # tts_erp.py is the LEGACY stdlib service (not the running prod service —

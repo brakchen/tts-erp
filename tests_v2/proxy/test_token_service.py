@@ -31,6 +31,9 @@ os.environ.setdefault(
 )
 
 
+pytestmark = [pytest.mark.domain_proxy, pytest.mark.layer_integration]
+
+
 class _FakeResult:
     def __init__(self, ok: bool, **data: Any) -> None:
         self.ok = ok

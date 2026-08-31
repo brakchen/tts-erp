@@ -16,6 +16,11 @@ so any bearer key (even readonly) can fetch the page.
 
 from __future__ import annotations
 
+import pytest
+
+
+pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
+
 
 def test_manual_costs_page_returns_200_with_html(api_client, readonly_key):
     """GET the page → 200 text/html containing the form grid."""

@@ -11,6 +11,11 @@ These tests pin the role behavior that v2 endpoints will rely on:
 
 from __future__ import annotations
 
+import pytest
+
+
+pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
+
 
 def test_healthz_public_when_auth_enforce(api_client):
     """healthz must be reachable without any Authorization header."""

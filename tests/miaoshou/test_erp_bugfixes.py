@@ -6,6 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_unit]
+
 # ===== P0 — JSON body 必须紧凑序列化（与官方文档 5.2 示例一致）=====
 
 def test_p0_body_json_compact_serialization():

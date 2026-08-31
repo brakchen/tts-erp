@@ -18,6 +18,14 @@ import pytest
 
 from tts_erp_v2.proxy.tts_shop.signing import build_canonical, sign_request
 
+
+# NOTE: marked `layer_integration` (not `layer_unit`) because importing
+# `tts_erp_v2.proxy.tts_shop.signing` indirectly triggers
+# `tts_erp_v2.db.base._resolve_db_url()`, which raises if TTS_ERP_DB_URL
+# isn't set. The test bodies themselves are pure signing math, but the
+# module-level import forces the DB env var.
+pytestmark = [pytest.mark.domain_proxy, pytest.mark.layer_integration]
+
 SECRET = "abc123"
 PATH = "/order/202309/orders/search"
 QUERY_GET = {"app_key": "test_key", "shop_cipher": "sc", "timestamp": "1700000000"}

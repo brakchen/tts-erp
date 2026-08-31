@@ -12,7 +12,17 @@ Covers:
 
 from __future__ import annotations
 
+import pytest
+
 from datetime import timezone
+
+
+pytestmark = [
+    pytest.mark.domain_commerce,
+    pytest.mark.domain_migration,
+    pytest.mark.layer_integration,
+    pytest.mark.slow,
+]
 
 from scripts.migrate_v1_to_v2.common import epoch_seconds_to_utc
 

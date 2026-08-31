@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 from sqlalchemy import func, select
 
 from tts_erp_v2.db.models import (
@@ -25,6 +27,9 @@ from tts_erp_v2.db.models import (
     ProductLink,
 )
 from tts_erp_v2.linkage import compute
+
+
+pytestmark = [pytest.mark.domain_linkage, pytest.mark.layer_integration]
 
 
 def _utc(year=2026, month=8, day=29):

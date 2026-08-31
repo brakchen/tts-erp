@@ -13,6 +13,8 @@ from miaoshou.endpoints.shop import Shop
 from miaoshou.miaoshou_client import MiaoshouApiError
 from miaoshou.miaoshou_erp_client import MiaoshouErpClient
 
+pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_unit]
+
 # ============================================================
 # 🟢 regression guard 1: Shop int 字段接受 string "0"/"1" (Pydantic v2 自动转)
 # ============================================================

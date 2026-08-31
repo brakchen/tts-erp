@@ -13,6 +13,12 @@ business rules. It must be:
 """
 from __future__ import annotations
 
+import pytest
+
+
+pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
+
+
 # All of these are real phrases the LLM must see in the output to
 # understand the system correctly. Each one encodes a non-obvious
 # business rule the user MUST be told.

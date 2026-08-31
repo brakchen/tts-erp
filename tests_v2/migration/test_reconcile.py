@@ -17,6 +17,15 @@ them.
 
 from __future__ import annotations
 
+import pytest
+
+
+pytestmark = [
+    pytest.mark.domain_migration,
+    pytest.mark.layer_integration,
+    pytest.mark.slow,
+]
+
 import json
 import subprocess
 import sys

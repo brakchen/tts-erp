@@ -18,6 +18,9 @@ from tts_erp_v2.db.models.integration import Credentials, SyncJob
 from tts_erp_v2.jobs.token_refresh import JOB_NAME, sync_token_refresh
 
 
+pytestmark = [pytest.mark.domain_token_refresh, pytest.mark.layer_integration]
+
+
 def _make_credentials(session, *, expires_at: datetime | None, provider: str = "tiktok") -> Credentials:
     """Insert a Credentials row via the production encryption path
     so refresh_if_needed can decrypt it.

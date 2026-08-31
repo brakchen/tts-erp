@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 from scripts.migrate_v1_to_v2.common import (
     MOCK_SHOP_ID,
     DryRunSink,
@@ -21,6 +23,9 @@ from scripts.migrate_v1_to_v2.common import (
     is_real_shop_id,
     iter_batches,
 )
+
+
+pytestmark = [pytest.mark.domain_migration, pytest.mark.layer_integration, pytest.mark.slow]
 
 # ─── time conversion ──────────────────────────────────────────────
 

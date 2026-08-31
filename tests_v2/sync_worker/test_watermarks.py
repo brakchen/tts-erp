@@ -14,10 +14,16 @@ These tests use the per-test transaction-rollback pattern from
 """
 from __future__ import annotations
 
+import pytest
+
 from sqlalchemy import select
 
 from tts_erp_v2.db.models import SyncCursor
 from tts_erp_v2.sync_worker import watermarks
+
+
+pytestmark = [pytest.mark.domain_sync, pytest.mark.layer_integration]
+
 
 # ─── get_cursor / set_cursor (epoch ms) ────────────────────────────
 

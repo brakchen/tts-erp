@@ -23,6 +23,9 @@ from tts_erp_v2.db.models import (
 )
 from tts_erp_v2.jobs.tiktok import products as products_job
 from tts_erp_v2.sync_worker import watermarks
+
+
+pytestmark = [pytest.mark.domain_commerce, pytest.mark.layer_integration]
 from tts_erp_v2.sync_worker.job_runner import run_with_sync_job
 
 

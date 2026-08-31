@@ -8,6 +8,8 @@ import pytest
 
 from miaoshou.miaoshou_erp_client import MiaoshouErpClient
 
+pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_unit]
+
 
 def test_timestamp_called_per_attempt():
     """🔴 P0 bugfix: 每个 retry attempt 都重新生成 timestamp.

@@ -24,9 +24,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+import pytest
+
 from tts_erp_v2.proxy.miaoshou.retry import (
     paginate_with_retry,
 )
+
+
+pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
 
 
 @dataclass

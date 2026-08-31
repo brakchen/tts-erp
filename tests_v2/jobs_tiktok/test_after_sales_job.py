@@ -21,6 +21,9 @@ from tts_erp_v2.sync_worker import watermarks
 from tts_erp_v2.sync_worker.job_runner import run_with_sync_job
 
 
+pytestmark = [pytest.mark.domain_after_sales, pytest.mark.layer_integration]
+
+
 class FakeProxy:
     def __init__(self, *, returns_pages=None, cancels_pages=None):
         self.returns_pages = returns_pages or []

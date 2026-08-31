@@ -29,6 +29,9 @@ from tts_erp_v2.sync_worker import watermarks
 from tts_erp_v2.sync_worker.job_runner import run_with_sync_job
 
 
+pytestmark = [pytest.mark.domain_logistics, pytest.mark.layer_integration]
+
+
 class FakeProxy:
     """Responds to the tracking endpoint; key by order_id."""
 

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
+
 from miaoshou.endpoints.collection_box import CommonCollectBoxDetail
 from miaoshou.endpoints.shop import Shop
+
+pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_unit]
 
 
 def test_shop_int_fields_coerce_strings():

@@ -13,6 +13,8 @@ from miaoshou.miaoshou_signing import (  # type: ignore[reportMissingImports]
     now_ms,
 )
 
+pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_unit]
+
 
 def test_md5_upper_basic():
     # 已知向量：md5("hello") = 5d41402abc4b2a76b9719d911017c592

@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
+
 
 def test_cursor_route_present_in_v2_app(api_client):
     """``/v1/analytics/sync/cursor`` must be a registered route on v2.

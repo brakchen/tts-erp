@@ -11,6 +11,11 @@ from ..miaoshou_client import MiaoshouApiResponse, MiaoshouClient
 
 
 class TestEndpoint:
+    # Not a pytest test class — this is the SDK's TestEndpoint helper
+    # (apifox "测试工具 endpoint" namespace). pytest's default discovery
+    # would otherwise complain about the __init__ + class-name combo.
+    __test__ = False
+
     def __init__(self, client: MiaoshouClient) -> None:
         self._c = client
 
