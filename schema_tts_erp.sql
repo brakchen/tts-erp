@@ -90,8 +90,13 @@ CREATE TABLE IF NOT EXISTS public.analytics_audit_log (
     records_ok integer,
     records_rej integer,
     error_code text,
+    error_message text,
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
+
+-- 2026-08-31: error_message column backfill for existing deploys.
+ALTER TABLE public.analytics_audit_log
+    ADD COLUMN IF NOT EXISTS error_message text;
 
 
 

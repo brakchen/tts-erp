@@ -50,7 +50,7 @@ if _env_path.exists():
 from anyio.to_thread import run_sync  # noqa: E402
 from fastapi import APIRouter, Query, Request  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
-from pydantic import BaseModel, Field, field_validator  # noqa: E402
+from pydantic import BaseModel, Field, ValidationError, field_validator  # noqa: E402
 
 from .domain import (  # noqa: E402
     DEFAULT_TIMEZONE,
@@ -334,7 +334,11 @@ async def post_batches(request: Request) -> JSONResponse:
 
     try:
         payload = BatchRequest.model_validate(body)
-    except Exception as exc:
+    except ValidationError as exc:
+        # Surface the failing field/path/type to the client so they can
+        # diagnose without parsing the free-form Pydantic message. We
+        # sanitize: drop `input` / `ctx` (those can carry record-body
+        # values) and keep only the safe identifier triple.
         return await _audit_and_error(
             request=request,
             request_id=request_id,
@@ -346,6 +350,30 @@ async def post_batches(request: Request) -> JSONResponse:
             error_code="SCHEMA_INVALID",
             method=method,
             path=path,
+            structured_errors=_sanitize_pydantic_errors(exc),
+        )
+    except Exception as exc:
+        # Unexpected: Pydantic schema parsed but something inside the
+        # record-level handler exploded (e.g. a downstream validator
+        # bug). Treat as SCHEMA_INVALID with no field-level detail so
+        # the client gets the same envelope shape; ops get the raw
+        # exception class via stderr.
+        return await _audit_and_error(
+            request=request,
+            request_id=request_id,
+            status=400,
+            code="SCHEMA_INVALID",
+            message=str(exc),
+            retryable=False,
+            key_prefix=key_prefix,
+            error_code="SCHEMA_INVALID",
+            method=method,
+            path=path,
+            structured_errors=[{
+                "loc": [],
+                "msg": type(exc).__name__,
+                "type": "internal_error",
+            }],
         )
 
     if payload.protocolVersion not in SUPPORTED_PROTOCOL_VERSIONS:
@@ -691,17 +719,75 @@ def _error_response(
     message: str,
     request_id: str | None,
     retryable: bool,
+    structured_errors: list[dict[str, object]] | None = None,
 ) -> JSONResponse:
-    """Build a sanitized error envelope. Never echoes tokens/headers/body."""
-    return JSONResponse(
-        status_code=status,
-        content={
-            "code": code,
-            "message": message,
-            "requestId": request_id or _request_id_from_headers_fallback(),
-            "retryable": retryable,
-        },
-    )
+    """Build a sanitized error envelope. Never echoes tokens/headers/body.
+
+    ``structured_errors`` is the safe identifier triple (loc/msg/type) from
+    Pydantic — clients use it to programmatically identify which record and
+    field failed without regex-parsing the free-form ``message``. When None
+    (default) the field is omitted; we never emit an empty list because that
+    would change the JSON shape for the v1 contract.
+    """
+    payload: dict[str, object] = {
+        "code": code,
+        "message": message,
+        "requestId": request_id or _request_id_from_headers_fallback(),
+        "retryable": retryable,
+    }
+    if structured_errors:
+        payload["errors"] = structured_errors
+    return JSONResponse(status_code=status, content=payload)
+
+
+def _sanitize_pydantic_errors(exc: ValidationError) -> list[dict[str, object]]:
+    """Reduce Pydantic's errors() to the safe identifier triple.
+
+    Pydantic's full per-error dict carries:
+      - ``type``     → kept (safe identifier, e.g. ``string_too_short``)
+      - ``loc``      → kept as list of path segments **with their original
+                        Python types** (int for list indices, str for field
+                        names). The client uses these to drill into the
+                        offending record (``loc == ['records', 0,
+                        'capturedAt']`` ⇒ record #0, field capturedAt).
+                        Coercing int → str loses the array-index shape;
+                        joining with ``.`` would also be ambiguous when a
+                        field name happens to contain a dot.
+      - ``msg``      → kept (Pydantic's free-form message — already
+                        sanitized; no body, no token)
+      - ``input``    → DROPPED — can contain the offending record field
+                        value verbatim, which for our batch endpoint is
+                        usually innocuous but the policy is consistent
+                        with the storage-layer redaction (see
+                        ``tts_erp_v2/extension/storage.py::SENSITIVE_*``)
+      - ``ctx``      → DROPPED — same reason (e.g. ``min_length: 64``
+                        leaks the schema constraint which is harmless, but
+                        tighter field-by-field values like ``actual_length``
+                        could leak; we drop the whole ctx to be safe)
+      - ``url``      → DROPPED — internal doc link, no client value
+
+    Output is JSON-serializable, ordering-stable, and bounded by the
+    Pydantic error count (one entry per failed field/rule).
+    """
+    sanitized: list[dict[str, object]] = []
+    for err in exc.errors():
+        loc_segments: list[object] = []
+        for segment in err.get("loc", ()):
+            # Pydantic uses int for list indices, str for field names.
+            # Preserve both: a client that needs to pluralize "record 0"
+            # vs "records[0].capturedAt" gets the right primitive.
+            if isinstance(segment, (int, str)):
+                loc_segments.append(segment)
+            else:
+                loc_segments.append(str(segment))
+        sanitized.append(
+            {
+                "loc": loc_segments,
+                "msg": str(err.get("msg", "")),
+                "type": str(err.get("type", "unknown")),
+            }
+        )
+    return sanitized
 
 
 def _request_id_from_headers_fallback() -> str:
@@ -722,6 +808,7 @@ async def _audit_and_error(
     error_code: str,
     method: str,
     path: str,
+    structured_errors: list[dict[str, object]] | None = None,
 ) -> JSONResponse:
     """One-line stderr diagnostic so ops can tell WHICH field/rule failed
     without asking the client — the audit table only stores the error
@@ -730,6 +817,15 @@ async def _audit_and_error(
     ``message`` is a Pydantic/JSON-parse description (field names +
     truncated input values); it never contains headers, tokens, or the
     request body. Newlines are flattened to keep the line grep-friendly.
+
+    ``structured_errors`` (added 2026-08-31) is the safe identifier triple
+    from Pydantic (loc/msg/type, ``input``/``ctx``/``url`` dropped — see
+    ``_sanitize_pydantic_errors``). It rides on the response body as
+    ``errors[]`` so the Chrome extension can branch on the failing field
+    path without regex-parsing the free-form message, AND is persisted
+    into ``analytics_audit_log.error_message`` (same 500-char sanitized
+    payload as stderr) so ops can ``SELECT ... WHERE error_message LIKE
+    '%capturedAt%'`` after the log rotates.
     """
     safe_message = " ".join(str(message).split())[:500]
     sys.stderr.write(
@@ -747,6 +843,7 @@ async def _audit_and_error(
             status=status,
             key_prefix=key_prefix,
             error_code=error_code,
+            error_message=safe_message,
         )
     )
     return _error_response(
@@ -755,4 +852,5 @@ async def _audit_and_error(
         message=message,
         request_id=request_id,
         retryable=retryable,
+        structured_errors=structured_errors,
     )

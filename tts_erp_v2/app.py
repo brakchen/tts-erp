@@ -38,6 +38,7 @@ from fastapi.staticfiles import StaticFiles
 
 from analytics_sync.app import router as analytics_sync_router
 from tts_erp_v2.api.v2 import (
+    admin,
     auth,
     commerce,
     linkage,
@@ -59,6 +60,12 @@ def _build_routes(app: FastAPI) -> None:
     app.include_router(pages.router)
     app.include_router(llm_context.router)
     app.include_router(auth.router)  # browser login + session cookie
+    # Admin-only operational endpoints (rate-limit hot-reload, etc.).
+    # All paths under /v2/admin are gated to admin role both by the
+    # auth middleware (default deny for unknown paths) and by an
+    # explicit ``require_role_at_least(request, "admin")`` in the
+    # handler for defense-in-depth. See tts_erp_v2/api/v2/admin.py.
+    app.include_router(admin.router, prefix="/v2/admin")
     # analytics_sync (Chrome extension upload + cursor) — unified under
     # tts-erp management per the 2026-08-30 refactor. Standalone port 9878
     # is now retired. Auth + rate-limit are inherited from the parent

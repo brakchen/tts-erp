@@ -102,6 +102,15 @@ curl -H "Authorization: Bearer <key>" \
 
 # 人工成本填写页（浏览器打开；未登录会被 302 引导到 /v2/auth/login）
 open "http://127.0.0.1:9877/v2/pages/manual-costs"
+
+# Admin：查看 / 热重载限流（看 [限流与热重载](#限流与热重载) 详细）
+curl -H "Authorization: Bearer <admin_key>" \
+  "http://127.0.0.1:9877/v2/admin/rate-limit" | jq
+
+# Admin：重读 TTS_ERP_RATE_LIMIT_PER_MIN 环境变量（不传 new_limit 即可）
+curl -X POST -H "Authorization: Bearer <admin_key>" \
+  -H "Content-Type: application/json" -d '{}' \
+  "http://127.0.0.1:9877/v2/admin/reset-rate-limit" | jq
 ```
 
 完整端点列表见 [`tech-doc/external-api.md`](tech-doc/external-api.md) 或 `GET /endpoints`。
@@ -155,7 +164,7 @@ POST/DELETE 必须带 `X-Requested-With: tts-erp` 头（CSRF guard）。
 
 - `readonly`：所有 v2 GET + `/static/*`
 - `readwrite`：+ `POST /v2/reporting/manual-costs`、`POST /v2/spu-images/upload-url`、`POST /v2/spu-images/{id}/confirm`、`DELETE /v2/spu-images/{id}`、`/v1/analytics/sync/*`
-- `admin`：`POST /v2/linkage/overrides`（覆盖 product_links，handler 内校验 admin）；未匹配路径默认按 admin 拦截
+- `admin`：`POST /v2/linkage/overrides`（覆盖 product_links，handler 内校验 admin）、`POST /v2/admin/reset-rate-limit`（热重载限流）；未匹配路径默认按 admin 拦截
 
 key 管理：`python3 api_keys.py create --role <role> --name <name>`（另有 `list` / `revoke --prefix` / `rotate --prefix`）。库里只存 SHA-256 哈希，完整 key 创建时打印一次。
 

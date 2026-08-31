@@ -181,6 +181,14 @@ CREATE TABLE IF NOT EXISTS analytics_shop_timezones (
 -- requestId-keyed audit trail for ops diagnostics. No secrets: only
 -- status codes, record counts, key prefix. Retention is operator's
 -- responsibility (cron job).
+--
+-- error_message: Pydantic/JSON-parse detail (≤ 500 chars, sanitized —
+-- no tokens, no body). Lets ops query historical 400s by field name
+-- without grepping stderr (added 2026-08-31 after the production
+-- incident where the SCHEMA_INVALID audit row alone was
+-- undiagnosable). The column is nullable so older audit rows stay
+-- valid; production deploys that pre-date this column get an
+-- idempotent ADD COLUMN below.
 CREATE TABLE IF NOT EXISTS analytics_audit_log (
     id BIGSERIAL PRIMARY KEY,
     request_id TEXT,
@@ -193,8 +201,15 @@ CREATE TABLE IF NOT EXISTS analytics_audit_log (
     records_ok INT,
     records_rej INT,
     error_code TEXT,
+    error_message TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Backfill on existing deploys: the original CREATE TABLE above is
+-- idempotent but won't ALTER an existing table to add the new
+-- column. The IF NOT EXISTS on the column makes this safe to re-run.
+ALTER TABLE analytics_audit_log
+    ADD COLUMN IF NOT EXISTS error_message TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_analytics_audit_request
 ON analytics_audit_log (request_id);

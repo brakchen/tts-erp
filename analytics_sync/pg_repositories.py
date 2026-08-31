@@ -121,6 +121,13 @@ class PgAnalyticsRepository(AnalyticsRepository):
                     # an expected_page_count, every record for that day must
                     # agree. Lock the row so concurrent batches serialize.
                     cur.execute(
+                        # noqa: S608 — parameterised query. All identifiers are
+                        # hardcoded literals (seller_id, advertiser_id,
+                        # storage_key, campaign_id, day); every value comes
+                        # from the unit_day tuple via psycopg's %s binding.
+                        # Adding text() here would just rewrite the same
+                        # parameterised query in SQLAlchemy form and trip a
+                        # different linter rule.
                         """
                         SELECT expected_page_count
                         FROM analytics_daily_completeness
@@ -481,6 +488,12 @@ def fetch_cursor_page(
 
     with connect() as conn, conn.cursor() as cur:
         cur.execute(
+            # noqa: S608 — parameterised query. Identifiers are hardcoded
+            # literals; all five %s placeholders bind to the ``params``
+            # tuple (seller_id, advertiser_id, optional storage_key filter,
+            # repetition for the storage_key equality check, optional
+            # campaign_id filter, repetition for the campaign_id equality
+            # check). psycopg's native escaping handles the values.
             """
             SELECT storage_key, campaign_id, latest_completed_day, first_seen_day
             FROM analytics_cursors
@@ -580,18 +593,29 @@ def write_audit(
     records_ok: int | None = None,
     records_rej: int | None = None,
     error_code: str | None = None,
+    error_message: str | None = None,
 ) -> None:
     """Append one audit row. Best-effort — failures are logged to stderr
-    but do not propagate, so audit problems never break the request."""
+    but do not propagate, so audit problems never break the request.
+
+    ``error_message`` is the same sanitized Pydantic/JSON-parse detail that
+    already goes to stderr (500-char cap, no newlines). Persisting it in
+    the audit table gives ops a queryable second copy after the stderr
+    log rotates — the original 2026-08-30 incident had `error_code`
+    alone, leaving SCHEMA_INVALID undiagnosable without asking the
+    client. The column is added idempotently in schema.sql; passing
+    ``None`` here is fine (it's the historical default).
+    """
     try:
         with connect() as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO analytics_audit_log (
                     request_id, endpoint, method, path, status,
-                    key_prefix, records_in, records_ok, records_rej, error_code
+                    key_prefix, records_in, records_ok, records_rej,
+                    error_code, error_message
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     request_id,
@@ -604,6 +628,7 @@ def write_audit(
                     records_ok,
                     records_rej,
                     error_code,
+                    error_message,
                 ),
             )
             conn.commit()

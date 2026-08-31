@@ -106,7 +106,7 @@ curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" \
 
 - 除豁免路径（`/healthz`、`/endpoints`、`/openapi.json`、`/docs`、`/redoc`、`/docs/oauth2-redirect`、`/v2/auth/{login,logout,me}`）外所有端点需要 `Authorization: Bearer <key>` 或 `X-API-Key: <key>`；无 key 401、角色不够 403
 - 浏览器另有会话 cookie 登录：`POST /v2/auth/login` 用 API key 换 `tts_session` cookie（见 `tech-doc/browser-login-design.md`）；cookie 会话做 mutation 必须带 `X-Requested-With: tts-erp`（CSRF 闸）
-- 三级角色：`readonly` < `readwrite` < `admin`；分类逻辑在 **`tts_erp_v2/middleware/auth.py::required_role()`**（未匹配路径默认按 admin 拦截）；个别端点在 handler 内再校验（`POST /v2/linkage/overrides`=admin、`issues/{id}/resolve`=readwrite）
+- 三级角色：`readonly` < `readwrite` < `admin`；分类逻辑在 **`tts_erp_v2/middleware/auth.py::required_role()`**（未匹配路径默认按 admin 拦截）；个别端点在 handler 内再校验（`POST /v2/linkage/overrides`=admin、`issues/{id}/resolve`=readwrite、`POST /v2/admin/reset-rate-limit`=admin）
 - key 管理走 `python3 api_keys.py create/list/revoke/rotate`（`revoke --prefix` / `rotate --prefix`）；表里只有 SHA-256 哈希（`security.api_keys`），完整 key 只在创建时打印一次
 - 模式开关：`.env TTS_ERP_AUTH_MODE=off|shadow|enforce`（生产 = enforce）；cron/脚本用 `.env TTS_ERP_SERVICE_KEY`
 
@@ -131,6 +131,8 @@ curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" \
 | `GET /v2/reporting/{cost-snapshots,profit-daily,coverage,missing-cost-products}` | 成本快照 / 日利润 / 覆盖率 / 待补成本清单 |
 | `GET /v2/spu-images`、`POST /v2/spu-images/upload-url`、`POST /v2/spu-images/{image_id}/confirm`、`GET\|DELETE /v2/spu-images/{image_id}` | SPU 参考图（MinIO presign 上传） |
 | `GET /v2/llm-context` | 给 LLM agent 的上下文包（experimental） |
+| `GET /v2/admin/rate-limit` | 查看当前限流状态（singleton 存在时 limit / window_s / active_buckets + env var） |
+| `POST /v2/admin/reset-rate-limit` | 热重载限流（admin）；body `{new_limit?, reset_buckets?}`，不传 `new_limit` 即重读 `TTS_ERP_RATE_LIMIT_PER_MIN` |
 | `GET /v1/analytics/sync/{batches,cursor}` | analytics-sync 批次 / 游标（内部） |
 
 **已拆除、不要再找**：
@@ -206,8 +208,8 @@ commits），但 `:9877` 运行时已不再服务这些路径。生产读 / 写 
 | 路径 | 用途 |
 | ------------------------------------------------- | -------------------------------------------- |
 | **`tts_erp_v2/app.py`** | **主服务**（FastAPI `build_app()` 工厂；`tts-erp.service` 跑 `uvicorn tts_erp_v2.app:app`，监听 9877） |
-| `tts_erp_v2/api/v2/` | 路由：commerce / linkage / reporting / pages / spu_images / auth / llm_context |
-| `tts_erp_v2/middleware/` | `auth.py`（API key + 角色矩阵）、`session_auth.py`（cookie 会话）、`rate_limit.py`、`access_log.py` |
+| `tts_erp_v2/api/v2/` | 路由：commerce / linkage / reporting / pages / spu_images / auth / llm_context / **admin** (限流热重载等) |
+| `tts_erp_v2/middleware/` | `auth.py`（API key + 角色矩阵）、`session_auth.py`（cookie 会话）、`rate_limit.py`（60s 滑动窗，env 配）、`access_log.py` |
 | `tts_erp_v2/proxy/` | 出站层：`tts_shop/`（TikTok 签名 + 客户端）、`miaoshou/`、`token_service.py`（凭证 Fernet 加解密 + 续期） |
 | `tts_erp_v2/jobs/` | 同步 job：`tiktok/*`（6 个）、`miaoshou/*`（4 个，**未注册调度**）、`token_refresh.py`、`runner.py` |
 | `tts_erp_v2/sync_worker/` | APScheduler worker（`scheduler.py` 的 `JOBS` 注册表；独立跑在 `tts-erp-sync.service`） |
