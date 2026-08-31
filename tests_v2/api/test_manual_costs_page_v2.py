@@ -42,20 +42,27 @@ def test_manual_costs_page_v2_references_static_assets(api_client, readonly_key)
     )
 
 
-def test_manual_costs_page_v2_has_three_operational_tabs(api_client, readonly_key):
-    """Page must render three tabs with operational state labels.
+def test_manual_costs_page_v2_has_two_operational_tabs(api_client, readonly_key):
+    """Page must render two tabs with operational state labels.
 
-    Per design doc §2.4 — tabs are operational states (待填成本 / 待传图片 /
-    最近提交), NOT numeric indices. The filter toolbar (搜索 / 每页行数)
-    lives below the tabs. All user-facing copy is 中文 (2026-08-31).
+    2026-09-01: the old 待填成本 and 待传图片 tabs were merged into one
+    待处理 tab (both endpoints returned the same set: products with no
+    manual cost and no effective link). Operators no longer need to
+    click between two redundant tabs to enter cost then upload photo —
+    each row carries both inputs and one submit.
     """
     r = api_client.get(
         "/v2/pages/manual-costs",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     body = r.text
-    for label in ("待填成本", "待传图片", "最近提交"):
+    for label in ("待处理", "最近提交"):
         assert label in body, f"missing tab label: {label!r}"
+    # The retired labels must be gone (regression guard).
+    for retired in ("待填成本", "待传图片"):
+        assert retired not in body, (
+            f"retired tab label still rendered: {retired!r}"
+        )
 
 
 def test_manual_costs_page_v2_has_shop_switcher(api_client, readonly_key):
@@ -178,10 +185,11 @@ def test_console_js_unwraps_api_envelope():
     )
     src = js.read_text(encoding="utf-8")
     assert "function unwrap(payload)" in src, "unwrap helper missing from console.js"
-    # All three load functions must pipe their payload through unwrap().
-    assert src.count("unwrap(payload)") >= 3, (
+    # Both load functions (pending + recent) must pipe their payload
+    # through unwrap(). Was ≥3 when there were three tabs.
+    assert src.count("unwrap(payload)") >= 2, (
         f"unwrap(payload) called {src.count('unwrap(payload)')} times, "
-        "expected ≥ 3 (cost, photo, recent tabs)"
+        "expected ≥ 2 (pending + recent tabs)"
     )
     # Spot-check: filter() must not be called on a payload that wasn't
     # unwrapped (the original bug pattern).

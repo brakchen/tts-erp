@@ -8,8 +8,7 @@
   // ---------- constants ----------
   var STORAGE_ACCOUNT_KEY = "mc_active_account";
   var CSRF_HEADER = "tts-erp";
-  var TAB_COST = "needs_cost";
-  var TAB_PHOTO = "needs_photo";
+  var TAB_PENDING = "pending";
   var TAB_RECENT = "recent";
   var DEFAULT_LIMIT = 50;
 
@@ -199,7 +198,7 @@
   }
 
   // ---------- tabs ----------
-  var currentTab = TAB_COST;
+  var currentTab = TAB_PENDING;
   var costFilter = "";
   var costOffset = 0;
 
@@ -214,8 +213,7 @@
   }
 
   function refreshActiveTab() {
-    if (currentTab === TAB_COST) return loadNeedsCost();
-    if (currentTab === TAB_PHOTO) return loadNeedsPhoto();
+    if (currentTab === TAB_PENDING) return loadPending();
     if (currentTab === TAB_RECENT) return loadRecent();
   }
 
@@ -260,13 +258,13 @@
           '<td colspan="6" class="text-secondary small">\u9650\u6d41\u7a7a\u95f2\u00b7' +
             '<a href="#" data-retry>\u70b9\u51fb\u91cd\u8bd5</a></td>',
         );
-        tr.querySelector("[data-retry]").addEventListener("click", function (ev) {
+        tr.querySelector("[data-retry]").addEventListener("click", (ev) => {
           ev.preventDefault();
           retry();
         });
       }
       renderWaiting();
-      var iv = setInterval(function () {
+      var iv = setInterval(() => {
         var remain = Math.max(
           0,
           ra - Math.floor((Date.now() - startedAt) / 1000),
@@ -293,8 +291,15 @@
     });
   }
 
-  // ---------- tab 1: needs cost ----------
-  function loadNeedsCost() {
+  // ---------- tab 1: pending (cost + optional photo in one row) ----------
+  // 2026-09-01: merged the old "needs cost" + "needs photo" tabs. Both
+  // hit /v2/reporting/missing-cost-products (active products with no
+  // manual cost and no effective link) and filtered client-side; the
+  // photo tab was a strict subset of the cost tab, so the operator saw
+  // the same rows twice and had to click between tabs to enter cost then
+  // upload the photo. Each row now carries both inputs; submitting costs
+  // and (optionally) uploads the photo in one flow.
+  function loadPending() {
     var acct = getActiveAccountId();
     var tbody = $("#grid-rows");
     html(tbody, loadingRow());
@@ -305,31 +310,40 @@
       costOffset;
     if (acct) url += "&channel_account_id=" + acct;
     api(url)
-      .then((r) => {
+      .then(function (r) {
         if (!r.ok) throw new Error("HTTP " + r.status);
         return r.json();
       })
-      .then((payload) => {
+      .then(function (payload) {
         var items = unwrap(payload);
-        renderCostRows(items);
-        setBadge("badge-cost", items.length);
+        renderPendingRows(items);
+        // Server-side total_missing_photo counts beyond the page limit;
+        // fall back to page length when the backend omits it.
+        var total =
+          payload &&
+          typeof payload === "object" &&
+          typeof payload.total_missing_photo === "number"
+            ? payload.total_missing_photo
+            : items.length;
+        setBadge("badge-pending", total);
       })
-      .catch((e) => {
-        errorRow(e, loadNeedsCost);
+      .catch(function (e) {
+        errorRow(e, loadPending);
       });
   }
 
-  function renderCostRows(items) {
+  function renderPendingRows(items) {
     var tbody = $("#grid-rows");
     html(tbody, "");
     if (!items.length) {
       html(tbody, emptyRow("该店铺所有商品均已填成本并附图。"));
       return;
     }
-    items.forEach((it) => {
+    items.forEach(function (it) {
       var tr = document.createElement("tr");
       tr.dataset.ext = it.external_product_id || "";
       tr.dataset.cpid = it.channel_product_id;
+      tr.dataset.acct = String(getActiveAccountId() || "");
       html(
         tr,
         '<td class="font-monospace small" data-label="SKU">' +
@@ -338,7 +352,6 @@
           '<td data-label="标题">' +
           esc(it.title || "") +
           "</td>" +
-          '<td class="font-monospace small text-secondary" data-label="状态">⊘ 缺成本</td>' +
           '<td class="text-end" data-label="单位成本">' +
           '<div class="d-inline-flex align-items-center gap-2">' +
           '<input type="number" class="form-control form-control-sm font-monospace text-end" style="width: 110px" step="0.0001" min="0.0001" data-k="unit_cost" placeholder="0.0000">' +
@@ -350,159 +363,68 @@
           '<td data-label="备注">' +
           '<input type="text" class="form-control form-control-sm" data-k="note" maxlength="500" placeholder="（可选）">' +
           "</td>" +
+          '<td data-label="图片">' +
+          '<label class="d-inline-block border rounded px-3 py-2 text-secondary small" style="border-style: dashed; cursor: pointer; min-width: 180px" data-act="dropzone">' +
+          '📷 拖入或点击选择<input type="file" accept="image/*" class="d-none">' +
+          "</label>" +
+          '<div class="d-flex gap-2 flex-wrap mt-2" data-gallery></div>' +
+          "</td>" +
           '<td data-label="操作">' +
           '<div class="d-inline-flex align-items-center gap-2">' +
-          '<button class="btn btn-sm btn-primary" data-act="submit-cost">提交</button>' +
+          '<button class="btn btn-sm btn-primary" data-act="submit">提交</button>' +
           '<span class="row-status small font-monospace"></span>' +
           "</div>" +
           "</td>",
       );
-      tbody.appendChild(tr);
-      tr.querySelector('[data-act="submit-cost"]').addEventListener(
-        "click",
-        () => {
-          submitCost(tr);
-        },
-      );
-    });
-    applyFilter();
-  }
-
-  function submitCost(tr) {
-    var inputs = tr.querySelectorAll("input, select");
-    var body = { channel_product_external_id: tr.dataset.ext };
-    inputs.forEach((i) => {
-      body[i.dataset.k] = i.value;
-    });
-    var unit = parseFloat(body.unit_cost);
-    if (!unit || unit <= 0) {
-      setRowStatus(tr, "请输入大于 0 的单位成本", "is-err");
-      return;
-    }
-    tr.classList.add("table-active");
-    setRowStatus(tr, "保存中…", "is-saving");
-    api("/v2/reporting/manual-costs", {
-      method: "POST",
-      body: JSON.stringify(body),
-    })
-      .then((r) => {
-        if (r.status === 201) return r.json();
-        var t = "";
-        try {
-          return r.text().then((x) => {
-            t = x;
-            throw new Error("HTTP " + r.status + " · " + t);
-          });
-        } catch {
-          throw new Error("HTTP " + r.status);
-        }
-      })
-      .then(() => {
-        fileRow(tr);
-      })
-      .catch((e) => {
-        setRowStatus(tr, "错误：" + e.message, "is-err");
-        tr.classList.remove("table-active");
-      });
-  }
-
-  // ---------- tab 2: needs photo ----------
-  function loadNeedsPhoto() {
-    var acct = getActiveAccountId();
-    var tbody = $("#grid-rows");
-    html(tbody, loadingRow());
-    // Same endpoint shape as tab 1; backend tags with missing_photo flag.
-    var url =
-      "/v2/reporting/missing-cost-products?limit=" +
-      DEFAULT_LIMIT +
-      "&offset=0";
-    if (acct) url += "&channel_account_id=" + acct;
-    api(url)
-      .then((r) => {
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        return r.json();
-      })
-      .then((payload) => {
-        // Server-side count takes precedence when the endpoint provides it
-        // (it counts beyond the page limit); otherwise fall back to the
-        // filtered client-side count.
-        var total =
-          payload &&
-          typeof payload === "object" &&
-          typeof payload.total_missing_photo === "number"
-            ? payload.total_missing_photo
-            : null;
-        var items = unwrap(payload).filter((it) => it.missing_photo);
-        renderPhotoRows(items);
-        setBadge("badge-photo", total == null ? items.length : total);
-      })
-      .catch((e) => {
-        errorRow(e, loadNeedsPhoto);
-      });
-  }
-
-  function renderPhotoRows(items) {
-    var tbody = $("#grid-rows");
-    html(tbody, "");
-    if (!items.length) {
-      html(tbody, emptyRow("该店铺所有商品均已附图。"));
-      return;
-    }
-    items.forEach((it) => {
-      var tr = document.createElement("tr");
-      tr.dataset.ext = it.external_product_id || "";
-      tr.dataset.cpid = it.channel_product_id;
-      tr.dataset.acct = getActiveAccountId() || "";
-      html(
-        tr,
-        '<td class="font-monospace small" data-label="SKU">' +
-          esc(it.external_product_id || "—") +
-          "</td>" +
-          '<td data-label="标题">' +
-          esc(it.title || "") +
-          "</td>" +
-          '<td class="font-monospace small text-secondary" data-label="状态">✚ 仅需附图</td>' +
-          '<td data-label="图片" colspan="2">' +
-          '<label class="d-inline-block border rounded px-3 py-2 text-secondary small" style="border-style: dashed; cursor: pointer; min-width: 200px" data-act="dropzone">' +
-          '📷 拖入图片或点击选择<input type="file" accept="image/*" class="d-none">' +
-          "</label>" +
-          '<div class="d-flex gap-2 flex-wrap mt-2" data-gallery></div>' +
-          "</td>" +
-          '<td data-label="状态"><span class="row-status small font-monospace"></span></td>',
-      );
       var drop = tr.querySelector('[data-act="dropzone"]');
       var input = drop.querySelector("input");
-      input.addEventListener("change", () => {
-        if (input.files[0]) uploadPhoto(tr, input.files[0]);
+      // Stash the file on the row so submitPending() can read it
+      // regardless of whether the user clicked-to-pick (populates
+      // input.files) or drag-and-dropped (DataTransfer is one-shot).
+      input.addEventListener("change", function () {
+        if (input.files[0]) {
+          tr._pickedFile = input.files[0];
+          drop.childNodes[0].nodeValue =
+            "📷 " + (input.files[0].name || "已选择") + " · 点击替换";
+        }
       });
-      drop.addEventListener("dragover", (ev) => {
+      drop.addEventListener("dragover", function (ev) {
         ev.preventDefault();
         drop.classList.add("border-danger", "text-danger");
       });
-      drop.addEventListener("dragleave", () => {
+      drop.addEventListener("dragleave", function () {
         drop.classList.remove("border-danger", "text-danger");
       });
-      drop.addEventListener("drop", (ev) => {
+      drop.addEventListener("drop", function (ev) {
         ev.preventDefault();
         drop.classList.remove("border-danger", "text-danger");
         var f =
           ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
-        if (f) uploadPhoto(tr, f);
+        if (f) {
+          tr._pickedFile = f;
+          drop.childNodes[0].nodeValue =
+            "📷 " + (f.name || "已选择") + " · 点击替换";
+        }
+      });
+      tr.querySelector('[data-act="submit"]').addEventListener("click", function () {
+        submitPending(tr);
       });
       tbody.appendChild(tr);
-      // load existing photos for this SPU (read-only preview)
+      // Existing photos preview (read-only).
       var gallery = tr.querySelector("[data-gallery]");
       api(
         "/v2/spu-images?channel_product_id=" +
           encodeURIComponent(tr.dataset.cpid),
       )
-        .then((r) => (r.ok ? r.json() : []))
-        .then((list) => {
-          (list || []).slice(0, 4).forEach((im) => {
+        .then(function (r) {
+          return r.ok ? r.json() : [];
+        })
+        .then(function (list) {
+          (list || []).slice(0, 4).forEach(function (im) {
             var img = document.createElement("img");
             img.className = "img-thumbnail";
-            img.style.width = "64px";
-            img.style.height = "64px";
+            img.style.width = "48px";
+            img.style.height = "48px";
             img.style.objectFit = "cover";
             img.src = im.url;
             img.alt = esc(im.filename || "");
@@ -511,78 +433,113 @@
             gallery.appendChild(img);
           });
         })
-        .catch(() => {
+        .catch(function () {
           /* gallery optional */
         });
     });
     applyFilter();
   }
 
-  function uploadPhoto(tr, file) {
-    var acct = parseInt(tr.dataset.acct || "0", 10);
-    var cpid = parseInt(tr.dataset.cpid || "0", 10);
-    if (!acct || !cpid) {
-      setRowStatus(tr, "缺少店铺或商品信息", "is-err");
+  function submitPending(tr) {
+    var inputs = tr.querySelectorAll("input[data-k], select[data-k]");
+    var body = { channel_product_external_id: tr.dataset.ext };
+    inputs.forEach(function (i) {
+      body[i.dataset.k] = i.value;
+    });
+    var unit = parseFloat(body.unit_cost);
+    if (!unit || unit <= 0) {
+      setRowStatus(tr, "请输入大于 0 的单位成本", "is-err");
       return;
     }
-    if (file.size > 8 * 1024 * 1024) {
+    var file = tr._pickedFile || null;
+    if (file && file.size > 8 * 1024 * 1024) {
       setRowStatus(tr, "文件超过 8 MiB", "is-err");
       return;
     }
+    var acct = parseInt(tr.dataset.acct || "0", 10);
+    var cpid = parseInt(tr.dataset.cpid || "0", 10);
     tr.classList.add("table-active");
-    setRowStatus(tr, "申请上传链接…", "is-saving");
-    api("/v2/spu-images/upload-url", {
+    setRowStatus(tr, "保存成本中…", "is-saving");
+    // Step 1: always POST manual-costs first. If this fails the operator
+    // wants to know before any image upload burns the MinIO budget.
+    api("/v2/reporting/manual-costs", {
       method: "POST",
-      body: JSON.stringify({
-        channel_account_id: acct,
-        channel_product_id: cpid,
-        filename: file.name || "photo.jpg",
-        content_type: file.type || "image/jpeg",
-        size_bytes: file.size,
-      }),
+      body: JSON.stringify(body),
     })
-      .then((r) => {
+      .then(function (r) {
         if (r.status === 201) return r.json();
-        return r.text().then((t) => {
-          throw new Error("upload-url HTTP " + r.status + " · " + t);
+        return r.text().then(function (t) {
+          throw new Error("成本 HTTP " + r.status + " · " + t);
         });
       })
-      .then((info) => {
-        setRowStatus(tr, "上传到 MinIO…", "is-saving");
-        return fetch(info.upload_url, {
-          method: "PUT",
-          credentials: "include",
-          headers: info.required_headers || {
-            "Content-Type": file.type || "image/jpeg",
-          },
-          body: file,
-        }).then((upR) => {
-          if (!upR.ok) throw new Error("MinIO PUT HTTP " + upR.status);
-          return info;
-        });
-      })
-      .then((info) => {
-        setRowStatus(tr, "确认中…", "is-saving");
-        return api("/v2/spu-images/" + info.image_id + "/confirm", {
+      .then(function () {
+        if (!file) {
+          // Cost-only submission, done.
+          return null;
+        }
+        setRowStatus(tr, "申请上传链接…", "is-saving");
+        return api("/v2/spu-images/upload-url", {
           method: "POST",
-        });
-      })
-      .then((r) => {
-        if (r.status !== 200)
-          return r.text().then((t) => {
-            throw new Error("confirm HTTP " + r.status + " · " + t);
+          body: JSON.stringify({
+            channel_account_id: acct,
+            channel_product_id: cpid,
+            filename: file.name || "photo.jpg",
+            content_type: file.type || "image/jpeg",
+            size_bytes: file.size,
+          }),
+        })
+          .then(function (r) {
+            if (r.status === 201) return r.json();
+            return r.text().then(function (t) {
+              throw new Error("upload-url HTTP " + r.status + " · " + t);
+            });
+          })
+          .then(function (info) {
+            setRowStatus(tr, "上传到 MinIO…", "is-saving");
+            return fetch(info.upload_url, {
+              method: "PUT",
+              credentials: "include",
+              headers: info.required_headers || {
+                "Content-Type": file.type || "image/jpeg",
+              },
+              body: file,
+            }).then(function (upR) {
+              if (!upR.ok) throw new Error("MinIO PUT HTTP " + upR.status);
+              return info;
+            });
+          })
+          .then(function (info) {
+            setRowStatus(tr, "确认中…", "is-saving");
+            return api("/v2/spu-images/" + info.image_id + "/confirm", {
+              method: "POST",
+            }).then(function (r) {
+              if (r.status !== 200)
+                return r.text().then(function (t) {
+                  throw new Error("confirm HTTP " + r.status + " · " + t);
+                });
+              return r.json();
+            });
           });
-        return r.json();
       })
-      .then(() => {
+      .then(function () {
         fileRow(tr);
       })
-      .catch((e) => {
-        setRowStatus(tr, "错误：" + e.message, "is-err");
+      .catch(function (e) {
+        // Cost succeeded but image failed → row stays so the operator
+        // can re-click. Surface the partial-success message clearly.
+        var msg = e && e.message ? e.message : String(e);
+        if (
+          msg.indexOf("MinIO PUT") !== -1 ||
+          msg.indexOf("upload-url") !== -1 ||
+          msg.indexOf("confirm") !== -1
+        ) {
+          setRowStatus(tr, "成本已保存，图片上传失败： " + msg, "is-err");
+        } else {
+          setRowStatus(tr, "错误：" + msg, "is-err");
+        }
         tr.classList.remove("table-active");
       });
   }
-
   // ---------- tab 3: recently filed ----------
   function loadRecent() {
     var acct = getActiveAccountId();
