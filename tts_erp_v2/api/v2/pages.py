@@ -25,16 +25,16 @@ router = APIRouter(prefix="/v2/pages", tags=["pages"])
 
 @router.get("/manual-costs", response_class=HTMLResponse)
 def manual_costs_page() -> HTMLResponse:
-    """Manual cost entry + SPU image upload workbench.
+  """Manual cost entry + SPU image upload workbench.
 
-    The HTML shell is a small stub:
-    - links to ``/static/css/console.css`` (design tokens + layout)
-    - links to ``/static/js/console.js`` (shop switcher, tabs, inline filing,
-      drag-drop photo upload, the FILED stamp animation)
-    - the JS handles its own /v2/auth/me probe and redirects unauthenticated
-      callers to ``/v2/auth/login?next=/v2/pages/manual-costs``
-    """
-    return HTMLResponse(_PAGE_HTML)
+  The HTML shell is a small stub:
+  - links to ``/static/vendor/bootstrap.min.css`` (self-hosted, MIT)
+  - links to ``/static/js/console.js`` (shop switcher, tabs, inline filing,
+    drag-drop photo upload, envelope unwrap for backend pagination)
+  - the JS handles its own /v2/auth/me probe and redirects unauthenticated
+    callers to ``/v2/auth/login?next=/v2/pages/manual-costs``
+  """
+  return HTMLResponse(_PAGE_HTML)
 
 
 # Marker for the legacy token-paste UI — kept as a comment so future
@@ -48,7 +48,7 @@ _PAGE_HTML = """<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>tts-erp · procurement</title>
+  <title>tts-erp · 采购工作台</title>
   <!-- Relative path: resolves to /static/... locally and /tts/static/...
        behind the NGINX prefix. Do not make this absolute. -->
   <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
@@ -56,10 +56,10 @@ _PAGE_HTML = """<!doctype html>
 <body>
   <nav class="navbar bg-white border-bottom sticky-top">
     <div class="container-fluid px-3 px-lg-4">
-      <span class="navbar-brand mb-0">tts-erp · procurement</span>
+      <span class="navbar-brand mb-0">tts-erp · 采购工作台</span>
       <div class="d-flex align-items-center gap-3">
-        <label class="d-flex align-items-center gap-2 small text-secondary mb-0" for="shop-switcher">shop
-          <select id="shop-switcher" name="channel_account_id" class="form-select form-select-sm w-auto" aria-label="active shop"></select>
+        <label class="d-flex align-items-center gap-2 small text-secondary mb-0" for="shop-switcher">店铺
+          <select id="shop-switcher" name="channel_account_id" class="form-select form-select-sm w-auto" aria-label="当前店铺"></select>
         </label>
         <span class="small text-secondary" id="ops-identity"></span>
       </div>
@@ -67,29 +67,29 @@ _PAGE_HTML = """<!doctype html>
   </nav>
 
   <main class="container-fluid px-3 px-lg-4 py-3" style="max-width: 1280px">
-    <ul class="nav nav-tabs" role="tablist" aria-label="workbench tabs">
+    <ul class="nav nav-tabs" role="tablist" aria-label="工作台标签页">
       <li class="nav-item" role="presentation">
         <button class="tab nav-link active" type="button" role="tab" data-tab="needs_cost" aria-selected="true" aria-controls="grid-rows">
-          Needs cost <span class="badge text-bg-secondary" id="badge-cost">·</span>
+          待填成本 <span class="badge text-bg-secondary" id="badge-cost">·</span>
         </button>
       </li>
       <li class="nav-item" role="presentation">
         <button class="tab nav-link" type="button" role="tab" data-tab="needs_photo" aria-selected="false" aria-controls="grid-rows">
-          Needs photo <span class="badge text-bg-secondary" id="badge-photo">·</span>
+          待传图片 <span class="badge text-bg-secondary" id="badge-photo">·</span>
         </button>
       </li>
       <li class="nav-item" role="presentation">
         <button class="tab nav-link" type="button" role="tab" data-tab="recent" aria-selected="false" aria-controls="grid-rows">
-          Recently filed <span class="badge text-bg-secondary" id="badge-recent">·</span>
+          最近提交 <span class="badge text-bg-secondary" id="badge-recent">·</span>
         </button>
       </li>
     </ul>
 
     <div class="d-flex align-items-center gap-2 my-3 small text-secondary">
-      <label for="filter-search">search</label>
-      <input type="search" id="filter-search" class="form-control form-control-sm" style="max-width: 220px" placeholder="SKU or title" aria-label="filter rows">
-      <label for="filter-limit">page</label>
-      <select id="filter-limit" class="form-select form-select-sm w-auto" aria-label="rows per page">
+      <label for="filter-search">搜索</label>
+      <input type="search" id="filter-search" class="form-control form-control-sm" style="max-width: 220px" placeholder="SKU 或标题" aria-label="过滤行">
+      <label for="filter-limit">每页</label>
+      <select id="filter-limit" class="form-select form-select-sm w-auto" aria-label="每页行数">
         <option>25</option>
         <option selected>50</option>
         <option>100</option>
@@ -101,15 +101,15 @@ _PAGE_HTML = """<!doctype html>
         <thead>
           <tr id="grid-head-cost">
             <th scope="col">SKU</th>
-            <th scope="col">Title</th>
-            <th scope="col">State</th>
-            <th scope="col" class="text-end">Unit cost</th>
-            <th scope="col">Note</th>
-            <th scope="col">Action</th>
+            <th scope="col">标题</th>
+            <th scope="col">状态</th>
+            <th scope="col" class="text-end">单位成本</th>
+            <th scope="col">备注</th>
+            <th scope="col">操作</th>
           </tr>
         </thead>
         <tbody id="grid-rows">
-          <tr><td colspan="6" class="text-secondary">loading shops…</td></tr>
+          <tr><td colspan="6" class="text-secondary">加载店铺中…</td></tr>
         </tbody>
       </table>
     </div>

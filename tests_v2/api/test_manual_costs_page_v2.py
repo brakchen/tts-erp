@@ -37,22 +37,24 @@ def test_manual_costs_page_v2_references_static_assets(api_client, readonly_key)
     body = r.text
     assert "../../static/vendor/bootstrap.min.css" in body, "missing Bootstrap CSS link"
     assert "../../static/js/console.js" in body, "missing JS link"
-    assert "/static/css/console.css" not in body, "retired custom stylesheet still linked"
+    assert "/static/css/console.css" not in body, (
+        "retired custom stylesheet still linked"
+    )
 
 
 def test_manual_costs_page_v2_has_three_operational_tabs(api_client, readonly_key):
     """Page must render three tabs with operational state labels.
 
-    Per design doc §2.4 — tabs are operational states (Needs cost /
-    Needs photo / Recently filed), NOT numeric indices. The filter
-    toolbar (search / page size) lives below the tabs.
+    Per design doc §2.4 — tabs are operational states (待填成本 / 待传图片 /
+    最近提交), NOT numeric indices. The filter toolbar (搜索 / 每页行数)
+    lives below the tabs. All user-facing copy is 中文 (2026-08-31).
     """
     r = api_client.get(
         "/v2/pages/manual-costs",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     body = r.text
-    for label in ("Needs cost", "Needs photo", "Recently filed"):
+    for label in ("待填成本", "待传图片", "最近提交"):
         assert label in body, f"missing tab label: {label!r}"
 
 
@@ -132,17 +134,19 @@ def test_manual_costs_page_v2_uses_design_token_variables(api_client, readonly_k
     # Cheap but effective: the page itself must not carry a color hex.
     # CSS asset contents are not loaded here so we can't grep them.
     import re
+
     hex_colors = re.findall(r"#[0-9A-Fa-f]{6}\b", body)
     assert not hex_colors, f"raw hex colors leaked into HTML: {hex_colors}"
 
 
 def test_manual_costs_page_v2_self_hosted_font_hint(api_client, readonly_key):
-    """Page hint about font hosting: the CSS file is local, not a CDN <link>.
+    """Page must not link a public CDN for fonts.
 
-    The design doc self-correction (latest revision) moved off Google
-    Fonts CDN to local /static/fonts/. We assert no fonts.googleapis.com
-    or fonts.gstatic.com CDN link in the HTML — operators run on a
-    private LAN, the CDN leak is unwanted.
+    Operators reach this service over a private NAT tunnel; CDN links
+    leak operator IPs. We assert no fonts.googleapis.com or
+    fonts.gstatic.com link in the HTML. The page actually uses
+    Bootstrap 5.3.8's default font stack now (2026-08-31 — the custom
+    IBM Plex typography was dropped with the rest of console.css).
     """
     r = api_client.get(
         "/v2/pages/manual-costs",
@@ -151,3 +155,30 @@ def test_manual_costs_page_v2_self_hosted_font_hint(api_client, readonly_key):
     body = r.text
     assert "fonts.googleapis.com" not in body, "Google Fonts CDN leak"
     assert "fonts.gstatic.com" not in body, "Google Fonts CDN leak"
+
+
+def test_console_js_unwraps_api_envelope():
+    """Regression guard for the '(items || []).filter is not a function' crash.
+
+    2026-08-31: the backend rolled out an envelope
+        { items: [...], total_missing_photo: N }
+    on /v2/reporting/missing-cost-products. console.js must unwrap that
+    envelope before iterating; otherwise loadNeedsPhoto throws on the
+    Needs photo tab. Also protects loadNeedsCost + loadRecent against
+    any future envelope roll-out on their endpoints.
+    """
+    from pathlib import Path
+
+    js = Path(__file__).resolve().parents[2] / "tts_erp_v2" / "static" / "js" / "console.js"
+    src = js.read_text(encoding="utf-8")
+    assert "function unwrap(payload)" in src, "unwrap helper missing from console.js"
+    # All three load functions must pipe their payload through unwrap().
+    assert src.count("unwrap(payload)") >= 3, (
+        f"unwrap(payload) called {src.count('unwrap(payload)')} times, "
+        "expected ≥ 3 (cost, photo, recent tabs)"
+    )
+    # Spot-check: filter() must not be called on a payload that wasn't
+    # unwrapped (the original bug pattern).
+    assert ".filter((it)" not in src or "unwrap(payload).filter" in src, (
+        ".filter called on a payload without unwrap — likely the 2026-08-31 bug"
+    )
