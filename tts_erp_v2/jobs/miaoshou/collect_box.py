@@ -45,7 +45,6 @@ from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models.procurement import ProcurementProduct
 from tts_erp_v2.jobs.miaoshou._common import (
-    MiaoshouContext,
     resolve_miaoshou_context,
 )
 from tts_erp_v2.jobs.runner import record_raw_payload, record_sync_issue, run_job
@@ -67,7 +66,7 @@ def _fetch_page(
     client: _MiaoshouClientProto, *, page_no: int, page_size: int = PAGE_SIZE
 ) -> dict[str, Any]:
     return client._call_erp(
-        path="/open/v1/product/collect_box/tiktok/collect_box/search_collect_box_list",
+        path="/open/v1/product/collect_box/tiktok/collect_box/search_collect_box_detail_list",
         body={"pageNo": page_no, "pageSize": page_size},
     )
 

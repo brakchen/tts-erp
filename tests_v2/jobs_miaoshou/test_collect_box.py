@@ -2,12 +2,10 @@
 from __future__ import annotations
 
 import pytest
-
 from sqlalchemy import select
 
 from tts_erp_v2.db.models.integration import SyncJob
 from tts_erp_v2.jobs.miaoshou.collect_box import sync_collect_box
-
 
 pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
 
@@ -57,7 +55,10 @@ def test_sync_collect_box_walks_pages(
 
     assert result["products_upserted"] >= 2
     job = db_session.execute(
-        select(SyncJob).where(SyncJob.job_name == "miaoshou.collect_box")
+        select(SyncJob)
+        .where(SyncJob.job_name == "miaoshou.collect_box")
+        .order_by(SyncJob.id.desc())
+        .limit(1)
     ).scalar_one()
     assert job.status == "succeeded"
 

@@ -2,12 +2,10 @@
 from __future__ import annotations
 
 import pytest
-
 from sqlalchemy import select
 
 from tts_erp_v2.db.models.integration import SyncJob
 from tts_erp_v2.jobs.miaoshou.shops import sync_shops
-
 
 pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
 
@@ -43,7 +41,10 @@ def test_sync_shops_writes_shops_and_sync_job_row(
     assert result["upserted"] == 1
     assert result["shops_seen"] == 1
     job = db_session.execute(
-        select(SyncJob).where(SyncJob.job_name == "miaoshou.shops")
+        select(SyncJob)
+        .where(SyncJob.job_name == "miaoshou.shops")
+        .order_by(SyncJob.id.desc())
+        .limit(1)
     ).scalar_one()
     assert job.status == "succeeded"
 

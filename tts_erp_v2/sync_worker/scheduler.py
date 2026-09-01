@@ -141,13 +141,10 @@ JOBS: dict[str, JobSpec] = {
         is_tiktok=False,
         entrypoint="sync_move_collect",
     ),
-    "miaoshou.purchase_orders": JobSpec(
-        job_name="miaoshou.purchase_orders",
-        module_path="tts_erp_v2.jobs.miaoshou.purchase_orders",
-        interval_seconds=3600,  # 1 h
-        is_tiktok=False,
-        entrypoint="sync_purchase_orders",
-    ),
+    # NOTE(2026-09-01): miaoshou.purchase_orders intentionally NOT registered —
+    # the job's endpoint path 404s (routeNotFound) against the production ERP
+    # API; the v2 path was written from docs and never live-verified. Re-add
+    # once the correct path is confirmed from the apifox doc (fd54e57e…).
     # ── Reporting recompute jobs (library functions since cutover; never
     # scheduled — reporting.* tables stayed empty in prod) ──────────────
     "reporting.cost_snapshots": JobSpec(

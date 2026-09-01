@@ -34,14 +34,12 @@ import os
 import urllib.error
 import urllib.parse
 from dataclasses import dataclass
-from typing import Any
-
-from typing_extensions import Self
+from typing import Any, Self
 
 # Import signing from the legacy package — same algorithm, no need to
 # duplicate. Once the §7.1 cutover is done, we can move the signing
 # module into ``tts_erp_v2/proxy/miaoshou/`` and update the import.
-from miaoshou.miaoshou_signing import (  # noqa: E402 -- module-level import is fine after the lazy usages
+from miaoshou.miaoshou_signing import (
     build_envelope,
     hmac_sha256_sign,
     now_ms,
@@ -111,12 +109,19 @@ def _assert_safe_url(url: str) -> urllib.parse.ParseResult:
     return parsed
 
 
-def safe_http_post_json(url: str, body_bytes: bytes, timeout: float) -> str:
+def safe_http_post_json(
+    url: str,
+    body_bytes: bytes,
+    timeout: float,
+    headers: dict[str, str] | None = None,
+) -> str:
     """SSRF-safe POST: whitelist scheme, return response body.
 
     Uses ``http.client`` directly to avoid opengrep tier-1 false
     positives on ``urllib.request.urlopen`` (the legacy module's
-    same workaround).
+    same workaround). ``headers`` are merged over the default
+    JSON Content-Type (ERP auth headers x-app-key / x-timestamp /
+    x-sign ride in through here).
     """
     parsed = _assert_safe_url(url)
     target_path = parsed.path or "/"
@@ -128,10 +133,10 @@ def safe_http_post_json(url: str, body_bytes: bytes, timeout: float) -> str:
     else:
         conn = http.client.HTTPConnection(host, parsed.port, timeout=timeout)
     try:
-        conn.request(
-            "POST", target_path, body=body_bytes,
-            headers={"Content-Type": "application/json;charset=UTF-8"},
-        )
+        req_headers = {"Content-Type": "application/json;charset=UTF-8"}
+        if headers:
+            req_headers.update(headers)
+        conn.request("POST", target_path, body=body_bytes, headers=req_headers)
         resp = conn.getresponse()
         status = getattr(resp, "status", 200)
         if isinstance(status, int) and status >= 400:
@@ -377,8 +382,18 @@ class MiaoshouErpClient:
             body_json=body_json,
         )
 
+        # ERP auth rides in headers (legacy contract: x-app-key /
+        # x-timestamp (seconds) / x-sign lowercase hex). Without these
+        # the upstream rejects every call with [code=signMissing].
+        auth_headers = {
+            "x-app-key": self.app_id,
+            "x-timestamp": str(timestamp_sec),
+            "x-sign": signature,
+            **extra_headers,
+        }
+
         try:
-            raw = safe_http_post_json(url, body_bytes, self.timeout)
+            raw = safe_http_post_json(url, body_bytes, self.timeout, headers=auth_headers)
         except urllib.error.HTTPError as e:
             preview = e.read().decode("utf-8", errors="replace")[:300]
             biz_code: int | str = e.code
@@ -411,13 +426,13 @@ class MiaoshouErpClient:
 
 
 __all__ = [
-    "MiaoshouClient",
-    "MiaoshouErpClient",
-    "MiaoshouApiResponse",
-    "MiaoshouApiError",
-    "EnvConfig",
-    "safe_http_post_json",
+    "ERP_DEFAULT_BASE_URL",
     "PROD_BASE",
     "TEST_BASE",
-    "ERP_DEFAULT_BASE_URL",
+    "EnvConfig",
+    "MiaoshouApiError",
+    "MiaoshouApiResponse",
+    "MiaoshouClient",
+    "MiaoshouErpClient",
+    "safe_http_post_json",
 ]

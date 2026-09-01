@@ -11,12 +11,10 @@ goodsPurchaseOrderList + total.
 from __future__ import annotations
 
 import pytest
-
 from sqlalchemy import select
 
 from tts_erp_v2.db.models.integration import SyncJob
 from tts_erp_v2.jobs.miaoshou.purchase_orders import sync_purchase_orders
-
 
 pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
 
@@ -35,7 +33,10 @@ def test_sync_purchase_orders_empty_path(
     db_session.commit()
     assert result["orders_upserted"] == 0
     job = db_session.execute(
-        select(SyncJob).where(SyncJob.job_name == "miaoshou.purchase_orders")
+        select(SyncJob)
+        .where(SyncJob.job_name == "miaoshou.purchase_orders")
+        .order_by(SyncJob.id.desc())
+        .limit(1)
     ).scalar_one()
     assert job.status == "succeeded"
 

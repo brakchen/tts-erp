@@ -49,11 +49,6 @@ def test_jobs_registry_includes_miaoshou_and_reporting():
             "sync_move_collect",
             1800,
         ),
-        "miaoshou.purchase_orders": (
-            "tts_erp_v2.jobs.miaoshou.purchase_orders",
-            "sync_purchase_orders",
-            3600,
-        ),
         "reporting.cost_snapshots": (
             "tts_erp_v2.jobs.reporting",
             "run_cost_snapshots",
@@ -65,6 +60,8 @@ def test_jobs_registry_includes_miaoshou_and_reporting():
             3600,
         ),
     }
+    # miaoshou.purchase_orders intentionally absent: its endpoint path 404s
+    # against the prod ERP API (routeNotFound, verified 2026-09-01).
     for name, (module_path, entrypoint, interval) in expected.items():
         spec = JOBS.get(name)
         assert spec is not None, f"{name} missing from JOBS"

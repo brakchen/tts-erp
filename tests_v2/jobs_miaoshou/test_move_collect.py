@@ -24,8 +24,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import pytest
-
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from tts_erp_v2.db.models.integration import (
     RawRecord,
@@ -34,7 +33,6 @@ from tts_erp_v2.db.models.integration import (
 )
 from tts_erp_v2.db.models.linkage import LinkEvidence
 from tts_erp_v2.jobs.miaoshou.move_collect import sync_move_collect
-
 
 pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
 
@@ -142,7 +140,10 @@ def test_move_collect_walks_all_pages_through_rate_limit_retrys(
 
     # SyncJob row exists with status='succeeded' and the right counters.
     job = db_session.execute(
-        select(SyncJob).where(SyncJob.job_name == "miaoshou.move_collect")
+        select(SyncJob)
+        .where(SyncJob.job_name == "miaoshou.move_collect")
+        .order_by(SyncJob.id.desc())
+        .limit(1)
     ).scalar_one()
     assert job.status == "succeeded"
     assert job.rows_total == 240
@@ -161,13 +162,17 @@ def test_move_collect_writes_raw_records_per_task(
     )
     fake_client.install(side_effect)
 
+    max_raw_id = db_session.execute(
+        select(func.max(RawRecord.id))
+    ).scalar_one_or_none() or 0
     sync_move_collect(db_session, client=fake_client, max_retries=2)
     db_session.commit()
 
     raw_rows = (
         db_session.execute(
             select(RawRecord).where(
-                RawRecord.endpoint == "miaoshou.move_collect.search_move_collect_list"
+                RawRecord.endpoint == "miaoshou.move_collect.search_move_collect_list",
+                RawRecord.id > max_raw_id,
             )
         )
         .scalars()
@@ -273,7 +278,10 @@ def test_move_collect_handles_empty_response(
     assert result["issues"] == 0
     # SyncJob row still marked succeeded with 0 counters.
     job = db_session.execute(
-        select(SyncJob).where(SyncJob.job_name == "miaoshou.move_collect")
+        select(SyncJob)
+        .where(SyncJob.job_name == "miaoshou.move_collect")
+        .order_by(SyncJob.id.desc())
+        .limit(1)
     ).scalar_one()
     assert job.status == "succeeded"
     assert job.rows_total == 0
@@ -305,7 +313,10 @@ def test_move_collect_skips_non_dict_items(
     assert result["evidence_inserted"] == 2
     assert result["issues"] == 1
     issue = db_session.execute(
-        select(SyncIssue).where(SyncIssue.job_name == "miaoshou.move_collect")
+        select(SyncIssue)
+        .where(SyncIssue.job_name == "miaoshou.move_collect")
+        .order_by(SyncIssue.id.desc())
+        .limit(1)
     ).scalar_one()
     assert issue.issue_type == "MOVE_COLLECT_PARSE_FAILED"
 
