@@ -214,7 +214,9 @@ def main(argv: list[str] | None = None) -> int:
                 "finance.settlement_transactions, "
                 "finance.settlement_statements"
             )
-            print("  > TRUNCATE finance.settlement_{components,transactions,statements}")
+            print(
+                "  > TRUNCATE finance.settlement_{components,transactions,statements}"
+            )
             exec_cursor.execute(
                 "DELETE FROM integration.sync_cursors "
                 "WHERE job_name IN ('tiktok.finance', "
