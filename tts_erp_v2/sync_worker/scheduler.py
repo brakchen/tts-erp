@@ -71,6 +71,10 @@ class JobSpec:
     module_path: str
     interval_seconds: int
     is_tiktok: bool = True
+    #: System-wide jobs (is_tiktok=False) call ``getattr(module, entrypoint)(session)``.
+    entrypoint: str = "run"
+    #: token.refresh only: pass a real refresher registry into the entrypoint.
+    needs_token_registry: bool = False
 
 
 # Intervals match the legacy ``sync_cron.py`` cadence (see
@@ -111,6 +115,54 @@ JOBS: dict[str, JobSpec] = {
         module_path="tts_erp_v2.jobs.token_refresh",
         interval_seconds=21600,  # 6 h — covers 24 h expiry window
         is_tiktok=False,
+        entrypoint="sync_token_refresh",
+        needs_token_registry=True,
+    ),
+    # ── Miaoshou procurement jobs (registered 2026-09-01 — code has been
+    # in the tree since the v2 cutover but was never scheduled) ─────────
+    "miaoshou.shops": JobSpec(
+        job_name="miaoshou.shops",
+        module_path="tts_erp_v2.jobs.miaoshou.shops",
+        interval_seconds=21600,  # 6 h — shop list rarely changes
+        is_tiktok=False,
+        entrypoint="sync_shops",
+    ),
+    "miaoshou.collect_box": JobSpec(
+        job_name="miaoshou.collect_box",
+        module_path="tts_erp_v2.jobs.miaoshou.collect_box",
+        interval_seconds=1800,  # 30 min — 采集箱是联动证据源
+        is_tiktok=False,
+        entrypoint="sync_collect_box",
+    ),
+    "miaoshou.move_collect": JobSpec(
+        job_name="miaoshou.move_collect",
+        module_path="tts_erp_v2.jobs.miaoshou.move_collect",
+        interval_seconds=1800,  # 30 min
+        is_tiktok=False,
+        entrypoint="sync_move_collect",
+    ),
+    "miaoshou.purchase_orders": JobSpec(
+        job_name="miaoshou.purchase_orders",
+        module_path="tts_erp_v2.jobs.miaoshou.purchase_orders",
+        interval_seconds=3600,  # 1 h
+        is_tiktok=False,
+        entrypoint="sync_purchase_orders",
+    ),
+    # ── Reporting recompute jobs (library functions since cutover; never
+    # scheduled — reporting.* tables stayed empty in prod) ──────────────
+    "reporting.cost_snapshots": JobSpec(
+        job_name="reporting.cost_snapshots",
+        module_path="tts_erp_v2.jobs.reporting",
+        interval_seconds=21600,  # 6 h — cost inputs change slowly
+        is_tiktok=False,
+        entrypoint="run_cost_snapshots",
+    ),
+    "reporting.profit_daily": JobSpec(
+        job_name="reporting.profit_daily",
+        module_path="tts_erp_v2.jobs.reporting",
+        interval_seconds=3600,  # 1 h — rebuild today+yesterday (UTC)
+        is_tiktok=False,
+        entrypoint="run_profit_daily",
     ),
 }
 
@@ -202,55 +254,42 @@ def _run_tiktok_job(
                 session.close()
 
 
-def _run_token_refresh_job(
+def _run_system_job(
     spec: JobSpec,
     session_factory: sessionmaker[Session],
 ) -> None:
-    """Run ``token.refresh`` once. No per-shop fan-out.
+    """Run a system-wide job once (no per-shop fan-out, no proxy_call).
 
-    Wires the production TikTok refresher registry into the job so the
-    no-op stub in :mod:`tts_erp_v2.jobs.token_refresh` is replaced by
-    a real HTTP call to ``/api/v2/token/refresh``. Miaoshou still
-    receives a no-op refresher (per AGENTS.md §10.2 — no v2 Miaoshou
-    refresh path).
+    Covers ``token.refresh`` (real TikTok refresher registry wired in),
+    the four ``miaoshou.*`` jobs and the two ``reporting.*`` recompute
+    jobs.
 
-    Commit contract: the sync_jobs row written by
-    :func:`sync_token_refresh`'s ``run_job`` context manager MUST be
-    durable, so we explicitly ``commit()`` on the success path AND on
-    any exception path before the session is closed. Without the
-    explicit commit, the outer transaction is rolled back by the
-    session-close → integration.sync_jobs shows zero rows for
-    ``token.refresh`` (the production observation that drove this fix).
-    """
+    Commit contract: the sync_jobs row written inside the job's
+    ``run_job`` context manager is NOT committed by the job itself —
+    we commit on the success path AND write a sentinel failed row on
+    any exception path before the session is closed. Without this,
+    bookkeeping is silently rolled back on session close (the
+    production observation that drove this fix)."""
     mod = importlib.import_module(spec.module_path)
-    # Lazy import: avoid hard dependency when scheduler.py is imported
-    # just for the JOBS registry (e.g. ``list`` mode).
-    from tts_erp_v2.proxy.tiktok_auth import build_token_registry
 
-    registry = build_token_registry(session_factory=session_factory)
+    kwargs: dict = {}
+    if spec.needs_token_registry:
+        # Lazy import: avoid hard dependency when scheduler.py is imported
+        # just for the JOBS registry (e.g. ``list`` mode).
+        from tts_erp_v2.proxy.tiktok_auth import build_token_registry
+
+        kwargs["registry"] = build_token_registry(session_factory=session_factory)
 
     session = session_factory()
     try:
-        result = mod.sync_token_refresh(session, registry=registry)
-        # ``sync_token_refresh`` writes the sync_jobs row inside its
-        # ``run_job`` context manager but does NOT commit (the
-        # context manager is decorator-style; it expects the caller
-        # to own the transaction). Commit here so the bookkeeping
-        # row is durable even if APScheduler restarts immediately.
+        entrypoint = getattr(mod, spec.entrypoint)
+        result = entrypoint(session, **kwargs)
         try:
             session.commit()
         except Exception:  # noqa: BLE001 — boundary
             log.exception("[%s] commit() failed after successful run", spec.job_name)
             session.rollback()
-        log.info(
-            "[%s] ok scanned=%d refreshed=%d skipped=%d failed=%d issues=%d",
-            spec.job_name,
-            result.get("scanned", 0),
-            result.get("refreshed", 0),
-            result.get("skipped", 0),
-            result.get("failed", 0),
-            result.get("issues", 0),
-        )
+        log.info("[%s] ok result=%s", spec.job_name, result)
     except Exception:  # noqa: BLE001 — boundary
         # The exception fired BEFORE the sync_jobs row was committed
         # (or DURING the commit). Roll back the inner transaction
@@ -321,8 +360,15 @@ def _make_executor(
 ) -> Callable[[], None]:
     """Wrap a job's run logic into a no-arg callable APScheduler can fire."""
     if spec.is_tiktok:
-        return lambda: _run_tiktok_job(spec, session_factory)
-    return lambda: _run_token_refresh_job(spec, session_factory)
+        def run_tiktok() -> None:
+            _run_tiktok_job(spec, session_factory)
+
+        return run_tiktok
+
+    def run_system() -> None:
+        _run_system_job(spec, session_factory)
+
+    return run_system
 
 
 # ─── Scheduler factory ────────────────────────────────────────────

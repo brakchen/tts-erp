@@ -1,6 +1,6 @@
-"""TDD tests for scheduler._run_token_refresh_job — sync_jobs durability.
+"""TDD tests for scheduler._run_system_job — sync_jobs durability.
 
-Production fault: ``scheduler._run_token_refresh_job`` previously
+Production fault: ``scheduler._run_system_job`` previously
 called ``sync_token_refresh(session)`` inside a context manager
 (``run_job``) but never committed the session. The resulting
 ``integration.sync_jobs`` rows for ``job_name='token.refresh'``
@@ -18,7 +18,7 @@ These tests verify:
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -94,7 +94,7 @@ def test_run_token_refresh_writes_succeeded_sync_job(
     """A clean tick leaves a sync_jobs row with status='succeeded'."""
     from tts_erp_v2.sync_worker.scheduler import (
         JobSpec,
-        _run_token_refresh_job,
+        _run_system_job,
     )
 
     external_id = "TEST_TT_TK_REFRESH_OK"
@@ -102,7 +102,7 @@ def test_run_token_refresh_writes_succeeded_sync_job(
         session_factory,
         external_id=external_id,
         # Already expired → row qualifies for refresh.
-        expires_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        expires_at=datetime.now(UTC) - timedelta(hours=2),
     )
 
     # Patch build_token_registry to use a fake refresher that returns
@@ -113,7 +113,7 @@ def test_run_token_refresh_writes_succeeded_sync_job(
         "access_token": "rotated_at_xyz",
         "refresh_token": "rotated_rt_xyz",
         "shop_cipher": "rotated_cipher_xyz",
-        "expires_at": datetime.now(timezone.utc) + timedelta(hours=2),
+        "expires_at": datetime.now(UTC) + timedelta(hours=2),
     }
 
     def fake_registry(*args: Any, **kwargs: Any) -> Any:
@@ -130,8 +130,10 @@ def test_run_token_refresh_writes_succeeded_sync_job(
         module_path="tts_erp_v2.jobs.token_refresh",
         interval_seconds=21600,
         is_tiktok=False,
+        entrypoint="sync_token_refresh",
+        needs_token_registry=True,
     )
-    _run_token_refresh_job(spec, session_factory)
+    _run_system_job(spec, session_factory)
 
     # The scheduler MUST have written a sync_jobs row.
     sess = session_factory()
@@ -160,14 +162,14 @@ def test_run_token_refresh_writes_failed_sync_job_on_exception(
     """
     from tts_erp_v2.sync_worker.scheduler import (
         JobSpec,
-        _run_token_refresh_job,
+        _run_system_job,
     )
 
     external_id = "TEST_TT_TK_REFRESH_FAIL"
     _seed_credentials(
         session_factory,
         external_id=external_id,
-        expires_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        expires_at=datetime.now(UTC) - timedelta(hours=2),
     )
 
     # Patch sync_token_refresh to raise (simulates unexpected failure
@@ -191,9 +193,11 @@ def test_run_token_refresh_writes_failed_sync_job_on_exception(
         module_path="tts_erp_v2.jobs.token_refresh",
         interval_seconds=21600,
         is_tiktok=False,
+        entrypoint="sync_token_refresh",
+        needs_token_registry=True,
     )
     # Should NOT raise (scheduler swallows the exception).
-    _run_token_refresh_job(spec, session_factory)
+    _run_system_job(spec, session_factory)
 
     # Verify a 'failed' sync_jobs row was written.
     sess = session_factory()
@@ -226,14 +230,14 @@ def test_run_token_refresh_wires_real_tiktok_refresher(
     """
     from tts_erp_v2.sync_worker.scheduler import (
         JobSpec,
-        _run_token_refresh_job,
+        _run_system_job,
     )
 
     external_id = "TEST_TT_TK_REFRESH_WIRED"
     _seed_credentials(
         session_factory,
         external_id=external_id,
-        expires_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        expires_at=datetime.now(UTC) - timedelta(hours=2),
     )
 
     # Sentinel: track whether build_token_registry was called.
@@ -250,7 +254,7 @@ def test_run_token_refresh_wires_real_tiktok_refresher(
                     "access_token": "rotated_at_xyz",
                     "refresh_token": "rotated_rt_xyz",
                     "shop_cipher": "rotated_cipher_xyz",
-                    "expires_at": datetime.now(timezone.utc) + timedelta(hours=2),
+                    "expires_at": datetime.now(UTC) + timedelta(hours=2),
                 }
             return refresher
         return reg
@@ -262,8 +266,10 @@ def test_run_token_refresh_wires_real_tiktok_refresher(
         module_path="tts_erp_v2.jobs.token_refresh",
         interval_seconds=21600,
         is_tiktok=False,
+        entrypoint="sync_token_refresh",
+        needs_token_registry=True,
     )
-    _run_token_refresh_job(spec, session_factory)
+    _run_system_job(spec, session_factory)
 
     # The registry was invoked with a session_factory (proves the wiring).
     assert len(called_with) == 1

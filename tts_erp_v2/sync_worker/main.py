@@ -150,9 +150,9 @@ def _run_one_job(name: str) -> int:
 
         _run_tiktok_job(spec, session_factory)
     else:
-        from tts_erp_v2.sync_worker.scheduler import _run_token_refresh_job
+        from tts_erp_v2.sync_worker.scheduler import _run_system_job
 
-        _run_token_refresh_job(spec, session_factory)
+        _run_system_job(spec, session_factory)
     return 0
 
 
