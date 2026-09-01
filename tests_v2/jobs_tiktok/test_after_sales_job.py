@@ -256,7 +256,11 @@ def test_after_sales_resolves_line_via_line_id(db_session) -> None:
         inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
     )
     assert result.rows_inserted == 1
-    cl = db_session.execute(select(CaseLine)).scalar_one()
+    cl = db_session.execute(
+        select(CaseLine)
+        .join(Case, CaseLine.case_id == Case.id)
+        .where(Case.external_case_id == "C_LINE")
+    ).scalar_one()
     # external_case_line_id prefers the case-side id when present.
     assert cl.external_case_line_id == "CXL_LINE"
     # sales_order_line_id resolved through order_line_item_id → external_line_id.
@@ -310,7 +314,11 @@ def test_after_sales_resolves_line_via_sku_id(db_session) -> None:
     )
     assert result.rows_inserted == 1
     assert result.rows_failed == 0
-    cl = db_session.execute(select(CaseLine)).scalar_one()
+    cl = db_session.execute(
+        select(CaseLine)
+        .join(Case, CaseLine.case_id == Case.id)
+        .where(Case.external_case_id == "C_SKU")
+    ).scalar_one()
     # sku-only path stores the sku_id as the external_case_line_id.
     assert cl.external_case_line_id == "CL1_SKU"
     sol = db_session.execute(
@@ -356,7 +364,11 @@ def test_after_sales_unknown_line_when_sku_does_not_match(db_session) -> None:
     )
     # The case itself still inserts; only the line failed.
     assert result.rows_inserted == 1
-    cl_count = db_session.execute(select(CaseLine)).scalars().all()
+    cl_count = db_session.execute(
+        select(CaseLine)
+        .join(Case, CaseLine.case_id == Case.id)
+        .where(Case.external_case_id == "C_SKU_BAD")
+    ).scalars().all()
     assert cl_count == []
     issue = db_session.execute(
         select(SyncIssue).where(
@@ -414,7 +426,7 @@ def test_after_sales_persists_case_level_refund_amount(db_session) -> None:
     case = db_session.execute(
         select(Case).where(Case.external_case_id == "C_REFUND")
     ).scalar_one()
-    assert case.refund_amount == Decimal("686850")
+    assert case.refund_amount == Decimal(686850)
     assert case.currency == "VND"
 
 

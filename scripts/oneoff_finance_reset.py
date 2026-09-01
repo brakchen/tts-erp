@@ -121,16 +121,17 @@ def _resolve_db_url() -> str:
 # into psql.
 _SQL: list[tuple[str, str]] = [
     (
-        "TRUNCATE finance.settlement_components",
-        "Child of settlement_transactions — must drop first.",
-    ),
-    (
-        "TRUNCATE finance.settlement_transactions",
-        "Child of settlement_statements.",
-    ),
-    (
-        "TRUNCATE finance.settlement_statements",
-        "Was replicated 24× (1080 rows for 45 real statements).",
+        (
+            "TRUNCATE finance.settlement_components, "
+            "finance.settlement_transactions, "
+            "finance.settlement_statements"
+        ),
+        (
+            "One multi-table TRUNCATE — PostgreSQL handles the FK order "
+            "internally; separate TRUNCATEs fail with FeatureNotSupported "
+            "(components references transactions). The statements table was "
+            "replicated 24× (1080 rows for 45 real statements)."
+        ),
     ),
     (
         (
@@ -208,12 +209,12 @@ def main(argv: list[str] | None = None) -> int:
     print("Connecting and executing...")
     with psycopg.connect(db_url, autocommit=False) as conn:
         with conn.cursor() as exec_cursor:
-            exec_cursor.execute("TRUNCATE finance.settlement_components")
-            print("  > TRUNCATE finance.settlement_components")
-            exec_cursor.execute("TRUNCATE finance.settlement_transactions")
-            print("  > TRUNCATE finance.settlement_transactions")
-            exec_cursor.execute("TRUNCATE finance.settlement_statements")
-            print("  > TRUNCATE finance.settlement_statements")
+            exec_cursor.execute(
+                "TRUNCATE finance.settlement_components, "
+                "finance.settlement_transactions, "
+                "finance.settlement_statements"
+            )
+            print("  > TRUNCATE finance.settlement_{components,transactions,statements}")
             exec_cursor.execute(
                 "DELETE FROM integration.sync_cursors "
                 "WHERE job_name IN ('tiktok.finance', "

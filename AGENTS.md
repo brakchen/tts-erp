@@ -190,6 +190,8 @@ commits），但 `:9877` 运行时已不再服务这些路径。生产读 / 写 
      这两个端点 2026-08-17 起已从代码中**整个删除**（不再返回 501，而是无路由 404）。v2 在 `tts_erp_v2/jobs/tiktok/after_sales.py` 只读，同上原则如果以后要接，单独 review。
 - ❌ **不要**在 v2 端点里读 `public.*` 表。v2 完全读新 9 schema。4 周观察期内 `public.*` 仅作 rollback safety，**是**旧代码路径，但 v2 代码不会直接查。
 - ❌ **不要**接 `POST /orders/<id>/{confirm,cancel,update_status,shipping_info,verify_shipping}`。v2 架构是只读分析，写操作已全部拆除。
+- ❌ **不要裸跑 `git reset --hard` / `git checkout -- .` / `git clean -f`**(2026-09-01 起约定):多 agent 并发工作时,这类命令会把别人未提交的改动直接清掉(08-31 曾一次抹掉 5 条修复 lane 的全部未提交工作)。看到不属于自己的未提交改动 → 先问,不要清。
+- ❌ **不要跑 `tests_v2/migration/` 域测试或 `scripts/migrate_v1_to_v2/` 脚本**,除非显式设了 `TTS_ERP_ALLOW_PROD_MIGRATION=1` —— 它们会真实写生产库(08-31 曾因此把生产凭证回退成 legacy 格式、全线停摆 22h)。代码层已加闸,不要绕过。
 
 ## 5. 常见 bug + 修复
 
