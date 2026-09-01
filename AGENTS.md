@@ -260,6 +260,7 @@ ssh schan@192.168.47.130 "bash /home/schan/tts-erp/restart.sh"
 - `tts-erp-sync.service` — `.venv/bin/python -m tts_erp_v2.sync_worker.main`
   （APScheduler sync-worker；安装脚本 `prod-switch/install-sync-worker.sh`）
 - `oauth-receiver.service` — 仅 4 周回滚观察期保留（见 oauth-receiver 的 setup 文档）
+- `tts-erp-watchdog.timer` — 同步健康巡检（每 10min 跑 `scripts/watchdog_sync.py`, findings 追加到 `logs/watchdog.log`; 未配 webhook, 约定由 agent 会话定时扫该日志代告警)
 
 ```bash
 systemctl --user status tts-erp.service       # API 状态
