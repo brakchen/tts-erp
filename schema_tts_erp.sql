@@ -191,21 +191,6 @@ CREATE TABLE IF NOT EXISTS analytics.ad_audit_log (
 );
 
 
--- Name: ad_cursors; Type: TABLE; Schema: analytics; Owner: -
-
-CREATE TABLE IF NOT EXISTS analytics.ad_cursors (
-    seller_id text CONSTRAINT analytics_cursors_seller_id_not_null NOT NULL,
-    advertiser_id text CONSTRAINT analytics_cursors_advertiser_id_not_null NOT NULL,
-    storage_key text CONSTRAINT analytics_cursors_storage_key_not_null NOT NULL,
-    campaign_id text CONSTRAINT analytics_cursors_campaign_id_not_null NOT NULL,
-    latest_completed_day date,
-    last_updated_at timestamp with time zone DEFAULT now() CONSTRAINT analytics_cursors_last_updated_at_not_null NOT NULL,
-    request_id text,
-    first_seen_day date,
-    CONSTRAINT ck_analytics_cursors_storage CHECK ((storage_key = ANY (ARRAY['productAnalyses'::text, 'sessionAnalyses'::text, 'campaignChangeLogs'::text])))
-);
-
-
 -- Name: ad_daily_completeness; Type: TABLE; Schema: analytics; Owner: -
 
 CREATE TABLE IF NOT EXISTS analytics.ad_daily_completeness (
@@ -214,28 +199,39 @@ CREATE TABLE IF NOT EXISTS analytics.ad_daily_completeness (
     storage_key text CONSTRAINT analytics_daily_completeness_storage_key_not_null NOT NULL,
     campaign_id text CONSTRAINT analytics_daily_completeness_campaign_id_not_null NOT NULL,
     day date CONSTRAINT analytics_daily_completeness_day_not_null NOT NULL,
-    expected_page_count integer CONSTRAINT analytics_daily_completeness_expected_page_count_not_null NOT NULL,
-    is_complete boolean DEFAULT false CONSTRAINT analytics_daily_completeness_is_complete_not_null NOT NULL,
-    completed_at timestamp with time zone,
-    last_recomputed_at timestamp with time zone DEFAULT now() CONSTRAINT analytics_daily_completeness_last_recomputed_at_not_null NOT NULL,
-    CONSTRAINT ck_analytics_daily_completeness_expected CHECK ((expected_page_count > 0)),
+    captured_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT ck_analytics_daily_completeness_storage CHECK ((storage_key = ANY (ARRAY['productAnalyses'::text, 'sessionAnalyses'::text, 'campaignChangeLogs'::text])))
 );
 
 
--- Name: ad_daily_pages; Type: TABLE; Schema: analytics; Owner: -
+-- Name: ad_raw; Type: TABLE; Schema: analytics; Owner: -
 
-CREATE TABLE IF NOT EXISTS analytics.ad_daily_pages (
-    seller_id text CONSTRAINT analytics_daily_pages_seller_id_not_null NOT NULL,
-    advertiser_id text CONSTRAINT analytics_daily_pages_advertiser_id_not_null NOT NULL,
-    storage_key text CONSTRAINT analytics_daily_pages_storage_key_not_null NOT NULL,
-    campaign_id text CONSTRAINT analytics_daily_pages_campaign_id_not_null NOT NULL,
-    day date CONSTRAINT analytics_daily_pages_day_not_null NOT NULL,
-    page integer CONSTRAINT analytics_daily_pages_page_not_null NOT NULL,
-    inserted_at timestamp with time zone DEFAULT now() CONSTRAINT analytics_daily_pages_inserted_at_not_null NOT NULL,
-    CONSTRAINT ck_analytics_daily_pages_page CHECK ((page > 0)),
-    CONSTRAINT ck_analytics_daily_pages_storage CHECK ((storage_key = ANY (ARRAY['productAnalyses'::text, 'sessionAnalyses'::text, 'campaignChangeLogs'::text])))
+CREATE TABLE IF NOT EXISTS analytics.ad_raw (
+    id bigint CONSTRAINT analytics_raw_id_not_null NOT NULL,
+    idempotency_key text CONSTRAINT analytics_raw_idempotency_key_not_null NOT NULL,
+    seller_id text CONSTRAINT analytics_raw_seller_id_not_null NOT NULL,
+    advertiser_id text CONSTRAINT analytics_raw_advertiser_id_not_null NOT NULL,
+    endpoint text CONSTRAINT analytics_raw_endpoint_not_null NOT NULL,
+    method text CONSTRAINT analytics_raw_method_not_null NOT NULL,
+    day date CONSTRAINT analytics_raw_day_not_null NOT NULL,
+    campaign_id text CONSTRAINT analytics_raw_campaign_id_not_null NOT NULL,
+    request jsonb CONSTRAINT analytics_raw_request_not_null NOT NULL,
+    response jsonb CONSTRAINT analytics_raw_response_not_null NOT NULL,
+    captured_at timestamp with time zone CONSTRAINT analytics_raw_captured_at_not_null NOT NULL,
+    received_at timestamp with time zone DEFAULT now() CONSTRAINT analytics_raw_received_at_not_null NOT NULL,
+    source text,
+    request_id text,
+    protocol_version integer DEFAULT 2 CONSTRAINT analytics_raw_protocol_version_not_null NOT NULL,
+    schema_version integer DEFAULT 1 CONSTRAINT analytics_raw_schema_version_not_null NOT NULL,
+    CONSTRAINT ck_analytics_raw_protocol CHECK ((protocol_version > 0)),
+    CONSTRAINT ck_analytics_raw_schema CHECK ((schema_version > 0))
 );
+
+
+
+
+
+
 
 
 -- Name: ad_records; Type: TABLE; Schema: analytics; Owner: -
@@ -249,7 +245,6 @@ CREATE TABLE IF NOT EXISTS analytics.ad_records (
     storage_key text CONSTRAINT analytics_records_storage_key_not_null NOT NULL,
     campaign_id text CONSTRAINT analytics_records_campaign_id_not_null NOT NULL,
     day date CONSTRAINT analytics_records_day_not_null NOT NULL,
-    page integer CONSTRAINT analytics_records_page_not_null NOT NULL,
     shop_name text,
     endpoint text CONSTRAINT analytics_records_endpoint_not_null NOT NULL,
     method text CONSTRAINT analytics_records_method_not_null NOT NULL,
@@ -261,8 +256,6 @@ CREATE TABLE IF NOT EXISTS analytics.ad_records (
     protocol_version integer DEFAULT 1 CONSTRAINT analytics_records_protocol_version_not_null NOT NULL,
     received_at timestamp with time zone DEFAULT now() CONSTRAINT analytics_records_received_at_not_null NOT NULL,
     request_id text,
-    expected_page_count integer,
-    CONSTRAINT ck_analytics_records_page CHECK ((page > 0)),
     CONSTRAINT ck_analytics_records_protocol CHECK ((protocol_version > 0)),
     CONSTRAINT ck_analytics_records_schema CHECK ((schema_version > 0)),
     CONSTRAINT ck_analytics_records_storage CHECK ((storage_key = ANY (ARRAY['productAnalyses'::text, 'sessionAnalyses'::text, 'campaignChangeLogs'::text])))
@@ -1510,6 +1503,10 @@ ALTER TABLE security.api_keys ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 
 
 
+-- Name: ad_raw id; Type: DEFAULT; Schema: analytics; Owner: -
+
+
+
 -- Name: ad_records id; Type: DEFAULT; Schema: analytics; Owner: -
 
 
@@ -1552,10 +1549,10 @@ ALTER TABLE ONLY analytics.ad_audit_log
     ADD CONSTRAINT analytics_audit_log_pkey PRIMARY KEY (id);
 
 
--- Name: ad_cursors analytics_cursors_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
+-- Name: ad_raw analytics_raw_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
 
-ALTER TABLE ONLY analytics.ad_cursors
-    ADD CONSTRAINT analytics_cursors_pkey PRIMARY KEY (seller_id, advertiser_id, storage_key, campaign_id);
+ALTER TABLE ONLY analytics.ad_raw
+    ADD CONSTRAINT analytics_raw_pkey PRIMARY KEY (id);
 
 
 -- Name: ad_records analytics_records_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
@@ -1576,16 +1573,16 @@ ALTER TABLE ONLY analytics.ad_daily_completeness
     ADD CONSTRAINT pk_analytics_daily_completeness PRIMARY KEY (seller_id, advertiser_id, storage_key, campaign_id, day);
 
 
--- Name: ad_daily_pages pk_analytics_daily_pages; Type: CONSTRAINT; Schema: analytics; Owner: -
+-- Name: ad_raw uq_analytics_raw_unit_day; Type: CONSTRAINT; Schema: analytics; Owner: -
 
-ALTER TABLE ONLY analytics.ad_daily_pages
-    ADD CONSTRAINT pk_analytics_daily_pages PRIMARY KEY (seller_id, advertiser_id, storage_key, campaign_id, day, page);
+ALTER TABLE ONLY analytics.ad_raw
+    ADD CONSTRAINT uq_analytics_raw_unit_day UNIQUE (seller_id, advertiser_id, endpoint, day, campaign_id);
 
 
--- Name: ad_records uq_analytics_records_idem; Type: CONSTRAINT; Schema: analytics; Owner: -
+-- Name: ad_records uq_analytics_records_unit_day; Type: CONSTRAINT; Schema: analytics; Owner: -
 
 ALTER TABLE ONLY analytics.ad_records
-    ADD CONSTRAINT uq_analytics_records_idem UNIQUE (idempotency_key);
+    ADD CONSTRAINT uq_analytics_records_unit_day UNIQUE (seller_id, advertiser_id, storage_key, campaign_id, day);
 
 
 -- Name: channel_accounts channel_accounts_pkey; Type: CONSTRAINT; Schema: commerce; Owner: -
@@ -2105,14 +2102,19 @@ CREATE INDEX IF NOT EXISTS idx_analytics_audit_created ON analytics.ad_audit_log
 CREATE INDEX IF NOT EXISTS idx_analytics_audit_request ON analytics.ad_audit_log USING btree (request_id);
 
 
--- Name: idx_analytics_daily_completeness_unit_complete; Type: INDEX; Schema: analytics; Owner: -
+-- Name: idx_analytics_raw_received; Type: INDEX; Schema: analytics; Owner: -
 
-CREATE INDEX IF NOT EXISTS idx_analytics_daily_completeness_unit_complete ON analytics.ad_daily_completeness USING btree (seller_id, advertiser_id, storage_key, campaign_id, day, is_complete);
+CREATE INDEX IF NOT EXISTS idx_analytics_raw_received ON analytics.ad_raw USING btree (received_at DESC);
 
 
--- Name: idx_analytics_daily_pages_unit; Type: INDEX; Schema: analytics; Owner: -
+-- Name: idx_analytics_raw_request; Type: INDEX; Schema: analytics; Owner: -
 
-CREATE INDEX IF NOT EXISTS idx_analytics_daily_pages_unit ON analytics.ad_daily_pages USING btree (seller_id, advertiser_id, storage_key, campaign_id, day);
+CREATE INDEX IF NOT EXISTS idx_analytics_raw_request ON analytics.ad_raw USING btree (request_id);
+
+
+-- Name: idx_analytics_raw_scope; Type: INDEX; Schema: analytics; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_analytics_raw_scope ON analytics.ad_raw USING btree (seller_id, advertiser_id, endpoint, day);
 
 
 -- Name: idx_analytics_records_received; Type: INDEX; Schema: analytics; Owner: -
@@ -2128,11 +2130,6 @@ CREATE INDEX IF NOT EXISTS idx_analytics_records_request ON analytics.ad_records
 -- Name: idx_analytics_records_scope; Type: INDEX; Schema: analytics; Owner: -
 
 CREATE INDEX IF NOT EXISTS idx_analytics_records_scope ON analytics.ad_records USING btree (seller_id, advertiser_id, storage_key, campaign_id, day);
-
-
--- Name: idx_analytics_records_scope_page; Type: INDEX; Schema: analytics; Owner: -
-
-CREATE INDEX IF NOT EXISTS idx_analytics_records_scope_page ON analytics.ad_records USING btree (seller_id, advertiser_id, storage_key, campaign_id, day, page);
 
 
 -- Name: ix_channel_accounts_status; Type: INDEX; Schema: commerce; Owner: -
@@ -2958,5 +2955,5 @@ ALTER TABLE ONLY reporting.shipment_tracking_summary
 
 -- PostgreSQL database dump complete
 
-\unrestrict zncrxhs5au9fDfoNAPhzpkfRgvuf5ajldmQ9rasslkF3ef7kdQOPqi3GBBQUcHR
+\unrestrict QKDfyG924xtyKyHMrqE4cwEDuafuyhhQ0zoxygUOWh6kFXm14EUuqcOmwNX2F7T
 

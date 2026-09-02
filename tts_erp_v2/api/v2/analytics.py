@@ -342,7 +342,7 @@ def post_dumps(
             path=path,
             structured_errors=_sanitize_pydantic_errors(exc),
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: no-boolean-in-except
         # 意外分支：Pydantic schema 过了但 record 级 handler 内部炸了
         # （比如下游 validator bug）。按 SCHEMA_INVALID 返回同样的
         # envelope 形状但不带字段级细节；ops 从 stderr 拿异常类名。
@@ -467,7 +467,7 @@ def post_dumps(
         result = upsert_dump(
             sess, dump, request_id=payload.requestId or request_id
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: no-boolean-in-except
         exc_class = type(exc).__name__
         sys.stderr.write(
             f"[analytics-sync] persistence failure: {exc_class}: {exc}\n"

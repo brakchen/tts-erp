@@ -36,11 +36,8 @@ D2 (schema) — dump 架构落地：
 """
 
 from __future__ import annotations
-
 from collections.abc import Sequence
-
 from sqlalchemy import text
-
 from alembic import op  # pyright: ignore[reportAttributeAccessIssue]
 
 revision: str = "0005_ad_raw_per_unit_day"
@@ -51,7 +48,8 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     # 1. ad_raw new table (source-of-truth, immutable raw dump)
-    op.execute(text("""
+    op.execute(
+        text("""
         CREATE TABLE IF NOT EXISTS analytics.ad_raw (
             id                bigserial CONSTRAINT analytics_raw_id_not_null NOT NULL,
             idempotency_key   text CONSTRAINT analytics_raw_idempotency_key_not_null NOT NULL,
@@ -77,59 +75,94 @@ def upgrade() -> None:
             CONSTRAINT ck_analytics_raw_protocol CHECK ((protocol_version > 0)),
             CONSTRAINT ck_analytics_raw_schema   CHECK ((schema_version > 0))
         )
-    """))
+    """)
+    )
 
     # 索引（保留 has-data 高效查询 + 通用审计/recent 列表）
-    op.execute(text("""
+    op.execute(
+        text("""
         CREATE INDEX IF NOT EXISTS idx_analytics_raw_received
             ON analytics.ad_raw (received_at DESC)
-    """))
-    op.execute(text("""
+    """)
+    )
+    op.execute(
+        text("""
         CREATE INDEX IF NOT EXISTS idx_analytics_raw_request
             ON analytics.ad_raw (request_id)
-    """))
-    op.execute(text("""
+    """)
+    )
+    op.execute(
+        text("""
         CREATE INDEX IF NOT EXISTS idx_analytics_raw_scope
             ON analytics.ad_raw (seller_id, advertiser_id, endpoint, day)
-    """))
+    """)
+    )
 
     # 2. ad_daily_completeness: drop expected_page_count + is_complete,
     #    replace completed_at with captured_at timestamptz
-    op.execute(text("""
+    op.execute(
+        text("""
         -- backfill：is_complete=true 的行转 completed_at=now()（曾经完整的事实存档）
         UPDATE analytics.ad_daily_completeness
         SET completed_at = COALESCE(completed_at, now())
         WHERE is_complete = true
-    """))
-    op.execute(text("""
+    """)
+    )
+    op.execute(
+        text("""
         -- 删 is_complete=false 的行（未完成的脏数据，后续从 ad_raw 重建）
         DELETE FROM analytics.ad_daily_completeness
         WHERE is_complete = false
-    """))
-    op.execute(text("""
+    """)
+    )
+    op.execute(
+        text("""
         -- 删 expected_page_count
         ALTER TABLE analytics.ad_daily_completeness
             DROP COLUMN expected_page_count
-    """))
-    op.execute(text("""
+    """)
+    )
+    op.execute(
+        text("""
         -- 删 last_recomputed_at（重组逻辑消失，无意义）
         ALTER TABLE analytics.ad_daily_completeness
             DROP COLUMN last_recomputed_at
-    """))
-    op.execute(text("""
+    """)
+    )
+    op.execute(
+        text("""
         -- 删 is_complete（被 captured_at 取代）
         ALTER TABLE analytics.ad_daily_completeness
             DROP COLUMN is_complete
-    """))
-    op.execute(text("""
+    """)
+    )
+    op.execute(
+        text("""
         -- 把 completed_at 改成 captured_at NOT NULL
         ALTER TABLE analytics.ad_daily_completeness
             DROP COLUMN completed_at
-    """))
-    op.execute(text("""
+    """)
+    )
+    op.execute(
+        text("""
         ALTER TABLE analytics.ad_daily_completeness
-            ADD COLUMN captured_at timestamp with time zone NOT NULL
-    """))
+            ADD COLUMN captured_at timestamp with time zone DEFAULT now()
+    """)
+    )
+    op.execute(
+        text("""
+        -- 对已有行补 captured_at(为 now()),后续 ALTER SET NOT NULL
+        UPDATE analytics.ad_daily_completeness
+        SET captured_at = now()
+        WHERE captured_at IS NULL
+    """)
+    )
+    op.execute(
+        text("""
+        ALTER TABLE analytics.ad_daily_completeness
+            ALTER COLUMN captured_at SET NOT NULL
+    """)
+    )
 
     # 3. drop ad_daily_pages (page bitmap concept is gone)
     op.execute(text("DROP TABLE IF EXISTS analytics.ad_daily_pages"))
@@ -139,81 +172,128 @@ def upgrade() -> None:
 
     # 5. ad_records: drop page / expected_page_count, change unique constraint
     # page 维度的旧数据不要了（dump 1 天 1 行，page 隐式 = 1）
-    op.execute(text("""
+    op.execute(
+        text("""
         ALTER TABLE analytics.ad_records DROP COLUMN page
-    """))
-    op.execute(text("""
-        ALTER TABLE analytics.ad_records DROP CONSTRAINT ck_analytics_records_page
-    """))
-    op.execute(text("""
+    """)
+    )
+    # page 列上的 check 约束 ck_analytics_records_page 被 PG 自动 CASCADE 删,
+    # 显式 DROP CONSTRAINT 会报"does not exist" — 这里不再写
+    op.execute(
+        text("""
         ALTER TABLE analytics.ad_records DROP COLUMN expected_page_count
-    """))
+    """)
+    )
     # 删旧 idempotency_key 唯一约束（被 5 元组 key 取代）
-    op.execute(text("""
+    op.execute(
+        text("""
         ALTER TABLE analytics.ad_records
             DROP CONSTRAINT uq_analytics_records_idem
-    """))
+    """)
+    )
+    # dedupe 同一 5 元组的旧行（v1/v2 协议允许多 page/同 day 并存,新 UNIQUE 不允许）。
+    # 保留每组 id 最大的行(最新插入)。不可逆合并 —— dump architecture 下
+    # 一天只 dump 一次,旧 page-N 行被 page-1 取代。
+    op.execute(
+        text("""
+        DELETE FROM analytics.ad_records
+        WHERE id IN (
+            SELECT id FROM (
+                SELECT id, ROW_NUMBER() OVER (
+                    PARTITION BY seller_id, advertiser_id, storage_key, campaign_id, day
+                    ORDER BY id DESC
+                ) AS rn
+                FROM analytics.ad_records
+            ) t WHERE rn > 1
+        )
+    """)
+    )
     # 新唯一约束: (scope, storageKey, campaignId, day) 5 元组
-    op.execute(text("""
+    op.execute(
+        text("""
         ALTER TABLE analytics.ad_records
             ADD CONSTRAINT uq_analytics_records_unit_day
             UNIQUE (seller_id, advertiser_id, storage_key, campaign_id, day)
-    """))
+    """)
+    )
     # 旧 idx_analytics_records_scope_page 索引 (含 page 列) 删
     op.execute(text("DROP INDEX IF EXISTS analytics.idx_analytics_records_scope_page"))
 
 
 def downgrade() -> None:
     # 反向回滚（仅作灾难恢复，正常流程不应 downgrade 因为数据已不可逆丢失）
-    op.execute(text("""
+    op.execute(
+        text("""
         ALTER TABLE analytics.ad_records
             ADD COLUMN page integer CONSTRAINT ck_analytics_records_page CHECK ((page > 0)) NOT NULL DEFAULT 1
-    """))
-    op.execute(text("""
+    """)
+    )
+    op.execute(
+        text("""
         ALTER TABLE analytics.ad_records
             ADD COLUMN expected_page_count integer
-    """))
-    op.execute(text("""
+    """)
+    )
+    op.execute(
+        text("""
         ALTER TABLE analytics.ad_records
             DROP CONSTRAINT uq_analytics_records_unit_day
-    """))
-    op.execute(text("""
+    """)
+    )
+    op.execute(
+        text("""
         ALTER TABLE analytics.ad_records
             ADD CONSTRAINT uq_analytics_records_idem UNIQUE (idempotency_key)
-    """))
-    op.execute(text("""
+    """)
+    )
+    op.execute(
+        text("""
         CREATE INDEX IF NOT EXISTS idx_analytics_records_scope_page
             ON analytics.ad_records USING btree (seller_id, advertiser_id, storage_key, campaign_id, day, page)
-    """))
+    """)
+    )
 
     # ad_daily_completeness 反向：把 captured_at 还原成 is_complete + completed_at
-    op.execute(text("""
+    op.execute(
+        text("""
         ALTER TABLE analytics.ad_daily_completeness
             ADD COLUMN completed_at timestamp with time zone
-    """))
-    op.execute(text("""
+    """)
+    )
+    op.execute(
+        text("""
         ALTER TABLE analytics.ad_daily_completeness
             ADD COLUMN is_complete boolean DEFAULT false NOT NULL
-    """))
-    op.execute(text("""
+    """)
+    )
+    op.execute(
+        text("""
         UPDATE analytics.ad_daily_completeness
         SET is_complete = true, completed_at = captured_at
         WHERE captured_at IS NOT NULL
-    """))
-    op.execute(text("""
+    """)
+    )
+    op.execute(
+        text("""
         ALTER TABLE analytics.ad_daily_completeness DROP COLUMN captured_at
-    """))
-    op.execute(text("""
+    """)
+    )
+    op.execute(
+        text("""
         ALTER TABLE analytics.ad_daily_completeness
             ADD COLUMN expected_page_count integer CONSTRAINT ck_analytics_daily_completeness_expected CHECK ((expected_page_count > 0)) NOT NULL DEFAULT 1
-    """))
-    op.execute(text("""
+    """)
+    )
+    op.execute(
+        text("""
         ALTER TABLE analytics.ad_daily_completeness
             ADD COLUMN last_recomputed_at timestamp with time zone DEFAULT now() NOT NULL
-    """))
+    """)
+    )
 
     # ad_daily_pages / ad_cursors 重新建（结构跟 0004 一样）
-    op.execute(text("""
+    op.execute(
+        text("""
         CREATE TABLE IF NOT EXISTS analytics.ad_daily_pages (
             seller_id text NOT NULL, advertiser_id text NOT NULL,
             storage_key text NOT NULL, campaign_id text NOT NULL,
@@ -222,8 +302,10 @@ def downgrade() -> None:
             request_id text,
             CONSTRAINT analytics_daily_pages_pkey PRIMARY KEY (seller_id, advertiser_id, storage_key, campaign_id, day, page)
         )
-    """))
-    op.execute(text("""
+    """)
+    )
+    op.execute(
+        text("""
         CREATE TABLE IF NOT EXISTS analytics.ad_cursors (
             seller_id text NOT NULL, advertiser_id text NOT NULL,
             storage_key text NOT NULL, campaign_id text NOT NULL,
@@ -232,6 +314,7 @@ def downgrade() -> None:
             request_id text,
             CONSTRAINT analytics_cursors_pkey PRIMARY KEY (seller_id, advertiser_id, storage_key, campaign_id)
         )
-    """))
+    """)
+    )
 
     op.execute(text("DROP TABLE IF EXISTS analytics.ad_raw"))
