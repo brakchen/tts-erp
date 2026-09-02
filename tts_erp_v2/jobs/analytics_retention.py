@@ -5,11 +5,13 @@
 增长到 55k 行才发现）。现注册为 sync-worker 日级 job，与 token.refresh
 等 system-wide job 同模式。
 
-语义与原 retention.sql 一致：
+语义与原 retention.sql 一致（dump architecture 0005 后）：
 - ``analytics.ad_records`` 按 ``received_at`` 保留 90 天
 - ``analytics.ad_audit_log`` 按 ``created_at`` 保留 30 天
-- ``ad_cursors`` / ``ad_shop_timezones`` 永久保留（cursor 是同步状态，
-  删了会让 client 回退到 bootstrap 窗口全量重传）
+- ``ad_raw`` 是 source-of-truth 不 purge（dump architecture：ad_raw 永久保留，
+  派生表 ad_records / ad_daily_completeness 可重建；ad_cursors / ad_daily_pages
+  已在 0005 删除）
+- ``ad_shop_timezones`` 永久保留
 
 事务边界：本 entrypoint 不 commit —— sync-worker 的 ``run_with_sync_job``
 统一 commit（见 job_runner.py 注释：Callers should NOT commit again）。

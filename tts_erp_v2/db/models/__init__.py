@@ -15,9 +15,8 @@ from tts_erp_v2.db.models.after_sales import (
 )
 from tts_erp_v2.db.models.analytics import (
     AdAuditLog,
-    AdCursor,
     AdDailyCompleteness,
-    AdDailyPage,
+    AdRaw,
     AdRecord,
     AdShopTimezone,
 )
@@ -76,9 +75,8 @@ from tts_erp_v2.db.models.security import ApiKey
 __all__ = [
     "AccountLink",
     "AdAuditLog",
-    "AdCursor",
     "AdDailyCompleteness",
-    "AdDailyPage",
+    "AdRaw",
     "AdRecord",
     "AdShopTimezone",
     "ApiKey",

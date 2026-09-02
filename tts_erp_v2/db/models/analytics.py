@@ -1,17 +1,23 @@
 """analytics.* — Chrome extension (tk-adv-cost-monitor) analytics ingest.
 
-6 tables: ad_records / ad_daily_pages / ad_daily_completeness /
-ad_cursors / ad_shop_timezones / ad_audit_log.
+5 tables: ad_raw / ad_records / ad_daily_completeness /
+ad_shop_timezones / ad_audit_log.
 
-历史：v1 时代这些表在 public schema、以 analytics_ 前缀命名
-（public.analytics_records 等），由 analytics_sync/schema.sql 双轨维护。
-2026-09-02 v2 化（tech-doc/analytics-v2-migration-plan.md）：
-- 迁入独立 schema `analytics`（第 10 个），表名改 ad_ 前缀
-- alembic migration 0004 负责 SET SCHEMA + RENAME（老库）/ CREATE（新库）
-- 存储层从裸 psycopg 改为 SQLAlchemy（tts_erp_v2/analytics/repository.py）
+历史：
+- v1 时代在 public schema、以 analytics_ 前缀命名，由
+  analytics_sync/schema.sql 双轨维护。
+- 2026-09-02 v2 化（tech-doc/analytics-v2-migration-plan.md）：迁入独立
+  schema `analytics`（第 10 个），表名改 ad_ 前缀；alembic migration 0004
+  负责 SET SCHEMA + RENAME（老库）/ CREATE（新库）。
+- 2026-09-02 dump architecture（tech-doc/analytics/dump-architecture.md）：
+  migration 0005 drop ad_daily_pages / ad_cursors（page/cursor 概念删除），
+  新增 ad_raw（source-of-truth，5 元组 unique 幂等），ad_records 去
+  page / expected_page_count 列，ad_daily_completeness 只剩 captured_at
+  （existence 语义由 has-data 查 ad_raw 承担）。
 
-注意：索引/约束名保留历史名（如 uq_analytics_records_idem），
-SET SCHEMA + RENAME TABLE 不会自动改它们；模型声明与现网保持一致。
+模型声明与 migration 0005 后的现网 schema 对齐（索引/约束名保留
+SET SCHEMA 时代的历史名）。本模块只作 metadata 镜像 —— 实际读写走
+tts_erp_v2/analytics/repository.py（raw SQL，ad_raw 无 ORM 写入）。
 """
 
 from __future__ import annotations
@@ -20,7 +26,6 @@ from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger,
-    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -40,16 +45,84 @@ _STORAGE_KEY_CHECK = (
     "storage_key IN ('productAnalyses', 'sessionAnalyses', 'campaignChangeLogs')"
 )
 
+# ─── ad_raw ──────────────────────────────────────────────────────────
+# Source of truth：每条 dump = 一次完整 HTTP 交换（request/response 原样
+# JSONB）。不派生、immutable；唯一性 = 5 元组
+# (seller_id, advertiser_id, endpoint, day, campaign_id)，幂等由
+# uq_analytics_raw_unit_day 保证。与 ad_records / ad_daily_completeness
+# 无 FK，逻辑链接靠 shared 5 元组 key（endpoint 经 STORAGE_KEY_BY_PATH
+# 映射到 storage_key）。
+class AdRaw(Base):
+    __tablename__ = "ad_raw"
+    __table_args__ = (
+        UniqueConstraint(
+            "seller_id",
+            "advertiser_id",
+            "endpoint",
+            "day",
+            "campaign_id",
+            name="uq_analytics_raw_unit_day",
+        ),
+        CheckConstraint("protocol_version > 0", name="ck_analytics_raw_protocol"),
+        CheckConstraint("schema_version > 0", name="ck_analytics_raw_schema"),
+        Index(
+            "idx_analytics_raw_scope",
+            "seller_id",
+            "advertiser_id",
+            "endpoint",
+            "day",
+        ),
+        Index("idx_analytics_raw_request", "request_id"),
+        Index("idx_analytics_raw_received", "received_at"),
+        {"schema": "analytics"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    idempotency_key: Mapped[str] = mapped_column(Text, nullable=False)
+    seller_id: Mapped[str] = mapped_column(Text, nullable=False)
+    advertiser_id: Mapped[str] = mapped_column(Text, nullable=False)
+    endpoint: Mapped[str] = mapped_column(Text, nullable=False)
+    method: Mapped[str] = mapped_column(Text, nullable=False)
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+    campaign_id: Mapped[str] = mapped_column(Text, nullable=False)
+    request: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    response: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    source: Mapped[str | None] = mapped_column(Text)
+    request_id: Mapped[str | None] = mapped_column(Text)
+    protocol_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("2")
+    )
+    schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1")
+    )
+
 
 # ─── ad_records ──────────────────────────────────────────────────────
-# 原始批次记录：Chrome extension 上传的 response JSON + 归一化 scope 列。
-# uq idempotency_key 保证幂等（重复插入 = duplicate，不是错误）。
+# 派生表：ad_raw 落库后在同事务内派生出的分析行（body 提取后形状）。
+# dump architecture 后无 page / expected_page_count 列；唯一约束是
+# 5 元组 (seller_id, advertiser_id, storage_key, campaign_id, day)。
 class AdRecord(Base):
     __tablename__ = "ad_records"
     __table_args__ = (
-        UniqueConstraint("idempotency_key", name="uq_analytics_records_idem"),
+        UniqueConstraint(
+            "seller_id",
+            "advertiser_id",
+            "storage_key",
+            "campaign_id",
+            "day",
+            name="uq_analytics_records_unit_day",
+        ),
         CheckConstraint(_STORAGE_KEY_CHECK, name="ck_analytics_records_storage"),
-        CheckConstraint("page > 0", name="ck_analytics_records_page"),
         CheckConstraint("schema_version > 0", name="ck_analytics_records_schema"),
         CheckConstraint("protocol_version > 0", name="ck_analytics_records_protocol"),
         Index(
@@ -59,15 +132,6 @@ class AdRecord(Base):
             "storage_key",
             "campaign_id",
             "day",
-        ),
-        Index(
-            "idx_analytics_records_scope_page",
-            "seller_id",
-            "advertiser_id",
-            "storage_key",
-            "campaign_id",
-            "day",
-            "page",
         ),
         Index("idx_analytics_records_request", "request_id"),
         Index("idx_analytics_records_received", "received_at"),
@@ -86,7 +150,6 @@ class AdRecord(Base):
     storage_key: Mapped[str] = mapped_column(Text, nullable=False)
     campaign_id: Mapped[str] = mapped_column(Text, nullable=False)
     day: Mapped[date] = mapped_column(Date, nullable=False)
-    page: Mapped[int] = mapped_column(Integer, nullable=False)
     shop_name: Mapped[str | None] = mapped_column(Text)
     endpoint: Mapped[str] = mapped_column(Text, nullable=False)
     method: Mapped[str] = mapped_column(Text, nullable=False)
@@ -96,7 +159,6 @@ class AdRecord(Base):
     captured_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
-    expected_page_count: Mapped[int | None] = mapped_column(Integer)
     schema_version: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("1")
     )
@@ -109,47 +171,10 @@ class AdRecord(Base):
     request_id: Mapped[str | None] = mapped_column(Text)
 
 
-# ─── ad_daily_pages ──────────────────────────────────────────────────
-# 页位图：每个 (scope, storageKey, campaignId, day, page) 已持久化一行。
-# 复合 PK 让并发 batch 的 ON CONFLICT DO NOTHING 安全 race。
-class AdDailyPage(Base):
-    __tablename__ = "ad_daily_pages"
-    __table_args__ = (
-        PrimaryKeyConstraint(
-            "seller_id",
-            "advertiser_id",
-            "storage_key",
-            "campaign_id",
-            "day",
-            "page",
-            name="pk_analytics_daily_pages",
-        ),
-        CheckConstraint(_STORAGE_KEY_CHECK, name="ck_analytics_daily_pages_storage"),
-        CheckConstraint("page > 0", name="ck_analytics_daily_pages_page"),
-        Index(
-            "idx_analytics_daily_pages_unit",
-            "seller_id",
-            "advertiser_id",
-            "storage_key",
-            "campaign_id",
-            "day",
-        ),
-        {"schema": "analytics"},
-    )
-
-    seller_id: Mapped[str] = mapped_column(Text, nullable=False)
-    advertiser_id: Mapped[str] = mapped_column(Text, nullable=False)
-    storage_key: Mapped[str] = mapped_column(Text, nullable=False)
-    campaign_id: Mapped[str] = mapped_column(Text, nullable=False)
-    day: Mapped[date] = mapped_column(Date, nullable=False)
-    page: Mapped[int] = mapped_column(Integer, nullable=False)
-    inserted_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()")
-    )
-
-
 # ─── ad_daily_completeness ───────────────────────────────────────────
-# 「这天齐了吗」的聚合真相源。batch 事务内在 ad_daily_pages 变化后重算。
+# 「今天有数据」的轻量锚点（captured_at = last dump 时间）。
+# dump architecture 后 is_complete / expected_page_count 语义删除——
+# 完整性的真相源是 ad_raw existence（GET /cursor has-data 查它）。
 class AdDailyCompleteness(Base):
     __tablename__ = "ad_daily_completeness"
     __table_args__ = (
@@ -164,18 +189,6 @@ class AdDailyCompleteness(Base):
         CheckConstraint(
             _STORAGE_KEY_CHECK, name="ck_analytics_daily_completeness_storage"
         ),
-        CheckConstraint(
-            "expected_page_count > 0", name="ck_analytics_daily_completeness_expected"
-        ),
-        Index(
-            "idx_analytics_daily_completeness_unit_complete",
-            "seller_id",
-            "advertiser_id",
-            "storage_key",
-            "campaign_id",
-            "day",
-            "is_complete",
-        ),
         {"schema": "analytics"},
     )
 
@@ -184,47 +197,13 @@ class AdDailyCompleteness(Base):
     storage_key: Mapped[str] = mapped_column(Text, nullable=False)
     campaign_id: Mapped[str] = mapped_column(Text, nullable=False)
     day: Mapped[date] = mapped_column(Date, nullable=False)
-    expected_page_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    is_complete: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("FALSE")
-    )
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_recomputed_at: Mapped[datetime] = mapped_column(
+    captured_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
-
-
-# ─── ad_cursors ──────────────────────────────────────────────────────
-# 每个 (seller, advertiser, storageKey, campaignId) 一行。
-# latest_completed_day 只进不退；first_seen_day 是连续链 anchor。
-class AdCursor(Base):
-    __tablename__ = "ad_cursors"
-    __table_args__ = (
-        PrimaryKeyConstraint(
-            "seller_id",
-            "advertiser_id",
-            "storage_key",
-            "campaign_id",
-            name="pk_analytics_cursors",
-        ),
-        CheckConstraint(_STORAGE_KEY_CHECK, name="ck_analytics_cursors_storage"),
-        {"schema": "analytics"},
-    )
-
-    seller_id: Mapped[str] = mapped_column(Text, nullable=False)
-    advertiser_id: Mapped[str] = mapped_column(Text, nullable=False)
-    storage_key: Mapped[str] = mapped_column(Text, nullable=False)
-    campaign_id: Mapped[str] = mapped_column(Text, nullable=False)
-    latest_completed_day: Mapped[date | None] = mapped_column(Date)
-    first_seen_day: Mapped[date | None] = mapped_column(Date)
-    last_updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()")
-    )
-    request_id: Mapped[str | None] = mapped_column(Text)
 
 
 # ─── ad_shop_timezones ───────────────────────────────────────────────
-# 每个 seller 的权威 IANA 时区（cursor bootstrap / nextRequiredDay 按它算）。
+# 每个 seller 的权威 IANA 时区（has-data 检查按 seller 时区的「今天」算）。
 class AdShopTimezone(Base):
     __tablename__ = "ad_shop_timezones"
     __table_args__ = (
