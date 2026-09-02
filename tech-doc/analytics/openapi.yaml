@@ -63,9 +63,9 @@ paths:
                 type: object
                 required: [status, service, version]
                 properties:
-                  status: {type: string, enum: [ok]}
-                  service: {type: string}
-                  version: {type: string}
+                  status: { type: string, enum: [ok] }
+                  service: { type: string }
+                  version: { type: string }
 
   /endpoints:
     get:
@@ -98,11 +98,11 @@ paths:
         - name: sellerId
           in: query
           required: true
-          schema: {type: string, minLength: 1, maxLength: 128}
+          schema: { type: string, minLength: 1, maxLength: 128 }
         - name: advertiserId
           in: query
           required: true
-          schema: {type: string, minLength: 1, maxLength: 128}
+          schema: { type: string, minLength: 1, maxLength: 128 }
         - name: storageKey
           in: query
           required: false
@@ -112,16 +112,16 @@ paths:
         - name: campaignId
           in: query
           required: false
-          schema: {type: string, maxLength: 128}
+          schema: { type: string, maxLength: 128 }
         - name: cursor
           in: query
           required: false
-          schema: {type: string, maxLength: 4096}
+          schema: { type: string, maxLength: 4096 }
           description: "Opaque pagination cursor. MVP: not used."
         - name: pageSize
           in: query
           required: false
-          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
       responses:
         "200":
           description: ok
@@ -198,8 +198,8 @@ components:
       type: object
       required: [sellerId, advertiserId]
       properties:
-        sellerId: {type: string, minLength: 1, maxLength: 128}
-        advertiserId: {type: string, minLength: 1, maxLength: 128}
+        sellerId: { type: string, minLength: 1, maxLength: 128 }
+        advertiserId: { type: string, minLength: 1, maxLength: 128 }
         shopName:
           type: string
           nullable: true
@@ -235,7 +235,7 @@ components:
             Local UUID from the plugin. Used for tracing only; NOT a
             cross-retry idempotency key.
         storageKey: { $ref: "#/components/schemas/StorageKey" }
-        campaignId: {type: string, minLength: 1, maxLength: 128}
+        campaignId: { type: string, minLength: 1, maxLength: 128 }
         day:
           type: string
           format: date
@@ -269,7 +269,7 @@ components:
           minLength: 1
           maxLength: 512
           description: TikTok API path (e.g. `/oec_ads/...`).
-        method: {type: string, minLength: 1, maxLength: 16}
+        method: { type: string, minLength: 1, maxLength: 16 }
         requestBody:
           type: object
           additionalProperties: true
@@ -323,7 +323,7 @@ components:
       required: [storageKey, campaignId, nextRequiredDay]
       properties:
         storageKey: { $ref: "#/components/schemas/StorageKey" }
-        campaignId: {type: string}
+        campaignId: { type: string }
         latestCompletedDay:
           type: string
           format: date
@@ -347,8 +347,8 @@ components:
       type: object
       required: [code, requestId, data]
       properties:
-        code: {type: integer, enum: [0]}
-        requestId: {type: string}
+        code: { type: integer, enum: [0] }
+        requestId: { type: string }
         data:
           type: object
           required: [timezone, items, nextCursor]
@@ -367,7 +367,7 @@ components:
       type: object
       required: [idempotencyKey, status]
       properties:
-        idempotencyKey: {type: string}
+        idempotencyKey: { type: string }
         status:
           type: string
           enum: [inserted, duplicate]
@@ -379,7 +379,7 @@ components:
       type: object
       required: [idempotencyKey, code, message, retryable]
       properties:
-        idempotencyKey: {type: string}
+        idempotencyKey: { type: string }
         code:
           type: string
           enum:
@@ -387,7 +387,7 @@ components:
             - RESPONSE_TOO_LARGE
             - PAGE_COUNT_CONFLICT
             - SCOPE_DENIED
-        message: {type: string}
+        message: { type: string }
         retryable:
           type: boolean
           description: |
@@ -398,8 +398,8 @@ components:
       type: object
       required: [code, requestId, data]
       properties:
-        code: {type: integer, enum: [0]}
-        requestId: {type: string}
+        code: { type: integer, enum: [0] }
+        requestId: { type: string }
         data:
           type: object
           required: [accepted, rejected]
@@ -425,8 +425,8 @@ components:
             - `PAYLOAD_TOO_LARGE`
             - `RATE_LIMITED`
             - `INTERNAL_ERROR`
-        message: {type: string}
-        requestId: {type: string}
+        message: { type: string }
+        requestId: { type: string }
         retryable:
           type: boolean
           description: |
@@ -462,7 +462,7 @@ components:
       description: Per-token rate limit exceeded
       headers:
         Retry-After:
-          schema: {type: integer}
+          schema: { type: integer }
           description: Seconds until next request is allowed.
       content:
         application/json:

@@ -51,3 +51,6 @@ tdd/.env
 # Stray "F:" directory left over from an earlier scp path-mangling experiment
 /F:
 /F:/
+
+# git worktrees (parallel agent checkouts — never commit)
+.worktrees/

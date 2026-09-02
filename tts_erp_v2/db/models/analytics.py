@@ -45,6 +45,7 @@ _STORAGE_KEY_CHECK = (
     "storage_key IN ('productAnalyses', 'sessionAnalyses', 'campaignChangeLogs')"
 )
 
+
 # ─── ad_raw ──────────────────────────────────────────────────────────
 # Source of truth：每条 dump = 一次完整 HTTP 交换（request/response 原样
 # JSONB）。不派生、immutable；唯一性 = 5 元组
