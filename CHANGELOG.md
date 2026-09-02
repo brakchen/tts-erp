@@ -47,7 +47,7 @@
 - `tech-doc/external-api.md` §3 analytics 节全段 /v2 化（mount/路径/env var/curl/稳定性矩阵）。
 - `setup/analytics-sync.md` v0.4.0 → v0.5.0 重写头部 + 状态表 + 文件布局 + 表清单 + 端点列表。
 - `tech-doc/analytics/`（原 `analytics_sync/tech-doc/`）5 文件 `/v1` → `/v2`、表名 `analytics_*` → `analytics.ad_*`、
-` 层架构引用更新、`cron` retention → `sync-worker job`。
+`层架构引用更新、`cron` retention → `sync-worker job`。
 
 ## 2026-08-31 (feature) — Procurement console redesign + SPU image storage（branch `feature/procurement-ui`）
 

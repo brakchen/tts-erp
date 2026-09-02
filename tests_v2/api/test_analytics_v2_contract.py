@@ -58,15 +58,32 @@ def _cleanup_analytics_rows(db_engine):
 
 # ─── 路由 + auth ─────────────────────────────────────────────────────
 
+
 def test_v2_cursor_route_anonymous_is_401(api_client):
-    assert api_client.get("/v2/analytics/sync/cursor", params={"sellerId": SELLER, "advertiserId": ADVERTISER, "endpoint": ENDPOINT, "day": DAY}).status_code == 401
+    assert (
+        api_client.get(
+            "/v2/analytics/sync/cursor",
+            params={
+                "sellerId": SELLER,
+                "advertiserId": ADVERTISER,
+                "endpoint": ENDPOINT,
+                "day": DAY,
+            },
+        ).status_code
+        == 401
+    )
 
 
 def test_v2_cursor_readonly_key_is_forbidden(api_client, readonly_key):
     r = api_client.get(
         "/v2/analytics/sync/cursor",
         headers={"Authorization": f"Bearer {readonly_key}"},
-        params={"sellerId": SELLER, "advertiserId": ADVERTISER, "endpoint": ENDPOINT, "day": DAY},
+        params={
+            "sellerId": SELLER,
+            "advertiserId": ADVERTISER,
+            "endpoint": ENDPOINT,
+            "day": DAY,
+        },
     )
     assert r.status_code == 403
 
@@ -75,7 +92,12 @@ def test_v2_cursor_readwrite_key_passes(api_client, readwrite_key):
     r = api_client.get(
         "/v2/analytics/sync/cursor",
         headers={"Authorization": f"Bearer {readwrite_key}"},
-        params={"sellerId": SELLER, "advertiserId": ADVERTISER, "endpoint": ENDPOINT, "day": DAY},
+        params={
+            "sellerId": SELLER,
+            "advertiserId": ADVERTISER,
+            "endpoint": ENDPOINT,
+            "day": DAY,
+        },
     )
     assert r.status_code == 200
     body = r.json()
@@ -89,11 +111,14 @@ def test_v2_dumps_route_present(api_client, readwrite_key):
         "/v2/analytics/sync/dumps",
         headers={"Authorization": f"Bearer {readwrite_key}"},
         json={
-            "protocolVersion": 2, "requestId": "req-test-dump-1",
+            "protocolVersion": 2,
+            "requestId": "req-test-dump-1",
             "scope": {"sellerId": SELLER, "advertiserId": ADVERTISER},
             "dump": {
-                "endpoint": ENDPOINT, "method": "POST",
-                "day": DAY, "campaignId": CAMPAIGN,
+                "endpoint": ENDPOINT,
+                "method": "POST",
+                "day": DAY,
+                "campaignId": CAMPAIGN,
                 "request": {"url": "http://tiktok.test/..."},
                 "response": {"status": 200, "body": {"data": {"rows": []}}},
                 "capturedAt": "2026-08-23T00:00:00.000Z",
@@ -109,24 +134,34 @@ def test_v2_dumps_route_present(api_client, readwrite_key):
 
 def test_v1_paths_are_gone(api_client, admin_key):
     for path in ["/v1/analytics/sync/cursor", "/v1/analytics/sync/batches"]:
-        r = api_client.get(path, headers={"Authorization": f"Bearer {admin_key}"}, params={"sellerId": SELLER, "advertiserId": ADVERTISER})
+        r = api_client.get(
+            path,
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"sellerId": SELLER, "advertiserId": ADVERTISER},
+        )
         assert r.status_code == 404, f"expected 404 for {path}, got {r.status_code}"
 
 
 # ─── cursor has-data 行为 ───────────────────────────────────────────
 
-def test_v2_cursor_has_data_returns_true_after_dump(api_client, readwrite_key, db_engine):
+
+def test_v2_cursor_has_data_returns_true_after_dump(
+    api_client, readwrite_key, db_engine
+):
     """dump 1 次后，cursor has-data 应返 true。"""
     # 先 dump 1 次
     api_client.post(
         "/v2/analytics/sync/dumps",
         headers={"Authorization": f"Bearer {readwrite_key}"},
         json={
-            "protocolVersion": 2, "requestId": str(uuid.uuid4()),
+            "protocolVersion": 2,
+            "requestId": str(uuid.uuid4()),
             "scope": {"sellerId": SELLER, "advertiserId": ADVERTISER},
             "dump": {
-                "endpoint": ENDPOINT, "method": "POST",
-                "day": DAY, "campaignId": CAMPAIGN,
+                "endpoint": ENDPOINT,
+                "method": "POST",
+                "day": DAY,
+                "campaignId": CAMPAIGN,
                 "request": {"url": "http://tiktok.test/..."},
                 "response": {"status": 200, "body": {"data": {"rows": []}}},
                 "capturedAt": "2026-08-23T00:00:00.000Z",
@@ -137,7 +172,13 @@ def test_v2_cursor_has_data_returns_true_after_dump(api_client, readwrite_key, d
     r = api_client.get(
         "/v2/analytics/sync/cursor",
         headers={"Authorization": f"Bearer {readwrite_key}"},
-        params={"sellerId": SELLER, "advertiserId": ADVERTISER, "endpoint": ENDPOINT, "day": DAY, "campaignId": CAMPAIGN},
+        params={
+            "sellerId": SELLER,
+            "advertiserId": ADVERTISER,
+            "endpoint": ENDPOINT,
+            "day": DAY,
+            "campaignId": CAMPAIGN,
+        },
     )
     body = r.json()
     assert body["code"] == 0
@@ -151,7 +192,12 @@ def test_v2_cursor_has_data_returns_false_before_dump(api_client, readwrite_key)
     r = api_client.get(
         "/v2/analytics/sync/cursor",
         headers={"Authorization": f"Bearer {readwrite_key}"},
-        params={"sellerId": SELLER, "advertiserId": ADVERTISER, "endpoint": ENDPOINT, "day": "2099-01-01"},
+        params={
+            "sellerId": SELLER,
+            "advertiserId": ADVERTISER,
+            "endpoint": ENDPOINT,
+            "day": "2099-01-01",
+        },
     )
     body = r.json()
     assert body["code"] == 0
@@ -162,7 +208,12 @@ def test_v2_cursor_400_on_unknown_endpoint(api_client, readwrite_key):
     r = api_client.get(
         "/v2/analytics/sync/cursor",
         headers={"Authorization": f"Bearer {readwrite_key}"},
-        params={"sellerId": SELLER, "advertiserId": ADVERTISER, "endpoint": "/unknown/path", "day": DAY},
+        params={
+            "sellerId": SELLER,
+            "advertiserId": ADVERTISER,
+            "endpoint": "/unknown/path",
+            "day": DAY,
+        },
     )
     assert r.status_code == 400
     assert r.json()["code"] == "SCHEMA_INVALID"
@@ -170,21 +221,33 @@ def test_v2_cursor_400_on_unknown_endpoint(api_client, readwrite_key):
 
 # ─── /dumps 行为 ─────────────────────────────────────────────────────
 
+
 def test_v2_dumps_insert_then_duplicate(api_client, readwrite_key, db_engine):
     """同 dump 重放 2 次：第 1 次 inserted，第 2 次 duplicate。"""
     payload = {
-        "protocolVersion": 2, "requestId": str(uuid.uuid4()),
+        "protocolVersion": 2,
+        "requestId": str(uuid.uuid4()),
         "scope": {"sellerId": SELLER, "advertiserId": ADVERTISER},
         "dump": {
-            "endpoint": ENDPOINT, "method": "POST",
-            "day": DAY, "campaignId": CAMPAIGN,
+            "endpoint": ENDPOINT,
+            "method": "POST",
+            "day": DAY,
+            "campaignId": CAMPAIGN,
             "request": {"url": "http://tiktok.test/..."},
             "response": {"status": 200, "body": {"data": {"rows": []}}},
             "capturedAt": "2026-08-23T00:00:00.000Z",
         },
     }
-    r1 = api_client.post("/v2/analytics/sync/dumps", headers={"Authorization": f"Bearer {readwrite_key}"}, json=payload)
-    r2 = api_client.post("/v2/analytics/sync/dumps", headers={"Authorization": f"Bearer {readwrite_key}"}, json=payload)
+    r1 = api_client.post(
+        "/v2/analytics/sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=payload,
+    )
+    r2 = api_client.post(
+        "/v2/analytics/sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=payload,
+    )
     assert r1.json()["data"]["status"] == "inserted"
     assert r2.json()["data"]["status"] == "duplicate"
     # idempotencyKey 必须一致
@@ -197,11 +260,14 @@ def test_v2_dumps_400_on_unknown_endpoint(api_client, readwrite_key):
         "/v2/analytics/sync/dumps",
         headers={"Authorization": f"Bearer {readwrite_key}"},
         json={
-            "protocolVersion": 2, "requestId": "r",
+            "protocolVersion": 2,
+            "requestId": "r",
             "scope": {"sellerId": SELLER, "advertiserId": ADVERTISER},
             "dump": {
-                "endpoint": "/unknown/path", "method": "POST",
-                "day": DAY, "campaignId": CAMPAIGN,
+                "endpoint": "/unknown/path",
+                "method": "POST",
+                "day": DAY,
+                "campaignId": CAMPAIGN,
                 "request": {"url": "x"},
                 "response": {"status": 200, "body": {}},
                 "capturedAt": "2026-08-23T00:00:00.000Z",
@@ -218,11 +284,14 @@ def test_v2_dumps_audit_log_written(api_client, readwrite_key, db_engine):
         "/v2/analytics/sync/dumps",
         headers={"Authorization": f"Bearer {readwrite_key}"},
         json={
-            "protocolVersion": 2, "requestId": str(uuid.uuid4()),
+            "protocolVersion": 2,
+            "requestId": str(uuid.uuid4()),
             "scope": {"sellerId": SELLER, "advertiserId": ADVERTISER},
             "dump": {
-                "endpoint": ENDPOINT, "method": "POST",
-                "day": DAY, "campaignId": CAMPAIGN,
+                "endpoint": ENDPOINT,
+                "method": "POST",
+                "day": DAY,
+                "campaignId": CAMPAIGN,
                 "request": {"url": "http://tiktok.test/..."},
                 "response": {"status": 200, "body": {"data": {"rows": []}}},
                 "capturedAt": "2026-08-23T00:00:00.000Z",
@@ -232,7 +301,9 @@ def test_v2_dumps_audit_log_written(api_client, readwrite_key, db_engine):
     with db_engine.begin() as conn:
         # noqa: python-sql-injection — 字面量 SQL
         row = conn.execute(
-            text("SELECT endpoint, status, records_in FROM analytics.ad_audit_log WHERE endpoint = 'dumps' ORDER BY id DESC LIMIT 1"),
+            text(
+                "SELECT endpoint, status, records_in FROM analytics.ad_audit_log WHERE endpoint = 'dumps' ORDER BY id DESC LIMIT 1"
+            ),
         ).first()
     assert row is not None
     assert row[0] == "dumps"
@@ -242,16 +313,20 @@ def test_v2_dumps_audit_log_written(api_client, readwrite_key, db_engine):
 
 # ─── envelope ─────────────────────────────────────────────────────
 
+
 def test_v2_dumps_response_is_json_serializable_envelope(api_client, readwrite_key):
     r = api_client.post(
         "/v2/analytics/sync/dumps",
         headers={"Authorization": f"Bearer {readwrite_key}"},
         json={
-            "protocolVersion": 2, "requestId": "req-envelope-1",
+            "protocolVersion": 2,
+            "requestId": "req-envelope-1",
             "scope": {"sellerId": SELLER, "advertiserId": ADVERTISER},
             "dump": {
-                "endpoint": ENDPOINT, "method": "POST",
-                "day": DAY, "campaignId": CAMPAIGN,
+                "endpoint": ENDPOINT,
+                "method": "POST",
+                "day": DAY,
+                "campaignId": CAMPAIGN,
                 "request": {"url": "http://tiktok.test/..."},
                 "response": {"status": 200, "body": {}},
                 "capturedAt": "2026-08-23T00:00:00.000Z",

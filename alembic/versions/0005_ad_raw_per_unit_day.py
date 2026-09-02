@@ -36,8 +36,11 @@ D2 (schema) — dump 架构落地：
 """
 
 from __future__ import annotations
+
 from collections.abc import Sequence
+
 from sqlalchemy import text
+
 from alembic import op  # pyright: ignore[reportAttributeAccessIssue]
 
 revision: str = "0005_ad_raw_per_unit_day"
