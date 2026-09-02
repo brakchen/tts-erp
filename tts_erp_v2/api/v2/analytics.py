@@ -435,8 +435,7 @@ def post_dumps(
             status=400,
             code="RESPONSE_TOO_LARGE",
             message=(
-                f"dump.response is {response_size} bytes; "
-                f"max {MAX_RESPONSE_DATA_BYTES}"
+                f"dump.response is {response_size} bytes; max {MAX_RESPONSE_DATA_BYTES}"
             ),
             retryable=False,
             key_prefix=key_prefix,
@@ -464,14 +463,10 @@ def post_dumps(
     )
 
     try:
-        result = upsert_dump(
-            sess, dump, request_id=payload.requestId or request_id
-        )
+        result = upsert_dump(sess, dump, request_id=payload.requestId or request_id)
     except Exception as exc:  # noqa: no-boolean-in-except
         exc_class = type(exc).__name__
-        sys.stderr.write(
-            f"[analytics-sync] persistence failure: {exc_class}: {exc}\n"
-        )
+        sys.stderr.write(f"[analytics-sync] persistence failure: {exc_class}: {exc}\n")
         write_audit(
             request_id=payload.requestId or request_id,
             endpoint="dumps",

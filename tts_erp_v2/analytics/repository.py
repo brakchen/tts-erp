@@ -43,8 +43,8 @@ from .domain import (
 # plugin dump 协议不传 storageKey（消除 client 端 enum 知识）,
 # server 端用 STORAGE_KEY_BY_PATH[endpoint] 推导。
 STORAGE_KEY_BY_PATH: dict[str, StorageKey] = {
-    "/oec_ads/shopping/v1/oec/stat/post_product_list":     StorageKey.PRODUCT_ANALYSES,
-    "/oec_ads/shopping/v1/oec/stat/post_session_list":     StorageKey.SESSION_ANALYSES,
+    "/oec_ads/shopping/v1/oec/stat/post_product_list": StorageKey.PRODUCT_ANALYSES,
+    "/oec_ads/shopping/v1/oec/stat/post_session_list": StorageKey.SESSION_ANALYSES,
     "/oec_ads/shopping/v1/oec/stat/campaign_opt_log_list": StorageKey.CAMPAIGN_CHANGE_LOGS,
 }
 
@@ -233,8 +233,12 @@ def upsert_dump(
             "shop_name": None,  # dump 协议无 shop_name
             "endpoint": dump.endpoint,
             "method": dump.method,
-            "request_body": json.dumps(dump.request.get("body", {}), ensure_ascii=False),
-            "response_data": json.dumps(dump.response.get("body", {}), ensure_ascii=False),
+            "request_body": json.dumps(
+                dump.request.get("body", {}), ensure_ascii=False
+            ),
+            "response_data": json.dumps(
+                dump.response.get("body", {}), ensure_ascii=False
+            ),
             "source": dump.source,
             "captured_at": dump.captured_at,
             "schema_version": dump.schema_version,
