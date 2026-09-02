@@ -1,14 +1,22 @@
-"""Analytics Sync domain types.
+"""Analytics 领域类型（v2）。
 
-Pure domain layer — no I/O, no framework, no DB. This module defines
-the shape of every value object that flows through the service.
+纯领域层 —— 无 I/O、无框架、无 DB。定义流经本服务的全部值对象形状。
+
+2026-09-02 从 ``analytics_sync/domain.py`` 零逻辑平移（v2 化，
+tech-doc/analytics-v2-migration-plan.md）。本模块是 Chrome extension
+协议契约的一部分：幂等键推导、裁剪规则、envelope 形状全都字节级锁定，
+改动必须升 protocolVersion。
 
 Layering:
-    domain.py            (this file — types only)
+    domain.py            (本文件 —— 仅类型)
     ↓
-    pg_repositories.py   (PG-backed storage)
+    repository.py        (SQLAlchemy 存储)
     ↓
-    app.py               (FastAPI handlers)
+    api/v2/analytics.py  (FastAPI handlers)
+
+注：旧 ``AnalyticsRepository`` Protocol（为 standalone 服务的测试替身而设）
+随 v2 化移除 —— handler 直接调 repository 模块函数 + 请求级 session，
+测试走真实 DB（tests_v2 事务回滚隔离）。
 """
 
 from __future__ import annotations
@@ -18,7 +26,7 @@ import json
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any
 
 
 class StorageKey(str, Enum):
@@ -30,8 +38,7 @@ class StorageKey(str, Enum):
 
 
 # Default IANA timezone for sellers without an explicit setting.
-# Single source of truth — app.py and pg_repositories.py both import
-# from here (W4.3: pg_repositories used to hardcode the same literal).
+# Single source of truth — handlers and repository both import from here.
 DEFAULT_TIMEZONE = "Asia/Shanghai"
 
 
@@ -112,32 +119,6 @@ class RejectedRecord:
 class BatchResult:
     accepted: list[AcceptedRecord]
     rejected: list[RejectedRecord]
-
-
-class AnalyticsRepository(Protocol):
-    """Persistence boundary. PG implementation lives in pg_repositories.py.
-
-    Keeps handlers free of SQL and makes contract tests possible without
-    a live database. Cursor and timezone reads are stateless pure
-    functions in pg_repositories.fetch_cursor_page / fetch_timezone.
-    """
-
-    def upsert_records(
-        self,
-        scope: Scope,
-        records: list[Record],
-        request_id: str | None,
-        *,
-        today_in_shop_tz: date,
-        bootstrap_day: date,
-    ) -> BatchResult:
-        """Insert records, advance cursors atomically.
-
-        Returns per-record outcome. The cursor table is only updated
-        inside the same transaction after records and daily pages are
-        durable, and only to the last contiguous complete day.
-        """
-        ...
 
 
 # ─── Canonical JSON for idempotency key ──────────────────────────────

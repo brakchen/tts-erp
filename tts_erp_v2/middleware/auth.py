@@ -114,7 +114,7 @@ def _strip_external_prefix(path: str) -> str:
     # don't second-guess its content beyond that.
     prefix = raw_prefix if raw_prefix.endswith("/") else raw_prefix + "/"
     if path.startswith(prefix):
-        remainder = path[len(prefix):]
+        remainder = path[len(prefix) :]
         return "/" + remainder if not remainder.startswith("/") else remainder
     return path
 
@@ -129,8 +129,9 @@ def required_role(method: str, path: str) -> int | None:
     p = _strip_external_prefix(p)
     if p in EXEMPT_PATHS:
         return None
-    # analytics_sync is readwrite (Chrome extension uploads).
-    if p.startswith("/v1/analytics/sync"):
+    # analytics ingest 是 readwrite（Chrome extension 上传）。
+    # 2026-09-02 v2 化：/v1/analytics/sync 随发布下线，单挂 /v2。
+    if p.startswith("/v2/analytics/sync"):
         return ROLE_LEVEL["readwrite"]
     # Miaoshou callback nodes are public (TikTok shop server-to-server push).
     if p.startswith("/miaoshou/callback"):
@@ -370,8 +371,10 @@ class AuthMiddleware:
             )
             req_path = scope.get("path", "")
             if req_path.startswith(normalized):
-                stripped = req_path[len(normalized):]
-                scope["path"] = "/" + stripped if not stripped.startswith("/") else stripped
+                stripped = req_path[len(normalized) :]
+                scope["path"] = (
+                    "/" + stripped if not stripped.startswith("/") else stripped
+                )
                 # FastAPI uses raw_path for the actual route match; keep
                 # it in sync so /v2/auth/login (no prefix) registers.
                 if scope.get("raw_path"):

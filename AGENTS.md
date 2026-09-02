@@ -133,7 +133,7 @@ curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" \
 | `GET /v2/llm-context` | 给 LLM agent 的上下文包（experimental） |
 | `GET /v2/admin/rate-limit` | 查看当前限流状态（singleton 存在时 limit / window_s / active_buckets + env var） |
 | `POST /v2/admin/reset-rate-limit` | 热重载限流（admin）；body `{new_limit?, reset_buckets?}`，不传 `new_limit` 即重读 `TTS_ERP_RATE_LIMIT_PER_MIN` |
-| `GET /v1/analytics/sync/{batches,cursor}` | analytics-sync 批次 / 游标（内部） |
+| `GET /v2/analytics/sync/cursor`、`POST /v2/analytics/sync/batches` | Chrome 扩展广告分析 ingest（readwrite + key scope；自有 envelope；2026-09-02 从 /v1 硬切，无别名） |
 
 **已拆除、不要再找**：
 
@@ -141,6 +141,7 @@ curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" \
   `tts-erp-sync.service` 调度（频率见 `tts_erp_v2/sync_worker/scheduler.py` 的 `JOBS`）
 - 没有 `/v2/linkage/effective-product-links` —— 那只是 DB 层 view，无 HTTP 端点
 - 没有任何 `/miaoshou/*` 路由 —— 出站代理和回调端点都未挂进 v2（见 §10.2）
+- 没有 `/v1/analytics/sync/*` —— 2026-09-02 硬切到 `/v2/analytics/sync/*`（单挂载无别名，legacy `analytics_sync/` 包同 release 删除）
 - 读端点过滤参数是内部 id（`channel_account_id` 等），`shop_id` 会被静默忽略（见 §2.4）
 
 **legacy v1 端点状态**（2026-08-29 切换后）：
@@ -210,12 +211,13 @@ commits），但 `:9877` 运行时已不再服务这些路径。生产读 / 写 
 | 路径 | 用途 |
 | ------------------------------------------------- | -------------------------------------------- |
 | **`tts_erp_v2/app.py`** | **主服务**（FastAPI `build_app()` 工厂；`tts-erp.service` 跑 `uvicorn tts_erp_v2.app:app`，监听 9877） |
-| `tts_erp_v2/api/v2/` | 路由：commerce / linkage / reporting / pages / spu_images / auth / llm_context / **admin** (限流热重载等) |
+| `tts_erp_v2/api/v2/` | 路由：commerce / linkage / reporting / pages / spu_images / auth / llm_context / **admin** (限流热重载等) / **analytics**（Chrome 扩展 ingest） |
 | `tts_erp_v2/middleware/` | `auth.py`（API key + 角色矩阵）、`session_auth.py`（cookie 会话）、`rate_limit.py`（60s 滑动窗，env 配）、`access_log.py` |
 | `tts_erp_v2/proxy/` | 出站层：`tts_shop/`（TikTok 签名 + 客户端）、`miaoshou/`、`token_service.py`（凭证 Fernet 加解密 + 续期） |
 | `tts_erp_v2/jobs/` | 同步 job：`tiktok/*`（6 个）、`miaoshou/*`（4 个，**未注册调度**）、`token_refresh.py`、`runner.py` |
 | `tts_erp_v2/sync_worker/` | APScheduler worker（`scheduler.py` 的 `JOBS` 注册表；独立跑在 `tts-erp-sync.service`） |
-| `tts_erp_v2/db/models/` | 9 schema SQLAlchemy 模型 |
+| `tts_erp_v2/db/models/` | 10 schema SQLAlchemy 模型（含 `analytics` schema 的 `ad_*` 6 表） |
+| `tts_erp_v2/analytics/` | Chrome 扩展广告分析 ingest 的 domain + SQLAlchemy repository（路由在 `api/v2/analytics.py`，表在 `analytics` schema） |
 | `tts_erp_v2/linkage/` / `reporting/` / `storage/` | 关联计算 / 成本利润重算 / MinIO 对象存储 |
 | `api_keys.py` | API key 管理 CLI（create/list/revoke/rotate；表在 `security.api_keys`） |
 | `schema_tts_erp.sql` / `schema_oauth.sql` | PG 表结构（按库拆分；`python3 scripts/regen_schema.py` 重新生成） |
@@ -230,7 +232,7 @@ commits），但 `:9877` 运行时已不再服务这些路径。生产读 / 写 
 | `sync_cron.py` / `run_sync_cron.sh` | **legacy**：v1 cron 同步，已被 `tts-erp-sync.service` 取代（脚本内自注 superseded），无调用方，观察期后删 |
 | `tts_erp.py` / `tts_signing.py` | **legacy**：v1 stdlib 服务遗物（v2 不 import；签名实现以 `tts_erp_v2/proxy/tts_shop/signing.py` 为准） |
 | `tdd/` | **已废弃**：v1 FastAPI 服务 / 中间件已删除，仅剩 Wave 1-4 开发/QA 报告留档 |
-| `tech-doc/` | 设计文档目录（`external-api.md` 是端点活契约） |
+| `tech-doc/` | 设计文档目录（`external-api.md` 是端点活契约；`analytics/` 是 Chrome 扩展 ingest 协议规范） |
 | `setup/` | 用户向 setup 文档（`tts-erp.md` / `analytics-sync.md`）+ schema 备份 |
 | `AGENTS.md` / `README.md` / `handoff.md` / `CHANGELOG.md` | 本文件 / 人类说明 / 跨 session 交接 / 变更日志 |
 
@@ -351,7 +353,7 @@ Run after any change to `tts_erp_v2/app.py`, `tts_erp_v2/middleware/*`.
 
 These endpoints (and their semantics) may break without notice:
 
-- `GET /v1/analytics/sync/*` — analytics-sync 内部 ingest 契约
+- `GET /v2/analytics/sync/*` — Chrome 扩展 ingest 契约（自有 envelope，随扩展发布节奏演进）
 - `GET /v2/llm-context` — experimental LLM 上下文包
 - `POST /v2/linkage/overrides` 等 mutation 端点的 body 字段可能随表单演进
 

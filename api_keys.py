@@ -199,7 +199,7 @@ def main() -> None:
         nargs="*",
         default=[],
         help=(
-            "Optional scope strings for analytics_sync per-seller restriction. "
+            "Optional scope strings for analytics ingest per-seller restriction. "
             "Format: 'seller:<id>' or 'advertiser:<id>'. "
             "Empty (default) = unrestricted. Examples: "
             "--scopes seller:shop-1 --scopes advertiser:adv-1"

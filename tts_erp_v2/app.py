@@ -36,9 +36,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from analytics_sync.app import router as analytics_sync_router
 from tts_erp_v2.api.v2 import (
     admin,
+    analytics,
     auth,
     commerce,
     linkage,
@@ -66,14 +66,14 @@ def _build_routes(app: FastAPI) -> None:
     # explicit ``require_role_at_least(request, "admin")`` in the
     # handler for defense-in-depth. See tts_erp_v2/api/v2/admin.py.
     app.include_router(admin.router, prefix="/v2/admin")
-    # analytics_sync (Chrome extension upload + cursor) — unified under
-    # tts-erp management per the 2026-08-30 refactor. Standalone port 9878
-    # is now retired. Auth + rate-limit are inherited from the parent
-    # app's middleware stack; the router's handlers read
-    # `request.scope["api_key_hash"]` / `request.scope["api_key_scopes"]`
-    # which AuthMiddleware populates above (see
-    # tts_erp_v2/middleware/auth.py:399-410).
-    app.include_router(analytics_sync_router, prefix="/v1/analytics/sync")
+    # analytics (Chrome extension upload + cursor) — 2026-09-02 v2 化：
+    # 原 analytics_sync 孤岛包拆除，路由迁入 api/v2/analytics.py，
+    # 存储走 tts_erp_v2/analytics/repository.py（analytics.ad_* 表）。
+    # 单挂 /v2/analytics/sync —— 旧 /v1/analytics/sync/* 随本次发布下线
+    # （用户拍板，无 alias；发布窗口必须与插件发版同步）。
+    # Auth + rate-limit 继承父 app 中间件栈；handler 读
+    # `request.scope["api_key_hash"]` / `request.scope["api_key_scopes"]`。
+    app.include_router(analytics.router)
 
     # Operator-console static assets (vendor/bootstrap.min.css / js/console.js). Auth is
     # readonly-level via the "/static/" prefix in middleware/auth.py —

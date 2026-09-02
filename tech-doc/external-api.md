@@ -41,7 +41,7 @@ cookie (see [Browser session login](#browser-session-login)).
 | Operator console (HTML) | `GET /v2/pages/manual-costs` | readonly (browser → 302 login) |
 | SPU image list / upload / delete | `GET /v2/spu-images`, `POST /v2/spu-images/upload-url`, `POST /v2/spu-images/{id}/confirm`, `DELETE /v2/spu-images/{id}` | readonly / readwrite |
 | Browser login / logout / whoami | `GET\|POST /v2/auth/login`, `POST /v2/auth/logout`, `GET /v2/auth/me` | public |
-| Analytics cursor / batch upload (Chrome ext) | `GET /v1/analytics/sync/cursor`, `POST /v1/analytics/sync/batches` | readwrite + scope |
+| Analytics cursor / batch upload (Chrome ext) | `GET /v2/analytics/sync/cursor`, `POST /v2/analytics/sync/batches` | readwrite + scope |
 
 Key gotchas (read these before writing code):
 
@@ -241,16 +241,17 @@ for LLM agents, generated from the live PG schema. `?format=md` (default)
 returns `text/markdown`; `?format=json` returns
 `{schema_version, generated_at, key_role, markdown, sections}`.
 
-### Analytics Sync (`/v1/analytics/sync/*`)
+### Analytics Sync (`/v2/analytics/sync/*`)
 
-Mounted under tts-erp at `/v1/analytics/sync/*` (the standalone :9878
-process was retired 2026-08-30). Powers the `tk-adv-cost-monitor` Chrome
+Mounted under tts-erp at `/v2/analytics/sync/*`（2026-09-02 从
+`/v1/analytics/sync/*` 单挂载硬切，无 /v1 别名；再早的 standalone
+:9878 进程已于 2026-08-30 退役）。Powers the `tk-adv-cost-monitor` Chrome
 extension. Auth requires **readwrite** role plus a per-seller scope grant
 (the api_key's `scopes` array). Full protocol lives in
-[`analytics_sync/tech-doc/analytics-sync.md`](../analytics_sync/tech-doc/analytics-sync.md);
+[`analytics/analytics-sync.md`](analytics/analytics-sync.md);
 this section is the agent-facing quick reference.
 
-#### `GET /v1/analytics/sync/cursor`
+#### `GET /v2/analytics/sync/cursor`
 
 Returns the latest-day state for every `(storageKey, campaignId)` pair
 known for the scope. `nextRequiredDay` is authoritative for the daily
@@ -290,12 +291,12 @@ Response:
 
 `nextRequiredDay = max(latestCompletedDay + 1 day, today_in_shop_tz − bootstrap_lookback_days)`.
 If `latestCompletedDay` is NULL, returns `today_in_shop_tz − 30 days`
-(configurable via env `ANALYTICS_SYNC_BOOTSTRAP_LOOKBACK_DAYS`).
+(configurable via env `TTS_ERP_ANALYTICS_BOOTSTRAP_LOOKBACK_DAYS`).
 
 `403 SCOPE_DENIED` if the api_key's `scopes[]` doesn't cover the
 requested `(sellerId, advertiserId)`.
 
-#### `POST /v1/analytics/sync/batches`
+#### `POST /v2/analytics/sync/batches`
 
 Idempotent batch upload (≤ 100 records / 2 MB body). The server
 **recomputes** the canonical idempotency key from each record and
@@ -431,8 +432,10 @@ The full key is shown ONCE on creation. Store it securely.
   response field is backwards-compatible; removing/renaming/changing the
   meaning of a field is a breaking change and requires a new version
   prefix.
-- `/v1/analytics/sync/*` keeps its v1 envelope for the deployed Chrome
-  extension — that contract is frozen at protocolVersion 1.
+- `/v2/analytics/sync/*` keeps its own envelope for the deployed Chrome
+  extension（`{code, requestId, data}`，与 `/v2` 其余端点的裸 JSON 不同）——
+  payload `protocolVersion` 1/2 均接受，契约 frozen。
+  2026-09-02 前该 API 挂在 `/v1/analytics/sync/*`，已硬切下线（404）。
 
 ## Examples
 
@@ -461,7 +464,7 @@ curl -sS -X POST -H "Authorization: Bearer $KEY" \
 
 ```bash
 curl -sS -H "X-API-Key: $KEY" \
-  "http://127.0.0.1:9877/v1/analytics/sync/cursor?sellerId=seller-1&advertiserId=adv-1&pageSize=100" \
+  "http://127.0.0.1:9877/v2/analytics/sync/cursor?sellerId=seller-1&advertiserId=adv-1&pageSize=100" \
   | jq -r '.data.items[] | [.storageKey, .campaignId, .nextRequiredDay] | @tsv'
 ```
 
@@ -484,7 +487,7 @@ Stable external endpoints (safe to build dashboards / agents on):
 | `GET /v2/spu-images`, upload/confirm/delete | readonly / readwrite | v2 |
 | `GET /v2/llm-context` | readonly | v2 (content evolves with the schema) |
 | `GET\|POST /v2/auth/*` | public | v2 |
-| `GET /v1/analytics/sync/cursor`, `POST /v1/analytics/sync/batches` | readwrite + scope | v1 (frozen) |
+| `GET /v2/analytics/sync/cursor`, `POST /v2/analytics/sync/batches` | readwrite + scope | analytics（自有 envelope，frozen） |
 
 Retired (404 since the 2026-08-29 hard switch — do NOT build on these;
 they exist only in git history):

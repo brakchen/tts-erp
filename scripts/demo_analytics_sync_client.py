@@ -2,7 +2,7 @@
 
 This script is a runnable, copy-pasteable walkthrough of the upload cycle
 that the ``tk-adv-cost-monitor`` Chrome extension uses against
-``POST /v1/analytics/sync/{cursor,batches}``.  It is written for the
+``POST /v2/analytics/sync/{cursor,batches}``.  It is written for the
 upstream maintainers as a "show me exactly how to call this and what the
 server replies with" reference — open it, read top-to-bottom, and you
 have everything you need to wire the production client.
@@ -11,11 +11,11 @@ How to read this script
 -----------------------
 
 The module is split into three numbered steps that match the daily-job
-flow in ``analytics_sync/tech-doc/plugin-integration.md`` §4:
+flow in ``tech-doc/analytics/plugin-integration.md`` §4:
 
-  Step 1.  GET /v1/analytics/sync/cursor          — discover what to sync
-  Step 2.  POST /v1/analytics/sync/batches        — upload one record (happy)
-  Step 3.  POST /v1/analytics/sync/batches        — upload a BAD record
+  Step 1.  GET /v2/analytics/sync/cursor          — discover what to sync
+  Step 2.  POST /v2/analytics/sync/batches        — upload one record (happy)
+  Step 3.  POST /v2/analytics/sync/batches        — upload a BAD record
 
 Each step prints:
 
@@ -100,14 +100,15 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
 
-
 # ─── Configuration ──────────────────────────────────────────────────────
 
 BASE_URL = os.environ.get("TTS_ERP_BASE_URL", "http://127.0.0.1:9877")
 # Read the service key directly from .env so the demo can be run against
 # a local dev box without exporting env vars by hand.  Replace with the
 # real key via ``export TTS_ERP_SERVICE_KEY=...`` for production demos.
-SERVICE_KEY = os.environ.get("TTS_ERP_SERVICE_KEY", "ttserp_rw_DEMO_PLACEHOLDER_REPLACE_ME")
+SERVICE_KEY = os.environ.get(
+    "TTS_ERP_SERVICE_KEY", "ttserp_rw_DEMO_PLACEHOLDER_REPLACE_ME"
+)
 SELLER_ID = os.environ.get("TTS_ERP_DEMO_SELLER", "TEST_seller-1")
 ADVERTISER_ID = os.environ.get("TTS_ERP_DEMO_ADV", "TEST_adv-1")
 SHOP_NAME = os.environ.get("TTS_ERP_DEMO_SHOP", "demo-shop")
@@ -140,7 +141,8 @@ def print_curl(method: str, url: str, body: dict[str, Any] | None = None) -> Non
     pieces = [
         "curl",
         "-sS",  # silent + show errors
-        "-X", method,
+        "-X",
+        method,
         f'  -H "Authorization: Bearer {safe_key}"',
         '  -H "Content-Type: application/json"',
         f'  -H "X-Protocol-Version: {PROTOCOL_VERSION}"',
@@ -195,10 +197,10 @@ def compute_idempotency_key(
 ) -> str:
     """sha256 hex of the canonical 6-field record identity.
 
-    Must match ``analytics_sync.domain.compute_idempotency_key`` byte-for-
+    Must match ``tts_erp_v2.analytics.domain.compute_idempotency_key`` byte-for-
     byte; the server recomputes this on every received record and rejects
     any client-sent ``idempotencyKey`` that doesn't match.  See
-    ``analytics_sync/tech-doc/plugin-integration.md`` §3 for the rules.
+    ``tech-doc/analytics/plugin-integration.md`` §3 for the rules.
 
     Locked reference vector (computed against the production server):
 
@@ -265,7 +267,7 @@ def demo_idempotency_key() -> str:
 def step_cursor_dry_run() -> dict[str, Any]:
     """Print what step 2 would send + receive, no live HTTP."""
     url = (
-        f"{BASE_URL}/v1/analytics/sync/cursor"
+        f"{BASE_URL}/v2/analytics/sync/cursor"
         f"?sellerId={SELLER_ID}&advertiserId={ADVERTISER_ID}"
         f"&storageKey=productAnalyses&campaignId={CAMPAIGN_ID}"
     )
@@ -312,7 +314,7 @@ def step_cursor_dry_run() -> dict[str, Any]:
 def step_cursor_live() -> dict[str, Any]:
     """Make the actual GET cursor call and return the parsed JSON."""
     url = (
-        f"{BASE_URL}/v1/analytics/sync/cursor"
+        f"{BASE_URL}/v2/analytics/sync/cursor"
         f"?sellerId={SELLER_ID}&advertiserId={ADVERTISER_ID}"
         f"&storageKey=productAnalyses&campaignId={CAMPAIGN_ID}"
     )
@@ -331,7 +333,9 @@ def step_cursor_live() -> dict[str, Any]:
 # ─── Step 3 · POST batches (happy path) ─────────────────────────────────
 
 
-def build_demo_record(*, idempotency_key: str, expected_page_count: int = 3) -> dict[str, Any]:
+def build_demo_record(
+    *, idempotency_key: str, expected_page_count: int = 3
+) -> dict[str, Any]:
     """One canonical ``RecordIn`` payload for a 3-page product analysis day.
 
     ``response`` is the literal JSON TikTok returned for this page; the
@@ -375,7 +379,7 @@ def step_batch_happy_dry_run(idempotency_key: str) -> dict[str, Any]:
         },
         "records": [record],
     }
-    print_curl("POST", f"{BASE_URL}/v1/analytics/sync/batches", body=body)
+    print_curl("POST", f"{BASE_URL}/v2/analytics/sync/batches", body=body)
 
     expected = {
         "code": 0,
@@ -445,31 +449,31 @@ def step_batch_bad_dry_run() -> dict[str, Any]:
         },
         "records": bad_records,
     }
-    print_curl("POST", f"{BASE_URL}/v1/analytics/sync/batches", body=body)
+    print_curl("POST", f"{BASE_URL}/v2/analytics/sync/batches", body=body)
 
     expected = {
         "code": "SCHEMA_INVALID",
         "message": "3 validation errors for BatchRequest\n"
-                   "records.0.capturedAt\n"
-                   "  Value error, capturedAt must include a timezone ...\n"
-                   "records.1.storageKey\n"
-                   "  Input should be 'productAnalyses', 'sessionAnalyses' "
-                   "or 'campaignChangeLogs' ...\n"
-                   "records.2.page\n"
-                   "  Input should be greater than or equal to 1 ...",
+        "records.0.capturedAt\n"
+        "  Value error, capturedAt must include a timezone ...\n"
+        "records.1.storageKey\n"
+        "  Input should be 'productAnalyses', 'sessionAnalyses' "
+        "or 'campaignChangeLogs' ...\n"
+        "records.2.page\n"
+        "  Input should be greater than or equal to 1 ...",
         "requestId": "req-DEMO-batch-bad",
         "retryable": False,
         "errors": [
             {
                 "loc": ["records", 0, "capturedAt"],
                 "msg": "Value error, capturedAt must include a timezone "
-                       "(use ISO-8601 with 'Z' or '+00:00')",
+                "(use ISO-8601 with 'Z' or '+00:00')",
                 "type": "value_error",
             },
             {
                 "loc": ["records", 1, "storageKey"],
                 "msg": "Input should be 'productAnalyses', 'sessionAnalyses' "
-                       "or 'campaignChangeLogs'",
+                "or 'campaignChangeLogs'",
                 "type": "enum",
             },
             {
@@ -522,7 +526,7 @@ def step_batch_live(idempotency_key: str) -> dict[str, Any]:
         "records": [build_demo_record(idempotency_key=idempotency_key)],
     }
     req = urllib.request.Request(  # noqa: S310  (scheme allowlisted in _safe_urlopen)
-        f"{BASE_URL}/v1/analytics/sync/batches",
+        f"{BASE_URL}/v2/analytics/sync/batches",
         method="POST",
         data=json.dumps(body).encode("utf-8"),
     )
@@ -558,7 +562,7 @@ def parse_args(argv: list[str]) -> CliArgs:
         "--live",
         action="store_true",
         help="Make actual HTTP calls to $TTS_ERP_BASE_URL "
-             "(requires a running tts-erp + a real SERVICE_KEY).",
+        "(requires a running tts-erp + a real SERVICE_KEY).",
     )
     parser.add_argument(
         "--only",
@@ -574,7 +578,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     mode = "LIVE" if args.live else "DRY-RUN"
     section(
-        f"tts-erp analytics_sync API demo · mode={mode} · base={BASE_URL}",
+        f"tts-erp analytics ingest API demo · mode={mode} · base={BASE_URL}",
         textwrap.dedent(
             f"""\
             SELLER_ID     = {SELLER_ID}        (TEST_ prefix → auto-cleaned by
@@ -610,7 +614,7 @@ def main(argv: list[str] | None = None) -> int:
     # Step 2: cursor
     if show_all or "cursor" in args.only:
         section(
-            "Step 2 · GET /v1/analytics/sync/cursor",
+            "Step 2 · GET /v2/analytics/sync/cursor",
             "Discover what days still need collecting for this campaign.",
         )
         if args.live:
@@ -621,7 +625,7 @@ def main(argv: list[str] | None = None) -> int:
     # Step 3: happy-path batch
     if show_all or "happy" in args.only:
         section(
-            "Step 3 · POST /v1/analytics/sync/batches — happy path",
+            "Step 3 · POST /v2/analytics/sync/batches — happy path",
             "Upload one canonical record.  Server validates, recomputes the "
             "idempotency key, inserts if new (returns ``inserted``) or skips "
             "if seen (returns ``duplicate``).",
@@ -634,7 +638,7 @@ def main(argv: list[str] | None = None) -> int:
     # Step 4: bad batch → showcases new structured errors[]
     if show_all or "bad" in args.only:
         section(
-            "Step 4 · POST /v1/analytics/sync/batches — bad record",
+            "Step 4 · POST /v2/analytics/sync/batches — bad record",
             "Three deliberate problems in one batch so you can see how each "
             "failing field shows up in the structured ``errors[]`` array.",
         )
@@ -644,8 +648,8 @@ def main(argv: list[str] | None = None) -> int:
         "where to go next",
         textwrap.dedent(
             """\
-            • analytics_sync/tech-doc/plugin-integration.md  — full protocol spec
-            • analytics_sync/tech-doc/analytics-sync.md     — endpoint reference + curl examples
+• tech-doc/analytics/plugin-integration.md — full protocol spec
+            • tech-doc/analytics/analytics-sync.md   — endpoint reference + curl examples
             • analytics_sync/tech-doc/compatibility.md      — v1 ↔ v2 policy + rollout checklist
             • analytics_sync/tech-doc/openapi.yaml         — machine-readable schema
             • chrome-plugins/ads-data-sync/src/core/analytics-sync-v2.ts  — the production TS client

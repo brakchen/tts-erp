@@ -3,12 +3,12 @@
 Reads TTS_ERP_DB_URL from os.environ (populated from .env at app startup).
 Does NOT mutate the existing public.* schema or the legacy tables.
 """
+
 from __future__ import annotations
 
 import os
 from collections.abc import Iterator
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import create_engine
 from sqlalchemy.dialects.postgresql import TIMESTAMP
@@ -26,6 +26,7 @@ SCHEMAS: tuple[str, ...] = (
     "linkage",
     "reporting",
     "security",
+    "analytics",
 )
 
 
@@ -43,8 +44,8 @@ class Base(DeclarativeBase):
     }
 
 
-_engine: Optional[Engine] = None
-_SessionLocal: Optional[sessionmaker[Session]] = None
+_engine: Engine | None = None
+_SessionLocal: sessionmaker[Session] | None = None
 
 
 def _resolve_db_url() -> str:

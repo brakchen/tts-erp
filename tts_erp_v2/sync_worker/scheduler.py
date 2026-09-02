@@ -161,6 +161,15 @@ JOBS: dict[str, JobSpec] = {
         is_tiktok=False,
         entrypoint="run_profit_daily",
     ),
+    # ── Analytics retention (2026-09-02 — analytics v2 化 D6；替代从未
+    # 安装 cron 的 analytics_sync/retention.sql) ────────────────────────
+    "analytics.retention": JobSpec(
+        job_name="analytics.retention",
+        module_path="tts_erp_v2.jobs.analytics_retention",
+        interval_seconds=86400,  # 1 d — 与原 retention.sql 建议的日级一致
+        is_tiktok=False,
+        entrypoint="run_analytics_retention",
+    ),
 }
 
 
@@ -357,6 +366,7 @@ def _make_executor(
 ) -> Callable[[], None]:
     """Wrap a job's run logic into a no-arg callable APScheduler can fire."""
     if spec.is_tiktok:
+
         def run_tiktok() -> None:
             _run_tiktok_job(spec, session_factory)
 

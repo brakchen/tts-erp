@@ -21,10 +21,10 @@ These tests guard the recursion contract end-to-end. If you add a new
 ``include_router`` to ``tts_erp_v2.app:build_app``, /endpoints must list
 its paths without any further code change.
 """
+
 from __future__ import annotations
 
 import pytest
-
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -64,21 +64,22 @@ def test_endpoints_lists_v2_business_routes(api_client):
 
 
 def test_endpoints_lists_analytics_sync_routes(api_client):
-    """analytics_sync router is mounted under /v1/analytics/sync — must appear.
+    """analytics router is mounted under /v2/analytics/sync — must appear.
 
-    Regression guard for the original bug: /v1/analytics/sync/* lived
-    inside an ``_IncludedRouter`` and was dropped by the original flat
+    Regression guard for the original bug: analytics routes lived
+    inside an ``_IncludedRouter`` and were dropped by the original flat
     walk. This test fails (and the bug is back) if anyone reverts to a
     non-recursive walk without the recursion fix.
+
+    2026-09-02 v2 化：路径从 /v1/analytics/sync/* 迁到 /v2/analytics/sync/*。
     """
     r = api_client.get("/endpoints")
     payload = r.json()
     paths = _path_set(payload)
-    assert "/v1/analytics/sync/cursor" in paths, (
-        f"/v1/analytics/sync/cursor missing from /endpoints; "
-        f"got paths={sorted(paths)}"
+    assert "/v2/analytics/sync/cursor" in paths, (
+        f"/v2/analytics/sync/cursor missing from /endpoints; got paths={sorted(paths)}"
     )
-    assert "/v1/analytics/sync/batches" in paths
+    assert "/v2/analytics/sync/batches" in paths
 
 
 def test_endpoints_lists_path_param_routes(api_client):

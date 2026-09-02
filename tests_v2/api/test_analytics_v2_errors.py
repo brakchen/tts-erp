@@ -1,62 +1,52 @@
-"""Handler-level tests: analytics_sync error observability.
+"""Handler-level tests: /v2/analytics/sync error observability（v2 化移植版）。
 
-Production incident 2026-08-30: Chrome-extension clients got
-``HTTP 400 SCHEMA_INVALID`` on ``POST /v1/analytics/sync/batches`` but
-the audit table (``analytics_audit_log``) only stores the error *code*,
-not the Pydantic field-level message, and the v2 access-log middleware
-only records the request body *size*. Result: ops could not tell which
-field failed validation without asking the client.
+移植自 tests_v2/api/test_analytics_sync_errors.py（/v1 路径 +
+analytics_sync 孤岛包），2026-09-02 随 v2 化改写
+（tech-doc/analytics-v2-migration-plan.md Phase 3）：
 
-These tests pin the contract that every ``_audit_and_error`` rejection
-also writes one sanitized diagnostic line to stderr — field-level
-Pydantic detail, request id, key prefix — WITHOUT echoing the request
-body or any credential material.
+- 路径 /v1/analytics/sync/* → /v2/analytics/sync/*
+- monkeypatch 目标 analytics_sync.app → tts_erp_v2.api.v2.analytics
+- 审计回读 analytics_sync.pg_repositories.connect → db_engine +
+  analytics.ad_audit_log
+- 删除 session 级 autouse ALTER fixture（alembic 0004 单轨拥有 schema）
+
+锁定的契约（生产事故回归点）：
+1. 每次 _audit_and_error 拒绝都向 stderr 写一条消毒诊断行（字段级
+   Pydantic 细节 + request id + key 前缀），不 echo 请求体/凭证。
+2. SCHEMA_INVALID 响应带结构化 errors[]（loc/msg/type 三元组，
+   丢 input/ctx/url）。
+3. errors[] 是 SCHEMA_INVALID 专属 —— MALFORMED_JSON /
+   UNSUPPORTED_PROTOCOL_VERSION 不得带该字段。
+4. 审计行 error_message 与 stderr 是同一份 ≤500 字符消毒载荷。
+
+数据隔离：全部 TEST_ 哨兵；audit 行按 request_id/path 前缀清理
+（写审计走独立连接 commit，逃出测试 savepoint）。
 """
+
 from __future__ import annotations
 
 import json
 
 import pytest
-from psycopg import errors as pg_errors
+from sqlalchemy import text
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
+_BATCHES = "/v2/analytics/sync/batches"
 
-@pytest.fixture(scope="session", autouse=True)
-def _ensure_analytics_audit_error_message_column():
-    """SESSION-SCOPED autouse migration for the 2026-08-31 audit log column.
 
-    The test DB is shared across the v2 suite (sessions come and go, but
-    schema is set up once via ``alembic upgrade head`` + analytics_sync
-    ``schema.sql``). When ``analytics_audit_log.error_message`` lands as
-    part of a forward migration, the production deploy applies it via
-    ``psql < analytics_sync/schema.sql`` which is idempotent
-    (``ALTER TABLE ... ADD COLUMN IF NOT EXISTS``).
-
-    The test suite can't run alembic between every test, so we
-    mirror the production migration here. If the column already
-    exists, the ``ADD COLUMN IF NOT EXISTS`` is a no-op; if it
-    doesn't, this is the only place in the suite that needs the
-    column so we apply it exactly once per session.
-
-    The literal DDL string contains no interpolation — column name and
-    type are baked in, so there is no injection surface; psycopg
-    cursor.execute is the same call shape as ``write_audit``.
-    """
-    from analytics_sync.pg_repositories import connect
-
-    try:
-        with connect() as conn, conn.cursor() as cur:
-            cur.execute(
-                "ALTER TABLE analytics_audit_log "
-                "ADD COLUMN IF NOT EXISTS error_message TEXT"
+@pytest.fixture(autouse=True)
+def _cleanup_audit_rows(db_engine):
+    """清掉本文件写进 analytics.ad_audit_log 的 TEST_ 行。"""
+    yield
+    with db_engine.begin() as conn:
+        # pi-lens-ignore: python-sql-injection
+        conn.execute(
+            text(
+                "DELETE FROM analytics.ad_audit_log "
+                "WHERE request_id LIKE 'TEST_%' OR path LIKE '%TEST_%'"
             )
-            conn.commit()
-    except pg_errors.UndefinedTable:
-        # analytics_audit_log doesn't exist yet — the conftest's
-        # alembic-prereq check would have skipped these tests; let it
-        # bubble up as a skip rather than mask with a silent failure.
-        pytest.skip("analytics_audit_log not provisioned in test DB")
+        )
 
 
 def _valid_record() -> dict:
@@ -81,7 +71,7 @@ def _payload(**record_overrides) -> dict:
     record.update(record_overrides)
     return {
         "protocolVersion": 2,
-        "requestId": "req-test-observability",
+        "requestId": "TEST_req-observability",
         "scope": {"sellerId": "TEST_seller-1", "advertiserId": "TEST_adv-1"},
         "records": [record],
     }
@@ -95,26 +85,28 @@ def test_schema_invalid_logs_field_detail_to_stderr(api_client, readwrite_key, c
     record fields was malformed.
     """
     r = api_client.post(
-        "/v1/analytics/sync/batches",
+        _BATCHES,
         json=_payload(capturedAt="2026-08-30T18:43:00"),  # no timezone → invalid
         headers={
             "Authorization": f"Bearer {readwrite_key}",
             # Correlation id travels in the header (plugin-integration §2):
             # on SCHEMA_INVALID the body never parses, so payload.requestId
             # is unavailable to the handler.
-            "X-Request-Id": "req-test-observability",
+            "X-Request-Id": "TEST_req-observability",
         },
     )
     assert r.status_code == 400, r.text
     assert r.json()["code"] == "SCHEMA_INVALID"
 
     err = capsys.readouterr().err
-    assert "[analytics-sync]" in err, f"expected diagnostic line on stderr, got: {err!r}"
+    assert "[analytics-sync]" in err, (
+        f"expected diagnostic line on stderr, got: {err!r}"
+    )
     assert "SCHEMA_INVALID" in err
     # Field-level detail from the Pydantic message must be present.
     assert "capturedAt" in err
     # Request correlation id for joining against the audit table.
-    assert "req-test-observability" in err
+    assert "TEST_req-observability" in err
 
 
 def test_schema_invalid_stderr_line_does_not_leak_credentials(
@@ -122,7 +114,7 @@ def test_schema_invalid_stderr_line_does_not_leak_credentials(
 ):
     """The diagnostic line must not echo the bearer token or request body."""
     r = api_client.post(
-        "/v1/analytics/sync/batches",
+        _BATCHES,
         json=_payload(capturedAt="2026-08-30T18:43:00"),
         headers={"Authorization": f"Bearer {readwrite_key}"},
     )
@@ -137,7 +129,7 @@ def test_schema_invalid_stderr_line_does_not_leak_credentials(
 def test_malformed_json_logs_to_stderr(api_client, readwrite_key, capsys):
     """MALFORMED_JSON rejections go through the same diagnostic path."""
     r = api_client.post(
-        "/v1/analytics/sync/batches",
+        _BATCHES,
         content=b'{"protocolVersion": 2, "scope": ',  # truncated JSON
         headers={
             "Authorization": f"Bearer {readwrite_key}",
@@ -157,7 +149,7 @@ def test_unsupported_protocol_version_logs_to_stderr(api_client, readwrite_key, 
     payload = _payload()
     payload["protocolVersion"] = 99
     r = api_client.post(
-        "/v1/analytics/sync/batches",
+        _BATCHES,
         content=json.dumps(payload).encode(),
         headers={
             "Authorization": f"Bearer {readwrite_key}",
@@ -174,9 +166,9 @@ def test_unsupported_protocol_version_logs_to_stderr(api_client, readwrite_key, 
 
 def test_oversized_body_logs_to_stderr(api_client, readwrite_key, capsys, monkeypatch):
     """413 PAYLOAD_TOO_LARGE goes through the same diagnostic path."""
-    monkeypatch.setattr("analytics_sync.app.MAX_BODY_BYTES", 64)
+    monkeypatch.setattr("tts_erp_v2.api.v2.analytics.MAX_BODY_BYTES", 64)
     r = api_client.post(
-        "/v1/analytics/sync/batches",
+        _BATCHES,
         content=b'{"protocolVersion": 2, "scope": {}, "records": ["' + b"x" * 64,
         headers={
             "Authorization": f"Bearer {readwrite_key}",
@@ -189,22 +181,19 @@ def test_oversized_body_logs_to_stderr(api_client, readwrite_key, capsys, monkey
     assert "[analytics-sync]" in err
 
 
-# ─── Structured errors[] in response body (2026-08-31 ──────────────────
-# The free-form ``message`` string carries field paths but requires the
-# client to regex-parse them. Pydantic's ``errors()`` returns a
-# structured list of {loc, msg, type, input, ctx, url} — we surface the
-# safe triple (loc/msg/type, drop input/ctx/url) so the Chrome extension
-# can branch on the failing field path without parsing. The audit table
-# also gains an ``error_message`` column so ops can SQL-query historical
-# 400s after stderr rotates. These tests pin both contracts.
+# ─── Structured errors[] in response body ─────────────────────────────
+# Pydantic errors() → 安全三元组（loc/msg/type，丢 input/ctx/url），
+# Chrome extension 据此按字段路径分支，不用解析自由文本。审计表
+# error_message 列让 ops 在 stderr 轮转后仍可 SQL 查历史 400。
 
 
 def test_schema_invalid_response_carries_structured_errors_single_field(
-    api_client, readwrite_key,
+    api_client,
+    readwrite_key,
 ):
     """A single failing field shows up as one structured entry."""
     r = api_client.post(
-        "/v1/analytics/sync/batches",
+        _BATCHES,
         json=_payload(capturedAt="2026-08-30T18:43:00"),  # missing timezone
         headers={"Authorization": f"Bearer {readwrite_key}"},
     )
@@ -223,7 +212,8 @@ def test_schema_invalid_response_carries_structured_errors_single_field(
 
 
 def test_schema_invalid_response_carries_structured_errors_multiple_fields(
-    api_client, readwrite_key,
+    api_client,
+    readwrite_key,
 ):
     """All Pydantic validation failures surface as separate entries in order."""
     payload = _payload()
@@ -236,7 +226,7 @@ def test_schema_invalid_response_carries_structured_errors_multiple_fields(
         {**_valid_record(), "page": 0},
     ]
     r = api_client.post(
-        "/v1/analytics/sync/batches",
+        _BATCHES,
         json=payload,
         headers={"Authorization": f"Bearer {readwrite_key}"},
     )
@@ -254,7 +244,8 @@ def test_schema_invalid_response_carries_structured_errors_multiple_fields(
 
 
 def test_schema_invalid_response_strips_input_and_ctx_from_structured_errors(
-    api_client, readwrite_key,
+    api_client,
+    readwrite_key,
 ):
     """The structured triple must NEVER carry ``input`` or ``ctx`` —
     both can echo the offending field value, and the policy is to keep
@@ -265,7 +256,7 @@ def test_schema_invalid_response_strips_input_and_ctx_from_structured_errors(
     idempotencyKey test, or ``ctx: {min_length: 64}`` for the same.
     """
     r = api_client.post(
-        "/v1/analytics/sync/batches",
+        _BATCHES,
         json=_payload(idempotencyKey="short"),
         headers={"Authorization": f"Bearer {readwrite_key}"},
     )
@@ -277,13 +268,14 @@ def test_schema_invalid_response_strips_input_and_ctx_from_structured_errors(
 
 
 def test_schema_invalid_response_does_not_leak_token_or_body(
-    api_client, readwrite_key,
+    api_client,
+    readwrite_key,
 ):
     """Bearer token, request body fragments, or Pydantic-rendered input
     values must not appear in ``errors[]`` either. Mirrors the existing
     stderr-line test but on the structured side."""
     r = api_client.post(
-        "/v1/analytics/sync/batches",
+        _BATCHES,
         json=_payload(capturedAt="not-a-real-datetime-bearer-abcdef"),
         headers={"Authorization": f"Bearer {readwrite_key}"},
     )
@@ -301,9 +293,12 @@ def test_non_schema_400_paths_omit_errors_field(api_client, readwrite_key):
     JSON contract for those error codes. Pin that the field is absent."""
     # MALFORMED_JSON — truncated body
     r1 = api_client.post(
-        "/v1/analytics/sync/batches",
+        _BATCHES,
         content=b"{",
-        headers={"Authorization": f"Bearer {readwrite_key}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {readwrite_key}",
+            "Content-Type": "application/json",
+        },
     )
     assert r1.status_code == 400
     assert r1.json()["code"] == "MALFORMED_JSON"
@@ -313,7 +308,7 @@ def test_non_schema_400_paths_omit_errors_field(api_client, readwrite_key):
     payload = _payload()
     payload["protocolVersion"] = 99
     r2 = api_client.post(
-        "/v1/analytics/sync/batches",
+        _BATCHES,
         content=json.dumps(payload).encode(),
         headers={"Authorization": f"Bearer {readwrite_key}"},
     )
@@ -323,20 +318,20 @@ def test_non_schema_400_paths_omit_errors_field(api_client, readwrite_key):
 
 
 def test_schema_invalid_persists_error_message_in_audit_log(
-    api_client, readwrite_key,
+    api_client,
+    readwrite_key,
+    db_engine,
 ):
     """The audit row must carry the same sanitized Pydantic message
     that goes to stderr — ops need a queryable second copy after the
     stderr log rotates.
 
-    Reads analytics_audit_log directly (no public introspection
-    endpoint exists) and looks for the matching request_id. Uses
-    ``analytics_sync.pg_repositories.connect`` so it shares the same
-    connection helper the production audit write uses.
+    v2 化后 write_audit 在同步 handler 内同步提交（独立 engine 连接），
+    响应返回时审计行已落库，无需旧版的轮询等待。
     """
-    request_id = "req-test-audit-error-message"
+    request_id = "TEST_req-audit-error-message"
     r = api_client.post(
-        "/v1/analytics/sync/batches",
+        _BATCHES,
         json=_payload(capturedAt="2026-08-30T18:43:00"),
         headers={
             "Authorization": f"Bearer {readwrite_key}",
@@ -345,24 +340,15 @@ def test_schema_invalid_persists_error_message_in_audit_log(
     )
     assert r.status_code == 400
 
-    # The audit insert is fire-and-forget via run_sync — give it a
-    # tick to commit before reading back. (Same race the production
-    # retry path waits for.)
-    import time
-    deadline = time.monotonic() + 2.0
-    row = None
-    while time.monotonic() < deadline:
-        from analytics_sync.pg_repositories import connect
-        with connect() as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT error_code, error_message FROM analytics_audit_log "
-                "WHERE request_id = %s ORDER BY created_at DESC LIMIT 1",
-                (request_id,),
-            )
-            row = cur.fetchone()
-        if row is not None:
-            break
-        time.sleep(0.05)
+    with db_engine.begin() as conn:
+        # pi-lens-ignore: python-sql-injection
+        row = conn.execute(
+            text(
+                "SELECT error_code, error_message FROM analytics.ad_audit_log "
+                "WHERE request_id = :rid ORDER BY created_at DESC LIMIT 1"
+            ),
+            {"rid": request_id},
+        ).fetchone()
 
     assert row is not None, "audit row missing for SCHEMA_INVALID request"
     error_code, error_message = row

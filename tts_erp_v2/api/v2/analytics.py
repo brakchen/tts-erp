@@ -1,72 +1,57 @@
-"""analytics_sync handlers — mounted under tts-erp FastAPI at /v1/analytics/sync.
+"""/v2/analytics/sync/* — Chrome extension (tk-adv-cost-monitor) analytics ingest。
 
-This module provides only handlers, Pydantic models, and pure helpers
-(scope_grants, _key_prefix, _scopes, _request_id_from_headers, etc).
+2026-09-02 v2 化（tech-doc/analytics-v2-migration-plan.md）：
+- 旧 ``analytics_sync/app.py``（挂在 /v1/analytics/sync，裸 psycopg 存储）
+  迁移为本模块；/v1 路径随发布下线（单挂 /v2，无 alias —— 用户拍板）。
+- 存储走 ``tts_erp_v2/analytics/repository.py``（SQLAlchemy，
+  schema = analytics.ad_*）。
+- Auth/限流/访问日志全部继承 v2 中间件栈；``required_role()`` 把
+  ``/v2/analytics/sync`` 前缀分类为 readwrite（middleware/auth.py）。
 
-Mounted exclusively by ``tts_erp_v2.app:build_app()`` via
-``app.include_router(router, prefix="/v1/analytics/sync")``. Auth and
-rate-limiting are inherited from the v2 app's middleware stack:
+协议契约（字节级锁定，见 plan D4）：envelope 形状、幂等键推导、
+错误码矩阵、cursor items echo sellerId/advertiserId、
+``protocolVersion`` 1/2（payload 内版本轴，与路由 /v2 无关）。
 
-- ``tts_erp_v2.middleware.auth.AuthMiddleware`` populates
-  ``request.scope["api_key_hash"]`` and ``request.scope["api_key_scopes"]``
-  before each handler runs.
-- ``tts_erp_v2.middleware.rate_limit.RateLimitMiddleware`` buckets per
-  ``api_key_hash``.
-
-The standalone :9878 service was retired 2026-08-30; ``analytics_sync``
-no longer ships its own FastAPI app, auth middleware, or rate-limit
-middleware. See ``setup/analytics-sync.md`` for the new deployment
-topology (one process — ``tts-erp`` on :9877 — hosts every API).
-
-Per-seller scope check is enforced inside each handler by reading
-``request.scope["api_key_scopes"]``.
+Handler 结构说明：
+- ``get_cursor`` 是同步 def —— v2 惯例（同 commerce/reporting），
+  FastAPI 自动丢线程池。
+- ``post_batches`` 需要在 Pydantic 解析**之前**拿原始 body（413 尺寸闸 +
+  MALFORMED_JSON 与 SCHEMA_INVALID 的区分），原始 body 只能异步读，
+  因此用 async 依赖 ``_raw_body`` 喂给同步 handler —— handler 本体保持
+  同步 + ``Depends(get_session)``，不引入 async session。
 """
 
 from __future__ import annotations
 
-import base64
 import json
 import os
 import sys
+import uuid
 from datetime import date, datetime, timedelta
-from functools import partial
-from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-# Load .env from the repo root BEFORE importing anything that reads env
-# vars at module import time (e.g. tts_erp via tdd.auth). Works both in
-# worktree and main checkout.
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-_env_path = _REPO_ROOT / ".env"
-if _env_path.exists():
-    for _line in _env_path.read_text(encoding="utf-8").splitlines():
-        _line = _line.strip()
-        if not _line or _line.startswith("#") or "=" not in _line:
-            continue
-        _k, _v = _line.split("=", 1)
-        os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, ValidationError, field_validator
+from sqlalchemy.orm import Session
 
-from anyio.to_thread import run_sync  # noqa: E402
-from fastapi import APIRouter, Query, Request  # noqa: E402
-from fastapi.responses import JSONResponse  # noqa: E402
-from pydantic import BaseModel, Field, ValidationError, field_validator  # noqa: E402
-
-from .domain import (  # noqa: E402
+from tts_erp_v2.analytics.domain import (
     DEFAULT_TIMEZONE,
     Record,
     Scope,
     StorageKey,
     compute_idempotency_key,
 )
-from .pg_repositories import (  # noqa: E402
-    PgAnalyticsRepository,
+from tts_erp_v2.analytics.repository import (
     fetch_cursor_page,
     fetch_timezone,
+    upsert_records,
     write_audit,
 )
+from tts_erp_v2.api.deps import get_session
 
-# ─── Config ────────────────────────────────────────────────────────────
+# ─── Config ───────────────────────────────────────────────────────────
 
 PROTOCOL_VERSION = 2
 SUPPORTED_PROTOCOL_VERSIONS = {1, 2}
@@ -75,6 +60,9 @@ DEFAULT_BOOTSTRAP_LOOKBACK_DAYS = 30
 MAX_BATCH_RECORDS = 100
 MAX_BODY_BYTES = 2 * 1024 * 1024  # 2 MB per protocol §5
 MAX_RESPONSE_DATA_BYTES = 256 * 1024  # cap individual response_data JSON
+
+_PATH_CURSOR = "/v2/analytics/sync/cursor"
+_PATH_BATCHES = "/v2/analytics/sync/batches"
 
 
 # ─── Scope-grant helper (also used by tests) ──────────────────────────
@@ -88,8 +76,7 @@ def scope_grants(scopes, *, seller_id, advertiser_id):
     (typos like 'seler:x') fail closed — silently ignoring them would
     make a misspelled scope entry a no-op that looks like it works.
 
-    Mirrors tts-erp/api_keys.py `scopes` semantics (see api_keys CLI
-    `--scopes` flag).
+    Mirrors api_keys.py `scopes` semantics (see api_keys CLI `--scopes`).
     """
     if not scopes or "*" in scopes:
         return True
@@ -105,10 +92,10 @@ def scope_grants(scopes, *, seller_id, advertiser_id):
     return not (advertiser_grants and advertiser_id not in advertiser_grants)
 
 
-# ─── Router (mounted under /v1/analytics/sync by tts-erp) ─────────────
+# ─── Router ───────────────────────────────────────────────────────────
 
 
-router = APIRouter()
+router = APIRouter(prefix="/v2/analytics/sync", tags=["analytics"])
 
 
 # ─── Models ───────────────────────────────────────────────────────────
@@ -153,6 +140,19 @@ class BatchRequest(BaseModel):
     records: list[RecordIn] = Field(min_length=1, max_length=MAX_BATCH_RECORDS)
 
 
+# ─── 依赖：原始 body（post_batches 的 413/JSON 闸需要解析前拿 body）───
+
+
+async def _raw_body(request: Request) -> bytes:
+    """读原始请求体（async 依赖；Starlette 会缓存，handler 可再取）。
+
+    FastAPI 允许同步 endpoint 配 async 依赖：依赖先在 async 上下文解析，
+    随后同步 handler 进线程池 —— 借此绕开「同步 handler 无法 await
+    request.body()」的限制，同时保持 v2 同步 handler + Depends 惯例。
+    """
+    return await request.body()
+
+
 # ─── Cursor endpoint ──────────────────────────────────────────────────
 
 
@@ -165,6 +165,7 @@ def get_cursor(
     campaignId: str | None = Query(default=None, max_length=128),
     cursor: str | None = Query(default=None, max_length=4096),
     pageSize: int = Query(default=50, ge=1, le=100),
+    sess: Session = Depends(get_session),
 ) -> JSONResponse:
     """Return the canonical latest-day state for every (storageKey, campaignId)
     pair known for this scope. Returns timezone + nextRequiredDay per row.
@@ -175,6 +176,7 @@ def get_cursor(
     """
     request_id = _request_id_from_headers(request)
     key_prefix = _key_prefix(request)
+    audit_path = f"{_PATH_CURSOR}?sellerId={sellerId}&advertiserId={advertiserId}"
 
     if not scope_grants(
         tuple(_scopes(request)),
@@ -185,7 +187,7 @@ def get_cursor(
             request_id=request_id,
             endpoint="cursor",
             method="GET",
-            path=f"/v1/analytics/sync/cursor?sellerId={sellerId}&advertiserId={advertiserId}",
+            path=audit_path,
             status=403,
             key_prefix=key_prefix,
             error_code="SCOPE_DENIED",
@@ -198,7 +200,7 @@ def get_cursor(
             retryable=False,
         )
 
-    tz_name = fetch_timezone(sellerId)
+    tz_name = fetch_timezone(sess, sellerId)
     today = _today_in_tz(tz_name)
     bootstrap_days = _safe_int(
         os.environ.get("ANALYTICS_SYNC_BOOTSTRAP_LOOKBACK_DAYS"),
@@ -206,28 +208,26 @@ def get_cursor(
     )
 
     entries = fetch_cursor_page(
+        sess,
         seller_id=sellerId,
         advertiser_id=advertiserId,
         storage_key=storageKey,
         campaign_id=campaignId,
-        timezone_name=tz_name,
         today_in_shop_tz=today,
         bootstrap_lookback_days=bootstrap_days,
     )
 
     page = entries[:pageSize]
-    # W1.8: nextCursor is NOT implemented (fetch_cursor_page returns all
-    # rows; the incoming `cursor` param is ignored). Emitting a cursor the
-    # server can't consume would send clients into an infinite loop
-    # re-fetching page 1 — stay null until real keyset pagination lands
-    # (Wave 3.5). Current unit counts are far below pageSize anyway.
+    # nextCursor 未实现（fetch_cursor_page 返回全量行；入参 cursor 被忽略）。
+    # 发出服务端无法消费的 cursor 会让客户端死循环重拉第 1 页 —— 在真正的
+    # keyset 分页落地前保持 null。当前 unit 数量远低于 pageSize。
     next_cursor = None
 
     write_audit(
         request_id=request_id,
         endpoint="cursor",
         method="GET",
-        path=f"/v1/analytics/sync/cursor?sellerId={sellerId}&advertiserId={advertiserId}",
+        path=audit_path,
         status=200,
         key_prefix=key_prefix,
         records_in=len(page),
@@ -242,10 +242,9 @@ def get_cursor(
                 "timezone": tz_name,
                 "items": [
                     {
-                        # sellerId/advertiserId are echoed per row: the
-                        # Chrome extension's parseCursor strictly matches
-                        # items on the requested scope (2026-08-30 protocol
-                        # alignment — do not drop these fields).
+                        # sellerId/advertiserId 逐行 echo：Chrome extension 的
+                        # parseCursor 严格按请求的 scope 匹配 items
+                        # （2026-08-30 协议对齐 —— 不要删这两个字段）。
                         "sellerId": sellerId,
                         "advertiserId": advertiserId,
                         "storageKey": e.storage_key.value,
@@ -267,44 +266,39 @@ def get_cursor(
 
 
 @router.post("/batches")
-async def post_batches(request: Request) -> JSONResponse:
+def post_batches(
+    request: Request,
+    body_bytes: bytes = Depends(_raw_body),
+    sess: Session = Depends(get_session),
+) -> JSONResponse:
     """Idempotent batch upload with per-record outcomes.
 
     Limits: 100 records max, 2 MB body max. Body size is checked BEFORE
     JSON parsing so a too-large request returns 413 cleanly.
-
-    All sync psycopg calls (write_audit / upsert_records / fetch_timezone)
-    are wrapped in anyio.to_thread.run_sync so they never block the
-    event loop.
     """
     request_id = _request_id_from_headers(request)
     key_prefix = _key_prefix(request)
     method = "POST"
-    path = "/v1/analytics/sync/batches"
+    path = _PATH_BATCHES
 
-    cl = request.headers.get("content-length")
-    if cl is not None:
-        try:
-            if int(cl) > MAX_BODY_BYTES:
-                return await _audit_and_error(
-                    request=request,
-                    request_id=request_id,
-                    status=413,
-                    code="PAYLOAD_TOO_LARGE",
-                    message=f"Content-Length {cl} exceeds maximum {MAX_BODY_BYTES} bytes",
-                    retryable=False,
-                    key_prefix=key_prefix,
-                    error_code="PAYLOAD_TOO_LARGE",
-                    method=method,
-                    path=path,
-                )
-        except ValueError:
-            pass
+    # 垃圾 header（int 解析失败）→ None → 跳过预检，后面的实际 body
+    # 尺寸检查照样兜住超大请求。
+    cl = _parse_content_length(request.headers.get("content-length"))
+    if cl is not None and cl > MAX_BODY_BYTES:
+        return _audit_and_error(
+            request_id=request_id,
+            status=413,
+            code="PAYLOAD_TOO_LARGE",
+            message=f"Content-Length {cl} exceeds maximum {MAX_BODY_BYTES} bytes",
+            retryable=False,
+            key_prefix=key_prefix,
+            error_code="PAYLOAD_TOO_LARGE",
+            method=method,
+            path=path,
+        )
 
-    body_bytes = await request.body()
     if len(body_bytes) > MAX_BODY_BYTES:
-        return await _audit_and_error(
-            request=request,
+        return _audit_and_error(
             request_id=request_id,
             status=413,
             code="PAYLOAD_TOO_LARGE",
@@ -319,8 +313,7 @@ async def post_batches(request: Request) -> JSONResponse:
     try:
         body = json.loads(body_bytes)
     except json.JSONDecodeError as exc:
-        return await _audit_and_error(
-            request=request,
+        return _audit_and_error(
             request_id=request_id,
             status=400,
             code="MALFORMED_JSON",
@@ -335,12 +328,9 @@ async def post_batches(request: Request) -> JSONResponse:
     try:
         payload = BatchRequest.model_validate(body)
     except ValidationError as exc:
-        # Surface the failing field/path/type to the client so they can
-        # diagnose without parsing the free-form Pydantic message. We
-        # sanitize: drop `input` / `ctx` (those can carry record-body
-        # values) and keep only the safe identifier triple.
-        return await _audit_and_error(
-            request=request,
+        # 把失败字段/路径/类型告诉客户端，便于不解自由文本就定位。
+        # 消毒：丢 input/ctx（可能带 record body 值），只留安全标识三元组。
+        return _audit_and_error(
             request_id=request_id,
             status=400,
             code="SCHEMA_INVALID",
@@ -353,13 +343,10 @@ async def post_batches(request: Request) -> JSONResponse:
             structured_errors=_sanitize_pydantic_errors(exc),
         )
     except Exception as exc:
-        # Unexpected: Pydantic schema parsed but something inside the
-        # record-level handler exploded (e.g. a downstream validator
-        # bug). Treat as SCHEMA_INVALID with no field-level detail so
-        # the client gets the same envelope shape; ops get the raw
-        # exception class via stderr.
-        return await _audit_and_error(
-            request=request,
+        # 意外分支：Pydantic schema 过了但 record 级 handler 内部炸了
+        # （比如下游 validator bug）。按 SCHEMA_INVALID 返回同样的
+        # envelope 形状但不带字段级细节；ops 从 stderr 拿异常类名。
+        return _audit_and_error(
             request_id=request_id,
             status=400,
             code="SCHEMA_INVALID",
@@ -369,16 +356,17 @@ async def post_batches(request: Request) -> JSONResponse:
             error_code="SCHEMA_INVALID",
             method=method,
             path=path,
-            structured_errors=[{
-                "loc": [],
-                "msg": type(exc).__name__,
-                "type": "internal_error",
-            }],
+            structured_errors=[
+                {
+                    "loc": [],
+                    "msg": type(exc).__name__,
+                    "type": "internal_error",
+                }
+            ],
         )
 
     if payload.protocolVersion not in SUPPORTED_PROTOCOL_VERSIONS:
-        return await _audit_and_error(
-            request=request,
+        return _audit_and_error(
             request_id=request_id,
             status=400,
             code="UNSUPPORTED_PROTOCOL_VERSION",
@@ -398,20 +386,17 @@ async def post_batches(request: Request) -> JSONResponse:
         seller_id=payload.scope.sellerId,
         advertiser_id=payload.scope.advertiserId,
     ):
-        await run_sync(
-            partial(
-                write_audit,
-                request_id=payload.requestId,
-                endpoint="batches",
-                method=method,
-                path=path,
-                status=403,
-                key_prefix=key_prefix,
-                records_in=len(payload.records),
-                records_ok=0,
-                records_rej=0,
-                error_code="SCOPE_DENIED",
-            )
+        write_audit(
+            request_id=payload.requestId,
+            endpoint="batches",
+            method=method,
+            path=path,
+            status=403,
+            key_prefix=key_prefix,
+            records_in=len(payload.records),
+            records_ok=0,
+            records_rej=0,
+            error_code="SCOPE_DENIED",
         )
         return _error_response(
             status=403,
@@ -425,7 +410,7 @@ async def post_batches(request: Request) -> JSONResponse:
     rejected: list[dict[str, Any]] = []
     valid_records: list[Record] = []
 
-    # Within-batch expectedPageCount must be consistent per daily unit.
+    # batch 内同一 daily unit 的 expectedPageCount 必须一致。
     expected_by_unit: dict[tuple[str, str, str, str, date], int] = {}
 
     for idx, rec_in in enumerate(payload.records):
@@ -554,7 +539,7 @@ async def post_batches(request: Request) -> JSONResponse:
 
     if valid_records:
         try:
-            tz_name = await run_sync(fetch_timezone, payload.scope.sellerId)
+            tz_name = fetch_timezone(sess, payload.scope.sellerId)
             today = _today_in_tz(tz_name)
             bootstrap_days = _safe_int(
                 os.environ.get(
@@ -565,35 +550,30 @@ async def post_batches(request: Request) -> JSONResponse:
             )
             bootstrap_day = _subtract_days(today, bootstrap_days)
 
-            result = await run_sync(
-                partial(
-                    PgAnalyticsRepository().upsert_records,
-                    scope,
-                    valid_records,
-                    request_id=payload.requestId,
-                    today_in_shop_tz=today,
-                    bootstrap_day=bootstrap_day,
-                )
+            result = upsert_records(
+                sess,
+                scope,
+                valid_records,
+                request_id=payload.requestId,
+                today_in_shop_tz=today,
+                bootstrap_day=bootstrap_day,
             )
         except Exception as exc:
             exc_class = type(exc).__name__
             sys.stderr.write(
                 f"[analytics-sync] persistence failure: {exc_class}: {exc}\n"
             )
-            await run_sync(
-                partial(
-                    write_audit,
-                    request_id=payload.requestId,
-                    endpoint="batches",
-                    method=method,
-                    path=path,
-                    status=500,
-                    key_prefix=key_prefix,
-                    records_in=len(payload.records),
-                    records_ok=0,
-                    records_rej=len(rejected),
-                    error_code=f"INTERNAL_ERROR:{exc_class}",
-                )
+            write_audit(
+                request_id=payload.requestId,
+                endpoint="batches",
+                method=method,
+                path=path,
+                status=500,
+                key_prefix=key_prefix,
+                records_in=len(payload.records),
+                records_ok=0,
+                records_rej=len(rejected),
+                error_code=f"INTERNAL_ERROR:{exc_class}",
             )
             return _error_response(
                 status=500,
@@ -615,19 +595,16 @@ async def post_batches(request: Request) -> JSONResponse:
                 }
             )
 
-    await run_sync(
-        partial(
-            write_audit,
-            request_id=payload.requestId,
-            endpoint="batches",
-            method=method,
-            path=path,
-            status=200,
-            key_prefix=key_prefix,
-            records_in=len(payload.records),
-            records_ok=len(accepted),
-            records_rej=len(rejected),
-        )
+    write_audit(
+        request_id=payload.requestId,
+        endpoint="batches",
+        method=method,
+        path=path,
+        status=200,
+        key_prefix=key_prefix,
+        records_in=len(payload.records),
+        records_ok=len(accepted),
+        records_rej=len(rejected),
     )
 
     return JSONResponse(
@@ -668,6 +645,18 @@ def _subtract_days(d: date, n: int) -> date:
     return d - timedelta(days=n)
 
 
+def _parse_content_length(value: str | None) -> int | None:
+    """Content-Length header → int；垃圾值返回 None（调用方跳过预检，
+    由实际 body 尺寸检查兜底）。int() 对 isdigit 为真的部分 Unicode
+    数字（如上标 ²）也会抛 ValueError，必须真 try/except。"""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
 def _safe_int(value: str | None, default: int) -> int:
     """Parse an int from an environment string, returning default on failure."""
     if value is None:
@@ -678,37 +667,23 @@ def _safe_int(value: str | None, default: int) -> int:
         return default
 
 
-def _encode_cursor(page_size: int, total: int) -> str | None:
-    """Opaque base64-encoded cursor. UNUSED since W1.8: nextCursor is
-    always null until real keyset pagination is implemented (Wave 3.5).
-    Kept for the Wave 3.5 implementation to build on."""
-    if total <= page_size:
-        return None
-    payload = json.dumps(
-        {"page_size": page_size, "offset": page_size}, separators=(",", ":")
-    )
-    return base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
-
-
 def _request_id_from_headers(request: Request) -> str:
     rid = request.headers.get("x-request-id")
     if rid:
         return rid[:128]
-    import uuid
-
     return f"req-{uuid.uuid4()}"
 
 
 def _key_prefix(request: Request) -> str | None:
     """Read the api key's 16-char prefix from ASGI scope (set by
-    tts-erp's AuthMiddleware). None if request is unauthenticated."""
+    AuthMiddleware). None if request is unauthenticated."""
     key_hash = request.scope.get("api_key_hash")
     return key_hash[:16] if isinstance(key_hash, str) else None
 
 
 def _scopes(request: Request) -> tuple[str, ...]:
     """Read the api key's scopes tuple from ASGI scope (set by
-    tts-erp's AuthMiddleware). Empty tuple means unrestricted."""
+    AuthMiddleware). Empty tuple means unrestricted."""
     return request.scope.get("api_key_scopes", ())  # type: ignore[no-any-return]
 
 
@@ -732,7 +707,7 @@ def _error_response(
     payload: dict[str, object] = {
         "code": code,
         "message": message,
-        "requestId": request_id or _request_id_from_headers_fallback(),
+        "requestId": request_id or f"req-{uuid.uuid4()}",
         "retryable": retryable,
     }
     if structured_errors:
@@ -743,39 +718,24 @@ def _error_response(
 def _sanitize_pydantic_errors(exc: ValidationError) -> list[dict[str, object]]:
     """Reduce Pydantic's errors() to the safe identifier triple.
 
-    Pydantic's full per-error dict carries:
-      - ``type``     → kept (safe identifier, e.g. ``string_too_short``)
-      - ``loc``      → kept as list of path segments **with their original
-                        Python types** (int for list indices, str for field
-                        names). The client uses these to drill into the
-                        offending record (``loc == ['records', 0,
-                        'capturedAt']`` ⇒ record #0, field capturedAt).
-                        Coercing int → str loses the array-index shape;
-                        joining with ``.`` would also be ambiguous when a
-                        field name happens to contain a dot.
-      - ``msg``      → kept (Pydantic's free-form message — already
-                        sanitized; no body, no token)
-      - ``input``    → DROPPED — can contain the offending record field
-                        value verbatim, which for our batch endpoint is
-                        usually innocuous but the policy is consistent
-                        with the storage-layer redaction (see
-                        ``tts_erp_v2/extension/storage.py::SENSITIVE_*``)
-      - ``ctx``      → DROPPED — same reason (e.g. ``min_length: 64``
-                        leaks the schema constraint which is harmless, but
-                        tighter field-by-field values like ``actual_length``
-                        could leak; we drop the whole ctx to be safe)
-      - ``url``      → DROPPED — internal doc link, no client value
+    - ``type``  → 保留（安全标识，如 ``string_too_short``）
+    - ``loc``   → 保留原始 Python 类型的路径段（int = list 下标，
+                  str = 字段名）。client 据此定位出错记录
+                  （``loc == ['records', 0, 'capturedAt']`` ⇒ 第 0 条
+                  记录的 capturedAt 字段）。int→str 强转会丢数组下标
+                  形状；用 ``.`` 拼接在字段名本身含点时会有歧义。
+    - ``msg``   → 保留（Pydantic 自由文本，已消毒：无 body、无 token）
+    - ``input`` → 丢弃 —— 可能逐字带出错的 record 字段值
+    - ``ctx``   → 丢弃 —— 同理（如 ``actual_length`` 可能泄漏）
+    - ``url``   → 丢弃 —— 内部文档链接，无 client 价值
 
-    Output is JSON-serializable, ordering-stable, and bounded by the
-    Pydantic error count (one entry per failed field/rule).
+    输出可 JSON 序列化、顺序稳定、以 Pydantic 错误数为界。
     """
     sanitized: list[dict[str, object]] = []
     for err in exc.errors():
         loc_segments: list[object] = []
         for segment in err.get("loc", ()):
-            # Pydantic uses int for list indices, str for field names.
-            # Preserve both: a client that needs to pluralize "record 0"
-            # vs "records[0].capturedAt" gets the right primitive.
+            # Pydantic 用 int 表示 list 下标、str 表示字段名。两者都保留。
             if isinstance(segment, (int, str)):
                 loc_segments.append(segment)
             else:
@@ -790,15 +750,8 @@ def _sanitize_pydantic_errors(exc: ValidationError) -> list[dict[str, object]]:
     return sanitized
 
 
-def _request_id_from_headers_fallback() -> str:
-    import uuid
-
-    return f"req-{uuid.uuid4()}"
-
-
-async def _audit_and_error(
+def _audit_and_error(
     *,
-    request: Request,
     request_id: str,
     status: int,
     code: str,
@@ -810,22 +763,14 @@ async def _audit_and_error(
     path: str,
     structured_errors: list[dict[str, object]] | None = None,
 ) -> JSONResponse:
-    """One-line stderr diagnostic so ops can tell WHICH field/rule failed
-    without asking the client — the audit table only stores the error
-    code (2026-08-30 incident: real Chrome-extension traffic returned
-    SCHEMA_INVALID for hours with no field detail anywhere server-side).
-    ``message`` is a Pydantic/JSON-parse description (field names +
-    truncated input values); it never contains headers, tokens, or the
-    request body. Newlines are flattened to keep the line grep-friendly.
+    """一行 stderr 诊断，让 ops 不问客户端就知道是哪个字段/规则挂了
+    （2026-08-30 事故：真实流量 SCHEMA_INVALID 数小时，服务端无任何
+    字段级细节）。``message`` 是 Pydantic/JSON 解析描述（字段名 +
+    截断输入值），绝不含 headers/token/请求体。换行压平，方便 grep。
 
-    ``structured_errors`` (added 2026-08-31) is the safe identifier triple
-    from Pydantic (loc/msg/type, ``input``/``ctx``/``url`` dropped — see
-    ``_sanitize_pydantic_errors``). It rides on the response body as
-    ``errors[]`` so the Chrome extension can branch on the failing field
-    path without regex-parsing the free-form message, AND is persisted
-    into ``analytics_audit_log.error_message`` (same 500-char sanitized
-    payload as stderr) so ops can ``SELECT ... WHERE error_message LIKE
-    '%capturedAt%'`` after the log rotates.
+    ``structured_errors`` 随响应体 ``errors[]`` 下发，并写入
+    ``analytics.ad_audit_log.error_message``（与 stderr 同一份 ≤500 字符
+    消毒载荷），ops 可在日志轮转后按字段名查历史 400。
     """
     safe_message = " ".join(str(message).split())[:500]
     sys.stderr.write(
@@ -833,18 +778,15 @@ async def _audit_and_error(
         f"request_id={request_id} key_prefix={key_prefix or '-'} "
         f"method={method} path={path} message={safe_message}\n"
     )
-    await run_sync(
-        partial(
-            write_audit,
-            request_id=request_id,
-            endpoint="batches",
-            method=method,
-            path=path,
-            status=status,
-            key_prefix=key_prefix,
-            error_code=error_code,
-            error_message=safe_message,
-        )
+    write_audit(
+        request_id=request_id,
+        endpoint="batches",
+        method=method,
+        path=path,
+        status=status,
+        key_prefix=key_prefix,
+        error_code=error_code,
+        error_message=safe_message,
     )
     return _error_response(
         status=status,

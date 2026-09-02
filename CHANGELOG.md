@@ -1,5 +1,54 @@
 # tts-erp CHANGELOG
 
+## 2026-09-02 (feature) — Analytics ingest v2 化 + /v2 路径硬切
+
+设计文档：`tech-doc/analytics-v2-migration-plan.md`（4 个决策）。迁移实战见
+`tech-doc/analytics/`（原 `analytics_sync/tech-doc/` 整包迁入）。
+
+### Storage / schema
+
+- 新 schema：`analytics`（原 `public.analytics_*` 6 表整包 `SET SCHEMA` + `RENAME` → `ad_*`，零拷贝）；
+  alembic migration `0004_analytics_ad_schema.py`（dual-path：老库迁移 / 全新建表）。
+- 新 SQLAlchemy 模型：`tts_erp_v2/db/models/analytics.py`（6 个表映射 `ad_records` / `ad_daily_pages` /
+  `ad_daily_completeness` / `ad_cursors` / `ad_shop_timezones` / `ad_audit_log`）。
+- 新 SQLAlchemy repository：`tts_erp_v2/analytics/repository.py`（语义与原 `analytics_sync/pg_repositories.py` 完全一致；
+  `FOR UPDATE` → `with_for_update()`，`ON CONFLICT DO NOTHING` → `pg_insert().on_conflict_do_nothing()`）。
+- 新 sync-worker daily job `analytics.retention`（`tts_erp_v2/jobs/analytics_retention.py`）：
+  删 `analytics.ad_records` `received_at < 90d` + `analytics.ad_audit_log` `created_at < 30d`（env 可调）。
+- `tts_erp_v2/db/base.py::SCHEMAS` += `"analytics"`。
+
+### API
+
+- 新路由：`tts_erp_v2/api/v2/analytics.py`（`APIRouter(prefix="/v2/analytics/sync")`），
+  handler `get_cursor` / `post_batches`；协议 envelope 与响应形态与 v1 byte-equivalent。
+- `tts_erp_v2/app.py`：用新 `analytics.router` 替换原 `analytics_sync_router` 挂载。
+- `tts_erp_v2/middleware/auth.py`：路径分类 `/v1/analytics/sync/*` → `/v2/analytics/sync/*`（readwrite）。
+- **硬切**：无 `/v1` 别名（单挂载决策）；`/v1/analytics/sync/*` 同 release 下线为 404。
+  Chrome 扩展必须同窗口发布只改 path 后缀的更新，否则 404。
+
+### Tests
+
+- 新 `tests_v2/api/test_analytics_v2_contract.py`（11 契约测试：auth 矩阵 401/403/200、
+  `/v1` 404、`sellerId/advertiserId` 回显、inserted/duplicate/mismatch 三态）。
+- 新 `tests_v2/api/test_analytics_v2_errors.py`（从 `test_analytics_sync_errors.py` 移植并改 /v2）；
+  删 autouse `ALTER TABLE` fixture（alembic 单轨接管 schema）。
+- 删 `tests_v2/api/test_analytics_sync_mount.py` + `tests_v2/api/test_analytics_sync_errors.py`。
+- `tests_v2/api/test_endpoints_index.py` + `scripts/demo_analytics_sync_client.py` 路径改 /v2。
+
+### 拆除
+
+- 删 `analytics_sync/` 包（README / app.py / domain.py / pg_repositories.py / schema.sql / migration_v2.sql / retention.sql）。
+- `scripts/demo_analytics_sync_client.py` 路径引用：`analytics_sync/tech-doc/...` → `tech-doc/analytics/...`。
+- `api_keys.py --scopes` help 文本：「analytics_sync per-seller restriction」 → 「analytics ingest per-seller restriction」。
+
+### Docs
+
+- `AGENTS.md` §3 端点表加 `/v2/analytics/sync/{cursor,batches}` 行 + §3「已拆除」加 /v1 404 条 + §9.5 更新 + §6 文件表加 `tts_erp_v2/analytics/` 行 + `tech-doc/analytics/` 引用。
+- `tech-doc/external-api.md` §3 analytics 节全段 /v2 化（mount/路径/env var/curl/稳定性矩阵）。
+- `setup/analytics-sync.md` v0.4.0 → v0.5.0 重写头部 + 状态表 + 文件布局 + 表清单 + 端点列表。
+- `tech-doc/analytics/`（原 `analytics_sync/tech-doc/`）5 文件 `/v1` → `/v2`、表名 `analytics_*` → `analytics.ad_*`、
+` 层架构引用更新、`cron` retention → `sync-worker job`。
+
 ## 2026-08-31 (feature) — Procurement console redesign + SPU image storage（branch `feature/procurement-ui`）
 
 设计文档：`tech-doc/procurement-ui-redesign.md`（design tokens + API contracts）。

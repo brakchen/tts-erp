@@ -30,6 +30,56 @@
 
 SELECT pg_catalog.set_config('search_path', '', false);
 
+-- Name: after_sales; Type: SCHEMA; Schema: -; Owner: -
+
+CREATE SCHEMA after_sales;
+
+
+-- Name: analytics; Type: SCHEMA; Schema: -; Owner: -
+
+CREATE SCHEMA analytics;
+
+
+-- Name: commerce; Type: SCHEMA; Schema: -; Owner: -
+
+CREATE SCHEMA commerce;
+
+
+-- Name: finance; Type: SCHEMA; Schema: -; Owner: -
+
+CREATE SCHEMA finance;
+
+
+-- Name: fulfillment; Type: SCHEMA; Schema: -; Owner: -
+
+CREATE SCHEMA fulfillment;
+
+
+-- Name: integration; Type: SCHEMA; Schema: -; Owner: -
+
+CREATE SCHEMA integration;
+
+
+-- Name: linkage; Type: SCHEMA; Schema: -; Owner: -
+
+CREATE SCHEMA linkage;
+
+
+-- Name: procurement; Type: SCHEMA; Schema: -; Owner: -
+
+CREATE SCHEMA procurement;
+
+
+-- Name: reporting; Type: SCHEMA; Schema: -; Owner: -
+
+CREATE SCHEMA reporting;
+
+
+-- Name: security; Type: SCHEMA; Schema: -; Owner: -
+
+CREATE SCHEMA security;
+
+
 -- Name: cleanup_sync_log(integer); Type: FUNCTION; Schema: public; Owner: -
 
 CREATE OR REPLACE FUNCTION public.cleanup_sync_log(retention_days integer DEFAULT 60) RETURNS TABLE(deleted_count bigint, cutoff_timestamp timestamp with time zone)
@@ -76,104 +126,140 @@ $$;
 
 
 
--- Name: analytics_audit_log; Type: TABLE; Schema: public; Owner: -
+-- Name: case_lines; Type: TABLE; Schema: after_sales; Owner: -
 
-CREATE TABLE IF NOT EXISTS public.analytics_audit_log (
+CREATE TABLE IF NOT EXISTS after_sales.case_lines (
     id bigint NOT NULL,
+    case_id bigint NOT NULL,
+    sales_order_line_id bigint NOT NULL,
+    external_case_line_id text,
+    quantity numeric(20,4),
+    refund_amount numeric(20,4),
+    currency text,
+    should_replenish_stock boolean
+);
+
+
+
+ALTER TABLE after_sales.case_lines ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME after_sales.case_lines_id_seq
+);
+
+
+-- Name: cases; Type: TABLE; Schema: after_sales; Owner: -
+
+CREATE TABLE IF NOT EXISTS after_sales.cases (
+    id bigint NOT NULL,
+    channel_account_id bigint NOT NULL,
+    sales_order_id bigint NOT NULL,
+    external_case_id text NOT NULL,
+    case_type text NOT NULL,
+    status text,
+    reason_code text,
+    reason_text text,
+    created_at_source timestamp with time zone,
+    updated_at_source timestamp with time zone,
+    raw_record_id bigint,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    refund_amount numeric(20,4),
+    currency text
+);
+
+
+
+ALTER TABLE after_sales.cases ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME after_sales.cases_id_seq
+);
+
+
+-- Name: ad_audit_log; Type: TABLE; Schema: analytics; Owner: -
+
+CREATE TABLE IF NOT EXISTS analytics.ad_audit_log (
+    id bigint CONSTRAINT analytics_audit_log_id_not_null NOT NULL,
     request_id text,
-    endpoint text NOT NULL,
-    method text NOT NULL,
-    path text NOT NULL,
-    status integer NOT NULL,
+    endpoint text CONSTRAINT analytics_audit_log_endpoint_not_null NOT NULL,
+    method text CONSTRAINT analytics_audit_log_method_not_null NOT NULL,
+    path text CONSTRAINT analytics_audit_log_path_not_null NOT NULL,
+    status integer CONSTRAINT analytics_audit_log_status_not_null NOT NULL,
     key_prefix text,
     records_in integer,
     records_ok integer,
     records_rej integer,
     error_code text,
-    error_message text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    created_at timestamp with time zone DEFAULT now() CONSTRAINT analytics_audit_log_created_at_not_null NOT NULL,
+    error_message text
 );
 
--- 2026-08-31: error_message column backfill for existing deploys.
-ALTER TABLE public.analytics_audit_log
-    ADD COLUMN IF NOT EXISTS error_message text;
 
+-- Name: ad_cursors; Type: TABLE; Schema: analytics; Owner: -
 
-
-
-
-
-
-
--- Name: analytics_cursors; Type: TABLE; Schema: public; Owner: -
-
-CREATE TABLE IF NOT EXISTS public.analytics_cursors (
-    seller_id text NOT NULL,
-    advertiser_id text NOT NULL,
-    storage_key text NOT NULL,
-    campaign_id text NOT NULL,
+CREATE TABLE IF NOT EXISTS analytics.ad_cursors (
+    seller_id text CONSTRAINT analytics_cursors_seller_id_not_null NOT NULL,
+    advertiser_id text CONSTRAINT analytics_cursors_advertiser_id_not_null NOT NULL,
+    storage_key text CONSTRAINT analytics_cursors_storage_key_not_null NOT NULL,
+    campaign_id text CONSTRAINT analytics_cursors_campaign_id_not_null NOT NULL,
     latest_completed_day date,
-    last_updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_updated_at timestamp with time zone DEFAULT now() CONSTRAINT analytics_cursors_last_updated_at_not_null NOT NULL,
     request_id text,
     first_seen_day date,
     CONSTRAINT ck_analytics_cursors_storage CHECK ((storage_key = ANY (ARRAY['productAnalyses'::text, 'sessionAnalyses'::text, 'campaignChangeLogs'::text])))
 );
 
 
--- Name: analytics_daily_completeness; Type: TABLE; Schema: public; Owner: -
+-- Name: ad_daily_completeness; Type: TABLE; Schema: analytics; Owner: -
 
-CREATE TABLE IF NOT EXISTS public.analytics_daily_completeness (
-    seller_id text NOT NULL,
-    advertiser_id text NOT NULL,
-    storage_key text NOT NULL,
-    campaign_id text NOT NULL,
-    day date NOT NULL,
-    expected_page_count integer NOT NULL,
-    is_complete boolean DEFAULT false NOT NULL,
+CREATE TABLE IF NOT EXISTS analytics.ad_daily_completeness (
+    seller_id text CONSTRAINT analytics_daily_completeness_seller_id_not_null NOT NULL,
+    advertiser_id text CONSTRAINT analytics_daily_completeness_advertiser_id_not_null NOT NULL,
+    storage_key text CONSTRAINT analytics_daily_completeness_storage_key_not_null NOT NULL,
+    campaign_id text CONSTRAINT analytics_daily_completeness_campaign_id_not_null NOT NULL,
+    day date CONSTRAINT analytics_daily_completeness_day_not_null NOT NULL,
+    expected_page_count integer CONSTRAINT analytics_daily_completeness_expected_page_count_not_null NOT NULL,
+    is_complete boolean DEFAULT false CONSTRAINT analytics_daily_completeness_is_complete_not_null NOT NULL,
     completed_at timestamp with time zone,
-    last_recomputed_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_recomputed_at timestamp with time zone DEFAULT now() CONSTRAINT analytics_daily_completeness_last_recomputed_at_not_null NOT NULL,
     CONSTRAINT ck_analytics_daily_completeness_expected CHECK ((expected_page_count > 0)),
     CONSTRAINT ck_analytics_daily_completeness_storage CHECK ((storage_key = ANY (ARRAY['productAnalyses'::text, 'sessionAnalyses'::text, 'campaignChangeLogs'::text])))
 );
 
 
--- Name: analytics_daily_pages; Type: TABLE; Schema: public; Owner: -
+-- Name: ad_daily_pages; Type: TABLE; Schema: analytics; Owner: -
 
-CREATE TABLE IF NOT EXISTS public.analytics_daily_pages (
-    seller_id text NOT NULL,
-    advertiser_id text NOT NULL,
-    storage_key text NOT NULL,
-    campaign_id text NOT NULL,
-    day date NOT NULL,
-    page integer NOT NULL,
-    inserted_at timestamp with time zone DEFAULT now() NOT NULL,
+CREATE TABLE IF NOT EXISTS analytics.ad_daily_pages (
+    seller_id text CONSTRAINT analytics_daily_pages_seller_id_not_null NOT NULL,
+    advertiser_id text CONSTRAINT analytics_daily_pages_advertiser_id_not_null NOT NULL,
+    storage_key text CONSTRAINT analytics_daily_pages_storage_key_not_null NOT NULL,
+    campaign_id text CONSTRAINT analytics_daily_pages_campaign_id_not_null NOT NULL,
+    day date CONSTRAINT analytics_daily_pages_day_not_null NOT NULL,
+    page integer CONSTRAINT analytics_daily_pages_page_not_null NOT NULL,
+    inserted_at timestamp with time zone DEFAULT now() CONSTRAINT analytics_daily_pages_inserted_at_not_null NOT NULL,
     CONSTRAINT ck_analytics_daily_pages_page CHECK ((page > 0)),
     CONSTRAINT ck_analytics_daily_pages_storage CHECK ((storage_key = ANY (ARRAY['productAnalyses'::text, 'sessionAnalyses'::text, 'campaignChangeLogs'::text])))
 );
 
 
--- Name: analytics_records; Type: TABLE; Schema: public; Owner: -
+-- Name: ad_records; Type: TABLE; Schema: analytics; Owner: -
 
-CREATE TABLE IF NOT EXISTS public.analytics_records (
-    id bigint NOT NULL,
-    idempotency_key text NOT NULL,
+CREATE TABLE IF NOT EXISTS analytics.ad_records (
+    id bigint CONSTRAINT analytics_records_id_not_null NOT NULL,
+    idempotency_key text CONSTRAINT analytics_records_idempotency_key_not_null NOT NULL,
     source_record_id text,
-    seller_id text NOT NULL,
-    advertiser_id text NOT NULL,
-    storage_key text NOT NULL,
-    campaign_id text NOT NULL,
-    day date NOT NULL,
-    page integer NOT NULL,
+    seller_id text CONSTRAINT analytics_records_seller_id_not_null NOT NULL,
+    advertiser_id text CONSTRAINT analytics_records_advertiser_id_not_null NOT NULL,
+    storage_key text CONSTRAINT analytics_records_storage_key_not_null NOT NULL,
+    campaign_id text CONSTRAINT analytics_records_campaign_id_not_null NOT NULL,
+    day date CONSTRAINT analytics_records_day_not_null NOT NULL,
+    page integer CONSTRAINT analytics_records_page_not_null NOT NULL,
     shop_name text,
-    endpoint text NOT NULL,
-    method text NOT NULL,
+    endpoint text CONSTRAINT analytics_records_endpoint_not_null NOT NULL,
+    method text CONSTRAINT analytics_records_method_not_null NOT NULL,
     request_body jsonb,
-    response_data jsonb NOT NULL,
-    source text NOT NULL,
-    captured_at timestamp with time zone NOT NULL,
-    schema_version integer DEFAULT 1 NOT NULL,
-    protocol_version integer DEFAULT 1 NOT NULL,
-    received_at timestamp with time zone DEFAULT now() NOT NULL,
+    response_data jsonb CONSTRAINT analytics_records_response_data_not_null NOT NULL,
+    source text CONSTRAINT analytics_records_source_not_null NOT NULL,
+    captured_at timestamp with time zone CONSTRAINT analytics_records_captured_at_not_null NOT NULL,
+    schema_version integer DEFAULT 1 CONSTRAINT analytics_records_schema_version_not_null NOT NULL,
+    protocol_version integer DEFAULT 1 CONSTRAINT analytics_records_protocol_version_not_null NOT NULL,
+    received_at timestamp with time zone DEFAULT now() CONSTRAINT analytics_records_received_at_not_null NOT NULL,
     request_id text,
     expected_page_count integer,
     CONSTRAINT ck_analytics_records_page CHECK ((page > 0)),
@@ -183,19 +269,705 @@ CREATE TABLE IF NOT EXISTS public.analytics_records (
 );
 
 
+-- Name: ad_shop_timezones; Type: TABLE; Schema: analytics; Owner: -
+
+CREATE TABLE IF NOT EXISTS analytics.ad_shop_timezones (
+    seller_id text CONSTRAINT analytics_shop_timezones_seller_id_not_null NOT NULL,
+    advertiser_id text CONSTRAINT analytics_shop_timezones_advertiser_id_not_null NOT NULL,
+    timezone text DEFAULT 'Asia/Shanghai'::text CONSTRAINT analytics_shop_timezones_timezone_not_null NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() CONSTRAINT analytics_shop_timezones_updated_at_not_null NOT NULL
+);
 
 
 
 
 
 
--- Name: analytics_shop_timezones; Type: TABLE; Schema: public; Owner: -
 
-CREATE TABLE IF NOT EXISTS public.analytics_shop_timezones (
-    seller_id text NOT NULL,
-    advertiser_id text NOT NULL,
-    timezone text DEFAULT 'Asia/Shanghai'::text NOT NULL,
+
+
+
+
+
+
+
+-- Name: channel_accounts; Type: TABLE; Schema: commerce; Owner: -
+
+CREATE TABLE IF NOT EXISTS commerce.channel_accounts (
+    id bigint NOT NULL,
+    platform text NOT NULL,
+    external_account_id text NOT NULL,
+    account_name text,
+    region text,
+    seller_type text,
+    status text,
+    credential_id bigint,
+    source_updated_at timestamp with time zone,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE commerce.channel_accounts ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME commerce.channel_accounts_id_seq
+);
+
+
+-- Name: channel_product_variants; Type: TABLE; Schema: commerce; Owner: -
+
+CREATE TABLE IF NOT EXISTS commerce.channel_product_variants (
+    id bigint NOT NULL,
+    channel_product_id bigint NOT NULL,
+    external_variant_id text NOT NULL,
+    seller_sku text,
+    variant_name text,
+    attributes jsonb,
+    image_url text,
+    status text,
+    source_updated_at timestamp with time zone,
+    raw_record_id bigint,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE commerce.channel_product_variants ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME commerce.channel_product_variants_id_seq
+);
+
+
+-- Name: channel_products; Type: TABLE; Schema: commerce; Owner: -
+
+CREATE TABLE IF NOT EXISTS commerce.channel_products (
+    id bigint NOT NULL,
+    channel_account_id bigint NOT NULL,
+    external_product_id text NOT NULL,
+    title text,
+    category_id text,
+    status text,
+    main_image_url text,
+    source_created_at timestamp with time zone,
+    source_updated_at timestamp with time zone,
+    raw_record_id bigint,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE commerce.channel_products ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME commerce.channel_products_id_seq
+);
+
+
+-- Name: sales_order_lines; Type: TABLE; Schema: commerce; Owner: -
+
+CREATE TABLE IF NOT EXISTS commerce.sales_order_lines (
+    id bigint NOT NULL,
+    sales_order_id bigint NOT NULL,
+    external_line_id text NOT NULL,
+    channel_product_id bigint,
+    channel_product_variant_id bigint,
+    external_product_id_snapshot text,
+    external_variant_id_snapshot text,
+    product_name_snapshot text,
+    variant_name_snapshot text,
+    image_url_snapshot text,
+    quantity numeric(20,4),
+    unit_price numeric(20,4),
+    currency text,
+    line_status text,
+    raw_record_id bigint,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE commerce.sales_order_lines ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME commerce.sales_order_lines_id_seq
+);
+
+
+-- Name: sales_orders; Type: TABLE; Schema: commerce; Owner: -
+
+CREATE TABLE IF NOT EXISTS commerce.sales_orders (
+    id bigint NOT NULL,
+    channel_account_id bigint NOT NULL,
+    external_order_id text NOT NULL,
+    status text,
+    currency text,
+    payment_amount numeric(20,4),
+    total_amount numeric(20,4),
+    fulfillment_type text,
+    source_created_at timestamp with time zone,
+    source_updated_at timestamp with time zone,
+    paid_at timestamp with time zone,
+    shipped_at timestamp with time zone,
+    delivered_at timestamp with time zone,
+    cancelled_at timestamp with time zone,
+    raw_record_id bigint,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE commerce.sales_orders ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME commerce.sales_orders_id_seq
+);
+
+
+-- Name: payouts; Type: TABLE; Schema: finance; Owner: -
+
+CREATE TABLE IF NOT EXISTS finance.payouts (
+    id bigint NOT NULL,
+    channel_account_id bigint NOT NULL,
+    external_payout_id text NOT NULL,
+    status text,
+    currency text,
+    amount numeric(20,4),
+    source_created_at timestamp with time zone,
+    source_updated_at timestamp with time zone,
+    raw_record_id bigint,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE finance.payouts ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME finance.payouts_id_seq
+);
+
+
+-- Name: settlement_components; Type: TABLE; Schema: finance; Owner: -
+
+CREATE TABLE IF NOT EXISTS finance.settlement_components (
+    id bigint NOT NULL,
+    transaction_id bigint NOT NULL,
+    component_code text NOT NULL,
+    amount numeric(20,4) NOT NULL,
+    currency text NOT NULL,
+    source_order integer
+);
+
+
+
+ALTER TABLE finance.settlement_components ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME finance.settlement_components_id_seq
+);
+
+
+-- Name: settlement_statements; Type: TABLE; Schema: finance; Owner: -
+
+CREATE TABLE IF NOT EXISTS finance.settlement_statements (
+    id bigint NOT NULL,
+    payout_id bigint NOT NULL,
+    external_statement_id text NOT NULL,
+    statement_time timestamp with time zone,
+    period_start date,
+    period_end date,
+    currency text,
+    raw_record_id bigint,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE finance.settlement_statements ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME finance.settlement_statements_id_seq
+);
+
+
+-- Name: settlement_transactions; Type: TABLE; Schema: finance; Owner: -
+
+CREATE TABLE IF NOT EXISTS finance.settlement_transactions (
+    id bigint NOT NULL,
+    settlement_statement_id bigint NOT NULL,
+    external_transaction_id text NOT NULL,
+    sales_order_id bigint,
+    sales_order_line_id bigint,
+    after_sales_case_id bigint,
+    transaction_time timestamp with time zone,
+    raw_record_id bigint,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE finance.settlement_transactions ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME finance.settlement_transactions_id_seq
+);
+
+
+-- Name: shipment_lines; Type: TABLE; Schema: fulfillment; Owner: -
+
+CREATE TABLE IF NOT EXISTS fulfillment.shipment_lines (
+    shipment_id bigint NOT NULL,
+    sales_order_line_id bigint NOT NULL,
+    quantity numeric(20,4)
+);
+
+
+-- Name: shipments; Type: TABLE; Schema: fulfillment; Owner: -
+
+CREATE TABLE IF NOT EXISTS fulfillment.shipments (
+    id bigint NOT NULL,
+    sales_order_id bigint NOT NULL,
+    external_package_id text NOT NULL,
+    tracking_number text,
+    provider_id text,
+    provider_name text,
+    status text,
+    shipped_at timestamp with time zone,
+    delivered_at timestamp with time zone,
+    raw_record_id bigint,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE fulfillment.shipments ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME fulfillment.shipments_id_seq
+);
+
+
+-- Name: tracking_events; Type: TABLE; Schema: fulfillment; Owner: -
+
+CREATE TABLE IF NOT EXISTS fulfillment.tracking_events (
+    id bigint NOT NULL,
+    shipment_id bigint NOT NULL,
+    external_event_key text NOT NULL,
+    action_code integer,
+    event_at timestamp with time zone,
+    description text,
+    location text,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE fulfillment.tracking_events ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME fulfillment.tracking_events_id_seq
+);
+
+
+-- Name: credentials; Type: TABLE; Schema: integration; Owner: -
+
+CREATE TABLE IF NOT EXISTS integration.credentials (
+    id bigint NOT NULL,
+    provider text NOT NULL,
+    external_account_id text NOT NULL,
+    account_label text,
+    ciphertext bytea NOT NULL,
+    expires_at timestamp with time zone,
+    granted_scopes jsonb,
+    company_secret_ciphertext bytea,
+    extra jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE integration.credentials ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME integration.credentials_id_seq
+);
+
+
+-- Name: raw_records; Type: TABLE; Schema: integration; Owner: -
+
+CREATE TABLE IF NOT EXISTS integration.raw_records (
+    id bigint NOT NULL,
+    credential_id bigint,
+    endpoint text NOT NULL,
+    external_id text,
+    captured_at timestamp with time zone DEFAULT now() NOT NULL,
+    payload jsonb NOT NULL,
+    payload_hash character varying(64),
+    synced_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE integration.raw_records ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME integration.raw_records_id_seq
+);
+
+
+-- Name: sync_cursors; Type: TABLE; Schema: integration; Owner: -
+
+CREATE TABLE IF NOT EXISTS integration.sync_cursors (
+    id bigint NOT NULL,
+    job_name text NOT NULL,
+    scope text NOT NULL,
+    cursor_value text,
+    cursor_epoch_ms bigint,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE integration.sync_cursors ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME integration.sync_cursors_id_seq
+);
+
+
+-- Name: sync_issues; Type: TABLE; Schema: integration; Owner: -
+
+CREATE TABLE IF NOT EXISTS integration.sync_issues (
+    id bigint NOT NULL,
+    job_name text NOT NULL,
+    issue_type text NOT NULL,
+    external_id text,
+    details jsonb,
+    detected_at timestamp with time zone DEFAULT now() NOT NULL,
+    resolved_at timestamp with time zone
+);
+
+
+
+ALTER TABLE integration.sync_issues ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME integration.sync_issues_id_seq
+);
+
+
+-- Name: sync_jobs; Type: TABLE; Schema: integration; Owner: -
+
+CREATE TABLE IF NOT EXISTS integration.sync_jobs (
+    id bigint NOT NULL,
+    job_name text NOT NULL,
+    credential_id bigint,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    finished_at timestamp with time zone,
+    status text DEFAULT 'running'::text NOT NULL,
+    rows_total integer DEFAULT 0 NOT NULL,
+    rows_inserted integer DEFAULT 0 NOT NULL,
+    rows_updated integer DEFAULT 0 NOT NULL,
+    rows_failed integer DEFAULT 0 NOT NULL,
+    error_message text,
+    extra jsonb
+);
+
+
+
+ALTER TABLE integration.sync_jobs ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME integration.sync_jobs_id_seq
+);
+
+
+-- Name: account_links; Type: TABLE; Schema: linkage; Owner: -
+
+CREATE TABLE IF NOT EXISTS linkage.account_links (
+    id bigint NOT NULL,
+    procurement_account_id bigint NOT NULL,
+    channel_account_id bigint NOT NULL,
+    external_relation_id text,
+    status text,
+    valid_from timestamp with time zone DEFAULT now() NOT NULL,
+    valid_to timestamp with time zone,
+    source_updated_at timestamp with time zone,
+    raw_record_id bigint
+);
+
+
+
+ALTER TABLE linkage.account_links ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME linkage.account_links_id_seq
+);
+
+
+-- Name: link_overrides; Type: TABLE; Schema: linkage; Owner: -
+
+CREATE TABLE IF NOT EXISTS linkage.link_overrides (
+    id bigint NOT NULL,
+    procurement_product_id bigint NOT NULL,
+    channel_product_id bigint NOT NULL,
+    decision text NOT NULL,
+    reason text,
+    valid_from timestamp with time zone DEFAULT now() NOT NULL,
+    valid_to timestamp with time zone,
+    created_by text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: product_links; Type: TABLE; Schema: linkage; Owner: -
+
+CREATE TABLE IF NOT EXISTS linkage.product_links (
+    id bigint NOT NULL,
+    procurement_product_id bigint NOT NULL,
+    channel_product_id bigint NOT NULL,
+    external_relation_id text,
+    relation_type text NOT NULL,
+    status text,
+    is_primary boolean,
+    valid_from timestamp with time zone DEFAULT now() NOT NULL,
+    valid_to timestamp with time zone,
+    source_updated_at timestamp with time zone,
+    raw_record_id bigint,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: procurement_products; Type: TABLE; Schema: procurement; Owner: -
+
+CREATE TABLE IF NOT EXISTS procurement.procurement_products (
+    id bigint NOT NULL,
+    procurement_account_id bigint NOT NULL,
+    external_product_id text NOT NULL,
+    product_type text,
+    title text,
+    source_platform text,
+    source_item_id text,
+    source_item_url text,
+    status text,
+    raw_record_id bigint,
+    source_updated_at timestamp with time zone,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: effective_product_links; Type: VIEW; Schema: linkage; Owner: -
+
+CREATE VIEW linkage.effective_product_links AS
+ SELECT cp.id AS channel_product_id,
+    COALESCE(lo.procurement_product_id, pl.procurement_product_id) AS procurement_product_id,
+    COALESCE(lo.decision, pl.relation_type) AS effective_relation_type,
+    COALESCE(lo.id, pl.id) AS source_link_id,
+        CASE
+            WHEN (lo.id IS NOT NULL) THEN 'OPERATOR_OVERRIDE'::text
+            ELSE 'MIAOSHOU_PUBLISHED_TO_TIKTOK'::text
+        END AS source_kind,
+    COALESCE(lo.valid_from, pl.valid_from) AS effective_from,
+    pp.procurement_account_id,
+    cp.channel_account_id
+   FROM (((commerce.channel_products cp
+     LEFT JOIN linkage.link_overrides lo ON (((lo.channel_product_id = cp.id) AND (lo.valid_to IS NULL))))
+     LEFT JOIN linkage.product_links pl ON (((pl.channel_product_id = cp.id) AND (pl.valid_to IS NULL) AND ((lo.id IS NULL) OR (lo.decision <> 'DENY'::text)))))
+     LEFT JOIN procurement.procurement_products pp ON ((pp.id = COALESCE(lo.procurement_product_id, pl.procurement_product_id))))
+  WHERE (COALESCE(lo.decision, 'ALLOW'::text) <> 'DENY'::text);
+
+
+-- Name: link_evidence; Type: TABLE; Schema: linkage; Owner: -
+
+CREATE TABLE IF NOT EXISTS linkage.link_evidence (
+    id bigint NOT NULL,
+    product_link_id bigint,
+    variant_link_id bigint,
+    evidence_type text NOT NULL,
+    source_table text,
+    source_external_id text,
+    evidence_payload jsonb,
+    observed_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE linkage.link_evidence ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME linkage.link_evidence_id_seq
+);
+
+
+-- Name: link_issues; Type: TABLE; Schema: linkage; Owner: -
+
+CREATE TABLE IF NOT EXISTS linkage.link_issues (
+    id bigint NOT NULL,
+    issue_type text NOT NULL,
+    procurement_product_id bigint,
+    channel_product_id bigint,
+    candidate_count integer,
+    status text,
+    details jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    resolved_at timestamp with time zone
+);
+
+
+
+ALTER TABLE linkage.link_issues ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME linkage.link_issues_id_seq
+);
+
+
+
+ALTER TABLE linkage.link_overrides ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME linkage.link_overrides_id_seq
+);
+
+
+
+ALTER TABLE linkage.product_links ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME linkage.product_links_id_seq
+);
+
+
+-- Name: variant_links; Type: TABLE; Schema: linkage; Owner: -
+
+CREATE TABLE IF NOT EXISTS linkage.variant_links (
+    id bigint NOT NULL,
+    procurement_product_variant_id bigint NOT NULL,
+    channel_product_variant_id bigint NOT NULL,
+    external_relation_id text,
+    status text,
+    valid_from timestamp with time zone DEFAULT now() NOT NULL,
+    valid_to timestamp with time zone,
+    raw_record_id bigint
+);
+
+
+
+ALTER TABLE linkage.variant_links ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME linkage.variant_links_id_seq
+);
+
+
+-- Name: manual_product_costs; Type: TABLE; Schema: procurement; Owner: -
+
+CREATE TABLE IF NOT EXISTS procurement.manual_product_costs (
+    id bigint NOT NULL,
+    channel_product_id bigint NOT NULL,
+    unit_cost numeric(20,4) NOT NULL,
+    currency text NOT NULL,
+    valid_from timestamp with time zone DEFAULT now() NOT NULL,
+    valid_to timestamp with time zone,
+    note text,
+    created_by text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE procurement.manual_product_costs ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME procurement.manual_product_costs_id_seq
+);
+
+
+-- Name: procurement_accounts; Type: TABLE; Schema: procurement; Owner: -
+
+CREATE TABLE IF NOT EXISTS procurement.procurement_accounts (
+    id bigint NOT NULL,
+    provider text NOT NULL,
+    external_account_id text NOT NULL,
+    account_name text,
+    status text,
+    credential_id bigint,
+    source_updated_at timestamp with time zone,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE procurement.procurement_accounts ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME procurement.procurement_accounts_id_seq
+);
+
+
+-- Name: procurement_product_variants; Type: TABLE; Schema: procurement; Owner: -
+
+CREATE TABLE IF NOT EXISTS procurement.procurement_product_variants (
+    id bigint NOT NULL,
+    procurement_product_id bigint NOT NULL,
+    external_variant_id text NOT NULL,
+    variant_name text,
+    attributes jsonb,
+    supplier_sku text,
+    status text,
+    raw_record_id bigint,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE procurement.procurement_product_variants ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME procurement.procurement_product_variants_id_seq
+);
+
+
+
+ALTER TABLE procurement.procurement_products ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME procurement.procurement_products_id_seq
+);
+
+
+-- Name: purchase_order_lines; Type: TABLE; Schema: procurement; Owner: -
+
+CREATE TABLE IF NOT EXISTS procurement.purchase_order_lines (
+    id bigint NOT NULL,
+    purchase_order_id bigint NOT NULL,
+    external_line_id text NOT NULL,
+    procurement_product_id bigint NOT NULL,
+    procurement_product_variant_id bigint,
+    quantity numeric(20,4),
+    unit_cost numeric(20,4),
+    currency text,
+    line_status text,
+    raw_record_id bigint,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE procurement.purchase_order_lines ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME procurement.purchase_order_lines_id_seq
+);
+
+
+-- Name: purchase_orders; Type: TABLE; Schema: procurement; Owner: -
+
+CREATE TABLE IF NOT EXISTS procurement.purchase_orders (
+    id bigint NOT NULL,
+    procurement_account_id bigint NOT NULL,
+    external_purchase_order_id text NOT NULL,
+    supplier_id text,
+    status text,
+    currency text,
+    total_amount numeric(20,4),
+    source_created_at timestamp with time zone,
+    source_updated_at timestamp with time zone,
+    paid_at timestamp with time zone,
+    completed_at timestamp with time zone,
+    raw_record_id bigint,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE procurement.purchase_orders ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME procurement.purchase_orders_id_seq
+);
+
+
+-- Name: spu_images; Type: TABLE; Schema: procurement; Owner: -
+
+CREATE TABLE IF NOT EXISTS procurement.spu_images (
+    id bigint NOT NULL,
+    channel_account_id bigint NOT NULL,
+    channel_product_id bigint NOT NULL,
+    object_key text NOT NULL,
+    filename text NOT NULL,
+    content_type text NOT NULL,
+    size_bytes bigint NOT NULL,
+    status text DEFAULT 'awaiting_upload'::text NOT NULL,
+    uploaded_at timestamp with time zone DEFAULT now() NOT NULL,
+    uploaded_by_key_id bigint,
+    uploaded_by_prefix text,
+    deleted_at timestamp with time zone,
+    failure_reason text,
+    raw_metadata jsonb,
+    CONSTRAINT spu_images_size_bytes_check CHECK (((size_bytes > 0) AND (size_bytes <= 8388608))),
+    CONSTRAINT spu_images_status_check CHECK ((status = ANY (ARRAY['awaiting_upload'::text, 'ready'::text, 'failed'::text])))
+);
+
+
+
+ALTER TABLE procurement.spu_images ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME procurement.spu_images_id_seq
+);
+
+
+-- Name: alembic_version; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE IF NOT EXISTS public.alembic_version (
+    version_num character varying(32) NOT NULL
 );
 
 
@@ -641,11 +1413,104 @@ CREATE TABLE IF NOT EXISTS public.sync_log (
 
 
 
--- Name: analytics_audit_log id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: product_cost_snapshots; Type: TABLE; Schema: reporting; Owner: -
+
+CREATE TABLE IF NOT EXISTS reporting.product_cost_snapshots (
+    id bigint NOT NULL,
+    channel_product_id bigint NOT NULL,
+    cost_method text NOT NULL,
+    unit_cost numeric(20,4) NOT NULL,
+    currency text NOT NULL,
+    valid_from timestamp with time zone DEFAULT now() NOT NULL,
+    valid_to timestamp with time zone,
+    source_purchase_quantity numeric(20,4),
+    source_purchase_amount numeric(20,4),
+    source_line_count integer,
+    calculation_version integer DEFAULT 1 NOT NULL,
+    calculated_at timestamp with time zone DEFAULT now() NOT NULL
+);
 
 
 
--- Name: analytics_records id; Type: DEFAULT; Schema: public; Owner: -
+ALTER TABLE reporting.product_cost_snapshots ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME reporting.product_cost_snapshots_id_seq
+);
+
+
+-- Name: product_profit_daily; Type: TABLE; Schema: reporting; Owner: -
+
+CREATE TABLE IF NOT EXISTS reporting.product_profit_daily (
+    id bigint NOT NULL,
+    channel_product_id bigint NOT NULL,
+    profit_date date NOT NULL,
+    units_sold numeric(20,4),
+    gross_revenue numeric(20,4),
+    estimated_cogs numeric(20,4),
+    platform_fees numeric(20,4),
+    shipping_cost numeric(20,4),
+    refunds numeric(20,4),
+    estimated_gross_profit numeric(20,4),
+    currency text,
+    cost_method text,
+    calculation_version integer DEFAULT 1 NOT NULL,
+    calculated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE reporting.product_profit_daily ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME reporting.product_profit_daily_id_seq
+);
+
+
+-- Name: shipment_tracking_summary; Type: TABLE; Schema: reporting; Owner: -
+
+CREATE TABLE IF NOT EXISTS reporting.shipment_tracking_summary (
+    id bigint NOT NULL,
+    shipment_id bigint NOT NULL,
+    tracking_number text,
+    first_event_at timestamp with time zone,
+    last_event_at timestamp with time zone,
+    last_event_description text,
+    last_location text,
+    event_count integer,
+    calculation_version integer DEFAULT 1 NOT NULL,
+    calculated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE reporting.shipment_tracking_summary ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME reporting.shipment_tracking_summary_id_seq
+);
+
+
+-- Name: api_keys; Type: TABLE; Schema: security; Owner: -
+
+CREATE TABLE IF NOT EXISTS security.api_keys (
+    id bigint NOT NULL,
+    key_hash text NOT NULL,
+    key_prefix text NOT NULL,
+    name text,
+    role text NOT NULL,
+    status text DEFAULT 'active'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_used_at timestamp with time zone,
+    rotated_to_key_hash text
+);
+
+
+
+ALTER TABLE security.api_keys ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME security.api_keys_id_seq
+);
+
+
+-- Name: ad_audit_log id; Type: DEFAULT; Schema: analytics; Owner: -
+
+
+
+-- Name: ad_records id; Type: DEFAULT; Schema: analytics; Owner: -
 
 
 
@@ -657,28 +1522,394 @@ CREATE TABLE IF NOT EXISTS public.sync_log (
 
 
 
--- Name: analytics_audit_log analytics_audit_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: case_lines case_lines_pkey; Type: CONSTRAINT; Schema: after_sales; Owner: -
 
-ALTER TABLE ONLY public.analytics_audit_log
+ALTER TABLE ONLY after_sales.case_lines
+    ADD CONSTRAINT case_lines_pkey PRIMARY KEY (id);
+
+
+-- Name: cases cases_pkey; Type: CONSTRAINT; Schema: after_sales; Owner: -
+
+ALTER TABLE ONLY after_sales.cases
+    ADD CONSTRAINT cases_pkey PRIMARY KEY (id);
+
+
+-- Name: case_lines uq_case_lines_case_ext; Type: CONSTRAINT; Schema: after_sales; Owner: -
+
+ALTER TABLE ONLY after_sales.case_lines
+    ADD CONSTRAINT uq_case_lines_case_ext UNIQUE (case_id, external_case_line_id);
+
+
+-- Name: cases uq_cases_account_ext; Type: CONSTRAINT; Schema: after_sales; Owner: -
+
+ALTER TABLE ONLY after_sales.cases
+    ADD CONSTRAINT uq_cases_account_ext UNIQUE (channel_account_id, external_case_id);
+
+
+-- Name: ad_audit_log analytics_audit_log_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
+
+ALTER TABLE ONLY analytics.ad_audit_log
     ADD CONSTRAINT analytics_audit_log_pkey PRIMARY KEY (id);
 
 
--- Name: analytics_cursors analytics_cursors_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: ad_cursors analytics_cursors_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
 
-ALTER TABLE ONLY public.analytics_cursors
+ALTER TABLE ONLY analytics.ad_cursors
     ADD CONSTRAINT analytics_cursors_pkey PRIMARY KEY (seller_id, advertiser_id, storage_key, campaign_id);
 
 
--- Name: analytics_records analytics_records_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: ad_records analytics_records_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
 
-ALTER TABLE ONLY public.analytics_records
+ALTER TABLE ONLY analytics.ad_records
     ADD CONSTRAINT analytics_records_pkey PRIMARY KEY (id);
 
 
--- Name: analytics_shop_timezones analytics_shop_timezones_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: ad_shop_timezones analytics_shop_timezones_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
 
-ALTER TABLE ONLY public.analytics_shop_timezones
+ALTER TABLE ONLY analytics.ad_shop_timezones
     ADD CONSTRAINT analytics_shop_timezones_pkey PRIMARY KEY (seller_id);
+
+
+-- Name: ad_daily_completeness pk_analytics_daily_completeness; Type: CONSTRAINT; Schema: analytics; Owner: -
+
+ALTER TABLE ONLY analytics.ad_daily_completeness
+    ADD CONSTRAINT pk_analytics_daily_completeness PRIMARY KEY (seller_id, advertiser_id, storage_key, campaign_id, day);
+
+
+-- Name: ad_daily_pages pk_analytics_daily_pages; Type: CONSTRAINT; Schema: analytics; Owner: -
+
+ALTER TABLE ONLY analytics.ad_daily_pages
+    ADD CONSTRAINT pk_analytics_daily_pages PRIMARY KEY (seller_id, advertiser_id, storage_key, campaign_id, day, page);
+
+
+-- Name: ad_records uq_analytics_records_idem; Type: CONSTRAINT; Schema: analytics; Owner: -
+
+ALTER TABLE ONLY analytics.ad_records
+    ADD CONSTRAINT uq_analytics_records_idem UNIQUE (idempotency_key);
+
+
+-- Name: channel_accounts channel_accounts_pkey; Type: CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.channel_accounts
+    ADD CONSTRAINT channel_accounts_pkey PRIMARY KEY (id);
+
+
+-- Name: channel_product_variants channel_product_variants_pkey; Type: CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.channel_product_variants
+    ADD CONSTRAINT channel_product_variants_pkey PRIMARY KEY (id);
+
+
+-- Name: channel_products channel_products_pkey; Type: CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.channel_products
+    ADD CONSTRAINT channel_products_pkey PRIMARY KEY (id);
+
+
+-- Name: sales_order_lines sales_order_lines_pkey; Type: CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.sales_order_lines
+    ADD CONSTRAINT sales_order_lines_pkey PRIMARY KEY (id);
+
+
+-- Name: sales_orders sales_orders_pkey; Type: CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.sales_orders
+    ADD CONSTRAINT sales_orders_pkey PRIMARY KEY (id);
+
+
+-- Name: channel_accounts uq_channel_accounts_platform_ext; Type: CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.channel_accounts
+    ADD CONSTRAINT uq_channel_accounts_platform_ext UNIQUE (platform, external_account_id);
+
+
+-- Name: channel_products uq_channel_products_account_ext; Type: CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.channel_products
+    ADD CONSTRAINT uq_channel_products_account_ext UNIQUE (channel_account_id, external_product_id);
+
+
+-- Name: channel_product_variants uq_channel_variants_product_ext; Type: CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.channel_product_variants
+    ADD CONSTRAINT uq_channel_variants_product_ext UNIQUE (channel_product_id, external_variant_id);
+
+
+-- Name: sales_order_lines uq_sales_order_lines_order_ext; Type: CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.sales_order_lines
+    ADD CONSTRAINT uq_sales_order_lines_order_ext UNIQUE (sales_order_id, external_line_id);
+
+
+-- Name: sales_orders uq_sales_orders_account_ext; Type: CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.sales_orders
+    ADD CONSTRAINT uq_sales_orders_account_ext UNIQUE (channel_account_id, external_order_id);
+
+
+-- Name: payouts payouts_pkey; Type: CONSTRAINT; Schema: finance; Owner: -
+
+ALTER TABLE ONLY finance.payouts
+    ADD CONSTRAINT payouts_pkey PRIMARY KEY (id);
+
+
+-- Name: settlement_components settlement_components_pkey; Type: CONSTRAINT; Schema: finance; Owner: -
+
+ALTER TABLE ONLY finance.settlement_components
+    ADD CONSTRAINT settlement_components_pkey PRIMARY KEY (id);
+
+
+-- Name: settlement_statements settlement_statements_pkey; Type: CONSTRAINT; Schema: finance; Owner: -
+
+ALTER TABLE ONLY finance.settlement_statements
+    ADD CONSTRAINT settlement_statements_pkey PRIMARY KEY (id);
+
+
+-- Name: settlement_transactions settlement_transactions_pkey; Type: CONSTRAINT; Schema: finance; Owner: -
+
+ALTER TABLE ONLY finance.settlement_transactions
+    ADD CONSTRAINT settlement_transactions_pkey PRIMARY KEY (id);
+
+
+-- Name: payouts uq_payouts_account_ext; Type: CONSTRAINT; Schema: finance; Owner: -
+
+ALTER TABLE ONLY finance.payouts
+    ADD CONSTRAINT uq_payouts_account_ext UNIQUE (channel_account_id, external_payout_id);
+
+
+-- Name: settlement_components uq_settlement_components_txn_code; Type: CONSTRAINT; Schema: finance; Owner: -
+
+ALTER TABLE ONLY finance.settlement_components
+    ADD CONSTRAINT uq_settlement_components_txn_code UNIQUE (transaction_id, component_code);
+
+
+-- Name: settlement_statements uq_settlement_statements_payout_ext; Type: CONSTRAINT; Schema: finance; Owner: -
+
+ALTER TABLE ONLY finance.settlement_statements
+    ADD CONSTRAINT uq_settlement_statements_payout_ext UNIQUE (payout_id, external_statement_id);
+
+
+-- Name: settlement_transactions uq_settlement_txn_stmt_ext; Type: CONSTRAINT; Schema: finance; Owner: -
+
+ALTER TABLE ONLY finance.settlement_transactions
+    ADD CONSTRAINT uq_settlement_txn_stmt_ext UNIQUE (settlement_statement_id, external_transaction_id);
+
+
+-- Name: shipment_lines shipment_lines_pkey; Type: CONSTRAINT; Schema: fulfillment; Owner: -
+
+ALTER TABLE ONLY fulfillment.shipment_lines
+    ADD CONSTRAINT shipment_lines_pkey PRIMARY KEY (shipment_id, sales_order_line_id);
+
+
+-- Name: shipments shipments_pkey; Type: CONSTRAINT; Schema: fulfillment; Owner: -
+
+ALTER TABLE ONLY fulfillment.shipments
+    ADD CONSTRAINT shipments_pkey PRIMARY KEY (id);
+
+
+-- Name: tracking_events tracking_events_pkey; Type: CONSTRAINT; Schema: fulfillment; Owner: -
+
+ALTER TABLE ONLY fulfillment.tracking_events
+    ADD CONSTRAINT tracking_events_pkey PRIMARY KEY (id);
+
+
+-- Name: shipments uq_shipments_order_ext; Type: CONSTRAINT; Schema: fulfillment; Owner: -
+
+ALTER TABLE ONLY fulfillment.shipments
+    ADD CONSTRAINT uq_shipments_order_ext UNIQUE (sales_order_id, external_package_id);
+
+
+-- Name: tracking_events uq_tracking_events_shipment_key; Type: CONSTRAINT; Schema: fulfillment; Owner: -
+
+ALTER TABLE ONLY fulfillment.tracking_events
+    ADD CONSTRAINT uq_tracking_events_shipment_key UNIQUE (shipment_id, external_event_key);
+
+
+-- Name: credentials credentials_pkey; Type: CONSTRAINT; Schema: integration; Owner: -
+
+ALTER TABLE ONLY integration.credentials
+    ADD CONSTRAINT credentials_pkey PRIMARY KEY (id);
+
+
+-- Name: raw_records raw_records_pkey; Type: CONSTRAINT; Schema: integration; Owner: -
+
+ALTER TABLE ONLY integration.raw_records
+    ADD CONSTRAINT raw_records_pkey PRIMARY KEY (id);
+
+
+-- Name: sync_cursors sync_cursors_pkey; Type: CONSTRAINT; Schema: integration; Owner: -
+
+ALTER TABLE ONLY integration.sync_cursors
+    ADD CONSTRAINT sync_cursors_pkey PRIMARY KEY (id);
+
+
+-- Name: sync_issues sync_issues_pkey; Type: CONSTRAINT; Schema: integration; Owner: -
+
+ALTER TABLE ONLY integration.sync_issues
+    ADD CONSTRAINT sync_issues_pkey PRIMARY KEY (id);
+
+
+-- Name: sync_jobs sync_jobs_pkey; Type: CONSTRAINT; Schema: integration; Owner: -
+
+ALTER TABLE ONLY integration.sync_jobs
+    ADD CONSTRAINT sync_jobs_pkey PRIMARY KEY (id);
+
+
+-- Name: credentials uq_credentials_provider_account; Type: CONSTRAINT; Schema: integration; Owner: -
+
+ALTER TABLE ONLY integration.credentials
+    ADD CONSTRAINT uq_credentials_provider_account UNIQUE (provider, external_account_id);
+
+
+-- Name: sync_cursors uq_sync_cursors_job_scope; Type: CONSTRAINT; Schema: integration; Owner: -
+
+ALTER TABLE ONLY integration.sync_cursors
+    ADD CONSTRAINT uq_sync_cursors_job_scope UNIQUE (job_name, scope);
+
+
+-- Name: account_links account_links_pkey; Type: CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.account_links
+    ADD CONSTRAINT account_links_pkey PRIMARY KEY (id);
+
+
+-- Name: link_evidence link_evidence_pkey; Type: CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.link_evidence
+    ADD CONSTRAINT link_evidence_pkey PRIMARY KEY (id);
+
+
+-- Name: link_issues link_issues_pkey; Type: CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.link_issues
+    ADD CONSTRAINT link_issues_pkey PRIMARY KEY (id);
+
+
+-- Name: link_overrides link_overrides_pkey; Type: CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.link_overrides
+    ADD CONSTRAINT link_overrides_pkey PRIMARY KEY (id);
+
+
+-- Name: product_links product_links_pkey; Type: CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.product_links
+    ADD CONSTRAINT product_links_pkey PRIMARY KEY (id);
+
+
+-- Name: account_links uq_account_links_triplet; Type: CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.account_links
+    ADD CONSTRAINT uq_account_links_triplet UNIQUE (procurement_account_id, channel_account_id, external_relation_id);
+
+
+-- Name: link_overrides uq_link_overrides_pivot_validfrom; Type: CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.link_overrides
+    ADD CONSTRAINT uq_link_overrides_pivot_validfrom UNIQUE (procurement_product_id, channel_product_id, valid_from);
+
+
+-- Name: product_links uq_product_links_pivot_validfrom; Type: CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.product_links
+    ADD CONSTRAINT uq_product_links_pivot_validfrom UNIQUE (procurement_product_id, channel_product_id, valid_from);
+
+
+-- Name: variant_links uq_variant_links_pivot_validfrom; Type: CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.variant_links
+    ADD CONSTRAINT uq_variant_links_pivot_validfrom UNIQUE (procurement_product_variant_id, channel_product_variant_id, valid_from);
+
+
+-- Name: variant_links variant_links_pkey; Type: CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.variant_links
+    ADD CONSTRAINT variant_links_pkey PRIMARY KEY (id);
+
+
+-- Name: manual_product_costs manual_product_costs_pkey; Type: CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.manual_product_costs
+    ADD CONSTRAINT manual_product_costs_pkey PRIMARY KEY (id);
+
+
+-- Name: procurement_accounts procurement_accounts_pkey; Type: CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.procurement_accounts
+    ADD CONSTRAINT procurement_accounts_pkey PRIMARY KEY (id);
+
+
+-- Name: procurement_product_variants procurement_product_variants_pkey; Type: CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.procurement_product_variants
+    ADD CONSTRAINT procurement_product_variants_pkey PRIMARY KEY (id);
+
+
+-- Name: procurement_products procurement_products_pkey; Type: CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.procurement_products
+    ADD CONSTRAINT procurement_products_pkey PRIMARY KEY (id);
+
+
+-- Name: purchase_order_lines purchase_order_lines_pkey; Type: CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.purchase_order_lines
+    ADD CONSTRAINT purchase_order_lines_pkey PRIMARY KEY (id);
+
+
+-- Name: purchase_orders purchase_orders_pkey; Type: CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.purchase_orders
+    ADD CONSTRAINT purchase_orders_pkey PRIMARY KEY (id);
+
+
+-- Name: spu_images spu_images_object_key_key; Type: CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.spu_images
+    ADD CONSTRAINT spu_images_object_key_key UNIQUE (object_key);
+
+
+-- Name: spu_images spu_images_pkey; Type: CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.spu_images
+    ADD CONSTRAINT spu_images_pkey PRIMARY KEY (id);
+
+
+-- Name: procurement_accounts uq_procurement_accounts_provider_ext; Type: CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.procurement_accounts
+    ADD CONSTRAINT uq_procurement_accounts_provider_ext UNIQUE (provider, external_account_id);
+
+
+-- Name: procurement_products uq_procurement_products_account_ext; Type: CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.procurement_products
+    ADD CONSTRAINT uq_procurement_products_account_ext UNIQUE (procurement_account_id, external_product_id);
+
+
+-- Name: procurement_product_variants uq_procurement_variants_product_ext; Type: CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.procurement_product_variants
+    ADD CONSTRAINT uq_procurement_variants_product_ext UNIQUE (procurement_product_id, external_variant_id);
+
+
+-- Name: purchase_order_lines uq_purchase_order_lines_order_ext; Type: CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.purchase_order_lines
+    ADD CONSTRAINT uq_purchase_order_lines_order_ext UNIQUE (purchase_order_id, external_line_id);
+
+
+-- Name: purchase_orders uq_purchase_orders_account_ext; Type: CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.purchase_orders
+    ADD CONSTRAINT uq_purchase_orders_account_ext UNIQUE (procurement_account_id, external_purchase_order_id);
+
+
+-- Name: alembic_version alembic_version_pkc; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY public.alembic_version
+    ADD CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num);
 
 
 -- Name: api_keys api_keys_key_hash_key; Type: CONSTRAINT; Schema: public; Owner: -
@@ -765,18 +1996,6 @@ ALTER TABLE ONLY public.payments
     ADD CONSTRAINT payments_pkey PRIMARY KEY (payment_id);
 
 
--- Name: analytics_daily_completeness pk_analytics_daily_completeness; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY public.analytics_daily_completeness
-    ADD CONSTRAINT pk_analytics_daily_completeness PRIMARY KEY (seller_id, advertiser_id, storage_key, campaign_id, day);
-
-
--- Name: analytics_daily_pages pk_analytics_daily_pages; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY public.analytics_daily_pages
-    ADD CONSTRAINT pk_analytics_daily_pages PRIMARY KEY (seller_id, advertiser_id, storage_key, campaign_id, day, page);
-
-
 -- Name: returns returns_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY public.returns
@@ -807,56 +2026,313 @@ ALTER TABLE ONLY public.sync_log
     ADD CONSTRAINT sync_log_pkey PRIMARY KEY (id);
 
 
--- Name: analytics_records uq_analytics_records_idem; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY public.analytics_records
-    ADD CONSTRAINT uq_analytics_records_idem UNIQUE (idempotency_key);
-
-
 -- Name: api_keys uq_api_keys_prefix; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY public.api_keys
     ADD CONSTRAINT uq_api_keys_prefix UNIQUE (key_prefix);
 
 
--- Name: idx_analytics_audit_created; Type: INDEX; Schema: public; Owner: -
+-- Name: product_cost_snapshots product_cost_snapshots_pkey; Type: CONSTRAINT; Schema: reporting; Owner: -
 
-CREATE INDEX IF NOT EXISTS idx_analytics_audit_created ON public.analytics_audit_log USING btree (created_at DESC);
-
-
--- Name: idx_analytics_audit_request; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX IF NOT EXISTS idx_analytics_audit_request ON public.analytics_audit_log USING btree (request_id);
+ALTER TABLE ONLY reporting.product_cost_snapshots
+    ADD CONSTRAINT product_cost_snapshots_pkey PRIMARY KEY (id);
 
 
--- Name: idx_analytics_daily_completeness_unit_complete; Type: INDEX; Schema: public; Owner: -
+-- Name: product_profit_daily product_profit_daily_pkey; Type: CONSTRAINT; Schema: reporting; Owner: -
 
-CREATE INDEX IF NOT EXISTS idx_analytics_daily_completeness_unit_complete ON public.analytics_daily_completeness USING btree (seller_id, advertiser_id, storage_key, campaign_id, day, is_complete);
-
-
--- Name: idx_analytics_daily_pages_unit; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX IF NOT EXISTS idx_analytics_daily_pages_unit ON public.analytics_daily_pages USING btree (seller_id, advertiser_id, storage_key, campaign_id, day);
+ALTER TABLE ONLY reporting.product_profit_daily
+    ADD CONSTRAINT product_profit_daily_pkey PRIMARY KEY (id);
 
 
--- Name: idx_analytics_records_received; Type: INDEX; Schema: public; Owner: -
+-- Name: shipment_tracking_summary shipment_tracking_summary_pkey; Type: CONSTRAINT; Schema: reporting; Owner: -
 
-CREATE INDEX IF NOT EXISTS idx_analytics_records_received ON public.analytics_records USING btree (received_at DESC);
-
-
--- Name: idx_analytics_records_request; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX IF NOT EXISTS idx_analytics_records_request ON public.analytics_records USING btree (request_id);
+ALTER TABLE ONLY reporting.shipment_tracking_summary
+    ADD CONSTRAINT shipment_tracking_summary_pkey PRIMARY KEY (id);
 
 
--- Name: idx_analytics_records_scope; Type: INDEX; Schema: public; Owner: -
+-- Name: product_cost_snapshots uq_cost_snapshots_pivot_version; Type: CONSTRAINT; Schema: reporting; Owner: -
 
-CREATE INDEX IF NOT EXISTS idx_analytics_records_scope ON public.analytics_records USING btree (seller_id, advertiser_id, storage_key, campaign_id, day);
+ALTER TABLE ONLY reporting.product_cost_snapshots
+    ADD CONSTRAINT uq_cost_snapshots_pivot_version UNIQUE (channel_product_id, valid_from, calculation_version);
 
 
--- Name: idx_analytics_records_scope_page; Type: INDEX; Schema: public; Owner: -
+-- Name: product_profit_daily uq_profit_daily_pivot_version; Type: CONSTRAINT; Schema: reporting; Owner: -
 
-CREATE INDEX IF NOT EXISTS idx_analytics_records_scope_page ON public.analytics_records USING btree (seller_id, advertiser_id, storage_key, campaign_id, day, page);
+ALTER TABLE ONLY reporting.product_profit_daily
+    ADD CONSTRAINT uq_profit_daily_pivot_version UNIQUE (channel_product_id, profit_date, calculation_version);
+
+
+-- Name: shipment_tracking_summary uq_tracking_summary_shipment_version; Type: CONSTRAINT; Schema: reporting; Owner: -
+
+ALTER TABLE ONLY reporting.shipment_tracking_summary
+    ADD CONSTRAINT uq_tracking_summary_shipment_version UNIQUE (shipment_id, calculation_version);
+
+
+-- Name: api_keys api_keys_pkey; Type: CONSTRAINT; Schema: security; Owner: -
+
+ALTER TABLE ONLY security.api_keys
+    ADD CONSTRAINT api_keys_pkey PRIMARY KEY (id);
+
+
+-- Name: api_keys ix_api_keys_key_hash; Type: CONSTRAINT; Schema: security; Owner: -
+
+ALTER TABLE ONLY security.api_keys
+    ADD CONSTRAINT ix_api_keys_key_hash UNIQUE (key_hash);
+
+
+-- Name: ix_case_lines_sales_order_line; Type: INDEX; Schema: after_sales; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_case_lines_sales_order_line ON after_sales.case_lines USING btree (sales_order_line_id);
+
+
+-- Name: ix_cases_case_type_status; Type: INDEX; Schema: after_sales; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_cases_case_type_status ON after_sales.cases USING btree (case_type, status);
+
+
+-- Name: ix_cases_sales_order; Type: INDEX; Schema: after_sales; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_cases_sales_order ON after_sales.cases USING btree (sales_order_id);
+
+
+-- Name: idx_analytics_audit_created; Type: INDEX; Schema: analytics; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_analytics_audit_created ON analytics.ad_audit_log USING btree (created_at DESC);
+
+
+-- Name: idx_analytics_audit_request; Type: INDEX; Schema: analytics; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_analytics_audit_request ON analytics.ad_audit_log USING btree (request_id);
+
+
+-- Name: idx_analytics_daily_completeness_unit_complete; Type: INDEX; Schema: analytics; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_analytics_daily_completeness_unit_complete ON analytics.ad_daily_completeness USING btree (seller_id, advertiser_id, storage_key, campaign_id, day, is_complete);
+
+
+-- Name: idx_analytics_daily_pages_unit; Type: INDEX; Schema: analytics; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_analytics_daily_pages_unit ON analytics.ad_daily_pages USING btree (seller_id, advertiser_id, storage_key, campaign_id, day);
+
+
+-- Name: idx_analytics_records_received; Type: INDEX; Schema: analytics; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_analytics_records_received ON analytics.ad_records USING btree (received_at DESC);
+
+
+-- Name: idx_analytics_records_request; Type: INDEX; Schema: analytics; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_analytics_records_request ON analytics.ad_records USING btree (request_id);
+
+
+-- Name: idx_analytics_records_scope; Type: INDEX; Schema: analytics; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_analytics_records_scope ON analytics.ad_records USING btree (seller_id, advertiser_id, storage_key, campaign_id, day);
+
+
+-- Name: idx_analytics_records_scope_page; Type: INDEX; Schema: analytics; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_analytics_records_scope_page ON analytics.ad_records USING btree (seller_id, advertiser_id, storage_key, campaign_id, day, page);
+
+
+-- Name: ix_channel_accounts_status; Type: INDEX; Schema: commerce; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_channel_accounts_status ON commerce.channel_accounts USING btree (status);
+
+
+-- Name: ix_channel_products_status; Type: INDEX; Schema: commerce; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_channel_products_status ON commerce.channel_products USING btree (status);
+
+
+-- Name: ix_channel_variants_seller_sku; Type: INDEX; Schema: commerce; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_channel_variants_seller_sku ON commerce.channel_product_variants USING btree (seller_sku);
+
+
+-- Name: ix_sales_order_lines_channel_product; Type: INDEX; Schema: commerce; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_sales_order_lines_channel_product ON commerce.sales_order_lines USING btree (channel_product_id);
+
+
+-- Name: ix_sales_order_lines_channel_variant; Type: INDEX; Schema: commerce; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_sales_order_lines_channel_variant ON commerce.sales_order_lines USING btree (channel_product_variant_id);
+
+
+-- Name: ix_sales_orders_paid_at; Type: INDEX; Schema: commerce; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_sales_orders_paid_at ON commerce.sales_orders USING btree (paid_at);
+
+
+-- Name: ix_sales_orders_status; Type: INDEX; Schema: commerce; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_sales_orders_status ON commerce.sales_orders USING btree (status);
+
+
+-- Name: ix_payouts_status; Type: INDEX; Schema: finance; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_payouts_status ON finance.payouts USING btree (status);
+
+
+-- Name: ix_settlement_components_code; Type: INDEX; Schema: finance; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_settlement_components_code ON finance.settlement_components USING btree (component_code);
+
+
+-- Name: ix_settlement_statements_statement_time; Type: INDEX; Schema: finance; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_settlement_statements_statement_time ON finance.settlement_statements USING btree (statement_time);
+
+
+-- Name: ix_settlement_txn_case; Type: INDEX; Schema: finance; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_settlement_txn_case ON finance.settlement_transactions USING btree (after_sales_case_id);
+
+
+-- Name: ix_settlement_txn_order_line; Type: INDEX; Schema: finance; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_settlement_txn_order_line ON finance.settlement_transactions USING btree (sales_order_line_id);
+
+
+-- Name: ix_settlement_txn_sales_order; Type: INDEX; Schema: finance; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_settlement_txn_sales_order ON finance.settlement_transactions USING btree (sales_order_id);
+
+
+-- Name: ix_shipments_status; Type: INDEX; Schema: fulfillment; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_shipments_status ON fulfillment.shipments USING btree (status);
+
+
+-- Name: ix_shipments_tracking_number; Type: INDEX; Schema: fulfillment; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_shipments_tracking_number ON fulfillment.shipments USING btree (tracking_number);
+
+
+-- Name: ix_tracking_events_event_at; Type: INDEX; Schema: fulfillment; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_tracking_events_event_at ON fulfillment.tracking_events USING btree (event_at);
+
+
+-- Name: ix_credentials_provider; Type: INDEX; Schema: integration; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_credentials_provider ON integration.credentials USING btree (provider);
+
+
+-- Name: ix_raw_records_captured_at; Type: INDEX; Schema: integration; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_raw_records_captured_at ON integration.raw_records USING btree (captured_at);
+
+
+-- Name: ix_raw_records_endpoint_account; Type: INDEX; Schema: integration; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_raw_records_endpoint_account ON integration.raw_records USING btree (endpoint, credential_id);
+
+
+-- Name: ix_raw_records_external_id; Type: INDEX; Schema: integration; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_raw_records_external_id ON integration.raw_records USING btree (external_id);
+
+
+-- Name: ix_sync_issues_job_resolved; Type: INDEX; Schema: integration; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_sync_issues_job_resolved ON integration.sync_issues USING btree (job_name, resolved_at);
+
+
+-- Name: ix_sync_jobs_name_started; Type: INDEX; Schema: integration; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_sync_jobs_name_started ON integration.sync_jobs USING btree (job_name, started_at);
+
+
+-- Name: ix_account_links_validity; Type: INDEX; Schema: linkage; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_account_links_validity ON linkage.account_links USING btree (valid_from, valid_to);
+
+
+-- Name: ix_link_evidence_product_link; Type: INDEX; Schema: linkage; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_link_evidence_product_link ON linkage.link_evidence USING btree (product_link_id);
+
+
+-- Name: ix_link_evidence_variant_link; Type: INDEX; Schema: linkage; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_link_evidence_variant_link ON linkage.link_evidence USING btree (variant_link_id);
+
+
+-- Name: ix_link_issues_type_resolved; Type: INDEX; Schema: linkage; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_link_issues_type_resolved ON linkage.link_issues USING btree (issue_type, resolved_at);
+
+
+-- Name: ix_link_overrides_decision; Type: INDEX; Schema: linkage; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_link_overrides_decision ON linkage.link_overrides USING btree (decision);
+
+
+-- Name: ix_product_links_channel_product; Type: INDEX; Schema: linkage; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_product_links_channel_product ON linkage.product_links USING btree (channel_product_id);
+
+
+-- Name: ix_product_links_status; Type: INDEX; Schema: linkage; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_product_links_status ON linkage.product_links USING btree (status);
+
+
+-- Name: ix_variant_links_validity; Type: INDEX; Schema: linkage; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_variant_links_validity ON linkage.variant_links USING btree (valid_from, valid_to);
+
+
+-- Name: ix_manual_costs_channel_product_valid; Type: INDEX; Schema: procurement; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_manual_costs_channel_product_valid ON procurement.manual_product_costs USING btree (channel_product_id, valid_from);
+
+
+-- Name: ix_procurement_accounts_status; Type: INDEX; Schema: procurement; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_procurement_accounts_status ON procurement.procurement_accounts USING btree (status);
+
+
+-- Name: ix_procurement_products_product_type; Type: INDEX; Schema: procurement; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_procurement_products_product_type ON procurement.procurement_products USING btree (product_type);
+
+
+-- Name: ix_procurement_products_status; Type: INDEX; Schema: procurement; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_procurement_products_status ON procurement.procurement_products USING btree (status);
+
+
+-- Name: ix_procurement_variants_supplier_sku; Type: INDEX; Schema: procurement; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_procurement_variants_supplier_sku ON procurement.procurement_product_variants USING btree (supplier_sku);
+
+
+-- Name: ix_purchase_order_lines_product; Type: INDEX; Schema: procurement; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_purchase_order_lines_product ON procurement.purchase_order_lines USING btree (procurement_product_id);
+
+
+-- Name: ix_purchase_orders_status; Type: INDEX; Schema: procurement; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_purchase_orders_status ON procurement.purchase_orders USING btree (status);
+
+
+-- Name: ix_spu_images_account_uploaded; Type: INDEX; Schema: procurement; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_spu_images_account_uploaded ON procurement.spu_images USING btree (channel_account_id, uploaded_at DESC) WHERE (deleted_at IS NULL);
+
+
+-- Name: ix_spu_images_product_status; Type: INDEX; Schema: procurement; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_spu_images_product_status ON procurement.spu_images USING btree (channel_product_id, status) WHERE (deleted_at IS NULL);
+
+
+-- Name: uq_manual_costs_one_open; Type: INDEX; Schema: procurement; Owner: -
+
+CREATE UNIQUE INDEX uq_manual_costs_one_open ON procurement.manual_product_costs USING btree (channel_product_id) WHERE (valid_to IS NULL);
 
 
 -- Name: idx_cancellations_create_time; Type: INDEX; Schema: public; Owner: -
@@ -1054,6 +2530,21 @@ CREATE INDEX IF NOT EXISTS idx_stmt_txns_type ON public.statement_transactions U
 CREATE INDEX IF NOT EXISTS idx_sync_log_shop ON public.sync_log USING btree (shop_id, started_at DESC);
 
 
+-- Name: ix_cost_snapshots_method; Type: INDEX; Schema: reporting; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_cost_snapshots_method ON reporting.product_cost_snapshots USING btree (cost_method);
+
+
+-- Name: ix_profit_daily_profit_date; Type: INDEX; Schema: reporting; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_profit_daily_profit_date ON reporting.product_profit_daily USING btree (profit_date);
+
+
+-- Name: ix_api_keys_role; Type: INDEX; Schema: security; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_api_keys_role ON security.api_keys USING btree (role);
+
+
 -- Name: orders trg_orders_touch; Type: TRIGGER; Schema: public; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_orders_touch BEFORE UPDATE ON public.orders FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at();
@@ -1069,7 +2560,403 @@ CREATE OR REPLACE TRIGGER trg_shops_touch BEFORE UPDATE ON public.shops FOR EACH
 CREATE OR REPLACE TRIGGER trg_sync_log_retention AFTER INSERT ON public.sync_log FOR EACH STATEMENT EXECUTE FUNCTION public.trg_sync_log_retention_fn();
 
 
+-- Name: case_lines case_lines_case_id_fkey; Type: FK CONSTRAINT; Schema: after_sales; Owner: -
+
+ALTER TABLE ONLY after_sales.case_lines
+    ADD CONSTRAINT case_lines_case_id_fkey FOREIGN KEY (case_id) REFERENCES after_sales.cases(id) ON DELETE CASCADE;
+
+
+-- Name: case_lines case_lines_sales_order_line_id_fkey; Type: FK CONSTRAINT; Schema: after_sales; Owner: -
+
+ALTER TABLE ONLY after_sales.case_lines
+    ADD CONSTRAINT case_lines_sales_order_line_id_fkey FOREIGN KEY (sales_order_line_id) REFERENCES commerce.sales_order_lines(id) ON DELETE RESTRICT;
+
+
+-- Name: cases cases_channel_account_id_fkey; Type: FK CONSTRAINT; Schema: after_sales; Owner: -
+
+ALTER TABLE ONLY after_sales.cases
+    ADD CONSTRAINT cases_channel_account_id_fkey FOREIGN KEY (channel_account_id) REFERENCES commerce.channel_accounts(id) ON DELETE RESTRICT;
+
+
+-- Name: cases cases_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: after_sales; Owner: -
+
+ALTER TABLE ONLY after_sales.cases
+    ADD CONSTRAINT cases_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
+
+
+-- Name: cases cases_sales_order_id_fkey; Type: FK CONSTRAINT; Schema: after_sales; Owner: -
+
+ALTER TABLE ONLY after_sales.cases
+    ADD CONSTRAINT cases_sales_order_id_fkey FOREIGN KEY (sales_order_id) REFERENCES commerce.sales_orders(id) ON DELETE RESTRICT;
+
+
+-- Name: channel_accounts channel_accounts_credential_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.channel_accounts
+    ADD CONSTRAINT channel_accounts_credential_id_fkey FOREIGN KEY (credential_id) REFERENCES integration.credentials(id) ON DELETE SET NULL;
+
+
+-- Name: channel_product_variants channel_product_variants_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.channel_product_variants
+    ADD CONSTRAINT channel_product_variants_channel_product_id_fkey FOREIGN KEY (channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE RESTRICT;
+
+
+-- Name: channel_product_variants channel_product_variants_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.channel_product_variants
+    ADD CONSTRAINT channel_product_variants_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
+
+
+-- Name: channel_products channel_products_channel_account_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.channel_products
+    ADD CONSTRAINT channel_products_channel_account_id_fkey FOREIGN KEY (channel_account_id) REFERENCES commerce.channel_accounts(id) ON DELETE RESTRICT;
+
+
+-- Name: channel_products channel_products_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.channel_products
+    ADD CONSTRAINT channel_products_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
+
+
+-- Name: sales_order_lines sales_order_lines_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.sales_order_lines
+    ADD CONSTRAINT sales_order_lines_channel_product_id_fkey FOREIGN KEY (channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE SET NULL;
+
+
+-- Name: sales_order_lines sales_order_lines_channel_product_variant_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.sales_order_lines
+    ADD CONSTRAINT sales_order_lines_channel_product_variant_id_fkey FOREIGN KEY (channel_product_variant_id) REFERENCES commerce.channel_product_variants(id) ON DELETE SET NULL;
+
+
+-- Name: sales_order_lines sales_order_lines_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.sales_order_lines
+    ADD CONSTRAINT sales_order_lines_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
+
+
+-- Name: sales_order_lines sales_order_lines_sales_order_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.sales_order_lines
+    ADD CONSTRAINT sales_order_lines_sales_order_id_fkey FOREIGN KEY (sales_order_id) REFERENCES commerce.sales_orders(id) ON DELETE RESTRICT;
+
+
+-- Name: sales_orders sales_orders_channel_account_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.sales_orders
+    ADD CONSTRAINT sales_orders_channel_account_id_fkey FOREIGN KEY (channel_account_id) REFERENCES commerce.channel_accounts(id) ON DELETE RESTRICT;
+
+
+-- Name: sales_orders sales_orders_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.sales_orders
+    ADD CONSTRAINT sales_orders_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
+
+
+-- Name: payouts payouts_channel_account_id_fkey; Type: FK CONSTRAINT; Schema: finance; Owner: -
+
+ALTER TABLE ONLY finance.payouts
+    ADD CONSTRAINT payouts_channel_account_id_fkey FOREIGN KEY (channel_account_id) REFERENCES commerce.channel_accounts(id) ON DELETE RESTRICT;
+
+
+-- Name: payouts payouts_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: finance; Owner: -
+
+ALTER TABLE ONLY finance.payouts
+    ADD CONSTRAINT payouts_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
+
+
+-- Name: settlement_components settlement_components_transaction_id_fkey; Type: FK CONSTRAINT; Schema: finance; Owner: -
+
+ALTER TABLE ONLY finance.settlement_components
+    ADD CONSTRAINT settlement_components_transaction_id_fkey FOREIGN KEY (transaction_id) REFERENCES finance.settlement_transactions(id) ON DELETE CASCADE;
+
+
+-- Name: settlement_statements settlement_statements_payout_id_fkey; Type: FK CONSTRAINT; Schema: finance; Owner: -
+
+ALTER TABLE ONLY finance.settlement_statements
+    ADD CONSTRAINT settlement_statements_payout_id_fkey FOREIGN KEY (payout_id) REFERENCES finance.payouts(id) ON DELETE RESTRICT;
+
+
+-- Name: settlement_statements settlement_statements_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: finance; Owner: -
+
+ALTER TABLE ONLY finance.settlement_statements
+    ADD CONSTRAINT settlement_statements_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
+
+
+-- Name: settlement_transactions settlement_transactions_after_sales_case_id_fkey; Type: FK CONSTRAINT; Schema: finance; Owner: -
+
+ALTER TABLE ONLY finance.settlement_transactions
+    ADD CONSTRAINT settlement_transactions_after_sales_case_id_fkey FOREIGN KEY (after_sales_case_id) REFERENCES after_sales.cases(id) ON DELETE SET NULL;
+
+
+-- Name: settlement_transactions settlement_transactions_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: finance; Owner: -
+
+ALTER TABLE ONLY finance.settlement_transactions
+    ADD CONSTRAINT settlement_transactions_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
+
+
+-- Name: settlement_transactions settlement_transactions_sales_order_id_fkey; Type: FK CONSTRAINT; Schema: finance; Owner: -
+
+ALTER TABLE ONLY finance.settlement_transactions
+    ADD CONSTRAINT settlement_transactions_sales_order_id_fkey FOREIGN KEY (sales_order_id) REFERENCES commerce.sales_orders(id) ON DELETE SET NULL;
+
+
+-- Name: settlement_transactions settlement_transactions_sales_order_line_id_fkey; Type: FK CONSTRAINT; Schema: finance; Owner: -
+
+ALTER TABLE ONLY finance.settlement_transactions
+    ADD CONSTRAINT settlement_transactions_sales_order_line_id_fkey FOREIGN KEY (sales_order_line_id) REFERENCES commerce.sales_order_lines(id) ON DELETE SET NULL;
+
+
+-- Name: settlement_transactions settlement_transactions_settlement_statement_id_fkey; Type: FK CONSTRAINT; Schema: finance; Owner: -
+
+ALTER TABLE ONLY finance.settlement_transactions
+    ADD CONSTRAINT settlement_transactions_settlement_statement_id_fkey FOREIGN KEY (settlement_statement_id) REFERENCES finance.settlement_statements(id) ON DELETE RESTRICT;
+
+
+-- Name: shipment_lines shipment_lines_sales_order_line_id_fkey; Type: FK CONSTRAINT; Schema: fulfillment; Owner: -
+
+ALTER TABLE ONLY fulfillment.shipment_lines
+    ADD CONSTRAINT shipment_lines_sales_order_line_id_fkey FOREIGN KEY (sales_order_line_id) REFERENCES commerce.sales_order_lines(id) ON DELETE RESTRICT;
+
+
+-- Name: shipment_lines shipment_lines_shipment_id_fkey; Type: FK CONSTRAINT; Schema: fulfillment; Owner: -
+
+ALTER TABLE ONLY fulfillment.shipment_lines
+    ADD CONSTRAINT shipment_lines_shipment_id_fkey FOREIGN KEY (shipment_id) REFERENCES fulfillment.shipments(id) ON DELETE CASCADE;
+
+
+-- Name: shipments shipments_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: fulfillment; Owner: -
+
+ALTER TABLE ONLY fulfillment.shipments
+    ADD CONSTRAINT shipments_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
+
+
+-- Name: shipments shipments_sales_order_id_fkey; Type: FK CONSTRAINT; Schema: fulfillment; Owner: -
+
+ALTER TABLE ONLY fulfillment.shipments
+    ADD CONSTRAINT shipments_sales_order_id_fkey FOREIGN KEY (sales_order_id) REFERENCES commerce.sales_orders(id) ON DELETE RESTRICT;
+
+
+-- Name: tracking_events tracking_events_shipment_id_fkey; Type: FK CONSTRAINT; Schema: fulfillment; Owner: -
+
+ALTER TABLE ONLY fulfillment.tracking_events
+    ADD CONSTRAINT tracking_events_shipment_id_fkey FOREIGN KEY (shipment_id) REFERENCES fulfillment.shipments(id) ON DELETE CASCADE;
+
+
+-- Name: raw_records raw_records_credential_id_fkey; Type: FK CONSTRAINT; Schema: integration; Owner: -
+
+ALTER TABLE ONLY integration.raw_records
+    ADD CONSTRAINT raw_records_credential_id_fkey FOREIGN KEY (credential_id) REFERENCES integration.credentials(id) ON DELETE SET NULL;
+
+
+-- Name: sync_jobs sync_jobs_credential_id_fkey; Type: FK CONSTRAINT; Schema: integration; Owner: -
+
+ALTER TABLE ONLY integration.sync_jobs
+    ADD CONSTRAINT sync_jobs_credential_id_fkey FOREIGN KEY (credential_id) REFERENCES integration.credentials(id) ON DELETE SET NULL;
+
+
+-- Name: account_links account_links_channel_account_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.account_links
+    ADD CONSTRAINT account_links_channel_account_id_fkey FOREIGN KEY (channel_account_id) REFERENCES commerce.channel_accounts(id) ON DELETE RESTRICT;
+
+
+-- Name: account_links account_links_procurement_account_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.account_links
+    ADD CONSTRAINT account_links_procurement_account_id_fkey FOREIGN KEY (procurement_account_id) REFERENCES procurement.procurement_accounts(id) ON DELETE RESTRICT;
+
+
+-- Name: account_links account_links_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.account_links
+    ADD CONSTRAINT account_links_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
+
+
+-- Name: link_evidence link_evidence_product_link_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.link_evidence
+    ADD CONSTRAINT link_evidence_product_link_id_fkey FOREIGN KEY (product_link_id) REFERENCES linkage.product_links(id) ON DELETE SET NULL;
+
+
+-- Name: link_evidence link_evidence_variant_link_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.link_evidence
+    ADD CONSTRAINT link_evidence_variant_link_id_fkey FOREIGN KEY (variant_link_id) REFERENCES linkage.variant_links(id) ON DELETE SET NULL;
+
+
+-- Name: link_issues link_issues_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.link_issues
+    ADD CONSTRAINT link_issues_channel_product_id_fkey FOREIGN KEY (channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE SET NULL;
+
+
+-- Name: link_issues link_issues_procurement_product_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.link_issues
+    ADD CONSTRAINT link_issues_procurement_product_id_fkey FOREIGN KEY (procurement_product_id) REFERENCES procurement.procurement_products(id) ON DELETE SET NULL;
+
+
+-- Name: link_overrides link_overrides_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.link_overrides
+    ADD CONSTRAINT link_overrides_channel_product_id_fkey FOREIGN KEY (channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE RESTRICT;
+
+
+-- Name: link_overrides link_overrides_procurement_product_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.link_overrides
+    ADD CONSTRAINT link_overrides_procurement_product_id_fkey FOREIGN KEY (procurement_product_id) REFERENCES procurement.procurement_products(id) ON DELETE RESTRICT;
+
+
+-- Name: product_links product_links_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.product_links
+    ADD CONSTRAINT product_links_channel_product_id_fkey FOREIGN KEY (channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE RESTRICT;
+
+
+-- Name: product_links product_links_procurement_product_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.product_links
+    ADD CONSTRAINT product_links_procurement_product_id_fkey FOREIGN KEY (procurement_product_id) REFERENCES procurement.procurement_products(id) ON DELETE RESTRICT;
+
+
+-- Name: product_links product_links_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.product_links
+    ADD CONSTRAINT product_links_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
+
+
+-- Name: variant_links variant_links_channel_product_variant_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.variant_links
+    ADD CONSTRAINT variant_links_channel_product_variant_id_fkey FOREIGN KEY (channel_product_variant_id) REFERENCES commerce.channel_product_variants(id) ON DELETE RESTRICT;
+
+
+-- Name: variant_links variant_links_procurement_product_variant_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.variant_links
+    ADD CONSTRAINT variant_links_procurement_product_variant_id_fkey FOREIGN KEY (procurement_product_variant_id) REFERENCES procurement.procurement_product_variants(id) ON DELETE RESTRICT;
+
+
+-- Name: variant_links variant_links_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
+
+ALTER TABLE ONLY linkage.variant_links
+    ADD CONSTRAINT variant_links_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
+
+
+-- Name: manual_product_costs manual_product_costs_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.manual_product_costs
+    ADD CONSTRAINT manual_product_costs_channel_product_id_fkey FOREIGN KEY (channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE RESTRICT;
+
+
+-- Name: procurement_accounts procurement_accounts_credential_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.procurement_accounts
+    ADD CONSTRAINT procurement_accounts_credential_id_fkey FOREIGN KEY (credential_id) REFERENCES integration.credentials(id) ON DELETE SET NULL;
+
+
+-- Name: procurement_product_variants procurement_product_variants_procurement_product_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.procurement_product_variants
+    ADD CONSTRAINT procurement_product_variants_procurement_product_id_fkey FOREIGN KEY (procurement_product_id) REFERENCES procurement.procurement_products(id) ON DELETE RESTRICT;
+
+
+-- Name: procurement_product_variants procurement_product_variants_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.procurement_product_variants
+    ADD CONSTRAINT procurement_product_variants_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
+
+
+-- Name: procurement_products procurement_products_procurement_account_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.procurement_products
+    ADD CONSTRAINT procurement_products_procurement_account_id_fkey FOREIGN KEY (procurement_account_id) REFERENCES procurement.procurement_accounts(id) ON DELETE RESTRICT;
+
+
+-- Name: procurement_products procurement_products_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.procurement_products
+    ADD CONSTRAINT procurement_products_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
+
+
+-- Name: purchase_order_lines purchase_order_lines_procurement_product_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.purchase_order_lines
+    ADD CONSTRAINT purchase_order_lines_procurement_product_id_fkey FOREIGN KEY (procurement_product_id) REFERENCES procurement.procurement_products(id) ON DELETE RESTRICT;
+
+
+-- Name: purchase_order_lines purchase_order_lines_procurement_product_variant_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.purchase_order_lines
+    ADD CONSTRAINT purchase_order_lines_procurement_product_variant_id_fkey FOREIGN KEY (procurement_product_variant_id) REFERENCES procurement.procurement_product_variants(id) ON DELETE SET NULL;
+
+
+-- Name: purchase_order_lines purchase_order_lines_purchase_order_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.purchase_order_lines
+    ADD CONSTRAINT purchase_order_lines_purchase_order_id_fkey FOREIGN KEY (purchase_order_id) REFERENCES procurement.purchase_orders(id) ON DELETE RESTRICT;
+
+
+-- Name: purchase_order_lines purchase_order_lines_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.purchase_order_lines
+    ADD CONSTRAINT purchase_order_lines_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
+
+
+-- Name: purchase_orders purchase_orders_procurement_account_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.purchase_orders
+    ADD CONSTRAINT purchase_orders_procurement_account_id_fkey FOREIGN KEY (procurement_account_id) REFERENCES procurement.procurement_accounts(id) ON DELETE RESTRICT;
+
+
+-- Name: purchase_orders purchase_orders_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.purchase_orders
+    ADD CONSTRAINT purchase_orders_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
+
+
+-- Name: spu_images spu_images_channel_account_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.spu_images
+    ADD CONSTRAINT spu_images_channel_account_id_fkey FOREIGN KEY (channel_account_id) REFERENCES commerce.channel_accounts(id) ON DELETE RESTRICT;
+
+
+-- Name: spu_images spu_images_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.spu_images
+    ADD CONSTRAINT spu_images_channel_product_id_fkey FOREIGN KEY (channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE RESTRICT;
+
+
+-- Name: spu_images spu_images_uploaded_by_key_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
+
+ALTER TABLE ONLY procurement.spu_images
+    ADD CONSTRAINT spu_images_uploaded_by_key_id_fkey FOREIGN KEY (uploaded_by_key_id) REFERENCES security.api_keys(id) ON DELETE SET NULL;
+
+
+-- Name: product_cost_snapshots product_cost_snapshots_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: reporting; Owner: -
+
+ALTER TABLE ONLY reporting.product_cost_snapshots
+    ADD CONSTRAINT product_cost_snapshots_channel_product_id_fkey FOREIGN KEY (channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE RESTRICT;
+
+
+-- Name: product_profit_daily product_profit_daily_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: reporting; Owner: -
+
+ALTER TABLE ONLY reporting.product_profit_daily
+    ADD CONSTRAINT product_profit_daily_channel_product_id_fkey FOREIGN KEY (channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE RESTRICT;
+
+
+-- Name: shipment_tracking_summary shipment_tracking_summary_shipment_id_fkey; Type: FK CONSTRAINT; Schema: reporting; Owner: -
+
+ALTER TABLE ONLY reporting.shipment_tracking_summary
+    ADD CONSTRAINT shipment_tracking_summary_shipment_id_fkey FOREIGN KEY (shipment_id) REFERENCES fulfillment.shipments(id) ON DELETE CASCADE;
+
+
 -- PostgreSQL database dump complete
 
-\unrestrict ZGHgNvf16OmDGU9JEoH59Kc1xOFSehZY2GoUUQd4QjxfinPmeKaQD9kna92bbAE
+\unrestrict zncrxhs5au9fDfoNAPhzpkfRgvuf5ajldmQ9rasslkF3ef7kdQOPqi3GBBQUcHR
 

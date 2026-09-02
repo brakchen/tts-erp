@@ -3,58 +3,119 @@
 Importing this package registers every tts_erp_v2 model on Base.metadata
 via side-effect imports of the per-schema submodules.
 """
+
 from __future__ import annotations
 
 from sqlalchemy import MetaData
 
 from tts_erp_v2.db.base import Base
+from tts_erp_v2.db.models.after_sales import (
+    Case,
+    CaseLine,
+)
+from tts_erp_v2.db.models.analytics import (
+    AdAuditLog,
+    AdCursor,
+    AdDailyCompleteness,
+    AdDailyPage,
+    AdRecord,
+    AdShopTimezone,
+)
+from tts_erp_v2.db.models.commerce import (
+    ChannelAccount,
+    ChannelProduct,
+    ChannelProductVariant,
+    SalesOrder,
+    SalesOrderLine,
+)
+from tts_erp_v2.db.models.finance import (
+    Payout,
+    SettlementComponent,
+    SettlementStatement,
+    SettlementTransaction,
+)
+from tts_erp_v2.db.models.fulfillment import (
+    Shipment,
+    ShipmentLine,
+    TrackingEvent,
+)
 
 # Side-effect: import every per-schema module so its tables register on
 # Base.metadata. We also re-export the classes for convenience so tests
 # can `from tts_erp_v2.db.models import ApiKey` etc.
-from tts_erp_v2.db.models.integration import (  # noqa: F401
-    Credentials, RawRecord, SyncJob, SyncCursor, SyncIssue,
+from tts_erp_v2.db.models.integration import (
+    Credentials,
+    RawRecord,
+    SyncCursor,
+    SyncIssue,
+    SyncJob,
 )
-from tts_erp_v2.db.models.commerce import (  # noqa: F401
-    ChannelAccount, ChannelProduct, ChannelProductVariant,
-    SalesOrder, SalesOrderLine,
+from tts_erp_v2.db.models.linkage import (
+    AccountLink,
+    LinkEvidence,
+    LinkIssue,
+    LinkOverride,
+    ProductLink,
+    VariantLink,
 )
-from tts_erp_v2.db.models.procurement import (  # noqa: F401
-    ProcurementAccount, ProcurementProduct, ProcurementProductVariant,
-    PurchaseOrder, PurchaseOrderLine, ManualProductCost,
+from tts_erp_v2.db.models.procurement import (
+    ManualProductCost,
+    ProcurementAccount,
+    ProcurementProduct,
+    ProcurementProductVariant,
+    PurchaseOrder,
+    PurchaseOrderLine,
 )
-from tts_erp_v2.db.models.fulfillment import (  # noqa: F401
-    Shipment, ShipmentLine, TrackingEvent,
+from tts_erp_v2.db.models.reporting import (
+    ProductCostSnapshot,
+    ProductProfitDaily,
+    ShipmentTrackingSummary,
 )
-from tts_erp_v2.db.models.after_sales import (  # noqa: F401
-    Case, CaseLine,
-)
-from tts_erp_v2.db.models.finance import (  # noqa: F401
-    Payout, SettlementStatement, SettlementTransaction, SettlementComponent,
-)
-from tts_erp_v2.db.models.linkage import (  # noqa: F401
-    AccountLink, ProductLink, VariantLink, LinkEvidence,
-    LinkOverride, LinkIssue,
-)
-from tts_erp_v2.db.models.reporting import (  # noqa: F401
-    ProductCostSnapshot, ProductProfitDaily, ShipmentTrackingSummary,
-)
-from tts_erp_v2.db.models.security import ApiKey  # noqa: F401
-
+from tts_erp_v2.db.models.security import ApiKey
 
 __all__ = [
-    "Base",
-    "Credentials", "RawRecord", "SyncJob", "SyncCursor", "SyncIssue",
-    "ChannelAccount", "ChannelProduct", "ChannelProductVariant",
-    "SalesOrder", "SalesOrderLine",
-    "ProcurementAccount", "ProcurementProduct", "ProcurementProductVariant",
-    "PurchaseOrder", "PurchaseOrderLine", "ManualProductCost",
-    "Shipment", "ShipmentLine", "TrackingEvent",
-    "Case", "CaseLine",
-    "Payout", "SettlementStatement", "SettlementTransaction", "SettlementComponent",
-    "AccountLink", "ProductLink", "VariantLink", "LinkEvidence", "LinkOverride", "LinkIssue",
-    "ProductCostSnapshot", "ProductProfitDaily", "ShipmentTrackingSummary",
+    "AccountLink",
+    "AdAuditLog",
+    "AdCursor",
+    "AdDailyCompleteness",
+    "AdDailyPage",
+    "AdRecord",
+    "AdShopTimezone",
     "ApiKey",
+    "Base",
+    "Case",
+    "CaseLine",
+    "ChannelAccount",
+    "ChannelProduct",
+    "ChannelProductVariant",
+    "Credentials",
+    "LinkEvidence",
+    "LinkIssue",
+    "LinkOverride",
+    "ManualProductCost",
+    "Payout",
+    "ProcurementAccount",
+    "ProcurementProduct",
+    "ProcurementProductVariant",
+    "ProductCostSnapshot",
+    "ProductLink",
+    "ProductProfitDaily",
+    "PurchaseOrder",
+    "PurchaseOrderLine",
+    "RawRecord",
+    "SalesOrder",
+    "SalesOrderLine",
+    "SettlementComponent",
+    "SettlementStatement",
+    "SettlementTransaction",
+    "Shipment",
+    "ShipmentLine",
+    "ShipmentTrackingSummary",
+    "SyncCursor",
+    "SyncIssue",
+    "SyncJob",
+    "TrackingEvent",
+    "VariantLink",
 ]
 
 
