@@ -49,31 +49,28 @@ def _cleanup_audit_rows(db_engine):
         )
 
 
-def _valid_record() -> dict:
+def _valid_dump() -> dict:
+    """DumpBodyIn 形状：单 dump object（dump architecture，page 隐式 = 1）。"""
     return {
-        "idempotencyKey": "a" * 64,
-        "storageKey": "productAnalyses",
-        "campaignId": "TEST_campaign-1",
-        "day": "2026-08-30",
-        "page": 1,
-        "expectedPageCount": 1,
         "endpoint": "/oec_ads/report",
         "method": "POST",
-        "response": {"data": []},
-        "source": "background_poll",
+        "day": "2026-08-30",
+        "campaignId": "TEST_campaign-1",
+        "request": {"url": "https://ads.tiktok.com/report", "headers": {}},
+        "response": {"status": 200, "body": {"data": []}},
         "capturedAt": "2026-08-30T18:43:00.000Z",
         "schemaVersion": 2,
     }
 
 
-def _payload(**record_overrides) -> dict:
-    record = _valid_record()
-    record.update(record_overrides)
+def _payload(**dump_overrides) -> dict:
+    dump = _valid_dump()
+    dump.update(dump_overrides)
     return {
         "protocolVersion": 2,
         "requestId": "TEST_req-observability",
         "scope": {"sellerId": "TEST_seller-1", "advertiserId": "TEST_adv-1"},
-        "records": [record],
+        "dump": dump,
     }
 
 
@@ -206,7 +203,7 @@ def test_schema_invalid_response_carries_structured_errors_single_field(
     err = body["errors"][0]
     # Safe identifier triple only — no raw input values, no ctx, no url.
     assert set(err.keys()) == {"loc", "msg", "type"}
-    assert err["loc"] == ["records", 0, "capturedAt"]
+    assert err["loc"] == ["dump", "capturedAt"]
     assert err["type"] == "value_error"
     assert "timezone" in err["msg"]
 
@@ -215,16 +212,12 @@ def test_schema_invalid_response_carries_structured_errors_multiple_fields(
     api_client,
     readwrite_key,
 ):
-    """All Pydantic validation failures surface as separate entries in order."""
-    payload = _payload()
-    payload["records"] = [
-        # record 0: idempotencyKey too short
-        {**_valid_record(), "idempotencyKey": "short"},
-        # record 1: bad storageKey enum
-        {**_valid_record(), "storageKey": "WRONG"},
-        # record 2: page = 0 (must be >= 1)
-        {**_valid_record(), "page": 0},
-    ]
+    """All dump-field validation failures surface as separate entries in order."""
+    payload = _payload(
+        endpoint="",  # min_length=1 → string_too_short
+        campaignId="",  # min_length=1 → string_too_short
+        schemaVersion=0,  # ge=1 → greater_than_equal
+    )
     r = api_client.post(
         _BATCHES,
         json=payload,
@@ -235,11 +228,11 @@ def test_schema_invalid_response_carries_structured_errors_multiple_fields(
     assert body["code"] == "SCHEMA_INVALID"
     errors = body["errors"]
     assert len(errors) == 3
-    assert errors[0]["loc"] == ["records", 0, "idempotencyKey"]
+    assert errors[0]["loc"] == ["dump", "endpoint"]
     assert errors[0]["type"] == "string_too_short"
-    assert errors[1]["loc"] == ["records", 1, "storageKey"]
-    assert errors[1]["type"] == "enum"
-    assert errors[2]["loc"] == ["records", 2, "page"]
+    assert errors[1]["loc"] == ["dump", "campaignId"]
+    assert errors[1]["type"] == "string_too_short"
+    assert errors[2]["loc"] == ["dump", "schemaVersion"]
     assert errors[2]["type"] == "greater_than_equal"
 
 
@@ -252,12 +245,12 @@ def test_schema_invalid_response_strips_input_and_ctx_from_structured_errors(
     them out of the response envelope even when the value is innocuous.
 
     Regression guard: a future cleanup that pipes Pydantic's errors()
-    straight through would leak ``input: 'short'`` for the too-short
-    idempotencyKey test, or ``ctx: {min_length: 64}`` for the same.
+    straight through would leak ``input: '2026-08-30T18:43:00'`` for the
+    naive-capturedAt test, or ``ctx: {min_length: ...}`` for the same.
     """
     r = api_client.post(
         _BATCHES,
-        json=_payload(idempotencyKey="short"),
+        json=_payload(capturedAt="2026-08-30T18:43:00"),  # 缺时区 → invalid
         headers={"Authorization": f"Bearer {readwrite_key}"},
     )
     body = r.json()
