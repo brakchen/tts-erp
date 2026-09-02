@@ -26,6 +26,7 @@ We keep the legacy ``miaoshou/`` package intact: the FastAPI app at
 imports the signing helpers from ``miaoshou.miaoshou_signing`` directly
 to avoid duplicating the canonical-string logic.
 """
+
 from __future__ import annotations
 
 import http.client
@@ -162,9 +163,13 @@ class EnvConfig:
     def from_name(cls, env: str | None) -> EnvConfig:
         env = (env or "test").lower()
         if env == "prod":
-            return cls(base_url=PROD_BASE, path_prefix=PROD_USER_OPEN_PREFIX, name="prod")
+            return cls(
+                base_url=PROD_BASE, path_prefix=PROD_USER_OPEN_PREFIX, name="prod"
+            )
         if env == "test":
-            return cls(base_url=TEST_BASE, path_prefix=TEST_USER_OPEN_PREFIX, name="test")
+            return cls(
+                base_url=TEST_BASE, path_prefix=TEST_USER_OPEN_PREFIX, name="test"
+            )
         raise ValueError(f"未知 MIAOSHOU_ENV: {env!r}, expected 'prod' or 'test'")
 
 
@@ -202,9 +207,7 @@ class MiaoshouClient:
         license_id = os.environ.get("MIAOSHOU_LICENSE_ID", "")
         secret = os.environ.get("MIAOSHOU_COMPANY_SECRET", "")
         if not license_id or not secret:
-            raise RuntimeError(
-                "missing MIAOSHOU_LICENSE_ID / MIAOSHOU_COMPANY_SECRET"
-            )
+            raise RuntimeError("missing MIAOSHOU_LICENSE_ID / MIAOSHOU_COMPANY_SECRET")
         try:
             timeout = float(os.environ.get("MIAOSHOU_HTTP_TIMEOUT", "30"))
         except (TypeError, ValueError) as e:
@@ -246,6 +249,7 @@ class MiaoshouClient:
 
         if os.environ.get("MIAOSHOU_DEBUG_SIGN") == "1":
             import sys
+
             print(
                 f"[miaoshou-debug] url={url}\n  envelope.sign={envelope['sign']}\n"
                 f"  busData={envelope['busData']}",
@@ -265,7 +269,9 @@ class MiaoshouClient:
         try:
             payload = json.loads(raw)
         except (ValueError, TypeError) as e:
-            raise MiaoshouApiError(0, f"无法解析响应: {e} body={raw[:200]}", None) from e
+            raise MiaoshouApiError(
+                0, f"无法解析响应: {e} body={raw[:200]}", None
+            ) from e
 
         try:
             raw_code = int(payload.get("code", 0))
@@ -320,9 +326,7 @@ class MiaoshouErpClient:
         app_id = app_id_raw.strip()
         app_secret = app_secret_raw.strip()
         if not app_id or not app_secret:
-            raise RuntimeError(
-                "missing MIAOSHOU_LICENSE_ID / MIAOSHOU_COMPANY_SECRET"
-            )
+            raise RuntimeError("missing MIAOSHOU_LICENSE_ID / MIAOSHOU_COMPANY_SECRET")
         try:
             timeout = float(os.environ.get("MIAOSHOU_HTTP_TIMEOUT", "30"))
         except (TypeError, ValueError) as e:
@@ -393,7 +397,9 @@ class MiaoshouErpClient:
         }
 
         try:
-            raw = safe_http_post_json(url, body_bytes, self.timeout, headers=auth_headers)
+            raw = safe_http_post_json(
+                url, body_bytes, self.timeout, headers=auth_headers
+            )
         except urllib.error.HTTPError as e:
             preview = e.read().decode("utf-8", errors="replace")[:300]
             biz_code: int | str = e.code
@@ -412,7 +418,9 @@ class MiaoshouErpClient:
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError as e:
-            raise MiaoshouApiError(0, f"无法解析响应: {e} body={raw[:200]}", None) from e
+            raise MiaoshouApiError(
+                0, f"无法解析响应: {e} body={raw[:200]}", None
+            ) from e
 
         # ERP envelope: {"result":"success"/"fail", "code":"0"/<errorCode>, "data":..., "reason":...}
         result = payload.get("result")

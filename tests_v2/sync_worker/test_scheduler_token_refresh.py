@@ -16,6 +16,7 @@ These tests verify:
 3. The TikTok refresher registry is wired into the call (proves the
    no-op stub from before the fix is no longer being used).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -76,10 +77,9 @@ def _cleanup(session_factory: sessionmaker, *, external_id: str) -> None:
     sess = session_factory()
     try:
         from sqlalchemy import delete
+
         sess.execute(
-            delete(Credentials).where(
-                Credentials.external_account_id == external_id
-            )
+            delete(Credentials).where(Credentials.external_account_id == external_id)
         )
         sess.commit()
     finally:
@@ -120,7 +120,9 @@ def test_run_token_refresh_writes_succeeded_sync_job(
         def reg(provider: str, external_account_id: str) -> Any:
             def refresher(_p: str, _eid: str) -> dict:
                 return fake_payload
+
             return refresher
+
         return reg
 
     monkeypatch.setattr(tiktok_auth, "build_token_registry", fake_registry)
@@ -138,9 +140,11 @@ def test_run_token_refresh_writes_succeeded_sync_job(
     # The scheduler MUST have written a sync_jobs row.
     sess = session_factory()
     try:
-        rows = sess.execute(
-            select(SyncJob).where(SyncJob.job_name == "token.refresh")
-        ).scalars().all()
+        rows = (
+            sess.execute(select(SyncJob).where(SyncJob.job_name == "token.refresh"))
+            .scalars()
+            .all()
+        )
         assert len(rows) >= 1
         # Most recent row is 'succeeded'.
         latest = max(rows, key=lambda r: r.started_at)
@@ -181,6 +185,7 @@ def test_run_token_refresh_writes_failed_sync_job_on_exception(
         # Commit a 'failed' row first to simulate the original run_job
         # behavior, then raise.
         from tts_erp_v2.jobs.runner import run_job
+
         with run_job(session, job_name="token.refresh") as job:
             job.rows_total = 0
         session.commit()
@@ -202,9 +207,11 @@ def test_run_token_refresh_writes_failed_sync_job_on_exception(
     # Verify a 'failed' sync_jobs row was written.
     sess = session_factory()
     try:
-        rows = sess.execute(
-            select(SyncJob).where(SyncJob.job_name == "token.refresh")
-        ).scalars().all()
+        rows = (
+            sess.execute(select(SyncJob).where(SyncJob.job_name == "token.refresh"))
+            .scalars()
+            .all()
+        )
         assert len(rows) >= 1
         latest = max(rows, key=lambda r: r.started_at)
         # The scheduler should have written either:
@@ -256,7 +263,9 @@ def test_run_token_refresh_wires_real_tiktok_refresher(
                     "shop_cipher": "rotated_cipher_xyz",
                     "expires_at": datetime.now(UTC) + timedelta(hours=2),
                 }
+
             return refresher
+
         return reg
 
     monkeypatch.setattr(tiktok_auth, "build_token_registry", fake_registry)

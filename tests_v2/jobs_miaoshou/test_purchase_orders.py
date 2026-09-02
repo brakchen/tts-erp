@@ -8,6 +8,7 @@ Endpoint (apifox api-482189163): search_goods_purchase_order_page.
 Param shape: page / pageSize (NOT pageNo). Response key:
 goodsPurchaseOrderList + total.
 """
+
 from __future__ import annotations
 
 import pytest

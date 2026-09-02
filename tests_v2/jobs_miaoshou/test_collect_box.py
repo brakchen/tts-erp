@@ -1,4 +1,5 @@
 """Tests for tts_erp_v2.jobs.miaoshou.collect_box."""
+
 from __future__ import annotations
 
 import pytest
@@ -67,7 +68,10 @@ def test_sync_collect_box_empty_response(
     db_session, fake_client, miaoshou_credentials_row
 ) -> None:
     fake_client.install(
-        lambda **_: {"result": "success", "data": {"collectBoxDetailList": [], "total": 0}}
+        lambda **_: {
+            "result": "success",
+            "data": {"collectBoxDetailList": [], "total": 0},
+        }
     )
     result = sync_collect_box(db_session, client=fake_client)
     db_session.commit()

@@ -11,6 +11,7 @@ Covers:
 Note on isolation: these tests run against the dev DB inside the
 rollback fixture. Assertions are bounded to TEST_-seeded rows only.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
@@ -86,9 +87,7 @@ def _fake_module(monkeypatch: pytest.MonkeyPatch, fn) -> None:
     """Inject a fake module into importlib for the dispatch test."""
     fake = MagicMock()
     fake.fake_entry = fn
-    monkeypatch.setattr(
-        scheduler.importlib, "import_module", lambda _path: fake
-    )
+    monkeypatch.setattr(scheduler.importlib, "import_module", lambda _path: fake)
 
 
 def test_system_job_commits_on_success(monkeypatch):
@@ -213,9 +212,7 @@ def test_run_cost_snapshots_writes_seeded_spu(db_session):
 def test_run_profit_daily_far_future_date(db_session):
     """Rebuild for a date with no orders writes zero rows (and does not
     touch prod rows for today)."""
-    rows = reporting_job.profit_daily.rebuild(
-        db_session, profit_date=date(2030, 1, 1)
-    )
+    rows = reporting_job.profit_daily.rebuild(db_session, profit_date=date(2030, 1, 1))
     assert rows == []
 
 

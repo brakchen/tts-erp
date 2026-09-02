@@ -7,6 +7,7 @@ The legacy ``miaoshou/miaoshou_erp_client.py`` sends x-app-key /
 x-timestamp / x-sign headers; this test pins that contract on the v2
 client so the signature can never be dropped again.
 """
+
 from __future__ import annotations
 
 import json

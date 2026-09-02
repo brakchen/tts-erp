@@ -34,6 +34,7 @@ Empty pages → natural pagination end (no error). Non-rate-limit
 failures propagate to ``run_job`` → SyncJob status='failed'. Re-runs
 are idempotent (ON CONFLICT DO UPDATE on the unique constraint).
 """
+
 from __future__ import annotations
 
 import logging
@@ -58,8 +59,14 @@ MAX_PAGES = 1000
 
 
 class _MiaoshouClientProto(Protocol):
-    def _call_erp(self, *, path: str, body: dict | None = None, query: dict | None = None,
-                  extra_headers: dict | None = None) -> dict[str, Any]: ...
+    def _call_erp(
+        self,
+        *,
+        path: str,
+        body: dict | None = None,
+        query: dict | None = None,
+        extra_headers: dict | None = None,
+    ) -> dict[str, Any]: ...
 
 
 def _fetch_page(
@@ -117,11 +124,10 @@ def sync_collect_box(
         # injected client (e.g. tests).
         ctx = resolve_miaoshou_context(session, license_id=license_id)
         if ctx is None:
-            raise RuntimeError(
-                "no miaoshou credentials row; cannot construct context"
-            )
+            raise RuntimeError("no miaoshou credentials row; cannot construct context")
         if client is None:
             from tts_erp_v2.jobs.miaoshou._common import miaoshou_client_factory
+
             client = miaoshou_client_factory(ctx)
 
         rate_limit_retries = 0
@@ -129,7 +135,9 @@ def sync_collect_box(
         def _on_retry(attempt: int, err: BaseException) -> None:
             nonlocal rate_limit_retries
             rate_limit_retries += 1
-            log.warning("miaoshou.collect_box page retry attempt=%d err=%r", attempt, err)
+            log.warning(
+                "miaoshou.collect_box page retry attempt=%d err=%r", attempt, err
+            )
 
         def fetch_page(page: int) -> dict[str, Any]:
             return _fetch_page(client, page_no=page)  # type: ignore[arg-type]
@@ -263,9 +271,7 @@ def _upsert_product(
     row = session.execute(
         select(ProcurementProduct)
         .where(ProcurementProduct.procurement_account_id == procurement_account_id)
-        .where(
-            ProcurementProduct.external_product_id == parsed["external_product_id"]
-        )
+        .where(ProcurementProduct.external_product_id == parsed["external_product_id"])
     ).scalar_one()
     return row
 

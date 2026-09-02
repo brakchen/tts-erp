@@ -19,6 +19,7 @@ We keep the test pure: the fake client is injected via the
 ``client=`` parameter; no network, no real SDK, no real DB writes
 outside the test-owned transaction (rolled back at teardown).
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -162,9 +163,9 @@ def test_move_collect_writes_raw_records_per_task(
     )
     fake_client.install(side_effect)
 
-    max_raw_id = db_session.execute(
-        select(func.max(RawRecord.id))
-    ).scalar_one_or_none() or 0
+    max_raw_id = (
+        db_session.execute(select(func.max(RawRecord.id))).scalar_one_or_none() or 0
+    )
     sync_move_collect(db_session, client=fake_client, max_retries=2)
     db_session.commit()
 
@@ -241,7 +242,9 @@ def test_move_collect_idempotent(
                 LinkEvidence.evidence_type == "MOVE_COLLECT_TASK",
                 LinkEvidence.source_external_id.like("t_%"),
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
     assert first_count == 3
 
@@ -254,7 +257,9 @@ def test_move_collect_idempotent(
                 LinkEvidence.evidence_type == "MOVE_COLLECT_TASK",
                 LinkEvidence.source_external_id.like("t_%"),
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
     assert second_count == 3, (
         f"idempotency broken: re-run added {second_count - first_count} extra evidence rows"
@@ -265,8 +270,12 @@ def test_move_collect_handles_empty_response(
     db_session, fake_client, miaoshou_credentials_row
 ) -> None:
     """Empty move-collect list must terminate cleanly."""
+
     def side_effect(*, path, body, **_kwargs):
-        return {"result": "success", "data": {"moveCollectDetailList": [], "total": 0, "totalPage": 1}}
+        return {
+            "result": "success",
+            "data": {"moveCollectDetailList": [], "total": 0, "totalPage": 1},
+        }
 
     fake_client.install(side_effect)
 
@@ -291,6 +300,7 @@ def test_move_collect_skips_non_dict_items(
     db_session, fake_client, miaoshou_credentials_row
 ) -> None:
     """Items that aren't dicts land in ``sync_issues`` and the job continues."""
+
     def side_effect(*, path, body, **_kwargs):
         return {
             "result": "success",
@@ -330,9 +340,7 @@ def test_move_collect_status_filter(
     )
     fake_client.install(side_effect)
 
-    sync_move_collect(
-        db_session, client=fake_client, status="success", max_retries=2
-    )
+    sync_move_collect(db_session, client=fake_client, status="success", max_retries=2)
     db_session.commit()
 
     # The status filter must appear in the body sent to the upstream.

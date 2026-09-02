@@ -1,4 +1,5 @@
 """Tests for tts_erp_v2.jobs.miaoshou.shops."""
+
 from __future__ import annotations
 
 import pytest
@@ -52,9 +53,7 @@ def test_sync_shops_writes_shops_and_sync_job_row(
 def test_sync_shops_empty_response_is_noop(
     db_session, fake_client, miaoshou_credentials_row
 ) -> None:
-    fake_client.install(
-        lambda **_: {"result": "success", "data": {"shopList": []}}
-    )
+    fake_client.install(lambda **_: {"result": "success", "data": {"shopList": []}})
     result = sync_shops(db_session, client=fake_client)
     db_session.commit()
     assert result["upserted"] == 0

@@ -17,6 +17,7 @@ NOT commit — the scheduler's system-job executor commits on success and
 writes a sentinel failed row on exception (same contract as
 ``token.refresh``).
 """
+
 from __future__ import annotations
 
 import logging
@@ -86,7 +87,10 @@ def run_cost_snapshots(session: Session) -> dict[str, Any]:
             "calculation_version": calculation_version,
             "valid_from": valid_from.isoformat(),
         }
-        return {"snapshots_written": written, "calculation_version": calculation_version}
+        return {
+            "snapshots_written": written,
+            "calculation_version": calculation_version,
+        }
 
 
 def run_profit_daily(session: Session) -> dict[str, Any]:
