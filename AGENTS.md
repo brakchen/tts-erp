@@ -133,7 +133,7 @@ curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" \
 | `GET /v2/llm-context` | 给 LLM agent 的上下文包（experimental） |
 | `GET /v2/admin/rate-limit` | 查看当前限流状态（singleton 存在时 limit / window_s / active_buckets + env var） |
 | `POST /v2/admin/reset-rate-limit` | 热重载限流（admin）；body `{new_limit?, reset_buckets?}`，不传 `new_limit` 即重读 `TTS_ERP_RATE_LIMIT_PER_MIN` |
-| `GET /v2/analytics/sync/cursor`、`POST /v2/analytics/sync/batches` | Chrome 扩展广告分析 ingest（readwrite + key scope；自有 envelope；2026-09-02 从 /v1 硬切，无别名） |
+| `GET /v2/analytics/sync/cursor`、`POST /v2/analytics/sync/dumps` | Chrome 扩展广告分析 ingest（readwrite + key scope；自有 envelope；2026-09-02 从 /v1 硬切无别名；同日 dump 化：cursor 降级 has-data，`/batches` → `/dumps` 单 dump，见 tech-doc/analytics/dump-architecture.md） |
 
 **已拆除、不要再找**：
 
@@ -142,6 +142,7 @@ curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" \
 - 没有 `/v2/linkage/effective-product-links` —— 那只是 DB 层 view，无 HTTP 端点
 - 没有任何 `/miaoshou/*` 路由 —— 出站代理和回调端点都未挂进 v2（见 §10.2）
 - 没有 `/v1/analytics/sync/*` —— 2026-09-02 硬切到 `/v2/analytics/sync/*`（单挂载无别名，legacy `analytics_sync/` 包同 release 删除）
+- 没有 `/v2/analytics/sync/batches` —— dump 架构（同 release）换成 `/v2/analytics/sync/dumps`（单 dump object），cursor 从 work-list（items/nextRequiredDay）降级为 has-data 预检；`ad_daily_pages` / `ad_cursors` 表已随 migration 0005 drop
 - 读端点过滤参数是内部 id（`channel_account_id` 等），`shop_id` 会被静默忽略（见 §2.4）
 
 **legacy v1 端点状态**（2026-08-29 切换后）：

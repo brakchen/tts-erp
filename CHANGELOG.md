@@ -1,5 +1,57 @@
 # tts-erp CHANGELOG
 
+## 2026-09-02 (feature) — Analytics ingest dump architecture（migration 0005）
+
+设计文档：`tech-doc/analytics/dump-architecture.md`（4 个 lock-in 决策）。配套 Chrome
+扩展端（`tk-adv-cost-monitor`）同步 release（插件 repo commits 3d7ddb7 → 8975e4e）。
+
+### 协议（breaking，随扩展同窗口发布）
+
+- `POST /v2/analytics/sync/batches`（批量 records[]）→ **`POST /v2/analytics/sync/dumps`**：
+  body 单 dump object（`{protocolVersion, requestId, scope, dump:{endpoint, method, day,
+  campaignId, request, response, capturedAt}}`），严禁批量。响应 `data:{idempotencyKey, status}`。
+- `GET /v2/analytics/sync/cursor` 从 work-list（`items[]/nextRequiredDay/pageSize/cursor/timezone`）
+  降级为 **has-data 预检**：`?sellerId&advertiserId&endpoint&day[&campaignId]` →
+  `data:{day, endpoint, storageKey, hasData}`（查 `ad_raw` existence）。
+- `protocolVersion ∈ {1,2}`（2 = dump 单 object 形状）；idempotency key 算法不变（6 字段，page 固定 1）。
+
+### Storage / schema（alembic `0005_ad_raw_per_unit_day.py`）
+
+- 新 `analytics.ad_raw`：source-of-truth，1 dump 1 行完整 HTTP 交换（request/response JSONB）；
+  UNIQUE `(seller_id, advertiser_id, endpoint, day, campaign_id)`；无 FK 到派生表；retention 不 purge。
+- drop `ad_daily_pages`（page bitmap）、`ad_cursors`（cursor work-list 状态）。
+- `ad_records` 去 `page` / `expected_page_count` 列；唯一约束改 5 元组
+  `uq_analytics_records_unit_day`；`ad_daily_completeness` 只留 `captured_at`
+  （existence 语义 = has-data 查 ad_raw）。
+- `tts_erp_v2/db/models/analytics.py` 对齐 5 表现状（删 AdDailyPage/AdCursor，加 AdRaw；
+  AdRecord/AdDailyCompleteness 去 page/expected/is_complete 列）。
+
+### Code
+
+- `tts_erp_v2/api/v2/analytics.py`：`post_dumps`（含 size 闸 2MB/256KB、storage_key 由
+  `STORAGE_KEY_BY_PATH` 推导、SCHEMA_INVALID structured errors[]）+ `get_cursor` has-data。
+- `tts_erp_v2/analytics/domain.py`：删 Record.page/expected_page_count/CursorEntry/CursorPage；
+  新增 DumpPayload/DumpResult/HasDataResult。
+- `tts_erp_v2/analytics/repository.py`：raw SQL（SQL_INSERT_RAW / SQL_INSERT_DERIVED /
+  SQL_UPSERT_COMPLETENESS）+ `has_data()` + `upsert_dump()`；`STORAGE_KEY_BY_PATH` 常量。
+- `tts_erp_v2/jobs/analytics_retention.py`：ad_raw 永久保留语义（docstring 同步）。
+
+### Tests
+
+- `tests_v2/api/test_analytics_v2_contract.py` 重写：cursor has-data（before/after dump）、
+  `/dumps` 单 dump insert+duplicate、v1 404、unknown endpoint 400、audit log、envelope。
+- `tests_v2/api/test_analytics_v2_errors.py`：payload 形状 records[] → dump 单 object；
+  structured errors loc `['records',0,·]` → `['dump',·]`。
+- `tests_v2/api/test_endpoints_index.py`：`/batches` 断言 → `/dumps`。
+
+### Docs
+
+- `tech-doc/analytics/dump-architecture.md` 新增（★ 事实源）；旧 5 文档（analytics-sync.md /
+  architecture.md / compatibility.md / plugin-integration.md / openapi.yaml）加 superseded banner。
+- `tech-doc/external-api.md`：analytics 节重写（/cursor has-data + /dumps 协议/示例/错误表/矩阵）。
+- `setup/analytics-sync.md` v0.5.0 → v0.6.0 全量重写 dump 版。
+- `AGENTS.md` §3 端点表 `/batches` → `/dumps` + 「已拆除」加 /batches 404 + ad_daily_pages/ad_cursors drop。
+
 ## 2026-09-02 (feature) — Analytics ingest v2 化 + /v2 路径硬切
 
 设计文档：`tech-doc/analytics-v2-migration-plan.md`（4 个决策）。迁移实战见

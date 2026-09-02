@@ -41,7 +41,7 @@ cookie (see [Browser session login](#browser-session-login)).
 | Operator console (HTML) | `GET /v2/pages/manual-costs` | readonly (browser → 302 login) |
 | SPU image list / upload / delete | `GET /v2/spu-images`, `POST /v2/spu-images/upload-url`, `POST /v2/spu-images/{id}/confirm`, `DELETE /v2/spu-images/{id}` | readonly / readwrite |
 | Browser login / logout / whoami | `GET\|POST /v2/auth/login`, `POST /v2/auth/logout`, `GET /v2/auth/me` | public |
-| Analytics cursor / batch upload (Chrome ext) | `GET /v2/analytics/sync/cursor`, `POST /v2/analytics/sync/batches` | readwrite + scope |
+| Analytics cursor has-data / dump ingest (Chrome ext) | `GET /v2/analytics/sync/cursor`, `POST /v2/analytics/sync/dumps` | readwrite + scope |
 
 Key gotchas (read these before writing code):
 
@@ -253,9 +253,12 @@ this section is the agent-facing quick reference.
 
 #### `GET /v2/analytics/sync/cursor`
 
-Returns the latest-day state for every `(storageKey, campaignId)` pair
-known for the scope. `nextRequiredDay` is authoritative for the daily
-job scheduler.
+has-data 预检（dump architecture，2026-09-02 起）：查这个
+`(scope, endpoint, day[, campaignId])` 是否已有 dump 落库
+（`analytics.ad_raw` existence）。plugin 在打 TikTok 前先问一次，
+`hasData: true` → 跳过该天的抓取（防风控）。work-list 模式
+（`items` / `nextRequiredDay` / `pageSize` / `cursor` / `timezone`）
+已随 dump architecture 删除（见 `analytics/dump-architecture.md`）。
 
 Query parameters:
 
@@ -263,70 +266,74 @@ Query parameters:
 | --- | --- | --- |
 | `sellerId` | string | required, ≤ 128 chars |
 | `advertiserId` | string | required, ≤ 128 chars |
-| `storageKey` | enum | optional; one of `productAnalyses`, `sessionAnalyses`, `campaignChangeLogs` |
-| `campaignId` | string | optional, ≤ 128 chars |
-| `cursor` | string | optional, opaque (reserved for future use) |
-| `pageSize` | int | optional, 1..100, default 50 |
+| `endpoint` | string | required；必须在 dump 白名单（见下） |
+| `day` | date | required, `YYYY-MM-DD` |
+| `campaignId` | string | optional, ≤ 128 chars；缺省查整 day |
 
-Response:
+`endpoint` 白名单（server 据此推导 `storageKey`）：
+
+- `/oec_ads/shopping/v1/oec/stat/post_product_list` → `productAnalyses`
+- `/oec_ads/shopping/v1/oec/stat/post_session_list` → `sessionAnalyses`
+- `/oec_ads/shopping/v1/oec/stat/campaign_opt_log_list` → `campaignChangeLogs`
+
+白名单外的 endpoint → `400 SCHEMA_INVALID`。
+
+Response (`code: 0`):
 
 ```json
 {
   "code": 0,
   "requestId": "req-…",
   "data": {
-    "timezone": "Asia/Shanghai",
-    "items": [
-      {
-        "storageKey": "productAnalyses",
-        "campaignId": "campaign-1",
-        "latestCompletedDay": "2026-08-22",
-        "nextRequiredDay": "2026-08-23"
-      }
-    ],
-    "nextCursor": null
+    "day": "2026-08-23",
+    "endpoint": "/oec_ads/shopping/v1/oec/stat/post_product_list",
+    "storageKey": "productAnalyses",
+    "hasData": false
   }
 }
 ```
 
-`nextRequiredDay = max(latestCompletedDay + 1 day, today_in_shop_tz − bootstrap_lookback_days)`.
-If `latestCompletedDay` is NULL, returns `today_in_shop_tz − 30 days`
-(configurable via env `TTS_ERP_ANALYTICS_BOOTSTRAP_LOOKBACK_DAYS`).
+带 `campaignId` 查询时响应多带 `"campaignId"` 字段。`403 SCOPE_DENIED`
+if the api_key's `scopes[]` doesn't cover the requested
+`(sellerId, advertiserId)`.
 
-`403 SCOPE_DENIED` if the api_key's `scopes[]` doesn't cover the
-requested `(sellerId, advertiserId)`.
+#### `POST /v2/analytics/sync/dumps`
 
-#### `POST /v2/analytics/sync/batches`
+单 dump 写入（dump architecture，2026-09-02 起；旧 `/batches` 批量协议
+已下线 404）。一次请求 = 一次完整 HTTP 交换的原始落库
+（`analytics.ad_raw`，source-of-truth）。plugin **严禁批量**：一页一
+dump、一页一发，永不把 N 页 buffer 成一批（见
+`analytics/dump-architecture.md` D2）。
 
-Idempotent batch upload (≤ 100 records / 2 MB body). The server
-**recomputes** the canonical idempotency key from each record and
-rejects any record whose client-sent `idempotencyKey` doesn't match the
-recomputed one — the DB unique constraint is the single source of
-dedup truth.
-
-Request body:
+Body（≤ 2 MB）：
 
 ```json
 {
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "requestId": "req-…",
-  "scope": {"sellerId": "seller-1", "advertiserId": "adv-1", "shopName": "demo-shop"},
-  "records": [
-    {
-      "idempotencyKey": "<64-char lowercase hex>",
-      "storageKey": "productAnalyses",
-      "campaignId": "campaign-1",
-      "day": "2026-08-23",
-      "page": 1,
-      "endpoint": "/oec_ads/...",
-      "method": "POST",
-      "response": {"data": []},
-      "source": "background_poll",
-      "capturedAt": "2026-08-23T03:00:00.000Z"
-    }
-  ]
+  "scope": {"sellerId": "seller-1", "advertiserId": "adv-1"},
+  "dump": {
+    "endpoint": "/oec_ads/shopping/v1/oec/stat/post_product_list",
+    "method": "POST",
+    "day": "2026-08-23",
+    "campaignId": "campaign-1",
+    "request": {"url": "…", "headers": {}, "body": {}},
+    "response": {"status": 200, "headers": {}, "body": {"data": []}},
+    "capturedAt": "2026-08-23T03:00:00.000Z"
+  }
 }
 ```
+
+- `request` / `response` = plugin 抓的完整 HTTP 交换（JSONB 原样落 ad_raw）。
+- `capturedAt` 必须带时区（`Z` 或 `+00:00`）。
+- 不带 `page`（隐式 = 1）/ `expectedPageCount` / `storageKey` /
+  `sourceRecordId` —— 这些概念在 dump architecture 已删除；`storageKey`
+  由 server 从 `endpoint` 推导。
+
+幂等：server 重算 canonical idempotency key（6 字段 SHA-256，page 固定
+1），`ad_raw` 的 5 元组 unique 约束
+`(seller_id, advertiser_id, endpoint, day, campaign_id)` 兜底 ——
+同 dump 重放 → `duplicate`，不是错误。
 
 Success response (`code: 0`):
 
@@ -335,29 +342,27 @@ Success response (`code: 0`):
   "code": 0,
   "requestId": "req-…",
   "data": {
-    "accepted": [
-      {"idempotencyKey": "...", "status": "inserted"},
-      {"idempotencyKey": "...", "status": "duplicate"}
-    ],
-    "rejected": [
-      {"idempotencyKey": "...", "code": "SCHEMA_INVALID", "message": "...", "retryable": false}
-    ]
+    "idempotencyKey": "<64-char lowercase hex>",
+    "status": "inserted"
   }
 }
 ```
 
-`inserted` and `duplicate` are **both successes**. `rejected[*].retryable = false`
-means do NOT retry unchanged — surface the error to a human.
+`status ∈ {"inserted", "duplicate"}` — 两者都是成功。
 
 Errors:
 
 | code | meaning | retry? |
 | --- | --- | --- |
-| 400 | malformed JSON / schema invalid / unsupported protocol version | no |
+| 400 `MALFORMED_JSON` / `SCHEMA_INVALID` / `UNSUPPORTED_PROTOCOL_VERSION` | body 解析 / 校验 / 协议版本 | no |
+| 400 `RESPONSE_TOO_LARGE` | 单 dump `response` > 256 KB | no (split) |
 | 401 | missing or invalid Bearer token | no |
-| 403 | scope mismatch (`SCOPE_DENIED`) | no |
-| 413 | body > 2 MB | no (split batch) |
+| 403 `SCOPE_DENIED` | scope mismatch | no |
+| 413 `PAYLOAD_TOO_LARGE` | body > 2 MB | no (split) |
 | 429 | rate limited | yes (after `Retry-After`) |
+
+`SCHEMA_INVALID` 响应带结构化 `errors[]`（`loc`/`msg`/`type` 安全三元组，
+无 input/ctx）；其余错误码不带 `errors` 字段。
 
 ### Misc
 
@@ -433,9 +438,11 @@ The full key is shown ONCE on creation. Store it securely.
   meaning of a field is a breaking change and requires a new version
   prefix.
 - `/v2/analytics/sync/*` keeps its own envelope for the deployed Chrome
-  extension（`{code, requestId, data}`，与 `/v2` 其余端点的裸 JSON 不同）——
-  payload `protocolVersion` 1/2 均接受，契约 frozen。
+  extension（success `{code, requestId, data}` / error
+  `{code, message, requestId, retryable}`，与 `/v2` 其余端点的裸 JSON 不同）——
+  payload `protocolVersion` ∈ {1, 2} 均接受（dump 单 object 形状），契约 frozen。
   2026-09-02 前该 API 挂在 `/v1/analytics/sync/*`，已硬切下线（404）。
+  2026-09-02 dump architecture 将 `/batches` 换为 `/dumps`（404 无别名）。
 
 ## Examples
 
@@ -460,12 +467,12 @@ curl -sS -X POST -H "Authorization: Bearer $KEY" \
   "http://127.0.0.1:9877/v2/reporting/manual-costs"
 ```
 
-### Analytics cursor poll (Chrome extension pattern)
+### Analytics cursor has-data poll (Chrome extension pattern)
 
 ```bash
 curl -sS -H "X-API-Key: $KEY" \
-  "http://127.0.0.1:9877/v2/analytics/sync/cursor?sellerId=seller-1&advertiserId=adv-1&pageSize=100" \
-  | jq -r '.data.items[] | [.storageKey, .campaignId, .nextRequiredDay] | @tsv'
+  "http://127.0.0.1:9877/v2/analytics/sync/cursor?sellerId=seller-1&advertiserId=adv-1&endpoint=%2Foec_ads%2Fshopping%2Fv1%2Foec%2Fstat%2Fpost_product_list&day=2026-08-23" \
+  | jq -r '.data | [.day, .storageKey, (.hasData|tostring)] | @tsv'
 ```
 
 ## Stability matrix
@@ -487,7 +494,7 @@ Stable external endpoints (safe to build dashboards / agents on):
 | `GET /v2/spu-images`, upload/confirm/delete | readonly / readwrite | v2 |
 | `GET /v2/llm-context` | readonly | v2 (content evolves with the schema) |
 | `GET\|POST /v2/auth/*` | public | v2 |
-| `GET /v2/analytics/sync/cursor`, `POST /v2/analytics/sync/batches` | readwrite + scope | analytics（自有 envelope，frozen） |
+| `GET /v2/analytics/sync/cursor`, `POST /v2/analytics/sync/dumps` | readwrite + scope | analytics（自有 envelope，frozen） |
 
 Retired (404 since the 2026-08-29 hard switch — do NOT build on these;
 they exist only in git history):
