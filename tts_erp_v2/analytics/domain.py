@@ -1,22 +1,28 @@
-"""Analytics 领域类型（v2）。
+"""Analytics 领域类型（v2，dump architecture）。
 
 纯领域层 —— 无 I/O、无框架、无 DB。定义流经本服务的全部值对象形状。
 
-2026-09-02 从 ``analytics_sync/domain.py`` 零逻辑平移（v2 化，
-tech-doc/analytics-v2-migration-plan.md）。本模块是 Chrome extension
-协议契约的一部分：幂等键推导、裁剪规则、envelope 形状全都字节级锁定，
-改动必须升 protocolVersion。
+2026-09-02 v2 dump 化（tech-doc/analytics/dump-architecture.md）：
+- ``Record`` 去掉 ``page`` / ``expected_page_count`` 字段（dump 1 天 1 行，page 隐式 = 1）
+- 删除 ``CursorEntry`` / ``CursorPage``（cursor 协议 work-list 模式不再适用）
+- 新增 ``DumpPayload``（plugin dump 入口）/ ``DumpResult``（idempotency_key + status）
+- 新增 ``HasDataResult``（GET /cursor has-data 模式的响应）
+- 保留 ``Scope`` / ``StorageKey`` / ``AcceptedRecord`` / ``RejectedRecord`` 类型
+  （虽然 v2 dump 协议是单 record 模式，但 ``BatchResult`` 仍供 audit/未来扩展）
 
 Layering:
     domain.py            (本文件 —— 仅类型)
     ↓
-    repository.py        (SQLAlchemy 存储)
+    repository.py        (SQLAlchemy 存储：ad_raw + ad_records + ad_daily_completeness)
     ↓
-    api/v2/analytics.py  (FastAPI handlers)
+    api/v2/analytics.py  (FastAPI handlers: /dumps + /cursor has-data)
 
-注：旧 ``AnalyticsRepository`` Protocol（为 standalone 服务的测试替身而设）
-随 v2 化移除 —— handler 直接调 repository 模块函数 + 请求级 session，
-测试走真实 DB（tests_v2 事务回滚隔离）。
+⚠️ 协议契约（dump architecture 锁定）：
+- dump 字段单 object 不可 list
+- ad_raw 5 元组 unique (seller_id, advertiser_id, endpoint, day, campaign_id)
+- 幂等键 6 字段 SHA-256（page 隐式 = 1）
+- 所有 endpoint→storageKey 1:1 映射在 server 端常量 (STORAGE_KEY_BY_PATH)
+- ad_raw 与 ad_records / ad_daily_completeness 无 FK，逻辑链接靠 shared 5 元组 key
 """
 
 from __future__ import annotations
@@ -30,7 +36,9 @@ from typing import Any
 
 
 class StorageKey(str, Enum):
-    """Allowlist of dataset identifiers (mirrors the Chrome extension)."""
+    """Allowlist of dataset identifiers (mirrors the Chrome extension).
+    dump architecture 改造后：仅 3 个 dump 端点对应这 3 个 enum。
+    discovery 端点 post_campaign_list 不 dump，单独流程。"""
 
     PRODUCT_ANALYSES = "productAnalyses"
     SESSION_ANALYSES = "sessionAnalyses"
@@ -46,6 +54,9 @@ DEFAULT_TIMEZONE = "Asia/Shanghai"
 # must produce the exact same hex string the plugin sent. Trimming rules
 # below are part of the protocol; do NOT change without bumping the
 # protocol version.
+#
+# dump architecture: page 隐式 = 1,仍走 6 字段 SHA-256。DumpPayload 转换时固定传
+# page=1,所有 dump 的 idempotency_key 算法与旧 v2 batches 协议字节兼容。
 @dataclass(frozen=True)
 class Scope:
     """seller/advertiser pair from the plugin's request scope block."""
@@ -56,51 +67,60 @@ class Scope:
 
 
 @dataclass(frozen=True)
-class Record:
-    """A single analytics record as it arrives in the batch payload.
+class DumpPayload:
+    """One dump = one (scope, endpoint, day, campaign_id) row.
 
-    `idempotency_key` is computed by the server from the canonical fields
-    (see canonical_json_for_key). The client also sends its own value
-    which we verify matches; mismatch → SCHEMA_INVALID.
+    Plugin dump 协议输入。
+    - ``request`` 完整 HTTP 交换(URL + headers + body)
+    - ``response`` 完整 HTTP 交换(status + headers + body)
+    - ``page`` 隐式 = 1(dump architecture 下一天一 dump,page 维度消失)
+    - ``storage_key`` 由 server 端 STORAGE_KEY_BY_PATH 从 endpoint 推导,
+      不来自 plugin 端(消除客户端 enum 知识)
+    - ``expected_page_count`` 完全删除(若需要由 server 端从 response 抽)
     """
 
-    idempotency_key: str
-    source_record_id: str | None
-    storage_key: StorageKey
-    campaign_id: str
-    day: date
-    page: int
+    seller_id: str
+    advertiser_id: str
     endpoint: str
     method: str
-    request_body: dict[str, Any] | None
-    response: dict[str, Any]
-    source: str
-    captured_at: datetime
-    schema_version: int = 1
-    expected_page_count: int | None = None
-    protocol_version: int = 1
-
-
-@dataclass(frozen=True)
-class CursorEntry:
-    """One row of the cursor response — the per-(scope, dataset, campaign)
-    state of the latest persisted day."""
-
-    storage_key: StorageKey
+    day: date
     campaign_id: str
-    latest_completed_day: date | None
-    next_required_day: date
+    request: dict[str, Any]
+    response: dict[str, Any]
+    captured_at: datetime
+    storage_key: StorageKey  # server-derived
+    request_id: str | None = None
+    source: str = "tiktok-shop-data-sync"
+    protocol_version: int = 2
+    schema_version: int = 1
 
 
 @dataclass(frozen=True)
-class CursorPage:
-    """Cursor endpoint response payload (data field only)."""
+class DumpResult:
+    """Output of upsert_dump: idempotency_key + status."""
 
-    timezone: str
-    items: list[CursorEntry]
-    next_cursor: str | None
+    idempotency_key: str
+    status: str  # "inserted" | "duplicate"
 
 
+@dataclass(frozen=True)
+class HasDataResult:
+    """Output of has_data (GET /cursor has-data 模式):storageKey + bool.
+
+    日后 plugin 端用来做"这天的这个 endpoint 是否已经 dump 过了"的预检闸,
+    避免重复打 TikTok 触发风控。
+    """
+
+    day: date
+    endpoint: str
+    storage_key: StorageKey
+    has_data: bool
+    campaign_id: str | None = None  # only present if queried
+
+
+# 保留 AcceptedRecord / RejectedRecord / BatchResult 供未来 /batches 类型兼容或
+# 单 dump 内部 per-field rejected 时使用(目前 dump 协议是整 dump accepted/whole
+# 失败二选一,但保留类型未来扩展)
 @dataclass(frozen=True)
 class AcceptedRecord:
     idempotency_key: str
@@ -185,6 +205,10 @@ def compute_idempotency_key(
     `page` accepts both int and str (e.g. 1 vs "1"); `int()` is applied
     inside canonical_json_for_key before hashing so the two are
     interchangeable.
+
+    dump architecture 下调用方固定传 page=1（dump 1 天 1 行），
+    与 v2 batches 协议字节兼容 —— 同一 (5 fields, page=1) 输入产生
+    同一哈希。
     """
     payload = canonical_json_for_key(
         seller_id=seller_id,
