@@ -32,7 +32,7 @@ from sqlalchemy import text
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
-_BATCHES = "/v2/analytics/sync/batches"
+_BATCHES = "/v2/analytics/sync/dumps"
 
 
 @pytest.fixture(autouse=True)

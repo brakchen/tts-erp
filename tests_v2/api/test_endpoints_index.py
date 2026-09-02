@@ -79,7 +79,7 @@ def test_endpoints_lists_analytics_sync_routes(api_client):
     assert "/v2/analytics/sync/cursor" in paths, (
         f"/v2/analytics/sync/cursor missing from /endpoints; got paths={sorted(paths)}"
     )
-    assert "/v2/analytics/sync/batches" in paths
+    assert "/v2/analytics/sync/dumps" in paths
 
 
 def test_endpoints_lists_path_param_routes(api_client):
