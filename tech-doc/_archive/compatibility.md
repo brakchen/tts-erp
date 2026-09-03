@@ -3,7 +3,7 @@
 > ad_daily_pages / ad_cursors 时代）。当前协议是 **单 dump**：`POST /dumps`
 > （单 object）+ `GET /cursor` has-data 预检；`ad_raw` source-of-truth，
 > 派生表 ad_records / ad_daily_completeness。以
-> [dump-architecture.md](./dump-architecture.md) 为准（★ 当前事实源）。
+> [dump-architecture.md](../analytics/dump-architecture.md) 为准（★ 当前事实源）。
 > 本文件仅作历史/歧义记录保留。
 
 # Compatibility & retention

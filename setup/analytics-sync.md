@@ -295,5 +295,5 @@ cookie / 完整请求头。
 
 - `tech-doc/analytics/dump-architecture.md` — ★ 当前 dump 架构方案
 - `tech-doc/external-api.md` — tts-erp 全量外部端点契约（analytics 节）
-- `tech-doc/analytics/plugin-integration.md` — 插件对接（旧 page 协议，superseded）
+- `tech-doc/_archive/plugin-integration.md` — 插件对接（旧 page 协议，已 superseded 归档）
 - `tests_v2/api/test_analytics_v2_contract.py` + `test_analytics_v2_errors.py` — 契约 + 错误观测测试

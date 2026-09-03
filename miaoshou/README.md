@@ -15,7 +15,7 @@
 - apifox：`api-482189163`
 - path：`POST /open/v1/product/collect_box/tiktok/move_collect/search_move_collect_list`
 - SDK：`MiaoshouErpClient.tk_collect_box.search_move_collect_list(page_no, page_size, status?, item_id?, source_item_id?)`（`miaoshou/endpoints/tk_collect_box.py`，`page_size` 上限 20）
-- 同步入口：`POST :9877/sync/miaoshou_move_collect_tasks` → `tdd/miaoshou_sync.py::sync_miaoshou_move_collect_tasks` → 落库 `miaoshou_move_collect_tasks`
+- 同步入口（v2）：sync-worker 的 `miaoshou.move_collect` job（`tts_erp_v2/jobs/miaoshou/move_collect.py::sync_move_collect`）每 30 分钟由 APScheduler 触发，进程内调 SDK 落库 `procurement.miaoshou_move_collect_tasks`。v2 无 `/miaoshou/*` HTTP 路由（见 AGENTS.md §10.2）
 
 ### 实测结论（2026-08-29，生产库）
 

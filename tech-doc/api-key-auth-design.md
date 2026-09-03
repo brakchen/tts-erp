@@ -118,7 +118,9 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys (key_prefix);
 
 注意 `POST /orders/search` 虽语义是读，但消耗 TikTok 限流配额——归为 readonly 是刻意放宽（查询是高频需求），如滥用再上调。
 
-### 5.4 中间件（新文件 `tdd/auth.py`）
+### 5.4 中间件
+
+**v2 实施位置**：`tts_erp_v2/middleware/auth.py`（AuthMiddleware）+ `tts_erp_v2/middleware/session_auth.py`（浏览器 cookie 会话，独立中间件）。v1 时期计划放在 `tdd/auth.py`，v2 重构时未保留该路径。
 
 - `AuthMiddleware(BaseHTTPMiddleware)`，在 `tts_erp_fastapi.py` 一行 `app.add_middleware(...)` 挂载
 - 匹配顺序：豁免表 → 前缀规则表（最长前缀优先）→ 默认拒绝
@@ -153,10 +155,10 @@ python3 api_keys.py rotate --prefix ttserp_rw_Kx9vQ2mP         # = create 同名
 
 | 调用方 | 改造 |
 | --- | --- |
-| `sync_cron.py`（每 10 分钟 cron） | 从 env 读 `TTS_ERP_SERVICE_KEY`，所有 `/sync/*` 请求带 `Authorization: Bearer` |
-| `run_sync_cron.sh` | 无需改（已 source .env），`.env` 加一行 `TTS_ERP_SERVICE_KEY=ttserp_rw_...`（0600 权限不变） |
-| `test_e2e.py` | 同样从 env 读 key 带 header；新增「无 key 应 401」断言（`final_smoke.py` / `regression_check.py` 在 2026-08-30 cleanup 已删，调用方合并到 `tests/test_e2e*.py`） |
-| `tdd/` 测试 | 新增 `test_auth.py`（见 §8）；既有 TestClient 测试在 conftest 统一注入 admin key header |
+| ~~`sync_cron.py`（每 10 分钟 cron）~~ | **2026-09-03 已废弃**：被 sync-worker（`tts-erp-sync.service`，APScheduler）取代；v2 同步无 HTTP `/sync/*` 路由（见 AGENTS.md §3）。 |
+| ~~`run_sync_cron.sh`~~ | **2026-09-03 仍保留**（rollback.sh 依赖），观察期后删。 |
+| `test_e2e.py` | 同样从 env 读 key 带 header；新增「无 key 应 401」断言。 |
+| `tests_v2/middleware/` 测试 | 新增 `test_auth.py`（见 §8）；既有 TestClient 测试在 `tests_v2/conftest.py` 统一注入 admin key header。 |
 | 人工 curl / Windows 工作站 | 发一把 `readonly` 或 `readwrite` key，随用随带 header |
 | README / AGENTS.md / setup 文档 | 更新端点说明（标注所需角色）、`.env` 字段、故障排查表 |
 
@@ -171,7 +173,7 @@ python3 api_keys.py rotate --prefix ttserp_rw_Kx9vQ2mP         # = create 同名
 
 每步都可独立回滚：`TTS_ERP_AUTH_MODE=off` + 重启即恢复（30 秒级）。
 
-## 8. 测试计划（`tdd/test_auth.py`）
+## 8. 测试计划（`tests_v2/middleware/test_auth.py`）
 
 沿用现有 pytest + TestClient + TEST_ 哨兵模式：
 
@@ -206,12 +208,13 @@ python3 api_keys.py rotate --prefix ttserp_rw_Kx9vQ2mP         # = create 同名
 
 ## 11. 文件改动清单（实施时）
 
-| 文件 | 动作 |
+| 文件（v2 实际位置） | 动作 |
 | --- | --- |
-| `tdd/auth.py` | 新建：AuthMiddleware + 角色矩阵 + 缓存 |
-| `tdd/tts_erp_fastapi.py` | 挂载中间件（~3 行） |
-| `tdd/test_auth.py` | 新建：§8 测试 |
-| `tdd/conftest.py` | TestClient 统一注入 admin key |
+| `tts_erp_v2/middleware/auth.py` | 新建：AuthMiddleware + 角色矩阵 + 缓存 |
+| `tts_erp_v2/app.py` | 在 `build_app()` 内挂载中间件（约 3 行） |
+| `tts_erp_v2/middleware/session_auth.py` | 新建：浏览器 cookie 会话（独立中间件；HMAC 签名 `tts_session` cookie） |
+| `tests_v2/middleware/test_auth.py` + `tests_v2/middleware/test_session_auth.py` | 新建：§8 测试 |
+| `tests_v2/conftest.py` | TestClient 统一注入 admin key header |
 | `api_keys.py` | 新建：管理 CLI |
 | `schema.sql` | 新增 `api_keys` 表 |
 | `sync_cron.py` | 请求带 Authorization header |

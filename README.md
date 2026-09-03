@@ -1,6 +1,6 @@
 # tts-erp
 
-> TikTok Shop 销售 + 妙手采购 数据整合分析系统 · 9-schema PostgreSQL + FastAPI/uvicorn (端口 9877) + APScheduler 同步
+> TikTok Shop 销售 + 妙手采购 数据整合分析系统 · 10-schema PostgreSQL + FastAPI/uvicorn (端口 9877) + APScheduler 同步
 
 ## 它是干什么的
 
@@ -25,16 +25,19 @@
 │  │  /v2/linkage/*   │  │   miaoshou SDK)  │  │                  │  │
 │  │  /v2/reporting/* │  │                 │  │                  │  │
 │  │  /v2/pages/*     │  │  共享 in-process │  │  6 TikTok jobs   │  │
-│  └────────┬─────────┘  └─────────┬────────┘  │  + token.refresh  │  │
-│           │                      │           │ (妙手 job 未调度) │  │
+│  └────────┬─────────┘  └─────────┬────────┘  │  + token.refresh │  │
+│           │                      │           │  + 3 妙手 jobs   │  │
+│           │                      │           │  + reporting.*   │  │
+│           │                      │           │  + analytics.    │  │
+│           │                      │           │    retention     │  │
 │           └──────────┬───────────┘                    │            │
 │                      ▼                                ▼            │
 │           ┌─────────────────────────────────────────────┐           │
-│           │      PostgreSQL tts_erp (9 schemas)         │           │
-│           │  integration / commerce / procurement       │           │
-│           │  fulfillment / after_sales / finance         │           │
-│           │  linkage / reporting / security             │           │
-│           │  (36 张表 + 1 view)                         │           │
+│           │      PostgreSQL tts_erp (10 schemas)        │           │
+│           │  integration / commerce / procurement       │
+│           │  fulfillment / after_sales / finance        │
+│           │  linkage / reporting / security             │
+│           │  analytics                                  │           │
 │           └─────────────────────────────────────────────┘           │
 └──────────────────────────────────────────────────────────────────┘
                        │              │              │
@@ -51,7 +54,7 @@
 > `tts_erp_v2/proxy/token_service.py` 通过 `oauth_receiver_core.py` **in-process** 完成。
 > 端口 9876 还活着只是为了 4 周观察期内的紧急回滚（脚本见 `prod-switch/rollback.sh`）。
 
-## 数据模型（9 schema / 36 表 + 1 view）
+## 数据模型（10 schema / 60 表 + 1 view）
 
 权威定义：[`tech-doc/data-model-target-v3.md`](tech-doc/data-model-target-v3.md)
 
@@ -132,12 +135,22 @@ sync-worker 是独立 systemd 单元（`tts-erp-sync.service`），与 api 平�
 | `tiktok.finance` | /finance/payouts + /finance/statements | 每 1h |
 | `tiktok.logistics` | /logistics/orders/{id}/tracking | 每 10 min（活跃运单） |
 | `token.refresh` | 按 `integration.credentials.expires_at` 提前续期 | 每 6h |
+| `miaoshou.shops` | /shop/list | 每 6h（妙手店铺列表） |
+| `miaoshou.collect_box` | /collectBox/list | 每 30 min（采集箱 = 联动证据源） |
+| `miaoshou.move_collect` | /moveCollect/list | 每 30 min（搬家任务） |
+| `reporting.cost_snapshots` | `tts_erp_v2/jobs/reporting.py` | 每 6h（成本输入变化慢） |
+| `reporting.profit_daily` | `tts_erp_v2/jobs/reporting.py` | 每 1h（重建当日+昨日 UTC） |
+| `analytics.retention` | ad_audit_log / ad_raw TTL | 每 1 d（日级，2026-09-02 上线） |
 
-**未接入调度的 job**（代码在库、未注册进 `JOBS`，生产 `sync_jobs` 从未跑过）：
-`miaoshou.shops` / `miaoshou.purchase_orders` / `miaoshou.collect_box` / `miaoshou.move_collect`
-（`tts_erp_v2/jobs/miaoshou/`），以及 link-compute / cost-snapshots / profit-daily 重算
-（`tts_erp_v2/linkage/compute.py`、`tts_erp_v2/reporting/*`，只有库函数，无触发方）——
-所以 `reporting.*` 三张表当前为空、`/v2/reporting/profit-daily` / `cost-snapshots` 返空属预期。
+**未接入调度的 job**（代码在库、未注册进 `JOBS`）：
+
+- `miaoshou.purchase_orders`（`tts_erp_v2/jobs/miaoshou/purchase_orders.py`）：
+  scheduler.py 顶部 `NOTE(2026-09-01)` 标注 endpoint 路径 404（routeNotFound），
+  v2 实现从 apifox 文档写就但未做线上实拍验证，**有意不注册**直到正确路径从
+  apifox doc（fd54e57e…）确认后再加入。
+- link-compute（`tts_erp_v2/linkage/compute.py`）：只有库函数无触发方，
+  `/v2/linkage/*` 读端点读的是历史 link 表，刷新靠定期的人工 override 或
+  `product_links` upsert 路径。
 
 每次 run 写一行 `integration.sync_jobs`（rows_total/inserted/failed + status）。失败写 `integration.sync_issues`，**job 不会卡死**，下一个调度继续跑。
 
@@ -163,7 +176,7 @@ POST/DELETE 必须带 `X-Requested-With: tts-erp` 头（CSRF guard）。
 部分写端点在 handler 内再校验）：
 
 - `readonly`：所有 v2 GET + `/static/*`
-- `readwrite`：+ `POST /v2/reporting/manual-costs`、`POST /v2/spu-images/upload-url`、`POST /v2/spu-images/{id}/confirm`、`DELETE /v2/spu-images/{id}`、`/v1/analytics/sync/*`
+- `readwrite`：+ `POST /v2/reporting/manual-costs`、`POST /v2/spu-images/upload-url`、`POST /v2/spu-images/{id}/confirm`、`DELETE /v2/spu-images/{id}`、`/v2/analytics/sync/*`
 - `admin`：`POST /v2/linkage/overrides`（覆盖 product_links，handler 内校验 admin）、`POST /v2/admin/reset-rate-limit`（热重载限流）；未匹配路径默认按 admin 拦截
 
 key 管理：`python3 api_keys.py create --role <role> --name <name>`（另有 `list` / `revoke --prefix` / `rotate --prefix`）。库里只存 SHA-256 哈希，完整 key 创建时打印一次。
@@ -173,9 +186,9 @@ key 管理：`python3 api_keys.py create --role <role> --name <name>`（另有 `
 ## 本地数据
 
 - **一个库**：`tts_erp`（docker 容器 `postgres`，5432）
-- **9 schema**：`integration` / `commerce` / `procurement` / `fulfillment` / `after_sales` / `finance` / `linkage` / `reporting` / `security`
-- **36 张表 + 1 view**：见 [`tech-doc/data-model-target-v3.md`](tech-doc/data-model-target-v3.md)
-- **Alembic 迁移**：`alembic/versions/20260829_init_nine_schemas.py`（初始 9 schema），`alembic upgrade head` 应用
+- **10 schema**：`integration` / `commerce` / `procurement` / `fulfillment` / `after_sales` / `finance` / `linkage` / `reporting` / `security` / `analytics`
+- **60 张表 + 1 view**：v2 schema 40 张 + 19 张 `public.*` legacy（4 周观察期内可回滚，过期后归档）+ 1 张 `public.alembic_version`；view = `linkage.effective_product_links`。见 [`tech-doc/data-model-target-v3.md`](tech-doc/data-model-target-v3.md)
+- **Alembic 迁移**：`alembic/versions/20260829_init_nine_schemas.py`（初始 10 schema；文件名仍含 `nine` 是历史命名，`upgrade head` 会按 mtimes 应用），`alembic upgrade head` 应用
 - **旧 public.* 保留** 4 周观察期后归档 — 见 `prod-switch/observe-archive.sh`
 
 ## 安装 / 部署
@@ -271,7 +284,7 @@ MIAOSHOU_DEBUG_SIGN=1 .venv/bin/python -c "from miaoshou.miaoshou_signing import
 - [`AGENTS.md`](AGENTS.md) — AI agent 操作指南（端点速查、签名规范、DO/DON'T）
 - [`CHANGELOG.md`](CHANGELOG.md) — 变更历史（按日期）
 - [`handoff.md`](handoff.md) — 跨 session 交接笔记
-- [`tech-doc/data-model-target-v3.md`](tech-doc/data-model-target-v3.md) — 9 schema V3 真理源
+- [`tech-doc/data-model-target-v3.md`](tech-doc/data-model-target-v3.md) — 10 schema V3 真理源
 - [`tech-doc/external-api.md`](tech-doc/external-api.md) — v2 端点契约
 - [`tech-doc/api-key-auth-design.md`](tech-doc/api-key-auth-design.md) — auth 设计
 - [`tech-doc/refactor-tech-plan-v2.md`](tech-doc/refactor-tech-plan-v2.md) — 重构技术方案 V2（已实施）

@@ -4,8 +4,7 @@ The project standardises on ``TTS_ERP_DB_URL`` / ``OAUTH_DB_URL`` in
 ``.env``. v2 code consumes these through SQLAlchemy, which accepts
 either ``postgresql://...`` or ``postgresql+psycopg://...``. Raw
 ``psycopg.connect()`` (the legacy ``sync_cron.py``, the ``api_keys.py``
-CLI, the ``analytics_sync.pg_repositories`` service, the one-off
-``verify_db.py`` script, etc.) only accepts the plain
+CLI, etc.) only accepts the plain
 ``postgresql://`` scheme — ``psycopg3``'s conninfo parser raises
 ``ProgrammingError: missing "=" after "postgresql+psycopg://..."``.
 

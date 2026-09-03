@@ -9,7 +9,7 @@
 - **下游数据源**：TikTok Shop Open API (`open-api.tiktokglobalshop.com`) + 妙手开放平台 (`openapi.wanshifu.com`)
 - **凭证**：自持在 `integration.credentials` 表（Fernet 加密，key = `.env TTS_ERP_FERNET_KEY`），
   加解密统一走 `tts_erp_v2/proxy/token_service.py`
-- **存储**：PostgreSQL `tts_erp` 数据库（`postgres` 容器，端口 5432），9 schema / 36 表 + 1 view
+- **存储**：PostgreSQL `tts_erp` 数据库（`postgres` 容器，端口 5432），10 schema / 60 表 + 1 view（40 张 v2 表 + 19 张 `public.*` legacy + 1 张 `public.alembic_version`）
 - **对外端口**：`9877`（FastAPI 只读分析端点 + 人工成本填写页）
 - **同步**：独立进程 `tts-erp-sync.service`（APScheduler，`python -m tts_erp_v2.sync_worker.main`）
 - **oauth-receiver (`:9876`)**：v2 不再调用它，仅 4 周回滚观察期内保留
@@ -180,6 +180,8 @@ commits），但 `:9877` 运行时已不再服务这些路径。生产读 / 写 
 - 改 schema 走 schema_tts_erp.sql / schema_oauth.sql（按库拆分），`IF NOT EXISTS` 兼容老库
 - **优先复用成熟开源组件**：GitHub 上有维护活跃、star 数高（成熟领域 ≥ 5k、新兴领域 ≥ 1k）、license 友好的现成方案时，**优先用**，不要裸写 / 自己强制实现 —— 典型场景：HTTP 代理 / 网关、限流、熔断、retry/backoff、分布式锁、定时任务、对象存储 SDK、消息队列、数据库迁移、auth/JWT、参数校验、structlog 类日志、metrics/prom client 等。理由：(a) 现成组件已踩过生产坑、坑更少；(b) 维护/升级是社区分摊；(c) 业务代码更聚焦 domain logic。**评估开源时的护栏**：(a) 引入前查最后一次 release 是否在 1 年内 + issues 关闭率 ≥ 80%；(b) 优先选有公司/组织背书（如 Starlette/FastAPI/httpx/structlog/sqlalchemy/alembic/pydantic 这类），避免个人小项目单点故障；(c) 真没有合适开源时再考虑自研，自研时要留出能替换的 seam（接口层、依赖注入）。
 - **一次性 / 临时脚本放 `scripts/`**（与 `scripts/migrate_v1_to_v2/`、`scripts/regen_schema.py` 同级）：debug 探测、一次性数据导出、smoke / regression 演练等跑一次就丢的小脚本都进这里，**根目录不放**。`scripts/` 里有 `__init__.py` 让它能被 pytest 收集；脚本名前缀 `oneoff_` / `probe_` / `smoke_` / `dump_` 自描述用途。不要把这类脚本 commit 到根目录或业务目录里。
+- **Sub-agent 并发改动必须开 worktree**(2026-09-03 起约定):父 agent 派生 sub-agent 做并行改动时(多 lane 任务 / 拆分 PR / 大面积 bug 修复),**每个 sub-agent 都必须**在 `git worktree add .worktrees/<slug> -b <branch>` 下手,`<slug>` 用 kebab-case 描述改动主题(如 `fix-auth-loop` / `redesign-console-ui` / `fix-migration-prod-guardrails`),`<branch>` 用 `<prefix>/<slug>` 命名(`fix/` / `feature/` / `redesign/` / `chore/`)。`.worktrees/` 已在 `.gitignore` 第 55 行,worktree 内的 commit 留本地、**不** push 远端。**禁止**在 master worktree 上让 sub-agent 直接 `git add` / `git commit` —— master 是公共区,只跑读 / 跑测试 / 跑文档 / 跑 `git merge`。起因:08-31 一次 `git reset --hard` 把 master 上 5 条修复 lane 的全部未提交改动一并抹掉,之后所有并发 lane 才统一改走 worktree。
+- **Worktree 收尾必须 merge + 清理**(2026-09-03 起约定):sub-agent 完成后,**合并方**(通常父 agent)按序走: (1) `cd` 进 master worktree 拉 sub-agent 的分支;(2) `git merge <branch> --no-ff -m "merge: <slug> (lane <lane-id>)"`;(3) 跑 `bash scripts/test.sh fast` 必须 0 fail;(4) 收尾 `git worktree remove .worktrees/<slug>` + `git branch -D <branch>` + `git worktree prune`;(5) 确认 `git worktree list` 没有残留。**禁止**用 `git add -A && git commit -m "merge <slug>"` 偷工(那不是 merge,是把别人未审的代码污染进 master);也**禁止** "先合了再说,worktree 留到周末清"—— `.worktrees/` 8 月起累积了 8 条修复 lane(见 `git worktree list` 输出),是这条规范出台前留下的历史产物;新 lane 完成后必须当场收尾,避免无限堆积。
 
 ### DON'T
 
@@ -190,7 +192,7 @@ commits），但 `:9877` 运行时已不再服务这些路径。生产读 / 写 
 - ❌ 不要假设 `code: 0` 是唯一的 success —— TikTok 也会返回 `code: 105005` (scope 缺失) `code: 36009004` (字段缺失) 等
 - ❌ **不要**接 `POST /returns` / `POST /cancellations`（CREATE write endpoint，会在真实店铺创建退货/取消单）。
      这两个端点 2026-08-17 起已从代码中**整个删除**（不再返回 501，而是无路由 404）。v2 在 `tts_erp_v2/jobs/tiktok/after_sales.py` 只读，同上原则如果以后要接，单独 review。
-- ❌ **不要**在 v2 端点里读 `public.*` 表。v2 完全读新 9 schema。4 周观察期内 `public.*` 仅作 rollback safety，**是**旧代码路径，但 v2 代码不会直接查。
+- ❌ **不要**在 v2 端点里读 `public.*` 表。v2 完全读新 10 schema。4 周观察期内 `public.*` 仅作 rollback safety，**是**旧代码路径，但 v2 代码不会直接查。
 - ❌ **不要**接 `POST /orders/<id>/{confirm,cancel,update_status,shipping_info,verify_shipping}`。v2 架构是只读分析，写操作已全部拆除。
 - ❌ **不要裸跑 `git reset --hard` / `git checkout -- .` / `git clean -f`**(2026-09-01 起约定):多 agent 并发工作时,这类命令会把别人未提交的改动直接清掉(08-31 曾一次抹掉 5 条修复 lane 的全部未提交工作)。看到不属于自己的未提交改动 → 先问,不要清。
 - ❌ **不要跑 `tests_v2/migration/` 域测试或 `scripts/migrate_v1_to_v2/` 脚本**,除非显式设了 `TTS_ERP_ALLOW_PROD_MIGRATION=1` —— 它们会真实写生产库(08-31 曾因此把生产凭证回退成 legacy 格式、全线停摆 22h)。代码层已加闸,不要绕过。
@@ -215,9 +217,9 @@ commits），但 `:9877` 运行时已不再服务这些路径。生产读 / 写 
 | `tts_erp_v2/api/v2/` | 路由：commerce / linkage / reporting / pages / spu_images / auth / llm_context / **admin** (限流热重载等) / **analytics**（Chrome 扩展 ingest） |
 | `tts_erp_v2/middleware/` | `auth.py`（API key + 角色矩阵）、`session_auth.py`（cookie 会话）、`rate_limit.py`（60s 滑动窗，env 配）、`access_log.py` |
 | `tts_erp_v2/proxy/` | 出站层：`tts_shop/`（TikTok 签名 + 客户端）、`miaoshou/`、`token_service.py`（凭证 Fernet 加解密 + 续期） |
-| `tts_erp_v2/jobs/` | 同步 job：`tiktok/*`（6 个）、`miaoshou/*`（4 个，**未注册调度**）、`token_refresh.py`、`runner.py` |
+| `tts_erp_v2/jobs/` | 同步 job：`tiktok/*`（6 个）、`miaoshou/*`（4 个，**3 个已注册**：`shops` 6h / `collect_box` 30min / `move_collect` 30min；`purchase_orders` 因 endpoint 404 故意不注册，scheduler.py 顶部 `NOTE(2026-09-01)`）、`analytics_retention.py`（日级）、`reporting.py`（cost_snapshots 6h / profit_daily 1h）、`token_refresh.py`（6h）、`runner.py` |
 | `tts_erp_v2/sync_worker/` | APScheduler worker（`scheduler.py` 的 `JOBS` 注册表；独立跑在 `tts-erp-sync.service`） |
-| `tts_erp_v2/db/models/` | 10 schema SQLAlchemy 模型（含 `analytics` schema 的 `ad_*` 6 表） |
+| `tts_erp_v2/db/models/` | 10 schema SQLAlchemy 模型（`analytics` schema 5 张表：`ad_audit_log` / `ad_daily_completeness` / `ad_raw` / `ad_records` / `ad_shop_timezones`） |
 | `tts_erp_v2/analytics/` | Chrome 扩展广告分析 ingest 的 domain + SQLAlchemy repository（路由在 `api/v2/analytics.py`，表在 `analytics` schema） |
 | `tts_erp_v2/linkage/` / `reporting/` / `storage/` | 关联计算 / 成本利润重算 / MinIO 对象存储 |
 | `api_keys.py` | API key 管理 CLI（create/list/revoke/rotate；表在 `security.api_keys`） |
@@ -385,8 +387,14 @@ v2 app **没有挂载任何 `/miaoshou/*` 路由**——v1 的 `POST /miaoshou/<
 
 - **出站**：`tts_erp_v2/jobs/miaoshou/*`（shops / collect_box / move_collect /
   purchase_orders 4 个 job）进程内调 SDK（经 `tts_erp_v2/proxy/miaoshou/`）落
-  `procurement.*`。⚠️ **这 4 个 job 目前未注册进 sync-worker 调度**（`scheduler.py`
-  的 `JOBS` 无条目），生产不自动跑；要跑得手动触发 job 函数或补注册。
+  `procurement.*`。**调度状态（截至 2026-09-01 见 scheduler.py 顶部 `NOTE`）**：
+  - ✅ `miaoshou.shops` — 已注册，每 6h
+  - ✅ `miaoshou.collect_box` — 已注册，每 30min（采集箱 = 联动证据源）
+  - ✅ `miaoshou.move_collect` — 已注册，每 30min
+  - ⛔ `miaoshou.purchase_orders` — **未注册**：scheduler.py 顶部
+    `NOTE(2026-09-01)` 标注 endpoint 路径 404（routeNotFound），v2 实现从
+    apifox 文档写就但未做线上实拍验证，**有意不注册**直到正确路径从
+    apifox doc（fd54e57e…）确认后再加入。
 - **回调**：payload 模型 + `dispatch_callback()` 保留在 `miaoshou/callbacks/`，
   但没有 HTTP 入口——妙手若推送 webhook 当前会 404。要恢复需在 v2 app 挂路由（单独评审）。
 

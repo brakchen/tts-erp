@@ -248,7 +248,7 @@ Mounted under tts-erp at `/v2/analytics/sync/*`（2026-09-02 从
 :9878 进程已于 2026-08-30 退役）。Powers the `tk-adv-cost-monitor` Chrome
 extension. Auth requires **readwrite** role plus a per-seller scope grant
 (the api_key's `scopes` array). Full protocol lives in
-[`analytics/analytics-sync.md`](analytics/analytics-sync.md);
+[`analytics/dump-architecture.md`](analytics/dump-architecture.md);
 this section is the agent-facing quick reference.
 
 #### `GET /v2/analytics/sync/cursor`
