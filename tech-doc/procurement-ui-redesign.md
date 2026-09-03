@@ -14,6 +14,7 @@
 > Owner: schan · Date: 2026-08-31
 > Status: **已实现并合入 master**（merge `aca4389`，2026-08-31；后续样式修正见
 > `dee1e8d` / `2cd0d6b`）。As-built 差异：
+>
 > - 静态资源最终为 `tts_erp_v2/static/js/console.js` + `static/vendor/bootstrap.min.css`
 >   （后续 commit 改为自托管 Bootstrap，**没有**落地 §2.3 的 `/static/fonts/` 自托管字体
 >   和 §6 的 `static/css/console.css`）；

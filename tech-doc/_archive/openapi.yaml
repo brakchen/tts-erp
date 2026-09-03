@@ -63,9 +63,9 @@ paths:
                 type: object
                 required: [status, service, version]
                 properties:
-                  status: {type: string, enum: [ok]}
-                  service: {type: string}
-                  version: {type: string}
+                  status: { type: string, enum: [ok] }
+                  service: { type: string }
+                  version: { type: string }
 
   /endpoints:
     get:
@@ -98,11 +98,11 @@ paths:
         - name: sellerId
           in: query
           required: true
-          schema: {type: string, minLength: 1, maxLength: 128}
+          schema: { type: string, minLength: 1, maxLength: 128 }
         - name: advertiserId
           in: query
           required: true
-          schema: {type: string, minLength: 1, maxLength: 128}
+          schema: { type: string, minLength: 1, maxLength: 128 }
         - name: storageKey
           in: query
           required: false
@@ -112,26 +112,26 @@ paths:
         - name: campaignId
           in: query
           required: false
-          schema: {type: string, maxLength: 128}
+          schema: { type: string, maxLength: 128 }
         - name: cursor
           in: query
           required: false
-          schema: {type: string, maxLength: 4096}
+          schema: { type: string, maxLength: 4096 }
           description: "Opaque pagination cursor. MVP: not used."
         - name: pageSize
           in: query
           required: false
-          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
       responses:
         "200":
           description: ok
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/CursorResponse"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "429": {$ref: "#/components/responses/RateLimited"}
-        "500": {$ref: "#/components/responses/InternalError"}
+              schema: { $ref: "#/components/schemas/CursorResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /v2/analytics/sync/batches:
     post:
@@ -158,20 +158,20 @@ paths:
         required: true
         content:
           application/json:
-            schema: {$ref: "#/components/schemas/BatchRequest"}
+            schema: { $ref: "#/components/schemas/BatchRequest" }
       responses:
         "200":
           description: ok
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/BatchResponse"}
+              schema: { $ref: "#/components/schemas/BatchResponse" }
         "400":
           $ref: "#/components/responses/BadRequest"
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "413": {$ref: "#/components/responses/PayloadTooLarge"}
-        "429": {$ref: "#/components/responses/RateLimited"}
-        "500": {$ref: "#/components/responses/InternalError"}
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
 components:
   securitySchemes:
@@ -198,8 +198,8 @@ components:
       type: object
       required: [sellerId, advertiserId]
       properties:
-        sellerId: {type: string, minLength: 1, maxLength: 128}
-        advertiserId: {type: string, minLength: 1, maxLength: 128}
+        sellerId: { type: string, minLength: 1, maxLength: 128 }
+        advertiserId: { type: string, minLength: 1, maxLength: 128 }
         shopName:
           type: string
           nullable: true
@@ -234,8 +234,8 @@ components:
           description: |
             Local UUID from the plugin. Used for tracing only; NOT a
             cross-retry idempotency key.
-        storageKey: {$ref: "#/components/schemas/StorageKey"}
-        campaignId: {type: string, minLength: 1, maxLength: 128}
+        storageKey: { $ref: "#/components/schemas/StorageKey" }
+        campaignId: { type: string, minLength: 1, maxLength: 128 }
         day:
           type: string
           format: date
@@ -269,7 +269,7 @@ components:
           minLength: 1
           maxLength: 512
           description: TikTok API path (e.g. `/oec_ads/...`).
-        method: {type: string, minLength: 1, maxLength: 16}
+        method: { type: string, minLength: 1, maxLength: 16 }
         requestBody:
           type: object
           additionalProperties: true
@@ -311,19 +311,19 @@ components:
           minLength: 1
           maxLength: 128
           description: Client-supplied UUID for tracing. Echoed in response.
-        scope: {$ref: "#/components/schemas/Scope"}
+        scope: { $ref: "#/components/schemas/Scope" }
         records:
           type: array
           minItems: 1
           maxItems: 100
-          items: {$ref: "#/components/schemas/RecordIn"}
+          items: { $ref: "#/components/schemas/RecordIn" }
 
     CursorEntry:
       type: object
       required: [storageKey, campaignId, nextRequiredDay]
       properties:
-        storageKey: {$ref: "#/components/schemas/StorageKey"}
-        campaignId: {type: string}
+        storageKey: { $ref: "#/components/schemas/StorageKey" }
+        campaignId: { type: string }
         latestCompletedDay:
           type: string
           format: date
@@ -347,8 +347,8 @@ components:
       type: object
       required: [code, requestId, data]
       properties:
-        code: {type: integer, enum: [0]}
-        requestId: {type: string}
+        code: { type: integer, enum: [0] }
+        requestId: { type: string }
         data:
           type: object
           required: [timezone, items, nextCursor]
@@ -358,7 +358,7 @@ components:
               description: Canonical IANA timezone for the seller.
             items:
               type: array
-              items: {$ref: "#/components/schemas/CursorEntry"}
+              items: { $ref: "#/components/schemas/CursorEntry" }
             nextCursor:
               type: [string, "null"]
               description: "Opaque pagination cursor (MVP: null)."
@@ -367,7 +367,7 @@ components:
       type: object
       required: [idempotencyKey, status]
       properties:
-        idempotencyKey: {type: string}
+        idempotencyKey: { type: string }
         status:
           type: string
           enum: [inserted, duplicate]
@@ -379,7 +379,7 @@ components:
       type: object
       required: [idempotencyKey, code, message, retryable]
       properties:
-        idempotencyKey: {type: string}
+        idempotencyKey: { type: string }
         code:
           type: string
           enum:
@@ -387,7 +387,7 @@ components:
             - RESPONSE_TOO_LARGE
             - PAGE_COUNT_CONFLICT
             - SCOPE_DENIED
-        message: {type: string}
+        message: { type: string }
         retryable:
           type: boolean
           description: |
@@ -398,18 +398,18 @@ components:
       type: object
       required: [code, requestId, data]
       properties:
-        code: {type: integer, enum: [0]}
-        requestId: {type: string}
+        code: { type: integer, enum: [0] }
+        requestId: { type: string }
         data:
           type: object
           required: [accepted, rejected]
           properties:
             accepted:
               type: array
-              items: {$ref: "#/components/schemas/AcceptedRecord"}
+              items: { $ref: "#/components/schemas/AcceptedRecord" }
             rejected:
               type: array
-              items: {$ref: "#/components/schemas/RejectedRecord"}
+              items: { $ref: "#/components/schemas/RejectedRecord" }
 
     ErrorEnvelope:
       type: object
@@ -425,8 +425,8 @@ components:
             - `PAYLOAD_TOO_LARGE`
             - `RATE_LIMITED`
             - `INTERNAL_ERROR`
-        message: {type: string}
-        requestId: {type: string}
+        message: { type: string }
+        requestId: { type: string }
         retryable:
           type: boolean
           description: |
@@ -438,38 +438,38 @@ components:
       description: Malformed JSON or invalid schema
       content:
         application/json:
-          schema: {$ref: "#/components/schemas/ErrorEnvelope"}
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
 
     Unauthorized:
       description: Missing or invalid Bearer token
       content:
         application/json:
-          schema: {$ref: "#/components/schemas/ErrorEnvelope"}
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
 
     Forbidden:
       description: Token does not grant access to this scope
       content:
         application/json:
-          schema: {$ref: "#/components/schemas/ErrorEnvelope"}
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
 
     PayloadTooLarge:
       description: Body exceeds 2 MB
       content:
         application/json:
-          schema: {$ref: "#/components/schemas/ErrorEnvelope"}
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
 
     RateLimited:
       description: Per-token rate limit exceeded
       headers:
         Retry-After:
-          schema: {type: integer}
+          schema: { type: integer }
           description: Seconds until next request is allowed.
       content:
         application/json:
-          schema: {$ref: "#/components/schemas/ErrorEnvelope"}
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
 
     InternalError:
       description: Server-side failure
       content:
         application/json:
-          schema: {$ref: "#/components/schemas/ErrorEnvelope"}
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
