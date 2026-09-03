@@ -224,6 +224,20 @@ apifox 标题“妙手开放平台”，底层 endpoint 指向 `openapi.wanshifu
   `bash scripts/test.sh fast` 0 fail → `git worktree remove .worktrees/<slug>` + `git branch -D <branch>` +
   `git worktree prune` → 确认 `git worktree list` 无残留 → push。禁止 `git add -A && git commit` 冒充 merge；
   禁止"先合了再说、worktree 留到周末清"
+- **lane 冲突处理**：
+  - **派活时先声明文件所有权**：并行的 lane 尽量不碰同一文件；仓库里最容易被多 lane 同改的共享点 =
+    `sync_worker/scheduler.py`、`tests/conftest.py`、`tts_erp_v2/db/models/`、schema SQL / `regen_schema.py`、
+    `restart.sh`。父 agent 派活时若两个 lane 都要动同一文件，先约定谁改（或拆成不重叠的改动面）
+  - **冲突时先别删 worktree**：收尾流程的 `git worktree remove` 只在 merge 成功之后做。merge 报冲突 =
+    lane 分支落后于 master → 在 lane worktree 内先 `git rebase master`（lane 是私有分支，rebase 比 merge 干净），
+    逐个冲突文件解：保留**双方意图**（先看两边改了什么再合，不要图快选一边）；解完在 lane worktree 跑
+    `bash scripts/test.sh fast` 必须 0 fail，再回 master `git merge --no-ff`
+  - **禁止一刀切**：不得用 `git checkout --theirs/--ours` 或全局 `-X theirs` 静默丢弃任何一方改动——
+    lane 是别人未审的代码，丢了一方等于丢整条 lane 的工作（08-31 教训同源）
+  - **语义冲突靠全量测试兜底**：两个 lane 改同一模块的不同函数时 git 可能不报 conflict，但运行时互相踩——
+    因此同文件或同模块的多 lane 合并后，`scripts/test.sh fast` 0 fail 是硬门槛，不能只跑自己 lane 的域测试
+  - **解不了就重排**：`git merge --abort` 恢复原状，换 merge 顺序（先合依赖方 / 改动面小的），或找 lane owner
+    重开一个干净分支重做冲突部分；禁止硬解出一个能过测试但行为错的合并
 - **master 改动完成必须 push**：测试 0 fail、文档已更新、工作区干净后 `git push origin master`，不留
   unpushed state。严禁 `--force`；push 非 fast-forward 时先 `git fetch` + rebase 或
   `git merge --no-ff origin/master`，解冲突再 push。半成品 / WIP / draft commit 不得留在 master 不推
