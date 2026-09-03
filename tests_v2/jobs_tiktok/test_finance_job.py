@@ -464,11 +464,15 @@ def test_finance_statement_without_payment_id_skipped_with_issue(db_session) -> 
     # No statement row should exist (skip, not silent attach). Scoped to
     # the test account so production's 1080 replicated rows don't pollute.
     assert _test_account_statements(db_session, account) == []
-    # SyncIssue recorded.
+    # SyncIssue recorded. Filter by (job_name, external_id) — prod has 23
+    # STATEMENT_PAYMENT_ID_MISSING rows for other jobs that would inflate
+    # the count.
     issues = (
         db_session.execute(
             select(SyncIssue).where(
-                SyncIssue.issue_type == "STATEMENT_PAYMENT_ID_MISSING"
+                SyncIssue.issue_type == "STATEMENT_PAYMENT_ID_MISSING",
+                SyncIssue.job_name == "tiktok.finance",
+                SyncIssue.external_id == "STM_X",
             )
         )
         .scalars()

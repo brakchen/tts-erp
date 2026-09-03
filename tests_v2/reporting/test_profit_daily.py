@@ -96,7 +96,13 @@ def _make_account_and_product(session):
 
 
 def test_rebuild_increments_calculation_version(db_session):
-    """Calling rebuild twice writes rows with v=1 then v=2."""
+    """Two rebuild calls produce two consecutive versions of the same SPU.
+
+    _next_calculation_version uses ``MAX(calculation_version) + 1`` GLOBALLY
+    (intentional, see profit_daily.py:71-75) so the absolute starting
+    version depends on whatever else has ever been rebuilt in prod — not
+    1. We assert the *delta* (consecutive +1) rather than absolute values.
+    """
     _acct, cp = _make_account_and_product(db_session)
     _seed(db_session, channel_product_id=cp.id)
 
@@ -113,8 +119,12 @@ def test_rebuild_increments_calculation_version(db_session):
         .all()
     )
     versions = sorted({r.calculation_version for r in rows})
-    assert versions == [1, 2]
-    # Old (v=1) rows are NOT deleted.
+    assert len(versions) == 2, f"expected exactly 2 versions, got {versions}"
+    assert versions[1] == versions[0] + 1, (
+        f"calculation_version should increment by 1 between rebuilds; "
+        f"got {versions}"
+    )
+    # Old (lower-version) rows are NOT deleted.
     assert len(rows) == 2
 
 

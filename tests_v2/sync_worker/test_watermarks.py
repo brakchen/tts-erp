@@ -15,12 +15,10 @@ These tests use the per-test transaction-rollback pattern from
 from __future__ import annotations
 
 import pytest
-
 from sqlalchemy import select
 
 from tts_erp_v2.db.models import SyncCursor
 from tts_erp_v2.sync_worker import watermarks
-
 
 pytestmark = [pytest.mark.domain_sync, pytest.mark.layer_integration]
 
@@ -65,8 +63,14 @@ def test_set_cursor_upserts_existing_row(db_session) -> None:
     )
     db_session.commit()
 
+    # Filter by (job_name, scope) — prod has a tiktok.orders cursor for
+    # the real shop_id scope (7494763368967603447); without scope="*" the
+    # assertion would see 2 rows.
     rows = db_session.execute(
-        select(SyncCursor).where(SyncCursor.job_name == "tiktok.orders")
+        select(SyncCursor).where(
+            SyncCursor.job_name == "tiktok.orders",
+            SyncCursor.scope == "*",
+        )
     ).scalars().all()
     assert len(rows) == 1
     assert rows[0].cursor_epoch_ms == 2_000
@@ -121,8 +125,13 @@ def test_set_cursor_updates_updated_at(db_session) -> None:
         cursor_epoch_ms=100,
     )
     db_session.commit()
+    # Filter by scope="*" — prod has another tiktok.orders cursor for the
+    # real shop_id scope; scalar_one() would MultipleResultsFound.
     first = db_session.execute(
-        select(SyncCursor).where(SyncCursor.job_name == "tiktok.orders")
+        select(SyncCursor).where(
+            SyncCursor.job_name == "tiktok.orders",
+            SyncCursor.scope == "*",
+        )
     ).scalar_one()
     first_updated = first.updated_at
     assert first_updated is not None
@@ -135,7 +144,10 @@ def test_set_cursor_updates_updated_at(db_session) -> None:
     )
     db_session.commit()
     second = db_session.execute(
-        select(SyncCursor).where(SyncCursor.job_name == "tiktok.orders")
+        select(SyncCursor).where(
+            SyncCursor.job_name == "tiktok.orders",
+            SyncCursor.scope == "*",
+        )
     ).scalar_one()
     assert second.updated_at >= first_updated
 

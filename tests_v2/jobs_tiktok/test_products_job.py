@@ -18,12 +18,10 @@ from tts_erp_v2.db.models import (
     ChannelProduct,
     ChannelProductVariant,
     Credentials,
-    RawRecord,
     SyncIssue,
 )
 from tts_erp_v2.jobs.tiktok import products as products_job
 from tts_erp_v2.sync_worker import watermarks
-
 
 pytestmark = [pytest.mark.domain_commerce, pytest.mark.layer_integration]
 from tts_erp_v2.sync_worker.job_runner import run_with_sync_job
@@ -112,9 +110,29 @@ def test_products_first_run_writes_products_and_variants(db_session) -> None:
         },
     )
     assert result.rows_inserted == 2
-    products = db_session.execute(select(ChannelProduct)).scalars().all()
+    # Filter by channel_account_id — prod has 147 ChannelProducts from
+    # the real TikTok shop; the unscoped select would return all of them.
+    products = (
+        db_session.execute(
+            select(ChannelProduct).where(
+                ChannelProduct.channel_account_id == account.id
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert {p.external_product_id for p in products} == {"P1", "P2"}
-    variants = db_session.execute(select(ChannelProductVariant)).scalars().all()
+    variants = (
+        db_session.execute(
+            select(ChannelProductVariant).where(
+                ChannelProductVariant.channel_product_id.in_(
+                    [p.id for p in products]
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert len(variants) == 1
     assert variants[0].external_variant_id == "V1"
     cursor = watermarks.get_cursor(

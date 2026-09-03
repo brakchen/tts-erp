@@ -5,36 +5,53 @@ to confirm column names + types behave as the schema spec requires.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
 
-
 pytestmark = [pytest.mark.domain_models, pytest.mark.layer_integration]
 
 from tts_erp_v2.db.models import (
-    ApiKey,
     AccountLink,
-    Case as AfterSalesCase, CaseLine as AfterSalesCaseLine,
-    ChannelAccount, ChannelProduct, ChannelProductVariant,
+    ApiKey,
+    ChannelAccount,
+    ChannelProduct,
+    ChannelProductVariant,
     Credentials,
-    LinkEvidence, LinkIssue, LinkOverride,
+    LinkEvidence,
+    LinkIssue,
+    LinkOverride,
     ManualProductCost,
     Payout,
-    ProductCostSnapshot, ProductProfitDaily,
-    ProcurementAccount, ProcurementProduct, ProcurementProductVariant,
+    ProcurementAccount,
+    ProcurementProduct,
+    ProcurementProductVariant,
+    ProductCostSnapshot,
     ProductLink,
-    PurchaseOrder, PurchaseOrderLine,
+    ProductProfitDaily,
+    PurchaseOrder,
+    PurchaseOrderLine,
     RawRecord,
-    SalesOrder, SalesOrderLine,
-    SettlementComponent, SettlementStatement, SettlementTransaction,
-    Shipment, ShipmentLine, TrackingEvent,
-    SyncCursor, SyncIssue, SyncJob,
-    VariantLink,
+    SalesOrder,
+    SalesOrderLine,
+    SettlementComponent,
+    SettlementStatement,
+    SettlementTransaction,
+    Shipment,
+    ShipmentLine,
+    SyncCursor,
+    SyncIssue,
+    SyncJob,
+    TrackingEvent,
 )
-
+from tts_erp_v2.db.models import (
+    Case as AfterSalesCase,
+)
+from tts_erp_v2.db.models import (
+    CaseLine as AfterSalesCaseLine,
+)
 
 # ── fixtures shared across the smoke matrix ─────────────────────────
 
@@ -152,8 +169,10 @@ def test_raw_records_insert_select(db_session: Session, credentials_row: Credent
 
 
 def test_sync_jobs_lifecycle(db_session: Session) -> None:
+    # Use a TEST_-prefixed job_name — prod has 649 "tiktok.orders" SyncJobs
+    # accumulated from the real sync-worker since 2026-08-30.
     j = SyncJob(
-        job_name="tiktok.orders",
+        job_name="TEST_smoke_orders",
         status="running",
         rows_total=0,
     )
@@ -163,11 +182,11 @@ def test_sync_jobs_lifecycle(db_session: Session) -> None:
     # simulate completion
     j.status = "succeeded"
     j.rows_inserted = 42
-    j.finished_at = datetime.now(timezone.utc)
+    j.finished_at = datetime.now(UTC)
     db_session.flush()
 
     found = db_session.execute(
-        select(SyncJob).where(SyncJob.job_name == "tiktok.orders")
+        select(SyncJob).where(SyncJob.job_name == "TEST_smoke_orders")
     ).scalar_one()
     assert found.status == "succeeded"
     assert found.rows_inserted == 42
@@ -389,7 +408,7 @@ def test_shipment_and_lines_and_tracking(
         shipment_id=sh.id,
         external_event_key="TEST_evt_1",
         action_code=10,
-        event_at=datetime.now(timezone.utc),
+        event_at=datetime.now(UTC),
         description="Picked up",
         location="HCM",
     )
@@ -561,19 +580,18 @@ def test_product_links_unique_with_valid_from(
     """Per refactor-tech-plan-v2 §3.2: UNIQUE(procurement, channel, valid_from)
     so historical versions don't collide.
     """
-    from datetime import timedelta
 
     pl1 = ProductLink(
         procurement_product_id=procurement_product_row.id,
         channel_product_id=channel_product_row.id,
         relation_type="MIAOSHOU_PUBLISHED_TO_TIKTOK",
-        valid_from=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        valid_from=datetime(2024, 1, 1, tzinfo=UTC),
     )
     pl2 = ProductLink(
         procurement_product_id=procurement_product_row.id,
         channel_product_id=channel_product_row.id,
         relation_type="MIAOSHOU_PUBLISHED_TO_TIKTOK",
-        valid_from=datetime(2024, 2, 1, tzinfo=timezone.utc),
+        valid_from=datetime(2024, 2, 1, tzinfo=UTC),
     )
     db_session.add_all([pl1, pl2])
     db_session.flush()

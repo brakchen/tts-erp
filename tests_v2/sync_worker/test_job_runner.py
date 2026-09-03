@@ -25,7 +25,6 @@ from tts_erp_v2.sync_worker.job_runner import (
     run_with_sync_job,
 )
 
-
 pytestmark = [pytest.mark.domain_sync, pytest.mark.layer_integration]
 
 
@@ -127,6 +126,7 @@ def test_run_with_sync_job_accepts_credential_id(db_session) -> None:
 
 def test_run_with_sync_job_marks_row_failed_on_exception(db_session) -> None:
     """Inner exception → status='failed', error_message captures it."""
+    cred = _make_credential(db_session)
 
     def _boom(session):
         raise ValueError("kaboom")
@@ -135,12 +135,17 @@ def test_run_with_sync_job_marks_row_failed_on_exception(db_session) -> None:
         run_with_sync_job(
             db_session,
             job_name="tiktok.orders",
+            credential_id=cred.id,
             inner=_boom,
         )
 
-    # Roll back the outer savepoint so we can re-query.
+    # Filter by credential_id — prod has 649 tiktok.orders SyncJobs that
+    # would otherwise inflate the count.
     rows = db_session.execute(
-        select(SyncJob).where(SyncJob.job_name == "tiktok.orders")
+        select(SyncJob).where(
+            SyncJob.job_name == "tiktok.orders",
+            SyncJob.credential_id == cred.id,
+        )
     ).scalars().all()
     assert len(rows) == 1
     failed = rows[0]
@@ -154,6 +159,8 @@ def test_run_with_sync_job_records_zero_counters_on_failure(
     db_session,
 ) -> None:
     """Failure rows have zero counters (no inflated success numbers)."""
+    cred = _make_credential(db_session)
+
     def _boom(session):
         raise RuntimeError("upstream down")
 
@@ -161,11 +168,15 @@ def test_run_with_sync_job_records_zero_counters_on_failure(
         run_with_sync_job(
             db_session,
             job_name="tiktok.orders",
+            credential_id=cred.id,
             inner=_boom,
         )
 
     rows = db_session.execute(
-        select(SyncJob).where(SyncJob.job_name == "tiktok.orders")
+        select(SyncJob).where(
+            SyncJob.job_name == "tiktok.orders",
+            SyncJob.credential_id == cred.id,
+        )
     ).scalars().all()
     assert len(rows) == 1
     assert rows[0].rows_total == 0

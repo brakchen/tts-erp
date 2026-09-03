@@ -210,8 +210,15 @@ def test_after_sales_unknown_order_writes_sync_issue(db_session) -> None:
         inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
     )
     assert result.rows_failed == 1
+    # Filter by the unique (issue_type, external_id) the test inserted —
+    # prod has 53 PARSE_ERROR rows for this job_name that would otherwise
+    # blow up .scalar_one().
     issue = db_session.execute(
-        select(SyncIssue).where(SyncIssue.job_name == "tiktok.after_sales")
+        select(SyncIssue).where(
+            SyncIssue.job_name == "tiktok.after_sales",
+            SyncIssue.issue_type == "UNKNOWN_ORDER",
+            SyncIssue.external_id == "R2",
+        )
     ).scalar_one()
     assert issue.issue_type == "UNKNOWN_ORDER"
 
