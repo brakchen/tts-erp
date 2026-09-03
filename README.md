@@ -226,10 +226,10 @@ bash prod-switch/rollback.sh                # 紧急：回到 v1 旧栈
 cd /home/schan/tts-erp
 scripts/test.sh fast                # 日常全量（排除 slow + requires_service）
 scripts/test.sh commerce            # 按业务域跑单切片（详见 tech-doc/test-domains.md）
-.venv/bin/pytest tests_v2/ -p no:warnings   # 直接跑 v2 套件（addopts 默认排除 domain_migration）
+.venv/bin/pytest tests/ -p no:warnings   # 直接跑 v2 套件（addopts 默认排除 domain_migration）
 ```
 
-约定（`tests_v2/conftest.py`）：
+约定（`tests/conftest.py`）：
 
 - **事务回滚隔离**：DB 测试每个用例跑在外层事务里，结束即 rollback，可安全对生产库跑
 - **`TEST_%` 哨兵**：落库提交的数据（如 `_seed_channel_product`），`shop_id`/`txn_id` 一律 `TEST_` 前缀

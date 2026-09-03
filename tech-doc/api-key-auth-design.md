@@ -158,7 +158,7 @@ python3 api_keys.py rotate --prefix ttserp_rw_Kx9vQ2mP         # = create 同名
 | ~~`sync_cron.py`（每 10 分钟 cron）~~ | **2026-09-03 已废弃**：被 sync-worker（`tts-erp-sync.service`，APScheduler）取代；v2 同步无 HTTP `/sync/*` 路由（见 AGENTS.md §3）。 |
 | ~~`run_sync_cron.sh`~~ | **2026-09-03 仍保留**（rollback.sh 依赖），观察期后删。 |
 | `test_e2e.py` | 同样从 env 读 key 带 header；新增「无 key 应 401」断言。 |
-| `tests_v2/middleware/` 测试 | 新增 `test_auth.py`（见 §8）；既有 TestClient 测试在 `tests_v2/conftest.py` 统一注入 admin key header。 |
+| `tests/middleware/` 测试 | 新增 `test_auth.py`（见 §8）；既有 TestClient 测试在 `tests/conftest.py` 统一注入 admin key header。 |
 | 人工 curl / Windows 工作站 | 发一把 `readonly` 或 `readwrite` key，随用随带 header |
 | README / AGENTS.md / setup 文档 | 更新端点说明（标注所需角色）、`.env` 字段、故障排查表 |
 
@@ -173,7 +173,7 @@ python3 api_keys.py rotate --prefix ttserp_rw_Kx9vQ2mP         # = create 同名
 
 每步都可独立回滚：`TTS_ERP_AUTH_MODE=off` + 重启即恢复（30 秒级）。
 
-## 8. 测试计划（`tests_v2/middleware/test_auth.py`）
+## 8. 测试计划（`tests/middleware/test_auth.py`）
 
 沿用现有 pytest + TestClient + TEST_ 哨兵模式：
 
@@ -213,8 +213,8 @@ python3 api_keys.py rotate --prefix ttserp_rw_Kx9vQ2mP         # = create 同名
 | `tts_erp_v2/middleware/auth.py` | 新建：AuthMiddleware + 角色矩阵 + 缓存 |
 | `tts_erp_v2/app.py` | 在 `build_app()` 内挂载中间件（约 3 行） |
 | `tts_erp_v2/middleware/session_auth.py` | 新建：浏览器 cookie 会话（独立中间件；HMAC 签名 `tts_session` cookie） |
-| `tests_v2/middleware/test_auth.py` + `tests_v2/middleware/test_session_auth.py` | 新建：§8 测试 |
-| `tests_v2/conftest.py` | TestClient 统一注入 admin key header |
+| `tests/middleware/test_auth.py` + `tests/middleware/test_session_auth.py` | 新建：§8 测试 |
+| `tests/conftest.py` | TestClient 统一注入 admin key header |
 | `api_keys.py` | 新建：管理 CLI |
 | `schema.sql` | 新增 `api_keys` 表 |
 | `sync_cron.py` | 请求带 Authorization header |

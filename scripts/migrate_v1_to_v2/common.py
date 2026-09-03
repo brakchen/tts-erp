@@ -24,7 +24,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.pool import NullPool
 
 # Best-effort load of .env so the scripts work when invoked directly
-# (without going through ``tts_erp_v2.db.base`` / tests_v2 conftest).
+# (without going through ``tts_erp_v2.db.base`` / tests conftest).
 try:
     from dotenv import load_dotenv
     _env_path = Path(__file__).resolve().parents[2] / ".env"
@@ -55,8 +55,8 @@ def is_real_shop_id(shop_id: str | None) -> bool:
 
 # ─── prod migration kill-switch ──────────────────────────────────────
 #
-# 2026-08-30 incident: ``tests_v2/migration/conftest._ensure_migrations_applied``
-# used to be ``autouse=True``, so any pytest run under ``tests_v2/`` replayed
+# 2026-08-30 incident: ``tests/migration/conftest._ensure_migrations_applied``
+# used to be ``autouse=True``, so any pytest run under ``tests/`` replayed
 # ``migrate_shops.run(dry_run=False)`` against the PRODUCTION database and
 # overwrote ``integration.credentials.ciphertext`` with the legacy
 # (non-JSON-envelope) format. ``load_credentials()`` then started throwing

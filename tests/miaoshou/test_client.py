@@ -2,7 +2,7 @@
 
 不打真实网络，用 monkeypatch 替换 http.client.HTTPSConnection。
 """
-# ruff: noqa: S105 S106 -- 本文件所有 "SECRET"/"ttserp_..." 字符串都是测试假凭证
+
 
 from __future__ import annotations
 

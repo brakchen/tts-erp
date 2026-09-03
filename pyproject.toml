@@ -20,7 +20,7 @@ dependencies = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
-testpaths = ["tests", "tests_v2"]
+testpaths = ["tests"]
 addopts = "-ra -q -m 'not domain_migration'"
 asyncio_mode = "auto"
 markers = [

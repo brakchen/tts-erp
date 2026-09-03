@@ -377,11 +377,11 @@ CSRF guard on POST: cookie-authed callers must send
 
 | Layer        | File                                                  | What                                                                  |
 |--------------|-------------------------------------------------------|-----------------------------------------------------------------------|
-| MinIO client | `tests_v2/storage/test_minio_client.py`               | presign URL shape, ensure_bucket idempotency, stat errors              |
-| Backend API  | `tests_v2/api/test_spu_images.py`                     | upload-url happy path + bad size / bad content-type; confirm head-fail|
+| MinIO client | `tests/storage/test_minio_client.py`               | presign URL shape, ensure_bucket idempotency, stat errors              |
+| Backend API  | `tests/api/test_spu_images.py`                     | upload-url happy path + bad size / bad content-type; confirm head-fail|
 |              |                                                       | list filter; delete idempotency; role gates                           |
-| Frontend     | `tests_v2/api/test_manual_costs_page_v2.py`           | page renders shop switcher + 3 tabs; static assets served             |
-| E2E smoke    | `tests_v2/api/test_spu_images_e2e.py`                 | upload-url → PUT to fake MinIO (mitmproxy or in-proc mock) → confirm   |
+| Frontend     | `tests/api/test_manual_costs_page_v2.py`           | page renders shop switcher + 3 tabs; static assets served             |
+| E2E smoke    | `tests/api/test_spu_images_e2e.py`                 | upload-url → PUT to fake MinIO (mitmproxy or in-proc mock) → confirm   |
 
 Tests use the existing `conftest.py` transaction-rollback pattern. MinIO
 is mocked at the client boundary (the SDK is never imported in tests).

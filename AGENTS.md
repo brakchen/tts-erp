@@ -171,8 +171,8 @@ commits），但 `:9877` 运行时已不再服务这些路径。生产读 / 写 
 
 ### DO
 
-- **TDD：先写/改测试，再实现到通过**；v2 测试在 `tests_v2/`（共享 fixtures 在 `tests_v2/conftest.py`：事务回滚隔离、`TEST_%` 哨兵），妙手 SDK 测试在 `tests/miaoshou/`
-- **跑测试默认跳过 migration 域**：`pyproject.toml addopts` 带 `-m 'not domain_migration'` —— `tests_v2/migration/` 会直接读写生产库且全量跑时卡锁（详见 `tech-doc/test-domains.md`）。要跑它用 `scripts/test.sh migration` 或 `pytest -m domain_migration tests_v2/migration`（CLI `-m` 覆盖 addopts）。日常全量用 `scripts/test.sh fast`
+- **TDD：先写/改测试，再实现到通过**；v2 测试在 `tests/`（共享 fixtures 在 `tests/conftest.py`：事务回滚隔离、`TEST_%` 哨兵），妙手 SDK 测试在 `tests/miaoshou/`
+- **跑测试默认跳过 migration 域**：`pyproject.toml addopts` 带 `-m 'not domain_migration'` —— `tests/migration/` 会直接读写生产库且全量跑时卡锁（详见 `tech-doc/test-domains.md`）。要跑它用 `scripts/test.sh migration` 或 `pytest -m domain_migration tests/migration`（CLI `-m` 覆盖 addopts）。日常全量用 `scripts/test.sh fast`
 - 改完调 `bash /home/schan/tts-erp/restart.sh` 验证 healthz 200（注意：只重启 `tts-erp.service`；改了 `jobs/` / `sync_worker/` 要另跑 `systemctl --user restart tts-erp-sync.service`）
 - 改完跑 `python3 test_e2e.py`（仓库根，端到端冒烟，需服务在跑）
 - 看 `logs/stderr.log` 抓 traceback
@@ -195,7 +195,7 @@ commits），但 `:9877` 运行时已不再服务这些路径。生产读 / 写 
 - ❌ **不要**在 v2 端点里读 `public.*` 表。v2 完全读新 10 schema。4 周观察期内 `public.*` 仅作 rollback safety，**是**旧代码路径，但 v2 代码不会直接查。
 - ❌ **不要**接 `POST /orders/<id>/{confirm,cancel,update_status,shipping_info,verify_shipping}`。v2 架构是只读分析，写操作已全部拆除。
 - ❌ **不要裸跑 `git reset --hard` / `git checkout -- .` / `git clean -f`**(2026-09-01 起约定):多 agent 并发工作时,这类命令会把别人未提交的改动直接清掉(08-31 曾一次抹掉 5 条修复 lane 的全部未提交工作)。看到不属于自己的未提交改动 → 先问,不要清。
-- ❌ **不要跑 `tests_v2/migration/` 域测试或 `scripts/migrate_v1_to_v2/` 脚本**,除非显式设了 `TTS_ERP_ALLOW_PROD_MIGRATION=1` —— 它们会真实写生产库(08-31 曾因此把生产凭证回退成 legacy 格式、全线停摆 22h)。代码层已加闸,不要绕过。
+- ❌ **不要跑 `tests/migration/` 域测试或 `scripts/migrate_v1_to_v2/` 脚本**,除非显式设了 `TTS_ERP_ALLOW_PROD_MIGRATION=1` —— 它们会真实写生产库(08-31 曾因此把生产凭证回退成 legacy 格式、全线停摆 22h)。代码层已加闸,不要绕过。
 
 ## 5. 常见 bug + 修复
 
@@ -225,8 +225,8 @@ commits），但 `:9877` 运行时已不再服务这些路径。生产读 / 写 
 | `api_keys.py` | API key 管理 CLI（create/list/revoke/rotate；表在 `security.api_keys`） |
 | `schema_tts_erp.sql` / `schema_oauth.sql` | PG 表结构（按库拆分；`python3 scripts/regen_schema.py` 重新生成） |
 | **`miaoshou/`** | 妙手 SDK 包（客户端 + MD5 签名 + 36 出站 endpoint + 18 回调 payload；**无 HTTP 路由**，进程内被 jobs 用） |
-| `conftest.py` | pytest 根 conftest（仅 path 引导；业务 fixtures 在 `tests_v2/conftest.py`） |
-| `tests_v2/` | v2 测试套件（api / jobs_* / linkage / middleware / proxy / reporting / storage / sync_worker / migration 域） |
+| `conftest.py` | pytest 根 conftest（仅 path 引导；业务 fixtures 在 `tests/conftest.py`） |
+| `tests/` | v2 测试套件（api / jobs_* / linkage / middleware / proxy / reporting / storage / sync_worker / migration 域） |
 | `tests/miaoshou/` | 妙手 SDK 单测（91 个 test function，15 文件） |
 | `test_e2e.py` / `test_e2e_finance.py` | 端到端冒烟（仓库根；需服务在跑） |
 | `.env` | 配置（0600，含 app_key/secret/DB URL/Fernet key/MinIO） |
@@ -347,8 +347,8 @@ outermost or rate limiting breaks (key_id will be None).
 
 - `bash prod-switch/postswitch-smoke.sh` — 7 步生产冒烟（healthz / auth 401 /
   v2 读端点 / 页面 / sync_jobs 新鲜度）
-- `.venv/bin/pytest tests_v2/ -q` — 含 `tests_v2/middleware/`（auth/ratelimit/
-  session）与 `tests_v2/api/` 的端点契约测试
+- `.venv/bin/pytest tests/ -q` — 含 `tests/middleware/`（auth/ratelimit/
+  session）与 `tests/api/` 的端点契约测试
 
 Run after any change to `tts_erp_v2/app.py`, `tts_erp_v2/middleware/*`.
 
@@ -414,7 +414,7 @@ sign    = MD5(busData + companySecret).upper()
 
 ```shell
 .venv/bin/pytest tests/miaoshou/ -q        # SDK 单测：91 个 test function（15 文件）
-.venv/bin/pytest tests_v2/jobs_miaoshou/ -q  # v2 妙手 job 测试
+.venv/bin/pytest tests/jobs_miaoshou/ -q  # v2 妙手 job 测试
 ```
 
 覆盖 signing / client / callbacks / 36 出站 endpoint；签名锁定向量在

@@ -10,7 +10,7 @@ module (sync_miaoshou_shops, db_list_miaoshou_shops) and legacy
 ``tts_erp.persist_miaoshou_shop`` helper. Modern equivalent lives at
 ``tts_erp_v2.jobs.miaoshou.shops.sync_shops`` (sync_jobs-lifecycle,
 async-aware, no (code, body) tuple return). The behaviour here is
-already covered by ``tests_v2/jobs_miaoshou/test_shops.py`` for the
+already covered by ``tests/jobs_miaoshou/test_shops.py`` for the
 v2 path; this file is kept for historical reference only.
 """
 
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-# TODO: delete once tests_v2/jobs_miaoshou/test_shops.py covers all
+# TODO: delete once tests/jobs_miaoshou/test_shops.py covers all
 # original assertions (parameter hardening, _safe_int defaults,
 # 502/500 error paths). Current overlap is partial.
 pytestmark = [
@@ -26,7 +26,7 @@ pytestmark = [
     pytest.mark.layer_integration,
     pytest.mark.skip(
         reason="miaoshou_sync retired with tdd/ codebase; covered by "
-        "tests_v2/jobs_miaoshou/test_shops.py for the v2 path"
+        "tests/jobs_miaoshou/test_shops.py for the v2 path"
     ),
 ]
 

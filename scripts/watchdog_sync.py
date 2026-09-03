@@ -81,7 +81,7 @@ from typing import Any
 
 # Same env-var loading pattern as scripts/oneoff_finance_reset.py —
 # the watchdog must work when invoked directly, without going through
-# tests_v2/conftest.py or any other entry point that loads .env.
+# tests/conftest.py or any other entry point that loads .env.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ENV_PATH = PROJECT_ROOT / ".env"
 
@@ -98,7 +98,7 @@ if str(PROJECT_ROOT) not in sys.path:
 def _load_env() -> None:
     """Best-effort load of .env so TTS_ERP_DB_URL etc. are populated.
 
-    Mirrors the parsing in tests_v2/conftest.py so behaviour is
+    Mirrors the parsing in tests/conftest.py so behaviour is
     consistent whether the watchdog runs from a cron tick (no shell
     env) or a developer invocation (env already exported). Ignores
     comments and blank lines; trims surrounding quotes on values.

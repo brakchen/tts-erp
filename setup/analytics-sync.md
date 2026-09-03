@@ -41,7 +41,7 @@ Chrome 扩展（`tk-adv-cost-monitor`）在 TikTok 广告分析页拦截到一�
 | Auth                  | tts-erp v2 `AuthMiddleware`（`security.api_keys`，Bearer / X-API-Key，60s TTL 缓存）|
 | RateLimit             | tts-erp v2 `RateLimitMiddleware`（默认 100/min/key，`TTS_ERP_RATE_LIMIT_PER_MIN` 可调）|
 | DB                    | `tts_erp` on `postgres` container :5432 · `analytics` schema（迁移 alembic 0004 + 0005）|
-| 测试覆盖              | `tests_v2/api/test_analytics_v2_contract.py` + `test_analytics_v2_errors.py` + `test_endpoints_index.py` |
+| 测试覆盖              | `tests/api/test_analytics_v2_contract.py` + `test_analytics_v2_errors.py` + `test_endpoints_index.py` |
 | 协议版本              | `protocolVersion ∈ {1, 2}`（2 = dump 单 object 形状）            |
 | 设计文档              | `tech-doc/analytics/dump-architecture.md`（另见同目录 architecture.md / analytics-sync.md）|
 
@@ -296,4 +296,4 @@ cookie / 完整请求头。
 - `tech-doc/analytics/dump-architecture.md` — ★ 当前 dump 架构方案
 - `tech-doc/external-api.md` — tts-erp 全量外部端点契约（analytics 节）
 - `tech-doc/_archive/plugin-integration.md` — 插件对接（旧 page 协议，已 superseded 归档）
-- `tests_v2/api/test_analytics_v2_contract.py` + `test_analytics_v2_errors.py` — 契约 + 错误观测测试
+- `tests/api/test_analytics_v2_contract.py` + `test_analytics_v2_errors.py` — 契约 + 错误观测测试
