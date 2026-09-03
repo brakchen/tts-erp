@@ -76,8 +76,7 @@ SQL_LIST_OVERRIDES = (
     "SELECT id, procurement_product_id, channel_product_id, decision, "
     "reason, valid_from, valid_to, created_by "
     "FROM linkage.link_overrides "
-    "WHERE (:channel_id IS NULL OR channel_product_id = CAST(:channel_id AS bigint)) "
-    "AND (:active_only = FALSE OR valid_to IS NULL) "
+    "WHERE 1=1 "
     "ORDER BY valid_from DESC LIMIT :limit OFFSET :offset"
 )
 SQL_RESOLVE_ISSUE = (
@@ -286,16 +285,24 @@ def list_link_overrides(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> list[LinkOverrideOut]:
-    rows = _q(
-        _STMT_LIST_OVERRIDES,
-        {
-            "channel_id": channel_product_id,
-            "active_only": active_only,
-            "limit": limit,
-            "offset": offset,
-        },
-        sess,
-    ).all()
+    # Build the WHERE clause in Python. Cannot use ``IS NULL OR col = :col``
+    # or ``:bool_param = FALSE OR col IS NULL`` patterns — psycopg cannot
+    # type-infer a None or boolean bind param and the route 500s with
+    # ``could not determine data type of parameter``. Mirrors the
+    # _q_Optional helper but kept inline so ``active_only`` can mix an
+    # IS-NULL predicate with optional equality filters.
+    clauses: list[str] = []
+    params: dict = {"limit": limit, "offset": offset}
+    if channel_product_id is not None:
+        clauses.append("channel_product_id = :channel_product_id")
+        params["channel_product_id"] = channel_product_id
+    if active_only:
+        clauses.append("valid_to IS NULL")
+    where = (" AND ".join(clauses)) if clauses else "1=1"
+    sql = SQL_LIST_OVERRIDES.replace("WHERE 1=1", f"WHERE {where}")
+    # pi-lens-ignore: python-sql-injection — WHERE tokens are hardcoded
+    # string literals; all user-supplied data flows through :bind params.
+    rows = sess.execute(text(sql), params).all()
     return [_override_row(r) for r in rows]
 
 
@@ -317,23 +324,22 @@ def create_link_override(
     the same (procurement, channel) pair before inserting the new one,
     so ``valid_to`` history is preserved.
 
-    For ``DENY`` decisions, ``procurement_product_id`` may be null
-    (operator denies even when no candidate exists). For ``ALLOW`` /
-    ``PRIMARY``, it is required.
+    ``procurement_product_id`` is REQUIRED for every decision:
+    ``link_overrides.procurement_product_id`` is NOT NULL and references
+    ``procurement.procurement_products(id)``, so the handler cannot
+    insert a sentinel (0 would violate the FK). Operators wanting to
+    "deny everything" must still anchor the DENY row to a procurement
+    product (typically id=1, the catch-all "未分类" / unclassified
+    row seeded by schema migration 0001).
     """
     require_role_at_least(request, "admin")
-    if body.decision in ("ALLOW", "PRIMARY") and body.procurement_product_id is None:
+    if body.procurement_product_id is None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "procurement_product_id is required for ALLOW/PRIMARY",
+            "procurement_product_id is required for every override "
+            "(link_overrides.procurement_product_id is NOT NULL)",
         )
-    if body.procurement_product_id is None:
-        # Use a sentinel 0 for DENY rows; we accept it for SQL compliance.
-        # The model FK will reject 0 if the row references a real product,
-        # so we explicitly insert 0 only when the FK is None.
-        proc_id = 0
-    else:
-        proc_id = body.procurement_product_id
+    proc_id = body.procurement_product_id
 
     role = request.scope.get("api_key_role") or "unknown"
     created_by = f"api_key:{role}"

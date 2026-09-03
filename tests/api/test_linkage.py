@@ -713,7 +713,7 @@ def test_create_override_readonly_is_403(api_client, readonly_key):
 def test_create_override_allow_missing_procurement_id_is_422(
     api_client, admin_key
 ):
-    """Lines 333-337: ALLOW/PRIMARY require procurement_product_id → 422."""
+    """procurement_product_id is required for every override → 422."""
     r = api_client.post(
         "/v2/linkage/overrides",
         headers={"Authorization": f"Bearer {admin_key}"},
@@ -724,7 +724,7 @@ def test_create_override_allow_missing_procurement_id_is_422(
         },
     )
     assert r.status_code == 422, r.text
-    assert "procurement_product_id is required for ALLOW/PRIMARY" in r.text
+    assert "procurement_product_id is required" in r.text
 
 
 def test_create_override_primary_missing_procurement_id_is_422(
@@ -757,27 +757,18 @@ def test_create_override_bad_decision_is_422(api_client, admin_key):
     assert r.status_code == 422, r.text
 
 
-def test_create_override_deny_without_procurement_id_raises_integrity_error(
+def test_create_override_deny_without_procurement_id_returns_422(
     api_client, admin_key, db_engine
 ):
-    """Lines 339-341 + 363-374: DENY with procurement_product_id=None
-    is documented to use sentinel 0, but the FK
-    ``link_overrides_procurement_product_id_fkey REFERENCES
-    procurement.procurement_products(id)`` blocks the insert.
+    """DENY with procurement_product_id=None → 422.
 
-    This is a real bug — the handler's docstring claims the sentinel
-    works but it actually crashes with IntegrityError on commit.
-    FastAPI's TestClient (default ``raise_server_exceptions=True``)
-    re-raises unhandled server exceptions rather than translating to
-    500, so the cleanest way to pin this behavior is ``pytest.raises``.
-
-    If/when the schema or handler is fixed (drop NOT NULL on
-    link_overrides.procurement_product_id, or have the handler skip
-    the INSERT for null procurement id), this test will start failing
-    — that's the regression guard for an intentional fix.
+    link_overrides.procurement_product_id is NOT NULL and FK-references
+    procurement.procurement_products(id), so the handler cannot insert
+    a sentinel (0 would violate the FK). Operators wanting to "deny
+    everything" must anchor the DENY row to a real procurement product
+    (typically the catch-all "unclassified" row at id=1). This test
+    pins that contract.
     """
-    from sqlalchemy.exc import IntegrityError
-
     # Clean any leftovers for a deterministic check.
     with db_engine.begin() as conn:
         # pi-lens-ignore: python-sql-injection — literal SQL
@@ -786,20 +777,21 @@ def test_create_override_deny_without_procurement_id_raises_integrity_error(
                 "DELETE FROM linkage.link_overrides WHERE reason LIKE 'TEST_%'"
             )
         )
-    with pytest.raises(IntegrityError) as exc_info:
-        api_client.post(
-            "/v2/linkage/overrides",
-            headers={"Authorization": f"Bearer {admin_key}"},
-            json={
-                "channel_product_id": 999999998,
-                "procurement_product_id": None,
-                "decision": "DENY",
-                "reason": "TEST_deny_reason",
-            },
-        )
-    # The exception message confirms the FK on procurement_product_id
-    # is the root cause.
-    assert "link_overrides_procurement_product_id_fkey" in str(exc_info.value)
+    r = api_client.post(
+        "/v2/linkage/overrides",
+        headers={"Authorization": f"Bearer {admin_key}"},
+        json={
+            "channel_product_id": 999999998,
+            "procurement_product_id": None,
+            "decision": "DENY",
+            "reason": "TEST_deny_reason",
+        },
+    )
+    assert r.status_code == 422, r.text
+    body = r.json()
+    # Pydantic's HTTPException→detail mapping keeps the detail dict
+    # as-is when raised from inside a handler.
+    assert "procurement_product_id is required" in str(body)
 
 
 def test_create_override_allow_with_procurement_id_succeeds(
