@@ -1,6 +1,6 @@
 # Test split by domain
 
-The pytest suite at `tests/` + `tests_v2/` is tagged with **domain** +
+The pytest suite at `tests/` + `tests/` is tagged with **domain** +
 **layer** markers so you can run a single business slice without paying
 for the full ~10k LOC run.
 
@@ -49,7 +49,7 @@ to think about it per-test.
 | `layer_unit`        | pure helpers, no DB / no fixtures (very fast, ≤ 100ms / test)          |
 | `layer_integration` | uses DB / fixtures / `TestClient` (default)                            |
 | `slow`              | ≥ 1 s per test (migration tests, e2e)                                  |
-| `requires_db`       | needs `TTS_ERP_DB_URL` env var (most `tests_v2/` tests)                |
+| `requires_db`       | needs `TTS_ERP_DB_URL` env var (most `tests/` tests)                |
 | `requires_service`  | needs live `:9877` service (`domain_e2e`)                              |
 
 ## Common invocations
@@ -108,7 +108,7 @@ If you want to call `pytest` directly:
   .venv/bin/pytest -m "not slow and not requires_service"
   ```
 
-- **`requires_db` vs `requires_service` are separate.** Most `tests_v2/`
+- **`requires_db` vs `requires_service` are separate.** Most `tests/`
   tests need a Postgres reachable via `TTS_ERP_DB_URL`. The `domain_e2e`
   suite additionally needs `:9877` running locally. Run them with:
 
@@ -120,7 +120,7 @@ If you want to call `pytest` directly:
 - **Worktrees.** `chore/*` worktrees don't carry their own `.venv` — the
   script falls back to `/home/schan/tts-erp/.venv/bin/pytest` when
   `./.venv/bin/pytest` is missing.
-- **Migration tests are NOT autouse.** Per `tests_v2/migration/conftest.py`
+- **Migration tests are NOT autouse.** Per `tests/migration/conftest.py`
   safety note (2026-08-30), the `_ensure_migrations_applied` fixture is
   opt-in. Running `scripts/test.sh migration` will exercise dry-run
   paths without rewriting production data. To actually apply migrations,
@@ -131,16 +131,16 @@ If you want to call `pytest` directly:
   every migration against the PROD DB per test (autouse), and in
   full-suite runs blocks indefinitely on locks held by earlier tests
   (no `statement_timeout`), hanging the suite at ~60%. To run them
-  deliberately: `pytest -m domain_migration tests_v2/migration`
+  deliberately: `pytest -m domain_migration tests/migration`
   (CLI `-m` overrides addopts) or `scripts/test.sh all` / `migration`.
   Delete the dir together with `scripts/migrate_v1_to_v2/` when the
   rollback observation window closes (~2026-09-26).
 - **Migration tests require an explicit opt-in env var (2026-08-31).**
-  Even with `-m domain_migration`, the entire `tests_v2/migration/`
+  Even with `-m domain_migration`, the entire `tests/migration/`
   directory is skipped unless `TTS_ERP_ALLOW_PROD_MIGRATION=1` is set in
   the environment. The check is enforced at three layers:
 
-    1. **Module-level skip** in `tests_v2/migration/conftest.py` —
+    1. **Module-level skip** in `tests/migration/conftest.py` —
        `pytest.skip(allow_module_level=True)` blocks collection of any
        test in the directory unless the env var is set.
     2. **Session-scoped fixture** (`_ensure_migrations_applied`) —
@@ -157,7 +157,7 @@ If you want to call `pytest` directly:
   The SQL itself is also locked down: `migrate_shops._UPSERT_CREDENTIAL`
   no longer overwrites `ciphertext` / `company_secret_ciphertext` on
   `ON CONFLICT DO UPDATE` (only the initial INSERT writes them). See
-  `tests_v2/migration/test_migrate_shops.py::TestUpsertCredentialSql`
+  `tests/migration/test_migrate_shops.py::TestUpsertCredentialSql`
   for the string-level assertion. This closes the loop on the 2026-08-30
   incident where an autouse test fixture overwrote the v2 JSON-envelope
   `integration.credentials.ciphertext` with the legacy

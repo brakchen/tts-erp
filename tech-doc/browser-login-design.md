@@ -141,7 +141,7 @@ AuthMiddleware：优先验会话 cookie（key_hash → DB 复查仍有效）→ 
 
 ## 9. 测试计划（TDD，先写测试）
 
-新增 `tests_v2/api/test_auth_login.py`：
+新增 `tests/api/test_auth_login.py`：
 
 - GET 登录页 200 + text/html，无需凭据
 - POST 合法 key → 200 + `Set-Cookie`（HttpOnly、SameSite=Lax、含签名）；随后 `/v2/auth/me` → `{authenticated:true, role}`
@@ -157,9 +157,9 @@ AuthMiddleware：优先验会话 cookie（key_hash → DB 复查仍有效）→ 
 
 改动现有：
 
-- `tests_v2/api/test_pages.py::test_manual_costs_page_requires_some_auth`
+- `tests/api/test_pages.py::test_manual_costs_page_requires_some_auth`
   → 改为断言浏览器 Accept 下 302 到 login（或保留 JSON 401 断言 + 新增 302 用例）
-- `tests_v2/api/test_middleware.py` 分类变化同步
+- `tests/api/test_middleware.py` 分类变化同步
 
 手工验证：`bash restart.sh` → `curl -i` 走外网 `/tts/` 全流程（登录 → cookie →
 页面 200 → missing-cost-products 数据 200）。
@@ -173,8 +173,8 @@ AuthMiddleware：优先验会话 cookie（key_hash → DB 复查仍有效）→ 
 | `tts_erp_v2/api/v2/pages.py` | 改：prefix 感知 API base、去 token 粘贴 UI、登录态/退出、401 跳转 |
 | `tts_erp_v2/app.py` | 改：include auth router |
 | `.env` | 加 `TTS_ERP_SESSION_SECRET`（`openssl rand -hex 32`）、可选 `TTS_ERP_SESSION_TTL` / `TTS_ERP_SESSION_SECURE` |
-| `tests_v2/api/test_auth_login.py` | 新增 |
-| `tests_v2/api/test_pages.py`、`test_middleware.py` | 更新断言 |
+| `tests/api/test_auth_login.py` | 新增 |
+| `tests/api/test_pages.py`、`test_middleware.py` | 更新断言 |
 | 本文件 | 设计文档 |
 
 无 DB schema 变更（stateless 会话）。

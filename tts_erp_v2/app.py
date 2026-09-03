@@ -166,7 +166,7 @@ def _register_public_routes(app: FastAPI) -> None:
         wraps every ``include_router`` child in a lazy ``_IncludedRouter``
         proxy that has no ``path`` attribute — a flat walk would
         silently drop every business route. See
-        ``tests_v2/api/test_endpoints_index.py`` for the regression
+        ``tests/api/test_endpoints_index.py`` for the regression
         guard.
         """
         items = sorted(_walk_v2_routes(app.routes), key=lambda x: x["path"])
