@@ -12,12 +12,22 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from tts_erp_v2.db.models.integration import Credentials, SyncJob
 from tts_erp_v2.jobs.token_refresh import JOB_NAME, sync_token_refresh
 
 pytestmark = [pytest.mark.domain_token_refresh, pytest.mark.layer_integration]
+
+
+def _wipe_credentials(session) -> None:
+    """Delete all credentials so the test sees a clean slate.
+
+    The outer-transaction rollback in ``db_session`` fixture restores
+    production state at teardown — this DELETE is never durable.
+    """
+    session.execute(text("DELETE FROM integration.credentials"))
+    session.commit()  # release savepoint so subsequent SELECTs see the wipe
 
 
 def _make_credentials(session, *, expires_at: datetime | None, provider: str = "tiktok") -> Credentials:
@@ -59,6 +69,7 @@ class _FakeRefresher:
 
 
 def test_no_credentials_is_noop(db_session) -> None:
+    _wipe_credentials(db_session)
     reg = _FakeRefresher()
     result = sync_token_refresh(db_session, registry=reg)
     assert result["scanned"] == 0
@@ -70,6 +81,7 @@ def test_no_credentials_is_noop(db_session) -> None:
 def test_already_fresh_skips_refresher(db_session) -> None:
     """expires_at far in the future → outside the refresh window →
     the row is not in the due list, so the refresher is never wired."""
+    _wipe_credentials(db_session)
     far_future = datetime.now(UTC) + timedelta(days=30)
     _make_credentials(db_session, expires_at=far_future)
     reg = _FakeRefresher()

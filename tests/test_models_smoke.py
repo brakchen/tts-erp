@@ -177,6 +177,7 @@ def test_sync_jobs_lifecycle(db_session: Session) -> None:
     )
     db_session.add(j)
     db_session.flush()
+    job_id = j.id
 
     # simulate completion
     j.status = "succeeded"
@@ -185,7 +186,7 @@ def test_sync_jobs_lifecycle(db_session: Session) -> None:
     db_session.flush()
 
     found = db_session.execute(
-        select(SyncJob).where(SyncJob.job_name == "tiktok.orders")
+        select(SyncJob).where(SyncJob.id == job_id)
     ).scalar_one()
     assert found.status == "succeeded"
     assert found.rows_inserted == 42

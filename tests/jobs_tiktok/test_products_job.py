@@ -110,9 +110,19 @@ def test_products_first_run_writes_products_and_variants(db_session) -> None:
         },
     )
     assert result.rows_inserted == 2
-    products = db_session.execute(select(ChannelProduct)).scalars().all()
+    products = db_session.execute(
+        select(ChannelProduct).where(ChannelProduct.channel_account_id == account.id)
+    ).scalars().all()
     assert {p.external_product_id for p in products} == {"P1", "P2"}
-    variants = db_session.execute(select(ChannelProductVariant)).scalars().all()
+    variants = db_session.execute(
+        select(ChannelProductVariant).where(
+            ChannelProductVariant.channel_product_id.in_(
+                select(ChannelProduct.id).where(
+                    ChannelProduct.channel_account_id == account.id
+                )
+            )
+        )
+    ).scalars().all()
     assert len(variants) == 1
     assert variants[0].external_variant_id == "V1"
     cursor = watermarks.get_cursor(
