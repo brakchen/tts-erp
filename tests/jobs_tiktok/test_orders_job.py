@@ -491,8 +491,13 @@ def test_orders_non_zero_upstream_code_fails_sync_job(db_session) -> None:
             },
         )
 
+    # Filter by credential_id — prod has 649 tiktok.orders SyncJobs that
+    # would otherwise inflate the count.
     rows = db_session.execute(
-        select(SyncJob).where(SyncJob.job_name == "tiktok.orders")
+        select(SyncJob).where(
+            SyncJob.job_name == "tiktok.orders",
+            SyncJob.credential_id == account.credential_id,
+        )
     ).scalars().all()
     assert len(rows) == 1
     assert rows[0].status == "failed"

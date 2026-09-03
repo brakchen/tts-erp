@@ -170,8 +170,10 @@ def test_raw_records_insert_select(db_session: Session, credentials_row: Credent
 
 
 def test_sync_jobs_lifecycle(db_session: Session) -> None:
+    # Use a TEST_-prefixed job_name — prod has 649 "tiktok.orders" SyncJobs
+    # accumulated from the real sync-worker since 2026-08-30.
     j = SyncJob(
-        job_name="tiktok.orders",
+        job_name="TEST_smoke_orders",
         status="running",
         rows_total=0,
     )
@@ -185,7 +187,7 @@ def test_sync_jobs_lifecycle(db_session: Session) -> None:
     db_session.flush()
 
     found = db_session.execute(
-        select(SyncJob).where(SyncJob.job_name == "tiktok.orders")
+        select(SyncJob).where(SyncJob.job_name == "TEST_smoke_orders")
     ).scalar_one()
     assert found.status == "succeeded"
     assert found.rows_inserted == 42
