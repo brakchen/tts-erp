@@ -120,48 +120,29 @@ If you want to call `pytest` directly:
 - **Worktrees.** `chore/*` worktrees don't carry their own `.venv` — the
   script falls back to `/home/schan/tts-erp/.venv/bin/pytest` when
   `./.venv/bin/pytest` is missing.
-- **Migration tests are NOT autouse.** Per `tests/migration/conftest.py`
-  safety note (2026-08-30), the `_ensure_migrations_applied` fixture is
-  opt-in. Running `scripts/test.sh migration` will exercise dry-run
-  paths without rewriting production data. To actually apply migrations,
-  request `_ensure_migrations_applied` explicitly in a one-off script.
-- **Migration tests are excluded by default (2026-08-31).**
-  `pyproject.toml addopts` carries `-m 'not domain_migration'` — bare
-  `pytest` skips the whole dir. Rationale: `test_reconcile.py` re-applies
-  every migration against the PROD DB per test (autouse), and in
-  full-suite runs blocks indefinitely on locks held by earlier tests
-  (no `statement_timeout`), hanging the suite at ~60%. To run them
-  deliberately: `pytest -m domain_migration tests/migration`
-  (CLI `-m` overrides addopts) or `scripts/test.sh all` / `migration`.
-  Delete the dir together with `scripts/migrate_v1_to_v2/` when the
-  rollback observation window closes (~2026-09-26).
-- **Migration tests require an explicit opt-in env var (2026-08-31).**
-  Even with `-m domain_migration`, the entire `tests/migration/`
-  directory is skipped unless `TTS_ERP_ALLOW_PROD_MIGRATION=1` is set in
-  the environment. The check is enforced at three layers:
-
-    1. **Module-level skip** in `tests/migration/conftest.py` —
-       `pytest.skip(allow_module_level=True)` blocks collection of any
-       test in the directory unless the env var is set.
-    2. **Session-scoped fixture** (`_ensure_migrations_applied`) —
-       re-checks the env var at the top of the fixture as
-       defense-in-depth (so a future regression that removes the
-       module-level skip still leaves the fixture gated).
-    3. **Per-script guard** — every `run(dry_run=False)` in
-       `scripts/migrate_v1_to_v2/migrate_*.py` and
-       `re_encrypt_credentials.main()` calls
-       `scripts.migrate_v1_to_v2.common.require_prod_guard(dry_run=False)`,
-       which raises `SystemExit(2)` if the env var is unset. dry_run
-       paths skip the check.
-
-  The SQL itself is also locked down: `migrate_shops._UPSERT_CREDENTIAL`
-  no longer overwrites `ciphertext` / `company_secret_ciphertext` on
-  `ON CONFLICT DO UPDATE` (only the initial INSERT writes them). See
-  `tests/migration/test_migrate_shops.py::TestUpsertCredentialSql`
-  for the string-level assertion. This closes the loop on the 2026-08-30
-  incident where an autouse test fixture overwrote the v2 JSON-envelope
-  `integration.credentials.ciphertext` with the legacy
-  `Fernet(raw_access_token)` format and broke the sync worker for ~22h.
+- **Migration tests — ARCHIVED（2026-09-03）。** `tests/migration/` 和
+  `scripts/migrate_v1_to_v2/` 已 git mv 到
+  `tech-doc/_archive/migrate-v1-to-v2-2026-08-29/`,原位只留 README 指针（见
+  `tests/MIGRATION_TESTS_ARCHIVED.md` 和 `scripts/MIGRATE_V1_TO_V2_ARCHIVED.md`）。
+  迁移在 2026-08-29 切流时已执行完毕,这两个目录是 08-31 22h 全线停摆事故的根因,
+  归档是 `tech-doc/test-domains.md:134` 原计划的"DOC 计划删除"动作。
+  下面这段三层闸的描述作历史保留,方便复盘:
+  - **NOT autouse**：`_ensure_migrations_applied` fixture opt-in;`scripts/test.sh migration`
+    默认跑 dry-run,不重写生产库。
+  - **默认 excluded（2026-08-31）**:`pyproject.toml addopts` 带 `-m 'not domain_migration'`,
+    裸 `pytest` 跳整目录。原因:`test_reconcile.py` autouse 全量重放迁移对 PROD 写,
+    在全量跑时与早 test 持锁冲突(无 `statement_timeout`),在 60% 处卡住整套。
+  - **需显式 opt-in（2026-08-31）**:`TTS_ERP_ALLOW_PROD_MIGRATION=1`
+    + `-m domain_migration` 才解开。三层闸:
+    (1) `tests/migration/conftest.py` module-level skip;(2)
+    `_ensure_migrations_applied` session fixture 再检;(3)
+    `scripts.migrate_v1_to_v2.common.require_prod_guard(dry_run=False)` 抛 `SystemExit(2)`。
+  - **SQL 锁定**:`migrate_shops._UPSERT_CREDENTIAL` 不再 `ON CONFLICT DO UPDATE`
+    覆盖 `ciphertext` / `company_secret_ciphertext`(只 INSERT 写),
+    由 `tests/migration/test_migrate_shops.py::TestUpsertCredentialSql`
+    字符串断言锁定。08-30 incident 闭环:autouse fixture 把 v2 JSON-envelope
+    `integration.credentials.ciphertext` 写成 legacy `Fernet(raw_access_token)` 格式,
+    同步 worker 停摆 22h。
 
 ## Mapping files to domains
 
