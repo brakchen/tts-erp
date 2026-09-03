@@ -133,7 +133,7 @@ If you want to call `pytest` directly:
     裸 `pytest` 跳整目录。原因:`test_reconcile.py` autouse 全量重放迁移对 PROD 写,
     在全量跑时与早 test 持锁冲突(无 `statement_timeout`),在 60% 处卡住整套。
   - **需显式 opt-in（2026-08-31）**:`TTS_ERP_ALLOW_PROD_MIGRATION=1`
-    + `-m domain_migration` 才解开。三层闸:
+    - `-m domain_migration` 才解开。三层闸:
     (1) `tests/migration/conftest.py` module-level skip;(2)
     `_ensure_migrations_applied` session fixture 再检;(3)
     `scripts.migrate_v1_to_v2.common.require_prod_guard(dry_run=False)` 抛 `SystemExit(2)`。
