@@ -3,6 +3,7 @@
 Strategy: insert one minimal row per table via the ORM, then read it back
 to confirm column names + types behave as the schema spec requires.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -56,6 +57,7 @@ pytestmark = [pytest.mark.domain_models, pytest.mark.layer_integration]
 
 # ── fixtures shared across the smoke matrix ─────────────────────────
 
+
 @pytest.fixture()
 def credentials_row(db_session: Session) -> Credentials:
     c = Credentials(
@@ -82,7 +84,9 @@ def raw_record_row(db_session: Session, credentials_row: Credentials) -> RawReco
 
 
 @pytest.fixture()
-def channel_account_row(db_session: Session, credentials_row: Credentials) -> ChannelAccount:
+def channel_account_row(
+    db_session: Session, credentials_row: Credentials
+) -> ChannelAccount:
     a = ChannelAccount(
         platform="tiktok",
         external_account_id="TEST_acct_1",
@@ -94,7 +98,9 @@ def channel_account_row(db_session: Session, credentials_row: Credentials) -> Ch
 
 
 @pytest.fixture()
-def procurement_account_row(db_session: Session, credentials_row: Credentials) -> ProcurementAccount:
+def procurement_account_row(
+    db_session: Session, credentials_row: Credentials
+) -> ProcurementAccount:
     p = ProcurementAccount(
         provider="miaoshou",
         external_account_id="TEST_lic_1",
@@ -106,7 +112,9 @@ def procurement_account_row(db_session: Session, credentials_row: Credentials) -
 
 
 @pytest.fixture()
-def channel_product_row(db_session: Session, channel_account_row: ChannelAccount) -> ChannelProduct:
+def channel_product_row(
+    db_session: Session, channel_account_row: ChannelAccount
+) -> ChannelProduct:
     p = ChannelProduct(
         channel_account_id=channel_account_row.id,
         external_product_id="TEST_prod_1",
@@ -131,6 +139,7 @@ def procurement_product_row(
 
 # ── per-table smoke inserts ────────────────────────────────────────
 
+
 def test_credentials_insert_select(db_session: Session) -> None:
     c = Credentials(
         provider="tiktok",
@@ -149,10 +158,14 @@ def test_credentials_insert_select(db_session: Session) -> None:
     assert found.granted_scopes == ["orders.read", "products.read"]
     assert isinstance(found.created_at, datetime)
     # timestamptz check — should be tz-aware
-    assert found.created_at.tzinfo is not None, "created_at must be timestamptz (V3 §14)"
+    assert found.created_at.tzinfo is not None, (
+        "created_at must be timestamptz (V3 §14)"
+    )
 
 
-def test_raw_records_insert_select(db_session: Session, credentials_row: Credentials) -> None:
+def test_raw_records_insert_select(
+    db_session: Session, credentials_row: Credentials
+) -> None:
     rr = RawRecord(
         credential_id=credentials_row.id,
         endpoint="tiktok.order.search",
@@ -200,6 +213,7 @@ def test_sync_cursors_unique(db_session: Session) -> None:
     b = SyncCursor(job_name="tiktok.orders", scope="TEST_acct")
     db_session.add(b)
     import sqlalchemy.exc
+
     with pytest.raises(sqlalchemy.exc.IntegrityError):
         db_session.flush()
 
@@ -241,6 +255,7 @@ def test_channel_products_unique_per_account(
     )
     db_session.add_all([a, b])
     import sqlalchemy.exc
+
     with pytest.raises(sqlalchemy.exc.IntegrityError):
         db_session.flush()
 
@@ -259,7 +274,9 @@ def test_channel_variants_attributes_jsonb(
 
 
 def test_sales_order_and_line_with_snapshots(
-    db_session: Session, channel_account_row: ChannelAccount, channel_product_row: ChannelProduct
+    db_session: Session,
+    channel_account_row: ChannelAccount,
+    channel_product_row: ChannelProduct,
 ) -> None:
     so = SalesOrder(
         channel_account_id=channel_account_row.id,
@@ -287,7 +304,9 @@ def test_sales_order_and_line_with_snapshots(
     assert sol.product_name_snapshot == "TEST widget"
 
 
-def test_procurement_accounts(db_session: Session, credentials_row: Credentials) -> None:
+def test_procurement_accounts(
+    db_session: Session, credentials_row: Credentials
+) -> None:
     p = ProcurementAccount(
         provider="miaoshou",
         external_account_id="TEST_lic_2",
@@ -298,7 +317,9 @@ def test_procurement_accounts(db_session: Session, credentials_row: Credentials)
     assert p.id is not None
 
 
-def test_procurement_products(db_session: Session, procurement_account_row: ProcurementAccount) -> None:
+def test_procurement_products(
+    db_session: Session, procurement_account_row: ProcurementAccount
+) -> None:
     p = ProcurementProduct(
         procurement_account_id=procurement_account_row.id,
         external_product_id="TEST_pp_1",
@@ -526,6 +547,7 @@ def test_finance_chain(
     )
     db_session.add(sc2)
     import sqlalchemy.exc
+
     with pytest.raises(sqlalchemy.exc.IntegrityError):
         db_session.flush()
 
@@ -642,6 +664,7 @@ def test_reporting_profit_daily(
     db_session: Session, channel_product_row: ChannelProduct
 ) -> None:
     from datetime import date
+
     p = ProductProfitDaily(
         channel_product_id=channel_product_row.id,
         profit_date=date(2024, 8, 29),
@@ -660,6 +683,7 @@ def test_reporting_profit_daily(
 def test_api_keys_hashed(db_session: Session) -> None:
     """Key material must be SHA-256 hex only; plaintext shown ONCE at creation."""
     import hashlib
+
     plaintext = "ttserp_rw_smoke_test_xyz"
     k = ApiKey(
         key_hash=hashlib.sha256(plaintext.encode()).hexdigest(),
@@ -680,11 +704,14 @@ def test_effective_product_links_view_consultable(db_engine) -> None:
     Empty data is fine — we just confirm the view exists and parses.
     """
     from sqlalchemy import text
+
     with db_engine.connect() as conn:
-        rows = conn.execute(text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_schema='linkage' AND table_name='effective_product_links'"
-        )).fetchall()
+        rows = conn.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema='linkage' AND table_name='effective_product_links'"
+            )
+        ).fetchall()
     cols = {r[0] for r in rows}
     assert "channel_product_id" in cols
     assert "procurement_product_id" in cols

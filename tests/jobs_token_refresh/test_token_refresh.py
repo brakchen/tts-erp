@@ -7,6 +7,7 @@ Verifies:
 * Credentials expiring soon → refresher invoked, row updated.
 * Per-row refresh failure → issue counter increments; other rows continue.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -30,7 +31,9 @@ def _wipe_credentials(session) -> None:
     session.commit()  # release savepoint so subsequent SELECTs see the wipe
 
 
-def _make_credentials(session, *, expires_at: datetime | None, provider: str = "tiktok") -> Credentials:
+def _make_credentials(
+    session, *, expires_at: datetime | None, provider: str = "tiktok"
+) -> Credentials:
     """Insert a Credentials row via the production encryption path
     so refresh_if_needed can decrypt it.
     """
@@ -52,8 +55,13 @@ class _FakeRefresher:
     each call. Supports a sequence of responses via ``responses`` keyed
     by external_account_id, or a single ``default`` response."""
 
-    def __init__(self, default: dict | None = None, *, raise_exc: Exception | None = None) -> None:
-        self.default = default or {"access_token": "new", "expires_at": datetime.now(UTC) + timedelta(days=30)}
+    def __init__(
+        self, default: dict | None = None, *, raise_exc: Exception | None = None
+    ) -> None:
+        self.default = default or {
+            "access_token": "new",
+            "expires_at": datetime.now(UTC) + timedelta(days=30),
+        }
         self.responses: dict[str, dict] = {}
         self.raise_exc = raise_exc
         self.calls: list[str] = []

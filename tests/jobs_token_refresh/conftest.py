@@ -3,6 +3,7 @@
 Sets the Fernet key env var so upsert_credentials / refresh_if_needed
 can encrypt + decrypt the seed credentials row.
 """
+
 from __future__ import annotations
 
 import os

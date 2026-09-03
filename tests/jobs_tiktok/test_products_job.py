@@ -6,6 +6,7 @@ Verifies:
   payload.
 * Watermark advances to the max update_time seen.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -89,7 +90,9 @@ def test_products_first_run_writes_products_and_variants(db_session) -> None:
                         _product_payload(
                             "P1",
                             update_time=1_700_000_100,
-                            variants=[_variant_payload("V1", update_time=1_700_000_100)],
+                            variants=[
+                                _variant_payload("V1", update_time=1_700_000_100)
+                            ],
                         ),
                         _product_payload("P2", update_time=1_700_000_200),
                     ],
@@ -125,9 +128,7 @@ def test_products_first_run_writes_products_and_variants(db_session) -> None:
     variants = (
         db_session.execute(
             select(ChannelProductVariant).where(
-                ChannelProductVariant.channel_product_id.in_(
-                    [p.id for p in products]
-                )
+                ChannelProductVariant.channel_product_id.in_([p.id for p in products])
             )
         )
         .scalars()
