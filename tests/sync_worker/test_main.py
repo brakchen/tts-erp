@@ -260,7 +260,10 @@ def test_main_daemon_registers_signal_handlers_and_starts(
         lambda *a, **k: fake_factory,
     )
     monkeypatch.setattr(
-        "tts_erp_v2.sync_worker.scheduler.build_scheduler",
+        # Patch where main uses build_scheduler (top-level import), not
+        # where it's defined — main.py has its own bound name from
+        # ``from tts_erp_v2.sync_worker.scheduler import build_scheduler``.
+        "tts_erp_v2.sync_worker.main.build_scheduler",
         lambda sf, **k: fake_sched,
     )
 
@@ -297,7 +300,9 @@ def test_main_daemon_signal_handler_shuts_down(
         lambda *a, **k: fake_factory,
     )
     monkeypatch.setattr(
-        "tts_erp_v2.sync_worker.scheduler.build_scheduler",
+        # Patch where main uses build_scheduler (top-level import), not
+        # where it's defined.
+        "tts_erp_v2.sync_worker.main.build_scheduler",
         lambda sf, **k: fake_sched,
     )
 
@@ -340,7 +345,7 @@ def test_main_list_runs_without_db(
         return s
 
     monkeypatch.setattr(
-        "tts_erp_v2.sync_worker.scheduler.build_scheduler", fake_build
+        "tts_erp_v2.sync_worker.main.build_scheduler", fake_build
     )
 
     rc = main(["list"])
@@ -358,10 +363,15 @@ def test_main_run_delegates_to_run_one_job(
     monkeypatch.setenv("TTS_ERP_FERNET_KEY", "abc")
 
     called: dict = {}
+    # ``or 0`` short-circuits on the truthy setdefault result (which
+    # is the just-set value, the job-name string), so the lambda would
+    # return ``name`` instead of ``0`` and ``main()`` would propagate it
+    # as the exit code. Use update+tuple so the function returns 0
+    # unconditionally while still capturing the call argument.
     monkeypatch.setattr(
         main_mod,
         "_run_one_job",
-        lambda name: called.setdefault("name", name) or 0,
+        lambda name: (called.update({"name": name}) or 0),
     )
 
     rc = main(["run", "tiktok.orders"])

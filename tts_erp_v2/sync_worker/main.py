@@ -75,12 +75,19 @@ def _require_env() -> None:
 
 def _configure_logging() -> None:
     """Plain INFO-to-stderr logging. systemd captures stderr to journalctl."""
+    level = os.environ.get("TTS_ERP_SYNC_LOG_LEVEL", "INFO").upper()
     logging.basicConfig(
-        level=os.environ.get("TTS_ERP_SYNC_LOG_LEVEL", "INFO").upper(),
+        level=level,
         format=("%(asctime)s %(levelname)-7s %(name)s | %(message)s"),
         datefmt="%Y-%m-%dT%H:%M:%S%z",
         stream=sys.stderr,
     )
+    # Force the root level even when basicConfig was a no-op (it is when
+    # the caller already configured handlers — common under pytest and
+    # any embedder that wires its own logging). basicConfig's ``level=``
+    # kwarg is also no-op in that path; we set it explicitly here so the
+    # documented behaviour holds in those environments too.
+    logging.getLogger().setLevel(level)
 
 
 # ─── Subcommand handlers ───────────────────────────────────────────

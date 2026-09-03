@@ -288,23 +288,29 @@ def test_enumerate_tiktok_shops_returns_empty_on_db_error() -> None:
     assert result == []
 
 
-def test_enumerate_tiktok_shops_skips_null_external_ids() -> None:
-    """Rows with NULL external_account_id are skipped (defensive)."""
+def test_enumerate_tiktok_shops_skips_mock_prefixed_ids() -> None:
+    """Rows whose ``external_account_id`` starts with ``MOCK_`` are skipped.
+
+    Note: the production filter is ``if row[0] and not row[0].startswith("MOCK_")``
+    (see ``scheduler.py:_enumerate_tiktok_shops``). The previous version of
+    this test attempted to UPDATE ``external_account_id`` to NULL to test
+    the ``if row[0]`` defensive clause, but the column is ``NOT NULL`` —
+    the UPDATE crashed with NotNullViolation before the test could
+    exercise the filter. Since NULL is structurally impossible, the only
+    reachable defensive case is the MOCK_-prefix exclusion.
+    """
     factory = _factory()
-    null_id = "TEST_ENUM_NULL_OWNER"  # sentinel; we manually null it
-    _seed_credentials_for_enum(factory, external_id=null_id)
+    keep_id = "TEST_ENUM_REAL_OWNER"
+    skip_id = "MOCK_ENUM_SKIP_OWNER"
+    _seed_credentials_for_enum(factory, external_id=keep_id)
+    _seed_credentials_for_enum(factory, external_id=skip_id)
     sess = factory()
     try:
-        # Null out the external_account_id for our sentinel row.
-        sess.execute(
-            text("UPDATE integration.credentials SET external_account_id = NULL WHERE external_account_id = :e"),
-            {"e": null_id},
-        )
-        sess.commit()
         result = _enumerate_tiktok_shops(sess)
-        assert null_id not in result
+        assert keep_id in result
+        assert skip_id not in result
     finally:
-        # Clean: delete the now-NULL row (no external_account_id to match on)
+        # Clean: remove the seeded rows.
         sess.rollback()
         sess.close()
         sess = factory()
@@ -312,9 +318,9 @@ def test_enumerate_tiktok_shops_skips_null_external_ids() -> None:
             sess.execute(
                 text(
                     "DELETE FROM integration.credentials "
-                    "WHERE external_account_id IS NULL AND ciphertext = :ct"
+                    "WHERE external_account_id IN (:k, :s)"
                 ),
-                {"ct": b"\x00" * 32},
+                {"k": keep_id, "s": skip_id},
             )
             sess.commit()
         finally:
@@ -375,17 +381,32 @@ def test_record_failed_tick_writes_a_failed_row() -> None:
 
 
 def test_run_tiktok_job_skips_when_no_shops(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Empty shop list → log + early return; import_module never called."""
+    """Empty shop list → log + early return; the inner ``mod.run`` is
+    NEVER invoked (we just import the module to read ``run``).
+
+    The previous version asserted ``import_module`` was never called,
+    but production actually DOES call ``importlib.import_module`` first
+    (to resolve ``mod.run``) and only early-returns after the shop list
+    is empty. The reachable defensive case is that ``mod.run`` itself
+    is not called when there are no shops — that's what we assert here.
+    """
     factory = MagicMock()
     factory.return_value = MagicMock()
     monkeypatch.setattr(
         scheduler, "_enumerate_tiktok_shops_in_factory", lambda _sf: []
     )
-    import_seen = {"n": 0}
+
+    run_called = {"n": 0}
+
+    fake_mod = MagicMock()
+
+    def fake_run(*args, **kwargs):
+        run_called["n"] += 1
+
+    fake_mod.run = fake_run
 
     def fake_import(name: str):
-        import_seen["n"] += 1
-        return MagicMock()
+        return fake_mod
 
     monkeypatch.setattr(scheduler.importlib, "import_module", fake_import)
 
@@ -396,7 +417,7 @@ def test_run_tiktok_job_skips_when_no_shops(monkeypatch: pytest.MonkeyPatch) -> 
         is_tiktok=True,
     )
     _run_tiktok_job(spec, factory)  # must not raise
-    assert import_seen["n"] == 0
+    assert run_called["n"] == 0
 
 
 def test_run_tiktok_job_runs_per_shop_and_closes_session(

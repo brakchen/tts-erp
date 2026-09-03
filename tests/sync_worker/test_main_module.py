@@ -10,14 +10,16 @@ So we verify:
 
 * The module imports without side effects.
 * It exposes :func:`main` as the same callable ``main.main`` returns.
-* Executing it as ``__main__`` (via :mod:`runpy`) reaches ``main()`` —
-  done with a monkeypatched main() that returns a sentinel exit code
-  to prove the dispatch wired correctly without touching the real DB.
+* Executing it as a real subprocess (``python -m tts_erp_v2.sync_worker``)
+  reaches ``main()``. We use ``list`` as the subcommand because it exits
+  without starting a :class:`BlockingScheduler` (the daemon path blocks
+  forever and is exercised by the systemd unit test suite, not here).
 """
 
 from __future__ import annotations
 
-import runpy
+import os
+import subprocess
 import sys
 
 import pytest
@@ -34,21 +36,35 @@ def test_main_module_exports_main_callable() -> None:
     assert mod.main is main_mod.main
 
 
-def test_main_module_runs_main_when_invoked_as_script(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``python -m tts_erp_v2.sync_worker`` dispatches into main.main()."""
-    import tts_erp_v2.sync_worker.__main__ as target_mod
+def test_main_module_runs_main_when_invoked_as_script() -> None:
+    """``python -m tts_erp_v2.sync_worker list`` dispatches into main.main()
+    and exits 0 without starting a scheduler.
 
-    sentinel = object()
-    monkeypatch.setattr(target_mod, "main", lambda: sentinel)
-
-    # Reload via runpy as __main__; sys.argv is wiped to mimic real CLI.
-    monkeypatch.setattr(sys, "argv", ["tts_erp_v2.sync_worker"])
-    with pytest.raises(SystemExit) as exc:
-        runpy.run_module(
-            "tts_erp_v2.sync_worker",
-            run_name="__main__",
-            alter_sys=True,
-        )
-    assert exc.value.code is sentinel
+    Run via subprocess instead of runpy — runpy has a known collision
+    with the ``__main__`` shim when the module is already imported (it
+    warns ``found in sys.modules after import of package`` and ends up
+    running the daemon branch which blocks for 30s).
+    """
+    env = {
+        **os.environ,
+        "TTS_ERP_DB_URL": "postgresql+psycopg://x/y",
+        "TTS_ERP_FERNET_KEY": "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=",
+    }
+    result = subprocess.run(
+        [sys.executable, "-m", "tts_erp_v2.sync_worker", "list"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        env=env,
+        cwd="/home/schan/tts-erp",  # run from project root so package discovery works
+    )
+    # ``list`` exits 0 and prints a table of JOBS. The exact format is
+    # not asserted (column widths etc. are cosmetic) — just verify the
+    # invocation reached ``main()`` and listed at least one registered
+    # job.
+    assert result.returncode == 0, (
+        f"non-zero exit; stderr=\n{result.stderr}\nstdout=\n{result.stdout}"
+    )
+    assert "tiktok.orders" in result.stdout, (
+        f"expected tiktok.orders in list output; got\n{result.stdout}"
+    )

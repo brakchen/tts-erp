@@ -97,9 +97,17 @@ def test_run_analytics_retention_records_sync_job_counters(
     purge_counts = {"records_deleted": 12, "audit_deleted": 5}
 
     with patch(
-        "tts_erp_v2.analytics.repository.purge_expired", return_value=purge_counts
+        # Patch where the function is BOUND in the consumer module
+        # (``from tts_erp_v2.analytics.repository import purge_expired``
+        # creates tts_erp_v2.jobs.analytics_retention.purge_expired as a
+        # separate name). Patching the source module alone leaves the
+        # consumer's local binding pointing at the real function, so
+        # production would call the real purge_expired (which then runs
+        # against the MagicMock session and returns MagicMock rowcounts).
+        "tts_erp_v2.jobs.analytics_retention.purge_expired",
+        return_value=purge_counts,
     ) as purge_seen, patch(
-        "tts_erp_v2.jobs.runner.run_job"
+        "tts_erp_v2.jobs.analytics_retention.run_job"
     ) as run_job_mock:
         # Make run_job behave like a context manager returning fake_job.
         run_job_mock.return_value.__enter__.return_value = fake_job
@@ -136,15 +144,19 @@ def test_run_analytics_retention_respects_env_overrides(
     fake_job = MagicMock()
 
     with patch(
-        "tts_erp_v2.analytics.repository.purge_expired", return_value=purge_counts
+        # See test_run_analytics_retention_records_sync_job_counters for
+        # why we patch the consumer's module attribute, not the source.
+        "tts_erp_v2.jobs.analytics_retention.purge_expired",
+        return_value=purge_counts,
     ) as purge_seen, patch(
-        "tts_erp_v2.jobs.runner.run_job"
+        "tts_erp_v2.jobs.analytics_retention.run_job"
     ) as run_job_mock:
         run_job_mock.return_value.__enter__.return_value = fake_job
         run_job_mock.return_value.__exit__.return_value = False
 
         retention_mod.run_analytics_retention(fake_session)
 
+    assert purge_seen.call_args is not None
     assert purge_seen.call_args.kwargs == {"records_days": 7, "audit_days": 2}
     assert fake_job.extra["records_days"] == 7
     assert fake_job.extra["audit_days"] == 2
