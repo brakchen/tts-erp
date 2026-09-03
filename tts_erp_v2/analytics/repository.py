@@ -411,6 +411,11 @@ def purge_expired(
     ).rowcount
     # pi-lens-ignore: python-sql-injection
     audit_deleted = sess.execute(text(SQL_PURGE_AUDIT), {"days": audit_days}).rowcount
+    # Docstring promises commit — deliver it so callers (e.g.
+    # analytics_retention.run_analytics_retention, request handlers
+    # that want to trigger a cleanup) don't have to know the internal
+    # transaction boundary.
+    sess.commit()
     return {"records_deleted": records_deleted, "audit_deleted": audit_deleted}
 
 
