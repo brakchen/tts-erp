@@ -93,7 +93,10 @@ JOBS: dict[str, JobSpec] = {
     "tiktok.products": JobSpec(
         job_name="tiktok.products",
         module_path="tts_erp_v2.jobs.tiktok.products",
-        interval_seconds=21600,  # 6 h — catalog rarely changes
+        # 2026-09-05: 6h→10min —— products 同步改为逐 SPU 调 Get Product
+        # 补主图(见 fix/spu-product-images)，6h 一次会让新 SPU 的图滞后
+        # 最多一个班次；且上游商品/价格/库存变化节奏也需要更及时同步。
+        interval_seconds=600,  # 10 min
     ),
     "tiktok.logistics": JobSpec(
         job_name="tiktok.logistics",
