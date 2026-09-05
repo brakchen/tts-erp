@@ -1,4 +1,5 @@
 """TDD tests for jobs.tiktok.after_sales — returns + cancellations."""
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -36,10 +37,7 @@ def _apply_cases_refund_columns(db_session):
         )
     )
     db_session.execute(
-        text(
-            "ALTER TABLE after_sales.cases "
-            "ADD COLUMN IF NOT EXISTS currency TEXT"
-        )
+        text("ALTER TABLE after_sales.cases ADD COLUMN IF NOT EXISTS currency TEXT")
     )
     db_session.flush()
     yield
@@ -55,9 +53,17 @@ class FakeProxy:
         self.calls.append((method, path))
         # dispatch on endpoint
         if "returns" in path:
-            return self.returns_pages.pop(0) if self.returns_pages else {"code": 0, "data": {"returns": []}}
+            return (
+                self.returns_pages.pop(0)
+                if self.returns_pages
+                else {"code": 0, "data": {"returns": []}}
+            )
         if "cancellations" in path:
-            return self.cancels_pages.pop(0) if self.cancels_pages else {"code": 0, "data": {"cancellations": []}}
+            return (
+                self.cancels_pages.pop(0)
+                if self.cancels_pages
+                else {"code": 0, "data": {"cancellations": []}}
+            )
         return {"code": 404}
 
 
@@ -107,7 +113,9 @@ def _make_account_with_order(
     return acct
 
 
-def _return_payload(rid: str, order_id: str, *, update_time: int = 1_700_000_500, lines=None):
+def _return_payload(
+    rid: str, order_id: str, *, update_time: int = 1_700_000_500, lines=None
+):
     return {
         "return_id": rid,
         "order_id": order_id,
@@ -117,7 +125,9 @@ def _return_payload(rid: str, order_id: str, *, update_time: int = 1_700_000_500
     }
 
 
-def _cancel_payload(cid: str, order_id: str, *, update_time: int = 1_700_000_600, lines=None):
+def _cancel_payload(
+    cid: str, order_id: str, *, update_time: int = 1_700_000_600, lines=None
+):
     return {
         "cancel_id": cid,
         "order_id": order_id,
@@ -136,7 +146,7 @@ def test_after_sales_writes_returns_and_cancellations(db_session) -> None:
                 "data": {
                     "returns": [_return_payload("R1", "TEST_SO_A")],
                     "next_page_token": "",
-                }
+                },
             }
         ],
         cancels_pages=[
@@ -151,13 +161,16 @@ def test_after_sales_writes_returns_and_cancellations(db_session) -> None:
                                 {
                                     "line_id": "CL1",
                                     "quantity": 1,
-                                    "refund_amount": {"amount": "5.00", "currency": "USD"},
+                                    "refund_amount": {
+                                        "amount": "5.00",
+                                        "currency": "USD",
+                                    },
                                 }
                             ],
                         )
                     ],
                     "next_page_token": "",
-                }
+                },
             }
         ],
     )
@@ -169,16 +182,20 @@ def test_after_sales_writes_returns_and_cancellations(db_session) -> None:
         inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
     )
     assert result.rows_inserted == 2
-    cases = db_session.execute(
-        select(Case).where(Case.external_case_id.in_(["R1", "C1"]))
-    ).scalars().all()
+    cases = (
+        db_session.execute(select(Case).where(Case.external_case_id.in_(["R1", "C1"])))
+        .scalars()
+        .all()
+    )
     assert {c.case_type for c in cases} == {"RETURN", "CANCEL"}
     assert {c.external_case_id for c in cases} == {"R1", "C1"}
-    case_lines = db_session.execute(
-        select(CaseLine).where(
-            CaseLine.case_id.in_([c.id for c in cases])
+    case_lines = (
+        db_session.execute(
+            select(CaseLine).where(CaseLine.case_id.in_([c.id for c in cases]))
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(case_lines) == 1
     assert case_lines[0].external_case_line_id == "CL1"
     # Watermark advances to the max update_time seen (across both)
@@ -197,10 +214,12 @@ def test_after_sales_unknown_order_writes_sync_issue(db_session) -> None:
                 "data": {
                     "returns": [_return_payload("R2", "TEST_SO_NOT_FOUND")],
                     "next_page_token": "",
-                }
+                },
             }
         ],
-        cancels_pages=[{"code": 0, "data": {"cancellations": [], "next_page_token": ""}}],
+        cancels_pages=[
+            {"code": 0, "data": {"cancellations": [], "next_page_token": ""}}
+        ],
     )
     _, result = run_with_sync_job(
         db_session,
@@ -251,7 +270,7 @@ def test_after_sales_resolves_line_via_line_id(db_session) -> None:
                         )
                     ],
                     "next_page_token": "",
-                }
+                },
             }
         ],
     )
@@ -276,12 +295,16 @@ def test_after_sales_resolves_line_via_line_id(db_session) -> None:
     ).scalar_one()
     assert cl.sales_order_line_id == sol.id
     # No UNKNOWN_LINE issues raised.
-    issues = db_session.execute(
-        select(SyncIssue).where(
-            SyncIssue.job_name == "tiktok.after_sales",
-            SyncIssue.issue_type == "UNKNOWN_LINE",
+    issues = (
+        db_session.execute(
+            select(SyncIssue).where(
+                SyncIssue.job_name == "tiktok.after_sales",
+                SyncIssue.issue_type == "UNKNOWN_LINE",
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert issues == []
 
 
@@ -308,7 +331,7 @@ def test_after_sales_resolves_line_via_sku_id(db_session) -> None:
                         )
                     ],
                     "next_page_token": "",
-                }
+                },
             }
         ],
     )
@@ -358,7 +381,7 @@ def test_after_sales_unknown_line_when_sku_does_not_match(db_session) -> None:
                         )
                     ],
                     "next_page_token": "",
-                }
+                },
             }
         ],
     )
@@ -371,11 +394,15 @@ def test_after_sales_unknown_line_when_sku_does_not_match(db_session) -> None:
     )
     # The case itself still inserts; only the line failed.
     assert result.rows_inserted == 1
-    cl_count = db_session.execute(
-        select(CaseLine)
-        .join(Case, CaseLine.case_id == Case.id)
-        .where(Case.external_case_id == "C_SKU_BAD")
-    ).scalars().all()
+    cl_count = (
+        db_session.execute(
+            select(CaseLine)
+            .join(Case, CaseLine.case_id == Case.id)
+            .where(Case.external_case_id == "C_SKU_BAD")
+        )
+        .scalars()
+        .all()
+    )
     assert cl_count == []
     issue = db_session.execute(
         select(SyncIssue).where(
@@ -418,7 +445,7 @@ def test_after_sales_persists_case_level_refund_amount(db_session) -> None:
                         }
                     ],
                     "next_page_token": "",
-                }
+                },
             }
         ],
     )
@@ -456,7 +483,7 @@ def test_after_sales_persists_case_level_refund_amount_legacy_shape(db_session) 
                         }
                     ],
                     "next_page_token": "",
-                }
+                },
             }
         ],
     )
@@ -494,7 +521,7 @@ def test_after_sales_bare_string_refund_does_not_crash(db_session) -> None:
                         }
                     ],
                     "next_page_token": "",
-                }
+                },
             }
         ],
     )
@@ -530,10 +557,12 @@ def test_after_sales_unknown_order_dedup_across_ticks(db_session) -> None:
                 "data": {
                     "returns": [_return_payload("R_DUP", "TEST_SO_NOT_FOUND")],
                     "next_page_token": "",
-                }
+                },
             }
         ],
-        cancels_pages=[{"code": 0, "data": {"cancellations": [], "next_page_token": ""}}],
+        cancels_pages=[
+            {"code": 0, "data": {"cancellations": [], "next_page_token": ""}}
+        ],
     )
     # First tick
     run_with_sync_job(
@@ -552,12 +581,19 @@ def test_after_sales_unknown_order_dedup_across_ticks(db_session) -> None:
         inner=after_sales_job.run,
         inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
     )
-    issues = db_session.execute(
-        select(SyncIssue).where(
-            SyncIssue.job_name == "tiktok.after_sales",
-            SyncIssue.issue_type == "UNKNOWN_ORDER",
+    issues = (
+        db_session.execute(
+            select(SyncIssue).where(
+                SyncIssue.job_name == "tiktok.after_sales",
+                SyncIssue.issue_type == "UNKNOWN_ORDER",
+                # Scope to this test's row: committed production UNKNOWN_ORDER
+                # rows (real after_sales sync) would otherwise leak into the count.
+                SyncIssue.external_id == "R_DUP",
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     # record_sync_issue dedups: exactly one row, not two.
     assert len(issues) == 1
     assert issues[0].external_id == "R_DUP"
