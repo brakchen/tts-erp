@@ -54,7 +54,7 @@ pytestmark = [pytest.mark.domain_sync]
 EXPECTED_JOB_INTERVALS = {
     "tiktok.orders": 600,
     "tiktok.order_detail": 1800,
-    "tiktok.products": 21600,
+    "tiktok.products": 600,
     "tiktok.logistics": 600,
     "tiktok.after_sales": 900,
     "tiktok.finance": 3600,

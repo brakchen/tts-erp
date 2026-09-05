@@ -130,7 +130,7 @@ sync-worker 是独立 systemd 单元（`tts-erp-sync.service`），与 api 平�
 | --- | --- | --- |
 | `tiktok.orders` | /orders/search | 每 10 min（按 update_time 增量） |
 | `tiktok.order_detail` | /order/202309/orders | 每 30 min（补单 gap-filler） |
-| `tiktok.products` | /products/search | 每 6h |
+| `tiktok.products` | /products/search | 每 10 min（2026-09-05 由 6h 改 —— 逐 SPU Get Product 补主图后需更快同步） |
 | `tiktok.after_sales` | /returns/search + /cancellations/search | 每 15 min |
 | `tiktok.finance` | /finance/payouts + /finance/statements | 每 1h |
 | `tiktok.logistics` | /logistics/orders/{id}/tracking | 每 10 min（活跃运单） |
