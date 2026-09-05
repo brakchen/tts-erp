@@ -173,12 +173,26 @@ JOBS: dict[str, JobSpec] = {
 # ─── Shop enumerator ───────────────────────────────────────────────
 
 
+# Non-production external_account_id prefixes that must never be dialed
+# upstream. ``MOCK_`` dates to the 2026-08-25 leak (1008 wasted upstream
+# calls/day); ``TEST_`` covers dev/OAuth-test credentials that land in the
+# shared DB (e.g. the shop-oauth-auth lane's ``TEST_OAUTH_SHOP_API_1`` —
+# 2026-09-05 it made every tiktok job retry ~10s per tick against a shop
+# that has no commerce.shops row). Production shop ids are numeric
+# TikTok strings, so neither prefix can collide with a real shop.
+NON_PRODUCTION_SHOP_PREFIXES = ("MOCK_", "TEST_")
+
+
 def _enumerate_tiktok_shops(session: Session) -> list[str]:
     """Return the ``external_account_id`` of every ``provider='tiktok'`` row.
 
-    Filters out ``MOCK_*`` sentinels (the 2026-08-25 leak that
-    triggered 1008 wasted upstream calls / day until fixed — see
-    ``sync_cron.discover_shops`` for the original guard).
+    Filters out non-production sentinels (``MOCK_*`` / ``TEST_*`` — see
+    :data:`NON_PRODUCTION_SHOP_PREFIXES`). ``MOCK_*`` was the 2026-08-25
+    leak that triggered 1008 wasted upstream calls / day until fixed
+    (see ``sync_cron.discover_shops`` for the original guard); ``TEST_*``
+    was added 2026-09-05 after OAuth-test credentials (created by the
+    shop-oauth-auth lane) made every tiktok job burn ~10s per tick on
+    retries against a shop with no ``commerce.shops`` row.
 
     Returns ``[]`` on DB error so a single transient PG blip does NOT
     abort the worker. APScheduler will simply log an empty tick and
@@ -193,7 +207,11 @@ def _enumerate_tiktok_shops(session: Session) -> list[str]:
     except Exception:  # noqa: BLE001 — boundary between SQLAlchemy and our worker
         log.exception("_enumerate_tiktok_shops failed; returning empty list")
         return []
-    return [row[0] for row in rows if row[0] and not row[0].startswith("MOCK_")]
+    return [
+        row[0]
+        for row in rows
+        if row[0] and not row[0].startswith(NON_PRODUCTION_SHOP_PREFIXES)
+    ]
 
 
 # ─── Per-tick executor ─────────────────────────────────────────────
