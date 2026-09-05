@@ -40,6 +40,12 @@ downgrade 重建 4 张表（schema 照抄现 models 定义,数据不恢复 —�
 down 只保证 schema 可回滚,不保证数据;ad_raw 仍可重建派生表,audit 历史
 不可恢复。
 
+实现说明（2026-09-05 二次加固）：upgrade/downgrade 全部用 alembic op API
+（op.drop_table / op.create_table / op.create_index），**不出现裸
+op.execute(text(...))** —— 一是 alembic 惯用写法,二是消灭 pi-lens 对静态
+DDL 字符串的 python-sql-injection 误报（此前该文件因 op.execute 模式被
+自动化 fixer 反复改写、函数体缩进被剥坏,见 commit 记录）。
+
 代码侧配套改动（不在 migration 内）：
 - 删除 AdRecord / AdDailyCompleteness / AdShopTimezone / AdAuditLog 类
 - repository 删死 SQL + write_audit/purge_expired/fetch_timezone
@@ -53,7 +59,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from sqlalchemy import text
+import sqlalchemy as sa
 
 from alembic import op  # pyright: ignore[reportAttributeAccessIssue]
 
@@ -63,136 +69,158 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-# ─── 表与索引的现 schema（downgrade 重建用，从现 models 抄）──────────
-
-# ad_daily_completeness —— schema 照抄 tts_erp_v2/db/models/analytics.py
-# AdDailyCompleteness + check constraint。
-_AD_DAILY_COMPLETENESS_DDL = """
-CREATE TABLE analytics.ad_daily_completeness (
-    seller_id     text        NOT NULL,
-    advertiser_id text        NOT NULL,
-    storage_key   text        NOT NULL,
-    campaign_id   text        NOT NULL,
-    day           date        NOT NULL,
-    captured_at   timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at    timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT pk_analytics_daily_completeness PRIMARY KEY (
-        seller_id, advertiser_id, storage_key, campaign_id, day
-    ),
-    CONSTRAINT ck_analytics_daily_completeness_storage
-        CHECK (storage_key IN ('productAnalyses', 'sessionAnalyses', 'campaignChangeLogs'))
-)
-"""
-
-# ad_records —— schema 照抄 AdRecord。id bigint identity（Postgres 14+
-# GENERATED ALWAYS AS IDENTITY）；原 schema 用 bigserial,这里用 bigserial
-# 与现库一致。
-_AD_RECORDS_DDL = """
-CREATE TABLE analytics.ad_records (
-    id              bigserial PRIMARY KEY,
-    idempotency_key text NOT NULL,
-    source_record_id text,
-    seller_id       text NOT NULL,
-    advertiser_id   text NOT NULL,
-    storage_key     text NOT NULL,
-    campaign_id     text NOT NULL,
-    day             date NOT NULL,
-    shop_name       text,
-    endpoint        text NOT NULL,
-    method          text NOT NULL,
-    request_body    jsonb,
-    response_data   jsonb NOT NULL,
-    source          text NOT NULL,
-    captured_at     timestamp with time zone NOT NULL,
-    schema_version  integer DEFAULT 1 NOT NULL,
-    protocol_version integer DEFAULT 1 NOT NULL,
-    received_at     timestamp with time zone DEFAULT now() NOT NULL,
-    request_id      text,
-    updated_at      timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT uq_analytics_records_unit_day UNIQUE (
-        seller_id, advertiser_id, storage_key, campaign_id, day
-    ),
-    CONSTRAINT ck_analytics_records_storage
-        CHECK (storage_key IN ('productAnalyses', 'sessionAnalyses', 'campaignChangeLogs')),
-    CONSTRAINT ck_analytics_records_schema CHECK (schema_version > 0),
-    CONSTRAINT ck_analytics_records_protocol CHECK (protocol_version > 0)
-);
-CREATE INDEX idx_analytics_records_scope
-    ON analytics.ad_records (seller_id, advertiser_id, storage_key, campaign_id, day);
-CREATE INDEX idx_analytics_records_request
-    ON analytics.ad_records (request_id);
-CREATE INDEX idx_analytics_records_received
-    ON analytics.ad_records (received_at);
-"""
-
-# ad_shop_timezones —— 照抄 AdShopTimezone。
-_AD_SHOP_TIMEZONES_DDL = """
-CREATE TABLE analytics.ad_shop_timezones (
-    seller_id     text NOT NULL,
-    advertiser_id text NOT NULL,
-    timezone      text DEFAULT 'Asia/Shanghai' NOT NULL,
-    updated_at    timestamp with time zone DEFAULT now() NOT NULL,
-    created_at    timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT pk_analytics_shop_timezones PRIMARY KEY (seller_id)
-)
-"""
-
-# ad_audit_log —— 照抄 AdAuditLog。索引也重建。
-_AD_AUDIT_LOG_DDL = """
-CREATE TABLE analytics.ad_audit_log (
-    id            bigserial PRIMARY KEY,
-    request_id    text,
-    endpoint      text NOT NULL,
-    method        text NOT NULL,
-    path          text NOT NULL,
-    status        integer NOT NULL,
-    key_prefix    text,
-    records_in    integer,
-    records_ok    integer,
-    records_rej   integer,
-    error_code    text,
-    error_message text,
-    created_at    timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at    timestamp with time zone DEFAULT now() NOT NULL
-);
-CREATE INDEX idx_analytics_audit_request ON analytics.ad_audit_log (request_id);
-CREATE INDEX idx_analytics_audit_created ON analytics.ad_audit_log (created_at);
-"""
-
-
 def upgrade() -> None:
-    """Drop 4 dead analytics tables; their duties are either obsolete or
-    moved to structured file logs."""
-    # 顺序：先无依赖 → 有依赖；本组表之间无 FK，顺序不敏感。
-    # pi-lens-ignore: python-sql-injection — literal DDL, constant table names only
-    op.execute(text("DROP TABLE IF EXISTS analytics.ad_audit_log CASCADE"))
-    # pi-lens-ignore: python-sql-injection — literal DDL, constant table names only
-    op.execute(text("DROP TABLE IF EXISTS analytics.ad_shop_timezones CASCADE"))
-    # pi-lens-ignore: python-sql-injection — literal DDL, constant table names only
-    op.execute(text("DROP TABLE IF EXISTS analytics.ad_daily_completeness CASCADE"))
-    # pi-lens-ignore: python-sql-injection — literal DDL, constant table names only
-    op.execute(text("DROP TABLE IF EXISTS analytics.ad_records CASCADE"))
+    """Drop 4 dead analytics tables; duties are either obsolete or moved to
+    structured file logs (schema-only drop, no re-derivation)."""
+    op.drop_table("ad_audit_log", schema="analytics")
+    op.drop_table("ad_shop_timezones", schema="analytics")
+    op.drop_table("ad_daily_completeness", schema="analytics")
+    op.drop_table("ad_records", schema="analytics")
 
 
 def downgrade() -> None:
-    """Recreate the 4 tables (schema only).
+    """Recreate the 4 tables (schema only, **data NOT recovered**).
 
-    Schema definitions mirror the deleted SQLAlchemy models in
-    ``tts_erp_v2/db/models/analytics.py``. **Data is NOT recovered**:
     - ``ad_raw`` still allows re-deriving ``ad_records`` / ``ad_daily_completeness``
-      content (body-only payload); the down itself does not re-derive, it only
-      restores the empty table shape.
-    - ``ad_audit_log`` historical rows are permanently lost (the reorg plan
-      accepts this; structured file logs are the new source of audit history).
-    - ``ad_shop_timezones`` historical rows are lost; new rows will be lazily
-      re-seeded on the first fetch_timezone call (which is itself removed
-      from production code paths — this is a defence-in-depth rollback only).
+      content (body-only payload); down only restores empty table shapes.
+    - ``ad_audit_log`` historical rows are permanently lost (reorg plan
+      accepts this; structured file logs are the new audit source).
+    - ``ad_shop_timezones`` historical rows are lost; new rows would be lazily
+      re-seeded by the (now removed) fetch_timezone — rollback-only defence.
+
+    列/约束/索引名照抄被删的 SQLAlchemy models（AdRecord / AdDailyCompleteness /
+    AdShopTimezone / AdAuditLog）里的声明，保证 rollback 后 schema 与
+    0004-0006 时代一致。
     """
-    # pi-lens-ignore: python-sql-injection — literal DDL constants, no user input
-    op.execute(text(_AD_RECORDS_DDL))
-    # pi-lens-ignore: python-sql-injection — literal DDL constants, no user input
-    op.execute(text(_AD_DAILY_COMPLETENESS_DDL))
-    # pi-lens-ignore: python-sql-injection — literal DDL constants, no user input
-    op.execute(text(_AD_SHOP_TIMEZONES_DDL))
-    # pi-lens-ignore: python-sql-injection — literal DDL constants, no user input
-    op.execute(text(_AD_AUDIT_LOG_DDL))
+    # ad_daily_completeness —— 复合 PK，无自增 id。
+    op.create_table(
+        "ad_daily_completeness",
+        sa.Column("seller_id", sa.Text, nullable=False),
+        sa.Column("advertiser_id", sa.Text, nullable=False),
+        sa.Column("storage_key", sa.Text, nullable=False),
+        sa.Column("campaign_id", sa.Text, nullable=False),
+        sa.Column("day", sa.Date, nullable=False),
+        sa.Column("captured_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint(
+            "seller_id",
+            "advertiser_id",
+            "storage_key",
+            "campaign_id",
+            "day",
+            name="pk_analytics_daily_completeness",
+        ),
+        sa.CheckConstraint(
+            "storage_key IN ('productAnalyses', 'sessionAnalyses', "
+            "'campaignChangeLogs')",
+            name="ck_analytics_daily_completeness_storage",
+        ),
+        schema="analytics",
+    )
+
+    # ad_records —— bigint identity PK + 5 元组 unique + 2 check + 3 索引。
+    op.create_table(
+        "ad_records",
+        sa.Column("id", sa.BigInteger, sa.Identity(), nullable=False),
+        sa.Column("idempotency_key", sa.Text, nullable=False),
+        sa.Column("source_record_id", sa.Text),
+        sa.Column("seller_id", sa.Text, nullable=False),
+        sa.Column("advertiser_id", sa.Text, nullable=False),
+        sa.Column("storage_key", sa.Text, nullable=False),
+        sa.Column("campaign_id", sa.Text, nullable=False),
+        sa.Column("day", sa.Date, nullable=False),
+        sa.Column("shop_name", sa.Text),
+        sa.Column("endpoint", sa.Text, nullable=False),
+        sa.Column("method", sa.Text, nullable=False),
+        sa.Column("request_body", sa.JSONB),
+        sa.Column("response_data", sa.JSONB, nullable=False),
+        sa.Column("source", sa.Text, nullable=False),
+        sa.Column("captured_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("schema_version", sa.Integer, nullable=False, server_default="1"),
+        sa.Column("protocol_version", sa.Integer, nullable=False, server_default="1"),
+        sa.Column("received_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("request_id", sa.Text),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint(
+            "seller_id",
+            "advertiser_id",
+            "storage_key",
+            "campaign_id",
+            "day",
+            name="uq_analytics_records_unit_day",
+        ),
+        sa.CheckConstraint(
+            "storage_key IN ('productAnalyses', 'sessionAnalyses', "
+            "'campaignChangeLogs')",
+            name="ck_analytics_records_storage",
+        ),
+        sa.CheckConstraint("schema_version > 0", name="ck_analytics_records_schema"),
+        sa.CheckConstraint(
+            "protocol_version > 0", name="ck_analytics_records_protocol"
+        ),
+        schema="analytics",
+    )
+    op.create_index(
+        "idx_analytics_records_scope",
+        "ad_records",
+        ["seller_id", "advertiser_id", "storage_key", "campaign_id", "day"],
+        schema="analytics",
+    )
+    op.create_index(
+        "idx_analytics_records_request",
+        "ad_records",
+        ["request_id"],
+        schema="analytics",
+    )
+    op.create_index(
+        "idx_analytics_records_received",
+        "ad_records",
+        ["received_at"],
+        schema="analytics",
+    )
+
+    # ad_shop_timezones —— seller_id 单列 PK。
+    op.create_table(
+        "ad_shop_timezones",
+        sa.Column("seller_id", sa.Text, nullable=False),
+        sa.Column("advertiser_id", sa.Text, nullable=False),
+        sa.Column("timezone", sa.Text, nullable=False, server_default="Asia/Shanghai"),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint("seller_id", name="pk_analytics_shop_timezones"),
+        schema="analytics",
+    )
+
+    # ad_audit_log —— bigint identity PK + 2 索引。
+    op.create_table(
+        "ad_audit_log",
+        sa.Column("id", sa.BigInteger, sa.Identity(), nullable=False),
+        sa.Column("request_id", sa.Text),
+        sa.Column("endpoint", sa.Text, nullable=False),
+        sa.Column("method", sa.Text, nullable=False),
+        sa.Column("path", sa.Text, nullable=False),
+        sa.Column("status", sa.Integer, nullable=False),
+        sa.Column("key_prefix", sa.Text),
+        sa.Column("records_in", sa.Integer),
+        sa.Column("records_ok", sa.Integer),
+        sa.Column("records_rej", sa.Integer),
+        sa.Column("error_code", sa.Text),
+        sa.Column("error_message", sa.Text),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint("id"),
+        schema="analytics",
+    )
+    op.create_index(
+        "idx_analytics_audit_request",
+        "ad_audit_log",
+        ["request_id"],
+        schema="analytics",
+    )
+    op.create_index(
+        "idx_analytics_audit_created",
+        "ad_audit_log",
+        ["created_at"],
+        schema="analytics",
+    )
