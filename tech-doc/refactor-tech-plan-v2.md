@@ -3,6 +3,7 @@
 > 版本：V2 · 2026-08-29（替代 V1，所有评审决策已并入正文）
 > **实施状态：已完成**——v2 已于 2026-08-29 切流生产（`:9877` 跑 `tts_erp_v2.app:app`）。
 > As-built 与本文的差异：
+>
 > - 代码布局落在 `tts_erp_v2/` 包内（`app.py` / `api/v2/` / `proxy/` / `sync_worker/` /
 >   `db/models/`），不是 §2.2 画的顶层 `app/` `proxy/` 目录；
 > - sync-worker 实际注册的 job 及频率以 `tts_erp_v2/sync_worker/scheduler.py` 的
@@ -310,6 +311,12 @@ public 降级只读镜像 ──观察期（4 周）──→ ⑤ pg_dump 归档
 5. **归档删除**：观察期满无问题 → `pg_dump -n public` 归档到文件后
    `DROP` public 下 24 张旧业务表（`analytics_*` 保留）。oauth_receiver 库同样
    先 dump 再 drop。
+
+   > ✅ **2026-09-05 提前执行（原定观察期 ~09-26 满）**：已按本步流程 pg_dump 归档到
+   > `/home/schan/backups/tts_erp_public_v1_legacy_20260905T110814Z.sql.gz` 后 DROP 19 张 v1 业务表
+   > （实为 19 非 24：analytics_* 已由 migration 0004 迁出 analytics schema；oauth 表本就在独立
+   > oauth_receiver 库）。`public` schema 保留 `fn_touch_updated_at()`（41 个 v2 updated_at 触发器依赖，
+   > 属 v2 基础设施非 legacy）。oauth_receiver 库未动，届时同样先 dump 再 drop。
 
 任何一步出问题：新链路停用、旧 cron 拉起即可回退（public 全程未被修改）。
 

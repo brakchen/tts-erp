@@ -1,7 +1,17 @@
 # handoff.md — tts-erp 跨 session 交接笔记
 
-> 上次 session: 2026-08-31（接力 2026-08-30 pi-web 卡死的 session）
-> 上次 session 主题: Procurement console redesign + SPU image storage（worktree `~/tts-erp.procurement`, branch `feature/procurement-ui`）
+> 上次 session: 2026-09-05（v1 public.*归档删除；另有 analytics.ad_product_links 视图 lane）
+> 上次 session 主题: 删除 v1 遗留 public.* 业务表（19 张 DROP），official dump-then-drop 流程
+
+## TL;DR (2026-09-05)
+
+**v1 `public.*` 遗留层已按官方流程归档删除**（观察期提前收口，原定 ~09-26）：
+
+1. 归档：`/home/schan/backups/tts_erp_public_v1_legacy_20260905T110814Z.sql.gz`（19 表 schema+data，可完整恢复）。
+2. DROP 19 张 v1 业务表 + 3 个孤儿函数；`schema_tts_erp.sql` 重生成（-839 行）。
+3. **不要动 `public` schema 和 `public.fn_touch_updated_at()`** —— 41 个 v2 updated_at 触发器依赖它
+   （migration 0001；`tests/db/test_time_fields_convention.py` 锁定）。
+4. oauth_receiver（独立库 :5432/oauth_receiver）未动，仍按原观察期 ~09-26 保留。
 
 ## TL;DR (2026-08-31)
 

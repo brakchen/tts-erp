@@ -1,5 +1,34 @@
 # tts-erp CHANGELOG
 
+## 2026-09-05 (fix) — 全量测试稳定性：修两个顺序/残留依赖 bug
+
+修复导致 `scripts/test.sh fast` 偶发红的问题（均与本次 ops 无关的预存问题）：
+
+- `tests/jobs_tiktok/test_after_sales_job.py::test_after_sales_unknown_order_dedup_across_ticks`：
+  select 未按 external_id 过滤，会把生产真实未解决的 UNKNOWN_ORDER 行（sync worker 写入）算进计数 →
+  断言 3≠1 误挂。改为只查自己那行（`external_id == "R_DUP"`）。
+- `tests/api/conftest.py`：确定性 TEST_ key 改 **PostgreSQL upsert（ON CONFLICT DO UPDATE）**。
+  残留 key（run 被 kill 等导致 teardown wipe 未跑）会让后续所有 api 测试的 key fixture 撞
+  `ix_api_keys_key_hash` 唯一约束 → 401 级联全 api 域（曾观察到 ObjectDeletedError / 单次 run 50+ 失败）。
+  幂等覆盖后自愈；验证：手工插入残留 key 后测试照常通过。
+
+## 2026-09-05 (ops) — v1 legacy `public.*` 归档删除（19 张业务表 DROP）
+
+v2 切流的 v1 数据回查窗口提前收口：按 `tech-doc/refactor-tech-plan-v2.md` §7.1 step 5 流程
+（先 dump 归档 → 再 DROP）删除 v1 遗留层。**只删 legacy 数据表，不动 v2 基础设施**。
+
+- DROP 19 张 `public` v1 业务表：orders / order_items / order_shippings / payments / shops /
+  returns / cancellations / statements / statement_transactions / logistics_tracking(_events|_targets) /
+  miaoshou_shops / miaoshou_price_templates / miaoshou_collect_box_details / miaoshou_move_collect_tasks /
+  sync_log / api_keys / alembic_version（+ 附属索引、2 个 standalone 序列）。
+- 同步清理 3 个仅服务 v1 表的孤儿函数：`touch_updated_at`、`trg_sync_log_retention_fn`、`cleanup_sync_log`。
+- **保留** `public` schema 与 `public.fn_touch_updated_at()`——migration 0001 的 updated_at 自动维护
+  触发器函数，41 个 v2 表触发器依赖（`tests/db/test_time_fields_convention.py` 锁定）。
+- 归档：`/home/schan/backups/tts_erp_public_v1_legacy_20260905T110814Z.sql.gz`（schema+data 1.2MB，可完整恢复）。
+  oauth_receiver（独立 DB）未动。
+- `scripts/regen_schema.py` 重生成 `schema_tts_erp.sql`（-839 行，public 遗留段落移除）。
+- 验证：DROP 后 public 业务表 0 残留、`fn_touch_updated_at` 在、41 触发器完好、相关测试 0 fail。
+
 ## 2026-09-05 (feature) — analytics.ad_product_links 视图（广告×商品关联 + 出单量/消耗，migration 0006）
 
 从 `analytics.ad_raw` 的 `post_product_list` 原始 dump 派生「广告(计划) ↔ 商品(SPU)」关联视图。

@@ -6,7 +6,7 @@
 ## 1. Stack（项目栈）
 
 Python 3.14 · FastAPI + uvicorn（`:9877`）· SQLAlchemy 2 + psycopg3 · PostgreSQL 容器（`:5432`，
-10 schema / 60 表 + 1 view）· APScheduler（独立 sync-worker 进程）· MinIO · Fernet 加密 · systemd user units。
+10 schema / 41 表 + 2 view（v1 `public.*` 业务表已于 2026-09-05 归档删除，见 §6）· APScheduler（独立 sync-worker 进程）· MinIO · Fernet 加密 · systemd user units。
 
 - v2（2026-08-29 切流生产）：TikTok Shop 销售 + 妙手采购 → **本地分析库 + 只读 API + 定时同步**
 - 下游：TikTok Shop Open API (`open-api.tiktokglobalshop.com`) + 妙手开放平台 (`openapi.wanshifu.com`)
@@ -124,13 +124,15 @@ curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" \
   `/dumps`（单 dump object）；cursor 降级 has-data 预检（协议见 `tech-doc/analytics/dump-architecture.md`）
 - 没有 `/v2/analytics/sync/batches`（同 release 删除；`ad_daily_pages` / `ad_cursors` 表 migration 0005 drop）
 - v1 路由（`/shops`、`/token/*`、`/orders/*`、`/finance/*`、`/returns/*`、`/cancellations/*`、`/db/*`）全部 404，
-  v1→v2 迁移映射见 `external-api.md` 底部 Stability matrix；v1 代码在 git history（观察期内仅作回滚参照）
+  v1→v2 迁移映射见 `external-api.md` 底部 Stability matrix；v1 代码仍在 git history（仅代码级参照——v1 DB 数据已 2026-09-05 归档删除，回滚需先恢复 dump）
 
 ## 6. Boundaries（不要碰）
 
 - ❌ 不要直连 oauth_receiver 的 `oauth_tokens` 表 / HTTP 调 :9876 / 自己拿 Fernet key 解密 —— 凭证
   只能走 `proxy.token_service`（见 §4.1）
-- ❌ 不要在 v2 代码里读 `public.*` legacy 表（v2 完全读 10 schema；`public.*` 仅观察期 rollback safety）
+- ❌ 不要重建 / 依赖 `public.*` v1 遗留表（v2 只读 10 schema；v1 业务表 2026-09-05 已 DROP，归档在
+  `/home/schan/backups/tts_erp_public_v1_legacy_*.sql.gz`）。`public` schema 现仅存 v2 基础设施：41 个
+  updated_at 触发器依赖的 `public.fn_touch_updated_at()`——删它 = 全库 updated_at 停摆，动之前先确认
 - ❌ 不要接写端点：`POST /returns|/cancellations`（会在真实店铺创建退货/取消单）、
   `POST /orders/<id>/{confirm,cancel,update_status,shipping_info,verify_shipping}` —— v2 是只读分析架构，
   写操作全部拆除（若未来要接，单独 review）
