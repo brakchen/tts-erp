@@ -136,14 +136,14 @@ CHECK 约束、部分索引、函数/trigger 感知不可靠。现有库中 `syn
   加密密钥随 .env 移交）。
 - **`integration.credentials` 定位**：外部平台凭证表——一次 TikTok 店铺授权 /
   一个妙手 license = 一行，存密文 token / secret、过期时间、granted scopes。
-  业务账户表（`commerce.channel_accounts` / `procurement.procurement_accounts`）
+  业务账户表（`commerce.shops` / `procurement.procurement_accounts`）
   通过 `credential_id` FK 引用它，凭证与业务实体解耦。即使长期单店铺，
   oauth_tokens 合库也需要这个落点；不做多凭证的额外设计，未来多店铺/多 license 插行即可。
 
 ### 3.2 核心表 DDL 原则（V3 §5-§11 的字段级补充决策）
 
 - **id 策略**：内部代理主键 `bigint generated always as identity`；外部 id 全 text；
-  账户范围唯一约束 `UNIQUE(channel_account_id, external_*)`。
+  账户范围唯一约束 `UNIQUE(shop_pk, external_*)`。
 - **raw 策略**：`integration.raw_records` 存全量原始 JSON（credential_id、
   endpoint、external_id、captured_at、payload jsonb）；规范化表只留 `raw_record_id`
   指针，不再每表复制 raw jsonb（现状 orders 719 行 4.3MB，双写是体积主因）。
@@ -158,13 +158,13 @@ CHECK 约束、部分索引、函数/trigger 感知不可靠。现有库中 `syn
 - **财务组件表**：`settlement_components` 只落**非零**金额行
   （实测 58 列中大量恒 0，全落会 17 倍膨胀）。
 - **product_links 唯一性**（对 V3 的修正）：
-  `UNIQUE (procurement_product_id, channel_product_id, valid_from)`，
+  `UNIQUE (procurement_product_id, spu_pk, valid_from)`，
   否则有效期叠加的历史版本会重复插入。
 - **`linkage.effective_product_links` 用 VIEW 实现**（override 优先 → 有效妙手关系）；
   `reporting.*` 用可重建表（job 全量重算 + `calculation_version`），不用物化视图
   （重算时机要显式可控）。
 - **人工成本表** `procurement.manual_product_costs`：`id identity PK、
-  channel_product_id FK、unit_cost numeric(20,4)、currency、valid_from、valid_to NULL、
+  spu_pk FK、unit_cost numeric(20,4)、currency、valid_from、valid_to NULL、
   note、created_by、created_at`；同一 SPU 同时只有一条有效记录（视图取最新有效行），
   填写历史全部保留。
 

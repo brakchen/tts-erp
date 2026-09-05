@@ -8,13 +8,13 @@ Audit P1-6 (2026-09-01 fleet review): the manual-costs POST handler used
 to write a new row in transaction #1 (commit) and then close the prior
 effective row in transaction #2 wrapped in ``try/except: rollback()``. A
 failure between the two commits left two rows with ``valid_to IS NULL``
-for the same channel_product_id — i.e. two "effective" manual costs at
+for the same spu_pk — i.e. two "effective" manual costs at
 once. The handler now wraps close-old + insert in a single transaction
 (see ``tts_erp_v2/api/v2/reporting.py::submit_manual_cost``), and this
 migration adds the DB-side belt-and-suspenders:
 
     CREATE UNIQUE INDEX uq_manual_costs_one_open
-        ON procurement.manual_product_costs (channel_product_id)
+        ON procurement.manual_product_costs (spu_pk)
         WHERE valid_to IS NULL;
 
 PG partial indexes only enforce uniqueness for rows that match the
@@ -51,26 +51,26 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     # ─── 1. Safety check: refuse to create the index if the table
     # already has duplicate valid_to IS NULL rows for any
-    # channel_product_id. Without this, CREATE UNIQUE INDEX would fail
+    # spu_pk. Without this, CREATE UNIQUE INDEX would fail
     # mid-transaction and leave alembic in a half-state.
     bind = op.get_bind()
     # pi-lens-ignore opengrep.sqlalchemy.sql-injection: literal SQL, no user input
     duplicates = bind.execute(
         text(
-            "SELECT channel_product_id, COUNT(*) AS n "
+            "SELECT spu_pk, COUNT(*) AS n "
             "FROM procurement.manual_product_costs "
             "WHERE valid_to IS NULL "
-            "GROUP BY channel_product_id "
+            "GROUP BY spu_pk "
             "HAVING COUNT(*) > 1"
         )
     ).fetchall()
     if duplicates:
         rows = ", ".join(
-            f"channel_product_id={r.channel_product_id} count={r.n}" for r in duplicates
+            f"spu_pk={r.spu_pk} count={r.n}" for r in duplicates
         )
         raise RuntimeError(
             "procurement.manual_product_costs already has multiple "
-            "valid_to IS NULL rows per channel_product_id — cannot add "
+            "valid_to IS NULL rows per spu_pk — cannot add "
             "uq_manual_costs_one_open without manual reconciliation. "
             f"Violators: {rows}"
         )
@@ -81,7 +81,7 @@ def upgrade() -> None:
     # row per parent" pattern used elsewhere.
     op.execute(
         "CREATE UNIQUE INDEX uq_manual_costs_one_open "
-        "ON procurement.manual_product_costs (channel_product_id) "
+        "ON procurement.manual_product_costs (spu_pk) "
         "WHERE valid_to IS NULL"
     )
 

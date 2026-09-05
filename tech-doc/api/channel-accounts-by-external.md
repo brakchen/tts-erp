@@ -1,4 +1,4 @@
-# `GET /v2/commerce/channel-accounts/by-external/{external_account_id}` — Spec
+# `GET /v2/commerce/channel-accounts/by-external/{shop_id}` — Spec
 
 **Single source of truth** for the channel-account reverse-lookup
 endpoint. If anything in `tts_erp_v2/api/v2/commerce.py` disagrees
@@ -9,7 +9,7 @@ with this file, this file wins.
 ## 1. URL
 
 ```
-GET /v2/commerce/channel-accounts/by-external/{external_account_id}
+GET /v2/commerce/channel-accounts/by-external/{shop_id}
     ?platform={platform_string}     # optional, default "tiktok"
 ```
 
@@ -148,8 +148,8 @@ curl -sS -H "X-API-Key: $KEY" \
 | Route | Purpose |
 | --- | --- |
 | `GET /v2/commerce/channel-accounts` | List all accounts (filter `?platform=`) |
-| `GET /v2/commerce/channel-accounts/{account_id}` | Look up by internal bigint PK |
-| `GET /v2/commerce/channel-accounts/by-external/{external_account_id}` | **This endpoint** — look up by upstream shop_id |
+| `GET /v2/commerce/channel-accounts/{shop_pk}` | Look up by internal bigint PK |
+| `GET /v2/commerce/channel-accounts/by-external/{shop_id}` | **This endpoint** — look up by upstream shop_id |
 
 The three together cover both forward and reverse lookup patterns
 without forcing callers to dump the table.

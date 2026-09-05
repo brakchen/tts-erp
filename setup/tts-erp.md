@@ -77,7 +77,7 @@ curl -s http://127.0.0.1:9877/healthz
 | `106001 invalid sign` | HMAC 签名格式错 | `TTS_DEBUG_SIGN=1` 起服务看 canonical，对比 AGENTS.md §2.2 |
 | `105005 Access denied` | app 没勾对应 scope | TikTok Partner Center 改 app scope + 重新授权 |
 | `36009004 PageSize is required` | body 字段名/格式错 | 查 TikTok API 文档的 Request Body |
-| v2 端点 `?shop_id=` 没过滤 | v2 只认内部 id | 先 `GET /v2/commerce/channel-accounts` 查 `channel_account_id` |
+| v2 端点 `?shop_id=` 没过滤 | v2 只认内部 id | 先 `GET /v2/commerce/channel-accounts` 查 `shop_pk` |
 | `TTS_ERP_DB_URL not configured` | `.env` 缺 DB URL | 配 .env |
 | `psycopg.OperationalError` | PG 容器 down | `docker exec postgres pg_isready` |
 | 物流数据多日不更新 | `tts-erp-sync.service` 未 active / tracking 排序错 | `systemctl --user status tts-erp-sync.service` + 看 `integration.sync_jobs` |

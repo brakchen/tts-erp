@@ -46,8 +46,8 @@ post-product-list-field-semantics.md），每行自带当天的出单数 / 消�
 
 | 列 | 关联 | 说明 |
 | --- | --- | --- |
-| `channel_account_id` | `commerce.channel_accounts`（platform='tiktok'，`external_account_id` = ad seller_id） | seller 级；同店铺所有行相同 |
-| `channel_product_id` | `commerce.channel_products`（channel_account_id + `external_product_id` = SPU） | 商品级；SPU 不在同步目录（下架/未同步）时为 NULL |
+| `shop_pk` | `commerce.shops`（platform='tiktok'，`external_account_id` = ad seller_id） | seller 级；同店铺所有行相同 |
+| `spu_pk` | `commerce.products_spu`（shop_pk + `external_product_id` = SPU） | 商品级；SPU 不在同步目录（下架/未同步）时为 NULL |
 
 ## 3. 关键澄清
 
@@ -88,8 +88,8 @@ FROM analytics.ad_product_links GROUP BY campaign_id;
 - 视图合计 vs 直接对 ad_raw 行正则求和：消耗 1207.17 == 1207.17，出单 139 == 139 ✓
 - 当前数据形态：337 个 campaign×SPU 对（228 个广告计划 / 111 个 SPU；
   219 个单商品广告、9 个多商品广告，最多挂 26 个商品）；窗口 2026-08-28 ~ 2026-09-05。
-- 该 seller 下 111 个被投 SPU 中 106 个已在 `commerce.channel_products` 目录，
-  视图可带出内部 `channel_product_id` 继续 JOIN 销售/成本报表。
+- 该 seller 下 111 个被投 SPU 中 106 个已在 `commerce.products_spu` 目录，
+  视图可带出内部 `spu_pk` 继续 JOIN 销售/成本报表。
 
 ## 6. 变更方式
 

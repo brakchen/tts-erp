@@ -14,7 +14,7 @@ Upstream contract reference: `tts-partner-api-docs/Get Product.md`
 
 ```
 GET /v2/tiktok-shop/products/{product_id}
-    ?channel_account_id={ca_id}
+    ?shop_pk={ca_id}
     &return_under_review_version={bool}        # optional, default false
     &return_draft_version={bool}              # optional, default false
     &locale={bcp47}                           # optional, default null
@@ -23,7 +23,7 @@ GET /v2/tiktok-shop/products/{product_id}
 | Component | In | Required | Type | Notes |
 | --- | --- | --- | --- | --- |
 | `product_id` | path | yes | string | TikTok product ID. Upstream returns string IDs (`"1729592969712207008"`). |
-| `channel_account_id` | query | yes | int ≥ 1 | Internal `commerce.channel_accounts.id`. Resolves upstream `shop_id` + `access_token` + `shop_cipher`. Must be `platform='tiktok'`. |
+| `shop_pk` | query | yes | int ≥ 1 | Internal `commerce.shops.id`. Resolves upstream `shop_id` + `access_token` + `shop_cipher`. Must be `platform='tiktok'`. |
 | `return_under_review_version` | query | no | bool | Upstream flag (see upstream docs). Mutually exclusive with `return_draft_version`. |
 | `return_draft_version` | query | no | bool | Upstream flag. Mutually exclusive with `return_under_review_version`. |
 | `locale` | query | no | BCP-47 string, ≤ 16 chars | Display locale. `None` → upstream uses shop default. |
@@ -90,8 +90,8 @@ Abridged example (real payload is far larger — see `tts-partner-api-docs/Get P
 | **200** | upstream `code == 0` | the upstream `data` dict (verbatim) |
 | **401** | missing / invalid / disabled API key | (auth middleware JSON `{"detail": "..."}`) |
 | **403** | key role < readonly | (auth middleware JSON `{"detail": "requires readonly"}`) |
-| **404** | `channel_account_id` not found, OR not `platform='tiktok'`, OR `integration.credentials` row missing, OR `shop_cipher` empty | `{"detail": "<message>"}` |
-| **422** | missing `channel_account_id` query param, OR `channel_account_id < 1`, OR mutually exclusive flags set together | standard FastAPI validation array OR `{"detail": "return_under_review_version and return_draft_version are mutually exclusive ..."}` |
+| **404** | `shop_pk` not found, OR not `platform='tiktok'`, OR `integration.credentials` row missing, OR `shop_cipher` empty | `{"detail": "<message>"}` |
+| **422** | missing `shop_pk` query param, OR `shop_pk < 1`, OR mutually exclusive flags set together | standard FastAPI validation array OR `{"detail": "return_under_review_version and return_draft_version are mutually exclusive ..."}` |
 | **429** | upstream rate-limit (internal retry budget exhausted: 3 attempts) | `{"detail": "upstream rate limit: ..."}` |
 | **502** | upstream `code != 0` (business error) | `{"detail": {"message": "upstream returned a non-zero business code", "upstream_code": <int>, "upstream_message": <str>, "upstream_request_id": <str \| null>}}` |
 | **502** | upstream auth rejected (401/403 from TikTok) | `{"detail": "upstream auth rejected: ..."}` |
@@ -107,7 +107,7 @@ Abridged example (real payload is far larger — see `tts-partner-api-docs/Get P
 
 ```bash
 curl -sS -H "X-API-Key: $KEY" \
-  "http://127.0.0.1:9877/v2/tiktok-shop/products/1729592969712207008?channel_account_id=314"
+  "http://127.0.0.1:9877/v2/tiktok-shop/products/1729592969712207008?shop_pk=314"
 ```
 
 → 200, body = upstream `data` dict.
@@ -116,14 +116,14 @@ curl -sS -H "X-API-Key: $KEY" \
 
 ```bash
 curl -sS -H "Authorization: Bearer $KEY" \
-  "http://127.0.0.1:9877/v2/tiktok-shop/products/1729592969712207008?channel_account_id=314&return_under_review_version=true&locale=en-US"
+  "http://127.0.0.1:9877/v2/tiktok-shop/products/1729592969712207008?shop_pk=314&return_under_review_version=true&locale=en-US"
 ```
 
 ### 6.3 Mutually exclusive flags
 
 ```bash
 curl -sS -H "X-API-Key: $KEY" \
-  "http://127.0.0.1:9877/v2/tiktok-shop/products/1729592969712207008?channel_account_id=314&return_under_review_version=true&return_draft_version=true"
+  "http://127.0.0.1:9877/v2/tiktok-shop/products/1729592969712207008?shop_pk=314&return_under_review_version=true&return_draft_version=true"
 ```
 
 → 422, `{"detail": "return_under_review_version and return_draft_version are mutually exclusive ..."}`.
@@ -132,7 +132,7 @@ curl -sS -H "X-API-Key: $KEY" \
 
 ```bash
 curl -sS -H "X-API-Key: $KEY" \
-  "http://127.0.0.1:9877/v2/tiktok-shop/products/DOES_NOT_EXIST?channel_account_id=314"
+  "http://127.0.0.1:9877/v2/tiktok-shop/products/DOES_NOT_EXIST?shop_pk=314"
 ```
 
 → 502:
@@ -150,10 +150,10 @@ curl -sS -H "X-API-Key: $KEY" \
 ### 6.5 Missing credentials
 
 ```bash
-# commerce.channel_accounts has id=314, but integration.credentials
+# commerce.shops has id=314, but integration.credentials
 # has no row for external_account_id='7494763368967603447'
 curl -sS -H "X-API-Key: $KEY" \
-  "http://127.0.0.1:9877/v2/tiktok-shop/products/1729592969712207008?channel_account_id=314"
+  "http://127.0.0.1:9877/v2/tiktok-shop/products/1729592969712207008?shop_pk=314"
 ```
 
 → 404, `{"detail": "integration.credentials missing for tiktok shop_id='7494763368967603447'"}`.

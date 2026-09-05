@@ -21,9 +21,9 @@ Create Date: 2026-09-05
 - 广告消耗 = SUM(mixed_real_cost)（真实消耗）
 - 窗口元数据: observed_days / first_day / last_day —— 让"累计"口径可解释
   （ad_raw 不 purge，随插件持续 dump 而增长）
-- ERP 富化: LEFT JOIN commerce.channel_accounts / channel_products
-  （seller_id = channel_accounts.external_account_id,SPU = external_product_id），
-  命中则带出内部 channel_account_id / channel_product_id，否则 NULL
+- ERP 富化: LEFT JOIN commerce.shops / products_spu
+  （seller_id = shops.external_account_id,SPU = external_product_id），
+  命中则带出内部 shop_pk / spu_pk，否则 NULL
 - 健壮性: 数值字段来自 JSON 字符串,先正则校验再 ::numeric / ::bigint；
   缺失/脏值按 NULL 处理（SUM 忽略），修复前 schema（仅 product_id）的旧行
   仍保留关联但业绩为 0
@@ -106,15 +106,15 @@ def upgrade() -> None:
                    COALESCE(SUM(d.order_sku), 0)::bigint AS order_sku_total,  -- 出单量合计
                    COALESCE(SUM(d.real_cost), 0)::numeric(20, 4)    AS real_cost_total,  -- 广告消耗合计
                    COALESCE(SUM(d.order_value), 0)::numeric(20, 4)  AS order_value_total, -- 出单 GMV 合计
-                   ca.id                             AS channel_account_id,  -- ERP 内部渠道账户
-                   cp.id                             AS channel_product_id    -- ERP 内部商品 key
+                   ca.id                             AS shop_pk,  -- ERP 内部渠道账户
+                   cp.id                             AS spu_pk    -- ERP 内部商品 key
             FROM daily d
             JOIN latest l USING (seller_id, advertiser_id, campaign_id, product_id)
-            LEFT JOIN commerce.channel_accounts ca
+            LEFT JOIN commerce.shops ca
                    ON ca.platform = 'tiktok'
                   AND ca.external_account_id = d.seller_id
-            LEFT JOIN commerce.channel_products cp
-                   ON cp.channel_account_id = ca.id
+            LEFT JOIN commerce.products_spu cp
+                   ON cp.shop_pk = ca.id
                   AND cp.external_product_id = d.product_id
             GROUP BY d.seller_id, d.advertiser_id, d.campaign_id, d.product_id,
                      l.product_name, l.product_status, l.gmv_max_bid_type,

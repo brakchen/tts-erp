@@ -24,8 +24,8 @@ cookie (see [Browser session login](#browser-session-login)).
 | Discover every route | `GET /endpoints` | public |
 | Auto-generated schema | `GET /openapi.json`, `/docs`, `/redoc` | public |
 | LLM-oriented system + data dictionary | `GET /v2/llm-context` | readonly |
-| List shops (→ internal `channel_account_id`) | `GET /v2/commerce/channel-accounts` | readonly |
-| Look up shop by upstream shop_id | `GET /v2/commerce/channel-accounts/by-external/{external_account_id}` | readonly — see [`tech-doc/api/channel-accounts-by-external.md`](api/channel-accounts-by-external.md) |
+| List shops (→ internal `shop_pk`) | `GET /v2/commerce/channel-accounts` | readonly |
+| Look up shop by upstream shop_id | `GET /v2/commerce/channel-accounts/by-external/{shop_id}` | readonly — see [`tech-doc/api/channel-accounts-by-external.md`](api/channel-accounts-by-external.md) |
 | List / get TikTok products (SPU) | `GET /v2/commerce/channel-products[/{id}[/variants]]` | readonly |
 | List / get orders (+ lines) | `GET /v2/commerce/sales-orders[/{id}[/lines]]` | readonly |
 | TikTok Shop product detail (read-through) | `GET /v2/tiktok-shop/products/{product_id}` | readonly — see [`tech-doc/api/tiktok-shop-get-product.md`](api/tiktok-shop-get-product.md) |
@@ -48,10 +48,10 @@ cookie (see [Browser session login](#browser-session-login)).
 Key gotchas (read these before writing code):
 
 - **Filter by internal ids, not shop_id.** v2 list endpoints take
-  `channel_account_id` / `channel_product_id` (internal bigint PKs).
+  `shop_pk` / `spu_pk` (internal bigint PKs).
   Resolve a TikTok `shop_id` once via
   `GET /v2/commerce/channel-accounts?platform=tiktok` →
-  `external_account_id`. Passing `?shop_id=` is **silently ignored**
+  `shop_id`. Passing `?shop_id=` is **silently ignored**
   (FastAPI drops unknown query params) and you get an unfiltered list.
 - **Pagination is `limit` + `offset`** (no cursors in v2). `limit` is
   1..500, default 100 (200 on `missing-cost-products`).
@@ -70,9 +70,9 @@ KEY=$(cat ~/.tts-erp-key)        # mint with: python3 api_keys.py create --role 
 # resolve the shop's internal account id once
 curl -sS -H "X-API-Key: $KEY" \
   "http://127.0.0.1:9877/v2/commerce/channel-accounts?platform=tiktok"
-# → [{"id":314,"external_account_id":"7494763368967603447",...}]
+# → [{"id":314,"shop_id":"7494763368967603447",...}]
 curl -sS -H "X-API-Key: $KEY" \
-  "http://127.0.0.1:9877/v2/commerce/sales-orders?channel_account_id=314&limit=2"
+  "http://127.0.0.1:9877/v2/commerce/sales-orders?shop_pk=314&limit=2"
 ```
 
 ## Authentication
@@ -170,27 +170,27 @@ All list endpoints accept `limit` (1..500, default 100) + `offset` (≥0).
 
 | Endpoint | Extra query params | Returns |
 | --- | --- | --- |
-| `GET /v2/commerce/channel-accounts` | `platform` (e.g. `tiktok`) | list of `{id, platform, external_account_id, account_name, region, seller_type, status, synced_at}` |
-| `GET /v2/commerce/channel-accounts/{account_id}` | — | one account; 404 if unknown |
-| `GET /v2/commerce/channel-accounts/by-external/{external_account_id}` | [`api/channel-accounts-by-external.md`](api/channel-accounts-by-external.md) | reverse-lookup by upstream shop_id; `?platform=tiktok` default; 404 if unknown |
-| `GET /v2/commerce/channel-accounts/{account_id}/order-stats` | — | `{order_count, payment_amount_sum}` aggregate (0/0 when empty) |
-| `GET /v2/commerce/channel-products` | `channel_account_id`, `status` | SPU list: `{id, channel_account_id, external_product_id, title, status, source_created_at, source_updated_at}` |
-| `GET /v2/commerce/channel-products/{product_id}` | — | one SPU; 404 if unknown |
-| `GET /v2/commerce/channel-products/{product_id}/variants` | — | SKU list: `{id, channel_product_id, external_variant_id, seller_sku, variant_name}` |
-| `GET /v2/commerce/sales-orders` | `channel_account_id`, `status` | order list: `{id, channel_account_id, external_order_id, status, currency, payment_amount, total_amount, source_created_at, source_updated_at, paid_at}` |
-| `GET /v2/commerce/sales-orders/{order_id}` | — | one order (internal `id`, **not** `external_order_id`); 404 if unknown |
-| `GET /v2/commerce/sales-orders/{order_id}/lines` | — | order lines: `{id, sales_order_id, external_line_id, channel_product_id, channel_product_variant_id, quantity, unit_price}` |
+| `GET /v2/commerce/channel-accounts` | `platform` (e.g. `tiktok`) | list of `{id, platform, shop_id, account_name, region, seller_type, status, synced_at}` |
+| `GET /v2/commerce/channel-accounts/{shop_pk}` | — | one account; 404 if unknown |
+| `GET /v2/commerce/channel-accounts/by-external/{shop_id}` | [`api/channel-accounts-by-external.md`](api/channel-accounts-by-external.md) | reverse-lookup by upstream shop_id; `?platform=tiktok` default; 404 if unknown |
+| `GET /v2/commerce/channel-accounts/{shop_pk}/order-stats` | — | `{order_count, payment_amount_sum}` aggregate (0/0 when empty) |
+| `GET /v2/commerce/channel-products` | `shop_pk`, `status` | SPU list: `{id, shop_pk, spu_id, title, status, source_created_at, source_updated_at}` |
+| `GET /v2/commerce/channel-products/{spu_pk}` | — | one SPU; 404 if unknown |
+| `GET /v2/commerce/channel-products/{spu_pk}/variants` | — | SKU list: `{id, spu_pk, sku_id, seller_sku, variant_name}` |
+| `GET /v2/commerce/sales-orders` | `shop_pk`, `status` | order list: `{id, shop_pk, order_id, status, currency, payment_amount, total_amount, order_time, order_modify_time, paid_at}` |
+| `GET /v2/commerce/sales-orders/{order_pk}` | — | one order (internal id, **not** the TikTok `order_id`); 404 if unknown |
+| `GET /v2/commerce/sales-orders/{order_pk}/lines` | — | order lines: `{id, order_pk, external_line_id, spu_pk, sku_pk, quantity, unit_price}` |
 
 ### Linkage (`/v2/linkage/*`)
 
 | Endpoint | Role | Query params / body |
 | --- | --- | --- |
-| `GET /v2/linkage/product-links` | readonly | `channel_product_id`, `procurement_product_id`, `limit`, `offset` |
+| `GET /v2/linkage/product-links` | readonly | `spu_pk`, `procurement_product_id`, `limit`, `offset` |
 | `GET /v2/linkage/evidence` | readonly | `product_link_id`, `limit`, `offset` |
 | `GET /v2/linkage/issues` | readonly | `unresolved_only` (default true), `limit`, `offset` |
 | `POST /v2/linkage/issues/{issue_id}/resolve` | readwrite (handler-enforced) | — ; 200 `{id, status:"resolved"}`, 404 if missing/already resolved |
-| `GET /v2/linkage/overrides` | readonly | `channel_product_id`, `active_only` (default true), `limit`, `offset` |
-| `POST /v2/linkage/overrides` | **admin** (handler-enforced) | body `{"channel_product_id": int, "procurement_product_id": int \| null, "decision": "ALLOW"\|"DENY"\|"PRIMARY", "reason"?: str, "valid_from"?: datetime}` → 201 |
+| `GET /v2/linkage/overrides` | readonly | `spu_pk`, `active_only` (default true), `limit`, `offset` |
+| `POST /v2/linkage/overrides` | **admin** (handler-enforced) | body `{"spu_pk": int, "procurement_product_id": int \| null, "decision": "ALLOW"\|"DENY"\|"PRIMARY", "reason"?: str, "valid_from"?: datetime}` → 201 |
 
 Note: the merged "effective links" view exists only at the DB layer
 (`linkage.effective_product_links`); there is **no** HTTP endpoint for it —
@@ -200,11 +200,11 @@ Note: the merged "effective links" view exists only at the DB layer
 
 | Endpoint | Role | Query params / body |
 | --- | --- | --- |
-| `GET /v2/reporting/cost-snapshots` | readonly | `channel_product_id`, `cost_method`, `limit`, `offset` |
-| `GET /v2/reporting/profit-daily` | readonly | `channel_product_id`, `on_date`, `limit`, `offset` |
+| `GET /v2/reporting/cost-snapshots` | readonly | `spu_pk`, `cost_method`, `limit`, `offset` |
+| `GET /v2/reporting/profit-daily` | readonly | `spu_pk`, `on_date`, `limit`, `offset` |
 | `GET /v2/reporting/coverage` | readonly | — → `{total_spus, active_spus, linked_spus, missing_cost_spus, calculation_version}` |
-| `GET /v2/reporting/missing-cost-products` | readonly | `channel_account_id`, `limit` (default 200), `offset` → `{items: [{channel_product_id, external_product_id, title, channel_account_id, missing_photo}], total_missing_photo}` |
-| `POST /v2/reporting/manual-costs` | readwrite | body `{"channel_product_external_id": str, "unit_cost": decimal>0, "currency": "VND", "valid_from"?: datetime, "note"?: str}` → 201 `ManualCostOut`; auto-closes the previous effective row for the SPU |
+| `GET /v2/reporting/missing-cost-products` | readonly | `shop_pk`, `limit` (default 200), `offset` → `{items: [{spu_pk, spu_id, title, shop_pk, missing_photo}], total_missing_photo}` |
+| `POST /v2/reporting/manual-costs` | readwrite | body `{"spu_id": str, "unit_cost": decimal>0, "currency": "VND", "valid_from"?: datetime, "note"?: str}` → 201 `ManualCostOut`; auto-closes the previous effective row for the SPU |
 
 Cost semantics: `MANUAL_ENTRY` (this endpoint) > 妙手采购单 > (1688 采集标价
 **禁用**). See `tech-doc/refactor-tech-plan-v2.md` §6 decisions 10/12.
@@ -226,13 +226,13 @@ Presigned MinIO upload flow (server never proxies bytes; design:
 [`procurement-ui-redesign.md`](procurement-ui-redesign.md)):
 
 1. `POST /v2/spu-images/upload-url` (readwrite) — body
-   `{"channel_account_id", "channel_product_id", "filename", "content_type", "size_bytes"≤8MiB}`
+   `{"shop_pk", "spu_pk", "filename", "content_type", "size_bytes"≤8MiB}`
    → 201 `{image_id, object_key, upload_url, upload_expires_at, required_headers}`.
 2. Browser PUTs the file to `upload_url` directly.
 3. `POST /v2/spu-images/{image_id}/confirm` (readwrite) — server HEAD-verifies
    the object → `{status: "ready", url, ...}`; 409 `UPLOAD_NOT_FOUND` if the
    PUT never landed.
-4. `GET /v2/spu-images?channel_product_id=X` (readonly) — ready images with
+4. `GET /v2/spu-images?spu_pk=X` (readonly) — ready images with
    presigned GET URLs.
 5. `DELETE /v2/spu-images/{image_id}` (readwrite) — soft-delete, 204,
    idempotent.
@@ -249,7 +249,7 @@ returns `text/markdown`; `?format=json` returns
 Live, **uncached** pass-throughs to the TikTok Shop Partner API
 documented in `tts-partner-api-docs/`. Each call resolves the seller's
 credentials via `proxy/token_service.load_credentials()` (key by
-internal `channel_account_id` → upstream `shop_id` → `access_token` +
+internal `shop_pk` → upstream `shop_id` → `access_token` +
 `shop_cipher`) and hands the upstream `data` payload back verbatim.
 
 | Endpoint | Spec | Upstream | Required upstream scope |
@@ -474,8 +474,8 @@ ACCT=$(curl -sS -H "X-API-Key: $KEY" \
   "http://127.0.0.1:9877/v2/commerce/channel-accounts?platform=tiktok" \
   | jq -r '.[0].id')
 curl -sS -H "X-API-Key: $KEY" \
-  "http://127.0.0.1:9877/v2/commerce/sales-orders?channel_account_id=$ACCT&limit=20" \
-  | jq -r '.[] | [.external_order_id, .status, .payment_amount, .currency] | @tsv'
+  "http://127.0.0.1:9877/v2/commerce/sales-orders?shop_pk=$ACCT&limit=20" \
+  | jq -r '.[] | [.order_id, .status, .payment_amount, .currency] | @tsv'
 ```
 
 ### Submit a manual cost for an SPU
@@ -483,7 +483,7 @@ curl -sS -H "X-API-Key: $KEY" \
 ```bash
 curl -sS -X POST -H "Authorization: Bearer $KEY" \
   -H "Content-Type: application/json" \
-  -d '{"channel_product_external_id":"1730000000000000001","unit_cost":"12.40","currency":"VND","note":"1688 议价后价"}' \
+  -d '{"spu_id":"1730000000000000001","unit_cost":"12.40","currency":"VND","note":"1688 议价后价"}' \
   "http://127.0.0.1:9877/v2/reporting/manual-costs"
 ```
 

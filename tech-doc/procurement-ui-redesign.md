@@ -161,8 +161,8 @@ and lets the browser do multipart/chunked if needed).
 
   ```json
   {
-    "channel_account_id": 7,            // scopes the upload to one shop
-    "channel_product_id": 1234,         // SPU the image belongs to
+    "shop_pk": 7,            // scopes the upload to one shop
+    "spu_pk": 1234,         // SPU the image belongs to
     "filename": "packing-slip-front.jpg", // sanitised server-side
     "content_type": "image/jpeg",
     "size_bytes": 184320                 // sanity-bound ≤ 8 MiB
@@ -182,12 +182,12 @@ and lets the browser do multipart/chunked if needed).
   ```
 
 - Errors: `400` (bad filename / content_type / size), `403` (auth/role),
-  `404` (channel_account_id or channel_product_id not found).
+  `404` (shop_pk or spu_pk not found).
 
 Object-key layout (set on the server, never user-controlled):
 
 ```
-shops/<channel_account_id>/spus/<channel_product_id>/<YYYY-MM-DD>/<image_id>-<slug>.<ext>
+shops/<shop_pk>/spus/<spu_pk>/<YYYY-MM-DD>/<image_id>-<slug>.<ext>
 ```
 
 ### 3.2 `POST /v2/spu-images/{image_id}/confirm`
@@ -215,7 +215,7 @@ returns the read URL (presigned or public-base, depending on
 - If the HEAD fails: `409` `UPLOAD_NOT_FOUND` with a hint to retry the
   upload-url flow.
 
-### 3.3 `GET /v2/spu-images?channel_product_id=X`
+### 3.3 `GET /v2/spu-images?spu_pk=X`
 
 Lists ready images for one SPU. Used by the "Needs photo" tab counter
 and by the gallery on the per-SPU detail view.
@@ -227,7 +227,7 @@ and by the gallery on the per-SPU detail view.
   [
     {
       "image_id": 555,
-      "channel_product_id": 1234,
+      "spu_pk": 1234,
       "object_key": "shops/7/spus/1234/2026-08-31/555-...",
       "filename": "packing-slip-front.jpg",
       "content_type": "image/jpeg",
@@ -252,7 +252,7 @@ basis (logged but not fatal if MinIO fails). Idempotent.
 
 `GET /v2/reporting/missing-cost-products` already exists (returns active
 SPUs with no manual cost and no link). We extend it to accept
-`?channel_account_id=X` and to include a new `missing_photo` flag (counts
+`?shop_pk=X` and to include a new `missing_photo` flag (counts
 of images vs. presence/absence). The frontend tab counters are read off
 these endpoints; we don't add a dedicated `/counts` endpoint.
 
@@ -266,10 +266,10 @@ CREATE SCHEMA IF NOT EXISTS procurement;
 
 CREATE TABLE IF NOT EXISTS procurement.spu_images (
     id                  BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-    channel_account_id  BIGINT NOT NULL
-        REFERENCES commerce.channel_accounts(id) ON DELETE RESTRICT,
-    channel_product_id  BIGINT NOT NULL
-        REFERENCES commerce.channel_products(id) ON DELETE RESTRICT,
+    shop_pk  BIGINT NOT NULL
+        REFERENCES commerce.shops(id) ON DELETE RESTRICT,
+    spu_pk  BIGINT NOT NULL
+        REFERENCES commerce.products_spu(id) ON DELETE RESTRICT,
     object_key          TEXT NOT NULL UNIQUE,
     filename            TEXT NOT NULL,
     content_type        TEXT NOT NULL,
@@ -285,10 +285,10 @@ CREATE TABLE IF NOT EXISTS procurement.spu_images (
 );
 
 CREATE INDEX IF NOT EXISTS ix_spu_images_product_status
-    ON procurement.spu_images (channel_product_id, status)
+    ON procurement.spu_images (spu_pk, status)
     WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS ix_spu_images_account_uploaded
-    ON procurement.spu_images (channel_account_id, uploaded_at DESC)
+    ON procurement.spu_images (shop_pk, uploaded_at DESC)
     WHERE deleted_at IS NULL;
 ```
 

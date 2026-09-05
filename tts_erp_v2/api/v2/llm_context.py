@@ -303,13 +303,13 @@ opaque `next_cursor` where applicable.
 | method | path | purpose |
 | --- | --- | --- |
 | GET | `/v2/commerce/channel-accounts` | list platform accounts (filter by `?platform=`) |
-| GET | `/v2/commerce/channel-accounts/{account_id}` | one account by id |
-| GET | `/v2/commerce/channel-products?shop_id=X&limit=...` | list TikTok SKUs (filter by `?status=active`) |
-| GET | `/v2/commerce/channel-products/{product_id}` | one TikTok SKU |
-| GET | `/v2/commerce/sales-orders?shop_id=X&status=AWAITING_SHIPMENT&limit=...` | list orders (filter by `?status=`, `?currency=`, `?source_updated_at_ge=epoch`) |
-| GET | `/v2/commerce/sales-orders/{order_id}?shop_id=X` | one order, includes lines |
-| GET | `/v2/commerce/sales-orders/{order_id}/lines` | order lines only (lightweight) |
-| GET | `/v2/commerce/sales-orders/{order_id}/raw` | the original TikTok JSON envelope (for debugging) |
+| GET | `/v2/commerce/channel-accounts/{shop_pk}` | one account by internal id |
+| GET | `/v2/commerce/channel-products?shop_pk=X&limit=...` | list TikTok SPU (filter by `?status=active`) |
+| GET | `/v2/commerce/channel-products/{spu_pk}` | one TikTok SPU (internal id) |
+| GET | `/v2/commerce/sales-orders?shop_pk=X&status=AWAITING_SHIPMENT&limit=...` | list orders (filter by `?shop_pk=` `?status=` `?limit=`/`?offset=`) |
+| GET | `/v2/commerce/sales-orders/{order_pk}` | one order by internal id |
+| GET | `/v2/commerce/sales-orders/{order_pk}/lines` | order lines only (lightweight) |
+| GET | `/v2/commerce/sales-orders/{order_pk}/raw` | the original TikTok JSON envelope (for debugging) |
 
 ### 10.2 Linkage (sales ↔ procurement) — readonly + admin override
 

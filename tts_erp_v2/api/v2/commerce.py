@@ -249,12 +249,12 @@ def get_channel_account_by_external(
     return _row_to_channel_account(row)
 
 
-@router.get("/channel-accounts/{account_id}", response_model=ChannelAccountOut)
+@router.get("/channel-accounts/{shop_pk}", response_model=ChannelAccountOut)
 def get_channel_account(
-    account_id: int,
+    shop_pk: int,
     sess: Session = Depends(get_session),
 ) -> ChannelAccountOut:
-    row = _q(_STMT_GET_CHANNEL_ACCOUNT, {"id": account_id}, sess).first()
+    row = _q(_STMT_GET_CHANNEL_ACCOUNT, {"id": shop_pk}, sess).first()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "channel account not found")
     return _row_to_channel_account(row)
@@ -281,26 +281,26 @@ def list_products_spu(
     return [_row_to_channel_product(r) for r in rows]
 
 
-@router.get("/channel-products/{product_id}", response_model=ChannelProductOut)
+@router.get("/channel-products/{spu_pk}", response_model=ChannelProductOut)
 def get_channel_product(
-    product_id: int,
+    spu_pk: int,
     sess: Session = Depends(get_session),
 ) -> ChannelProductOut:
-    row = _q(_STMT_GET_CHANNEL_PRODUCT, {"id": product_id}, sess).first()
+    row = _q(_STMT_GET_CHANNEL_PRODUCT, {"id": spu_pk}, sess).first()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "channel product not found")
     return _row_to_channel_product(row)
 
 
 @router.get(
-    "/channel-products/{product_id}/variants",
+    "/channel-products/{spu_pk}/variants",
     response_model=list[ChannelProductVariantOut],
 )
 def list_products_sku(
-    product_id: int,
+    spu_pk: int,
     sess: Session = Depends(get_session),
 ) -> list[ChannelProductVariantOut]:
-    rows = _q(_STMT_LIST_CHANNEL_VARIANTS, {"id": product_id}, sess).all()
+    rows = _q(_STMT_LIST_CHANNEL_VARIANTS, {"id": spu_pk}, sess).all()
     return [
         ChannelProductVariantOut(
             id=r.id,
@@ -334,26 +334,26 @@ def list_sales_orders(
     return [_row_to_sales_order(r) for r in rows]
 
 
-@router.get("/sales-orders/{order_id}", response_model=SalesOrderOut)
+@router.get("/sales-orders/{order_pk}", response_model=SalesOrderOut)
 def get_sales_order(
-    order_id: int,
+    order_pk: int,
     sess: Session = Depends(get_session),
 ) -> SalesOrderOut:
-    row = _q(_STMT_GET_SALES_ORDER, {"id": order_id}, sess).first()
+    row = _q(_STMT_GET_SALES_ORDER, {"id": order_pk}, sess).first()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "sales order not found")
     return _row_to_sales_order(row)
 
 
 @router.get(
-    "/sales-orders/{order_id}/lines",
+    "/sales-orders/{order_pk}/lines",
     response_model=list[SalesOrderLineOut],
 )
 def list_sales_order_lines(
-    order_id: int,
+    order_pk: int,
     sess: Session = Depends(get_session),
 ) -> list[SalesOrderLineOut]:
-    rows = _q(_STMT_LIST_ORDER_LINES, {"id": order_id}, sess).all()
+    rows = _q(_STMT_LIST_ORDER_LINES, {"id": order_pk}, sess).all()
     return [
         SalesOrderLineOut(
             id=r.id,
@@ -369,20 +369,20 @@ def list_sales_order_lines(
 
 
 @router.get(
-    "/channel-accounts/{account_id}/order-stats",
+    "/channel-accounts/{shop_pk}/order-stats",
     summary="Per-account order aggregate — distinct order count + sum of payment_amount",
 )
 def channel_account_order_stats(
-    account_id: int,
+    shop_pk: int,
     sess: Session = Depends(get_session),
 ) -> dict:
     """Lightweight aggregate: distinct order count + sum of payment_amount.
 
     Returns 0/0 when no orders exist (the COALESCE handles NULL from SUM).
     """
-    row = _q(_STMT_ACCOUNT_ORDER_STATS, {"id": account_id}, sess).one()
+    row = _q(_STMT_ACCOUNT_ORDER_STATS, {"id": shop_pk}, sess).one()
     return {
-        "shop_pk": account_id,
+        "shop_pk": shop_pk,
         "distinct_orders": int(row.n or 0),
         "total_payment_amount": str(row.total),
     }

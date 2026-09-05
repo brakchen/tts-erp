@@ -63,13 +63,13 @@
 | `moveCollectTaskDetailId` | `moveCollectTaskDetailId: str` | `move_collect_task_detail_id` (PK 之一) | 搬家任务明细 id | `linkage.link_evidence.source_external_id` |
 | `collectBoxDetailId` | `collectBoxDetailId: str` | `collect_box_detail_id` | 采集箱商品 id（妙手侧商品） | `procurement.procurement_products.external_product_id` |
 | `shopId` | `shopId: str` | `shop_id` (text) | 妙手店铺 id（非 TikTok shop id） | `linkage.account_links` / `procurement.procurement_accounts` |
-| `platformItemId` | `platformItemId: str` | `platform_item_id` | **TikTok 商品 SPU id**（= `order_items.product_id`） | `commerce.channel_products.external_product_id` |
+| `platformItemId` | `platformItemId: str` | `platform_item_id` | **TikTok 商品 SPU id**（= `order_items.product_id`） | `commerce.products_spu.external_product_id` |
 | `source` | `source: str` | `source` | 采购源头平台（1688 等） | `procurement.procurement_products.source_platform` |
 | `sourceItemId` | `sourceItemId: str` | `source_item_id` | 源头平台商品 id（1688 offer id） | `procurement.procurement_products.source_item_id` |
 | `sourceSite` | `sourceSite: str` | `source_site` | 源头站点 | 同上 |
 | `sourceItemUrl` | `sourceItemUrl: str` | `source_item_url` | 源头商品 URL | `procurement.procurement_products.source_item_url` |
 | `itemNum` | `itemNum: str` | `item_num` | 货号 | — |
-| `cid` | `cid: str` | `cid` | TikTok 类目 id | `commerce.channel_products.category_id`（旁证） |
+| `cid` | `cid: str` | `cid` | TikTok 类目 id | `commerce.products_spu.category_id`（旁证） |
 | `title` | `title: str` | `title` | 商品标题（快照） | 仅证据，不作正式关联依据 |
 | `thumbnail` | `thumbnail: str` | `thumbnail` | 主图 URL（1688 源图） | 仅证据 |
 | `isTiming` | `isTiming: str` | `is_timing` | 是否定时发布（"0"/"1"） | — |
@@ -79,7 +79,7 @@
 | `gmtModified` | `gmtModified: str` | `gmt_modified` (text) | 最后修改时间（同上） | `source_updated_at`（需转 timestamptz） |
 | `isRenewItem` | `isRenewItem: bool` | `is_renew_item` | 是否重新刊登 | — |
 | `shopName` | `shopName: str` | `shop_name` | 妙手店铺名（快照） | 仅证据（不可作关联依据） |
-| `site` / `siteName` | `site` / `siteName: str` | `site` / `site_name` | TikTok 站点（VN 等） | `commerce.channel_accounts.region`（旁证） |
+| `site` / `siteName` | `site` / `siteName: str` | `site` / `site_name` | TikTok 站点（VN 等） | `commerce.shops.region`（旁证） |
 | `itemEditUrl` | `itemEditUrl: str` | `item_edit_url` | TikTok 卖家中心编辑页 URL，含 product id | 仅证据 |
 | `breadcrumb` | `breadcrumb: str` | `breadcrumb` | TikTok 类目路径 | 仅证据（类目校验辅助） |
 | `ownerSubAppAccountId` | `ownerSubAppAccountId: int` | `owner_sub_app_account_id` | 妙手子账号 id（0=主账号） | — |

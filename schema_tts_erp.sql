@@ -164,8 +164,8 @@ ALTER TABLE after_sales.case_lines ALTER COLUMN id ADD GENERATED ALWAYS AS IDENT
 
 CREATE TABLE IF NOT EXISTS after_sales.cases (
     id bigint NOT NULL,
-    channel_account_id bigint NOT NULL,
-    sales_order_id bigint NOT NULL,
+    shop_pk bigint NOT NULL,
+    order_pk bigint NOT NULL,
     external_case_id text NOT NULL,
     case_type text NOT NULL,
     status text,
@@ -246,9 +246,9 @@ CREATE TABLE IF NOT EXISTS analytics.ad_raw (
 );
 
 
--- Name: channel_accounts; Type: TABLE; Schema: commerce; Owner: -
+-- Name: shops; Type: TABLE; Schema: commerce; Owner: -
 
-CREATE TABLE IF NOT EXISTS commerce.channel_accounts (
+CREATE TABLE IF NOT EXISTS commerce.shops (
     id bigint NOT NULL,
     platform text NOT NULL,
     external_account_id text NOT NULL,
@@ -263,11 +263,11 @@ CREATE TABLE IF NOT EXISTS commerce.channel_accounts (
 );
 
 
--- Name: channel_products; Type: TABLE; Schema: commerce; Owner: -
+-- Name: products_spu; Type: TABLE; Schema: commerce; Owner: -
 
-CREATE TABLE IF NOT EXISTS commerce.channel_products (
+CREATE TABLE IF NOT EXISTS commerce.products_spu (
     id bigint NOT NULL,
-    channel_account_id bigint NOT NULL,
+    shop_pk bigint NOT NULL,
     external_product_id text NOT NULL,
     title text,
     category_id text,
@@ -332,12 +332,12 @@ CREATE VIEW analytics.ad_product_links AS
     (COALESCE(sum(d.order_sku), (0)::numeric))::bigint AS order_sku_total,
     (COALESCE(sum(d.real_cost), (0)::numeric))::numeric(20,4) AS real_cost_total,
     (COALESCE(sum(d.order_value), (0)::numeric))::numeric(20,4) AS order_value_total,
-    ca.id AS channel_account_id,
-    cp.id AS channel_product_id
+    ca.id AS shop_pk,
+    cp.id AS spu_pk
    FROM (((daily d
      JOIN latest l USING (seller_id, advertiser_id, campaign_id, product_id))
-     LEFT JOIN commerce.channel_accounts ca ON (((ca.platform = 'tiktok'::text) AND (ca.external_account_id = d.seller_id))))
-     LEFT JOIN commerce.channel_products cp ON (((cp.channel_account_id = ca.id) AND (cp.external_product_id = d.product_id))))
+     LEFT JOIN commerce.shops ca ON (((ca.platform = 'tiktok'::text) AND (ca.external_account_id = d.seller_id))))
+     LEFT JOIN commerce.products_spu cp ON (((cp.shop_pk = ca.id) AND (cp.external_product_id = d.product_id))))
   GROUP BY d.seller_id, d.advertiser_id, d.campaign_id, d.product_id, l.product_name, l.product_status, l.gmv_max_bid_type, ca.id, cp.id;
 
 
@@ -400,16 +400,16 @@ CREATE TABLE IF NOT EXISTS analytics.ad_shop_timezones (
 
 
 
-ALTER TABLE commerce.channel_accounts ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME commerce.channel_accounts_id_seq
+ALTER TABLE commerce.shops ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME commerce.shops_id_seq
 );
 
 
--- Name: channel_product_variants; Type: TABLE; Schema: commerce; Owner: -
+-- Name: products_sku; Type: TABLE; Schema: commerce; Owner: -
 
-CREATE TABLE IF NOT EXISTS commerce.channel_product_variants (
+CREATE TABLE IF NOT EXISTS commerce.products_sku (
     id bigint NOT NULL,
-    channel_product_id bigint NOT NULL,
+    spu_pk bigint NOT NULL,
     external_variant_id text NOT NULL,
     seller_sku text,
     variant_name text,
@@ -424,14 +424,14 @@ CREATE TABLE IF NOT EXISTS commerce.channel_product_variants (
 
 
 
-ALTER TABLE commerce.channel_product_variants ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME commerce.channel_product_variants_id_seq
+ALTER TABLE commerce.products_sku ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME commerce.products_sku_id_seq
 );
 
 
 
-ALTER TABLE commerce.channel_products ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME commerce.channel_products_id_seq
+ALTER TABLE commerce.products_spu ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME commerce.products_spu_id_seq
 );
 
 
@@ -439,10 +439,10 @@ ALTER TABLE commerce.channel_products ALTER COLUMN id ADD GENERATED ALWAYS AS ID
 
 CREATE TABLE IF NOT EXISTS commerce.sales_order_lines (
     id bigint NOT NULL,
-    sales_order_id bigint NOT NULL,
+    order_pk bigint NOT NULL,
     external_line_id text NOT NULL,
-    channel_product_id bigint,
-    channel_product_variant_id bigint,
+    spu_pk bigint,
+    sku_pk bigint,
     external_product_id_snapshot text,
     external_variant_id_snapshot text,
     product_name_snapshot text,
@@ -468,8 +468,8 @@ ALTER TABLE commerce.sales_order_lines ALTER COLUMN id ADD GENERATED ALWAYS AS I
 
 CREATE TABLE IF NOT EXISTS commerce.sales_orders (
     id bigint NOT NULL,
-    channel_account_id bigint NOT NULL,
-    external_order_id text NOT NULL,
+    shop_pk bigint NOT NULL,
+    order_id text NOT NULL,
     status text,
     currency text,
     payment_amount numeric(20,4),
@@ -497,7 +497,7 @@ ALTER TABLE commerce.sales_orders ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTI
 
 CREATE TABLE IF NOT EXISTS finance.payouts (
     id bigint NOT NULL,
-    channel_account_id bigint NOT NULL,
+    shop_pk bigint NOT NULL,
     external_payout_id text NOT NULL,
     status text,
     currency text,
@@ -564,7 +564,7 @@ CREATE TABLE IF NOT EXISTS finance.settlement_transactions (
     id bigint NOT NULL,
     settlement_statement_id bigint NOT NULL,
     external_transaction_id text NOT NULL,
-    sales_order_id bigint,
+    order_pk bigint,
     sales_order_line_id bigint,
     after_sales_case_id bigint,
     transaction_time timestamp with time zone,
@@ -595,7 +595,7 @@ CREATE TABLE IF NOT EXISTS fulfillment.shipment_lines (
 
 CREATE TABLE IF NOT EXISTS fulfillment.shipments (
     id bigint NOT NULL,
-    sales_order_id bigint NOT NULL,
+    order_pk bigint NOT NULL,
     external_package_id text NOT NULL,
     tracking_number text,
     provider_id text,
@@ -751,7 +751,7 @@ ALTER TABLE integration.sync_jobs ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTI
 CREATE TABLE IF NOT EXISTS linkage.account_links (
     id bigint NOT NULL,
     procurement_account_id bigint NOT NULL,
-    channel_account_id bigint NOT NULL,
+    shop_pk bigint NOT NULL,
     external_relation_id text,
     status text,
     valid_from timestamp with time zone DEFAULT now() NOT NULL,
@@ -774,7 +774,7 @@ ALTER TABLE linkage.account_links ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTI
 CREATE TABLE IF NOT EXISTS linkage.link_overrides (
     id bigint NOT NULL,
     procurement_product_id bigint NOT NULL,
-    channel_product_id bigint NOT NULL,
+    spu_pk bigint NOT NULL,
     decision text NOT NULL,
     reason text,
     valid_from timestamp with time zone DEFAULT now() NOT NULL,
@@ -790,7 +790,7 @@ CREATE TABLE IF NOT EXISTS linkage.link_overrides (
 CREATE TABLE IF NOT EXISTS linkage.product_links (
     id bigint NOT NULL,
     procurement_product_id bigint NOT NULL,
-    channel_product_id bigint NOT NULL,
+    spu_pk bigint NOT NULL,
     external_relation_id text,
     relation_type text NOT NULL,
     status text,
@@ -826,7 +826,7 @@ CREATE TABLE IF NOT EXISTS procurement.procurement_products (
 -- Name: effective_product_links; Type: VIEW; Schema: linkage; Owner: -
 
 CREATE VIEW linkage.effective_product_links AS
- SELECT cp.id AS channel_product_id,
+ SELECT cp.id AS spu_pk,
     COALESCE(lo.procurement_product_id, pl.procurement_product_id) AS procurement_product_id,
     COALESCE(lo.decision, pl.relation_type) AS effective_relation_type,
     COALESCE(lo.id, pl.id) AS source_link_id,
@@ -836,10 +836,10 @@ CREATE VIEW linkage.effective_product_links AS
         END AS source_kind,
     COALESCE(lo.valid_from, pl.valid_from) AS effective_from,
     pp.procurement_account_id,
-    cp.channel_account_id
-   FROM (((commerce.channel_products cp
-     LEFT JOIN linkage.link_overrides lo ON (((lo.channel_product_id = cp.id) AND (lo.valid_to IS NULL))))
-     LEFT JOIN linkage.product_links pl ON (((pl.channel_product_id = cp.id) AND (pl.valid_to IS NULL) AND ((lo.id IS NULL) OR (lo.decision <> 'DENY'::text)))))
+    cp.shop_pk
+   FROM (((commerce.products_spu cp
+     LEFT JOIN linkage.link_overrides lo ON (((lo.spu_pk = cp.id) AND (lo.valid_to IS NULL))))
+     LEFT JOIN linkage.product_links pl ON (((pl.spu_pk = cp.id) AND (pl.valid_to IS NULL) AND ((lo.id IS NULL) OR (lo.decision <> 'DENY'::text)))))
      LEFT JOIN procurement.procurement_products pp ON ((pp.id = COALESCE(lo.procurement_product_id, pl.procurement_product_id))))
   WHERE (COALESCE(lo.decision, 'ALLOW'::text) <> 'DENY'::text);
 
@@ -872,7 +872,7 @@ CREATE TABLE IF NOT EXISTS linkage.link_issues (
     id bigint NOT NULL,
     issue_type text NOT NULL,
     procurement_product_id bigint,
-    channel_product_id bigint,
+    spu_pk bigint,
     candidate_count integer,
     status text,
     details jsonb,
@@ -905,7 +905,7 @@ ALTER TABLE linkage.product_links ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTI
 CREATE TABLE IF NOT EXISTS linkage.variant_links (
     id bigint NOT NULL,
     procurement_product_variant_id bigint NOT NULL,
-    channel_product_variant_id bigint NOT NULL,
+    sku_pk bigint NOT NULL,
     external_relation_id text,
     status text,
     valid_from timestamp with time zone DEFAULT now() NOT NULL,
@@ -926,7 +926,7 @@ ALTER TABLE linkage.variant_links ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTI
 
 CREATE TABLE IF NOT EXISTS procurement.manual_product_costs (
     id bigint NOT NULL,
-    channel_product_id bigint NOT NULL,
+    spu_pk bigint NOT NULL,
     unit_cost numeric(20,4) NOT NULL,
     currency text NOT NULL,
     valid_from timestamp with time zone DEFAULT now() NOT NULL,
@@ -1047,8 +1047,8 @@ ALTER TABLE procurement.purchase_orders ALTER COLUMN id ADD GENERATED ALWAYS AS 
 
 CREATE TABLE IF NOT EXISTS procurement.spu_images (
     id bigint NOT NULL,
-    channel_account_id bigint NOT NULL,
-    channel_product_id bigint NOT NULL,
+    shop_pk bigint NOT NULL,
+    spu_pk bigint NOT NULL,
     object_key text NOT NULL,
     filename text NOT NULL,
     content_type text NOT NULL,
@@ -1526,7 +1526,7 @@ CREATE TABLE IF NOT EXISTS public.sync_log (
 
 CREATE TABLE IF NOT EXISTS reporting.product_cost_snapshots (
     id bigint NOT NULL,
-    channel_product_id bigint NOT NULL,
+    spu_pk bigint NOT NULL,
     cost_method text NOT NULL,
     unit_cost numeric(20,4) NOT NULL,
     currency text NOT NULL,
@@ -1552,7 +1552,7 @@ ALTER TABLE reporting.product_cost_snapshots ALTER COLUMN id ADD GENERATED ALWAY
 
 CREATE TABLE IF NOT EXISTS reporting.product_profit_daily (
     id bigint NOT NULL,
-    channel_product_id bigint NOT NULL,
+    spu_pk bigint NOT NULL,
     profit_date date NOT NULL,
     units_sold numeric(20,4),
     gross_revenue numeric(20,4),
@@ -1663,7 +1663,7 @@ ALTER TABLE ONLY after_sales.case_lines
 -- Name: cases uq_cases_account_ext; Type: CONSTRAINT; Schema: after_sales; Owner: -
 
 ALTER TABLE ONLY after_sales.cases
-    ADD CONSTRAINT uq_cases_account_ext UNIQUE (channel_account_id, external_case_id);
+    ADD CONSTRAINT uq_cases_account_ext UNIQUE (shop_pk, external_case_id);
 
 
 -- Name: ad_audit_log analytics_audit_log_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
@@ -1708,22 +1708,22 @@ ALTER TABLE ONLY analytics.ad_records
     ADD CONSTRAINT uq_analytics_records_unit_day UNIQUE (seller_id, advertiser_id, storage_key, campaign_id, day);
 
 
--- Name: channel_accounts channel_accounts_pkey; Type: CONSTRAINT; Schema: commerce; Owner: -
+-- Name: shops shops_pkey; Type: CONSTRAINT; Schema: commerce; Owner: -
 
-ALTER TABLE ONLY commerce.channel_accounts
-    ADD CONSTRAINT channel_accounts_pkey PRIMARY KEY (id);
-
-
--- Name: channel_product_variants channel_product_variants_pkey; Type: CONSTRAINT; Schema: commerce; Owner: -
-
-ALTER TABLE ONLY commerce.channel_product_variants
-    ADD CONSTRAINT channel_product_variants_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY commerce.shops
+    ADD CONSTRAINT shops_pkey PRIMARY KEY (id);
 
 
--- Name: channel_products channel_products_pkey; Type: CONSTRAINT; Schema: commerce; Owner: -
+-- Name: products_sku products_sku_pkey; Type: CONSTRAINT; Schema: commerce; Owner: -
 
-ALTER TABLE ONLY commerce.channel_products
-    ADD CONSTRAINT channel_products_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY commerce.products_sku
+    ADD CONSTRAINT products_sku_pkey PRIMARY KEY (id);
+
+
+-- Name: products_spu products_spu_pkey; Type: CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.products_spu
+    ADD CONSTRAINT products_spu_pkey PRIMARY KEY (id);
 
 
 -- Name: sales_order_lines sales_order_lines_pkey; Type: CONSTRAINT; Schema: commerce; Owner: -
@@ -1738,34 +1738,34 @@ ALTER TABLE ONLY commerce.sales_orders
     ADD CONSTRAINT sales_orders_pkey PRIMARY KEY (id);
 
 
--- Name: channel_accounts uq_channel_accounts_platform_ext; Type: CONSTRAINT; Schema: commerce; Owner: -
+-- Name: shops uq_shops_platform_ext; Type: CONSTRAINT; Schema: commerce; Owner: -
 
-ALTER TABLE ONLY commerce.channel_accounts
-    ADD CONSTRAINT uq_channel_accounts_platform_ext UNIQUE (platform, external_account_id);
-
-
--- Name: channel_products uq_channel_products_account_ext; Type: CONSTRAINT; Schema: commerce; Owner: -
-
-ALTER TABLE ONLY commerce.channel_products
-    ADD CONSTRAINT uq_channel_products_account_ext UNIQUE (channel_account_id, external_product_id);
+ALTER TABLE ONLY commerce.shops
+    ADD CONSTRAINT uq_shops_platform_ext UNIQUE (platform, external_account_id);
 
 
--- Name: channel_product_variants uq_channel_variants_product_ext; Type: CONSTRAINT; Schema: commerce; Owner: -
+-- Name: products_spu uq_products_spu_account_ext; Type: CONSTRAINT; Schema: commerce; Owner: -
 
-ALTER TABLE ONLY commerce.channel_product_variants
-    ADD CONSTRAINT uq_channel_variants_product_ext UNIQUE (channel_product_id, external_variant_id);
+ALTER TABLE ONLY commerce.products_spu
+    ADD CONSTRAINT uq_products_spu_account_ext UNIQUE (shop_pk, external_product_id);
+
+
+-- Name: products_sku uq_channel_variants_product_ext; Type: CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.products_sku
+    ADD CONSTRAINT uq_channel_variants_product_ext UNIQUE (spu_pk, external_variant_id);
 
 
 -- Name: sales_order_lines uq_sales_order_lines_order_ext; Type: CONSTRAINT; Schema: commerce; Owner: -
 
 ALTER TABLE ONLY commerce.sales_order_lines
-    ADD CONSTRAINT uq_sales_order_lines_order_ext UNIQUE (sales_order_id, external_line_id);
+    ADD CONSTRAINT uq_sales_order_lines_order_ext UNIQUE (order_pk, external_line_id);
 
 
 -- Name: sales_orders uq_sales_orders_account_ext; Type: CONSTRAINT; Schema: commerce; Owner: -
 
 ALTER TABLE ONLY commerce.sales_orders
-    ADD CONSTRAINT uq_sales_orders_account_ext UNIQUE (channel_account_id, external_order_id);
+    ADD CONSTRAINT uq_sales_orders_account_ext UNIQUE (shop_pk, order_id);
 
 
 -- Name: payouts payouts_pkey; Type: CONSTRAINT; Schema: finance; Owner: -
@@ -1795,7 +1795,7 @@ ALTER TABLE ONLY finance.settlement_transactions
 -- Name: payouts uq_payouts_account_ext; Type: CONSTRAINT; Schema: finance; Owner: -
 
 ALTER TABLE ONLY finance.payouts
-    ADD CONSTRAINT uq_payouts_account_ext UNIQUE (channel_account_id, external_payout_id);
+    ADD CONSTRAINT uq_payouts_account_ext UNIQUE (shop_pk, external_payout_id);
 
 
 -- Name: settlement_components uq_settlement_components_txn_code; Type: CONSTRAINT; Schema: finance; Owner: -
@@ -1837,7 +1837,7 @@ ALTER TABLE ONLY fulfillment.tracking_events
 -- Name: shipments uq_shipments_order_ext; Type: CONSTRAINT; Schema: fulfillment; Owner: -
 
 ALTER TABLE ONLY fulfillment.shipments
-    ADD CONSTRAINT uq_shipments_order_ext UNIQUE (sales_order_id, external_package_id);
+    ADD CONSTRAINT uq_shipments_order_ext UNIQUE (order_pk, external_package_id);
 
 
 -- Name: tracking_events uq_tracking_events_shipment_key; Type: CONSTRAINT; Schema: fulfillment; Owner: -
@@ -1921,25 +1921,25 @@ ALTER TABLE ONLY linkage.product_links
 -- Name: account_links uq_account_links_triplet; Type: CONSTRAINT; Schema: linkage; Owner: -
 
 ALTER TABLE ONLY linkage.account_links
-    ADD CONSTRAINT uq_account_links_triplet UNIQUE (procurement_account_id, channel_account_id, external_relation_id);
+    ADD CONSTRAINT uq_account_links_triplet UNIQUE (procurement_account_id, shop_pk, external_relation_id);
 
 
 -- Name: link_overrides uq_link_overrides_pivot_validfrom; Type: CONSTRAINT; Schema: linkage; Owner: -
 
 ALTER TABLE ONLY linkage.link_overrides
-    ADD CONSTRAINT uq_link_overrides_pivot_validfrom UNIQUE (procurement_product_id, channel_product_id, valid_from);
+    ADD CONSTRAINT uq_link_overrides_pivot_validfrom UNIQUE (procurement_product_id, spu_pk, valid_from);
 
 
 -- Name: product_links uq_product_links_pivot_validfrom; Type: CONSTRAINT; Schema: linkage; Owner: -
 
 ALTER TABLE ONLY linkage.product_links
-    ADD CONSTRAINT uq_product_links_pivot_validfrom UNIQUE (procurement_product_id, channel_product_id, valid_from);
+    ADD CONSTRAINT uq_product_links_pivot_validfrom UNIQUE (procurement_product_id, spu_pk, valid_from);
 
 
 -- Name: variant_links uq_variant_links_pivot_validfrom; Type: CONSTRAINT; Schema: linkage; Owner: -
 
 ALTER TABLE ONLY linkage.variant_links
-    ADD CONSTRAINT uq_variant_links_pivot_validfrom UNIQUE (procurement_product_variant_id, channel_product_variant_id, valid_from);
+    ADD CONSTRAINT uq_variant_links_pivot_validfrom UNIQUE (procurement_product_variant_id, sku_pk, valid_from);
 
 
 -- Name: variant_links variant_links_pkey; Type: CONSTRAINT; Schema: linkage; Owner: -
@@ -2173,13 +2173,13 @@ ALTER TABLE ONLY reporting.shipment_tracking_summary
 -- Name: product_cost_snapshots uq_cost_snapshots_pivot_version; Type: CONSTRAINT; Schema: reporting; Owner: -
 
 ALTER TABLE ONLY reporting.product_cost_snapshots
-    ADD CONSTRAINT uq_cost_snapshots_pivot_version UNIQUE (channel_product_id, valid_from, calculation_version);
+    ADD CONSTRAINT uq_cost_snapshots_pivot_version UNIQUE (spu_pk, valid_from, calculation_version);
 
 
 -- Name: product_profit_daily uq_profit_daily_pivot_version; Type: CONSTRAINT; Schema: reporting; Owner: -
 
 ALTER TABLE ONLY reporting.product_profit_daily
-    ADD CONSTRAINT uq_profit_daily_pivot_version UNIQUE (channel_product_id, profit_date, calculation_version);
+    ADD CONSTRAINT uq_profit_daily_pivot_version UNIQUE (spu_pk, profit_date, calculation_version);
 
 
 -- Name: shipment_tracking_summary uq_tracking_summary_shipment_version; Type: CONSTRAINT; Schema: reporting; Owner: -
@@ -2212,7 +2212,7 @@ CREATE INDEX IF NOT EXISTS ix_cases_case_type_status ON after_sales.cases USING 
 
 -- Name: ix_cases_sales_order; Type: INDEX; Schema: after_sales; Owner: -
 
-CREATE INDEX IF NOT EXISTS ix_cases_sales_order ON after_sales.cases USING btree (sales_order_id);
+CREATE INDEX IF NOT EXISTS ix_cases_sales_order ON after_sales.cases USING btree (order_pk);
 
 
 -- Name: idx_analytics_audit_created; Type: INDEX; Schema: analytics; Owner: -
@@ -2255,29 +2255,29 @@ CREATE INDEX IF NOT EXISTS idx_analytics_records_request ON analytics.ad_records
 CREATE INDEX IF NOT EXISTS idx_analytics_records_scope ON analytics.ad_records USING btree (seller_id, advertiser_id, storage_key, campaign_id, day);
 
 
--- Name: ix_channel_accounts_status; Type: INDEX; Schema: commerce; Owner: -
+-- Name: ix_shops_status; Type: INDEX; Schema: commerce; Owner: -
 
-CREATE INDEX IF NOT EXISTS ix_channel_accounts_status ON commerce.channel_accounts USING btree (status);
+CREATE INDEX IF NOT EXISTS ix_shops_status ON commerce.shops USING btree (status);
 
 
--- Name: ix_channel_products_status; Type: INDEX; Schema: commerce; Owner: -
+-- Name: ix_products_spu_status; Type: INDEX; Schema: commerce; Owner: -
 
-CREATE INDEX IF NOT EXISTS ix_channel_products_status ON commerce.channel_products USING btree (status);
+CREATE INDEX IF NOT EXISTS ix_products_spu_status ON commerce.products_spu USING btree (status);
 
 
 -- Name: ix_channel_variants_seller_sku; Type: INDEX; Schema: commerce; Owner: -
 
-CREATE INDEX IF NOT EXISTS ix_channel_variants_seller_sku ON commerce.channel_product_variants USING btree (seller_sku);
+CREATE INDEX IF NOT EXISTS ix_channel_variants_seller_sku ON commerce.products_sku USING btree (seller_sku);
 
 
 -- Name: ix_sales_order_lines_channel_product; Type: INDEX; Schema: commerce; Owner: -
 
-CREATE INDEX IF NOT EXISTS ix_sales_order_lines_channel_product ON commerce.sales_order_lines USING btree (channel_product_id);
+CREATE INDEX IF NOT EXISTS ix_sales_order_lines_channel_product ON commerce.sales_order_lines USING btree (spu_pk);
 
 
 -- Name: ix_sales_order_lines_channel_variant; Type: INDEX; Schema: commerce; Owner: -
 
-CREATE INDEX IF NOT EXISTS ix_sales_order_lines_channel_variant ON commerce.sales_order_lines USING btree (channel_product_variant_id);
+CREATE INDEX IF NOT EXISTS ix_sales_order_lines_channel_variant ON commerce.sales_order_lines USING btree (sku_pk);
 
 
 -- Name: ix_sales_orders_paid_at; Type: INDEX; Schema: commerce; Owner: -
@@ -2317,7 +2317,7 @@ CREATE INDEX IF NOT EXISTS ix_settlement_txn_order_line ON finance.settlement_tr
 
 -- Name: ix_settlement_txn_sales_order; Type: INDEX; Schema: finance; Owner: -
 
-CREATE INDEX IF NOT EXISTS ix_settlement_txn_sales_order ON finance.settlement_transactions USING btree (sales_order_id);
+CREATE INDEX IF NOT EXISTS ix_settlement_txn_sales_order ON finance.settlement_transactions USING btree (order_pk);
 
 
 -- Name: ix_shipments_status; Type: INDEX; Schema: fulfillment; Owner: -
@@ -2392,7 +2392,7 @@ CREATE INDEX IF NOT EXISTS ix_link_overrides_decision ON linkage.link_overrides 
 
 -- Name: ix_product_links_channel_product; Type: INDEX; Schema: linkage; Owner: -
 
-CREATE INDEX IF NOT EXISTS ix_product_links_channel_product ON linkage.product_links USING btree (channel_product_id);
+CREATE INDEX IF NOT EXISTS ix_product_links_channel_product ON linkage.product_links USING btree (spu_pk);
 
 
 -- Name: ix_product_links_status; Type: INDEX; Schema: linkage; Owner: -
@@ -2407,7 +2407,7 @@ CREATE INDEX IF NOT EXISTS ix_variant_links_validity ON linkage.variant_links US
 
 -- Name: ix_manual_costs_channel_product_valid; Type: INDEX; Schema: procurement; Owner: -
 
-CREATE INDEX IF NOT EXISTS ix_manual_costs_channel_product_valid ON procurement.manual_product_costs USING btree (channel_product_id, valid_from);
+CREATE INDEX IF NOT EXISTS ix_manual_costs_channel_product_valid ON procurement.manual_product_costs USING btree (spu_pk, valid_from);
 
 
 -- Name: ix_procurement_accounts_status; Type: INDEX; Schema: procurement; Owner: -
@@ -2442,17 +2442,17 @@ CREATE INDEX IF NOT EXISTS ix_purchase_orders_status ON procurement.purchase_ord
 
 -- Name: ix_spu_images_account_uploaded; Type: INDEX; Schema: procurement; Owner: -
 
-CREATE INDEX IF NOT EXISTS ix_spu_images_account_uploaded ON procurement.spu_images USING btree (channel_account_id, uploaded_at DESC) WHERE (deleted_at IS NULL);
+CREATE INDEX IF NOT EXISTS ix_spu_images_account_uploaded ON procurement.spu_images USING btree (shop_pk, uploaded_at DESC) WHERE (deleted_at IS NULL);
 
 
 -- Name: ix_spu_images_product_status; Type: INDEX; Schema: procurement; Owner: -
 
-CREATE INDEX IF NOT EXISTS ix_spu_images_product_status ON procurement.spu_images USING btree (channel_product_id, status) WHERE (deleted_at IS NULL);
+CREATE INDEX IF NOT EXISTS ix_spu_images_product_status ON procurement.spu_images USING btree (spu_pk, status) WHERE (deleted_at IS NULL);
 
 
 -- Name: uq_manual_costs_one_open; Type: INDEX; Schema: procurement; Owner: -
 
-CREATE UNIQUE INDEX uq_manual_costs_one_open ON procurement.manual_product_costs USING btree (channel_product_id) WHERE (valid_to IS NULL);
+CREATE UNIQUE INDEX uq_manual_costs_one_open ON procurement.manual_product_costs USING btree (spu_pk) WHERE (valid_to IS NULL);
 
 
 -- Name: idx_cancellations_create_time; Type: INDEX; Schema: public; Owner: -
@@ -2700,19 +2700,19 @@ CREATE OR REPLACE TRIGGER trg_analytics_ad_records_touch BEFORE UPDATE ON analyt
 CREATE OR REPLACE TRIGGER trg_analytics_ad_shop_timezones_touch BEFORE UPDATE ON analytics.ad_shop_timezones FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
--- Name: channel_accounts trg_commerce_channel_accounts_touch; Type: TRIGGER; Schema: commerce; Owner: -
+-- Name: shops trg_commerce_shops_touch; Type: TRIGGER; Schema: commerce; Owner: -
 
-CREATE OR REPLACE TRIGGER trg_commerce_channel_accounts_touch BEFORE UPDATE ON commerce.channel_accounts FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
--- Name: channel_product_variants trg_commerce_channel_product_variants_touch; Type: TRIGGER; Schema: commerce; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_commerce_channel_product_variants_touch BEFORE UPDATE ON commerce.channel_product_variants FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+CREATE OR REPLACE TRIGGER trg_commerce_shops_touch BEFORE UPDATE ON commerce.shops FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
--- Name: channel_products trg_commerce_channel_products_touch; Type: TRIGGER; Schema: commerce; Owner: -
+-- Name: products_sku trg_commerce_products_sku_touch; Type: TRIGGER; Schema: commerce; Owner: -
 
-CREATE OR REPLACE TRIGGER trg_commerce_channel_products_touch BEFORE UPDATE ON commerce.channel_products FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+CREATE OR REPLACE TRIGGER trg_commerce_products_sku_touch BEFORE UPDATE ON commerce.products_sku FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: products_spu trg_commerce_products_spu_touch; Type: TRIGGER; Schema: commerce; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_commerce_products_spu_touch BEFORE UPDATE ON commerce.products_spu FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
 -- Name: sales_order_lines trg_commerce_sales_order_lines_touch; Type: TRIGGER; Schema: commerce; Owner: -
@@ -2897,10 +2897,10 @@ ALTER TABLE ONLY after_sales.case_lines
     ADD CONSTRAINT case_lines_sales_order_line_id_fkey FOREIGN KEY (sales_order_line_id) REFERENCES commerce.sales_order_lines(id) ON DELETE RESTRICT;
 
 
--- Name: cases cases_channel_account_id_fkey; Type: FK CONSTRAINT; Schema: after_sales; Owner: -
+-- Name: cases cases_shop_pk_fkey; Type: FK CONSTRAINT; Schema: after_sales; Owner: -
 
 ALTER TABLE ONLY after_sales.cases
-    ADD CONSTRAINT cases_channel_account_id_fkey FOREIGN KEY (channel_account_id) REFERENCES commerce.channel_accounts(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT cases_shop_pk_fkey FOREIGN KEY (shop_pk) REFERENCES commerce.shops(id) ON DELETE RESTRICT;
 
 
 -- Name: cases cases_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: after_sales; Owner: -
@@ -2909,52 +2909,52 @@ ALTER TABLE ONLY after_sales.cases
     ADD CONSTRAINT cases_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
 
 
--- Name: cases cases_sales_order_id_fkey; Type: FK CONSTRAINT; Schema: after_sales; Owner: -
+-- Name: cases cases_order_pk_fkey; Type: FK CONSTRAINT; Schema: after_sales; Owner: -
 
 ALTER TABLE ONLY after_sales.cases
-    ADD CONSTRAINT cases_sales_order_id_fkey FOREIGN KEY (sales_order_id) REFERENCES commerce.sales_orders(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT cases_order_pk_fkey FOREIGN KEY (order_pk) REFERENCES commerce.sales_orders(id) ON DELETE RESTRICT;
 
 
--- Name: channel_accounts channel_accounts_credential_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+-- Name: shops shops_credential_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
 
-ALTER TABLE ONLY commerce.channel_accounts
-    ADD CONSTRAINT channel_accounts_credential_id_fkey FOREIGN KEY (credential_id) REFERENCES integration.credentials(id) ON DELETE SET NULL;
-
-
--- Name: channel_product_variants channel_product_variants_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
-
-ALTER TABLE ONLY commerce.channel_product_variants
-    ADD CONSTRAINT channel_product_variants_channel_product_id_fkey FOREIGN KEY (channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY commerce.shops
+    ADD CONSTRAINT shops_credential_id_fkey FOREIGN KEY (credential_id) REFERENCES integration.credentials(id) ON DELETE SET NULL;
 
 
--- Name: channel_product_variants channel_product_variants_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+-- Name: products_sku products_sku_spu_pk_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
 
-ALTER TABLE ONLY commerce.channel_product_variants
-    ADD CONSTRAINT channel_product_variants_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
-
-
--- Name: channel_products channel_products_channel_account_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
-
-ALTER TABLE ONLY commerce.channel_products
-    ADD CONSTRAINT channel_products_channel_account_id_fkey FOREIGN KEY (channel_account_id) REFERENCES commerce.channel_accounts(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY commerce.products_sku
+    ADD CONSTRAINT products_sku_spu_pk_fkey FOREIGN KEY (spu_pk) REFERENCES commerce.products_spu(id) ON DELETE RESTRICT;
 
 
--- Name: channel_products channel_products_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+-- Name: products_sku products_sku_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
 
-ALTER TABLE ONLY commerce.channel_products
-    ADD CONSTRAINT channel_products_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
-
-
--- Name: sales_order_lines sales_order_lines_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
-
-ALTER TABLE ONLY commerce.sales_order_lines
-    ADD CONSTRAINT sales_order_lines_channel_product_id_fkey FOREIGN KEY (channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE SET NULL;
+ALTER TABLE ONLY commerce.products_sku
+    ADD CONSTRAINT products_sku_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
 
 
--- Name: sales_order_lines sales_order_lines_channel_product_variant_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+-- Name: products_spu products_spu_shop_pk_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.products_spu
+    ADD CONSTRAINT products_spu_shop_pk_fkey FOREIGN KEY (shop_pk) REFERENCES commerce.shops(id) ON DELETE RESTRICT;
+
+
+-- Name: products_spu products_spu_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.products_spu
+    ADD CONSTRAINT products_spu_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
+
+
+-- Name: sales_order_lines sales_order_lines_spu_pk_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
 
 ALTER TABLE ONLY commerce.sales_order_lines
-    ADD CONSTRAINT sales_order_lines_channel_product_variant_id_fkey FOREIGN KEY (channel_product_variant_id) REFERENCES commerce.channel_product_variants(id) ON DELETE SET NULL;
+    ADD CONSTRAINT sales_order_lines_spu_pk_fkey FOREIGN KEY (spu_pk) REFERENCES commerce.products_spu(id) ON DELETE SET NULL;
+
+
+-- Name: sales_order_lines sales_order_lines_sku_pk_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.sales_order_lines
+    ADD CONSTRAINT sales_order_lines_sku_pk_fkey FOREIGN KEY (sku_pk) REFERENCES commerce.products_sku(id) ON DELETE SET NULL;
 
 
 -- Name: sales_order_lines sales_order_lines_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
@@ -2963,16 +2963,16 @@ ALTER TABLE ONLY commerce.sales_order_lines
     ADD CONSTRAINT sales_order_lines_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
 
 
--- Name: sales_order_lines sales_order_lines_sales_order_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+-- Name: sales_order_lines sales_order_lines_order_pk_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
 
 ALTER TABLE ONLY commerce.sales_order_lines
-    ADD CONSTRAINT sales_order_lines_sales_order_id_fkey FOREIGN KEY (sales_order_id) REFERENCES commerce.sales_orders(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT sales_order_lines_order_pk_fkey FOREIGN KEY (order_pk) REFERENCES commerce.sales_orders(id) ON DELETE RESTRICT;
 
 
--- Name: sales_orders sales_orders_channel_account_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+-- Name: sales_orders sales_orders_shop_pk_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
 
 ALTER TABLE ONLY commerce.sales_orders
-    ADD CONSTRAINT sales_orders_channel_account_id_fkey FOREIGN KEY (channel_account_id) REFERENCES commerce.channel_accounts(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT sales_orders_shop_pk_fkey FOREIGN KEY (shop_pk) REFERENCES commerce.shops(id) ON DELETE RESTRICT;
 
 
 -- Name: sales_orders sales_orders_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
@@ -2981,10 +2981,10 @@ ALTER TABLE ONLY commerce.sales_orders
     ADD CONSTRAINT sales_orders_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
 
 
--- Name: payouts payouts_channel_account_id_fkey; Type: FK CONSTRAINT; Schema: finance; Owner: -
+-- Name: payouts payouts_shop_pk_fkey; Type: FK CONSTRAINT; Schema: finance; Owner: -
 
 ALTER TABLE ONLY finance.payouts
-    ADD CONSTRAINT payouts_channel_account_id_fkey FOREIGN KEY (channel_account_id) REFERENCES commerce.channel_accounts(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT payouts_shop_pk_fkey FOREIGN KEY (shop_pk) REFERENCES commerce.shops(id) ON DELETE RESTRICT;
 
 
 -- Name: payouts payouts_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: finance; Owner: -
@@ -3023,10 +3023,10 @@ ALTER TABLE ONLY finance.settlement_transactions
     ADD CONSTRAINT settlement_transactions_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
 
 
--- Name: settlement_transactions settlement_transactions_sales_order_id_fkey; Type: FK CONSTRAINT; Schema: finance; Owner: -
+-- Name: settlement_transactions settlement_transactions_order_pk_fkey; Type: FK CONSTRAINT; Schema: finance; Owner: -
 
 ALTER TABLE ONLY finance.settlement_transactions
-    ADD CONSTRAINT settlement_transactions_sales_order_id_fkey FOREIGN KEY (sales_order_id) REFERENCES commerce.sales_orders(id) ON DELETE SET NULL;
+    ADD CONSTRAINT settlement_transactions_order_pk_fkey FOREIGN KEY (order_pk) REFERENCES commerce.sales_orders(id) ON DELETE SET NULL;
 
 
 -- Name: settlement_transactions settlement_transactions_sales_order_line_id_fkey; Type: FK CONSTRAINT; Schema: finance; Owner: -
@@ -3059,10 +3059,10 @@ ALTER TABLE ONLY fulfillment.shipments
     ADD CONSTRAINT shipments_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
 
 
--- Name: shipments shipments_sales_order_id_fkey; Type: FK CONSTRAINT; Schema: fulfillment; Owner: -
+-- Name: shipments shipments_order_pk_fkey; Type: FK CONSTRAINT; Schema: fulfillment; Owner: -
 
 ALTER TABLE ONLY fulfillment.shipments
-    ADD CONSTRAINT shipments_sales_order_id_fkey FOREIGN KEY (sales_order_id) REFERENCES commerce.sales_orders(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT shipments_order_pk_fkey FOREIGN KEY (order_pk) REFERENCES commerce.sales_orders(id) ON DELETE RESTRICT;
 
 
 -- Name: tracking_events tracking_events_shipment_id_fkey; Type: FK CONSTRAINT; Schema: fulfillment; Owner: -
@@ -3083,10 +3083,10 @@ ALTER TABLE ONLY integration.sync_jobs
     ADD CONSTRAINT sync_jobs_credential_id_fkey FOREIGN KEY (credential_id) REFERENCES integration.credentials(id) ON DELETE SET NULL;
 
 
--- Name: account_links account_links_channel_account_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
+-- Name: account_links account_links_shop_pk_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
 
 ALTER TABLE ONLY linkage.account_links
-    ADD CONSTRAINT account_links_channel_account_id_fkey FOREIGN KEY (channel_account_id) REFERENCES commerce.channel_accounts(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT account_links_shop_pk_fkey FOREIGN KEY (shop_pk) REFERENCES commerce.shops(id) ON DELETE RESTRICT;
 
 
 -- Name: account_links account_links_procurement_account_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
@@ -3113,10 +3113,10 @@ ALTER TABLE ONLY linkage.link_evidence
     ADD CONSTRAINT link_evidence_variant_link_id_fkey FOREIGN KEY (variant_link_id) REFERENCES linkage.variant_links(id) ON DELETE SET NULL;
 
 
--- Name: link_issues link_issues_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
+-- Name: link_issues link_issues_spu_pk_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
 
 ALTER TABLE ONLY linkage.link_issues
-    ADD CONSTRAINT link_issues_channel_product_id_fkey FOREIGN KEY (channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE SET NULL;
+    ADD CONSTRAINT link_issues_spu_pk_fkey FOREIGN KEY (spu_pk) REFERENCES commerce.products_spu(id) ON DELETE SET NULL;
 
 
 -- Name: link_issues link_issues_procurement_product_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
@@ -3125,10 +3125,10 @@ ALTER TABLE ONLY linkage.link_issues
     ADD CONSTRAINT link_issues_procurement_product_id_fkey FOREIGN KEY (procurement_product_id) REFERENCES procurement.procurement_products(id) ON DELETE SET NULL;
 
 
--- Name: link_overrides link_overrides_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
+-- Name: link_overrides link_overrides_spu_pk_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
 
 ALTER TABLE ONLY linkage.link_overrides
-    ADD CONSTRAINT link_overrides_channel_product_id_fkey FOREIGN KEY (channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT link_overrides_spu_pk_fkey FOREIGN KEY (spu_pk) REFERENCES commerce.products_spu(id) ON DELETE RESTRICT;
 
 
 -- Name: link_overrides link_overrides_procurement_product_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
@@ -3137,10 +3137,10 @@ ALTER TABLE ONLY linkage.link_overrides
     ADD CONSTRAINT link_overrides_procurement_product_id_fkey FOREIGN KEY (procurement_product_id) REFERENCES procurement.procurement_products(id) ON DELETE RESTRICT;
 
 
--- Name: product_links product_links_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
+-- Name: product_links product_links_spu_pk_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
 
 ALTER TABLE ONLY linkage.product_links
-    ADD CONSTRAINT product_links_channel_product_id_fkey FOREIGN KEY (channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT product_links_spu_pk_fkey FOREIGN KEY (spu_pk) REFERENCES commerce.products_spu(id) ON DELETE RESTRICT;
 
 
 -- Name: product_links product_links_procurement_product_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
@@ -3155,10 +3155,10 @@ ALTER TABLE ONLY linkage.product_links
     ADD CONSTRAINT product_links_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
 
 
--- Name: variant_links variant_links_channel_product_variant_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
+-- Name: variant_links variant_links_sku_pk_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
 
 ALTER TABLE ONLY linkage.variant_links
-    ADD CONSTRAINT variant_links_channel_product_variant_id_fkey FOREIGN KEY (channel_product_variant_id) REFERENCES commerce.channel_product_variants(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT variant_links_sku_pk_fkey FOREIGN KEY (sku_pk) REFERENCES commerce.products_sku(id) ON DELETE RESTRICT;
 
 
 -- Name: variant_links variant_links_procurement_product_variant_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
@@ -3173,10 +3173,10 @@ ALTER TABLE ONLY linkage.variant_links
     ADD CONSTRAINT variant_links_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
 
 
--- Name: manual_product_costs manual_product_costs_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
+-- Name: manual_product_costs manual_product_costs_spu_pk_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
 
 ALTER TABLE ONLY procurement.manual_product_costs
-    ADD CONSTRAINT manual_product_costs_channel_product_id_fkey FOREIGN KEY (channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT manual_product_costs_spu_pk_fkey FOREIGN KEY (spu_pk) REFERENCES commerce.products_spu(id) ON DELETE RESTRICT;
 
 
 -- Name: procurement_accounts procurement_accounts_credential_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
@@ -3245,16 +3245,16 @@ ALTER TABLE ONLY procurement.purchase_orders
     ADD CONSTRAINT purchase_orders_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
 
 
--- Name: spu_images spu_images_channel_account_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
+-- Name: spu_images spu_images_shop_pk_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
 
 ALTER TABLE ONLY procurement.spu_images
-    ADD CONSTRAINT spu_images_channel_account_id_fkey FOREIGN KEY (channel_account_id) REFERENCES commerce.channel_accounts(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT spu_images_shop_pk_fkey FOREIGN KEY (shop_pk) REFERENCES commerce.shops(id) ON DELETE RESTRICT;
 
 
--- Name: spu_images spu_images_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
+-- Name: spu_images spu_images_spu_pk_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
 
 ALTER TABLE ONLY procurement.spu_images
-    ADD CONSTRAINT spu_images_channel_product_id_fkey FOREIGN KEY (channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT spu_images_spu_pk_fkey FOREIGN KEY (spu_pk) REFERENCES commerce.products_spu(id) ON DELETE RESTRICT;
 
 
 -- Name: spu_images spu_images_uploaded_by_key_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
@@ -3263,16 +3263,16 @@ ALTER TABLE ONLY procurement.spu_images
     ADD CONSTRAINT spu_images_uploaded_by_key_id_fkey FOREIGN KEY (uploaded_by_key_id) REFERENCES security.api_keys(id) ON DELETE SET NULL;
 
 
--- Name: product_cost_snapshots product_cost_snapshots_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: reporting; Owner: -
+-- Name: product_cost_snapshots product_cost_snapshots_spu_pk_fkey; Type: FK CONSTRAINT; Schema: reporting; Owner: -
 
 ALTER TABLE ONLY reporting.product_cost_snapshots
-    ADD CONSTRAINT product_cost_snapshots_channel_product_id_fkey FOREIGN KEY (channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT product_cost_snapshots_spu_pk_fkey FOREIGN KEY (spu_pk) REFERENCES commerce.products_spu(id) ON DELETE RESTRICT;
 
 
--- Name: product_profit_daily product_profit_daily_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: reporting; Owner: -
+-- Name: product_profit_daily product_profit_daily_spu_pk_fkey; Type: FK CONSTRAINT; Schema: reporting; Owner: -
 
 ALTER TABLE ONLY reporting.product_profit_daily
-    ADD CONSTRAINT product_profit_daily_channel_product_id_fkey FOREIGN KEY (channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT product_profit_daily_spu_pk_fkey FOREIGN KEY (spu_pk) REFERENCES commerce.products_spu(id) ON DELETE RESTRICT;
 
 
 -- Name: shipment_tracking_summary shipment_tracking_summary_shipment_id_fkey; Type: FK CONSTRAINT; Schema: reporting; Owner: -
