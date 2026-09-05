@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -39,6 +39,7 @@ class JobResult:
     rows_inserted: int = 0
     rows_updated: int = 0
     rows_failed: int = 0
+    rows_image_fetch_failed: int = 0
     cursor: int | str | None = None  # watermark value to write post-run
 
 
@@ -74,7 +75,7 @@ def finish_sync_job(
     error_message: str | None = None,
 ) -> None:
     """Update the sync_jobs row with final counters / status."""
-    row.finished_at = datetime.now(timezone.utc)
+    row.finished_at = datetime.now(UTC)
     row.status = status
     row.rows_total = result.rows_total
     row.rows_inserted = result.rows_inserted
@@ -103,7 +104,7 @@ def run_with_sync_job(
     sync_row = start_sync_job(session, job_name=job_name, credential_id=credential_id)
     try:
         result = inner(session, **(inner_kwargs or {}))
-    except Exception as exc:  # noqa: BLE001 — we want broad capture for the bookkeeping row
+    except Exception as exc:
         finish_sync_job(
             session,
             sync_row,
@@ -120,7 +121,7 @@ def run_with_sync_job(
 
 __all__ = [
     "JobResult",
-    "start_sync_job",
     "finish_sync_job",
     "run_with_sync_job",
+    "start_sync_job",
 ]
