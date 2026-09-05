@@ -6,8 +6,6 @@ analytics_sync 孤岛包），2026-09-02 随 v2 化改写
 
 - 路径 /v1/analytics/sync/* → /v2/analytics/sync/*
 - monkeypatch 目标 analytics_sync.app → tts_erp_v2.api.v2.analytics
-- 审计回读 analytics_sync.pg_repositories.connect → db_engine +
-  analytics.ad_audit_log
 - 删除 session 级 autouse ALTER fixture（alembic 0004 单轨拥有 schema）
 
 锁定的契约（生产事故回归点）：
@@ -17,36 +15,40 @@ analytics_sync 孤岛包），2026-09-02 随 v2 化改写
    丢 input/ctx/url）。
 3. errors[] 是 SCHEMA_INVALID 专属 —— MALFORMED_JSON /
    UNSUPPORTED_PROTOCOL_VERSION 不得带该字段。
-4. 审计行 error_message 与 stderr 是同一份 ≤500 字符消毒载荷。
+4. 审计（迁移后=文件日志）：拒绝路径也走 ``tts_erp_v2.analytics.ingest``
+   logger 单行 key=value，message 与 stderr 同一份 ≤500 字符消毒载荷。
 
-数据隔离：全部 TEST_ 哨兵；audit 行按 request_id/path 前缀清理
-（写审计走独立连接 commit，逃出测试 savepoint）。
+2026-09-05 reorg（tech-doc/analytics/reorg-plan.md 决策 #4）：
+- 删 ``analytics.ad_audit_log``（DB 表）,审计职责迁出,改 logger
+  ``tts_erp_v2.analytics.ingest`` 单行日志。
+- 原 ``_cleanup_audit_rows`` fixture（DELETE FROM ad_audit_log）已删:
+  audit 表 drop 后无需清理。
+- 原 ``test_schema_invalid_persists_error_message_in_audit_log``（断言
+  DB 行）改为 ``test_schema_invalid_persists_message_in_ingest_log``
+  （caplog 断言日志行）——消息消毒契约保留。
+
+数据隔离：全部 TEST_ 哨兵；本文件不动 DB 表（audit 改日志了）。
 """
 
 from __future__ import annotations
 
 import json
+import logging
 
 import pytest
-from sqlalchemy import text
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
 _BATCHES = "/v2/analytics/sync/dumps"
 
 
+# 2026-09-05 reorg:ad_audit_log 表 drop,无需 cleanup fixture。
+# 保留 autouse 占位（若未来需要 DB 隔离,在此实现）。
 @pytest.fixture(autouse=True)
-def _cleanup_audit_rows(db_engine):
-    """清掉本文件写进 analytics.ad_audit_log 的 TEST_ 行。"""
+def _no_db_cleanup_needed():  # noqa: D401 — intentional no-op for reorg transition
+    """2026-09-05 reorg 前用此位清 ``analytics.ad_audit_log`` 的 TEST_ 行；
+    表已 drop,fixture 改为 no-op,保留 autouse 是为后续扩展留挂点。"""
     yield
-    with db_engine.begin() as conn:
-        # pi-lens-ignore: python-sql-injection
-        conn.execute(
-            text(
-                "DELETE FROM analytics.ad_audit_log "
-                "WHERE request_id LIKE 'TEST_%' OR path LIKE '%TEST_%'"
-            )
-        )
 
 
 def _valid_dump() -> dict:
@@ -310,19 +312,22 @@ def test_non_schema_400_paths_omit_errors_field(api_client, readwrite_key):
     assert "errors" not in r2.json()
 
 
-def test_schema_invalid_persists_error_message_in_audit_log(
+def test_schema_invalid_persists_message_in_ingest_log(
     api_client,
     readwrite_key,
-    db_engine,
+    caplog,
 ):
-    """The audit row must carry the same sanitized Pydantic message
-    that goes to stderr — ops need a queryable second copy after the
-    stderr log rotates.
+    """The ingest logger line must carry the same sanitized Pydantic message
+    that goes to stderr — 2026-09-05 reorg 前是 DB 行（ad_audit_log）,
+    现在改 logger ``tts_erp_v2.analytics.ingest`` 单行 key=value。
 
-    v2 化后 write_audit 在同步 handler 内同步提交（独立 engine 连接），
-    响应返回时审计行已落库，无需旧版的轮询等待。
+    锁定的契约：
+    - 一次 SCHEMA_INVALID 拒绝 → 一行 logger.warning 行
+    - error_code=SCHEMA_INVALID, message 与 stderr 同款 ≤500 字符消毒载荷
+    - message 含 field-level 提示（capturedAt / timezone）
     """
     request_id = "TEST_req-audit-error-message"
+    caplog.set_level(logging.WARNING, logger="tts_erp_v2.analytics.ingest")
     r = api_client.post(
         _BATCHES,
         json=_payload(capturedAt="2026-08-30T18:43:00"),
@@ -333,23 +338,21 @@ def test_schema_invalid_persists_error_message_in_audit_log(
     )
     assert r.status_code == 400
 
-    with db_engine.begin() as conn:
-        # pi-lens-ignore: python-sql-injection
-        row = conn.execute(
-            text(
-                "SELECT error_code, error_message FROM analytics.ad_audit_log "
-                "WHERE request_id = :rid ORDER BY created_at DESC LIMIT 1"
-            ),
-            {"rid": request_id},
-        ).fetchone()
-
-    assert row is not None, "audit row missing for SCHEMA_INVALID request"
-    error_code, error_message = row
-    assert error_code == "SCHEMA_INVALID"
-    assert error_message is not None
-    # The sanitized stderr line is whitespace-flattened and capped at
-    # 500 chars; same payload goes to the DB column.
-    assert "capturedAt" in error_message
-    assert "timezone" in error_message
-    # No newlines (stderr contract is single-line grep-friendly).
-    assert "\n" not in error_message
+    matches = [
+        rec
+        for rec in caplog.records
+        if rec.name == "tts_erp_v2.analytics.ingest"
+        and rec.levelno == logging.WARNING
+        and f"request_id={request_id}" in rec.getMessage()
+        and "error_code=SCHEMA_INVALID" in rec.getMessage()
+    ]
+    assert matches, (
+        "ingest logger WARNING line missing for SCHEMA_INVALID request; "
+        f"records={[r.getMessage() for r in caplog.records]}"
+    )
+    msg = matches[-1].getMessage()
+    # sanitized: whitespace-flattened, ≤500 chars, no newlines
+    assert "capturedAt" in msg
+    assert "timezone" in msg
+    assert "\n" not in msg
+    assert len(msg) <= 500 + 200  # key=value 前缀 + ≤500 message

@@ -64,6 +64,25 @@
 - ✅ `ad_daily_completeness`（简化为 `captured_at` 时间戳）
 - ✅ `ad_shop_timezones`（永久保留，配置类）
 
+### D5. schema 3 → 1 张表（2026-09-05 reorg,tech-doc/analytics/reorg-plan.md）
+
+D1-D4 之后的第二个收敛动作,在 dump 协议稳态下进一步的清理：
+
+- ❌ `ad_records` —— 生产零 SELECT（仅 INSERT + retention 90d DELETE）,
+  与 ``ad_raw.response.body`` 重复存同一 payload,删。
+- ❌ `ad_daily_completeness` —— D3 后 has-data 已查 ``ad_raw``,
+  该表不参与协议、仅每次 dump 第三次写放大,删。
+- ❌ `ad_shop_timezones` —— 生产读写路径均死（详见 reorg-plan §5.5）,
+  11 行是 v1 cursor 协议遗留,删。配置概念随需随取,不占 schema。
+- ❌ `ad_audit_log` —— 审计是日志不是数据,生产零 SELECT;与
+  ``middleware/access_log.py``（全站每请求一行 stdout.log）重叠。
+  改为 ``tts_erp_v2.analytics.ingest`` logger 单行 key=value 结构化
+  文件日志。
+- ✅ ``ad_raw`` —— 唯一保留的表（source-of-truth）。
+
+对应 migration：``alembic/versions/0007_analytics_reorg_drop_dead_tables.py``,
+代码改动详见 reorg-plan §5。Chrome 扩展协议不变。
+
 ---
 
 ## 3. 完整架构
@@ -83,11 +102,12 @@ plugin:
                    → 标记 done
   6. 触发: collection alarm (单 fire, 30s 节奏) + 手动按钮
 
-server (/dumps, 1 事务写 3 张表):
-  1. INSERT ad_raw (ON CONFLICT (5 col) DO UPDATE)
-  2. INSERT ad_records (ON CONFLICT (5 col) DO UPDATE) ← 派生
-  3. UPSERT ad_daily_completeness (captured_at=now())
-  4. COMMIT
+server (/dumps, 1 事务写 **1** 张表 —— 2026-09-05 reorg 后由 3 张缩为 1 张）:
+  1. INSERT ad_raw (ON CONFLICT (5 col) DO UPDATE, RETURNING xmax=0 判 inserted/duplicate)
+  2. COMMIT
+
+（reorg 前写 ad_raw + ad_records + ad_daily_completeness 三张；2026-09-05
+ 之后 ad_records / ad_daily_completeness 已 drop —— 详见 reorg-plan §5.3）
 
 server (/cursor has-data):
   SELECT 1 FROM analytics.ad_raw
@@ -102,7 +122,7 @@ server (/cursor has-data):
 | 表 | unique 列 | 为什么不一样 |
 | --- | --- | --- |
 | `ad_raw` | `(seller_id, advertiser_id, endpoint, day, campaign_id)` | endpoint = plugin 抓的原始 path |
-| `ad_records` | `(seller_id, advertiser_id, storage_key, campaign_id, day)` | storage_key = 从 endpoint 推导的 enum |
+| `ad_records` | `(seller_id, advertiser_id, storage_key, campaign_id, day)` | storage_key = 从 endpoint 推导的 enum（**2026-09-05 已 drop**） |
 
 **逻辑等价**：`STORAGE_KEY_BY_PATH[endpoint] = storage_key`（4 路径 1:1 映射）。两个表的 5 元组指向同一个数据 unit。
 
@@ -306,12 +326,14 @@ Response 200:
 - [ ] tts-erp: /batches 路由删
 - [ ] chrome plugin: 新 build 部署到 Chrome Web Store
 - [ ] nginx: 不动(路径不变 `/v2/analytics/sync/{cursor,dumps}`)
-- [ ] smoke test: 真实 plugin dump 一个 (scope, endpoint, day),verify ad_raw + ad_records + ad_daily_completeness 各 1 行
-- [ ] smoke test: 重复 dump 同一个 (scope, endpoint, day),verify 3 张表都是 1 行(ON CONFLICT DO UPDATE)
+- [ ] smoke test: 真实 plugin dump 一个 (scope, endpoint, day),verify ad_raw +1 行（2026-09-05 reorg 后仅 1 张表）
+- [ ] smoke test: 重复 dump 同一个 (scope, endpoint, day),verify ad_raw 1 行(ON CONFLICT DO UPDATE) + 返回 duplicate
 - [ ] smoke test: 跨 day dump,verify has-data 返 true(同 day 重复),false(新 day)
-- [ ] 监控: audit_log endpoint 字段 = "dumps" vs "cursor" 区分
-- [ ] 监控: 24h 内 ad_daily_completeness 写入量 > 0(否则 plugin 没真发 dump)
+- [ ] 监控: ingest logger 24h 内出现 dumps / cursor 行（替代原 audit_log 写入量检查）
 - [ ] 监控: 24h 内 ad_raw 写入量 > 0
-- [ ] 24h 后无 ad_cursors 引用错误日志(老代码清理完)
-- [ ] 24h 后无 ad_daily_pages 引用错误日志
+- [ ] 24h 后无 ad_records / ad_daily_completeness / ad_shop_timezones / ad_audit_log 引用错误日志(老代码清理完)
 - [ ] 24h 后无 /batches 404 之外的 5xx(老 client 完全切走)
+
+> **2026-09-05 reorg 上线补充**（tech-doc/analytics/reorg-plan.md §9）：
+> 同窗口上线迁移 0007 + 代码 + regen schema + 重启 tts-erp + tts-erp-sync。
+> 详见 reorg-plan.md。

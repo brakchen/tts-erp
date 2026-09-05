@@ -9,11 +9,21 @@
   STORAGE_KEY_BY_PATH 从 endpoint 推导（消除 client 端 enum 知识）、
   ad_raw 5 元组 unique (seller_id, advertiser_id, endpoint, day, campaign_id)。
 
+2026-09-05 reorg（tech-doc/analytics/reorg-plan.md 决策 #1-#4）：
+- ad_records / ad_daily_completeness / ad_shop_timezones / ad_audit_log 删
+  除;upsert_dump 缩为单表写（只 INSERT ad_raw）。
+- **审计改文件日志**:`analytics.ad_audit_log` 删,改为 logger
+  ``tts_erp_v2.analytics.ingest`` 单行 key=value 结构化日志。失败路径
+  ``_audit_and_error`` 仍打 stderr（沿用 2026-08-30 事故回归守护点）,
+  并把"再写一条 DB"的 write_audit 换成同一份结构化 log。成功路径也补
+  一行（这是 audit → 日志后唯一会"丢"的信息：成功请求的 records
+  计数,现在落在日志而非 DB 行）。
+
 Handler 结构说明：
 - ``get_cursor`` / ``post_dumps`` 都是同步 def —— v2 惯例（同 commerce/
   reporting）,FastAPI 自动丢线程池。
 - ``post_dumps`` 需要在 Pydantic 解析**之前**拿原始 body（413 尺寸闸 +
-  MALFORMED_JSON 与 SCHEMA_INVALID 的区分），原始 body 只能异步读，
+  MALFORMED_JSON 与 SCHEMA_INVALID 的区分），原始 body 只能异步读,
   因此用 async 依赖 ``_raw_body`` 喂给同步 handler —— handler 本体保持
   同步 + ``Depends(get_session)``,不引入 async session。
 """
@@ -21,11 +31,11 @@ Handler 结构说明：
 from __future__ import annotations
 
 import json
+import logging
 import sys
 import uuid
 from datetime import date, datetime, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
@@ -33,7 +43,6 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.analytics.domain import (
-    DEFAULT_TIMEZONE,
     DumpPayload,
     HasDataResult,
 )
@@ -41,7 +50,6 @@ from tts_erp_v2.analytics.repository import (
     STORAGE_KEY_BY_PATH,
     has_data,
     upsert_dump,
-    write_audit,
 )
 from tts_erp_v2.api.deps import get_session
 
@@ -50,12 +58,75 @@ from tts_erp_v2.api.deps import get_session
 PROTOCOL_VERSION = 2
 SUPPORTED_PROTOCOL_VERSIONS = {1, 2}
 PROTOCOL_VERSION_HEADER = "X-Protocol-Version"
-DEFAULT_BOOTSTRAP_LOOKBACK_DAYS = 30
 MAX_BODY_BYTES = 2 * 1024 * 1024  # 2 MB per protocol §5
 MAX_RESPONSE_DATA_BYTES = 256 * 1024  # cap individual response_data JSON
 
 _PATH_CURSOR = "/v2/analytics/sync/cursor"
 _PATH_DUMPS = "/v2/analytics/sync/dumps"
+
+
+# ─── Logger（审计迁移自 DB → 文件日志）──────────────────────────────
+# 替代原 analytics.ad_audit_log。每条 ingest 请求（含成功与失败路径）一行
+# key=value,字段见 ``_log_ingest_event``。
+#
+# logger name 与项目其它 ingest/audit 日志命名风格一致（参考
+# ``tts_erp_v2.api.v2.auth.login_logger`` / ``access_log.access``）。handler
+# 配置遵循 uvicorn dictConfig（默认走 root logger + systemd stdout/stderr →
+# logs/stdout.log / logs/stderr.log,与 access_log 一致,无需额外 handler）。
+log = logging.getLogger("tts_erp_v2.analytics.ingest")
+
+
+def _log_ingest_event(
+    *,
+    level: int,
+    request_id: str | None,
+    key_prefix: str | None,
+    method: str,
+    path: str,
+    status: int,
+    records_in: int | None = None,
+    records_ok: int | None = None,
+    records_rej: int | None = None,
+    error_code: str | None = None,
+    message: str | None = None,
+) -> None:
+    """Emit a single key=value ingest log line.
+
+    Field contract（与原 ad_audit_log 列 1:1 对齐,确保历史 SQL 查询可
+    用同一组 key grep 重写）:
+
+    - request_id, key_prefix, method, path, status, records_in,
+      records_ok, records_rej, error_code, message.
+    - message 沿用 ``_sanitize_message``（≤500 字符、空白压平,无换行），
+      与 stderr 同一份消毒载荷（2026-08-30 事故回归守护）。
+
+    LogRecord args intentionally omitted — the line is fully formatted in
+    ``msg=`` so it grep-stably includes all fields.
+    """
+    parts: list[str] = [
+        f"request_id={request_id or '-'}",
+        f"key_prefix={key_prefix or '-'}",
+        f"method={method}",
+        f"path={path}",
+        f"status={status}",
+    ]
+    if records_in is not None:
+        parts.append(f"records_in={records_in}")
+    if records_ok is not None:
+        parts.append(f"records_ok={records_ok}")
+    if records_rej is not None:
+        parts.append(f"records_rej={records_rej}")
+    if error_code:
+        parts.append(f"error_code={error_code}")
+    if message:
+        parts.append(f"message={_sanitize_message(message)}")
+    log.log(level, " ".join(parts))
+
+
+def _sanitize_message(message: Any) -> str:
+    """Mirror the previous DB-column + stderr sanitization: whitespace
+    flattened, ≤500 chars, no newlines (single-line grep-friendly)."""
+    return " ".join(str(message).split())[:500]
 
 
 # ─── Scope-grant helper (also used by tests) ──────────────────────────
@@ -188,13 +259,13 @@ def get_cursor(
         seller_id=sellerId,
         advertiser_id=advertiserId,
     ):
-        write_audit(
+        _log_ingest_event(
+            level=logging.WARNING,
             request_id=request_id,
-            endpoint="cursor",
+            key_prefix=key_prefix,
             method="GET",
             path=audit_path,
             status=403,
-            key_prefix=key_prefix,
             error_code="SCOPE_DENIED",
         )
         return _error_response(
@@ -228,13 +299,13 @@ def get_cursor(
             path=audit_path,
         )
 
-    write_audit(
+    _log_ingest_event(
+        level=logging.INFO,
         request_id=request_id,
-        endpoint="cursor",
+        key_prefix=key_prefix,
         method="GET",
         path=audit_path,
         status=200,
-        key_prefix=key_prefix,
         records_in=1,
         records_ok=1 if result.has_data else 0,
     )
@@ -273,7 +344,8 @@ def post_dumps(
     - dumps 字段是单 object（plugin 严禁批量同步）
     - page 隐式 = 1
     - endpoint 必带;server 端 STORAGE_KEY_BY_PATH 推导 storage_key
-    - 单事务写 3 张表（ad_raw + ad_records + ad_daily_completeness）
+    - 单事务写 1 张表（ad_raw）—— 2026-09-05 reorg 后由 3 张缩为 1 张
+      （ad_records / ad_daily_completeness 已删,见 reorg-plan 决策 #1-#2）。
     - 2 MB body 上限（与旧 /batches 保持一致）
     """
     request_id = _request_id_from_headers(request)
@@ -386,13 +458,13 @@ def post_dumps(
         seller_id=payload.scope.sellerId,
         advertiser_id=payload.scope.advertiserId,
     ):
-        write_audit(
-            request_id=request_id,
-            endpoint="dumps",
+        _log_ingest_event(
+            level=logging.WARNING,
+            request_id=payload.requestId or request_id,
+            key_prefix=key_prefix,
             method=method,
             path=path,
             status=403,
-            key_prefix=key_prefix,
             records_in=0,
             records_ok=0,
             records_rej=0,
@@ -467,13 +539,13 @@ def post_dumps(
     except Exception as exc:  # noqa: no-boolean-in-except
         exc_class = type(exc).__name__
         sys.stderr.write(f"[analytics-sync] persistence failure: {exc_class}: {exc}\n")
-        write_audit(
+        _log_ingest_event(
+            level=logging.ERROR,
             request_id=payload.requestId or request_id,
-            endpoint="dumps",
+            key_prefix=key_prefix,
             method=method,
             path=path,
             status=500,
-            key_prefix=key_prefix,
             records_in=1,
             records_ok=0,
             records_rej=0,
@@ -487,13 +559,13 @@ def post_dumps(
             retryable=True,
         )
 
-    write_audit(
+    _log_ingest_event(
+        level=logging.INFO,
         request_id=payload.requestId or request_id,
-        endpoint="dumps",
+        key_prefix=key_prefix,
         method=method,
         path=path,
         status=200,
-        key_prefix=key_prefix,
         records_in=1,
         records_ok=1 if result.status == "inserted" else 0,
         records_rej=0,
@@ -515,19 +587,6 @@ def post_dumps(
 # ─── Helpers ──────────────────────────────────────────────────────────
 
 
-def _today_in_tz(tz_name: str) -> date:
-    try:
-        tz = ZoneInfo(tz_name)
-    except Exception:
-        tz = ZoneInfo(DEFAULT_TIMEZONE)
-    return datetime.now(tz).date()
-
-
-def _subtract_days(d: date, n: int) -> date:
-    """Subtract n days from d."""
-    return d - timedelta(days=n)
-
-
 def _parse_content_length(value: str | None) -> int | None:
     """Content-Length header → int；垃圾值返回 None（调用方跳过预检,
     由实际 body 尺寸检查兜底）。int() 对 isdigit 为真的部分 Unicode
@@ -538,16 +597,6 @@ def _parse_content_length(value: str | None) -> int | None:
         return int(value)
     except ValueError:
         return None
-
-
-def _safe_int(value: str | None, default: int) -> int:
-    """Parse an int from an environment string, returning default on failure."""
-    if value is None:
-        return default
-    try:
-        return max(1, int(value))
-    except ValueError:
-        return default
 
 
 def _request_id_from_headers(request: Request) -> str:
@@ -651,27 +700,26 @@ def _audit_and_error(
     字段级细节）。``message`` 是 Pydantic/JSON 解析描述（字段名 +
     截断输入值），绝不含 headers/token/请求体。换行压平，方便 grep。
 
-    ``structured_errors`` 随响应体 ``errors[]`` 下发，并写入
-    ``analytics.ad_audit_log.error_message``（与 stderr 同一份 ≤500 字符
-    消毒载荷），ops 可在日志轮转后按字段名查历史 400。
-
-    dump architecture 改造后,method/path 来自调用方（"dumps"/"cursor"）
+    2026-09-05 reorg 后：原本的 "再写一条 DB audit_log" 改为结构化
+    文件日志（``_log_ingest_event``），统一走 stderr（与 access_log
+    同源）。同时仍打 stderr 这行（与历史回归守护点 1:1：每次拒绝都
+    有一行 stderr 可 grep）。
     """
-    safe_message = " ".join(str(message).split())[:500]
+    safe_message = _sanitize_message(message)
     sys.stderr.write(
         f"[analytics-sync] reject status={status} code={code} "
         f"request_id={request_id} key_prefix={key_prefix or '-'} "
         f"method={method} path={path} message={safe_message}\n"
     )
-    write_audit(
+    _log_ingest_event(
+        level=logging.WARNING,
         request_id=request_id,
-        endpoint=path.lstrip("/").split("/")[0] if path else "unknown",  # noqa: E501 "dumps" / "cursor" / "unknown"
+        key_prefix=key_prefix,
         method=method,
         path=path,
         status=status,
-        key_prefix=key_prefix,
         error_code=error_code,
-        error_message=safe_message,
+        message=safe_message,
     )
     return _error_response(
         status=status,

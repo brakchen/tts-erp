@@ -32,12 +32,10 @@ DAY = "2026-08-23"
 
 # dump architecture：dump 唯一性 (scope, endpoint, day, campaign_id)
 # cursor has-data 查 ad_raw（不在 ad_cursors）
+# 2026-09-05 reorg 后:analytics schema 仅剩 ad_raw,4 张派生表已 drop。
+# cleanup SQL 由 5 张表缩为 1 张。
 _CLEANUP_SQL = (
-    "DELETE FROM analytics.ad_daily_completeness WHERE seller_id = :s",
-    "DELETE FROM analytics.ad_records WHERE seller_id = :s",
     "DELETE FROM analytics.ad_raw WHERE seller_id = :s",
-    "DELETE FROM analytics.ad_shop_timezones WHERE seller_id = :s",
-    "DELETE FROM analytics.ad_audit_log WHERE path LIKE '%sellerId=TEST_%'",
 )
 
 
@@ -278,9 +276,30 @@ def test_v2_dumps_400_on_unknown_endpoint(api_client, readwrite_key):
     assert r.json()["code"] == "SCHEMA_INVALID"
 
 
-def test_v2_dumps_audit_log_written(api_client, readwrite_key, db_engine):
-    """每次 dump 写一条 audit_log（endpoint='dumps'）。"""
-    api_client.post(
+# 2026-09-05 reorg:ad_audit_log 已删、审计改文件日志——
+# test_v2_dumps_audit_log_written 改写为 caplog 断言 ingest 日志行,
+# 见 test_v2_dumps_emits_ingest_log_line below。
+test_v2_dumps_audit_log_written = None  # type: ignore[assignment]
+
+
+def test_v2_dumps_emits_ingest_log_line(
+    api_client, readwrite_key, caplog
+):
+    """每次 POST /dumps 写一条 ingest logger 单行 key=value（替代 audit_log）。
+
+    2026-09-05 reorg 后 audit 职责从 ``analytics.ad_audit_log``（DB 表）
+    迁到 ``tts_erp_v2.analytics.ingest`` logger（文件）。这里断言：
+    - 一次成功 POST /dumps → caplog 抓到该 logger 一行 INFO log
+    - log 字段包含 method=POST path=/v2/analytics/sync/dumps
+      status=200 records_in=1 records_ok=1 records_rej=0
+    """
+    import logging
+
+    from tts_erp_v2.api.v2 import analytics as analytics_module
+
+    caplog.set_level(logging.INFO, logger="tts_erp_v2.analytics.ingest")
+
+    r = api_client.post(
         "/v2/analytics/sync/dumps",
         headers={"Authorization": f"Bearer {readwrite_key}"},
         json={
@@ -298,17 +317,22 @@ def test_v2_dumps_audit_log_written(api_client, readwrite_key, db_engine):
             },
         },
     )
-    with db_engine.begin() as conn:
-        # noqa: python-sql-injection — 字面量 SQL
-        row = conn.execute(
-            text(
-                "SELECT endpoint, status, records_in FROM analytics.ad_audit_log WHERE endpoint = 'dumps' ORDER BY id DESC LIMIT 1"
-            ),
-        ).first()
-    assert row is not None
-    assert row[0] == "dumps"
-    assert row[1] == 200
-    assert row[2] == 1
+    assert r.status_code == 200
+
+    # 找 method=POST + path=…/dumps + status=200 的一行
+    matches = [
+        rec
+        for rec in caplog.records
+        if rec.name == "tts_erp_v2.analytics.ingest"
+        and "method=POST" in rec.getMessage()
+        and "path=/v2/analytics/sync/dumps" in rec.getMessage()
+        and "status=200" in rec.getMessage()
+    ]
+    assert matches, f"ingest log line for dumps 200 missing; records={[r.getMessage() for r in caplog.records]}"
+    msg = matches[-1].getMessage()
+    assert "records_in=1" in msg
+    assert "records_ok=1" in msg
+    assert "records_rej=0" in msg
 
 
 # ─── envelope ─────────────────────────────────────────────────────

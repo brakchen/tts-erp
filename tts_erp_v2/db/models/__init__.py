@@ -14,11 +14,7 @@ from tts_erp_v2.db.models.after_sales import (
     CaseLine,
 )
 from tts_erp_v2.db.models.analytics import (
-    AdAuditLog,
-    AdDailyCompleteness,
     AdRaw,
-    AdRecord,
-    AdShopTimezone,
 )
 from tts_erp_v2.db.models.commerce import (
     ChannelAccount,
@@ -74,11 +70,7 @@ from tts_erp_v2.db.models.security import ApiKey
 
 __all__ = [
     "AccountLink",
-    "AdAuditLog",
-    "AdDailyCompleteness",
     "AdRaw",
-    "AdRecord",
-    "AdShopTimezone",
     "ApiKey",
     "Base",
     "Case",

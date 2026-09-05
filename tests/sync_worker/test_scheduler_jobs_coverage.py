@@ -64,15 +64,19 @@ EXPECTED_JOB_INTERVALS = {
     "miaoshou.move_collect": 1800,
     "reporting.cost_snapshots": 21600,
     "reporting.profit_daily": 3600,
-    "analytics.retention": 86400,
 }
 
 
 def test_jobs_registry_has_expected_count() -> None:
-    """13 jobs total — keeps us honest if a new one slips in unannounced."""
+    """12 jobs total — keeps us honest if a new one slips in unannounced.
+
+    2026-09-05 reorg: ``analytics.retention`` 已从 JOBS 摘除（见
+    tech-doc/analytics/reorg-plan.md 决策 #1-#4）—— ad_records /
+    ad_audit_log / 等 4 张表 drop 后无对象可 purge。原 13 → 12。
+    """
     # 6 tiktok + 4 system (token + 3 reporting + ... ) — keep the
     # number pinned so we don't drift silently.
-    assert len(JOBS) == 13
+    assert len(JOBS) == 12
 
 
 @pytest.mark.parametrize(

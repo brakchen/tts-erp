@@ -134,7 +134,7 @@ def test_configure_logging_respects_env_override(
         (3600, "1h"),
         (21600, "6h"),  # products + token.refresh
         (86399, "23h"),
-        (86400, "1d"),  # analytics.retention
+        (86400, "1d"),  # day-long job (reporting.profit_daily 等)
         (259200, "3d"),
     ],
 )
@@ -160,7 +160,6 @@ def test_print_jobs_renders_table_without_db(
     assert "tiktok.orders" in captured
     assert "tiktok.products" in captured
     assert "token.refresh" in captured
-    assert "analytics.retention" in captured
 
 
 def test_noop_session_factory_raises_if_called() -> None:
