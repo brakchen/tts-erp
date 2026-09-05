@@ -27,7 +27,7 @@ cookie (see [Browser session login](#browser-session-login)).
 | List shops (→ internal `channel_account_id`) | `GET /v2/commerce/channel-accounts` | readonly |
 | List / get TikTok products (SPU) | `GET /v2/commerce/channel-products[/{id}[/variants]]` | readonly |
 | List / get orders (+ lines) | `GET /v2/commerce/sales-orders[/{id}[/lines]]` | readonly |
-| TikTok Shop product detail (read-through) | `GET /v2/tiktok-shop/products/{product_id}` | readonly |
+| TikTok Shop product detail (read-through) | `GET /v2/tiktok-shop/products/{product_id}` | readonly — see [`tech-doc/api/tiktok-shop-get-product.md`](api/tiktok-shop-get-product.md) |
 | Per-shop order aggregate | `GET /v2/commerce/channel-accounts/{id}/order-stats` | readonly |
 | 妙手↔TikTok product links | `GET /v2/linkage/product-links` | readonly |
 | Link evidence (raw) | `GET /v2/linkage/evidence` | readonly |
@@ -249,52 +249,10 @@ documented in `tts-partner-api-docs/`. Each call resolves the seller's
 credentials via `proxy/token_service.load_credentials()` (key by
 internal `channel_account_id` → upstream `shop_id` → `access_token` +
 `shop_cipher`) and hands the upstream `data` payload back verbatim.
-**No DB caching** — callers that need offline durability should add a
-sync job on top of the proxy layer
-(`tts_erp_v2/proxy/tts_shop/products_api.py`).
 
-| Endpoint | Upstream | Required scope |
-| --- | --- | --- |
-| `GET /v2/tiktok-shop/products/{product_id}` | `GET /product/202309/products/{product_id}` | `seller.product.basic` |
-
-`GET /v2/tiktok-shop/products/{product_id}` (readonly) — fetch one
-product's full details. Query params:
-
-- `channel_account_id` (**required**, `ge=1`) — internal
-  `commerce.channel_accounts.id`. Must be a `platform='tiktok'` row;
-  non-tiktok or unknown ids return 404.
-- `return_under_review_version` (default `false`) — upstream flag; see
-  `tts-partner-api-docs/Get Product.md` for semantics.
-- `return_draft_version` (default `false`) — upstream flag; mutually
-  exclusive with `return_under_review_version` per upstream docs.
-  Passing both yields 422.
-- `locale` (optional, BCP-47) — display locale; `None` → upstream
-  uses the shop default.
-
-Response: the full product dict returned by the upstream (id, title,
-status, audit, brand, category_chains, certifications, skus, package
-dimensions, ...). No Pydantic model — the client controls its own
-consumption of the shape. The envelope `{code, message, request_id}`
-is stripped after the success check.
-
-Error mapping:
-
-- `502` upstream `code != 0` → `{detail: {message, upstream_code,
-  upstream_message, upstream_request_id}}` so callers can branch on
-  the upstream code without re-fetching.
-- `404` unknown `channel_account_id` or missing credentials.
-- `429` upstream rate-limit (exhausted retry budget).
-- `502` upstream auth rejected, upstream HTTP 4xx/5xx, network blip
-  after retries.
-- `500` signing/config error (`TIKTOK_APP_KEY` / `TIKTOK_APP_SECRET`
-  missing).
-
-Example:
-
-```bash
-curl -sS -H "X-API-Key: $KEY" \
-  "http://127.0.0.1:9877/v2/tiktok-shop/products/1729592969712207008?channel_account_id=314"
-```
+| Endpoint | Spec | Upstream | Required upstream scope |
+| --- | --- | --- | --- |
+| `GET /v2/tiktok-shop/products/{product_id}` | [`api/tiktok-shop-get-product.md`](api/tiktok-shop-get-product.md) | `GET /product/202309/products/{product_id}` | `seller.product.basic` |
 
 The other 7 Partner API product-domain GETs in `tts-partner-api-docs/`
 (Listing Prerequisites / Categories / Attributes / Brands / Category

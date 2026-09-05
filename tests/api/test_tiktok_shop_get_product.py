@@ -336,3 +336,79 @@ def test_get_product_500_signing_error(api_client, readonly_key, proxy_stub):
     )
 
     assert r.status_code == 500, r.text
+
+
+# ---------------------------------------------------------------------------
+# OpenAPI metadata — regression guard so a future refactor doesn't drop the
+# contract docs from /docs Swagger UI.
+# ---------------------------------------------------------------------------
+
+
+PATH_KEY = "/v2/tiktok-shop/products/{product_id}"
+REQUIRED_RESPONSES = {"200", "401", "403", "404", "422", "429", "502", "500"}
+
+
+def _get_openapi_path(api_client, path_key: str) -> dict:
+    r = api_client.get("/openapi.json")
+    assert r.status_code == 200, r.text
+    return r.json()["paths"][path_key]["get"]
+
+
+def test_openapi_summary_is_set(api_client):
+    """`summary` is the headline shown in the Swagger UI list view."""
+    op = _get_openapi_path(api_client, PATH_KEY)
+    summary = op.get("summary", "")
+    assert summary, "summary is empty — Swagger UI list view will be blank"
+    assert "TikTok" in summary
+    assert "product" in summary.lower()
+
+
+def test_openapi_description_references_spec_doc(api_client):
+    """`description` must point at the single-source spec doc."""
+    op = _get_openapi_path(api_client, PATH_KEY)
+    desc = op.get("description", "")
+    assert desc, "description is empty — Swagger UI detail view will be blank"
+    assert "tech-doc/api/tiktok-shop-get-product.md" in desc, (
+        "description must name the canonical spec doc so the two "
+        "don't drift"
+    )
+    # The contract key points must all appear in the description so a
+    # reader can find them at a glance.
+    for keyword in (
+        "channel_account_id",
+        "return_under_review_version",
+        "return_draft_version",
+        "locale",
+        "seller.product.basic",
+        "readonly",
+        "502",
+    ):
+        assert keyword in desc, f"description missing keyword: {keyword!r}"
+
+
+def test_openapi_responses_documents_full_status_matrix(api_client):
+    """Every status code in the spec must be in `responses` so Swagger UI
+    shows them in the Responses block."""
+    op = _get_openapi_path(api_client, PATH_KEY)
+    responses = op.get("responses", {})
+    assert responses, "responses map is empty"
+    missing = REQUIRED_RESPONSES - set(responses.keys())
+    assert not missing, f"missing status codes in OpenAPI: {sorted(missing)}"
+
+
+def test_openapi_query_params_have_descriptions(api_client):
+    """Each query parameter must have a description so the Swagger UI
+    Try-It-Out panel explains it."""
+    op = _get_openapi_path(api_client, PATH_KEY)
+    params = op.get("parameters", [])
+    by_name = {p["name"]: p for p in params}
+
+    for name in (
+        "channel_account_id",
+        "return_under_review_version",
+        "return_draft_version",
+        "locale",
+    ):
+        assert name in by_name, f"missing OpenAPI parameter: {name!r}"
+        desc = by_name[name].get("description", "")
+        assert desc, f"OpenAPI parameter {name!r} has no description"
