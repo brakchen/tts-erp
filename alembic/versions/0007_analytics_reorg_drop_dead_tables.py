@@ -53,11 +53,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from alembic import op  # pyright: ignore[reportAttributeAccessIssue]
 from sqlalchemy import text
 
-from alembic import op  # pyright: ignore[reportAttributeAccessIssue]
-
-revision: str = "0007_analytics_reorg_drop_dead_tables"
+revision: str = "0007_analytics_reorg"
 down_revision: str | None = "0006_ad_product_links_view"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
