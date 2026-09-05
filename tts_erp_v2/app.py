@@ -46,6 +46,7 @@ from tts_erp_v2.api.v2 import (
     pages,
     reporting,
     spu_images,
+    tiktok_shop,
 )
 from tts_erp_v2.middleware.access_log import AccessLogMiddleware
 from tts_erp_v2.middleware.auth import AuthMiddleware
@@ -59,6 +60,7 @@ def _build_routes(app: FastAPI) -> None:
     app.include_router(spu_images.router)  # SPU image upload (presigned MinIO)
     app.include_router(pages.router)
     app.include_router(llm_context.router)
+    app.include_router(tiktok_shop.router)  # TikTok Shop Partner API read-through (live, no DB caching)
     app.include_router(auth.router)  # browser login + session cookie
     # Admin-only operational endpoints (rate-limit hot-reload, etc.).
     # All paths under /v2/admin are gated to admin role both by the
