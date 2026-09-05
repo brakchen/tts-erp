@@ -34,12 +34,14 @@ import json
 import logging
 import sys
 import uuid
-from datetime import date, datetime
-from typing import Any
+from datetime import UTC, date, datetime
+from decimal import ROUND_HALF_UP, Decimal
+from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError, field_validator
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.analytics.domain import (
@@ -52,6 +54,7 @@ from tts_erp_v2.analytics.repository import (
     upsert_dump,
 )
 from tts_erp_v2.api.deps import get_session
+from tts_erp_v2.db.constants import PAID_SALES_ORDER_STATUSES
 
 # ─── Config ───────────────────────────────────────────────────────────
 
@@ -740,4 +743,505 @@ def _audit_and_error(
         request_id=request_id,
         retryable=retryable,
         structured_errors=structured_errors,
+    )
+
+
+# ═════════════════════════════════════════════════════════════════════
+# SPU 实际 ROI 看板 — GET /v2/analytics/spu-roi（只读，role=readonly）
+#
+# 口径唯一真相 = tech-doc/analytics/spu-real-roi-dashboard.md §4/§5
+# （2026-09-05 拍板：D4/D6/D9/D10 —— 全表统一 USD、固定汇率、单位成本
+# 按 SPU 解析 人工优先/缺省 K1=30 CNY、平台佣金按 sales×费率基线估算）。
+# 端点只读 view/表并在服务层一次换算后序列化（money=4 位小数、比率=2 位）；
+# 页面与 totals 全部消费本端点，不另行计算（§5.1）。
+# ═════════════════════════════════════════════════════════════════════
+
+roi_router = APIRouter(prefix="/v2/analytics", tags=["analytics"])
+
+# 固定常量（决策 D9：USD→VND=26,330 / CNY→USD=0.14774，展示 0.1477；
+# D4：K1=30 CNY/件 仅作未命中人工成本的默认；D10：平台佣金基线 r̂）
+FX_USD_VND = Decimal(26330)
+FX_CNY_USD = Decimal("0.14774")
+K1_DEFAULT_CNY = Decimal(30)
+FEE_RATE_BASELINE = Decimal("0.1156")
+FX_AS_OF = "2026-09-05"
+
+_MONEY_Q = Decimal("0.0001")
+_RATIO_Q = Decimal("0.01")
+
+_PAID_STATUSES = sorted(PAID_SALES_ORDER_STATUSES)
+
+_CASE_COMPLETED_STATUSES = (
+    "CANCELLATION_REQUEST_COMPLETE",
+    "RETURN_OR_REFUND_REQUEST_COMPLETE",
+)
+
+# 汇总键统一 spu_pk(§2/§5.2);spu_pk IS NULL 的未关联行不进主表,
+# 未归属退款行数单独在 meta 上报(§5.1-5/§6.5)。
+_SQL_ROI_AD = text(
+    """
+    SELECT spu_pk,
+           count(DISTINCT campaign_id)::int          AS ad_count,
+           coalesce(sum(real_cost_total), 0)         AS spend,
+           coalesce(sum(order_value_total), 0)       AS gmv_ad,
+           coalesce(sum(order_sku_total), 0)::bigint AS ad_orders,
+           min(first_day)                            AS ad_first_day,
+           max(last_day)                             AS ad_last_day
+    FROM analytics.ad_product_links
+    WHERE spu_pk IS NOT NULL
+    GROUP BY spu_pk
+    """
+)
+
+_SQL_ROI_SALES = text(
+    """
+    SELECT sl.spu_pk,
+           count(DISTINCT so.id)::int                    AS order_count,
+           coalesce(sum(sl.quantity), 0)                 AS units_sold,
+           coalesce(sum(sl.quantity * sl.unit_price), 0) AS sales
+    FROM commerce.sales_order_lines sl
+    JOIN commerce.sales_orders so ON so.id = sl.order_pk
+    WHERE sl.spu_pk IS NOT NULL
+      AND so.status = ANY(CAST(:paid_statuses AS text[]))
+      AND so.paid_at IS NOT NULL
+    GROUP BY sl.spu_pk
+    """
+)
+
+_SQL_ROI_REFUNDS = text(
+    """
+    SELECT sl.spu_pk,
+           coalesce(sum(cl.quantity)       FILTER (
+               WHERE so.status = ANY(CAST(:paid_statuses AS text[]))
+                 AND c.case_type = 'REFUND_ONLY'), 0)      AS refund_only_qty,
+           coalesce(sum(cl.refund_amount)  FILTER (
+               WHERE so.status = ANY(CAST(:paid_statuses AS text[]))
+                 AND c.case_type = 'REFUND_ONLY'), 0)      AS refund_only_amount,
+           coalesce(sum(cl.quantity)       FILTER (
+               WHERE so.status = ANY(CAST(:paid_statuses AS text[]))
+                 AND c.case_type = 'RETURN_AND_REFUND'), 0) AS refund_return_qty,
+           coalesce(sum(cl.refund_amount)  FILTER (
+               WHERE so.status = ANY(CAST(:paid_statuses AS text[]))
+                 AND c.case_type = 'RETURN_AND_REFUND'), 0) AS refund_return_amount,
+           coalesce(sum(cl.quantity)       FILTER (
+               WHERE so.status = 'CANCELLED'
+                 AND c.case_type IN ('CANCELLATION', 'CANCEL')), 0) AS refund_cancelled_qty,
+           coalesce(sum(cl.refund_amount)  FILTER (
+               WHERE so.status = 'CANCELLED'
+                 AND c.case_type IN ('CANCELLATION', 'CANCEL')
+                 AND cl.refund_amount IS NOT NULL), 0)      AS refund_cancelled_amount,
+           count(*)                         FILTER (
+               WHERE so.status = 'CANCELLED'
+                 AND c.case_type IN ('CANCELLATION', 'CANCEL')
+                 AND cl.refund_amount IS NULL)::int         AS refund_cancelled_missing_lines
+    FROM after_sales.cases c
+    JOIN after_sales.case_lines cl ON cl.case_id = c.id
+    JOIN commerce.sales_order_lines sl ON sl.id = cl.sales_order_line_id
+    JOIN commerce.sales_orders so ON so.id = c.order_pk
+    WHERE c.status IN (:st0, :st1)
+      AND sl.spu_pk IS NOT NULL
+    GROUP BY sl.spu_pk
+    """
+)
+
+_SQL_ROI_COSTS = text(
+    """
+    SELECT spu_pk, unit_cost
+    FROM procurement.manual_product_costs
+    WHERE valid_to IS NULL
+    """
+)
+
+_SQL_ROI_CATALOG = text(
+    """
+    SELECT cp.id AS spu_pk, cp.shop_pk, cp.spu_id, cp.title, cp.status,
+           cp.main_image_url, s.shop_id, s.account_name AS shop_name
+    FROM commerce.products_spu cp
+    LEFT JOIN commerce.shops s ON s.id = cp.shop_pk
+    WHERE (CAST(:shop_pk AS bigint) IS NULL
+           OR cp.shop_pk = CAST(:shop_pk AS bigint))
+      AND (CAST(:q AS text) IS NULL OR cp.spu_id ILIKE '%' || :q || '%')
+    ORDER BY cp.id
+    """
+)
+
+_SQL_ROI_WINDOW = text(
+    "SELECT min(first_day) AS first_day, max(last_day) AS last_day "
+    "FROM analytics.ad_product_links"
+)
+
+_SQL_ROI_UNATTRIBUTED = text(
+    """
+    SELECT count(*)::int AS n
+    FROM after_sales.cases c
+    JOIN after_sales.case_lines cl ON cl.case_id = c.id
+    LEFT JOIN commerce.sales_order_lines sl ON sl.id = cl.sales_order_line_id
+    WHERE c.status IN (:st0, :st1)
+      AND (cl.sales_order_line_id IS NULL OR sl.spu_pk IS NULL)
+      AND (CAST(:shop_pk AS bigint) IS NULL
+           OR c.shop_pk = CAST(:shop_pk AS bigint))
+    """
+)
+
+
+def _fmt_money(value: Decimal | None) -> str | None:
+    """money → 4 位小数字符串(§5.1-4);None 保持 JSON null。"""
+    if value is None:
+        return None
+    return format(value.quantize(_MONEY_Q, rounding=ROUND_HALF_UP), ".4f")
+
+
+def _fmt_ratio(value: Decimal | None) -> str | None:
+    """比率 → 2 位小数字符串(§5.1-4);None 保持 JSON null。"""
+    if value is None:
+        return None
+    return format(value.quantize(_RATIO_Q, rounding=ROUND_HALF_UP), ".2f")
+
+
+def _row_int(value) -> int:
+    return int(value) if value is not None else 0
+
+
+def _query_spu_roi(
+    sess: Session,
+    *,
+    q: str | None,
+    shop_pk: int | None,
+    include_all: bool,
+    sort_field: str,
+    ascending: bool,
+    limit: int,
+    offset: int,
+    fee_rate: Decimal | None,
+) -> dict:
+    """查询 + 计算 + 分页，返回 §5.3 envelope（items/total/totals/meta）。
+
+    行与 totals 同源:totals 由行级 USD 值(同一组 CTE 结果)服务端加总。
+    金额底层原币计算、输出层一次换算(§4.2 通用规则),绝不在客户端换算。
+    fee_rate=None → 用固定基线 FEE_RATE_BASELINE;有值 → 页面覆写。
+    """
+    rate = fee_rate if fee_rate is not None else FEE_RATE_BASELINE
+    cats = sess.execute(
+        _SQL_ROI_CATALOG, {"shop_pk": shop_pk, "q": q}
+    ).mappings().all()
+    # pi-lens-ignore: python-sql-injection
+    ad_rows = sess.execute(_SQL_ROI_AD).mappings().all()
+    ad_map = {r["spu_pk"]: r for r in ad_rows if r["spu_pk"] is not None}
+    # pi-lens-ignore: python-sql-injection
+    sales_rows = sess.execute(
+        _SQL_ROI_SALES, {"paid_statuses": _PAID_STATUSES}
+    ).mappings().all()
+    sales_map = {
+        r["spu_pk"]: r for r in sales_rows if r["spu_pk"] is not None
+    }
+    # pi-lens-ignore: python-sql-injection
+    refund_rows = sess.execute(
+        _SQL_ROI_REFUNDS,
+        {
+            "paid_statuses": _PAID_STATUSES,
+            "st0": _CASE_COMPLETED_STATUSES[0],
+            "st1": _CASE_COMPLETED_STATUSES[1],
+        },
+    ).mappings().all()
+    refund_map = {
+        r["spu_pk"]: r for r in refund_rows if r["spu_pk"] is not None
+    }
+    # pi-lens-ignore: python-sql-injection
+    cost_rows = sess.execute(_SQL_ROI_COSTS).mappings().all()
+    cost_map = {r["spu_pk"]: Decimal(r["unit_cost"]) for r in cost_rows}
+
+    # ── 每 SPU 一行(原币聚合 → USD 换算 → 派生指标)──────────────────
+    plain: list[dict] = []
+    for cat in cats:
+        pk = cat["spu_pk"]
+        ad = ad_map.get(pk)
+        sales = sales_map.get(pk)
+        refund = refund_map.get(pk)
+        if not include_all and ad is None and sales is None and refund is None:
+            continue  # §5.1-7:默认只含有活动(广告∨销售∨退款)的 SPU
+
+        spend = Decimal(ad["spend"]) if ad else Decimal(0)
+        gmv_ad = Decimal(ad["gmv_ad"]) if ad else Decimal(0)
+        ad_orders = _row_int(ad["ad_orders"]) if ad else 0
+        ad_count = _row_int(ad["ad_count"]) if ad else 0
+        ad_first_day = ad["ad_first_day"] if ad else None
+        ad_last_day = ad["ad_last_day"] if ad else None
+
+        order_count = _row_int(sales["order_count"]) if sales else 0
+        units_dec = Decimal(sales["units_sold"]) if sales else Decimal(0)
+        units_sold = _row_int(units_dec)
+        sales_vnd = Decimal(sales["sales"]) if sales else Decimal(0)
+
+        # refund 行级金额(缺失行不造数:净额桶金额直取,取消桶分已知/未知)
+        refund_only_vnd = (
+            Decimal(refund["refund_only_amount"]) if refund else Decimal(0)
+        )
+        refund_return_vnd = (
+            Decimal(refund["refund_return_amount"]) if refund else Decimal(0)
+        )
+        refund_cancelled_vnd = (
+            Decimal(refund["refund_cancelled_amount"]) if refund else Decimal(0)
+        )
+        refund_only_qty = _row_int(refund["refund_only_qty"]) if refund else 0
+        refund_return_qty = (
+            _row_int(refund["refund_return_qty"]) if refund else 0
+        )
+        refund_cancelled_qty = (
+            _row_int(refund["refund_cancelled_qty"]) if refund else 0
+        )
+        refund_cancelled_missing = (
+            _row_int(refund["refund_cancelled_missing_lines"])
+            if refund
+            else 0
+        )
+        refund_net_vnd = refund_only_vnd + refund_return_vnd
+
+        # 单位成本解析(§4.2):MANUAL 有效行优先,未命中 → K1=30 CNY
+        unit_cost_cny = cost_map.get(pk, K1_DEFAULT_CNY)
+        cost_source = "MANUAL" if pk in cost_map else "DEFAULT_K1"
+        unit_cost_usd = unit_cost_cny * FX_CNY_USD
+
+        # USD 换算(先原币加总、再一次换算,§4.2 通用规则)
+        sales_usd = sales_vnd / FX_USD_VND
+        net_cash_vnd = sales_vnd - refund_net_vnd
+        net_cash_usd = net_cash_vnd / FX_USD_VND
+        refund_only_usd = refund_only_vnd / FX_USD_VND
+        refund_return_usd = refund_return_vnd / FX_USD_VND
+        refund_net_usd = refund_only_usd + refund_return_usd
+        refund_cancelled_usd = refund_cancelled_vnd / FX_USD_VND
+
+        fee_usd = sales_usd * rate  # M19:本期全按 sales×费率估算
+        return_loss_usd = refund_return_qty * unit_cost_usd  # M13b 全损
+        cogs_all_usd = units_dec * unit_cost_usd  # M18 全售出货本(含退回件)
+        net_profit = net_cash_usd - cogs_all_usd - spend - fee_usd  # M18
+        nc_prime = net_cash_usd - return_loss_usd  # M17 NC′(全 USD)
+        cogs_kept = (units_dec - refund_return_qty) * unit_cost_usd  # M17
+
+        roi_real: Decimal | None = None
+        if spend != 0:
+            roi_real = nc_prime / spend  # M14
+        roi_l0: Decimal | None = gmv_ad / spend if spend != 0 else None  # M4
+        cpa: Decimal | None = spend / ad_orders if ad_orders else None  # M15
+        refund_rate: Decimal | None = (
+            refund_net_usd / sales_usd if sales_usd != 0 else None
+        )  # M12
+
+        breakeven_denom = nc_prime - cogs_kept - fee_usd
+        roi_breakeven: Decimal | None = None
+        if spend != 0 and breakeven_denom > 0:
+            roi_breakeven = nc_prime / breakeven_denom  # M17
+
+        plain.append(
+            {
+                "spu_pk": pk,
+                "spu_id": cat["spu_id"],
+                "title": cat["title"],
+                "status": cat["status"],
+                "main_image_url": cat["main_image_url"],
+                "shop_id": cat["shop_id"],
+                "shop_name": cat["shop_name"],
+                "ad_count": ad_count,
+                "ad_orders": ad_orders,
+                "spend": spend,
+                "gmv_ad": gmv_ad,
+                "roi_l0": roi_l0,
+                "ad_first_day": ad_first_day,
+                "ad_last_day": ad_last_day,
+                "order_count": order_count,
+                "units_sold": units_sold,
+                "sales": sales_usd,
+                "refund_only_qty": refund_only_qty,
+                "refund_only_amount": refund_only_usd,
+                "refund_return_qty": refund_return_qty,
+                "refund_return_amount": refund_return_usd,
+                "refund_net_qty": refund_only_qty + refund_return_qty,
+                "refund_net_amount": refund_net_usd,
+                "refund_rate": refund_rate,
+                "refund_cancelled_qty": refund_cancelled_qty,
+                "refund_cancelled_amount": refund_cancelled_usd,
+                "refund_cancelled_missing_lines": refund_cancelled_missing,
+                "return_loss": return_loss_usd,
+                "net_profit": net_profit,
+                "platform_fee": fee_usd,
+                "roi_real": roi_real,
+                "roi_breakeven": roi_breakeven,
+                "cpa": cpa,
+                "unit_cost_used": unit_cost_usd,
+                "cost_source": cost_source,
+            }
+        )
+
+    # ── 排序(None 沉底;实际 ROI 升序遇同值按消耗降序 → 可复现)────────
+    # ── 排序(None 沉底;实际 ROI 升序遇同值按消耗降序 → 可复现,§7.6)──
+    def _sort_key(row: dict):
+        value = row[sort_field]
+        if value is None:
+            return (True, Decimal(0), Decimal(0))
+        primary = value if ascending else -value
+        tie = -row["spend"] if ascending else row["spend"]
+        return (False, primary, tie)
+
+    plain.sort(key=_sort_key)
+
+    # ── totals(跨分页、当前筛选;行级 USD 服务端加总)─────────────────
+    money_total = {
+        "spend": sum((r["spend"] for r in plain), Decimal(0)),
+        "sales": sum((r["sales"] for r in plain), Decimal(0)),
+        "refund_net_amount": sum(
+            (r["refund_net_amount"] for r in plain), Decimal(0)
+        ),
+        "return_loss": sum((r["return_loss"] for r in plain), Decimal(0)),
+        "net_profit": sum((r["net_profit"] for r in plain), Decimal(0)),
+    }
+    totals = {
+        "row_count": len(plain),
+        "spend": _fmt_money(money_total["spend"]),
+        "sales": _fmt_money(money_total["sales"]),
+        "refund_net_amount": _fmt_money(money_total["refund_net_amount"]),
+        "return_loss": _fmt_money(money_total["return_loss"]),
+        "net_profit": _fmt_money(money_total["net_profit"]),
+    }
+
+    # ── meta(§5.3)────────────────────────────────────────────────────
+    window_row = sess.execute(_SQL_ROI_WINDOW).mappings().first()
+    unattributed = sess.execute(
+        _SQL_ROI_UNATTRIBUTED,
+        {"st0": _CASE_COMPLETED_STATUSES[0], "st1": _CASE_COMPLETED_STATUSES[1],
+         "shop_pk": shop_pk},
+    ).mappings().first()
+    override_rate = None if fee_rate is None else str(fee_rate)
+    meta = {
+        "fx": {
+            "usd_vnd": _fmt_money(FX_USD_VND),
+            "cny_usd": format(
+                FX_CNY_USD.quantize(_MONEY_Q, rounding=ROUND_HALF_UP), ".4f"
+            ),
+            "as_of": FX_AS_OF,
+            "source": "fixed-const",
+        },
+        "cost_assumption": (
+            "按 SPU 解析：人工成本(MANUAL)有效行优先，未命中 → "
+            "K1=30 CNY/件 ≈ $4.43/件；DEFAULT_K1 行页面 ⚠ 可跳 manual-costs 补录"
+        ),
+        "fee": {
+            "mode": "override" if override_rate is not None else "baseline",
+            "rate": override_rate if override_rate is not None else str(FEE_RATE_BASELINE),
+            "override": override_rate,
+            "note": (
+                "平台佣金=平台从销售额直接扣除的全部费用(抽佣/联盟/运费类)；"
+                "已结算按实际，未结算按基线；解析上线后自动分层"
+            ),
+        },
+        "window": {
+            "first_day": (
+                window_row["first_day"].isoformat() if window_row["first_day"] else None
+            ),
+            "last_day": (
+                window_row["last_day"].isoformat() if window_row["last_day"] else None
+            ),
+            "note": "ad 观测窗口全量(默认窗口 W,§4.5)",
+        },
+        "unattributed_refund_lines": unattributed["n"] if unattributed else 0,
+        "computed_at": datetime.now(UTC).isoformat(),
+        "currency": {
+            "display": "USD",
+            "native": {"ad": "USD", "sales_refund": "VND", "cost": "CNY"},
+        },
+    }
+
+    # ── 分页切片 + money/比率序列化 ─────────────────────────────────
+    page = plain[offset : offset + limit]
+    items = []
+    for r in page:
+        items.append(
+            {
+                "spu_pk": r["spu_pk"],
+                "spu_id": r["spu_id"],
+                "title": r["title"],
+                "status": r["status"],
+                "main_image_url": r["main_image_url"],
+                "shop_id": r["shop_id"],
+                "shop_name": r["shop_name"],
+                "ad_count": r["ad_count"],
+                "ad_orders": r["ad_orders"],
+                "spend": _fmt_money(r["spend"]),
+                "gmv_ad": _fmt_money(r["gmv_ad"]),
+                "roi_l0": _fmt_ratio(r["roi_l0"]),
+                "ad_first_day": (
+                    r["ad_first_day"].isoformat() if r["ad_first_day"] else None
+                ),
+                "ad_last_day": (
+                    r["ad_last_day"].isoformat() if r["ad_last_day"] else None
+                ),
+                "order_count": r["order_count"],
+                "units_sold": r["units_sold"],
+                "sales": _fmt_money(r["sales"]),
+                "refund_only_qty": r["refund_only_qty"],
+                "refund_only_amount": _fmt_money(r["refund_only_amount"]),
+                "refund_return_qty": r["refund_return_qty"],
+                "refund_return_amount": _fmt_money(r["refund_return_amount"]),
+                "refund_net_qty": r["refund_net_qty"],
+                "refund_net_amount": _fmt_money(r["refund_net_amount"]),
+                "refund_rate": _fmt_ratio(r["refund_rate"]),
+                "refund_cancelled_qty": r["refund_cancelled_qty"],
+                "refund_cancelled_amount": _fmt_money(r["refund_cancelled_amount"]),
+                "refund_cancelled_missing_lines": r["refund_cancelled_missing_lines"],
+                "return_loss": _fmt_money(r["return_loss"]),
+                "net_profit": _fmt_money(r["net_profit"]),
+                "platform_fee": _fmt_money(r["platform_fee"]),
+                "roi_real": _fmt_ratio(r["roi_real"]),
+                "roi_breakeven": _fmt_ratio(r["roi_breakeven"]),
+                "cpa": _fmt_money(r["cpa"]),
+                "unit_cost_used": _fmt_money(r["unit_cost_used"]),
+                "cost_source": r["cost_source"],
+            }
+        )
+
+    return {"items": items, "total": len(plain), "totals": totals, "meta": meta}
+
+
+_ROI_SORT_FIELDS = ("roi_real", "spend", "refund_rate", "net_profit", "sales")
+
+
+@roi_router.get("/spu-roi")
+def list_spu_roi(
+    sess: Session = Depends(get_session),
+    q: str | None = Query(default=None, max_length=200),
+    sort: Literal["roi_real", "spend", "refund_rate", "net_profit", "sales"] = (
+        "roi_real"
+    ),
+    order: Literal["asc", "desc"] = "asc",
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    include_all: bool = Query(default=False),
+    shop_pk: int | None = Query(default=None, ge=1),
+    fee_rate: str | None = Query(default=None, max_length=20),
+) -> dict:
+    """SPU 实际 ROI 主表(每 SPU 一行)。readonly;消费方为 /v2/pages/spu-roi。
+
+    q = spu_id 子串搜索;sort/order 控制排序(默认实际 ROI 升序,§7.3);
+    include_all=true 把无任何活动的目录 SPU 也拉进来(§5.1-7);
+    fee_rate 页面覆写平台佣金费率(缺省用固定基线 0.1156,D10)。
+    """
+    fee_value: Decimal | None = None
+    if fee_rate is not None and fee_rate.strip():
+        raw = fee_rate.strip()
+        try:
+            fee_value = Decimal(raw)
+        except Exception as exc:  # noqa: BLE001 - pydantic InvalidOperation 语义
+            raise HTTPException(
+                status_code=422, detail="fee_rate must be a decimal"
+            ) from exc
+        if fee_value < 0:
+            raise HTTPException(status_code=422, detail="fee_rate must be >= 0")
+    return _query_spu_roi(
+        sess,
+        q=q or None,
+        shop_pk=shop_pk,
+        include_all=include_all,
+        sort_field=sort,
+        ascending=(order != "desc"),
+        limit=limit,
+        offset=offset,
+        fee_rate=fee_value,  # None → 基线(baseline);有值 → override
     )

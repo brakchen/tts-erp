@@ -86,6 +86,7 @@ _READWRITE_EXACT = {
 _READONLY_EXACT = {
     "/v2/llm-context",  # GET — self-describing system + data dictionary for LLM agents
     "/v2/spu-images",  # GET — list ready images (no trailing slash in router)
+    "/v2/analytics/spu-roi",  # GET — SPU 实际 ROI 看板主表(只读报表)
 }
 # All other /v2/* paths default to admin (defensive: unknown = privileged).
 
