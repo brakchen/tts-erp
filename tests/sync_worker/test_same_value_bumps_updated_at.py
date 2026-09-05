@@ -3,6 +3,7 @@
 之前 bug:on_conflict_do_update 的 SET 子句没包含 updated_at,
 导致 cursor 值不变时(updated_at 留在旧值),staleness 监控误报。
 """
+
 import time
 
 from sqlalchemy import select
@@ -15,7 +16,9 @@ def test_set_cursor_same_value_bumps_updated_at(db_session):
     """相同 cursor_epoch_ms 重复 set_cursor,updated_at 必须 bump。"""
     # First write
     watermarks.set_cursor(
-        db_session, job_name="tiktok.products", scope="*",
+        db_session,
+        job_name="tiktok.products",
+        scope="*",
         cursor_epoch_ms=1788498603427,
     )
     db_session.commit()
@@ -31,7 +34,9 @@ def test_set_cursor_same_value_bumps_updated_at(db_session):
     # 模拟 sync worker 跑了几小时后再 upsert(same value)
     time.sleep(0.1)
     watermarks.set_cursor(
-        db_session, job_name="tiktok.products", scope="*",
+        db_session,
+        job_name="tiktok.products",
+        scope="*",
         cursor_epoch_ms=1788498603427,  # ← 完全相同的值
     )
     db_session.commit()

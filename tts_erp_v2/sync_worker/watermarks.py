@@ -14,6 +14,7 @@ Two value shapes are supported:
 Each row is uniquely keyed by ``(job_name, scope)``. ``scope`` is
 typically a shop_id or the literal ``"*"`` for system-wide jobs.
 """
+
 from __future__ import annotations
 
 from sqlalchemy import select, text

@@ -159,8 +159,18 @@ def _view_rows(db_session) -> list[dict]:
 def test_view_aggregates_spend_and_orders_across_days(db_session):
     """同一 campaign×SPU 跨多天 → 1 行,出单量/消耗/GMV 按天合计,窗口元数据正确。"""
     camp = "TEST_CAMPAIGN_1"
-    _dump_day(db_session, "2026-08-01", camp, [_row("TEST_SPU_1", cost="10.00", orders="3", gmv="100.00")])
-    _dump_day(db_session, "2026-08-02", camp, [_row("TEST_SPU_1", cost="20.50", orders="5", gmv="250.00")])
+    _dump_day(
+        db_session,
+        "2026-08-01",
+        camp,
+        [_row("TEST_SPU_1", cost="10.00", orders="3", gmv="100.00")],
+    )
+    _dump_day(
+        db_session,
+        "2026-08-02",
+        camp,
+        [_row("TEST_SPU_1", cost="20.50", orders="5", gmv="250.00")],
+    )
 
     rows = _view_rows(db_session)
     assert len(rows) == 1
@@ -181,11 +191,20 @@ def test_view_rows_are_per_campaign_product_pair(db_session):
     """不同 campaign / 不同 SPU 各自成行;多商品 campaign 不出双计。"""
     # 同一 (campaign, day) 的多个 SPU 在同一条 dump 的 table 数组里
     _dump_day(
-        db_session, "2026-08-01", "TEST_CAMP_A",
-        [_row("TEST_SPU_1", cost="1.00", orders="1", gmv="5.00"),
-         _row("TEST_SPU_2", cost="2.00", orders="2", gmv="9.00")],
+        db_session,
+        "2026-08-01",
+        "TEST_CAMP_A",
+        [
+            _row("TEST_SPU_1", cost="1.00", orders="1", gmv="5.00"),
+            _row("TEST_SPU_2", cost="2.00", orders="2", gmv="9.00"),
+        ],
     )
-    _dump_day(db_session, "2026-08-01", "TEST_CAMP_B", [_row("TEST_SPU_1", cost="4.00", orders="4", gmv="16.00")])
+    _dump_day(
+        db_session,
+        "2026-08-01",
+        "TEST_CAMP_B",
+        [_row("TEST_SPU_1", cost="4.00", orders="4", gmv="16.00")],
+    )
 
     rows = _view_rows(db_session)
     assert [(r["campaign_id"], r["product_id"]) for r in rows] == [
@@ -199,8 +218,18 @@ def test_view_rows_are_per_campaign_product_pair(db_session):
 def test_view_latest_product_name_and_status_win(db_session):
     """名称/上架状态取观测期最后一天那一行的值。"""
     camp = "TEST_CAMPAIGN_1"
-    _dump_day(db_session, "2026-08-01", camp, [_row("TEST_SPU_1", name="旧名", status="available")])
-    _dump_day(db_session, "2026-08-02", camp, [_row("TEST_SPU_1", name="新名", status="unavailable")])
+    _dump_day(
+        db_session,
+        "2026-08-01",
+        camp,
+        [_row("TEST_SPU_1", name="旧名", status="available")],
+    )
+    _dump_day(
+        db_session,
+        "2026-08-02",
+        camp,
+        [_row("TEST_SPU_1", name="新名", status="unavailable")],
+    )
 
     r = _view_rows(db_session)[0]
     assert r["product_name"] == "新名"
@@ -214,7 +243,9 @@ def test_view_handles_missing_or_dirty_metric_fields(db_session):
     _dump_day(db_session, "2026-08-01", camp, [{"product_id": "TEST_SPU_1"}])
     # 脏数值:空串 / 非数字占位
     _dump_day(
-        db_session, "2026-08-02", camp,
+        db_session,
+        "2026-08-02",
+        camp,
         [_row("TEST_SPU_1", cost="-", orders="", gmv="abc")],
     )
 
@@ -249,7 +280,9 @@ def test_view_left_joins_erp_channel_product_when_known(db_session):
 
     camp = "TEST_CAMPAIGN_1"
     _dump_day(
-        db_session, "2026-08-01", camp,
+        db_session,
+        "2026-08-01",
+        camp,
         [_row("TEST_SPU_1"), _row("TEST_SPU_2")],
     )
 
