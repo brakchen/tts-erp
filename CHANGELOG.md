@@ -1,5 +1,18 @@
 # tts-erp CHANGELOG
 
+## 2026-09-05 (refactor) — commerce 域命名重构上线（ADR-0003，live 已应用 migration 0007）
+
+按 ADR-0003 §2.6 + D1 拍板实施，**live 库已 ALTER 并验证**：
+
+- **表改名**：`commerce.channel_accounts→shops`、`channel_products→products_spu`、`channel_product_variants→products_sku`
+- **FK 列 `_pk` 化（全库统一）**：`shop_pk`×6（含 after_sales.cases / finance.payouts / linkage.account_links / procurement.spu_images）、`order_pk`×4（order_lines / cases / shipments / settlement_transactions）、`spu_pk`×9、`sku_pk`×2
+- **上游文本 id**：`external_account_id→shop_id`、`external_product_id→spu_id`、`external_variant_id→sku_id`、`external_order_id→order_id`
+- **sales_orders 时间列（D1，仅此表）**：`source_created_at→order_time`、`source_updated_at→order_modify_time`
+- **API（D2/D3）**：响应字段同步（shop_id/spu_id/sku_id/order_id/order_time/order_modify_time）；路径参数 `{account_id}/{product_id}/{order_id}→{shop_pk}/{spu_pk}/{order_pk}`（by-external→`{shop_id}`）；external-api.md 活契约已同步
+- **视图重建**：`linkage.effective_product_links` / `analytics.ad_product_links`（source 引用+输出列）
+- **保留**：procurement/miaoshou/credentials 同名词、快照列 external_*_snapshot、SPU 等 scope-A 的 source_*、DB 对象名（约束/索引）不变
+- 验证：rename-scratch + live 全量 fast 912 passed / 0 fail；备份 `backups/tts_erp_pre_commerce_rename_20260905T210856Z.sql.gz`
+
 ## 2026-09-05 (fix) — 全量测试稳定性：修两个顺序/残留依赖 bug
 
 修复导致 `scripts/test.sh fast` 偶发红的问题（均与本次 ops 无关的预存问题）：
