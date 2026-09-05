@@ -50,18 +50,9 @@ def _wipe_rows(db_engine):
 
 
 def _wipe(db_engine) -> None:
+    """只清 ad_raw + commerce TEST_ 行（2026-09-05 reorg：ad_records /
+    ad_daily_completeness 等派生表已随 migration 0007 drop）。"""
     with db_engine.begin() as conn:
-        # pi-lens-ignore: python-sql-injection — literal SQL, LIKE prefix is constant
-        conn.execute(
-            text("DELETE FROM analytics.ad_records WHERE seller_id LIKE 'TEST_%'")
-        )
-        # pi-lens-ignore: python-sql-injection — literal SQL, LIKE prefix is constant
-        conn.execute(
-            text(
-                "DELETE FROM analytics.ad_daily_completeness "
-                "WHERE seller_id LIKE 'TEST_%'"
-            )
-        )
         # pi-lens-ignore: python-sql-injection — literal SQL, LIKE prefix is constant
         conn.execute(text("DELETE FROM analytics.ad_raw WHERE seller_id LIKE 'TEST_%'"))
         # pi-lens-ignore: python-sql-injection — literal SQL, LIKE prefix is constant
