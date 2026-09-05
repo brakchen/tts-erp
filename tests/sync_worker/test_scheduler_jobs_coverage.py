@@ -10,7 +10,7 @@ reporting + token.refresh) and ``test_scheduler_token_refresh.py``
   jitter, max_instances=1, and coalesce=True.
 * :func:`_make_executor` routes tiktok jobs through
   ``_run_tiktok_job`` and system jobs through ``_run_system_job``.
-* :func:`_enumerate_tiktok_shops` filters MOCK_* and tolerates DB
+* :func:`_enumerate_tiktok_shops` filters MOCK_*/TEST_* and tolerates DB
   errors.
 * :func:`_record_failed_tick` writes a sentinel ``SyncJob`` row.
 * :func:`_run_tiktok_job` retry loop, no-shop early return, and the
@@ -219,8 +219,11 @@ def test_make_executor_for_system_calls_run_system_job(monkeypatch) -> None:
 def _seed_credentials_for_enum(session_factory, *, external_id: str) -> None:
     """Insert a real Credentials row so the enumerator returns it.
 
-    Prefixed TEST_ so future cleanup scripts (see
-    ``logs/diagnose-failures.md``) can prune it without touching prod.
+    Fixture ids use the ``ENUMKEEP_`` prefix (NOT ``TEST_``): the
+    enumerator now excludes ``TEST_*`` / ``MOCK_*`` credentials from
+    upstream dialing, so a TEST_-prefixed row would be filtered out and
+    the test could never assert containment. Cleanup is explicit (delete
+    in teardown) so no script-based pruning is needed here.
     """
     sess = session_factory()
     try:
@@ -263,7 +266,7 @@ def _factory():
 def test_enumerate_tiktok_shops_filters_mocks_and_returns_sorted() -> None:
     """Real and MOCK_* rows present → only real rows, sorted."""
     factory = _factory()
-    real_id = "TEST_ENUM_REAL_SHOP"
+    real_id = "ENUMKEEP_REAL_SHOP"
     mock_id = "MOCK_LEGACY_SENTINEL"
     _seed_credentials_for_enum(factory, external_id=real_id)
     _seed_credentials_for_enum(factory, external_id=mock_id)
@@ -295,24 +298,26 @@ def test_enumerate_tiktok_shops_returns_empty_on_db_error() -> None:
 def test_enumerate_tiktok_shops_skips_mock_prefixed_ids() -> None:
     """Rows whose ``external_account_id`` starts with ``MOCK_`` are skipped.
 
-    Note: the production filter is ``if row[0] and not row[0].startswith("MOCK_")``
-    (see ``scheduler.py:_enumerate_tiktok_shops``). The previous version of
-    this test attempted to UPDATE ``external_account_id`` to NULL to test
-    the ``if row[0]`` defensive clause, but the column is ``NOT NULL`` —
-    the UPDATE crashed with NotNullViolation before the test could
-    exercise the filter. Since NULL is structurally impossible, the only
-    reachable defensive case is the MOCK_-prefix exclusion.
+    Note: the production filter excludes both ``MOCK_`` and ``TEST_``
+    prefixes (``NON_PRODUCTION_SHOP_PREFIXES`` in ``scheduler.py``) —
+    ``TEST_*`` was added 2026-09-05 after OAuth-test credentials made
+    every tiktok job retry ~10s/tick against a shop with no
+    ``commerce.shops`` row. The "kept" fixture deliberately uses a
+    non-excluded prefix (``ENUMKEEP_*``) so it survives the filter.
     """
     factory = _factory()
-    keep_id = "TEST_ENUM_REAL_OWNER"
-    skip_id = "MOCK_ENUM_SKIP_OWNER"
+    keep_id = "ENUMKEEP_REAL_OWNER"
+    skip_mock = "MOCK_ENUM_SKIP_OWNER"
+    skip_test = "TEST_ENUM_SKIP_OWNER"
     _seed_credentials_for_enum(factory, external_id=keep_id)
-    _seed_credentials_for_enum(factory, external_id=skip_id)
+    _seed_credentials_for_enum(factory, external_id=skip_mock)
+    _seed_credentials_for_enum(factory, external_id=skip_test)
     sess = factory()
     try:
         result = _enumerate_tiktok_shops(sess)
         assert keep_id in result
-        assert skip_id not in result
+        assert skip_mock not in result
+        assert skip_test not in result
     finally:
         # Clean: remove the seeded rows.
         sess.rollback()
@@ -322,9 +327,9 @@ def test_enumerate_tiktok_shops_skips_mock_prefixed_ids() -> None:
             sess.execute(
                 text(
                     "DELETE FROM integration.credentials "
-                    "WHERE external_account_id IN (:k, :s)"
+                    "WHERE external_account_id IN (:k, :m, :t)"
                 ),
-                {"k": keep_id, "s": skip_id},
+                {"k": keep_id, "m": skip_mock, "t": skip_test},
             )
             sess.commit()
         finally:
