@@ -67,6 +67,11 @@ _READONLY_PREFIXES = (
     # POST upload-url / {id}/confirm and DELETE /{id} are classified
     # by the _READWRITE_EXACT entries below.
     "/v2/spu-images/",
+    # TikTok Shop Partner API read-through proxy (live, no DB caching).
+    # All endpoints here are GETs that hand the upstream payload back
+    # verbatim. See ``tts_erp_v2/proxy/tts_shop/products_api.py`` for
+    # the proxy layer and ``tts-partner-api-docs/`` for the contract.
+    "/v2/tiktok-shop/",
     # Operator-console static assets (vendor/bootstrap / js/console.js). Not under
     # /v2/; any authenticated session may fetch them.
     "/static/",
