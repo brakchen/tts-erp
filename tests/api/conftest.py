@@ -198,17 +198,31 @@ def api_client_off(db_engine) -> Iterator[TestClient]:
 
 
 def _make_active(sess, role: str, prefix: str) -> str:
-    from sqlalchemy import insert
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     plaintext = f"ttserp_{role}_{prefix}"
     p = _params_for_key(plaintext, role, "active")
+    # Upsert on key_hash: deterministic TEST_ keys may survive a killed / aborted
+    # run (teardown wipe never ran), and a leftover row would otherwise trip the
+    # unique index and 401-cascade every later api test in the process. Overwriting
+    # the stale row makes the fixture idempotent / self-healing.
     sess.execute(
-        insert(Base_metadata_api_keys()).values(
+        pg_insert(Base_metadata_api_keys())
+        .values(
             key_hash=p["h"],
             key_prefix=p["p"],
             name=p["n"],
             role=p["r"],
             status=p["s"],
+        )
+        .on_conflict_do_update(
+            index_elements=[Base_metadata_api_keys().c.key_hash],
+            set_={
+                "key_prefix": p["p"],
+                "name": p["n"],
+                "role": p["r"],
+                "status": p["s"],
+            },
         )
     )
     sess.commit()
@@ -216,17 +230,27 @@ def _make_active(sess, role: str, prefix: str) -> str:
 
 
 def _make_disabled(sess, prefix: str) -> str:
-    from sqlalchemy import insert
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     plaintext = f"ttserp_disabled_{prefix}"
     p = _params_for_key(plaintext, "admin", "disabled")
     sess.execute(
-        insert(Base_metadata_api_keys()).values(
+        pg_insert(Base_metadata_api_keys())
+        .values(
             key_hash=p["h"],
             key_prefix=p["p"],
             name="TEST_disabled",
             role="admin",
             status="disabled",
+        )
+        .on_conflict_do_update(
+            index_elements=[Base_metadata_api_keys().c.key_hash],
+            set_={
+                "key_prefix": p["p"],
+                "name": "TEST_disabled",
+                "role": "admin",
+                "status": "disabled",
+            },
         )
     )
     sess.commit()
