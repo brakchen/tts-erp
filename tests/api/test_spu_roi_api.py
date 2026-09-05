@@ -31,9 +31,9 @@ from sqlalchemy.orm import Session
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
 # ─── 口径常量(与实现对齐,期望值推导用)──────────────────────────────
-USD_VND = Decimal("26330")
+USD_VND = Decimal(26330)
 CNY_USD = Decimal("0.14774")
-K1_CNY = Decimal("30")
+K1_CNY = Decimal(30)
 FEE_BASELINE = Decimal("0.1156")
 _Q4 = Decimal("0.0001")
 _Q2 = Decimal("0.01")
@@ -69,11 +69,11 @@ def _wipe_spu_roi_rows(db_engine, _isolate_state):
 
 def _wipe(db_engine) -> None:
     with db_engine.begin() as conn:
-        # pi-lens-ignore: python-sql-injection — literal SQL, LIKE prefix is constant
+        # pi-lens-ignore: python-sql-injection
         conn.execute(
             text("DELETE FROM analytics.ad_raw WHERE seller_id LIKE 'TEST_%'")
         )
-        # pi-lens-ignore: python-sql-injection — literal SQL, LIKE prefix is constant
+        # pi-lens-ignore: python-sql-injection
         conn.execute(
             text(
                 "DELETE FROM after_sales.case_lines "
@@ -85,7 +85,7 @@ def _wipe(db_engine) -> None:
                 ")"
             )
         )
-        # pi-lens-ignore: python-sql-injection — literal SQL, LIKE prefix is constant
+        # pi-lens-ignore: python-sql-injection
         conn.execute(
             text(
                 "DELETE FROM after_sales.cases c "
@@ -94,7 +94,7 @@ def _wipe(db_engine) -> None:
                 ")"
             )
         )
-        # pi-lens-ignore: python-sql-injection — literal SQL, LIKE prefix is constant
+        # pi-lens-ignore: python-sql-injection
         conn.execute(
             text(
                 "DELETE FROM commerce.sales_order_lines "
@@ -106,7 +106,7 @@ def _wipe(db_engine) -> None:
                 ")"
             )
         )
-        # pi-lens-ignore: python-sql-injection — literal SQL, LIKE prefix is constant
+        # pi-lens-ignore: python-sql-injection
         conn.execute(
             text(
                 "DELETE FROM commerce.sales_orders "
@@ -121,7 +121,7 @@ def _wipe(db_engine) -> None:
 
 
 def _seed_shop(sess, seller: str) -> int:
-    # pi-lens-ignore: python-sql-injection — literal SQL, bound-param dict
+    # pi-lens-ignore: python-sql-injection
     return sess.execute(
         text(
             "INSERT INTO commerce.shops (platform, shop_id, account_name, status) "
@@ -132,7 +132,7 @@ def _seed_shop(sess, seller: str) -> int:
 
 
 def _seed_spu(sess, shop_pk: int, spu_id: str, *, title: str | None = None) -> int:
-    # pi-lens-ignore: python-sql-injection — literal SQL, bound-param dict
+    # pi-lens-ignore: python-sql-injection
     return sess.execute(
         text(
             "INSERT INTO commerce.products_spu "
@@ -155,7 +155,7 @@ def _seed_ad_dump(
     gmv: str,
 ) -> None:
     """post_product_list 一条 ad_raw(1 campaign×SPU×1 day)。"""
-    # pi-lens-ignore: python-sql-injection — literal SQL, bound-param dict
+    # pi-lens-ignore: python-sql-injection
     sess.execute(
         text(
             """
@@ -220,7 +220,7 @@ def _seed_order_line(
     paid_at = None
     if paid:
         paid_at = "2026-09-01T08:00:00+00:00"
-    # pi-lens-ignore: python-sql-injection — literal SQL, bound-param dict
+    # pi-lens-ignore: python-sql-injection
     order_pk = sess.execute(
         text(
             "INSERT INTO commerce.sales_orders "
@@ -230,7 +230,7 @@ def _seed_order_line(
         ),
         {"shop": shop_pk, "oid": order_id, "status": status, "paid": paid_at},
     ).scalar_one()
-    # pi-lens-ignore: python-sql-injection — literal SQL, bound-param dict
+    # pi-lens-ignore: python-sql-injection
     sess.execute(
         text(
             "INSERT INTO commerce.sales_order_lines "
@@ -597,7 +597,7 @@ def test_spu_roi_manual_cost_source(api_client, readonly_key, db_engine):
     item = body["items"][0]
     assert item["spu_pk"] == spu_pk
     assert item["cost_source"] == "MANUAL"
-    assert item["unit_cost_used"] == m4(Decimal("25") * CNY_USD)  # "3.6935"
+    assert item["unit_cost_used"] == m4(Decimal(25) * CNY_USD)  # "3.6935"
     # 货损/净利按 25 CNY/件 重算:return_loss = 1×3.6935
     assert item["return_loss"] == "3.6935"
     assert item["net_profit"] == "39.9725"
@@ -682,12 +682,12 @@ def test_spu_roi_default_sort_roi_asc_pagination_and_totals(
     assert totals["net_profit"] == "55.8138"
     # 行加总 == totals(每行已是 4 位小数字符串)
     row_sum = {
-        "spend": sum((Decimal(i["spend"]) for i in body["items"]), Decimal("0")),
-        "sales": sum((Decimal(i["sales"]) for i in body["items"]), Decimal("0")),
+        "spend": sum((Decimal(i["spend"]) for i in body["items"]), Decimal(0)),
+        "sales": sum((Decimal(i["sales"]) for i in body["items"]), Decimal(0)),
         "refund_net_amount": sum(
-            (Decimal(i["refund_net_amount"]) for i in body["items"]), Decimal("0")
+            (Decimal(i["refund_net_amount"]) for i in body["items"]), Decimal(0)
         ),
-        "net_profit": sum((Decimal(i["net_profit"]) for i in body["items"]), Decimal("0")),
+        "net_profit": sum((Decimal(i["net_profit"]) for i in body["items"]), Decimal(0)),
     }
     assert m4(row_sum["spend"]) == totals["spend"]
     assert m4(row_sum["sales"]) == totals["sales"]

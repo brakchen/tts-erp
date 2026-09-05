@@ -1228,7 +1228,8 @@ def list_spu_roi(
         raw = fee_rate.strip()
         try:
             fee_value = Decimal(raw)
-        except Exception as exc:  # noqa: BLE001 - pydantic InvalidOperation 语义
+        except Exception as exc:
+            # Decimal 解析失败(pydantic InvalidOperation 语义)
             raise HTTPException(
                 status_code=422, detail="fee_rate must be a decimal"
             ) from exc
