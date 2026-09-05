@@ -33,7 +33,7 @@ class Payout(Base):
     __tablename__ = "payouts"
     __table_args__ = (
         UniqueConstraint(
-            "channel_account_id", "external_payout_id", name="uq_payouts_account_ext"
+            "shop_pk", "external_payout_id", name="uq_payouts_account_ext"
         ),
         Index("ix_payouts_status", "status"),
         {"schema": "finance"},
@@ -44,9 +44,9 @@ class Payout(Base):
         primary_key=True,
         server_default=text("generate_always_as_identity()"),
     )
-    channel_account_id: Mapped[int] = mapped_column(
+    shop_pk: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("commerce.channel_accounts.id", ondelete="RESTRICT"),
+        ForeignKey("commerce.shops.id", ondelete="RESTRICT"),
         nullable=False,
     )
     external_payout_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -124,7 +124,7 @@ class SettlementTransaction(Base):
             "external_transaction_id",
             name="uq_settlement_txn_stmt_ext",
         ),
-        Index("ix_settlement_txn_sales_order", "sales_order_id"),
+        Index("ix_settlement_txn_sales_order", "order_pk"),
         Index("ix_settlement_txn_order_line", "sales_order_line_id"),
         Index("ix_settlement_txn_case", "after_sales_case_id"),
         {"schema": "finance"},
@@ -141,7 +141,7 @@ class SettlementTransaction(Base):
         nullable=False,
     )
     external_transaction_id: Mapped[str] = mapped_column(Text, nullable=False)
-    sales_order_id: Mapped[int | None] = mapped_column(
+    order_pk: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("commerce.sales_orders.id", ondelete="SET NULL")
     )
     sales_order_line_id: Mapped[int | None] = mapped_column(

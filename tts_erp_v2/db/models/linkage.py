@@ -7,7 +7,7 @@ Plus 1 VIEW: effective_product_links (created via hand-written Alembic
 migration since SQLAlchemy models don't express DDL views).
 
 product_links carries the corrected uniqueness:
-    UNIQUE (procurement_product_id, channel_product_id, valid_from)
+    UNIQUE (procurement_product_id, spu_pk, valid_from)
 which lets historical versions coexist without collision.
 """
 
@@ -38,7 +38,7 @@ class AccountLink(Base):
     __table_args__ = (
         UniqueConstraint(
             "procurement_account_id",
-            "channel_account_id",
+            "shop_pk",
             "external_relation_id",
             name="uq_account_links_triplet",
         ),
@@ -56,9 +56,9 @@ class AccountLink(Base):
         ForeignKey("procurement.procurement_accounts.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    channel_account_id: Mapped[int] = mapped_column(
+    shop_pk: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("commerce.channel_accounts.id", ondelete="RESTRICT"),
+        ForeignKey("commerce.shops.id", ondelete="RESTRICT"),
         nullable=False,
     )
     external_relation_id: Mapped[str | None] = mapped_column(Text)
@@ -90,12 +90,12 @@ class ProductLink(Base):
         # (procurement, channel, valid_from) — historical versions coexist.
         UniqueConstraint(
             "procurement_product_id",
-            "channel_product_id",
+            "spu_pk",
             "valid_from",
             name="uq_product_links_pivot_validfrom",
         ),
         Index("ix_product_links_status", "status"),
-        Index("ix_product_links_channel_product", "channel_product_id"),
+        Index("ix_product_links_channel_product", "spu_pk"),
         {"schema": "linkage"},
     )
 
@@ -109,9 +109,9 @@ class ProductLink(Base):
         ForeignKey("procurement.procurement_products.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    channel_product_id: Mapped[int] = mapped_column(
+    spu_pk: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("commerce.channel_products.id", ondelete="RESTRICT"),
+        ForeignKey("commerce.products_spu.id", ondelete="RESTRICT"),
         nullable=False,
     )
     external_relation_id: Mapped[str | None] = mapped_column(Text)
@@ -143,7 +143,7 @@ class VariantLink(Base):
     __table_args__ = (
         UniqueConstraint(
             "procurement_product_variant_id",
-            "channel_product_variant_id",
+            "sku_pk",
             "valid_from",
             name="uq_variant_links_pivot_validfrom",
         ),
@@ -161,9 +161,9 @@ class VariantLink(Base):
         ForeignKey("procurement.procurement_product_variants.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    channel_product_variant_id: Mapped[int] = mapped_column(
+    sku_pk: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("commerce.channel_product_variants.id", ondelete="RESTRICT"),
+        ForeignKey("commerce.products_sku.id", ondelete="RESTRICT"),
         nullable=False,
     )
     external_relation_id: Mapped[str | None] = mapped_column(Text)
@@ -237,7 +237,7 @@ class LinkOverride(Base):
     __table_args__ = (
         UniqueConstraint(
             "procurement_product_id",
-            "channel_product_id",
+            "spu_pk",
             "valid_from",
             name="uq_link_overrides_pivot_validfrom",
         ),
@@ -255,9 +255,9 @@ class LinkOverride(Base):
         ForeignKey("procurement.procurement_products.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    channel_product_id: Mapped[int] = mapped_column(
+    spu_pk: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("commerce.channel_products.id", ondelete="RESTRICT"),
+        ForeignKey("commerce.products_spu.id", ondelete="RESTRICT"),
         nullable=False,
     )
     decision: Mapped[str] = mapped_column(
@@ -300,8 +300,8 @@ class LinkIssue(Base):
         BigInteger,
         ForeignKey("procurement.procurement_products.id", ondelete="SET NULL"),
     )
-    channel_product_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("commerce.channel_products.id", ondelete="SET NULL")
+    spu_pk: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("commerce.products_spu.id", ondelete="SET NULL")
     )
     candidate_count: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[str | None] = mapped_column(Text)

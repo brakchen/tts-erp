@@ -265,7 +265,7 @@ class ManualProductCost(Base):
     __tablename__ = "manual_product_costs"
     __table_args__ = (
         Index(
-            "ix_manual_costs_channel_product_valid", "channel_product_id", "valid_from"
+            "ix_manual_costs_channel_product_valid", "spu_pk", "valid_from"
         ),
         {"schema": "procurement"},
     )
@@ -275,9 +275,9 @@ class ManualProductCost(Base):
         primary_key=True,
         server_default=text("generate_always_as_identity()"),
     )
-    channel_product_id: Mapped[int] = mapped_column(
+    spu_pk: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("commerce.channel_products.id", ondelete="RESTRICT"),
+        ForeignKey("commerce.products_spu.id", ondelete="RESTRICT"),
         nullable=False,
     )
     unit_cost: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)

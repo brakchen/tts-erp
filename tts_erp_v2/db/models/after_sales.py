@@ -31,9 +31,9 @@ class Case(Base):
     __tablename__ = "cases"
     __table_args__ = (
         UniqueConstraint(
-            "channel_account_id", "external_case_id", name="uq_cases_account_ext"
+            "shop_pk", "external_case_id", name="uq_cases_account_ext"
         ),
-        Index("ix_cases_sales_order", "sales_order_id"),
+        Index("ix_cases_sales_order", "order_pk"),
         Index("ix_cases_case_type_status", "case_type", "status"),
         {"schema": "after_sales"},
     )
@@ -43,12 +43,12 @@ class Case(Base):
         primary_key=True,
         server_default=text("generate_always_as_identity()"),
     )
-    channel_account_id: Mapped[int] = mapped_column(
+    shop_pk: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("commerce.channel_accounts.id", ondelete="RESTRICT"),
+        ForeignKey("commerce.shops.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    sales_order_id: Mapped[int] = mapped_column(
+    order_pk: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("commerce.sales_orders.id", ondelete="RESTRICT"),
         nullable=False,

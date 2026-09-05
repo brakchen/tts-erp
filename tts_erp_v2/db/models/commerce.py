@@ -1,6 +1,6 @@
 """commerce.* — TikTok Shop sales domain.
 
-5 tables: channel_accounts / channel_products / channel_product_variants /
+5 tables: shops / products_spu / products_sku /
 sales_orders / sales_order_lines.
 """
 
@@ -27,10 +27,10 @@ from tts_erp_v2.db.base import Base
 class ChannelAccount(Base):
     """TikTok Shop store account."""
 
-    __tablename__ = "channel_accounts"
+    __tablename__ = "shops"
     __table_args__ = (
         UniqueConstraint(
-            "platform", "external_account_id", name="uq_channel_accounts_platform_ext"
+            "platform", "shop_id", name="uq_channel_accounts_platform_ext"
         ),
         Index("ix_channel_accounts_status", "status"),
         {"schema": "commerce"},
@@ -42,7 +42,7 @@ class ChannelAccount(Base):
         server_default=text("generate_always_as_identity()"),
     )
     platform: Mapped[str] = mapped_column(Text, nullable=False)
-    external_account_id: Mapped[str] = mapped_column(Text, nullable=False)
+    shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     account_name: Mapped[str | None] = mapped_column(Text)
     region: Mapped[str | None] = mapped_column(Text)
     seller_type: Mapped[str | None] = mapped_column(Text)
@@ -64,11 +64,11 @@ class ChannelAccount(Base):
 class ChannelProduct(Base):
     """TikTok SPU (Product). NOT system-internal SKU."""
 
-    __tablename__ = "channel_products"
+    __tablename__ = "products_spu"
     __table_args__ = (
         UniqueConstraint(
-            "channel_account_id",
-            "external_product_id",
+            "shop_pk",
+            "spu_id",
             name="uq_channel_products_account_ext",
         ),
         Index("ix_channel_products_status", "status"),
@@ -80,12 +80,12 @@ class ChannelProduct(Base):
         primary_key=True,
         server_default=text("generate_always_as_identity()"),
     )
-    channel_account_id: Mapped[int] = mapped_column(
+    shop_pk: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("commerce.channel_accounts.id", ondelete="RESTRICT"),
+        ForeignKey("commerce.shops.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    external_product_id: Mapped[str] = mapped_column(Text, nullable=False)
+    spu_id: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[str | None] = mapped_column(Text)
     category_id: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str | None] = mapped_column(Text)
@@ -108,11 +108,11 @@ class ChannelProduct(Base):
 class ChannelProductVariant(Base):
     """TikTok SKU."""
 
-    __tablename__ = "channel_product_variants"
+    __tablename__ = "products_sku"
     __table_args__ = (
         UniqueConstraint(
-            "channel_product_id",
-            "external_variant_id",
+            "spu_pk",
+            "sku_id",
             name="uq_channel_variants_product_ext",
         ),
         Index("ix_channel_variants_seller_sku", "seller_sku"),
@@ -124,12 +124,12 @@ class ChannelProductVariant(Base):
         primary_key=True,
         server_default=text("generate_always_as_identity()"),
     )
-    channel_product_id: Mapped[int] = mapped_column(
+    spu_pk: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("commerce.channel_products.id", ondelete="RESTRICT"),
+        ForeignKey("commerce.products_spu.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    external_variant_id: Mapped[str] = mapped_column(Text, nullable=False)
+    sku_id: Mapped[str] = mapped_column(Text, nullable=False)
     seller_sku: Mapped[str | None] = mapped_column(Text)
     variant_name: Mapped[str | None] = mapped_column(Text)
     attributes: Mapped[dict | None] = mapped_column(JSONB)
@@ -155,8 +155,8 @@ class SalesOrder(Base):
     __tablename__ = "sales_orders"
     __table_args__ = (
         UniqueConstraint(
-            "channel_account_id",
-            "external_order_id",
+            "shop_pk",
+            "order_id",
             name="uq_sales_orders_account_ext",
         ),
         Index("ix_sales_orders_status", "status"),
@@ -169,19 +169,19 @@ class SalesOrder(Base):
         primary_key=True,
         server_default=text("generate_always_as_identity()"),
     )
-    channel_account_id: Mapped[int] = mapped_column(
+    shop_pk: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("commerce.channel_accounts.id", ondelete="RESTRICT"),
+        ForeignKey("commerce.shops.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    external_order_id: Mapped[str] = mapped_column(Text, nullable=False)
+    order_id: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str | None] = mapped_column(Text)
     currency: Mapped[str | None] = mapped_column(Text)
     payment_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
     total_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
     fulfillment_type: Mapped[str | None] = mapped_column(Text)
-    source_created_at: Mapped[datetime | None]
-    source_updated_at: Mapped[datetime | None]
+    order_time: Mapped[datetime | None]
+    order_modify_time: Mapped[datetime | None]
     paid_at: Mapped[datetime | None]
     shipped_at: Mapped[datetime | None]
     delivered_at: Mapped[datetime | None]
@@ -202,7 +202,7 @@ class SalesOrder(Base):
 class SalesOrderLine(Base):
     """Order line item. Snapshots name/variant/image at purchase time.
 
-    Foreign keys to channel_products / channel_product_variants are
+    Foreign keys to products_spu / products_sku are
     intentionally nullable: when a line lands before its product is synced,
     the row still persists, and external_*_snapshot columns hold the truth
     for later join. NEVER auto-bind by title.
@@ -211,10 +211,10 @@ class SalesOrderLine(Base):
     __tablename__ = "sales_order_lines"
     __table_args__ = (
         UniqueConstraint(
-            "sales_order_id", "external_line_id", name="uq_sales_order_lines_order_ext"
+            "order_pk", "external_line_id", name="uq_sales_order_lines_order_ext"
         ),
-        Index("ix_sales_order_lines_channel_product", "channel_product_id"),
-        Index("ix_sales_order_lines_channel_variant", "channel_product_variant_id"),
+        Index("ix_sales_order_lines_channel_product", "spu_pk"),
+        Index("ix_sales_order_lines_channel_variant", "sku_pk"),
         {"schema": "commerce"},
     )
 
@@ -223,18 +223,18 @@ class SalesOrderLine(Base):
         primary_key=True,
         server_default=text("generate_always_as_identity()"),
     )
-    sales_order_id: Mapped[int] = mapped_column(
+    order_pk: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("commerce.sales_orders.id", ondelete="RESTRICT"),
         nullable=False,
     )
     external_line_id: Mapped[str] = mapped_column(Text, nullable=False)
-    channel_product_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("commerce.channel_products.id", ondelete="SET NULL")
+    spu_pk: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("commerce.products_spu.id", ondelete="SET NULL")
     )
-    channel_product_variant_id: Mapped[int | None] = mapped_column(
+    sku_pk: Mapped[int | None] = mapped_column(
         BigInteger,
-        ForeignKey("commerce.channel_product_variants.id", ondelete="SET NULL"),
+        ForeignKey("commerce.products_sku.id", ondelete="SET NULL"),
     )
     external_product_id_snapshot: Mapped[str | None] = mapped_column(Text)
     external_variant_id_snapshot: Mapped[str | None] = mapped_column(Text)

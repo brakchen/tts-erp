@@ -39,7 +39,7 @@ class ProductCostSnapshot(Base):
     __tablename__ = "product_cost_snapshots"
     __table_args__ = (
         UniqueConstraint(
-            "channel_product_id",
+            "spu_pk",
             "valid_from",
             "calculation_version",
             name="uq_cost_snapshots_pivot_version",
@@ -53,9 +53,9 @@ class ProductCostSnapshot(Base):
         primary_key=True,
         server_default=text("generate_always_as_identity()"),
     )
-    channel_product_id: Mapped[int] = mapped_column(
+    spu_pk: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("commerce.channel_products.id", ondelete="RESTRICT"),
+        ForeignKey("commerce.products_spu.id", ondelete="RESTRICT"),
         nullable=False,
     )
     cost_method: Mapped[str] = mapped_column(Text, nullable=False)
@@ -94,7 +94,7 @@ class ProductProfitDaily(Base):
     __tablename__ = "product_profit_daily"
     __table_args__ = (
         UniqueConstraint(
-            "channel_product_id",
+            "spu_pk",
             "profit_date",
             "calculation_version",
             name="uq_profit_daily_pivot_version",
@@ -108,9 +108,9 @@ class ProductProfitDaily(Base):
         primary_key=True,
         server_default=text("generate_always_as_identity()"),
     )
-    channel_product_id: Mapped[int] = mapped_column(
+    spu_pk: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("commerce.channel_products.id", ondelete="RESTRICT"),
+        ForeignKey("commerce.products_spu.id", ondelete="RESTRICT"),
         nullable=False,
     )
     profit_date: Mapped[date] = mapped_column(Date, nullable=False)
