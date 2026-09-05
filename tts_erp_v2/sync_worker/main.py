@@ -38,7 +38,9 @@ two entry points independent.
 from __future__ import annotations
 
 import logging
+import logging.handlers
 import os
+import pathlib
 import signal
 import sys
 
@@ -74,7 +76,15 @@ def _require_env() -> None:
 
 
 def _configure_logging() -> None:
-    """Plain INFO-to-stderr logging. systemd captures stderr to journalctl."""
+    """INFO to stderr + a rotating file under logs/.
+
+    systemd captures stderr to journalctl; the file handler is a second
+    copy so bursty failure windows (misfire replays, journald rate
+    limiting) never drop the real traceback that the sentinel
+    ``tick raised`` row points at. Path is relative to the repo root
+    (cwd of the systemd unit); pytest environments without a ``logs/``
+    dir fall back to stderr-only via the guard below.
+    """
     level = os.environ.get("TTS_ERP_SYNC_LOG_LEVEL", "INFO").upper()
     logging.basicConfig(
         level=level,
@@ -88,6 +98,21 @@ def _configure_logging() -> None:
     # kwarg is also no-op in that path; we set it explicitly here so the
     # documented behaviour holds in those environments too.
     logging.getLogger().setLevel(level)
+    log_dir = pathlib.Path(__file__).resolve().parent.parent.parent / "logs"
+    if log_dir.is_dir():
+        _log_file = log_dir / "sync_worker.log"
+        fh = logging.handlers.RotatingFileHandler(
+            _log_file,
+            maxBytes=5 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
+        )
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)-7s %(name)s | %(message)s")
+        )
+        logging.getLogger().addHandler(fh)
+        log.info("sync_worker file logging -> %s", _log_file)
 
 
 # ─── Subcommand handlers ───────────────────────────────────────────

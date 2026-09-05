@@ -290,7 +290,7 @@ def _run_system_job(
             log.exception("[%s] commit() failed after successful run", spec.job_name)
             session.rollback()
         log.info("[%s] ok result=%s", spec.job_name, result)
-    except Exception:  # noqa: BLE001 — boundary
+    except Exception as exc:  # noqa: BLE001 — boundary
         # The exception fired BEFORE the sync_jobs row was committed
         # (or DURING the commit). Roll back the inner transaction
         # first, then write a sentinel 'failed' sync_jobs row in a
@@ -299,7 +299,11 @@ def _run_system_job(
             session.rollback()
         except Exception:  # noqa: BLE001
             log.exception("[%s] rollback during error path failed", spec.job_name)
-        _record_failed_tick(session_factory, spec, "tick raised")
+        _record_failed_tick(
+            session_factory,
+            spec,
+            f"tick raised: {type(exc).__name__}: {exc}",
+        )
         log.exception("[%s] tick failed", spec.job_name)
     finally:
         session.close()

@@ -135,7 +135,7 @@ def test_system_job_writes_sentinel_on_exception(monkeypatch):
     )
     scheduler._run_system_job(spec, factory)  # must not raise
     session.rollback.assert_called()
-    assert sentinel_calls == ["tick raised"]
+    assert sentinel_calls == ["tick raised: RuntimeError: boom"]
 
 
 def test_system_job_passes_registry_only_for_token_refresh(monkeypatch):

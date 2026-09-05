@@ -566,7 +566,7 @@ def test_run_system_job_swallows_rollback_error(
         entrypoint="fake_entry",
     )
     _run_system_job(spec, factory)
-    assert sentinel_calls == ["tick raised"]
+    assert sentinel_calls == ["tick raised: ValueError: inner boom"]
 
 
 def test_run_system_job_skips_registry_when_needs_token_registry_false(
