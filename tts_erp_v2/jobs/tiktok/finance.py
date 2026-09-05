@@ -50,7 +50,7 @@ amounts — they bloat the table 17x).
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -62,6 +62,7 @@ from tts_erp_v2.db.models import (
     ChannelAccount,
     Payout,
     RawRecord,
+    SalesOrder,
     SettlementComponent,
     SettlementStatement,
     SettlementTransaction,
@@ -173,7 +174,7 @@ def _epoch_seconds_to_utc(seconds: int | None):
     if seconds is None or seconds <= 0:
         return None
     try:
-        return datetime.fromtimestamp(_safe_int(seconds), tz=timezone.utc)
+        return datetime.fromtimestamp(_safe_int(seconds), tz=UTC)
     except (TypeError, ValueError, OverflowError):
         return None
 
@@ -185,6 +186,25 @@ def _to_decimal(v) -> Decimal | None:
         return Decimal(str(v))
     except Exception:  # noqa: BLE001
         return None
+
+
+def _money_of(
+    value, *, fallback_currency: str | None = None
+) -> tuple[Decimal | None, str | None]:
+    """Coerce a TikTok 202309 money field to ``(amount, currency)``.
+
+    Live 202309 ``/payments`` payloads carry amounts as NESTED objects
+    ``{"value": "3928553", "currency": "VND"}`` — reading them as flat
+    scalars silently drops the field (audit 2026-09-05: every
+    ``finance.payouts`` row had amount=NULL currency=NULL). Older / legacy
+    shapes (statements payloads, test fixtures) are flat scalars with a
+    sibling top-level ``currency``. Handles both.
+    """
+    if isinstance(value, dict):
+        return _to_decimal(value.get("value")), value.get(
+            "currency"
+        ) or fallback_currency
+    return _to_decimal(value), fallback_currency
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -244,11 +264,22 @@ def _parse_payout(raw: dict) -> dict:
     pid = raw.get("payment_id") or raw.get("id")
     if not pid:
         raise ParseError("payment_id missing")
+    # Live 202309 payments: ``amount`` == ``settlement_amount`` ==
+    # ``payment_amount_before_exchange`` (exchange_rate="1" for VND
+    # stores), all nested objects. Prefer the top-level ``amount`` and
+    # fall back to ``settlement_amount`` for payloads that omit it.
+    amount, currency = _money_of(
+        raw.get("amount"), fallback_currency=raw.get("currency")
+    )
+    if amount is None:
+        amount, currency = _money_of(
+            raw.get("settlement_amount"), fallback_currency=raw.get("currency")
+        )
     return {
         "external_payout_id": str(pid),
         "status": raw.get("payment_status") or raw.get("status"),
-        "currency": raw.get("currency"),
-        "amount": _to_decimal(raw.get("amount")),
+        "currency": currency,
+        "amount": amount,
         "source_created_at": _epoch_seconds_to_utc(raw.get("create_time")),
         "source_updated_at": _epoch_seconds_to_utc(raw.get("update_time")),
     }
@@ -645,6 +676,36 @@ def _sync_statements(
                 )
                 continue
 
+            # Link the transaction to its sales order when the upstream
+            # payload carries ``order_id`` (real 202309 transactions do).
+            # Pre-fix this was never resolved → the whole
+            # ``settlement_transactions`` table sat with order_pk NULL and
+            # 订单×结算 couldn't be reconciled (audit 2026-09-05). Orders
+            # that haven't synced yet (or that we never store) are left
+            # NULL and surfaced as a SyncIssue so the gap stays visible.
+            order_id_ext = raw_t.get("order_id")
+            if order_id_ext:
+                order_pk = session.execute(
+                    select(SalesOrder.id).where(
+                        SalesOrder.shop_pk == account.id,
+                        SalesOrder.order_id == str(order_id_ext),
+                    )
+                ).scalar_one_or_none()
+                t_fields["order_pk"] = order_pk
+                if order_pk is None:
+                    failed += 1
+                    session.add(
+                        SyncIssue(
+                            job_name=JOB_NAME,
+                            issue_type="TXN_ORDER_NOT_FOUND",
+                            external_id=ext_txn_id,
+                            details={
+                                "section": "transactions",
+                                "order_id": str(order_id_ext),
+                            },
+                        )
+                    )
+
             raw_t_row = RawRecord(
                 endpoint=STATEMENT_TRANSACTIONS_TEMPLATE.format(
                     statement_id=s_fields["external_statement_id"]
@@ -722,9 +783,7 @@ def run(
         )
     ).scalar_one_or_none()
     if account is None:
-        raise UpstreamJobError(
-            f"shops row missing for tiktok shop_id={shop_id!r}"
-        )
+        raise UpstreamJobError(f"shops row missing for tiktok shop_id={shop_id!r}")
 
     payouts_result = _sync_payouts(
         session,

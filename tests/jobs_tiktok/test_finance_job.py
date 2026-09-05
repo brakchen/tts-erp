@@ -24,6 +24,8 @@ Contract under test (Lane 2 refactor, 2026-08-31)
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 from sqlalchemy import select
 
@@ -31,6 +33,7 @@ from tts_erp_v2.db.models import (
     ChannelAccount,
     Credentials,
     Payout,
+    SalesOrder,
     SettlementComponent,
     SettlementStatement,
     SettlementTransaction,
@@ -139,6 +142,58 @@ def _transaction_payload(tid: str, *, fee: str | None = "1.50"):
     if fee is not None:
         tx["fee"] = fee
     return tx
+
+
+def _payout_payload_202309(pid: str, *, amount: str = "3928553"):
+    """Real 202309 /payments payload: top-level ``id`` + NESTED money.
+
+    Live shape (2026-09-05): ``amount`` / ``settlement_amount`` are
+    ``{"value": "...", "currency": "VND"}`` objects, NOT flat scalars.
+    This is the shape the pre-fix ``_parse_payout`` silently dropped
+    (``raw.get("amount")`` → dict → ``None``).
+    """
+    return {
+        "id": pid,
+        "amount": {"value": amount, "currency": "VND"},
+        "status": "PAID",
+        "create_time": 1_700_001_000,
+        "paid_time": 1_700_001_100,
+        "exchange_rate": "1",
+        "settlement_amount": {"value": amount, "currency": "VND"},
+        "payment_amount_before_exchange": {"value": amount, "currency": "VND"},
+    }
+
+
+def _statement_transaction_payload_202309(
+    tid: str, *, order_id: str | None = None, settlement_amount: str = "374012"
+):
+    """Real 202309 statement_transactions payload: flat money fields +
+    optional upstream ``order_id`` linking the line to a sales order.
+    """
+    tx = {
+        "id": tid,
+        "type": "ORDER",
+        "currency": "VND",
+        "settlement_amount": settlement_amount,
+        "order_create_time": 1_700_001_000,
+    }
+    if order_id is not None:
+        tx["order_id"] = order_id
+    return tx
+
+
+def _make_sales_order(session, account: ChannelAccount, order_id: str) -> SalesOrder:
+    order = SalesOrder(
+        shop_pk=account.id,
+        order_id=order_id,
+        status="COMPLETED",
+        currency="VND",
+        payment_amount=Decimal("539477.0000"),
+        total_amount=Decimal("539477.0000"),
+    )
+    session.add(order)
+    session.flush()
+    return order
 
 
 def _cursor_value(session, *, job_name: str, scope: str) -> int | None:
@@ -814,3 +869,153 @@ def test_finance_old_legacy_cursor_name_not_written(db_session) -> None:
         .all()
     )
     assert legacy == []
+
+
+# ─── Regression: real 202309 payload shapes (audit 2026-09-05) ────
+#
+# Live /finance/202309/payments payloads carry amounts as NESTED
+# ``{"value": ..., "currency": ...}`` objects; the pre-fix parser read
+# ``raw.get("amount")`` / ``raw.get("currency")`` as flat scalars, so
+# every finance.payouts row landed with amount=NULL currency=NULL.
+# statement_transactions rows carry an upstream ``order_id`` that was
+# never resolved → settlement_transactions.order_pk stayed NULL for the
+# whole table (订单×结算无法对账).
+
+
+def test_finance_payout_nested_amount_currency_persisted(db_session) -> None:
+    """A real 202309 payments payload (nested money objects) must persist
+    amount + currency on finance.payouts — regression for the audit that
+    found all 30 prod rows with amount=NULL currency=NULL.
+    """
+    account = _make_account(db_session)
+    proxy = FakeProxy(
+        payouts_pages=[
+            {"code": 0, "data": {"payments": [_payout_payload_202309("PAY_N1")]}}
+        ],
+        statements_pages=[],
+        transactions_pages=[],
+    )
+    _, result = run_with_sync_job(
+        db_session,
+        job_name="tiktok.finance",
+        credential_id=account.credential_id,
+        inner=finance_job.run,
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
+    )
+    assert result.rows_inserted == 1
+    payout = db_session.execute(
+        select(Payout).where(Payout.external_payout_id == "PAY_N1")
+    ).scalar_one()
+    assert payout.amount == pytest.approx(3_928_553)
+    assert payout.currency == "VND"
+    assert payout.status == "PAID"
+
+
+def test_finance_transaction_order_pk_resolved(db_session) -> None:
+    """statement_transactions payloads carry upstream ``order_id``; the
+    transaction row must link (order_pk) to the matching sales order.
+    """
+    account = _make_account(db_session)
+    order = _make_sales_order(db_session, account, "TEST_TT_FIN_ORD1")
+    proxy = FakeProxy(
+        payouts_pages=[
+            {"code": 0, "data": {"payments": [_payout_payload_202309("PAY_N2")]}}
+        ],
+        statements_pages=[
+            {
+                "code": 0,
+                "data": {
+                    "statements": [_statement_payload("STM_N2", payment_id="PAY_N2")],
+                    "next_page_token": "",
+                },
+            }
+        ],
+        transactions_pages=[
+            {
+                "code": 0,
+                "data": {
+                    "statement_transactions": [
+                        _statement_transaction_payload_202309(
+                            "TXN_N2", order_id=order.order_id
+                        )
+                    ],
+                    "next_page_token": "",
+                },
+            }
+        ],
+    )
+    run_with_sync_job(
+        db_session,
+        job_name="tiktok.finance",
+        credential_id=account.credential_id,
+        inner=finance_job.run,
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
+    )
+    txn = db_session.execute(
+        select(SettlementTransaction).where(
+            SettlementTransaction.external_transaction_id == "TXN_N2"
+        )
+    ).scalar_one()
+    assert txn.order_pk == order.id
+
+
+def test_finance_transaction_unresolved_order_sync_issue(db_session) -> None:
+    """order_id present but no matching sales order row → transaction is
+    still ingested (order sync may lag) with order_pk NULL, and the gap
+    is surfaced as a SyncIssue for later back-fill.
+    """
+    account = _make_account(db_session)
+    proxy = FakeProxy(
+        payouts_pages=[
+            {"code": 0, "data": {"payments": [_payout_payload_202309("PAY_N3")]}}
+        ],
+        statements_pages=[
+            {
+                "code": 0,
+                "data": {
+                    "statements": [_statement_payload("STM_N3", payment_id="PAY_N3")],
+                    "next_page_token": "",
+                },
+            }
+        ],
+        transactions_pages=[
+            {
+                "code": 0,
+                "data": {
+                    "statement_transactions": [
+                        _statement_transaction_payload_202309(
+                            "TXN_N3", order_id="TEST_TT_FIN_ORD_MISSING"
+                        )
+                    ],
+                    "next_page_token": "",
+                },
+            }
+        ],
+    )
+    run_with_sync_job(
+        db_session,
+        job_name="tiktok.finance",
+        credential_id=account.credential_id,
+        inner=finance_job.run,
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
+    )
+    txn = db_session.execute(
+        select(SettlementTransaction).where(
+            SettlementTransaction.external_transaction_id == "TXN_N3"
+        )
+    ).scalar_one()
+    # Still ingested (order sync may simply lag a tick), link left NULL.
+    assert txn.order_pk is None
+    issues = (
+        db_session.execute(
+            select(SyncIssue).where(
+                SyncIssue.job_name == "tiktok.finance",
+                SyncIssue.issue_type == "TXN_ORDER_NOT_FOUND",
+                SyncIssue.external_id == "TXN_N3",
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(issues) == 1
+    assert issues[0].details["order_id"] == "TEST_TT_FIN_ORD_MISSING"
