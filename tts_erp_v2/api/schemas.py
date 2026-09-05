@@ -24,6 +24,8 @@ class ChannelAccountOut(BaseModel):
     seller_type: str | None = None
     status: str | None = None
     synced_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class ChannelProductOut(BaseModel):
@@ -44,6 +46,8 @@ class ChannelProductVariantOut(BaseModel):
     external_variant_id: str
     seller_sku: str | None = None
     variant_name: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class SalesOrderOut(BaseModel):
@@ -69,6 +73,8 @@ class SalesOrderLineOut(BaseModel):
     channel_product_variant_id: int | None = None
     quantity: Decimal | None = None
     unit_price: Decimal | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class LinkEvidenceOut(BaseModel):
@@ -80,6 +86,8 @@ class LinkEvidenceOut(BaseModel):
     source_table: str | None = None
     source_external_id: str | None = None
     observed_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class ProductLinkOut(BaseModel):
@@ -92,6 +100,8 @@ class ProductLinkOut(BaseModel):
     is_primary: bool | None = None
     valid_from: datetime
     valid_to: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class LinkOverrideIn(BaseModel):
@@ -106,6 +116,8 @@ class LinkOverrideIn(BaseModel):
     decision: str = Field(pattern="^(ALLOW|DENY|PRIMARY)$")
     reason: str | None = Field(default=None, max_length=500)
     valid_from: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class LinkOverrideOut(BaseModel):
@@ -118,6 +130,8 @@ class LinkOverrideOut(BaseModel):
     valid_from: datetime
     valid_to: datetime | None = None
     created_by: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class LinkIssueOut(BaseModel):
@@ -130,6 +144,7 @@ class LinkIssueOut(BaseModel):
     status: str | None = None
     created_at: datetime
     resolved_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class ManualCostIn(BaseModel):
@@ -147,6 +162,8 @@ class ManualCostIn(BaseModel):
     currency: str = Field(min_length=3, max_length=3, pattern="^[A-Z]{3}$")
     valid_from: datetime | None = None
     note: str | None = Field(default=None, max_length=500)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class ManualCostOut(BaseModel):
@@ -159,6 +176,8 @@ class ManualCostOut(BaseModel):
     valid_to: datetime | None = None
     note: str | None = None
     created_by: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class CostSnapshotOut(BaseModel):
@@ -170,6 +189,8 @@ class CostSnapshotOut(BaseModel):
     currency: str
     calculation_version: int
     calculated_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class ProfitDailyOut(BaseModel):
@@ -181,6 +202,8 @@ class ProfitDailyOut(BaseModel):
     cost: Decimal | None = None
     profit: Decimal | None = None
     currency: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class CoverageReport(BaseModel):
@@ -198,3 +221,5 @@ class CoverageReport(BaseModel):
     linked_spus: int
     missing_cost_spus: int
     calculation_version: int
+    created_at: datetime | None = None
+    updated_at: datetime | None = None

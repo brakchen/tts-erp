@@ -50,7 +50,7 @@ _SQL_LATEST_PURCHASE_COST = text(
     "JOIN procurement.purchase_orders po ON po.id = pol.purchase_order_id "
     "WHERE epl.channel_product_id = :cp_id "
     "  AND pol.unit_cost IS NOT NULL "
-    "ORDER BY pol.synced_at DESC NULLS LAST, pol.id DESC "
+    "ORDER BY pol.updated_at DESC NULLS LAST, pol.id DESC "
     "LIMIT 1"
 )
 

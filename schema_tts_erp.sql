@@ -101,6 +101,18 @@ END;
 $$;
 
 
+-- Name: fn_touch_updated_at(); Type: FUNCTION; Schema: public; Owner: -
+
+CREATE OR REPLACE FUNCTION public.fn_touch_updated_at() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  NEW.updated_at := clock_timestamp();
+  RETURN NEW;
+END;
+$$;
+
+
 -- Name: touch_updated_at(); Type: FUNCTION; Schema: public; Owner: -
 
 CREATE OR REPLACE FUNCTION public.touch_updated_at() RETURNS trigger
@@ -136,7 +148,9 @@ CREATE TABLE IF NOT EXISTS after_sales.case_lines (
     quantity numeric(20,4),
     refund_amount numeric(20,4),
     currency text,
-    should_replenish_stock boolean
+    should_replenish_stock boolean,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -162,7 +176,8 @@ CREATE TABLE IF NOT EXISTS after_sales.cases (
     raw_record_id bigint,
     synced_at timestamp with time zone DEFAULT now() NOT NULL,
     refund_amount numeric(20,4),
-    currency text
+    currency text,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -187,7 +202,8 @@ CREATE TABLE IF NOT EXISTS analytics.ad_audit_log (
     records_rej integer,
     error_code text,
     created_at timestamp with time zone DEFAULT now() CONSTRAINT analytics_audit_log_created_at_not_null NOT NULL,
-    error_message text
+    error_message text,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -200,6 +216,7 @@ CREATE TABLE IF NOT EXISTS analytics.ad_daily_completeness (
     campaign_id text CONSTRAINT analytics_daily_completeness_campaign_id_not_null NOT NULL,
     day date CONSTRAINT analytics_daily_completeness_day_not_null NOT NULL,
     captured_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT ck_analytics_daily_completeness_storage CHECK ((storage_key = ANY (ARRAY['productAnalyses'::text, 'sessionAnalyses'::text, 'campaignChangeLogs'::text])))
 );
 
@@ -223,6 +240,7 @@ CREATE TABLE IF NOT EXISTS analytics.ad_raw (
     request_id text,
     protocol_version integer DEFAULT 2 CONSTRAINT analytics_raw_protocol_version_not_null NOT NULL,
     schema_version integer DEFAULT 1 CONSTRAINT analytics_raw_schema_version_not_null NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT ck_analytics_raw_protocol CHECK ((protocol_version > 0)),
     CONSTRAINT ck_analytics_raw_schema CHECK ((schema_version > 0))
 );
@@ -256,6 +274,7 @@ CREATE TABLE IF NOT EXISTS analytics.ad_records (
     protocol_version integer DEFAULT 1 CONSTRAINT analytics_records_protocol_version_not_null NOT NULL,
     received_at timestamp with time zone DEFAULT now() CONSTRAINT analytics_records_received_at_not_null NOT NULL,
     request_id text,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT ck_analytics_records_protocol CHECK ((protocol_version > 0)),
     CONSTRAINT ck_analytics_records_schema CHECK ((schema_version > 0)),
     CONSTRAINT ck_analytics_records_storage CHECK ((storage_key = ANY (ARRAY['productAnalyses'::text, 'sessionAnalyses'::text, 'campaignChangeLogs'::text])))
@@ -268,7 +287,8 @@ CREATE TABLE IF NOT EXISTS analytics.ad_shop_timezones (
     seller_id text CONSTRAINT analytics_shop_timezones_seller_id_not_null NOT NULL,
     advertiser_id text CONSTRAINT analytics_shop_timezones_advertiser_id_not_null NOT NULL,
     timezone text DEFAULT 'Asia/Shanghai'::text CONSTRAINT analytics_shop_timezones_timezone_not_null NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() CONSTRAINT analytics_shop_timezones_updated_at_not_null NOT NULL
+    updated_at timestamp with time zone DEFAULT now() CONSTRAINT analytics_shop_timezones_updated_at_not_null NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -296,7 +316,8 @@ CREATE TABLE IF NOT EXISTS commerce.channel_accounts (
     status text,
     credential_id bigint,
     source_updated_at timestamp with time zone,
-    synced_at timestamp with time zone DEFAULT now() NOT NULL
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -319,7 +340,8 @@ CREATE TABLE IF NOT EXISTS commerce.channel_product_variants (
     status text,
     source_updated_at timestamp with time zone,
     raw_record_id bigint,
-    synced_at timestamp with time zone DEFAULT now() NOT NULL
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -342,7 +364,8 @@ CREATE TABLE IF NOT EXISTS commerce.channel_products (
     source_created_at timestamp with time zone,
     source_updated_at timestamp with time zone,
     raw_record_id bigint,
-    synced_at timestamp with time zone DEFAULT now() NOT NULL
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -370,7 +393,8 @@ CREATE TABLE IF NOT EXISTS commerce.sales_order_lines (
     currency text,
     line_status text,
     raw_record_id bigint,
-    synced_at timestamp with time zone DEFAULT now() NOT NULL
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -398,7 +422,8 @@ CREATE TABLE IF NOT EXISTS commerce.sales_orders (
     delivered_at timestamp with time zone,
     cancelled_at timestamp with time zone,
     raw_record_id bigint,
-    synced_at timestamp with time zone DEFAULT now() NOT NULL
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -420,7 +445,8 @@ CREATE TABLE IF NOT EXISTS finance.payouts (
     source_created_at timestamp with time zone,
     source_updated_at timestamp with time zone,
     raw_record_id bigint,
-    synced_at timestamp with time zone DEFAULT now() NOT NULL
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -438,7 +464,9 @@ CREATE TABLE IF NOT EXISTS finance.settlement_components (
     component_code text NOT NULL,
     amount numeric(20,4) NOT NULL,
     currency text NOT NULL,
-    source_order integer
+    source_order integer,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -459,7 +487,8 @@ CREATE TABLE IF NOT EXISTS finance.settlement_statements (
     period_end date,
     currency text,
     raw_record_id bigint,
-    synced_at timestamp with time zone DEFAULT now() NOT NULL
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -480,7 +509,8 @@ CREATE TABLE IF NOT EXISTS finance.settlement_transactions (
     after_sales_case_id bigint,
     transaction_time timestamp with time zone,
     raw_record_id bigint,
-    synced_at timestamp with time zone DEFAULT now() NOT NULL
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -495,7 +525,9 @@ ALTER TABLE finance.settlement_transactions ALTER COLUMN id ADD GENERATED ALWAYS
 CREATE TABLE IF NOT EXISTS fulfillment.shipment_lines (
     shipment_id bigint NOT NULL,
     sales_order_line_id bigint NOT NULL,
-    quantity numeric(20,4)
+    quantity numeric(20,4),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -512,7 +544,8 @@ CREATE TABLE IF NOT EXISTS fulfillment.shipments (
     shipped_at timestamp with time zone,
     delivered_at timestamp with time zone,
     raw_record_id bigint,
-    synced_at timestamp with time zone DEFAULT now() NOT NULL
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -532,7 +565,8 @@ CREATE TABLE IF NOT EXISTS fulfillment.tracking_events (
     event_at timestamp with time zone,
     description text,
     location text,
-    synced_at timestamp with time zone DEFAULT now() NOT NULL
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -575,7 +609,8 @@ CREATE TABLE IF NOT EXISTS integration.raw_records (
     captured_at timestamp with time zone DEFAULT now() NOT NULL,
     payload jsonb NOT NULL,
     payload_hash character varying(64),
-    synced_at timestamp with time zone DEFAULT now() NOT NULL
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -593,7 +628,8 @@ CREATE TABLE IF NOT EXISTS integration.sync_cursors (
     scope text NOT NULL,
     cursor_value text,
     cursor_epoch_ms bigint,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -612,7 +648,9 @@ CREATE TABLE IF NOT EXISTS integration.sync_issues (
     external_id text,
     details jsonb,
     detected_at timestamp with time zone DEFAULT now() NOT NULL,
-    resolved_at timestamp with time zone
+    resolved_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -636,7 +674,9 @@ CREATE TABLE IF NOT EXISTS integration.sync_jobs (
     rows_updated integer DEFAULT 0 NOT NULL,
     rows_failed integer DEFAULT 0 NOT NULL,
     error_message text,
-    extra jsonb
+    extra jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -657,7 +697,9 @@ CREATE TABLE IF NOT EXISTS linkage.account_links (
     valid_from timestamp with time zone DEFAULT now() NOT NULL,
     valid_to timestamp with time zone,
     source_updated_at timestamp with time zone,
-    raw_record_id bigint
+    raw_record_id bigint,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -678,7 +720,8 @@ CREATE TABLE IF NOT EXISTS linkage.link_overrides (
     valid_from timestamp with time zone DEFAULT now() NOT NULL,
     valid_to timestamp with time zone,
     created_by text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -715,7 +758,8 @@ CREATE TABLE IF NOT EXISTS procurement.procurement_products (
     status text,
     raw_record_id bigint,
     source_updated_at timestamp with time zone,
-    synced_at timestamp with time zone DEFAULT now() NOT NULL
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -750,7 +794,9 @@ CREATE TABLE IF NOT EXISTS linkage.link_evidence (
     source_table text,
     source_external_id text,
     evidence_payload jsonb,
-    observed_at timestamp with time zone DEFAULT now() NOT NULL
+    observed_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -771,7 +817,8 @@ CREATE TABLE IF NOT EXISTS linkage.link_issues (
     status text,
     details jsonb,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    resolved_at timestamp with time zone
+    resolved_at timestamp with time zone,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -803,7 +850,9 @@ CREATE TABLE IF NOT EXISTS linkage.variant_links (
     status text,
     valid_from timestamp with time zone DEFAULT now() NOT NULL,
     valid_to timestamp with time zone,
-    raw_record_id bigint
+    raw_record_id bigint,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -824,7 +873,8 @@ CREATE TABLE IF NOT EXISTS procurement.manual_product_costs (
     valid_to timestamp with time zone,
     note text,
     created_by text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -844,7 +894,8 @@ CREATE TABLE IF NOT EXISTS procurement.procurement_accounts (
     status text,
     credential_id bigint,
     source_updated_at timestamp with time zone,
-    synced_at timestamp with time zone DEFAULT now() NOT NULL
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -865,7 +916,8 @@ CREATE TABLE IF NOT EXISTS procurement.procurement_product_variants (
     supplier_sku text,
     status text,
     raw_record_id bigint,
-    synced_at timestamp with time zone DEFAULT now() NOT NULL
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -894,7 +946,8 @@ CREATE TABLE IF NOT EXISTS procurement.purchase_order_lines (
     currency text,
     line_status text,
     raw_record_id bigint,
-    synced_at timestamp with time zone DEFAULT now() NOT NULL
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -919,7 +972,8 @@ CREATE TABLE IF NOT EXISTS procurement.purchase_orders (
     paid_at timestamp with time zone,
     completed_at timestamp with time zone,
     raw_record_id bigint,
-    synced_at timestamp with time zone DEFAULT now() NOT NULL
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -946,6 +1000,8 @@ CREATE TABLE IF NOT EXISTS procurement.spu_images (
     deleted_at timestamp with time zone,
     failure_reason text,
     raw_metadata jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT spu_images_size_bytes_check CHECK (((size_bytes > 0) AND (size_bytes <= 8388608))),
     CONSTRAINT spu_images_status_check CHECK ((status = ANY (ARRAY['awaiting_upload'::text, 'ready'::text, 'failed'::text])))
 );
@@ -1420,7 +1476,9 @@ CREATE TABLE IF NOT EXISTS reporting.product_cost_snapshots (
     source_purchase_amount numeric(20,4),
     source_line_count integer,
     calculation_version integer DEFAULT 1 NOT NULL,
-    calculated_at timestamp with time zone DEFAULT now() NOT NULL
+    calculated_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -1446,7 +1504,9 @@ CREATE TABLE IF NOT EXISTS reporting.product_profit_daily (
     currency text,
     cost_method text,
     calculation_version integer DEFAULT 1 NOT NULL,
-    calculated_at timestamp with time zone DEFAULT now() NOT NULL
+    calculated_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -1468,7 +1528,9 @@ CREATE TABLE IF NOT EXISTS reporting.shipment_tracking_summary (
     last_location text,
     event_count integer,
     calculation_version integer DEFAULT 1 NOT NULL,
-    calculated_at timestamp with time zone DEFAULT now() NOT NULL
+    calculated_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -1489,7 +1551,8 @@ CREATE TABLE IF NOT EXISTS security.api_keys (
     status text DEFAULT 'active'::text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     last_used_at timestamp with time zone,
-    rotated_to_key_hash text
+    rotated_to_key_hash text,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -2542,6 +2605,191 @@ CREATE INDEX IF NOT EXISTS ix_profit_daily_profit_date ON reporting.product_prof
 CREATE INDEX IF NOT EXISTS ix_api_keys_role ON security.api_keys USING btree (role);
 
 
+-- Name: case_lines trg_after_sales_case_lines_touch; Type: TRIGGER; Schema: after_sales; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_after_sales_case_lines_touch BEFORE UPDATE ON after_sales.case_lines FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: cases trg_after_sales_cases_touch; Type: TRIGGER; Schema: after_sales; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_after_sales_cases_touch BEFORE UPDATE ON after_sales.cases FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: ad_audit_log trg_analytics_ad_audit_log_touch; Type: TRIGGER; Schema: analytics; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_analytics_ad_audit_log_touch BEFORE UPDATE ON analytics.ad_audit_log FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: ad_daily_completeness trg_analytics_ad_daily_completeness_touch; Type: TRIGGER; Schema: analytics; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_analytics_ad_daily_completeness_touch BEFORE UPDATE ON analytics.ad_daily_completeness FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: ad_raw trg_analytics_ad_raw_touch; Type: TRIGGER; Schema: analytics; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_analytics_ad_raw_touch BEFORE UPDATE ON analytics.ad_raw FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: ad_records trg_analytics_ad_records_touch; Type: TRIGGER; Schema: analytics; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_analytics_ad_records_touch BEFORE UPDATE ON analytics.ad_records FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: ad_shop_timezones trg_analytics_ad_shop_timezones_touch; Type: TRIGGER; Schema: analytics; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_analytics_ad_shop_timezones_touch BEFORE UPDATE ON analytics.ad_shop_timezones FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: channel_accounts trg_commerce_channel_accounts_touch; Type: TRIGGER; Schema: commerce; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_commerce_channel_accounts_touch BEFORE UPDATE ON commerce.channel_accounts FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: channel_product_variants trg_commerce_channel_product_variants_touch; Type: TRIGGER; Schema: commerce; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_commerce_channel_product_variants_touch BEFORE UPDATE ON commerce.channel_product_variants FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: channel_products trg_commerce_channel_products_touch; Type: TRIGGER; Schema: commerce; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_commerce_channel_products_touch BEFORE UPDATE ON commerce.channel_products FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: sales_order_lines trg_commerce_sales_order_lines_touch; Type: TRIGGER; Schema: commerce; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_commerce_sales_order_lines_touch BEFORE UPDATE ON commerce.sales_order_lines FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: sales_orders trg_commerce_sales_orders_touch; Type: TRIGGER; Schema: commerce; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_commerce_sales_orders_touch BEFORE UPDATE ON commerce.sales_orders FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: payouts trg_finance_payouts_touch; Type: TRIGGER; Schema: finance; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_finance_payouts_touch BEFORE UPDATE ON finance.payouts FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: settlement_components trg_finance_settlement_components_touch; Type: TRIGGER; Schema: finance; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_finance_settlement_components_touch BEFORE UPDATE ON finance.settlement_components FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: settlement_statements trg_finance_settlement_statements_touch; Type: TRIGGER; Schema: finance; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_finance_settlement_statements_touch BEFORE UPDATE ON finance.settlement_statements FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: settlement_transactions trg_finance_settlement_transactions_touch; Type: TRIGGER; Schema: finance; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_finance_settlement_transactions_touch BEFORE UPDATE ON finance.settlement_transactions FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: shipment_lines trg_fulfillment_shipment_lines_touch; Type: TRIGGER; Schema: fulfillment; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_fulfillment_shipment_lines_touch BEFORE UPDATE ON fulfillment.shipment_lines FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: shipments trg_fulfillment_shipments_touch; Type: TRIGGER; Schema: fulfillment; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_fulfillment_shipments_touch BEFORE UPDATE ON fulfillment.shipments FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: tracking_events trg_fulfillment_tracking_events_touch; Type: TRIGGER; Schema: fulfillment; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_fulfillment_tracking_events_touch BEFORE UPDATE ON fulfillment.tracking_events FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: credentials trg_integration_credentials_touch; Type: TRIGGER; Schema: integration; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_integration_credentials_touch BEFORE UPDATE ON integration.credentials FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: raw_records trg_integration_raw_records_touch; Type: TRIGGER; Schema: integration; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_integration_raw_records_touch BEFORE UPDATE ON integration.raw_records FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: sync_cursors trg_integration_sync_cursors_touch; Type: TRIGGER; Schema: integration; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_integration_sync_cursors_touch BEFORE UPDATE ON integration.sync_cursors FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: sync_issues trg_integration_sync_issues_touch; Type: TRIGGER; Schema: integration; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_integration_sync_issues_touch BEFORE UPDATE ON integration.sync_issues FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: sync_jobs trg_integration_sync_jobs_touch; Type: TRIGGER; Schema: integration; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_integration_sync_jobs_touch BEFORE UPDATE ON integration.sync_jobs FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: account_links trg_linkage_account_links_touch; Type: TRIGGER; Schema: linkage; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_linkage_account_links_touch BEFORE UPDATE ON linkage.account_links FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: link_evidence trg_linkage_link_evidence_touch; Type: TRIGGER; Schema: linkage; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_linkage_link_evidence_touch BEFORE UPDATE ON linkage.link_evidence FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: link_issues trg_linkage_link_issues_touch; Type: TRIGGER; Schema: linkage; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_linkage_link_issues_touch BEFORE UPDATE ON linkage.link_issues FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: link_overrides trg_linkage_link_overrides_touch; Type: TRIGGER; Schema: linkage; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_linkage_link_overrides_touch BEFORE UPDATE ON linkage.link_overrides FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: product_links trg_linkage_product_links_touch; Type: TRIGGER; Schema: linkage; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_linkage_product_links_touch BEFORE UPDATE ON linkage.product_links FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: variant_links trg_linkage_variant_links_touch; Type: TRIGGER; Schema: linkage; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_linkage_variant_links_touch BEFORE UPDATE ON linkage.variant_links FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: manual_product_costs trg_procurement_manual_product_costs_touch; Type: TRIGGER; Schema: procurement; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_procurement_manual_product_costs_touch BEFORE UPDATE ON procurement.manual_product_costs FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: procurement_accounts trg_procurement_procurement_accounts_touch; Type: TRIGGER; Schema: procurement; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_procurement_procurement_accounts_touch BEFORE UPDATE ON procurement.procurement_accounts FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: procurement_product_variants trg_procurement_procurement_product_variants_touch; Type: TRIGGER; Schema: procurement; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_procurement_procurement_product_variants_touch BEFORE UPDATE ON procurement.procurement_product_variants FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: procurement_products trg_procurement_procurement_products_touch; Type: TRIGGER; Schema: procurement; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_procurement_procurement_products_touch BEFORE UPDATE ON procurement.procurement_products FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: purchase_order_lines trg_procurement_purchase_order_lines_touch; Type: TRIGGER; Schema: procurement; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_procurement_purchase_order_lines_touch BEFORE UPDATE ON procurement.purchase_order_lines FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: purchase_orders trg_procurement_purchase_orders_touch; Type: TRIGGER; Schema: procurement; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_procurement_purchase_orders_touch BEFORE UPDATE ON procurement.purchase_orders FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: spu_images trg_procurement_spu_images_touch; Type: TRIGGER; Schema: procurement; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_procurement_spu_images_touch BEFORE UPDATE ON procurement.spu_images FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
 -- Name: orders trg_orders_touch; Type: TRIGGER; Schema: public; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_orders_touch BEFORE UPDATE ON public.orders FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at();
@@ -2555,6 +2803,26 @@ CREATE OR REPLACE TRIGGER trg_shops_touch BEFORE UPDATE ON public.shops FOR EACH
 -- Name: sync_log trg_sync_log_retention; Type: TRIGGER; Schema: public; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_sync_log_retention AFTER INSERT ON public.sync_log FOR EACH STATEMENT EXECUTE FUNCTION public.trg_sync_log_retention_fn();
+
+
+-- Name: product_cost_snapshots trg_reporting_product_cost_snapshots_touch; Type: TRIGGER; Schema: reporting; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_reporting_product_cost_snapshots_touch BEFORE UPDATE ON reporting.product_cost_snapshots FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: product_profit_daily trg_reporting_product_profit_daily_touch; Type: TRIGGER; Schema: reporting; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_reporting_product_profit_daily_touch BEFORE UPDATE ON reporting.product_profit_daily FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: shipment_tracking_summary trg_reporting_shipment_tracking_summary_touch; Type: TRIGGER; Schema: reporting; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_reporting_shipment_tracking_summary_touch BEFORE UPDATE ON reporting.shipment_tracking_summary FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: api_keys trg_security_api_keys_touch; Type: TRIGGER; Schema: security; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_security_api_keys_touch BEFORE UPDATE ON security.api_keys FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
 -- Name: case_lines case_lines_case_id_fkey; Type: FK CONSTRAINT; Schema: after_sales; Owner: -
@@ -2955,5 +3223,5 @@ ALTER TABLE ONLY reporting.shipment_tracking_summary
 
 -- PostgreSQL database dump complete
 
-\unrestrict QKDfyG924xtyKyHMrqE4cwEDuafuyhhQ0zoxygUOWh6kFXm14EUuqcOmwNX2F7T
+\unrestrict dbJEkt7qEEcYGxX9vAjNSsnow2TsanYVfIUZxDp4khjmxZbhNl7tmEsRroJPI1Z
 

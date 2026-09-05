@@ -106,6 +106,12 @@ class AdRaw(Base):
     schema_version: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("1")
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+        onupdate=text("now()"),
+    )
 
 
 # ─── ad_records ──────────────────────────────────────────────────────
@@ -170,6 +176,12 @@ class AdRecord(Base):
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
     request_id: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+        onupdate=text("now()"),
+    )
 
 
 # ─── ad_daily_completeness ───────────────────────────────────────────
@@ -201,6 +213,12 @@ class AdDailyCompleteness(Base):
     captured_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+        onupdate=text("now()"),
+    )
 
 
 # ─── ad_shop_timezones ───────────────────────────────────────────────
@@ -218,7 +236,13 @@ class AdShopTimezone(Base):
         Text, nullable=False, server_default=text("'Asia/Shanghai'")
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()")
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+        onupdate=text("now()"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        nullable=False, server_default=text("now()")
     )
 
 
@@ -251,4 +275,10 @@ class AdAuditLog(Base):
     error_message: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+        onupdate=text("now()"),
     )

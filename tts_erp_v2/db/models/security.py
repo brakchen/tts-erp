@@ -4,10 +4,10 @@
 on creation. Role ∈ {readonly, readwrite, admin}. The auth middleware
 buckets requests by (api_key, role).
 """
+
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import (
     BigInteger,
@@ -30,12 +30,29 @@ class ApiKey(Base):
         {"schema": "security"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, server_default=text("generate_always_as_identity()"))
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
     key_hash: Mapped[str] = mapped_column(Text, nullable=False)  # sha256 hex
-    key_prefix: Mapped[str] = mapped_column(Text, nullable=False)  # e.g. ttserp_rw_abc...  — for human-friendly listing
-    name: Mapped[Optional[str]] = mapped_column(Text)
-    role: Mapped[str] = mapped_column(Text, nullable=False)  # readonly | readwrite | admin
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
-    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
-    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    rotated_to_key_hash: Mapped[Optional[str]] = mapped_column(Text)
+    key_prefix: Mapped[str] = mapped_column(
+        Text, nullable=False
+    )  # e.g. ttserp_rw_abc...  — for human-friendly listing
+    name: Mapped[str | None] = mapped_column(Text)
+    role: Mapped[str] = mapped_column(
+        Text, nullable=False
+    )  # readonly | readwrite | admin
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'active'")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        nullable=False, server_default=text("now()")
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        nullable=False,
+        server_default=text("now()"),
+        onupdate=text("now()"),
+    )
+    rotated_to_key_hash: Mapped[str | None] = mapped_column(Text)
