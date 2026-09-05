@@ -20,6 +20,7 @@ biz-doc/
 └── analytics/
     ├── post-product-list-field-semantics.md    ← post_product_list 字段语义
     ├── endpoint-join-keys.md                   ← 端点间关联键(JOIN 模板)
+    ├── ad-product-links-view.md                ← analytics.ad_product_links 视图(广告×商品关联+出单/消耗)
     ├── post-session-list-field-semantics.md    ← (待补)
     └── campaign-opt-log-list-field-semantics.md ← (待补)
 ```

@@ -1,5 +1,26 @@
 # tts-erp CHANGELOG
 
+## 2026-09-05 (feature) — analytics.ad_product_links 视图（广告×商品关联 + 出单量/消耗，migration 0006）
+
+从 `analytics.ad_raw` 的 `post_product_list` 原始 dump 派生「广告(计划) ↔ 商品(SPU)」关联视图。
+
+### Storage / schema（alembic `0006_ad_product_links_view.py`）
+
+- 新 DB 层视图 `analytics.ad_product_links`（无 HTTP 端点，同 `linkage.effective_product_links` 模式）：
+  粒度 = (seller_id, advertiser_id, campaign_id, product_id) 一行，跨 ad_raw 已捕获全部 day 聚合。
+- 指标：出单量合计 `order_sku_total`（SUM onsite_roi2_shopping_sku，TikTok Orders(SKU) 口径，
+  含自然归因单）、广告消耗合计 `real_cost_total`（SUM mixed_real_cost）、出单 GMV 合计
+  `order_value_total`；窗口元数据 observed_days/first_day/last_day；商品名/状态取最后观测日。
+- ERP 富化：LEFT JOIN commerce.channel_accounts（external_account_id=seller_id）/ channel_products
+  （external_product_id=SPU）带出内部 channel_account_id / channel_product_id（目录外为 NULL）。
+- 健壮性：JSON 数值字符串先正则校验再 cast（脏值→NULL→0）；修复前无业绩字段的旧 dump
+  保留关联行、业绩为 0。
+- 语义/口径/查询示例：`biz-doc/analytics/ad-product-links-view.md`；测试
+  `tests/analytics/test_ad_product_links_view.py`（5 tests）。验证：视图合计 vs ad_raw 直接
+  求和 1207.17 / 139 完全一致；当前 337 对（228 广告计划 / 111 SPU）。
+
+# tts-erp CHANGELOG
+
 ## 2026-09-02 (feature) — Analytics ingest dump architecture（migration 0005）
 
 设计文档：`tech-doc/analytics/dump-architecture.md`（4 个 lock-in 决策）。配套 Chrome

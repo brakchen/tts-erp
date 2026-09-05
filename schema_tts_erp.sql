@@ -246,6 +246,101 @@ CREATE TABLE IF NOT EXISTS analytics.ad_raw (
 );
 
 
+-- Name: channel_accounts; Type: TABLE; Schema: commerce; Owner: -
+
+CREATE TABLE IF NOT EXISTS commerce.channel_accounts (
+    id bigint NOT NULL,
+    platform text NOT NULL,
+    external_account_id text NOT NULL,
+    account_name text,
+    region text,
+    seller_type text,
+    status text,
+    credential_id bigint,
+    source_updated_at timestamp with time zone,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: channel_products; Type: TABLE; Schema: commerce; Owner: -
+
+CREATE TABLE IF NOT EXISTS commerce.channel_products (
+    id bigint NOT NULL,
+    channel_account_id bigint NOT NULL,
+    external_product_id text NOT NULL,
+    title text,
+    category_id text,
+    status text,
+    main_image_url text,
+    source_created_at timestamp with time zone,
+    source_updated_at timestamp with time zone,
+    raw_record_id bigint,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: ad_product_links; Type: VIEW; Schema: analytics; Owner: -
+
+CREATE VIEW analytics.ad_product_links AS
+ WITH daily AS (
+         SELECT r.seller_id,
+            r.advertiser_id,
+            r.campaign_id,
+            r.day,
+            (el.value ->> 'product_id'::text) AS product_id,
+            (el.value ->> 'product_name'::text) AS product_name,
+            (el.value ->> 'product_status'::text) AS product_status,
+            (el.value ->> 'gmv_max_bid_type'::text) AS gmv_max_bid_type,
+                CASE
+                    WHEN ((el.value ->> 'mixed_real_cost'::text) ~ '^[0-9]+([.][0-9]+)?$'::text) THEN ((el.value ->> 'mixed_real_cost'::text))::numeric
+                    ELSE NULL::numeric
+                END AS real_cost,
+                CASE
+                    WHEN ((el.value ->> 'onsite_roi2_shopping_sku'::text) ~ '^[0-9]+$'::text) THEN ((el.value ->> 'onsite_roi2_shopping_sku'::text))::bigint
+                    ELSE NULL::bigint
+                END AS order_sku,
+                CASE
+                    WHEN ((el.value ->> 'onsite_roi2_shopping_value'::text) ~ '^[0-9]+([.][0-9]+)?$'::text) THEN ((el.value ->> 'onsite_roi2_shopping_value'::text))::numeric
+                    ELSE NULL::numeric
+                END AS order_value
+           FROM (analytics.ad_raw r
+             CROSS JOIN LATERAL jsonb_array_elements((((r.response -> 'body'::text) -> 'data'::text) -> 'table'::text)) el(value))
+          WHERE ((r.endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'::text) AND (el.value ? 'product_id'::text) AND (NULLIF((el.value ->> 'product_id'::text), ''::text) IS NOT NULL))
+        ), latest AS (
+         SELECT DISTINCT ON (daily.seller_id, daily.advertiser_id, daily.campaign_id, daily.product_id) daily.seller_id,
+            daily.advertiser_id,
+            daily.campaign_id,
+            daily.product_id,
+            daily.product_name,
+            daily.product_status,
+            daily.gmv_max_bid_type
+           FROM daily
+          ORDER BY daily.seller_id, daily.advertiser_id, daily.campaign_id, daily.product_id, daily.day DESC
+        )
+ SELECT d.seller_id,
+    d.advertiser_id,
+    d.campaign_id,
+    d.product_id,
+    l.product_name,
+    l.product_status,
+    l.gmv_max_bid_type,
+    count(DISTINCT d.day) AS observed_days,
+    min(d.day) AS first_day,
+    max(d.day) AS last_day,
+    (COALESCE(sum(d.order_sku), (0)::numeric))::bigint AS order_sku_total,
+    (COALESCE(sum(d.real_cost), (0)::numeric))::numeric(20,4) AS real_cost_total,
+    (COALESCE(sum(d.order_value), (0)::numeric))::numeric(20,4) AS order_value_total,
+    ca.id AS channel_account_id,
+    cp.id AS channel_product_id
+   FROM (((daily d
+     JOIN latest l USING (seller_id, advertiser_id, campaign_id, product_id))
+     LEFT JOIN commerce.channel_accounts ca ON (((ca.platform = 'tiktok'::text) AND (ca.external_account_id = d.seller_id))))
+     LEFT JOIN commerce.channel_products cp ON (((cp.channel_account_id = ca.id) AND (cp.external_product_id = d.product_id))))
+  GROUP BY d.seller_id, d.advertiser_id, d.campaign_id, d.product_id, l.product_name, l.product_status, l.gmv_max_bid_type, ca.id, cp.id;
+
+
 
 
 
@@ -304,23 +399,6 @@ CREATE TABLE IF NOT EXISTS analytics.ad_shop_timezones (
 
 
 
--- Name: channel_accounts; Type: TABLE; Schema: commerce; Owner: -
-
-CREATE TABLE IF NOT EXISTS commerce.channel_accounts (
-    id bigint NOT NULL,
-    platform text NOT NULL,
-    external_account_id text NOT NULL,
-    account_name text,
-    region text,
-    seller_type text,
-    status text,
-    credential_id bigint,
-    source_updated_at timestamp with time zone,
-    synced_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
 
 ALTER TABLE commerce.channel_accounts ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME commerce.channel_accounts_id_seq
@@ -348,24 +426,6 @@ CREATE TABLE IF NOT EXISTS commerce.channel_product_variants (
 
 ALTER TABLE commerce.channel_product_variants ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME commerce.channel_product_variants_id_seq
-);
-
-
--- Name: channel_products; Type: TABLE; Schema: commerce; Owner: -
-
-CREATE TABLE IF NOT EXISTS commerce.channel_products (
-    id bigint NOT NULL,
-    channel_account_id bigint NOT NULL,
-    external_product_id text NOT NULL,
-    title text,
-    category_id text,
-    status text,
-    main_image_url text,
-    source_created_at timestamp with time zone,
-    source_updated_at timestamp with time zone,
-    raw_record_id bigint,
-    synced_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -3223,5 +3283,4 @@ ALTER TABLE ONLY reporting.shipment_tracking_summary
 
 -- PostgreSQL database dump complete
 
-\unrestrict dbJEkt7qEEcYGxX9vAjNSsnow2TsanYVfIUZxDp4khjmxZbhNl7tmEsRroJPI1Z
 

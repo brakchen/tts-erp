@@ -140,3 +140,10 @@ campaign 总 GMV  = SUM(table[*].onsite_roi2_shopping_value)
 - **tts-erp server schema**:
   - `tts_erp_v2/api/v2/analytics.py:107-130` `DumpBodyIn` 接受任意 dict 不做字段过滤
   - `tts_erp_v2/analytics/repository.py:142-237` `upsert_dump` 原样存
+
+## 8. 聚合视图
+
+按 §4 的度量公式跨天聚合的成品视图 = `analytics.ad_product_links`（每
+campaign × SPU 一行，出单量/消耗/GMV 合计 + 观测窗口元数据 + ERP 内部
+商品 key 富化）。字段口径、查询示例与验证记录见
+`biz-doc/analytics/ad-product-links-view.md`。
