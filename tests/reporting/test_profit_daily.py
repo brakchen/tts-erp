@@ -72,7 +72,7 @@ def _seed(session, *, spu_pk: int, currency="USD", status="COMPLETED"):
 
 def _make_account_and_product(session):
     cred = Credentials(
-        provider="tiktok", shop_id="TEST_TT_PROFIT", ciphertext=b"\x00" * 32
+        provider="tiktok", external_account_id="TEST_TT_PROFIT", ciphertext=b"\x00" * 32
     )
     session.add(cred)
     session.flush()

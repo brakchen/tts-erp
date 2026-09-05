@@ -51,7 +51,7 @@ def _make_account_with_order(session, *, shop_id: str = "TEST_TT_LOG_SHOP",
                              order_id: str = "TEST_SO_L") -> ChannelAccount:
     cred = Credentials(
         provider="tiktok",
-        shop_id=shop_id,
+        external_account_id=shop_id,
         ciphertext=b"\x00" * 32,
     )
     session.add(cred)

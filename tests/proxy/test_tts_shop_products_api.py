@@ -133,7 +133,7 @@ def _seed_account(
     sess.execute(
         insert(accounts_tbl).values(
             platform=platform,
-            external_account_id=shop_id,
+            shop_id=shop_id,
             account_name=f"TEST acct {shop_id}",
             status="active",
         )
@@ -143,7 +143,7 @@ def _seed_account(
     from sqlalchemy import select
 
     row = sess.execute(
-        select(accounts_tbl.c.id).where(accounts_tbl.c.external_account_id == shop_id)
+        select(accounts_tbl.c.id).where(accounts_tbl.c.shop_id == shop_id)
     ).one()
     return int(row[0])
 
@@ -296,7 +296,7 @@ def test_get_product_channel_account_wrong_platform(db_session, fernet_key: str)
     miaoshou_id = int(
         db_session.execute(
             select(accounts_tbl.c.id).where(
-                accounts_tbl.c.external_account_id == "TEST_tspapi_miaoshou"
+                accounts_tbl.c.shop_id == "TEST_tspapi_miaoshou"
             )
         ).one()[0]
     )

@@ -34,7 +34,7 @@ def _utc(year=2026, month=8, day=29):
 
 def _acct(session):
     cred = Credentials(
-        provider="tiktok", shop_id="TEST_TT_COV", ciphertext=b"\x00" * 32
+        provider="tiktok", external_account_id="TEST_TT_COV", ciphertext=b"\x00" * 32
     )
     session.add(cred)
     session.flush()
@@ -130,21 +130,21 @@ def test_spu_linkage_coverage(db_session):
     # on product_links.procurement_product_id is satisfied.
     pa_cred = Credentials(
         provider="miaoshou",
-        shop_id="TEST_MS_COV",
+        external_account_id="TEST_MS_COV",
         ciphertext=b"\x00" * 32,
     )
     db_session.add(pa_cred)
     db_session.flush()
     pa = ProcurementAccount(
         provider="miaoshou",
-        shop_id="TEST_MS_COV",
+        external_account_id="TEST_MS_COV",
         credential_id=pa_cred.id,
     )
     db_session.add(pa)
     db_session.flush()
     pp = ProcurementProduct(
         procurement_account_id=pa.id,
-        spu_id="TEST_MS_PROD_COV",
+        external_product_id="TEST_MS_PROD_COV",
         product_type="COLLECTED_PRODUCT",
         status="ACTIVE",
     )

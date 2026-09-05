@@ -72,7 +72,7 @@ def _make_account_with_order(
 ) -> ChannelAccount:
     cred = Credentials(
         provider="tiktok",
-        shop_id=shop_id,
+        external_account_id=shop_id,
         ciphertext=b"\x00" * 32,
     )
     session.add(cred)
@@ -556,6 +556,9 @@ def test_after_sales_unknown_order_dedup_across_ticks(db_session) -> None:
         select(SyncIssue).where(
             SyncIssue.job_name == "tiktok.after_sales",
             SyncIssue.issue_type == "UNKNOWN_ORDER",
+            # Scope to this test's row: committed production UNKNOWN_ORDER
+            # rows (real after_sales sync) would otherwise leak into the count.
+            SyncIssue.external_id == "R_DUP",
         )
     ).scalars().all()
     # record_sync_issue dedups: exactly one row, not two.

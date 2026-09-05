@@ -170,7 +170,7 @@ def test_system_job_passes_registry_only_for_token_refresh(monkeypatch):
 def _seed_manual_cost_spu(db_session) -> ChannelProduct:
     acct = ChannelAccount(
         platform="tiktok",
-        external_account_id="TEST_MS_RPT",
+        shop_id="TEST_MS_RPT",
         account_name="test",
         status="ACTIVE",
     )
@@ -178,7 +178,7 @@ def _seed_manual_cost_spu(db_session) -> ChannelProduct:
     db_session.flush()
     cp = ChannelProduct(
         shop_pk=acct.id,
-        external_product_id="TEST_MS_RPT_P1",
+        spu_id="TEST_MS_RPT_P1",
         title="t",
         status="ACTIVATE",
     )
@@ -221,7 +221,7 @@ def test_run_profit_daily_counts_paid_order(db_session):
     for its SPU (bounded assertion — prod has no such date)."""
     acct = ChannelAccount(
         platform="tiktok",
-        external_account_id="TEST_MS_RPT2",
+        shop_id="TEST_MS_RPT2",
         account_name="test",
         status="ACTIVE",
     )
@@ -229,7 +229,7 @@ def test_run_profit_daily_counts_paid_order(db_session):
     db_session.flush()
     cp = ChannelProduct(
         shop_pk=acct.id,
-        external_product_id="TEST_MS_RPT_P2",
+        spu_id="TEST_MS_RPT_P2",
         title="t",
         status="ACTIVATE",
     )

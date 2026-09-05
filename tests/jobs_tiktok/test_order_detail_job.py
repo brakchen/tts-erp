@@ -48,7 +48,7 @@ class FakeProxy:
 def _make_account(session) -> ChannelAccount:
     cred = Credentials(
         provider="tiktok",
-        shop_id="TEST_TT_DETAIL_SHOP",
+        external_account_id="TEST_TT_DETAIL_SHOP",
         ciphertext=b"\x00" * 32,
     )
     session.add(cred)

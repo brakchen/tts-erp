@@ -86,7 +86,7 @@ def _resolve_shop_id(session: Session, shop_pk: int) -> str:
     """
     row = session.execute(
         text(
-            "SELECT external_account_id FROM commerce.shops "
+            "SELECT shop_id FROM commerce.shops "
             "WHERE id = :id AND platform = 'tiktok'"
         ),
         {"id": shop_pk},

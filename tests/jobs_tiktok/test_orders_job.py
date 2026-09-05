@@ -45,7 +45,7 @@ pytestmark = [pytest.mark.domain_commerce, pytest.mark.layer_integration]
 def _make_credential(session, external_id="TEST_TT_ORD_CRED") -> Credentials:
     cred = Credentials(
         provider="tiktok",
-        shop_id=external_id,
+        external_account_id=external_id,
         ciphertext=b"\x00" * 32,
     )
     session.add(cred)
@@ -56,7 +56,7 @@ def _make_credential(session, external_id="TEST_TT_ORD_CRED") -> Credentials:
 def _make_channel_account(session, external_id="TEST_TT_ORD_SHOP") -> ChannelAccount:
     cred = Credentials(
         provider="tiktok",
-        shop_id=external_id,
+        external_account_id=external_id,
         ciphertext=b"\x00" * 32,
     )
     session.add(cred)

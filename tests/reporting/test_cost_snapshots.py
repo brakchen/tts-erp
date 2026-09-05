@@ -37,7 +37,7 @@ def _utc(year=2026, month=8, day=29):
 
 def _make_channel_account(session, external_id="TEST_TT_SHOP_C"):
     cred = Credentials(
-        provider="tiktok", shop_id=external_id, ciphertext=b"\x00" * 32
+        provider="tiktok", external_account_id=external_id, ciphertext=b"\x00" * 32
     )
     session.add(cred)
     session.flush()
