@@ -101,31 +101,31 @@ def _seed_account_and_product(db_engine, external_account: str, external_product
         with Session(db_engine) as sess:
             sess.execute(
                 text(
-                    "INSERT INTO commerce.channel_accounts "
-                    "(platform, external_account_id, account_name, status) "
+                    "INSERT INTO commerce.shops "
+                    "(platform, shop_id, account_name, status) "
                     "VALUES ('tiktok', :ext, 'TEST acct', 'active')"
                 ),
                 {"ext": external_account},
             )
             acct_id = sess.execute(
                 text(
-                    "SELECT id FROM commerce.channel_accounts "
-                    "WHERE external_account_id = :ext"
+                    "SELECT id FROM commerce.shops "
+                    "WHERE shop_id = :ext"
                 ),
                 {"ext": external_account},
             ).scalar()
             sess.execute(
                 text(
-                    "INSERT INTO commerce.channel_products "
-                    "(channel_account_id, external_product_id, title, status) "
+                    "INSERT INTO commerce.products_spu "
+                    "(shop_pk, spu_id, title, status) "
                     "VALUES (:acct, :ext, 'TEST title', 'active')"
                 ),
                 {"acct": acct_id, "ext": external_product},
             )
             cp_id = sess.execute(
                 text(
-                    "SELECT id FROM commerce.channel_products "
-                    "WHERE external_product_id = :ext"
+                    "SELECT id FROM commerce.products_spu "
+                    "WHERE spu_id = :ext"
                 ),
                 {"ext": external_product},
             ).scalar()
@@ -146,7 +146,7 @@ def _seed_ready_image(db_engine, account_id: int, product_id: int, suffix: str =
             row = sess.execute(
                 text(
                     "INSERT INTO procurement.spu_images "
-                    "(channel_account_id, channel_product_id, object_key, "
+                    "(shop_pk, spu_pk, object_key, "
                     " filename, content_type, size_bytes, status, "
                     " uploaded_by_prefix) "
                     "VALUES (:acct, :prod, :k, :fn, 'image/jpeg', 1024, "
@@ -175,8 +175,8 @@ def test_upload_url_requires_readwrite(api_client_focused, readonly_key):
         "/v2/spu-images/upload-url",
         headers={"Authorization": f"Bearer {readonly_key}"},
         json={
-            "channel_account_id": 1,
-            "channel_product_id": 1,
+            "shop_pk": 1,
+            "spu_pk": 1,
             "filename": "a.jpg",
             "content_type": "image/jpeg",
             "size_bytes": 1024,
@@ -196,8 +196,8 @@ def test_upload_url_happy_path_returns_201_and_presigned(
         "/v2/spu-images/upload-url",
         headers={"Authorization": f"Bearer {readwrite_key}"},
         json={
-            "channel_account_id": acct_id,
-            "channel_product_id": cp_id,
+            "shop_pk": acct_id,
+            "spu_pk": cp_id,
             "filename": "Packing-Slip-Front.JPG",
             "content_type": "image/jpeg",
             "size_bytes": 184320,
@@ -219,15 +219,15 @@ def test_upload_url_happy_path_returns_201_and_presigned(
     with Session(db_engine) as verify_sess:
         row = verify_sess.execute(
             text(
-                "SELECT status, channel_account_id, channel_product_id, "
+                "SELECT status, shop_pk, spu_pk, "
                 "       size_bytes, content_type "
                 "FROM procurement.spu_images WHERE id = :i"
             ),
             {"i": body["image_id"]},
         ).first()
     assert row.status == "awaiting_upload"
-    assert row.channel_account_id == acct_id
-    assert row.channel_product_id == cp_id
+    assert row.shop_pk == acct_id
+    assert row.spu_pk == cp_id
     assert row.size_bytes == 184320
     assert row.content_type == "image/jpeg"
 
@@ -239,8 +239,8 @@ def test_upload_url_rejects_unknown_account(
         "/v2/spu-images/upload-url",
         headers={"Authorization": f"Bearer {readwrite_key}"},
         json={
-            "channel_account_id": 9_999_999,
-            "channel_product_id": 1,
+            "shop_pk": 9_999_999,
+            "spu_pk": 1,
             "filename": "a.jpg",
             "content_type": "image/jpeg",
             "size_bytes": 1024,
@@ -259,8 +259,8 @@ def test_upload_url_rejects_unknown_product(
         "/v2/spu-images/upload-url",
         headers={"Authorization": f"Bearer {readwrite_key}"},
         json={
-            "channel_account_id": acct_id,
-            "channel_product_id": 9_999_999,
+            "shop_pk": acct_id,
+            "spu_pk": 9_999_999,
             "filename": "a.jpg",
             "content_type": "image/jpeg",
             "size_bytes": 1024,
@@ -277,8 +277,8 @@ def test_upload_url_rejects_oversize(api_client_focused, readwrite_key, db_engin
         "/v2/spu-images/upload-url",
         headers={"Authorization": f"Bearer {readwrite_key}"},
         json={
-            "channel_account_id": acct_id,
-            "channel_product_id": cp_id,
+            "shop_pk": acct_id,
+            "spu_pk": cp_id,
             "filename": "a.jpg",
             "content_type": "image/jpeg",
             "size_bytes": 8 * 1024 * 1024 + 1,
@@ -297,8 +297,8 @@ def test_upload_url_rejects_bad_content_type(
         "/v2/spu-images/upload-url",
         headers={"Authorization": f"Bearer {readwrite_key}"},
         json={
-            "channel_account_id": acct_id,
-            "channel_product_id": cp_id,
+            "shop_pk": acct_id,
+            "spu_pk": cp_id,
             "filename": "a.jpg",
             "content_type": "text/html",
             "size_bytes": 1024,
@@ -317,8 +317,8 @@ def test_upload_url_rejects_empty_filename(
         "/v2/spu-images/upload-url",
         headers={"Authorization": f"Bearer {readwrite_key}"},
         json={
-            "channel_account_id": acct_id,
-            "channel_product_id": cp_id,
+            "shop_pk": acct_id,
+            "spu_pk": cp_id,
             "filename": "",
             "content_type": "image/jpeg",
             "size_bytes": 1024,
@@ -426,14 +426,14 @@ def test_confirm_404_for_unknown_image(api_client_focused, readwrite_key):
 
 def test_list_requires_readonly_or_higher(api_client_focused):
     """No bearer → 401."""
-    r = api_client_focused.get("/v2/spu-images?channel_product_id=1")
+    r = api_client_focused.get("/v2/spu-images?spu_pk=1")
     assert r.status_code == 401, r.text
 
 
 def test_list_returns_only_ready_images(
     api_client_focused, readonly_key, db_engine
 ):
-    """Filtered to status=ready and matching channel_product_id."""
+    """Filtered to status=ready and matching spu_pk."""
     acct_id, cp_id = _seed_account_and_product(
         db_engine, "TEST_spuim_list_a", "TEST_spuim_list_p",
     )
@@ -447,7 +447,7 @@ def test_list_returns_only_ready_images(
             sess.execute(
                 text(
                     "INSERT INTO procurement.spu_images "
-                    "(channel_account_id, channel_product_id, object_key, "
+                    "(shop_pk, spu_pk, object_key, "
                     " filename, content_type, size_bytes, status, uploaded_by_prefix) "
                     "VALUES (:a, :p, :k, 'a.jpg', 'image/jpeg', 100, "
                     "        'awaiting_upload', 'ttserp_rw_')"
@@ -460,7 +460,7 @@ def test_list_returns_only_ready_images(
             sess.execute(
                 text(
                     "INSERT INTO procurement.spu_images "
-                    "(channel_account_id, channel_product_id, object_key, "
+                    "(shop_pk, spu_pk, object_key, "
                     " filename, content_type, size_bytes, status, "
                     " uploaded_by_prefix, deleted_at) "
                     "VALUES (:a, :p, :k, 'd.jpg', 'image/jpeg', 100, "
@@ -475,7 +475,7 @@ def test_list_returns_only_ready_images(
         mp.undo()
 
     r = api_client_focused.get(
-        f"/v2/spu-images?channel_product_id={cp_id}",
+        f"/v2/spu-images?spu_pk={cp_id}",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200, r.text
@@ -492,7 +492,7 @@ def test_list_returns_presigned_url_and_expiry(
     )
     rid = _seed_ready_image(db_engine, acct_id, cp_id, suffix="withurl")
     r = api_client_focused.get(
-        f"/v2/spu-images?channel_product_id={cp_id}",
+        f"/v2/spu-images?spu_pk={cp_id}",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200, r.text
@@ -591,7 +591,7 @@ def test_delete_minio_failure_is_logged_not_fatal(
     assert row.deleted_at is not None
 
 
-def test_list_without_channel_product_id_returns_all_ready(
+def test_list_without_spu_pk_returns_all_ready(
     api_client_focused, readonly_key, db_engine
 ):
     """Regression: unfiltered list must not 500 (AmbiguousParameter on NULL cp_id)."""

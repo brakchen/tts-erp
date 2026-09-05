@@ -106,8 +106,8 @@ SHA-256 hashes only; the plaintext is shown ONCE on creation via
 
 | schema       | domain                                    | representative tables                                 |
 | ------------ | ----------------------------------------- | ----------------------------------------------------- |
-| integration  | 集成 / 同步运行时                          | credentials, channel_accounts, raw_records, sync_jobs |
-| commerce     | TikTok 销售（订单 / 商品）                 | sales_orders, sales_order_lines, channel_products     |
+| integration  | 集成 / 同步运行时                          | credentials, shops, raw_records, sync_jobs |
+| commerce     | TikTok 销售（订单 / 商品）                 | sales_orders, sales_order_lines, products_spu     |
 | procurement  | 妙手采购 + 人工成本                        | procurement_accounts, procurement_products, manual_product_costs |
 | fulfillment  | 物流                                       | shipments, shipment_lines, tracking_events            |
 | after_sales  | 退货 / 取消                                | cases, case_lines                                     |
@@ -147,14 +147,14 @@ tables already encode this — **prefer reading those over recomputing**.
 ## 6. The right JOINs (template queries)
 
 - **Sales per SKU per day** → ``commerce.sales_order_lines`` joined to
-  ``commerce.sales_orders`` and ``commerce.channel_products``.
+  ``commerce.sales_orders`` and ``commerce.products_spu``.
 - **Profit per SKU per day** → ``reporting.product_profit_daily``
   (pre-aggregated, currency-normalized within the row's ``currency``).
 - **Miaoshou product ↔ TikTok SPU** → ``linkage.effective_product_links``
   (the view; use this, not ``linkage.product_links`` directly, because
   overrides change the answer).
 - **Active SPU without cost** → ``GET /v2/reporting/missing-cost-products``
-  (or the ``commerce.channel_products`` rows that have no
+  (or the ``commerce.products_spu`` rows that have no
   ``procurement.manual_product_costs`` row with ``valid_to IS NULL``
   AND no effective link).
 - **Time semantics**: TikTok ``update_time`` / ``create_time`` are
@@ -170,8 +170,8 @@ tables already encode this — **prefer reading those over recomputing**.
   ``linkage.effective_product_links`` (overrides change the answer).
 - DO NOT assume a single ``currency`` per query. TikTok has VND/USD
   orders; Miaoshou is mostly CNY. Use the row's ``currency`` column.
-- DO NOT join ``sales_order_lines`` to ``channel_products`` via
-  ``product_id`` alone — use ``channel_product_id`` (FK) for the
+- DO NOT join ``sales_order_lines`` to ``products_spu`` via
+  ``product_id`` alone — use ``spu_pk`` (FK) for the
   authoritative link. The raw product id strings are also stored in
   ``external_product_id_snapshot`` for audit.
 - DO NOT call ``POST /orders/*`` write endpoints — they are 404 in v2.
@@ -197,8 +197,8 @@ tables already encode this — **prefer reading those over recomputing**.
 # ``tts_erp_v2/db/models/<domain>.py``.
 
 _SCHEMAS: list[tuple[str, str]] = [
-    ("integration", "credentials, channel_accounts, raw_records, sync_jobs, sync_cursors, sync_issues"),
-    ("commerce", "TikTok sales: sales_orders, sales_order_lines, channel_products, channel_product_variants"),
+    ("integration", "credentials, shops, raw_records, sync_jobs, sync_cursors, sync_issues"),
+    ("commerce", "TikTok sales: sales_orders, sales_order_lines, products_spu, products_sku"),
     ("procurement", "Miaoshou procurement + manual costs: procurement_accounts/products/variants, purchase_orders/lines, manual_product_costs"),
     ("fulfillment", "Logistics: shipments, shipment_lines, tracking_events"),
     ("after_sales", "Returns/cancellations: cases, case_lines"),

@@ -48,25 +48,25 @@ class FakeProxy:
 
 
 def _make_account_with_order(session, *, shop_id: str = "TEST_TT_LOG_SHOP",
-                             external_order_id: str = "TEST_SO_L") -> ChannelAccount:
+                             order_id: str = "TEST_SO_L") -> ChannelAccount:
     cred = Credentials(
         provider="tiktok",
-        external_account_id=shop_id,
+        shop_id=shop_id,
         ciphertext=b"\x00" * 32,
     )
     session.add(cred)
     session.flush()
     acct = ChannelAccount(
         platform="tiktok",
-        external_account_id=shop_id,
+        shop_id=shop_id,
         credential_id=cred.id,
         status="active",
     )
     session.add(acct)
     session.flush()
     so = SalesOrder(
-        channel_account_id=acct.id,
-        external_order_id=external_order_id,
+        shop_pk=acct.id,
+        order_id=order_id,
         status="SHIPPED",
     )
     session.add(so)
@@ -77,14 +77,14 @@ def _make_account_with_order(session, *, shop_id: str = "TEST_TT_LOG_SHOP",
 def _seed_orders_raw_record(
     session,
     *,
-    external_order_id: str,
+    order_id: str,
     tracking_number: str = "TN1",
     provider_id: str = "UPS",
     provider_name: str = "UPS",
     package_id: str | None = None,
 ) -> RawRecord:
     payload: dict[str, Any] = {
-        "id": external_order_id,
+        "id": order_id,
         "tracking_number": tracking_number,
         "shipping_provider_id": provider_id,
         "shipping_provider_name": provider_name,
@@ -93,7 +93,7 @@ def _seed_orders_raw_record(
         payload["packages"] = [{"id": package_id}]
     rr = RawRecord(
         endpoint="/order/202309/orders/search",
-        external_id=external_order_id,
+        external_id=order_id,
         payload=payload,
     )
     session.add(rr)
@@ -109,7 +109,7 @@ def test_logistics_writes_shipment_and_tracks_watermark(db_session) -> None:
     account = _make_account_with_order(db_session)
     _seed_orders_raw_record(
         db_session,
-        external_order_id="TEST_SO_L",
+        order_id="TEST_SO_L",
         tracking_number="TN1",
         package_id="PKG1",
     )
@@ -130,7 +130,7 @@ def test_logistics_writes_shipment_and_tracks_watermark(db_session) -> None:
         job_name="tiktok.logistics",
         credential_id=account.credential_id,
         inner=logistics_job.run,
-        inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
     assert result.rows_inserted == 1
     shipment = db_session.execute(
@@ -146,7 +146,7 @@ def test_logistics_writes_shipment_and_tracks_watermark(db_session) -> None:
     assert events[0].description == "Order placed."
     # Watermark advanced to the max update_time_millis seen.
     cursor = watermarks.get_cursor(
-        db_session, job_name="tiktok.logistics", scope=account.external_account_id
+        db_session, job_name="tiktok.logistics", scope=account.shop_id
     )
     assert cursor == 1_700_002_100_000
 
@@ -157,7 +157,7 @@ def test_logistics_synthesizes_package_id_from_order_id(db_session) -> None:
     account = _make_account_with_order(db_session)
     _seed_orders_raw_record(
         db_session,
-        external_order_id="TEST_SO_L",
+        order_id="TEST_SO_L",
         tracking_number="TN1",
         package_id=None,  # no packages in payload
     )
@@ -177,7 +177,7 @@ def test_logistics_synthesizes_package_id_from_order_id(db_session) -> None:
         job_name="tiktok.logistics",
         credential_id=account.credential_id,
         inner=logistics_job.run,
-        inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
     assert result.rows_inserted == 1
     shipment = db_session.execute(
@@ -192,7 +192,7 @@ def test_logistics_unknown_order_writes_sync_issue(db_session) -> None:
     account = _make_account_with_order(db_session)
     _seed_orders_raw_record(
         db_session,
-        external_order_id="TEST_SO_NOT_FOUND",
+        order_id="TEST_SO_NOT_FOUND",
         tracking_number="TN_GHOST",
         package_id="PKG_GHOST",
     )
@@ -202,7 +202,7 @@ def test_logistics_unknown_order_writes_sync_issue(db_session) -> None:
         job_name="tiktok.logistics",
         credential_id=account.credential_id,
         inner=logistics_job.run,
-        inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
     # There must be ≥1 failed row (the ghost order); the production DB
     # may also contribute unrelated rows, so we assert on the issue +
@@ -226,7 +226,7 @@ def test_logistics_fetch_events_disabled_skips_tracking(db_session) -> None:
     account = _make_account_with_order(db_session)
     _seed_orders_raw_record(
         db_session,
-        external_order_id="TEST_SO_L",
+        order_id="TEST_SO_L",
         tracking_number="TN2",
         package_id="PKG2",
     )
@@ -238,7 +238,7 @@ def test_logistics_fetch_events_disabled_skips_tracking(db_session) -> None:
         inner=logistics_job.run,
         inner_kwargs={
             "proxy_call": proxy,
-            "shop_id": account.external_account_id,
+            "shop_id": account.shop_id,
             "fetch_events": False,
         },
     )
@@ -260,7 +260,7 @@ def test_logistics_skips_orders_without_tracking_number(db_session) -> None:
     account = _make_account_with_order(db_session)
     _seed_orders_raw_record(
         db_session,
-        external_order_id="TEST_SO_L",
+        order_id="TEST_SO_L",
         tracking_number="TN_OK",
         package_id="PKG_OK",
     )
@@ -287,7 +287,7 @@ def test_logistics_skips_orders_without_tracking_number(db_session) -> None:
         job_name="tiktok.logistics",
         credential_id=account.credential_id,
         inner=logistics_job.run,
-        inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
     assert result.rows_inserted >= 1
     # The order with a tracking_number was hit on the wire; the one
@@ -305,36 +305,36 @@ def test_logistics_excludes_terminal_status_orders(db_session) -> None:
     are excluded — their tracking never changes."""
     account = _make_account_with_order(
         db_session, shop_id="TEST_TT_LOG_SHOP_TERM",
-        external_order_id="TEST_SO_DONE",
+        order_id="TEST_SO_DONE",
     )
     so_done = db_session.execute(
-        select(SalesOrder).where(SalesOrder.external_order_id == "TEST_SO_DONE")
+        select(SalesOrder).where(SalesOrder.order_id == "TEST_SO_DONE")
     ).scalar_one()
     # Pre-existing terminal shipment for this order.
     db_session.add(
         Shipment(
-            sales_order_id=so_done.id,
+            order_pk=so_done.id,
             external_package_id="PKG_DONE",
             status="DELIVERED",
         )
     )
     _seed_orders_raw_record(
         db_session,
-        external_order_id="TEST_SO_DONE",
+        order_id="TEST_SO_DONE",
         tracking_number="TN_DONE",
         package_id="PKG_DONE_RR",
     )
     # Also seed a fresh, non-terminal order under the same shop.
     so_open = SalesOrder(
-        channel_account_id=account.id,
-        external_order_id="TEST_SO_OPEN",
+        shop_pk=account.id,
+        order_id="TEST_SO_OPEN",
         status="SHIPPED",
     )
     db_session.add(so_open)
     db_session.flush()
     _seed_orders_raw_record(
         db_session,
-        external_order_id="TEST_SO_OPEN",
+        order_id="TEST_SO_OPEN",
         tracking_number="TN_OPEN",
         package_id="PKG_OPEN",
     )
@@ -354,7 +354,7 @@ def test_logistics_excludes_terminal_status_orders(db_session) -> None:
         job_name="tiktok.logistics",
         credential_id=account.credential_id,
         inner=logistics_job.run,
-        inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
     # Only TEST_SO_OPEN was hit on the wire; TEST_SO_DONE was excluded.
     assert any("TEST_SO_OPEN" in path for _m, path in proxy.calls)
@@ -372,7 +372,7 @@ def test_logistics_classifies_delivered_status(db_session) -> None:
     account = _make_account_with_order(db_session)
     _seed_orders_raw_record(
         db_session,
-        external_order_id="TEST_SO_L",
+        order_id="TEST_SO_L",
         tracking_number="TN_D",
         package_id="PKG_D",
     )
@@ -397,7 +397,7 @@ def test_logistics_classifies_delivered_status(db_session) -> None:
         job_name="tiktok.logistics",
         credential_id=account.credential_id,
         inner=logistics_job.run,
-        inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
     assert result.rows_inserted == 1
     shipment = db_session.execute(

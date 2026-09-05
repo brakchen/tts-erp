@@ -61,7 +61,7 @@ def test_v2_endpoint_rejects_disabled_key(api_client, bad_key):
 def test_readonly_cannot_post_manual_costs(api_client, readonly_key):
     """readonly role is below readwrite; POST /v2/reporting/manual-costs → 403."""
     body = {
-        "channel_product_external_id": "TEST_ext_ro_post",
+        "spu_id": "TEST_ext_ro_post",
         "unit_cost": "12.34",
         "currency": "USD",
     }

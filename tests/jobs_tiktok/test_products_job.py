@@ -1,4 +1,4 @@
-"""TDD tests for jobs.tiktok.products — channel_products + variants sync.
+"""TDD tests for jobs.tiktok.products — products_spu + variants sync.
 
 Verifies:
 * Pagination (next_page_token) walks every page.
@@ -41,14 +41,14 @@ class FakeProxy:
 def _make_account(session) -> ChannelAccount:
     cred = Credentials(
         provider="tiktok",
-        external_account_id="TEST_TT_PROD_SHOP",
+        shop_id="TEST_TT_PROD_SHOP",
         ciphertext=b"\x00" * 32,
     )
     session.add(cred)
     session.flush()
     acct = ChannelAccount(
         platform="tiktok",
-        external_account_id="TEST_TT_PROD_SHOP",
+        shop_id="TEST_TT_PROD_SHOP",
         credential_id=cred.id,
         status="active",
     )
@@ -109,35 +109,35 @@ def test_products_first_run_writes_products_and_variants(db_session) -> None:
         inner=products_job.run,
         inner_kwargs={
             "proxy_call": proxy,
-            "shop_id": account.external_account_id,
+            "shop_id": account.shop_id,
         },
     )
     assert result.rows_inserted == 2
-    # Filter by channel_account_id — prod has 147 ChannelProducts from
+    # Filter by shop_pk — prod has 147 ChannelProducts from
     # the real TikTok shop; the unscoped select would return all of them.
     products = (
         db_session.execute(
             select(ChannelProduct).where(
-                ChannelProduct.channel_account_id == account.id
+                ChannelProduct.shop_pk == account.id
             )
         )
         .scalars()
         .all()
     )
-    assert {p.external_product_id for p in products} == {"P1", "P2"}
+    assert {p.spu_id for p in products} == {"P1", "P2"}
     variants = (
         db_session.execute(
             select(ChannelProductVariant).where(
-                ChannelProductVariant.channel_product_id.in_([p.id for p in products])
+                ChannelProductVariant.spu_pk.in_([p.id for p in products])
             )
         )
         .scalars()
         .all()
     )
     assert len(variants) == 1
-    assert variants[0].external_variant_id == "V1"
+    assert variants[0].sku_id == "V1"
     cursor = watermarks.get_cursor(
-        db_session, job_name="tiktok.products", scope=account.external_account_id
+        db_session, job_name="tiktok.products", scope=account.shop_id
     )
     assert cursor == 1_700_000_200_000  # ms
 
@@ -148,7 +148,7 @@ def test_products_second_run_advances_watermark_only(db_session) -> None:
     watermarks.set_cursor(
         db_session,
         job_name="tiktok.products",
-        scope=account.external_account_id,
+        scope=account.shop_id,
         cursor_epoch_ms=1_700_000_100_000,
     )
 
@@ -173,7 +173,7 @@ def test_products_second_run_advances_watermark_only(db_session) -> None:
         inner=products_job.run,
         inner_kwargs={
             "proxy_call": proxy,
-            "shop_id": account.external_account_id,
+            "shop_id": account.shop_id,
         },
     )
     assert result.cursor == 1_700_000_150_000
@@ -203,7 +203,7 @@ def test_products_parse_failure_writes_sync_issue(db_session) -> None:
         inner=products_job.run,
         inner_kwargs={
             "proxy_call": proxy,
-            "shop_id": account.external_account_id,
+            "shop_id": account.shop_id,
         },
     )
     assert result.rows_failed == 1

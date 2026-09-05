@@ -1,7 +1,7 @@
 """Shared domain constants used across lanes.
 
 Centralised here so that any code path filtering on a free-text status
-column (``channel_products.status`` is the canonical example — TikTok
+column (``products_spu.status`` is the canonical example — TikTok
 sync writes 'ACTIVATE', older docs / tests assumed 'active') can
 reference the same source of truth.
 

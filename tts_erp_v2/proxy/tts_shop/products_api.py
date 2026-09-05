@@ -16,7 +16,7 @@ Conventions
   handled by :class:`TiktokShopClient`
   (``tts_erp_v2/proxy/tts_shop/client.py``).
 * Each wrapper resolves credentials via :func:`load_credentials` keyed
-  by internal ``channel_account_id`` → upstream ``shop_id`` →
+  by internal ``shop_pk`` → upstream ``shop_id`` →
   ``access_token`` + ``shop_cipher``.
 * The upstream envelope ``{code, message, data, request_id}`` is
   unwrapped: on ``code == 0`` we return ``data``; otherwise raise
@@ -71,14 +71,14 @@ class UpstreamBusinessError(ProxyError):
 
 
 class ChannelAccountNotFound(ProxyError):
-    """commerce.channel_accounts has no row matching the internal id + platform=tiktok."""
+    """commerce.shops has no row matching the internal id + platform=tiktok."""
 
 
 class CredentialsMissing(ProxyError):
     """integration.credentials missing or shop_cipher empty for the given tiktok shop_id."""
 
 
-def _resolve_shop_id(session: Session, channel_account_id: int) -> str:
+def _resolve_shop_id(session: Session, shop_pk: int) -> str:
     """Look up the upstream shop_id (external_account_id) from the internal id.
 
     Enforces ``platform='tiktok'`` so a miaoshou account id cannot
@@ -86,14 +86,14 @@ def _resolve_shop_id(session: Session, channel_account_id: int) -> str:
     """
     row = session.execute(
         text(
-            "SELECT external_account_id FROM commerce.channel_accounts "
+            "SELECT external_account_id FROM commerce.shops "
             "WHERE id = :id AND platform = 'tiktok'"
         ),
-        {"id": channel_account_id},
+        {"id": shop_pk},
     ).first()
     if row is None:
         raise ChannelAccountNotFound(
-            f"commerce.channel_accounts id={channel_account_id} "
+            f"commerce.shops id={shop_pk} "
             f"platform='tiktok' not found"
         )
     return row[0]
@@ -157,7 +157,7 @@ def _check_envelope(payload: Mapping[str, Any]) -> dict[str, Any]:
 def get_product(
     *,
     session: Session,
-    channel_account_id: int,
+    shop_pk: int,
     product_id: str,
     return_under_review_version: bool = False,
     return_draft_version: bool = False,
@@ -179,7 +179,7 @@ def get_product(
     Args:
         session: SQLAlchemy session for credential + channel_account
             lookups (read-only; no mutations).
-        channel_account_id: Internal ``commerce.channel_accounts.id``.
+        shop_pk: Internal ``commerce.shops.id``.
             Must be a ``platform='tiktok'`` row. The upstream shop_id
             is resolved via ``external_account_id``.
         product_id: TikTok product ID (upstream returns string ids).
@@ -211,7 +211,7 @@ def get_product(
             "mutually exclusive per upstream docs"
         )
 
-    shop_id = _resolve_shop_id(session, channel_account_id)
+    shop_id = _resolve_shop_id(session, shop_pk)
     cred = _load_tiktok_credentials(session, shop_id)
     if client is None:
         client = _build_default_client()

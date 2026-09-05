@@ -1,7 +1,7 @@
 """Regression tests for ``GET /v2/reporting/cost-snapshots``.
 
 2026-08-31: the optional-filter SQL pattern
-    ``WHERE (:channel_id IS NULL OR channel_product_id = :channel_id)``
+    ``WHERE (:channel_id IS NULL OR spu_pk = :channel_id)``
 broke with ``psycopg.errors.AmbiguousParameter`` ("could not determine
 data type of parameter $1") because PG cannot infer the parameter type
 when bound to NULL. The fix adds explicit ``CAST(:channel_id AS bigint)``
@@ -48,13 +48,13 @@ def test_cost_snapshots_no_filter_returns_200_bare_array(api_client, readonly_ke
 def test_cost_snapshots_with_filters_returns_200_empty(api_client, readonly_key):
     """Filter values that match nothing → 200 + empty array.
 
-    Exercises the ``OR channel_product_id = :channel_id`` branch with
+    Exercises the ``OR spu_pk = :channel_id`` branch with
     non-NULL params, so we know the CAST didn't break the OR-short-
     circuit when filters are supplied.
     """
     r = api_client.get(
         "/v2/reporting/cost-snapshots"
-        "?limit=5&channel_product_id=999999999&cost_method=definitely_not_a_method",
+        "?limit=5&spu_pk=999999999&cost_method=definitely_not_a_method",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200, r.text
@@ -68,9 +68,9 @@ def test_cost_snapshots_with_only_one_filter_returns_200(api_client, readonly_ke
     CASTs handle (NULL, real) and (real, NULL) as well as (NULL, NULL)
     from test #1.
     """
-    # Only channel_product_id
+    # Only spu_pk
     r1 = api_client.get(
-        "/v2/reporting/cost-snapshots?channel_product_id=999999999",
+        "/v2/reporting/cost-snapshots?spu_pk=999999999",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r1.status_code == 200, r1.text

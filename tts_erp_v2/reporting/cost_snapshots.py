@@ -47,14 +47,14 @@ class ResolvedCost:
 
 
 def _current_manual_cost(
-    session: Session, channel_product_id: int
+    session: Session, spu_pk: int
 ) -> ManualProductCost | None:
     """Return the effective (valid_to IS NULL) manual cost row for the
     SPU, if any. We use valid_to IS NULL as the signal that this is
     the latest entry — historical rows are kept for forensics."""
     return session.execute(
         select(ManualProductCost).where(
-            ManualProductCost.channel_product_id == channel_product_id,
+            ManualProductCost.spu_pk == spu_pk,
             ManualProductCost.valid_to.is_(None),
         )
     ).scalar_one_or_none()
@@ -63,7 +63,7 @@ def _current_manual_cost(
 def resolve_unit_cost(
     session: Session,
     *,
-    channel_product_id: int,
+    spu_pk: int,
     purchase_order_unit_cost: Decimal | None = None,
     purchase_order_currency: str | None = None,
     collect_listing_cost: Decimal | None = None,  # explicit dead-end param
@@ -77,7 +77,7 @@ def resolve_unit_cost(
     is NEVER used.
     """
     # 1. MANUAL_ENTRY (highest priority)
-    manual = _current_manual_cost(session, channel_product_id)
+    manual = _current_manual_cost(session, spu_pk)
     if manual is not None:
         return ResolvedCost(
             method="MANUAL_ENTRY",
@@ -102,18 +102,18 @@ def resolve_unit_cost(
 
 
 def active_spus_without_cost(session: Session) -> list[tuple[str, int]]:
-    """Return [(external_product_id, channel_product_id)] for active
-    channel_products that have no manual cost and no purchase-order
+    """Return [(spu_id, spu_pk)] for active
+    products_spu that have no manual cost and no purchase-order
     cost available. Powers the "in-stock without cost" monitoring list
     that the operator uses to drive the manual-costs form."""
     cp_with_manual = exists().where(
-        ManualProductCost.channel_product_id == ChannelProduct.id
+        ManualProductCost.spu_pk == ChannelProduct.id
     )
     rows = session.execute(
-        select(ChannelProduct.external_product_id, ChannelProduct.id)
+        select(ChannelProduct.spu_id, ChannelProduct.id)
         .where(ChannelProduct.status == ACTIVE_PRODUCT_STATUS)
         .where(~cp_with_manual)
-        .order_by(ChannelProduct.external_product_id)
+        .order_by(ChannelProduct.spu_id)
     ).all()
     return [(r[0], r[1]) for r in rows]
 
@@ -144,14 +144,14 @@ def rebuild_snapshots(
             po_cost, po_currency = purchase_order_lookup(cp.id)
         resolved = resolve_unit_cost(
             session,
-            channel_product_id=cp.id,
+            spu_pk=cp.id,
             purchase_order_unit_cost=po_cost,
             purchase_order_currency=po_currency,
         )
         if resolved is None:
             continue
         snap = ProductCostSnapshot(
-            channel_product_id=cp.id,
+            spu_pk=cp.id,
             cost_method=resolved.method,
             unit_cost=resolved.unit_cost,
             currency=resolved.currency,

@@ -60,15 +60,15 @@ def _seed_account_and_product(
 ) -> tuple[ChannelAccount, ChannelProduct]:
     acct = ChannelAccount(
         platform="tiktok",
-        external_account_id=account_external_id,
+        shop_id=account_external_id,
         account_name=f"test {account_external_id}",
         status=account_status,
     )
     db_session.add(acct)
     db_session.flush()
     cp = ChannelProduct(
-        channel_account_id=acct.id,
-        external_product_id=product_external_id,
+        shop_pk=acct.id,
+        spu_id=product_external_id,
         title=f"test {product_external_id}",
         status=product_status,
     )
@@ -131,13 +131,13 @@ def test_purchase_order_lookup_returns_unit_cost_and_currency_pair(db_session) -
     )
     account_link = AccountLink(
         procurement_account_id=acct.id,
-        channel_account_id=chan_acct.id,
+        shop_pk=chan_acct.id,
     )
     db_session.add(account_link)
     db_session.flush()
     product_link = ProductLink(
         procurement_product_id=product.id,
-        channel_product_id=chan_product.id,
+        spu_pk=chan_product.id,
         relation_type="MIAOSHOU_PUBLISHED_TO_TIKTOK",
     )
     db_session.add(product_link)
@@ -213,8 +213,8 @@ def test_run_profit_daily_writes_row_for_paid_order_in_window(db_session) -> Non
     )
     paid_status = next(iter(PAID_SALES_ORDER_STATUSES))
     order = SalesOrder(
-        channel_account_id=acct.id,
-        external_order_id="TEST_rpt_yest_o",
+        shop_pk=acct.id,
+        order_id="TEST_rpt_yest_o",
         status=paid_status,
         currency="VND",
         payment_amount=Decimal(100000),
@@ -224,9 +224,9 @@ def test_run_profit_daily_writes_row_for_paid_order_in_window(db_session) -> Non
     db_session.flush()
     db_session.add(
         SalesOrderLine(
-            sales_order_id=order.id,
+            order_pk=order.id,
             external_line_id="TEST_rpt_yest_l",
-            channel_product_id=cp.id,
+            spu_pk=cp.id,
             quantity=Decimal(2),
             unit_price=Decimal(50000),
             currency="VND",
@@ -237,11 +237,11 @@ def test_run_profit_daily_writes_row_for_paid_order_in_window(db_session) -> Non
     out = run_profit_daily(db_session)
     assert len(out["dates"]) == 2
     assert out["rows_written"] >= 1
-    # The TEST order's row exists with our TEST channel_product_id.
+    # The TEST order's row exists with our TEST spu_pk.
     rows = (
         db_session.execute(
             select(ProductProfitDaily).where(
-                ProductProfitDaily.channel_product_id == cp.id
+                ProductProfitDaily.spu_pk == cp.id
             )
         )
         .scalars()
@@ -295,7 +295,7 @@ def test_run_cost_snapshots_records_calculation_version_and_valid_from_in_extra(
     )
     db_session.add(
         ManualProductCost(
-            channel_product_id=cp.id,
+            spu_pk=cp.id,
             unit_cost=Decimal("7.50"),
             currency="CNY",
         )
@@ -356,7 +356,7 @@ def test_run_cost_snapshots_uses_purchase_order_lookup(db_session) -> None:
     )
     db_session.add(
         ManualProductCost(
-            channel_product_id=cp.id,
+            spu_pk=cp.id,
             unit_cost=Decimal("9.99"),
             currency="CNY",
         )
@@ -365,10 +365,10 @@ def test_run_cost_snapshots_uses_purchase_order_lookup(db_session) -> None:
     out = run_cost_snapshots(db_session)
     assert out["snapshots_written"] >= 1
     # The TEST row's snapshot is MANUAL_ENTRY (since the purchase-order
-    # lookup returns None for a TEST_ channel_product_id with no link).
+    # lookup returns None for a TEST_ spu_pk with no link).
     snap = db_session.execute(
         select(ProductCostSnapshot).where(
-            ProductCostSnapshot.channel_product_id == cp.id
+            ProductCostSnapshot.spu_pk == cp.id
         )
     ).scalars().all()
     assert any(s.cost_method == "MANUAL_ENTRY" and s.unit_cost == Decimal("9.9900") for s in snap)

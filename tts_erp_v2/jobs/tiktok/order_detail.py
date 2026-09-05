@@ -174,12 +174,12 @@ def run(
     account = session.execute(
         select(ChannelAccount).where(
             ChannelAccount.platform == "tiktok",
-            ChannelAccount.external_account_id == shop_id,
+            ChannelAccount.shop_id == shop_id,
         )
     ).scalar_one_or_none()
     if account is None:
         raise UpstreamJobError(
-            f"channel_accounts row missing for tiktok shop_id={shop_id!r}"
+            f"shops row missing for tiktok shop_id={shop_id!r}"
         )
 
     if order_ids is None:
@@ -226,21 +226,21 @@ def run(
             payload=raw,
         )
         insert_values = {
-            "channel_account_id": account.id,
+            "shop_pk": account.id,
             **fields,
             "raw_record_id": raw_row.id,
         }
         update_cols = {k: insert_values[k] for k in fields}
         update_cols["raw_record_id"] = raw_row.id
         stmt = pg_insert(SalesOrder).values(**insert_values).on_conflict_do_update(
-            index_elements=["channel_account_id", "external_order_id"],
+            index_elements=["shop_pk", "order_id"],
             set_=update_cols,
         )
         session.execute(stmt)
         so_row = session.execute(
             select(SalesOrder).where(
-                SalesOrder.channel_account_id == account.id,
-                SalesOrder.external_order_id == order_id,
+                SalesOrder.shop_pk == account.id,
+                SalesOrder.order_id == order_id,
             )
         ).scalar_one()
 
@@ -257,7 +257,7 @@ def run(
                 )
                 continue
             li_values = {
-                "sales_order_id": so_row.id,
+                "order_pk": so_row.id,
                 **line_fields,
                 "raw_record_id": raw_row.id,
             }
@@ -265,7 +265,7 @@ def run(
             li_update["raw_record_id"] = raw_row.id
             session.execute(
                 pg_insert(SalesOrderLine).values(**li_values).on_conflict_do_update(
-                    index_elements=["sales_order_id", "external_line_id"],
+                    index_elements=["order_pk", "external_line_id"],
                     set_=li_update,
                 )
             )

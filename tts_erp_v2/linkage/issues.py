@@ -17,7 +17,7 @@ from typing import Any
 def make_issue(
     *,
     issue_type: str,
-    channel_product_id: int | None = None,
+    spu_pk: int | None = None,
     procurement_product_id: int | None = None,
     candidate_count: int | None = None,
     details: dict[str, Any] | None = None,
@@ -26,7 +26,7 @@ def make_issue(
     """Build a generic LinkIssue payload dict."""
     return {
         "issue_type": issue_type,
-        "channel_product_id": channel_product_id,
+        "spu_pk": spu_pk,
         "procurement_product_id": procurement_product_id,
         "candidate_count": candidate_count,
         "status": "OPEN",
@@ -38,8 +38,8 @@ def make_issue(
 
 def detect_product_link_missing(
     *,
-    channel_product_external_id: str,
-    channel_product_id: int,
+    spu_id: str,
+    spu_pk: int,
     procurement_product_external_id: str,
     procurement_product_id: int,
     observed_at: datetime,
@@ -49,11 +49,11 @@ def detect_product_link_missing(
     derive a product_link for a known (SPU, procurement_product) pair."""
     return make_issue(
         issue_type="PRODUCT_LINK_MISSING",
-        channel_product_id=channel_product_id,
+        spu_pk=spu_pk,
         procurement_product_id=procurement_product_id,
         candidate_count=0,
         details={
-            "channel_external_id": channel_product_external_id,
+            "channel_external_id": spu_id,
             "procurement_external_id": procurement_product_external_id,
         },
         observed_at=observed_at,
@@ -62,7 +62,7 @@ def detect_product_link_missing(
 
 def detect_multiple_primary_links(
     *,
-    channel_product_id: int,
+    spu_pk: int,
     primary_link_ids: list[int],
     observed_at: datetime | None = None,
 ) -> dict[str, Any] | None:
@@ -72,7 +72,7 @@ def detect_multiple_primary_links(
         return None
     return make_issue(
         issue_type="MULTIPLE_PRIMARY_LINKS",
-        channel_product_id=channel_product_id,
+        spu_pk=spu_pk,
         candidate_count=len(primary_link_ids),
         details={"primary_link_ids": list(primary_link_ids)},
         observed_at=observed_at,
@@ -81,7 +81,7 @@ def detect_multiple_primary_links(
 
 def detect_ambiguous_source(
     *,
-    channel_product_id: int,
+    spu_pk: int,
     candidate_count: int,
     candidate_procurement_ids: list[int] | None = None,
     observed_at: datetime | None = None,
@@ -93,7 +93,7 @@ def detect_ambiguous_source(
         return None
     return make_issue(
         issue_type="AMBIGUOUS_SOURCE",
-        channel_product_id=channel_product_id,
+        spu_pk=spu_pk,
         candidate_count=candidate_count,
         details={
             "candidate_procurement_ids": list(candidate_procurement_ids or []),

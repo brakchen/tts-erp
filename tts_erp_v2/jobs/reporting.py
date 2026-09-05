@@ -48,7 +48,7 @@ _SQL_LATEST_PURCHASE_COST = text(
     "JOIN procurement.purchase_order_lines pol "
     "  ON pol.procurement_product_id = epl.procurement_product_id "
     "JOIN procurement.purchase_orders po ON po.id = pol.purchase_order_id "
-    "WHERE epl.channel_product_id = :cp_id "
+    "WHERE epl.spu_pk = :cp_id "
     "  AND pol.unit_cost IS NOT NULL "
     "ORDER BY pol.updated_at DESC NULLS LAST, pol.id DESC "
     "LIMIT 1"
@@ -56,7 +56,7 @@ _SQL_LATEST_PURCHASE_COST = text(
 
 
 def _purchase_order_lookup(session: Session):
-    """Return a lookup fn: channel_product_id → (unit_cost, currency) | (None, None)."""
+    """Return a lookup fn: spu_pk → (unit_cost, currency) | (None, None)."""
 
     def lookup(cp_id: int) -> tuple[Decimal | None, str | None]:
         row = session.execute(_SQL_LATEST_PURCHASE_COST, {"cp_id": cp_id}).first()

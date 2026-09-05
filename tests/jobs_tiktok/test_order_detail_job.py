@@ -48,14 +48,14 @@ class FakeProxy:
 def _make_account(session) -> ChannelAccount:
     cred = Credentials(
         provider="tiktok",
-        external_account_id="TEST_TT_DETAIL_SHOP",
+        shop_id="TEST_TT_DETAIL_SHOP",
         ciphertext=b"\x00" * 32,
     )
     session.add(cred)
     session.flush()
     acct = ChannelAccount(
         platform="tiktok",
-        external_account_id="TEST_TT_DETAIL_SHOP",
+        shop_id="TEST_TT_DETAIL_SHOP",
         credential_id=cred.id,
         status="active",
     )
@@ -107,7 +107,7 @@ def test_detail_writes_raw_records_and_normalized_rows(db_session) -> None:
         inner=order_detail.run,
         inner_kwargs={
             "proxy_call": proxy,
-            "shop_id": account.external_account_id,
+            "shop_id": account.shop_id,
             "order_ids": ["O1"],
         },
     )
@@ -116,12 +116,12 @@ def test_detail_writes_raw_records_and_normalized_rows(db_session) -> None:
     assert result.rows_inserted == 1
     assert result.rows_failed == 0
     so = db_session.execute(
-        select(SalesOrder).where(SalesOrder.external_order_id == "O1")
+        select(SalesOrder).where(SalesOrder.order_id == "O1")
     ).scalar_one()
-    assert so.external_order_id == "O1"
+    assert so.order_id == "O1"
     lines = db_session.execute(
         select(SalesOrderLine).where(
-            SalesOrderLine.sales_order_id == so.id
+            SalesOrderLine.order_pk == so.id
         )
     ).scalars().all()
     assert len(lines) == 1
@@ -145,7 +145,7 @@ def test_detail_writes_sync_issue_on_upstream_error(db_session) -> None:
         inner=order_detail.run,
         inner_kwargs={
             "proxy_call": proxy,
-            "shop_id": account.external_account_id,
+            "shop_id": account.shop_id,
             "order_ids": ["O1"],
         },
     )
@@ -165,7 +165,7 @@ def test_detail_empty_order_ids_is_noop(db_session) -> None:
         inner=order_detail.run,
         inner_kwargs={
             "proxy_call": proxy,
-            "shop_id": account.external_account_id,
+            "shop_id": account.shop_id,
             "order_ids": [],
         },
     )
@@ -196,7 +196,7 @@ def test_detail_parse_failure_continues(db_session) -> None:
         inner=order_detail.run,
         inner_kwargs={
             "proxy_call": proxy,
-            "shop_id": account.external_account_id,
+            "shop_id": account.shop_id,
             "order_ids": ["BAD", "OK"],
         },
     )
@@ -256,7 +256,7 @@ def test_detail_auto_mode_pulls_from_sync_issues(db_session) -> None:
         inner=order_detail.run,
         inner_kwargs={
             "proxy_call": proxy,
-            "shop_id": account.external_account_id,
+            "shop_id": account.shop_id,
             # order_ids omitted on purpose — auto-mode
         },
     )
@@ -303,7 +303,7 @@ def test_detail_auto_mode_dedups_order_id_across_line_issues(db_session) -> None
         inner=order_detail.run,
         inner_kwargs={
             "proxy_call": proxy,
-            "shop_id": account.external_account_id,
+            "shop_id": account.shop_id,
         },
     )
     assert result.rows_total == 1
@@ -341,7 +341,7 @@ def test_detail_auto_mode_caps_at_batch_size(db_session) -> None:
         inner=order_detail.run,
         inner_kwargs={
             "proxy_call": proxy,
-            "shop_id": account.external_account_id,
+            "shop_id": account.shop_id,
         },
     )
     assert result.rows_total == AUTO_BATCH_SIZE
@@ -368,7 +368,7 @@ def test_detail_auto_mode_failed_fetch_keeps_issue_open(db_session) -> None:
         inner=order_detail.run,
         inner_kwargs={
             "proxy_call": proxy,
-            "shop_id": account.external_account_id,
+            "shop_id": account.shop_id,
         },
     )
     assert result.rows_total == 1
@@ -394,7 +394,7 @@ def test_detail_auto_mode_no_issues_is_noop(db_session) -> None:
         inner=order_detail.run,
         inner_kwargs={
             "proxy_call": proxy,
-            "shop_id": account.external_account_id,
+            "shop_id": account.shop_id,
         },
     )
     assert result.rows_total == 0
@@ -422,7 +422,7 @@ def test_detail_explicit_order_ids_still_resolves(db_session) -> None:
         inner=order_detail.run,
         inner_kwargs={
             "proxy_call": proxy,
-            "shop_id": account.external_account_id,
+            "shop_id": account.shop_id,
             "order_ids": ["O_EXPLICIT"],
         },
     )

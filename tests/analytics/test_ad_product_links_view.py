@@ -8,7 +8,7 @@ every captured day:
 - window metadata: observed_days / first_day / last_day
 - metrics: order_sku_total (出单数), real_cost_total (广告消耗),
   order_value_total (出单 GMV)
-- ERP enrichment: channel_account_id / channel_product_id LEFT JOINed to
+- ERP enrichment: shop_pk / spu_pk LEFT JOINed to
   commerce (NULL when the SPU isn't in the synced TikTok catalog)
 
 Semantics/derivation documented in biz-doc/analytics/ad-product-links-view.md.
@@ -67,15 +67,15 @@ def _wipe(db_engine) -> None:
         # pi-lens-ignore: python-sql-injection — literal SQL, LIKE prefix is constant
         conn.execute(
             text(
-                "DELETE FROM commerce.channel_products "
-                "WHERE external_product_id LIKE 'TEST_%'"
+                "DELETE FROM commerce.products_spu "
+                "WHERE spu_id LIKE 'TEST_%'"
             )
         )
         # pi-lens-ignore: python-sql-injection — literal SQL, LIKE prefix is constant
         conn.execute(
             text(
-                "DELETE FROM commerce.channel_accounts "
-                "WHERE external_account_id LIKE 'TEST_%'"
+                "DELETE FROM commerce.shops "
+                "WHERE shop_id LIKE 'TEST_%'"
             )
         )
 
@@ -236,19 +236,19 @@ def test_view_handles_missing_or_dirty_metric_fields(db_session):
 
 
 def test_view_left_joins_erp_channel_product_when_known(db_session):
-    """SPU 已在 commerce.channel_products 目录 → 带出内部 channel ids,否则 NULL。"""
+    """SPU 已在 commerce.products_spu 目录 → 带出内部 channel ids,否则 NULL。"""
     # ERP 目录里登记一个 TEST 商品
     with db_session.begin_nested():
         acct_id = db_session.execute(
             text(
-                "INSERT INTO commerce.channel_accounts (platform, external_account_id) "
+                "INSERT INTO commerce.shops (platform, shop_id) "
                 "VALUES ('tiktok', :ext) RETURNING id"
             ),
             {"ext": _SELLER},
         ).scalar_one()
         db_session.execute(
             text(
-                "INSERT INTO commerce.channel_products (channel_account_id, external_product_id, title) "
+                "INSERT INTO commerce.products_spu (shop_pk, spu_id, title) "
                 "VALUES (:acct, 'TEST_SPU_1', 'TEST 目录商品')"
             ),
             {"acct": acct_id},
@@ -261,8 +261,8 @@ def test_view_left_joins_erp_channel_product_when_known(db_session):
     )
 
     rows = {r["product_id"]: r for r in _view_rows(db_session)}
-    assert rows["TEST_SPU_1"]["channel_account_id"] == acct_id
-    assert rows["TEST_SPU_1"]["channel_product_id"] is not None
+    assert rows["TEST_SPU_1"]["shop_pk"] == acct_id
+    assert rows["TEST_SPU_1"]["spu_pk"] is not None
     # 同 seller 的另一 SPU 没在目录里：能带出渠道账户（seller 级），但商品 key 为 NULL
-    assert rows["TEST_SPU_2"]["channel_account_id"] == acct_id
-    assert rows["TEST_SPU_2"]["channel_product_id"] is None
+    assert rows["TEST_SPU_2"]["shop_pk"] == acct_id
+    assert rows["TEST_SPU_2"]["spu_pk"] is None

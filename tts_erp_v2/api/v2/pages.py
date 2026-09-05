@@ -525,7 +525,7 @@ _PAGE_HTML = """<!doctype html>
       <div class="op-header-meta">
         <label class="op-shop" for="shop-switcher">
           <span>店铺</span>
-          <select id="shop-switcher" name="channel_account_id" class="op-shop-select" aria-label="当前店铺"></select>
+          <select id="shop-switcher" name="shop_pk" class="op-shop-select" aria-label="当前店铺"></select>
         </label>
         <span class="op-identity" id="ops-identity"></span>
       </div>

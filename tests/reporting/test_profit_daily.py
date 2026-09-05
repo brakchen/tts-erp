@@ -36,7 +36,7 @@ def _utc():
     return datetime(2026, 8, 29, tzinfo=UTC)
 
 
-def _seed(session, *, channel_product_id: int, currency="USD", status="COMPLETED"):
+def _seed(session, *, spu_pk: int, currency="USD", status="COMPLETED"):
     """Helper: a single paid sales order with one line, with given
     gross_revenue. Cost comes from ProductCostSnapshot, if any.
 
@@ -47,8 +47,8 @@ def _seed(session, *, channel_product_id: int, currency="USD", status="COMPLETED
     """
     acct = session.execute(select(ChannelAccount)).scalars().first()
     so = SalesOrder(
-        channel_account_id=acct.id,
-        external_order_id="TEST_ORDER_001",
+        shop_pk=acct.id,
+        order_id="TEST_ORDER_001",
         status=status,
         currency=currency,
         payment_amount=Decimal("100.00"),
@@ -58,9 +58,9 @@ def _seed(session, *, channel_product_id: int, currency="USD", status="COMPLETED
     session.add(so)
     session.flush()
     line = SalesOrderLine(
-        sales_order_id=so.id,
+        order_pk=so.id,
         external_line_id="TEST_LINE_001",
-        channel_product_id=channel_product_id,
+        spu_pk=spu_pk,
         quantity=Decimal("2.0000"),
         unit_price=Decimal("50.00"),
         currency=currency,
@@ -72,18 +72,18 @@ def _seed(session, *, channel_product_id: int, currency="USD", status="COMPLETED
 
 def _make_account_and_product(session):
     cred = Credentials(
-        provider="tiktok", external_account_id="TEST_TT_PROFIT", ciphertext=b"\x00" * 32
+        provider="tiktok", shop_id="TEST_TT_PROFIT", ciphertext=b"\x00" * 32
     )
     session.add(cred)
     session.flush()
     acct = ChannelAccount(
-        platform="tiktok", external_account_id="TEST_TT_PROFIT", credential_id=cred.id
+        platform="tiktok", shop_id="TEST_TT_PROFIT", credential_id=cred.id
     )
     session.add(acct)
     session.flush()
     cp = ChannelProduct(
-        channel_account_id=acct.id,
-        external_product_id="TEST_PROFIT_SPU",
+        shop_pk=acct.id,
+        spu_id="TEST_PROFIT_SPU",
         title="TEST profit product",
         status=ACTIVE_PRODUCT_STATUS,
     )
@@ -104,7 +104,7 @@ def test_rebuild_increments_calculation_version(db_session):
     1. We assert the *delta* (consecutive +1) rather than absolute values.
     """
     _acct, cp = _make_account_and_product(db_session)
-    _seed(db_session, channel_product_id=cp.id)
+    _seed(db_session, spu_pk=cp.id)
 
     profit_daily.rebuild(db_session, profit_date=date(2026, 8, 29))
     profit_daily.rebuild(db_session, profit_date=date(2026, 8, 29))
@@ -112,7 +112,7 @@ def test_rebuild_increments_calculation_version(db_session):
     rows = (
         db_session.execute(
             select(ProductProfitDaily).where(
-                ProductProfitDaily.channel_product_id == cp.id
+                ProductProfitDaily.spu_pk == cp.id
             )
         )
         .scalars()
@@ -136,7 +136,7 @@ def test_basic_revenue_and_cogs(db_session):
     # seed a cost snapshot at unit_cost 10
     db_session.add(
         ProductCostSnapshot(
-            channel_product_id=cp.id,
+            spu_pk=cp.id,
             cost_method="MANUAL_ENTRY",
             unit_cost=Decimal("10.00"),
             currency="USD",
@@ -146,11 +146,11 @@ def test_basic_revenue_and_cogs(db_session):
         )
     )
     db_session.flush()
-    _seed(db_session, channel_product_id=cp.id)
+    _seed(db_session, spu_pk=cp.id)
 
     rows = profit_daily.rebuild(db_session, profit_date=date(2026, 8, 29))
     assert len(rows) >= 1
-    row = next(r for r in rows if r.channel_product_id == cp.id)
+    row = next(r for r in rows if r.spu_pk == cp.id)
     # 2 units * $50 = $100 gross_revenue, 2 units * $10 = $20 estimated_cogs
     assert row.gross_revenue == Decimal("100.00")
     assert row.estimated_cogs == Decimal("20.00")
@@ -165,10 +165,10 @@ def test_basic_revenue_and_cogs(db_session):
 
 def test_no_cost_snapshot_means_cogs_null(db_session):
     _acct, cp = _make_account_and_product(db_session)
-    _seed(db_session, channel_product_id=cp.id)
+    _seed(db_session, spu_pk=cp.id)
 
     rows = profit_daily.rebuild(db_session, profit_date=date(2026, 8, 29))
-    row = next(r for r in rows if r.channel_product_id == cp.id)
+    row = next(r for r in rows if r.spu_pk == cp.id)
     assert row.gross_revenue == Decimal("100.00")
     assert row.estimated_cogs is None  # unknown cost
     assert row.estimated_gross_profit is None  # can't compute
@@ -202,41 +202,41 @@ def test_no_orders_for_date_no_row(db_session):
 def test_paid_status_whitelist_includes_completed(db_session):
     """COMPLETED (the most common production status) is treated as paid."""
     _acct, cp = _make_account_and_product(db_session)
-    _seed(db_session, channel_product_id=cp.id, status="COMPLETED")
+    _seed(db_session, spu_pk=cp.id, status="COMPLETED")
     rows = profit_daily.rebuild(db_session, profit_date=date(2026, 8, 29))
-    assert any(r.channel_product_id == cp.id for r in rows)
+    assert any(r.spu_pk == cp.id for r in rows)
 
 
 def test_paid_status_whitelist_includes_awaiting_shipment(db_session):
     """AWAITING_SHIPMENT (paid but not yet shipped) is also treated as paid."""
     _acct, cp = _make_account_and_product(db_session)
-    _seed(db_session, channel_product_id=cp.id, status="AWAITING_SHIPMENT")
+    _seed(db_session, spu_pk=cp.id, status="AWAITING_SHIPMENT")
     rows = profit_daily.rebuild(db_session, profit_date=date(2026, 8, 29))
-    assert any(r.channel_product_id == cp.id for r in rows)
+    assert any(r.spu_pk == cp.id for r in rows)
 
 
 def test_paid_status_whitelist_includes_in_transit(db_session):
     _acct, cp = _make_account_and_product(db_session)
-    _seed(db_session, channel_product_id=cp.id, status="IN_TRANSIT")
+    _seed(db_session, spu_pk=cp.id, status="IN_TRANSIT")
     rows = profit_daily.rebuild(db_session, profit_date=date(2026, 8, 29))
-    assert any(r.channel_product_id == cp.id for r in rows)
+    assert any(r.spu_pk == cp.id for r in rows)
 
 
 def test_unpaid_status_excluded(db_session):
     """UNPAID orders must not appear in revenue aggregations."""
     _acct, cp = _make_account_and_product(db_session)
-    _seed(db_session, channel_product_id=cp.id, status="UNPAID")
+    _seed(db_session, spu_pk=cp.id, status="UNPAID")
     rows = profit_daily.rebuild(db_session, profit_date=date(2026, 8, 29))
-    assert all(r.channel_product_id != cp.id for r in rows)
+    assert all(r.spu_pk != cp.id for r in rows)
 
 
 def test_cancelled_status_excluded(db_session):
     """CANCELLED orders must not appear in revenue aggregations even
     though they sometimes have paid_at set (e.g. partial-refund)."""
     _acct, cp = _make_account_and_product(db_session)
-    _seed(db_session, channel_product_id=cp.id, status="CANCELLED")
+    _seed(db_session, spu_pk=cp.id, status="CANCELLED")
     rows = profit_daily.rebuild(db_session, profit_date=date(2026, 8, 29))
-    assert all(r.channel_product_id != cp.id for r in rows)
+    assert all(r.spu_pk != cp.id for r in rows)
 
 
 def test_paid_whitelist_is_documented_in_constants():
@@ -273,7 +273,7 @@ def test_currency_mismatch_writes_null_cogs_and_logs_sync_issue(db_session):
     # Cost snapshot in CNY (operator entered / 妙手).
     db_session.add(
         ProductCostSnapshot(
-            channel_product_id=cp.id,
+            spu_pk=cp.id,
             cost_method="MANUAL_ENTRY",
             unit_cost=Decimal("10.00"),
             currency="CNY",
@@ -284,10 +284,10 @@ def test_currency_mismatch_writes_null_cogs_and_logs_sync_issue(db_session):
     )
     db_session.flush()
     # Order in VND (production reality).
-    _seed(db_session, channel_product_id=cp.id, currency="VND")
+    _seed(db_session, spu_pk=cp.id, currency="VND")
 
     rows = profit_daily.rebuild(db_session, profit_date=date(2026, 8, 29))
-    row = next(r for r in rows if r.channel_product_id == cp.id)
+    row = next(r for r in rows if r.spu_pk == cp.id)
 
     # gross_revenue stays honest.
     assert row.gross_revenue == Decimal("100.00")
@@ -320,7 +320,7 @@ def test_same_currency_does_not_emit_sync_issue(db_session):
     _acct, cp = _make_account_and_product(db_session)
     db_session.add(
         ProductCostSnapshot(
-            channel_product_id=cp.id,
+            spu_pk=cp.id,
             cost_method="MANUAL_ENTRY",
             unit_cost=Decimal("10.00"),
             currency="USD",
@@ -330,10 +330,10 @@ def test_same_currency_does_not_emit_sync_issue(db_session):
         )
     )
     db_session.flush()
-    _seed(db_session, channel_product_id=cp.id, currency="USD")
+    _seed(db_session, spu_pk=cp.id, currency="USD")
 
     rows = profit_daily.rebuild(db_session, profit_date=date(2026, 8, 29))
-    row = next(r for r in rows if r.channel_product_id == cp.id)
+    row = next(r for r in rows if r.spu_pk == cp.id)
     assert row.estimated_cogs == Decimal("20.00")
     assert row.estimated_gross_profit == Decimal("80.00")
     assert row.cost_method == "MANUAL_ENTRY"

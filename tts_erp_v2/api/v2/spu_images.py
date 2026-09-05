@@ -8,7 +8,7 @@ Flow:
 2. Browser PUTs the file directly to MinIO (server doesn't proxy bytes).
 3. Browser POSTs to ``/v2/spu-images/{id}/confirm``; server HEADs the
    object and flips status to ``ready``.
-4. ``GET /v2/spu-images?channel_product_id=X`` returns ready images
+4. ``GET /v2/spu-images?spu_pk=X`` returns ready images
    with presigned GET URLs.
 5. ``DELETE /v2/spu-images/{id}`` soft-deletes and best-effort removes
    from MinIO.
@@ -68,8 +68,8 @@ def get_minio_client() -> MinioClient:
 
 
 class UploadUrlIn(BaseModel):
-    channel_account_id: int = Field(ge=1)
-    channel_product_id: int = Field(ge=1)
+    shop_pk: int = Field(ge=1)
+    spu_pk: int = Field(ge=1)
     filename: str = Field(min_length=1, max_length=255)
     content_type: str = Field(min_length=1, max_length=127)
     size_bytes: int = Field(ge=1)
@@ -95,8 +95,8 @@ class ConfirmOut(BaseModel):
 
 class ImageOut(BaseModel):
     image_id: int
-    channel_product_id: int
-    channel_product_external_id: str | None = None
+    spu_pk: int
+    spu_id: str | None = None
     object_key: str
     filename: str
     content_type: str
@@ -111,15 +111,15 @@ class ImageOut(BaseModel):
 
 
 SQL_VERIFY_ACCOUNT = (
-    "SELECT id FROM commerce.channel_accounts WHERE id = :acct"
+    "SELECT id FROM commerce.shops WHERE id = :acct"
 )
 SQL_VERIFY_PRODUCT = (
-    "SELECT id FROM commerce.channel_products "
-    "WHERE id = :cp AND channel_account_id = :acct"
+    "SELECT id FROM commerce.products_spu "
+    "WHERE id = :cp AND shop_pk = :acct"
 )
 SQL_INSERT_IMAGE = (
     "INSERT INTO procurement.spu_images ("
-    "channel_account_id, channel_product_id, object_key, "
+    "shop_pk, spu_pk, object_key, "
     "filename, content_type, size_bytes, status, "
     "uploaded_by_key_id, uploaded_by_prefix) "
     "VALUES (:acct, :cp, :key, :fn, :ct, :size, 'awaiting_upload', "
@@ -127,7 +127,7 @@ SQL_INSERT_IMAGE = (
     "RETURNING id, object_key"
 )
 SQL_GET_IMAGE_FOR_CONFIRM = (
-    "SELECT id, channel_account_id, channel_product_id, object_key, "
+    "SELECT id, shop_pk, spu_pk, object_key, "
     "       filename, content_type, size_bytes, status, deleted_at "
     "FROM procurement.spu_images WHERE id = :id"
 )
@@ -142,14 +142,14 @@ SQL_MARK_FAILED = (
     "SET status = 'failed', failure_reason = :why WHERE id = :id"
 )
 SQL_LIST_READY_IMAGES = (
-    "SELECT si.id, si.channel_product_id, cp.external_product_id, "
+    "SELECT si.id, si.spu_pk, cp.spu_id, "
     "       si.object_key, si.filename, si.content_type, si.size_bytes, "
     "       si.uploaded_at, si.uploaded_by_prefix "
     "FROM procurement.spu_images si "
-    "JOIN commerce.channel_products cp ON cp.id = si.channel_product_id "
+    "JOIN commerce.products_spu cp ON cp.id = si.spu_pk "
     "WHERE si.deleted_at IS NULL "
     "AND si.status = 'ready' "
-    "AND (CAST(:cp_id AS bigint) IS NULL OR si.channel_product_id = :cp_id) "
+    "AND (CAST(:cp_id AS bigint) IS NULL OR si.spu_pk = :cp_id) "
     "ORDER BY si.uploaded_at DESC LIMIT :limit OFFSET :offset"
 )
 SQL_SOFT_DELETE = (
@@ -221,20 +221,20 @@ def create_upload_url(
 
     # Verify both foreign keys exist (and product belongs to account).
     if sess.execute(
-        _STMT_VERIFY_ACCOUNT, {"acct": body.channel_account_id},
+        _STMT_VERIFY_ACCOUNT, {"acct": body.shop_pk},
     ).first() is None:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
-            f"channel account not found: {body.channel_account_id}",
+            f"channel account not found: {body.shop_pk}",
         )
     if sess.execute(
         _STMT_VERIFY_PRODUCT,
-        {"cp": body.channel_product_id, "acct": body.channel_account_id},
+        {"cp": body.spu_pk, "acct": body.shop_pk},
     ).first() is None:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
             f"channel product not found in account "
-            f"{body.channel_account_id}: {body.channel_product_id}",
+            f"{body.shop_pk}: {body.spu_pk}",
         )
 
     # Insert with status='awaiting_upload' and a placeholder object_key;
@@ -247,8 +247,8 @@ def create_upload_url(
     row = sess.execute(
         _STMT_INSERT_IMAGE,
         {
-            "acct": body.channel_account_id,
-            "cp": body.channel_product_id,
+            "acct": body.shop_pk,
+            "cp": body.spu_pk,
             "key": placeholder,
             "fn": body.filename,
             "ct": body.content_type,
@@ -269,8 +269,8 @@ def create_upload_url(
     slug = slugify_filename(body.filename)
     ext = body.filename.rsplit(".", 1)[-1].lower() if "." in body.filename else ""
     object_key = build_object_key(
-        account_id=body.channel_account_id,
-        product_id=body.channel_product_id,
+        account_id=body.shop_pk,
+        product_id=body.spu_pk,
         image_id=image_id,
         slug=slug,
         ext=ext or "bin",
@@ -390,14 +390,14 @@ def confirm_upload(
 @router.get("", response_model=list[ImageOut])
 def list_images(
     sess: Annotated[Session, Depends(get_session)],
-    channel_product_id: int | None = Query(default=None, ge=1),
+    spu_pk: int | None = Query(default=None, ge=1),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> list[ImageOut]:
     """List ready (non-deleted) images, optionally filtered by SPU."""
     rows = sess.execute(
         _STMT_LIST_READY_IMAGES,
-        {"cp_id": channel_product_id, "limit": limit, "offset": offset},
+        {"cp_id": spu_pk, "limit": limit, "offset": offset},
     ).all()
     minio = get_minio_client()
     out: list[ImageOut] = []
@@ -410,8 +410,8 @@ def list_images(
         out.append(
             ImageOut(
                 image_id=r.id,
-                channel_product_id=r.channel_product_id,
-                channel_product_external_id=r.external_product_id,
+                spu_pk=r.spu_pk,
+                spu_id=r.spu_id,
                 object_key=r.object_key,
                 filename=r.filename,
                 content_type=r.content_type,

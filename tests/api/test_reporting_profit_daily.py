@@ -38,10 +38,10 @@ def _cleanup_test_profit_daily(db_engine):
 
     The shared ``tests/api/conftest.py::_isolate_state`` only wipes
     TEST_* rows from the tables Lane E (this lane's neighbours) touch:
-    channel_accounts, channel_products, manual_product_costs, spu_images,
+    shops, products_spu, manual_product_costs, spu_images,
     api_keys. reporting.product_profit_daily is OUT of that scope, so
     rows this test commits would otherwise leak across runs and break
-    subsequent seeding via the (channel_product_id, profit_date,
+    subsequent seeding via the (spu_pk, profit_date,
     calculation_version) UNIQUE constraint.
     """
     _wipe_test_profit_daily(db_engine)
@@ -57,9 +57,9 @@ def _wipe_test_profit_daily(db_engine) -> None:
         conn.execute(
             text(
                 "DELETE FROM reporting.product_profit_daily "
-                "WHERE channel_product_id IN ("
-                "  SELECT id FROM commerce.channel_products "
-                "  WHERE external_product_id LIKE 'TEST_%'"
+                "WHERE spu_pk IN ("
+                "  SELECT id FROM commerce.products_spu "
+                "  WHERE spu_id LIKE 'TEST_%'"
                 ")"
             )
         )
@@ -94,15 +94,15 @@ def test_profit_daily_no_filter_returns_200_bare_array(api_client, readonly_key)
 def test_profit_daily_with_unmatched_filter_returns_200_empty(
     api_client, readonly_key
 ):
-    """A channel_product_id filter that matches no rows → 200 + ``[]``.
+    """A spu_pk filter that matches no rows → 200 + ``[]``.
 
-    Exercises the ``OR channel_product_id = :channel_id`` branch with
+    Exercises the ``OR spu_pk = :channel_id`` branch with
     non-NULL params so we know the CAST we added for AmbiguousParameter
     didn't break the OR-short-circuit when filters are supplied.
     """
     r = api_client.get(
         "/v2/reporting/profit-daily"
-        "?channel_product_id=999999999&on_date=2030-01-01",
+        "?spu_pk=999999999&on_date=2030-01-01",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200, r.text
@@ -112,12 +112,12 @@ def test_profit_daily_with_unmatched_filter_returns_200_empty(
 def test_profit_daily_with_only_channel_filter_returns_200(
     api_client, readonly_key
 ):
-    """Single-filter combo: only ``channel_product_id`` (date is NULL).
+    """Single-filter combo: only ``spu_pk`` (date is NULL).
 
     Confirms the CAST(:on_date AS date) handles a NULL param cleanly.
     """
     r = api_client.get(
-        "/v2/reporting/profit-daily?channel_product_id=999999999",
+        "/v2/reporting/profit-daily?spu_pk=999999999",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200, r.text
@@ -149,23 +149,23 @@ def test_profit_daily_one_row_aliases_all_fields(api_client, readwrite_key, db_e
         # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
         seed_sess.execute(
             text(
-                "INSERT INTO commerce.channel_accounts "
-                "(platform, external_account_id, account_name, status) "
+                "INSERT INTO commerce.shops "
+                "(platform, shop_id, account_name, status) "
                 "VALUES ('tiktok', 'TEST_acct_pf', 'TEST acct pf', 'active')"
             )
         )
         # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
         acct_id = seed_sess.execute(
             text(
-                "SELECT id FROM commerce.channel_accounts "
-                "WHERE external_account_id = 'TEST_acct_pf'"
+                "SELECT id FROM commerce.shops "
+                "WHERE shop_id = 'TEST_acct_pf'"
             )
         ).scalar()
         # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
         seed_sess.execute(
             text(
-                "INSERT INTO commerce.channel_products "
-                "(channel_account_id, external_product_id, title, status) "
+                "INSERT INTO commerce.products_spu "
+                "(shop_pk, spu_id, title, status) "
                 "VALUES (:acct, 'TEST_PF_SPU', 'TEST pf product', 'ACTIVATE')"
             ),
             {"acct": acct_id},
@@ -173,15 +173,15 @@ def test_profit_daily_one_row_aliases_all_fields(api_client, readwrite_key, db_e
         # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
         cp_id = seed_sess.execute(
             text(
-                "SELECT id FROM commerce.channel_products "
-                "WHERE external_product_id = 'TEST_PF_SPU'"
+                "SELECT id FROM commerce.products_spu "
+                "WHERE spu_id = 'TEST_PF_SPU'"
             )
         ).scalar()
         # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
         seed_sess.execute(
             text(
                 "INSERT INTO reporting.product_profit_daily "
-                "(channel_product_id, profit_date, units_sold, gross_revenue, "
+                "(spu_pk, profit_date, units_sold, gross_revenue, "
                 " estimated_cogs, estimated_gross_profit, currency, "
                 " cost_method, calculation_version) "
                 "VALUES (:cp, '2030-01-15', 3.0000, 150.00, 30.00, 120.00, "
@@ -191,10 +191,10 @@ def test_profit_daily_one_row_aliases_all_fields(api_client, readwrite_key, db_e
         )
         seed_sess.commit()
 
-    # 2. GET via the API and find the row by channel_product_id.
+    # 2. GET via the API and find the row by spu_pk.
     r = api_client.get(
         f"/v2/reporting/profit-daily"
-        f"?channel_product_id={cp_id}&on_date=2030-01-15",
+        f"?spu_pk={cp_id}&on_date=2030-01-15",
         headers={"Authorization": f"Bearer {readwrite_key}"},
     )
     assert r.status_code == 200, r.text
@@ -204,7 +204,7 @@ def test_profit_daily_one_row_aliases_all_fields(api_client, readwrite_key, db_e
 
     # 3. Field-by-field assertions on the aliased response shape.
     assert row["id"] > 0
-    assert row["channel_product_id"] == cp_id
+    assert row["spu_pk"] == cp_id
     # on_date is a DATE column aliased onto the ProfitDailyOut schema
     # (typed datetime | None). SQLAlchemy + JSON serialise it as
     # 'YYYY-MM-DDTHH:MM:SS' (midnight when the source has no time

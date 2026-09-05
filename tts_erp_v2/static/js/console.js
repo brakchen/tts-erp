@@ -302,7 +302,7 @@
       DEFAULT_LIMIT +
       "&offset=" +
       costOffset;
-    if (acct) url += "&channel_account_id=" + acct;
+    if (acct) url += "&shop_pk=" + acct;
     api(url)
       .then(function (r) {
         if (!r.ok) throw new Error("HTTP " + r.status);
@@ -346,15 +346,15 @@
     }
     items.forEach(function (it) {
       var tr = document.createElement("tr");
-      tr.dataset.ext = it.external_product_id || "";
-      tr.dataset.cpid = it.channel_product_id;
+      tr.dataset.ext = it.spu_id || "";
+      tr.dataset.cpid = it.spu_pk;
       tr.dataset.acct = String(getActiveAccountId() || "");
       html(
         tr,
         '<td class="op-td-sku" data-label="SKU" title="' +
-          esc(it.external_product_id || "") +
+          esc(it.spu_id || "") +
           '">' +
-          esc(it.external_product_id || "—") +
+          esc(it.spu_id || "—") +
           "</td>" +
           '<td class="op-td-title" data-label="标题">' +
           esc(it.title || "") +
@@ -419,7 +419,7 @@
       // Existing photos preview (read-only).
       var gallery = tr.querySelector("[data-gallery]");
       api(
-        "/v2/spu-images?channel_product_id=" +
+        "/v2/spu-images?spu_pk=" +
           encodeURIComponent(tr.dataset.cpid),
       )
         .then(function (r) {
@@ -448,7 +448,7 @@
 
   function submitPending(tr) {
     var inputs = tr.querySelectorAll("input[data-k], select[data-k]");
-    var body = { channel_product_external_id: tr.dataset.ext };
+    var body = { spu_id: tr.dataset.ext };
     inputs.forEach(function (i) {
       body[i.dataset.k] = i.value;
     });
@@ -487,8 +487,8 @@
         return api("/v2/spu-images/upload-url", {
           method: "POST",
           body: JSON.stringify({
-            channel_account_id: acct,
-            channel_product_id: cpid,
+            shop_pk: acct,
+            spu_pk: cpid,
             filename: file.name || "photo.jpg",
             content_type: file.type || "image/jpeg",
             size_bytes: file.size,
@@ -552,7 +552,7 @@
     var tbody = $("#grid-rows");
     html(tbody, loadingRow());
     var url = "/v2/reporting/cost-snapshots?limit=" + DEFAULT_LIMIT;
-    if (acct) url += "&channel_account_id=" + acct;
+    if (acct) url += "&shop_pk=" + acct;
     api(url)
       .then((r) => {
         if (!r.ok) throw new Error("HTTP " + r.status);
@@ -583,7 +583,7 @@
           esc(fmtDate(it.calculated_at)) +
           "</td>" +
           '<td class="op-td-sku" data-label="渠道商品">' +
-          esc(it.channel_product_id) +
+          esc(it.spu_pk) +
           "</td>" +
           '<td data-label="成本方法">' +
           esc(it.cost_method || "—") +

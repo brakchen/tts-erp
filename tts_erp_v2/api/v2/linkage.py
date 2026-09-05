@@ -38,7 +38,7 @@ router = APIRouter(prefix="/v2/linkage", tags=["linkage"])
 # None-valued bind param and the query 500s with
 # ``ERROR: could not determine data type of parameter $1``.
 SQL_LIST_PRODUCT_LINKS = (
-    "SELECT id, procurement_product_id, channel_product_id, relation_type, "
+    "SELECT id, procurement_product_id, spu_pk, relation_type, "
     "status, is_primary, valid_from, valid_to "
     "FROM linkage.product_links "
     "ORDER BY id LIMIT :limit OFFSET :offset"
@@ -50,7 +50,7 @@ SQL_LIST_LINK_EVIDENCE = (
     "ORDER BY id LIMIT :limit OFFSET :offset"
 )
 SQL_LIST_LINK_ISSUES = (
-    "SELECT id, issue_type, procurement_product_id, channel_product_id, "
+    "SELECT id, issue_type, procurement_product_id, spu_pk, "
     "candidate_count, status, created_at, resolved_at "
     "FROM linkage.link_issues "
     "WHERE (:unresolved_only = FALSE OR resolved_at IS NULL) "
@@ -58,22 +58,22 @@ SQL_LIST_LINK_ISSUES = (
 )
 SQL_INSERT_LINK_OVERRIDE = (
     "INSERT INTO linkage.link_overrides ("
-    "procurement_product_id, channel_product_id, decision, reason, "
+    "procurement_product_id, spu_pk, decision, reason, "
     "valid_from, valid_to, created_by, created_at) "
     "VALUES (:proc_id, :channel_id, :decision, :reason, :valid_from, "
     "NULL, :created_by, now()) "
-    "RETURNING id, procurement_product_id, channel_product_id, decision, "
+    "RETURNING id, procurement_product_id, spu_pk, decision, "
     "reason, valid_from, valid_to, created_by"
 )
 SQL_CLOSE_OLD_OVERRIDES = (
     "UPDATE linkage.link_overrides SET valid_to = now() "
-    "WHERE channel_product_id = CAST(:channel_id AS bigint) "
+    "WHERE spu_pk = CAST(:channel_id AS bigint) "
     "AND procurement_product_id = CAST(:proc_id AS bigint) "
     "AND valid_to IS NULL "
     "AND id <> :keep_id"
 )
 SQL_LIST_OVERRIDES = (
-    "SELECT id, procurement_product_id, channel_product_id, decision, "
+    "SELECT id, procurement_product_id, spu_pk, decision, "
     "reason, valid_from, valid_to, created_by "
     "FROM linkage.link_overrides "
     "WHERE 1=1 "
@@ -166,7 +166,7 @@ def _product_link_row(row: Any) -> ProductLinkOut:
     return ProductLinkOut(
         id=row.id,
         procurement_product_id=row.procurement_product_id,
-        channel_product_id=row.channel_product_id,
+        spu_pk=row.spu_pk,
         relation_type=row.relation_type,
         status=row.status,
         is_primary=row.is_primary,
@@ -180,7 +180,7 @@ def _issue_row(row: Any) -> LinkIssueOut:
         id=row.id,
         issue_type=row.issue_type,
         procurement_product_id=row.procurement_product_id,
-        channel_product_id=row.channel_product_id,
+        spu_pk=row.spu_pk,
         candidate_count=row.candidate_count,
         status=row.status,
         created_at=row.created_at,
@@ -192,7 +192,7 @@ def _override_row(row: Any) -> LinkOverrideOut:
     return LinkOverrideOut(
         id=row.id,
         procurement_product_id=row.procurement_product_id,
-        channel_product_id=row.channel_product_id,
+        spu_pk=row.spu_pk,
         decision=row.decision,
         reason=row.reason,
         valid_from=row.valid_from,
@@ -204,7 +204,7 @@ def _override_row(row: Any) -> LinkOverrideOut:
 @router.get("/product-links", response_model=list[ProductLinkOut])
 def list_product_links(
     sess: Session = Depends(get_session),
-    channel_product_id: int | None = Query(default=None),
+    spu_pk: int | None = Query(default=None),
     procurement_product_id: int | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -212,7 +212,7 @@ def list_product_links(
     rows = _q_optional(
         SQL_LIST_PRODUCT_LINKS,
         {
-            "channel_product_id": channel_product_id,
+            "spu_pk": spu_pk,
             "procurement_product_id": procurement_product_id,
         },
         {"limit": limit, "offset": offset},
@@ -280,7 +280,7 @@ def resolve_link_issue(
 @router.get("/overrides", response_model=list[LinkOverrideOut])
 def list_link_overrides(
     sess: Session = Depends(get_session),
-    channel_product_id: int | None = Query(default=None),
+    spu_pk: int | None = Query(default=None),
     active_only: bool = Query(default=True),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -293,9 +293,9 @@ def list_link_overrides(
     # IS-NULL predicate with optional equality filters.
     clauses: list[str] = []
     params: dict = {"limit": limit, "offset": offset}
-    if channel_product_id is not None:
-        clauses.append("channel_product_id = :channel_product_id")
-        params["channel_product_id"] = channel_product_id
+    if spu_pk is not None:
+        clauses.append("spu_pk = :spu_pk")
+        params["spu_pk"] = spu_pk
     if active_only:
         clauses.append("valid_to IS NULL")
     where = (" AND ".join(clauses)) if clauses else "1=1"
@@ -351,7 +351,7 @@ def create_link_override(
         _STMT_INSERT_LINK_OVERRIDE,
         {
             "proc_id": proc_id,
-            "channel_id": body.channel_product_id,
+            "channel_id": body.spu_pk,
             "decision": body.decision,
             "reason": body.reason,
             "valid_from": valid_from,
@@ -370,7 +370,7 @@ def create_link_override(
         _q(
             _STMT_CLOSE_OLD_OVERRIDES,
             {
-                "channel_id": body.channel_product_id,
+                "channel_id": body.spu_pk,
                 "proc_id": proc_id,
                 "keep_id": new_row.id,
             },

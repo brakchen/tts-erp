@@ -34,12 +34,12 @@ def _utc(year=2026, month=8, day=29):
 
 def _acct(session):
     cred = Credentials(
-        provider="tiktok", external_account_id="TEST_TT_COV", ciphertext=b"\x00" * 32
+        provider="tiktok", shop_id="TEST_TT_COV", ciphertext=b"\x00" * 32
     )
     session.add(cred)
     session.flush()
     a = ChannelAccount(
-        platform="tiktok", external_account_id="TEST_TT_COV", credential_id=cred.id
+        platform="tiktok", shop_id="TEST_TT_COV", credential_id=cred.id
     )
     session.add(a)
     session.flush()
@@ -51,20 +51,20 @@ def _acct(session):
 
 def test_line_product_resolution_rate(db_session):
     """order_line_product_resolution_rate = (lines with non-null
-    channel_product_id) / total lines."""
+    spu_pk) / total lines."""
     base = coverage.line_product_resolution_rate(db_session)
     a = _acct(db_session)
     cp = ChannelProduct(
-        channel_account_id=a.id,
-        external_product_id="TEST_RES_1",
+        shop_pk=a.id,
+        spu_id="TEST_RES_1",
         title="TEST r",
         status="ACTIVE",
     )
     db_session.add(cp)
     db_session.flush()
     so = SalesOrder(
-        channel_account_id=a.id,
-        external_order_id="TEST_SO_RES_1",
+        shop_pk=a.id,
+        order_id="TEST_SO_RES_1",
         status="PAID",
         currency="USD",
         payment_amount=Decimal(10),
@@ -75,9 +75,9 @@ def test_line_product_resolution_rate(db_session):
     # 2 lines: 1 resolved, 1 unresolved
     db_session.add(
         SalesOrderLine(
-            sales_order_id=so.id,
+            order_pk=so.id,
             external_line_id="L1",
-            channel_product_id=cp.id,
+            spu_pk=cp.id,
             quantity=Decimal(1),
             unit_price=Decimal(5),
             currency="USD",
@@ -86,9 +86,9 @@ def test_line_product_resolution_rate(db_session):
     )
     db_session.add(
         SalesOrderLine(
-            sales_order_id=so.id,
+            order_pk=so.id,
             external_line_id="L2",
-            channel_product_id=None,
+            spu_pk=None,
             quantity=Decimal(1),
             unit_price=Decimal(5),
             currency="USD",
@@ -110,18 +110,18 @@ def test_line_product_resolution_rate(db_session):
 
 
 def test_spu_linkage_coverage(db_session):
-    """spu_linkage_coverage = channel_products that have at least one
-    effective product_link / total active channel_products."""
+    """spu_linkage_coverage = products_spu that have at least one
+    effective product_link / total active products_spu."""
     base = coverage.spu_linkage_coverage(db_session)
     a = _acct(db_session)
     cp_linked = ChannelProduct(
-        channel_account_id=a.id,
-        external_product_id="TEST_LINK_1",
+        shop_pk=a.id,
+        spu_id="TEST_LINK_1",
         status="ACTIVE",
     )
     cp_unlinked = ChannelProduct(
-        channel_account_id=a.id,
-        external_product_id="TEST_NOLINK_1",
+        shop_pk=a.id,
+        spu_id="TEST_NOLINK_1",
         status="ACTIVE",
     )
     db_session.add_all([cp_linked, cp_unlinked])
@@ -130,21 +130,21 @@ def test_spu_linkage_coverage(db_session):
     # on product_links.procurement_product_id is satisfied.
     pa_cred = Credentials(
         provider="miaoshou",
-        external_account_id="TEST_MS_COV",
+        shop_id="TEST_MS_COV",
         ciphertext=b"\x00" * 32,
     )
     db_session.add(pa_cred)
     db_session.flush()
     pa = ProcurementAccount(
         provider="miaoshou",
-        external_account_id="TEST_MS_COV",
+        shop_id="TEST_MS_COV",
         credential_id=pa_cred.id,
     )
     db_session.add(pa)
     db_session.flush()
     pp = ProcurementProduct(
         procurement_account_id=pa.id,
-        external_product_id="TEST_MS_PROD_COV",
+        spu_id="TEST_MS_PROD_COV",
         product_type="COLLECTED_PRODUCT",
         status="ACTIVE",
     )
@@ -153,7 +153,7 @@ def test_spu_linkage_coverage(db_session):
     db_session.add(
         ProductLink(
             procurement_product_id=pp.id,
-            channel_product_id=cp_linked.id,
+            spu_pk=cp_linked.id,
             relation_type="MIAOSHOU_PUBLISHED_TO_TIKTOK",
             valid_from=_utc(),
             valid_to=None,
@@ -173,12 +173,12 @@ def test_spu_linkage_coverage(db_session):
 
 
 def test_link_issue_rate(db_session):
-    """conflict_rate = unresolved link issues / total channel_products."""
+    """conflict_rate = unresolved link issues / total products_spu."""
     base = coverage.link_issue_rate(db_session)
     a = _acct(db_session)
     cp = ChannelProduct(
-        channel_account_id=a.id,
-        external_product_id="TEST_CONF_1",
+        shop_pk=a.id,
+        spu_id="TEST_CONF_1",
         status="ACTIVE",
     )
     db_session.add(cp)
@@ -186,7 +186,7 @@ def test_link_issue_rate(db_session):
     db_session.add(
         LinkIssue(
             issue_type="AMBIGUOUS_SOURCE",
-            channel_product_id=cp.id,
+            spu_pk=cp.id,
             status="OPEN",
             candidate_count=2,
         )
@@ -210,20 +210,20 @@ def test_cost_coverage_rate(db_session):
     base = coverage.cost_coverage_rate(db_session)
     a = _acct(db_session)
     cp1 = ChannelProduct(
-        channel_account_id=a.id,
-        external_product_id="TEST_COST_1",
+        shop_pk=a.id,
+        spu_id="TEST_COST_1",
         status="ACTIVE",
     )
     cp2 = ChannelProduct(
-        channel_account_id=a.id,
-        external_product_id="TEST_COST_2",
+        shop_pk=a.id,
+        spu_id="TEST_COST_2",
         status="ACTIVE",
     )
     db_session.add_all([cp1, cp2])
     db_session.flush()
     db_session.add(
         ProductCostSnapshot(
-            channel_product_id=cp1.id,
+            spu_pk=cp1.id,
             cost_method="MANUAL_ENTRY",
             unit_cost=Decimal(5),
             currency="USD",

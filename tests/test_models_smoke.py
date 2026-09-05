@@ -89,7 +89,7 @@ def channel_account_row(
 ) -> ChannelAccount:
     a = ChannelAccount(
         platform="tiktok",
-        external_account_id="TEST_acct_1",
+        shop_id="TEST_acct_1",
         credential_id=credentials_row.id,
     )
     db_session.add(a)
@@ -116,8 +116,8 @@ def channel_product_row(
     db_session: Session, channel_account_row: ChannelAccount
 ) -> ChannelProduct:
     p = ChannelProduct(
-        channel_account_id=channel_account_row.id,
-        external_product_id="TEST_prod_1",
+        shop_pk=channel_account_row.id,
+        spu_id="TEST_prod_1",
     )
     db_session.add(p)
     db_session.flush()
@@ -234,7 +234,7 @@ def test_channel_account_credential_fk(
 ) -> None:
     a = ChannelAccount(
         platform="tiktok",
-        external_account_id="TEST_acct_3",
+        shop_id="TEST_acct_3",
         credential_id=credentials_row.id,
     )
     db_session.add(a)
@@ -242,16 +242,16 @@ def test_channel_account_credential_fk(
     assert a.credential_id == credentials_row.id
 
 
-def test_channel_products_unique_per_account(
+def test_products_spu_unique_per_account(
     db_session: Session, channel_account_row: ChannelAccount
 ) -> None:
     a = ChannelProduct(
-        channel_account_id=channel_account_row.id,
-        external_product_id="TEST_prod_dup",
+        shop_pk=channel_account_row.id,
+        spu_id="TEST_prod_dup",
     )
     b = ChannelProduct(
-        channel_account_id=channel_account_row.id,
-        external_product_id="TEST_prod_dup",
+        shop_pk=channel_account_row.id,
+        spu_id="TEST_prod_dup",
     )
     db_session.add_all([a, b])
     import sqlalchemy.exc
@@ -264,8 +264,8 @@ def test_channel_variants_attributes_jsonb(
     db_session: Session, channel_product_row: ChannelProduct
 ) -> None:
     v = ChannelProductVariant(
-        channel_product_id=channel_product_row.id,
-        external_variant_id="TEST_var_1",
+        spu_pk=channel_product_row.id,
+        sku_id="TEST_var_1",
         attributes={"color": "red", "size": "L"},
     )
     db_session.add(v)
@@ -279,8 +279,8 @@ def test_sales_order_and_line_with_snapshots(
     channel_product_row: ChannelProduct,
 ) -> None:
     so = SalesOrder(
-        channel_account_id=channel_account_row.id,
-        external_order_id="TEST_ord_1",
+        shop_pk=channel_account_row.id,
+        order_id="TEST_ord_1",
         currency="VND",
         payment_amount=100000.0,
     )
@@ -288,10 +288,10 @@ def test_sales_order_and_line_with_snapshots(
     db_session.flush()
 
     sol = SalesOrderLine(
-        sales_order_id=so.id,
+        order_pk=so.id,
         external_line_id="TEST_line_1",
-        channel_product_id=channel_product_row.id,
-        external_product_id_snapshot=channel_product_row.external_product_id,
+        spu_pk=channel_product_row.id,
+        external_product_id_snapshot=channel_product_row.spu_id,
         product_name_snapshot="TEST widget",
         quantity=1,
         unit_price=100000.0,
@@ -300,7 +300,7 @@ def test_sales_order_and_line_with_snapshots(
     db_session.add(sol)
     db_session.flush()
 
-    assert sol.channel_product_id == channel_product_row.id
+    assert sol.spu_pk == channel_product_row.id
     assert sol.product_name_snapshot == "TEST widget"
 
 
@@ -375,7 +375,7 @@ def test_manual_product_costs(
     db_session: Session, channel_product_row: ChannelProduct
 ) -> None:
     m = ManualProductCost(
-        channel_product_id=channel_product_row.id,
+        spu_pk=channel_product_row.id,
         unit_cost=42.5,
         currency="CNY",
         note="TEST entry",
@@ -395,22 +395,22 @@ def test_shipment_and_lines_and_tracking(
     channel_product_row: ChannelProduct,
 ) -> None:
     so = SalesOrder(
-        channel_account_id=channel_account_row.id,
-        external_order_id="TEST_ord_ship",
+        shop_pk=channel_account_row.id,
+        order_id="TEST_ord_ship",
     )
     db_session.add(so)
     db_session.flush()
 
     sol = SalesOrderLine(
-        sales_order_id=so.id,
+        order_pk=so.id,
         external_line_id="TEST_sol_ship",
-        channel_product_id=channel_product_row.id,
+        spu_pk=channel_product_row.id,
     )
     db_session.add(sol)
     db_session.flush()
 
     sh = Shipment(
-        sales_order_id=so.id,
+        order_pk=so.id,
         external_package_id="TEST_pkg_1",
         tracking_number="TEST_tracking_1",
         status="shipped",
@@ -445,23 +445,23 @@ def test_after_sales_cases_and_lines(
     channel_product_row: ChannelProduct,
 ) -> None:
     so = SalesOrder(
-        channel_account_id=channel_account_row.id,
-        external_order_id="TEST_ord_case",
+        shop_pk=channel_account_row.id,
+        order_id="TEST_ord_case",
     )
     db_session.add(so)
     db_session.flush()
 
     sol = SalesOrderLine(
-        sales_order_id=so.id,
+        order_pk=so.id,
         external_line_id="TEST_sol_case",
-        channel_product_id=channel_product_row.id,
+        spu_pk=channel_product_row.id,
     )
     db_session.add(sol)
     db_session.flush()
 
     case = AfterSalesCase(
-        channel_account_id=channel_account_row.id,
-        sales_order_id=so.id,
+        shop_pk=channel_account_row.id,
+        order_pk=so.id,
         external_case_id="TEST_case_1",
         case_type="REFUND_ONLY",
         status="pending",
@@ -488,22 +488,22 @@ def test_finance_chain(
     channel_product_row: ChannelProduct,
 ) -> None:
     so = SalesOrder(
-        channel_account_id=channel_account_row.id,
-        external_order_id="TEST_ord_fin",
+        shop_pk=channel_account_row.id,
+        order_id="TEST_ord_fin",
     )
     db_session.add(so)
     db_session.flush()
 
     sol = SalesOrderLine(
-        sales_order_id=so.id,
+        order_pk=so.id,
         external_line_id="TEST_sol_fin",
-        channel_product_id=channel_product_row.id,
+        spu_pk=channel_product_row.id,
     )
     db_session.add(sol)
     db_session.flush()
 
     pay = Payout(
-        channel_account_id=channel_account_row.id,
+        shop_pk=channel_account_row.id,
         external_payout_id="TEST_pay_1",
         amount=1000.0,
         currency="VND",
@@ -522,7 +522,7 @@ def test_finance_chain(
     st = SettlementTransaction(
         settlement_statement_id=ss.id,
         external_transaction_id="TEST_st_1",
-        sales_order_id=so.id,
+        order_pk=so.id,
         sales_order_line_id=sol.id,
     )
     db_session.add(st)
@@ -561,14 +561,14 @@ def test_linkage_chain(
 ) -> None:
     al = AccountLink(
         procurement_account_id=procurement_account_row.id,
-        channel_account_id=channel_account_row.id,
+        shop_pk=channel_account_row.id,
     )
     db_session.add(al)
     db_session.flush()
 
     pl = ProductLink(
         procurement_product_id=procurement_product_row.id,
-        channel_product_id=channel_product_row.id,
+        spu_pk=channel_product_row.id,
         relation_type="MIAOSHOU_PUBLISHED_TO_TIKTOK",
         is_primary=True,
     )
@@ -586,7 +586,7 @@ def test_linkage_chain(
 
     lo = LinkOverride(
         procurement_product_id=procurement_product_row.id,
-        channel_product_id=channel_product_row.id,
+        spu_pk=channel_product_row.id,
         decision="PRIMARY",
         created_by="op1",
     )
@@ -606,13 +606,13 @@ def test_product_links_unique_with_valid_from(
 
     pl1 = ProductLink(
         procurement_product_id=procurement_product_row.id,
-        channel_product_id=channel_product_row.id,
+        spu_pk=channel_product_row.id,
         relation_type="MIAOSHOU_PUBLISHED_TO_TIKTOK",
         valid_from=datetime(2024, 1, 1, tzinfo=UTC),
     )
     pl2 = ProductLink(
         procurement_product_id=procurement_product_row.id,
-        channel_product_id=channel_product_row.id,
+        spu_pk=channel_product_row.id,
         relation_type="MIAOSHOU_PUBLISHED_TO_TIKTOK",
         valid_from=datetime(2024, 2, 1, tzinfo=UTC),
     )
@@ -629,7 +629,7 @@ def test_variant_links(db_session: Session) -> None:
     insp = inspect(db_session.get_bind())
     cols = {c["name"] for c in insp.get_columns("variant_links", schema="linkage")}
     assert "procurement_product_variant_id" in cols
-    assert "channel_product_variant_id" in cols
+    assert "sku_pk" in cols
 
 
 def test_link_issues_record(
@@ -637,7 +637,7 @@ def test_link_issues_record(
 ) -> None:
     li = LinkIssue(
         issue_type="AMBIGUOUS_SOURCE",
-        channel_product_id=channel_product_row.id,
+        spu_pk=channel_product_row.id,
         candidate_count=3,
     )
     db_session.add(li)
@@ -649,7 +649,7 @@ def test_reporting_cost_snapshot(
     db_session: Session, channel_product_row: ChannelProduct
 ) -> None:
     snap = ProductCostSnapshot(
-        channel_product_id=channel_product_row.id,
+        spu_pk=channel_product_row.id,
         cost_method="MANUAL_ENTRY",
         unit_cost=42.5,
         currency="CNY",
@@ -666,7 +666,7 @@ def test_reporting_profit_daily(
     from datetime import date
 
     p = ProductProfitDaily(
-        channel_product_id=channel_product_row.id,
+        spu_pk=channel_product_row.id,
         profit_date=date(2024, 8, 29),
         units_sold=10,
         gross_revenue=1000.0,
@@ -713,6 +713,6 @@ def test_effective_product_links_view_consultable(db_engine) -> None:
             )
         ).fetchall()
     cols = {r[0] for r in rows}
-    assert "channel_product_id" in cols
+    assert "spu_pk" in cols
     assert "procurement_product_id" in cols
     assert "effective_relation_type" in cols

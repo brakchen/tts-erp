@@ -44,7 +44,7 @@ def _make_channel_account(session, *, external_id="TEST_TT_SHOP_1"):
     session.flush()
     acct = ChannelAccount(
         platform="tiktok",
-        external_account_id=external_id,
+        shop_id=external_id,
         account_name="TEST shop",
         credential_id=cred.id,
     )
@@ -74,8 +74,8 @@ def _make_procurement_account(session, *, external_id="TEST_MS_LIC_1"):
 
 def _make_channel_product(session, account, *, external_id="TEST_TT_PROD_1"):
     p = ChannelProduct(
-        channel_account_id=account.id,
-        external_product_id=external_id,
+        shop_pk=account.id,
+        spu_id=external_id,
         title="TEST some product",
         status="ACTIVE",
     )
@@ -126,7 +126,7 @@ def test_success_task_creates_evidence_and_product_link(db_session):
 
     links = (
         db_session.execute(
-            select(ProductLink).where(ProductLink.channel_product_id == cp.id)
+            select(ProductLink).where(ProductLink.spu_pk == cp.id)
         )
         .scalars()
         .all()
@@ -235,7 +235,7 @@ def test_ambiguous_source_raises_issue_and_blocks_link(db_session):
 
     links = (
         db_session.execute(
-            select(ProductLink).where(ProductLink.channel_product_id == cp.id)
+            select(ProductLink).where(ProductLink.spu_pk == cp.id)
         )
         .scalars()
         .all()
@@ -254,7 +254,7 @@ def test_ambiguous_source_raises_issue_and_blocks_link(db_session):
         db_session.execute(
             select(LinkIssue).where(
                 LinkIssue.issue_type == "AMBIGUOUS_SOURCE",
-                LinkIssue.channel_product_id == cp.id,
+                LinkIssue.spu_pk == cp.id,
             )
         )
         .scalars()
@@ -262,17 +262,17 @@ def test_ambiguous_source_raises_issue_and_blocks_link(db_session):
     )
     assert len(issues) >= 1
     issue = issues[-1]
-    assert issue.channel_product_id == cp.id
+    assert issue.spu_pk == cp.id
     assert issue.candidate_count == 2
     assert issue.resolved_at is None
 
 
-# ─── 4. UNRESOLVED: task references unknown channel_product_id
+# ─── 4. UNRESOLVED: task references unknown spu_pk
 
 
 def test_task_with_unknown_channel_product_writes_issue(db_session):
     """A success task pointing to a channel_product that doesn't exist
-    yet in commerce.channel_products writes a sync-level LinkIssue (or
+    yet in commerce.products_spu writes a sync-level LinkIssue (or
     skip silently) — the move_collect processor must not crash, and the
     evidence should be retained as orphan."""
     ca = _make_channel_account(db_session)
@@ -305,7 +305,7 @@ def test_task_with_unknown_channel_product_writes_issue(db_session):
 def test_reprocessing_same_task_is_idempotent(db_session):
     """Re-running the same external_task_id does not create duplicate
     product_links. Either upsert on (procurement_product_id,
-    channel_product_id, source_external_id) or skip."""
+    spu_pk, source_external_id) or skip."""
     ca = _make_channel_account(db_session)
     pa = _make_procurement_account(db_session)
     _make_channel_product(db_session, ca, external_id="TEST_TT_PROD_IDEM")

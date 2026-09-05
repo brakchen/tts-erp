@@ -1,7 +1,7 @@
 """reporting.profit_daily — rebuild product_profit_daily.
 
 The rebuild is incremental on calculation_version: each run writes a new
-``(channel_product_id, profit_date, calculation_version)`` row and
+``(spu_pk, profit_date, calculation_version)`` row and
 leaves older versions in place for forensics.
 
 Revenue side: aggregate ``commerce.sales_order_lines`` joined to paid
@@ -55,13 +55,13 @@ log = logging.getLogger("tts_erp_v2.reporting.profit_daily")
 
 
 def _latest_snapshot(
-    session: Session, channel_product_id: int
+    session: Session, spu_pk: int
 ) -> ProductCostSnapshot | None:
     """Newest effective snapshot for a SPU (valid_to IS NULL, max
     valid_from)."""
     return session.execute(
         select(ProductCostSnapshot)
-        .where(ProductCostSnapshot.channel_product_id == channel_product_id)
+        .where(ProductCostSnapshot.spu_pk == spu_pk)
         .where(ProductCostSnapshot.valid_to.is_(None))
         .order_by(ProductCostSnapshot.valid_from.desc())
         .limit(1)
@@ -79,7 +79,7 @@ def _next_calculation_version(session: Session) -> int:
 def _record_currency_mismatch(
     session: Session,
     *,
-    channel_product_id: int,
+    spu_pk: int,
     profit_date: date,
     order_currency: str | None,
     snapshot_currency: str | None,
@@ -97,7 +97,7 @@ def _record_currency_mismatch(
         SyncIssue(
             job_name="reporting.profit_daily",
             issue_type="CURRENCY_MISMATCH",
-            external_id=str(channel_product_id),
+            external_id=str(spu_pk),
             details={
                 "profit_date": profit_date.isoformat(),
                 "order_currency": order_currency,
@@ -112,7 +112,7 @@ def _record_currency_mismatch(
     )
     log.warning(
         "profit_daily: cp_id=%s profit_date=%s currency_mismatch order=%s snapshot=%s",
-        channel_product_id,
+        spu_pk,
         profit_date.isoformat(),
         order_currency,
         snapshot_currency,
@@ -130,24 +130,24 @@ def rebuild(session: Session, *, profit_date: date) -> list[ProductProfitDaily]:
     # See module docstring for why PAID_SALES_ORDER_STATUSES (not 'PAID').
     rows = session.execute(
         select(
-            SalesOrderLine.channel_product_id,
+            SalesOrderLine.spu_pk,
             func.coalesce(func.sum(SalesOrderLine.quantity), 0).label("units"),
             func.coalesce(
                 func.sum(SalesOrderLine.quantity * SalesOrderLine.unit_price), 0
             ).label("revenue"),
             func.max(SalesOrder.currency).label("currency"),
         )
-        .join(SalesOrder, SalesOrder.id == SalesOrderLine.sales_order_id)
+        .join(SalesOrder, SalesOrder.id == SalesOrderLine.order_pk)
         .where(SalesOrder.status.in_(PAID_SALES_ORDER_STATUSES))
         .where(SalesOrder.paid_at.is_not(None))
         .where(func.date(SalesOrder.paid_at) == profit_date)
-        .where(SalesOrderLine.channel_product_id.is_not(None))
-        .group_by(SalesOrderLine.channel_product_id)
+        .where(SalesOrderLine.spu_pk.is_not(None))
+        .group_by(SalesOrderLine.spu_pk)
     ).all()
 
     out: list[ProductProfitDaily] = []
     for row in rows:
-        cp_id = row.channel_product_id
+        cp_id = row.spu_pk
         units = Decimal(row.units or 0)
         revenue = Decimal(row.revenue or 0)
         currency = row.currency or "USD"
@@ -165,7 +165,7 @@ def rebuild(session: Session, *, profit_date: date) -> list[ProductProfitDaily]:
             if snap.currency != currency:
                 _record_currency_mismatch(
                     session,
-                    channel_product_id=cp_id,
+                    spu_pk=cp_id,
                     profit_date=profit_date,
                     order_currency=currency,
                     snapshot_currency=snap.currency,
@@ -180,7 +180,7 @@ def rebuild(session: Session, *, profit_date: date) -> list[ProductProfitDaily]:
                 cost_method = snap.cost_method
 
         pd_row = ProductProfitDaily(
-            channel_product_id=cp_id,
+            spu_pk=cp_id,
             profit_date=profit_date,
             units_sold=units,
             gross_revenue=revenue.quantize(Decimal("0.01")),

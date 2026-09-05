@@ -110,20 +110,20 @@ def _wipe_test_rows(db_engine) -> None:
 
     api_keys_tbl = Base.metadata.tables["security.api_keys"]
     manual_costs_tbl = Base.metadata.tables["procurement.manual_product_costs"]
-    channel_products_tbl = Base.metadata.tables["commerce.channel_products"]
-    channel_accounts_tbl = Base.metadata.tables["commerce.channel_accounts"]
-    # 2026-08-31 procurement.spu_images — RESTRICT FK from channel_products
+    products_spu_tbl = Base.metadata.tables["commerce.products_spu"]
+    shops_tbl = Base.metadata.tables["commerce.shops"]
+    # 2026-08-31 procurement.spu_images — RESTRICT FK from products_spu
     # requires this wipe first. See tech-doc/procurement-ui-redesign.md §9.
     # Table is created by schema_storage.sql and not registered as an ORM
     # model, so we wipe via raw text() with the same TEST_-prefixed scope.
     spu_images_wipe = _text(
         "DELETE FROM procurement.spu_images "
-        "WHERE channel_product_id IN ("
-        "  SELECT id FROM commerce.channel_products "
-        "  WHERE external_product_id LIKE 'TEST_%'"
-        ") OR channel_account_id IN ("
-        "  SELECT id FROM commerce.channel_accounts "
-        "  WHERE external_account_id LIKE 'TEST_%'"
+        "WHERE spu_pk IN ("
+        "  SELECT id FROM commerce.products_spu "
+        "  WHERE spu_id LIKE 'TEST_%'"
+        ") OR shop_pk IN ("
+        "  SELECT id FROM commerce.shops "
+        "  WHERE shop_id LIKE 'TEST_%'"
         ")"
     )
 
@@ -131,21 +131,21 @@ def _wipe_test_rows(db_engine) -> None:
         conn.execute(spu_images_wipe)
         conn.execute(
             delete(manual_costs_tbl).where(
-                manual_costs_tbl.c.channel_product_id.in_(
-                    select_func(channel_products_tbl.c.id).where(
-                        channel_products_tbl.c.external_product_id.like("TEST_%")
+                manual_costs_tbl.c.spu_pk.in_(
+                    select_func(products_spu_tbl.c.id).where(
+                        products_spu_tbl.c.spu_id.like("TEST_%")
                     )
                 )
             )
         )
         conn.execute(
-            delete(channel_products_tbl).where(
-                channel_products_tbl.c.external_product_id.like("TEST_%")
+            delete(products_spu_tbl).where(
+                products_spu_tbl.c.spu_id.like("TEST_%")
             )
         )
         conn.execute(
-            delete(channel_accounts_tbl).where(
-                channel_accounts_tbl.c.external_account_id.like("TEST_%")
+            delete(shops_tbl).where(
+                shops_tbl.c.shop_id.like("TEST_%")
             )
         )
         conn.execute(delete(api_keys_tbl).where(api_keys_tbl.c.name.like("TEST_%")))

@@ -122,8 +122,8 @@ def _map_proxy_error(exc: ProxyError) -> HTTPException:
         "**Auth.** `Authorization: Bearer <key>` or `X-API-Key: <key>`; "
         "role = `readonly`. The TikTok Partner App must have scope "
         "`seller.product.basic` enabled (else upstream returns 105005).\n\n"
-        "**Required query.** `channel_account_id` (int ≥ 1) — internal "
-        "`commerce.channel_accounts.id`. Resolves upstream `shop_id` + "
+        "**Required query.** `shop_pk` (int ≥ 1) — internal "
+        "`commerce.shops.id`. Resolves upstream `shop_id` + "
         "`access_token` + `shop_cipher`. Must be `platform='tiktok'`.\n\n"
         "**Optional query.** `return_under_review_version` (bool, default "
         "false), `return_draft_version` (bool, default false) — mutually "
@@ -156,13 +156,13 @@ def _map_proxy_error(exc: ProxyError) -> HTTPException:
         401: {"description": "Missing / invalid / disabled API key."},
         403: {"description": "API key role < readonly."},
         404: {
-            "description": "`channel_account_id` not found, or not "
+            "description": "`shop_pk` not found, or not "
             "`platform='tiktok'`, or `integration.credentials` row missing, "
             "or `shop_cipher` empty."
         },
         422: {
-            "description": "Missing `channel_account_id`, or "
-            "`channel_account_id < 1`, or mutually-exclusive flags set together."
+            "description": "Missing `shop_pk`, or "
+            "`shop_pk < 1`, or mutually-exclusive flags set together."
         },
         429: {"description": "Upstream rate-limit, internal retry budget exhausted."},
         502: {
@@ -179,11 +179,11 @@ def _map_proxy_error(exc: ProxyError) -> HTTPException:
 def get_product(
     product_id: str,
     sess: Session = Depends(get_session),
-    channel_account_id: int = Query(
+    shop_pk: int = Query(
         ...,
         ge=1,
         description=(
-            "Internal commerce.channel_accounts.id (must be platform=tiktok). "
+            "Internal commerce.shops.id (must be platform=tiktok). "
             "Resolves the upstream shop_id + access_token + shop_cipher."
         ),
     ),
@@ -208,7 +208,7 @@ def get_product(
     try:
         return products_api.get_product(
             session=sess,
-            channel_account_id=channel_account_id,
+            shop_pk=shop_pk,
             product_id=product_id,
             return_under_review_version=return_under_review_version,
             return_draft_version=return_draft_version,

@@ -10,8 +10,8 @@ Coverage
 --------
 * 200 happy path: upstream data returned verbatim
 * 401 missing key (auth middleware)
-* 422 missing channel_account_id query param
-* 422 channel_account_id < 1
+* 422 missing shop_pk query param
+* 422 shop_pk < 1
 * 422 mutually exclusive flags (handler-side ValueError → 422)
 * 404 ChannelAccountNotFound
 * 404 CredentialsMissing
@@ -68,7 +68,7 @@ class _ProxyStub:
         self,
         *,
         session: Any,
-        channel_account_id: int,
+        shop_pk: int,
         product_id: str,
         return_under_review_version: bool = False,
         return_draft_version: bool = False,
@@ -77,7 +77,7 @@ class _ProxyStub:
     ) -> dict[str, Any]:
         self.calls.append(
             {
-                "channel_account_id": channel_account_id,
+                "shop_pk": shop_pk,
                 "product_id": product_id,
                 "return_under_review_version": return_under_review_version,
                 "return_draft_version": return_draft_version,
@@ -111,7 +111,7 @@ def test_get_product_returns_upstream_data(api_client, readonly_key, proxy_stub)
 
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
-        params={"channel_account_id": 1},
+        params={"shop_pk": 1},
         headers=_auth_headers(readonly_key),
     )
 
@@ -125,7 +125,7 @@ def test_get_product_passes_query_params_to_proxy(api_client, readonly_key, prox
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
         params={
-            "channel_account_id": 42,
+            "shop_pk": 42,
             "return_under_review_version": "true",
             "locale": "en-US",
         },
@@ -135,7 +135,7 @@ def test_get_product_passes_query_params_to_proxy(api_client, readonly_key, prox
     assert r.status_code == 200, r.text
     assert len(proxy_stub.calls) == 1
     call = proxy_stub.calls[0]
-    assert call["channel_account_id"] == 42
+    assert call["shop_pk"] == 42
     assert call["product_id"] == PRODUCT_ID
     assert call["return_under_review_version"] is True
     assert call["return_draft_version"] is False
@@ -150,7 +150,7 @@ def test_get_product_passes_query_params_to_proxy(api_client, readonly_key, prox
 def test_get_product_401_without_key(api_client, proxy_stub):
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
-        params={"channel_account_id": 1},
+        params={"shop_pk": 1},
     )
 
     assert r.status_code == 401, r.text
@@ -163,7 +163,7 @@ def test_get_product_401_without_key(api_client, proxy_stub):
 # ---------------------------------------------------------------------------
 
 
-def test_get_product_422_without_channel_account_id(api_client, readonly_key, proxy_stub):
+def test_get_product_422_without_shop_pk(api_client, readonly_key, proxy_stub):
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
         headers=_auth_headers(readonly_key),
@@ -173,10 +173,10 @@ def test_get_product_422_without_channel_account_id(api_client, readonly_key, pr
     assert proxy_stub.calls == []
 
 
-def test_get_product_422_channel_account_id_below_one(api_client, readonly_key, proxy_stub):
+def test_get_product_422_shop_pk_below_one(api_client, readonly_key, proxy_stub):
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
-        params={"channel_account_id": 0},
+        params={"shop_pk": 0},
         headers=_auth_headers(readonly_key),
     )
 
@@ -196,7 +196,7 @@ def test_get_product_422_mutually_exclusive_flags(api_client, readonly_key, prox
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
         params={
-            "channel_account_id": 1,
+            "shop_pk": 1,
             "return_under_review_version": "true",
             "return_draft_version": "true",
         },
@@ -213,12 +213,12 @@ def test_get_product_422_mutually_exclusive_flags(api_client, readonly_key, prox
 
 def test_get_product_404_channel_account_not_found(api_client, readonly_key, proxy_stub):
     proxy_stub.side_effect = products_api.ChannelAccountNotFound(
-        "commerce.channel_accounts id=42 platform='tiktok' not found"
+        "commerce.shops id=42 platform='tiktok' not found"
     )
 
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
-        params={"channel_account_id": 42},
+        params={"shop_pk": 42},
         headers=_auth_headers(readonly_key),
     )
 
@@ -233,7 +233,7 @@ def test_get_product_404_credentials_missing(api_client, readonly_key, proxy_stu
 
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
-        params={"channel_account_id": 1},
+        params={"shop_pk": 1},
         headers=_auth_headers(readonly_key),
     )
 
@@ -252,7 +252,7 @@ def test_get_product_502_upstream_business_error(api_client, readonly_key, proxy
 
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
-        params={"channel_account_id": 1},
+        params={"shop_pk": 1},
         headers=_auth_headers(readonly_key),
     )
 
@@ -270,7 +270,7 @@ def test_get_product_502_authentication_error(api_client, readonly_key, proxy_st
 
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
-        params={"channel_account_id": 1},
+        params={"shop_pk": 1},
         headers=_auth_headers(readonly_key),
     )
 
@@ -286,7 +286,7 @@ def test_get_product_429_rate_limited(api_client, readonly_key, proxy_stub):
 
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
-        params={"channel_account_id": 1},
+        params={"shop_pk": 1},
         headers=_auth_headers(readonly_key),
     )
 
@@ -302,7 +302,7 @@ def test_get_product_502_upstream_http_error(api_client, readonly_key, proxy_stu
 
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
-        params={"channel_account_id": 1},
+        params={"shop_pk": 1},
         headers=_auth_headers(readonly_key),
     )
 
@@ -316,7 +316,7 @@ def test_get_product_502_transient_error(api_client, readonly_key, proxy_stub):
 
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
-        params={"channel_account_id": 1},
+        params={"shop_pk": 1},
         headers=_auth_headers(readonly_key),
     )
 
@@ -331,7 +331,7 @@ def test_get_product_500_signing_error(api_client, readonly_key, proxy_stub):
 
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
-        params={"channel_account_id": 1},
+        params={"shop_pk": 1},
         headers=_auth_headers(readonly_key),
     )
 
@@ -375,7 +375,7 @@ def test_openapi_description_references_spec_doc(api_client):
     # The contract key points must all appear in the description so a
     # reader can find them at a glance.
     for keyword in (
-        "channel_account_id",
+        "shop_pk",
         "return_under_review_version",
         "return_draft_version",
         "locale",
@@ -404,7 +404,7 @@ def test_openapi_query_params_have_descriptions(api_client):
     by_name = {p["name"]: p for p in params}
 
     for name in (
-        "channel_account_id",
+        "shop_pk",
         "return_under_review_version",
         "return_draft_version",
         "locale",

@@ -29,7 +29,7 @@ router = APIRouter(prefix="/v2/reporting", tags=["reporting"])
 
 # --- SQL constants (module-level, no interpolation) -----------------------
 SQL_COST_SNAPSHOTS = (
-    "SELECT id, channel_product_id, cost_method, unit_cost, currency, "
+    "SELECT id, spu_pk, cost_method, unit_cost, currency, "
     "calculation_version, calculated_at "
     "FROM reporting.product_cost_snapshots "
     # (2026-08-31) The optional-filter pattern (:param IS NULL OR col = :param)
@@ -38,7 +38,7 @@ SQL_COST_SNAPSHOTS = (
     # pin the parameter types to the column types (channel_id bigint,
     # method text) so the WHERE evaluates cleanly with either bound value.
     "WHERE (CAST(:channel_id AS bigint) IS NULL "
-    "OR channel_product_id = :channel_id) "
+    "OR spu_pk = :channel_id) "
     "AND (CAST(:method AS text) IS NULL OR cost_method = :method) "
     "ORDER BY calculated_at DESC NULLS LAST LIMIT :limit OFFSET :offset"
 )
@@ -53,7 +53,7 @@ SQL_PROFIT_DAILY = (
     # but we CAST the bound param to date for the same reason
     # cost-snapshots had to CAST (PG otherwise raises
     # AmbiguousParameter when the param is NULL).
-    "SELECT id, channel_product_id, "
+    "SELECT id, spu_pk, "
     "       profit_date AS on_date, "
     "       gross_revenue AS revenue, "
     "       estimated_cogs AS cost, "
@@ -61,43 +61,43 @@ SQL_PROFIT_DAILY = (
     "       currency "
     "FROM reporting.product_profit_daily "
     "WHERE (CAST(:channel_id AS bigint) IS NULL "
-    "OR channel_product_id = CAST(:channel_id AS bigint)) "
+    "OR spu_pk = CAST(:channel_id AS bigint)) "
     "AND (CAST(:on_date AS date) IS NULL "
     "OR profit_date = CAST(:on_date AS date)) "
     "ORDER BY profit_date DESC NULLS LAST LIMIT :limit OFFSET :offset"
 )
 SQL_COVERAGE_REPORT = (
     "SELECT "
-    "(SELECT COUNT(*) FROM commerce.channel_products) AS total_spus, "
+    "(SELECT COUNT(*) FROM commerce.products_spu) AS total_spus, "
     # (2026-09-01) status is free-text — TikTok sync stores 'ACTIVATE'
     # (uppercase) but tests / docs / earlier code expected lowercase
     # 'active'. Use ILIKE so the aggregate matches either case.
-    "(SELECT COUNT(*) FROM commerce.channel_products "
+    "(SELECT COUNT(*) FROM commerce.products_spu "
     "WHERE status ILIKE 'activate') AS active_spus, "
-    "(SELECT COUNT(DISTINCT channel_product_id) "
+    "(SELECT COUNT(DISTINCT spu_pk) "
     "FROM linkage.effective_product_links "
     "WHERE effective_relation_type IS NOT NULL) AS linked_spus, "
-    "(SELECT COUNT(*) FROM commerce.channel_products cp "
+    "(SELECT COUNT(*) FROM commerce.products_spu cp "
     "WHERE cp.status ILIKE 'activate' "
     "AND NOT EXISTS ("
     "  SELECT 1 FROM procurement.manual_product_costs m "
-    "  WHERE m.channel_product_id = cp.id AND m.valid_to IS NULL"
+    "  WHERE m.spu_pk = cp.id AND m.valid_to IS NULL"
     ") AND NOT EXISTS ("
     "  SELECT 1 FROM linkage.effective_product_links epl "
-    "  WHERE epl.channel_product_id = cp.id "
+    "  WHERE epl.spu_pk = cp.id "
     "  AND epl.effective_relation_type IS NOT NULL"
     ")) AS missing_cost_spus, "
     "(SELECT COALESCE(MAX(calculation_version), 1) "
     "FROM reporting.product_cost_snapshots) AS calculation_version"
 )
-SQL_RESOLVE_CHANNEL_PRODUCT = "SELECT id FROM commerce.channel_products WHERE external_product_id = :ext_id LIMIT 1"
+SQL_RESOLVE_CHANNEL_PRODUCT = "SELECT id FROM commerce.products_spu WHERE spu_id = :ext_id LIMIT 1"
 SQL_INSERT_MANUAL_COST = (
     "INSERT INTO procurement.manual_product_costs ("
-    "channel_product_id, unit_cost, currency, valid_from, valid_to, "
+    "spu_pk, unit_cost, currency, valid_from, valid_to, "
     "note, created_by, created_at) "
     "VALUES (:cp_id, :unit_cost, :currency, :valid_from, NULL, "
     ":note, :created_by, now()) "
-    "RETURNING id, channel_product_id, unit_cost, currency, valid_from, "
+    "RETURNING id, spu_pk, unit_cost, currency, valid_from, "
     "valid_to, note, created_by"
 )
 # 2026-09-01: close-old-then-insert sequence rewritten as a single
@@ -111,16 +111,16 @@ SQL_INSERT_MANUAL_COST = (
 # The partial unique index uq_manual_costs_one_open (added in
 # migration 0003_manual_costs_one_open) is the DB-side safety net: even
 # if the application logic regresses, the index will reject a second
-# valid_to IS NULL row for the same channel_product_id.
+# valid_to IS NULL row for the same spu_pk.
 SQL_CLOSE_OLD_MANUAL_COSTS_BEFORE_INSERT = (
     "UPDATE procurement.manual_product_costs SET valid_to = now() "
-    "WHERE channel_product_id = :cp_id AND valid_to IS NULL"
+    "WHERE spu_pk = :cp_id AND valid_to IS NULL"
 )
 SQL_LIST_MISSING_COST_PRODUCTS = (
-    "SELECT cp.id, cp.external_product_id, cp.title, cp.channel_account_id, "
+    "SELECT cp.id, cp.spu_id, cp.title, cp.shop_pk, "
     "       (NOT EXISTS ("
     "         SELECT 1 FROM procurement.spu_images si "
-    "         WHERE si.channel_product_id = cp.id "
+    "         WHERE si.spu_pk = cp.id "
     "         AND si.status = 'ready' AND si.deleted_at IS NULL"
     "       )) AS missing_photo "
     # (2026-09-01) cp.status stored as 'ACTIVATE' by TikTok sync; use
@@ -132,34 +132,34 @@ SQL_LIST_MISSING_COST_PRODUCTS = (
     # presence of effective_relation_type (non-null) means an actual
     # link. The pre-fix NOT EXISTS evaluated FALSE for every product
     # and the "Needs cost" tab was always empty.
-    "FROM commerce.channel_products cp "
+    "FROM commerce.products_spu cp "
     "WHERE cp.status ILIKE 'activate' "
-    "AND (CAST(:acct_id AS bigint) IS NULL OR cp.channel_account_id = CAST(:acct_id AS bigint)) "
+    "AND (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
     "AND NOT EXISTS ("
     "  SELECT 1 FROM procurement.manual_product_costs m "
-    "  WHERE m.channel_product_id = cp.id AND m.valid_to IS NULL"
+    "  WHERE m.spu_pk = cp.id AND m.valid_to IS NULL"
     ") AND NOT EXISTS ("
     "  SELECT 1 FROM linkage.effective_product_links epl "
-    "  WHERE epl.channel_product_id = cp.id "
+    "  WHERE epl.spu_pk = cp.id "
     "  AND epl.effective_relation_type IS NOT NULL"
     ") ORDER BY cp.id LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
 )
 SQL_TOTAL_MISSING_PHOTO = (
     "SELECT COUNT(*) AS n FROM ("
     "  SELECT cp.id "
-    "  FROM commerce.channel_products cp "
+    "  FROM commerce.products_spu cp "
     "  WHERE cp.status ILIKE 'activate' "
-    "  AND (CAST(:acct_id AS bigint) IS NULL OR cp.channel_account_id = CAST(:acct_id AS bigint)) "
+    "  AND (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
     "  AND NOT EXISTS ("
     "    SELECT 1 FROM procurement.manual_product_costs m "
-    "    WHERE m.channel_product_id = cp.id AND m.valid_to IS NULL"
+    "    WHERE m.spu_pk = cp.id AND m.valid_to IS NULL"
     "  ) AND NOT EXISTS ("
     "    SELECT 1 FROM linkage.effective_product_links epl "
-    "    WHERE epl.channel_product_id = cp.id "
+    "    WHERE epl.spu_pk = cp.id "
     "    AND epl.effective_relation_type IS NOT NULL"
     "  ) AND NOT EXISTS ("
     "    SELECT 1 FROM procurement.spu_images si "
-    "    WHERE si.channel_product_id = cp.id "
+    "    WHERE si.spu_pk = cp.id "
     "    AND si.status = 'ready' AND si.deleted_at IS NULL"
     "  )"
     ") sub"
@@ -195,7 +195,7 @@ def _safe_int(value: Any, default: int = 0) -> int:
 def _cost_snapshot_row(row: Any) -> CostSnapshotOut:
     return CostSnapshotOut(
         id=row.id,
-        channel_product_id=row.channel_product_id,
+        spu_pk=row.spu_pk,
         cost_method=row.cost_method,
         unit_cost=row.unit_cost,
         currency=row.currency,
@@ -207,7 +207,7 @@ def _cost_snapshot_row(row: Any) -> CostSnapshotOut:
 def _profit_daily_row(row: Any) -> ProfitDailyOut:
     return ProfitDailyOut(
         id=row.id,
-        channel_product_id=row.channel_product_id,
+        spu_pk=row.spu_pk,
         on_date=row.on_date,
         revenue=row.revenue,
         cost=row.cost,
@@ -219,7 +219,7 @@ def _profit_daily_row(row: Any) -> ProfitDailyOut:
 def _manual_cost_row(row: Any) -> ManualCostOut:
     return ManualCostOut(
         id=row.id,
-        channel_product_id=row.channel_product_id,
+        spu_pk=row.spu_pk,
         unit_cost=row.unit_cost,
         currency=row.currency,
         valid_from=row.valid_from,
@@ -232,7 +232,7 @@ def _manual_cost_row(row: Any) -> ManualCostOut:
 @router.get("/cost-snapshots", response_model=list[CostSnapshotOut])
 def list_cost_snapshots(
     sess: Session = Depends(get_session),
-    channel_product_id: int | None = Query(default=None),
+    spu_pk: int | None = Query(default=None),
     cost_method: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -240,7 +240,7 @@ def list_cost_snapshots(
     rows = sess.execute(
         _STMT_COST_SNAPSHOTS,
         {
-            "channel_id": channel_product_id,
+            "channel_id": spu_pk,
             "method": cost_method,
             "limit": limit,
             "offset": offset,
@@ -252,7 +252,7 @@ def list_cost_snapshots(
 @router.get("/profit-daily", response_model=list[ProfitDailyOut])
 def list_profit_daily(
     sess: Session = Depends(get_session),
-    channel_product_id: int | None = Query(default=None),
+    spu_pk: int | None = Query(default=None),
     on_date: datetime | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -260,7 +260,7 @@ def list_profit_daily(
     rows = sess.execute(
         _STMT_PROFIT_DAILY,
         {
-            "channel_id": channel_product_id,
+            "channel_id": spu_pk,
             "on_date": on_date,
             "limit": limit,
             "offset": offset,
@@ -285,7 +285,7 @@ def coverage_report(sess: Session = Depends(get_session)) -> CoverageReport:
 @router.get("/missing-cost-products")
 def list_missing_cost_products(
     sess: Session = Depends(get_session),
-    channel_account_id: int | None = Query(default=None, ge=1),
+    shop_pk: int | None = Query(default=None, ge=1),
     limit: int = Query(default=200, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> dict:
@@ -300,25 +300,25 @@ def list_missing_cost_products(
     consumers that ignore the wrapper and read row fields keep working
     because the per-row shape is unchanged.
 
-    ``channel_account_id`` scopes the list to one shop; when omitted,
+    ``shop_pk`` scopes the list to one shop; when omitted,
     the response spans all shops (legacy behaviour, used by the global
     test_auth_login.py probe).
     """
     items_rows = sess.execute(
         _STMT_LIST_MISSING_COST_PRODUCTS,
-        {"acct_id": channel_account_id, "limit": limit, "offset": offset},
+        {"acct_id": shop_pk, "limit": limit, "offset": offset},
     ).all()
     total_row = sess.execute(
         _STMT_TOTAL_MISSING_PHOTO,
-        {"acct_id": channel_account_id},
+        {"acct_id": shop_pk},
     ).one()
     return {
         "items": [
             {
-                "channel_product_id": r.id,
-                "external_product_id": r.external_product_id,
+                "spu_pk": r.id,
+                "spu_id": r.spu_id,
                 "title": r.title,
-                "channel_account_id": r.channel_account_id,
+                "shop_pk": r.shop_pk,
                 "missing_photo": bool(r.missing_photo),
             }
             for r in items_rows
@@ -339,7 +339,7 @@ def submit_manual_cost(
 ) -> ManualCostOut:
     """Operator-entered unit cost for one SPU. Requires readwrite.
 
-    Resolves the channel product by ``external_product_id``, closes
+    Resolves the channel product by ``spu_id``, closes
     any existing effective manual_cost row for the same SPU (history
     preserved via ``valid_to``), and inserts a fresh row.
 
@@ -361,12 +361,12 @@ def submit_manual_cost(
         )
     cp_row = sess.execute(
         _STMT_RESOLVE_CHANNEL_PRODUCT,
-        {"ext_id": body.channel_product_external_id},
+        {"ext_id": body.spu_id},
     ).first()
     if cp_row is None:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
-            f"channel product not found: {body.channel_product_external_id}",
+            f"channel product not found: {body.spu_id}",
         )
     cp_id = cp_row.id
     role = request.scope.get("api_key_role") or "unknown"
@@ -377,7 +377,7 @@ def submit_manual_cost(
     # The previous two-commit pattern (insert+commit, then
     # try/except: rollback the close) silently lost the UPDATE on any
     # error path, leaving two rows with valid_to IS NULL for the same
-    # channel_product_id. The DB-side partial unique index
+    # spu_pk. The DB-side partial unique index
     # uq_manual_costs_one_open (alembic 0003) is the safety net; the
     # app-level guarantee below is that we flush the UPDATE before the
     # INSERT, so a same-SPU race against another concurrent POST is

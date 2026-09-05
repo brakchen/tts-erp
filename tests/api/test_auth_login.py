@@ -113,7 +113,7 @@ def test_session_cookie_reads_data_endpoint(api_client, readwrite_key):
 def test_session_role_readonly_cannot_post(api_client, readonly_key):
     _login(api_client, readonly_key)
     body = {
-        "channel_product_external_id": "TEST_ext_ro_session",
+        "spu_id": "TEST_ext_ro_session",
         "unit_cost": "1",
         "currency": "USD",
     }
@@ -129,7 +129,7 @@ def test_session_readwrite_passes_role_check(api_client, readwrite_key):
     """readwrite session + CSRF header → auth passes; 404 = product not found."""
     _login(api_client, readwrite_key)
     body = {
-        "channel_product_external_id": "TEST_ext_rw_session",
+        "spu_id": "TEST_ext_rw_session",
         "unit_cost": "1",
         "currency": "USD",
     }
@@ -145,7 +145,7 @@ def test_session_post_without_csrf_header_403(api_client, readwrite_key):
     """Cookie-authed POST without X-Requested-With → 403 (CSRF guard)."""
     _login(api_client, readwrite_key)
     body = {
-        "channel_product_external_id": "TEST_ext_no_csrf",
+        "spu_id": "TEST_ext_no_csrf",
         "unit_cost": "1",
         "currency": "USD",
     }

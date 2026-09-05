@@ -37,12 +37,12 @@ def _utc(year=2026, month=8, day=29):
 
 def _make_channel_account(session, external_id="TEST_TT_SHOP_C"):
     cred = Credentials(
-        provider="tiktok", external_account_id=external_id, ciphertext=b"\x00" * 32
+        provider="tiktok", shop_id=external_id, ciphertext=b"\x00" * 32
     )
     session.add(cred)
     session.flush()
     acct = ChannelAccount(
-        platform="tiktok", external_account_id=external_id, credential_id=cred.id
+        platform="tiktok", shop_id=external_id, credential_id=cred.id
     )
     session.add(acct)
     session.flush()
@@ -51,8 +51,8 @@ def _make_channel_account(session, external_id="TEST_TT_SHOP_C"):
 
 def _make_channel_product(session, account, external_id, status=ACTIVE_PRODUCT_STATUS):
     p = ChannelProduct(
-        channel_account_id=account.id,
-        external_product_id=external_id,
+        shop_pk=account.id,
+        spu_id=external_id,
         title=f"TEST product {external_id}",
         status=status,
     )
@@ -72,7 +72,7 @@ def test_manual_entry_wins_over_purchase_order(db_session):
 
     # Inject a manual cost (cheaper than the purchase-order-derived cost)
     manual = ManualProductCost(
-        channel_product_id=cp.id,
+        spu_pk=cp.id,
         unit_cost=Decimal("5.50"),
         currency="USD",
         valid_from=_utc(),
@@ -87,7 +87,7 @@ def test_manual_entry_wins_over_purchase_order(db_session):
     # compute_unit_cost_from_purchase_orders returning a different cost.
     actual = cost_snapshots.resolve_unit_cost(
         db_session,
-        channel_product_id=cp.id,
+        spu_pk=cp.id,
         purchase_order_unit_cost=Decimal("99.99"),
     )
     assert actual is not None
@@ -106,7 +106,7 @@ def test_fallback_to_latest_purchase_cost_when_no_manual(db_session):
 
     actual = cost_snapshots.resolve_unit_cost(
         db_session,
-        channel_product_id=cp.id,
+        spu_pk=cp.id,
         purchase_order_unit_cost=Decimal("12.34"),
     )
     assert actual is not None
@@ -126,7 +126,7 @@ def test_no_source_produces_no_snapshot(db_session):
 
     actual = cost_snapshots.resolve_unit_cost(
         db_session,
-        channel_product_id=cp.id,
+        spu_pk=cp.id,
         purchase_order_unit_cost=None,
     )
     assert actual is None
@@ -135,7 +135,7 @@ def test_no_source_produces_no_snapshot(db_session):
     snaps = (
         db_session.execute(
             select(ProductCostSnapshot).where(
-                ProductCostSnapshot.channel_product_id == cp.id
+                ProductCostSnapshot.spu_pk == cp.id
             )
         )
         .scalars()
@@ -158,7 +158,7 @@ def test_collect_listing_cost_is_rejected_explicitly(db_session):
     # only accept MANUAL_ENTRY or purchase-order-derived values.
     actual = cost_snapshots.resolve_unit_cost(
         db_session,
-        channel_product_id=cp.id,
+        spu_pk=cp.id,
         purchase_order_unit_cost=None,
         # An attempted listing cost bypass should be rejected:
         collect_listing_cost=Decimal("7.77"),
@@ -170,7 +170,7 @@ def test_collect_listing_cost_is_rejected_explicitly(db_session):
 
 
 def test_no_cost_inventory_lists_active_spus_without_snapshot(db_session):
-    """active_spus_without_cost() returns active channel_products with no
+    """active_spus_without_cost() returns active products_spu with no
     effective cost (no manual, no purchase_order unit cost)."""
     ca = _make_channel_account(db_session)
     cp_active_no_cost = _make_channel_product(db_session, ca, "TEST_SPU_ACTIVE_NC")
@@ -183,7 +183,7 @@ def test_no_cost_inventory_lists_active_spus_without_snapshot(db_session):
     # cp_active_with_cost gets a manual entry
     db_session.add(
         ManualProductCost(
-            channel_product_id=cp_active_with_cost.id,
+            spu_pk=cp_active_with_cost.id,
             unit_cost=Decimal("9.99"),
             currency="USD",
             valid_from=_utc(),
@@ -211,7 +211,7 @@ def test_historical_manual_cost_not_picked_up(db_session):
 
     db_session.add(
         ManualProductCost(
-            channel_product_id=cp.id,
+            spu_pk=cp.id,
             unit_cost=Decimal("2.00"),  # old cheap price
             currency="USD",
             valid_from=_utc(2025, 1, 1),
@@ -223,7 +223,7 @@ def test_historical_manual_cost_not_picked_up(db_session):
 
     actual = cost_snapshots.resolve_unit_cost(
         db_session,
-        channel_product_id=cp.id,
+        spu_pk=cp.id,
         purchase_order_unit_cost=None,
     )
     assert actual is None  # only old (closed) manual entry exists

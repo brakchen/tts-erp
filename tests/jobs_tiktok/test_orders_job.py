@@ -45,7 +45,7 @@ pytestmark = [pytest.mark.domain_commerce, pytest.mark.layer_integration]
 def _make_credential(session, external_id="TEST_TT_ORD_CRED") -> Credentials:
     cred = Credentials(
         provider="tiktok",
-        external_account_id=external_id,
+        shop_id=external_id,
         ciphertext=b"\x00" * 32,
     )
     session.add(cred)
@@ -56,14 +56,14 @@ def _make_credential(session, external_id="TEST_TT_ORD_CRED") -> Credentials:
 def _make_channel_account(session, external_id="TEST_TT_ORD_SHOP") -> ChannelAccount:
     cred = Credentials(
         provider="tiktok",
-        external_account_id=external_id,
+        shop_id=external_id,
         ciphertext=b"\x00" * 32,
     )
     session.add(cred)
     session.flush()
     acct = ChannelAccount(
         platform="tiktok",
-        external_account_id=external_id,
+        shop_id=external_id,
         credential_id=cred.id,
     )
     session.add(acct)
@@ -204,7 +204,7 @@ def test_orders_first_run_writes_raw_records_and_normalized_rows(
         inner=run_orders,
         inner_kwargs={
             "proxy_call": proxy,
-            "shop_id": account.external_account_id,
+            "shop_id": account.shop_id,
         },
     )
 
@@ -236,19 +236,19 @@ def test_orders_first_run_writes_raw_records_and_normalized_rows(
     # ── sales_orders: 3 rows, all upserted ─────────────────────────
     order_rows = db_session.execute(
         select(SalesOrder).where(
-            SalesOrder.external_order_id.in_([
+            SalesOrder.order_id.in_([
                 "5800000000000001",
                 "5800000000000002",
                 "5800000000000003",
             ])
         )
     ).scalars().all()
-    assert {o.external_order_id for o in order_rows} == {
+    assert {o.order_id for o in order_rows} == {
         "5800000000000001",
         "5800000000000002",
         "5800000000000003",
     }
-    assert all(o.channel_account_id == account.id for o in order_rows)
+    assert all(o.shop_pk == account.id for o in order_rows)
     assert all(o.raw_record_id is not None for o in order_rows)
 
     # ── sales_order_lines: only the one order had lines ────────────
@@ -262,7 +262,7 @@ def test_orders_first_run_writes_raw_records_and_normalized_rows(
 
     # ── sync_cursors: watermark advanced to max update_time ms ────
     cursor_value = watermarks.get_cursor(
-        db_session, job_name="tiktok.orders", scope=account.external_account_id
+        db_session, job_name="tiktok.orders", scope=account.shop_id
     )
     assert cursor_value == 1_700_000_300_000  # ms = s × 1000
 
@@ -275,7 +275,7 @@ def test_orders_second_run_advances_watermark_only(db_session) -> None:
     watermarks.set_cursor(
         db_session,
         job_name="tiktok.orders",
-        scope=account.external_account_id,
+        scope=account.shop_id,
         cursor_epoch_ms=1_700_000_300_000,
     )
     db_session.commit()
@@ -306,7 +306,7 @@ def test_orders_second_run_advances_watermark_only(db_session) -> None:
         inner=run_orders,
         inner_kwargs={
             "proxy_call": proxy,
-            "shop_id": account.external_account_id,
+            "shop_id": account.shop_id,
         },
     )
 
@@ -316,7 +316,7 @@ def test_orders_second_run_advances_watermark_only(db_session) -> None:
     # the stored cursor (seconds = ms / 1000).
     assert proxy.requests[0]["body"].get("update_time_ge") == 1_700_000_300
     cursor = watermarks.get_cursor(
-        db_session, job_name="tiktok.orders", scope=account.external_account_id
+        db_session, job_name="tiktok.orders", scope=account.shop_id
     )
     assert cursor == 1_700_000_400_000
 
@@ -352,13 +352,13 @@ def test_orders_re_upsert_is_idempotent(db_session) -> None:
         inner=run_orders,
         inner_kwargs={
             "proxy_call": proxy,
-            "shop_id": account.external_account_id,
+            "shop_id": account.shop_id,
         },
     )
     first_count = len(
         db_session.execute(
             select(SalesOrder).where(
-                SalesOrder.external_order_id == "5800000000000099"
+                SalesOrder.order_id == "5800000000000099"
             )
         ).scalars().all()
     )
@@ -368,7 +368,7 @@ def test_orders_re_upsert_is_idempotent(db_session) -> None:
     watermarks.set_cursor(
         db_session,
         job_name="tiktok.orders",
-        scope=account.external_account_id,
+        scope=account.shop_id,
         cursor_epoch_ms=1_700_000_000_000,
     )
     db_session.commit()
@@ -381,7 +381,7 @@ def test_orders_re_upsert_is_idempotent(db_session) -> None:
         inner=run_orders,
         inner_kwargs={
             "proxy_call": proxy,
-            "shop_id": account.external_account_id,
+            "shop_id": account.shop_id,
         },
     )
 
@@ -389,7 +389,7 @@ def test_orders_re_upsert_is_idempotent(db_session) -> None:
     second_count = len(
         db_session.execute(
             select(SalesOrder).where(
-                SalesOrder.external_order_id == "5800000000000099"
+                SalesOrder.order_id == "5800000000000099"
             )
         ).scalars().all()
     )
@@ -437,7 +437,7 @@ def test_orders_parse_failure_writes_sync_issue_continues(db_session) -> None:
         inner=run_orders,
         inner_kwargs={
             "proxy_call": proxy,
-            "shop_id": account.external_account_id,
+            "shop_id": account.shop_id,
         },
     )
 
@@ -456,11 +456,11 @@ def test_orders_parse_failure_writes_sync_issue_continues(db_session) -> None:
     # The valid order still landed
     valid_orders = db_session.execute(
         select(SalesOrder).where(
-            SalesOrder.external_order_id == "5800000000000010"
+            SalesOrder.order_id == "5800000000000010"
         )
     ).scalars().all()
     assert len(valid_orders) == 1
-    assert valid_orders[0].external_order_id == "5800000000000010"
+    assert valid_orders[0].order_id == "5800000000000010"
 
 
 # ─── Upstream errors ───────────────────────────────────────────────
@@ -487,7 +487,7 @@ def test_orders_non_zero_upstream_code_fails_sync_job(db_session) -> None:
             inner=run_orders,
             inner_kwargs={
                 "proxy_call": proxy,
-                "shop_id": account.external_account_id,
+                "shop_id": account.shop_id,
             },
         )
 
@@ -524,7 +524,7 @@ def test_orders_empty_response_is_a_noop(db_session) -> None:
         inner=run_orders,
         inner_kwargs={
             "proxy_call": proxy,
-            "shop_id": account.external_account_id,
+            "shop_id": account.shop_id,
         },
     )
 
@@ -532,6 +532,6 @@ def test_orders_empty_response_is_a_noop(db_session) -> None:
     assert result.rows_inserted == 0
     assert result.cursor is None
     cursor = watermarks.get_cursor(
-        db_session, job_name="tiktok.orders", scope=account.external_account_id
+        db_session, job_name="tiktok.orders", scope=account.shop_id
     )
     assert cursor is None

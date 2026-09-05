@@ -18,7 +18,7 @@ class ChannelAccountOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     platform: str
-    external_account_id: str
+    shop_id: str
     account_name: str | None = None
     region: str | None = None
     seller_type: str | None = None
@@ -31,8 +31,8 @@ class ChannelAccountOut(BaseModel):
 class ChannelProductOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
-    channel_account_id: int
-    external_product_id: str
+    shop_pk: int
+    spu_id: str
     title: str | None = None
     status: str | None = None
     source_created_at: datetime | None = None
@@ -42,8 +42,8 @@ class ChannelProductOut(BaseModel):
 class ChannelProductVariantOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
-    channel_product_id: int
-    external_variant_id: str
+    spu_pk: int
+    sku_id: str
     seller_sku: str | None = None
     variant_name: str | None = None
     created_at: datetime | None = None
@@ -53,24 +53,24 @@ class ChannelProductVariantOut(BaseModel):
 class SalesOrderOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
-    channel_account_id: int
-    external_order_id: str
+    shop_pk: int
+    order_id: str
     status: str | None = None
     currency: str | None = None
     payment_amount: Decimal | None = None
     total_amount: Decimal | None = None
-    source_created_at: datetime | None = None
-    source_updated_at: datetime | None = None
+    order_time: datetime | None = None
+    order_modify_time: datetime | None = None
     paid_at: datetime | None = None
 
 
 class SalesOrderLineOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
-    sales_order_id: int
+    order_pk: int
     external_line_id: str
-    channel_product_id: int | None = None
-    channel_product_variant_id: int | None = None
+    spu_pk: int | None = None
+    sku_pk: int | None = None
     quantity: Decimal | None = None
     unit_price: Decimal | None = None
     created_at: datetime | None = None
@@ -94,7 +94,7 @@ class ProductLinkOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     procurement_product_id: int
-    channel_product_id: int
+    spu_pk: int
     relation_type: str
     status: str | None = None
     is_primary: bool | None = None
@@ -111,7 +111,7 @@ class LinkOverrideIn(BaseModel):
     optional for DENY rows (operator denies even without a candidate).
     """
 
-    channel_product_id: int
+    spu_pk: int
     procurement_product_id: int | None = None
     decision: str = Field(pattern="^(ALLOW|DENY|PRIMARY)$")
     reason: str | None = Field(default=None, max_length=500)
@@ -124,7 +124,7 @@ class LinkOverrideOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     procurement_product_id: int
-    channel_product_id: int
+    spu_pk: int
     decision: str
     reason: str | None = None
     valid_from: datetime
@@ -139,7 +139,7 @@ class LinkIssueOut(BaseModel):
     id: int
     issue_type: str
     procurement_product_id: int | None = None
-    channel_product_id: int | None = None
+    spu_pk: int | None = None
     candidate_count: int | None = None
     status: str | None = None
     created_at: datetime
@@ -151,13 +151,13 @@ class ManualCostIn(BaseModel):
     """Body for POST /v2/reporting/manual-costs.
 
     Caller passes the channel product's external id (the
-    ``external_product_id`` column on ``commerce.channel_products``).
-    The handler resolves it to ``channel_product_id`` and inserts into
+    ``spu_id`` column on ``commerce.products_spu``).
+    The handler resolves it to ``spu_pk`` and inserts into
     ``procurement.manual_product_costs``. New submissions auto-close the
     previous effective row for the same SPU by setting its ``valid_to``.
     """
 
-    channel_product_external_id: str = Field(min_length=1, max_length=128)
+    spu_id: str = Field(min_length=1, max_length=128)
     unit_cost: Decimal = Field(gt=Decimal("0"))
     currency: str = Field(min_length=3, max_length=3, pattern="^[A-Z]{3}$")
     valid_from: datetime | None = None
@@ -169,7 +169,7 @@ class ManualCostIn(BaseModel):
 class ManualCostOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
-    channel_product_id: int
+    spu_pk: int
     unit_cost: Decimal
     currency: str
     valid_from: datetime
@@ -183,7 +183,7 @@ class ManualCostOut(BaseModel):
 class CostSnapshotOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
-    channel_product_id: int
+    spu_pk: int
     cost_method: str
     unit_cost: Decimal
     currency: str
@@ -196,7 +196,7 @@ class CostSnapshotOut(BaseModel):
 class ProfitDailyOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
-    channel_product_id: int
+    spu_pk: int
     on_date: datetime | None = None
     revenue: Decimal | None = None
     cost: Decimal | None = None

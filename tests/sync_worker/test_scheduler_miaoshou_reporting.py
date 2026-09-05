@@ -177,7 +177,7 @@ def _seed_manual_cost_spu(db_session) -> ChannelProduct:
     db_session.add(acct)
     db_session.flush()
     cp = ChannelProduct(
-        channel_account_id=acct.id,
+        shop_pk=acct.id,
         external_product_id="TEST_MS_RPT_P1",
         title="t",
         status="ACTIVATE",
@@ -186,7 +186,7 @@ def _seed_manual_cost_spu(db_session) -> ChannelProduct:
     db_session.flush()
     db_session.add(
         ManualProductCost(
-            channel_product_id=cp.id,
+            spu_pk=cp.id,
             unit_cost=Decimal("3.50"),
             currency="CNY",
         )
@@ -201,7 +201,7 @@ def test_run_cost_snapshots_writes_seeded_spu(db_session):
     assert out["snapshots_written"] >= 1
     row = db_session.execute(
         select(ProductCostSnapshot).where(
-            ProductCostSnapshot.channel_product_id == cp.id
+            ProductCostSnapshot.spu_pk == cp.id
         )
     ).scalar_one()
     assert row.cost_method == "MANUAL_ENTRY"
@@ -228,7 +228,7 @@ def test_run_profit_daily_counts_paid_order(db_session):
     db_session.add(acct)
     db_session.flush()
     cp = ChannelProduct(
-        channel_account_id=acct.id,
+        shop_pk=acct.id,
         external_product_id="TEST_MS_RPT_P2",
         title="t",
         status="ACTIVATE",
@@ -236,8 +236,8 @@ def test_run_profit_daily_counts_paid_order(db_session):
     db_session.add(cp)
     db_session.flush()
     order = SalesOrder(
-        channel_account_id=acct.id,
-        external_order_id="TEST_MS_RPT_O1",
+        shop_pk=acct.id,
+        order_id="TEST_MS_RPT_O1",
         status="COMPLETED",
         currency="VND",
         payment_amount=Decimal(100000),
@@ -247,9 +247,9 @@ def test_run_profit_daily_counts_paid_order(db_session):
     db_session.flush()
     db_session.add(
         SalesOrderLine(
-            sales_order_id=order.id,
+            order_pk=order.id,
             external_line_id="TEST_MS_RPT_L1",
-            channel_product_id=cp.id,
+            spu_pk=cp.id,
             quantity=Decimal(2),
             unit_price=Decimal(50000),
             currency="VND",
@@ -260,7 +260,7 @@ def test_run_profit_daily_counts_paid_order(db_session):
     mine = [
         r
         for r in rows
-        if r.channel_product_id == cp.id and r.profit_date == date(2030, 1, 1)
+        if r.spu_pk == cp.id and r.profit_date == date(2030, 1, 1)
     ]
     assert len(mine) == 1
     assert mine[0].units_sold == Decimal("2.0000")
