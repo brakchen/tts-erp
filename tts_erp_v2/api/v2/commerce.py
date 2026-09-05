@@ -44,6 +44,11 @@ SQL_GET_CHANNEL_ACCOUNT = (
     "seller_type, status, synced_at FROM commerce.channel_accounts "
     "WHERE id = :id"
 )
+SQL_GET_CHANNEL_ACCOUNT_BY_EXTERNAL = (
+    "SELECT id, platform, external_account_id, account_name, region, "
+    "seller_type, status, synced_at FROM commerce.channel_accounts "
+    "WHERE platform = :platform AND external_account_id = :ext"
+)
 SQL_LIST_CHANNEL_PRODUCTS = (
     "SELECT id, channel_account_id, external_product_id, title, status, "
     "source_created_at, source_updated_at FROM commerce.channel_products "
@@ -101,6 +106,7 @@ def _q(compiled_stmt, params: dict, sess: Session):
 
 _STMT_LIST_CHANNEL_ACCOUNTS = text(SQL_LIST_CHANNEL_ACCOUNTS)
 _STMT_GET_CHANNEL_ACCOUNT = text(SQL_GET_CHANNEL_ACCOUNT)
+_STMT_GET_CHANNEL_ACCOUNT_BY_EXTERNAL = text(SQL_GET_CHANNEL_ACCOUNT_BY_EXTERNAL)
 _STMT_LIST_CHANNEL_PRODUCTS = text(SQL_LIST_CHANNEL_PRODUCTS)
 _STMT_GET_CHANNEL_PRODUCT = text(SQL_GET_CHANNEL_PRODUCT)
 _STMT_LIST_CHANNEL_VARIANTS = text(SQL_LIST_CHANNEL_VARIANTS)
@@ -163,6 +169,84 @@ def list_channel_accounts(
         sess,
     ).all()
     return [_row_to_channel_account(r) for r in rows]
+
+
+@router.get(
+    "/channel-accounts/by-external/{external_account_id}",
+    response_model=ChannelAccountOut,
+    summary="Look up a channel account by its upstream (external) account id",
+    description=(
+        "**Single-source spec:** `tech-doc/api/channel-accounts-by-external.md`.\n\n"
+        "Reverse-lookup endpoint: given the upstream shop_id "
+        "(`external_account_id`) and a `platform` filter, return the internal "
+        "`commerce.channel_accounts` row. Replaces the list-and-filter "
+        "pattern (`GET /channel-accounts?platform=...` + client-side search) "
+        "with one round-trip and a clean 404.\n\n"
+        "**Auth.** `Authorization: Bearer <key>` or `X-API-Key: <key>`; "
+        "role = `readonly` (whole `/v2/commerce/*` prefix is readonly).\n\n"
+        "**Path.** `{external_account_id}` — upstream shop_id (string, e.g. "
+        "`7494763368967603447`).\n\n"
+        "**Query.** `platform` (string, default `\"tiktok\"`, ≤ 32 chars). "
+        "**Required for uniqueness:** `external_account_id` is only unique "
+        "within a platform — once we onboard miaoshou accounts, the same "
+        "external id may exist under `tiktok` and `miaoshou` separately.\n\n"
+        "**Response.** 200 with `ChannelAccountOut`; 404 when no row matches; "
+        "401 without key; 403 for role < readonly."
+    ),
+    responses={
+        200: {
+            "description": "Matching channel account.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": 314,
+                        "platform": "tiktok",
+                        "external_account_id": "7494763368967603447",
+                        "account_name": "Bridge nook",
+                        "region": "VN",
+                        "seller_type": "CROSS_BORDER",
+                        "status": "active",
+                    }
+                }
+            },
+        },
+        401: {"description": "Missing / invalid / disabled API key."},
+        403: {"description": "API key role < readonly."},
+        404: {
+            "description": "No `commerce.channel_accounts` row matches "
+            "`(platform, external_account_id)`."
+        },
+    },
+)
+def get_channel_account_by_external(
+    external_account_id: str,
+    sess: Session = Depends(get_session),
+    platform: str = Query(
+        default="tiktok",
+        max_length=32,
+        description=(
+            "Platform filter. Required for uniqueness — "
+            "`external_account_id` is only unique within a platform. "
+            "Default: `tiktok`."
+        ),
+    ),
+) -> ChannelAccountOut:
+    """Look up a channel account by its upstream (external) account id.
+
+    Full contract: see `tech-doc/api/channel-accounts-by-external.md`.
+    """
+    row = _q(
+        _STMT_GET_CHANNEL_ACCOUNT_BY_EXTERNAL,
+        {"platform": platform, "ext": external_account_id},
+        sess,
+    ).first()
+    if row is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"channel account not found for platform={platform!r} "
+            f"external_account_id={external_account_id!r}",
+        )
+    return _row_to_channel_account(row)
 
 
 @router.get("/channel-accounts/{account_id}", response_model=ChannelAccountOut)

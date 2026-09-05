@@ -25,6 +25,7 @@ cookie (see [Browser session login](#browser-session-login)).
 | Auto-generated schema | `GET /openapi.json`, `/docs`, `/redoc` | public |
 | LLM-oriented system + data dictionary | `GET /v2/llm-context` | readonly |
 | List shops (→ internal `channel_account_id`) | `GET /v2/commerce/channel-accounts` | readonly |
+| Look up shop by upstream shop_id | `GET /v2/commerce/channel-accounts/by-external/{external_account_id}` | readonly — see [`tech-doc/api/channel-accounts-by-external.md`](api/channel-accounts-by-external.md) |
 | List / get TikTok products (SPU) | `GET /v2/commerce/channel-products[/{id}[/variants]]` | readonly |
 | List / get orders (+ lines) | `GET /v2/commerce/sales-orders[/{id}[/lines]]` | readonly |
 | TikTok Shop product detail (read-through) | `GET /v2/tiktok-shop/products/{product_id}` | readonly — see [`tech-doc/api/tiktok-shop-get-product.md`](api/tiktok-shop-get-product.md) |
@@ -171,6 +172,7 @@ All list endpoints accept `limit` (1..500, default 100) + `offset` (≥0).
 | --- | --- | --- |
 | `GET /v2/commerce/channel-accounts` | `platform` (e.g. `tiktok`) | list of `{id, platform, external_account_id, account_name, region, seller_type, status, synced_at}` |
 | `GET /v2/commerce/channel-accounts/{account_id}` | — | one account; 404 if unknown |
+| `GET /v2/commerce/channel-accounts/by-external/{external_account_id}` | [`api/channel-accounts-by-external.md`](api/channel-accounts-by-external.md) | reverse-lookup by upstream shop_id; `?platform=tiktok` default; 404 if unknown |
 | `GET /v2/commerce/channel-accounts/{account_id}/order-stats` | — | `{order_count, payment_amount_sum}` aggregate (0/0 when empty) |
 | `GET /v2/commerce/channel-products` | `channel_account_id`, `status` | SPU list: `{id, channel_account_id, external_product_id, title, status, source_created_at, source_updated_at}` |
 | `GET /v2/commerce/channel-products/{product_id}` | — | one SPU; 404 if unknown |
