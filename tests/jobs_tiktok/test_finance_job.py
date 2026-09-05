@@ -33,6 +33,7 @@ from tts_erp_v2.db.models import (
     ChannelAccount,
     Credentials,
     Payout,
+    RawRecord,
     SalesOrder,
     SettlementComponent,
     SettlementStatement,
@@ -1158,3 +1159,127 @@ def test_finance_transaction_time_from_order_create_time(db_session) -> None:
         )
     ).scalar_one()
     assert txn.transaction_time == datetime.fromtimestamp(1_700_010_000, tz=UTC)
+
+
+# ─── Regression: raw_records dedup / payload_hash + payouts cursor ──
+# (audit 2026-09-06, ops pass). Real 202309 /payments payloads carry no
+# ``update_time``, so the payouts watermark never advanced → every tick
+# re-pulled all payments and APPENDED a duplicate raw_records row each
+# time (raw bloat; payload_hash left NULL — every sibling job hashes).
+
+
+def test_finance_raw_records_deduped_and_hashed(db_session) -> None:
+    """Re-fetching an identical payload must NOT append another raw row:
+    dedup on (endpoint, external_id, payload) reuses the first copy and
+    fills payload_hash (sha256 of canonical sorted-keys JSON, same
+    convention as jobs/tiktok/orders.py)."""
+    import hashlib
+    import json
+
+    account = _make_account(db_session)
+    pay_payload = _payout_payload_202309("PAY_R1", amount="123456")
+    stmt_payload = _statement_payload("STM_R1", payment_id="PAY_R1")
+
+    def _proxy() -> FakeProxy:
+        return FakeProxy(
+            payouts_pages=[{"code": 0, "data": {"payments": [pay_payload]}}],
+            statements_pages=[
+                {
+                    "code": 0,
+                    "data": {
+                        "statements": [stmt_payload],
+                        "next_page_token": "",
+                    },
+                }
+            ],
+            transactions_pages=[
+                {
+                    "code": 0,
+                    "data": {
+                        "statement_transactions": [
+                            _statement_transaction_payload_202309(
+                                "TXN_R1", order_id="TEST_TT_FIN_ORD_R1"
+                            )
+                        ],
+                        "next_page_token": "",
+                    },
+                }
+            ],
+        )
+
+    run_with_sync_job(
+        db_session,
+        job_name="tiktok.finance",
+        credential_id=account.credential_id,
+        inner=finance_job.run,
+        inner_kwargs={"proxy_call": _proxy(), "shop_id": account.shop_id},
+    )
+
+    def _raw_rows(endpoint_like: str, ext: str) -> list:
+        return list(
+            db_session.execute(
+                select(RawRecord).where(
+                    RawRecord.endpoint.like(endpoint_like),
+                    RawRecord.external_id == ext,
+                )
+            ).scalars()
+        )
+
+    # Tick 2: identical payloads re-fetched (payouts have no cursor yet).
+    run_with_sync_job(
+        db_session,
+        job_name="tiktok.finance",
+        credential_id=account.credential_id,
+        inner=finance_job.run,
+        inner_kwargs={"proxy_call": _proxy(), "shop_id": account.shop_id},
+    )
+
+    payout_rows = _raw_rows("%/payments", "PAY_R1")
+    stmt_rows = _raw_rows("%/statements", "STM_R1")
+    txn_rows = _raw_rows("%statement_transactions%", "TXN_R1")
+    # Dedup: one row per payload, not one per tick.
+    assert len(payout_rows) == 1, f"payout raw rows after 2 ticks: {len(payout_rows)}"
+    assert len(stmt_rows) == 1
+    assert len(txn_rows) == 1
+    # payload_hash populated with the canonical sha256 (orders.py style).
+    expected_pay = hashlib.sha256(
+        json.dumps(pay_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    assert payout_rows[0].payload_hash == expected_pay
+    # Business row still points at the (single) raw row.
+    payout = db_session.execute(
+        select(Payout).where(Payout.external_payout_id == "PAY_R1")
+    ).scalar_one()
+    assert payout.amount == pytest.approx(123_456)
+    assert payout.raw_record_id == payout_rows[0].id
+
+
+def test_finance_payout_cursor_falls_back_to_create_time(db_session) -> None:
+    """Real 202309 /payments payloads have no ``update_time``; the payouts
+    watermark must advance off ``create_time`` so the sub-job stops
+    re-pulling everything every tick (and writing a cursor row)."""
+    account = _make_account(db_session)
+    proxy = FakeProxy(
+        payouts_pages=[
+            {
+                "code": 0,
+                "data": {"payments": [_payout_payload_202309("PAY_R2", amount="555")]},
+            }
+        ],
+        statements_pages=[],  # no statements — isolate the payouts cursor
+        transactions_pages=[],
+    )
+    run_with_sync_job(
+        db_session,
+        job_name="tiktok.finance",
+        credential_id=account.credential_id,
+        inner=finance_job.run,
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
+    )
+    cursor = _cursor_value(
+        db_session,
+        job_name="tiktok.finance.payouts",
+        scope=account.shop_id,
+    )
+    # create_time = 1_700_001_000 (seconds) → epoch ms.
+    assert cursor == 1_700_001_000_000

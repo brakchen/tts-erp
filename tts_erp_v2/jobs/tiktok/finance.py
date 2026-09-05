@@ -59,12 +59,14 @@ only in raw payloads.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -404,13 +406,70 @@ def _upsert_transaction(
     return row.id
 
 
+def _store_raw(
+    session: Session,
+    *,
+    endpoint: str,
+    external_id: str | None,
+    payload: dict,
+) -> RawRecord:
+    """Insert OR reuse the raw_records row for one fetched item.
+
+    Dedup contract (audit 2026-09-06, ops pass): some finance sub-jobs
+    re-fetch the same items on every tick - the payouts watermark never
+    advanced (202309 payloads carry no ``update_time``) and the
+    statements cursor re-fetches its boundary items (``statement_time_ge``
+    is >=, so the newest day's statement + transactions repeat each tick)
+    - so blindly appending a RawRecord per fetch grew the table without
+    bound. We key on (endpoint, external_id, payload): an identical
+    payload reuses the FIRST copy (business rows keep pointing at it),
+    while a genuinely-changed payload still appends a fresh audit row.
+
+    ``payload_hash`` is sha256 of the canonical sorted-keys JSON - same
+    convention as jobs/tiktok/orders.py::_store_raw and
+    jobs/runner.py::record_raw_payload - and doubles as the quick dedup
+    key. Rows written before hashing existed (payload_hash NULL) are
+    matched by payload equality and upgraded in place.
+    """
+    payload_bytes = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode(
+        "utf-8"
+    )
+    payload_hash = hashlib.sha256(payload_bytes).hexdigest()
+    existing = session.execute(
+        select(RawRecord)
+        .where(
+            RawRecord.endpoint == endpoint,
+            RawRecord.external_id == external_id,
+            or_(
+                RawRecord.payload_hash == payload_hash,
+                RawRecord.payload == payload,
+            ),
+        )
+        .order_by(RawRecord.id)
+        .limit(1)
+    ).scalar_one_or_none()
+    if existing is not None:
+        if existing.payload_hash is None:
+            existing.payload_hash = payload_hash  # upgrade pre-hash rows
+        return existing
+    row = RawRecord(
+        endpoint=endpoint,
+        external_id=external_id,
+        payload=payload,
+        payload_hash=payload_hash,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
 def _write_components(
     session, *, transaction_id: int, raw: dict, default_currency: str | None = None
 ) -> int:
     """Write non-zero settlement_components rows. Returns count written.
 
     ``component_code`` = upstream field name stripped of the ``_amount``
-    suffix and uppercased (``gross_sales_amount`` → ``GROSS_SALES``), the
+    suffix and uppercased (``gross_sales_amount`` -> ``GROSS_SALES``), the
     convention shared with the archived migrate_finance.py and with
     ``db/models/finance.py``. ``source_order`` keeps the upstream field
     index for traceability.
@@ -495,7 +554,7 @@ def _sync_payouts(
     total = 0
     inserted = 0
     failed = 0
-    max_update_ms: int | None = watermark_ms
+    max_cursor_ms: int | None = watermark_ms
 
     for raw_p in raw_payouts:
         total += 1
@@ -514,13 +573,12 @@ def _sync_payouts(
             )
             continue
 
-        raw_row = RawRecord(
+        raw_row = _store_raw(
+            session,
             endpoint=PAYOUTS_ENDPOINT,
             external_id=p_fields["external_payout_id"],
             payload=raw_p,
         )
-        session.add(raw_row)
-        session.flush()
         _upsert_payout(
             session,
             account_id=account.id,
@@ -529,26 +587,34 @@ def _sync_payouts(
         )
 
         inserted += 1
-        if p_fields["source_updated_at"] is not None:
-            update_ms = _safe_int(p_fields["source_updated_at"].timestamp() * 1000)
-            if update_ms and (max_update_ms is None or update_ms > max_update_ms):
-                max_update_ms = update_ms
+        # Live 202309 /payments payloads carry NO ``update_time`` (audit
+        # 2026-09-06) → source_updated_at is always None and the watermark
+        # never advanced, so every tick re-pulled ALL payments from epoch
+        # (idempotent, but raw_records grew a duplicate per tick). Payments
+        # are created once and never change after PAID, so fall back to
+        # ``create_time`` as the cursor source; once a cursor exists the
+        # sub-job sends ``update_time_ge`` exactly as before.
+        cursor_time = p_fields["source_updated_at"] or p_fields["source_created_at"]
+        if cursor_time is not None:
+            cursor_ms = _safe_int(cursor_time.timestamp() * 1000)
+            if cursor_ms and (max_cursor_ms is None or cursor_ms > max_cursor_ms):
+                max_cursor_ms = cursor_ms
 
-    if max_update_ms is not None and (
-        watermark_ms is None or max_update_ms > watermark_ms
+    if max_cursor_ms is not None and (
+        watermark_ms is None or max_cursor_ms > watermark_ms
     ):
         watermarks.set_cursor(
             session,
             job_name=PAYOUTS_JOB_NAME,
             scope=scope,
-            cursor_epoch_ms=max_update_ms,
+            cursor_epoch_ms=max_cursor_ms,
         )
 
     return JobResult(
         rows_total=total,
         rows_inserted=inserted,
         rows_failed=failed,
-        cursor=max_update_ms,
+        cursor=max_cursor_ms,
     )
 
 
@@ -662,13 +728,12 @@ def _sync_statements(
             )
             continue
 
-        raw_s_row = RawRecord(
+        raw_s_row = _store_raw(
+            session,
             endpoint=STATEMENTS_ENDPOINT,
             external_id=s_fields["external_statement_id"],
             payload=raw_s,
         )
-        session.add(raw_s_row)
-        session.flush()
         stmt_id = _upsert_statement(
             session,
             fields=s_fields,
@@ -736,15 +801,14 @@ def _sync_statements(
                         )
                     )
 
-            raw_t_row = RawRecord(
+            raw_t_row = _store_raw(
+                session,
                 endpoint=STATEMENT_TRANSACTIONS_TEMPLATE.format(
                     statement_id=s_fields["external_statement_id"]
                 ),
                 external_id=t_fields["external_transaction_id"],
                 payload=raw_t,
             )
-            session.add(raw_t_row)
-            session.flush()
             txn_id = _upsert_transaction(
                 session,
                 stmt_id=stmt_id,
