@@ -108,7 +108,74 @@ def _map_proxy_error(exc: ProxyError) -> HTTPException:
     )
 
 
-@router.get("/products/{product_id}")
+@router.get(
+    "/products/{product_id}",
+    summary="Get one product's full details from TikTok Shop",
+    description=(
+        "**Single-source spec:** `tech-doc/api/tiktok-shop-get-product.md`. "
+        "If this string disagrees with that file, the file wins.\n\n"
+        "Live read-through to TikTok Shop Partner API's\n"
+        "`GET /product/202309/products/{product_id}` — no DB caching. "
+        "Returns the upstream `data` payload verbatim (hundreds of fields; "
+        "the client controls its own consumption of the shape — we do not "
+        "model it with Pydantic).\n\n"
+        "**Auth.** `Authorization: Bearer <key>` or `X-API-Key: <key>`; "
+        "role = `readonly`. The TikTok Partner App must have scope "
+        "`seller.product.basic` enabled (else upstream returns 105005).\n\n"
+        "**Required query.** `channel_account_id` (int ≥ 1) — internal "
+        "`commerce.channel_accounts.id`. Resolves upstream `shop_id` + "
+        "`access_token` + `shop_cipher`. Must be `platform='tiktok'`.\n\n"
+        "**Optional query.** `return_under_review_version` (bool, default "
+        "false), `return_draft_version` (bool, default false) — mutually "
+        "exclusive per upstream docs; passing both yields 422. "
+        "`locale` (BCP-47 ≤ 16 chars) — `None` → upstream uses shop default.\n\n"
+        "**Response.** 200 with the upstream `data` dict (envelope stripped). "
+        "Errors: 401 (no key), 403 (role < readonly), 404 (channel_account or "
+        "credentials missing), 422 (validation / mutually-exclusive flags), "
+        "429 (upstream rate-limit after retries), 502 (upstream code != 0 / "
+        "auth / http / transient), 500 (TIKTOK_APP_KEY missing). See spec doc "
+        "for the full status matrix + example payloads."
+    ),
+    responses={
+        200: {
+            "description": "Upstream `data` payload returned verbatim. "
+            "Shape: see upstream docs (`tts-partner-api-docs/Get Product.md`). "
+            "No Pydantic model — the client parses its own subset.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": "1729592969712207008",
+                        "title": "Premium Yoga Leggings - Black",
+                        "status": "ACTIVATE",
+                        "audit": {"status": "APPROVED"},
+                        "brand": {"id": "7082427311584347905", "name": "Bridge nook"},
+                    }
+                }
+            },
+        },
+        401: {"description": "Missing / invalid / disabled API key."},
+        403: {"description": "API key role < readonly."},
+        404: {
+            "description": "`channel_account_id` not found, or not "
+            "`platform='tiktok'`, or `integration.credentials` row missing, "
+            "or `shop_cipher` empty."
+        },
+        422: {
+            "description": "Missing `channel_account_id`, or "
+            "`channel_account_id < 1`, or mutually-exclusive flags set together."
+        },
+        429: {"description": "Upstream rate-limit, internal retry budget exhausted."},
+        502: {
+            "description": "Upstream `code != 0` (see `upstream_code` in "
+            "detail), upstream auth rejected, upstream HTTP 4xx/5xx, or "
+            "network blip after retries."
+        },
+        500: {
+            "description": "`TIKTOK_APP_KEY` / `TIKTOK_APP_SECRET` / "
+            "`TTS_ERP_FERNET_KEY` not configured."
+        },
+    },
+)
 def get_product(
     product_id: str,
     sess: Session = Depends(get_session),
@@ -117,19 +184,26 @@ def get_product(
         ge=1,
         description=(
             "Internal commerce.channel_accounts.id (must be platform=tiktok). "
-            "Used to resolve the upstream shop_id + credentials."
+            "Resolves the upstream shop_id + access_token + shop_cipher."
         ),
     ),
-    return_under_review_version: bool = Query(default=False),
-    return_draft_version: bool = Query(default=False),
-    locale: str | None = Query(default=None, max_length=16),
+    return_under_review_version: bool = Query(
+        default=False,
+        description="Upstream flag. Mutually exclusive with return_draft_version.",
+    ),
+    return_draft_version: bool = Query(
+        default=False,
+        description="Upstream flag. Mutually exclusive with return_under_review_version.",
+    ),
+    locale: str | None = Query(
+        default=None,
+        max_length=16,
+        description="BCP-47 locale code (e.g. en-US). None → upstream uses shop default.",
+    ),
 ) -> dict[str, Any]:
     """Fetch one product's full details from TikTok Shop.
 
-    See ``tts-partner-api-docs/Get Product.md`` for the upstream
-    contract. The response is the upstream ``data`` payload returned
-    verbatim (hundreds of fields; no Pydantic model — the client
-    controls its own consumption of the shape).
+    Full contract: see `tech-doc/api/tiktok-shop-get-product.md`.
     """
     try:
         return products_api.get_product(
