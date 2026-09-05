@@ -16,7 +16,7 @@ typically a shop_id or the literal ``"*"`` for system-wide jobs.
 """
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -82,6 +82,9 @@ def set_cursor(
         set_={
             "cursor_value": cursor_value,
             "cursor_epoch_ms": cursor_epoch_ms,
+            # 关键修复:无新数据时 cursor 值不变,必须 bump updated_at
+            # 否则 staleness 监控误报("假死锁"),ADR-0002 §3.3 提到的就是这个
+            "updated_at": text("now()"),
         },
     )
     session.execute(upsert_stmt)
