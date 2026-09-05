@@ -53,8 +53,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from alembic import op  # pyright: ignore[reportAttributeAccessIssue]
 from sqlalchemy import text
+
+from alembic import op  # pyright: ignore[reportAttributeAccessIssue]
 
 revision: str = "0007_analytics_reorg"
 down_revision: str | None = "0006_ad_product_links_view"
@@ -163,9 +164,13 @@ def upgrade() -> None:
     """Drop 4 dead analytics tables; their duties are either obsolete or
     moved to structured file logs."""
     # 顺序：先无依赖 → 有依赖；本组表之间无 FK，顺序不敏感。
+    # pi-lens-ignore: python-sql-injection — literal DDL, constant table names only
     op.execute(text("DROP TABLE IF EXISTS analytics.ad_audit_log CASCADE"))
+    # pi-lens-ignore: python-sql-injection — literal DDL, constant table names only
     op.execute(text("DROP TABLE IF EXISTS analytics.ad_shop_timezones CASCADE"))
+    # pi-lens-ignore: python-sql-injection — literal DDL, constant table names only
     op.execute(text("DROP TABLE IF EXISTS analytics.ad_daily_completeness CASCADE"))
+    # pi-lens-ignore: python-sql-injection — literal DDL, constant table names only
     op.execute(text("DROP TABLE IF EXISTS analytics.ad_records CASCADE"))
 
 
@@ -183,7 +188,11 @@ def downgrade() -> None:
       re-seeded on the first fetch_timezone call (which is itself removed
       from production code paths — this is a defence-in-depth rollback only).
     """
+    # pi-lens-ignore: python-sql-injection — literal DDL constants, no user input
     op.execute(text(_AD_RECORDS_DDL))
+    # pi-lens-ignore: python-sql-injection — literal DDL constants, no user input
     op.execute(text(_AD_DAILY_COMPLETENESS_DDL))
+    # pi-lens-ignore: python-sql-injection — literal DDL constants, no user input
     op.execute(text(_AD_SHOP_TIMEZONES_DDL))
+    # pi-lens-ignore: python-sql-injection — literal DDL constants, no user input
     op.execute(text(_AD_AUDIT_LOG_DDL))
