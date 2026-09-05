@@ -142,40 +142,6 @@ ALTER TABLE after_sales.cases ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 );
 
 
--- Name: ad_audit_log; Type: TABLE; Schema: analytics; Owner: -
-
-CREATE TABLE IF NOT EXISTS analytics.ad_audit_log (
-    id bigint CONSTRAINT analytics_audit_log_id_not_null NOT NULL,
-    request_id text,
-    endpoint text CONSTRAINT analytics_audit_log_endpoint_not_null NOT NULL,
-    method text CONSTRAINT analytics_audit_log_method_not_null NOT NULL,
-    path text CONSTRAINT analytics_audit_log_path_not_null NOT NULL,
-    status integer CONSTRAINT analytics_audit_log_status_not_null NOT NULL,
-    key_prefix text,
-    records_in integer,
-    records_ok integer,
-    records_rej integer,
-    error_code text,
-    created_at timestamp with time zone DEFAULT now() CONSTRAINT analytics_audit_log_created_at_not_null NOT NULL,
-    error_message text,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
--- Name: ad_daily_completeness; Type: TABLE; Schema: analytics; Owner: -
-
-CREATE TABLE IF NOT EXISTS analytics.ad_daily_completeness (
-    seller_id text CONSTRAINT analytics_daily_completeness_seller_id_not_null NOT NULL,
-    advertiser_id text CONSTRAINT analytics_daily_completeness_advertiser_id_not_null NOT NULL,
-    storage_key text CONSTRAINT analytics_daily_completeness_storage_key_not_null NOT NULL,
-    campaign_id text CONSTRAINT analytics_daily_completeness_campaign_id_not_null NOT NULL,
-    day date CONSTRAINT analytics_daily_completeness_day_not_null NOT NULL,
-    captured_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT ck_analytics_daily_completeness_storage CHECK ((storage_key = ANY (ARRAY['productAnalyses'::text, 'sessionAnalyses'::text, 'campaignChangeLogs'::text])))
-);
-
-
 -- Name: ad_raw; Type: TABLE; Schema: analytics; Owner: -
 
 CREATE TABLE IF NOT EXISTS analytics.ad_raw (
@@ -294,58 +260,6 @@ CREATE VIEW analytics.ad_product_links AS
      LEFT JOIN commerce.channel_accounts ca ON (((ca.platform = 'tiktok'::text) AND (ca.external_account_id = d.seller_id))))
      LEFT JOIN commerce.channel_products cp ON (((cp.channel_account_id = ca.id) AND (cp.external_product_id = d.product_id))))
   GROUP BY d.seller_id, d.advertiser_id, d.campaign_id, d.product_id, l.product_name, l.product_status, l.gmv_max_bid_type, ca.id, cp.id;
-
-
-
-
-
-
-
-
--- Name: ad_records; Type: TABLE; Schema: analytics; Owner: -
-
-CREATE TABLE IF NOT EXISTS analytics.ad_records (
-    id bigint CONSTRAINT analytics_records_id_not_null NOT NULL,
-    idempotency_key text CONSTRAINT analytics_records_idempotency_key_not_null NOT NULL,
-    source_record_id text,
-    seller_id text CONSTRAINT analytics_records_seller_id_not_null NOT NULL,
-    advertiser_id text CONSTRAINT analytics_records_advertiser_id_not_null NOT NULL,
-    storage_key text CONSTRAINT analytics_records_storage_key_not_null NOT NULL,
-    campaign_id text CONSTRAINT analytics_records_campaign_id_not_null NOT NULL,
-    day date CONSTRAINT analytics_records_day_not_null NOT NULL,
-    shop_name text,
-    endpoint text CONSTRAINT analytics_records_endpoint_not_null NOT NULL,
-    method text CONSTRAINT analytics_records_method_not_null NOT NULL,
-    request_body jsonb,
-    response_data jsonb CONSTRAINT analytics_records_response_data_not_null NOT NULL,
-    source text CONSTRAINT analytics_records_source_not_null NOT NULL,
-    captured_at timestamp with time zone CONSTRAINT analytics_records_captured_at_not_null NOT NULL,
-    schema_version integer DEFAULT 1 CONSTRAINT analytics_records_schema_version_not_null NOT NULL,
-    protocol_version integer DEFAULT 1 CONSTRAINT analytics_records_protocol_version_not_null NOT NULL,
-    received_at timestamp with time zone DEFAULT now() CONSTRAINT analytics_records_received_at_not_null NOT NULL,
-    request_id text,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT ck_analytics_records_protocol CHECK ((protocol_version > 0)),
-    CONSTRAINT ck_analytics_records_schema CHECK ((schema_version > 0)),
-    CONSTRAINT ck_analytics_records_storage CHECK ((storage_key = ANY (ARRAY['productAnalyses'::text, 'sessionAnalyses'::text, 'campaignChangeLogs'::text])))
-);
-
-
--- Name: ad_shop_timezones; Type: TABLE; Schema: analytics; Owner: -
-
-CREATE TABLE IF NOT EXISTS analytics.ad_shop_timezones (
-    seller_id text CONSTRAINT analytics_shop_timezones_seller_id_not_null NOT NULL,
-    advertiser_id text CONSTRAINT analytics_shop_timezones_advertiser_id_not_null NOT NULL,
-    timezone text DEFAULT 'Asia/Shanghai'::text CONSTRAINT analytics_shop_timezones_timezone_not_null NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() CONSTRAINT analytics_shop_timezones_updated_at_not_null NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
-
-
-
-
 
 
 
@@ -1028,6 +942,13 @@ ALTER TABLE procurement.spu_images ALTER COLUMN id ADD GENERATED ALWAYS AS IDENT
 );
 
 
+-- Name: alembic_version; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE IF NOT EXISTS public.alembic_version (
+    version_num character varying(32) NOT NULL
+);
+
+
 -- Name: product_cost_snapshots; Type: TABLE; Schema: reporting; Owner: -
 
 CREATE TABLE IF NOT EXISTS reporting.product_cost_snapshots (
@@ -1128,15 +1049,7 @@ ALTER TABLE security.api_keys ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 );
 
 
--- Name: ad_audit_log id; Type: DEFAULT; Schema: analytics; Owner: -
-
-
-
 -- Name: ad_raw id; Type: DEFAULT; Schema: analytics; Owner: -
-
-
-
--- Name: ad_records id; Type: DEFAULT; Schema: analytics; Owner: -
 
 
 
@@ -1164,46 +1077,16 @@ ALTER TABLE ONLY after_sales.cases
     ADD CONSTRAINT uq_cases_account_ext UNIQUE (channel_account_id, external_case_id);
 
 
--- Name: ad_audit_log analytics_audit_log_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
-
-ALTER TABLE ONLY analytics.ad_audit_log
-    ADD CONSTRAINT analytics_audit_log_pkey PRIMARY KEY (id);
-
-
 -- Name: ad_raw analytics_raw_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
 
 ALTER TABLE ONLY analytics.ad_raw
     ADD CONSTRAINT analytics_raw_pkey PRIMARY KEY (id);
 
 
--- Name: ad_records analytics_records_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
-
-ALTER TABLE ONLY analytics.ad_records
-    ADD CONSTRAINT analytics_records_pkey PRIMARY KEY (id);
-
-
--- Name: ad_shop_timezones analytics_shop_timezones_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
-
-ALTER TABLE ONLY analytics.ad_shop_timezones
-    ADD CONSTRAINT analytics_shop_timezones_pkey PRIMARY KEY (seller_id);
-
-
--- Name: ad_daily_completeness pk_analytics_daily_completeness; Type: CONSTRAINT; Schema: analytics; Owner: -
-
-ALTER TABLE ONLY analytics.ad_daily_completeness
-    ADD CONSTRAINT pk_analytics_daily_completeness PRIMARY KEY (seller_id, advertiser_id, storage_key, campaign_id, day);
-
-
 -- Name: ad_raw uq_analytics_raw_unit_day; Type: CONSTRAINT; Schema: analytics; Owner: -
 
 ALTER TABLE ONLY analytics.ad_raw
     ADD CONSTRAINT uq_analytics_raw_unit_day UNIQUE (seller_id, advertiser_id, endpoint, day, campaign_id);
-
-
--- Name: ad_records uq_analytics_records_unit_day; Type: CONSTRAINT; Schema: analytics; Owner: -
-
-ALTER TABLE ONLY analytics.ad_records
-    ADD CONSTRAINT uq_analytics_records_unit_day UNIQUE (seller_id, advertiser_id, storage_key, campaign_id, day);
 
 
 -- Name: channel_accounts channel_accounts_pkey; Type: CONSTRAINT; Schema: commerce; Owner: -
@@ -1524,6 +1407,12 @@ ALTER TABLE ONLY procurement.purchase_orders
     ADD CONSTRAINT uq_purchase_orders_account_ext UNIQUE (procurement_account_id, external_purchase_order_id);
 
 
+-- Name: alembic_version alembic_version_pkc; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY public.alembic_version
+    ADD CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num);
+
+
 -- Name: product_cost_snapshots product_cost_snapshots_pkey; Type: CONSTRAINT; Schema: reporting; Owner: -
 
 ALTER TABLE ONLY reporting.product_cost_snapshots
@@ -1587,16 +1476,6 @@ CREATE INDEX IF NOT EXISTS ix_cases_case_type_status ON after_sales.cases USING 
 CREATE INDEX IF NOT EXISTS ix_cases_sales_order ON after_sales.cases USING btree (sales_order_id);
 
 
--- Name: idx_analytics_audit_created; Type: INDEX; Schema: analytics; Owner: -
-
-CREATE INDEX IF NOT EXISTS idx_analytics_audit_created ON analytics.ad_audit_log USING btree (created_at DESC);
-
-
--- Name: idx_analytics_audit_request; Type: INDEX; Schema: analytics; Owner: -
-
-CREATE INDEX IF NOT EXISTS idx_analytics_audit_request ON analytics.ad_audit_log USING btree (request_id);
-
-
 -- Name: idx_analytics_raw_received; Type: INDEX; Schema: analytics; Owner: -
 
 CREATE INDEX IF NOT EXISTS idx_analytics_raw_received ON analytics.ad_raw USING btree (received_at DESC);
@@ -1610,21 +1489,6 @@ CREATE INDEX IF NOT EXISTS idx_analytics_raw_request ON analytics.ad_raw USING b
 -- Name: idx_analytics_raw_scope; Type: INDEX; Schema: analytics; Owner: -
 
 CREATE INDEX IF NOT EXISTS idx_analytics_raw_scope ON analytics.ad_raw USING btree (seller_id, advertiser_id, endpoint, day);
-
-
--- Name: idx_analytics_records_received; Type: INDEX; Schema: analytics; Owner: -
-
-CREATE INDEX IF NOT EXISTS idx_analytics_records_received ON analytics.ad_records USING btree (received_at DESC);
-
-
--- Name: idx_analytics_records_request; Type: INDEX; Schema: analytics; Owner: -
-
-CREATE INDEX IF NOT EXISTS idx_analytics_records_request ON analytics.ad_records USING btree (request_id);
-
-
--- Name: idx_analytics_records_scope; Type: INDEX; Schema: analytics; Owner: -
-
-CREATE INDEX IF NOT EXISTS idx_analytics_records_scope ON analytics.ad_records USING btree (seller_id, advertiser_id, storage_key, campaign_id, day);
 
 
 -- Name: ix_channel_accounts_status; Type: INDEX; Schema: commerce; Owner: -
@@ -1852,29 +1716,9 @@ CREATE OR REPLACE TRIGGER trg_after_sales_case_lines_touch BEFORE UPDATE ON afte
 CREATE OR REPLACE TRIGGER trg_after_sales_cases_touch BEFORE UPDATE ON after_sales.cases FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
--- Name: ad_audit_log trg_analytics_ad_audit_log_touch; Type: TRIGGER; Schema: analytics; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_analytics_ad_audit_log_touch BEFORE UPDATE ON analytics.ad_audit_log FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
--- Name: ad_daily_completeness trg_analytics_ad_daily_completeness_touch; Type: TRIGGER; Schema: analytics; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_analytics_ad_daily_completeness_touch BEFORE UPDATE ON analytics.ad_daily_completeness FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
 -- Name: ad_raw trg_analytics_ad_raw_touch; Type: TRIGGER; Schema: analytics; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_analytics_ad_raw_touch BEFORE UPDATE ON analytics.ad_raw FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
--- Name: ad_records trg_analytics_ad_records_touch; Type: TRIGGER; Schema: analytics; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_analytics_ad_records_touch BEFORE UPDATE ON analytics.ad_records FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
--- Name: ad_shop_timezones trg_analytics_ad_shop_timezones_touch; Type: TRIGGER; Schema: analytics; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_analytics_ad_shop_timezones_touch BEFORE UPDATE ON analytics.ad_shop_timezones FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
 -- Name: channel_accounts trg_commerce_channel_accounts_touch; Type: TRIGGER; Schema: commerce; Owner: -
@@ -2445,5 +2289,5 @@ ALTER TABLE ONLY reporting.shipment_tracking_summary
 
 -- PostgreSQL database dump complete
 
-\unrestrict A0HU8D7dpS6mDBkShkWL3tfrx1qcUHBmOkqfLDZMzZLWrGxa5NWYO4viQ650rOO
+\unrestrict PoJLVbbfH5k8k4ncm5S9Szpg24t2mE9J4Ndl2P3fWNwhH9dTgS05VfkGIy90UVe
 

@@ -6,7 +6,7 @@
 ## 1. Stack（项目栈）
 
 Python 3.14 · FastAPI + uvicorn（`:9877`）· SQLAlchemy 2 + psycopg3 · PostgreSQL 容器（`:5432`，
-10 schema / 41 表 + 2 view（v1 `public.*` 业务表已于 2026-09-05 归档删除，见 §6）· APScheduler（独立 sync-worker 进程）· MinIO · Fernet 加密 · systemd user units。
+10 schema / 37 表 + 2 view（v1 `public.*` 业务表 2026-09-05 归档删除；analytics 4 张僵尸表 migration 0007 drop）· APScheduler（独立 sync-worker 进程）· MinIO · Fernet 加密 · systemd user units。
 
 - v2（2026-08-29 切流生产）：TikTok Shop 销售 + 妙手采购 → **本地分析库 + 只读 API + 定时同步**
 - 下游：TikTok Shop Open API (`open-api.tiktokglobalshop.com`) + 妙手开放平台 (`openapi.wanshifu.com`)
