@@ -34,7 +34,7 @@ import json
 import logging
 import sys
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -69,11 +69,23 @@ _PATH_DUMPS = "/v2/analytics/sync/dumps"
 # 替代原 analytics.ad_audit_log。每条 ingest 请求（含成功与失败路径）一行
 # key=value,字段见 ``_log_ingest_event``。
 #
-# logger name 与项目其它 ingest/audit 日志命名风格一致（参考
-# ``tts_erp_v2.api.v2.auth.login_logger`` / ``access_log.access``）。handler
-# 配置遵循 uvicorn dictConfig（默认走 root logger + systemd stdout/stderr →
-# logs/stdout.log / logs/stderr.log,与 access_log 一致,无需额外 handler）。
+# handler 接法与 ``tts_erp_v2.auth.login_logger`` / ``access_log.access``
+# 一致：uvicorn dictConfig 只给 uvicorn.* logger 挂 handler，root 无
+# handler（2026-08-30 教训：不显式 setLevel + 接 handler 的 logger 是静默
+# no-op），因此这里 setLevel(INFO) + 自接 stdout StreamHandler。
+# ⚠️ 差异点：**propagate 保持 True**（不学 login_logger 的 False）——
+# tests/api/test_analytics_v2_*.py 用 caplog（root handler）断言 ingest
+# 行，propagate=False 会断掉捕获。自身 handler 已把记录置 handled=True，
+# 生产下不会触发 lastResort 重复。
 log = logging.getLogger("tts_erp_v2.analytics.ingest")
+log.setLevel(logging.INFO)
+if not any(
+    isinstance(h, logging.StreamHandler) and h.stream is sys.stdout
+    for h in log.handlers
+):
+    _ingest_stdout = logging.StreamHandler(sys.stdout)
+    _ingest_stdout.setFormatter(logging.Formatter("%(message)s"))
+    log.addHandler(_ingest_stdout)
 
 
 def _log_ingest_event(
