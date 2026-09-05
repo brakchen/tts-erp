@@ -10,8 +10,9 @@ reporting + token.refresh) and ``test_scheduler_token_refresh.py``
   jitter, max_instances=1, and coalesce=True.
 * :func:`_make_executor` routes tiktok jobs through
   ``_run_tiktok_job`` and system jobs through ``_run_system_job``.
-* :func:`_enumerate_tiktok_shops` filters MOCK_*/TEST_* and tolerates DB
-  errors.
+* :func:`_enumerate_tiktok_shops` only returns credentials that own a
+  commerce.shops row (EXISTS filter) and skips MOCK_*/TEST_* prefixes; it
+  tolerates DB errors.
 * :func:`_record_failed_tick` writes a sentinel ``SyncJob`` row.
 * :func:`_run_tiktok_job` retry loop, no-shop early return, and the
   shop fan-out.
@@ -32,7 +33,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
 from tts_erp_v2.db.base import get_engine
-from tts_erp_v2.db.models import Credentials
+from tts_erp_v2.db.models import ChannelAccount, Credentials
 from tts_erp_v2.sync_worker import scheduler
 from tts_erp_v2.sync_worker.scheduler import (
     JOBS,
@@ -216,29 +217,51 @@ def test_make_executor_for_system_calls_run_system_job(monkeypatch) -> None:
 # ─── _enumerate_tiktok_shops (DB-backed, TEST_-sentinel isolation) ──
 
 
-def _seed_credentials_for_enum(session_factory, *, external_id: str) -> None:
-    """Insert a real Credentials row so the enumerator returns it.
+def _seed_credentials_for_enum(
+    session_factory, *, external_id: str, with_shop_row: bool = False
+) -> None:
+    """Insert a Credentials row (+ optional commerce.shops row) for the
+    enumerator tests.
 
-    Fixture ids use the ``ENUMKEEP_`` prefix (NOT ``TEST_``): the
-    enumerator now excludes ``TEST_*`` / ``MOCK_*`` credentials from
-    upstream dialing, so a TEST_-prefixed row would be filtered out and
-    the test could never assert containment. Cleanup is explicit (delete
-    in teardown) so no script-based pruning is needed here.
+    ``with_shop_row=True`` also inserts the matching ``commerce.shops``
+    row (platform='tiktok', shop_id=external_id, linked by
+    credential_id) — this is what makes a credential a real, dialable
+    shop under the enumerator's EXISTS filter. ``False`` seeds an
+    OAuth-only orphan (no shop row), which the enumerator must skip.
+
+    Fixture ids use the ``ENUMKEEP_`` prefix (NOT ``TEST_``/``MOCK_``):
+    the enumerator's secondary prefix guard excludes those, so a
+    prefixed row could never assert containment. Cleanup is explicit
+    (delete in teardown) so no script-based pruning is needed here.
     """
     sess = session_factory()
     try:
-        # Idempotent: delete-then-insert.
+        # Idempotent: delete-then-insert (shops first — its credential
+        # FK is ON DELETE SET NULL, and (platform, shop_id) is unique).
+        sess.execute(
+            text("DELETE FROM commerce.shops WHERE shop_id = :e AND platform = 'tiktok'"),
+            {"e": external_id},
+        )
         sess.execute(
             text("DELETE FROM integration.credentials WHERE external_account_id = :e"),
             {"e": external_id},
         )
-        sess.add(
-            Credentials(
-                provider="tiktok",
-                external_account_id=external_id,
-                ciphertext=b"\x00" * 32,
-            )
+        cred = Credentials(
+            provider="tiktok",
+            external_account_id=external_id,
+            ciphertext=b"\x00" * 32,
         )
+        sess.add(cred)
+        sess.flush()
+        if with_shop_row:
+            sess.add(
+                ChannelAccount(
+                    platform="tiktok",
+                    shop_id=external_id,
+                    credential_id=cred.id,
+                    status="active",
+                )
+            )
         sess.commit()
     finally:
         sess.close()
@@ -247,6 +270,10 @@ def _seed_credentials_for_enum(session_factory, *, external_id: str) -> None:
 def _cleanup_credentials(session_factory, *, external_id: str) -> None:
     sess = session_factory()
     try:
+        sess.execute(
+            text("DELETE FROM commerce.shops WHERE shop_id = :e AND platform = 'tiktok'"),
+            {"e": external_id},
+        )
         sess.execute(
             text("DELETE FROM integration.credentials WHERE external_account_id = :e"),
             {"e": external_id},
@@ -264,19 +291,26 @@ def _factory():
 
 
 def test_enumerate_tiktok_shops_filters_mocks_and_returns_sorted() -> None:
-    """Real and MOCK_* rows present → only real rows, sorted."""
+    """Real (with shops row) + MOCK_* rows → only real rows, sorted.
+
+    ``real_id`` is seeded WITH a commerce.shops row (the EXISTS filter's
+    definition of a dialable shop); ``mock_id`` is seeded with a shops
+    row TOO — proving the MOCK_* prefix guard excludes it even when the
+    shop row exists (secondary defense).
+    """
     factory = _factory()
     real_id = "ENUMKEEP_REAL_SHOP"
     mock_id = "MOCK_LEGACY_SENTINEL"
-    _seed_credentials_for_enum(factory, external_id=real_id)
-    _seed_credentials_for_enum(factory, external_id=mock_id)
+    _seed_credentials_for_enum(factory, external_id=real_id, with_shop_row=True)
+    _seed_credentials_for_enum(factory, external_id=mock_id, with_shop_row=True)
     try:
         sess = factory()
         try:
             result = _enumerate_tiktok_shops(sess)
         finally:
             sess.close()
-        # mock is filtered out
+        # mock is filtered out by the prefix guard (even though it has a
+        # shops row)
         assert mock_id not in result
         # real_id is present (other prod rows may also be present, so we
         # only assert containment, not equality)
@@ -295,29 +329,36 @@ def test_enumerate_tiktok_shops_returns_empty_on_db_error() -> None:
     assert result == []
 
 
-def test_enumerate_tiktok_shops_skips_mock_prefixed_ids() -> None:
-    """Rows whose ``external_account_id`` starts with ``MOCK_`` are skipped.
+def test_enumerate_tiktok_shops_skips_prefix_and_orphan_credentials() -> None:
+    """MOCK_*/TEST_* (even with a shops row) and shop-less orphans are
+    skipped; a real shop-row credential survives.
 
-    Note: the production filter excludes both ``MOCK_`` and ``TEST_``
-    prefixes (``NON_PRODUCTION_SHOP_PREFIXES`` in ``scheduler.py``) —
-    ``TEST_*`` was added 2026-09-05 after OAuth-test credentials made
-    every tiktok job retry ~10s/tick against a shop with no
-    ``commerce.shops`` row. The "kept" fixture deliberately uses a
-    non-excluded prefix (``ENUMKEEP_*``) so it survives the filter.
+    Note: the production enumerator applies TWO guards — the primary
+    EXISTS filter (credential must own a ``commerce.shops`` row) and the
+    secondary prefix guard (``MOCK_`` / ``TEST_`` excluded even if a
+    shops row exists). The "kept" fixture deliberately uses a
+    non-excluded prefix (``ENUMKEEP_*``) WITH a shops row so it passes
+    both guards. ``skip_mock`` / ``skip_test`` are seeded WITH shops
+    rows to prove the prefix guard alone rejects them; ``skip_orphan``
+    has NO shops row and no excluded prefix, proving the EXISTS filter
+    rejects it independently of naming.
     """
     factory = _factory()
     keep_id = "ENUMKEEP_REAL_OWNER"
     skip_mock = "MOCK_ENUM_SKIP_OWNER"
     skip_test = "TEST_ENUM_SKIP_OWNER"
-    _seed_credentials_for_enum(factory, external_id=keep_id)
-    _seed_credentials_for_enum(factory, external_id=skip_mock)
-    _seed_credentials_for_enum(factory, external_id=skip_test)
+    skip_orphan = "ENUMORPHAN_NO_SHOP"
+    _seed_credentials_for_enum(factory, external_id=keep_id, with_shop_row=True)
+    _seed_credentials_for_enum(factory, external_id=skip_mock, with_shop_row=True)
+    _seed_credentials_for_enum(factory, external_id=skip_test, with_shop_row=True)
+    _seed_credentials_for_enum(factory, external_id=skip_orphan, with_shop_row=False)
     sess = factory()
     try:
         result = _enumerate_tiktok_shops(sess)
         assert keep_id in result
         assert skip_mock not in result
         assert skip_test not in result
+        assert skip_orphan not in result
     finally:
         # Clean: remove the seeded rows.
         sess.rollback()
@@ -327,7 +368,18 @@ def test_enumerate_tiktok_shops_skips_mock_prefixed_ids() -> None:
             sess.execute(
                 text(
                     "DELETE FROM integration.credentials "
-                    "WHERE external_account_id IN (:k, :m, :t)"
+                    "WHERE external_account_id IN (:k, :m, :t, :o)"
+                ),
+                {
+                    "k": keep_id,
+                    "m": skip_mock,
+                    "t": skip_test,
+                    "o": skip_orphan,
+                },
+            )
+            sess.execute(
+                text(
+                    "DELETE FROM commerce.shops WHERE shop_id IN (:k, :m, :t)"
                 ),
                 {"k": keep_id, "m": skip_mock, "t": skip_test},
             )

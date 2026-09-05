@@ -33,9 +33,10 @@ from datetime import datetime, timezone
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from tts_erp_v2.db.models import ChannelAccount
 from tts_erp_v2.db.models.integration import Credentials
 from tts_erp_v2.sync_worker.job_runner import (
     run_with_sync_job,
@@ -180,19 +181,32 @@ JOBS: dict[str, JobSpec] = {
 # 2026-09-05 it made every tiktok job retry ~10s per tick against a shop
 # that has no commerce.shops row). Production shop ids are numeric
 # TikTok strings, so neither prefix can collide with a real shop.
+#
+# These are a SECONDARY guard. The primary filter is that the credential
+# must own a row in ``commerce.shops`` (see :func:`_enumerate_tiktok_shops`):
+# a shop row is the "ready to sync" marker — the jobs fail hard on
+# shop-less credentials (``orders._ensure_channel_account`` raises).
 NON_PRODUCTION_SHOP_PREFIXES = ("MOCK_", "TEST_")
 
 
 def _enumerate_tiktok_shops(session: Session) -> list[str]:
-    """Return the ``external_account_id`` of every ``provider='tiktok'`` row.
+    """Return every ``provider='tiktok'`` credential that owns a shop row.
 
-    Filters out non-production sentinels (``MOCK_*`` / ``TEST_*`` — see
-    :data:`NON_PRODUCTION_SHOP_PREFIXES`). ``MOCK_*`` was the 2026-08-25
-    leak that triggered 1008 wasted upstream calls / day until fixed
-    (see ``sync_cron.discover_shops`` for the original guard); ``TEST_*``
-    was added 2026-09-05 after OAuth-test credentials (created by the
-    shop-oauth-auth lane) made every tiktok job burn ~10s per tick on
-    retries against a shop with no ``commerce.shops`` row.
+    Primary filter (2026-09-05): only credentials with a matching row in
+    ``commerce.shops`` (``platform='tiktok'`` + ``shop_id ==
+    external_account_id``) are returned. A credential alone is just an
+    OAuth token — the ``commerce.shops`` row is what marks a shop as
+    ready to sync, and every job hard-fails on shop-less credentials
+    (``orders._ensure_channel_account`` raises ``UpstreamJobError``).
+    Filtering at enumeration time means a stray OAuth-test credential
+    (any prefix) can never make every tiktok job burn ~10s per tick on
+    retries, regardless of how it is named.
+
+    Secondary guard: :data:`NON_PRODUCTION_SHOP_PREFIXES`` (``MOCK_*`` /
+    ``TEST_*``) are still excluded even if a shop row exists, so a
+    dev/test shop that was mistakenly fully bootstrapped can never be
+    dialed. ``MOCK_*`` was the 2026-08-25 leak that triggered 1008
+    wasted upstream calls / day until fixed.
 
     Returns ``[]`` on DB error so a single transient PG blip does NOT
     abort the worker. APScheduler will simply log an empty tick and
@@ -201,7 +215,16 @@ def _enumerate_tiktok_shops(session: Session) -> list[str]:
     try:
         rows = session.execute(
             select(Credentials.external_account_id)
-            .where(Credentials.provider == "tiktok")
+            .where(
+                Credentials.provider == "tiktok",
+                exists(
+                    select(ChannelAccount.shop_id).where(
+                        ChannelAccount.platform == "tiktok",
+                        ChannelAccount.shop_id
+                        == Credentials.external_account_id,
+                    )
+                ),
+            )
             .order_by(Credentials.external_account_id)
         ).all()
     except Exception:  # noqa: BLE001 — boundary between SQLAlchemy and our worker
