@@ -30,7 +30,7 @@ class Shipment(Base):
     __tablename__ = "shipments"
     __table_args__ = (
         UniqueConstraint(
-            "sales_order_id", "external_package_id", name="uq_shipments_order_ext"
+            "order_pk", "external_package_id", name="uq_shipments_order_ext"
         ),
         Index("ix_shipments_tracking_number", "tracking_number"),
         Index("ix_shipments_status", "status"),
@@ -42,7 +42,7 @@ class Shipment(Base):
         primary_key=True,
         server_default=text("generate_always_as_identity()"),
     )
-    sales_order_id: Mapped[int] = mapped_column(
+    order_pk: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("commerce.sales_orders.id", ondelete="RESTRICT"),
         nullable=False,

@@ -115,8 +115,8 @@ v2 切流的 v1 数据回查窗口提前收口：按 `tech-doc/refactor-tech-pla
 - 指标：出单量合计 `order_sku_total`（SUM onsite_roi2_shopping_sku，TikTok Orders(SKU) 口径，
   含自然归因单）、广告消耗合计 `real_cost_total`（SUM mixed_real_cost）、出单 GMV 合计
   `order_value_total`；窗口元数据 observed_days/first_day/last_day；商品名/状态取最后观测日。
-- ERP 富化：LEFT JOIN commerce.channel_accounts（external_account_id=seller_id）/ channel_products
-  （external_product_id=SPU）带出内部 channel_account_id / channel_product_id（目录外为 NULL）。
+- ERP 富化：LEFT JOIN commerce.shops（external_account_id=seller_id）/ products_spu
+  （external_product_id=SPU）带出内部 shop_pk / spu_pk（目录外为 NULL）。
 - 健壮性：JSON 数值字符串先正则校验再 cast（脏值→NULL→0）；修复前无业绩字段的旧 dump
   保留关联行、业绩为 0。
 - 语义/口径/查询示例：`biz-doc/analytics/ad-product-links-view.md`；测试
@@ -237,12 +237,12 @@ v2 切流的 v1 数据回查窗口提前收口：按 `tech-doc/refactor-tech-pla
 - 新 `tts_erp_v2/api/v2/spu_images.py`：
   - `POST /v2/spu-images/upload-url`（readwrite）— 签发 presigned PUT，落 `awaiting_upload` 行
   - `POST /v2/spu-images/{id}/confirm`（readwrite）— head 校验对象存在后置 `ready`
-  - `GET /v2/spu-images[?channel_product_id=]`（readonly）— ready 列表 + presigned GET URL
+  - `GET /v2/spu-images[?spu_pk=]`（readonly）— ready 列表 + presigned GET URL
   - `DELETE /v2/spu-images/{id}`（readwrite）— 软删
   - Cookie 会话下的 mutation 带 CSRF guard（与 manual-costs POST 同款）
 - 新 `tts_erp_v2/storage/schema_storage.sql`：`procurement.spu_images` 表。
 - **fix**: `GET /v2/spu-images` 不带 filter 时 `CAST(:cp_id AS bigint)` 修
-  `AmbiguousParameter` 500（回归测试 `test_list_without_channel_product_id_returns_all_ready`）。
+  `AmbiguousParameter` 500（回归测试 `test_list_without_spu_pk_returns_all_ready`）。
 - `pyproject.toml`：补 `[project]` 依赖清单（含 `minio>=7.2`），uv/pip 可解析。
 
 ### Frontend — operator console 重做

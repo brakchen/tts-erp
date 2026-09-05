@@ -44,7 +44,7 @@ def _wipe_linkage_rows(db_engine):
     """Wipe all linkage.* rows that this file touches.
 
     The autouse ``_isolate_state`` in tests/api/conftest.py only knows
-    about channel_products / channel_accounts / manual_costs / spu_images
+    about products_spu / shops / manual_costs / spu_images
     / api_keys. We add linkage.* on top so failed tests don't pollute the
     next test's row set.
 
@@ -119,26 +119,26 @@ def _seed_linkage_rows(db_engine):
         # pi-lens-ignore: python-sql-injection — literal SQL, only :ext/:acct bound
         conn.execute(
             text(
-                "INSERT INTO commerce.channel_accounts "
-                "(platform, external_account_id, account_name, status) "
+                "INSERT INTO commerce.shops "
+                "(platform, shop_id, account_name, status) "
                 "VALUES ('tiktok', 'TEST_link_acct', 'TEST acct', 'active')"
             )
         )
         # pi-lens-ignore: python-sql-injection — literal SQL, only :acct/:ext bound
         conn.execute(
             text(
-                "INSERT INTO commerce.channel_products "
-                "(channel_account_id, external_product_id, title, status) "
+                "INSERT INTO commerce.products_spu "
+                "(shop_pk, spu_id, title, status) "
                 "VALUES ("
-                "  (SELECT id FROM commerce.channel_accounts "
-                "   WHERE external_account_id = 'TEST_link_acct'),"
+                "  (SELECT id FROM commerce.shops "
+                "   WHERE shop_id = 'TEST_link_acct'),"
                 "  'TEST_link_prod', 'TEST title', 'active')"
             )
         )
         cp_id = conn.execute(
             text(
-                "SELECT id FROM commerce.channel_products "
-                "WHERE external_product_id = 'TEST_link_prod'"
+                "SELECT id FROM commerce.products_spu "
+                "WHERE spu_id = 'TEST_link_prod'"
             )
         ).scalar()
         # procurement product for the FK columns on product_links +
@@ -179,7 +179,7 @@ def _seed_linkage_rows(db_engine):
         conn.execute(
             text(
                 "INSERT INTO linkage.product_links "
-                "(procurement_product_id, channel_product_id, "
+                "(procurement_product_id, spu_pk, "
                 " external_relation_id, relation_type, status, is_primary) "
                 "VALUES (:pp, :cp, :rel, 'MATCH', 'active', true)"
             ),
@@ -199,7 +199,7 @@ def _seed_linkage_rows(db_engine):
             text(
                 "INSERT INTO linkage.link_evidence "
                 "(product_link_id, evidence_type, source_table, source_external_id) "
-                "VALUES (:pl, 'TEST_evidence_kind', 'commerce.channel_products', :ext)"
+                "VALUES (:pl, 'TEST_evidence_kind', 'commerce.products_spu', :ext)"
             ),
             {"pl": pl_id, "ext": evidence_ext_id},
         )
@@ -209,7 +209,7 @@ def _seed_linkage_rows(db_engine):
         conn.execute(
             text(
                 "INSERT INTO linkage.link_issues "
-                "(issue_type, procurement_product_id, channel_product_id, "
+                "(issue_type, procurement_product_id, spu_pk, "
                 " candidate_count, status, details) "
                 "VALUES (:t, :pp, :cp, 2, 'open', '{\"note\": \"TEST_linkage_seed\"}'::jsonb)"
             ),
@@ -228,7 +228,7 @@ def _seed_linkage_rows(db_engine):
         conn.execute(
             text(
                 "INSERT INTO linkage.link_overrides "
-                "(procurement_product_id, channel_product_id, decision, "
+                "(procurement_product_id, spu_pk, decision, "
                 " reason, valid_from, created_by) "
                 "VALUES (:pp, :cp, 'PRIMARY', :r, now(), 'api_key:admin')"
             ),
@@ -243,8 +243,8 @@ def _seed_linkage_rows(db_engine):
         ).scalar()
 
     return {
-        "channel_account_id": cp_id,
-        "channel_product_id": cp_id,
+        "shop_pk": cp_id,
+        "spu_pk": cp_id,
         "procurement_product_id": pp_id,
         "product_link_id": pl_id,
         "issue_id": issue_id,
@@ -269,7 +269,7 @@ def test_list_product_links_with_data(api_client, readonly_key, db_engine):
     by_id = {row["id"]: row for row in rows}
     assert seeded["product_link_id"] in by_id
     row = by_id[seeded["product_link_id"]]
-    assert row["channel_product_id"] == seeded["channel_product_id"]
+    assert row["spu_pk"] == seeded["spu_pk"]
     assert row["procurement_product_id"] == seeded["procurement_product_id"]
     assert row["relation_type"] == "MATCH"
     assert row["status"] == "active"
@@ -279,17 +279,17 @@ def test_list_product_links_with_data(api_client, readonly_key, db_engine):
 def test_list_product_links_filter_by_channel_product(
     api_client, readonly_key, db_engine
 ):
-    """Optional filter channel_product_id narrows the result set."""
+    """Optional filter spu_pk narrows the result set."""
     seeded = _seed_linkage_rows(db_engine)
     r = api_client.get(
         f"/v2/linkage/product-links"
-        f"?channel_product_id={seeded['channel_product_id']}",
+        f"?spu_pk={seeded['spu_pk']}",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200, r.text
     rows = r.json()
     assert all(
-        row["channel_product_id"] == seeded["channel_product_id"]
+        row["spu_pk"] == seeded["spu_pk"]
         for row in rows
     )
     assert seeded["product_link_id"] in [row["id"] for row in rows]
@@ -327,13 +327,13 @@ def test_list_product_links_shop_id_is_silently_ignored(
     """AGENTS.md §2.4: ``?shop_id=`` MUST NOT filter on /linkage either.
 
     product_links has no shop_id column; the handler accepts but ignores
-    it. We seed + filter by channel_product_id (a real column) and add a
+    it. We seed + filter by spu_pk (a real column) and add a
     stray shop_id to confirm the row still appears.
     """
     seeded = _seed_linkage_rows(db_engine)
     r = api_client.get(
         f"/v2/linkage/product-links"
-        f"?channel_product_id={seeded['channel_product_id']}&shop_id=9999999",
+        f"?spu_pk={seeded['spu_pk']}&shop_id=9999999",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200, r.text
@@ -367,7 +367,7 @@ def test_list_evidence_with_data(api_client, readonly_key, db_engine):
     row = rows[0]
     assert row["product_link_id"] == seeded["product_link_id"]
     assert row["evidence_type"] == "TEST_evidence_kind"
-    assert row["source_table"] == "commerce.channel_products"
+    assert row["source_table"] == "commerce.products_spu"
     assert row["source_external_id"] == "TEST_link_evid"
 
 
@@ -579,16 +579,16 @@ def test_resolve_issue_already_resolved_is_404(api_client, admin_key, db_engine)
 def test_list_overrides_with_data(api_client, readonly_key, db_engine):
     """Lines 289-299: response body built by _override_row.
 
-    Scoped by channel_product_id — the unfiltered list (channel_id=None)
+    Scoped by spu_pk — the unfiltered list (channel_id=None)
     triggers a known psycopg bug: ``(:channel_id IS NULL OR ... = CAST(:channel_id AS bigint))``
     fails with ``AmbiguousParameter`` because psycopg cannot infer the
-    type of a None-valued bind. Filtering by channel_product_id sidesteps
+    type of a None-valued bind. Filtering by spu_pk sidesteps
     the bug AND makes the membership assertion deterministic.
     """
     seeded = _seed_linkage_rows(db_engine)
     r = api_client.get(
         f"/v2/linkage/overrides"
-        f"?channel_product_id={seeded['channel_product_id']}",
+        f"?spu_pk={seeded['spu_pk']}",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200, r.text
@@ -598,7 +598,7 @@ def test_list_overrides_with_data(api_client, readonly_key, db_engine):
     row = by_id[seeded["override_id"]]
     assert row["decision"] == "PRIMARY"
     assert row["procurement_product_id"] == seeded["procurement_product_id"]
-    assert row["channel_product_id"] == seeded["channel_product_id"]
+    assert row["spu_pk"] == seeded["spu_pk"]
     assert row["reason"] == "TEST_override_reason"
     assert row["created_by"] == "api_key:admin"
     assert row["valid_to"] is None  # active row
@@ -607,17 +607,17 @@ def test_list_overrides_with_data(api_client, readonly_key, db_engine):
 def test_list_overrides_filter_by_channel_product(
     api_client, readonly_key, db_engine
 ):
-    """Optional channel_product_id filter scopes the result set."""
+    """Optional spu_pk filter scopes the result set."""
     seeded = _seed_linkage_rows(db_engine)
     r = api_client.get(
         f"/v2/linkage/overrides"
-        f"?channel_product_id={seeded['channel_product_id']}",
+        f"?spu_pk={seeded['spu_pk']}",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200, r.text
     rows = r.json()
     assert all(
-        row["channel_product_id"] == seeded["channel_product_id"]
+        row["spu_pk"] == seeded["spu_pk"]
         for row in rows
     )
     assert seeded["override_id"] in [row["id"] for row in rows]
@@ -646,7 +646,7 @@ def test_list_overrides_active_only_false_includes_closed(
     # Default active_only=true → the closed row should NOT appear.
     r_active = api_client.get(
         f"/v2/linkage/overrides"
-        f"?channel_product_id={seeded['channel_product_id']}",
+        f"?spu_pk={seeded['spu_pk']}",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r_active.status_code == 200, r_active.text
@@ -656,7 +656,7 @@ def test_list_overrides_active_only_false_includes_closed(
     # active_only=false → closed row appears.
     r_all = api_client.get(
         f"/v2/linkage/overrides"
-        f"?channel_product_id={seeded['channel_product_id']}&active_only=false",
+        f"?spu_pk={seeded['spu_pk']}&active_only=false",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r_all.status_code == 200, r_all.text
@@ -674,7 +674,7 @@ def test_create_override_anonymous_is_401(api_client):
     r = api_client.post(
         "/v2/linkage/overrides",
         json={
-            "channel_product_id": 1,
+            "spu_pk": 1,
             "procurement_product_id": 1,
             "decision": "PRIMARY",
         },
@@ -688,7 +688,7 @@ def test_create_override_readwrite_is_403(api_client, readwrite_key):
         "/v2/linkage/overrides",
         headers={"Authorization": f"Bearer {readwrite_key}"},
         json={
-            "channel_product_id": 1,
+            "spu_pk": 1,
             "procurement_product_id": 1,
             "decision": "PRIMARY",
         },
@@ -702,7 +702,7 @@ def test_create_override_readonly_is_403(api_client, readonly_key):
         "/v2/linkage/overrides",
         headers={"Authorization": f"Bearer {readonly_key}"},
         json={
-            "channel_product_id": 1,
+            "spu_pk": 1,
             "procurement_product_id": 1,
             "decision": "PRIMARY",
         },
@@ -718,7 +718,7 @@ def test_create_override_allow_missing_procurement_id_is_422(
         "/v2/linkage/overrides",
         headers={"Authorization": f"Bearer {admin_key}"},
         json={
-            "channel_product_id": 999999999,
+            "spu_pk": 999999999,
             "procurement_product_id": None,
             "decision": "ALLOW",
         },
@@ -735,7 +735,7 @@ def test_create_override_primary_missing_procurement_id_is_422(
         "/v2/linkage/overrides",
         headers={"Authorization": f"Bearer {admin_key}"},
         json={
-            "channel_product_id": 999999999,
+            "spu_pk": 999999999,
             "procurement_product_id": None,
             "decision": "PRIMARY",
         },
@@ -749,7 +749,7 @@ def test_create_override_bad_decision_is_422(api_client, admin_key):
         "/v2/linkage/overrides",
         headers={"Authorization": f"Bearer {admin_key}"},
         json={
-            "channel_product_id": 1,
+            "spu_pk": 1,
             "procurement_product_id": 1,
             "decision": "MAYBE",
         },
@@ -781,7 +781,7 @@ def test_create_override_deny_without_procurement_id_returns_422(
         "/v2/linkage/overrides",
         headers={"Authorization": f"Bearer {admin_key}"},
         json={
-            "channel_product_id": 999999998,
+            "spu_pk": 999999998,
             "procurement_product_id": None,
             "decision": "DENY",
             "reason": "TEST_deny_reason",
@@ -803,7 +803,7 @@ def test_create_override_allow_with_procurement_id_succeeds(
         "/v2/linkage/overrides",
         headers={"Authorization": f"Bearer {admin_key}"},
         json={
-            "channel_product_id": seeded["channel_product_id"],
+            "spu_pk": seeded["spu_pk"],
             "procurement_product_id": seeded["procurement_product_id"],
             "decision": "ALLOW",
             "reason": "TEST_allow_reason",
@@ -813,7 +813,7 @@ def test_create_override_allow_with_procurement_id_succeeds(
     body = r.json()
     assert body["decision"] == "ALLOW"
     assert body["procurement_product_id"] == seeded["procurement_product_id"]
-    assert body["channel_product_id"] == seeded["channel_product_id"]
+    assert body["spu_pk"] == seeded["spu_pk"]
     assert body["reason"] == "TEST_allow_reason"
     assert body["valid_to"] is None
     assert body["created_by"] == "api_key:admin"
@@ -832,7 +832,7 @@ def test_create_override_closes_previous_active_override(
         "/v2/linkage/overrides",
         headers={"Authorization": f"Bearer {admin_key}"},
         json={
-            "channel_product_id": seeded["channel_product_id"],
+            "spu_pk": seeded["spu_pk"],
             "procurement_product_id": seeded["procurement_product_id"],
             "decision": "ALLOW",
             "reason": "TEST_replace_reason",

@@ -1,8 +1,8 @@
 """Tests for the extended ``GET /v2/reporting/missing-cost-products``.
 
 Spec (tech-doc/procurement-ui-redesign.md §3.5):
-- Back-compat: no ``?channel_account_id=`` → global view, same as today.
-- New: ``?channel_account_id=X`` → scope to one shop.
+- Back-compat: no ``?shop_pk=`` → global view, same as today.
+- New: ``?shop_pk=X`` → scope to one shop.
 - New: each row has ``missing_photo`` (bool) and the response carries a
   top-level ``total_missing_photo`` summary field for the tab badge.
 
@@ -49,16 +49,16 @@ def seed_unmatched_active_product(db_engine):
     with Session(db_engine) as sess:
         sess.execute(
             text(
-                "INSERT INTO commerce.channel_accounts "
-                "(platform, external_account_id, account_name, status) "
+                "INSERT INTO commerce.shops "
+                "(platform, shop_id, account_name, status) "
                 "VALUES ('tiktok', :ext, 'TEST acct', 'active')"
             ),
             {"ext": ext_acct},
         )
         acct_id = sess.execute(
             text(
-                "SELECT id FROM commerce.channel_accounts "
-                "WHERE external_account_id = :ext"
+                "SELECT id FROM commerce.shops "
+                "WHERE shop_id = :ext"
             ),
             {"ext": ext_acct},
         ).scalar()
@@ -66,14 +66,14 @@ def seed_unmatched_active_product(db_engine):
         # data; this is the case the original ``= 'active'`` filter missed.
         sess.execute(
             text(
-                "INSERT INTO commerce.channel_products "
-                "(channel_account_id, external_product_id, title, status) "
+                "INSERT INTO commerce.products_spu "
+                "(shop_pk, spu_id, title, status) "
                 "VALUES (:acct, :ext, 'TEST title', 'ACTIVATE')"
             ),
             {"acct": acct_id, "ext": ext_prod},
         )
         sess.commit()
-    yield {"channel_account_id": acct_id, "external_product_id": ext_prod}
+    yield {"shop_pk": acct_id, "spu_id": ext_prod}
 
 
 def test_status_activate_is_included(api_client, readonly_key, seed_unmatched_active_product):
@@ -85,13 +85,13 @@ def test_status_activate_is_included(api_client, readonly_key, seed_unmatched_ac
     """
     r = api_client.get(
         "/v2/reporting/missing-cost-products"
-        f"?channel_account_id={seed_unmatched_active_product['channel_account_id']}"
+        f"?shop_pk={seed_unmatched_active_product['shop_pk']}"
         "&limit=200",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200, r.text
-    ext_ids = [row["external_product_id"] for row in r.json()["items"]]
-    assert seed_unmatched_active_product["external_product_id"] in ext_ids
+    ext_ids = [row["spu_id"] for row in r.json()["items"]]
+    assert seed_unmatched_active_product["spu_id"] in ext_ids
 
 
 def test_unlinked_product_survives_left_join_view(
@@ -108,7 +108,7 @@ def test_unlinked_product_survives_left_join_view(
     """
     r = api_client.get(
         "/v2/reporting/missing-cost-products"
-        f"?channel_account_id={seed_unmatched_active_product['channel_account_id']}"
+        f"?shop_pk={seed_unmatched_active_product['shop_pk']}"
         "&limit=200",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
@@ -116,8 +116,8 @@ def test_unlinked_product_survives_left_join_view(
     items = r.json()["items"]
     cp_id = None
     for row in items:
-        if row["external_product_id"] == seed_unmatched_active_product["external_product_id"]:
-            cp_id = row["channel_product_id"]
+        if row["spu_id"] == seed_unmatched_active_product["spu_id"]:
+            cp_id = row["spu_pk"]
             break
     assert cp_id is not None, "seeded product should appear in items"
     # Sanity-check the view really does emit a phantom row for this
@@ -130,7 +130,7 @@ def test_unlinked_product_survives_left_join_view(
         phantom = conn.execute(
             text(
                 "SELECT effective_relation_type FROM linkage.effective_product_links "
-                "WHERE channel_product_id = :cp"
+                "WHERE spu_pk = :cp"
             ),
             {"cp": cp_id},
         ).first()
@@ -145,7 +145,7 @@ def test_unlinked_product_survives_left_join_view(
 
 
 def test_response_shape_no_filter(api_client, readonly_key):
-    """No channel_account_id → response has {items, total_missing_photo}.
+    """No shop_pk → response has {items, total_missing_photo}.
 
     Items is a list of objects each carrying the legacy keys plus the
     new ``missing_photo`` flag.
@@ -160,21 +160,21 @@ def test_response_shape_no_filter(api_client, readonly_key):
     assert "items" in body and isinstance(body["items"], list)
     assert "total_missing_photo" in body and isinstance(body["total_missing_photo"], int)
     for row in body["items"]:
-        assert "channel_product_id" in row
-        assert "external_product_id" in row
+        assert "spu_pk" in row
+        assert "spu_id" in row
         assert "title" in row
         assert "missing_photo" in row and isinstance(row["missing_photo"], bool)
 
 
-def test_channel_account_id_filter_runs_without_error(api_client, readonly_key):
-    """channel_account_id=… is accepted; SQL executes successfully.
+def test_shop_pk_filter_runs_without_error(api_client, readonly_key):
+    """shop_pk=… is accepted; SQL executes successfully.
 
     We can't assert which rows come back without knowing the view's
     data state (see module docstring), so we just confirm the query
     path is wired up.
     """
     r = api_client.get(
-        "/v2/reporting/missing-cost-products?channel_account_id=1&limit=10",
+        "/v2/reporting/missing-cost-products?shop_pk=1&limit=10",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200, r.text
@@ -211,9 +211,9 @@ def test_total_missing_photo_consistent_with_items(api_client, readonly_key):
 def test_total_missing_photo_consistent_with_items_filtered(
     api_client, readonly_key
 ):
-    """Same consistency check under channel_account_id= filter."""
+    """Same consistency check under shop_pk= filter."""
     r = api_client.get(
-        "/v2/reporting/missing-cost-products?channel_account_id=1&limit=200",
+        "/v2/reporting/missing-cost-products?shop_pk=1&limit=200",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200, r.text

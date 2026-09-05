@@ -33,62 +33,62 @@ router = APIRouter(prefix="/v2/commerce", tags=["commerce"])
 
 # --- SQL constants (no interpolation) ------------------------------------
 SQL_LIST_CHANNEL_ACCOUNTS = (
-    "SELECT id, platform, external_account_id, account_name, region, "
+    "SELECT id, platform, shop_id, account_name, region, "
     "seller_type, status, synced_at "
-    "FROM commerce.channel_accounts "
+    "FROM commerce.shops "
     "WHERE (CAST(:platform AS text) IS NULL OR platform = CAST(:platform AS text)) "
     "ORDER BY id LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
 )
 SQL_GET_CHANNEL_ACCOUNT = (
-    "SELECT id, platform, external_account_id, account_name, region, "
-    "seller_type, status, synced_at FROM commerce.channel_accounts "
+    "SELECT id, platform, shop_id, account_name, region, "
+    "seller_type, status, synced_at FROM commerce.shops "
     "WHERE id = :id"
 )
 SQL_GET_CHANNEL_ACCOUNT_BY_EXTERNAL = (
-    "SELECT id, platform, external_account_id, account_name, region, "
-    "seller_type, status, synced_at FROM commerce.channel_accounts "
-    "WHERE platform = :platform AND external_account_id = :ext"
+    "SELECT id, platform, shop_id, account_name, region, "
+    "seller_type, status, synced_at FROM commerce.shops "
+    "WHERE platform = :platform AND shop_id = :ext"
 )
 SQL_LIST_CHANNEL_PRODUCTS = (
-    "SELECT id, channel_account_id, external_product_id, title, status, "
-    "source_created_at, source_updated_at FROM commerce.channel_products "
-    "WHERE (CAST(:acct_id AS bigint) IS NULL OR channel_account_id = CAST(:acct_id AS bigint)) "
+    "SELECT id, shop_pk, spu_id, title, status, "
+    "source_created_at, source_updated_at FROM commerce.products_spu "
+    "WHERE (CAST(:acct_id AS bigint) IS NULL OR shop_pk = CAST(:acct_id AS bigint)) "
     "AND (CAST(:status AS text) IS NULL OR status = CAST(:status AS text)) "
     "ORDER BY id LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
 )
 SQL_GET_CHANNEL_PRODUCT = (
-    "SELECT id, channel_account_id, external_product_id, title, status, "
-    "source_created_at, source_updated_at FROM commerce.channel_products "
+    "SELECT id, shop_pk, spu_id, title, status, "
+    "source_created_at, source_updated_at FROM commerce.products_spu "
     "WHERE id = :id"
 )
 SQL_LIST_CHANNEL_VARIANTS = (
-    "SELECT id, channel_product_id, external_variant_id, seller_sku, "
-    "variant_name FROM commerce.channel_product_variants "
-    "WHERE channel_product_id = :id ORDER BY id"
+    "SELECT id, spu_pk, sku_id, seller_sku, "
+    "variant_name FROM commerce.products_sku "
+    "WHERE spu_pk = :id ORDER BY id"
 )
 SQL_LIST_SALES_ORDERS = (
-    "SELECT id, channel_account_id, external_order_id, status, currency, "
-    "payment_amount, total_amount, source_created_at, source_updated_at, "
+    "SELECT id, shop_pk, order_id, status, currency, "
+    "payment_amount, total_amount, order_time, order_modify_time, "
     "paid_at FROM commerce.sales_orders "
-    "WHERE (CAST(:acct_id AS bigint) IS NULL OR channel_account_id = CAST(:acct_id AS bigint)) "
+    "WHERE (CAST(:acct_id AS bigint) IS NULL OR shop_pk = CAST(:acct_id AS bigint)) "
     "AND (CAST(:status AS text) IS NULL OR status = CAST(:status AS text)) "
-    "ORDER BY source_updated_at DESC NULLS LAST "
+    "ORDER BY order_modify_time DESC NULLS LAST "
     "LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
 )
 SQL_GET_SALES_ORDER = (
-    "SELECT id, channel_account_id, external_order_id, status, currency, "
-    "payment_amount, total_amount, source_created_at, source_updated_at, "
+    "SELECT id, shop_pk, order_id, status, currency, "
+    "payment_amount, total_amount, order_time, order_modify_time, "
     "paid_at FROM commerce.sales_orders WHERE id = :id"
 )
 SQL_LIST_ORDER_LINES = (
-    "SELECT id, sales_order_id, external_line_id, channel_product_id, "
-    "channel_product_variant_id, quantity, unit_price "
-    "FROM commerce.sales_order_lines WHERE sales_order_id = :id ORDER BY id"
+    "SELECT id, order_pk, external_line_id, spu_pk, "
+    "sku_pk, quantity, unit_price "
+    "FROM commerce.sales_order_lines WHERE order_pk = :id ORDER BY id"
 )
 SQL_ACCOUNT_ORDER_STATS = (
     "SELECT COUNT(DISTINCT id) AS n, "
     "COALESCE(SUM(payment_amount), 0) AS total "
-    "FROM commerce.sales_orders WHERE channel_account_id = :id"
+    "FROM commerce.sales_orders WHERE shop_pk = :id"
 )
 
 
@@ -120,7 +120,7 @@ def _row_to_channel_account(row: Any) -> ChannelAccountOut:
     return ChannelAccountOut(
         id=row.id,
         platform=row.platform,
-        external_account_id=row.external_account_id,
+        shop_id=row.shop_id,
         account_name=row.account_name,
         region=row.region,
         seller_type=row.seller_type,
@@ -132,8 +132,8 @@ def _row_to_channel_account(row: Any) -> ChannelAccountOut:
 def _row_to_channel_product(row: Any) -> ChannelProductOut:
     return ChannelProductOut(
         id=row.id,
-        channel_account_id=row.channel_account_id,
-        external_product_id=row.external_product_id,
+        shop_pk=row.shop_pk,
+        spu_id=row.spu_id,
         title=row.title,
         status=row.status,
         source_created_at=row.source_created_at,
@@ -144,20 +144,20 @@ def _row_to_channel_product(row: Any) -> ChannelProductOut:
 def _row_to_sales_order(row: Any) -> SalesOrderOut:
     return SalesOrderOut(
         id=row.id,
-        channel_account_id=row.channel_account_id,
-        external_order_id=row.external_order_id,
+        shop_pk=row.shop_pk,
+        order_id=row.order_id,
         status=row.status,
         currency=row.currency,
         payment_amount=row.payment_amount,
         total_amount=row.total_amount,
-        source_created_at=row.source_created_at,
-        source_updated_at=row.source_updated_at,
+        order_time=row.order_time,
+        order_modify_time=row.order_modify_time,
         paid_at=row.paid_at,
     )
 
 
 @router.get("/channel-accounts", response_model=list[ChannelAccountOut])
-def list_channel_accounts(
+def list_shops(
     sess: Session = Depends(get_session),
     platform: str | None = Query(default=None, max_length=32),
     limit: int = Query(default=100, ge=1, le=500),
@@ -172,22 +172,22 @@ def list_channel_accounts(
 
 
 @router.get(
-    "/channel-accounts/by-external/{external_account_id}",
+    "/channel-accounts/by-external/{shop_id}",
     response_model=ChannelAccountOut,
     summary="Look up a channel account by its upstream (external) account id",
     description=(
         "**Single-source spec:** `tech-doc/api/channel-accounts-by-external.md`.\n\n"
         "Reverse-lookup endpoint: given the upstream shop_id "
-        "(`external_account_id`) and a `platform` filter, return the internal "
-        "`commerce.channel_accounts` row. Replaces the list-and-filter "
+        "(`shop_id`) and a `platform` filter, return the internal "
+        "`commerce.shops` row. Replaces the list-and-filter "
         "pattern (`GET /channel-accounts?platform=...` + client-side search) "
         "with one round-trip and a clean 404.\n\n"
         "**Auth.** `Authorization: Bearer <key>` or `X-API-Key: <key>`; "
         "role = `readonly` (whole `/v2/commerce/*` prefix is readonly).\n\n"
-        "**Path.** `{external_account_id}` — upstream shop_id (string, e.g. "
+        "**Path.** `{shop_id}` — upstream shop_id (string, e.g. "
         "`7494763368967603447`).\n\n"
         "**Query.** `platform` (string, default `\"tiktok\"`, ≤ 32 chars). "
-        "**Required for uniqueness:** `external_account_id` is only unique "
+        "**Required for uniqueness:** `shop_id` is only unique "
         "within a platform — once we onboard miaoshou accounts, the same "
         "external id may exist under `tiktok` and `miaoshou` separately.\n\n"
         "**Response.** 200 with `ChannelAccountOut`; 404 when no row matches; "
@@ -201,7 +201,7 @@ def list_channel_accounts(
                     "example": {
                         "id": 314,
                         "platform": "tiktok",
-                        "external_account_id": "7494763368967603447",
+                        "shop_id": "7494763368967603447",
                         "account_name": "Bridge nook",
                         "region": "VN",
                         "seller_type": "CROSS_BORDER",
@@ -213,20 +213,20 @@ def list_channel_accounts(
         401: {"description": "Missing / invalid / disabled API key."},
         403: {"description": "API key role < readonly."},
         404: {
-            "description": "No `commerce.channel_accounts` row matches "
-            "`(platform, external_account_id)`."
+            "description": "No `commerce.shops` row matches "
+            "`(platform, shop_id)`."
         },
     },
 )
 def get_channel_account_by_external(
-    external_account_id: str,
+    shop_id: str,
     sess: Session = Depends(get_session),
     platform: str = Query(
         default="tiktok",
         max_length=32,
         description=(
             "Platform filter. Required for uniqueness — "
-            "`external_account_id` is only unique within a platform. "
+            "`shop_id` is only unique within a platform. "
             "Default: `tiktok`."
         ),
     ),
@@ -237,33 +237,33 @@ def get_channel_account_by_external(
     """
     row = _q(
         _STMT_GET_CHANNEL_ACCOUNT_BY_EXTERNAL,
-        {"platform": platform, "ext": external_account_id},
+        {"platform": platform, "ext": shop_id},
         sess,
     ).first()
     if row is None:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
             f"channel account not found for platform={platform!r} "
-            f"external_account_id={external_account_id!r}",
+            f"shop_id={shop_id!r}",
         )
     return _row_to_channel_account(row)
 
 
-@router.get("/channel-accounts/{account_id}", response_model=ChannelAccountOut)
+@router.get("/channel-accounts/{shop_pk}", response_model=ChannelAccountOut)
 def get_channel_account(
-    account_id: int,
+    shop_pk: int,
     sess: Session = Depends(get_session),
 ) -> ChannelAccountOut:
-    row = _q(_STMT_GET_CHANNEL_ACCOUNT, {"id": account_id}, sess).first()
+    row = _q(_STMT_GET_CHANNEL_ACCOUNT, {"id": shop_pk}, sess).first()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "channel account not found")
     return _row_to_channel_account(row)
 
 
 @router.get("/channel-products", response_model=list[ChannelProductOut])
-def list_channel_products(
+def list_products_spu(
     sess: Session = Depends(get_session),
-    channel_account_id: int | None = Query(default=None),
+    shop_pk: int | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -271,7 +271,7 @@ def list_channel_products(
     rows = _q(
         _STMT_LIST_CHANNEL_PRODUCTS,
         {
-            "acct_id": channel_account_id,
+            "acct_id": shop_pk,
             "status": status_filter,
             "limit": limit,
             "offset": offset,
@@ -281,31 +281,31 @@ def list_channel_products(
     return [_row_to_channel_product(r) for r in rows]
 
 
-@router.get("/channel-products/{product_id}", response_model=ChannelProductOut)
+@router.get("/channel-products/{spu_pk}", response_model=ChannelProductOut)
 def get_channel_product(
-    product_id: int,
+    spu_pk: int,
     sess: Session = Depends(get_session),
 ) -> ChannelProductOut:
-    row = _q(_STMT_GET_CHANNEL_PRODUCT, {"id": product_id}, sess).first()
+    row = _q(_STMT_GET_CHANNEL_PRODUCT, {"id": spu_pk}, sess).first()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "channel product not found")
     return _row_to_channel_product(row)
 
 
 @router.get(
-    "/channel-products/{product_id}/variants",
+    "/channel-products/{spu_pk}/variants",
     response_model=list[ChannelProductVariantOut],
 )
-def list_channel_product_variants(
-    product_id: int,
+def list_products_sku(
+    spu_pk: int,
     sess: Session = Depends(get_session),
 ) -> list[ChannelProductVariantOut]:
-    rows = _q(_STMT_LIST_CHANNEL_VARIANTS, {"id": product_id}, sess).all()
+    rows = _q(_STMT_LIST_CHANNEL_VARIANTS, {"id": spu_pk}, sess).all()
     return [
         ChannelProductVariantOut(
             id=r.id,
-            channel_product_id=r.channel_product_id,
-            external_variant_id=r.external_variant_id,
+            spu_pk=r.spu_pk,
+            sku_id=r.sku_id,
             seller_sku=r.seller_sku,
             variant_name=r.variant_name,
         )
@@ -316,7 +316,7 @@ def list_channel_product_variants(
 @router.get("/sales-orders", response_model=list[SalesOrderOut])
 def list_sales_orders(
     sess: Session = Depends(get_session),
-    channel_account_id: int | None = Query(default=None),
+    shop_pk: int | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -324,7 +324,7 @@ def list_sales_orders(
     rows = _q(
         _STMT_LIST_SALES_ORDERS,
         {
-            "acct_id": channel_account_id,
+            "acct_id": shop_pk,
             "status": status_filter,
             "limit": limit,
             "offset": offset,
@@ -334,33 +334,33 @@ def list_sales_orders(
     return [_row_to_sales_order(r) for r in rows]
 
 
-@router.get("/sales-orders/{order_id}", response_model=SalesOrderOut)
+@router.get("/sales-orders/{order_pk}", response_model=SalesOrderOut)
 def get_sales_order(
-    order_id: int,
+    order_pk: int,
     sess: Session = Depends(get_session),
 ) -> SalesOrderOut:
-    row = _q(_STMT_GET_SALES_ORDER, {"id": order_id}, sess).first()
+    row = _q(_STMT_GET_SALES_ORDER, {"id": order_pk}, sess).first()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "sales order not found")
     return _row_to_sales_order(row)
 
 
 @router.get(
-    "/sales-orders/{order_id}/lines",
+    "/sales-orders/{order_pk}/lines",
     response_model=list[SalesOrderLineOut],
 )
 def list_sales_order_lines(
-    order_id: int,
+    order_pk: int,
     sess: Session = Depends(get_session),
 ) -> list[SalesOrderLineOut]:
-    rows = _q(_STMT_LIST_ORDER_LINES, {"id": order_id}, sess).all()
+    rows = _q(_STMT_LIST_ORDER_LINES, {"id": order_pk}, sess).all()
     return [
         SalesOrderLineOut(
             id=r.id,
-            sales_order_id=r.sales_order_id,
+            order_pk=r.order_pk,
             external_line_id=r.external_line_id,
-            channel_product_id=r.channel_product_id,
-            channel_product_variant_id=r.channel_product_variant_id,
+            spu_pk=r.spu_pk,
+            sku_pk=r.sku_pk,
             quantity=r.quantity,
             unit_price=r.unit_price,
         )
@@ -369,20 +369,20 @@ def list_sales_order_lines(
 
 
 @router.get(
-    "/channel-accounts/{account_id}/order-stats",
+    "/channel-accounts/{shop_pk}/order-stats",
     summary="Per-account order aggregate — distinct order count + sum of payment_amount",
 )
 def channel_account_order_stats(
-    account_id: int,
+    shop_pk: int,
     sess: Session = Depends(get_session),
 ) -> dict:
     """Lightweight aggregate: distinct order count + sum of payment_amount.
 
     Returns 0/0 when no orders exist (the COALESCE handles NULL from SUM).
     """
-    row = _q(_STMT_ACCOUNT_ORDER_STATS, {"id": account_id}, sess).one()
+    row = _q(_STMT_ACCOUNT_ORDER_STATS, {"id": shop_pk}, sess).one()
     return {
-        "channel_account_id": account_id,
+        "shop_pk": shop_pk,
         "distinct_orders": int(row.n or 0),
         "total_payment_amount": str(row.total),
     }

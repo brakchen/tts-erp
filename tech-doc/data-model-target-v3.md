@@ -143,7 +143,7 @@ reporting
 
 # 5. 销售域模型
 
-## 5.1 `commerce.channel_accounts`
+## 5.1 `commerce.shops`
 
 表示 TikTok Shop 店铺账户。
 
@@ -170,7 +170,7 @@ UNIQUE (platform, external_account_id)
 
 OAuth Token 不应存放在店铺表中，而应属于 `integration.credentials`（经 `credential_id` 关联）。
 
-## 5.2 `commerce.channel_products`
+## 5.2 `commerce.products_spu`
 
 表示 TikTok Shop 商品/SPU。
 
@@ -178,7 +178,7 @@ OAuth Token 不应存放在店铺表中，而应属于 `integration.credentials`
 
 ```text
 id bigint PK
-channel_account_id bigint FK
+shop_pk bigint FK
 external_product_id text
 title text
 category_id text
@@ -193,16 +193,16 @@ synced_at timestamptz
 约束：
 
 ```text
-UNIQUE (channel_account_id, external_product_id)
+UNIQUE (shop_pk, external_product_id)
 ```
 
-## 5.3 `commerce.channel_product_variants`
+## 5.3 `commerce.products_sku`
 
 表示 TikTok SKU。
 
 ```text
 id bigint PK
-channel_product_id bigint FK
+spu_pk bigint FK
 external_variant_id text
 seller_sku text
 variant_name text
@@ -217,15 +217,15 @@ synced_at timestamptz
 约束：
 
 ```text
-UNIQUE (channel_product_id, external_variant_id)
+UNIQUE (spu_pk, external_variant_id)
 ```
 
 ## 5.4 `commerce.sales_orders`
 
 ```text
 id bigint PK
-channel_account_id bigint FK
-external_order_id text
+shop_pk bigint FK
+order_id text
 status text
 currency text
 payment_amount numeric(20,4)
@@ -244,17 +244,17 @@ synced_at timestamptz
 约束：
 
 ```text
-UNIQUE (channel_account_id, external_order_id)
+UNIQUE (shop_pk, order_id)
 ```
 
 ## 5.5 `commerce.sales_order_lines`
 
 ```text
 id bigint PK
-sales_order_id bigint FK
+order_pk bigint FK
 external_line_id text
-channel_product_id bigint FK NULL
-channel_product_variant_id bigint FK NULL
+spu_pk bigint FK NULL
+sku_pk bigint FK NULL
 external_product_id_snapshot text
 external_variant_id_snapshot text
 product_name_snapshot text
@@ -271,7 +271,7 @@ synced_at timestamptz
 约束：
 
 ```text
-UNIQUE (sales_order_id, external_line_id)
+UNIQUE (order_pk, external_line_id)
 ```
 
 订单行同时关联 TikTok 商品和 SKU。
@@ -411,7 +411,7 @@ UNIQUE (purchase_order_id, external_line_id)
 ```text
 id bigint PK
 procurement_account_id bigint FK
-channel_account_id bigint FK
+shop_pk bigint FK
 external_relation_id text NULL
 status text
 valid_from timestamptz
@@ -429,7 +429,7 @@ raw_record_id bigint
 ```text
 id bigint PK
 procurement_product_id bigint FK
-channel_product_id bigint FK
+spu_pk bigint FK
 external_relation_id text
 relation_type text
 status text
@@ -468,7 +468,7 @@ MIAOSHOU_PROCUREMENT_SOURCE
 ```text
 id bigint PK
 procurement_product_variant_id bigint FK
-channel_product_variant_id bigint FK
+sku_pk bigint FK
 external_relation_id text
 status text
 valid_from timestamptz
@@ -509,7 +509,7 @@ observed_at timestamptz
 ```text
 id bigint PK
 procurement_product_id bigint FK
-channel_product_id bigint FK
+spu_pk bigint FK
 decision text
 reason text
 valid_from timestamptz
@@ -546,7 +546,7 @@ linkage.effective_product_links
 id bigint PK
 issue_type text
 procurement_product_id bigint NULL
-channel_product_id bigint NULL
+spu_pk bigint NULL
 candidate_count integer
 status text
 details jsonb
@@ -574,7 +574,7 @@ VARIANT_LINK_MISSING
 
 ```text
 id bigint PK
-sales_order_id bigint FK
+order_pk bigint FK
 external_package_id text
 tracking_number text
 provider_id text
@@ -624,8 +624,8 @@ reporting.shipment_tracking_summary
 
 ```text
 id bigint PK
-channel_account_id bigint FK
-sales_order_id bigint FK
+shop_pk bigint FK
+order_pk bigint FK
 external_case_id text
 case_type text
 status text
@@ -685,7 +685,7 @@ payout
 `settlement_transactions` 可选关联：
 
 ```text
-sales_order_id
+order_pk
 sales_order_line_id
 after_sales_case_id
 ```
@@ -764,7 +764,7 @@ TikTok 商品销量
 
 ```text
 id bigint PK
-channel_product_id bigint FK
+spu_pk bigint FK
 cost_method text
 unit_cost numeric(20,4)
 currency text
@@ -873,11 +873,11 @@ erDiagram
 
 | 现有表 | 目标模型 |
 | --- | --- |
-| `shops` | `commerce.channel_accounts` |
+| `shops` | `commerce.shops` |
 | `orders` | `commerce.sales_orders` |
 | `order_items` | `commerce.sales_order_lines` |
-| 缺失的 TikTok 商品数据 | `commerce.channel_products` |
-| 缺失的 TikTok SKU 数据 | `commerce.channel_product_variants` |
+| 缺失的 TikTok 商品数据 | `commerce.products_spu` |
+| 缺失的 TikTok SKU 数据 | `commerce.products_sku` |
 | `order_shippings` | `fulfillment.shipments` |
 | `logistics_tracking_events` | `fulfillment.tracking_events` |
 | `logistics_tracking` | `reporting.shipment_tracking_summary` |
@@ -921,7 +921,7 @@ erDiagram
 
 ## 阶段一：补齐 TikTok 销售主干
 
-1. 建立 `channel_accounts`。
+1. 建立 `shops`。
 2. 同步 TikTok 商品。
 3. 同步 TikTok SKU。
 4. 将订单行关联到 TikTok 商品和 SKU。
@@ -1042,7 +1042,7 @@ TikTok订单行
 实施过程中新增了两张正文未含的表：
 
 1. **`procurement.manual_product_costs`**（2026-08-29，refactor plan V2 §3.2 / 决策 12）：
-   人工填写的 SPU 成本——`id identity PK、channel_product_id FK、unit_cost numeric(20,4)、
+   人工填写的 SPU 成本——`id identity PK、spu_pk FK、unit_cost numeric(20,4)、
    currency、valid_from、valid_to NULL、note、created_by、created_at`；同一 SPU 同时只有
    一条有效记录（新提交自动关闭上一条的 `valid_to`），填写历史全保留。成本口径中
    `MANUAL_ENTRY` 优先级最高。

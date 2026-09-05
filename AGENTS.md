@@ -105,14 +105,14 @@ canonical GET : {app_secret}{path}{app_key}{value}{shop_cipher}{value}{timestamp
 本机实时清单 `GET /endpoints`。端点契约要点：分页 `limit`(1..500, 默认100)/`offset`；时间 ISO-8601 UTC；
 money 列序列化为 JSON 字符串（用 Decimal 解析）；`POST /v2/linkage/overrides`=admin。
 
-**过滤用内部主键**（`channel_account_id` / `channel_product_id`），不是 `shop_id`——传 `?shop_id=`
+**过滤用内部主键**（`shop_pk` / `spu_pk`），不是 `shop_id`——传 `?shop_id=`
 不报错但被 FastAPI **静默忽略**（返回全量不过滤）。先查再过滤：
 
 ```bash
 curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" "http://127.0.0.1:9877/v2/commerce/channel-accounts"
-# → external_account_id 即 TikTok shop_id；返回里的 channel_account_id 即内部主键（以实际结果为准）
+# → external_account_id 即 TikTok shop_id；返回里的 shop_pk 即内部主键（以实际结果为准）
 curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" \
-  "http://127.0.0.1:9877/v2/commerce/sales-orders?channel_account_id=<内部 id>&limit=5"
+  "http://127.0.0.1:9877/v2/commerce/sales-orders?shop_pk=<内部 id>&limit=5"
 ```
 
 **已拆除、不要再找**：
@@ -154,7 +154,7 @@ curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" \
 | `106001 invalid sign` | 签名格式错（最常见） | `TTS_DEBUG_SIGN=1` 看 canonical，对比 §4.2 |
 | `105005 Access denied` | app 没勾 scope | Partner Center 改 app scope + 重新授权 |
 | `36009004 PageSize is required` | body 字段名/格式错 | 查 TikTok API 文档 Request Body 章节 |
-| v2 端点传 `?shop_id=` 没过滤 | v2 只认内部 id，静默忽略 | 先查 `channel_account_id`（§5） |
+| v2 端点传 `?shop_id=` 没过滤 | v2 只认内部 id，静默忽略 | 先查 `shop_pk`（§5） |
 | 物流数据多日不更新 | `tiktok.logistics` job 没在跑 | `systemctl --user status tts-erp-sync.service`；取 tracking 首尾必须按 `update_time_millis` 排序（列表最新在前） |
 | `psycopg.OperationalError` | PG 容器 down | `docker exec postgres pg_isready` |
 

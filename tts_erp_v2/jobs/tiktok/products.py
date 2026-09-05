@@ -1,7 +1,7 @@
-"""tiktok.products — channel_products + channel_product_variants sync.
+"""tiktok.products — products_spu + products_sku sync.
 
 Pulls the active catalog and upserts into
-``commerce.channel_products`` / ``commerce.channel_product_variants``.
+``commerce.products_spu`` / ``commerce.products_sku``.
 Writes unknown product_ids surfaced by the orders job back to
 ``integration.sync_issues`` so the next run can resolve them.
 
@@ -95,7 +95,7 @@ def _parse_product(raw: dict) -> dict:
     if not pid:
         raise ParseError("product_id missing")
     return {
-        "external_product_id": str(pid),
+        "spu_id": str(pid),
         "title": raw.get("title"),
         "category_id": raw.get("category_id"),
         "status": raw.get("status"),
@@ -110,7 +110,7 @@ def _parse_variant(raw: dict) -> dict:
     if not vid:
         raise ParseError("variant id missing")
     return {
-        "external_variant_id": str(vid),
+        "sku_id": str(vid),
         "seller_sku": raw.get("seller_sku"),
         "variant_name": raw.get("sku_name") or raw.get("variant_name"),
         "attributes": raw.get("attributes"),
@@ -124,7 +124,7 @@ def _upsert_product(
     session, *, account_id: int, fields: dict, raw_record_id: int
 ) -> int:
     insert_values = {
-        "channel_account_id": account_id,
+        "shop_pk": account_id,
         **fields,
         "raw_record_id": raw_record_id,
     }
@@ -134,24 +134,24 @@ def _upsert_product(
         pg_insert(ChannelProduct)
         .values(**insert_values)
         .on_conflict_do_update(
-            index_elements=["channel_account_id", "external_product_id"],
+            index_elements=["shop_pk", "spu_id"],
             set_=update_cols,
         )
     )
     row = session.execute(
         select(ChannelProduct).where(
-            ChannelProduct.channel_account_id == account_id,
-            ChannelProduct.external_product_id == fields["external_product_id"],
+            ChannelProduct.shop_pk == account_id,
+            ChannelProduct.spu_id == fields["spu_id"],
         )
     ).scalar_one()
     return row.id
 
 
 def _upsert_variant(
-    session, *, channel_product_id: int, fields: dict, raw_record_id: int
+    session, *, spu_pk: int, fields: dict, raw_record_id: int
 ) -> None:
     insert_values = {
-        "channel_product_id": channel_product_id,
+        "spu_pk": spu_pk,
         **fields,
         "raw_record_id": raw_record_id,
     }
@@ -161,7 +161,7 @@ def _upsert_variant(
         pg_insert(ChannelProductVariant)
         .values(**insert_values)
         .on_conflict_do_update(
-            index_elements=["channel_product_id", "external_variant_id"],
+            index_elements=["spu_pk", "sku_id"],
             set_=update_cols,
         )
     )
@@ -181,12 +181,12 @@ def run(
     account = session.execute(
         select(ChannelAccount).where(
             ChannelAccount.platform == "tiktok",
-            ChannelAccount.external_account_id == shop_id,
+            ChannelAccount.shop_id == shop_id,
         )
     ).scalar_one_or_none()
     if account is None:
         raise UpstreamJobError(
-            f"channel_accounts row missing for tiktok shop_id={shop_id!r}"
+            f"shops row missing for tiktok shop_id={shop_id!r}"
         )
 
     watermark_ms = watermarks.get_cursor(session, job_name=JOB_NAME, scope=cursor_scope)
@@ -220,7 +220,7 @@ def run(
 
         raw_row = RawRecord(
             endpoint=ENDPOINT,
-            external_id=p_fields["external_product_id"],
+            external_id=p_fields["spu_id"],
             payload=raw,
         )
         session.add(raw_row)
@@ -240,14 +240,14 @@ def run(
                     SyncIssue(
                         job_name=JOB_NAME,
                         issue_type="PARSE_ERROR",
-                        external_id=f"{p_fields['external_product_id']}:<sku>",
+                        external_id=f"{p_fields['spu_id']}:<sku>",
                         details={"error": str(exc)},
                     )
                 )
                 continue
             _upsert_variant(
                 session,
-                channel_product_id=cp_id,
+                spu_pk=cp_id,
                 fields=v_fields,
                 raw_record_id=raw_row.id,
             )

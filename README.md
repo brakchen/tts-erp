@@ -61,7 +61,7 @@
 | Schema | 域 | 代表表 |
 | --- | --- | --- |
 | `integration` | 集成 + 同步 | `credentials`, `raw_records`, `sync_jobs`, `sync_cursors`, `sync_issues` |
-| `commerce` | TikTok 销售（订单/商品） | `channel_accounts`, `sales_orders`, `sales_order_lines`, `channel_products`, `channel_product_variants` |
+| `commerce` | TikTok 销售（订单/商品） | `shops`, `sales_orders`, `sales_order_lines`, `products_spu`, `products_sku` |
 | `procurement` | 妙手采购 + 人工成本 + SPU 图 | `procurement_accounts`, `procurement_products`, `purchase_orders`, `manual_product_costs`, `spu_images` |
 | `fulfillment` | 物流 | `shipments`, `shipment_lines`, `tracking_events` |
 | `after_sales` | 退货/取消 | `cases`, `case_lines` |
@@ -77,17 +77,17 @@
 ### v2 端点（生产路径）
 
 所有 v2 读端点查的是**本地 PG 新 schema**（不打上游 TikTok），过滤参数是**内部 id**
-（`channel_account_id` / `channel_product_id`），不是 `shop_id` —— 传了也会被 FastAPI 静默忽略。
+（`shop_pk` / `spu_pk`），不是 `shop_id` —— 传了也会被 FastAPI 静默忽略。
 先用 external_account_id（即 TikTok shop_id）查出内部 id：
 
 ```bash
-# 0. 店铺 → 内部 channel_account_id（当前生产：7494763368967603447 → 314）
+# 0. 店铺 → 内部 shop_pk（当前生产：7494763368967603447 → 314）
 curl -H "Authorization: Bearer <key>" \
   "http://127.0.0.1:9877/v2/commerce/channel-accounts?platform=tiktok" | jq
 
 # 销售端
 curl -H "Authorization: Bearer <key>" \
-  "http://127.0.0.1:9877/v2/commerce/sales-orders?channel_account_id=314&limit=20" | jq
+  "http://127.0.0.1:9877/v2/commerce/sales-orders?shop_pk=314&limit=20" | jq
 
 curl -H "Authorization: Bearer <key>" \
   "http://127.0.0.1:9877/v2/commerce/sales-orders/<内部订单 id>" | jq

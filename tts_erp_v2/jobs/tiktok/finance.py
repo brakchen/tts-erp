@@ -283,7 +283,7 @@ def _upsert_payout(
     session, *, account_id: int, fields: dict, raw_record_id: int
 ) -> int:
     insert_values = {
-        "channel_account_id": account_id,
+        "shop_pk": account_id,
         **fields,
         "raw_record_id": raw_record_id,
     }
@@ -293,13 +293,13 @@ def _upsert_payout(
         pg_insert(Payout)
         .values(**insert_values)
         .on_conflict_do_update(
-            index_elements=["channel_account_id", "external_payout_id"],
+            index_elements=["shop_pk", "external_payout_id"],
             set_=update_cols,
         )
     )
     row = session.execute(
         select(Payout).where(
-            Payout.channel_account_id == account_id,
+            Payout.shop_pk == account_id,
             Payout.external_payout_id == fields["external_payout_id"],
         )
     ).scalar_one()
@@ -566,7 +566,7 @@ def _sync_statements(
 
         payout_row = session.execute(
             select(Payout).where(
-                Payout.channel_account_id == account.id,
+                Payout.shop_pk == account.id,
                 Payout.external_payout_id == str(payment_id),
             )
         ).scalar_one_or_none()
@@ -718,12 +718,12 @@ def run(
     account = session.execute(
         select(ChannelAccount).where(
             ChannelAccount.platform == "tiktok",
-            ChannelAccount.external_account_id == shop_id,
+            ChannelAccount.shop_id == shop_id,
         )
     ).scalar_one_or_none()
     if account is None:
         raise UpstreamJobError(
-            f"channel_accounts row missing for tiktok shop_id={shop_id!r}"
+            f"shops row missing for tiktok shop_id={shop_id!r}"
         )
 
     payouts_result = _sync_payouts(

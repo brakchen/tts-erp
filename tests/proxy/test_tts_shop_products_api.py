@@ -15,7 +15,7 @@ Test surface
   - ``data`` not an object → :class:`ProxyError`
   - response not a JSON object → :class:`ProxyError`
 * configuration errors
-  - ``channel_account_id`` not in commerce.channel_accounts → :class:`ChannelAccountNotFound`
+  - ``shop_pk`` not in commerce.shops → :class:`ChannelAccountNotFound`
   - row exists but ``platform != 'tiktok'`` → :class:`ChannelAccountNotFound`
   - credentials missing → :class:`CredentialsMissing`
   - credentials present but ``shop_cipher`` empty → :class:`CredentialsMissing`
@@ -124,16 +124,16 @@ def _seed_account(
     shop_id: str = SHOP_ID,
     platform: str = "tiktok",
 ) -> int:
-    """Insert a TEST_ channel_accounts row; return its id.
+    """Insert a TEST_ shops row; return its id.
 
     The row lives inside the test's outer transaction (no explicit
     commit needed — the wrapper's session shares the same connection).
     """
-    accounts_tbl = Base.metadata.tables["commerce.channel_accounts"]
+    accounts_tbl = Base.metadata.tables["commerce.shops"]
     sess.execute(
         insert(accounts_tbl).values(
             platform=platform,
-            external_account_id=shop_id,
+            shop_id=shop_id,
             account_name=f"TEST acct {shop_id}",
             status="active",
         )
@@ -143,7 +143,7 @@ def _seed_account(
     from sqlalchemy import select
 
     row = sess.execute(
-        select(accounts_tbl.c.id).where(accounts_tbl.c.external_account_id == shop_id)
+        select(accounts_tbl.c.id).where(accounts_tbl.c.shop_id == shop_id)
     ).one()
     return int(row[0])
 
@@ -183,7 +183,7 @@ def test_get_product_returns_data_on_success(db_session, fernet_key: str):
 
     result = products_api.get_product(
         session=db_session,
-        channel_account_id=acct_id,
+        shop_pk=acct_id,
         product_id=PRODUCT_ID,
         client=fake,
     )
@@ -210,7 +210,7 @@ def test_get_product_raises_on_non_zero_code(db_session, fernet_key: str):
     with pytest.raises(products_api.UpstreamBusinessError) as ei:
         products_api.get_product(
             session=db_session,
-            channel_account_id=acct_id,
+            shop_pk=acct_id,
             product_id=PRODUCT_ID,
             client=fake,
         )
@@ -229,7 +229,7 @@ def test_get_product_envelope_missing_code_raises_proxy_error(db_session, fernet
     with pytest.raises(proxy_errors.ProxyError, match="missing 'code'"):
         products_api.get_product(
             session=db_session,
-            channel_account_id=acct_id,
+            shop_pk=acct_id,
             product_id=PRODUCT_ID,
             client=fake,
         )
@@ -243,7 +243,7 @@ def test_get_product_envelope_data_not_object_raises_proxy_error(db_session, fer
     with pytest.raises(proxy_errors.ProxyError, match="'data' is not an object"):
         products_api.get_product(
             session=db_session,
-            channel_account_id=acct_id,
+            shop_pk=acct_id,
             product_id=PRODUCT_ID,
             client=fake,
         )
@@ -257,7 +257,7 @@ def test_get_product_response_not_mapping_raises_proxy_error(db_session, fernet_
     with pytest.raises(proxy_errors.ProxyError, match="not a JSON object"):
         products_api.get_product(
             session=db_session,
-            channel_account_id=acct_id,
+            shop_pk=acct_id,
             product_id=PRODUCT_ID,
             client=fake,
         )
@@ -269,14 +269,14 @@ def test_get_product_response_not_mapping_raises_proxy_error(db_session, fernet_
 
 
 def test_get_product_channel_account_not_found(db_session, fernet_key: str):
-    """Credentials exist but no channel_accounts row matches → ChannelAccountNotFound."""
+    """Credentials exist but no shops row matches → ChannelAccountNotFound."""
     _seed_credentials(db_session)  # credentials seeded, no account row
     fake = _FakeClient(payload=_success_envelope({"id": PRODUCT_ID}))
 
     with pytest.raises(products_api.ChannelAccountNotFound, match="not found"):
         products_api.get_product(
             session=db_session,
-            channel_account_id=999_999,
+            shop_pk=999_999,
             product_id=PRODUCT_ID,
             client=fake,
         )
@@ -292,11 +292,11 @@ def test_get_product_channel_account_wrong_platform(db_session, fernet_key: str)
 
     from sqlalchemy import select
 
-    accounts_tbl = Base.metadata.tables["commerce.channel_accounts"]
+    accounts_tbl = Base.metadata.tables["commerce.shops"]
     miaoshou_id = int(
         db_session.execute(
             select(accounts_tbl.c.id).where(
-                accounts_tbl.c.external_account_id == "TEST_tspapi_miaoshou"
+                accounts_tbl.c.shop_id == "TEST_tspapi_miaoshou"
             )
         ).one()[0]
     )
@@ -304,7 +304,7 @@ def test_get_product_channel_account_wrong_platform(db_session, fernet_key: str)
     with pytest.raises(products_api.ChannelAccountNotFound, match="not found"):
         products_api.get_product(
             session=db_session,
-            channel_account_id=miaoshou_id,
+            shop_pk=miaoshou_id,
             product_id=PRODUCT_ID,
             client=fake,
         )
@@ -319,7 +319,7 @@ def test_get_product_credentials_missing(db_session, fernet_key: str):
     with pytest.raises(products_api.CredentialsMissing, match="missing"):
         products_api.get_product(
             session=db_session,
-            channel_account_id=acct_id,
+            shop_pk=acct_id,
             product_id=PRODUCT_ID,
             client=fake,
         )
@@ -338,7 +338,7 @@ def test_get_product_empty_shop_cipher_raises(db_session, fernet_key: str):
     with pytest.raises(products_api.CredentialsMissing, match="shop_cipher"):
         products_api.get_product(
             session=db_session,
-            channel_account_id=acct_id,
+            shop_pk=acct_id,
             product_id=PRODUCT_ID,
             client=fake,
         )
@@ -354,7 +354,7 @@ def test_get_product_mutually_exclusive_flags_raise_value_error():
     with pytest.raises(ValueError, match="mutually exclusive"):
         products_api.get_product(
             session=MagicMock(),  # never reached
-            channel_account_id=1,
+            shop_pk=1,
             product_id=PRODUCT_ID,
             return_under_review_version=True,
             return_draft_version=True,
@@ -369,7 +369,7 @@ def test_get_product_locale_passes_through(db_session, fernet_key: str):
 
     products_api.get_product(
         session=db_session,
-        channel_account_id=acct_id,
+        shop_pk=acct_id,
         product_id=PRODUCT_ID,
         locale="en-US",
         client=fake,
@@ -388,7 +388,7 @@ def test_get_product_under_review_flag_emits_param(db_session, fernet_key: str):
 
     products_api.get_product(
         session=db_session,
-        channel_account_id=acct_id,
+        shop_pk=acct_id,
         product_id=PRODUCT_ID,
         return_under_review_version=True,
         client=fake,
@@ -407,7 +407,7 @@ def test_get_product_draft_flag_emits_param(db_session, fernet_key: str):
 
     products_api.get_product(
         session=db_session,
-        channel_account_id=acct_id,
+        shop_pk=acct_id,
         product_id=PRODUCT_ID,
         return_draft_version=True,
         client=fake,
@@ -426,7 +426,7 @@ def test_get_product_default_flags_omit_param(db_session, fernet_key: str):
 
     products_api.get_product(
         session=db_session,
-        channel_account_id=acct_id,
+        shop_pk=acct_id,
         product_id=PRODUCT_ID,
         client=fake,
     )

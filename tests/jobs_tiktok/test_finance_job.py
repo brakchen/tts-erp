@@ -100,7 +100,7 @@ def _make_account(session) -> ChannelAccount:
     session.flush()
     acct = ChannelAccount(
         platform="tiktok",
-        external_account_id="TEST_TT_FIN_SHOP",
+        shop_id="TEST_TT_FIN_SHOP",
         credential_id=cred.id,
         status="active",
     )
@@ -166,7 +166,7 @@ def _test_account_statements(
         session.execute(
             select(SettlementStatement)
             .join(Payout, SettlementStatement.payout_id == Payout.id)
-            .where(Payout.channel_account_id == account.id)
+            .where(Payout.shop_pk == account.id)
         )
         .scalars()
         .all()
@@ -188,7 +188,7 @@ def _test_account_transactions(
                 SettlementTransaction.settlement_statement_id == SettlementStatement.id,
             )
             .join(Payout, SettlementStatement.payout_id == Payout.id)
-            .where(Payout.channel_account_id == account.id)
+            .where(Payout.shop_pk == account.id)
         )
         .scalars()
         .all()
@@ -226,7 +226,7 @@ def test_finance_payouts_statements_transactions_components(db_session) -> None:
         job_name="tiktok.finance",
         credential_id=account.credential_id,
         inner=finance_job.run,
-        inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
     assert (
         result.rows_inserted == 2
@@ -290,7 +290,7 @@ def test_finance_zero_amount_component_not_written(db_session) -> None:
         job_name="tiktok.finance",
         credential_id=account.credential_id,
         inner=finance_job.run,
-        inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
     assert (
         result.rows_inserted == 2
@@ -344,15 +344,15 @@ def test_finance_statements_have_own_cursor(db_session) -> None:
         job_name="tiktok.finance",
         credential_id=account.credential_id,
         inner=finance_job.run,
-        inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
     payouts_cursor = _cursor_value(
-        db_session, job_name="tiktok.finance.payouts", scope=account.external_account_id
+        db_session, job_name="tiktok.finance.payouts", scope=account.shop_id
     )
     stmts_cursor = _cursor_value(
         db_session,
         job_name="tiktok.finance.statements",
-        scope=account.external_account_id,
+        scope=account.shop_id,
     )
     assert payouts_cursor is not None and payouts_cursor > 0
     assert stmts_cursor is not None and stmts_cursor > 0
@@ -411,7 +411,7 @@ def test_finance_statement_attaches_only_to_own_payout(db_session) -> None:
         job_name="tiktok.finance",
         credential_id=account.credential_id,
         inner=finance_job.run,
-        inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
     payout_a = db_session.execute(
         select(Payout).where(Payout.external_payout_id == "PAY_A")
@@ -459,7 +459,7 @@ def test_finance_statement_without_payment_id_skipped_with_issue(db_session) -> 
         job_name="tiktok.finance",
         credential_id=account.credential_id,
         inner=finance_job.run,
-        inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
     # No statement row should exist (skip, not silent attach). Scoped to
     # the test account so production's 1080 replicated rows don't pollute.
@@ -486,7 +486,7 @@ def test_finance_statement_without_payment_id_skipped_with_issue(db_session) -> 
     stmts_cursor = _cursor_value(
         db_session,
         job_name="tiktok.finance.statements",
-        scope=account.external_account_id,
+        scope=account.shop_id,
     )
     assert stmts_cursor is None, (
         "statements cursor advanced past a row we couldn't ingest; "
@@ -516,7 +516,7 @@ def test_finance_upstream_failure_on_statements_raises(db_session) -> None:
             job_name="tiktok.finance",
             credential_id=account.credential_id,
             inner=finance_job.run,
-            inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+            inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
         )
     # sync_jobs row was committed before the re-raise — fetch it now.
     sync_row = db_session.execute(
@@ -539,7 +539,7 @@ def test_finance_upstream_failure_on_statements_raises(db_session) -> None:
         _cursor_value(
             db_session,
             job_name="tiktok.finance.statements",
-            scope=account.external_account_id,
+            scope=account.shop_id,
         )
         is None
     )
@@ -569,7 +569,7 @@ def test_finance_upstream_failure_on_transactions_raises(db_session) -> None:
             job_name="tiktok.finance",
             credential_id=account.credential_id,
             inner=finance_job.run,
-            inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+            inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
         )
     # sync_jobs row was committed before the re-raise — fetch it now.
     sync_row = db_session.execute(
@@ -647,15 +647,15 @@ def test_finance_late_statement_advances_independently(db_session) -> None:
         job_name="tiktok.finance",
         credential_id=account.credential_id,
         inner=finance_job.run,
-        inner_kwargs={"proxy_call": proxy1, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy1, "shop_id": account.shop_id},
     )
     payouts_cursor_after_tick1 = _cursor_value(
-        db_session, job_name="tiktok.finance.payouts", scope=account.external_account_id
+        db_session, job_name="tiktok.finance.payouts", scope=account.shop_id
     )
     stmts_cursor_after_tick1 = _cursor_value(
         db_session,
         job_name="tiktok.finance.statements",
-        scope=account.external_account_id,
+        scope=account.shop_id,
     )
     assert payouts_cursor_after_tick1 == stmts_cursor_after_tick1 == 1_700_001_000_000
 
@@ -697,7 +697,7 @@ def test_finance_late_statement_advances_independently(db_session) -> None:
         job_name="tiktok.finance",
         credential_id=account.credential_id,
         inner=finance_job.run,
-        inner_kwargs={"proxy_call": proxy2, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy2, "shop_id": account.shop_id},
     )
     # The new statement was ingested — the payouts cursor staying put
     # didn't matter, because statements has its own cursor.
@@ -711,14 +711,14 @@ def test_finance_late_statement_advances_independently(db_session) -> None:
     payouts_cursor_after_tick2 = _cursor_value(
         db_session,
         job_name="tiktok.finance.payouts",
-        scope=account.external_account_id,
+        scope=account.shop_id,
     )
     assert payouts_cursor_after_tick2 == payouts_cursor_after_tick1
     # Statements cursor advanced to the late statement_time.
     stmts_cursor_after_tick2 = _cursor_value(
         db_session,
         job_name="tiktok.finance.statements",
-        scope=account.external_account_id,
+        scope=account.shop_id,
     )
     assert stmts_cursor_after_tick2 is not None
     assert payouts_cursor_after_tick1 is not None
@@ -750,7 +750,7 @@ def test_finance_statement_without_known_payout_raises_sync_issue(db_session) ->
         job_name="tiktok.finance",
         credential_id=account.credential_id,
         inner=finance_job.run,
-        inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
     issues = (
         db_session.execute(
@@ -804,7 +804,7 @@ def test_finance_old_legacy_cursor_name_not_written(db_session) -> None:
         job_name="tiktok.finance",
         credential_id=account.credential_id,
         inner=finance_job.run,
-        inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
     legacy = (
         db_session.execute(

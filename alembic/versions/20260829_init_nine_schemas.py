@@ -121,7 +121,7 @@ def upgrade() -> None:
     op.execute("CREATE INDEX ix_sync_issues_job_resolved ON integration.sync_issues (job_name, resolved_at)")
 
     # ── commerce.* (5) ────────────────────────────────────────────────
-    op.execute("""CREATE TABLE commerce.channel_accounts (
+    op.execute("""CREATE TABLE commerce.shops (
         id BIGINT GENERATED ALWAYS AS IDENTITY NOT NULL,
         platform TEXT NOT NULL,
         external_account_id TEXT NOT NULL,
@@ -133,14 +133,14 @@ def upgrade() -> None:
         source_updated_at TIMESTAMP WITH TIME ZONE,
         synced_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
         PRIMARY KEY (id),
-        CONSTRAINT uq_channel_accounts_platform_ext UNIQUE (platform, external_account_id),
+        CONSTRAINT uq_shops_platform_ext UNIQUE (platform, external_account_id),
         FOREIGN KEY(credential_id) REFERENCES integration.credentials(id) ON DELETE SET NULL
     )""")
-    op.execute("CREATE INDEX ix_channel_accounts_status ON commerce.channel_accounts (status)")
+    op.execute("CREATE INDEX ix_shops_status ON commerce.shops (status)")
 
-    op.execute("""CREATE TABLE commerce.channel_products (
+    op.execute("""CREATE TABLE commerce.products_spu (
         id BIGINT GENERATED ALWAYS AS IDENTITY NOT NULL,
-        channel_account_id BIGINT NOT NULL,
+        shop_pk BIGINT NOT NULL,
         external_product_id TEXT NOT NULL,
         title TEXT,
         category_id TEXT,
@@ -151,15 +151,15 @@ def upgrade() -> None:
         raw_record_id BIGINT,
         synced_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
         PRIMARY KEY (id),
-        CONSTRAINT uq_channel_products_account_ext UNIQUE (channel_account_id, external_product_id),
-        FOREIGN KEY(channel_account_id) REFERENCES commerce.channel_accounts(id) ON DELETE RESTRICT,
+        CONSTRAINT uq_products_spu_account_ext UNIQUE (shop_pk, external_product_id),
+        FOREIGN KEY(shop_pk) REFERENCES commerce.shops(id) ON DELETE RESTRICT,
         FOREIGN KEY(raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL
     )""")
-    op.execute("CREATE INDEX ix_channel_products_status ON commerce.channel_products (status)")
+    op.execute("CREATE INDEX ix_products_spu_status ON commerce.products_spu (status)")
 
-    op.execute("""CREATE TABLE commerce.channel_product_variants (
+    op.execute("""CREATE TABLE commerce.products_sku (
         id BIGINT GENERATED ALWAYS AS IDENTITY NOT NULL,
-        channel_product_id BIGINT NOT NULL,
+        spu_pk BIGINT NOT NULL,
         external_variant_id TEXT NOT NULL,
         seller_sku TEXT,
         variant_name TEXT,
@@ -170,16 +170,16 @@ def upgrade() -> None:
         raw_record_id BIGINT,
         synced_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
         PRIMARY KEY (id),
-        CONSTRAINT uq_channel_variants_product_ext UNIQUE (channel_product_id, external_variant_id),
-        FOREIGN KEY(channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE RESTRICT,
+        CONSTRAINT uq_channel_variants_product_ext UNIQUE (spu_pk, external_variant_id),
+        FOREIGN KEY(spu_pk) REFERENCES commerce.products_spu(id) ON DELETE RESTRICT,
         FOREIGN KEY(raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL
     )""")
-    op.execute("CREATE INDEX ix_channel_variants_seller_sku ON commerce.channel_product_variants (seller_sku)")
+    op.execute("CREATE INDEX ix_channel_variants_seller_sku ON commerce.products_sku (seller_sku)")
 
     op.execute("""CREATE TABLE commerce.sales_orders (
         id BIGINT GENERATED ALWAYS AS IDENTITY NOT NULL,
-        channel_account_id BIGINT NOT NULL,
-        external_order_id TEXT NOT NULL,
+        shop_pk BIGINT NOT NULL,
+        order_id TEXT NOT NULL,
         status TEXT,
         currency TEXT,
         payment_amount NUMERIC(20, 4),
@@ -194,8 +194,8 @@ def upgrade() -> None:
         raw_record_id BIGINT,
         synced_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
         PRIMARY KEY (id),
-        CONSTRAINT uq_sales_orders_account_ext UNIQUE (channel_account_id, external_order_id),
-        FOREIGN KEY(channel_account_id) REFERENCES commerce.channel_accounts(id) ON DELETE RESTRICT,
+        CONSTRAINT uq_sales_orders_account_ext UNIQUE (shop_pk, order_id),
+        FOREIGN KEY(shop_pk) REFERENCES commerce.shops(id) ON DELETE RESTRICT,
         FOREIGN KEY(raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL
     )""")
     op.execute("CREATE INDEX ix_sales_orders_status ON commerce.sales_orders (status)")
@@ -203,10 +203,10 @@ def upgrade() -> None:
 
     op.execute("""CREATE TABLE commerce.sales_order_lines (
         id BIGINT GENERATED ALWAYS AS IDENTITY NOT NULL,
-        sales_order_id BIGINT NOT NULL,
+        order_pk BIGINT NOT NULL,
         external_line_id TEXT NOT NULL,
-        channel_product_id BIGINT,
-        channel_product_variant_id BIGINT,
+        spu_pk BIGINT,
+        sku_pk BIGINT,
         external_product_id_snapshot TEXT,
         external_variant_id_snapshot TEXT,
         product_name_snapshot TEXT,
@@ -219,14 +219,14 @@ def upgrade() -> None:
         raw_record_id BIGINT,
         synced_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
         PRIMARY KEY (id),
-        CONSTRAINT uq_sales_order_lines_order_ext UNIQUE (sales_order_id, external_line_id),
-        FOREIGN KEY(sales_order_id) REFERENCES commerce.sales_orders(id) ON DELETE RESTRICT,
-        FOREIGN KEY(channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE SET NULL,
-        FOREIGN KEY(channel_product_variant_id) REFERENCES commerce.channel_product_variants(id) ON DELETE SET NULL,
+        CONSTRAINT uq_sales_order_lines_order_ext UNIQUE (order_pk, external_line_id),
+        FOREIGN KEY(order_pk) REFERENCES commerce.sales_orders(id) ON DELETE RESTRICT,
+        FOREIGN KEY(spu_pk) REFERENCES commerce.products_spu(id) ON DELETE SET NULL,
+        FOREIGN KEY(sku_pk) REFERENCES commerce.products_sku(id) ON DELETE SET NULL,
         FOREIGN KEY(raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL
     )""")
-    op.execute("CREATE INDEX ix_sales_order_lines_channel_product ON commerce.sales_order_lines (channel_product_id)")
-    op.execute("CREATE INDEX ix_sales_order_lines_channel_variant ON commerce.sales_order_lines (channel_product_variant_id)")
+    op.execute("CREATE INDEX ix_sales_order_lines_channel_product ON commerce.sales_order_lines (spu_pk)")
+    op.execute("CREATE INDEX ix_sales_order_lines_channel_variant ON commerce.sales_order_lines (sku_pk)")
 
     # ── procurement.* (6) ─────────────────────────────────────────────
     op.execute("""CREATE TABLE procurement.procurement_accounts (
@@ -326,7 +326,7 @@ def upgrade() -> None:
 
     op.execute("""CREATE TABLE procurement.manual_product_costs (
         id BIGINT GENERATED ALWAYS AS IDENTITY NOT NULL,
-        channel_product_id BIGINT NOT NULL,
+        spu_pk BIGINT NOT NULL,
         unit_cost NUMERIC(20, 4) NOT NULL,
         currency TEXT NOT NULL,
         valid_from TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
@@ -335,14 +335,14 @@ def upgrade() -> None:
         created_by TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
         PRIMARY KEY (id),
-        FOREIGN KEY(channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE RESTRICT
+        FOREIGN KEY(spu_pk) REFERENCES commerce.products_spu(id) ON DELETE RESTRICT
     )""")
-    op.execute("CREATE INDEX ix_manual_costs_channel_product_valid ON procurement.manual_product_costs (channel_product_id, valid_from)")
+    op.execute("CREATE INDEX ix_manual_costs_channel_product_valid ON procurement.manual_product_costs (spu_pk, valid_from)")
 
     # ── fulfillment.* (3) ─────────────────────────────────────────────
     op.execute("""CREATE TABLE fulfillment.shipments (
         id BIGINT GENERATED ALWAYS AS IDENTITY NOT NULL,
-        sales_order_id BIGINT NOT NULL,
+        order_pk BIGINT NOT NULL,
         external_package_id TEXT NOT NULL,
         tracking_number TEXT,
         provider_id TEXT,
@@ -353,8 +353,8 @@ def upgrade() -> None:
         raw_record_id BIGINT,
         synced_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
         PRIMARY KEY (id),
-        CONSTRAINT uq_shipments_order_ext UNIQUE (sales_order_id, external_package_id),
-        FOREIGN KEY(sales_order_id) REFERENCES commerce.sales_orders(id) ON DELETE RESTRICT,
+        CONSTRAINT uq_shipments_order_ext UNIQUE (order_pk, external_package_id),
+        FOREIGN KEY(order_pk) REFERENCES commerce.sales_orders(id) ON DELETE RESTRICT,
         FOREIGN KEY(raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL
     )""")
     op.execute("CREATE INDEX ix_shipments_tracking_number ON fulfillment.shipments (tracking_number)")
@@ -387,8 +387,8 @@ def upgrade() -> None:
     # ── after_sales.* (2) ─────────────────────────────────────────────
     op.execute("""CREATE TABLE after_sales.cases (
         id BIGINT GENERATED ALWAYS AS IDENTITY NOT NULL,
-        channel_account_id BIGINT NOT NULL,
-        sales_order_id BIGINT NOT NULL,
+        shop_pk BIGINT NOT NULL,
+        order_pk BIGINT NOT NULL,
         external_case_id TEXT NOT NULL,
         case_type TEXT NOT NULL,
         status TEXT,
@@ -399,12 +399,12 @@ def upgrade() -> None:
         raw_record_id BIGINT,
         synced_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
         PRIMARY KEY (id),
-        CONSTRAINT uq_cases_account_ext UNIQUE (channel_account_id, external_case_id),
-        FOREIGN KEY(channel_account_id) REFERENCES commerce.channel_accounts(id) ON DELETE RESTRICT,
-        FOREIGN KEY(sales_order_id) REFERENCES commerce.sales_orders(id) ON DELETE RESTRICT,
+        CONSTRAINT uq_cases_account_ext UNIQUE (shop_pk, external_case_id),
+        FOREIGN KEY(shop_pk) REFERENCES commerce.shops(id) ON DELETE RESTRICT,
+        FOREIGN KEY(order_pk) REFERENCES commerce.sales_orders(id) ON DELETE RESTRICT,
         FOREIGN KEY(raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL
     )""")
-    op.execute("CREATE INDEX ix_cases_sales_order ON after_sales.cases (sales_order_id)")
+    op.execute("CREATE INDEX ix_cases_sales_order ON after_sales.cases (order_pk)")
     op.execute("CREATE INDEX ix_cases_case_type_status ON after_sales.cases (case_type, status)")
 
     op.execute("""CREATE TABLE after_sales.case_lines (
@@ -426,7 +426,7 @@ def upgrade() -> None:
     # ── finance.* (4) ─────────────────────────────────────────────────
     op.execute("""CREATE TABLE finance.payouts (
         id BIGINT GENERATED ALWAYS AS IDENTITY NOT NULL,
-        channel_account_id BIGINT NOT NULL,
+        shop_pk BIGINT NOT NULL,
         external_payout_id TEXT NOT NULL,
         status TEXT,
         currency TEXT,
@@ -436,8 +436,8 @@ def upgrade() -> None:
         raw_record_id BIGINT,
         synced_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
         PRIMARY KEY (id),
-        CONSTRAINT uq_payouts_account_ext UNIQUE (channel_account_id, external_payout_id),
-        FOREIGN KEY(channel_account_id) REFERENCES commerce.channel_accounts(id) ON DELETE RESTRICT,
+        CONSTRAINT uq_payouts_account_ext UNIQUE (shop_pk, external_payout_id),
+        FOREIGN KEY(shop_pk) REFERENCES commerce.shops(id) ON DELETE RESTRICT,
         FOREIGN KEY(raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL
     )""")
     op.execute("CREATE INDEX ix_payouts_status ON finance.payouts (status)")
@@ -463,7 +463,7 @@ def upgrade() -> None:
         id BIGINT GENERATED ALWAYS AS IDENTITY NOT NULL,
         settlement_statement_id BIGINT NOT NULL,
         external_transaction_id TEXT NOT NULL,
-        sales_order_id BIGINT,
+        order_pk BIGINT,
         sales_order_line_id BIGINT,
         after_sales_case_id BIGINT,
         transaction_time TIMESTAMP WITH TIME ZONE,
@@ -472,12 +472,12 @@ def upgrade() -> None:
         PRIMARY KEY (id),
         CONSTRAINT uq_settlement_txn_stmt_ext UNIQUE (settlement_statement_id, external_transaction_id),
         FOREIGN KEY(settlement_statement_id) REFERENCES finance.settlement_statements(id) ON DELETE RESTRICT,
-        FOREIGN KEY(sales_order_id) REFERENCES commerce.sales_orders(id) ON DELETE SET NULL,
+        FOREIGN KEY(order_pk) REFERENCES commerce.sales_orders(id) ON DELETE SET NULL,
         FOREIGN KEY(sales_order_line_id) REFERENCES commerce.sales_order_lines(id) ON DELETE SET NULL,
         FOREIGN KEY(after_sales_case_id) REFERENCES after_sales.cases(id) ON DELETE SET NULL,
         FOREIGN KEY(raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL
     )""")
-    op.execute("CREATE INDEX ix_settlement_txn_sales_order ON finance.settlement_transactions (sales_order_id)")
+    op.execute("CREATE INDEX ix_settlement_txn_sales_order ON finance.settlement_transactions (order_pk)")
     op.execute("CREATE INDEX ix_settlement_txn_order_line ON finance.settlement_transactions (sales_order_line_id)")
     op.execute("CREATE INDEX ix_settlement_txn_case ON finance.settlement_transactions (after_sales_case_id)")
 
@@ -498,7 +498,7 @@ def upgrade() -> None:
     op.execute("""CREATE TABLE linkage.account_links (
         id BIGINT GENERATED ALWAYS AS IDENTITY NOT NULL,
         procurement_account_id BIGINT NOT NULL,
-        channel_account_id BIGINT NOT NULL,
+        shop_pk BIGINT NOT NULL,
         external_relation_id TEXT,
         status TEXT,
         valid_from TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
@@ -506,9 +506,9 @@ def upgrade() -> None:
         source_updated_at TIMESTAMP WITH TIME ZONE,
         raw_record_id BIGINT,
         PRIMARY KEY (id),
-        CONSTRAINT uq_account_links_triplet UNIQUE (procurement_account_id, channel_account_id, external_relation_id),
+        CONSTRAINT uq_account_links_triplet UNIQUE (procurement_account_id, shop_pk, external_relation_id),
         FOREIGN KEY(procurement_account_id) REFERENCES procurement.procurement_accounts(id) ON DELETE RESTRICT,
-        FOREIGN KEY(channel_account_id) REFERENCES commerce.channel_accounts(id) ON DELETE RESTRICT,
+        FOREIGN KEY(shop_pk) REFERENCES commerce.shops(id) ON DELETE RESTRICT,
         FOREIGN KEY(raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL
     )""")
     op.execute("CREATE INDEX ix_account_links_validity ON linkage.account_links (valid_from, valid_to)")
@@ -516,7 +516,7 @@ def upgrade() -> None:
     op.execute("""CREATE TABLE linkage.product_links (
         id BIGINT GENERATED ALWAYS AS IDENTITY NOT NULL,
         procurement_product_id BIGINT NOT NULL,
-        channel_product_id BIGINT NOT NULL,
+        spu_pk BIGINT NOT NULL,
         external_relation_id TEXT,
         relation_type TEXT NOT NULL,
         status TEXT,
@@ -528,27 +528,27 @@ def upgrade() -> None:
         created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
         PRIMARY KEY (id),
-        CONSTRAINT uq_product_links_pivot_validfrom UNIQUE (procurement_product_id, channel_product_id, valid_from),
+        CONSTRAINT uq_product_links_pivot_validfrom UNIQUE (procurement_product_id, spu_pk, valid_from),
         FOREIGN KEY(procurement_product_id) REFERENCES procurement.procurement_products(id) ON DELETE RESTRICT,
-        FOREIGN KEY(channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE RESTRICT,
+        FOREIGN KEY(spu_pk) REFERENCES commerce.products_spu(id) ON DELETE RESTRICT,
         FOREIGN KEY(raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL
     )""")
     op.execute("CREATE INDEX ix_product_links_status ON linkage.product_links (status)")
-    op.execute("CREATE INDEX ix_product_links_channel_product ON linkage.product_links (channel_product_id)")
+    op.execute("CREATE INDEX ix_product_links_channel_product ON linkage.product_links (spu_pk)")
 
     op.execute("""CREATE TABLE linkage.variant_links (
         id BIGINT GENERATED ALWAYS AS IDENTITY NOT NULL,
         procurement_product_variant_id BIGINT NOT NULL,
-        channel_product_variant_id BIGINT NOT NULL,
+        sku_pk BIGINT NOT NULL,
         external_relation_id TEXT,
         status TEXT,
         valid_from TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
         valid_to TIMESTAMP WITH TIME ZONE,
         raw_record_id BIGINT,
         PRIMARY KEY (id),
-        CONSTRAINT uq_variant_links_pivot_validfrom UNIQUE (procurement_product_variant_id, channel_product_variant_id, valid_from),
+        CONSTRAINT uq_variant_links_pivot_validfrom UNIQUE (procurement_product_variant_id, sku_pk, valid_from),
         FOREIGN KEY(procurement_product_variant_id) REFERENCES procurement.procurement_product_variants(id) ON DELETE RESTRICT,
-        FOREIGN KEY(channel_product_variant_id) REFERENCES commerce.channel_product_variants(id) ON DELETE RESTRICT,
+        FOREIGN KEY(sku_pk) REFERENCES commerce.products_sku(id) ON DELETE RESTRICT,
         FOREIGN KEY(raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL
     )""")
     op.execute("CREATE INDEX ix_variant_links_validity ON linkage.variant_links (valid_from, valid_to)")
@@ -572,7 +572,7 @@ def upgrade() -> None:
     op.execute("""CREATE TABLE linkage.link_overrides (
         id BIGINT GENERATED ALWAYS AS IDENTITY NOT NULL,
         procurement_product_id BIGINT NOT NULL,
-        channel_product_id BIGINT NOT NULL,
+        spu_pk BIGINT NOT NULL,
         decision TEXT NOT NULL,
         reason TEXT,
         valid_from TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
@@ -580,9 +580,9 @@ def upgrade() -> None:
         created_by TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
         PRIMARY KEY (id),
-        CONSTRAINT uq_link_overrides_pivot_validfrom UNIQUE (procurement_product_id, channel_product_id, valid_from),
+        CONSTRAINT uq_link_overrides_pivot_validfrom UNIQUE (procurement_product_id, spu_pk, valid_from),
         FOREIGN KEY(procurement_product_id) REFERENCES procurement.procurement_products(id) ON DELETE RESTRICT,
-        FOREIGN KEY(channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE RESTRICT
+        FOREIGN KEY(spu_pk) REFERENCES commerce.products_spu(id) ON DELETE RESTRICT
     )""")
     op.execute("CREATE INDEX ix_link_overrides_decision ON linkage.link_overrides (decision)")
 
@@ -590,7 +590,7 @@ def upgrade() -> None:
         id BIGINT GENERATED ALWAYS AS IDENTITY NOT NULL,
         issue_type TEXT NOT NULL,
         procurement_product_id BIGINT,
-        channel_product_id BIGINT,
+        spu_pk BIGINT,
         candidate_count INTEGER,
         status TEXT,
         details JSONB,
@@ -598,27 +598,27 @@ def upgrade() -> None:
         resolved_at TIMESTAMP WITH TIME ZONE,
         PRIMARY KEY (id),
         FOREIGN KEY(procurement_product_id) REFERENCES procurement.procurement_products(id) ON DELETE SET NULL,
-        FOREIGN KEY(channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE SET NULL
+        FOREIGN KEY(spu_pk) REFERENCES commerce.products_spu(id) ON DELETE SET NULL
     )""")
     op.execute("CREATE INDEX ix_link_issues_type_resolved ON linkage.link_issues (issue_type, resolved_at)")
 
     # VIEW: effective_product_links (override priority → valid miaoshou link)
     op.execute("""CREATE OR REPLACE VIEW linkage.effective_product_links AS
         SELECT
-            cp.id   AS channel_product_id,
+            cp.id   AS spu_pk,
             COALESCE(lo.procurement_product_id, pl.procurement_product_id) AS procurement_product_id,
             COALESCE(lo.decision, pl.relation_type) AS effective_relation_type,
             COALESCE(lo.id, pl.id) AS source_link_id,
             CASE WHEN lo.id IS NOT NULL THEN 'OPERATOR_OVERRIDE' ELSE 'MIAOSHOU_PUBLISHED_TO_TIKTOK' END AS source_kind,
             COALESCE(lo.valid_from, pl.valid_from) AS effective_from,
             pp.procurement_account_id,
-            cp.channel_account_id
-        FROM commerce.channel_products cp
+            cp.shop_pk
+        FROM commerce.products_spu cp
         LEFT JOIN linkage.link_overrides lo
-               ON lo.channel_product_id = cp.id
+               ON lo.spu_pk = cp.id
               AND lo.valid_to IS NULL
         LEFT JOIN linkage.product_links pl
-               ON pl.channel_product_id = cp.id
+               ON pl.spu_pk = cp.id
               AND pl.valid_to IS NULL
               AND (lo.id IS NULL OR lo.decision <> 'DENY')
         LEFT JOIN procurement.procurement_products pp
@@ -629,7 +629,7 @@ def upgrade() -> None:
     # ── reporting.* (3) ───────────────────────────────────────────────
     op.execute("""CREATE TABLE reporting.product_cost_snapshots (
         id BIGINT GENERATED ALWAYS AS IDENTITY NOT NULL,
-        channel_product_id BIGINT NOT NULL,
+        spu_pk BIGINT NOT NULL,
         cost_method TEXT NOT NULL,
         unit_cost NUMERIC(20, 4) NOT NULL,
         currency TEXT NOT NULL,
@@ -641,14 +641,14 @@ def upgrade() -> None:
         calculation_version INTEGER DEFAULT 1 NOT NULL,
         calculated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
         PRIMARY KEY (id),
-        CONSTRAINT uq_cost_snapshots_pivot_version UNIQUE (channel_product_id, valid_from, calculation_version),
-        FOREIGN KEY(channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE RESTRICT
+        CONSTRAINT uq_cost_snapshots_pivot_version UNIQUE (spu_pk, valid_from, calculation_version),
+        FOREIGN KEY(spu_pk) REFERENCES commerce.products_spu(id) ON DELETE RESTRICT
     )""")
     op.execute("CREATE INDEX ix_cost_snapshots_method ON reporting.product_cost_snapshots (cost_method)")
 
     op.execute("""CREATE TABLE reporting.product_profit_daily (
         id BIGINT GENERATED ALWAYS AS IDENTITY NOT NULL,
-        channel_product_id BIGINT NOT NULL,
+        spu_pk BIGINT NOT NULL,
         profit_date DATE NOT NULL,
         units_sold NUMERIC(20, 4),
         gross_revenue NUMERIC(20, 4),
@@ -662,8 +662,8 @@ def upgrade() -> None:
         calculation_version INTEGER DEFAULT 1 NOT NULL,
         calculated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
         PRIMARY KEY (id),
-        CONSTRAINT uq_profit_daily_pivot_version UNIQUE (channel_product_id, profit_date, calculation_version),
-        FOREIGN KEY(channel_product_id) REFERENCES commerce.channel_products(id) ON DELETE RESTRICT
+        CONSTRAINT uq_profit_daily_pivot_version UNIQUE (spu_pk, profit_date, calculation_version),
+        FOREIGN KEY(spu_pk) REFERENCES commerce.products_spu(id) ON DELETE RESTRICT
     )""")
     op.execute("CREATE INDEX ix_profit_daily_profit_date ON reporting.product_profit_daily (profit_date)")
 
@@ -712,7 +712,7 @@ def downgrade() -> None:
         ("after_sales", ["case_lines", "cases"]),
         ("fulfillment", ["tracking_events", "shipment_lines", "shipments"]),
         ("procurement", ["manual_product_costs", "purchase_order_lines", "purchase_orders", "procurement_product_variants", "procurement_products", "procurement_accounts"]),
-        ("commerce", ["sales_order_lines", "sales_orders", "channel_product_variants", "channel_products", "channel_accounts"]),
+        ("commerce", ["sales_order_lines", "sales_orders", "products_sku", "products_spu", "shops"]),
         ("integration", ["sync_issues", "sync_cursors", "sync_jobs", "raw_records", "credentials"]),
     ):
         for tbl in tables:

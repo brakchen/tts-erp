@@ -6,10 +6,10 @@ CREATE SCHEMA IF NOT EXISTS procurement;
 
 CREATE TABLE IF NOT EXISTS procurement.spu_images (
     id                  BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-    channel_account_id  BIGINT NOT NULL
-        REFERENCES commerce.channel_accounts(id) ON DELETE RESTRICT,
-    channel_product_id  BIGINT NOT NULL
-        REFERENCES commerce.channel_products(id) ON DELETE RESTRICT,
+    shop_pk  BIGINT NOT NULL
+        REFERENCES commerce.shops(id) ON DELETE RESTRICT,
+    spu_pk  BIGINT NOT NULL
+        REFERENCES commerce.products_spu(id) ON DELETE RESTRICT,
     object_key          TEXT NOT NULL UNIQUE,
     filename            TEXT NOT NULL,
     content_type        TEXT NOT NULL,
@@ -25,9 +25,9 @@ CREATE TABLE IF NOT EXISTS procurement.spu_images (
 );
 
 CREATE INDEX IF NOT EXISTS ix_spu_images_product_status
-    ON procurement.spu_images (channel_product_id, status)
+    ON procurement.spu_images (spu_pk, status)
     WHERE deleted_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS ix_spu_images_account_uploaded
-    ON procurement.spu_images (channel_account_id, uploaded_at DESC)
+    ON procurement.spu_images (shop_pk, uploaded_at DESC)
     WHERE deleted_at IS NULL;

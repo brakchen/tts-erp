@@ -85,13 +85,13 @@ def test_endpoints_lists_analytics_sync_routes(api_client):
 def test_endpoints_lists_path_param_routes(api_client):
     """Routes with ``{param}`` placeholders must surface too.
 
-    FastAPI stores the path_format (``/v2/commerce/sales-orders/{order_id}``)
+    FastAPI stores the path_format (``/v2/commerce/sales-orders/{order_pk}``)
     on APIRoute. The recursion walker must read it, not skip it.
     """
     r = api_client.get("/endpoints")
     payload = r.json()
     paths = _path_set(payload)
-    assert "/v2/commerce/sales-orders/{order_id}" in paths
+    assert "/v2/commerce/sales-orders/{order_pk}" in paths
     assert "/v2/linkage/issues/{issue_id}/resolve" in paths
 
 

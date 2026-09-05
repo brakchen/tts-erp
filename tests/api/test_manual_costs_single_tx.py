@@ -4,13 +4,13 @@ Audit P1-6 (2026-09-01): the manual-costs POST handler used to INSERT
 the new row in transaction #1 (commit), then UPDATE the prior row's
 ``valid_to`` in transaction #2 wrapped in ``try/except: rollback()``.
 A connection blip or constraint-violation between the two commits left
-TWO rows with ``valid_to IS NULL`` for the same ``channel_product_id``
+TWO rows with ``valid_to IS NULL`` for the same ``spu_pk``
 — i.e. two "effective" manual costs at once, which silently doubled
 downstream cogs / profit figures.
 
 The fix wraps close-old + insert in a single transaction, and adds the
 DB-side belt-and-suspenders: a partial unique index
-``uq_manual_costs_one_open`` on ``(channel_product_id) WHERE valid_to
+``uq_manual_costs_one_open`` on ``(spu_pk) WHERE valid_to
 IS NULL``. Even if app logic regresses, the index rejects the second
 open row.
 
@@ -49,23 +49,23 @@ def _seed_channel_product(db_engine, external_id: str) -> int:
         sess.execute(
             # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
             text(
-                "INSERT INTO commerce.channel_accounts "
-                "(platform, external_account_id, account_name, status) "
+                "INSERT INTO commerce.shops "
+                "(platform, shop_id, account_name, status) "
                 "VALUES ('tiktok', 'TEST_acct_mc_tx', 'TEST acct mc tx', 'active')"
             )
         )
         acct_id = sess.execute(
             # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
             text(
-                "SELECT id FROM commerce.channel_accounts "
-                "WHERE external_account_id = 'TEST_acct_mc_tx'"
+                "SELECT id FROM commerce.shops "
+                "WHERE shop_id = 'TEST_acct_mc_tx'"
             )
         ).scalar()
         sess.execute(
             # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
             text(
-                "INSERT INTO commerce.channel_products "
-                "(channel_account_id, external_product_id, title, status) "
+                "INSERT INTO commerce.products_spu "
+                "(shop_pk, spu_id, title, status) "
                 "VALUES (:acct, :ext, 'TEST mc tx product', 'ACTIVATE')"
             ),
             {"acct": acct_id, "ext": external_id},
@@ -74,15 +74,15 @@ def _seed_channel_product(db_engine, external_id: str) -> int:
         cp_id = sess.execute(
             # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
             text(
-                "SELECT id FROM commerce.channel_products "
-                "WHERE external_product_id = :ext"
+                "SELECT id FROM commerce.products_spu "
+                "WHERE spu_id = :ext"
             ),
             {"ext": external_id},
         ).scalar()
     return cp_id
 
 
-def _count_open_manual_costs(db_engine, channel_product_id: int) -> int:
+def _count_open_manual_costs(db_engine, spu_pk: int) -> int:
     """Count rows for this SPU with ``valid_to IS NULL`` (effective rows).
 
     Pre-fix bug: this could return 2 (or more) after a concurrent
@@ -93,9 +93,9 @@ def _count_open_manual_costs(db_engine, channel_product_id: int) -> int:
             # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
             text(
                 "SELECT COUNT(*) FROM procurement.manual_product_costs "
-                "WHERE channel_product_id = :cp AND valid_to IS NULL"
+                "WHERE spu_pk = :cp AND valid_to IS NULL"
             ),
-            {"cp": channel_product_id},
+            {"cp": spu_pk},
         ).scalar()
     return int(n or 0)
 
@@ -118,7 +118,7 @@ def test_second_submission_yields_exactly_one_open_row(
         "/v2/reporting/manual-costs",
         headers={"Authorization": f"Bearer {readwrite_key}"},
         json={
-            "channel_product_external_id": "TEST_mc_singleton",
+            "spu_id": "TEST_mc_singleton",
             "unit_cost": "10.00",
             "currency": "USD",
         },
@@ -129,7 +129,7 @@ def test_second_submission_yields_exactly_one_open_row(
         "/v2/reporting/manual-costs",
         headers={"Authorization": f"Bearer {readwrite_key}"},
         json={
-            "channel_product_external_id": "TEST_mc_singleton",
+            "spu_id": "TEST_mc_singleton",
             "unit_cost": "11.00",
             "currency": "USD",
         },
@@ -149,7 +149,7 @@ def test_second_submission_yields_exactly_one_open_row(
             # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
             text(
                 "SELECT COUNT(*) FROM procurement.manual_product_costs "
-                "WHERE channel_product_id = :cp"
+                "WHERE spu_pk = :cp"
             ),
             {"cp": cp_id},
         ).scalar()
@@ -185,7 +185,7 @@ def test_concurrent_submissions_yield_at_most_one_open_row(
         "/v2/reporting/manual-costs",
         headers={"Authorization": f"Bearer {readwrite_key}"},
         json={
-            "channel_product_external_id": "TEST_mc_race",
+            "spu_id": "TEST_mc_race",
             "unit_cost": "5.00",
             "currency": "USD",
         },
@@ -194,7 +194,7 @@ def test_concurrent_submissions_yield_at_most_one_open_row(
         "/v2/reporting/manual-costs",
         headers={"Authorization": f"Bearer {readwrite_key}"},
         json={
-            "channel_product_external_id": "TEST_mc_race",
+            "spu_id": "TEST_mc_race",
             "unit_cost": "7.00",
             "currency": "USD",
         },

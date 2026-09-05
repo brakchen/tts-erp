@@ -85,22 +85,22 @@ def _make_account_with_order(
     session.flush()
     acct = ChannelAccount(
         platform="tiktok",
-        external_account_id=shop_id,
+        shop_id=shop_id,
         credential_id=cred.id,
         status="active",
     )
     session.add(acct)
     session.flush()
     so = SalesOrder(
-        channel_account_id=acct.id,
-        external_order_id=order_id,
+        shop_pk=acct.id,
+        order_id=order_id,
         status="SHIPPED",
         currency="USD",
     )
     session.add(so)
     session.flush()
     sol = SalesOrderLine(
-        sales_order_id=so.id,
+        order_pk=so.id,
         external_line_id=line_id,
         external_variant_id_snapshot=sku_id,
         quantity=1,
@@ -179,7 +179,7 @@ def test_after_sales_writes_returns_and_cancellations(db_session) -> None:
         job_name="tiktok.after_sales",
         credential_id=account.credential_id,
         inner=after_sales_job.run,
-        inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
     assert result.rows_inserted == 2
     cases = (
@@ -200,7 +200,7 @@ def test_after_sales_writes_returns_and_cancellations(db_session) -> None:
     assert case_lines[0].external_case_line_id == "CL1"
     # Watermark advances to the max update_time seen (across both)
     cursor = watermarks.get_cursor(
-        db_session, job_name="tiktok.after_sales", scope=account.external_account_id
+        db_session, job_name="tiktok.after_sales", scope=account.shop_id
     )
     assert cursor == 1_700_000_600_000
 
@@ -226,7 +226,7 @@ def test_after_sales_unknown_order_writes_sync_issue(db_session) -> None:
         job_name="tiktok.after_sales",
         credential_id=account.credential_id,
         inner=after_sales_job.run,
-        inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
     assert result.rows_failed == 1
     # Filter by the unique (issue_type, external_id) the test inserted —
@@ -279,7 +279,7 @@ def test_after_sales_resolves_line_via_line_id(db_session) -> None:
         job_name="tiktok.after_sales",
         credential_id=account.credential_id,
         inner=after_sales_job.run,
-        inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
     assert result.rows_inserted == 1
     cl = db_session.execute(
@@ -340,7 +340,7 @@ def test_after_sales_resolves_line_via_sku_id(db_session) -> None:
         job_name="tiktok.after_sales",
         credential_id=account.credential_id,
         inner=after_sales_job.run,
-        inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
     assert result.rows_inserted == 1
     assert result.rows_failed == 0
@@ -390,7 +390,7 @@ def test_after_sales_unknown_line_when_sku_does_not_match(db_session) -> None:
         job_name="tiktok.after_sales",
         credential_id=account.credential_id,
         inner=after_sales_job.run,
-        inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
     # The case itself still inserts; only the line failed.
     assert result.rows_inserted == 1
@@ -454,7 +454,7 @@ def test_after_sales_persists_case_level_refund_amount(db_session) -> None:
         job_name="tiktok.after_sales",
         credential_id=account.credential_id,
         inner=after_sales_job.run,
-        inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
     assert result.rows_inserted == 1
     case = db_session.execute(
@@ -492,7 +492,7 @@ def test_after_sales_persists_case_level_refund_amount_legacy_shape(db_session) 
         job_name="tiktok.after_sales",
         credential_id=account.credential_id,
         inner=after_sales_job.run,
-        inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
     case = db_session.execute(
         select(Case).where(Case.external_case_id == "C_REFUND_LEGACY")
@@ -530,7 +530,7 @@ def test_after_sales_bare_string_refund_does_not_crash(db_session) -> None:
         job_name="tiktok.after_sales",
         credential_id=account.credential_id,
         inner=after_sales_job.run,
-        inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
     assert result.rows_inserted == 1
     assert result.rows_failed == 0
@@ -570,7 +570,7 @@ def test_after_sales_unknown_order_dedup_across_ticks(db_session) -> None:
         job_name="tiktok.after_sales",
         credential_id=account.credential_id,
         inner=after_sales_job.run,
-        inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
     # Second tick (proxy pages already drained by the first run; both endpoints
     # fall back to empty-page defaults).
@@ -579,7 +579,7 @@ def test_after_sales_unknown_order_dedup_across_ticks(db_session) -> None:
         job_name="tiktok.after_sales",
         credential_id=account.credential_id,
         inner=after_sales_job.run,
-        inner_kwargs={"proxy_call": proxy, "shop_id": account.external_account_id},
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
     issues = (
         db_session.execute(

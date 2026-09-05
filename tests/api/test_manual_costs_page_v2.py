@@ -73,7 +73,7 @@ def test_manual_costs_page_v2_has_shop_switcher(api_client, readonly_key):
     )
     body = r.text
     assert 'id="shop-switcher"' in body, "missing shop switcher control"
-    assert 'name="channel_account_id"' in body, "shop switcher missing name attr"
+    assert 'name="shop_pk"' in body, "shop switcher missing name attr"
 
 
 def test_manual_costs_page_v2_drops_token_paste_block(api_client, readonly_key):

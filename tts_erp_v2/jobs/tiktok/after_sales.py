@@ -180,7 +180,7 @@ def _parse_case(case_type: str, raw: dict) -> dict:
     return {
         "case_type": case_type,
         "external_case_id": str(cid),
-        "external_order_id": str(order_id) if order_id else None,
+        "order_id": str(order_id) if order_id else None,
         "status": raw.get("status") or raw.get("return_status") or raw.get("cancel_status"),
         "reason_code": raw.get("reason_code"),
         "reason_text": raw.get("reason_text"),
@@ -191,13 +191,13 @@ def _parse_case(case_type: str, raw: dict) -> dict:
     }
 
 
-def _resolve_sales_order_id(session: Session, account_id: int, external_order_id: str | None) -> int | None:
-    if not external_order_id:
+def _resolve_order_pk(session: Session, account_id: int, order_id: str | None) -> int | None:
+    if not order_id:
         return None
     return session.execute(
         select(SalesOrder.id).where(
-            SalesOrder.channel_account_id == account_id,
-            SalesOrder.external_order_id == external_order_id,
+            SalesOrder.shop_pk == account_id,
+            SalesOrder.order_id == order_id,
         )
     ).scalar_one_or_none()
 
@@ -235,7 +235,7 @@ def _process_one_type(
             )
             continue
 
-        so_id = _resolve_sales_order_id(session, account_id, fields["external_order_id"])
+        so_id = _resolve_order_pk(session, account_id, fields["order_id"])
         if so_id is None:
             # V3 §14 — surface unknown order as a sync_issue, not silent drop.
             # ``record_sync_issue`` dedups on (job_name, issue_type,
@@ -246,7 +246,7 @@ def _process_one_type(
                 job_name=JOB_NAME,
                 issue_type="UNKNOWN_ORDER",
                 external_id=fields["external_case_id"],
-                details={"external_order_id": fields["external_order_id"]},
+                details={"order_id": fields["order_id"]},
             )
             failed += 1
             continue
@@ -260,22 +260,22 @@ def _process_one_type(
         session.flush()
 
         insert_values = {
-            "channel_account_id": account_id,
-            "sales_order_id": so_id,
-            **{k: v for k, v in fields.items() if k != "external_order_id"},
+            "shop_pk": account_id,
+            "order_pk": so_id,
+            **{k: v for k, v in fields.items() if k != "order_id"},
             "raw_record_id": raw_row.id,
         }
-        update_cols = {k: insert_values[k] for k in fields if k != "external_order_id"}
+        update_cols = {k: insert_values[k] for k in fields if k != "order_id"}
         update_cols["raw_record_id"] = raw_row.id
         session.execute(
             pg_insert(Case).values(**insert_values).on_conflict_do_update(
-                index_elements=["channel_account_id", "external_case_id"],
+                index_elements=["shop_pk", "external_case_id"],
                 set_=update_cols,
             )
         )
         case_row = session.execute(
             select(Case).where(
-                Case.channel_account_id == account_id,
+                Case.shop_pk == account_id,
                 Case.external_case_id == fields["external_case_id"],
             )
         ).scalar_one()
@@ -309,13 +309,13 @@ def _process_one_type(
             # Resolve sales_order_line_id (NOT NULL FK on case_lines).
             # Two paths depending on which id the payload surfaced:
             #   1. order_line_key set → lookup sales_order_lines.external_line_id
-            #      = order_line_key AND sales_order_id = so_id
+            #      = order_line_key AND order_pk = so_id
             #   2. order_line_key is None → the only id we have is a
             #      sku_id, so look up via external_variant_id_snapshot.
             if order_line_key is not None:
                 sol_id = session.execute(
                     select(SalesOrderLine.id).where(
-                        SalesOrderLine.sales_order_id == so_id,
+                        SalesOrderLine.order_pk == so_id,
                         SalesOrderLine.external_line_id == order_line_key,
                     )
                 ).scalar_one_or_none()
@@ -324,7 +324,7 @@ def _process_one_type(
             else:
                 sol_id = session.execute(
                     select(SalesOrderLine.id).where(
-                        SalesOrderLine.sales_order_id == so_id,
+                        SalesOrderLine.order_pk == so_id,
                         SalesOrderLine.external_variant_id_snapshot == raw_line.get("sku_id"),
                     )
                 ).scalar_one_or_none()
@@ -340,7 +340,7 @@ def _process_one_type(
                     issue_type="UNKNOWN_LINE",
                     external_id=f"{fields['external_case_id']}:{external_case_line_id}",
                     details={
-                        "sales_order_id": so_id,
+                        "order_pk": so_id,
                         "lookup_path": lookup_path,
                         "lookup_value": str(lookup_value) if lookup_value is not None else None,
                     },
@@ -372,12 +372,12 @@ def run(
     account = session.execute(
         select(ChannelAccount).where(
             ChannelAccount.platform == "tiktok",
-            ChannelAccount.external_account_id == shop_id,
+            ChannelAccount.shop_id == shop_id,
         )
     ).scalar_one_or_none()
     if account is None:
         raise UpstreamJobError(
-            f"channel_accounts row missing for tiktok shop_id={shop_id!r}"
+            f"shops row missing for tiktok shop_id={shop_id!r}"
         )
 
     watermark_ms = watermarks.get_cursor(

@@ -19,16 +19,16 @@ from tts_erp_v2.db.models import (
 
 
 def line_product_resolution_rate(session: Session) -> dict:
-    """SalesOrderLine.channel_product_id NOT NULL ratio.
+    """SalesOrderLine.spu_pk NOT NULL ratio.
 
     Denominator includes every line; numerator excludes lines with NULL
-    channel_product_id (typically because the product hadn't synced
+    spu_pk (typically because the product hadn't synced
     yet when the order arrived).
     """
     total = session.execute(select(func.count(SalesOrderLine.id))).scalar_one()
     resolved = session.execute(
         select(func.count(SalesOrderLine.id))
-        .where(SalesOrderLine.channel_product_id.is_not(None))
+        .where(SalesOrderLine.spu_pk.is_not(None))
     ).scalar_one()
     rate = float(resolved) / float(total) if total else 0.0
     return {
@@ -46,7 +46,7 @@ def spu_linkage_coverage(session: Session) -> dict:
         .where(ChannelProduct.status == "ACTIVE")
     ).scalar_one()
     linked = session.execute(
-        select(func.count(func.distinct(ProductLink.channel_product_id)))
+        select(func.count(func.distinct(ProductLink.spu_pk)))
         .where(ProductLink.valid_to.is_(None))
     ).scalar_one()
     rate = float(linked) / float(active) if active else 0.0
@@ -82,7 +82,7 @@ def cost_coverage_rate(session: Session) -> dict:
         .where(ChannelProduct.status == "ACTIVE")
     ).scalar_one()
     costed = session.execute(
-        select(func.count(func.distinct(ProductCostSnapshot.channel_product_id)))
+        select(func.count(func.distinct(ProductCostSnapshot.spu_pk)))
         .where(ProductCostSnapshot.valid_to.is_(None))
     ).scalar_one()
     rate = float(costed) / float(active) if active else 0.0

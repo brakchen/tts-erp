@@ -230,7 +230,7 @@ def test_critical_columns_have_comments():
     eng = get_engine()
     critical_cols = {
         ("commerce", "sales_orders", "synced_at"),
-        ("commerce", "sales_orders", "channel_account_id"),
+        ("commerce", "sales_orders", "shop_pk"),
         ("integration", "sync_cursors", "updated_at"),
         ("integration", "raw_records", "captured_at"),
         ("analytics", "ad_raw", "endpoint"),

@@ -24,7 +24,7 @@ parse, we record an issue and continue with the next page.
 Reentrancy / idempotency
 ------------------------
 All inserts go through ``INSERT ... ON CONFLICT DO UPDATE`` keyed on
-the natural ``(channel_account_id, external_*)`` constraints. A second
+the natural ``(shop_pk, external_*)`` constraints. A second
 run on the same window updates existing rows instead of duplicating.
 
 Proxy contract
@@ -117,12 +117,12 @@ def _ensure_channel_account(session: Session, shop_id: str) -> ChannelAccount:
     row = session.execute(
         select(ChannelAccount).where(
             ChannelAccount.platform == "tiktok",
-            ChannelAccount.external_account_id == shop_id,
+            ChannelAccount.shop_id == shop_id,
         )
     ).scalar_one_or_none()
     if row is None:
         raise UpstreamJobError(
-            f"channel_accounts row missing for tiktok shop_id={shop_id!r}; "
+            f"shops row missing for tiktok shop_id={shop_id!r}; "
             "complete /authorize + /callback first"
         )
     return row
@@ -186,7 +186,7 @@ def _parse_order_payload(raw: dict[str, Any]) -> dict[str, Any]:
     """Validate + normalize a single order item.
 
     Returns a dict ready to be upserted into ``commerce.sales_orders``
-    (channel_account_id is filled in by the caller). Raises
+    (shop_pk is filled in by the caller). Raises
     :class:`ParseError` when the row cannot be coerced (missing
     required fields).
 
@@ -211,7 +211,7 @@ def _parse_order_payload(raw: dict[str, Any]) -> dict[str, Any]:
     # shape no longer exists.
     payable = payment.get("total_amount") or payment.get("sub_total")
     return {
-        "external_order_id": str(order_id),
+        "order_id": str(order_id),
         "status": raw.get("status") or raw.get("order_status"),
         "currency": raw.get("currency") or payment.get("currency"),
         "payment_amount": _to_decimal(payable),
@@ -221,8 +221,8 @@ def _parse_order_payload(raw: dict[str, Any]) -> dict[str, Any]:
             or (raw.get("total_amount") or {}).get("amount")
         ),
         "fulfillment_type": raw.get("fulfillment_type"),
-        "source_created_at": _epoch_seconds_to_utc(raw.get("create_time")),
-        "source_updated_at": _epoch_seconds_to_utc(update_time_s),
+        "order_time": _epoch_seconds_to_utc(raw.get("create_time")),
+        "order_modify_time": _epoch_seconds_to_utc(update_time_s),
         "paid_at": _epoch_seconds_to_utc(raw.get("paid_time")),
         "shipped_at": _epoch_seconds_to_utc(
             raw.get("rts_time") or raw.get("ship_time")
@@ -251,7 +251,7 @@ def _parse_line_payload(order_id: str, raw: dict[str, Any]) -> dict[str, Any]:
         currency = raw.get("currency")
     return {
         "external_line_id": str(line_id),
-        # channel_product_id / channel_product_variant_id stay NULL
+        # spu_pk / sku_pk stay NULL
         # when the product hasn't been synced yet — the snapshot
         # columns hold the truth for later join.
         "external_product_id_snapshot": raw.get("product_id"),
@@ -281,12 +281,12 @@ def _to_decimal(value: Any) -> Decimal | None:
 def _upsert_sales_order(
     session: Session,
     *,
-    channel_account_id: int,
+    shop_pk: int,
     fields: dict[str, Any],
     raw_record_id: int,
 ) -> SalesOrder:
     insert_values = {
-        "channel_account_id": channel_account_id,
+        "shop_pk": shop_pk,
         **fields,
         "raw_record_id": raw_record_id,
     }
@@ -294,14 +294,14 @@ def _upsert_sales_order(
     update_cols = {k: insert_values[k] for k in fields}
     update_cols["raw_record_id"] = raw_record_id
     stmt = stmt.on_conflict_do_update(
-        index_elements=["channel_account_id", "external_order_id"],
+        index_elements=["shop_pk", "order_id"],
         set_=update_cols,
     )
     session.execute(stmt)
     row = session.execute(
         select(SalesOrder).where(
-            SalesOrder.channel_account_id == channel_account_id,
-            SalesOrder.external_order_id == fields["external_order_id"],
+            SalesOrder.shop_pk == shop_pk,
+            SalesOrder.order_id == fields["order_id"],
         )
     ).scalar_one()
     return row
@@ -310,12 +310,12 @@ def _upsert_sales_order(
 def _upsert_sales_order_line(
     session: Session,
     *,
-    sales_order_id: int,
+    order_pk: int,
     fields: dict[str, Any],
     raw_record_id: int,
 ) -> SalesOrderLine:
     insert_values = {
-        "sales_order_id": sales_order_id,
+        "order_pk": order_pk,
         **fields,
         "raw_record_id": raw_record_id,
     }
@@ -323,13 +323,13 @@ def _upsert_sales_order_line(
     update_cols = {k: insert_values[k] for k in fields}
     update_cols["raw_record_id"] = raw_record_id
     stmt = stmt.on_conflict_do_update(
-        index_elements=["sales_order_id", "external_line_id"],
+        index_elements=["order_pk", "external_line_id"],
         set_=update_cols,
     )
     session.execute(stmt)
     row = session.execute(
         select(SalesOrderLine).where(
-            SalesOrderLine.sales_order_id == sales_order_id,
+            SalesOrderLine.order_pk == order_pk,
             SalesOrderLine.external_line_id == fields["external_line_id"],
         )
     ).scalar_one()
@@ -386,7 +386,7 @@ def run(
     Args:
         session: SQLAlchemy session (the helper commits it).
         proxy_call: callable doing signed POST + token injection.
-        shop_id: TikTok shop id (external_account_id).
+        shop_id: TikTok shop id (shop_id).
         page_size: page size to ask the upstream for.
         scope: cursor scope (defaults to ``shop_id``).
 
@@ -426,7 +426,7 @@ def run(
             )
             continue
 
-        order_external_id = fields["external_order_id"]
+        order_external_id = fields["order_id"]
         raw_row = _store_raw(
             session,
             endpoint=ENDPOINT,
@@ -436,7 +436,7 @@ def run(
 
         sales_order = _upsert_sales_order(
             session,
-            channel_account_id=account.id,
+            shop_pk=account.id,
             fields=fields,
             raw_record_id=raw_row.id,
         )
@@ -459,14 +459,14 @@ def run(
                 continue
             _upsert_sales_order_line(
                 session,
-                sales_order_id=sales_order.id,
+                order_pk=sales_order.id,
                 fields=line_fields,
                 raw_record_id=raw_row.id,
             )
 
         rows_inserted += 1
-        update_ms = fields.get("source_updated_at") and _safe_int(
-            fields["source_updated_at"].timestamp() * 1000
+        update_ms = fields.get("order_modify_time") and _safe_int(
+            fields["order_modify_time"].timestamp() * 1000
         )
         if update_ms and (max_update_time_ms is None or update_ms > max_update_time_ms):
             max_update_time_ms = update_ms

@@ -107,34 +107,34 @@ def _parse_event(raw: dict) -> dict:
     }
 
 
-def _resolve_order_id(session: Session, account_id: int, external_order_id: str) -> int | None:
+def _resolve_order_id(session: Session, account_id: int, order_id: str) -> int | None:
     return session.execute(
         select(SalesOrder.id).where(
-            SalesOrder.channel_account_id == account_id,
-            SalesOrder.external_order_id == external_order_id,
+            SalesOrder.shop_pk == account_id,
+            SalesOrder.order_id == order_id,
         )
     ).scalar_one_or_none()
 
 
 def _upsert_shipment(
-    session: Session, *, sales_order_id: int, fields: dict, raw_record_id: int
+    session: Session, *, order_pk: int, fields: dict, raw_record_id: int
 ) -> int:
     insert_values = {
-        "sales_order_id": sales_order_id,
-        **{k: v for k, v in fields.items() if k != "external_order_id"},
+        "order_pk": order_pk,
+        **{k: v for k, v in fields.items() if k != "order_id"},
         "raw_record_id": raw_record_id,
     }
-    update_cols = {k: insert_values[k] for k in fields if k != "external_order_id"}
+    update_cols = {k: insert_values[k] for k in fields if k != "order_id"}
     update_cols["raw_record_id"] = raw_record_id
     session.execute(
         pg_insert(Shipment).values(**insert_values).on_conflict_do_update(
-            index_elements=["sales_order_id", "external_package_id"],
+            index_elements=["order_pk", "external_package_id"],
             set_=update_cols,
         )
     )
     row = session.execute(
         select(Shipment).where(
-            Shipment.sales_order_id == sales_order_id,
+            Shipment.order_pk == order_pk,
             Shipment.external_package_id == fields["external_package_id"],
         )
     ).scalar_one()
@@ -162,8 +162,8 @@ def _select_tracking_targets(session: Session, *, limit: int = TARGET_LIMIT) -> 
     terminal logistics state are excluded (their tracking never changes).
     """
     terminal_orders = (
-        select(SalesOrder.external_order_id)
-        .join(Shipment, Shipment.sales_order_id == SalesOrder.id)
+        select(SalesOrder.order_id)
+        .join(Shipment, Shipment.order_pk == SalesOrder.id)
         .where(Shipment.status.in_(FINAL_STATUSES))
     )
     rows = session.execute(
@@ -185,7 +185,7 @@ def _select_tracking_targets(session: Session, *, limit: int = TARGET_LIMIT) -> 
         pkg_id = packages[0].get("id") if packages and isinstance(packages[0], dict) else None
         targets.append(
             {
-                "external_order_id": str(oid),
+                "order_id": str(oid),
                 "tracking_number": tracking,
                 "external_package_id": str(pkg_id) if pkg_id else str(oid),
                 "provider_id": payload.get("shipping_provider_id"),
@@ -237,7 +237,7 @@ def run(
     Args:
         session: SQLAlchemy session (the helper commits it).
         proxy_call: callable doing signed GET + token injection.
-        shop_id: TikTok shop id (external_account_id).
+        shop_id: TikTok shop id (shop_id).
         page_size: cap on how many orders to process this tick
             (mapped to TARGET_LIMIT).
         scope: cursor scope (defaults to ``shop_id``).
@@ -254,12 +254,12 @@ def run(
     account = session.execute(
         select(ChannelAccount).where(
             ChannelAccount.platform == "tiktok",
-            ChannelAccount.external_account_id == shop_id,
+            ChannelAccount.shop_id == shop_id,
         )
     ).scalar_one_or_none()
     if account is None:
         raise UpstreamJobError(
-            f"channel_accounts row missing for tiktok shop_id={shop_id!r}"
+            f"shops row missing for tiktok shop_id={shop_id!r}"
         )
 
     watermark_ms = watermarks.get_cursor(
@@ -276,7 +276,7 @@ def run(
 
     for target in targets:
         total += 1
-        oid = target["external_order_id"]
+        oid = target["order_id"]
         so_id = _resolve_order_id(session, account.id, oid)
         if so_id is None:
             session.add(
@@ -284,7 +284,7 @@ def run(
                     job_name=JOB_NAME,
                     issue_type="UNKNOWN_ORDER",
                     external_id=target["external_package_id"],
-                    details={"external_order_id": oid},
+                    details={"order_id": oid},
                 )
             )
             failed += 1
@@ -337,7 +337,7 @@ def run(
 
         s_fields = {
             "external_package_id": target["external_package_id"],
-            "external_order_id": oid,
+            "order_id": oid,
             "tracking_number": target["tracking_number"],
             "provider_id": target["provider_id"],
             "provider_name": target["provider_name"],
@@ -347,7 +347,7 @@ def run(
         }
         shipment_id = _upsert_shipment(
             session,
-            sales_order_id=so_id,
+            order_pk=so_id,
             fields=s_fields,
             raw_record_id=raw_row.id,
         )
@@ -380,12 +380,12 @@ def run(
             session.execute(
                 pg_insert(Shipment)
                 .values(
-                    sales_order_id=so_id,
+                    order_pk=so_id,
                     external_package_id=target["external_package_id"],
                     status=status,
                 )
                 .on_conflict_do_update(
-                    index_elements=["sales_order_id", "external_package_id"],
+                    index_elements=["order_pk", "external_package_id"],
                     set_={"status": status},
                 )
             )

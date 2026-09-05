@@ -1,8 +1,8 @@
-"""TDD tests for ``GET /v2/commerce/channel-accounts/by-external/{external_account_id}``.
+"""TDD tests for ``GET /v2/commerce/channel-accounts/by-external/{shop_id}``.
 
 Reverse-lookup endpoint: given the upstream shop_id
-(``external_account_id``, e.g. the TikTok shop_id) plus a ``platform``
-filter, return the internal ``commerce.channel_accounts`` row.
+(``shop_id``, e.g. the TikTok shop_id) plus a ``platform``
+filter, return the internal ``commerce.shops`` row.
 
 Why this exists
 ---------------
@@ -15,7 +15,7 @@ the row doesn't exist.
 
 Contract (mirrors :mod:`tech-doc/api/channel-accounts-by-external.md`):
 
-* Path: ``{external_account_id}`` — upstream shop_id (string).
+* Path: ``{shop_id}`` — upstream shop_id (string).
 * Query: ``platform`` (string, default ``"tiktok"``).
 * Response: a single :class:`ChannelAccountOut` on hit, 404 on miss.
 * Auth: ``readonly`` (the whole ``/v2/commerce/`` prefix is classified
@@ -25,16 +25,16 @@ Test surface
 ------------
 * happy path — explicit ``?platform=tiktok`` returns the seeded row
 * default — omitting ``platform`` defaults to ``tiktok``
-* 404 — unknown ``external_account_id``
-* 404 — known ``external_account_id`` but wrong ``platform``
-* 404 — known row but a different platform's external_account_id
+* 404 — unknown ``shop_id``
+* 404 — known ``shop_id`` but wrong ``platform``
+* 404 — known row but a different platform's shop_id
 * 401 — no API key
 * The route is declared BEFORE ``/channel-accounts/{account_id}`` so
   FastAPI matches ``by-external`` as a literal segment, not as an
   ``int`` that fails to coerce.
 
 The ``seed_commerce_rows`` fixture in :mod:`tests.api.test_commerce`
-already provisions a tiktok row with external_account_id
+already provisions a tiktok row with shop_id
 ``"TEST_commerce_acct"``; we reuse it. The :mod:`tests.api.conftest`
 autouse wipes TEST_-prefixed rows between tests.
 """
@@ -49,7 +49,7 @@ from tts_erp_v2.db.base import Base
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
 
-# Minimal local seeding — we only need the channel_accounts row, not
+# Minimal local seeding — we only need the shops row, not
 # the full commerce graph that test_commerce.py's seed_commerce_rows
 # provisions. Keeping this self-contained avoids cross-file fixture
 # coupling and the autouse _isolate_state in tests/api/conftest.py
@@ -60,12 +60,12 @@ EXT_ACCT = "TEST_byext_acct"
 @pytest.fixture()
 def seed_channel_account(db_engine):
     """Insert a single tiktok channel_account row; yield its id."""
-    accounts_tbl = Base.metadata.tables["commerce.channel_accounts"]
+    accounts_tbl = Base.metadata.tables["commerce.shops"]
     with db_engine.begin() as conn:
         conn.execute(
             insert(accounts_tbl).values(
                 platform="tiktok",
-                external_account_id=EXT_ACCT,
+                shop_id=EXT_ACCT,
                 account_name="TEST acct by-external",
                 region="VN",
                 seller_type="CROSS_BORDER",
@@ -73,7 +73,7 @@ def seed_channel_account(db_engine):
             )
         )
         return conn.execute(
-            text("SELECT id FROM commerce.channel_accounts WHERE external_account_id = :ext"),
+            text("SELECT id FROM commerce.shops WHERE shop_id = :ext"),
             {"ext": EXT_ACCT},
         ).scalar_one()
 
@@ -100,7 +100,7 @@ def test_by_external_happy_path_with_explicit_platform(
     body = r.json()
     assert body["id"] == seed_channel_account
     assert body["platform"] == "tiktok"
-    assert body["external_account_id"] == EXT_ACCT
+    assert body["shop_id"] == EXT_ACCT
 
 
 def test_by_external_defaults_platform_to_tiktok(
@@ -110,10 +110,10 @@ def test_by_external_defaults_platform_to_tiktok(
     r = api_client.get(_url(EXT_ACCT), headers=_auth(readonly_key))
 
     assert r.status_code == 200, r.text
-    assert r.json()["external_account_id"] == EXT_ACCT
+    assert r.json()["shop_id"] == EXT_ACCT
 
 
-def test_by_external_404_when_external_account_id_unknown(
+def test_by_external_404_when_shop_id_unknown(
     api_client, readonly_key
 ):
     """No row matches → 404 (NOT 200 with empty list)."""
@@ -133,7 +133,7 @@ def test_by_external_404_when_platform_mismatched(
     """Row exists under tiktok but caller asks for miaoshou → 404.
 
     Prevents accidental cross-platform collisions once we onboard
-    miaoshou accounts: ``external_account_id`` is only unique within
+    miaoshou accounts: ``shop_id`` is only unique within
     a platform, not globally.
     """
     r = api_client.get(
@@ -183,7 +183,7 @@ def test_by_external_path_segment_does_not_collide_with_account_id_route(
 # ---------------------------------------------------------------------------
 
 
-PATH_KEY = "/v2/commerce/channel-accounts/by-external/{external_account_id}"
+PATH_KEY = "/v2/commerce/channel-accounts/by-external/{shop_id}"
 
 
 def _get_openapi_path(api_client) -> dict:

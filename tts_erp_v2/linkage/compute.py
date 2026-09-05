@@ -76,8 +76,8 @@ def process_move_collect_task(
     # ── 2. resolve SPU and procurement_product by external id ───────
     cp = session.execute(
         select(ChannelProduct).where(
-            ChannelProduct.channel_account_id == channel_account.id,
-            ChannelProduct.external_product_id == platform_item_id,
+            ChannelProduct.shop_pk == channel_account.id,
+            ChannelProduct.spu_id == platform_item_id,
         )
     ).scalar_one_or_none()
     pp = session.execute(
@@ -97,7 +97,7 @@ def process_move_collect_task(
             source_external_id=external_task_id,
             evidence_payload={
                 **evidence_payload,
-                "unresolved_channel_product_id": platform_item_id,
+                "unresolved_spu_pk": platform_item_id,
                 "unresolved_procurement_product_id": source_item_id,
             },
             observed_at=observed_at,
@@ -131,7 +131,7 @@ def process_move_collect_task(
         else:
             issue_payload = issue_detectors.make_issue(
                 issue_type="PRODUCT_LINK_MISSING",
-                channel_product_id=cp.id,
+                spu_pk=cp.id,
                 details={
                     "external_task_id": external_task_id,
                     "source_item_id": source_item_id,
@@ -146,7 +146,7 @@ def process_move_collect_task(
     # ── 3. idempotency: same (cp, pp) link already valid? ──────────
     existing_valid = session.execute(
         select(ProductLink).where(
-            ProductLink.channel_product_id == cp.id,
+            ProductLink.spu_pk == cp.id,
             ProductLink.procurement_product_id == pp.id,
             ProductLink.valid_to.is_(None),
         )
@@ -173,7 +173,7 @@ def process_move_collect_task(
     # effective link.
     older_valid_links = session.execute(
         select(ProductLink).where(
-            ProductLink.channel_product_id == cp.id,
+            ProductLink.spu_pk == cp.id,
             ProductLink.valid_to.is_(None),
         )
     ).scalars().all()
@@ -188,7 +188,7 @@ def process_move_collect_task(
 
     link = ProductLink(
         procurement_product_id=pp.id,
-        channel_product_id=cp.id,
+        spu_pk=cp.id,
         external_relation_id=external_task_id,
         relation_type="MIAOSHOU_PUBLISHED_TO_TIKTOK",
         status="ACTIVE",
@@ -216,7 +216,7 @@ def process_move_collect_task(
     # If there were older valid links, this is now an ambiguous state.
     if superseded_procurement_ids:
         issue_payload = issue_detectors.detect_ambiguous_source(
-            channel_product_id=cp.id,
+            spu_pk=cp.id,
             candidate_count=len(superseded_procurement_ids) + 1,
             candidate_procurement_ids=[*superseded_procurement_ids, pp.id],
             observed_at=observed_at,
