@@ -1,5 +1,15 @@
 # tts-erp CHANGELOG
 
+## 2026-09-05 (feat) — SPU 实际 ROI 看板（只读端点 + 账页式页面）
+
+按 `tech-doc/analytics/spu-real-roi-dashboard.md`（§4/§5/§7 口径）实施：
+
+- **端点 `GET /v2/analytics/spu-roi`**（role=readonly，`_READONLY_EXACT`）：每 SPU 一行的广告消耗 / 有效销售 / 退款分桶 / 净利润 / 实际 ROI / 保本线主表。查询 `q`(spu_id 子串)、`sort`(roi_real|spend|refund_rate|net_profit|sales)、`order`、`limit/offset`、`include_all`、`shop_pk`、`fee_rate`(费率覆写)；返回 `{items,total,totals,meta}`（money 4 位小数串 / 比率 2 位串 / null 语义）。
+- **固定常量口径**：USD→VND=26,330、CNY→USD=0.14774、K1=30 CNY/件（DEFAULT_K1 / MANUAL 两分支）、平台佣金基线 0.1156（D9/D4/D10）；退款按 case 完结状态分桶（净额桶进净利润，已付被取消桶 = 信息列 + 缺失行数上报）。
+- **页面 `GET /v2/pages/spu-roi` + `static/js/spu-roi.js`**：账页式 UI（结余带/搜索/每页条数/列头排序/上一页下一页/401→login；实际 ROI<保本或净利润<0 → 红边红字；DEFAULT_K1 → 标题旁 ⚠）。
+- **测试** `tests/api/test_spu_roi_api.py`（14 个：auth / 单 SPU 口径精确断言 / MANUAL 成本 / include_all / 分页排序 / totals 加总一致 / meta / 页面契约）。
+- **文档**：external-api.md TL;DR + 正文一节 + Stability matrix（stable 只读）。
+
 ## 2026-09-05 (refactor) — commerce 域命名重构上线（ADR-0003，live 已应用 migration 0007）
 
 按 ADR-0003 §2.6 + D1 拍板实施，**live 库已 ALTER 并验证**：
