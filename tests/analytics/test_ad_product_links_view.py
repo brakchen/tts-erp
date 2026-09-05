@@ -59,15 +59,17 @@ def _wipe(db_engine) -> None:
         conn.execute(
             text(
                 "DELETE FROM commerce.channel_products "
-                "WHERE external_product_id LIKE 'TEST_%'"
-            )
+                "WHERE external_product_id LIKE :prefix"
+            ),
+            {"prefix": "TEST_%"},
         )
         # pi-lens-ignore: python-sql-injection — literal SQL, LIKE prefix is constant
         conn.execute(
             text(
                 "DELETE FROM commerce.channel_accounts "
-                "WHERE external_account_id LIKE 'TEST_%'"
-            )
+                "WHERE external_account_id LIKE :prefix"
+            ),
+            {"prefix": "TEST_%"},
         )
 
 
