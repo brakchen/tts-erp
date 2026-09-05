@@ -29,6 +29,81 @@ v2 切流的 v1 数据回查窗口提前收口：按 `tech-doc/refactor-tech-pla
 - `scripts/regen_schema.py` 重生成 `schema_tts_erp.sql`（-839 行，public 遗留段落移除）。
 - 验证：DROP 后 public 业务表 0 残留、`fn_touch_updated_at` 在、41 触发器完好、相关测试 0 fail。
 
+## 2026-09-05 (refactor) — analytics schema reorg（migration 0007，删 4 张僵尸表 + 审计改文件日志）
+
+依据 `tech-doc/analytics/reorg-plan.md`（2026-09-05），analytics schema 从「5 表 + 1 view」收成「1 表 + 1 view」：
+
+### Schema / migration
+
+- `alembic/versions/0007_analytics_reorg_drop_dead_tables.py`：
+  - DROP `analytics.ad_records`（生产零 SELECT,与 ad_raw.response.body 重复存同一 payload）
+  - DROP `analytics.ad_daily_completeness`（has-data 已查 ad_raw,该表不参与协议,仅第三次写放大）
+  - DROP `analytics.ad_shop_timezones`（生产读写路径均死：fetch_timezone 仅测试调用,
+    4 条 SQL 常量都是未执行死 SQL,_today_in_tz 无调用方）
+  - DROP `analytics.ad_audit_log`（审计改文件日志，见下）
+- 保留 `analytics.ad_raw`（source-of-truth,5 元组 unique 幂等 upsert）与
+  `analytics.ad_product_links` VIEW（不变,仅读 ad_raw）
+
+### 代码改动
+
+- `tts_erp_v2/db/models/analytics.py`：删 4 个类（AdRecord / AdDailyCompleteness /
+  AdShopTimezone / AdAuditLog）,仅留 AdRaw;`db/models/__init__.py` 同步
+- `tts_erp_v2/analytics/repository.py`：删 9 条死 SQL 常量 + `write_audit()` /
+  `purge_expired()` / `fetch_timezone()`;`upsert_dump()` 缩为**单表写**
+  (只 INSERT ad_raw, ON CONFLICT 5 元组 DO UPDATE, RETURNING xmax=0 判
+  inserted/duplicate)
+- `tts_erp_v2/api/v2/analytics.py`:删全部 `write_audit` 调用与 import;新增
+  `tts_erp_v2.analytics.ingest` logger,get_cursor/post_dumps 的成功与错误
+  路径各打一条 key=value 单行（字段 1:1 对齐原 ad_audit_log 列）。
+  `_audit_and_error` 仍写 stderr（2026-08-30 事故回归守护点）+ 同一份
+  消毒 message 进 logger。HTTP 响应契约逐字节不变。
+- `tts_erp_v2/jobs/analytics_retention.py`:整文件删除（4 张表 drop 后无对象可 purge）
+- `tts_erp_v2/sync_worker/scheduler.py`:JOBS 摘除 `analytics.retention`
+  条目及注释段（JOBS 数 13 → 12）
+
+### 审计迁移语义
+
+- 旧 audit 表职责迁出到 `tts_erp_v2.analytics.ingest` logger,与
+  `middleware/access_log.py` 全站请求日志同源（stderr/stdout → logs/ 下文件）
+- 成功路径也补一条 log（旧 audit 表只写 success path 但 ops 用得不多;
+  现在 records 计数可从 log 看到）
+- 历史 54,786 行 ad_audit_log 随 drop 丢失（已接受;如需留底,部署前
+  SELECT 导出到日志文件）
+
+### 测试
+
+- `tests/analytics/test_repository.py`:删 fetch_timezone 3 个 + write_audit 2 个 +
+  purge_expired 2 个 + _add_days / _subtract_days 6 个测试（共 13 删）;
+  cleanup 从 5 张表缩为 1 张（ad_raw）。upsert_dump 行为测试保留并
+  加注释说明「派生表已 drop,新代码只写 ad_raw」
+- `tests/api/test_analytics_v2_contract.py`:`test_v2_dumps_audit_log_written`
+  改写为 `test_v2_dumps_emits_ingest_log_line`（caplog 断言 logger 单行）;
+  cleanup 从 5 张表缩为 1 张
+- `tests/api/test_analytics_v2_errors.py`:`test_schema_invalid_persists_error_message_in_audit_log`
+  改写为 `test_schema_invalid_persists_message_in_ingest_log`（caplog
+  断言 logger.warning 行,消毒契约保留）;`_cleanup_audit_rows` fixture 删
+- `tests/sync_worker/test_analytics_retention.py`:整文件删除
+- `tests/sync_worker/test_scheduler_jobs_coverage.py`:`EXPECTED_JOB_INTERVALS`
+  删 `analytics.retention`;`len(JOBS)` 断言 13 → 12
+- `tests/sync_worker/test_main.py`:`_fmt_duration` parametrized fixture
+  中删除 analytics.retention 注释行;`test_print_jobs_renders_table_without_db`
+  去掉 retention 断言
+
+### 文档
+
+- `tech-doc/analytics/dump-architecture.md`:新增 D5「schema 3 → 1」决策;
+  §3.1 数据流图（写 3 表 → 1 表）;§10 上线清单（监控项调整）
+- `tech-doc/analytics/reorg-plan.md`:实施依据
+- `AGENTS.md` §8 目录地图:analytics schema 标注「仅 ad_raw 1 表」
+- `setup/analytics-sync.md`:表清单/retention 段落同步;文件树注释更新
+
+### 范围外（明确未做,另记未决）
+
+- `ad_raw` append-only 语义改造
+- typed 事实表(`ad_product_daily` 等)
+- view 改为基于事实表 / 加窗口参数
+- Chrome 扩展协议变更
+
 ## 2026-09-05 (feature) — analytics.ad_product_links 视图（广告×商品关联 + 出单量/消耗，migration 0006）
 
 从 `analytics.ad_raw` 的 `post_product_list` 原始 dump 派生「广告(计划) ↔ 商品(SPU)」关联视图。

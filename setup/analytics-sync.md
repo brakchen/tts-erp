@@ -6,7 +6,7 @@
 >
 > 上游：Chrome 扩展 (tk-adv-cost-monitor) 推 `productAnalyses` / `sessionAnalyses` / `campaignChangeLogs` 三类分析 dump
 > 下游：（无，纯存储 + has-data 预检服务）
-> 存储：PostgreSQL `tts_erp` 数据库 · `analytics` schema · 5 张表（`ad_raw` / `ad_records` / `ad_daily_completeness` / `ad_shop_timezones` / `ad_audit_log`）
+> 存储：PostgreSQL `tts_erp` 数据库 · `analytics` schema · **1 张表**（`ad_raw`）—— 2026-09-05 reorg 后由 5 张收为 1 张（详见 `tech-doc/analytics/reorg-plan.md`）
 >
 > **变更背景**：
 >
@@ -29,7 +29,7 @@ Chrome 扩展（`tk-adv-cost-monitor`）在 TikTok 广告分析页拦截到一�
   dump 过没」，`hasData: true` 直接跳过
 - ✅ 每 token prefix 独立限流（默认 100/min）；per-token scope 校验
 - ✅ 错误码 400/401/403/413/429/5xx 全部带 `{code, message, requestId, retryable}`，永不回显 token
-- ✅ retention 由 sync-worker daily job `analytics.retention` 自动跑（ad_records 90d + audit 30d；ad_raw 永久保留），无需 cron
+- ✅ retention 由 sync-worker daily job ~~`analytics.retention`~~（2026-09-05 reorg 后已摘除）—— ad_raw 永久保留，无需 cron；其他派生表已 drop,无需清
 
 ## 当前状态
 
@@ -52,10 +52,10 @@ Chrome 扩展（`tk-adv-cost-monitor`）在 TikTok 广告分析页拦截到一�
 ├── tts_erp_v2/
 │   ├── analytics/
 │   │   ├── domain.py                 # 纯类型（Scope/DumpPayload/DumpResult/HasDataResult）
-│   │   └── repository.py             # SQLAlchemy 实现（raw SQL：ad_raw + 派生 + has_data + 审计）
+│   │   └── repository.py             # SQLAlchemy 实现（raw SQL：ad_raw 单表 + has_data）
 │   ├── api/v2/analytics.py           # 唯一 APIRouter + handlers + Pydantic models
-│   ├── jobs/analytics_retention.py   # sync-worker daily retention job（ad_records 90d + audit 30d）
-│   └── db/models/analytics.py        # 5 表 SQLAlchemy metadata 镜像（读写走 repository raw SQL）
+│   └── db/models/analytics.py        # 1 表（ad_raw）SQLAlchemy metadata 镜像（读写走 repository raw SQL）
+│       # 2026-09-05 reorg：jobs/analytics_retention.py 删除,TDD 详情见 tech-doc/analytics/reorg-plan.md
 ├── alembic/versions/
 │   ├── 0004_analytics_ad_schema.py   # 迁移：public.analytics_* → analytics.ad_*
 │   └── 0005_ad_raw_per_unit_day.py   # dump 化：+ad_raw，drop ad_daily_pages/ad_cursors，去 page 列
@@ -75,21 +75,21 @@ Chrome 扩展（`tk-adv-cost-monitor`）在 TikTok 广告分析页拦截到一�
 ```text
 database: tts_erp
 schema:   analytics
-tables:   ad_raw, ad_records, ad_daily_completeness,
-          ad_shop_timezones, ad_audit_log
+tables:   ad_raw
 ```
 
 | 表                            | 说明                                                                  |
 |-------------------------------|----------------------------------------------------------------------|
-| `analytics.ad_raw`            | **source-of-truth**：每 dump 一行完整 HTTP 交换（request/response JSONB）。UNIQUE 5 元组 `(seller_id, advertiser_id, endpoint, day, campaign_id)`。无 FK 到派生表；不 purge |
-| `analytics.ad_records`        | 派生行（dump 事务内从 ad_raw 提取）。UNIQUE 5 元组 `(seller_id, advertiser_id, storage_key, campaign_id, day)`；retention 90d |
-| `analytics.ad_daily_completeness` | 「这天有数据」轻量锚点（`captured_at` = last dump）。完整性真相源 = ad_raw existence（has-data 查它）|
-| `analytics.ad_shop_timezones` | 每店铺 IANA 时区（默认 `Asia/Shanghai`）                              |
-| `analytics.ad_audit_log`      | requestId-keyed 审计轨迹（无密钥，60s 内可查 `key_prefix`）；retention 30d |
+| `analytics.ad_raw`            | **source-of-truth** —— 全 analytics schema 仅此 1 表：每 dump 一行完整 HTTP 交换（request/response JSONB）。UNIQUE 5 元组 `(seller_id, advertiser_id, endpoint, day, campaign_id)`。不 purge |
 | `security.api_keys`           | Bearer token 只存 SHA-256 + 16 字符前缀，revoke 走 `enabled=false`    |
 
-> 已删除（migration 0005）：`ad_daily_pages`（page bitmap）、`ad_cursors`
-> （cursor work-list 状态）。`ad_records.page / expected_page_count` 列同删。
+> 2026-09-05 reorg 后删除（migration 0007）：
+> - `ad_records` —— 生产零 SELECT 的纯写放大表
+> - `ad_daily_completeness` —— 与 ad_raw existence 完全冗余
+> - `ad_shop_timezones` —— 生产读写路径均死，配置概念随需随取
+> - `ad_audit_log` —— 审计改 logger 文件日志（``tts_erp_v2.analytics.ingest``）
+>
+> 详见 `tech-doc/analytics/reorg-plan.md`。
 
 ## 端点完整列表
 
@@ -246,8 +246,8 @@ systemctl --user restart tts-erp.service       # = bash restart.sh
 journalctl --user -u tts-erp -n 50
 ```
 
-retention job 在 sync-worker（`tts-erp-sync.service`，daily
-`analytics.retention`）：
+retention job 在 sync-worker `tts-erp-sync.service`（2026-09-05 reorg 后
+analytics 域已无日级 job）：
 
 ```bash
 systemctl --user restart tts-erp-sync.service  # 改了 jobs/ 或 sync_worker/ 后跑

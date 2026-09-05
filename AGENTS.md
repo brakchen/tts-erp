@@ -172,10 +172,10 @@ tts_erp_v2/
 │                        #   llm_context / admin / analytics（Chrome 扩展 ingest）
 ├── middleware/          # auth.py（角色矩阵）、session_auth.py、rate_limit.py、access_log.py
 ├── proxy/               # 出站层：tts_shop/（TikTok 签名+客户端）、miaoshou/、token_service.py
-├── jobs/                # 同步 job 实现：tiktok/*、miaoshou/*、analytics_retention（日级）、
+├── jobs/                # 同步 job 实现：tiktok/*、miaoshou/*、
 │                        #   reporting（cost_snapshots 6h / profit_daily 1h）、token_refresh（6h）、runner
 ├── sync_worker/         # APScheduler；JOBS 注册表 + 调度状态（顶部 NOTE，以它为准）
-├── db/models/           # 10 schema SQLAlchemy 模型（analytics schema 5 表）
+├── db/models/           # 10 schema SQLAlchemy 模型 — 2026-09-05 reorg 后 analytics schema 仅 ad_raw 1 表（reorg-plan §2）
 ├── analytics/ linkage/ reporting/ storage/
 └── static/
 
