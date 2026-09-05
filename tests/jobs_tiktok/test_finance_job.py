@@ -137,10 +137,11 @@ def _statement_payload(
     return out
 
 
-def _transaction_payload(tid: str, *, fee: str | None = "1.50"):
+def _transaction_payload(tid: str, *, fee_amount: str | None = "1.50"):
+    """202309 statement_transactions shape: flat ``*_amount`` fields."""
     tx = {"transaction_id": tid, "transaction_time": 1_700_001_000}
-    if fee is not None:
-        tx["fee"] = fee
+    if fee_amount is not None:
+        tx["fee_amount"] = fee_amount
     return tx
 
 
@@ -270,7 +271,9 @@ def test_finance_payouts_statements_transactions_components(db_session) -> None:
             {
                 "code": 0,
                 "data": {
-                    "statement_transactions": [_transaction_payload("TX1", fee="2.50")],
+                    "statement_transactions": [
+                        _transaction_payload("TX1", fee_amount="2.50")
+                    ],
                     "next_page_token": "",
                 },
             }
@@ -312,7 +315,7 @@ def test_finance_payouts_statements_transactions_components(db_session) -> None:
         .all()
     )
     assert len(components) == 1
-    assert components[0].component_code == "fee"
+    assert components[0].component_code == "FEE"
     assert components[0].amount == pytest.approx(2.50)
 
 
@@ -334,7 +337,9 @@ def test_finance_zero_amount_component_not_written(db_session) -> None:
             {
                 "code": 0,
                 "data": {
-                    "statement_transactions": [_transaction_payload("TX2", fee="0")],
+                    "statement_transactions": [
+                        _transaction_payload("TX2", fee_amount="0")
+                    ],
                     "next_page_token": "",
                 },
             }
@@ -388,7 +393,9 @@ def test_finance_statements_have_own_cursor(db_session) -> None:
             {
                 "code": 0,
                 "data": {
-                    "statement_transactions": [_transaction_payload("TX3", fee="1.00")],
+                    "statement_transactions": [
+                        _transaction_payload("TX3", fee_amount="1.00")
+                    ],
                     "next_page_token": "",
                 },
             }
@@ -454,7 +461,7 @@ def test_finance_statement_attaches_only_to_own_payout(db_session) -> None:
                 "code": 0,
                 "data": {
                     "statement_transactions": [
-                        _transaction_payload("TX_A", fee="1.00")
+                        _transaction_payload("TX_A", fee_amount="1.00")
                     ],
                     "next_page_token": "",
                 },
@@ -690,7 +697,7 @@ def test_finance_late_statement_advances_independently(db_session) -> None:
                 "code": 0,
                 "data": {
                     "statement_transactions": [
-                        _transaction_payload("TX_L", fee="1.00")
+                        _transaction_payload("TX_L", fee_amount="1.00")
                     ],
                     "next_page_token": "",
                 },
@@ -740,7 +747,7 @@ def test_finance_late_statement_advances_independently(db_session) -> None:
                 "code": 0,
                 "data": {
                     "statement_transactions": [
-                        _transaction_payload("TX_L_LATE", fee="0.50")
+                        _transaction_payload("TX_L_LATE", fee_amount="0.50")
                     ],
                     "next_page_token": "",
                 },
@@ -847,7 +854,7 @@ def test_finance_old_legacy_cursor_name_not_written(db_session) -> None:
                 "code": 0,
                 "data": {
                     "statement_transactions": [
-                        _transaction_payload("TX_N", fee="1.00")
+                        _transaction_payload("TX_N", fee_amount="1.00")
                     ],
                     "next_page_token": "",
                 },
@@ -1019,3 +1026,135 @@ def test_finance_transaction_unresolved_order_sync_issue(db_session) -> None:
     )
     assert len(issues) == 1
     assert issues[0].details["order_id"] == "TEST_TT_FIN_ORD_MISSING"
+
+
+def test_finance_components_full_breakdown_uppercase_codes(db_session) -> None:
+    """A real 202309 transaction payload must expand EVERY non-zero
+    ``*_amount`` field into a component with the v3 uppercase code
+    (``gross_sales_amount`` → ``GROSS_SALES``, etc.), not just the net
+    ``settlement_amount`` under its raw lowercase name.
+
+    Regression (audit 2026-09-06): the old allowlist used lowercase stems
+    (``fee``/``refund``/``platform_commission``…) that never match upstream
+    keys, so the fee/gross/refund breakdown only ever lived in raw payloads.
+    """
+    account = _make_account(db_session)
+    tx = {
+        "transaction_id": "TXN_BR1",
+        "type": "ORDER",
+        "currency": "VND",
+        "gross_sales_amount": "899128",
+        "customer_payment_amount": "539477",
+        "platform_commission_amount": "-80922",
+        "seller_discount_amount": "-359651",
+        "fee_amount": "-165465",
+        "settlement_amount": "374012",
+        "customer_refund_amount": "0",  # zero must be skipped
+    }
+    proxy = FakeProxy(
+        payouts_pages=[
+            {"code": 0, "data": {"payments": [_payout_payload_202309("PAY_BR1")]}}
+        ],
+        statements_pages=[
+            {
+                "code": 0,
+                "data": {
+                    "statements": [_statement_payload("STM_BR1", payment_id="PAY_BR1")],
+                    "next_page_token": "",
+                },
+            }
+        ],
+        transactions_pages=[
+            {"code": 0, "data": {"statement_transactions": [tx], "next_page_token": ""}}
+        ],
+    )
+    run_with_sync_job(
+        db_session,
+        job_name="tiktok.finance",
+        credential_id=account.credential_id,
+        inner=finance_job.run,
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
+    )
+    txn = db_session.execute(
+        select(SettlementTransaction).where(
+            SettlementTransaction.external_transaction_id == "TXN_BR1"
+        )
+    ).scalar_one()
+    comps = {
+        c.component_code: c
+        for c in db_session.execute(
+            select(SettlementComponent).where(
+                SettlementComponent.transaction_id == txn.id
+            )
+        ).scalars()
+    }
+    assert set(comps) == {
+        "GROSS_SALES",
+        "CUSTOMER_PAYMENT",
+        "PLATFORM_COMMISSION",
+        "SELLER_DISCOUNT",
+        "FEE",
+        "SETTLEMENT",
+    }
+    assert comps["GROSS_SALES"].amount == pytest.approx(899_128)
+    assert comps["PLATFORM_COMMISSION"].amount == pytest.approx(-80_922)
+    assert comps["SETTLEMENT"].amount == pytest.approx(374_012)
+    assert all(c.currency == "VND" for c in comps.values())
+    # source_order tracks the upstream field index (traceability contract).
+    orders = [c.source_order for c in comps.values()]
+    assert all(o is not None for o in orders)
+
+
+def test_finance_transaction_time_from_order_create_time(db_session) -> None:
+    """202309 transaction payloads carry no ``transaction_time``; the time
+    must fall back to ``order_create_time`` (also the endpoint's required
+    sort_field) so settlement_transactions.transaction_time is never NULL.
+
+    Regression (audit 2026-09-06): pre-fix every row landed NULL (545/545
+    in prod) because the parser only read the absent ``transaction_time``.
+    """
+    from datetime import UTC, datetime
+
+    account = _make_account(db_session)
+    proxy = FakeProxy(
+        payouts_pages=[
+            {"code": 0, "data": {"payments": [_payout_payload_202309("PAY_BR2")]}}
+        ],
+        statements_pages=[
+            {
+                "code": 0,
+                "data": {
+                    "statements": [_statement_payload("STM_BR2", payment_id="PAY_BR2")],
+                    "next_page_token": "",
+                },
+            }
+        ],
+        transactions_pages=[
+            {
+                "code": 0,
+                "data": {
+                    "statement_transactions": [
+                        {
+                            "transaction_id": "TXN_BR2",
+                            "currency": "VND",
+                            "order_create_time": 1_700_010_000,
+                        }
+                    ],
+                    "next_page_token": "",
+                },
+            }
+        ],
+    )
+    run_with_sync_job(
+        db_session,
+        job_name="tiktok.finance",
+        credential_id=account.credential_id,
+        inner=finance_job.run,
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
+    )
+    txn = db_session.execute(
+        select(SettlementTransaction).where(
+            SettlementTransaction.external_transaction_id == "TXN_BR2"
+        )
+    ).scalar_one()
+    assert txn.transaction_time == datetime.fromtimestamp(1_700_010_000, tz=UTC)

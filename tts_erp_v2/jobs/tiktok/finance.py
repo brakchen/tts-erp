@@ -41,10 +41,20 @@ prod) are surfaced as ``STATEMENT_PAYMENT_ID_MISSING`` and skipped —
 the cursor does NOT advance past them, so a later payload revision
 or a back-fill can still pick them up.
 
-The 58 ``_COMPONENT_COLUMNS`` allowlist mirrors the legacy migration
-script's; we only write a ``settlement_components`` row when the source
-amount is non-zero (matches the v3 model rule that we never store 0
-amounts — they bloat the table 17x).
+The 53 ``_COMPONENT_COLUMNS`` source keys mirror the upstream 202309
+``statement_transactions`` payload field names (same list as the archived
+``migrate_finance.py``); each is expanded to a ``settlement_components`` row
+with ``component_code`` = field name stripped of ``_amount`` and uppercased
+(e.g. ``settlement_amount`` → ``SETTLEMENT``, ``gross_sales_amount`` →
+``GROSS_SALES``) — the v3 convention ``db/models/finance.py`` documents.
+We only write a row when the source amount is non-zero (v3 rule: never
+store 0 amounts — they bloat the table 17x).
+
+Audit 2026-09-06: the pre-audit allowlist used lowercase stems (``fee``,
+``refund``, …) that never match upstream ``*_amount`` keys, so ONLY
+``settlement_amount`` was ever written (and under the raw lowercase name,
+not the documented uppercase code). The fee/gross/refund breakdown lived
+only in raw payloads.
 """
 
 from __future__ import annotations
@@ -104,61 +114,62 @@ ProxyCall = Callable[..., dict]
 # (kept in sync with scripts/migrate_v1_to_v2/migrate_finance.py). New
 # columns require updating both files.
 _COMPONENT_COLUMNS: tuple[str, ...] = (
-    "fee",
-    "refund",
-    "settlement_amount",
-    "shipping_fee",
-    "transaction_fee",
+    # Upstream 202309 statement_transactions numeric fields, 1:1 with the
+    # archived migrate_finance.py list. ``component_code`` is derived as
+    # ``field.removesuffix("_amount").upper()`` (see _write_components).
+    "actual_return_shipping_fee_amount",
+    "actual_shipping_fee_amount",
     "adjustment_amount",
-    "seller_credit",
-    "platform_credit",
-    "settlement_fee",
-    "marketing_promotion_fee",
-    "live_gift_fee",
-    "affiliate_commission",
-    "affiliate_commission_fee",
-    "platform_commission",
-    "referral_fee",
-    "tax",
-    "import_tax",
-    "vat",
-    "duty",
-    "deposit",
-    "deposit_release",
-    "deposit_freeze",
-    "deposit_deduct",
-    "reverse_logistics_fee",
-    "logistics_adjustment",
-    "return_shipping_fee",
-    "buyer_payment",
-    "buyer_refund",
-    "buyer_partial_refund",
-    "buyer_recharge",
-    "buyer_voucher",
-    "seller_recharge",
-    "seller_voucher",
-    "co_funding_1",
-    "co_funding_2",
-    "co_funding_3",
-    "co_funding_4",
-    "co_funding_5",
-    "small_order_compensation",
-    "delivery_failed_compensation",
-    "lost_compensation",
-    "damaged_compensation",
-    "counterfeit_compensation",
-    "late_delivery_compensation",
-    "shipping_subsidy",
-    "return_shipping_subsidy",
-    "platform_subsidy",
-    "flash_sale_subsidy",
-    "freeship_subsidy",
-    "live_special_subsidy",
-    "influencer_subsidy",
-    "mall_subsidy",
-    "cpa_commission",
-    "cpa_commission_fee",
-    "mall_other_fee",
+    "affiliate_ads_commission_amount",
+    "affiliate_commission_amount",
+    "affiliate_commission_before_pit",
+    "affiliate_partner_commission_amount",
+    "after_seller_discounts_subtotal_amount",
+    "customer_order_refund_amount",
+    "customer_paid_shipping_fee_amount",
+    "customer_paid_shipping_fee_refund_amount",
+    "customer_payment_amount",
+    "customer_refund_amount",
+    "customer_shipping_fee_amount",
+    "customer_shipping_fee_offset_amount",
+    "fbm_shipping_cost_amount",
+    "fbt_fulfillment_fee_amount",
+    "fbt_fulfillment_fee_reimbursement_amount",
+    "fbt_shipping_cost_amount",
+    "fee_amount",
+    "gross_sales_amount",
+    "gross_sales_refund_amount",
+    "isr_income_tax_amount",
+    "iva_vat_amount",
+    "net_sales_amount",
+    "pit_amount",
+    "platform_commission_amount",
+    "platform_discount_amount",
+    "platform_discount_refund_amount",
+    "platform_refund_subsidy_amount",
+    "platform_shipping_fee_discount_amount",
+    "promo_shipping_incentive_amount",
+    "referral_fee_amount",
+    "refund_administration_fee_amount",
+    "refund_shipping_cost_discount_amount",
+    "retail_delivery_fee_amount",
+    "retail_delivery_fee_payment_amount",
+    "retail_delivery_fee_refund_amount",
+    "return_shipping_fee_amount",
+    "revenue_amount",
+    "sales_tax_amount",
+    "sales_tax_payment_amount",
+    "sales_tax_refund_amount",
+    "seller_discount_amount",
+    "seller_discount_refund_amount",
+    "settlement_amount",
+    "shipping_cost_amount",
+    "shipping_cost_discount_amount",
+    "shipping_fee_amount",
+    "shipping_fee_subsidy_amount",
+    "shipping_insurance_fee_amount",
+    "signature_confirmation_fee_amount",
+    "transaction_fee_amount",
 )
 
 
@@ -304,9 +315,15 @@ def _parse_transaction(raw: dict) -> dict:
     tid = raw.get("transaction_id") or raw.get("id")
     if not tid:
         raise ParseError("transaction_id missing")
+    # 202309 transaction payloads carry NO ``transaction_time``; the
+    # authoritative timestamp is ``order_create_time`` (also the endpoint's
+    # required sort_field). The archived migration mapped it the same way;
+    # pre-audit the column stayed NULL for every row.
     return {
         "external_transaction_id": str(tid),
-        "transaction_time": _epoch_seconds_to_utc(raw.get("transaction_time")),
+        "transaction_time": _epoch_seconds_to_utc(
+            raw.get("transaction_time") or raw.get("order_create_time")
+        ),
     }
 
 
@@ -390,12 +407,20 @@ def _upsert_transaction(
 def _write_components(
     session, *, transaction_id: int, raw: dict, default_currency: str | None = None
 ) -> int:
-    """Write non-zero settlement_components rows. Returns count written."""
+    """Write non-zero settlement_components rows. Returns count written.
+
+    ``component_code`` = upstream field name stripped of the ``_amount``
+    suffix and uppercased (``gross_sales_amount`` → ``GROSS_SALES``), the
+    convention shared with the archived migrate_finance.py and with
+    ``db/models/finance.py``. ``source_order`` keeps the upstream field
+    index for traceability.
+    """
     written = 0
-    for col in _COMPONENT_COLUMNS:
+    for source_order, col in enumerate(_COMPONENT_COLUMNS):
         amount = _to_decimal(raw.get(col))
         if amount is None or amount == 0:
             continue
+        code = col.removesuffix("_amount").upper()
         currency = raw.get(f"{col}_currency") or raw.get("currency") or default_currency
         if not currency:
             # Without a currency we can't write a valid component row
@@ -414,13 +439,18 @@ def _write_components(
             pg_insert(SettlementComponent)
             .values(
                 transaction_id=transaction_id,
-                component_code=col,
+                component_code=code,
                 amount=amount,
                 currency=currency,
+                source_order=source_order,
             )
             .on_conflict_do_update(
                 index_elements=["transaction_id", "component_code"],
-                set_={"amount": amount, "currency": currency},
+                set_={
+                    "amount": amount,
+                    "currency": currency,
+                    "source_order": source_order,
+                },
             )
         )
         written += 1
