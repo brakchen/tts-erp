@@ -161,15 +161,9 @@ JOBS: dict[str, JobSpec] = {
         is_tiktok=False,
         entrypoint="run_profit_daily",
     ),
-    # ── Analytics retention (2026-09-02 — analytics v2 化 D6；替代从未
-    # 安装 cron 的 analytics_sync/retention.sql) ────────────────────────
-    "analytics.retention": JobSpec(
-        job_name="analytics.retention",
-        module_path="tts_erp_v2.jobs.analytics_retention",
-        interval_seconds=86400,  # 1 d — 与原 retention.sql 建议的日级一致
-        is_tiktok=False,
-        entrypoint="run_analytics_retention",
-    ),
+    # ── Analytics retention 已于 2026-09-05 reorg（tech-doc/analytics/
+    # reorg-plan.md 决策 #1-#4）摘除：ad_records / ad_audit_log / 等 4 张
+    # 表已 drop,审计改文件日志,无对象可 purge。JOBS 数从 13 → 12。
 }
 
 
