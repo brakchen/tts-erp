@@ -187,7 +187,7 @@ SPU 无广告投放 → 广告列显示 0 与“无投放”文案（不隐藏�
 
 - **全表统一 USD、不再分栏**：广告（原生 USD）、销售/退款金额（原生 VND ÷ USD→VND）、货损（原生 CNY × CNY→USD）→ 由此算得的各金额列（含净利润）与 ROI **全部以 USD 展示**；底层按原币计算、输出层一次换算（防舍入）；换算用**固定汇率常量（D9）**，其值在栏头/提示行标注；配置缺失时，依赖换算的金额列（如净利润）与 ROI 列置 `—` 并提示（延续 audit P1-4b 的“宁可承认不知道”原则）。
 - **口径警告 chip**：广告列旁常驻提示「GMV Max 归因含自然单 + 数据有滞后修正，广告数字≠纯广告增量、≠最终回款」。
-- 时间默认窗口与 ad 观测窗口对齐（§4.5），切换日期范围时 B 组自动附“该范围非 ad 窗口内精确值”说明。
+- 时间默认 = 全历史累计（销售/退款不裁剪，ad 恒为视图全窗口）；如需同窗口口径，端点显式传 `w_start`/`w_end`，B 组口径说明以 meta.window 为准（§4.5）。
 
 ---
 
@@ -317,10 +317,10 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
 
 ### 4.5 时间口径（必须向用户说清的一处）
 
-- **销售/退款**：可按用户选的日期范围精确过滤（paid_at / case 完结时间）。
-- **广告消耗**：`ad_product_links` 是**全窗口累计**视图（ad_raw 不 purge，窗口 = 2026-08-28 ~ 至今 且持续增长）。**它没有“截止今天”的日期参数**。
-  - 默认方案：页面默认窗口 = 视图观测窗口（first_day~last_day），此时 B/C/D 三组口径一致（都是“至今累计”），避免拿“30 天销售”去比“全量消耗”。
-  - 用户自定义范围时：B 组标注「消耗为全量累计值（含窗口外）」，或改为直接查 ad_raw 按 `day` 过滤（§5 SQL 模板给 daily 展开版）——本期建议只做前者，避免范围蔓延。
+- **默认（不传 `w_start` / `w_end`）= 全历史累计**：销售/退款按各自全历史行累计，不做日期裁剪。
+- 可选传 `w_start` / `w_end`（ISO 日期 `yyyy-mm-dd`）裁剪销售与退款：销售按订单 `paid_at`（`>= w_start` 且 `< w_end+1 天`，即**含 `w_end` 当日**）；退款按 case `updated_at_source`（状态完结时间）**同界**。
+- **广告消耗**：`ad_product_links` 是**全窗口累计**视图（ad_raw 不 purge），**没有日期参数**——始终整窗累计；`meta.window.first_day/last_day` 只是 ad 视图的观测窗口（供参考），**不代表销售/退款已按该窗口裁剪**。
+- 页面/BI 需要同窗口口径时：显式传 `w_start` / `w_end`；口径标注以 `meta.window.note` 为准（默认注记“ad=视图全窗口累计；销售/退款=全历史（未裁剪，可传 w_start/w_end）”）。
 
 ### 4.6 汇率换算（D1/D9：广告全 USD；本期固定汇率常量，在线机制挂起）
 
@@ -343,8 +343,8 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
 3. **totals 同源**：页首合计由端点用**与行查询相同的 CTE** 再做聚合回传（跨分页加总），不做分页客户端求和。
 4. **序列化规则**：金额底层原币计算，**输出统一 USD**（VND ÷ USD→VND、CNY × CNY→USD，服务端一次换算）→ money = `numeric(20,4)` JSON 字符串；比率 = 2 位小数字符串；件数 = 整数（值恒为整时）。
 5. **NULL 语义统一**：无投放 → `spend="0.0000"` + `ad_count=0`（页面文案“无投放”）；除数为 0 的 ROI → `null`（页面显示 `—`）；无有效销售 → `sales=0`、`refund_rate/roi_real=null`；**固定汇率配置缺失 → 依赖换算的金额（如 `net_profit`）与 ROI 输出 `null`（页面 `—`），原生 USD 列（广告）不受影响；本期固定值下恒有值**。
-6. **时间窗口单一**：行与 totals 使用同一个 `W`（默认 = ad 观测窗口全量，§4.5）。
-7. **行范围**：默认返回窗口内「有广告投放 ∨ 有有效销售 ∨ 有退款」的 SPU；可选参数 `include_all` 拉全部 ACTIVE SPU（无任何活动的行金额全 0）。
+6. **时间窗口单一**：行与 totals 使用同一个筛选——默认不传参 = **销售/退款全历史累计**（可传 `w_start`/`w_end` 裁剪：销售按 `paid_at`、退款按 `updated_at_source`，含 `w_end` 当日）；广告 = ad 视图全窗口累计（无日期参数）。`meta.window` 明示 ad 观测窗口**供参考**，销售/退款是否被裁剪见 `meta.window.note`（§4.5）。
+7. **行范围**：默认返回「有广告投放 ∨ 有有效销售 ∨ 有退款」的 SPU（不按目录状态裁剪）；可选参数 `include_all` 拉**全部 ACTIVE 目录 SPU**（目录查询按 `cp.status ILIKE 'activate'` 过滤，DEACTIVATE/DELETED 等不进 include_all；无任何活动的行金额全 0）。
 
 ### 5.2 行输出字段契约（主表 1 行 = 1 SPU）
 
@@ -400,13 +400,13 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
   }],
   "total": 111,
   "totals": {"row_count": 111, "spend": "1414.7700", "sales": "…",
-              "refund_net_amount": "…", "net_profit": "…"},   // 金额均为 USD（原币 VND/CNY 加总后一次换算）
+              "refund_net_amount": "…", "net_profit": "…", "roi_real": "…"},   // 金额均为 USD(原币加总后一次换算);roi_real = Σ(net_cash−return_loss)/Σspend(服务端)
   "meta": {
     "fx": {"usd_vnd": "26330.0000", "cny_usd": "0.1477",   // 实现常量 0.14774（30 CNY≈$4.4322/件）
           "as_of": "2026-09-05", "source": "fixed-const（在线机制挂起，§4.6）"},
     "cost_assumption": "按 SPU 解析：人工成本(MANUAL)优先，无记录 → K1=30 CNY/件 ≈ $4.43/件（本样例 DEFAULT_K1，页面 ⚠）",
     "fee": {"mode": "baseline", "rate": "0.1156", "override": null, "note": "平台佣金=全部直接扣除(抽佣/联盟/运费类)；已结算按实际，未结算按基线；解析上线后自动分层"},
-    "window": {"first_day": "2026-08-28", "last_day": "2026-09-05", "note": "ad 观测窗口全量(§4.5)"},
+    "window": {"first_day": "2026-08-28", "last_day": "2026-09-05", "note": "ad=视图全窗口累计(供参考)；销售/退款=全历史(未裁剪，可传 w_start/w_end)"},
     "unattributed_refund_lines": 66,
     "computed_at": "…", "currency": {"display": "USD", "native": {"ad": "USD", "sales_refund": "VND", "cost": "CNY"}}
   }
@@ -691,6 +691,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 → **已排期（D7，2026-09-05）**：结算归属解析 job + 只读 view（finance 域工作线）。产出后：① 已结算订单启用**实际扣费（fee_amount）**、未结算按基线 r̂（M19 自动分层），net_cash 基础切 M16 后已结算部分不再单扣平台费用；② 卖家承担的退货运费（return_shipping_fee_amount≠0）可直接扣入净利润；③ 参考基线 r̂ 与“已结算/未结算”分层由 view 现算。
 
 **解析 job + view 规格（D7）**：
+
 - 输入：`integration.raw_records` `…/statement_transactions`（59 列），按 `payload->>'id'` 去重（同一交易会被多次抓取重复入库）。
 - 输出：结构化表（按 order_pk 归属，含 settlement_amount / gross_sales_amount / platform_commission_amount / return_shipping_fee_amount / refund 系列等，不再只留 settlement_amount 一个 component）+ **只读 view**（如 `finance.v_settlement_order`；模式参照 `analytics.ad_product_links`：DB 层 view、无 HTTP 端点、端点只读 view）。
 - 归属链：`payload->>'order_id'` → `commerce.sales_orders` → `after_sales.cases`（退货/运费按 case）→ case_lines → spu_pk；多 SPU 订单按订单行金额占比分摊到 SPU。
@@ -721,7 +722,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 | 退款率警戒线 | 30% | ⚠ + 红字 | §7.2 |
 | 广告回本线（实际 ROI < 1.0） | 1.0 | 更深红（红底浅字） | §7.2 |
 | 汇率（固定常量，D9） | **USD→VND = 26,330 / CNY→USD = 0.14774**（展示 0.1477；30 CNY ≈ $4.4322/件；2026-09-05，配置可改） | 全表金额换算 / 净利润 / 保本 / ROI | §4.6 |
-| 默认窗口 `W` | ad 观测窗口（first_day~last_day） | 行/合计同窗口 | §4.5/§5.1-6 |
+| 日期窗口(端点参数,2026-09 review 补) | **默认不传 = 销售/退款全历史累计**;可选 `w_start`/`w_end`(ISO 日期)裁剪(销售 paid_at / 退款 updated_at_source);ad 无日期参数,恒整窗累计 | 行/合计同筛选 | §4.5/§5.1-6 |
 | 行范围 | 有活动 SPU；可选 `include_all` | 空行金额全 0 | §5.1-7 |
 | 平台佣金费率 r̂ | **参考基线 ≈11.6%（Σ\|fee_amount\|/Σgross，含抽佣/联盟/运费等全部直接扣除；页面可覆写 %；无结算样本 → 0 并标注）** | 保本 M17 / 净利润 M18 的 platform_fee（M19） | D10；解析上线后已结算部分自动用实际值 |
 
@@ -872,5 +873,5 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 1. 在线汇率（原 D1）何时恢复：本期固定常量即可；如需在线化再启动 §4.6 机制方案（届时定主源/兜底源）。
 2. ~~finance 结算归属解析 job 是否排期~~ → **已解决（D7：已排期，见已拍板 8）**。
 3. 页面角色：readonly 即可，还是退款金额明细需要更高角色？（建议 readonly）
-4. 日期默认窗口：ad 观测窗口（推荐，口径自洽）还是自然月？
+4. ~~日期默认窗口：ad 观测窗口（推荐，口径自洽）还是自然月？~~ → **已解决（2026-09 review）**：端点默认不裁剪（销售/退款 = 全历史累计；ad = 视图全窗口累计），需要窗口时显式传 `w_start`/`w_end`（§4.5）；`meta.window` 明示 ad 观测窗口供参考。
 5. （D10 已定基线段）参考基线的统计粒度：当前 = 窗口 + 店铺全量；是否需按近 N 天 / 按类目细分？（默认不细分）

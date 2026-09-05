@@ -70,9 +70,7 @@ def _wipe_spu_roi_rows(db_engine, _isolate_state):
 def _wipe(db_engine) -> None:
     with db_engine.begin() as conn:
         # pi-lens-ignore: python-sql-injection
-        conn.execute(
-            text("DELETE FROM analytics.ad_raw WHERE seller_id LIKE 'TEST_%'")
-        )
+        conn.execute(text("DELETE FROM analytics.ad_raw WHERE seller_id LIKE 'TEST_%'"))
         # pi-lens-ignore: python-sql-injection
         conn.execute(
             text(
@@ -131,16 +129,28 @@ def _seed_shop(sess, seller: str) -> int:
     ).scalar_one()
 
 
-def _seed_spu(sess, shop_pk: int, spu_id: str, *, title: str | None = None) -> int:
+def _seed_spu(
+    sess,
+    shop_pk: int,
+    spu_id: str,
+    *,
+    title: str | None = None,
+    status: str = "ACTIVATE",
+) -> int:
     # pi-lens-ignore: python-sql-injection
     return sess.execute(
         text(
             "INSERT INTO commerce.products_spu "
             "(shop_pk, spu_id, title, status, main_image_url) "
-            "VALUES (:shop, :sid, :title, 'ACTIVATE', 'https://img.test/x.png') "
+            "VALUES (:shop, :sid, :title, :status, 'https://img.test/x.png') "
             "RETURNING id"
         ),
-        {"shop": shop_pk, "sid": spu_id, "title": title or f"{spu_id} 标题"},
+        {
+            "shop": shop_pk,
+            "sid": spu_id,
+            "title": title or f"{spu_id} 标题",
+            "status": status,
+        },
     ).scalar_one()
 
 
@@ -215,11 +225,15 @@ def _seed_order_line(
     qty: str,
     unit_price: str,
     paid: bool,
+    paid_iso: str | None = None,
 ) -> int:
-    """插入一单(可带多行);返回 order id。"""
+    """插入一单(可带多行);返回 order id。
+
+    paid_iso 自定义 paid_at(ISO,默认 2026-09-01),供窗口裁剪测试。
+    """
     paid_at = None
     if paid:
-        paid_at = "2026-09-01T08:00:00+00:00"
+        paid_at = paid_iso or "2026-09-01T08:00:00+00:00"
     # pi-lens-ignore: python-sql-injection
     order_pk = sess.execute(
         text(
@@ -257,8 +271,12 @@ def _seed_case(
     ext_case: str,
     case_type: str,
     status: str,
-    lines: list[tuple[int, str, str, str | None]],  # (sales_order_line_id, ext, qty, refund_amt)
+    lines: list[
+        tuple[int, str, str, str | None]
+    ],  # (sales_order_line_id, ext, qty, refund_amt)
+    updated_iso: str | None = None,
 ) -> None:
+    updated = updated_iso or "2026-09-03T00:00:00+00:00"
     case_pk = sess.execute(
         text(
             "INSERT INTO after_sales.cases "
@@ -266,10 +284,17 @@ def _seed_case(
             " created_at_source, updated_at_source, currency) "
             "VALUES (:shop, :o, :ec, :ct, :st, "
             " CAST('2026-09-02T00:00:00+00:00' AS timestamptz), "
-            " CAST('2026-09-03T00:00:00+00:00' AS timestamptz), 'VND') "
+            " CAST(:updated AS timestamptz), 'VND') "
             "RETURNING id"
         ),
-        {"shop": shop_pk, "o": order_pk, "ec": ext_case, "ct": case_type, "st": status},
+        {
+            "shop": shop_pk,
+            "o": order_pk,
+            "ec": ext_case,
+            "ct": case_type,
+            "st": status,
+            "updated": updated,
+        },
     ).scalar_one()
     for line_pk, ext, qty, amt in lines:
         sess.execute(
@@ -477,6 +502,100 @@ def _seed_spu_manual(sess) -> int:
     return spu_pk
 
 
+def _seed_window_spu(sess) -> int:
+    """窗口裁剪场景 SPU(仅销售+退款,无广告):
+
+    - 窗内有效销售单 1(paid 2026-09-10)3 件×$20= $60
+    - 窗外有效销售单 2(paid 2026-08-10)2 件×$20= $40
+    - 窗内完结退货退款 1 件 $20(updated 2026-09-12)
+    - 窗外完结退货退款 1 件 $20(updated 2026-08-20)
+
+    默认(不传 w_start/w_end)= 全历史累计:units=5、sales=$100、
+    refund_return_qty=2;传 2026-09-01~09-30 → 只留窗内:units=3、
+    sales=$60、refund_return_qty=1。
+    """
+    seller = "TEST_SELLER_WIN"
+    shop_pk = _seed_shop(sess, seller)
+    spu_pk = _seed_spu(sess, shop_pk, "TEST_ROI_SPU_WIN")
+    o1 = _seed_order_line(
+        sess,
+        shop_pk=shop_pk,
+        spu_pk=spu_pk,
+        order_id="TEST_ORDER_W1",
+        status=PAID_ORDER_STATUS,
+        line_ext="TEST_LINE_W1",
+        qty="3",
+        unit_price="526600",  # $20/件 → $60
+        paid=True,
+        paid_iso="2026-09-10T08:00:00+00:00",
+    )
+    line1 = _fetch_spu_line_id(sess, "TEST_ORDER_W1")
+    _seed_order_line(
+        sess,
+        shop_pk=shop_pk,
+        spu_pk=spu_pk,
+        order_id="TEST_ORDER_W2",
+        status=PAID_ORDER_STATUS,
+        line_ext="TEST_LINE_W2",
+        qty="2",
+        unit_price="526600",  # $20/件 → $40
+        paid=True,
+        paid_iso="2026-08-10T08:00:00+00:00",
+    )
+    _seed_case(
+        sess,
+        shop_pk=shop_pk,
+        order_pk=o1,
+        ext_case="TEST_CASE_W1",
+        case_type="RETURN_AND_REFUND",
+        status="RETURN_OR_REFUND_REQUEST_COMPLETE",
+        lines=[(line1, "TEST_CLINE_W1", "1", "526600")],
+        updated_iso="2026-09-12T00:00:00+00:00",
+    )
+    _seed_case(
+        sess,
+        shop_pk=shop_pk,
+        order_pk=o1,
+        ext_case="TEST_CASE_W2",
+        case_type="RETURN_AND_REFUND",
+        status="RETURN_OR_REFUND_REQUEST_COMPLETE",
+        lines=[(line1, "TEST_CLINE_W2", "1", "526600")],
+        updated_iso="2026-08-20T00:00:00+00:00",
+    )
+    return spu_pk
+
+
+def _seed_status_mix(sess) -> None:
+    """include_all 行范围(§5.1-7):ACTIVATE vs DEACTIVATE 目录状态。
+
+    - TEST_ROI_SPU_ACTIVE_ON / DEACTIVE_ON 各有有效销售单(有活动)
+    - TEST_ROI_SPU_ACTIVE_IDLE / DEACTIVE_IDLE 仅目录行(无活动)
+    """
+    for sid, status in (
+        ("TEST_ROI_SPU_ACTIVE_ON", "ACTIVATE"),
+        ("TEST_ROI_SPU_DEACTIVE_ON", "DEACTIVATE"),
+    ):
+        shop = _seed_shop(sess, f"TEST_SELLER_{sid}")
+        spu = _seed_spu(sess, shop, sid, status=status)
+        _seed_order_line(
+            sess,
+            shop_pk=shop,
+            spu_pk=spu,
+            order_id=f"TEST_ORDER_{sid}",
+            status=PAID_ORDER_STATUS,
+            line_ext=f"TEST_LINE_{sid}",
+            qty="1",
+            unit_price="263300",  # $10
+            paid=True,
+        )
+    for sid, status in (
+        ("TEST_ROI_SPU_ACTIVE_IDLE", "ACTIVATE"),
+        ("TEST_ROI_SPU_DEACTIVE_IDLE", "DEACTIVATE"),
+    ):
+        shop = _seed_shop(sess, f"TEST_SELLER_{sid}")
+        _seed_spu(sess, shop, sid, status=status)
+
+
 def _commit_all(sess) -> None:
     sess.commit()
 
@@ -647,6 +766,173 @@ def test_spu_roi_excludes_inactive_by_default_includes_with_flag(
     assert zero["cpa"] is None
 
 
+def test_spu_roi_include_all_filters_non_active_status(
+    api_client, readonly_key, db_engine
+):
+    """§5.1-7 include_all = 全部 ACTIVE SPU:DEACTIVATE 状态不进行范围。
+
+    默认(不含 include_all)仍按"有活动"返回(不按状态裁剪),include_all
+    目录查询加 status ILIKE 'activate' 后 DEACTIVATE 目录行被排除。
+    """
+    with Session(db_engine) as sess:
+        _seed(sess, _seed_status_mix)
+
+    h = {"Authorization": f"Bearer {readonly_key}"}
+    # 默认:有活动的 ACTIVATE + DEACTIVATE 都在(状态不参与默认行范围)
+    r = api_client.get("/v2/analytics/spu-roi", headers=h, params={"q": Q})
+    body = r.json()
+    assert body["total"] == 2
+    by_id = {i["spu_id"] for i in body["items"]}
+    assert by_id == {"TEST_ROI_SPU_ACTIVE_ON", "TEST_ROI_SPU_DEACTIVE_ON"}
+
+    # include_all=true:只含 ACTIVE 状态(含无活动),DEACTIVATE 一律排除
+    r2 = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=h,
+        params={"q": Q, "include_all": "true"},
+    )
+    body2 = r2.json()
+    assert body2["total"] == 2
+    by_id2 = {i["spu_id"] for i in body2["items"]}
+    assert by_id2 == {"TEST_ROI_SPU_ACTIVE_ON", "TEST_ROI_SPU_ACTIVE_IDLE"}
+    assert "TEST_ROI_SPU_DEACTIVE_ON" not in by_id2
+    assert "TEST_ROI_SPU_DEACTIVE_IDLE" not in by_id2
+
+
+def test_spu_roi_window_params_clip_sales_and_refunds(
+    api_client, readonly_key, db_engine
+):
+    """w_start/w_end 裁剪销售(paid_at)与退款(updated_at_source);
+    不传 = 全历史累计(§4.5)。"""
+    with Session(db_engine) as sess:
+        _seed(sess, _seed_window_spu)
+
+    h = {"Authorization": f"Bearer {readonly_key}"}
+    # 默认(无窗口参数):全历史累计 → 两单两退款都在
+    r = api_client.get(
+        "/v2/analytics/spu-roi", headers=h, params={"q": "TEST_ROI_SPU_WIN"}
+    )
+    body = r.json()
+    assert body["total"] == 1
+    item = body["items"][0]
+    assert item["order_count"] == 2
+    assert item["units_sold"] == 5
+    assert item["sales"] == "100.0000"
+    assert item["refund_return_qty"] == 2
+    assert item["refund_return_amount"] == "40.0000"
+    # meta.window 如实注记:ad=视图全窗口累计;销售/退款=全历史(未裁剪)
+    assert "ad=视图全窗口累计" in body["meta"]["window"]["note"]
+    assert "未裁剪" in body["meta"]["window"]["note"]
+
+    # 传窗口:早于 2026-09-01 的销售单/退款 case 被排除(窗口边界含 w_end 当日)
+    r2 = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=h,
+        params={
+            "q": "TEST_ROI_SPU_WIN",
+            "w_start": "2026-09-01",
+            "w_end": "2026-09-30",
+        },
+    )
+    body2 = r2.json()
+    assert body2["total"] == 1
+    item2 = body2["items"][0]
+    assert item2["order_count"] == 1, item2  # 窗外 TEST_ORDER_W2 被排除
+    assert item2["units_sold"] == 3
+    assert item2["sales"] == "60.0000"
+    assert item2["refund_return_qty"] == 1  # 窗外 2026-08-20 case 被排除
+    assert item2["refund_return_amount"] == "20.0000"
+    assert "已裁剪" in body2["meta"]["window"]["note"]
+
+
+def test_spu_roi_sort_whitelist_covers_page_sortable_columns(
+    api_client, readonly_key, db_engine
+):
+    """页面 spu-roi.js 可排序列名 ⊆ 端点 sort 白名单(不再 422)。
+
+    spu-roi.js 的 SORTABLE 集合与端点 Literal 白名单必须同步:遍历
+    JS 中每个可排序列名 → sort=<列> 请求必须 200。
+    """
+    import re
+    from pathlib import Path
+
+    js_path = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "spu-roi.js"
+    )
+    src = js_path.read_text(encoding="utf-8")
+    m = re.search(r"(?s)var SORTABLE = new Set\(\[(.*?)\]\);", src)
+    assert m, "spu-roi.js 找不到 SORTABLE 集合"
+    fields = re.findall(r'"([a-z0-9_]+)"', m.group(1))
+    assert fields, "SORTABLE 集合为空"
+
+    with Session(db_engine) as sess:
+        _seed(sess, _seed_scenario_a)
+    h = {"Authorization": f"Bearer {readonly_key}"}
+    for field in fields:
+        r = api_client.get(
+            "/v2/analytics/spu-roi",
+            headers=h,
+            params={"q": Q, "sort": field},
+        )
+        assert r.status_code == 200, f"sort={field} 应 200,得 {r.status_code}"
+    # 未知 sort 值仍 422(白名单收紧语义)
+    assert (
+        api_client.get(
+            "/v2/analytics/spu-roi", headers=h, params={"sort": "nope"}
+        ).status_code
+        == 422
+    )
+
+
+def test_spu_roi_totals_roi_real_native_reconciliation(
+    api_client, readonly_key, db_engine
+):
+    """totals.roi_real 服务端计算 = Σ(net_cash−return_loss)/Σspend。
+
+    原生值对账:用种子层的原生 VND/CNY/USD 值按"合计后一次换算"推导
+    期望(§5.4-4),与端点返回的 2 位小数字符串一致;不用浏览器端舍入值。
+    """
+    with Session(db_engine) as sess:
+        _seed(sess, _seed_scenario_a)  # net_cash_vnd 2106400 / spend 10
+        _seed(sess, _seed_spu_b)  # 2369700 / spend 50
+        _seed(sess, _seed_spu_c)  # 789900 / spend 10
+
+    h = {"Authorization": f"Bearer {readonly_key}"}
+    r = api_client.get("/v2/analytics/spu-roi", headers=h, params={"q": Q})
+    body = r.json()
+    assert body["total"] == 3
+
+    # 原生合计(种子已知):Σ net_cash_vnd 恰被 fx 整除 → 200 整
+    native_net_cash_vnd = Decimal(2106400 + 2369700 + 789900)
+    total_return_loss = Decimal("4.4322")  # A:1 件×30 CNY×0.14774
+    total_spend = Decimal(70)
+    nc_prime = native_net_cash_vnd / USD_VND - total_return_loss
+    expected = m2(nc_prime / total_spend)
+    assert expected == "2.79"
+    assert body["totals"]["roi_real"] == expected
+
+
+def test_spu_roi_totals_roi_real_single_row_matches_item(
+    api_client, readonly_key, db_engine
+):
+    """单行场景:totals.roi_real == 该行 roi_real(同源同公式)。"""
+    with Session(db_engine) as sess:
+        _seed(sess, _seed_scenario_a)
+    r2 = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+        params={"q": "TEST_ROI_SPU_A"},
+    )
+    body2 = r2.json()
+    assert body2["total"] == 1
+    assert body2["totals"]["roi_real"] == body2["items"][0]["roi_real"]
+    assert body2["totals"]["roi_real"] == "7.56"
+
+
 # ─── 分页 / 搜索 / 排序 ───────────────────────────────────────────────
 
 
@@ -687,7 +973,9 @@ def test_spu_roi_default_sort_roi_asc_pagination_and_totals(
         "refund_net_amount": sum(
             (Decimal(i["refund_net_amount"]) for i in body["items"]), Decimal(0)
         ),
-        "net_profit": sum((Decimal(i["net_profit"]) for i in body["items"]), Decimal(0)),
+        "net_profit": sum(
+            (Decimal(i["net_profit"]) for i in body["items"]), Decimal(0)
+        ),
     }
     assert m4(row_sum["spend"]) == totals["spend"]
     assert m4(row_sum["sales"]) == totals["sales"]
@@ -798,6 +1086,7 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
         "refund_net_amount": "0.0000",
         "return_loss": "0.0000",
         "net_profit": "0.0000",
+        "roi_real": None,  # Σspend=0 → null(页面显示 —)
     }
     meta = body["meta"]
     assert meta["fx"] == {
@@ -812,6 +1101,9 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
     assert meta["cost_assumption"]
     assert "first_day" in meta["window"]
     assert "last_day" in meta["window"]
+    # meta.window = ad 视图全窗口供参考(§4.5:销售/退款默认不裁剪)
+    assert "ad=视图全窗口累计" in meta["window"]["note"]
+    assert "w_start/w_end" in meta["window"]["note"]
     assert meta["unattributed_refund_lines"] >= 0
     assert meta["computed_at"]
     assert meta["currency"] == {
@@ -905,3 +1197,112 @@ def test_spu_roi_js_targets_dashboard_hooks():
     assert "roi_breakeven" in src  # 红绿判据字段
     assert "cost_source" in src
     assert "DEFAULT_K1" in src  # ⚠ 判断
+
+
+def test_spu_roi_page_header_summary_has_loss_cell(api_client, readonly_key):
+    """§7.1 结余带补"全损货损"格(JS 消费 totals.return_loss)。"""
+    from pathlib import Path
+
+    r = api_client.get(
+        "/v2/pages/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    body = r.text
+    assert 'id="sum-loss"' in body, "结余带缺全损货损格"
+    assert "全损货损" in body
+    # JS 必须填充该格
+    js_src = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "spu-roi.js"
+    ).read_text(encoding="utf-8")
+    assert '("#sum-loss")' in js_src
+    assert "totals.return_loss" in js_src
+
+
+def test_spu_roi_page_column_toggle_groups_default_hidden(api_client, readonly_key):
+    """§7.5:⚙ 列开关可显隐"仅退/退货拆分、已付被取消、平台佣金"三组。
+
+    商品/ROI₀ 列头保持不可点(无 op-th-sort);信息列默认 col-hidden。
+    """
+    r = api_client.get(
+        "/v2/pages/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    body = r.text
+    # 开关三组
+    assert 'id="col-toggle-refundsplit"' in body
+    assert 'id="col-toggle-cancel"' in body
+    assert 'id="col-toggle-fee"' in body
+    assert 'data-colgroup="cg-refundsplit"' in body
+    assert 'data-colgroup="cg-cancel"' in body
+    assert 'data-colgroup="cg-fee"' in body
+    # 信息列默认隐藏(col-hidden)+ data-cg 供 JS 切换
+    for cg in ("cg-refundsplit", "cg-cancel", "cg-fee"):
+        assert f'data-cg="{cg}"' in body
+    assert "col-hidden" in body
+    # 商品/ROI₀ 不可点:其表头不带 op-th-sort
+    import re
+
+    sortable = re.findall(
+        r'class="op-th[^"]*op-th-sort[^"]*" data-sort="([a-z0-9_]+)"', body
+    )
+    assert sortable
+    assert "spu_id" not in sortable
+    assert "roi_l0" not in sortable
+
+
+def test_spu_roi_page_sortable_headers_within_endpoint_whitelist(
+    api_client, readonly_key, db_engine
+):
+    """页面可点列头 ⊆ 端点 sort 白名单:每个 data-sort 请求 200(不再 422)。"""
+    import re
+
+    r = api_client.get(
+        "/v2/pages/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    body = r.text
+    fields = re.findall(
+        r'class="op-th[^"]*op-th-sort[^"]*" data-sort="([a-z0-9_]+)"', body
+    )
+    assert fields
+    with Session(db_engine) as sess:
+        _seed(sess, _seed_scenario_a)
+    h = {"Authorization": f"Bearer {readonly_key}"}
+    for field in fields:
+        r2 = api_client.get(
+            "/v2/analytics/spu-roi",
+            headers=h,
+            params={"q": Q, "sort": field},
+        )
+        assert r2.status_code == 200, f"sort={field} 应 200,得 {r2.status_code}"
+
+
+def test_spu_roi_js_review_fixes_present():
+    """review 修复守卫:操作员身份 / 无投放 / 标色常量 / 服务端 ROI。"""
+    from pathlib import Path
+
+    js_path = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "spu-roi.js"
+    )
+    src = js_path.read_text(encoding="utf-8")
+    # finding 6:loadMe 用 authenticated===true 守卫(而非不存在的 key_prefix)
+    assert "authenticated === true" in src
+    # finding 5-④:§7.2 标色阈值常量
+    assert "ROI_HARD_LOSS" in src
+    assert "PASS_LINE" in src
+    assert "REFUND_RATE_ALERT" in src
+    # finding 5-②:无投放文案
+    assert "无投放" in src
+    # finding 5-③:列开关 + 信息列字段
+    assert "col-hidden" in src
+    assert "data-cg" in src
+    # finding 2:结余带直接消费 totals.roi_real,页面不反推 ROI
+    assert "totals.roi_real" in src

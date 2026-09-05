@@ -1,5 +1,17 @@
 # tts-erp CHANGELOG
 
+## 2026-09-05 (fix) — SPU 实际 ROI 看板 code review 修复（6 findings）
+
+review 回修，口径仍以 `tech-doc/analytics/spu-real-roi-dashboard.md` §4/§5/§7 为准：
+
+- **排序白名单扩全**：`GET /v2/analytics/spu-roi` 的 `sort` 从 5 列扩到页面可排序的全部纯数值列（+`ad_count/gmv_ad/order_count/units_sold/refund_net_amount/return_loss/roi_breakeven`），列头点击不再 422；同值次级键 spend DESC 保持可复现。商品/ROI₀ 表头改为不可点。
+- **totals.roi_real（服务端单点真相）**：结余带整体 ROI 改为消费端点 `totals.roi_real`（服务端 Σ(net_cash−return_loss)/Σspend，原生 VND 合计后一次换算 USD，2 位小数串；Σspend=0 → null），页面删除客户端除法；新增原生值对账测试。
+- **时间窗口参数 `w_start`/`w_end`**（可选 ISO 日期）：提供时销售按 `paid_at`、退款按 `updated_at_source` 裁剪（含 w_end 当日）；**不传 = 全历史累计**；`meta.window` 改为如实注记（ad=视图全窗口累计供参考 + note 明示销售/退款是否裁剪）。spec §4.5/§5.1-6 措辞同步。
+- **include_all 限 ACTIVE**：include_all 分支目录查询加 `cp.status ILIKE 'activate'`，DEACTIVATE/DELETED 等不再拉入（§5.1-7）。
+- **页面 UI 补齐（§7）**：结余带补“全损货损”格；广告数=0 行显示“无投放”；新增 ⚙ 列开关（仅退/退货拆分、已付被取消、平台佣金三组默认折叠可显隐）；标色补全 §7.2（ROI<1.0 深红红底 / ≥保本<1.5 浅橙 / 退款率>30% ⚠+红字）。
+- **操作员身份修复**：`spu-roi.js` 改用 `/v2/auth/me` 的 `authenticated===true` + role 显示操作员身份（原恒显“登录”），退出走 POST /v2/auth/logout。
+- 测试：`tests/api/test_spu_roi_api.py` 14 → 23（新增排序白名单/窗口裁剪/include_all ACTIVE/totals ROI 原生对账/页面与 JS 契约断言）。
+
 ## 2026-09-05 (feat) — SPU 实际 ROI 看板（只读端点 + 账页式页面）
 
 按 `tech-doc/analytics/spu-real-roi-dashboard.md`（§4/§5/§7 口径）实施：
@@ -20,7 +32,7 @@
 - **sales_orders 时间列（D1，仅此表）**：`source_created_at→order_time`、`source_updated_at→order_modify_time`
 - **API（D2/D3）**：响应字段同步（shop_id/spu_id/sku_id/order_id/order_time/order_modify_time）；路径参数 `{account_id}/{product_id}/{order_id}→{shop_pk}/{spu_pk}/{order_pk}`（by-external→`{shop_id}`）；external-api.md 活契约已同步
 - **视图重建**：`linkage.effective_product_links` / `analytics.ad_product_links`（source 引用+输出列）
-- **保留**：procurement/miaoshou/credentials 同名词、快照列 external_*_snapshot、SPU 等 scope-A 的 source_*、DB 对象名（约束/索引）不变
+- **保留**：procurement/miaoshou/credentials 同名词、快照列 external_**snapshot、SPU 等 scope-A 的 source**、DB 对象名（约束/索引）不变
 - 验证：rename-scratch + live 全量 fast 912 passed / 0 fail；备份 `backups/tts_erp_pre_commerce_rename_20260905T210856Z.sql.gz`
 
 ## 2026-09-05 (fix) — 全量测试稳定性：修两个顺序/残留依赖 bug
@@ -96,7 +108,7 @@ v2 切流的 v1 数据回查窗口提前收口：按 `tech-doc/refactor-tech-pla
 ### 测试
 
 - `tests/analytics/test_repository.py`:删 fetch_timezone 3 个 + write_audit 2 个 +
-  purge_expired 2 个 + _add_days / _subtract_days 6 个测试（共 13 删）;
+  purge_expired 2 个 +_add_days /_subtract_days 6 个测试（共 13 删）;
   cleanup 从 5 张表缩为 1 张（ad_raw）。upsert_dump 行为测试保留并
   加注释说明「派生表已 drop,新代码只写 ad_raw」
 - `tests/api/test_analytics_v2_contract.py`:`test_v2_dumps_audit_log_written`

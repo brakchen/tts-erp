@@ -37,13 +37,13 @@ router = APIRouter(prefix="/v2/pages", tags=["pages"])
 
 @router.get("/spu-roi", response_class=HTMLResponse)
 def spu_roi_page() -> HTMLResponse:
-    """SPU 实际 ROI 看板(账页式,§7 of tech-doc/analytics/spu-real-roi-dashboard.md)。
+  """SPU 实际 ROI 看板(账页式,§7 of tech-doc/analytics/spu-real-roi-dashboard.md)。
 
-    HTML shell 只做骨架:标题/结余带/工具栏/表格容器/分页;数据与业务计算
-    全部消费 GET /v2/analytics/spu-roi(只读,§5.1-1 页面不计算业务数字)。
-    样式沿用操作台家族 token(warm-paper),行为在 static/js/spu-roi.js。
-    """
-    return HTMLResponse(_SPU_ROI_PAGE_HTML)
+  HTML shell 只做骨架:标题/结余带/工具栏/表格容器/分页;数据与业务计算
+  全部消费 GET /v2/analytics/spu-roi(只读,§5.1-1 页面不计算业务数字)。
+  样式沿用操作台家族 token(warm-paper),行为在 static/js/spu-roi.js。
+  """
+  return HTMLResponse(_SPU_ROI_PAGE_HTML)
 
 
 @router.get("/manual-costs", response_class=HTMLResponse)
@@ -682,6 +682,20 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       text-transform: uppercase; user-select: none;
     }
 
+    /* ---------- 列开关 ⚙(§7.5) ---------- */
+    .op-colswitch {
+      display: inline-flex; align-items: center; gap: 12px; flex-wrap: wrap;
+      text-transform: none; letter-spacing: 0;
+    }
+    .op-cols-title { color: var(--muted); cursor: default; }
+    .op-cols-item {
+      display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+      color: var(--ink);
+    }
+    .op-cols-item:hover { color: var(--accent); }
+    .op-cols-item input { width: auto; margin: 0; cursor: pointer; accent-color: var(--accent); }
+    .col-hidden { display: none; }
+
     /* ---------- 工具栏 ---------- */
     .op-toolbar {
       display: flex; align-items: center; gap: 26px; flex-wrap: wrap;
@@ -734,6 +748,18 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     tr.row-bad td { background: rgba(140, 26, 26, 0.045); }
     tr.row-bad .roi-red { color: var(--danger); font-weight: 700; }
     tr.row-bad .np-red { color: var(--danger); font-weight: 700; }
+    /* §7.2 标色:实际ROI<1.0 更深红红底浅字(广告回本线) */
+    .roi-hard {
+      background: #7f1212; color: #fdf3ec; font-weight: 700;
+      padding: 2px 6px;
+    }
+    /* §7.2:≥保本但 < 及格线 1.5 → 浅橙,不标红 */
+    .roi-subpar { color: var(--warn); font-weight: 700; }
+    /* §7.2:退款率 > 30% → 退款率红字 */
+    .rr-high { color: var(--danger); font-weight: 700; }
+    .warn-rr { color: var(--warn); cursor: help; font-size: 12px; }
+    /* §5.1-5:无投放文案 */
+    .no-ad { color: var(--muted); letter-spacing: 0.04em; }
     .td-spu { font-family: var(--mono); font-size: 11px; color: var(--muted); }
     .td-title { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .td-null { color: var(--rule); }
@@ -783,6 +809,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       <span class="op-counter-item"><span class="op-counter-label">消耗 $</span><span class="op-counter-num" id="sum-spend">—</span></span>
       <span class="op-counter-item"><span class="op-counter-label">有效销售 $</span><span class="op-counter-num" id="sum-sales">—</span></span>
       <span class="op-counter-item"><span class="op-counter-label">退款净额 $</span><span class="op-counter-num" id="sum-refund">—</span></span>
+      <span class="op-counter-item"><span class="op-counter-label">全损货损 $</span><span class="op-counter-num" id="sum-loss">—</span></span>
       <span class="op-counter-item"><span class="op-counter-label">净利润 $</span><span class="op-counter-num" id="sum-profit">—</span></span>
       <span class="op-counter-item"><span class="op-counter-label">整体实际 ROI</span><span class="op-counter-num" id="sum-roi">—</span></span>
       <span class="op-counter-stamp" id="sum-stamp">ROI · 账页</span>
@@ -809,6 +836,12 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
         <span>含无活动</span>
         <input id="filter-include-all" type="checkbox" style="width:auto">
       </label>
+      <span class="op-colswitch" id="colswitch" title="列开关：显示/隐藏信息列（§7.5 默认折叠）">
+        <span class="op-cols-title">⚙ 列</span>
+        <label class="op-cols-item"><input type="checkbox" id="col-toggle-refundsplit" class="col-toggle" data-colgroup="cg-refundsplit">仅退/退货拆分</label>
+        <label class="op-cols-item"><input type="checkbox" id="col-toggle-cancel" class="col-toggle" data-colgroup="cg-cancel">已付被取消</label>
+        <label class="op-cols-item"><input type="checkbox" id="col-toggle-fee" class="col-toggle" data-colgroup="cg-fee">平台佣金</label>
+      </span>
       <button type="button" class="op-btn" id="btn-refresh">刷新</button>
       <span class="op-sortable-note" id="sort-note">默认排序：实际 ROI ↑（最亏在前）</span>
     </section>
@@ -817,18 +850,26 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       <table class="op-table" aria-live="polite">
         <thead class="op-sticky">
           <tr id="head-row">
-            <th scope="col" class="op-th op-th-left op-th-sort" data-sort="spu_id">商品</th>
+            <th scope="col" class="op-th op-th-left">商品</th>
             <th scope="col" class="op-th op-th-sort" data-sort="ad_count">广告数</th>
             <th scope="col" class="op-th op-th-sort" data-sort="spend">消耗 USD</th>
             <th scope="col" class="op-th op-th-sort" data-sort="gmv_ad">平台GMV</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="roi_l0">ROI₀</th>
+            <th scope="col" class="op-th">ROI₀</th>
             <th scope="col" class="op-th op-th-sort" data-sort="order_count">有效单</th>
             <th scope="col" class="op-th op-th-sort" data-sort="units_sold">件数</th>
             <th scope="col" class="op-th op-th-sort" data-sort="sales">销售$</th>
+            <th scope="col" class="op-th col-hidden" data-cg="cg-refundsplit">仅退件</th>
+            <th scope="col" class="op-th col-hidden" data-cg="cg-refundsplit">仅退$</th>
+            <th scope="col" class="op-th col-hidden" data-cg="cg-refundsplit">退货件</th>
+            <th scope="col" class="op-th col-hidden" data-cg="cg-refundsplit">退货$</th>
             <th scope="col" class="op-th op-th-sort" data-sort="refund_net_amount">退款净额$</th>
             <th scope="col" class="op-th op-th-sort" data-sort="refund_rate">退款率%</th>
+            <th scope="col" class="op-th col-hidden" data-cg="cg-cancel">取消件</th>
+            <th scope="col" class="op-th col-hidden" data-cg="cg-cancel">取消退款$</th>
+            <th scope="col" class="op-th col-hidden" data-cg="cg-cancel">金额未知行</th>
             <th scope="col" class="op-th op-th-sort" data-sort="net_profit">净利润$</th>
             <th scope="col" class="op-th op-th-sort" data-sort="return_loss">货损$</th>
+            <th scope="col" class="op-th col-hidden" data-cg="cg-fee">平台佣金$</th>
             <th scope="col" class="op-th op-th-sort" data-sort="roi_breakeven">保本</th>
             <th scope="col" class="op-th op-th-sort" data-sort="roi_real">实际ROI</th>
           </tr>

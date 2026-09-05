@@ -273,17 +273,19 @@ Query parameters:
 | name | type | default | notes |
 | --- | --- | --- | --- |
 | `q` | string | — | `spu_id` 子串搜索(ILIKE) |
-| `sort` | enum | `roi_real` | `roi_real` \| `spend` \| `refund_rate` \| `net_profit` \| `sales` |
+| `sort` | enum | `roi_real` | `roi_real` \| `spend` \| `refund_rate` \| `net_profit` \| `sales` \| `ad_count` \| `gmv_ad` \| `order_count` \| `units_sold` \| `refund_net_amount` \| `return_loss` \| `roi_breakeven`(与页面可排序列一致;同值次级键 spend DESC 保证可复现) |
 | `order` | enum | `asc` | `asc` \| `desc`;默认实际 ROI 升序(最亏在前) |
 | `limit` | int | 100 | 1..500(分页 v2 约定) |
 | `offset` | int | 0 | ≥ 0 |
-| `include_all` | bool | `false` | `false` 只含有广告∨有效销售∨退款的 SPU;`true` 拉全部目录 SPU |
+| `include_all` | bool | `false` | `false` 只含有广告∨有效销售∨退款的 SPU;`true` 拉全部 **ACTIVE**(status ILIKE 'activate')目录 SPU(DEACTIVATE/DELETED 等排除) |
 | `shop_pk` | int | — | 店铺过滤(内部主键) |
 | `fee_rate` | decimal-str | — | 平台佣金费率页面覆写;缺省固定基线 `0.1156`(决策 D10) |
+| `w_start` | date | — | ISO `yyyy-mm-dd`;提供时销售按 `paid_at`、退款按 `updated_at_source` 裁剪(含当日) |
+| `w_end` | date | — | ISO `yyyy-mm-dd`;与 `w_start` 配对使用;不提供 `w_start`/`w_end` = 销售/退款**全历史累计**(ad 无日期参数,恒整窗累计,§4.5) |
 
 Response envelope:`{items: [...], total, totals, meta}`。每行字段与公式一一对应(`spu_pk, spu_id, title, status, main_image_url, shop_id, shop_name, ad_count, ad_orders, spend, gmv_ad, roi_l0, ad_first_day, ad_last_day, order_count, units_sold, sales, refund_only_qty, refund_only_amount, refund_return_qty, refund_return_amount, refund_net_qty, refund_net_amount, refund_rate, refund_cancelled_qty, refund_cancelled_amount, refund_cancelled_missing_lines, return_loss, net_profit, platform_fee, roi_real, roi_breakeven, cpa, unit_cost_used, cost_source`)。
 
-格式化约定(§5.1):**money = 4 位小数字符串**、比率/ROI = 2 位小数字符串、件数整数;`null` = 无解/除数为 0(页面显示 `—`);无投放 SPU `spend="0.0000"` + `ad_count=0`。全表金额统一 USD(原币 VND/CNY 服务端按固定汇率 26,330 / 0.14774 一次换算,meta.fx 标注)。`totals` = 跨分页、当前筛选的行级服务端加总(`row_count, spend, sales, refund_net_amount, return_loss, net_profit`);`total` = 匹配行数。`meta` 携带 fx/fee/cost_assumption/window/unattributed_refund_lines/computed_at/currency。
+格式化约定(§5.1):**money = 4 位小数字符串**、比率/ROI = 2 位小数字符串、件数整数;`null` = 无解/除数为 0(页面显示 `—`);无投放 SPU `spend="0.0000"` + `ad_count=0`。全表金额统一 USD(原币 VND/CNY 服务端按固定汇率 26,330 / 0.14774 一次换算,meta.fx 标注)。`totals` = 跨分页、当前筛选的行级服务端加总(`row_count, spend, sales, refund_net_amount, return_loss, net_profit, roi_real`;`roi_real` = Σ(net_cash−return_loss)/Σspend,原生合计后一次换算,Σspend=0 → null);`total` = 匹配行数。`meta` 携带 fx/fee/cost_assumption/window/unattributed_refund_lines/computed_at/currency;`meta.window` 为 ad 视图观测窗口(供参考),销售/退款是否裁剪见 `note`。
 
 Example:
 
