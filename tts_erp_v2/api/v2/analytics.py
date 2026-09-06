@@ -918,6 +918,29 @@ _SQL_ROI_WINDOW = text(
     "FROM analytics.ad_product_links"
 )
 
+_SQL_ROI_DATA_WINDOW = text(
+    """
+    -- 起始/截止日可裁剪数据(销售∪退款)的真实时间跨度:供页面回填日期框。
+    -- 范围与 w_start/w_end 的实际裁剪口径一致(销售按 paid_at、退款按
+    -- updated_at_source、同一批状态白名单),不传窗口时全跨度 = 不限。
+    -- 注意:ad 不在此列 —— 广告视图按窗口聚合无法按日切片,日期不影响 ad。
+    WITH croppable AS (
+        SELECT (so.paid_at AT TIME ZONE 'UTC')::date AS d
+        FROM commerce.sales_orders so
+        WHERE so.status = ANY(CAST(:paid_statuses AS text[]))
+          AND (CAST(:shop_pk AS bigint) IS NULL
+               OR so.shop_pk = CAST(:shop_pk AS bigint))
+        UNION
+        SELECT (c.updated_at_source AT TIME ZONE 'UTC')::date AS d
+        FROM after_sales.cases c
+        WHERE c.status IN (:st0, :st1)
+          AND (CAST(:shop_pk AS bigint) IS NULL
+               OR c.shop_pk = CAST(:shop_pk AS bigint))
+    )
+    SELECT min(d) AS first_day, max(d) AS last_day FROM croppable
+    """
+)
+
 _SQL_ROI_UNATTRIBUTED = text(
     """
     SELECT count(*)::int AS n
@@ -1210,6 +1233,19 @@ def _query_spu_roi(
 
     # ── meta(§5.3)────────────────────────────────────────────────────
     window_row = sess.execute(_SQL_ROI_WINDOW).mappings().first()
+    data_window_row = (
+        sess.execute(
+            _SQL_ROI_DATA_WINDOW,
+            {
+                "paid_statuses": _PAID_STATUSES,
+                "st0": _CASE_COMPLETED_STATUSES[0],
+                "st1": _CASE_COMPLETED_STATUSES[1],
+                "shop_pk": shop_pk,
+            },
+        )
+        .mappings()
+        .first()
+    )
     unattributed = (
         sess.execute(
             _SQL_ROI_UNATTRIBUTED,
@@ -1264,6 +1300,18 @@ def _query_spu_roi(
             ),
             "last_day": (
                 window_row["last_day"].isoformat() if window_row["last_day"] else None
+            ),
+            #: 日期过滤可裁剪数据(销售∪退款)的真实跨度 —— 页面用它把起始/
+            #: 截止日按当前数据真实呈现(全跨度 = 不限,结果一致;仅回填展示)。
+            "coverage_first_day": (
+                data_window_row["first_day"].isoformat()
+                if data_window_row and data_window_row["first_day"]
+                else None
+            ),
+            "coverage_last_day": (
+                data_window_row["last_day"].isoformat()
+                if data_window_row and data_window_row["last_day"]
+                else None
             ),
             "note": window_note,
         },

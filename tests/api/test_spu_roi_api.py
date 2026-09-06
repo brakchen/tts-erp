@@ -217,6 +217,7 @@ def _seed_ad_dump(
     spend: str,
     orders: str,
     gmv: str,
+    day: str = DAY,
 ) -> None:
     """post_product_list 一条 ad_raw(1 campaign×SPU×1 day)。"""
     # pi-lens-ignore: python-sql-injection
@@ -240,7 +241,7 @@ def _seed_ad_dump(
             "seller": seller,
             "advertiser": "TEST_ADV",
             "endpoint": "/oec_ads/shopping/v1/oec/stat/post_product_list",
-            "day": DAY,
+            "day": day,
             "campaign": campaign_id,
             "request": json.dumps({"url": "http://tiktok.test/", "body": {}}),
             "response": json.dumps(
@@ -958,11 +959,25 @@ def test_spu_roi_window_params_clip_sales_and_refunds(
     不传 = 全历史累计(§4.5)。"""
     with Session(db_engine) as sess:
         _seed(sess, _seed_window_spu)
+        win_shop_pk = sess.execute(
+            text("SELECT id FROM commerce.shops WHERE shop_id = 'TEST_SELLER_WIN'")
+        ).scalar_one()
+        rows = sess.execute(text(
+            "SELECT (so.paid_at AT TIME ZONE 'UTC')::date d FROM commerce.sales_orders so "
+            "WHERE so.shop_pk=:s AND so.status='DELIVERED' ORDER BY d"
+        ), {"s": win_shop_pk}).all()
+        crow = sess.execute(text(
+            "SELECT (c.updated_at_source AT TIME ZONE 'UTC')::date d FROM after_sales.cases c "
+            "WHERE c.shop_pk=:s ORDER BY d"
+        ), {"s": win_shop_pk}).all()
 
     h = {"Authorization": f"Bearer {readonly_key}"}
-    # 默认(无窗口参数):全历史累计 → 两单两退款都在
+    # 默认(无窗口参数):全历史累计 → 两单两退款都在(带 shop_pk:coverage 只算本店,
+    # 断言确定性,不受共享库其它店铺真实数据影响)
     r = api_client.get(
-        "/v2/analytics/spu-roi", headers=h, params={"q": "TEST_ROI_SPU_WIN"}
+        "/v2/analytics/spu-roi",
+        headers=h,
+        params={"q": "TEST_ROI_SPU_WIN", "shop_pk": win_shop_pk},
     )
     body = r.json()
     assert body["total"] == 1
@@ -975,6 +990,11 @@ def test_spu_roi_window_params_clip_sales_and_refunds(
     # meta.window 如实注记:ad=视图全窗口累计;销售/退款=全历史(未裁剪)
     assert "ad=视图全窗口累计" in body["meta"]["window"]["note"]
     assert "未裁剪" in body["meta"]["window"]["note"]
+    # 日期可裁剪数据(销售∪退款)的真实跨度:窗外 2026-08-10/2026-08-20 +
+    # 窗内 2026-09-10/2026-09-12 → min=08-10, max=09-12(页面回填日期框)
+    w = body["meta"]["window"]
+    assert w["coverage_first_day"] == "2026-08-10"
+    assert w["coverage_last_day"] == "2026-09-12"
 
     # 传窗口:早于 2026-09-01 的销售单/退款 case 被排除(窗口边界含 w_end 当日)
     r2 = api_client.get(
@@ -995,6 +1015,77 @@ def test_spu_roi_window_params_clip_sales_and_refunds(
     assert item2["refund_return_qty"] == 1  # 窗外 2026-08-20 case 被排除
     assert item2["refund_return_amount"] == "20.0000"
     assert "已裁剪" in body2["meta"]["window"]["note"]
+
+
+def test_spu_roi_date_window_does_not_clip_ad(api_client, readonly_key, db_engine):
+    """review 结论实证:起始/截止日只裁剪销售(paid_at)与退款(updated_at_source),
+    广告 spend/gmv/ad_count 不受 w_start/w_end 影响(ad=视图全窗口累计供参考)。
+
+    回归护栏:防止将来有人把 ad 也悄悄按日期切片 → ROI 分母(全窗口 spend)
+    与分子(裁剪后净现金)口径错配而无提示。
+    """
+    with Session(db_engine) as sess:
+        shop_pk = _seed_shop(sess, "TEST_SELLER_WAD")
+        spu_pk = _seed_spu(sess, shop_pk, "TEST_ROI_SPU_WAD")
+        # 广告行落在窗口之外(2026-06-01)——若 ad 被日期裁剪就会消失
+        _seed_ad_dump(
+            sess,
+            seller="TEST_SELLER_WAD",
+            product_id="TEST_ROI_SPU_WAD",
+            campaign_id="CAMP_OUTSIDE_WINDOW",
+            spend="25",
+            orders="0",
+            gmv="30",
+            day="2026-06-01",
+        )
+        # 两笔销售:窗内(09-10)与窗外(08-10)各 $20
+        _seed_order_line(
+            sess,
+            shop_pk=shop_pk,
+            spu_pk=spu_pk,
+            order_id="TEST_ORDER_WAD1",
+            status=PAID_ORDER_STATUS,
+            line_ext="TEST_LINE_WAD1",
+            qty="1",
+            unit_price="526600",  # $20
+            paid=True,
+            paid_iso="2026-09-10T08:00:00+00:00",
+        )
+        _seed_order_line(
+            sess,
+            shop_pk=shop_pk,
+            spu_pk=spu_pk,
+            order_id="TEST_ORDER_WAD2",
+            status=PAID_ORDER_STATUS,
+            line_ext="TEST_LINE_WAD2",
+            qty="1",
+            unit_price="526600",
+            paid=True,
+            paid_iso="2026-08-10T08:00:00+00:00",
+        )
+        sess.commit()  # handler 用独立连接读,必须真提交(SQLAlchemy 2 上下文不自动 commit)
+    h = {"Authorization": f"Bearer {readonly_key}"}
+    # 不限窗口:ad spend 25 / sales 40 / 2 单
+    r_all = api_client.get(
+        "/v2/analytics/spu-roi", headers=h, params={"q": "TEST_ROI_SPU_WAD"}
+    )
+    item_all = r_all.json()["items"][0]
+    assert item_all["ad_count"] == 1
+    assert item_all["spend"] == "25.0000"
+    assert item_all["sales"] == "40.0000"
+    assert item_all["order_count"] == 2
+    # 裁剪到 09-01~09-30:销售只剩 1 单 $20;ad 依旧全窗口(窗外广告行仍在)
+    r_crop = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=h,
+        params={"q": "TEST_ROI_SPU_WAD", "w_start": "2026-09-01", "w_end": "2026-09-30"},
+    )
+    item_crop = r_crop.json()["items"][0]
+    assert item_crop["ad_count"] == 1, item_crop  # 广告不被日期裁剪
+    assert item_crop["spend"] == "25.0000"
+    assert item_crop["sales"] == "20.0000"
+    assert item_crop["order_count"] == 1
+    assert "已裁剪" in r_crop.json()["meta"]["window"]["note"]
 
 
 def test_spu_roi_sort_whitelist_covers_page_sortable_columns(
@@ -1342,6 +1433,10 @@ def test_spu_roi_page_toolbar_shop_and_date_filters(api_client, readonly_key):
     assert 'id="filter-w-start"' in body
     assert 'id="filter-w-end"' in body
     assert 'type="date"' in body
+    # 含无活动 hover 问号解释(? 悬停出现,data-tip 委托)
+    assert "含无活动" in body
+    assert 'class="op-hint"' in body
+    assert "没有任意活动" in body
     # 无内联事件处理器(既有 shell 约束)
     for forbidden in ("onchange=", "onclick="):
         assert forbidden not in body, f"inline handler found: {forbidden}"
@@ -1502,6 +1597,9 @@ def test_spu_roi_js_review_fixes_present():
     assert "data-cg" in src
     # finding 2:结余带直接消费 totals.roi_real,页面不反推 ROI
     assert "totals.roi_real" in src
+    # 2026-09-06:日期框按数据真实跨度回填(meta.window.coverage_*)只读一次
+    assert "coverage_first_day" in src
+    assert "datesTouched" in src
 
 
 

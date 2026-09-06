@@ -143,6 +143,7 @@
     shopPk: null, // 店铺筛选(null/""=全部店铺)
     wStart: "", // 日期范围 yyyy-mm-dd(""=不限)
     wEnd: "",
+    datesTouched: false, // 用户手动改过日期? (自动回填只发生一次,随后交还用户)
     feeRate: null, // 页面覆写费率(小数),null = 用服务端基线
     cols: {}, // ⚙ 列开关: {cg-refundsplit|cg-cancel|cg-fee: true=显示}(默认隐藏)
     sort: DEFAULT_SORT,
@@ -372,6 +373,21 @@
     }
     notes.push("默认 30元/件成本(⚠) 行会标注 · 金额已由服务端换算 USD");
     $("#foot-meta").textContent = notes.join(" · ");
+
+    // 起始/截止日真实呈现(2026-09-06):数据有可裁剪跨度(销售∪退款覆盖)且
+    // 用户未手动改过日期 → 把输入框回填成当前数据的真实时间范围。全跨度 ≡
+    // 不限,结果不变;回填仅作如实呈现,不让 ad 口径产生误解。
+    var cw = meta.window || {};
+    if (
+      cw.coverage_first_day &&
+      cw.coverage_last_day &&
+      !state.datesTouched &&
+      $("#filter-w-start").value === "" &&
+      $("#filter-w-end").value === ""
+    ) {
+      $("#filter-w-start").value = cw.coverage_first_day;
+      $("#filter-w-end").value = cw.coverage_last_day;
+    }
 
     applyColToggles(); // 新渲染的行/空态要重新应用 ⚙ 列开关
     updateSortMarkers();
@@ -668,11 +684,13 @@
     // 日期范围:空 = 不限;yyyy-mm-dd 直接作 w_start/w_end(含 w_end 当日)
     $("#filter-w-start").addEventListener("change", (e) => {
       state.wStart = e.target.value || "";
+      if (e.target.value) state.datesTouched = true; // 用户已接管,不再自动回填
       state.offset = 0;
       load();
     });
     $("#filter-w-end").addEventListener("change", (e) => {
       state.wEnd = e.target.value || "";
+      if (e.target.value) state.datesTouched = true; // 用户已接管,不再自动回填
       state.offset = 0;
       load();
     });
