@@ -44,6 +44,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from tts_erp_v2.analytics import has_data_cache
 from tts_erp_v2.analytics.domain import (
     DumpPayload,
     HasDataResult,
@@ -51,9 +52,11 @@ from tts_erp_v2.analytics.domain import (
 from tts_erp_v2.analytics.repository import (
     STORAGE_KEY_BY_PATH,
     has_data,
+    load_campaign_pairs,
     upsert_dump,
 )
 from tts_erp_v2.api.deps import get_session
+from tts_erp_v2.db.base import get_session_factory
 from tts_erp_v2.db.constants import PAID_SALES_ORDER_STATUSES
 from tts_erp_v2.fx.rates import load_rate_map
 
@@ -247,6 +250,34 @@ async def _raw_body(request: Request) -> bytes:
 # ─── Cursor endpoint (has-data 模式) ──────────────────────────────
 
 
+def _cursor_ok(
+    *,
+    request_id: str,
+    day_iso: str,
+    endpoint: str,
+    storage_key_value: str,
+    has_data: bool,
+    campaign_id: str | None,
+) -> JSONResponse:
+    """200 envelope 唯一构造点(缓存命中/DB 回源两条路径共用,body 恒同形)。"""
+    response_data: dict[str, object] = {
+        "day": day_iso,
+        "endpoint": endpoint,
+        "storageKey": storage_key_value,
+        "hasData": has_data,
+    }
+    if campaign_id is not None:
+        response_data["campaignId"] = campaign_id
+    return JSONResponse(
+        status_code=200,
+        content={
+            "code": 0,
+            "requestId": request_id,
+            "data": response_data,
+        },
+    )
+
+
 @router.get("/cursor")
 def get_cursor(
     request: Request,
@@ -255,19 +286,24 @@ def get_cursor(
     endpoint: str = Query(min_length=1, max_length=512),
     day: date = Query(...),  # noqa: B008 — FastAPI Query default 惯例
     campaignId: str | None = Query(default=None, max_length=128),
-    sess: Session = Depends(get_session),  # noqa: B008 — FastAPI DI 惯例
 ) -> JSONResponse:
     """has-data 检查:这个 (scope, endpoint, day[, campaignId]) 有没有数据。
 
     Plugin 端用此做防 TikTok 风控的预检闸,hasData=true → 跳过该天抓取。
     cursor 协议 work-list 模式 (items / nextRequiredDay / pageSize / cursor
     / timezone) 全部删除 —— tech-doc/analytics/dump-architecture.md D3。
+
+    2026-09-06 缓存(has_data_cache.py,设计见 dump-architecture.md「cursor
+    has-data 缓存」):campaign-scoped 请求先查内存 (endpoint, day) 集合 ——
+    命中不碰 DB/session;miss 才按需开 session 回源灌桶。无 campaignId 请求
+    (scope 级任意行存在性,~60/天)不缓存,走 has_data 原 EXISTS 路径。
     """
     request_id = _request_id_from_headers(request)
     key_prefix = _key_prefix(request)
+    day_iso = day.isoformat()
     audit_path = (
         f"{_PATH_CURSOR}?sellerId={sellerId}&advertiserId={advertiserId}"
-        f"&endpoint={endpoint}&day={day.isoformat()}"
+        f"&endpoint={endpoint}&day={day_iso}"
     )
 
     if not scope_grants(
@@ -292,28 +328,85 @@ def get_cursor(
             retryable=False,
         )
 
-    try:
-        result: HasDataResult = has_data(
-            sess,
-            seller_id=sellerId,
-            advertiser_id=advertiserId,
-            endpoint=endpoint,
-            day=day,
-            campaign_id=campaignId,
-        )
-    except ValueError as exc:
-        # endpoint 不在 4 路径白名单（STORAGE_KEY_BY_PATH）
+    # endpoint 白名单提前到缓存判定之前:命中路径不经过 has_data 的
+    # ValueError,这里统一兜(400 SCHEMA_INVALID,行为与回源路径一致)。
+    storage_key = STORAGE_KEY_BY_PATH.get(endpoint)
+    if storage_key is None:
         return _audit_and_error(
             request_id=request_id,
             status=400,
             code="SCHEMA_INVALID",
-            message=str(exc),
+            message=f"unknown endpoint: {endpoint}",
             retryable=False,
             key_prefix=key_prefix,
             error_code="SCHEMA_INVALID",
             method="GET",
             path=audit_path,
         )
+
+    # 1) 缓存命中(仅 campaign-scoped;空集合 = 已加载确无数据,也命中)
+    if campaignId is not None:
+        pairs = has_data_cache.get(
+            seller_id=sellerId,
+            advertiser_id=advertiserId,
+            campaign_id=campaignId,
+        )
+        if pairs is not None:
+            has = (endpoint, day_iso) in pairs
+            _log_ingest_event(
+                level=logging.INFO,
+                request_id=request_id,
+                key_prefix=key_prefix,
+                method="GET",
+                path=audit_path,
+                status=200,
+                records_in=1,
+                records_ok=1 if has else 0,
+            )
+            return _cursor_ok(
+                request_id=request_id,
+                day_iso=day_iso,
+                endpoint=endpoint,
+                storage_key_value=storage_key.value,
+                has_data=has,
+                campaign_id=campaignId,
+            )
+
+    # 2) 缓存 miss / 无 campaignId → DB 回源。命中路径不开 session(避免
+    #    checkout 往返),所以这里按 deps.get_session 同款语义按需开/收。
+    SessionLocal = get_session_factory()
+    sess = SessionLocal()
+    try:
+        if campaignId is not None:
+            # 灌桶:一次性拉该 campaign 的 (endpoint, day) 全集,后续命中免 DB
+            pairs = load_campaign_pairs(
+                sess,
+                seller_id=sellerId,
+                advertiser_id=advertiserId,
+                campaign_id=campaignId,
+            )
+            has_data_cache.put(
+                seller_id=sellerId,
+                advertiser_id=advertiserId,
+                campaign_id=campaignId,
+                pairs=pairs,
+            )
+            has = (endpoint, day_iso) in pairs
+        else:
+            result: HasDataResult = has_data(
+                sess,
+                seller_id=sellerId,
+                advertiser_id=advertiserId,
+                endpoint=endpoint,
+                day=day,
+                campaign_id=None,
+            )
+            has = result.has_data
+    finally:
+        try:
+            sess.rollback()
+        finally:
+            sess.close()
 
     _log_ingest_event(
         level=logging.INFO,
@@ -323,25 +416,16 @@ def get_cursor(
         path=audit_path,
         status=200,
         records_in=1,
-        records_ok=1 if result.has_data else 0,
+        records_ok=1 if has else 0,
     )
 
-    response_data: dict[str, object] = {
-        "day": day.isoformat(),
-        "endpoint": endpoint,
-        "storageKey": result.storage_key.value,
-        "hasData": result.has_data,
-    }
-    if campaignId is not None:
-        response_data["campaignId"] = campaignId
-
-    return JSONResponse(
-        status_code=200,
-        content={
-            "code": 0,
-            "requestId": request_id,
-            "data": response_data,
-        },
+    return _cursor_ok(
+        request_id=request_id,
+        day_iso=day_iso,
+        endpoint=endpoint,
+        storage_key_value=storage_key.value,
+        has_data=has,
+        campaign_id=campaignId,
     )
 
 
@@ -574,6 +658,17 @@ def post_dumps(
             request_id=request_id,
             retryable=True,
         )
+
+    # Write-through：cursor has-data 缓存立刻看到刚落库的 (endpoint, day)。
+    # 桶未加载时 mark_present no-op —— 下次 GET 回源重载（新行已落库），
+    # 结果必对（见 has_data_cache.mark_present docstring）。
+    has_data_cache.mark_present(
+        seller_id=dump.seller_id,
+        advertiser_id=dump.advertiser_id,
+        campaign_id=dump.campaign_id,
+        endpoint=dump.endpoint,
+        day=dump.day.isoformat(),
+    )
 
     _log_ingest_event(
         level=logging.INFO,
@@ -992,7 +1087,11 @@ def _fmt_ratio(value: Decimal | None) -> str | None:
 
 
 def _row_int(value) -> int:
-    return int(value) if value is not None else 0
+    """Aggregate 列安全转 int（COUNT/SUM/COALESCE 永不为非数字，锚点防呆）。"""
+    try:
+        return int(value) if value is not None else 0
+    except (TypeError, ValueError):
+        return 0
 
 
 def _query_spu_roi(

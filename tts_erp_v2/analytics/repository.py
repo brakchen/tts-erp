@@ -84,6 +84,41 @@ LIMIT 1
 """
 
 
+# campaign 桶灌载（cursor has-data 缓存 miss 回源,见 has_data_cache.py）:
+# 只拉 DISTINCT (endpoint, day) 两列 —— 绝不碰 request/response JSONB blob,
+# 单 campaign 量级 = endpoint×day（实测 ≤177 tuple）,够灌 frozenset。
+SQL_CAMPAIGN_DAYS = """
+SELECT DISTINCT endpoint, day FROM analytics.ad_raw
+WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
+  AND campaign_id = :campaign_id
+"""
+
+
+def load_campaign_pairs(
+    sess: Session,
+    *,
+    seller_id: str,
+    advertiser_id: str,
+    campaign_id: str,
+) -> frozenset[tuple[str, str]]:
+    """Load every (endpoint, day.isoformat()) present for (scope, campaign).
+
+    has_data_cache miss 回源用；与 has_data 的 EXISTS 语义等价（同一读
+    快照下,成员存在 ⟺ EXISTS 命中）,但一次性带回整个桶,后续命中免 DB。
+    只读,不做 storage_key 校验（调用方已提前过白名单）。
+    """
+    # pi-lens-ignore: python-sql-injection
+    rows = sess.execute(
+        text(SQL_CAMPAIGN_DAYS),
+        {
+            "seller_id": seller_id,
+            "advertiser_id": advertiser_id,
+            "campaign_id": campaign_id,
+        },
+    ).all()
+    return frozenset((endpoint, d.isoformat()) for endpoint, d in rows)
+
+
 # ─── dump upsert（1 表 1 事务）────────────────────────────────────────
 
 
@@ -188,9 +223,11 @@ def has_data(
 
 
 __all__ = [
-    "STORAGE_KEY_BY_PATH",
+    "SQL_CAMPAIGN_DAYS",
     "SQL_HAS_DATA",
     "SQL_INSERT_RAW",
+    "STORAGE_KEY_BY_PATH",
     "has_data",
+    "load_campaign_pairs",
     "upsert_dump",
 ]

@@ -68,6 +68,7 @@ def _isolate_state(db_engine, monkeypatch):
     # Setup: wipe any TEST_ rows left over from a previous run, then
     # clear cached middleware state so a freshly-inserted key is queried
     # fresh rather than served from the in-process cache.
+    from tts_erp_v2.analytics import has_data_cache
     from tts_erp_v2.middleware import session_auth
     from tts_erp_v2.middleware.auth import clear_cache
     from tts_erp_v2.middleware.rate_limit import reset_shared
@@ -89,10 +90,14 @@ def _isolate_state(db_engine, monkeypatch):
     _wipe_test_rows(db_engine)
     clear_cache()
     reset_shared()
+    # cursor has-data 进程缓存同样按测试隔离 —— 不清会在测试间串桶
+    # （上一个测试灌的 TEST_ campaign 桶会污染下一个测试的存在性判定）。
+    has_data_cache.reset()
     yield
     # Teardown: clear cached middleware state again, then wipe rows.
     clear_cache()
     reset_shared()
+    has_data_cache.reset()
     _wipe_test_rows(db_engine)
 
 
@@ -128,11 +133,12 @@ def _wipe_test_rows(db_engine) -> None:
     )
 
     with db_engine.begin() as conn:
+        # pi-lens-ignore: python-sql-injection — static literal SQL（spu_images wipe，TEST_ 常量）
         conn.execute(spu_images_wipe)
         # fx.* exchange-rate cache (2026-09-06): TEST_-prefixed base codes
         # only — the snapshot delete cascades to fx.exchange_rates rows.
-        # pi-lens-ignore: python-sql-injection — literal SQL, bound LIKE param only
         # pi-lens-ignore opengrep.sqlalchemy.sql-injection: static DELETE, bound LIKE, no user input
+        # pi-lens-ignore: python-sql-injection — literal SQL, bound LIKE param only
         conn.execute(
             _text(
                 "DELETE FROM fx.exchange_rate_snapshots WHERE base_code LIKE 'TEST_%'"
