@@ -636,6 +636,7 @@ def post_dumps(
 
     try:
         result = upsert_dump(sess, dump, request_id=payload.requestId or request_id)
+    # pi-lens-ignore: ast-grep:no-boolean-in-except
     except Exception as exc:  # noqa: BLE001 — 持久化意外分支兜底
         exc_class = type(exc).__name__
         sys.stderr.write(f"[analytics-sync] persistence failure: {exc_class}: {exc}\n")
@@ -859,7 +860,11 @@ roi_router = APIRouter(prefix="/v2/analytics", tags=["analytics"])
 FX_USD_VND = Decimal(26330)
 FX_CNY_USD = Decimal("0.14774")
 K1_DEFAULT_CNY = Decimal(30)
-FEE_RATE_BASELINE = Decimal("0.1156")
+# D10 平台佣金参考基线 r̂：已结算订单实测重定（2026-09-06，用户拍板）——
+# 331 笔已支付·已结算·无退款订单，(买家实付 − 结算到账)/实付 平均 30.8%
+# （中位 30.4%；其中 PLATFORM_COMMISSION 恰为折后货款×15%，其余为运费/联盟等）。
+# 旧基线 11.56% 低估了平台实际扣费，勿回退。
+FEE_RATE_BASELINE = Decimal("0.308")
 FX_AS_OF = "2026-09-05"
 
 _MONEY_Q = Decimal("0.0001")
@@ -1591,7 +1596,7 @@ def list_spu_roi(
 
     q = spu_id 子串搜索;sort/order 控制排序(默认实际 ROI 升序,§7.3);
     include_all=true 把无任何活动的目录 SPU 也拉进来(§5.1-7,限 ACTIVE);
-    fee_rate 页面覆写平台佣金费率(缺省用固定基线 0.1156,D10);
+    fee_rate 页面覆写平台佣金费率(缺省用固定基线 0.308,D10 2026-09-06 实测重定);
     w_start/w_end(ISO 日期)裁剪销售(paid_at)与退款(updated_at_source),
     不传 = 全历史累计;ad 视图无日期参数,始终全窗口累计(§4.5)。
     """

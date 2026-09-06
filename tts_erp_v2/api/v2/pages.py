@@ -1117,9 +1117,9 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
             <option value="200">200</option>
           </select>
         </label>
-        <label class="op-field" data-tip="平台佣金费率：默认参考基线 0.1156（可覆写）">
+        <label class="op-field" data-tip="平台佣金费率：默认参考基线 0.308（2026-09-06 实测重定，可覆写）">
           <span class="op-fld-label">费率 %</span>
-          <input id="filter-fee" type="text" class="form-control op-fee-input" placeholder="11.56" inputmode="decimal" autocomplete="off">
+          <input id="filter-fee" type="text" class="form-control op-fee-input" placeholder="30.8" inputmode="decimal" autocomplete="off">
         </label>
         <div class="d-inline-flex flex-row align-items-center gap-2 pb-1">
           <span class="op-fld-label">含无活动</span>

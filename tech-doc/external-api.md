@@ -310,7 +310,7 @@ Query parameters:
 | `offset` | int | 0 | ≥ 0 |
 | `include_all` | bool | `false` | `false` 只含有广告∨有效销售∨退款的 SPU;`true` 拉全部 **ACTIVE**(status ILIKE 'activate')目录 SPU(DEACTIVATE/DELETED 等排除) |
 | `shop_pk` | int | — | 店铺过滤(内部主键) |
-| `fee_rate` | decimal-str | — | 平台佣金费率页面覆写;缺省固定基线 `0.1156`(决策 D10) |
+| `fee_rate` | decimal-str | — | 平台佣金费率页面覆写;缺省固定基线 `0.308`(决策 D10,2026-09-06 实测重定:331 笔已结算无退款单 (实付−结算)/实付 平均 30.8%) |
 | `w_start` | date | — | ISO `yyyy-mm-dd`;提供时销售按 `paid_at`、退款按 `updated_at_source` 裁剪(含当日) |
 | `w_end` | date | — | ISO `yyyy-mm-dd`;与 `w_start` 配对使用;不提供 `w_start`/`w_end` = 销售/退款**全历史累计**(ad 无日期参数,恒整窗累计,§4.5) |
 
