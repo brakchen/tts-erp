@@ -971,8 +971,8 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       <span class="op-counter-item"><span class="op-counter-label">SPU</span><span class="op-counter-num" id="sum-n">·</span></span>
       <span class="op-counter-item"><span class="op-counter-label">消耗 $</span><span class="op-counter-num" id="sum-spend">—</span></span>
       <span class="op-counter-item"><span class="op-counter-label">有效销售 $</span><span class="op-counter-num" id="sum-sales">—</span></span>
-      <span class="op-counter-item"><span class="op-counter-label">退款净额 $</span><span class="op-counter-num" id="sum-refund">—</span></span>
-      <span class="op-counter-item"><span class="op-counter-label">全损货损 $</span><span class="op-counter-num" id="sum-loss">—</span></span>
+      <span class="op-counter-item"><span class="op-counter-label">退款净额 $<span class="op-hint" data-tip="有效已付订单中已完结退款的净退款额 = 仅退款(REFUND_ONLY) + 退货退款(RETURN_AND_REFUND) 的退款金额，VND→USD 换算。不含：已付被取消订单退款（见 ⚙ 列开关『已付被取消』信息列）、异常单(UNPAID 等)退款、未关联到 SPU 的退款行（页脚『未归属退款 N 行』只计行数不计金额）。与『全损货损』不同维度：这里是退给客户的钱，货的成本损失在下一格">?</span></span><span class="op-counter-num" id="sum-refund">—</span></span>
+      <span class="op-counter-item"><span class="op-counter-label">全损货损 $<span class="op-hint" data-tip="退货商品未回收，按成本全额计损(M13b) = 退货退款(RETURN_AND_REFUND)件数 × 该 SPU 单位成本(USD)。单位成本：人工成本(MANUAL)有效行优先，未录入按默认 30 CNY/件(≈$4.45)换算。注意这是成本维度，不是退款金额；未关联 SPU 的退货件不计入。缺人工成本的 SPU 用默认值会在行内标 ⚠">?</span></span><span class="op-counter-num" id="sum-loss">—</span></span>
       <span class="op-counter-item"><span class="op-counter-label">净利润 $</span><span class="op-counter-num" id="sum-profit">—</span></span>
       <span class="op-counter-item"><span class="op-counter-label">整体实际 ROI</span><span class="op-counter-num" id="sum-roi">—</span></span>
     </section>

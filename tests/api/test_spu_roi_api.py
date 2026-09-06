@@ -1433,6 +1433,11 @@ def test_spu_roi_page_toolbar_shop_and_date_filters(api_client, readonly_key):
     assert "含无活动" in body
     assert 'class="op-hint"' in body
     assert "没有任意活动" in body
+    # 结余带口径 ? 悬停说明:退款净额 / 全损货损
+    assert "REFUND_ONLY" in body
+    assert "M13b" in body
+    assert "sum-refund" in body
+    assert "sum-loss" in body
     # 无内联事件处理器(既有 shell 约束)
     for forbidden in ("onchange=", "onclick="):
         assert forbidden not in body, f"inline handler found: {forbidden}"
