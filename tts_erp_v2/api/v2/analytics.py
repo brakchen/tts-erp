@@ -983,6 +983,35 @@ _SQL_ROI_REFUNDS = text(
     """
 )
 
+# 结余带单量/GMV 汇总(跨可见 SPU 全局 distinct;§5.3 2026-09-06 扩展):
+# - order_count:有效销售订单数(白名单状态且已付款,paid_at 窗口)
+# - cancelled_order_count:已付被取消订单数(status=CANCELLED 且已付款,paid_at 窗口)
+# - cancelled_sales:已付被取消订单的原始行金额合计(VND)→ GMV 补全
+# 与行级 _SQL_ROI_SALES 同窗口/状态白名单;区别只在按 SPU 组 vs 跨 SPU 去重计数。
+_SQL_ROI_ORDER_SCOPE = text(
+    """
+    SELECT
+      count(DISTINCT so.id) FILTER (
+          WHERE so.status = ANY(CAST(:paid_statuses AS text[]))
+            AND so.paid_at IS NOT NULL)                              AS order_count,
+      count(DISTINCT so.id) FILTER (
+          WHERE so.status = 'CANCELLED'
+            AND so.paid_at IS NOT NULL)                              AS cancelled_order_count,
+      coalesce(sum(sl.quantity * sl.unit_price) FILTER (
+          WHERE so.status = 'CANCELLED'
+            AND so.paid_at IS NOT NULL), 0)                          AS cancelled_sales
+    FROM commerce.sales_order_lines sl
+    JOIN commerce.sales_orders so ON so.id = sl.order_pk
+    WHERE sl.spu_pk = ANY(CAST(:pks AS bigint[]))
+      AND so.paid_at IS NOT NULL
+      AND (CAST(:ws AS timestamptz) IS NULL
+           OR so.paid_at >= CAST(:ws AS timestamptz))
+      AND (CAST(:we AS timestamptz) IS NULL
+           OR so.paid_at < CAST(:we AS timestamptz))
+    """
+)
+
+
 _SQL_ROI_COSTS = text(
     """
     SELECT spu_pk, unit_cost
@@ -1111,7 +1140,9 @@ def _query_spu_roi(
     """查询 + 计算 + 分页，返回 §5.3 envelope（items/total/totals/meta）。
 
     行与 totals 同源:totals 由行级 USD 值(同一组 CTE 结果)服务端加总;
-    totals.roi_real 额外用原生合计(Σ net_cash 原币一次换算)对账(§5.4-4)。
+    totals.roi_real 额外用原生合计(Σ net_cash 原币一次换算)对账(§5.4-4);
+    totals.gmv/order_count/cancelled_order_count/total_orders 2026-09-06 起由
+    _SQL_ROI_ORDER_SCOPE 跨可见 SPU 全局去重聚合(非行加总;GMV = M6 + M6b)。
     金额底层原币计算、输出层一次换算(§4.2 通用规则),绝不在客户端换算。
     fee_rate=None → 用固定基线 FEE_RATE_BASELINE;有值 → 页面覆写。
     w_start/w_end(ISO 日期,可选):提供时销售按 paid_at、退款按
@@ -1320,10 +1351,42 @@ def _query_spu_roi(
     if total_spend_dec != 0:
         total_nc_prime = total_native_net_cash_vnd / fx_usd_vnd - total_return_loss_dec
         roi_real_total = _fmt_ratio(total_nc_prime / total_spend_dec)
+    # 结余带单量/GMV(§5.3 2026-09-06):跨可见 SPU 全局去重计数;GMV =
+    # 有效销售 gross + 已付被取消订单原始行金额(= Σ quantity×unit_price,
+    # 同一 paid_at 窗口;取消单原始金额行级齐全,与取消退款"未知行"无关)。
+    spu_pks = [r["spu_pk"] for r in plain]
+    scope_row = None
+    if spu_pks:
+        # pi-lens-ignore: python-sql-injection
+        scope_row = (
+            sess.execute(
+                _SQL_ROI_ORDER_SCOPE,
+                {
+                    "paid_statuses": _PAID_STATUSES,
+                    "pks": spu_pks,
+                    "ws": ws_dt,
+                    "we": we_dt,
+                },
+            )
+            .mappings()
+            .first()
+        )
+    eff_orders = _row_int(scope_row["order_count"]) if scope_row else 0
+    cancelled_orders = (
+        _row_int(scope_row["cancelled_order_count"]) if scope_row else 0
+    )
+    cancelled_sales_usd = (
+        Decimal(scope_row["cancelled_sales"]) / fx_usd_vnd if scope_row else Decimal(0)
+    )
+    gmv_total = money_total["sales"] + cancelled_sales_usd
     totals = {
         "row_count": len(plain),
+        "order_count": eff_orders,
+        "cancelled_order_count": cancelled_orders,
+        "total_orders": eff_orders + cancelled_orders,
         "spend": _fmt_money(money_total["spend"]),
         "sales": _fmt_money(money_total["sales"]),
+        "gmv": _fmt_money(gmv_total),
         "refund_net_amount": _fmt_money(money_total["refund_net_amount"]),
         "return_loss": _fmt_money(money_total["return_loss"]),
         "net_profit": _fmt_money(money_total["net_profit"]),

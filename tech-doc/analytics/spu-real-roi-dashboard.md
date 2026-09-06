@@ -166,7 +166,7 @@
 | D 退款 | ✓ 有效订单退款（仅退款+退货退款：单数/件数/金额，**计入净额**）、✓ 已付被取消订单退款（件数/金额，**信息列不计净额**）、✓ 退款率=有效订单退款÷销售金额 | case 状态完结才计入；件数取 `case_lines.quantity` | USD（原币 VND 换算） |
 | E 实际 ROI | ✓ **净利润**（M18，毛利口径：净现金(内部) − 全部售出货本 − 广告消耗，每 SPU 真赚多少，**页面金额核心列**）；✓ **全损退货货损**（M13b = 全损退货件数 × 单位成本解析值，人工优先/缺省 30 CNY ≈ $4.43/件）；✓ **实际 ROI** = (净现金(内部) − 退货货损) ÷ 广告消耗（M14）；✓ **保本实际 ROI**（M17，实际 ROI 低于它标红） | 净利润是“结余核心”（负值红字），实际 ROI 主指标，保本线是红绿判据；**净现金收入(M13) 仅内部中间量，不展示** | USD（原币 VND/CNY）/ 比值 |
 
-顶部**合计条**（跟随当前筛选实时汇总，家族 signature，**全 USD**）：共 N 个 SPU · 广告消耗 $x · 有效销售 $x · 有效订单退款 $x · 全损货损 $x · **净利润 $x** · **整体实际 ROI n**（固定汇率 D9：26,330 / 0.1477，§4.6）。
+顶部**合计条**（跟随当前筛选实时汇总，家族 signature，**全 USD**，2026-09-06 定稿 10 格）：广告消耗 $x · 有效销售 $x · GMV $x（全部订单销售额）· 有效单量 · 总单量 · 退款净额 $x · 全损退款 $x（M13b 成本口径，原「全损货损」改名）· 取消单量 · **净利润 $x** · **整体实际 ROI n**（固定汇率 D9：26,330 / 0.1477，§4.6）。
 
 **排序默认「实际 ROI 升序」**（最亏的排最前，决策 D5），列头可切：广告消耗 / 退款率 / 净利润 / 销售（交互见 §7.3）。
 **搜索框**：`spu_id` 子串（对齐广告报表里看到的商品 ID）。分页 limit/offset 沿用 v2 约定。
@@ -235,6 +235,7 @@ SPU 无广告投放 → 广告列显示 0 与“无投放”文案（不隐藏�
 | M5 | 售出件数（有效销售） | `units(s)` | `Σ sales_order_lines.quantity`（join **有效销售订单**且 `paid_at∈W`，`spu_pk=s`） | 按日可拆 | sales_order_lines + sales_orders |
 | M5b | 有效销售订单数 | `order_count(s)` | `COUNT(DISTINCT sales_orders.id)`（同一有效销售过滤） | 按日可拆 | 同上 |
 | M6 | 销售金额(gross) | `sales(s)` | `Σ quantity × unit_price`（同上过滤条件） | 按日可拆 | 同上 |
+| M6b | 已付被取消订单原始销售额(gross) | `cancelled_sales(s)` | `Σ quantity × unit_price`（**status=CANCELLED 且已付款**，paid_at 窗口；订单行金额齐全，与 M9 退款"未知行"无关） | 按日可拆 | 同 M5/M6 过滤 |
 | M7 | 仅退款金额（计净额） | `refund_only(s)` | `Σ` 已完结 REFUND_ONLY case 退款，**且其订单 ∈ 有效销售订单** | 按完结时间 | cases(+case_lines) |
 | M8 | 退货退款金额（计净额） | `refund_return(s)` | `Σ` 已完结 RETURN_AND_REFUND case 退款，**且其订单 ∈ 有效销售订单** | 同上 | 同上 |
 | M9 | 已付被取消订单退款（信息列） | `refund_cancelled(s)` | `Σ` 已完结 CANCELLATION/CANCEL case 退款（订单 status=CANCELLED —— 该单销售本就不在 M6 里，故只展示不扣净额）。**行级金额缺失时不造数**：输出「已知金额小计 + 未知行数」（实测缺失 219/246，见 §5.6） | 同上 | 同上 |
@@ -403,8 +404,9 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
     "unit_cost_used": "4.4322", "cost_source": "DEFAULT_K1"   // 本样例无人工成本 → 默认 30 元 → 页面 ⚠
   }],
   "total": 111,
-  "totals": {"row_count": 111, "spend": "1414.7700", "sales": "…",
-              "refund_net_amount": "…", "net_profit": "…", "roi_real": "…"},   // 金额均为 USD(原币加总后一次换算);roi_real = Σ(net_cash−return_loss)/Σspend(服务端)
+  "totals": {"row_count": 111, "order_count": …, "cancelled_order_count": …, "total_orders": …,
+              "spend": "1414.7700", "sales": "…", "gmv": "…",
+              "refund_net_amount": "…", "net_profit": "…", "roi_real": "…"},   // 金额均为 USD(原币加总后一次换算);gmv = sales + M6b(已付被取消原额);单量跨可见 SPU 去重;roi_real = Σ(net_cash−return_loss)/Σspend(服务端)
   "meta": {
     "fx": {"usd_vnd": "26330.0000", "cny_usd": "0.1477",   // 实现常量 0.14774（30 CNY≈$4.4322/件）
           "as_of": "2026-09-05", "source": "fixed-const（在线机制挂起，§4.6）"},
@@ -740,8 +742,9 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 
 ```text
 ┌ [tts-erp]  SPU 实际 ROI ── 数据截至 2026-09-05（ad 窗口 08-28 ~ 09-05 全量）────┐
-│ 结余带:  N 个 SPU · 消耗 $x · 销售 $x · 退款 $x · 货损 $x · 净利润 $x        │
-│         · 整体实际 ROI n        （全表 USD · 固定汇率 D9 · 09-05）        │
+│ 结余带:  广告消耗 $x · 有效销售 $x · GMV $x · 有效单量 · 总单量          │
+│          · 退款净额 $x · 全损退款 $x · 取消单量 · 净利润 $x · 整体 ROI n │
+│          （每格带 ? 口径气泡;全表 USD · 固定汇率 D9 · 09-05）           │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ [🔍 搜索 spu_id…] [店铺▾] [日期▾] [列开关⚙] [保本线=动态] [及格线▾1.5(可关)]  默认排序: 实际ROI↑ │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -755,6 +758,21 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 [提示行] “全表 USD（原币 VND/CNY 服务端换算）· N 个 SPU 使用默认 30 元/件成本(⚠) · 已付被取消退款 N 行金额未知 · 未归属退款 N 行”
 [警告 chip] GMV Max 归因含自然单、数据滞后修正 —— 广告列仅供对照，实际 ROI 以 ERP 侧为准
 ```
+
+**结余带 10 格口径（2026-09-06，全部带 `?` 气泡，数值来自 `totals`）**：
+
+| 格 | 数值来源 | 口径 |
+| --- | --- | --- |
+| 广告消耗 $ | `totals.spend` | M1：广告视图全窗口累计（无日期参数） |
+| 有效销售 $ | `totals.sales` | M6：有效销售订单行金额 gross（白名单状态 + paid_at 落窗） |
+| GMV $ | `totals.gmv` | 全部订单销售额 = M6 有效销售 + M6b 已付被取消订单原始行金额（同一 paid_at 窗口；≠ 广告归因「平台GMV」） |
+| 有效单量 | `totals.order_count` | 有效销售订单数（跨可见 SPU 全局去重） |
+| 总单量 | `totals.total_orders` | 有效单量 + 取消单量 |
+| 退款净额 $ | `totals.refund_net_amount` | M10：仅退 + 退货退款（不含已付被取消退款） |
+| 全损退款 $ | `totals.return_loss` | M13b：已完结退货按全损计（成本维度；2026-09-06 由「全损货损」改名，数值/口径不变） |
+| 取消单量 | `totals.cancelled_order_count` | 已付被取消订单数（status=CANCELLED 且已付款，paid_at 落窗；跨可见 SPU 去重） |
+| 净利润 $ | `totals.net_profit` | M18 |
+| 整体实际 ROI | `totals.roi_real` | M14；Σspend=0 → `—` |
 
 ### 7.2 标色与阈值（默认值，页面 ⚙ 可调，不锁死）
 
@@ -781,8 +799,8 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 - **换算单点**：换算只发生在服务端输出层一次（先原币加总再换，§4.2/§4.6）；页面拿到即 USD，不做二次换算；fx 取值时间随 meta 展示（合计带旁一行小字）。
 - 列开关 ⚙：整组收/展（如“已付被取消（信息列）”“平台出单量(ad_orders)/单订单成本(cpa)”默认折叠，想看再开；平台 GMV 默认显示，对齐 §7.1 骨架）。
 - 顶部提示行 + 结余带随筛选实时刷新；每页 100（上限 500 走 v2 分页约定）。
-- 移动端（2026-09-06 重构）：布局走 Bootstrap 5.3.8 栅格/工具类 —— 结余带 xs 2 列 →
-  lg 7 列降密度、工具栏 flex-wrap 纵向堆叠、列开关折叠进 `<details>`；表格
+- 移动端（2026-09-06 重构）：布局走 Bootstrap 5.3.8 栅格/工具类 —— 结余带
+  xs 2 / sm 3 / md 4 / lg 5 列（两行）降密度、工具栏 flex-wrap 纵向堆叠、列开关折叠进 `<details>`；表格
   `.table-responsive` + `max-height` 双轴滚动框（表头在框内吸顶、首列横向溢出时吸左，
   不限断点），小屏按断点 nth-child 裁掉次要对比列（广告数/平台GMV/ROI₀/件数，
   576–991 裁 广告数/ROI₀）降低横滚量；列开关信息列（§7.5）全尺寸可用。

@@ -801,6 +801,12 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert body["totals"]["row_count"] == 1
     assert body["totals"]["spend"] == "10.0000"
     assert body["totals"]["sales"] == "100.0000"
+    # 2026-09-06 结余带扩展:GMV = 有效销售 + 已付被取消原始金额(2×$20);
+    # 单量跨可见 SPU 全局去重(场景 A:1 有效单 + 1 取消单)
+    assert body["totals"]["gmv"] == "140.0000"
+    assert body["totals"]["order_count"] == 1
+    assert body["totals"]["cancelled_order_count"] == 1
+    assert body["totals"]["total_orders"] == 2
     assert body["totals"]["refund_net_amount"] == "20.0000"
     assert body["totals"]["net_profit"] == "36.2790"
 
@@ -1201,8 +1207,12 @@ def test_spu_roi_default_sort_roi_asc_pagination_and_totals(
     # totals 跨分页、当前筛选加总
     totals = body["totals"]
     assert totals["row_count"] == 3
+    assert totals["order_count"] == 3  # A/B/C 各 1 有效单
+    assert totals["cancelled_order_count"] == 1  # A 的已付被取消单
+    assert totals["total_orders"] == 4
     assert totals["spend"] == "70.0000"  # 10+50+10
     assert totals["sales"] == "220.0000"  # 100+90+30
+    assert totals["gmv"] == "260.0000"  # 有效 220 + 取消单原额 40(A:2×$20)
     assert totals["refund_net_amount"] == "20.0000"
     assert totals["net_profit"] == "55.8138"
     # 行加总 == totals(每行已是 4 位小数字符串)
@@ -1340,8 +1350,12 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
     assert body["total"] == 0
     assert body["totals"] == {
         "row_count": 0,
+        "order_count": 0,
+        "cancelled_order_count": 0,
+        "total_orders": 0,
         "spend": "0.0000",
         "sales": "0.0000",
+        "gmv": "0.0000",
         "refund_net_amount": "0.0000",
         "return_loss": "0.0000",
         "net_profit": "0.0000",
@@ -1433,7 +1447,7 @@ def test_spu_roi_page_toolbar_shop_and_date_filters(api_client, readonly_key):
     assert "含无活动" in body
     assert 'class="op-hint"' in body
     assert "没有任意活动" in body
-    # 结余带口径 ? 悬停说明:退款净额 / 全损货损
+    # 结余带口径 ? 悬停说明:退款净额 / 全损退款
     assert "REFUND_ONLY" in body
     assert "M13b" in body
     assert "sum-refund" in body
@@ -1491,8 +1505,10 @@ def test_spu_roi_js_targets_dashboard_hooks():
     assert "DEFAULT_K1" in src  # ⚠ 判断
 
 
-def test_spu_roi_page_header_summary_has_loss_cell(api_client, readonly_key):
-    """§7.1 结余带补"全损货损"格(JS 消费 totals.return_loss)。"""
+def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
+    """§7.1 结余带(2026-09-06):去 SPU 数;新增 GMV/有效单量/总单量/取消单量;
+    全损货损改名全损退款(数值仍 = totals.return_loss);每个概览格带 ? 口径说明。
+    """
     from pathlib import Path
 
     r = api_client.get(
@@ -1500,9 +1516,27 @@ def test_spu_roi_page_header_summary_has_loss_cell(api_client, readonly_key):
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     body = r.text
-    assert 'id="sum-loss"' in body, "结余带缺全损货损格"
-    assert "全损货损" in body
-    # JS 必须填充该格
+    # 10 格指标 id 齐全(顺序 = 页面骨架)
+    for cell_id in (
+        "sum-spend",
+        "sum-sales",
+        "sum-gmv",
+        "sum-orders",
+        "sum-total-orders",
+        "sum-refund",
+        "sum-loss",
+        "sum-cancelled-orders",
+        "sum-profit",
+        "sum-roi",
+    ):
+        assert f'id="{cell_id}"' in body, f"结余带缺 {cell_id} 格"
+    # 不再展示 SPU 个数
+    assert 'id="sum-n"' not in body
+    assert "全损退款" in body  # 全损货损改名
+    assert "M13b" in body
+    # 每个概览格都有 ? 口径悬停
+    assert body.count('class="op-hint"') >= 10
+    # JS 必须填充全损格与新格
     js_src = (
         Path(__file__).resolve().parents[2]
         / "tts_erp_v2"
@@ -1512,6 +1546,9 @@ def test_spu_roi_page_header_summary_has_loss_cell(api_client, readonly_key):
     ).read_text(encoding="utf-8")
     assert '("#sum-loss")' in js_src
     assert "totals.return_loss" in js_src
+    assert '("#sum-gmv")' in js_src
+    assert '("#sum-total-orders")' in js_src
+    assert '("#sum-cancelled-orders")' in js_src
 
 
 def test_spu_roi_page_column_toggle_groups_default_hidden(api_client, readonly_key):
