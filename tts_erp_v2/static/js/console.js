@@ -8,7 +8,6 @@
   // ---------- constants ----------
   var STORAGE_ACCOUNT_KEY = "mc_active_account";
   var CSRF_HEADER = "tts-erp";
-  var TAB_PENDING = "pending";
   var TAB_RECENT = "recent";
   var TAB_ALL = "all";
   var DEFAULT_LIMIT = 50;
@@ -67,6 +66,15 @@
   function fmtDate(iso) {
     if (!iso) return "";
     return iso.replace("T", " ").replace(/\.\d+Z$/, "Z");
+  }
+
+  // Short date for the catalogue's created / updated columns
+  // (source timestamps are UTC; the operator's local timezone is what
+  // the browser renders, so just clip the full fmtDate to date+time).
+  function fmtShortDate(iso) {
+    var d = fmtDate(iso);
+    if (!d) return "—";
+    return d;
   }
 
   // ---------- API surface (cookie auth: withCredentials + CSRF header) ----------
@@ -194,9 +202,14 @@
   }
 
   // ---------- tabs ----------
-  var currentTab = TAB_PENDING;
+  var currentTab = TAB_ALL;
   var costFilter = "";
   var costOffset = 0;
+  // All-SPU catalogue sort state (2026-09-06): the active sort column
+  // + direction. Column headers carry data-sort; clicking toggles asc→
+  // desc→(reload). Default = updated_at desc (most-recently-changed
+  // first is the useful browsing order for a cost-editing session).
+  var catalogueSort = { key: "updated_at", order: "desc" };
 
   function setActiveTab(name) {
     currentTab = name;
@@ -205,46 +218,60 @@
       btn.setAttribute("aria-selected", isActive ? "true" : "false");
       btn.classList.toggle("op-tab-active", isActive);
     });
-    applyTableHead(name);
-    // Submit-all is a pending-tab action — hide it elsewhere.
+    // Counter + toolbar copy follow the tab: all = catalogue count,
+    // recent = change-log count.
+    var label = $("#op-counter-label");
+    var sub = $("#op-counter-sub");
+    if (label) label.textContent = name === TAB_RECENT ? "最近提交" : "全部 SPU";
+    if (sub)
+      sub.textContent =
+        name === TAB_RECENT
+          ? "成本变更记录 · 每次提交一条"
+          : "目录 · 编辑成本后提交全部";
+    var stamp = $(".op-counter-stamp");
+    if (stamp)
+      stamp.textContent = name === TAB_RECENT ? "CHANGELOG · N/M" : "CATALOG · ALL";
+    // Submit-all is an all-tab action (files the edited rows).
     var submitAll = $('[data-act="submit-all"]');
-    if (submitAll) submitAll.style.display = name === TAB_PENDING ? "" : "none";
+    if (submitAll) submitAll.style.display = name === TAB_ALL ? "" : "none";
     var batchStatus = $(".op-batch-status");
     if (batchStatus)
-      batchStatus.style.display = name === TAB_PENDING ? "" : "none";
+      batchStatus.style.display = name === TAB_ALL ? "" : "none";
+    applyTableHead(name);
     refreshActiveTab();
   }
 
   function refreshActiveTab() {
-    if (currentTab === TAB_PENDING) return loadPending();
     if (currentTab === TAB_RECENT) return loadRecent();
-    if (currentTab === TAB_ALL) return loadAll();
+    return loadAll();
   }
 
   // Each tab renders a different column set; swap the <thead> so the
   // header labels always match the rows below.
   var THEAD_BY_TAB = {
-    pending:
-      '<tr><th scope="col" class="op-th op-th-sku">SKU</th>' +
-      '<th scope="col" class="op-th op-th-title">标题</th>' +
-      '<th scope="col" class="op-th op-th-cost">单位成本</th>' +
-      '<th scope="col" class="op-th op-th-note">备注</th>' +
-      '<th scope="col" class="op-th op-th-photo">图片</th>' +
-      '<th scope="col" class="op-th op-th-action">操作</th></tr>',
-    recent:
-      '<tr><th scope="col" class="op-th op-th-sku">时间</th>' +
-      '<th scope="col" class="op-th op-th-sku">SKU</th>' +
-      '<th scope="col" class="op-th op-th-title">标题</th>' +
-      '<th scope="col" class="op-th op-th-cost">单位成本</th>' +
-      '<th scope="col" class="op-th op-th-sku">货币</th>' +
-      '<th scope="col" class="op-th op-th-note">备注</th></tr>',
+    // All-SPU catalogue (2026-09-06): SKU / title / status / editable
+    // cost / created / updated / image. Sort arrows live on the
+    // sortable columns; the active one is marked is-sorted-* by
+    // renderAllRows' caller.
     all:
       '<tr><th scope="col" class="op-th op-th-sku">SKU</th>' +
       '<th scope="col" class="op-th op-th-title">标题</th>' +
       '<th scope="col" class="op-th op-th-sku">状态</th>' +
-      '<th scope="col" class="op-th op-th-cost">当前成本</th>' +
-      '<th scope="col" class="op-th op-th-sku">货币</th>' +
+      '<th scope="col" class="op-th op-th-cost op-th-sortable" data-sort="unit_cost" title="按成本价排序">成本<span class="op-sort-arrow"></span></th>' +
+      '<th scope="col" class="op-th op-th-sku op-th-sortable" data-sort="created_at" title="按创建时间排序">创建<span class="op-sort-arrow"></span></th>' +
+      '<th scope="col" class="op-th op-th-sku op-th-sortable" data-sort="updated_at" title="按更新时间排序">更新<span class="op-sort-arrow"></span></th>' +
       '<th scope="col" class="op-th op-th-photo">图片</th></tr>',
+    // Change log (2026-09-06): one row per cost submission, showing
+    // what price it replaced. First submission for a SPU has no
+    // predecessor (prev —).
+    recent:
+      '<tr><th scope="col" class="op-th op-th-sku">变更时间</th>' +
+      '<th scope="col" class="op-th op-th-sku">SKU</th>' +
+      '<th scope="col" class="op-th op-th-title">标题</th>' +
+      '<th scope="col" class="op-th op-th-cost">变更前</th>' +
+      '<th scope="col" class="op-th op-th-cost">变更后</th>' +
+      '<th scope="col" class="op-th op-th-sku">货币</th>' +
+      '<th scope="col" class="op-th op-th-note">备注</th></tr>',
   };
   function applyTableHead(name) {
     var thead = document.querySelector(".op-table thead");
@@ -255,14 +282,43 @@
     var fresh = document.createElement("tr");
     fresh.innerHTML = rows; // pi-lens-ignore: no-inner-html-js
     if (old && old.parentNode) old.parentNode.replaceChild(fresh, old);
+    bindSortableHeaders(fresh);
+  }
+
+  // Catalogue sort headers (2026-09-06): clicking a sortable th cycles
+  // asc → desc → asc… for that column and reloads the all tab. The
+  // active column is marked is-sorted-* so the operator sees which way
+  // the rows are ordered.
+  function bindSortableHeaders(tr) {
+    if (!tr || currentTab !== TAB_ALL) return;
+    $$(".op-th-sortable", tr).forEach((th) => {
+      var key = th.getAttribute("data-sort");
+      if (!key) return;
+      var isActive = catalogueSort.key === key;
+      th.classList.toggle("is-sorted-asc", isActive && catalogueSort.order === "asc");
+      th.classList.toggle(
+        "is-sorted-desc",
+        isActive && catalogueSort.order === "desc",
+      );
+      th.addEventListener("click", () => {
+        if (catalogueSort.key === key) {
+          catalogueSort.order =
+            catalogueSort.order === "asc" ? "desc" : "asc";
+        } else {
+          catalogueSort.key = key;
+          catalogueSort.order = "desc";
+        }
+        loadAll();
+      });
+    });
   }
 
   // ---------- shared row rendering bits ----------
   function loadingRow() {
-    return '<tr><td colspan="6" class="op-loading">加载中…</td></tr>';
+    return '<tr><td colspan="7" class="op-loading">加载中…</td></tr>';
   }
   function emptyRow(text) {
-    return '<tr><td colspan="6" class="op-empty">' + text + "</td></tr>";
+    return '<tr><td colspan="7" class="op-empty">' + text + "</td></tr>";
   }
   function errorRow(e, retry) {
     var tbody = $("#grid-rows");
@@ -279,7 +335,7 @@
       function renderWaiting() {
         html(
           tr,
-          '<td colspan="6" class="op-loading is-rate-limit">\u9650\u6d41\u4e2d\uff0c' +
+          '<td colspan="7" class="op-loading is-rate-limit">\u9650\u6d41\u4e2d\uff0c' +
             '<span class="rl-cd">' +
             ra +
             "</span>s \u540e\u53ef\u91cd\u8bd5</td>",
@@ -288,7 +344,7 @@
       function renderReady() {
         html(
           tr,
-          '<td colspan="6" class="text-secondary small">\u9650\u6d41\u7a7a\u95f2\u00b7' +
+          '<td colspan="7" class="text-secondary small">\u9650\u6d41\u7a7a\u95f2\u00b7' +
             '<a href="#" data-retry>\u70b9\u51fb\u91cd\u8bd5</a></td>',
         );
         tr.querySelector("[data-retry]").addEventListener("click", (ev) => {
@@ -314,7 +370,7 @@
     // Non-429: original "重试" link behaviour.
     html(
       tbody,
-      '<tr><td colspan="6" class="op-error">\u9519\u8bef\uff1a' +
+      '<tr><td colspan="7" class="op-error">\u9519\u8bef\uff1a' +
         esc(e.message) +
         ' \u00b7 <a href="#" data-retry>\u91cd\u8bd5</a></td></tr>',
     );
@@ -324,110 +380,6 @@
     });
   }
 
-  // ---------- tab 1: pending (cost entry; main-image mirror shown) ----------
-  // 2026-09-05 page-rework lane: the photo-upload half of this tab is
-  // gone. The row shows the SPU's TikTok main image mirrored into local
-  // MinIO (image_url from the backend; fallback icon when the mirror
-  // hasn't finished). Each row carries the cost input; submitting costs
-  // POSTs /v2/reporting/manual-costs with currency fixed to CNY.
-  function loadPending() {
-    var acct = getActiveAccountId();
-    var tbody = $("#grid-rows");
-    html(tbody, loadingRow());
-    var url =
-      "/v2/reporting/missing-cost-products?limit=" +
-      DEFAULT_LIMIT +
-      "&offset=" +
-      costOffset;
-    if (acct) url += "&shop_pk=" + acct;
-    api(url)
-      .then((r) => {
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        return r.json();
-      })
-      .then((payload) => {
-        var items = unwrap(payload);
-        renderPendingRows(items);
-        // Server-side total_missing_photo counts beyond the page limit;
-        // fall back to page length when the backend omits it.
-        var total =
-          payload &&
-          typeof payload === "object" &&
-          typeof payload.total_missing_photo === "number"
-            ? payload.total_missing_photo
-            : items.length;
-        setBadge("badge-pending", total);
-        // Signature counter: the oversized mono number at the top
-        // of the page. Always reflects the pending queue total —
-        // stable across tab switches so the operator's KPI
-        // doesn't flicker when they click between 待处理 / 最近提交.
-        var counter = $("#op-counter");
-        var num = $("#op-counter-num");
-        if (num) num.textContent = String(total);
-        if (counter) {
-          counter.setAttribute("data-state", "ready");
-          counter.setAttribute("aria-busy", "false");
-        }
-      })
-      .catch((e) => {
-        errorRow(e, loadPending);
-      });
-  }
-
-  function renderPendingRows(items) {
-    var tbody = $("#grid-rows");
-    html(tbody, "");
-    if (!items.length) {
-      html(tbody, emptyRow("该店铺所有商品均已填成本。"));
-      return;
-    }
-    items.forEach((it) => {
-      var tr = document.createElement("tr");
-      tr.dataset.ext = it.spu_id || "";
-      tr.dataset.cpid = it.spu_pk;
-      tr.dataset.acct = String(getActiveAccountId() || "");
-      html(
-        tr,
-        '<td class="op-td-sku" data-label="SKU" title="' +
-          esc(it.spu_id || "") +
-          '">' +
-          esc(it.spu_id || "—") +
-          "</td>" +
-          '<td class="op-td-title" data-label="标题">' +
-          esc(it.title || "") +
-          "</td>" +
-          '<td class="op-td-cost" data-label="单位成本">' +
-          '<span class="op-cost-input">' +
-          '<input type="number" class="op-input-cost" step="0.0001" min="0.0001" data-k="unit_cost" placeholder="0.0000" aria-label="单位成本">' +
-          '<span class="op-currency-fixed" aria-label="货币">CNY</span>' +
-          "</span>" +
-          "</td>" +
-          '<td data-label="备注">' +
-          '<input type="text" class="op-input-note" data-k="note" maxlength="500" placeholder="（可选）" aria-label="备注">' +
-          "</td>" +
-          '<td data-label="图片">' +
-          mirrorCellHtml(it) +
-          "</td>" +
-          '<td class="op-td-action" data-label="操作">' +
-          '<button class="op-btn-primary" data-act="submit">提交</button>' +
-          '<span class="row-status"></span>' +
-          "</td>",
-      );
-      var zoom = tr.querySelector("[data-zoom]");
-      if (zoom) {
-        zoom.addEventListener("click", (ev) => {
-          ev.preventDefault();
-          openLightbox(zoom.getAttribute("data-zoom"));
-        });
-      }
-      bindMirrorErrorFallback(tr);
-      tr.querySelector('[data-act="submit"]').addEventListener("click", () => {
-        submitPending(tr);
-      });
-      tbody.appendChild(tr);
-    });
-    applyFilter();
-  }
 
   // Mirror image cell (2026-09-05 page-rework lane): the operator no
   // longer uploads supplier reference photos. The row shows the SPU's
@@ -512,21 +464,15 @@
     if (ev.key === "Escape") closeLightbox();
   }
 
-  function submitPending(tr) {
-    // Single-row submit: reuse the shared cost POST but keep the
-    // row-level status semantics (errors stay on the row).
-    return postManualCost(tr).catch(() => {
-      /* status already set on the row */
-    });
-  }
-
-  // POST one row's manual cost. Resolves on success (row is filed);
-  // rejects when the row has no valid unit cost or the server errors —
-  // the caller decides how to surface the failure (single-row keeps it
-  // on the row; submit-all aggregates).
   function postManualCost(tr) {
     var inputs = tr.querySelectorAll("input[data-k]");
-    var body = { spu_id: tr.dataset.ext, currency: "CNY" };
+    // Catalogue rows keep their existing currency (dataset.origCurrency,
+    // set at render); brand-new rows (no prior cost) file as CNY — the
+    // page's fixed entry currency.
+    var body = {
+      spu_id: tr.dataset.ext,
+      currency: tr.dataset.origCurrency || "CNY",
+    };
     inputs.forEach((i) => {
       body[i.dataset.k] = i.value;
     });
@@ -537,9 +483,6 @@
     }
     tr.classList.add("table-active");
     setRowStatus(tr, "保存中…", "is-saving");
-    // 2026-09-05 page-rework lane: manual-costs only. The photo upload
-    // flow (spu-images upload-url/PUT/confirm) is gone — the page now
-    // renders the TikTok main image from its MinIO mirror instead.
     return api("/v2/reporting/manual-costs", {
       method: "POST",
       body: JSON.stringify(body),
@@ -551,7 +494,7 @@
         });
       })
       .then(() => {
-        fileRow(tr);
+        fileRow(tr, /* keepRow */ true);
       })
       .catch((e) => {
         var msg = e && e.message ? e.message : String(e);
@@ -561,23 +504,19 @@
       });
   }
 
-  // Submit every visible pending row that has a valid unit cost, one
+  // Submit every edited catalogue row that has a valid unit cost, one
   // after another. Serial (not Promise.all) so a page of 100 rows does
   // not fire 100 parallel POSTs into the per-key rate-limit bucket.
-  // Rows without a cost are left for the operator to fill; the summary
-  // reports how many were filed vs skipped vs failed.
-  function submitAllPending() {
+  // Only rows the operator actually changed (is-dirty) are filed; a row
+  // whose input still equals its server value is left alone. The
+  // summary reports how many were filed vs skipped vs failed.
+  function submitAllEdited() {
     var rows = $$("#grid-rows tr[data-ext]");
-    var targets = rows.filter((tr) => {
-      var input = tr.querySelector('input[data-k="unit_cost"]');
-      var unit = input ? parseFloat(input.value) : NaN;
-      return !!unit && unit > 0;
-    });
-    var skipped = rows.length - targets.length;
+    var targets = rows.filter((tr) => tr.classList.contains("is-dirty"));
     if (!targets.length) {
       var banner = $(".op-batch-status");
       if (banner) {
-        banner.textContent = "没有已填写成本的待提交行（先填写单位成本）";
+        banner.textContent = "没有已编辑的行（先改成本，再提交全部）";
         banner.classList.add("is-err");
       }
       return;
@@ -605,22 +544,27 @@
         "已提交 " +
         filed +
         " 行" +
-        (skipped ? " · 跳过 " + skipped + " 行（未填成本）" : "") +
         (failed ? " · 失败 " + failed + " 行" : "");
       banner.textContent = msg;
       banner.classList.toggle("is-err", failed > 0);
       banner.classList.toggle("is-ok", filed > 0 && failed === 0);
+      if (failed === 0) {
+        // Everything filed — refresh so 最近提交 shows the changes and
+        // the catalogue reflects the new effective costs.
+        loadAll();
+      }
     });
   }
-  // ---------- tab 3: recently filed ----------
+  // ---------- tab: change log (最近提交) ----------
+  // Each row is one cost submission, showing what price it replaced.
+  // 2026-09-06: reads GET /v2/reporting/manual-costs (the truth table —
+  // manual_product_costs) so a fresh submission shows immediately; the
+  // backend pairs each row with the SPU's previous effective price via a
+  // LAG window, so the UI renders 变更前 → 变更后.
   function loadRecent() {
     var acct = getActiveAccountId();
     var tbody = $("#grid-rows");
     html(tbody, loadingRow());
-    // 2026-09-06: recently-filed now reads GET /v2/reporting/manual-costs
-    // (the truth table) so a fresh submission shows immediately — the old
-    // cost-snapshots source is recomputed every 6 h and stayed empty
-    // right after a manual entry.
     var url = "/v2/reporting/manual-costs?limit=" + DEFAULT_LIMIT;
     if (acct) url += "&shop_pk=" + acct;
     api(url)
@@ -632,6 +576,8 @@
         var items = unwrap(payload);
         renderRecentRows(items);
         setBadge("badge-recent", items.length);
+        setCounterNum(items.length);
+        setCounterReady();
       })
       .catch((e) => {
         errorRow(e, loadRecent);
@@ -647,11 +593,14 @@
     }
     items.forEach((it) => {
       var tr = document.createElement("tr");
-      // manual-costs rows: created_at / spu_id / title / unit_cost /
-      // currency / note (see GET /v2/reporting/manual-costs).
+      var prevTxt =
+        it.prev_unit_cost == null ? "—" : esc(it.prev_unit_cost);
+      var curTxt = esc(it.unit_cost);
       html(
         tr,
-        '<td class="op-td-sku" data-label="时间">' +
+        '<td class="op-td-sku" data-label="变更时间" title="' +
+          esc(it.created_at || "") +
+          '">' +
           esc(fmtDate(it.created_at)) +
           "</td>" +
           '<td class="op-td-sku" data-label="SKU" title="' +
@@ -662,8 +611,11 @@
           '<td class="op-td-title" data-label="标题">' +
           esc(it.title || "") +
           "</td>" +
-          '<td class="op-td-cost" data-label="单位成本">' +
-          esc(it.unit_cost) +
+          '<td class="op-td-cost" data-label="变更前">' +
+          prevTxt +
+          "</td>" +
+          '<td class="op-td-cost op-td-new-cost" data-label="变更后">' +
+          curTxt +
           "</td>" +
           '<td class="op-td-sku" data-label="货币">' +
           esc(it.currency || "—") +
@@ -677,21 +629,34 @@
     applyFilter();
   }
 
-  // ---------- tab 3: all SPUs (read-only catalogue) ----------
+  // ---------- tab: 全部 SPU (editable catalogue) ----------
+  // Reads GET /v2/commerce/channel-products with the active sort. Each
+  // row's cost cell is an editable input pre-filled with the current
+  // effective cost; editing marks the row is-dirty and 提交全部 files
+  // every dirty row (POST /v2/reporting/manual-costs, CNY).
   function loadAll() {
     var acct = getActiveAccountId();
     var tbody = $("#grid-rows");
     html(tbody, loadingRow());
-    var url = "/v2/commerce/channel-products?limit=" + DEFAULT_LIMIT;
+    var url =
+      "/v2/commerce/channel-products?limit=" +
+      DEFAULT_LIMIT +
+      "&sort=" +
+      encodeURIComponent(catalogueSort.key) +
+      "&order=" +
+      encodeURIComponent(catalogueSort.order);
     if (acct) url += "&shop_pk=" + acct;
     api(url)
       .then((r) => {
         if (!r.ok) throw new Error("HTTP " + r.status);
         return r.json();
       })
-      .then((items) => {
+      .then((payload) => {
+        var items = unwrap(payload);
         renderAllRows(items);
         setBadge("badge-all", items.length);
+        setCounterNum(items.length);
+        setCounterReady();
       })
       .catch((e) => {
         errorRow(e, loadAll);
@@ -707,7 +672,36 @@
     }
     items.forEach((it) => {
       var tr = document.createElement("tr");
-      var costText = it.unit_cost == null ? "缺" : it.unit_cost;
+      // spu_id doubles as the POST key (the backend resolves it to the
+      // internal pk); we also stash the SPU's current effective cost so
+      // the dirty check can compare the edited value against it.
+      tr.dataset.ext = it.spu_id || "";
+      tr.dataset.origCost = it.unit_cost == null ? "" : String(it.unit_cost);
+      tr.dataset.origCurrency = it.currency || "CNY";
+      var currency = it.currency || "CNY";
+      var costCell;
+      // New row (no cost yet): CNY placeholder, empty input.
+      if (it.unit_cost == null) {
+        costCell =
+          '<span class="op-cost-input" title="输入成本后点提交全部">' +
+          '<input type="number" class="op-input-cost" step="0.0001" min="0.0001" data-k="unit_cost" placeholder="缺" aria-label="单位成本">' +
+          '<span class="op-currency-fixed" aria-label="货币">CNY</span>' +
+          "</span>";
+      } else {
+        // Existing cost: pre-filled input + its currency badge. Editing
+        // the number re-files under the SAME currency (the operator is
+        // correcting a value, not changing units). CNY is the page's
+        // fixed entry currency, so an existing VND/… row keeps its own.
+        costCell =
+          '<span class="op-cost-input" title="编辑成本后点提交全部">' +
+          '<input type="number" class="op-input-cost" step="0.0001" min="0.0001" data-k="unit_cost" value="' +
+          esc(String(it.unit_cost)) +
+          '" aria-label="单位成本">' +
+          '<span class="op-currency-fixed" aria-label="货币">' +
+          esc(currency) +
+          "</span>" +
+          "</span>";
+      }
       html(
         tr,
         '<td class="op-td-sku" data-label="SKU" title="' +
@@ -721,11 +715,19 @@
           '<td class="op-td-sku" data-label="状态">' +
           esc(it.status || "—") +
           "</td>" +
-          '<td class="op-td-cost" data-label="当前成本">' +
-          esc(costText) +
+          '<td class="op-td-cost" data-label="成本">' +
+          costCell +
+          '<span class="row-status" aria-live="polite"></span>' +
           "</td>" +
-          '<td class="op-td-sku" data-label="货币">' +
-          esc(it.currency || "—") +
+          '<td class="op-td-sku" data-label="创建" title="' +
+          esc(it.source_created_at || "") +
+          '">' +
+          esc(fmtShortDate(it.source_created_at)) +
+          "</td>" +
+          '<td class="op-td-sku" data-label="更新" title="' +
+          esc(it.source_updated_at || "") +
+          '">' +
+          esc(fmtShortDate(it.source_updated_at)) +
           "</td>" +
           '<td data-label="图片">' +
           mirrorCellHtml(it) +
@@ -737,6 +739,21 @@
         zoom.addEventListener("click", (ev) => {
           ev.preventDefault();
           openLightbox(zoom.getAttribute("data-zoom"));
+        });
+      }
+      // Dirty tracking: any change to the cost input lights the row up
+      // and makes it eligible for 提交全部.
+      var input = tr.querySelector('input[data-k="unit_cost"]');
+      if (input) {
+        input.addEventListener("input", () => {
+          var raw = input.value.trim();
+          var changed = raw !== tr.dataset.origCost;
+          tr.classList.toggle("is-dirty", changed);
+          if (changed) {
+            tr.classList.add("table-active");
+          } else {
+            tr.classList.remove("table-active");
+          }
         });
       }
       tbody.appendChild(tr);
@@ -770,8 +787,37 @@
     if (el) el.textContent = String(n);
   }
 
-  function fileRow(tr) {
+  // Signature counter helpers: the oversized mono number at the top of
+  // the page reflects the ACTIVE tab's row count (catalogue SPUs on
+  // 全部 SPU, change-log rows on 最近提交) — it stays stable across
+  // tab switches so the operator's read of the page doesn't flicker.
+  function setCounterNum(n) {
+    var num = $("#op-counter-num");
+    if (num) num.textContent = String(n);
+  }
+  function setCounterReady() {
+    var counter = $("#op-counter");
+    if (!counter) return;
+    counter.setAttribute("data-state", "ready");
+    counter.setAttribute("aria-busy", "false");
+  }
+
+  function fileRow(tr, keepRow) {
     setRowStatus(tr, "已提交 ✓", "is-ok");
+    if (keepRow) {
+      // Catalogue mode: the row STAYS (the SPU is still part of the
+      // directory). Rebase the dirty marker onto the just-filed value so
+      // a second identical submit-all pass has nothing to do, and drop
+      // the editing highlight.
+      var input = tr.querySelector('input[data-k="unit_cost"]');
+      if (input) tr.dataset.origCost = input.value.trim();
+      tr.classList.remove("is-dirty", "table-active");
+      setTimeout(() => {
+        var s = tr.querySelector(".row-status");
+        if (s) s.textContent = "";
+      }, 1800);
+      return;
+    }
     var delay =
       window.matchMedia &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -805,11 +851,16 @@
     var submitAll = $('[data-act="submit-all"]');
     if (submitAll)
       submitAll.addEventListener("click", () => {
-        if (currentTab === TAB_PENDING) submitAllPending();
+        if (currentTab === TAB_ALL) submitAllEdited();
       });
     loadShops()
       .then(loadMe)
-      .then(refreshActiveTab)
+      .then(() => {
+        // The static HTML already marks 全部 SPU active, but the <thead>
+        // must be swapped to the JS column set + sort bindings attached;
+        // setActiveTab handles both and fires the first load.
+        setActiveTab(TAB_ALL);
+      })
       .catch((e) => {
         // surface auth-misconfig early; the page never silently stays empty
         var main = $("main");

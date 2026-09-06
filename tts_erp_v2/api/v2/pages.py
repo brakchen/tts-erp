@@ -39,34 +39,34 @@ router = APIRouter(prefix="/v2/pages", tags=["pages"])
 
 @router.get("/spu-roi", response_class=HTMLResponse)
 def spu_roi_page() -> HTMLResponse:
-  """SPU 实际 ROI 看板(账页式,§7 of tech-doc/analytics/spu-real-roi-dashboard.md)。
+    """SPU 实际 ROI 看板(账页式,§7 of tech-doc/analytics/spu-real-roi-dashboard.md)。
 
-  HTML shell 只做骨架:标题/结余带/工具栏/表格容器/分页;数据与业务计算
-  全部消费 GET /v2/analytics/spu-roi(只读,§5.1-1 页面不计算业务数字)。
-  样式沿用操作台家族 token(warm-paper),行为在 static/js/spu-roi.js。
-  """
-  return HTMLResponse(_SPU_ROI_PAGE_HTML)
+    HTML shell 只做骨架:标题/结余带/工具栏/表格容器/分页;数据与业务计算
+    全部消费 GET /v2/analytics/spu-roi(只读,§5.1-1 页面不计算业务数字)。
+    样式沿用操作台家族 token(warm-paper),行为在 static/js/spu-roi.js。
+    """
+    return HTMLResponse(_SPU_ROI_PAGE_HTML)
 
 
 @router.get("/manual-costs", response_class=HTMLResponse)
 def manual_costs_page() -> HTMLResponse:
-  """Manual cost entry workbench (main-image mirror display).
+    """Manual cost entry workbench (main-image mirror display).
 
-  The HTML shell is a small stub:
-  - links to ``/static/vendor/bootstrap.min.css`` (self-hosted, MIT)
-  - inline ``<style>`` block for the industrial-console personality
-  - links to ``/static/js/console.js`` (shop switcher, tabs, inline filing,
-    envelope unwrap for backend pagination, signature-counter population,
-    lightbox preview of the SPU's mirrored main image)
-  - the JS handles its own /v2/auth/me probe and redirects unauthenticated
-    callers to ``/v2/auth/login?next=/v2/pages/manual-costs``
+    The HTML shell is a small stub:
+    - links to ``/static/vendor/bootstrap.min.css`` (self-hosted, MIT)
+    - inline ``<style>`` block for the industrial-console personality
+    - links to ``/static/js/console.js`` (shop switcher, tabs, inline filing,
+      envelope unwrap for backend pagination, signature-counter population,
+      lightbox preview of the SPU's mirrored main image)
+    - the JS handles its own /v2/auth/me probe and redirects unauthenticated
+      callers to ``/v2/auth/login?next=/v2/pages/manual-costs``
 
-  2026-09-05 page-rework lane: the supplier-reference-photo upload flow
-  was removed. The 图片 column now shows the TikTok main image mirrored
-  into local MinIO (``image_url`` from the backend, fallback icon when the
-  mirror hasn't finished); cost currency is fixed to CNY.
-  """
-  return HTMLResponse(_PAGE_HTML)
+    2026-09-05 page-rework lane: the supplier-reference-photo upload flow
+    was removed. The 图片 column now shows the TikTok main image mirrored
+    into local MinIO (``image_url`` from the backend, fallback icon when the
+    mirror hasn't finished); cost currency is fixed to CNY.
+    """
+    return HTMLResponse(_PAGE_HTML)
 
 
 # Marker for the legacy token-paste UI — kept as a comment so future
@@ -366,6 +366,25 @@ _PAGE_HTML = """<!doctype html>
     }
     .op-th-cost { text-align: right; }
     .op-th-action { text-align: right; }
+    /* Sortable column headers (all-SPU catalogue, 2026-09-06): clicking
+       a sortable th re-requests channel-products with the new sort.
+       The active sort column shows ↑/↓ via .op-sort-arrow. */
+    .op-th-sortable { cursor: pointer; user-select: none; }
+    .op-th-sortable:hover { color: var(--accent); }
+    .op-th-sortable .op-sort-arrow {
+      display: inline-block;
+      width: 10px;
+      margin-left: 4px;
+      color: var(--muted);
+    }
+    .op-th-sortable.is-sorted-asc .op-sort-arrow::after { content: "\2191"; }
+    .op-th-sortable.is-sorted-desc .op-sort-arrow::after { content: "\2193"; }
+    .op-th-sortable.is-sorted-asc,
+    .op-th-sortable.is-sorted-desc { color: var(--accent); }
+    /* Row edit state: an edited-but-unsubmitted cost input is highlighted
+       so the operator can see what 提交全部 will file. */
+    .op-cost-input.is-dirty { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .op-cost-input.is-dirty .op-currency-fixed { background: var(--accent-deep); color: var(--paper); }
     .op-table td {
       padding: 14px 12px;
       border-bottom: 1px solid var(--rule-soft);
@@ -603,20 +622,16 @@ _PAGE_HTML = """<!doctype html>
     <section class="op-counter" id="op-counter" data-state="loading" aria-busy="true" aria-live="polite">
       <div class="op-counter-num" id="op-counter-num">·</div>
       <div class="op-counter-meta">
-        <div class="op-counter-label">待处理</div>
-        <div class="op-counter-sub">活跃 SPU · 缺成本</div>
+        <div class="op-counter-label" id="op-counter-label">全部 SPU</div>
+        <div class="op-counter-sub" id="op-counter-sub">目录 · 点击列头排序 · 编辑成本后提交</div>
       </div>
-      <div class="op-counter-stamp" aria-hidden="true">FILED · 01 / 02</div>
+      <div class="op-counter-stamp" aria-hidden="true">CATALOG · ALL</div>
     </section>
 
     <nav class="op-tabs" role="tablist" aria-label="工作台标签页">
-      <button class="op-tab" type="button" role="tab" data-tab="all" aria-selected="false" aria-controls="grid-rows">
+      <button class="op-tab op-tab-active" type="button" role="tab" data-tab="all" aria-selected="true" aria-controls="grid-rows">
         全部 SPU
         <span class="op-badge" id="badge-all">·</span>
-      </button>
-      <button class="op-tab op-tab-active" type="button" role="tab" data-tab="pending" aria-selected="true" aria-controls="grid-rows">
-        待处理
-        <span class="op-badge" id="badge-pending">·</span>
       </button>
       <button class="op-tab" type="button" role="tab" data-tab="recent" aria-selected="false" aria-controls="grid-rows">
         最近提交
@@ -638,7 +653,7 @@ _PAGE_HTML = """<!doctype html>
         </select>
       </label>
       <span class="op-toolbar-spacer" aria-hidden="true"></span>
-      <button type="button" class="op-btn-primary" data-act="submit-all" aria-label="一次性提交所有已填写成本的行">
+      <button type="button" class="op-btn-primary" data-act="submit-all" aria-label="一次性提交所有已编辑成本的行">
         提交全部
       </button>
       <span class="op-batch-status" role="status" aria-live="polite"></span>
@@ -647,17 +662,18 @@ _PAGE_HTML = """<!doctype html>
     <div class="op-table-wrap">
       <table class="op-table" aria-live="polite">
         <thead>
-          <tr id="grid-head-pending">
+          <tr>
             <th scope="col" class="op-th op-th-sku">SKU</th>
             <th scope="col" class="op-th op-th-title">标题</th>
-            <th scope="col" class="op-th op-th-cost">单位成本</th>
-            <th scope="col" class="op-th op-th-note">备注</th>
+            <th scope="col" class="op-th op-th-sku">状态</th>
+            <th scope="col" class="op-th op-th-cost op-th-sortable" data-sort="unit_cost" title="按成本价排序">成本<span class="op-sort-arrow" aria-hidden="true"></span></th>
+            <th scope="col" class="op-th op-th-sku op-th-sortable" data-sort="created_at" title="按创建时间排序">创建<span class="op-sort-arrow" aria-hidden="true"></span></th>
+            <th scope="col" class="op-th op-th-sku op-th-sortable" data-sort="updated_at" title="按更新时间排序">更新<span class="op-sort-arrow" aria-hidden="true"></span></th>
             <th scope="col" class="op-th op-th-photo">图片</th>
-            <th scope="col" class="op-th op-th-action">操作</th>
           </tr>
         </thead>
         <tbody id="grid-rows">
-          <tr><td colspan="6" class="op-loading">加载店铺中…</td></tr>
+          <tr><td colspan="7" class="op-loading">加载店铺中…</td></tr>
         </tbody>
       </table>
     </div>

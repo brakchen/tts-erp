@@ -43,23 +43,21 @@ def test_manual_costs_page_v2_references_static_assets(api_client, readonly_key)
 
 
 def test_manual_costs_page_v2_has_two_operational_tabs(api_client, readonly_key):
-    """Page must render two tabs with operational state labels.
+    """Page must render exactly two tabs: 全部 SPU + 最近提交.
 
-    2026-09-01: the old 待填成本 and 待传图片 tabs were merged into one
-    待处理 tab (both endpoints returned the same set: products with no
-    manual cost and no effective link). Operators no longer need to
-    click between two redundant tabs to enter cost then upload photo —
-    each row carries both inputs and one submit.
+    2026-09-06: the 待处理 tab is retired. The editable catalogue (全部
+    SPU, cost inline-editable + 提交全部) and the change log (最近提交,
+    变更前 → 变更后) are the only two views.
     """
     r = api_client.get(
         "/v2/pages/manual-costs",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     body = r.text
-    for label in ("待处理", "最近提交"):
+    for label in ("全部 SPU", "最近提交"):
         assert label in body, f"missing tab label: {label!r}"
     # The retired labels must be gone (regression guard).
-    for retired in ("待填成本", "待传图片"):
+    for retired in ("待处理", "待填成本", "待传图片"):
         assert retired not in body, f"retired tab label still rendered: {retired!r}"
 
 
@@ -156,9 +154,9 @@ def test_manual_costs_page_v2_signature_counter_present(api_client, readonly_key
     """The signature oversized queue counter element must render.
 
     The .op-counter block (with id="op-counter", the .op-counter-num
-    span, and the .op-counter-label "待处理") is the page's primary
-    visual element. JS populates .op-counter-num with the pending
-    total on first API response.
+    span, and the .op-counter-label) is the page's primary visual
+    element. JS populates .op-counter-num with the active tab's row
+    count (catalogue SPUs on 全部 SPU, change-log rows on 最近提交).
     """
     r = api_client.get(
         "/v2/pages/manual-costs",
@@ -168,7 +166,7 @@ def test_manual_costs_page_v2_signature_counter_present(api_client, readonly_key
     assert 'id="op-counter"' in body, "signature counter section missing"
     assert 'id="op-counter-num"' in body, "signature counter num span missing"
     assert "op-counter-label" in body, "counter label class missing"
-    assert "待处理" in body, "counter label text '待处理' missing"
+    assert "全部 SPU" in body, "counter label text missing"
     # Industrial-console fingerprints in the inline <style>
     assert "--paper:" in body, "paper token not declared"
     assert "--accent:" in body, "accent token not declared"
@@ -203,10 +201,18 @@ def test_console_js_uses_redesign_class_names():
         "op-currency-fixed",
         "op-mirror-thumb",
         "op-img-fallback",
-        "op-btn-primary",
         "op-loading",
+        "op-cost-input",
+        "row-status",
     ):
         assert cls in src, f"console.js missing class hook: {cls!r}"
+    # op-btn-primary no longer appears in console.js: per-row submit
+    # buttons are gone (2026-09-06) — the only submit control is the
+    # toolbar 提交全部 (data-act="submit-all"), which lives in the page
+    # HTML. Assert the button hook there instead.
+    assert "op-btn-primary" not in src, (
+        "console.js should not render per-row submit buttons anymore"
+    )
     # Retired UI must stay gone (page-rework lane).
     for retired in ("op-select-currency", "op-dropzone"):
         assert retired not in src, (
@@ -215,7 +221,7 @@ def test_console_js_uses_redesign_class_names():
 
 
 def test_console_js_populates_signature_counter():
-    """console.js loadPending must populate #op-counter-num on success.
+    """console.js loaders must populate #op-counter-num on success.
 
     The signature counter is purely JS-driven — without the population
     step the page would render '·' forever.
@@ -277,11 +283,11 @@ def test_console_js_unwraps_api_envelope():
     )
     src = js.read_text(encoding="utf-8")
     assert "function unwrap(payload)" in src, "unwrap helper missing from console.js"
-    # Both load functions (pending + recent) must pipe their payload
-    # through unwrap(). Was ≥3 when there were three tabs.
+    # Both load functions (catalogue + change log) must pipe their
+    # payload through unwrap().
     assert src.count("unwrap(payload)") >= 2, (
         f"unwrap(payload) called {src.count('unwrap(payload)')} times, "
-        "expected ≥ 2 (pending + recent tabs)"
+        "expected ≥ 2 (all + recent tabs)"
     )
     # Spot-check: filter() must not be called on a payload that wasn't
     # unwrapped (the original bug pattern).
@@ -293,11 +299,11 @@ def test_console_js_unwraps_api_envelope():
 def test_page_has_submit_all_button(api_client, readonly_key):
     """The toolbar must expose a 提交全部 (batch submit) control.
 
-    2026-09-06 operator request: one click files every visible pending
-    row that already has a valid unit cost. The button lives in the
-    toolbar (data-act="submit-all") and the JS wires it to
-    submitAllPending(); a live status banner (.op-batch-status) reports
-    filed / skipped / failed counts.
+    2026-09-06 operator request: one click files every EDITED row on the
+    全部 SPU tab (dirty-tracking marks rows whose cost input changed).
+    The button lives in the toolbar (data-act="submit-all") and the JS
+    wires it to submitAllEdited(); a live status banner (.op-batch-status)
+    reports filed / failed counts.
     """
     r = api_client.get(
         "/v2/pages/manual-costs",
@@ -319,7 +325,7 @@ def test_page_has_submit_all_button(api_client, readonly_key):
         / "console.js"
     )
     src = js.read_text(encoding="utf-8")
-    assert "function submitAllPending()" in src, "console.js missing submitAllPending"
+    assert "function submitAllEdited()" in src, "console.js missing submitAllEdited"
     assert "function postManualCost(tr)" in src, "console.js missing postManualCost"
     assert "submit-all" in src, "console.js must bind [data-act=submit-all]"
 
@@ -357,3 +363,81 @@ def test_page_has_all_spu_tab(api_client, readonly_key):
     assert "/v2/commerce/channel-products" in src, (
         "console.js all tab must read channel-products"
     )
+
+
+def test_page_has_no_pending_tab(api_client, readonly_key):
+    """待处理 tab retired: the data-tab=pending button is gone entirely."""
+    r = api_client.get(
+        "/v2/pages/manual-costs",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    body = r.text
+    assert 'data-tab="pending"' not in body, "pending tab button still rendered"
+    assert 'id="badge-pending"' not in body, "pending badge still rendered"
+    assert 'data-tab="all"' in body, "all tab must still be present"
+    assert 'data-tab="recent"' in body, "recent tab must still be present"
+
+
+def test_page_has_editable_catalogue_hooks(api_client, readonly_key):
+    """全部 SPU rows are editable: cost input + dirty markers.
+
+    The static thead carries the sortable headers (data-sort on 成本 /
+    创建 / 更新) so the operator can re-sort the catalogue.
+    """
+    r = api_client.get(
+        "/v2/pages/manual-costs",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.text
+    for hook in (
+        'data-sort="unit_cost"',
+        'data-sort="created_at"',
+        'data-sort="updated_at"',
+        "op-th-sortable",
+        "op-sort-arrow",
+    ):
+        assert hook in body, f"page missing sort hook: {hook!r}"
+
+    from pathlib import Path
+
+    js = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "console.js"
+    )
+    src = js.read_text(encoding="utf-8")
+    assert "function bindSortableHeaders(tr)" in src, "sort binder missing"
+    assert "catalogueSort" in src, "catalogue sort state missing"
+    assert "is-dirty" in src, "row dirty tracking missing"
+    assert "submitAllEdited" in src, "edited-rows batch submit missing"
+    # Sort state must flow into the channel-products request.
+    assert "&sort=" in src, "loadAll must send the sort query"
+    assert "source_created_at" in src, "catalogue row must render created time"
+    assert "source_updated_at" in src, "catalogue row must render updated time"
+
+
+def test_console_js_recent_tab_renders_prev_and_new():
+    """最近提交 = change log: rows show 变更前 → 变更后.
+
+    renderRecentRows must read prev_unit_cost / unit_cost (the backend
+    LAG pairing) and render both columns.
+    """
+    from pathlib import Path
+
+    js = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "console.js"
+    )
+    src = js.read_text(encoding="utf-8")
+    assert "function renderRecentRows(items)" in src
+    assert "prev_unit_cost" in src, "console.js must read prev_unit_cost"
+    assert "变更前" in src and "变更后" in src, (
+        "recent thead/rows must label the before/after price columns"
+    )
+    assert 'data-label="变更时间"' in src, "recent rows must show the change timestamp"
