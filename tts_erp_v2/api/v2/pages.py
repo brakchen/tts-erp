@@ -749,7 +749,7 @@ _PAGE_HTML = """<!doctype html>
 #   - 自定义 CSS 只留两件事:① warm-paper token 皮肤(:root 把 --bs-* 主题变量收编到同套 token,
 #     border-radius 归零工业直角);② JS 依赖的行为类(data-tip 气泡 / ⚙ 列开关 / lightbox /
 #     §7.2 标色 / 结余带数字),这些 JS 逐字渲染不可改名。
-#   - 移动端:结余带 row-cols-2→xl 7 降密度;工具栏 flex-wrap 自然纵向堆叠;表格
+#   - 移动端:结余带 xs 2 列 → lg 7 格单行;工具栏 flex-wrap 自然纵向堆叠;表格
 #     .table-responsive 横滚 + 小屏按 nth-child 裁次要对比列(广告数/平台GMV/ROI₀/件数)+
 #     首列/表头 sticky(≤lg),避免手机上看 22 列大海。
 _SPU_ROI_PAGE_HTML = """<!doctype html>
@@ -1024,6 +1024,11 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     /* ---------- 响应式(Bootstrap 断点同源) ----------
        小屏裁掉次要对比列(广告数/平台GMV/ROI₀/件数)降低横滚量;
        首列/表头 ≤lg 才 sticky(桌面无需吸左,避免多一列常驻宽度)。 */
+    /* ≥lg:结余带 7 格挤单行(bootstrap row-cols 上限 6,故用等宽 flex 覆盖) */
+    @media (min-width: 992px) {
+      .op-counter .row { flex-wrap: nowrap; }
+      .op-counter .row > * { flex: 1 1 0; width: auto; }
+    }
     @media (max-width: 991.98px) {
       table.op-table thead th:first-child,
       table.op-table tbody td:first-child {
@@ -1068,8 +1073,8 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
 
   <main class="op-main">
     <!-- 结余带:row-cols 栅格降密度(xs 2 → xl 7),JS 只写 #sum-* 文本 + is-err/is-ok -->
-    <section class="op-counter px-2 px-md-4 py-3 py-md-4" aria-live="polite">
-      <div class="row g-2 g-md-3 text-center row-cols-2 row-cols-sm-3 row-cols-md-4 row-cols-lg-7">
+    <section class="op-counter px-2 px-md-4 py-3 py-md-4" id="summaries" aria-live="polite">
+      <div class="row g-2 g-md-3 text-center row-cols-2 row-cols-sm-3 row-cols-md-4">
         <div class="col"><span class="op-counter-item"><span class="op-counter-label">SPU</span><span class="op-counter-num" id="sum-n">·</span></span></div>
         <div class="col"><span class="op-counter-item"><span class="op-counter-label">消耗 $</span><span class="op-counter-num" id="sum-spend">—</span></span></div>
         <div class="col"><span class="op-counter-item"><span class="op-counter-label">有效销售 $</span><span class="op-counter-num" id="sum-sales">—</span></span></div>
