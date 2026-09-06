@@ -20,7 +20,8 @@ Python 3.14 · FastAPI + uvicorn（`:9877`）· SQLAlchemy 2 + psycopg3 · Postg
 
 ```bash
 bash scripts/test.sh fast                          # 日常全量测试（唯一入口；migration 域已归档勿跑）
-.venv/bin/pytest tests/<domain>/ -q                # 单域（如 tests/miaoshou/、tests/jobs_tiktok/）
+.venv/bin/pytest tests/<domain>/ -q                # 单域（如 tests/miaoshou/、tests/jobs_tiktok/）；
+                                                    # worktree 内无 .venv，改用 /home/schan/tts-erp/.venv/bin/pytest（见 §11）
 bash restart.sh                                    # 重启 API = systemctl --user restart tts-erp.service
 systemctl --user restart tts-erp-sync.service      # 改了 jobs/ 或 sync_worker/ 后必须单独跑
 python3 test_e2e.py / test_e2e_finance.py          # 端到端冒烟（需 :9877 在跑）
@@ -219,6 +220,26 @@ apifox 标题“妙手开放平台”，底层 endpoint 指向 `openapi.wanshifu
 - **并发 sub-agent 必须开 worktree**：`git worktree add .worktrees/<slug> -b <prefix>/<slug>`
   （slug = kebab-case 主题，prefix = fix/feature/redesign/chore）。worktree 内 commit 留本地**不 push**；
   master worktree 是公共区，只跑读 / 测试 / 文档 / merge。`.worktrees/` 已在 .gitignore
+- **新 worktree 环境准备（开完第一步，必做）**：worktree 只含 tracked 文件，`.env`（gitignored）和 `.venv`
+  都不会跟过去——不先补环境，第一发 DB / curl / 测试必炸（`TTS_ERP_DB_URL not set`、API key 401、
+  `ModuleNotFoundError`），且症状看起来像代码问题，会白烧大量 token 排查（09-05 实测教训）。开完即做：
+
+  ```bash
+  git worktree add .worktrees/<slug> -b <prefix>/<slug>
+  cd .worktrees/<slug> && ln -s ../../.env .env   # 软链主仓 .env；已有 worktree 全是软链，永远最新不过期
+  # 备选：cp /home/schan/tts-erp/.env .env —— 独立副本也行，但 .env 一改（key rotate / DB URL /
+  #   TTS_ERP_AUTH_MODE 切换）副本就过期，症状更诡异；软链是仓库惯例，优先软链
+  bash scripts/test.sh fast                      # ✓ 能跑（test.sh 已自动 fallback 主仓 venv）
+  /home/schan/tts-erp/.venv/bin/pytest tests/<domain>/ -q   # 裸 pytest 用绝对路径，别用 .venv/bin/pytest
+  ```
+
+  - venv 同理不在 worktree：一律显式用主仓绝对路径 `/home/schan/tts-erp/.venv/bin/...`，不要在 worktree 里
+    新造 venv；§2 的 `.venv/bin/pytest` 只对 master 有效
+  - **不要改 / 删 worktree 里的 .env**：软链会写穿/穿透到主仓 `.env`（全 lane 共享凭证），只由 master 维护
+  - pi-lens 自动检查报 `spawn python ENOENT` / “test runner error” = 已知假报错（runner 在 worktree 找不到
+    python），忽略即可，以自己用绝对 venv 实测的结果为准
+  - bash / edit / read 的路径按**当前 cwd 的 worktree** 解析：先 `cd .worktrees/<slug>` 或全程写绝对路径，
+    别用相对路径跨 worktree 操作（实测多次把 edit 落进 master 公共区，还要 stash/pop 收拾）
 - **worktree 收尾**：master 上 `git merge <branch> --no-ff -m "merge: <slug> (lane <lane-id>)"` →
   `bash scripts/test.sh fast` 0 fail → `git worktree remove .worktrees/<slug>` + `git branch -D <branch>` +
   `git worktree prune` → 确认 `git worktree list` 无残留 → push。禁止 `git add -A && git commit` 冒充 merge；
