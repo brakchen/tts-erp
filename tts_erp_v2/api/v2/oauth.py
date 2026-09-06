@@ -29,7 +29,9 @@ so it is unit-testable without HTTP); outbound token calls live in
 from __future__ import annotations
 
 import html as _html
+import json
 import logging
+import os
 from typing import Any
 
 from fastapi import (
@@ -412,4 +414,238 @@ def _handle_html(
             else f"{n} shops authorized",
         ),
         status_code=status.HTTP_200_OK,
+    )
+
+
+# ─── operator console: 新店授权控制台页 ──────────────────────────────
+# Self-contained HTML shell (inline CSS/JS, no vendor assets) served at
+# GET /v2/oauth/tiktok/onboard (readonly-classified in middleware/auth.py
+# so an unauthenticated browser 302s to the login page like /v2/pages/*).
+# Behaviour lives in the inline script: probe /v2/auth/me → admin gate →
+# call GET /v2/oauth/tiktok/authorize?format=json (admin) on demand so the
+# link is always fresh (state TTL 45 min, single-use) — never cached.
+
+_ONBOARD_PAGE_HTML = """<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>新店授权 · tts-erp</title>
+<style>
+  :root {
+    --paper: #F4EFE4; --paper-deep: #EAE3D2; --ink: #1B1814; --ink-soft: #4A4239;
+    --rule: #C9BFA8; --rule-soft: #DDD4BF; --accent: #B8390E; --accent-deep: #8F2C09;
+    --muted: #6E6657; --danger: #8C1A1A; --ok: #2F6B3E;
+    --mono: ui-monospace, 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'PingFang SC',
+            'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--sans); font-size: 14px; line-height: 1.5; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { color: var(--accent-deep); }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 28px 24px 48px; }
+  header.ops { border-bottom: 1px solid var(--rule); padding-bottom: 14px;
+    margin-bottom: 22px; display: flex; justify-content: space-between;
+    align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+  .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--muted); }
+  h1 { font-size: 22px; margin: 4px 0 0; font-weight: 650; letter-spacing: .01em; }
+  #identity { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .card { background: #FCF9F1; border: 1px solid var(--rule);
+    padding: 18px 20px; margin-bottom: 16px; }
+  .card h2 { font-size: 13px; font-family: var(--mono); font-weight: 600;
+    letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft);
+    margin: 0 0 12px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button { font: inherit; background: var(--ink); color: var(--paper);
+    border: 0; padding: 8px 16px; cursor: pointer; }
+  button:hover { background: var(--ink-soft); }
+  button:disabled { opacity: .45; cursor: wait; }
+  .btn-ghost { background: transparent; color: var(--accent);
+    border: 1px solid var(--accent); }
+  .btn-ghost:hover { background: rgba(184,57,14,.06); }
+  .linkbox { font-family: var(--mono); font-size: 12px; word-break: break-all;
+    background: var(--paper-deep); border: 1px solid var(--rule-soft);
+    padding: 10px 12px; margin: 12px 0; }
+  .meta { color: var(--muted); font-size: 12px; }
+  .ok { color: var(--ok); } .err { color: var(--danger); }
+  .status { font-size: 13px; min-height: 20px; }
+  ol.steps { padding-left: 20px; margin: 8px 0 0; }
+  ol.steps li { margin: 6px 0; }
+  code { font-family: var(--mono); background: var(--paper-deep);
+    padding: 0 5px; font-size: 12px; }
+  .hide { display: none; }
+  #redirect-hint { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="ops">
+    <div>
+      <div class="eyebrow">TikTok Shop · Seller OAuth</div>
+      <h1>新店接入授权</h1>
+    </div>
+    <div id="identity">…</div>
+  </header>
+
+  <div class="card">
+    <h2>授权链接</h2>
+    <div class="row">
+      <button id="btn-gen" type="button">生成授权链接</button>
+      <span class="meta">state 单次使用 · 45 分钟有效 · 每次生成都是新链接</span>
+    </div>
+    <div class="status" id="status"></div>
+    <div id="linkcard" class="hide">
+      <div class="linkbox" id="linkbox"></div>
+      <div class="row">
+        <a id="btn-open" class="btn-ghost" target="_blank" rel="noopener"
+           style="padding:6px 14px;border:1px solid var(--accent)">在新窗口打开</a>
+        <button id="btn-copy" class="btn-ghost" type="button">复制链接</button>
+        <span class="meta" id="expiry"></span>
+      </div>
+    </div>
+    <div id="role-gate" class="hide">
+      <p class="status err">当前会话没有 <code>admin</code> 角色 — 生成授权链接需要 admin。
+        换用管理员账号登录后重试。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>操作步骤</h2>
+    <ol class="steps">
+      <li>点「生成授权链接」，然后在新窗口打开它（或复制链接）。</li>
+      <li>以要接入的 <strong>卖家账号</strong> 登录 TikTok Seller Center 并同意授权。</li>
+      <li>TikTok 会把浏览器带回回调地址，页面会显示授权结果（店名 / 地区 / 授权范围）。</li>
+      <li>落库成功即完成 —— 下个同步 tick 会自动把新店纳入数据同步
+        （<code>integration.credentials</code> + <code>commerce.shops</code>，含每店 shop_cipher）。</li>
+    </ol>
+    <p class="meta" style="margin-bottom:4px">前置条件：</p>
+    <ul class="steps">
+      <li>Partner Center 的 Redirect URL 已配成公网形式：<br>
+        <span id="redirect-hint"></span></li>
+      <li><code>TIKTOK_SERVICE_ID</code> 已配置、app 已过审（生成接口会直接提示缺什么）。</li>
+    </ul>
+  </div>
+</div>
+
+<noscript><p style="text-align:center">此页面需要 JavaScript。</p></noscript>
+<script>
+(() => {
+  'use strict';
+  var PREFIX = location.pathname.replace(/\\/v2\\/oauth\\/tiktok\\/.*$/, "");
+  if (!/^\\/[a-z0-9/_-]*$/i.test(PREFIX)) PREFIX = "";
+  function $(s) { return document.querySelector(s); }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+    return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]; }); }
+  function html(el, m) { el.innerHTML = m; } // pi-lens-ignore: no-inner-html-js
+  function loginUrl() {
+    return PREFIX + "/v2/auth/login?next=" + PREFIX + "/v2/oauth/tiktok/onboard";
+  }
+  function api(path) {
+    return fetch(PREFIX + path, { credentials: "include", headers: {} })
+      .then(function (r) {
+        if (r.status === 401) { window.location.href = loginUrl(); return null; } // pi-lens-ignore: no-open-redirect-js
+        return r;
+      });
+  }
+  var statusEl = $("#status");
+  function setStatus(cls, msg) { if (!statusEl) return; statusEl.className = "status" + (cls ? " " + cls : ""); statusEl.textContent = msg || ""; }
+  function showLink(url, state, expiresAt) {
+    var lc = $("#linkcard"); if (!lc) return;
+    lc.classList.remove("hide");
+    html($("#linkbox"), esc(url));
+    var open = $("#btn-open"); if (open) open.href = url;
+    var ex = $("#expiry"); if (ex) { var t = expiresAt ? expiresAt.replace("T", " ").replace(/\\.\\d+Z$/, "Z") : ""; ex.textContent = t ? ("有效至 " + t + " UTC") : ""; }
+    setStatus("ok", "链接已生成（单次使用；被用过或过期后点上方按钮重新生成）。");
+  }
+  function gate() {
+    var g = $("#role-gate"); if (g) g.classList.remove("hide");
+    var b = $("#btn-gen"); if (b) b.disabled = true;
+    setStatus("", "");
+  }
+  function generate() {
+    var b = $("#btn-gen"); if (!b) return;
+    b.disabled = true; b.textContent = "生成中…";
+    setStatus("", "正在向 TikTok 注册一次性 state…");
+    api("/v2/oauth/tiktok/authorize?format=json")
+      .then(function (r) {
+        if (!r) return null;
+        if (r.status === 403) { gate(); return null; }
+        if (!r.ok) { return r.json().catch(function () { return {}; }); }
+        return r.json();
+      })
+      .then(function (d) {
+        if (!d) return;
+        if (d.ok && d.authorize_url) {
+          showLink(d.authorize_url, d.state, d.state_expires_at);
+        } else {
+          var msg = (d && (d.error || d.detail)) || ("HTTP " + (d && d.status_code || "错误"));
+          setStatus("err", "生成失败：" + msg + " — 检查服务端日志可定位（缺 TIKTOK_SERVICE_ID 会在此报配置错误）。");
+        }
+      })
+      .catch(function (e) { setStatus("err", "请求失败：" + (e && e.message || e)); })
+      .then(function () { if (b) { b.disabled = false; b.textContent = "生成授权链接"; } });
+  }
+  var copyBtn = $("#btn-copy");
+  if (copyBtn) {
+    copyBtn.addEventListener("click", function () {
+      var url = ($("#linkbox") || {}).textContent || "";
+      if (!url) return;
+      function done() { copyBtn.textContent = "已复制"; setTimeout(function () { copyBtn.textContent = "复制链接"; }, 1600); }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(done).catch(function () {
+          var ta = document.createElement("textarea"); ta.value = url;
+          document.body.appendChild(ta); ta.select();
+          try { document.execCommand("copy"); done(); } finally { document.body.removeChild(ta); }
+        });
+      } else {
+        var ta = document.createElement("textarea"); ta.value = url;
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand("copy"); done(); } finally { document.body.removeChild(ta); }
+      }
+    });
+  }
+  var gen = $("#btn-gen");
+  if (gen) gen.addEventListener("click", generate);
+  function boot() {
+    var redir = $("#redirect-hint");
+    if (redir) redir.textContent = window.__REDIRECT_HINT__ || "";
+    api("/v2/auth/me").then(function (r) { return r ? r.json() : null; }).then(function (me) {
+      var id = $("#identity"); if (!id) return;
+      if (me && me.authenticated) {
+        var key = me.key_prefix || "session";
+        html(id, "操作员 <code>" + esc(key) + "</code> · " + esc(me.role || "") + ' · <a href="' + PREFIX + '/v2/auth/logout">退出</a>');
+      } else { html(id, '<a href="' + loginUrl() + '">登录</a>'); return; }
+      if (me.role !== "admin") { gate(); } else { generate(); }
+    }).catch(function () { /* not fatal */ });
+  }
+  boot();
+})();
+</script>
+</body>
+</html>
+"""
+
+
+@router.get("/onboard", response_class=HTMLResponse, summary="新店授权控制台页 (HTML)")
+def onboard_page(request: Request) -> HTMLResponse:
+    """Operator console for onboarding a new TikTok shop (browser UI).
+
+    Readonly HTML shell (``/v2/oauth/tiktok/onboard`` in the auth
+    middleware's ``_READONLY_EXACT`` so an unauthenticated browser GET is
+    302-redirected to the login page). The page's inline JS probes
+    ``/v2/auth/me``; only an ``admin`` session may generate — it calls
+    ``GET /v2/oauth/tiktok/authorize?format=json`` (admin-gated) on demand
+    so every link is fresh (45-min single-use CSRF state). No shop/DB data
+    is rendered server-side; the shell is static.
+    """
+    prefix = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "")
+    redirect_hint = f"{prefix}/v2/oauth/tiktok/callback"
+    return HTMLResponse(
+        _ONBOARD_PAGE_HTML.replace(
+            'window.__REDIRECT_HINT__ || ""',
+            f'window.__REDIRECT_HINT__ = {json.dumps(redirect_hint)} || ""',
+        )
     )

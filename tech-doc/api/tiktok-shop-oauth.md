@@ -28,6 +28,14 @@ GET /v2/oauth/tiktok/authorize ────────────────�
 
 ## 端点契约
 
+### `GET /v2/oauth/tiktok/onboard` — 新店授权控制台页（浏览器 UI）
+
+- **Role**: readonly（`_READONLY_EXACT` 精确豁免行；HTML 壳页本身无数据/无副作用）。
+  未登录浏览器 GET → 302 `/v2/auth/login?next=/v2/oauth/tiktok/onboard`。
+- **行为**: 内联 JS 探测 `/v2/auth/me`，非 admin 显示角色门槛；admin 点「生成授权链接」
+  调 `GET /v2/oauth/tiktok/authorize?format=json` → 展示新链接（复制 / 新窗口打开 / 到期时间）。
+  每次生成 = 新 state（45min、单次使用），**不缓存链接**。
+
 ### `GET /v2/oauth/tiktok/authorize` — 发起授权（admin）
 
 - **Role**: `admin`（handler `require_role_at_least(request, "admin")`；

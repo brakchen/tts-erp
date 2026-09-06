@@ -80,6 +80,15 @@ miaoshou/ak_... 均已就位且 scope 齐全），v1 oauth_receiver 库失去回
   2. 跑 `tech-doc/_archive/migrate-v1-to-v2-2026-08-29/scripts/re_encrypt_credentials.py` 把 legacy 格式转回 v2 envelope
   3. 恢复 oauth-receiver.service unit + .env 的 OAUTH_* 两行
 
+## 2026-09-06 (feat) — 新店授权控制台页 `GET /v2/oauth/tiktok/onboard`（浏览器 UI）
+
+- 操作台页（readonly 壳页 + 内联 JS）：未登录浏览器 302 → 登录页；`/v2/auth/me`
+  探测角色，非 admin 显示角色门槛。点「生成授权链接」按需调
+  `GET /v2/oauth/tiktok/authorize?format=json`（admin 闸不变）→ 每次生成全新链接
+  （单次使用 state、45min TTL、不缓存），一键复制 / 新窗口打开，附到期时间与操作步骤。
+- `middleware/auth.py` `_READONLY_EXACT` 增 `/v2/oauth/tiktok/onboard`（页面只读；授权动作仍 admin）。
+- 契约测试：未登录 302→login、readonly 可见壳、admin 同壳（tests/api/test_oauth_api.py +3）。
+
 ## 2026-09-06 (fix) — oauth 回调两段式落库：Get Authorized Shops 枚举店铺（真实上游验证）
 
 真实授权首跑实测：service_id 流 token/get 返回**用户级 token**（data 无 shop_id/shop_cipher，

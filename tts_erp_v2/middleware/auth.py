@@ -26,7 +26,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from anyio.to_thread import run_sync
 
@@ -92,6 +92,7 @@ _READONLY_EXACT = {
     "/v2/llm-context",  # GET — self-describing system + data dictionary for LLM agents
     "/v2/spu-images",  # GET — list ready images (no trailing slash in router)
     "/v2/analytics/spu-roi",  # GET — SPU 实际 ROI 看板主表(只读报表)
+    "/v2/oauth/tiktok/onboard",  # GET — 新店授权控制台页(HTML 壳;生成动作本身仍 admin)
 }
 # All other /v2/* paths default to admin (defensive: unknown = privileged).
 
@@ -210,12 +211,12 @@ def _db_lookup(key_hash: str) -> tuple[int | None, tuple[str, ...]] | None:
         if row.status != "active":
             return None
         if row.last_used_at is not None and (
-            row.last_used_at < datetime(1970, 1, 1, tzinfo=timezone.utc)
+            row.last_used_at < datetime(1970, 1, 1, tzinfo=UTC)
         ):
             return None  # defensive: corrupted last_used_at
         # Bump last_used_at on cache miss (best-effort, ignore failure).
         try:
-            row.last_used_at = datetime.now(timezone.utc)
+            row.last_used_at = datetime.now(UTC)
             sess.commit()
         except Exception:
             sess.rollback()

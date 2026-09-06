@@ -265,3 +265,43 @@ def test_callback_html_default_render(api_client, app_env: None) -> None:
     assert r.status_code == 400
     assert "text/html" in r.headers["content-type"]
     assert "No authorization code" in r.text
+
+
+# ─── onboard console page ────────────────────────────────────────────
+
+
+def test_onboard_page_redirects_browser_to_login() -> None:
+    """Unauthenticated browser GET → 302 to the login page (readonly-exact
+    classification), never a raw 401 JSON wall."""
+    from tts_erp_v2.app import build_app
+
+    with TestClient(build_app()) as client:
+        r = client.get(
+            "/v2/oauth/tiktok/onboard",
+            headers={"Accept": "text/html"},
+            follow_redirects=False,
+        )
+        assert r.status_code == 302, r.text
+        loc = r.headers["location"]
+        assert "/v2/auth/login" in loc
+        assert "next=/v2/oauth/tiktok/onboard" in loc
+
+
+def test_onboard_page_readonly_can_view(
+    api_client, readonly_key, app_env: None
+) -> None:
+    """The console shell is readonly-viewable; generation is admin-gated
+    in the JS (the JSON authorize endpoint stays admin-only)."""
+    r = api_client.get("/v2/oauth/tiktok/onboard", headers=_bearer(readonly_key))
+    assert r.status_code == 200, r.text
+    assert "新店接入授权" in r.text
+    assert 'id="btn-gen"' in r.text
+    assert "authorize?format=json" in r.text
+
+
+def test_onboard_page_admin_same_shell(api_client, admin_key, app_env: None) -> None:
+    """Admin gets the identical shell (behaviour difference is client-side
+    role gating, not a different document)."""
+    r = api_client.get("/v2/oauth/tiktok/onboard", headers=_bearer(admin_key))
+    assert r.status_code == 200, r.text
+    assert 'id="btn-gen"' in r.text
