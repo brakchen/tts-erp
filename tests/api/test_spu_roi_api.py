@@ -8,7 +8,10 @@ USD→VND=26330、CNY→USD=0.14774、K1=30 CNY/件、平台佣金基线 0.1156)
 3. 业务口径:单 SPU 场景(1 有效订单 + 1 已完结退货退款 + 1 已付被取消订单
    的取消退款 case)按 §4.2 公式精确断言 sales/refund_return/net_profit/
    roi_real/roi_breakeven/platform_fee/return_loss/cpa/unit_cost_used;
-   取消桶只进信息列不进净额(DEFAULT_K1 + MANUAL 两分支)
+   取消桶只进信息列不进净额(DEFAULT_K1 + MANUAL 两分支);
+   UNPAID 等异常订单的已完结退款按 §4.2 rule 0 防御性进未归属
+   (不进 refund_* 桶/行内金额,meta.unattributed_refund_lines +1);
+   fee_rate=NaN/Infinity 非有限值 → 422 不 500
 4. 行范围:无活动 SPU 默认排除、include_all=true 包含
 5. totals(跨分页)与行加总一致;meta 字段齐全
 6. 页面 GET 200 text/html + 标题 + 静态资源引用 + 设计 token
@@ -502,6 +505,55 @@ def _seed_spu_manual(sess) -> int:
     return spu_pk
 
 
+def _seed_unpaid_refund_spu(sess) -> int:
+    """异常订单退款场景(§4.2 rule 0):有效销售单 + UNPAID 订单已完结退款。
+
+    - TEST_ORDER_AB1:有效销售(DELIVERED,已付)5 件×$20 → sales $100
+    - TEST_ORDER_AB2:UNPAID(白名单外且非 CANCELLED)订单,1 行已完结
+      RETURN_AND_REFUND case,退 1 件 526,600 VND(=$20),有 spu_pk
+
+    期望:该退款不进 refund_net/refund_cancelled 桶、不进净额与行内金额
+    (net_profit 视同无此退款),只在 meta.unattributed_refund_lines 显式
+    +1 计数(防御性未归属),不静默丢。
+    """
+    seller = "TEST_SELLER_AB"
+    shop_pk = _seed_shop(sess, seller)
+    spu_pk = _seed_spu(sess, shop_pk, "TEST_ROI_SPU_AB")
+    _seed_order_line(
+        sess,
+        shop_pk=shop_pk,
+        spu_pk=spu_pk,
+        order_id="TEST_ORDER_AB1",
+        status=PAID_ORDER_STATUS,
+        line_ext="TEST_LINE_AB1",
+        qty="5",
+        unit_price="526600",  # $20/件 → sales $100
+        paid=True,
+    )
+    o2 = _seed_order_line(
+        sess,
+        shop_pk=shop_pk,
+        spu_pk=spu_pk,
+        order_id="TEST_ORDER_AB2",
+        status="UNPAID",
+        line_ext="TEST_LINE_AB2",
+        qty="1",
+        unit_price="526600",
+        paid=False,
+    )
+    line2 = _fetch_spu_line_id(sess, "TEST_ORDER_AB2")
+    _seed_case(
+        sess,
+        shop_pk=shop_pk,
+        order_pk=o2,
+        ext_case="TEST_CASE_AB1",
+        case_type="RETURN_AND_REFUND",
+        status="RETURN_OR_REFUND_REQUEST_COMPLETE",
+        lines=[(line2, "TEST_CLINE_AB1", "1", "526600")],
+    )
+    return spu_pk
+
+
 def _seed_window_spu(sess) -> int:
     """窗口裁剪场景 SPU(仅销售+退款,无广告):
 
@@ -720,6 +772,55 @@ def test_spu_roi_manual_cost_source(api_client, readonly_key, db_engine):
     # 货损/净利按 25 CNY/件 重算:return_loss = 1×3.6935
     assert item["return_loss"] == "3.6935"
     assert item["net_profit"] == "39.9725"
+
+
+def test_spu_roi_unpaid_order_refund_defensive_unattributed(
+    api_client, readonly_key, db_engine
+):
+    """§4.2 rule 0:UNPAID 等异常订单的已完结退款防御性进未归属。
+
+    该退款行有 spu_pk 但订单状态不在白名单也不是 CANCELLED → 不进
+    refund_net/refund_cancelled 桶、不进净额与行内金额(net_profit 视同
+    无此退款),只在 meta.unattributed_refund_lines 显式 +1,不静默丢。
+    """
+    h = {"Authorization": f"Bearer {readonly_key}"}
+    params = {"q": "TEST_ROI_SPU_AB"}
+    # 造数据前的基线 meta(未归属计数是全局口径,delta 断言不受其它残留行影响)
+    r0 = api_client.get("/v2/analytics/spu-roi", headers=h, params=params)
+    assert r0.status_code == 200, r0.text
+    base = r0.json()["meta"]["unattributed_refund_lines"]
+
+    with Session(db_engine) as sess:
+        _seed(sess, _seed_unpaid_refund_spu)
+
+    r = api_client.get("/v2/analytics/spu-roi", headers=h, params=params)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["total"] == 1, body["items"]
+    item = body["items"][0]
+
+    # 销售侧不受影响:UNPAID 单不进有效销售(DELIVERED 单 5 件×$20)
+    assert item["order_count"] == 1
+    assert item["units_sold"] == 5
+    assert item["sales"] == "100.0000"
+
+    # 异常订单退款不进 refund_net 桶(REFUND_ONLY/RETURN 桶都保持 0)
+    assert item["refund_return_qty"] == 0
+    assert item["refund_return_amount"] == "0.0000"
+    assert item["refund_net_qty"] == 0
+    assert item["refund_net_amount"] == "0.0000"
+    assert item["refund_rate"] == "0.00"
+    # 也不进取消桶 / 货损
+    assert item["refund_cancelled_qty"] == 0
+    assert item["refund_cancelled_amount"] == "0.0000"
+    assert item["refund_cancelled_missing_lines"] == 0
+    assert item["return_loss"] == "0.0000"
+    # 行内金额视同无此退款:net_profit = 100 − 5×4.4322 − 0 − 100×0.1156
+    assert item["platform_fee"] == "11.5600"
+    assert item["net_profit"] == "66.2790"
+
+    # 防御性进未归属:meta 计数 +1(不静默)
+    assert body["meta"]["unattributed_refund_lines"] == base + 1, body["meta"]
 
 
 # ─── 行范围(include_all)──────────────────────────────────────────────
@@ -1063,6 +1164,19 @@ def test_spu_roi_rejects_bad_params(api_client, readonly_key):
     assert (
         api_client.get(
             "/v2/analytics/spu-roi", headers=h, params={"fee_rate": "abc"}
+        ).status_code
+        == 422
+    )
+    # 非有限 Decimal(NaN/Infinity)比较不报错但会穿透到 quantize → 一律 422,不能 500
+    assert (
+        api_client.get(
+            "/v2/analytics/spu-roi", headers=h, params={"fee_rate": "NaN"}
+        ).status_code
+        == 422
+    )
+    assert (
+        api_client.get(
+            "/v2/analytics/spu-roi", headers=h, params={"fee_rate": "Infinity"}
         ).status_code
         == 422
     )

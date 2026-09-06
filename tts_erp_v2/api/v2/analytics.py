@@ -842,6 +842,9 @@ _SQL_ROI_REFUNDS = text(
     JOIN after_sales.case_lines cl ON cl.case_id = c.id
     JOIN commerce.sales_order_lines sl ON sl.id = cl.sales_order_line_id
     JOIN commerce.sales_orders so ON so.id = c.order_pk
+    -- §4.2 rule 0：白名单/CANCELLED 之外的异常订单状态(UNPAID/ON_HOLD 等)
+    -- 的已完结退款行,所有 FILTER 都不命中 → 不进任何 refund_* 金额桶、
+    -- 不进行内金额;这类行在 meta.unattributed_refund_lines 显式计数上报
     WHERE c.status IN (:st0, :st1)
       AND sl.spu_pk IS NOT NULL
       AND (CAST(:ws AS timestamptz) IS NULL
@@ -885,13 +888,35 @@ _SQL_ROI_WINDOW = text(
 _SQL_ROI_UNATTRIBUTED = text(
     """
     SELECT count(*)::int AS n
-    FROM after_sales.cases c
-    JOIN after_sales.case_lines cl ON cl.case_id = c.id
-    LEFT JOIN commerce.sales_order_lines sl ON sl.id = cl.sales_order_line_id
-    WHERE c.status IN (:st0, :st1)
-      AND (cl.sales_order_line_id IS NULL OR sl.spu_pk IS NULL)
-      AND (CAST(:shop_pk AS bigint) IS NULL
-           OR c.shop_pk = CAST(:shop_pk AS bigint))
+    FROM (
+        -- 未归属已完结退款行(§4.2 rule 0 + rule 3)：两类行都进 meta
+        -- unattributed_refund_lines 页脚提示,不静默丢。
+        -- (a) 归属不上：case_lines 无 sales_order_line_id,或 line 无 spu
+        SELECT cl.id
+        FROM after_sales.cases c
+        JOIN after_sales.case_lines cl ON cl.case_id = c.id
+        LEFT JOIN commerce.sales_order_lines sl ON sl.id = cl.sales_order_line_id
+        WHERE c.status IN (:st0, :st1)
+          AND (cl.sales_order_line_id IS NULL OR sl.spu_pk IS NULL)
+          AND (CAST(:shop_pk AS bigint) IS NULL
+               OR c.shop_pk = CAST(:shop_pk AS bigint))
+        UNION ALL
+        -- (b) 订单状态异常(白名单外且非 CANCELLED,如 UNPAID/ON_HOLD)的
+        --     已完结退款行：§4.2 rule 0 防御性进未归属。这些行在退款 SQL 里
+        --     有 spu_pk 但因状态不命中任何 FILTER → 不进 refund_* 桶,
+        --     这里显式计数;与 (a) 的 spu_pk IS NOT NULL 条件互斥不重复
+        SELECT cl.id
+        FROM after_sales.cases c
+        JOIN after_sales.case_lines cl ON cl.case_id = c.id
+        JOIN commerce.sales_order_lines sl ON sl.id = cl.sales_order_line_id
+        JOIN commerce.sales_orders so ON so.id = c.order_pk
+        WHERE c.status IN (:st0, :st1)
+          AND sl.spu_pk IS NOT NULL
+          AND so.status <> ALL (CAST(:paid_statuses AS text[]))
+          AND so.status <> 'CANCELLED'
+          AND (CAST(:shop_pk AS bigint) IS NULL
+               OR c.shop_pk = CAST(:shop_pk AS bigint))
+    ) u
     """
 )
 
@@ -1156,6 +1181,7 @@ def _query_spu_roi(
             {
                 "st0": _CASE_COMPLETED_STATUSES[0],
                 "st1": _CASE_COMPLETED_STATUSES[1],
+                "paid_statuses": _PAID_STATUSES,
                 "shop_pk": shop_pk,
             },
         )
@@ -1326,6 +1352,12 @@ def list_spu_roi(
             raise HTTPException(
                 status_code=422, detail="fee_rate must be a decimal"
             ) from exc
+        if not fee_value.is_finite():
+            # Decimal('NaN')/('Infinity') 与 0 比较不报错(NaN 比较恒 False),
+            # 会穿透到 _fmt_money quantize 造成 500;统一按 422 拒掉
+            raise HTTPException(
+                status_code=422, detail="fee_rate must be a finite decimal"
+            )
         if fee_value < 0:
             raise HTTPException(status_code=422, detail="fee_rate must be >= 0")
     if w_start is not None and w_end is not None and w_start > w_end:
