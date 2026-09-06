@@ -44,6 +44,7 @@ from tts_erp_v2.api.v2 import (
     fx,
     linkage,
     llm_context,
+    oauth,
     pages,
     reporting,
     spu_images,
@@ -67,6 +68,9 @@ def _build_routes(app: FastAPI) -> None:
     app.include_router(
         tiktok_shop.router
     )  # TikTok Shop Partner API read-through (live, no DB caching)
+    app.include_router(
+        oauth.router
+    )  # TikTok seller OAuth onboarding (authorize + public callback)
     app.include_router(auth.router)  # browser login + session cookie
     # Admin-only operational endpoints (rate-limit hot-reload, etc.).
     # All paths under /v2/admin are gated to admin role both by the

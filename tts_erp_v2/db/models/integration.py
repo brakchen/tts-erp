@@ -1,6 +1,7 @@
 """integration.* — raw API captures, sync bookkeeping, credentials.
 
-5 tables: credentials / raw_records / sync_jobs / sync_cursors / sync_issues.
+6 tables: credentials / raw_records / sync_jobs / sync_cursors /
+sync_issues / oauth_states (one-time CSRF state, see proxy/tiktok_oauth).
 
 All times timestamptz, internal PK bigint identity, external ids text.
 """
@@ -220,3 +221,36 @@ class SyncIssue(Base):
     created_at: Mapped[datetime] = mapped_column(
         nullable=False, server_default=text("now()")
     )
+
+
+# ─── oauth_states ─────────────────────────────────────────────────────
+# One-time CSRF state tokens for the seller authorization flow (Lane E —
+# see proxy/tiktok_oauth.py). Only the sha256 hash is stored; the raw
+# token rides the authorize-link URL and is consumed atomically on
+# callback. Rows are short-lived (TTL ≈ auth_code validity).
+class OAuthState(Base):
+    __tablename__ = "oauth_states"
+    __table_args__ = (
+        UniqueConstraint("state_hash", name="uq_oauth_states_hash"),
+        Index("ix_oauth_states_created_at", "created_at"),
+        {"schema": "integration"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    provider: Mapped[str] = mapped_column(Text, nullable=False)  # 'tiktok'
+    state_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        nullable=False, server_default=text("now()")
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        nullable=False, server_default=text("now()")
+    )
+    extra: Mapped[dict | None] = mapped_column(JSONB)

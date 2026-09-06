@@ -79,6 +79,29 @@ miaoshou/ak_... 均已就位且 scope 齐全），v1 oauth_receiver 库失去回
   1. `gunzip backups/oauth_receiver_v1_legacy_20260905T134439Z.sql.gz | docker exec -i postgres psql -U postgres -d postgres`（先 CREATE DATABASE oauth_receiver）
   2. 跑 `tech-doc/_archive/migrate-v1-to-v2-2026-08-29/scripts/re_encrypt_credentials.py` 把 legacy 格式转回 v2 envelope
   3. 恢复 oauth-receiver.service unit + .env 的 OAUTH_* 两行
+## 2026-09-06 (feat) — 新店 TikTok seller 授权流程上线（Lane E 收尾合入部署）
+
+Lane E 的 `/v2/oauth/tiktok/*`（v1 oauth-receiver `/authorize`+`/callback` 职责迁入 v2）收尾合入并部署
+（承接 2026-09-05 已落地的 out-of-band migration：live `integration.oauth_states` 表当日已建，本次以
+alembic **0011_oauth_states** 重编号接入 0007→0009→0010 链并 stamp，schema_tts_erp.sql 重新 regen）。
+
+- **端点**：`GET /v2/oauth/tiktok/authorize`（admin；注册一次性 CSRF state + 返回授权链接）、
+  `GET /v2/oauth/tiktok/callback`（**public** 豁免；校验 state → `token/get` 换 token → 落库）
+- **新模块** `proxy/tiktok_oauth.py`：`register_state`/`pop_state`（sha256 存储、原子单次消费、
+  45min TTL）＋ `complete_tiktok_authorization`（user_type ∈ {0,4,5} 校验、shop_id/shop_cipher 必填
+  ——缺失显式失败不落半残行，错误附上游 data keys、credentials + commerce.shops 双行幂等 upsert）
+- **`proxy/tiktok_auth.py` 扩展**：`exchange_auth_code`（grant_type=authorized_code，兼容
+  `expires_in` 秒 / `access_token_expire_in` 绝对时间戳两种过期形态）＋ `build_authorize_url`
+  （默认 ROW 域 services.tiktokshop.com，`TIKTOK_AUTHORIZE_HOST` 可覆盖 US）
+- **schema**：`integration.oauth_states` 新表（alembic 0011；live 已存在同构表 → `alembic stamp`）
+- **env**：`TIKTOK_SERVICE_ID`（Partner Center App & Service 页，人类填）+ 可选 `TIKTOK_AUTHORIZE_HOST`
+- **公网回调**：Redirect URL 必须带外部前缀 `/tts`（nginx 仅把 `/tts/*` 转给 API；无前缀落在
+  ProfitLens 前端 404）→ `http://daqiang.nat100.top/tts/v2/oauth/tiktok/callback`
+- 契约/文档：`tech-doc/api/tiktok-shop-oauth.md`（single-source spec；shop_id/shop_cipher 已由 v1
+  生产同款 token/get 读取验证，见 spec「上游契约确认」节）+ external-api.md TL;DR
+- 测试：proxy HTTP 单测 + DB 编排集成 + API 契约共 31 个新用例
+- 已知边界：授权到期/取消的 webhook 接收未做（见 spec 生命周期备注），续期=重走本流程（幂等）
+
 
 ## 2026-09-05 (refactor) — commerce 域命名重构上线（ADR-0003，live 已应用 migration 0007）
 
