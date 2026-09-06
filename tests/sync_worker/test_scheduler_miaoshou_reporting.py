@@ -25,6 +25,8 @@ from tts_erp_v2.db.models import (
     ChannelAccount,
     ChannelProduct,
     ManualProductCost,
+    ProcurementAccount,
+    ProcurementProduct,
     ProductCostSnapshot,
     ProductProfitDaily,
     SalesOrder,
@@ -212,6 +214,79 @@ def test_run_cost_snapshots_writes_seeded_spu(db_session):
     assert row.cost_method == "MANUAL_ENTRY"
     assert row.unit_cost == Decimal("3.5000")
     assert row.calculation_version == out["calculation_version"]
+
+
+def _seed_source_price(db_session, spu_id: str, *, master_cost: Decimal | None = None):
+    """SPU 主档行（external=spu_id，带 1688 offer）+ 公共采集箱货源行。
+    返回 (cp, common_row)。"""
+    acct = ChannelAccount(
+        platform="tiktok",
+        shop_id=f"TEST_MS_RPT_{spu_id}",
+        account_name="test",
+        status="ACTIVE",
+    )
+    db_session.add(acct)
+    db_session.flush()
+    cp = ChannelProduct(
+        shop_pk=acct.id, spu_id=spu_id, title="t", status="ACTIVATE"
+    )
+    db_session.add(cp)
+    db_session.flush()
+    pact = ProcurementAccount(
+        provider="miaoshou",
+        external_account_id=f"TEST_LIC_{spu_id}",
+        account_name="test",
+    )
+    db_session.add(pact)
+    db_session.flush()
+    master = ProcurementProduct(
+        procurement_account_id=pact.id,
+        external_product_id=spu_id,
+        product_type="COLLECTED_PRODUCT",
+        source_platform="1688",
+        source_item_id="TEST_OFFER_SRC1",
+        title="t",
+        source_unit_cost=master_cost,
+    )
+    common = ProcurementProduct(
+        procurement_account_id=pact.id,
+        external_product_id="TEST_CBD_SRC1",
+        product_type="COLLECTED_PRODUCT",
+        source_platform="1688",
+        source_item_id="TEST_OFFER_SRC1",
+        title="t",
+        source_unit_cost=Decimal("34.00"),
+    )
+    db_session.add_all([master, common])
+    db_session.flush()
+    return cp
+
+
+def test_run_cost_snapshots_source_price_fallback_via_offer(db_session):
+    """SPU 主档行无成本但带 1688 offer → 经 offer 命中公共采集箱行价格 →
+    写 SOURCE_PRICE 快照（估算兜底，非成交口径）。"""
+    cp = _seed_source_price(db_session, "TEST_MS_RPT_SRC_O")
+    out = reporting_job.run_cost_snapshots(db_session)
+    assert out["snapshots_written"] >= 1
+    row = db_session.execute(
+        select(ProductCostSnapshot).where(ProductCostSnapshot.spu_pk == cp.id)
+    ).scalar_one()
+    assert row.cost_method == "SOURCE_PRICE"
+    assert row.unit_cost == Decimal("34.0000")
+    assert row.currency == "CNY"
+
+
+def test_run_cost_snapshots_source_price_direct_on_master_row(db_session):
+    """SPU 主档行本身带 source_unit_cost → 直接命中（不经 offer 桥）。"""
+    cp = _seed_source_price(
+        db_session, "TEST_MS_RPT_SRC_D", master_cost=Decimal("12.00")
+    )
+    reporting_job.run_cost_snapshots(db_session)
+    row = db_session.execute(
+        select(ProductCostSnapshot).where(ProductCostSnapshot.spu_pk == cp.id)
+    ).scalar_one()
+    assert row.cost_method == "SOURCE_PRICE"
+    assert row.unit_cost == Decimal("12.0000")
 
 
 def test_run_profit_daily_far_future_date(db_session):

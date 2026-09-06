@@ -7,7 +7,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select
 
-from tts_erp_v2.db.models.integration import SyncJob, SyncIssue
+from tts_erp_v2.db.models.integration import SyncIssue, SyncJob
 from tts_erp_v2.db.models.procurement import ProcurementProduct
 from tts_erp_v2.jobs.miaoshou.common_collect_box import sync_common_collect_box
 

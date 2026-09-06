@@ -63,10 +63,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models.procurement import ProcurementProduct
-from tts_erp_v2.jobs.miaoshou._common import (
-    MiaoshouContext,
-    resolve_miaoshou_context,
-)
+from tts_erp_v2.jobs.miaoshou._common import resolve_miaoshou_context
 from tts_erp_v2.jobs.runner import record_raw_payload, record_sync_issue, run_job
 
 log = logging.getLogger("tts_erp_v2.jobs.miaoshou.common_collect_box")

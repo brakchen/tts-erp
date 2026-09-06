@@ -1,9 +1,8 @@
 """TDD tests for reporting.cost_snapshots.
 
 Verifies the priority chain: MANUAL_ENTRY > LATEST_PURCHASE_COST >
-PERIOD_AVERAGE_COST > WEIGHTED_AVERAGE_COST. 1688 collect listing cost
-is explicitly NOT a fallback. Products with no source produce NO
-snapshot and show up in the no-cost inventory.
+SOURCE_PRICE (货源价估算兜底，2026-09-06 决策：货源价=采购价口径，method
+区分便于后续与采购单对账)。三种都无 → 不写快照，SPU 出现在无成本清单。
 """
 
 from __future__ import annotations
@@ -144,26 +143,98 @@ def test_no_source_produces_no_snapshot(db_session):
     assert len(snaps) == 0
 
 
-# ─── 4. COLLECT_LISTING_COST is rejected ─────────────────────────────
+# ─── 4. SOURCE_PRICE (货源价) fallback ───────────────────────────────
 
 
-def test_collect_listing_cost_is_rejected_explicitly(db_session):
-    """Passing the COLLECT_LISTING_COST method (1688 listing price) is
-    FORBIDDEN. Even if the caller provides a price, resolve_unit_cost
-    must ignore it and return None when no other source exists."""
+def test_source_price_fallback_when_no_other_source(db_session):
+    """No manual, no purchase-order cost, but a 货源价 is supplied →
+    SOURCE_PRICE snapshot (估算兜底), currency default CNY."""
     ca = _make_channel_account(db_session)
-    cp = _make_channel_product(db_session, ca, "TEST_SPU_LISTING")
+    cp = _make_channel_product(db_session, ca, "TEST_SPU_SOURCE")
 
-    # If a caller tries to pass listing cost, the function must still
-    # only accept MANUAL_ENTRY or purchase-order-derived values.
     actual = cost_snapshots.resolve_unit_cost(
         db_session,
         spu_pk=cp.id,
         purchase_order_unit_cost=None,
-        # An attempted listing cost bypass should be rejected:
-        collect_listing_cost=Decimal("7.77"),
+        source_unit_cost=Decimal("7.77"),
     )
-    assert actual is None
+    assert actual is not None
+    assert actual.method == "SOURCE_PRICE"
+    assert actual.unit_cost == Decimal("7.77")
+    assert actual.currency == "CNY"
+
+
+def test_source_price_loses_to_purchase_order_cost(db_session):
+    """When both a purchase-order cost and a 货源价 exist (no manual),
+    LATEST_PURCHASE_COST wins — 成交口径优先于挂牌标价。"""
+    ca = _make_channel_account(db_session)
+    cp = _make_channel_product(db_session, ca, "TEST_SPU_SRC_LOSES")
+
+    actual = cost_snapshots.resolve_unit_cost(
+        db_session,
+        spu_pk=cp.id,
+        purchase_order_unit_cost=Decimal("12.34"),
+        source_unit_cost=Decimal("7.77"),
+    )
+    assert actual is not None
+    assert actual.method == "LATEST_PURCHASE_COST"
+    assert actual.unit_cost == Decimal("12.34")
+
+
+def test_source_price_loses_to_manual_cost(db_session):
+    """Manual entry always wins even when a 货源价 is present."""
+    ca = _make_channel_account(db_session)
+    cp = _make_channel_product(db_session, ca, "TEST_SPU_SRC_MANUAL")
+    db_session.add(
+        ManualProductCost(
+            spu_pk=cp.id,
+            unit_cost=Decimal("5.50"),
+            currency="USD",
+            valid_from=_utc(),
+            valid_to=None,
+            created_by="TEST_user",
+        )
+    )
+    db_session.flush()
+
+    actual = cost_snapshots.resolve_unit_cost(
+        db_session,
+        spu_pk=cp.id,
+        purchase_order_unit_cost=None,
+        source_unit_cost=Decimal("7.77"),
+    )
+    assert actual.method == "MANUAL_ENTRY"
+    assert actual.unit_cost == Decimal("5.50")
+
+
+def test_rebuild_snapshots_writes_source_price_with_lookup(db_session):
+    """rebuild_snapshots accepts a source_cost_lookup and writes
+    SOURCE_PRICE rows for SPUs that only have a 货源价."""
+    ca = _make_channel_account(db_session)
+    cp_with = _make_channel_product(db_session, ca, "TEST_SPU_SRC_OK")
+
+    written = cost_snapshots.rebuild_snapshots(
+        db_session,
+        calculation_version=7,
+        valid_from=_utc(),
+        source_cost_lookup=lambda spu_pk: (
+            (Decimal("34.00"), "CNY") if spu_pk == cp_with.id else (None, None)
+        ),
+    )
+    assert written >= 1
+
+    snap = (
+        db_session.execute(
+            select(ProductCostSnapshot).where(
+                ProductCostSnapshot.spu_pk == cp_with.id,
+                ProductCostSnapshot.calculation_version == 7,
+            )
+        )
+        .scalar_one()
+    )
+    assert snap.cost_method == "SOURCE_PRICE"
+    assert snap.unit_cost == Decimal("34.0000")
+    assert snap.currency == "CNY"
 
 
 # ─── 5. no-cost inventory query ───────────────────────────────────────

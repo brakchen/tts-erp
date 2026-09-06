@@ -8,7 +8,7 @@ thin job wrapper that registers them into ``sync_worker.scheduler.JOBS``.
 
 Cadence (see scheduler.JOBS):
 * ``reporting.cost_snapshots`` — every 6 h (cost inputs change slowly:
-  manual entries + miaoshou purchase orders).
+  manual entries + miaoshou purchase orders + 货源价 SOURCE_PRICE 兜底).
 * ``reporting.profit_daily`` — every 1 h, rebuilding today + yesterday
   (UTC) so late order updates / after-sales changes land.
 
@@ -67,6 +67,58 @@ def _purchase_order_lookup(session: Session):
     return lookup
 
 
+# 货源价（SOURCE_PRICE 兜底）lookup。两跳：
+# 1) SPU 主档行本身（procurement_products.external_product_id == spu_id）
+#    已有 source_unit_cost → 直接用（将来采集行价格回填到主档行后走这里）。
+# 2) 否则按主档行 source_item_id（1688 offer）去公共采集箱行找最新价格。
+# 只读，返回 NULL 行由调用方视为“无货源价”。
+_SQL_SOURCE_COST_DIRECT = text(
+    "SELECT pp.source_unit_cost "
+    "FROM commerce.products_spu cp "
+    "JOIN procurement.procurement_products pp "
+    "  ON pp.external_product_id = cp.spu_id "
+    "WHERE cp.id = :cp_id AND pp.source_unit_cost IS NOT NULL "
+    "ORDER BY pp.synced_at DESC NULLS LAST, pp.id DESC "
+    "LIMIT 1"
+)
+
+_SQL_SOURCE_COST_VIA_OFFER = text(
+    "WITH offer AS ( "
+    "  SELECT pp.source_item_id "
+    "  FROM commerce.products_spu cp "
+    "  JOIN procurement.procurement_products pp "
+    "    ON pp.external_product_id = cp.spu_id "
+    "  WHERE cp.id = :cp_id AND pp.source_item_id IS NOT NULL "
+    "  LIMIT 1 "
+    ") "
+    "SELECT pp.source_unit_cost "
+    "FROM procurement.procurement_products pp "
+    "JOIN offer o ON pp.source_item_id = o.source_item_id "
+    "WHERE pp.source_unit_cost IS NOT NULL "
+    "ORDER BY pp.synced_at DESC NULLS LAST, pp.id DESC "
+    "LIMIT 1"
+)
+
+
+def _source_cost_lookup(session: Session):
+    """Return a lookup fn: spu_pk → (source_unit_cost, 'CNY') | (None, None).
+
+    货源价口径 = 妙手公共采集箱 price（1688 挂牌标价），由
+    miaoshou.common_collect_box job 维护；作 SOURCE_PRICE 估算兜底，
+    非采购单成交口径。"""
+
+    def lookup(cp_id: int) -> tuple[Decimal | None, str | None]:
+        row = session.execute(_SQL_SOURCE_COST_DIRECT, {"cp_id": cp_id}).first()
+        if row is not None and row[0] is not None:
+            return row[0], "CNY"
+        row = session.execute(_SQL_SOURCE_COST_VIA_OFFER, {"cp_id": cp_id}).first()
+        if row is None or row[0] is None:
+            return None, None
+        return row[0], "CNY"
+
+    return lookup
+
+
 def run_cost_snapshots(session: Session) -> dict[str, Any]:
     """Rebuild cost snapshots for every ACTIVE SPU. Returns counters."""
     with run_job(session, job_name=JOB_COST_SNAPSHOTS) as job:
@@ -80,6 +132,7 @@ def run_cost_snapshots(session: Session) -> dict[str, Any]:
             calculation_version=calculation_version,
             valid_from=valid_from,
             purchase_order_lookup=_purchase_order_lookup(session),
+            source_cost_lookup=_source_cost_lookup(session),
         )
         job.rows_total = written
         job.rows_inserted = written
