@@ -1602,7 +1602,6 @@ def test_spu_roi_js_review_fixes_present():
     assert "datesTouched" in src
 
 
-
 # ─── 在线汇率接入(D1 落地 2026-09-06)─────────────────────────────────
 
 
@@ -1639,7 +1638,9 @@ def test_spu_roi_meta_uses_live_fx_rates(api_client, readonly_key, monkeypatch):
             "CNY": Decimal("6.9"),
         },
     )
-    monkeypatch.setattr(analytics_mod, "load_rate_map", lambda sess, base_code="USD": rm)
+    monkeypatch.setattr(
+        analytics_mod, "load_rate_map", lambda sess, base_code="USD": rm
+    )
     fx = _fx_meta_of_empty_query(api_client, readonly_key)
     assert fx == {
         "usd_vnd": "26000.0000",
