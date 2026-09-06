@@ -16,6 +16,7 @@ The orders job is the canonical incremental sync:
 The proxy layer is mocked with a :class:`FakeProxy` that returns
 scripted responses keyed on the upstream page state.
 """
+# pi-lens-ignore: I001
 from __future__ import annotations
 
 from typing import Any
@@ -265,6 +266,82 @@ def test_orders_first_run_writes_raw_records_and_normalized_rows(
         db_session, job_name="tiktok.orders", scope=account.shop_id
     )
     assert cursor_value == 1_700_000_300_000  # ms = s × 1000
+
+
+def test_orders_line_without_quantity_defaults_to_one(db_session) -> None:
+    """TikTok 202309 line_items[] = one row per piece and does NOT send
+    a ``quantity`` field (verified on live payloads 2026-09-06: 0/3686
+    lines carry it; a 2-piece order arrives as two identical lines with
+    distinct line_ids). A line that omits quantity must be stored as
+    exactly 1 unit; if upstream ever does send a real quantity we keep
+    it (future-proof). Regression: these lines used to be stored with
+    quantity=NULL, zeroing every line-aggregated revenue report.
+    """
+    account = _make_channel_account(db_session)
+    proxy = FakeProxy(
+        pages=[
+            {
+                "code": 0,
+                "message": "ok",
+                "data": {
+                    "orders": [
+                        _order_payload(
+                            order_id="5800000000000099",
+                            update_time=1_700_000_999,
+                            status="UNSHIPPED",
+                            lines=[
+                                {
+                                    "line_id": "L_NOQTY",
+                                    "product_id": "P1",
+                                    "sku_id": "S1",
+                                    "product_name": "TEST prod 1",
+                                    "sku_name": "TEST sku 1",
+                                    # NOTE: TikTok 202309 does not
+                                    # include ``quantity`` on the line
+                                    "sale_price": {"amount": "12.50", "currency": "USD"},
+                                },
+                                {
+                                    "line_id": "L_QTY3",
+                                    "product_id": "P1",
+                                    "sku_id": "S1",
+                                    "product_name": "TEST prod 1",
+                                    "sku_name": "TEST sku 1",
+                                    "quantity": 3,
+                                    "sale_price": {"amount": "12.50", "currency": "USD"},
+                                },
+                            ],
+                        ),
+                    ],
+                    "next_page_token": "",
+                },
+            },
+        ]
+    )
+
+    sync_row, result = run_with_sync_job(
+        db_session,
+        job_name="tiktok.orders",
+        credential_id=account.credential_id,
+        inner=run_orders,
+        inner_kwargs={
+            "proxy_call": proxy,
+            "shop_id": account.shop_id,
+        },
+    )
+    assert sync_row.status == "succeeded"
+    assert result.rows_failed == 0
+
+    lines = db_session.execute(
+        select(SalesOrderLine).where(
+            SalesOrderLine.external_line_id.in_(["L_NOQTY", "L_QTY3"])
+        )
+    ).scalars().all()
+    by_id = {ln.external_line_id: ln for ln in lines}
+    assert set(by_id) == {"L_NOQTY", "L_QTY3"}
+    # Missing upstream quantity → exactly one unit per line (per-piece model).
+    assert by_id["L_NOQTY"].quantity == 1
+    # Explicit upstream quantity is honoured.
+    assert by_id["L_QTY3"].quantity == 3
 
 
 def test_orders_second_run_advances_watermark_only(db_session) -> None:

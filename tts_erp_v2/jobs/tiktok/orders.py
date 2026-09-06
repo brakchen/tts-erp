@@ -40,7 +40,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -96,7 +96,7 @@ def _safe_int(value: Any, default: int = 0) -> int:
 def _epoch_seconds_to_utc(seconds: int | None) -> datetime | None:
     if seconds is None or seconds <= 0:
         return None
-    return datetime.fromtimestamp(_safe_int(seconds), tz=timezone.utc)
+    return datetime.fromtimestamp(_safe_int(seconds), tz=UTC)
 
 
 def _epoch_ms_to_seconds(ms: int) -> int:
@@ -249,6 +249,18 @@ def _parse_line_payload(order_id: str, raw: dict[str, Any]) -> dict[str, Any]:
     else:
         sale_price = sale_price_raw
         currency = raw.get("currency")
+    # TikTok 202309: ``line_items[]`` is one row PER PIECE — a 2-piece
+    # order arrives as two identical lines with distinct line_ids, and
+    # the API does NOT return a ``quantity`` field on the line
+    # (verified against live payloads 2026-09-06: 0/3686 lines carry it;
+    # every one of the 472 historical rows is exactly 1, and 420/452
+    # orders reconcile payment_amount == Σ line price with qty=1).
+    # Storing NULL when upstream omits the field silently zeroes every
+    # line-aggregated revenue report (product_profit_daily / spu-roi),
+    # so default to exactly 1 unit per line. If upstream ever starts
+    # sending a real quantity, honour it.
+    raw_qty = _to_decimal(raw.get("quantity"))
+    quantity: Decimal | None = raw_qty if raw_qty is not None else Decimal(1)
     return {
         "external_line_id": str(line_id),
         # spu_pk / sku_pk stay NULL
@@ -259,7 +271,7 @@ def _parse_line_payload(order_id: str, raw: dict[str, Any]) -> dict[str, Any]:
         "product_name_snapshot": raw.get("product_name"),
         "variant_name_snapshot": raw.get("sku_name"),
         "image_url_snapshot": raw.get("sku_image") or raw.get("product_image_url"),
-        "quantity": _to_decimal(raw.get("quantity")),
+        "quantity": quantity,
         "unit_price": _to_decimal(sale_price),
         "currency": currency,
         "line_status": raw.get("display_status") or raw.get("line_status"),
@@ -415,6 +427,7 @@ def run(
         rows_total += 1
         try:
             fields = _parse_order_payload(raw)
+        # pi-lens-ignore: ast-grep:no-boolean-in-except
         except ParseError as exc:
             rows_failed += 1
             _record_issue(
@@ -510,10 +523,10 @@ def _safe_truncate(raw: Any, *, max_chars: int = 1000) -> Any:
 
 
 __all__ = [
-    "run",
     "ENDPOINT",
     "JOB_NAME",
+    "ParseError",
     "ProxyCall",
     "UpstreamJobError",
-    "ParseError",
+    "run",
 ]
