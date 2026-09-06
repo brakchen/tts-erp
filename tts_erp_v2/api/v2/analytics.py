@@ -55,6 +55,7 @@ from tts_erp_v2.analytics.repository import (
 )
 from tts_erp_v2.api.deps import get_session
 from tts_erp_v2.db.constants import PAID_SALES_ORDER_STATUSES
+from tts_erp_v2.fx.rates import load_rate_map
 
 # ─── Config ───────────────────────────────────────────────────────────
 
@@ -769,6 +770,38 @@ FX_AS_OF = "2026-09-05"
 _MONEY_Q = Decimal("0.0001")
 _RATIO_Q = Decimal("0.01")
 
+#: 在线汇率派生中间精度(与 fx 存储 Numeric(20,8) 一致)
+_RATE_Q8 = Decimal("0.00000001")
+
+
+def _resolve_fx_rates(
+    sess: Session,
+) -> tuple[Decimal, Decimal, str, str]:
+    """ROI 账页换算汇率：在线 fx 缓存优先(D1 落地，见 fx-agent-handbook)。
+
+    读 fx.* 最新 USD 快照 → (CNY→USD, USD→VND, as_of, source)：
+
+    - 快照存在且含 VND/CNY → ``source="fx-cache"``：USD→VND 直取快照
+      ``rates["VND"]``；CNY→USD = 1/rates["CNY"]（桥式倒数）量化到 8 dp。
+      as_of = 上游 last_update 的日期(UTC)。
+    - 快照缺失 / 币种不全 → 回退 D9 固定常量 ``source="fixed-const"``，
+      账页金额换算永不因缓存缺位而空白（宁可承认口径旧）。
+
+    每次请求只查一次；API 进程零上游调用（fx.* 是同步 job 的缓存）。
+    """
+    rm = load_rate_map(sess, base_code="USD")
+    if rm is not None and {"VND", "CNY"} <= set(rm.rates):
+        cny_usd = (Decimal(1) / rm.rates["CNY"]).quantize(
+            _RATE_Q8, rounding=ROUND_HALF_UP
+        )
+        return (
+            cny_usd,
+            rm.rates["VND"],
+            rm.upstream_last_update.date().isoformat(),
+            "fx-cache",
+        )
+    return (FX_CNY_USD, FX_USD_VND, FX_AS_OF, "fixed-const")
+
 _PAID_STATUSES = sorted(PAID_SALES_ORDER_STATUSES)
 
 _CASE_COMPLETED_STATUSES = (
@@ -963,6 +996,8 @@ def _query_spu_roi(
     updated_at_source 裁剪(左闭右开,+1 天);不提供 → 全历史累计(§4.5)。
     """
     rate = fee_rate if fee_rate is not None else FEE_RATE_BASELINE
+    # 汇率解析：在线 fx 缓存优先、D9 常量回退（每次请求一次 DB 读）
+    fx_cny_usd, fx_usd_vnd, fx_as_of, fx_source = _resolve_fx_rates(sess)
     # 窗口边界:yyyymmdd → UTC 当日 00:00 / 次日 00:00(w_end 含当日)
     ws_dt = datetime.combine(w_start, time.min, tzinfo=UTC) if w_start else None
     we_dt = (
@@ -1062,16 +1097,16 @@ def _query_spu_roi(
         # 单位成本解析(§4.2):MANUAL 有效行优先,未命中 → K1=30 CNY
         unit_cost_cny = cost_map.get(pk, K1_DEFAULT_CNY)
         cost_source = "MANUAL" if pk in cost_map else "DEFAULT_K1"
-        unit_cost_usd = unit_cost_cny * FX_CNY_USD
+        unit_cost_usd = unit_cost_cny * fx_cny_usd
 
         # USD 换算(先原币加总、再一次换算,§4.2 通用规则)
-        sales_usd = sales_vnd / FX_USD_VND
+        sales_usd = sales_vnd / fx_usd_vnd
         net_cash_vnd = sales_vnd - refund_net_vnd
-        net_cash_usd = net_cash_vnd / FX_USD_VND
-        refund_only_usd = refund_only_vnd / FX_USD_VND
-        refund_return_usd = refund_return_vnd / FX_USD_VND
+        net_cash_usd = net_cash_vnd / fx_usd_vnd
+        refund_only_usd = refund_only_vnd / fx_usd_vnd
+        refund_return_usd = refund_return_vnd / fx_usd_vnd
         refund_net_usd = refund_only_usd + refund_return_usd
-        refund_cancelled_usd = refund_cancelled_vnd / FX_USD_VND
+        refund_cancelled_usd = refund_cancelled_vnd / fx_usd_vnd
 
         fee_usd = sales_usd * rate  # M19:本期全按 sales×费率估算
         return_loss_usd = refund_return_qty * unit_cost_usd  # M13b 全损
@@ -1161,7 +1196,7 @@ def _query_spu_roi(
     # 合计后一次换算,2 位小数串);Σspend=0 → null(页面显示 —)
     roi_real_total: str | None = None
     if total_spend_dec != 0:
-        total_nc_prime = total_native_net_cash_vnd / FX_USD_VND - total_return_loss_dec
+        total_nc_prime = total_native_net_cash_vnd / fx_usd_vnd - total_return_loss_dec
         roi_real_total = _fmt_ratio(total_nc_prime / total_spend_dec)
     totals = {
         "row_count": len(plain),
@@ -1201,12 +1236,12 @@ def _query_spu_roi(
         )
     meta = {
         "fx": {
-            "usd_vnd": _fmt_money(FX_USD_VND),
+            "usd_vnd": _fmt_money(fx_usd_vnd),
             "cny_usd": format(
-                FX_CNY_USD.quantize(_MONEY_Q, rounding=ROUND_HALF_UP), ".4f"
+                fx_cny_usd.quantize(_MONEY_Q, rounding=ROUND_HALF_UP), ".4f"
             ),
-            "as_of": FX_AS_OF,
-            "source": "fixed-const",
+            "as_of": fx_as_of,
+            "source": fx_source,
         },
         "cost_assumption": (
             "按 SPU 解析：人工成本(MANUAL)有效行优先，未命中 → "
