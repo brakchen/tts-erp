@@ -970,6 +970,11 @@ def test_spu_roi_totals_order_status_scope_cod_shop(
         Decimal(50) - Decimal(5) * K1_CNY * CNY_USD - Decimal(10)
         - Decimal(50) * FEE_BASELINE
     )
+    # 行内新列(2026-09-06 列集):销售=GMV全单(50+10 取消原额)、取消单量、取消率、退货率(单量)
+    assert item["gmv_sales"] == "60.0000", "行内销售 = 有效销售 + 取消原额"
+    assert item["cancelled_order_count"] == 1
+    assert item["cancel_rate"] == m2(Decimal(1) / Decimal(3))  # 1/(2+1)=0.33
+    assert item["refund_rate_qty"] == "0.00"  # 0 退货订单 / 2 有效单
     t = body["totals"]
     assert t["order_count"] == 2
     assert t["cancelled_order_count"] == 1, "未收款取消单应计入取消单(状态口径)"
@@ -1711,6 +1716,15 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     # 不再展示 SPU 个数
     assert 'id="sum-n"' not in body
     assert "全损退款" in body  # 全损货损改名
+    # 2026-09-06 行内列集:销售$/有效销售$/退货$/取消单量/取消率%/退货率%/全损退款$/实际ROI/保本ROI
+    for col_label in (
+        "销售$", "有效销售$", "退货$", "取消单量", "取消率%", "退货率%",
+        "全损退款$", "净利润$", "实际ROI", "保本ROI",
+    ):
+        assert col_label in body, f"行内缺列 {col_label}"
+    # 新 ⚙ 开关组(广告归因对照 / 订单结构)
+    assert 'id="col-toggle-adref"' in body
+    assert 'id="col-toggle-structure"' in body
     assert "M13b" in body
     # 每个概览格都有 ? 口径悬停
     assert body.count('class="op-hint"') >= 10
