@@ -1,5 +1,7 @@
 # handoff.md — tts-erp 跨 session 交接笔记
 
+> 🔄 **当前在途工作注册（谁在改什么 / 谁接手）：先读 `handoff/ACTIVE.md`**（AGENTS.md §12.1）
+
 > 上次 session: 2026-09-05（v1 oauth_receiver 库 DROP + public.* 19 张业务表归档）
 > 上次 session 主题: v1 oauth_receiver 库整体废弃并 DROP（提前 21 天结束 4 周观察期）+ 配套清理
 

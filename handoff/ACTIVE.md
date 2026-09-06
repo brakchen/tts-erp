@@ -1,0 +1,25 @@
+# ACTIVE.md — tts-erp 在途工作注册表（谁在改什么 / 谁接手）
+
+> **机器可读**：markdown 表格，是"当前谁拥有 master 未提交改动 / 分支"的唯一 truth
+> source（AGENTS.md §12.1）。**任何 agent 在 master 工作区开新工作前，必先更新本表**
+> （注册自己的 lane，或确认已有注册覆盖你要动的文件面），再动第一行代码。
+> 收尾 / 换手 / 放弃都必须改表；merge 后删行。历史交接见根目录 `handoff.md`。
+
+## 状态机
+
+`draft`（进行中）→ `done`（待合入）→ merge 后 **删行**；放弃 = `abandoned` + 日期 + 原因。
+
+| lane_id | 主题 | owner(session) | branch/worktree | 拥有的文件/目录 | 状态 | updated(UTC) |
+| --- | --- | --- | --- | --- | --- | --- |
+| feat/manual-costs-v2 | manual-costs 页 v2（全部 SPU tab / 事件绑定修复） | 未登记（owner session 见 .worktrees/manual-costs-v2 @ 5324f95） | .worktrees/manual-costs-v2 | tts_erp_v2/api/v2/pages.py、tts_erp_v2/static/js/spu-roi.js、console.js（master WT 在途 M） | draft | 2026-09-06 |
+
+<!-- 新 lane 示例（复制改）：
+| lane_id | 主题 | owner(session) | .worktrees/<slug> / branch | 文件列表 | draft | <UTC> |
+-->
+
+## 规则速记
+
+- 开新工作（尤其会动 master WT 未提交区 / 共享点文件）→ **先加一行再动工**。
+- 每步完成更新状态；被接手 / 被卡住 → 更新 owner / abandoned。
+- 找"这是谁的 WIP" → 先查本表，再 `git fetch` 对比 `origin/master` 看 HEAD 是否在动
+  （AGENTS.md §12.3 接手协议）。

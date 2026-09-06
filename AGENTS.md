@@ -262,3 +262,44 @@ apifox 标题“妙手开放平台”，底层 endpoint 指向 `openapi.wanshifu
   unpushed state。严禁 `--force`；push 非 fast-forward 时先 `git fetch` + rebase 或
   `git merge --no-ff origin/master`，解冲突再 push。半成品 / WIP / draft commit 不得留在 master 不推
 - commit message 带类型前缀（`feat/fix/chore/docs/style/merge`）+ 中文描述；merge 消息格式见上
+
+## 12. WIP 归属与交接（防“无主 WIP”复现——2026-09-06 fx 教训）
+
+### 12.1 固定交接目录 handoff/（先注册再动工）
+
+- `handoff/ACTIVE.md` = 机器可读的**在途工作注册表**，是“当前谁拥有 master 未提交改动 /
+  分支”的唯一 truth source。在 master 工作区开新工作前**必先更新 ACTIVE.md**（或确认已有
+  注册覆盖你要动的文件面），再动第一行代码：
+
+  ```markdown
+  | lane_id | 主题 | owner(session) | branch/worktree | 拥有的文件/目录 | 状态 | updated(UTC) |
+  ```
+
+  状态机：draft → done(待合) → merged(删行) / abandoned(标日期+原因)。收尾 / 换手 /
+  放弃都必须改表；merge 后删行。根目录 `handoff.md` 保留为**历史**交接（收尾追加 TL;DR），
+  其头部放一行指针指向 ACTIVE.md（2026-09-06 起）。
+- watchdog（可选增强）：扫描 master WT 中 untracked / 未提交文件的存在时长，超阈值记
+  `logs/watchdog.log` 提示“登记归属或开分支”。
+
+### 12.2 master 工作区纪律（fx 根因①：成块 WIP 裸奔）
+
+- ❌ 成块新功能（>1 文件 / 预计跨多步）禁止以 untracked / 未提交状态长期躺在 master。
+  两条路二选一：立即开 worktree 分支（§11），或每完成一个原子单元立即 commit。
+- 未完成的改动 = 分支上的 commit 或 ACTIVE.md 里的一行，**不允许裸奔**。
+
+### 12.3 接手“无主”改动的强制协议（fx 根因②③）
+
+1. 读 `handoff/ACTIVE.md`：有注册者 → 找它收尾；无 → 继续。
+2. `git fetch` 后对比 `origin/master`：**HEAD 是否在动 / 最近谁在提交**——“看起来无主”
+   常常是别人正提交到一半（本次 fx 就是：我 worktree 开发期间原 lane 自己冒出来提交了
+   同源内容，merge 时 add/add 冲突）。
+3. 先快照保全（`git diff > /tmp/<topic>_wip.patch` + untracked 打包）再动。
+4. **合回前必做去重检查**：`git fetch && git diff --stat <分支基址> <新 master>`；
+   发现同源内容已被提交 → 丢弃冗余分支/提交，只保留真实增量（bug 修复/文档）再 merge。
+5. 清 master 上被接手文件的 WIP 前，快照必须已留存（§6 “先问不清”不变）。
+
+### 12.4 并发测试互清（已知坑）
+
+- 共享 dev DB：两个会话同时跑 `scripts/test.sh fast` 会互清 TEST_ api_keys / 哨兵行 →
+  大规模 401 / error 假失败。需全量跑时错峰；失败先挑 FAILED/ERROR **隔离重跑一次**，
+  全绿即 flake 不是真失败。
