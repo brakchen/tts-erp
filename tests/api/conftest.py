@@ -138,6 +138,28 @@ def _wipe_test_rows(db_engine) -> None:
                 "DELETE FROM fx.exchange_rate_snapshots WHERE base_code LIKE 'TEST_%'"
             )
         )
+        # TEST_-marked *rate* rows can belong to non-TEST_-base snapshots
+        # (test_latest_defaults_to_usd_base seeds a real-USD snapshot
+        # whose every rate carries a TEST_ marker target, making it
+        # deterministically the newest USD row). Delete the marker rates
+        # first — the snapshot is then orphaned (zero rate rows left)
+        # and removed by the follow-up statement. Real fx.sync snapshots
+        # only ever carry real ISO target codes, so neither statement
+        # touches live rows. pi-lens-ignore: same static-DELETE
+        # reasoning as above.
+        conn.execute(
+            _text(
+                "DELETE FROM fx.exchange_rates "
+                "WHERE base_code LIKE 'TEST_%' OR target_code LIKE 'TEST_%'"
+            )
+        )
+        conn.execute(
+            _text(
+                "DELETE FROM fx.exchange_rate_snapshots "
+                "WHERE base_code LIKE 'TEST_%' "
+                "OR id NOT IN (SELECT DISTINCT snapshot_id FROM fx.exchange_rates)"
+            )
+        )
         conn.execute(
             delete(manual_costs_tbl).where(
                 manual_costs_tbl.c.spu_pk.in_(
