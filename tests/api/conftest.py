@@ -129,6 +129,15 @@ def _wipe_test_rows(db_engine) -> None:
 
     with db_engine.begin() as conn:
         conn.execute(spu_images_wipe)
+        # fx.* exchange-rate cache (2026-09-06): TEST_-prefixed base codes
+        # only — the snapshot delete cascades to fx.exchange_rates rows.
+        # pi-lens-ignore: python-sql-injection — literal SQL, bound LIKE param only
+        conn.execute(
+            _text(
+                "DELETE FROM fx.exchange_rate_snapshots "
+                "WHERE base_code LIKE 'TEST_%'"
+            )
+        )
         conn.execute(
             delete(manual_costs_tbl).where(
                 manual_costs_tbl.c.spu_pk.in_(

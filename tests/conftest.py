@@ -121,6 +121,8 @@ def _check_schema_prereq(db_engine) -> None:
         "finance.settlement_statements",
         "finance.settlement_transactions",
         "finance.settlement_components",
+        "fx.exchange_rate_snapshots",
+        "fx.exchange_rates",
         "linkage.account_links",
         "linkage.product_links",
         "linkage.variant_links",
@@ -137,7 +139,7 @@ def _check_schema_prereq(db_engine) -> None:
             text(
                 "SELECT table_schema || '.' || table_name FROM information_schema.tables "
                 "WHERE table_schema IN ('integration','commerce','procurement','fulfillment',"
-                "'after_sales','finance','linkage','reporting','security')"
+                "'after_sales','finance','linkage','reporting','security','fx')"
             )
         ).fetchall()
     actual = {r[0] for r in rows}

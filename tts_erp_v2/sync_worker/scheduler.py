@@ -122,6 +122,21 @@ JOBS: dict[str, JobSpec] = {
         entrypoint="sync_token_refresh",
         needs_token_registry=True,
     ),
+    # ── Exchange-rate cache (2026-09-06) ──────────────────────────
+    # Third-party ExchangeRate-API (v6.exchangerate-api.com), Free plan
+    # 1500 req/month + billed overage. The job is HORIZON-GATED: it
+    # fetches only after the upstream's published ``time_next_update_utc``
+    # (stored as fx.exchange_rate_snapshots.next_update_at) passes, so a
+    # healthy install makes ~1 request/day. The API process never dials
+    # upstream — all reads serve the cached fx.* tables
+    # (tech-doc/fx-exchange-rates.md).
+    "fx.sync": JobSpec(
+        job_name="fx.sync",
+        module_path="tts_erp_v2.jobs.exchangerate.sync",
+        interval_seconds=3600,  # 1 h — early-skips until next_update_at
+        is_tiktok=False,
+        entrypoint="run_scheduled",
+    ),
     # ── Miaoshou procurement jobs (registered 2026-09-01 — code has been
     # in the tree since the v2 cutover but was never scheduled) ─────────
     "miaoshou.shops": JobSpec(

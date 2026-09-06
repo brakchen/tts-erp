@@ -205,6 +205,7 @@ _SCHEMAS: list[tuple[str, str]] = [
     ("finance", "Statements/transactions: payouts, settlement_statements, settlement_transactions, settlement_components"),
     ("linkage", "Sales↔procurement mapping: account_links, product_links, variant_links, link_evidence, link_overrides, link_issues + effective_product_links view"),
     ("reporting", "Profit/cost: product_cost_snapshots, product_profit_daily, shipment_tracking_summary"),
+    ("fx", "Cached exchange rates: exchange_rate_snapshots + exchange_rates (USD-base snapshot, local currency conversion — read-only, upstream quota-billed)"),
     ("security", "API keys: api_keys"),
 ]
 
@@ -229,7 +230,8 @@ def _introspect_schemas(sess: Session) -> str:
                 "FROM information_schema.tables "
                 "WHERE table_schema IN ("
                 "  'integration','commerce','procurement','fulfillment',"
-                "  'after_sales','finance','linkage','reporting','security'"
+                "  'after_sales','finance','linkage','reporting','security',"
+                "  'fx'"
                 ") AND table_type = 'BASE TABLE' "
                 "ORDER BY table_schema, table_name"
             )
@@ -241,7 +243,8 @@ def _introspect_schemas(sess: Session) -> str:
                 "FROM pg_stat_user_tables "
                 "WHERE schemaname IN ("
                 "  'integration','commerce','procurement','fulfillment',"
-                "  'after_sales','finance','linkage','reporting','security'"
+                "  'after_sales','finance','linkage','reporting','security',"
+                "  'fx'"
                 ")"
             )
         ).all()
@@ -549,7 +552,7 @@ def get_llm_context(
         {
             "schema_version": "v2-1",
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "host": os.environ.get("TTS_ERP_HOST", "0.0.0.0"),  # pi-lens-ignore ruff.B006: JSON debug field, not socket bind (uvicorn binding is via systemd --host ${TTS_ERP_HOST})
+            "host": os.environ.get("TTS_ERP_HOST", "0.0.0.0"),  # pi-lens-ignore: no-server-bind-wildcard — JSON debug field reporting the bind host, NOT a socket bind (uvicorn binds via systemd --host ${TTS_ERP_HOST})
             "sections": [
                 {"id": s["id"], "title": s["title"], "body": s["body"]}
                 for s in sections

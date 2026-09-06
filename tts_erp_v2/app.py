@@ -41,6 +41,7 @@ from tts_erp_v2.api.v2 import (
     analytics,
     auth,
     commerce,
+    fx,
     linkage,
     llm_context,
     pages,
@@ -57,6 +58,7 @@ def _build_routes(app: FastAPI) -> None:
     app.include_router(commerce.router)
     app.include_router(linkage.router)
     app.include_router(reporting.router)
+    app.include_router(fx.router)  # cached exchange rates + local conversion (readonly; never dials upstream)
     app.include_router(spu_images.router)  # SPU image upload (presigned MinIO)
     app.include_router(pages.router)
     app.include_router(llm_context.router)

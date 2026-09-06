@@ -66,21 +66,24 @@ EXPECTED_JOB_INTERVALS = {
     "reporting.cost_snapshots": 21600,
     "reporting.profit_daily": 3600,
     "spu.image_mirror": 1800,
+    "fx.sync": 3600,
 }
 
 
 def test_jobs_registry_has_expected_count() -> None:
-    """13 jobs total — keeps us honest if a new one slips in unannounced.
+    """14 jobs total — keeps us honest if a new one slips in unannounced.
 
     2026-09-05 reorg: ``analytics.retention`` 已从 JOBS 摘除（见
     tech-doc/analytics/reorg-plan.md 决策 #1-#4）—— ad_records /
     ad_audit_log / 等 4 张表 drop 后无对象可 purge。原 13 → 12。
     2026-09-05 晚：spu.image_mirror 加入（镜像 products_spu.main_image_url
     到本地 MinIO，页面渲染不再直连 TikTok CDN）→ 12 → 13。
+    2026-09-06：fx.sync 加入（ExchangeRate-API 汇率缓存，horizon-gated
+    ≈1 请求/天）→ 13 → 14。
     """
-    # 6 tiktok + 5 system (token + 3 reporting + image_mirror + ... ) —
-    # keep the number pinned so we don't drift silently.
-    assert len(JOBS) == 13
+    # 6 tiktok + 8 system (token + 3 miaoshou + 2 reporting + image_mirror
+    # + fx.sync) — keep the number pinned so we don't drift silently.
+    assert len(JOBS) == 14
 
 
 @pytest.mark.parametrize(
@@ -241,10 +244,12 @@ def _seed_credentials_for_enum(
     try:
         # Idempotent: delete-then-insert (shops first — its credential
         # FK is ON DELETE SET NULL, and (platform, shop_id) is unique).
+        # pi-lens-ignore: python-sql-injection — bound :e param, literal SQL
         sess.execute(
             text("DELETE FROM commerce.shops WHERE shop_id = :e AND platform = 'tiktok'"),
             {"e": external_id},
         )
+        # pi-lens-ignore: python-sql-injection — bound :e param, literal SQL
         sess.execute(
             text("DELETE FROM integration.credentials WHERE external_account_id = :e"),
             {"e": external_id},
@@ -273,10 +278,12 @@ def _seed_credentials_for_enum(
 def _cleanup_credentials(session_factory, *, external_id: str) -> None:
     sess = session_factory()
     try:
+        # pi-lens-ignore: python-sql-injection — bound :e param, literal SQL
         sess.execute(
             text("DELETE FROM commerce.shops WHERE shop_id = :e AND platform = 'tiktok'"),
             {"e": external_id},
         )
+        # pi-lens-ignore: python-sql-injection — bound :e param, literal SQL
         sess.execute(
             text("DELETE FROM integration.credentials WHERE external_account_id = :e"),
             {"e": external_id},
@@ -368,6 +375,7 @@ def test_enumerate_tiktok_shops_skips_prefix_and_orphan_credentials() -> None:
         sess.close()
         sess = factory()
         try:
+            # pi-lens-ignore: python-sql-injection — bound :k/:m/:t/:o params, literal SQL
             sess.execute(
                 text(
                     "DELETE FROM integration.credentials "
@@ -380,6 +388,7 @@ def test_enumerate_tiktok_shops_skips_prefix_and_orphan_credentials() -> None:
                     "o": skip_orphan,
                 },
             )
+            # pi-lens-ignore: python-sql-injection — bound :k/:m/:t params, literal SQL
             sess.execute(
                 text(
                     "DELETE FROM commerce.shops WHERE shop_id IN (:k, :m, :t)"
@@ -408,6 +417,7 @@ def test_record_failed_tick_writes_a_failed_row() -> None:
 
     sess = factory()
     try:
+        # pi-lens-ignore: python-sql-injection — static SELECT, no user input
         row = sess.execute(
             text(
                 "SELECT status, error_message FROM integration.sync_jobs "
@@ -428,6 +438,7 @@ def test_record_failed_tick_writes_a_failed_row() -> None:
         sess.close()
         sess = factory()
         try:
+            # pi-lens-ignore: python-sql-injection — bound :msg param, literal SQL
             sess.execute(
                 text(
                     "DELETE FROM integration.sync_jobs "

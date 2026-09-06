@@ -34,6 +34,10 @@ from tts_erp_v2.db.models.fulfillment import (
     ShipmentLine,
     TrackingEvent,
 )
+from tts_erp_v2.db.models.fx import (
+    ExchangeRate,
+    ExchangeRateSnapshot,
+)
 
 # Side-effect: import every per-schema module so its tables register on
 # Base.metadata. We also re-export the classes for convenience so tests
@@ -79,6 +83,8 @@ __all__ = [
     "ChannelProduct",
     "ChannelProductVariant",
     "Credentials",
+    "ExchangeRate",
+    "ExchangeRateSnapshot",
     "LinkEvidence",
     "LinkIssue",
     "LinkOverride",

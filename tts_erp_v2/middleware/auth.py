@@ -62,6 +62,7 @@ _READONLY_PREFIXES = (
     "/v2/commerce/",
     "/v2/linkage/",
     "/v2/reporting/",
+    "/v2/fx/",  # cached exchange rates + conversion (readonly; served from fx.* cache)
     "/v2/pages/",
     # SPU image reads — GET /v2/spu-images[/...] → readonly.
     # POST upload-url / {id}/confirm and DELETE /{id} are classified

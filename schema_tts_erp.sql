@@ -55,6 +55,11 @@ CREATE SCHEMA finance;
 CREATE SCHEMA fulfillment;
 
 
+-- Name: fx; Type: SCHEMA; Schema: -; Owner: -
+
+CREATE SCHEMA fx;
+
+
 -- Name: integration; Type: SCHEMA; Schema: -; Owner: -
 
 CREATE SCHEMA integration;
@@ -506,6 +511,45 @@ ALTER TABLE fulfillment.tracking_events ALTER COLUMN id ADD GENERATED ALWAYS AS 
 );
 
 
+-- Name: exchange_rate_snapshots; Type: TABLE; Schema: fx; Owner: -
+
+CREATE TABLE IF NOT EXISTS fx.exchange_rate_snapshots (
+    id bigint NOT NULL,
+    base_code text NOT NULL,
+    upstream_last_update timestamp with time zone NOT NULL,
+    next_update_at timestamp with time zone,
+    fetched_at timestamp with time zone DEFAULT now() NOT NULL,
+    rates_count integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE fx.exchange_rate_snapshots ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME fx.exchange_rate_snapshots_id_seq
+);
+
+
+-- Name: exchange_rates; Type: TABLE; Schema: fx; Owner: -
+
+CREATE TABLE IF NOT EXISTS fx.exchange_rates (
+    id bigint NOT NULL,
+    snapshot_id bigint NOT NULL,
+    base_code text NOT NULL,
+    target_code text NOT NULL,
+    rate numeric(20,8) NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE fx.exchange_rates ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME fx.exchange_rates_id_seq
+);
+
+
 -- Name: credentials; Type: TABLE; Schema: integration; Owner: -
 
 CREATE TABLE IF NOT EXISTS integration.credentials (
@@ -526,6 +570,26 @@ CREATE TABLE IF NOT EXISTS integration.credentials (
 
 ALTER TABLE integration.credentials ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME integration.credentials_id_seq
+);
+
+
+-- Name: oauth_states; Type: TABLE; Schema: integration; Owner: -
+
+CREATE TABLE IF NOT EXISTS integration.oauth_states (
+    id bigint NOT NULL,
+    provider text NOT NULL,
+    state_hash text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    consumed_at timestamp with time zone,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    extra jsonb
+);
+
+
+
+ALTER TABLE integration.oauth_states ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME integration.oauth_states_id_seq
 );
 
 
@@ -1228,10 +1292,40 @@ ALTER TABLE ONLY fulfillment.tracking_events
     ADD CONSTRAINT uq_tracking_events_shipment_key UNIQUE (shipment_id, external_event_key);
 
 
+-- Name: exchange_rate_snapshots exchange_rate_snapshots_pkey; Type: CONSTRAINT; Schema: fx; Owner: -
+
+ALTER TABLE ONLY fx.exchange_rate_snapshots
+    ADD CONSTRAINT exchange_rate_snapshots_pkey PRIMARY KEY (id);
+
+
+-- Name: exchange_rates exchange_rates_pkey; Type: CONSTRAINT; Schema: fx; Owner: -
+
+ALTER TABLE ONLY fx.exchange_rates
+    ADD CONSTRAINT exchange_rates_pkey PRIMARY KEY (id);
+
+
+-- Name: exchange_rates uq_fx_rates_snapshot_target; Type: CONSTRAINT; Schema: fx; Owner: -
+
+ALTER TABLE ONLY fx.exchange_rates
+    ADD CONSTRAINT uq_fx_rates_snapshot_target UNIQUE (snapshot_id, target_code);
+
+
+-- Name: exchange_rate_snapshots uq_fx_snapshots_base_update; Type: CONSTRAINT; Schema: fx; Owner: -
+
+ALTER TABLE ONLY fx.exchange_rate_snapshots
+    ADD CONSTRAINT uq_fx_snapshots_base_update UNIQUE (base_code, upstream_last_update);
+
+
 -- Name: credentials credentials_pkey; Type: CONSTRAINT; Schema: integration; Owner: -
 
 ALTER TABLE ONLY integration.credentials
     ADD CONSTRAINT credentials_pkey PRIMARY KEY (id);
+
+
+-- Name: oauth_states oauth_states_pkey; Type: CONSTRAINT; Schema: integration; Owner: -
+
+ALTER TABLE ONLY integration.oauth_states
+    ADD CONSTRAINT oauth_states_pkey PRIMARY KEY (id);
 
 
 -- Name: raw_records raw_records_pkey; Type: CONSTRAINT; Schema: integration; Owner: -
@@ -1262,6 +1356,12 @@ ALTER TABLE ONLY integration.sync_jobs
 
 ALTER TABLE ONLY integration.credentials
     ADD CONSTRAINT uq_credentials_provider_account UNIQUE (provider, external_account_id);
+
+
+-- Name: oauth_states uq_oauth_states_hash; Type: CONSTRAINT; Schema: integration; Owner: -
+
+ALTER TABLE ONLY integration.oauth_states
+    ADD CONSTRAINT uq_oauth_states_hash UNIQUE (state_hash);
 
 
 -- Name: sync_cursors uq_sync_cursors_job_scope; Type: CONSTRAINT; Schema: integration; Owner: -
@@ -1572,9 +1672,19 @@ CREATE INDEX IF NOT EXISTS ix_shipments_tracking_number ON fulfillment.shipments
 CREATE INDEX IF NOT EXISTS ix_tracking_events_event_at ON fulfillment.tracking_events USING btree (event_at);
 
 
+-- Name: ix_fx_snapshots_base_id; Type: INDEX; Schema: fx; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_fx_snapshots_base_id ON fx.exchange_rate_snapshots USING btree (base_code, id);
+
+
 -- Name: ix_credentials_provider; Type: INDEX; Schema: integration; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_credentials_provider ON integration.credentials USING btree (provider);
+
+
+-- Name: ix_oauth_states_created_at; Type: INDEX; Schema: integration; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_oauth_states_created_at ON integration.oauth_states USING btree (created_at);
 
 
 -- Name: ix_raw_records_captured_at; Type: INDEX; Schema: integration; Owner: -
@@ -1782,9 +1892,24 @@ CREATE OR REPLACE TRIGGER trg_fulfillment_shipments_touch BEFORE UPDATE ON fulfi
 CREATE OR REPLACE TRIGGER trg_fulfillment_tracking_events_touch BEFORE UPDATE ON fulfillment.tracking_events FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
+-- Name: exchange_rate_snapshots trg_fx_exchange_rate_snapshots_touch; Type: TRIGGER; Schema: fx; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_fx_exchange_rate_snapshots_touch BEFORE UPDATE ON fx.exchange_rate_snapshots FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: exchange_rates trg_fx_exchange_rates_touch; Type: TRIGGER; Schema: fx; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_fx_exchange_rates_touch BEFORE UPDATE ON fx.exchange_rates FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
 -- Name: credentials trg_integration_credentials_touch; Type: TRIGGER; Schema: integration; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_integration_credentials_touch BEFORE UPDATE ON integration.credentials FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: oauth_states trg_integration_oauth_states_touch; Type: TRIGGER; Schema: integration; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_integration_oauth_states_touch BEFORE UPDATE ON integration.oauth_states FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
 -- Name: raw_records trg_integration_raw_records_touch; Type: TRIGGER; Schema: integration; Owner: -
@@ -2078,6 +2203,12 @@ ALTER TABLE ONLY fulfillment.tracking_events
     ADD CONSTRAINT tracking_events_shipment_id_fkey FOREIGN KEY (shipment_id) REFERENCES fulfillment.shipments(id) ON DELETE CASCADE;
 
 
+-- Name: exchange_rates exchange_rates_snapshot_id_fkey; Type: FK CONSTRAINT; Schema: fx; Owner: -
+
+ALTER TABLE ONLY fx.exchange_rates
+    ADD CONSTRAINT exchange_rates_snapshot_id_fkey FOREIGN KEY (snapshot_id) REFERENCES fx.exchange_rate_snapshots(id) ON DELETE CASCADE;
+
+
 -- Name: raw_records raw_records_credential_id_fkey; Type: FK CONSTRAINT; Schema: integration; Owner: -
 
 ALTER TABLE ONLY integration.raw_records
@@ -2290,5 +2421,5 @@ ALTER TABLE ONLY reporting.shipment_tracking_summary
 
 -- PostgreSQL database dump complete
 
-\unrestrict Rj31su2nFp9gc9i3dwYCX2HLteAnby17hAeH3eqUvy12M9R2PDe85cWZzrT5ezd
+\unrestrict 5AIa7i9ERgoPOulwfo6sR8epi31A0D8uhbMLwcQfLfdZfL7Z3vpsQEWUUB4x0EU
 
