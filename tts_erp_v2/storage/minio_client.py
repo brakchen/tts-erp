@@ -290,6 +290,35 @@ class MinioClient:
         )
         return self._publicise(url)
 
+    def put_bytes(
+        self,
+        object_key: str,
+        data: bytes,
+        content_type: str,
+    ) -> None:
+        """Server-side upload of raw bytes (proxy path, no presign).
+
+        Used by the SPU image mirror job (2026-09-05): the job downloads
+        ``products_spu.main_image_url`` from TikTok's CDN and stores a
+        local copy via this method. Contrast with :meth:`presign_put`,
+        which hands the browser a URL so the client uploads directly
+        (server never proxies bytes) — the mirror path is the opposite
+        by design: the server does the download, so it must do the put.
+
+        SDK: ``put_object`` with an in-memory BytesIO body. Object
+        size is taken from the buffer (SDK streams from the file-like
+        object).
+        """
+        import io
+
+        self._sdk.put_object(
+            self._config.bucket,
+            object_key,
+            io.BytesIO(data),
+            length=len(data),
+            content_type=content_type,
+        )
+
     def presign_get(
         self,
         object_key: str,

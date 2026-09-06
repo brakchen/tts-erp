@@ -23,6 +23,7 @@ from tts_erp_v2.api.schemas import (
     ManualCostOut,
     ProfitDailyOut,
 )
+from tts_erp_v2.storage.minio_client import MinioClient
 
 router = APIRouter(prefix="/v2/reporting", tags=["reporting"])
 
@@ -90,7 +91,9 @@ SQL_COVERAGE_REPORT = (
     "(SELECT COALESCE(MAX(calculation_version), 1) "
     "FROM reporting.product_cost_snapshots) AS calculation_version"
 )
-SQL_RESOLVE_CHANNEL_PRODUCT = "SELECT id FROM commerce.products_spu WHERE spu_id = :ext_id LIMIT 1"
+SQL_RESOLVE_CHANNEL_PRODUCT = (
+    "SELECT id FROM commerce.products_spu WHERE spu_id = :ext_id LIMIT 1"
+)
 SQL_INSERT_MANUAL_COST = (
     "INSERT INTO procurement.manual_product_costs ("
     "spu_pk, unit_cost, currency, valid_from, valid_to, "
@@ -118,6 +121,7 @@ SQL_CLOSE_OLD_MANUAL_COSTS_BEFORE_INSERT = (
 )
 SQL_LIST_MISSING_COST_PRODUCTS = (
     "SELECT cp.id, cp.spu_id, cp.title, cp.shop_pk, "
+    "       cp.main_image_url, cp.mirror_object_key, "
     "       (NOT EXISTS ("
     "         SELECT 1 FROM procurement.spu_images si "
     "         WHERE si.spu_pk = cp.id "
@@ -176,6 +180,31 @@ _STMT_CLOSE_OLD_MANUAL_COSTS_BEFORE_INSERT = text(
 )
 _STMT_LIST_MISSING_COST_PRODUCTS = text(SQL_LIST_MISSING_COST_PRODUCTS)
 _STMT_TOTAL_MISSING_PHOTO = text(SQL_TOTAL_MISSING_PHOTO)
+
+
+# --- mirror URL resolution (2026-09-05 page-rework lane) -----------------
+# The mirror job stores only ``mirror_object_key`` on products_spu; the
+# read endpoints resolve it to a presigned / public URL on demand so
+# MinIO access config can evolve without a backfill. Rows with no mirror
+# yet (job not run / failed / no main image) return image_url=None and
+# the frontend shows the default missing-image icon instead.
+
+_minio_client_singleton: MinioClient | None = None
+
+
+def _resolve_mirror_url(mirror_object_key: str | None) -> str | None:
+    """Return a renderable URL for a stored mirror object key, else None."""
+    if not mirror_object_key:
+        return None
+    global _minio_client_singleton
+    if _minio_client_singleton is None:
+        _minio_client_singleton = MinioClient.from_env()
+    client = _minio_client_singleton
+    public_url = client.public_url_or_none(mirror_object_key)
+    if public_url is not None:
+        return public_url
+    url, _expires_at = client.presign_get(mirror_object_key)
+    return url
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -320,6 +349,13 @@ def list_missing_cost_products(
                 "title": r.title,
                 "shop_pk": r.shop_pk,
                 "missing_photo": bool(r.missing_photo),
+                # 2026-09-05 mirror lane: expose the TikTok main image and
+                # its local MinIO mirror so the page can render the SPU
+                # image without hitting the TikTok CDN on every load.
+                # ``image_url`` is None when the mirror job hasn't finished
+                # yet (frontend shows the default missing-image icon).
+                "main_image_url": r.main_image_url,
+                "image_url": _resolve_mirror_url(r.mirror_object_key),
             }
             for r in items_rows
         ],

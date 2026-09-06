@@ -47,7 +47,7 @@ def seed_unmatched_active_product(db_engine):
     ext_acct = "TEST_acct_for_missing_cost"
     ext_prod = "TEST_prod_for_missing_cost"
     with Session(db_engine) as sess:
-        sess.execute(
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "INSERT INTO commerce.shops "
                 "(platform, shop_id, account_name, status) "
@@ -55,16 +55,13 @@ def seed_unmatched_active_product(db_engine):
             ),
             {"ext": ext_acct},
         )
-        acct_id = sess.execute(
-            text(
-                "SELECT id FROM commerce.shops "
-                "WHERE shop_id = :ext"
-            ),
+        acct_id = sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            text("SELECT id FROM commerce.shops WHERE shop_id = :ext"),
             {"ext": ext_acct},
         ).scalar()
         # IMPORTANT: status='ACTIVATE' (uppercase) — same as production
         # data; this is the case the original ``= 'active'`` filter missed.
-        sess.execute(
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "INSERT INTO commerce.products_spu "
                 "(shop_pk, spu_id, title, status) "
@@ -76,7 +73,9 @@ def seed_unmatched_active_product(db_engine):
     yield {"shop_pk": acct_id, "spu_id": ext_prod}
 
 
-def test_status_activate_is_included(api_client, readonly_key, seed_unmatched_active_product):
+def test_status_activate_is_included(
+    api_client, readonly_key, seed_unmatched_active_product
+):
     """Regression: TikTok-stored 'ACTIVATE' must be picked up.
 
     Before the fix, ``WHERE cp.status = 'active'`` (lowercase) silently
@@ -125,9 +124,10 @@ def test_unlinked_product_survives_left_join_view(
     # Without that phantom row, this regression test would pass even on
     # the unfixed code.
     from sqlalchemy import create_engine as _ce
+
     # Use a fresh connection so we don't depend on the handler's session.
     with _ce(__import__("os").environ["TTS_ERP_DB_URL"]).connect() as conn:
-        phantom = conn.execute(
+        phantom = conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "SELECT effective_relation_type FROM linkage.effective_product_links "
                 "WHERE spu_pk = :cp"
@@ -158,7 +158,9 @@ def test_response_shape_no_filter(api_client, readonly_key):
     body = r.json()
     assert isinstance(body, dict)
     assert "items" in body and isinstance(body["items"], list)
-    assert "total_missing_photo" in body and isinstance(body["total_missing_photo"], int)
+    assert "total_missing_photo" in body and isinstance(
+        body["total_missing_photo"], int
+    )
     for row in body["items"]:
         assert "spu_pk" in row
         assert "spu_id" in row
@@ -208,9 +210,7 @@ def test_total_missing_photo_consistent_with_items(api_client, readonly_key):
     assert body["total_missing_photo"] == actual
 
 
-def test_total_missing_photo_consistent_with_items_filtered(
-    api_client, readonly_key
-):
+def test_total_missing_photo_consistent_with_items_filtered(api_client, readonly_key):
     """Same consistency check under shop_pk= filter."""
     r = api_client.get(
         "/v2/reporting/missing-cost-products?shop_pk=1&limit=200",
@@ -220,3 +220,27 @@ def test_total_missing_photo_consistent_with_items_filtered(
     body = r.json()
     actual = sum(1 for row in body["items"] if row["missing_photo"])
     assert body["total_missing_photo"] == actual
+
+
+# --- 2026-09-05 mirror lane: image fields ---------------------------------
+
+
+def test_response_rows_expose_image_fields(api_client, readonly_key):
+    """Every missing-cost row carries main_image_url + image_url keys.
+
+    The manual-costs page renders the SPU's TikTok main image from its
+    local MinIO mirror (spu-image-mirror lane). ``image_url`` is null
+    when the mirror job hasn't finished for a row yet — the frontend
+    then shows the default missing-image icon instead of a broken img.
+    """
+    r = api_client.get(
+        "/v2/reporting/missing-cost-products?limit=200",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    for row in body["items"]:
+        assert "main_image_url" in row
+        assert "image_url" in row
+        # image_url is either a resolvable URL or None (mirror pending).
+        assert row["image_url"] is None or isinstance(row["image_url"], str)

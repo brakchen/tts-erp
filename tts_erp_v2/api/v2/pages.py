@@ -10,9 +10,11 @@ Asset paths are RELATIVE (``../../static/…``) so the page works both on
 (2026-08-31: absolute ``/static/…`` links 404'd behind the prefix).
 
 Auth classification: the page is ``readonly``-equivalent for the GET
-(handler does no DB writes). The page JS calls write endpoints
-(``/v2/reporting/manual-costs``, ``/v2/spu-images/*``) — those require
-a readwrite or admin session via the ``/v2/auth/login`` cookie flow.
+(handler does no DB writes). The page JS calls the write endpoint
+``/v2/reporting/manual-costs`` — which requires a readwrite or admin
+session via the ``/v2/auth/login`` cookie flow. (2026-09-05 page-rework
+lane: the page no longer calls the ``/v2/spu-images/*`` upload/confirm
+endpoints — the image column renders the MinIO mirror instead.)
 
 Visual design (2026-09-01 redesign)
 ----------------------------------
@@ -48,16 +50,21 @@ def spu_roi_page() -> HTMLResponse:
 
 @router.get("/manual-costs", response_class=HTMLResponse)
 def manual_costs_page() -> HTMLResponse:
-  """Manual cost entry + SPU image upload workbench.
+  """Manual cost entry workbench (main-image mirror display).
 
   The HTML shell is a small stub:
   - links to ``/static/vendor/bootstrap.min.css`` (self-hosted, MIT)
   - inline ``<style>`` block for the industrial-console personality
   - links to ``/static/js/console.js`` (shop switcher, tabs, inline filing,
-    drag-drop photo upload, envelope unwrap for backend pagination,
-    signature-counter population)
+    envelope unwrap for backend pagination, signature-counter population,
+    lightbox preview of the SPU's mirrored main image)
   - the JS handles its own /v2/auth/me probe and redirects unauthenticated
     callers to ``/v2/auth/login?next=/v2/pages/manual-costs``
+
+  2026-09-05 page-rework lane: the supplier-reference-photo upload flow
+  was removed. The 图片 column now shows the TikTok main image mirrored
+  into local MinIO (``image_url`` from the backend, fallback icon when the
+  mirror hasn't finished); cost currency is fixed to CNY.
   """
   return HTMLResponse(_PAGE_HTML)
 
@@ -389,7 +396,7 @@ _PAGE_HTML = """<!doctype html>
     .op-input-cost::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
     .op-input-cost:focus { outline: 0; }
     .op-input-cost::placeholder { color: var(--rule); }
-    .op-select-currency {
+    .op-currency-fixed {
       font-family: var(--mono);
       font-size: 11px;
       font-weight: 500;
@@ -399,7 +406,7 @@ _PAGE_HTML = """<!doctype html>
       border-left: 1px solid var(--rule);
       background: var(--paper-deep);
       color: var(--ink);
-      cursor: pointer;
+      pointer-events: none;
     }
     .op-input-note {
       width: 100%;
@@ -415,26 +422,60 @@ _PAGE_HTML = """<!doctype html>
     .op-input-note:focus { outline: 0; border-bottom-color: var(--accent); }
     .op-input-note::placeholder { color: var(--rule); }
 
-    /* Drop zone */
-    .op-dropzone {
-      display: inline-block;
-      border: 1px dashed var(--rule);
-      padding: 7px 14px;
-      font-family: var(--mono);
-      font-size: 11px;
-      letter-spacing: 0.06em;
-      color: var(--muted);
-      cursor: pointer;
-      min-width: 180px;
-      text-align: center;
-      background: var(--paper);
-      transition: border-color 120ms ease, color 120ms ease;
+    /* Main-image mirror cell (2026-09-05 page-rework lane): the row
+       shows the SPU's TikTok main image mirrored into local MinIO — no
+       manual upload UI. Rows without a finished mirror render a
+       fixed-size fallback box instead. */
+    .op-mirror-thumb {
+      display: block;
+      width: 56px;
+      height: 56px;
+      object-fit: cover;
+      border: 1px solid var(--rule);
+      cursor: zoom-in;
+      background: var(--paper-deep);
     }
-    .op-dropzone:hover { border-color: var(--ink-soft); color: var(--ink-soft); }
-    .op-dropzone.is-drag { border-color: var(--accent); color: var(--accent); background: var(--paper-deep); }
-    .op-gallery { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-    .op-gallery img { width: 44px; height: 44px; object-fit: cover; border: 1px solid var(--rule); }
-
+    .op-img-fallback {
+      display: inline-block;
+      width: 56px;
+      height: 56px;
+      border: 1px dashed var(--rule);
+      background: var(--paper-deep);
+    }
+    /* Lightbox: click row image → fullscreen overlay; click empty space
+       (or × / Esc) to close. */
+    .op-lightbox {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(20, 16, 10, 0.86);
+      z-index: 1000;
+      cursor: zoom-out;
+      padding: 40px;
+    }
+    .op-lightbox.is-open { display: flex; }
+    .op-lightbox img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      border: 1px solid var(--rule);
+      background: var(--paper);
+      cursor: default;
+    }
+    .op-lightbox-close {
+      position: absolute;
+      top: 12px;
+      right: 18px;
+      background: transparent;
+      border: 0;
+      color: var(--paper);
+      font-size: 34px;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .op-lightbox-close:hover { color: var(--accent); }
     /* Submit button — the only filled button on the page */
     .op-btn-primary {
       font-family: var(--mono);
@@ -549,7 +590,7 @@ _PAGE_HTML = """<!doctype html>
       <div class="op-counter-num" id="op-counter-num">·</div>
       <div class="op-counter-meta">
         <div class="op-counter-label">待处理</div>
-        <div class="op-counter-sub">活跃 SPU · 缺成本 · 缺图片</div>
+        <div class="op-counter-sub">活跃 SPU · 缺成本</div>
       </div>
       <div class="op-counter-stamp" aria-hidden="true">FILED · 01 / 02</div>
     </section>
