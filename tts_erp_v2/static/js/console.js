@@ -577,7 +577,11 @@
     var acct = getActiveAccountId();
     var tbody = $("#grid-rows");
     html(tbody, loadingRow());
-    var url = "/v2/reporting/cost-snapshots?limit=" + DEFAULT_LIMIT;
+    // 2026-09-06: recently-filed now reads GET /v2/reporting/manual-costs
+    // (the truth table) so a fresh submission shows immediately — the old
+    // cost-snapshots source is recomputed every 6 h and stayed empty
+    // right after a manual entry.
+    var url = "/v2/reporting/manual-costs?limit=" + DEFAULT_LIMIT;
     if (acct) url += "&shop_pk=" + acct;
     api(url)
       .then((r) => {
@@ -603,16 +607,20 @@
     }
     items.forEach((it) => {
       var tr = document.createElement("tr");
+      // manual-costs rows: created_at / spu_id / title / unit_cost /
+      // currency / note (see GET /v2/reporting/manual-costs).
       html(
         tr,
         '<td class="op-td-sku" data-label="时间">' +
-          esc(fmtDate(it.calculated_at)) +
+          esc(fmtDate(it.created_at)) +
           "</td>" +
-          '<td class="op-td-sku" data-label="渠道商品">' +
-          esc(it.spu_pk) +
+          '<td class="op-td-sku" data-label="SKU" title="' +
+          esc(it.spu_id || "") +
+          '">' +
+          esc(it.spu_id || "—") +
           "</td>" +
-          '<td data-label="成本方法">' +
-          esc(it.cost_method || "—") +
+          '<td class="op-td-title" data-label="标题">' +
+          esc(it.title || "") +
           "</td>" +
           '<td class="op-td-cost" data-label="单位成本">' +
           esc(it.unit_cost) +
@@ -620,8 +628,8 @@
           '<td class="op-td-sku" data-label="货币">' +
           esc(it.currency || "—") +
           "</td>" +
-          '<td class="op-td-sku" data-label="版本">v' +
-          esc(it.calculation_version || 1) +
+          '<td data-label="备注">' +
+          esc(it.note || "") +
           "</td>",
       );
       tbody.appendChild(tr);

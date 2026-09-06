@@ -119,6 +119,20 @@ SQL_CLOSE_OLD_MANUAL_COSTS_BEFORE_INSERT = (
     "UPDATE procurement.manual_product_costs SET valid_to = now() "
     "WHERE spu_pk = :cp_id AND valid_to IS NULL"
 )
+# 2026-09-06: recently-filed list reads the truth table directly so the
+# operator sees their submission immediately — the old page relied on
+# reporting.cost_snapshots which is recomputed every 6 h (empty right
+# after a manual entry). Join products_spu for shop_pk / spu_id / title.
+SQL_LIST_MANUAL_COSTS = (
+    "SELECT m.id, m.spu_pk, m.unit_cost, m.currency, m.valid_from, "
+    "       m.valid_to, m.note, m.created_by, m.created_at, m.updated_at, "
+    "       cp.spu_id, cp.shop_pk, cp.title "
+    "FROM procurement.manual_product_costs m "
+    "JOIN commerce.products_spu cp ON cp.id = m.spu_pk "
+    "WHERE (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
+    "ORDER BY m.created_at DESC, m.id DESC "
+    "LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
+)
 SQL_LIST_MISSING_COST_PRODUCTS = (
     "SELECT cp.id, cp.spu_id, cp.title, cp.shop_pk, "
     "       cp.main_image_url, cp.mirror_object_key, "
@@ -180,6 +194,7 @@ _STMT_CLOSE_OLD_MANUAL_COSTS_BEFORE_INSERT = text(
 )
 _STMT_LIST_MISSING_COST_PRODUCTS = text(SQL_LIST_MISSING_COST_PRODUCTS)
 _STMT_TOTAL_MISSING_PHOTO = text(SQL_TOTAL_MISSING_PHOTO)
+_STMT_LIST_MANUAL_COSTS = text(SQL_LIST_MANUAL_COSTS)
 
 
 # --- mirror URL resolution (2026-09-05 page-rework lane) -----------------
@@ -360,6 +375,47 @@ def list_missing_cost_products(
             for r in items_rows
         ],
         "total_missing_photo": _safe_int(total_row.n),
+    }
+
+
+@router.get("/manual-costs")
+def list_manual_costs(
+    sess: Session = Depends(get_session),
+    shop_pk: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> dict:
+    """Recently filed manual costs (newest first) — the 最近提交 tab.
+
+    2026-09-06: this tab used to read ``reporting.cost_snapshots`` which
+    is recomputed every 6 h — right after a manual entry the tab stayed
+    empty (the operator's fresh submission appeared only after the next
+    snapshot tick). This endpoint reads ``procurement.manual_product_costs``
+    (the truth table) so a submission shows up immediately.
+
+    ``shop_pk`` scopes to one shop; omit for all shops.
+    """
+    rows = sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: module-level text() + bound params
+        _STMT_LIST_MANUAL_COSTS,
+        {"acct_id": shop_pk, "limit": limit, "offset": offset},
+    ).all()
+    return {
+        "items": [
+            {
+                "id": r.id,
+                "spu_pk": r.spu_pk,
+                "spu_id": r.spu_id,
+                "title": r.title,
+                "shop_pk": r.shop_pk,
+                "unit_cost": str(r.unit_cost),
+                "currency": r.currency,
+                "note": r.note,
+                "valid_from": r.valid_from.isoformat() if r.valid_from else None,
+                "valid_to": r.valid_to.isoformat() if r.valid_to else None,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
     }
 
 
