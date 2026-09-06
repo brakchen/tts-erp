@@ -227,7 +227,8 @@ upstream's own refresh cadence (`time_next_update_utc`) — a healthy install
 makes **~1 upstream request/day** and **these handlers never dial upstream**;
 all reads serve the local `fx.*` cache tables and conversion math runs
 locally through the snapshot base as a bridge. Design / quota budget / ops:
-[`fx-exchange-rates.md`](fx-exchange-rates.md).
+[`fx-exchange-rates.md`](fx-exchange-rates.md). **Agent 快速操作版（在哪查汇率、
+怎么用参数换汇、红线）见 [`fx-agent-handbook.md`](fx-agent-handbook.md)。**
 
 | Endpoint | Role | Query params |
 | --- | --- | --- |
