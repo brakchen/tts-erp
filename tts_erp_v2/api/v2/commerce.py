@@ -98,6 +98,20 @@ _SORT_TAILS_CHANNEL_PRODUCTS = {
     "updated_at-desc": "ORDER BY cp.source_updated_at DESC NULLS LAST, cp.id",
     "unit_cost-asc": ("ORDER BY m.unit_cost ASC NULLS LAST, cp.id"),
     "unit_cost-desc": ("ORDER BY m.unit_cost DESC NULLS LAST, cp.id"),
+    # Status sort (2026-09-06): stable by a fixed weight so the list
+    # doesn't depend on upstream enum spelling. Weights mirror the page's
+    # Chinese labels: 商家(ACTIVATE)=0 < 下架(DELETED)=1 < 停售
+    # (SELLER_DEACTIVATED)=2.
+    "status-asc": (
+        "ORDER BY CASE cp.status WHEN 'ACTIVATE' THEN 0 "
+        "WHEN 'DELETED' THEN 1 WHEN 'SELLER_DEACTIVATED' THEN 2 "
+        "ELSE 3 END ASC, cp.id"
+    ),
+    "status-desc": (
+        "ORDER BY CASE cp.status WHEN 'ACTIVATE' THEN 0 "
+        "WHEN 'DELETED' THEN 1 WHEN 'SELLER_DEACTIVATED' THEN 2 "
+        "ELSE 3 END DESC, cp.id"
+    ),
     # Back-compat default: stable insertion order.
     "id-asc": "ORDER BY cp.id",
 }
@@ -335,7 +349,7 @@ def get_channel_account(
 
 def _sort_key(sort: str, order: str) -> str:
     """Map (sort, order) onto the allowlist; default = id asc."""
-    if sort not in ("created_at", "updated_at", "unit_cost", "id"):
+    if sort not in ("created_at", "updated_at", "unit_cost", "status", "id"):
         return "id-asc"
     return f"{sort}-{order}"
 
@@ -347,11 +361,13 @@ def list_products_spu(
     status_filter: str | None = Query(default=None, alias="status"),
     sort: str = Query(
         default="id",
-        pattern="^(id|created_at|updated_at|unit_cost)$",
+        pattern="^(id|created_at|updated_at|unit_cost|status)$",
         description=(
             "Catalogue column to sort on: id (insertion order), "
-            "created_at / updated_at (source timestamps), or unit_cost "
-            "(current effective manual cost; cost-less rows always tail)."
+            "created_at / updated_at (source timestamps), unit_cost "
+            "(current effective manual cost; cost-less rows always tail), "
+            "or status (ACTIVATE=商家 first, then DELETED, then "
+            "SELLER_DEACTIVATED)."
         ),
     ),
     order: str = Query(default="asc", pattern="^(asc|desc)$"),

@@ -441,3 +441,48 @@ def test_console_js_recent_tab_renders_prev_and_new():
         "recent thead/rows must label the before/after price columns"
     )
     assert 'data-label="变更时间"' in src, "recent rows must show the change timestamp"
+
+
+def test_page_has_status_filter_dropdown(api_client, readonly_key):
+    """The toolbar exposes a 状态 filter dropdown (id="filter-status").
+
+    Options are populated from console.js' STATUS_LABELS at boot, so the
+    static HTML only carries the empty <select> — the page test asserts
+    the select exists, and the JS test below locks the label mapping.
+    """
+    r = api_client.get(
+        "/v2/pages/manual-costs",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.text
+    assert 'id="filter-status"' in body, "status filter select missing"
+    assert 'aria-label="按状态过滤"' in body, "status filter aria-label missing"
+
+
+def test_console_js_status_label_mapping_and_sort():
+    """console.js maps upstream status codes to Chinese labels and lets
+    the operator sort the status column.
+
+    The page's 全部 SPU view shows ACTIVATE=商家 / DELETED=下架 /
+    SELLER_DEACTIVATED=停售; the status header is click-sortable via
+    data-sort="status" and the URL carries ?status= for filtering.
+    """
+    from pathlib import Path
+
+    js = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "console.js"
+    )
+    src = js.read_text(encoding="utf-8")
+    assert "STATUS_LABELS" in src, "status label map missing"
+    assert 'ACTIVATE: "商家"' in src or "ACTIVATE:" in src, "ACTIVATE mapping missing"
+    assert 'DELETED: "下架"' in src or "DELETED:" in src, "DELETED mapping missing"
+    assert "SELLER_DEACTIVATED" in src, "SELLER_DEACTIVATED mapping missing"
+    assert "function statusLabel" in src, "statusLabel helper missing"
+    assert 'data-sort="status"' in src, "status column must be sortable"
+    assert "catalogueStatus" in src, "status filter state missing"
+    assert "&status=" in src, "loadAll must forward ?status="

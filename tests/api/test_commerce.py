@@ -755,3 +755,109 @@ def test_channel_products_sort_rejects_unknown_field(
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 422, r.text
+
+
+# ---------------------------------------------------------------------------
+# Status: Chinese labels / filter / sort (2026-09-06 all-SPU catalogue)
+# ---------------------------------------------------------------------------
+
+_STATUS_SPUS = {
+    "TEST_MCST_activate": ("商家产品", "ACTIVATE"),
+    "TEST_MCST_deleted": ("删除产品", "DELETED"),
+    "TEST_MCST_seller": ("停售产品", "SELLER_DEACTIVATED"),
+}
+
+
+@pytest.fixture()
+def seed_spus_statuses(db_engine):
+    """Three TEST_ SPUs under one shop, one per upstream status value."""
+    ext_acct = "TEST_MCST_acct"
+    with db_engine.begin() as conn:
+        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            text(
+                "INSERT INTO commerce.shops "
+                "(platform, shop_id, account_name, status) "
+                "VALUES ('tiktok', :ext, 'TEST acct', 'active')"
+            ),
+            {"ext": ext_acct},
+        )
+        acct_id = conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            text("SELECT id FROM commerce.shops WHERE shop_id = :ext"),
+            {"ext": ext_acct},
+        ).scalar()
+        spu_ids = {}
+        for ext, (title, status) in _STATUS_SPUS.items():
+            conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+                text(
+                    "INSERT INTO commerce.products_spu "
+                    "(shop_pk, spu_id, title, status, "
+                    " source_created_at, source_updated_at) "
+                    "VALUES (:acct, :ext, :title, :status, now(), now())"
+                ),
+                {"acct": acct_id, "ext": ext, "title": title, "status": status},
+            )
+            pk = conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+                text("SELECT id FROM commerce.products_spu WHERE spu_id = :ext"),
+                {"ext": ext},
+            ).scalar()
+            spu_ids[ext] = pk
+
+    yield {"acct_id": acct_id, "spu_ids": spu_ids}
+
+    with db_engine.begin() as conn:
+        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            text("DELETE FROM commerce.products_spu WHERE shop_pk = :acct"),
+            {"acct": acct_id},
+        )
+        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            text("DELETE FROM commerce.shops WHERE id = :acct"),
+            {"acct": acct_id},
+        )
+
+
+def _products_for_status(api_client, readonly_key, acct_id, **query):
+    qs = "&".join(f"{k}={v}" for k, v in query.items())
+    url = f"/v2/commerce/channel-products?limit=50&shop_pk={acct_id}"
+    if qs:
+        url += "&" + qs
+    r = api_client.get(url, headers={"Authorization": f"Bearer {readonly_key}"})
+    assert r.status_code == 200, r.text
+    return [row["spu_id"] for row in r.json()]
+
+
+def test_channel_products_filter_by_status(
+    api_client, readonly_key, seed_spus_statuses
+):
+    """?status=DELETED returns only DELETED rows (raw upstream code filter)."""
+    acct = seed_spus_statuses["acct_id"]
+    got = _products_for_status(api_client, readonly_key, acct, status="DELETED")
+    assert got == ["TEST_MCST_deleted"], f"expected only DELETED row, got {got}"
+
+
+def test_channel_products_filter_by_status_all_statuses_present(
+    api_client, readonly_key, seed_spus_statuses
+):
+    """Without ?status= all three statuses come back."""
+    acct = seed_spus_statuses["acct_id"]
+    got = _products_for_status(api_client, readonly_key, acct)
+    assert set(got) == set(_STATUS_SPUS.keys())
+
+
+def test_channel_products_sort_status_asc(api_client, readonly_key, seed_spus_statuses):
+    """sort=status&order=asc → 商家(ACTIVATE) first, then 下架(DELETED),
+    then 停售(SELLER_DEACTIVATED) — the fixed weight order."""
+    acct = seed_spus_statuses["acct_id"]
+    got = _products_for_status(
+        api_client, readonly_key, acct, sort="status", order="asc"
+    )
+    assert got == ["TEST_MCST_activate", "TEST_MCST_deleted", "TEST_MCST_seller"], got
+
+
+def test_channel_products_sort_status_desc(
+    api_client, readonly_key, seed_spus_statuses
+):
+    acct = seed_spus_statuses["acct_id"]
+    got = _products_for_status(
+        api_client, readonly_key, acct, sort="status", order="desc"
+    )
+    assert got == ["TEST_MCST_seller", "TEST_MCST_deleted", "TEST_MCST_activate"], got
