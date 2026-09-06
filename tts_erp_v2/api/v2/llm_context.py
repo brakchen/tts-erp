@@ -210,7 +210,7 @@ _SCHEMAS: list[tuple[str, str]] = [
 ]
 
 
-def _introspect_schemas(sess: Session) -> str:
+def _introspect_schemas(session: Session) -> str:
     """Build the dynamic schema table of contents from live PG.
 
     Returns a Markdown section listing every table in every schema with
@@ -224,7 +224,7 @@ def _introspect_schemas(sess: Session) -> str:
         # information_schema. We avoid pg_catalog functions (like
         # obj_description) that require special privileges.
         # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() with literal schema names only, no user input
-        table_rows = sess.execute(
+        table_rows = session.execute(
             text(
                 "SELECT table_schema, table_name "
                 "FROM information_schema.tables "
@@ -237,7 +237,7 @@ def _introspect_schemas(sess: Session) -> str:
             )
         ).all()
         # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() with literal schema names only, no user input
-        rows_rows = sess.execute(
+        rows_rows = session.execute(
             text(
                 "SELECT schemaname, relname, n_live_tup "
                 "FROM pg_stat_user_tables "
@@ -440,7 +440,7 @@ def get_llm_context(
         "(structured envelope around the same content).",
         pattern="^(md|markdown|json)$",
     ),
-    sess: Session = Depends(get_session),
+    session: Session = Depends(get_session),
 ) -> Any:
     """Return the LLM-facing system + data dictionary.
 
@@ -502,7 +502,7 @@ def get_llm_context(
         {
             "id": "tables_live",
             "title": "Tables (live from PG)",
-            "body": _introspect_schemas(sess),
+            "body": _introspect_schemas(session),
         },
         {
             "id": "endpoints",

@@ -240,17 +240,17 @@ def _seed_credentials_for_enum(
     prefixed row could never assert containment. Cleanup is explicit
     (delete in teardown) so no script-based pruning is needed here.
     """
-    sess = session_factory()
+    session = session_factory()
     try:
         # Idempotent: delete-then-insert (shops first — its credential
         # FK is ON DELETE SET NULL, and (platform, shop_id) is unique).
         # pi-lens-ignore: python-sql-injection — bound :e param, literal SQL
-        sess.execute(
+        session.execute(
             text("DELETE FROM commerce.shops WHERE shop_id = :e AND platform = 'tiktok'"),
             {"e": external_id},
         )
         # pi-lens-ignore: python-sql-injection — bound :e param, literal SQL
-        sess.execute(
+        session.execute(
             text("DELETE FROM integration.credentials WHERE external_account_id = :e"),
             {"e": external_id},
         )
@@ -259,10 +259,10 @@ def _seed_credentials_for_enum(
             external_account_id=external_id,
             ciphertext=b"\x00" * 32,
         )
-        sess.add(cred)
-        sess.flush()
+        session.add(cred)
+        session.flush()
         if with_shop_row:
-            sess.add(
+            session.add(
                 ChannelAccount(
                     platform="tiktok",
                     shop_id=external_id,
@@ -270,27 +270,27 @@ def _seed_credentials_for_enum(
                     status="active",
                 )
             )
-        sess.commit()
+        session.commit()
     finally:
-        sess.close()
+        session.close()
 
 
 def _cleanup_credentials(session_factory, *, external_id: str) -> None:
-    sess = session_factory()
+    session = session_factory()
     try:
         # pi-lens-ignore: python-sql-injection — bound :e param, literal SQL
-        sess.execute(
+        session.execute(
             text("DELETE FROM commerce.shops WHERE shop_id = :e AND platform = 'tiktok'"),
             {"e": external_id},
         )
         # pi-lens-ignore: python-sql-injection — bound :e param, literal SQL
-        sess.execute(
+        session.execute(
             text("DELETE FROM integration.credentials WHERE external_account_id = :e"),
             {"e": external_id},
         )
-        sess.commit()
+        session.commit()
     finally:
-        sess.close()
+        session.close()
 
 
 def _factory():
@@ -314,11 +314,11 @@ def test_enumerate_tiktok_shops_filters_mocks_and_returns_sorted() -> None:
     _seed_credentials_for_enum(factory, external_id=real_id, with_shop_row=True)
     _seed_credentials_for_enum(factory, external_id=mock_id, with_shop_row=True)
     try:
-        sess = factory()
+        session = factory()
         try:
-            result = _enumerate_tiktok_shops(sess)
+            result = _enumerate_tiktok_shops(session)
         finally:
-            sess.close()
+            session.close()
         # mock is filtered out by the prefix guard (even though it has a
         # shops row)
         assert mock_id not in result
@@ -332,10 +332,10 @@ def test_enumerate_tiktok_shops_filters_mocks_and_returns_sorted() -> None:
 
 def test_enumerate_tiktok_shops_returns_empty_on_db_error() -> None:
     """A blown session.execute → log + empty list (NOT propagate)."""
-    sess = MagicMock()
-    sess.execute.side_effect = OperationalError("SELECT 1", {}, Exception("pg down"))
+    session = MagicMock()
+    session.execute.side_effect = OperationalError("SELECT 1", {}, Exception("pg down"))
     # Should NOT raise.
-    result = _enumerate_tiktok_shops(sess)
+    result = _enumerate_tiktok_shops(session)
     assert result == []
 
 
@@ -362,21 +362,21 @@ def test_enumerate_tiktok_shops_skips_prefix_and_orphan_credentials() -> None:
     _seed_credentials_for_enum(factory, external_id=skip_mock, with_shop_row=True)
     _seed_credentials_for_enum(factory, external_id=skip_test, with_shop_row=True)
     _seed_credentials_for_enum(factory, external_id=skip_orphan, with_shop_row=False)
-    sess = factory()
+    session = factory()
     try:
-        result = _enumerate_tiktok_shops(sess)
+        result = _enumerate_tiktok_shops(session)
         assert keep_id in result
         assert skip_mock not in result
         assert skip_test not in result
         assert skip_orphan not in result
     finally:
         # Clean: remove the seeded rows.
-        sess.rollback()
-        sess.close()
-        sess = factory()
+        session.rollback()
+        session.close()
+        session = factory()
         try:
             # pi-lens-ignore: python-sql-injection — bound :k/:m/:t/:o params, literal SQL
-            sess.execute(
+            session.execute(
                 text(
                     "DELETE FROM integration.credentials "
                     "WHERE external_account_id IN (:k, :m, :t, :o)"
@@ -389,15 +389,15 @@ def test_enumerate_tiktok_shops_skips_prefix_and_orphan_credentials() -> None:
                 },
             )
             # pi-lens-ignore: python-sql-injection — bound :k/:m/:t params, literal SQL
-            sess.execute(
+            session.execute(
                 text(
                     "DELETE FROM commerce.shops WHERE shop_id IN (:k, :m, :t)"
                 ),
                 {"k": keep_id, "m": skip_mock, "t": skip_test},
             )
-            sess.commit()
+            session.commit()
         finally:
-            sess.close()
+            session.close()
 
 
 # ─── _record_failed_tick (uses real DB for SyncJob) ────────────────
@@ -415,10 +415,10 @@ def test_record_failed_tick_writes_a_failed_row() -> None:
     )
     _record_failed_tick(factory, spec, "simulated boom")
 
-    sess = factory()
+    session = factory()
     try:
         # pi-lens-ignore: python-sql-injection — static SELECT, no user input
-        row = sess.execute(
+        row = session.execute(
             text(
                 "SELECT status, error_message FROM integration.sync_jobs "
                 "WHERE job_name = 'reporting.cost_snapshots' "
@@ -434,12 +434,12 @@ def test_record_failed_tick_writes_a_failed_row() -> None:
         assert row[1]  # non-empty
     finally:
         # Clean the row we wrote (job_name is not TEST_*-prefixed).
-        sess.rollback()
-        sess.close()
-        sess = factory()
+        session.rollback()
+        session.close()
+        session = factory()
         try:
             # pi-lens-ignore: python-sql-injection — bound :msg param, literal SQL
-            sess.execute(
+            session.execute(
                 text(
                     "DELETE FROM integration.sync_jobs "
                     "WHERE job_name = 'reporting.cost_snapshots' "
@@ -447,9 +447,9 @@ def test_record_failed_tick_writes_a_failed_row() -> None:
                 ),
                 {"msg": "simulated boom"},
             )
-            sess.commit()
+            session.commit()
         finally:
-            sess.close()
+            session.close()
 
 
 # ─── _run_tiktok_job — happy path, retry, no-shops ────────────────
