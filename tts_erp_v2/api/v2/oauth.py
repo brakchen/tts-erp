@@ -125,7 +125,7 @@ def _json(*, ok: bool, http_status: int, **fields: Any) -> JSONResponse:
 )
 def authorize(
     request: Request,
-    sess: Session = Depends(get_session),
+    sess: Session = Depends(get_session),  # noqa: B008 — FastAPI DI 惯例
     redirect_to: str | None = Query(
         default=None,
         description="(display hint only) where the operator should land after the flow.",
@@ -187,7 +187,7 @@ def authorize(
 @router.get("/callback", summary="TikTok OAuth redirect target (public)")
 def callback(
     request: Request,
-    sess: Session = Depends(get_session),
+    sess: Session = Depends(get_session),  # noqa: B008 — FastAPI DI 惯例
     code: str | None = Query(default=None),
     state: str | None = Query(default=None),
     error: str | None = Query(default=None),
