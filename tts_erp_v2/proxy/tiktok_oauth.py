@@ -199,7 +199,8 @@ def complete_tiktok_authorization(
         raise OAuthFlowError(
             "missing_shop_id",
             "token response carried no shop_id — cannot key a credentials "
-            "row; check the Partner Center app scopes",
+            "row; check the Partner Center app scopes. Upstream data keys: "
+            f"{sorted(grant.get('_upstream_data_keys') or [])}",
         )
     shop_id = str(shop_id)
 
@@ -221,9 +222,10 @@ def complete_tiktok_authorization(
             "missing_shop_cipher",
             "token response carried no shop_cipher — every tiktok data job "
             "signs with shop_cipher and cross-border routing requires it; "
-            "verify the real token/get response with a test account (the "
-            "Authorization overview data table does not document it), or "
-            "extend this flow to fetch it via Get Authorized Shop",
+            "if this is a real upstream shape change, extend the flow to "
+            "fetch it via Get Authorized Shop (never weaken this check). "
+            "Upstream data keys: "
+            f"{sorted(grant.get('_upstream_data_keys') or [])}",
         )
 
     account_name = grant.get("account_name")

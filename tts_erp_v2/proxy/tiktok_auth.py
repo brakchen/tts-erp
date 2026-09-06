@@ -381,6 +381,12 @@ def exchange_auth_code(*, auth_code: str) -> dict[str, Any]:
         "seller_type": seller_type if isinstance(seller_type, str) else None,
         "user_type": user_type if isinstance(user_type, int) else None,
         "granted_scopes": granted_scopes,
+        # Diagnostics: the actual keys upstream returned inside ``data``.
+        # The onboarding flow appends them to missing_shop_id /
+        # missing_shop_cipher errors so a first real run against a new
+        # upstream shape is decidable in seconds (field renamed vs need
+        # an extra Get Authorized Shop call) instead of guesswork.
+        "_upstream_data_keys": sorted(data.keys()) if isinstance(data, dict) else [],
     }
 
 

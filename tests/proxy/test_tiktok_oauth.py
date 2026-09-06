@@ -126,6 +126,14 @@ def test_exchange_auth_code_success(
     assert out["expires_at"] is not None
     delta = (out["expires_at"] - datetime.now(UTC)).total_seconds()
     assert 604700 <= delta <= 604900
+    # Diagnostic key surface (missing_shop_id / missing_shop_cipher messages
+    # append this so a first real run is decidable).
+    assert "_upstream_data_keys" in out
+    assert set(out["_upstream_data_keys"]) >= {
+        "access_token",
+        "shop_id",
+        "shop_cipher",
+    }
 
     assert len(fake.calls) == 1
     call = fake.calls[0]

@@ -102,19 +102,23 @@ GET /v2/oauth/tiktok/authorize ────────────────�
 4. 测试用 Seller Center **test account / Development Shops**，不要在开发期用
    线上 seller 真号授权。
 
-## 上游契约风险（合入即生效，go-live 前必须验证）
+## 上游契约确认（shop_id / shop_cipher 从哪来）
 
-⚠️ `Authorization overview.md` 的 token/get **data 字段表没有 `shop_id` 与
-`shop_cipher`**（只有 access/refresh/open_id/seller_name/seller_base_region/
-user_type/granted_scopes），而本流程的原始单测 mock 假设了这两个字段存在。
-已加防御：缺失时 `kind=missing_shop_cipher` / `missing_shop_id` 显式失败，
-**不会写入半残 credentials 行**。
+✅ **已由 v1 生产路径验证**：v1 `oauth-receiver`（同为 app_key `6kv9a06k12g4c` + 同一个
+`auth.tiktok-shops.com/api/v2/token/get`、`grant_type=authorized_code`）在生产回调里从响应
+`data` 直接读取 `shop_id / shop_cipher / shop_region / seller_type` 落库成功——现网生产店
+`7494763368967603447` 的凭证（含 shop_cipher）即由此而来并持续被 v2 job 签名使用。
 
-**go-live 前用 test account 真跑一次 /authorize → callback 抓真实 token/get 响应**：
-- 若真实响应含 `data.shop_id` + `data.shop_cipher` → 无改动，本 spec 成立；
-- 若缺 → 需在 `complete_tiktok_authorization` 里补「Get Authorized Shop」调用
-  （token/get 后用 access_token 拉授权店铺列表拿 shop_id/shop_cipher，天然支持一用户多店），
-  不要弱化上面的缺失校验。
+⚠️ 注意：本地 `Authorization overview.md` 的 data 字段表**被裁剪过**（未列 shop_id/shop_cipher，
+也漏了 prod refresh 实际在用的相对 `expires_in`），不要因它否定真实响应。
+
+**防御仍在**：万一上游对某 app/市场不返回 shop_id/shop_cipher，`complete_tiktok_authorization`
+会以 `kind=missing_shop_id` / `missing_shop_cipher` **显式失败且不落库**，错误信息附带上游
+实际返回的 data keys（`_upstream_data_keys`），可当场判断是字段改名还是需补「Get Authorized
+Shop」调用——不要弱化校验。
+
+**go-live 冒烟（test account 首跑即可，非阻塞）**：真跑一次 /authorize → callback，若响应含
+`data.shop_id`+`data.shop_cipher` 则零改动收尾；真缺则按上面错误信息里的 keys 扩展。
 
 ## 生命周期备注
 
