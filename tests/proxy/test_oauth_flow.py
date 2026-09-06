@@ -294,6 +294,37 @@ def test_complete_authorization_missing_shop_id(
     assert ei.value.kind == "missing_shop_id"
 
 
+def test_complete_authorization_missing_shop_cipher(
+    db_session, fernet_key: str, fake_exchange: dict[str, Any]
+) -> None:
+    """Grant without shop_cipher fails loudly — never writes a credential
+    row whose first data job dies on the missing cipher (cross-border
+    routing + HMAC signing require it). See the contract note in
+    :func:`complete_tiktok_authorization`."""
+    from tts_erp_v2.db.models.integration import Credentials
+    from tts_erp_v2.proxy.tiktok_oauth import (
+        OAuthFlowError,
+        complete_tiktok_authorization,
+        register_state,
+    )
+
+    fake_exchange["shop_cipher"] = None
+    raw, _ = register_state(db_session)
+    with pytest.raises(OAuthFlowError) as ei:
+        complete_tiktok_authorization(db_session, code="code_x", state=raw)
+    assert ei.value.kind == "missing_shop_cipher"
+    # No half-broken row left behind for the shop.
+    n = db_session.execute(
+        select(func.count())
+        .select_from(Credentials)
+        .where(
+            Credentials.provider == "tiktok",
+            Credentials.external_account_id == TEST_SHOP_ID,
+        )
+    ).scalar()
+    assert n == 0
+
+
 def test_complete_authorization_upstream_failure_consumes_state(
     db_session, fernet_key: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:

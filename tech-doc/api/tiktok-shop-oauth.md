@@ -72,7 +72,8 @@ GET /v2/oauth/tiktok/authorize ────────────────�
   - 成功 → `200 {"ok": true, "kind": "authorized", "result": {shop_id, credential_id, account_id, ...}}`
   - seller 拒绝 → `200 {"ok": false, "kind": "denied", "error": "auth_denied"}`
   - state 无效/过期 → `400 kind=state_invalid`；重用 → `400 kind=state_reused`
-  - `user_type` 不支持 → `400 kind=user_type`；无 `shop_id` → `400 kind=missing_shop_id`
+  - `user_type` 不支持 → `400 kind=user_type`；无 `shop_id` → `400 kind=missing_shop_id`；
+    无 `shop_cipher` → `400 kind=missing_shop_cipher`（跨境路由/签名必需，宁可不落库）
   - 上游 token/get 拒绝（如 code 已用过）→ `502 kind=upstream`（state 已消费，
     需重新发起 authorize）
   - 无 `code` 裸访问 → `400 kind=missing_code`
@@ -100,6 +101,20 @@ GET /v2/oauth/tiktok/authorize ────────────────�
 3. 确认 scope（`seller.*` 读类）已勾选；勾太多影响审核与授权率。
 4. 测试用 Seller Center **test account / Development Shops**，不要在开发期用
    线上 seller 真号授权。
+
+## 上游契约风险（合入即生效，go-live 前必须验证）
+
+⚠️ `Authorization overview.md` 的 token/get **data 字段表没有 `shop_id` 与
+`shop_cipher`**（只有 access/refresh/open_id/seller_name/seller_base_region/
+user_type/granted_scopes），而本流程的原始单测 mock 假设了这两个字段存在。
+已加防御：缺失时 `kind=missing_shop_cipher` / `missing_shop_id` 显式失败，
+**不会写入半残 credentials 行**。
+
+**go-live 前用 test account 真跑一次 /authorize → callback 抓真实 token/get 响应**：
+- 若真实响应含 `data.shop_id` + `data.shop_cipher` → 无改动，本 spec 成立；
+- 若缺 → 需在 `complete_tiktok_authorization` 里补「Get Authorized Shop」调用
+  （token/get 后用 access_token 拉授权店铺列表拿 shop_id/shop_cipher，天然支持一用户多店），
+  不要弱化上面的缺失校验。
 
 ## 生命周期备注
 

@@ -59,7 +59,7 @@ class OAuthFlowError(ValueError):
     ``kind`` is a stable machine-readable tag the HTTP layer maps to a
     message + status:
     ``state_invalid`` / ``state_reused`` / ``user_type`` /
-    ``missing_shop_id``.
+    ``missing_shop_id`` / ``missing_shop_cipher``.
     """
 
     def __init__(self, kind: str, message: str) -> None:
@@ -203,6 +203,29 @@ def complete_tiktok_authorization(
         )
     shop_id = str(shop_id)
 
+    # Cross-border routing + HMAC signing require shop_cipher on EVERY
+    # shop-scoped data call (proxy/tts_shop: products_api raises on an
+    # empty cipher). Fail loudly here instead of writing a credential
+    # row whose first sync job dies with CredentialsMissing.
+    #
+    # ⚠ contract note: the Authorization overview doc's token/get data
+    # field table does NOT list shop_cipher / shop_id — the original
+    # Lane-E unit mocks assumed both. If the real upstream response
+    # omits them, this flow surfaces immediately with kind
+    # ``missing_shop_cipher`` (never a silent half-broken row); the
+    # fix is then to source them via TikTok's "Get Authorized Shop"
+    # call after token/get, not to weaken this check.
+    shop_cipher = grant.get("shop_cipher")
+    if not shop_cipher:
+        raise OAuthFlowError(
+            "missing_shop_cipher",
+            "token response carried no shop_cipher — every tiktok data job "
+            "signs with shop_cipher and cross-border routing requires it; "
+            "verify the real token/get response with a test account (the "
+            "Authorization overview data table does not document it), or "
+            "extend this flow to fetch it via Get Authorized Shop",
+        )
+
     account_name = grant.get("account_name")
     region = grant.get("region")
     seller_type = grant.get("seller_type")
@@ -215,7 +238,7 @@ def complete_tiktok_authorization(
         external_account_id=shop_id,
         plaintext_access_token=grant["access_token"],
         plaintext_refresh_token=grant.get("refresh_token"),
-        plaintext_shop_cipher=grant.get("shop_cipher"),
+        plaintext_shop_cipher=shop_cipher,
         account_label=account_name,
         expires_at=grant.get("expires_at"),
         granted_scopes=granted_scopes,
