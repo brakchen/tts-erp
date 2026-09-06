@@ -12,8 +12,8 @@
 | lane_id | 主题 | owner(session) | branch/worktree | 拥有的文件/目录 | 状态 | updated(UTC) |
 | --- | --- | --- | --- | --- | --- | --- |
 | feat/spu-roi-page-ui | ROI 看板 UI：主图点击放大 / 缩略图加大(34→56)+单元格布局 / 汇率 stamp 与汇总重叠修复 | (接管 manual-costs-v2 之后的独立 UI lane) | .worktrees/spu-roi-page-ui | tts_erp_v2/api/v2/pages.py(ROI 模板段)、tts_erp_v2/static/js/spu-roi.js、handoff/ACTIVE.md | merged (9253965) | 2026-09-06T06:16Z |
-| feat/fx-live-roi | ROI 账页汇率接入在线 fx 缓存（D1 排期落地：fixed-const → fx.* cache，缺缓存回退常量）+ 测试 | 本会话 (master 维护 agent) | .worktrees/fx-live-roi | tts_erp_v2/api/v2/analytics.py、tests/api/test_spu_roi_api.py、tech-doc/analytics/spu-real-roi-dashboard.md、handoff/ACTIVE.md | draft | 2026-09-06T06:40Z |
 | feat/manual-costs-v2 | manual-costs 页 v2（全部 SPU tab / 事件绑定修复） | 未登记（owner session 见 .worktrees/manual-costs-v2 @ 5324f95） | .worktrees/manual-costs-v2 | tts_erp_v2/api/v2/pages.py、tts_erp_v2/static/js/spu-roi.js、console.js（master WT 在途 M） | draft | 2026-09-06 |
+| feat/tiktok-shop-oauth | TikTok seller OAuth 收尾部署（接手 Lane E 无主 WIP：rebase master 51→0、migration 0008→0011 接 0010、公网 /tts 前缀修正、部署验证） | 本 session（oauth 修复 agent，§12.3 接手：无登记 + HEAD 静止 e9f3310） | .worktrees/shop-oauth-auth / feature/shop-oauth-auth | tts_erp_v2/api/v2/oauth.py、tts_erp_v2/proxy/tiktok_oauth.py、tts_erp_v2/proxy/tiktok_auth.py、tts_erp_v2/app.py、tts_erp_v2/middleware/auth.py、tts_erp_v2/db/models/integration.py、alembic/versions/（0011 迁移）、schema_tts_erp.sql、tech-doc/api/tiktok-shop-oauth.md、tests/api|proxy 新增测试 | draft | 2026-09-06T06:46Z |
 
 <!-- 新 lane 示例（复制改）：
 | lane_id | 主题 | owner(session) | .worktrees/<slug> / branch | 文件列表 | draft | <UTC> |
