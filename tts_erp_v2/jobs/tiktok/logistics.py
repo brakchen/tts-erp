@@ -31,7 +31,7 @@ we convert at the boundary to UTC ``datetime`` for storage (V3 §14).
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -78,7 +78,7 @@ def _epoch_ms_to_utc(ms: int | None) -> datetime | None:
     if ms is None or ms <= 0:
         return None
     try:
-        return datetime.fromtimestamp(int(ms) / 1000.0, tz=timezone.utc)
+        return datetime.fromtimestamp(int(ms) / 1000.0, tz=UTC)
     except (TypeError, ValueError, OverflowError):
         return None
 
@@ -417,12 +417,12 @@ def run(
 
 
 __all__ = [
-    "run",
-    "JOB_NAME",
-    "TRACKING_ENDPOINT_TEMPLATE",
     "FINAL_STATUSES",
+    "JOB_NAME",
     "TARGET_LIMIT",
+    "TRACKING_ENDPOINT_TEMPLATE",
+    "ParseError",
     "ProxyCall",
     "UpstreamJobError",
-    "ParseError",
+    "run",
 ]

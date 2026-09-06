@@ -55,6 +55,7 @@ from tts_erp_v2.db.models import (
     SalesOrderLine,
     SyncIssue,
 )
+from tts_erp_v2.jobs.tiktok import spu_link
 from tts_erp_v2.sync_worker.job_runner import JobResult
 
 # Upstream path (TikTok 202309 spec). Frozen string so it appears
@@ -263,9 +264,10 @@ def _parse_line_payload(order_id: str, raw: dict[str, Any]) -> dict[str, Any]:
     quantity: Decimal | None = raw_qty if raw_qty is not None else Decimal(1)
     return {
         "external_line_id": str(line_id),
-        # spu_pk / sku_pk stay NULL
-        # when the product hasn't been synced yet — the snapshot
-        # columns hold the truth for later join.
+        # spu_pk 由调用方(orders/order_detail run)按本模块 spu_link 预载
+        # 目录解析,命中即填;未命中保持 NULL(产品未同步/已下架)——
+        # 快照列(snapshot)保留 truth,products job 同步后由
+        # spu_link.backfill_null_line_spu_pk 补关联(2026-09-06 修复)。
         "external_product_id_snapshot": raw.get("product_id"),
         "external_variant_id_snapshot": raw.get("sku_id"),
         "product_name_snapshot": raw.get("product_name"),
@@ -410,6 +412,11 @@ def run(
 
     cursor_scope = scope or shop_id
     account = _ensure_channel_account(session, shop_id)
+    # 2026-09-06 修复(8-31 后新单 spu_pk 恒 NULL 根因):写行时按
+    # external_product_id_snapshot 预载同店目录,命中即填 spu_pk。
+    # 目录缺失的行仍保持 NULL(由 products job 同步后回填,见
+    # tts_erp_v2/jobs/tiktok/spu_link.py)。
+    spu_map = spu_link.spu_map_for_shop(session, shop_pk=account.id)
     watermark_ms = watermarks.get_cursor(session, job_name=JOB_NAME, scope=cursor_scope)
 
     base_body: dict[str, Any] = {"page_size": page_size}
@@ -470,6 +477,12 @@ def run(
                     },
                 )
                 continue
+            # 2026-09-06:目录命中即填 spu_pk(不覆盖已有关联);未命中
+            # 保持 NULL → products 同步后回填(spu_link.backfill)。
+            snap_pid = line_fields.get("external_product_id_snapshot")
+            resolved = spu_link.link_line_spu_pk(spu_map, product_snapshot=snap_pid)
+            if resolved is not None:
+                line_fields["spu_pk"] = resolved
             _upsert_sales_order_line(
                 session,
                 order_pk=sales_order.id,

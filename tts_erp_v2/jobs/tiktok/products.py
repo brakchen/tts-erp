@@ -30,6 +30,7 @@ row with core fields from search and write an ``IMAGE_FETCH_ERROR``
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
 from datetime import UTC
 from typing import Any
@@ -45,6 +46,7 @@ from tts_erp_v2.db.models import (
     RawRecord,
     SyncIssue,
 )
+from tts_erp_v2.jobs.tiktok import spu_link
 from tts_erp_v2.sync_worker.job_runner import JobResult
 
 ENDPOINT = "/product/202309/products/search"
@@ -393,6 +395,12 @@ def run(
         )
         if update_ms and (max_update_ms is None or update_ms > max_update_ms):
             max_update_ms = update_ms
+
+    # 2026-09-06:订单行若先于产品目录落地(spu_pk NULL),产品同步完
+    # 成后回填补关联(幂等;只碰 NULL 行)。根因与收敛路径见 spu_link 模块。
+    linked = spu_link.backfill_null_line_spu_pk(session, shop_pk=account.id)
+    if linked:
+        sys.stderr.write(f"[tiktok.products] linked {linked} order lines to SPUs\n")
 
     new_cursor_ms: int | None = None
     if max_update_ms is not None and (

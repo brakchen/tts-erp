@@ -40,6 +40,7 @@ from tts_erp_v2.db.models import (
     SyncIssue,
 )
 from tts_erp_v2.jobs.runner import record_sync_issue
+from tts_erp_v2.jobs.tiktok import spu_link
 from tts_erp_v2.jobs.tiktok.orders import (
     ParseError,
     ProxyCall,
@@ -193,6 +194,8 @@ def run(
     ).scalar_one_or_none()
     if account is None:
         raise UpstreamJobError(f"shops row missing for tiktok shop_id={shop_id!r}")
+    # 2026-09-06:与 orders 同规则,写行时目录命中即填 spu_pk。
+    spu_map = spu_link.spu_map_for_shop(session, shop_pk=account.id)
 
     if order_ids is None:
         order_ids = _auto_collect_order_ids(session, account_id=account.id)
@@ -278,6 +281,10 @@ def run(
                     details={"error": str(e), "raw": _safe_truncate(raw_line)},
                 )
                 continue
+            snap_pid = line_fields.get("external_product_id_snapshot")
+            resolved = spu_link.link_line_spu_pk(spu_map, product_snapshot=snap_pid)
+            if resolved is not None:
+                line_fields["spu_pk"] = resolved
             li_values = {
                 "order_pk": so_row.id,
                 **line_fields,

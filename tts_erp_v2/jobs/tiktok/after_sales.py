@@ -10,7 +10,7 @@ Cursor: epoch ms in ``integration.sync_cursors`` (scope=shop_id).
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -47,7 +47,7 @@ def _epoch_seconds_to_utc(seconds: int | None):
     if seconds is None or seconds <= 0:
         return None
     try:
-        return datetime.fromtimestamp(_safe_int(seconds), tz=timezone.utc)
+        return datetime.fromtimestamp(_safe_int(seconds), tz=UTC)
     except (TypeError, ValueError, OverflowError):
         return None
 
@@ -444,11 +444,11 @@ def run(
 
 
 __all__ = [
-    "run",
+    "CANCELLATIONS_ENDPOINT",
     "JOB_NAME",
     "RETURNS_ENDPOINT",
-    "CANCELLATIONS_ENDPOINT",
+    "ParseError",
     "ProxyCall",
     "UpstreamJobError",
-    "ParseError",
+    "run",
 ]

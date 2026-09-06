@@ -27,6 +27,7 @@ from sqlalchemy import select
 
 from tts_erp_v2.db.models import (
     ChannelAccount,
+    ChannelProduct,
     Credentials,
     RawRecord,
     SalesOrder,
@@ -378,6 +379,88 @@ def test_orders_line_without_quantity_defaults_to_one(db_session) -> None:
     assert by_id["L_NOQTY"].quantity == 1
     # Explicit upstream quantity is honoured.
     assert by_id["L_QTY3"].quantity == 3
+
+
+def test_orders_line_links_spu_when_catalog_known(db_session) -> None:
+    """写入时按 external_product_id_snapshot 关联 products_spu(同店)。
+
+    Regression 2026-09-06: orders job 曾永远留 spu_pk NULL("later
+    join"注释),导致 8-31 后新单整单从 SPU 级报表消失。目录已含该
+    产品时,行应在写库时就带上 spu_pk。
+    """
+    account = _make_channel_account(db_session)
+    prod = ChannelProduct(
+        shop_pk=account.id, spu_id="P1", title="TEST 目录商品"
+    )
+    db_session.add(prod)
+    db_session.flush()
+
+    proxy = FakeProxy(
+        pages=[
+            {
+                "code": 0,
+                "message": "ok",
+                "data": {
+                    "orders": [
+                        _order_payload(
+                            order_id="5800000000000088",
+                            update_time=1_700_000_888,
+                            status="UNSHIPPED",
+                            lines=[
+                                {
+                                    "line_id": "L_SPU1",
+                                    "product_id": "P1",
+                                    "sku_id": "S1",
+                                    "quantity": 1,
+                                    "sale_price": {
+                                        "amount": "12.50",
+                                        "currency": "USD",
+                                    },
+                                },
+                                {
+                                    "line_id": "L_SPU_MISSING",
+                                    "product_id": "P_NOT_IN_CATALOG",
+                                    "sku_id": "S9",
+                                    "quantity": 1,
+                                    "sale_price": {
+                                        "amount": "8.00",
+                                        "currency": "USD",
+                                    },
+                                },
+                            ],
+                        ),
+                    ],
+                    "next_page_token": "",
+                },
+            },
+        ]
+    )
+
+    sync_row, result = run_with_sync_job(
+        db_session,
+        job_name="tiktok.orders",
+        credential_id=account.credential_id,
+        inner=run_orders,
+        inner_kwargs={
+            "proxy_call": proxy,
+            "shop_id": account.shop_id,
+        },
+    )
+    assert sync_row.status == "succeeded"
+    assert result.rows_failed == 0
+
+    lines = (
+        db_session.execute(
+            select(SalesOrderLine).where(
+                SalesOrderLine.external_line_id.in_(["L_SPU1", "L_SPU_MISSING"])
+            )
+        )
+        .scalars()
+        .all()
+    )
+    by_id = {ln.external_line_id: ln for ln in lines}
+    assert by_id["L_SPU1"].spu_pk == prod.id  # 目录命中 → 直接关联
+    assert by_id["L_SPU_MISSING"].spu_pk is None  # 目录缺失 → 留 NULL 待 products 回填
 
 
 def test_orders_second_run_advances_watermark_only(db_session) -> None:

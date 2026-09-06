@@ -19,6 +19,8 @@ from tts_erp_v2.db.models import (
     ChannelProduct,
     ChannelProductVariant,
     Credentials,
+    SalesOrder,
+    SalesOrderLine,
     SyncIssue,
 )
 from tts_erp_v2.jobs.tiktok import products as products_job
@@ -128,9 +130,7 @@ def test_products_first_run_writes_products_and_variants(db_session) -> None:
     # the real TikTok shop; the unscoped select would return all of them.
     products = (
         db_session.execute(
-            select(ChannelProduct).where(
-                ChannelProduct.shop_pk == account.id
-            )
+            select(ChannelProduct).where(ChannelProduct.shop_pk == account.id)
         )
         .scalars()
         .all()
@@ -340,9 +340,7 @@ def test_products_run_calls_image_fetcher_for_each_spu(db_session) -> None:
             }
         return {
             "id": "P2",
-            "main_images": [
-                {"urls": ["https://example.com/p2.jpg"], "thumb_urls": []}
-            ],
+            "main_images": [{"urls": ["https://example.com/p2.jpg"], "thumb_urls": []}],
             "skus": [],
         }
 
@@ -459,3 +457,69 @@ def test_products_run_logs_sync_issue_when_get_product_fails(
     )
     assert len(issues) == 1
     assert issues[0].external_id == "P_FAIL"
+
+
+def test_products_sync_backfills_pre_existing_null_spu_lines(db_session) -> None:
+    """products 同步后回填:先落地的订单行(spu_pk NULL)在目录补齐后关联上。
+
+    Regression 2026-09-06:8-31 后 orders 先于 products 落地的行永远
+    NULL,ROI/单量报表丢单。products job 每次跑完应把该店 NULL 且
+    snapshot 命中目录的行补上 spu_pk(幂等)。
+    """
+    account = _make_account(db_session)
+    # 先造一条"订单先到、产品目录未同步"的历史行
+    order = SalesOrder(
+        shop_pk=account.id,
+        order_id="TEST_ORD_PRE",
+        status="DELIVERED",
+        currency="VND",
+    )
+    db_session.add(order)
+    db_session.flush()
+    db_session.add(
+        SalesOrderLine(
+            order_pk=order.id,
+            external_line_id="TEST_LINE_PRE",
+            external_product_id_snapshot="P_BACKFILL",
+            quantity=1,
+            unit_price=100,
+            currency="VND",
+        )
+    )
+    db_session.flush()
+
+    proxy = FakeProxy(
+        pages=[
+            {
+                "code": 0,
+                "message": "ok",
+                "data": {
+                    "products": [
+                        _product_payload("P_BACKFILL", update_time=1_700_000_500),
+                    ],
+                    "next_page_token": "",
+                },
+            }
+        ]
+    )
+
+    _, result = run_with_sync_job(
+        db_session,
+        job_name="tiktok.products",
+        credential_id=account.credential_id,
+        inner=products_job.run,
+        inner_kwargs={
+            "proxy_call": proxy,
+            "shop_id": account.shop_id,
+        },
+    )
+    assert result.rows_inserted == 1
+    assert result.rows_failed == 0
+
+    prod = db_session.execute(
+        select(ChannelProduct).where(ChannelProduct.spu_id == "P_BACKFILL")
+    ).scalar_one()
+    line = db_session.execute(
+        select(SalesOrderLine).where(SalesOrderLine.external_line_id == "TEST_LINE_PRE")
+    ).scalar_one()
+    assert line.spu_pk == prod.id, "products 同步后历史 NULL 行应被回填"
