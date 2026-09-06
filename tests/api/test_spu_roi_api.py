@@ -962,14 +962,6 @@ def test_spu_roi_window_params_clip_sales_and_refunds(
         win_shop_pk = sess.execute(
             text("SELECT id FROM commerce.shops WHERE shop_id = 'TEST_SELLER_WIN'")
         ).scalar_one()
-        rows = sess.execute(text(
-            "SELECT (so.paid_at AT TIME ZONE 'UTC')::date d FROM commerce.sales_orders so "
-            "WHERE so.shop_pk=:s AND so.status='DELIVERED' ORDER BY d"
-        ), {"s": win_shop_pk}).all()
-        crow = sess.execute(text(
-            "SELECT (c.updated_at_source AT TIME ZONE 'UTC')::date d FROM after_sales.cases c "
-            "WHERE c.shop_pk=:s ORDER BY d"
-        ), {"s": win_shop_pk}).all()
 
     h = {"Authorization": f"Bearer {readonly_key}"}
     # 默认(无窗口参数):全历史累计 → 两单两退款都在(带 shop_pk:coverage 只算本店,
@@ -1078,7 +1070,11 @@ def test_spu_roi_date_window_does_not_clip_ad(api_client, readonly_key, db_engin
     r_crop = api_client.get(
         "/v2/analytics/spu-roi",
         headers=h,
-        params={"q": "TEST_ROI_SPU_WAD", "w_start": "2026-09-01", "w_end": "2026-09-30"},
+        params={
+            "q": "TEST_ROI_SPU_WAD",
+            "w_start": "2026-09-01",
+            "w_end": "2026-09-30",
+        },
     )
     item_crop = r_crop.json()["items"][0]
     assert item_crop["ad_count"] == 1, item_crop  # 广告不被日期裁剪
