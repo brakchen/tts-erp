@@ -31,10 +31,39 @@ that retired ``/static/css/console.css``), and no webfonts (no CDN).
 
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
+
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
 router = APIRouter(prefix="/v2/pages", tags=["pages"])
+
+
+# Cache-busting (2026-09-06): the operator console has no Cache-Control on
+# /static, so browsers heuristically cache console.js / spu-roi.js and keep
+# serving a stale build until a manual hard refresh. Each page appends
+# ?v=<hash-of-content> to its script src: the version only changes when the
+# file's bytes change, so a deploy ships a new URL and the browser fetches
+# the fresh JS without any manual refresh.
+_JS_DIR = Path(__file__).resolve().parents[2] / "static" / "js"
+
+
+def _js_version(filename: str) -> str:
+    try:
+        digest = hashlib.sha256((_JS_DIR / filename).read_bytes()).hexdigest()
+    except OSError:
+        return "0"
+    return digest[:8]
+
+
+def _page(html: str) -> HTMLResponse:
+    """Render a page template, stamping the JS cache-bust versions."""
+    return HTMLResponse(
+        html.replace("__JSV_CONSOLE__", _js_version("console.js")).replace(
+            "__JSV_SPU_ROI__", _js_version("spu-roi.js")
+        )
+    )
 
 
 @router.get("/spu-roi", response_class=HTMLResponse)
@@ -45,7 +74,7 @@ def spu_roi_page() -> HTMLResponse:
     全部消费 GET /v2/analytics/spu-roi(只读,§5.1-1 页面不计算业务数字)。
     样式沿用操作台家族 token(warm-paper),行为在 static/js/spu-roi.js。
     """
-    return HTMLResponse(_SPU_ROI_PAGE_HTML)
+    return _page(_SPU_ROI_PAGE_HTML)
 
 
 @router.get("/manual-costs", response_class=HTMLResponse)
@@ -66,7 +95,7 @@ def manual_costs_page() -> HTMLResponse:
     into local MinIO (``image_url`` from the backend, fallback icon when the
     mirror hasn't finished); cost currency is fixed to CNY.
     """
-    return HTMLResponse(_PAGE_HTML)
+    return _page(_PAGE_HTML)
 
 
 # Marker for the legacy token-paste UI — kept as a comment so future
@@ -702,7 +731,7 @@ _PAGE_HTML = """<!doctype html>
     </section>
   </main>
 
-  <script src="../../static/js/console.js" defer></script>
+  <script src="../../static/js/console.js?v=__JSV_CONSOLE__" defer></script>
 </body>
 </html>
 """
@@ -1089,7 +1118,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
   </main>
 
   <div id="ops-tip" role="tooltip" hidden></div>
-  <script src="../../static/js/spu-roi.js" defer></script>
+  <script src="../../static/js/spu-roi.js?v=__JSV_SPU_ROI__" defer></script>
 </body>
 </html>
 """

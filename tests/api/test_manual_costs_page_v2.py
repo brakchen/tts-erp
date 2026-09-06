@@ -530,3 +530,29 @@ def test_page_has_pager_controls(api_client, readonly_key):
     assert '"#filter-limit"' in src or "filter-limit" in src, (
         "每页 dropdown must be wired"
     )
+
+
+def test_page_script_has_cache_bust_version(api_client, readonly_key):
+    """console.js must be referenced with ?v=<content hash>.
+
+    2026-09-06: /static has no Cache-Control and browsers heuristically
+    cache console.js, so users kept seeing the previous build (e.g. the
+    pre-pagination 50-row catalogue). Stamping a content-hash query makes
+    every deploy invalidate the stale copy automatically.
+    """
+    r = api_client.get(
+        "/v2/pages/manual-costs",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.text
+    import re
+
+    m = re.search(r'src="([^"]*console\.js[^"]*)"', body)
+    assert m, "console.js script tag missing"
+    src = m.group(1)
+    assert "?v=" in src, f"console.js src must carry ?v= cache-bust, got: {src}"
+    version = src.split("?v=")[1]
+    assert re.fullmatch(r"[0-9a-f]{8}", version), (
+        f"version must be an 8-char content hash, got: {version!r}"
+    )
