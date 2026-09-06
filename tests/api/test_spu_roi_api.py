@@ -900,6 +900,62 @@ def test_spu_roi_totals_cross_spu_dedup_and_gmv_split(
     assert by_id["TEST_ROI_SPU_Y"]["order_count"] == 1
 
 
+def _seed_refund_on_shared_order_y_line(sess) -> tuple[int, int]:
+    """跨 SPU 订单退款归属(P2-1 回归):O1 含 X/Y 两行,仅 Y 行有退款 case。
+
+    行级退款订单数必须按【行】归属:Y 的 refund_order_count=1/refund_rate_qty=1.00,
+    X 保持 0.00(不能因同订单另一 SPU 行退款而虚增)。
+    """
+    seller = "TEST_SELLER_RY"
+    shop_pk = _seed_shop(sess, seller)
+    x = _seed_spu(sess, shop_pk, "TEST_ROI_SPU_RY_X")
+    y = _seed_spu(sess, shop_pk, "TEST_ROI_SPU_RY_Y")
+    o1 = _seed_order_line(
+        sess, shop_pk=shop_pk, spu_pk=x, order_id="TEST_ORDER_RY1",
+        status="DELIVERED", line_ext="TEST_LINE_RY1",
+        qty="1", unit_price="263300", paid=True,  # $10
+    )
+    _seed_extra_order_line(
+        sess, order_id="TEST_ORDER_RY1", spu_pk=y, line_ext="TEST_LINE_RY2",
+        qty="1", unit_price="263300",  # $10
+    )
+    y_line = sess.execute(
+        text(
+            "SELECT id FROM commerce.sales_order_lines "
+            "WHERE order_pk = (SELECT id FROM commerce.sales_orders "
+            "WHERE order_id = 'TEST_ORDER_RY1' LIMIT 1) "
+            "AND external_line_id = 'TEST_LINE_RY2'"
+        )
+    ).scalar_one()
+    _seed_case(
+        sess, shop_pk=shop_pk, order_pk=o1, ext_case="TEST_CASE_RY1",
+        case_type="RETURN_AND_REFUND", status="RETURN_OR_REFUND_REQUEST_COMPLETE",
+        lines=[(y_line, "TEST_CLINE_RY1", "1", "263300")],
+    )
+    return x, y
+
+
+def test_spu_roi_refund_order_count_attributed_to_own_line(
+    api_client, readonly_key, db_engine
+):
+    """P2-1:退款订单数按行归属——共享订单仅 Y 行退款时,X 的退货率不虚增。"""
+    with Session(db_engine) as sess:
+        _seed(sess, _seed_refund_on_shared_order_y_line)
+
+    h = {"Authorization": f"Bearer {readonly_key}"}
+    r = api_client.get(
+        "/v2/analytics/spu-roi", headers=h, params={"q": "TEST_ROI_SPU_RY"}
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    by_id = {i["spu_id"]: i for i in body["items"]}
+    assert set(by_id) == {"TEST_ROI_SPU_RY_X", "TEST_ROI_SPU_RY_Y"}
+    assert by_id["TEST_ROI_SPU_RY_X"]["refund_rate_qty"] == "0.00"
+    assert by_id["TEST_ROI_SPU_RY_X"]["refund_net_amount"] == "0.0000"
+    assert by_id["TEST_ROI_SPU_RY_Y"]["refund_rate_qty"] == "1.00"  # 1 退货单 / 1 有效单
+    assert by_id["TEST_ROI_SPU_RY_Y"]["refund_net_amount"] == "10.0000"
+
+
 def _seed_cod_and_unpaid_cancelled(sess) -> int:
     """全链状态口径回归场景(2026-09-06):COD 在途单 + 未收款取消单。
 

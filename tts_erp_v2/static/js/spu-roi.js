@@ -303,7 +303,7 @@
   function renderError(msg) {
     html(
       $("#rows"),
-      `<tr><td colspan="22" class="op-error">${esc(msg)} · <a href="#" id="retry-link">重试</a></td></tr>`,
+      `<tr><td colspan="25" class="op-error">${esc(msg)} · <a href="#" id="retry-link">重试</a></td></tr>`,
     );
     var link = $("#retry-link");
     if (link) {
@@ -317,7 +317,7 @@
   function renderEmpty() {
     html(
       $("#rows"),
-      '<tr><td colspan="22" class="op-empty">没有匹配该 spu_id 的 SPU（试试完整 ID）</td></tr>',
+      '<tr><td colspan="25" class="op-empty">没有匹配该 spu_id 的 SPU（试试完整 ID）</td></tr>',
     );
   }
 
@@ -505,7 +505,7 @@
     state.loading = true;
     html(
       $("#rows"),
-      '<tr><td colspan="22" class="op-loading">加载中…</td></tr>',
+      '<tr><td colspan="25" class="op-loading">加载中…</td></tr>',
     );
     var feeParam = null;
     if (state.feeRate !== null && state.feeRate !== "") {

@@ -304,7 +304,7 @@ Query parameters:
 | name | type | default | notes |
 | --- | --- | --- | --- |
 | `q` | string | — | `spu_id` 子串搜索(ILIKE) |
-| `sort` | enum | `roi_real` | `roi_real` \| `spend` \| `refund_rate` \| `net_profit` \| `sales` \| `ad_count` \| `gmv_ad` \| `order_count` \| `units_sold` \| `refund_net_amount` \| `return_loss` \| `roi_breakeven`(与页面可排序列一致;同值次级键 spend DESC 保证可复现) |
+| `sort` | enum | `roi_real` | `roi_real` \| `spend` \| `refund_rate` \| `refund_rate_qty` \| `cancel_rate` \| `net_profit` \| `sales` \| `gmv_sales` \| `ad_count` \| `gmv_ad` \| `order_count` \| `cancelled_order_count` \| `units_sold` \| `refund_net_amount` \| `return_loss` \| `roi_breakeven`(与页面可排序列一致;同值次级键 spend DESC 保证可复现) |
 | `order` | enum | `asc` | `asc` \| `desc`;默认实际 ROI 升序(最亏在前) |
 | `limit` | int | 100 | 1..500(分页 v2 约定) |
 | `offset` | int | 0 | ≥ 0 |

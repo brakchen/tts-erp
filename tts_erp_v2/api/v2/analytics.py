@@ -962,6 +962,7 @@ _SQL_ROI_ROW_STATUS = text(
                  AND EXISTS (SELECT 1 FROM after_sales.cases c2
                              JOIN after_sales.case_lines cl2 ON cl2.case_id = c2.id
                              WHERE c2.order_pk = so.id
+                               AND cl2.sales_order_line_id = sl.id
                                AND c2.status IN (:st0, :st1)
                                AND c2.case_type IN ('REFUND_ONLY', 'RETURN_AND_REFUND'))) AS refund_order_count
     FROM commerce.sales_order_lines sl
