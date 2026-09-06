@@ -753,7 +753,10 @@ CREATE TABLE IF NOT EXISTS procurement.procurement_products (
     raw_record_id bigint,
     source_updated_at timestamp with time zone,
     synced_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    source_unit_cost numeric(20,4),
+    source_min_unit_cost numeric(20,4),
+    source_max_unit_cost numeric(20,4)
 );
 
 
@@ -2421,5 +2424,5 @@ ALTER TABLE ONLY reporting.shipment_tracking_summary
 
 -- PostgreSQL database dump complete
 
-\unrestrict eGDe9NaxPGHQ5JUOrisXJt2Fsbx7uunhafY8d8Oa8ft8HbUvRSYpR29CnYijW2u
+\unrestrict wHJicWzgAW1pDfRG72mXpaeYqqYFO5n10L2QzRNcFnrDHxUYdHg8s1YzQP90TdA
 

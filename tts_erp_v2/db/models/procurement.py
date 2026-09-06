@@ -96,6 +96,13 @@ class ProcurementProduct(Base):
     source_platform: Mapped[str | None] = mapped_column(Text)
     source_item_id: Mapped[str | None] = mapped_column(Text)
     source_item_url: Mapped[str | None] = mapped_column(Text)
+    # 货源价（采集层挂牌口径）：由 miaoshou.common_collect_box job 从妙手公共采集箱
+    # 列表写入（`price` / `minSkuPrice` / `maxSkuPrice`）。这是 1688 货源标价，
+    # 不是采购单成交成本——成本口径见 purchase_order_lines.unit_cost /
+    # reporting.product_cost_snapshots（SOURCE_PRICE 只作兜底估算，见 tech-doc）。
+    source_unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    source_min_unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    source_max_unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
     status: Mapped[str | None] = mapped_column(Text)
     raw_record_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("integration.raw_records.id", ondelete="SET NULL")
