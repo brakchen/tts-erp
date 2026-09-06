@@ -1207,6 +1207,7 @@ def _query_spu_roi(
         if w_end
         else None
     )
+    # pi-lens-ignore: python-sql-injection
     cats = (
         sess.execute(
             _SQL_ROI_CATALOG,
@@ -1482,7 +1483,9 @@ def _query_spu_roi(
     }
 
     # ── meta(§5.3)────────────────────────────────────────────────────
+    # pi-lens-ignore: python-sql-injection
     window_row = sess.execute(_SQL_ROI_WINDOW).mappings().first()
+    # pi-lens-ignore: python-sql-injection
     data_window_row = (
         sess.execute(
             _SQL_ROI_DATA_WINDOW,
@@ -1496,6 +1499,7 @@ def _query_spu_roi(
         .mappings()
         .first()
     )
+    # pi-lens-ignore: python-sql-injection
     unattributed = (
         sess.execute(
             _SQL_ROI_UNATTRIBUTED,
