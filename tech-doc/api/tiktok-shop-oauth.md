@@ -92,10 +92,11 @@ GET /v2/oauth/tiktok/authorize ────────────────�
 ## Partner Center 一次性配置（人类操作，agent 不代办）
 
 1. App **App & Service** 页抄 `service_id` → 写 `.env TIKTOK_SERVICE_ID`。
-2. **Redirect URL** 填公网可达的 callback（NAT 已 strip 9877、浏览器流量在
-   nginx `/tts` 前缀下）：
-   `http://daqiang.nat100.top/v2/oauth/tiktok/callback`（前缀按
-   `TTS_ERP_EXTERNAL_PREFIX` 实际值拼；middleware 会剥前缀匹配豁免）。
+2. **Redirect URL** 填公网可达的 callback —— **必须带外部前缀 `/tts`**（nginx
+   只把 `/tts/*` 转给 :9877 API，无前缀的 `daqiang.nat100.top/v2/...` 会落在
+   ProfitLens 前端 404 页）：
+   `http://daqiang.nat100.top/tts/v2/oauth/tiktok/callback`（前缀取
+   `TTS_ERP_EXTERNAL_PREFIX` 实际值，当前 `/tts`；middleware 会剥前缀匹配豁免）。
 3. 确认 scope（`seller.*` 读类）已勾选；勾太多影响审核与授权率。
 4. 测试用 Seller Center **test account / Development Shops**，不要在开发期用
    线上 seller 真号授权。

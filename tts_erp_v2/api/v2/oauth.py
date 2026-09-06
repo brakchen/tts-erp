@@ -15,8 +15,10 @@ Routes:
   pass ``?format=json`` for machine-readable output.
 
 The Redirect URL registered in Partner Center must point at the public
-form of ``/callback`` (NAT host + external prefix, no port — e.g.
-``http://daqiang.nat100.top/v2/oauth/tiktok/callback``).
+form of ``/callback`` with the external prefix, no port — e.g.
+``http://daqiang.nat100.top/tts/v2/oauth/tiktok/callback`` (nginx only
+proxies ``/tts/*`` to :9877; the prefix comes from
+``TTS_ERP_EXTERNAL_PREFIX``, currently ``/tts``).
 
 Contract + setup: ``tech-doc/api/tiktok-shop-oauth.md``. Orchestration
 logic lives in :mod:`tts_erp_v2.proxy.tiktok_oauth` (kept router-free
