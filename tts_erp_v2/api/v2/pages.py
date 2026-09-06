@@ -719,31 +719,40 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     }
     .op-header-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
     .op-eyebrow {
-      font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em;
+      font-family: var(--sans); font-size: 12px; letter-spacing: 0.14em;
       text-transform: uppercase; color: var(--muted);
     }
-    .op-title { font-family: var(--serif); font-weight: 600; font-size: 22px; margin: 0; letter-spacing: -0.01em; }
-    .op-identity { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+    /* 页标题 = 唯一 serif 例外(大标题);正文统一 --sans */
+    .op-title { font-family: var(--serif); font-weight: 700; font-size: 26px; margin: 0; letter-spacing: -0.01em; }
+    .op-identity { font-family: var(--sans); font-size: 12px; color: var(--muted); }
+    .op-identity code { font-family: var(--mono); color: var(--ink); }
 
     /* ---------- 结余带(家族 signature,§3.1/§7) ---------- */
+    /* 结余带(汇总):数字加大、整带水平居中,每格标签/数字各自居中 */
     .op-counter {
-      display: flex; flex-wrap: wrap; align-items: baseline; gap: 14px 26px;
-      padding: 20px 28px; border-bottom: 1px solid var(--rule);
+      position: relative;
+      display: flex; flex-wrap: wrap; justify-content: center; align-items: center;
+      gap: 12px 40px;
+      padding: 24px 28px 22px; border-bottom: 1px solid var(--rule);
       background: var(--paper);
-      font-family: var(--mono); font-variant-numeric: tabular-nums;
+      font-family: var(--sans); font-variant-numeric: tabular-nums;
     }
-    .op-counter-item { display: inline-flex; flex-direction: column; gap: 2px; }
+    .op-counter-item {
+      display: inline-flex; flex-direction: column; align-items: center;
+      gap: 6px; text-align: center; min-width: 88px;
+    }
     .op-counter-label {
-      font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em;
-      text-transform: uppercase; color: var(--muted);
+      font-family: var(--sans); font-size: 12px; font-weight: 500;
+      letter-spacing: 0.08em; color: var(--muted); white-space: nowrap;
     }
-    .op-counter-num { font-size: 20px; font-weight: 700; color: var(--ink); white-space: nowrap; }
+    .op-counter-num { font-size: 32px; font-weight: 700; line-height: 1.1; color: var(--ink); white-space: nowrap; }
     .op-counter-num.is-err { color: var(--danger); }
     .op-counter-num.is-ok { color: var(--ok); }
     .op-counter-stamp {
-      margin-left: auto; align-self: flex-end; font-family: var(--mono);
-      font-size: 10px; letter-spacing: 0.3em; color: var(--rule);
-      text-transform: uppercase; user-select: none;
+      position: absolute; right: 28px; top: 50%; transform: translateY(-50%);
+      font-family: var(--sans); font-size: 11px; letter-spacing: 0.28em;
+      color: var(--rule); text-transform: uppercase;
+      user-select: none; pointer-events: none;
     }
 
     /* ---------- 列开关 ⚙(§7.5) ---------- */
@@ -762,10 +771,10 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
 
     /* ---------- 工具栏 ---------- */
     .op-toolbar {
-      display: flex; align-items: center; gap: 26px; flex-wrap: wrap;
-      padding: 14px 28px; border-bottom: 1px solid var(--rule);
-      font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em;
-      text-transform: uppercase; color: var(--muted);
+      display: flex; align-items: center; gap: 22px; flex-wrap: wrap;
+      padding: 13px 28px; border-bottom: 1px solid var(--rule);
+      font-family: var(--sans); font-size: 13px; letter-spacing: 0;
+      text-transform: none; color: var(--muted);
     }
     .op-search, .op-field { display: inline-flex; align-items: center; gap: 8px; }
     .op-input {
@@ -779,8 +788,8 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     select.op-input { border: 1px solid var(--rule); padding: 3px 6px; cursor: pointer; }
     input.op-input-date { width: 150px; text-transform: none; letter-spacing: 0; color-scheme: light; }
     .op-btn {
-      font-family: var(--mono); font-size: 11px; font-weight: 600;
-      letter-spacing: 0.1em; text-transform: uppercase; padding: 7px 14px;
+      font-family: var(--sans); font-size: 13px; font-weight: 600;
+      letter-spacing: 0; padding: 6px 14px;
       background: transparent; color: var(--ink); border: 1px solid var(--rule);
       cursor: pointer; border-radius: 0;
     }
@@ -789,15 +798,15 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     .op-th-sort { cursor: pointer; user-select: none; }
     .op-th-sort:hover { color: var(--accent); }
     .op-th-sort .arrow { color: var(--accent); }
-    .op-sortable-note { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-left: 10px; text-transform: none; }
+    .op-sortable-note { font-family: var(--sans); font-size: 12px; color: var(--muted); margin-left: 10px; }
 
     /* ---------- 主表 ---------- */
     .op-main { max-width: 1680px; margin: 0 auto; }
     .op-table-wrap { padding: 0 28px 30px; overflow-x: auto; }
     table.op-table { width: 100%; border-collapse: collapse; min-width: 1500px; }
     .op-th {
-      text-align: right; font-family: var(--mono); font-size: 10px;
-      letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted);
+      text-align: right; font-family: var(--sans); font-size: 12px;
+      letter-spacing: 0.04em; color: var(--muted);
       font-weight: 600; padding: 10px 8px; border-bottom: 1px solid var(--rule);
       white-space: nowrap; background: var(--paper);
     }
@@ -806,6 +815,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     tbody.op-rows td {
       padding: 10px 8px; border-bottom: 1px solid var(--rule-soft);
       text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums;
+      font-family: var(--sans); font-size: 13px;
     }
     tbody.op-rows td.td-left { text-align: left; }
     tbody.op-rows tr:hover { background: var(--paper-deep); }
@@ -825,16 +835,17 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     .warn-rr { color: var(--warn); cursor: help; font-size: 12px; }
     /* §5.1-5:无投放文案 */
     .no-ad { color: var(--muted); letter-spacing: 0.04em; }
-    .td-spu { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+    /* 原始 ID/状态码保留 mono 作为"代码"标注,其余全 sans */
+    .td-spu { font-family: var(--mono); font-size: 12px; color: var(--muted); }
     .td-title { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .td-null { color: var(--rule); }
     .warn-default { color: var(--warn); cursor: help; font-size: 12px; }
     .spu-img { width: 34px; height: 34px; object-fit: cover; border: 1px solid var(--rule); vertical-align: middle; margin-right: 8px; }
-    .spu-status { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-left: 8px; }
+    .spu-status { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-left: 8px; }
     .spu-status.is-down { color: var(--warn); }
 
     /* ---------- 分页 ---------- */
-    .op-pager { display: flex; align-items: center; gap: 18px; padding: 4px 28px 44px; font-family: var(--mono); font-size: 12px; }
+    .op-pager { display: flex; align-items: center; gap: 18px; padding: 4px 28px 44px; font-family: var(--sans); font-size: 13px; }
     .op-pager-page { color: var(--ink); font-variant-numeric: tabular-nums; }
     .op-pager button.op-btn { padding: 4px 12px; }
 
@@ -845,15 +856,32 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     }
     .op-warn-chip {
       display: inline-block; margin-left: 14px; padding: 2px 10px;
-      border: 1px solid var(--warn); color: var(--warn); font-size: 11px;
-      font-family: var(--mono);
+      border: 1px solid var(--warn); color: var(--warn); font-size: 12px;
+      font-family: var(--sans);
     }
     .op-loading, .op-empty, .op-error { text-align: center; padding: 60px 20px !important; color: var(--muted); }
     .op-error { color: var(--danger); }
     .op-empty { color: var(--muted); }
     @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+    /* ---------- hover 说明气泡(data-tip,JS 委托;替代原生 title) ---------- */
+    [data-tip] { cursor: help; }
+    input[data-tip], select[data-tip], textarea[data-tip] { cursor: auto; }
+    #ops-tip {
+      position: fixed; z-index: 1000; max-width: 340px;
+      background: var(--ink); color: var(--paper);
+      font-family: var(--sans); font-size: 12px; line-height: 1.5;
+      padding: 8px 11px; border-radius: 0;
+      box-shadow: 0 2px 12px rgba(27, 24, 20, 0.28);
+      pointer-events: none;
+    }
+
+    @media (max-width: 1180px) {
+      .op-counter-stamp { display: none; }
+    }
     @media (max-width: 900px) {
       .op-counter, .op-toolbar, .op-table-wrap, .op-pager, .op-footnotes { padding-left: 14px; padding-right: 14px; }
+      .op-counter { gap: 10px 22px; padding-top: 20px; padding-bottom: 18px; }
+      .op-counter-num { font-size: 24px; }
     }
   </style>
 </head>
@@ -885,17 +913,17 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
         <span>搜索 spu_id</span>
         <input id="filter-q" type="search" class="op-input op-input-search" placeholder="例如 1736527242804888823">
       </label>
-      <label class="op-field" title="店铺筛选：仅看该店铺 SPU（默认全部店铺，spec §7.1）">
+      <label class="op-field" data-tip="店铺筛选：仅看该店铺 SPU（默认全部店铺）">
         <span>店铺</span>
         <select id="filter-shop" class="op-input" aria-label="筛选店铺（全部店铺 = 不限）">
           <option value="">全部店铺</option>
         </select>
       </label>
-      <label class="op-field" title="销售/退款日期范围（空 = 全历史；广告窗口始终全量，spec §4.5）">
+      <label class="op-field" data-tip="销售/退款日期范围（空 = 全历史；广告窗口始终全量）">
         <span>起始日</span>
         <input id="filter-w-start" type="date" class="op-input op-input-date" aria-label="销售/退款起始日期（空 = 不限）">
       </label>
-      <label class="op-field" title="销售/退款日期范围（空 = 全历史；含当日，spec §4.5）">
+      <label class="op-field" data-tip="销售/退款日期范围（空 = 全历史；含当日）">
         <span>截止日</span>
         <input id="filter-w-end" type="date" class="op-input op-input-date" aria-label="销售/退款截止日期（空 = 不限）">
       </label>
@@ -907,7 +935,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
           <option value="200">200</option>
         </select>
       </label>
-      <label class="op-field" title="平台佣金费率：默认参考基线 0.1156（可覆写）">
+      <label class="op-field" data-tip="平台佣金费率：默认参考基线 0.1156（可覆写）">
         <span>费率 %</span>
         <input id="filter-fee" type="text" class="op-input op-input-search" style="width:70px" placeholder="11.56" inputmode="decimal">
       </label>
@@ -915,7 +943,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
         <span>含无活动</span>
         <input id="filter-include-all" type="checkbox" style="width:auto">
       </label>
-      <span class="op-colswitch" id="colswitch" title="列开关：显示/隐藏信息列（§7.5 默认折叠）">
+      <span class="op-colswitch" id="colswitch" data-tip="列开关：显示/隐藏信息列（默认折叠）">
         <span class="op-cols-title">⚙ 列</span>
         <label class="op-cols-item"><input type="checkbox" id="col-toggle-refundsplit" class="col-toggle" data-colgroup="cg-refundsplit">仅退/退货拆分</label>
         <label class="op-cols-item"><input type="checkbox" id="col-toggle-cancel" class="col-toggle" data-colgroup="cg-cancel">已付被取消</label>
@@ -971,6 +999,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     </section>
   </main>
 
+  <div id="ops-tip" role="tooltip" hidden></div>
   <script src="../../static/js/spu-roi.js" defer></script>
 </body>
 </html>

@@ -215,9 +215,9 @@
       ? `<img class="spu-img" alt="" src="${esc(it.main_image_url)}">`
       : "";
     var warn =
-      '<span class="warn-default" title="无人工成本记录，按默认 30元/件计算，可去 manual-costs 补录">⚠</span> ';
+      '<span class="warn-default" data-tip="无人工成本记录，按默认 30元/件计算，可去 manual-costs 补录">⚠</span> ';
     var warnRr = rrHigh
-      ? '<span class="warn-rr" title="退款率超过 30% 警戒线">⚠</span> '
+      ? '<span class="warn-rr" data-tip="退款率超过 30% 警戒线">⚠</span> '
       : "";
     var status =
       it.status === "ACTIVATE" || !it.status
@@ -231,26 +231,26 @@
     if (!hasRoi) {
       roiCell = "—"; // 除数为 0 → null → —
     } else if (hardLoss) {
-      roiCell = `<span class="roi-hard" title="实际 ROI < ${ROI_HARD_LOSS.toFixed(1)}：连广告费都带不回">${fmtRatio(it.roi_real)}</span>`;
+      roiCell = `<span class="roi-hard" data-tip="实际 ROI &lt; ${ROI_HARD_LOSS.toFixed(1)}：连广告费都带不回">${fmtRatio(it.roi_real)}</span>`;
     } else if (losing) {
-      roiCell = `<span class="roi-red" title="该 SPU 亏损">实际 ${fmtRatio(it.roi_real)} &lt; 保本 ${fmtRatio(it.roi_breakeven)}</span>`;
+      roiCell = `<span class="roi-red" data-tip="该 SPU 亏损">实际 ${fmtRatio(it.roi_real)} &lt; 保本 ${fmtRatio(it.roi_breakeven)}</span>`;
     } else if (roiReal < PASS_LINE) {
-      roiCell = `<span class="roi-subpar" title="≥ 保本但低于心理及格线 ${PASS_LINE.toFixed(1)}">${fmtRatio(it.roi_real)}</span>`;
+      roiCell = `<span class="roi-subpar" data-tip="≥ 保本但低于心理及格线 ${PASS_LINE.toFixed(1)}">${fmtRatio(it.roi_real)}</span>`;
     } else {
       roiCell = fmtRatio(it.roi_real);
     }
     var profitClass = npNeg ? ' class="np-red"' : "";
     var adCell =
       it.ad_count === 0 || it.ad_count == null
-        ? '<span class="no-ad" title="该 SPU 无广告投放">无投放</span>'
+        ? '<span class="no-ad" data-tip="该 SPU 无广告投放">无投放</span>'
         : fmtInt(it.ad_count);
     var rrCell = rrHigh
-      ? `<td class="rr-high" title="退款率超过 30% 警戒线">${fmtPct(it.refund_rate)}</td>`
+      ? `<td class="rr-high" data-tip="退款率超过 30% 警戒线">${fmtPct(it.refund_rate)}</td>`
       : `<td>${fmtPct(it.refund_rate)}</td>`;
     return (
       `<tr class="${isBad ? "row-bad" : ""}">` +
       `<td class="td-left">${img}<div class="td-spu">${esc(it.spu_id)}</div>` +
-      `<div class="td-title" title="${esc(it.title || "")}">${warnDefault ? warn : ""}${warnRr}${esc(it.title || "")}${status}</div></td>` +
+      `<div class="td-title" data-tip="${esc(it.title || "")}">${warnDefault ? warn : ""}${warnRr}${esc(it.title || "")}${status}</div></td>` +
       `<td>${adCell}</td>` +
       `<td>${fmtMoney(it.spend)}</td>` +
       `<td>${fmtMoney(it.gmv_ad)}</td>` +
@@ -264,12 +264,12 @@
       `<td class="col-hidden" data-cg="cg-refundsplit">${fmtMoney(it.refund_return_amount)}</td>` +
       `<td>${fmtMoney(it.refund_net_amount)}</td>` +
       rrCell +
-      `<td class="col-hidden" data-cg="cg-cancel" title="已付被取消订单退款(信息列,不计净额)">${fmtInt(it.refund_cancelled_qty)}</td>` +
+      `<td class="col-hidden" data-cg="cg-cancel" data-tip="已付被取消订单退款（信息列，不计净额）">${fmtInt(it.refund_cancelled_qty)}</td>` +
       `<td class="col-hidden" data-cg="cg-cancel">${fmtMoney(it.refund_cancelled_amount)}</td>` +
-      `<td class="col-hidden" data-cg="cg-cancel" title="${it.refund_cancelled_missing_lines ? "另有行金额未知(不造数)" : ""}">${fmtInt(it.refund_cancelled_missing_lines)}</td>` +
+      `<td class="col-hidden" data-cg="cg-cancel" data-tip="${it.refund_cancelled_missing_lines ? "另有行金额未知（不造数）" : ""}">${fmtInt(it.refund_cancelled_missing_lines)}</td>` +
       `<td${profitClass}>${fmtMoney(it.net_profit)}</td>` +
-      `<td title="${costTitle}">${fmtMoney(it.return_loss)}</td>` +
-      `<td class="col-hidden" data-cg="cg-fee" title="平台佣金=平台从销售额直接扣除的全部费用(抽佣/联盟/运费类)">${fmtMoney(it.platform_fee)}</td>` +
+      `<td data-tip="${costTitle}">${fmtMoney(it.return_loss)}</td>` +
+      `<td class="col-hidden" data-cg="cg-fee" data-tip="平台佣金 = 平台从销售额直接扣除的全部费用（抽佣/联盟/运费类）">${fmtMoney(it.platform_fee)}</td>` +
       `<td>${fmtRatio(it.roi_breakeven)}</td>` +
       `<td>${roiCell}</td>` +
       "</tr>"
@@ -457,6 +457,7 @@
   // ---------- load ----------
   function load() {
     if (state.loading) return;
+    hideTip(); // 重拉前收起可能悬浮的说明气泡
     state.loading = true;
     html(
       $("#rows"),
@@ -499,6 +500,66 @@
       clearTimeout(t);
       t = setTimeout(() => fn.apply(null, args), ms);
     };
+  }
+
+  // ---------- hover 说明气泡([data-tip] 委托;替代原生 title,见页面样式) ----------
+  // 页面里任何带 data-tip 的元素(⚠ 图标、标色格、格头/字段口径说明、被截断的
+  // 商品全名…)悬停即在此气泡展示文案;位置贴元素上方(顶部空间不足翻到下方),
+  // 不跟手、不挡锚点,滚动/点击/离开即收起。行重新渲染也无需重绑(事件委托)。
+  var tipEl = null;
+  var tipAnchor = null;
+  function ensureTip() {
+    if (!tipEl) {
+      tipEl = document.createElement("div");
+      tipEl.id = "ops-tip";
+      tipEl.setAttribute("role", "tooltip");
+      document.body.appendChild(tipEl);
+    }
+    return tipEl;
+  }
+  function hideTip() {
+    tipAnchor = null;
+    if (tipEl) tipEl.hidden = true;
+  }
+  function tipHit(el) {
+    if (!el || !el.closest) return null;
+    var t = el.closest("[data-tip]");
+    if (!t) return null;
+    var text = t.getAttribute("data-tip");
+    return text ? { el: t, text: text } : null;
+  }
+  function showTip(anchor, text) {
+    var tip = ensureTip();
+    tip.textContent = text; // 纯文本,防注入
+    tip.hidden = false;
+    var r = anchor.getBoundingClientRect();
+    var tw = tip.offsetWidth;
+    var th = tip.offsetHeight;
+    var x = Math.round(r.left + r.width / 2 - tw / 2);
+    x = Math.max(8, Math.min(x, window.innerWidth - tw - 8));
+    var y = Math.round(r.top - th - 8);
+    if (y < 8) y = Math.round(r.bottom + 8); // 上方放不下 → 下方
+    tip.style.left = x + "px";
+    tip.style.top = y + "px";
+    tipAnchor = anchor;
+  }
+  function wireTooltips() {
+    document.addEventListener("mouseover", (e) => {
+      var hit = tipHit(e.target);
+      if (hit) {
+        if (hit.el !== tipAnchor) showTip(hit.el, hit.text);
+      } else {
+        hideTip();
+      }
+    });
+    document.addEventListener("mouseout", (e) => {
+      if (!tipAnchor) return;
+      var rel = tipHit(e.relatedTarget);
+      if (!rel) hideTip(); // 指针离开所有 data-tip 区域
+    });
+    window.addEventListener("scroll", hideTip, true); // capture: 容器内滚动也收起,防错位
+    window.addEventListener("resize", hideTip);
+    document.addEventListener("click", hideTip);
   }
 
   // ---------- 交互绑定 ----------
@@ -596,6 +657,7 @@
 
     applyColToggles();
     bindColToggles();
+    wireTooltips(); // 悬停说明气泡(data-tip 委托,含重渲染后的新行)
     loadMe();
     loadShops(); // 店铺选项异步填充;失败不影响主表
     load();
