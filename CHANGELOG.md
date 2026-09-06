@@ -1,5 +1,9 @@
 # tts-erp CHANGELOG
 
+## 2026-09-06 (fix) — SPU 实际 ROI 看板 fee_rate 量级上限
+
+- **fee_rate 量级上限 → 422**：`GET /v2/analytics/spu-roi` 的 `fee_rate` 增加 `|fee_rate| > 1e6` 校验（用 `Decimal.copy_abs()`，避开默认算术 context 对超大指数的 Overflow），与既有非有限值/负值校验并列，杜绝 `1e9999999` 这类值穿透到 quantize 造成 500；`tests/api/test_spu_roi_api.py` 补充 `fee_rate=1e9999999 → 422` 断言。
+
 ## 2026-09-06 (fix) — SPU 实际 ROI 看板终审（3 项低级别）
 
 review 终审回修（低级别），口径仍以 `tech-doc/analytics/spu-real-roi-dashboard.md` §4/§5/§7 为准：
