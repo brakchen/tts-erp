@@ -217,8 +217,63 @@ def test_refresh_if_needed_calls_refresher_when_expired(
         external_account_id="shop_TEST_003",
         refresher=refresher,
     )
+    assert loaded is not None
     assert loaded.access_token == "new_at"
     assert refresher.calls == [("tiktok", "shop_TEST_003")]
+
+
+def test_refresh_preserves_shop_cipher_when_refresher_omits_it(
+    db_session, fernet_key: str
+) -> None:
+    """Regression: TikTok's refresh response stopped returning
+    ``shop_cipher`` (observed 2026-09-05 18:00Z — the envelope was
+    rewritten without it and every downstream 202309 call started
+    failing with ``Missing identifier … shop_cipher … required``).
+    Token rotation must carry the shop identity forward: only an
+    explicit value from the refresher may replace it. The same guard
+    keeps an omitted refresh_token from stranding us on the next
+    refresh.
+    """
+    from tts_erp_v2.proxy.token_service import (
+        load_credentials,
+        refresh_if_needed,
+        upsert_credentials,
+    )
+
+    upsert_credentials(
+        db_session,
+        provider="tiktok",
+        external_account_id="shop_TEST_004",
+        plaintext_access_token="stale_at",
+        plaintext_refresh_token="stale_rt",
+        plaintext_shop_cipher="stale_cipher",
+        expires_at=datetime.now(UTC) - timedelta(minutes=10),
+    )
+    db_session.commit()
+
+    # Refresh response WITHOUT shop_cipher / refresh_token (TikTok's
+    # current behaviour) — only a fresh access_token comes back.
+    refresher = _FakeRefresher(
+        access_token="new_at",
+        expires_at=(datetime.now(UTC) + timedelta(hours=2)).isoformat(),
+    )
+    loaded = refresh_if_needed(
+        db_session,
+        provider="tiktok",
+        external_account_id="shop_TEST_004",
+        refresher=refresher,
+    )
+    assert loaded is not None
+    assert loaded.access_token == "new_at"
+    # Old shop identity + refresh token survived the rotation.
+    assert loaded.shop_cipher == "stale_cipher"
+    assert loaded.refresh_token == "stale_rt"
+
+    # And the persistence round-trips (envelope still carries them).
+    reloaded = load_credentials(db_session, "tiktok", "shop_TEST_004")
+    assert reloaded is not None
+    assert reloaded.shop_cipher == "stale_cipher"
+    assert reloaded.refresh_token == "stale_rt"
 
 
 def test_refresh_if_needed_skips_when_fresh(db_session, fernet_key: str) -> None:
@@ -244,6 +299,7 @@ def test_refresh_if_needed_skips_when_fresh(db_session, fernet_key: str) -> None
         external_account_id="shop_TEST_004",
         refresher=refresher,
     )
+    assert loaded is not None
     assert loaded.access_token == "fresh_at"
     assert refresher.calls == []  # not called
 

@@ -26,7 +26,7 @@ tests).
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -51,7 +51,7 @@ from tts_erp_v2.jobs.tiktok.orders import (
 from tts_erp_v2.sync_worker.job_runner import JobResult
 
 JOB_NAME = "tiktok.order_detail"
-DETAIL_ENDPOINT = "/order/202309/orders/detail"
+DETAIL_ENDPOINT = "/order/202309/orders"
 
 #: Issue types that say "go re-fetch this order, we couldn't process it
 #: last time". Other types (UPSTREAM_NONZERO, AUTH_ERROR, ...) don't
@@ -134,7 +134,7 @@ def _resolve_matching_issues(
     rows touched. Called only on the success path so a failed detail
     fetch keeps the issue open for the next tick.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     rows = session.execute(
         select(SyncIssue)
         .where(SyncIssue.job_name == JOB_NAME)
@@ -162,9 +162,18 @@ def run(
 ) -> JobResult:
     """Fetch detail for each id and upsert.
 
-    The proxy_call receives ``GET`` calls with the path + query string
-    containing the id. Implementation detail: tests use a fake that
-    keys on the order_id and returns the structured detail payload.
+    TikTok 202309 has NO dedicated ``/orders/{id}`` or ``/orders/detail``
+    route — ``GET /order/202309/orders`` with the order id as the
+    ``ids`` query parameter is the detail call (confirmed against the
+    published 202309 SDK path table: ``ORDER_DETAIL = "/order/202309/orders"``
+    + ``ids=<order_number>``; the old ``/order/202309/orders/{id}`` path
+    returns ``Invalid path`` upstream, which is why this job logged 229
+    UPSTREAM_NONZERO failures before the fix). ``ids`` is a single id;
+    the order comes back under ``data.order`` (with a defensive
+    ``data.orders[0]`` fallback for envelope variants).
+
+    Implementation detail: tests use a fake that keys on the order id
+    and returns the structured detail payload.
 
     When ``order_ids`` is None the job derives its input list from
     ``integration.sync_issues`` for this shop (auto-mode). An empty
@@ -192,8 +201,9 @@ def run(
     rows_failed = 0
     for order_id in order_ids:
         rows_total += 1
-        path = f"/order/202309/orders/{order_id}"
-        resp = proxy_call("GET", path, body=None)
+        # 202309 detail = GET the orders endpoint with ids=<order_id>
+        # (query param; the proxy lifts body keys to the query string).
+        resp = proxy_call("GET", DETAIL_ENDPOINT, body={"ids": order_id})
         code = resp.get("code", -1)
         if code != 0:
             rows_failed += 1
@@ -205,7 +215,12 @@ def run(
                 details={"code": code, "message": resp.get("message")},
             )
             continue
-        raw = (resp.get("data") or {}).get("order") or {}
+        detail_data = resp.get("data") or {}
+        raw = detail_data.get("order")
+        if raw is None:
+            orders = detail_data.get("orders") or []
+            raw = orders[0] if orders else None
+        raw = raw or {}  # missing order body → parse raises below
         try:
             fields = _parse_order_payload(raw)
         except ParseError as e:
@@ -282,9 +297,9 @@ def run(
 
 
 __all__ = [
-    "run",
-    "JOB_NAME",
-    "DETAIL_ENDPOINT",
     "AUTO_BATCH_SIZE",
     "AUTO_ISSUE_TYPES",
+    "DETAIL_ENDPOINT",
+    "JOB_NAME",
+    "run",
 ]

@@ -37,7 +37,7 @@ import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -137,9 +137,9 @@ def is_expired(
     if expires_at is None:
         return False
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
     if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
+        expires_at = expires_at.replace(tzinfo=UTC)
     return expires_at <= now + skew
 
 
@@ -263,7 +263,7 @@ def upsert_credentials(
         "expires_at": expires_at,
         "granted_scopes": granted_scopes,
         "extra": extra,
-        "updated_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(UTC),
     }
     insert_stmt = pg_insert(Credentials).values(**values)
     upsert_stmt = insert_stmt.on_conflict_do_update(
@@ -356,6 +356,19 @@ def refresh_if_needed(
         # Refresher failed; return the stale row so the caller can decide.
         return CredentialsView.from_row(row)
 
+    # Carry forward the shop identity when the refresh response omits
+    # it. TikTok's token-refresh response has stopped returning
+    # ``shop_cipher`` (observed 2026-09-05 18:00Z — the envelope was
+    # rewritten without it and every downstream 202309 call started
+    # failing with ``Missing identifier … shop_cipher … required``).
+    # Rotating tokens must NOT silently drop shop identity: only an
+    # explicit value from the refresher replaces the old one. Same
+    # guard for refresh_token (a refresher that omits it must not
+    # strand us token-less on the next refresh).
+    old_view = CredentialsView.from_row(row)
+    next_refresh_token = fresh.get("refresh_token") or old_view.refresh_token
+    next_shop_cipher = fresh.get("shop_cipher") or old_view.shop_cipher
+
     expires_at_raw = fresh.get("expires_at")
     expires_at: datetime | None = None
     if isinstance(expires_at_raw, datetime):
@@ -364,7 +377,7 @@ def refresh_if_needed(
         try:
             expires_at = datetime.fromisoformat(expires_at_raw)
             if expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=timezone.utc)
+                expires_at = expires_at.replace(tzinfo=UTC)
         except ValueError:
             expires_at = None
 
@@ -373,8 +386,8 @@ def refresh_if_needed(
         provider=provider,
         external_account_id=external_account_id,
         plaintext_access_token=fresh["access_token"],
-        plaintext_refresh_token=fresh.get("refresh_token"),
-        plaintext_shop_cipher=fresh.get("shop_cipher"),
+        plaintext_refresh_token=next_refresh_token,
+        plaintext_shop_cipher=next_shop_cipher,
         account_label=row.account_label,
         expires_at=expires_at,
         granted_scopes=row.granted_scopes,

@@ -32,17 +32,26 @@ pytestmark = [pytest.mark.domain_commerce, pytest.mark.layer_integration]
 
 
 class FakeProxy:
-    """Keyed on the URL path. body is ignored for GET-style detail calls."""
+    """Dispatch on the order id carried in the GET body.
+
+    The 202309 detail call is ``GET /order/202309/orders`` with the
+    order id as the ``ids`` query parameter (the proxy lifts body keys
+    to the query string), so every detail request shares one path and
+    the fake keys its scripted pages on the order id instead.
+    """
+
+    DETAIL_PATH = order_detail.DETAIL_ENDPOINT
 
     def __init__(self, *, pages: dict[str, dict[str, Any]]):
         self.pages = pages
-        self.calls: list[tuple[str, str | None]] = []
+        self.calls: list[tuple[str, str, dict[str, Any] | None]] = []
 
     def __call__(self, method: str, path: str, body=None):
-        self.calls.append((method, path))
-        if path not in self.pages:
+        self.calls.append((method, path, body))
+        ids = (body or {}).get("ids") if body else None
+        if path != self.DETAIL_PATH or not ids or ids not in self.pages:
             return {"code": 404, "message": "not found", "data": None}
-        return self.pages[path]
+        return self.pages[ids]
 
 
 def _make_account(session) -> ChannelAccount:
@@ -79,7 +88,7 @@ def test_detail_writes_raw_records_and_normalized_rows(db_session) -> None:
     account = _make_account(db_session)
     proxy = FakeProxy(
         pages={
-            "/order/202309/orders/O1": {
+            "O1": {
                 "code": 0,
                 "message": "ok",
                 "data": {
@@ -132,7 +141,7 @@ def test_detail_writes_raw_records_and_normalized_rows(db_session) -> None:
         ).scalars().all()
     ]
     assert raw_ids == ["O1"]
-    assert proxy.calls == [("GET", "/order/202309/orders/O1")]
+    assert proxy.calls == [("GET", "/order/202309/orders", {"ids": "O1"})]
 
 
 def test_detail_writes_sync_issue_on_upstream_error(db_session) -> None:
@@ -177,12 +186,12 @@ def test_detail_parse_failure_continues(db_session) -> None:
     account = _make_account(db_session)
     proxy = FakeProxy(
         pages={
-            "/order/202309/orders/BAD": {
+            "BAD": {
                 "code": 0,
                 "message": "ok",
                 "data": {"order": {"order_id": "BAD"}},  # missing update_time
             },
-            "/order/202309/orders/OK": {
+            "OK": {
                 "code": 0,
                 "message": "ok",
                 "data": {"order": _order_payload("OK")},
@@ -237,12 +246,12 @@ def test_detail_auto_mode_pulls_from_sync_issues(db_session) -> None:
     _seed_unresolved_issue(db_session, external_id="O_AUTO_2:L1")
     proxy = FakeProxy(
         pages={
-            "/order/202309/orders/O_AUTO_1": {
+            "O_AUTO_1": {
                 "code": 0,
                 "message": "ok",
                 "data": {"order": _order_payload("O_AUTO_1")},
             },
-            "/order/202309/orders/O_AUTO_2": {
+            "O_AUTO_2": {
                 "code": 0,
                 "message": "ok",
                 "data": {"order": _order_payload("O_AUTO_2")},
@@ -271,8 +280,8 @@ def test_detail_auto_mode_pulls_from_sync_issues(db_session) -> None:
     for i in issues:
         assert i.resolved_at is not None
     assert proxy.calls == [
-        ("GET", "/order/202309/orders/O_AUTO_1"),
-        ("GET", "/order/202309/orders/O_AUTO_2"),
+        ("GET", "/order/202309/orders", {"ids": "O_AUTO_1"}),
+        ("GET", "/order/202309/orders", {"ids": "O_AUTO_2"}),
     ]
 
 
@@ -289,7 +298,7 @@ def test_detail_auto_mode_dedups_order_id_across_line_issues(db_session) -> None
     )
     proxy = FakeProxy(
         pages={
-            "/order/202309/orders/O_DUP": {
+            "O_DUP": {
                 "code": 0,
                 "message": "ok",
                 "data": {"order": _order_payload("O_DUP")},
@@ -308,7 +317,7 @@ def test_detail_auto_mode_dedups_order_id_across_line_issues(db_session) -> None
     )
     assert result.rows_total == 1
     assert result.rows_inserted == 1
-    assert proxy.calls == [("GET", "/order/202309/orders/O_DUP")]
+    assert proxy.calls == [("GET", "/order/202309/orders", {"ids": "O_DUP"})]
 
 
 def test_detail_auto_mode_caps_at_batch_size(db_session) -> None:
@@ -326,7 +335,7 @@ def test_detail_auto_mode_caps_at_batch_size(db_session) -> None:
         )
     proxy = FakeProxy(
         pages={
-            f"/order/202309/orders/O_CAP_{i:03d}": {
+            f"O_CAP_{i:03d}": {
                 "code": 0,
                 "message": "ok",
                 "data": {"order": _order_payload(f"O_CAP_{i:03d}")},
@@ -408,7 +417,7 @@ def test_detail_explicit_order_ids_still_resolves(db_session) -> None:
     _seed_unresolved_issue(db_session, external_id="O_EXPLICIT")
     proxy = FakeProxy(
         pages={
-            "/order/202309/orders/O_EXPLICIT": {
+            "O_EXPLICIT": {
                 "code": 0,
                 "message": "ok",
                 "data": {"order": _order_payload("O_EXPLICIT")},
