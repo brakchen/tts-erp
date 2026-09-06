@@ -13,8 +13,10 @@ Python 3.14 · FastAPI + uvicorn（`:9877`）· SQLAlchemy 2 + psycopg3 · Postg
 - 打上游 TikTok 的**唯一**路径 = sync-worker jobs（经 `tts_erp_v2/proxy/tts_shop`，内部处理 HMAC 签名 /
   `x-tts-access-token` / shop_cipher 位置 / 翻页 / 过期 token 续期）。不要自己拼上游请求。
 - 读数据：`curl http://127.0.0.1:9877/v2/...`（本地直连带端口）
-- 公网域名 `daqiang.nat100.top`（NAT **已 strip 9877 端口**）：给用户的 URL / TikTok 填的 redirect URL /
-  文档 curl 示例一律 `http://daqiang.nat100.top/<path>`，不带端口
+- 公网域名 `daqiang.nat100.top`（NAT **已 strip 9877 端口**）：nginx 只把 `/tts/*` 转发给 API，
+  无前缀的 `daqiang.nat100.top/v2/...` 落在 ProfitLens 前端 404。给用户的 URL / TikTok 填的 redirect URL /
+  纯公网 curl 一律 `http://daqiang.nat100.top/tts/<path>`；本地直连 `127.0.0.1:9877/v2/...` 才不带 `/tts`
+  （前缀取自 `TTS_ERP_EXTERNAL_PREFIX`，当前 `/tts`；middleware 剥前缀匹配豁免，两端一致）
 
 ## 2. Commands（命令）
 
