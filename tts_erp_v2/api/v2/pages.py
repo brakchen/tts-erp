@@ -819,6 +819,15 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     }
     .op-btn:hover { border-color: var(--accent); color: var(--accent); }
     .op-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    /* hover 问号说明(2026-09-06):data-tip 委托渲染气泡 */
+    .op-hint {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 15px; height: 15px; margin-left: 2px; border-radius: 50%;
+      border: 1px solid var(--rule); color: var(--muted);
+      font-family: var(--sans); font-size: 10px; line-height: 1;
+      cursor: help; user-select: none; flex: none;
+    }
+    .op-hint:hover { border-color: var(--accent); color: var(--accent); }
     .op-th-sort { cursor: pointer; user-select: none; }
     .op-th-sort:hover { color: var(--accent); }
     .op-th-sort .arrow { color: var(--accent); }
@@ -1001,6 +1010,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       </label>
       <label class="op-field">
         <span>含无活动</span>
+        <span class="op-hint" role="note" tabindex="0" data-tip="默认只列出当前窗口内有广告或销售/退款活动的 SPU；勾选后，处于 ACTIVE 状态但没有任意活动（无投放 / 未出单）的 SPU 也会一并列出——这类行的 ROI / 金额显示 — 或「无投放」">?</span>
         <input id="filter-include-all" type="checkbox" style="width:auto">
       </label>
       <span class="op-colswitch" id="colswitch" data-tip="列开关：显示/隐藏信息列（默认折叠）">
