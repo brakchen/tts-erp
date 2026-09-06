@@ -5,6 +5,20 @@
 > 上次 session: 2026-09-05（v1 oauth_receiver 库 DROP + public.* 19 张业务表归档）
 > 上次 session 主题: v1 oauth_receiver 库整体废弃并 DROP（提前 21 天结束 4 周观察期）+ 配套清理
 
+## TL;DR (2026-09-06 结余带 10 格重构 + 订单行→SPU 关联断裂修复)
+- **结余带 10 格重构**(merge 5cbf518):去掉 SPU 数,新增 GMV(全部订单销售额 M6+M6b)/有效单量/
+  总单量/取消单量;全损货损改名全损退款(数值=return_loss 不变);每格带 ? 口径气泡;栅格
+  xs2/sm3/md4/lg5。后端 totals 新增 4 键(_SQL_ROI_ORDER_SCOPE 跨可见 SPU 全局去重)。
+- **订单行→SPU 关联断裂修复**(merge 833d823):8-31 后 orders/order_detail 写行 spu_pk 恒 NULL
+  ("later join" 注释但无 job 执行)→ SPU 级报表整单丢失。修复=写时目录解析(orders/order_detail)+
+  products 同步后 backfill(spu_link.py)+ oneoff 存量(scripts/oneoff_backfill_order_line_spu.py,
+  已 apply 241 行)。修复后 totals: order 431→**510**、cancelled 10→**26**、total 441→**536**、
+  GMV 10118→**12126**。sync-worker 已重启。测试 +8 全绿(jobs_tiktok 全域,mirror 已知环境失败除外)。
+- 已知环境失败(非本 lane,另一 session 在修):`tests/fx/*` + `tests/api/test_fx_api.py`(fx.sync 真实
+  snapshot 干扰,见 ACTIVE fix/fx-test-isolation)、`tests/jobs_tiktok/test_spu_image_mirror_job.py`
+  (live spu.image_mirror job 在 dev DB 残留 MIRROR_DOWNLOAD_FAILED 行)。全量 0 fail 待 fx lane 落地。
+- 提醒:master WT 有其它 lane 未提交 WIP(console.js 等)——收尾前先看 ACTIVE。
+
 ## TL;DR (2026-09-06 spu-roi Bootstrap 重构 + 手机端适配)
 - spu-roi 页(`/v2/pages/spu-roi`)重构为 **Bootstrap 5.3.8 栅格/工具类布局**:结余带 row-cols
   (xs2→md4→lg7)、工具栏 flex-wrap 纵向堆叠、`<details>` 列开关、`.table-responsive` 横滚 +
