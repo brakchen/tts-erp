@@ -305,12 +305,17 @@
     var meta = payload.meta || {};
     lastTotal = payload.total || 0;
 
-    // 结余带
-    $("#sum-n").textContent = String(totals.row_count || 0);
+    // 结余带(§7.1 2026-09-06 扩展:去 SPU 数,新增 GMV/有效单量/总单量/取消单量)
     $("#sum-spend").textContent = fmtMoney(totals.spend);
     $("#sum-sales").textContent = fmtMoney(totals.sales);
+    $("#sum-gmv").textContent = fmtMoney(totals.gmv);
+    $("#sum-orders").textContent = fmtInt(totals.order_count || 0);
+    $("#sum-total-orders").textContent = fmtInt(totals.total_orders || 0);
     $("#sum-refund").textContent = fmtMoney(totals.refund_net_amount);
-    $("#sum-loss").textContent = fmtMoney(totals.return_loss); // §7.1 全损货损
+    $("#sum-loss").textContent = fmtMoney(totals.return_loss); // §7.1 全损退款(= return_loss 成本口径)
+    $("#sum-cancelled-orders").textContent = fmtInt(
+      totals.cancelled_order_count || 0,
+    );
     var profit = parseFloat(totals.net_profit);
     var profitEl = $("#sum-profit");
     profitEl.textContent = fmtMoney(totals.net_profit);

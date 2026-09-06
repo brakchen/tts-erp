@@ -449,6 +449,61 @@ def _seed_scenario_a(sess) -> int:
     return spu_pk
 
 
+def _seed_extra_order_line(
+    sess, *, order_id: str, spu_pk: int, line_ext: str, qty: str, unit_price: str
+) -> None:
+    """给已存在订单补插一行(跨 SPU 订单用:同一 order_id 多行)。"""
+    # pi-lens-ignore: python-sql-injection
+    sess.execute(
+        text(
+            "INSERT INTO commerce.sales_order_lines "
+            "(order_pk, external_line_id, spu_pk, quantity, unit_price, currency) "
+            "SELECT id, :ext, :spu, CAST(:qty AS numeric), "
+            "CAST(:price AS numeric), 'VND' FROM commerce.sales_orders "
+            "WHERE order_id = :oid"
+        ),
+        {"ext": line_ext, "spu": spu_pk, "qty": qty, "price": unit_price, "oid": order_id},
+    )
+
+
+def _seed_cross_spu_orders(sess) -> tuple[int, int]:
+    """跨 SPU 去重场景(review MINOR 补测):两个 SPU X/Y 共享同一张订单。
+
+    - TEST_ROI_SPU_X / TEST_ROI_SPU_Y(同店铺,均 ACTIVATE)
+    - 有效订单 O1(DELIVERED,已付):两行,分别挂 X(1×$10)与 Y(1×$10)
+      → 每 SPU 行 order_count=1,但全局 distinct 有效单只有 1
+    - 已付被取消订单 O2(CANCELLED,已付):两行 X/Y(各 1×$5)
+      → 全局 distinct 取消单 = 1;取消原额 10 计入 GMV
+
+    期望:行加总(∑order_count=2)≠ totals.order_count=1;GMV = 20+10。
+    """
+    seller = "TEST_SELLER_XY"
+    shop_pk = _seed_shop(sess, seller)
+    x = _seed_spu(sess, shop_pk, "TEST_ROI_SPU_X")
+    y = _seed_spu(sess, shop_pk, "TEST_ROI_SPU_Y")
+    # O1: 有效单(首行挂 X,补一行挂 Y → 同一张单跨两 SPU)
+    _seed_order_line(
+        sess, shop_pk=shop_pk, spu_pk=x, order_id="TEST_ORDER_XY1",
+        status=PAID_ORDER_STATUS, line_ext="TEST_LINE_XY1",
+        qty="1", unit_price="263300", paid=True,  # $10
+    )
+    _seed_extra_order_line(
+        sess, order_id="TEST_ORDER_XY1", spu_pk=y, line_ext="TEST_LINE_XY2",
+        qty="1", unit_price="263300",  # $10
+    )
+    # O2: 已付被取消,同样跨两 SPU(各 $5)
+    _seed_order_line(
+        sess, shop_pk=shop_pk, spu_pk=x, order_id="TEST_ORDER_XY2",
+        status="CANCELLED", line_ext="TEST_LINE_XY3",
+        qty="1", unit_price="131650", paid=True,  # $5
+    )
+    _seed_extra_order_line(
+        sess, order_id="TEST_ORDER_XY2", spu_pk=y, line_ext="TEST_LINE_XY4",
+        qty="1", unit_price="131650",  # $5
+    )
+    return x, y
+
+
 def _seed_spu_b(sess) -> int:
     """SPU B:spend=50、销售 $90(3×$30)、无退款 → roi_real=1.80。"""
     seller = "TEST_SELLER_B"
@@ -801,8 +856,50 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert body["totals"]["row_count"] == 1
     assert body["totals"]["spend"] == "10.0000"
     assert body["totals"]["sales"] == "100.0000"
+    # 2026-09-06 结余带扩展:GMV = 有效销售 + 已付被取消原始金额(2×$20);
+    # 单量跨可见 SPU 全局去重(场景 A:1 有效单 + 1 取消单)
+    assert body["totals"]["gmv"] == "140.0000"
+    assert body["totals"]["order_count"] == 1
+    assert body["totals"]["cancelled_order_count"] == 1
+    assert body["totals"]["total_orders"] == 2
     assert body["totals"]["refund_net_amount"] == "20.0000"
     assert body["totals"]["net_profit"] == "36.2790"
+
+
+def test_spu_roi_totals_cross_spu_dedup_and_gmv_split(
+    api_client, readonly_key, db_engine
+):
+    """review MINOR:一张跨 SPU 的订单(两 SPU 各一行)在 totals 里只计一次。
+
+    - 行加总 ∑order_count = 2(X/Y 各 1)≠ totals.order_count = 1(全局去重)
+    - 已付被取消同理:totals.cancelled_order_count = 1
+    - GMV 拆分:X/Y 各分摊有效 $10 + 取消原额 $5 → totals.gmv = 20+10
+    """
+    with Session(db_engine) as sess:
+        x, y = _seed(sess, _seed_cross_spu_orders)
+
+    h = {"Authorization": f"Bearer {readonly_key}"}
+    r = api_client.get(
+        "/v2/analytics/spu-roi", headers=h, params={"q": Q}
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["total"] == 2, body["items"]
+    row_sum_orders = sum(i["order_count"] for i in body["items"])
+    assert row_sum_orders == 2  # X、Y 行各计 1
+    t = body["totals"]
+    assert t["row_count"] == 2
+    assert t["order_count"] == 1, "跨 SPU 订单在 totals 应全局去重"
+    assert t["cancelled_order_count"] == 1
+    assert t["total_orders"] == 2
+    assert t["sales"] == "20.0000"  # 10+10(行级各自归属)
+    assert t["gmv"] == "30.0000"  # 有效 20 + 取消原额 10
+    # 单行归属校验:每 SPU 只带自己那行金额
+    by_id = {i["spu_id"]: i for i in body["items"]}
+    assert by_id["TEST_ROI_SPU_X"]["sales"] == "10.0000"
+    assert by_id["TEST_ROI_SPU_Y"]["sales"] == "10.0000"
+    assert by_id["TEST_ROI_SPU_X"]["order_count"] == 1
+    assert by_id["TEST_ROI_SPU_Y"]["order_count"] == 1
 
 
 def test_spu_roi_manual_cost_source(api_client, readonly_key, db_engine):
@@ -1007,6 +1104,17 @@ def test_spu_roi_window_params_clip_sales_and_refunds(
     assert item2["refund_return_qty"] == 1  # 窗外 2026-08-20 case 被排除
     assert item2["refund_return_amount"] == "20.0000"
     assert "已裁剪" in body2["meta"]["window"]["note"]
+    # 结余带 totals 同窗口裁剪(2026-09-06):GMV/单量按 paid_at 裁剪
+    assert body2["totals"]["sales"] == "60.0000"
+    assert body2["totals"]["gmv"] == "60.0000"  # 无取消单 → GMV = sales
+    assert body2["totals"]["order_count"] == 1
+    assert body2["totals"]["cancelled_order_count"] == 0
+    assert body2["totals"]["total_orders"] == 1
+    # 不传窗口 = 全历史:两单都在(与上面 item 断言同源)
+    assert body["totals"]["sales"] == "100.0000"
+    assert body["totals"]["gmv"] == "100.0000"
+    assert body["totals"]["order_count"] == 2
+    assert body["totals"]["total_orders"] == 2
 
 
 def test_spu_roi_date_window_does_not_clip_ad(api_client, readonly_key, db_engine):
@@ -1201,8 +1309,12 @@ def test_spu_roi_default_sort_roi_asc_pagination_and_totals(
     # totals 跨分页、当前筛选加总
     totals = body["totals"]
     assert totals["row_count"] == 3
+    assert totals["order_count"] == 3  # A/B/C 各 1 有效单
+    assert totals["cancelled_order_count"] == 1  # A 的已付被取消单
+    assert totals["total_orders"] == 4
     assert totals["spend"] == "70.0000"  # 10+50+10
     assert totals["sales"] == "220.0000"  # 100+90+30
+    assert totals["gmv"] == "260.0000"  # 有效 220 + 取消单原额 40(A:2×$20)
     assert totals["refund_net_amount"] == "20.0000"
     assert totals["net_profit"] == "55.8138"
     # 行加总 == totals(每行已是 4 位小数字符串)
@@ -1340,8 +1452,12 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
     assert body["total"] == 0
     assert body["totals"] == {
         "row_count": 0,
+        "order_count": 0,
+        "cancelled_order_count": 0,
+        "total_orders": 0,
         "spend": "0.0000",
         "sales": "0.0000",
+        "gmv": "0.0000",
         "refund_net_amount": "0.0000",
         "return_loss": "0.0000",
         "net_profit": "0.0000",
@@ -1433,7 +1549,7 @@ def test_spu_roi_page_toolbar_shop_and_date_filters(api_client, readonly_key):
     assert "含无活动" in body
     assert 'class="op-hint"' in body
     assert "没有任意活动" in body
-    # 结余带口径 ? 悬停说明:退款净额 / 全损货损
+    # 结余带口径 ? 悬停说明:退款净额 / 全损退款
     assert "REFUND_ONLY" in body
     assert "M13b" in body
     assert "sum-refund" in body
@@ -1491,8 +1607,10 @@ def test_spu_roi_js_targets_dashboard_hooks():
     assert "DEFAULT_K1" in src  # ⚠ 判断
 
 
-def test_spu_roi_page_header_summary_has_loss_cell(api_client, readonly_key):
-    """§7.1 结余带补"全损货损"格(JS 消费 totals.return_loss)。"""
+def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
+    """§7.1 结余带(2026-09-06):去 SPU 数;新增 GMV/有效单量/总单量/取消单量;
+    全损货损改名全损退款(数值仍 = totals.return_loss);每个概览格带 ? 口径说明。
+    """
     from pathlib import Path
 
     r = api_client.get(
@@ -1500,9 +1618,27 @@ def test_spu_roi_page_header_summary_has_loss_cell(api_client, readonly_key):
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     body = r.text
-    assert 'id="sum-loss"' in body, "结余带缺全损货损格"
-    assert "全损货损" in body
-    # JS 必须填充该格
+    # 10 格指标 id 齐全(顺序 = 页面骨架)
+    for cell_id in (
+        "sum-spend",
+        "sum-sales",
+        "sum-gmv",
+        "sum-orders",
+        "sum-total-orders",
+        "sum-refund",
+        "sum-loss",
+        "sum-cancelled-orders",
+        "sum-profit",
+        "sum-roi",
+    ):
+        assert f'id="{cell_id}"' in body, f"结余带缺 {cell_id} 格"
+    # 不再展示 SPU 个数
+    assert 'id="sum-n"' not in body
+    assert "全损退款" in body  # 全损货损改名
+    assert "M13b" in body
+    # 每个概览格都有 ? 口径悬停
+    assert body.count('class="op-hint"') >= 10
+    # JS 必须填充全损格与新格
     js_src = (
         Path(__file__).resolve().parents[2]
         / "tts_erp_v2"
@@ -1512,6 +1648,9 @@ def test_spu_roi_page_header_summary_has_loss_cell(api_client, readonly_key):
     ).read_text(encoding="utf-8")
     assert '("#sum-loss")' in js_src
     assert "totals.return_loss" in js_src
+    assert '("#sum-gmv")' in js_src
+    assert '("#sum-total-orders")' in js_src
+    assert '("#sum-cancelled-orders")' in js_src
 
 
 def test_spu_roi_page_column_toggle_groups_default_hidden(api_client, readonly_key):

@@ -749,7 +749,7 @@ _PAGE_HTML = """<!doctype html>
 #   - 自定义 CSS 只留两件事:① warm-paper token 皮肤(:root 把 --bs-* 主题变量收编到同套 token,
 #     border-radius 归零工业直角);② JS 依赖的行为类(data-tip 气泡 / ⚙ 列开关 / lightbox /
 #     §7.2 标色 / 结余带数字),这些 JS 逐字渲染不可改名。
-#   - 移动端:结余带 xs 2 列 → lg 7 格单行;工具栏 flex-wrap 自然纵向堆叠;表格
+#   - 移动端:结余带 xs 2 / sm 3 / md 4 / lg 5(两行);工具栏 flex-wrap 自然纵向堆叠;表格
 #     .table-responsive + max-height 双轴滚动框:表头在框内吸顶、首列横向溢出时吸左,
 #     小屏按 nth-child 裁次要对比列(广告数/平台GMV/ROI₀/件数),避免手机上看 22 列大海。
 _SPU_ROI_PAGE_HTML = """<!doctype html>
@@ -817,7 +817,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     .op-scope-note { font-size: 11px; letter-spacing: 0.05em; color: var(--muted); user-select: none; }
 
     /* ---------- 结余带(家族 signature,§3.1/§7) ---------- */
-    /* 结构 = bootstrap row-cols 栅格(见 body):xs 2 格 → lg(≥992px) 7 格单行,数字密度随屏降。 */
+    /* 结构 = bootstrap row-cols 栅格(见 body):xs 2 / sm 3 / md 4 / lg 5(两行),数字密度随屏降。 */
     .op-counter { border-bottom: 1px solid var(--rule); background: var(--paper); }
     .op-counter-item {
       display: flex; flex-direction: column; align-items: center;
@@ -1028,11 +1028,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     /* ---------- 响应式(Bootstrap 断点同源) ----------
        小屏裁掉次要对比列(广告数/平台GMV/ROI₀/件数)降低横滚量;
        表头吸顶/首列吸左在滚动框内生效(见 .op-table-wrap 注释),不区分断点。 */
-    /* ≥lg:结余带 7 格挤单行(bootstrap row-cols 上限 6,故用等宽 flex 覆盖) */
-    @media (min-width: 992px) {
-      .op-counter .row { flex-wrap: nowrap; }
-      .op-counter .row > * { flex: 1 1 0; width: auto; }
-    }
+    /* ≤991.98:表格首列宽约束(吸左 sticky 需限宽防挤压) */
     @media (max-width: 991.98px) {
       table.op-table thead th:first-child,
       table.op-table tbody td:first-child {
@@ -1076,16 +1072,19 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
   </header>
 
   <main class="op-main">
-    <!-- 结余带:row-cols 栅格降密度(xs 2 → lg 7),JS 只写 #sum-* 文本 + is-err/is-ok -->
+    <!-- 结余带:row-cols 栅格降密度(xs 2 / sm 3 / md 4 / lg 5 两行),JS 只写 #sum-* 文本 + is-err/is-ok -->
     <section class="op-counter px-2 px-md-4 py-3 py-md-4" id="summaries" aria-live="polite">
-      <div class="row g-2 g-md-3 text-center row-cols-2 row-cols-sm-3 row-cols-md-4">
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">SPU</span><span class="op-counter-num" id="sum-n">·</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">消耗 $</span><span class="op-counter-num" id="sum-spend">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">有效销售 $</span><span class="op-counter-num" id="sum-sales">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">退款净额 $<span class="op-hint" data-tip="有效已付订单中已完结退款的净退款额 = 仅退款(REFUND_ONLY) + 退货退款(RETURN_AND_REFUND) 的退款金额，VND→USD 换算。不含：已付被取消订单退款（见 ⚙ 列开关『已付被取消』信息列）、异常单(UNPAID 等)退款、未关联到 SPU 的退款行（页脚『未归属退款 N 行』只计行数不计金额）。与『全损货损』不同维度：这里是退给客户的钱，货的成本损失在下一格">?</span></span><span class="op-counter-num" id="sum-refund">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">全损货损 $<span class="op-hint" data-tip="退货商品未回收，按成本全额计损(M13b) = 退货退款(RETURN_AND_REFUND)件数 × 该 SPU 单位成本(USD)。单位成本：人工成本(MANUAL)有效行优先，未录入按默认 30 CNY/件(≈$4.43)换算。注意这是成本维度，不是退款金额；未关联 SPU 的退货件不计入。缺人工成本的 SPU 用默认值会在行内标 ⚠">?</span></span><span class="op-counter-num" id="sum-loss">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">净利润 $</span><span class="op-counter-num" id="sum-profit">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">整体实际 ROI</span><span class="op-counter-num" id="sum-roi">—</span></span></div>
+      <div class="row g-2 g-md-3 text-center row-cols-2 row-cols-sm-3 row-cols-md-4 row-cols-lg-5">
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">广告消耗<span class="op-hint" data-tip="广告消耗 = Σ real_cost_total（广告视图全窗口累计，USD；作为减项计入净利润）">?</span></span><span class="op-counter-num" id="sum-spend">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">有效销售<span class="op-hint" data-tip="有效销售订单金额 gross = Σ quantity×unit_price（状态 ∈ 已付白名单且已付款，按 paid_at 落窗）；退款不在此扣减，见「退款净额」">?</span></span><span class="op-counter-num" id="sum-sales">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">GMV<span class="op-hint" data-tip="全部订单销售额 = 有效销售 + 已付被取消订单的原始行金额（同一 paid_at 窗口，仅当前筛选可见 SPU）；≠ 行内「平台GMV」广告归因口径">?</span></span><span class="op-counter-num" id="sum-gmv">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">有效单量<span class="op-hint" data-tip="有效销售订单数（跨可见 SPU 全局去重；状态白名单 + 已付款，按 paid_at 落窗）">?</span></span><span class="op-counter-num" id="sum-orders">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">总单量<span class="op-hint" data-tip="总单量 = 有效订单数 + 已付被取消订单数（全部已付款订单，paid_at 落窗；跨可见 SPU 去重）">?</span></span><span class="op-counter-num" id="sum-total-orders">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">退款净额<span class="op-hint" data-tip="有效已付订单中已完结退款的净退款额 = 仅退款(REFUND_ONLY) + 退货退款(RETURN_AND_REFUND) 的退款金额，VND→USD 换算。不含：已付被取消订单退款（见 ⚙ 列开关『已付被取消』信息列）、异常单(UNPAID 等)退款、未关联到 SPU 的退款行（页脚『未归属退款 N 行』只计行数不计金额）。与『全损退款』不同维度：这里是退给客户的钱，货的成本损失在下一格">?</span></span><span class="op-counter-num" id="sum-refund">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">全损退款<span class="op-hint" data-tip="全损退款 = 已完结退货(RETURN_AND_REFUND)按全损计（M13b）= 退货件数 × 该 SPU 单位成本(USD)。单位成本：人工成本(MANUAL)有效行优先，未录入按默认 30 CNY/件(≈$4.43)换算。注意这是成本维度，不是退款金额（退款金额见上一格）；未关联 SPU 的退货件不计入。缺人工成本的 SPU 用默认值会在行内标 ⚠">?</span></span><span class="op-counter-num" id="sum-loss">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">取消单量<span class="op-hint" data-tip="已付被取消订单数（status=CANCELLED 且已付款，按 paid_at 落窗）。原始金额已计入 GMV；退款仅信息列展示、不计净额">?</span></span><span class="op-counter-num" id="sum-cancelled-orders">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">净利润<span class="op-hint" data-tip="净利润 = (有效销售 − 净退款) − 全部售出件货本 − 广告消耗 − 平台佣金估算（USD）；负值红字">?</span></span><span class="op-counter-num" id="sum-profit">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">整体实际 ROI<span class="op-hint" data-tip="实际 ROI = (有效销售 − 净退款 − 全损退款(M13b 货损成本)) ÷ 广告消耗（M14）；≥ 保本 = 赚，< 保本 = 亏（主判据）；无广告消耗 → —">?</span></span><span class="op-counter-num" id="sum-roi">—</span></span></div>
       </div>
     </section>
 
@@ -1167,7 +1166,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
             <th scope="col" class="op-th op-th-sort" data-sort="return_loss" data-tip="全损退货件数 × 单位成本解析值（默认 30元/件 ≈ $4.43，USD）">货损$</th>
             <th scope="col" class="op-th col-hidden" data-cg="cg-fee">平台佣金$</th>
             <th scope="col" class="op-th op-th-sort" data-sort="roi_breakeven" data-tip="该 SPU 的动态保本 ROI 线（实际 ROI ≥ 此值即不亏）">保本</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="roi_real" data-tip="实际 ROI = (有效销售 − 净退款 − 全损货损) ÷ 广告消耗；≥ 保本 = 赚，< 保本 = 亏（主判据）">实际ROI</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="roi_real" data-tip="实际 ROI = (有效销售 − 净退款 − 全损退款(M13b 货损成本)) ÷ 广告消耗；≥ 保本 = 赚，< 保本 = 亏（主判据）">实际ROI</th>
           </tr>
         </thead>
         <tbody class="op-rows" id="rows">
