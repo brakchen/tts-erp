@@ -1,5 +1,14 @@
 # tts-erp CHANGELOG
 
+## 2026-09-06 (fix) — SPU 实际 ROI 看板终审（3 项低级别）
+
+review 终审回修（低级别），口径仍以 `tech-doc/analytics/spu-real-roi-dashboard.md` §4/§5/§7 为准：
+
+- **fee_rate 非有限值 → 422**：`GET /v2/analytics/spu-roi` 传 `NaN`/`Infinity` 时与 0 比较不报错，会穿透到 `_fmt_money` quantize 造成 500 → 在 `list_spu_roi` 入口统一按 422 拒掉（`fee_rate must be a finite decimal`）。
+- **异常状态退款进未归属**：白名单外且非 CANCELLED 的异常订单状态（UNPAID/ON_HOLD 等）的已完结退款行不进任何 refund_* 金额桶，按 §4.2 rule 0 防御性计入 `meta.unattributed_refund_lines` 显式上报（不静默丢，页脚提示）。
+- **spec §7.5 GMV 可见性一致**：平台 GMV 列由“⚙ 默认折叠”改为**默认显示**（对齐 §7.1 定稿骨架，行内与 ROI₀ 同组对照）；⚙ 默认折叠项改为平台出单量(ad_orders)/单订单成本(cpa)。
+- 测试：`tests/api/test_spu_roi_api.py` 24 → 25（新增 UNPAID 退款未归属计数用例）。
+
 ## 2026-09-05 (fix) — SPU 实际 ROI 看板 code review 第 2 轮（2 项低级别）
 
 review 回修（第 2 轮，低级别），口径仍以 `tech-doc/analytics/spu-real-roi-dashboard.md` §4/§5/§7 为准：

@@ -1358,6 +1358,15 @@ def list_spu_roi(
             raise HTTPException(
                 status_code=422, detail="fee_rate must be a finite decimal"
             )
+        if fee_value.copy_abs() > Decimal("1e6"):
+            # 有限但指数量级巨大(如 1e9999999)会穿透后续乘法/_fmt_money
+            # quantize 抛 Overflow/InvalidOperation → 500;超合理范围按 422 拒掉。
+            # 注意用 copy_abs():内置 abs()/一元负号套默认 context(Emax=999999),
+            # 对超量级值自身就抛 Overflow;copy_abs() 不套 context、比较是精确的
+            raise HTTPException(
+                status_code=422,
+                detail="fee_rate out of reasonable range (|fee_rate| <= 1e6)",
+            )
         if fee_value < 0:
             raise HTTPException(status_code=422, detail="fee_rate must be >= 0")
     if w_start is not None and w_end is not None and w_start > w_end:

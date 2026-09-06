@@ -11,7 +11,7 @@ USD→VND=26330、CNY→USD=0.14774、K1=30 CNY/件、平台佣金基线 0.1156)
    取消桶只进信息列不进净额(DEFAULT_K1 + MANUAL 两分支);
    UNPAID 等异常订单的已完结退款按 §4.2 rule 0 防御性进未归属
    (不进 refund_* 桶/行内金额,meta.unattributed_refund_lines +1);
-   fee_rate=NaN/Infinity 非有限值 → 422 不 500
+   fee_rate=NaN/Infinity 非有限值 / 超量级(如 1e9999999) → 422 不 500
 4. 行范围:无活动 SPU 默认排除、include_all=true 包含
 5. totals(跨分页)与行加总一致;meta 字段齐全
 6. 页面 GET 200 text/html + 标题 + 静态资源引用 + 设计 token
@@ -1177,6 +1177,13 @@ def test_spu_roi_rejects_bad_params(api_client, readonly_key):
     assert (
         api_client.get(
             "/v2/analytics/spu-roi", headers=h, params={"fee_rate": "Infinity"}
+        ).status_code
+        == 422
+    )
+    # 有限但指数量级巨大(1e9999999)会穿透到乘法/_fmt_money quantize → 量级上限 422,不能 500
+    assert (
+        api_client.get(
+            "/v2/analytics/spu-roi", headers=h, params={"fee_rate": "1e9999999"}
         ).status_code
         == 422
     )
