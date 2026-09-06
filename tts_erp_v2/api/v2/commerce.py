@@ -241,7 +241,7 @@ def list_shops(
         "role = `readonly` (whole `/v2/commerce/*` prefix is readonly).\n\n"
         "**Path.** `{shop_id}` — upstream shop_id (string, e.g. "
         "`7494763368967603447`).\n\n"
-        "**Query.** `platform` (string, default `\"tiktok\"`, ≤ 32 chars). "
+        '**Query.** `platform` (string, default `"tiktok"`, ≤ 32 chars). '
         "**Required for uniqueness:** `shop_id` is only unique "
         "within a platform — once we onboard miaoshou accounts, the same "
         "external id may exist under `tiktok` and `miaoshou` separately.\n\n"
@@ -267,10 +267,7 @@ def list_shops(
         },
         401: {"description": "Missing / invalid / disabled API key."},
         403: {"description": "API key role < readonly."},
-        404: {
-            "description": "No `commerce.shops` row matches "
-            "`(platform, shop_id)`."
-        },
+        404: {"description": "No `commerce.shops` row matches `(platform, shop_id)`."},
     },
 )
 def get_channel_account_by_external(
@@ -298,8 +295,7 @@ def get_channel_account_by_external(
     if row is None:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
-            f"channel account not found for platform={platform!r} "
-            f"shop_id={shop_id!r}",
+            f"channel account not found for platform={platform!r} shop_id={shop_id!r}",
         )
     return _row_to_channel_account(row)
 

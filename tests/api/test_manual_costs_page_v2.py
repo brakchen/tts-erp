@@ -321,7 +321,7 @@ def test_page_has_submit_all_button(api_client, readonly_key):
     src = js.read_text(encoding="utf-8")
     assert "function submitAllPending()" in src, "console.js missing submitAllPending"
     assert "function postManualCost(tr)" in src, "console.js missing postManualCost"
-    assert 'submit-all' in src, "console.js must bind [data-act=submit-all]"
+    assert "submit-all" in src, "console.js must bind [data-act=submit-all]"
 
 
 def test_page_has_all_spu_tab(api_client, readonly_key):

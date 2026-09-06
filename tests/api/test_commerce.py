@@ -60,10 +60,7 @@ def seed_commerce_rows(db_engine):
             {"ext": ext_acct},
         )
         acct_id = conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
-            text(
-                "SELECT id FROM commerce.shops "
-                "WHERE shop_id = :ext"
-            ),
+            text("SELECT id FROM commerce.shops WHERE shop_id = :ext"),
             {"ext": ext_acct},
         ).scalar()
 
@@ -77,10 +74,7 @@ def seed_commerce_rows(db_engine):
             {"acct": acct_id, "ext": ext_prod},
         )
         cp_id = conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
-            text(
-                "SELECT id FROM commerce.products_spu "
-                "WHERE spu_id = :ext"
-            ),
+            text("SELECT id FROM commerce.products_spu WHERE spu_id = :ext"),
             {"ext": ext_prod},
         ).scalar()
 
@@ -105,10 +99,7 @@ def seed_commerce_rows(db_engine):
             {"acct": acct_id, "ext": ext_order},
         )
         order_id = conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
-            text(
-                "SELECT id FROM commerce.sales_orders "
-                "WHERE order_id = :ext"
-            ),
+            text("SELECT id FROM commerce.sales_orders WHERE order_id = :ext"),
             {"ext": ext_order},
         ).scalar()
 
@@ -162,8 +153,7 @@ def _wipe(db_engine) -> None:
         # pi-lens-ignore: python-sql-injection — literal SQL, LIKE prefix is constant
         conn.execute(
             text(
-                "DELETE FROM commerce.products_sku "
-                "WHERE sku_id LIKE 'TEST_commerce_%'"
+                "DELETE FROM commerce.products_sku WHERE sku_id LIKE 'TEST_commerce_%'"
             )
         )
 
@@ -213,9 +203,7 @@ def test_list_shops_shop_id_is_silently_ignored(
     )
 
 
-def test_list_shops_filter_by_platform(
-    api_client, readonly_key, seed_commerce_rows
-):
+def test_list_shops_filter_by_platform(api_client, readonly_key, seed_commerce_rows):
     """Happy path of the platform= filter (does match the seeded row)."""
     r = api_client.get(
         "/v2/commerce/channel-accounts?platform=tiktok",
@@ -236,9 +224,7 @@ def test_get_channel_account_404(api_client, readonly_key):
     assert "channel account not found" in r.text
 
 
-def test_get_channel_account_200_with_row(
-    api_client, readonly_key, seed_commerce_rows
-):
+def test_get_channel_account_200_with_row(api_client, readonly_key, seed_commerce_rows):
     """Lines 173-176: get by id returns the seeded row."""
     r = api_client.get(
         f"/v2/commerce/channel-accounts/{seed_commerce_rows['account_id']}",
@@ -278,8 +264,7 @@ def test_channel_account_order_stats_with_data(
     the value must be the numeric SUM, not 0 or NULL.
     """
     r = api_client.get(
-        f"/v2/commerce/channel-accounts/"
-        f"{seed_commerce_rows['account_id']}/order-stats",
+        f"/v2/commerce/channel-accounts/{seed_commerce_rows['account_id']}/order-stats",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200, r.text
@@ -294,13 +279,10 @@ def test_channel_account_order_stats_with_data(
 # ---------------------------------------------------------------------------
 
 
-def test_list_products_spu_with_data(
-    api_client, readonly_key, seed_commerce_rows
-):
+def test_list_products_spu_with_data(api_client, readonly_key, seed_commerce_rows):
     """Lines 187-197: response body built by _row_to_channel_product."""
     r = api_client.get(
-        f"/v2/commerce/channel-products"
-        f"?shop_pk={seed_commerce_rows['account_id']}",
+        f"/v2/commerce/channel-products?shop_pk={seed_commerce_rows['account_id']}",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200, r.text
@@ -319,16 +301,12 @@ def test_list_products_spu_filter_by_account(
 ):
     """shop_pk= filter must scope to the seeded account."""
     r = api_client.get(
-        f"/v2/commerce/channel-products"
-        f"?shop_pk={seed_commerce_rows['account_id']}",
+        f"/v2/commerce/channel-products?shop_pk={seed_commerce_rows['account_id']}",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200, r.text
     rows = r.json()
-    assert all(
-        row["shop_pk"] == seed_commerce_rows["account_id"]
-        for row in rows
-    )
+    assert all(row["shop_pk"] == seed_commerce_rows["account_id"] for row in rows)
     assert seed_commerce_rows["product_id"] in [row["id"] for row in rows]
 
 
@@ -350,10 +328,7 @@ def test_list_products_spu_shop_id_is_silently_ignored(
     assert r.status_code == 200, r.text
     # shop_pk filter still applied (shop_id silently dropped).
     rows = r.json()
-    assert all(
-        row["shop_pk"] == seed_commerce_rows["account_id"]
-        for row in rows
-    )
+    assert all(row["shop_pk"] == seed_commerce_rows["account_id"] for row in rows)
     assert seed_commerce_rows["product_id"] in [row["id"] for row in rows]
 
 
@@ -379,13 +354,10 @@ def test_get_channel_product_200(api_client, readonly_key, seed_commerce_rows):
     assert body["spu_id"] == seed_commerce_rows["ext_prod"]
 
 
-def test_list_products_sku_with_data(
-    api_client, readonly_key, seed_commerce_rows
-):
+def test_list_products_sku_with_data(api_client, readonly_key, seed_commerce_rows):
     """Lines 219-220: variants endpoint body."""
     r = api_client.get(
-        f"/v2/commerce/channel-products/"
-        f"{seed_commerce_rows['product_id']}/variants",
+        f"/v2/commerce/channel-products/{seed_commerce_rows['product_id']}/variants",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200, r.text
@@ -413,9 +385,7 @@ def test_list_products_sku_empty(api_client, readonly_key):
 # ---------------------------------------------------------------------------
 
 
-def test_list_sales_orders_with_data(
-    api_client, readonly_key, seed_commerce_rows
-):
+def test_list_sales_orders_with_data(api_client, readonly_key, seed_commerce_rows):
     """Lines 258-261: response body built by _row_to_sales_order.
 
     Scoped by shop_pk so the seeded TEST_ row is the only
@@ -423,8 +393,7 @@ def test_list_sales_orders_with_data(
     a NULL-order_modify_time seed below the cut.
     """
     r = api_client.get(
-        f"/v2/commerce/sales-orders"
-        f"?shop_pk={seed_commerce_rows['account_id']}",
+        f"/v2/commerce/sales-orders?shop_pk={seed_commerce_rows['account_id']}",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200, r.text
@@ -477,10 +446,7 @@ def test_list_sales_orders_shop_id_is_silently_ignored(
     assert r.status_code == 200, r.text
     rows = r.json()
     # shop_pk filter still applied.
-    assert all(
-        row["shop_pk"] == seed_commerce_rows["account_id"]
-        for row in rows
-    )
+    assert all(row["shop_pk"] == seed_commerce_rows["account_id"] for row in rows)
     assert seed_commerce_rows["order_id"] in [row["id"] for row in rows]
 
 
@@ -507,9 +473,7 @@ def test_get_sales_order_200(api_client, readonly_key, seed_commerce_rows):
     assert float(body["payment_amount"]) == 12.34
 
 
-def test_list_sales_order_lines_with_data(
-    api_client, readonly_key, seed_commerce_rows
-):
+def test_list_sales_order_lines_with_data(api_client, readonly_key, seed_commerce_rows):
     """Lines 272-273: response body built by SalesOrderLineOut."""
     r = api_client.get(
         f"/v2/commerce/sales-orders/{seed_commerce_rows['order_id']}/lines",
