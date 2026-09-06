@@ -204,6 +204,19 @@ def callback(
     tick (it fans out over credentials rows).
     """
     fmt = (format or "").lower() == "json"
+    if code:
+        log.info(
+            "oauth callback received: code_prefix=%s state_present=%s fmt=%s",
+            code[:10],
+            bool(state),
+            fmt,
+        )
+    else:
+        log.warning(
+            "oauth callback received without code (error=%s state_present=%s)",
+            error,
+            bool(state),
+        )
     if fmt:
         return _handle_json(code=code, state=state, error=error, sess=sess)
     return _handle_html(code=code, state=state, error=error, sess=sess)
@@ -212,10 +225,13 @@ def callback(
 def _handle_json(
     *, code: str | None, state: str | None, error: str | None, sess: Any
 ) -> JSONResponse:
+    code_pfx = (code or "")[:10]
+    state_present = bool(state)
     # Seller rejected at the consent screen.
     if error:
-        if state:
+        if state_present:
             pop_state(sess, state)  # spend the CSRF token best-effort
+        log.warning("oauth callback json denied: error=%s state_present=%s", error, state_present)
         return _json(
             ok=False,
             http_status=200,
@@ -223,6 +239,7 @@ def _handle_json(
             error=error,
         )
     if not code:
+        log.warning("oauth callback json missing_code: state_present=%s", state_present)
         return _json(
             ok=False,
             http_status=400,
@@ -232,6 +249,13 @@ def _handle_json(
     try:
         out = complete_tiktok_authorization(sess, code=code, state=state or "")
     except OAuthFlowError as exc:
+        log.warning(
+            "oauth callback json rejected: kind=%s code_prefix=%s state_present=%s msg=%s",
+            exc.kind,
+            code_pfx,
+            state_present,
+            exc.message,
+        )
         return _json(
             ok=False,
             http_status=400,
@@ -239,6 +263,12 @@ def _handle_json(
             error=exc.message,
         )
     except UpstreamHttpError as exc:
+        log.error(
+            "oauth callback json upstream failure: code_prefix=%s upstream_code=%s %s",
+            code_pfx,
+            getattr(exc, "upstream_code", None),
+            exc,
+        )
         return _json(
             ok=False,
             http_status=502,
@@ -247,6 +277,7 @@ def _handle_json(
             upstream_code=getattr(exc, "upstream_code", None),
         )
     except ProxyError as exc:
+        log.error("oauth callback json proxy failure: code_prefix=%s %s", code_pfx, exc)
         return _json(
             ok=False,
             http_status=502,
@@ -260,6 +291,8 @@ def _handle_json(
 def _handle_html(
     *, code: str | None, state: str | None, error: str | None, sess: Any
 ) -> HTMLResponse:
+    code_pfx = (code or "")[:10]
+    state_present = bool(state)
     if error:
         if state:
             pop_state(sess, state)
@@ -288,8 +321,21 @@ def _handle_html(
     try:
         out = complete_tiktok_authorization(sess, code=code, state=state or "")
     except OAuthFlowError as exc:
+        log.warning(
+            "oauth callback rejected: kind=%s code_prefix=%s state_present=%s msg=%s",
+            exc.kind,
+            code_pfx,
+            state_present,
+            exc.message,
+        )
         return _err_page("Authorization failed", exc.message)
     except UpstreamHttpError as exc:
+        log.error(
+            "oauth callback upstream failure: code_prefix=%s upstream_code=%s %s",
+            code_pfx,
+            getattr(exc, "upstream_code", None),
+            exc,
+        )
         return HTMLResponse(
             content=_page(
                 "Authorization failed",
@@ -302,6 +348,7 @@ def _handle_html(
             status_code=status.HTTP_502_BAD_GATEWAY,
         )
     except ProxyError as exc:
+        log.error("oauth callback proxy failure: code_prefix=%s %s", code_pfx, exc)
         return HTMLResponse(
             content=_page(
                 "Authorization failed",
@@ -311,6 +358,12 @@ def _handle_html(
             status_code=status.HTTP_502_BAD_GATEWAY,
         )
 
+    log.info(
+        "oauth callback: shop=%s authorized (html) credential_id=%s account_id=%s",
+        out.get("shop_id"),
+        out.get("credential_id"),
+        out.get("account_id"),
+    )
     rows = []
     for label, value in (
         ("Shop id", out.get("shop_id")),
