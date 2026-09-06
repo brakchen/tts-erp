@@ -124,13 +124,24 @@ SQL_CLOSE_OLD_MANUAL_COSTS_BEFORE_INSERT = (
 # reporting.cost_snapshots which is recomputed every 6 h (empty right
 # after a manual entry). Join products_spu for shop_pk / spu_id / title.
 SQL_LIST_MANUAL_COSTS = (
-    "SELECT m.id, m.spu_pk, m.unit_cost, m.currency, m.valid_from, "
-    "       m.valid_to, m.note, m.created_by, m.created_at, m.updated_at, "
+    "WITH ranked AS ("
+    "  SELECT m.id, m.spu_pk, m.unit_cost, m.currency, "
+    "         m.valid_from, m.valid_to, m.note, m.created_by, "
+    "         m.created_at, m.updated_at, "
+    "         LAG(m.unit_cost) OVER (PARTITION BY m.spu_pk ORDER BY m.created_at, m.id) "
+    "           AS prev_unit_cost, "
+    "         LAG(m.currency) OVER (PARTITION BY m.spu_pk ORDER BY m.created_at, m.id) "
+    "           AS prev_currency "
+    "  FROM procurement.manual_product_costs m "
+    ")"
+    "SELECT r.id, r.spu_pk, r.unit_cost, r.currency, r.valid_from, "
+    "       r.valid_to, r.note, r.created_by, r.created_at, r.updated_at, "
+    "       r.prev_unit_cost, r.prev_currency, "
     "       cp.spu_id, cp.shop_pk, cp.title "
-    "FROM procurement.manual_product_costs m "
-    "JOIN commerce.products_spu cp ON cp.id = m.spu_pk "
+    "FROM ranked r "
+    "JOIN commerce.products_spu cp ON cp.id = r.spu_pk "
     "WHERE (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
-    "ORDER BY m.created_at DESC, m.id DESC "
+    "ORDER BY r.created_at DESC, r.id DESC "
     "LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
 )
 SQL_LIST_MISSING_COST_PRODUCTS = (
@@ -409,6 +420,10 @@ def list_manual_costs(
                 "shop_pk": r.shop_pk,
                 "unit_cost": str(r.unit_cost),
                 "currency": r.currency,
+                "prev_unit_cost": (
+                    str(r.prev_unit_cost) if r.prev_unit_cost is not None else None
+                ),
+                "prev_currency": r.prev_currency,
                 "note": r.note,
                 "valid_from": r.valid_from.isoformat() if r.valid_from else None,
                 "valid_to": r.valid_to.isoformat() if r.valid_to else None,

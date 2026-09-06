@@ -577,3 +577,181 @@ def _seed_spu(db_engine, external_id: str) -> int:
             {"ext": external_id},
         ).scalar()
     return cp_id
+
+
+# ---------------------------------------------------------------------------
+# GET /v2/commerce/channel-products — sort / order (2026-09-06 all-SPU tab)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def seed_spus_with_times(db_engine):
+    """Three TEST_ SPUs under one shop with distinct source times + costs.
+
+    The all-SPU catalogue needs clickable sorting on created / updated
+    / unit_cost; this fixture pins deterministic values so the response
+    order is assertable without touching other shops' rows.
+    """
+    ext_acct = "TEST_MCSORT_acct"
+    with db_engine.begin() as conn:
+        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            text(
+                "INSERT INTO commerce.shops "
+                "(platform, shop_id, account_name, status) "
+                "VALUES ('tiktok', :ext, 'TEST acct', 'active')"
+            ),
+            {"ext": ext_acct},
+        )
+        acct_id = conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            text("SELECT id FROM commerce.shops WHERE shop_id = :ext"),
+            {"ext": ext_acct},
+        ).scalar()
+        spu_ids = {}
+        # spu_a: oldest created, mid updated, highest cost
+        # spu_b: mid created, newest updated, lowest cost
+        # spu_c: newest created, oldest updated, mid cost (no manual cost row)
+        for ext, title, created, updated in (
+            (
+                "TEST_MCSORT_a",
+                "A title",
+                "2026-01-01T00:00:00+00:00",
+                "2026-06-01T00:00:00+00:00",
+            ),
+            (
+                "TEST_MCSORT_b",
+                "B title",
+                "2026-02-01T00:00:00+00:00",
+                "2026-09-01T00:00:00+00:00",
+            ),
+            (
+                "TEST_MCSORT_c",
+                "C title",
+                "2026-03-01T00:00:00+00:00",
+                "2026-03-01T00:00:00+00:00",
+            ),
+        ):
+            conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+                text(
+                    "INSERT INTO commerce.products_spu "
+                    "(shop_pk, spu_id, title, status, "
+                    " source_created_at, source_updated_at) "
+                    "VALUES (:acct, :ext, :title, 'active', :created, :updated)"
+                ),
+                {
+                    "acct": acct_id,
+                    "ext": ext,
+                    "title": title,
+                    "created": created,
+                    "updated": updated,
+                },
+            )
+            pk = conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+                text("SELECT id FROM commerce.products_spu WHERE spu_id = :ext"),
+                {"ext": ext},
+            ).scalar()
+            spu_ids[ext] = pk
+        # Costs: A=30 (highest), B=10 (lowest), C none.
+        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            text(
+                "INSERT INTO procurement.manual_product_costs "
+                "(spu_pk, unit_cost, currency, valid_from, valid_to) "
+                "VALUES (:a, 30.0, 'CNY', now(), NULL), "
+                "       (:b, 10.0, 'CNY', now(), NULL)"
+            ),
+            {"a": spu_ids["TEST_MCSORT_a"], "b": spu_ids["TEST_MCSORT_b"]},
+        )
+
+    yield {"acct_id": acct_id, "spu_ids": spu_ids}
+
+    with db_engine.begin() as conn:
+        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            text(
+                "DELETE FROM procurement.manual_product_costs "
+                "WHERE spu_pk IN ("
+                "  SELECT id FROM commerce.products_spu "
+                "  WHERE shop_pk = :acct)"
+            ),
+            {"acct": acct_id},
+        )
+        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            text("DELETE FROM commerce.products_spu WHERE shop_pk = :acct"),
+            {"acct": acct_id},
+        )
+        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            text("DELETE FROM commerce.shops WHERE id = :acct"),
+            {"acct": acct_id},
+        )
+
+
+def _sort_products(api_client, readonly_key, acct_id, **query):
+    qs = "&".join(f"{k}={v}" for k, v in query.items())
+    url = f"/v2/commerce/channel-products?limit=50&shop_pk={acct_id}"
+    if qs:
+        url += "&" + qs
+    r = api_client.get(url, headers={"Authorization": f"Bearer {readonly_key}"})
+    assert r.status_code == 200, r.text
+    return [row["spu_id"] for row in r.json()]
+
+
+def test_channel_products_sort_created_at_desc(
+    api_client, readonly_key, seed_spus_with_times
+):
+    """sort=created_at&order=desc → newest source_created_at first (c,b,a)."""
+    acct = seed_spus_with_times["acct_id"]
+    assert _sort_products(
+        api_client, readonly_key, acct, sort="created_at", order="desc"
+    ) == ["TEST_MCSORT_c", "TEST_MCSORT_b", "TEST_MCSORT_a"]
+
+
+def test_channel_products_sort_created_at_asc(
+    api_client, readonly_key, seed_spus_with_times
+):
+    acct = seed_spus_with_times["acct_id"]
+    assert _sort_products(
+        api_client, readonly_key, acct, sort="created_at", order="asc"
+    ) == ["TEST_MCSORT_a", "TEST_MCSORT_b", "TEST_MCSORT_c"]
+
+
+def test_channel_products_sort_updated_at_desc(
+    api_client, readonly_key, seed_spus_with_times
+):
+    """sort=updated_at&order=desc → newest source_updated_at first (b,a,c)."""
+    acct = seed_spus_with_times["acct_id"]
+    assert _sort_products(
+        api_client, readonly_key, acct, sort="updated_at", order="desc"
+    ) == ["TEST_MCSORT_b", "TEST_MCSORT_a", "TEST_MCSORT_c"]
+
+
+def test_channel_products_sort_unit_cost_desc(
+    api_client, readonly_key, seed_spus_with_times
+):
+    """sort=unit_cost&order=desc → highest cost first; cost-less SPU last.
+
+    NULL manual costs sort to the tail on both directions.
+    """
+    acct = seed_spus_with_times["acct_id"]
+    assert _sort_products(
+        api_client, readonly_key, acct, sort="unit_cost", order="desc"
+    ) == ["TEST_MCSORT_a", "TEST_MCSORT_b", "TEST_MCSORT_c"]
+
+
+def test_channel_products_sort_unit_cost_asc(
+    api_client, readonly_key, seed_spus_with_times
+):
+    acct = seed_spus_with_times["acct_id"]
+    assert _sort_products(
+        api_client, readonly_key, acct, sort="unit_cost", order="asc"
+    ) == ["TEST_MCSORT_b", "TEST_MCSORT_a", "TEST_MCSORT_c"]
+
+
+def test_channel_products_sort_rejects_unknown_field(
+    api_client, readonly_key, seed_spus_with_times
+):
+    """Unknown sort keys must 422 (FastAPI Literal validation), not pass through."""
+    acct = seed_spus_with_times["acct_id"]
+    qs = "sort=banana&order=desc"
+    r = api_client.get(
+        f"/v2/commerce/channel-products?limit=50&shop_pk={acct}&{qs}",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 422, r.text

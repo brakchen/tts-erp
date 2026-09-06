@@ -84,8 +84,31 @@ SQL_LIST_CHANNEL_PRODUCTS = (
     "  ON m.spu_pk = cp.id AND m.valid_to IS NULL "
     "WHERE (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
     "AND (CAST(:status AS text) IS NULL OR cp.status = CAST(:status AS text)) "
-    "ORDER BY cp.id LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
 )
+# All-SPU catalogue sorters (2026-09-06): the tail of SQL_LIST_CHANNEL_PRODUCTS.
+# Values come from the allowlist below — no request input ever reaches the
+# SQL text, so each ORDER BY tail stays a module-level constant.
+# NULL manual costs sort to the tail in BOTH directions (cost-less rows are
+# not "lowest cost" — they are "no cost yet", so they must not jump to the
+# top of an asc sort and masquerade as cheapest).
+_SORT_TAILS_CHANNEL_PRODUCTS = {
+    "created_at-asc": "ORDER BY cp.source_created_at ASC NULLS LAST, cp.id",
+    "created_at-desc": "ORDER BY cp.source_created_at DESC NULLS LAST, cp.id",
+    "updated_at-asc": "ORDER BY cp.source_updated_at ASC NULLS LAST, cp.id",
+    "updated_at-desc": "ORDER BY cp.source_updated_at DESC NULLS LAST, cp.id",
+    "unit_cost-asc": ("ORDER BY m.unit_cost ASC NULLS LAST, cp.id"),
+    "unit_cost-desc": ("ORDER BY m.unit_cost DESC NULLS LAST, cp.id"),
+    # Back-compat default: stable insertion order.
+    "id-asc": "ORDER BY cp.id",
+}
+_PAGE_SUFFIX = "LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
+_SQL_LIST_CHANNEL_PRODUCTS = {
+    # Each precompiled statement = the shared SELECT + an allowlisted
+    # ORDER BY tail + the LIMIT/OFFSET page suffix. No request value
+    # ever enters the SQL string (sort/order map onto dict keys).
+    key: text(SQL_LIST_CHANNEL_PRODUCTS + " " + tail + " " + _PAGE_SUFFIX)
+    for key, tail in _SORT_TAILS_CHANNEL_PRODUCTS.items()
+}
 SQL_GET_CHANNEL_PRODUCT = (
     "SELECT cp.id, cp.shop_pk, cp.spu_id, cp.title, cp.status, "
     "       cp.source_created_at, cp.source_updated_at, "
@@ -155,7 +178,6 @@ def _safe_int(value: Any, default: int = 0) -> int:
 _STMT_LIST_CHANNEL_ACCOUNTS = text(SQL_LIST_CHANNEL_ACCOUNTS)
 _STMT_GET_CHANNEL_ACCOUNT = text(SQL_GET_CHANNEL_ACCOUNT)
 _STMT_GET_CHANNEL_ACCOUNT_BY_EXTERNAL = text(SQL_GET_CHANNEL_ACCOUNT_BY_EXTERNAL)
-_STMT_LIST_CHANNEL_PRODUCTS = text(SQL_LIST_CHANNEL_PRODUCTS)
 _STMT_GET_CHANNEL_PRODUCT = text(SQL_GET_CHANNEL_PRODUCT)
 _STMT_LIST_CHANNEL_VARIANTS = text(SQL_LIST_CHANNEL_VARIANTS)
 _STMT_LIST_SALES_ORDERS = text(SQL_LIST_SALES_ORDERS)
@@ -311,16 +333,34 @@ def get_channel_account(
     return _row_to_channel_account(row)
 
 
+def _sort_key(sort: str, order: str) -> str:
+    """Map (sort, order) onto the allowlist; default = id asc."""
+    if sort not in ("created_at", "updated_at", "unit_cost", "id"):
+        return "id-asc"
+    return f"{sort}-{order}"
+
+
 @router.get("/channel-products", response_model=list[ChannelProductOut])
 def list_products_spu(
     sess: Session = Depends(get_session),
     shop_pk: int | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
+    sort: str = Query(
+        default="id",
+        pattern="^(id|created_at|updated_at|unit_cost)$",
+        description=(
+            "Catalogue column to sort on: id (insertion order), "
+            "created_at / updated_at (source timestamps), or unit_cost "
+            "(current effective manual cost; cost-less rows always tail)."
+        ),
+    ),
+    order: str = Query(default="asc", pattern="^(asc|desc)$"),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> list[ChannelProductOut]:
+    key = _sort_key(sort, order)
     rows = _q(
-        _STMT_LIST_CHANNEL_PRODUCTS,
+        _SQL_LIST_CHANNEL_PRODUCTS[key],
         {
             "acct_id": shop_pk,
             "status": status_filter,

@@ -43,10 +43,7 @@ def _seed_channel_product(db_engine, external_id: str) -> int:
             )
         )
         acct_id = sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
-            text(
-                "SELECT id FROM commerce.shops "
-                "WHERE shop_id = 'TEST_acct_for_costs'"
-            )
+            text("SELECT id FROM commerce.shops WHERE shop_id = 'TEST_acct_for_costs'")
         ).scalar()
         sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
             text(
@@ -58,10 +55,7 @@ def _seed_channel_product(db_engine, external_id: str) -> int:
         )
         sess.commit()
         cp_id = sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
-            text(
-                "SELECT id FROM commerce.products_spu "
-                "WHERE spu_id = :ext"
-            ),
+            text("SELECT id FROM commerce.products_spu WHERE spu_id = :ext"),
             {"ext": external_id},
         ).scalar()
     return cp_id
@@ -123,9 +117,7 @@ def test_manual_costs_rejects_zero_or_negative(api_client, readwrite_key):
     assert r.status_code == 422, r.text
 
 
-def test_manual_costs_happy_path_writes_row(
-    api_client, readwrite_key, db_engine
-):
+def test_manual_costs_happy_path_writes_row(api_client, readwrite_key, db_engine):
     """Successful POST inserts into procurement.manual_product_costs."""
     cp_id = _seed_channel_product(db_engine, "TEST_mc_happy")
     r = api_client.post(
@@ -209,7 +201,9 @@ def test_manual_costs_second_submission_closes_first(
     assert str(rows[1].unit_cost).startswith("11.00")
 
 
-def test_get_manual_costs_lists_recent_submissions(api_client, readwrite_key, db_engine, readonly_key):
+def test_get_manual_costs_lists_recent_submissions(
+    api_client, readwrite_key, db_engine, readonly_key
+):
     """GET /v2/reporting/manual-costs returns filed entries (newest first).
 
     2026-09-06 regression: the 最近提交 tab used to read
@@ -247,4 +241,46 @@ def test_get_manual_costs_lists_recent_submissions(api_client, readwrite_key, db
     # Newest-first ordering: the fresh row must be near the top.
     assert body["items"][0]["spu_pk"] == cp_id or any(
         body["items"][i]["spu_pk"] == cp_id for i in range(min(3, len(body["items"])))
+    )
+
+
+def test_get_manual_costs_reports_prev_price_on_change(
+    api_client, readwrite_key, readonly_key, db_engine
+):
+    """The 最近提交 tab shows 变更前 → 变更后 per row.
+
+    2026-09-06: after the operator edits a SPU's cost a second time the
+    history rows both exist (close-old + insert-new); the list endpoint
+    must surface the NEWEST row's previous price (the value it replaced)
+    so the UI can render "10 → 11" instead of two independent rows.
+    """
+    cp_id = _seed_channel_product(db_engine, "TEST_mc_prevprice")
+    for cost in ("10.00", "11.00", "12.50"):
+        r = api_client.post(
+            "/v2/reporting/manual-costs",
+            headers={"Authorization": f"Bearer {readwrite_key}"},
+            json={
+                "spu_id": "TEST_mc_prevprice",
+                "unit_cost": cost,
+                "currency": "CNY",
+            },
+        )
+        assert r.status_code == 201, r.text
+
+    r = api_client.get(
+        "/v2/reporting/manual-costs?limit=50",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    items = r.json()["items"]
+    mine = [x for x in items if x["spu_id"] == "TEST_mc_prevprice"]
+    assert len(mine) == 3, f"expected 3 history rows, got {len(mine)}"
+    # Newest first: 12.50 was preceded by 11.00, which was preceded by 10.00
+    newest, mid, oldest = mine
+    assert str(newest["unit_cost"]).startswith("12.50")
+    assert str(newest["prev_unit_cost"]).startswith("11.00")
+    assert str(mid["unit_cost"]).startswith("11.00")
+    assert str(mid["prev_unit_cost"]).startswith("10.00")
+    assert oldest["prev_unit_cost"] is None, (
+        "the very first submission has no predecessor"
     )
