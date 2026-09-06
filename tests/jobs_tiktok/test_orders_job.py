@@ -393,6 +393,10 @@ def test_orders_line_links_spu_when_catalog_known(db_session) -> None:
         shop_pk=account.id, spu_id="P1", title="TEST 目录商品"
     )
     db_session.add(prod)
+    prod_num = ChannelProduct(
+        shop_pk=account.id, spu_id="999888777", title="TEST 目录数字 id"
+    )
+    db_session.add(prod_num)
     db_session.flush()
 
     proxy = FakeProxy(
@@ -414,6 +418,16 @@ def test_orders_line_links_spu_when_catalog_known(db_session) -> None:
                                     "quantity": 1,
                                     "sale_price": {
                                         "amount": "12.50",
+                                        "currency": "USD",
+                                    },
+                                },
+                                {
+                                    "line_id": "L_SPU_NUMERIC",
+                                    "product_id": 999888777,  # JSON number
+                                    "sku_id": "S8",
+                                    "quantity": 1,
+                                    "sale_price": {
+                                        "amount": "11.00",
                                         "currency": "USD",
                                     },
                                 },
@@ -452,7 +466,9 @@ def test_orders_line_links_spu_when_catalog_known(db_session) -> None:
     lines = (
         db_session.execute(
             select(SalesOrderLine).where(
-                SalesOrderLine.external_line_id.in_(["L_SPU1", "L_SPU_MISSING"])
+                SalesOrderLine.external_line_id.in_(
+                ["L_SPU1", "L_SPU_NUMERIC", "L_SPU_MISSING"]
+            )
             )
         )
         .scalars()
@@ -460,6 +476,7 @@ def test_orders_line_links_spu_when_catalog_known(db_session) -> None:
     )
     by_id = {ln.external_line_id: ln for ln in lines}
     assert by_id["L_SPU1"].spu_pk == prod.id  # 目录命中 → 直接关联
+    assert by_id["L_SPU_NUMERIC"].spu_pk == prod_num.id  # 数字 id 归一化后命中
     assert by_id["L_SPU_MISSING"].spu_pk is None  # 目录缺失 → 留 NULL 待 products 回填
 
 

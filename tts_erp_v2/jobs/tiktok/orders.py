@@ -479,8 +479,12 @@ def run(
                 continue
             # 2026-09-06:目录命中即填 spu_pk(不覆盖已有关联);未命中
             # 保持 NULL → products 同步后回填(spu_link.backfill)。
+            # snapshot 原始值可能是数字(JSON number),目录键恒 str
+            # (products.py 存 str(spu_id));归一化后再查,避免漏命中
             snap_pid = line_fields.get("external_product_id_snapshot")
-            resolved = spu_link.link_line_spu_pk(spu_map, product_snapshot=snap_pid)
+            resolved = spu_link.link_line_spu_pk(
+                spu_map, product_snapshot=None if snap_pid is None else str(snap_pid)
+            )
             if resolved is not None:
                 line_fields["spu_pk"] = resolved
             _upsert_sales_order_line(

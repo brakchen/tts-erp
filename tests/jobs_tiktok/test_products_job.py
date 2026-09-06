@@ -511,6 +511,7 @@ def test_products_sync_backfills_pre_existing_null_spu_lines(db_session) -> None
         inner_kwargs={
             "proxy_call": proxy,
             "shop_id": account.shop_id,
+            "image_fetcher": _noop_image_fetcher,
         },
     )
     assert result.rows_inserted == 1
