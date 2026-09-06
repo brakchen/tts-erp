@@ -17,7 +17,7 @@
   // away. Only the enum values seen in production are mapped; unknown
   // values fall through to the raw code.
   var STATUS_LABELS = {
-    ACTIVATE: "商家",
+    ACTIVATE: "在售",
     DELETED: "下架",
     SELLER_DEACTIVATED: "停售",
   };
@@ -237,12 +237,12 @@
   // ---------- tabs ----------
   var currentTab = TAB_ALL;
   var costFilter = "";
-  var costOffset = 0;
   // All-SPU catalogue sort state (2026-09-06): the active sort column
   // + direction. Column headers carry data-sort; clicking toggles asc→
-  // desc→(reload). Default = updated_at desc (most-recently-changed
-  // first is the useful browsing order for a cost-editing session).
-  var catalogueSort = { key: "updated_at", order: "desc" };
+  // desc→(reload). Default = status asc so in-sale (在售/ACTIVATE)
+  // products lead the catalogue; the operator can re-sort by clicking
+  // any sortable header.
+  var catalogueSort = { key: "status", order: "asc" };
   // Status dropdown filter (2026-09-06): '' = all statuses, otherwise
   // the raw upstream code forwarded as ?status= on channel-products.
   var catalogueStatus = "";

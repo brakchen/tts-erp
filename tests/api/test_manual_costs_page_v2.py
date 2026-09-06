@@ -464,9 +464,10 @@ def test_console_js_status_label_mapping_and_sort():
     """console.js maps upstream status codes to Chinese labels and lets
     the operator sort the status column.
 
-    The page's 全部 SPU view shows ACTIVATE=商家 / DELETED=下架 /
+    The page's 全部 SPU view shows ACTIVATE=在售 / DELETED=下架 /
     SELLER_DEACTIVATED=停售; the status header is click-sortable via
-    data-sort="status" and the URL carries ?status= for filtering.
+    data-sort="status" and the URL carries ?status= for filtering. The
+    catalogue defaults to status-asc so in-sale products lead.
     """
     from pathlib import Path
 
@@ -479,10 +480,14 @@ def test_console_js_status_label_mapping_and_sort():
     )
     src = js.read_text(encoding="utf-8")
     assert "STATUS_LABELS" in src, "status label map missing"
-    assert 'ACTIVATE: "商家"' in src or "ACTIVATE:" in src, "ACTIVATE mapping missing"
-    assert 'DELETED: "下架"' in src or "DELETED:" in src, "DELETED mapping missing"
+    assert 'ACTIVATE: "在售"' in src, "ACTIVATE must map to 在售"
+    assert "商家" not in src, "old 商家 label must be gone"
+    assert 'DELETED: "下架"' in src, "DELETED must map to 下架"
     assert "SELLER_DEACTIVATED" in src, "SELLER_DEACTIVATED mapping missing"
     assert "function statusLabel" in src, "statusLabel helper missing"
     assert 'data-sort="status"' in src, "status column must be sortable"
     assert "catalogueStatus" in src, "status filter state missing"
     assert "&status=" in src, "loadAll must forward ?status="
+    # Default catalogue sort: in-sale products first.
+    assert 'key: "status"' in src, "default sort must be by status"
+    assert 'order: "asc"' in src, "default order must be asc (在售 first)"
