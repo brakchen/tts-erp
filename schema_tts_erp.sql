@@ -3,7 +3,7 @@
 -- =============================================================================
 --
 -- DO NOT EDIT BY HAND. Run `python3 scripts/regen_schema.py` after any
--- schema change; it rewrites schema_oauth.sql + schema_tts_erp.sql.
+-- schema change; it rewrites schema_tts_erp.sql.
 --
 -- To apply:
 --     docker exec -i postgres psql -U postgres -d tts_erp < schema_tts_erp.sql
@@ -2290,5 +2290,5 @@ ALTER TABLE ONLY reporting.shipment_tracking_summary
 
 -- PostgreSQL database dump complete
 
-\unrestrict JhVKueVK9hldBqd33oeppaLuiOZQViyL3Xv8CRHdibNYe4wxTV5LjS17YhNk55T
+\unrestrict Rj31su2nFp9gc9i3dwYCX2HLteAnby17hAeH3eqUvy12M9R2PDe85cWZzrT5ezd
 

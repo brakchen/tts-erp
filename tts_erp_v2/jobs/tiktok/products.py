@@ -233,9 +233,7 @@ def _upsert_product(
     return row.id
 
 
-def _upsert_variant(
-    session, *, spu_pk: int, fields: dict, raw_record_id: int
-) -> None:
+def _upsert_variant(session, *, spu_pk: int, fields: dict, raw_record_id: int) -> None:
     insert_values = {
         "spu_pk": spu_pk,
         **fields,
@@ -272,9 +270,7 @@ def run(
         )
     ).scalar_one_or_none()
     if account is None:
-        raise UpstreamJobError(
-            f"shops row missing for tiktok shop_id={shop_id!r}"
-        )
+        raise UpstreamJobError(f"shops row missing for tiktok shop_id={shop_id!r}")
 
     # Default fetcher: signed Get Product call (production path).
     # Tests inject their own ``image_fetcher`` to avoid hitting upstream.

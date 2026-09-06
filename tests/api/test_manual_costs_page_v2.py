@@ -288,3 +288,37 @@ def test_console_js_unwraps_api_envelope():
     assert ".filter((it)" not in src or "unwrap(payload).filter" in src, (
         ".filter called on a payload without unwrap — likely the 2026-08-31 bug"
     )
+
+
+def test_page_has_submit_all_button(api_client, readonly_key):
+    """The toolbar must expose a 提交全部 (batch submit) control.
+
+    2026-09-06 operator request: one click files every visible pending
+    row that already has a valid unit cost. The button lives in the
+    toolbar (data-act="submit-all") and the JS wires it to
+    submitAllPending(); a live status banner (.op-batch-status) reports
+    filed / skipped / failed counts.
+    """
+    r = api_client.get(
+        "/v2/pages/manual-costs",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.text
+    assert 'data-act="submit-all"' in body, "submit-all button missing"
+    assert "提交全部" in body, "submit-all button label missing"
+    assert 'class="op-batch-status"' in body, "batch status banner missing"
+
+    from pathlib import Path
+
+    js = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "console.js"
+    )
+    src = js.read_text(encoding="utf-8")
+    assert "function submitAllPending()" in src, "console.js missing submitAllPending"
+    assert "function postManualCost(tr)" in src, "console.js missing postManualCost"
+    assert 'submit-all' in src, "console.js must bind [data-act=submit-all]"

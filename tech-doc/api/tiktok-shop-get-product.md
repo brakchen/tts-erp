@@ -136,6 +136,7 @@ curl -sS -H "X-API-Key: $KEY" \
 ```
 
 → 502:
+
 ```json
 {
   "detail": {
@@ -151,7 +152,9 @@ curl -sS -H "X-API-Key: $KEY" \
 
 ```bash
 # commerce.shops has id=314, but integration.credentials
-# has no row for external_account_id='7494763368967603447'
+# has no row for provider='tiktok', external_account_id='7494763368967603447'
+# (note: `integration.credentials.external_account_id` was NOT renamed by
+# ADR-0003 §2.6 — only the commerce-side column became `shop_id`)
 curl -sS -H "X-API-Key: $KEY" \
   "http://127.0.0.1:9877/v2/tiktok-shop/products/1729592969712207008?shop_pk=314"
 ```

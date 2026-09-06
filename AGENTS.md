@@ -15,8 +15,6 @@ Python 3.14 · FastAPI + uvicorn（`:9877`）· SQLAlchemy 2 + psycopg3 · Postg
 - 读数据：`curl http://127.0.0.1:9877/v2/...`（本地直连带端口）
 - 公网域名 `daqiang.nat100.top`（NAT **已 strip 9877 端口**）：给用户的 URL / TikTok 填的 redirect URL /
   文档 curl 示例一律 `http://daqiang.nat100.top/<path>`，不带端口
-- `oauth-receiver` (`:9876`)：v2 不再调用，仅 4 周回滚观察期（~2026-09-26）保留——不要直连它的
-  `oauth_tokens` 表，也不要 HTTP 调它拿 token
 
 ## 2. Commands（命令）
 
@@ -33,7 +31,7 @@ journalctl --user -u tts-erp -n 50                 # systemd 日志
 ```
 
 - schema 变更流程：改 `tts_erp_v2/db/models/` → `python3 scripts/regen_schema.py` 重新生成
-  `schema_tts_erp.sql` / `schema_oauth.sql`（按库拆分；`IF NOT EXISTS` 幂等兼容老库）→ 应用
+  `schema_tts_erp.sql`（`IF NOT EXISTS` 幂等兼容老库）→ 应用
 - API key：`python3 api_keys.py create/list/revoke/rotate`（`--prefix` 定位；明文只创建时打印一次）
 - 签名调试：`TTS_DEBUG_SIGN=1`（TikTok）/ `MIAOSHOU_DEBUG_SIGN=1`（妙手）在 stderr 打 canonical
 - 测试规范：TDD 先写测试再实现；共享 fixtures 在 `tests/conftest.py`（事务回滚隔离、`TEST_%` 哨兵数据）；
@@ -65,8 +63,7 @@ access_token = cred.access_token   # 已解密
 shop_cipher = cred.shop_cipher
 
 # ✗ 错误（都是实测踩过的坑）
-# 直连 oauth_receiver 库的 oauth_tokens 表      # v1 遗物
-# HTTP 调 :9876 oauth-receiver 拿 token        # v2 不跨进程
+# 直连 oauth_receiver 库的 oauth_tokens 表      # v1 遗物（库已 2026-09-05 DROP，备份 backups/oauth_receiver_v1_legacy_*.sql.gz）
 # 自己拿 Fernet key 解密 integration.credentials # 绕过统一实现（掩码/续期/降级会失效）
 ```
 
@@ -128,8 +125,8 @@ curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" \
 
 ## 6. Boundaries（不要碰）
 
-- ❌ 不要直连 oauth_receiver 的 `oauth_tokens` 表 / HTTP 调 :9876 / 自己拿 Fernet key 解密 —— 凭证
-  只能走 `proxy.token_service`（见 §4.1）
+- ❌ 不要直连 v1 `oauth_tokens` 表（库已 DROP，备份 `backups/oauth_receiver_v1_legacy_*.sql.gz`）/
+  不要自己拿 Fernet key 解密 `integration.credentials` —— 凭证只能走 `proxy.token_service`（见 §4.1）
 - ❌ 不要重建 / 依赖 `public.*` v1 遗留表（v2 只读 10 schema；v1 业务表 2026-09-05 已 DROP，归档在
   `/home/schan/backups/tts_erp_public_v1_legacy_*.sql.gz`）。`public` schema 现仅存 v2 基础设施：41 个
   updated_at 触发器依赖的 `public.fn_touch_updated_at()`——删它 = 全库 updated_at 停摆，动之前先确认
@@ -162,7 +159,7 @@ curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" \
 
 systemd user units（`Linger=yes` 开机自启，无需登录）：`tts-erp.service`（uvicorn API，cwd=仓库根，
 `EnvironmentFile=.env`）、`tts-erp-sync.service`（APScheduler worker，安装脚本
-`prod-switch/install-sync-worker.sh`）、`oauth-receiver.service`（观察期保留）、`tts-erp-watchdog.timer`
+`prod-switch/install-sync-worker.sh`）、`tts-erp-watchdog.timer`
 （每 10min 巡检 → `logs/watchdog.log`）。
 
 ```text
@@ -180,7 +177,7 @@ tts_erp_v2/
 └── static/
 
 miaoshou/                # 妙手 SDK 包（独立包：client + miaoshou_signing.py；无 HTTP 路由，进程内用）
-api_keys.py              # key 管理 CLI     schema_tts_erp.sql / schema_oauth.sql   restart.sh
+api_keys.py              # key 管理 CLI     schema_tts_erp.sql   restart.sh
 tests/                   # v2 测试（api/jobs_*/linkage/middleware/proxy/reporting/storage/sync_worker）
 tech-doc/                # 设计文档（external-api.md 端点活契约；analytics/；test-domains.md）
 setup/                   # 用户向 setup 文档（tts-erp.md / analytics-sync.md）

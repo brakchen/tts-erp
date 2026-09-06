@@ -316,7 +316,9 @@ public 降级只读镜像 ──观察期（4 周）──→ ⑤ pg_dump 归档
    > `/home/schan/backups/tts_erp_public_v1_legacy_20260905T110814Z.sql.gz` 后 DROP 19 张 v1 业务表
    > （实为 19 非 24：analytics_* 已由 migration 0004 迁出 analytics schema；oauth 表本就在独立
    > oauth_receiver 库）。`public` schema 保留 `fn_touch_updated_at()`（41 个 v2 updated_at 触发器依赖，
-   > 属 v2 基础设施非 legacy）。oauth_receiver 库未动，届时同样先 dump 再 drop。
+   > 属 v2 基础设施非 legacy）。oauth_receiver 库同样于 2026-09-05 dump 归档（备份
+   > `backups/oauth_receiver_v1_legacy_20260905T134439Z.sql.gz`）后 DROP，凭证单源收口
+   > 到 `integration.credentials`（详见 CHANGELOG 2026-09-05 ops 条目）。
 
 任何一步出问题：新链路停用、旧 cron 拉起即可回退（public 全程未被修改）。
 

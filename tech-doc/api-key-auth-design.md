@@ -10,7 +10,8 @@
 > - 中间件现位于 `tts_erp_v2/middleware/auth.py`（本文 §5.4 的 `tdd/auth.py` 是 v1 位置，已退役）；
 >   v2 另有 `tts_erp_v2/middleware/session_auth.py` 提供浏览器会话 cookie（见 browser-login-design.md）。
 > - `api_keys` 表已迁入 **`security.api_keys`**（九 schema 之一）；本文 §5.2 的 `schema.sql`
->   已于 2026-08-27 拆分为 `schema_tts_erp.sql` / `schema_oauth.sql`。
+>   已于 2026-08-27 拆分为 `schema_tts_erp.sql` / `schema_oauth.sql`，并于 2026-09-05
+>   oauth_receiver 库 DROP 时移除后者、简化为单文件 `schema_tts_erp.sql`。
 > - 豁免清单现为 `/healthz`、`/endpoints`、`/openapi.json`、`/docs`、`/redoc`、
 >   `/docs/oauth2-redirect`、`/v2/auth/{login,logout,me}`（见 v2 中间件 `EXEMPT_PATHS`）。
 > - §5.3 / §6 的端点矩阵基于 v1 路由（`/db/*`、`/orders/*` 等），这些路由已随 v2 硬切换删除；
@@ -43,7 +44,6 @@ tts-erp 当前**无任何鉴权**且监听 `0.0.0.0:9877`。局域网内任何�
 
 - 不做 OAuth2/OIDC/JWT 签发体系（单体内网服务，过度设计）
 - 不做 per-key 限流、IP 白名单（列入后续增强，见 §10）
-- 不改 oauth-receiver:9876（它同样无鉴权，是另一个项目的课题，见 §10）
 - 不做 TLS（内网 HTTP 可接受；如将来经 cpolar 暴露公网，TLS + 鉴权是前置条件，见 §10）
 
 ## 3. 威胁模型
@@ -200,10 +200,10 @@ python3 api_keys.py rotate --prefix ttserp_rw_Kx9vQ2mP         # = create 同名
 
 ## 10. 后续增强（本方案不做，列出备查）
 
-1. **oauth-receiver:9876 同样需要鉴权**——它是 token 的真正源头，裸奔状态下 tts-erp 的 `/token/*` 管得再严也是掩耳盗铃。**建议下一步优先做**。
+1. （2026-09-05 移除：oauth-receiver 项目已整体废弃，其鉴权需求随之消失）
 2. 网络层兜底：`restart.sh` 监听改 `127.0.0.1` + 确需 LAN 访问时加 UFW 来源白名单（与鉴权互补，纵深防御）
 3. per-key 限流（滑动窗口，防单调用方打爆 TikTok 10 QPS 配额）
-4. 如需公网访问：cpolar + TLS 前置，且必须先完成本方案 + oauth-receiver 鉴权
+4. 如需公网访问：cpolar + TLS 前置
 5. key 过期自动轮换提醒（`expires_at` + cron 日报）
 
 ## 11. 文件改动清单（实施时）

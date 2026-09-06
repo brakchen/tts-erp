@@ -204,6 +204,11 @@
       btn.setAttribute("aria-selected", isActive ? "true" : "false");
       btn.classList.toggle("op-tab-active", isActive);
     });
+    // Submit-all is a pending-tab action — hide it elsewhere.
+    var submitAll = $("[data-act=\"submit-all\"]");
+    if (submitAll) submitAll.style.display = name === TAB_PENDING ? "" : "none";
+    var batchStatus = $(".op-batch-status");
+    if (batchStatus) batchStatus.style.display = name === TAB_PENDING ? "" : "none";
     refreshActiveTab();
   }
 
@@ -427,24 +432,30 @@
     if (!_lightbox) {
       _lightbox = document.createElement("div");
       _lightbox.className = "op-lightbox";
-      _lightbox.innerHTML =
-        '<button type="button" class="op-lightbox-close" aria-label="关闭">×</button>' +
-        '<img alt="">';
+      // Build children via DOM API — no innerHTML (static template, and
+      // keeps the audit surface free of innerHTML sinks).
+      var close = document.createElement("button");
+      close.type = "button";
+      close.className = "op-lightbox-close";
+      close.setAttribute("aria-label", "关闭");
+      close.textContent = "×";
+      var lightImg = document.createElement("img");
+      lightImg.alt = "";
+      _lightbox.appendChild(close);
+      _lightbox.appendChild(lightImg);
       // Only a click on the backdrop closes — a click on the enlarged
       // image itself stops propagation so the operator can pan/zoom
       // without accidentally dismissing the preview.
       _lightbox.addEventListener("click", function (ev) {
         if (ev.target === _lightbox) closeLightbox();
       });
-      _lightbox.querySelector("img").addEventListener("click", function (ev) {
+      lightImg.addEventListener("click", function (ev) {
         ev.stopPropagation();
       });
-      _lightbox
-        .querySelector(".op-lightbox-close")
-        .addEventListener("click", function (ev) {
-          ev.stopPropagation();
-          closeLightbox();
-        });
+      close.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        closeLightbox();
+      });
       document.body.appendChild(_lightbox);
     }
     _lightbox.querySelector("img").src = url;
@@ -462,6 +473,18 @@
   }
 
   function submitPending(tr) {
+    // Single-row submit: reuse the shared cost POST but keep the
+    // row-level status semantics (errors stay on the row).
+    return postManualCost(tr).catch(function () {
+      /* status already set on the row */
+    });
+  }
+
+  // POST one row's manual cost. Resolves on success (row is filed);
+  // rejects when the row has no valid unit cost or the server errors —
+  // the caller decides how to surface the failure (single-row keeps it
+  // on the row; submit-all aggregates).
+  function postManualCost(tr) {
     var inputs = tr.querySelectorAll("input[data-k]");
     var body = { spu_id: tr.dataset.ext, currency: "CNY" };
     inputs.forEach(function (i) {
@@ -470,14 +493,14 @@
     var unit = parseFloat(body.unit_cost);
     if (!unit || unit <= 0) {
       setRowStatus(tr, "请输入大于 0 的单位成本", "is-err");
-      return;
+      return Promise.reject(new Error("no cost"));
     }
     tr.classList.add("table-active");
     setRowStatus(tr, "保存中…", "is-saving");
     // 2026-09-05 page-rework lane: manual-costs only. The photo upload
     // flow (spu-images upload-url/PUT/confirm) is gone — the page now
     // renders the TikTok main image from its MinIO mirror instead.
-    api("/v2/reporting/manual-costs", {
+    return api("/v2/reporting/manual-costs", {
       method: "POST",
       body: JSON.stringify(body),
     })
@@ -494,7 +517,60 @@
         var msg = e && e.message ? e.message : String(e);
         setRowStatus(tr, "错误：" + msg, "is-err");
         tr.classList.remove("table-active");
+        throw e;
       });
+  }
+
+  // Submit every visible pending row that has a valid unit cost, one
+  // after another. Serial (not Promise.all) so a page of 100 rows does
+  // not fire 100 parallel POSTs into the per-key rate-limit bucket.
+  // Rows without a cost are left for the operator to fill; the summary
+  // reports how many were filed vs skipped vs failed.
+  function submitAllPending() {
+    var rows = $$("#grid-rows tr[data-ext]");
+    var targets = rows.filter(function (tr) {
+      var input = tr.querySelector("input[data-k=\"unit_cost\"]");
+      var unit = input ? parseFloat(input.value) : NaN;
+      return !!unit && unit > 0;
+    });
+    var skipped = rows.length - targets.length;
+    if (!targets.length) {
+      var banner = $(".op-batch-status");
+      if (banner) {
+        banner.textContent = "没有已填写成本的待提交行（先填写单位成本）";
+        banner.classList.add("is-err");
+      }
+      return;
+    }
+    var btn = $("[data-act=\"submit-all\"]");
+    if (btn) btn.disabled = true;
+    var filed = 0;
+    var failed = 0;
+    var chain = Promise.resolve();
+    targets.forEach(function (tr) {
+      chain = chain
+        .then(function () {
+          return postManualCost(tr);
+        })
+        .then(function () {
+          filed += 1;
+        })
+        .catch(function () {
+          failed += 1;
+        });
+    });
+    chain.then(function () {
+      if (btn) btn.disabled = false;
+      var banner = $(".op-batch-status");
+      if (!banner) return;
+      var msg =
+        "已提交 " + filed + " 行" +
+        (skipped ? " · 跳过 " + skipped + " 行（未填成本）" : "") +
+        (failed ? " · 失败 " + failed + " 行" : "");
+      banner.textContent = msg;
+      banner.classList.toggle("is-err", failed > 0);
+      banner.classList.toggle("is-ok", filed > 0 && failed === 0);
+    });
   }
   // ---------- tab 3: recently filed ----------
   function loadRecent() {
@@ -607,6 +683,11 @@
       search.addEventListener("input", () => {
         costFilter = search.value.trim().toLowerCase();
         applyFilter();
+      });
+    var submitAll = $("[data-act=\"submit-all\"]");
+    if (submitAll)
+      submitAll.addEventListener("click", function () {
+        if (currentTab === TAB_PENDING) submitAllPending();
       });
     loadShops()
       .then(loadMe)

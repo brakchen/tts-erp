@@ -143,6 +143,21 @@ reporting
 
 # 5. 销售域模型
 
+> **2026-09-05 rename (ADR-0003 §2.6 + D1)**：本章字段名按 ADR-0003 拍板的
+> 「一个词一个意思」基准线给出（live DB 已应用，migration 0007）：
+>
+> - 指向某张表**主键**的外键列 = `<业务名>_pk`（如 `shop_pk` 里装的就是 `commerce.shops.id`
+>   的 314 这类内部号）；上游平台给的**业务文本 id** = `<业务名>_id`
+>   （`shop_id` / `order_id` / `spu_id` / `sku_id` = TikTok 的 19 位文本串）；
+> - 涉及范围 = commerce 域 5 张表（§5.1-§5.5） + 跨 8 个模型文件的 FK 列；
+> - `source_*` 时间列在 sales_orders 上**仅本表**做了语义改名（`source_created_at → order_time`、
+>   `source_updated_at → order_modify_time`，即 D1）；
+>   products_spu / products_sku 等保留 `source_created_at` / `source_updated_at`
+>   （与 ADR-0001 时间列约定保持一致）；
+> - procurement / miaoshou / credentials 同名词保留 `external_account_id` /
+>   `external_product_id` / `external_variant_id`（见 §6 / §4.1）—— ADR-0003 范围仅限 commerce；
+> - DB 对象名（约束 / 索引）保持原名（`uq_channel_accounts_platform_ext` 等历史约束名不变）。
+
 ## 5.1 `commerce.shops`
 
 表示 TikTok Shop 店铺账户。
@@ -150,7 +165,7 @@ reporting
 ```text
 id bigint PK
 platform text
-external_account_id text
+shop_id text                       -- 2026-09-05 前 = external_account_id
 account_name text
 region text
 seller_type text
@@ -158,15 +173,14 @@ status text
 credential_id bigint FK
 source_updated_at timestamptz
 synced_at timestamptz
+updated_at timestamptz             -- 触发器自动更新（fn_touch_updated_at）
 ```
 
 约束：
 
 ```text
-UNIQUE (platform, external_account_id)
+UNIQUE (platform, shop_id)
 ```
-
-现有 `shops` 应迁移到这张表。
 
 OAuth Token 不应存放在店铺表中，而应属于 `integration.credentials`（经 `credential_id` 关联）。
 
@@ -178,22 +192,23 @@ OAuth Token 不应存放在店铺表中，而应属于 `integration.credentials`
 
 ```text
 id bigint PK
-shop_pk bigint FK
-external_product_id text
+shop_pk bigint FK                  -- 2026-09-05 前 = channel_account_id
+spu_id text                        -- 2026-09-05 前 = external_product_id
 title text
 category_id text
 status text
 main_image_url text
-source_created_at timestamptz
+source_created_at timestamptz     -- 时间列语义保持 ADR-0001 约定
 source_updated_at timestamptz
 raw_record_id bigint
 synced_at timestamptz
+updated_at timestamptz
 ```
 
 约束：
 
 ```text
-UNIQUE (shop_pk, external_product_id)
+UNIQUE (shop_pk, spu_id)
 ```
 
 ## 5.3 `commerce.products_sku`
@@ -202,8 +217,8 @@ UNIQUE (shop_pk, external_product_id)
 
 ```text
 id bigint PK
-spu_pk bigint FK
-external_variant_id text
+spu_pk bigint FK                   -- 2026-09-05 前 = channel_product_id
+sku_id text                        -- 2026-09-05 前 = external_variant_id
 seller_sku text
 variant_name text
 attributes jsonb
@@ -212,33 +227,35 @@ status text
 source_updated_at timestamptz
 raw_record_id bigint
 synced_at timestamptz
+updated_at timestamptz
 ```
 
 约束：
 
 ```text
-UNIQUE (spu_pk, external_variant_id)
+UNIQUE (spu_pk, sku_id)
 ```
 
 ## 5.4 `commerce.sales_orders`
 
 ```text
 id bigint PK
-shop_pk bigint FK
-order_id text
+shop_pk bigint FK                  -- 2026-09-05 前 = channel_account_id
+order_id text                      -- 2026-09-05 前 = external_order_id
 status text
 currency text
 payment_amount numeric(20,4)
 total_amount numeric(20,4)
 fulfillment_type text
-source_created_at timestamptz
-source_updated_at timestamptz
+order_time timestamptz             -- D1：2026-09-05 前 = source_created_at
+order_modify_time timestamptz      -- D1：2026-09-05 前 = source_updated_at
 paid_at timestamptz
 shipped_at timestamptz
 delivered_at timestamptz
 cancelled_at timestamptz
 raw_record_id bigint
 synced_at timestamptz
+updated_at timestamptz
 ```
 
 约束：
@@ -251,10 +268,10 @@ UNIQUE (shop_pk, order_id)
 
 ```text
 id bigint PK
-order_pk bigint FK
-external_line_id text
-spu_pk bigint FK NULL
-sku_pk bigint FK NULL
+order_pk bigint FK                  -- 2026-09-05 前 = sales_order_id
+external_line_id text               -- 订单行外键仍用 external_* 前缀（行是订单来源实体的一部分）
+spu_pk bigint FK NULL              -- 2026-09-05 前 = channel_product_id
+sku_pk bigint FK NULL              -- 2026-09-05 前 = channel_product_variant_id
 external_product_id_snapshot text
 external_variant_id_snapshot text
 product_name_snapshot text
@@ -266,6 +283,7 @@ currency text
 line_status text
 raw_record_id bigint
 synced_at timestamptz
+updated_at timestamptz
 ```
 
 约束：
@@ -277,6 +295,11 @@ UNIQUE (order_pk, external_line_id)
 订单行同时关联 TikTok 商品和 SKU。
 
 如果同步订单时商品尚未同步完成，允许正式外键暂时为空，但必须保留外部 ID，并写入 `integration.sync_issues`。后续通过精确外部 ID 补齐，不允许通过标题自动绑定。
+
+> **API 层（D3）**：sales_order_lines 的响应字段同步改名
+> （`channel_product_id → spu_pk`、`channel_product_variant_id → sku_pk`）；
+> 但 `external_line_id` / `external_product_id_snapshot` 等 `external_*`
+> 快照列保留原名（与 ADR-0003 §2.6 范围一致——快照列属业务命名，不在本轮）。
 
 ---
 
@@ -829,42 +852,49 @@ linkage.effective_product_links
 
 # 12. 总体关系图
 
+> **2026-09-05 rename（ADR-0003 §2.6）**：图中的 `CHANNEL_ACCOUNT` /
+> `CHANNEL_PRODUCT` / `CHANNEL_VARIANT` 对应 commerce 域新表名
+> `commerce.shops` / `commerce.products_spu` / `commerce.products_sku`
+> （`channel_*` 前缀已由 ORM 类 `ChannelAccount` / `ChannelProduct` /
+> `ChannelProductVariant` 保留作为 Python 类名，DB 表名去前缀）。
+> PROCUREMENT_* 对应 procurement schema 原表名。
+
 ```mermaid
 erDiagram
-    CHANNEL_ACCOUNT ||--o{ CHANNEL_PRODUCT : owns
-    CHANNEL_PRODUCT ||--o{ CHANNEL_VARIANT : contains
-    CHANNEL_ACCOUNT ||--o{ SALES_ORDER : receives
-    SALES_ORDER ||--o{ SALES_ORDER_LINE : contains
-    CHANNEL_PRODUCT ||--o{ SALES_ORDER_LINE : sold_as
-    CHANNEL_VARIANT ||--o{ SALES_ORDER_LINE : optionally_sold_as
+    commerce_shops ||--o{ commerce_products_spu : owns
+    commerce_products_spu ||--o{ commerce_products_sku : contains
+    commerce_shops ||--o{ commerce_sales_orders : receives
+    commerce_sales_orders ||--o{ commerce_sales_order_lines : contains
+    commerce_products_spu ||--o{ commerce_sales_order_lines : sold_as
+    commerce_products_sku ||--o{ commerce_sales_order_lines : optionally_sold_as
 
-    PROCUREMENT_ACCOUNT ||--o{ PROCUREMENT_PRODUCT : owns
-    PROCUREMENT_PRODUCT ||--o{ PROCUREMENT_VARIANT : contains
-    PROCUREMENT_ACCOUNT ||--o{ PURCHASE_ORDER : receives
-    PURCHASE_ORDER ||--o{ PURCHASE_ORDER_LINE : contains
-    PROCUREMENT_PRODUCT ||--o{ PURCHASE_ORDER_LINE : purchased_as
-    PROCUREMENT_VARIANT ||--o{ PURCHASE_ORDER_LINE : optionally_purchased_as
+    procurement_accounts ||--o{ procurement_products : owns
+    procurement_products ||--o{ procurement_product_variants : contains
+    procurement_accounts ||--o{ purchase_orders : receives
+    purchase_orders ||--o{ purchase_order_lines : contains
+    procurement_products ||--o{ purchase_order_lines : purchased_as
+    procurement_product_variants ||--o{ purchase_order_lines : optionally_purchased_as
 
-    PROCUREMENT_ACCOUNT ||--o{ ACCOUNT_LINK : participates
-    CHANNEL_ACCOUNT ||--o{ ACCOUNT_LINK : participates
+    procurement_accounts ||--o{ account_links : participates
+    commerce_shops ||--o{ account_links : participates
 
-    PROCUREMENT_PRODUCT ||--o{ PRODUCT_LINK : source
-    CHANNEL_PRODUCT ||--o{ PRODUCT_LINK : target
-    PRODUCT_LINK ||--o{ LINK_EVIDENCE : supported_by
+    procurement_products ||--o{ product_links : source
+    commerce_products_spu ||--o{ product_links : target
+    product_links ||--o{ link_evidence : supported_by
 
-    PROCUREMENT_VARIANT ||--o{ VARIANT_LINK : source
-    CHANNEL_VARIANT ||--o{ VARIANT_LINK : target
+    procurement_product_variants ||--o{ variant_links : source
+    commerce_products_sku ||--o{ variant_links : target
 
-    SALES_ORDER ||--o{ SHIPMENT : fulfilled_by
-    SHIPMENT ||--o{ SHIPMENT_LINE : contains
-    SALES_ORDER_LINE ||--o{ SHIPMENT_LINE : ships
-    SHIPMENT ||--o{ TRACKING_EVENT : produces
+    commerce_sales_orders ||--o{ shipments : fulfilled_by
+    shipments ||--o{ shipment_lines : contains
+    commerce_sales_order_lines ||--o{ shipment_lines : ships
+    shipments ||--o{ tracking_events : produces
 
-    SALES_ORDER ||--o{ AFTER_SALES_CASE : has
-    AFTER_SALES_CASE ||--o{ AFTER_SALES_LINE : contains
-    SALES_ORDER_LINE ||--o{ AFTER_SALES_LINE : affects
+    commerce_sales_orders ||--o{ cases : has
+    cases ||--o{ case_lines : contains
+    commerce_sales_order_lines ||--o{ case_lines : affects
 
-    CHANNEL_PRODUCT ||--o{ PRODUCT_COST_SNAPSHOT : receives
+    commerce_products_spu ||--o{ product_cost_snapshots : receives
 ```
 
 ---

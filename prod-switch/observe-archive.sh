@@ -2,6 +2,12 @@
 # observe-archive.sh — 4 周观察期结束后的归档操作
 # 用法：bash /home/schan/tts-erp/prod-switch/observe-archive.sh
 # 前置：观察期内无回滚、无 sync_issues 异常增长
+#
+# ⚠️ 2026-09-05 状态：本次 oauth_receiver 库清理已按本脚本设计的全部动作手动执行
+# （dump 备份 → 拆 systemd unit → 清理 .env OAUTH_* → 删 schema_oauth.sql →
+#  regen_schema.py 单库化 → DROP DATABASE → 更新文档）。脚本本身保留作
+# 未来类似收尾的 SOP 模板；oauth-receiver.service 已不存在，脚本内停服务 /
+# disable 段运行时会报 unit not found 但被 || true 包裹不影响退出。
 set -euo pipefail
 
 REPO=/home/schan/tts-erp

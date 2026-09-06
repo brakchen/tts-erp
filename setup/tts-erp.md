@@ -10,7 +10,7 @@
 | [`../README.md`](../README.md) | v2 架构 / 同步 / 鉴权 / 调试 / 已知问题 |
 | [`../AGENTS.md`](../AGENTS.md) | AI agent 操作指南（HMAC 签名、凭证单源、DO/DON'T） |
 | [`../tech-doc/external-api.md`](../tech-doc/external-api.md) | v2 端点契约（活契约；任何外部对接以此为准） |
-| [`../tech-doc/data-model-target-v3.md`](../tech-doc/data-model-target-v3.md) | 10 schema / 60 表 V3 真理源 |
+| [`../tech-doc/data-model-target-v3.md`](../tech-doc/data-model-target-v3.md) | 10 schema / 37 表 + 2 view V3 真理源（2026-09-05 按 ADR-0003 §2.6 同步） |
 | [`../tech-doc/api-key-auth-design.md`](../tech-doc/api-key-auth-design.md) | API key 鉴权设计 |
 | [`../tech-doc/browser-login-design.md`](../tech-doc/browser-login-design.md) | 浏览器 cookie 会话设计 |
 | [`../tech-doc/refactor-tech-plan-v2.md`](../tech-doc/refactor-tech-plan-v2.md) | v2 重构技术方案（已实施） |
@@ -23,13 +23,11 @@ v2 由 systemd user 单元托管（`~/.config/systemd/user/`，`Linger=yes`，�
 
 - `tts-erp.service` — `tts_erp_v2/app:app`（FastAPI/uvicorn，端口 9877）
 - `tts-erp-sync.service` — `tts_erp_v2.sync_worker.main`（APScheduler 同步）
-- `oauth-receiver.service` — **仅 4 周回滚观察期保留**（自 v2 切流 2026-08-29 起）
 - `tts-erp-watchdog.timer` — 同步巡检（每 10min 跑 `scripts/watchdog_sync.py`）
 
 ```bash
 systemctl --user status tts-erp.service        # v2 API
 systemctl --user status tts-erp-sync.service   # sync-worker
-systemctl --user status oauth-receiver.service # 4 周观察期内保留
 systemctl --user restart tts-erp.service       # 等价 restart.sh
 systemctl --user restart tts-erp-sync.service  # 改了 jobs/ 或 sync_worker/ 后必须单独跑
 

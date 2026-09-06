@@ -313,6 +313,20 @@ _PAGE_HTML = """<!doctype html>
       flex-wrap: wrap;
     }
     .op-search, .op-pp { display: inline-flex; align-items: center; gap: 10px; }
+    .op-toolbar-spacer { flex: 1; }
+    .op-btn-primary[data-act="submit-all"] { padding: 6px 14px; }
+    .op-btn-primary[data-act="submit-all"]:disabled { background: var(--rule); color: var(--paper); cursor: wait; }
+    /* Batch submit result banner (submit-all) */
+    .op-batch-status {
+      font-family: var(--sans);
+      font-size: 12px;
+      letter-spacing: 0;
+      text-transform: none;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .op-batch-status.is-ok { color: var(--ok); }
+    .op-batch-status.is-err { color: var(--danger); }
     .op-input {
       font-family: var(--sans);
       font-size: 13px;
@@ -619,6 +633,11 @@ _PAGE_HTML = """<!doctype html>
           <option>100</option>
         </select>
       </label>
+      <span class="op-toolbar-spacer" aria-hidden="true"></span>
+      <button type="button" class="op-btn-primary" data-act="submit-all" aria-label="一次性提交所有已填写成本的行">
+        提交全部
+      </button>
+      <span class="op-batch-status" role="status" aria-live="polite"></span>
     </div>
 
     <div class="op-table-wrap">

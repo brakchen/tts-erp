@@ -1,9 +1,30 @@
 # handoff.md — tts-erp 跨 session 交接笔记
 
-> 上次 session: 2026-09-05（v1 public.*归档删除；另有 analytics.ad_product_links 视图 lane）
-> 上次 session 主题: 删除 v1 遗留 public.* 业务表（19 张 DROP），official dump-then-drop 流程
+> 上次 session: 2026-09-05（v1 oauth_receiver 库 DROP + public.* 19 张业务表归档）
+> 上次 session 主题: v1 oauth_receiver 库整体废弃并 DROP（提前 21 天结束 4 周观察期）+ 配套清理
 
-## TL;DR (2026-09-05)
+## TL;DR (2026-09-05 oauth_receiver DROP)
+
+**v1 `oauth_receiver` 库已按官方流程整体废弃并 DROP**（AGENTS.md 原计划保留至 ~09-26，
+本次 2026-09-05 提前收口）：
+
+1. 归档：`/home/schan/backups/oauth_receiver_v1_legacy_20260905T134439Z.sql.gz`（3.1KB，
+   含 `DROP TABLE IF EXISTS public.oauth_tokens` + `CREATE TABLE`，可完整恢复）。
+2. 凭证单源已完全收口到 `integration.credentials`（tiktok/7494763368967603447 Bridge nook +
+   miaoshou/ak_... 均已就位且 scope 齐全）——v1 oauth_receiver 库失去回滚价值。
+3. 拆 systemd unit + `.env` 的 `OAUTH_DB_URL` / `OAUTH_DB_ENCRYPTION_KEY` 两行
+   （`TTS_ERP_FERNET_KEY` 是同一 Fernet key，保留不动）+ 删 `schema_oauth.sql` +
+   `scripts/regen_schema.py` 单库化。
+4. **CHANGELOG / AGENTS.md / setup/tts-erp.md / tech-doc/api-key-auth-design.md /
+   tech-doc/analytics/reorg-plan.md 已同步**。`tech-doc/_archive/` 与 ADR 历史保留。
+5. **回滚路径**：恢复 oauth-receiver 库 + 跑 `tech-doc/_archive/migrate-v1-to-v2-2026-08-29/
+   scripts/re_encrypt_credentials.py` 把 legacy 格式转回 v2 envelope + 恢复 .env / unit。
+6. 验证：`bash scripts/test.sh fast` exit=0 全绿；`:9877/healthz` 返 `ok/enforce`；sync-worker
+   进程无崩溃（已跑 5112 jobs 历史）。
+7. ⚠️ 测试稳定性预存问题（CHANGELOG 9-5 fix 条目已记录，间歇性偶发，master HEAD 预存，
+   与本次清理无关）——不需要重做。
+
+## TL;DR (2026-09-05 public.* DROP)
 
 **v1 `public.*` 遗留层已按官方流程归档删除**（观察期提前收口，原定 ~09-26）：
 
@@ -11,7 +32,8 @@
 2. DROP 19 张 v1 业务表 + 3 个孤儿函数；`schema_tts_erp.sql` 重生成（-839 行）。
 3. **不要动 `public` schema 和 `public.fn_touch_updated_at()`** —— 41 个 v2 updated_at 触发器依赖它
    （migration 0001；`tests/db/test_time_fields_convention.py` 锁定）。
-4. oauth_receiver（独立库 :5432/oauth_receiver）未动，仍按原观察期 ~09-26 保留。
+4. ~~oauth_receiver（独立库 :5432/oauth_receiver）未动，仍按原观察期 ~09-26 保留。~~
+   **2026-09-05 同日已 DROP**，见上一段 "TL;DR (2026-09-05 oauth_receiver DROP)"。
 
 ## TL;DR (2026-08-31)
 

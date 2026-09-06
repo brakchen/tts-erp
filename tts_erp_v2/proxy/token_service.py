@@ -24,8 +24,10 @@ What we do NOT carry over
 Encryption key
 --------------
 The Fernet key is read from ``TTS_ERP_FERNET_KEY``. We do NOT read
-``OAUTH_DB_ENCRYPTION_KEY`` (the legacy name) — that env var is
-operator-owned by oauth-receiver; tts-erp-v2 owns its own.
+``OAUTH_DB_ENCRYPTION_KEY`` (the legacy name from the v1 oauth-receiver
+service, retired and dropped on 2026-09-05; see CHANGELOG ops entry).
+tts-erp-v2 owns its own key via the ``integration.credentials`` table
+single source of truth (see AGENTS.md §4.1).
 """
 
 from __future__ import annotations

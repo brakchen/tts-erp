@@ -19,6 +19,7 @@ If the inner callable raises, :func:`run_job`:
 Note: ``session.commit()`` is called inside the helper. Callers should
 NOT commit again (the helper manages transaction boundaries).
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable

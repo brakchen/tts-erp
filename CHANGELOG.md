@@ -43,6 +43,43 @@ review 回修，口径仍以 `tech-doc/analytics/spu-real-roi-dashboard.md` §4/
 - **测试** `tests/api/test_spu_roi_api.py`（14 个：auth / 单 SPU 口径精确断言 / MANUAL 成本 / include_all / 分页排序 / totals 加总一致 / meta / 页面契约）。
 - **文档**：external-api.md TL;DR + 正文一节 + Stability matrix（stable 只读）。
 
+## 2026-09-05 (ops) — v1 `oauth_receiver` 库整体废弃并 DROP（提前 21 天结束 4 周观察期）
+
+凭证单源已完全收口到 `integration.credentials`（2 行：tiktok/7494763368967603447 Bridge nook +
+miaoshou/ak_... 均已就位且 scope 齐全），v1 oauth_receiver 库失去回滚价值，按 owner 决策
+**提前结束观察期**（AGENTS.md 原计划保留至 ~2026-09-26，本次 2026-09-05 即清理）。
+
+### 执行步骤（先 dump 后拆引用再 DROP）
+
+- **dump 归档**：`backups/oauth_receiver_v1_legacy_20260905T134439Z.sql.gz`（3.1KB，
+  gz 校验通过，含 `DROP TABLE IF EXISTS public.oauth_tokens` + `CREATE TABLE` —
+  可完整恢复到 fresh DB）。
+- **systemd unit**：`oauth-receiver.service` 在 v2 切流后已 inactive/disabled，删
+  `~/.config/systemd/user/oauth-receiver.service` + `daemon-reload`，unit 文件已不存在。
+  源仓库 `/home/schan/oauth-receiver/`（独立 v1 git repo）按 AGENTS.md 「v1 代码留在
+  git history」策略保留。
+- **`.env`**：删 `OAUTH_DB_URL` / `OAUTH_DB_ENCRYPTION_KEY` 两行（v2 canonical
+  `TTS_ERP_FERNET_KEY` 是同一 Fernet key，保留不动；备份 `.env.bak.<ts>` 留存）。
+- **`scripts/regen_schema.py`**：去掉 oauth 段，单库化为只生成 `schema_tts_erp.sql`。
+  删除 `schema_oauth.sql`。
+- **`DROP DATABASE`**：`DROP DATABASE IF EXISTS oauth_receiver WITH (FORCE)` 成功；
+  验证 tts_erp 库 40 张表（含 alembic_version + 2 view）完好。
+- **文档**：`AGENTS.md` §1/§2/§4.1/§6/§8 移除 oauth-receiver 引用，保留 §4.1/§6 的
+  「直连 oauth_tokens 表 / 自己解密 integration.credentials」踩坑教训并指向备份路径；
+  `setup/tts-erp.md` 进程托管段移除；`tech-doc/analytics/reorg-plan.md` §5.8
+  标注 schema_oauth.sql 已删；`tech-doc/api-key-auth-design.md` §10 移除
+  oauth-receiver 鉴权前瞻项。
+- **CHANGELOG 老条目 / `tech-doc/_archive/` / `tech-doc/adr/`** 历史记录**不动**——
+  按惯例历史日志只追加不修改，归档区只读不恢复。
+
+### 风险披露
+
+- AGENTS.md §1/§8 此前明确「4 周观察期（~2026-09-26）保留」，本次提前 21 天收口。
+- 若 v2 凭证单源（integration.credentials + token_service）出问题要回滚 v1，需：
+  1. `gunzip backups/oauth_receiver_v1_legacy_20260905T134439Z.sql.gz | docker exec -i postgres psql -U postgres -d postgres`（先 CREATE DATABASE oauth_receiver）
+  2. 跑 `tech-doc/_archive/migrate-v1-to-v2-2026-08-29/scripts/re_encrypt_credentials.py` 把 legacy 格式转回 v2 envelope
+  3. 恢复 oauth-receiver.service unit + .env 的 OAUTH_* 两行
+
 ## 2026-09-05 (refactor) — commerce 域命名重构上线（ADR-0003，live 已应用 migration 0007）
 
 按 ADR-0003 §2.6 + D1 拍板实施，**live 库已 ALTER 并验证**：

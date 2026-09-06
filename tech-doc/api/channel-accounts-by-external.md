@@ -15,8 +15,14 @@ GET /v2/commerce/channel-accounts/by-external/{shop_id}
 
 | Component | In | Required | Type | Notes |
 | --- | --- | --- | --- | --- |
-| `external_account_id` | path | yes | string | Upstream shop_id (e.g. TikTok shop_id). Example: `7494763368967603447`. |
-| `platform` | query | no | string, ≤ 32 chars | Default `"tiktok"`. **Required for uniqueness** — `external_account_id` is only unique within a platform, not globally. |
+| `shop_id` | path | yes | string | Upstream shop_id (e.g. TikTok shop_id). Example: `7494763368967603447`. |
+| `platform` | query | no | string, ≤ 32 chars | Default `"tiktok"`. **Required for uniqueness** — `shop_id` is only unique within a platform, not globally. |
+
+> **2026-09-05 rename**: path param was historically documented as
+> `external_account_id` (when `commerce.shops` had that column). Per
+> ADR-0003 §2.6 the column was renamed to `shop_id` and the path parameter
+> followed. This doc is the spec — the path is `/by-external/{shop_id}`
+> regardless of the historical column name.
 
 ---
 
@@ -37,7 +43,7 @@ A single `ChannelAccountOut` (see `tts_erp_v2/api/schemas.py`):
 {
   "id": 314,
   "platform": "tiktok",
-  "external_account_id": "7494763368967603447",
+  "shop_id": "7494763368967603447",
   "account_name": "Bridge nook",
   "region": "VN",
   "seller_type": "CROSS_BORDER",
@@ -54,10 +60,10 @@ A single `ChannelAccountOut` (see `tts_erp_v2/api/schemas.py`):
 
 | Status | When | `detail` body |
 | --- | --- | --- |
-| **200** | row matches `(platform, external_account_id)` | the `ChannelAccountOut` object |
+| **200** | row matches `(platform, shop_id)` | the `ChannelAccountOut` object |
 | **401** | missing / invalid / disabled API key | (auth middleware JSON `{"detail": "..."}`) |
 | **403** | key role < readonly | (auth middleware JSON `{"detail": "requires readonly"}`) |
-| **404** | no row matches | `{"detail": "channel account not found for platform='tiktok' external_account_id='XYZ'"}` |
+| **404** | no row matches | `{"detail": "channel account not found for platform='tiktok' shop_id='XYZ'"}` |
 
 ---
 
@@ -81,7 +87,7 @@ curl -sS -H "X-API-Key: $KEY" \
 
 → 200 if a miaoshou row with that external id exists, 404 otherwise.
 
-### 5.3 Unknown external_account_id
+### 5.3 Unknown shop_id
 
 ```bash
 curl -sS -H "X-API-Key: $KEY" \
@@ -89,9 +95,10 @@ curl -sS -H "X-API-Key: $KEY" \
 ```
 
 → 404:
+
 ```json
 {
-  "detail": "channel account not found for platform='tiktok' external_account_id='DOES_NOT_EXIST'"
+  "detail": "channel account not found for platform='tiktok' shop_id='DOES_NOT_EXIST'"
 }
 ```
 

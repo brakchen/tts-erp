@@ -42,21 +42,22 @@
 └──────────────────────────────────────────────────────────────────┘
                        │              │              │
                        ▼              ▼              ▼
-              ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-              │ TikTok Shop   │ │ 妙手开放平台  │ │  oauth-       │
-              │ Open API      │ │ openapi.     │ │ receiver     │
-              │ (202309)      │ │ wanshifu.com │ │ :9876 (保留   │
-              └──────────────┘ └──────────────┘ │  4 周回滚窗) │
-                                                 └──────────────┘
+              ┌──────────────┐ ┌──────────────┐
+              │ TikTok Shop   │ │ 妙手开放平台  │
+              │ Open API      │ │ openapi.     │
+              │ (202309)      │ │ wanshifu.com │
+              └──────────────┘ └──────────────┘
 ```
 
-> **oauth-receiver** 在 v2 中不再被 tts-erp 直接 HTTP 调用 — token 加解密由
-> `tts_erp_v2/proxy/token_service.py` 通过 `oauth_receiver_core.py` **in-process** 完成。
-> 端口 9876 还活着只是为了 4 周观察期内的紧急回滚（脚本见 `prod-switch/rollback.sh`）。
+> **凭证单源（`integration.credentials` + `tts_erp_v2/proxy/token_service.py`）**：
+> token 加解密 / 续期全 in-process 完成，无需任何独立 oauth-receiver 服务
+> （v1 oauth-receiver 库 + systemd unit 已于 2026-09-05 整体废弃并 DROP，
+> 备份 `backups/oauth_receiver_v1_legacy_*.sql.gz`）。
 
-## 数据模型（10 schema / 60 表 + 1 view）
+## 数据模型（10 schema / 37 表 + 2 view）
 
-权威定义：[`tech-doc/data-model-target-v3.md`](tech-doc/data-model-target-v3.md)
+权威定义：[`tech-doc/data-model-target-v3.md`](tech-doc/data-model-target-v3.md)（2026-09-05
+按 ADR-0003 §2.6 同步，commerce 域列名已更新到 live DB）
 
 | Schema | 域 | 代表表 |
 | --- | --- | --- |
@@ -70,7 +71,11 @@
 | `reporting` | 利润/成本快照 | `product_cost_snapshots`, `product_profit_daily`, `shipment_tracking_summary` |
 | `security` | API key | `api_keys` |
 
-外加 1 个 view：`linkage.effective_product_links`（product_links + link_overrides 的并集）
+外加 1 张 analytics 表 `ad_raw`（source-of-truth）+ 2 个 view：
+`analytics.ad_product_links`（ad×SPU 关联）和 `linkage.effective_product_links`
+（product_links + link_overrides 的并集）。2026-09-05 analytics reorg 后
+`ad_records` / `ad_daily_completeness` / `ad_shop_timezones` / `ad_audit_log`
+4 张派生表已 drop（详见 `tech-doc/analytics/reorg-plan.md`）。
 
 ## 快速开始
 
@@ -78,7 +83,7 @@
 
 所有 v2 读端点查的是**本地 PG 新 schema**（不打上游 TikTok），过滤参数是**内部 id**
 （`shop_pk` / `spu_pk`），不是 `shop_id` —— 传了也会被 FastAPI 静默忽略。
-先用 external_account_id（即 TikTok shop_id）查出内部 id：
+先用 `shop_id`（即 TikTok shop_id 19 位文本串）查出内部 id：
 
 ```bash
 # 0. 店铺 → 内部 shop_pk（当前生产：7494763368967603447 → 314）
@@ -118,8 +123,10 @@ curl -X POST -H "Authorization: Bearer <admin_key>" \
 
 完整端点列表见 [`tech-doc/external-api.md`](tech-doc/external-api.md) 或 `GET /endpoints`。
 
-> **legacy 端点 `/orders/*`, `/finance/*`, `/db/*`, `/sync/*`, `/miaoshou/*` 在 v2 已删除**。
-> v1 数据保留在 `public.*`（4 周观察期内可回滚，过期后归档 — 见 `prod-switch/observe-archive.sh`）。
+> **legacy 端点 `/orders/*`, `/finance/*`, `/db/*`, `/sync/*`, `/miaoshou/*` 在 v2 已删除（404）**。
+> v1 业务表（`public.*` 19 张）已于 2026-09-05 提前归档并 DROP
+> （原计划保留 4 周观察期 ~09-26，本次提前收口）；备份
+> `/home/schan/backups/tts_erp_public_v1_legacy_*.sql.gz`。
 
 ## 同步（sync-worker，APScheduler）
 
@@ -140,7 +147,7 @@ sync-worker 是独立 systemd 单元（`tts-erp-sync.service`），与 api 平�
 | `miaoshou.move_collect` | /moveCollect/list | 每 30 min（搬家任务） |
 | `reporting.cost_snapshots` | `tts_erp_v2/jobs/reporting.py` | 每 6h（成本输入变化慢） |
 | `reporting.profit_daily` | `tts_erp_v2/jobs/reporting.py` | 每 1h（重建当日+昨日 UTC） |
-| `analytics.retention` | ad_audit_log / ad_raw TTL | 每 1 d（日级，2026-09-02 上线） |
+| `analytics.retention` | ad_audit_log / ad_raw TTL | ~~每 1 d~~（2026-09-05 摘除：ad_raw append-only / ad_audit_log 已 drop；详见 `tech-doc/analytics/reorg-plan.md`） |
 
 **未接入调度的 job**（代码在库、未注册进 `JOBS`）：
 
@@ -186,10 +193,10 @@ key 管理：`python3 api_keys.py create --role <role> --name <name>`（另有 `
 ## 本地数据
 
 - **一个库**：`tts_erp`（docker 容器 `postgres`，5432）
-- **10 schema**：`integration` / `commerce` / `procurement` / `fulfillment` / `after_sales` / `finance` / `linkage` / `reporting` / `security` / `analytics`
-- **60 张表 + 1 view**：v2 schema 40 张 + 19 张 `public.*` legacy（4 周观察期内可回滚，过期后归档）+ 1 张 `public.alembic_version`；view = `linkage.effective_product_links`。见 [`tech-doc/data-model-target-v3.md`](tech-doc/data-model-target-v3.md)
+- **10 schema + 1 public**：`integration` / `commerce` / `procurement` / `fulfillment` / `after_sales` / `finance` / `linkage` / `reporting` / `security` / `analytics`；外加 `public` schema 仅存 `alembic_version`（v2 迁移基础设施）。
+- **37 张表 + 2 view + 1 alembic_version**：v2 业务表 37 张（跨 10 schema）+ `analytics.ad_raw` source-of-truth 表；view = `analytics.ad_product_links` + `linkage.effective_product_links`。2026-09-05 analytics reorg 后 4 张派生表已 drop（详见 `tech-doc/analytics/reorg-plan.md`）。见 [`tech-doc/data-model-target-v3.md`](tech-doc/data-model-target-v3.md)
 - **Alembic 迁移**：`alembic/versions/20260829_init_nine_schemas.py`（初始 10 schema；文件名仍含 `nine` 是历史命名，`upgrade head` 会按 mtimes 应用），`alembic upgrade head` 应用
-- **旧 public.* 保留** 4 周观察期后归档 — 见 `prod-switch/observe-archive.sh`
+- **v1 业务表 `public.*`** 已于 2026-09-05 提前归档并 DROP（原计划保留 4 周观察期 ~09-26，本次提前收口；备份 `/home/schan/backups/tts_erp_public_v1_legacy_*.sql.gz`）
 
 ## 安装 / 部署
 
@@ -209,15 +216,11 @@ systemctl --user start tts-erp-sync.service    # v2 sync-worker
 
 ## 生产切换
 
-6 个独立脚本，每个都可单独执行 / 单独回滚（见 [`prod-switch/`](prod-switch/)）：
+v2 切流已于 **2026-08-29 完成**，并于 **2026-09-05 完成 v1 整体归档**（oauth_receiver 库 DROP + public.* 19 张 v1 业务表归档 DROP）。`prod-switch/` 目录仍保留作历史脚本与回滚 SOP（如需）：
 
 ```bash
-bash prod-switch/preflight.sh              # 6 项硬性自检
-bash prod-switch/install-sync-worker.sh     # 一次性：装 systemd 单元
-bash prod-switch/switch-to-v2.sh            # 切到 v2（自动 rollback 失败）
 bash prod-switch/postswitch-smoke.sh        # 7 项冒烟（healthz/auth/角色/CORS/manual-costs/v2 端点/PG 连接数）
-bash prod-switch/observe-archive.sh         # 4 周后：停 :9876 + 改 public.* 名为 _deprecated_*
-bash prod-switch/rollback.sh                # 紧急：回到 v1 旧栈
+bash prod-switch/rollback.sh                # 历史脚本：紧急回到 v1 旧栈（v1 库已 DROP，不可回滚；脚本仅供查阅）
 ```
 
 ## 开发方式：TDD
@@ -275,9 +278,12 @@ MIAOSHOU_DEBUG_SIGN=1 .venv/bin/python -c "from miaoshou.miaoshou_signing import
 - **`/miaoshou/callback/*` 在 v2 已无路由（实测 404）**：回调派发代码仍在 `miaoshou/callbacks/`，
   auth 中间件也仍把该前缀分类为公开路径，但 v2 app 从未挂载回调 router。妙手若仍在推送，
   这些 webhook 实际已无人接收；要恢复需把 router 挂回 v2 app 并单独 review。
-- **回滚 4 周后撤 oauth-receiver**：v2 不依赖 :9876，但 rollback 脚本需要它在 4 周内保持运行。
 - **`/returns/*` 和 `/cancellations/*` 不接 CREATE 写端点**：避免在真实店铺创建退货/取消单。详见 `AGENTS.md` §4。
 - **`/reverse/202309/*` 不存在**：TikTok 202309 spec 没开放 reverse logistics 模块（HTTP 404 at CDN）。
+- **oauth-receiver :9876 已 DROP**（2026-09-05）：凭证全部走 `integration.credentials` +
+  `tts_erp_v2/proxy/token_service.py`；不再有任何外部服务拿 token。如需回滚 v1 凭证源，
+  从备份 `backups/oauth_receiver_v1_legacy_*.sql.gz` 恢复 + 重跑
+  `tech-doc/_archive/migrate-v1-to-v2-2026-08-29/scripts/re_encrypt_credentials.py` 转回 v2 envelope。
 
 ## 相关
 

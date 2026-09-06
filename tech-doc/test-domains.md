@@ -7,7 +7,7 @@ for the full ~10k LOC run.
 ## Why split?
 
 - **Speed.** A typical `pytest` over everything takes minutes because
-  the suite touches 36 migration tables + the FastAPI app + SDKs. A
+  the suite touches 37 business tables + the FastAPI app + SDKs. A
   single domain (`domain_commerce`, `domain_api`, …) usually runs in
   single-digit seconds.
 - **Signal-to-noise.** A failure in `domain_finance` shouldn't block
