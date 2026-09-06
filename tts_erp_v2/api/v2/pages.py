@@ -713,6 +713,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     .op-input-search { width: 240px; text-transform: none; letter-spacing: 0; }
     .op-input-search::placeholder { color: var(--rule); }
     select.op-input { border: 1px solid var(--rule); padding: 3px 6px; cursor: pointer; }
+    input.op-input-date { width: 150px; text-transform: none; letter-spacing: 0; color-scheme: light; }
     .op-btn {
       font-family: var(--mono); font-size: 11px; font-weight: 600;
       letter-spacing: 0.1em; text-transform: uppercase; padding: 7px 14px;
@@ -819,6 +820,20 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       <label class="op-search">
         <span>搜索 spu_id</span>
         <input id="filter-q" type="search" class="op-input op-input-search" placeholder="例如 1736527242804888823">
+      </label>
+      <label class="op-field" title="店铺筛选：仅看该店铺 SPU（默认全部店铺，spec §7.1）">
+        <span>店铺</span>
+        <select id="filter-shop" class="op-input" aria-label="筛选店铺（全部店铺 = 不限）">
+          <option value="">全部店铺</option>
+        </select>
+      </label>
+      <label class="op-field" title="销售/退款日期范围（空 = 全历史；广告窗口始终全量，spec §4.5）">
+        <span>起始日</span>
+        <input id="filter-w-start" type="date" class="op-input op-input-date" aria-label="销售/退款起始日期（空 = 不限）">
+      </label>
+      <label class="op-field" title="销售/退款日期范围（空 = 全历史；含当日，spec §4.5）">
+        <span>截止日</span>
+        <input id="filter-w-end" type="date" class="op-input op-input-date" aria-label="销售/退款截止日期（空 = 不限）">
       </label>
       <label class="op-field">
         <span>每页</span>

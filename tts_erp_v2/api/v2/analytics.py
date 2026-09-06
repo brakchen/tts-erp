@@ -1113,7 +1113,6 @@ def _query_spu_roi(
             }
         )
 
-    # ── 排序(None 沉底;实际 ROI 升序遇同值按消耗降序 → 可复现)────────
     # ── 排序(None 沉底;实际 ROI 升序遇同值按消耗降序 → 可复现,§7.6)──
     def _sort_key(row: dict):
         value = row[sort_field]

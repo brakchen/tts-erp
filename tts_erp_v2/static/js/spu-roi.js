@@ -140,6 +140,9 @@
     q: "",
     limit: 100,
     includeAll: false,
+    shopPk: null, // 店铺筛选(null/""=全部店铺)
+    wStart: "", // 日期范围 yyyy-mm-dd(""=不限)
+    wEnd: "",
     feeRate: null, // 页面覆写费率(小数),null = 用服务端基线
     cols: {}, // ⚙ 列开关: {cg-refundsplit|cg-cancel|cg-fee: true=显示}(默认隐藏)
     sort: DEFAULT_SORT,
@@ -419,6 +422,38 @@
     );
   }
 
+  // ---------- 店铺下拉(GET /v2/commerce/channel-accounts,readonly) ----------
+  // 值 = 内部 id/shop_pk,显示 = account_name;默认"全部店铺"(不传 shop_pk =
+  // 全部店铺全历史)。401 → 跳登录(与主表 load() 一致);失败只留占位项,
+  // 不阻塞主表(空态文案即占位项"全部店铺")。
+  function loadShops() {
+    fetch(
+      `${PREFIX}/v2/commerce/channel-accounts?platform=tiktok&limit=500`,
+      { credentials: "include", headers: { Accept: "application/json" } },
+    )
+      .then((r) => {
+        if (r.status === 401) {
+          // 401 → 跳登录(console.js 家族行为)
+          window.location.href = loginUrl(); // pi-lens-ignore: no-open-redirect-js
+          throw new Error("unauthorized");
+        }
+        if (!r.ok) throw new Error(`shops HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((shops) => {
+        var sel = $("#filter-shop");
+        if (!sel || !Array.isArray(shops)) return;
+        // 保留 HTML 里的"全部店铺"占位项,其后追加店铺选项
+        shops.forEach((s) => {
+          var opt = document.createElement("option");
+          opt.value = String(s.id);
+          opt.textContent = s.account_name || `#${s.id}`;
+          sel.appendChild(opt);
+        });
+      })
+      .catch(() => {});
+  }
+
   // ---------- load ----------
   function load() {
     if (state.loading) return;
@@ -439,6 +474,9 @@
       limit: state.limit,
       offset: state.offset,
       include_all: state.includeAll ? "true" : "false",
+      shop_pk: state.shopPk || null,
+      w_start: state.wStart || null,
+      w_end: state.wEnd || null,
       fee_rate: feeParam,
     })
       .then((payload) => {
@@ -503,6 +541,26 @@
       load();
     });
 
+    // 店铺筛选:空值 = 全部店铺(不传 shop_pk = 全历史语义)
+    $("#filter-shop").addEventListener("change", (e) => {
+      var v = e.target.value;
+      state.shopPk = v === "" ? null : v;
+      state.offset = 0;
+      load();
+    });
+
+    // 日期范围:空 = 不限;yyyy-mm-dd 直接作 w_start/w_end(含 w_end 当日)
+    $("#filter-w-start").addEventListener("change", (e) => {
+      state.wStart = e.target.value || "";
+      state.offset = 0;
+      load();
+    });
+    $("#filter-w-end").addEventListener("change", (e) => {
+      state.wEnd = e.target.value || "";
+      state.offset = 0;
+      load();
+    });
+
     $("#btn-refresh").addEventListener("click", () => load());
     $("#btn-prev").addEventListener("click", () => {
       if (state.offset > 0) {
@@ -539,6 +597,7 @@
     applyColToggles();
     bindColToggles();
     loadMe();
+    loadShops(); // 店铺选项异步填充;失败不影响主表
     load();
   }
 

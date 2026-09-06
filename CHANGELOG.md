@@ -1,5 +1,13 @@
 # tts-erp CHANGELOG
 
+## 2026-09-05 (fix) — SPU 实际 ROI 看板 code review 第 2 轮（2 项低级别）
+
+review 回修（第 2 轮，低级别），口径仍以 `tech-doc/analytics/spu-real-roi-dashboard.md` §4/§5/§7 为准：
+
+- **页面工具条新增店铺/日期筛选**（§7.1 `[店铺▾][日期▾]`）：`#filter-shop` 下拉默认“全部店铺”，选项由 JS 从 `GET /v2/commerce/channel-accounts`（readonly，cookie 会话，401→login）拉取，显示 account_name、值为内部 shop_pk；`#filter-w-start` / `#filter-w-end` 为 `type=date` 输入（空 = 不限）；变化时仅把非空 shop_pk / w_start / w_end（yyyy-mm-dd）并入请求 query，保持“不传 = 全历史”语义；加载失败只留占位项不阻塞主表。
+- **去重注释**：`analytics.py` 排序注释重复两行 → 保留带 §7.6 引用的一行。
+- 测试：`tests/api/test_spu_roi_api.py` 23 → 24（新增工具栏控件 id 契约）。
+
 ## 2026-09-05 (fix) — SPU 实际 ROI 看板 code review 修复（6 findings）
 
 review 回修，口径仍以 `tech-doc/analytics/spu-real-roi-dashboard.md` §4/§5/§7 为准：

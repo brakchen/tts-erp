@@ -1151,6 +1151,30 @@ def test_spu_roi_page_requires_auth(api_client):
     assert api_client.get("/v2/pages/spu-roi").status_code == 401
 
 
+def test_spu_roi_page_toolbar_shop_and_date_filters(api_client, readonly_key):
+    """§7.1 工具条 [店铺▾][日期▾] 入口:页面 HTML 含筛选控件 id。
+
+    review finding B:店铺/日期窗口能力此前只在 API 层,页面无入口。
+    仅锁 HTML 元素契约(控件行为在 static/js/spu-roi.js,JS 运行时
+    不在契约范围);默认全部店铺(空值=不传 shop_pk=全历史)。
+    """
+    r = api_client.get(
+        "/v2/pages/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    body = r.text
+    # 店铺下拉(含"全部店铺"占位,其余由 JS 从 channel-accounts 拉取填充)
+    assert 'id="filter-shop"' in body
+    assert '<option value="">全部店铺</option>' in body
+    # 日期范围输入(空 = 不限 → w_start/w_end 不传 = 全历史)
+    assert 'id="filter-w-start"' in body
+    assert 'id="filter-w-end"' in body
+    assert 'type="date"' in body
+    # 无内联事件处理器(既有 shell 约束)
+    for forbidden in ("onchange=", "onclick="):
+        assert forbidden not in body, f"inline handler found: {forbidden}"
+
+
 def test_spu_roi_page_shell_contract(api_client, readonly_key):
     """页面 HTML shell:标题、静态资源相对路径、warm-paper token。"""
     r = api_client.get(
