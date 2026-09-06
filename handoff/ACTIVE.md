@@ -17,6 +17,7 @@
 | feat/cursor-hasdata-cache | cursor has-data 10min 进程内存缓存：(seller,adv,campaign)→(endpoint,day) 集合；get_cursor 命中免 DB、post_dumps write-through；无 campaignId 请求不缓存 | 本 session（master WT 直改） | master（无分支，原子 commit） | tts_erp_v2/analytics/has_data_cache.py(新)、repository.py、tts_erp_v2/api/v2/analytics.py、tests/api/conftest.py、tests/analytics/test_has_data_cache.py(新)、tests/api/test_analytics_v2_cursor_cache.py(新)、tech-doc/analytics/dump-architecture.md | merged (649de06) | 2026-09-06T10:45Z |
 | feat/db-pool-sizing | QueuePool 重配：pre_ping off（改 pool_recycle=300）+ size 10/overflow 20 + pool_timeout 10s（09-05 池耗尽 503 的 fast-fail） | 本 session（master WT 直改） | master（无分支，原子 commit） | tts_erp_v2/db/base.py、handoff/ACTIVE.md | merged | 2026-09-06T11:20Z |
 | fix/review-findings-cache-pool | review（4241295..HEAD）发现修复：Finding-1 db/base.py 重启风险注释低估；Finding-2/3 has_data_cache.py docstring 补 no-DELETE 不变量红线 + 单进程假设警告 | 本 session（master WT 直改） | master（无分支，原子 commit） | tts_erp_v2/db/base.py、tts_erp_v2/analytics/has_data_cache.py、handoff/ACTIVE.md | merged | 2026-09-06T12:10Z |
+| docs/roi-calc-prompt | ROI 计算口径/公式整理为可复用 agent prompt，存 tech-doc/analytics/roi-calc-prompt.md（取消/全损判定、保本 ROI M17、GMVMax 商品ROI、汇率/费率基线等，truth source=spu-real-roi-dashboard.md） | 本 session（master WT 直改，仅新增文档） | master（无分支，原子 commit） | tech-doc/analytics/roi-calc-prompt.md(新)、handoff/ACTIVE.md | draft | 2026-09-07T00:10Z |
 
 <!-- 新 lane 示例（复制改）：
 | lane_id | 主题 | owner(session) | .worktrees/<slug> / branch | 文件列表 | draft | <UTC> |
