@@ -1172,7 +1172,7 @@ def test_spu_roi_window_params_clip_sales_and_refunds(
     assert item2["refund_return_qty"] == 1  # 窗外 2026-08-20 case 被排除
     assert item2["refund_return_amount"] == "20.0000"
     assert "已裁剪" in body2["meta"]["window"]["note"]
-    # 结余带 totals 同窗口裁剪(2026-09-06):GMV/单量按 paid_at 裁剪
+    # 结余带 totals 同窗口裁剪(2026-09-06):GMV/单量按 COALESCE(paid_at, order_time) 裁剪(全已付场景=paid_at)
     assert body2["totals"]["sales"] == "60.0000"
     assert body2["totals"]["gmv"] == "60.0000"  # 无取消单 → GMV = sales
     assert body2["totals"]["order_count"] == 1

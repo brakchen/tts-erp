@@ -999,10 +999,14 @@ _SQL_ROI_ORDER_SCOPE = text(
           WHERE so.status = ANY(CAST(:paid_statuses AS text[])))        AS order_count,
       count(DISTINCT so.id) FILTER (
           WHERE so.status = 'CANCELLED')                                AS cancelled_order_count,
-      coalesce(sum(sl.quantity * sl.unit_price), 0)                     AS gmv
+      coalesce(sum(sl.quantity * sl.unit_price) FILTER (
+          WHERE so.status = ANY(CAST(:paid_statuses AS text[]))
+             OR so.status = 'CANCELLED'), 0)                            AS gmv
     FROM commerce.sales_order_lines sl
     JOIN commerce.sales_orders so ON so.id = sl.order_pk
     WHERE sl.spu_pk = ANY(CAST(:pks AS bigint[]))
+      AND (so.status = ANY(CAST(:paid_statuses AS text[]))
+           OR so.status = 'CANCELLED')
       AND (CAST(:ws AS timestamptz) IS NULL
            OR coalesce(so.paid_at, so.order_time) >= CAST(:ws AS timestamptz))
       AND (CAST(:we AS timestamptz) IS NULL
