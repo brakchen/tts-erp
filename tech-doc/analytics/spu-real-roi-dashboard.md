@@ -235,7 +235,7 @@ SPU 无广告投放 → 广告列显示 0 与“无投放”文案（不隐藏�
 | M5 | 售出件数（有效销售） | `units(s)` | `Σ sales_order_lines.quantity`（join **有效销售订单**且 `paid_at∈W`，`spu_pk=s`） | 按日可拆 | sales_order_lines + sales_orders |
 | M5b | 有效销售订单数 | `order_count(s)` | `COUNT(DISTINCT sales_orders.id)`（同一有效销售过滤） | 按日可拆 | 同上 |
 | M6 | 销售金额(gross) | `sales(s)` | `Σ quantity × unit_price`（同上过滤条件） | 按日可拆 | 同上 |
-| M6b | 已付被取消订单原始销售额(gross) | `cancelled_sales(s)` | `Σ quantity × unit_price`（**status=CANCELLED 且已付款**，paid_at 窗口；订单行金额齐全，与 M9 退款"未知行"无关） | 按日可拆 | 同 M5/M6 过滤 |
+| M6b | 全部订单销售额(gross,状态口径) | `gmv(s)` | `Σ quantity × unit_price`（白名单状态 ∪ CANCELLED 全单原始行金额；**下单即计、不看 paid_at**，2026-09-06 修订：COD 店在途/未收款取消也算单，对应结余带 GMV 格） | 按日可拆 | 同 M5/M6 过滤 + 状态桶 |
 | M7 | 仅退款金额（计净额） | `refund_only(s)` | `Σ` 已完结 REFUND_ONLY case 退款，**且其订单 ∈ 有效销售订单** | 按完结时间 | cases(+case_lines) |
 | M8 | 退货退款金额（计净额） | `refund_return(s)` | `Σ` 已完结 RETURN_AND_REFUND case 退款，**且其订单 ∈ 有效销售订单** | 同上 | 同上 |
 | M9 | 已付被取消订单退款（信息列） | `refund_cancelled(s)` | `Σ` 已完结 CANCELLATION/CANCEL case 退款（订单 status=CANCELLED —— 该单销售本就不在 M6 里，故只展示不扣净额）。**行级金额缺失时不造数**：输出「已知金额小计 + 未知行数」（实测缺失 219/246，见 §5.6） | 同上 | 同上 |
@@ -406,7 +406,7 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
   "total": 111,
   "totals": {"row_count": 111, "order_count": …, "cancelled_order_count": …, "total_orders": …,
               "spend": "1414.7700", "sales": "…", "gmv": "…",
-              "refund_net_amount": "…", "net_profit": "…", "roi_real": "…"},   // 金额均为 USD(原币加总后一次换算);gmv = sales + M6b(已付被取消原额);单量跨可见 SPU 去重;roi_real = Σ(net_cash−return_loss)/Σspend(服务端)
+              "refund_net_amount": "…", "net_profit": "…", "roi_real": "…"},   // 金额均为 USD(原币加总后一次换算);单量(有效/取消/总)与 gmv 为状态口径(下单即算,含 COD 在途/未收款取消,2026-09-06),sales 等金额仍会计口径;roi_real = Σ(net_cash−return_loss)/Σspend(服务端)
   "meta": {
     "fx": {"usd_vnd": "26330.0000", "cny_usd": "0.1477",   // 实现常量 0.14774（30 CNY≈$4.4322/件）
           "as_of": "2026-09-05", "source": "fixed-const（在线机制挂起，§4.6）"},
@@ -759,20 +759,23 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 [警告 chip] GMV Max 归因含自然单、数据滞后修正 —— 广告列仅供对照，实际 ROI 以 ERP 侧为准
 ```
 
-**结余带 10 格口径（2026-09-06，全部带 `?` 气泡，数值来自 `totals`）**：
+**结余带 10 格口径（2026-09-06 状态口径修订，全部带 `?` 气泡，数值来自 `totals`）**：
+
+> 两套口径共存（COD 店语义）：**单量/GMV = 订单管理口径（下单即算订单，不看 paid_at）**；
+> **金额主指标（sales/退款/净利润/ROI）= 会计口径（已收款）**。差的就是在途 COD 与未收款取消。
 
 | 格 | 数值来源 | 口径 |
 | --- | --- | --- |
 | 广告消耗 | `totals.spend` | M1：广告视图全窗口累计（无日期参数） |
-| 有效销售 | `totals.sales` | M6：有效销售订单行金额 gross（白名单状态 + paid_at 落窗） |
-| GMV | `totals.gmv` | 全部订单销售额 = M6 有效销售 + M6b 已付被取消订单原始行金额（同一 paid_at 窗口；≠ 广告归因「平台GMV」） |
-| 有效单量 | `totals.order_count` | 有效销售订单数（跨可见 SPU 全局去重） |
-| 总单量 | `totals.total_orders` | 有效单量 + 取消单量 |
-| 退款净额 | `totals.refund_net_amount` | M10：仅退 + 退货退款（不含已付被取消退款） |
+| 有效销售 | `totals.sales` | M6：有效销售订单行金额 gross（白名单状态 + paid_at 落窗；**会计口径**） |
+| GMV | `totals.gmv` | 全部订单销售额 = 白名单有效 ∪ 取消订单的原始行金额（**状态口径，下单即计**：含 COD 在途未收款、含取消单原额；≠ 广告归因「平台GMV」） |
+| 有效单量 | `totals.order_count` | 有效订单数（**状态口径**：白名单状态全部订单，含 COD 在途/待收款；跨可见 SPU 全局去重） |
+| 总单量 | `totals.total_orders` | 有效单量 + 取消单量（**状态口径** = 与 TikTok 订单管理总数一致） |
+| 退款净额 | `totals.refund_net_amount` | M10：仅退 + 退货退款（不含已付被取消退款；会计口径） |
 | 全损退款 | `totals.return_loss` | M13b：已完结退货按全损计（成本维度；2026-09-06 由「全损货损」改名，数值/口径不变） |
-| 取消单量 | `totals.cancelled_order_count` | 已付被取消订单数（status=CANCELLED 且已付款，paid_at 落窗；跨可见 SPU 去重） |
-| 净利润 | `totals.net_profit` | M18 |
-| 整体实际 ROI | `totals.roi_real` | M14；Σspend=0 → `—` |
+| 取消单量 | `totals.cancelled_order_count` | 取消订单数（**状态口径**：全部 status=CANCELLED，含未收款即取消的 COD 拒收/超时单；跨可见 SPU 去重） |
+| 净利润 | `totals.net_profit` | M18（会计口径） |
+| 整体实际 ROI | `totals.roi_real` | M14（会计口径）；Σspend=0 → `—` |
 
 ### 7.2 标色与阈值（默认值，页面 ⚙ 可调，不锁死）
 

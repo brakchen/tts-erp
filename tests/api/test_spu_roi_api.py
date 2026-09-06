@@ -902,6 +902,74 @@ def test_spu_roi_totals_cross_spu_dedup_and_gmv_split(
     assert by_id["TEST_ROI_SPU_Y"]["order_count"] == 1
 
 
+def _seed_cod_and_unpaid_cancelled(sess) -> int:
+    """状态口径回归场景(2026-09-06):COD 在途单 + 未收款取消单。
+
+    - TEST_ROI_SPU_COD: 已收款有效单 1(DELIVERED,paid,3×$10=$30)
+    - COD 在途单(IN_TRANSIT,paid_at=NULL,行 2×$10=$20) → 算"有效订单"
+    - 未收款取消单(CANCELLED,paid_at=NULL,行 1×$10=$10) → 算"取消单"
+
+    期望 totals(order 状态口径):order_count=2(有效已付+COD在途)、
+    cancelled_order_count=1(未收款取消也计)、total_orders=3、gmv=60
+    (全部原始行金额 30+20+10);而行级 items.sales 仍只算已收款 30。
+    """
+    seller = "TEST_SELLER_COD"
+    shop_pk = _seed_shop(sess, seller)
+    spu_pk = _seed_spu(sess, shop_pk, "TEST_ROI_SPU_COD")
+    _seed_ad_dump(
+        sess, seller=seller, product_id="TEST_ROI_SPU_COD",
+        campaign_id="TEST_CAMP_COD", spend="10.00", orders="3", gmv="30.00",
+    )
+    _seed_order_line(
+        sess, shop_pk=shop_pk, spu_pk=spu_pk, order_id="TEST_ORDER_COD1",
+        status="DELIVERED", line_ext="TEST_LINE_COD1",
+        qty="3", unit_price="263300", paid=True,  # $30
+    )
+    # COD 在途:状态白名单但钱未收(paid_at 不落)
+    _seed_order_line(
+        sess, shop_pk=shop_pk, spu_pk=spu_pk, order_id="TEST_ORDER_COD2",
+        status="IN_TRANSIT", line_ext="TEST_LINE_COD2",
+        qty="2", unit_price="263300", paid=False,  # $20 未收款
+    )
+    # 未收款取消:CANCELLED 且 paid_at 无
+    _seed_order_line(
+        sess, shop_pk=shop_pk, spu_pk=spu_pk, order_id="TEST_ORDER_COD3",
+        status="CANCELLED", line_ext="TEST_LINE_COD3",
+        qty="1", unit_price="263300", paid=False,  # $10 未收款取消
+    )
+    return spu_pk
+
+
+def test_spu_roi_totals_order_status_scope_cod_shop(
+    api_client, readonly_key, db_engine
+):
+    """2026-09-06:结余带单量/GMV 改按订单状态口径(COD 店下单即算单)。
+
+    行级金额(会计)仍按已收款;单量/GMV(订单管理口径)不看 paid_at:
+    COD 在途/未收款取消都计入对应桶,GMV = 全部原始行金额。
+    """
+    with Session(db_engine) as sess:
+        spu_pk = _seed(sess, _seed_cod_and_unpaid_cancelled)
+
+    h = {"Authorization": f"Bearer {readonly_key}"}
+    r = api_client.get(
+        "/v2/analytics/spu-roi", headers=h, params={"q": "TEST_ROI_SPU_COD"}
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["total"] == 1
+    item = body["items"][0]
+    # 行级 = 会计口径不变: 有效销售订单数/金额只含已收款单
+    assert item["order_count"] == 1
+    assert item["sales"] == "30.0000"
+    t = body["totals"]
+    assert t["order_count"] == 2, "COD 在途单应计入有效订单(状态口径)"
+    assert t["cancelled_order_count"] == 1, "未收款取消单应计入取消单(状态口径)"
+    assert t["total_orders"] == 3
+    assert t["sales"] == "30.0000"  # sales 仍会计口径
+    assert t["gmv"] == "60.0000", "GMV=全部订单原始行金额(含在途COD与取消原额)"
+
+
 def test_spu_roi_manual_cost_source(api_client, readonly_key, db_engine):
     """命中 manual_product_costs 有效行 → cost_source=MANUAL,unit_cost_used 用真值。"""
     with Session(db_engine) as sess:
@@ -1104,7 +1172,7 @@ def test_spu_roi_window_params_clip_sales_and_refunds(
     assert item2["refund_return_qty"] == 1  # 窗外 2026-08-20 case 被排除
     assert item2["refund_return_amount"] == "20.0000"
     assert "已裁剪" in body2["meta"]["window"]["note"]
-    # 结余带 totals 同窗口裁剪(2026-09-06):GMV/单量按 paid_at 裁剪
+    # 结余带 totals 同窗口裁剪(2026-09-06):GMV/单量按 COALESCE(paid_at, order_time) 裁剪(全已付场景=paid_at)
     assert body2["totals"]["sales"] == "60.0000"
     assert body2["totals"]["gmv"] == "60.0000"  # 无取消单 → GMV = sales
     assert body2["totals"]["order_count"] == 1
