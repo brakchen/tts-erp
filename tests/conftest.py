@@ -135,6 +135,7 @@ def _check_schema_prereq(db_engine) -> None:
         "security.api_keys",
     }
     with db_engine.connect() as conn:
+        # pi-lens-ignore: python-sql-injection — static schema introspection, no user input
         rows = conn.execute(
             text(
                 "SELECT table_schema || '.' || table_name FROM information_schema.tables "
