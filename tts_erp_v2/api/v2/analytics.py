@@ -936,11 +936,10 @@ _SQL_ROI_SALES = text(
     JOIN commerce.sales_orders so ON so.id = sl.order_pk
     WHERE sl.spu_pk IS NOT NULL
       AND so.status = ANY(CAST(:paid_statuses AS text[]))
-      AND so.paid_at IS NOT NULL
       AND (CAST(:ws AS timestamptz) IS NULL
-           OR so.paid_at >= CAST(:ws AS timestamptz))
+           OR coalesce(so.paid_at, so.order_time) >= CAST(:ws AS timestamptz))
       AND (CAST(:we AS timestamptz) IS NULL
-           OR so.paid_at < CAST(:we AS timestamptz))
+           OR coalesce(so.paid_at, so.order_time) < CAST(:we AS timestamptz))
     GROUP BY sl.spu_pk
     """
 )
@@ -1053,11 +1052,12 @@ _SQL_ROI_WINDOW = text(
 _SQL_ROI_DATA_WINDOW = text(
     """
     -- 起始/截止日可裁剪数据(销售∪退款)的真实时间跨度:供页面回填日期框。
-    -- 范围与 w_start/w_end 的实际裁剪口径一致(销售按 paid_at、退款按
-    -- updated_at_source、同一批状态白名单),不传窗口时全跨度 = 不限。
+    -- 范围与 w_start/w_end 的实际裁剪口径一致(销售按 COALESCE(paid_at,
+    -- order_time) —— 2026-09-06 状态口径、退款按 updated_at_source、同一批
+    -- 状态白名单),不传窗口时全跨度 = 不限。
     -- 注意:ad 不在此列 —— 广告视图按窗口聚合无法按日切片,日期不影响 ad。
     WITH croppable AS (
-        SELECT (so.paid_at AT TIME ZONE 'UTC')::date AS d
+        SELECT (coalesce(so.paid_at, so.order_time) AT TIME ZONE 'UTC')::date AS d
         FROM commerce.sales_orders so
         WHERE so.status = ANY(CAST(:paid_statuses AS text[]))
           AND (CAST(:shop_pk AS bigint) IS NULL
@@ -1150,13 +1150,16 @@ def _query_spu_roi(
     行与 totals 同源:totals 由行级 USD 值(同一组 CTE 结果)服务端加总;
     totals.roi_real 额外用原生合计(Σ net_cash 原币一次换算)对账(§5.4-4);
     totals.gmv/order_count/cancelled_order_count/total_orders 2026-09-06 起由
-    _SQL_ROI_ORDER_SCOPE 跨可见 SPU 全局去重聚合(非行加总)。注意口径:
-    单量/GMV 按【订单状态】计(COD 店下单即算订单,不看 paid_at),
-    GMV = 白名单∪CANCELLED 全单原始行金额;行级金额(M6/M18/退款/ROI)
-    仍按【已收款】会计口径 —— 两套口径在结余带 tooltip 与 §7.1 标明。
+    _SQL_ROI_ORDER_SCOPE 跨可见 SPU 全局去重聚合(非行加总)。
+    2026-09-06 全链状态口径(COD 店下单即算):行级 _SQL_ROI_SALES 与
+    totals 都不再要求 paid_at —— 白名单状态订单(含 COD 在途未收款)即
+    计入 有效单量/件数/sales,派生 M13 净现金/M18 净利/M14 ROI/M17 保本
+    自动跟随;GMV = 白名单∪CANCELLED 全单原始行金额(再含取消原额);
+    CANCELLED 订单不计 sales(仅 GMV/取消单量),其退款仅信息列。
     金额底层原币计算、输出层一次换算(§4.2 通用规则),绝不在客户端换算。
     fee_rate=None → 用固定基线 FEE_RATE_BASELINE;有值 → 页面覆写。
-    w_start/w_end(ISO 日期,可选):提供时销售按 paid_at、退款按
+    w_start/w_end(ISO 日期,可选):提供时销售按 COALESCE(paid_at,
+    order_time)(2026-09-06 状态口径,未收款按下单日)、退款按
     updated_at_source 裁剪(左闭右开,+1 天);不提供 → 全历史累计(§4.5)。
     """
     rate = fee_rate if fee_rate is not None else FEE_RATE_BASELINE
@@ -1363,9 +1366,7 @@ def _query_spu_roi(
         total_nc_prime = total_native_net_cash_vnd / fx_usd_vnd - total_return_loss_dec
         roi_real_total = _fmt_ratio(total_nc_prime / total_spend_dec)
     # 结余带单量/GMV(§5.3 2026-09-06 状态口径):跨可见 SPU 全局去重;
-    # 有效/取消单量均不再卡 paid_at(COD 在途、未收款取消都算订单),
-    # GMV = 白名单∪CANCELLED 全部订单原始行金额(下单即计;≠ 行级
-    # sales 已收款口径)。窗口列 = coalesce(paid_at, order_time)。
+    # 与行级同口径 —— sales 已含 COD 在途;GMV 再含取消单原额。
     spu_pks = [r["spu_pk"] for r in plain]
     scope_row = None
     if spu_pks:
