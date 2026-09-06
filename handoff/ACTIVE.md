@@ -11,6 +11,7 @@
 
 | lane_id | 主题 | owner(session) | branch/worktree | 拥有的文件/目录 | 状态 | updated(UTC) |
 | --- | --- | --- | --- | --- | --- | --- |
+| feat/spu-roi-page-ui | ROI 看板 UI：主图点击放大 / 缩略图加大(34→56)+单元格布局 / 汇率 stamp 与汇总重叠修复 | (接管 manual-costs-v2 之后的独立 UI lane) | .worktrees/spu-roi-page-ui | tts_erp_v2/api/v2/pages.py(ROI 模板段)、tts_erp_v2/static/js/spu-roi.js、handoff/ACTIVE.md | draft | 2026-09-06T06:16Z |
 | feat/manual-costs-v2 | manual-costs 页 v2（全部 SPU tab / 事件绑定修复） | 未登记（owner session 见 .worktrees/manual-costs-v2 @ 5324f95） | .worktrees/manual-costs-v2 | tts_erp_v2/api/v2/pages.py、tts_erp_v2/static/js/spu-roi.js、console.js（master WT 在途 M） | draft | 2026-09-06 |
 
 <!-- 新 lane 示例（复制改）：

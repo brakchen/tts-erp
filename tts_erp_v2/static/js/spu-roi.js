@@ -212,8 +212,8 @@
     var rr = parseFloat(it.refund_rate);
     var rrHigh = Number.isFinite(rr) && rr > REFUND_RATE_ALERT; // §7.2
     var img = it.main_image_url
-      ? `<img class="spu-img" alt="" src="${esc(it.main_image_url)}">`
-      : "";
+      ? `<img class="spu-img" alt="" src="${esc(it.main_image_url)}" data-zoom="${esc(it.main_image_url)}">`
+      : '<span class="spu-img-missing" aria-hidden="true">无主图</span>';
     var warn =
       '<span class="warn-default" data-tip="无人工成本记录，按默认 30元/件计算，可去 manual-costs 补录">⚠</span> ';
     var warnRr = rrHigh
@@ -249,8 +249,9 @@
       : `<td>${fmtPct(it.refund_rate)}</td>`;
     return (
       `<tr class="${isBad ? "row-bad" : ""}">` +
-      `<td class="td-left">${img}<div class="td-spu">${esc(it.spu_id)}</div>` +
-      `<div class="td-title" data-tip="${esc(it.title || "")}">${warnDefault ? warn : ""}${warnRr}${esc(it.title || "")}${status}</div></td>` +
+      `<td class="td-left"><span class="td-spu-cell">${img}<span class="td-spu-meta">` +
+      `<span class="td-spu">${esc(it.spu_id)}</span>` +
+      `<span class="td-title" data-tip="${esc(it.title || "")}">${warnDefault ? warn : ""}${warnRr}${esc(it.title || "")}${status}</span></span></span></td>` +
       `<td>${adCell}</td>` +
       `<td>${fmtMoney(it.spend)}</td>` +
       `<td>${fmtMoney(it.gmv_ad)}</td>` +
@@ -562,6 +563,60 @@
     document.addEventListener("click", hideTip);
   }
 
+  // Lightbox:click 主图(spu-img[data-zoom])→ 全屏叠层;点背景(非放大图
+  // 本身)/×/Esc 关闭。单例叠层,与 manual-costs console.js 同款交互。
+  // 事件委托:行图在 render() 里注入,不逐行绑定;隐藏行/翻页自动生效。
+  var _roiLightbox = null;
+  function openLightbox(url) {
+    if (!url) return;
+    if (!_roiLightbox) {
+      _roiLightbox = document.createElement("div");
+      _roiLightbox.className = "op-lightbox";
+      // DOM API 构建,不用 innerHTML(保持无 innerHTML 审计面)
+      var close = document.createElement("button");
+      close.type = "button";
+      close.className = "op-lightbox-close";
+      close.setAttribute("aria-label", "关闭");
+      close.textContent = "×";
+      var lightImg = document.createElement("img");
+      lightImg.alt = "";
+      _roiLightbox.appendChild(close);
+      _roiLightbox.appendChild(lightImg);
+      _roiLightbox.addEventListener("click", (ev) => {
+        if (ev.target === _roiLightbox) closeLightbox();
+      });
+      lightImg.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+      });
+      close.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        closeLightbox();
+      });
+      document.body.appendChild(_roiLightbox);
+    }
+    _roiLightbox.querySelector("img").src = url;
+    _roiLightbox.classList.add("is-open");
+    document.addEventListener("keydown", lightboxEsc);
+  }
+  function closeLightbox() {
+    if (!_roiLightbox) return;
+    _roiLightbox.classList.remove("is-open");
+    _roiLightbox.querySelector("img").src = "";
+    document.removeEventListener("keydown", lightboxEsc);
+  }
+  function lightboxEsc(ev) {
+    if (ev.key === "Escape") closeLightbox();
+  }
+  function wireZoom() {
+    document.addEventListener("click", (e) => {
+      var t = e.target && e.target.closest ? e.target.closest("[data-zoom]") : null;
+      if (t) {
+        e.preventDefault();
+        openLightbox(t.getAttribute("data-zoom"));
+      }
+    });
+  }
+
   // ---------- 交互绑定 ----------
   function bindControls() {
     var q = $("#filter-q");
@@ -658,6 +713,7 @@
     applyColToggles();
     bindColToggles();
     wireTooltips(); // 悬停说明气泡(data-tip 委托,含重渲染后的新行)
+    wireZoom(); // 主图点击放大(委托)
     loadMe();
     loadShops(); // 店铺选项异步填充;失败不影响主表
     load();
