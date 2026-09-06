@@ -40,6 +40,8 @@ cookie (see [Browser session login](#browser-session-login)).
 | Coverage / health snapshot | `GET /v2/reporting/coverage` | readonly |
 | Active SPUs missing a cost | `GET /v2/reporting/missing-cost-products` | readonly |
 | Submit a manual cost | `POST /v2/reporting/manual-costs` | readwrite |
+| Latest cached FX rates | `GET /v2/fx/latest` | readonly |
+| Currency conversion (local, cached) | `GET /v2/fx/convert` | readonly |
 | Operator console (HTML) | `GET /v2/pages/manual-costs` | readonly (browser → 302 login) |
 | SPU 实际 ROI 看板主表 | `GET /v2/analytics/spu-roi` | readonly — 口径见 [`analytics/spu-real-roi-dashboard.md`](analytics/spu-real-roi-dashboard.md) |
 | SPU 实际 ROI 页面 (HTML) | `GET /v2/pages/spu-roi` | readonly (browser → 302 login) |
@@ -215,6 +217,32 @@ Cost semantics: `MANUAL_ENTRY` (this endpoint) > 妙手采购单 > (1688 采集�
 > `profit_daily` are not wired into the sync-worker scheduler yet, so
 > those two tables are empty and the GETs return `[]` — expected, not a
 > bug in your client.
+
+### FX rates (`/v2/fx/*`)
+
+Cached exchange rates + local currency conversion. Backed by the
+ExchangeRate-API Standard endpoint (Free plan = **1500 requests / month,
+overage billed**), synced only by the `fx.sync` sync-worker job on the
+upstream's own refresh cadence (`time_next_update_utc`) — a healthy install
+makes **~1 upstream request/day** and **these handlers never dial upstream**;
+all reads serve the local `fx.*` cache tables and conversion math runs
+locally through the snapshot base as a bridge. Design / quota budget / ops:
+[`fx-exchange-rates.md`](fx-exchange-rates.md).
+
+| Endpoint | Role | Query params |
+| --- | --- | --- |
+| `GET /v2/fx/latest` | readonly | `base_code` (default `USD`) → `{base_code, upstream_last_update, next_update_at, fetched_at, rate_count, stale, rates}` — `rates` maps every code to a **JSON string** rate (8 dp); `stale=true` means the cache is past the upstream refresh horizon (data ≈1 day old at most until fx.sync refetches). 404 when fx.sync has never fetched that base. |
+| `GET /v2/fx/convert` | readonly | `amount`, `from_code`, `to_code`, `base_code?` (default `USD`) → `{base_code, upstream_last_update, next_update_at, stale, amount, from_code, to_code, rate, converted}` — 8-dp quantized Decimal strings. 400 on an uncached currency code; 404 when the base has no snapshot. |
+
+```bash
+# full USD-based rate map + freshness
+curl -sS -H "X-API-Key: $TTS_ERP_RO_KEY" \
+  "http://127.0.0.1:9877/v2/fx/latest"
+
+# 100 CNY → USD at cached rates (no upstream call)
+curl -sS -H "X-API-Key: $TTS_ERP_RO_KEY" \
+  "http://127.0.0.1:9877/v2/fx/convert?amount=100&from_code=CNY&to_code=USD"
+```
 
 ### Pages
 
@@ -545,6 +573,7 @@ Stable external endpoints (safe to build dashboards / agents on):
 | `POST /v2/linkage/overrides` | admin | v2 |
 | `GET /v2/reporting/*` | readonly | v2 |
 | `POST /v2/reporting/manual-costs` | readwrite | v2 |
+| `GET /v2/fx/latest`, `/v2/fx/convert` | readonly | v2 — cached (fx.sync ≈1 上游请求/天，API 路径零上游) |
 | `GET /v2/pages/manual-costs` | readonly | v2 (HTML — not a machine contract) |
 | `GET /v2/pages/spu-roi` | readonly | v2 (HTML — not a machine contract) |
 | `GET /v2/analytics/spu-roi` | readonly | stable 只读（口径见 `analytics/spu-real-roi-dashboard.md`） |
