@@ -17,6 +17,8 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -61,16 +63,30 @@ def app_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture()
 def fake_exchange(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    """Stub the upstream /token/get call in the flow module."""
+    """Stub the two upstream calls (token/get + authorized shops)."""
     import tts_erp_v2.proxy.tiktok_oauth as flow
 
     payload: dict[str, Any] = dict(_grant_payload())
+    shops = [
+        {
+            "shop_id": TEST_SHOP_ID,
+            "shop_cipher": "api_grant_cipher",
+            "account_name": "TEST Seller API",
+            "region": "VN",
+            "seller_type": "CROSS_BORDER",
+        }
+    ]
 
     def _fake(*, auth_code: str) -> dict[str, Any]:
         payload["auth_code_seen"] = auth_code
         return payload
 
+    def _fake_shops(*, access_token: str) -> list[dict[str, Any]]:
+        payload["shops_access_token_seen"] = access_token
+        return shops
+
     monkeypatch.setattr(flow, "exchange_auth_code", _fake)
+    monkeypatch.setattr(flow, "fetch_authorized_shops", _fake_shops)
     return payload
 
 
@@ -102,8 +118,6 @@ def test_authorize_returns_link(
     # The state is persisted (hash only) — findable by full re-registration
     # count is awkward; assert the returned token round-trips through the
     # flow's own hash by looking the row up via the module.
-    from sqlalchemy import select
-
     from tts_erp_v2.db.models.integration import OAuthState
     from tts_erp_v2.proxy.tiktok_oauth import _state_hash
 
@@ -130,8 +144,6 @@ def test_authorize_missing_service_id_is_500(
 def test_callback_is_public() -> None:
     """No key required — the middleware exempts the exact path. A bare hit
     reports missing_code instead of 401."""
-    from fastapi.testclient import TestClient
-
     from tts_erp_v2.app import build_app
 
     with TestClient(build_app()) as client:
@@ -173,8 +185,6 @@ def test_callback_happy_path_bootstraps_rows(
     fake_exchange: dict[str, Any],
 ) -> None:
     """Full round-trip: authorize → TikTok redirect → rows exist."""
-    from sqlalchemy import select
-
     from tts_erp_v2.db.models.commerce import ChannelAccount
     from tts_erp_v2.db.models.integration import Credentials
     from tts_erp_v2.proxy.token_service import load_credentials
@@ -192,8 +202,11 @@ def test_callback_happy_path_bootstraps_rows(
     body = r.json()
     assert body["ok"] is True
     assert body["kind"] == "authorized"
-    assert body["result"]["shop_id"] == TEST_SHOP_ID
+    shop = body["result"]["shops"][0]
+    assert shop["shop_id"] == TEST_SHOP_ID
     assert fake_exchange["auth_code_seen"] == "TTP_real_code"
+    expected_at = "TTP_grant_at_api"
+    assert fake_exchange["shops_access_token_seen"] == expected_at
 
     # 3. Rows bootstrapped (committed by the app's own connection).
     acct = db_session.execute(
@@ -202,7 +215,7 @@ def test_callback_happy_path_bootstraps_rows(
             ChannelAccount.shop_id == TEST_SHOP_ID,
         )
     ).scalar_one()
-    assert acct.credential_id == body["result"]["credential_id"]
+    assert acct.credential_id == shop["credential_id"]
     cred = db_session.execute(
         select(Credentials).where(
             Credentials.provider == "tiktok",
@@ -214,8 +227,10 @@ def test_callback_happy_path_bootstraps_rows(
     # 4. Decrypted envelope round-trips (real Fernet key from .env).
     view = load_credentials(db_session, "tiktok", TEST_SHOP_ID)
     assert view is not None
-    assert view.access_token == "TTP_grant_at_api"
-    assert view.shop_cipher == "api_grant_cipher"
+    expected_at = "TTP_grant_at_api"
+    expected_cipher = "api_grant_cipher"
+    assert view.access_token == expected_at
+    assert view.shop_cipher == expected_cipher
 
 
 def test_callback_reusing_state_is_rejected(

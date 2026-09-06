@@ -79,6 +79,25 @@ miaoshou/ak_... 均已就位且 scope 齐全），v1 oauth_receiver 库失去回
   1. `gunzip backups/oauth_receiver_v1_legacy_20260905T134439Z.sql.gz | docker exec -i postgres psql -U postgres -d postgres`（先 CREATE DATABASE oauth_receiver）
   2. 跑 `tech-doc/_archive/migrate-v1-to-v2-2026-08-29/scripts/re_encrypt_credentials.py` 把 legacy 格式转回 v2 envelope
   3. 恢复 oauth-receiver.service unit + .env 的 OAUTH_* 两行
+
+## 2026-09-06 (fix) — oauth 回调两段式落库：Get Authorized Shops 枚举店铺（真实上游验证）
+
+真实授权首跑实测：service_id 流 token/get 返回**用户级 token**（data 无 shop_id/shop_cipher，
+Authorization overview 字段表在此准确），原假设「token/get 直给店铺身份」不成立 → 补第二段调用：
+
+- `proxy/tiktok_auth.py` 新增 `fetch_authorized_shops`：HMAC 签名 GET
+  `{TIKTOK_API_HOST}/authorization/202309/shops`（app_key+timestamp 签名、无 shop_cipher，
+  同 v1 生产 fetch_shops；`x-tts-access-token` 头），容错解析
+  `id|shop_id / cipher|shop_cipher / name|shop_name / region|shop_region`，raw keys 记日志
+- `complete_tiktok_authorization` 改两段式：token/get（用户级）→ Get Authorized Shops →
+  **每店** upsert credentials + commerce.shops（共享用户 token + 每店 cipher）；多店 seller
+  自动逐店落库；新增 `kind=no_authorized_shop`；店铺条目缺 id/cipher → missing_shop_id /
+  missing_shop_cipher 显式失败不落半残行（错误附 raw keys）
+- 成功结果改 `{"shops":[...]}`（HTML 逐店渲染 / JSON 数组）
+- 单测：fetch_authorized_shops HTTP 5 例 + flow 多店/空店列表/条目缺字段 + api 契约适配
+- spec：`tech-doc/api/tiktok-shop-oauth.md`「上游契约确认」节按实测定稿
+- 附带：oauth 回调全路径结构化日志（kind/upstream_code/成功逐店），真实授权失败可当场定位
+
 ## 2026-09-06 (feat) — 新店 TikTok seller 授权流程上线（Lane E 收尾合入部署）
 
 Lane E 的 `/v2/oauth/tiktok/*`（v1 oauth-receiver `/authorize`+`/callback` 职责迁入 v2）收尾合入并部署
@@ -101,7 +120,6 @@ alembic **0011_oauth_states** 重编号接入 0007→0009→0010 链并 stamp，
   生产同款 token/get 读取验证，见 spec「上游契约确认」节）+ external-api.md TL;DR
 - 测试：proxy HTTP 单测 + DB 编排集成 + API 契约共 31 个新用例
 - 已知边界：授权到期/取消的 webhook 接收未做（见 spec 生命周期备注），续期=重走本流程（幂等）
-
 
 ## 2026-09-05 (refactor) — commerce 域命名重构上线（ADR-0003，live 已应用 migration 0007）
 

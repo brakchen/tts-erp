@@ -90,7 +90,7 @@ def _page(title: str, body_html: str, *, status_line: str = "") -> str:
 </style>
 </head>
 <body>
-<div class="card {_html.escape('ok' if 'success' in title.lower() else 'err')}">
+<div class="card {_html.escape("ok" if "success" in title.lower() else "err")}">
   <p class="status">{status_line}</p>
   {body_html}
 </div>
@@ -120,9 +120,7 @@ def _json(*, ok: bool, http_status: int, **fields: Any) -> JSONResponse:
 # ─── authorize link ──────────────────────────────────────────────────
 
 
-@router.get(
-    "/authorize", summary="Start TikTok seller authorization"
-)
+@router.get("/authorize", summary="Start TikTok seller authorization")
 def authorize(
     request: Request,
     sess: Session = Depends(get_session),  # noqa: B008 — FastAPI DI 惯例
@@ -168,7 +166,7 @@ def authorize(
         "<h1>Authorize a new TikTok shop</h1>"
         f"<p>State registered (single-use, expires "
         f"<code>{_html.escape(payload['state_expires_at'])}</code> UTC).</p>"
-        '<p><strong>Open this link in a browser</strong> and approve as the '
+        "<p><strong>Open this link in a browser</strong> and approve as the "
         "seller:</p>"
         f'<p><a href="{_html.escape(authorize_url)}">Open authorization link</a></p>'
         f"<p><code>{_html.escape(authorize_url)}</code></p>"
@@ -176,7 +174,9 @@ def authorize(
         "<code>?code=...&amp;state=...</code> and this page shows the result.</p>"
     )
     return HTMLResponse(
-        content=_page("tts-erp · authorize", body, status_line="Authorization link ready"),
+        content=_page(
+            "tts-erp · authorize", body, status_line="Authorization link ready"
+        ),
         status_code=status.HTTP_200_OK,
     )
 
@@ -231,7 +231,11 @@ def _handle_json(
     if error:
         if state_present:
             pop_state(sess, state)  # spend the CSRF token best-effort
-        log.warning("oauth callback json denied: error=%s state_present=%s", error, state_present)
+        log.warning(
+            "oauth callback json denied: error=%s state_present=%s",
+            error,
+            state_present,
+        )
         return _json(
             ok=False,
             http_status=200,
@@ -284,7 +288,12 @@ def _handle_json(
             kind="proxy",
             error=str(exc),
         )
-    log.info("oauth callback: shop=%s authorized", out["shop_id"])
+    for shop in out.get("shops") or []:
+        log.info(
+            "oauth callback: shop=%s authorized (json) credential_id=%s",
+            shop.get("shop_id"),
+            shop.get("credential_id"),
+        )
     return _json(ok=True, http_status=200, kind="authorized", result=out)
 
 
@@ -358,38 +367,49 @@ def _handle_html(
             status_code=status.HTTP_502_BAD_GATEWAY,
         )
 
-    log.info(
-        "oauth callback: shop=%s authorized (html) credential_id=%s account_id=%s",
-        out.get("shop_id"),
-        out.get("credential_id"),
-        out.get("account_id"),
-    )
-    rows = []
-    for label, value in (
-        ("Shop id", out.get("shop_id")),
-        ("Seller name", out.get("account_name")),
-        ("Region", out.get("region")),
-        ("Seller type", out.get("seller_type")),
-        ("Credentials row", out.get("credential_id")),
-        ("Channel account row", out.get("account_id")),
-        ("Access token expires", out.get("expires_at")),
-    ):
-        rows.append(
-            f"<tr><th>{_html.escape(label)}</th>"
-            f"<td><code>{_html.escape(str(value))}</code></td></tr>"
+    shops = out.get("shops") or []
+    for shop in shops:
+        log.info(
+            "oauth callback: shop=%s authorized (html) credential_id=%s account_id=%s",
+            shop.get("shop_id"),
+            shop.get("credential_id"),
+            shop.get("account_id"),
         )
-    scopes = ", ".join(out.get("granted_scopes") or [])
+    sections = []
+    for shop in shops:
+        rows = []
+        for label, value in (
+            ("Shop id", shop.get("shop_id")),
+            ("Seller name", shop.get("account_name")),
+            ("Region", shop.get("region")),
+            ("Seller type", shop.get("seller_type")),
+            ("Credentials row", shop.get("credential_id")),
+            ("Channel account row", shop.get("account_id")),
+            ("Access token expires", shop.get("expires_at")),
+        ):
+            rows.append(
+                f"<tr><th>{_html.escape(label)}</th>"
+                f"<td><code>{_html.escape(str(value))}</code></td></tr>"
+            )
+        scopes = ", ".join(shop.get("granted_scopes") or [])
+        sections.append(
+            "<table>"
+            + "".join(rows)
+            + "</table>"
+            + f"<p>Granted scopes: <code>{_html.escape(scopes)}</code></p>"
+        )
+    n = len(shops)
     body = (
         "<p>The shop is authorized. Sync jobs pick it up automatically "
-        "on their next tick.</p>"
-        f"<table>{''.join(rows)}</table>"
-        f"<p>Granted scopes: <code>{_html.escape(scopes)}</code></p>"
+        "on their next tick.</p>" + "<hr>".join(sections)
     )
     return HTMLResponse(
         content=_page(
             "tts-erp · shop authorized",
             body,
-            status_line=f"Shop {out.get('shop_id')} authorized",
+            status_line=f"Shop {shops[0].get('shop_id')} authorized"
+            if n == 1
+            else f"{n} shops authorized",
         ),
         status_code=status.HTTP_200_OK,
     )

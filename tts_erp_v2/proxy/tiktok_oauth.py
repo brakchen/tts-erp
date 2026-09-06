@@ -11,11 +11,12 @@ on top of FastAPI in Lane E"):
 * :func:`pop_state` — atomically consume a state on callback
   (single-use; reports ``ok`` / ``unknown`` / ``reused`` / ``expired``).
 * :func:`complete_tiktok_authorization` — the end-to-end callback path:
-  validate state → exchange ``auth_code`` for tokens (via
-  :func:`tts_erp_v2.proxy.tiktok_auth.exchange_auth_code`) → upsert the
-  ``integration.credentials`` row (keyed by the upstream 19-digit
-  ``shop_id``, which the sync worker fans out over) → upsert the
-  ``commerce.shops`` channel-account row linked to it.
+  validate state → exchange ``auth_code`` for a user-level token (via
+  :func:`tts_erp_v2.proxy.tiktok_auth.exchange_auth_code`) → enumerate the
+  granted shops via "Get Authorized Shops" (per-shop ``shop_id`` +
+  ``shop_cipher``) → upsert one ``integration.credentials`` row per shop
+  (keyed by the upstream 19-digit ``shop_id``, which the sync worker fans
+  out over) + the linked ``commerce.shops`` channel-account row.
 
 Flow reference: ``tts-partner-api-docs/Authorization overview.md`` +
 ``Seller authorization guide.md``.
@@ -35,7 +36,10 @@ from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models.commerce import ChannelAccount
 from tts_erp_v2.db.models.integration import OAuthState
-from tts_erp_v2.proxy.tiktok_auth import exchange_auth_code
+from tts_erp_v2.proxy.tiktok_auth import (
+    exchange_auth_code,
+    fetch_authorized_shops,
+)
 from tts_erp_v2.proxy.token_service import upsert_credentials
 
 log = logging.getLogger("tts_erp_v2.proxy.tiktok_oauth")
@@ -59,7 +63,8 @@ class OAuthFlowError(ValueError):
     ``kind`` is a stable machine-readable tag the HTTP layer maps to a
     message + status:
     ``state_invalid`` / ``state_reused`` / ``user_type`` /
-    ``missing_shop_id`` / ``missing_shop_cipher``.
+    ``no_authorized_shop`` / ``missing_shop_id`` /
+    ``missing_shop_cipher``.
     """
 
     def __init__(self, kind: str, message: str) -> None:
@@ -128,7 +133,7 @@ def pop_state(session: Session, raw_state: str | None) -> tuple[str, int | None]
     ).first()
     if consumed is not None:
         session.commit()
-        return "ok", int(consumed[0])
+        return "ok", consumed[0]  # BigInteger id is already int
 
     row = session.execute(
         select(OAuthState).where(OAuthState.state_hash == state_hash)
@@ -150,25 +155,36 @@ def complete_tiktok_authorization(
 
     1. Validate + consume the CSRF state (fails closed on unknown /
        expired / reused state — no upstream call is made).
-    2. Exchange ``auth_code`` for tokens (upstream errors propagate as
-       :class:`~tts_erp_v2.proxy.errors.UpstreamHttpError`; the state is
-       already spent, so the operator starts a fresh link).
-    3. Verify the grant is a shop we can sync (user_type in
-       :data:`ALLOWED_USER_TYPES`) and carries a ``shop_id``.
-    4. Upsert ``integration.credentials`` (key = upstream ``shop_id``)
-       and ``commerce.shops`` linked to it, then commit.
+    2. Exchange ``auth_code`` for a **user-level** token. ``token/get``
+       carries ``open_id``/``seller_name``/``seller_base_region``/
+       ``user_type`` but NO shop identity — confirmed against live
+       upstream 2026-09-06.
+    3. Verify the grant is a seller we can sync (``user_type`` in
+       :data:`ALLOWED_USER_TYPES`).
+    4. Call TikTok's "Get Authorized Shops"
+       (``/authorization/202309/shops``) to enumerate the granted shops
+       — each entry carries the per-shop ``shop_id`` + ``shop_cipher``
+       that every data job signs with.
+    5. For each shop: upsert ``integration.credentials`` (key = upstream
+       ``shop_id``; shared user token + per-shop cipher) and the
+       ``commerce.shops`` row linked to it, then commit.
 
     Idempotent per shop: re-authorizing an existing shop updates both
-    rows in place (this is also the renewal path).
+    rows in place (this is also the renewal path). Multi-shop sellers
+    land one credentials + shops pair per shop; the sync worker fans
+    out over all of them on its next tick.
 
-    Returns a summary dict with ``shop_id`` / ``credential_id`` /
-    ``account_id`` / ``account_name`` / ``region`` / ``seller_type`` /
-    ``granted_scopes`` / ``expires_at``.
+    Returns ``{"shops": [{shop_id, credential_id, account_id,
+    account_name, region, seller_type, granted_scopes, expires_at}]}``.
 
     Raises:
         OAuthFlowError: kind ``state_invalid`` (unknown/expired state),
             ``state_reused``, ``user_type`` (creator/partner grant),
-            ``missing_shop_id``.
+            ``no_authorized_shop`` (token granted no shop),
+            ``missing_shop_id`` / ``missing_shop_cipher`` (a shop-list
+            entry lost its identity/cipher — surfaced with the raw
+            entry keys so a renamed upstream field is decidable in one
+            run instead of guesswork).
     """
     status, _sid = pop_state(session, state)
     if status == "reused":
@@ -194,112 +210,120 @@ def complete_tiktok_authorization(
             "creator or partner grant cannot be synced by this system",
         )
 
-    shop_id = grant.get("shop_id")
-    if not shop_id:
-        raise OAuthFlowError(
-            "missing_shop_id",
-            "token response carried no shop_id — cannot key a credentials "
-            "row; check the Partner Center app scopes. Upstream data keys: "
-            f"{sorted(grant.get('_upstream_data_keys') or [])}",
-        )
-    shop_id = str(shop_id)
+    access_token = grant["access_token"]  # exchange_auth_code guarantees it
 
-    # Cross-border routing + HMAC signing require shop_cipher on EVERY
-    # shop-scoped data call (proxy/tts_shop: products_api raises on an
-    # empty cipher). Fail loudly here instead of writing a credential
-    # row whose first sync job dies with CredentialsMissing.
-    #
-    # ⚠ contract note: the Authorization overview doc's token/get data
-    # field table does NOT list shop_cipher / shop_id — the original
-    # Lane-E unit mocks assumed both. If the real upstream response
-    # omits them, this flow surfaces immediately with kind
-    # ``missing_shop_cipher`` (never a silent half-broken row); the
-    # fix is then to source them via TikTok's "Get Authorized Shop"
-    # call after token/get, not to weaken this check.
-    shop_cipher = grant.get("shop_cipher")
-    if not shop_cipher:
+    # token/get carries NO shop identity (user-level token). Enumerate
+    # the granted shops — each entry carries shop_id + shop_cipher.
+    shops = fetch_authorized_shops(access_token=access_token)
+    if not shops:
         raise OAuthFlowError(
-            "missing_shop_cipher",
-            "token response carried no shop_cipher — every tiktok data job "
-            "signs with shop_cipher and cross-border routing requires it; "
-            "if this is a real upstream shape change, extend the flow to "
-            "fetch it via Get Authorized Shop (never weaken this check). "
-            "Upstream data keys: "
-            f"{sorted(grant.get('_upstream_data_keys') or [])}",
+            "no_authorized_shop",
+            "Get Authorized Shops returned no shops for this token — the "
+            "seller must grant at least one active shop to the app",
         )
 
-    account_name = grant.get("account_name")
-    region = grant.get("region")
-    seller_type = grant.get("seller_type")
     granted_scopes = grant.get("granted_scopes")
     now = datetime.now(UTC)
+    summaries: list[dict[str, Any]] = []
+    for shop in shops:
+        shop_id = shop.get("shop_id")
+        raw_keys = sorted(shop.get("_raw_keys") or [])
+        if not shop_id:
+            raise OAuthFlowError(
+                "missing_shop_id",
+                "an authorized-shop entry carried no shop_id — cannot key "
+                "a credentials row. Raw entry keys: "
+                f"{raw_keys}",
+            )
+        # Cross-border routing + HMAC signing require shop_cipher on
+        # every shop-scoped data call (tts_shop raises on an empty
+        # cipher). Never write a row whose first sync job dies with
+        # CredentialsMissing.
+        shop_cipher = shop.get("shop_cipher")
+        if not shop_cipher:
+            raise OAuthFlowError(
+                "missing_shop_cipher",
+                f"shop {shop_id}: authorized-shop entry carried no "
+                "shop_cipher — every tiktok data job signs with it and "
+                "cross-border routing requires it. Raw entry keys: "
+                f"{raw_keys}",
+            )
 
-    cred_row = upsert_credentials(
-        session,
-        provider="tiktok",
-        external_account_id=shop_id,
-        plaintext_access_token=grant["access_token"],
-        plaintext_refresh_token=grant.get("refresh_token"),
-        plaintext_shop_cipher=shop_cipher,
-        account_label=account_name,
-        expires_at=grant.get("expires_at"),
-        granted_scopes=granted_scopes,
-    )
-    credential_id = cred_row.id
+        account_name = shop.get("account_name") or grant.get("account_name")
+        region = shop.get("region") or grant.get("region")
+        seller_type = shop.get("seller_type") or grant.get("seller_type")
 
-    acct_vals: dict[str, Any] = {
-        "platform": "tiktok",
-        "shop_id": shop_id,
-        "account_name": account_name,
-        "region": region,
-        "seller_type": seller_type,
-        "status": "active",
-        "credential_id": credential_id,
-        "source_updated_at": now,
-        "synced_at": now,
-        "updated_at": now,
-    }
-    insert_stmt = pg_insert(ChannelAccount).values(**acct_vals)
-    upsert_stmt = insert_stmt.on_conflict_do_update(
-        index_elements=["platform", "shop_id"],
-        set_={
-            "account_name": acct_vals["account_name"],
-            "region": acct_vals["region"],
-            "seller_type": acct_vals["seller_type"],
-            "status": "active",
-            "credential_id": acct_vals["credential_id"],
-            "source_updated_at": acct_vals["source_updated_at"],
-            "synced_at": acct_vals["synced_at"],
-            "updated_at": acct_vals["updated_at"],
-        },
-    )
-    session.execute(upsert_stmt)
-    acct_row = session.execute(
-        select(ChannelAccount).where(
-            ChannelAccount.platform == "tiktok",
-            ChannelAccount.shop_id == shop_id,
+        cred_row = upsert_credentials(
+            session,
+            provider="tiktok",
+            external_account_id=shop_id,
+            plaintext_access_token=access_token,
+            plaintext_refresh_token=grant.get("refresh_token"),
+            plaintext_shop_cipher=shop_cipher,
+            account_label=account_name,
+            expires_at=grant.get("expires_at"),
+            granted_scopes=granted_scopes,
         )
-    ).scalar_one()
+        credential_id = cred_row.id
+
+        acct_vals: dict[str, Any] = {
+            "platform": "tiktok",
+            "shop_id": shop_id,
+            "account_name": account_name,
+            "region": region,
+            "seller_type": seller_type,
+            "status": "active",
+            "credential_id": credential_id,
+            "source_updated_at": now,
+            "synced_at": now,
+            "updated_at": now,
+        }
+        insert_stmt = pg_insert(ChannelAccount).values(**acct_vals)
+        upsert_stmt = insert_stmt.on_conflict_do_update(
+            index_elements=["platform", "shop_id"],
+            set_={
+                "account_name": acct_vals["account_name"],
+                "region": acct_vals["region"],
+                "seller_type": acct_vals["seller_type"],
+                "status": "active",
+                "credential_id": acct_vals["credential_id"],
+                "source_updated_at": acct_vals["source_updated_at"],
+                "synced_at": acct_vals["synced_at"],
+                "updated_at": acct_vals["updated_at"],
+            },
+        )
+        session.execute(upsert_stmt)
+        acct_row = session.execute(
+            select(ChannelAccount).where(
+                ChannelAccount.platform == "tiktok",
+                ChannelAccount.shop_id == shop_id,
+            )
+        ).scalar_one()
+
+        summaries.append(
+            {
+                "shop_id": shop_id,
+                "credential_id": credential_id,
+                "account_id": acct_row.id,
+                "account_name": account_name,
+                "region": region,
+                "seller_type": seller_type,
+                "granted_scopes": granted_scopes,
+                "expires_at": grant.get("expires_at"),
+            }
+        )
+        log.info(
+            "tiktok oauth: shop=%s authorized (user_type=%s region=%s "
+            "scopes=%s raw_entry_keys=%s)",
+            shop_id,
+            user_type,
+            region,
+            granted_scopes,
+            raw_keys,
+        )
     session.commit()
     session.expire_all()
-
-    log.info(
-        "tiktok oauth: shop=%s authorized (user_type=%s region=%s scopes=%s)",
-        shop_id,
-        user_type,
-        region,
-        granted_scopes,
-    )
-    return {
-        "shop_id": shop_id,
-        "credential_id": credential_id,
-        "account_id": acct_row.id,
-        "account_name": account_name,
-        "region": region,
-        "seller_type": seller_type,
-        "granted_scopes": granted_scopes,
-        "expires_at": grant.get("expires_at"),
-    }
+    return {"shops": summaries}
 
 
 __all__ = [

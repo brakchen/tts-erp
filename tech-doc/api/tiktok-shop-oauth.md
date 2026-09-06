@@ -19,9 +19,9 @@ GET /v2/oauth/tiktok/authorize ────────────────�
 浏览器打开 authorize_url ──► seller 登录/同意
                               └─► redirect → /v2/oauth/tiktok/callback?code&state
                                                               ► pop_state(单次消费)
-                                                              ► token/get 换 token
-                                                              ► upsert credentials
-                                                              ► upsert commerce.shops
+                                                              ► token/get 换 token(用户级)
+                                                              ► Get Authorized Shops(每店 shop_id+cipher)
+                                                              ► 每店 upsert credentials+commerce.shops
                                                               ► HTML/JSON 结果页
    ◄── 授权成功，下个 tick 数据 job 自动接管
 ```
@@ -35,6 +35,7 @@ GET /v2/oauth/tiktok/authorize ────────────────�
   `X-Requested-With: tts-erp`。
 - **Query**: 无必选。`format=json` → JSON；否则 HTML（含可直接点的链接）。
 - **响应 200 (json)**:
+
   ```json
   {
     "ok": true,
@@ -44,6 +45,7 @@ GET /v2/oauth/tiktok/authorize ────────────────�
     "hint": "..."
   }
   ```
+
 - **错误**: `500`（`TIKTOK_SERVICE_ID` 未配置 / authorize host 非 http(s)）、
   `401/403`（无 key / role < admin）。
 - **副作用**: `integration.oauth_states` 插一行（只存 `sha256(state)`）。
@@ -58,22 +60,28 @@ GET /v2/oauth/tiktok/authorize ────────────────�
 - **行为顺序**: 校验并**原子消费** state（single-use；未知/过期/重用全部
   fail-closed，且不触发上游调用）→ 消费成功才调
   `GET auth.tiktok-shops.com/api/v2/token/get?app_key&app_secret&auth_code&grant_type=authorized_code`
-  → `user_type ∈ {0,4,5}`（seller / global-selling；creator=1 / partner=2,3 拒绝）→
-  `shop_id` 必填 → upsert 两行 → commit。
-- **落库**（同一事务）:
+  拿**用户级 token**（open_id/seller_*，**无 shop 身份**）→ `user_type ∈ {0,4,5}`
+  （seller / global-selling；creator=1 / partner=2,3 拒绝）→ 调
+  `GET open-api.tiktokglobalshop.com/authorization/202309/shops`（HMAC 签名 +
+  `x-tts-access-token`）枚举授权店铺（每店含 shop_id + shop_cipher）→ **每店**
+  upsert credentials + commerce.shops → commit。
+- **落库**（同一事务，**一店一对行**；多店 seller 自动逐店落）:
   - `integration.credentials`：key `(provider='tiktok', external_account_id=shop_id)`；
-    envelope 存 `access_token/refresh_token/shop_cipher`（Fernet），
-    `account_label=seller_name`，`expires_at`，`granted_scopes`。
+    envelope 存 `access_token/refresh_token/shop_cipher`（Fernet；token 为用户级共享，
+    shop_cipher 为该店专属），`account_label=店名`，`expires_at`，`granted_scopes`。
   - `commerce.shops`：`(platform='tiktok', shop_id)` upsert →
     `account_name/region/seller_type/status='active'/credential_id` 关联。
   - **幂等**：同一 shop 重复授权 = 续期路径，两行原地更新，不产生重复。
+  - 授权响应中店铺列表为空 → `kind=no_authorized_shop`（不落任何行）。
 - **响应**: 默认 HTML 结果页（浏览器展示 shop_id/name/region/scopes）；
   `format=json`:
-  - 成功 → `200 {"ok": true, "kind": "authorized", "result": {shop_id, credential_id, account_id, ...}}`
+  - 成功 → `200 {"ok": true, "kind": "authorized", "result": {"shops": [{shop_id,
+    credential_id, account_id, account_name, region, seller_type, expires_at, granted_scopes}]}}`
   - seller 拒绝 → `200 {"ok": false, "kind": "denied", "error": "auth_denied"}`
   - state 无效/过期 → `400 kind=state_invalid`；重用 → `400 kind=state_reused`
-  - `user_type` 不支持 → `400 kind=user_type`；无 `shop_id` → `400 kind=missing_shop_id`；
-    无 `shop_cipher` → `400 kind=missing_shop_cipher`（跨境路由/签名必需，宁可不落库）
+  - `user_type` 不支持 → `400 kind=user_type`；店铺列表为空 → `400 kind=no_authorized_shop`
+  - 店铺条目缺 `shop_id`/`shop_cipher` → `400 kind=missing_shop_id` / `missing_shop_cipher`
+    （跨境路由/签名必需，宁可不落库；错误附条目 raw keys 可当场判断上游改版）
   - 上游 token/get 拒绝（如 code 已用过）→ `502 kind=upstream`（state 已消费，
     需重新发起 authorize）
   - 无 `code` 裸访问 → `400 kind=missing_code`
@@ -88,6 +96,7 @@ GET /v2/oauth/tiktok/authorize ────────────────�
 | `TIKTOK_APP_KEY` / `TIKTOK_APP_SECRET` | ✅ | token/get 与刷新共用（已有） |
 | `TIKTOK_AUTHORIZE_HOST` | 可选 | 授权域名。默认 ROW `https://services.tiktokshop.com`；US 市场设 `https://services.us.tiktokshop.com` |
 | `TIKTOK_AUTH_HOST` | 可选 | token 域名，默认 `https://auth.tiktok-shops.com`（已有） |
+| `TIKTOK_API_HOST` | ✅ 回调 | Get Authorized Shops 域名，默认 `https://open-api.tiktokglobalshop.com`（已有） |
 | `TIKTOK_REDIRECT_URI` | 可选 | 仅展示/文档用。Partner Center 里配的实际 Redirect URL 才是生效值 |
 
 ## Partner Center 一次性配置（人类操作，agent 不代办）
@@ -102,23 +111,24 @@ GET /v2/oauth/tiktok/authorize ────────────────�
 4. 测试用 Seller Center **test account / Development Shops**，不要在开发期用
    线上 seller 真号授权。
 
-## 上游契约确认（shop_id / shop_cipher 从哪来）
+## 上游契约确认（shop_id / shop_cipher 从哪来）—— 已实测定稿
 
-✅ **已由 v1 生产路径验证**：v1 `oauth-receiver`（同为 app_key `6kv9a06k12g4c` + 同一个
-`auth.tiktok-shops.com/api/v2/token/get`、`grant_type=authorized_code`）在生产回调里从响应
-`data` 直接读取 `shop_id / shop_cipher / shop_region / seller_type` 落库成功——现网生产店
-`7494763368967603447` 的凭证（含 shop_cipher）即由此而来并持续被 v2 job 签名使用。
+**实测结论（2026-09-06 live 验证）**：service_id 授权流的 `token/get` 返回的是
+**用户级 token**：`data` 只有 `access_token / access_token_expire_in / refresh_token /
+refresh_token_expire_in / open_id / seller_name / seller_base_region / user_type /
+granted_scopes`——**没有 shop_id、没有 shop_cipher**（Authorization overview 字段表
+在此是准确的）。v1 时代 token/get 能直接读到 shop 字段，是因为旧 app_key 授权流与
+service_id 流不同（v1 生产凭证来自旧流）。
 
-⚠️ 注意：本地 `Authorization overview.md` 的 data 字段表**被裁剪过**（未列 shop_id/shop_cipher，
-也漏了 prod refresh 实际在用的相对 `expires_in`），不要因它否定真实响应。
+因此每店的 `shop_id` + `shop_cipher` 来自 **Get Authorized Shops**
+（`GET {TIKTOK_API_HOST}/authorization/202309/shops`，HMAC 签名——只含 app_key+
+timestamp，无 shop_cipher；头带 `x-tts-access-token`；响应 `data.shops[]` 每项含
+`id/cipher/name/region/seller_type`，解析容错 `id|shop_id`、`cipher|shop_cipher`、
+`name|shop_name`、`region|shop_region`，首次真实调用的 raw keys 记入日志）。
 
-**防御仍在**：万一上游对某 app/市场不返回 shop_id/shop_cipher，`complete_tiktok_authorization`
-会以 `kind=missing_shop_id` / `missing_shop_cipher` **显式失败且不落库**，错误信息附带上游
-实际返回的 data keys（`_upstream_data_keys`），可当场判断是字段改名还是需补「Get Authorized
-Shop」调用——不要弱化校验。
-
-**go-live 冒烟（test account 首跑即可，非阻塞）**：真跑一次 /authorize → callback，若响应含
-`data.shop_id`+`data.shop_cipher` 则零改动收尾；真缺则按上面错误信息里的 keys 扩展。
+**防御仍在**：店铺条目缺 shop_id/shop_cipher → 该次授权 `missing_shop_id` /
+`missing_shop_cipher` 显式失败且不落半残行；店铺列表为空 → `no_authorized_shop`。
+错误均附 raw keys 供当场判断——不要弱化校验。
 
 ## 生命周期备注
 

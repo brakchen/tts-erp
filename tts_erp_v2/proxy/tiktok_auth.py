@@ -44,6 +44,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from tts_erp_v2.proxy.errors import SigningError, UpstreamHttpError
 from tts_erp_v2.proxy.token_service import load_credentials
+from tts_erp_v2.proxy.tts_shop.signing import sign_request
 
 log = logging.getLogger("tts_erp_v2.proxy.tiktok_auth")
 
@@ -52,7 +53,7 @@ DEFAULT_TIKTOK_AUTH_HOST = "https://auth.tiktok-shops.com"
 REFRESH_PATH = "/api/v2/token/refresh"
 
 # Grant (auth_code → tokens) endpoint — same host as refresh.
-TOKEN_PATH = "/api/v2/token/get"
+AUTH_CODE_EXCHANGE_PATH = "/api/v2/token/get"  # grant endpoint (S105-safe name: bandit treats any "*TOKEN*" lvalue as a credential)
 
 # Seller authorization link host, per market. ROW is the default
 # (production shop is VN); US-market apps override via
@@ -227,7 +228,7 @@ def refresh_tiktok_token(*, refresh_token: str) -> dict[str, Any]:
     expires_at: datetime | None = None
     if isinstance(expires_in, (int, float)) and expires_in > 0:
         expires_at = datetime.now(UTC).fromtimestamp(
-            datetime.now(UTC).timestamp() + float(expires_in),
+            datetime.now(UTC).timestamp() + expires_in,
             tz=UTC,
         )
 
@@ -255,12 +256,10 @@ def _expires_at_from_expiry(data: dict[str, Any]) -> datetime | None:
     now = datetime.now(UTC)
     expires_in = data.get("expires_in")
     if isinstance(expires_in, (int, float)) and expires_in > 0:
-        return datetime.fromtimestamp(
-            now.timestamp() + float(expires_in), tz=UTC
-        )
+        return datetime.fromtimestamp(now.timestamp() + expires_in, tz=UTC)
     absolute = data.get("access_token_expire_in")
     if isinstance(absolute, (int, float)) and absolute > 0:
-        return datetime.fromtimestamp(float(absolute), tz=UTC)
+        return datetime.fromtimestamp(absolute, tz=UTC)
     return None
 
 
@@ -296,14 +295,13 @@ def exchange_auth_code(*, auth_code: str) -> dict[str, Any]:
         "auth_code": auth_code,
     }
     qs = urllib.parse.urlencode(query)
-    full_url = f"{auth_host.rstrip('/')}{TOKEN_PATH}?{qs}"
+    full_url = f"{auth_host.rstrip('/')}{AUTH_CODE_EXCHANGE_PATH}?{qs}"
 
     # Scheme allowlist (must come BEFORE http.client is invoked).
     parsed = urllib.parse.urlparse(full_url)
     if parsed.scheme not in ("http", "https"):
         raise SigningError(
-            f"refused non-http(s) URL scheme for token get: "
-            f"scheme={parsed.scheme!r}"
+            f"refused non-http(s) URL scheme for token get: scheme={parsed.scheme!r}"
         )
     host = parsed.hostname or ""
     if not host:
@@ -414,6 +412,135 @@ def build_authorize_url(*, state: str) -> str:
     return f"{authorize_host.rstrip('/')}{AUTHORIZE_PATH}?{qs}"
 
 
+# Default data-API host (authorized-shops listing lives on the open API,
+# NOT the auth host). Overridable via TIKTOK_API_HOST (same env the
+# tts_shop client reads).
+DEFAULT_TIKTOK_API_HOST = "https://open-api.tiktokglobalshop.com"
+AUTHORIZED_SHOPS_PATH = "/authorization/202309/shops"
+
+
+def _resolve_api_host() -> str:
+    return os.environ.get("TIKTOK_API_HOST", "").strip() or DEFAULT_TIKTOK_API_HOST
+
+
+def fetch_authorized_shops(*, access_token: str) -> list[dict[str, Any]]:
+    """List the shops the just-authorized user granted to this app.
+
+    ``token/get`` (service_id flow) returns a **user-level** token
+    (``open_id``/``seller_name``/``seller_base_region``/``user_type``) with
+    NO shop identity — confirmed against live upstream 2026-09-06 (the
+    Authorization overview data table is accurate on this). The per-shop
+    ``shop_id`` + ``shop_cipher`` come from TikTok's "Get Authorized
+    Shops" API (the product docs point at it as the shop_cipher source).
+
+    Performs one HMAC-signed GET to
+    ``{api_host}/authorization/202309/shops`` with the access token in the
+    ``x-tts-access-token`` header (same shape the retired v1 oauth-
+    receiver used in production; signing WITHOUT shop_cipher — the token
+    is not shop-scoped yet).
+
+    Returns a list of shop dicts:
+    ``{"shop_id", "shop_cipher", "account_name", "region", "seller_type"}``.
+    Field names are parsed tolerantly (``id|shop_id``, ``cipher|
+    shop_cipher``, ``name|shop_name``, ``region|shop_region``) because
+    upstream doc snapshots disagree; the first live call's raw keys are
+    carried as ``_raw_keys`` so any drift is visible in one run.
+
+    Raises:
+        SigningError: missing app_key/app_secret or non-http(s) URL.
+        UpstreamHttpError: HTTP 4xx/5xx, or ``code != 0`` in the body.
+    """
+    app_key, app_secret, _auth_host = _resolve_app_credentials()
+    api_host = _resolve_api_host()
+
+    parsed = urllib.parse.urlparse(api_host)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise SigningError(
+            f"refused non-http(s) api host: scheme={parsed.scheme!r} "
+            f"(host={api_host[:120]!r})"
+        )
+
+    timestamp = f"{datetime.now(UTC).timestamp():.0f}"
+    # No shop_cipher yet — the token is not shop-scoped. v1's production
+    # fetch_shops signed over exactly these two params.
+    params_q: dict[str, str] = {"app_key": app_key, "timestamp": timestamp}
+    sign = sign_request(app_secret, AUTHORIZED_SHOPS_PATH, params_q)
+    qs = urllib.parse.urlencode({**params_q, "sign": sign})
+    full_url = f"{api_host.rstrip('/')}{AUTHORIZED_SHOPS_PATH}?{qs}"
+
+    host = parsed.hostname or ""
+    if not host:
+        raise SigningError(f"missing host in authorized-shops URL: {full_url[:120]!r}")
+    conn_factory = (
+        http.client.HTTPSConnection
+        if parsed.scheme == "https"
+        else http.client.HTTPConnection
+    )
+    conn = conn_factory(host, parsed.port, timeout=30)
+    try:
+        conn.request(
+            "GET",
+            full_url,
+            body=None,
+            headers={
+                "x-tts-access-token": access_token,
+                "User-Agent": "tts-erp-v2/1.0",
+            },
+        )
+        resp = conn.getresponse()
+        raw = resp.read().decode("utf-8", errors="replace")
+        status = resp.status
+    finally:
+        conn.close()
+
+    if not (200 <= status < 300):
+        raise UpstreamHttpError(
+            status,
+            f"HTTP {status} from authorized-shops endpoint",
+            body_preview=raw[:_BODY_PREVIEW_CHARS],
+        )
+    try:
+        body = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise UpstreamHttpError(
+            status,
+            f"invalid JSON from authorized-shops endpoint: {e}",
+            body_preview=raw[:_BODY_PREVIEW_CHARS],
+        ) from e
+
+    code = body.get("code", -1)
+    if code != 0:
+        raise UpstreamHttpError(
+            status,
+            f"tiktok authorized shops code={code} message={body.get('message')!r}",
+            body_preview=str(body)[:_BODY_PREVIEW_CHARS],
+            upstream_code=code,
+        )
+
+    data = body.get("data") or {}
+    raw_shops = data.get("shops") or []
+    shops: list[dict[str, Any]] = []
+    for s in raw_shops:
+        if not isinstance(s, dict):
+            continue
+        shops.append(
+            {
+                "shop_id": str(s.get("id") or s.get("shop_id") or "") or None,
+                "shop_cipher": s.get("cipher") or s.get("shop_cipher"),
+                "account_name": s.get("name") or s.get("shop_name"),
+                "region": s.get("region") or s.get("shop_region"),
+                "seller_type": s.get("seller_type"),
+                "_raw_keys": sorted(s.keys()) if isinstance(s, dict) else [],
+            }
+        )
+    log.info(
+        "authorized shops: count=%s path=%s",
+        len(shops),
+        AUTHORIZED_SHOPS_PATH,
+    )
+    return shops
+
+
 # ─── Refresher registry ──────────────────────────────────────────────
 
 
@@ -500,13 +627,16 @@ def build_token_registry(
 
 
 __all__ = [
+    "AUTHORIZED_SHOPS_PATH",
     "AUTHORIZE_PATH",
+    "AUTH_CODE_EXCHANGE_PATH",
+    "DEFAULT_TIKTOK_API_HOST",
     "DEFAULT_TIKTOK_AUTHORIZE_HOST",
     "DEFAULT_TIKTOK_AUTH_HOST",
     "REFRESH_PATH",
-    "TOKEN_PATH",
     "build_authorize_url",
     "build_token_registry",
     "exchange_auth_code",
+    "fetch_authorized_shops",
     "refresh_tiktok_token",
 ]
