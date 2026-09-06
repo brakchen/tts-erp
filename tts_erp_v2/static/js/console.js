@@ -63,12 +63,6 @@
     if (payload && Array.isArray(payload.items)) return payload.items;
     return [];
   }
-  function fmtBytes(n) {
-    if (n == null) return "";
-    if (n < 1024) return n + " B";
-    if (n < 1048576) return (n / 1024).toFixed(1) + " KiB";
-    return (n / 1048576).toFixed(2) + " MiB";
-  }
   function fmtDate(iso) {
     if (!iso) return "";
     return iso.replace("T", " ").replace(/\.\d+Z$/, "Z");
@@ -285,14 +279,12 @@
     });
   }
 
-  // ---------- tab 1: pending (cost + optional photo in one row) ----------
-  // 2026-09-01: merged the old "needs cost" + "needs photo" tabs. Both
-  // hit /v2/reporting/missing-cost-products (active products with no
-  // manual cost and no effective link) and filtered client-side; the
-  // photo tab was a strict subset of the cost tab, so the operator saw
-  // the same rows twice and had to click between tabs to enter cost then
-  // upload the photo. Each row now carries both inputs; submitting costs
-  // and (optionally) uploads the photo in one flow.
+  // ---------- tab 1: pending (cost entry; main-image mirror shown) ----------
+  // 2026-09-05 page-rework lane: the photo-upload half of this tab is
+  // gone. The row shows the SPU's TikTok main image mirrored into local
+  // MinIO (image_url from the backend; fallback icon when the mirror
+  // hasn't finished). Each row carries the cost input; submitting costs
+  // POSTs /v2/reporting/manual-costs with currency fixed to CNY.
   function loadPending() {
     var acct = getActiveAccountId();
     var tbody = $("#grid-rows");
@@ -341,7 +333,7 @@
     var tbody = $("#grid-rows");
     html(tbody, "");
     if (!items.length) {
-      html(tbody, emptyRow("该店铺所有商品均已填成本并附图。"));
+      html(tbody, emptyRow("该店铺所有商品均已填成本。"));
       return;
     }
     items.forEach(function (it) {
@@ -362,93 +354,116 @@
           '<td class="op-td-cost" data-label="单位成本">' +
           '<span class="op-cost-input">' +
           '<input type="number" class="op-input-cost" step="0.0001" min="0.0001" data-k="unit_cost" placeholder="0.0000" aria-label="单位成本">' +
-          '<select class="op-select-currency" data-k="currency" aria-label="货币">' +
-          "<option>USD</option><option>CNY</option><option selected>VND</option><option>EUR</option>" +
-          "</select>" +
+          '<span class="op-currency-fixed" aria-label="货币">CNY</span>' +
           "</span>" +
           "</td>" +
           '<td data-label="备注">' +
           '<input type="text" class="op-input-note" data-k="note" maxlength="500" placeholder="（可选）" aria-label="备注">' +
           "</td>" +
-          '<td data-label="图片">' +
-          '<label class="op-dropzone" data-act="dropzone">' +
-          "📷 拖入或点击选择" +
-          '<input type="file" accept="image/*" class="d-none">' +
-          "</label>" +
-          '<div class="op-gallery" data-gallery></div>' +
+          "<td data-label=\"图片\">" +
+          mirrorCellHtml(it) +
           "</td>" +
           '<td class="op-td-action" data-label="操作">' +
           '<button class="op-btn-primary" data-act="submit">提交</button>' +
           '<span class="row-status"></span>' +
           "</td>",
       );
-      var drop = tr.querySelector('[data-act="dropzone"]');
-      var input = drop.querySelector("input");
-      // Stash the file on the row so submitPending() can read it
-      // regardless of whether the user clicked-to-pick (populates
-      // input.files) or drag-and-dropped (DataTransfer is one-shot).
-      input.addEventListener("change", function () {
-        if (input.files[0]) {
-          tr._pickedFile = input.files[0];
-          drop.childNodes[0].nodeValue =
-            "📷 " + (input.files[0].name || "已选择") + " · 点击替换";
-        }
-      });
-      drop.addEventListener("dragover", function (ev) {
-        ev.preventDefault();
-        drop.classList.add("is-drag");
-      });
-      drop.addEventListener("dragleave", function () {
-        drop.classList.remove("is-drag");
-      });
-      drop.addEventListener("drop", function (ev) {
-        ev.preventDefault();
-        drop.classList.remove("is-drag");
-        var f =
-          ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
-        if (f) {
-          tr._pickedFile = f;
-          drop.childNodes[0].nodeValue =
-            "📷 " + (f.name || "已选择") + " · 点击替换";
-        }
-      });
+      var zoom = tr.querySelector("[data-zoom]");
+      if (zoom) {
+        zoom.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          openLightbox(zoom.getAttribute("data-zoom"));
+        });
+      }
+      bindMirrorErrorFallback(tr);
       tr.querySelector('[data-act="submit"]').addEventListener("click", function () {
         submitPending(tr);
       });
       tbody.appendChild(tr);
-      // Existing photos preview (read-only).
-      var gallery = tr.querySelector("[data-gallery]");
-      api(
-        "/v2/spu-images?spu_pk=" +
-          encodeURIComponent(tr.dataset.cpid),
-      )
-        .then(function (r) {
-          return r.ok ? r.json() : [];
-        })
-        .then(function (list) {
-          (list || []).slice(0, 4).forEach(function (im) {
-            var img = document.createElement("img");
-            img.alt = esc(im.filename || "");
-            img.title = esc(im.filename || "") + " · " + fmtBytes(im.size_bytes);
-            img.src = im.url;
-            // Width/height/object-fit handled by .op-gallery img in CSS
-            img.src = im.url;
-            img.alt = esc(im.filename || "");
-            img.title =
-              esc(im.filename || "") + " · " + fmtBytes(im.size_bytes);
-            gallery.appendChild(img);
-          });
-        })
-        .catch(function () {
-          /* gallery optional */
-        });
     });
     applyFilter();
   }
 
+  // Mirror image cell (2026-09-05 page-rework lane): the operator no
+  // longer uploads supplier reference photos. The row shows the SPU's
+  // TikTok main image mirrored into local MinIO (resolved server-side to
+  // image_url). Missing / not-yet-mirrored rows render a fixed-size
+  // fallback box instead of a broken <img>.
+  function mirrorCellHtml(it) {
+    var url = it.image_url;
+    if (url) {
+      return (
+        '<img class="op-mirror-thumb" data-zoom="' +
+        esc(url) +
+        '" src="' +
+        esc(url) +
+        '" alt="" title="点击放大">'
+      );
+    }
+    return '<span class="op-img-fallback" title="主图未同步/镜像未完成"></span>';
+  }
+
+  // If a mirror <img> fails to load at render time (presigned URL
+  // expired / object missing), swap it for the same fixed-size fallback
+  // so the grid never shows a broken image.
+  function bindMirrorErrorFallback(tr) {
+    var imgs = tr.querySelectorAll("img.op-mirror-thumb");
+    imgs.forEach(function (img) {
+      img.addEventListener("error", function () {
+        var holder = document.createElement("span");
+        holder.className = "op-img-fallback";
+        holder.title = "镜像图加载失败";
+        if (img.parentNode) img.parentNode.replaceChild(holder, img);
+      });
+    });
+  }
+
+  // Lightbox: click the row image to open a full-screen overlay; click
+  // the overlay background (not the enlarged image itself, nor × / Esc)
+  // to close. One shared overlay per page.
+  var _lightbox = null;
+  function openLightbox(url) {
+    if (!url) return;
+    if (!_lightbox) {
+      _lightbox = document.createElement("div");
+      _lightbox.className = "op-lightbox";
+      _lightbox.innerHTML =
+        '<button type="button" class="op-lightbox-close" aria-label="关闭">×</button>' +
+        '<img alt="">';
+      // Only a click on the backdrop closes — a click on the enlarged
+      // image itself stops propagation so the operator can pan/zoom
+      // without accidentally dismissing the preview.
+      _lightbox.addEventListener("click", function (ev) {
+        if (ev.target === _lightbox) closeLightbox();
+      });
+      _lightbox.querySelector("img").addEventListener("click", function (ev) {
+        ev.stopPropagation();
+      });
+      _lightbox
+        .querySelector(".op-lightbox-close")
+        .addEventListener("click", function (ev) {
+          ev.stopPropagation();
+          closeLightbox();
+        });
+      document.body.appendChild(_lightbox);
+    }
+    _lightbox.querySelector("img").src = url;
+    _lightbox.classList.add("is-open");
+    document.addEventListener("keydown", _lightboxEsc);
+  }
+  function closeLightbox() {
+    if (!_lightbox) return;
+    _lightbox.classList.remove("is-open");
+    _lightbox.querySelector("img").src = "";
+    document.removeEventListener("keydown", _lightboxEsc);
+  }
+  function _lightboxEsc(ev) {
+    if (ev.key === "Escape") closeLightbox();
+  }
+
   function submitPending(tr) {
-    var inputs = tr.querySelectorAll("input[data-k], select[data-k]");
-    var body = { spu_id: tr.dataset.ext };
+    var inputs = tr.querySelectorAll("input[data-k]");
+    var body = { spu_id: tr.dataset.ext, currency: "CNY" };
     inputs.forEach(function (i) {
       body[i.dataset.k] = i.value;
     });
@@ -457,17 +472,11 @@
       setRowStatus(tr, "请输入大于 0 的单位成本", "is-err");
       return;
     }
-    var file = tr._pickedFile || null;
-    if (file && file.size > 8 * 1024 * 1024) {
-      setRowStatus(tr, "文件超过 8 MiB", "is-err");
-      return;
-    }
-    var acct = parseInt(tr.dataset.acct || "0", 10);
-    var cpid = parseInt(tr.dataset.cpid || "0", 10);
     tr.classList.add("table-active");
-    setRowStatus(tr, "保存成本中…", "is-saving");
-    // Step 1: always POST manual-costs first. If this fails the operator
-    // wants to know before any image upload burns the MinIO budget.
+    setRowStatus(tr, "保存中…", "is-saving");
+    // 2026-09-05 page-rework lane: manual-costs only. The photo upload
+    // flow (spu-images upload-url/PUT/confirm) is gone — the page now
+    // renders the TikTok main image from its MinIO mirror instead.
     api("/v2/reporting/manual-costs", {
       method: "POST",
       body: JSON.stringify(body),
@@ -479,70 +488,11 @@
         });
       })
       .then(function () {
-        if (!file) {
-          // Cost-only submission, done.
-          return null;
-        }
-        setRowStatus(tr, "申请上传链接…", "is-saving");
-        return api("/v2/spu-images/upload-url", {
-          method: "POST",
-          body: JSON.stringify({
-            shop_pk: acct,
-            spu_pk: cpid,
-            filename: file.name || "photo.jpg",
-            content_type: file.type || "image/jpeg",
-            size_bytes: file.size,
-          }),
-        })
-          .then(function (r) {
-            if (r.status === 201) return r.json();
-            return r.text().then(function (t) {
-              throw new Error("upload-url HTTP " + r.status + " · " + t);
-            });
-          })
-          .then(function (info) {
-            setRowStatus(tr, "上传到 MinIO…", "is-saving");
-            return fetch(info.upload_url, {
-              method: "PUT",
-              credentials: "include",
-              headers: info.required_headers || {
-                "Content-Type": file.type || "image/jpeg",
-              },
-              body: file,
-            }).then(function (upR) {
-              if (!upR.ok) throw new Error("MinIO PUT HTTP " + upR.status);
-              return info;
-            });
-          })
-          .then(function (info) {
-            setRowStatus(tr, "确认中…", "is-saving");
-            return api("/v2/spu-images/" + info.image_id + "/confirm", {
-              method: "POST",
-            }).then(function (r) {
-              if (r.status !== 200)
-                return r.text().then(function (t) {
-                  throw new Error("confirm HTTP " + r.status + " · " + t);
-                });
-              return r.json();
-            });
-          });
-      })
-      .then(function () {
         fileRow(tr);
       })
       .catch(function (e) {
-        // Cost succeeded but image failed → row stays so the operator
-        // can re-click. Surface the partial-success message clearly.
         var msg = e && e.message ? e.message : String(e);
-        if (
-          msg.indexOf("MinIO PUT") !== -1 ||
-          msg.indexOf("upload-url") !== -1 ||
-          msg.indexOf("confirm") !== -1
-        ) {
-          setRowStatus(tr, "成本已保存，图片上传失败： " + msg, "is-err");
-        } else {
-          setRowStatus(tr, "错误：" + msg, "is-err");
-        }
+        setRowStatus(tr, "错误：" + msg, "is-err");
         tr.classList.remove("table-active");
       });
   }

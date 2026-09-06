@@ -60,9 +60,7 @@ def test_manual_costs_page_v2_has_two_operational_tabs(api_client, readonly_key)
         assert label in body, f"missing tab label: {label!r}"
     # The retired labels must be gone (regression guard).
     for retired in ("待填成本", "待传图片"):
-        assert retired not in body, (
-            f"retired tab label still rendered: {retired!r}"
-        )
+        assert retired not in body, f"retired tab label still rendered: {retired!r}"
 
 
 def test_manual_costs_page_v2_has_shop_switcher(api_client, readonly_key):
@@ -184,6 +182,9 @@ def test_console_js_uses_redesign_class_names():
 
     Regression guard so the next refactor doesn't regress the page to
     raw Bootstrap classes (which the CSS no longer styles).
+    2026-09-05 page-rework lane: currency select + upload dropzone are
+    gone (fixed CNY + MinIO main-image mirror); the hooks below are the
+    live set in the current row template.
     """
     from pathlib import Path
 
@@ -199,12 +200,18 @@ def test_console_js_uses_redesign_class_names():
         "op-td-sku",
         "op-td-cost",
         "op-input-cost",
-        "op-select-currency",
-        "op-dropzone",
+        "op-currency-fixed",
+        "op-mirror-thumb",
+        "op-img-fallback",
         "op-btn-primary",
         "op-loading",
     ):
         assert cls in src, f"console.js missing class hook: {cls!r}"
+    # Retired UI must stay gone (page-rework lane).
+    for retired in ("op-select-currency", "op-dropzone"):
+        assert retired not in src, (
+            f"console.js must not reference retired upload/currency UI: {retired!r}"
+        )
 
 
 def test_console_js_populates_signature_counter():
@@ -226,7 +233,7 @@ def test_console_js_populates_signature_counter():
     assert '"#op-counter-num"' in src or "#op-counter-num" in src, (
         "console.js does not target #op-counter-num"
     )
-    assert 'data-state' in src and '"ready"' in src, (
+    assert "data-state" in src and '"ready"' in src, (
         "console.js does not flip counter data-state to ready on success"
     )
 

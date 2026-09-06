@@ -165,9 +165,23 @@ JOBS: dict[str, JobSpec] = {
         is_tiktok=False,
         entrypoint="run_profit_daily",
     ),
+    # ── SPU image mirror (2026-09-05 page-rework lane) ───────────────
+    # Mirrors products_spu.main_image_url into local MinIO so the
+    # manual-costs page renders from our own bucket, not the TikTok CDN.
+    # System-wide (no per-shop fan-out): scans every SPU with a main
+    # image and skips ones whose derived object key already matches
+    # mirror_object_key (key embeds a URL hash = the dedupe).
+    "spu.image_mirror": JobSpec(
+        job_name="spu.image_mirror",
+        module_path="tts_erp_v2.jobs.tiktok.spu_image_mirror",
+        interval_seconds=1800,  # 30 min — images change rarely
+        is_tiktok=False,
+        entrypoint="run_scheduled",
+    ),
     # ── Analytics retention 已于 2026-09-05 reorg（tech-doc/analytics/
     # reorg-plan.md 决策 #1-#4）摘除：ad_records / ad_audit_log / 等 4 张
-    # 表已 drop,审计改文件日志,无对象可 purge。JOBS 数从 13 → 12。
+    # 表已 drop,审计改文件日志,无对象可 purge。JOBS 数 13 → 12。
+    # 2026-09-05 晚：spu.image_mirror 加入 → 12 → 13（见 coverage 测试）。
 }
 
 
@@ -220,8 +234,7 @@ def _enumerate_tiktok_shops(session: Session) -> list[str]:
                 exists(
                     select(ChannelAccount.shop_id).where(
                         ChannelAccount.platform == "tiktok",
-                        ChannelAccount.shop_id
-                        == Credentials.external_account_id,
+                        ChannelAccount.shop_id == Credentials.external_account_id,
                     )
                 ),
             )

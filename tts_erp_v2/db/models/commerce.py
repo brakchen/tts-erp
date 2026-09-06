@@ -90,6 +90,14 @@ class ChannelProduct(Base):
     category_id: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str | None] = mapped_column(Text)
     main_image_url: Mapped[str | None] = mapped_column(Text)
+    # Local MinIO mirror of ``main_image_url`` (2026-09-05): the object
+    # key embeds a hash of the source URL
+    # (``mirror/<spu_pk>/<sha1(url)[:16]>.jpg``) so the key itself IS the
+    # dedupe — the mirror job compares the current URL's derived key
+    # against this column and only re-downloads when it changed.
+    # Rendering endpoints resolve this key to a presigned/public URL on
+    # read (never stored as a URL, so MinIO access config can evolve).
+    mirror_object_key: Mapped[str | None] = mapped_column(Text)
     source_created_at: Mapped[datetime | None]
     source_updated_at: Mapped[datetime | None]
     raw_record_id: Mapped[int | None] = mapped_column(

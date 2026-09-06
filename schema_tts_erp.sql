@@ -181,7 +181,8 @@ CREATE TABLE IF NOT EXISTS commerce.products_spu (
     source_updated_at timestamp with time zone,
     raw_record_id bigint,
     synced_at timestamp with time zone DEFAULT now() CONSTRAINT channel_products_synced_at_not_null NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() CONSTRAINT channel_products_updated_at_not_null NOT NULL
+    updated_at timestamp with time zone DEFAULT now() CONSTRAINT channel_products_updated_at_not_null NOT NULL,
+    mirror_object_key text
 );
 
 
