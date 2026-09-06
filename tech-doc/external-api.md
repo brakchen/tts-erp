@@ -48,6 +48,8 @@ cookie (see [Browser session login](#browser-session-login)).
 | SPU image list / upload / delete | `GET /v2/spu-images`, `POST /v2/spu-images/upload-url`, `POST /v2/spu-images/{id}/confirm`, `DELETE /v2/spu-images/{id}` | readonly / readwrite |
 | Browser login / logout / whoami | `GET\|POST /v2/auth/login`, `POST /v2/auth/logout`, `GET /v2/auth/me` | public |
 | Analytics cursor has-data / dump ingest (Chrome ext) | `GET /v2/analytics/sync/cursor`, `POST /v2/analytics/sync/dumps` | readwrite + scope |
+| Start TikTok seller authorization | `GET /v2/oauth/tiktok/authorize` | **admin** (handler-enforced) |
+| TikTok OAuth redirect target (new-shop onboarding) | `GET /v2/oauth/tiktok/callback?code&state` | **public** — see [`tech-doc/api/tiktok-shop-oauth.md`](api/tiktok-shop-oauth.md) |
 
 Key gotchas (read these before writing code):
 

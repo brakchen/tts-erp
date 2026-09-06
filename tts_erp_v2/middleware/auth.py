@@ -53,6 +53,10 @@ EXEMPT_PATHS = {
     "/v2/auth/login",
     "/v2/auth/logout",
     "/v2/auth/me",
+    # TikTok seller OAuth redirect target — TikTok's servers redirect the
+    # seller's browser here; there is no API key to present. The route
+    # validates its single-use CSRF state before doing anything.
+    "/v2/oauth/tiktok/callback",
 }
 
 # Path-level required role for the v2 app.
