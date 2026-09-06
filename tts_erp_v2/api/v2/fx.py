@@ -132,7 +132,7 @@ def convert_fx(
             detail=f"{exc} (fx cache has {exc.codes} unlisted)",
         ) from exc
     if conv is None:
-        raise _not_found(from_code)
+        raise _not_found(base_code)
     return FxConvertOut(
         base_code=conv.base_code,
         upstream_last_update=conv.upstream_last_update,
