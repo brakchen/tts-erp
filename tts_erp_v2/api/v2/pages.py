@@ -1,9 +1,13 @@
 """/v2/pages/* — server-rendered HTML pages (no SPA framework).
 
-The manual-costs page (the only Lane E page) renders a static HTML shell.
-Styling is **Bootstrap 5.3.8**, self-hosted at ``/static/vendor/bootstrap.min.css``
-(MIT — see ``static/vendor/NOTICE.md``); behaviour lives in
-``/static/js/console.js``. No custom design system, no CDN links.
+Both served pages render static HTML shells styled with **Bootstrap 5.3.8**,
+self-hosted at ``/static/vendor/bootstrap.min.css`` (MIT — see
+``static/vendor/NOTICE.md``); no CDN links. The manual-costs page puts
+behaviour in ``/static/js/console.js``; the SPU-ROI page in
+``/static/js/spu-roi.js``. Layout is Bootstrap grid + utilities with the
+inline warm-paper skin; both pages are mobile-adapted (the ROI shell has
+breakpoint column pruning + sticky first column, see the ``_SPU_ROI_PAGE_HTML``
+header comment).
 
 Asset paths are RELATIVE (``../../static/…``) so the page works both on
 ``127.0.0.1:9877`` directly and behind the NGINX ``/tts`` prefix
@@ -72,7 +76,8 @@ def spu_roi_page() -> HTMLResponse:
 
     HTML shell 只做骨架:标题/结余带/工具栏/表格容器/分页;数据与业务计算
     全部消费 GET /v2/analytics/spu-roi(只读,§5.1-1 页面不计算业务数字)。
-    样式沿用操作台家族 token(warm-paper),行为在 static/js/spu-roi.js。
+    布局 = Bootstrap 5.3.8 栅格/工具类 + 手机端适配(见 shell 头注释),行为在
+    static/js/spu-roi.js。
     """
     return _page(_SPU_ROI_PAGE_HTML)
 
@@ -739,15 +744,24 @@ _PAGE_HTML = """<!doctype html>
 
 # SPU 实际 ROI 看板(账页式)HTML shell — 结构见 tech-doc/analytics/spu-real-roi-dashboard.md §7。
 # 只读:JS 消费 GET /v2/analytics/spu-roi;业务数字全在服务端算好(§5.1-1)。
+# 页面布局 2026-09-06 重构为 Bootstrap 5.3.8(自托管 static/vendor/bootstrap.min.css):
+#   - 结构全部用 bootstrap 工具/栅格类(row/col-*, flex-wrap, gap-*, py/px)驱动响应式;
+#   - 自定义 CSS 只留两件事:① warm-paper token 皮肤(:root 把 --bs-* 主题变量收编到同套 token,
+#     border-radius 归零工业直角);② JS 依赖的行为类(data-tip 气泡 / ⚙ 列开关 / lightbox /
+#     §7.2 标色 / 结余带数字),这些 JS 逐字渲染不可改名。
+#   - 移动端:结余带 row-cols-2→xl 7 降密度;工具栏 flex-wrap 自然纵向堆叠;表格
+#     .table-responsive 横滚 + 小屏按 nth-child 裁次要对比列(广告数/平台GMV/ROI₀/件数)+
+#     首列/表头 sticky(≤lg),避免手机上看 22 列大海。
 _SPU_ROI_PAGE_HTML = """<!doctype html>
 <html lang="zh-Hans">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SPU 实际 ROI · tts-erp</title>
+  <!-- Relative path: resolves to /static/... locally and /tts/static/... behind NGINX. Do not make absolute. -->
   <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
   <style>
-    /* warm-paper 工业操作台 token(与 manual-costs 同源,§7) */
+    /* ---------- warm-paper token(操作台家族,与 manual-costs 同源 §7) ---------- */
     :root {
       --paper: #F4EFE4;
       --paper-deep: #EAE3D2;
@@ -764,6 +778,15 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       --mono: ui-monospace, 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', Consolas, 'Liberation Mono', monospace;
       --sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
       --serif: ui-serif, 'Iowan Old Style', 'Apple Garamond', 'Source Han Serif SC', 'Noto Serif CJK SC', serif;
+      /* Bootstrap 主题变量 → warm-paper(让 .btn/.form-*/.link 自动随家族皮肤) */
+      --bs-body-bg: var(--paper);
+      --bs-body-color: var(--ink);
+      --bs-body-font-family: var(--sans);
+      --bs-border-color: var(--rule);
+      --bs-border-radius: 0;             /* 工业直角:全站零圆角 */
+      --bs-link-color: var(--accent);
+      --bs-link-hover-color: var(--accent-deep);
+      --bs-focus-ring-color: rgba(184, 57, 14, 0.22);
     }
     * { box-sizing: border-box; }
     html, body {
@@ -779,181 +802,193 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     body { background-color: var(--paper); }
     a { color: var(--accent); text-decoration: none; }
     a:hover { color: var(--accent-deep); }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
     /* ---------- 头 ---------- */
-    .op-header {
-      border-bottom: 1px solid var(--rule);
-      padding: 18px 28px 14px;
-    }
-    .op-header-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+    .op-header { border-bottom: 1px solid var(--rule); }
     .op-eyebrow {
       font-family: var(--sans); font-size: 12px; letter-spacing: 0.14em;
       text-transform: uppercase; color: var(--muted);
     }
     /* 页标题 = 唯一 serif 例外(大标题);正文统一 --sans */
-    .op-title { font-family: var(--serif); font-weight: 700; font-size: 26px; margin: 0; letter-spacing: -0.01em; }
-    .op-identity { font-family: var(--sans); font-size: 12px; color: var(--muted); }
+    .op-title { font-family: var(--serif); font-weight: 700; font-size: 26px; letter-spacing: -0.01em; }
+    .op-identity { font-size: 12px; color: var(--muted); }
     .op-identity code { font-family: var(--mono); color: var(--ink); }
+    .op-scope-note { font-size: 11px; letter-spacing: 0.05em; color: var(--muted); user-select: none; }
 
     /* ---------- 结余带(家族 signature,§3.1/§7) ---------- */
-    /* 结余带(汇总):数字加大、整带水平居中,每格标签/数字各自居中 */
-    .op-counter {
-      position: relative;
-      display: flex; flex-wrap: wrap; justify-content: center; align-items: center;
-      gap: 12px 40px;
-      padding: 24px 28px 22px; border-bottom: 1px solid var(--rule);
-      background: var(--paper);
-      font-family: var(--sans); font-variant-numeric: tabular-nums;
-    }
+    /* 结构 = bootstrap row-cols 栅格(见 body):xs 2 格 → xl 7 格,数字密度随屏降。 */
+    .op-counter { border-bottom: 1px solid var(--rule); background: var(--paper); }
     .op-counter-item {
-      display: inline-flex; flex-direction: column; align-items: center;
-      gap: 6px; text-align: center; min-width: 88px;
+      display: flex; flex-direction: column; align-items: center;
+      gap: 4px; text-align: center; min-width: 0;
     }
     .op-counter-label {
-      font-family: var(--sans); font-size: 12px; font-weight: 500;
-      letter-spacing: 0.08em; color: var(--muted); white-space: nowrap;
+      font-size: 12px; font-weight: 500; letter-spacing: 0.06em;
+      color: var(--muted); white-space: nowrap;
     }
-    .op-counter-num { font-size: 32px; font-weight: 700; line-height: 1.1; color: var(--ink); white-space: nowrap; }
+    .op-counter-num {
+      font-size: 26px; font-weight: 700; line-height: 1.1; color: var(--ink);
+      white-space: nowrap; font-variant-numeric: tabular-nums;
+    }
     .op-counter-num.is-err { color: var(--danger); }
     .op-counter-num.is-ok { color: var(--ok); }
-    /* 口径戳移入页头(2026-09-06 ROI UI lane):原为结余带绝对定位右侧,
-       窗口 1180–1600 时与居中的汇总数字重叠 → 改静态放 header 右侧,不再遮挡 */
-    .op-header-side {
-      display: flex; flex-direction: column; align-items: flex-end;
-      gap: 5px; padding-bottom: 2px;
-    }
-    .op-scope-note {
-      font-family: var(--sans); font-size: 11px; letter-spacing: 0.05em;
-      color: var(--muted); user-select: none; text-align: right;
-    }
-
-    /* ---------- 列开关 ⚙(§7.5) ---------- */
-    .op-colswitch {
-      display: inline-flex; align-items: center; gap: 12px; flex-wrap: wrap;
-      text-transform: none; letter-spacing: 0;
-    }
-    .op-cols-title { color: var(--muted); cursor: default; }
-    .op-cols-item {
-      display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
-      color: var(--ink);
-    }
-    .op-cols-item:hover { color: var(--accent); }
-    .op-cols-item input { width: auto; margin: 0; cursor: pointer; accent-color: var(--accent); }
-    .col-hidden { display: none; }
-
-    /* ---------- 工具栏 ---------- */
-    .op-toolbar {
-      display: flex; align-items: center; gap: 22px; flex-wrap: wrap;
-      padding: 13px 28px; border-bottom: 1px solid var(--rule);
-      font-family: var(--sans); font-size: 13px; letter-spacing: 0;
-      text-transform: none; color: var(--muted);
-    }
-    .op-search, .op-field { display: inline-flex; align-items: center; gap: 8px; }
-    .op-input {
-      font-family: var(--sans); font-size: 13px; background: transparent;
-      border: 0; border-bottom: 1px solid var(--rule); color: var(--ink);
-      padding: 4px 0; border-radius: 0;
-    }
-    .op-input:focus { outline: 0; border-bottom-color: var(--accent); }
-    .op-input-search { width: 240px; text-transform: none; letter-spacing: 0; }
-    .op-input-search::placeholder { color: var(--rule); }
-    select.op-input { border: 1px solid var(--rule); padding: 3px 6px; cursor: pointer; }
-    input.op-input-date { width: 150px; text-transform: none; letter-spacing: 0; color-scheme: light; }
-    .op-btn {
-      font-family: var(--sans); font-size: 13px; font-weight: 600;
-      letter-spacing: 0; padding: 6px 14px;
-      background: transparent; color: var(--ink); border: 1px solid var(--rule);
-      cursor: pointer; border-radius: 0;
-    }
-    .op-btn:hover { border-color: var(--accent); color: var(--accent); }
-    .op-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-    /* hover 问号说明(2026-09-06):data-tip 委托渲染气泡 */
     .op-hint {
       display: inline-flex; align-items: center; justify-content: center;
       width: 15px; height: 15px; margin-left: 2px; border-radius: 50%;
       border: 1px solid var(--rule); color: var(--muted);
-      font-family: var(--sans); font-size: 10px; line-height: 1;
-      cursor: help; user-select: none; flex: none;
+      font-size: 10px; line-height: 1; cursor: help; user-select: none; flex: none;
     }
     .op-hint:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ---------- 工具栏(bootstrap flex-wrap;字段纵向 label + 控件) ---------- */
+    .op-toolbar { border-bottom: 1px solid var(--rule); background: var(--paper); }
+    .op-field { display: inline-flex; flex-direction: column; gap: 2px; }
+    .op-fld-label {
+      font-size: 12px; font-weight: 500; letter-spacing: 0.04em;
+      color: var(--muted); white-space: nowrap; user-select: none;
+    }
+    /* 控件收进 warm-paper:直角、无填充、下划线输入;select 保留自带箭头 */
+    .op-field .form-control, .op-field .form-select, .op-toolbar .form-control, .op-toolbar .form-select {
+      font-size: 13px; color: var(--ink);
+      border-radius: 0;
+      background-color: transparent;
+    }
+    .op-field .form-control {
+      border: 0; border-bottom: 1px solid var(--rule);
+      padding: 4px 2px; height: auto; min-width: 120px;
+    }
+    .op-field .form-control:focus {
+      border-bottom-color: var(--accent);
+      box-shadow: none;
+    }
+    .op-field .form-select {
+      border: 1px solid var(--rule); padding: 3px 26px 3px 8px; height: auto;
+    }
+    .op-field input[type="date"] { color-scheme: light; min-width: 0; width: 100%; }
+    .op-field input[type="checkbox"] {
+      width: 15px; height: 15px; accent-color: var(--accent); margin: 0;
+      cursor: pointer; flex: none;
+    }
+    .op-search-input { min-width: 220px !important; }
+    .op-search-input::placeholder { color: var(--rule); }
+    .op-fee-input { max-width: 84px; }
+    .op-field .form-select { min-width: 96px; }
+    /* 按钮 = bootstrap .btn 组件 + 家族变量主题(op-btn 皮肤) */
+    .op-btn {
+      --bs-btn-color: var(--ink);
+      --bs-btn-border-color: var(--rule);
+      --bs-btn-bg: transparent;
+      --bs-btn-hover-color: var(--accent);
+      --bs-btn-hover-border-color: var(--accent);
+      --bs-btn-hover-bg: transparent;
+      --bs-btn-active-color: var(--accent);
+      --bs-btn-active-border-color: var(--accent);
+      --bs-btn-active-bg: transparent;
+      --bs-btn-focus-box-shadow: 0 0 0 0.15rem rgba(184, 57, 14, 0.22);
+      font-size: 13px;
+      border-radius: 0 !important;
+    }
+    .op-btn:disabled { opacity: 0.45; }
+
+    /* ---------- ⚙ 列开关(§7.5 默认折叠)→ <details> 原生展开,零 JS ---------- */
+    .op-colswitch summary {
+      cursor: pointer; list-style-position: inside;
+      font-size: 13px; color: var(--ink-soft); user-select: none;
+    }
+    .op-colswitch summary::-webkit-details-marker { display: none; }
+    .op-colswitch[open] summary { color: var(--accent); }
+    .op-cols-item {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 12px; color: var(--ink); cursor: pointer; white-space: nowrap;
+    }
+    .op-cols-item:hover { color: var(--accent); }
+    .op-cols-item input { width: 13px; height: 13px; accent-color: var(--accent); margin: 0; cursor: pointer; }
+    .col-hidden { display: none; }
+
+    /* ---------- 列头排序(JS 挂点击;箭头 span.arrow 由 JS 追加) ---------- */
     .op-th-sort { cursor: pointer; user-select: none; }
     .op-th-sort:hover { color: var(--accent); }
     .op-th-sort .arrow { color: var(--accent); }
-    .op-sortable-note { font-family: var(--sans); font-size: 12px; color: var(--muted); margin-left: 10px; }
+    .op-sortable-note { font-size: 12px; color: var(--muted); }
 
     /* ---------- 主表 ---------- */
-    .op-main { max-width: 1680px; margin: 0 auto; }
-    .op-table-wrap { padding: 0 28px 30px; overflow-x: auto; }
-    table.op-table { width: 100%; border-collapse: collapse; min-width: 1500px; }
+    /* .table-responsive 是 bootstrap 的横滚容器;不套 .table(会改 cell 排版),
+       单元格横滚/粘连/标色全自管(JS 渲染的 td 类不可改名)。 */
+    .op-main { max-width: 1720px; margin: 0 auto; }
+    .op-table-wrap { overflow-x: auto; overflow-y: clip; }
+    table.op-table {
+      width: 100%; border-collapse: collapse;
+      min-width: 1500px; margin-bottom: 0;
+    }
     .op-th {
-      text-align: right; font-family: var(--sans); font-size: 12px;
-      letter-spacing: 0.04em; color: var(--muted);
-      font-weight: 600; padding: 10px 8px; border-bottom: 1px solid var(--rule);
-      white-space: nowrap; background: var(--paper);
+      text-align: right; font-size: 12px; letter-spacing: 0.04em;
+      color: var(--muted); font-weight: 600; padding: 10px 8px;
+      border-bottom: 1px solid var(--rule); white-space: nowrap;
+      background: var(--paper); vertical-align: bottom;
     }
     .op-th-left { text-align: left; }
-    thead.op-sticky .op-th { position: sticky; top: 0; z-index: 2; background: var(--paper); }
+    /* 表头 + 首列 sticky:纵向吸顶(视口滚),横向吸左(.op-table-wrap 横滚) */
+    table.op-table thead th {
+      position: sticky; top: 0; z-index: 3; background: var(--paper);
+    }
+    table.op-table thead th:first-child { left: 0; z-index: 4; box-shadow: inset 1px 0 0 var(--rule); }
     tbody.op-rows td {
-      padding: 10px 8px; border-bottom: 1px solid var(--rule-soft);
+      padding: 9px 8px; border-bottom: 1px solid var(--rule-soft);
       text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums;
-      font-family: var(--sans); font-size: 13px;
+      font-size: 13px; background: transparent;
     }
     tbody.op-rows td.td-left { text-align: left; }
+    table.op-table tbody td:first-child {
+      position: sticky; left: 0; z-index: 2; background: var(--paper);
+      box-shadow: inset 1px 0 0 var(--rule-soft);
+    }
+    table.op-table tbody tr:hover td:first-child { background: var(--paper-deep); }
+    table.op-table tbody tr.row-bad td:first-child { background: rgba(140, 26, 26, 0.055); }
     tbody.op-rows tr:hover { background: var(--paper-deep); }
     tr.row-bad { box-shadow: inset 2px 0 0 var(--danger); }
     tr.row-bad td { background: rgba(140, 26, 26, 0.045); }
-    tr.row-bad .roi-red { color: var(--danger); font-weight: 700; }
-    tr.row-bad .np-red { color: var(--danger); font-weight: 700; }
+    tr.row-bad .roi-red, tr.row-bad .np-red { color: var(--danger); font-weight: 700; }
+    td.np-red { color: var(--danger); font-weight: 700; }
     /* §7.2 标色:实际ROI<1.0 更深红红底浅字(广告回本线) */
     .roi-hard {
       background: #7f1212; color: #fdf3ec; font-weight: 700;
       padding: 2px 6px;
     }
-    /* §7.2:≥保本但 < 及格线 1.5 → 浅橙,不标红 */
     .roi-subpar { color: var(--warn); font-weight: 700; }
-    /* §7.2:退款率 > 30% → 退款率红字 */
+    .roi-red { color: var(--danger); font-weight: 700; }
     .rr-high { color: var(--danger); font-weight: 700; }
-    .warn-rr { color: var(--warn); cursor: help; font-size: 12px; }
-    /* §5.1-5:无投放文案 */
+    .warn-rr, .warn-default { color: var(--warn); cursor: help; font-size: 12px; }
     .no-ad { color: var(--muted); letter-spacing: 0.04em; }
-    /* 原始 ID/状态码保留 mono 作为"代码"标注,其余全 sans */
     .td-spu { font-family: var(--mono); font-size: 12px; color: var(--muted); }
     .td-title { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .td-null { color: var(--rule); }
-    .warn-default { color: var(--warn); cursor: help; font-size: 12px; }
-    /* SPU 主图格(2026-09-06 ROI UI lane):56px 主图(原 34px) + 右侧两行
-       (spu_id / 标题) 垂直居中;主图可点击 → lightbox 放大 —— 与
-       manual-costs 同一家族交互。无图 → 虚线占位,保持行高/对齐。 */
     .td-spu-cell { display: flex; align-items: center; gap: 12px; }
     .spu-img {
       width: 56px; height: 56px; flex: none; object-fit: cover;
-      border: 1px solid var(--rule); background: var(--paper-deep);
-      cursor: zoom-in;
+      border: 1px solid var(--rule); background: var(--paper-deep); cursor: zoom-in;
     }
     .spu-img:hover { border-color: var(--accent); }
     .spu-img-missing {
       width: 56px; height: 56px; flex: none; display: flex;
       align-items: center; justify-content: center;
       border: 1px dashed var(--rule); background: var(--paper-deep);
-      color: var(--rule); font-size: 10px; letter-spacing: 0.12em;
-      font-family: var(--sans); user-select: none;
+      color: var(--rule); font-size: 10px; letter-spacing: 0.12em; user-select: none;
     }
     .td-spu-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .spu-status { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-left: 8px; }
     .spu-status.is-down { color: var(--warn); }
-    /* Lightbox:click 主图 → 全屏叠层;点背景(非放大图)/×/Esc 关闭。
-       CSS 与 manual-costs 同款;JS 在 spu-roi.js(openLightbox)。 */
+    /* Lightbox(JS 创建 .op-lightbox 叠层;CSS 与 manual-costs 同款) */
     .op-lightbox {
       position: fixed; inset: 0; display: none;
       align-items: center; justify-content: center;
       background: rgba(20, 16, 10, 0.86);
-      z-index: 1000; cursor: zoom-out; padding: 40px;
+      z-index: 1000; cursor: zoom-out; padding: 24px;
     }
     .op-lightbox.is-open { display: flex; }
     .op-lightbox img {
       max-width: 100%; max-height: 100%; object-fit: contain;
-      border: 1px solid var(--rule); background: var(--paper);
-      cursor: default;
+      border: 1px solid var(--rule); background: var(--paper); cursor: default;
     }
     .op-lightbox-close {
       position: absolute; top: 12px; right: 18px;
@@ -962,52 +997,69 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     }
     .op-lightbox-close:hover { color: var(--accent); }
 
-    /* ---------- 分页 ---------- */
-    .op-pager { display: flex; align-items: center; gap: 18px; padding: 4px 28px 44px; font-family: var(--sans); font-size: 13px; }
-    .op-pager-page { color: var(--ink); font-variant-numeric: tabular-nums; }
-    .op-pager button.op-btn { padding: 4px 12px; }
-
-    /* ---------- 提示行 ---------- */
-    .op-footnotes {
-      padding: 8px 28px 26px; font-size: 12px; color: var(--muted);
-      border-top: 1px solid var(--rule-soft);
-    }
+    /* ---------- 分页 / 提示行 ---------- */
+    .op-pager-page { color: var(--ink); font-variant-numeric: tabular-nums; font-size: 13px; }
+    .op-footnotes { font-size: 12px; color: var(--muted); border-top: 1px solid var(--rule-soft); }
     .op-warn-chip {
       display: inline-block; margin-left: 14px; padding: 2px 10px;
       border: 1px solid var(--warn); color: var(--warn); font-size: 12px;
-      font-family: var(--sans);
     }
-    .op-loading, .op-empty, .op-error { text-align: center; padding: 60px 20px !important; color: var(--muted); }
+    .op-loading, .op-empty, .op-error { text-align: center; padding: 60px 20px !important; }
+    .op-loading, .op-empty { color: var(--muted); }
     .op-error { color: var(--danger); }
-    .op-empty { color: var(--muted); }
-    @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
     /* ---------- hover 说明气泡(data-tip,JS 委托;替代原生 title) ---------- */
     [data-tip] { cursor: help; }
     input[data-tip], select[data-tip], textarea[data-tip] { cursor: auto; }
     #ops-tip {
       position: fixed; z-index: 1000; max-width: 340px;
       background: var(--ink); color: var(--paper);
-      font-family: var(--sans); font-size: 12px; line-height: 1.5;
-      padding: 8px 11px; border-radius: 0;
+      font-size: 12px; line-height: 1.5; padding: 8px 11px; border-radius: 0;
       box-shadow: 0 2px 12px rgba(27, 24, 20, 0.28);
       pointer-events: none;
     }
 
-    @media (max-width: 900px) {
-      .op-counter, .op-toolbar, .op-table-wrap, .op-pager, .op-footnotes { padding-left: 14px; padding-right: 14px; }
-      .op-counter { gap: 10px 22px; padding-top: 20px; padding-bottom: 18px; }
-      .op-counter-num { font-size: 24px; }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+    /* ---------- 响应式(Bootstrap 断点同源) ----------
+       小屏裁掉次要对比列(广告数/平台GMV/ROI₀/件数)降低横滚量;
+       首列/表头 ≤lg 才 sticky(桌面无需吸左,避免多一列常驻宽度)。 */
+    @media (max-width: 991.98px) {
+      table.op-table thead th:first-child,
+      table.op-table tbody td:first-child {
+        max-width: 230px; overflow: hidden;
+      }
+      table.op-table tbody td:first-child { min-width: 190px; }
+      table.op-table .td-title { max-width: 120px; }
+    }
+    @media (max-width: 575.98px) {
+      .op-title { font-size: 22px; }
+      .op-counter-num { font-size: 21px; }
+      table.op-table { min-width: 1080px; }
+      table.op-table thead th:nth-child(2), table.op-table tbody td:nth-child(2),   /* 广告数 */
+      table.op-table thead th:nth-child(4), table.op-table tbody td:nth-child(4),   /* 平台GMV */
+      table.op-table thead th:nth-child(5), table.op-table tbody td:nth-child(5),   /* ROI₀ */
+      table.op-table thead th:nth-child(7), table.op-table tbody td:nth-child(7) {  /* 件数 */
+        display: none;
+      }
+    }
+    @media (min-width: 576px) and (max-width: 991.98px) {
+      table.op-table { min-width: 1240px; }
+      table.op-table thead th:nth-child(2), table.op-table tbody td:nth-child(2),   /* 广告数 */
+      table.op-table thead th:nth-child(5), table.op-table tbody td:nth-child(5) {  /* ROI₀ */
+        display: none;
+      }
     }
   </style>
 </head>
 <body>
   <header class="op-header">
-    <div class="op-header-row">
+    <div class="op-main px-2 px-md-4 py-3 d-flex flex-wrap justify-content-between align-items-end gap-2 gap-md-3">
       <div>
-        <span class="op-eyebrow">TikTok Shop · Analytics</span>
-        <h1 class="op-title">SPU 实际 ROI</h1>
+        <div class="op-eyebrow mb-1">TikTok Shop · Analytics</div>
+        <h1 class="op-title mb-0">SPU 实际 ROI</h1>
       </div>
-      <div class="op-header-side">
+      <div class="d-flex flex-column align-items-start align-items-sm-end text-sm-end">
         <span class="op-identity" id="ops-identity"></span>
         <span class="op-scope-note" id="sum-stamp">ROI · 账页</span>
       </div>
@@ -1015,66 +1067,76 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
   </header>
 
   <main class="op-main">
-    <section class="op-counter" id="summaries" aria-live="polite">
-      <span class="op-counter-item"><span class="op-counter-label">SPU</span><span class="op-counter-num" id="sum-n">·</span></span>
-      <span class="op-counter-item"><span class="op-counter-label">消耗 $</span><span class="op-counter-num" id="sum-spend">—</span></span>
-      <span class="op-counter-item"><span class="op-counter-label">有效销售 $</span><span class="op-counter-num" id="sum-sales">—</span></span>
-      <span class="op-counter-item"><span class="op-counter-label">退款净额 $<span class="op-hint" data-tip="有效已付订单中已完结退款的净退款额 = 仅退款(REFUND_ONLY) + 退货退款(RETURN_AND_REFUND) 的退款金额，VND→USD 换算。不含：已付被取消订单退款（见 ⚙ 列开关『已付被取消』信息列）、异常单(UNPAID 等)退款、未关联到 SPU 的退款行（页脚『未归属退款 N 行』只计行数不计金额）。与『全损货损』不同维度：这里是退给客户的钱，货的成本损失在下一格">?</span></span><span class="op-counter-num" id="sum-refund">—</span></span>
-      <span class="op-counter-item"><span class="op-counter-label">全损货损 $<span class="op-hint" data-tip="退货商品未回收，按成本全额计损(M13b) = 退货退款(RETURN_AND_REFUND)件数 × 该 SPU 单位成本(USD)。单位成本：人工成本(MANUAL)有效行优先，未录入按默认 30 CNY/件(≈$4.45)换算。注意这是成本维度，不是退款金额；未关联 SPU 的退货件不计入。缺人工成本的 SPU 用默认值会在行内标 ⚠">?</span></span><span class="op-counter-num" id="sum-loss">—</span></span>
-      <span class="op-counter-item"><span class="op-counter-label">净利润 $</span><span class="op-counter-num" id="sum-profit">—</span></span>
-      <span class="op-counter-item"><span class="op-counter-label">整体实际 ROI</span><span class="op-counter-num" id="sum-roi">—</span></span>
+    <!-- 结余带:row-cols 栅格降密度(xs 2 → xl 7),JS 只写 #sum-* 文本 + is-err/is-ok -->
+    <section class="op-counter px-2 px-md-4 py-3 py-md-4" aria-live="polite">
+      <div class="row g-2 g-md-3 text-center row-cols-2 row-cols-md-4 row-cols-xl-7">
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">SPU</span><span class="op-counter-num" id="sum-n">·</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">消耗 $</span><span class="op-counter-num" id="sum-spend">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">有效销售 $</span><span class="op-counter-num" id="sum-sales">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">退款净额 $<span class="op-hint" data-tip="有效已付订单中已完结退款的净退款额 = 仅退款(REFUND_ONLY) + 退货退款(RETURN_AND_REFUND) 的退款金额，VND→USD 换算。不含：已付被取消订单退款（见 ⚙ 列开关『已付被取消』信息列）、异常单(UNPAID 等)退款、未关联到 SPU 的退款行（页脚『未归属退款 N 行』只计行数不计金额）。与『全损货损』不同维度：这里是退给客户的钱，货的成本损失在下一格">?</span></span><span class="op-counter-num" id="sum-refund">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">全损货损 $<span class="op-hint" data-tip="退货商品未回收，按成本全额计损(M13b) = 退货退款(RETURN_AND_REFUND)件数 × 该 SPU 单位成本(USD)。单位成本：人工成本(MANUAL)有效行优先，未录入按默认 30 CNY/件(≈$4.45)换算。注意这是成本维度，不是退款金额；未关联 SPU 的退货件不计入。缺人工成本的 SPU 用默认值会在行内标 ⚠">?</span></span><span class="op-counter-num" id="sum-loss">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">净利润 $</span><span class="op-counter-num" id="sum-profit">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">整体实际 ROI</span><span class="op-counter-num" id="sum-roi">—</span></span></div>
+      </div>
     </section>
 
-    <section class="op-toolbar" id="toolbar">
-      <label class="op-search">
-        <span>搜索 spu_id</span>
-        <input id="filter-q" type="search" class="op-input op-input-search" placeholder="例如 1736527242804888823">
-      </label>
-      <label class="op-field" data-tip="店铺筛选：仅看该店铺 SPU（默认全部店铺）">
-        <span>店铺</span>
-        <select id="filter-shop" class="op-input" aria-label="筛选店铺（全部店铺 = 不限）">
-          <option value="">全部店铺</option>
-        </select>
-      </label>
-      <label class="op-field" data-tip="销售/退款日期范围（空 = 全历史；广告窗口始终全量）">
-        <span>起始日</span>
-        <input id="filter-w-start" type="date" class="op-input op-input-date" aria-label="销售/退款起始日期（空 = 不限）">
-      </label>
-      <label class="op-field" data-tip="销售/退款日期范围（空 = 全历史；含当日）">
-        <span>截止日</span>
-        <input id="filter-w-end" type="date" class="op-input op-input-date" aria-label="销售/退款截止日期（空 = 不限）">
-      </label>
-      <label class="op-field">
-        <span>每页</span>
-        <select id="filter-limit" class="op-input">
-          <option value="50">50</option>
-          <option value="100" selected>100</option>
-          <option value="200">200</option>
-        </select>
-      </label>
-      <label class="op-field" data-tip="平台佣金费率：默认参考基线 0.1156（可覆写）">
-        <span>费率 %</span>
-        <input id="filter-fee" type="text" class="op-input op-input-search" style="width:70px" placeholder="11.56" inputmode="decimal">
-      </label>
-      <label class="op-field">
-        <span>含无活动</span>
-        <span class="op-hint" role="note" tabindex="0" data-tip="默认只列出当前窗口内有广告或销售/退款活动的 SPU；勾选后，处于 ACTIVE 状态但没有任意活动（无投放 / 未出单）的 SPU 也会一并列出——这类行的 ROI / 金额显示 — 或「无投放」">?</span>
-        <input id="filter-include-all" type="checkbox" style="width:auto">
-      </label>
-      <span class="op-colswitch" id="colswitch" data-tip="列开关：显示/隐藏信息列（默认折叠）">
-        <span class="op-cols-title">⚙ 列</span>
-        <label class="op-cols-item"><input type="checkbox" id="col-toggle-refundsplit" class="col-toggle" data-colgroup="cg-refundsplit">仅退/退货拆分</label>
-        <label class="op-cols-item"><input type="checkbox" id="col-toggle-cancel" class="col-toggle" data-colgroup="cg-cancel">已付被取消</label>
-        <label class="op-cols-item"><input type="checkbox" id="col-toggle-fee" class="col-toggle" data-colgroup="cg-fee">平台佣金</label>
-      </span>
-      <button type="button" class="op-btn" id="btn-refresh">刷新</button>
-      <span class="op-sortable-note" id="sort-note">默认排序：实际 ROI ↑（最亏在前）</span>
+    <!-- 工具栏:flex-wrap 纵向自然堆叠,控件满宽由各自 min/max 宽度约束 -->
+    <section class="op-toolbar px-2 px-md-4 py-3" id="toolbar">
+      <div class="d-flex flex-wrap align-items-end gap-3 gap-md-4 row-gap-2">
+        <label class="op-field" for="filter-q">
+          <span class="op-fld-label">搜索 spu_id</span>
+          <input id="filter-q" type="search" class="form-control op-search-input" placeholder="例如 1736527242804888823" autocomplete="off">
+        </label>
+        <label class="op-field" data-tip="店铺筛选：仅看该店铺 SPU（默认全部店铺）">
+          <span class="op-fld-label">店铺</span>
+          <select id="filter-shop" class="form-select" aria-label="筛选店铺（全部店铺 = 不限）">
+            <option value="">全部店铺</option>
+          </select>
+        </label>
+        <label class="op-field" data-tip="销售/退款日期范围（空 = 全历史；广告窗口始终全量）">
+          <span class="op-fld-label">起始日</span>
+          <input id="filter-w-start" type="date" class="form-control" aria-label="销售/退款起始日期（空 = 不限）">
+        </label>
+        <label class="op-field" data-tip="销售/退款日期范围（空 = 全历史；含当日）">
+          <span class="op-fld-label">截止日</span>
+          <input id="filter-w-end" type="date" class="form-control" aria-label="销售/退款截止日期（空 = 不限）">
+        </label>
+        <label class="op-field">
+          <span class="op-fld-label">每页</span>
+          <select id="filter-limit" class="form-select" aria-label="每页条数">
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="200">200</option>
+          </select>
+        </label>
+        <label class="op-field" data-tip="平台佣金费率：默认参考基线 0.1156（可覆写）">
+          <span class="op-fld-label">费率 %</span>
+          <input id="filter-fee" type="text" class="form-control op-fee-input" placeholder="11.56" inputmode="decimal" autocomplete="off">
+        </label>
+        <div class="op-field d-inline-flex flex-row align-items-center gap-2 pb-1">
+          <span class="op-fld-label">含无活动</span>
+          <span class="op-hint" role="note" tabindex="0" data-tip="默认只列出当前窗口内有广告或销售/退款活动的 SPU；勾选后，处于 ACTIVE 状态但没有任意活动（无投放 / 未出单）的 SPU 也会一并列出——这类行的 ROI / 金额显示 — 或「无投放」">?</span>
+          <input id="filter-include-all" type="checkbox" aria-label="含无活动 SPU">
+        </div>
+        <button type="button" class="btn btn-sm op-btn align-self-end" id="btn-refresh">刷新</button>
+        <span class="op-sortable-note align-self-end ms-md-auto" id="sort-note">默认排序：实际 ROI ↑（最亏在前）</span>
+      </div>
+      <!-- ⚙ 列开关(§7.5 默认折叠):原生 details 展开,不引 bootstrap JS -->
+      <details class="op-colswitch mt-2" id="colswitch">
+        <summary>⚙ 列（默认折叠）</summary>
+        <div class="d-flex flex-wrap gap-3 gap-md-4 row-gap-1 mt-1">
+          <label class="op-cols-item"><input type="checkbox" id="col-toggle-refundsplit" class="col-toggle" data-colgroup="cg-refundsplit">仅退/退货拆分</label>
+          <label class="op-cols-item"><input type="checkbox" id="col-toggle-cancel" class="col-toggle" data-colgroup="cg-cancel">已付被取消</label>
+          <label class="op-cols-item"><input type="checkbox" id="col-toggle-fee" class="col-toggle" data-colgroup="cg-fee">平台佣金</label>
+        </div>
+      </details>
     </section>
 
-    <div class="op-table-wrap">
+    <!-- 主表:.table-responsive 横滚;thead th + 首列 sticky(见 CSS) -->
+    <div class="op-table-wrap table-responsive">
       <table class="op-table" aria-live="polite">
-        <thead class="op-sticky">
-          <tr id="head-row">
+        <thead>
+          <tr>
             <th scope="col" class="op-th op-th-left">商品</th>
             <th scope="col" class="op-th op-th-sort" data-sort="ad_count">广告数</th>
             <th scope="col" class="op-th op-th-sort" data-sort="spend">消耗 USD</th>
@@ -1100,18 +1162,18 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
           </tr>
         </thead>
         <tbody class="op-rows" id="rows">
-          <tr><td colspan="14" class="op-loading">加载中…</td></tr>
+          <tr><td colspan="22" class="op-loading">加载中…</td></tr>
         </tbody>
       </table>
     </div>
 
-    <section class="op-pager">
-      <button type="button" class="op-btn" id="btn-prev">← 上一页</button>
+    <section class="op-pager px-2 px-md-4 d-flex flex-wrap align-items-center gap-3 py-3 pb-4">
+      <button type="button" class="btn btn-sm op-btn" id="btn-prev">← 上一页</button>
       <span class="op-pager-page" id="pager-label">—</span>
-      <button type="button" class="op-btn" id="btn-next">下一页 →</button>
+      <button type="button" class="btn btn-sm op-btn" id="btn-next">下一页 →</button>
     </section>
 
-    <section class="op-footnotes" id="footnotes">
+    <section class="op-footnotes px-2 px-md-4 py-3 mb-4" id="footnotes">
       <span id="foot-meta">—</span>
       <span class="op-warn-chip">GMV Max 归因含自然单 · 广告数字仅供对照</span>
     </section>
