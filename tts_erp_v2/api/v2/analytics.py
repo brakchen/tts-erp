@@ -983,31 +983,30 @@ _SQL_ROI_REFUNDS = text(
     """
 )
 
-# 结余带单量/GMV 汇总(跨可见 SPU 全局 distinct;§5.3 2026-09-06 扩展):
-# - order_count:有效销售订单数(白名单状态且已付款,paid_at 窗口)
-# - cancelled_order_count:已付被取消订单数(status=CANCELLED 且已付款,paid_at 窗口)
-# - cancelled_sales:已付被取消订单的原始行金额合计(VND)→ GMV 补全
-# 与行级 _SQL_ROI_SALES 同窗口/状态白名单;区别只在按 SPU 组 vs 跨 SPU 去重计数。
+# 结余带单量/GMV 汇总(跨可见 SPU 全局 distinct;§5.3 2026-09-06 状态口径):
+# - order_count:有效订单数 = 已付白名单状态(非 CANCELLED)全部订单,
+#   不再要求 paid_at(COD 在途/待收款也算订单,与订单管理一致)
+# - cancelled_order_count:取消订单数 = 全部 status='CANCELLED' 订单
+#   (不再要求 paid_at;未收款就取消的 COD 拒收/超时单也计入)
+# - gmv:全部订单销售额 = 白名单∪CANCELLED 订单的原始行金额合计(Σ qty×price),
+#   含 COD 在途未收款与取消单原额 —— 下单即计,非回款口径(回款看行级 M6/M13)
+# 窗口裁剪列 = COALESCE(paid_at, order_time)(已收款按收款日,未收款按下单日);
+# 与行级 _SQL_ROI_SALES 的差异只在 paid_at 门槛与去重粒度(按 SPU 组 vs 跨 SPU)。
 _SQL_ROI_ORDER_SCOPE = text(
     """
     SELECT
       count(DISTINCT so.id) FILTER (
-          WHERE so.status = ANY(CAST(:paid_statuses AS text[]))
-            AND so.paid_at IS NOT NULL)                              AS order_count,
+          WHERE so.status = ANY(CAST(:paid_statuses AS text[])))        AS order_count,
       count(DISTINCT so.id) FILTER (
-          WHERE so.status = 'CANCELLED'
-            AND so.paid_at IS NOT NULL)                              AS cancelled_order_count,
-      coalesce(sum(sl.quantity * sl.unit_price) FILTER (
-          WHERE so.status = 'CANCELLED'
-            AND so.paid_at IS NOT NULL), 0)                          AS cancelled_sales
+          WHERE so.status = 'CANCELLED')                                AS cancelled_order_count,
+      coalesce(sum(sl.quantity * sl.unit_price), 0)                     AS gmv
     FROM commerce.sales_order_lines sl
     JOIN commerce.sales_orders so ON so.id = sl.order_pk
     WHERE sl.spu_pk = ANY(CAST(:pks AS bigint[]))
-      AND so.paid_at IS NOT NULL
       AND (CAST(:ws AS timestamptz) IS NULL
-           OR so.paid_at >= CAST(:ws AS timestamptz))
+           OR coalesce(so.paid_at, so.order_time) >= CAST(:ws AS timestamptz))
       AND (CAST(:we AS timestamptz) IS NULL
-           OR so.paid_at < CAST(:we AS timestamptz))
+           OR coalesce(so.paid_at, so.order_time) < CAST(:we AS timestamptz))
     """
 )
 
@@ -1142,7 +1141,10 @@ def _query_spu_roi(
     行与 totals 同源:totals 由行级 USD 值(同一组 CTE 结果)服务端加总;
     totals.roi_real 额外用原生合计(Σ net_cash 原币一次换算)对账(§5.4-4);
     totals.gmv/order_count/cancelled_order_count/total_orders 2026-09-06 起由
-    _SQL_ROI_ORDER_SCOPE 跨可见 SPU 全局去重聚合(非行加总;GMV = M6 + M6b)。
+    _SQL_ROI_ORDER_SCOPE 跨可见 SPU 全局去重聚合(非行加总)。注意口径:
+    单量/GMV 按【订单状态】计(COD 店下单即算订单,不看 paid_at),
+    GMV = 白名单∪CANCELLED 全单原始行金额;行级金额(M6/M18/退款/ROI)
+    仍按【已收款】会计口径 —— 两套口径在结余带 tooltip 与 §7.1 标明。
     金额底层原币计算、输出层一次换算(§4.2 通用规则),绝不在客户端换算。
     fee_rate=None → 用固定基线 FEE_RATE_BASELINE;有值 → 页面覆写。
     w_start/w_end(ISO 日期,可选):提供时销售按 paid_at、退款按
@@ -1351,9 +1353,10 @@ def _query_spu_roi(
     if total_spend_dec != 0:
         total_nc_prime = total_native_net_cash_vnd / fx_usd_vnd - total_return_loss_dec
         roi_real_total = _fmt_ratio(total_nc_prime / total_spend_dec)
-    # 结余带单量/GMV(§5.3 2026-09-06):跨可见 SPU 全局去重计数;GMV =
-    # 有效销售 gross + 已付被取消订单原始行金额(= Σ quantity×unit_price,
-    # 同一 paid_at 窗口;取消单原始金额行级齐全,与取消退款"未知行"无关)。
+    # 结余带单量/GMV(§5.3 2026-09-06 状态口径):跨可见 SPU 全局去重;
+    # 有效/取消单量均不再卡 paid_at(COD 在途、未收款取消都算订单),
+    # GMV = 白名单∪CANCELLED 全部订单原始行金额(下单即计;≠ 行级
+    # sales 已收款口径)。窗口列 = coalesce(paid_at, order_time)。
     spu_pks = [r["spu_pk"] for r in plain]
     scope_row = None
     if spu_pks:
@@ -1375,10 +1378,9 @@ def _query_spu_roi(
     cancelled_orders = (
         _row_int(scope_row["cancelled_order_count"]) if scope_row else 0
     )
-    cancelled_sales_usd = (
-        Decimal(scope_row["cancelled_sales"]) / fx_usd_vnd if scope_row else Decimal(0)
+    gmv_total = (
+        Decimal(scope_row["gmv"]) / fx_usd_vnd if scope_row else Decimal(0)
     )
-    gmv_total = money_total["sales"] + cancelled_sales_usd
     totals = {
         "row_count": len(plain),
         "order_count": eff_orders,
@@ -1424,13 +1426,15 @@ def _query_spu_roi(
     override_rate = None if fee_rate is None else str(fee_rate)
     if w_start is None and w_end is None:
         window_note = (
-            "ad=视图全窗口累计(供参考)；销售/退款=全历史(未裁剪,可传 w_start/w_end)"
+            "ad=视图全窗口累计(供参考)；销售/退款=全历史(未裁剪,可传 w_start/w_end)；"
+            "结余带单量/GMV 按下单状态全量累计"
         )
     else:
         window_note = (
             "ad=视图全窗口累计(供参考)；销售/退款已裁剪:"
             f"{w_start.isoformat() if w_start else '不限'}"
-            f" ~ {w_end.isoformat() if w_end else '不限'}(含 w_end 当日)"
+            f" ~ {w_end.isoformat() if w_end else '不限'}(含 w_end 当日)；"
+            "结余带单量/GMV 按 COALESCE(paid_at, order_time) 裁剪"
         )
     meta = {
         "fx": {
