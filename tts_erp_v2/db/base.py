@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 from datetime import datetime
+from typing import Any, ClassVar
 
 from sqlalchemy import create_engine
 from sqlalchemy.dialects.postgresql import TIMESTAMP
@@ -39,13 +40,33 @@ class Base(DeclarativeBase):
     inferred column type per-declarative-base via ``type_annotation_map``.
     """
 
-    type_annotation_map = {
+    # ClassVar：这是 DeclarativeBase 的类级配置（非映射列），SQLAlchemy 按
+    # 名从类 dict 读取，注释类型不影响功能；ruff RUF012 要求显式标注。
+    type_annotation_map: ClassVar[dict[Any, type]] = {
         datetime: TIMESTAMP(timezone=True),
     }
 
 
 _engine: Engine | None = None
 _SessionLocal: sessionmaker[Session] | None = None
+
+# ─── QueuePool 配置（2026-09-06，见 commit 信息 + 压测基线）────────────
+# 背景：默认 QueuePool 5+10=15 + pool_pre_ping 每 checkout 一次 SELECT 往返 +
+# checkout 超时 30s，是 09-05 cursor 池耗尽 503（排队 100s+）与单进程吞吐
+# 上限 ~200 qps 的共因（实测同查询 pre_ping on 198 qps → off 371 qps，
+# SQLAlchemy 8 线程 139 qps < 单线程 371 qps = GIL 后池锁排队）。
+#
+# 决策：
+# - pool_pre_ping=False：去掉每请求一次往返；容器重启丢连接的残余风险由
+#   pool_recycle=300 兜（长连接周期性换新），重启瞬间最多一个瞬时 500。
+# - size 10 / overflow 20（单进程 30）：API + sync-worker 两进程各 30 = 60，
+#   PG max_connections=100 留 40 头；09-05 那种 15 连接被占满的耗尽点后移。
+# - pool_timeout 10s（原 30s）：真到耗尽时快速失败（503/错误），不再让请求
+#   挂 100s 才报错。
+POOL_SIZE = 10
+POOL_MAX_OVERFLOW = 20
+POOL_TIMEOUT_S = 10.0
+POOL_RECYCLE_S = 300
 
 
 def _resolve_db_url() -> str:
@@ -63,7 +84,18 @@ def get_engine(url: str | None = None, *, echo: bool = False) -> Engine:
     global _engine
     target = url or _resolve_db_url()
     if _engine is None or _engine.url.render_as_string(hide_password=False) != target:
-        _engine = create_engine(target, echo=echo, future=True, pool_pre_ping=True)
+        _engine = create_engine(
+            target,
+            echo=echo,
+            future=True,
+            # 池参数见模块顶部注释（pre_ping off + recycle 300 + size 10/
+            # overflow 20 + checkout 超时 10s）。
+            pool_pre_ping=False,
+            pool_recycle=POOL_RECYCLE_S,
+            pool_size=POOL_SIZE,
+            max_overflow=POOL_MAX_OVERFLOW,
+            pool_timeout=POOL_TIMEOUT_S,
+        )
     return _engine
 
 
