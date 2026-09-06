@@ -84,18 +84,27 @@ SQL_LIST_CHANNEL_PRODUCTS = (
     "  ON m.spu_pk = cp.id AND m.valid_to IS NULL "
     "WHERE (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
     "AND (CAST(:status AS text) IS NULL OR cp.status = CAST(:status AS text)) "
+    "AND (NOT CAST(:has_orders AS boolean) OR EXISTS ("
+    "  SELECT 1 FROM commerce.sales_order_lines sol "
+    "  WHERE sol.spu_pk = cp.id AND sol.spu_pk IS NOT NULL"
+    "))"
 )
 # Total row count for the SAME filter (no sort / page suffix) — surfaced as
 # the X-Total-Count header so the page can render 共 N 行 / paging without
 # switching the JSON body to an envelope (the bare-array shape is a stable
 # external contract). The LEFT JOIN cannot inflate the count: at most one
-# open manual_product_costs row per SPU (partial unique index).
+# open manual_product_costs row per SPU (partial unique index); the
+# has-orders EXISTS also cannot inflate it.
 SQL_COUNT_CHANNEL_PRODUCTS = (
     "SELECT COUNT(*) AS n FROM commerce.products_spu cp "
     "LEFT JOIN procurement.manual_product_costs m "
     "  ON m.spu_pk = cp.id AND m.valid_to IS NULL "
     "WHERE (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
     "AND (CAST(:status AS text) IS NULL OR cp.status = CAST(:status AS text)) "
+    "AND (NOT CAST(:has_orders AS boolean) OR EXISTS ("
+    "  SELECT 1 FROM commerce.sales_order_lines sol "
+    "  WHERE sol.spu_pk = cp.id AND sol.spu_pk IS NOT NULL"
+    "))"
 )
 # All-SPU catalogue sorters (2026-09-06): the tail of SQL_LIST_CHANNEL_PRODUCTS.
 # Values come from the allowlist below — no request input ever reaches the
@@ -374,6 +383,14 @@ def list_products_spu(
     sess: Session = Depends(get_session),
     shop_pk: int | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
+    has_orders: bool = Query(
+        default=False,
+        description=(
+            "Only return SPUs that appear on at least one sales order "
+            "line (spu_pk bound). False (default) returns the whole "
+            "catalogue."
+        ),
+    ),
     sort: str = Query(
         default="id",
         pattern="^(id|created_at|updated_at|unit_cost|status)$",
@@ -381,7 +398,7 @@ def list_products_spu(
             "Catalogue column to sort on: id (insertion order), "
             "created_at / updated_at (source timestamps), unit_cost "
             "(current effective manual cost; cost-less rows always tail), "
-            "or status (ACTIVATE=商家 first, then DELETED, then "
+            "or status (ACTIVATE=在售 first, then DELETED, then "
             "SELLER_DEACTIVATED)."
         ),
     ),
@@ -394,6 +411,7 @@ def list_products_spu(
     params = {
         "acct_id": shop_pk,
         "status": status_filter,
+        "has_orders": has_orders,
     }
     # Total matching rows (same filter, ignoring page bounds) — exposed as
     # X-Total-Count so the UI can render 共 N 行 without switching the

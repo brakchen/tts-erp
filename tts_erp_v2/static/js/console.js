@@ -253,6 +253,10 @@
   // Status dropdown filter (2026-09-06): '' = all statuses, otherwise
   // the raw upstream code forwarded as ?status= on channel-products.
   var catalogueStatus = "";
+  // Only-show-SPUs-with-orders toggle (2026-09-06): when on, the request
+  // carries has_orders=true and the backend restricts to SPUs that appear
+  // on at least one sales order line.
+  var catalogueHasOrders = false;
 
   function setActiveTab(name) {
     currentTab = name;
@@ -265,7 +269,8 @@
     // recent = change-log count.
     var label = $("#op-counter-label");
     var sub = $("#op-counter-sub");
-    if (label) label.textContent = name === TAB_RECENT ? "最近提交" : "全部 SPU";
+    if (label)
+      label.textContent = name === TAB_RECENT ? "最近提交" : "全部 SPU";
     if (sub)
       sub.textContent =
         name === TAB_RECENT
@@ -273,13 +278,13 @@
           : "目录 · 编辑成本后提交全部";
     var stamp = $(".op-counter-stamp");
     if (stamp)
-      stamp.textContent = name === TAB_RECENT ? "CHANGELOG · N/M" : "CATALOG · ALL";
+      stamp.textContent =
+        name === TAB_RECENT ? "CHANGELOG · N/M" : "CATALOG · ALL";
     // Submit-all is an all-tab action (files the edited rows).
     var submitAll = $('[data-act="submit-all"]');
     if (submitAll) submitAll.style.display = name === TAB_ALL ? "" : "none";
     var batchStatus = $(".op-batch-status");
-    if (batchStatus)
-      batchStatus.style.display = name === TAB_ALL ? "" : "none";
+    if (batchStatus) batchStatus.style.display = name === TAB_ALL ? "" : "none";
     applyTableHead(name);
     refreshActiveTab();
   }
@@ -338,15 +343,17 @@
       var key = th.getAttribute("data-sort");
       if (!key) return;
       var isActive = catalogueSort.key === key;
-      th.classList.toggle("is-sorted-asc", isActive && catalogueSort.order === "asc");
+      th.classList.toggle(
+        "is-sorted-asc",
+        isActive && catalogueSort.order === "asc",
+      );
       th.classList.toggle(
         "is-sorted-desc",
         isActive && catalogueSort.order === "desc",
       );
       th.addEventListener("click", () => {
         if (catalogueSort.key === key) {
-          catalogueSort.order =
-            catalogueSort.order === "asc" ? "desc" : "asc";
+          catalogueSort.order = catalogueSort.order === "asc" ? "desc" : "asc";
         } else {
           catalogueSort.key = key;
           catalogueSort.order = "desc";
@@ -424,7 +431,6 @@
       retry();
     });
   }
-
 
   // Mirror image cell (2026-09-05 page-rework lane): the operator no
   // longer uploads supplier reference photos. The row shows the SPU's
@@ -586,10 +592,7 @@
       var banner = $(".op-batch-status");
       if (!banner) return;
       var msg =
-        "已提交 " +
-        filed +
-        " 行" +
-        (failed ? " · 失败 " + failed + " 行" : "");
+        "已提交 " + filed + " 行" + (failed ? " · 失败 " + failed + " 行" : "");
       banner.textContent = msg;
       banner.classList.toggle("is-err", failed > 0);
       banner.classList.toggle("is-ok", filed > 0 && failed === 0);
@@ -638,8 +641,7 @@
     }
     items.forEach((it) => {
       var tr = document.createElement("tr");
-      var prevTxt =
-        it.prev_unit_cost == null ? "—" : esc(it.prev_unit_cost);
+      var prevTxt = it.prev_unit_cost == null ? "—" : esc(it.prev_unit_cost);
       var curTxt = esc(it.unit_cost);
       html(
         tr,
@@ -692,7 +694,9 @@
       encodeURIComponent(catalogueSort.key) +
       "&order=" +
       encodeURIComponent(catalogueSort.order);
-    if (catalogueStatus) url += "&status=" + encodeURIComponent(catalogueStatus);
+    if (catalogueStatus)
+      url += "&status=" + encodeURIComponent(catalogueStatus);
+    if (catalogueHasOrders) url += "&has_orders=true";
     if (acct) url += "&shop_pk=" + acct;
     api(url)
       .then((r) => {
@@ -936,6 +940,15 @@
         if (currentTab === TAB_ALL) loadAll();
       });
     }
+    // Only-show-SPUs-with-orders toggle (2026-09-06): forwards
+    // has_orders=true so the catalogue narrows to SPUs with sales.
+    var hasOrdersBox = $("#filter-has-orders");
+    if (hasOrdersBox)
+      hasOrdersBox.addEventListener("change", () => {
+        catalogueHasOrders = hasOrdersBox.checked;
+        pageOffset = 0;
+        if (currentTab === TAB_ALL) loadAll();
+      });
     // 每页 dropdown drives the catalogue page size (2026-09-06).
     var limitSel = $("#filter-limit");
     if (limitSel) {

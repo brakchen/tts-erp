@@ -703,6 +703,10 @@ _PAGE_HTML = """<!doctype html>
         <span>状态</span>
         <select id="filter-status" class="op-input op-input-pp" aria-label="按状态过滤"></select>
       </label>
+      <label class="op-pp op-has-orders" title="只看出现在销售订单行里的 SPU">
+        <input type="checkbox" id="filter-has-orders" aria-label="仅看有单的 SPU">
+        <span>仅看有单</span>
+      </label>
       <span class="op-toolbar-spacer" aria-hidden="true"></span>
       <button type="button" class="op-btn-primary" data-act="submit-all" aria-label="一次性提交所有已编辑成本的行">
         提交全部

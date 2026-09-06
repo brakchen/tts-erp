@@ -556,3 +556,32 @@ def test_page_script_has_cache_bust_version(api_client, readonly_key):
     assert re.fullmatch(r"[0-9a-f]{8}", version), (
         f"version must be an 8-char content hash, got: {version!r}"
     )
+
+
+def test_page_has_has_orders_toggle(api_client, readonly_key):
+    """The toolbar exposes 仅看有单 (id="filter-has-orders") and console.js
+    forwards has_orders=true on the channel-products request."""
+    r = api_client.get(
+        "/v2/pages/manual-costs",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.text
+    assert 'id="filter-has-orders"' in body, "has-orders checkbox missing"
+    assert "仅看有单" in body, "has-orders label missing"
+
+    from pathlib import Path
+
+    js = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "console.js"
+    )
+    src = js.read_text(encoding="utf-8")
+    assert "catalogueHasOrders" in src, "has-orders state missing"
+    assert "has_orders=true" in src, "loadAll must forward has_orders=true"
+    assert 'id="filter-has-orders"' in src or "filter-has-orders" in src, (
+        "checkbox binding missing"
+    )

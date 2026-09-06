@@ -893,3 +893,98 @@ def test_channel_products_exposes_total_count_header(
     assert r2.status_code == 200
     assert len(r2.json()) == 1
     assert r2.headers["X-Total-Count"] == "3"
+
+
+# ---------------------------------------------------------------------------
+# has_orders filter (2026-09-06 "仅看有单" catalogue toggle)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def seed_spu_one_ordered(db_engine):
+    """Two TEST_ SPUs under one shop; only ONE appears on an order line."""
+    ext_acct = "TEST_MCHO_acct"
+    ext_sold = "TEST_MCHO_sold"
+    ext_never = "TEST_MCHO_never"
+    with db_engine.begin() as sess:
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            text(
+                "INSERT INTO commerce.shops "
+                "(platform, shop_id, account_name, status) "
+                "VALUES ('tiktok', :ext, 'TEST acct', 'active')"
+            ),
+            {"ext": ext_acct},
+        )
+        acct_id = sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            text("SELECT id FROM commerce.shops WHERE shop_id = :ext"),
+            {"ext": ext_acct},
+        ).scalar()
+        for ext in (ext_sold, ext_never):
+            sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+                text(
+                    "INSERT INTO commerce.products_spu "
+                    "(shop_pk, spu_id, title, status) "
+                    "VALUES (:acct, :ext, 'T', 'ACTIVATE')"
+                ),
+                {"acct": acct_id, "ext": ext},
+            )
+        sold_pk = sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            text("SELECT id FROM commerce.products_spu WHERE spu_id = :ext"),
+            {"ext": ext_sold},
+        ).scalar()
+        order_id = sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            text(
+                "INSERT INTO commerce.sales_orders "
+                "(shop_pk, order_id, status, currency, payment_amount) "
+                "VALUES (:acct, :ext, 'PAID', 'USD', 5.00) RETURNING id"
+            ),
+            {"acct": acct_id, "ext": "TEST_MCHO_order"},
+        ).scalar()
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            text(
+                "INSERT INTO commerce.sales_order_lines "
+                "(order_pk, external_line_id, spu_pk, quantity) "
+                "VALUES (:o, 'L1', :spu, 1)"
+            ),
+            {"o": order_id, "spu": sold_pk},
+        )
+
+    yield {"acct_id": acct_id, "sold": ext_sold, "never": ext_never}
+
+    with db_engine.begin() as sess:
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            text(
+                "DELETE FROM commerce.sales_order_lines WHERE order_pk IN "
+                "(SELECT id FROM commerce.sales_orders WHERE order_id = 'TEST_MCHO_order')"
+            )
+        )
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            text("DELETE FROM commerce.sales_orders WHERE order_id = 'TEST_MCHO_order'")
+        )
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            text("DELETE FROM commerce.products_spu WHERE shop_pk = :acct"),
+            {"acct": acct_id},
+        )
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            text("DELETE FROM commerce.shops WHERE id = :acct"),
+            {"acct": acct_id},
+        )
+
+
+def test_channel_products_has_orders_true_only_sold(
+    api_client, readonly_key, seed_spu_one_ordered
+):
+    acct = seed_spu_one_ordered["acct_id"]
+    got = _sort_products(api_client, readonly_key, acct, has_orders="true")
+    assert got == [seed_spu_one_ordered["sold"]], got
+
+
+def test_channel_products_has_orders_default_returns_all(
+    api_client, readonly_key, seed_spu_one_ordered
+):
+    acct = seed_spu_one_ordered["acct_id"]
+    got = _sort_products(api_client, readonly_key, acct)
+    assert set(got) == {
+        seed_spu_one_ordered["sold"],
+        seed_spu_one_ordered["never"],
+    }
