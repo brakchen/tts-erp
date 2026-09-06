@@ -944,6 +944,41 @@ _SQL_ROI_SALES = text(
     """
 )
 
+# 行级状态口径聚合(2026-09-06,结余带/行内口径一致):
+# - cancelled_order_count:取消单量 = status='CANCELLED' 的去重订单数(含未收款取消,
+#   与 _SQL_ROI_ORDER_SCOPE 同口径但按 SPU 分组,供行内列展示)
+# - cancelled_sales:取消订单原始行金额合计(VND) → 行内"销售 = 有效销售 + 取消原额"
+# - refund_order_count:退货订单数 = 已完结 REFUND_ONLY/RETURN_AND_REFUND case 的
+#   去重订单数(订单∈有效白名单状态) → 行内"退货率 = 退货订单数 ÷ 有效单量"
+_SQL_ROI_ROW_STATUS = text(
+    """
+    SELECT sl.spu_pk,
+           count(DISTINCT so.id) FILTER (
+               WHERE so.status = 'CANCELLED')                              AS cancelled_order_count,
+           coalesce(sum(sl.quantity * sl.unit_price) FILTER (
+               WHERE so.status = 'CANCELLED'), 0)                          AS cancelled_sales,
+           count(DISTINCT so.id) FILTER (
+               WHERE so.status = ANY(CAST(:paid_statuses AS text[]))
+                 AND EXISTS (SELECT 1 FROM after_sales.cases c2
+                             JOIN after_sales.case_lines cl2 ON cl2.case_id = c2.id
+                             WHERE c2.order_pk = so.id
+                               AND cl2.sales_order_line_id = sl.id
+                               AND c2.status IN (:st0, :st1)
+                               AND c2.case_type IN ('REFUND_ONLY', 'RETURN_AND_REFUND'))) AS refund_order_count
+    FROM commerce.sales_order_lines sl
+    JOIN commerce.sales_orders so ON so.id = sl.order_pk
+    WHERE sl.spu_pk IS NOT NULL
+      AND (so.status = ANY(CAST(:paid_statuses AS text[]))
+           OR so.status = 'CANCELLED')
+      AND (CAST(:ws AS timestamptz) IS NULL
+           OR coalesce(so.paid_at, so.order_time) >= CAST(:ws AS timestamptz))
+      AND (CAST(:we AS timestamptz) IS NULL
+           OR coalesce(so.paid_at, so.order_time) < CAST(:we AS timestamptz))
+    GROUP BY sl.spu_pk
+    """
+)
+
+
 _SQL_ROI_REFUNDS = text(
     """
     SELECT sl.spu_pk,
@@ -1214,6 +1249,24 @@ def _query_spu_roi(
     )
     refund_map = {r["spu_pk"]: r for r in refund_rows if r["spu_pk"] is not None}
     # pi-lens-ignore: python-sql-injection
+    row_status_rows = (
+        sess.execute(
+            _SQL_ROI_ROW_STATUS,
+            {
+                "paid_statuses": _PAID_STATUSES,
+                "st0": _CASE_COMPLETED_STATUSES[0],
+                "st1": _CASE_COMPLETED_STATUSES[1],
+                "ws": ws_dt,
+                "we": we_dt,
+            },
+        )
+        .mappings()
+        .all()
+    )
+    row_status_map = {
+        r["spu_pk"]: r for r in row_status_rows if r["spu_pk"] is not None
+    }
+    # pi-lens-ignore: python-sql-injection
     cost_rows = sess.execute(_SQL_ROI_COSTS).mappings().all()
     cost_map = {r["spu_pk"]: Decimal(r["unit_cost"]) for r in cost_rows}
 
@@ -1242,6 +1295,13 @@ def _query_spu_roi(
         units_dec = Decimal(sales["units_sold"]) if sales else Decimal(0)
         units_sold = _row_int(units_dec)
         sales_vnd = Decimal(sales["sales"]) if sales else Decimal(0)
+        # 行级状态口径聚合(2026-09-06):取消单量/取消原额/退货订单数
+        rs = row_status_map.get(pk)
+        cancelled_orders = _row_int(rs["cancelled_order_count"]) if rs else 0
+        cancelled_sales_usd = (
+            Decimal(rs["cancelled_sales"]) / fx_usd_vnd if rs else Decimal(0)
+        )
+        refund_orders = _row_int(rs["refund_order_count"]) if rs else 0
 
         # refund 行级金额(缺失行不造数:净额桶金额直取,取消桶分已知/未知)
         refund_only_vnd = (
@@ -1296,6 +1356,18 @@ def _query_spu_roi(
         if spend != 0 and breakeven_denom > 0:
             roi_breakeven = nc_prime / breakeven_denom  # M17
 
+        # 行内展示口径(2026-09-06,与结余带一致):
+        # 销售(GMV全单) = 有效销售 + 取消原额;取消率 = 取消单量/(有效+取消);
+        # 退货率(单量) = 退货订单数 / 有效单量(M12 金额口径保留为 refund_rate)。
+        gmv_sales_usd = sales_usd + cancelled_sales_usd
+        cancel_rate: Decimal | None = None
+        total_orders_row = order_count + cancelled_orders
+        if total_orders_row != 0:
+            cancel_rate = Decimal(cancelled_orders) / total_orders_row
+        refund_rate_qty: Decimal | None = None
+        if order_count != 0:
+            refund_rate_qty = Decimal(refund_orders) / order_count
+
         total_native_net_cash_vnd += net_cash_vnd
         total_spend_dec += spend
         total_return_loss_dec += return_loss_usd
@@ -1317,8 +1389,12 @@ def _query_spu_roi(
                 "ad_first_day": ad_first_day,
                 "ad_last_day": ad_last_day,
                 "order_count": order_count,
+                "cancelled_order_count": cancelled_orders,
                 "units_sold": units_sold,
                 "sales": sales_usd,
+                "gmv_sales": gmv_sales_usd,
+                "cancel_rate": cancel_rate,
+                "refund_rate_qty": refund_rate_qty,
                 "refund_only_qty": refund_only_qty,
                 "refund_only_amount": refund_only_usd,
                 "refund_return_qty": refund_return_qty,
@@ -1524,8 +1600,12 @@ def _query_spu_roi(
                     r["ad_last_day"].isoformat() if r["ad_last_day"] else None
                 ),
                 "order_count": r["order_count"],
+                "cancelled_order_count": r["cancelled_order_count"],
                 "units_sold": r["units_sold"],
                 "sales": _fmt_money(r["sales"]),
+                "gmv_sales": _fmt_money(r["gmv_sales"]),
+                "cancel_rate": _fmt_ratio(r["cancel_rate"]),
+                "refund_rate_qty": _fmt_ratio(r["refund_rate_qty"]),
                 "refund_only_qty": r["refund_only_qty"],
                 "refund_only_amount": _fmt_money(r["refund_only_amount"]),
                 "refund_return_qty": r["refund_return_qty"],
@@ -1554,11 +1634,15 @@ _ROI_SORT_FIELDS = (
     "roi_real",
     "spend",
     "refund_rate",
+    "refund_rate_qty",
+    "cancel_rate",
     "net_profit",
     "sales",
+    "gmv_sales",
     "ad_count",
     "gmv_ad",
     "order_count",
+    "cancelled_order_count",
     "units_sold",
     "refund_net_amount",
     "return_loss",
@@ -1576,10 +1660,14 @@ def list_spu_roi(
         "refund_rate",
         "net_profit",
         "sales",
+        "gmv_sales",
         "ad_count",
         "gmv_ad",
         "order_count",
+        "cancelled_order_count",
         "units_sold",
+        "refund_rate_qty",
+        "cancel_rate",
         "refund_net_amount",
         "return_loss",
         "roi_breakeven",

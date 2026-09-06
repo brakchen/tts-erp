@@ -235,6 +235,10 @@ SPU 无广告投放 → 广告列显示 0 与“无投放”文案（不隐藏�
 | M5 | 售出件数（有效销售） | `units(s)` | `Σ sales_order_lines.quantity`（join **有效销售订单**且 `coalesce(paid_at, order_time)∈W`，`spu_pk=s`；**状态口径 2026-09-06：白名单状态即算，含 COD 在途未收款**） | 按日可拆 | sales_order_lines + sales_orders |
 | M5b | 有效销售订单数 | `order_count(s)` | `COUNT(DISTINCT sales_orders.id)`（同一有效销售过滤；**状态口径：白名单状态全部订单，含 COD 在途**） | 按日可拆 | 同上 |
 | M6 | 销售金额(gross) | `sales(s)` | `Σ quantity × unit_price`（同上过滤条件；**状态口径：下单即算，含 COD 在途未收款**；CANCELLED 不计入） | 按日可拆 | 同上 |
+| M5c | 取消订单数 | `cancelled_order_count(s)` | `COUNT(DISTINCT id)` status=CANCELLED（状态口径，含未收款取消；2026-09-06 行内新列，与结余带取消单量同口径） | 按日可拆 | sales_orders |
+| M6c | 行内销售(GMV 全单) | `gmv_sales(s)` | 有效销售 + 取消原额（= 结余带 GMV 的行级版；2026-09-06） | 按日可拆 | M6+M6b 行级 |
+| M12b | 取消率 | `cancel_rate(s)` | 取消单量 ÷ (有效单量+取消单量)（单量口径，2026-09-06） | 范围 | M5b/M5c |
+| M12c | 退货率（单量口径） | `refund_rate_qty(s)` | 退货订单数 ÷ 有效单量（退款 case 去重订单数，非金额；2026-09-06 行内主列） | 范围 | case 去重订单 / M5b |
 | M6b | 全部订单销售额(gross,状态口径) | `gmv(s)` | `Σ quantity × unit_price`（白名单状态 ∪ CANCELLED 全单原始行金额；**下单即计、不看 paid_at**，2026-09-06 修订：COD 店在途/未收款取消也算单，对应结余带 GMV 格） | 按日可拆 | 同 M5/M6 过滤 + 状态桶 |
 | M7 | 仅退款金额（计净额） | `refund_only(s)` | `Σ` 已完结 REFUND_ONLY case 退款，**且其订单 ∈ 有效销售订单** | 按完结时间 | cases(+case_lines) |
 | M8 | 退货退款金额（计净额） | `refund_return(s)` | `Σ` 已完结 RETURN_AND_REFUND case 退款，**且其订单 ∈ 有效销售订单** | 同上 | 同上 |
@@ -362,13 +366,17 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
 | B 广告 | 平台出单 GMV（USD，归因） | `gmv_ad` | money-str | M3：`Σ order_value_total`；仅展示非回款 |
 | B 广告 | 平台 GMV ROI | `roi_l0` | ratio-str/null | M4：`gmv_ad/spend`；`spend=0 → null` |
 | B 广告 | 观测窗口 | `ad_first_day, ad_last_day` | date | 该 spu 的 `MIN(first_day)/MAX(last_day)`（meta 也给全局窗口） |
-| C 销售 | 有效销售订单数 | `order_count` | int | M5b：`COUNT(DISTINCT sales_orders.id)`（有效销售过滤 + `paid_at∈W`） |
+| C 销售 | 有效销售订单数 | `order_count` | int | M5b：`COUNT(DISTINCT sales_orders.id)`（状态口径 2026-09-06：白名单状态全部，含 COD 在途，COALESCE 窗口） |
 | C 销售 | 售出件数 | `units_sold` | int | M5：`Σ quantity`（同过滤） |
+| C 销售 | 取消订单数（主列） | `cancelled_order_count` | int | M5c：`COUNT(DISTINCT id)` status=CANCELLED（状态口径，含未收款取消） |
+| C 销售 | 销售(GMV 全单,主列) | `gmv_sales` | money-str | M6c：`sales + 取消原额` = 结余带 GMV 行级版 |
+| C 销售 | 取消率%（主列） | `cancel_rate` | ratio-str/null | M12b：`取消单量/(有效单量+取消单量)`；分母 0 → null |
 | C 销售 | 销售金额（USD，原币 VND） | `sales` | money-str | M6：`Σ quantity × unit_price`（同过滤，原生 VND → ÷usd_vnd） |
 | D 退款 | 仅退款：件数/金额 | `refund_only_qty, refund_only_amount` | int/money | M7：已完结 REFUND_ONLY 且订单 ∈ 有效销售（金额 = case_lines 行级直取） |
 | D 退款 | 退货退款：件数/金额 | `refund_return_qty, refund_return_amount` | int/money | M8：已完结 RETURN_AND_REFUND 且订单 ∈ 有效销售（同上） |
 | D 退款 | 有效订单退款小计 | `refund_net_qty, refund_net_amount` | int/money | M10：M7+M8（**计入净现金的唯一退款桶**） |
-| D 退款 | 退款率 | `refund_rate` | ratio-str/null | M12：`refund_net_amount/sales`；`sales=0 → null` |
+| D 退款 | 退款率（金额口径,隐藏） | `refund_rate` | ratio-str/null | M12：`refund_net_amount/sales`；`sales=0 → null` |
+| D 退款 | 退货率%（主列,单量口径） | `refund_rate_qty` | ratio-str/null | M12c：`退货订单数(order∈白名单且有已完结净额退款 case 的行,行级归属) ÷ 有效单量`；`order_count=0 → null` |
 | D 退款 | 已付被取消订单退款（信息列） | `refund_cancelled_qty, refund_cancelled_amount, refund_cancelled_missing_lines` | int/money/int | M9：已完结 CANCELLATION/CANCEL 且订单=CANCELLED；`amount` = **已知行金额小计**，缺失行不造数 → `missing_lines` 上报（页面显示“另有 N 行金额未知”） |
 | E 实际 ROI | 退货货损（全损，USD） | `return_loss` | money-str | M13b：全损退货件数 × 单位成本解析值（人工优先，缺省 **30 CNY/件 ≈ $4.43**）→ 折 USD |
 | E 实际 ROI | 单件货本来源（成本解析结果） | `unit_cost_used, cost_source` | money/enum | §4.2：`cost_source` ∈ `MANUAL`（命中 manual_product_costs 有效行）/ `DEFAULT_K1`（默认 30 元）；**`DEFAULT_K1` → 页面该行 ⚠ + tooltip，可跳 manual-costs 页补录** |
@@ -748,10 +756,10 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ [🔍 搜索 spu_id…] [店铺▾] [日期▾] [列开关⚙] [保本线=动态] [及格线▾1.5(可关)]  默认排序: 实际ROI↑ │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│  商品        │ 广告          │ 销售（有效单）   │ 退款               │ 净/ROI                     │
-│ 图·spu_id·标题│广告数│消耗│平台GMV│ROI₀│有效单│件数│销售$│仅退│退货退款$│退款率│净利润$│货损$│保本│实际ROI│
-│ 1736… Áo…   │  1  │157.40│472.91│3.00│ 55 │ 27 │557.21│…│109.09  │19.6%│106.65│17.73│1.63│ 2.73 │
-│ 1736… 爆退品  │  4  │312.00│…   │3.80│ 90 │ 98 │930.50│…│372.20  │40.0%│−295.66│44.32│1.90│0.85  │ ← 红边：净利润<0（ROI 0.85<保本 ≈1.9）
+│  商品        │ 广告      │ 销售        │ 退款    │ 取消/比率            │ 净/ROI                       │
+│ 图·spu_id·标题│广告数│消耗USD│销售$│有效销售$│退货$│取消单量│取消率│退货率│全损退款$│净利润$│实际ROI│保本ROI│
+│ 1736… Áo…   │  1  │157.40│557.21│529.01│109.09│  5  │ 9.1% │11.8% │ 17.73 │106.65│ 2.73  │ 1.63  │
+│ 1736… 爆退品  │  4  │312.00│930.50│880.10│372.20│ 12  │11.8% │12.5% │ 44.32 │−295.66│ 0.85  │ 1.90  │ ← 红边：净利润<0（ROI 0.85<保本 ≈1.9）
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ ← 上一页  p/M  下一页 →   每页 100 条                                        │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -802,27 +810,25 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 
 - 金额：服务端下发 USD 字符串 → 前端千分位 `$`（2 位小数）；货损单元格 hover 标注单件成本来源（人工价 MANUAL，或 `默认 30元/件 ≈ $4.43 ⚠`）；件数整数；ROI 2 位、退款率百分比显示。
 - **换算单点**：换算只发生在服务端输出层一次（先原币加总再换，§4.2/§4.6）；页面拿到即 USD，不做二次换算；fx 取值时间随 meta 展示（合计带旁一行小字）。
-- 列开关 ⚙：整组收/展（如“已付被取消（信息列）”“平台出单量(ad_orders)/单订单成本(cpa)”默认折叠，想看再开；平台 GMV 默认显示，对齐 §7.1 骨架）。
+- 列开关 ⚙（2026-09-06 重组）：主列 = 用户清单 12 项(见 §7.5)；隐藏组 = 广告归因对照(cg-adref:平台GMV归因/ROI₀)、订单结构(cg-structure:有效单/件数)、仅退/退货拆分、取消明细、平台佣金——默认折叠，想看再开。
 - 顶部提示行 + 结余带随筛选实时刷新；每页 100（上限 500 走 v2 分页约定）。
 - 移动端（2026-09-06 重构）：布局走 Bootstrap 5.3.8 栅格/工具类 —— 结余带
   xs 2 / sm 3 / md 4 / lg 5 列（两行）降密度、工具栏 flex-wrap 纵向堆叠、列开关折叠进 `<details>`；表格
   `.table-responsive` + `max-height` 双轴滚动框（表头在框内吸顶、首列横向溢出时吸左，
-  不限断点），小屏按断点 nth-child 裁掉次要对比列（广告数/平台GMV/ROI₀/件数，
-  576–991 裁 广告数/ROI₀）降低横滚量；列开关信息列（§7.5）全尺寸可用。
+  不限断点），小屏按断点 nth-child 裁掉次要列（≤575 裁 广告数/取消率/退货率/保本ROI，
+  576–991 裁 取消率/退货率）降低横滚量；列开关信息列（§7.5）全尺寸可用。
 
 ### 7.5 列可见性默认（⚙ 开关分组）
 
 | 分组 / 列 | 默认 | 说明 |
 | --- | --- | --- |
 | 商品：图 / spu_id / 标题 / 状态 | 显示 | 标题 ellipsis + hover 全文 |
-| 店铺 / 观测窗口 | 折叠 | ⚙ 可开 |
-| 广告：广告数 / 消耗 / ROI₀ | 显示 | L0 仅供对照 |
-| 广告：平台GMV | 显示 | 默认可见，对齐 §7.1 定稿骨架（页首/行内与 ROI₀ 同组对照） |
-| 广告：平台出单量(ad_orders) / 单订单成本(cpa) | 折叠 | 信息列，⚙ 可开 |
-| 销售：有效单 / 件数 / 销售$ | 显示 | |
-| 退款：净额小计 / 退款率 | 显示 | |
-| 退款：仅退 / 退货退款拆分、已付被取消（含 unknown 行数） | 折叠 | 钻取 tab 内可见；“另有 N 行金额未知”提示行保留在页脚 |
-| 净/ROI：**净利润$** / 货损$ / 保本 / 实际ROI | 显示 | 主区域（净现金收入不展示；净利润负值红字，与红绿判据同号；平台费用（渠道费用）为 ⚙ 可选列） |
+| **主列(2026-09-06 用户清单)**：广告数 / 消耗 USD / 销售$ / 有效销售$ / 退货$ / 取消单量 / 取消率% / 退货率% / 全损退款$ / 净利润$ / 实际ROI / 保本ROI | 显示 | 口径与结余带一致：销售$=GMV 全单(有效+取消原额)、有效销售$=白名单、退货$=净退款、取消率=取消/(有效+取消)、退货率=退货订单数÷有效单量(单量口径) |
+| ⚙ 广告归因对照(cg-adref)：平台GMV(归因) / ROI₀ | 折叠 | 广告侧对照列(2026-09-06 从主列移入隐藏组) |
+| ⚙ 订单结构(cg-structure)：有效单 / 件数 | 折叠 | 2026-09-06 新增隐藏组 |
+| ⚙ 仅退/退货拆分(cg-refundsplit)：仅退件/$、退货件/$ | 折叠 | 钻取信息 |
+| ⚙ 取消明细(cg-cancel)：取消件 / 取消退款$ / 金额未知行 | 折叠 | “另有 N 行金额未知”提示行保留在页脚 |
+| ⚙ 平台佣金(cg-fee) | 折叠 | 渠道费用 |
 
 > 折叠列仍参与排序与合计，只是不占横向空间。
 > 成本 ⚠ 不占独立列：凡 `cost_source=DEFAULT_K1` 的行在标题旁显示 ⚠，tooltip 文案见 §7.2（提示可去 `/v2/pages/manual-costs` 补录，页面无直达跳转链接）。

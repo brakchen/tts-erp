@@ -13,26 +13,34 @@
     roi_real: "实际ROI",
     spend: "消耗",
     refund_rate: "退款率",
+    refund_rate_qty: "退货率",
+    cancel_rate: "取消率",
     net_profit: "净利润",
-    sales: "销售",
+    sales: "有效销售",
+    gmv_sales: "销售",
     gmv_ad: "平台GMV",
     ad_count: "广告数",
     roi_l0: "ROI₀",
     order_count: "有效单",
+    cancelled_order_count: "取消单量",
     units_sold: "件数",
-    refund_net_amount: "退款净额",
-    return_loss: "货损",
-    roi_breakeven: "保本",
+    refund_net_amount: "退货",
+    return_loss: "全损退款",
+    roi_breakeven: "保本ROI",
   };
   var SORTABLE = new Set([
     "roi_real",
     "spend",
     "refund_rate",
+    "refund_rate_qty",
+    "cancel_rate",
     "net_profit",
     "sales",
+    "gmv_sales",
     "gmv_ad",
     "ad_count",
     "order_count",
+    "cancelled_order_count",
     "units_sold",
     "return_loss",
     "roi_breakeven",
@@ -245,35 +253,49 @@
       it.ad_count === 0 || it.ad_count == null
         ? '<span class="no-ad" data-tip="该 SPU 无广告投放">无投放</span>'
         : fmtInt(it.ad_count);
-    var rrCell = rrHigh
-      ? `<td class="rr-high" data-tip="退款率超过 30% 警戒线">${fmtPct(it.refund_rate)}</td>`
-      : `<td>${fmtPct(it.refund_rate)}</td>`;
+    // 2026-09-06:金额退款率列已从行内主列移除(退货率改单量口径 refund_rate_qty);
+    // rrHigh 仍驱动商品标题 ⚠ 警示(金额口径 >30% 阈值沿用)。
+    var fmtPctOrDash = (v) =>
+      v === null || v === undefined || v === "" ? "—" : fmtPct(v);
     return (
       `<tr class="${isBad ? "row-bad" : ""}">` +
       `<td class="td-left"><span class="td-spu-cell">${img}<span class="td-spu-meta">` +
       `<span class="td-spu">${esc(it.spu_id)}</span>` +
       `<span class="td-title" data-tip="${esc(it.title || "")}">${warnDefault ? warn : ""}${warnRr}${esc(it.title || "")}${status}</span></span></span></td>` +
+      // 广告数 / 消耗 USD
       `<td>${adCell}</td>` +
       `<td>${fmtMoney(it.spend)}</td>` +
-      `<td>${fmtMoney(it.gmv_ad)}</td>` +
-      `<td>${fmtRatio(it.roi_l0)}</td>` +
-      `<td>${fmtInt(it.order_count)}</td>` +
-      `<td>${fmtInt(it.units_sold)}</td>` +
+      // 销售(全单=GMV) / 有效销售 / 退货(净退款)
+      `<td>${fmtMoney(it.gmv_sales)}</td>` +
       `<td>${fmtMoney(it.sales)}</td>` +
+      `<td>${fmtMoney(it.refund_net_amount)}</td>` +
+      // 取消单量 / 取消率 / 退货率(单量)
+      `<td>${fmtInt(it.cancelled_order_count)}</td>` +
+      `<td>${fmtPctOrDash(it.cancel_rate)}</td>` +
+      `<td>${fmtPctOrDash(it.refund_rate_qty)}</td>` +
+      // 全损退款金额 / 净利润
+      `<td data-tip="${costTitle}">${fmtMoney(it.return_loss)}</td>` +
+      `<td${profitClass}>${fmtMoney(it.net_profit)}</td>` +
+      // 实际ROI / 保本ROI
+      `<td>${roiCell}</td>` +
+      `<td>${fmtRatio(it.roi_breakeven)}</td>` +
+      // 隐藏组:广告归因对照(平台GMV/ROI₀)
+      `<td class="col-hidden" data-cg="cg-adref">${fmtMoney(it.gmv_ad)}</td>` +
+      `<td class="col-hidden" data-cg="cg-adref">${fmtRatio(it.roi_l0)}</td>` +
+      // 隐藏组:订单结构(有效单/件数)
+      `<td class="col-hidden" data-cg="cg-structure">${fmtInt(it.order_count)}</td>` +
+      `<td class="col-hidden" data-cg="cg-structure">${fmtInt(it.units_sold)}</td>` +
+      // 隐藏组:仅退/退货拆分
       `<td class="col-hidden" data-cg="cg-refundsplit">${fmtInt(it.refund_only_qty)}</td>` +
       `<td class="col-hidden" data-cg="cg-refundsplit">${fmtMoney(it.refund_only_amount)}</td>` +
       `<td class="col-hidden" data-cg="cg-refundsplit">${fmtInt(it.refund_return_qty)}</td>` +
       `<td class="col-hidden" data-cg="cg-refundsplit">${fmtMoney(it.refund_return_amount)}</td>` +
-      `<td>${fmtMoney(it.refund_net_amount)}</td>` +
-      rrCell +
+      // 隐藏组:取消明细(件/金额/未知行)
       `<td class="col-hidden" data-cg="cg-cancel" data-tip="已付被取消订单退款（信息列，不计净额）">${fmtInt(it.refund_cancelled_qty)}</td>` +
       `<td class="col-hidden" data-cg="cg-cancel">${fmtMoney(it.refund_cancelled_amount)}</td>` +
       `<td class="col-hidden" data-cg="cg-cancel" data-tip="${it.refund_cancelled_missing_lines ? "另有行金额未知（不造数）" : ""}">${fmtInt(it.refund_cancelled_missing_lines)}</td>` +
-      `<td${profitClass}>${fmtMoney(it.net_profit)}</td>` +
-      `<td data-tip="${costTitle}">${fmtMoney(it.return_loss)}</td>` +
+      // 隐藏组:平台佣金
       `<td class="col-hidden" data-cg="cg-fee" data-tip="平台佣金 = 平台从销售额直接扣除的全部费用（抽佣/联盟/运费类）">${fmtMoney(it.platform_fee)}</td>` +
-      `<td>${fmtRatio(it.roi_breakeven)}</td>` +
-      `<td>${roiCell}</td>` +
       "</tr>"
     );
   }
@@ -281,7 +303,7 @@
   function renderError(msg) {
     html(
       $("#rows"),
-      `<tr><td colspan="22" class="op-error">${esc(msg)} · <a href="#" id="retry-link">重试</a></td></tr>`,
+      `<tr><td colspan="25" class="op-error">${esc(msg)} · <a href="#" id="retry-link">重试</a></td></tr>`,
     );
     var link = $("#retry-link");
     if (link) {
@@ -295,7 +317,7 @@
   function renderEmpty() {
     html(
       $("#rows"),
-      '<tr><td colspan="22" class="op-empty">没有匹配该 spu_id 的 SPU（试试完整 ID）</td></tr>',
+      '<tr><td colspan="25" class="op-empty">没有匹配该 spu_id 的 SPU（试试完整 ID）</td></tr>',
     );
   }
 
@@ -483,7 +505,7 @@
     state.loading = true;
     html(
       $("#rows"),
-      '<tr><td colspan="22" class="op-loading">加载中…</td></tr>',
+      '<tr><td colspan="25" class="op-loading">加载中…</td></tr>',
     );
     var feeParam = null;
     if (state.feeRate !== null && state.feeRate !== "") {

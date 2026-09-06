@@ -755,7 +755,7 @@ _PAGE_HTML = """<!doctype html>
 #     §7.2 标色 / 结余带数字),这些 JS 逐字渲染不可改名。
 #   - 移动端:结余带 xs 2 / sm 3 / md 4 / lg 5(两行);工具栏 flex-wrap 自然纵向堆叠;表格
 #     .table-responsive + max-height 双轴滚动框:表头在框内吸顶、首列横向溢出时吸左,
-#     小屏按 nth-child 裁次要对比列(广告数/平台GMV/ROI₀/件数),避免手机上看 22 列大海。
+#     小屏按 nth-child 裁次要列(广告数/取消率/退货率/保本ROI),避免手机上看 25 列大海。
 _SPU_ROI_PAGE_HTML = """<!doctype html>
 <html lang="zh-Hans">
 <head>
@@ -1030,7 +1030,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
     /* ---------- 响应式(Bootstrap 断点同源) ----------
-       小屏裁掉次要对比列(广告数/平台GMV/ROI₀/件数)降低横滚量;
+       小屏裁掉次要列(广告数/取消率/退货率/保本ROI)降低横滚量;
        表头吸顶/首列吸左在滚动框内生效(见 .op-table-wrap 注释),不区分断点。 */
     /* ≤991.98:表格首列宽约束(吸左 sticky 需限宽防挤压) */
     @media (max-width: 991.98px) {
@@ -1046,16 +1046,16 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       .op-counter-num { font-size: 21px; }
       table.op-table { min-width: 1080px; }
       table.op-table thead th:nth-child(2), table.op-table tbody td:nth-child(2),   /* 广告数 */
-      table.op-table thead th:nth-child(4), table.op-table tbody td:nth-child(4),   /* 平台GMV */
-      table.op-table thead th:nth-child(5), table.op-table tbody td:nth-child(5),   /* ROI₀ */
-      table.op-table thead th:nth-child(7), table.op-table tbody td:nth-child(7) {  /* 件数 */
+      table.op-table thead th:nth-child(8), table.op-table tbody td:nth-child(8),   /* 取消率% */
+      table.op-table thead th:nth-child(9), table.op-table tbody td:nth-child(9),   /* 退货率% */
+      table.op-table thead th:nth-child(13), table.op-table tbody td:nth-child(13) {  /* 保本ROI */
         display: none;
       }
     }
     @media (min-width: 576px) and (max-width: 991.98px) {
       table.op-table { min-width: 1240px; }
-      table.op-table thead th:nth-child(2), table.op-table tbody td:nth-child(2),   /* 广告数 */
-      table.op-table thead th:nth-child(5), table.op-table tbody td:nth-child(5) {  /* ROI₀ */
+      table.op-table thead th:nth-child(8), table.op-table tbody td:nth-child(8),   /* 取消率% */
+      table.op-table thead th:nth-child(9), table.op-table tbody td:nth-child(9) {  /* 退货率% */
         display: none;
       }
     }
@@ -1137,8 +1137,10 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       <details class="op-colswitch mt-2" id="colswitch">
         <summary>⚙ 列（默认折叠）</summary>
         <div class="d-flex flex-wrap gap-3 gap-md-4 row-gap-1 mt-1">
+          <label class="op-cols-item"><input type="checkbox" id="col-toggle-adref" class="col-toggle" data-colgroup="cg-adref">广告归因对照(平台GMV/ROI₀)</label>
+          <label class="op-cols-item"><input type="checkbox" id="col-toggle-structure" class="col-toggle" data-colgroup="cg-structure">订单结构(有效单/件数)</label>
           <label class="op-cols-item"><input type="checkbox" id="col-toggle-refundsplit" class="col-toggle" data-colgroup="cg-refundsplit">仅退/退货拆分</label>
-          <label class="op-cols-item"><input type="checkbox" id="col-toggle-cancel" class="col-toggle" data-colgroup="cg-cancel">已付被取消</label>
+          <label class="op-cols-item"><input type="checkbox" id="col-toggle-cancel" class="col-toggle" data-colgroup="cg-cancel">取消明细(件/金额/未知)</label>
           <label class="op-cols-item"><input type="checkbox" id="col-toggle-fee" class="col-toggle" data-colgroup="cg-fee">平台佣金</label>
         </div>
       </details>
@@ -1152,29 +1154,32 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
             <th scope="col" class="op-th op-th-left">商品</th>
             <th scope="col" class="op-th op-th-sort" data-sort="ad_count">广告数</th>
             <th scope="col" class="op-th op-th-sort" data-sort="spend" data-tip="广告消耗（USD，广告窗口全量累计；作为减项计入净利润）">消耗 USD</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="gmv_ad" data-tip="平台 GMV Max 归因含自然单（仅供对照）">平台GMV</th>
-            <th scope="col" class="op-th" data-tip="平台侧 GMV ÷ 消耗 的投放口径 ROI（仅供对照）">ROI₀</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="order_count" data-tip="有效销售订单数（排除 CANCELLED）">有效单</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="units_sold" data-tip="有效销售件数">件数</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="sales" data-tip="有效销售金额（USD）">销售$</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="gmv_sales" data-tip="销售 = 全部订单销售额（状态口径，下单即算：有效销售 + 已付/未付取消原额；与结余带 GMV 同口径）">销售$</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="sales" data-tip="有效销售 = 白名单状态订单行金额（含 COD 在途，不含取消；与结余带有效销售同口径）">有效销售$</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="refund_net_amount" data-tip="退货 = 净退款额（仅退款 + 退货退款，USD；与结余带退款净额同口径）">退货$</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="cancelled_order_count" data-tip="取消单量 = status=CANCELLED 订单数（状态口径，含未收款即取消的 COD 拒收/超时单；与结余带取消单量同口径）">取消单量</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="cancel_rate" data-tip="取消率 = 取消单量 ÷ (有效单量 + 取消单量)（单量口径）">取消率%</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="refund_rate_qty" data-tip="退货率 = 退货订单数 ÷ 有效单量（单量口径，非金额）">退货率%</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="return_loss" data-tip="全损退款金额 = 全损退货件数 × 单位成本解析值（默认 30元/件 ≈ $4.43，USD；与结余带全损退款同口径）">全损退款$</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="net_profit" data-tip="净利润 = (有效销售 − 净退款) − 全部售出件货本 − 广告消耗 − 平台佣金估算（USD）；负值红字。状态口径：销售含 COD 在途未收款单">净利润$</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="roi_real" data-tip="实际 ROI = (有效销售 − 净退款 − 全损退款(M13b 货损成本)) ÷ 广告消耗；≥ 保本 = 赚，< 保本 = 亏（主判据）。状态口径：销售含 COD 在途未收款单">实际ROI</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="roi_breakeven" data-tip="该 SPU 的动态保本 ROI 线（实际 ROI ≥ 此值即不亏）">保本ROI</th>
+            <th scope="col" class="op-th col-hidden" data-cg="cg-adref">平台GMV(归因)</th>
+            <th scope="col" class="op-th col-hidden" data-cg="cg-adref">ROI₀</th>
+            <th scope="col" class="op-th col-hidden" data-cg="cg-structure">有效单</th>
+            <th scope="col" class="op-th col-hidden" data-cg="cg-structure">件数</th>
             <th scope="col" class="op-th col-hidden" data-cg="cg-refundsplit">仅退件</th>
             <th scope="col" class="op-th col-hidden" data-cg="cg-refundsplit">仅退$</th>
             <th scope="col" class="op-th col-hidden" data-cg="cg-refundsplit">退货件</th>
             <th scope="col" class="op-th col-hidden" data-cg="cg-refundsplit">退货$</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="refund_net_amount" data-tip="净退款额 = 仅退款 + 退货退款（USD，不含已付被取消）">退款净额$</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="refund_rate" data-tip="净退款额 ÷ 有效销售（默认 >30% 警戒标红）">退款率%</th>
             <th scope="col" class="op-th col-hidden" data-cg="cg-cancel">取消件</th>
             <th scope="col" class="op-th col-hidden" data-cg="cg-cancel">取消退款$</th>
             <th scope="col" class="op-th col-hidden" data-cg="cg-cancel">金额未知行</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="net_profit" data-tip="净利润 = (有效销售 − 净退款) − 全部售出件货本 − 广告消耗 − 平台佣金估算（USD）；负值红字。状态口径：销售含 COD 在途未收款单">净利润$</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="return_loss" data-tip="全损退货件数 × 单位成本解析值（默认 30元/件 ≈ $4.43，USD）">货损$</th>
             <th scope="col" class="op-th col-hidden" data-cg="cg-fee">平台佣金$</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="roi_breakeven" data-tip="该 SPU 的动态保本 ROI 线（实际 ROI ≥ 此值即不亏）">保本</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="roi_real" data-tip="实际 ROI = (有效销售 − 净退款 − 全损退款(M13b 货损成本)) ÷ 广告消耗；≥ 保本 = 赚，< 保本 = 亏（主判据）。状态口径：销售含 COD 在途未收款单">实际ROI</th>
           </tr>
         </thead>
         <tbody class="op-rows" id="rows">
-          <tr><td colspan="22" class="op-loading">加载中…</td></tr>
+          <tr><td colspan="25" class="op-loading">加载中…</td></tr>
         </tbody>
       </table>
     </div>
