@@ -41,6 +41,8 @@ cookie (see [Browser session login](#browser-session-login)).
 | Active SPUs missing a cost | `GET /v2/reporting/missing-cost-products` | readonly |
 | Submit a manual cost | `POST /v2/reporting/manual-costs` | readwrite |
 | Operator console (HTML) | `GET /v2/pages/manual-costs` | readonly (browser → 302 login) |
+| SPU 实际 ROI 看板主表 | `GET /v2/analytics/spu-roi` | readonly — 口径见 [`analytics/spu-real-roi-dashboard.md`](analytics/spu-real-roi-dashboard.md) |
+| SPU 实际 ROI 页面 (HTML) | `GET /v2/pages/spu-roi` | readonly (browser → 302 login) |
 | SPU image list / upload / delete | `GET /v2/spu-images`, `POST /v2/spu-images/upload-url`, `POST /v2/spu-images/{id}/confirm`, `DELETE /v2/spu-images/{id}` | readonly / readwrite |
 | Browser login / logout / whoami | `GET\|POST /v2/auth/login`, `POST /v2/auth/logout`, `GET /v2/auth/me` | public |
 | Analytics cursor has-data / dump ingest (Chrome ext) | `GET /v2/analytics/sync/cursor`, `POST /v2/analytics/sync/dumps` | readwrite + scope |
@@ -219,6 +221,7 @@ Cost semantics: `MANUAL_ENTRY` (this endpoint) > 妙手采购单 > (1688 采集�
 | Endpoint | Role | Notes |
 | --- | --- | --- |
 | `GET /v2/pages/manual-costs` | readonly | Server-rendered operator console (shop switcher + needs-cost / needs-photo / recently-filed tabs). Browser without a session → 302 to `/v2/auth/login`. Static assets under `/static/*` are readonly-classified too. |
+| `GET /v2/pages/spu-roi` | readonly | SPU 实际 ROI 看板(账页式)。Server-rendered HTML shell;数据来自 `GET /v2/analytics/spu-roi`;JS 在 `/static/js/spu-roi.js`。 |
 
 ### SPU images (`/v2/spu-images/*`)
 
@@ -260,6 +263,38 @@ The other 7 Partner API product-domain GETs in `tts-partner-api-docs/`
 (Listing Prerequisites / Categories / Attributes / Brands / Category
 Rules / Image Translation Tasks / Submission Records) are deferred to
 separate work items — same proxy + router pattern.
+
+### Analytics — SPU 实际 ROI (`/v2/analytics/spu-roi`)
+
+**Stability: stable · 只读(readonly)**。按 SPU 一行的「广告消耗 → 有效销售 → 退款 → 净利润 → 实际 ROI/保本线」账页数据源;页面 `GET /v2/pages/spu-roi` 消费它。**口径唯一真相** = [`analytics/spu-real-roi-dashboard.md`](analytics/spu-real-roi-dashboard.md) §4/§5(公式 M1–M19);本端点只读计算并序列化,不做任何写。
+
+Query parameters:
+
+| name | type | default | notes |
+| --- | --- | --- | --- |
+| `q` | string | — | `spu_id` 子串搜索(ILIKE) |
+| `sort` | enum | `roi_real` | `roi_real` \| `spend` \| `refund_rate` \| `net_profit` \| `sales` \| `ad_count` \| `gmv_ad` \| `order_count` \| `units_sold` \| `refund_net_amount` \| `return_loss` \| `roi_breakeven`(与页面可排序列一致;同值次级键 spend DESC 保证可复现) |
+| `order` | enum | `asc` | `asc` \| `desc`;默认实际 ROI 升序(最亏在前) |
+| `limit` | int | 100 | 1..500(分页 v2 约定) |
+| `offset` | int | 0 | ≥ 0 |
+| `include_all` | bool | `false` | `false` 只含有广告∨有效销售∨退款的 SPU;`true` 拉全部 **ACTIVE**(status ILIKE 'activate')目录 SPU(DEACTIVATE/DELETED 等排除) |
+| `shop_pk` | int | — | 店铺过滤(内部主键) |
+| `fee_rate` | decimal-str | — | 平台佣金费率页面覆写;缺省固定基线 `0.1156`(决策 D10) |
+| `w_start` | date | — | ISO `yyyy-mm-dd`;提供时销售按 `paid_at`、退款按 `updated_at_source` 裁剪(含当日) |
+| `w_end` | date | — | ISO `yyyy-mm-dd`;与 `w_start` 配对使用;不提供 `w_start`/`w_end` = 销售/退款**全历史累计**(ad 无日期参数,恒整窗累计,§4.5) |
+
+Response envelope:`{items: [...], total, totals, meta}`。每行字段与公式一一对应(`spu_pk, spu_id, title, status, main_image_url, shop_id, shop_name, ad_count, ad_orders, spend, gmv_ad, roi_l0, ad_first_day, ad_last_day, order_count, units_sold, sales, refund_only_qty, refund_only_amount, refund_return_qty, refund_return_amount, refund_net_qty, refund_net_amount, refund_rate, refund_cancelled_qty, refund_cancelled_amount, refund_cancelled_missing_lines, return_loss, net_profit, platform_fee, roi_real, roi_breakeven, cpa, unit_cost_used, cost_source`)。
+
+格式化约定(§5.1):**money = 4 位小数字符串**、比率/ROI = 2 位小数字符串、件数整数;`null` = 无解/除数为 0(页面显示 `—`);无投放 SPU `spend="0.0000"` + `ad_count=0`。全表金额统一 USD(原币 VND/CNY 服务端按固定汇率 26,330 / 0.14774 一次换算,meta.fx 标注)。`totals` = 跨分页、当前筛选的行级服务端加总(`row_count, spend, sales, refund_net_amount, return_loss, net_profit, roi_real`;`roi_real` = Σ(net_cash−return_loss)/Σspend,原生合计后一次换算,Σspend=0 → null);`total` = 匹配行数。`meta` 携带 fx/fee/cost_assumption/window/unattributed_refund_lines/computed_at/currency;`meta.window` 为 ad 视图观测窗口(供参考),销售/退款是否裁剪见 `note`。
+
+Example:
+
+```bash
+curl -sS -H "X-API-Key: $KEY" \
+  'http://127.0.0.1:9877/v2/analytics/spu-roi?sort=roi_real&order=asc&limit=5'
+```
+
+Auth 分类细节:`/v2/analytics/spu-roi` 命中 `_READONLY_EXACT`(readonly),与 `/v2/analytics/sync/*`(readwrite,Chrome 扩展 ingest)是两条不相干的路由。
 
 ### Analytics Sync (`/v2/analytics/sync/*`)
 
@@ -511,6 +546,8 @@ Stable external endpoints (safe to build dashboards / agents on):
 | `GET /v2/reporting/*` | readonly | v2 |
 | `POST /v2/reporting/manual-costs` | readwrite | v2 |
 | `GET /v2/pages/manual-costs` | readonly | v2 (HTML — not a machine contract) |
+| `GET /v2/pages/spu-roi` | readonly | v2 (HTML — not a machine contract) |
+| `GET /v2/analytics/spu-roi` | readonly | stable 只读（口径见 `analytics/spu-real-roi-dashboard.md`） |
 | `GET /v2/spu-images`, upload/confirm/delete | readonly / readwrite | v2 |
 | `GET /v2/llm-context` | readonly | v2 (content evolves with the schema) |
 | `GET\|POST /v2/auth/*` | public | v2 |

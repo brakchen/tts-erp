@@ -76,6 +76,9 @@ def _build_routes(app: FastAPI) -> None:
     # Auth + rate-limit 继承父 app 中间件栈；handler 读
     # `request.scope["api_key_hash"]` / `request.scope["api_key_scopes"]`。
     app.include_router(analytics.router)
+    # SPU 实际 ROI 看板主表(GET /v2/analytics/spu-roi,readonly)——单挂
+    # /v2/analytics 下独立 router,不蹭 /sync 前缀(readwrite 分类)。
+    app.include_router(analytics.roi_router)
 
     # Operator-console static assets (vendor/bootstrap.min.css / js/console.js). Auth is
     # readonly-level via the "/static/" prefix in middleware/auth.py —

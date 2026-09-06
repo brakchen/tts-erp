@@ -1,5 +1,48 @@
 # tts-erp CHANGELOG
 
+## 2026-09-06 (fix) — SPU 实际 ROI 看板 fee_rate 量级上限
+
+- **fee_rate 量级上限 → 422**：`GET /v2/analytics/spu-roi` 的 `fee_rate` 增加 `|fee_rate| > 1e6` 校验（用 `Decimal.copy_abs()`，避开默认算术 context 对超大指数的 Overflow），与既有非有限值/负值校验并列，杜绝 `1e9999999` 这类值穿透到 quantize 造成 500；`tests/api/test_spu_roi_api.py` 补充 `fee_rate=1e9999999 → 422` 断言。
+
+## 2026-09-06 (fix) — SPU 实际 ROI 看板终审（3 项低级别）
+
+review 终审回修（低级别），口径仍以 `tech-doc/analytics/spu-real-roi-dashboard.md` §4/§5/§7 为准：
+
+- **fee_rate 非有限值 → 422**：`GET /v2/analytics/spu-roi` 传 `NaN`/`Infinity` 时与 0 比较不报错，会穿透到 `_fmt_money` quantize 造成 500 → 在 `list_spu_roi` 入口统一按 422 拒掉（`fee_rate must be a finite decimal`）。
+- **异常状态退款进未归属**：白名单外且非 CANCELLED 的异常订单状态（UNPAID/ON_HOLD 等）的已完结退款行不进任何 refund_* 金额桶，按 §4.2 rule 0 防御性计入 `meta.unattributed_refund_lines` 显式上报（不静默丢，页脚提示）。
+- **spec §7.5 GMV 可见性一致**：平台 GMV 列由“⚙ 默认折叠”改为**默认显示**（对齐 §7.1 定稿骨架，行内与 ROI₀ 同组对照）；⚙ 默认折叠项改为平台出单量(ad_orders)/单订单成本(cpa)。
+- 测试：`tests/api/test_spu_roi_api.py` 24 → 25（新增 UNPAID 退款未归属计数用例）。
+
+## 2026-09-05 (fix) — SPU 实际 ROI 看板 code review 第 2 轮（2 项低级别）
+
+review 回修（第 2 轮，低级别），口径仍以 `tech-doc/analytics/spu-real-roi-dashboard.md` §4/§5/§7 为准：
+
+- **页面工具条新增店铺/日期筛选**（§7.1 `[店铺▾][日期▾]`）：`#filter-shop` 下拉默认“全部店铺”，选项由 JS 从 `GET /v2/commerce/channel-accounts`（readonly，cookie 会话，401→login）拉取，显示 account_name、值为内部 shop_pk；`#filter-w-start` / `#filter-w-end` 为 `type=date` 输入（空 = 不限）；变化时仅把非空 shop_pk / w_start / w_end（yyyy-mm-dd）并入请求 query，保持“不传 = 全历史”语义；加载失败只留占位项不阻塞主表。
+- **去重注释**：`analytics.py` 排序注释重复两行 → 保留带 §7.6 引用的一行。
+- 测试：`tests/api/test_spu_roi_api.py` 23 → 24（新增工具栏控件 id 契约）。
+
+## 2026-09-05 (fix) — SPU 实际 ROI 看板 code review 修复（6 findings）
+
+review 回修，口径仍以 `tech-doc/analytics/spu-real-roi-dashboard.md` §4/§5/§7 为准：
+
+- **排序白名单扩全**：`GET /v2/analytics/spu-roi` 的 `sort` 从 5 列扩到页面可排序的全部纯数值列（+`ad_count/gmv_ad/order_count/units_sold/refund_net_amount/return_loss/roi_breakeven`），列头点击不再 422；同值次级键 spend DESC 保持可复现。商品/ROI₀ 表头改为不可点。
+- **totals.roi_real（服务端单点真相）**：结余带整体 ROI 改为消费端点 `totals.roi_real`（服务端 Σ(net_cash−return_loss)/Σspend，原生 VND 合计后一次换算 USD，2 位小数串；Σspend=0 → null），页面删除客户端除法；新增原生值对账测试。
+- **时间窗口参数 `w_start`/`w_end`**（可选 ISO 日期）：提供时销售按 `paid_at`、退款按 `updated_at_source` 裁剪（含 w_end 当日）；**不传 = 全历史累计**；`meta.window` 改为如实注记（ad=视图全窗口累计供参考 + note 明示销售/退款是否裁剪）。spec §4.5/§5.1-6 措辞同步。
+- **include_all 限 ACTIVE**：include_all 分支目录查询加 `cp.status ILIKE 'activate'`，DEACTIVATE/DELETED 等不再拉入（§5.1-7）。
+- **页面 UI 补齐（§7）**：结余带补“全损货损”格；广告数=0 行显示“无投放”；新增 ⚙ 列开关（仅退/退货拆分、已付被取消、平台佣金三组默认折叠可显隐）；标色补全 §7.2（ROI<1.0 深红红底 / ≥保本<1.5 浅橙 / 退款率>30% ⚠+红字）。
+- **操作员身份修复**：`spu-roi.js` 改用 `/v2/auth/me` 的 `authenticated===true` + role 显示操作员身份（原恒显“登录”），退出走 POST /v2/auth/logout。
+- 测试：`tests/api/test_spu_roi_api.py` 14 → 23（新增排序白名单/窗口裁剪/include_all ACTIVE/totals ROI 原生对账/页面与 JS 契约断言）。
+
+## 2026-09-05 (feat) — SPU 实际 ROI 看板（只读端点 + 账页式页面）
+
+按 `tech-doc/analytics/spu-real-roi-dashboard.md`（§4/§5/§7 口径）实施：
+
+- **端点 `GET /v2/analytics/spu-roi`**（role=readonly，`_READONLY_EXACT`）：每 SPU 一行的广告消耗 / 有效销售 / 退款分桶 / 净利润 / 实际 ROI / 保本线主表。查询 `q`(spu_id 子串)、`sort`(roi_real|spend|refund_rate|net_profit|sales)、`order`、`limit/offset`、`include_all`、`shop_pk`、`fee_rate`(费率覆写)；返回 `{items,total,totals,meta}`（money 4 位小数串 / 比率 2 位串 / null 语义）。
+- **固定常量口径**：USD→VND=26,330、CNY→USD=0.14774、K1=30 CNY/件（DEFAULT_K1 / MANUAL 两分支）、平台佣金基线 0.1156（D9/D4/D10）；退款按 case 完结状态分桶（净额桶进净利润，已付被取消桶 = 信息列 + 缺失行数上报）。
+- **页面 `GET /v2/pages/spu-roi` + `static/js/spu-roi.js`**：账页式 UI（结余带/搜索/每页条数/列头排序/上一页下一页/401→login；实际 ROI<保本或净利润<0 → 红边红字；DEFAULT_K1 → 标题旁 ⚠）。
+- **测试** `tests/api/test_spu_roi_api.py`（14 个：auth / 单 SPU 口径精确断言 / MANUAL 成本 / include_all / 分页排序 / totals 加总一致 / meta / 页面契约）。
+- **文档**：external-api.md TL;DR + 正文一节 + Stability matrix（stable 只读）。
+
 ## 2026-09-05 (refactor) — commerce 域命名重构上线（ADR-0003，live 已应用 migration 0007）
 
 按 ADR-0003 §2.6 + D1 拍板实施，**live 库已 ALTER 并验证**：
@@ -10,7 +53,7 @@
 - **sales_orders 时间列（D1，仅此表）**：`source_created_at→order_time`、`source_updated_at→order_modify_time`
 - **API（D2/D3）**：响应字段同步（shop_id/spu_id/sku_id/order_id/order_time/order_modify_time）；路径参数 `{account_id}/{product_id}/{order_id}→{shop_pk}/{spu_pk}/{order_pk}`（by-external→`{shop_id}`）；external-api.md 活契约已同步
 - **视图重建**：`linkage.effective_product_links` / `analytics.ad_product_links`（source 引用+输出列）
-- **保留**：procurement/miaoshou/credentials 同名词、快照列 external_*_snapshot、SPU 等 scope-A 的 source_*、DB 对象名（约束/索引）不变
+- **保留**：procurement/miaoshou/credentials 同名词、快照列 external_**snapshot、SPU 等 scope-A 的 source**、DB 对象名（约束/索引）不变
 - 验证：rename-scratch + live 全量 fast 912 passed / 0 fail；备份 `backups/tts_erp_pre_commerce_rename_20260905T210856Z.sql.gz`
 
 ## 2026-09-05 (fix) — 全量测试稳定性：修两个顺序/残留依赖 bug
@@ -86,7 +129,7 @@ v2 切流的 v1 数据回查窗口提前收口：按 `tech-doc/refactor-tech-pla
 ### 测试
 
 - `tests/analytics/test_repository.py`:删 fetch_timezone 3 个 + write_audit 2 个 +
-  purge_expired 2 个 + _add_days / _subtract_days 6 个测试（共 13 删）;
+  purge_expired 2 个 +_add_days /_subtract_days 6 个测试（共 13 删）;
   cleanup 从 5 张表缩为 1 张（ad_raw）。upsert_dump 行为测试保留并
   加注释说明「派生表已 drop,新代码只写 ad_raw」
 - `tests/api/test_analytics_v2_contract.py`:`test_v2_dumps_audit_log_written`
