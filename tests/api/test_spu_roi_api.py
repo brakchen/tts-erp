@@ -70,6 +70,57 @@ def _wipe_spu_roi_rows(db_engine, _isolate_state):
     _wipe(db_engine)
 
 
+# ─── 在线汇率(2026-09-06:ROI 账页换算已接 fx.* 缓存,D9 常量回退)─────
+# autouse 注入一张与旧 D9 常量等值的 USD 快照(2099 时间戳保证最新):既有
+# 全部金额/ROI 期望(26330 / 0.14774 派生)不变,同时让实现路径走 fx-cache。
+FX_SEED_TS = "2099-09-06T00:00:00+00:00"
+FX_SEED_VND = "26330"
+FX_SEED_CNY = "6.7686473"  # 1/CNY 量化 8dp = 0.14774001 → .4f 0.1477
+
+
+def _seed_fx(db_engine) -> None:
+    with db_engine.begin() as conn:
+        # pi-lens-ignore: python-sql-injection — literal insert, bound params
+        sid = conn.execute(
+            text(
+                "INSERT INTO fx.exchange_rate_snapshots "
+                "(base_code, upstream_last_update, next_update_at, fetched_at, rates_count) "
+                "VALUES ('USD', :ts, :ts2, now(), 3) RETURNING id"
+            ),
+            {"ts": FX_SEED_TS, "ts2": "2099-09-07T00:00:00+00:00"},
+        ).scalar()
+        for code, rate in [("USD", "1"), ("VND", FX_SEED_VND), ("CNY", FX_SEED_CNY)]:
+            # pi-lens-ignore: python-sql-injection — literal insert, bound params
+            conn.execute(
+                text(
+                    "INSERT INTO fx.exchange_rates "
+                    "(snapshot_id, base_code, target_code, rate) "
+                    "VALUES (:sid, 'USD', :c, :r)"
+                ),
+                {"sid": sid, "c": code, "r": rate},
+            )
+
+
+def _del_fx(db_engine) -> None:
+    with db_engine.begin() as conn:
+        # pi-lens-ignore: python-sql-injection — literal delete, bound param
+        conn.execute(
+            text(
+                "DELETE FROM fx.exchange_rate_snapshots "
+                "WHERE base_code = 'USD' AND upstream_last_update = :ts"
+            ),
+            {"ts": FX_SEED_TS},
+        )
+
+
+@pytest.fixture(autouse=True)
+def _fx_online_consts(db_engine, _isolate_state):
+    """ROI 换算走在线 fx 缓存:注入匹配常量快照;teardown 先于 _wipe 移除。"""
+    _seed_fx(db_engine)
+    yield
+    _del_fx(db_engine)
+
+
 def _wipe(db_engine) -> None:
     with db_engine.begin() as conn:
         # pi-lens-ignore: python-sql-injection
@@ -1213,8 +1264,8 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
     assert meta["fx"] == {
         "usd_vnd": "26330.0000",
         "cny_usd": "0.1477",
-        "as_of": "2026-09-05",
-        "source": "fixed-const",
+        "as_of": "2099-09-06",  # 在线 fx 快照注入(autouse),非 D9 常量日期
+        "source": "fx-cache",
     }
     assert meta["fee"]["mode"] == "baseline"
     assert meta["fee"]["rate"] == "0.1156"
@@ -1451,3 +1502,68 @@ def test_spu_roi_js_review_fixes_present():
     assert "data-cg" in src
     # finding 2:结余带直接消费 totals.roi_real,页面不反推 ROI
     assert "totals.roi_real" in src
+
+
+
+# ─── 在线汇率接入(D1 落地 2026-09-06)─────────────────────────────────
+
+
+def _fx_meta_of_empty_query(api_client, readonly_key) -> dict:
+    """q 不命中 → items 空,meta.fx 仍按当前汇率解析给出(在线或回退)。"""
+    r = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+        params={"q": "TEST_NO_MATCH_XYZ"},
+    )
+    assert r.status_code == 200, r.text
+    return r.json()["meta"]["fx"]
+
+
+def test_spu_roi_meta_uses_live_fx_rates(api_client, readonly_key, monkeypatch):
+    """换算汇率来自在线 fx 快照:monkeypatch 一张非 D9 值的 USD 快照,
+    验证实现真正走 fx-cache —— 值/来源/日期都取自已注入的快照(不是常量)。
+    派生数学:CNY→USD = 1/rates[CNY] 量化 8dp;USD→VND = rates[VND]。
+    """
+    from datetime import UTC, datetime
+
+    import tts_erp_v2.api.v2.analytics as analytics_mod
+    from tts_erp_v2.fx.rates import RateMap
+
+    rm = RateMap(
+        snapshot_id=999_000_001,
+        base_code="USD",
+        upstream_last_update=datetime(2026, 9, 6, 0, 0, 1, tzinfo=UTC),
+        next_update_at=datetime(2026, 9, 7, 0, 0, 1, tzinfo=UTC),
+        fetched_at=datetime(2026, 9, 6, 6, 0, 0, tzinfo=UTC),
+        rates={
+            "USD": Decimal(1),
+            "VND": Decimal(26000),
+            "CNY": Decimal("6.9"),
+        },
+    )
+    monkeypatch.setattr(analytics_mod, "load_rate_map", lambda sess, base_code="USD": rm)
+    fx = _fx_meta_of_empty_query(api_client, readonly_key)
+    assert fx == {
+        "usd_vnd": "26000.0000",
+        "cny_usd": "0.1449",  # 1/6.9 = 0.14492753… → .4f
+        "as_of": "2026-09-06",
+        "source": "fx-cache",
+    }
+
+
+def test_spu_roi_fx_fallback_to_fixed_const_when_no_snapshot(
+    api_client, readonly_key, monkeypatch
+):
+    """缓存未就绪(无 USD 快照)→ 回退 D9 固定常量,金额换算不空白。"""
+    import tts_erp_v2.api.v2.analytics as analytics_mod
+
+    monkeypatch.setattr(
+        analytics_mod, "load_rate_map", lambda sess, base_code="USD": None
+    )
+    fx = _fx_meta_of_empty_query(api_client, readonly_key)
+    assert fx == {
+        "usd_vnd": "26330.0000",
+        "cny_usd": "0.1477",
+        "as_of": "2026-09-05",
+        "source": "fixed-const",
+    }
