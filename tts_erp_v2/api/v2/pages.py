@@ -618,6 +618,10 @@ _PAGE_HTML = """<!doctype html>
         最近提交
         <span class="op-badge" id="badge-recent">·</span>
       </button>
+      <button class="op-tab" type="button" role="tab" data-tab="all" aria-selected="false" aria-controls="grid-rows">
+        全部 SPU
+        <span class="op-badge" id="badge-all">·</span>
+      </button>
     </nav>
 
     <div class="op-toolbar">

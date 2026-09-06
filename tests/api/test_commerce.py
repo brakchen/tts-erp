@@ -51,7 +51,7 @@ def seed_commerce_rows(db_engine):
 
     with db_engine.begin() as conn:
         # pi-lens-ignore: python-sql-injection — literal SQL, only :ext/:acct/:cp/:so bound
-        conn.execute(
+        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "INSERT INTO commerce.shops "
                 "(platform, shop_id, account_name, status) "
@@ -59,7 +59,7 @@ def seed_commerce_rows(db_engine):
             ),
             {"ext": ext_acct},
         )
-        acct_id = conn.execute(
+        acct_id = conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "SELECT id FROM commerce.shops "
                 "WHERE shop_id = :ext"
@@ -68,7 +68,7 @@ def seed_commerce_rows(db_engine):
         ).scalar()
 
         # pi-lens-ignore: python-sql-injection — literal SQL, only :acct/:ext bound
-        conn.execute(
+        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "INSERT INTO commerce.products_spu "
                 "(shop_pk, spu_id, title, status) "
@@ -76,7 +76,7 @@ def seed_commerce_rows(db_engine):
             ),
             {"acct": acct_id, "ext": ext_prod},
         )
-        cp_id = conn.execute(
+        cp_id = conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "SELECT id FROM commerce.products_spu "
                 "WHERE spu_id = :ext"
@@ -85,7 +85,7 @@ def seed_commerce_rows(db_engine):
         ).scalar()
 
         # pi-lens-ignore: python-sql-injection — literal SQL, only :cp/:ext bound
-        conn.execute(
+        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "INSERT INTO commerce.products_sku "
                 "(spu_pk, sku_id, seller_sku, variant_name) "
@@ -95,7 +95,7 @@ def seed_commerce_rows(db_engine):
         )
 
         # pi-lens-ignore: python-sql-injection — literal SQL, only :acct/:ext bound
-        conn.execute(
+        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "INSERT INTO commerce.sales_orders "
                 "(shop_pk, order_id, status, currency, "
@@ -104,7 +104,7 @@ def seed_commerce_rows(db_engine):
             ),
             {"acct": acct_id, "ext": ext_order},
         )
-        order_id = conn.execute(
+        order_id = conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "SELECT id FROM commerce.sales_orders "
                 "WHERE order_id = :ext"
@@ -113,7 +113,7 @@ def seed_commerce_rows(db_engine):
         ).scalar()
 
         # pi-lens-ignore: python-sql-injection — literal SQL, only :so/:cp/:cv bound
-        conn.execute(
+        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "INSERT INTO commerce.sales_order_lines "
                 "(order_pk, external_line_id, spu_pk, "
@@ -143,7 +143,7 @@ def _wipe(db_engine) -> None:
     """
     with db_engine.begin() as conn:
         # pi-lens-ignore: python-sql-injection — literal SQL, LIKE prefix is constant
-        conn.execute(
+        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "DELETE FROM commerce.sales_order_lines "
                 "WHERE order_pk IN ("
@@ -153,7 +153,7 @@ def _wipe(db_engine) -> None:
             )
         )
         # pi-lens-ignore: python-sql-injection — literal SQL, LIKE prefix is constant
-        conn.execute(
+        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "DELETE FROM commerce.sales_orders "
                 "WHERE order_id LIKE 'TEST_commerce_%'"
@@ -545,3 +545,71 @@ def test_shops_anonymous_is_401(api_client):
     """Smoke: any /v2/commerce/* requires readonly+."""
     r = api_client.get("/v2/commerce/channel-accounts")
     assert r.status_code == 401
+
+
+# 2026-09-06 all-SPU tab: channel-products carries current cost + mirror
+# ---------------------------------------------------------------------------
+
+
+def test_list_products_spu_includes_cost_and_image_fields(
+    api_client, readonly_key, db_engine
+):
+    """channel-products rows expose the effective manual cost + mirror URL.
+
+    The 全部 SPU tab needs per-SPU status / current cost / currency and a
+    renderable image. Back-compat: the legacy fields stay; the new ones
+    are null when absent.
+    """
+    cp_id = _seed_spu(db_engine, "TEST_commerce_costfield")
+    # Seed an effective manual cost for that SPU.
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO procurement.manual_product_costs "
+                "(spu_pk, unit_cost, currency, valid_from, valid_to) "
+                "VALUES (:cp, '12.50', 'CNY', now(), NULL)"
+            ),
+            {"cp": cp_id},
+        )
+
+    r = api_client.get(
+        "/v2/commerce/channel-products?limit=500",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    row = next((x for x in r.json() if x["id"] == cp_id), None)
+    assert row is not None, f"seeded SPU missing: {r.text[:300]}"
+    assert row["unit_cost"] is not None
+    assert row["currency"] == "CNY"
+    assert row["cost_method"] == "MANUAL_ENTRY"
+    assert "image_url" in row and "main_image_url" in row
+
+
+def _seed_spu(db_engine, external_id: str) -> int:
+    """Seed a minimal TEST_ shop + SPU; return the SPU id."""
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO commerce.shops "
+                "(platform, shop_id, account_name, status) "
+                "VALUES ('tiktok', :ext, 'TEST acct', 'active')"
+            ),
+            {"ext": external_id},
+        )
+        acct_id = conn.execute(
+            text("SELECT id FROM commerce.shops WHERE shop_id = :ext"),
+            {"ext": external_id},
+        ).scalar()
+        conn.execute(
+            text(
+                "INSERT INTO commerce.products_spu "
+                "(shop_pk, spu_id, title, status) "
+                "VALUES (:acct, :ext, 'TEST title', 'active')"
+            ),
+            {"acct": acct_id, "ext": external_id},
+        )
+        cp_id = conn.execute(
+            text("SELECT id FROM commerce.products_spu WHERE spu_id = :ext"),
+            {"ext": external_id},
+        ).scalar()
+    return cp_id

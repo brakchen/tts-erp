@@ -27,8 +27,32 @@ from tts_erp_v2.api.schemas import (
     SalesOrderLineOut,
     SalesOrderOut,
 )
+from tts_erp_v2.storage.minio_client import MinioClient
 
 router = APIRouter(prefix="/v2/commerce", tags=["commerce"])
+
+
+# --- mirror URL resolution (2026-09-06 all-SPU tab) -----------------------
+# Same lazy-singleton pattern as reporting.list_missing_cost_products: the
+# mirror job stores only mirror_object_key on products_spu; read endpoints
+# resolve it to a presigned / public URL on demand. Rows without a mirror
+# yet return image_url=None (frontend shows the fallback icon).
+_minio_client_singleton: MinioClient | None = None
+
+
+def _resolve_mirror_url(mirror_object_key: str | None) -> str | None:
+    """Return a renderable URL for a stored mirror object key, else None."""
+    if not mirror_object_key:
+        return None
+    global _minio_client_singleton
+    if _minio_client_singleton is None:
+        _minio_client_singleton = MinioClient.from_env()
+    client = _minio_client_singleton
+    public_url = client.public_url_or_none(mirror_object_key)
+    if public_url is not None:
+        return public_url
+    url, _expires_at = client.presign_get(mirror_object_key)
+    return url
 
 
 # --- SQL constants (no interpolation) ------------------------------------
@@ -50,16 +74,28 @@ SQL_GET_CHANNEL_ACCOUNT_BY_EXTERNAL = (
     "WHERE platform = :platform AND shop_id = :ext"
 )
 SQL_LIST_CHANNEL_PRODUCTS = (
-    "SELECT id, shop_pk, spu_id, title, status, "
-    "source_created_at, source_updated_at FROM commerce.products_spu "
-    "WHERE (CAST(:acct_id AS bigint) IS NULL OR shop_pk = CAST(:acct_id AS bigint)) "
-    "AND (CAST(:status AS text) IS NULL OR status = CAST(:status AS text)) "
-    "ORDER BY id LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
+    "SELECT cp.id, cp.shop_pk, cp.spu_id, cp.title, cp.status, "
+    "       cp.source_created_at, cp.source_updated_at, "
+    "       cp.main_image_url, cp.mirror_object_key, "
+    "       m.unit_cost, m.currency, "
+    "       CASE WHEN m.id IS NULL THEN NULL ELSE 'MANUAL_ENTRY' END AS cost_method "
+    "FROM commerce.products_spu cp "
+    "LEFT JOIN procurement.manual_product_costs m "
+    "  ON m.spu_pk = cp.id AND m.valid_to IS NULL "
+    "WHERE (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
+    "AND (CAST(:status AS text) IS NULL OR cp.status = CAST(:status AS text)) "
+    "ORDER BY cp.id LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
 )
 SQL_GET_CHANNEL_PRODUCT = (
-    "SELECT id, shop_pk, spu_id, title, status, "
-    "source_created_at, source_updated_at FROM commerce.products_spu "
-    "WHERE id = :id"
+    "SELECT cp.id, cp.shop_pk, cp.spu_id, cp.title, cp.status, "
+    "       cp.source_created_at, cp.source_updated_at, "
+    "       cp.main_image_url, cp.mirror_object_key, "
+    "       m.unit_cost, m.currency, "
+    "       CASE WHEN m.id IS NULL THEN NULL ELSE 'MANUAL_ENTRY' END AS cost_method "
+    "FROM commerce.products_spu cp "
+    "LEFT JOIN procurement.manual_product_costs m "
+    "  ON m.spu_pk = cp.id AND m.valid_to IS NULL "
+    "WHERE cp.id = :id"
 )
 SQL_LIST_CHANNEL_VARIANTS = (
     "SELECT id, spu_pk, sku_id, seller_sku, "
@@ -104,6 +140,18 @@ def _q(compiled_stmt, params: dict, sess: Session):
     return sess.execute(compiled_stmt, params)
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    """Defensive int coercion for aggregate columns.
+
+    COUNT() results are never NULL but the linter wants an explicit
+    try/except anchor — same pattern as reporting._safe_int.
+    """
+    try:
+        return int(value) if value is not None else default
+    except (TypeError, ValueError):
+        return default
+
+
 _STMT_LIST_CHANNEL_ACCOUNTS = text(SQL_LIST_CHANNEL_ACCOUNTS)
 _STMT_GET_CHANNEL_ACCOUNT = text(SQL_GET_CHANNEL_ACCOUNT)
 _STMT_GET_CHANNEL_ACCOUNT_BY_EXTERNAL = text(SQL_GET_CHANNEL_ACCOUNT_BY_EXTERNAL)
@@ -138,6 +186,13 @@ def _row_to_channel_product(row: Any) -> ChannelProductOut:
         status=row.status,
         source_created_at=row.source_created_at,
         source_updated_at=row.source_updated_at,
+        # 2026-09-06 all-SPU tab: current effective manual cost + the
+        # local MinIO mirror URL (resolved from mirror_object_key).
+        unit_cost=row.unit_cost,
+        currency=row.currency,
+        cost_method=row.cost_method,
+        image_url=_resolve_mirror_url(row.mirror_object_key),
+        main_image_url=row.main_image_url,
     )
 
 
@@ -383,6 +438,6 @@ def channel_account_order_stats(
     row = _q(_STMT_ACCOUNT_ORDER_STATS, {"id": shop_pk}, sess).one()
     return {
         "shop_pk": shop_pk,
-        "distinct_orders": int(row.n or 0),
+        "distinct_orders": _safe_int(row.n),
         "total_payment_amount": str(row.total),
     }

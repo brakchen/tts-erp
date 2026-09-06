@@ -10,6 +10,7 @@
   var CSRF_HEADER = "tts-erp";
   var TAB_PENDING = "pending";
   var TAB_RECENT = "recent";
+  var TAB_ALL = "all";
   var DEFAULT_LIMIT = 50;
 
   // Public path prefix: "/tts" behind the NGINX reverse proxy, "" when
@@ -204,6 +205,7 @@
       btn.setAttribute("aria-selected", isActive ? "true" : "false");
       btn.classList.toggle("op-tab-active", isActive);
     });
+    applyTableHead(name);
     // Submit-all is a pending-tab action — hide it elsewhere.
     var submitAll = $("[data-act=\"submit-all\"]");
     if (submitAll) submitAll.style.display = name === TAB_PENDING ? "" : "none";
@@ -215,6 +217,43 @@
   function refreshActiveTab() {
     if (currentTab === TAB_PENDING) return loadPending();
     if (currentTab === TAB_RECENT) return loadRecent();
+    if (currentTab === TAB_ALL) return loadAll();
+  }
+
+  // Each tab renders a different column set; swap the <thead> so the
+  // header labels always match the rows below.
+  var THEAD_BY_TAB = {
+    pending:
+      '<tr><th scope="col" class="op-th op-th-sku">SKU</th>' +
+      '<th scope="col" class="op-th op-th-title">标题</th>' +
+      '<th scope="col" class="op-th op-th-cost">单位成本</th>' +
+      '<th scope="col" class="op-th op-th-note">备注</th>' +
+      '<th scope="col" class="op-th op-th-photo">图片</th>' +
+      '<th scope="col" class="op-th op-th-action">操作</th></tr>',
+    recent:
+      '<tr><th scope="col" class="op-th op-th-sku">时间</th>' +
+      '<th scope="col" class="op-th op-th-sku">SKU</th>' +
+      '<th scope="col" class="op-th op-th-title">标题</th>' +
+      '<th scope="col" class="op-th op-th-cost">单位成本</th>' +
+      '<th scope="col" class="op-th op-th-sku">货币</th>' +
+      '<th scope="col" class="op-th op-th-note">备注</th></tr>',
+    all:
+      '<tr><th scope="col" class="op-th op-th-sku">SKU</th>' +
+      '<th scope="col" class="op-th op-th-title">标题</th>' +
+      '<th scope="col" class="op-th op-th-sku">状态</th>' +
+      '<th scope="col" class="op-th op-th-cost">当前成本</th>' +
+      '<th scope="col" class="op-th op-th-sku">货币</th>' +
+      '<th scope="col" class="op-th op-th-photo">图片</th></tr>',
+  };
+  function applyTableHead(name) {
+    var thead = document.querySelector(".op-table thead");
+    if (!thead) return;
+    var rows = THEAD_BY_TAB[name];
+    if (!rows) return;
+    var old = thead.querySelector("tr");
+    var fresh = document.createElement("tr");
+    fresh.innerHTML = rows; // pi-lens-ignore: no-inner-html-js
+    if (old && old.parentNode) old.parentNode.replaceChild(fresh, old);
   }
 
   // ---------- shared row rendering bits ----------
@@ -632,6 +671,73 @@
           esc(it.note || "") +
           "</td>",
       );
+      tbody.appendChild(tr);
+    });
+    applyFilter();
+  }
+
+  // ---------- tab 3: all SPUs (read-only catalogue) ----------
+  function loadAll() {
+    var acct = getActiveAccountId();
+    var tbody = $("#grid-rows");
+    html(tbody, loadingRow());
+    var url = "/v2/commerce/channel-products?limit=" + DEFAULT_LIMIT;
+    if (acct) url += "&shop_pk=" + acct;
+    api(url)
+      .then((r) => {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then((items) => {
+        renderAllRows(items);
+        setBadge("badge-all", items.length);
+      })
+      .catch((e) => {
+        errorRow(e, loadAll);
+      });
+  }
+
+  function renderAllRows(items) {
+    var tbody = $("#grid-rows");
+    html(tbody, "");
+    if (!items.length) {
+      html(tbody, emptyRow("该店铺暂无 SPU。"));
+      return;
+    }
+    items.forEach((it) => {
+      var tr = document.createElement("tr");
+      var costText = it.unit_cost != null ? it.unit_cost : "缺";
+      html(
+        tr,
+        '<td class="op-td-sku" data-label="SKU" title="' +
+          esc(it.spu_id || "") +
+          '">' +
+          esc(it.spu_id || "—") +
+          "</td>" +
+          '<td class="op-td-title" data-label="标题">' +
+          esc(it.title || "") +
+          "</td>" +
+          '<td class="op-td-sku" data-label="状态">' +
+          esc(it.status || "—") +
+          "</td>" +
+          '<td class="op-td-cost" data-label="当前成本">' +
+          esc(costText) +
+          "</td>" +
+          '<td class="op-td-sku" data-label="货币">' +
+          esc(it.currency || "—") +
+          "</td>" +
+          "<td data-label=\"图片\">" +
+          mirrorCellHtml(it) +
+          "</td>",
+      );
+      bindMirrorErrorFallback(tr);
+      var zoom = tr.querySelector("[data-zoom]");
+      if (zoom) {
+        zoom.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          openLightbox(zoom.getAttribute("data-zoom"));
+        });
+      }
       tbody.appendChild(tr);
     });
     applyFilter();

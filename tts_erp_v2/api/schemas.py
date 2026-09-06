@@ -37,6 +37,13 @@ class ChannelProductOut(BaseModel):
     status: str | None = None
     source_created_at: datetime | None = None
     source_updated_at: datetime | None = None
+    # 2026-09-06 all-SPU tab: current effective manual cost (if any) and
+    # the local MinIO mirror of the TikTok main image. Null when absent.
+    unit_cost: Decimal | None = None
+    currency: str | None = None
+    cost_method: str | None = None
+    image_url: str | None = None
+    main_image_url: str | None = None
 
 
 class ChannelProductVariantOut(BaseModel):

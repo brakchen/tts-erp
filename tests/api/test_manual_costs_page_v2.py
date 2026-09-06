@@ -322,3 +322,38 @@ def test_page_has_submit_all_button(api_client, readonly_key):
     assert "function submitAllPending()" in src, "console.js missing submitAllPending"
     assert "function postManualCost(tr)" in src, "console.js missing postManualCost"
     assert 'submit-all' in src, "console.js must bind [data-act=submit-all]"
+
+
+def test_page_has_all_spu_tab(api_client, readonly_key):
+    """The tab bar exposes a 全部 SPU view.
+
+    2026-09-06 operator request: see every SPU (not just pending / recent)
+    with its status, current manual cost, and mirrored main image. The tab
+    reads GET /v2/commerce/channel-products which now carries per-row
+    unit_cost / currency / image_url alongside the legacy fields.
+    """
+    r = api_client.get(
+        "/v2/pages/manual-costs",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.text
+    assert 'data-tab="all"' in body, "all-SPU tab missing"
+    assert "全部 SPU" in body, "all-SPU tab label missing"
+    assert 'id="badge-all"' in body, "all-SPU badge missing"
+
+    from pathlib import Path
+
+    js = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "console.js"
+    )
+    src = js.read_text(encoding="utf-8")
+    assert "function loadAll()" in src, "console.js missing loadAll"
+    assert "function renderAllRows(items)" in src, "console.js missing renderAllRows"
+    assert "/v2/commerce/channel-products" in src, (
+        "console.js all tab must read channel-products"
+    )
