@@ -5,6 +5,18 @@
 > 上次 session: 2026-09-05（v1 oauth_receiver 库 DROP + public.* 19 张业务表归档）
 > 上次 session 主题: v1 oauth_receiver 库整体废弃并 DROP（提前 21 天结束 4 周观察期）+ 配套清理
 
+## TL;DR (2026-09-06 spu-roi Bootstrap 重构 + 手机端适配)
+- spu-roi 页(`/v2/pages/spu-roi`)重构为 **Bootstrap 5.3.8 栅格/工具类布局**:结余带 row-cols
+  (xs2→md4→lg7)、工具栏 flex-wrap 纵向堆叠、`<details>` 列开关、`.table-responsive` 横滚 +
+  首列/表头 sticky(≤lg)、小屏 nth-child 裁次要列(广告数/平台GMV/ROI₀/件数),580→
+  页面样式仍 warm-paper 家族(`--bs-*` 变量收编 + 零圆角)。spu-roi.js **零改动**(纯 CSS/HTML)。
+  merge 6136245,已重启 + 公网冒烟,已 push。
+- 已知环境失败(非本 lane,另一 session 在修):`tests/fx/*` + `tests/api/test_fx_api.py`(fx.sync 真实
+  snapshot 干扰,见 ACTIVE fix/fx-test-isolation)、`tests/jobs_tiktok/test_spu_image_mirror_job.py`
+  (live spu.image_mirror job 在 dev DB 残留 MIRROR_DOWNLOAD_FAILED 行)。全量 0 fail 待 fx lane 落地。
+- 提醒:master WT 有 feat/cursor-hasdata-cache lane 的未提交 WIP(analytics.py/repository.py/
+  conftest.py/console.js 等,已在 ACTIVE 注册)——任何人收尾前先看 ACTIVE。
+
 ## TL;DR (2026-09-05 oauth_receiver DROP)
 
 **v1 `oauth_receiver` 库已按官方流程整体废弃并 DROP**（AGENTS.md 原计划保留至 ~09-26，
