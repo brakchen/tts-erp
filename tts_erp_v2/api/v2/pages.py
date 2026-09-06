@@ -1148,7 +1148,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
           <tr>
             <th scope="col" class="op-th op-th-left">商品</th>
             <th scope="col" class="op-th op-th-sort" data-sort="ad_count">广告数</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="spend" data-tip="广告消耗（广告窗口全量，USD；仅供对照，不参与净利润）">消耗 USD</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="spend" data-tip="广告消耗（USD，广告窗口全量累计；作为减项计入净利润）">消耗 USD</th>
             <th scope="col" class="op-th op-th-sort" data-sort="gmv_ad" data-tip="平台 GMV Max 归因含自然单（仅供对照）">平台GMV</th>
             <th scope="col" class="op-th" data-tip="平台侧 GMV ÷ 消耗 的投放口径 ROI（仅供对照）">ROI₀</th>
             <th scope="col" class="op-th op-th-sort" data-sort="order_count" data-tip="有效销售订单数（排除 CANCELLED）">有效单</th>
