@@ -300,6 +300,6 @@ apifox 标题“妙手开放平台”，底层 endpoint 指向 `openapi.wanshifu
 
 ### 12.4 并发测试互清（已知坑）
 
-- 共享 dev DB：两个会话同时跑 `scripts/test.sh fast` 会互清 TEST_ api_keys / 哨兵行 →
+- 共享 dev DB：两个会话同时跑 `scripts/test.sh fast` 会互清 TEST_api_keys / 哨兵行 →
   大规模 401 / error 假失败。需全量跑时错峰；失败先挑 FAILED/ERROR **隔离重跑一次**，
   全绿即 flake 不是真失败。
