@@ -50,6 +50,11 @@ def test_jobs_registry_includes_miaoshou_and_reporting():
             "sync_move_collect",
             1800,
         ),
+        "miaoshou.common_collect_box": (
+            "tts_erp_v2.jobs.miaoshou.common_collect_box",
+            "sync_common_collect_box",
+            21600,
+        ),
         "reporting.cost_snapshots": (
             "tts_erp_v2.jobs.reporting",
             "run_cost_snapshots",

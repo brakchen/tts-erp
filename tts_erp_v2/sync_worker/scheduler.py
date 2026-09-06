@@ -160,6 +160,17 @@ JOBS: dict[str, JobSpec] = {
         is_tiktok=False,
         entrypoint="sync_move_collect",
     ),
+    # 公共采集箱（货源采集箱）→ procurement_products 货源价列
+    # (source_unit_cost/min/max)。货源价可信位在公共采集箱 price
+    # （TK 采集箱 originPrice 会被人工改坏，2026-09-06 实测差 7×），
+    # 供 reporting 的 SOURCE_PRICE 兜底估算。6h 与 cost_snapshots 同频。
+    "miaoshou.common_collect_box": JobSpec(
+        job_name="miaoshou.common_collect_box",
+        module_path="tts_erp_v2.jobs.miaoshou.common_collect_box",
+        interval_seconds=21600,  # 6 h — 货源价变化慢
+        is_tiktok=False,
+        entrypoint="sync_common_collect_box",
+    ),
     # NOTE(2026-09-01): miaoshou.purchase_orders intentionally NOT registered —
     # the job's endpoint path 404s (routeNotFound) against the production ERP
     # API; the v2 path was written from docs and never live-verified. Re-add
