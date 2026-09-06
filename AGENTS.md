@@ -47,6 +47,13 @@ journalctl --user -u tts-erp -n 50                 # systemd 日志
 from datetime import UTC, datetime
 calculated_at = datetime.now(UTC)
 
+# ⚠ 口径提醒（2026-09-06 用户拍板）：存储/时间戳一律 UTC，但【统计与报表的日期归期
+#   按店铺当地时区】切分，不是 UTC 日界。当前店铺 Bridge nook 在越南 = UTC+7：
+#   某“销售日”= VN 自然日，即 UTC [T-1 17:00, T 17:00)。
+#   例：营收按 paid_at 落 VN 日、退款按完结时间 VN 日、广告按 VN 日；给用户的
+#   日期口径/筛选与 TikTok 后台订单管理一致（后台默认按下单时间 + 本地时区）。
+#   换算：VN 日界 = paid_at - timedelta(hours=7) 后再取 date（或用 AT TIME ZONE 'Asia/Ho_Chi_Minh'）。
+
 # DB：SQLAlchemy 2.0 style（select()/session），不在 async handler 里跑同步 psycopg
 #   （会挂死 event loop——2026-08 P1 事故，中间件层已踩过）
 # 测试数据一律 TEST_ 前缀（生产表约束/唯一键不会撞）
