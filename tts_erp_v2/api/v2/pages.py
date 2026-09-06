@@ -750,8 +750,8 @@ _PAGE_HTML = """<!doctype html>
 #     border-radius 归零工业直角);② JS 依赖的行为类(data-tip 气泡 / ⚙ 列开关 / lightbox /
 #     §7.2 标色 / 结余带数字),这些 JS 逐字渲染不可改名。
 #   - 移动端:结余带 xs 2 列 → lg 7 格单行;工具栏 flex-wrap 自然纵向堆叠;表格
-#     .table-responsive 横滚 + 小屏按 nth-child 裁次要对比列(广告数/平台GMV/ROI₀/件数)+
-#     首列/表头 sticky(≤lg),避免手机上看 22 列大海。
+#     .table-responsive + max-height 双轴滚动框:表头在框内吸顶、首列横向溢出时吸左,
+#     小屏按 nth-child 裁次要对比列(广告数/平台GMV/ROI₀/件数),避免手机上看 22 列大海。
 _SPU_ROI_PAGE_HTML = """<!doctype html>
 <html lang="zh-Hans">
 <head>
@@ -916,7 +916,10 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     /* .table-responsive 是 bootstrap 的横滚容器;不套 .table(会改 cell 排版),
        单元格横滚/粘连/标色全自管(JS 渲染的 td 类不可改名)。 */
     .op-main { max-width: 1720px; margin: 0 auto; }
-    .op-table-wrap { overflow-x: auto; overflow-y: clip; }
+    /* 表格滚动框 = 横/纵双轴滚动容器:max-height 使其纵向可滚(滚到底前先读完一屏),thead
+       top:0 吸顶在框内才成立 —— 纯 overflow-x 容器(纵轴被迫 clip/hidden)会让表头随
+       页面滚走(实测失效)。首列吸左同框生效。 */
+    .op-table-wrap { overflow: auto; max-height: min(72vh, 880px); overscroll-behavior: contain; }
     table.op-table {
       width: 100%; border-collapse: collapse;
       min-width: 1500px; margin-bottom: 0;
@@ -928,11 +931,12 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       background: var(--paper); vertical-align: bottom;
     }
     .op-th-left { text-align: left; }
-    /* 表头 + 首列 sticky:纵向吸顶(视口滚),横向吸左(.op-table-wrap 横滚) */
+    /* 表头 + 首列 sticky:表头在滚动框内吸顶(box 自身双轴滚动),首列横向溢出时吸左 */
     table.op-table thead th {
       position: sticky; top: 0; z-index: 3; background: var(--paper);
     }
     table.op-table thead th:first-child { left: 0; z-index: 4; box-shadow: inset 1px 0 0 var(--rule); }
+    table.op-table thead .op-th[data-tip] { cursor: pointer; }
     tbody.op-rows td {
       padding: 9px 8px; border-bottom: 1px solid var(--rule-soft);
       text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums;
@@ -1023,7 +1027,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
 
     /* ---------- 响应式(Bootstrap 断点同源) ----------
        小屏裁掉次要对比列(广告数/平台GMV/ROI₀/件数)降低横滚量;
-       首列/表头 ≤lg 才 sticky(桌面无需吸左,避免多一列常驻宽度)。 */
+       表头吸顶/首列吸左在滚动框内生效(见 .op-table-wrap 注释),不区分断点。 */
     /* ≥lg:结余带 7 格挤单行(bootstrap row-cols 上限 6,故用等宽 flex 覆盖) */
     @media (min-width: 992px) {
       .op-counter .row { flex-wrap: nowrap; }
@@ -1079,7 +1083,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
         <div class="col"><span class="op-counter-item"><span class="op-counter-label">消耗 $</span><span class="op-counter-num" id="sum-spend">—</span></span></div>
         <div class="col"><span class="op-counter-item"><span class="op-counter-label">有效销售 $</span><span class="op-counter-num" id="sum-sales">—</span></span></div>
         <div class="col"><span class="op-counter-item"><span class="op-counter-label">退款净额 $<span class="op-hint" data-tip="有效已付订单中已完结退款的净退款额 = 仅退款(REFUND_ONLY) + 退货退款(RETURN_AND_REFUND) 的退款金额，VND→USD 换算。不含：已付被取消订单退款（见 ⚙ 列开关『已付被取消』信息列）、异常单(UNPAID 等)退款、未关联到 SPU 的退款行（页脚『未归属退款 N 行』只计行数不计金额）。与『全损货损』不同维度：这里是退给客户的钱，货的成本损失在下一格">?</span></span><span class="op-counter-num" id="sum-refund">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">全损货损 $<span class="op-hint" data-tip="退货商品未回收，按成本全额计损(M13b) = 退货退款(RETURN_AND_REFUND)件数 × 该 SPU 单位成本(USD)。单位成本：人工成本(MANUAL)有效行优先，未录入按默认 30 CNY/件(≈$4.45)换算。注意这是成本维度，不是退款金额；未关联 SPU 的退货件不计入。缺人工成本的 SPU 用默认值会在行内标 ⚠">?</span></span><span class="op-counter-num" id="sum-loss">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">全损货损 $<span class="op-hint" data-tip="退货商品未回收，按成本全额计损(M13b) = 退货退款(RETURN_AND_REFUND)件数 × 该 SPU 单位成本(USD)。单位成本：人工成本(MANUAL)有效行优先，未录入按默认 30 CNY/件(≈$4.43)换算。注意这是成本维度，不是退款金额；未关联 SPU 的退货件不计入。缺人工成本的 SPU 用默认值会在行内标 ⚠">?</span></span><span class="op-counter-num" id="sum-loss">—</span></span></div>
         <div class="col"><span class="op-counter-item"><span class="op-counter-label">净利润 $</span><span class="op-counter-num" id="sum-profit">—</span></span></div>
         <div class="col"><span class="op-counter-item"><span class="op-counter-label">整体实际 ROI</span><span class="op-counter-num" id="sum-roi">—</span></span></div>
       </div>
@@ -1144,26 +1148,26 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
           <tr>
             <th scope="col" class="op-th op-th-left">商品</th>
             <th scope="col" class="op-th op-th-sort" data-sort="ad_count">广告数</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="spend">消耗 USD</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="gmv_ad">平台GMV</th>
-            <th scope="col" class="op-th">ROI₀</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="order_count">有效单</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="units_sold">件数</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="sales">销售$</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="spend" data-tip="广告消耗（广告窗口全量，USD；仅供对照，不参与净利润）">消耗 USD</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="gmv_ad" data-tip="平台 GMV Max 归因含自然单（仅供对照）">平台GMV</th>
+            <th scope="col" class="op-th" data-tip="平台侧 GMV ÷ 消耗 的投放口径 ROI（仅供对照）">ROI₀</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="order_count" data-tip="有效销售订单数（排除 CANCELLED）">有效单</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="units_sold" data-tip="有效销售件数">件数</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="sales" data-tip="有效销售金额（USD）">销售$</th>
             <th scope="col" class="op-th col-hidden" data-cg="cg-refundsplit">仅退件</th>
             <th scope="col" class="op-th col-hidden" data-cg="cg-refundsplit">仅退$</th>
             <th scope="col" class="op-th col-hidden" data-cg="cg-refundsplit">退货件</th>
             <th scope="col" class="op-th col-hidden" data-cg="cg-refundsplit">退货$</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="refund_net_amount">退款净额$</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="refund_rate">退款率%</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="refund_net_amount" data-tip="净退款额 = 仅退款 + 退货退款（USD，不含已付被取消）">退款净额$</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="refund_rate" data-tip="净退款额 ÷ 有效销售（>30% 标红）">退款率%</th>
             <th scope="col" class="op-th col-hidden" data-cg="cg-cancel">取消件</th>
             <th scope="col" class="op-th col-hidden" data-cg="cg-cancel">取消退款$</th>
             <th scope="col" class="op-th col-hidden" data-cg="cg-cancel">金额未知行</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="net_profit">净利润$</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="return_loss">货损$</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="net_profit" data-tip="(有效销售 − 货本) − 广告消耗 − 平台佣金（USD；负值红字）">净利润$</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="return_loss" data-tip="全损退货件数 × 单位成本解析值（默认 30元/件 ≈ $4.43，USD）">货损$</th>
             <th scope="col" class="op-th col-hidden" data-cg="cg-fee">平台佣金$</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="roi_breakeven">保本</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="roi_real">实际ROI</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="roi_breakeven" data-tip="该 SPU 的保本 ROI 线（净利润 ≥ 0）">保本</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="roi_real" data-tip="净利润 ÷ 广告消耗；≥ 保本 = 赚，< 保本 = 亏（主判据）">实际ROI</th>
           </tr>
         </thead>
         <tbody class="op-rows" id="rows">
