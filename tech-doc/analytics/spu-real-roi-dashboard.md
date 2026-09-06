@@ -763,15 +763,15 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 
 | 格 | 数值来源 | 口径 |
 | --- | --- | --- |
-| 广告消耗 $ | `totals.spend` | M1：广告视图全窗口累计（无日期参数） |
-| 有效销售 $ | `totals.sales` | M6：有效销售订单行金额 gross（白名单状态 + paid_at 落窗） |
-| GMV $ | `totals.gmv` | 全部订单销售额 = M6 有效销售 + M6b 已付被取消订单原始行金额（同一 paid_at 窗口；≠ 广告归因「平台GMV」） |
+| 广告消耗 | `totals.spend` | M1：广告视图全窗口累计（无日期参数） |
+| 有效销售 | `totals.sales` | M6：有效销售订单行金额 gross（白名单状态 + paid_at 落窗） |
+| GMV | `totals.gmv` | 全部订单销售额 = M6 有效销售 + M6b 已付被取消订单原始行金额（同一 paid_at 窗口；≠ 广告归因「平台GMV」） |
 | 有效单量 | `totals.order_count` | 有效销售订单数（跨可见 SPU 全局去重） |
 | 总单量 | `totals.total_orders` | 有效单量 + 取消单量 |
-| 退款净额 $ | `totals.refund_net_amount` | M10：仅退 + 退货退款（不含已付被取消退款） |
-| 全损退款 $ | `totals.return_loss` | M13b：已完结退货按全损计（成本维度；2026-09-06 由「全损货损」改名，数值/口径不变） |
+| 退款净额 | `totals.refund_net_amount` | M10：仅退 + 退货退款（不含已付被取消退款） |
+| 全损退款 | `totals.return_loss` | M13b：已完结退货按全损计（成本维度；2026-09-06 由「全损货损」改名，数值/口径不变） |
 | 取消单量 | `totals.cancelled_order_count` | 已付被取消订单数（status=CANCELLED 且已付款，paid_at 落窗；跨可见 SPU 去重） |
-| 净利润 $ | `totals.net_profit` | M18 |
+| 净利润 | `totals.net_profit` | M18 |
 | 整体实际 ROI | `totals.roi_real` | M14；Σspend=0 → `—` |
 
 ### 7.2 标色与阈值（默认值，页面 ⚙ 可调，不锁死）
