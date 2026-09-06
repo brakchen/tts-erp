@@ -1159,15 +1159,15 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
             <th scope="col" class="op-th col-hidden" data-cg="cg-refundsplit">退货件</th>
             <th scope="col" class="op-th col-hidden" data-cg="cg-refundsplit">退货$</th>
             <th scope="col" class="op-th op-th-sort" data-sort="refund_net_amount" data-tip="净退款额 = 仅退款 + 退货退款（USD，不含已付被取消）">退款净额$</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="refund_rate" data-tip="净退款额 ÷ 有效销售（>30% 标红）">退款率%</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="refund_rate" data-tip="净退款额 ÷ 有效销售（默认 >30% 警戒标红）">退款率%</th>
             <th scope="col" class="op-th col-hidden" data-cg="cg-cancel">取消件</th>
             <th scope="col" class="op-th col-hidden" data-cg="cg-cancel">取消退款$</th>
             <th scope="col" class="op-th col-hidden" data-cg="cg-cancel">金额未知行</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="net_profit" data-tip="(有效销售 − 货本) − 广告消耗 − 平台佣金（USD；负值红字）">净利润$</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="net_profit" data-tip="净利润 = (有效销售 − 净退款) − 全部售出件货本 − 广告消耗 − 平台佣金估算（USD）；负值红字">净利润$</th>
             <th scope="col" class="op-th op-th-sort" data-sort="return_loss" data-tip="全损退货件数 × 单位成本解析值（默认 30元/件 ≈ $4.43，USD）">货损$</th>
             <th scope="col" class="op-th col-hidden" data-cg="cg-fee">平台佣金$</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="roi_breakeven" data-tip="该 SPU 的保本 ROI 线（净利润 ≥ 0）">保本</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="roi_real" data-tip="净利润 ÷ 广告消耗；≥ 保本 = 赚，< 保本 = 亏（主判据）">实际ROI</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="roi_breakeven" data-tip="该 SPU 的动态保本 ROI 线（实际 ROI ≥ 此值即不亏）">保本</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="roi_real" data-tip="实际 ROI = (有效销售 − 净退款 − 全损货损) ÷ 广告消耗；≥ 保本 = 赚，< 保本 = 亏（主判据）">实际ROI</th>
           </tr>
         </thead>
         <tbody class="op-rows" id="rows">
