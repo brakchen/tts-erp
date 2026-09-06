@@ -207,10 +207,11 @@
     });
     applyTableHead(name);
     // Submit-all is a pending-tab action — hide it elsewhere.
-    var submitAll = $("[data-act=\"submit-all\"]");
+    var submitAll = $('[data-act="submit-all"]');
     if (submitAll) submitAll.style.display = name === TAB_PENDING ? "" : "none";
     var batchStatus = $(".op-batch-status");
-    if (batchStatus) batchStatus.style.display = name === TAB_PENDING ? "" : "none";
+    if (batchStatus)
+      batchStatus.style.display = name === TAB_PENDING ? "" : "none";
     refreshActiveTab();
   }
 
@@ -340,11 +341,11 @@
       costOffset;
     if (acct) url += "&shop_pk=" + acct;
     api(url)
-      .then(function (r) {
+      .then((r) => {
         if (!r.ok) throw new Error("HTTP " + r.status);
         return r.json();
       })
-      .then(function (payload) {
+      .then((payload) => {
         var items = unwrap(payload);
         renderPendingRows(items);
         // Server-side total_missing_photo counts beyond the page limit;
@@ -368,7 +369,7 @@
           counter.setAttribute("aria-busy", "false");
         }
       })
-      .catch(function (e) {
+      .catch((e) => {
         errorRow(e, loadPending);
       });
   }
@@ -380,7 +381,7 @@
       html(tbody, emptyRow("该店铺所有商品均已填成本。"));
       return;
     }
-    items.forEach(function (it) {
+    items.forEach((it) => {
       var tr = document.createElement("tr");
       tr.dataset.ext = it.spu_id || "";
       tr.dataset.cpid = it.spu_pk;
@@ -404,7 +405,7 @@
           '<td data-label="备注">' +
           '<input type="text" class="op-input-note" data-k="note" maxlength="500" placeholder="（可选）" aria-label="备注">' +
           "</td>" +
-          "<td data-label=\"图片\">" +
+          '<td data-label="图片">' +
           mirrorCellHtml(it) +
           "</td>" +
           '<td class="op-td-action" data-label="操作">' +
@@ -414,13 +415,13 @@
       );
       var zoom = tr.querySelector("[data-zoom]");
       if (zoom) {
-        zoom.addEventListener("click", function (ev) {
+        zoom.addEventListener("click", (ev) => {
           ev.preventDefault();
           openLightbox(zoom.getAttribute("data-zoom"));
         });
       }
       bindMirrorErrorFallback(tr);
-      tr.querySelector('[data-act="submit"]').addEventListener("click", function () {
+      tr.querySelector('[data-act="submit"]').addEventListener("click", () => {
         submitPending(tr);
       });
       tbody.appendChild(tr);
@@ -452,8 +453,8 @@
   // so the grid never shows a broken image.
   function bindMirrorErrorFallback(tr) {
     var imgs = tr.querySelectorAll("img.op-mirror-thumb");
-    imgs.forEach(function (img) {
-      img.addEventListener("error", function () {
+    imgs.forEach((img) => {
+      img.addEventListener("error", () => {
         var holder = document.createElement("span");
         holder.className = "op-img-fallback";
         holder.title = "镜像图加载失败";
@@ -485,13 +486,13 @@
       // Only a click on the backdrop closes — a click on the enlarged
       // image itself stops propagation so the operator can pan/zoom
       // without accidentally dismissing the preview.
-      _lightbox.addEventListener("click", function (ev) {
+      _lightbox.addEventListener("click", (ev) => {
         if (ev.target === _lightbox) closeLightbox();
       });
-      lightImg.addEventListener("click", function (ev) {
+      lightImg.addEventListener("click", (ev) => {
         ev.stopPropagation();
       });
-      close.addEventListener("click", function (ev) {
+      close.addEventListener("click", (ev) => {
         ev.stopPropagation();
         closeLightbox();
       });
@@ -514,7 +515,7 @@
   function submitPending(tr) {
     // Single-row submit: reuse the shared cost POST but keep the
     // row-level status semantics (errors stay on the row).
-    return postManualCost(tr).catch(function () {
+    return postManualCost(tr).catch(() => {
       /* status already set on the row */
     });
   }
@@ -526,7 +527,7 @@
   function postManualCost(tr) {
     var inputs = tr.querySelectorAll("input[data-k]");
     var body = { spu_id: tr.dataset.ext, currency: "CNY" };
-    inputs.forEach(function (i) {
+    inputs.forEach((i) => {
       body[i.dataset.k] = i.value;
     });
     var unit = parseFloat(body.unit_cost);
@@ -543,16 +544,16 @@
       method: "POST",
       body: JSON.stringify(body),
     })
-      .then(function (r) {
+      .then((r) => {
         if (r.status === 201) return r.json();
-        return r.text().then(function (t) {
+        return r.text().then((t) => {
           throw new Error("成本 HTTP " + r.status + " · " + t);
         });
       })
-      .then(function () {
+      .then(() => {
         fileRow(tr);
       })
-      .catch(function (e) {
+      .catch((e) => {
         var msg = e && e.message ? e.message : String(e);
         setRowStatus(tr, "错误：" + msg, "is-err");
         tr.classList.remove("table-active");
@@ -567,8 +568,8 @@
   // reports how many were filed vs skipped vs failed.
   function submitAllPending() {
     var rows = $$("#grid-rows tr[data-ext]");
-    var targets = rows.filter(function (tr) {
-      var input = tr.querySelector("input[data-k=\"unit_cost\"]");
+    var targets = rows.filter((tr) => {
+      var input = tr.querySelector('input[data-k="unit_cost"]');
       var unit = input ? parseFloat(input.value) : NaN;
       return !!unit && unit > 0;
     });
@@ -581,29 +582,29 @@
       }
       return;
     }
-    var btn = $("[data-act=\"submit-all\"]");
+    var btn = $('[data-act="submit-all"]');
     if (btn) btn.disabled = true;
     var filed = 0;
     var failed = 0;
     var chain = Promise.resolve();
-    targets.forEach(function (tr) {
+    targets.forEach((tr) => {
       chain = chain
-        .then(function () {
-          return postManualCost(tr);
-        })
-        .then(function () {
+        .then(() => postManualCost(tr))
+        .then(() => {
           filed += 1;
         })
-        .catch(function () {
+        .catch(() => {
           failed += 1;
         });
     });
-    chain.then(function () {
+    chain.then(() => {
       if (btn) btn.disabled = false;
       var banner = $(".op-batch-status");
       if (!banner) return;
       var msg =
-        "已提交 " + filed + " 行" +
+        "已提交 " +
+        filed +
+        " 行" +
         (skipped ? " · 跳过 " + skipped + " 行（未填成本）" : "") +
         (failed ? " · 失败 " + failed + " 行" : "");
       banner.textContent = msg;
@@ -706,7 +707,7 @@
     }
     items.forEach((it) => {
       var tr = document.createElement("tr");
-      var costText = it.unit_cost != null ? it.unit_cost : "缺";
+      var costText = it.unit_cost == null ? "缺" : it.unit_cost;
       html(
         tr,
         '<td class="op-td-sku" data-label="SKU" title="' +
@@ -726,14 +727,14 @@
           '<td class="op-td-sku" data-label="货币">' +
           esc(it.currency || "—") +
           "</td>" +
-          "<td data-label=\"图片\">" +
+          '<td data-label="图片">' +
           mirrorCellHtml(it) +
           "</td>",
       );
       bindMirrorErrorFallback(tr);
       var zoom = tr.querySelector("[data-zoom]");
       if (zoom) {
-        zoom.addEventListener("click", function (ev) {
+        zoom.addEventListener("click", (ev) => {
           ev.preventDefault();
           openLightbox(zoom.getAttribute("data-zoom"));
         });
@@ -787,7 +788,10 @@
 
   // ---------- boot ----------
   function boot() {
-    $$(".tab").forEach((btn) => {
+    // Buttons carry class="op-tab" (not ".tab") — this selector bug meant
+    // tab clicks were never bound (2026-09-06 report: recent/all tabs
+    // unclickable).
+    $$(".op-tab").forEach((btn) => {
       btn.addEventListener("click", () => {
         setActiveTab(btn.getAttribute("data-tab"));
       });
@@ -798,9 +802,9 @@
         costFilter = search.value.trim().toLowerCase();
         applyFilter();
       });
-    var submitAll = $("[data-act=\"submit-all\"]");
+    var submitAll = $('[data-act="submit-all"]');
     if (submitAll)
-      submitAll.addEventListener("click", function () {
+      submitAll.addEventListener("click", () => {
         if (currentTab === TAB_PENDING) submitAllPending();
       });
     loadShops()

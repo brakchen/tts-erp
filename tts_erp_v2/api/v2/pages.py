@@ -610,6 +610,10 @@ _PAGE_HTML = """<!doctype html>
     </section>
 
     <nav class="op-tabs" role="tablist" aria-label="工作台标签页">
+      <button class="op-tab" type="button" role="tab" data-tab="all" aria-selected="false" aria-controls="grid-rows">
+        全部 SPU
+        <span class="op-badge" id="badge-all">·</span>
+      </button>
       <button class="op-tab op-tab-active" type="button" role="tab" data-tab="pending" aria-selected="true" aria-controls="grid-rows">
         待处理
         <span class="op-badge" id="badge-pending">·</span>
@@ -617,10 +621,6 @@ _PAGE_HTML = """<!doctype html>
       <button class="op-tab" type="button" role="tab" data-tab="recent" aria-selected="false" aria-controls="grid-rows">
         最近提交
         <span class="op-badge" id="badge-recent">·</span>
-      </button>
-      <button class="op-tab" type="button" role="tab" data-tab="all" aria-selected="false" aria-controls="grid-rows">
-        全部 SPU
-        <span class="op-badge" id="badge-all">·</span>
       </button>
     </nav>
 
