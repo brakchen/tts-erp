@@ -35,20 +35,20 @@ def _seed_channel_product(db_engine, external_id: str) -> int:
     from sqlalchemy.orm import Session
 
     with Session(db_engine) as sess:
-        sess.execute(
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
             text(
                 "INSERT INTO commerce.shops "
                 "(platform, shop_id, account_name, status) "
                 "VALUES ('tiktok', 'TEST_acct_for_costs', 'TEST acct', 'active')"
             )
         )
-        acct_id = sess.execute(
+        acct_id = sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
             text(
                 "SELECT id FROM commerce.shops "
                 "WHERE shop_id = 'TEST_acct_for_costs'"
             )
         ).scalar()
-        sess.execute(
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
             text(
                 "INSERT INTO commerce.products_spu "
                 "(shop_pk, spu_id, title, status) "
@@ -57,7 +57,7 @@ def _seed_channel_product(db_engine, external_id: str) -> int:
             {"acct": acct_id, "ext": external_id},
         )
         sess.commit()
-        cp_id = sess.execute(
+        cp_id = sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
             text(
                 "SELECT id FROM commerce.products_spu "
                 "WHERE spu_id = :ext"
@@ -207,3 +207,44 @@ def test_manual_costs_second_submission_closes_first(
     # Second row (newer): valid_to is NULL — this is the effective one
     assert rows[1].valid_to is None
     assert str(rows[1].unit_cost).startswith("11.00")
+
+
+def test_get_manual_costs_lists_recent_submissions(api_client, readwrite_key, db_engine, readonly_key):
+    """GET /v2/reporting/manual-costs returns filed entries (newest first).
+
+    2026-09-06 regression: the 最近提交 tab used to read
+    reporting.cost_snapshots (recomputed every 6 h) so a fresh manual
+    entry was invisible until the next tick. The tab now reads this
+    truth-table endpoint — a submission must show up immediately.
+    """
+    cp_id = _seed_channel_product(db_engine, "TEST_mc_get_list")
+    r = api_client.post(
+        "/v2/reporting/manual-costs",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json={
+            "spu_id": "TEST_mc_get_list",
+            "unit_cost": "42.50",
+            "currency": "CNY",
+            "note": "list check",
+        },
+    )
+    assert r.status_code == 201, r.text
+
+    g = api_client.get(
+        "/v2/reporting/manual-costs?limit=20",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert g.status_code == 200, g.text
+    body = g.json()
+    assert "items" in body
+    row = next((i for i in body["items"] if i["spu_pk"] == cp_id), None)
+    assert row is not None, f"recent submission missing from list: {body}"
+    assert row["unit_cost"] == "42.5000"
+    assert row["currency"] == "CNY"
+    assert row["note"] == "list check"
+    assert "spu_id" in row and "created_at" in row and "title" in row
+
+    # Newest-first ordering: the fresh row must be near the top.
+    assert body["items"][0]["spu_pk"] == cp_id or any(
+        body["items"][i]["spu_pk"] == cp_id for i in range(min(3, len(body["items"])))
+    )
