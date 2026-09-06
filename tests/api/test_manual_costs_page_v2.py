@@ -491,3 +491,42 @@ def test_console_js_status_label_mapping_and_sort():
     # Default catalogue sort: in-sale products first.
     assert 'key: "status"' in src, "default sort must be by status"
     assert 'order: "asc"' in src, "default order must be asc (在售 first)"
+
+
+def test_page_has_pager_controls(api_client, readonly_key):
+    """The catalogue has prev/next paging + a row-count label.
+
+    2026-09-06: channel-products is a bare-array contract, so the total
+    travels in X-Total-Count; the pager lives under the table.
+    """
+    r = api_client.get(
+        "/v2/pages/manual-costs",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.text
+    assert 'id="grid-pager"' in body, "pager section missing"
+    assert 'id="btn-prev"' in body, "prev button missing"
+    assert 'id="btn-next"' in body, "next button missing"
+    assert 'id="pager-label"' in body, "pager label missing"
+    assert "上一页" in body and "下一页" in body, "pager button labels missing"
+
+    from pathlib import Path
+
+    js = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "console.js"
+    )
+    src = js.read_text(encoding="utf-8")
+    assert "function updatePager(total, pageLen)" in src, (
+        "updatePager missing from console.js"
+    )
+    assert "pageOffset" in src, "page offset state missing"
+    assert "pageLimit" in src, "page limit state missing"
+    assert "X-Total-Count" in src, "console.js must read X-Total-Count"
+    assert '"#filter-limit"' in src or "filter-limit" in src, (
+        "每页 dropdown must be wired"
+    )

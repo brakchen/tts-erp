@@ -39,34 +39,34 @@ router = APIRouter(prefix="/v2/pages", tags=["pages"])
 
 @router.get("/spu-roi", response_class=HTMLResponse)
 def spu_roi_page() -> HTMLResponse:
-  """SPU 实际 ROI 看板(账页式,§7 of tech-doc/analytics/spu-real-roi-dashboard.md)。
+    """SPU 实际 ROI 看板(账页式,§7 of tech-doc/analytics/spu-real-roi-dashboard.md)。
 
-  HTML shell 只做骨架:标题/结余带/工具栏/表格容器/分页;数据与业务计算
-  全部消费 GET /v2/analytics/spu-roi(只读,§5.1-1 页面不计算业务数字)。
-  样式沿用操作台家族 token(warm-paper),行为在 static/js/spu-roi.js。
-  """
-  return HTMLResponse(_SPU_ROI_PAGE_HTML)
+    HTML shell 只做骨架:标题/结余带/工具栏/表格容器/分页;数据与业务计算
+    全部消费 GET /v2/analytics/spu-roi(只读,§5.1-1 页面不计算业务数字)。
+    样式沿用操作台家族 token(warm-paper),行为在 static/js/spu-roi.js。
+    """
+    return HTMLResponse(_SPU_ROI_PAGE_HTML)
 
 
 @router.get("/manual-costs", response_class=HTMLResponse)
 def manual_costs_page() -> HTMLResponse:
-  """Manual cost entry workbench (main-image mirror display).
+    """Manual cost entry workbench (main-image mirror display).
 
-  The HTML shell is a small stub:
-  - links to ``/static/vendor/bootstrap.min.css`` (self-hosted, MIT)
-  - inline ``<style>`` block for the industrial-console personality
-  - links to ``/static/js/console.js`` (shop switcher, tabs, inline filing,
-    envelope unwrap for backend pagination, signature-counter population,
-    lightbox preview of the SPU's mirrored main image)
-  - the JS handles its own /v2/auth/me probe and redirects unauthenticated
-    callers to ``/v2/auth/login?next=/v2/pages/manual-costs``
+    The HTML shell is a small stub:
+    - links to ``/static/vendor/bootstrap.min.css`` (self-hosted, MIT)
+    - inline ``<style>`` block for the industrial-console personality
+    - links to ``/static/js/console.js`` (shop switcher, tabs, inline filing,
+      envelope unwrap for backend pagination, signature-counter population,
+      lightbox preview of the SPU's mirrored main image)
+    - the JS handles its own /v2/auth/me probe and redirects unauthenticated
+      callers to ``/v2/auth/login?next=/v2/pages/manual-costs``
 
-  2026-09-05 page-rework lane: the supplier-reference-photo upload flow
-  was removed. The 图片 column now shows the TikTok main image mirrored
-  into local MinIO (``image_url`` from the backend, fallback icon when the
-  mirror hasn't finished); cost currency is fixed to CNY.
-  """
-  return HTMLResponse(_PAGE_HTML)
+    2026-09-05 page-rework lane: the supplier-reference-photo upload flow
+    was removed. The 图片 column now shows the TikTok main image mirrored
+    into local MinIO (``image_url`` from the backend, fallback icon when the
+    mirror hasn't finished); cost currency is fixed to CNY.
+    """
+    return HTMLResponse(_PAGE_HTML)
 
 
 # Marker for the legacy token-paste UI — kept as a comment so future
@@ -344,7 +344,20 @@ _PAGE_HTML = """<!doctype html>
 
     /* ---------- TABLE ---------- */
     .op-main { max-width: 1280px; margin: 0 auto; }
-    .op-table-wrap { padding: 0 28px 56px; }
+    .op-table-wrap { padding: 0 28px 4px; }
+    .op-pager {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 14px 28px 56px;
+      font-family: var(--sans);
+      font-size: 13px;
+    }
+    .op-pager-page { color: var(--ink); font-variant-numeric: tabular-nums; }
+    .op-pager .op-btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
     .op-table {
       width: 100%;
       border-collapse: collapse;
@@ -681,6 +694,12 @@ _PAGE_HTML = """<!doctype html>
         </tbody>
       </table>
     </div>
+
+    <section class="op-pager" id="grid-pager">
+      <button type="button" class="op-btn" id="btn-prev" disabled>← 上一页</button>
+      <span class="op-pager-page" id="pager-label">—</span>
+      <button type="button" class="op-btn" id="btn-next" disabled>下一页 →</button>
+    </section>
   </main>
 
   <script src="../../static/js/console.js" defer></script>

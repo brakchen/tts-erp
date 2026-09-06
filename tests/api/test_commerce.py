@@ -49,9 +49,9 @@ def seed_commerce_rows(db_engine):
     # Wipe any prior leftovers (idempotent across re-runs).
     _wipe(db_engine)
 
-    with db_engine.begin() as conn:
+    with db_engine.begin() as sess:
         # pi-lens-ignore: python-sql-injection — literal SQL, only :ext/:acct/:cp/:so bound
-        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "INSERT INTO commerce.shops "
                 "(platform, shop_id, account_name, status) "
@@ -59,13 +59,13 @@ def seed_commerce_rows(db_engine):
             ),
             {"ext": ext_acct},
         )
-        acct_id = conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+        acct_id = sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text("SELECT id FROM commerce.shops WHERE shop_id = :ext"),
             {"ext": ext_acct},
         ).scalar()
 
         # pi-lens-ignore: python-sql-injection — literal SQL, only :acct/:ext bound
-        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "INSERT INTO commerce.products_spu "
                 "(shop_pk, spu_id, title, status) "
@@ -73,13 +73,13 @@ def seed_commerce_rows(db_engine):
             ),
             {"acct": acct_id, "ext": ext_prod},
         )
-        cp_id = conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+        cp_id = sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text("SELECT id FROM commerce.products_spu WHERE spu_id = :ext"),
             {"ext": ext_prod},
         ).scalar()
 
         # pi-lens-ignore: python-sql-injection — literal SQL, only :cp/:ext bound
-        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "INSERT INTO commerce.products_sku "
                 "(spu_pk, sku_id, seller_sku, variant_name) "
@@ -89,7 +89,7 @@ def seed_commerce_rows(db_engine):
         )
 
         # pi-lens-ignore: python-sql-injection — literal SQL, only :acct/:ext bound
-        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "INSERT INTO commerce.sales_orders "
                 "(shop_pk, order_id, status, currency, "
@@ -98,13 +98,13 @@ def seed_commerce_rows(db_engine):
             ),
             {"acct": acct_id, "ext": ext_order},
         )
-        order_id = conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+        order_id = sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text("SELECT id FROM commerce.sales_orders WHERE order_id = :ext"),
             {"ext": ext_order},
         ).scalar()
 
         # pi-lens-ignore: python-sql-injection — literal SQL, only :so/:cp/:cv bound
-        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "INSERT INTO commerce.sales_order_lines "
                 "(order_pk, external_line_id, spu_pk, "
@@ -132,9 +132,9 @@ def _wipe(db_engine) -> None:
     wipes products_spu / shops by TEST_ external ids;
     this fixture adds the 3 tables the autouse doesn't know about.
     """
-    with db_engine.begin() as conn:
+    with db_engine.begin() as sess:
         # pi-lens-ignore: python-sql-injection — literal SQL, LIKE prefix is constant
-        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "DELETE FROM commerce.sales_order_lines "
                 "WHERE order_pk IN ("
@@ -144,14 +144,14 @@ def _wipe(db_engine) -> None:
             )
         )
         # pi-lens-ignore: python-sql-injection — literal SQL, LIKE prefix is constant
-        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "DELETE FROM commerce.sales_orders "
                 "WHERE order_id LIKE 'TEST_commerce_%'"
             )
         )
         # pi-lens-ignore: python-sql-injection — literal SQL, LIKE prefix is constant
-        conn.execute(
+        sess.execute(
             text(
                 "DELETE FROM commerce.products_sku WHERE sku_id LIKE 'TEST_commerce_%'"
             )
@@ -526,8 +526,8 @@ def test_list_products_spu_includes_cost_and_image_fields(
     """
     cp_id = _seed_spu(db_engine, "TEST_commerce_costfield")
     # Seed an effective manual cost for that SPU.
-    with db_engine.begin() as conn:
-        conn.execute(
+    with db_engine.begin() as sess:
+        sess.execute(
             text(
                 "INSERT INTO procurement.manual_product_costs "
                 "(spu_pk, unit_cost, currency, valid_from, valid_to) "
@@ -551,8 +551,8 @@ def test_list_products_spu_includes_cost_and_image_fields(
 
 def _seed_spu(db_engine, external_id: str) -> int:
     """Seed a minimal TEST_ shop + SPU; return the SPU id."""
-    with db_engine.begin() as conn:
-        conn.execute(
+    with db_engine.begin() as sess:
+        sess.execute(
             text(
                 "INSERT INTO commerce.shops "
                 "(platform, shop_id, account_name, status) "
@@ -560,11 +560,11 @@ def _seed_spu(db_engine, external_id: str) -> int:
             ),
             {"ext": external_id},
         )
-        acct_id = conn.execute(
+        acct_id = sess.execute(
             text("SELECT id FROM commerce.shops WHERE shop_id = :ext"),
             {"ext": external_id},
         ).scalar()
-        conn.execute(
+        sess.execute(
             text(
                 "INSERT INTO commerce.products_spu "
                 "(shop_pk, spu_id, title, status) "
@@ -572,7 +572,7 @@ def _seed_spu(db_engine, external_id: str) -> int:
             ),
             {"acct": acct_id, "ext": external_id},
         )
-        cp_id = conn.execute(
+        cp_id = sess.execute(
             text("SELECT id FROM commerce.products_spu WHERE spu_id = :ext"),
             {"ext": external_id},
         ).scalar()
@@ -593,8 +593,8 @@ def seed_spus_with_times(db_engine):
     order is assertable without touching other shops' rows.
     """
     ext_acct = "TEST_MCSORT_acct"
-    with db_engine.begin() as conn:
-        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+    with db_engine.begin() as sess:
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "INSERT INTO commerce.shops "
                 "(platform, shop_id, account_name, status) "
@@ -602,7 +602,7 @@ def seed_spus_with_times(db_engine):
             ),
             {"ext": ext_acct},
         )
-        acct_id = conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+        acct_id = sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text("SELECT id FROM commerce.shops WHERE shop_id = :ext"),
             {"ext": ext_acct},
         ).scalar()
@@ -630,7 +630,7 @@ def seed_spus_with_times(db_engine):
                 "2026-03-01T00:00:00+00:00",
             ),
         ):
-            conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
                 text(
                     "INSERT INTO commerce.products_spu "
                     "(shop_pk, spu_id, title, status, "
@@ -645,13 +645,13 @@ def seed_spus_with_times(db_engine):
                     "updated": updated,
                 },
             )
-            pk = conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            pk = sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
                 text("SELECT id FROM commerce.products_spu WHERE spu_id = :ext"),
                 {"ext": ext},
             ).scalar()
             spu_ids[ext] = pk
         # Costs: A=30 (highest), B=10 (lowest), C none.
-        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "INSERT INTO procurement.manual_product_costs "
                 "(spu_pk, unit_cost, currency, valid_from, valid_to) "
@@ -663,8 +663,8 @@ def seed_spus_with_times(db_engine):
 
     yield {"acct_id": acct_id, "spu_ids": spu_ids}
 
-    with db_engine.begin() as conn:
-        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+    with db_engine.begin() as sess:
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "DELETE FROM procurement.manual_product_costs "
                 "WHERE spu_pk IN ("
@@ -673,11 +673,11 @@ def seed_spus_with_times(db_engine):
             ),
             {"acct": acct_id},
         )
-        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text("DELETE FROM commerce.products_spu WHERE shop_pk = :acct"),
             {"acct": acct_id},
         )
-        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text("DELETE FROM commerce.shops WHERE id = :acct"),
             {"acct": acct_id},
         )
@@ -772,8 +772,8 @@ _STATUS_SPUS = {
 def seed_spus_statuses(db_engine):
     """Three TEST_ SPUs under one shop, one per upstream status value."""
     ext_acct = "TEST_MCST_acct"
-    with db_engine.begin() as conn:
-        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+    with db_engine.begin() as sess:
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "INSERT INTO commerce.shops "
                 "(platform, shop_id, account_name, status) "
@@ -781,13 +781,13 @@ def seed_spus_statuses(db_engine):
             ),
             {"ext": ext_acct},
         )
-        acct_id = conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+        acct_id = sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text("SELECT id FROM commerce.shops WHERE shop_id = :ext"),
             {"ext": ext_acct},
         ).scalar()
         spu_ids = {}
         for ext, (title, status) in _STATUS_SPUS.items():
-            conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
                 text(
                     "INSERT INTO commerce.products_spu "
                     "(shop_pk, spu_id, title, status, "
@@ -796,7 +796,7 @@ def seed_spus_statuses(db_engine):
                 ),
                 {"acct": acct_id, "ext": ext, "title": title, "status": status},
             )
-            pk = conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+            pk = sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
                 text("SELECT id FROM commerce.products_spu WHERE spu_id = :ext"),
                 {"ext": ext},
             ).scalar()
@@ -804,12 +804,12 @@ def seed_spus_statuses(db_engine):
 
     yield {"acct_id": acct_id, "spu_ids": spu_ids}
 
-    with db_engine.begin() as conn:
-        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+    with db_engine.begin() as sess:
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text("DELETE FROM commerce.products_spu WHERE shop_pk = :acct"),
             {"acct": acct_id},
         )
-        conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+        sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text("DELETE FROM commerce.shops WHERE id = :acct"),
             {"acct": acct_id},
         )
@@ -861,3 +861,35 @@ def test_channel_products_sort_status_desc(
         api_client, readonly_key, acct, sort="status", order="desc"
     )
     assert got == ["TEST_MCST_seller", "TEST_MCST_deleted", "TEST_MCST_activate"], got
+
+
+def test_channel_products_exposes_total_count_header(
+    api_client, readonly_key, seed_spus_with_times
+):
+    """channel-products returns X-Total-Count matching the filtered set.
+
+    2026-09-06 pager: the bare-array body is a stable external contract,
+    so the matching row count travels in a header instead. With a status
+    filter applied the header reflects the FILTERED total, not the whole
+    table.
+    """
+    acct = seed_spus_with_times["acct_id"]
+    r = api_client.get(
+        f"/v2/commerce/channel-products?limit=2&shop_pk={acct}",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    assert "X-Total-Count" in r.headers, "X-Total-Count header missing"
+    # The fixture seeds 3 TEST_ SPUs under this shop.
+    assert r.headers["X-Total-Count"] == "3", r.headers["X-Total-Count"]
+    # limit=2 paged the body but the header still counts all 3.
+    assert len(r.json()) == 2
+
+    # Offset paging: skipping 2 leaves 1 row.
+    r2 = api_client.get(
+        f"/v2/commerce/channel-products?limit=2&offset=2&shop_pk={acct}",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r2.status_code == 200
+    assert len(r2.json()) == 1
+    assert r2.headers["X-Total-Count"] == "3"

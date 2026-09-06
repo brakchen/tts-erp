@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -80,6 +80,18 @@ SQL_LIST_CHANNEL_PRODUCTS = (
     "       m.unit_cost, m.currency, "
     "       CASE WHEN m.id IS NULL THEN NULL ELSE 'MANUAL_ENTRY' END AS cost_method "
     "FROM commerce.products_spu cp "
+    "LEFT JOIN procurement.manual_product_costs m "
+    "  ON m.spu_pk = cp.id AND m.valid_to IS NULL "
+    "WHERE (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
+    "AND (CAST(:status AS text) IS NULL OR cp.status = CAST(:status AS text)) "
+)
+# Total row count for the SAME filter (no sort / page suffix) — surfaced as
+# the X-Total-Count header so the page can render 共 N 行 / paging without
+# switching the JSON body to an envelope (the bare-array shape is a stable
+# external contract). The LEFT JOIN cannot inflate the count: at most one
+# open manual_product_costs row per SPU (partial unique index).
+SQL_COUNT_CHANNEL_PRODUCTS = (
+    "SELECT COUNT(*) AS n FROM commerce.products_spu cp "
     "LEFT JOIN procurement.manual_product_costs m "
     "  ON m.spu_pk = cp.id AND m.valid_to IS NULL "
     "WHERE (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
@@ -174,7 +186,9 @@ def _q(compiled_stmt, params: dict, sess: Session):
     data flows only through the ``params`` dict — never into the SQL
     string itself.
     """
-    return sess.execute(compiled_stmt, params)
+    return sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: module-level text() constants + bound params only
+        compiled_stmt, params
+    )
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -192,6 +206,7 @@ def _safe_int(value: Any, default: int = 0) -> int:
 _STMT_LIST_CHANNEL_ACCOUNTS = text(SQL_LIST_CHANNEL_ACCOUNTS)
 _STMT_GET_CHANNEL_ACCOUNT = text(SQL_GET_CHANNEL_ACCOUNT)
 _STMT_GET_CHANNEL_ACCOUNT_BY_EXTERNAL = text(SQL_GET_CHANNEL_ACCOUNT_BY_EXTERNAL)
+_STMT_COUNT_CHANNEL_PRODUCTS = text(SQL_COUNT_CHANNEL_PRODUCTS)
 _STMT_GET_CHANNEL_PRODUCT = text(SQL_GET_CHANNEL_PRODUCT)
 _STMT_LIST_CHANNEL_VARIANTS = text(SQL_LIST_CHANNEL_VARIANTS)
 _STMT_LIST_SALES_ORDERS = text(SQL_LIST_SALES_ORDERS)
@@ -373,16 +388,30 @@ def list_products_spu(
     order: str = Query(default="asc", pattern="^(asc|desc)$"),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    response: Response = None,  # type: ignore[assignment]  # injected by FastAPI
 ) -> list[ChannelProductOut]:
     key = _sort_key(sort, order)
+    params = {
+        "acct_id": shop_pk,
+        "status": status_filter,
+    }
+    # Total matching rows (same filter, ignoring page bounds) — exposed as
+    # X-Total-Count so the UI can render 共 N 行 without switching the
+    # bare-array body to an envelope. Missing response (unit test without
+    # FastAPI injection) simply skips the header.
+    if response is not None:
+        total = _q(
+            _STMT_COUNT_CHANNEL_PRODUCTS,
+            params,
+            sess,
+        ).scalar()
+        response.headers["X-Total-Count"] = str(total or 0)
+    page_params = dict(params)
+    page_params["limit"] = limit
+    page_params["offset"] = offset
     rows = _q(
         _SQL_LIST_CHANNEL_PRODUCTS[key],
-        {
-            "acct_id": shop_pk,
-            "status": status_filter,
-            "limit": limit,
-            "offset": offset,
-        },
+        page_params,
         sess,
     ).all()
     return [_row_to_channel_product(r) for r in rows]

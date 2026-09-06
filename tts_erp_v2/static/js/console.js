@@ -237,6 +237,13 @@
   // ---------- tabs ----------
   var currentTab = TAB_ALL;
   var costFilter = "";
+  // Catalogue paging (2026-09-06): the backend returns pages via
+  // limit/offset and reports the filtered total in X-Total-Count.
+  // pageLimit follows the 每页 dropdown (25/50/100); pageOffset is the
+  // first row of the current page.
+  var pageLimit = 50;
+  var pageOffset = 0;
+  var pageTotal = null; // null = not fetched yet (no pager shown)
   // All-SPU catalogue sort state (2026-09-06): the active sort column
   // + direction. Column headers carry data-sort; clicking toggles asc→
   // desc→(reload). Default = status asc so in-sale (在售/ACTIVATE)
@@ -344,6 +351,8 @@
           catalogueSort.key = key;
           catalogueSort.order = "desc";
         }
+        // New sort order starts from page 1.
+        pageOffset = 0;
         loadAll();
       });
     });
@@ -676,7 +685,9 @@
     html(tbody, loadingRow());
     var url =
       "/v2/commerce/channel-products?limit=" +
-      DEFAULT_LIMIT +
+      pageLimit +
+      "&offset=" +
+      pageOffset +
       "&sort=" +
       encodeURIComponent(catalogueSort.key) +
       "&order=" +
@@ -686,18 +697,42 @@
     api(url)
       .then((r) => {
         if (!r.ok) throw new Error("HTTP " + r.status);
+        var totalHdr = r.headers.get("X-Total-Count");
+        if (totalHdr != null) {
+          var n = parseInt(totalHdr, 10);
+          pageTotal = isNaN(n) ? null : n;
+        }
         return r.json();
       })
       .then((payload) => {
         var items = unwrap(payload);
         renderAllRows(items);
-        setBadge("badge-all", items.length);
-        setCounterNum(items.length);
+        setBadge("badge-all", pageTotal == null ? items.length : pageTotal);
+        setCounterNum(pageTotal == null ? items.length : pageTotal);
+        updatePager(pageTotal == null ? items.length : pageTotal, items.length);
         setCounterReady();
       })
       .catch((e) => {
         errorRow(e, loadAll);
       });
+  }
+
+  // Pager footer (2026-09-06): prev / next buttons + 共 N 行 · 第 X/Y 页.
+  // The pager reflects the all-tab's filtered total (X-Total-Count); it is
+  // hidden when the backend didn't report a total or there is only one page.
+  function updatePager(total, pageLen) {
+    var pager = $(".op-pager");
+    if (!pager) return;
+    var pages = Math.max(1, Math.ceil(total / pageLimit));
+    var cur = Math.floor(pageOffset / pageLimit) + 1;
+    var label = $("#pager-label");
+    if (label)
+      label.textContent =
+        "共 " + total + " 行 · 第 " + cur + " / " + pages + " 页";
+    var prev = $("#btn-prev");
+    var next = $("#btn-next");
+    if (prev) prev.disabled = pageOffset <= 0;
+    if (next) next.disabled = pageOffset + pageLen >= total;
   }
 
   function renderAllRows(items) {
@@ -897,9 +932,36 @@
       populateStatusFilter(statusFilter);
       statusFilter.addEventListener("change", () => {
         catalogueStatus = statusFilter.value;
+        pageOffset = 0;
         if (currentTab === TAB_ALL) loadAll();
       });
     }
+    // 每页 dropdown drives the catalogue page size (2026-09-06).
+    var limitSel = $("#filter-limit");
+    if (limitSel) {
+      var initial = parseInt(limitSel.value, 10);
+      if (!isNaN(initial) && initial > 0) pageLimit = initial;
+      limitSel.addEventListener("change", () => {
+        var v = parseInt(limitSel.value, 10);
+        if (isNaN(v) || v <= 0) return;
+        pageLimit = v;
+        pageOffset = 0;
+        if (currentTab === TAB_ALL) loadAll();
+      });
+    }
+    var btnPrev = $("#btn-prev");
+    var btnNext = $("#btn-next");
+    if (btnPrev)
+      btnPrev.addEventListener("click", () => {
+        if (pageOffset - pageLimit < 0) pageOffset = 0;
+        else pageOffset -= pageLimit;
+        if (currentTab === TAB_ALL) loadAll();
+      });
+    if (btnNext)
+      btnNext.addEventListener("click", () => {
+        pageOffset += pageLimit;
+        if (currentTab === TAB_ALL) loadAll();
+      });
     loadShops()
       .then(loadMe)
       .then(() => {
