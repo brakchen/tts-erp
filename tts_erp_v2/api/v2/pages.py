@@ -817,7 +817,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     .op-scope-note { font-size: 11px; letter-spacing: 0.05em; color: var(--muted); user-select: none; }
 
     /* ---------- 结余带(家族 signature,§3.1/§7) ---------- */
-    /* 结构 = bootstrap row-cols 栅格(见 body):xs 2 格 → xl 7 格,数字密度随屏降。 */
+    /* 结构 = bootstrap row-cols 栅格(见 body):xs 2 格 → lg(≥992px) 7 格单行,数字密度随屏降。 */
     .op-counter { border-bottom: 1px solid var(--rule); background: var(--paper); }
     .op-counter-item {
       display: flex; flex-direction: column; align-items: center;
@@ -1076,7 +1076,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
   </header>
 
   <main class="op-main">
-    <!-- 结余带:row-cols 栅格降密度(xs 2 → xl 7),JS 只写 #sum-* 文本 + is-err/is-ok -->
+    <!-- 结余带:row-cols 栅格降密度(xs 2 → lg 7),JS 只写 #sum-* 文本 + is-err/is-ok -->
     <section class="op-counter px-2 px-md-4 py-3 py-md-4" id="summaries" aria-live="polite">
       <div class="row g-2 g-md-3 text-center row-cols-2 row-cols-sm-3 row-cols-md-4">
         <div class="col"><span class="op-counter-item"><span class="op-counter-label">SPU</span><span class="op-counter-num" id="sum-n">·</span></span></div>
