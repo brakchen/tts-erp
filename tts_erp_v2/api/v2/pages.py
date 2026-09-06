@@ -1069,7 +1069,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
   <main class="op-main">
     <!-- 结余带:row-cols 栅格降密度(xs 2 → xl 7),JS 只写 #sum-* 文本 + is-err/is-ok -->
     <section class="op-counter px-2 px-md-4 py-3 py-md-4" aria-live="polite">
-      <div class="row g-2 g-md-3 text-center row-cols-2 row-cols-md-4 row-cols-xl-7">
+      <div class="row g-2 g-md-3 text-center row-cols-2 row-cols-sm-3 row-cols-md-4 row-cols-lg-7">
         <div class="col"><span class="op-counter-item"><span class="op-counter-label">SPU</span><span class="op-counter-num" id="sum-n">·</span></span></div>
         <div class="col"><span class="op-counter-item"><span class="op-counter-label">消耗 $</span><span class="op-counter-num" id="sum-spend">—</span></span></div>
         <div class="col"><span class="op-counter-item"><span class="op-counter-label">有效销售 $</span><span class="op-counter-num" id="sum-sales">—</span></span></div>
@@ -1113,7 +1113,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
           <span class="op-fld-label">费率 %</span>
           <input id="filter-fee" type="text" class="form-control op-fee-input" placeholder="11.56" inputmode="decimal" autocomplete="off">
         </label>
-        <div class="op-field d-inline-flex flex-row align-items-center gap-2 pb-1">
+        <div class="d-inline-flex flex-row align-items-center gap-2 pb-1">
           <span class="op-fld-label">含无活动</span>
           <span class="op-hint" role="note" tabindex="0" data-tip="默认只列出当前窗口内有广告或销售/退款活动的 SPU；勾选后，处于 ACTIVE 状态但没有任意活动（无投放 / 未出单）的 SPU 也会一并列出——这类行的 ROI / 金额显示 — 或「无投放」">?</span>
           <input id="filter-include-all" type="checkbox" aria-label="含无活动 SPU">
