@@ -764,11 +764,15 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     .op-counter-num { font-size: 32px; font-weight: 700; line-height: 1.1; color: var(--ink); white-space: nowrap; }
     .op-counter-num.is-err { color: var(--danger); }
     .op-counter-num.is-ok { color: var(--ok); }
-    .op-counter-stamp {
-      position: absolute; right: 28px; top: 50%; transform: translateY(-50%);
-      font-family: var(--sans); font-size: 11px; letter-spacing: 0.28em;
-      color: var(--rule); text-transform: uppercase;
-      user-select: none; pointer-events: none;
+    /* 口径戳移入页头(2026-09-06 ROI UI lane):原为结余带绝对定位右侧,
+       窗口 1180–1600 时与居中的汇总数字重叠 → 改静态放 header 右侧,不再遮挡 */
+    .op-header-side {
+      display: flex; flex-direction: column; align-items: flex-end;
+      gap: 5px; padding-bottom: 2px;
+    }
+    .op-scope-note {
+      font-family: var(--sans); font-size: 11px; letter-spacing: 0.05em;
+      color: var(--muted); user-select: none; text-align: right;
     }
 
     /* ---------- 列开关 ⚙(§7.5) ---------- */
@@ -853,12 +857,49 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     .no-ad { color: var(--muted); letter-spacing: 0.04em; }
     /* 原始 ID/状态码保留 mono 作为"代码"标注,其余全 sans */
     .td-spu { font-family: var(--mono); font-size: 12px; color: var(--muted); }
-    .td-title { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .td-title { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .td-null { color: var(--rule); }
     .warn-default { color: var(--warn); cursor: help; font-size: 12px; }
-    .spu-img { width: 34px; height: 34px; object-fit: cover; border: 1px solid var(--rule); vertical-align: middle; margin-right: 8px; }
+    /* SPU 主图格(2026-09-06 ROI UI lane):56px 主图(原 34px) + 右侧两行
+       (spu_id / 标题) 垂直居中;主图可点击 → lightbox 放大 —— 与
+       manual-costs 同一家族交互。无图 → 虚线占位,保持行高/对齐。 */
+    .td-spu-cell { display: flex; align-items: center; gap: 12px; }
+    .spu-img {
+      width: 56px; height: 56px; flex: none; object-fit: cover;
+      border: 1px solid var(--rule); background: var(--paper-deep);
+      cursor: zoom-in;
+    }
+    .spu-img:hover { border-color: var(--accent); }
+    .spu-img-missing {
+      width: 56px; height: 56px; flex: none; display: flex;
+      align-items: center; justify-content: center;
+      border: 1px dashed var(--rule); background: var(--paper-deep);
+      color: var(--rule); font-size: 10px; letter-spacing: 0.12em;
+      font-family: var(--sans); user-select: none;
+    }
+    .td-spu-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .spu-status { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-left: 8px; }
     .spu-status.is-down { color: var(--warn); }
+    /* Lightbox:click 主图 → 全屏叠层;点背景(非放大图)/×/Esc 关闭。
+       CSS 与 manual-costs 同款;JS 在 spu-roi.js(openLightbox)。 */
+    .op-lightbox {
+      position: fixed; inset: 0; display: none;
+      align-items: center; justify-content: center;
+      background: rgba(20, 16, 10, 0.86);
+      z-index: 1000; cursor: zoom-out; padding: 40px;
+    }
+    .op-lightbox.is-open { display: flex; }
+    .op-lightbox img {
+      max-width: 100%; max-height: 100%; object-fit: contain;
+      border: 1px solid var(--rule); background: var(--paper);
+      cursor: default;
+    }
+    .op-lightbox-close {
+      position: absolute; top: 12px; right: 18px;
+      background: transparent; border: 0; color: var(--paper);
+      font-size: 34px; line-height: 1; cursor: pointer;
+    }
+    .op-lightbox-close:hover { color: var(--accent); }
 
     /* ---------- 分页 ---------- */
     .op-pager { display: flex; align-items: center; gap: 18px; padding: 4px 28px 44px; font-family: var(--sans); font-size: 13px; }
@@ -891,9 +932,6 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       pointer-events: none;
     }
 
-    @media (max-width: 1180px) {
-      .op-counter-stamp { display: none; }
-    }
     @media (max-width: 900px) {
       .op-counter, .op-toolbar, .op-table-wrap, .op-pager, .op-footnotes { padding-left: 14px; padding-right: 14px; }
       .op-counter { gap: 10px 22px; padding-top: 20px; padding-bottom: 18px; }
@@ -908,7 +946,10 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
         <span class="op-eyebrow">TikTok Shop · Analytics</span>
         <h1 class="op-title">SPU 实际 ROI</h1>
       </div>
-      <span class="op-identity" id="ops-identity"></span>
+      <div class="op-header-side">
+        <span class="op-identity" id="ops-identity"></span>
+        <span class="op-scope-note" id="sum-stamp">ROI · 账页</span>
+      </div>
     </div>
   </header>
 
@@ -921,7 +962,6 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       <span class="op-counter-item"><span class="op-counter-label">全损货损 $</span><span class="op-counter-num" id="sum-loss">—</span></span>
       <span class="op-counter-item"><span class="op-counter-label">净利润 $</span><span class="op-counter-num" id="sum-profit">—</span></span>
       <span class="op-counter-item"><span class="op-counter-label">整体实际 ROI</span><span class="op-counter-num" id="sum-roi">—</span></span>
-      <span class="op-counter-stamp" id="sum-stamp">ROI · 账页</span>
     </section>
 
     <section class="op-toolbar" id="toolbar">
