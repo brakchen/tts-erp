@@ -9,6 +9,7 @@ Verifies:
   issues for this shop from ``integration.sync_issues`` and processes
   them; successful processing resolves the matching issues.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -128,17 +129,21 @@ def test_detail_writes_raw_records_and_normalized_rows(db_session) -> None:
         select(SalesOrder).where(SalesOrder.order_id == "O1")
     ).scalar_one()
     assert so.order_id == "O1"
-    lines = db_session.execute(
-        select(SalesOrderLine).where(
-            SalesOrderLine.order_pk == so.id
+    lines = (
+        db_session.execute(
+            select(SalesOrderLine).where(SalesOrderLine.order_pk == so.id)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(lines) == 1
     raw_ids = [
         r.external_id
         for r in db_session.execute(
             select(RawRecord).where(RawRecord.external_id == "O1")
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     ]
     assert raw_ids == ["O1"]
     assert proxy.calls == [("GET", "/order/202309/orders", {"ids": "O1"})]
@@ -159,7 +164,9 @@ def test_detail_writes_sync_issue_on_upstream_error(db_session) -> None:
         },
     )
     assert result.rows_failed == 1
-    issue = db_session.execute(select(SyncIssue).where(SyncIssue.job_name == "tiktok.order_detail")).scalar_one()
+    issue = db_session.execute(
+        select(SyncIssue).where(SyncIssue.job_name == "tiktok.order_detail")
+    ).scalar_one()
     assert issue.issue_type == "UPSTREAM_NONZERO"
     assert issue.external_id == "O1"
 
@@ -212,7 +219,9 @@ def test_detail_parse_failure_continues(db_session) -> None:
     assert result.rows_total == 2
     assert result.rows_failed == 1
     assert result.rows_inserted == 1
-    issue = db_session.execute(select(SyncIssue).where(SyncIssue.job_name == "tiktok.order_detail")).scalar_one()
+    issue = db_session.execute(
+        select(SyncIssue).where(SyncIssue.job_name == "tiktok.order_detail")
+    ).scalar_one()
     assert issue.issue_type == "PARSE_ERROR"
 
 
@@ -273,9 +282,13 @@ def test_detail_auto_mode_pulls_from_sync_issues(db_session) -> None:
     assert result.rows_inserted == 2
     assert result.rows_failed == 0
     # Both issues resolved.
-    issues = db_session.execute(
-        select(SyncIssue).where(SyncIssue.job_name == "tiktok.order_detail")
-    ).scalars().all()
+    issues = (
+        db_session.execute(
+            select(SyncIssue).where(SyncIssue.job_name == "tiktok.order_detail")
+        )
+        .scalars()
+        .all()
+    )
     assert len(issues) == 2
     for i in issues:
         assert i.resolved_at is not None
@@ -356,11 +369,15 @@ def test_detail_auto_mode_caps_at_batch_size(db_session) -> None:
     assert result.rows_total == AUTO_BATCH_SIZE
     assert result.rows_inserted == AUTO_BATCH_SIZE
     # The oldest issues (lowest i) are still open.
-    open_issues = db_session.execute(
-        select(SyncIssue)
-        .where(SyncIssue.job_name == "tiktok.order_detail")
-        .where(SyncIssue.resolved_at.is_(None))
-    ).scalars().all()
+    open_issues = (
+        db_session.execute(
+            select(SyncIssue)
+            .where(SyncIssue.job_name == "tiktok.order_detail")
+            .where(SyncIssue.resolved_at.is_(None))
+        )
+        .scalars()
+        .all()
+    )
     assert len(open_issues) == 5
 
 
@@ -382,9 +399,13 @@ def test_detail_auto_mode_failed_fetch_keeps_issue_open(db_session) -> None:
     )
     assert result.rows_total == 1
     assert result.rows_failed == 1
-    issues = db_session.execute(
-        select(SyncIssue).where(SyncIssue.job_name == "tiktok.order_detail")
-    ).scalars().all()
+    issues = (
+        db_session.execute(
+            select(SyncIssue).where(SyncIssue.job_name == "tiktok.order_detail")
+        )
+        .scalars()
+        .all()
+    )
     # Original PARSE_ERROR still open, plus the new UPSTREAM_NONZERO.
     types = sorted(i.issue_type for i in issues)
     assert types == ["PARSE_ERROR", "UPSTREAM_NONZERO"]

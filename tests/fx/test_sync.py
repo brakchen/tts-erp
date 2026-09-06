@@ -113,9 +113,13 @@ def test_first_fetch_inserts_snapshot_and_rate_rows(db_session) -> None:
     assert result["base_code"] == "USD"
     assert called == [("k", "USD")]
 
-    snaps = db_session.execute(
-        select(ExchangeRateSnapshot).order_by(ExchangeRateSnapshot.id)
-    ).scalars().all()
+    snaps = (
+        db_session.execute(
+            select(ExchangeRateSnapshot).order_by(ExchangeRateSnapshot.id)
+        )
+        .scalars()
+        .all()
+    )
     assert len(snaps) == 1
     snap = snaps[0]
     assert snap.base_code == "USD"
@@ -126,9 +130,13 @@ def test_first_fetch_inserts_snapshot_and_rate_rows(db_session) -> None:
 
     assert _count(db_session, ExchangeRate) == 3
     # Raw upstream payload lands in integration.raw_records (audit).
-    raw = db_session.execute(
-        select(RawRecord).where(RawRecord.endpoint.like("exchangerate/v6/%"))
-    ).scalars().all()
+    raw = (
+        db_session.execute(
+            select(RawRecord).where(RawRecord.endpoint.like("exchangerate/v6/%"))
+        )
+        .scalars()
+        .all()
+    )
     assert len(raw) == 1
     assert raw[0].external_id == "USD"
 
@@ -199,9 +207,7 @@ def test_missing_api_key_env_raises(db_session, monkeypatch) -> None:
         run_scheduled(db_session)
 
 
-def test_run_scheduled_happy_path_writes_succeeded_job(
-    db_session, monkeypatch
-) -> None:
+def test_run_scheduled_happy_path_writes_succeeded_job(db_session, monkeypatch) -> None:
     monkeypatch.setenv(ENV_API_KEY, "test-key")
 
     def fetcher(api_key: str, base_code: str) -> StandardRates:
@@ -213,11 +219,15 @@ def test_run_scheduled_happy_path_writes_succeeded_job(
     result = run_scheduled(db_session)
 
     assert result["status"] == "fetched"
-    job = db_session.execute(
-        select(SyncJob)
-        .where(SyncJob.job_name == JOB_NAME)
-        .order_by(SyncJob.id.desc())
-    ).scalars().first()
+    job = (
+        db_session.execute(
+            select(SyncJob)
+            .where(SyncJob.job_name == JOB_NAME)
+            .order_by(SyncJob.id.desc())
+        )
+        .scalars()
+        .first()
+    )
     assert job is not None
     assert job.status == "succeeded"
     assert job.rows_inserted == 3
@@ -229,9 +239,7 @@ def test_run_scheduled_quota_error_sets_cooldown_and_skips(
     monkeypatch.setenv(ENV_API_KEY, "test-key")
 
     def quota_error(api_key: str, base_code: str) -> StandardRates:
-        raise ExchangeRateAPIError(
-            "quota exceeded", error_type="quota-exceeded"
-        )
+        raise ExchangeRateAPIError("quota exceeded", error_type="quota-exceeded")
 
     monkeypatch.setattr(
         "tts_erp_v2.jobs.exchangerate.sync.fetch_standard_rates", quota_error
@@ -241,17 +249,23 @@ def test_run_scheduled_quota_error_sets_cooldown_and_skips(
     assert result["status"] == "skipped"
     assert "quota-exceeded" in result["reason"]
 
-    job = db_session.execute(
-        select(SyncJob)
-        .where(SyncJob.job_name == JOB_NAME)
-        .order_by(SyncJob.id.desc())
-    ).scalars().first()
+    job = (
+        db_session.execute(
+            select(SyncJob)
+            .where(SyncJob.job_name == JOB_NAME)
+            .order_by(SyncJob.id.desc())
+        )
+        .scalars()
+        .first()
+    )
     assert job is not None
     assert job.status == "skipped"
 
-    issue = db_session.execute(
-        select(SyncIssue).where(SyncIssue.job_name == JOB_NAME)
-    ).scalars().first()
+    issue = (
+        db_session.execute(select(SyncIssue).where(SyncIssue.job_name == JOB_NAME))
+        .scalars()
+        .first()
+    )
     assert issue is not None
     assert issue.issue_type == "EXCHANGERATE_UPSTREAM_ERROR"
     assert issue.details["error_type"] == "quota-exceeded"
@@ -276,11 +290,15 @@ def test_run_scheduled_non_quota_upstream_error_fails_loudly(
     with pytest.raises(ExchangeRateAPIError):
         run_scheduled(db_session)
 
-    job = db_session.execute(
-        select(SyncJob)
-        .where(SyncJob.job_name == JOB_NAME)
-        .order_by(SyncJob.id.desc())
-    ).scalars().first()
+    job = (
+        db_session.execute(
+            select(SyncJob)
+            .where(SyncJob.job_name == JOB_NAME)
+            .order_by(SyncJob.id.desc())
+        )
+        .scalars()
+        .first()
+    )
     assert job is not None
     assert job.status == "failed"
     assert "ExchangeRateAPIError" in (job.error_message or "")

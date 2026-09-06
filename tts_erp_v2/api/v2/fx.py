@@ -75,9 +75,7 @@ def _not_found(base_code: str) -> HTTPException:
 @router.get("/latest", response_model=FxLatestOut)
 def latest_fx(
     sess: Session = Depends(get_session),
-    base_code: str = Query(
-        default=DEFAULT_BASE_CODE, min_length=3, max_length=12
-    ),
+    base_code: str = Query(default=DEFAULT_BASE_CODE, min_length=3, max_length=12),
 ) -> FxLatestOut:
     """Full latest rate map (1 unit of base_code in every target code).
 
@@ -107,9 +105,7 @@ def convert_fx(
     ),
     from_code: str = Query(..., min_length=3, max_length=12),
     to_code: str = Query(..., min_length=3, max_length=12),
-    base_code: str = Query(
-        default=DEFAULT_BASE_CODE, min_length=3, max_length=12
-    ),
+    base_code: str = Query(default=DEFAULT_BASE_CODE, min_length=3, max_length=12),
 ) -> FxConvertOut:
     """Convert ``amount`` from ``from_code`` to ``to_code`` using the
     latest cached snapshot for ``base_code`` — pure local math, zero

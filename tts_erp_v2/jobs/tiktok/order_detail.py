@@ -24,6 +24,7 @@ list automatically when ``order_ids=None``:
 Explicit ``order_ids=[...]`` still works for ad-hoc triggers (CLI,
 tests).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -135,19 +136,23 @@ def _resolve_matching_issues(
     fetch keeps the issue open for the next tick.
     """
     now = datetime.now(UTC)
-    rows = session.execute(
-        select(SyncIssue)
-        .where(SyncIssue.job_name == JOB_NAME)
-        .where(SyncIssue.resolved_at.is_(None))
-        # Parens around the == are required: Python's ``|`` has higher
-        # precedence than ``==``, so without parens this evaluates as
-        # ``external_id == (order_id | external_id.like(...))`` and the
-        # ``str | BinaryExpression`` raises TypeError.
-        .where(
-            (SyncIssue.external_id == order_id)
-            | SyncIssue.external_id.like(f"{order_id}:%")
+    rows = (
+        session.execute(
+            select(SyncIssue)
+            .where(SyncIssue.job_name == JOB_NAME)
+            .where(SyncIssue.resolved_at.is_(None))
+            # Parens around the == are required: Python's ``|`` has higher
+            # precedence than ``==``, so without parens this evaluates as
+            # ``external_id == (order_id | external_id.like(...))`` and the
+            # ``str | BinaryExpression`` raises TypeError.
+            .where(
+                (SyncIssue.external_id == order_id)
+                | SyncIssue.external_id.like(f"{order_id}:%")
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     for row in rows:
         row.resolved_at = now
     return len(rows)
@@ -187,9 +192,7 @@ def run(
         )
     ).scalar_one_or_none()
     if account is None:
-        raise UpstreamJobError(
-            f"shops row missing for tiktok shop_id={shop_id!r}"
-        )
+        raise UpstreamJobError(f"shops row missing for tiktok shop_id={shop_id!r}")
 
     if order_ids is None:
         order_ids = _auto_collect_order_ids(session, account_id=account.id)
@@ -247,9 +250,13 @@ def run(
         }
         update_cols = {k: insert_values[k] for k in fields}
         update_cols["raw_record_id"] = raw_row.id
-        stmt = pg_insert(SalesOrder).values(**insert_values).on_conflict_do_update(
-            index_elements=["shop_pk", "order_id"],
-            set_=update_cols,
+        stmt = (
+            pg_insert(SalesOrder)
+            .values(**insert_values)
+            .on_conflict_do_update(
+                index_elements=["shop_pk", "order_id"],
+                set_=update_cols,
+            )
         )
         session.execute(stmt)
         so_row = session.execute(
@@ -279,7 +286,9 @@ def run(
             li_update = {k: li_values[k] for k in line_fields}
             li_update["raw_record_id"] = raw_row.id
             session.execute(
-                pg_insert(SalesOrderLine).values(**li_values).on_conflict_do_update(
+                pg_insert(SalesOrderLine)
+                .values(**li_values)
+                .on_conflict_do_update(
                     index_elements=["order_pk", "external_line_id"],
                     set_=li_update,
                 )

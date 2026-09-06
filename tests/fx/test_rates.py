@@ -148,9 +148,7 @@ def test_convert_unknown_currency_raises(db_session) -> None:
 
 
 def test_convert_or_none_returns_none_without_snapshot(db_session) -> None:
-    out = convert_or_none(
-        db_session, amount=Decimal(1), from_code="USD", to_code="CNY"
-    )
+    out = convert_or_none(db_session, amount=Decimal(1), from_code="USD", to_code="CNY")
     assert out is None
 
 

@@ -38,6 +38,7 @@ What this endpoint does NOT include (secrets, noise)
 - No ``public.*`` legacy tables (those will be archived after the
   4-week observation window).
 """
+
 from __future__ import annotations
 
 import os
@@ -197,15 +198,36 @@ tables already encode this — **prefer reading those over recomputing**.
 # ``tts_erp_v2/db/models/<domain>.py``.
 
 _SCHEMAS: list[tuple[str, str]] = [
-    ("integration", "credentials, shops, raw_records, sync_jobs, sync_cursors, sync_issues"),
-    ("commerce", "TikTok sales: sales_orders, sales_order_lines, products_spu, products_sku"),
-    ("procurement", "Miaoshou procurement + manual costs: procurement_accounts/products/variants, purchase_orders/lines, manual_product_costs"),
+    (
+        "integration",
+        "credentials, shops, raw_records, sync_jobs, sync_cursors, sync_issues",
+    ),
+    (
+        "commerce",
+        "TikTok sales: sales_orders, sales_order_lines, products_spu, products_sku",
+    ),
+    (
+        "procurement",
+        "Miaoshou procurement + manual costs: procurement_accounts/products/variants, purchase_orders/lines, manual_product_costs",
+    ),
     ("fulfillment", "Logistics: shipments, shipment_lines, tracking_events"),
     ("after_sales", "Returns/cancellations: cases, case_lines"),
-    ("finance", "Statements/transactions: payouts, settlement_statements, settlement_transactions, settlement_components"),
-    ("linkage", "Sales↔procurement mapping: account_links, product_links, variant_links, link_evidence, link_overrides, link_issues + effective_product_links view"),
-    ("reporting", "Profit/cost: product_cost_snapshots, product_profit_daily, shipment_tracking_summary"),
-    ("fx", "Cached exchange rates: exchange_rate_snapshots + exchange_rates (USD-base snapshot, local currency conversion — read-only, upstream quota-billed)"),
+    (
+        "finance",
+        "Statements/transactions: payouts, settlement_statements, settlement_transactions, settlement_components",
+    ),
+    (
+        "linkage",
+        "Sales↔procurement mapping: account_links, product_links, variant_links, link_evidence, link_overrides, link_issues + effective_product_links view",
+    ),
+    (
+        "reporting",
+        "Profit/cost: product_cost_snapshots, product_profit_daily, shipment_tracking_summary",
+    ),
+    (
+        "fx",
+        "Cached exchange rates: exchange_rate_snapshots + exchange_rates (USD-base snapshot, local currency conversion — read-only, upstream quota-billed)",
+    ),
     ("security", "API keys: api_keys"),
 ]
 
@@ -465,10 +487,7 @@ def get_llm_context(
                     "| schema       | domain                                                       |",
                     "| ------------ | ------------------------------------------------------------ |",
                 ]
-                + [
-                    f"| `{s}` | {dom} |"
-                    for s, dom in _SCHEMAS
-                ]
+                + [f"| `{s}` | {dom} |" for s, dom in _SCHEMAS]
                 + [
                     "",
                     "Plus 1 view: `linkage.effective_product_links` (product_links "
@@ -482,17 +501,23 @@ def get_llm_context(
         {
             "id": "cost_profit",
             "title": "Cost & profit semantics",
-            "body": _OVERVIEW_MD.split("## 5. **CRITICAL: Cost & profit semantics**")[1].split("## 6.")[0],
+            "body": _OVERVIEW_MD.split("## 5. **CRITICAL: Cost & profit semantics**")[
+                1
+            ].split("## 6.")[0],
         },
         {
             "id": "query_patterns",
             "title": "Right JOINs (template queries)",
-            "body": _OVERVIEW_MD.split("## 6. The right JOINs (template queries)")[1].split("## 7. Known pitfalls")[0],
+            "body": _OVERVIEW_MD.split("## 6. The right JOINs (template queries)")[
+                1
+            ].split("## 7. Known pitfalls")[0],
         },
         {
             "id": "pitfalls",
             "title": "Known pitfalls",
-            "body": _OVERVIEW_MD.split("## 7. Known pitfalls (read this BEFORE writing any query)")[1].split("## 8. Versioning")[0],
+            "body": _OVERVIEW_MD.split(
+                "## 7. Known pitfalls (read this BEFORE writing any query)"
+            )[1].split("## 8. Versioning")[0],
         },
         {
             "id": "versioning",
@@ -552,7 +577,9 @@ def get_llm_context(
         {
             "schema_version": "v2-1",
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "host": os.environ.get("TTS_ERP_HOST", "0.0.0.0"),  # pi-lens-ignore: no-server-bind-wildcard — JSON debug field reporting the bind host, NOT a socket bind (uvicorn binds via systemd --host ${TTS_ERP_HOST})
+            "host": os.environ.get(
+                "TTS_ERP_HOST", "0.0.0.0"
+            ),  # pi-lens-ignore: no-server-bind-wildcard — JSON debug field reporting the bind host, NOT a socket bind (uvicorn binds via systemd --host ${TTS_ERP_HOST})
             "sections": [
                 {"id": s["id"], "title": s["title"], "body": s["body"]}
                 for s in sections

@@ -18,6 +18,7 @@ Usage:
     .venv/bin/python scripts/oneoff_backfill_order_line_quantity.py        # dry-run
     .venv/bin/python scripts/oneoff_backfill_order_line_quantity.py --apply
 """
+
 from __future__ import annotations
 
 import os
@@ -27,7 +28,9 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+load_dotenv(
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+)
 
 from sqlalchemy import func, select, update  # noqa: E402
 
@@ -41,12 +44,14 @@ def main() -> int:
     sf = get_session_factory()
     with sf() as sess:  # type: Session
         total = sess.execute(
-            select(func.count()).select_from(SalesOrderLine).where(
-                SalesOrderLine.quantity.is_(None)
-            )
+            select(func.count())
+            .select_from(SalesOrderLine)
+            .where(SalesOrderLine.quantity.is_(None))
         ).scalar_one()
         with_price = sess.execute(
-            select(func.count()).select_from(SalesOrderLine).where(
+            select(func.count())
+            .select_from(SalesOrderLine)
+            .where(
                 SalesOrderLine.quantity.is_(None),
                 SalesOrderLine.unit_price.is_not(None),
             )
@@ -67,9 +72,9 @@ def main() -> int:
         ).rowcount
         sess.commit()
         left = sess.execute(
-            select(func.count()).select_from(SalesOrderLine).where(
-                SalesOrderLine.quantity.is_(None)
-            )
+            select(func.count())
+            .select_from(SalesOrderLine)
+            .where(SalesOrderLine.quantity.is_(None))
         ).scalar_one()
         print(f"已回填 {affected} 行 quantity=1；剩余 quantity IS NULL: {left}")
         return 0

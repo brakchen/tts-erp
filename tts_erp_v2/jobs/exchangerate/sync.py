@@ -85,9 +85,7 @@ def _default_fetcher() -> Fetcher:
     return fetch_standard_rates
 
 
-def latest_snapshot(
-    session: Session, base_code: str
-) -> ExchangeRateSnapshot | None:
+def latest_snapshot(session: Session, base_code: str) -> ExchangeRateSnapshot | None:
     """Newest stored snapshot for ``base_code`` (by id), or None."""
     return session.execute(
         select(ExchangeRateSnapshot)

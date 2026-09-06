@@ -16,6 +16,7 @@ The orders job is the canonical incremental sync:
 The proxy layer is mocked with a :class:`FakeProxy` that returns
 scripted responses keyed on the upstream page state.
 """
+
 # pi-lens-ignore: I001
 from __future__ import annotations
 
@@ -129,11 +130,19 @@ class FakeProxy:
         for idx, p in enumerate(self._pages):
             label = p.get("response_label")
             if label:
-                self._page_map[label] = self._pages[idx + 1] if idx + 1 < len(self._pages) else self._pages[-1]
-        self._fallback = self._pages[-1] if self._pages else {"code": 0, "data": {"orders": []}}
+                self._page_map[label] = (
+                    self._pages[idx + 1]
+                    if idx + 1 < len(self._pages)
+                    else self._pages[-1]
+                )
+        self._fallback = (
+            self._pages[-1] if self._pages else {"code": 0, "data": {"orders": []}}
+        )
         self.requests: list[dict[str, Any]] = []
 
-    def __call__(self, method: str, path: str, *, body: dict | None = None, **kw: Any) -> dict:
+    def __call__(
+        self, method: str, path: str, *, body: dict | None = None, **kw: Any
+    ) -> dict:
         self.requests.append({"method": method, "path": path, "body": body or {}})
         if body and "next_page_token" in body:
             return self._page_map.get(body["next_page_token"], self._fallback)
@@ -168,7 +177,10 @@ def test_orders_first_run_writes_raw_records_and_normalized_rows(
                                     "product_name": "TEST prod 1",
                                     "sku_name": "TEST sku 1",
                                     "quantity": 1,
-                                    "sale_price": {"amount": "12.50", "currency": "USD"},
+                                    "sale_price": {
+                                        "amount": "12.50",
+                                        "currency": "USD",
+                                    },
                                 },
                             ],
                         ),
@@ -220,13 +232,17 @@ def test_orders_first_run_writes_raw_records_and_normalized_rows(
         r.external_id
         for r in db_session.execute(
             select(RawRecord).where(
-                RawRecord.external_id.in_([
-                    "5800000000000001",
-                    "5800000000000002",
-                    "5800000000000003",
-                ])
+                RawRecord.external_id.in_(
+                    [
+                        "5800000000000001",
+                        "5800000000000002",
+                        "5800000000000003",
+                    ]
+                )
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     }
     assert raw_ids == {
         "5800000000000001",
@@ -235,15 +251,21 @@ def test_orders_first_run_writes_raw_records_and_normalized_rows(
     }
 
     # ── sales_orders: 3 rows, all upserted ─────────────────────────
-    order_rows = db_session.execute(
-        select(SalesOrder).where(
-            SalesOrder.order_id.in_([
-                "5800000000000001",
-                "5800000000000002",
-                "5800000000000003",
-            ])
+    order_rows = (
+        db_session.execute(
+            select(SalesOrder).where(
+                SalesOrder.order_id.in_(
+                    [
+                        "5800000000000001",
+                        "5800000000000002",
+                        "5800000000000003",
+                    ]
+                )
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert {o.order_id for o in order_rows} == {
         "5800000000000001",
         "5800000000000002",
@@ -253,9 +275,13 @@ def test_orders_first_run_writes_raw_records_and_normalized_rows(
     assert all(o.raw_record_id is not None for o in order_rows)
 
     # ── sales_order_lines: only the one order had lines ────────────
-    lines = db_session.execute(
-        select(SalesOrderLine).where(SalesOrderLine.external_line_id == "L1")
-    ).scalars().all()
+    lines = (
+        db_session.execute(
+            select(SalesOrderLine).where(SalesOrderLine.external_line_id == "L1")
+        )
+        .scalars()
+        .all()
+    )
     assert len(lines) == 1
     assert lines[0].external_line_id == "L1"
     assert lines[0].external_product_id_snapshot == "P1"
@@ -298,7 +324,10 @@ def test_orders_line_without_quantity_defaults_to_one(db_session) -> None:
                                     "sku_name": "TEST sku 1",
                                     # NOTE: TikTok 202309 does not
                                     # include ``quantity`` on the line
-                                    "sale_price": {"amount": "12.50", "currency": "USD"},
+                                    "sale_price": {
+                                        "amount": "12.50",
+                                        "currency": "USD",
+                                    },
                                 },
                                 {
                                     "line_id": "L_QTY3",
@@ -307,7 +336,10 @@ def test_orders_line_without_quantity_defaults_to_one(db_session) -> None:
                                     "product_name": "TEST prod 1",
                                     "sku_name": "TEST sku 1",
                                     "quantity": 3,
-                                    "sale_price": {"amount": "12.50", "currency": "USD"},
+                                    "sale_price": {
+                                        "amount": "12.50",
+                                        "currency": "USD",
+                                    },
                                 },
                             ],
                         ),
@@ -331,11 +363,15 @@ def test_orders_line_without_quantity_defaults_to_one(db_session) -> None:
     assert sync_row.status == "succeeded"
     assert result.rows_failed == 0
 
-    lines = db_session.execute(
-        select(SalesOrderLine).where(
-            SalesOrderLine.external_line_id.in_(["L_NOQTY", "L_QTY3"])
+    lines = (
+        db_session.execute(
+            select(SalesOrderLine).where(
+                SalesOrderLine.external_line_id.in_(["L_NOQTY", "L_QTY3"])
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     by_id = {ln.external_line_id: ln for ln in lines}
     assert set(by_id) == {"L_NOQTY", "L_QTY3"}
     # Missing upstream quantity → exactly one unit per line (per-piece model).
@@ -434,10 +470,10 @@ def test_orders_re_upsert_is_idempotent(db_session) -> None:
     )
     first_count = len(
         db_session.execute(
-            select(SalesOrder).where(
-                SalesOrder.order_id == "5800000000000099"
-            )
-        ).scalars().all()
+            select(SalesOrder).where(SalesOrder.order_id == "5800000000000099")
+        )
+        .scalars()
+        .all()
     )
     assert first_count == 1
 
@@ -465,13 +501,15 @@ def test_orders_re_upsert_is_idempotent(db_session) -> None:
     # No new row, just an update.
     second_count = len(
         db_session.execute(
-            select(SalesOrder).where(
-                SalesOrder.order_id == "5800000000000099"
-            )
-        ).scalars().all()
+            select(SalesOrder).where(SalesOrder.order_id == "5800000000000099")
+        )
+        .scalars()
+        .all()
     )
     assert second_count == 1
-    assert result.rows_inserted == 1  # upsert counts as insert for JobResult bookkeeping
+    assert (
+        result.rows_inserted == 1
+    )  # upsert counts as insert for JobResult bookkeeping
 
 
 # ─── Parse failures ────────────────────────────────────────────────
@@ -524,18 +562,24 @@ def test_orders_parse_failure_writes_sync_issue_continues(db_session) -> None:
     assert result.rows_inserted == 1
 
     # sync_issues: 1 row, issue_type=PARSE_ERROR (or similar)
-    issues = db_session.execute(
-        select(SyncIssue).where(SyncIssue.job_name == "tiktok.orders")
-    ).scalars().all()
+    issues = (
+        db_session.execute(
+            select(SyncIssue).where(SyncIssue.job_name == "tiktok.orders")
+        )
+        .scalars()
+        .all()
+    )
     assert len(issues) == 1
     assert issues[0].job_name == "tiktok.orders"
     assert issues[0].issue_type == "PARSE_ERROR"
     # The valid order still landed
-    valid_orders = db_session.execute(
-        select(SalesOrder).where(
-            SalesOrder.order_id == "5800000000000010"
+    valid_orders = (
+        db_session.execute(
+            select(SalesOrder).where(SalesOrder.order_id == "5800000000000010")
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(valid_orders) == 1
     assert valid_orders[0].order_id == "5800000000000010"
 
@@ -570,12 +614,16 @@ def test_orders_non_zero_upstream_code_fails_sync_job(db_session) -> None:
 
     # Filter by credential_id — prod has 649 tiktok.orders SyncJobs that
     # would otherwise inflate the count.
-    rows = db_session.execute(
-        select(SyncJob).where(
-            SyncJob.job_name == "tiktok.orders",
-            SyncJob.credential_id == account.credential_id,
+    rows = (
+        db_session.execute(
+            select(SyncJob).where(
+                SyncJob.job_name == "tiktok.orders",
+                SyncJob.credential_id == account.credential_id,
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
     assert rows[0].status == "failed"
     assert "105005" in (rows[0].error_message or "")

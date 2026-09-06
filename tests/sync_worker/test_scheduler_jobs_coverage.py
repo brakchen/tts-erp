@@ -184,7 +184,9 @@ def test_make_executor_for_tiktok_calls_run_tiktok_job(monkeypatch) -> None:
     """A spec with is_tiktok=True → callable that delegates to _run_tiktok_job."""
     seen: dict = {}
     monkeypatch.setattr(
-        scheduler, "_run_tiktok_job", lambda spec, sf: seen.setdefault("called", (spec, sf))
+        scheduler,
+        "_run_tiktok_job",
+        lambda spec, sf: seen.setdefault("called", (spec, sf)),
     )
 
     spec = JobSpec(
@@ -203,7 +205,9 @@ def test_make_executor_for_system_calls_run_system_job(monkeypatch) -> None:
     """spec.is_tiktok=False → callable that delegates to _run_system_job."""
     seen: dict = {}
     monkeypatch.setattr(
-        scheduler, "_run_system_job", lambda spec, sf: seen.setdefault("called", (spec, sf))
+        scheduler,
+        "_run_system_job",
+        lambda spec, sf: seen.setdefault("called", (spec, sf)),
     )
 
     spec = JobSpec(
@@ -246,7 +250,9 @@ def _seed_credentials_for_enum(
         # FK is ON DELETE SET NULL, and (platform, shop_id) is unique).
         # pi-lens-ignore: python-sql-injection — bound :e param, literal SQL
         session.execute(
-            text("DELETE FROM commerce.shops WHERE shop_id = :e AND platform = 'tiktok'"),
+            text(
+                "DELETE FROM commerce.shops WHERE shop_id = :e AND platform = 'tiktok'"
+            ),
             {"e": external_id},
         )
         # pi-lens-ignore: python-sql-injection — bound :e param, literal SQL
@@ -280,7 +286,9 @@ def _cleanup_credentials(session_factory, *, external_id: str) -> None:
     try:
         # pi-lens-ignore: python-sql-injection — bound :e param, literal SQL
         session.execute(
-            text("DELETE FROM commerce.shops WHERE shop_id = :e AND platform = 'tiktok'"),
+            text(
+                "DELETE FROM commerce.shops WHERE shop_id = :e AND platform = 'tiktok'"
+            ),
             {"e": external_id},
         )
         # pi-lens-ignore: python-sql-injection — bound :e param, literal SQL
@@ -390,9 +398,7 @@ def test_enumerate_tiktok_shops_skips_prefix_and_orphan_credentials() -> None:
             )
             # pi-lens-ignore: python-sql-injection — bound :k/:m/:t params, literal SQL
             session.execute(
-                text(
-                    "DELETE FROM commerce.shops WHERE shop_id IN (:k, :m, :t)"
-                ),
+                text("DELETE FROM commerce.shops WHERE shop_id IN (:k, :m, :t)"),
                 {"k": keep_id, "m": skip_mock, "t": skip_test},
             )
             session.commit()
@@ -467,9 +473,7 @@ def test_run_tiktok_job_skips_when_no_shops(monkeypatch: pytest.MonkeyPatch) -> 
     """
     factory = MagicMock()
     factory.return_value = MagicMock()
-    monkeypatch.setattr(
-        scheduler, "_enumerate_tiktok_shops_in_factory", lambda _sf: []
-    )
+    monkeypatch.setattr(scheduler, "_enumerate_tiktok_shops_in_factory", lambda _sf: [])
 
     run_called = {"n": 0}
 
@@ -508,9 +512,7 @@ def test_run_tiktok_job_runs_per_shop_and_closes_session(
     )
 
     mod = MagicMock()
-    mod.run.return_value = MagicMock(
-        rows_total=5, rows_inserted=3, rows_failed=0
-    )
+    mod.run.return_value = MagicMock(rows_total=5, rows_inserted=3, rows_failed=0)
     monkeypatch.setattr(scheduler.importlib, "import_module", lambda _p: mod)
 
     # build_proxy_call returns a sentinel closure; capture the shop_id arg.

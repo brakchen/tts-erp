@@ -135,8 +135,7 @@ def _wipe_test_rows(db_engine) -> None:
         # pi-lens-ignore opengrep.sqlalchemy.sql-injection: static DELETE, bound LIKE, no user input
         conn.execute(
             _text(
-                "DELETE FROM fx.exchange_rate_snapshots "
-                "WHERE base_code LIKE 'TEST_%'"
+                "DELETE FROM fx.exchange_rate_snapshots WHERE base_code LIKE 'TEST_%'"
             )
         )
         conn.execute(
@@ -149,15 +148,9 @@ def _wipe_test_rows(db_engine) -> None:
             )
         )
         conn.execute(
-            delete(products_spu_tbl).where(
-                products_spu_tbl.c.spu_id.like("TEST_%")
-            )
+            delete(products_spu_tbl).where(products_spu_tbl.c.spu_id.like("TEST_%"))
         )
-        conn.execute(
-            delete(shops_tbl).where(
-                shops_tbl.c.shop_id.like("TEST_%")
-            )
-        )
+        conn.execute(delete(shops_tbl).where(shops_tbl.c.shop_id.like("TEST_%")))
         conn.execute(delete(api_keys_tbl).where(api_keys_tbl.c.name.like("TEST_%")))
 
 
