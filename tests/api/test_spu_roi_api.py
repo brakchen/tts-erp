@@ -901,15 +901,16 @@ def test_spu_roi_totals_cross_spu_dedup_and_gmv_split(
 
 
 def _seed_cod_and_unpaid_cancelled(sess) -> int:
-    """状态口径回归场景(2026-09-06):COD 在途单 + 未收款取消单。
+    """全链状态口径回归场景(2026-09-06):COD 在途单 + 未收款取消单。
 
-    - TEST_ROI_SPU_COD: 已收款有效单 1(DELIVERED,paid,3×$10=$30)
+    - TEST_ROI_SPU_COD: 有效单(DELIVERED,paid,3×$10=$30)
     - COD 在途单(IN_TRANSIT,paid_at=NULL,行 2×$10=$20) → 算"有效订单"
     - 未收款取消单(CANCELLED,paid_at=NULL,行 1×$10=$10) → 算"取消单"
 
-    期望 totals(order 状态口径):order_count=2(有效已付+COD在途)、
-    cancelled_order_count=1(未收款取消也计)、total_orders=3、gmv=60
-    (全部原始行金额 30+20+10);而行级 items.sales 仍只算已收款 30。
+    2026-09-06 全链状态口径:行级与 totals 都不再卡 paid_at ——
+    order_count=2(有效已付+COD在途)、cancelled=1、total=3;
+    sales=50(含在途COD 20,不含取消)、gmv=60(含取消原额);
+    派生 net_profit/units_sold 等也随行级 sales 走状态口径。
     """
     seller = "TEST_SELLER_COD"
     shop_pk = _seed_shop(sess, seller)
@@ -941,10 +942,11 @@ def _seed_cod_and_unpaid_cancelled(sess) -> int:
 def test_spu_roi_totals_order_status_scope_cod_shop(
     api_client, readonly_key, db_engine
 ):
-    """2026-09-06:结余带单量/GMV 改按订单状态口径(COD 店下单即算单)。
+    """2026-09-06:全链状态口径(COD 店下单即算单)。
 
-    行级金额(会计)仍按已收款;单量/GMV(订单管理口径)不看 paid_at:
-    COD 在途/未收款取消都计入对应桶,GMV = 全部原始行金额。
+    行级与 totals 一致:销售/件数/单量不看 paid_at(COD 在途计入有效、
+    未收款取消计入取消),GMV=全部原始行金额。金额主指标(净利润/ROI)
+    跟随行级 sales 同步为状态口径。
     """
     with Session(db_engine) as sess:
         _seed(sess, _seed_cod_and_unpaid_cancelled)
@@ -957,14 +959,22 @@ def test_spu_roi_totals_order_status_scope_cod_shop(
     body = r.json()
     assert body["total"] == 1
     item = body["items"][0]
-    # 行级 = 会计口径不变: 有效销售订单数/金额只含已收款单
-    assert item["order_count"] == 1
-    assert item["sales"] == "30.0000"
+    # 行级也按状态口径(2026-09-06 全链):COD 在途算有效订单/件数/销售
+    assert item["order_count"] == 2, "行级有效订单数含 COD 在途单"
+    assert item["units_sold"] == 5  # 3(已收) + 2(在途)
+    assert item["sales"] == "50.0000"  # 30 + 20,含在途 COD
+    assert item["refund_net_amount"] == "0.0000"
+    # 派生:净现金 50 − COGS_all(5×4.4322=22.161) − spend 10 − fee(50×0.1156=5.78)
+    assert item["platform_fee"] == m4(Decimal(50) * FEE_BASELINE)  # 5.7800
+    assert item["net_profit"] == m4(
+        Decimal(50) - Decimal(5) * K1_CNY * CNY_USD - Decimal(10)
+        - Decimal(50) * FEE_BASELINE
+    )
     t = body["totals"]
-    assert t["order_count"] == 2, "COD 在途单应计入有效订单(状态口径)"
+    assert t["order_count"] == 2
     assert t["cancelled_order_count"] == 1, "未收款取消单应计入取消单(状态口径)"
     assert t["total_orders"] == 3
-    assert t["sales"] == "30.0000"  # sales 仍会计口径
+    assert t["sales"] == "50.0000"  # totals.sales 现在与行级一致 = 状态口径
     assert t["gmv"] == "60.0000", "GMV=全部订单原始行金额(含在途COD与取消原额)"
 
 
