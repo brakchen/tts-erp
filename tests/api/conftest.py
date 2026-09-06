@@ -132,6 +132,7 @@ def _wipe_test_rows(db_engine) -> None:
         # fx.* exchange-rate cache (2026-09-06): TEST_-prefixed base codes
         # only — the snapshot delete cascades to fx.exchange_rates rows.
         # pi-lens-ignore: python-sql-injection — literal SQL, bound LIKE param only
+        # pi-lens-ignore opengrep.sqlalchemy.sql-injection: static DELETE, bound LIKE, no user input
         conn.execute(
             _text(
                 "DELETE FROM fx.exchange_rate_snapshots "
