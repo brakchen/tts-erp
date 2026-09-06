@@ -783,7 +783,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 - 顶部提示行 + 结余带随筛选实时刷新；每页 100（上限 500 走 v2 分页约定）。
 - 移动端（2026-09-06 重构）：布局走 Bootstrap 5.3.8 栅格/工具类 —— 结余带 xs 2 列 →
   lg 7 列降密度、工具栏 flex-wrap 纵向堆叠、列开关折叠进 `<details>`；表格
-  `.table-responsive` + `max-height` 双轴滚动框（表头在框内吸顶、首列横滚时吸左，
+  `.table-responsive` + `max-height` 双轴滚动框（表头在框内吸顶、首列横向溢出时吸左，
   不限断点），小屏按断点 nth-child 裁掉次要对比列（广告数/平台GMV/ROI₀/件数，
   576–991 裁 广告数/ROI₀）降低横滚量；列开关信息列（§7.5）全尺寸可用。
 
