@@ -57,8 +57,13 @@ _SessionLocal: sessionmaker[Session] | None = None
 # SQLAlchemy 8 线程 139 qps < 单线程 371 qps = GIL 后池锁排队）。
 #
 # 决策：
-# - pool_pre_ping=False：去掉每请求一次往返；容器重启丢连接的残余风险由
-#   pool_recycle=300 兜（长连接周期性换新），重启瞬间最多一个瞬时 500。
+# - pool_pre_ping=False：去掉每请求一次往返。残余风险（review Finding-1
+#   修正表述）：PG 容器重启瞬间**所有**池连接全死（recycle=300 只按创建时
+#   长静默换新，不预检 <300s 的连接）→ 每条死连接在 checkout 后第一次
+#   execute 才暴露，恰好一次失败/连接（API+sync 两池合计至多 ~pool size 个
+#   请求），随后该连接被池判死丢弃并重建，数分钟内自愈；有客户端重试兜底。
+#   若未来要彻底消除：只对 sync-worker 进程开 pool_pre_ping=True（它对
+#   故障代价最高），API 保持 off。
 # - size 10 / overflow 20（单进程 30）：API + sync-worker 两进程各 30 = 60，
 #   PG max_connections=100 留 40 头；09-05 那种 15 连接被占满的耗尽点后移。
 # - pool_timeout 10s（原 30s）：真到耗尽时快速失败（503/错误），不再让请求

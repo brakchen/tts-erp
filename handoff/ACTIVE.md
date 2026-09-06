@@ -16,6 +16,7 @@
 | fix/fx-test-isolation | fx 测试脱敏：fx.sync 每日真实 USD snapshot 入库后，假设 fx 表无真实数据的 fx/rates/sync/api 测试被环境性破坏（HEAD 复现），改为互斥 base_code + 夹具内清理，不含对生产行的假设 | 本 session | .worktrees/fx-test-isolation / fix/fx-test-isolation | tests/fx/*.py、tests/api/test_fx_api.py、tests/conftest.py（如涉及共享夹具） | draft | 2026-09-06T07:14Z |
 | feat/cursor-hasdata-cache | cursor has-data 10min 进程内存缓存：(seller,adv,campaign)→(endpoint,day) 集合；get_cursor 命中免 DB、post_dumps write-through；无 campaignId 请求不缓存 | 本 session（master WT 直改） | master（无分支，原子 commit） | tts_erp_v2/analytics/has_data_cache.py(新)、repository.py、tts_erp_v2/api/v2/analytics.py、tests/api/conftest.py、tests/analytics/test_has_data_cache.py(新)、tests/api/test_analytics_v2_cursor_cache.py(新)、tech-doc/analytics/dump-architecture.md | merged (649de06) | 2026-09-06T10:45Z |
 | feat/db-pool-sizing | QueuePool 重配：pre_ping off（改 pool_recycle=300）+ size 10/overflow 20 + pool_timeout 10s（09-05 池耗尽 503 的 fast-fail） | 本 session（master WT 直改） | master（无分支，原子 commit） | tts_erp_v2/db/base.py、handoff/ACTIVE.md | merged | 2026-09-06T11:20Z |
+| fix/review-findings-cache-pool | review（4241295..HEAD）发现修复：Finding-1 db/base.py 重启风险注释低估；Finding-2/3 has_data_cache.py docstring 补 no-DELETE 不变量红线 + 单进程假设警告 | 本 session（master WT 直改） | master（无分支，原子 commit） | tts_erp_v2/db/base.py、tts_erp_v2/analytics/has_data_cache.py、handoff/ACTIVE.md | merged | 2026-09-06T12:10Z |
 
 <!-- 新 lane 示例（复制改）：
 | lane_id | 主题 | owner(session) | .worktrees/<slug> / branch | 文件列表 | draft | <UTC> |

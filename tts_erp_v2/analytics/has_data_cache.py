@@ -23,6 +23,16 @@ TTL 由 loaded_at 单调钟判定（10 min）；桶只增不删、惰性驱逐 +
 写路径 mark_present 在桶未加载时 no-op（下次 GET 全量重载，新行已落库，
 结果必对）——**禁止**在未加载桶上建「半桶」。
 
+⚠️ 依赖不变量（红线，review Finding-2/3）：
+- **ad_raw 只 upsert 不删** 是本缓存无 stale-true 的 load-bearing 前提。任何
+  未来对 ad_raw 的手工/运维 DELETE（合规删除、误操作、临时清数）会造成最长
+  10min stale-true → 插件跳过本应抓取的 day。setup/analytics-sync.md 已写
+  「ad_raw 永久保留」，动它之前先确认本缓存与插件语义。
+- **uvicorn 单进程**（ExecStart 无 --workers）是 load-bearing 假设：多 worker
+  下 mark_present 只更新本 worker 桶 → 跨 worker stale-false 至多 TTL 窗口
+  （仍无 stale-true、自愈），但「命中免 DB」收益打折。加多 worker 前需改
+  共享缓存或接受该窗口。
+
 Tests: tests/analytics/test_has_data_cache.py（假时钟单测）+
 tests/api/test_analytics_v2_cursor_cache.py（端点集成，_isolate_state 里
 reset() 保证测试隔离）。
