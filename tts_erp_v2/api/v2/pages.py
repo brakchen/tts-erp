@@ -652,6 +652,10 @@ _PAGE_HTML = """<!doctype html>
           <option>100</option>
         </select>
       </label>
+      <label class="op-pp">
+        <span>状态</span>
+        <select id="filter-status" class="op-input op-input-pp" aria-label="按状态过滤"></select>
+      </label>
       <span class="op-toolbar-spacer" aria-hidden="true"></span>
       <button type="button" class="op-btn-primary" data-act="submit-all" aria-label="一次性提交所有已编辑成本的行">
         提交全部

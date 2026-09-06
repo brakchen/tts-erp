@@ -12,6 +12,39 @@
   var TAB_ALL = "all";
   var DEFAULT_LIMIT = 50;
 
+  // TikTok products_spu.status → operator-facing Chinese label
+  // (2026-09-06 status column). Centralised so the wording is one edit
+  // away. Only the enum values seen in production are mapped; unknown
+  // values fall through to the raw code.
+  var STATUS_LABELS = {
+    ACTIVATE: "商家",
+    DELETED: "下架",
+    SELLER_DEACTIVATED: "停售",
+  };
+  // Filter options for the status dropdown: '' = all, otherwise the raw
+  // upstream code (the backend channel-products filter expects the raw
+  // value, not the Chinese label). Populated into #filter-status at boot
+  // so the labels live in exactly one place (STATUS_LABELS).
+  var STATUS_ORDER = ["ACTIVATE", "DELETED", "SELLER_DEACTIVATED"];
+  function statusLabel(raw) {
+    return STATUS_LABELS[raw] || raw || "—";
+  }
+  function populateStatusFilter(select) {
+    if (!select) return;
+    var frag = document.createDocumentFragment();
+    var all = document.createElement("option");
+    all.value = "";
+    all.textContent = "全部状态";
+    frag.appendChild(all);
+    STATUS_ORDER.forEach((code) => {
+      var opt = document.createElement("option");
+      opt.value = code;
+      opt.textContent = STATUS_LABELS[code];
+      frag.appendChild(opt);
+    });
+    select.appendChild(frag);
+  }
+
   // Public path prefix: "/tts" behind the NGINX reverse proxy, "" when
   // hitting :9877 directly. Derived from the page URL so every API call
   // and redirect works under both. Same trick as /v2/auth/login's JS.
@@ -210,6 +243,9 @@
   // desc→(reload). Default = updated_at desc (most-recently-changed
   // first is the useful browsing order for a cost-editing session).
   var catalogueSort = { key: "updated_at", order: "desc" };
+  // Status dropdown filter (2026-09-06): '' = all statuses, otherwise
+  // the raw upstream code forwarded as ?status= on channel-products.
+  var catalogueStatus = "";
 
   function setActiveTab(name) {
     currentTab = name;
@@ -256,7 +292,7 @@
     all:
       '<tr><th scope="col" class="op-th op-th-sku">SKU</th>' +
       '<th scope="col" class="op-th op-th-title">标题</th>' +
-      '<th scope="col" class="op-th op-th-sku">状态</th>' +
+      '<th scope="col" class="op-th op-th-sku op-th-sortable" data-sort="status" title="按状态排序">状态<span class="op-sort-arrow"></span></th>' +
       '<th scope="col" class="op-th op-th-cost op-th-sortable" data-sort="unit_cost" title="按成本价排序">成本<span class="op-sort-arrow"></span></th>' +
       '<th scope="col" class="op-th op-th-sku op-th-sortable" data-sort="created_at" title="按创建时间排序">创建<span class="op-sort-arrow"></span></th>' +
       '<th scope="col" class="op-th op-th-sku op-th-sortable" data-sort="updated_at" title="按更新时间排序">更新<span class="op-sort-arrow"></span></th>' +
@@ -645,6 +681,7 @@
       encodeURIComponent(catalogueSort.key) +
       "&order=" +
       encodeURIComponent(catalogueSort.order);
+    if (catalogueStatus) url += "&status=" + encodeURIComponent(catalogueStatus);
     if (acct) url += "&shop_pk=" + acct;
     api(url)
       .then((r) => {
@@ -713,7 +750,7 @@
           esc(it.title || "") +
           "</td>" +
           '<td class="op-td-sku" data-label="状态">' +
-          esc(it.status || "—") +
+          esc(statusLabel(it.status)) +
           "</td>" +
           '<td class="op-td-cost" data-label="成本">' +
           costCell +
@@ -853,6 +890,16 @@
       submitAll.addEventListener("click", () => {
         if (currentTab === TAB_ALL) submitAllEdited();
       });
+    var statusFilter = $("#filter-status");
+    if (statusFilter) {
+      // Populate the dropdown from STATUS_LABELS so mapping + options
+      // stay in one place; then bind change → reload all tab.
+      populateStatusFilter(statusFilter);
+      statusFilter.addEventListener("change", () => {
+        catalogueStatus = statusFilter.value;
+        if (currentTab === TAB_ALL) loadAll();
+      });
+    }
     loadShops()
       .then(loadMe)
       .then(() => {
