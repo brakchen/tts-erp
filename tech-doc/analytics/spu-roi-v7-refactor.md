@@ -304,7 +304,7 @@ meta 变更：
 | **订单·物流** | 该 SPU 窗口内订单列表：订单号 / 状态 / 件数 / 行金额 / paid_at / **is_settled** / **已到海外(38301)✓** / 全损标记；每行可再展开 **tracking 时间线**（`tracking_events` 按事件时间排序，action_code + 描述）；CANCELLED 单标红、全损单标 ⚠ | `commerce.sales_orders/lines` + `fulfillment.shipments/tracking_events` |
 | **结算** | 已结算订单的**组件拆分明细**：每单一张小表（GROSS_SALES / SELLER_DISCOUNT / PLATFORM_COMMISSION / AFFILIATE_COMMISSION / SHIPPING_FEE / ACTUAL_SHIPPING_FEE / PLATFORM_DISCOUNT / CUSTOMER_REFUND / FEE / **SETTLEMENT**），VND 原值 + USD 换算；statement 时间；**SPU 分摊比例**（line_gmv/order_gmv）；未结算订单不进明细，tab 底部一行汇总「未结算 N 单，估算净收入 $X（基线 r̂ ×(1−退货率)）」（行字段计算，用户拍板 2026-09-07） | `finance.settlement_transactions/components` |
 | **售后** | case 明细（**order_id 关联**（可跳订单 tab 对号）/ 类型/状态/退款金额/原因 code+text/时间），未完结标黄 | `after_sales.cases/case_lines`（P1 原规划） |
-| **广告** | campaign×SPU 行（campaign_id/消耗/出单/窗口）；campaign **名称是数据缺口**（三个已同步 endpoint 的 response 均无名称字段，1368 行实测）——端点预留 `campaign_name`（现恒 null），需扩展端补采集（见 §6.4） | `analytics.ad_product_links`（P1 原规划） |
+| **广告** | campaign×SPU 行（campaign_id/消耗/出单/窗口；无名称字段——同步数据不含，已拍板不追） | `analytics.ad_product_links`（P1 原规划） |
 
 **tab 结构统一为「顶部指标汇总区 + 下方明细记录」**（D8：主表移出的指标
 按域归位，不再做隐藏列）：
@@ -371,9 +371,7 @@ SQL 简单独立；面板一打开就全量拉四个域反而浪费。代价是�
 
 // GET …/ads（无窗口参数）
 { "spu_pk": 1448,
-  "ads": [{ "campaign_id": "…", "campaign_name": null,  // 数据缺口：
-                                        // 现有同步数据无名称，预留字段
-    "spend": "…", "orders": 12,
+  "ads": [{ "campaign_id": "…", "spend": "…", "orders": 12,
     "first_day": "…", "last_day": "…" }],
   "meta": {…} }
 ```
@@ -386,18 +384,24 @@ SQL 简单独立；面板一打开就全量拉四个域反而浪费。代价是�
   tracking / settlement / cases 随订单走，不单独裁剪；`ads` 无窗口（§4.5 广告全窗口）。
 - spu_pk 不存在 → 404；鉴权沿用 readonly 角色矩阵。
 
-### 6.4 后续展示 backlog（本期不做，仅登记——见 todo）
+### 6.4 后续展示 backlog（2026-09-07 取舍完毕）
 
-dashboard §3.3 P2 原规划 + 本次讨论新增候选：
+**入选**（主重构后第一批迭代，数据均现成）：
 
-- 退款原因聚合（cases.reason_code 堆叠 → 品控反推）
-- 秒拍秒退预警（paid_at → 取消/退款完成 < 阈值占比）
-- 退货阶段分布（发货前取消 / 发货后退款 / 妥投后退货三类量化）
-- 退货运费承担（ACTUAL_RETURN_SHIPPING_FEE 入净利，随 finance 数据完善）
-- 结算周期对账视图（按 statement 周期 × SPU 交叉表）
-- 利润时间趋势（按 VN 自然日的净利/ROI 曲线，复用 v3 区间聚合思路）
-- **campaign 名称采集**（数据缺口，需 Chrome 扩展侧在 campaign 相关接口/页面
-  带上名称字段后回填；端点契约已预留 `campaign_name`）
+1. 退款原因聚合（cases.reason_code 堆叠 → 品控反推）
+2. 秒拍秒退预警（paid_at → 取消/退款完成 < 阈值占比）
+3. 退货阶段分布（发货前取消 / 发货后退款 / 妥投后退货三类量化）
+4. 结算周期对账视图（按 statement 周期 × SPU 交叉表）
+5. 退货运费承担（ACTUAL_RETURN_SHIPPING_FEE 入净利）——**覆盖率已验证
+   （2026-09-07）**：payload 键 100% 传输（638/638 显式携带）；零值落库后
+   「显式 0 = 平台未收」语义成立；实际非零仅 5 笔（合计 −90,300 VND ≈
+   −$3.5，对照 26 个完结退货 case）——不是缺数，是大多退货平台没收运费。
+   做进净利公式即可（影响噪声级），不必单独成列。
+
+**放弃（2026-09-07 用户拍板）**：
+
+- ~~利润时间趋势（VN 自然日净利/ROI 曲线）~~——不需要
+- ~~campaign 名称采集~~——没有名称就算了；端点契约不预留 `campaign_name`
 
 ## 7. 测试方案（TDD）
 
