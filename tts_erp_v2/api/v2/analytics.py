@@ -19,6 +19,11 @@
   一行（这是 audit → 日志后唯一会"丢"的信息：成功请求的 records
   计数,现在落在日志而非 DB 行）。
 
+2026-09-07 v3 range-aggregate（tech-doc/analytics/range-aggregate-history-sync.md）：
+- /cursor 双模式：v3 coverage（kind+campaignId → live 行状态）/ legacy has-data
+- /dumps 单 dump 支持 kind=history/today（live 单行原地 upsert）+ v2 daily 兼容
+- 新增 capturedAt 单调守卫（status: stale_ignored）与 ad_sync_audit 元数据审计
+
 Handler 结构说明：
 - ``get_cursor`` / ``post_dumps`` 都是同步 def —— v2 惯例（同 commerce/
   reporting）,FastAPI 自动丢线程池。
@@ -46,13 +51,16 @@ from sqlalchemy.orm import Session
 
 from tts_erp_v2.analytics import has_data_cache
 from tts_erp_v2.analytics.domain import (
+    KIND_DAILY,
+    KIND_TODAY,
+    LIVE_KINDS,
     DumpPayload,
     HasDataResult,
 )
 from tts_erp_v2.analytics.repository import (
     STORAGE_KEY_BY_PATH,
     has_data,
-    load_campaign_pairs,
+    load_campaign_live_rows,
     upsert_dump,
 )
 from tts_erp_v2.api.deps import get_session
@@ -62,8 +70,8 @@ from tts_erp_v2.fx.rates import load_rate_map
 
 # ─── Config ───────────────────────────────────────────────────────────
 
-PROTOCOL_VERSION = 2
-SUPPORTED_PROTOCOL_VERSIONS = {1, 2}
+PROTOCOL_VERSION = 3
+SUPPORTED_PROTOCOL_VERSIONS = {1, 2, 3}
 PROTOCOL_VERSION_HEADER = "X-Protocol-Version"
 MAX_BODY_BYTES = 2 * 1024 * 1024  # 2 MB per protocol §5
 MAX_RESPONSE_DATA_BYTES = 256 * 1024  # cap individual response_data JSON
@@ -203,7 +211,12 @@ class DumpBodyIn(BaseModel):
 
     endpoint: str = Field(min_length=1, max_length=512)
     method: str = Field(min_length=1, max_length=16)
-    day: date
+    # v2：day = 单日（daily 行的 day_start=day_end=day）。
+    # v3：kind + dayStart/dayEnd 定义 live 区间；day 保留为兼容冗余（= dayEnd）。
+    day: date | None = None
+    dayStart: date | None = None
+    dayEnd: date | None = None
+    kind: str | None = Field(default=None, max_length=16)
     campaignId: str = Field(min_length=1, max_length=128)
     request: dict[str, Any]
     response: dict[str, Any]
@@ -247,7 +260,7 @@ async def _raw_body(request: Request) -> bytes:
     return await request.body()
 
 
-# ─── Cursor endpoint (has-data 模式) ──────────────────────────────
+# ─── Cursor endpoint (has-data 模式 + v3 coverage 模式) ─────────────
 
 
 def _cursor_ok(
@@ -259,7 +272,7 @@ def _cursor_ok(
     has_data: bool,
     campaign_id: str | None,
 ) -> JSONResponse:
-    """200 envelope 唯一构造点(缓存命中/DB 回源两条路径共用,body 恒同形)。"""
+    """200 envelope 唯一构造点(legacy has-data 模式;body 恒同形)。"""
     response_data: dict[str, object] = {
         "day": day_iso,
         "endpoint": endpoint,
@@ -278,32 +291,79 @@ def _cursor_ok(
     )
 
 
+def _coverage_ok(
+    *,
+    request_id: str,
+    endpoint: str,
+    storage_key_value: str,
+    kind: str,
+    has_row: bool,
+    campaign_id: str | None = None,
+    day_start_iso: str | None = None,
+    day_end_iso: str | None = None,
+    captured_at_iso: str | None = None,
+) -> JSONResponse:
+    """200 envelope（v3 coverage 模式）: live 行状态 + 区间 + capturedAt。"""
+    response_data: dict[str, object] = {
+        "endpoint": endpoint,
+        "storageKey": storage_key_value,
+        "kind": kind,
+        "hasRow": has_row,
+    }
+    if campaign_id is not None:
+        response_data["campaignId"] = campaign_id
+    if day_start_iso is not None:
+        response_data["dayStart"] = day_start_iso
+    if day_end_iso is not None:
+        response_data["dayEnd"] = day_end_iso
+    if captured_at_iso is not None:
+        response_data["capturedAt"] = captured_at_iso
+    return JSONResponse(
+        status_code=200,
+        content={
+            "code": 0,
+            "requestId": request_id,
+            "data": response_data,
+        },
+    )
+
+
 @router.get("/cursor")
 def get_cursor(
     request: Request,
     sellerId: str = Query(min_length=1, max_length=128),
     advertiserId: str = Query(min_length=1, max_length=128),
     endpoint: str = Query(min_length=1, max_length=512),
-    day: date = Query(...),  # noqa: B008 — FastAPI Query default 惯例
     campaignId: str | None = Query(default=None, max_length=128),
+    # v3 coverage 模式参数（带 kind 时启用）
+    kind: str | None = Query(default=None, max_length=16),
+    dayStart: date | None = Query(default=None),  # noqa: B008
+    dayEnd: date | None = Query(default=None),  # noqa: B008
+    # legacy has-data 模式参数（无 kind 时按 day 单日查）
+    day: date | None = Query(default=None),  # noqa: B008
 ) -> JSONResponse:
-    """has-data 检查:这个 (scope, endpoint, day[, campaignId]) 有没有数据。
+    """/cursor 双模式：
 
-    Plugin 端用此做防 TikTok 风控的预检闸,hasData=true → 跳过该天抓取。
-    cursor 协议 work-list 模式 (items / nextRequiredDay / pageSize / cursor
-    / timezone) 全部删除 —— tech-doc/analytics/dump-architecture.md D3。
+    - v3 coverage（kind ∈ history/today，需带 campaignId）：返回该
+      (scope, endpoint, campaign) 的 live 行状态 {kind, hasRow, dayStart,
+      dayEnd, capturedAt}。插件据此决策：无行 / day_start≠S / day_end<T-1
+      → 抓取整段；精确覆盖 → 跳过（防重复全量历史）。
+    - legacy has-data（无 kind + day）：旧 v2 插件「这个 (scope, endpoint,
+      day[, campaignId]) 有没有数据」。覆盖语义含 live 区间（迁移期 history
+      区间覆盖历史日 → 返回 true，旧插件不再重复补拉）。
 
-    2026-09-06 缓存(has_data_cache.py,设计见 dump-architecture.md「cursor
-    has-data 缓存」):campaign-scoped 请求先查内存 (endpoint, day) 集合 ——
-    命中不碰 DB/session;miss 才按需开 session 回源灌桶。无 campaignId 请求
-    (scope 级任意行存在性,~60/天)不缓存,走 has_data 原 EXISTS 路径。
+    2026-09-07 缓存(has_data_cache.py)只跟踪 live 行（v3 coverage 用）：
+    campaign-scoped 先查内存 live 行集 —— 命中不碰 DB/session;miss 才按需开
+    session 回源灌桶。legacy has-data 路径（无 campaignId 或旧 v2 day 查询）
+    直接走 DB（低频 / 过渡期）。
     """
     request_id = _request_id_from_headers(request)
     key_prefix = _key_prefix(request)
-    day_iso = day.isoformat()
     audit_path = (
         f"{_PATH_CURSOR}?sellerId={sellerId}&advertiserId={advertiserId}"
-        f"&endpoint={endpoint}&day={day_iso}"
+        f"&endpoint={endpoint}&campaignId={campaignId or ''}"
+        f"&kind={kind or ''}&dayStart={dayStart or ''}&dayEnd={dayEnd or ''}"
+        f"&day={day or ''}"
     )
 
     if not scope_grants(
@@ -328,7 +388,7 @@ def get_cursor(
             retryable=False,
         )
 
-    # endpoint 白名单提前到缓存判定之前:命中路径不经过 has_data 的
+    # endpoint 白名单提前到缓存判定之前:命中路径不经过 repository 的
     # ValueError,这里统一兜(400 SCHEMA_INVALID,行为与回源路径一致)。
     storage_key = STORAGE_KEY_BY_PATH.get(endpoint)
     if storage_key is None:
@@ -344,64 +404,115 @@ def get_cursor(
             path=audit_path,
         )
 
-    # 1) 缓存命中(仅 campaign-scoped;空集合 = 已加载确无数据,也命中)
-    if campaignId is not None:
-        pairs = has_data_cache.get(
+    # ── v3 coverage 模式 ────────────────────────────────────────────
+    if kind is not None:
+        if kind not in LIVE_KINDS:
+            return _audit_and_error(
+                request_id=request_id,
+                status=400,
+                code="SCHEMA_INVALID",
+                message=f"kind must be one of {sorted(LIVE_KINDS)}",
+                retryable=False,
+                key_prefix=key_prefix,
+                error_code="SCHEMA_INVALID",
+                method="GET",
+                path=audit_path,
+            )
+        if campaignId is None:
+            return _audit_and_error(
+                request_id=request_id,
+                status=400,
+                code="SCHEMA_INVALID",
+                message="kind coverage 模式必须带 campaignId",
+                retryable=False,
+                key_prefix=key_prefix,
+                error_code="SCHEMA_INVALID",
+                method="GET",
+                path=audit_path,
+            )
+        # 1) 缓存命中（只缓存 campaign-scoped 的 live 行集）
+        rows = has_data_cache.get(
             seller_id=sellerId,
             advertiser_id=advertiserId,
             campaign_id=campaignId,
         )
-        if pairs is not None:
-            has = (endpoint, day_iso) in pairs
-            _log_ingest_event(
-                level=logging.INFO,
-                request_id=request_id,
-                key_prefix=key_prefix,
-                method="GET",
-                path=audit_path,
-                status=200,
-                records_in=1,
-                records_ok=1 if has else 0,
-            )
-            return _cursor_ok(
-                request_id=request_id,
-                day_iso=day_iso,
-                endpoint=endpoint,
-                storage_key_value=storage_key.value,
-                has_data=has,
-                campaign_id=campaignId,
-            )
-
-    # 2) 缓存 miss / 无 campaignId → DB 回源。命中路径不开 session(避免
-    #    checkout 往返),所以这里按 deps.get_session 同款语义按需开/收。
-    SessionLocal = get_session_factory()
-    sess = SessionLocal()
-    try:
-        if campaignId is not None:
-            # 灌桶:一次性拉该 campaign 的 (endpoint, day) 全集,后续命中免 DB
-            pairs = load_campaign_pairs(
-                sess,
-                seller_id=sellerId,
-                advertiser_id=advertiserId,
-                campaign_id=campaignId,
-            )
+        if rows is None:
+            SessionLocal = get_session_factory()
+            sess = SessionLocal()
+            try:
+                rows = load_campaign_live_rows(
+                    sess,
+                    seller_id=sellerId,
+                    advertiser_id=advertiserId,
+                    campaign_id=campaignId,
+                )
+            finally:
+                try:
+                    sess.rollback()
+                finally:
+                    sess.close()
             has_data_cache.put(
                 seller_id=sellerId,
                 advertiser_id=advertiserId,
                 campaign_id=campaignId,
-                pairs=pairs,
+                rows=rows,
             )
-            has = (endpoint, day_iso) in pairs
-        else:
-            result: HasDataResult = has_data(
-                sess,
-                seller_id=sellerId,
-                advertiser_id=advertiserId,
-                endpoint=endpoint,
-                day=day,
-                campaign_id=None,
-            )
-            has = result.has_data
+        entry = next(
+            (r for r in rows if r[0] == endpoint and r[1] == kind), None
+        )
+        has_row = entry is not None
+        day_start_iso = entry[2] if entry else None
+        day_end_iso = entry[3] if entry else None
+        captured_at_iso = entry[4] if entry else None
+        _log_ingest_event(
+            level=logging.INFO,
+            request_id=request_id,
+            key_prefix=key_prefix,
+            method="GET",
+            path=audit_path,
+            status=200,
+            records_in=1,
+            records_ok=1 if has_row else 0,
+        )
+        return _coverage_ok(
+            request_id=request_id,
+            endpoint=endpoint,
+            storage_key_value=storage_key.value,
+            kind=kind,
+            has_row=has_row,
+            campaign_id=campaignId,
+            day_start_iso=day_start_iso,
+            day_end_iso=day_end_iso,
+            captured_at_iso=captured_at_iso,
+        )
+
+    # ── legacy has-data 模式（无 kind）──────────────────────────────
+    if day is None:
+        return _audit_and_error(
+            request_id=request_id,
+            status=400,
+            code="SCHEMA_INVALID",
+            message="legacy has-data 模式必须带 day；coverage 模式必须带 kind",
+            retryable=False,
+            key_prefix=key_prefix,
+            error_code="SCHEMA_INVALID",
+            method="GET",
+            path=audit_path,
+        )
+    day_iso = day.isoformat()
+    # 无 campaignId 或 legacy day 查询 → 直接 DB（低频 / 过渡期，不缓存）
+    SessionLocal = get_session_factory()
+    sess = SessionLocal()
+    try:
+        result: HasDataResult = has_data(
+            sess,
+            seller_id=sellerId,
+            advertiser_id=advertiserId,
+            endpoint=endpoint,
+            day=day,
+            campaign_id=campaignId,
+        )
+        has = result.has_data
     finally:
         try:
             sess.rollback()
@@ -616,13 +727,114 @@ def post_dumps(
             path=path,
         )
 
+    # 归一化 kind / 区间（v3 live vs v2 daily）
+    dump_kind = payload.dump.kind
+    day_start: date | None = payload.dump.dayStart
+    day_end: date | None = payload.dump.dayEnd
+    if dump_kind is None:
+        # v2 旧客户端：无 kind → legacy daily 单日行
+        dump_kind = KIND_DAILY
+        if payload.dump.day is None:
+            return _audit_and_error(
+                request_id=request_id,
+                status=400,
+                code="SCHEMA_INVALID",
+                message="dump.day is required when kind is absent (v2 daily 模式)",
+                retryable=False,
+                key_prefix=key_prefix,
+                error_code="SCHEMA_INVALID",
+                method=method,
+                path=path,
+            )
+        day_start = payload.dump.day
+        day_end = payload.dump.day
+    else:
+        if dump_kind not in LIVE_KINDS + (KIND_DAILY,):
+            return _audit_and_error(
+                request_id=request_id,
+                status=400,
+                code="SCHEMA_INVALID",
+                message=f"dump.kind must be one of history/today/daily, got {dump_kind!r}",
+                retryable=False,
+                key_prefix=key_prefix,
+                error_code="SCHEMA_INVALID",
+                method=method,
+                path=path,
+            )
+        if dump_kind in LIVE_KINDS:
+            if day_start is None or day_end is None:
+                return _audit_and_error(
+                    request_id=request_id,
+                    status=400,
+                    code="SCHEMA_INVALID",
+                    message="dump.dayStart/dayEnd are required for kind=history/today",
+                    retryable=False,
+                    key_prefix=key_prefix,
+                    error_code="SCHEMA_INVALID",
+                    method=method,
+                    path=path,
+                )
+            if day_start > day_end:
+                return _audit_and_error(
+                    request_id=request_id,
+                    status=400,
+                    code="SCHEMA_INVALID",
+                    message="dump.dayStart must be <= dump.dayEnd",
+                    retryable=False,
+                    key_prefix=key_prefix,
+                    error_code="SCHEMA_INVALID",
+                    method=method,
+                    path=path,
+                )
+            if dump_kind == KIND_TODAY and day_start != day_end:
+                return _audit_and_error(
+                    request_id=request_id,
+                    status=400,
+                    code="SCHEMA_INVALID",
+                    message="dump.dayStart must equal dump.dayEnd for kind=today (单日区间)",
+                    retryable=False,
+                    key_prefix=key_prefix,
+                    error_code="SCHEMA_INVALID",
+                    method=method,
+                    path=path,
+                )
+            if payload.dump.day is not None and payload.dump.day != day_end:
+                return _audit_and_error(
+                    request_id=request_id,
+                    status=400,
+                    code="SCHEMA_INVALID",
+                    message="dump.day (compat) must equal dump.dayEnd",
+                    retryable=False,
+                    key_prefix=key_prefix,
+                    error_code="SCHEMA_INVALID",
+                    method=method,
+                    path=path,
+                )
+        else:  # kind == daily（显式）
+            if payload.dump.day is None:
+                return _audit_and_error(
+                    request_id=request_id,
+                    status=400,
+                    code="SCHEMA_INVALID",
+                    message="dump.day is required for kind=daily",
+                    retryable=False,
+                    key_prefix=key_prefix,
+                    error_code="SCHEMA_INVALID",
+                    method=method,
+                    path=path,
+                )
+            day_start = payload.dump.day
+            day_end = payload.dump.day
+
     # 构造 DumpPayload（包含 server-推的 storage_key）
     dump = DumpPayload(
         seller_id=payload.scope.sellerId,
         advertiser_id=payload.scope.advertiserId,
         endpoint=payload.dump.endpoint,
         method=payload.dump.method,
-        day=payload.dump.day,
+        kind=dump_kind,
+        day_start=day_start,
+        day_end=day_end,
         campaign_id=payload.dump.campaignId,
         storage_key=storage_key,
         request=payload.dump.request,
@@ -660,16 +872,24 @@ def post_dumps(
             retryable=True,
         )
 
-    # Write-through：cursor has-data 缓存立刻看到刚落库的 (endpoint, day)。
+    # Write-through：live upsert 成功后把 live 行 upsert 进 cursor 缓存桶
+    # （同 (endpoint, kind) 替换；history 推进 / today 快照都正确反映）。
     # 桶未加载时 mark_present no-op —— 下次 GET 回源重载（新行已落库），
     # 结果必对（见 has_data_cache.mark_present docstring）。
-    has_data_cache.mark_present(
-        seller_id=dump.seller_id,
-        advertiser_id=dump.advertiser_id,
-        campaign_id=dump.campaign_id,
-        endpoint=dump.endpoint,
-        day=dump.day.isoformat(),
-    )
+    # stale_ignored = 行未被本次写入改变 → 不 mark，防止旧 capturedAt 污染桶。
+    if dump.kind in LIVE_KINDS and result.status in ("inserted", "updated"):
+        has_data_cache.mark_present(
+            seller_id=dump.seller_id,
+            advertiser_id=dump.advertiser_id,
+            campaign_id=dump.campaign_id,
+            row=(
+                dump.endpoint,
+                dump.kind,
+                dump.day_start.isoformat(),
+                dump.day_end.isoformat(),
+                dump.captured_at.isoformat(),
+            ),
+        )
 
     _log_ingest_event(
         level=logging.INFO,
@@ -679,7 +899,7 @@ def post_dumps(
         path=path,
         status=200,
         records_in=1,
-        records_ok=1 if result.status == "inserted" else 0,
+        records_ok=1 if result.status in ("inserted", "updated") else 0,
         records_rej=0,
     )
 
@@ -901,6 +1121,7 @@ def _resolve_fx_rates(
             "fx-cache",
         )
     return (FX_CNY_USD, FX_USD_VND, FX_AS_OF, "fixed-const")
+
 
 _PAID_STATUSES = sorted(PAID_SALES_ORDER_STATUSES)
 
@@ -1462,12 +1683,8 @@ def _query_spu_roi(
             .first()
         )
     eff_orders = _row_int(scope_row["order_count"]) if scope_row else 0
-    cancelled_orders = (
-        _row_int(scope_row["cancelled_order_count"]) if scope_row else 0
-    )
-    gmv_total = (
-        Decimal(scope_row["gmv"]) / fx_usd_vnd if scope_row else Decimal(0)
-    )
+    cancelled_orders = _row_int(scope_row["cancelled_order_count"]) if scope_row else 0
+    gmv_total = Decimal(scope_row["gmv"]) / fx_usd_vnd if scope_row else Decimal(0)
     totals = {
         "row_count": len(plain),
         "order_count": eff_orders,

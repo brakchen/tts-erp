@@ -1,5 +1,24 @@
 # tts-erp CHANGELOG
 
+## 2026-09-07 (feature) — analytics 区间聚合同步（protocol v3, Design A）
+
+服务端落地 `tech-doc/analytics/range-aggregate-history-sync.md`（与 Chrome 扩展
+v3 同窗口发布）：
+
+- **schema**（migration 0012/0013/0014）：`analytics.ad_raw` 从「一行=一天」升级
+  为 `kind(history/today/daily) + [day_start..day_end]`；live 行按
+  (seller,advertiser,endpoint,campaign,kind) partial-unique，daily 行保留旧
+  5 元组唯一；新增 `analytics.ad_sync_audit` 元数据审计表；
+  `ad_product_links` 视图改读 live 快照（未转换 campaign 回退 daily 保口径）。
+- **/dumps**：protocolVersion 3（kind/dayStart/dayEnd）；status 扩展
+  `updated` / `stale_ignored`（capturedAt 单调守卫防旧覆盖新）；v3 history 写入
+  同事务折叠被覆盖的 legacy daily 行 + 写审计。v2 旧客户端仍兼容（daily）。
+- **/cursor**：新增 v3 coverage 模式（kind + campaignId → 返回 live 行
+  hasRow/dayStart/dayEnd/capturedAt）；legacy has-data 改为覆盖语义（daily 或
+  live 区间含该日）。`has_data_cache` 只缓存 live 行（无 stale-true）。
+- 测试：`tests/analytics/*`（37）+ `tests/api/test_analytics_v3_range.py`（12）
+  新增/适配；analytics 相关全量 111 passed。
+
 ## 2026-09-06 (fix) — SPU 实际 ROI 看板 fee_rate 量级上限
 
 - **fee_rate 量级上限 → 422**：`GET /v2/analytics/spu-roi` 的 `fee_rate` 增加 `|fee_rate| > 1e6` 校验（用 `Decimal.copy_abs()`，避开默认算术 context 对超大指数的 Overflow），与既有非有限值/负值校验并列，杜绝 `1e9999999` 这类值穿透到 quantize 造成 500；`tests/api/test_spu_roi_api.py` 补充 `fee_rate=1e9999999 → 422` 断言。

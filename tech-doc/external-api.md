@@ -335,16 +335,24 @@ Mounted under tts-erp at `/v2/analytics/sync/*`（2026-09-02 从
 extension. Auth requires **readwrite** role plus a per-seller scope grant
 (the api_key's `scopes` array). Full protocol lives in
 [`analytics/dump-architecture.md`](analytics/dump-architecture.md);
+[`analytics/range-aggregate-history-sync.md`](analytics/range-aggregate-history-sync.md)
+is the v3 区间聚合方案（2026-09-07 起，插件端 v3 + 服务端双模式）；
 this section is the agent-facing quick reference.
 
 #### `GET /v2/analytics/sync/cursor`
 
-has-data 预检（dump architecture，2026-09-02 起）：查这个
-`(scope, endpoint, day[, campaignId])` 是否已有 dump 落库
-（`analytics.ad_raw` existence）。plugin 在打 TikTok 前先问一次，
-`hasData: true` → 跳过该天的抓取（防风控）。work-list 模式
-（`items` / `nextRequiredDay` / `pageSize` / `cursor` / `timezone`）
-已随 dump architecture 删除（见 `analytics/dump-architecture.md`）。
+双模式预检（dump architecture + v3 range-aggregate）：
+
+- **v3 coverage（带 `kind=history|today` + `campaignId`）**：返回该
+  `(scope, endpoint, campaign)` 的 live 行状态 `{kind, hasRow, dayStart,
+  dayEnd, capturedAt}`。plugin 据此决策 history 是否已 settled（无行 / 区间
+  不匹配 → 抓取整段；精确覆盖 → 跳过）。
+- **legacy has-data（无 `kind` + `day`）**：查该
+  `(scope, endpoint, day[, campaignId])` 是否已被覆盖（daily 单日 或 live 区间含该日）。
+  `hasData: true` → 跳过该天的抓取（防风控）。
+
+work-list 模式（`items` / `nextRequiredDay` / `pageSize` / `cursor` /
+`timezone`）已随 dump architecture 删除（见 `analytics/dump-architecture.md`）。
 
 Query parameters:
 
@@ -353,8 +361,10 @@ Query parameters:
 | `sellerId` | string | required, ≤ 128 chars |
 | `advertiserId` | string | required, ≤ 128 chars |
 | `endpoint` | string | required；必须在 dump 白名单（见下） |
-| `day` | date | required, `YYYY-MM-DD` |
-| `campaignId` | string | optional, ≤ 128 chars；缺省查整 day |
+| `kind` | string | optional；`history`/`today` 时启用 v3 coverage 模式 |
+| `campaignId` | string | coverage 模式必带；legacy 模式可选 |
+| `dayStart` / `dayEnd` | date | optional（coverage 模式请求冗余回显） |
+| `day` | date | legacy 模式必带, `YYYY-MM-DD` |
 
 `endpoint` 白名单（server 据此推导 `storageKey`）：
 
@@ -362,27 +372,29 @@ Query parameters:
 - `/oec_ads/shopping/v1/oec/stat/post_session_list` → `sessionAnalyses`
 - `/oec_ads/shopping/v1/oec/stat/campaign_opt_log_list` → `campaignChangeLogs`
 
-白名单外的 endpoint → `400 SCHEMA_INVALID`。
+白名单外的 endpoint → `400 SCHEMA_INVALID`。coverage 模式缺 `campaignId` /
+非法 `kind` → `400 SCHEMA_INVALID`。
 
-Response (`code: 0`):
+coverage 响应示例（`code: 0`）：
 
 ```json
 {
   "code": 0,
   "requestId": "req-…",
   "data": {
-    "day": "2026-08-23",
-    "endpoint": "/oec_ads/shopping/v1/oec/stat/post_product_list",
+    "endpoint": "…/post_product_list",
     "storageKey": "productAnalyses",
-    "hasData": false
+    "kind": "history",
+    "hasRow": true,
+    "campaignId": "campaign-1",
+    "dayStart": "2026-07-01",
+    "dayEnd": "2026-09-05",
+    "capturedAt": "2026-09-05T12:00:00.000Z"
   }
 }
 ```
 
-带 `campaignId` 查询时响应多带 `"campaignId"` 字段。`403 SCOPE_DENIED`
-if the api_key's `scopes[]` doesn't cover the requested
-`(sellerId, advertiserId)`.
-
+legacy has-data 响应仍为 `{day, endpoint, storageKey, hasData[, campaignId]}`。
 #### `POST /v2/analytics/sync/dumps`
 
 单 dump 写入（dump architecture，2026-09-02 起；旧 `/batches` 批量协议
@@ -395,31 +407,40 @@ Body（≤ 2 MB）：
 
 ```json
 {
-  "protocolVersion": 2,
+  "protocolVersion": 3,
   "requestId": "req-…",
   "scope": {"sellerId": "seller-1", "advertiserId": "adv-1"},
   "dump": {
     "endpoint": "/oec_ads/shopping/v1/oec/stat/post_product_list",
     "method": "POST",
-    "day": "2026-08-23",
+    "kind": "history",
+    "dayStart": "2026-07-01",
+    "dayEnd": "2026-09-05",
     "campaignId": "campaign-1",
     "request": {"url": "…", "headers": {}, "body": {}},
     "response": {"status": 200, "headers": {}, "body": {"data": []}},
-    "capturedAt": "2026-08-23T03:00:00.000Z"
+    "capturedAt": "2026-09-05T12:00:00.000Z"
   }
 }
 ```
 
+- v3（`protocolVersion: 3`）：`kind` ∈ `history`/`today`，`dayStart`/`dayEnd`
+  必带；`day` 保留为兼容冗余（必须 == `dayEnd`）。每 `(scope, endpoint,
+  campaign, kind)` 至多一行 live（Design A 快照）。
+- v2（`protocolVersion: 2`，无 `kind`/区间）：legacy daily 单日写入兼容
+  （`day_start=day_end=day`），首个覆盖它们的 v3 history 写入时被同事务折叠。
 - `request` / `response` = plugin 抓的完整 HTTP 交换（JSONB 原样落 ad_raw）。
 - `capturedAt` 必须带时区（`Z` 或 `+00:00`）。
 - 不带 `page`（隐式 = 1）/ `expectedPageCount` / `storageKey` /
   `sourceRecordId` —— 这些概念在 dump architecture 已删除；`storageKey`
   由 server 从 `endpoint` 推导。
 
-幂等：server 重算 canonical idempotency key（6 字段 SHA-256，page 固定
-1），`ad_raw` 的 5 元组 unique 约束
-`(seller_id, advertiser_id, endpoint, day, campaign_id)` 兜底 ——
-同 dump 重放 → `duplicate`，不是错误。
+幂等（server 自算 canonical key）：
+
+- v3：6 字段 SHA-256 `(sellerId, advertiserId, storageKey, campaignId, kind,
+  dayStart, dayEnd)` + capturedAt 单调守卫 —— 同一 live 行重放 → `updated`；
+  更旧 capturedAt 的迟到重试 → `stale_ignored`（视为成功，不覆盖新快照）。
+- v2：6 字段 SHA-256（含 day + page=1），daily 行重放 → `duplicate`。
 
 Success response (`code: 0`):
 
@@ -434,7 +455,10 @@ Success response (`code: 0`):
 }
 ```
 
-`status ∈ {"inserted", "duplicate"}` — 两者都是成功。
+`status ∈ {"inserted", "updated", "duplicate", "stale_ignored"}` — 全部视为成功。
+
+内容被取代事件（history 替换/推进/重建、daily 折叠、today 跨天 reset）写
+`analytics.ad_sync_audit` 一行元数据审计（与主写同事务；30s today 常规刷新不写）。
 
 Errors:
 

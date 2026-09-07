@@ -1,20 +1,16 @@
-"""Coverage for ``analytics.ad_product_links`` view (ad_raw-derived).
+"""Coverage for ``analytics.ad_product_links`` view（live 优先 + daily 过渡回退）。
 
 The view exposes the 广告计划(campaign) ↔ 商品(SPU) 关联 from
-``post_product_list`` raw dumps, aggregated per (campaign, product) over
-every captured day:
+``post_product_list`` raw dumps，按 (campaign, product) 聚合。range-aggregate
+（Design A，migration 0014）后语义：
 
-- association keys: seller_id / advertiser_id / campaign_id / product_id
-- window metadata: observed_days / first_day / last_day
-- metrics: order_sku_total (出单数), real_cost_total (广告消耗),
-  order_value_total (出单 GMV)
-- ERP enrichment: shop_pk / spu_pk LEFT JOINed to
-  commerce (NULL when the SPU isn't in the synced TikTok catalog)
+- live 有效集：kind='history' 全取；kind='today' 仅当不存在 day_end >= 它的
+  history（防跨天推进间隙双计/漏计）。
+- 未转换 campaign（无 live 行）回退读 legacy daily 行 —— 口径与迁移前一致。
+- observed_days = Σ(day_end-day_start+1)（live 行按覆盖跨度，daily 行计 1）；
+  first_day = min(day_start)，last_day = max(day_end)。
 
-Semantics/derivation documented in biz-doc/analytics/ad-product-links-view.md.
-
-Data isolation: TEST_-prefixed seller/advertiser/campaign/product ids, wiped
-before and after each test (analytics + commerce rows this file touches).
+Data isolation: TEST_-prefixed seller/advertiser/campaign/product ids。
 """
 
 from __future__ import annotations
@@ -32,43 +28,23 @@ _SELLER = "TEST_SELLER_1"
 _ADVERTISER = "TEST_ADVERTISER_1"
 
 
-# ---------------------------------------------------------------------------
-# Cleanup
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _wipe_rows(db_engine):
-    """Wipe analytics.ad_* + commerce TEST_ rows before and after each test.
-
-    The shared api/conftest.py autouse doesn't apply under tests/analytics/
-    (conftest scope), so mirror tests/analytics/test_repository.py's pattern.
-    """
     _wipe(db_engine)
     yield
     _wipe(db_engine)
 
 
 def _wipe(db_engine) -> None:
-    """只清 ad_raw + commerce TEST_ 行（2026-09-05 reorg：ad_records /
-    ad_daily_completeness 等派生表已随 migration 0007 drop）。"""
     with db_engine.begin() as conn:
         # pi-lens-ignore: python-sql-injection — literal SQL, LIKE prefix is constant
         conn.execute(text("DELETE FROM analytics.ad_raw WHERE seller_id LIKE 'TEST_%'"))
-        # pi-lens-ignore: python-sql-injection — literal SQL, LIKE prefix is constant
         conn.execute(
-            text(
-                "DELETE FROM commerce.products_spu "
-                "WHERE spu_id LIKE :prefix"
-            ),
+            text("DELETE FROM commerce.products_spu WHERE spu_id LIKE :prefix"),
             {"prefix": "TEST_%"},
         )
-        # pi-lens-ignore: python-sql-injection — literal SQL, LIKE prefix is constant
         conn.execute(
-            text(
-                "DELETE FROM commerce.shops "
-                "WHERE shop_id LIKE :prefix"
-            ),
+            text("DELETE FROM commerce.shops WHERE shop_id LIKE :prefix"),
             {"prefix": "TEST_%"},
         )
 
@@ -78,36 +54,42 @@ def _wipe(db_engine) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _dump_day(db_session, day: str, campaign_id: str, table_rows: list[dict]) -> None:
-    """Insert one analytics.ad_raw row (post_product_list) for a campaign/day."""
+def _insert_raw(
+    db_session,
+    kind: str,
+    day_start: str,
+    day_end: str,
+    campaign_id: str,
+    table_rows: list[dict],
+) -> None:
+    """Insert one analytics.ad_raw row (post_product_list) for a kind/interval."""
     db_session.execute(
         text(
             """
             INSERT INTO analytics.ad_raw (
                 idempotency_key, seller_id, advertiser_id, endpoint, method,
-                day, campaign_id, request, response, captured_at, source,
-                protocol_version, schema_version
+                kind, day_start, day_end, campaign_id, request, response,
+                captured_at, source, protocol_version, schema_version
             ) VALUES (
                 :idem, :seller, :advertiser, :endpoint, 'POST',
-                :day, :campaign,
+                :kind, CAST(:ds AS date), CAST(:de AS date), :campaign,
                 CAST(:request AS JSONB), CAST(:response AS JSONB),
-                now(), 'TEST', 2, 1
+                now(), 'TEST', 3, 2
             )
             """
         ),
         {
-            "idem": f"TEST_IDEM_{day}_{campaign_id}",
+            "idem": f"TEST_IDEM_{kind}_{day_start}_{day_end}_{campaign_id}",
             "seller": _SELLER,
             "advertiser": _ADVERTISER,
             "endpoint": _ENDPOINT_PRODUCT,
-            "day": day,
+            "kind": kind,
+            "ds": day_start,
+            "de": day_end,
             "campaign": campaign_id,
             "request": json.dumps({"url": "https://x/post_product_list", "body": {}}),
             "response": json.dumps(
-                {
-                    "status": 200,
-                    "body": {"code": 0, "data": {"table": table_rows}},
-                }
+                {"status": 200, "body": {"code": 0, "data": {"table": table_rows}}}
             ),
         },
     )
@@ -151,26 +133,16 @@ def _view_rows(db_session) -> list[dict]:
     ]
 
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
+# ─── 过渡期：无 live 行的 campaign 回退 daily（口径与迁移前一致）──────
 
 
 def test_view_aggregates_spend_and_orders_across_days(db_session):
-    """同一 campaign×SPU 跨多天 → 1 行,出单量/消耗/GMV 按天合计,窗口元数据正确。"""
+    """同一 campaign×SPU 跨多天 legacy daily 行 → 1 行,出单量/消耗/GMV 合计。"""
     camp = "TEST_CAMPAIGN_1"
-    _dump_day(
-        db_session,
-        "2026-08-01",
-        camp,
-        [_row("TEST_SPU_1", cost="10.00", orders="3", gmv="100.00")],
-    )
-    _dump_day(
-        db_session,
-        "2026-08-02",
-        camp,
-        [_row("TEST_SPU_1", cost="20.50", orders="5", gmv="250.00")],
-    )
+    _insert_raw(db_session, "daily", "2026-08-01", "2026-08-01", camp,
+                [_row("TEST_SPU_1", cost="10.00", orders="3", gmv="100.00")])
+    _insert_raw(db_session, "daily", "2026-08-02", "2026-08-02", camp,
+                [_row("TEST_SPU_1", cost="20.50", orders="5", gmv="250.00")])
 
     rows = _view_rows(db_session)
     assert len(rows) == 1
@@ -189,22 +161,12 @@ def test_view_aggregates_spend_and_orders_across_days(db_session):
 
 def test_view_rows_are_per_campaign_product_pair(db_session):
     """不同 campaign / 不同 SPU 各自成行;多商品 campaign 不出双计。"""
-    # 同一 (campaign, day) 的多个 SPU 在同一条 dump 的 table 数组里
-    _dump_day(
-        db_session,
-        "2026-08-01",
-        "TEST_CAMP_A",
-        [
-            _row("TEST_SPU_1", cost="1.00", orders="1", gmv="5.00"),
-            _row("TEST_SPU_2", cost="2.00", orders="2", gmv="9.00"),
-        ],
-    )
-    _dump_day(
-        db_session,
-        "2026-08-01",
-        "TEST_CAMP_B",
-        [_row("TEST_SPU_1", cost="4.00", orders="4", gmv="16.00")],
-    )
+    _insert_raw(db_session, "daily", "2026-08-01", "2026-08-01", "TEST_CAMP_A", [
+        _row("TEST_SPU_1", cost="1.00", orders="1", gmv="5.00"),
+        _row("TEST_SPU_2", cost="2.00", orders="2", gmv="9.00"),
+    ])
+    _insert_raw(db_session, "daily", "2026-08-01", "2026-08-01", "TEST_CAMP_B",
+                [_row("TEST_SPU_1", cost="4.00", orders="4", gmv="16.00")])
 
     rows = _view_rows(db_session)
     assert [(r["campaign_id"], r["product_id"]) for r in rows] == [
@@ -216,20 +178,12 @@ def test_view_rows_are_per_campaign_product_pair(db_session):
 
 
 def test_view_latest_product_name_and_status_win(db_session):
-    """名称/上架状态取观测期最后一天那一行的值。"""
+    """名称/上架状态取覆盖末日（day_end 最大）那一行的值。"""
     camp = "TEST_CAMPAIGN_1"
-    _dump_day(
-        db_session,
-        "2026-08-01",
-        camp,
-        [_row("TEST_SPU_1", name="旧名", status="available")],
-    )
-    _dump_day(
-        db_session,
-        "2026-08-02",
-        camp,
-        [_row("TEST_SPU_1", name="新名", status="unavailable")],
-    )
+    _insert_raw(db_session, "daily", "2026-08-01", "2026-08-01", camp,
+                [_row("TEST_SPU_1", name="旧名", status="available")])
+    _insert_raw(db_session, "daily", "2026-08-02", "2026-08-02", camp,
+                [_row("TEST_SPU_1", name="新名", status="unavailable")])
 
     r = _view_rows(db_session)[0]
     assert r["product_name"] == "新名"
@@ -239,19 +193,12 @@ def test_view_latest_product_name_and_status_win(db_session):
 def test_view_handles_missing_or_dirty_metric_fields(db_session):
     """缺失/非数字业绩字段按 0 计,不抛错;无指标旧 dump 仍保留关联行。"""
     camp = "TEST_CAMPAIGN_1"
-    # 无任何业绩字段的精简行(修复前 schema)——只表达"挂了哪些商品"
-    _dump_day(db_session, "2026-08-01", camp, [{"product_id": "TEST_SPU_1"}])
-    # 脏数值:空串 / 非数字占位
-    _dump_day(
-        db_session,
-        "2026-08-02",
-        camp,
-        [_row("TEST_SPU_1", cost="-", orders="", gmv="abc")],
-    )
+    _insert_raw(db_session, "daily", "2026-08-01", "2026-08-01", camp,
+                [{"product_id": "TEST_SPU_1"}])
+    _insert_raw(db_session, "daily", "2026-08-02", "2026-08-02", camp,
+                [_row("TEST_SPU_1", cost="-", orders="", gmv="abc")])
 
-    rows = _view_rows(db_session)
-    assert len(rows) == 1
-    r = rows[0]
+    r = _view_rows(db_session)[0]
     assert r["product_id"] == "TEST_SPU_1"
     assert r["observed_days"] == 2
     assert float(r["real_cost_total"]) == 0.0
@@ -261,7 +208,6 @@ def test_view_handles_missing_or_dirty_metric_fields(db_session):
 
 def test_view_left_joins_erp_channel_product_when_known(db_session):
     """SPU 已在 commerce.products_spu 目录 → 带出内部 channel ids,否则 NULL。"""
-    # ERP 目录里登记一个 TEST 商品
     with db_session.begin_nested():
         acct_id = db_session.execute(
             text(
@@ -279,16 +225,87 @@ def test_view_left_joins_erp_channel_product_when_known(db_session):
         )
 
     camp = "TEST_CAMPAIGN_1"
-    _dump_day(
-        db_session,
-        "2026-08-01",
-        camp,
-        [_row("TEST_SPU_1"), _row("TEST_SPU_2")],
-    )
+    _insert_raw(db_session, "daily", "2026-08-01", "2026-08-01", camp,
+                [_row("TEST_SPU_1"), _row("TEST_SPU_2")])
 
     rows = {r["product_id"]: r for r in _view_rows(db_session)}
     assert rows["TEST_SPU_1"]["shop_pk"] == acct_id
     assert rows["TEST_SPU_1"]["spu_pk"] is not None
-    # 同 seller 的另一 SPU 没在目录里：能带出渠道账户（seller 级），但商品 key 为 NULL
     assert rows["TEST_SPU_2"]["shop_pk"] == acct_id
     assert rows["TEST_SPU_2"]["spu_pk"] is None
+
+
+# ─── live 语义（migration 0014）──────────────────────────────────────
+
+
+def test_view_uses_live_history_and_ignores_daily(db_session):
+    """S8：有 live history 的 campaign 只看 live 快照，遮蔽其 daily 行。"""
+    camp = "TEST_CAMPAIGN_LIVE1"
+    # 该 campaign 的 legacy daily 行（应被遮蔽，不参与视图）
+    _insert_raw(db_session, "daily", "2026-08-01", "2026-08-01", camp,
+                [_row("TEST_SPU_1", cost="999.00", orders="999", gmv="999.00")])
+    # live history 整段快照（Design A：聚合后的权威值）
+    _insert_raw(db_session, "history", "2026-07-01", "2026-09-05", camp,
+                [_row("TEST_SPU_1", cost="30.50", orders="8", gmv="350.00")])
+
+    rows = _view_rows(db_session)
+    assert len(rows) == 1
+    r = rows[0]
+    assert float(r["real_cost_total"]) == 30.50
+    assert r["order_sku_total"] == 8
+    assert float(r["order_value_total"]) == 350.00
+    # 窗口元数据由 live 区间推导：跨度 = (09-05 - 07-01) + 1 = 67 天
+    assert r["observed_days"] == 67
+    assert r["first_day"].isoformat() == "2026-07-01"
+    assert r["last_day"].isoformat() == "2026-09-05"
+
+
+def test_view_today_row_counts_only_when_after_history(db_session):
+    """S8：today 仅当 day_end > history.day_end 计入；跨天过渡间隙不计。"""
+    camp = "TEST_CAMPAIGN_LIVE2"
+    _insert_raw(db_session, "history", "2026-07-01", "2026-09-09", camp,
+                [_row("TEST_SPU_1", cost="100.00", orders="10", gmv="1000.00")])
+    # 昨日 today 残留（day_end == history.day_end）→ 不应双计
+    _insert_raw(db_session, "today", "2026-09-09", "2026-09-09", camp,
+                [_row("TEST_SPU_1", cost="1.00", orders="1", gmv="1.00")])
+
+    r = _view_rows(db_session)[0]
+    assert float(r["real_cost_total"]) == 100.00
+    assert r["order_sku_total"] == 10
+
+    # 新一天 today（day_end = 09-10 > history day_end）→ 计入
+    camp2 = "TEST_CAMPAIGN_LIVE3"
+    _insert_raw(db_session, "history", "2026-07-01", "2026-09-09", camp2,
+                [_row("TEST_SPU_1", cost="100.00", orders="10", gmv="1000.00")])
+    _insert_raw(db_session, "today", "2026-09-10", "2026-09-10", camp2,
+                [_row("TEST_SPU_1", cost="5.00", orders="2", gmv="50.00")])
+
+    r2 = _view_rows(db_session, )[-1]
+    assert r2["campaign_id"] == camp2
+    assert float(r2["real_cost_total"]) == 105.00
+    assert r2["order_sku_total"] == 12
+    assert r2["last_day"].isoformat() == "2026-09-10"
+    assert r2["observed_days"] == 72  # 71 + 1
+
+
+def test_view_campaign_with_only_today_row_counts(db_session):
+    """S==today（无 history）时：live today 行本身即全部数据。"""
+    camp = "TEST_CAMPAIGN_LIVE4"
+    _insert_raw(db_session, "today", "2026-09-10", "2026-09-10", camp,
+                [_row("TEST_SPU_1", cost="3.00", orders="1", gmv="30.00")])
+    rows = _view_rows(db_session)
+    assert len(rows) == 1
+    assert float(rows[0]["real_cost_total"]) == 3.00
+    assert rows[0]["observed_days"] == 1
+
+
+def test_view_empty_live_history_shadows_leftover_daily(db_session):
+    """review P2b：live 行即使空表（区间无 SPU 响应行）也代表该 campaign 已由
+    live 模型接管——残留 legacy daily 行不得浮出（防重复/口径混用）。
+    判定基于 ad_raw 的 live 行存在性，与响应是否含 product 行解耦。"""
+    camp = "TEST_CAMPAIGN_P2B"
+    _insert_raw(db_session, "daily", "2026-08-01", "2026-08-01", camp,
+                [_row("TEST_SPU_P2B", cost="999.00", orders="999", gmv="999.00")])
+    # live history 快照：空 product 表（无 product 行），但 live 行真实存在
+    _insert_raw(db_session, "history", "2026-07-01", "2026-09-05", camp, [])
+    assert _view_rows(db_session) == []

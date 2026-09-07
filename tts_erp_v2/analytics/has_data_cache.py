@@ -1,41 +1,32 @@
-"""In-process existence cache for GET /v2/analytics/sync/cursor (has-data).
+"""In-process live-row cache for GET /v2/analytics/sync/cursor (coverage mode).
 
-设计（2026-09-06，tech-doc/analytics/dump-architecture.md「cursor has-data
-缓存」小节）——为什么是「campaign → (endpoint, day) 集合」：
+设计（2026-09-07，tech-doc/analytics/range-aggregate-history-sync.md §5.2）——
+为什么是「campaign → (endpoint, kind, 区间, capturedAt) live 行集」：
 
-- cursor 请求 99.8% 带 campaignId（实测 251,397 / 251,861），是扩展扫历史时
-  对同一批 (campaign × endpoint × day) 的重复存在性检查。
-- hasData 对 (scope, endpoint, day, campaign) **恒定**（ad_raw 只 upsert 不
-  删，无 stale-true）；单写者（唯一写者 = 扩展 POST /dumps）+ /dumps 成功
-  后 write-through ⇒ stale-false 窗口收敛到 ~0。
-- miss 时一条 SQL 只拉 DISTINCT (endpoint, day)（不碰 request/response
-  JSONB blob），灌入后后续命中走纯内存 frozenset 成员检查，不碰 DB/session。
-
-边界（与 has_data SQL 语义严格对齐）：
-- 只缓存 campaign-scoped 请求。无 campaignId 的请求（实测 ~60/天）语义是
-  「该 (scope, endpoint, day) 有没有任意行（不分 campaign）」，量级可忽略，
-  直接走 repository.has_data 原 DB 路径，不缓存。
-- campaign_id 列 NOT NULL（schema 约束），所以 key 恒为 str。
+- v3 coverage 请求对同一批 (scope × campaign × endpoint × kind) 重复检查 live 行
+  是否存在、区间是否匹配（决定 history 是否已 settled、today 是否要刷新）。
+- 只缓存 **live 行**（kind history/today）——这是 /cursor coverage 模式的回答对象。
+  legacy daily 行折叠（物理 DELETE）只发生在 kind='daily'，live 行集不受影响，
+  ⇒ 无 stale-true（红线论证保持成立）。
+- miss 时一条 SQL 只拉 live 5 元组（endpoint, kind, day_start, day_end,
+  captured_at），不碰 request/response JSONB blob，灌入后纯内存 frozenset 判断。
 
 一致性：进程内 dict + threading.Lock（uvicorn 单进程）；key 含
 seller_id/advertiser_id —— campaign_id 只在 scope 内唯一，防多店铺撞 id。
 TTL 由 loaded_at 单调钟判定（10 min）；桶只增不删、惰性驱逐 + put 时全扫。
-写路径 mark_present 在桶未加载时 no-op（下次 GET 全量重载，新行已落库，
-结果必对）——**禁止**在未加载桶上建「半桶」。
 
-⚠️ 依赖不变量（红线，review Finding-2/3）：
-- **ad_raw 只 upsert 不删** 是本缓存无 stale-true 的 load-bearing 前提。任何
-  未来对 ad_raw 的手工/运维 DELETE（合规删除、误操作、临时清数）会造成最长
-  10min stale-true → 插件跳过本应抓取的 day。setup/analytics-sync.md 已写
-  「ad_raw 永久保留」，动它之前先确认本缓存与插件语义。
-- **uvicorn 单进程**（ExecStart 无 --workers）是 load-bearing 假设：多 worker
-  下 mark_present 只更新本 worker 桶 → 跨 worker stale-false 至多 TTL 窗口
-  （仍无 stale-true、自愈），但「命中免 DB」收益打折。加多 worker 前需改
-  共享缓存或接受该窗口。
+写路径 mark_present：live upsert（inserted/updated）后把该行 upsert 进桶
+（同 (endpoint, kind) 替换，history 推进/今天快照都正确反映）；stale_ignored
+**不** mark（行未变）。桶未加载时 no-op（下次 GET 回源全量重载，结果必对）。
 
-Tests: tests/analytics/test_has_data_cache.py（假时钟单测）+
-tests/api/test_analytics_v2_cursor_cache.py（端点集成，_isolate_state 里
-reset() 保证测试隔离）。
+⚠️ 依赖不变量（红线，review Finding-2/3 更新版）：
+- **live 行只 upsert 不删** 是本缓存无 stale-true 的 load-bearing 前提。物理删除
+  仅允许 kind='daily' legacy 折叠（repository._fold_daily），不进 live 桶；
+  **禁止**任何对 history/today 行的运维/手工 DELETE，否则最长 10min stale-true →
+  插件跳过本应抓取的区间。
+- **uvicorn 单进程**（ExecStart 无 --workers）是 load-bearing 假设：多 worker 下
+  mark_present 只更新本 worker 桶 → 跨 worker stale-false 至多 TTL 窗口（仍无
+  stale-true、自愈），但「命中免 DB」收益打折。
 """
 
 from __future__ import annotations
@@ -46,17 +37,19 @@ from collections.abc import Iterable
 
 CACHE_TTL_S = 600  # 10 分钟；桶过期后下次 get 视为 miss，从 DB 全量重载
 
-# 桶 value：frozenset[(endpoint 字符串, day.isoformat())]
+# live 行 5 元组：(endpoint, kind, day_start.isoformat(), day_end.isoformat(),
+# captured_at.isoformat())。capturedAt 供 coverage 响应直接回显。
+LiveRow = tuple[str, str, str, str, str]
+
 _CacheKey = tuple[str, str, str]
-_Pair = tuple[str, str]
 
 
 class _Bucket:
-    __slots__ = ("loaded_at", "pairs")
+    __slots__ = ("loaded_at", "rows")
 
-    def __init__(self, pairs: frozenset[_Pair]) -> None:
+    def __init__(self, rows: frozenset[LiveRow]) -> None:
         self.loaded_at = time.monotonic()
-        self.pairs = pairs
+        self.rows = rows
 
 
 _buckets: dict[_CacheKey, _Bucket] = {}
@@ -67,11 +60,11 @@ def get(
     seller_id: str,
     advertiser_id: str,
     campaign_id: str,
-) -> frozenset[_Pair] | None:
-    """Return the cached (endpoint, day) set, or None on miss/expiry.
+) -> frozenset[LiveRow] | None:
+    """Return the cached live-row set, or None on miss/expiry.
 
-    ``frozenset()``（空集合）与 None 是两种状态：前者表示「已加载、确无
-    数据」，后者表示「未加载/过期，需回源」。
+    ``frozenset()``（空集合）与 None 是两种状态：前者表示「已加载、确无 live 行」，
+    后者表示「未加载/过期，需回源」。
     """
     key = (seller_id, advertiser_id, campaign_id)
     now = time.monotonic()
@@ -82,18 +75,18 @@ def get(
         if now - bucket.loaded_at >= CACHE_TTL_S:
             _buckets.pop(key, None)
             return None
-        return bucket.pairs
+        return bucket.rows
 
 
 def put(
     seller_id: str,
     advertiser_id: str,
     campaign_id: str,
-    pairs: Iterable[_Pair],
+    rows: Iterable[LiveRow],
 ) -> None:
-    """Seed/replace the bucket for (scope, campaign) with fresh DB rows."""
+    """Seed/replace the bucket for (scope, campaign) with fresh DB live rows."""
     key = (seller_id, advertiser_id, campaign_id)
-    normalized = frozenset(pairs)
+    normalized = frozenset(rows)
     with _lock:
         _buckets[key] = _Bucket(normalized)
         _sweep_expired_locked()
@@ -103,22 +96,22 @@ def mark_present(
     seller_id: str,
     advertiser_id: str,
     campaign_id: str,
-    endpoint: str,
-    day: str,
+    row: LiveRow,
 ) -> bool:
-    """Write-through: /dumps 成功落库后把 (endpoint, day) 标为存在。
+    """Write-through: live upsert 成功落库后把该行 upsert 进桶（同 endpoint+kind 替换）。
 
-    Returns True if a **loaded** bucket was updated (or already contained
-    the pair); False when no bucket exists (no-op — 下次 GET 从 DB 全量
-    重载，已含此行，结果必对)。
+    Returns True when a **loaded** bucket was updated; False when no bucket
+    exists (no-op — 下次 GET 从 DB 全量回源，已含此行，结果必对)。
     """
     key = (seller_id, advertiser_id, campaign_id)
+    endpoint, kind = row[0], row[1]
     with _lock:
         bucket = _buckets.get(key)
         if bucket is None or time.monotonic() - bucket.loaded_at >= CACHE_TTL_S:
             return False
-        if (endpoint, day) not in bucket.pairs:
-            bucket.pairs = frozenset(bucket.pairs | {(endpoint, day)})
+        keep = {r for r in bucket.rows if not (r[0] == endpoint and r[1] == kind)}
+        if row not in bucket.rows:
+            bucket.rows = frozenset(keep | {row})
         return True
 
 
@@ -146,6 +139,7 @@ def _sweep_expired_locked() -> None:
 
 __all__ = [
     "CACHE_TTL_S",
+    "LiveRow",
     "get",
     "mark_present",
     "put",

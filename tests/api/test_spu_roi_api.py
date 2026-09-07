@@ -226,11 +226,11 @@ def _seed_ad_dump(
             """
             INSERT INTO analytics.ad_raw (
                 idempotency_key, seller_id, advertiser_id, endpoint, method,
-                day, campaign_id, request, response, captured_at, source,
-                protocol_version, schema_version
+                kind, day_start, day_end, campaign_id, request, response,
+                captured_at, source, protocol_version, schema_version
             ) VALUES (
                 :idem, :seller, :advertiser, :endpoint, 'POST',
-                CAST(:day AS date), :campaign,
+                'daily', CAST(:day AS date), CAST(:day AS date), :campaign,
                 CAST(:request AS JSONB), CAST(:response AS JSONB),
                 now(), 'TEST', 2, 1
             )
@@ -462,7 +462,13 @@ def _seed_extra_order_line(
             "CAST(:price AS numeric), 'VND' FROM commerce.sales_orders "
             "WHERE order_id = :oid"
         ),
-        {"ext": line_ext, "spu": spu_pk, "qty": qty, "price": unit_price, "oid": order_id},
+        {
+            "ext": line_ext,
+            "spu": spu_pk,
+            "qty": qty,
+            "price": unit_price,
+            "oid": order_id,
+        },
     )
 
 
@@ -483,23 +489,43 @@ def _seed_cross_spu_orders(sess) -> tuple[int, int]:
     y = _seed_spu(sess, shop_pk, "TEST_ROI_SPU_Y")
     # O1: 有效单(首行挂 X,补一行挂 Y → 同一张单跨两 SPU)
     _seed_order_line(
-        sess, shop_pk=shop_pk, spu_pk=x, order_id="TEST_ORDER_XY1",
-        status=PAID_ORDER_STATUS, line_ext="TEST_LINE_XY1",
-        qty="1", unit_price="263300", paid=True,  # $10
+        sess,
+        shop_pk=shop_pk,
+        spu_pk=x,
+        order_id="TEST_ORDER_XY1",
+        status=PAID_ORDER_STATUS,
+        line_ext="TEST_LINE_XY1",
+        qty="1",
+        unit_price="263300",
+        paid=True,  # $10
     )
     _seed_extra_order_line(
-        sess, order_id="TEST_ORDER_XY1", spu_pk=y, line_ext="TEST_LINE_XY2",
-        qty="1", unit_price="263300",  # $10
+        sess,
+        order_id="TEST_ORDER_XY1",
+        spu_pk=y,
+        line_ext="TEST_LINE_XY2",
+        qty="1",
+        unit_price="263300",  # $10
     )
     # O2: 已付被取消,同样跨两 SPU(各 $5)
     _seed_order_line(
-        sess, shop_pk=shop_pk, spu_pk=x, order_id="TEST_ORDER_XY2",
-        status="CANCELLED", line_ext="TEST_LINE_XY3",
-        qty="1", unit_price="131650", paid=True,  # $5
+        sess,
+        shop_pk=shop_pk,
+        spu_pk=x,
+        order_id="TEST_ORDER_XY2",
+        status="CANCELLED",
+        line_ext="TEST_LINE_XY3",
+        qty="1",
+        unit_price="131650",
+        paid=True,  # $5
     )
     _seed_extra_order_line(
-        sess, order_id="TEST_ORDER_XY2", spu_pk=y, line_ext="TEST_LINE_XY4",
-        qty="1", unit_price="131650",  # $5
+        sess,
+        order_id="TEST_ORDER_XY2",
+        spu_pk=y,
+        line_ext="TEST_LINE_XY4",
+        qty="1",
+        unit_price="131650",  # $5
     )
     return x, y
 
@@ -911,13 +937,23 @@ def _seed_refund_on_shared_order_y_line(sess) -> tuple[int, int]:
     x = _seed_spu(sess, shop_pk, "TEST_ROI_SPU_RY_X")
     y = _seed_spu(sess, shop_pk, "TEST_ROI_SPU_RY_Y")
     o1 = _seed_order_line(
-        sess, shop_pk=shop_pk, spu_pk=x, order_id="TEST_ORDER_RY1",
-        status="DELIVERED", line_ext="TEST_LINE_RY1",
-        qty="1", unit_price="263300", paid=True,  # $10
+        sess,
+        shop_pk=shop_pk,
+        spu_pk=x,
+        order_id="TEST_ORDER_RY1",
+        status="DELIVERED",
+        line_ext="TEST_LINE_RY1",
+        qty="1",
+        unit_price="263300",
+        paid=True,  # $10
     )
     _seed_extra_order_line(
-        sess, order_id="TEST_ORDER_RY1", spu_pk=y, line_ext="TEST_LINE_RY2",
-        qty="1", unit_price="263300",  # $10
+        sess,
+        order_id="TEST_ORDER_RY1",
+        spu_pk=y,
+        line_ext="TEST_LINE_RY2",
+        qty="1",
+        unit_price="263300",  # $10
     )
     y_line = sess.execute(
         text(
@@ -928,8 +964,12 @@ def _seed_refund_on_shared_order_y_line(sess) -> tuple[int, int]:
         )
     ).scalar_one()
     _seed_case(
-        sess, shop_pk=shop_pk, order_pk=o1, ext_case="TEST_CASE_RY1",
-        case_type="RETURN_AND_REFUND", status="RETURN_OR_REFUND_REQUEST_COMPLETE",
+        sess,
+        shop_pk=shop_pk,
+        order_pk=o1,
+        ext_case="TEST_CASE_RY1",
+        case_type="RETURN_AND_REFUND",
+        status="RETURN_OR_REFUND_REQUEST_COMPLETE",
         lines=[(y_line, "TEST_CLINE_RY1", "1", "263300")],
     )
     return x, y
@@ -952,7 +992,9 @@ def test_spu_roi_refund_order_count_attributed_to_own_line(
     assert set(by_id) == {"TEST_ROI_SPU_RY_X", "TEST_ROI_SPU_RY_Y"}
     assert by_id["TEST_ROI_SPU_RY_X"]["refund_rate_qty"] == "0.00"
     assert by_id["TEST_ROI_SPU_RY_X"]["refund_net_amount"] == "0.0000"
-    assert by_id["TEST_ROI_SPU_RY_Y"]["refund_rate_qty"] == "1.00"  # 1 退货单 / 1 有效单
+    assert (
+        by_id["TEST_ROI_SPU_RY_Y"]["refund_rate_qty"] == "1.00"
+    )  # 1 退货单 / 1 有效单
     assert by_id["TEST_ROI_SPU_RY_Y"]["refund_net_amount"] == "10.0000"
 
 
@@ -972,25 +1014,48 @@ def _seed_cod_and_unpaid_cancelled(sess) -> int:
     shop_pk = _seed_shop(sess, seller)
     spu_pk = _seed_spu(sess, shop_pk, "TEST_ROI_SPU_COD")
     _seed_ad_dump(
-        sess, seller=seller, product_id="TEST_ROI_SPU_COD",
-        campaign_id="TEST_CAMP_COD", spend="10.00", orders="3", gmv="30.00",
+        sess,
+        seller=seller,
+        product_id="TEST_ROI_SPU_COD",
+        campaign_id="TEST_CAMP_COD",
+        spend="10.00",
+        orders="3",
+        gmv="30.00",
     )
     _seed_order_line(
-        sess, shop_pk=shop_pk, spu_pk=spu_pk, order_id="TEST_ORDER_COD1",
-        status="DELIVERED", line_ext="TEST_LINE_COD1",
-        qty="3", unit_price="263300", paid=True,  # $30
+        sess,
+        shop_pk=shop_pk,
+        spu_pk=spu_pk,
+        order_id="TEST_ORDER_COD1",
+        status="DELIVERED",
+        line_ext="TEST_LINE_COD1",
+        qty="3",
+        unit_price="263300",
+        paid=True,  # $30
     )
     # COD 在途:状态白名单但钱未收(paid_at 不落)
     _seed_order_line(
-        sess, shop_pk=shop_pk, spu_pk=spu_pk, order_id="TEST_ORDER_COD2",
-        status="IN_TRANSIT", line_ext="TEST_LINE_COD2",
-        qty="2", unit_price="263300", paid=False,  # $20 未收款
+        sess,
+        shop_pk=shop_pk,
+        spu_pk=spu_pk,
+        order_id="TEST_ORDER_COD2",
+        status="IN_TRANSIT",
+        line_ext="TEST_LINE_COD2",
+        qty="2",
+        unit_price="263300",
+        paid=False,  # $20 未收款
     )
     # 未收款取消:CANCELLED 且 paid_at 无
     _seed_order_line(
-        sess, shop_pk=shop_pk, spu_pk=spu_pk, order_id="TEST_ORDER_COD3",
-        status="CANCELLED", line_ext="TEST_LINE_COD3",
-        qty="1", unit_price="263300", paid=False,  # $10 未收款取消
+        sess,
+        shop_pk=shop_pk,
+        spu_pk=spu_pk,
+        order_id="TEST_ORDER_COD3",
+        status="CANCELLED",
+        line_ext="TEST_LINE_COD3",
+        qty="1",
+        unit_price="263300",
+        paid=False,  # $10 未收款取消
     )
     return spu_pk
 
@@ -1023,7 +1088,9 @@ def test_spu_roi_totals_order_status_scope_cod_shop(
     # 派生:净现金 50 − COGS_all(5×4.4322=22.161) − spend 10 − fee(50×0.1156=5.78)
     assert item["platform_fee"] == m4(Decimal(50) * FEE_BASELINE)  # 5.7800
     assert item["net_profit"] == m4(
-        Decimal(50) - Decimal(5) * K1_CNY * CNY_USD - Decimal(10)
+        Decimal(50)
+        - Decimal(5) * K1_CNY * CNY_USD
+        - Decimal(10)
         - Decimal(50) * FEE_BASELINE
     )
     # 行内新列(2026-09-06 列集):销售=GMV全单(50+10 取消原额)、取消单量、取消率、退货率(单量)
@@ -1774,8 +1841,16 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert "全损退款" in body  # 全损货损改名
     # 2026-09-06 行内列集:销售$/有效销售$/退货$/取消单量/取消率%/退货率%/全损退款$/实际ROI/保本ROI
     for col_label in (
-        "销售$", "有效销售$", "退货$", "取消单量", "取消率%", "退货率%",
-        "全损退款$", "净利润$", "实际ROI", "保本ROI",
+        "销售$",
+        "有效销售$",
+        "退货$",
+        "取消单量",
+        "取消率%",
+        "退货率%",
+        "全损退款$",
+        "净利润$",
+        "实际ROI",
+        "保本ROI",
     ):
         assert col_label in body, f"行内缺列 {col_label}"
     # 新 ⚙ 开关组(广告归因对照 / 订单结构)

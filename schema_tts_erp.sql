@@ -156,7 +156,7 @@ CREATE TABLE IF NOT EXISTS analytics.ad_raw (
     advertiser_id text CONSTRAINT analytics_raw_advertiser_id_not_null NOT NULL,
     endpoint text CONSTRAINT analytics_raw_endpoint_not_null NOT NULL,
     method text CONSTRAINT analytics_raw_method_not_null NOT NULL,
-    day date CONSTRAINT analytics_raw_day_not_null NOT NULL,
+    day_end date CONSTRAINT analytics_raw_day_not_null NOT NULL,
     campaign_id text CONSTRAINT analytics_raw_campaign_id_not_null NOT NULL,
     request jsonb CONSTRAINT analytics_raw_request_not_null NOT NULL,
     response jsonb CONSTRAINT analytics_raw_response_not_null NOT NULL,
@@ -167,8 +167,12 @@ CREATE TABLE IF NOT EXISTS analytics.ad_raw (
     protocol_version integer DEFAULT 2 CONSTRAINT analytics_raw_protocol_version_not_null NOT NULL,
     schema_version integer DEFAULT 1 CONSTRAINT analytics_raw_schema_version_not_null NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    kind text NOT NULL,
+    day_start date NOT NULL,
+    CONSTRAINT ck_analytics_raw_kind CHECK ((kind = ANY (ARRAY['history'::text, 'today'::text, 'daily'::text]))),
     CONSTRAINT ck_analytics_raw_protocol CHECK ((protocol_version > 0)),
-    CONSTRAINT ck_analytics_raw_schema CHECK ((schema_version > 0))
+    CONSTRAINT ck_analytics_raw_schema CHECK ((schema_version > 0)),
+    CONSTRAINT ck_analytics_raw_today_single_day CHECK (((kind <> 'today'::text) OR (day_start = day_end)))
 );
 
 
@@ -211,11 +215,13 @@ CREATE TABLE IF NOT EXISTS commerce.shops (
 -- Name: ad_product_links; Type: VIEW; Schema: analytics; Owner: -
 
 CREATE VIEW analytics.ad_product_links AS
- WITH daily AS (
+ WITH product_rows AS (
          SELECT r.seller_id,
             r.advertiser_id,
             r.campaign_id,
-            r.day,
+            r.kind,
+            r.day_start,
+            r.day_end,
             (el.value ->> 'product_id'::text) AS product_id,
             (el.value ->> 'product_name'::text) AS product_name,
             (el.value ->> 'product_status'::text) AS product_status,
@@ -235,16 +241,91 @@ CREATE VIEW analytics.ad_product_links AS
            FROM (analytics.ad_raw r
              CROSS JOIN LATERAL jsonb_array_elements((((r.response -> 'body'::text) -> 'data'::text) -> 'table'::text)) el(value))
           WHERE ((r.endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'::text) AND (el.value ? 'product_id'::text) AND (NULLIF((el.value ->> 'product_id'::text), ''::text) IS NOT NULL))
+        ), live_spans AS (
+         SELECT DISTINCT ad_raw.seller_id,
+            ad_raw.advertiser_id,
+            ad_raw.campaign_id,
+            ad_raw.kind,
+            ad_raw.day_start,
+            ad_raw.day_end
+           FROM analytics.ad_raw
+          WHERE ((ad_raw.endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'::text) AND (ad_raw.kind = ANY (ARRAY['history'::text, 'today'::text])))
+        ), live AS (
+         SELECT pr.seller_id,
+            pr.advertiser_id,
+            pr.campaign_id,
+            pr.kind,
+            pr.day_start,
+            pr.day_end,
+            pr.product_id,
+            pr.product_name,
+            pr.product_status,
+            pr.gmv_max_bid_type,
+            pr.real_cost,
+            pr.order_sku,
+            pr.order_value
+           FROM product_rows pr
+          WHERE ((pr.kind = 'history'::text) OR ((pr.kind = 'today'::text) AND (NOT (EXISTS ( SELECT 1
+                   FROM live_spans hs
+                  WHERE ((hs.kind = 'history'::text) AND (hs.seller_id = pr.seller_id) AND (hs.advertiser_id = pr.advertiser_id) AND (hs.campaign_id = pr.campaign_id) AND (hs.day_end >= pr.day_end)))))))
+        ), daily_fallback AS (
+         SELECT pr.seller_id,
+            pr.advertiser_id,
+            pr.campaign_id,
+            pr.kind,
+            pr.day_start,
+            pr.day_end,
+            pr.product_id,
+            pr.product_name,
+            pr.product_status,
+            pr.gmv_max_bid_type,
+            pr.real_cost,
+            pr.order_sku,
+            pr.order_value
+           FROM product_rows pr
+          WHERE ((pr.kind = 'daily'::text) AND (NOT (EXISTS ( SELECT 1
+                   FROM live_spans hl
+                  WHERE ((hl.seller_id = pr.seller_id) AND (hl.advertiser_id = pr.advertiser_id) AND (hl.campaign_id = pr.campaign_id))))))
+        ), src AS (
+         SELECT live.seller_id,
+            live.advertiser_id,
+            live.campaign_id,
+            live.kind,
+            live.day_start,
+            live.day_end,
+            live.product_id,
+            live.product_name,
+            live.product_status,
+            live.gmv_max_bid_type,
+            live.real_cost,
+            live.order_sku,
+            live.order_value
+           FROM live
+        UNION ALL
+         SELECT daily_fallback.seller_id,
+            daily_fallback.advertiser_id,
+            daily_fallback.campaign_id,
+            daily_fallback.kind,
+            daily_fallback.day_start,
+            daily_fallback.day_end,
+            daily_fallback.product_id,
+            daily_fallback.product_name,
+            daily_fallback.product_status,
+            daily_fallback.gmv_max_bid_type,
+            daily_fallback.real_cost,
+            daily_fallback.order_sku,
+            daily_fallback.order_value
+           FROM daily_fallback
         ), latest AS (
-         SELECT DISTINCT ON (daily.seller_id, daily.advertiser_id, daily.campaign_id, daily.product_id) daily.seller_id,
-            daily.advertiser_id,
-            daily.campaign_id,
-            daily.product_id,
-            daily.product_name,
-            daily.product_status,
-            daily.gmv_max_bid_type
-           FROM daily
-          ORDER BY daily.seller_id, daily.advertiser_id, daily.campaign_id, daily.product_id, daily.day DESC
+         SELECT DISTINCT ON (src.seller_id, src.advertiser_id, src.campaign_id, src.product_id) src.seller_id,
+            src.advertiser_id,
+            src.campaign_id,
+            src.product_id,
+            src.product_name,
+            src.product_status,
+            src.gmv_max_bid_type
+           FROM src
+          ORDER BY src.seller_id, src.advertiser_id, src.campaign_id, src.product_id, src.day_end DESC
         )
  SELECT d.seller_id,
     d.advertiser_id,
@@ -253,15 +334,15 @@ CREATE VIEW analytics.ad_product_links AS
     l.product_name,
     l.product_status,
     l.gmv_max_bid_type,
-    count(DISTINCT d.day) AS observed_days,
-    min(d.day) AS first_day,
-    max(d.day) AS last_day,
+    COALESCE(sum(((d.day_end - d.day_start) + 1)), (0)::bigint) AS observed_days,
+    min(d.day_start) AS first_day,
+    max(d.day_end) AS last_day,
     (COALESCE(sum(d.order_sku), (0)::numeric))::bigint AS order_sku_total,
     (COALESCE(sum(d.real_cost), (0)::numeric))::numeric(20,4) AS real_cost_total,
     (COALESCE(sum(d.order_value), (0)::numeric))::numeric(20,4) AS order_value_total,
     ca.id AS shop_pk,
     cp.id AS spu_pk
-   FROM (((daily d
+   FROM (((src d
      JOIN latest l USING (seller_id, advertiser_id, campaign_id, product_id))
      LEFT JOIN commerce.shops ca ON (((ca.platform = 'tiktok'::text) AND (ca.shop_id = d.seller_id))))
      LEFT JOIN commerce.products_spu cp ON (((cp.shop_pk = ca.id) AND (cp.spu_id = d.product_id))))
@@ -272,6 +353,36 @@ CREATE VIEW analytics.ad_product_links AS
 
 
 
+
+
+-- Name: ad_sync_audit; Type: TABLE; Schema: analytics; Owner: -
+
+CREATE TABLE IF NOT EXISTS analytics.ad_sync_audit (
+    id bigint NOT NULL,
+    occurred_at timestamp with time zone DEFAULT now() NOT NULL,
+    seller_id text NOT NULL,
+    advertiser_id text NOT NULL,
+    endpoint text NOT NULL,
+    campaign_id text NOT NULL,
+    kind text NOT NULL,
+    event text NOT NULL,
+    prev_day_start date,
+    prev_day_end date,
+    prev_captured_at timestamp with time zone,
+    new_day_start date,
+    new_day_end date,
+    new_captured_at timestamp with time zone,
+    reason text,
+    request_id text,
+    CONSTRAINT ck_ad_sync_audit_event CHECK ((event = ANY (ARRAY['history_replaced'::text, 'rollover_advanced'::text, 'window_rebuilt'::text, 'legacy_collapsed'::text, 'today_reset'::text]))),
+    CONSTRAINT ck_ad_sync_audit_kind CHECK ((kind = ANY (ARRAY['history'::text, 'today'::text, 'daily'::text])))
+);
+
+
+
+ALTER TABLE analytics.ad_sync_audit ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME analytics.ad_sync_audit_id_seq
+);
 
 
 
@@ -753,7 +864,10 @@ CREATE TABLE IF NOT EXISTS procurement.procurement_products (
     raw_record_id bigint,
     source_updated_at timestamp with time zone,
     synced_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    source_unit_cost numeric(20,4),
+    source_min_unit_cost numeric(20,4),
+    source_max_unit_cost numeric(20,4)
 );
 
 
@@ -1142,16 +1256,16 @@ ALTER TABLE ONLY after_sales.cases
     ADD CONSTRAINT uq_cases_account_ext UNIQUE (shop_pk, external_case_id);
 
 
+-- Name: ad_sync_audit ad_sync_audit_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
+
+ALTER TABLE ONLY analytics.ad_sync_audit
+    ADD CONSTRAINT ad_sync_audit_pkey PRIMARY KEY (id);
+
+
 -- Name: ad_raw analytics_raw_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
 
 ALTER TABLE ONLY analytics.ad_raw
     ADD CONSTRAINT analytics_raw_pkey PRIMARY KEY (id);
-
-
--- Name: ad_raw uq_analytics_raw_unit_day; Type: CONSTRAINT; Schema: analytics; Owner: -
-
-ALTER TABLE ONLY analytics.ad_raw
-    ADD CONSTRAINT uq_analytics_raw_unit_day UNIQUE (seller_id, advertiser_id, endpoint, day, campaign_id);
 
 
 -- Name: shops channel_accounts_pkey; Type: CONSTRAINT; Schema: commerce; Owner: -
@@ -1577,6 +1691,11 @@ CREATE INDEX IF NOT EXISTS ix_cases_case_type_status ON after_sales.cases USING 
 CREATE INDEX IF NOT EXISTS ix_cases_sales_order ON after_sales.cases USING btree (order_pk);
 
 
+-- Name: idx_ad_sync_audit_scope; Type: INDEX; Schema: analytics; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_ad_sync_audit_scope ON analytics.ad_sync_audit USING btree (seller_id, advertiser_id, campaign_id, occurred_at DESC);
+
+
 -- Name: idx_analytics_raw_received; Type: INDEX; Schema: analytics; Owner: -
 
 CREATE INDEX IF NOT EXISTS idx_analytics_raw_received ON analytics.ad_raw USING btree (received_at DESC);
@@ -1589,7 +1708,17 @@ CREATE INDEX IF NOT EXISTS idx_analytics_raw_request ON analytics.ad_raw USING b
 
 -- Name: idx_analytics_raw_scope; Type: INDEX; Schema: analytics; Owner: -
 
-CREATE INDEX IF NOT EXISTS idx_analytics_raw_scope ON analytics.ad_raw USING btree (seller_id, advertiser_id, endpoint, day);
+CREATE INDEX IF NOT EXISTS idx_analytics_raw_scope ON analytics.ad_raw USING btree (seller_id, advertiser_id, endpoint, day_end);
+
+
+-- Name: uq_analytics_raw_daily; Type: INDEX; Schema: analytics; Owner: -
+
+CREATE UNIQUE INDEX uq_analytics_raw_daily ON analytics.ad_raw USING btree (seller_id, advertiser_id, endpoint, day_end, campaign_id) WHERE (kind = 'daily'::text);
+
+
+-- Name: uq_analytics_raw_live; Type: INDEX; Schema: analytics; Owner: -
+
+CREATE UNIQUE INDEX uq_analytics_raw_live ON analytics.ad_raw USING btree (seller_id, advertiser_id, endpoint, campaign_id, kind) WHERE (kind = ANY (ARRAY['history'::text, 'today'::text]));
 
 
 -- Name: ix_channel_accounts_status; Type: INDEX; Schema: commerce; Owner: -
@@ -2421,5 +2550,5 @@ ALTER TABLE ONLY reporting.shipment_tracking_summary
 
 -- PostgreSQL database dump complete
 
-\unrestrict eGDe9NaxPGHQ5JUOrisXJt2Fsbx7uunhafY8d8Oa8ft8HbUvRSYpR29CnYijW2u
+\unrestrict QDZcAfU8Cg7ckRHrrT3Hnyx7TQYEvKvljD6I3LBM5n3uaCUvkJs4oLr63jTKpuH
 

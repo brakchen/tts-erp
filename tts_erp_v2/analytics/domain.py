@@ -1,28 +1,25 @@
-"""Analytics 领域类型（v2，dump architecture）。
+"""Analytics 领域类型（v2 + v3 range-aggregate, dump architecture）。
 
 纯领域层 —— 无 I/O、无框架、无 DB。定义流经本服务的全部值对象形状。
 
 2026-09-02 v2 dump 化（tech-doc/analytics/dump-architecture.md）：
-- ``Record`` 去掉 ``page`` / ``expected_page_count`` 字段（dump 1 天 1 行，page 隐式 = 1）
-- 删除 ``CursorEntry`` / ``CursorPage``（cursor 协议 work-list 模式不再适用）
+- ``Record`` 去掉 ``page`` / ``expected_page_count`` 字段（dump 1 天 1 行,page 隐式 = 1）
 - 新增 ``DumpPayload``（plugin dump 入口）/ ``DumpResult``（idempotency_key + status）
 - 新增 ``HasDataResult``（GET /cursor has-data 模式的响应）
-- 保留 ``Scope`` / ``StorageKey`` / ``AcceptedRecord`` / ``RejectedRecord`` 类型
-  （虽然 v2 dump 协议是单 record 模式，但 ``BatchResult`` 仍供 audit/未来扩展）
 
-Layering:
-    domain.py            (本文件 —— 仅类型)
-    ↓
-    repository.py        (SQLAlchemy 存储：ad_raw + ad_records + ad_daily_completeness)
-    ↓
-    api/v2/analytics.py  (FastAPI handlers: /dumps + /cursor has-data)
+2026-09-07 range-aggregate（tech-doc/analytics/range-aggregate-history-sync.md）：
+- ``DumpPayload`` 从单 ``day`` 升级为 ``kind`` + 区间 ``[day_start..day_end]``：
+  - kind='history' 历史整段快照 [S..T-1]
+  - kind='today'   今日快照 [T..T]
+  - kind='daily'   legacy 逐日行（旧 v2 插件写入兼容）
+- 新增 protocol v3 幂等键公式（6 字段含 kind/dayStart/dayEnd；v2 分支保留）
+- 新增 ``LiveRowResult``（/cursor coverage 模式的 live 行状态）
 
-⚠️ 协议契约（dump architecture 锁定）：
+⚠️ 协议契约（dump architecture 锁定 + v3 扩展）：
 - dump 字段单 object 不可 list
-- ad_raw 5 元组 unique (seller_id, advertiser_id, endpoint, day, campaign_id)
-- 幂等键 6 字段 SHA-256（page 隐式 = 1）
+- live 行 unique (seller_id, advertiser_id, endpoint, campaign_id, kind)
+- v2 幂等键 6 字段 SHA-256（day+page=1）；v3 幂等键 6 字段 SHA-256（kind+dayStart+dayEnd）
 - 所有 endpoint→storageKey 1:1 映射在 server 端常量 (STORAGE_KEY_BY_PATH)
-- ad_raw 与 ad_records / ad_daily_completeness 无 FK，逻辑链接靠 shared 5 元组 key
 """
 
 from __future__ import annotations
@@ -33,6 +30,12 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
 from typing import Any
+
+# kind 常量（与 DB CHECK 约束 / 插件协议对齐）
+KIND_HISTORY = "history"
+KIND_TODAY = "today"
+KIND_DAILY = "daily"
+LIVE_KINDS = (KIND_HISTORY, KIND_TODAY)
 
 
 class StorageKey(str, Enum):
@@ -50,13 +53,6 @@ class StorageKey(str, Enum):
 DEFAULT_TIMEZONE = "Asia/Shanghai"
 
 
-# Sentinel pattern: server-side compute of the canonical idempotency key
-# must produce the exact same hex string the plugin sent. Trimming rules
-# below are part of the protocol; do NOT change without bumping the
-# protocol version.
-#
-# dump architecture: page 隐式 = 1,仍走 6 字段 SHA-256。DumpPayload 转换时固定传
-# page=1,所有 dump 的 idempotency_key 算法与旧 v2 batches 协议字节兼容。
 @dataclass(frozen=True)
 class Scope:
     """seller/advertiser pair from the plugin's request scope block."""
@@ -68,22 +64,25 @@ class Scope:
 
 @dataclass(frozen=True)
 class DumpPayload:
-    """One dump = one (scope, endpoint, day, campaign_id) row.
+    """One dump = one (scope, endpoint, campaign, kind) row with an interval.
 
     Plugin dump 协议输入。
     - ``request`` 完整 HTTP 交换(URL + headers + body)
     - ``response`` 完整 HTTP 交换(status + headers + body)
-    - ``page`` 隐式 = 1(dump architecture 下一天一 dump,page 维度消失)
+    - ``page`` 隐式 = 1(dump architecture 下无 page 维度)
+    - ``kind`` ∈ history / today / daily；``day_start``/``day_end`` 定义覆盖区间
+      （daily 行 day_start == day_end == 单日）
     - ``storage_key`` 由 server 端 STORAGE_KEY_BY_PATH 从 endpoint 推导,
       不来自 plugin 端(消除客户端 enum 知识)
-    - ``expected_page_count`` 完全删除(若需要由 server 端从 response 抽)
     """
 
     seller_id: str
     advertiser_id: str
     endpoint: str
     method: str
-    day: date
+    kind: str
+    day_start: date
+    day_end: date
     campaign_id: str
     request: dict[str, Any]
     response: dict[str, Any]
@@ -91,8 +90,8 @@ class DumpPayload:
     storage_key: StorageKey  # server-derived
     request_id: str | None = None
     source: str = "tiktok-shop-data-sync"
-    protocol_version: int = 2
-    schema_version: int = 1
+    protocol_version: int = 3
+    schema_version: int = 2
 
 
 @dataclass(frozen=True)
@@ -100,15 +99,15 @@ class DumpResult:
     """Output of upsert_dump: idempotency_key + status."""
 
     idempotency_key: str
-    status: str  # "inserted" | "duplicate"
+    status: str  # inserted | updated | duplicate | stale_ignored
 
 
 @dataclass(frozen=True)
 class HasDataResult:
-    """Output of has_data (GET /cursor has-data 模式):storageKey + bool.
+    """Output of legacy day-based has_data (GET /cursor, 无 kind):storageKey + bool.
 
-    日后 plugin 端用来做"这天的这个 endpoint 是否已经 dump 过了"的预检闸,
-    避免重复打 TikTok 触发风控。
+    旧 v2 插件用"这个 (scope, endpoint, day[, campaignId]) 有没有数据"做防 TikTok
+    风控预检闸。覆盖语义：daily 行 day_end=day，或 live 行区间含该 day。
     """
 
     day: date
@@ -118,13 +117,28 @@ class HasDataResult:
     campaign_id: str | None = None  # only present if queried
 
 
-# 保留 AcceptedRecord / RejectedRecord / BatchResult 供未来 /batches 类型兼容或
-# 单 dump 内部 per-field rejected 时使用(目前 dump 协议是整 dump accepted/whole
-# 失败二选一,但保留类型未来扩展)
+@dataclass(frozen=True)
+class LiveRowResult:
+    """Output of coverage lookup (GET /cursor, kind=history|today).
+
+    带 campaignId 时返回该 (scope,endpoint,campaign) 的 live 行状态（如有）。
+    """
+
+    endpoint: str
+    storage_key: StorageKey
+    campaign_id: str | None = None
+    kind: str | None = None
+    has_row: bool = False
+    day_start: date | None = None
+    day_end: date | None = None
+    captured_at: datetime | None = None
+
+
+# 保留 AcceptedRecord / RejectedRecord / BatchResult 供未来扩展使用
 @dataclass(frozen=True)
 class AcceptedRecord:
     idempotency_key: str
-    status: str  # "inserted" | "duplicate"
+    status: str  # "inserted" | "updated" | "duplicate"
 
 
 @dataclass(frozen=True)
@@ -141,11 +155,9 @@ class BatchResult:
     rejected: list[RejectedRecord]
 
 
-# ─── Canonical JSON for idempotency key ──────────────────────────────
+# ─── Canonical JSON for v2 idempotency key ───────────────────────────
 # Per protocol §2: keys must be sorted, UTF-8, no insignificant
-# whitespace, exact string values after trimming. We canonicalize the
-# five fields explicitly rather than running json.dumps with sort_keys,
-# because we also need to coerce page to int and day to ISO string.
+# whitespace, exact string values after trimming.
 
 
 def canonical_json_for_key(
@@ -157,13 +169,10 @@ def canonical_json_for_key(
     day: date | str,
     page: int | str,
 ) -> str:
-    """Return the canonical JSON string used as input to sha256.
+    """Return the canonical JSON string used as input to sha256 (v2).
 
     `page` is coerced to int (so `1` and `"1"` produce the same hash).
     `day` is coerced to ISO `YYYY-MM-DD` if a `date` object is passed.
-    String fields are stripped. Keys are sorted (ASCII); separators are
-    `(",", ":")` to remove insignificant whitespace; non-ASCII characters
-    are passed through verbatim (ensure_ascii=False).
     """
     storage_key_str = (
         storage_key.value if isinstance(storage_key, StorageKey) else storage_key
@@ -200,16 +209,7 @@ def compute_idempotency_key(
     day: date | str,
     page: int | str,
 ) -> str:
-    """sha256 hex digest of canonical_json_for_key(...).
-
-    `page` accepts both int and str (e.g. 1 vs "1"); `int()` is applied
-    inside canonical_json_for_key before hashing so the two are
-    interchangeable.
-
-    dump architecture 下调用方固定传 page=1（dump 1 天 1 行），
-    与 v2 batches 协议字节兼容 —— 同一 (5 fields, page=1) 输入产生
-    同一哈希。
-    """
+    """sha256 hex digest of canonical_json_for_key(...) (v2, page=1 legacy)."""
     payload = canonical_json_for_key(
         seller_id=seller_id,
         advertiser_id=advertiser_id,
@@ -219,3 +219,83 @@ def compute_idempotency_key(
         page=page,
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+# ─── Canonical JSON for v3 idempotency key（kind + 区间）────────────────
+
+
+def canonical_json_for_key_v3(
+    *,
+    seller_id: str,
+    advertiser_id: str,
+    storage_key: StorageKey | str,
+    campaign_id: str,
+    kind: str,
+    day_start: date | str,
+    day_end: date | str,
+) -> str:
+    """Return the canonical JSON string used as input to sha256 (v3).
+
+    与 v2 同款规则（strip / ISO / sort_keys / 无空白 / UTF-8）。
+    """
+    storage_key_str = (
+        storage_key.value if isinstance(storage_key, StorageKey) else storage_key
+    )
+    day_start_str = day_start.isoformat() if isinstance(day_start, date) else day_start
+    day_end_str = day_end.isoformat() if isinstance(day_end, date) else day_end
+    return json.dumps(
+        {
+            "sellerId": seller_id.strip(),
+            "advertiserId": advertiser_id.strip(),
+            "storageKey": storage_key_str,
+            "campaignId": campaign_id.strip(),
+            "kind": kind,
+            "dayStart": day_start_str,
+            "dayEnd": day_end_str,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def compute_idempotency_key_v3(
+    *,
+    seller_id: str,
+    advertiser_id: str,
+    storage_key: StorageKey | str,
+    campaign_id: str,
+    kind: str,
+    day_start: date | str,
+    day_end: date | str,
+) -> str:
+    """sha256 hex digest of canonical_json_for_key_v3(...)."""
+    payload = canonical_json_for_key_v3(
+        seller_id=seller_id,
+        advertiser_id=advertiser_id,
+        storage_key=storage_key,
+        campaign_id=campaign_id,
+        kind=kind,
+        day_start=day_start,
+        day_end=day_end,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+__all__ = [
+    "DEFAULT_TIMEZONE",
+    "KIND_DAILY",
+    "KIND_HISTORY",
+    "KIND_TODAY",
+    "LIVE_KINDS",
+    "DumpPayload",
+    "DumpResult",
+    "HasDataResult",
+    "LiveRowResult",
+    "Scope",
+    "StorageKey",
+    "canonical_json_for_key",
+    "canonical_json_for_key_v3",
+    "compute_idempotency_key",
+    "compute_idempotency_key_v3",
+]

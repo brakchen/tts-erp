@@ -129,6 +129,7 @@ curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" \
 - 没有任何 `/miaoshou/*` 路由（出站代理和回调端点未挂 v2，实测 404）
 - 没有 `/v1/analytics/sync/*` —— 2026-09-02 硬切 `/v2/analytics/sync/*`（无别名）；`/batches` 已换
   `/dumps`（单 dump object）；cursor 降级 has-data 预检（协议见 `tech-doc/analytics/dump-architecture.md`）
+  —— 2026-09-07 v3 区间聚合（Design A）见 `tech-doc/analytics/range-aggregate-history-sync.md`
 - 没有 `/v2/analytics/sync/batches`（同 release 删除；`ad_daily_pages` / `ad_cursors` 表 migration 0005 drop）
 - v1 路由（`/shops`、`/token/*`、`/orders/*`、`/finance/*`、`/returns/*`、`/cancellations/*`、`/db/*`）全部 404，
   v1→v2 迁移映射见 `external-api.md` 底部 Stability matrix；v1 代码仍在 git history（仅代码级参照——v1 DB 数据已 2026-09-05 归档删除，回滚需先恢复 dump）
