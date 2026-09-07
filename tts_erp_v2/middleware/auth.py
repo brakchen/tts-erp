@@ -92,7 +92,17 @@ _READONLY_EXACT = {
     "/v2/llm-context",  # GET — self-describing system + data dictionary for LLM agents
     "/v2/spu-images",  # GET — list ready images (no trailing slash in router)
     "/v2/analytics/spu-roi",  # GET — SPU 实际 ROI 看板主表(只读报表)
-    "/v2/oauth/tiktok/onboard",  # GET — 新店授权控制台页(HTML 壳;生成动作本身仍 admin)
+    # TikTok seller OAuth: both pages are classified readonly at the
+    # middleware so any logged-in operator can load the UI / see whether
+    # generation works. The handler (oauth.py::authorize) still enforces
+    # ``require_role_at_least("readwrite")`` as a fine-grained gate —
+    # readonly users get 403 from the handler, readwrite and admin
+    # pass. The CSRF ``state`` row inserted by authorize is harmless
+    # (single-use, 45-min TTL, no business-data side effect — the real
+    # ``integration.credentials`` + ``commerce.shops`` writes happen in
+    # the public ``/callback`` handshake).
+    "/v2/oauth/tiktok/onboard",
+    "/v2/oauth/tiktok/authorize",
 }
 # All other /v2/* paths default to admin (defensive: unknown = privileged).
 

@@ -32,15 +32,19 @@ GET /v2/oauth/tiktok/authorize ────────────────�
 
 - **Role**: readonly（`_READONLY_EXACT` 精确豁免行；HTML 壳页本身无数据/无副作用）。
   未登录浏览器 GET → 302 `/v2/auth/login?next=/v2/oauth/tiktok/onboard`。
-- **行为**: 内联 JS 探测 `/v2/auth/me`，非 admin 显示角色门槛；admin 点「生成授权链接」
+- **行为**: 内联 JS 探测 `/v2/auth/me`，readwrite 及以上可以点「生成授权链接」
   调 `GET /v2/oauth/tiktok/authorize?format=json` → 展示新链接（复制 / 新窗口打开 / 到期时间）。
-  每次生成 = 新 state（45min、单次使用），**不缓存链接**。
+  readonly 用户按钮可点但服务端会回 403，JS 把 inline `<div id="role-gate">` 解锁
+  并禁用按钮。每次生成 = 新 state（45min、单次使用），**不缓存链接**。
 
-### `GET /v2/oauth/tiktok/authorize` — 发起授权（admin）
+### `GET /v2/oauth/tiktok/authorize` — 发起授权（readwrite 及以上）
 
-- **Role**: `admin`（handler `require_role_at_least(request, "admin")`；
-  middleware 对未知路径默认 admin，双重保险）。浏览器会话需带
-  `X-Requested-With: tts-erp`。
+- **Role**: `readwrite` 及以上（handler `require_role_at_least(request, "readwrite")`；
+  middleware 对未知路径默认 admin，handler 内显式降到 readwrite）。
+  浏览器会话需带 `X-Requested-With: tts-erp`。
+  生成操作本身只插一行 `integration.oauth_states`（state sha256），无破坏性
+  数据变更（真正的写入在 `callback`，由 public 握手驱动）；因此从 admin
+  降到 readwrite 比 `linkage overrides`（业务数据覆写，留 admin）更合理。
 - **Query**: 无必选。`format=json` → JSON；否则 HTML（含可直接点的链接）。
 - **响应 200 (json)**:
 
@@ -55,7 +59,7 @@ GET /v2/oauth/tiktok/authorize ────────────────�
   ```
 
 - **错误**: `500`（`TIKTOK_SERVICE_ID` 未配置 / authorize host 非 http(s)）、
-  `401/403`（无 key / role < admin）。
+  `401/403`（无 key / role < readwrite）。
 - **副作用**: `integration.oauth_states` 插一行（只存 `sha256(state)`）。
 
 ### `GET /v2/oauth/tiktok/callback` — TikTok 重定向目标（public）
