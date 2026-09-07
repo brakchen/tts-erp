@@ -40,9 +40,7 @@ def _make_channel_account(session, external_id="TEST_TT_SHOP_C"):
     )
     session.add(cred)
     session.flush()
-    acct = ChannelAccount(
-        platform="tiktok", shop_id=external_id, credential_id=cred.id
-    )
+    acct = ChannelAccount(platform="tiktok", shop_id=external_id, credential_id=cred.id)
     session.add(acct)
     session.flush()
     return acct
@@ -133,9 +131,7 @@ def test_no_source_produces_no_snapshot(db_session):
     # No snapshot row should have been written by the resolver itself
     snaps = (
         db_session.execute(
-            select(ProductCostSnapshot).where(
-                ProductCostSnapshot.spu_pk == cp.id
-            )
+            select(ProductCostSnapshot).where(ProductCostSnapshot.spu_pk == cp.id)
         )
         .scalars()
         .all()
@@ -203,6 +199,7 @@ def test_source_price_loses_to_manual_cost(db_session):
         purchase_order_unit_cost=None,
         source_unit_cost=Decimal("7.77"),
     )
+    assert actual is not None
     assert actual.method == "MANUAL_ENTRY"
     assert actual.unit_cost == Decimal("5.50")
 
@@ -223,15 +220,12 @@ def test_rebuild_snapshots_writes_source_price_with_lookup(db_session):
     )
     assert written >= 1
 
-    snap = (
-        db_session.execute(
-            select(ProductCostSnapshot).where(
-                ProductCostSnapshot.spu_pk == cp_with.id,
-                ProductCostSnapshot.calculation_version == 7,
-            )
+    snap = db_session.execute(
+        select(ProductCostSnapshot).where(
+            ProductCostSnapshot.spu_pk == cp_with.id,
+            ProductCostSnapshot.calculation_version == 7,
         )
-        .scalar_one()
-    )
+    ).scalar_one()
     assert snap.cost_method == "SOURCE_PRICE"
     assert snap.unit_cost == Decimal("34.0000")
     assert snap.currency == "CNY"

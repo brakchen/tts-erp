@@ -23,8 +23,12 @@ def _box_payload(
     source_item_id: str = "1053836757309",
     status: str = "success",
 ) -> dict:
-    src = {"source": "1688", "sourceSite": "", "sourceItemId": source_item_id,
-           "sourceItemUrl": f"http://detail.1688.com/offer/{source_item_id}.html"}
+    src = {
+        "source": "1688",
+        "sourceSite": "",
+        "sourceItemId": source_item_id,
+        "sourceItemUrl": f"http://detail.1688.com/offer/{source_item_id}.html",
+    }
     item: dict = {
         "commonCollectBoxDetailId": common_id,
         "title": f"TEST source {common_id}",
@@ -41,11 +45,13 @@ def _box_payload(
 
 def _install_pages(fake_client, pages: list[dict]) -> None:
     """pages[0] is the page-1 response; every later page is empty."""
+
     def side_effect(*, path, body, **_kwargs):
         page = int(body.get("pageNo", body.get("page", 1)))
         if page <= len(pages):
             return pages[page - 1]
         return {"result": "success", "data": {"detailList": [], "total": 0}}
+
     fake_client.install(side_effect)
 
 
@@ -71,8 +77,13 @@ def test_sync_common_collect_box_upserts_source_price_columns(
                 "data": {
                     "detailList": [
                         _box_payload("ccbd_1"),
-                        _box_payload("ccbd_2", price="29.50", min_price=29.50,
-                                     max_price=42.00, source_item_id="999"),
+                        _box_payload(
+                            "ccbd_2",
+                            price="29.50",
+                            min_price=29.50,
+                            max_price=42.00,
+                            source_item_id="999",
+                        ),
                     ],
                     "total": 2,
                 },
@@ -121,8 +132,9 @@ def test_sync_common_collect_box_price_falls_back_to_min_sku(
                 "result": "success",
                 "data": {
                     "detailList": [
-                        _box_payload("ccbd_no_price", price=None, min_price=19.9,
-                                     max_price=25.0),
+                        _box_payload(
+                            "ccbd_no_price", price=None, min_price=19.9, max_price=25.0
+                        ),
                     ],
                     "total": 1,
                 },

@@ -207,9 +207,7 @@ def test_run_cost_snapshots_writes_seeded_spu(db_session):
     out = reporting_job.run_cost_snapshots(db_session)
     assert out["snapshots_written"] >= 1
     row = db_session.execute(
-        select(ProductCostSnapshot).where(
-            ProductCostSnapshot.spu_pk == cp.id
-        )
+        select(ProductCostSnapshot).where(ProductCostSnapshot.spu_pk == cp.id)
     ).scalar_one()
     assert row.cost_method == "MANUAL_ENTRY"
     assert row.unit_cost == Decimal("3.5000")
@@ -227,9 +225,7 @@ def _seed_source_price(db_session, spu_id: str, *, master_cost: Decimal | None =
     )
     db_session.add(acct)
     db_session.flush()
-    cp = ChannelProduct(
-        shop_pk=acct.id, spu_id=spu_id, title="t", status="ACTIVATE"
-    )
+    cp = ChannelProduct(shop_pk=acct.id, spu_id=spu_id, title="t", status="ACTIVATE")
     db_session.add(cp)
     db_session.flush()
     pact = ProcurementAccount(
@@ -337,11 +333,7 @@ def test_run_profit_daily_counts_paid_order(db_session):
     )
     db_session.flush()
     rows = reporting_job.profit_daily.rebuild(db_session, profit_date=date(2030, 1, 1))
-    mine = [
-        r
-        for r in rows
-        if r.spu_pk == cp.id and r.profit_date == date(2030, 1, 1)
-    ]
+    mine = [r for r in rows if r.spu_pk == cp.id and r.profit_date == date(2030, 1, 1)]
     assert len(mine) == 1
     assert mine[0].units_sold == Decimal("2.0000")
     assert mine[0].gross_revenue == Decimal("100000.00")
