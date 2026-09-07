@@ -220,6 +220,28 @@ spu_pk→(cost, currency, source) map），口径与 jobs 版 1:1（同一 SQL �
   SETTLEMENT 行（更早代码窗口期写入），与本次回填不冲突。陈旧性检查通过：
   0 笔「payload=0 但库存非零」。
 
+### 3.6 币种清单与换算（D6 输入，2026-09-07 生产库实测）
+
+所有金额**底层按原币聚合、输出层一次换算成 USD**（dashboard 决策⑥ +
+§4.2 通用规则）。各数据源的存储币种：
+
+| 数据源 | 金额字段 | 币种 | 实测证据 |
+| --- | --- | --- | --- |
+| 广告 `analytics.ad_product_links` | `real_cost_total` / `order_value_total` | **USD** | 拍板口径（OEC 账号显示币种），无需换算 |
+| 销售 `commerce.sales_order_lines` | `unit_price` | **VND** | 928/928 行全 VND |
+| 订单 `commerce.sales_orders` | `total_amount` / `payment_amount` | **VND** | 888/888 行全 VND |
+| 退款 `after_sales.case_lines` | `refund_amount` | **VND**（假设） | 58 行 VND + ⚠ 231/289 行 currency IS NULL——按店铺币种 VND 处理（现有代码已隐含此假设） |
+| 结算 `finance.settlement_components` | `amount` | **VND** | 31,477/31,477 行全 VND |
+| 结算单/打款 `finance.settlement_statements` / `payouts` | — | **VND** | 37 + 32 行全 VND |
+| 人工成本 `procurement.manual_product_costs` | `unit_cost` | **CNY** | 7/7 行全 CNY |
+| 采购成交价 `procurement.purchase_order_lines` | `unit_cost` | CNY（设计） | ⚠ **表空（0 行）**——成本链第 2 层当前空转，保留待妙手采购单流入 |
+| 1688 货源价 `procurement.procurement_products` | `source_unit_cost` | **CNY**（无 currency 列，1688 ¥ 定义） | 812 行 |
+
+换算路径：VND → USD 用 `÷ fx rates["VND"]`；CNY → USD 用
+`× (1 / fx rates["CNY"])`（桥式倒数，见 `_resolve_fx_rates`）；USD 直用。
+汇率源 = `fx.exchange_rate_snapshots` 在线快照，缺失时回退固定常量
+（`fixed-const` 兜底，绝不让账页空白）。
+
 ## 4. 端点契约变化（`GET /v2/analytics/spu-roi`，additive 不破已有字段）
 
 行新增字段（money-str / int，序列化规则不变：money 4 位小数、比率 2 位）：
