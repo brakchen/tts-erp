@@ -169,6 +169,9 @@ tracking 侧无 action_code 索引但全表数千行，不加索引。
 
 ```text
 1. MANUAL_ENTRY         procurement.manual_product_costs（spu_pk，现行已有层）
+                        对外名称 = 「人工标注的采购成交价」（2026-09-07 用户拍板
+                        改术语；原「人工成本」作废——它语义上就是采购成交价，
+                        只是人工标注而非妙手采购单同步）
 2. LATEST_PURCHASE_COST linkage.effective_product_links → purchase_order_lines
                         最新一条 unit_cost（妙手采购单成交价，updated_at 倒序）
 3. SOURCE_PRICE         procurement_products.source_unit_cost（1688 挂牌价；
@@ -233,7 +236,7 @@ spu_pk→(cost, currency, source) map），口径与 jobs 版 1:1（同一 SQL �
 | 退款 `after_sales.case_lines` | `refund_amount` | **VND**（假设） | 58 行 VND + ⚠ 231/289 行 currency IS NULL——按店铺币种 VND 处理（现有代码已隐含此假设） |
 | 结算 `finance.settlement_components` | `amount` | **VND** | 31,477/31,477 行全 VND |
 | 结算单/打款 `finance.settlement_statements` / `payouts` | — | **VND** | 37 + 32 行全 VND |
-| 人工成本 `procurement.manual_product_costs` | `unit_cost` | **CNY** | 7/7 行全 CNY |
+| 人工标注的采购成交价 `procurement.manual_product_costs` | `unit_cost` | **CNY** | 7/7 行全 CNY |
 | 采购成交价 `procurement.purchase_order_lines` | `unit_cost` | CNY（设计） | ⚠ **表空（0 行）**——成本链第 2 层当前空转，保留待妙手采购单流入 |
 | 1688 货源价 `procurement.procurement_products` | `source_unit_cost` | **CNY**（无 currency 列，1688 ¥ 定义） | 812 行 |
 
@@ -300,7 +303,7 @@ meta 变更：
 - 行点击 → 行内展开钻取面板（§6，D7 ✅ 行内 accordion）；
   `settled_order_count < order_count` 的行标题旁加「含未结算，净利为估算」
   小标（复用 warn 样式 + data-tip）。
-- 成本兜底文案 30 → 40：行内 ⚠ warn tip 改「无成本记录（人工/采购单/
+- 成本兜底文案 30 → 40：行内 ⚠ warn tip 改「无成本记录（人工标注/采购单/
   货源价均未命中），按默认 40 元/件」（D1）。
 
 ## 6. 明细钻取面板设计（P1 落地 + v7 扩展）
