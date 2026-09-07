@@ -1,6 +1,6 @@
 # pages/spu-roi v7 重构技术方案
 
-> **状态：决策点 D1–D7 全部拍板（2026-09-07），可以开工**。
+> **状态：决策点 D1–D8 全部拍板（2026-09-07），可以开工**。
 > 注：D5（未结算退货率折算）与 D4（M13b 切 38301 全损口径）已超出 rubric v7
 > 字面——rubric 需升 v8 同步（实施步骤 §8-7）。
 > 口径 truth source：`handoff/spu-roi-full-loss-rubric.md`（v7，2026-09-07 用户拍板）+
@@ -226,11 +226,12 @@ spu_pk→(cost, currency, source) map），口径与 jobs 版 1:1（同一 SQL �
 
 | 字段 | 含义 | 展示 |
 | --- | --- | --- |
-| `net_revenue` | Σ line_net（已结算 SETTLEMENT 分摊 + 未结算 ×(1−r̂)），USD | ⚙ 隐藏组「结算 v7」 |
-| `settled_sales` / `unsettled_sales` | 已/未结算 GMV 拆分，USD | ⚙ 同上 |
-| `settled_order_count` | 已结算订单数 | ⚙ 同上 |
-| `full_loss_qty` | 全损件数（38301 口径，rubric 检查点 127） | ⚙ 同上 |
-| `full_loss_cancelled_qty` | 其中 CANCELLED 已到海外（COGS 补扣基数） | ⚙ 同上 |
+| `full_loss_rate` | **全损退款率** = `full_loss_qty ÷ (units_sold + full_loss_cancelled_qty)`，分母 0 → null（D8 主列，可排序） | **主列** |
+| `net_revenue` | Σ line_net（已结算 SETTLEMENT 分摊 + 未结算 ×(1−r̂)×(1−退货率)，D5），USD | 下钻·结算 tab 顶部 |
+| `settled_sales` / `unsettled_sales` | 已/未结算 GMV 拆分，USD | 下钻·同上 |
+| `settled_order_count` | 已结算订单数 | 下钻·同上 |
+| `full_loss_qty` | 全损件数（38301 口径，rubric 检查点 127） | 下钻·同上 |
+| `full_loss_cancelled_qty` | 其中 CANCELLED 已到海外（COGS 补扣基数） | 下钻·同上 |
 
 语义变化（值会变，`tech-doc` §5.2 + `external-api.md` 必须同步标注）：
 `net_profit` / `roi_real` / `roi_breakeven` / `platform_fee` / **`return_loss`
@@ -244,7 +245,7 @@ meta 变更：
 - 新增 `meta.settlement = {settled_orders, unsettled_orders, coverage}`
 - 新增 `meta.rubric_version = "v7"`（页面 stamp 可显示，口径漂移一眼定位）
 
-排序白名单暂不新增字段（16 个现字段不动）。
+排序白名单新增 `full_loss_rate`（D8 主列可排序）；其余 16 个现字段不动。
 
 **新增端点**（钻取面板数据源，详见 §6.3；D6 已拍板 = 每 tab 懒加载）：
 `GET /v2/analytics/spu-roi/{spu_pk}/{orders|settlements|cases|ads}`（readonly），
@@ -252,22 +253,33 @@ meta 变更：
 
 ## 5. 页面改造（`api/v2/pages.py` 模板 + `static/js/spu-roi.js`）
 
-1. 主列不动（商品/广告数/消耗/销售/有效销售/退货/取消单量/取消率/退货率/
-   全损退款/净利润/实际ROI/保本ROI），红绿判据逻辑不变。
-2. 新增 ⚙ 列开关组 `cg-settle`：结算净收入 / 已结算 GMV / 未结算 GMV /
-   全损件数 / 全损取消件数（默认折叠，与现有 5 组一致）。
-3. 结余带 10 格不动，只改 tooltip：「净利润」格换 v7 口径文案（已结算按
-   SETTLEMENT 实到账、未结算按 30.8% 基线 ×(1−退货率)、含全损取消补扣）；
-   「全损退款」格 tooltip 改 38301 全损口径定义（D4 B：到海外 + 退款/取消，
-   含已出海被取消件——货拿不回来）。
-4. 「费率 %」输入框 tooltip 改：「仅作用于未结算订单（已结算按 SETTLEMENT
-   实到账，不受此影响）；未结算净收入另按该 SPU 当前退货率折算（D5）」。
-5. `rowMarkup` 加隐藏组 cell；`settled_order_count < order_count` 的行标题旁
-   加「含未结算，净利为估算」小标（复用现有 warn 样式 + data-tip）。
-6. **行点击 → 行内展开钻取面板**（交互详设见 §6，D7 ✅ 行内 accordion）。
-7. 成本兜底文案 30 → 40：结余带「全损退款」tooltip、行内 ⚠ warn tip
-   （"无人工成本记录"改"无成本记录（人工/采购单/货源价均未命中）"）；
-   ⚠ 只对 `cost_source=DEFAULT_K1` 行出现（D1）。
+**主表列精简（D8 ✅ 2026-09-07 用户拍板）**：行维度只保留 6 个指标列，
+其余全部移入下钻面板对应 tab 的顶部汇总区（§6.2）。
+
+| 主表列 | 字段 | 说明 |
+| --- | --- | --- |
+| 商品 | `spu_id / title / main_image_url / status` | 维度列（⚠ DEFAULT_K1 标记保留在标题旁） |
+| 广告消耗 | `spend` | USD，广告全窗口累计 |
+| 有效GMV | `sales` | 白名单有效销售，USD |
+| 有效出单量 | `order_count` | 白名单订单数 |
+| 取消率 | `cancel_rate` | 取消 ÷（有效+取消） |
+| 全损退款率 | `full_loss_rate`（新字段） | 全损件 ÷（售出件+全损取消件）；分母 0 → — |
+| 净利润 | `net_profit` | M18，负值红字（红绿判据保留） |
+
+- **⚙ 列开关组全部取消**（cg-adref/structure/refundsplit/cancel/fee + 原拟
+  新增的 cg-settle 都不再做列）——主表不再有隐藏列。
+- 可排序列头 = 6 个指标列；**默认排序改为净利润升序**（最亏在前；原默认
+  roi_real 升序——ROI 已不在主列，改为下钻利润构成 tab 展示）。
+- API 契约不变：所有字段照常在 JSON 返回（下钻各 tab 顶部汇总区直接消费
+  行字段），本次是展示层精简，不动端点字段。
+- 结余带（10 格汇总）不动，tooltip 文案按 v7 口径更新（净利润 = 已结算
+  SETTLEMENT + 未结算 ×(1−r̂)×(1−退货率) − 货本含全损取消 − 广告；
+  全损退款 = 38301 全损口径）。
+- 行点击 → 行内展开钻取面板（§6，D7 ✅ 行内 accordion）；
+  `settled_order_count < order_count` 的行标题旁加「含未结算，净利为估算」
+  小标（复用 warn 样式 + data-tip）。
+- 成本兜底文案 30 → 40：行内 ⚠ warn tip 改「无成本记录（人工/采购单/
+  货源价均未命中），按默认 40 元/件」（D1）。
 
 ## 6. 明细钻取面板设计（P1 落地 + v7 扩展）
 
@@ -290,9 +302,26 @@ meta 变更：
 | --- | --- | --- |
 | **利润构成** | 该 SPU 的 v7 P&L 分解瀑布（文本表）：净收入（已结算 SETTLEMENT 分摊 / 未结算 ×(1−r̂) 两行）− 货本（售出件 + 全损取消件分列）− 广告消耗 = **净利润**；每行带口径 tooltip。这是「数字可信」的锚点——用户能逐行对账 | 主表行已有字段直出（不再请求） |
 | **订单·物流** | 该 SPU 窗口内订单列表：订单号 / 状态 / 件数 / 行金额 / paid_at / **is_settled** / **已到海外(38301)✓** / 全损标记；每行可再展开 **tracking 时间线**（`tracking_events` 按事件时间排序，action_code + 描述）；CANCELLED 单标红、全损单标 ⚠ | `commerce.sales_orders/lines` + `fulfillment.shipments/tracking_events` |
-| **结算** | 已结算订单的**组件拆分明细**：每单一张小表（GROSS_SALES / SELLER_DISCOUNT / PLATFORM_COMMISSION / AFFILIATE_COMMISSION / SHIPPING_FEE / ACTUAL_SHIPPING_FEE / PLATFORM_DISCOUNT / CUSTOMER_REFUND / FEE / **SETTLEMENT**），VND 原值 + USD 换算；statement 时间；**SPU 分摊比例**（line_gmv/order_gmv）；未结算订单显示「未结算，按 r̂=30.8% 基线估算」 | `finance.settlement_transactions/components` |
-| **售后** | case 明细（类型/状态/退款金额/原因 code+text/时间），未完结标黄 | `after_sales.cases/case_lines`（P1 原规划） |
-| **广告** | campaign×SPU 行（广告 ID/消耗/出单/窗口） | `analytics.ad_product_links`（P1 原规划） |
+| **结算** | 已结算订单的**组件拆分明细**：每单一张小表（GROSS_SALES / SELLER_DISCOUNT / PLATFORM_COMMISSION / AFFILIATE_COMMISSION / SHIPPING_FEE / ACTUAL_SHIPPING_FEE / PLATFORM_DISCOUNT / CUSTOMER_REFUND / FEE / **SETTLEMENT**），VND 原值 + USD 换算；statement 时间；**SPU 分摊比例**（line_gmv/order_gmv）；未结算订单不进明细，tab 底部一行汇总「未结算 N 单，估算净收入 $X（基线 r̂ ×(1−退货率)）」（行字段计算，用户拍板 2026-09-07） | `finance.settlement_transactions/components` |
+| **售后** | case 明细（**order_id 关联**（可跳订单 tab 对号）/ 类型/状态/退款金额/原因 code+text/时间），未完结标黄 | `after_sales.cases/case_lines`（P1 原规划） |
+| **广告** | campaign×SPU 行（campaign_id/消耗/出单/窗口）；campaign **名称是数据缺口**（三个已同步 endpoint 的 response 均无名称字段，1368 行实测）——端点预留 `campaign_name`（现恒 null），需扩展端补采集（见 §6.4） | `analytics.ad_product_links`（P1 原规划） |
+
+**tab 结构统一为「顶部指标汇总区 + 下方明细记录」**（D8：主表移出的指标
+按域归位，不再做隐藏列）：
+
+- **利润构成**：v7 P&L 瀑布 + 移入的利润域指标（实际 ROI / 保本 ROI /
+  平台佣金 / 全损货损金额 / CPA / 单位成本+来源类型标签——**不下钻来源
+  记录**（不要采购单号/1688 offer 链接，展示解析后的价格即可，用户拍板
+  2026-09-07））
+- **订单·物流**：顶部 = 订单结构指标（有效单量 / 售出件数 / 取消单量 /
+  取消原额 / 销售 GMV 全单口径）
+- **结算**：顶部 = 结算域指标（net_revenue / 已结算 GMV / 未结算 GMV /
+  已结算单量 / 全损件数 / 全损取消件数）
+- **售后**：顶部 = 退款指标（净退款额 / 退款率金额·单量两口径 /
+  仅退·退货拆分 / 已付被取消信息列含 missing_lines）
+- **广告**：顶部 = 广告指标（投放广告数 / 平台出单量 / 平台 GMV / ROI₀ /
+  观测窗口），并明示「广告域全窗口累计，不随日期裁剪」（与主表窗口的
+  差异必须可见，否则用户对不上数）
 
 ### 6.3 端点设计（D6 ✅ 已拍板：每 tab 一个懒加载端点）
 
@@ -336,13 +365,15 @@ SQL 简单独立；面板一打开就全量拉四个域反而浪费。代价是�
 
 // GET …/cases
 { "spu_pk": 1448,
-  "cases": [{ "case_id": "…", "type": "…", "status": "…",
+  "cases": [{ "case_id": "…", "order_id": "…", "type": "…", "status": "…",
     "refund_amount": "…", "reason": "…", "updated_at": "…" }],
   "meta": {…} }
 
 // GET …/ads（无窗口参数）
 { "spu_pk": 1448,
-  "ads": [{ "campaign_id": "…", "spend": "…", "orders": 12,
+  "ads": [{ "campaign_id": "…", "campaign_name": null,  // 数据缺口：
+                                        // 现有同步数据无名称，预留字段
+    "spend": "…", "orders": 12,
     "first_day": "…", "last_day": "…" }],
   "meta": {…} }
 ```
@@ -365,6 +396,8 @@ dashboard §3.3 P2 原规划 + 本次讨论新增候选：
 - 退货运费承担（ACTUAL_RETURN_SHIPPING_FEE 入净利，随 finance 数据完善）
 - 结算周期对账视图（按 statement 周期 × SPU 交叉表）
 - 利润时间趋势（按 VN 自然日的净利/ROI 曲线，复用 v3 区间聚合思路）
+- **campaign 名称采集**（数据缺口，需 Chrome 扩展侧在 campaign 相关接口/页面
+  带上名称字段后回填；端点契约已预留 `campaign_name`）
 
 ## 7. 测试方案（TDD）
 
@@ -404,6 +437,8 @@ TEST_ 前缀行，走 `tests/conftest.py` 事务回滚隔离惯例）。
 19. D2/§3.5：`_write_components` 零值落库（0 写行、None 仍跳过）；
     回填脚本幂等（重跑不产生重复行）；ROI 侧：`SETTLEMENT=0` 的订单按已结算
     net=0 处理（不当未结算估算）
+20. D8：主表仅渲染 6 指标列 + 商品列；列开关组移除；默认排序 = 净利润升序；
+    `full_loss_rate` = 全损件 ÷（售出件+全损取消件），分母 0 → null
 
 **验收对账**：`scripts/oneoff_roi_v7_reconcile.py` 对生产库跑 rubric 检查点表
 （总净收入 $9,300.21 / 净利 −$2,266.87 / ROI 1.3094 / 保本 1.6286 /
@@ -434,7 +469,7 @@ unit test 不依赖生产数据；该脚本为一次性验收，不 commit 到�
 8. `test.sh fast` 0 fail → master `git merge --no-ff` → push → 清 worktree +
    ACTIVE.md 删行
 
-## 9. 决策点（未全部拍板前禁止开工）
+## 9. 决策点（D1–D8 全部拍板）
 
 | # | 问题 | 选项 | 倾向 | 状态 |
 | --- | --- | --- | --- | --- |
@@ -445,6 +480,7 @@ unit test 不依赖生产数据；该脚本为一次性验收，不 commit 到�
 | D5 | **未结算订单的退款** | A. 不扣（rubric v7 字面）；B. 扣 case 退款；C. 按 SPU 当前退货率估算 | **C**（未结算净收入 = gmv × (1−r̂) × (1−refund_rate_spu)，rate = M12 金额口径，无历史 → 0，钳位 [0,1]；注意：已偏离 rubric v7 字面，rubric 需升 v8） | ✅ C（2026-09-07 用户拍板） |
 | D6 | **钻取端点形态**：单端点全 sections vs 每 tab 一个懒加载端点 | A. 单端点；B. 每 tab 一端点懒加载 | **B**（面板打开零请求、只看利润构成不拉数；每端点单域 SQL 更简单） | ✅ B（2026-09-07 用户拍板） |
 | D7 | **钻取交互形式**：行内 accordion vs 右侧 drawer vs modal | A. 行内 accordion（§6.1）；B. drawer；C. modal | **A**（无框架 plain DOM 最简、与列开关 details 同哲学、上下文不丢行位置） | ✅ A（2026-09-07 用户拍板） |
+| D8 | **主表列精简** | 用户指定：行维度只保留 广告消耗 / 有效GMV / 有效出单量 / 取消率 / 全损退款率 / 净利润 6 列 | 其余全部移入下钻各 tab 顶部汇总区；⚙ 列开关组取消；新增 `full_loss_rate` 字段（入排序白名单）；默认排序改净利润升序；API 契约不变（展示层精简） | ✅（2026-09-07 用户拍板） |
 
 ## 10. 已知偏差与后续（不阻塞本次重构）
 
