@@ -1,6 +1,8 @@
 # ─── Secrets ─────────────────────────────────────────
 .env
 .env.local
+.env.test
+.env.test.local
 *.pem
 *.key
 

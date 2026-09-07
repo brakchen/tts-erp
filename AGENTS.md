@@ -8,6 +8,11 @@
 Python 3.14 · FastAPI + uvicorn（`:9877`）· SQLAlchemy 2 + psycopg3 · PostgreSQL 容器（`:5432`，
 10 schema / 37 表 + 2 view（v1 `public.*` 业务表 2026-09-05 归档删除；analytics 4 张僵尸表 migration 0007 drop）· APScheduler（独立 sync-worker 进程）· MinIO · Fernet 加密 · systemd user units。
 
+- **测试 DB 隔离（2026-09-07）**：tests 跑在专用 `tts_erp_v3_test` 库；prod `tts_erp` 仅 systemd API + 人工 dev
+  连接，永不被测试污染。`.env.test`（gitignored）= `.env` 的 dbname 替身；`scripts/test.sh` 启动时 source
+  它。开发者在 test db 上手动跑 `bash scripts/import_prod_to_test.sh --yes` 可按需把 prod 数据搬进
+  test db（multi-pass FK 处理，默认含 credentials 让 FK 走得通，prod Fernet key 不变所以仍可解密）。
+
 - v2（2026-08-29 切流生产）：TikTok Shop 销售 + 妙手采购 → **本地分析库 + 只读 API + 定时同步**
 - 下游：TikTok Shop Open API (`open-api.tiktokglobalshop.com`) + 妙手开放平台 (`openapi.wanshifu.com`)
 - 打上游 TikTok 的**唯一**路径 = sync-worker jobs（经 `tts_erp_v2/proxy/tts_shop`，内部处理 HMAC 签名 /
@@ -21,9 +26,13 @@ Python 3.14 · FastAPI + uvicorn（`:9877`）· SQLAlchemy 2 + psycopg3 · Postg
 ## 2. Commands（命令）
 
 ```bash
-bash scripts/test.sh fast                          # 日常全量测试（唯一入口；migration 域已归档勿跑）
+bash scripts/test.sh fast                          # 日常全量测试（唯一入口；自动 source .env.test 切到 tts_erp_v3_test；migration 域已归档勿跑）
+TTS_ERP_TEST_OFF=1 bash scripts/test.sh fast      # 跳过 .env.test source（仅迁移/手动调试用；默认禁走）
 .venv/bin/pytest tests/<domain>/ -q                # 单域（如 tests/miaoshou/、tests/jobs_tiktok/）；
                                                     # worktree 内无 .venv，改用 /home/schan/tts-erp/.venv/bin/pytest（见 §11）
+bash scripts/import_prod_to_test.sh --dry-run      # 看 import plan（37 张表 + credentials + api_keys）
+bash scripts/import_prod_to_test.sh --yes          # 实际把 prod 数据导入 tts_erp_v3_test（multi-pass FK）
+bash scripts/import_prod_to_test.sh --exclude-credentials --yes  # 不拷 credentials（部分 FK 表会空）
 bash restart.sh                                    # 重启 API = systemctl --user restart tts-erp.service
 systemctl --user restart tts-erp-sync.service      # 改了 jobs/ 或 sync_worker/ 后必须单独跑
 python3 test_e2e.py / test_e2e_finance.py          # 端到端冒烟（需 :9877 在跑）
@@ -39,6 +48,12 @@ journalctl --user -u tts-erp -n 50                 # systemd 日志
 - 签名调试：`TTS_DEBUG_SIGN=1`（TikTok）/ `MIAOSHOU_DEBUG_SIGN=1`（妙手）在 stderr 打 canonical
 - 测试规范：TDD 先写测试再实现；共享 fixtures 在 `tests/conftest.py`（事务回滚隔离、`TEST_%` 哨兵数据）；
   跑不过 0 fail 不收尾
+- **测试环境隔离（2026-09-07）**：所有测试默认连 `tts_erp_v3_test`（专用 test db，已 schema 一致）。
+  `bash scripts/test.sh` 自动 source `.env.test`（gitignored）切到 test db。prod API service /
+  `uvicorn` 本地启动仍读 `.env` 连 prod `tts_erp`，**零变更**。安全护栏：tests/conftest.py 检测到
+  `TTS_ERP_DB_URL` 指向 prod-shape dbname（`tts_erp` / `tts_erp_prod`）会往 stderr 打 WARNING；
+  scripts/test.sh 会在 .env.test 缺失时直接退出。需要 prod-shaped 数据时运行
+  `bash scripts/import_prod_to_test.sh --yes`。
 
 ## 3. Code style（写代码风格，带示例）
 
