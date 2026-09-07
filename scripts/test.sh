@@ -10,15 +10,34 @@
 #   scripts/test.sh coverage              # with coverage report (incl. domain_migration)
 #
 # Domain names may be given with or without the "domain_" prefix
-# (e.g. `scripts/test.sh miaoshou` == `scripts/test.sh domain_miaoshou`).
+# (e.g. `scripts/test.sh miaoshou` == `pytest -m "domain_miaoshou and not slow"`).
+#
+# Test-DB isolation (2026-09-07): by default this script sources
+# ``.env.test`` (gitignored, must exist locally) which sets
+# ``TTS_ERP_DB_URL_TEST`` → ``tts_erp_v3_test`` so tests run against
+# the dedicated test database instead of the production ``tts_erp``.
+# Set ``TTS_ERP_TEST_OFF=1`` to bypass (e.g. when intentionally running
+# the migration suite against prod). Set ``TTS_ERP_DB_URL_TEST``
+# directly to override the value from ``.env.test``.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PYTEST=".venv/bin/pytest"
 if [ ! -x "$PYTEST" ]; then
   # Worktrees share the parent repo's venv; fall back to the absolute path.
-  PARENT_VENV="$(cd .. && pwd)/$(basename "$(pwd)").../.venv/bin/pytest"
   PYTEST="/home/schan/tts-erp/.venv/bin/pytest"
+fi
+
+# ── Test-DB isolation (2026-09-07) ──────────────────────────────
+# Default: source ``.env.test`` so pytest connects to the dedicated
+# ``tts_erp_v3_test`` database rather than the prod ``tts_erp`` the
+# systemd API uses. See ``scripts/import_prod_to_test.sh`` for how to
+# seed prod-shaped data into the test DB when a developer needs it.
+if [ "${TTS_ERP_TEST_OFF:-0}" != "1" ] && [ -z "${TTS_ERP_DB_URL_TEST:-}" ] && [ -f .env.test ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . ./.env.test
+  set +a
 fi
 
 # addopts now carries `-m 'not domain_migration'` (2026-08-31): the migration

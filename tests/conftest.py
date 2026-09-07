@@ -43,10 +43,73 @@ _load_env()
 
 # Append +psycopg driver if .env gave plain postgresql:// (legacy URL
 # format). psycopg2 is not installed in this environment.
-_db_url = os.environ.get("TTS_ERP_DB_URL")
-if _db_url and _db_url.startswith("postgresql://") and "+psycopg" not in _db_url:
-    _db_url = "postgresql+psycopg://" + _db_url[len("postgresql://") :]
-    os.environ["TTS_ERP_DB_URL"] = _db_url
+def _coerce_psycopg(url: str) -> str:
+    """Translate a plain ``postgresql://`` URL to ``postgresql+psycopg://``.
+
+    The legacy DSN format (``postgresql://user:pass@host/db``) is what
+    ``.env`` and most Docker setups emit. SQLAlchemy 2 + psycopg3 needs
+    the explicit ``+psycopg`` driver suffix to pick the right DBAPI.
+    """
+    if url.startswith("postgresql://") and "+psycopg" not in url:
+        return "postgresql+psycopg://" + url[len("postgresql://") :]
+    return url
+
+
+# Test-DB override resolution (2026-09-07):
+#
+# The project historically had every test connect to the production
+# database (``TTS_ERP_DB_URL`` from ``.env``). That shared-DB coupling
+# is what allowed test commits to leak into prod (the 2026-09-07
+# audit found 150 ``integration.sync_jobs`` rows and 1
+# ``integration.credentials`` row with ``TEST_`` prefixes sitting in
+# the live ``tts_erp`` DB). The fix is env-driven:
+#
+#   1. ``scripts/test.sh fast`` sources ``.env.test`` (gitignored) which
+#      sets ``TTS_ERP_DB_URL_TEST`` to the dedicated ``tts_erp_v3_test``
+#      database.
+#   2. ``tests/conftest.py`` (here) prefers ``TTS_ERP_DB_URL_TEST``
+#      over the prod ``TTS_ERP_DB_URL``; tests run against the test DB.
+#   3. The prod API service (``tts-erp.service``) still reads ``.env``
+#      unchanged and keeps talking to ``tts_erp``. Zero restart, zero
+#      docker change.
+#
+# We do NOT hard-fail when ``TTS_ERP_DB_URL_TEST`` is unset: that
+# keeps direct ``pytest`` invocations (e.g. ``pytest tests/db/`` for
+# a one-off introspection) working. Instead we print a one-line
+# warning the first time we resolve to a prod-shaped dbname so the
+# developer notices. The hard guard for the full suite lives in
+# ``scripts/test.sh`` (refuses to run without ``.env.test``).
+from urllib.parse import urlparse as _urlparse
+
+_db_url_test = os.environ.get("TTS_ERP_DB_URL_TEST")
+_db_url_prod = os.environ.get("TTS_ERP_DB_URL")
+
+if _db_url_test:
+    _db_url = _coerce_psycopg(_db_url_test)
+    os.environ["TTS_ERP_DB_URL"] = _db_url  # propagate so SQLAlchemy
+                                           # picks up the override too
+elif _db_url_prod:
+    _db_url = _coerce_psycopg(_db_url_prod)
+    # Defensive: warn if we're about to run tests against what looks
+    # like the production DB AND the caller didn't opt in via
+    # ``TTS_ERP_DB_URL_TEST``. This catches ``pytest`` invoked without
+    # ``scripts/test.sh`` when a developer has only ``.env`` on disk.
+    try:
+        _dbname = (_urlparse(_db_url).path or "").lstrip("/")
+        if _dbname in {"tts_erp", "tts_erp_prod"}:
+            sys.stderr.write(
+                "\n[conftest] WARNING: TTS_ERP_DB_URL_TEST not set; tests\n"
+                "             will run against the production-shaped DB\n"
+                "             ``{db}``. Use ``bash scripts/test.sh fast``\n"
+                "             (or ``cp .env .env.test && sed -i\n"
+                "             's|/tts_erp\\b|/tts_erp_v3_test|' .env.test``)\n"
+                "             to isolate.\n\n".format(db=_dbname)
+            )
+    except Exception:  # noqa: BLE001 — defensive: URL parse failure
+        # must never block a test run; we already have a usable _db_url.
+        pass
+else:
+    _db_url = None  # type: ignore[assignment]
 
 
 @pytest.fixture(scope="session")
