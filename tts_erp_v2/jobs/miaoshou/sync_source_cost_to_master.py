@@ -43,14 +43,17 @@ _SQL_BACKFILL = text(
                source_item_id,
                source_unit_cost,
                source_min_unit_cost,
-               source_max_unit_cost,
-               procurement_account_id
+               source_max_unit_cost
         FROM procurement.procurement_products
         WHERE NOT (external_product_id ~ '^[0-9]{15,20}$')
           AND source_unit_cost IS NOT NULL
           AND source_item_id IS NOT NULL
         ORDER BY source_item_id, synced_at DESC NULLS LAST, id DESC
     )
+    -- NB: no procurement_account_id join — source_item_id is the global
+    -- 1688 offer id, not account-scoped. A TK-side row written under one
+    -- miaoshou license can freely bridge to a public-box row written under
+    -- another (they both reference the same physical 1688 offer).
     UPDATE procurement.procurement_products tk
     SET source_unit_cost = lo.source_unit_cost,
         source_min_unit_cost = lo.source_min_unit_cost,
@@ -59,7 +62,6 @@ _SQL_BACKFILL = text(
     FROM latest_offer lo
     WHERE tk.external_product_id ~ '^[0-9]{15,20}$'
       AND tk.source_item_id = lo.source_item_id
-      AND tk.procurement_account_id = lo.procurement_account_id
       AND (
           tk.source_unit_cost IS DISTINCT FROM lo.source_unit_cost
           OR tk.source_min_unit_cost IS DISTINCT FROM lo.source_min_unit_cost
