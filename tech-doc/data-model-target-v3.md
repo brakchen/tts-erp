@@ -807,10 +807,17 @@ MANUAL_ENTRY              -- 人工填写（本系统事实源，优先级最高
 LATEST_PURCHASE_COST      -- 妙手采购单
 PERIOD_AVERAGE_COST       -- 妙手采购单
 WEIGHTED_AVERAGE_COST     -- 妙手采购单
+SOURCE_PRICE             -- 货源价兜底（2026-09-06 决策：货源价=采购价口径）
 ```
 
-注意：1688 采集标价**不是**成本口径（标价 ≠ 实际采购价）。无人工填写且无采购单的
-SPU 不生成成本快照，进入异常/待填队列。
+> 2026-09-06 决策（配合 `miaoshou.common_collect_box` job）：用户在拍板
+> “货源价就是我们的采购价格”后，公共采集箱挂牌价（`procurement_products.source_unit_cost`）
+> 作为 **SOURCE_PRICE 估算兜底** 落账（优先级低于采购单/人工），method 区分开，
+> 报表只能叫“估算成本”，待真实采购单出现后对账修正。
+
+注意：1688 采集标价严格说**不是**成交成本（标价 ≠ 实际采购价，TK 采集箱
+originPrice 曾被实测差 7×）；SOURCE_PRICE 只作估算兜底。无人工、无采购单、
+无货源价的 SPU 不生成成本快照，进入异常/待填队列。
 
 ## 11.4 利润口径
 

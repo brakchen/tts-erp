@@ -31,9 +31,10 @@ class ProductCostSnapshot(Base):
     """Resolved unit cost for a TikTok product at a point in time.
 
     cost_method ∈ {MANUAL_ENTRY, LATEST_PURCHASE_COST, PERIOD_AVERAGE_COST,
-                   WEIGHTED_AVERAGE_COST}. 1688 listing price is NOT a
-    valid cost source. SPU with no available source ⇒ no row written,
-    surfaced via LinkIssue or monitoring report.
+                   WEIGHTED_AVERAGE_COST, SOURCE_PRICE}。SOURCE_PRICE = 货源价
+    （procurement_products.source_unit_cost，公共采集箱挂牌价）兜底估算口径，
+    报表须标注“估算成本”，成交后与采购单口径对账。SPU 无任何可用口径
+    ⇒ 不写行，经 monitoring / active_spus_without_cost 暴露。
     """
 
     __tablename__ = "product_cost_snapshots"
