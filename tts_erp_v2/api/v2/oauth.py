@@ -425,9 +425,11 @@ def _handle_html(
 # Self-contained HTML shell (inline CSS/JS, no vendor assets) served at
 # GET /v2/oauth/tiktok/onboard (readonly-classified in middleware/auth.py
 # so an unauthenticated browser 302s to the login page like /v2/pages/*).
-# Behaviour lives in the inline script: probe /v2/auth/me → admin gate →
-# call GET /v2/oauth/tiktok/authorize?format=json (admin) on demand so the
-# link is always fresh (state TTL 45 min, single-use) — never cached.
+# Behaviour lives in the inline script: probe /v2/auth/me → role-gate
+# (readwrite+ may generate, readonly is shown a 403 hint) → on click
+# call GET /v2/oauth/tiktok/authorize?format=json (readwrite-gated) and
+# window.open the returned link in a new tab. Every click = fresh state
+# (45-min, single-use); the URL itself is never cached client-side.
 
 _ONBOARD_PAGE_HTML = """<!doctype html>
 <html lang="zh-Hans">
@@ -470,9 +472,6 @@ _ONBOARD_PAGE_HTML = """<!doctype html>
   .btn-ghost { background: transparent; color: var(--accent);
     border: 1px solid var(--accent); }
   .btn-ghost:hover { background: rgba(184,57,14,.06); }
-  .linkbox { font-family: var(--mono); font-size: 12px; word-break: break-all;
-    background: var(--paper-deep); border: 1px solid var(--rule-soft);
-    padding: 10px 12px; margin: 12px 0; }
   .meta { color: var(--muted); font-size: 12px; }
   .ok { color: var(--ok); } .err { color: var(--danger); }
   .status { font-size: 13px; min-height: 20px; }
@@ -497,21 +496,12 @@ _ONBOARD_PAGE_HTML = """<!doctype html>
   <div class="card">
     <h2>授权链接</h2>
     <div class="row">
-      <button id="btn-gen" type="button">生成授权链接</button>
-      <span class="meta">state 单次使用 · 45 分钟有效 · 每次生成都是新链接</span>
+      <button id="btn-gen" type="button">授权新店</button>
+      <span class="meta">点一次即可 · 自动新窗口打开 TikTok 授权页 · state 单次使用 · 45 分钟内有效</span>
     </div>
     <div class="status" id="status"></div>
-    <div id="linkcard" class="hide">
-      <div class="linkbox" id="linkbox"></div>
-      <div class="row">
-        <a id="btn-open" class="btn-ghost" target="_blank" rel="noopener"
-           style="padding:6px 14px;border:1px solid var(--accent)">在新窗口打开</a>
-        <button id="btn-copy" class="btn-ghost" type="button">复制链接</button>
-        <span class="meta" id="expiry"></span>
-      </div>
-    </div>
     <div id="role-gate" class="hide">
-      <p class="status err">当前会话没有 <code>readwrite</code> 或以上角色 — 生成授权链接需要 readwrite 及以上。
+      <p class="status err">当前会话没有 <code>readwrite</code> 或以上角色 — 「授权新店」需要 readwrite 及以上。
         换用更高权限账号登录后重试。</p>
     </div>
   </div>
@@ -519,7 +509,7 @@ _ONBOARD_PAGE_HTML = """<!doctype html>
   <div class="card">
     <h2>操作步骤</h2>
     <ol class="steps">
-      <li>点「生成授权链接」，然后在新窗口打开它（或复制链接）。</li>
+      <li>点「<strong>授权新店</strong>」—— 自动在新窗口打开 TikTok 授权页（state 单次使用 · 45 分钟内有效）。</li>
       <li>以要接入的 <strong>卖家账号</strong> 登录 TikTok Seller Center 并同意授权。</li>
       <li>TikTok 会把浏览器带回回调地址，页面会显示授权结果（店名 / 地区 / 授权范围）。</li>
       <li>落库成功即完成 —— 下个同步 tick 会自动把新店纳入数据同步
@@ -556,13 +546,19 @@ _ONBOARD_PAGE_HTML = """<!doctype html>
   }
   var statusEl = $("#status");
   function setStatus(cls, msg) { if (!statusEl) return; statusEl.className = "status" + (cls ? " " + cls : ""); statusEl.textContent = msg || ""; }
-  function showLink(url, state, expiresAt) {
-    var lc = $("#linkcard"); if (!lc) return;
-    lc.classList.remove("hide");
-    html($("#linkbox"), esc(url));
-    var open = $("#btn-open"); if (open) open.href = url;
-    var ex = $("#expiry"); if (ex) { var t = expiresAt ? expiresAt.replace("T", " ").replace(/\\.\\d+Z$/, "Z") : ""; ex.textContent = t ? ("有效至 " + t + " UTC") : ""; }
-    setStatus("ok", "链接已生成（单次使用；被用过或过期后点上方按钮重新生成）。");
+  function openAuth(url, expiresAt) {
+    // window.open must be called in a user-gesture context; the click
+    // handler's .then() chain qualifies for Chrome; Firefox may still
+    // block — fall back to an inline link in that case.
+    var w = window.open(url, "_blank", "noopener,noreferrer");
+    if (w) {
+      var t = expiresAt ? expiresAt.replace("T", " ").replace(/\\.\\d+Z$/, "Z") : "";
+      setStatus("ok", "已在新标签页打开授权页" + (t ? " · 有效至 " + t + " UTC" : "") + "（单次使用；被用过或过期后重新点「授权新店」）。");
+    } else {
+      // popup blocked — render an inline clickable fallback
+      statusEl.innerHTML = '浏览器拦截了新窗口，请<a href="' + esc(url) + '" target="_blank" rel="noopener">点这里打开授权页</a>（单次使用 · 45 分钟内有效）。';
+      statusEl.className = "status err";
+    }
   }
   function gate() {
     var g = $("#role-gate"); if (g) g.classList.remove("hide");
@@ -571,7 +567,7 @@ _ONBOARD_PAGE_HTML = """<!doctype html>
   }
   function generate() {
     var b = $("#btn-gen"); if (!b) return;
-    b.disabled = true; b.textContent = "生成中…";
+    b.disabled = true; var oldLabel = b.textContent; b.textContent = "生成中…";
     setStatus("", "正在向 TikTok 注册一次性 state…");
     api("/v2/oauth/tiktok/authorize?format=json")
       .then(function (r) {
@@ -583,33 +579,14 @@ _ONBOARD_PAGE_HTML = """<!doctype html>
       .then(function (d) {
         if (!d) return;
         if (d.ok && d.authorize_url) {
-          showLink(d.authorize_url, d.state, d.state_expires_at);
+          openAuth(d.authorize_url, d.state_expires_at);
         } else {
           var msg = (d && (d.error || d.detail)) || ("HTTP " + (d && d.status_code || "错误"));
           setStatus("err", "生成失败：" + msg + " — 检查服务端日志可定位（缺 TIKTOK_SERVICE_ID 会在此报配置错误）。");
         }
       })
       .catch(function (e) { setStatus("err", "请求失败：" + (e && e.message || e)); })
-      .then(function () { if (b) { b.disabled = false; b.textContent = "生成授权链接"; } });
-  }
-  var copyBtn = $("#btn-copy");
-  if (copyBtn) {
-    copyBtn.addEventListener("click", function () {
-      var url = ($("#linkbox") || {}).textContent || "";
-      if (!url) return;
-      function done() { copyBtn.textContent = "已复制"; setTimeout(function () { copyBtn.textContent = "复制链接"; }, 1600); }
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(url).then(done).catch(function () {
-          var ta = document.createElement("textarea"); ta.value = url;
-          document.body.appendChild(ta); ta.select();
-          try { document.execCommand("copy"); done(); } finally { document.body.removeChild(ta); }
-        });
-      } else {
-        var ta = document.createElement("textarea"); ta.value = url;
-        document.body.appendChild(ta); ta.select();
-        try { document.execCommand("copy"); done(); } finally { document.body.removeChild(ta); }
-      }
-    });
+      .then(function () { if (b) { b.disabled = false; b.textContent = oldLabel; } });
   }
   var gen = $("#btn-gen");
   if (gen) gen.addEventListener("click", generate);
@@ -622,7 +599,10 @@ _ONBOARD_PAGE_HTML = """<!doctype html>
         var key = me.key_prefix || "session";
         html(id, "操作员 <code>" + esc(key) + "</code> · " + esc(me.role || "") + ' · <a href="' + PREFIX + '/v2/auth/logout">退出</a>');
       } else { html(id, '<a href="' + loginUrl() + '">登录</a>'); return; }
-      if (me.role !== "admin") { gate(); } else { generate(); }
+      // Only gate users who lack the generate privilege; do NOT
+      // auto-generate on page load (would auto-open a TikTok tab
+      // every time admin/readwrite visits the page — intrusive).
+      if (me.role !== "admin" && me.role !== "readwrite") { gate(); }
     }).catch(function () { /* not fatal */ });
   }
   boot();
@@ -640,10 +620,11 @@ def onboard_page(request: Request) -> HTMLResponse:
     Readonly HTML shell (``/v2/oauth/tiktok/onboard`` in the auth
     middleware's ``_READONLY_EXACT`` so an unauthenticated browser GET is
     302-redirected to the login page). The page's inline JS probes
-    ``/v2/auth/me``; only an ``admin`` session may generate — it calls
-    ``GET /v2/oauth/tiktok/authorize?format=json`` (admin-gated) on demand
-    so every link is fresh (45-min single-use CSRF state). No shop/DB data
-    is rendered server-side; the shell is static.
+    ``/v2/auth/me``; a ``readwrite``-or-above session may click the
+    button, which calls ``GET /v2/oauth/tiktok/authorize?format=json``
+    (readwrite-gated) and ``window.open``-s the returned link in a new
+    tab. Readonly sessions see an inline 403 hint instead. No shop/DB
+    data is rendered server-side; the shell is static.
     """
     prefix = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "")
     redirect_hint = f"{prefix}/v2/oauth/tiktok/callback"

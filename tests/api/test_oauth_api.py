@@ -318,8 +318,16 @@ def test_onboard_page_readonly_can_view(
     assert "新店接入授权" in r.text
     assert 'id="btn-gen"' in r.text
     assert "authorize?format=json" in r.text
-    # New error message references the readwrite threshold (not admin).
+    # New error message references the readwrite threshold (not admin)
+    # and the new button label "授权新店".
     assert "readwrite" in r.text
+    assert "授权新店" in r.text
+    # Two-step UX (linkbox + copy button) is gone — click auto-opens.
+    assert "id=\"linkbox\"" not in r.text
+    assert "id=\"btn-copy\"" not in r.text
+    assert "复制链接" not in r.text
+    # JS uses window.open for the new flow (visible in the inline script).
+    assert "window.open" in r.text
 
 
 def test_onboard_page_admin_same_shell(api_client, admin_key, app_env: None) -> None:
@@ -329,3 +337,4 @@ def test_onboard_page_admin_same_shell(api_client, admin_key, app_env: None) -> 
     r = api_client.get("/v2/oauth/tiktok/onboard", headers=_bearer(admin_key))
     assert r.status_code == 200, r.text
     assert 'id="btn-gen"' in r.text
+    assert "授权新店" in r.text
