@@ -3,8 +3,10 @@ TikTok seller authorization flow (new-shop onboarding).
 
 Full contract: tech-doc/api/tiktok-shop-oauth.md. Key facts tested here:
 
-* ``authorize`` is admin-only and returns a TikTok link carrying the
-  registered single-use state.
+* ``authorize`` requires readwrite-or-above and returns a TikTok link
+  carrying the registered single-use state. (Generation is harmless —
+  a single-use CSRF row + a URL — so the threshold sits one notch
+  above the readonly HTML shell it lives behind.)
 * ``callback`` is PUBLIC (TikTok redirect target — no API key) and is
   the only place the flow does anything; bad/forged states fail closed.
 * The happy path bootstraps ``integration.credentials`` +
@@ -93,18 +95,30 @@ def fake_exchange(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 # ─── authorize ───────────────────────────────────────────────────────
 
 
-def test_authorize_requires_admin(api_client, readonly_key, readwrite_key) -> None:
-    """readonly/readwrite are 403 — only admin may onboard a shop."""
-    for key in (readonly_key, readwrite_key):
-        r = api_client.get(AUTHZ, headers=_bearer(key), params={"format": "json"})
-        assert r.status_code == 403, r.text
+def test_authorize_requires_readwrite_or_above(
+    api_client, readonly_key, readwrite_key
+) -> None:
+    """readonly is 403; readwrite passes (admin also passes by
+    transitivity, but we don't test it here — the role-lattice
+    guarantee is in middleware)."""
+    r = api_client.get(
+        AUTHZ, headers=_bearer(readonly_key), params={"format": "json"}
+    )
+    assert r.status_code == 403, r.text
+
+    r = api_client.get(
+        AUTHZ, headers=_bearer(readwrite_key), params={"format": "json"}
+    )
+    assert r.status_code == 200, r.text
 
 
 def test_authorize_returns_link(
-    api_client, admin_key, app_env: None, db_session
+    api_client, readwrite_key, app_env: None, db_session
 ) -> None:
-    """Admin gets an authorize_url with service_id + a fresh state."""
-    r = api_client.get(AUTHZ, headers=_bearer(admin_key), params={"format": "json"})
+    """readwrite gets an authorize_url with service_id + a fresh state."""
+    r = api_client.get(
+        AUTHZ, headers=_bearer(readwrite_key), params={"format": "json"}
+    )
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["ok"] is True
@@ -129,11 +143,13 @@ def test_authorize_returns_link(
 
 
 def test_authorize_missing_service_id_is_500(
-    api_client, admin_key, monkeypatch: pytest.MonkeyPatch
+    api_client, readwrite_key, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """No TIKTOK_SERVICE_ID → clear config error, not a bogus link."""
     monkeypatch.delenv("TIKTOK_SERVICE_ID", raising=False)
-    r = api_client.get(AUTHZ, headers=_bearer(admin_key), params={"format": "json"})
+    r = api_client.get(
+        AUTHZ, headers=_bearer(readwrite_key), params={"format": "json"}
+    )
     assert r.status_code == 500, r.text
     assert "TIKTOK_SERVICE_ID" in r.text
 
@@ -179,7 +195,7 @@ def test_callback_forged_state_fails_closed(
 
 def test_callback_happy_path_bootstraps_rows(
     api_client,
-    admin_key,
+    readwrite_key,
     db_session,
     app_env: None,
     fake_exchange: dict[str, Any],
@@ -189,8 +205,10 @@ def test_callback_happy_path_bootstraps_rows(
     from tts_erp_v2.db.models.integration import Credentials
     from tts_erp_v2.proxy.token_service import load_credentials
 
-    # 1. Start the flow (admin).
-    r = api_client.get(AUTHZ, headers=_bearer(admin_key), params={"format": "json"})
+    # 1. Start the flow (readwrite-or-above; admin also passes by transitivity).
+    r = api_client.get(
+        AUTHZ, headers=_bearer(readwrite_key), params={"format": "json"}
+    )
     assert r.status_code == 200, r.text
     state = _state_from_url(r.json()["authorize_url"])
 
@@ -235,13 +253,15 @@ def test_callback_happy_path_bootstraps_rows(
 
 def test_callback_reusing_state_is_rejected(
     api_client,
-    admin_key,
+    readwrite_key,
     app_env: None,
     fake_exchange: dict[str, Any],
 ) -> None:
     """The CSRF state is single-use — a second callback with the same
     state gets 400 state_reused and must not re-run the exchange."""
-    r = api_client.get(AUTHZ, headers=_bearer(admin_key), params={"format": "json"})
+    r = api_client.get(
+        AUTHZ, headers=_bearer(readwrite_key), params={"format": "json"}
+    )
     state = _state_from_url(r.json()["authorize_url"])
 
     r1 = api_client.get(
@@ -290,18 +310,22 @@ def test_onboard_page_redirects_browser_to_login() -> None:
 def test_onboard_page_readonly_can_view(
     api_client, readonly_key, app_env: None
 ) -> None:
-    """The console shell is readonly-viewable; generation is admin-gated
-    in the JS (the JSON authorize endpoint stays admin-only)."""
+    """The console shell is readonly-viewable; a readonly key can load
+    the page (button click will be gated server-side at the JSON
+    authorize endpoint, which requires readwrite or above)."""
     r = api_client.get("/v2/oauth/tiktok/onboard", headers=_bearer(readonly_key))
     assert r.status_code == 200, r.text
     assert "新店接入授权" in r.text
     assert 'id="btn-gen"' in r.text
     assert "authorize?format=json" in r.text
+    # New error message references the readwrite threshold (not admin).
+    assert "readwrite" in r.text
 
 
 def test_onboard_page_admin_same_shell(api_client, admin_key, app_env: None) -> None:
-    """Admin gets the identical shell (behaviour difference is client-side
-    role gating, not a different document)."""
+    """Admin gets the identical shell (the JSON authorize endpoint sits
+    one notch lower in role now — readwrite — but the document is the
+    same; gating happens on click, not in the HTML itself)."""
     r = api_client.get("/v2/oauth/tiktok/onboard", headers=_bearer(admin_key))
     assert r.status_code == 200, r.text
     assert 'id="btn-gen"' in r.text

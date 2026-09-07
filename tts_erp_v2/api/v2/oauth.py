@@ -5,9 +5,9 @@ The front half of the OAuth lifecycle that v1's standalone
 v2 retires that service, so the redirect target moves here.
 
 Routes:
-- ``GET /v2/oauth/tiktok/authorize`` — admin. Mints a single-use CSRF
-  ``state`` and returns the TikTok authorization link. Open the link in
-  a browser, sign in as the seller, approve.
+- ``GET /v2/oauth/tiktok/authorize`` — readwrite or above. Mints a
+  single-use CSRF ``state`` and returns the TikTok authorization link.
+  Open the link in a browser, sign in as the seller, approve.
 - ``GET /v2/oauth/tiktok/callback`` — **public** (TikTok redirects the
   seller's browser here with ``?code=...&state=...``). Validates state,
   exchanges the auth_code, and bootstraps the ``integration.credentials``
@@ -133,13 +133,17 @@ def authorize(
 ):
     """Mint a single-use CSRF state and build the TikTok authorization link.
 
-    **Admin only.** Returns the ``authorize_url`` to open in a browser
-    (as the seller) plus the raw ``state`` for diagnostics.
+    **Readwrite or above.** Returns the ``authorize_url`` to open in a
+    browser (as the seller) plus the raw ``state`` for diagnostics.
+    Generating the link is harmless (no upstream call, no destructive
+    DB write — just a single-use CSRF row); only the resulting callback
+    mutates ``integration.credentials`` + ``commerce.shops``, and that
+    surface stays under the public OAuth handshake.
 
     Requires ``TIKTOK_SERVICE_ID`` (Partner Center App & Service page)
     in the server env — else 500 with a config message.
     """
-    require_role_at_least(request, "admin")
+    require_role_at_least(request, "readwrite")
     try:
         raw_state, expires_at = register_state(sess)
         authorize_url = build_authorize_url(state=raw_state)
@@ -507,8 +511,8 @@ _ONBOARD_PAGE_HTML = """<!doctype html>
       </div>
     </div>
     <div id="role-gate" class="hide">
-      <p class="status err">当前会话没有 <code>admin</code> 角色 — 生成授权链接需要 admin。
-        换用管理员账号登录后重试。</p>
+      <p class="status err">当前会话没有 <code>readwrite</code> 或以上角色 — 生成授权链接需要 readwrite 及以上。
+        换用更高权限账号登录后重试。</p>
     </div>
   </div>
 
