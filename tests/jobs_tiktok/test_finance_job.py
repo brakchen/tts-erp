@@ -320,8 +320,14 @@ def test_finance_payouts_statements_transactions_components(db_session) -> None:
     assert components[0].amount == pytest.approx(2.50)
 
 
-def test_finance_zero_amount_component_not_written(db_session) -> None:
-    """V3 rule: don't store zero-amount components (17x bloat)."""
+def test_finance_zero_amount_component_written(db_session) -> None:
+    """2026-09-07（D2 拍板，spu-roi-v7-refactor §3.5）：显式零值落库。
+
+    上游 53 个 *_amount 字段全部显式传输（0 = "0" 字符串）：显式零 =
+    「该维度结算过但金额为 0」（如全额退款单 settlement_amount="0"），
+    与字段缺失（None，仍跳过）语义不同。废弃 v3 的 17x-bloat 零跳过规则。
+    本 payload 只带 fee_amount="0"：FEE=0 必须落库，其余 52 个缺失字段
+    不得造行。"""
     account = _make_account(db_session)
     proxy = FakeProxy(
         payouts_pages=[{"code": 0, "data": {"payments": [_payout_payload("PAY2")]}}],
@@ -370,7 +376,9 @@ def test_finance_zero_amount_component_not_written(db_session) -> None:
         .scalars()
         .all()
     )
-    assert components == []  # no zero rows
+    assert len(components) == 1  # FEE=0 落库；其余缺失字段不造行
+    assert components[0].component_code == "FEE"
+    assert components[0].amount == 0
 
 
 # ─── Lane 2 regression tests ──────────────────────────────────────
@@ -1030,10 +1038,11 @@ def test_finance_transaction_unresolved_order_sync_issue(db_session) -> None:
 
 
 def test_finance_components_full_breakdown_uppercase_codes(db_session) -> None:
-    """A real 202309 transaction payload must expand EVERY non-zero
+    """A real 202309 transaction payload must expand EVERY present
     ``*_amount`` field into a component with the v3 uppercase code
     (``gross_sales_amount`` → ``GROSS_SALES``, etc.), not just the net
-    ``settlement_amount`` under its raw lowercase name.
+    ``settlement_amount`` under its raw lowercase name. Explicit zeros are
+    stored too (2026-09-07 D2, spu-roi-v7-refactor §3.5).
 
     Regression (audit 2026-09-06): the old allowlist used lowercase stems
     (``fee``/``refund``/``platform_commission``…) that never match upstream
@@ -1050,7 +1059,7 @@ def test_finance_components_full_breakdown_uppercase_codes(db_session) -> None:
         "seller_discount_amount": "-359651",
         "fee_amount": "-165465",
         "settlement_amount": "374012",
-        "customer_refund_amount": "0",  # zero must be skipped
+        "customer_refund_amount": "0",  # 显式零也落库（2026-09-07 D2）
     }
     proxy = FakeProxy(
         payouts_pages=[
@@ -1096,10 +1105,12 @@ def test_finance_components_full_breakdown_uppercase_codes(db_session) -> None:
         "SELLER_DISCOUNT",
         "FEE",
         "SETTLEMENT",
+        "CUSTOMER_REFUND",  # 显式 0 行（D2）
     }
     assert comps["GROSS_SALES"].amount == pytest.approx(899_128)
     assert comps["PLATFORM_COMMISSION"].amount == pytest.approx(-80_922)
     assert comps["SETTLEMENT"].amount == pytest.approx(374_012)
+    assert comps["CUSTOMER_REFUND"].amount == 0
     assert all(c.currency == "VND" for c in comps.values())
     # source_order tracks the upstream field index (traceability contract).
     orders = [c.source_order for c in comps.values()]

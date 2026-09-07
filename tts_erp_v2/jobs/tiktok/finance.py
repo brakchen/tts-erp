@@ -47,8 +47,11 @@ The 53 ``_COMPONENT_COLUMNS`` source keys mirror the upstream 202309
 with ``component_code`` = field name stripped of ``_amount`` and uppercased
 (e.g. ``settlement_amount`` → ``SETTLEMENT``, ``gross_sales_amount`` →
 ``GROSS_SALES``) — the v3 convention ``db/models/finance.py`` documents.
-We only write a row when the source amount is non-zero (v3 rule: never
-store 0 amounts — they bloat the table 17x).
+Explicit zero amounts are stored too (2026-09-07, spu-roi-v7-refactor §3.5
+拍板：数据完整优先，废弃 v3 的 17x-bloat 零跳过规则）——上游 53 个
+``*_amount`` 字段全部显式传输（``"0"`` 字符串），显式 0 = 「该维度结算过
+但金额为 0」（如全额退款单 ``settlement_amount="0"``），与字段缺失
+（None，仍跳过）语义不同；「无 SETTLEMENT 行」从此唯一 = 未结算。
 
 Audit 2026-09-06: the pre-audit allowlist used lowercase stems (``fee``,
 ``refund``, …) that never match upstream ``*_amount`` keys, so ONLY
@@ -466,7 +469,10 @@ def _store_raw(
 def _write_components(
     session, *, transaction_id: int, raw: dict, default_currency: str | None = None
 ) -> int:
-    """Write non-zero settlement_components rows. Returns count written.
+    """Write all present settlement_components rows. Returns count written.
+
+    Explicit zeros are stored (2026-09-07, spu-roi-v7-refactor §3.5); only
+    absent / non-numeric fields are skipped.
 
     ``component_code`` = upstream field name stripped of the ``_amount``
     suffix and uppercased (``gross_sales_amount`` -> ``GROSS_SALES``), the
@@ -477,7 +483,8 @@ def _write_components(
     written = 0
     for source_order, col in enumerate(_COMPONENT_COLUMNS):
         amount = _to_decimal(raw.get(col))
-        if amount is None or amount == 0:
+        # 2026-09-07（spu-roi-v7-refactor §3.5）：显式 0 落库，仅缺失跳过
+        if amount is None:
             continue
         code = col.removesuffix("_amount").upper()
         currency = raw.get(f"{col}_currency") or raw.get("currency") or default_currency
