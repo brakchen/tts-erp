@@ -23,7 +23,7 @@ net_profit = (sales − refund_net)/FX − units_sold×cost − spend − sales�
 
 | # | 现状 | v7 要求 | 影响 |
 | --- | --- | --- | --- |
-| G1 | 净收入 = `sales − refund_net`（订单行毛额），平台费再按**全部** sales × 30.8% 平扣 | **按订单分已结算/未结算分层**：已结算用 `SETTLEMENT` 实到账（费用已内含），未结算按 `line_gmv × 0.692`；**不再二次扣 fee** | 净利润从 +$2,384 翻正为 **−$2,266**（rubric 检查点），这是本次重构的核心 |
+| G1 | 净收入 = `sales − refund_net`（订单行毛额），平台费再按**全部** sales × 30.8% 平扣 | **按订单分已结算/未结算分层**：已结算用 `SETTLEMENT` 实到账（费用已内含），未结算按 `line_gmv × (1−r̂) × (1−退款率_spu)`（D5）；**不再二次扣 fee** | 净利润从 +$2,384 翻正为 **−$2,266**（rubric v7 旧检查点，D1/D4/D5 后重定），这是本次重构的核心 |
 | G2 | COGS = `units_sold × cost`，**缺 v6 的全损取消补扣** | COGS = `(units_sold + full_loss_cancelled_qty) × cost`；`full_loss_cancelled_qty` = 已到海外(38301) 且 CANCELLED 的件数 | 88 单已出海取消单的货本一直没扣 |
 | G3 | `return_loss = refund_return_qty × cost`（只算完结退货 case） | 全损件数判定 = **tracking 38301** +（完结 case ∨ CANCELLED），v5→v7 沿用（127 件 vs v4 delivered_at 的 28 件） | 全损列严重低估；需新联表 `fulfillment.shipments/tracking_events` |
 | G4 | `platform_fee = sales × r̂`（全量平扣，M18 输入） | M19 缩水为**信息列**：`r̂ × 未结算 sales`（已结算扣费已内含在 SETTLEMENT） | 字段语义变、不再是 M18 输入 |
@@ -137,7 +137,7 @@ SQL 只出 `settled_net_vnd`（SETTLEMENT 分摊后）与 `unsettled_sales_vnd`�
 
 **`fee_rate` 参数语义变化**：从「全量平扣费率」变为「未结算订单扣费率 r̂」，
 在 Python 层只作用于未结算部分——页面覆写自动只影响未结算估算。
-`FEE_RATE_BASELINE = 0.308` 沿用（D10 实测重定）。
+`FEE_RATE_BASELINE = 0.308` 沿用（dashboard D10 实测重定）。
 
 **性能**：数据量极小（订单 ~900、结算组件 ~4.8K、tracking 966 条）；
 `ix_settlement_txn_sales_order` + `uq_settlement_components_txn_code` 均在；
@@ -223,7 +223,7 @@ spu_pk→(cost, currency, source) map），口径与 jobs 版 1:1（同一 SQL �
   SETTLEMENT 行（更早代码窗口期写入），与本次回填不冲突。陈旧性检查通过：
   0 笔「payload=0 但库存非零」。
 
-### 3.6 币种清单与换算（D6 输入，2026-09-07 生产库实测）
+### 3.6 币种清单与换算（dashboard D6 输入，2026-09-07 生产库实测）
 
 所有金额**底层按原币聚合、输出层一次换算成 USD**（dashboard 决策⑥ +
 §4.2 通用规则）。各数据源的存储币种：
@@ -268,7 +268,8 @@ meta 变更：
 
 - `meta.fee.note` 改 v7 文案（已结算含在 SETTLEMENT 内不再单扣；未结算按 r̂）
 - 新增 `meta.settlement = {settled_orders, unsettled_orders, coverage}`
-- 新增 `meta.rubric_version = "v7"`（页面 stamp 可显示，口径漂移一眼定位）
+- 新增 `meta.rubric_version = "v8"`（页面 stamp 可显示，口径漂移一眼定位；
+  实现已含 D4/D5 超出 rubric v7 字面，rubric 升 v8 同步后填 "v8"）
 
 排序白名单新增 `full_loss_rate`（D8 主列可排序）；其余 16 个现字段不动。
 
@@ -293,8 +294,9 @@ meta 变更：
 
 - **⚙ 列开关组全部取消**（cg-adref/structure/refundsplit/cancel/fee + 原拟
   新增的 cg-settle 都不再做列）——主表不再有隐藏列。
-- 可排序列头 = 6 个指标列；**默认排序改为净利润升序**（最亏在前；原默认
-  roi_real 升序——ROI 已不在主列，改为下钻利润构成 tab 展示）。
+- 可排序列头 = 6 个指标列；页面 JS 显式传 `sort=net_profit&order=asc`
+  （**端点默认值 `sort="roi_real"` 保持不动**——避免改 API 契约，
+  保持对外脚本兼容；下钻利润构成 tab 直接展示 ROI）。
 - API 契约不变：所有字段照常在 JSON 返回（下钻各 tab 顶部汇总区直接消费
   行字段），本次是展示层精简，不动端点字段。
 - 结余带（10 格汇总）不动，tooltip 文案按 v7 口径更新（净利润 = 已结算
@@ -314,7 +316,7 @@ meta 变更：
 ### 6.1 交互形式（D7 ✅ 已拍板：行内 accordion）
 
 - 点击主表行 → **行内 accordion 展开**详情面板（在该行下方插入详情行，
-  复用无框架 plain DOM；与 ⚙ 列开关的原生 `details` 同哲学，不引 bootstrap JS）。
+  复用无框架 plain DOM；不引 bootstrap JS）。
 - 同时只展开一行；再点该行 / ESC / 点另一行 → 折叠。
 - **面板展开本身零请求**：利润构成 tab 直用主表行字段；其余 tab **首次激活才
   fetch 对应端点**（D6 ✅ tab 懒加载），按 `(spu_pk, tab, 窗口)` 前端缓存；
@@ -445,7 +447,8 @@ TEST_ 前缀行，走 `tests/conftest.py` 事务回滚隔离惯例）。
 5. `fee_rate` override 只影响未结算部分
 6. CANCELLED + 38301 → `full_loss_cancelled_qty` 进 COGS；CANCELLED 无 38301 → 不进
 7. 完结退货 case + 38301 → 进 `full_loss_qty` 但不重复进 COGS（已在 units_sold 内）
-8. 事务存在但无 SETTLEMENT 组件 → 按未结算兜底（D2）
+8. 防御分支：SETTLEMENT 行不存在（实测 605/605 不可达）→ 按未结算兜底
+    （与 §2 行存在判定一致——SQL JOIN SETTLEMENT 行不在则 settlement_vnd NULL）
 9. 整单 GMV=0 的已结算订单（`NULLIF` 兜底，net=0 不除零）
 10. `net_profit ≥ 0 ⇔ roi_real ≥ roi_breakeven` 恒等式回归
 11. `orders` 端点：`is_settled` / 38301 到达标志 / tracking 时间线按事件时间排序
@@ -469,10 +472,12 @@ TEST_ 前缀行，走 `tests/conftest.py` 事务回滚隔离惯例）。
 20. D8：主表仅渲染 6 指标列 + 商品列；列开关组移除；默认排序 = 净利润升序；
     `full_loss_rate` = 全损件 ÷（售出件+全损取消件），分母 0 → null
 
-**验收对账**：`scripts/oneoff_roi_v7_reconcile.py` 对生产库跑 rubric 检查点表
-（总净收入 $9,300.21 / 净利 −$2,266.87 / ROI 1.3094 / 保本 1.6286 /
-全损 127 / 盈利 SPU 25 / 已结算 608 单 95.4%），全对才算口径落地。
-unit test 不依赖生产数据；该脚本为一次性验收，不 commit 到业务目录。
+**验收对账**：`scripts/oneoff_roi_v7_reconcile.py` 对生产库跑出**新基线数字**
+（D1/D4/D5 都改了公式，rubric v7 旧检查点（净利 −$2,266.87 / ROI 1.3094 /
+保本 1.6286 / 盈利 SPU 25 / 已结算 608 单 95.4%）由这些改动失效，
+不再作为 oracle）→ **先用最终公式跑出新基线 → 你确认 → 写回 rubric v8
+当新检查点**。unit test 不依赖生产数据；该脚本为一次性验收，不 commit
+到业务目录。
 
 页面 shell 契约测试（`test_spu_roi_page_*`）同步更新列/hint 断言。
 
@@ -486,6 +491,8 @@ unit test 不依赖生产数据；该脚本为一次性验收，不 commit 到�
 2. **数据层先行（§3.5）**：`_write_components` 零值落库 + 测试反转 →
    回填脚本对生产库跑一把 → 重启 `tts-erp-sync.service`
    （D2 语义从这一步起生效）
+   — **✅ 2026-09-07 已落地**：merge eba20af、回填 2,339 行零值组件、
+   sync-worker 已重启；详细见 §3.5 执行结果。
 3. TDD：先写 §7 测试（红）→ 后端模块抽取 + v7 公式 + 成本链（§3.4，D1）（绿）
 4. 明细钻取四个 tab 端点（§6.3，D6 = tab 懒加载）+ 测试（§7 用例 11–13）
 5. 页面模板 + JS（隐藏组 + tooltip + stamp + 钻取面板 accordion 五 tab）
