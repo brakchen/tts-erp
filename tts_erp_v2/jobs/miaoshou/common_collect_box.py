@@ -51,6 +51,7 @@ Failure mode contract
 ``commonCollectBoxDetailId`` 的行 → ``COMMON_BOX_MISSING_ID`` 写
 ``sync_issues`` 并跳过。上游失败 → ``run_job`` → SyncJob failed, re-raise。
 """
+
 from __future__ import annotations
 
 import logging
@@ -70,7 +71,9 @@ log = logging.getLogger("tts_erp_v2.jobs.miaoshou.common_collect_box")
 
 JOB_NAME = "miaoshou.common_collect_box"
 ENDPOINT = "miaoshou.common_collect_box.get_common_collect_box_list"
-PATH = "/open/v1/product/common_collect_box/common_collect_box/get_common_collect_box_list"
+PATH = (
+    "/open/v1/product/common_collect_box/common_collect_box/get_common_collect_box_list"
+)
 PAGE_SIZE = 50  # upstream default for this endpoint; no documented cap
 MAX_PAGES = 1000
 
@@ -190,7 +193,8 @@ def sync_common_collect_box(
             rate_limit_retries += 1
             log.warning(
                 "miaoshou.common_collect_box page retry attempt=%d err=%r",
-                attempt, err,
+                attempt,
+                err,
             )
 
         def fetch_page(page: int) -> PageResult:

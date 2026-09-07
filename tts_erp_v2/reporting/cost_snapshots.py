@@ -48,9 +48,7 @@ class ResolvedCost:
     currency: str
 
 
-def _current_manual_cost(
-    session: Session, spu_pk: int
-) -> ManualProductCost | None:
+def _current_manual_cost(session: Session, spu_pk: int) -> ManualProductCost | None:
     """Return the effective (valid_to IS NULL) manual cost row for the
     SPU, if any. We use valid_to IS NULL as the signal that this is
     the latest entry — historical rows are kept for forensics."""
@@ -114,9 +112,7 @@ def active_spus_without_cost(session: Session) -> list[tuple[str, int]]:
     products_spu that have no manual cost and no purchase-order
     cost available. Powers the "in-stock without cost" monitoring list
     that the operator uses to drive the manual-costs form."""
-    cp_with_manual = exists().where(
-        ManualProductCost.spu_pk == ChannelProduct.id
-    )
+    cp_with_manual = exists().where(ManualProductCost.spu_pk == ChannelProduct.id)
     rows = session.execute(
         select(ChannelProduct.spu_id, ChannelProduct.id)
         .where(ChannelProduct.status == ACTIVE_PRODUCT_STATUS)

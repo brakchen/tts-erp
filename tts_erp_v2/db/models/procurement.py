@@ -271,9 +271,7 @@ class ManualProductCost(Base):
 
     __tablename__ = "manual_product_costs"
     __table_args__ = (
-        Index(
-            "ix_manual_costs_channel_product_valid", "spu_pk", "valid_from"
-        ),
+        Index("ix_manual_costs_channel_product_valid", "spu_pk", "valid_from"),
         {"schema": "procurement"},
     )
 
