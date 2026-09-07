@@ -147,6 +147,12 @@ curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" \
 - ❌ 不要在 .env 里写 app_secret 给客户端调用者（明文暴露）
 - ❌ 不要裸跑 `git reset --hard` / `git checkout -- .` / `git clean -f`（会清掉并发 lane 未提交改动——
   08-31 曾一次抹掉 5 条 lane 的全部工作）；看到不属于自己的未提交改动 → 先问，不要清
+- ✅ 合法清理替代（按场景选）：
+  - `git revert <commit>` —— 撤销已 push 的公共 commit，生成反向 commit（不丢历史）
+  - `git stash` / `git stash pop` —— 暂存**自己的** WIP（绝不 stash 别人的）
+  - `git restore --staged <file>` —— 仅取消 staged（worktree 字节不动）
+  - `git restore --source=<commit> -- <file>` —— 从指定 commit 取单文件版本
+  - `git checkout -- <file>`（指定文件，非 `-- .`）—— 取消**自己的** unstaged 改动
 - ❌ 不要跑 `tests/migration/` 或 `scripts/migrate_v1_to_v2/`（已归档到
   `tech-doc/_archive/migrate-v1-to-v2-2026-08-29/`，勿恢复；08-31 曾把生产凭证回退成 legacy 格式停摆 22h）
 - ❌ 不要假设 TikTok `code: 0` 是唯一 success（也有 `105005` scope 缺失 / `36009004` 字段缺失等）
@@ -246,14 +252,19 @@ apifox 标题“妙手开放平台”，底层 endpoint 指向 `openapi.wanshifu
   - venv 同理不在 worktree：一律显式用主仓绝对路径 `/home/schan/tts-erp/.venv/bin/...`，不要在 worktree 里
     新造 venv；§2 的 `.venv/bin/pytest` 只对 master 有效
   - **不要改 / 删 worktree 里的 .env**：软链会写穿/穿透到主仓 `.env`（全 lane 共享凭证），只由 master 维护
+  - **调试 .env 副作用警告**：所有 worktree 软链到主仓同一 `.env`，任一 lane 临时改 `.env`（比如
+    `TTS_ERP_AUTH_MODE=off` 本地调试、`TTS_ERP_DB_URL` 切测试库）会**立即污染所有 lane**。调试后
+    **必须立即还原**，或用 `.env.local` 覆盖软链（gitignored，不写穿到主仓）
   - pi-lens 自动检查报 `spawn python ENOENT` / “test runner error” = 已知假报错（runner 在 worktree 找不到
     python），忽略即可，以自己用绝对 venv 实测的结果为准
   - bash / edit / read 的路径按**当前 cwd 的 worktree** 解析：先 `cd .worktrees/<slug>` 或全程写绝对路径，
     别用相对路径跨 worktree 操作（实测多次把 edit 落进 master 公共区，还要 stash/pop 收拾）
 - **worktree 收尾**：master 上 `git merge <branch> --no-ff -m "merge: <slug> (lane <lane-id>)"` →
-  `bash scripts/test.sh fast` 0 fail → `git worktree remove .worktrees/<slug>` + `git branch -D <branch>` +
-  `git worktree prune` → 确认 `git worktree list` 无残留 → push。禁止 `git add -A && git commit` 冒充 merge；
-  禁止"先合了再说、worktree 留到周末清"
+  **立即在 master WT 重跑 `bash scripts/test.sh fast` 必须 0 fail**（merge 引入的冲突解错 / cherry-pick
+  漏依赖只有在这里才能兜住，lane 内 pre-merge 测试不够）→ `git worktree remove .worktrees/<slug>` +
+  **`git log --oneline master..<branch>` 预检必须为空**（否则 lane commit 未完全 merge，-D 会丢 commit）→
+  `git branch -D <branch>` + `git worktree prune` → 确认 `git worktree list` 无残留 → push。禁止
+  `git add -A && git commit` 冒充 merge；禁止"先合了再说、worktree 留到周末清"
 - **lane 冲突处理**：
   - **派活时先声明文件所有权**：并行的 lane 尽量不碰同一文件；仓库里最容易被多 lane 同改的共享点 =
     `sync_worker/scheduler.py`、`tests/conftest.py`、`tts_erp_v2/db/models/`、schema SQL / `regen_schema.py`、
@@ -289,7 +300,12 @@ apifox 标题“妙手开放平台”，底层 endpoint 指向 `openapi.wanshifu
   放弃都必须改表；merge 后删行。根目录 `handoff.md` 保留为**历史**交接（收尾追加 TL;DR），
   其头部放一行指针指向 ACTIVE.md（2026-09-06 起）。
 - watchdog（可选增强）：扫描 master WT 中 untracked / 未提交文件的存在时长，超阈值记
-  `logs/watchdog.log` 提示“登记归属或开分支”。
+  `logs/watchdog.log` 提示"登记归属或开分支"。
+- **ACTIVE.md 单写者规则**：master 上同一时刻只允许一个会话 / agent 持有 ACTIVE.md 写权（写入 = 增行 /
+  改状态 / 删行）。多个 lane 并发改 ACTIVE.md 必须串行——否则会撞内容或丢行。实操：
+  - 写前 `git diff handoff/ACTIVE.md` 确认无他人 in-flight 改动；有 → 等合并 / 接手
+  - 写后立即 `git add handoff/ACTIVE.md`（不依赖 commit 时机，丢 staged 也比丢 unstaged 安全）
+  - 高频编辑考虑加 `flock /tmp/active-md.lock` 防并发（按需启用，单 lane 不必）
 
 ### 12.2 master 工作区纪律（fx 根因①：成块 WIP 裸奔）
 
@@ -307,9 +323,17 @@ apifox 标题“妙手开放平台”，底层 endpoint 指向 `openapi.wanshifu
 4. **合回前必做去重检查**：`git fetch && git diff --stat <分支基址> <新 master>`；
    发现同源内容已被提交 → 丢弃冗余分支/提交，只保留真实增量（bug 修复/文档）再 merge。
 5. 清 master 上被接手文件的 WIP 前，快照必须已留存（§6 “先问不清”不变）。
+6. **接手后 ACTIVE.md 必须更新**：原 owner 那行改 `abandoned (<日期>，接手给 <新 owner>)` + 新增一行
+   `接手: <新 lane_id> from <原 owner> at <UTC>`。否则下一个人接手时不知道当前状态是谁的。
 
 ### 12.4 并发测试互清（已知坑）
 
 - 共享 dev DB：两个会话同时跑 `scripts/test.sh fast` 会互清 TEST_api_keys / 哨兵行 →
-  大规模 401 / error 假失败。需全量跑时错峰；失败先挑 FAILED/ERROR **隔离重跑一次**，
-  全绿即 flake 不是真失败。
+  大规模 401 / error 假失败。需全量跑时**串行执行**，任选一种：
+  - **file lock**：`flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast`（锁被占则立即失败，不互等）
+  - **轮询等前 run 完**：`while pgrep -f 'scripts/test.sh\|pytest tests/' >/dev/null; do sleep 5; done;
+    bash scripts/test.sh fast`
+  - **分 ephemeral DB**：lane A 用 `TTS_ERP_DB_URL=postgresql://...test_a`，lane B 用 `test_b`，
+    互不影响（最稳，但需独立 DB 实例）
+- 失败先挑 FAILED/ERROR **隔离重跑一次**（只跑那几条 + 它们的依赖），全绿即 flake 不是真失败；
+  隔离重跑仍 fail 才算真失败，进 §7 排查。
