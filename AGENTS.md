@@ -275,11 +275,23 @@ apifox 标题“妙手开放平台”，底层 endpoint 指向 `openapi.wanshifu
   - bash / edit / read 的路径按**当前 cwd 的 worktree** 解析：先 `cd .worktrees/<slug>` 或全程写绝对路径，
     别用相对路径跨 worktree 操作（实测多次把 edit 落进 master 公共区，还要 stash/pop 收拾）
 - **worktree 收尾**：master 上 `git merge <branch> --no-ff -m "merge: <slug> (lane <lane-id>)"` →
-  **立即在 master WT 重跑 `bash scripts/test.sh fast` 必须 0 fail**（merge 引入的冲突解错 / cherry-pick
-  漏依赖只有在这里才能兜住，lane 内 pre-merge 测试不够）→ `git worktree remove .worktrees/<slug>` +
-  **`git log --oneline master..<branch>` 预检必须为空**（否则 lane commit 未完全 merge，-D 会丢 commit）→
-  `git branch -D <branch>` + `git worktree prune` → 确认 `git worktree list` 无残留 → push。禁止
-  `git add -A && git commit` 冒充 merge；禁止"先合了再说、worktree 留到周末清"
+  **立即在 master WT 重跑 `bash scripts/test.sh fast`，按 lane 代码改动面分类判定**：
+  - **文档/config-only lane**（无 `tts_erp_v2/**` 或 `tests/**` 改动）：merge 前后 fail 集合差异全属
+    pre-existing（master HEAD 既有 fx-test-isolation / test-prod-isolation / db test_time_fields_convention
+    等正在修的 fail），lane 自身无代码风险 → push 通过。判定命令：
+    `git diff <merge-base>..HEAD -- 'tts_erp_v2/**' 'tests/**' | wc -l` = 0
+  - **代码/test lane**（改了 `tts_erp_v2/**` 或 `tests/**`）：merge 后 fail 集合对比合并前 master HEAD
+    baseline（`bash scripts/test.sh fast 2>&1 | grep '^FAILED' | sort > /tmp/fail-{before,after}.txt`
+    在 lane merge 前后各跑一次，`diff` 对比）—— **新 fail = lane 引入，必修复才能 push**。"fail 来源"
+    按 §12.4 隔离重跑协议：稳定 fail 进 §7 排查；flake 重跑通过
+  - 历史背景：本规上版硬规则 "merge 后必须 0 fail" 在 master HEAD pre-existing fail 存在下不可达
+    （任何 lane merge 后都跑不到 0 fail）。本次细化按 lane 改动面分类，文档/config-only lane 不受
+    pre-existing fail 阻塞；代码/test lane 仍必须 0 新 fail（merge 引入的冲突解错 / cherry-pick 漏
+    依赖只有在这里才能兜住，lane 内 pre-merge 测试不够）
+  → `git worktree remove .worktrees/<slug>` + **`git log --oneline master..<branch>` 预检必须为空**
+  （否则 lane commit 未完全 merge，-D 会丢 commit）→ `git branch -D <branch>` + `git worktree prune`
+  → 确认 `git worktree list` 无残留 → push。禁止 `git add -A && git commit` 冒充 merge；禁止
+  "先合了再说、worktree 留到周末清"
 - **lane 冲突处理**：
   - **派活时先声明文件所有权**：并行的 lane 尽量不碰同一文件；仓库里最容易被多 lane 同改的共享点 =
     `sync_worker/scheduler.py`、`tests/conftest.py`、`tts_erp_v2/db/models/`、schema SQL / `regen_schema.py`、
