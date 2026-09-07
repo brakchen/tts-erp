@@ -236,6 +236,7 @@ SPU 无广告投放 → 广告列显示 0 与“无投放”文案（不隐藏�
 | M5b | 有效销售订单数 | `order_count(s)` | `COUNT(DISTINCT sales_orders.id)`（同一有效销售过滤；**状态口径：白名单状态全部订单，含 COD 在途**） | 按日可拆 | 同上 |
 | M6 | 销售金额(gross) | `sales(s)` | `Σ quantity × unit_price`（同上过滤条件；**状态口径：下单即算，含 COD 在途未收款**；CANCELLED 不计入） | 按日可拆 | 同上 |
 | M5c | 取消订单数 | `cancelled_order_count(s)` | `COUNT(DISTINCT id)` status=CANCELLED（状态口径，含未收款取消；2026-09-06 行内新列，与结余带取消单量同口径） | 按日可拆 | sales_orders |
+| M5d | **全损取消件数（v6 货本补扣基数）** | `full_loss_cancelled_qty(s)` | `Σ sales_order_lines.quantity WHERE sales_orders.status='CANCELLED' AND EXISTS(SELECT 1 FROM fulfillment.tracking_events te JOIN fulfillment.shipments sh ON sh.id=te.shipment_id WHERE sh.order_pk=sales_orders.id AND te.action_code=38301)`（**2026-09-07 v6 新增**：物流已到海外 + 被取消的件数；被 `PAID_SALES_ORDER_STATUSES` 白名单排除未进 units_sold 但货本确实付出，必须在 M18 COGS_all 里补扣；详见 M18 公式） | 范围求和 | fulfillment.tracking_events + sales_orders |
 | M6c | 行内销售(GMV 全单) | `gmv_sales(s)` | 有效销售 + 取消原额（= 结余带 GMV 的行级版；2026-09-06） | 按日可拆 | M6+M6b 行级 |
 | M12b | 取消率 | `cancel_rate(s)` | 取消单量 ÷ (有效单量+取消单量)（单量口径，2026-09-06） | 范围 | M5b/M5c |
 | M12c | 退货率（单量口径） | `refund_rate_qty(s)` | 退货订单数 ÷ 有效单量（退款 case 去重订单数，非金额；2026-09-06 行内主列） | 范围 | case 去重订单 / M5b |
@@ -250,12 +251,12 @@ SPU 无广告投放 → 广告列显示 0 与“无投放”文案（不隐藏�
 | M13b | **全损退货货损** | `return_loss(s)` | `全损退货件数(M11 退货桶) × 单位成本解析值(§4.2，人工优先/缺省 30 CNY) × CNY→USD 汇率`（全损口径：退货即货本全损，§2） | 范围求和 | M11 + 成本解析 + fx(§4.6) |
 | M14 | **实际 ROI（页面主指标）** | `roi_real(s)` | `(net_cash(s) − return_loss(s)) / spend(s)`（净现金/货损已由原币经固定汇率换算成 USD，spend 原生 USD，**同币相除无汇率因子**）；`spend=0` 或固定汇率配置缺失/异常 → `null` | 范围 | M13−M13b / M1 |
 | M15 | 单订单广告成本 | `cpa(s)` | `spend(s) / ad_orders(s)`（= M1/M2b，平台出单量口径） | 范围 | M1/M2b |
-| M16 | **订单结算金额（净现金权威口径，待 finance 落地）** | `settlement_net(s)` | `Σ` 有效销售订单的**每笔订单结算净额**（TikTok 结算单订单级净额，平台扣费/退款调整已含；**不做佣金等分项建模**——决策 3） | 按结算周期 | finance（§6.11） |
+| M16 | **订单结算金额（净现金权威口径，v7 已落地）** | `settlement_net(s)` | `Σ` 有效销售订单的**每笔订单 SETTLEMENT 净额**（TikTok 结算单订单级净额，平台扣费/退款调整已含；**v7 落地**：从 `finance.settlement_components` 取 `component_code='SETTLEMENT'`，通过 `finance.settlement_transactions.order_pk` 关联；不做佣金等分项建模——决策 3） | 按结算周期 | finance.settlement_components + finance.settlement_transactions |
 | M17 | **保本实际 ROI（每 SPU 动态线）** | `roi_breakeven(s)` | 见下方“保本线口径”：`NC′ ÷ (NC′ − COGS_kept − fee_est)`；`COGS_kept + fee_est ≥ NC′ → NULL`（结构性亏损，无保本线） | 范围 | 由 M13/M13b/M11/M5/M19 推导 |
-| M18 | **净利润（毛利口径，页面金额核心列）** | `net_profit(s)` | `net_cash(s) − COGS_all(s) − spend(s) − fee_est(s)`，`COGS_all = units_sold × 单位成本解析值`（全部售出件货本，含退回件——不再单扣 return_loss，避免重复）；**`net_profit ≥ 0 ⇔ roi_real ≥ roi_breakeven`（与 M17 同号）**；fee_est 见 M19（分层：已结算用实际、未结算按 r̂；净额已含部分不再单计） | 范围求和 | M13/M5/M6 + 成本解析 + M1 + M19 |
-| M19 | **平台佣金（渠道费用）** | `platform_fee(s)` | `已结算订单实际扣费(Σ\|fee_amount\|) + 未结算订单 sales × r̂`；`r̂` = 参考基线（Σ\|fee_amount\| / Σgross_sales_amount，**2026-09-05 去重实测 ≈ 11.6%**，页面可覆写输入 %）；解析 job 未上线前全按 r̂ 估（本期）；已结算部分用实际后不再估 | 范围 | M6 + 基线（§6.11） |
+| M18 | **净利润（毛利口径，页面金额核心列）** | `net_profit(s)` | `(Σ line_net_vnd / USD_VND) − ad_cost_usd − procurement_usd`；其中 `line_net_vnd = is_settled ? order_SETTLEMENT × line_gmv / order_gmv : line_gmv × (1 − 0.308)`，`procurement_usd = (units_sold + full_loss_cancelled_qty) × unit_cost × CNY_USD`（**2026-09-07 v7 关键改动**：净利润按"已结算 vs 未结算"分层算 — **已结算订单**用 `finance.settlement_components.SETTLEMENT`（卖家实际到账 VND，已扣完所有平台费 + 运费 + 联盟佣金 + 退款调整），按 line_gmv / order_gmv 比例分摊到各行；**未结算订单**按 `line_gmv × (1 − 30.8%)` 估算；v6 的 `COGS_all = (units_sold + full_loss_cancelled_qty) × unit_cost` 沿用；`is_settled` 判定 = `EXISTS (SELECT 1 FROM finance.settlement_transactions WHERE order_pk = sales_orders.id)`）；**`net_profit ≥ 0 ⇔ roi_real ≥ roi_breakeven`（与 M17 同号）**；**实测基线 35.9%**(v7 已结算订单验证)比 30.8% 高 5.1pp(联盟+运费+补贴),未来 finance job 落地后未结算部分应改用实测基线 | 范围求和 | finance.settlement_components + commerce + fx + 成本解析 |
+| M19 | **平台佣金基线（v7 DUAL-LAYER）** | `platform_fee(s)` | `r̂ × sales_unsettled(s)`（**2026-09-07 v7 改动**：已结算订单的扣费不再作为 M18 的输入——已隐含在 SETTLEMENT 净额里；本字段只剩"未结算订单 × 基线"部分；`r̂` = 参考基线（Σ\|fee_amount\| / Σgross_sales_amount，**2026-09-06 重定 ≈ 30.8%**（D10 旧值 11.6% 低估了联盟/运费等所有直接扣除，2026-09-06 重定实测 30.8%）；解析 job 上线后自动切换为已结算用实际、未结算按 r̂ 的双层结构）；页面可覆写输入 % | 范围 | M6(未结算子集) + 基线 |
 
-> 净现金两种口径：M13 = 订单行金额朴素估算（本期先上）；M16 = 每笔订单结算金额（落地后作为 net_cash 的**内部替代基础** → 净利润 M18 / 实际 ROI M14 / 保本 M17 的已结算部分自动含平台扣费/退款调整——此时**已结算部分不再单计 fee**（净额已含），未结算部分仍按参考基线 r̂ 计（M19 分层），避免重复扣）。两者差异 ≈ 平台扣费 ± 退款调整时差。
+> 净现金两种口径（v7 已统一到 M18）：M13 = 订单行金额朴素估算（不直接用，作内部中间量）；**M16 = 每笔订单 SETTLEMENT 净额（v7 已成为净利润的核心输入）**——已结算订单用 M16 当净收入，未结算订单用 `line_gmv × (1 − 30.8%)` 估算，二者按订单粒度逐笔加总。两者差异 ≈ 平台扣费 ± 退款调整时差。**v7 不再用 `net_cash − fee_est` 二次扣减**(避免重复扣)。
 
 **平台佣金（渠道费用）处理（D10：已结算按实际，未结算按基线）**：
 

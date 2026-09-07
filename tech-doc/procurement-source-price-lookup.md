@@ -14,7 +14,7 @@
 
 ## 二、读优先级（与 `reporting.cost_snapshots.resolve_unit_cost` 一致）
 
-```
+```text
 1. MANUAL_ENTRY        — procurement.manual_product_costs (人工)
 2. LATEST_PURCHASE_COST— procurement.purchase_order_lines.unit_cost (妙手采购单)
 3. SOURCE_PRICE        — procurement_products.source_unit_cost (本次回填的 1688 货源价)

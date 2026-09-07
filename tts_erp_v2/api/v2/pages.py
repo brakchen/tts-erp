@@ -54,53 +54,53 @@ _JS_DIR = Path(__file__).resolve().parents[2] / "static" / "js"
 
 
 def _js_version(filename: str) -> str:
-    try:
-        digest = hashlib.sha256((_JS_DIR / filename).read_bytes()).hexdigest()
-    except OSError:
-        return "0"
-    return digest[:8]
+  try:
+    digest = hashlib.sha256((_JS_DIR / filename).read_bytes()).hexdigest()
+  except OSError:
+    return "0"
+  return digest[:8]
 
 
 def _page(html: str) -> HTMLResponse:
-    """Render a page template, stamping the JS cache-bust versions."""
-    return HTMLResponse(
-        html.replace("__JSV_CONSOLE__", _js_version("console.js")).replace(
-            "__JSV_SPU_ROI__", _js_version("spu-roi.js")
-        )
+  """Render a page template, stamping the JS cache-bust versions."""
+  return HTMLResponse(
+    html.replace("__JSV_CONSOLE__", _js_version("console.js")).replace(
+      "__JSV_SPU_ROI__", _js_version("spu-roi.js")
     )
+  )
 
 
 @router.get("/spu-roi", response_class=HTMLResponse)
 def spu_roi_page() -> HTMLResponse:
-    """SPU 实际 ROI 看板(账页式,§7 of tech-doc/analytics/spu-real-roi-dashboard.md)。
+  """SPU 实际 ROI 看板(账页式,§7 of tech-doc/analytics/spu-real-roi-dashboard.md)。
 
-    HTML shell 只做骨架:标题/结余带/工具栏/表格容器/分页;数据与业务计算
-    全部消费 GET /v2/analytics/spu-roi(只读,§5.1-1 页面不计算业务数字)。
-    布局 = Bootstrap 5.3.8 栅格/工具类 + 手机端适配(见 shell 头注释),行为在
-    static/js/spu-roi.js。
-    """
-    return _page(_SPU_ROI_PAGE_HTML)
+  HTML shell 只做骨架:标题/结余带/工具栏/表格容器/分页;数据与业务计算
+  全部消费 GET /v2/analytics/spu-roi(只读,§5.1-1 页面不计算业务数字)。
+  布局 = Bootstrap 5.3.8 栅格/工具类 + 手机端适配(见 shell 头注释),行为在
+  static/js/spu-roi.js。
+  """
+  return _page(_SPU_ROI_PAGE_HTML)
 
 
 @router.get("/manual-costs", response_class=HTMLResponse)
 def manual_costs_page() -> HTMLResponse:
-    """Manual cost entry workbench (main-image mirror display).
+  """Manual cost entry workbench (main-image mirror display).
 
-    The HTML shell is a small stub:
-    - links to ``/static/vendor/bootstrap.min.css`` (self-hosted, MIT)
-    - inline ``<style>`` block for the industrial-console personality
-    - links to ``/static/js/console.js`` (shop switcher, tabs, inline filing,
-      envelope unwrap for backend pagination, signature-counter population,
-      lightbox preview of the SPU's mirrored main image)
-    - the JS handles its own /v2/auth/me probe and redirects unauthenticated
-      callers to ``/v2/auth/login?next=/v2/pages/manual-costs``
+  The HTML shell is a small stub:
+  - links to ``/static/vendor/bootstrap.min.css`` (self-hosted, MIT)
+  - inline ``<style>`` block for the industrial-console personality
+  - links to ``/static/js/console.js`` (shop switcher, tabs, inline filing,
+    envelope unwrap for backend pagination, signature-counter population,
+    lightbox preview of the SPU's mirrored main image)
+  - the JS handles its own /v2/auth/me probe and redirects unauthenticated
+    callers to ``/v2/auth/login?next=/v2/pages/manual-costs``
 
-    2026-09-05 page-rework lane: the supplier-reference-photo upload flow
-    was removed. The 图片 column now shows the TikTok main image mirrored
-    into local MinIO (``image_url`` from the backend, fallback icon when the
-    mirror hasn't finished); cost currency is fixed to CNY.
-    """
-    return _page(_PAGE_HTML)
+  2026-09-05 page-rework lane: the supplier-reference-photo upload flow
+  was removed. The 图片 column now shows the TikTok main image mirrored
+  into local MinIO (``image_url`` from the backend, fallback icon when the
+  mirror hasn't finished); cost currency is fixed to CNY.
+  """
+  return _page(_PAGE_HTML)
 
 
 # Marker for the legacy token-paste UI — kept as a comment so future

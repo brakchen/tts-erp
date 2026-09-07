@@ -389,9 +389,7 @@ def test_orders_line_links_spu_when_catalog_known(db_session) -> None:
     产品时,行应在写库时就带上 spu_pk。
     """
     account = _make_channel_account(db_session)
-    prod = ChannelProduct(
-        shop_pk=account.id, spu_id="P1", title="TEST 目录商品"
-    )
+    prod = ChannelProduct(shop_pk=account.id, spu_id="P1", title="TEST 目录商品")
     db_session.add(prod)
     prod_num = ChannelProduct(
         shop_pk=account.id, spu_id="999888777", title="TEST 目录数字 id"
@@ -467,8 +465,8 @@ def test_orders_line_links_spu_when_catalog_known(db_session) -> None:
         db_session.execute(
             select(SalesOrderLine).where(
                 SalesOrderLine.external_line_id.in_(
-                ["L_SPU1", "L_SPU_NUMERIC", "L_SPU_MISSING"]
-            )
+                    ["L_SPU1", "L_SPU_NUMERIC", "L_SPU_MISSING"]
+                )
             )
         )
         .scalars()

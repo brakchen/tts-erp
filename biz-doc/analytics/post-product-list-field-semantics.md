@@ -147,3 +147,51 @@ campaign 总 GMV  = SUM(table[*].onsite_roi2_shopping_value)
 campaign × SPU 一行，出单量/消耗/GMV 合计 + 观测窗口元数据 + ERP 内部
 商品 key 富化）。字段口径、查询示例与验证记录见
 `biz-doc/analytics/ad-product-links-view.md`。
+
+## 9. 下游使用：全损判定需联表 `fulfillment.tracking_events`
+
+**⚠️ 重要：仅靠本表 + `commerce.*` 算不出"全损退货件"**。
+
+`mixed_real_cost`（广告消耗）会被用于 SPU 净利润/ROI 看板
+（`tech-doc/analytics/spu-real-roi-dashboard.md` §4.2 M18），但**全损件数**
+判定需要再 JOIN 一张物流表：
+
+```sql
+-- 全损件数 v5/v6/v7 口径（`handoff/spu-roi-full-loss-rubric.md`）
+SELECT sol.spu_pk, SUM(sol.quantity) AS full_loss_qty
+FROM commerce.sales_order_lines sol
+JOIN commerce.sales_orders so ON so.id = sol.order_pk
+LEFT JOIN fulfillment.shipments sh ON sh.order_pk = so.id
+WHERE EXISTS (
+    SELECT 1 FROM fulfillment.tracking_events te
+    WHERE te.shipment_id = sh.id
+      AND te.action_code = 38301   -- "Arrived in destination country/region"
+)
+  AND (EXISTS (SELECT 1 FROM after_sales.cases c
+               WHERE c.order_pk = so.id
+                 AND c.status IN ('RETURN_OR_REFUND_REQUEST_COMPLETE',
+                                   'CANCELLATION_REQUEST_COMPLETE'))
+       OR so.status = 'CANCELLED')
+GROUP BY sol.spu_pk;
+```
+
+**关键字段**：`fulfillment.tracking_events.action_code = 38301`（"Arrived in destination country/region"），含义是包裹**已到达目的国**。
+
+**为什么不能用 `sales_orders.delivered_at` / `shipments.delivered_at` 替代**：
+那两个字段只代表"最终投递完成"或"本地派送成功"，无法区分"还在路上"与"已到海外"。v4 用 `delivered_at` 只算到 28 件全损，v5 改用 `action_code=38301` 算到 127 件（多 4.5 倍），且覆盖了"已到海外但被取消"的订单。
+
+**配套表 / 视图**：
+
+- `fulfillment.shipments`（包裹）
+- `fulfillment.tracking_events`（物流轨迹）
+- `after_sales.cases`（售后退款/取消单）
+- `analytics.ad_product_links`（本 endpoint 聚合视图）
+- `commerce.products_spu`（SPU 内部键）
+
+**完整口径链（含 v7 已结算金额）**见 `handoff/spu-roi-full-loss-rubric.md` v7 章节。
+
+## 10. 来源补充
+
+- `handoff/spu-roi-full-loss-rubric.md` — SPU ROI 全损口径的项目记忆（v7 当前）
+- `tech-doc/analytics/spu-real-roi-dashboard.md` §4.2 — 看板指标公式表（M5d/M18/M19）
+- `biz-doc/analytics/ad-product-links-view.md` — 聚合视图字段语义
