@@ -166,8 +166,10 @@ class SettlementTransaction(Base):
 
 
 class SettlementComponent(Base):
-    """One non-zero amount line per transaction (e.g. GROSS_SALES,
-    PLATFORM_COMMISSION). Wide-row 58-column raw lives in
+    """One row per present amount line per transaction (e.g. GROSS_SALES,
+    PLATFORM_COMMISSION). Explicit zero amounts are stored since 2026-09-07
+    (spu-roi-v7-refactor §3.5：上游 53 字段全部显式传输，0 = 结算过但金额
+    为 0，与字段缺失语义不同）。Wide-row 58-column raw lives in
     integration.raw_records and is reconstructable there; this table is
     the analytical EAV view.
     """
