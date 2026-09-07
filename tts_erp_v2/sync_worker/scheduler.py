@@ -171,6 +171,19 @@ JOBS: dict[str, JobSpec] = {
         is_tiktok=False,
         entrypoint="sync_common_collect_box",
     ),
+    # TK 侧 procurement_products (external=spu_id) 的 source_unit_cost 等列
+    # 由 move_collect / collect_box 写,但只填 source_item_id 不填 cost。
+    # 本 job 从公共采集箱行(同 source_item_id 桥) latest-by-synced_at
+    # 回填 3 个 cost 列到 TK 侧行,让 spu_id→source_price 直读成立。
+    # 与 common_collect_box 同频(6h),在其后跑所以 offer 数据新鲜;
+    # IS DISTINCT FROM 守卫保证幂等。
+    "miaoshou.sync_source_cost_to_master": JobSpec(
+        job_name="miaoshou.sync_source_cost_to_master",
+        module_path="tts_erp_v2.jobs.miaoshou.sync_source_cost_to_master",
+        interval_seconds=21600,  # 6 h — after common_collect_box so offer is fresh
+        is_tiktok=False,
+        entrypoint="sync_source_cost_to_master",
+    ),
     # NOTE(2026-09-01): miaoshou.purchase_orders intentionally NOT registered —
     # the job's endpoint path 404s (routeNotFound) against the production ERP
     # API; the v2 path was written from docs and never live-verified. Re-add

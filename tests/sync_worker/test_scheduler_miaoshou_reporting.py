@@ -57,6 +57,11 @@ def test_jobs_registry_includes_miaoshou_and_reporting():
             "sync_common_collect_box",
             21600,
         ),
+        "miaoshou.sync_source_cost_to_master": (
+            "tts_erp_v2.jobs.miaoshou.sync_source_cost_to_master",
+            "sync_source_cost_to_master",
+            21600,
+        ),
         "reporting.cost_snapshots": (
             "tts_erp_v2.jobs.reporting",
             "run_cost_snapshots",

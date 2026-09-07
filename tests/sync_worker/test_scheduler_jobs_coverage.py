@@ -64,6 +64,7 @@ EXPECTED_JOB_INTERVALS = {
     "miaoshou.collect_box": 1800,
     "miaoshou.move_collect": 1800,
     "miaoshou.common_collect_box": 21600,
+    "miaoshou.sync_source_cost_to_master": 21600,
     "reporting.cost_snapshots": 21600,
     "reporting.profit_daily": 3600,
     "spu.image_mirror": 1800,
@@ -82,9 +83,9 @@ def test_jobs_registry_has_expected_count() -> None:
     2026-09-06：fx.sync 加入（ExchangeRate-API 汇率缓存，horizon-gated
     ≈1 请求/天）→ 13 → 14。
     """
-    # 6 tiktok + 9 system (token + 4 miaoshou + 2 reporting + image_mirror
+    # 6 tiktok + 10 system (token + 5 miaoshou + 2 reporting + image_mirror
     # + fx.sync) — keep the number pinned so we don't drift silently.
-    assert len(JOBS) == 15
+    assert len(JOBS) == 16
 
 
 @pytest.mark.parametrize(
