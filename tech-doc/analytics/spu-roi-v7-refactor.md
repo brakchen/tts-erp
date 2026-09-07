@@ -212,6 +212,13 @@ spu_pk→(cost, currency, source) map），口径与 jobs 版 1:1（同一 SQL �
   `db/models/finance.py` 的 "One non-zero amount line" docstring 改写；
   原断言「零跳过」的 tests/jobs_tiktok 测试反转。
 - ⚠️ 改了 `jobs/` → 上线时必须 `systemctl --user restart tts-erp-sync.service`。
+- **执行结果（2026-09-07 已落地）**：writer 改动 merge（8f29a0a + eba20af）→
+  sync-worker 重启 → 回填 **2,339 行**零值组件。验证：605/605 交易 payload
+  显式携带 `settlement_amount`（127 笔显式 `"0"`）；回填后 **0 笔交易缺
+  SETTLEMENT 行——「有交易必有 SETTLEMENT 行」实测成立**；回填脚本重跑
+  dry-run 缺失=0（幂等）。组件表 ~4.7K → 31.5K 行。存量另有 114 笔历史零值
+  SETTLEMENT 行（更早代码窗口期写入），与本次回填不冲突。陈旧性检查通过：
+  0 笔「payload=0 但库存非零」。
 
 ## 4. 端点契约变化（`GET /v2/analytics/spu-roi`，additive 不破已有字段）
 
