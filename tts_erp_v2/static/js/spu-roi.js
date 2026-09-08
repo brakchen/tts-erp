@@ -484,7 +484,7 @@
       ),
       cell("CPA", m(it.cpa)),
       cell("全损货损$", m(it.return_loss)),
-      cell("单位成本", m(it.unit_cost_used) + " " + (it.cost_source || "")),
+      cell("单位成本", m(it.unit_cost_used)),
       cell("已结算单", String(it.settled_order_count || 0)),
       cell("已结 GMV", m(it.settled_sales)),
       cell("未结 GMV", m(it.unsettled_sales)),
