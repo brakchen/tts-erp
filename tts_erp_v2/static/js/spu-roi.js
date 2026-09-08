@@ -71,6 +71,27 @@
         })[c],
     );
   }
+
+  function el(tag, props, ...children) {
+    var node = document.createElement(tag);
+    if (props)
+      for (var k in props) {
+        if (k === "class") node.className = props[k];
+        else if (k === "text") node.textContent = props[k];
+        else if (k === "hidden" && !props[k]) continue;
+        else node.setAttribute(k, props[k]);
+      }
+    var flat =
+      children.length === 1 && Array.isArray(children[0])
+        ? children[0]
+        : children;
+    for (var i = 0; i < flat.length; i++) {
+      var c = flat[i];
+      if (c == null) continue;
+      node.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+    }
+    return node;
+  }
   // Single choke point for markup writes.
   function html(el, markup) {
     el.innerHTML = markup; // pi-lens-ignore: no-inner-html-js
@@ -226,10 +247,6 @@
       it.status === "ACTIVATE" || !it.status
         ? ""
         : `<span class="spu-status is-down">${esc(it.status)}</span>`;
-    var costTitle =
-      it.cost_source === "MANUAL"
-        ? `人工标注的采购成交价(${esc(it.unit_cost_used)} USD/件)`
-        : "默认 40 元/件 ≈ $5.95 ⚠";
     var profitClass = npNeg ? ' class="np-red"' : "";
     var adCell =
       it.ad_count === 0 || it.ad_count == null
@@ -253,7 +270,6 @@
       "</tr>"
     );
   }
-
 
   function renderError(msg) {
     html(
@@ -396,10 +412,15 @@
   }
 
   // ---------- 钻取面板 (D7 行内 accordion + D6 tab 懒加载) ----------
-  function clearDrillCache() { state.drillCache = new Map(); }
-  function _drillCacheKey(spuPk, tab) { return [spuPk, tab, state.wStart, state.wEnd].join("|"); }
+  function clearDrillCache() {
+    state.drillCache = new Map();
+  }
+  function _drillCacheKey(spuPk, tab) {
+    return [spuPk, tab, state.wStart, state.wEnd].join("|");
+  }
   function _drillUrl(tab, spuPk) {
-    var base = PREFIX + "/v2/analytics/spu-roi/" + encodeURIComponent(spuPk) + "/" + tab;
+    var base =
+      PREFIX + "/v2/analytics/spu-roi/" + encodeURIComponent(spuPk) + "/" + tab;
     var qs = [];
     if (state.wStart) qs.push("w_start=" + encodeURIComponent(state.wStart));
     if (state.wEnd) qs.push("w_end=" + encodeURIComponent(state.wEnd));
@@ -407,53 +428,78 @@
   }
   function fetchDrillTab(spuPk, tab) {
     var key = _drillCacheKey(spuPk, tab);
-    if (state.drillCache.has(key)) return Promise.resolve(state.drillCache.get(key));
+    if (state.drillCache.has(key))
+      return Promise.resolve(state.drillCache.get(key));
     return fetch(_drillUrl(tab, spuPk), {
       credentials: "include",
       headers: { Accept: "application/json" },
-    }).then(function (r) {
-      if (r.status === 401) { window.location.href = loginUrl(); throw new Error("unauthorized"); }
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      return r.json();
-    }).then(function (data) {
-      state.drillCache.set(key, data);
-      return data;
-    });
+    })
+      .then((r) => {
+        if (r.status === 401) {
+          window.location.href = loginUrl();
+          throw new Error("unauthorized");
+        } // pi-lens-ignore: no-open-redirect-js
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then((data) => {
+        state.drillCache.set(key, data);
+        return data;
+      });
   }
   function closeDrillPanel() {
     if (state.openDrillRow) {
       var nxt = state.openDrillRow.nextElementSibling;
-      if (nxt && nxt.classList && nxt.classList.contains("op-drill-row")) nxt.remove();
+      if (nxt && nxt.classList && nxt.classList.contains("op-drill-row"))
+        nxt.remove();
       state.openDrillRow = null;
     }
   }
   function renderProfitSummary(it) {
-    function m(v) { return v == null || v === "" ? "—" : fmtMoney(v); }
-    function cell(label, value, hint) {
-      return '<div class="op-drill-cell"><span class="op-drill-lbl">' + esc(label) +
-        (hint ? '<span class="op-hint" data-tip="' + esc(hint) + '">?</span>' : "") +
-        '</span><span class="op-drill-val">' + (value == null ? "—" : value) + "</span></div>";
+    function m(v) {
+      return v == null || v === "" ? "—" : fmtMoney(v);
     }
-    return '<div class="op-drill-grid">' +
-      cell("ROI 实际", fmtRatio(it.roi_real)) +
-      cell("ROI 保本", fmtRatio(it.roi_breakeven)) +
-      cell("平台佣金", m(it.platform_fee), "平台从销售额直接扣除的全部费用（抽佣/联盟/运费类）") +
-      cell("CPA", m(it.cpa)) +
-      cell("全损货损$", m(it.return_loss)) +
-      cell("单位成本", m(it.unit_cost_used) + " " + (it.cost_source || "")) +
-      cell("已结算单", String(it.settled_order_count || 0)) +
-      cell("已结 GMV", m(it.settled_sales)) +
-      cell("未结 GMV", m(it.unsettled_sales)) +
-      cell("全损件数", String(it.full_loss_qty || 0)) +
-      cell("全损取消", String(it.full_loss_cancelled_qty || 0)) +
-      cell("净收入", m(it.net_revenue)) +
-      "</div>";
+    function cell(label, value, hint) {
+      var val = value == null ? "—" : value;
+      var hintEl = hint
+        ? el("span", { class: "op-hint", "data-tip": hint }, "?")
+        : null;
+      return el(
+        "div",
+        { class: "op-drill-cell" },
+        el("span", { class: "op-drill-lbl" }, label, hintEl),
+        el("span", { class: "op-drill-val" }, String(val)),
+      );
+    }
+    return el(
+      "div",
+      { class: "op-drill-grid" },
+      cell("ROI 实际", fmtRatio(it.roi_real)),
+      cell("ROI 保本", fmtRatio(it.roi_breakeven)),
+      cell(
+        "平台佣金",
+        m(it.platform_fee),
+        "平台从销售额直接扣除的全部费用（抽佣/联盟/运费类）",
+      ),
+      cell("CPA", m(it.cpa)),
+      cell("全损货损$", m(it.return_loss)),
+      cell("单位成本", m(it.unit_cost_used) + " " + (it.cost_source || "")),
+      cell("已结算单", String(it.settled_order_count || 0)),
+      cell("已结 GMV", m(it.settled_sales)),
+      cell("未结 GMV", m(it.unsettled_sales)),
+      cell("全损件数", String(it.full_loss_qty || 0)),
+      cell("全损取消", String(it.full_loss_cancelled_qty || 0)),
+      cell("净收入", m(it.net_revenue)),
+    );
   }
   function renderProfitTab(it) {
     var settled = Number(it.settled_sales || 0);
     var unsettled = Number(it.unsettled_sales || 0);
     var netRevenue = Number(it.net_revenue || 0);
-    var settledNet = settled + unsettled > 0 ? (settled / (settled + unsettled)) * netRevenue : netRevenue;
+    var settledNet =
+      settled + unsettled > 0
+        ? (settled / (settled + unsettled)) * netRevenue
+        : netRevenue;
     var unsettledNet = netRevenue - settledNet;
     var flc = Number(it.full_loss_cancelled_qty || 0);
     var unitCost = Number(it.unit_cost_used || 0);
@@ -462,81 +508,206 @@
     var spend = Number(it.spend || 0);
     var np = Number(it.net_profit || 0);
     function row(label, val, klass, hint) {
-      return '<tr' + (klass ? ' class="' + klass + '"' : "") + '>' +
-        "<td>" + esc(label) + (hint ? ' <span class="op-hint" data-tip="' + esc(hint) + '">?</span>' : "") +
-        "</td><td>" + fmtMoney(val) + "</td></tr>";
+      var hintEl = hint
+        ? el("span", { class: "op-hint", "data-tip": hint }, "?")
+        : null;
+      var attrs = {};
+      if (klass) attrs["class"] = klass;
+      return el(
+        "tr",
+        attrs,
+        el("td", null, label, " ", hintEl),
+        el("td", null, fmtMoney(val)),
+      );
     }
-    return '<table class="op-pnl-table"><tbody>' +
-      row("净收入·已结算(SETTLEMENT 分摊)", settledNet, null, "v7 D2 零值落库后,有交易必有 SETTLEMENT 行;amount=0 即已结算到手 0") +
-      row("净收入·未结算(×(1−r̂)×(1−退货率))", unsettledNet, null, "v7 D5:未结算按基线 30.8% × (1−本 SPU 退款率) 估算") +
-      row("− 货本·售出件", -cogsSold) +
-      row("− 货本·全损取消件(D4 B 补扣)", -cogsFlc, null, "D4 B 切 38301 全损口径:M13b = full_loss_qty × cost,含已出海取消件") +
-      row("− 广告消耗", -spend) +
-      row("= 净利润", np, np < 0 ? "np-red" : "np-positive", "M18 红绿仅按净利判(C3 拍板);负值红字") +
-      "</tbody></table>";
+    var rows = [
+      row(
+        "净收入·已结算(SETTLEMENT 分摊)",
+        settledNet,
+        null,
+        "v7 D2 零值落库后,有交易必有 SETTLEMENT 行;amount=0 即已结算到手 0",
+      ),
+      row(
+        "净收入·未结算(×(1−r̂)×(1−退货率))",
+        unsettledNet,
+        null,
+        "v7 D5:未结算按基线 30.8% × (1−本 SPU 退款率) 估算",
+      ),
+      row("− 货本·售出件", -cogsSold),
+      row(
+        "− 货本·全损取消件(D4 B 补扣)",
+        -cogsFlc,
+        null,
+        "D4 B 切 38301 全损口径:M13b = full_loss_qty × cost,含已出海取消件",
+      ),
+      row("− 广告消耗", -spend),
+      row(
+        "= 净利润",
+        np,
+        np < 0 ? "np-red" : "np-positive",
+        "M18 红绿仅按净利判(C3 拍板);负值红字",
+      ),
+    ];
+    return el("table", { class: "op-pnl-table" }, el("tbody", null, rows));
   }
   function renderDrillTabBody(tab, data) {
-    if (!data) return '<div class="op-drill-loading">无数据</div>';
+    function loading(msg) {
+      return el("div", { class: "op-drill-loading" }, msg);
+    }
+    if (!data) return loading("无数据");
     if (tab === "settlements") {
       var ss = data.settlements || [];
-      if (!ss.length) return '<div class="op-drill-loading">未结算订单不展示（基线估算见利润构成 tab）。</div>';
-      return '<table class="op-pnl-table"><thead><tr><th>订单号</th><th>SETTLEMENT</th><th>分摊比</th><th>statement</th></tr></thead><tbody>' +
-        ss.map(function (s) {
-          var comp = (s.components || []).filter(function (c) { return c.code === "SETTLEMENT"; })[0];
-          var set = comp ? fmtMoney(comp.amount) : "—";
-          return "<tr><td>" + esc(s.order_id) + "</td><td>" + set +
-            "</td><td>" + esc(s.share_ratio || "—") +
-            "</td><td>" + esc(s.statement_time || "—") + "</td></tr>";
-        }).join("") + "</tbody></table>";
+      if (!ss.length)
+        return loading("未结算订单不展示（基线估算见利润构成 tab）。");
+      var srows = ss.map((s) => {
+        var comp = (s.components || []).filter(
+          (c) => c.code === "SETTLEMENT",
+        )[0];
+        return el(
+          "tr",
+          null,
+          el("td", null, s.order_id),
+          el("td", null, comp ? fmtMoney(comp.amount) : "—"),
+          el("td", null, s.share_ratio || "—"),
+          el("td", null, s.statement_time || "—"),
+        );
+      });
+      return el(
+        "table",
+        { class: "op-pnl-table" },
+        el(
+          "thead",
+          null,
+          el(
+            "tr",
+            null,
+            el("th", null, "订单号"),
+            el("th", null, "SETTLEMENT"),
+            el("th", null, "分摊比"),
+            el("th", null, "statement"),
+          ),
+        ),
+        el("tbody", null, srows),
+      );
     }
     if (tab === "orders") {
       var orders = data.orders || [];
-      if (!orders.length) return '<div class="op-drill-loading">无订单</div>';
-      return '<table class="op-pnl-table"><thead><tr><th>订单号</th><th>状态</th><th>件</th><th>is_settled</th><th>38301</th><th>全损</th></tr></thead><tbody>' +
-        orders.map(function (o) {
-          return "<tr><td>" + esc(o.order_id) + "</td><td>" + esc(o.status) +
-            "</td><td>" + esc(o.qty) +
-            "</td><td>" + (o.is_settled ? "✓" : "—") +
-            "</td><td>" + (o.arrived_overseas ? "✓" : "—") +
-            "</td><td>" + (o.full_loss ? "⚠" : "—") + "</td></tr>";
-        }).join("") + "</tbody></table>";
+      if (!orders.length) return loading("无订单");
+      var orows = orders.map((o) =>
+        el(
+          "tr",
+          null,
+          el("td", null, o.order_id),
+          el("td", null, o.status),
+          el("td", null, o.qty),
+          el("td", null, o.is_settled ? "✓" : "—"),
+          el("td", null, o.arrived_overseas ? "✓" : "—"),
+          el("td", null, o.full_loss ? "⚠" : "—"),
+        ),
+      );
+      return el(
+        "table",
+        { class: "op-pnl-table" },
+        el(
+          "thead",
+          null,
+          el(
+            "tr",
+            null,
+            el("th", null, "订单号"),
+            el("th", null, "状态"),
+            el("th", null, "件"),
+            el("th", null, "is_settled"),
+            el("th", null, "38301"),
+            el("th", null, "全损"),
+          ),
+        ),
+        el("tbody", null, orows),
+      );
     }
     if (tab === "cases") {
       var cases = data.cases || [];
-      if (!cases.length) return '<div class="op-drill-loading">无售后 case</div>';
-      return '<table class="op-pnl-table"><thead><tr><th>case</th><th>订单</th><th>类型</th><th>状态</th><th>退款</th></tr></thead><tbody>' +
-        cases.map(function (c) {
-          return "<tr><td>" + esc(c.case_id) + "</td><td>" + esc(c.order_id || "—") +
-            "</td><td>" + esc(c.type) + "</td><td>" + esc(c.status) +
-            "</td><td>" + fmtMoney(c.refund_amount) + "</td></tr>";
-        }).join("") + "</tbody></table>";
+      if (!cases.length) return loading("无售后 case");
+      var crows = cases.map((c) =>
+        el(
+          "tr",
+          null,
+          el("td", null, c.case_id),
+          el("td", null, c.order_id || "—"),
+          el("td", null, c.type),
+          el("td", null, c.status),
+          el("td", null, fmtMoney(c.refund_amount)),
+        ),
+      );
+      return el(
+        "table",
+        { class: "op-pnl-table" },
+        el(
+          "thead",
+          null,
+          el(
+            "tr",
+            null,
+            el("th", null, "case"),
+            el("th", null, "订单"),
+            el("th", null, "类型"),
+            el("th", null, "状态"),
+            el("th", null, "退款"),
+          ),
+        ),
+        el("tbody", null, crows),
+      );
     }
     if (tab === "ads") {
       var ads = data.ads || [];
-      if (!ads.length) return '<div class="op-drill-loading">无广告投放</div>';
-      return '<table class="op-pnl-table"><thead><tr><th>campaign_id</th><th>spend</th><th>orders</th><th>窗口</th></tr></thead><tbody>' +
-        ads.map(function (a) {
-          return "<tr><td>" + esc(a.campaign_id) + "</td><td>" + fmtMoney(a.spend) +
-            "</td><td>" + esc(a.orders) +
-            "</td><td>" + esc(a.first_day || "—") + " ~ " + esc(a.last_day || "—") + "</td></tr>";
-        }).join("") + "</tbody></table>";
+      if (!ads.length) return loading("无广告投放");
+      var arows = ads.map((a) =>
+        el(
+          "tr",
+          null,
+          el("td", null, a.campaign_id),
+          el("td", null, fmtMoney(a.spend)),
+          el("td", null, a.orders),
+          el("td", null, (a.first_day || "—") + " ~ " + (a.last_day || "—")),
+        ),
+      );
+      return el(
+        "table",
+        { class: "op-pnl-table" },
+        el(
+          "thead",
+          null,
+          el(
+            "tr",
+            null,
+            el("th", null, "campaign_id"),
+            el("th", null, "spend"),
+            el("th", null, "orders"),
+            el("th", null, "窗口"),
+          ),
+        ),
+        el("tbody", null, arows),
+      );
     }
-    return '<div class="op-drill-loading">未知 tab</div>';
+    return loading("未知 tab");
   }
   function renderDrillLazy(drill, it, which) {
     var body = drill.querySelector('[data-region="body"]');
     body.textContent = "加载中…";
     fetchDrillTab(it.spu_pk, which)
-      .then(function (data) {
-        body.innerHTML = renderDrillTabBody(which, data);
+      .then((data) => {
+        body.replaceChildren(renderDrillTabBody(which, data));
         if (typeof wireTooltips === "function") wireTooltips();
       })
-      .catch(function (e) {
+      .catch((e) => {
         body.textContent = "加载失败：" + (e && e.message ? e.message : e);
       });
   }
   function openDrillPanel(row, it) {
-    if (state.openDrillRow === row) { closeDrillPanel(); return; }
+    if (state.openDrillRow === row) {
+      closeDrillPanel();
+      return;
+    }
     closeDrillPanel();
     if (!it || !it.spu_pk) return;
     var tpl = document.getElementById("tpl-drilldown-panel");
@@ -549,18 +720,27 @@
     var orderCount = Number(it.order_count || 0);
     if (settledCount > 0 && settledCount < orderCount) {
       banner.hidden = false;
-      banner.textContent = "含未结算订单，净收入为估算（基线 ×(1−r̂)×(1−退货率)）。";
+      banner.textContent =
+        "含未结算订单，净收入为估算（基线 ×(1−r̂)×(1−退货率)）。";
     }
-    drill.querySelector('[data-region="summary"]').innerHTML = renderProfitSummary(it);
-    drill.querySelector('[data-region="body"]').innerHTML = renderProfitTab(it);
+    drill
+      .querySelector('[data-region="summary"]')
+      .replaceChildren(renderProfitSummary(it));
+    drill
+      .querySelector('[data-region="body"]')
+      .replaceChildren(renderProfitTab(it));
     var tabs = drill.querySelectorAll(".op-drill-tab");
-    Array.prototype.forEach.call(tabs, function (tab) {
-      tab.addEventListener("click", function () {
-        Array.prototype.forEach.call(tabs, function (t) { t.classList.remove("is-active"); });
+    Array.prototype.forEach.call(tabs, (tab) => {
+      tab.addEventListener("click", () => {
+        Array.prototype.forEach.call(tabs, (t) => {
+          t.classList.remove("is-active");
+        });
         tab.classList.add("is-active");
         var which = tab.getAttribute("data-tab");
         if (which === "pnl") {
-          drill.querySelector('[data-region="body"]').innerHTML = renderProfitTab(it);
+          drill
+            .querySelector('[data-region="body"]')
+            .replaceChildren(renderProfitTab(it));
         } else {
           renderDrillLazy(drill, it, which);
         }
@@ -576,18 +756,18 @@
     var tbody = document.getElementById("rows");
     if (!tbody) return;
     _rowAccordionBound = true;
-    tbody.addEventListener("click", function (e) {
+    tbody.addEventListener("click", (e) => {
       var tr = e.target;
       while (tr && tr.tagName !== "TR") tr = tr.parentElement;
       if (!tr || !tr.dataset || !tr.dataset.spupk) return;
       if (tr.classList && tr.classList.contains("op-drill-row")) return;
       var spuPk = tr.dataset.spupk;
       var it = (window.__lastPayloadItems || []).filter(
-        function (i) { return String(i.spu_pk) === String(spuPk); }
+        (i) => String(i.spu_pk) === String(spuPk),
       )[0];
       if (it) openDrillPanel(tr, it);
     });
-    document.addEventListener("keydown", function (e) {
+    document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") closeDrillPanel();
     });
   }
@@ -597,10 +777,10 @@
   // 全部店铺全历史)。401 → 跳登录(与主表 load() 一致);失败只留占位项,
   // 不阻塞主表(空态文案即占位项"全部店铺")。
   function loadShops() {
-    fetch(
-      `${PREFIX}/v2/commerce/channel-accounts?platform=tiktok&limit=500`,
-      { credentials: "include", headers: { Accept: "application/json" } },
-    )
+    fetch(`${PREFIX}/v2/commerce/channel-accounts?platform=tiktok&limit=500`, {
+      credentials: "include",
+      headers: { Accept: "application/json" },
+    })
       .then((r) => {
         if (r.status === 401) {
           // 401 → 跳登录(console.js 家族行为)
@@ -778,7 +958,8 @@
   }
   function wireZoom() {
     document.addEventListener("click", (e) => {
-      var t = e.target && e.target.closest ? e.target.closest("[data-zoom]") : null;
+      var t =
+        e.target && e.target.closest ? e.target.closest("[data-zoom]") : null;
       if (t) {
         e.preventDefault();
         openLightbox(t.getAttribute("data-zoom"));

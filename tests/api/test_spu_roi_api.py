@@ -25,12 +25,14 @@ teardown 顺序:先清子表,再由 conftest 清父表)。
 from __future__ import annotations
 
 import json
+import re
 from decimal import ROUND_HALF_UP, Decimal
 
-import re
 import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+import tts_erp_v2.analytics.spu_roi as spu_roi_mod
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -906,7 +908,9 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
 
     # 成本：DEFAULT_K1 = 40 CNY × 0.14774 ≈ 5.9088
     assert item["cost_source"] == "DEFAULT_K1"
-    assert Decimal(item["unit_cost_used"]) == Decimal(K1_CNY * CNY_USD).quantize(_Q4, rounding=ROUND_HALF_UP)
+    assert Decimal(item["unit_cost_used"]) == Decimal(K1_CNY * CNY_USD).quantize(
+        _Q4, rounding=ROUND_HALF_UP
+    )
 
     # v7 利润域
     assert Decimal(item["return_loss"]) == Decimal("0.0000")
@@ -1521,7 +1525,7 @@ def test_spu_roi_totals_roi_real_native_reconciliation(
     total_return_loss_usd = sum(Decimal(it["return_loss"]) for it in items.values())
     total_spend_usd = sum(Decimal(it["spend"]) for it in items.values())
     expected = (total_net_revenue_usd - total_return_loss_usd) / total_spend_usd
-    assert body["totals"]["roi_real"] == m2(expected.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP))
+    assert body["totals"]["roi_real"] == m2(Decimal(expected))
 
 
 def test_spu_roi_totals_roi_real_single_row_matches_item(
@@ -1575,7 +1579,7 @@ def test_spu_roi_default_sort_roi_asc_pagination_and_totals(
     # A spend=10, B=50, C=10（已知常数）
     expected_order = sorted(spu_roi, key=lambda k: spu_roi[k])
     assert [i["spu_id"] for i in items] == expected_order
-    for spu_id, expected_roi in spu_roi.items():
+    for spu_id, _ in spu_roi.items():
         # 不再写死：从行 net_revenue/return_loss/spend 反推（舍入到 2dp）
         row = next(it for it in items if it["spu_id"] == spu_id)
         nc = Decimal(row["net_revenue"])
@@ -1605,9 +1609,7 @@ def test_spu_roi_default_sort_roi_asc_pagination_and_totals(
         "refund_net_amount": sum(
             (Decimal(i["refund_net_amount"]) for i in items), Decimal(0)
         ),
-        "net_profit": sum(
-            (Decimal(i["net_profit"]) for i in items), Decimal(0)
-        ),
+        "net_profit": sum((Decimal(i["net_profit"]) for i in items), Decimal(0)),
     }
     assert m4(row_sum["spend"]) == totals["spend"]
     assert m4(row_sum["sales"]) == totals["sales"]
@@ -1920,17 +1922,34 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     # D8(2026-09-07)主表精确匹配 th 表头文本
     main_th_labels = re.findall(r'<th[^>]*scope="col"[^>]*>([^<]+)</th>', body)
     for col_label in (
-        "商品", "广告消耗", "有效GMV", "有效出单量",
-        "取消率%", "全损退款率%", "净利润",
+        "商品",
+        "广告消耗",
+        "有效GMV",
+        "有效出单量",
+        "取消率%",
+        "全损退款率%",
+        "净利润",
     ):
         assert col_label in main_th_labels, f"主表缺列 {col_label}"
     # D8 删除:原 13 列里只在 th 表头出现过的标签
-    for removed in ("销售$", "有效销售$", "退货$", "退货率%",
-                   "全损退款$", "实际ROI", "保本ROI"):
+    for removed in (
+        "销售$",
+        "有效销售$",
+        "退货$",
+        "退货率%",
+        "全损退款$",
+        "实际ROI",
+        "保本ROI",
+    ):
         assert removed not in main_th_labels, f"D8 已删:th 表头残留 {removed}"
     # D8 删除 ⚙ 列开关组
-    for toggle in ("col-toggle-adref", "col-toggle-structure",
-                   "col-toggle-refundsplit", "col-toggle-cancel", "col-toggle-fee"):
+    for toggle in (
+        "col-toggle-adref",
+        "col-toggle-structure",
+        "col-toggle-refundsplit",
+        "col-toggle-cancel",
+        "col-toggle-fee",
+    ):
         assert toggle not in body
     # M13b 已迁钻取面板利润构成 tab(D4 B 切 38301 全损口径)
     assert "M13b" in body
@@ -1971,8 +1990,12 @@ def test_spu_roi_page_d8_no_column_toggles(api_client, readonly_key):
         r'class="op-th[^"]*op-th-sort[^"]*" data-sort="([a-z0-9_]+)"', body
     )
     assert set(sortable) == {
-        "spend", "sales", "order_count", "cancel_rate",
-        "full_loss_rate", "net_profit",
+        "spend",
+        "sales",
+        "order_count",
+        "cancel_rate",
+        "full_loss_rate",
+        "net_profit",
     }, f"D8 主表可点列异常: {sortable}"
 
 
@@ -2063,7 +2086,6 @@ def test_spu_roi_meta_uses_live_fx_rates(api_client, readonly_key, monkeypatch):
     """
     from datetime import UTC, datetime
 
-    import tts_erp_v2.api.v2.analytics as analytics_mod
     from tts_erp_v2.fx.rates import RateMap
 
     rm = RateMap(
@@ -2078,9 +2100,7 @@ def test_spu_roi_meta_uses_live_fx_rates(api_client, readonly_key, monkeypatch):
             "CNY": Decimal("6.9"),
         },
     )
-    monkeypatch.setattr(
-        analytics_mod, "load_rate_map", lambda sess, base_code="USD": rm
-    )
+    monkeypatch.setattr(spu_roi_mod, "load_rate_map", lambda sess, base_code="USD": rm)
     fx = _fx_meta_of_empty_query(api_client, readonly_key)
     assert fx == {
         "usd_vnd": "26000.0000",
@@ -2094,10 +2114,8 @@ def test_spu_roi_fx_fallback_to_fixed_const_when_no_snapshot(
     api_client, readonly_key, monkeypatch
 ):
     """缓存未就绪(无 USD 快照)→ 回退 D9 固定常量,金额换算不空白。"""
-    import tts_erp_v2.api.v2.analytics as analytics_mod
-
     monkeypatch.setattr(
-        analytics_mod, "load_rate_map", lambda sess, base_code="USD": None
+        spu_roi_mod, "load_rate_map", lambda sess, base_code="USD": None
     )
     fx = _fx_meta_of_empty_query(api_client, readonly_key)
     assert fx == {
@@ -2108,8 +2126,8 @@ def test_spu_roi_fx_fallback_to_fixed_const_when_no_snapshot(
     }
 
 
-
 # ─── D7/D6 钻取面板(行内 accordion + tab 懒加载)──────────────────────────────
+
 
 def test_spu_roi_page_drilldown_template_present(api_client, readonly_key):
     """D7(2026-09-07):页面含 #tpl-drilldown-panel 模板 + 5 tab + 摘要/正文 region。"""
@@ -2128,7 +2146,6 @@ def test_spu_roi_page_drilldown_template_present(api_client, readonly_key):
 
 def test_spu_roi_page_no_old_columns(api_client, readonly_key):
     """D8(2026-09-07)主表无隐藏列、无 ⚙ 开关、无 ROI 列;6 列标签齐全。"""
-    import re as _re
     r = api_client.get(
         "/v2/pages/spu-roi",
         headers={"Authorization": f"Bearer {readonly_key}"},
@@ -2136,13 +2153,25 @@ def test_spu_roi_page_no_old_columns(api_client, readonly_key):
     body = r.text
     main_th_labels = re.findall(r'<th[^>]*scope="col"[^>]*>([^<]+)</th>', body)
     for forbidden in (
-        "实际ROI", "保本ROI", "销售$", "有效销售$", "退货$",
-        "取消单量", "退货率%", "全损退款$", "广告数",
+        "实际ROI",
+        "保本ROI",
+        "销售$",
+        "有效销售$",
+        "退货$",
+        "取消单量",
+        "退货率%",
+        "全损退款$",
+        "广告数",
     ):
         assert forbidden not in main_th_labels, f"D8 已删:th 表头残留 {forbidden}"
     for col in (
-        "商品", "广告消耗", "有效GMV", "有效出单量",
-        "取消率%", "全损退款率%", "净利润",
+        "商品",
+        "广告消耗",
+        "有效GMV",
+        "有效出单量",
+        "取消率%",
+        "全损退款率%",
+        "净利润",
     ):
         assert col in main_th_labels, f"D8 主表缺列 {col}"
     assert "op-th col-hidden" not in body
