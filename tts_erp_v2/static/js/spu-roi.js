@@ -88,7 +88,15 @@
     for (var i = 0; i < flat.length; i++) {
       var c = flat[i];
       if (c == null) continue;
-      node.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+      // el() 子元素兜底: string → TextNode; Node → 直接 append; 其他(number/boolean) → 走 String → TextNode
+      // 修复 orders/settlements/cases/ads tab 的 appendChild 报错(o.qty/s.order_id/a.orders 等是 number)
+      if (typeof c === "string") {
+        node.appendChild(document.createTextNode(c));
+      } else if (c instanceof Node) {
+        node.appendChild(c);
+      } else {
+        node.appendChild(document.createTextNode(String(c)));
+      }
     }
     return node;
   }
