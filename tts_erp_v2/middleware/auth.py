@@ -72,6 +72,10 @@ _READONLY_PREFIXES = (
     # POST upload-url / {id}/confirm and DELETE /{id} are classified
     # by the _READWRITE_EXACT entries below.
     "/v2/spu-images/",
+    # SPU 实际 ROI 钻取面板 4 端点({spu_pk}/{orders|settlements|cases|ads})。
+    # 主表 /v2/analytics/spu-roi 在下方 _READONLY_EXACT 中(无尾斜杠);子路径
+    # 补 prefix,避免 fallback 到默认 admin(role=readonly session → 403)。
+    "/v2/analytics/spu-roi/",
     # TikTok Shop Partner API read-through proxy (live, no DB caching).
     # All endpoints here are GETs that hand the upstream payload back
     # verbatim. See ``tts_erp_v2/proxy/tts_shop/products_api.py`` for
