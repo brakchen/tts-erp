@@ -460,15 +460,14 @@ _SQL_DETAIL_SETTLEMENTS = text(
     SELECT so.id AS order_pk,
            so.order_id,
            st.id AS txn_pk,
-           st.statement_time,
-           st.transaction_id AS statement_id
+           st.transaction_time AS statement_time
     FROM commerce.sales_orders so
     JOIN finance.settlement_transactions st ON st.order_pk = so.id
     WHERE so.id IN (
         SELECT order_pk FROM commerce.sales_order_lines
         WHERE spu_pk = :spu_pk
     )
-    ORDER BY st.statement_time DESC NULLS LAST, st.id DESC
+    ORDER BY st.transaction_time DESC NULLS LAST, st.id DESC
     """
 )
 
