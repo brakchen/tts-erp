@@ -942,7 +942,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     table.op-table thead th:first-child { left: 0; z-index: 4; box-shadow: inset 1px 0 0 var(--rule); }
     table.op-table thead .op-th-sort[data-tip] { cursor: pointer; }
     tbody.op-rows td {
-      padding: 9px 8px; border-bottom: 1px solid var(--rule-soft);
+      padding: 8px 4px; border-bottom: 1px solid var(--rule-soft);
       text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums;
       font-size: 13px; background: transparent;
     }
