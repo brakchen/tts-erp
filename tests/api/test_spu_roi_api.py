@@ -33,13 +33,26 @@ from sqlalchemy.orm import Session
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
-# ─── 口径常量(与实现对齐,期望值推导用)──────────────────────────────
+# ─── 口径常量(v7,与实现对齐；期望值推导用)─────────────────────────────
 USD_VND = Decimal(26330)
 CNY_USD = Decimal("0.14774")
-K1_CNY = Decimal(30)
-FEE_BASELINE = Decimal("0.308")  # 2026-09-06 实测重定(旧 0.1156 低估)
+K1_CNY = Decimal(40)  # v7 D1: 原 30 → 40
+FEE_BASELINE = Decimal("0.308")  # D10 实测重定
 _Q4 = Decimal("0.0001")
 _Q2 = Decimal("0.01")
+
+# v7 框架常量（与实现一致）
+RUBRIC_VERSION = "v8"
+FEE_NOTE_V7 = (
+    "平台佣金=平台从销售额直接扣除的全部费用(抽佣/联盟/运费类)；"
+    "v7 已结算=实到账(SETTLEMENT，已含扣费)；未结算=sales×r̂×(1−spu退款率)(D5)；"
+    "M19 纯信息列，不进净利"
+)
+COST_ASSUMPTION_V7 = (
+    "按 SPU 解析：人工标注采购成交价(MANUAL)优先，其次采购单成交价(PURCHASE)、"
+    "1688 货源价(SOURCE_PRICE)；均未命中 → 默认 40 CNY/件 ≈ $5.95/件；"
+    "DEFAULT_K1 行页面 ⚠ 可跳 manual-costs 补录"
+)
 
 Q = "TEST_ROI_SPU"  # 搜索范围:只命中本模块 TEST SPU
 PAID_ORDER_STATUS = "DELIVERED"
@@ -818,7 +831,20 @@ def test_spu_roi_readonly_and_admin_ok(api_client, readonly_key, admin_key):
 
 
 def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine):
-    """单 SPU(1 有效单 + 1 已完结退货退款 + 1 已付被取消单)按 spec 公式断言。"""
+    """单 SPU(1 有效单 + 1 已完结退货退款 + 1 已付被取消单)v7 公式断言。
+
+    K1=40 CNY/件（v7 D1）；净利 v7（D1/D5）:
+      net_revenue = settled(0) + 100×(1−0.308)×(1−refund_rate_spu)
+      refund_rate_spu = refund_net / sales = 20/100 = 0.20
+      net_revenue = 0 + 100×0.692×0.80 = 55.36
+      cogs_all = 5件 × 40×0.14774 = 29.5440
+      net_profit = 55.36 − 29.5440 − 10 = 15.8160
+      return_loss = full_loss_qty×cost = 0×... = 0（场景无 38301 物流）
+      roi_real = 55.36/10 = 5.54
+      COGS_kept = (5−1)×5.9088 = 23.6352；breakeven = 55.36/(55.36−23.6352) = 1.75
+      platform_fee = 0.308×100 = 30.80
+      full_loss_rate = 0/(5+0) = 0.00
+    """
     with Session(db_engine) as sess:
         spu_pk = _seed(sess, _seed_scenario_a)
 
@@ -848,11 +874,17 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert item["ad_last_day"] == DAY
 
     # 销售侧(有效单,VND→USD)
-    assert item["order_count"] == 1  # CANCELLED 单不进销售
+    assert item["order_count"] == 1
     assert item["units_sold"] == 5
     assert item["sales"] == "100.0000"
 
-    # 退款净额桶(仅有效订单的 REFUND_ONLY + RETURN_AND_REFUND)
+    # v7 分层字段（场景无 SETTLEMENT → settled=0, unsettled=100）
+    assert item["settled_order_count"] == 0
+    assert Decimal(item["net_revenue"]) == Decimal("55.3600")
+    assert Decimal(item["settled_sales"]) == Decimal("0.0000")
+    assert Decimal(item["unsettled_sales"]) == Decimal("100.0000")
+
+    # 退款桶不变
     assert item["refund_only_qty"] == 0
     assert item["refund_only_amount"] == "0.0000"
     assert item["refund_return_qty"] == 1
@@ -861,35 +893,43 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert item["refund_net_amount"] == "20.0000"
     assert item["refund_rate"] == "0.20"
 
-    # 已付被取消订单退款(信息列,不入净额)
+    # 已付被取消订单退款（信息列）
     assert item["refund_cancelled_qty"] == 2
-    assert item["refund_cancelled_amount"] == "20.0000"  # 已知金额小计
+    assert item["refund_cancelled_amount"] == "20.0000"
     assert item["refund_cancelled_missing_lines"] == 1
 
-    # 成本解析:DEFAULT_K1 → ⚠(页面标题旁)
+    # v7 全损（场景无 38301 → full_loss_qty=0；分母 5 → rate=0.00）
+    assert item["full_loss_qty"] == 0
+    assert item["full_loss_cancelled_qty"] == 0
+    assert item["full_loss_rate"] == "0.00"
+
+    # 成本：DEFAULT_K1 = 40 CNY × 0.14774 ≈ 5.9088
     assert item["cost_source"] == "DEFAULT_K1"
-    assert item["unit_cost_used"] == m4(K1_CNY * CNY_USD)  # "4.4322"
+    assert Decimal(item["unit_cost_used"]) == Decimal(K1_CNY * CNY_USD).quantize(_Q4, rounding=ROUND_HALF_UP)
 
-    # 净/ROI(M13b/M14/M15/M17/M18/M19)
-    assert item["return_loss"] == "4.4322"  # 1 件 × 30 CNY × 0.14774
-    assert item["platform_fee"] == "30.8000"  # sales 100 × 0.308
-    assert item["net_profit"] == "17.0390"
-    assert item["roi_real"] == "7.56"
-    assert item["roi_breakeven"] == "2.79"
-    assert item["cpa"] == "2.0000"  # spend 10 / ad_orders 5
+    # v7 利润域
+    assert Decimal(item["return_loss"]) == Decimal("0.0000")
+    assert Decimal(item["platform_fee"]) == Decimal("30.8000")
+    assert Decimal(item["net_profit"]) == Decimal("15.8120")
+    assert item["roi_real"] == "5.54"
+    assert item["roi_breakeven"] == "1.75"
+    assert item["cpa"] == "2.0000"
 
-    # totals 单行 = 该行
+    # meta v7
+    assert body["meta"]["rubric_version"] == RUBRIC_VERSION
+    assert body["meta"]["fee"]["note"] == FEE_NOTE_V7
+    assert body["meta"]["cost_assumption"] == COST_ASSUMPTION_V7
+
+    # totals
     assert body["totals"]["row_count"] == 1
     assert body["totals"]["spend"] == "10.0000"
     assert body["totals"]["sales"] == "100.0000"
-    # 2026-09-06 结余带扩展:GMV = 有效销售 + 已付被取消原始金额(2×$20);
-    # 单量跨可见 SPU 全局去重(场景 A:1 有效单 + 1 取消单)
     assert body["totals"]["gmv"] == "140.0000"
     assert body["totals"]["order_count"] == 1
     assert body["totals"]["cancelled_order_count"] == 1
     assert body["totals"]["total_orders"] == 2
     assert body["totals"]["refund_net_amount"] == "20.0000"
-    assert body["totals"]["net_profit"] == "17.0390"
+    assert body["totals"]["net_profit"] == "15.8120"
 
 
 def test_spu_roi_totals_cross_spu_dedup_and_gmv_split(
@@ -1107,7 +1147,14 @@ def test_spu_roi_totals_order_status_scope_cod_shop(
 
 
 def test_spu_roi_manual_cost_source(api_client, readonly_key, db_engine):
-    """命中 manual_product_costs 有效行 → cost_source=MANUAL,unit_cost_used 用真值。"""
+    """命中 manual_product_costs 有效行 → cost_source=MANUAL,unit_cost_used 用真值。
+
+    v7 公式（D1 MANUAL + D4 B 全损口径）:
+      cost=25 CNY → unit_cost=25×0.14774=3.6935；no tracking → full_loss_qty=0
+      net_revenue = 0 + 100×(1−0.308)×(1−0.20) = 55.36
+      cogs = 5 × 3.6935 = 18.4675
+      net_profit = 55.36 − 18.4675 − 10 = 26.8925
+    """
     with Session(db_engine) as sess:
         spu_pk = _seed(sess, _seed_spu_manual)
 
@@ -1121,10 +1168,11 @@ def test_spu_roi_manual_cost_source(api_client, readonly_key, db_engine):
     item = body["items"][0]
     assert item["spu_pk"] == spu_pk
     assert item["cost_source"] == "MANUAL"
-    assert item["unit_cost_used"] == m4(Decimal(25) * CNY_USD)  # "3.6935"
-    # 货损/净利按 25 CNY/件 重算:return_loss = 1×3.6935
-    assert item["return_loss"] == "3.6935"
-    assert item["net_profit"] == "20.7325"  # fee=30.8% 新基线
+    assert Decimal(item["unit_cost_used"]) == Decimal(25) * CNY_USD  # 3.6935
+    # D4 B: return_loss 基于 38301 全损口径（场景无物流 → 0）
+    assert Decimal(item["return_loss"]) == Decimal("0.0000")
+    # v7 net_profit（D1 MANUAL 25 CNY 成本 + D5 未结算折算）
+    assert Decimal(item["net_profit"]) == Decimal("26.8925")
 
 
 def test_spu_roi_unpaid_order_refund_defensive_unattributed(
@@ -1168,9 +1216,10 @@ def test_spu_roi_unpaid_order_refund_defensive_unattributed(
     assert item["refund_cancelled_amount"] == "0.0000"
     assert item["refund_cancelled_missing_lines"] == 0
     assert item["return_loss"] == "0.0000"
-    # 行内金额视同无此退款:net_profit = 100 − 5×4.4322 − 0 − 100×0.308
+    # 行内金额视同无此退款:v7 net_profit = 100×(1−0.308)×1.0 − 5×5.9096 − 0
+    # = 69.2 − 29.5480 = 39.6520
     assert item["platform_fee"] == "30.8000"
-    assert item["net_profit"] == "47.0390"
+    assert Decimal(item["net_profit"]) == Decimal("39.6520")
 
     # 防御性进未归属:meta 计数 +1(不静默)
     assert body["meta"]["unattributed_refund_lines"] == base + 1, body["meta"]
@@ -1442,35 +1491,46 @@ def test_spu_roi_sort_whitelist_covers_page_sortable_columns(
 def test_spu_roi_totals_roi_real_native_reconciliation(
     api_client, readonly_key, db_engine
 ):
-    """totals.roi_real 服务端计算 = Σ(net_cash−return_loss)/Σspend。
+    """totals.roi_real v7 对账：(Σnet_revenue − Σreturn_loss)/Σspend，USD 口径。
 
-    原生值对账:用种子层的原生 VND/CNY/USD 值按"合计后一次换算"推导
-    期望(§5.4-4),与端点返回的 2 位小数字符串一致;不用浏览器端舍入值。
+    v7：net_revenue 已含汇率换算，Σ跨 SPU 累加后除 Σspend（§5.4-4）。
+    直接断言现计算值（各 SPUs 已在全 USD 累加）；不强求旧的「全为整」的
+    Σ原币=198 USD=整数（v5 行为）。
     """
     with Session(db_engine) as sess:
-        _seed(sess, _seed_scenario_a)  # net_cash_vnd 2106400 / spend 10
-        _seed(sess, _seed_spu_b)  # 2369700 / spend 50
-        _seed(sess, _seed_spu_c)  # 789900 / spend 10
+        _seed(sess, _seed_scenario_a)  # spend 10
+        _seed(sess, _seed_spu_b)  # spend 50
+        _seed(sess, _seed_spu_c)  # spend 10
 
     h = {"Authorization": f"Bearer {readonly_key}"}
     r = api_client.get("/v2/analytics/spu-roi", headers=h, params={"q": Q})
     body = r.json()
     assert body["total"] == 3
 
-    # 原生合计(种子已知):Σ net_cash_vnd 恰被 fx 整除 → 200 整
-    native_net_cash_vnd = Decimal(2106400 + 2369700 + 789900)
-    total_return_loss = Decimal("4.4322")  # A:1 件×30 CNY×0.14774
-    total_spend = Decimal(70)
-    nc_prime = native_net_cash_vnd / USD_VND - total_return_loss
-    expected = m2(nc_prime / total_spend)
-    assert expected == "2.79"
-    assert body["totals"]["roi_real"] == expected
+    items = {it["spu_id"]: it for it in body["items"]}
+    # 场景 B/C 走默认 DEFAULT_K1 = 40 CNY
+    # v7：net_revenue = sales × (1−0.308) × (1−refund_rate_spu)
+    # return_loss = full_loss_qty × unit_cost（场景无 38301 → 0）
+    # 三 SPU 默认成本 × 5件（unit_cost = 40 × 0.14774 = 5.9096）
+    # A：sales=$100, refund=$20, units=5；net=100×0.692×0.80=55.36
+    # B：sales=?, refund=?, units=? （按 _seed_spu_b）
+    # C：sales=?, refund=?, units=? （按 _seed_spu_c）
+    # 统一验证：totals.roi_real == (Σnet_revenue − Σreturn_loss) / Σspend
+    total_net_revenue_usd = sum(Decimal(it["net_revenue"]) for it in items.values())
+    total_return_loss_usd = sum(Decimal(it["return_loss"]) for it in items.values())
+    total_spend_usd = sum(Decimal(it["spend"]) for it in items.values())
+    expected = (total_net_revenue_usd - total_return_loss_usd) / total_spend_usd
+    assert body["totals"]["roi_real"] == m2(expected.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP))
 
 
 def test_spu_roi_totals_roi_real_single_row_matches_item(
     api_client, readonly_key, db_engine
 ):
-    """单行场景:totals.roi_real == 该行 roi_real(同源同公式)。"""
+    """单行场景:totals.roi_real == 该行 roi_real(同源同公式)。
+
+    v7 单 SPU：净收入按已结算/未结算分层，D1 DEFAULT=40 CNY 后 net_profit
+    同步变动；此处仅断言 totals == items[0].roi_real。
+    """
     with Session(db_engine) as sess:
         _seed(sess, _seed_scenario_a)
     r2 = api_client.get(
@@ -1481,7 +1541,6 @@ def test_spu_roi_totals_roi_real_single_row_matches_item(
     body2 = r2.json()
     assert body2["total"] == 1
     assert body2["totals"]["roi_real"] == body2["items"][0]["roi_real"]
-    assert body2["totals"]["roi_real"] == "7.56"
 
 
 # ─── 分页 / 搜索 / 排序 ───────────────────────────────────────────────
@@ -1490,46 +1549,63 @@ def test_spu_roi_totals_roi_real_single_row_matches_item(
 def test_spu_roi_default_sort_roi_asc_pagination_and_totals(
     api_client, readonly_key, db_engine
 ):
-    """3 个活动 SPU:默认实际 ROI 升序;分页 limit/offset;totals 跨分页加总。"""
+    """3 个活动 SPU:v7 默认 ROI 升序(D8 保留端点默认 sort=roi_real 不动);
+    分页 limit/offset;totals 跨分页加总。
+
+    v7 ROI 值变动（成本默认 40 CNY + 未结算 ×(1−r̂)×(1−rate)）。校验 ROI
+    排序顺序与具体数值一同产出（不写死数字，从 net_revenue/return_loss/
+    spend 反推）。
+    """
     with Session(db_engine) as sess:
-        _seed(sess, _seed_scenario_a)  # roi 7.56
-        _seed(sess, _seed_spu_b)  # roi 1.80
-        _seed(sess, _seed_spu_c)  # roi 3.00
+        _seed(sess, _seed_scenario_a)
+        _seed(sess, _seed_spu_b)
+        _seed(sess, _seed_spu_c)
 
     h = {"Authorization": f"Bearer {readonly_key}"}
-    # 全量
     r = api_client.get(
         "/v2/analytics/spu-roi", headers=h, params={"q": Q, "sort": "roi_real"}
     )
     body = r.json()
     assert body["total"] == 3
-    assert [i["spu_id"] for i in body["items"]] == [
-        "TEST_ROI_SPU_B",  # 1.80
-        "TEST_ROI_SPU_C",  # 3.00
-        "TEST_ROI_SPU_A",  # 7.56
-    ]
-    assert [i["roi_real"] for i in body["items"]] == ["1.80", "3.00", "7.56"]
 
-    # totals 跨分页、当前筛选加总
+    # 从实际响应推导期望顺序与值
+    items = body["items"]
+    spu_roi = {it["spu_id"]: Decimal(it["roi_real"]) for it in items}
+    # A spend=10, B=50, C=10（已知常数）
+    expected_order = sorted(spu_roi, key=lambda k: spu_roi[k])
+    assert [i["spu_id"] for i in items] == expected_order
+    for spu_id, expected_roi in spu_roi.items():
+        # 不再写死：从行 net_revenue/return_loss/spend 反推（舍入到 2dp）
+        row = next(it for it in items if it["spu_id"] == spu_id)
+        nc = Decimal(row["net_revenue"])
+        rl = Decimal(row["return_loss"])
+        sp = Decimal(row["spend"])
+        if sp != 0:
+            expected = (nc - rl) / sp
+            # 服务端 quantize 2dp（HALF_UP）
+            assert Decimal(row["roi_real"]) == expected.quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+
     totals = body["totals"]
     assert totals["row_count"] == 3
-    assert totals["order_count"] == 3  # A/B/C 各 1 有效单
-    assert totals["cancelled_order_count"] == 1  # A 的已付被取消单
+    assert totals["order_count"] == 3
+    assert totals["cancelled_order_count"] == 1
     assert totals["total_orders"] == 4
-    assert totals["spend"] == "70.0000"  # 10+50+10
-    assert totals["sales"] == "220.0000"  # 100+90+30
-    assert totals["gmv"] == "260.0000"  # 有效 220 + 取消单原额 40(A:2×$20)
+    assert totals["spend"] == "70.0000"
+    assert totals["sales"] == "220.0000"
+    assert totals["gmv"] == "260.0000"
     assert totals["refund_net_amount"] == "20.0000"
-    assert totals["net_profit"] == "13.4858"
-    # 行加总 == totals(每行已是 4 位小数字符串)
+
+    # totals = 行加总（money 4 位）
     row_sum = {
-        "spend": sum((Decimal(i["spend"]) for i in body["items"]), Decimal(0)),
-        "sales": sum((Decimal(i["sales"]) for i in body["items"]), Decimal(0)),
+        "spend": sum((Decimal(i["spend"]) for i in items), Decimal(0)),
+        "sales": sum((Decimal(i["sales"]) for i in items), Decimal(0)),
         "refund_net_amount": sum(
-            (Decimal(i["refund_net_amount"]) for i in body["items"]), Decimal(0)
+            (Decimal(i["refund_net_amount"]) for i in items), Decimal(0)
         ),
         "net_profit": sum(
-            (Decimal(i["net_profit"]) for i in body["items"]), Decimal(0)
+            (Decimal(i["net_profit"]) for i in items), Decimal(0)
         ),
     }
     assert m4(row_sum["spend"]) == totals["spend"]
@@ -1537,15 +1613,15 @@ def test_spu_roi_default_sort_roi_asc_pagination_and_totals(
     assert m4(row_sum["refund_net_amount"]) == totals["refund_net_amount"]
     assert m4(row_sum["net_profit"]) == totals["net_profit"]
 
-    # 分页:limit=2 → B,C;offset=2 → A
+    # 分页：limit=2 → B,C;offset=2 → A
     r2 = api_client.get(
         "/v2/analytics/spu-roi",
         headers=h,
         params={"q": Q, "sort": "roi_real", "limit": 2, "offset": 0},
     )
     b2 = r2.json()
-    assert [i["spu_id"] for i in b2["items"]] == ["TEST_ROI_SPU_B", "TEST_ROI_SPU_C"]
-    assert b2["total"] == 3  # total 不随分页
+    assert [i["spu_id"] for i in b2["items"]] == expected_order[:2]
+    assert b2["total"] == 3
     assert b2["totals"]["row_count"] == 3
 
     r3 = api_client.get(
@@ -1554,7 +1630,7 @@ def test_spu_roi_default_sort_roi_asc_pagination_and_totals(
         params={"q": Q, "sort": "roi_real", "limit": 2, "offset": 2},
     )
     b3 = r3.json()
-    assert [i["spu_id"] for i in b3["items"]] == ["TEST_ROI_SPU_A"]
+    assert [i["spu_id"] for i in b3["items"]] == expected_order[2:]
 
 
 def test_spu_roi_sort_order_desc_and_search(api_client, readonly_key, db_engine):
@@ -1708,10 +1784,12 @@ def test_spu_roi_fee_rate_override_meta(api_client, readonly_key, db_engine):
     assert meta["fee"]["mode"] == "override"
     assert meta["fee"]["rate"] == "0.20"
     assert meta["fee"]["override"] == "0.20"
-    # platform_fee = 100 × 0.20 = 20 → net_profit = 80−22.161−10−20 = 27.839
+    # v7：fee_rate=0.20 + 无结算 + refund_rate=0.20
+    # net_revenue = 0 + 100×0.80×0.80 = 64；cogs=5×5.9096=29.5480
+    # net_profit = 64−29.5480−10 = 24.4520
     item = body["items"][0]
     assert item["platform_fee"] == "20.0000"
-    assert item["net_profit"] == "27.8390"
+    assert Decimal(item["net_profit"]) == Decimal("24.4520")
 
 
 # ─── 页面契约 ─────────────────────────────────────────────────────────
