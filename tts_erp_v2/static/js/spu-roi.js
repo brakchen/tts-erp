@@ -468,16 +468,30 @@
     function m(v) {
       return v == null || v === "" ? "—" : fmtMoney(v);
     }
-    function cell(label, value, hint) {
+    function cell(label, value, hint, warn) {
       var val = value == null ? "—" : value;
       var hintEl = hint
         ? el("span", { class: "op-hint", "data-tip": hint }, "?")
         : null;
+      // DEFAULT_K1 兑底时,值后面加 ⚠ + tooltip 提示
+      var warnEl = warn
+        ? el(
+            "span",
+            {
+              class: "op-warn",
+              "data-tip":
+                "采用 40 CNY 兑底成本价（无人工标注采购价、无 1688 货源价）\n" +
+                "实际成本可能远低于 40 CNY,净利润可能被高估",
+            },
+            "⚠",
+          )
+        : null;
+      var valChildren = warnEl ? [String(val), " ", warnEl] : [String(val)];
       return el(
         "div",
-        { class: "op-drill-cell" },
+        { class: "op-drill-cell" + (warn ? " op-drill-cell-fallback" : "") },
         el("span", { class: "op-drill-lbl" }, label, hintEl),
-        el("span", { class: "op-drill-val" }, String(val)),
+        el("span", { class: "op-drill-val" }, valChildren),
       );
     }
     return el(
@@ -492,7 +506,12 @@
       ),
       cell("CPA", m(it.cpa)),
       cell("全损货损$", m(it.return_loss)),
-      cell("单位成本", m(it.unit_cost_used)),
+      cell(
+        "单位成本",
+        m(it.unit_cost_used),
+        "成本链路: 人工标注(MANUAL) > 1688 货源价(SOURCE_PRICE) > 40 CNY 兑底(DEFAULT_K1)",
+        it.cost_source === "DEFAULT_K1",
+      ),
       cell("已结算单", String(it.settled_order_count || 0)),
       cell("已结 GMV", m(it.settled_sales)),
       cell("未结 GMV", m(it.unsettled_sales)),
