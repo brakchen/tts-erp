@@ -1181,10 +1181,13 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       padding: 10px 12px; border: 1px solid var(--rule-soft); background: var(--paper);
     }
     .op-pnl-layer-title {
+      display: flex; align-items: center; gap: 6px;
       font-size: 11px; font-weight: 600; letter-spacing: .08em;
       color: var(--muted); text-transform: uppercase; margin-bottom: 8px;
       padding-bottom: 6px; border-bottom: 1px solid var(--rule-soft);
+      text-align: left; justify-content: flex-start;
     }
+    .op-pnl-layer-titletext { white-space: nowrap; }
     .op-pnl-rows { display: flex; flex-direction: column; gap: 4px; }
     .op-pnl-row {
       display: flex; justify-content: space-between; align-items: baseline;
@@ -1211,7 +1214,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     }
     .op-tab-table th, .op-tab-table td {
       padding: 10px 14px; border-bottom: 1px solid var(--rule-soft);
-      text-align: center; vertical-align: middle;
+      text-align: left; vertical-align: middle;
     }
     .op-tab-table th {
       font-size: 11px; font-weight: 600; color: var(--muted);
@@ -1219,6 +1222,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       border-bottom-color: var(--rule);
     }
     .op-tab-table td:first-child { font-family: var(--mono); font-size: 11px; }
+    .op-tab-table th .op-hint { margin-left: 4px; }
     .op-tab-table tbody tr:hover { background: var(--paper-soft, var(--paper)); }
   </style>
 </head>
