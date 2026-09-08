@@ -1059,6 +1059,104 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
         display: none;
       }
     }
+
+    /* ---------- 钻取面板(D7 行内 accordion + 5 tab) ----------
+       之前 JS 输出 .op-drill-*/op-pnl-*/op-tab-table 类但没 CSS,被浏览器
+       默认样式渲染为裸 HTML(table/div 裸外观),是「利润构成 tab 都出
+       表格」误读的来源之一。利润构成用瀑布 <div> 分层(2026-09-07
+       设计稿 §6.2「P&L 分解瀑布」),其他 4 tab 是行级 <table>。 */
+    .op-drill-row > td { padding: 0 !important; background: var(--paper-soft, var(--paper)); }
+    .op-drill { padding: 14px 18px 18px; border-top: 1px solid var(--rule-soft); }
+    .op-drill-tabs {
+      display: flex; flex-wrap: wrap; gap: 0;
+      border-bottom: 1px solid var(--rule); margin-bottom: 14px;
+    }
+    .op-drill-tab {
+      background: transparent; border: 0; border-bottom: 2px solid transparent;
+      padding: 6px 14px; font-size: 13px; color: var(--muted);
+      cursor: pointer; user-select: none; font-family: inherit;
+      border-radius: 0; transition: color .12s, border-color .12s;
+    }
+    .op-drill-tab:hover { color: var(--ink); }
+    .op-drill-tab.is-active {
+      color: var(--accent); border-bottom-color: var(--accent); font-weight: 500;
+    }
+    .op-drill-tab:focus { outline: none; box-shadow: 0 0 0 0.15rem rgba(184,57,14,.22); }
+    .op-drill-banner {
+      padding: 8px 12px; margin-bottom: 12px;
+      font-size: 12px; border-left: 3px solid var(--warn, #b8390e);
+      background: var(--paper); color: var(--ink-soft);
+    }
+    .op-drill-banner[data-banner="warn"] { border-left-color: var(--warn, #b8390e); color: var(--warn, #b8390e); }
+    .op-drill-loading {
+      padding: 30px 0; text-align: center; color: var(--muted); font-size: 13px;
+    }
+
+    /* ---------- summary 区:指标卡片网格 ---------- */
+    .op-drill-summary { margin-bottom: 14px; }
+    .op-drill-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 8px 12px;
+    }
+    .op-drill-cell {
+      display: flex; flex-direction: column; gap: 2px;
+      padding: 8px 10px; background: var(--paper);
+      border: 1px solid var(--rule-soft);
+    }
+    .op-drill-lbl {
+      font-size: 11px; color: var(--muted); letter-spacing: .03em;
+      display: inline-flex; align-items: center; line-height: 1.3;
+    }
+    .op-drill-val {
+      font-size: 14px; font-weight: 600; color: var(--ink);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ---------- 利润构成瀑布(§6.2 文本表 → 改为 div 分层) ---------- */
+    .op-pnl { display: flex; flex-direction: column; gap: 12px; }
+    .op-pnl-layer {
+      padding: 10px 12px; border: 1px solid var(--rule-soft); background: var(--paper);
+    }
+    .op-pnl-layer-title {
+      font-size: 11px; font-weight: 600; letter-spacing: .08em;
+      color: var(--muted); text-transform: uppercase; margin-bottom: 8px;
+      padding-bottom: 6px; border-bottom: 1px solid var(--rule-soft);
+    }
+    .op-pnl-rows { display: flex; flex-direction: column; gap: 4px; }
+    .op-pnl-row {
+      display: flex; justify-content: space-between; align-items: baseline;
+      gap: 12px; font-size: 13px;
+    }
+    .op-pnl-row-label { color: var(--ink-soft); display: inline-flex; align-items: center; }
+    .op-pnl-row-val {
+      font-variant-numeric: tabular-nums; font-weight: 500;
+      display: inline-flex; align-items: baseline; gap: 4px;
+    }
+    .op-pnl-sign { color: var(--muted); font-weight: 400; }
+    .op-pnl-add .op-pnl-sign { color: var(--ok, #2d6a4f); }
+    .op-pnl-sub .op-pnl-sign { color: var(--danger, #b8390e); }
+    .op-pnl-layer-result { border-color: var(--ink); background: var(--paper); border-width: 1px; }
+    .op-pnl-result .op-pnl-row-label { font-weight: 600; color: var(--ink); }
+    .op-pnl-result .op-pnl-row-val { font-size: 16px; }
+    .op-pnl-row-neg .op-pnl-row-val { color: var(--danger, #b8390e); }
+    .op-pnl-row-pos .op-pnl-row-val { color: var(--ok, #2d6a4f); }
+
+    /* ---------- 4 个行级列表 tab(orders/settlements/cases/ads) ---------- */
+    .op-tab-table {
+      width: 100%; border-collapse: collapse; font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+    .op-tab-table th, .op-tab-table td {
+      padding: 6px 10px; border-bottom: 1px solid var(--rule-soft);
+      text-align: left;
+    }
+    .op-tab-table th {
+      font-size: 11px; font-weight: 600; color: var(--muted);
+      letter-spacing: .04em; text-transform: uppercase;
+      border-bottom-color: var(--rule);
+    }
+    .op-tab-table td:first-child { font-family: var(--mono); font-size: 11px; }
+    .op-tab-table tbody tr:hover { background: var(--paper-soft, var(--paper)); }
   </style>
 </head>
 <body>
