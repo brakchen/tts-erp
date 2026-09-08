@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 from decimal import ROUND_HALF_UP, Decimal
 
+import re
 import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -1831,11 +1832,10 @@ def test_spu_roi_page_toolbar_shop_and_date_filters(api_client, readonly_key):
     assert "含无活动" in body
     assert 'class="op-hint"' in body
     assert "没有任意活动" in body
-    # 结余带口径 ? 悬停说明:退款净额 / 全损退款
-    assert "REFUND_ONLY" in body
-    assert "M13b" in body
+    # 概览 10 格: sum-refund / sum-loss 仍存在;M13b 已迁钻取面板
     assert "sum-refund" in body
     assert "sum-loss" in body
+    assert "REFUND_ONLY" in body
     # 无内联事件处理器(既有 shell 约束)
     for forbidden in ("onchange=", "onclick="):
         assert forbidden not in body, f"inline handler found: {forbidden}"
@@ -1917,24 +1917,26 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     # 不再展示 SPU 个数
     assert 'id="sum-n"' not in body
     assert "全损退款" in body  # 全损货损改名
-    # 2026-09-06 行内列集:销售$/有效销售$/退货$/取消单量/取消率%/退货率%/全损退款$/实际ROI/保本ROI
+    # D8(2026-09-07)主表精确匹配 th 表头文本
+    main_th_labels = re.findall(r'<th[^>]*scope="col"[^>]*>([^<]+)</th>', body)
     for col_label in (
-        "销售$",
-        "有效销售$",
-        "退货$",
-        "取消单量",
-        "取消率%",
-        "退货率%",
-        "全损退款$",
-        "净利润$",
-        "实际ROI",
-        "保本ROI",
+        "商品", "广告消耗", "有效GMV", "有效出单量",
+        "取消率%", "全损退款率%", "净利润",
     ):
-        assert col_label in body, f"行内缺列 {col_label}"
-    # 新 ⚙ 开关组(广告归因对照 / 订单结构)
-    assert 'id="col-toggle-adref"' in body
-    assert 'id="col-toggle-structure"' in body
+        assert col_label in main_th_labels, f"主表缺列 {col_label}"
+    # D8 删除:原 13 列里只在 th 表头出现过的标签
+    for removed in ("销售$", "有效销售$", "退货$", "退货率%",
+                   "全损退款$", "实际ROI", "保本ROI"):
+        assert removed not in main_th_labels, f"D8 已删:th 表头残留 {removed}"
+    # D8 删除 ⚙ 列开关组
+    for toggle in ("col-toggle-adref", "col-toggle-structure",
+                   "col-toggle-refundsplit", "col-toggle-cancel", "col-toggle-fee"):
+        assert toggle not in body
+    # M13b 已迁钻取面板利润构成 tab(D4 B 切 38301 全损口径)
     assert "M13b" in body
+    # 钻取面板存在(D7 行内 accordion)
+    assert "op-drill" in body
+    assert "tpl-drilldown-panel" in body
     # 每个概览格都有 ? 口径悬停
     assert body.count('class="op-hint"') >= 10
     # JS 必须填充全损格与新格
@@ -1952,36 +1954,26 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert '("#sum-cancelled-orders")' in js_src
 
 
-def test_spu_roi_page_column_toggle_groups_default_hidden(api_client, readonly_key):
-    """§7.5:⚙ 列开关可显隐"仅退/退货拆分、已付被取消、平台佣金"三组。
-
-    商品/ROI₀ 列头保持不可点(无 op-th-sort);信息列默认 col-hidden。
+def test_spu_roi_page_d8_no_column_toggles(api_client, readonly_key):
+    """D8(2026-09-07):⚙ 列开关组全部删除;主表无 data-cg/col-hidden 信息列;
+    可排序列 = D8 新白名单 spend/sales/order_count/cancel_rate/
+    full_loss_rate/net_profit。
     """
     r = api_client.get(
         "/v2/pages/spu-roi",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     body = r.text
-    # 开关三组
-    assert 'id="col-toggle-refundsplit"' in body
-    assert 'id="col-toggle-cancel"' in body
-    assert 'id="col-toggle-fee"' in body
-    assert 'data-colgroup="cg-refundsplit"' in body
-    assert 'data-colgroup="cg-cancel"' in body
-    assert 'data-colgroup="cg-fee"' in body
-    # 信息列默认隐藏(col-hidden)+ data-cg 供 JS 切换
-    for cg in ("cg-refundsplit", "cg-cancel", "cg-fee"):
-        assert f'data-cg="{cg}"' in body
-    assert "col-hidden" in body
-    # 商品/ROI₀ 不可点:其表头不带 op-th-sort
-    import re
-
+    assert "col-toggle-" not in body
+    assert "data-colgroup=" not in body
+    assert "data-cg=" not in body
     sortable = re.findall(
         r'class="op-th[^"]*op-th-sort[^"]*" data-sort="([a-z0-9_]+)"', body
     )
-    assert sortable
-    assert "spu_id" not in sortable
-    assert "roi_l0" not in sortable
+    assert set(sortable) == {
+        "spend", "sales", "order_count", "cancel_rate",
+        "full_loss_rate", "net_profit",
+    }, f"D8 主表可点列异常: {sortable}"
 
 
 def test_spu_roi_page_sortable_headers_within_endpoint_whitelist(
@@ -2025,15 +2017,24 @@ def test_spu_roi_js_review_fixes_present():
     src = js_path.read_text(encoding="utf-8")
     # finding 6:loadMe 用 authenticated===true 守卫(而非不存在的 key_prefix)
     assert "authenticated === true" in src
-    # finding 5-④:§7.2 标色阈值常量
-    assert "ROI_HARD_LOSS" in src
-    assert "PASS_LINE" in src
+    # D8 删除 §7.2 标色阈值常量(C3:仅按净利判)
+    assert "ROI_HARD_LOSS = 1.0" not in src
+    assert "PASS_LINE = 1.5" not in src
     assert "REFUND_RATE_ALERT" in src
-    # finding 5-②:无投放文案
+    # 无投放文案(保留)
     assert "无投放" in src
-    # finding 5-③:列开关 + 信息列字段
-    assert "col-hidden" in src
-    assert "data-cg" in src
+    # D8 删除列开关 + 信息列字段
+    assert "op-th col-hidden" not in src
+    assert "td.col-hidden" not in src
+    # D7/D6 钻取面板:accordion + tab 懒加载
+    assert "openDrillPanel" in src
+    assert "bindRowAccordion" in src
+    assert "fetchDrillTab" in src
+    assert "tpl-drilldown-panel" in src
+    # A2:页面 JS 显式传 sort=net_profit&order=asc
+    assert "DEFAULT_SORT" in src
+    assert '"net_profit"' in src
+    assert '"asc"' in src
     # finding 2:结余带直接消费 totals.roi_real,页面不反推 ROI
     assert "totals.roi_real" in src
     # 2026-09-06:日期框按数据真实跨度回填(meta.window.coverage_*)只读一次
@@ -2105,3 +2106,44 @@ def test_spu_roi_fx_fallback_to_fixed_const_when_no_snapshot(
         "as_of": "2026-09-05",
         "source": "fixed-const",
     }
+
+
+
+# ─── D7/D6 钻取面板(行内 accordion + tab 懒加载)──────────────────────────────
+
+def test_spu_roi_page_drilldown_template_present(api_client, readonly_key):
+    """D7(2026-09-07):页面含 #tpl-drilldown-panel 模板 + 5 tab + 摘要/正文 region。"""
+    r = api_client.get(
+        "/v2/pages/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    body = r.text
+    assert 'id="tpl-drilldown-panel"' in body
+    for tab in ("pnl", "orders", "settlements", "cases", "ads"):
+        assert f'data-tab="{tab}"' in body, f"D7 缺 tab {tab}"
+    assert 'data-region="summary"' in body
+    assert 'data-region="body"' in body
+    assert 'data-banner="warn"' in body
+
+
+def test_spu_roi_page_no_old_columns(api_client, readonly_key):
+    """D8(2026-09-07)主表无隐藏列、无 ⚙ 开关、无 ROI 列;6 列标签齐全。"""
+    import re as _re
+    r = api_client.get(
+        "/v2/pages/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    body = r.text
+    main_th_labels = re.findall(r'<th[^>]*scope="col"[^>]*>([^<]+)</th>', body)
+    for forbidden in (
+        "实际ROI", "保本ROI", "销售$", "有效销售$", "退货$",
+        "取消单量", "退货率%", "全损退款$", "广告数",
+    ):
+        assert forbidden not in main_th_labels, f"D8 已删:th 表头残留 {forbidden}"
+    for col in (
+        "商品", "广告消耗", "有效GMV", "有效出单量",
+        "取消率%", "全损退款率%", "净利润",
+    ):
+        assert col in main_th_labels, f"D8 主表缺列 {col}"
+    assert "op-th col-hidden" not in body
+    assert "td.col-hidden" not in body
