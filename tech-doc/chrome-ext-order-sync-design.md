@@ -35,7 +35,7 @@ Chrome 扩展新增了对 TikTok Seller Center **订单/物流/结算**三个域
 | --- | --- | --- |
 | 粒度 | 每 (campaign, endpoint, day) 一行 | 每 (order_id) 或 (statement_id) 一行 |
 | has-data 查询 | 单个单元存在性 | **批量查询**（一次传 N 个 order_id，按 shop_id 定位） |
-| 时效性 | history=永不过期, today=当日刷新 | 物流有**保鲜期**（默认 24h） |
+| 时效性 | history=永不过期, today=当日刷新 | 无保鲜窗口，以插件同步数据为准 |
 | 数据量 | 4 端点 × N campaign × M 天 | 订单/物流各 1 端点，结算 2 端点 |
 
 ### 2.3 架构总览
@@ -134,7 +134,7 @@ CREATE INDEX ix_raw_log_endpoint ON chrome_sync.raw_log(endpoint);
 
 **设计要点**：
 
-- **无唯一约束**：同一 entity 可以多次同步（保鲜刷新），每次都是新的一行日志
+- **无唯一约束**：同一 entity 可以多次同步，每次都是新的一行日志
 - **存完整 dump**：endpoint + request_params + request_body + response_body 全量存，是所有同步数据的原始 source-of-truth
 - **两个时间戳**：`captured_at`（插件抓取时间，TikTok 侧）+ `created_at`（后端收到时间）
 - **解析状态**：`parse_error IS NULL` = 解析成功，`parse_error IS NOT NULL` = 解析失败（含原因）
@@ -245,7 +245,6 @@ CREATE TABLE chrome_sync.shipments (
     status          TEXT,                       -- ✅ 实测确认: track_list[-1].track_status
     shipped_at      TIMESTAMPTZ,               -- ✅ 实测确认: track_list[0].time
     delivered_at    TIMESTAMPTZ,               -- ✅ 实测确认: track_list[-1].time（仅 status 含 delivered）
-    captured_at     TIMESTAMPTZ NOT NULL,       -- 插件抓取时间（保鲜判断依据）
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -253,7 +252,6 @@ CREATE TABLE chrome_sync.shipments (
 );
 
 CREATE INDEX ix_shipments_order ON chrome_sync.shipments(shop_id, order_id);
-CREATE INDEX ix_shipments_captured ON chrome_sync.shipments(captured_at);
 
 COMMENT ON TABLE chrome_sync.shipments IS 'Chrome 扩展同步的 TikTok 物流包裹，来自 logistic_detail/list 的 package_list[]';
 COMMENT ON COLUMN chrome_sync.shipments.id IS '自增主键';
@@ -265,7 +263,6 @@ COMMENT ON COLUMN chrome_sync.shipments.carrier_name IS '物流服务商（logis
 COMMENT ON COLUMN chrome_sync.shipments.status IS '最新轨迹状态（track_list 最后一条）';
 COMMENT ON COLUMN chrome_sync.shipments.shipped_at IS '发货时间（首条轨迹时间）';
 COMMENT ON COLUMN chrome_sync.shipments.delivered_at IS '签收时间（仅 status 含 delivered 时填入）';
-COMMENT ON COLUMN chrome_sync.shipments.captured_at IS '插件抓取时间，用于保鲜判断';
 COMMENT ON COLUMN chrome_sync.shipments.order_id IS '关联 chrome_sync.orders.order_id';
 COMMENT ON COLUMN chrome_sync.shipments.created_at IS '数据入库时间';
 COMMENT ON COLUMN chrome_sync.shipments.updated_at IS '最后更新时间';
@@ -427,7 +424,7 @@ COMMENT ON COLUMN chrome_sync.settlement_details.updated_at IS '最后更新时�
 | `raw_log` 存储内容 | 完整 dump（request + response + 元数据） | 原始 source-of-truth，可从 raw_log 重跑解析修复业务表 |
 | 解析时机 | inline（dump handler 内） | 数据立即可查，不需要等 sync-worker 轮询 |
 | 业务表放在哪 | `chrome_sync` schema（独立） | 与 sync-worker 的 `commerce`/`fulfillment`/`finance` 完全隔离 |
-| 物流保鲜 | 有保鲜期（24h），查 `shipments.captured_at` | 物流状态实时变化 |
+| 物流保鲜 | 无保鲜窗口 | 以插件同步的数据为准，每次 dump 直接覆盖 |
 | 订单/结算保鲜 | 永不过期 | 创建后核心字段不变 |
 | `fee_components` 存 JSONB vs EAV | JSONB | 费用树递归结构，EAV 展开太碎；JSONB 保留完整层级 |
 
@@ -468,8 +465,7 @@ Content-Type: application/json
       "id1": true,
       "id2": false,
       "id3": true
-    },
-    "freshnessHours": 24
+    }
   }
 }
 ```
@@ -484,13 +480,12 @@ if domain == "orders":
     ).scalars().all()
 
 elif domain == "logistics":
-    cutoff = datetime.now(UTC) - timedelta(hours=FRESHNESS_HOURS)
+    # 无保鲜窗口，以插件同步的数据为准，只查存在性
     rows = sess.execute(
         select(ChromeShipment.order_id.distinct())
         .where(
             ChromeShipment.shop_id == shop_id,
             ChromeShipment.order_id.in_(ids),
-            ChromeShipment.captured_at >= cutoff,
         )
     ).scalars().all()
 
@@ -646,21 +641,19 @@ Authorization: Bearer <key>
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 5.3 物流保鲜刷新流程
+### 5.3 结算同步流程
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ 场景：订单 3 天前下单，物流状态可能已变化                       │
+│ 1. 插件抓取 statement/list/detail 分页响应                    │
+│    → POST /v2/order-sync/dumps (domain=statements)          │
+│    → 后端解析写入 settlements 表                              │
 │                                                             │
-│ 1. POST /v2/order-sync/has-data (domain=logistics)          │
-│    → shipments.captured_at 超过 24h → covered=false         │
+│ 2. 对每个 statement_id，抓取 transaction/detail               │
+│    → POST /v2/order-sync/dumps (domain=statements)          │
+│    → 后端解析写入 settlement_details 表                       │
 │                                                             │
-│ 2. 插件重新抓取该订单物流                                     │
-│    → POST /v2/order-sync/dumps (domain=logistics)           │
-│    → 后端 UPSERT shipments + tracking_events                │
-│    → captured_at 更新 → 下次 covered=true                    │
-│                                                             │
-│ 3. raw_log 记录两次同步流水（第一次 + 保鲜刷新）              │
+│ 3. raw_log 记录每次同步流水                                    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -698,12 +691,7 @@ Authorization: Bearer <key>
 
 ## 7. 配置
 
-```bash
-# .env
-TTS_ERP_LOGISTICS_FRESHNESS_HOURS=24   # 物流保鲜窗口，默认 24h
-```
-
-保鲜窗口可通过 API 响应的 `freshnessHours` 字段告知插件，便于动态调整。
+无需额外配置。
 
 ## 8. 与现有系统的关系
 
@@ -725,7 +713,7 @@ TTS_ERP_LOGISTICS_FRESHNESS_HOURS=24   # 物流保鲜窗口，默认 24h
 | 阶段 | 做什么 | 价值 |
 | --- | --- | --- |
 | **Phase 1（本次）** | `chrome_sync` 7 张表 + has-data/dumps/synced-ids 端点 + inline 解析 | 解决插件重复拉取问题，数据立即可查 |
-| **Phase 2** | 物流保鲜窗口动态化（已签收→永不过期，运输中→24h） | 减少不必要的保鲜刷新 |
+| **Phase 2** | 结算明细关联订单（补 `trade_order_id` → `order_id` 映射） | 结算数据可按订单维度聚合 |
 | **Phase 3（可选）** | chrome_sync → commerce/fulfillment/finance 数据桥接 | 如果需要把 Chrome 扩展数据纳入主分析链路 |
 
 ## 10. 逻辑解析规则（dump → 业务表）
@@ -877,7 +865,7 @@ TikTok `logistic_detail/list` 响应：
 | `shipped_at` | `track_list[0].time` | 首条轨迹；空 → `NULL` |
 | `delivered_at` | `track_list[-1].time` | 仅当 status 含 "elivered"；否则 `NULL` |
 | `raw_response` | 完整 response body | JSONB 直存 |
-| `captured_at` | dump 请求的 `capturedAt` | 直传（保鲜判断依据） |
+| `captured_at` | dump 请求的 `capturedAt` | 直传 |
 
 #### `chrome_sync.tracking_events` 字段映射
 
@@ -995,9 +983,9 @@ def flatten_fees(fee_list: list) -> list[dict]:
 | inline 解析增加 dump 接口延迟 | 订单解析 ~10 行 INSERT，物流 ~5 行，结算 ~20 行；单次 <50ms |
 | `raw_log` 膨胀 | 单条含 response body，物流 ~5KB/条，订单 ~20KB/条；每天 1000 单 × 3 域 ≈ 75MB；90 天 retention 自动清理；后续可按需调短或迁冷存储 |
 | has-data 批量查询 500 id 性能 | unique 索引 + IN 查询，~1ms |
-| 解析逻辑 bug 导致数据损坏 | `raw_response` JSONB 保留完整原始数据，可重跑解析修复 |
-| TikTok 字段名变更 | raw_response 保留原始数据 + raw_log 记录解析结果，可快速定位 |
-| 保鲜窗口内物流状态未更新 | 24h 窗口是折中；Phase 3 可按订单状态动态调整 |
+| 解析逻辑 bug 导致数据损坏 | raw_log.response_body 保留完整原始数据，可重跑解析修复 |
+| TikTok 字段名变更 | raw_log.response_body 保留原始数据，可重跑解析修复 |
+| 保鲜窗口内物流状态未更新 | 无保鲜窗口，以插件同步数据为准 |
 
 ---
 
