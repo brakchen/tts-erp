@@ -308,6 +308,7 @@ COMMENT ON COLUMN chrome_sync.tracking_events.updated_at IS '最后更新时间'
 ```sql
 CREATE TABLE chrome_sync.settlements (
     id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    log_id              BIGINT NOT NULL REFERENCES chrome_sync.raw_log(id),  -- 来源 raw_log
     shop_id             TEXT NOT NULL,
     statement_id        TEXT NOT NULL,
     statement_version   INT NOT NULL DEFAULT 0,
@@ -324,9 +325,7 @@ CREATE TABLE chrome_sync.settlements (
     payable_amount      NUMERIC(20,4),
     shipping_amount     NUMERIC(20,4),
     currency            TEXT,
-    raw_response        JSONB,
-    captured_at         TIMESTAMPTZ NOT NULL,
-    synced_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     CONSTRAINT uq_settlements_shop_stmt UNIQUE (shop_id, statement_id, statement_version)
@@ -363,6 +362,7 @@ COMMENT ON COLUMN chrome_sync.settlements.updated_at IS '最后更新时间';
 ```sql
 CREATE TABLE chrome_sync.settlement_details (
     id                      BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    log_id                  BIGINT NOT NULL REFERENCES chrome_sync.raw_log(id),  -- 来源 raw_log
     shop_id                 TEXT NOT NULL,
     statement_id            TEXT NOT NULL,
     statement_version       INT NOT NULL DEFAULT 0,
@@ -379,9 +379,7 @@ CREATE TABLE chrome_sync.settlement_details (
     fees_amount             NUMERIC(20,4),
     currency                TEXT,
     fee_components          JSONB,                      -- 递归展开后的扁平 [{code, amount, currency}]
-    raw_response            JSONB,
-    captured_at             TIMESTAMPTZ NOT NULL,
-    synced_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     CONSTRAINT uq_settlement_details_shop_sku UNIQUE (shop_id, sku_detail_id)
