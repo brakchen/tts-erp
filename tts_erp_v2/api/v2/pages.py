@@ -845,39 +845,69 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     }
     .op-hint:hover { border-color: var(--accent); color: var(--accent); }
 
-    /* ---------- 工具栏(bootstrap flex-wrap;字段纵向 label + 控件) ---------- */
+    /* ---------- 工具栏(bug:重写为统一行高 + 响应式) ---------- */
     .op-toolbar { border-bottom: 1px solid var(--rule); background: var(--paper); }
-    .op-field { display: inline-flex; flex-direction: column; gap: 2px; }
+    .op-toolbar-row {
+      display: flex; flex-wrap: wrap; align-items: flex-end;
+      gap: 10px 14px;
+    }
+    .op-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
     .op-fld-label {
       font-size: 12px; font-weight: 500; letter-spacing: 0.04em;
       color: var(--muted); white-space: nowrap; user-select: none;
+      display: flex; align-items: center; gap: 4px; min-height: 18px;
     }
-    /* 控件收进 warm-paper:直角、无填充、下划线输入;select 保留自带箭头 */
     .op-field .form-control, .op-field .form-select, .op-toolbar .form-control, .op-toolbar .form-select {
       font-size: 13px; color: var(--ink);
-      border-radius: 0;
-      background-color: transparent;
+      border-radius: 0; background-color: transparent; height: 32px;
     }
     .op-field .form-control {
       border: 0; border-bottom: 1px solid var(--rule);
-      padding: 4px 2px; height: auto; min-width: 120px;
+      padding: 4px 2px; min-width: 0;
     }
-    .op-field .form-control:focus {
-      border-bottom-color: var(--accent);
-      box-shadow: none;
-    }
+    .op-field .form-control:focus { border-bottom-color: var(--accent); box-shadow: none; }
     .op-field .form-select {
-      border: 1px solid var(--rule); padding: 3px 26px 3px 8px; height: auto;
+      border: 1px solid var(--rule); padding: 4px 26px 4px 8px; min-width: 0;
     }
-    .op-field input[type="date"] { color-scheme: light; min-width: 0; width: 100%; }
+    .op-field input[type="date"] { color-scheme: light; }
     .op-field input[type="checkbox"] {
-      width: 15px; height: 15px; accent-color: var(--accent); margin: 0;
+      width: 16px; height: 16px; accent-color: var(--accent); margin: 0;
       cursor: pointer; flex: none;
     }
-    .op-search-input { min-width: 220px !important; }
-    .op-search-input::placeholder { color: var(--rule); }
-    .op-fee-input { max-width: 84px; }
-    .op-field .form-select { min-width: 96px; }
+    /* 字段修饰类 = 桌面 min-width + flex basis(mobile 另作 override) */
+    .op-field--search  { min-width: 200px; }
+    .op-field--shop    { min-width: 140px; }
+    .op-field--date    { min-width: 140px; }
+    .op-field--limit   { min-width: 90px; }
+    .op-field--fee     { min-width: 80px; }
+    .op-field--checkbox {
+      flex-direction: row; align-items: center; gap: 6px;
+      padding-bottom: 7px; align-self: stretch;
+    }
+    .op-field--checkbox .op-fld-label { min-height: 0; }
+    .op-btn-refresh {
+      align-self: flex-end; height: 32px; padding: 0 14px; font-size: 13px;
+    }
+    .op-sortable-note {
+      font-size: 12px; color: var(--muted);
+      margin-left: auto; align-self: center; padding-bottom: 7px;
+    }
+    /* ≤md: 字段填满各占一行内的 50% 空间;搜索/checkbox/按钮/排序提示各占整行 */
+    @media (max-width: 767.98px) {
+      .op-toolbar-row { gap: 8px 10px; }
+      .op-field--search,
+      .op-field--shop,
+      .op-field--date,
+      .op-field--limit,
+      .op-field--fee { min-width: 0; flex: 1 1 calc(50% - 5px); }
+      .op-field--search  { flex-basis: 100%; }
+      .op-field--checkbox{ flex: 1 1 100%; }
+      .op-btn-refresh    { flex: 1 1 100%; }
+      .op-sortable-note  {
+        width: 100%; margin-left: 0; order: 99;
+        padding-bottom: 0; padding-top: 4px;
+      }
+    }
     /* 按钮 = bootstrap .btn 组件 + 家族变量主题(op-btn 皮肤) */
     .op-btn {
       --bs-btn-color: var(--ink);
@@ -1204,28 +1234,28 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       </div>
     </section>
 
-    <!-- 工具栏:flex-wrap 纵向自然堆叠,控件满宽由各自 min/max 宽度约束 -->
+    <!-- 工具栏:重写为统一行高 + 响应式(见 CSS .op-toolbar-row / .op-field--*) -->
     <section class="op-toolbar px-2 px-md-4 py-3" id="toolbar">
-      <div class="d-flex flex-wrap align-items-end gap-3 gap-md-4 row-gap-2">
-        <label class="op-field" for="filter-q">
+      <div class="op-toolbar-row">
+        <label class="op-field op-field--search" for="filter-q">
           <span class="op-fld-label">搜索 spu_id</span>
-          <input id="filter-q" type="search" class="form-control op-search-input" placeholder="例如 1736527242804888823" autocomplete="off">
+          <input id="filter-q" type="search" class="form-control" placeholder="spu_id 或标题" autocomplete="off" aria-label="按 spu_id 或标题搜索">
         </label>
-        <label class="op-field" data-tip="店铺筛选：仅看该店铺 SPU（默认全部店铺）">
+        <label class="op-field op-field--shop" for="filter-shop" data-tip="店铺筛选：仅看该店铺 SPU（默认全部店铺）">
           <span class="op-fld-label">店铺</span>
           <select id="filter-shop" class="form-select" aria-label="筛选店铺（全部店铺 = 不限）">
             <option value="">全部店铺</option>
           </select>
         </label>
-        <label class="op-field" data-tip="销售/退款日期范围（空 = 全历史；广告窗口始终全量）">
+        <label class="op-field op-field--date" for="filter-w-start" data-tip="销售/退款日期范围（空 = 全历史；广告窗口始终全量）">
           <span class="op-fld-label">起始日</span>
           <input id="filter-w-start" type="date" class="form-control" aria-label="销售/退款起始日期（空 = 不限）">
         </label>
-        <label class="op-field" data-tip="销售/退款日期范围（空 = 全历史；含当日）">
+        <label class="op-field op-field--date" for="filter-w-end" data-tip="销售/退款日期范围（空 = 全历史；含当日）">
           <span class="op-fld-label">截止日</span>
           <input id="filter-w-end" type="date" class="form-control" aria-label="销售/退款截止日期（空 = 不限）">
         </label>
-        <label class="op-field">
+        <label class="op-field op-field--limit" for="filter-limit">
           <span class="op-fld-label">每页</span>
           <select id="filter-limit" class="form-select" aria-label="每页条数">
             <option value="50">50</option>
@@ -1233,19 +1263,18 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
             <option value="200">200</option>
           </select>
         </label>
-        <label class="op-field" data-tip="平台佣金费率：默认参考基线 0.308（2026-09-06 实测重定，可覆写）">
+        <label class="op-field op-field--fee" for="filter-fee" data-tip="平台佣金费率：默认参考基线 0.308（2026-09-06 实测重定，可覆写）">
           <span class="op-fld-label">费率 %</span>
-          <input id="filter-fee" type="text" class="form-control op-fee-input" placeholder="30.8" inputmode="decimal" autocomplete="off">
+          <input id="filter-fee" type="text" class="form-control" placeholder="30.8" inputmode="decimal" autocomplete="off" aria-label="平台佣金费率（覆盖基线 0.308）">
         </label>
-        <div class="d-inline-flex flex-row align-items-center gap-2 pb-1">
-          <span class="op-fld-label">含无活动</span>
-          <span class="op-hint" role="note" tabindex="0" data-tip="默认只列出当前窗口内有广告或销售/退款活动的 SPU；勾选后，处于 ACTIVE 状态但没有任意活动（无投放 / 未出单）的 SPU 也会一并列出——这类行的 ROI / 金额显示 — 或「无投放」">?</span>
+        <label class="op-field op-field--checkbox" for="filter-include-all" data-tip="默认只列出当前窗口内有广告或销售/退款活动的 SPU；勾选后，处于 ACTIVE 状态但没有任意活动（无投放 / 未出单）的 SPU 也会一并列出——这类行的 ROI / 金额显示 — 或「无投放」">
           <input id="filter-include-all" type="checkbox" aria-label="含无活动 SPU">
-        </div>
-        <button type="button" class="btn btn-sm op-btn align-self-end" id="btn-refresh">刷新</button>
-        <span class="op-sortable-note align-self-end ms-md-auto" id="sort-note">默认排序：实际 ROI ↑（最亏在前）</span>
+          <span class="op-fld-label">含无活动</span>
+          <span class="op-hint" role="note" tabindex="0" aria-label="含无活动 SPU 的说明">?</span>
+        </label>
+        <button type="button" class="btn btn-sm op-btn op-btn-refresh" id="btn-refresh">刷新</button>
+        <span class="op-sortable-note" id="sort-note">默认排序：实际 ROI ↑（最亏在前）</span>
       </div>
-      <!-- D8（2026-09-07）：⚙ 列开关组全部删除；其余指标移入下钻面板（点击行展开 5 tab） -->
     </section>
 
     <!-- 主表 D8 精简为 7 列（商品 + 6 指标：广告消耗 / 有效GMV / 有效出单量 / 取消率% / 全损退款率% / 净利润） -->
