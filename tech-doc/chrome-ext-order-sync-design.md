@@ -151,16 +151,15 @@ CREATE TABLE chrome_sync.orders (
     log_id          BIGINT NOT NULL REFERENCES chrome_sync.raw_log(id),  -- 来源 raw_log
     shop_id         TEXT NOT NULL,
     order_id        TEXT NOT NULL,              -- TikTok main_order_id
-    status          TEXT,                       -- order_status_module.order_status
-    currency        TEXT,                       -- ISO 4217
-    payment_amount  NUMERIC(20,4),              -- price_module.payment.amount
-    total_amount    NUMERIC(20,4),              -- price_module.total_amount.amount
-    fulfillment_type TEXT,                      -- fulfillment_module.fulfillment_type
-    order_time      TIMESTAMPTZ,               -- create_time（待实测确认）
-    paid_at         TIMESTAMPTZ,               -- paid_time（待实测确认）
-    shipped_at      TIMESTAMPTZ,               -- shipped_time（待实测确认）
-    delivered_at    TIMESTAMPTZ,               -- delivered_time（待实测确认）
-    cancelled_at    TIMESTAMPTZ,               -- cancelled_time（待实测确认）
+    status          TEXT,
+    currency        TEXT,
+    payment_amount  NUMERIC(20,4),
+    total_amount    NUMERIC(20,4),
+    order_time      TIMESTAMPTZ,               -- 待实测确认字段路径
+    paid_at         TIMESTAMPTZ,               -- 待实测确认字段路径
+    shipped_at      TIMESTAMPTZ,               -- 待实测确认字段路径
+    delivered_at    TIMESTAMPTZ,               -- 待实测确认字段路径
+    cancelled_at    TIMESTAMPTZ,               -- 待实测确认字段路径
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -175,11 +174,11 @@ COMMENT ON COLUMN chrome_sync.orders.id IS '自增主键';
 COMMENT ON COLUMN chrome_sync.orders.shop_id IS 'TikTok 外部店铺 ID';
 COMMENT ON COLUMN chrome_sync.orders.log_id IS '关联 raw_log.id，溯源本次数据来自哪条 dump';
 COMMENT ON COLUMN chrome_sync.orders.order_id IS 'TikTok main_order_id';
-COMMENT ON COLUMN chrome_sync.orders.status IS '订单状态，如 DELIVERED/CANCELLED/IN_TRANSIT';
-COMMENT ON COLUMN chrome_sync.orders.payment_amount IS '买家实付金额（price_module.payment.amount）';
-COMMENT ON COLUMN chrome_sync.orders.total_amount IS '订单总金额（price_module.total_amount.amount）';
-COMMENT ON COLUMN chrome_sync.orders.fulfillment_type IS '履约方式，如 FBT/FBF';
-COMMENT ON COLUMN chrome_sync.orders.order_time IS '下单时间（create_time，待实测确认字段名）';
+COMMENT ON COLUMN chrome_sync.orders.status IS '订单状态（待实测确认字段路径）';
+COMMENT ON COLUMN chrome_sync.orders.currency IS '订单币种，ISO 4217（待实测确认字段路径）';
+COMMENT ON COLUMN chrome_sync.orders.payment_amount IS '买家实付金额（待实测确认字段路径）';
+COMMENT ON COLUMN chrome_sync.orders.total_amount IS '订单总金额（待实测确认字段路径）';
+COMMENT ON COLUMN chrome_sync.orders.order_time IS '下单时间（待实测确认字段路径）';
 COMMENT ON COLUMN chrome_sync.orders.paid_at IS '付款时间（paid_time，待实测确认；0 或缺失为 NULL）';
 COMMENT ON COLUMN chrome_sync.orders.shipped_at IS '发货时间（shipped_time，待实测确认）';
 COMMENT ON COLUMN chrome_sync.orders.delivered_at IS '签收时间（delivered_time，待实测确认）';
@@ -773,7 +772,6 @@ TikTok `order/list` 响应结构（模块化）：
           }
         ],
         "fulfill_line_module": [ ... ],
-        "fulfillment_module": { "fulfillment_type": "FBT" },
         "delivery_module": { ... }
       }
     ]
@@ -789,18 +787,15 @@ TikTok `order/list` 响应结构（模块化）：
 | --- | --- | --- |
 | `shop_id` | 请求 scope | 直传 |
 | `order_id` | `main_order_id` | 直传 |
-| `status` | `order_status_module.order_status` | 直传 |
-| `currency` | `price_module.payment.currency` | 直传 |
-| `payment_amount` | `price_module.payment.amount` | `Decimal(str)` |
-| `total_amount` | `price_module.total_amount.amount` | `Decimal(str)` |
-| `fulfillment_type` | `fulfillment_module.fulfillment_type` | 直传 |
-| `order_time` | `order_status_module.create_time` | 秒级 Unix → `datetime(UTC)` |
-| `paid_at` | `order_status_module.paid_time` | 同上；`0` → `NULL` |
-| `shipped_at` | `order_status_module.shipped_time` | 同上 |
-| `delivered_at` | `order_status_module.delivered_time` | 同上 |
-| `cancelled_at` | `order_status_module.cancelled_time` | 同上；`0` → `NULL` |
-| `raw_response` | 完整 response body | JSONB 直存（可选） |
-| `captured_at` | dump 请求的 `capturedAt` | 直传 |
+| `status` | order response | 待实测确认字段路径 |
+| `currency` | order response | 待实测确认字段路径 |
+| `payment_amount` | order response | 待实测确认字段路径 |
+| `total_amount` | order response | 待实测确认字段路径 |
+| `order_time` | order response | 待实测确认字段路径；Unix 秒 → `datetime(UTC)` |
+| `paid_at` | order response | 待实测确认字段路径；`0` → `NULL` |
+| `shipped_at` | order response | 待实测确认字段路径 |
+| `delivered_at` | order response | 待实测确认字段路径 |
+| `cancelled_at` | order response | 待实测确认字段路径；`0` → `NULL` |
 
 #### `chrome_sync.order_lines` 字段映射
 
