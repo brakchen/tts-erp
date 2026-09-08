@@ -968,20 +968,20 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     .rr-high { color: var(--danger); font-weight: 700; }
     .warn-rr, .warn-default { color: var(--warn); cursor: help; font-size: 12px; }
     .no-ad { color: var(--muted); letter-spacing: 0.04em; }
-    .td-spu { font-family: var(--mono); font-size: 12px; color: var(--muted); }
-    .td-title { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .td-spu { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+    .td-title { max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .td-null { color: var(--rule); }
-    .td-spu-cell { display: flex; align-items: center; gap: 6px; }
+    .td-spu-cell { display: flex; align-items: center; gap: 4px; }
     .spu-img {
-      width: 44px; height: 44px; flex: none; object-fit: cover;
+      width: 32px; height: 32px; flex: none; object-fit: cover;
       border: 1px solid var(--rule); background: var(--paper-deep); cursor: zoom-in;
     }
     .spu-img:hover { border-color: var(--accent); }
     .spu-img-missing {
-      width: 44px; height: 44px; flex: none; display: flex;
+      width: 32px; height: 32px; flex: none; display: flex;
       align-items: center; justify-content: center;
       border: 1px dashed var(--rule); background: var(--paper-deep);
-      color: var(--rule); font-size: 10px; letter-spacing: 0.12em; user-select: none;
+      color: var(--rule); font-size: 9px; letter-spacing: 0.12em; user-select: none;
     }
     .td-spu-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .spu-status { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-left: 8px; }
@@ -1038,8 +1038,8 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       table.op-table tbody td:first-child {
         max-width: 230px; overflow: hidden;
       }
-      table.op-table tbody td:first-child { min-width: 110px; }
-      table.op-table .td-title { max-width: 80px; }
+      table.op-table tbody td:first-child { min-width: 90px; }
+      table.op-table .td-title { max-width: 60px; }
     }
     @media (max-width: 575.98px) {
       .op-title { font-size: 22px; }
