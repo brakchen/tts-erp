@@ -159,6 +159,9 @@ def required_role(method: str, path: str) -> int | None:
     # 2026-09-02 v2 化：/v1/analytics/sync 随发布下线，单挂 /v2。
     if p.startswith("/v2/analytics/sync"):
         return ROLE_LEVEL["readwrite"]
+    # order-sync (Chrome 扩展订单/物流/结算同步) 也是 readwrite。
+    if p.startswith("/v2/order-sync"):
+        return ROLE_LEVEL["readwrite"]
     # Miaoshou callback nodes are public (TikTok shop server-to-server push).
     if p.startswith("/miaoshou/callback"):
         return None

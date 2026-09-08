@@ -45,6 +45,7 @@ from tts_erp_v2.api.v2 import (
     linkage,
     llm_context,
     oauth,
+    order_sync,
     pages,
     reporting,
     spu_images,
@@ -86,6 +87,9 @@ def _build_routes(app: FastAPI) -> None:
     # Auth + rate-limit 继承父 app 中间件栈；handler 读
     # `request.scope["api_key_hash"]` / `request.scope["api_key_scopes"]`。
     app.include_router(analytics.router)
+    # Chrome 扩展订单/物流/结算数据同步（readwrite；与 analytics 同级）。
+    # 详见 tech-doc/chrome-ext-order-sync-design.md。
+    app.include_router(order_sync.router)
     # SPU 实际 ROI 看板主表(GET /v2/analytics/spu-roi,readonly)——单挂
     # /v2/analytics 下独立 router,不蹭 /sync 前缀(readwrite 分类)。
     app.include_router(analytics.roi_router)
