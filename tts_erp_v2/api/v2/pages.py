@@ -953,6 +953,12 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     }
     table.op-table tbody tr:hover td:first-child { background: var(--paper-deep); }
     table.op-table tbody tr.row-bad td:first-child { background: rgba(140, 26, 26, 0.055); }
+    /* 关联广告数列:整数(0~3 位)+ “无投放”标签,锁 56px 防止表格 auto-layout 撑宽 */
+    table.op-table thead th[data-sort="ad_count"],
+    table.op-table tbody td:nth-child(2) {
+      width: 56px; min-width: 56px; max-width: 56px;
+      padding-left: 4px; padding-right: 4px;
+    }
     tbody.op-rows tr:hover { background: var(--paper-deep); }
     tr.row-bad { box-shadow: inset 2px 0 0 var(--danger); }
     tr.row-bad td { background: rgba(140, 26, 26, 0.045); }
