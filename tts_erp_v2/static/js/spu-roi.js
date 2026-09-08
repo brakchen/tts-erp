@@ -48,8 +48,6 @@
   ]);
 
   // §7.2 标色默认阈值(常量,页面 ⚙ 可调预留,不锁死)
-  var ROI_HARD_LOSS = 1.0; // 广告回本线:实际 ROI < 1.0 = 连广告费都带不回
-  var PASS_LINE = 1.5; // 心理及格线:≥保本但 < 1.5 → 浅橙,不标红
   var REFUND_RATE_ALERT = 0.3; // 退款率警戒线:> 30% → 标题⚠ + 红字
 
   // Public path prefix: "/tts" behind NGINX, "" on :9877 directly.
@@ -133,6 +131,8 @@
       credentials: "include", // session cookie
       headers: { Accept: "application/json" },
     }).then((r) => {
+      // D6: 主表筛选变化 → 清钻取缓存
+      clearDrillCache();
       if (r.status === 401) {
         // 401 → 跳登录(console.js 家族行为)
         window.location.href = loginUrl(); // pi-lens-ignore: no-open-redirect-js
@@ -153,7 +153,9 @@
     wEnd: "",
     datesTouched: false, // 用户手动改过日期? (自动回填只发生一次,随后交还用户)
     feeRate: null, // 页面覆写费率(小数),null = 用服务端基线
-    cols: {}, // ⚙ 列开关: {cg-refundsplit|cg-cancel|cg-fee: true=显示}(默认隐藏)
+    // D7 行内 accordion: 一次只展开一行; D6 tab 懒加载缓存,主表筛选变化时清空
+    openDrillRow: null,
+    drillCache: new Map(),
     sort: DEFAULT_SORT,
     order: DEFAULT_ORDER,
     offset: 0,
@@ -200,33 +202,25 @@
 
   // ---------- 渲染 ----------
   function rowMarkup(it) {
-    var roiReal = parseFloat(it.roi_real);
-    var hasRoi =
-      it.roi_real !== null &&
-      it.roi_real !== undefined &&
-      it.roi_real !== "" &&
-      Number.isFinite(roiReal);
-    var be = parseFloat(it.roi_breakeven);
-    var hasBe =
-      it.roi_breakeven !== null &&
-      it.roi_breakeven !== undefined &&
-      it.roi_breakeven !== "" &&
-      Number.isFinite(be);
-    var losing = hasRoi && hasBe && roiReal < be;
-    var hardLoss = hasRoi && roiReal < ROI_HARD_LOSS; // §7.2 广告回本线
     var np = parseFloat(it.net_profit);
     var npNeg = Number.isFinite(np) && np < 0;
-    var isBad = losing || npNeg || hardLoss;
+    var isBad = npNeg; // C3: 仅按净利判
     var warnDefault = it.cost_source === "DEFAULT_K1";
     var rr = parseFloat(it.refund_rate);
-    var rrHigh = Number.isFinite(rr) && rr > REFUND_RATE_ALERT; // §7.2
+    var rrHigh = Number.isFinite(rr) && rr > REFUND_RATE_ALERT;
+    var settledCount = Number(it.settled_order_count || 0);
+    var orderCount = Number(it.order_count || 0);
+    var hasUnsettled = settledCount > 0 && settledCount < orderCount;
     var img = it.main_image_url
       ? `<img class="spu-img" alt="" src="${esc(it.main_image_url)}" data-zoom="${esc(it.main_image_url)}">`
       : '<span class="spu-img-missing" aria-hidden="true">无主图</span>';
     var warn =
-      '<span class="warn-default" data-tip="无人工成本记录，按默认 30元/件计算，可去 manual-costs 补录">⚠</span> ';
+      '<span class="warn-default" data-tip="无成本记录（人工标注/采购单/货源价均未命中），按默认 40 元/件">⚠</span> ';
     var warnRr = rrHigh
       ? '<span class="warn-rr" data-tip="退款率超过 30% 警戒线">⚠</span> '
+      : "";
+    var warnUnsettled = hasUnsettled
+      ? '<span class="warn-unsettled" data-tip="含未结算订单，净利为估算">≈</span> '
       : "";
     var status =
       it.status === "ACTIVATE" || !it.status
@@ -234,71 +228,32 @@
         : `<span class="spu-status is-down">${esc(it.status)}</span>`;
     var costTitle =
       it.cost_source === "MANUAL"
-        ? `人工成本(${esc(it.unit_cost_used)} USD/件)`
-        : "默认 30元/件 ≈ $4.43 ⚠";
-    var roiCell;
-    if (!hasRoi) {
-      roiCell = "—"; // 除数为 0 → null → —
-    } else if (hardLoss) {
-      roiCell = `<span class="roi-hard" data-tip="实际 ROI &lt; ${ROI_HARD_LOSS.toFixed(1)}：连广告费都带不回">${fmtRatio(it.roi_real)}</span>`;
-    } else if (losing) {
-      roiCell = `<span class="roi-red" data-tip="该 SPU 亏损">实际 ${fmtRatio(it.roi_real)} &lt; 保本 ${fmtRatio(it.roi_breakeven)}</span>`;
-    } else if (roiReal < PASS_LINE) {
-      roiCell = `<span class="roi-subpar" data-tip="≥ 保本但低于心理及格线 ${PASS_LINE.toFixed(1)}">${fmtRatio(it.roi_real)}</span>`;
-    } else {
-      roiCell = fmtRatio(it.roi_real);
-    }
+        ? `人工标注的采购成交价(${esc(it.unit_cost_used)} USD/件)`
+        : "默认 40 元/件 ≈ $5.95 ⚠";
     var profitClass = npNeg ? ' class="np-red"' : "";
     var adCell =
       it.ad_count === 0 || it.ad_count == null
         ? '<span class="no-ad" data-tip="该 SPU 无广告投放">无投放</span>'
         : fmtInt(it.ad_count);
-    // 2026-09-06:金额退款率列已从行内主列移除(退货率改单量口径 refund_rate_qty);
-    // rrHigh 仍驱动商品标题 ⚠ 警示(金额口径 >30% 阈值沿用)。
     var fmtPctOrDash = (v) =>
       v === null || v === undefined || v === "" ? "—" : fmtPct(v);
+    // D8 6 列: 商品 / 广告消耗 / 有效GMV / 有效出单量 / 取消率 / 全损退款率% / 净利润
     return (
-      `<tr class="${isBad ? "row-bad" : ""}">` +
+      `<tr class="${isBad ? "row-bad" : ""}" data-spupk="${esc(it.spu_pk)}">` +
       `<td class="td-left"><span class="td-spu-cell">${img}<span class="td-spu-meta">` +
       `<span class="td-spu">${esc(it.spu_id)}</span>` +
-      `<span class="td-title" data-tip="${esc(it.title || "")}">${warnDefault ? warn : ""}${warnRr}${esc(it.title || "")}${status}</span></span></span></td>` +
-      // 广告数 / 消耗 USD
+      `<span class="td-title" data-tip="${esc(it.title || "")}">${warnUnsettled}${warnDefault ? warn : ""}${warnRr}${esc(it.title || "")}${status}</span></span></span></td>` +
       `<td>${adCell}</td>` +
       `<td>${fmtMoney(it.spend)}</td>` +
-      // 销售(全单=GMV) / 有效销售 / 退货(净退款)
-      `<td>${fmtMoney(it.gmv_sales)}</td>` +
       `<td>${fmtMoney(it.sales)}</td>` +
-      `<td>${fmtMoney(it.refund_net_amount)}</td>` +
-      // 取消单量 / 取消率 / 退货率(单量)
-      `<td>${fmtInt(it.cancelled_order_count)}</td>` +
+      `<td>${fmtInt(it.order_count)}</td>` +
       `<td>${fmtPctOrDash(it.cancel_rate)}</td>` +
-      `<td>${fmtPctOrDash(it.refund_rate_qty)}</td>` +
-      // 全损退款金额 / 净利润
-      `<td data-tip="${costTitle}">${fmtMoney(it.return_loss)}</td>` +
+      `<td>${fmtPctOrDash(it.full_loss_rate)}</td>` +
       `<td${profitClass}>${fmtMoney(it.net_profit)}</td>` +
-      // 实际ROI / 保本ROI
-      `<td>${roiCell}</td>` +
-      `<td>${fmtRatio(it.roi_breakeven)}</td>` +
-      // 隐藏组:广告归因对照(平台GMV/ROI₀)
-      `<td class="col-hidden" data-cg="cg-adref">${fmtMoney(it.gmv_ad)}</td>` +
-      `<td class="col-hidden" data-cg="cg-adref">${fmtRatio(it.roi_l0)}</td>` +
-      // 隐藏组:订单结构(有效单/件数)
-      `<td class="col-hidden" data-cg="cg-structure">${fmtInt(it.order_count)}</td>` +
-      `<td class="col-hidden" data-cg="cg-structure">${fmtInt(it.units_sold)}</td>` +
-      // 隐藏组:仅退/退货拆分
-      `<td class="col-hidden" data-cg="cg-refundsplit">${fmtInt(it.refund_only_qty)}</td>` +
-      `<td class="col-hidden" data-cg="cg-refundsplit">${fmtMoney(it.refund_only_amount)}</td>` +
-      `<td class="col-hidden" data-cg="cg-refundsplit">${fmtInt(it.refund_return_qty)}</td>` +
-      `<td class="col-hidden" data-cg="cg-refundsplit">${fmtMoney(it.refund_return_amount)}</td>` +
-      // 隐藏组:取消明细(件/金额/未知行)
-      `<td class="col-hidden" data-cg="cg-cancel" data-tip="已付被取消订单退款（信息列，不计净额）">${fmtInt(it.refund_cancelled_qty)}</td>` +
-      `<td class="col-hidden" data-cg="cg-cancel">${fmtMoney(it.refund_cancelled_amount)}</td>` +
-      `<td class="col-hidden" data-cg="cg-cancel" data-tip="${it.refund_cancelled_missing_lines ? "另有行金额未知（不造数）" : ""}">${fmtInt(it.refund_cancelled_missing_lines)}</td>` +
-      // 隐藏组:平台佣金
-      `<td class="col-hidden" data-cg="cg-fee" data-tip="平台佣金 = 平台从销售额直接扣除的全部费用（抽佣/联盟/运费类）">${fmtMoney(it.platform_fee)}</td>` +
       "</tr>"
     );
   }
+
 
   function renderError(msg) {
     html(
@@ -418,6 +373,7 @@
 
     applyColToggles(); // 新渲染的行/空态要重新应用 ⚙ 列开关
     updateSortMarkers();
+    bindRowAccordion(items);
   }
 
   function updateSortMarkers() {
@@ -439,31 +395,201 @@
       `当前排序：${SORT_LABEL[state.sort] || state.sort}${state.order === "asc" ? " ↑" : " ↓"}`;
   }
 
-  // ---------- ⚙ 列开关(§7.5 默认折叠) ----------
-  function applyColToggles() {
-    Array.prototype.forEach.call(
-      document.querySelectorAll(".col-toggle[data-colgroup]"),
-      (cb) => {
-        var group = cb.getAttribute("data-colgroup");
-        var on = !!state.cols[group];
-        Array.prototype.forEach.call(
-          document.querySelectorAll(`[data-cg="${group}"]`),
-          (el) => el.classList.toggle("col-hidden", !on),
-        );
-      },
-    );
+  // ---------- 钻取面板 (D7 行内 accordion + D6 tab 懒加载) ----------
+  function clearDrillCache() { state.drillCache = new Map(); }
+  function _drillCacheKey(spuPk, tab) { return [spuPk, tab, state.wStart, state.wEnd].join("|"); }
+  function _drillUrl(tab, spuPk) {
+    var base = PREFIX + "/v2/analytics/spu-roi/" + encodeURIComponent(spuPk) + "/" + tab;
+    var qs = [];
+    if (state.wStart) qs.push("w_start=" + encodeURIComponent(state.wStart));
+    if (state.wEnd) qs.push("w_end=" + encodeURIComponent(state.wEnd));
+    return qs.length ? base + "?" + qs.join("&") : base;
   }
-
-  function bindColToggles() {
-    Array.prototype.forEach.call(
-      document.querySelectorAll(".col-toggle[data-colgroup]"),
-      (cb) => {
-        cb.addEventListener("change", () => {
-          state.cols[cb.getAttribute("data-colgroup")] = cb.checked;
-          applyColToggles();
-        });
-      },
-    );
+  function fetchDrillTab(spuPk, tab) {
+    var key = _drillCacheKey(spuPk, tab);
+    if (state.drillCache.has(key)) return Promise.resolve(state.drillCache.get(key));
+    return fetch(_drillUrl(tab, spuPk), {
+      credentials: "include",
+      headers: { Accept: "application/json" },
+    }).then(function (r) {
+      if (r.status === 401) { window.location.href = loginUrl(); throw new Error("unauthorized"); }
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function (data) {
+      state.drillCache.set(key, data);
+      return data;
+    });
+  }
+  function closeDrillPanel() {
+    if (state.openDrillRow) {
+      var nxt = state.openDrillRow.nextElementSibling;
+      if (nxt && nxt.classList && nxt.classList.contains("op-drill-row")) nxt.remove();
+      state.openDrillRow = null;
+    }
+  }
+  function renderProfitSummary(it) {
+    function m(v) { return v == null || v === "" ? "—" : fmtMoney(v); }
+    function cell(label, value, hint) {
+      return '<div class="op-drill-cell"><span class="op-drill-lbl">' + esc(label) +
+        (hint ? '<span class="op-hint" data-tip="' + esc(hint) + '">?</span>' : "") +
+        '</span><span class="op-drill-val">' + (value == null ? "—" : value) + "</span></div>";
+    }
+    return '<div class="op-drill-grid">' +
+      cell("ROI 实际", fmtRatio(it.roi_real)) +
+      cell("ROI 保本", fmtRatio(it.roi_breakeven)) +
+      cell("平台佣金", m(it.platform_fee), "平台从销售额直接扣除的全部费用（抽佣/联盟/运费类）") +
+      cell("CPA", m(it.cpa)) +
+      cell("全损货损$", m(it.return_loss)) +
+      cell("单位成本", m(it.unit_cost_used) + " " + (it.cost_source || "")) +
+      cell("已结算单", String(it.settled_order_count || 0)) +
+      cell("已结 GMV", m(it.settled_sales)) +
+      cell("未结 GMV", m(it.unsettled_sales)) +
+      cell("全损件数", String(it.full_loss_qty || 0)) +
+      cell("全损取消", String(it.full_loss_cancelled_qty || 0)) +
+      cell("净收入", m(it.net_revenue)) +
+      "</div>";
+  }
+  function renderProfitTab(it) {
+    var settled = Number(it.settled_sales || 0);
+    var unsettled = Number(it.unsettled_sales || 0);
+    var netRevenue = Number(it.net_revenue || 0);
+    var settledNet = settled + unsettled > 0 ? (settled / (settled + unsettled)) * netRevenue : netRevenue;
+    var unsettledNet = netRevenue - settledNet;
+    var flc = Number(it.full_loss_cancelled_qty || 0);
+    var unitCost = Number(it.unit_cost_used || 0);
+    var cogsSold = Number(it.units_sold || 0) * unitCost;
+    var cogsFlc = flc * unitCost;
+    var spend = Number(it.spend || 0);
+    var np = Number(it.net_profit || 0);
+    function row(label, val, klass, hint) {
+      return '<tr' + (klass ? ' class="' + klass + '"' : "") + '>' +
+        "<td>" + esc(label) + (hint ? ' <span class="op-hint" data-tip="' + esc(hint) + '">?</span>' : "") +
+        "</td><td>" + fmtMoney(val) + "</td></tr>";
+    }
+    return '<table class="op-pnl-table"><tbody>' +
+      row("净收入·已结算(SETTLEMENT 分摊)", settledNet, null, "v7 D2 零值落库后,有交易必有 SETTLEMENT 行;amount=0 即已结算到手 0") +
+      row("净收入·未结算(×(1−r̂)×(1−退货率))", unsettledNet, null, "v7 D5:未结算按基线 30.8% × (1−本 SPU 退款率) 估算") +
+      row("− 货本·售出件", -cogsSold) +
+      row("− 货本·全损取消件(D4 B 补扣)", -cogsFlc, null, "D4 B 切 38301 全损口径:M13b = full_loss_qty × cost,含已出海取消件") +
+      row("− 广告消耗", -spend) +
+      row("= 净利润", np, np < 0 ? "np-red" : "np-positive", "M18 红绿仅按净利判(C3 拍板);负值红字") +
+      "</tbody></table>";
+  }
+  function renderDrillTabBody(tab, data) {
+    if (!data) return '<div class="op-drill-loading">无数据</div>';
+    if (tab === "settlements") {
+      var ss = data.settlements || [];
+      if (!ss.length) return '<div class="op-drill-loading">未结算订单不展示（基线估算见利润构成 tab）。</div>';
+      return '<table class="op-pnl-table"><thead><tr><th>订单号</th><th>SETTLEMENT</th><th>分摊比</th><th>statement</th></tr></thead><tbody>' +
+        ss.map(function (s) {
+          var comp = (s.components || []).filter(function (c) { return c.code === "SETTLEMENT"; })[0];
+          var set = comp ? fmtMoney(comp.amount) : "—";
+          return "<tr><td>" + esc(s.order_id) + "</td><td>" + set +
+            "</td><td>" + esc(s.share_ratio || "—") +
+            "</td><td>" + esc(s.statement_time || "—") + "</td></tr>";
+        }).join("") + "</tbody></table>";
+    }
+    if (tab === "orders") {
+      var orders = data.orders || [];
+      if (!orders.length) return '<div class="op-drill-loading">无订单</div>';
+      return '<table class="op-pnl-table"><thead><tr><th>订单号</th><th>状态</th><th>件</th><th>is_settled</th><th>38301</th><th>全损</th></tr></thead><tbody>' +
+        orders.map(function (o) {
+          return "<tr><td>" + esc(o.order_id) + "</td><td>" + esc(o.status) +
+            "</td><td>" + esc(o.qty) +
+            "</td><td>" + (o.is_settled ? "✓" : "—") +
+            "</td><td>" + (o.arrived_overseas ? "✓" : "—") +
+            "</td><td>" + (o.full_loss ? "⚠" : "—") + "</td></tr>";
+        }).join("") + "</tbody></table>";
+    }
+    if (tab === "cases") {
+      var cases = data.cases || [];
+      if (!cases.length) return '<div class="op-drill-loading">无售后 case</div>';
+      return '<table class="op-pnl-table"><thead><tr><th>case</th><th>订单</th><th>类型</th><th>状态</th><th>退款</th></tr></thead><tbody>' +
+        cases.map(function (c) {
+          return "<tr><td>" + esc(c.case_id) + "</td><td>" + esc(c.order_id || "—") +
+            "</td><td>" + esc(c.type) + "</td><td>" + esc(c.status) +
+            "</td><td>" + fmtMoney(c.refund_amount) + "</td></tr>";
+        }).join("") + "</tbody></table>";
+    }
+    if (tab === "ads") {
+      var ads = data.ads || [];
+      if (!ads.length) return '<div class="op-drill-loading">无广告投放</div>';
+      return '<table class="op-pnl-table"><thead><tr><th>campaign_id</th><th>spend</th><th>orders</th><th>窗口</th></tr></thead><tbody>' +
+        ads.map(function (a) {
+          return "<tr><td>" + esc(a.campaign_id) + "</td><td>" + fmtMoney(a.spend) +
+            "</td><td>" + esc(a.orders) +
+            "</td><td>" + esc(a.first_day || "—") + " ~ " + esc(a.last_day || "—") + "</td></tr>";
+        }).join("") + "</tbody></table>";
+    }
+    return '<div class="op-drill-loading">未知 tab</div>';
+  }
+  function renderDrillLazy(drill, it, which) {
+    var body = drill.querySelector('[data-region="body"]');
+    body.textContent = "加载中…";
+    fetchDrillTab(it.spu_pk, which)
+      .then(function (data) {
+        body.innerHTML = renderDrillTabBody(which, data);
+        if (typeof wireTooltips === "function") wireTooltips();
+      })
+      .catch(function (e) {
+        body.textContent = "加载失败：" + (e && e.message ? e.message : e);
+      });
+  }
+  function openDrillPanel(row, it) {
+    if (state.openDrillRow === row) { closeDrillPanel(); return; }
+    closeDrillPanel();
+    if (!it || !it.spu_pk) return;
+    var tpl = document.getElementById("tpl-drilldown-panel");
+    if (!tpl) return;
+    var frag = tpl.content.cloneNode(true);
+    var drillRow = frag.querySelector(".op-drill-row");
+    var drill = drillRow.querySelector(".op-drill");
+    var banner = drill.querySelector('[data-banner="warn"]');
+    var settledCount = Number(it.settled_order_count || 0);
+    var orderCount = Number(it.order_count || 0);
+    if (settledCount > 0 && settledCount < orderCount) {
+      banner.hidden = false;
+      banner.textContent = "含未结算订单，净收入为估算（基线 ×(1−r̂)×(1−退货率)）。";
+    }
+    drill.querySelector('[data-region="summary"]').innerHTML = renderProfitSummary(it);
+    drill.querySelector('[data-region="body"]').innerHTML = renderProfitTab(it);
+    var tabs = drill.querySelectorAll(".op-drill-tab");
+    Array.prototype.forEach.call(tabs, function (tab) {
+      tab.addEventListener("click", function () {
+        Array.prototype.forEach.call(tabs, function (t) { t.classList.remove("is-active"); });
+        tab.classList.add("is-active");
+        var which = tab.getAttribute("data-tab");
+        if (which === "pnl") {
+          drill.querySelector('[data-region="body"]').innerHTML = renderProfitTab(it);
+        } else {
+          renderDrillLazy(drill, it, which);
+        }
+      });
+    });
+    row.insertAdjacentElement("afterend", drillRow);
+    state.openDrillRow = row;
+  }
+  var _rowAccordionBound = false;
+  function bindRowAccordion(items) {
+    window.__lastPayloadItems = items || [];
+    if (_rowAccordionBound) return;
+    var tbody = document.getElementById("rows");
+    if (!tbody) return;
+    _rowAccordionBound = true;
+    tbody.addEventListener("click", function (e) {
+      var tr = e.target;
+      while (tr && tr.tagName !== "TR") tr = tr.parentElement;
+      if (!tr || !tr.dataset || !tr.dataset.spupk) return;
+      if (tr.classList && tr.classList.contains("op-drill-row")) return;
+      var spuPk = tr.dataset.spupk;
+      var it = (window.__lastPayloadItems || []).filter(
+        function (i) { return String(i.spu_pk) === String(spuPk); }
+      )[0];
+      if (it) openDrillPanel(tr, it);
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") closeDrillPanel();
+    });
   }
 
   // ---------- 店铺下拉(GET /v2/commerce/channel-accounts,readonly) ----------
@@ -755,8 +881,6 @@
       },
     );
 
-    applyColToggles();
-    bindColToggles();
     wireTooltips(); // 悬停说明气泡(data-tip 委托,含重渲染后的新行)
     wireZoom(); // 主图点击放大(委托)
     loadMe();

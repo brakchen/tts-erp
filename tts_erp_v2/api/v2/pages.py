@@ -908,7 +908,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     }
     .op-cols-item:hover { color: var(--accent); }
     .op-cols-item input { width: 13px; height: 13px; accent-color: var(--accent); margin: 0; cursor: pointer; }
-    .col-hidden { display: none; }
+/* D8: col-hidden 已删（主表 6 列无信息列）*/
 
     /* ---------- 列头排序(JS 挂点击;箭头 span.arrow 由 JS 追加) ---------- */
     .op-th-sort { cursor: pointer; user-select: none; }
@@ -1133,56 +1133,48 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
         <button type="button" class="btn btn-sm op-btn align-self-end" id="btn-refresh">刷新</button>
         <span class="op-sortable-note align-self-end ms-md-auto" id="sort-note">默认排序：实际 ROI ↑（最亏在前）</span>
       </div>
-      <!-- ⚙ 列开关(§7.5 默认折叠):原生 details 展开,不引 bootstrap JS -->
-      <details class="op-colswitch mt-2" id="colswitch">
-        <summary>⚙ 列（默认折叠）</summary>
-        <div class="d-flex flex-wrap gap-3 gap-md-4 row-gap-1 mt-1">
-          <label class="op-cols-item"><input type="checkbox" id="col-toggle-adref" class="col-toggle" data-colgroup="cg-adref">广告归因对照(平台GMV/ROI₀)</label>
-          <label class="op-cols-item"><input type="checkbox" id="col-toggle-structure" class="col-toggle" data-colgroup="cg-structure">订单结构(有效单/件数)</label>
-          <label class="op-cols-item"><input type="checkbox" id="col-toggle-refundsplit" class="col-toggle" data-colgroup="cg-refundsplit">仅退/退货拆分</label>
-          <label class="op-cols-item"><input type="checkbox" id="col-toggle-cancel" class="col-toggle" data-colgroup="cg-cancel">取消明细(件/金额/未知)</label>
-          <label class="op-cols-item"><input type="checkbox" id="col-toggle-fee" class="col-toggle" data-colgroup="cg-fee">平台佣金</label>
-        </div>
-      </details>
+      <!-- D8（2026-09-07）：⚙ 列开关组全部删除；其余指标移入下钻面板（点击行展开 5 tab） -->
     </section>
 
-    <!-- 主表:.table-responsive 横滚;thead th + 首列 sticky(见 CSS) -->
+    <!-- 主表 D8 精简为 7 列（商品 + 6 指标：广告消耗 / 有效GMV / 有效出单量 / 取消率% / 全损退款率% / 净利润） -->
     <div class="op-table-wrap table-responsive">
       <table class="op-table" aria-live="polite">
         <thead>
           <tr>
             <th scope="col" class="op-th op-th-left">商品</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="ad_count">广告数</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="spend" data-tip="广告消耗（USD，广告窗口全量累计；作为减项计入净利润）">消耗 USD</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="gmv_sales" data-tip="销售 = 全部订单销售额（状态口径，下单即算：有效销售 + 已付/未付取消原额；与结余带 GMV 同口径）">销售$</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="sales" data-tip="有效销售 = 白名单状态订单行金额（含 COD 在途，不含取消；与结余带有效销售同口径）">有效销售$</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="refund_net_amount" data-tip="退货 = 净退款额（仅退款 + 退货退款，USD；与结余带退款净额同口径）">退货$</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="cancelled_order_count" data-tip="取消单量 = status=CANCELLED 订单数（状态口径，含未收款即取消的 COD 拒收/超时单；与结余带取消单量同口径）">取消单量</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="cancel_rate" data-tip="取消率 = 取消单量 ÷ (有效单量 + 取消单量)（单量口径）">取消率%</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="refund_rate_qty" data-tip="退货率 = 退货订单数 ÷ 有效单量（单量口径，非金额）">退货率%</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="return_loss" data-tip="全损退款金额 = 全损退货件数 × 单位成本解析值（默认 30元/件 ≈ $4.43，USD；与结余带全损退款同口径）">全损退款$</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="net_profit" data-tip="净利润 = (有效销售 − 净退款) − 全部售出件货本 − 广告消耗 − 平台佣金估算（USD）；负值红字。状态口径：销售含 COD 在途未收款单">净利润$</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="roi_real" data-tip="实际 ROI = (有效销售 − 净退款 − 全损退款(M13b 货损成本)) ÷ 广告消耗；≥ 保本 = 赚，< 保本 = 亏（主判据）。状态口径：销售含 COD 在途未收款单">实际ROI</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="roi_breakeven" data-tip="该 SPU 的动态保本 ROI 线（实际 ROI ≥ 此值即不亏）">保本ROI</th>
-            <th scope="col" class="op-th col-hidden" data-cg="cg-adref">平台GMV(归因)</th>
-            <th scope="col" class="op-th col-hidden" data-cg="cg-adref">ROI₀</th>
-            <th scope="col" class="op-th col-hidden" data-cg="cg-structure">有效单</th>
-            <th scope="col" class="op-th col-hidden" data-cg="cg-structure">件数</th>
-            <th scope="col" class="op-th col-hidden" data-cg="cg-refundsplit">仅退件</th>
-            <th scope="col" class="op-th col-hidden" data-cg="cg-refundsplit">仅退$</th>
-            <th scope="col" class="op-th col-hidden" data-cg="cg-refundsplit">退货件</th>
-            <th scope="col" class="op-th col-hidden" data-cg="cg-refundsplit">退货$</th>
-            <th scope="col" class="op-th col-hidden" data-cg="cg-cancel">取消件</th>
-            <th scope="col" class="op-th col-hidden" data-cg="cg-cancel">取消退款$</th>
-            <th scope="col" class="op-th col-hidden" data-cg="cg-cancel">金额未知行</th>
-            <th scope="col" class="op-th col-hidden" data-cg="cg-fee">平台佣金$</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="spend" data-tip="广告消耗（USD，广告窗口全量累计；作为减项计入净利润）">广告消耗</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="sales" data-tip="有效GMV = 白名单状态订单行金额（USD；排除已取消订单，B1 拍板）">有效GMV</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="order_count" data-tip="有效出单量 = 白名单有效订单数（distinct）">有效出单量</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="cancel_rate" data-tip="取消率 = 取消单量 ÷ (有效单量 + 取消单量)">取消率%</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="full_loss_rate" data-tip="全损退款率% = 全损件数(38301) ÷ (售出件数+全损取消件数);D4 B 口径;分母0 → —">全损退款率%</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="net_profit" data-tip="净利润 v7(M18):已结算 SETTLEMENT + 未结算 ×(1−r̂)×(1−退款率) − 货本含全损取消 − 广告;负值红字。Red/green 仅按净利判(C3 拍板,删 ROI&lt;1 硬亏档)">净利润</th>
           </tr>
         </thead>
         <tbody class="op-rows" id="rows">
-          <tr><td colspan="25" class="op-loading">加载中…</td></tr>
+          <tr><td colspan="7" class="op-loading">加载中…</td></tr>
         </tbody>
       </table>
     </div>
+
+    <!-- D7 钻取面板模板（行内 accordion，由 spu-roi.js openDrillPanel 克隆插入） -->
+    <template id="tpl-drilldown-panel">
+      <tr class="op-drill-row" aria-live="polite">
+        <td colspan="7" class="op-drill-wrap">
+          <div class="op-drill" data-state="loading">
+            <nav class="op-drill-tabs" role="tablist">
+              <button type="button" class="op-drill-tab is-active" role="tab" data-tab="pnl">利润构成</button>
+              <button type="button" class="op-drill-tab" role="tab" data-tab="orders">订单·物流</button>
+              <button type="button" class="op-drill-tab" role="tab" data-tab="settlements">结算</button>
+              <button type="button" class="op-drill-tab" role="tab" data-tab="cases">售后</button>
+              <button type="button" class="op-drill-tab" role="tab" data-tab="ads">广告</button>
+            </nav>
+            <div class="op-drill-banner" data-banner="warn" hidden></div>
+            <div class="op-drill-summary" data-region="summary"></div>
+            <div class="op-drill-body" data-region="body"><div class="op-drill-loading">加载中…</div></div>
+          </div>
+        </td>
+      </tr>
+    </template>
 
     <section class="op-pager px-2 px-md-4 d-flex flex-wrap align-items-center gap-3 py-3 pb-4">
       <button type="button" class="btn btn-sm op-btn" id="btn-prev">← 上一页</button>
