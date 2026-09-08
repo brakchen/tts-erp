@@ -20,6 +20,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError, field_validator
+from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import get_session
@@ -34,6 +35,7 @@ from tts_erp_v2.chrome_sync.repository import (
     list_synced_ids,
     write_raw_log,
 )
+from tts_erp_v2.db.models.chrome_sync import RawLog
 
 # ─── Config ───────────────────────────────────────────────────────────
 
@@ -409,9 +411,8 @@ def post_dumps(
 
     # 3. 更新 raw_log 的解析结果
     if parse_error or rows_written > 0:
-        from sqlalchemy import update
         sess.execute(
-            update(RawLog)
+            sa_update(RawLog)
             .where(RawLog.id == log_id)
             .values(parse_error=parse_error, rows_written=rows_written)
         )

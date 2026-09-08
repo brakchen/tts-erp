@@ -585,6 +585,116 @@ Errors:
 `SCHEMA_INVALID` 响应带结构化 `errors[]`（`loc`/`msg`/`type` 安全三元组，
 无 input/ctx）；其余错误码不带 `errors` 字段。
 
+### Order Sync (`/v2/order-sync/*`)
+
+Chrome 扩展订单/物流/结算数据同步端点。插件从 TikTok Seller Center 抓取的
+HTTP 响应通过此端点写入后端 chrome_sync schema。Auth requires **readwrite** role。
+设计文档：`tech-doc/chrome-ext-order-sync-design.md`。
+
+#### `POST /v2/order-sync/has-data`
+
+批量查业务表存在性。插件拿到 order_id 列表后，一次请求查出哪些已有数据，
+只对缺失的发 TikTok 请求（解决物流 N+1 问题）。
+
+Body：
+
+```json
+{
+  "scope": {"sellerId": "...", "shopId": "..."},
+  "domain": "logistics",
+  "ids": ["order-1", "order-2", "order-3"]
+}
+```
+
+- `domain` ∈ `{orders, logistics, statements}`
+- `ids` 最多 500 个
+
+响应（`code: 0`）：
+
+```json
+{
+  "code": 0,
+  "requestId": "req-...",
+  "data": {
+    "domain": "logistics",
+    "covered": {"order-1": true, "order-2": false, "order-3": true}
+  }
+}
+```
+
+#### `POST /v2/order-sync/dumps`
+
+接收 dump → inline 解析 → 写业务表 + raw_log。每个 dump 对应一次 TikTok
+HTTP 交换的完整原始响应。
+
+Body（≤ 2 MB）：
+
+```json
+{
+  "protocolVersion": 1,
+  "requestId": "req-...",
+  "scope": {"sellerId": "...", "shopId": "..."},
+  "dump": {
+    "domain": "logistics",
+    "mainOrderId": "order-1",
+    "endpoint": "/api/v1/fulfillment/logistic_detail/list",
+    "method": "GET",
+    "request": {"params": {"main_order_id": "order-1"}, "body": null},
+    "response": {"status": 200, "body": {"code": 0, "data": {"package_list": [...]}}},
+    "capturedAt": "2026-09-08T10:00:00.000Z"
+  }
+}
+```
+
+- `domain` ∈ `{orders, logistics, statements}`
+- `logistics` 域必须带 `mainOrderId`
+- `statements` 域根据响应体自动判断 list / transaction detail
+- `capturedAt` 必须带时区
+
+响应（`code: 0`）：
+
+```json
+{
+  "code": 0,
+  "requestId": "req-...",
+  "data": {
+    "status": "inserted",
+    "logId": 42,
+    "rowsWritten": 3
+  }
+}
+```
+
+- `status` ∈ `{inserted, parse_error}`
+- `parse_error` 时 `rowsWritten=0`，`parseError` 字段含原因
+
+#### `GET /v2/order-sync/synced-ids`
+
+查询已同步 id 列表（分页）。
+
+| 参数 | 类型 | 说明 |
+| --- | --- | --- |
+| `shopId` | string | required |
+| `domain` | string | required；`orders`/`logistics`/`statements` |
+| `limit` | int | 1-500，默认 500 |
+| `offset` | int | ≥ 0，默认 0 |
+
+响应（`code: 0`）：
+
+```json
+{
+  "code": 0,
+  "requestId": "req-...",
+  "data": {
+    "domain": "orders",
+    "ids": ["order-1", "order-2"],
+    "total": 2,
+    "limit": 500,
+    "offset": 0
+  }
+}
+```
+
 ### Misc
 
 #### `GET /healthz`
