@@ -2,8 +2,28 @@
 
 > 🔄 **当前在途工作注册（谁在改什么 / 谁接手）：先读 `handoff/ACTIVE.md`**（AGENTS.md §12.1）
 
-> 上次 session: 2026-09-05（v1 oauth_receiver 库 DROP + public.* 19 张业务表归档）
-> 上次 session 主题: v1 oauth_receiver 库整体废弃并 DROP（提前 21 天结束 4 周观察期）+ 配套清理
+> 上次 session: 2026-09-07（AGENTS.md 多 agent 规则审查 + §11 细化 + stash@{0} 处理）
+> 上次 session 主题: AGENTS.md 多 agent 协作规则漏洞审查并补漏（6 处改动）+ §11 工作流收尾细化（按代码改动面分类判定）
+
+## TL;DR (2026-09-07 AGENTS.md 多 agent 规则补漏 + §11 细化)
+
+**AGENTS.md 多 agent 协作规则审查并补漏**（`95b399b` merge + `a203fd1` merge，2 条 lane）：
+
+1. **§6 合法清理手段清单**：禁止 `git reset --hard / checkout -- . / clean -f`，新增合法替代：`git revert` / `git stash / restore / checkout -- <file>`（指定文件非全清）
+2. **§11 worktree 收尾**：merge 后 master 重跑 `scripts/test.sh fast`（新节点）+ `git log --oneline master..<branch>` 预检（防 -D 丢 commit）
+3. **§11 .env 软链警告**：所有 worktree 共享 `.env`，任一 lane 临时改 `.env` 污染全部 lane；调试后必须还原或用 `.env.local` 覆盖
+4. **§12.1 单写者规则**：ACTIVE.md 同一时刻只允许一个 session/agent 写入；写前 git diff 确认、写后立即 git add
+5. **§12.3 接手步骤 6**：接手后 ACTIVE.md 必须更新（原 owner 改 abandoned + 新增接手行）
+6. **§12.4 错峰量化**：flock / 轮询 / 分 ephemeral DB 三种串行方案
+7. **§11 §11 测试规则细化**："merge 后必须 0 fail" 硬规则在 master HEAD pre-existing fail 下不可达 → 改为按 lane 代码改动面分类判定（`git diff <merge-base>..HEAD -- 'tts_erp_v2/**' 'tests/**' | wc -l` = 0 → 文档-only lane 直接 push；> 0 → fail-before/fail-after diff 对比）
+
+** stash@{0} 处理**：stash 内容（"master-wip-before-spu-image-mirror-merge"）apply 触发 7 个 conflict，评估后放弃（master 后续 commit 已吸收核心内容），snapshot 存 `/tmp/stash-0-snapshot-*.patch`。
+
+**新工具**：`scripts/test_lock.sh`（§12.4 flock 包装，防并发测试互清）。
+
+**已知问题**：settlement-zero-components merge 引入 61 新 fail（tests/api/ 下 17 文件），为代码 lane 应由该 owner 按 §11 新规 fail-before/fail-after 对比处理。
+
+**活跃 worktree**（截至 2026-09-07 21:45）：channel-account-by-external / docs-spu-roi-v7 / fx-test-isolation / spu-roi-v7 / spu-roi-v7-frontend（共 5 条）。
 
 ## TL;DR (2026-09-06 结余带 10 格重构 + 订单行→SPU 关联断裂修复)
 - **结余带 10 格重构**(merge 5cbf518):去掉 SPU 数,新增 GMV(全部订单销售额 M6+M6b)/有效单量/
