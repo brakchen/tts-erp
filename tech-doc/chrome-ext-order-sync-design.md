@@ -150,16 +150,16 @@ CREATE TABLE chrome_sync.orders (
     id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     log_id          BIGINT NOT NULL REFERENCES chrome_sync.raw_log(id),  -- 来源 raw_log
     shop_id         TEXT NOT NULL,
-    order_id        TEXT NOT NULL,              -- TikTok main_order_id
-    status          TEXT,
-    currency        TEXT,
-    payment_amount  NUMERIC(20,4),
-    total_amount    NUMERIC(20,4),
-    order_time      TIMESTAMPTZ,               -- 待实测确认字段路径
-    paid_at         TIMESTAMPTZ,               -- 待实测确认字段路径
-    shipped_at      TIMESTAMPTZ,               -- 待实测确认字段路径
-    delivered_at    TIMESTAMPTZ,               -- 待实测确认字段路径
-    cancelled_at    TIMESTAMPTZ,               -- 待实测确认字段路径
+    order_id        TEXT NOT NULL,              -- ✅ 实测确认: main_order_id
+    status          TEXT,                       -- 推断自 order_status_module，待实测确认
+    currency        TEXT,                       -- 推断自 price_module，待实测确认
+    payment_amount  NUMERIC(20,4),              -- 推断自 price_module.payment.amount，待实测确认
+    total_amount    NUMERIC(20,4),              -- 推断自 price_module.total_amount.amount，待实测确认
+    order_time      TIMESTAMPTZ,               -- 推断自 order_status_module.create_time，待实测确认
+    paid_at         TIMESTAMPTZ,               -- 推断自 order_status_module.paid_time，待实测确认
+    shipped_at      TIMESTAMPTZ,               -- 推断自 order_status_module.shipped_time，待实测确认
+    delivered_at    TIMESTAMPTZ,               -- 推断自 order_status_module.delivered_time，待实测确认
+    cancelled_at    TIMESTAMPTZ,               -- 推断自 order_status_module.cancelled_time，待实测确认
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -196,16 +196,16 @@ CREATE TABLE chrome_sync.order_lines (
     log_id          BIGINT NOT NULL REFERENCES chrome_sync.raw_log(id),  -- 来源 raw_log
     shop_id         TEXT NOT NULL,
     order_id        TEXT NOT NULL,              -- 关联 chrome_sync.orders.order_id
-    sku_id          TEXT NOT NULL,              -- TikTok sku_id，同订单内唯一
-    product_id      TEXT,                       -- TikTok product_id
-    product_name    TEXT,
-    variant_name    TEXT,
-    image_url       TEXT,
-    seller_sku      TEXT,
-    quantity        NUMERIC(20,4),
-    unit_price      NUMERIC(20,4),
-    currency        TEXT,
-    line_status     TEXT,
+    sku_id          TEXT NOT NULL,              -- ✅ 实测确认: sku_module[].sku_id
+    product_id      TEXT,                       -- ✅ 实测确认: sku_module[].product_id
+    product_name    TEXT,                       -- 推断自 sku_module[].product_name，待实测确认
+    variant_name    TEXT,                       -- 推断自 sku_module[].sku_name，待实测确认
+    image_url       TEXT,                       -- 推断自 sku_module[].sku_image，待实测确认
+    seller_sku      TEXT,                       -- 推断自 sku_module[].seller_sku，待实测确认
+    quantity        NUMERIC(20,4),              -- 推断自 sku_module[].quantity，待实测确认
+    unit_price      NUMERIC(20,4),              -- 推断自 sku_module[].sale_price.amount，待实测确认
+    currency        TEXT,                       -- 推断自 sku_module[].sale_price.currency，待实测确认
+    line_status     TEXT,                       -- 推断自 sku_module[].sku_order_status，待实测确认
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -238,13 +238,13 @@ CREATE TABLE chrome_sync.shipments (
     id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     log_id          BIGINT NOT NULL REFERENCES chrome_sync.raw_log(id),  -- 来源 raw_log
     shop_id         TEXT NOT NULL,
-    order_id        TEXT NOT NULL,              -- 关联 chrome_sync.orders.order_id
-    package_id      TEXT NOT NULL,              -- TikTok package_id
-    tracking_number TEXT,
-    carrier_name    TEXT,                       -- logistic_supplier
-    status          TEXT,                       -- 最新轨迹状态
-    shipped_at      TIMESTAMPTZ,               -- 首条轨迹时间
-    delivered_at    TIMESTAMPTZ,               -- 最后一条轨迹时间（仅 status 含 delivered）
+    order_id        TEXT NOT NULL,              -- ✅ 实测确认: main_order_id
+    package_id      TEXT NOT NULL,              -- ✅ 实测确认: package_id
+    tracking_number TEXT,                       -- ✅ 实测确认: tracking_no
+    carrier_name    TEXT,                       -- ✅ 实测确认: logistic_supplier
+    status          TEXT,                       -- ✅ 实测确认: track_list[-1].track_status
+    shipped_at      TIMESTAMPTZ,               -- ✅ 实测确认: track_list[0].time
+    delivered_at    TIMESTAMPTZ,               -- ✅ 实测确认: track_list[-1].time（仅 status 含 delivered）
     captured_at     TIMESTAMPTZ NOT NULL,       -- 插件抓取时间（保鲜判断依据）
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -279,10 +279,10 @@ CREATE TABLE chrome_sync.tracking_events (
     log_id          BIGINT NOT NULL REFERENCES chrome_sync.raw_log(id),  -- 来源 raw_log
     shop_id         TEXT NOT NULL,
     package_id      TEXT NOT NULL,              -- 关联 chrome_sync.shipments.package_id
-    event_key       TEXT NOT NULL,              -- 合成唯一键（package_id + index 或 time）
-    event_at        TIMESTAMPTZ,
-    description     TEXT,                       -- track_status 原文
-    location        TEXT,
+    event_key       TEXT NOT NULL,              -- 合成唯一键（package_id + index）
+    event_at        TIMESTAMPTZ,               -- ✅ 实测确认: track_list[].time
+    description     TEXT,                       -- ✅ 实测确认: track_list[].track_status
+    location        TEXT,                       -- 推断自 track_list[].location，codex 未确认该字段存在
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -309,21 +309,25 @@ CREATE TABLE chrome_sync.settlements (
     id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     log_id              BIGINT NOT NULL REFERENCES chrome_sync.raw_log(id),  -- 来源 raw_log
     shop_id             TEXT NOT NULL,
-    statement_id        TEXT NOT NULL,
-    statement_version   INT NOT NULL DEFAULT 0,
-    bill_period         TEXT,                       -- 原始 "2026-09-01~2026-09-07"
-    period_start        DATE,
-    period_end          DATE,
-    settlement_time     TIMESTAMPTZ,
-    payment_id          TEXT,
-    payment_status      TEXT,                       -- 'PENDING' / 'PAID' / 'FAILED'
-    settle_amount       NUMERIC(20,4),
-    earning_amount      NUMERIC(20,4),
-    fee_amount          NUMERIC(20,4),
-    adjust_amount       NUMERIC(20,4),
-    payable_amount      NUMERIC(20,4),
-    shipping_amount     NUMERIC(20,4),
-    currency            TEXT,
+    statement_id        TEXT NOT NULL,              -- ✅ 实测确认
+    statement_version   INT NOT NULL DEFAULT 0,     -- ✅ 实测确认
+    bill_period         TEXT,                       -- ✅ 实测确认
+    period_start        DATE,                       -- 从 bill_period 解析派生（如 "2026-09-01~2026-09-07" → 2026-09-01）
+    period_end          DATE,                       -- 从 bill_period 解析派生
+    settlement_time     TIMESTAMPTZ,               -- ✅ 实测确认
+    settlement_id       TEXT,                       -- ✅ 实测确认（codex 文档记录了该字段）
+    payment_id          TEXT,                       -- ✅ 实测确认
+    payment_status      TEXT,                       -- ✅ 实测确认（int → TEXT 映射）
+    statement_type      INT,                       -- ✅ 实测确认
+    payment_pending_reason INT,                    -- ✅ 实测确认
+    settle_amount       NUMERIC(20,4),             -- ✅ 实测确认
+    earning_amount      NUMERIC(20,4),             -- ✅ 实测确认
+    fee_amount          NUMERIC(20,4),             -- ✅ 实测确认
+    adjust_amount       NUMERIC(20,4),             -- ✅ 实测确认
+    payable_amount      NUMERIC(20,4),             -- ✅ 实测确认
+    shipping_amount     NUMERIC(20,4),             -- ✅ 实测确认
+    total_reserve_amount NUMERIC(20,4),            -- ✅ 实测确认
+    currency            TEXT,                       -- ✅ 实测确认
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -336,23 +340,26 @@ COMMENT ON TABLE chrome_sync.settlements IS 'Chrome 扩展同步的 TikTok 结�
 COMMENT ON COLUMN chrome_sync.settlements.id IS '自增主键';
 COMMENT ON COLUMN chrome_sync.settlements.log_id IS '关联 raw_log.id，溯源本次数据来自哪条 dump';
 COMMENT ON COLUMN chrome_sync.settlements.shop_id IS 'TikTok 外部店铺 ID';
+COMMENT ON COLUMN chrome_sync.settlements.statement_id IS 'TikTok statement_id（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlements.statement_version IS '结算版本号（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlements.bill_period IS '账期原始文本（✅ 实测确认），如 2026-09-01~2026-09-07';
+COMMENT ON COLUMN chrome_sync.settlements.period_start IS '账期起始日（从 bill_period 解析派生）';
+COMMENT ON COLUMN chrome_sync.settlements.period_end IS '账期结束日（从 bill_period 解析派生）';
+COMMENT ON COLUMN chrome_sync.settlements.settlement_time IS '结算时间（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlements.settlement_id IS 'TikTok settlement_id（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlements.payment_id IS 'TikTok payment_id（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlements.payment_status IS '打款状态（✅ 实测确认，int → TEXT）：PENDING / PAID / FAILED';
+COMMENT ON COLUMN chrome_sync.settlements.statement_type IS '结算单类型（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlements.payment_pending_reason IS '打款待处理原因（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlements.settle_amount IS '结算金额（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlements.earning_amount IS '收入金额（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlements.fee_amount IS '费用金额（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlements.adjust_amount IS '调整金额（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlements.payable_amount IS '应付金额（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlements.shipping_amount IS '运费金额（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlements.total_reserve_amount IS '预留金额（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlements.currency IS '币种，ISO 4217（✅ 实测确认）';
 COMMENT ON COLUMN chrome_sync.settlements.created_at IS '数据入库时间';
-COMMENT ON COLUMN chrome_sync.settlements.updated_at IS '最后更新时间';
-COMMENT ON COLUMN chrome_sync.settlements.statement_id IS 'TikTok statement_id';
-COMMENT ON COLUMN chrome_sync.settlements.statement_version IS '结算版本号';
-COMMENT ON COLUMN chrome_sync.settlements.bill_period IS '账期原始文本，如 2026-09-01~2026-09-07';
-COMMENT ON COLUMN chrome_sync.settlements.settle_amount IS '结算金额';
-COMMENT ON COLUMN chrome_sync.settlements.payable_amount IS '应付金额';
-COMMENT ON COLUMN chrome_sync.settlements.payment_id IS 'TikTok payment_id，关联打款';
-COMMENT ON COLUMN chrome_sync.settlements.period_start IS '账期起始日（从 bill_period 解析）';
-COMMENT ON COLUMN chrome_sync.settlements.period_end IS '账期结束日（从 bill_period 解析）';
-COMMENT ON COLUMN chrome_sync.settlements.settlement_time IS '结算时间';
-COMMENT ON COLUMN chrome_sync.settlements.payment_status IS '打款状态：PENDING / PAID / FAILED';
-COMMENT ON COLUMN chrome_sync.settlements.earning_amount IS '收入金额';
-COMMENT ON COLUMN chrome_sync.settlements.fee_amount IS '费用金额';
-COMMENT ON COLUMN chrome_sync.settlements.adjust_amount IS '调整金额';
-COMMENT ON COLUMN chrome_sync.settlements.shipping_amount IS '运费金额';
-COMMENT ON COLUMN chrome_sync.settlements.currency IS '币种，ISO 4217';
 COMMENT ON COLUMN chrome_sync.settlements.updated_at IS '最后更新时间';
 ```
 
@@ -365,19 +372,21 @@ CREATE TABLE chrome_sync.settlement_details (
     shop_id                 TEXT NOT NULL,
     statement_id            TEXT NOT NULL,
     statement_version       INT NOT NULL DEFAULT 0,
-    sku_detail_id           TEXT NOT NULL,              -- statement_sku_detail_id
-    trade_order_id          TEXT,                       -- TikTok trade_order_id（暂无 main_order_id 映射）
-    sku_id                  TEXT,
-    product_name            TEXT,
-    sku_name                TEXT,
-    quantity                NUMERIC(20,4),
-    settlement_status       TEXT,
-    placed_time             TIMESTAMPTZ,
-    settlement_amount       NUMERIC(20,4),
-    earning_amount          NUMERIC(20,4),
-    fees_amount             NUMERIC(20,4),
-    currency                TEXT,
-    fee_components          JSONB,                      -- 递归展开后的扁平 [{code, amount, currency}]
+    sku_detail_id           TEXT NOT NULL,              -- ✅ 实测确认: statement_sku_detail_id
+    trade_order_id          TEXT,                       -- ✅ 实测确认（与 main_order_id 映射关系待验证）
+    sku_id                  TEXT,                       -- ✅ 实测确认
+    product_name            TEXT,                       -- ✅ 实测确认
+    sku_name                TEXT,                       -- ✅ 实测确认
+    quantity                NUMERIC(20,4),              -- ✅ 实测确认
+    settlement_status       TEXT,                       -- ✅ 实测确认（int → TEXT）
+    placed_time             TIMESTAMPTZ,               -- ✅ 实测确认
+    settlement_amount       NUMERIC(20,4),             -- ✅ 实测确认
+    earning_amount          NUMERIC(20,4),             -- ✅ 实测确认
+    fees_amount             NUMERIC(20,4),             -- ✅ 实测确认: fees.amount
+    currency                TEXT,                       -- ✅ 实测确认
+    fee_components          JSONB,                      -- ✅ 实测确认: in_come.fee_list + out_come.fee_list 递归展开
+    seller_web_cut_flow     BOOL,                      -- ✅ 实测确认（顶层字段，非 sku_record 内）
+    seller_app_cut_flow     BOOL,                      -- ✅ 实测确认（顶层字段，非 sku_record 内）
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -390,23 +399,23 @@ COMMENT ON TABLE chrome_sync.settlement_details IS 'Chrome 扩展同步的 SKU �
 COMMENT ON COLUMN chrome_sync.settlement_details.id IS '自增主键';
 COMMENT ON COLUMN chrome_sync.settlement_details.log_id IS '关联 raw_log.id，溯源本次数据来自哪条 dump';
 COMMENT ON COLUMN chrome_sync.settlement_details.shop_id IS 'TikTok 外部店铺 ID';
-COMMENT ON COLUMN chrome_sync.settlement_details.quantity IS '购买数量（NUMERIC 兼容小数）';
-COMMENT ON COLUMN chrome_sync.settlement_details.created_at IS '数据入库时间';
-COMMENT ON COLUMN chrome_sync.settlement_details.sku_detail_id IS 'TikTok statement_sku_detail_id，唯一标识一笔 SKU 级结算';
-COMMENT ON COLUMN chrome_sync.settlement_details.trade_order_id IS 'TikTok trade_order_id，与 main_order_id 映射关系待验证';
-COMMENT ON COLUMN chrome_sync.settlement_details.fee_components IS '递归展开后的扁平费用列表 [{code, amount, currency}]';
-COMMENT ON COLUMN chrome_sync.settlement_details.statement_id IS '关联 chrome_sync.settlements.statement_id';
-COMMENT ON COLUMN chrome_sync.settlement_details.statement_version IS '关联 chrome_sync.settlements.statement_version';
-COMMENT ON COLUMN chrome_sync.settlement_details.sku_id IS 'TikTok sku_id';
-COMMENT ON COLUMN chrome_sync.settlement_details.product_name IS '商品名称';
-COMMENT ON COLUMN chrome_sync.settlement_details.sku_name IS 'SKU 名称';
-COMMENT ON COLUMN chrome_sync.settlement_details.settlement_status IS '结算状态（文本枚举）';
-COMMENT ON COLUMN chrome_sync.settlement_details.placed_time IS '下单时间';
-COMMENT ON COLUMN chrome_sync.settlement_details.settlement_amount IS '结算金额';
-COMMENT ON COLUMN chrome_sync.settlement_details.earning_amount IS '收入金额';
-COMMENT ON COLUMN chrome_sync.settlement_details.fees_amount IS '费用总金额';
-COMMENT ON COLUMN chrome_sync.settlement_details.currency IS '币种，ISO 4217';
-COMMENT ON COLUMN chrome_sync.settlement_details.fee_components IS '递归展开后的扁平费用列表 [{code, amount, currency}]';
+COMMENT ON COLUMN chrome_sync.settlement_details.sku_detail_id IS 'TikTok statement_sku_detail_id（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlement_details.trade_order_id IS 'TikTok trade_order_id（✅ 实测确认，与 main_order_id 映射关系待验证）';
+COMMENT ON COLUMN chrome_sync.settlement_details.statement_id IS '关联 chrome_sync.settlements.statement_id（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlement_details.statement_version IS '关联 chrome_sync.settlements.statement_version（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlement_details.sku_id IS 'TikTok sku_id（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlement_details.product_name IS '商品名称（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlement_details.sku_name IS 'SKU 名称（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlement_details.quantity IS '购买数量（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlement_details.settlement_status IS '结算状态（✅ 实测确认，int → TEXT）';
+COMMENT ON COLUMN chrome_sync.settlement_details.placed_time IS '下单时间（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlement_details.settlement_amount IS '结算金额（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlement_details.earning_amount IS '收入金额（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlement_details.fees_amount IS '费用总金额（✅ 实测确认: fees.amount）';
+COMMENT ON COLUMN chrome_sync.settlement_details.currency IS '币种，ISO 4217（✅ 实测确认）';
+COMMENT ON COLUMN chrome_sync.settlement_details.fee_components IS '递归展开后的扁平费用列表 [{code, amount, currency}]（✅ 实测确认: in_come.fee_list + out_come.fee_list）';
+COMMENT ON COLUMN chrome_sync.settlement_details.seller_web_cut_flow IS '卖家网页端扣款流程标记（✅ 实测确认，顶层字段）';
+COMMENT ON COLUMN chrome_sync.settlement_details.seller_app_cut_flow IS '卖家 APP 端扣款流程标记（✅ 实测确认，顶层字段）';
 COMMENT ON COLUMN chrome_sync.settlement_details.created_at IS '数据入库时间';
 COMMENT ON COLUMN chrome_sync.settlement_details.updated_at IS '最后更新时间';
 ```
