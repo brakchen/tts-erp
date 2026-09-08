@@ -198,9 +198,8 @@ CREATE TABLE chrome_sync.order_lines (
     id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     shop_id         TEXT NOT NULL,
     order_id        TEXT NOT NULL,              -- 关联 chrome_sync.orders.order_id
-    line_id         TEXT NOT NULL,              -- sku_id（同订单内唯一）
+    sku_id          TEXT NOT NULL,              -- TikTok sku_id，同订单内唯一
     product_id      TEXT,                       -- TikTok product_id
-    sku_id          TEXT,                       -- TikTok sku_id
     product_name    TEXT,
     variant_name    TEXT,
     image_url       TEXT,
@@ -209,9 +208,10 @@ CREATE TABLE chrome_sync.order_lines (
     unit_price      NUMERIC(20,4),
     currency        TEXT,
     line_status     TEXT,
+    synced_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    CONSTRAINT uq_order_lines_order_line UNIQUE (shop_id, order_id, line_id)
+    CONSTRAINT uq_order_lines_order_sku UNIQUE (shop_id, order_id, sku_id)
 );
 
 COMMENT ON TABLE chrome_sync.order_lines IS 'Chrome 扩展同步的 TikTok 订单行（SKU 级），来自 order/list 的 sku_module/fulfill_line_module';
@@ -221,14 +221,14 @@ COMMENT ON COLUMN chrome_sync.order_lines.variant_name IS 'SKU 名称快照';
 COMMENT ON COLUMN chrome_sync.order_lines.image_url IS 'SKU 图片 URL 快照';
 COMMENT ON COLUMN chrome_sync.order_lines.seller_sku IS '卖家自定义 SKU 编码';
 COMMENT ON COLUMN chrome_sync.order_lines.line_status IS '行状态，如 DELIVERED/CANCELLED';
-COMMENT ON COLUMN chrome_sync.order_lines.line_id IS '行标识，取 sku_id，同订单内唯一';
+COMMENT ON COLUMN chrome_sync.order_lines.sku_id IS 'TikTok sku_id，同订单内唯一';
 COMMENT ON COLUMN chrome_sync.order_lines.product_id IS 'TikTok product_id';
-COMMENT ON COLUMN chrome_sync.order_lines.sku_id IS 'TikTok sku_id';
 COMMENT ON COLUMN chrome_sync.order_lines.quantity IS '购买数量';
 COMMENT ON COLUMN chrome_sync.order_lines.unit_price IS 'SKU 单价（sale_price.amount）';
 COMMENT ON COLUMN chrome_sync.order_lines.shop_id IS 'TikTok 外部店铺 ID';
 COMMENT ON COLUMN chrome_sync.order_lines.order_id IS '关联 chrome_sync.orders.order_id';
 COMMENT ON COLUMN chrome_sync.order_lines.currency IS 'SKU 币种，ISO 4217';
+COMMENT ON COLUMN chrome_sync.order_lines.synced_at IS '数据入库时间';
 COMMENT ON COLUMN chrome_sync.order_lines.updated_at IS '最后更新时间';
 ```
 
@@ -312,7 +312,7 @@ CREATE TABLE chrome_sync.settlements (
     period_end          DATE,
     settlement_time     TIMESTAMPTZ,
     payment_id          TEXT,
-    payment_status      INT,
+    payment_status      TEXT,                       -- 'PENDING' / 'PAID' / 'FAILED'
     settle_amount       NUMERIC(20,4),
     earning_amount      NUMERIC(20,4),
     fee_amount          NUMERIC(20,4),
@@ -343,7 +343,7 @@ COMMENT ON COLUMN chrome_sync.settlements.payment_id IS 'TikTok payment_id，关
 COMMENT ON COLUMN chrome_sync.settlements.period_start IS '账期起始日（从 bill_period 解析）';
 COMMENT ON COLUMN chrome_sync.settlements.period_end IS '账期结束日（从 bill_period 解析）';
 COMMENT ON COLUMN chrome_sync.settlements.settlement_time IS '结算时间';
-COMMENT ON COLUMN chrome_sync.settlements.payment_status IS '打款状态：1=PENDING, 2=PAID, 3=FAILED';
+COMMENT ON COLUMN chrome_sync.settlements.payment_status IS '打款状态：PENDING / PAID / FAILED';
 COMMENT ON COLUMN chrome_sync.settlements.earning_amount IS '收入金额';
 COMMENT ON COLUMN chrome_sync.settlements.fee_amount IS '费用金额';
 COMMENT ON COLUMN chrome_sync.settlements.adjust_amount IS '调整金额';
@@ -367,8 +367,8 @@ CREATE TABLE chrome_sync.settlement_details (
     sku_id                  TEXT,
     product_name            TEXT,
     sku_name                TEXT,
-    quantity                INT,
-    settlement_status       INT,
+    quantity                NUMERIC(20,4),
+    settlement_status       TEXT,
     placed_time             TIMESTAMPTZ,
     settlement_amount       NUMERIC(20,4),
     earning_amount          NUMERIC(20,4),
@@ -388,7 +388,7 @@ CREATE INDEX ix_settlement_details_stmt ON chrome_sync.settlement_details(shop_i
 COMMENT ON TABLE chrome_sync.settlement_details IS 'Chrome 扩展同步的 SKU 级结算明细 + 费用拆分，来自 statement/transaction/detail';
 COMMENT ON COLUMN chrome_sync.settlement_details.id IS '自增主键';
 COMMENT ON COLUMN chrome_sync.settlement_details.shop_id IS 'TikTok 外部店铺 ID';
-COMMENT ON COLUMN chrome_sync.settlement_details.quantity IS '购买数量';
+COMMENT ON COLUMN chrome_sync.settlement_details.quantity IS '购买数量（NUMERIC 兼容小数）';
 COMMENT ON COLUMN chrome_sync.settlement_details.captured_at IS '插件在 TikTok 页面抓取响应的时间';
 COMMENT ON COLUMN chrome_sync.settlement_details.sku_detail_id IS 'TikTok statement_sku_detail_id，唯一标识一笔 SKU 级结算';
 COMMENT ON COLUMN chrome_sync.settlement_details.trade_order_id IS 'TikTok trade_order_id，与 main_order_id 映射关系待验证';
@@ -398,7 +398,7 @@ COMMENT ON COLUMN chrome_sync.settlement_details.statement_version IS '关联 ch
 COMMENT ON COLUMN chrome_sync.settlement_details.sku_id IS 'TikTok sku_id';
 COMMENT ON COLUMN chrome_sync.settlement_details.product_name IS '商品名称';
 COMMENT ON COLUMN chrome_sync.settlement_details.sku_name IS 'SKU 名称';
-COMMENT ON COLUMN chrome_sync.settlement_details.settlement_status IS '结算状态';
+COMMENT ON COLUMN chrome_sync.settlement_details.settlement_status IS '结算状态（文本枚举）';
 COMMENT ON COLUMN chrome_sync.settlement_details.placed_time IS '下单时间';
 COMMENT ON COLUMN chrome_sync.settlement_details.settlement_amount IS '结算金额';
 COMMENT ON COLUMN chrome_sync.settlement_details.earning_amount IS '收入金额';
@@ -807,7 +807,7 @@ TikTok `order/list` 响应结构（模块化）：
 | --- | --- | --- |
 | `shop_id` | 请求 scope | 直传 |
 | `order_id` | `main_order_id` | 直传 |
-| `line_id` | `sku_id` | 直传（同订单内唯一标识） |
+| `sku_id` | `sku_module.sku_id` | 直传（同订单内唯一标识） |
 | `product_id` | `sku_module.product_id` | 直传 |
 | `sku_id` | `sku_module.sku_id` | 直传 |
 | `product_name` | `sku_module.product_name` | 缺失 → `NULL` |
@@ -910,7 +910,7 @@ TikTok `logistic_detail/list` 响应：
 | `period_end` | 同上 | → `date(2026,9,7)` |
 | `settlement_time` | `settlement_time` | ISO → `datetime` |
 | `payment_id` | `payment_id` | 缺失 → `NULL` |
-| `payment_status` | `payment_status` | 直传（int） |
+| `payment_status` | `payment_status` | int → TEXT 映射（1→PENDING, 2→PAID, 3→FAILED） |
 | `settle_amount` | `settle_amount.amount` | `Decimal(str)` |
 | `earning_amount` | `earning_amount.amount` | `Decimal(str)` |
 | `fee_amount` | `fee_amount.amount` | `Decimal(str)` |
