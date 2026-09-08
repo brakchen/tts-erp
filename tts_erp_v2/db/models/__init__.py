@@ -16,6 +16,15 @@ from tts_erp_v2.db.models.after_sales import (
 from tts_erp_v2.db.models.analytics import (
     AdRaw,
 )
+from tts_erp_v2.db.models.chrome_sync import (
+    ChromeOrder,
+    ChromeOrderLine,
+    ChromeSettlement,
+    ChromeSettlementDetail,
+    ChromeShipment,
+    ChromeTrackingEvent,
+    RawLog,
+)
 from tts_erp_v2.db.models.commerce import (
     ChannelAccount,
     ChannelProduct,
@@ -76,6 +85,12 @@ __all__ = [
     "AccountLink",
     "AdRaw",
     "ApiKey",
+    "ChromeOrder",
+    "ChromeOrderLine",
+    "ChromeSettlement",
+    "ChromeSettlementDetail",
+    "ChromeShipment",
+    "ChromeTrackingEvent",
     "Base",
     "Case",
     "CaseLine",
@@ -98,6 +113,7 @@ __all__ = [
     "ProductProfitDaily",
     "PurchaseOrder",
     "PurchaseOrderLine",
+    "RawLog",
     "RawRecord",
     "SalesOrder",
     "SalesOrderLine",
