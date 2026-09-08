@@ -1197,8 +1197,8 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       font-variant-numeric: tabular-nums;
     }
     .op-tab-table th, .op-tab-table td {
-      padding: 6px 10px; border-bottom: 1px solid var(--rule-soft);
-      text-align: left;
+      padding: 10px 14px; border-bottom: 1px solid var(--rule-soft);
+      text-align: center; vertical-align: middle;
     }
     .op-tab-table th {
       font-size: 11px; font-weight: 600; color: var(--muted);
