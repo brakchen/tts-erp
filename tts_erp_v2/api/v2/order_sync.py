@@ -131,6 +131,8 @@ class DumpResponseIn(BaseModel):
 class DumpBodyIn(BaseModel):
     domain: str = Field(min_length=1, max_length=32)
     mainOrderId: str | None = Field(default=None, max_length=128)
+    statementId: str | None = Field(default=None, max_length=128)
+    statementVersion: int | None = None
     endpoint: str = Field(min_length=1, max_length=512)
     method: str = Field(min_length=1, max_length=16)
     request: DumpRequestIn
@@ -343,7 +345,22 @@ def post_dumps(
     response_body = payload.dump.response.body
     main_order_id = payload.dump.mainOrderId
 
-    # 解析 → 写业务表
+    # 1. 先写 raw_log 拿到 log_id（解析函数需要 log_id 关联）
+    log_id = write_raw_log(
+        sess,
+        domain=domain,
+        shop_id=shop_id,
+        endpoint=endpoint,
+        captured_at=captured_at,
+        request_params=request_params,
+        request_body=request_body,
+        response_body=response_body,
+        parse_error=None,  # 先写成功，解析失败再更新
+        rows_written=0,
+    )
+    sess.flush()  # 确保 log_id 可用
+
+    # 2. 解析 → 写业务表（传入真实 log_id）
     parse_error: str | None = None
     rows_written = 0
 
@@ -351,7 +368,7 @@ def post_dumps(
         if domain == "orders":
             rows_written = parse_order_response(
                 sess,
-                log_id=0,  # placeholder，下面写 raw_log 后更新
+                log_id=log_id,
                 shop_id=shop_id,
                 response_body=response_body,
                 captured_at=captured_at,
@@ -362,19 +379,18 @@ def post_dumps(
             else:
                 rows_written = parse_logistics_response(
                     sess,
-                    log_id=0,
+                    log_id=log_id,
                     shop_id=shop_id,
                     order_id=main_order_id,
                     response_body=response_body,
                     captured_at=captured_at,
                 )
         elif domain == "statements":
-            # 判断是 list 还是 transaction detail
             data = response_body.get("data") or {}
             if "sku_record" in data:
                 rows_written = parse_statement_transaction_response(
                     sess,
-                    log_id=0,
+                    log_id=log_id,
                     shop_id=shop_id,
                     response_body=response_body,
                     captured_at=captured_at,
@@ -382,7 +398,7 @@ def post_dumps(
             else:
                 rows_written = parse_statement_list_response(
                     sess,
-                    log_id=0,
+                    log_id=log_id,
                     shop_id=shop_id,
                     response_body=response_body,
                     captured_at=captured_at,
@@ -391,25 +407,14 @@ def post_dumps(
         parse_error = f"{type(exc).__name__}: {exc}"
         log.exception("parse error for domain=%s shop_id=%s", domain, shop_id)
 
-    # 写 raw_log（无论成功失败都写）
-    log_id = write_raw_log(
-        sess,
-        domain=domain,
-        shop_id=shop_id,
-        endpoint=endpoint,
-        captured_at=captured_at,
-        request_params=request_params,
-        request_body=request_body,
-        response_body=response_body,
-        parse_error=parse_error,
-        rows_written=rows_written,
-    )
-
-    # 更新业务表的 log_id（之前用了 placeholder 0）
-    # 由于 upsert 用的是 ON CONFLICT DO UPDATE，需要重新执行一次
-    # 实际上更好的做法是先写 raw_log 拿到 log_id 再解析
-    # 但为了保持代码简洁，这里接受 log_id=0 的情况
-    # （业务表的 log_id 指向 raw_log，但 0 不影响查询功能）
+    # 3. 更新 raw_log 的解析结果
+    if parse_error or rows_written > 0:
+        from sqlalchemy import update
+        sess.execute(
+            update(RawLog)
+            .where(RawLog.id == log_id)
+            .values(parse_error=parse_error, rows_written=rows_written)
+        )
 
     # commit
     sess.commit()

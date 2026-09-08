@@ -360,7 +360,11 @@ def parse_statement_transaction_response(
     product_name = sku_record.get("product_name")
     sku_name = sku_record.get("sku_name")
     quantity = _to_decimal(sku_record.get("quantity"))
-    settlement_status = str(sku_record.get("settlement_status", "")) if sku_record.get("settlement_status") is not None else None
+    settlement_status = (
+        str(sku_record.get("settlement_status", ""))
+        if sku_record.get("settlement_status") is not None
+        else None
+    )
     placed_time = _parse_iso_dt(sku_record.get("placed_time"))
 
     settlement_amount_obj = sku_record.get("settlement_amount") or {}
@@ -370,7 +374,9 @@ def parse_statement_transaction_response(
     # 递归展开费用树
     in_come = sku_record.get("in_come") or {}
     out_come = sku_record.get("out_come") or {}
-    fee_components = flatten_fees(in_come.get("fee_list")) + flatten_fees(out_come.get("fee_list"))
+    fee_components = flatten_fees(in_come.get("fee_list")) + flatten_fees(
+        out_come.get("fee_list")
+    )
 
     seller_web_cut_flow = response_body.get("seller_web_cut_flow")
     seller_app_cut_flow = response_body.get("seller_app_cut_flow")

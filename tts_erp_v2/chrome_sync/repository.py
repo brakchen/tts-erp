@@ -135,21 +135,20 @@ def list_synced_ids(
     """查询已同步 id 列表。返回 (ids, total)。"""
     if domain == "orders":
         base = select(ChromeOrder.order_id).where(ChromeOrder.shop_id == shop_id)
-        count_q = select(text("count(*)")).select_from(ChromeOrder).where(
-            ChromeOrder.shop_id == shop_id
+        count_q = (
+            select(text("count(*)"))
+            .select_from(ChromeOrder)
+            .where(ChromeOrder.shop_id == shop_id)
         )
     elif domain == "logistics":
         base = select(ChromeShipment.order_id.distinct()).where(
             ChromeShipment.shop_id == shop_id
         )
         # distinct count
-        count_q = (
-            select(text("count(*)"))
-            .select_from(
-                select(ChromeShipment.order_id.distinct())
-                .where(ChromeShipment.shop_id == shop_id)
-                .subquery()
-            )
+        count_q = select(text("count(*)")).select_from(
+            select(ChromeShipment.order_id.distinct())
+            .where(ChromeShipment.shop_id == shop_id)
+            .subquery()
         )
     elif domain == "statements":
         base = select(ChromeSettlement.statement_id).where(
@@ -615,7 +614,10 @@ def upsert_settlement_detail(
             updated_at=now,
         )
         .on_conflict_do_update(
-            index_elements=[ChromeSettlementDetail.shop_id, ChromeSettlementDetail.sku_detail_id],
+            index_elements=[
+                ChromeSettlementDetail.shop_id,
+                ChromeSettlementDetail.sku_detail_id,
+            ],
             set_={
                 "log_id": log_id,
                 "statement_id": statement_id,
