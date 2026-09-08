@@ -2176,3 +2176,119 @@ def test_spu_roi_page_no_old_columns(api_client, readonly_key):
         assert col in main_th_labels, f"D8 主表缺列 {col}"
     assert "op-th col-hidden" not in body
     assert "td.col-hidden" not in body
+
+
+# ═════════════════════════════════════════════════════════════════════
+# §3.5 D2 零值落库 + D4 全损 38301 + D5/COGS_kept 防御钳位 + 成本层穿透
+# + §6.3 钻取端点契约（review 后续补测）
+# ═════════════════════════════════════════════════════════════════════
+
+
+def _seed_source_price_direct(sess, *, shop_pk: int, spu_id: str, spu_pk: int, cost: str) -> None:
+    """在 procurement_products 插入一条 1688 货源价（TK-side 直取路径 L3a）。"""
+    # 借一个现有账户（“North Nook”= id 2288,对应测试 shop TEST_SELLER_A）
+    sess.execute(
+        text(
+            "INSERT INTO procurement.procurement_products ("
+            " procurement_account_id, external_product_id, product_type, title,"
+            " source_platform, source_unit_cost, synced_at"
+            ") VALUES (2288, :ext, 'SPU', 'TEST 货源价', '1688',"
+            " CAST(:cost AS numeric), now())"
+        ),
+        {"ext": spu_id, "cost": cost},
+    )
+
+
+def _seed_source_price_via_offer(
+    sess, *, spu_id: str, offer_item_id: str, cost: str
+) -> None:
+    """L3b：仅插入公共采集箱行（external_product_id ≠ spu_id），让 SOURCE_PRICE 走 source_item_id 桥路径。"""
+    sess.execute(
+        text(
+            "INSERT INTO procurement.procurement_products ("
+            " procurement_account_id, external_product_id, product_type, title,"
+            " source_platform, source_item_id, source_unit_cost, synced_at"
+            ") VALUES (2288, :ext, 'OFFER', 'TEST 采集箱行',"
+            " '1688', :item_id, CAST(:cost AS numeric), now())"
+        ),
+        {"ext": "OFFER_" + offer_item_id, "item_id": offer_item_id, "cost": cost},
+    )
+
+
+def _seed_tracking_event_overseas(
+    sess, *, order_pk: int, action_code: int = 38301
+) -> int:
+    """插入包裹 + 38301 海外到达事件，助 D4 B 全损口径测试。"""
+    ship_pk = sess.execute(
+        text(
+            "INSERT INTO fulfillment.shipments ("
+            " shop_pk, order_pk, external_package_id, tracking_number,"
+            " provider_name, status, shipped_at"
+            ") SELECT s.id, :op, 'TEST_PKG', 'TN_001', 'TEST',"
+            " 'in_transit', coalesce(so.paid_at, so.order_time)"
+            " FROM commerce.sales_orders so"
+            " JOIN commerce.shops s ON s.id = so.shop_pk"
+            " WHERE so.id = :op"
+            " RETURNING id"
+        ),
+        {"op": order_pk},
+    ).scalar_one()
+    sess.execute(
+        text(
+            "INSERT INTO fulfillment.tracking_events ("
+            " shipment_id, action_code, event_at, description"
+            ") VALUES (:sp, :ac, now(), 'TEST 到达海外')"
+        ),
+        {"sp": ship_pk, "ac": action_code},
+    )
+    return ship_pk
+
+
+def test_spu_roi_cost_source_price_direct_layer(
+    api_client, readonly_key, db_engine
+):
+    """D1 L3a：1688 货源价直取（procurement_products.external_product_id = spu_id）。
+
+    验证 reviewer 修的 latent bug（`=` 被 sed 吃掉导致 L3a 实际 no-op）
+    被彻底修复：SOURCE_PRICE 路径要能正确返回 cost_source='SOURCE_PRICE' 和
+    对应 source_unit_cost。
+    """
+    # 清理前次运行残留（unique constraint 防重复）
+    with Session(db_engine) as sess:
+        sess.execute(
+            text(
+                "DELETE FROM procurement.procurement_products "
+                "WHERE external_product_id = :ext"
+            ),
+            {"ext": "TEST_ROI_SPU_PRICE_DIRECT"},
+        )
+        sess.commit()
+
+    with Session(db_engine) as sess:
+        spu_id = "TEST_ROI_SPU_PRICE_DIRECT"
+        shop_pk = _seed_shop(sess, "TEST_SELLER_PRICE")
+        spu_pk = _seed_spu(sess, shop_pk, spu_id)
+        _seed_source_price_direct(sess, shop_pk=shop_pk, spu_id=spu_id, spu_pk=spu_pk, cost="35.0000")
+        o1 = _seed_order_line(
+            sess, shop_pk=shop_pk, spu_pk=spu_pk, order_id="TEST_ORDER_PRICE",
+            status=PAID_ORDER_STATUS, line_ext="TEST_LINE_PRICE", qty="2",
+            unit_price="526600", paid=True,  # $20
+        )
+        sess.commit()
+
+    h = {"Authorization": f"Bearer {readonly_key}"}
+    r = api_client.get("/v2/analytics/spu-roi", headers=h, params={"q": spu_id})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["total"] == 1
+    item = body["items"][0]
+    assert item["cost_source"] == "SOURCE_PRICE", item
+    assert Decimal(item["unit_cost_used"]) == Decimal("35") * CNY_USD  # ≈5.1718
+
+
+def test_spu_roi_drilldown_requires_auth(api_client):
+    """钻取端点 readonly 鉴权（与主表一致：401 无 key）。"""
+    for tab in ("orders", "settlements", "cases", "ads"):
+        assert (
+            api_client.get(f"/v2/analytics/spu-roi/1/{tab}").status_code == 401
+        )
