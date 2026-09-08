@@ -158,6 +158,24 @@ def _wipe_test_rows(db_engine) -> None:
         )
         conn.execute(delete(shops_tbl).where(shops_tbl.c.shop_id.like("TEST_%")))
         conn.execute(delete(api_keys_tbl).where(api_keys_tbl.c.name.like("TEST_%")))
+        # 2026-09-07: test_oauth_api.py::test_callback_happy_path_bootstraps_rows
+        # creates TEST_OAUTH_SHOP_API_1 credentials that were never cleaned
+        # up by the api/_isolate_state fixture (wipe only covered api_keys).
+        # Wipe TEST_ credentials to prevent leakage into prod.
+        creds_tbl = Base.metadata.tables["integration.credentials"]
+        conn.execute(
+            delete(creds_tbl).where(
+                creds_tbl.c.external_account_id.like("TEST_%")
+            )
+        )
+        # sync_issues can accumulate TEST_-prefixed rows (e.g.
+        # token.refresh TEST_ issues from test_scheduler_token_refresh).
+        conn.execute(
+            _text(
+                "DELETE FROM integration.sync_issues "
+                "WHERE job_name LIKE 'TEST_%' OR external_id LIKE 'TEST_%'"
+            )
+        )
 
 
 def select_func(col):
