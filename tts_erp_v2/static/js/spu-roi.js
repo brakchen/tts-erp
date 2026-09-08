@@ -565,39 +565,52 @@
         ),
       );
     }
-    function layer(title, rows) {
+    function layer(title, hint, rows) {
+      // title 左对齐(人类阅读习惯);hint 为层口径说明
       return el(
         "div",
         { class: "op-pnl-layer" },
-        el("div", { class: "op-pnl-layer-title" }, title),
+        el(
+          "div",
+          { class: "op-pnl-layer-title" },
+          el("span", { class: "op-pnl-layer-titletext" }, title),
+          hintSpan(hint),
+        ),
         el("div", { class: "op-pnl-rows" }, rows),
       );
     }
 
-    var layerRev = layer("净收入", [
-      row(
-        "已结算(SETTLEMENT 分摊)",
-        settledNet,
-        "add",
-        "v7 D2 零值落库后,有交易必有 SETTLEMENT 行;amount=0 即已结算到手 0",
-      ),
-      row(
-        "未结算(×(1−r̂)×(1−退货率))",
-        unsettledNet,
-        "add",
-        "v7 D5:未结算按基线 30.8% × (1−本 SPU 退款率) 估算",
-      ),
+    // 层提示文案集中维护,不改行的话可以复用
+    var HINT_LAYER_REV =
+      "净收入 = 已结算 SETTLEMENT 分摊 + 未结算 ×(1-r̂)×(1-SPU 退款率);v7 D5 口径";
+    var HINT_LAYER_COGS =
+      "货本 = (售出件 + 全损取消件) × 单位成本;售出件=units_sold,全损取消件=full_loss_cancelled_qty(v7 D4 B)";
+    var HINT_LAYER_AD =
+      "广告消耗 = Σreal_cost_total 广告视图全窗口累计(USD);作为减项计入净利润";
+    var HINT_LAYER_NP =
+      "净利润 = 净收入 − 货本 − 广告消耗(v7 公式);红绿仅按净利正负判(C3 拍板)";
+    var HINT_SETTLED =
+      "已结算部分 = 已有 SETTLEMENT 组件行的订单的 SETTLEMENT 净额(已扣完全部平台费+联盟+运费+退款调整);v7 D2 零值落库,amount=0 即已结算到手 0";
+    var HINT_UNSETTLED =
+      "未结算部分 = 订单无 SETTLEMENT 组件行,按 line_gmv × (1-0.308) × (1-SPU 退款率) 估算;v7 D5 口径";
+    var HINT_COGS_SOLD =
+      "售出件 = 实际售出件数 units_sold(已付白名单状态);v7 单位成本 × 件数";
+    var HINT_COGS_FLC =
+      "全损取消件 = full_loss_cancelled_qty = 已出海(38301) + 已取消订单的件数;v7 D4 B 补扣口径,货拿不回来按全损计";
+    var HINT_AD_SPEND =
+      "广告消耗 = Σ real_cost_total(广告视图全窗口累计,USD);作为减项计入净利润";
+
+    var layerRev = layer("净收入", HINT_LAYER_REV, [
+      row("已结算", settledNet, "add", HINT_SETTLED),
+      row("未结算", unsettledNet, "add", HINT_UNSETTLED),
     ]);
-    var layerCogs = layer("货本", [
-      row("售出件", -cogsSold, "sub"),
-      row(
-        "全损取消件(D4 B 补扣)",
-        -cogsFlc,
-        "sub",
-        "D4 B 切 38301 全损口径:M13b = full_loss_qty × cost,含已出海取消件",
-      ),
+    var layerCogs = layer("货本", HINT_LAYER_COGS, [
+      row("售出件", -cogsSold, "sub", HINT_COGS_SOLD),
+      row("全损取消件", -cogsFlc, "sub", HINT_COGS_FLC),
     ]);
-    var layerAd = layer("广告", [row("消耗", -spend, "sub")]);
+    var layerAd = layer("广告消耗", HINT_LAYER_AD, [
+      row("消耗", -spend, "sub", HINT_AD_SPEND),
+    ]);
     var layerResult = el(
       "div",
       { class: "op-pnl-layer op-pnl-layer-result" },
@@ -605,7 +618,7 @@
         "净利润",
         np,
         np < 0 ? "result op-pnl-row-neg" : "result op-pnl-row-pos",
-        "M18 红绿仅按净利判(C3 拍板);负值红字",
+        HINT_LAYER_NP,
       ),
     );
 
@@ -650,9 +663,9 @@
             "tr",
             null,
             el("th", null, "订单号"),
-            el("th", null, "SETTLEMENT"),
-            el("th", null, "分摊比"),
-            el("th", null, "statement"),
+            el("th", null, "SETTLEMENT", hintSpan("SETTLEMENT = 订单 SETTLEMENT 净额(已扣完全部平台费+联盟+运费+退款调整);v7 净利润核心输入")),
+            el("th", null, "分摊比", hintSpan("分摊比 = line_gmv / order_gmv;SETTLEMENT 按这个比例分到各行")),
+            el("th", null, "statement", hintSpan("statement_time = 结算单落库时间(settle_transactions.synced_at)")),
           ),
         ),
         el("tbody", null, srows),
@@ -716,11 +729,11 @@
           el(
             "tr",
             null,
-            el("th", null, "case"),
-            el("th", null, "订单"),
-            el("th", null, "类型"),
-            el("th", null, "状态"),
-            el("th", null, "退款"),
+            el("th", null, "case", hintSpan("case_id = 售后 case 外部 ID(after_sales.cases.external_case_id)")),
+            el("th", null, "订单", hintSpan("order_id = 关联订单 ID(after_sales.cases.order_pk → commerce.sales_orders.order_id)")),
+            el("th", null, "类型", hintSpan("case_type = RETURN_AND_REFUND(退货退款) / REFUND_ONLY(仅退款) / CANCELLATION(取消)")),
+            el("th", null, "状态", hintSpan("case 状态;RETURN_OR_REFUND_REQUEST_COMPLETE / CANCELLATION_REQUEST_COMPLETE 表示完结")),
+            el("th", null, "退款", hintSpan("refund_amount = 该 case 退款金额(USD,已从 GMV 减除)")),
           ),
         ),
         el("tbody", null, crows),
