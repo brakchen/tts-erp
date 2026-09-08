@@ -1154,6 +1154,19 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       font-size: 14px; font-weight: 600; color: var(--ink);
       font-variant-numeric: tabular-nums;
     }
+    /* DEFAULT_K1 兑底标记: ⚠ 提示 + 格背景微高亮(仅作用于 spu-roi 钻取面板) */
+    .op-warn {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 16px; height: 16px; border-radius: 50%;
+      background: var(--warn, #b8390e); color: var(--paper, #fff);
+      font-size: 11px; font-weight: 700; line-height: 1; cursor: help;
+      user-select: none; margin-left: 4px; flex: none;
+    }
+    .op-warn:hover { transform: scale(1.1); }
+    .op-drill-cell-fallback {
+      background: rgba(184, 57, 14, 0.06);
+      border-color: var(--warn, #b8390e);
+    }
     /* ≤md: 4 列 / ≤sm: 3 列 — 避免超窄屏挤 */
     @media (max-width: 767.98px) {
       .op-drill-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }

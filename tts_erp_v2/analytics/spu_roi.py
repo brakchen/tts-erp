@@ -620,7 +620,9 @@ def _spu_pk_exists(sess: Session, spu_pk: int) -> bool:
 # ═════════════════════════════════════════════════════════════════════
 
 # cost_source 枚举（按命中优先级排序）
-COST_SOURCE_PRIORITY = ("MANUAL", "PURCHASE", "SOURCE_PRICE", "DEFAULT_K1")
+# 2026-09-08 业务调整: 去 PURCHASE（妙手采购单）这一档，3 档链
+# MANUAL（人工标注）> SOURCE_PRICE（1688 货源价）> DEFAULT_K1（40 CNY 兜底）
+COST_SOURCE_PRIORITY = ("MANUAL", "SOURCE_PRICE", "DEFAULT_K1")
 
 
 def _resolve_costs_batch(
@@ -628,27 +630,20 @@ def _resolve_costs_batch(
 ) -> dict[int, tuple[Decimal, str]]:
     """批量解析每个 SPU 的单位成本 CNY + 来源枚举（§3.4 全链）。
 
-    优先级：MANUAL > PURCHASE > SOURCE_PRICE > DEFAULT(40 CNY)。
-    返回：{spu_pk: (unit_cost_cny, cost_source)}。DEFAULT_K1 行仅当三层
-    全部 miss 时兜底。
+    优先级：MANUAL > SOURCE_PRICE > DEFAULT(40 CNY)。
+    返回：{spu_pk: (unit_cost_cny, cost_source)}。DEFAULT_K1 行仅当两层
+    全部 miss 时兜底，UI 上需标 ⚠ 提示。
     """
     if not spu_pks:
         return {}
     out: dict[int, tuple[Decimal, str]] = {}
 
-    # L1: manual_product_costs
+    # L1: manual_product_costs（人工标注的采购成交价）
     rows = sess.execute(_SQL_COST_MANUAL, {"pks": spu_pks}).mappings().all()
     for r in rows:
         out[int(r["spu_pk"])] = (Decimal(r["unit_cost"]), "MANUAL")  # noqa: E511
 
-    # L2: LATEST_PURCHASE_COST（妙手采购单，按 updated_at DESC 取最新一条；priority: MANUAL > PURCHASE）
-    rows = sess.execute(_SQL_COST_PURCHASE, {"pks": spu_pks}).mappings().all()
-    for r in rows:
-        pk = int(r["spu_pk"])
-        if pk not in out:  # noqa — priority check
-            out[pk] = (Decimal(r["unit_cost"]), "PURCHASE")
-
-    # L3a + L3b: SOURCE_PRICE（1688 挂牌价）
+    # L2: SOURCE_PRICE（1688 货源价，direct + via offer 两条路径）
     missing = [pk for pk in spu_pks if pk not in out]
     if missing:
         rows = sess.execute(_SQL_COST_SOURCE_DIRECT, {"pks": missing}).mappings().all()
@@ -664,7 +659,7 @@ def _resolve_costs_batch(
             for r in rows:
                 out[int(r["spu_pk"])] = (Decimal(r["unit_cost"]), "SOURCE_PRICE")  # noqa: E511
 
-    # L4: DEFAULT_K1（40 CNY/件）
+    # L3: DEFAULT_K1（40 CNY/件 兜底，UI 上需 ⚠ 标注）
     for pk in spu_pks:
         if pk not in out:
             out[pk] = (K1_DEFAULT_CNY, "DEFAULT_K1")
