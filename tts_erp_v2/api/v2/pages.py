@@ -1095,21 +1095,29 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     /* ---------- summary 区:指标卡片网格 ---------- */
     .op-drill-summary { margin-bottom: 14px; }
     .op-drill-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-      gap: 8px 12px;
+      display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 8px 10px;
     }
     .op-drill-cell {
-      display: flex; flex-direction: column; gap: 2px;
-      padding: 8px 10px; background: var(--paper);
-      border: 1px solid var(--rule-soft);
+      display: flex; flex-direction: column; align-items: center;
+      gap: 4px; padding: 10px 6px; background: var(--paper);
+      border: 1px solid var(--rule-soft); text-align: center;
     }
     .op-drill-lbl {
       font-size: 11px; color: var(--muted); letter-spacing: .03em;
-      display: inline-flex; align-items: center; line-height: 1.3;
+      display: flex; align-items: center; justify-content: center; gap: 4px;
+      line-height: 1.3; min-height: 28px;
     }
     .op-drill-val {
       font-size: 14px; font-weight: 600; color: var(--ink);
       font-variant-numeric: tabular-nums;
+    }
+    /* ≤md: 4 列 / ≤sm: 3 列 — 避免超窄屏挤 */
+    @media (max-width: 767.98px) {
+      .op-drill-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    }
+    @media (max-width: 575.98px) {
+      .op-drill-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     }
 
     /* ---------- 利润构成瀑布(§6.2 文本表 → 改为 div 分层) ---------- */
