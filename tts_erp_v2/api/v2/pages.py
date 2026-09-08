@@ -969,9 +969,9 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     .warn-rr, .warn-default { color: var(--warn); cursor: help; font-size: 12px; }
     .no-ad { color: var(--muted); letter-spacing: 0.04em; }
     .td-spu { font-family: var(--mono); font-size: 12px; color: var(--muted); }
-    .td-title { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .td-title { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .td-null { color: var(--rule); }
-    .td-spu-cell { display: flex; align-items: center; gap: 12px; }
+    .td-spu-cell { display: flex; align-items: center; gap: 8px; }
     .spu-img {
       width: 56px; height: 56px; flex: none; object-fit: cover;
       border: 1px solid var(--rule); background: var(--paper-deep); cursor: zoom-in;
@@ -1038,8 +1038,8 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       table.op-table tbody td:first-child {
         max-width: 230px; overflow: hidden;
       }
-      table.op-table tbody td:first-child { min-width: 190px; }
-      table.op-table .td-title { max-width: 120px; }
+      table.op-table tbody td:first-child { min-width: 150px; }
+      table.op-table .td-title { max-width: 110px; }
     }
     @media (max-width: 575.98px) {
       .op-title { font-size: 22px; }
