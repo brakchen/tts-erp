@@ -387,7 +387,8 @@
       $("#filter-w-end").value = cw.coverage_last_day;
     }
 
-    applyColToggles(); // 新渲染的行/空态要重新应用 ⚙ 列开关
+    // D8(2026-09-07):⚙ 列开关组全删,applyColToggles 不再调用
+    // (94afd70 删定义/绑定/state.cols 时漏删了这处调用,跑起来 ReferenceError)
     updateSortMarkers();
     bindRowAccordion(items);
   }
