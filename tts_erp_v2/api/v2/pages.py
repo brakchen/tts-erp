@@ -954,9 +954,15 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
        top:0 吸顶在框内才成立 —— 纯 overflow-x 容器(纵轴被迫 clip/hidden)会让表头随
        页面滚走(实测失效)。首列吸左同框生效。 */
     .op-table-wrap { overflow: auto; max-height: min(72vh, 880px); overscroll-behavior: contain; }
+    /* table-layout: fixed —— 列宽由 thead th 决定,不受 cell 内容撑开
+       (auto 模式下 56px 提示被浏览器忽略,会按内容拉伸)
+       + overflow: hidden —— 内容超出列宽截断不破布局 */
     table.op-table {
-      width: 100%; border-collapse: collapse;
+      width: 100%; border-collapse: collapse; table-layout: fixed;
       min-width: 1500px; margin-bottom: 0;
+    }
+    table.op-table th, table.op-table td {
+      overflow: hidden; text-overflow: ellipsis;
     }
     .op-th {
       text-align: right; font-size: 12px; letter-spacing: 0.04em;
@@ -1282,14 +1288,14 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       <table class="op-table" aria-live="polite">
         <thead>
           <tr>
-            <th scope="col" class="op-th op-th-left">商品</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="ad_count" data-tip="关联广告数 = 该 SPU 命中的广告计划数(count(DISTINCT campaign_id));广告视图全窗口累计,不受日期裁剪">关联广告数</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="spend" data-tip="广告消耗（USD，广告窗口全量累计；作为减项计入净利润）">广告消耗</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="sales" data-tip="有效GMV = 白名单状态订单行金额（USD；排除已取消订单，B1 拍板）">有效GMV</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="order_count" data-tip="有效出单量 = 白名单有效订单数（distinct）">有效出单量</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="cancel_rate" data-tip="取消率 = 取消单量 ÷ (有效单量 + 取消单量)">取消率%</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="full_loss_rate" data-tip="全损退款率% = 全损件数(38301) ÷ (售出件数+全损取消件数);D4 B 口径;分母0 → —">全损退款率%</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="net_profit" data-tip="净利润 v7(M18):已结算 SETTLEMENT + 未结算 ×(1−r̂)×(1−退款率) − 货本含全损取消 − 广告;负值红字。Red/green 仅按净利判(C3 拍板,删 ROI&lt;1 硬亏档)">净利润</th>
+            <th scope="col" class="op-th op-th-left" width="288">商品</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="ad_count" data-tip="关联广告数 = 该 SPU 命中的广告计划数(count(DISTINCT campaign_id));广告视图全窗口累计,不受日期裁剪" width="72">关联广告数</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="spend" data-tip="广告消耗（USD，广告窗口全量累计；作为减项计入净利润）" width="200">广告消耗</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="sales" data-tip="有效GMV = 白名单状态订单行金额（USD；排除已取消订单，B1 拍板）" width="200">有效GMV</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="order_count" data-tip="有效出单量 = 白名单有效订单数（distinct）" width="160">有效出单量</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="cancel_rate" data-tip="取消率 = 取消单量 ÷ (有效单量 + 取消单量)" width="180">取消率%</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="full_loss_rate" data-tip="全损退款率% = 全损件数(38301) ÷ (售出件数+全损取消件数);D4 B 口径;分母0 → —" width="200">全损退款率%</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="net_profit" data-tip="净利润 v7(M18):已结算 SETTLEMENT + 未结算 ×(1−r̂)×(1−退款率) − 货本含全损取消 − 广告;负值红字。Red/green 仅按净利判(C3 拍板,删 ROI&lt;1 硬亏档)" width="200">净利润</th>
           </tr>
         </thead>
         <tbody class="op-rows" id="rows">
