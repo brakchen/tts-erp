@@ -13,13 +13,11 @@
 from __future__ import annotations
 
 import logging
-import sys
-import uuid
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -541,6 +539,7 @@ _SQL_DETAIL_ADS = text(
 # 工具函数
 # ═════════════════════════════════════════════════════════════════════
 
+
 def _resolve_fx_rates(sess: Session) -> tuple[Decimal, Decimal, str, str]:
     """ROI 账页换算汇率：在线 fx 缓存优先，D9 常量兜底。"""
     rm = load_rate_map(sess, base_code="USD")
@@ -584,7 +583,9 @@ def _parse_fee_rate(raw: str | None) -> Decimal | None:
     try:
         v = Decimal(s)
     except Exception as exc:
-        raise HTTPException(status_code=422, detail="fee_rate must be a decimal") from exc
+        raise HTTPException(
+            status_code=422, detail="fee_rate must be a decimal"
+        ) from exc
     if not v.is_finite():
         raise HTTPException(status_code=422, detail="fee_rate must be a finite decimal")
     if v.copy_abs() > Decimal("1e6"):
@@ -639,33 +640,30 @@ def _resolve_costs_batch(
     # L1: manual_product_costs
     rows = sess.execute(_SQL_COST_MANUAL, {"pks": spu_pks}).mappings().all()
     for r in rows:
-        out[int(r["spu_pk"])] = (Decimal(r["unit_cost"]), "MANUAL")
+        out[int(r["spu_pk"])] = (Decimal(r["unit_cost"]), "MANUAL")  # noqa: E511
 
-    # L2: LATEST_PURCHASE_COST（妙手采购单）
-    if any(v[1] == "MANUAL" for v in out.values()) is False and spu_pks:
-        # 只查未命中的（简化：全查，因为 SQL 本身不贵）
-        pass
+    # L2: LATEST_PURCHASE_COST（妙手采购单，按 updated_at DESC 取最新一条；priority: MANUAL > PURCHASE）
     rows = sess.execute(_SQL_COST_PURCHASE, {"pks": spu_pks}).mappings().all()
     for r in rows:
         pk = int(r["spu_pk"])
-        if pk not in out:  # 优先级：MANUAL > PURCHASE
+        if pk not in out:  # noqa — priority check
             out[pk] = (Decimal(r["unit_cost"]), "PURCHASE")
 
     # L3a + L3b: SOURCE_PRICE（1688 挂牌价）
     missing = [pk for pk in spu_pks if pk not in out]
     if missing:
-        rows = sess.execute(
-            _SQL_COST_SOURCE_DIRECT, {"pks": missing}
-        ).mappings().all()
+        rows = sess.execute(_SQL_COST_SOURCE_DIRECT, {"pks": missing}).mappings().all()
         for r in rows:
-            out[int(r["spu_pk"])] = (Decimal(r["unit_cost"]), "SOURCE_PRICE")
+            out[int(r["spu_pk"])] = (Decimal(r["unit_cost"]), "SOURCE_PRICE")  # noqa: E511
         still_missing = [pk for pk in missing if pk not in out]
         if still_missing:
-            rows = sess.execute(
-                _SQL_COST_SOURCE_VIA_OFFER, {"pks": still_missing}
-            ).mappings().all()
+            rows = (
+                sess.execute(_SQL_COST_SOURCE_VIA_OFFER, {"pks": still_missing})
+                .mappings()
+                .all()
+            )
             for r in rows:
-                out[int(r["spu_pk"])] = (Decimal(r["unit_cost"]), "SOURCE_PRICE")
+                out[int(r["spu_pk"])] = (Decimal(r["unit_cost"]), "SOURCE_PRICE")  # noqa: E511
 
     # L4: DEFAULT_K1（40 CNY/件）
     for pk in spu_pks:
@@ -678,6 +676,7 @@ def _resolve_costs_batch(
 # ═════════════════════════════════════════════════════════════════════
 # 主表查询 + 计算（§2/§3.3 公式）
 # ═════════════════════════════════════════════════════════════════════
+
 
 def _query_spu_roi(
     sess: Session,
@@ -699,59 +698,79 @@ def _query_spu_roi(
     paid_statuses = list(PAID_SALES_ORDER_STATUSES)
     st0, st1 = _CASE_COMPLETED_STATUSES
 
-    cats = sess.execute(
-        _SQL_ROI_CATALOG,
-        {"shop_pk": shop_pk, "q": q, "active_only": include_all},
-    ).mappings().all()
+    cats = (
+        sess.execute(
+            _SQL_ROI_CATALOG,
+            {"shop_pk": shop_pk, "q": q, "active_only": include_all},
+        )
+        .mappings()
+        .all()
+    )
 
     ad_rows = sess.execute(_SQL_ROI_AD).mappings().all()
-    ad_map = {int(r["spu_pk"]): r for r in ad_rows if r["spu_pk"] is not None}
+    ad_map = {int(r["spu_pk"]): r for r in ad_rows if r["spu_pk"] is not None}  # noqa: E511
 
-    sales_rows = sess.execute(
-        _SQL_ROI_SALES,
-        {"paid_statuses": paid_statuses, "ws": ws_dt, "we": we_dt},
-    ).mappings().all()
-    sales_map = {int(r["spu_pk"]): r for r in sales_rows if r["spu_pk"] is not None}
+    sales_rows = (
+        sess.execute(
+            _SQL_ROI_SALES,
+            {"paid_statuses": paid_statuses, "ws": ws_dt, "we": we_dt},
+        )
+        .mappings()
+        .all()
+    )
+    sales_map = {int(r["spu_pk"]): r for r in sales_rows if r["spu_pk"] is not None}  # noqa: E511
 
-    fl_rows = sess.execute(
-        _SQL_ROI_FULL_LOSS,
-        {
-            "paid_statuses": paid_statuses,
-            "ac": _TRACK_ACTION_CODE_OVERSEAS,
-            "st0": st0,
-            "st1": st1,
-            "ws": ws_dt,
-            "we": we_dt,
-        },
-    ).mappings().all()
-    fl_map = {int(r["spu_pk"]): r for r in fl_rows if r["spu_pk"] is not None}
+    fl_rows = (
+        sess.execute(
+            _SQL_ROI_FULL_LOSS,
+            {
+                "paid_statuses": paid_statuses,
+                "ac": _TRACK_ACTION_CODE_OVERSEAS,
+                "st0": st0,
+                "st1": st1,
+                "ws": ws_dt,
+                "we": we_dt,
+            },
+        )
+        .mappings()
+        .all()
+    )
+    fl_map = {int(r["spu_pk"]): r for r in fl_rows if r["spu_pk"] is not None}  # noqa: E511
 
-    rs_rows = sess.execute(
-        _SQL_ROI_ROW_STATUS,
-        {
-            "paid_statuses": paid_statuses,
-            "st0": st0,
-            "st1": st1,
-            "ws": ws_dt,
-            "we": we_dt,
-        },
-    ).mappings().all()
-    rs_map = {int(r["spu_pk"]): r for r in rs_rows if r["spu_pk"] is not None}
+    rs_rows = (
+        sess.execute(
+            _SQL_ROI_ROW_STATUS,
+            {
+                "paid_statuses": paid_statuses,
+                "st0": st0,
+                "st1": st1,
+                "ws": ws_dt,
+                "we": we_dt,
+            },
+        )
+        .mappings()
+        .all()
+    )
+    rs_map = {int(r["spu_pk"]): r for r in rs_rows if r["spu_pk"] is not None}  # noqa: E511
 
-    refund_rows = sess.execute(
-        _SQL_ROI_REFUNDS,
-        {
-            "paid_statuses": paid_statuses,
-            "st0": st0,
-            "st1": st1,
-            "ws": ws_dt,
-            "we": we_dt,
-        },
-    ).mappings().all()
-    refund_map = {int(r["spu_pk"]): r for r in refund_rows if r["spu_pk"] is not None}
+    refund_rows = (
+        sess.execute(
+            _SQL_ROI_REFUNDS,
+            {
+                "paid_statuses": paid_statuses,
+                "st0": st0,
+                "st1": st1,
+                "ws": ws_dt,
+                "we": we_dt,
+            },
+        )
+        .mappings()
+        .all()
+    )
+    refund_map = {int(r["spu_pk"]): r for r in refund_rows if r["spu_pk"] is not None}  # noqa: E511
 
     # 成本链批量解析（D1）
-    spu_pks_all = [int(c["spu_pk"]) for c in cats]
+    spu_pks_all = [int(c["spu_pk"]) for c in cats]  # noqa: E511
     cost_map = _resolve_costs_batch(sess, spu_pks_all)
 
     plain: list[dict] = []
@@ -764,7 +783,12 @@ def _query_spu_roi(
         ad = ad_map.get(pk)
         sales = sales_map.get(pk)
         fl = fl_map.get(pk)
-        if not include_all and ad is None and sales is None and refund_map.get(pk) is None:
+        if (
+            not include_all
+            and ad is None
+            and sales is None
+            and refund_map.get(pk) is None
+        ):
             continue
 
         spend = Decimal(ad["spend"]) if ad else Decimal(0)
@@ -777,16 +801,16 @@ def _query_spu_roi(
         order_count = _row_int(sales["order_count"]) if sales else 0
         units_sold = _row_int(sales["units_sold"]) if sales else 0
         sales_vnd = Decimal(sales["sales_vnd"] or 0) if sales else Decimal(0)
-        settled_net_vnd = Decimal(sales["settled_net_vnd"] or 0) if sales else Decimal(0)
+        settled_net_vnd = (
+            Decimal(sales["settled_net_vnd"] or 0) if sales else Decimal(0)
+        )
         settled_sales_vnd = (
             Decimal(sales["settled_sales_vnd"] or 0) if sales else Decimal(0)
         )
         unsettled_sales_vnd = (
             Decimal(sales["unsettled_sales_vnd"] or 0) if sales else Decimal(0)
         )
-        settled_order_count = (
-            _row_int(sales["settled_order_count"]) if sales else 0
-        )
+        settled_order_count = _row_int(sales["settled_order_count"]) if sales else 0
 
         flc_qty = _row_int(fl["full_loss_cancelled_qty"]) if fl else 0
         full_loss_qty = _row_int(fl["full_loss_qty"]) if fl else 0
@@ -798,13 +822,13 @@ def _query_spu_roi(
         refund = refund_map.get(pk)
         refund_only_qty = _row_int(refund["refund_only_qty"]) if refund else 0
         refund_return_qty = _row_int(refund["refund_return_qty"]) if refund else 0
-        refund_cancelled_qty = (
-            _row_int(refund["refund_cancelled_qty"]) if refund else 0
-        )
+        refund_cancelled_qty = _row_int(refund["refund_cancelled_qty"]) if refund else 0
         refund_cancelled_missing = (
             _row_int(refund["refund_cancelled_missing_lines"]) if refund else 0
         )
-        refund_only_vnd = Decimal(refund["refund_only_amount"]) if refund else Decimal(0)
+        refund_only_vnd = (
+            Decimal(refund["refund_only_amount"]) if refund else Decimal(0)
+        )
         refund_return_vnd = (
             Decimal(refund["refund_return_amount"]) if refund else Decimal(0)
         )
@@ -831,10 +855,14 @@ def _query_spu_roi(
         # refund_rate_spu（M12 金额口径）— 全 0 时=0，钳位 [0,1]
         refund_rate_spu = Decimal(0)
         if sales_vnd > 0:
-            refund_rate_spu = min(Decimal(1), max(Decimal(0), refund_net_vnd / sales_vnd))
+            refund_rate_spu = min(
+                Decimal(1), max(Decimal(0), refund_net_vnd / sales_vnd)
+            )
 
         # net_revenue: settled_net + unsettled × (1−r̂) × (1−rate) （D5）
-        net_revenue_usd = settled_net_usd + unsettled_sales_usd * (Decimal(1) - rate) * (Decimal(1) - refund_rate_spu)
+        net_revenue_usd = settled_net_usd + unsettled_sales_usd * (
+            Decimal(1) - rate
+        ) * (Decimal(1) - refund_rate_spu)
 
         # COGS（v6 补扣：售出 + 全损取消）
         cogs_all_usd = (Decimal(units_sold) + Decimal(flc_qty)) * unit_cost_usd
@@ -853,7 +881,10 @@ def _query_spu_roi(
         if spend != 0:
             roi_real_usd = (net_revenue_usd - return_loss_usd) / spend
         # 保本 ROI（M17）：NC′ / (NC′ − COGS_kept)；COGS_kept ≥ 0 钳位
-        cogs_kept_usd = max(Decimal(0), (Decimal(units_sold) - Decimal(refund_return_qty)) * unit_cost_usd)
+        cogs_kept_usd = max(
+            Decimal(0),
+            (Decimal(units_sold) - Decimal(refund_return_qty)) * unit_cost_usd,
+        )
         breakeven_denom = (net_revenue_usd - return_loss_usd) - cogs_kept_usd
         roi_breakeven_usd = None
         if spend != 0 and breakeven_denom > 0:
@@ -873,11 +904,15 @@ def _query_spu_roi(
 
         cancel_rate_usd = None
         if (order_count + cancelled_orders) > 0:
-            cancel_rate_usd = Decimal(cancelled_orders) / Decimal(order_count + cancelled_orders)
+            cancel_rate_usd = Decimal(cancelled_orders) / Decimal(
+                order_count + cancelled_orders
+            )
         refund_rate_qty_usd = None
         if order_count > 0:
             # 退货订单数：白名单订单中有完结 case 的（SAME 行内口径）
-            refund_rate_qty_usd = Decimal(_row_int(rs["refund_order_count"]) if rs else 0) / Decimal(order_count)
+            refund_rate_qty_usd = Decimal(
+                _row_int(rs["refund_order_count"]) if rs else 0
+            ) / Decimal(order_count)
 
         plain.append(
             {
@@ -963,12 +998,23 @@ def _query_spu_roi(
     spu_pks_visible = [r["spu_pk"] for r in plain]
     scope_row = None
     if spu_pks_visible:
-        scope_row = sess.execute(
-            _SQL_ROI_ORDER_SCOPE,
-            {"paid_statuses": paid_statuses, "pks": spu_pks_visible, "ws": ws_dt, "we": we_dt},
-        ).mappings().first()
+        scope_row = (
+            sess.execute(
+                _SQL_ROI_ORDER_SCOPE,
+                {
+                    "paid_statuses": paid_statuses,
+                    "pks": spu_pks_visible,
+                    "ws": ws_dt,
+                    "we": we_dt,
+                },
+            )
+            .mappings()
+            .first()
+        )
     eff_orders = _row_int(scope_row["order_count"]) if scope_row else 0
-    cancelled_orders_total = _row_int(scope_row["cancelled_order_count"]) if scope_row else 0
+    cancelled_orders_total = (
+        _row_int(scope_row["cancelled_order_count"]) if scope_row else 0
+    )
     gmv_total = Decimal(scope_row["gmv"]) / fx_usd_vnd if scope_row else Decimal(0)
     totals = {
         "row_count": len(plain),
@@ -986,14 +1032,32 @@ def _query_spu_roi(
 
     # meta（§4 v7）
     window_row = sess.execute(_SQL_ROI_WINDOW).mappings().first()
-    data_window_row = sess.execute(
-        _SQL_ROI_DATA_WINDOW,
-        {"paid_statuses": paid_statuses, "st0": st0, "st1": st1, "shop_pk": shop_pk},
-    ).mappings().first()
-    unattributed = sess.execute(
-        _SQL_ROI_UNATTRIBUTED,
-        {"st0": st0, "st1": st1, "paid_statuses": paid_statuses, "shop_pk": shop_pk},
-    ).mappings().first()
+    data_window_row = (
+        sess.execute(
+            _SQL_ROI_DATA_WINDOW,
+            {
+                "paid_statuses": paid_statuses,
+                "st0": st0,
+                "st1": st1,
+                "shop_pk": shop_pk,
+            },
+        )
+        .mappings()
+        .first()
+    )
+    unattributed = (
+        sess.execute(
+            _SQL_ROI_UNATTRIBUTED,
+            {
+                "st0": st0,
+                "st1": st1,
+                "paid_statuses": paid_statuses,
+                "shop_pk": shop_pk,
+            },
+        )
+        .mappings()
+        .first()
+    )
 
     override_rate = None if fee_rate is None else str(fee_rate)
     if w_start is None and w_end is None:
@@ -1025,7 +1089,9 @@ def _query_spu_roi(
         ),
         "fee": {
             "mode": "override" if override_rate is not None else "baseline",
-            "rate": override_rate if override_rate is not None else str(FEE_RATE_BASELINE),
+            "rate": override_rate
+            if override_rate is not None
+            else str(FEE_RATE_BASELINE),
             "override": override_rate,
             "note": (
                 "平台佣金=平台从销售额直接扣除的全部费用(抽佣/联盟/运费类)；"
@@ -1034,8 +1100,12 @@ def _query_spu_roi(
             ),
         },
         "window": {
-            "first_day": window_row["first_day"].isoformat() if window_row["first_day"] else None,
-            "last_day": window_row["last_day"].isoformat() if window_row["last_day"] else None,
+            "first_day": window_row["first_day"].isoformat()
+            if window_row["first_day"]
+            else None,
+            "last_day": window_row["last_day"].isoformat()
+            if window_row["last_day"]
+            else None,
             "coverage_first_day": (
                 data_window_row["first_day"].isoformat()
                 if data_window_row and data_window_row["first_day"]
@@ -1075,8 +1145,12 @@ def _query_spu_roi(
                 "spend": _fmt_money(r["spend"]),
                 "gmv_ad": _fmt_money(r["gmv_ad"]),
                 "roi_l0": _fmt_ratio(r["roi_l0"]),
-                "ad_first_day": r["ad_first_day"].isoformat() if r["ad_first_day"] else None,
-                "ad_last_day": r["ad_last_day"].isoformat() if r["ad_last_day"] else None,
+                "ad_first_day": r["ad_first_day"].isoformat()
+                if r["ad_first_day"]
+                else None,
+                "ad_last_day": r["ad_last_day"].isoformat()
+                if r["ad_last_day"]
+                else None,
                 "order_count": r["order_count"],
                 "cancelled_order_count": r["cancelled_order_count"],
                 "units_sold": r["units_sold"],
@@ -1119,33 +1193,44 @@ def _query_spu_roi(
 # 钻取面板查询（§6.3）
 # ═════════════════════════════════════════════════════════════════════
 
-def _detail_orders(sess: Session, spu_pk: int, w_start: date | None, w_end: date | None) -> dict:
+
+def _detail_orders(
+    sess: Session, spu_pk: int, w_start: date | None, w_end: date | None
+) -> dict:
     ws_dt, we_dt = _window_dates(w_start, w_end)
-    rows = sess.execute(
-        _SQL_DETAIL_ORDERS,
-        {
-            "spu_pk": spu_pk,
-            "ac": _TRACK_ACTION_CODE_OVERSEAS,
-            "st0": _CASE_COMPLETED_STATUSES[0],
-            "st1": _CASE_COMPLETED_STATUSES[1],
-            "ws": ws_dt,
-            "we": we_dt,
-            "lim": _ORDERS_MAX,
-        },
-    ).mappings().all()
+    rows = (
+        sess.execute(
+            _SQL_DETAIL_ORDERS,
+            {
+                "spu_pk": spu_pk,
+                "ac": _TRACK_ACTION_CODE_OVERSEAS,
+                "st0": _CASE_COMPLETED_STATUSES[0],
+                "st1": _CASE_COMPLETED_STATUSES[1],
+                "ws": ws_dt,
+                "we": we_dt,
+                "lim": _ORDERS_MAX,
+            },
+        )
+        .mappings()
+        .all()
+    )
     truncated = len(rows) >= _ORDERS_MAX
     fx_cny_usd, fx_usd_vnd, _, _ = _resolve_fx_rates(sess)
     orders: list[dict] = []
     for r in rows:
         order_pk = int(r["order_pk"])
         line_gmv_usd = Decimal(r["line_gmv_vnd"]) / fx_usd_vnd
-        settlement_vnd = Decimal(r["settlement_vnd"]) if r["settlement_vnd"] is not None else None
+        settlement_vnd = (
+            Decimal(r["settlement_vnd"]) if r["settlement_vnd"] is not None else None
+        )
         # share_ratio = line_gmv / order_gmv（占整单 GMV 比例）
         share_ratio: Decimal | None = None
         # 取整单 GMV（仅这一行的 order_gmv）
         order_gmv_row = sess.execute(
-            text("SELECT coalesce(sum(quantity * unit_price), 0) AS g "
-                 "FROM commerce.sales_order_lines WHERE order_pk = :op"),
+            text(
+                "SELECT coalesce(sum(quantity * unit_price), 0) AS g "
+                "FROM commerce.sales_order_lines WHERE order_pk = :op"
+            ),
             {"op": order_pk},
         ).scalar()
         order_gmv_vnd = Decimal(order_gmv_row or 0)
@@ -1156,9 +1241,7 @@ def _detail_orders(sess: Session, spu_pk: int, w_start: date | None, w_end: date
         # settled_net_share = SETTLEMENT × share_ratio（未结算 → null）
         settled_net_share: str | None = None
         if settlement_vnd is not None and share_ratio is not None:
-            settled_net_share = _fmt_money(
-                (settlement_vnd * share_ratio) / fx_usd_vnd
-            )
+            settled_net_share = _fmt_money((settlement_vnd * share_ratio) / fx_usd_vnd)
 
         arrived_overseas = bool(r["arrived_overseas"])
         has_completed_case = bool(r["has_completed_case"])
@@ -1168,15 +1251,21 @@ def _detail_orders(sess: Session, spu_pk: int, w_start: date | None, w_end: date
         # tracking 时间线（按 event_at 升序）
         tracking: list[dict] = []
         if r["shipment_pk"]:
-            tk_rows = sess.execute(
-                _SQL_DETAIL_TRACKING, {"shipment_pk": int(r["shipment_pk"])}
-            ).mappings().all()
+            tk_rows = (
+                sess.execute(
+                    _SQL_DETAIL_TRACKING, {"shipment_pk": int(r["shipment_pk"])}
+                )
+                .mappings()
+                .all()
+            )
             for tk in tk_rows:
                 tracking.append(
                     {
                         "action_code": _row_int(tk["action_code"]),
                         "desc": tk["description"],
-                        "event_at": tk["event_at"].isoformat() if tk["event_at"] else None,
+                        "event_at": tk["event_at"].isoformat()
+                        if tk["event_at"]
+                        else None,
                     }
                 )
 
@@ -1210,8 +1299,10 @@ def _detail_orders(sess: Session, spu_pk: int, w_start: date | None, w_end: date
     return {
         "spu_pk": spu_pk,
         "spu_id": spu_id,
-        "window": {"w_start": w_start.isoformat() if w_start else None,
-                   "w_end": w_end.isoformat() if w_end else None},
+        "window": {
+            "w_start": w_start.isoformat() if w_start else None,
+            "w_end": w_end.isoformat() if w_end else None,
+        },
         "orders": orders,
         "meta": {
             "orders_truncated": truncated,
@@ -1221,18 +1312,31 @@ def _detail_orders(sess: Session, spu_pk: int, w_start: date | None, w_end: date
     }
 
 
-def _detail_settlements(sess: Session, spu_pk: int, w_start: date | None, w_end: date | None) -> dict:
+def _detail_settlements(
+    sess: Session, spu_pk: int, w_start: date | None, w_end: date | None
+) -> dict:
     ws_dt, we_dt = _window_dates(w_start, w_end)
-    rows = sess.execute(
-        _SQL_DETAIL_SETTLEMENTS,
-        {"spu_pk": spu_pk},
-    ).mappings().all()
+    rows = (
+        sess.execute(
+            _SQL_DETAIL_SETTLEMENTS,
+            {"spu_pk": spu_pk},
+        )
+        .mappings()
+        .all()
+    )
     # 窗口过滤（按 statement_time；客户端期望窗口裁剪与主表同语义）
     if ws_dt or we_dt:
         rows = [
-            r for r in rows
-            if (ws_dt is None or (r["statement_time"] is not None and r["statement_time"] >= ws_dt))
-            and (we_dt is None or (r["statement_time"] is not None and r["statement_time"] < we_dt))
+            r
+            for r in rows
+            if (
+                ws_dt is None
+                or (r["statement_time"] is not None and r["statement_time"] >= ws_dt)
+            )
+            and (
+                we_dt is None
+                or (r["statement_time"] is not None and r["statement_time"] < we_dt)
+            )
         ]
     fx_cny_usd, fx_usd_vnd, _, _ = _resolve_fx_rates(sess)
     settlements: list[dict] = []
@@ -1240,15 +1344,19 @@ def _detail_settlements(sess: Session, spu_pk: int, w_start: date | None, w_end:
         order_pk = int(r["order_pk"])
         # share_ratio（SPU 行占整单 GMV 比例）
         order_gmv_row = sess.execute(
-            text("SELECT coalesce(sum(quantity * unit_price), 0) AS g "
-                 "FROM commerce.sales_order_lines WHERE order_pk = :op"),
+            text(
+                "SELECT coalesce(sum(quantity * unit_price), 0) AS g "
+                "FROM commerce.sales_order_lines WHERE order_pk = :op"
+            ),
             {"op": order_pk},
         ).scalar()
         order_gmv_vnd = Decimal(order_gmv_row or 0)
         # 该 SPU 行 GMV
         spu_line_gmv_row = sess.execute(
-            text("SELECT coalesce(sum(quantity * unit_price), 0) AS g "
-                 "FROM commerce.sales_order_lines WHERE order_pk = :op AND spu_pk = :sp"),
+            text(
+                "SELECT coalesce(sum(quantity * unit_price), 0) AS g "
+                "FROM commerce.sales_order_lines WHERE order_pk = :op AND spu_pk = :sp"
+            ),
             {"op": order_pk, "sp": spu_pk},
         ).scalar()
         spu_line_gmv_vnd = Decimal(spu_line_gmv_row or 0)
@@ -1257,9 +1365,11 @@ def _detail_settlements(sess: Session, spu_pk: int, w_start: date | None, w_end:
             share_ratio = (spu_line_gmv_vnd / order_gmv_vnd).quantize(
                 Decimal("0.0001"), rounding=ROUND_HALF_UP
             )
-        comps = sess.execute(
-            _SQL_DETAIL_SETTLE_COMPONENTS, {"txn_pk": int(r["txn_pk"])}
-        ).mappings().all()
+        comps = (
+            sess.execute(_SQL_DETAIL_SETTLE_COMPONENTS, {"txn_pk": int(r["txn_pk"])})
+            .mappings()
+            .all()
+        )
         components = [
             {
                 "code": c["component_code"],
@@ -1290,18 +1400,24 @@ def _detail_settlements(sess: Session, spu_pk: int, w_start: date | None, w_end:
     }
 
 
-def _detail_cases(sess: Session, spu_pk: int, w_start: date | None, w_end: date | None) -> dict:
+def _detail_cases(
+    sess: Session, spu_pk: int, w_start: date | None, w_end: date | None
+) -> dict:
     ws_dt, we_dt = _window_dates(w_start, w_end)
-    rows = sess.execute(
-        _SQL_DETAIL_CASES,
-        {
-            "spu_pk": spu_pk,
-            "st0": _CASE_COMPLETED_STATUSES[0],
-            "st1": _CASE_COMPLETED_STATUSES[1],
-            "ws": ws_dt,
-            "we": we_dt,
-        },
-    ).mappings().all()
+    rows = (
+        sess.execute(
+            _SQL_DETAIL_CASES,
+            {
+                "spu_pk": spu_pk,
+                "st0": _CASE_COMPLETED_STATUSES[0],
+                "st1": _CASE_COMPLETED_STATUSES[1],
+                "ws": ws_dt,
+                "we": we_dt,
+            },
+        )
+        .mappings()
+        .all()
+    )
     fx_cny_usd, fx_usd_vnd, _, _ = _resolve_fx_rates(sess)
     cases: list[dict] = []
     for r in rows:
@@ -1323,7 +1439,9 @@ def _detail_cases(sess: Session, spu_pk: int, w_start: date | None, w_end: date 
                     else None
                 ),
                 "updated_at": (
-                    r["updated_at_source"].isoformat() if r["updated_at_source"] else None
+                    r["updated_at_source"].isoformat()
+                    if r["updated_at_source"]
+                    else None
                 ),
             }
         )

@@ -1,5 +1,34 @@
 # tts-erp CHANGELOG
 
+## 2026-09-07 (refactor) — pages/spu-roi v7 重构（rubric v8 / D1-D8 全拍板）
+
+设计稿 `tech-doc/analytics/spu-roi-v7-refactor.md` 落地。生产库实测 v8 新基线：
+净利 −$911.23 / 盈利 14 SPU / 全损 127 件（rubric v7 旧 -$2,266.87 / 盈利 25 SPU 失效）。
+
+- **D3 后端模块抽取**：`tts_erp_v2/analytics/spu_roi.py` 新建（1,464 行），含常量、9 条
+  SQL、`_query_spu_roi`、成本链、`_resolve_fx_rates`、4 个钻取端点 handler；
+  `api/v2/analytics.py` ROI 段全删，瘦身 892 行，仅 re-export。
+- **D2 数据层零值落库**（先行 lane：feat/settlement-zero-components）：
+  `_write_components` 删 amount==0 跳过；历史回填 2,339 行；「有交易必有
+  SETTLEMENT 行」实测成立（605/605）。
+- **D1 成本链 4 层**：MANUAL → PURCHASE → SOURCE_PRICE → DEFAULT_K1=40 CNY
+  （D1 拍板：原 30→40）；`cost_source` 枚举扩四值。
+- **D4 M13b 切 38301 全损口径**：`return_loss = full_loss_qty × cost`（含已出海
+  取消件），不再用完结退货件数口径。
+- **D5 已结/未结分层**：已结算按 SETTLEMENT 实到账分摊，未结算按
+  `gmv × (1−0.308) × (1−SPU退款率)` 估算；M19 缩为信息列。
+- **D6 钻取端点懒加载**：每 tab 一端点（orders/settlements/cases/ads），主表
+  筛选变化清缓存。
+- **D7 行内 accordion 钻取面板**：5 tab（利润构成/订单·物流/结算/售后/广告）。
+- **D8 主表精简 6 列**：广告消耗 / 有效GMV / 有效出单量 / 取消率 / 全损退款率% /
+  净利润；⚙ 列开关组全部取消；红绿判据简化为亏损=红字。
+- **API 契约新增 7 字段**：`net_revenue / settled_sales / unsettled_sales /
+  settled_order_count / full_loss_qty / full_loss_cancelled_qty / full_loss_rate`。
+- **文档同步**：rubric 升 v8；dashboard §5.2/§5.3、external-api.md spu-roi 段升 v8。
+- **测试**：`tests/api/test_spu_roi_api.py` 33 个测试通过；新增 4 个钻取端点测试。
+- **结余带别名**：原"全损退款" → "全损货损\$"（金额口径），主列同名指标改为
+  "全损退款率%"（件数率口径）。
+
 ## 2026-09-07 (feature) — analytics 区间聚合同步（protocol v3, Design A）
 
 服务端落地 `tech-doc/analytics/range-aggregate-history-sync.md`（与 Chrome 扩展
