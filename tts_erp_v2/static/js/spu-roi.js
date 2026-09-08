@@ -508,48 +508,88 @@
     var cogsFlc = flc * unitCost;
     var spend = Number(it.spend || 0);
     var np = Number(it.net_profit || 0);
-    function row(label, val, klass, hint) {
-      var hintEl = hint
+
+    // 瀑布分层结构(<div>,不用 <table>):加项 / 减项 / 结果三段式,
+    // 与设计稿 §6.2 「P&L 分解瀑布」对齐;其余 4 tab 是行级列表保留 <table>。
+    function hintSpan(hint) {
+      return hint
         ? el("span", { class: "op-hint", "data-tip": hint }, "?")
         : null;
-      var attrs = {};
-      if (klass) attrs["class"] = klass;
+    }
+    function row(label, val, sign, hint) {
+      // sign = "add" | "sub" | "result" —— 控制前缀 +/-/= 颜色。
+      var signChar = sign === "sub" ? "−" : sign === "result" ? "=" : "+";
+      var klass = "op-pnl-row op-pnl-" + sign;
       return el(
-        "tr",
-        attrs,
-        el("td", null, label, " ", hintEl),
-        el("td", null, fmtMoney(val)),
+        "div",
+        { class: klass },
+        el(
+          "span",
+          { class: "op-pnl-row-label" },
+          label,
+          " ",
+          hintSpan(hint),
+        ),
+        el(
+          "span",
+          { class: "op-pnl-row-val" },
+          el("span", { class: "op-pnl-sign" }, signChar + " "),
+          fmtMoney(val),
+        ),
       );
     }
-    var rows = [
+    function layer(title, rows) {
+      return el(
+        "div",
+        { class: "op-pnl-layer" },
+        el("div", { class: "op-pnl-layer-title" }, title),
+        el("div", { class: "op-pnl-rows" }, rows),
+      );
+    }
+
+    var layerRev = layer("净收入", [
       row(
-        "净收入·已结算(SETTLEMENT 分摊)",
+        "已结算(SETTLEMENT 分摊)",
         settledNet,
-        null,
+        "add",
         "v7 D2 零值落库后,有交易必有 SETTLEMENT 行;amount=0 即已结算到手 0",
       ),
       row(
-        "净收入·未结算(×(1−r̂)×(1−退货率))",
+        "未结算(×(1−r̂)×(1−退货率))",
         unsettledNet,
-        null,
+        "add",
         "v7 D5:未结算按基线 30.8% × (1−本 SPU 退款率) 估算",
       ),
-      row("− 货本·售出件", -cogsSold),
+    ]);
+    var layerCogs = layer("货本", [
+      row("售出件", -cogsSold, "sub"),
       row(
-        "− 货本·全损取消件(D4 B 补扣)",
+        "全损取消件(D4 B 补扣)",
         -cogsFlc,
-        null,
+        "sub",
         "D4 B 切 38301 全损口径:M13b = full_loss_qty × cost,含已出海取消件",
       ),
-      row("− 广告消耗", -spend),
+    ]);
+    var layerAd = layer("广告", [row("消耗", -spend, "sub")]);
+    var layerResult = el(
+      "div",
+      { class: "op-pnl-layer op-pnl-layer-result" },
       row(
-        "= 净利润",
+        "净利润",
         np,
-        np < 0 ? "np-red" : "np-positive",
+        np < 0 ? "result op-pnl-row-neg" : "result op-pnl-row-pos",
         "M18 红绿仅按净利判(C3 拍板);负值红字",
       ),
-    ];
-    return el("table", { class: "op-pnl-table" }, el("tbody", null, rows));
+    );
+
+    return el(
+      "div",
+      { class: "op-pnl" },
+      layerRev,
+      layerCogs,
+      layerAd,
+      layerResult,
+    );
   }
   function renderDrillTabBody(tab, data) {
     function loading(msg) {
@@ -575,7 +615,7 @@
       });
       return el(
         "table",
-        { class: "op-pnl-table" },
+        { class: "op-tab-table" },
         el(
           "thead",
           null,
@@ -608,7 +648,7 @@
       );
       return el(
         "table",
-        { class: "op-pnl-table" },
+        { class: "op-tab-table" },
         el(
           "thead",
           null,
@@ -642,7 +682,7 @@
       );
       return el(
         "table",
-        { class: "op-pnl-table" },
+        { class: "op-tab-table" },
         el(
           "thead",
           null,
@@ -674,7 +714,7 @@
       );
       return el(
         "table",
-        { class: "op-pnl-table" },
+        { class: "op-tab-table" },
         el(
           "thead",
           null,
