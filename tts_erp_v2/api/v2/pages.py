@@ -1289,7 +1289,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
         <thead>
           <tr>
             <th scope="col" class="op-th op-th-left" width="140">商品</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="ad_count" data-tip="关联广告数 = 该 SPU 命中的广告计划数(count(DISTINCT campaign_id));广告视图全窗口累计,不受日期裁剪" width="60">关联广告数</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="ad_count" data-tip="关联广告数 = 该 SPU 命中的广告计划数(count(DISTINCT campaign_id));广告视图全窗口累计,不受日期裁剪" width="80">关联广告数</th>
             <th scope="col" class="op-th op-th-sort" data-sort="spend" data-tip="广告消耗（USD，广告窗口全量累计；作为减项计入净利润）" width="200">广告消耗</th>
             <th scope="col" class="op-th op-th-sort" data-sort="sales" data-tip="有效GMV = 白名单状态订单行金额（USD；排除已取消订单，B1 拍板）" width="200">有效GMV</th>
             <th scope="col" class="op-th op-th-sort" data-sort="order_count" data-tip="有效出单量 = 白名单有效订单数（distinct）" width="160">有效出单量</th>
