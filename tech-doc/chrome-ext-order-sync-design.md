@@ -114,6 +114,7 @@ CREATE TABLE chrome_sync.raw_log (
 );
 
 COMMENT ON TABLE chrome_sync.raw_log IS 'Chrome 扩展同步流水日志。每条 dump 请求一行，只追加不修改，存完整原始响应，用于审计和数据回溯。';
+COMMENT ON COLUMN chrome_sync.raw_log.id IS '自增主键';
 COMMENT ON COLUMN chrome_sync.raw_log.domain IS '同步域：orders=订单, logistics=物流, statements=结算';
 COMMENT ON COLUMN chrome_sync.raw_log.shop_id IS 'TikTok 外部店铺 ID';
 COMMENT ON COLUMN chrome_sync.raw_log.endpoint IS 'TikTok API 路径，如 /api/fulfillment/order/list';
@@ -171,6 +172,7 @@ CREATE INDEX ix_orders_shop ON chrome_sync.orders(shop_id);
 CREATE INDEX ix_orders_status ON chrome_sync.orders(status);
 
 COMMENT ON TABLE chrome_sync.orders IS 'Chrome 扩展同步的 TikTok 订单头，来自 order/list 响应';
+COMMENT ON COLUMN chrome_sync.orders.id IS '自增主键';
 COMMENT ON COLUMN chrome_sync.orders.shop_id IS 'TikTok 外部店铺 ID';
 COMMENT ON COLUMN chrome_sync.orders.order_id IS 'TikTok main_order_id';
 COMMENT ON COLUMN chrome_sync.orders.status IS '订单状态，如 DELIVERED/CANCELLED/IN_TRANSIT';
@@ -184,6 +186,9 @@ COMMENT ON COLUMN chrome_sync.orders.delivered_at IS '签收时间';
 COMMENT ON COLUMN chrome_sync.orders.cancelled_at IS '取消时间；0 或缺失为 NULL';
 COMMENT ON COLUMN chrome_sync.orders.raw_response IS 'TikTok order/list 完整原始响应（可选，溯源用）';
 COMMENT ON COLUMN chrome_sync.orders.captured_at IS '插件在 TikTok 页面抓取响应的时间';
+COMMENT ON COLUMN chrome_sync.orders.currency IS '订单币种，ISO 4217';
+COMMENT ON COLUMN chrome_sync.orders.synced_at IS '数据入库时间';
+COMMENT ON COLUMN chrome_sync.orders.updated_at IS '最后更新时间';
 ```
 
 #### `chrome_sync.order_lines` — 订单行
@@ -210,11 +215,21 @@ CREATE TABLE chrome_sync.order_lines (
 );
 
 COMMENT ON TABLE chrome_sync.order_lines IS 'Chrome 扩展同步的 TikTok 订单行（SKU 级），来自 order/list 的 sku_module/fulfill_line_module';
+COMMENT ON COLUMN chrome_sync.order_lines.id IS '自增主键';
+COMMENT ON COLUMN chrome_sync.order_lines.product_name IS '商品名称快照';
+COMMENT ON COLUMN chrome_sync.order_lines.variant_name IS 'SKU 名称快照';
+COMMENT ON COLUMN chrome_sync.order_lines.image_url IS 'SKU 图片 URL 快照';
+COMMENT ON COLUMN chrome_sync.order_lines.seller_sku IS '卖家自定义 SKU 编码';
+COMMENT ON COLUMN chrome_sync.order_lines.line_status IS '行状态，如 DELIVERED/CANCELLED';
 COMMENT ON COLUMN chrome_sync.order_lines.line_id IS '行标识，取 sku_id，同订单内唯一';
 COMMENT ON COLUMN chrome_sync.order_lines.product_id IS 'TikTok product_id';
 COMMENT ON COLUMN chrome_sync.order_lines.sku_id IS 'TikTok sku_id';
 COMMENT ON COLUMN chrome_sync.order_lines.quantity IS '购买数量';
 COMMENT ON COLUMN chrome_sync.order_lines.unit_price IS 'SKU 单价（sale_price.amount）';
+COMMENT ON COLUMN chrome_sync.order_lines.shop_id IS 'TikTok 外部店铺 ID';
+COMMENT ON COLUMN chrome_sync.order_lines.order_id IS '关联 chrome_sync.orders.order_id';
+COMMENT ON COLUMN chrome_sync.order_lines.currency IS 'SKU 币种，ISO 4217';
+COMMENT ON COLUMN chrome_sync.order_lines.updated_at IS '最后更新时间';
 ```
 
 #### `chrome_sync.shipments` — 物流包裹
@@ -242,6 +257,8 @@ CREATE INDEX ix_shipments_order ON chrome_sync.shipments(shop_id, order_id);
 CREATE INDEX ix_shipments_captured ON chrome_sync.shipments(captured_at);
 
 COMMENT ON TABLE chrome_sync.shipments IS 'Chrome 扩展同步的 TikTok 物流包裹，来自 logistic_detail/list 的 package_list[]';
+COMMENT ON COLUMN chrome_sync.shipments.id IS '自增主键';
+COMMENT ON COLUMN chrome_sync.shipments.shop_id IS 'TikTok 外部店铺 ID';
 COMMENT ON COLUMN chrome_sync.shipments.package_id IS 'TikTok package_id';
 COMMENT ON COLUMN chrome_sync.shipments.tracking_number IS '运单号（tracking_no）';
 COMMENT ON COLUMN chrome_sync.shipments.carrier_name IS '物流服务商（logistic_supplier）';
@@ -249,6 +266,10 @@ COMMENT ON COLUMN chrome_sync.shipments.status IS '最新轨迹状态（track_li
 COMMENT ON COLUMN chrome_sync.shipments.shipped_at IS '发货时间（首条轨迹时间）';
 COMMENT ON COLUMN chrome_sync.shipments.delivered_at IS '签收时间（仅 status 含 delivered 时填入）';
 COMMENT ON COLUMN chrome_sync.shipments.captured_at IS '插件抓取时间，用于保鲜判断';
+COMMENT ON COLUMN chrome_sync.shipments.order_id IS '关联 chrome_sync.orders.order_id';
+COMMENT ON COLUMN chrome_sync.shipments.raw_response IS 'TikTok logistic_detail/list 完整原始响应';
+COMMENT ON COLUMN chrome_sync.shipments.synced_at IS '数据入库时间';
+COMMENT ON COLUMN chrome_sync.shipments.updated_at IS '最后更新时间';
 ```
 
 #### `chrome_sync.tracking_events` — 物流轨迹
@@ -268,9 +289,14 @@ CREATE TABLE chrome_sync.tracking_events (
 );
 
 COMMENT ON TABLE chrome_sync.tracking_events IS 'Chrome 扩展同步的物流轨迹事件，来自 logistic_detail/list 的 track_list[]';
+COMMENT ON COLUMN chrome_sync.tracking_events.id IS '自增主键';
+COMMENT ON COLUMN chrome_sync.tracking_events.shop_id IS 'TikTok 外部店铺 ID';
+COMMENT ON COLUMN chrome_sync.tracking_events.package_id IS '关联 chrome_sync.shipments.package_id';
 COMMENT ON COLUMN chrome_sync.tracking_events.event_key IS '合成唯一键，如 {package_id}_{index}';
 COMMENT ON COLUMN chrome_sync.tracking_events.event_at IS '轨迹发生时间';
 COMMENT ON COLUMN chrome_sync.tracking_events.description IS '轨迹描述原文（track_status）';
+COMMENT ON COLUMN chrome_sync.tracking_events.location IS '轨迹地点';
+COMMENT ON COLUMN chrome_sync.tracking_events.updated_at IS '最后更新时间';
 ```
 
 #### `chrome_sync.settlements` — 结算单
@@ -305,12 +331,27 @@ CREATE TABLE chrome_sync.settlements (
 CREATE INDEX ix_settlements_shop ON chrome_sync.settlements(shop_id);
 
 COMMENT ON TABLE chrome_sync.settlements IS 'Chrome 扩展同步的 TikTok 结算单头，来自 statement/list/detail';
+COMMENT ON COLUMN chrome_sync.settlements.id IS '自增主键';
+COMMENT ON COLUMN chrome_sync.settlements.shop_id IS 'TikTok 外部店铺 ID';
+COMMENT ON COLUMN chrome_sync.settlements.captured_at IS '插件在 TikTok 页面抓取响应的时间';
 COMMENT ON COLUMN chrome_sync.settlements.statement_id IS 'TikTok statement_id';
 COMMENT ON COLUMN chrome_sync.settlements.statement_version IS '结算版本号';
 COMMENT ON COLUMN chrome_sync.settlements.bill_period IS '账期原始文本，如 2026-09-01~2026-09-07';
 COMMENT ON COLUMN chrome_sync.settlements.settle_amount IS '结算金额';
 COMMENT ON COLUMN chrome_sync.settlements.payable_amount IS '应付金额';
 COMMENT ON COLUMN chrome_sync.settlements.payment_id IS 'TikTok payment_id，关联打款';
+COMMENT ON COLUMN chrome_sync.settlements.period_start IS '账期起始日（从 bill_period 解析）';
+COMMENT ON COLUMN chrome_sync.settlements.period_end IS '账期结束日（从 bill_period 解析）';
+COMMENT ON COLUMN chrome_sync.settlements.settlement_time IS '结算时间';
+COMMENT ON COLUMN chrome_sync.settlements.payment_status IS '打款状态：1=PENDING, 2=PAID, 3=FAILED';
+COMMENT ON COLUMN chrome_sync.settlements.earning_amount IS '收入金额';
+COMMENT ON COLUMN chrome_sync.settlements.fee_amount IS '费用金额';
+COMMENT ON COLUMN chrome_sync.settlements.adjust_amount IS '调整金额';
+COMMENT ON COLUMN chrome_sync.settlements.shipping_amount IS '运费金额';
+COMMENT ON COLUMN chrome_sync.settlements.currency IS '币种，ISO 4217';
+COMMENT ON COLUMN chrome_sync.settlements.raw_response IS 'TikTok statement/list/detail 完整原始响应';
+COMMENT ON COLUMN chrome_sync.settlements.synced_at IS '数据入库时间';
+COMMENT ON COLUMN chrome_sync.settlements.updated_at IS '最后更新时间';
 ```
 
 #### `chrome_sync.settlement_details` — SKU 级结算明细 + 费用拆分
@@ -345,9 +386,27 @@ CREATE TABLE chrome_sync.settlement_details (
 CREATE INDEX ix_settlement_details_stmt ON chrome_sync.settlement_details(shop_id, statement_id);
 
 COMMENT ON TABLE chrome_sync.settlement_details IS 'Chrome 扩展同步的 SKU 级结算明细 + 费用拆分，来自 statement/transaction/detail';
+COMMENT ON COLUMN chrome_sync.settlement_details.id IS '自增主键';
+COMMENT ON COLUMN chrome_sync.settlement_details.shop_id IS 'TikTok 外部店铺 ID';
+COMMENT ON COLUMN chrome_sync.settlement_details.quantity IS '购买数量';
+COMMENT ON COLUMN chrome_sync.settlement_details.captured_at IS '插件在 TikTok 页面抓取响应的时间';
 COMMENT ON COLUMN chrome_sync.settlement_details.sku_detail_id IS 'TikTok statement_sku_detail_id，唯一标识一笔 SKU 级结算';
 COMMENT ON COLUMN chrome_sync.settlement_details.trade_order_id IS 'TikTok trade_order_id，与 main_order_id 映射关系待验证';
 COMMENT ON COLUMN chrome_sync.settlement_details.fee_components IS '递归展开后的扁平费用列表 [{code, amount, currency}]';
+COMMENT ON COLUMN chrome_sync.settlement_details.statement_id IS '关联 chrome_sync.settlements.statement_id';
+COMMENT ON COLUMN chrome_sync.settlement_details.statement_version IS '关联 chrome_sync.settlements.statement_version';
+COMMENT ON COLUMN chrome_sync.settlement_details.sku_id IS 'TikTok sku_id';
+COMMENT ON COLUMN chrome_sync.settlement_details.product_name IS '商品名称';
+COMMENT ON COLUMN chrome_sync.settlement_details.sku_name IS 'SKU 名称';
+COMMENT ON COLUMN chrome_sync.settlement_details.settlement_status IS '结算状态';
+COMMENT ON COLUMN chrome_sync.settlement_details.placed_time IS '下单时间';
+COMMENT ON COLUMN chrome_sync.settlement_details.settlement_amount IS '结算金额';
+COMMENT ON COLUMN chrome_sync.settlement_details.earning_amount IS '收入金额';
+COMMENT ON COLUMN chrome_sync.settlement_details.fees_amount IS '费用总金额';
+COMMENT ON COLUMN chrome_sync.settlement_details.currency IS '币种，ISO 4217';
+COMMENT ON COLUMN chrome_sync.settlement_details.raw_response IS 'TikTok statement/transaction/detail 完整原始响应';
+COMMENT ON COLUMN chrome_sync.settlement_details.synced_at IS '数据入库时间';
+COMMENT ON COLUMN chrome_sync.settlement_details.updated_at IS '最后更新时间';
 ```
 
 ### 3.4 表设计决策
