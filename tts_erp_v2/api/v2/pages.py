@@ -1107,7 +1107,9 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
        默认样式渲染为裸 HTML(table/div 裸外观),是「利润构成 tab 都出
        表格」误读的来源之一。利润构成用瀑布 <div> 分层(2026-09-07
        设计稿 §6.2「P&L 分解瀑布」),其他 4 tab 是行级 <table>。 */
-    .op-drill-row > td { padding: 0 !important; background: var(--paper-soft, var(--paper)); }
+    /* 钻取面板:外层 tr/td 也必须恢复 table 布局,否则嵌套的 .op-tab-table 无法对齐 */
+    .op-drill-row { display: table-row !important; }
+    .op-drill-row > td { display: table-cell !important; padding: 0 !important; background: var(--paper-soft, var(--paper)); }
     .op-drill { padding: 14px 18px 18px; border-top: 1px solid var(--rule-soft); }
     .op-drill-tabs {
       display: flex; flex-wrap: wrap; gap: 0;
