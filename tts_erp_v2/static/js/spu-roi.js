@@ -256,19 +256,14 @@
         ? ""
         : `<span class="spu-status is-down">${esc(it.status)}</span>`;
     var profitClass = npNeg ? ' class="np-red"' : "";
-    var adCell =
-      it.ad_count === 0 || it.ad_count == null
-        ? '<span class="no-ad" data-tip="该 SPU 无广告投放">无投放</span>'
-        : fmtInt(it.ad_count);
     var fmtPctOrDash = (v) =>
       v === null || v === undefined || v === "" ? "—" : fmtPct(v);
-    // D8 6 列: 商品 / 广告消耗 / 有效GMV / 有效出单量 / 取消率 / 全损退款率% / 净利润
+    // D8 6 指标列(§5): 广告消耗 / 有效GMV / 有效出单量 / 取消率 / 全损退款率% / 净利润
     return (
       `<tr class="${isBad ? "row-bad" : ""}" data-spupk="${esc(it.spu_pk)}">` +
       `<td class="td-left"><span class="td-spu-cell">${img}<span class="td-spu-meta">` +
       `<span class="td-spu">${esc(it.spu_id)}</span>` +
       `<span class="td-title" data-tip="${esc(it.title || "")}">${warnUnsettled}${warnDefault ? warn : ""}${warnRr}${esc(it.title || "")}${status}</span></span></span></td>` +
-      `<td>${adCell}</td>` +
       `<td>${fmtMoney(it.spend)}</td>` +
       `<td>${fmtMoney(it.sales)}</td>` +
       `<td>${fmtInt(it.order_count)}</td>` +
@@ -282,7 +277,7 @@
   function renderError(msg) {
     html(
       $("#rows"),
-      `<tr><td colspan="25" class="op-error">${esc(msg)} · <a href="#" id="retry-link">重试</a></td></tr>`,
+      `<tr><td colspan="7" class="op-error">${esc(msg)} · <a href="#" id="retry-link">重试</a></td></tr>`,
     );
     var link = $("#retry-link");
     if (link) {
@@ -296,7 +291,7 @@
   function renderEmpty() {
     html(
       $("#rows"),
-      '<tr><td colspan="25" class="op-empty">没有匹配该 spu_id 的 SPU（试试完整 ID）</td></tr>',
+      '<tr><td colspan="7" class="op-empty">没有匹配该 spu_id 的 SPU（试试完整 ID）</td></tr>',
     );
   }
 
@@ -528,13 +523,9 @@
     );
   }
   function renderProfitTab(it) {
-    var settled = Number(it.settled_sales || 0);
-    var unsettled = Number(it.unsettled_sales || 0);
+    // B1 fix: 用后端暴露的 settled_net(SETTLEMENT 净额),不用 gross settled_sales 比例拆
+    var settledNet = Number(it.settled_net || 0);
     var netRevenue = Number(it.net_revenue || 0);
-    var settledNet =
-      settled + unsettled > 0
-        ? (settled / (settled + unsettled)) * netRevenue
-        : netRevenue;
     var unsettledNet = netRevenue - settledNet;
     var flc = Number(it.full_loss_cancelled_qty || 0);
     var unitCost = Number(it.unit_cost_used || 0);
@@ -899,7 +890,7 @@
     state.loading = true;
     html(
       $("#rows"),
-      '<tr><td colspan="25" class="op-loading">加载中…</td></tr>',
+      '<tr><td colspan="7" class="op-loading">加载中…</td></tr>',
     );
     var feeParam = null;
     if (state.feeRate !== null && state.feeRate !== "") {

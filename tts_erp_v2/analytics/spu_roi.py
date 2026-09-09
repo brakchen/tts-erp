@@ -951,6 +951,7 @@ def _query_spu_roi(
                 "cost_source": cost_source,
                 # v7 新增字段（§4）
                 "net_revenue": net_revenue_usd,
+                "settled_net": settled_net_usd,
                 "settled_sales": settled_sales_usd,
                 "unsettled_sales": unsettled_sales_usd,
                 "settled_order_count": settled_order_count,
