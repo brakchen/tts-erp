@@ -397,6 +397,9 @@
       // api() 用 state.wStart || null 发请求,导致 w_start/w_end 参数不传、过滤不生效)
       state.wStart = cw.coverage_first_day;
       state.wEnd = cw.coverage_last_day;
+      // 首次 load() 是在 state 同步前发的(无日期参数,全历史);
+      // 现在 state 有了,重发一次让过滤生效(不重发用户点刷新才能看到过滤结果)
+      load();
     }
 
     // D8(2026-09-07):⚙ 列开关组全删,applyColToggles 不再调用
