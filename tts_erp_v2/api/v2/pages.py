@@ -1210,12 +1210,14 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     /* ---------- 4 个行级列表 tab(orders/settlements/cases/ads) ---------- */
     .op-tab-table {
       width: 100%; border-collapse: collapse; font-size: 12px;
-      font-variant-numeric: tabular-nums;
+      font-variant-numeric: tabular-nums; table-layout: fixed;
     }
     .op-tab-table th, .op-tab-table td {
       padding: 10px 14px; border-bottom: 1px solid var(--rule-soft);
       text-align: left; vertical-align: middle;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
+    .op-tab-table td:first-child { white-space: normal; word-break: break-all; }
     .op-tab-table th {
       font-size: 11px; font-weight: 600; color: var(--muted);
       letter-spacing: .04em; text-transform: uppercase;
