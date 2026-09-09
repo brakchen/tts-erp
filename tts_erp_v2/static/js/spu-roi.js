@@ -464,6 +464,12 @@
       state.openDrillRow = null;
     }
   }
+  // hintSpan: 钻取面板各 tab 共用的 hint 标记（? 图标 + data-tip 气泡）
+  function hintSpan(hint) {
+    return hint
+      ? el("span", { class: "op-hint", "data-tip": hint }, "?")
+      : null;
+  }
   function renderProfitSummary(it) {
     function m(v) {
       return v == null || v === "" ? "—" : fmtMoney(v);
@@ -534,11 +540,6 @@
 
     // 瀑布分层结构(<div>,不用 <table>):加项 / 减项 / 结果三段式,
     // 与设计稿 §6.2 「P&L 分解瀑布」对齐;其余 4 tab 是行级列表保留 <table>。
-    function hintSpan(hint) {
-      return hint
-        ? el("span", { class: "op-hint", "data-tip": hint }, "?")
-        : null;
-    }
     function row(label, val, sign, hint) {
       // sign = "add" | "sub" | "result" —— 控制前缀 +/-/= 颜色。
       var signChar = sign === "sub" ? "−" : sign === "result" ? "=" : "+";
