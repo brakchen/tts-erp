@@ -1208,6 +1208,12 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     .op-pnl-row-pos .op-pnl-row-val { color: var(--ok, #2d6a4f); }
 
     /* ---------- 4 个行级列表 tab(orders/settlements/cases/ads) ---------- */
+    /* 覆盖外层 .op-table td { display:block } 布局——钻取面板嵌套在主表 td 内,
+       若不覆盖,面板内所有 td/tr/tbody 都被强制 block,列无法对齐 */
+    .op-tab-table,
+    .op-tab-table thead, .op-tab-table tbody,
+    .op-tab-table tr { display: revert; }
+    .op-tab-table th, .op-tab-table td { display: table-cell; width: auto; }
     .op-tab-table {
       width: 100%; border-collapse: collapse; font-size: 12px;
       font-variant-numeric: tabular-nums; table-layout: fixed;
@@ -1215,9 +1221,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     .op-tab-table th, .op-tab-table td {
       padding: 10px 14px; border-bottom: 1px solid var(--rule-soft);
       text-align: left; vertical-align: middle;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .op-tab-table td:first-child { white-space: normal; word-break: break-all; }
     .op-tab-table th {
       font-size: 11px; font-weight: 600; color: var(--muted);
       letter-spacing: .04em; text-transform: uppercase;
