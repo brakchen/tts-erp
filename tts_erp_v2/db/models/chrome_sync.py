@@ -82,8 +82,14 @@ class ChromeOrder(Base):
         {"schema": "chrome_sync"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, server_default=text("generate_always_as_identity()"))
-    log_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chrome_sync.raw_log.id"), nullable=False)
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    log_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("chrome_sync.raw_log.id"), nullable=False
+    )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     order_id: Mapped[str] = mapped_column(Text, nullable=False)
     main_order_status: Mapped[int | None] = mapped_column(Integer)
@@ -100,8 +106,12 @@ class ChromeOrder(Base):
     latest_rts_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     latest_tts_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     buyer_nickname: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
 
 
 # ── order_lines ─────────────────────────────────────────────────────
@@ -109,12 +119,20 @@ class ChromeOrder(Base):
 class ChromeOrderLine(Base):
     __tablename__ = "order_lines"
     __table_args__ = (
-        UniqueConstraint("shop_id", "order_id", "sku_id", name="uq_order_lines_order_sku"),
+        UniqueConstraint(
+            "shop_id", "order_id", "sku_id", name="uq_order_lines_order_sku"
+        ),
         {"schema": "chrome_sync"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, server_default=text("generate_always_as_identity()"))
-    log_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chrome_sync.raw_log.id"), nullable=False)
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    log_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("chrome_sync.raw_log.id"), nullable=False
+    )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     order_id: Mapped[str] = mapped_column(Text, nullable=False)
     sku_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -128,8 +146,12 @@ class ChromeOrderLine(Base):
     currency: Mapped[str | None] = mapped_column(Text)
     main_order_status: Mapped[int | None] = mapped_column(Integer)
     sku_display_status: Mapped[int | None] = mapped_column(Integer)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
 
 
 # ── shipments ───────────────────────────────────────────────────────
@@ -137,9 +159,7 @@ class ChromeOrderLine(Base):
 class ChromeShipment(Base):
     __tablename__ = "shipments"
     __table_args__ = (
-        UniqueConstraint(
-            "shop_id", "package_id", name="uq_shipments_shop_pkg"
-        ),
+        UniqueConstraint("shop_id", "package_id", name="uq_shipments_shop_pkg"),
         Index("ix_shipments_order", "shop_id", "order_id"),
         {"schema": "chrome_sync"},
     )
@@ -241,9 +261,7 @@ class ChromeSettlement(Base):
     bill_period: Mapped[str | None] = mapped_column(Text)
     period_start: Mapped[date | None] = mapped_column(Date)
     period_end: Mapped[date | None] = mapped_column(Date)
-    settlement_time: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
+    settlement_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     settlement_id: Mapped[str | None] = mapped_column(Text)
     payment_id: Mapped[str | None] = mapped_column(Text)
     payment_status: Mapped[str | None] = mapped_column(Text)

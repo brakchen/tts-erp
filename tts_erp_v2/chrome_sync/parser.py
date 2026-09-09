@@ -152,7 +152,10 @@ def parse_order_response(
             line_sku_status = None
             if line_ids:
                 for osm_item in osm_list:
-                    if isinstance(osm_item, dict) and osm_item.get("order_line_id") == line_ids[0]:
+                    if (
+                        isinstance(osm_item, dict)
+                        and osm_item.get("order_line_id") == line_ids[0]
+                    ):
                         line_main_status = osm_item.get("main_order_status")
                         line_sku_status = osm_item.get("sku_display_status")
                         break
