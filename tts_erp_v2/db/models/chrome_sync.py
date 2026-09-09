@@ -78,37 +78,30 @@ class ChromeOrder(Base):
     __table_args__ = (
         UniqueConstraint("shop_id", "order_id", name="uq_orders_shop_order"),
         Index("ix_orders_shop", "shop_id"),
-        Index("ix_orders_status", "status"),
+        Index("ix_orders_status", "main_order_status"),
         {"schema": "chrome_sync"},
     )
 
-    id: Mapped[int] = mapped_column(
-        BigInteger,
-        primary_key=True,
-        server_default=text("generate_always_as_identity()"),
-    )
-    log_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("chrome_sync.raw_log.id"),
-        nullable=False,
-    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, server_default=text("generate_always_as_identity()"))
+    log_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chrome_sync.raw_log.id"), nullable=False)
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     order_id: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[str | None] = mapped_column(Text)
+    main_order_status: Mapped[int | None] = mapped_column(Integer)
+    sku_display_status: Mapped[int | None] = mapped_column(Integer)
     currency: Mapped[str | None] = mapped_column(Text)
     payment_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
     total_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    fulfillment_type: Mapped[int | None] = mapped_column(Integer)
+    pay_method: Mapped[str | None] = mapped_column(Text)
+    sale_region: Mapped[str | None] = mapped_column(Text)
+    shipping_fee: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
     order_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    shipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()")
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()")
-    )
+    update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    latest_rts_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    latest_tts_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    buyer_nickname: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
 
 # ── order_lines ─────────────────────────────────────────────────────
@@ -116,22 +109,12 @@ class ChromeOrder(Base):
 class ChromeOrderLine(Base):
     __tablename__ = "order_lines"
     __table_args__ = (
-        UniqueConstraint(
-            "shop_id", "order_id", "sku_id", name="uq_order_lines_order_sku"
-        ),
+        UniqueConstraint("shop_id", "order_id", "sku_id", name="uq_order_lines_order_sku"),
         {"schema": "chrome_sync"},
     )
 
-    id: Mapped[int] = mapped_column(
-        BigInteger,
-        primary_key=True,
-        server_default=text("generate_always_as_identity()"),
-    )
-    log_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("chrome_sync.raw_log.id"),
-        nullable=False,
-    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, server_default=text("generate_always_as_identity()"))
+    log_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chrome_sync.raw_log.id"), nullable=False)
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     order_id: Mapped[str] = mapped_column(Text, nullable=False)
     sku_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -139,17 +122,14 @@ class ChromeOrderLine(Base):
     product_name: Mapped[str | None] = mapped_column(Text)
     variant_name: Mapped[str | None] = mapped_column(Text)
     image_url: Mapped[str | None] = mapped_column(Text)
-    seller_sku: Mapped[str | None] = mapped_column(Text)
     quantity: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
     unit_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    total_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
     currency: Mapped[str | None] = mapped_column(Text)
-    line_status: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()")
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()")
-    )
+    main_order_status: Mapped[int | None] = mapped_column(Integer)
+    sku_display_status: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
 
 # ── shipments ───────────────────────────────────────────────────────

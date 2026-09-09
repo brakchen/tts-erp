@@ -56,7 +56,7 @@
 | C1 | 广告币种 | USD（D1，09-05） | 原生即 USD | 广告列 $ | — |
 | C2 | 销售口径 | **有效销售订单** = 排除 CANCELLED（D2/口径 B） | §4.1 白名单；M5/M6/M5b | 销售列只计有效单 | 与 profit_daily 同款白名单 |
 | C3 | 已付被取消单 | 不进销售；退款=信息列 | M9（不扣净额） | “已付被取消”信息列 | 避免重复扣 |
-| C4 | 退货口径 | **全损退货**：RETURN_AND_REFUND 已完结即全损（D4） | 件数 M11；金额 M8 | 退货列 + 货损列 | 实测 26/26 均妥投后退 |
+| C4 | 退货/取消口径 | **全损退货（v9）**：退货(RETURN_AND_REFUND/REFUND_ONLY)直接算全损；海外取消(CANCELLED + 物流已到海外 action_code=38301)也算全损；国内取消(物流未到海外) ≠ 全损 | 件数 M11 + M5d；金额 M8 | 退货列 + 货损列 | 退货 27 件 + 海外取消 133 件 = 全损 160 件；国内取消 182 件不计全损 |
 | C5 | 货物成本（单位成本解析） | **人工成本优先，未命中 → 默认 K1=40 CNY/件（D4）** ≈ $5.95/件 | ① `manual_product_costs` 有效行(valid_to IS NULL) → MANUAL；② 未命中 → DEFAULT_K1（§4.2） | 使用默认的行打 ⚠，可跳 manual-costs 补录 | 现网人工成本仅 2 行，绝大多数 SPU 本期走默认 |
 | C6 | 平台佣金/运费 | **不手工建模**（D3）；净现金权威口径 = 每笔订单结算净额 M16（落地后作 net_cash 的内部替代基础） | M16（待解析 job） | 净利润/保本按“未含平台费”口径并在页面标注，M16 落地后自动变准 | §9-3 |
 | C7 | 退货运费谁承担 | 结算明细 `return_shipping_fee_amount≠0`（09-05 探查，608 行→5 单，5/5=R&R） | 待解析 job 归属后作扣项 | 未来列 | 勿用 reason_code 猜 |
@@ -139,7 +139,7 @@
 | **净利润（毛利口径，页面金额核心列）** | M18 = 净现金收入(内部 M13) − 全部售出件货本 − 广告消耗 − **平台佣金（M19：已结算实际 + 未结算 sales×r̂）**（全 USD）；**≥ 0 ⇔ 实际 ROI ≥ 保本 ROI**；r̂ 默认 = 已结算参考基线（≈30.8%，2026-09-06 实测重定，含抽佣/联盟/运费等全部直接扣除），页面可覆写；解析上线后已结算部分自动用实际值。净现金收入本身**不展示** |
 | 订单结算金额 | 每笔订单在 TikTok 结算单里的**净额**（平台扣费/退款调整已含其中，净现金口径不做手工分项建模——决策 3）。净现金的**权威口径**（M16）；解析 job + view 已排期（D7），当前未落地（§6.11/§9-3） |
 | **平台佣金（渠道费用）** | 平台从销售额**直接扣除的全部费用**（交易抽佣 + 联盟佣金 + 运费类 + 其它扣款；单笔总扣 = 结算交易级 `fee_amount`）。**已结算订单 = 实际扣费；未结算订单 = sales × 参考基线 r̂**（Σ\|fee_amount\|/Σgross，≈30.8%，页面可覆写 %）；解析 job 上线后自动分层（D10/M19，§4.2/§6.11） |
-| **全损退货**（口径，2026-09-05 拍板） | RETURN_AND_REFUND 已完结即视为**全损**：货已妥投海外、退不回/不可再售（实测 26/26 全为发货后）→ 除退给买家的钱（已计入退款）外，**每件另计货损** = 件数 × 单位成本解析值（人工优先/缺省 40 CNY ≈ $5.95/件）。REFUND_ONLY（仅退款）不产生货损 |
+| **全损退货（v9 口径，2026-09-07 拍板）** | 退货 + 海外取消均视为**全损**：① 退货(RETURN_AND_REFUND/REFUND_ONLY)直接算全损，除退给买家的钱（已计入退款）外，**每件另计货损** = 件数 × 单位成本解析值（人工优先/缺省 40 CNY ≈ $5.95/件）；② **海外取消**：CANCELLED + 物流已到海外（`action_code=38301`）→ 也计全损（货本已付出）；③ 国内取消(物流未到海外) ≠ 全损，不计货本 |
 | **货物成本（占位）** | 2026-09-05 拍板：**按 SPU 解析**——先查 `procurement.manual_product_costs` 有效行（`valid_to IS NULL`），命中即用（`cost_source=MANUAL`，**表内保证人民币 CNY**）；未命中才用默认 **K1 = 40 CNY/件**（`DEFAULT_K1`，页面 ⚠）。两者均为 CNY，统一经 CNY→USD 在线汇率换 USD。 |
 | **显示币种（2026-09-05 拍板）** | **全表金额列统一 USD，不再分 USD/VND 栏**：VND 金额 ÷ USD→VND、货损 CNY × CNY→USD（均用在线汇率）；底层计算保持原币（防舍入），输出层一次换算、四舍五入；列头/提示行标注所用 fx 与取值时间 |
 
@@ -218,8 +218,8 @@ SPU 无广告投放 → 广告列显示 0 与“无投放”文案（不隐藏�
 **单位成本解析（每 SPU，人工优先 → 默认 40 元）**：
 
 ```text
-① 命中 procurement.manual_product_costs 有效行（valid_to IS NULL，每 SPU 至多一条） → unit_cost = 行值（**2026-09-05 确认：人工表录入保证为人民币 CNY** → 统一走 CNY→USD fx），cost_source = MANUAL
-② 未命中 → unit_cost = K1 = 40 CNY/件（≈ $5.95/件），cost_source = DEFAULT_K1
+① 命中 procurement.manual_product_costs 有效行（valid_to IS NULL，每 SPU 至多一条） → unit_cost = 行值（**2026-09-05 确认：人工表录入保证为人民币 CNY** → 统一走 CNY→USD fx），cost_source = 人工标注价格
+② 未命中 → unit_cost = 默认兜底价格 = 40 CNY/件（≈ $5.95/件），cost_source = DEFAULT_K1
    → 页面该行打 ⚠：无人工成本记录，按默认 40 元/件计算（可点去 /v2/pages/manual-costs 补录）
 ```
 
@@ -235,8 +235,8 @@ SPU 无广告投放 → 广告列显示 0 与“无投放”文案（不隐藏�
 | M5 | 售出件数（有效销售） | `units(s)` | `Σ sales_order_lines.quantity`（join **有效销售订单**且 `coalesce(paid_at, order_time)∈W`，`spu_pk=s`；**状态口径 2026-09-06：白名单状态即算，含 COD 在途未收款**） | 按日可拆 | sales_order_lines + sales_orders |
 | M5b | 有效销售订单数 | `order_count(s)` | `COUNT(DISTINCT sales_orders.id)`（同一有效销售过滤；**状态口径：白名单状态全部订单，含 COD 在途**） | 按日可拆 | 同上 |
 | M6 | 销售金额(gross) | `sales(s)` | `Σ quantity × unit_price`（同上过滤条件；**状态口径：下单即算，含 COD 在途未收款**；CANCELLED 不计入） | 按日可拆 | 同上 |
-| M5c | 取消订单数 | `cancelled_order_count(s)` | `COUNT(DISTINCT id)` status=CANCELLED（状态口径，含未收款取消；2026-09-06 行内新列，与结余带取消单量同口径） | 按日可拆 | sales_orders |
-| M5d | **全损取消件数（v6 货本补扣基数）** | `full_loss_cancelled_qty(s)` | `Σ sales_order_lines.quantity WHERE sales_orders.status='CANCELLED' AND EXISTS(SELECT 1 FROM fulfillment.tracking_events te JOIN fulfillment.shipments sh ON sh.id=te.shipment_id WHERE sh.order_pk=sales_orders.id AND te.action_code=38301)`（**2026-09-07 v6 新增**：物流已到海外 + 被取消的件数；被 `PAID_SALES_ORDER_STATUSES` 白名单排除未进 units_sold 但货本确实付出，必须在 M18 COGS_all 里补扣；详见 M18 公式） | 范围求和 | fulfillment.tracking_events + sales_orders |
+| | M5c | 取消订单数 | `cancelled_order_count(s)` | `COUNT(DISTINCT id)` status=CANCELLED（状态口径，含未收款取消；2026-09-06 行内新列，与结余带取消单量同口径） | 按日可拆 | sales_orders |
+| M5d | **全损件数（v9 口径）** | `full_loss_qty(s)` | `退货件数 + 海外取消件数`：退货 = `Σ case_lines.quantity WHERE case_type IN ('RETURN_AND_REFUND','REFUND_ONLY') AND status='RETURN_OR_REFUND_REQUEST_COMPLETE'`；海外取消 = `Σ sales_order_lines.quantity WHERE sales_orders.status='CANCELLED' AND EXISTS(tracking_events.action_code=38301)`；**国内取消(物流未到海外) ≠ 全损，不计入**；实测：退货 27 + 海外取消 133 = 全损 160 件，国内取消 182 件不计 | 范围求和 | case_lines + fulfillment.tracking_events + sales_orders |
 | M6c | 行内销售(GMV 全单) | `gmv_sales(s)` | 有效销售 + 取消原额（= 结余带 GMV 的行级版；2026-09-06） | 按日可拆 | M6+M6b 行级 |
 | M12b | 取消率 | `cancel_rate(s)` | 取消单量 ÷ (有效单量+取消单量)（单量口径，2026-09-06） | 范围 | M5b/M5c |
 | M12c | 退货率（单量口径） | `refund_rate_qty(s)` | 退货订单数 ÷ 有效单量（退款 case 去重订单数，非金额；2026-09-06 行内主列） | 范围 | case 去重订单 / M5b |
@@ -387,7 +387,7 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
 | **E 实际 ROI** | 其中 CANCELLED 已出海件数（COGS 补扣基数） | **`full_loss_cancelled_qty`** | **int** | **v8 新增：CANCELLED ∧ 38301 件数** |
 | **E 实际 ROI** | 全损率% | **`full_loss_rate`** | **ratio-str/null** | **v8 新增(D8 主列)：`full_loss_qty ÷ (units_sold + full_loss_cancelled_qty)`；分母 0 → null；不钳位（>100% 标识数据异常需人工核查）** |
 | E 实际 ROI | 退货货损（全损，USD） | `return_loss` | money-str | **M13b v8：全损件数 × 单位成本解析值（人工/采购单/货源价/40 CNY 兑底，§4.2）= `full_loss_qty × unit_cost_used` → 折 USD；不再用完结退货件（v7 口径）** |
-| E 实际 ROI | 单件货本来源（成本链解析结果） | `unit_cost_used, cost_source` | money/enum | **v8 扩为四值：`cost_source ∈ MANUAL(人工标注的采购成交价) / PURCHASE(妙手采购单成交价) / SOURCE_PRICE(1688 货源价) / DEFAULT_K1(默认 40 CNY/件 ≈ $5.95)`，价格优先链 MANUAL→PURCHASE→SOURCE_PRICE→DEFAULT_K1；**`DEFAULT_K1` → 页面该行 ⚠ + tooltip，可跳 manual-costs 页补录** |
+| E 实际 ROI | 单件货本来源（成本链解析结果） | `unit_cost_used, cost_source` | money/enum | **v8 扩为三值：`cost_source ∈ 人工标注价格 / 货源价 / 默认兜底价格(40 CNY/件 ≈ $5.95)`，价格优先链 人工标注价格→货源价→默认兜底价格；**默认兜底价格 → 页面该行 ⚠ + tooltip，可跳 manual-costs 页补录** |
 | E 实际 ROI | **净利润（毛利口径，页面金额核心列）** | `net_profit` | money-str | **M18 v8：`net_revenue − (units_sold + full_loss_cancelled_qty) × unit_cost_used − spend`（**不**二次扣 fee：已结算订单费用已含在 SETTLEMENT 里，未结算订单费用由 `× (1−r̂)` 部分折算）；**负值红字**（与 roi<保本同号，§5.4-6）；M13 net_cash 已退役为内部中间量** |
 | E 实际 ROI | 平台佣金（渠道费用，信息列） | `platform_fee` | money-str | **M19 v8：`r̂ × unsettled_sales`（仅未结算部分，**不**再是 M18 输入）；已结算订单费用已内含在 SETTLEMENT 不再单计；页面可覆写 `fee_rate`** |
 | E 实际 ROI | **实际 ROI（主指标）** | `roi_real` | ratio-str/null | **M14 v8：`(net_revenue − return_loss) / spend`（全 USD 口径）；`spend=0` 或固定汇率配置缺失/异常 → `null`** |

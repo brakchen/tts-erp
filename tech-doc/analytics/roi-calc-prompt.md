@@ -50,7 +50,7 @@
 
 ## 3. 成本输入
 - 采购成本 CNY/件：读 `procurement.manual_product_costs WHERE valid_to IS NULL`
-  （cost_source=MANUAL）；未录入默认 30 CNY/件（DEFAULT_K1，行标 ⚠）。
+  （cost_source=人工标注价格）；未录入默认 30 CNY/件（默认兜底价格，行标 ⚠）。
 - 广告成本：以用户给定总广告花费为准（USD）；ERP 归因 spend 仅作对照。
 - 平台费基线 fee_rate = 30.8%（FEE_RATE_BASELINE，2026-09-06 实测重定，可覆写）。
 

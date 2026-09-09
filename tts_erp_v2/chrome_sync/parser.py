@@ -73,36 +73,53 @@ def parse_order_response(
             log.warning("order missing main_order_id, skipping: %s", order)
             continue
 
-        # 推断自 order_status_module，待实测确认
-        osm = order.get("order_status_module") or {}
+        # ✅ 实测确认（2026-09-09 域名观察）
+        # order_status_module 是数组，每个 order_line 一个元素
+        osm_list = order.get("order_status_module") or []
+        osm_first = osm_list[0] if isinstance(osm_list, list) and osm_list else {}
+        # price_module: grand_total=实付, sub_total=总额
         pm = order.get("price_module") or {}
-        payment = pm.get("payment") or {}
-        total_amount_obj = pm.get("total_amount") or {}
+        grand_total = pm.get("grand_total") or {}
+        sub_total = pm.get("sub_total") or {}
+        # 时间戳在 trade_order_module（不在 order_status_module）
+        tom = order.get("trade_order_module") or {}
+        # buyer 信息
+        bim = order.get("buyer_info_module") or {}
 
-        status = osm.get("order_status")
-        currency = payment.get("currency") or total_amount_obj.get("currency")
-        payment_amount = _to_decimal(payment.get("amount"))
-        total_amount = _to_decimal(total_amount_obj.get("amount"))
-        order_time = _ts_to_datetime(osm.get("create_time"))
-        paid_at = _ts_to_datetime(osm.get("paid_time"))
-        shipped_at = _ts_to_datetime(osm.get("shipped_time"))
-        delivered_at = _ts_to_datetime(osm.get("delivered_time"))
-        cancelled_at = _ts_to_datetime(osm.get("cancelled_time"))
+        main_order_status = osm_first.get("main_order_status")  # 整数
+        sku_display_status = osm_first.get("sku_display_status")  # 整数
+        currency = grand_total.get("currency") or sub_total.get("currency")
+        payment_amount = _to_decimal(grand_total.get("price_val"))
+        total_amount = _to_decimal(sub_total.get("price_val"))
+        fulfillment_type = tom.get("fulfillment_type")  # 整数
+        pay_method = tom.get("pay_method")  # 文本
+        sale_region = tom.get("sale_region")  # 如 "VN"
+        shipping_fee = _to_decimal((tom.get("shipping_fee") or {}).get("price_val"))
+        order_time = _ts_to_datetime(tom.get("create_time"))  # 秒级字符串
+        update_time = _ts_to_datetime(tom.get("update_time"))  # 毫秒级字符串
+        latest_rts_time = _ts_to_datetime(tom.get("latest_rts_time"))
+        latest_tts_time = _ts_to_datetime(tom.get("latest_tts_time"))
+        buyer_nickname = bim.get("buyer_nickname")
 
         upsert_order(
             sess,
             log_id=log_id,
             shop_id=shop_id,
             order_id=order_id,
-            status=status,
+            main_order_status=main_order_status,
+            sku_display_status=sku_display_status,
             currency=currency,
             payment_amount=payment_amount,
             total_amount=total_amount,
+            fulfillment_type=fulfillment_type,
+            pay_method=pay_method,
+            sale_region=sale_region,
+            shipping_fee=shipping_fee,
             order_time=order_time,
-            paid_at=paid_at,
-            shipped_at=shipped_at,
-            delivered_at=delivered_at,
-            cancelled_at=cancelled_at,
+            update_time=update_time,
+            latest_rts_time=latest_rts_time,
+            latest_tts_time=latest_tts_time,
+            buyer_nickname=buyer_nickname,
         )
         rows_written += 1
 
@@ -115,17 +132,30 @@ def parse_order_response(
                 continue
             seen_skus.add(sku_id)
 
-            # 推断自 sku_module，待实测确认
+            # ✅ 实测确认（2026-09-09）
             product_id = item.get("product_id")
             product_name = item.get("product_name")
             variant_name = item.get("sku_name")
-            image_url = item.get("sku_image")
-            seller_sku = item.get("seller_sku")
+            # product_image.url_list[0]（不是 sku_image 字符串）
+            image_obj = item.get("product_image") or {}
+            image_url = (image_obj.get("url_list") or [None])[0]
             quantity = _to_decimal(item.get("quantity"))
-            sale_price = item.get("sale_price") or {}
-            unit_price = _to_decimal(sale_price.get("amount"))
-            line_currency = sale_price.get("currency")
-            line_status = item.get("sku_order_status")
+            # sku_unit_price.price_val（不是 sale_price.amount）
+            unit_price_obj = item.get("sku_unit_price") or {}
+            total_price_obj = item.get("sku_total_price") or {}
+            unit_price = _to_decimal(unit_price_obj.get("price_val"))
+            total_price = _to_decimal(total_price_obj.get("price_val"))
+            line_currency = unit_price_obj.get("currency")
+            # order_status_module 按 order_line_id 关联
+            line_ids = item.get("order_line_ids") or []
+            line_main_status = None
+            line_sku_status = None
+            if line_ids:
+                for osm_item in osm_list:
+                    if isinstance(osm_item, dict) and osm_item.get("order_line_id") == line_ids[0]:
+                        line_main_status = osm_item.get("main_order_status")
+                        line_sku_status = osm_item.get("sku_display_status")
+                        break
 
             upsert_order_line(
                 sess,
@@ -137,11 +167,12 @@ def parse_order_response(
                 product_name=product_name,
                 variant_name=variant_name,
                 image_url=image_url,
-                seller_sku=seller_sku,
                 quantity=quantity,
                 unit_price=unit_price,
+                total_price=total_price,
                 currency=line_currency,
-                line_status=line_status,
+                main_order_status=line_main_status,
+                sku_display_status=line_sku_status,
             )
             rows_written += 1
 
