@@ -985,7 +985,6 @@ def flatten_fees(fee_list: list) -> list[dict]:
 | TikTok 订单模块内部字段名未确认 | 解析规则可能字段名不对 | 用域名观察功能抓一份完整响应确认 |
 | `trade_order_id` ↔ `main_order_id` 映射 | 结算明细无法关联到订单 | 补抓映射接口或用 `sku_id` 间接关联 |
 | `statement_sku_detail_id` 获取路径 | 无法从 statement list 构造 transaction detail 请求 | 补抓中间接口 |
-| `global_product_id` 缺失 | 无法调用商品同款接口 | 从其他商品接口补齐 |
 
 ## 11. 风险与缓解
 
