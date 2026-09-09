@@ -1232,6 +1232,13 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     .op-tab-table td:first-child { font-family: var(--mono); font-size: 11px; }
     .op-tab-table th .op-hint { margin-left: 4px; }
     .op-tab-table tbody tr:hover { background: var(--paper-soft, var(--paper)); }
+    /* 防止外层 table.op-table 的 CSS 泄漏到嵌套 tab 表 */
+    .op-tab-table td {
+      overflow: visible !important; text-overflow: clip !important;
+      white-space: nowrap !important; width: auto !important;
+      min-width: 0 !important; max-width: none !important;
+      padding: 10px 14px !important; text-align: left !important;
+    }
   </style>
 </head>
 <body>
