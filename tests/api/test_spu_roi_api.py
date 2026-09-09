@@ -1923,7 +1923,6 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     main_th_labels = re.findall(r'<th[^>]*scope="col"[^>]*>([^<]+)</th>', body)
     for col_label in (
         "商品",
-        "关联广告数",
         "广告消耗",
         "有效GMV",
         "有效出单量",
@@ -1991,7 +1990,6 @@ def test_spu_roi_page_d8_no_column_toggles(api_client, readonly_key):
         r'class="op-th[^"]*op-th-sort[^"]*" data-sort="([a-z0-9_]+)"', body
     )
     assert set(sortable) == {
-        "ad_count",
         "spend",
         "sales",
         "order_count",
@@ -2163,12 +2161,11 @@ def test_spu_roi_page_no_old_columns(api_client, readonly_key):
         "取消单量",
         "退货率%",
         "全损退款$",
-        # 广告数 → 关联广告数(2026-09-08 恢复)
+        "关联广告数",
     ):
         assert forbidden not in main_th_labels, f"D8 已删:th 表头残留 {forbidden}"
     for col in (
         "商品",
-        "关联广告数",
         "广告消耗",
         "有效GMV",
         "有效出单量",

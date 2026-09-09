@@ -509,7 +509,7 @@ _SQL_DETAIL_CASES = text(
     LEFT JOIN after_sales.case_lines cl ON cl.case_id = c.id
     LEFT JOIN commerce.sales_order_lines sl ON sl.id = cl.sales_order_line_id
     LEFT JOIN commerce.sales_orders so ON so.id = c.order_pk
-    WHERE (sl.spu_pk = :spu_pk OR cl.sales_order_line_id IS NULL)
+    WHERE sl.spu_pk = :spu_pk
       AND (CAST(:ws AS timestamptz) IS NULL
            OR c.updated_at_source >= CAST(:ws AS timestamptz))
       AND (CAST(:we AS timestamptz) IS NULL
@@ -951,6 +951,7 @@ def _query_spu_roi(
                 "cost_source": cost_source,
                 # v7 新增字段（§4）
                 "net_revenue": net_revenue_usd,
+                "settled_net": settled_net_usd,
                 "settled_sales": settled_sales_usd,
                 "unsettled_sales": unsettled_sales_usd,
                 "settled_order_count": settled_order_count,
@@ -1171,6 +1172,7 @@ def _query_spu_roi(
                 "unit_cost_used": _fmt_money(r["unit_cost_used"]),
                 "cost_source": r["cost_source"],
                 "net_revenue": _fmt_money(r["net_revenue"]),
+                "settled_net": _fmt_money(r["settled_net"]),
                 "settled_sales": _fmt_money(r["settled_sales"]),
                 "unsettled_sales": _fmt_money(r["unsettled_sales"]),
                 "settled_order_count": r["settled_order_count"],

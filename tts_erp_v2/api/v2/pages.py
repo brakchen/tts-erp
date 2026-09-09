@@ -1306,7 +1306,6 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
         <thead>
           <tr>
             <th scope="col" class="op-th op-th-left" width="140">商品</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="ad_count" data-tip="关联广告数 = 该 SPU 命中的广告计划数(count(DISTINCT campaign_id));广告视图全窗口累计,不受日期裁剪" width="80">关联广告数</th>
             <th scope="col" class="op-th op-th-sort" data-sort="spend" data-tip="广告消耗（USD，广告窗口全量累计；作为减项计入净利润）" width="200">广告消耗</th>
             <th scope="col" class="op-th op-th-sort" data-sort="sales" data-tip="有效GMV = 白名单状态订单行金额（USD；排除已取消订单，B1 拍板）" width="200">有效GMV</th>
             <th scope="col" class="op-th op-th-sort" data-sort="order_count" data-tip="有效出单量 = 白名单有效订单数（distinct）" width="160">有效出单量</th>
@@ -1316,7 +1315,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
           </tr>
         </thead>
         <tbody class="op-rows" id="rows">
-          <tr><td colspan="8" class="op-loading">加载中…</td></tr>
+          <tr><td colspan="7" class="op-loading">加载中…</td></tr>
         </tbody>
       </table>
     </div>
@@ -1324,7 +1323,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     <!-- D7 钻取面板模板（行内 accordion，由 spu-roi.js openDrillPanel 克隆插入） -->
     <template id="tpl-drilldown-panel">
       <tr class="op-drill-row" aria-live="polite">
-        <td colspan="8" class="op-drill-wrap">
+        <td colspan="7" class="op-drill-wrap">
           <div class="op-drill" data-state="loading">
             <nav class="op-drill-tabs" role="tablist">
               <button type="button" class="op-drill-tab is-active" role="tab" data-tab="pnl">利润构成</button>
