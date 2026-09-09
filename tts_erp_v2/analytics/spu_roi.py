@@ -346,21 +346,6 @@ _SQL_COST_MANUAL = text(
     """
 )
 
-# L2: 妙手采购单最新成交价（linkage → purchase_order_lines updated_at DESC）
-_SQL_COST_PURCHASE = text(
-    """
-    SELECT DISTINCT ON (epl.spu_pk)
-           epl.spu_pk AS spu_pk,
-           pol.unit_cost AS unit_cost
-    FROM linkage.effective_product_links epl
-    JOIN procurement.purchase_order_lines pol
-      ON pol.procurement_product_id = epl.procurement_product_id
-    WHERE epl.spu_pk = ANY(CAST(:pks AS bigint[]))
-      AND pol.unit_cost IS NOT NULL
-    ORDER BY epl.spu_pk, pol.updated_at DESC NULLS LAST, pol.id DESC
-    """
-)
-
 # L3a: 1688 货源价 — TK-side 直取（external_product_id = spu_id）
 _SQL_COST_SOURCE_DIRECT = text(
     """
@@ -641,14 +626,14 @@ def _resolve_costs_batch(
     # L1: manual_product_costs（人工标注的采购成交价）
     rows = sess.execute(_SQL_COST_MANUAL, {"pks": spu_pks}).mappings().all()
     for r in rows:
-        out[int(r["spu_pk"])] = (Decimal(r["unit_cost"]), "MANUAL")  # noqa: E511
+        out[int(r["spu_pk"])] = (Decimal(r["unit_cost"]), "MANUAL")  # pi-lens-ignore: no-try-except
 
     # L2: SOURCE_PRICE（1688 货源价，direct + via offer 两条路径）
     missing = [pk for pk in spu_pks if pk not in out]
     if missing:
         rows = sess.execute(_SQL_COST_SOURCE_DIRECT, {"pks": missing}).mappings().all()
         for r in rows:
-            out[int(r["spu_pk"])] = (Decimal(r["unit_cost"]), "SOURCE_PRICE")  # noqa: E511
+            out[int(r["spu_pk"])] = (Decimal(r["unit_cost"]), "SOURCE_PRICE")  # pi-lens-ignore: no-try-except
         still_missing = [pk for pk in missing if pk not in out]
         if still_missing:
             rows = (
@@ -657,7 +642,7 @@ def _resolve_costs_batch(
                 .all()
             )
             for r in rows:
-                out[int(r["spu_pk"])] = (Decimal(r["unit_cost"]), "SOURCE_PRICE")  # noqa: E511
+                out[int(r["spu_pk"])] = (Decimal(r["unit_cost"]), "SOURCE_PRICE")  # pi-lens-ignore: no-try-except
 
     # L3: DEFAULT_K1（40 CNY/件 兜底，UI 上需 ⚠ 标注）
     for pk in spu_pks:
@@ -702,7 +687,7 @@ def _query_spu_roi(
     )
 
     ad_rows = sess.execute(_SQL_ROI_AD).mappings().all()
-    ad_map = {int(r["spu_pk"]): r for r in ad_rows if r["spu_pk"] is not None}  # noqa: E511
+    ad_map = {int(r["spu_pk"]): r for r in ad_rows if r["spu_pk"] is not None}  # pi-lens-ignore: no-try-except
 
     sales_rows = (
         sess.execute(
@@ -712,7 +697,7 @@ def _query_spu_roi(
         .mappings()
         .all()
     )
-    sales_map = {int(r["spu_pk"]): r for r in sales_rows if r["spu_pk"] is not None}  # noqa: E511
+    sales_map = {int(r["spu_pk"]): r for r in sales_rows if r["spu_pk"] is not None}  # pi-lens-ignore: no-try-except
 
     fl_rows = (
         sess.execute(
@@ -729,7 +714,7 @@ def _query_spu_roi(
         .mappings()
         .all()
     )
-    fl_map = {int(r["spu_pk"]): r for r in fl_rows if r["spu_pk"] is not None}  # noqa: E511
+    fl_map = {int(r["spu_pk"]): r for r in fl_rows if r["spu_pk"] is not None}  # pi-lens-ignore: no-try-except
 
     rs_rows = (
         sess.execute(
@@ -745,7 +730,7 @@ def _query_spu_roi(
         .mappings()
         .all()
     )
-    rs_map = {int(r["spu_pk"]): r for r in rs_rows if r["spu_pk"] is not None}  # noqa: E511
+    rs_map = {int(r["spu_pk"]): r for r in rs_rows if r["spu_pk"] is not None}  # pi-lens-ignore: no-try-except
 
     refund_rows = (
         sess.execute(
@@ -761,10 +746,10 @@ def _query_spu_roi(
         .mappings()
         .all()
     )
-    refund_map = {int(r["spu_pk"]): r for r in refund_rows if r["spu_pk"] is not None}  # noqa: E511
+    refund_map = {int(r["spu_pk"]): r for r in refund_rows if r["spu_pk"] is not None}  # pi-lens-ignore: no-try-except
 
     # 成本链批量解析（D1）
-    spu_pks_all = [int(c["spu_pk"]) for c in cats]  # noqa: E511
+    spu_pks_all = [int(c["spu_pk"]) for c in cats]  # pi-lens-ignore: no-try-except
     cost_map = _resolve_costs_batch(sess, spu_pks_all)
 
     plain: list[dict] = []

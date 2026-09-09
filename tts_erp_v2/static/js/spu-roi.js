@@ -37,14 +37,13 @@
     "net_profit",
     "sales",
     "gmv_sales",
-    "gmv_ad",
-    "ad_count",
     "order_count",
     "cancelled_order_count",
     "units_sold",
     "return_loss",
     "roi_breakeven",
     "refund_net_amount",
+    "full_loss_rate",
   ]);
 
   // §7.2 标色默认阈值(常量,页面 ⚙ 可调预留,不锁死)
