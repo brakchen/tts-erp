@@ -393,6 +393,10 @@
     ) {
       $("#filter-w-start").value = cw.coverage_first_day;
       $("#filter-w-end").value = cw.coverage_last_day;
+      // 同步 state(修复:之前只设 DOM.value,state.wStart/wEnd 仍是 "",
+      // api() 用 state.wStart || null 发请求,导致 w_start/w_end 参数不传、过滤不生效)
+      state.wStart = cw.coverage_first_day;
+      state.wEnd = cw.coverage_last_day;
     }
 
     // D8(2026-09-07):⚙ 列开关组全删,applyColToggles 不再调用
@@ -1097,18 +1101,27 @@
     });
 
     // 日期范围:空 = 不限;yyyy-mm-dd 直接作 w_start/w_end(含 w_end 当日)
-    $("#filter-w-start").addEventListener("change", (e) => {
-      state.wStart = e.target.value || "";
-      if (e.target.value) state.datesTouched = true; // 用户已接管,不再自动回填
+    // 校验: w_start 不能晚于 w_end(否则报错并重置为当前输入的字段)
+    function _dateFieldChanged(which, e) {
+      var v = e.target.value || "";
+      if (which === "start") state.wStart = v;
+      else state.wEnd = v;
+      if (v) state.datesTouched = true;
+      // 起始 > 截止 → 拒绝这次查询、重置该输入、提示错误
+      if (state.wStart && state.wEnd && state.wStart > state.wEnd) {
+        renderError(
+          "起始日期不能晚于截止日期（当前：" + state.wStart + " ~ " + state.wEnd + "）",
+        );
+        e.target.value = "";
+        if (which === "start") state.wStart = "";
+        else state.wEnd = "";
+        return;
+      }
       state.offset = 0;
       load();
-    });
-    $("#filter-w-end").addEventListener("change", (e) => {
-      state.wEnd = e.target.value || "";
-      if (e.target.value) state.datesTouched = true; // 用户已接管,不再自动回填
-      state.offset = 0;
-      load();
-    });
+    }
+    $("#filter-w-start").addEventListener("change", (e) => _dateFieldChanged("start", e));
+    $("#filter-w-end").addEventListener("change", (e) => _dateFieldChanged("end", e));
 
     $("#btn-refresh").addEventListener("click", () => load());
     $("#btn-prev").addEventListener("click", () => {
