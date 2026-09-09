@@ -151,15 +151,20 @@ CREATE TABLE chrome_sync.orders (
     log_id          BIGINT NOT NULL REFERENCES chrome_sync.raw_log(id),  -- 来源 raw_log
     shop_id         TEXT NOT NULL,
     order_id        TEXT NOT NULL,              -- ✅ 实测确认: main_order_id
-    status          TEXT,                       -- 推断自 order_status_module，待实测确认
-    currency        TEXT,                       -- 推断自 price_module，待实测确认
-    payment_amount  NUMERIC(20,4),              -- 推断自 price_module.payment.amount，待实测确认
-    total_amount    NUMERIC(20,4),              -- 推断自 price_module.total_amount.amount，待实测确认
-    order_time      TIMESTAMPTZ,               -- 推断自 order_status_module.create_time，待实测确认
-    paid_at         TIMESTAMPTZ,               -- 推断自 order_status_module.paid_time，待实测确认
-    shipped_at      TIMESTAMPTZ,               -- 推断自 order_status_module.shipped_time，待实测确认
-    delivered_at    TIMESTAMPTZ,               -- 推断自 order_status_module.delivered_time，待实测确认
-    cancelled_at    TIMESTAMPTZ,               -- 推断自 order_status_module.cancelled_time，待实测确认
+    main_order_status INT,                      -- ✅ 实测确认: order_status_module[0].main_order_status
+    sku_display_status INT,                     -- ✅ 实测确认: order_status_module[0].sku_display_status
+    currency        TEXT,                       -- ✅ 实测确认: price_module.grand_total.currency
+    payment_amount  NUMERIC(20,4),              -- ✅ 实测确认: price_module.grand_total.price_val
+    total_amount    NUMERIC(20,4),              -- ✅ 实测确认: price_module.sub_total.price_val
+    fulfillment_type INT,                       -- ✅ 实测确认: trade_order_module.fulfillment_type
+    pay_method      TEXT,                       -- ✅ 实测确认: trade_order_module.pay_method
+    sale_region     TEXT,                       -- ✅ 实测确认: trade_order_module.sale_region
+    shipping_fee    NUMERIC(20,4),              -- ✅ 实测确认: trade_order_module.shipping_fee.price_val
+    order_time      TIMESTAMPTZ,               -- ✅ 实测确认: trade_order_module.create_time（秒级字符串）
+    update_time     TIMESTAMPTZ,               -- ✅ 实测确认: trade_order_module.update_time（毫秒级字符串）
+    latest_rts_time TIMESTAMPTZ,               -- ✅ 实测确认: trade_order_module.latest_rts_time
+    latest_tts_time TIMESTAMPTZ,               -- ✅ 实测确认: trade_order_module.latest_tts_time
+    buyer_nickname  TEXT,                       -- ✅ 实测确认: buyer_info_module.buyer_nickname
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -173,18 +178,22 @@ COMMENT ON TABLE chrome_sync.orders IS 'Chrome 扩展同步的 TikTok 订单头�
 COMMENT ON COLUMN chrome_sync.orders.id IS '自增主键';
 COMMENT ON COLUMN chrome_sync.orders.shop_id IS 'TikTok 外部店铺 ID';
 COMMENT ON COLUMN chrome_sync.orders.log_id IS '关联 raw_log.id，溯源本次数据来自哪条 dump';
-COMMENT ON COLUMN chrome_sync.orders.order_id IS 'TikTok main_order_id';
-COMMENT ON COLUMN chrome_sync.orders.status IS '订单状态（待实测确认字段路径）';
-COMMENT ON COLUMN chrome_sync.orders.currency IS '订单币种，ISO 4217（待实测确认字段路径）';
-COMMENT ON COLUMN chrome_sync.orders.payment_amount IS '买家实付金额（待实测确认字段路径）';
-COMMENT ON COLUMN chrome_sync.orders.total_amount IS '订单总金额（待实测确认字段路径）';
-COMMENT ON COLUMN chrome_sync.orders.order_time IS '下单时间（待实测确认字段路径）';
-COMMENT ON COLUMN chrome_sync.orders.paid_at IS '付款时间（paid_time，待实测确认；0 或缺失为 NULL）';
-COMMENT ON COLUMN chrome_sync.orders.shipped_at IS '发货时间（shipped_time，待实测确认）';
-COMMENT ON COLUMN chrome_sync.orders.delivered_at IS '签收时间（delivered_time，待实测确认）';
-COMMENT ON COLUMN chrome_sync.orders.cancelled_at IS '取消时间（cancelled_time，待实测确认；0 或缺失为 NULL）';
+COMMENT ON COLUMN chrome_sync.orders.order_id IS '✅ TikTok main_order_id';
+COMMENT ON COLUMN chrome_sync.orders.main_order_status IS '✅ 订单状态码（整数，order_status_module[0].main_order_status）';
+COMMENT ON COLUMN chrome_sync.orders.sku_display_status IS '✅ SKU 展示状态码（整数，order_status_module[0].sku_display_status）';
+COMMENT ON COLUMN chrome_sync.orders.currency IS '✅ 币种 ISO 4217（price_module.grand_total.currency）';
+COMMENT ON COLUMN chrome_sync.orders.payment_amount IS '✅ 买家实付（price_module.grand_total.price_val，字符串转 Decimal）';
+COMMENT ON COLUMN chrome_sync.orders.total_amount IS '✅ 订单总额（price_module.sub_total.price_val）';
+COMMENT ON COLUMN chrome_sync.orders.fulfillment_type IS '✅ 履约类型（trade_order_module.fulfillment_type，整数）';
+COMMENT ON COLUMN chrome_sync.orders.pay_method IS '✅ 支付方式（trade_order_module.pay_method，如 Cash on delivery）';
+COMMENT ON COLUMN chrome_sync.orders.sale_region IS '✅ 销售区域（trade_order_module.sale_region，如 VN）';
+COMMENT ON COLUMN chrome_sync.orders.shipping_fee IS '✅ 运费（trade_order_module.shipping_fee.price_val）';
+COMMENT ON COLUMN chrome_sync.orders.order_time IS '✅ 下单时间（trade_order_module.create_time，秒级时间戳字符串）';
+COMMENT ON COLUMN chrome_sync.orders.update_time IS '✅ 更新时间（trade_order_module.update_time，毫秒级时间戳字符串）';
+COMMENT ON COLUMN chrome_sync.orders.latest_rts_time IS '✅ 最晚发货时间（trade_order_module.latest_rts_time）';
+COMMENT ON COLUMN chrome_sync.orders.latest_tts_time IS '✅ 最晚交易时间（trade_order_module.latest_tts_time）';
+COMMENT ON COLUMN chrome_sync.orders.buyer_nickname IS '✅ 买家昵称（buyer_info_module.buyer_nickname）';
 COMMENT ON COLUMN chrome_sync.orders.created_at IS '数据入库时间';
-COMMENT ON COLUMN chrome_sync.orders.currency IS '订单币种，ISO 4217';
 COMMENT ON COLUMN chrome_sync.orders.updated_at IS '最后更新时间';
 ```
 
@@ -198,14 +207,15 @@ CREATE TABLE chrome_sync.order_lines (
     order_id        TEXT NOT NULL,              -- 关联 chrome_sync.orders.order_id
     sku_id          TEXT NOT NULL,              -- ✅ 实测确认: sku_module[].sku_id
     product_id      TEXT,                       -- ✅ 实测确认: sku_module[].product_id
-    product_name    TEXT,                       -- 推断自 sku_module[].product_name，待实测确认
-    variant_name    TEXT,                       -- 推断自 sku_module[].sku_name，待实测确认
-    image_url       TEXT,                       -- 推断自 sku_module[].sku_image，待实测确认
-    seller_sku      TEXT,                       -- 推断自 sku_module[].seller_sku，待实测确认
-    quantity        NUMERIC(20,4),              -- 推断自 sku_module[].quantity，待实测确认
-    unit_price      NUMERIC(20,4),              -- 推断自 sku_module[].sale_price.amount，待实测确认
-    currency        TEXT,                       -- 推断自 sku_module[].sale_price.currency，待实测确认
-    line_status     TEXT,                       -- 推断自 sku_module[].sku_order_status，待实测确认
+    product_name    TEXT,                       -- ✅ 实测确认: sku_module[].product_name
+    variant_name    TEXT,                       -- ✅ 实测确认: sku_module[].sku_name
+    image_url       TEXT,                       -- ✅ 实测确认: sku_module[].product_image.url_list[0]
+    quantity        NUMERIC(20,4),              -- ✅ 实测确认: sku_module[].quantity
+    unit_price      NUMERIC(20,4),              -- ✅ 实测确认: sku_module[].sku_unit_price.price_val
+    total_price     NUMERIC(20,4),              -- ✅ 实测确认: sku_module[].sku_total_price.price_val
+    currency        TEXT,                       -- ✅ 实测确认: sku_module[].sku_unit_price.currency
+    main_order_status INT,                      -- ✅ 实测确认: order_status_module 按 order_line_id 关联
+    sku_display_status INT,                     -- ✅ 实测确认: order_status_module 按 order_line_id 关联
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -215,18 +225,19 @@ CREATE TABLE chrome_sync.order_lines (
 COMMENT ON TABLE chrome_sync.order_lines IS 'Chrome 扩展同步的 TikTok 订单行（SKU 级），来自 order/list 的 sku_module/fulfill_line_module';
 COMMENT ON COLUMN chrome_sync.order_lines.id IS '自增主键';
 COMMENT ON COLUMN chrome_sync.order_lines.log_id IS '关联 raw_log.id，溯源本次数据来自哪条 dump';
-COMMENT ON COLUMN chrome_sync.order_lines.sku_id IS 'TikTok sku_id，同订单内唯一';
-COMMENT ON COLUMN chrome_sync.order_lines.product_id IS 'TikTok product_id';
-COMMENT ON COLUMN chrome_sync.order_lines.product_name IS '商品名称快照';
-COMMENT ON COLUMN chrome_sync.order_lines.variant_name IS 'SKU 名称快照';
-COMMENT ON COLUMN chrome_sync.order_lines.image_url IS 'SKU 图片 URL 快照';
-COMMENT ON COLUMN chrome_sync.order_lines.seller_sku IS '卖家自定义 SKU 编码';
-COMMENT ON COLUMN chrome_sync.order_lines.quantity IS '购买数量';
-COMMENT ON COLUMN chrome_sync.order_lines.unit_price IS 'SKU 单价（sale_price.amount）';
+COMMENT ON COLUMN chrome_sync.order_lines.sku_id IS '✅ TikTok sku_id，同订单内唯一';
+COMMENT ON COLUMN chrome_sync.order_lines.product_id IS '✅ TikTok product_id';
+COMMENT ON COLUMN chrome_sync.order_lines.product_name IS '✅ 商品名称快照（sku_module[].product_name）';
+COMMENT ON COLUMN chrome_sync.order_lines.variant_name IS '✅ SKU 名称快照（sku_module[].sku_name）';
+COMMENT ON COLUMN chrome_sync.order_lines.image_url IS '✅ SKU 图片 URL（sku_module[].product_image.url_list[0]）';
+COMMENT ON COLUMN chrome_sync.order_lines.quantity IS '✅ 购买数量';
+COMMENT ON COLUMN chrome_sync.order_lines.unit_price IS '✅ 单价（sku_module[].sku_unit_price.price_val）';
+COMMENT ON COLUMN chrome_sync.order_lines.total_price IS '✅ 总价（sku_module[].sku_total_price.price_val）';
+COMMENT ON COLUMN chrome_sync.order_lines.currency IS '✅ 币种 ISO 4217';
+COMMENT ON COLUMN chrome_sync.order_lines.main_order_status IS '✅ 订单状态码（从 order_status_module 按 order_line_id 关联）';
+COMMENT ON COLUMN chrome_sync.order_lines.sku_display_status IS '✅ SKU 展示状态码（从 order_status_module 按 order_line_id 关联）';
 COMMENT ON COLUMN chrome_sync.order_lines.shop_id IS 'TikTok 外部店铺 ID';
 COMMENT ON COLUMN chrome_sync.order_lines.order_id IS '关联 chrome_sync.orders.order_id';
-COMMENT ON COLUMN chrome_sync.order_lines.currency IS 'SKU 币种，ISO 4217';
-COMMENT ON COLUMN chrome_sync.order_lines.line_status IS '行状态，如 DELIVERED/CANCELLED';
 COMMENT ON COLUMN chrome_sync.order_lines.created_at IS '数据入库时间';
 COMMENT ON COLUMN chrome_sync.order_lines.updated_at IS '最后更新时间';
 ```
