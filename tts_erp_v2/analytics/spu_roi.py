@@ -509,7 +509,7 @@ _SQL_DETAIL_CASES = text(
     LEFT JOIN after_sales.case_lines cl ON cl.case_id = c.id
     LEFT JOIN commerce.sales_order_lines sl ON sl.id = cl.sales_order_line_id
     LEFT JOIN commerce.sales_orders so ON so.id = c.order_pk
-    WHERE (sl.spu_pk = :spu_pk OR cl.sales_order_line_id IS NULL)
+    WHERE sl.spu_pk = :spu_pk
       AND (CAST(:ws AS timestamptz) IS NULL
            OR c.updated_at_source >= CAST(:ws AS timestamptz))
       AND (CAST(:we AS timestamptz) IS NULL
