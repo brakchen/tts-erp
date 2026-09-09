@@ -19,7 +19,6 @@
     sales: "有效销售",
     gmv_sales: "销售",
     gmv_ad: "平台GMV",
-    ad_count: "广告数",
     roi_l0: "ROI₀",
     order_count: "有效单",
     cancelled_order_count: "取消单量",
