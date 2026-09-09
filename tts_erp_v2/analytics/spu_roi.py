@@ -1172,6 +1172,7 @@ def _query_spu_roi(
                 "unit_cost_used": _fmt_money(r["unit_cost_used"]),
                 "cost_source": r["cost_source"],
                 "net_revenue": _fmt_money(r["net_revenue"]),
+                "settled_net": _fmt_money(r["settled_net"]),
                 "settled_sales": _fmt_money(r["settled_sales"]),
                 "unsettled_sales": _fmt_money(r["unsettled_sales"]),
                 "settled_order_count": r["settled_order_count"],
