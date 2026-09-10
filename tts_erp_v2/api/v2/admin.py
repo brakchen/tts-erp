@@ -177,3 +177,73 @@ def reset_rate_limit(
         reset_by_role=str(request.scope.get("api_key_role", "") or ""),
         reset_at=datetime.now(timezone.utc),
     )
+
+
+# ─── Plugin sync data purge ────────────────────────────────────────────
+
+# Tables that store Chrome extension synced data. Deletion order matters:
+# child tables (FK → raw_log.id) first, then the parent raw_log.
+_ANALYTICS_TABLES = [
+    "analytics.ad_today",
+    "analytics.ad_daily",
+    "analytics.ad_monthly",
+    "analytics.ad_raw_log",
+    "analytics.plugin_logs",
+]
+
+_CHROME_SYNC_CHILD_TABLES = [
+    "chrome_sync.order_lines",
+    "chrome_sync.orders",
+    "chrome_sync.shipments",
+    "chrome_sync.tracking_events",
+    "chrome_sync.settlement_details",
+    "chrome_sync.settlements",
+]
+
+_CHROME_SYNC_RAW_LOG = "chrome_sync.raw_log"
+
+
+@router.post(
+    "/purge-plugin-data",
+    summary="一键清除所有插件同步数据（admin only）",
+)
+def purge_plugin_data(request: Request) -> dict[str, Any]:
+    """Delete all Chrome extension synced data from analytics and chrome_sync schemas.
+
+    **Admin only.** Clears 12 tables in a single transaction:
+    - analytics: ad_today, ad_daily, ad_monthly, raw_log, plugin_logs
+    - chrome_sync: orders, order_lines, shipments, tracking_events,
+      settlements, settlement_details, raw_log
+
+    Returns per-table row counts before deletion.
+    """
+    require_role_at_least(request, "admin")
+
+    from sqlalchemy import text
+
+    from tts_erp_v2.db.base import get_engine
+
+    engine = get_engine()
+    counts: dict[str, int] = {}
+
+    with engine.begin() as conn:
+        # Count rows first (for the response)
+        all_tables = _ANALYTICS_TABLES + _CHROME_SYNC_CHILD_TABLES + [_CHROME_SYNC_RAW_LOG]
+        for table in all_tables:
+            try:
+                row = conn.execute(text(f"SELECT COUNT(*) FROM {table}"))  # pi-lens-ignore: python-sql-injection — hardcoded table names
+                counts[table] = int(row.scalar() or 0)
+            except Exception:
+                counts[table] = -1  # table doesn't exist
+
+        # Delete in FK-safe order: children first, then parent
+        for table in _CHROME_SYNC_CHILD_TABLES + [_CHROME_SYNC_RAW_LOG] + _ANALYTICS_TABLES:
+            if counts.get(table, 0) > 0:
+                conn.execute(text(f"DELETE FROM {table}"))  # pi-lens-ignore: python-sql-injection — hardcoded table names
+
+    return {
+        "cleared": {k: v for k, v in counts.items() if v > 0},
+        "total_rows_deleted": sum(v for v in counts.values() if v > 0),
+        "purged_by": str(request.scope.get("api_key_hash", "") or "")[:12],
+        "purged_at": datetime.now(timezone.utc).isoformat(),
+    }
