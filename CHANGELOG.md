@@ -1,5 +1,19 @@
 # tts-erp CHANGELOG
 
+## 2026-09-11 — 删除 v3 遗留对象（migration 0020）
+
+- **DROP** `analytics.ad_product_links`（视图）、`analytics.ad_raw`、
+  `analytics.ad_sync_audit` —— migration `0020_drop_v3_analytics_leftovers`。
+- 引用面审计（删前完成）：生产 Python **零引用**该视图；SPU ROI 的 `_SQL_ROI_AD`
+  直接读 `ad_daily ∪ ad_today` 并自行 JOIN `commerce`。`ad_raw` 自 v4 上线即冻结
+  （只写 `ad_raw_log`），最后真实写入 2026-09-09。
+- 配套：删 `tests/analytics/test_ad_product_links_view.py`（9 用例）；
+  `schema_tts_erp.sql` 重生成；`models/analytics.py` 注释更新；
+  一批现行文档同步（`external-api.md` / `setup/analytics-sync.md` /
+  `spu-real-roi-dashboard.md` 等），历史设计记录加废弃标注。
+- 备份：`/home/schan/backups/analytics_ad_raw_20260911_0118.sql.gz`（1467 行）、
+  `analytics_ad_sync_audit_20260911_0120.sql.gz`（2287 行）。
+
 ## 2026-09-07 (refactor) — pages/spu-roi v7 重构（rubric v8 / D1-D8 全拍板）
 
 设计稿 `tech-doc/analytics/spu-roi-v7-refactor.md` 落地。生产库实测 v8 新基线：

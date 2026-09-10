@@ -2,6 +2,16 @@
 
 > 接 `analytics-v2-migration-plan.md`：v2 切流（`/v2/analytics/sync/{cursor,batches}`）落地后，发现 cursor 协议和 batches 协议仍然承载了过多 **client-side 状态机**（page task 队列、lease、expected_page_count、isCompleteDailyUploadUnit、跨 batch 一致性检查等）。本方案把 plugin 彻底简化为 "dumb dump"，所有派生状态由 tts-erp 从 **ad_raw 源** 推导。
 
+> **⚠ 状态（2026-09-11）：本文所述 v3 区间聚合协议已废弃，遗留对象已删除。**
+> `analytics.ad_raw` / `analytics.ad_sync_audit` 两张表与 `analytics.ad_product_links`
+> 视图已由 **migration 0020** 删除。背景：`ad_raw` 自 v4 逐日协议上线后即冻结
+> （现行 `repository.py` 只写 `ad_raw_log`），而 `ad_product_links` 是 `ad_raw` 的
+> 唯一依赖者却**零生产消费者** —— SPU ROI 的 `_SQL_ROI_AD`
+> （`tts_erp_v2/analytics/spu_roi.py`）一直直接读 `ad_daily ∪ ad_today` 并自行 JOIN
+> `commerce`，从不经过该视图。**本文保留为当时的设计记录，不再反映现状**；
+> 现行架构见 `tech-doc/analytics/daily-sync-with-coverage.md`，引用面审计见
+> `alembic/versions/0020_drop_v3_analytics_leftovers.py` 的模块 docstring。
+
 ## 1. 现状问题（commit cc04490 之后的代码事实）
 
 ### 1.1 plugin 端状态机（`entrypoints/background.ts` ~1700 行）

@@ -6,7 +6,7 @@
 >
 > 上游：Chrome 扩展 (tk-adv-cost-monitor) 推 `productAnalyses` / `sessionAnalyses` / `campaignChangeLogs` 三类分析 dump
 > 下游：（无，纯存储 + has-data 预检服务）
-> 存储：PostgreSQL `tts_erp` 数据库 · `analytics` schema · **2 张表**（`ad_raw` + 元数据审计 `ad_sync_audit`）—— 2026-09-05 reorg 后由 5 张收为 1 张（详见 `tech-doc/analytics/reorg-plan.md`），2026-09-07 v3 区间聚合再加审计表（见 `tech-doc/analytics/range-aggregate-history-sync.md`）
+> 存储：PostgreSQL `tts_erp` 数据库 · `analytics` schema · **5 张表**（`ad_today` / `ad_daily` / `ad_monthly` / `ad_raw_log` / `plugin_logs`）—— 2026-09-11 migration 0020 已删除 v3 遗留的 `ad_raw` / `ad_sync_audit` 表与 `ad_product_links` 视图—— 2026-09-05 reorg 后由 5 张收为 1 张（详见 `tech-doc/analytics/reorg-plan.md`），2026-09-07 v3 区间聚合再加审计表（见 `tech-doc/analytics/range-aggregate-history-sync.md`）
 >
 > **变更背景**：
 >
@@ -14,6 +14,12 @@
 > - 2026-09-02 dump architecture（migration 0005，见 `tech-doc/analytics/dump-architecture.md`）：删除 plugin 端 page-task 状态机与 server 端 cursor work-list；`/batches`（批量 records[]）换为 `/dumps`（**单 dump object，严禁批量**）；新增 `ad_raw` source-of-truth 表；cursor 降级为 **has-data 预检**。
 > - 2026-09-07 区间聚合同步（protocol v3，migration 0012-0014，见 `tech-doc/analytics/range-aggregate-history-sync.md`）：插件改为「历史整段 `[S..T-1]` 聚合 + 今日 30s 快照」，每 `(scope,endpoint,campaign,kind)` 至多一行 live；扩展插件与 tts-erp **同窗口发布**。
 
+> **⚠ 本文的存储层描述以 v3 为主，已部分过期（2026-09-11）。**
+> v3 的 `analytics.ad_raw` 单表 + `ad_product_links` 视图已由 **migration 0020** 删除；
+> 现行存储是 v4 逐日协议（`ad_today` / `ad_daily` / `ad_monthly` / `ad_raw_log`），
+> 见 `tech-doc/analytics/daily-sync-with-coverage.md`。下文出现的 `ad_raw` 应读作
+> `ad_raw_log`，"视图"部分请以新文档为准。**本文件待整体重写。**
+>
 ## 是什么
 
 Chrome 扩展（`tk-adv-cost-monitor`）在 TikTok 广告分析页拦截到一次 HTTP 交换

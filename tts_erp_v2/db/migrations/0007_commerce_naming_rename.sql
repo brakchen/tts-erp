@@ -1,3 +1,9 @@
+-- ⚠ 已废弃的一次性迁移（2026-09-11 标注）：本文件是 alembic 之前的历史产物，
+-- 无任何脚本/CI 执行它。其中 `CREATE VIEW analytics.ad_product_links` 的部分已失效 ——
+-- 该视图连同 ad_raw / ad_sync_audit 已由 alembic migration 0020 删除。
+-- **请勿重新执行本文件**（会重建已删除的视图，造成 schema 漂移）。
+-- 现行 schema 以 alembic 迁移链 + schema_tts_erp.sql 为准。
+
 -- =============================================================================
 -- 0007: commerce 域命名重构（ADR-0003 §2.6 + D1 拍板）
 --   tables:  channel_accounts->shops | channel_products->products_spu | channel_product_variants->products_sku

@@ -429,7 +429,7 @@ Response `{spu_pk, cases[], meta}`。`cases[]` 每条 = `case_id, order_id(可�
 
 广告 tab 数据源（**无窗口参数**——广告全窗口累计，与主表一致）。
 
-Response `{spu_pk, ads[], meta}`。`ads[]` 每条 = `campaign_id, spend(USD), orders, first_day, last_day`（`analytics.ad_product_links` 视图聚合）。**不含 `campaign_name`**——v8 拍板不追（同步数据无名称字段）。
+Response `{spu_pk, ads[], meta}`。`ads[]` 每条 = `campaign_id, spend(USD), orders, first_day, last_day`（`analytics.ad_daily` ∪ `analytics.ad_today` 聚合（`spu_roi.py::_SQL_ROI_AD` 直读））。**不含 `campaign_name`**——v8 拍板不追（同步数据无名称字段）。
 
 #### 4 端点共享约定
 
@@ -596,7 +596,7 @@ Errors:
 
 单 dump 写入（dump architecture，2026-09-02 起；旧 `/batches` 批量协议
 已下线 404）。一次请求 = 一次完整 HTTP 交换的原始落库
-（`analytics.ad_raw`，source-of-truth）。plugin **严禁批量**：一页一
+（`analytics.ad_raw_log`，原始请求日志）。plugin **严禁批量**：一页一
 dump、一页一发，永不把 N 页 buffer 成一批（见
 `analytics/dump-architecture.md` D2）。
 
@@ -626,7 +626,7 @@ Body（≤ 2 MB）：
   campaign, kind)` 至多一行 live（Design A 快照）。
 - v2（`protocolVersion: 2`，无 `kind`/区间）：legacy daily 单日写入兼容
   （`day_start=day_end=day`），首个覆盖它们的 v3 history 写入时被同事务折叠。
-- `request` / `response` = plugin 抓的完整 HTTP 交换（JSONB 原样落 ad_raw）。
+- `request` / `response` = plugin 抓的完整 HTTP 交换（JSONB 原样落 `ad_raw_log`）。
 - `capturedAt` 必须带时区（`Z` 或 `+00:00`）。
 - 不带 `page`（隐式 = 1）/ `expectedPageCount` / `storageKey` /
   `sourceRecordId` —— 这些概念在 dump architecture 已删除；`storageKey`
@@ -654,8 +654,11 @@ Success response (`code: 0`):
 
 `status ∈ {"inserted", "updated", "duplicate", "stale_ignored"}` — 全部视为成功。
 
-内容被取代事件（history 替换/推进/重建、daily 折叠、today 跨天 reset）写
-`analytics.ad_sync_audit` 一行元数据审计（与主写同事务；30s today 常规刷新不写）。
+~~内容被取代事件（history 替换/推进/重建、daily 折叠、today 跨天 reset）写
+`analytics.ad_sync_audit` 一行元数据审计（与主写同事务；30s today 常规刷新不写）。~~
+**（2026-09-11 起失效：v3 遗留对象已由 migration 0020 删除）**：v4 逐日协议不做取代审计 ——
+`ad_daily` 每日一行 `ON CONFLICT DO NOTHING` 写入后不可变，本就没有"被取代"概念；
+`ad_today` 用 `ON CONFLICT DO UPDATE` 原地刷新，跨天由 `analytics.solidify` 固化后删除。
 
 Errors:
 

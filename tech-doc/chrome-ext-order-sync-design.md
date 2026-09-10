@@ -709,7 +709,7 @@ Authorization: Bearer <key>
 | 现有组件 | 关系 |
 | --- | --- |
 | `commerce.*` / `fulfillment.*` / `finance.*` | **完全隔离**。chrome_sync 有自己独立的 orders/shipments/settlements 表，不建 FK、不共享数据、不走 sync-worker |
-| `analytics.ad_raw` | 模式相似（dump → 存储），但 analytics 用 raw 暂存 + sync-worker 派生；chrome_sync 是 inline 解析 + raw_log 审计 |
+| `analytics.ad_raw_log` | 模式相似（dump → 存储），但 analytics 用 raw 暂存 + sync-worker 派生；chrome_sync 是 inline 解析 + raw_log 审计 |
 | `integration.raw_records` | 旧 v1 遗物，存 sync-worker 拉的数据。chrome_sync 来源完全不同（Chrome 扩展抓的） |
 | `sync_worker` | **不参与**。chrome_sync 的解析在 API handler 内 inline 完成，不需要调度 |
 

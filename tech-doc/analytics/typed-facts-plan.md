@@ -7,6 +7,16 @@
 > ✅ 2026-09-05 命名 gate 已解锁（ADR-0003 §2.6 已实施，live DB + 代码均已切到
 > `shop_pk` / `spu_pk`）；本方案 SQL 以新命名为准（已同步于 §5）。
 
+> **⚠ 状态（2026-09-11）：本文所述 v3 区间聚合协议已废弃，遗留对象已删除。**
+> `analytics.ad_raw` / `analytics.ad_sync_audit` 两张表与 `analytics.ad_product_links`
+> 视图已由 **migration 0020** 删除。背景：`ad_raw` 自 v4 逐日协议上线后即冻结
+> （现行 `repository.py` 只写 `ad_raw_log`），而 `ad_product_links` 是 `ad_raw` 的
+> 唯一依赖者却**零生产消费者** —— SPU ROI 的 `_SQL_ROI_AD`
+> （`tts_erp_v2/analytics/spu_roi.py`）一直直接读 `ad_daily ∪ ad_today` 并自行 JOIN
+> `commerce`，从不经过该视图。**本文保留为当时的设计记录，不再反映现状**；
+> 现行架构见 `tech-doc/analytics/daily-sync-with-coverage.md`，引用面审计见
+> `alembic/versions/0020_drop_v3_analytics_leftovers.py` 的模块 docstring。
+
 ## 1. 解决的问题（前一轮遗留的最大设计债）
 
 `ad_product_links` VIEW 目前**每次查询对全量历史 ad_raw 做 jsonb 运行时解析**：

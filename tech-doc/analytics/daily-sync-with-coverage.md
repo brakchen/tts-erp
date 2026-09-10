@@ -26,7 +26,7 @@
 - 每个同步任务各自有 coverage 查询，独立断点续传
 - 用户只选开始日，结束日由代码固定
 - `spu_roi.py` 直接读 `ad_daily` + `ad_today`，不再走 `ad_product_links` VIEW
-- `ad_product_links` VIEW 改读新表
+- ~~`ad_product_links` VIEW 改读新表~~ → **实际结局：删除该视图**（2026-09-11，migration 0020）——`_SQL_ROI_AD` 已直读新表，视图零生产消费者，改读没有意义
 
 ### 决策日志（D-*，实施即 lock）
 
@@ -42,7 +42,7 @@
 | D-8 | `ad_raw_log` 用 `kind` 区分 daily/monthly | 分两张日志表（冗余） |
 | D-9 | coverage 查询方案 B：一次返回所有 campaign 的覆盖数据 | 方案 A：逐 campaign 查询（30 次请求） |
 | D-10 | `spu_roi.py` 直接读 `ad_daily` + `ad_today` | 继续走 `ad_product_links` VIEW（多一层间接） |
-| D-11 | `ad_product_links` VIEW 改读新表 | 废弃 VIEW（影响其他未知消费方） |
+| D-11 | ~~VIEW 改读新表~~ → **已删除**（migration 0020，2026-09-11）| 保留 VIEW 并改读新表 |
 
 ---
 

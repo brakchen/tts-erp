@@ -6,6 +6,16 @@
 > 影响仓库：`tts-erp`（服务端）+ `chrome-plugins/ads-data-sync`（插件，同时下发一份 pointer）
 > 改动性质：破坏性协议升级（protocol v3）+ schema 演进（migration 0012），**两仓库同窗口上线**
 
+> **⚠ 状态（2026-09-11）：本文所述 v3 区间聚合协议已废弃，遗留对象已删除。**
+> `analytics.ad_raw` / `analytics.ad_sync_audit` 两张表与 `analytics.ad_product_links`
+> 视图已由 **migration 0020** 删除。背景：`ad_raw` 自 v4 逐日协议上线后即冻结
+> （现行 `repository.py` 只写 `ad_raw_log`），而 `ad_product_links` 是 `ad_raw` 的
+> 唯一依赖者却**零生产消费者** —— SPU ROI 的 `_SQL_ROI_AD`
+> （`tts_erp_v2/analytics/spu_roi.py`）一直直接读 `ad_daily ∪ ad_today` 并自行 JOIN
+> `commerce`，从不经过该视图。**本文保留为当时的设计记录，不再反映现状**；
+> 现行架构见 `tech-doc/analytics/daily-sync-with-coverage.md`，引用面审计见
+> `alembic/versions/0020_drop_v3_analytics_leftovers.py` 的模块 docstring。
+
 ---
 
 ## 0. TL;DR

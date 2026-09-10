@@ -204,7 +204,8 @@ tts_erp_v2/
 ├── jobs/                # 同步 job 实现：tiktok/*、miaoshou/*、
 │                        #   reporting（cost_snapshots 6h / profit_daily 1h）、token_refresh（6h）、runner
 ├── sync_worker/         # APScheduler；JOBS 注册表 + 调度状态（顶部 NOTE，以它为准）
-├── db/models/           # 10 schema SQLAlchemy 模型 — 2026-09-05 reorg 后 analytics schema 仅 ad_raw 1 表（reorg-plan §2）
+├── db/models/           # 10 schema SQLAlchemy 模型 — analytics 现为 ad_today/ad_daily/ad_monthly/ad_raw_log/plugin_logs
+│                        #   （v3 的 ad_raw + ad_sync_audit 表 + ad_product_links 视图已于 2026-09-11 由 migration 0020 删除）
 ├── analytics/ linkage/ reporting/ storage/
 └── static/
 
