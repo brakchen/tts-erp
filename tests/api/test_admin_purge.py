@@ -6,6 +6,7 @@ Verifies:
 - returns correct row counts
 - idempotent (clear on empty tables is a no-op)
 """
+
 from __future__ import annotations
 
 import pytest
@@ -47,7 +48,8 @@ def test_purge_plugin_data_returns_empty_on_clean_db(api_client, admin_key):
 def test_purge_plugin_data_clears_ad_tables(api_client, admin_key, db_engine):
     """插入测试数据后清除，验证行数返回正确."""
     with db_engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             INSERT INTO analytics.ad_daily (
                 seller_id, advertiser_id, campaign_id, product_id,
                 endpoint, day, mixed_real_cost, onsite_roi2_shopping_sku,
@@ -56,8 +58,10 @@ def test_purge_plugin_data_clears_ad_tables(api_client, admin_key, db_engine):
                 'TEST_SELLER', 'TEST_ADV', 'TEST_CAMP', 'TEST_PROD',
                 '/test', '2026-09-10', 10.00, 5, 50.00, now()
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             INSERT INTO analytics.ad_raw_log (
                 seller_id, advertiser_id, endpoint, campaign_id,
                 product_id, kind, day, request_url, request_method,
@@ -67,7 +71,8 @@ def test_purge_plugin_data_clears_ad_tables(api_client, admin_key, db_engine):
                 'TEST_PROD', 'daily', '2026-09-10', 'https://test.com', 'POST',
                 '{}', 200, '{}', 'TEST'
             )
-        """))
+        """)
+        )
 
     # Verify data exists
     with Session(db_engine) as sess:
@@ -86,8 +91,13 @@ def test_purge_plugin_data_clears_ad_tables(api_client, admin_key, db_engine):
 
     # Verify tables are empty
     with Session(db_engine) as sess:
-        for table in ["analytics.ad_daily", "analytics.ad_today", "analytics.ad_monthly",
-                       "analytics.ad_raw_log", "analytics.plugin_logs"]:
+        for table in [
+            "analytics.ad_daily",
+            "analytics.ad_today",
+            "analytics.ad_monthly",
+            "analytics.ad_raw_log",
+            "analytics.plugin_logs",
+        ]:
             count = sess.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar()
             assert count == 0, f"{table} should be empty after purge"
 

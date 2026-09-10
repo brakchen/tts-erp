@@ -210,14 +210,14 @@ _CHROME_SYNC_RAW_LOG = "chrome_sync.raw_log"
 def purge_plugin_data(request: Request) -> dict[str, Any]:
     """Delete all Chrome extension synced data from analytics and chrome_sync schemas.
 
-    **Admin only.** Clears 12 tables in a single transaction:
+    **Readwrite role required.** Clears 12 tables in a single transaction:
     - analytics: ad_today, ad_daily, ad_monthly, raw_log, plugin_logs
     - chrome_sync: orders, order_lines, shipments, tracking_events,
       settlements, settlement_details, raw_log
 
     Returns per-table row counts before deletion.
     """
-    require_role_at_least(request, "admin")
+    require_role_at_least(request, "readwrite")
 
     from sqlalchemy import text
 
@@ -228,18 +228,26 @@ def purge_plugin_data(request: Request) -> dict[str, Any]:
 
     with engine.begin() as conn:
         # Count rows first (for the response)
-        all_tables = _ANALYTICS_TABLES + _CHROME_SYNC_CHILD_TABLES + [_CHROME_SYNC_RAW_LOG]
+        all_tables = (
+            _ANALYTICS_TABLES + _CHROME_SYNC_CHILD_TABLES + [_CHROME_SYNC_RAW_LOG]
+        )
         for table in all_tables:
             try:
-                row = conn.execute(text(f"SELECT COUNT(*) FROM {table}"))  # pi-lens-ignore: python-sql-injection — hardcoded table names
+                row = conn.execute(
+                    text(f"SELECT COUNT(*) FROM {table}")
+                )  # pi-lens-ignore: python-sql-injection — hardcoded table names
                 counts[table] = int(row.scalar() or 0)
             except Exception:
                 counts[table] = -1  # table doesn't exist
 
         # Delete in FK-safe order: children first, then parent
-        for table in _CHROME_SYNC_CHILD_TABLES + [_CHROME_SYNC_RAW_LOG] + _ANALYTICS_TABLES:
+        for table in (
+            _CHROME_SYNC_CHILD_TABLES + [_CHROME_SYNC_RAW_LOG] + _ANALYTICS_TABLES
+        ):
             if counts.get(table, 0) > 0:
-                conn.execute(text(f"DELETE FROM {table}"))  # pi-lens-ignore: python-sql-injection — hardcoded table names
+                conn.execute(
+                    text(f"DELETE FROM {table}")
+                )  # pi-lens-ignore: python-sql-injection — hardcoded table names
 
     return {
         "cleared": {k: v for k, v in counts.items() if v > 0},
