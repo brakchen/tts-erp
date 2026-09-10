@@ -19,7 +19,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import AliasChoices, BaseModel, Field, ValidationError, field_validator
 from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session
 
@@ -139,7 +139,10 @@ class DumpBodyIn(BaseModel):
     method: str = Field(min_length=1, max_length=16)
     request: DumpRequestIn
     response: DumpResponseIn
-    capturedAt: datetime
+    # 统一命名 createdAt（2026-09-10 用户拍板）；capturedAt 为旧插件兼容别名。
+    createdAt: datetime = Field(
+        validation_alias=AliasChoices("createdAt", "capturedAt"),
+    )
 
     @field_validator("domain")
     @classmethod
@@ -148,12 +151,12 @@ class DumpBodyIn(BaseModel):
             raise ValueError(f"domain must be one of {sorted(VALID_DOMAINS)}")
         return v
 
-    @field_validator("capturedAt")
+    @field_validator("createdAt")
     @classmethod
-    def _captured_at_must_be_utc(cls, v: datetime) -> datetime:
+    def _created_at_must_be_utc(cls, v: datetime) -> datetime:
         if v.tzinfo is None:
             raise ValueError(
-                "capturedAt must include a timezone (use ISO-8601 with 'Z' or '+00:00')"
+                "createdAt must include a timezone (use ISO-8601 with 'Z' or '+00:00')"
             )
         return v
 
@@ -341,7 +344,7 @@ def post_dumps(
     shop_id = payload.scope.shopId
     domain = payload.dump.domain
     endpoint = payload.dump.endpoint
-    captured_at = payload.dump.capturedAt
+    captured_at = payload.dump.createdAt
     request_params = payload.dump.request.params
     request_body = payload.dump.request.body
     response_body = payload.dump.response.body

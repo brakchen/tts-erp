@@ -69,11 +69,12 @@ EXPECTED_JOB_INTERVALS = {
     "reporting.profit_daily": 3600,
     "spu.image_mirror": 1800,
     "fx.sync": 3600,
+    "analytics.solidify": 3600,
 }
 
 
 def test_jobs_registry_has_expected_count() -> None:
-    """14 jobs total — keeps us honest if a new one slips in unannounced.
+    """17 jobs total — keeps us honest if a new one slips in unannounced.
 
     2026-09-05 reorg: ``analytics.retention`` 已从 JOBS 摘除（见
     tech-doc/analytics/reorg-plan.md 决策 #1-#4）—— ad_records /
@@ -82,10 +83,12 @@ def test_jobs_registry_has_expected_count() -> None:
     到本地 MinIO，页面渲染不再直连 TikTok CDN）→ 12 → 13。
     2026-09-06：fx.sync 加入（ExchangeRate-API 汇率缓存，horizon-gated
     ≈1 请求/天）→ 13 → 14。
+    2026-09-08：analytics.solidify 加入（ad_today→ad_daily 跨天固化）→ 14 → 17。
     """
-    # 6 tiktok + 10 system (token + 5 miaoshou + 2 reporting + image_mirror
-    # + fx.sync) — keep the number pinned so we don't drift silently.
-    assert len(JOBS) == 16
+    # 6 tiktok + 11 system (token + 5 miaoshou + 2 reporting + image_mirror
+    # + fx.sync + analytics.solidify) — keep the number pinned so we don't
+    # drift silently.
+    assert len(JOBS) == 17
 
 
 @pytest.mark.parametrize(

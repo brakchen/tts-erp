@@ -217,10 +217,23 @@ JOBS: dict[str, JobSpec] = {
         is_tiktok=False,
         entrypoint="run_scheduled",
     ),
+    # ── Analytics solidify (2026-09-08) ──────────────────────────────
+    # ad_today → ad_daily 跨天固化。每天零点后将前一天的 ad_today 数据
+    # 固化到 ad_daily（coverage 查询走 ad_daily），然后清空 ad_today。
+    # 每小时跑一次，空表时 early return（保护窗 UTC 00:00-01:00）。
+    # Design: tech-doc/analytics/daily-sync-with-coverage.md §5.6。
+    "analytics.solidify": JobSpec(
+        job_name="analytics.solidify",
+        module_path="tts_erp_v2.jobs.analytics_solidify",
+        interval_seconds=3600,  # 1 h — 只在昨天数据存在时执行
+        is_tiktok=False,
+        entrypoint="run",
+    ),
     # ── Analytics retention 已于 2026-09-05 reorg（tech-doc/analytics/
     # reorg-plan.md 决策 #1-#4）摘除：ad_records / ad_audit_log / 等 4 张
     # 表已 drop,审计改文件日志,无对象可 purge。JOBS 数 13 → 12。
     # 2026-09-05 晚：spu.image_mirror 加入 → 12 → 13（见 coverage 测试）。
+    # 2026-09-08：analytics.solidify 加入 → 13 → 14（ad_today→ad_daily 固化）。
 }
 
 

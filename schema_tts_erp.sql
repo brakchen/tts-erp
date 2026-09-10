@@ -40,6 +40,11 @@ CREATE SCHEMA after_sales;
 CREATE SCHEMA analytics;
 
 
+-- Name: chrome_sync; Type: SCHEMA; Schema: -; Owner: -
+
+CREATE SCHEMA chrome_sync;
+
+
 -- Name: commerce; Type: SCHEMA; Schema: -; Owner: -
 
 CREATE SCHEMA commerce;
@@ -144,6 +149,58 @@ CREATE TABLE IF NOT EXISTS after_sales.cases (
 
 ALTER TABLE after_sales.cases ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME after_sales.cases_id_seq
+);
+
+
+-- Name: ad_daily; Type: TABLE; Schema: analytics; Owner: -
+
+CREATE TABLE IF NOT EXISTS analytics.ad_daily (
+    id bigint NOT NULL,
+    seller_id text NOT NULL,
+    advertiser_id text NOT NULL,
+    campaign_id text NOT NULL,
+    product_id text NOT NULL,
+    endpoint text NOT NULL,
+    day date NOT NULL,
+    mixed_real_cost numeric(20,4),
+    onsite_roi2_shopping_sku bigint,
+    onsite_roi2_shopping_value numeric(20,4),
+    onsite_mixed_real_roi2_shopping numeric(20,4),
+    metrics_extra jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE analytics.ad_daily ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME analytics.ad_daily_id_seq
+);
+
+
+-- Name: ad_monthly; Type: TABLE; Schema: analytics; Owner: -
+
+CREATE TABLE IF NOT EXISTS analytics.ad_monthly (
+    id bigint NOT NULL,
+    seller_id text NOT NULL,
+    advertiser_id text NOT NULL,
+    campaign_id text NOT NULL,
+    product_id text NOT NULL,
+    endpoint text NOT NULL,
+    year_month text NOT NULL,
+    mixed_real_cost numeric(20,4),
+    onsite_roi2_shopping_sku bigint,
+    onsite_roi2_shopping_value numeric(20,4),
+    onsite_mixed_real_roi2_shopping numeric(20,4),
+    metrics_extra jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE analytics.ad_monthly ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME analytics.ad_monthly_id_seq
 );
 
 
@@ -355,6 +412,37 @@ CREATE VIEW analytics.ad_product_links AS
 
 
 
+-- Name: ad_raw_log; Type: TABLE; Schema: analytics; Owner: -
+
+CREATE TABLE IF NOT EXISTS analytics.ad_raw_log (
+    id bigint NOT NULL,
+    seller_id text NOT NULL,
+    advertiser_id text NOT NULL,
+    endpoint text NOT NULL,
+    campaign_id text,
+    product_id text,
+    kind text NOT NULL,
+    day date,
+    year_month text,
+    request_url text NOT NULL,
+    request_method text NOT NULL,
+    request_body jsonb,
+    response_status integer,
+    response_body jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    request_id text,
+    source text DEFAULT 'tiktok-shop-data-sync'::text,
+    CONSTRAINT ad_raw_log_kind_check CHECK ((kind = ANY (ARRAY['daily'::text, 'today'::text, 'monthly'::text])))
+);
+
+
+
+ALTER TABLE analytics.ad_raw_log ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME analytics.ad_raw_log_id_seq
+);
+
+
 -- Name: ad_sync_audit; Type: TABLE; Schema: analytics; Owner: -
 
 CREATE TABLE IF NOT EXISTS analytics.ad_sync_audit (
@@ -374,6 +462,8 @@ CREATE TABLE IF NOT EXISTS analytics.ad_sync_audit (
     new_captured_at timestamp with time zone,
     reason text,
     request_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT ck_ad_sync_audit_event CHECK ((event = ANY (ARRAY['history_replaced'::text, 'rollover_advanced'::text, 'window_rebuilt'::text, 'legacy_collapsed'::text, 'today_reset'::text]))),
     CONSTRAINT ck_ad_sync_audit_kind CHECK ((kind = ANY (ARRAY['history'::text, 'today'::text, 'daily'::text])))
 );
@@ -382,6 +472,256 @@ CREATE TABLE IF NOT EXISTS analytics.ad_sync_audit (
 
 ALTER TABLE analytics.ad_sync_audit ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME analytics.ad_sync_audit_id_seq
+);
+
+
+-- Name: ad_today; Type: TABLE; Schema: analytics; Owner: -
+
+CREATE TABLE IF NOT EXISTS analytics.ad_today (
+    id bigint NOT NULL,
+    seller_id text NOT NULL,
+    advertiser_id text NOT NULL,
+    campaign_id text NOT NULL,
+    product_id text NOT NULL,
+    endpoint text NOT NULL,
+    day date NOT NULL,
+    mixed_real_cost numeric(20,4),
+    onsite_roi2_shopping_sku bigint,
+    onsite_roi2_shopping_value numeric(20,4),
+    onsite_mixed_real_roi2_shopping numeric(20,4),
+    metrics_extra jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE analytics.ad_today ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME analytics.ad_today_id_seq
+);
+
+
+-- Name: plugin_logs; Type: TABLE; Schema: analytics; Owner: -
+
+CREATE TABLE IF NOT EXISTS analytics.plugin_logs (
+    id bigint NOT NULL,
+    seller_id text NOT NULL,
+    advertiser_id text NOT NULL,
+    plugin_version text NOT NULL,
+    level text NOT NULL,
+    message text NOT NULL,
+    context jsonb,
+    occurred_at timestamp with time zone NOT NULL,
+    received_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT plugin_logs_level_check CHECK ((level = ANY (ARRAY['info'::text, 'warn'::text, 'error'::text])))
+);
+
+
+
+ALTER TABLE analytics.plugin_logs ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME analytics.plugin_logs_id_seq
+);
+
+
+-- Name: order_lines; Type: TABLE; Schema: chrome_sync; Owner: -
+
+CREATE TABLE IF NOT EXISTS chrome_sync.order_lines (
+    id bigint NOT NULL,
+    log_id bigint NOT NULL,
+    shop_id text NOT NULL,
+    order_id text NOT NULL,
+    sku_id text NOT NULL,
+    product_id text,
+    product_name text,
+    variant_name text,
+    image_url text,
+    quantity numeric(20,4),
+    unit_price numeric(20,4),
+    currency text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    total_price numeric(20,4),
+    main_order_status integer,
+    sku_display_status integer
+);
+
+
+
+ALTER TABLE chrome_sync.order_lines ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME chrome_sync.order_lines_id_seq
+);
+
+
+-- Name: orders; Type: TABLE; Schema: chrome_sync; Owner: -
+
+CREATE TABLE IF NOT EXISTS chrome_sync.orders (
+    id bigint NOT NULL,
+    log_id bigint NOT NULL,
+    shop_id text NOT NULL,
+    order_id text NOT NULL,
+    currency text,
+    payment_amount numeric(20,4),
+    total_amount numeric(20,4),
+    order_time timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    main_order_status integer,
+    sku_display_status integer,
+    fulfillment_type integer,
+    pay_method text,
+    sale_region text,
+    shipping_fee numeric(20,4),
+    update_time timestamp with time zone,
+    latest_rts_time timestamp with time zone,
+    latest_tts_time timestamp with time zone,
+    buyer_nickname text
+);
+
+
+
+ALTER TABLE chrome_sync.orders ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME chrome_sync.orders_id_seq
+);
+
+
+-- Name: raw_log; Type: TABLE; Schema: chrome_sync; Owner: -
+
+CREATE TABLE IF NOT EXISTS chrome_sync.raw_log (
+    id bigint NOT NULL,
+    domain text NOT NULL,
+    shop_id text NOT NULL,
+    endpoint text NOT NULL,
+    captured_at timestamp with time zone NOT NULL,
+    request_params jsonb,
+    request_body jsonb,
+    response_body jsonb NOT NULL,
+    parse_error text,
+    rows_written integer DEFAULT 0 NOT NULL,
+    source text DEFAULT 'chrome-ext'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE chrome_sync.raw_log ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME chrome_sync.raw_log_id_seq
+);
+
+
+-- Name: settlement_details; Type: TABLE; Schema: chrome_sync; Owner: -
+
+CREATE TABLE IF NOT EXISTS chrome_sync.settlement_details (
+    id bigint NOT NULL,
+    log_id bigint NOT NULL,
+    shop_id text NOT NULL,
+    statement_id text NOT NULL,
+    statement_version integer DEFAULT 0 NOT NULL,
+    sku_detail_id text NOT NULL,
+    trade_order_id text,
+    sku_id text,
+    product_name text,
+    sku_name text,
+    quantity numeric(20,4),
+    settlement_status text,
+    placed_time timestamp with time zone,
+    settlement_amount numeric(20,4),
+    earning_amount numeric(20,4),
+    fees_amount numeric(20,4),
+    currency text,
+    fee_components jsonb,
+    seller_web_cut_flow boolean,
+    seller_app_cut_flow boolean,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE chrome_sync.settlement_details ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME chrome_sync.settlement_details_id_seq
+);
+
+
+-- Name: settlements; Type: TABLE; Schema: chrome_sync; Owner: -
+
+CREATE TABLE IF NOT EXISTS chrome_sync.settlements (
+    id bigint NOT NULL,
+    log_id bigint NOT NULL,
+    shop_id text NOT NULL,
+    statement_id text NOT NULL,
+    statement_version integer DEFAULT 0 NOT NULL,
+    bill_period text,
+    period_start date,
+    period_end date,
+    settlement_time timestamp with time zone,
+    settlement_id text,
+    payment_id text,
+    payment_status text,
+    statement_type integer,
+    payment_pending_reason integer,
+    settle_amount numeric(20,4),
+    earning_amount numeric(20,4),
+    fee_amount numeric(20,4),
+    adjust_amount numeric(20,4),
+    payable_amount numeric(20,4),
+    shipping_amount numeric(20,4),
+    total_reserve_amount numeric(20,4),
+    currency text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE chrome_sync.settlements ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME chrome_sync.settlements_id_seq
+);
+
+
+-- Name: shipments; Type: TABLE; Schema: chrome_sync; Owner: -
+
+CREATE TABLE IF NOT EXISTS chrome_sync.shipments (
+    id bigint NOT NULL,
+    log_id bigint NOT NULL,
+    shop_id text NOT NULL,
+    order_id text NOT NULL,
+    package_id text NOT NULL,
+    tracking_number text,
+    carrier_name text,
+    status text,
+    shipped_at timestamp with time zone,
+    delivered_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE chrome_sync.shipments ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME chrome_sync.shipments_id_seq
+);
+
+
+-- Name: tracking_events; Type: TABLE; Schema: chrome_sync; Owner: -
+
+CREATE TABLE IF NOT EXISTS chrome_sync.tracking_events (
+    id bigint NOT NULL,
+    log_id bigint NOT NULL,
+    shop_id text NOT NULL,
+    package_id text NOT NULL,
+    event_key text NOT NULL,
+    event_at timestamp with time zone,
+    description text,
+    location text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE chrome_sync.tracking_events ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME chrome_sync.tracking_events_id_seq
 );
 
 
@@ -1256,16 +1596,142 @@ ALTER TABLE ONLY after_sales.cases
     ADD CONSTRAINT uq_cases_account_ext UNIQUE (shop_pk, external_case_id);
 
 
+-- Name: ad_daily ad_daily_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
+
+ALTER TABLE ONLY analytics.ad_daily
+    ADD CONSTRAINT ad_daily_pkey PRIMARY KEY (id);
+
+
+-- Name: ad_monthly ad_monthly_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
+
+ALTER TABLE ONLY analytics.ad_monthly
+    ADD CONSTRAINT ad_monthly_pkey PRIMARY KEY (id);
+
+
+-- Name: ad_raw_log ad_raw_log_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
+
+ALTER TABLE ONLY analytics.ad_raw_log
+    ADD CONSTRAINT ad_raw_log_pkey PRIMARY KEY (id);
+
+
 -- Name: ad_sync_audit ad_sync_audit_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
 
 ALTER TABLE ONLY analytics.ad_sync_audit
     ADD CONSTRAINT ad_sync_audit_pkey PRIMARY KEY (id);
 
 
+-- Name: ad_today ad_today_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
+
+ALTER TABLE ONLY analytics.ad_today
+    ADD CONSTRAINT ad_today_pkey PRIMARY KEY (id);
+
+
 -- Name: ad_raw analytics_raw_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
 
 ALTER TABLE ONLY analytics.ad_raw
     ADD CONSTRAINT analytics_raw_pkey PRIMARY KEY (id);
+
+
+-- Name: plugin_logs plugin_logs_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
+
+ALTER TABLE ONLY analytics.plugin_logs
+    ADD CONSTRAINT plugin_logs_pkey PRIMARY KEY (id);
+
+
+-- Name: ad_daily uq_ad_daily; Type: CONSTRAINT; Schema: analytics; Owner: -
+
+ALTER TABLE ONLY analytics.ad_daily
+    ADD CONSTRAINT uq_ad_daily UNIQUE (seller_id, advertiser_id, endpoint, campaign_id, product_id, day);
+
+
+-- Name: ad_monthly uq_ad_monthly; Type: CONSTRAINT; Schema: analytics; Owner: -
+
+ALTER TABLE ONLY analytics.ad_monthly
+    ADD CONSTRAINT uq_ad_monthly UNIQUE (seller_id, advertiser_id, endpoint, campaign_id, product_id, year_month);
+
+
+-- Name: ad_today uq_ad_today; Type: CONSTRAINT; Schema: analytics; Owner: -
+
+ALTER TABLE ONLY analytics.ad_today
+    ADD CONSTRAINT uq_ad_today UNIQUE (seller_id, advertiser_id, endpoint, campaign_id, product_id, day);
+
+
+-- Name: order_lines order_lines_pkey; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
+
+ALTER TABLE ONLY chrome_sync.order_lines
+    ADD CONSTRAINT order_lines_pkey PRIMARY KEY (id);
+
+
+-- Name: orders orders_pkey; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
+
+ALTER TABLE ONLY chrome_sync.orders
+    ADD CONSTRAINT orders_pkey PRIMARY KEY (id);
+
+
+-- Name: raw_log raw_log_pkey; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
+
+ALTER TABLE ONLY chrome_sync.raw_log
+    ADD CONSTRAINT raw_log_pkey PRIMARY KEY (id);
+
+
+-- Name: settlement_details settlement_details_pkey; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
+
+ALTER TABLE ONLY chrome_sync.settlement_details
+    ADD CONSTRAINT settlement_details_pkey PRIMARY KEY (id);
+
+
+-- Name: settlements settlements_pkey; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
+
+ALTER TABLE ONLY chrome_sync.settlements
+    ADD CONSTRAINT settlements_pkey PRIMARY KEY (id);
+
+
+-- Name: shipments shipments_pkey; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
+
+ALTER TABLE ONLY chrome_sync.shipments
+    ADD CONSTRAINT shipments_pkey PRIMARY KEY (id);
+
+
+-- Name: tracking_events tracking_events_pkey; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
+
+ALTER TABLE ONLY chrome_sync.tracking_events
+    ADD CONSTRAINT tracking_events_pkey PRIMARY KEY (id);
+
+
+-- Name: order_lines uq_order_lines_order_sku; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
+
+ALTER TABLE ONLY chrome_sync.order_lines
+    ADD CONSTRAINT uq_order_lines_order_sku UNIQUE (shop_id, order_id, sku_id);
+
+
+-- Name: orders uq_orders_shop_order; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
+
+ALTER TABLE ONLY chrome_sync.orders
+    ADD CONSTRAINT uq_orders_shop_order UNIQUE (shop_id, order_id);
+
+
+-- Name: settlement_details uq_settlement_details_shop_sku; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
+
+ALTER TABLE ONLY chrome_sync.settlement_details
+    ADD CONSTRAINT uq_settlement_details_shop_sku UNIQUE (shop_id, sku_detail_id);
+
+
+-- Name: settlements uq_settlements_shop_stmt; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
+
+ALTER TABLE ONLY chrome_sync.settlements
+    ADD CONSTRAINT uq_settlements_shop_stmt UNIQUE (shop_id, statement_id, statement_version);
+
+
+-- Name: shipments uq_shipments_shop_pkg; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
+
+ALTER TABLE ONLY chrome_sync.shipments
+    ADD CONSTRAINT uq_shipments_shop_pkg UNIQUE (shop_id, package_id);
+
+
+-- Name: tracking_events uq_tracking_events_pkg_key; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
+
+ALTER TABLE ONLY chrome_sync.tracking_events
+    ADD CONSTRAINT uq_tracking_events_pkg_key UNIQUE (shop_id, package_id, event_key);
 
 
 -- Name: shops channel_accounts_pkey; Type: CONSTRAINT; Schema: commerce; Owner: -
@@ -1691,9 +2157,39 @@ CREATE INDEX IF NOT EXISTS ix_cases_case_type_status ON after_sales.cases USING 
 CREATE INDEX IF NOT EXISTS ix_cases_sales_order ON after_sales.cases USING btree (order_pk);
 
 
+-- Name: idx_ad_daily_coverage; Type: INDEX; Schema: analytics; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_ad_daily_coverage ON analytics.ad_daily USING btree (seller_id, advertiser_id, endpoint, campaign_id, day);
+
+
+-- Name: idx_ad_daily_product_day; Type: INDEX; Schema: analytics; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_ad_daily_product_day ON analytics.ad_daily USING btree (product_id, day);
+
+
+-- Name: idx_ad_monthly_coverage; Type: INDEX; Schema: analytics; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_ad_monthly_coverage ON analytics.ad_monthly USING btree (seller_id, advertiser_id, endpoint, campaign_id, year_month);
+
+
+-- Name: idx_ad_raw_log_day; Type: INDEX; Schema: analytics; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_ad_raw_log_day ON analytics.ad_raw_log USING btree (day);
+
+
+-- Name: idx_ad_raw_log_request_id; Type: INDEX; Schema: analytics; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_ad_raw_log_request_id ON analytics.ad_raw_log USING btree (request_id);
+
+
 -- Name: idx_ad_sync_audit_scope; Type: INDEX; Schema: analytics; Owner: -
 
 CREATE INDEX IF NOT EXISTS idx_ad_sync_audit_scope ON analytics.ad_sync_audit USING btree (seller_id, advertiser_id, campaign_id, occurred_at DESC);
+
+
+-- Name: idx_ad_today_coverage; Type: INDEX; Schema: analytics; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_ad_today_coverage ON analytics.ad_today USING btree (seller_id, advertiser_id, endpoint, campaign_id, day);
 
 
 -- Name: idx_analytics_raw_received; Type: INDEX; Schema: analytics; Owner: -
@@ -1711,6 +2207,16 @@ CREATE INDEX IF NOT EXISTS idx_analytics_raw_request ON analytics.ad_raw USING b
 CREATE INDEX IF NOT EXISTS idx_analytics_raw_scope ON analytics.ad_raw USING btree (seller_id, advertiser_id, endpoint, day_end);
 
 
+-- Name: idx_plugin_logs_level; Type: INDEX; Schema: analytics; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_plugin_logs_level ON analytics.plugin_logs USING btree (level, occurred_at DESC);
+
+
+-- Name: idx_plugin_logs_seller_time; Type: INDEX; Schema: analytics; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_plugin_logs_seller_time ON analytics.plugin_logs USING btree (seller_id, occurred_at DESC);
+
+
 -- Name: uq_analytics_raw_daily; Type: INDEX; Schema: analytics; Owner: -
 
 CREATE UNIQUE INDEX uq_analytics_raw_daily ON analytics.ad_raw USING btree (seller_id, advertiser_id, endpoint, day_end, campaign_id) WHERE (kind = 'daily'::text);
@@ -1719,6 +2225,46 @@ CREATE UNIQUE INDEX uq_analytics_raw_daily ON analytics.ad_raw USING btree (sell
 -- Name: uq_analytics_raw_live; Type: INDEX; Schema: analytics; Owner: -
 
 CREATE UNIQUE INDEX uq_analytics_raw_live ON analytics.ad_raw USING btree (seller_id, advertiser_id, endpoint, campaign_id, kind) WHERE (kind = ANY (ARRAY['history'::text, 'today'::text]));
+
+
+-- Name: ix_orders_main_order_status; Type: INDEX; Schema: chrome_sync; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_orders_main_order_status ON chrome_sync.orders USING btree (main_order_status);
+
+
+-- Name: ix_orders_shop; Type: INDEX; Schema: chrome_sync; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_orders_shop ON chrome_sync.orders USING btree (shop_id);
+
+
+-- Name: ix_raw_log_created; Type: INDEX; Schema: chrome_sync; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_raw_log_created ON chrome_sync.raw_log USING btree (created_at);
+
+
+-- Name: ix_raw_log_domain_shop; Type: INDEX; Schema: chrome_sync; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_raw_log_domain_shop ON chrome_sync.raw_log USING btree (domain, shop_id);
+
+
+-- Name: ix_raw_log_endpoint; Type: INDEX; Schema: chrome_sync; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_raw_log_endpoint ON chrome_sync.raw_log USING btree (endpoint);
+
+
+-- Name: ix_settlement_details_stmt; Type: INDEX; Schema: chrome_sync; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_settlement_details_stmt ON chrome_sync.settlement_details USING btree (shop_id, statement_id);
+
+
+-- Name: ix_settlements_shop; Type: INDEX; Schema: chrome_sync; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_settlements_shop ON chrome_sync.settlements USING btree (shop_id);
+
+
+-- Name: ix_shipments_order; Type: INDEX; Schema: chrome_sync; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_shipments_order ON chrome_sync.shipments USING btree (shop_id, order_id);
 
 
 -- Name: ix_channel_accounts_status; Type: INDEX; Schema: commerce; Owner: -
@@ -1956,9 +2502,39 @@ CREATE OR REPLACE TRIGGER trg_after_sales_case_lines_touch BEFORE UPDATE ON afte
 CREATE OR REPLACE TRIGGER trg_after_sales_cases_touch BEFORE UPDATE ON after_sales.cases FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
+-- Name: ad_sync_audit trg_ad_sync_audit_touch; Type: TRIGGER; Schema: analytics; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_ad_sync_audit_touch BEFORE UPDATE ON analytics.ad_sync_audit FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: ad_daily trg_analytics_ad_daily_touch; Type: TRIGGER; Schema: analytics; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_analytics_ad_daily_touch BEFORE UPDATE ON analytics.ad_daily FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: ad_monthly trg_analytics_ad_monthly_touch; Type: TRIGGER; Schema: analytics; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_analytics_ad_monthly_touch BEFORE UPDATE ON analytics.ad_monthly FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: ad_raw_log trg_analytics_ad_raw_log_touch; Type: TRIGGER; Schema: analytics; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_analytics_ad_raw_log_touch BEFORE UPDATE ON analytics.ad_raw_log FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
 -- Name: ad_raw trg_analytics_ad_raw_touch; Type: TRIGGER; Schema: analytics; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_analytics_ad_raw_touch BEFORE UPDATE ON analytics.ad_raw FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: ad_today trg_analytics_ad_today_touch; Type: TRIGGER; Schema: analytics; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_analytics_ad_today_touch BEFORE UPDATE ON analytics.ad_today FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: plugin_logs trg_analytics_plugin_logs_touch; Type: TRIGGER; Schema: analytics; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_analytics_plugin_logs_touch BEFORE UPDATE ON analytics.plugin_logs FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
 -- Name: shops trg_commerce_channel_accounts_touch; Type: TRIGGER; Schema: commerce; Owner: -
@@ -2174,6 +2750,42 @@ ALTER TABLE ONLY after_sales.cases
 
 ALTER TABLE ONLY after_sales.cases
     ADD CONSTRAINT cases_sales_order_id_fkey FOREIGN KEY (order_pk) REFERENCES commerce.sales_orders(id) ON DELETE RESTRICT;
+
+
+-- Name: order_lines order_lines_log_id_fkey; Type: FK CONSTRAINT; Schema: chrome_sync; Owner: -
+
+ALTER TABLE ONLY chrome_sync.order_lines
+    ADD CONSTRAINT order_lines_log_id_fkey FOREIGN KEY (log_id) REFERENCES chrome_sync.raw_log(id);
+
+
+-- Name: orders orders_log_id_fkey; Type: FK CONSTRAINT; Schema: chrome_sync; Owner: -
+
+ALTER TABLE ONLY chrome_sync.orders
+    ADD CONSTRAINT orders_log_id_fkey FOREIGN KEY (log_id) REFERENCES chrome_sync.raw_log(id);
+
+
+-- Name: settlement_details settlement_details_log_id_fkey; Type: FK CONSTRAINT; Schema: chrome_sync; Owner: -
+
+ALTER TABLE ONLY chrome_sync.settlement_details
+    ADD CONSTRAINT settlement_details_log_id_fkey FOREIGN KEY (log_id) REFERENCES chrome_sync.raw_log(id);
+
+
+-- Name: settlements settlements_log_id_fkey; Type: FK CONSTRAINT; Schema: chrome_sync; Owner: -
+
+ALTER TABLE ONLY chrome_sync.settlements
+    ADD CONSTRAINT settlements_log_id_fkey FOREIGN KEY (log_id) REFERENCES chrome_sync.raw_log(id);
+
+
+-- Name: shipments shipments_log_id_fkey; Type: FK CONSTRAINT; Schema: chrome_sync; Owner: -
+
+ALTER TABLE ONLY chrome_sync.shipments
+    ADD CONSTRAINT shipments_log_id_fkey FOREIGN KEY (log_id) REFERENCES chrome_sync.raw_log(id);
+
+
+-- Name: tracking_events tracking_events_log_id_fkey; Type: FK CONSTRAINT; Schema: chrome_sync; Owner: -
+
+ALTER TABLE ONLY chrome_sync.tracking_events
+    ADD CONSTRAINT tracking_events_log_id_fkey FOREIGN KEY (log_id) REFERENCES chrome_sync.raw_log(id);
 
 
 -- Name: shops channel_accounts_credential_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
@@ -2550,5 +3162,5 @@ ALTER TABLE ONLY reporting.shipment_tracking_summary
 
 -- PostgreSQL database dump complete
 
-\unrestrict QDZcAfU8Cg7ckRHrrT3Hnyx7TQYEvKvljD6I3LBM5n3uaCUvkJs4oLr63jTKpuH
+\unrestrict zetIgGRa4YFGq67epXWAUmYJmitSF7pWlKFAvxiNJC9RLJV3FP2Rrked5iSGy88
 

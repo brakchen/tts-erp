@@ -86,12 +86,30 @@ _SQL_ROI_AD = text(
     """
     SELECT spu_pk,
            count(DISTINCT campaign_id)::int          AS ad_count,
-           coalesce(sum(real_cost_total), 0)         AS spend,
-           coalesce(sum(order_value_total), 0)       AS gmv_ad,
-           coalesce(sum(order_sku_total), 0)::bigint AS ad_orders,
-           min(first_day)                            AS ad_first_day,
-           max(last_day)                             AS ad_last_day
-    FROM analytics.ad_product_links
+           coalesce(sum(mixed_real_cost), 0)         AS spend,
+           coalesce(sum(onsite_roi2_shopping_value), 0) AS gmv_ad,
+           coalesce(sum(onsite_roi2_shopping_sku), 0)::bigint AS ad_orders,
+           min(day)                                  AS ad_first_day,
+           max(day)                                  AS ad_last_day
+    FROM (
+        SELECT d.campaign_id, d.product_id, d.day,
+               d.mixed_real_cost, d.onsite_roi2_shopping_sku,
+               d.onsite_roi2_shopping_value,
+               cp.id AS spu_pk
+        FROM analytics.ad_daily d
+        LEFT JOIN commerce.shops ca ON ca.platform = 'tiktok' AND ca.shop_id = d.seller_id
+        LEFT JOIN commerce.products_spu cp ON cp.shop_pk = ca.id AND cp.spu_id = d.product_id
+        WHERE d.endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'
+        UNION ALL
+        SELECT t.campaign_id, t.product_id, t.day,
+               t.mixed_real_cost, t.onsite_roi2_shopping_sku,
+               t.onsite_roi2_shopping_value,
+               cp.id AS spu_pk
+        FROM analytics.ad_today t
+        LEFT JOIN commerce.shops ca ON ca.platform = 'tiktok' AND ca.shop_id = t.seller_id
+        LEFT JOIN commerce.products_spu cp ON cp.shop_pk = ca.id AND cp.spu_id = t.product_id
+        WHERE t.endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'
+    ) combined
     WHERE spu_pk IS NOT NULL
     GROUP BY spu_pk
     """
@@ -281,8 +299,14 @@ _SQL_ROI_CATALOG = text(
 )
 
 _SQL_ROI_WINDOW = text(
-    "SELECT min(first_day) AS first_day, max(last_day) AS last_day "
-    "FROM analytics.ad_product_links"
+    "SELECT min(day) AS first_day, max(day) AS last_day "
+    "FROM ("
+    "  SELECT day FROM analytics.ad_daily "
+    "  WHERE endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list' "
+    "  UNION ALL "
+    "  SELECT day FROM analytics.ad_today "
+    "  WHERE endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list' "
+    ") combined"
 )
 
 _SQL_ROI_DATA_WINDOW = text(
@@ -507,14 +531,26 @@ _SQL_DETAIL_CASES = text(
 _SQL_DETAIL_ADS = text(
     """
     SELECT campaign_id,
-           sum(real_cost_total)        AS spend,
-           sum(order_sku_total)::bigint AS ad_orders,
-           min(first_day)               AS first_day,
-           max(last_day)                AS last_day
-    FROM analytics.ad_product_links
-    WHERE spu_pk = :spu_pk
+           sum(mixed_real_cost)        AS spend,
+           sum(onsite_roi2_shopping_sku)::bigint AS ad_orders,
+           min(day)                     AS first_day,
+           max(day)                     AS last_day
+    FROM (
+        SELECT campaign_id, product_id, day,
+               mixed_real_cost, onsite_roi2_shopping_sku
+        FROM analytics.ad_daily
+        WHERE endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'
+        UNION ALL
+        SELECT campaign_id, product_id, day,
+               mixed_real_cost, onsite_roi2_shopping_sku
+        FROM analytics.ad_today
+        WHERE endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'
+    ) combined
+    WHERE product_id IN (
+        SELECT cp.spu_id FROM commerce.products_spu cp WHERE cp.id = :spu_pk
+    )
     GROUP BY campaign_id
-    ORDER BY max(last_day) DESC NULLS LAST, campaign_id
+    ORDER BY max(day) DESC NULLS LAST, campaign_id
     """
 )
 
@@ -626,14 +662,20 @@ def _resolve_costs_batch(
     # L1: manual_product_costs（人工标注的采购成交价）
     rows = sess.execute(_SQL_COST_MANUAL, {"pks": spu_pks}).mappings().all()
     for r in rows:
-        out[int(r["spu_pk"])] = (Decimal(r["unit_cost"]), "MANUAL")  # pi-lens-ignore: no-try-except
+        out[int(r["spu_pk"])] = (
+            Decimal(r["unit_cost"]),
+            "MANUAL",
+        )  # pi-lens-ignore: no-try-except
 
     # L2: SOURCE_PRICE（1688 货源价，direct + via offer 两条路径）
     missing = [pk for pk in spu_pks if pk not in out]
     if missing:
         rows = sess.execute(_SQL_COST_SOURCE_DIRECT, {"pks": missing}).mappings().all()
         for r in rows:
-            out[int(r["spu_pk"])] = (Decimal(r["unit_cost"]), "SOURCE_PRICE")  # pi-lens-ignore: no-try-except
+            out[int(r["spu_pk"])] = (
+                Decimal(r["unit_cost"]),
+                "SOURCE_PRICE",
+            )  # pi-lens-ignore: no-try-except
         still_missing = [pk for pk in missing if pk not in out]
         if still_missing:
             rows = (
@@ -642,7 +684,10 @@ def _resolve_costs_batch(
                 .all()
             )
             for r in rows:
-                out[int(r["spu_pk"])] = (Decimal(r["unit_cost"]), "SOURCE_PRICE")  # pi-lens-ignore: no-try-except
+                out[int(r["spu_pk"])] = (
+                    Decimal(r["unit_cost"]),
+                    "SOURCE_PRICE",
+                )  # pi-lens-ignore: no-try-except
 
     # L3: DEFAULT_K1（40 CNY/件 兜底，UI 上需 ⚠ 标注）
     for pk in spu_pks:
@@ -687,7 +732,9 @@ def _query_spu_roi(
     )
 
     ad_rows = sess.execute(_SQL_ROI_AD).mappings().all()
-    ad_map = {int(r["spu_pk"]): r for r in ad_rows if r["spu_pk"] is not None}  # pi-lens-ignore: no-try-except
+    ad_map = {
+        int(r["spu_pk"]): r for r in ad_rows if r["spu_pk"] is not None
+    }  # pi-lens-ignore: no-try-except
 
     sales_rows = (
         sess.execute(
@@ -697,7 +744,9 @@ def _query_spu_roi(
         .mappings()
         .all()
     )
-    sales_map = {int(r["spu_pk"]): r for r in sales_rows if r["spu_pk"] is not None}  # pi-lens-ignore: no-try-except
+    sales_map = {
+        int(r["spu_pk"]): r for r in sales_rows if r["spu_pk"] is not None
+    }  # pi-lens-ignore: no-try-except
 
     fl_rows = (
         sess.execute(
@@ -714,7 +763,9 @@ def _query_spu_roi(
         .mappings()
         .all()
     )
-    fl_map = {int(r["spu_pk"]): r for r in fl_rows if r["spu_pk"] is not None}  # pi-lens-ignore: no-try-except
+    fl_map = {
+        int(r["spu_pk"]): r for r in fl_rows if r["spu_pk"] is not None
+    }  # pi-lens-ignore: no-try-except
 
     rs_rows = (
         sess.execute(
@@ -730,7 +781,9 @@ def _query_spu_roi(
         .mappings()
         .all()
     )
-    rs_map = {int(r["spu_pk"]): r for r in rs_rows if r["spu_pk"] is not None}  # pi-lens-ignore: no-try-except
+    rs_map = {
+        int(r["spu_pk"]): r for r in rs_rows if r["spu_pk"] is not None
+    }  # pi-lens-ignore: no-try-except
 
     refund_rows = (
         sess.execute(
@@ -746,7 +799,9 @@ def _query_spu_roi(
         .mappings()
         .all()
     )
-    refund_map = {int(r["spu_pk"]): r for r in refund_rows if r["spu_pk"] is not None}  # pi-lens-ignore: no-try-except
+    refund_map = {
+        int(r["spu_pk"]): r for r in refund_rows if r["spu_pk"] is not None
+    }  # pi-lens-ignore: no-try-except
 
     # 成本链批量解析（D1）
     spu_pks_all = [int(c["spu_pk"]) for c in cats]  # pi-lens-ignore: no-try-except

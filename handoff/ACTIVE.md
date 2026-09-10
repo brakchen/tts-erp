@@ -50,6 +50,7 @@
 
 >>>>>>> fix/spu-roi-table-fixed
 | fix/spu-roi-cell-padding-v2 | spu-roi 主表 cell 水平 padding 减半(2026-09-08 用户反馈「这里间距太宽」)：spu-roi `tbody.op-rows td` padding 9px 8px → 8px 4px(此 CSS 在 spu-roi `<style>` 段内,不是 manual-costs 共享的 `.op-table td`)。8 列 × 8px 水平 padding 砍半 = 共腾出 32px,特别是「关联广告数」这种只显 1-2 位小数的列效果明显 | 本 session | .worktrees/spu-roi-cell-pad-v2 / fix/spu-roi-cell-padding-v2 | tts_erp_v2/api/v2/pages.py、handoff/ACTIVE.md | merged (b7b1a03) | 2026-09-08T19:30Z |
+| fix/analytics-dump-createdat | analytics/order-sync dump 时间键统一 `createdAt`（服务端 DumpBodyIn canonical + AliasChoices 兼容旧 `capturedAt` 别名），修复插件 0.1.127 的 v4 dump 全 400「dump.capturedAt Field required」卡同步；含 4 个测试文件改名 + v4 设计文档 wire 示例 `created_at`→`createdAt` 纠正（该文档正是插件照抄写错的源头）+ 测试库补 chrome_sync schema | 本 session（接管上一位未完成诊断） | master（WIP 上增量，未提交） | tts_erp_v2/api/v2/analytics.py、tts_erp_v2/api/v2/order_sync.py、tests/api/{test_analytics_dumps_v4,test_order_sync_contract,test_analytics_v2_errors,test_analytics_v2_contract}.py、tech-doc/analytics/daily-sync-with-coverage.md | draft（已生效：API+sync-worker 已重启，冒烟 8/8） | 2026-09-10T15:35Z |
 
 <!-- 新 lane 示例（复制改）：
 | lane_id | 主题 | owner(session) | .worktrees/<slug> / branch | 文件列表 | draft | <UTC> |

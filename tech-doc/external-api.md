@@ -359,6 +359,7 @@ Response envelope:`{items: [...], total, totals, meta}`。
 | `cpa` | money-str/null | M15: `spend / ad_orders` | — |
 
 > **v8 语义变化（breaking relative to v5 文本）**：
+>
 > - `net_profit / roi_real / roi_breakeven / platform_fee` 公式重写（见 M18/M14/M17/M19）
 > - `return_loss` 口径从"完结退货件 × cost"切到"全损件数 × cost"（M13b v8）
 > - `cost_source` 从两值扩为四值
@@ -369,6 +370,7 @@ Response envelope:`{items: [...], total, totals, meta}`。
 格式化约定(§5.1):**money = 4 位小数字符串**、比率/ROI = 2 位小数字符串、件数/单量整数;`null` = 无解/除数为 0(页面显示 `—`);无投放 SPU `spend="0.0000"` + `ad_count=0`。全表金额统一 USD(原币 VND/CNY 服务端按 fx 快照一次换算,`meta.fx` 标注)。`totals` = 跨分页、当前筛选的加总:`row_count`(SPU 数)、单量(`order_count` 有效单 / `cancelled_order_count` 取消单 / `total_orders` = 两者之和,跨可见 SPU 全局去重)、`gmv`(全部订单销售额 = 白名单有效 ∪ 取消订单的原始行金额;money-str)与 `spend, sales, refund_net_amount, return_loss, net_profit`(行级 USD 服务端加总,4 位小数字符串)、`roi_real`(Σ(net_revenue−return_loss)/Σspend,Σspend=0 → null);`total` = 匹配行数。**口径注(2026-09-06 全链状态口径,COD 店)**:行级 `sales`/单量/`gmv` 全部按**订单状态**下单即算——白名单状态订单(含 COD 在途/待收款)计入 `sales` 与有效单量;取消订单只进 `gmv`/`cancelled_order_count`,不重复入 sales;净利润/退款率/ROI 等派生金额自动跟随状态口径 sales(回款前偏乐观)。窗口裁剪列 = `COALESCE(paid_at, order_time)`(已收款按收款日；COD 在途/取消未收款按下单日)。**主表行内列集(v8 D8 主表精简)**:**主列 = 商品 + 消耗USD/有效GMV(`sales`)/有效出单量(`order_count`)/取消率(`cancel_rate`)/全损率%(`full_loss_rate`)/净利润**;其余 26 字段（ROI/保本/平台佣金/全损货损金额/已结未结 GMV/退款拆分/广告归因/订单结构）由行内 accordion 钻取面板五 tab 顶部汇总区展示（详见下节）。`meta` 携带 fx/fee/cost_assumption/window/**`rubric_version`(v8 新增)**:"/"unattributed_refund_lines/computed_at/currency;`meta.window` 为 ad 视图观测窗口(供参考),销售/退款是否裁剪见 `note`。
 
 **v8 默认值总览**：
+
 - `sort="roi_real"`（API 契约不动；页面 JS 显式传 `sort=net_profit&order=asc`）
 - `fee_rate=0.308`（仅作用于未结算订单 `unsettled_sales × 0.308`，已结不受影响）
 - `include_all=false`、`limit=100`、`order="asc"`
@@ -506,6 +508,90 @@ coverage 响应示例（`code: 0`）：
 ```
 
 legacy has-data 响应仍为 `{day, endpoint, storageKey, hasData[, campaignId]}`。
+
+#### `GET /v2/analytics/sync/coverage`
+
+批量 coverage 查询（方案 B）：一次返回所有 campaign 的覆盖数据。支持天级（`kind=daily`）和月级（`kind=monthly`）两种粒度。设计文档：`analytics/daily-sync-with-coverage.md` §5.1。
+
+Auth：**readwrite** + per-seller scope grant（同 `/cursor` 和 `/dumps`）。
+
+Query parameters:
+
+| name | type | notes |
+| --- | --- | --- |
+| `sellerId` | string | required, ≤ 128 chars |
+| `advertiserId` | string | required, ≤ 128 chars |
+| `endpoint` | string | required；必须在 dump 白名单（同 `/cursor`） |
+| `kind` | string | required；`daily` 或 `monthly` |
+| `startDay` / `endDay` | date | `kind=daily` 时必带，`YYYY-MM-DD`；`startDay` ≤ `endDay` |
+| `startMonth` / `endMonth` | string | `kind=monthly` 时必带，`YYYY-MM` 格式；`startMonth` ≤ `endMonth` |
+
+`endpoint` 白名单（同 `/cursor` 和 `/dumps`）：
+
+- `/oec_ads/shopping/v1/oec/stat/post_product_list` → `productAnalyses`
+- `/oec_ads/shopping/v1/oec/stat/post_session_list` → `sessionAnalyses`
+- `/oec_ads/shopping/v1/oec/stat/campaign_opt_log_list` → `campaignChangeLogs`
+
+响应示例（`kind=daily`）：
+
+```json
+{
+  "code": 0,
+  "requestId": "req-…",
+  "data": {
+    "kind": "daily",
+    "endpoint": "/oec_ads/…/post_product_list",
+    "storageKey": "productAnalyses",
+    "startDay": "2026-01-01",
+    "endDay": "2026-10-08",
+    "totalRequested": 281,
+    "campaigns": {
+      "campaign-1": {
+        "coveredPeriods": ["2026-01-01", "2026-01-02", "..."],
+        "totalCovered": 280
+      },
+      "campaign-2": {
+        "coveredPeriods": ["2026-03-15", "2026-03-16", "..."],
+        "totalCovered": 207
+      }
+    }
+  }
+}
+```
+
+响应示例（`kind=monthly`）：
+
+```json
+{
+  "code": 0,
+  "requestId": "req-…",
+  "data": {
+    "kind": "monthly",
+    "endpoint": "/oec_ads/…/post_product_list",
+    "storageKey": "productAnalyses",
+    "startMonth": "2026-01",
+    "endMonth": "2026-09",
+    "totalRequested": 9,
+    "campaigns": {
+      "campaign-1": {
+        "coveredPeriods": ["2026-01", "2026-02", "..."],
+        "totalCovered": 8
+      }
+    }
+  }
+}
+```
+
+`totalRequested` = 请求区间内的总天数/月数；`coveredPeriods` = 该 campaign 已有数据的天/月列表（已排序）；`totalCovered` = 已覆盖的天/月数。
+
+Errors:
+
+| code | meaning |
+| --- | --- |
+| 400 `SCHEMA_INVALID` | endpoint 不在白名单 / kind 非法 / 必填日期参数缺失 / 日期格式错误 / startDay > endDay |
+| 403 `SCOPE_DENIED` | scope mismatch |
+| 401 | missing or invalid Bearer token |
+
 #### `POST /v2/analytics/sync/dumps`
 
 单 dump 写入（dump architecture，2026-09-02 起；旧 `/batches` 批量协议
@@ -828,7 +914,7 @@ Stable external endpoints (safe to build dashboards / agents on):
 | `GET /v2/spu-images`, upload/confirm/delete | readonly / readwrite | v2 |
 | `GET /v2/llm-context` | readonly | v2 (content evolves with the schema) |
 | `GET\|POST /v2/auth/*` | public | v2 |
-| `GET /v2/analytics/sync/cursor`, `POST /v2/analytics/sync/dumps` | readwrite + scope | analytics（自有 envelope，frozen） |
+| `GET /v2/analytics/sync/cursor`, `POST /v2/analytics/sync/dumps`, `GET /v2/analytics/sync/coverage` | readwrite + scope | analytics（自有 envelope，frozen） |
 
 Retired (404 since the 2026-08-29 hard switch — do NOT build on these;
 they exist only in git history):

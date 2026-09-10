@@ -13,9 +13,6 @@ from tts_erp_v2.db.models.after_sales import (
     Case,
     CaseLine,
 )
-from tts_erp_v2.db.models.analytics import (
-    AdRaw,
-)
 from tts_erp_v2.db.models.chrome_sync import (
     ChromeOrder,
     ChromeOrderLine,
@@ -83,7 +80,7 @@ from tts_erp_v2.db.models.security import ApiKey
 
 __all__ = [
     "AccountLink",
-    "AdRaw",
+
     "ApiKey",
     "ChromeOrder",
     "ChromeOrderLine",

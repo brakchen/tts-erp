@@ -33,6 +33,12 @@ def test_purge_plugin_data_requires_admin(api_client, readonly_key):
 
 def test_purge_plugin_data_returns_empty_on_clean_db(api_client, admin_key):
     """空库 → 返回零计数."""
+    # 先清一次确保干净
+    api_client.post(
+        "/v2/admin/purge-plugin-data",
+        headers={"Authorization": f"Bearer {admin_key}"},
+    )
+    # 第二次应该全零
     r = api_client.post(
         "/v2/admin/purge-plugin-data",
         headers={"Authorization": f"Bearer {admin_key}"},

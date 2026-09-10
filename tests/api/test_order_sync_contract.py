@@ -48,6 +48,7 @@ def _cleanup_chrome_sync_rows(db_engine):
     yield
     with db_engine.begin() as conn:  # noqa: python-sql-injection — 字面量 SQL
         for stmt in _CLEANUP_SQLS:
+            # pi-lens-ignore: python-sql-injection
             conn.execute(text(stmt), params)
 
 
@@ -74,7 +75,7 @@ def _dump_payload(
             **({"mainOrderId": main_order_id} if main_order_id else {}),
             "request": {"params": {}, "body": None},
             "response": {"status": 200, "body": response_body},
-            "capturedAt": "2026-09-08T10:00:00.000Z",
+            "createdAt": "2026-09-08T10:00:00.000Z",
         },
     }
 

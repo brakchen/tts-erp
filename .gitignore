@@ -60,3 +60,6 @@ tdd/.env
 # 生成的广告报表导出 / 上游 API 文档抓取（一次性，不入库）
 reports/
 tts-partner-api-docs/
+
+# 插件诊断导出（一次性排查产物，不入库）
+tiktok-data-sync-runtime-*.json

@@ -1,14 +1,19 @@
-"""TDD contract tests: /v2/analytics/sync/* — analytics ingest 的 dump architecture 契约。
+"""HTTP 契约测试：/v2/analytics/sync/* — analytics ingest 的 v4 契约。
 
-背景：v2 切流后（commit cc04490）又经历 dump architecture 重构
-（commit ab7fd22 + 8d25c94，tech-doc/analytics/dump-architecture.md）。
-本文件锁定新契约：
-1. 路由：/v2/analytics/sync/cursor（GET, has-data）+ /v2/analytics/sync/dumps（POST, 单 dump）
+背景：dump architecture 重构（tech-doc/analytics/dump-architecture.md）→
+2026-09-05 reorg → v4 结构化 rows 协议
+（tech-doc/analytics/daily-sync-with-coverage.md）。
+
+本文件只锁**传输层/路由层**契约（持久化语义见 ``test_analytics_dumps_v4.py``，
+coverage 语义见 ``test_analytics_coverage.py``）：
+
+1. 路由：``/v2/analytics/sync/coverage``（GET, 批量覆盖）+ ``/v2/analytics/sync/dumps``（POST, 单 dump v4）
 2. auth 分类 = readwrite：匿名 401、readonly 403、readwrite 通过
-3. 旧 /v1/analytics/sync/* 路径 = 404
-4. cursor has-data 模式：endpoint + day 5 元组查 ad_raw，返回 hasData bool
-5. dumps 端到端：合法 dump → accepted/inserted；幂等重放 → duplicate
-6. ad_raw 5 元组 unique 约束保证 dump 幂等
+3. 旧 ``/v1/analytics/sync/*`` 路径 = 404
+4. dumps v4 响应 envelope 形状固定 + ingest 日志行可观测
+
+历史：v3 的 ``/cursor`` has-data 单点查询已由 ``/coverage`` 批量查询取代
+（v3 区间聚合方案已搁置，见 range-aggregate-history-sync.md 的「已搁置」标注）。
 
 数据隔离：TEST_ 哨兵 seller/advertiser，finally 块经 db_engine
 直连清理（handler 内部 commit）。
@@ -24,18 +29,17 @@ from sqlalchemy import text
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
-SELLER = "TEST_seller-dump"
-ADVERTISER = "TEST_adv-dump"
-CAMPAIGN = "TEST_campaign-dump"
+SELLER = "TEST_seller-contract"
+ADVERTISER = "TEST_adv-contract"
+CAMPAIGN = "TEST_campaign-contract"
 ENDPOINT = "/oec_ads/shopping/v1/oec/stat/post_product_list"
 DAY = "2026-08-23"
 
-# dump architecture：dump 唯一性 (scope, endpoint, day, campaign_id)
-# cursor has-data 查 ad_raw（不在 ad_cursors）
-# 2026-09-05 reorg 后:analytics schema 仅剩 ad_raw,4 张派生表已 drop。
-# cleanup SQL 由 5 张表缩为 1 张。
 _CLEANUP_SQL = (
-    "DELETE FROM analytics.ad_raw WHERE seller_id = :s",
+    "DELETE FROM analytics.ad_daily WHERE seller_id = :s",
+    "DELETE FROM analytics.ad_today WHERE seller_id = :s",
+    "DELETE FROM analytics.ad_monthly WHERE seller_id = :s",
+    "DELETE FROM analytics.ad_raw_log WHERE seller_id = :s",
 )
 
 
@@ -45,89 +49,106 @@ def _cleanup_analytics_rows(db_engine):
     params = {"s": SELLER}
     with db_engine.begin() as conn:
         for stmt in _CLEANUP_SQL:
-            # noqa: python-sql-injection — 字面量 SQL tuple
+            # pi-lens-ignore: python-sql-injection
             conn.execute(text(stmt), params)
     yield
     with db_engine.begin() as conn:
         for stmt in _CLEANUP_SQL:
-            # noqa: python-sql-injection — 字面量 SQL tuple
+            # pi-lens-ignore: python-sql-injection
             conn.execute(text(stmt), params)
+
+
+def _dump_body_v4(request_id: str | None = None) -> dict:
+    """最小合法 v4 dump body。"""
+    return {
+        "protocolVersion": 4,
+        "requestId": request_id or str(uuid.uuid4()),
+        "scope": {"sellerId": SELLER, "advertiserId": ADVERTISER},
+        "dump": {
+            "kind": "daily",
+            "endpoint": ENDPOINT,
+            "method": "POST",
+            "day": DAY,
+            "campaignId": CAMPAIGN,
+            "rows": [{"product_id": "TEST_PROD_1", "mixed_real_cost": "1.00"}],
+            "request": {"url": "http://tiktok.test/...", "body": {}},
+            "response": {"status": 200, "body": {"data": {"table": []}}},
+            "createdAt": "2026-08-23T00:00:00.000Z",
+        },
+    }
 
 
 # ─── 路由 + auth ─────────────────────────────────────────────────────
 
 
-def test_v2_cursor_route_anonymous_is_401(api_client):
+def test_coverage_route_anonymous_is_401(api_client):
     assert (
         api_client.get(
-            "/v2/analytics/sync/cursor",
+            "/v2/analytics/sync/coverage",
             params={
                 "sellerId": SELLER,
                 "advertiserId": ADVERTISER,
                 "endpoint": ENDPOINT,
-                "day": DAY,
+                "kind": "daily",
+                "startDay": DAY,
+                "endDay": DAY,
             },
         ).status_code
         == 401
     )
 
 
-def test_v2_cursor_readonly_key_is_forbidden(api_client, readonly_key):
+def test_coverage_readonly_key_is_forbidden(api_client, readonly_key):
     r = api_client.get(
-        "/v2/analytics/sync/cursor",
+        "/v2/analytics/sync/coverage",
         headers={"Authorization": f"Bearer {readonly_key}"},
         params={
             "sellerId": SELLER,
             "advertiserId": ADVERTISER,
             "endpoint": ENDPOINT,
-            "day": DAY,
+            "kind": "daily",
+            "startDay": DAY,
+            "endDay": DAY,
         },
     )
     assert r.status_code == 403
 
 
-def test_v2_cursor_readwrite_key_passes(api_client, readwrite_key):
+def test_coverage_readwrite_key_passes(api_client, readwrite_key):
     r = api_client.get(
-        "/v2/analytics/sync/cursor",
+        "/v2/analytics/sync/coverage",
         headers={"Authorization": f"Bearer {readwrite_key}"},
         params={
             "sellerId": SELLER,
             "advertiserId": ADVERTISER,
             "endpoint": ENDPOINT,
-            "day": DAY,
+            "kind": "daily",
+            "startDay": DAY,
+            "endDay": DAY,
         },
     )
     assert r.status_code == 200
     body = r.json()
     assert body["code"] == 0
-    assert body["data"]["hasData"] is False
-    assert body["data"]["storageKey"] == "productAnalyses"
+    data = body["data"]
+    assert data["kind"] == "daily"
+    assert data["endpoint"] == ENDPOINT
+    assert data["storageKey"] == "productAnalyses"
+    assert data["totalRequested"] == 1
+    assert data["campaigns"] == {}
 
 
-def test_v2_dumps_route_present(api_client, readwrite_key):
+def test_dumps_v4_route_present(api_client, readwrite_key):
     r = api_client.post(
         "/v2/analytics/sync/dumps",
         headers={"Authorization": f"Bearer {readwrite_key}"},
-        json={
-            "protocolVersion": 2,
-            "requestId": "req-test-dump-1",
-            "scope": {"sellerId": SELLER, "advertiserId": ADVERTISER},
-            "dump": {
-                "endpoint": ENDPOINT,
-                "method": "POST",
-                "day": DAY,
-                "campaignId": CAMPAIGN,
-                "request": {"url": "http://tiktok.test/..."},
-                "response": {"status": 200, "body": {"data": {"rows": []}}},
-                "capturedAt": "2026-08-23T00:00:00.000Z",
-            },
-        },
+        json=_dump_body_v4("req-test-dump-1"),
     )
-    assert r.status_code == 200
+    assert r.status_code == 200, r.text
     body = r.json()
     assert body["code"] == 0
-    assert body["data"]["status"] == "inserted"
-    assert len(body["data"]["idempotencyKey"]) == 64  # SHA-256 hex
+    assert body["data"]["kind"] == "daily"
+    assert body["data"]["inserted"] == 1
 
 
 def test_v1_paths_are_gone(api_client, admin_key):
@@ -140,151 +161,23 @@ def test_v1_paths_are_gone(api_client, admin_key):
         assert r.status_code == 404, f"expected 404 for {path}, got {r.status_code}"
 
 
-# ─── cursor has-data 行为 ───────────────────────────────────────────
+# ─── envelope + 可观测性 ─────────────────────────────────────────────
 
 
-def test_v2_cursor_has_data_returns_true_after_dump(
-    api_client, readwrite_key, db_engine
-):
-    """dump 1 次后，cursor has-data 应返 true。"""
-    # 先 dump 1 次
-    api_client.post(
-        "/v2/analytics/sync/dumps",
-        headers={"Authorization": f"Bearer {readwrite_key}"},
-        json={
-            "protocolVersion": 2,
-            "requestId": str(uuid.uuid4()),
-            "scope": {"sellerId": SELLER, "advertiserId": ADVERTISER},
-            "dump": {
-                "endpoint": ENDPOINT,
-                "method": "POST",
-                "day": DAY,
-                "campaignId": CAMPAIGN,
-                "request": {"url": "http://tiktok.test/..."},
-                "response": {"status": 200, "body": {"data": {"rows": []}}},
-                "capturedAt": "2026-08-23T00:00:00.000Z",
-            },
-        },
-    )
-    # 再查 has-data
-    r = api_client.get(
-        "/v2/analytics/sync/cursor",
-        headers={"Authorization": f"Bearer {readwrite_key}"},
-        params={
-            "sellerId": SELLER,
-            "advertiserId": ADVERTISER,
-            "endpoint": ENDPOINT,
-            "day": DAY,
-            "campaignId": CAMPAIGN,
-        },
-    )
-    body = r.json()
-    assert body["code"] == 0
-    assert body["data"]["hasData"] is True
-    assert body["data"]["storageKey"] == "productAnalyses"
-    assert body["data"]["campaignId"] == CAMPAIGN
-
-
-def test_v2_cursor_has_data_returns_false_before_dump(api_client, readwrite_key):
-    """未 dump 时，cursor has-data 应返 false。"""
-    r = api_client.get(
-        "/v2/analytics/sync/cursor",
-        headers={"Authorization": f"Bearer {readwrite_key}"},
-        params={
-            "sellerId": SELLER,
-            "advertiserId": ADVERTISER,
-            "endpoint": ENDPOINT,
-            "day": "2099-01-01",
-        },
-    )
-    body = r.json()
-    assert body["code"] == 0
-    assert body["data"]["hasData"] is False
-
-
-def test_v2_cursor_400_on_unknown_endpoint(api_client, readwrite_key):
-    r = api_client.get(
-        "/v2/analytics/sync/cursor",
-        headers={"Authorization": f"Bearer {readwrite_key}"},
-        params={
-            "sellerId": SELLER,
-            "advertiserId": ADVERTISER,
-            "endpoint": "/unknown/path",
-            "day": DAY,
-        },
-    )
-    assert r.status_code == 400
-    assert r.json()["code"] == "SCHEMA_INVALID"
-
-
-# ─── /dumps 行为 ─────────────────────────────────────────────────────
-
-
-def test_v2_dumps_insert_then_duplicate(api_client, readwrite_key, db_engine):
-    """同 dump 重放 2 次：第 1 次 inserted，第 2 次 duplicate。"""
-    payload = {
-        "protocolVersion": 2,
-        "requestId": str(uuid.uuid4()),
-        "scope": {"sellerId": SELLER, "advertiserId": ADVERTISER},
-        "dump": {
-            "endpoint": ENDPOINT,
-            "method": "POST",
-            "day": DAY,
-            "campaignId": CAMPAIGN,
-            "request": {"url": "http://tiktok.test/..."},
-            "response": {"status": 200, "body": {"data": {"rows": []}}},
-            "capturedAt": "2026-08-23T00:00:00.000Z",
-        },
-    }
-    r1 = api_client.post(
-        "/v2/analytics/sync/dumps",
-        headers={"Authorization": f"Bearer {readwrite_key}"},
-        json=payload,
-    )
-    r2 = api_client.post(
-        "/v2/analytics/sync/dumps",
-        headers={"Authorization": f"Bearer {readwrite_key}"},
-        json=payload,
-    )
-    assert r1.json()["data"]["status"] == "inserted"
-    assert r2.json()["data"]["status"] == "duplicate"
-    # idempotencyKey 必须一致
-    assert r1.json()["data"]["idempotencyKey"] == r2.json()["data"]["idempotencyKey"]
-
-
-def test_v2_dumps_400_on_unknown_endpoint(api_client, readwrite_key):
-    """endpoint 不在 4 路径白名单 → 400 SCHEMA_INVALID。"""
+def test_dumps_v4_response_is_json_serializable_envelope(api_client, readwrite_key):
     r = api_client.post(
         "/v2/analytics/sync/dumps",
         headers={"Authorization": f"Bearer {readwrite_key}"},
-        json={
-            "protocolVersion": 2,
-            "requestId": "r",
-            "scope": {"sellerId": SELLER, "advertiserId": ADVERTISER},
-            "dump": {
-                "endpoint": "/unknown/path",
-                "method": "POST",
-                "day": DAY,
-                "campaignId": CAMPAIGN,
-                "request": {"url": "x"},
-                "response": {"status": 200, "body": {}},
-                "capturedAt": "2026-08-23T00:00:00.000Z",
-            },
-        },
+        json=_dump_body_v4("req-envelope-1"),
     )
-    assert r.status_code == 400
-    assert r.json()["code"] == "SCHEMA_INVALID"
+    body = r.json()
+    # dump 协议 envelope 字段固定
+    assert set(body.keys()) == {"code", "requestId", "data"}
+    assert set(body["data"].keys()) == {"kind", "rowCount", "inserted", "duplicates", "day"}
+    json.dumps(body)
 
 
-# 2026-09-05 reorg:ad_audit_log 已删、审计改文件日志——
-# test_v2_dumps_audit_log_written 改写为 caplog 断言 ingest 日志行,
-# 见 test_v2_dumps_emits_ingest_log_line below。
-test_v2_dumps_audit_log_written = None  # type: ignore[assignment]
-
-
-def test_v2_dumps_emits_ingest_log_line(
-    api_client, readwrite_key, caplog
-):
+def test_dumps_v4_emits_ingest_log_line(api_client, readwrite_key, caplog):
     """每次 POST /dumps 写一条 ingest logger 单行 key=value（替代 audit_log）。
 
     2026-09-05 reorg 后 audit 职责从 ``analytics.ad_audit_log``（DB 表）
@@ -295,31 +188,15 @@ def test_v2_dumps_emits_ingest_log_line(
     """
     import logging
 
-    from tts_erp_v2.api.v2 import analytics as analytics_module
-
     caplog.set_level(logging.INFO, logger="tts_erp_v2.analytics.ingest")
 
     r = api_client.post(
         "/v2/analytics/sync/dumps",
         headers={"Authorization": f"Bearer {readwrite_key}"},
-        json={
-            "protocolVersion": 2,
-            "requestId": str(uuid.uuid4()),
-            "scope": {"sellerId": SELLER, "advertiserId": ADVERTISER},
-            "dump": {
-                "endpoint": ENDPOINT,
-                "method": "POST",
-                "day": DAY,
-                "campaignId": CAMPAIGN,
-                "request": {"url": "http://tiktok.test/..."},
-                "response": {"status": 200, "body": {"data": {"rows": []}}},
-                "capturedAt": "2026-08-23T00:00:00.000Z",
-            },
-        },
+        json=_dump_body_v4(),
     )
     assert r.status_code == 200
 
-    # 找 method=POST + path=…/dumps + status=200 的一行
     matches = [
         rec
         for rec in caplog.records
@@ -328,41 +205,11 @@ def test_v2_dumps_emits_ingest_log_line(
         and "path=/v2/analytics/sync/dumps" in rec.getMessage()
         and "status=200" in rec.getMessage()
     ]
-    assert matches, f"ingest log line for dumps 200 missing; records={[r.getMessage() for r in caplog.records]}"
+    assert matches, (
+        "ingest log line for dumps 200 missing; "
+        f"records={[r.getMessage() for r in caplog.records]}"
+    )
     msg = matches[-1].getMessage()
     assert "records_in=1" in msg
     assert "records_ok=1" in msg
     assert "records_rej=0" in msg
-
-
-# ─── envelope ─────────────────────────────────────────────────────
-
-
-def test_v2_dumps_response_is_json_serializable_envelope(api_client, readwrite_key):
-    r = api_client.post(
-        "/v2/analytics/sync/dumps",
-        headers={"Authorization": f"Bearer {readwrite_key}"},
-        json={
-            "protocolVersion": 2,
-            "requestId": "req-envelope-1",
-            "scope": {"sellerId": SELLER, "advertiserId": ADVERTISER},
-            "dump": {
-                "endpoint": ENDPOINT,
-                "method": "POST",
-                "day": DAY,
-                "campaignId": CAMPAIGN,
-                "request": {"url": "http://tiktok.test/..."},
-                "response": {"status": 200, "body": {}},
-                "capturedAt": "2026-08-23T00:00:00.000Z",
-            },
-        },
-    )
-    body = r.json()
-    # dump 协议 envelope 字段固定
-    assert set(body.keys()) == {"code", "requestId", "data"}
-    assert set(body["data"].keys()) == {"idempotencyKey", "status"}
-    # idempotencyKey 是 64 字符 hex
-    assert isinstance(body["data"]["idempotencyKey"], str)
-    assert len(body["data"]["idempotencyKey"]) == 64
-    # 整体可 JSON 序列化
-    json.dumps(body)
