@@ -10,9 +10,16 @@
 模型声明与 migration 0018/0019 后的 schema 对齐。本模块只作 metadata 镜像
 —— 实际读写走 tts_erp_v2/analytics/repository.py（raw SQL,无 ORM 写入）。
 
-注意：analytics.ad_raw 和 analytics.ad_sync_audit 表仍存在于数据库中
-（由 migration 0012/0013 创建），但 v3 同步协议已废弃，ORM 模型已移除。
-如需 DROP 这两张表，请通过新的 alembic migration 执行。
+注意（2026-09-11 已清理）：analytics.ad_raw / ad_sync_audit 两张表与
+analytics.ad_product_links 视图已由 **migration 0020** 删除。
+它们是 v3 区间聚合协议（kind history/today + day_start/day_end）的遗留物：
+- ad_raw 早已冻结（现行 repository 只写 ad_raw_log，最后真实写入 2026-09-09）
+- ad_product_links 是 ad_raw 的唯一依赖者，但**零生产消费者** —— SPU ROI 的
+  _SQL_ROI_AD（tts_erp_v2/analytics/spu_roi.py:85）直接读 ad_daily ∪ ad_today
+  并自行 JOIN commerce，从不经过该视图（见 migration 0020 的引用面审计）
+
+回滚材料：/home/schan/backups/analytics_ad_raw_*.sql.gz（1467 行）、
+/home/schan/backups/analytics_ad_sync_audit_*.sql.gz（2287 行）。
 """
 
 from __future__ import annotations
