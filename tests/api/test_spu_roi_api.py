@@ -140,7 +140,12 @@ def _fx_online_consts(db_engine, _isolate_state):
 def _wipe(db_engine) -> None:
     with db_engine.begin() as conn:
         # pi-lens-ignore: python-sql-injection
-        conn.execute(text("DELETE FROM analytics.ad_raw WHERE seller_id LIKE 'TEST_%'"))
+        conn.execute(
+            text("DELETE FROM analytics.ad_daily WHERE seller_id LIKE 'TEST_%'")
+        )
+        conn.execute(
+            text("DELETE FROM analytics.ad_today WHERE seller_id LIKE 'TEST_%'")
+        )
         # pi-lens-ignore: python-sql-injection
         conn.execute(
             text(
@@ -235,52 +240,38 @@ def _seed_ad_dump(
     gmv: str,
     day: str = DAY,
 ) -> None:
-    """post_product_list 一条 ad_raw(1 campaign×SPU×1 day)。"""
+    """post_product_list 一条 ad_daily(1 campaign×SPU×1 day)。"""
     # pi-lens-ignore: python-sql-injection
     sess.execute(
         text(
             """
-            INSERT INTO analytics.ad_raw (
-                idempotency_key, seller_id, advertiser_id, endpoint, method,
-                kind, day_start, day_end, campaign_id, request, response,
-                captured_at, source, protocol_version, schema_version
+            INSERT INTO analytics.ad_daily (
+                seller_id, advertiser_id, campaign_id, product_id, endpoint, day,
+                mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value,
+                onsite_mixed_real_roi2_shopping, metrics_extra, created_at
             ) VALUES (
-                :idem, :seller, :advertiser, :endpoint, 'POST',
-                'daily', CAST(:day AS date), CAST(:day AS date), :campaign,
-                CAST(:request AS JSONB), CAST(:response AS JSONB),
-                now(), 'TEST', 2, 1
+                :seller, :advertiser, :campaign, :product_id,
+                '/oec_ads/shopping/v1/oec/stat/post_product_list',
+                CAST(:day AS date),
+                CAST(:spend AS NUMERIC), CAST(:orders AS BIGINT), CAST(:gmv AS NUMERIC),
+                NULL, '{}'::JSONB, now()
             )
+            ON CONFLICT ON CONSTRAINT uq_ad_daily DO UPDATE SET
+                mixed_real_cost = EXCLUDED.mixed_real_cost,
+                onsite_roi2_shopping_sku = EXCLUDED.onsite_roi2_shopping_sku,
+                onsite_roi2_shopping_value = EXCLUDED.onsite_roi2_shopping_value,
+                updated_at = now()
             """
         ),
         {
-            "idem": f"TEST_IDEM_{seller}_{product_id}_{campaign_id}",
             "seller": seller,
             "advertiser": "TEST_ADV",
-            "endpoint": "/oec_ads/shopping/v1/oec/stat/post_product_list",
-            "day": day,
             "campaign": campaign_id,
-            "request": json.dumps({"url": "http://tiktok.test/", "body": {}}),
-            "response": json.dumps(
-                {
-                    "status": 200,
-                    "body": {
-                        "code": 0,
-                        "data": {
-                            "table": [
-                                {
-                                    "product_id": product_id,
-                                    "product_name": "TEST 商品",
-                                    "product_status": "available",
-                                    "mixed_real_cost": spend,
-                                    "onsite_roi2_shopping_sku": orders,
-                                    "onsite_roi2_shopping_value": gmv,
-                                    "gmv_max_bid_type": "1",
-                                }
-                            ]
-                        },
-                    },
-                }
-            ),
+            "product_id": product_id,
+            "day": day,
+            "spend": spend,
+            "orders": orders,
+            "gmv": gmv,
         },
     )
 
@@ -886,6 +877,7 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert Decimal(item["net_revenue"]) == Decimal("55.3600")
     assert Decimal(item["settled_sales"]) == Decimal("0.0000")
     assert Decimal(item["unsettled_sales"]) == Decimal("100.0000")
+    assert Decimal(item["settled_net"]) == Decimal("0.0000")
 
     # 退款桶不变
     assert item["refund_only_qty"] == 0
@@ -2184,7 +2176,9 @@ def test_spu_roi_page_no_old_columns(api_client, readonly_key):
 # ═════════════════════════════════════════════════════════════════════
 
 
-def _seed_source_price_direct(sess, *, shop_pk: int, spu_id: str, spu_pk: int, cost: str) -> None:
+def _seed_source_price_direct(
+    sess, *, shop_pk: int, spu_id: str, spu_pk: int, cost: str
+) -> None:
     """在 procurement_products 插入一条 1688 货源价（TK-side 直取路径 L3a）。"""
     # 借一个现有账户（“North Nook”= id 2288,对应测试 shop TEST_SELLER_A）
     sess.execute(
@@ -2244,9 +2238,7 @@ def _seed_tracking_event_overseas(
     return ship_pk
 
 
-def test_spu_roi_cost_source_price_direct_layer(
-    api_client, readonly_key, db_engine
-):
+def test_spu_roi_cost_source_price_direct_layer(api_client, readonly_key, db_engine):
     """D1 L3a：1688 货源价直取（procurement_products.external_product_id = spu_id）。
 
     验证 reviewer 修的 latent bug（`=` 被 sed 吃掉导致 L3a 实际 no-op）
@@ -2268,11 +2260,19 @@ def test_spu_roi_cost_source_price_direct_layer(
         spu_id = "TEST_ROI_SPU_PRICE_DIRECT"
         shop_pk = _seed_shop(sess, "TEST_SELLER_PRICE")
         spu_pk = _seed_spu(sess, shop_pk, spu_id)
-        _seed_source_price_direct(sess, shop_pk=shop_pk, spu_id=spu_id, spu_pk=spu_pk, cost="35.0000")
+        _seed_source_price_direct(
+            sess, shop_pk=shop_pk, spu_id=spu_id, spu_pk=spu_pk, cost="35.0000"
+        )
         o1 = _seed_order_line(
-            sess, shop_pk=shop_pk, spu_pk=spu_pk, order_id="TEST_ORDER_PRICE",
-            status=PAID_ORDER_STATUS, line_ext="TEST_LINE_PRICE", qty="2",
-            unit_price="526600", paid=True,  # $20
+            sess,
+            shop_pk=shop_pk,
+            spu_pk=spu_pk,
+            order_id="TEST_ORDER_PRICE",
+            status=PAID_ORDER_STATUS,
+            line_ext="TEST_LINE_PRICE",
+            qty="2",
+            unit_price="526600",
+            paid=True,  # $20
         )
         sess.commit()
 
@@ -2289,6 +2289,4 @@ def test_spu_roi_cost_source_price_direct_layer(
 def test_spu_roi_drilldown_requires_auth(api_client):
     """钻取端点 readonly 鉴权（与主表一致：401 无 key）。"""
     for tab in ("orders", "settlements", "cases", "ads"):
-        assert (
-            api_client.get(f"/v2/analytics/spu-roi/1/{tab}").status_code == 401
-        )
+        assert api_client.get(f"/v2/analytics/spu-roi/1/{tab}").status_code == 401
