@@ -58,19 +58,21 @@ def _resolve_mirror_url(mirror_object_key: str | None) -> str | None:
 # --- SQL constants (no interpolation) ------------------------------------
 SQL_LIST_CHANNEL_ACCOUNTS = (
     "SELECT id, platform, shop_id, account_name, region, "
-    "seller_type, status, synced_at, opened_date "
+    "seller_type, status, synced_at, opened_date, credential_id, data_source "
     "FROM commerce.shops "
     "WHERE (CAST(:platform AS text) IS NULL OR platform = CAST(:platform AS text)) "
     "ORDER BY id LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
 )
 SQL_GET_CHANNEL_ACCOUNT = (
     "SELECT id, platform, shop_id, account_name, region, "
-    "seller_type, status, synced_at, opened_date FROM commerce.shops "
+    "seller_type, status, synced_at, opened_date, credential_id, data_source "
+    "FROM commerce.shops "
     "WHERE id = :id"
 )
 SQL_GET_CHANNEL_ACCOUNT_BY_EXTERNAL = (
     "SELECT id, platform, shop_id, account_name, region, "
-    "seller_type, status, synced_at, opened_date FROM commerce.shops "
+    "seller_type, status, synced_at, opened_date, credential_id, data_source "
+    "FROM commerce.shops "
     "WHERE platform = :platform AND shop_id = :ext"
 )
 SQL_LIST_CHANNEL_PRODUCTS = (
@@ -235,6 +237,8 @@ def _row_to_channel_account(row: Any) -> ChannelAccountOut:
         status=row.status,
         synced_at=row.synced_at,
         opened_date=row.opened_date,
+        credential_id=row.credential_id,
+        data_source=row.data_source,
     )
 
 

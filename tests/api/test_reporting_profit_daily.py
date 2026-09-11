@@ -150,8 +150,8 @@ def test_profit_daily_one_row_aliases_all_fields(api_client, readwrite_key, db_e
         seed_sess.execute(
             text(
                 "INSERT INTO commerce.shops "
-                "(platform, shop_id, account_name, status) "
-                "VALUES ('tiktok', 'TEST_acct_pf', 'TEST acct pf', 'active')"
+                "(platform, shop_id, account_name, status, data_source) "
+                "VALUES ('tiktok', 'TEST_acct_pf', 'TEST acct pf', 'active', 'api')"
             )
         )
         # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")

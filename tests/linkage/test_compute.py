@@ -47,6 +47,7 @@ def _make_channel_account(session, *, external_id="TEST_TT_SHOP_1"):
         shop_id=external_id,
         account_name="TEST shop",
         credential_id=cred.id,
+        data_source="api",
     )
     session.add(acct)
     session.flush()

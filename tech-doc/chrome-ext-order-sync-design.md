@@ -708,7 +708,7 @@ Authorization: Bearer <key>
 
 | 现有组件 | 关系 |
 | --- | --- |
-| `commerce.*` / `fulfillment.*` / `finance.*` | **业务表完全隔离**。chrome_sync 有自己独立的 orders/shipments/settlements 表，不建 FK、不共享数据、不走 sync-worker。**例外（2026-09-11）**：`commerce.shops` 是两种同步方式共享的店铺注册表——插件店铺可由运营人工注册（`POST /v2/admin/shops/register`，credential_id=NULL, status='registered'），只服务于查询关联（spu-roi 店铺筛选等），数据同步不依赖注册；店铺后续申请到 API 走 OAuth callback 后自动升级为 `status='active'`（同行补 credential_id，不产生重复行） |
+| `commerce.*` / `fulfillment.*` / `finance.*` | **业务表完全隔离**。chrome_sync 有自己独立的 orders/shipments/settlements 表，不建 FK、不共享数据、不走 sync-worker。**例外（2026-09-11）**：`commerce.shops` 是两种同步方式共享的店铺注册表——插件店铺由运营人工注册（`POST /v2/admin/shops/register`，readwrite），注册即完整店铺（status='active'，`data_source='plugin'` 枚举标识同步方式），只服务于查询关联（spu-roi 店铺筛选等），数据同步不依赖注册；店铺后续申请到 API 走 OAuth callback 后同行补 credential_id + `data_source` 翻转 'plugin'→'api'（不产生重复行） |
 | `analytics.ad_raw_log` | 模式相似（dump → 存储），但 analytics 用 raw 暂存 + sync-worker 派生；chrome_sync 是 inline 解析 + raw_log 审计 |
 | `integration.raw_records` | 旧 v1 遗物，存 sync-worker 拉的数据。chrome_sync 来源完全不同（Chrome 扩展抓的） |
 | `sync_worker` | **不参与**。chrome_sync 的解析在 API handler 内 inline 完成，不需要调度 |

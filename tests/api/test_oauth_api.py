@@ -234,6 +234,7 @@ def test_callback_happy_path_bootstraps_rows(
         )
     ).scalar_one()
     assert acct.credential_id == shop["credential_id"]
+    assert acct.data_source == "api"  # OAuth 路径建/升级的店铺标记为 api
     cred = db_session.execute(
         select(Credentials).where(
             Credentials.provider == "tiktok",
@@ -249,6 +250,55 @@ def test_callback_happy_path_bootstraps_rows(
     expected_cipher = "api_grant_cipher"
     assert view.access_token == expected_at
     assert view.shop_cipher == expected_cipher
+
+
+def test_callback_upgrades_plugin_registered_shop(
+    api_client,
+    readwrite_key,
+    db_engine,
+    db_session,
+    app_env: None,
+    fake_exchange: dict[str, Any],
+) -> None:
+    """插件注册店铺（data_source='plugin', credential_id=NULL）拿到 API
+    授权后走 OAuth callback：同一行升级为 api（credential_id 补上、
+    data_source 翻转），不产生重复行。opened_date 不在 OAuth upsert
+    的 set_ 里，人工填的开店日期保留。"""
+    from sqlalchemy import text as _text
+
+    from tts_erp_v2.db.models.commerce import ChannelAccount
+
+    with db_engine.begin() as conn:
+        conn.execute(
+            _text(
+                "INSERT INTO commerce.shops "
+                "(platform, shop_id, account_name, status, data_source, opened_date) "
+                "VALUES ('tiktok', :sid, 'Plugin Shop', 'active', 'plugin', "
+                "        '2026-06-01')"
+            ).bindparams(sid=TEST_SHOP_ID)
+        )
+
+    r = api_client.get(
+        AUTHZ, headers=_bearer(readwrite_key), params={"format": "json"}
+    )
+    state = _state_from_url(r.json()["authorize_url"])
+    r = api_client.get(
+        CALLBACK, params={"format": "json", "code": "TTP_real_code", "state": state}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["ok"] is True
+
+    rows = db_session.execute(
+        select(ChannelAccount).where(
+            ChannelAccount.platform == "tiktok",
+            ChannelAccount.shop_id == TEST_SHOP_ID,
+        )
+    ).scalars().all()
+    assert len(rows) == 1, "OAuth 升级不得产生重复 shops 行"
+    acct = rows[0]
+    assert acct.data_source == "api"
+    assert acct.credential_id is not None
+    assert str(acct.opened_date) == "2026-06-01"  # 人工填写值保留
 
 
 def test_callback_reusing_state_is_rejected(

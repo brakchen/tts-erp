@@ -176,7 +176,7 @@ All list endpoints accept `limit` (1..500, default 100) + `offset` (≥0).
 
 | Endpoint | Extra query params | Returns |
 | --- | --- | --- |
-| `GET /v2/commerce/channel-accounts` | `platform` (e.g. `tiktok`) | list of `{id, platform, shop_id, account_name, region, seller_type, status, opened_date, synced_at}` — `status='active'` = API 同步店铺，`'registered'` = 人工注册的插件店铺（`credential_id` 为空） |
+| `GET /v2/commerce/channel-accounts` | `platform` (e.g. `tiktok`) | list of `{id, platform, shop_id, account_name, region, seller_type, status, opened_date, data_source, credential_id, synced_at}` — `data_source='api'` = API 同步店铺，`'plugin'` = 人工注册的插件店铺 |
 | `GET /v2/commerce/channel-accounts/{shop_pk}` | — | one account; 404 if unknown |
 | `GET /v2/commerce/channel-accounts/by-external/{shop_id}` | [`api/channel-accounts-by-external.md`](api/channel-accounts-by-external.md) | reverse-lookup by upstream shop_id; `?platform=tiktok` default; 404 if unknown |
 | `GET /v2/commerce/channel-accounts/{shop_pk}/order-stats` | — | `{order_count, payment_amount_sum}` aggregate (0/0 when empty) |
@@ -253,14 +253,14 @@ curl -sS -H "X-API-Key: $TTS_ERP_RO_KEY" \
 | --- | --- | --- |
 | `GET /v2/pages/manual-costs` | readonly | Server-rendered operator console (shop switcher + needs-cost / needs-photo / recently-filed tabs). Browser without a session → 302 to `/v2/auth/login`. Static assets under `/static/*` are readonly-classified too. |
 | `GET /v2/pages/spu-roi` | readonly | SPU 实际 ROI 看板(账页式)。Server-rendered HTML shell;数据来自 `GET /v2/analytics/spu-roi`;JS 在 `/static/js/spu-roi.js`。 |
-| `GET /v2/pages/shops` | readonly | 店铺注册台。人工注册插件同步店铺（`commerce.shops` 补登记）；写入走 `POST /v2/admin/shops/register`（admin 会话）；JS 在 `/static/js/shops.js`。 |
+| `GET /v2/pages/shops` | readonly | 店铺注册台。人工注册插件同步店铺（`commerce.shops` 补登记）；写入走 `POST /v2/admin/shops/register`（readwrite 会话）；JS 在 `/static/js/shops.js`。 |
 
 ### Admin (`/v2/admin/*`, handler-enforced roles)
 
 | Endpoint | Role | Notes |
 | --- | --- | --- |
-| `POST /v2/admin/shops/register` | **admin** | 人工注册店铺。body `{"platform": "tiktok", "shop_id": str, "account_name"?: str, "region"?: str, "seller_type"?: str, "opened_date"?: "YYYY-MM-DD"}` → `{created: bool, shop: {...}}`。幂等：重复注册只补填仍为 NULL 的展示字段，**绝不覆盖** `credential_id`/`status`（插件 → API 升级由 OAuth callback 独占）。`shop_id` 必须是数字串，`TEST_`/`MOCK_` 前缀 422。注册只影响查询关联（spu-roi 店铺筛选等），数据同步不依赖注册。 |
-| `GET /v2/admin/shops/unregistered` | **admin** | 列出在 `chrome_sync.*` / `analytics.*` 插件数据里出现、但 `commerce.shops` 无行的 shop_id → `{candidates: [{shop_id, sources}]}`；注册页的候选清单。 |
+| `POST /v2/admin/shops/register` | **readwrite** | 人工注册店铺。body `{"platform": "tiktok", "shop_id": str, "account_name"?: str, "region"?: str, "seller_type"?: str, "opened_date"?: "YYYY-MM-DD"}` → `{created: bool, shop: {...}}`。幂等：重复注册只补填仍为 NULL 的展示字段，**绝不覆盖** `credential_id`/`status`（店铺后续拿到 API 授权时由 OAuth callback 补 credential_id + `data_source` 翻转 `'plugin'→'api'`）。`shop_id` 必须是数字串，`TEST_`/`MOCK_` 前缀 422。注册只影响查询关联（spu-roi 店铺筛选等），数据同步不依赖注册。 |
+| `GET /v2/admin/shops/unregistered` | **readwrite** | 列出在 `chrome_sync.*` / `analytics.*` 插件数据里出现、但 `commerce.shops` 无行的 shop_id → `{candidates: [{shop_id, sources}]}`；注册页的候选清单。 |
 
 ### SPU images (`/v2/spu-images/*`)
 

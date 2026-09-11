@@ -47,6 +47,8 @@
 | fix/analytics-dump-createdat | analytics/order-sync dump 时间键统一 `createdAt`（服务端 DumpBodyIn canonical + AliasChoices 兼容旧 `capturedAt` 别名），修复插件 0.1.127 的 v4 dump 全 400「dump.capturedAt Field required」卡同步；含 4 个测试文件改名 + v4 设计文档 wire 示例 `created_at`→`createdAt` 纠正（该文档正是插件照抄写错的源头）+ 测试库补 chrome_sync schema | 本 session（接管上一位未完成诊断） | master（已提交） | tts_erp_v2/api/v2/analytics.py、tts_erp_v2/api/v2/order_sync.py、tests/api/{test_analytics_dumps_v4,test_order_sync_contract,test_analytics_v2_errors,test_analytics_v2_contract}.py、tech-doc/analytics/daily-sync-with-coverage.md | merged (124c689) | 2026-09-10T15:45Z |
 
 
+| fix/shop-registration-tweaks | 店铺注册修正（2026-09-11 用户反馈）：①两个端点 admin→readwrite（auth 矩阵 /v2/admin/shops/ 前缀 + handler 门槛）；②去掉 status='registered' 自造状态——插件店铺注册即完整店铺，直接写 status='active'，同步方式由 credential_id IS NULL 推导；channel-accounts 响应补 credential_id，注册页 badge 改按 credential_id 判定 | 本 session | .worktrees/shop-reg-tweaks / fix/shop-registration-tweaks | tts_erp_v2/middleware/auth.py、tts_erp_v2/api/v2/admin.py、tts_erp_v2/api/v2/commerce.py、tts_erp_v2/api/schemas.py、tts_erp_v2/static/js/shops.js、tests/api/test_admin_shops.py、tech-doc/external-api.md、tech-doc/chrome-ext-order-sync-design.md、AGENTS.md、handoff/ACTIVE.md | draft | 2026-09-11T14:40Z |
+
 > **插件侧（chrome-plugins 仓库）的 lane 不登记在本表** ——
 > 见 `chrome-plugins/handoff/ACTIVE.md`（2026-09-11 起，避免两个真相源）。
 > 本表只管 tts-erp 自己的改动面。

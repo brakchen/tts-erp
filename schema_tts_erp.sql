@@ -499,7 +499,9 @@ CREATE TABLE IF NOT EXISTS commerce.shops (
     source_updated_at timestamp with time zone,
     synced_at timestamp with time zone DEFAULT now() CONSTRAINT channel_accounts_synced_at_not_null NOT NULL,
     updated_at timestamp with time zone DEFAULT now() CONSTRAINT channel_accounts_updated_at_not_null NOT NULL,
-    opened_date date
+    opened_date date,
+    data_source text NOT NULL,
+    CONSTRAINT ck_channel_accounts_data_source CHECK ((data_source = ANY (ARRAY['api'::text, 'plugin'::text])))
 );
 
 
@@ -2903,5 +2905,5 @@ ALTER TABLE ONLY reporting.shipment_tracking_summary
 
 -- PostgreSQL database dump complete
 
-\unrestrict HmAFw2KEcDdhshPPdWdXyQQspfus6tQaF4ewASrQ0Yl0O6Dn3UFK070WNak0aX6
+\unrestrict cvjFm4gv6ZA5gXCcASbmWlD7DIc7p3kUpOSLIPeHZovKzhTQPPglicQhMIYGKv9
 

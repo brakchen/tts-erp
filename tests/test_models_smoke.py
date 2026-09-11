@@ -91,6 +91,7 @@ def channel_account_row(
         platform="tiktok",
         shop_id="TEST_acct_1",
         credential_id=credentials_row.id,
+        data_source="api",
     )
     db_session.add(a)
     db_session.flush()
@@ -236,6 +237,7 @@ def test_channel_account_credential_fk(
         platform="tiktok",
         shop_id="TEST_acct_3",
         credential_id=credentials_row.id,
+        data_source="api",
     )
     db_session.add(a)
     db_session.flush()
