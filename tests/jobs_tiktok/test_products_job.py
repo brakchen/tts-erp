@@ -63,7 +63,6 @@ def _make_account(session) -> ChannelAccount:
         shop_id="TEST_TT_PROD_SHOP",
         credential_id=cred.id,
         status="active",
-        data_source="api",
     )
     session.add(acct)
     session.flush()

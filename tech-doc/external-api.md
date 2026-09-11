@@ -176,7 +176,7 @@ All list endpoints accept `limit` (1..500, default 100) + `offset` (≥0).
 
 | Endpoint | Extra query params | Returns |
 | --- | --- | --- |
-| `GET /v2/commerce/channel-accounts` | `platform` (e.g. `tiktok`) | list of `{id, platform, shop_id, account_name, region, seller_type, status, opened_date, data_source, credential_id, synced_at}` — `data_source='api'` = API 同步店铺，`'plugin'` = 人工注册的插件店铺 |
+| `GET /v2/commerce/channel-accounts` | `platform` (e.g. `tiktok`) | list of `{id, platform, shop_id, account_name, region, seller_type, status, opened_date, credential_id, synced_at}` — `credential_id` 非空 = 已 OAuth 授权走 API 同步，为空 = 仅插件同步 |
 | `GET /v2/commerce/channel-accounts/{shop_pk}` | — | one account; 404 if unknown |
 | `GET /v2/commerce/channel-accounts/by-external/{shop_id}` | [`api/channel-accounts-by-external.md`](api/channel-accounts-by-external.md) | reverse-lookup by upstream shop_id; `?platform=tiktok` default; 404 if unknown |
 | `GET /v2/commerce/channel-accounts/{shop_pk}/order-stats` | — | `{order_count, payment_amount_sum}` aggregate (0/0 when empty) |
@@ -259,7 +259,7 @@ curl -sS -H "X-API-Key: $TTS_ERP_RO_KEY" \
 
 | Endpoint | Role | Notes |
 | --- | --- | --- |
-| `POST /v2/admin/shops/register` | **readwrite** | 人工注册店铺。body `{"platform": "tiktok", "shop_id": str, "account_name"?: str, "region"?: str, "seller_type"?: str, "opened_date"?: "YYYY-MM-DD"}` → `{created: bool, shop: {...}}`。幂等：重复注册只补填仍为 NULL 的展示字段，**绝不覆盖** `credential_id`/`status`（店铺后续拿到 API 授权时由 OAuth callback 补 credential_id + `data_source` 翻转 `'plugin'→'api'`）。`shop_id` 必须是数字串，`TEST_`/`MOCK_` 前缀 422。注册只影响查询关联（spu-roi 店铺筛选等），数据同步不依赖注册。 |
+| `POST /v2/admin/shops/register` | **readwrite** | 人工注册店铺。body `{"platform": "tiktok", "shop_id": str, "account_name"?: str, "region"?: str, "seller_type"?: str, "opened_date"?: "YYYY-MM-DD"}` → `{created: bool, shop: {...}}`。幂等：重复注册只补填仍为 NULL 的展示字段，**绝不覆盖** `credential_id`/`status`（店铺后续拿到 API 授权时由 OAuth callback 补 `credential_id`，同行升级、不产生重复行）。`shop_id` 必须是数字串，`TEST_`/`MOCK_` 前缀 422。注册只影响查询关联（spu-roi 店铺筛选等），数据同步不依赖注册。 |
 | `GET /v2/admin/shops/unregistered` | **readwrite** | 列出在 `plugin.*` 插件数据里出现、但 `commerce.shops` 无行的 shop_id → `{candidates: [{shop_id, sources}]}`；注册页的候选清单。 |
 
 ### SPU images (`/v2/spu-images/*`)
@@ -660,8 +660,11 @@ Success response (`code: 0`):
 }
 ```
 
-`status ∈ {"inserted", "updated", "duplicate", "stale_ignored", "api_managed"}` — 全部视为成功。
-`api_managed`（2026-09-11 起）：店铺的 `commerce.shops.data_source='api'`（已 OAuth 授权走 API 同步）时，dump **全域静默忽略**（不写 `ad_*`、不写 `ad_raw_log`），插件应停止该店的广告抓取。
+`status ∈ {"inserted", "updated", "duplicate", "stale_ignored"}` — 全部视为成功。
+> **2026-09-11 变更**：原 `api_managed` 状态已移除。当时该状态会把已 OAuth 授权店铺的广告 dump
+> **全域静默忽略**，但广告数据没有 server-side 同步路径（JOBS 里无 ad job），等于把唯一数据来源
+> 挡掉。现插件数据统一落 `plugin.*` schema，与 API 同步数据（`commerce.*` 等）按 schema 物理隔离，
+> 不再需要「来源判定」来决定是否拦截。
 
 ~~内容被取代事件（history 替换/推进/重建、daily 折叠、today 跨天 reset）写
 `analytics.ad_sync_audit` 一行元数据审计（与主写同事务；30s today 常规刷新不写）。~~
@@ -763,8 +766,10 @@ Body（≤ 2 MB）：
 }
 ```
 
-- `status` ∈ `{inserted, parse_error, api_managed}`
-- `api_managed`（2026-09-11 起）：店铺的 `commerce.shops.data_source='api'`（已 OAuth 授权走 API 同步）时，dump **全域静默忽略**（不写 `plugin.raw_log`、不写业务表），插件应停止该店的订单/物流/结算抓取
+- `status` ∈ `{inserted, parse_error}`
+- **2026-09-11**：原 `api_managed` 状态已移除（连同 `commerce.shops.data_source` 列与
+  `api/deps.py::shop_is_api_managed` 守卫）。插件与 API 同步数据现按 schema 物理隔离
+  （`plugin.*` vs `commerce.*`/`fulfillment.*`/`finance.*`），不再需要来源判定。
 - `parse_error` 时 `rowsWritten=0`，`parseError` 字段含原因
 
 #### `GET /v2/order-sync/synced-ids`

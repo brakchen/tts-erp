@@ -52,7 +52,6 @@ def _make_shop(session: Session, external_id: str) -> ChannelAccount:
         shop_id=external_id,
         credential_id=cred.id,
         status="active",
-        data_source="api",
     )
     session.add(acct)
     session.flush()

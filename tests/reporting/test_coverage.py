@@ -39,7 +39,7 @@ def _acct(session):
     session.add(cred)
     session.flush()
     a = ChannelAccount(
-        platform="tiktok", shop_id="TEST_TT_COV", credential_id=cred.id, data_source="api"
+        platform="tiktok", shop_id="TEST_TT_COV", credential_id=cred.id
     )
     session.add(a)
     session.flush()

@@ -88,7 +88,6 @@ def _make_account_with_order(
         shop_id=shop_id,
         credential_id=cred.id,
         status="active",
-        data_source="api",
     )
     session.add(acct)
     session.flush()

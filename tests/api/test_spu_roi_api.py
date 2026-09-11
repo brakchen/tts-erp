@@ -197,8 +197,8 @@ def _seed_shop(sess, seller: str) -> int:
     # pi-lens-ignore: python-sql-injection
     return sess.execute(
         text(
-            "INSERT INTO commerce.shops (platform, shop_id, account_name, status, data_source) "
-            "VALUES ('tiktok', :sid, :name, 'active', 'api') RETURNING id"
+            "INSERT INTO commerce.shops (platform, shop_id, account_name, status) "
+            "VALUES ('tiktok', :sid, :name, 'active') RETURNING id"
         ),
         {"sid": seller, "name": f"{seller} 店铺"},
     ).scalar_one()

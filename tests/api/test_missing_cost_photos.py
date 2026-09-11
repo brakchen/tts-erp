@@ -50,8 +50,8 @@ def seed_unmatched_active_product(db_engine):
         sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "INSERT INTO commerce.shops "
-                "(platform, shop_id, account_name, status, data_source) "
-                "VALUES ('tiktok', :ext, 'TEST acct', 'active', 'api')"
+                "(platform, shop_id, account_name, status) "
+                "VALUES ('tiktok', :ext, 'TEST acct', 'active')"
             ),
             {"ext": ext_acct},
         )

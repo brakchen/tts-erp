@@ -281,7 +281,6 @@ def _seed_credentials_for_enum(
                     shop_id=external_id,
                     credential_id=cred.id,
                     status="active",
-                    data_source="api",
                 )
             )
         session.commit()
