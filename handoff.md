@@ -36,6 +36,25 @@
 发现了它们，但为避免引入新 fail，**只移除已消失的 `analytics`、未加入 `plugin`**。
 需要时另开 lane 补列 + 加触发器，并把 `plugin` 加入 `V2_SCHEMAS`。
 
+### ❗ 订单域插件同步：用户 2026-09-11 拍板「先不处理，先观察」（选项 B）—— 属预期状态，勿当 bug 修
+
+- **背景**：订单/物流/结算已有 server-side API 同步（`tiktok.orders` / `order_detail` /
+  `logistics` / `finance` / `after_sales` jobs → `commerce.*` / `fulfillment.*` /
+  `finance.*`），插件侧仍有一套并行的 order-sync；插件的 TikTok 请求**不经过 ad 的
+  `tiktokRequestPacer`**（自带 3s/单 的 N+1 间隔），因此两条链路会争抢上游配额。
+- **lane 4 拆守卫后的新变化**：order dumps 从「被静默丢弃（`200 api_managed`）」变为
+  **真正落库** → `plugin.orders / order_lines / shipments / tracking_events /
+  settlements / settlement_details / raw_log` **会开始增长**（之前一直 0 行）。
+- **预期现象**：同一事实在两处各存一份 —— `commerce.sales_orders`（API）vs
+  `plugin.orders`（插件）、`fulfillment.shipments` vs `plugin.shipments` 等。
+  **这是用户拍板的「schema 物理隔离 + 后续再选读哪个」设计，不是双写 bug。**
+- **已知代价**（接受）：① 上游请求配额轻微争抢；② 7 张插件订单表无业务读者却持续增长；
+  ③ 上文的时间字段缺口。
+- **若日后要下线**：应作为**整个插件订单域下线**（7 表 + `tts_erp_v2/plugin/orders/` +
+  `api/v2/order_sync.py` router + `tests/plugin/orders/` + **chrome-plugins 侧 order-sync 全套**），
+  **不要单独删 `plugin.raw_log`**（它是 6 张订单表的 FK 父表）。下线前需先确认插件订单同步
+  是否仍是「API scope 缺失时的兜底」。
+
 **完整记录**：`handoff/PLUGIN_ARCH_CLEANUP.md`（决策快照 / 每 lane 改动面 / 实测经验）。
 
 ---
@@ -61,10 +80,10 @@ merge + `a70d078` handoff；`8595167` chrome-plugins merge + `e35fc2c` handoff�
    chrome-plugins 加 9 个新测试，全量 668 测试通过。master HEAD 仍是 19 个 pre-existing
    fail（跟我无关），0 新 fail。
 5. **线上验证** — 重启后手工 curl 测 campaign_opt_log_list dump → 200 + `status=campaign_level`
-   + ad_raw_log 写 1 行 product_id=NULL。stderr KeyError 计数停在上轮 809 不再涨。
+   - ad_raw_log 写 1 行 product_id=NULL。stderr KeyError 计数停在上轮 809 不再涨。
 6. **postswhitch-smoke 8/8 通过** + master push 成功 + 双方 worktree 收尾清理。
 7. **已知遗留** — Bridge nook 当前被 `feature/api-managed-guard` lane 标 api_managed，
-   ad_* 表数据来源实际是另一条 path；本次修复重点是让 plugin 上传不再 500，
+   ad_*表数据来源实际是另一条 path；本次修复重点是让 plugin 上传不再 500，
    实际 ad_* 数据恢复需要看 api-managed 守卫 review。
 
 **修过的根因**：lane `feat(analytics): v4 结构化 rows 同步协议`（`124c689`，09-10 merge）
@@ -83,7 +102,7 @@ product_id → KeyError → dumps 500 → plugin 持续重试失败 → 14512 �
 6. **§12.4 错峰量化**：flock / 轮询 / 分 ephemeral DB 三种串行方案
 7. **§11 §11 测试规则细化**："merge 后必须 0 fail" 硬规则在 master HEAD pre-existing fail 下不可达 → 改为按 lane 代码改动面分类判定（`git diff <merge-base>..HEAD -- 'tts_erp_v2/**' 'tests/**' | wc -l` = 0 → 文档-only lane 直接 push；> 0 → fail-before/fail-after diff 对比）
 
-** stash@{0} 处理**：stash 内容（"master-wip-before-spu-image-mirror-merge"）apply 触发 7 个 conflict，评估后放弃（master 后续 commit 已吸收核心内容），snapshot 存 `/tmp/stash-0-snapshot-*.patch`。
+**stash@{0} 处理**：stash 内容（"master-wip-before-spu-image-mirror-merge"）apply 触发 7 个 conflict，评估后放弃（master 后续 commit 已吸收核心内容），snapshot 存 `/tmp/stash-0-snapshot-*.patch`。
 
 **新工具**：`scripts/test_lock.sh`（§12.4 flock 包装，防并发测试互清）。
 
@@ -92,6 +111,7 @@ product_id → KeyError → dumps 500 → plugin 持续重试失败 → 14512 �
 **活跃 worktree**（截至 2026-09-07 21:45）：channel-account-by-external / docs-spu-roi-v7 / fx-test-isolation / spu-roi-v7 / spu-roi-v7-frontend（共 5 条）。
 
 ## TL;DR (2026-09-06 结余带 10 格重构 + 订单行→SPU 关联断裂修复)
+
 - **结余带 10 格重构**(merge 5cbf518):去掉 SPU 数,新增 GMV(全部订单销售额 M6+M6b)/有效单量/
   总单量/取消单量;全损货损改名全损退款(数值=return_loss 不变);每格带 ? 口径气泡;栅格
   xs2/sm3/md4/lg5。后端 totals 新增 4 键(_SQL_ROI_ORDER_SCOPE 跨可见 SPU 全局去重)。
@@ -106,6 +126,7 @@ product_id → KeyError → dumps 500 → plugin 持续重试失败 → 14512 �
 - 提醒:master WT 有其它 lane 未提交 WIP(console.js 等)——收尾前先看 ACTIVE。
 
 ## TL;DR (2026-09-06 spu-roi Bootstrap 重构 + 手机端适配)
+
 - spu-roi 页(`/v2/pages/spu-roi`)重构为 **Bootstrap 5.3.8 栅格/工具类布局**:结余带 row-cols
   (xs2→md4→lg7)、工具栏 flex-wrap 纵向堆叠、`<details>` 列开关、`.table-responsive` 横滚 +
   首列/表头 sticky(≤lg)、小屏 nth-child 裁次要列(广告数/平台GMV/ROI₀/件数),580→
