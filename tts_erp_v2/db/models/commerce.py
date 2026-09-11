@@ -11,6 +11,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
+    CheckConstraint,
     Date,
     ForeignKey,
     Index,
@@ -34,6 +35,10 @@ class ChannelAccount(Base):
             "platform", "shop_id", name="uq_channel_accounts_platform_ext"
         ),
         Index("ix_channel_accounts_status", "status"),
+        CheckConstraint(
+            "data_source IN ('api', 'plugin')",
+            name="ck_channel_accounts_data_source",
+        ),
         {"schema": "commerce"},
     )
 
@@ -54,6 +59,10 @@ class ChannelAccount(Base):
     # 开店时间（天级，migration 0021）。人工注册时填写；OAuth 路径不覆盖
     # （upsert set_ 不含本列）。NULL = 未知/未填。
     opened_date: Mapped[date | None] = mapped_column(Date)
+    # 数据来源（migration 0022）：'api' = OAuth 授权的 API 同步店铺；
+    # 'plugin' = 人工注册的插件同步店铺。插件店拿到 API 授权后由 OAuth
+    # callback 翻转为 'api'（同行补 credential_id）。
+    data_source: Mapped[str] = mapped_column(Text, nullable=False)
     source_updated_at: Mapped[datetime | None]
     synced_at: Mapped[datetime] = mapped_column(
         nullable=False, server_default=text("now()")

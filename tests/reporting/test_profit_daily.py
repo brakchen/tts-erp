@@ -77,7 +77,7 @@ def _make_account_and_product(session):
     session.add(cred)
     session.flush()
     acct = ChannelAccount(
-        platform="tiktok", shop_id="TEST_TT_PROFIT", credential_id=cred.id
+        platform="tiktok", shop_id="TEST_TT_PROFIT", credential_id=cred.id, data_source="api"
     )
     session.add(acct)
     session.flush()

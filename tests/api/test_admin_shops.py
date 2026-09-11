@@ -3,8 +3,8 @@
 Pins the contract for ``POST /v2/admin/shops/register`` and
 ``GET /v2/admin/shops/unregistered`` (feature/shop-registration lane):
 
-  - admin registers a plugin-only shop into ``commerce.shops`` with
-    ``credential_id = NULL`` and ``status = 'registered'`` — the row
+  - admin/readwrite registers a plugin-only shop into ``commerce.shops``
+    with ``credential_id = NULL`` and ``status = 'active'`` — the row
     exists purely for query association (spu-roi shop filter), NOT for
     sync scheduling
   - registration is idempotent: re-registering returns the existing row
@@ -17,7 +17,7 @@ Pins the contract for ``POST /v2/admin/shops/register`` and
     (the plugin → API upgrade path)
   - ``unregistered`` lists shop ids seen in chrome_sync / analytics
     plugin data that have no ``commerce.shops`` row
-  - role matrix: admin only; readwrite/readonly → 403, anonymous → 401
+  - role matrix: readwrite+; readonly → 403, anonymous → 401
 """
 
 from __future__ import annotations
@@ -93,8 +93,9 @@ def test_register_creates_plugin_only_shop(api_client, admin_key, db_engine):
     assert shop["account_name"] == "Bridge nook 2"
     assert shop["region"] == "VN"
     assert shop["opened_date"] == "2026-06-01"
-    assert shop["status"] == "registered"
+    assert shop["status"] == "active"  # 注册即完整店铺，无「待授权」中间态
     assert shop["credential_id"] is None
+    assert shop["data_source"] == "plugin"
 
     from sqlalchemy.orm import Session
 
@@ -106,7 +107,8 @@ def test_register_creates_plugin_only_shop(api_client, admin_key, db_engine):
             )
         ).scalar_one()
     assert row.credential_id is None
-    assert row.status == "registered"
+    assert row.status == "active"
+    assert row.data_source == "plugin"
     assert str(row.opened_date) == "2026-06-01"
 
 
@@ -155,8 +157,8 @@ def test_register_never_clobbers_credential_link(api_client, admin_key, db_engin
         conn.execute(
             text(
                 "INSERT INTO commerce.shops "
-                "(platform, shop_id, account_name, status, credential_id) "
-                "VALUES ('tiktok', :sid, 'API Shop', 'active', :cid)"
+                "(platform, shop_id, account_name, status, credential_id, data_source) "
+                "VALUES ('tiktok', :sid, 'API Shop', 'active', :cid, 'api')"
             ).bindparams(sid=SHOP_A, cid=cred_id)
         )
     try:
@@ -167,6 +169,7 @@ def test_register_never_clobbers_credential_link(api_client, admin_key, db_engin
         shop = body["shop"]
         assert shop["credential_id"] == cred_id  # untouched
         assert shop["status"] == "active"  # untouched
+        assert shop["data_source"] == "api"  # untouched
         assert shop["account_name"] == "API Shop"  # untouched
     finally:
         with db_engine.begin() as conn:
@@ -192,11 +195,15 @@ def test_register_rejects_unknown_platform(api_client, admin_key):
 
 
 def test_register_role_matrix(api_client, readwrite_key, readonly_key):
-    for key, role in ((readwrite_key, "readwrite"), (readonly_key, "readonly")):
-        r = _register(api_client, key)
-        assert r.status_code == 403, (
-            f"{role} should be 403, got {r.status_code}: {r.text}"
-        )
+    """readwrite 可注册（2026-09-11 用户拍板，不再要求 admin）；readonly → 403。"""
+    r = _register(api_client, readwrite_key, shop_id=SHOP_B)
+    assert r.status_code == 200, r.text
+    assert r.json()["shop"]["shop_id"] == SHOP_B
+
+    r = _register(api_client, readonly_key)
+    assert r.status_code == 403, (
+        f"readonly should be 403, got {r.status_code}: {r.text}"
+    )
 
 
 def test_register_anonymous_is_401(api_client):
@@ -285,14 +292,21 @@ def test_unregistered_excludes_registered_shops(api_client, admin_key, db_engine
 
 
 def test_unregistered_role_matrix(api_client, readwrite_key, readonly_key):
-    for key, role in ((readwrite_key, "readwrite"), (readonly_key, "readonly")):
-        r = api_client.get(
-            "/v2/admin/shops/unregistered",
-            headers={"Authorization": f"Bearer {key}"},
-        )
-        assert r.status_code == 403, (
-            f"{role} should be 403, got {r.status_code}: {r.text}"
-        )
+    """readwrite 可查候选列表；readonly → 403。"""
+    r = api_client.get(
+        "/v2/admin/shops/unregistered",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+    )
+    assert r.status_code == 200, r.text
+    assert "candidates" in r.json()
+
+    r = api_client.get(
+        "/v2/admin/shops/unregistered",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 403, (
+        f"readonly should be 403, got {r.status_code}: {r.text}"
+    )
 
 
 def test_unregistered_anonymous_is_401(api_client):
@@ -313,3 +327,5 @@ def test_channel_accounts_exposes_opened_date(api_client, admin_key, readonly_ke
     rows = {row["shop_id"]: row for row in r.json()}
     assert SHOP_A in rows
     assert rows[SHOP_A]["opened_date"] == "2026-06-01"
+    assert rows[SHOP_A]["credential_id"] is None  # 插件店铺，无 API 凭证
+    assert rows[SHOP_A]["data_source"] == "plugin"

@@ -120,8 +120,8 @@ def _seed_linkage_rows(db_engine):
         conn.execute(
             text(
                 "INSERT INTO commerce.shops "
-                "(platform, shop_id, account_name, status) "
-                "VALUES ('tiktok', 'TEST_link_acct', 'TEST acct', 'active')"
+                "(platform, shop_id, account_name, status, data_source) "
+                "VALUES ('tiktok', 'TEST_link_acct', 'TEST acct', 'active', 'api')"
             )
         )
         # pi-lens-ignore: python-sql-injection — literal SQL, only :acct/:ext bound

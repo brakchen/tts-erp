@@ -40,7 +40,7 @@ def _make_channel_account(session, external_id="TEST_TT_SHOP_C"):
     )
     session.add(cred)
     session.flush()
-    acct = ChannelAccount(platform="tiktok", shop_id=external_id, credential_id=cred.id)
+    acct = ChannelAccount(platform="tiktok", shop_id=external_id, credential_id=cred.id, data_source="api")
     session.add(acct)
     session.flush()
     return acct

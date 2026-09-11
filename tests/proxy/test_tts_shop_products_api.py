@@ -136,6 +136,7 @@ def _seed_account(
             shop_id=shop_id,
             account_name=f"TEST acct {shop_id}",
             status="active",
+            data_source="api",
         )
     )
     sess.flush()

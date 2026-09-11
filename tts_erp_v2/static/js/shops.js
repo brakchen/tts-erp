@@ -70,7 +70,8 @@
           return;
         }
         body.innerHTML = shops.map(function (s) {
-          var isApi = s.status === "active";
+          // 同步方式 = shops.data_source 枚举（'api' | 'plugin'）
+          var isApi = s.data_source === "api";
           var badge = isApi
             ? '<span class="badge badge-sync-api">API 同步</span>'
             : '<span class="badge badge-sync-plugin">仅插件</span>';
@@ -91,7 +92,7 @@
       .then(function (r) {
         if (r.status === 403) {
           $("#cand-body").innerHTML =
-            '<tr><td colspan="3" class="text-muted">需要 admin 会话查看候选列表</td></tr>';
+            '<tr><td colspan="3" class="text-muted">需要 readwrite 及以上会话查看候选列表</td></tr>';
           return null;
         }
         if (!r.ok) throw new Error("unregistered HTTP " + r.status);
@@ -141,7 +142,7 @@
       })
         .then(function (r) {
           if (r.status === 403) {
-            showErr("需要 admin 会话才能注册店铺（当前会话角色不足）。");
+            showErr("需要 readwrite 及以上会话才能注册店铺（当前会话角色不足）。");
             return null;
           }
           return r.json().then(function (body) {
@@ -169,10 +170,10 @@
     return api("/v2/auth/me").then(function (r) {
       if (!r.ok) return;
       return r.json().then(function (me) {
-        if (me && me.role && me.role !== "admin") {
+        if (me && me.role === "readonly") {
           var note = $("#auth-note");
           note.textContent =
-            "当前会话角色为 " + me.role + " — 可以查看已注册列表，注册/候选列表需要 admin 会话。";
+            "当前会话角色为 readonly — 可以查看已注册列表，注册/候选列表需要 readwrite 及以上会话。";
           note.classList.remove("d-none");
         }
       });

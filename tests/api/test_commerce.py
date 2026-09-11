@@ -54,8 +54,8 @@ def seed_commerce_rows(db_engine):
         sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "INSERT INTO commerce.shops "
-                "(platform, shop_id, account_name, status) "
-                "VALUES ('tiktok', :ext, 'TEST acct', 'active')"
+                "(platform, shop_id, account_name, status, data_source) "
+                "VALUES ('tiktok', :ext, 'TEST acct', 'active', 'api')"
             ),
             {"ext": ext_acct},
         )
@@ -555,8 +555,8 @@ def _seed_spu(db_engine, external_id: str) -> int:
         sess.execute(
             text(
                 "INSERT INTO commerce.shops "
-                "(platform, shop_id, account_name, status) "
-                "VALUES ('tiktok', :ext, 'TEST acct', 'active')"
+                "(platform, shop_id, account_name, status, data_source) "
+                "VALUES ('tiktok', :ext, 'TEST acct', 'active', 'api')"
             ),
             {"ext": external_id},
         )
@@ -597,8 +597,8 @@ def seed_spus_with_times(db_engine):
         sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "INSERT INTO commerce.shops "
-                "(platform, shop_id, account_name, status) "
-                "VALUES ('tiktok', :ext, 'TEST acct', 'active')"
+                "(platform, shop_id, account_name, status, data_source) "
+                "VALUES ('tiktok', :ext, 'TEST acct', 'active', 'api')"
             ),
             {"ext": ext_acct},
         )
@@ -776,8 +776,8 @@ def seed_spus_statuses(db_engine):
         sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "INSERT INTO commerce.shops "
-                "(platform, shop_id, account_name, status) "
-                "VALUES ('tiktok', :ext, 'TEST acct', 'active')"
+                "(platform, shop_id, account_name, status, data_source) "
+                "VALUES ('tiktok', :ext, 'TEST acct', 'active', 'api')"
             ),
             {"ext": ext_acct},
         )
@@ -910,8 +910,8 @@ def seed_spu_one_ordered(db_engine):
         sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
             text(
                 "INSERT INTO commerce.shops "
-                "(platform, shop_id, account_name, status) "
-                "VALUES ('tiktok', :ext, 'TEST acct', 'active')"
+                "(platform, shop_id, account_name, status, data_source) "
+                "VALUES ('tiktok', :ext, 'TEST acct', 'active', 'api')"
             ),
             {"ext": ext_acct},
         )

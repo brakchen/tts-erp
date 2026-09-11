@@ -70,6 +70,7 @@ def seed_channel_account(db_engine):
                 region="VN",
                 seller_type="CROSS_BORDER",
                 status="active",
+                data_source="api",
             )
         )
         return conn.execute(

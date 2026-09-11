@@ -81,8 +81,8 @@ def shops_page() -> HTMLResponse:
 
   三段式：注册表单 / 待注册候选（GET /v2/admin/shops/unregistered）/
   已注册列表（GET /v2/commerce/channel-accounts）。行为在
-  static/js/shops.js；写入端点 POST /v2/admin/shops/register 要 admin
-  会话（非 admin 登录时页面只读展示 + 表单禁用提示）。
+  static/js/shops.js；写入端点 POST /v2/admin/shops/register 要 readwrite
+  会话（readonly 会话降级只读展示）。
   """
   return _page(_SHOPS_PAGE_HTML)
 

@@ -162,6 +162,10 @@ def required_role(method: str, path: str) -> int | None:
     # order-sync (Chrome 扩展订单/物流/结算同步) 也是 readwrite。
     if p.startswith("/v2/order-sync"):
         return ROLE_LEVEL["readwrite"]
+    # 店铺人工注册（插件店铺补登记，2026-09-11）：readwrite。
+    # 未知 /v2/admin/* 仍默认 admin（fail-closed）。
+    if p.startswith("/v2/admin/shops/"):
+        return ROLE_LEVEL["readwrite"]
     # Miaoshou callback nodes are public (TikTok shop server-to-server push).
     if p.startswith("/miaoshou/callback"):
         return None

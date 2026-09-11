@@ -63,6 +63,7 @@ def _seed_account_and_product(
         shop_id=account_external_id,
         account_name=f"test {account_external_id}",
         status=account_status,
+        data_source="api",
     )
     db_session.add(acct)
     db_session.flush()

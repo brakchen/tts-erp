@@ -199,7 +199,7 @@ tts_erp_v2/
 ├── app.py               # FastAPI build_app() 工厂（中间件顺序见 §6）
 ├── api/v2/              # 路由：commerce / linkage / reporting / pages / spu_images / auth /
 │                        #   llm_context / admin（rate-limit / purge-plugin-data / shops 注册：插件店铺人工登记进
-│                        #   commerce.shops，credential_id=NULL + status='registered'，仅服务查询关联） /
+│                        #   commerce.shops，data_source='plugin'（枚举 api|plugin），仅服务查询关联，readwrite 角色） /
 │                        #   analytics（Chrome 扩展 ingest）
 ├── middleware/          # auth.py（角色矩阵）、session_auth.py、rate_limit.py、access_log.py
 ├── proxy/               # 出站层：tts_shop/（TikTok 签名+客户端）、miaoshou/、token_service.py
