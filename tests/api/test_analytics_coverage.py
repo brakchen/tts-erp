@@ -382,16 +382,40 @@ def _seed_many_campaigns(db_engine, *, n_campaigns: int, days: list[str]) -> Non
 @pytest.fixture(autouse=True)
 def _cleanup_pager(db_engine):
     with db_engine.begin() as conn:
-        conn.execute(text("DELETE FROM analytics.ad_daily WHERE seller_id = :s"), {"s": PAGER_SELLER})
-        conn.execute(text("DELETE FROM analytics.ad_monthly WHERE seller_id = :s"), {"s": PAGER_SELLER})
-        conn.execute(text("DELETE FROM analytics.ad_today WHERE seller_id = :s"), {"s": PAGER_SELLER})
-        conn.execute(text("DELETE FROM analytics.ad_raw_log WHERE seller_id = :s"), {"s": PAGER_SELLER})
+        conn.execute(
+            text("DELETE FROM analytics.ad_daily WHERE seller_id = :s"),
+            {"s": PAGER_SELLER},
+        )
+        conn.execute(
+            text("DELETE FROM analytics.ad_monthly WHERE seller_id = :s"),
+            {"s": PAGER_SELLER},
+        )
+        conn.execute(
+            text("DELETE FROM analytics.ad_today WHERE seller_id = :s"),
+            {"s": PAGER_SELLER},
+        )
+        conn.execute(
+            text("DELETE FROM analytics.ad_raw_log WHERE seller_id = :s"),
+            {"s": PAGER_SELLER},
+        )
     yield
     with db_engine.begin() as conn:
-        conn.execute(text("DELETE FROM analytics.ad_daily WHERE seller_id = :s"), {"s": PAGER_SELLER})
-        conn.execute(text("DELETE FROM analytics.ad_monthly WHERE seller_id = :s"), {"s": PAGER_SELLER})
-        conn.execute(text("DELETE FROM analytics.ad_today WHERE seller_id = :s"), {"s": PAGER_SELLER})
-        conn.execute(text("DELETE FROM analytics.ad_raw_log WHERE seller_id = :s"), {"s": PAGER_SELLER})
+        conn.execute(
+            text("DELETE FROM analytics.ad_daily WHERE seller_id = :s"),
+            {"s": PAGER_SELLER},
+        )
+        conn.execute(
+            text("DELETE FROM analytics.ad_monthly WHERE seller_id = :s"),
+            {"s": PAGER_SELLER},
+        )
+        conn.execute(
+            text("DELETE FROM analytics.ad_today WHERE seller_id = :s"),
+            {"s": PAGER_SELLER},
+        )
+        conn.execute(
+            text("DELETE FROM analytics.ad_raw_log WHERE seller_id = :s"),
+            {"s": PAGER_SELLER},
+        )
 
 
 def _params(page=None, pageSize=None, **extra):
@@ -412,6 +436,7 @@ def _params(page=None, pageSize=None, **extra):
 
 
 # ─── 分页功能 ───
+
 
 def test_coverage_pagination_default(api_client, readwrite_key, db_engine):
     """不传 page/pageSize → 默认 page=1, pageSize=500，返回所有 campaign + pagination 元数据。"""
@@ -435,7 +460,13 @@ def test_coverage_pagination_basic(api_client, readwrite_key, db_engine):
     # page 1
     r1 = _coverage_get(api_client, readwrite_key, **_params(page=1, pageSize=100))
     d1 = r1.json()["data"]
-    assert d1["pagination"] == {"page": 1, "pageSize": 100, "totalCampaigns": 300, "totalPages": 3, "hasMore": True}
+    assert d1["pagination"] == {
+        "page": 1,
+        "pageSize": 100,
+        "totalCampaigns": 300,
+        "totalPages": 3,
+        "hasMore": True,
+    }
     assert len(d1["campaigns"]) == 100
     # page 2
     r2 = _coverage_get(api_client, readwrite_key, **_params(page=2, pageSize=100))
@@ -450,7 +481,11 @@ def test_coverage_pagination_basic(api_client, readwrite_key, db_engine):
     assert d3["pagination"]["hasMore"] is False
     assert len(d3["campaigns"]) == 100
     # 三页 campaign_id 互不重叠、合并为 300 个
-    all_cids = set(d1["campaigns"].keys()) | set(d2["campaigns"].keys()) | set(d3["campaigns"].keys())
+    all_cids = (
+        set(d1["campaigns"].keys())
+        | set(d2["campaigns"].keys())
+        | set(d3["campaigns"].keys())
+    )
     assert len(all_cids) == 300
 
 
