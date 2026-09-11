@@ -66,8 +66,108 @@ def _page(html: str) -> HTMLResponse:
   return HTMLResponse(
     html.replace("__JSV_CONSOLE__", _js_version("console.js")).replace(
       "__JSV_SPU_ROI__", _js_version("spu-roi.js")
-    )
+    ).replace("__JSV_SHOPS__", _js_version("shops.js"))
   )
+
+
+@router.get("/shops", response_class=HTMLResponse)
+def shops_page() -> HTMLResponse:
+  """店铺注册台（feature/shop-registration）。
+
+  用途：Chrome 插件同步的店铺没有 API credential，OAuth callback 不会给
+  它们建 commerce.shops 行，spu-roi 等 LEFT JOIN shops 的查询关联不上。
+  本页让运营人工注册这类店铺（credential_id=NULL, status='registered'）。
+  注册只影响查询关联，数据同步不依赖注册状态。
+
+  三段式：注册表单 / 待注册候选（GET /v2/admin/shops/unregistered）/
+  已注册列表（GET /v2/commerce/channel-accounts）。行为在
+  static/js/shops.js；写入端点 POST /v2/admin/shops/register 要 admin
+  会话（非 admin 登录时页面只读展示 + 表单禁用提示）。
+  """
+  return _page(_SHOPS_PAGE_HTML)
+
+
+_SHOPS_PAGE_HTML = """<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>店铺注册 · tts-erp</title>
+  <!-- Relative path: resolves to /static/... locally and /tts/static/...
+       behind the NGINX prefix. Do not make this absolute. -->
+  <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
+  <style>
+    body { background: #f6f7f9; }
+    .shop-card { background: #fff; border: 1px solid #e3e6ea; border-radius: 8px; }
+    .shop-card h2 { font-size: 1rem; font-weight: 600; }
+    .badge-sync-api { background: #2F6B3E; }
+    .badge-sync-plugin { background: #8a6d1a; }
+    .mono { font-family: ui-monospace, Consolas, monospace; font-size: .85em; }
+    table td, table th { vertical-align: middle; }
+  </style>
+</head>
+<body>
+<div class="container py-4" style="max-width: 960px">
+  <div class="d-flex align-items-baseline gap-3 mb-3">
+    <h1 class="h4 mb-0">店铺注册</h1>
+    <span class="text-muted small">插件同步店铺人工登记 — 仅影响查询关联，不影响数据同步</span>
+  </div>
+  <div id="auth-note" class="alert alert-warning d-none"></div>
+  <div id="err" class="alert alert-danger d-none"></div>
+
+  <div class="shop-card p-3 mb-4">
+    <h2 class="mb-3">注册店铺</h2>
+    <form id="register-form" class="row g-2 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label small mb-1" for="f-shop-id">shop_id *</label>
+        <input id="f-shop-id" class="form-control form-control-sm mono" required
+               pattern="[0-9]+" placeholder="19 位数字">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small mb-1" for="f-name">店铺名称</label>
+        <input id="f-name" class="form-control form-control-sm">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small mb-1" for="f-region">区域</label>
+        <input id="f-region" class="form-control form-control-sm" placeholder="VN">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small mb-1" for="f-opened">开店日期</label>
+        <input id="f-opened" type="date" class="form-control form-control-sm">
+      </div>
+      <div class="col-md-2">
+        <button type="submit" class="btn btn-sm btn-dark w-100">注册</button>
+      </div>
+    </form>
+    <div class="form-text">重复注册幂等：只补填仍为空的字段，不会覆盖已有 credential / 状态。</div>
+  </div>
+
+  <div class="shop-card p-3 mb-4">
+    <h2 class="mb-2">待注册候选 <span id="cand-count" class="text-muted small"></span></h2>
+    <div class="table-responsive">
+      <table class="table table-sm mb-0">
+        <thead><tr><th>shop_id</th><th>数据来源</th><th></th></tr></thead>
+        <tbody id="cand-body"><tr><td colspan="3" class="text-muted">加载中…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="shop-card p-3">
+    <h2 class="mb-2">已注册店铺</h2>
+    <div class="table-responsive">
+      <table class="table table-sm mb-0">
+        <thead><tr>
+          <th>shop_id</th><th>名称</th><th>区域</th><th>开店日期</th><th>同步方式</th>
+        </tr></thead>
+        <tbody id="shop-body"><tr><td colspan="5" class="text-muted">加载中…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<script src="../../static/js/shops.js?v=__JSV_SHOPS__" defer></script>
+</body>
+</html>
+"""
 
 
 @router.get("/spu-roi", response_class=HTMLResponse)

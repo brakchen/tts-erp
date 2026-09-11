@@ -498,7 +498,8 @@ CREATE TABLE IF NOT EXISTS commerce.shops (
     credential_id bigint,
     source_updated_at timestamp with time zone,
     synced_at timestamp with time zone DEFAULT now() CONSTRAINT channel_accounts_synced_at_not_null NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() CONSTRAINT channel_accounts_updated_at_not_null NOT NULL
+    updated_at timestamp with time zone DEFAULT now() CONSTRAINT channel_accounts_updated_at_not_null NOT NULL,
+    opened_date date
 );
 
 
@@ -2902,5 +2903,5 @@ ALTER TABLE ONLY reporting.shipment_tracking_summary
 
 -- PostgreSQL database dump complete
 
-\unrestrict pDpLcjcVDcvH1ovMntN1t6pnmKAzeYrIiMUlaed3n4GMi8v4Mb1Y9bpiDiktuhQ
+\unrestrict HmAFw2KEcDdhshPPdWdXyQQspfus6tQaF4ewASrQ0Yl0O6Dn3UFK070WNak0aX6
 

@@ -8,7 +8,7 @@ serialized as a string by default to avoid float drift on
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -23,6 +23,7 @@ class ChannelAccountOut(BaseModel):
     region: str | None = None
     seller_type: str | None = None
     status: str | None = None
+    opened_date: date | None = None
     synced_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None

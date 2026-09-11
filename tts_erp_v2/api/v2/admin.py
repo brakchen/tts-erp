@@ -16,11 +16,12 @@ pattern as ``tts_erp_v2/api/v2/linkage.py::overrides``.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
-from typing import Any
+from datetime import date, datetime, timezone
+from typing import Any, Literal
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import text
 
 from tts_erp_v2.api.deps import require_role_at_least
 from tts_erp_v2.middleware.rate_limit import (
@@ -255,3 +256,197 @@ def purge_plugin_data(request: Request) -> dict[str, Any]:
         "purged_by": str(request.scope.get("api_key_hash", "") or "")[:12],
         "purged_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+# ─── Manual shop registration (plugin-only shops) ─────────────────────
+#
+# Background: shops synced via the Chrome extension have no TikTok API
+# credential, so the OAuth callback (the only other writer of
+# ``commerce.shops``) never creates a row for them — and every
+# ``LEFT JOIN commerce.shops`` (spu-roi shop filter etc.) misses them.
+# These endpoints let an operator register such a shop MANUALLY:
+# the row is created with ``credential_id = NULL`` and
+# ``status = 'registered'`` (vs OAuth's ``'active'``).
+#
+# Invariants:
+#   * registration NEVER touches ``credential_id`` / ``status`` of an
+#     existing row — the OAuth callback owns the plugin → API upgrade
+#     (its ``on_conflict_do_update`` backfills credential_id and flips
+#     status to 'active').
+#   * data sync does NOT depend on registration: the plugin dumps
+#     endpoints write chrome_sync.*/analytics.* regardless.
+#   * registration only affects query-time association.
+
+# Non-production shop-id prefixes that must never be registered (mirrors
+# sync_worker/scheduler.py::NON_PRODUCTION_SHOP_PREFIXES — a registered
+# shop is one step closer to being dialed upstream).
+_NON_REGISTERABLE_PREFIXES = ("TEST_", "MOCK_")
+
+
+class ShopRegisterBody(BaseModel):
+    """POST body for ``/v2/admin/shops/register``."""
+
+    platform: Literal["tiktok"] = "tiktok"
+    shop_id: str = Field(min_length=1, max_length=64)
+    account_name: str | None = Field(default=None, max_length=200)
+    region: str | None = Field(default=None, max_length=16)
+    seller_type: str | None = Field(default=None, max_length=32)
+    opened_date: date | None = Field(
+        default=None,
+        description="开店时间（天级，YYYY-MM-DD）。可空。",
+    )
+
+    @field_validator("shop_id")
+    @classmethod
+    def _validate_shop_id(cls, v: str) -> str:
+        v = v.strip()
+        if not v.isdigit():
+            raise ValueError(
+                "shop_id must be a numeric TikTok shop id "
+                f"(TEST_/MOCK_ and other non-numeric ids are not registerable): {v!r}"
+            )
+        if v.startswith(_NON_REGISTERABLE_PREFIXES):
+            raise ValueError(f"shop_id prefix not registerable: {v!r}")
+        return v
+
+
+class ShopOut(BaseModel):
+    id: int
+    platform: str
+    shop_id: str
+    account_name: str | None = None
+    region: str | None = None
+    seller_type: str | None = None
+    status: str | None = None
+    credential_id: int | None = None
+    opened_date: date | None = None
+
+
+class ShopRegisterResponse(BaseModel):
+    created: bool
+    shop: ShopOut
+
+
+# INSERT: new plugin-only shop. ON CONFLICT: backfill still-NULL display
+# fields ONLY (COALESCE(existing, excluded)) — credential_id / status /
+# account_name of an existing row are never overwritten.
+# xmax = 0 distinguishes the inserted row from a conflict-updated one.
+_SQL_REGISTER_SHOP = text(
+    "INSERT INTO commerce.shops "
+    "(platform, shop_id, account_name, region, seller_type, status, opened_date) "
+    "VALUES (:platform, :shop_id, :account_name, :region, :seller_type, "
+    "        'registered', :opened_date) "
+    "ON CONFLICT (platform, shop_id) DO UPDATE SET "
+    "  account_name = COALESCE(shops.account_name, EXCLUDED.account_name), "
+    "  region = COALESCE(shops.region, EXCLUDED.region), "
+    "  seller_type = COALESCE(shops.seller_type, EXCLUDED.seller_type), "
+    "  opened_date = COALESCE(shops.opened_date, EXCLUDED.opened_date) "
+    "RETURNING id, platform, shop_id, account_name, region, seller_type, "
+    "          status, credential_id, opened_date, (xmax = 0) AS inserted"
+)
+
+
+@router.post(
+    "/shops/register",
+    response_model=ShopRegisterResponse,
+    summary="人工注册店铺（插件同步店铺补登记，admin only）",
+)
+def register_shop(
+    request: Request, body: ShopRegisterBody
+) -> ShopRegisterResponse:
+    """Register a shop row manually (plugin-synced shops without an API
+    credential). Idempotent on ``(platform, shop_id)``; re-registering
+    backfills still-NULL display fields and never clobbers an existing
+    credential link or status.
+    """
+    require_role_at_least(request, "admin")
+
+    from tts_erp_v2.db.base import get_engine
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        row = conn.execute(  # pi-lens-ignore: python-sql-injection — module-level constant SQL, bound params only
+            _SQL_REGISTER_SHOP,
+            {
+                "platform": body.platform,
+                "shop_id": body.shop_id,
+                "account_name": body.account_name,
+                "region": body.region,
+                "seller_type": body.seller_type,
+                "opened_date": body.opened_date,
+            },
+        ).one()
+    return ShopRegisterResponse(
+        created=bool(row.inserted),
+        shop=ShopOut(
+            id=row.id,
+            platform=row.platform,
+            shop_id=row.shop_id,
+            account_name=row.account_name,
+            region=row.region,
+            seller_type=row.seller_type,
+            status=row.status,
+            credential_id=row.credential_id,
+            opened_date=row.opened_date,
+        ),
+    )
+
+
+# Shop ids seen in plugin-synced data but with no commerce.shops row.
+# Sources: chrome_sync.raw_log.shop_id (order/logistics/settlement dumps)
+# + analytics seller_id (ad_today/ad_daily/plugin_logs).
+_SQL_UNREGISTERED_SHOPS = text(
+    "SELECT shop_id, source FROM ("
+    "  SELECT shop_id, 'chrome_sync' AS source FROM chrome_sync.raw_log GROUP BY shop_id"
+    "  UNION"
+    "  SELECT seller_id, 'analytics' FROM analytics.ad_today GROUP BY seller_id"
+    "  UNION"
+    "  SELECT seller_id, 'analytics' FROM analytics.ad_daily GROUP BY seller_id"
+    "  UNION"
+    "  SELECT seller_id, 'analytics' FROM analytics.plugin_logs GROUP BY seller_id"
+    ") seen "
+    "WHERE NOT EXISTS ("
+    "  SELECT 1 FROM commerce.shops s "
+    "  WHERE s.platform = 'tiktok' AND s.shop_id = seen.shop_id"
+    ") "
+    "ORDER BY shop_id"
+)
+
+
+class UnregisteredShop(BaseModel):
+    shop_id: str
+    sources: list[str]
+
+
+class UnregisteredShopsResponse(BaseModel):
+    candidates: list[UnregisteredShop]
+
+
+@router.get(
+    "/shops/unregistered",
+    response_model=UnregisteredShopsResponse,
+    summary="列出插件数据里出现但未注册的店铺（admin only）",
+)
+def list_unregistered_shops(request: Request) -> UnregisteredShopsResponse:
+    """Shop ids present in plugin-synced tables (chrome_sync / analytics)
+    but missing from ``commerce.shops`` — the candidate list for the
+    manual registration page.
+    """
+    require_role_at_least(request, "admin")
+
+    from tts_erp_v2.db.base import get_engine
+
+    engine = get_engine()
+    with engine.connect() as conn:
+        rows = conn.execute(  # pi-lens-ignore: python-sql-injection — module-level constant SQL, no params
+            _SQL_UNREGISTERED_SHOPS
+        ).all()
+    sources_by_shop: dict[str, set[str]] = {}
+    for r in rows:
+        sources_by_shop.setdefault(r.shop_id, set()).add(r.source)
+    return UnregisteredShopsResponse(
+        candidates=[
+            UnregisteredShop(shop_id=sid, sources=sorted(srcs))
+            for sid, srcs in sorted(sources_by_shop.items())
+        ]
+    )
