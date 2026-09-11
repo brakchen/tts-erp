@@ -2,8 +2,39 @@
 
 > 🔄 **当前在途工作注册（谁在改什么 / 谁接手）：先读 `handoff/ACTIVE.md`**（AGENTS.md §12.1）
 
-> 上次 session: 2026-09-07（AGENTS.md 多 agent 规则审查 + §11 细化 + stash@{0} 处理）
-> 上次 session 主题: AGENTS.md 多 agent 协作规则漏洞审查并补漏（6 处改动）+ §11 工作流收尾细化（按代码改动面分类判定）
+> 上次 session: 2026-09-11（fix/analytics-v4-campaign-rows 双端对齐完成并发布）
+> 上次 session 主题: v4 dump campaign-level rows 双端对齐（服务端白名单 + plugin 端 rows=[]）
+
+## TL;DR (2026-09-11 v4 dump campaign-level rows 双端对齐)
+
+**修复 Bridge nook 店铺 09-10 18:45 UTC 起 dumps 500 KeyError 持续失败**（`75c84c5` tts-erp
+merge + `a70d078` handoff；`8595167` chrome-plugins merge + `e35fc2c` handoff）：
+
+1. **服务端** — `tts_erp_v2/analytics/repository.py` 加 `_PRODUCT_LEVEL_ENDPOINTS` 白名单
+   (post_product_list + post_session_list)，不在白名单的 endpoint（如
+   campaign_opt_log_list）走 `_archive_raw_log_only` 路径：rows 只入 ad_raw_log
+   (response_body 完整保留)，不入 ad_daily/ad_today/ad_monthly，product_id 存 NULL。
+   `tts_erp_v2/api/v2/analytics.py` 在 dumps 响应里加 `status='campaign_level'` 字段。
+2. **插件端** — chrome-plugins `entrypoints/background.ts` 加 `extractRowsForV4Dump()`
+   helper：campaign-level endpoint → dump.rows=[]，product-level endpoint 走原
+   `extractRowsFromResponse`。三处调用 (daily/today/monthly) 全部换过去。
+3. **协议不变量** — 双端对齐让 "dump.rows 必须是 product-level 行" 成为 v4 协议明确
+   不变量。服务端 `is_product_level_endpoint()` 是公开 API（`__all__` 暴露），未来新
+   endpoint 默认走 product-level 保守暴露 KeyError，让开发者补白名单（AGENTS.md §6
+   fail-loud）。
+4. **测试** — tts-erp 加 7 个新测试（3 个 dumps endpoint + 4 个 repository 层），全部通过；
+   chrome-plugins 加 9 个新测试，全量 668 测试通过。master HEAD 仍是 19 个 pre-existing
+   fail（跟我无关），0 新 fail。
+5. **线上验证** — 重启后手工 curl 测 campaign_opt_log_list dump → 200 + `status=campaign_level`
+   + ad_raw_log 写 1 行 product_id=NULL。stderr KeyError 计数停在上轮 809 不再涨。
+6. **postswhitch-smoke 8/8 通过** + master push 成功 + 双方 worktree 收尾清理。
+7. **已知遗留** — Bridge nook 当前被 `feature/api-managed-guard` lane 标 api_managed，
+   ad_* 表数据来源实际是另一条 path；本次修复重点是让 plugin 上传不再 500，
+   实际 ad_* 数据恢复需要看 api-managed 守卫 review。
+
+**修过的根因**：lane `feat(analytics): v4 结构化 rows 同步协议`（`124c689`，09-10 merge）
+假设每行都有 product_id，但 campaign_opt_log_list 是 campaign-level 变更事件永远没
+product_id → KeyError → dumps 500 → plugin 持续重试失败 → 14512 条 plugin_logs 错误。
 
 ## TL;DR (2026-09-07 AGENTS.md 多 agent 规则补漏 + §11 细化)
 
