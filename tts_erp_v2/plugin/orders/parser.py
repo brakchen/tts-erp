@@ -1,4 +1,4 @@
-"""chrome_sync 解析层。
+"""plugin.orders 解析层。
 
 三个解析函数，每个函数：
 1. 从 TikTok 响应 JSON 提取结构化数据
@@ -17,7 +17,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.chrome_sync.repository import (
+from tts_erp_v2.plugin.orders.repository import (
     _parse_bill_period,
     _payment_status_to_text,
     _to_decimal,
@@ -30,7 +30,7 @@ from tts_erp_v2.chrome_sync.repository import (
     upsert_tracking_event,
 )
 
-log = logging.getLogger("tts_erp_v2.chrome_sync.parser")
+log = logging.getLogger("tts_erp_v2.plugin.orders.parser")
 
 
 # ── helpers ─────────────────────────────────────────────────────────

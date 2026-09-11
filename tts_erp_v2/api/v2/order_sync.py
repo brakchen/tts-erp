@@ -24,18 +24,18 @@ from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import get_session
-from tts_erp_v2.chrome_sync.parser import (
+from tts_erp_v2.db.models.plugin import RawLog
+from tts_erp_v2.plugin.orders.parser import (
     parse_logistics_response,
     parse_order_response,
     parse_statement_list_response,
     parse_statement_transaction_response,
 )
-from tts_erp_v2.chrome_sync.repository import (
+from tts_erp_v2.plugin.orders.repository import (
     has_data_bulk,
     list_synced_ids,
     write_raw_log,
 )
-from tts_erp_v2.db.models.chrome_sync import RawLog
 
 # ─── Config ───────────────────────────────────────────────────────────
 

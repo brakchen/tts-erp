@@ -1,8 +1,19 @@
 #!/usr/bin/env python3
-"""Regenerate schema_tts_erp.sql from the live tts_erp PG database.
+"""Regenerate schema_tts_erp.sql from a live tts_erp-shaped PG database.
 
 Run:
-    python3 scripts/regen_schema.py
+    python3 scripts/regen_schema.py                  # 默认读 .env 的 TTS_ERP_DB_URL（prod）
+    python3 scripts/regen_schema.py --db-url URL     # 指定库（如 test 库）
+    TTS_ERP_DB_URL=URL python3 scripts/regen_schema.py   # 环境变量覆盖
+
+库 URL 解析优先级：`--db-url` > 环境变量 `TTS_ERP_DB_URL` > `.env` 文件。
+
+**本脚本只读库（pg_dump），不写任何数据库** —— 产物是仓库里的
+``schema_tts_erp.sql`` 文本快照。需要在不触碰 prod 的前提下更新该快照时，
+对已跑完迁移的 test 库执行：
+
+    bash -c 'set -a; . ./.env.test; set +a; \
+      python3 scripts/regen_schema.py --db-url "$TTS_ERP_DB_URL"'
 
 What it does:
   1. Runs `pg_dump --schema-only --no-owner --no-privileges
@@ -33,6 +44,7 @@ that means schema.sql was probably going to be inaccurate anyway.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -50,6 +62,11 @@ def _env_value(key: str) -> str | None:
         if line.startswith(f"{key}="):
             return line.split("=", 1)[1].strip()
     return None
+
+
+def _resolve_db_url(cli_url: str | None) -> str | None:
+    """Resolve the source DB URL: --db-url > $TTS_ERP_DB_URL > .env."""
+    return cli_url or os.environ.get("TTS_ERP_DB_URL") or _env_value("TTS_ERP_DB_URL")
 
 
 def _redact(url: str) -> str:
@@ -94,8 +111,10 @@ def _clean(dump: str) -> str:
     lines = dump.splitlines()
     out: list[str] = []
     for line in lines:
-        # Security token — NEVER commit
-        if line.startswith("\\restrict"):
+        # Security token — NEVER commit (pg_dump ≥17 pairs \restrict with a
+        # matching \unrestrict carrying a fresh random token on EVERY run; both
+        # must be dropped or every regen emits a spurious one-line diff).
+        if line.startswith(("\\restrict", "\\unrestrict")):
             continue
         # Session config noise
         if line.startswith("SET ") and (
@@ -211,13 +230,29 @@ TTS_HEADER = """-- =============================================================
 """
 
 
-def main() -> int:
-    tts_url = _env_value("TTS_ERP_DB_URL")
+def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+
+    cli_url: str | None = None
+    if "--db-url" in args:
+        i = args.index("--db-url")
+        if i + 1 >= len(args):
+            sys.stderr.write("fatal: --db-url requires a value\n")
+            return 2
+        cli_url = args[i + 1]
+        del args[i : i + 2]
+    if args:
+        sys.stderr.write(f"fatal: unexpected arguments: {args}\n")
+        return 2
+
+    tts_url = _resolve_db_url(cli_url)
     if not tts_url:
-        sys.stderr.write(f"fatal: TTS_ERP_DB_URL missing in {ENV_PATH}\n")
+        sys.stderr.write(
+            f"fatal: no DB URL (pass --db-url, set TTS_ERP_DB_URL, or add it to {ENV_PATH})\n"
+        )
         return 1
 
-    sys.stderr.write(f"# source: tts_erp ({_redact(tts_url)})\n")
+    sys.stderr.write(f"# source: {_redact(tts_url)}\n")
     out_dir = Path(__file__).resolve().parent.parent
 
     tts_dump = _pg_dump(tts_url)

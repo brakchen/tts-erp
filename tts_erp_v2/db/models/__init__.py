@@ -13,7 +13,7 @@ from tts_erp_v2.db.models.after_sales import (
     Case,
     CaseLine,
 )
-from tts_erp_v2.db.models.chrome_sync import (
+from tts_erp_v2.db.models.plugin import (
     ChromeOrder,
     ChromeOrderLine,
     ChromeSettlement,

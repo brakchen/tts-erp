@@ -28,18 +28,18 @@ STATEMENT_ID_2 = "TEST_stmt-002"
 
 # FK 删除顺序：child → parent
 _CLEANUP_SQLS = [
-    "DELETE FROM chrome_sync.tracking_events WHERE shop_id = :s",
-    "DELETE FROM chrome_sync.order_lines WHERE shop_id = :s",
-    "DELETE FROM chrome_sync.settlement_details WHERE shop_id = :s",
-    "DELETE FROM chrome_sync.settlements WHERE shop_id = :s",
-    "DELETE FROM chrome_sync.shipments WHERE shop_id = :s",
-    "DELETE FROM chrome_sync.orders WHERE shop_id = :s",
-    "DELETE FROM chrome_sync.raw_log WHERE shop_id = :s",
+    "DELETE FROM plugin.tracking_events WHERE shop_id = :s",
+    "DELETE FROM plugin.order_lines WHERE shop_id = :s",
+    "DELETE FROM plugin.settlement_details WHERE shop_id = :s",
+    "DELETE FROM plugin.settlements WHERE shop_id = :s",
+    "DELETE FROM plugin.shipments WHERE shop_id = :s",
+    "DELETE FROM plugin.orders WHERE shop_id = :s",
+    "DELETE FROM plugin.raw_log WHERE shop_id = :s",
 ]
 
 
 @pytest.fixture(autouse=True)
-def _cleanup_chrome_sync_rows(db_engine):
+def _cleanup_plugin_order_rows(db_engine):
     """Setup + teardown 都清一遍。"""
     params = {"s": SHOP_ID}
     with db_engine.begin() as conn:  # noqa: python-sql-injection — 字面量 SQL
@@ -581,12 +581,12 @@ def test_dumps_api_managed_shop_is_ignored(api_client, readwrite_key, db_engine)
     with db_engine.connect() as conn:
         # pi-lens-ignore: python-sql-injection — 字面量 SQL + 绑定参数
         n_log = conn.execute(
-            text("SELECT count(*) FROM chrome_sync.raw_log WHERE shop_id = :s"),
+            text("SELECT count(*) FROM plugin.raw_log WHERE shop_id = :s"),
             {"s": SHOP_ID},
         ).scalar_one()
         # pi-lens-ignore: python-sql-injection — 字面量 SQL + 绑定参数
         n_order = conn.execute(
-            text("SELECT count(*) FROM chrome_sync.orders WHERE shop_id = :s"),
+            text("SELECT count(*) FROM plugin.orders WHERE shop_id = :s"),
             {"s": SHOP_ID},
         ).scalar_one()
     assert n_log == 0, "api_managed 店铺不得写 raw_log"

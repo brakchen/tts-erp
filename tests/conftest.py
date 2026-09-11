@@ -196,13 +196,13 @@ def _check_schema_prereq(db_engine) -> None:
         "reporting.product_profit_daily",
         "reporting.shipment_tracking_summary",
         "security.api_keys",
-        "chrome_sync.raw_log",
-        "chrome_sync.orders",
-        "chrome_sync.order_lines",
-        "chrome_sync.shipments",
-        "chrome_sync.tracking_events",
-        "chrome_sync.settlements",
-        "chrome_sync.settlement_details",
+        "plugin.raw_log",
+        "plugin.orders",
+        "plugin.order_lines",
+        "plugin.shipments",
+        "plugin.tracking_events",
+        "plugin.settlements",
+        "plugin.settlement_details",
     }
     with db_engine.connect() as conn:
         # pi-lens-ignore: python-sql-injection — static schema introspection, no user input
@@ -210,7 +210,7 @@ def _check_schema_prereq(db_engine) -> None:
             text(
                 "SELECT table_schema || '.' || table_name FROM information_schema.tables "
                 "WHERE table_schema IN ('integration','commerce','procurement','fulfillment',"
-                "'after_sales','finance','linkage','reporting','security','fx','chrome_sync')"
+                "'after_sales','finance','linkage','reporting','security','fx','plugin')"
             )
         ).fetchall()
     actual = {r[0] for r in rows}

@@ -47,7 +47,7 @@ def shop_is_api_managed(sess: Session, *, shop_id: str) -> bool:
     一次下发，``data_source`` 翻转为 'api' 后该店插件同步**全域停止**
     ——订单/物流/结算/广告一律改由 sync-worker 经 Open API 同步。
     order-sync / analytics 的 dumps 端点用本函数拦截，防止
-    chrome_sync.*/analytics.* 与 API 数据双写混合。
+    plugin.*/analytics.* 与 API 数据双写混合。
 
     未注册的店铺（shops 无行）返回 False：无行 = 纯插件店。
     """

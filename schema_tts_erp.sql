@@ -40,11 +40,6 @@ CREATE SCHEMA after_sales;
 CREATE SCHEMA analytics;
 
 
--- Name: chrome_sync; Type: SCHEMA; Schema: -; Owner: -
-
-CREATE SCHEMA chrome_sync;
-
-
 -- Name: commerce; Type: SCHEMA; Schema: -; Owner: -
 
 CREATE SCHEMA commerce;
@@ -73,6 +68,11 @@ CREATE SCHEMA integration;
 -- Name: linkage; Type: SCHEMA; Schema: -; Owner: -
 
 CREATE SCHEMA linkage;
+
+
+-- Name: plugin; Type: SCHEMA; Schema: -; Owner: -
+
+CREATE SCHEMA plugin;
 
 
 -- Name: procurement; Type: SCHEMA; Schema: -; Owner: -
@@ -281,207 +281,6 @@ CREATE TABLE IF NOT EXISTS analytics.plugin_logs (
 
 ALTER TABLE analytics.plugin_logs ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME analytics.plugin_logs_id_seq
-);
-
-
--- Name: order_lines; Type: TABLE; Schema: chrome_sync; Owner: -
-
-CREATE TABLE IF NOT EXISTS chrome_sync.order_lines (
-    id bigint NOT NULL,
-    log_id bigint NOT NULL,
-    shop_id text NOT NULL,
-    order_id text NOT NULL,
-    sku_id text NOT NULL,
-    product_id text,
-    product_name text,
-    variant_name text,
-    image_url text,
-    quantity numeric(20,4),
-    unit_price numeric(20,4),
-    currency text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    total_price numeric(20,4),
-    main_order_status integer,
-    sku_display_status integer
-);
-
-
-
-ALTER TABLE chrome_sync.order_lines ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME chrome_sync.order_lines_id_seq
-);
-
-
--- Name: orders; Type: TABLE; Schema: chrome_sync; Owner: -
-
-CREATE TABLE IF NOT EXISTS chrome_sync.orders (
-    id bigint NOT NULL,
-    log_id bigint NOT NULL,
-    shop_id text NOT NULL,
-    order_id text NOT NULL,
-    currency text,
-    payment_amount numeric(20,4),
-    total_amount numeric(20,4),
-    order_time timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    main_order_status integer,
-    sku_display_status integer,
-    fulfillment_type integer,
-    pay_method text,
-    sale_region text,
-    shipping_fee numeric(20,4),
-    update_time timestamp with time zone,
-    latest_rts_time timestamp with time zone,
-    latest_tts_time timestamp with time zone,
-    buyer_nickname text
-);
-
-
-
-ALTER TABLE chrome_sync.orders ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME chrome_sync.orders_id_seq
-);
-
-
--- Name: raw_log; Type: TABLE; Schema: chrome_sync; Owner: -
-
-CREATE TABLE IF NOT EXISTS chrome_sync.raw_log (
-    id bigint NOT NULL,
-    domain text NOT NULL,
-    shop_id text NOT NULL,
-    endpoint text NOT NULL,
-    captured_at timestamp with time zone NOT NULL,
-    request_params jsonb,
-    request_body jsonb,
-    response_body jsonb NOT NULL,
-    parse_error text,
-    rows_written integer DEFAULT 0 NOT NULL,
-    source text DEFAULT 'chrome-ext'::text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
-
-ALTER TABLE chrome_sync.raw_log ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME chrome_sync.raw_log_id_seq
-);
-
-
--- Name: settlement_details; Type: TABLE; Schema: chrome_sync; Owner: -
-
-CREATE TABLE IF NOT EXISTS chrome_sync.settlement_details (
-    id bigint NOT NULL,
-    log_id bigint NOT NULL,
-    shop_id text NOT NULL,
-    statement_id text NOT NULL,
-    statement_version integer DEFAULT 0 NOT NULL,
-    sku_detail_id text NOT NULL,
-    trade_order_id text,
-    sku_id text,
-    product_name text,
-    sku_name text,
-    quantity numeric(20,4),
-    settlement_status text,
-    placed_time timestamp with time zone,
-    settlement_amount numeric(20,4),
-    earning_amount numeric(20,4),
-    fees_amount numeric(20,4),
-    currency text,
-    fee_components jsonb,
-    seller_web_cut_flow boolean,
-    seller_app_cut_flow boolean,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
-
-ALTER TABLE chrome_sync.settlement_details ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME chrome_sync.settlement_details_id_seq
-);
-
-
--- Name: settlements; Type: TABLE; Schema: chrome_sync; Owner: -
-
-CREATE TABLE IF NOT EXISTS chrome_sync.settlements (
-    id bigint NOT NULL,
-    log_id bigint NOT NULL,
-    shop_id text NOT NULL,
-    statement_id text NOT NULL,
-    statement_version integer DEFAULT 0 NOT NULL,
-    bill_period text,
-    period_start date,
-    period_end date,
-    settlement_time timestamp with time zone,
-    settlement_id text,
-    payment_id text,
-    payment_status text,
-    statement_type integer,
-    payment_pending_reason integer,
-    settle_amount numeric(20,4),
-    earning_amount numeric(20,4),
-    fee_amount numeric(20,4),
-    adjust_amount numeric(20,4),
-    payable_amount numeric(20,4),
-    shipping_amount numeric(20,4),
-    total_reserve_amount numeric(20,4),
-    currency text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
-
-ALTER TABLE chrome_sync.settlements ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME chrome_sync.settlements_id_seq
-);
-
-
--- Name: shipments; Type: TABLE; Schema: chrome_sync; Owner: -
-
-CREATE TABLE IF NOT EXISTS chrome_sync.shipments (
-    id bigint NOT NULL,
-    log_id bigint NOT NULL,
-    shop_id text NOT NULL,
-    order_id text NOT NULL,
-    package_id text NOT NULL,
-    tracking_number text,
-    carrier_name text,
-    status text,
-    shipped_at timestamp with time zone,
-    delivered_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
-
-ALTER TABLE chrome_sync.shipments ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME chrome_sync.shipments_id_seq
-);
-
-
--- Name: tracking_events; Type: TABLE; Schema: chrome_sync; Owner: -
-
-CREATE TABLE IF NOT EXISTS chrome_sync.tracking_events (
-    id bigint NOT NULL,
-    log_id bigint NOT NULL,
-    shop_id text NOT NULL,
-    package_id text NOT NULL,
-    event_key text NOT NULL,
-    event_at timestamp with time zone,
-    description text,
-    location text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
-
-ALTER TABLE chrome_sync.tracking_events ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME chrome_sync.tracking_events_id_seq
 );
 
 
@@ -1109,6 +908,207 @@ ALTER TABLE linkage.variant_links ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTI
 );
 
 
+-- Name: order_lines; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.order_lines (
+    id bigint NOT NULL,
+    log_id bigint NOT NULL,
+    shop_id text NOT NULL,
+    order_id text NOT NULL,
+    sku_id text NOT NULL,
+    product_id text,
+    product_name text,
+    variant_name text,
+    image_url text,
+    quantity numeric(20,4),
+    unit_price numeric(20,4),
+    currency text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    total_price numeric(20,4),
+    main_order_status integer,
+    sku_display_status integer
+);
+
+
+
+ALTER TABLE plugin.order_lines ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.order_lines_id_seq
+);
+
+
+-- Name: orders; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.orders (
+    id bigint NOT NULL,
+    log_id bigint NOT NULL,
+    shop_id text NOT NULL,
+    order_id text NOT NULL,
+    currency text,
+    payment_amount numeric(20,4),
+    total_amount numeric(20,4),
+    order_time timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    main_order_status integer,
+    sku_display_status integer,
+    fulfillment_type integer,
+    pay_method text,
+    sale_region text,
+    shipping_fee numeric(20,4),
+    update_time timestamp with time zone,
+    latest_rts_time timestamp with time zone,
+    latest_tts_time timestamp with time zone,
+    buyer_nickname text
+);
+
+
+
+ALTER TABLE plugin.orders ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.orders_id_seq
+);
+
+
+-- Name: raw_log; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.raw_log (
+    id bigint NOT NULL,
+    domain text NOT NULL,
+    shop_id text NOT NULL,
+    endpoint text NOT NULL,
+    captured_at timestamp with time zone NOT NULL,
+    request_params jsonb,
+    request_body jsonb,
+    response_body jsonb NOT NULL,
+    parse_error text,
+    rows_written integer DEFAULT 0 NOT NULL,
+    source text DEFAULT 'chrome-ext'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.raw_log ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.raw_log_id_seq
+);
+
+
+-- Name: settlement_details; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.settlement_details (
+    id bigint NOT NULL,
+    log_id bigint NOT NULL,
+    shop_id text NOT NULL,
+    statement_id text NOT NULL,
+    statement_version integer DEFAULT 0 NOT NULL,
+    sku_detail_id text NOT NULL,
+    trade_order_id text,
+    sku_id text,
+    product_name text,
+    sku_name text,
+    quantity numeric(20,4),
+    settlement_status text,
+    placed_time timestamp with time zone,
+    settlement_amount numeric(20,4),
+    earning_amount numeric(20,4),
+    fees_amount numeric(20,4),
+    currency text,
+    fee_components jsonb,
+    seller_web_cut_flow boolean,
+    seller_app_cut_flow boolean,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.settlement_details ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.settlement_details_id_seq
+);
+
+
+-- Name: settlements; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.settlements (
+    id bigint NOT NULL,
+    log_id bigint NOT NULL,
+    shop_id text NOT NULL,
+    statement_id text NOT NULL,
+    statement_version integer DEFAULT 0 NOT NULL,
+    bill_period text,
+    period_start date,
+    period_end date,
+    settlement_time timestamp with time zone,
+    settlement_id text,
+    payment_id text,
+    payment_status text,
+    statement_type integer,
+    payment_pending_reason integer,
+    settle_amount numeric(20,4),
+    earning_amount numeric(20,4),
+    fee_amount numeric(20,4),
+    adjust_amount numeric(20,4),
+    payable_amount numeric(20,4),
+    shipping_amount numeric(20,4),
+    total_reserve_amount numeric(20,4),
+    currency text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.settlements ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.settlements_id_seq
+);
+
+
+-- Name: shipments; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.shipments (
+    id bigint NOT NULL,
+    log_id bigint NOT NULL,
+    shop_id text NOT NULL,
+    order_id text NOT NULL,
+    package_id text NOT NULL,
+    tracking_number text,
+    carrier_name text,
+    status text,
+    shipped_at timestamp with time zone,
+    delivered_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.shipments ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.shipments_id_seq
+);
+
+
+-- Name: tracking_events; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.tracking_events (
+    id bigint NOT NULL,
+    log_id bigint NOT NULL,
+    shop_id text NOT NULL,
+    package_id text NOT NULL,
+    event_key text NOT NULL,
+    event_at timestamp with time zone,
+    description text,
+    location text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.tracking_events ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.tracking_events_id_seq
+);
+
+
 -- Name: manual_product_costs; Type: TABLE; Schema: procurement; Owner: -
 
 CREATE TABLE IF NOT EXISTS procurement.manual_product_costs (
@@ -1439,84 +1439,6 @@ ALTER TABLE ONLY analytics.ad_today
     ADD CONSTRAINT uq_ad_today UNIQUE (seller_id, advertiser_id, endpoint, campaign_id, product_id, day);
 
 
--- Name: order_lines order_lines_pkey; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
-
-ALTER TABLE ONLY chrome_sync.order_lines
-    ADD CONSTRAINT order_lines_pkey PRIMARY KEY (id);
-
-
--- Name: orders orders_pkey; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
-
-ALTER TABLE ONLY chrome_sync.orders
-    ADD CONSTRAINT orders_pkey PRIMARY KEY (id);
-
-
--- Name: raw_log raw_log_pkey; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
-
-ALTER TABLE ONLY chrome_sync.raw_log
-    ADD CONSTRAINT raw_log_pkey PRIMARY KEY (id);
-
-
--- Name: settlement_details settlement_details_pkey; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
-
-ALTER TABLE ONLY chrome_sync.settlement_details
-    ADD CONSTRAINT settlement_details_pkey PRIMARY KEY (id);
-
-
--- Name: settlements settlements_pkey; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
-
-ALTER TABLE ONLY chrome_sync.settlements
-    ADD CONSTRAINT settlements_pkey PRIMARY KEY (id);
-
-
--- Name: shipments shipments_pkey; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
-
-ALTER TABLE ONLY chrome_sync.shipments
-    ADD CONSTRAINT shipments_pkey PRIMARY KEY (id);
-
-
--- Name: tracking_events tracking_events_pkey; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
-
-ALTER TABLE ONLY chrome_sync.tracking_events
-    ADD CONSTRAINT tracking_events_pkey PRIMARY KEY (id);
-
-
--- Name: order_lines uq_order_lines_order_sku; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
-
-ALTER TABLE ONLY chrome_sync.order_lines
-    ADD CONSTRAINT uq_order_lines_order_sku UNIQUE (shop_id, order_id, sku_id);
-
-
--- Name: orders uq_orders_shop_order; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
-
-ALTER TABLE ONLY chrome_sync.orders
-    ADD CONSTRAINT uq_orders_shop_order UNIQUE (shop_id, order_id);
-
-
--- Name: settlement_details uq_settlement_details_shop_sku; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
-
-ALTER TABLE ONLY chrome_sync.settlement_details
-    ADD CONSTRAINT uq_settlement_details_shop_sku UNIQUE (shop_id, sku_detail_id);
-
-
--- Name: settlements uq_settlements_shop_stmt; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
-
-ALTER TABLE ONLY chrome_sync.settlements
-    ADD CONSTRAINT uq_settlements_shop_stmt UNIQUE (shop_id, statement_id, statement_version);
-
-
--- Name: shipments uq_shipments_shop_pkg; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
-
-ALTER TABLE ONLY chrome_sync.shipments
-    ADD CONSTRAINT uq_shipments_shop_pkg UNIQUE (shop_id, package_id);
-
-
--- Name: tracking_events uq_tracking_events_pkg_key; Type: CONSTRAINT; Schema: chrome_sync; Owner: -
-
-ALTER TABLE ONLY chrome_sync.tracking_events
-    ADD CONSTRAINT uq_tracking_events_pkg_key UNIQUE (shop_id, package_id, event_key);
-
-
 -- Name: shops channel_accounts_pkey; Type: CONSTRAINT; Schema: commerce; Owner: -
 
 ALTER TABLE ONLY commerce.shops
@@ -1793,6 +1715,84 @@ ALTER TABLE ONLY linkage.variant_links
     ADD CONSTRAINT variant_links_pkey PRIMARY KEY (id);
 
 
+-- Name: order_lines order_lines_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.order_lines
+    ADD CONSTRAINT order_lines_pkey PRIMARY KEY (id);
+
+
+-- Name: orders orders_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.orders
+    ADD CONSTRAINT orders_pkey PRIMARY KEY (id);
+
+
+-- Name: raw_log raw_log_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.raw_log
+    ADD CONSTRAINT raw_log_pkey PRIMARY KEY (id);
+
+
+-- Name: settlement_details settlement_details_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.settlement_details
+    ADD CONSTRAINT settlement_details_pkey PRIMARY KEY (id);
+
+
+-- Name: settlements settlements_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.settlements
+    ADD CONSTRAINT settlements_pkey PRIMARY KEY (id);
+
+
+-- Name: shipments shipments_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.shipments
+    ADD CONSTRAINT shipments_pkey PRIMARY KEY (id);
+
+
+-- Name: tracking_events tracking_events_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.tracking_events
+    ADD CONSTRAINT tracking_events_pkey PRIMARY KEY (id);
+
+
+-- Name: order_lines uq_order_lines_order_sku; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.order_lines
+    ADD CONSTRAINT uq_order_lines_order_sku UNIQUE (shop_id, order_id, sku_id);
+
+
+-- Name: orders uq_orders_shop_order; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.orders
+    ADD CONSTRAINT uq_orders_shop_order UNIQUE (shop_id, order_id);
+
+
+-- Name: settlement_details uq_settlement_details_shop_sku; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.settlement_details
+    ADD CONSTRAINT uq_settlement_details_shop_sku UNIQUE (shop_id, sku_detail_id);
+
+
+-- Name: settlements uq_settlements_shop_stmt; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.settlements
+    ADD CONSTRAINT uq_settlements_shop_stmt UNIQUE (shop_id, statement_id, statement_version);
+
+
+-- Name: shipments uq_shipments_shop_pkg; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.shipments
+    ADD CONSTRAINT uq_shipments_shop_pkg UNIQUE (shop_id, package_id);
+
+
+-- Name: tracking_events uq_tracking_events_pkg_key; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.tracking_events
+    ADD CONSTRAINT uq_tracking_events_pkg_key UNIQUE (shop_id, package_id, event_key);
+
+
 -- Name: manual_product_costs manual_product_costs_pkey; Type: CONSTRAINT; Schema: procurement; Owner: -
 
 ALTER TABLE ONLY procurement.manual_product_costs
@@ -1980,46 +1980,6 @@ CREATE INDEX IF NOT EXISTS idx_plugin_logs_level ON analytics.plugin_logs USING 
 CREATE INDEX IF NOT EXISTS idx_plugin_logs_seller_time ON analytics.plugin_logs USING btree (seller_id, occurred_at DESC);
 
 
--- Name: ix_orders_main_order_status; Type: INDEX; Schema: chrome_sync; Owner: -
-
-CREATE INDEX IF NOT EXISTS ix_orders_main_order_status ON chrome_sync.orders USING btree (main_order_status);
-
-
--- Name: ix_orders_shop; Type: INDEX; Schema: chrome_sync; Owner: -
-
-CREATE INDEX IF NOT EXISTS ix_orders_shop ON chrome_sync.orders USING btree (shop_id);
-
-
--- Name: ix_raw_log_created; Type: INDEX; Schema: chrome_sync; Owner: -
-
-CREATE INDEX IF NOT EXISTS ix_raw_log_created ON chrome_sync.raw_log USING btree (created_at);
-
-
--- Name: ix_raw_log_domain_shop; Type: INDEX; Schema: chrome_sync; Owner: -
-
-CREATE INDEX IF NOT EXISTS ix_raw_log_domain_shop ON chrome_sync.raw_log USING btree (domain, shop_id);
-
-
--- Name: ix_raw_log_endpoint; Type: INDEX; Schema: chrome_sync; Owner: -
-
-CREATE INDEX IF NOT EXISTS ix_raw_log_endpoint ON chrome_sync.raw_log USING btree (endpoint);
-
-
--- Name: ix_settlement_details_stmt; Type: INDEX; Schema: chrome_sync; Owner: -
-
-CREATE INDEX IF NOT EXISTS ix_settlement_details_stmt ON chrome_sync.settlement_details USING btree (shop_id, statement_id);
-
-
--- Name: ix_settlements_shop; Type: INDEX; Schema: chrome_sync; Owner: -
-
-CREATE INDEX IF NOT EXISTS ix_settlements_shop ON chrome_sync.settlements USING btree (shop_id);
-
-
--- Name: ix_shipments_order; Type: INDEX; Schema: chrome_sync; Owner: -
-
-CREATE INDEX IF NOT EXISTS ix_shipments_order ON chrome_sync.shipments USING btree (shop_id, order_id);
-
-
 -- Name: ix_channel_accounts_status; Type: INDEX; Schema: commerce; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_channel_accounts_status ON commerce.shops USING btree (status);
@@ -2178,6 +2138,46 @@ CREATE INDEX IF NOT EXISTS ix_product_links_status ON linkage.product_links USIN
 -- Name: ix_variant_links_validity; Type: INDEX; Schema: linkage; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_variant_links_validity ON linkage.variant_links USING btree (valid_from, valid_to);
+
+
+-- Name: ix_orders_main_order_status; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_orders_main_order_status ON plugin.orders USING btree (main_order_status);
+
+
+-- Name: ix_orders_shop; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_orders_shop ON plugin.orders USING btree (shop_id);
+
+
+-- Name: ix_raw_log_created; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_raw_log_created ON plugin.raw_log USING btree (created_at);
+
+
+-- Name: ix_raw_log_domain_shop; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_raw_log_domain_shop ON plugin.raw_log USING btree (domain, shop_id);
+
+
+-- Name: ix_raw_log_endpoint; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_raw_log_endpoint ON plugin.raw_log USING btree (endpoint);
+
+
+-- Name: ix_settlement_details_stmt; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_settlement_details_stmt ON plugin.settlement_details USING btree (shop_id, statement_id);
+
+
+-- Name: ix_settlements_shop; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_settlements_shop ON plugin.settlements USING btree (shop_id);
+
+
+-- Name: ix_shipments_order; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_shipments_order ON plugin.shipments USING btree (shop_id, order_id);
 
 
 -- Name: ix_manual_costs_channel_product_valid; Type: INDEX; Schema: procurement; Owner: -
@@ -2495,42 +2495,6 @@ ALTER TABLE ONLY after_sales.cases
     ADD CONSTRAINT cases_sales_order_id_fkey FOREIGN KEY (order_pk) REFERENCES commerce.sales_orders(id) ON DELETE RESTRICT;
 
 
--- Name: order_lines order_lines_log_id_fkey; Type: FK CONSTRAINT; Schema: chrome_sync; Owner: -
-
-ALTER TABLE ONLY chrome_sync.order_lines
-    ADD CONSTRAINT order_lines_log_id_fkey FOREIGN KEY (log_id) REFERENCES chrome_sync.raw_log(id);
-
-
--- Name: orders orders_log_id_fkey; Type: FK CONSTRAINT; Schema: chrome_sync; Owner: -
-
-ALTER TABLE ONLY chrome_sync.orders
-    ADD CONSTRAINT orders_log_id_fkey FOREIGN KEY (log_id) REFERENCES chrome_sync.raw_log(id);
-
-
--- Name: settlement_details settlement_details_log_id_fkey; Type: FK CONSTRAINT; Schema: chrome_sync; Owner: -
-
-ALTER TABLE ONLY chrome_sync.settlement_details
-    ADD CONSTRAINT settlement_details_log_id_fkey FOREIGN KEY (log_id) REFERENCES chrome_sync.raw_log(id);
-
-
--- Name: settlements settlements_log_id_fkey; Type: FK CONSTRAINT; Schema: chrome_sync; Owner: -
-
-ALTER TABLE ONLY chrome_sync.settlements
-    ADD CONSTRAINT settlements_log_id_fkey FOREIGN KEY (log_id) REFERENCES chrome_sync.raw_log(id);
-
-
--- Name: shipments shipments_log_id_fkey; Type: FK CONSTRAINT; Schema: chrome_sync; Owner: -
-
-ALTER TABLE ONLY chrome_sync.shipments
-    ADD CONSTRAINT shipments_log_id_fkey FOREIGN KEY (log_id) REFERENCES chrome_sync.raw_log(id);
-
-
--- Name: tracking_events tracking_events_log_id_fkey; Type: FK CONSTRAINT; Schema: chrome_sync; Owner: -
-
-ALTER TABLE ONLY chrome_sync.tracking_events
-    ADD CONSTRAINT tracking_events_log_id_fkey FOREIGN KEY (log_id) REFERENCES chrome_sync.raw_log(id);
-
-
 -- Name: shops channel_accounts_credential_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
 
 ALTER TABLE ONLY commerce.shops
@@ -2795,6 +2759,42 @@ ALTER TABLE ONLY linkage.variant_links
     ADD CONSTRAINT variant_links_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
 
 
+-- Name: order_lines order_lines_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.order_lines
+    ADD CONSTRAINT order_lines_log_id_fkey FOREIGN KEY (log_id) REFERENCES plugin.raw_log(id);
+
+
+-- Name: orders orders_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.orders
+    ADD CONSTRAINT orders_log_id_fkey FOREIGN KEY (log_id) REFERENCES plugin.raw_log(id);
+
+
+-- Name: settlement_details settlement_details_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.settlement_details
+    ADD CONSTRAINT settlement_details_log_id_fkey FOREIGN KEY (log_id) REFERENCES plugin.raw_log(id);
+
+
+-- Name: settlements settlements_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.settlements
+    ADD CONSTRAINT settlements_log_id_fkey FOREIGN KEY (log_id) REFERENCES plugin.raw_log(id);
+
+
+-- Name: shipments shipments_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.shipments
+    ADD CONSTRAINT shipments_log_id_fkey FOREIGN KEY (log_id) REFERENCES plugin.raw_log(id);
+
+
+-- Name: tracking_events tracking_events_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.tracking_events
+    ADD CONSTRAINT tracking_events_log_id_fkey FOREIGN KEY (log_id) REFERENCES plugin.raw_log(id);
+
+
 -- Name: manual_product_costs manual_product_costs_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
 
 ALTER TABLE ONLY procurement.manual_product_costs
@@ -2905,5 +2905,4 @@ ALTER TABLE ONLY reporting.shipment_tracking_summary
 
 -- PostgreSQL database dump complete
 
-\unrestrict cvjFm4gv6ZA5gXCcASbmWlD7DIc7p3kUpOSLIPeHZovKzhTQPPglicQhMIYGKv9
 

@@ -64,7 +64,7 @@ Chrome 插件                                    tts-erp 后端
 
 ## 3. 数据模型
 
-### 3.1 架构：`chrome_sync` schema（完全独立）
+### 3.1 架构：`plugin` schema（完全独立）
 
 ```
 插件 POST /dumps
@@ -75,8 +75,8 @@ Chrome 插件                                    tts-erp 后端
 │                                     │
 │  1. 校验请求                         │
 │  2. 解析 TikTok 响应（inline）       │
-│  3. 写入 chrome_sync 业务表          │
-│  4. 写入 chrome_sync.raw_log（流水） │
+│  3. 写入 plugin 业务表          │
+│  4. 写入 plugin.raw_log（流水） │
 │  5. 返回 inserted/updated/stale      │
 └─────────────────────────────────────┘
 ```
@@ -89,16 +89,16 @@ Chrome 插件                                    tts-erp 后端
 - 与 `commerce`/`fulfillment`/`finance` **完全隔离**，不建 FK、不共享数据
 
 ```sql
-CREATE SCHEMA IF NOT EXISTS chrome_sync;
+CREATE SCHEMA IF NOT EXISTS plugin;
 ```
 
-### 3.2 `chrome_sync.raw_log` — 同步流水（完整 dump 存档）
+### 3.2 `plugin.raw_log` — 同步流水（完整 dump 存档）
 
 每条 dump 请求一行，只追加不修改。存储完整的原始 dump 内容，用于审计、
 问题排查和数据回溯。
 
 ```sql
-CREATE TABLE chrome_sync.raw_log (
+CREATE TABLE plugin.raw_log (
     id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     domain          TEXT NOT NULL,              -- 'orders' | 'logistics' | 'statements'
     shop_id         TEXT NOT NULL,              -- TikTok 外部 shop_id
@@ -113,23 +113,23 @@ CREATE TABLE chrome_sync.raw_log (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()  -- 后端收到时间
 );
 
-COMMENT ON TABLE chrome_sync.raw_log IS 'Chrome 扩展同步流水日志。每条 dump 请求一行，只追加不修改，存完整原始响应，用于审计和数据回溯。';
-COMMENT ON COLUMN chrome_sync.raw_log.id IS '自增主键';
-COMMENT ON COLUMN chrome_sync.raw_log.domain IS '同步域：orders=订单, logistics=物流, statements=结算';
-COMMENT ON COLUMN chrome_sync.raw_log.shop_id IS 'TikTok 外部店铺 ID';
-COMMENT ON COLUMN chrome_sync.raw_log.endpoint IS 'TikTok API 路径，如 /api/fulfillment/order/list';
-COMMENT ON COLUMN chrome_sync.raw_log.captured_at IS '插件在 TikTok 页面抓取响应的时间';
-COMMENT ON COLUMN chrome_sync.raw_log.request_params IS 'URL query params，如 {main_order_id: "...", offset: 0}';
-COMMENT ON COLUMN chrome_sync.raw_log.request_body IS 'POST 请求 body（GET 请求为 NULL）';
-COMMENT ON COLUMN chrome_sync.raw_log.response_body IS 'TikTok 完整原始响应，source-of-truth，可重跑解析修复业务表';
-COMMENT ON COLUMN chrome_sync.raw_log.parse_error IS '解析失败原因；NULL 表示解析成功';
-COMMENT ON COLUMN chrome_sync.raw_log.rows_written IS '本次解析写入业务表的行数';
-COMMENT ON COLUMN chrome_sync.raw_log.source IS '数据来源标识，默认 chrome-ext';
-COMMENT ON COLUMN chrome_sync.raw_log.created_at IS '后端收到并写入的时间';
+COMMENT ON TABLE plugin.raw_log IS 'Chrome 扩展同步流水日志。每条 dump 请求一行，只追加不修改，存完整原始响应，用于审计和数据回溯。';
+COMMENT ON COLUMN plugin.raw_log.id IS '自增主键';
+COMMENT ON COLUMN plugin.raw_log.domain IS '同步域：orders=订单, logistics=物流, statements=结算';
+COMMENT ON COLUMN plugin.raw_log.shop_id IS 'TikTok 外部店铺 ID';
+COMMENT ON COLUMN plugin.raw_log.endpoint IS 'TikTok API 路径，如 /api/fulfillment/order/list';
+COMMENT ON COLUMN plugin.raw_log.captured_at IS '插件在 TikTok 页面抓取响应的时间';
+COMMENT ON COLUMN plugin.raw_log.request_params IS 'URL query params，如 {main_order_id: "...", offset: 0}';
+COMMENT ON COLUMN plugin.raw_log.request_body IS 'POST 请求 body（GET 请求为 NULL）';
+COMMENT ON COLUMN plugin.raw_log.response_body IS 'TikTok 完整原始响应，source-of-truth，可重跑解析修复业务表';
+COMMENT ON COLUMN plugin.raw_log.parse_error IS '解析失败原因；NULL 表示解析成功';
+COMMENT ON COLUMN plugin.raw_log.rows_written IS '本次解析写入业务表的行数';
+COMMENT ON COLUMN plugin.raw_log.source IS '数据来源标识，默认 chrome-ext';
+COMMENT ON COLUMN plugin.raw_log.created_at IS '后端收到并写入的时间';
 
-CREATE INDEX ix_raw_log_domain_shop ON chrome_sync.raw_log(domain, shop_id);
-CREATE INDEX ix_raw_log_created ON chrome_sync.raw_log(created_at);
-CREATE INDEX ix_raw_log_endpoint ON chrome_sync.raw_log(endpoint);
+CREATE INDEX ix_raw_log_domain_shop ON plugin.raw_log(domain, shop_id);
+CREATE INDEX ix_raw_log_created ON plugin.raw_log(created_at);
+CREATE INDEX ix_raw_log_endpoint ON plugin.raw_log(endpoint);
 ```
 
 **设计要点**：
@@ -138,17 +138,17 @@ CREATE INDEX ix_raw_log_endpoint ON chrome_sync.raw_log(endpoint);
 - **存完整 dump**：endpoint + request_params + request_body + response_body 全量存，是所有同步数据的原始 source-of-truth
 - **两个时间戳**：`captured_at`（插件抓取时间，TikTok 侧）+ `created_at`（后端收到时间）
 - **解析状态**：`parse_error IS NULL` = 解析成功，`parse_error IS NOT NULL` = 解析失败（含原因）
-- **retention**：定期清理 90 天前的日志（`DELETE FROM chrome_sync.raw_log WHERE created_at < now() - interval '90 days'`）；或按需保留更长
+- **retention**：定期清理 90 天前的日志（`DELETE FROM plugin.raw_log WHERE created_at < now() - interval '90 days'`）；或按需保留更长
 - **数据回溯**：业务表数据有问题时，可从 raw_log.response_body 重跑解析修复
 
 ### 3.3 业务表
 
-#### `chrome_sync.orders` — 订单
+#### `plugin.orders` — 订单
 
 ```sql
-CREATE TABLE chrome_sync.orders (
+CREATE TABLE plugin.orders (
     id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    log_id          BIGINT NOT NULL REFERENCES chrome_sync.raw_log(id),  -- 来源 raw_log
+    log_id          BIGINT NOT NULL REFERENCES plugin.raw_log(id),  -- 来源 raw_log
     shop_id         TEXT NOT NULL,
     order_id        TEXT NOT NULL,              -- ✅ 实测确认: main_order_id
     main_order_status INT,                      -- ✅ 实测确认: order_status_module[0].main_order_status
@@ -171,40 +171,40 @@ CREATE TABLE chrome_sync.orders (
     CONSTRAINT uq_orders_shop_order UNIQUE (shop_id, order_id)
 );
 
-CREATE INDEX ix_orders_shop ON chrome_sync.orders(shop_id);
-CREATE INDEX ix_orders_status ON chrome_sync.orders(status);
+CREATE INDEX ix_orders_shop ON plugin.orders(shop_id);
+CREATE INDEX ix_orders_status ON plugin.orders(status);
 
-COMMENT ON TABLE chrome_sync.orders IS 'Chrome 扩展同步的 TikTok 订单头，来自 order/list 响应';
-COMMENT ON COLUMN chrome_sync.orders.id IS '自增主键';
-COMMENT ON COLUMN chrome_sync.orders.shop_id IS 'TikTok 外部店铺 ID';
-COMMENT ON COLUMN chrome_sync.orders.log_id IS '关联 raw_log.id，溯源本次数据来自哪条 dump';
-COMMENT ON COLUMN chrome_sync.orders.order_id IS '✅ TikTok main_order_id';
-COMMENT ON COLUMN chrome_sync.orders.main_order_status IS '✅ 订单状态码（整数，order_status_module[0].main_order_status）';
-COMMENT ON COLUMN chrome_sync.orders.sku_display_status IS '✅ SKU 展示状态码（整数，order_status_module[0].sku_display_status）';
-COMMENT ON COLUMN chrome_sync.orders.currency IS '✅ 币种 ISO 4217（price_module.grand_total.currency）';
-COMMENT ON COLUMN chrome_sync.orders.payment_amount IS '✅ 买家实付（price_module.grand_total.price_val，字符串转 Decimal）';
-COMMENT ON COLUMN chrome_sync.orders.total_amount IS '✅ 订单总额（price_module.sub_total.price_val）';
-COMMENT ON COLUMN chrome_sync.orders.fulfillment_type IS '✅ 履约类型（trade_order_module.fulfillment_type，整数）';
-COMMENT ON COLUMN chrome_sync.orders.pay_method IS '✅ 支付方式（trade_order_module.pay_method，如 Cash on delivery）';
-COMMENT ON COLUMN chrome_sync.orders.sale_region IS '✅ 销售区域（trade_order_module.sale_region，如 VN）';
-COMMENT ON COLUMN chrome_sync.orders.shipping_fee IS '✅ 运费（trade_order_module.shipping_fee.price_val）';
-COMMENT ON COLUMN chrome_sync.orders.order_time IS '✅ 下单时间（trade_order_module.create_time，秒级时间戳字符串）';
-COMMENT ON COLUMN chrome_sync.orders.update_time IS '✅ 更新时间（trade_order_module.update_time，毫秒级时间戳字符串）';
-COMMENT ON COLUMN chrome_sync.orders.latest_rts_time IS '✅ 最晚发货时间（trade_order_module.latest_rts_time）';
-COMMENT ON COLUMN chrome_sync.orders.latest_tts_time IS '✅ 最晚交易时间（trade_order_module.latest_tts_time）';
-COMMENT ON COLUMN chrome_sync.orders.buyer_nickname IS '✅ 买家昵称（buyer_info_module.buyer_nickname）';
-COMMENT ON COLUMN chrome_sync.orders.created_at IS '数据入库时间';
-COMMENT ON COLUMN chrome_sync.orders.updated_at IS '最后更新时间';
+COMMENT ON TABLE plugin.orders IS 'Chrome 扩展同步的 TikTok 订单头，来自 order/list 响应';
+COMMENT ON COLUMN plugin.orders.id IS '自增主键';
+COMMENT ON COLUMN plugin.orders.shop_id IS 'TikTok 外部店铺 ID';
+COMMENT ON COLUMN plugin.orders.log_id IS '关联 raw_log.id，溯源本次数据来自哪条 dump';
+COMMENT ON COLUMN plugin.orders.order_id IS '✅ TikTok main_order_id';
+COMMENT ON COLUMN plugin.orders.main_order_status IS '✅ 订单状态码（整数，order_status_module[0].main_order_status）';
+COMMENT ON COLUMN plugin.orders.sku_display_status IS '✅ SKU 展示状态码（整数，order_status_module[0].sku_display_status）';
+COMMENT ON COLUMN plugin.orders.currency IS '✅ 币种 ISO 4217（price_module.grand_total.currency）';
+COMMENT ON COLUMN plugin.orders.payment_amount IS '✅ 买家实付（price_module.grand_total.price_val，字符串转 Decimal）';
+COMMENT ON COLUMN plugin.orders.total_amount IS '✅ 订单总额（price_module.sub_total.price_val）';
+COMMENT ON COLUMN plugin.orders.fulfillment_type IS '✅ 履约类型（trade_order_module.fulfillment_type，整数）';
+COMMENT ON COLUMN plugin.orders.pay_method IS '✅ 支付方式（trade_order_module.pay_method，如 Cash on delivery）';
+COMMENT ON COLUMN plugin.orders.sale_region IS '✅ 销售区域（trade_order_module.sale_region，如 VN）';
+COMMENT ON COLUMN plugin.orders.shipping_fee IS '✅ 运费（trade_order_module.shipping_fee.price_val）';
+COMMENT ON COLUMN plugin.orders.order_time IS '✅ 下单时间（trade_order_module.create_time，秒级时间戳字符串）';
+COMMENT ON COLUMN plugin.orders.update_time IS '✅ 更新时间（trade_order_module.update_time，毫秒级时间戳字符串）';
+COMMENT ON COLUMN plugin.orders.latest_rts_time IS '✅ 最晚发货时间（trade_order_module.latest_rts_time）';
+COMMENT ON COLUMN plugin.orders.latest_tts_time IS '✅ 最晚交易时间（trade_order_module.latest_tts_time）';
+COMMENT ON COLUMN plugin.orders.buyer_nickname IS '✅ 买家昵称（buyer_info_module.buyer_nickname）';
+COMMENT ON COLUMN plugin.orders.created_at IS '数据入库时间';
+COMMENT ON COLUMN plugin.orders.updated_at IS '最后更新时间';
 ```
 
-#### `chrome_sync.order_lines` — 订单行
+#### `plugin.order_lines` — 订单行
 
 ```sql
-CREATE TABLE chrome_sync.order_lines (
+CREATE TABLE plugin.order_lines (
     id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    log_id          BIGINT NOT NULL REFERENCES chrome_sync.raw_log(id),  -- 来源 raw_log
+    log_id          BIGINT NOT NULL REFERENCES plugin.raw_log(id),  -- 来源 raw_log
     shop_id         TEXT NOT NULL,
-    order_id        TEXT NOT NULL,              -- 关联 chrome_sync.orders.order_id
+    order_id        TEXT NOT NULL,              -- 关联 plugin.orders.order_id
     sku_id          TEXT NOT NULL,              -- ✅ 实测确认: sku_module[].sku_id
     product_id      TEXT,                       -- ✅ 实测确认: sku_module[].product_id
     product_name    TEXT,                       -- ✅ 实测确认: sku_module[].product_name
@@ -222,32 +222,32 @@ CREATE TABLE chrome_sync.order_lines (
     CONSTRAINT uq_order_lines_order_sku UNIQUE (shop_id, order_id, sku_id)
 );
 
-COMMENT ON TABLE chrome_sync.order_lines IS 'Chrome 扩展同步的 TikTok 订单行（SKU 级），来自 order/list 的 sku_module/fulfill_line_module';
-COMMENT ON COLUMN chrome_sync.order_lines.id IS '自增主键';
-COMMENT ON COLUMN chrome_sync.order_lines.log_id IS '关联 raw_log.id，溯源本次数据来自哪条 dump';
-COMMENT ON COLUMN chrome_sync.order_lines.sku_id IS '✅ TikTok sku_id，同订单内唯一';
-COMMENT ON COLUMN chrome_sync.order_lines.product_id IS '✅ TikTok product_id';
-COMMENT ON COLUMN chrome_sync.order_lines.product_name IS '✅ 商品名称快照（sku_module[].product_name）';
-COMMENT ON COLUMN chrome_sync.order_lines.variant_name IS '✅ SKU 名称快照（sku_module[].sku_name）';
-COMMENT ON COLUMN chrome_sync.order_lines.image_url IS '✅ SKU 图片 URL（sku_module[].product_image.url_list[0]）';
-COMMENT ON COLUMN chrome_sync.order_lines.quantity IS '✅ 购买数量';
-COMMENT ON COLUMN chrome_sync.order_lines.unit_price IS '✅ 单价（sku_module[].sku_unit_price.price_val）';
-COMMENT ON COLUMN chrome_sync.order_lines.total_price IS '✅ 总价（sku_module[].sku_total_price.price_val）';
-COMMENT ON COLUMN chrome_sync.order_lines.currency IS '✅ 币种 ISO 4217';
-COMMENT ON COLUMN chrome_sync.order_lines.main_order_status IS '✅ 订单状态码（从 order_status_module 按 order_line_id 关联）';
-COMMENT ON COLUMN chrome_sync.order_lines.sku_display_status IS '✅ SKU 展示状态码（从 order_status_module 按 order_line_id 关联）';
-COMMENT ON COLUMN chrome_sync.order_lines.shop_id IS 'TikTok 外部店铺 ID';
-COMMENT ON COLUMN chrome_sync.order_lines.order_id IS '关联 chrome_sync.orders.order_id';
-COMMENT ON COLUMN chrome_sync.order_lines.created_at IS '数据入库时间';
-COMMENT ON COLUMN chrome_sync.order_lines.updated_at IS '最后更新时间';
+COMMENT ON TABLE plugin.order_lines IS 'Chrome 扩展同步的 TikTok 订单行（SKU 级），来自 order/list 的 sku_module/fulfill_line_module';
+COMMENT ON COLUMN plugin.order_lines.id IS '自增主键';
+COMMENT ON COLUMN plugin.order_lines.log_id IS '关联 raw_log.id，溯源本次数据来自哪条 dump';
+COMMENT ON COLUMN plugin.order_lines.sku_id IS '✅ TikTok sku_id，同订单内唯一';
+COMMENT ON COLUMN plugin.order_lines.product_id IS '✅ TikTok product_id';
+COMMENT ON COLUMN plugin.order_lines.product_name IS '✅ 商品名称快照（sku_module[].product_name）';
+COMMENT ON COLUMN plugin.order_lines.variant_name IS '✅ SKU 名称快照（sku_module[].sku_name）';
+COMMENT ON COLUMN plugin.order_lines.image_url IS '✅ SKU 图片 URL（sku_module[].product_image.url_list[0]）';
+COMMENT ON COLUMN plugin.order_lines.quantity IS '✅ 购买数量';
+COMMENT ON COLUMN plugin.order_lines.unit_price IS '✅ 单价（sku_module[].sku_unit_price.price_val）';
+COMMENT ON COLUMN plugin.order_lines.total_price IS '✅ 总价（sku_module[].sku_total_price.price_val）';
+COMMENT ON COLUMN plugin.order_lines.currency IS '✅ 币种 ISO 4217';
+COMMENT ON COLUMN plugin.order_lines.main_order_status IS '✅ 订单状态码（从 order_status_module 按 order_line_id 关联）';
+COMMENT ON COLUMN plugin.order_lines.sku_display_status IS '✅ SKU 展示状态码（从 order_status_module 按 order_line_id 关联）';
+COMMENT ON COLUMN plugin.order_lines.shop_id IS 'TikTok 外部店铺 ID';
+COMMENT ON COLUMN plugin.order_lines.order_id IS '关联 plugin.orders.order_id';
+COMMENT ON COLUMN plugin.order_lines.created_at IS '数据入库时间';
+COMMENT ON COLUMN plugin.order_lines.updated_at IS '最后更新时间';
 ```
 
-#### `chrome_sync.shipments` — 物流包裹
+#### `plugin.shipments` — 物流包裹
 
 ```sql
-CREATE TABLE chrome_sync.shipments (
+CREATE TABLE plugin.shipments (
     id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    log_id          BIGINT NOT NULL REFERENCES chrome_sync.raw_log(id),  -- 来源 raw_log
+    log_id          BIGINT NOT NULL REFERENCES plugin.raw_log(id),  -- 来源 raw_log
     shop_id         TEXT NOT NULL,
     order_id        TEXT NOT NULL,              -- ✅ 实测确认: main_order_id
     package_id      TEXT NOT NULL,              -- ✅ 实测确认: package_id
@@ -262,31 +262,31 @@ CREATE TABLE chrome_sync.shipments (
     CONSTRAINT uq_shipments_shop_pkg UNIQUE (shop_id, package_id)
 );
 
-CREATE INDEX ix_shipments_order ON chrome_sync.shipments(shop_id, order_id);
+CREATE INDEX ix_shipments_order ON plugin.shipments(shop_id, order_id);
 
-COMMENT ON TABLE chrome_sync.shipments IS 'Chrome 扩展同步的 TikTok 物流包裹，来自 logistic_detail/list 的 package_list[]';
-COMMENT ON COLUMN chrome_sync.shipments.id IS '自增主键';
-COMMENT ON COLUMN chrome_sync.shipments.log_id IS '关联 raw_log.id，溯源本次数据来自哪条 dump';
-COMMENT ON COLUMN chrome_sync.shipments.shop_id IS 'TikTok 外部店铺 ID';
-COMMENT ON COLUMN chrome_sync.shipments.package_id IS 'TikTok package_id';
-COMMENT ON COLUMN chrome_sync.shipments.tracking_number IS '运单号（tracking_no）';
-COMMENT ON COLUMN chrome_sync.shipments.carrier_name IS '物流服务商（logistic_supplier）';
-COMMENT ON COLUMN chrome_sync.shipments.status IS '最新轨迹状态（track_list 最后一条）';
-COMMENT ON COLUMN chrome_sync.shipments.shipped_at IS '发货时间（首条轨迹时间）';
-COMMENT ON COLUMN chrome_sync.shipments.delivered_at IS '签收时间（仅 status 含 delivered 时填入）';
-COMMENT ON COLUMN chrome_sync.shipments.order_id IS '关联 chrome_sync.orders.order_id';
-COMMENT ON COLUMN chrome_sync.shipments.created_at IS '数据入库时间';
-COMMENT ON COLUMN chrome_sync.shipments.updated_at IS '最后更新时间';
+COMMENT ON TABLE plugin.shipments IS 'Chrome 扩展同步的 TikTok 物流包裹，来自 logistic_detail/list 的 package_list[]';
+COMMENT ON COLUMN plugin.shipments.id IS '自增主键';
+COMMENT ON COLUMN plugin.shipments.log_id IS '关联 raw_log.id，溯源本次数据来自哪条 dump';
+COMMENT ON COLUMN plugin.shipments.shop_id IS 'TikTok 外部店铺 ID';
+COMMENT ON COLUMN plugin.shipments.package_id IS 'TikTok package_id';
+COMMENT ON COLUMN plugin.shipments.tracking_number IS '运单号（tracking_no）';
+COMMENT ON COLUMN plugin.shipments.carrier_name IS '物流服务商（logistic_supplier）';
+COMMENT ON COLUMN plugin.shipments.status IS '最新轨迹状态（track_list 最后一条）';
+COMMENT ON COLUMN plugin.shipments.shipped_at IS '发货时间（首条轨迹时间）';
+COMMENT ON COLUMN plugin.shipments.delivered_at IS '签收时间（仅 status 含 delivered 时填入）';
+COMMENT ON COLUMN plugin.shipments.order_id IS '关联 plugin.orders.order_id';
+COMMENT ON COLUMN plugin.shipments.created_at IS '数据入库时间';
+COMMENT ON COLUMN plugin.shipments.updated_at IS '最后更新时间';
 ```
 
-#### `chrome_sync.tracking_events` — 物流轨迹
+#### `plugin.tracking_events` — 物流轨迹
 
 ```sql
-CREATE TABLE chrome_sync.tracking_events (
+CREATE TABLE plugin.tracking_events (
     id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    log_id          BIGINT NOT NULL REFERENCES chrome_sync.raw_log(id),  -- 来源 raw_log
+    log_id          BIGINT NOT NULL REFERENCES plugin.raw_log(id),  -- 来源 raw_log
     shop_id         TEXT NOT NULL,
-    package_id      TEXT NOT NULL,              -- 关联 chrome_sync.shipments.package_id
+    package_id      TEXT NOT NULL,              -- 关联 plugin.shipments.package_id
     event_key       TEXT NOT NULL,              -- 合成唯一键（package_id + index）
     event_at        TIMESTAMPTZ,               -- ✅ 实测确认: track_list[].time
     description     TEXT,                       -- ✅ 实测确认: track_list[].track_status
@@ -297,25 +297,25 @@ CREATE TABLE chrome_sync.tracking_events (
     CONSTRAINT uq_tracking_events_pkg_key UNIQUE (shop_id, package_id, event_key)
 );
 
-COMMENT ON TABLE chrome_sync.tracking_events IS 'Chrome 扩展同步的物流轨迹事件，来自 logistic_detail/list 的 track_list[]';
-COMMENT ON COLUMN chrome_sync.tracking_events.id IS '自增主键';
-COMMENT ON COLUMN chrome_sync.tracking_events.log_id IS '关联 raw_log.id，溯源本次数据来自哪条 dump';
-COMMENT ON COLUMN chrome_sync.tracking_events.shop_id IS 'TikTok 外部店铺 ID';
-COMMENT ON COLUMN chrome_sync.tracking_events.package_id IS '关联 chrome_sync.shipments.package_id';
-COMMENT ON COLUMN chrome_sync.tracking_events.event_key IS '合成唯一键，如 {package_id}_{index}';
-COMMENT ON COLUMN chrome_sync.tracking_events.event_at IS '轨迹发生时间';
-COMMENT ON COLUMN chrome_sync.tracking_events.description IS '轨迹描述原文（track_status）';
-COMMENT ON COLUMN chrome_sync.tracking_events.location IS '轨迹地点';
-COMMENT ON COLUMN chrome_sync.tracking_events.created_at IS '数据入库时间';
-COMMENT ON COLUMN chrome_sync.tracking_events.updated_at IS '最后更新时间';
+COMMENT ON TABLE plugin.tracking_events IS 'Chrome 扩展同步的物流轨迹事件，来自 logistic_detail/list 的 track_list[]';
+COMMENT ON COLUMN plugin.tracking_events.id IS '自增主键';
+COMMENT ON COLUMN plugin.tracking_events.log_id IS '关联 raw_log.id，溯源本次数据来自哪条 dump';
+COMMENT ON COLUMN plugin.tracking_events.shop_id IS 'TikTok 外部店铺 ID';
+COMMENT ON COLUMN plugin.tracking_events.package_id IS '关联 plugin.shipments.package_id';
+COMMENT ON COLUMN plugin.tracking_events.event_key IS '合成唯一键，如 {package_id}_{index}';
+COMMENT ON COLUMN plugin.tracking_events.event_at IS '轨迹发生时间';
+COMMENT ON COLUMN plugin.tracking_events.description IS '轨迹描述原文（track_status）';
+COMMENT ON COLUMN plugin.tracking_events.location IS '轨迹地点';
+COMMENT ON COLUMN plugin.tracking_events.created_at IS '数据入库时间';
+COMMENT ON COLUMN plugin.tracking_events.updated_at IS '最后更新时间';
 ```
 
-#### `chrome_sync.settlements` — 结算单
+#### `plugin.settlements` — 结算单
 
 ```sql
-CREATE TABLE chrome_sync.settlements (
+CREATE TABLE plugin.settlements (
     id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    log_id              BIGINT NOT NULL REFERENCES chrome_sync.raw_log(id),  -- 来源 raw_log
+    log_id              BIGINT NOT NULL REFERENCES plugin.raw_log(id),  -- 来源 raw_log
     shop_id             TEXT NOT NULL,
     statement_id        TEXT NOT NULL,              -- ✅ 实测确认
     statement_version   INT NOT NULL DEFAULT 0,     -- ✅ 实测确认
@@ -342,41 +342,41 @@ CREATE TABLE chrome_sync.settlements (
     CONSTRAINT uq_settlements_shop_stmt UNIQUE (shop_id, statement_id, statement_version)
 );
 
-CREATE INDEX ix_settlements_shop ON chrome_sync.settlements(shop_id);
+CREATE INDEX ix_settlements_shop ON plugin.settlements(shop_id);
 
-COMMENT ON TABLE chrome_sync.settlements IS 'Chrome 扩展同步的 TikTok 结算单头，来自 statement/list/detail';
-COMMENT ON COLUMN chrome_sync.settlements.id IS '自增主键';
-COMMENT ON COLUMN chrome_sync.settlements.log_id IS '关联 raw_log.id，溯源本次数据来自哪条 dump';
-COMMENT ON COLUMN chrome_sync.settlements.shop_id IS 'TikTok 外部店铺 ID';
-COMMENT ON COLUMN chrome_sync.settlements.statement_id IS 'TikTok statement_id（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlements.statement_version IS '结算版本号（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlements.bill_period IS '账期原始文本（✅ 实测确认），如 2026-09-01~2026-09-07';
-COMMENT ON COLUMN chrome_sync.settlements.period_start IS '账期起始日（从 bill_period 解析派生）';
-COMMENT ON COLUMN chrome_sync.settlements.period_end IS '账期结束日（从 bill_period 解析派生）';
-COMMENT ON COLUMN chrome_sync.settlements.settlement_time IS '结算时间（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlements.settlement_id IS 'TikTok settlement_id（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlements.payment_id IS 'TikTok payment_id（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlements.payment_status IS '打款状态（✅ 实测确认，int → TEXT）：PENDING / PAID / FAILED';
-COMMENT ON COLUMN chrome_sync.settlements.statement_type IS '结算单类型（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlements.payment_pending_reason IS '打款待处理原因（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlements.settle_amount IS '结算金额（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlements.earning_amount IS '收入金额（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlements.fee_amount IS '费用金额（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlements.adjust_amount IS '调整金额（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlements.payable_amount IS '应付金额（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlements.shipping_amount IS '运费金额（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlements.total_reserve_amount IS '预留金额（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlements.currency IS '币种，ISO 4217（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlements.created_at IS '数据入库时间';
-COMMENT ON COLUMN chrome_sync.settlements.updated_at IS '最后更新时间';
+COMMENT ON TABLE plugin.settlements IS 'Chrome 扩展同步的 TikTok 结算单头，来自 statement/list/detail';
+COMMENT ON COLUMN plugin.settlements.id IS '自增主键';
+COMMENT ON COLUMN plugin.settlements.log_id IS '关联 raw_log.id，溯源本次数据来自哪条 dump';
+COMMENT ON COLUMN plugin.settlements.shop_id IS 'TikTok 外部店铺 ID';
+COMMENT ON COLUMN plugin.settlements.statement_id IS 'TikTok statement_id（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlements.statement_version IS '结算版本号（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlements.bill_period IS '账期原始文本（✅ 实测确认），如 2026-09-01~2026-09-07';
+COMMENT ON COLUMN plugin.settlements.period_start IS '账期起始日（从 bill_period 解析派生）';
+COMMENT ON COLUMN plugin.settlements.period_end IS '账期结束日（从 bill_period 解析派生）';
+COMMENT ON COLUMN plugin.settlements.settlement_time IS '结算时间（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlements.settlement_id IS 'TikTok settlement_id（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlements.payment_id IS 'TikTok payment_id（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlements.payment_status IS '打款状态（✅ 实测确认，int → TEXT）：PENDING / PAID / FAILED';
+COMMENT ON COLUMN plugin.settlements.statement_type IS '结算单类型（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlements.payment_pending_reason IS '打款待处理原因（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlements.settle_amount IS '结算金额（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlements.earning_amount IS '收入金额（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlements.fee_amount IS '费用金额（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlements.adjust_amount IS '调整金额（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlements.payable_amount IS '应付金额（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlements.shipping_amount IS '运费金额（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlements.total_reserve_amount IS '预留金额（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlements.currency IS '币种，ISO 4217（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlements.created_at IS '数据入库时间';
+COMMENT ON COLUMN plugin.settlements.updated_at IS '最后更新时间';
 ```
 
-#### `chrome_sync.settlement_details` — SKU 级结算明细 + 费用拆分
+#### `plugin.settlement_details` — SKU 级结算明细 + 费用拆分
 
 ```sql
-CREATE TABLE chrome_sync.settlement_details (
+CREATE TABLE plugin.settlement_details (
     id                      BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    log_id                  BIGINT NOT NULL REFERENCES chrome_sync.raw_log(id),  -- 来源 raw_log
+    log_id                  BIGINT NOT NULL REFERENCES plugin.raw_log(id),  -- 来源 raw_log
     shop_id                 TEXT NOT NULL,
     statement_id            TEXT NOT NULL,
     statement_version       INT NOT NULL DEFAULT 0,
@@ -401,31 +401,31 @@ CREATE TABLE chrome_sync.settlement_details (
     CONSTRAINT uq_settlement_details_shop_sku UNIQUE (shop_id, sku_detail_id)
 );
 
-CREATE INDEX ix_settlement_details_stmt ON chrome_sync.settlement_details(shop_id, statement_id);
+CREATE INDEX ix_settlement_details_stmt ON plugin.settlement_details(shop_id, statement_id);
 
-COMMENT ON TABLE chrome_sync.settlement_details IS 'Chrome 扩展同步的 SKU 级结算明细 + 费用拆分，来自 statement/transaction/detail';
-COMMENT ON COLUMN chrome_sync.settlement_details.id IS '自增主键';
-COMMENT ON COLUMN chrome_sync.settlement_details.log_id IS '关联 raw_log.id，溯源本次数据来自哪条 dump';
-COMMENT ON COLUMN chrome_sync.settlement_details.shop_id IS 'TikTok 外部店铺 ID';
-COMMENT ON COLUMN chrome_sync.settlement_details.sku_detail_id IS 'TikTok statement_sku_detail_id（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlement_details.trade_order_id IS 'TikTok trade_order_id（✅ 实测确认，与 main_order_id 映射关系待验证）';
-COMMENT ON COLUMN chrome_sync.settlement_details.statement_id IS '关联 chrome_sync.settlements.statement_id（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlement_details.statement_version IS '关联 chrome_sync.settlements.statement_version（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlement_details.sku_id IS 'TikTok sku_id（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlement_details.product_name IS '商品名称（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlement_details.sku_name IS 'SKU 名称（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlement_details.quantity IS '购买数量（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlement_details.settlement_status IS '结算状态（✅ 实测确认，int → TEXT）';
-COMMENT ON COLUMN chrome_sync.settlement_details.placed_time IS '下单时间（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlement_details.settlement_amount IS '结算金额（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlement_details.earning_amount IS '收入金额（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlement_details.fees_amount IS '费用总金额（✅ 实测确认: fees.amount）';
-COMMENT ON COLUMN chrome_sync.settlement_details.currency IS '币种，ISO 4217（✅ 实测确认）';
-COMMENT ON COLUMN chrome_sync.settlement_details.fee_components IS '递归展开后的扁平费用列表 [{code, amount, currency}]（✅ 实测确认: in_come.fee_list + out_come.fee_list）';
-COMMENT ON COLUMN chrome_sync.settlement_details.seller_web_cut_flow IS '卖家网页端扣款流程标记（✅ 实测确认，顶层字段）';
-COMMENT ON COLUMN chrome_sync.settlement_details.seller_app_cut_flow IS '卖家 APP 端扣款流程标记（✅ 实测确认，顶层字段）';
-COMMENT ON COLUMN chrome_sync.settlement_details.created_at IS '数据入库时间';
-COMMENT ON COLUMN chrome_sync.settlement_details.updated_at IS '最后更新时间';
+COMMENT ON TABLE plugin.settlement_details IS 'Chrome 扩展同步的 SKU 级结算明细 + 费用拆分，来自 statement/transaction/detail';
+COMMENT ON COLUMN plugin.settlement_details.id IS '自增主键';
+COMMENT ON COLUMN plugin.settlement_details.log_id IS '关联 raw_log.id，溯源本次数据来自哪条 dump';
+COMMENT ON COLUMN plugin.settlement_details.shop_id IS 'TikTok 外部店铺 ID';
+COMMENT ON COLUMN plugin.settlement_details.sku_detail_id IS 'TikTok statement_sku_detail_id（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlement_details.trade_order_id IS 'TikTok trade_order_id（✅ 实测确认，与 main_order_id 映射关系待验证）';
+COMMENT ON COLUMN plugin.settlement_details.statement_id IS '关联 plugin.settlements.statement_id（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlement_details.statement_version IS '关联 plugin.settlements.statement_version（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlement_details.sku_id IS 'TikTok sku_id（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlement_details.product_name IS '商品名称（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlement_details.sku_name IS 'SKU 名称（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlement_details.quantity IS '购买数量（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlement_details.settlement_status IS '结算状态（✅ 实测确认，int → TEXT）';
+COMMENT ON COLUMN plugin.settlement_details.placed_time IS '下单时间（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlement_details.settlement_amount IS '结算金额（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlement_details.earning_amount IS '收入金额（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlement_details.fees_amount IS '费用总金额（✅ 实测确认: fees.amount）';
+COMMENT ON COLUMN plugin.settlement_details.currency IS '币种，ISO 4217（✅ 实测确认）';
+COMMENT ON COLUMN plugin.settlement_details.fee_components IS '递归展开后的扁平费用列表 [{code, amount, currency}]（✅ 实测确认: in_come.fee_list + out_come.fee_list）';
+COMMENT ON COLUMN plugin.settlement_details.seller_web_cut_flow IS '卖家网页端扣款流程标记（✅ 实测确认，顶层字段）';
+COMMENT ON COLUMN plugin.settlement_details.seller_app_cut_flow IS '卖家 APP 端扣款流程标记（✅ 实测确认，顶层字段）';
+COMMENT ON COLUMN plugin.settlement_details.created_at IS '数据入库时间';
+COMMENT ON COLUMN plugin.settlement_details.updated_at IS '最后更新时间';
 ```
 
 ### 3.4 表设计决策
@@ -434,7 +434,7 @@ COMMENT ON COLUMN chrome_sync.settlement_details.updated_at IS '最后更新时�
 | --- | --- | --- |
 | `raw_log` 存储内容 | 完整 dump（request + response + 元数据） | 原始 source-of-truth，可从 raw_log 重跑解析修复业务表 |
 | 解析时机 | inline（dump handler 内） | 数据立即可查，不需要等 sync-worker 轮询 |
-| 业务表放在哪 | `chrome_sync` schema（独立） | 与 sync-worker 的 `commerce`/`fulfillment`/`finance` 完全隔离 |
+| 业务表放在哪 | `plugin` schema（独立） | 与 sync-worker 的 `commerce`/`fulfillment`/`finance` 完全隔离 |
 | 物流保鲜 | 无保鲜窗口 | 以插件同步的数据为准，每次 dump 直接覆盖 |
 | 订单/结算保鲜 | 永不过期 | 创建后核心字段不变 |
 | `fee_components` 存 JSONB vs EAV | JSONB | 费用树递归结构，EAV 展开太碎；JSONB 保留完整层级 |
@@ -674,8 +674,8 @@ Authorization: Bearer <key>
 
 | 文件 | 内容 |
 | --- | --- |
-| `alembic/versions/XXXX_chrome_sync_schema.py` | 创建 `chrome_sync` schema + 7 张表 |
-| `tts_erp_v2/db/models/chrome_sync.py` | SQLAlchemy 模型（7 个 class） |
+| `alembic/versions/XXXX_plugin_schema.py` | 创建 `plugin` schema + 7 张表 |
+| `tts_erp_v2/db/models/plugin.py` | SQLAlchemy 模型（7 个 class） |
 | `schema_tts_erp.sql` | `python3 scripts/regen_schema.py` 重新生成 |
 
 ### 6.2 API + 解析层
@@ -683,8 +683,8 @@ Authorization: Bearer <key>
 | 文件 | 内容 |
 | --- | --- |
 | `tts_erp_v2/api/v2/order_sync.py` | 新路由：`/v2/order-sync/{has-data,dumps,synced-ids}` |
-| `tts_erp_v2/chrome_sync/parser.py` | 解析函数：`parse_order_response()` / `parse_logistics_response()` / `parse_statement_response()` |
-| `tts_erp_v2/chrome_sync/repository.py` | `has_data_bulk()` / `upsert_order()` / `upsert_logistics()` / `upsert_statement()` / `write_raw_log()` |
+| `tts_erp_v2/plugin/parser.py` | 解析函数：`parse_order_response()` / `parse_logistics_response()` / `parse_statement_response()` |
+| `tts_erp_v2/plugin/repository.py` | `has_data_bulk()` / `upsert_order()` / `upsert_logistics()` / `upsert_statement()` / `write_raw_log()` |
 | `tts_erp_v2/app.py` | 挂载新路由 |
 
 ### 6.3 测试
@@ -692,7 +692,7 @@ Authorization: Bearer <key>
 | 文件 | 内容 |
 | --- | --- |
 | `tests/api/test_order_sync_contract.py` | 端点契约测试 |
-| `tests/chrome_sync/test_parser.py` | 解析函数单测（各种边界 case） |
+| `tests/plugin/test_parser.py` | 解析函数单测（各种边界 case） |
 
 ### 6.4 文档
 
@@ -708,10 +708,10 @@ Authorization: Bearer <key>
 
 | 现有组件 | 关系 |
 | --- | --- |
-| `commerce.*` / `fulfillment.*` / `finance.*` | **业务表完全隔离**。chrome_sync 有自己独立的 orders/shipments/settlements 表，不建 FK、不共享数据、不走 sync-worker。**例外（2026-09-11）**：`commerce.shops` 是两种同步方式共享的店铺注册表——插件店铺由运营人工注册（`POST /v2/admin/shops/register`，readwrite），注册即完整店铺（status='active'，`data_source='plugin'` 枚举标识同步方式），只服务于查询关联（spu-roi 店铺筛选等），数据同步不依赖注册；店铺后续申请到 API 走 OAuth callback 后同行补 credential_id + `data_source` 翻转 'plugin'→'api'（不产生重复行）。**翻转后插件 dumps 被全域静默忽略**（两个 dumps 端点返回 200 `{status:'api_managed'}` 不写库，守卫在 `api/deps.py::shop_is_api_managed`）——TikTok 授权整店全 scope 一次下发，混合态制度上不存在 |
-| `analytics.ad_raw_log` | 模式相似（dump → 存储），但 analytics 用 raw 暂存 + sync-worker 派生；chrome_sync 是 inline 解析 + raw_log 审计 |
-| `integration.raw_records` | 旧 v1 遗物，存 sync-worker 拉的数据。chrome_sync 来源完全不同（Chrome 扩展抓的） |
-| `sync_worker` | **不参与**。chrome_sync 的解析在 API handler 内 inline 完成，不需要调度 |
+| `commerce.*` / `fulfillment.*` / `finance.*` | **业务表完全隔离**。plugin 有自己独立的 orders/shipments/settlements 表，不建 FK、不共享数据、不走 sync-worker。**例外（2026-09-11）**：`commerce.shops` 是两种同步方式共享的店铺注册表——插件店铺由运营人工注册（`POST /v2/admin/shops/register`，readwrite），注册即完整店铺（status='active'，`data_source='plugin'` 枚举标识同步方式），只服务于查询关联（spu-roi 店铺筛选等），数据同步不依赖注册；店铺后续申请到 API 走 OAuth callback 后同行补 credential_id + `data_source` 翻转 'plugin'→'api'（不产生重复行）。**翻转后插件 dumps 被全域静默忽略**（两个 dumps 端点返回 200 `{status:'api_managed'}` 不写库，守卫在 `api/deps.py::shop_is_api_managed`）——TikTok 授权整店全 scope 一次下发，混合态制度上不存在 |
+| `analytics.ad_raw_log` | 模式相似（dump → 存储），但 analytics 用 raw 暂存 + sync-worker 派生；plugin 是 inline 解析 + raw_log 审计 |
+| `integration.raw_records` | 旧 v1 遗物，存 sync-worker 拉的数据。plugin 来源完全不同（Chrome 扩展抓的） |
+| `sync_worker` | **不参与**。plugin 的解析在 API handler 内 inline 完成，不需要调度 |
 
 **隔离原因**：
 
@@ -723,9 +723,9 @@ Authorization: Bearer <key>
 
 | 阶段 | 做什么 | 价值 |
 | --- | --- | --- |
-| **Phase 1（本次）** | `chrome_sync` 7 张表 + has-data/dumps/synced-ids 端点 + inline 解析 | 解决插件重复拉取问题，数据立即可查 |
+| **Phase 1（本次）** | `plugin` 7 张表 + has-data/dumps/synced-ids 端点 + inline 解析 | 解决插件重复拉取问题，数据立即可查 |
 | **Phase 2** | 结算明细关联订单（补 `trade_order_id` → `order_id` 映射） | 结算数据可按订单维度聚合 |
-| **Phase 3（可选）** | chrome_sync → commerce/fulfillment/finance 数据桥接 | 如果需要把 Chrome 扩展数据纳入主分析链路 |
+| **Phase 3（可选）** | plugin → commerce/fulfillment/finance 数据桥接 | 如果需要把 Chrome 扩展数据纳入主分析链路 |
 
 ## 10. 逻辑解析规则（dump → 业务表）
 
@@ -734,9 +734,9 @@ Authorization: Bearer <key>
 ```
 POST /dumps 请求到达
     │
-    ├─ domain=orders    → parse_order_response()    → upsert chrome_sync.orders + order_lines
-    ├─ domain=logistics → parse_logistics_response() → upsert chrome_sync.shipments + tracking_events
-    └─ domain=statements→ parse_statement_response() → upsert chrome_sync.settlements + settlement_details
+    ├─ domain=orders    → parse_order_response()    → upsert plugin.orders + order_lines
+    ├─ domain=logistics → parse_logistics_response() → upsert plugin.shipments + tracking_events
+    └─ domain=statements→ parse_statement_response() → upsert plugin.settlements + settlement_details
     │
     └─ write_raw_log()（无论成功失败都写）
 ```
@@ -789,7 +789,7 @@ TikTok `order/list` 响应结构（模块化）：
 
 **注意**：字段名基于 codex 文档推断，首次接入需用域名观察功能确认。
 
-#### `chrome_sync.orders` 字段映射
+#### `plugin.orders` 字段映射
 
 | 业务表列 | TikTok 来源 | 转换规则 |
 | --- | --- | --- |
@@ -805,7 +805,7 @@ TikTok `order/list` 响应结构（模块化）：
 | `delivered_at` | order response | 待实测确认字段路径 |
 | `cancelled_at` | order response | 待实测确认字段路径；`0` → `NULL` |
 
-#### `chrome_sync.order_lines` 字段映射
+#### `plugin.order_lines` 字段映射
 
 遍历 `sku_module[]`（优先）或 `fulfill_line_module[]`：
 
@@ -863,7 +863,7 @@ TikTok `logistic_detail/list` 响应：
 
 **一个订单可能有多个 package**。
 
-#### `chrome_sync.shipments` 字段映射
+#### `plugin.shipments` 字段映射
 
 | 业务表列 | TikTok 来源 | 转换规则 |
 | --- | --- | --- |
@@ -878,7 +878,7 @@ TikTok `logistic_detail/list` 响应：
 | `raw_response` | 完整 response body | JSONB 直存 |
 | `captured_at` | dump 请求的 `capturedAt` | 直传 |
 
-#### `chrome_sync.tracking_events` 字段映射
+#### `plugin.tracking_events` 字段映射
 
 遍历 `package.logistic_detail.track_list[]`：
 
@@ -904,7 +904,7 @@ TikTok `logistic_detail/list` 响应：
 
 涉及两个端点：`statement/list/detail`（结算单头）+ `statement/transaction/detail`（SKU 明细）。
 
-#### `statement/list/detail` → `chrome_sync.settlements`
+#### `statement/list/detail` → `plugin.settlements`
 
 | 业务表列 | TikTok 来源 | 转换规则 |
 | --- | --- | --- |
@@ -923,7 +923,7 @@ TikTok `logistic_detail/list` 响应：
 | `payable_amount` | `payable_amount.amount` | `Decimal(str)` |
 | `currency` | `settle_amount.currency` | 直传 |
 
-#### `statement/transaction/detail` → `chrome_sync.settlement_details`
+#### `statement/transaction/detail` → `plugin.settlement_details`
 
 | 业务表列 | TikTok 来源 | 转换规则 |
 | --- | --- | --- |
@@ -1004,5 +1004,5 @@ def flatten_fees(fee_list: list) -> list[dict]:
 - `shop_pk` = `commerce.shops` 表的内部自增主键（`id` 列），后端内部使用
 - `shop_id` = TikTok 外部店铺 ID（如 `7493838482981827388`），Chrome 插件只知道这个
 
-本方案所有 `chrome_sync.*` 表和 API 端点统一用外部 `shop_id` 作为关联键。
-chrome_sync 与 commerce/fulfillment/finance 完全隔离，不建跨 schema FK。
+本方案所有 `plugin.*` 表和 API 端点统一用外部 `shop_id` 作为关联键。
+plugin 与 commerce/fulfillment/finance 完全隔离，不建跨 schema FK。
