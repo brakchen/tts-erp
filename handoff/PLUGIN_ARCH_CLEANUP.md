@@ -254,4 +254,35 @@ systemctl --user restart tts-erp.service tts-erp-sync.service
 
 ---
 
-**HEAD**：`f13256f`（lane 1 未开工）
+## 8. 执行进度台账
+
+| Lane | 分支 | commit | 测试 | prod 迁移 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| 1 · AGENTS.md 红线 | —（master 直改） | `b4a3b9e` | docs-only | — | ✅ 已 push |
+| 2 · chrome_sync→plugin | `chore/rename-chrome-sync-to-plugin` | `5bc6451` / merge `1b47f0e` | 全量 fast 13 fail = baseline，**0 新 fail** | ✅ prod 已迁 `0023` + 重启，冒烟 8/8 | ✅ 已 push，worktree 已清 |
+| 3 · analytics→plugin | `chore/move-analytics-to-plugin` | — | — | — | ⬜ 待开工 |
+| 4 · drop data_source | `chore/drop-shops-data-source` | — | — | — | ⬜ 待开工 |
+
+### Lane 2 实际经验（给 lane 3/4 复用）
+
+1. **alembic revision id 必须 ≤ 32 字符** —— `alembic_version.version_num` 是 `varchar(32)`；
+   超长会在迁移跑完后报 `StringDataRightTruncation`（事务回滚，库不脏，但白跑一次）。
+   已用：`0023_chrome_sync_to_plugin`(26) / 计划：`0024_analytics_to_plugin`(24)、
+   `0025_drop_shops_data_source`(27)。
+2. **baseline 取法**：改 schema 的 lane 会改变 test 库形状 → 取 baseline 需
+   `alembic downgrade <前一个 revision>` → 在 master WT 跑全量 fast → 再 `upgrade head`。
+   否则 master 旧代码在已迁移的 test 库上会假失败。
+3. **regen_schema.py 现在支持 `--db-url`**，从 test 库 regen 的姿势：
+   `bash -c 'set -a; . ./.env.test; set +a; python3 scripts/regen_schema.py --db-url "$TTS_ERP_DB_URL"'`；
+   已顺手修掉 `\unrestrict` 随机 token（修后 regen 幂等，可重复跑无伪 diff）。
+4. **改名类迁移的 prod 序列**（已跑通）：merge 到 master → `alembic upgrade head` →
+   `systemctl --user restart tts-erp{,-sync}.service` → `bash prod-switch/postswitch-smoke.sh`。
+   本次执行时 Bridge nook 为 `data_source='api'`，dumps 被守卫挡住 → 改名期间无活跃写入，零报错。
+5. **ruff**：改完跑 `ruff check` 并对比 master 的 pre-existing 集合，别引入新错误
+   （本次引入过 PIE810 / I001，已修）。
+
+---
+
+**当前 HEAD**：`1b47f0e`（lane 2 已合并 + push）
+**prod alembic**：`0023_chrome_sync_to_plugin`
+**test alembic**：`0023_chrome_sync_to_plugin`
