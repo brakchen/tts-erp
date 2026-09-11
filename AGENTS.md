@@ -151,6 +151,14 @@ curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" \
 
 ## 6. Boundaries（不要碰）
 
+- ❌ **不得删除 / 截断 prod 库数据**。生产 schema 是真理之源（§1）；任何 `TRUNCATE` / `DELETE` /
+  `DROP TABLE` / `DROP SCHEMA` 必须先开 admin 端点 + 人工决策（`/v2/admin/purge-plugin-data`
+  是唯一合法路径），或者**仅在专用 test 库 `tts_erp_v3_test` 操作**。所有测试**只能**连 test 库
+  （走 `bash scripts/test.sh`，它自动 source `.env.test`；**禁止裸跑 `.venv/bin/pytest`** —— 它读
+  `.env` = prod `tts_erp`）；禁止直接连 prod dbname（`tts_erp` / `tts_erp_prod`）跑测试 / 迁移 /
+  手动 SQL。prod schema 改名 / 数据搬迁 migration 由用户**手动触发** `alembic upgrade head`，
+  agent **绝不**自动跑（agent 只在 test 库验证）；改名类迁移要与服务重启挨着做，否则旧 schema 名
+  的运行进程会报 `relation does not exist`
 - ❌ 不要直连 v1 `oauth_tokens` 表（库已 DROP，备份 `backups/oauth_receiver_v1_legacy_*.sql.gz`）/
   不要自己拿 Fernet key 解密 `integration.credentials` —— 凭证只能走 `proxy.token_service`（见 §4.1）
 - ❌ 不要重建 / 依赖 `public.*` v1 遗留表（v2 只读 10 schema；v1 业务表 2026-09-05 已 DROP，归档在
