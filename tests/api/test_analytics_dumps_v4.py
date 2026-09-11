@@ -329,3 +329,119 @@ def test_dumps_v4_plugin_registered_seller_still_written(
     r = _post(api_client, readwrite_key, _dump_body_v4())
     assert r.status_code == 200, r.text
     assert r.json()["data"]["inserted"] >= 1
+
+
+# ─── campaign-level endpoint：rows 没有 product_id，不写结构化表 ─────
+
+
+CAMPAIGN_CHANGE_LOG_ENDPOINT = (
+    "/oec_ads/shopping/v1/oec/stat/campaign_opt_log_list"
+)
+
+
+def _campaign_change_log_rows() -> list[dict]:
+    """模拟 campaign_opt_log_list 真实响应：rows 是 campaign-level 变更事件，
+    没有 product_id 字段（这是真值，campaign-change-log endpoint 永远没 product_id）。"""
+    return [
+        {
+            "change_id": "evt-001",
+            "campaign_id": CAMPAIGN,
+            "change_type": "BUDGET",
+            "old_value": "100.00",
+            "new_value": "150.00",
+            "modified_at": "2026-09-08T12:34:56Z",
+        },
+        {
+            "change_id": "evt-002",
+            "campaign_id": CAMPAIGN,
+            "change_type": "ROI",
+            "old_value": "1.5",
+            "new_value": "1.8",
+            "modified_at": "2026-09-08T12:35:00Z",
+        },
+    ]
+
+
+def test_dumps_v4_campaign_change_log_only_archives(
+    api_client, readwrite_key, db_engine
+):
+    """campaign_opt_log_list 是 campaign-level endpoint，rows 没有 product_id：
+    - HTTP 200（不是 500）
+    - ad_daily / ad_today / ad_monthly 全 0 行（不要污染 product 级结构化表）
+    - ad_raw_log 写 1 行（rows 完整保留在 response.body 存档）
+    - response.kind = "campaign_level"（明确告诉插件这是 campaign-level）"""
+    body = _dump_body_v4(
+        kind="daily",
+        day="2026-09-08",
+        endpoint=CAMPAIGN_CHANGE_LOG_ENDPOINT,
+        rows=_campaign_change_log_rows(),
+    )
+    r = _post(api_client, readwrite_key, body)
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert data["status"] == "campaign_level", data
+    assert data["rowCount"] == len(_campaign_change_log_rows())
+    assert data["inserted"] == 0  # 结构化表无新增
+
+    assert _ad_daily_count(db_engine) == 0
+    assert _ad_today_count(db_engine) == 0
+    assert _ad_monthly_count(db_engine) == 0
+    assert _ad_raw_log_count(db_engine) == 1
+
+    # ad_raw_log 里 product_id 是 NULL（不是 ''、不是 ''campaign'' 这种 sentinel）
+    with db_engine.connect() as conn:
+        # pi-lens-ignore: python-sql-injection
+        product_id, response_body = conn.execute(
+            text(
+                "SELECT product_id, response_body::text "
+                "FROM analytics.ad_raw_log WHERE seller_id = :s"
+            ),
+            {"s": SELLER},
+        ).first()
+    assert product_id is None
+    # response.body 完整保留原始 rows（不丢字段）—— service 把
+    # payload.dump.response 整体存入 response_body 列，所以结构是
+    # {status, body: {data: {table: rows}}}。
+    import json
+    archived = json.loads(response_body)
+    assert archived["body"]["data"]["table"][0]["change_id"] == "evt-001"
+    assert archived["body"]["data"]["table"][1]["change_type"] == "ROI"
+    assert archived["status"] == 200
+
+
+def test_dumps_v4_monthly_campaign_change_log_only_archives(
+    api_client, readwrite_key, db_engine
+):
+    """campaign_opt_log_list + kind=monthly 同样：rows 不进 ad_monthly，只进 ad_raw_log。"""
+    body = _dump_body_v4(
+        kind="monthly",
+        year_month="2026-08",
+        endpoint=CAMPAIGN_CHANGE_LOG_ENDPOINT,
+        rows=_campaign_change_log_rows(),
+    )
+    r = _post(api_client, readwrite_key, body)
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert data["status"] == "campaign_level", data
+    assert data["inserted"] == 0
+    assert _ad_monthly_count(db_engine) == 0
+    assert _ad_raw_log_count(db_engine) == 1
+
+
+def test_dumps_v4_today_campaign_change_log_only_archives(
+    api_client, readwrite_key, db_engine
+):
+    """campaign_opt_log_list + kind=today 同样：rows 不进 ad_today，只进 ad_raw_log。"""
+    body = _dump_body_v4(
+        kind="today",
+        day="2026-09-09",
+        endpoint=CAMPAIGN_CHANGE_LOG_ENDPOINT,
+        rows=_campaign_change_log_rows(),
+    )
+    r = _post(api_client, readwrite_key, body)
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert data["status"] == "campaign_level", data
+    assert data["inserted"] == 0
+    assert _ad_today_count(db_engine) == 0
+    assert _ad_raw_log_count(db_engine) == 1

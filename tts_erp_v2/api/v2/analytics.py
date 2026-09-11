@@ -706,6 +706,7 @@ def post_dumps(
             )
 
     from tts_erp_v2.analytics.repository import (
+        is_product_level_endpoint,
         upsert_daily_rows,
         upsert_monthly_rows,
         upsert_today_rows,
@@ -792,6 +793,12 @@ def post_dumps(
         "inserted": inserted,
         "duplicates": len(rows) - inserted,
     }
+    # campaign-level endpoint（如 campaign_opt_log_list）的 rows 没有 product_id，
+    # 不会进 ad_daily/ad_today/ad_monthly，只 ad_raw_log 存档；告诉插件这是
+    # expected outcome、不要把"inserted=0"误读成失败。插件侧
+    # analytics-sync-v2.ts 也可不依此字段（不依赖为优）。
+    if not is_product_level_endpoint(payload.dump.endpoint):
+        resp_data["status"] = "campaign_level"
     if dump_kind == "monthly":
         resp_data["yearMonth"] = payload.dump.yearMonth
     else:

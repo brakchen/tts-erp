@@ -134,6 +134,89 @@ _CORE_METRIC_KEYS: frozenset[str] = frozenset(
     }
 )
 
+# ─── Endpoint 分层白名单（2026-09-11 fix/analytics-v4-campaign-rows）──────────────
+# v4 dump 协议假设每行都有 product_id（ad_daily/ad_today/ad_monthly 的主键之一）。
+# 但部分 TikTok endpoint 是 campaign-level 粒度，rows 永远是 campaign 变更事件
+# （如 change_id / change_type），压根没有 product_id —— 硬走结构化表会 KeyError。
+#
+# 解决：在 upsert_*_rows 入口判断 endpoint：白名单内 = product-level 写结构化表，
+# 不在白名单 = campaign-level 只写 ad_raw_log（rows 原样存进 response.body 备查）。
+# 新增 endpoint 默认走 product-level，保守暴露 KeyError 让开发者知道要补白名单
+# （AGENTS.md §6 「fail loud」）。
+#
+# 配套：chrome-plugins/ads-data-sync/entrypoints/background.ts 的
+# executeSingle*DumpV4 在 campaign-level endpoint 时 dump.rows=[]，
+# 这样 wires 上 rows 就是空的，rows 完整性靠 response.body 存档保证。
+_PRODUCT_LEVEL_ENDPOINTS: frozenset[str] = frozenset(
+    {
+        # product-level：每个 row 是一个商品的指标
+        "/oec_ads/shopping/v1/oec/stat/post_product_list",
+        # session-level：按 spu_id_list 过滤的会话级数据，每个 row 仍属于某个 spu
+        # 当前 plugin 已禁用（2026-09-09：post_session_list 无实际用途），
+        # 保留白名单为未来启用预留。
+        "/oec_ads/shopping/v1/oec/stat/post_session_list",
+    }
+)
+
+
+def is_product_level_endpoint(endpoint: str) -> bool:
+    """返回 endpoint 是否属于 product-level（有 product_id，能写结构化表）。"""
+    return endpoint in _PRODUCT_LEVEL_ENDPOINTS
+
+
+def _archive_raw_log_only(
+    sess: Session,
+    *,
+    seller_id: str,
+    advertiser_id: str,
+    endpoint: str,
+    campaign_id: str,
+    rows: list[dict[str, Any]],
+    request_url: str,
+    request_body: dict[str, Any] | None,
+    response_status: int | None,
+    response_body: dict[str, Any] | None,
+    created_at: datetime,
+    request_id: str | None,
+    source: str | None,
+    kind: str,
+    day: date | None,
+    year_month: str | None,
+) -> int:
+    """campaign-level endpoint 专用：rows 原样保留在 ad_raw_log.response_body，
+    不写 ad_daily / ad_today / ad_monthly。返回 inserted=0。
+
+    为什么不让 caller 自己去写 ad_raw_log：保留单事务、参数验证、未来字段扩展
+    （如 dump_kind-specific 字段）的统一入口。
+    """
+    # ad_raw_log.product_id 对 campaign-level 没有意义 → 存 NULL（不是 ''、不是
+    # sentinel），下游 spu_roi JOIN 时 NULL 不会污染 ad_daily 聚合（ad_daily
+    # 才是 spu_roi 的真数据源）。
+    # pi-lens-ignore: python-sql-injection
+    sess.execute(
+        text(SQL_INSERT_RAW_LOG),
+        {
+            "seller_id": seller_id,
+            "advertiser_id": advertiser_id,
+            "endpoint": endpoint,
+            "campaign_id": campaign_id,
+            "product_id": None,
+            "kind": kind,
+            "day": day,
+            "year_month": year_month,
+            "request_url": request_url,
+            "request_method": "POST",
+            "request_body": json.dumps(request_body, ensure_ascii=False),
+            "response_status": response_status,
+            "response_body": json.dumps(response_body, ensure_ascii=False),
+            "created_at": created_at,
+            "request_id": request_id,
+            "source": source,
+        },
+    )
+    sess.commit()
+    return 0
+
 
 # ─── Coverage 查询 ────────────────────────────────────────────────────
 
@@ -253,7 +336,31 @@ def upsert_daily_rows(
     request_id: str | None,
     source: str | None,
 ) -> int:
-    """解析 rows → INSERT ad_daily + ad_raw_log，单事务。返回 inserted 计数。"""
+    """解析 rows → INSERT ad_daily + ad_raw_log，单事务。返回 inserted 计数。
+
+    campaign-level endpoint（rows 无 product_id，如 campaign_opt_log_list）：
+    只写 ad_raw_log（rows 保留在 response.body），不写 ad_daily。返回 0。
+    """
+    if not is_product_level_endpoint(endpoint):
+        return _archive_raw_log_only(
+            sess,
+            seller_id=seller_id,
+            advertiser_id=advertiser_id,
+            endpoint=endpoint,
+            campaign_id=campaign_id,
+            rows=rows,
+            request_url=request_url,
+            request_body=request_body,
+            response_status=response_status,
+            response_body=response_body,
+            created_at=created_at,
+            request_id=request_id,
+            source=source,
+            kind="daily",
+            day=day,
+            year_month=None,
+        )
+
     first_product_id = rows[0]["product_id"] if rows else None
     inserted = 0
 
@@ -332,7 +439,30 @@ def upsert_today_rows(
     request_id: str | None,
     source: str | None,
 ) -> int:
-    """解析 rows → INSERT ad_today（ON CONFLICT DO UPDATE）+ ad_raw_log，单事务。"""
+    """解析 rows → INSERT ad_today（ON CONFLICT DO UPDATE）+ ad_raw_log，单事务。
+
+    campaign-level endpoint：只写 ad_raw_log，不写 ad_today。返回 0。
+    """
+    if not is_product_level_endpoint(endpoint):
+        return _archive_raw_log_only(
+            sess,
+            seller_id=seller_id,
+            advertiser_id=advertiser_id,
+            endpoint=endpoint,
+            campaign_id=campaign_id,
+            rows=rows,
+            request_url=request_url,
+            request_body=request_body,
+            response_status=response_status,
+            response_body=response_body,
+            created_at=created_at,
+            request_id=request_id,
+            source=source,
+            kind="today",
+            day=day,
+            year_month=None,
+        )
+
     first_product_id = rows[0]["product_id"] if rows else None
     inserted = 0
 
@@ -410,7 +540,30 @@ def upsert_monthly_rows(
     request_id: str | None,
     source: str | None,
 ) -> int:
-    """解析 rows → INSERT ad_monthly + ad_raw_log，单事务。返回 inserted 计数。"""
+    """解析 rows → INSERT ad_monthly + ad_raw_log，单事务。返回 inserted 计数。
+
+    campaign-level endpoint：只写 ad_raw_log，不写 ad_monthly。返回 0。
+    """
+    if not is_product_level_endpoint(endpoint):
+        return _archive_raw_log_only(
+            sess,
+            seller_id=seller_id,
+            advertiser_id=advertiser_id,
+            endpoint=endpoint,
+            campaign_id=campaign_id,
+            rows=rows,
+            request_url=request_url,
+            request_body=request_body,
+            response_status=response_status,
+            response_body=response_body,
+            created_at=created_at,
+            request_id=request_id,
+            source=source,
+            kind="monthly",
+            day=None,
+            year_month=year_month,
+        )
+
     first_product_id = rows[0]["product_id"] if rows else None
     inserted = 0
 
@@ -577,6 +730,7 @@ __all__ = [
     "get_coverage_daily",
     "get_coverage_monthly",
     "insert_plugin_logs",
+    "is_product_level_endpoint",
     "solidify_yesterday",
     "solidify_yesterday_scope_pairs",
     "upsert_daily_rows",
