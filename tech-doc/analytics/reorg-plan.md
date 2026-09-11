@@ -43,7 +43,7 @@
 
 | # | 决策 | 依据（code facts） |
 | --- | --- | --- |
-| 1 | 删除 `analytics.ad_daily_completeness` | dump-architecture D3 后 has-data 直接查 ad_raw；该表不参与协议、无生产读方，仅每次 dump 第三次写放大（UPSERT captured_at）。 |
+| 1 | 删除 `plugin.ad_daily_completeness` | dump-architecture D3 后 has-data 直接查 ad_raw；该表不参与协议、无生产读方，仅每次 dump 第三次写放大（UPSERT captured_at）。 |
 | 2 | 删除 `analytics.ad_records` | 生产代码零 SELECT（仅 INSERT + retention 90d DELETE；读取只出现在 migration 回填与测试）；与 ad_raw.response.body 重复存同一 payload。 |
 | 3 | 删除 `analytics.ad_shop_timezones` | 生产读写路径均死：`fetch_timezone()` 仅测试调用、`SQL_UPSERT_TIMEZONE`/`SQL_GET_TIMEZONE`/`SQL_SEED_TIMEZONE`/`SQL_REPAIR_TIMEZONE` 均为未执行死 SQL、`_today_in_tz()` 无调用方；11 行是 0005 前 v1 cursor 协议遗留（值全为默认 Asia/Shanghai）。day 由 plugin 自报，server 不换算时区。 |
 | 4 | 删除 `analytics.ad_audit_log`，**改为结构化文件日志** | 审计是日志不是数据：生产零 SELECT（仅 retention DELETE + 人肉 SQL + 测试断言）；失败路径 `_audit_and_error` 已写 stderr；与 `middleware/access_log.py`（全站每请求一行 stdout.log）重叠。改为 logger 单行 key=value，成功路径也补一行（现唯一丢失信息 = 成功请求的 records 计数）。 |
@@ -81,7 +81,7 @@ analytics schema（重排后）
   当前 head = 0006，新版本号 **0007**。
 - upgrade：`op.drop_table`（或等价的 raw SQL，风格跟随 0005/0006）依次 drop：
   `analytics.ad_audit_log` → `analytics.ad_shop_timezones` →
-  `analytics.ad_daily_completeness` → `analytics.ad_records`（先 drop 无 FK 依赖的表；
+  `plugin.ad_daily_completeness` → `analytics.ad_records`（先 drop 无 FK 依赖的表；
   本组表无跨表 FK，顺序不敏感，仍按依赖直觉排）。索引随表 drop 自动消失。
 - downgrade：重建 4 张表（列定义照抄现 models/`schema_tts_erp.sql` 里的旧定义），
   **注释声明：ad_raw 仍可重建 ad_records/ad_daily_completeness；ad_audit_log 历史

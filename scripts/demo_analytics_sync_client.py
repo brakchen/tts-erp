@@ -197,7 +197,7 @@ def compute_idempotency_key(
 ) -> str:
     """sha256 hex of the canonical 6-field record identity.
 
-    Must match ``tts_erp_v2.analytics.domain.compute_idempotency_key`` byte-for-
+    Must match ``tts_erp_v2.plugin.ads.domain.compute_idempotency_key`` byte-for-
     byte; the server recomputes this on every received record and rejects
     any client-sent ``idempotencyKey`` that doesn't match.  See
     ``tech-doc/analytics/plugin-integration.md`` §3 for the rules.

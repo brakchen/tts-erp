@@ -69,7 +69,7 @@ EXPECTED_JOB_INTERVALS = {
     "reporting.profit_daily": 3600,
     "spu.image_mirror": 1800,
     "fx.sync": 3600,
-    "analytics.solidify": 3600,
+    "plugin.ad_merge_today2daily": 3600,
 }
 
 
@@ -84,9 +84,11 @@ def test_jobs_registry_has_expected_count() -> None:
     2026-09-06：fx.sync 加入（ExchangeRate-API 汇率缓存，horizon-gated
     ≈1 请求/天）→ 13 → 14。
     2026-09-08：analytics.solidify 加入（ad_today→ad_daily 跨天固化）→ 14 → 17。
+    2026-09-11：改名 ``analytics.solidify`` → ``plugin.ad_merge_today2daily``
+    （插件数据收敛到 plugin schema；模块 jobs/ad_merge_today2daily.py）。
     """
     # 6 tiktok + 11 system (token + 5 miaoshou + 2 reporting + image_mirror
-    # + fx.sync + analytics.solidify) — keep the number pinned so we don't
+    # + fx.sync + plugin.ad_merge_today2daily) — keep the number pinned so we don't
     # drift silently.
     assert len(JOBS) == 17
 

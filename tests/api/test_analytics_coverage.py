@@ -30,30 +30,30 @@ def _cleanup(db_engine):
     """Wipe TEST_ data from all analytics tables this test touches."""
     with db_engine.begin() as conn:
         conn.execute(
-            text("DELETE FROM analytics.ad_daily WHERE seller_id = :s"), {"s": SELLER}
+            text("DELETE FROM plugin.ad_daily WHERE seller_id = :s"), {"s": SELLER}
         )
         conn.execute(
-            text("DELETE FROM analytics.ad_monthly WHERE seller_id = :s"), {"s": SELLER}
+            text("DELETE FROM plugin.ad_monthly WHERE seller_id = :s"), {"s": SELLER}
         )
         conn.execute(
-            text("DELETE FROM analytics.ad_today WHERE seller_id = :s"), {"s": SELLER}
+            text("DELETE FROM plugin.ad_today WHERE seller_id = :s"), {"s": SELLER}
         )
         conn.execute(
-            text("DELETE FROM analytics.ad_raw_log WHERE seller_id = :s"), {"s": SELLER}
+            text("DELETE FROM plugin.ad_raw_log WHERE seller_id = :s"), {"s": SELLER}
         )
     yield
     with db_engine.begin() as conn:
         conn.execute(
-            text("DELETE FROM analytics.ad_daily WHERE seller_id = :s"), {"s": SELLER}
+            text("DELETE FROM plugin.ad_daily WHERE seller_id = :s"), {"s": SELLER}
         )
         conn.execute(
-            text("DELETE FROM analytics.ad_monthly WHERE seller_id = :s"), {"s": SELLER}
+            text("DELETE FROM plugin.ad_monthly WHERE seller_id = :s"), {"s": SELLER}
         )
         conn.execute(
-            text("DELETE FROM analytics.ad_today WHERE seller_id = :s"), {"s": SELLER}
+            text("DELETE FROM plugin.ad_today WHERE seller_id = :s"), {"s": SELLER}
         )
         conn.execute(
-            text("DELETE FROM analytics.ad_raw_log WHERE seller_id = :s"), {"s": SELLER}
+            text("DELETE FROM plugin.ad_raw_log WHERE seller_id = :s"), {"s": SELLER}
         )
 
 
@@ -64,12 +64,12 @@ def _insert_ad_daily(
     campaign_id: str = CAMPAIGN_1,
     product_id: str = "TEST_PROD_1",
 ) -> None:
-    """Insert one row into analytics.ad_daily for testing."""
+    """Insert one row into plugin.ad_daily for testing."""
     with db_engine.begin() as conn:
         conn.execute(
             text(
                 """
-                INSERT INTO analytics.ad_daily (
+                INSERT INTO plugin.ad_daily (
                     seller_id, advertiser_id, campaign_id, product_id, endpoint, day,
                     mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value,
                     onsite_mixed_real_roi2_shopping, metrics_extra, created_at
@@ -98,12 +98,12 @@ def _insert_ad_monthly(
     campaign_id: str = CAMPAIGN_1,
     product_id: str = "TEST_PROD_1",
 ) -> None:
-    """Insert one row into analytics.ad_monthly for testing."""
+    """Insert one row into plugin.ad_monthly for testing."""
     with db_engine.begin() as conn:
         conn.execute(
             text(
                 """
-                INSERT INTO analytics.ad_monthly (
+                INSERT INTO plugin.ad_monthly (
                     seller_id, advertiser_id, campaign_id, product_id, endpoint, year_month,
                     mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value,
                     onsite_mixed_real_roi2_shopping, metrics_extra, created_at
@@ -357,7 +357,7 @@ def _seed_many_campaigns(db_engine, *, n_campaigns: int, days: list[str]) -> Non
                 conn.execute(
                     text(
                         """
-                        INSERT INTO analytics.ad_daily (
+                        INSERT INTO plugin.ad_daily (
                             seller_id, advertiser_id, campaign_id, product_id, endpoint, day,
                             mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value,
                             onsite_mixed_real_roi2_shopping, metrics_extra, created_at
@@ -383,37 +383,37 @@ def _seed_many_campaigns(db_engine, *, n_campaigns: int, days: list[str]) -> Non
 def _cleanup_pager(db_engine):
     with db_engine.begin() as conn:
         conn.execute(
-            text("DELETE FROM analytics.ad_daily WHERE seller_id = :s"),
+            text("DELETE FROM plugin.ad_daily WHERE seller_id = :s"),
             {"s": PAGER_SELLER},
         )
         conn.execute(
-            text("DELETE FROM analytics.ad_monthly WHERE seller_id = :s"),
+            text("DELETE FROM plugin.ad_monthly WHERE seller_id = :s"),
             {"s": PAGER_SELLER},
         )
         conn.execute(
-            text("DELETE FROM analytics.ad_today WHERE seller_id = :s"),
+            text("DELETE FROM plugin.ad_today WHERE seller_id = :s"),
             {"s": PAGER_SELLER},
         )
         conn.execute(
-            text("DELETE FROM analytics.ad_raw_log WHERE seller_id = :s"),
+            text("DELETE FROM plugin.ad_raw_log WHERE seller_id = :s"),
             {"s": PAGER_SELLER},
         )
     yield
     with db_engine.begin() as conn:
         conn.execute(
-            text("DELETE FROM analytics.ad_daily WHERE seller_id = :s"),
+            text("DELETE FROM plugin.ad_daily WHERE seller_id = :s"),
             {"s": PAGER_SELLER},
         )
         conn.execute(
-            text("DELETE FROM analytics.ad_monthly WHERE seller_id = :s"),
+            text("DELETE FROM plugin.ad_monthly WHERE seller_id = :s"),
             {"s": PAGER_SELLER},
         )
         conn.execute(
-            text("DELETE FROM analytics.ad_today WHERE seller_id = :s"),
+            text("DELETE FROM plugin.ad_today WHERE seller_id = :s"),
             {"s": PAGER_SELLER},
         )
         conn.execute(
-            text("DELETE FROM analytics.ad_raw_log WHERE seller_id = :s"),
+            text("DELETE FROM plugin.ad_raw_log WHERE seller_id = :s"),
             {"s": PAGER_SELLER},
         )
 

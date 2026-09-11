@@ -35,11 +35,6 @@ SELECT pg_catalog.set_config('search_path', '', false);
 CREATE SCHEMA after_sales;
 
 
--- Name: analytics; Type: SCHEMA; Schema: -; Owner: -
-
-CREATE SCHEMA analytics;
-
-
 -- Name: commerce; Type: SCHEMA; Schema: -; Owner: -
 
 CREATE SCHEMA commerce;
@@ -149,138 +144,6 @@ CREATE TABLE IF NOT EXISTS after_sales.cases (
 
 ALTER TABLE after_sales.cases ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME after_sales.cases_id_seq
-);
-
-
--- Name: ad_daily; Type: TABLE; Schema: analytics; Owner: -
-
-CREATE TABLE IF NOT EXISTS analytics.ad_daily (
-    id bigint NOT NULL,
-    seller_id text NOT NULL,
-    advertiser_id text NOT NULL,
-    campaign_id text NOT NULL,
-    product_id text NOT NULL,
-    endpoint text NOT NULL,
-    day date NOT NULL,
-    mixed_real_cost numeric(20,4),
-    onsite_roi2_shopping_sku bigint,
-    onsite_roi2_shopping_value numeric(20,4),
-    onsite_mixed_real_roi2_shopping numeric(20,4),
-    metrics_extra jsonb,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
-
-ALTER TABLE analytics.ad_daily ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME analytics.ad_daily_id_seq
-);
-
-
--- Name: ad_monthly; Type: TABLE; Schema: analytics; Owner: -
-
-CREATE TABLE IF NOT EXISTS analytics.ad_monthly (
-    id bigint NOT NULL,
-    seller_id text NOT NULL,
-    advertiser_id text NOT NULL,
-    campaign_id text NOT NULL,
-    product_id text NOT NULL,
-    endpoint text NOT NULL,
-    year_month text NOT NULL,
-    mixed_real_cost numeric(20,4),
-    onsite_roi2_shopping_sku bigint,
-    onsite_roi2_shopping_value numeric(20,4),
-    onsite_mixed_real_roi2_shopping numeric(20,4),
-    metrics_extra jsonb,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
-
-ALTER TABLE analytics.ad_monthly ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME analytics.ad_monthly_id_seq
-);
-
-
--- Name: ad_raw_log; Type: TABLE; Schema: analytics; Owner: -
-
-CREATE TABLE IF NOT EXISTS analytics.ad_raw_log (
-    id bigint NOT NULL,
-    seller_id text NOT NULL,
-    advertiser_id text NOT NULL,
-    endpoint text NOT NULL,
-    campaign_id text,
-    product_id text,
-    kind text NOT NULL,
-    day date,
-    year_month text,
-    request_url text NOT NULL,
-    request_method text NOT NULL,
-    request_body jsonb,
-    response_status integer,
-    response_body jsonb,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    request_id text,
-    source text DEFAULT 'tiktok-shop-data-sync'::text,
-    CONSTRAINT ad_raw_log_kind_check CHECK ((kind = ANY (ARRAY['daily'::text, 'today'::text, 'monthly'::text])))
-);
-
-
-
-ALTER TABLE analytics.ad_raw_log ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME analytics.ad_raw_log_id_seq
-);
-
-
--- Name: ad_today; Type: TABLE; Schema: analytics; Owner: -
-
-CREATE TABLE IF NOT EXISTS analytics.ad_today (
-    id bigint NOT NULL,
-    seller_id text NOT NULL,
-    advertiser_id text NOT NULL,
-    campaign_id text NOT NULL,
-    product_id text NOT NULL,
-    endpoint text NOT NULL,
-    day date NOT NULL,
-    mixed_real_cost numeric(20,4),
-    onsite_roi2_shopping_sku bigint,
-    onsite_roi2_shopping_value numeric(20,4),
-    onsite_mixed_real_roi2_shopping numeric(20,4),
-    metrics_extra jsonb,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
-
-ALTER TABLE analytics.ad_today ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME analytics.ad_today_id_seq
-);
-
-
--- Name: plugin_logs; Type: TABLE; Schema: analytics; Owner: -
-
-CREATE TABLE IF NOT EXISTS analytics.plugin_logs (
-    id bigint NOT NULL,
-    seller_id text NOT NULL,
-    advertiser_id text NOT NULL,
-    plugin_version text NOT NULL,
-    level text NOT NULL,
-    message text NOT NULL,
-    context jsonb,
-    occurred_at timestamp with time zone NOT NULL,
-    received_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT plugin_logs_level_check CHECK ((level = ANY (ARRAY['info'::text, 'warn'::text, 'error'::text])))
-);
-
-
-
-ALTER TABLE analytics.plugin_logs ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME analytics.plugin_logs_id_seq
 );
 
 
@@ -908,6 +771,115 @@ ALTER TABLE linkage.variant_links ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTI
 );
 
 
+-- Name: ad_daily; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.ad_daily (
+    id bigint NOT NULL,
+    seller_id text NOT NULL,
+    advertiser_id text NOT NULL,
+    campaign_id text NOT NULL,
+    product_id text NOT NULL,
+    endpoint text NOT NULL,
+    day date NOT NULL,
+    mixed_real_cost numeric(20,4),
+    onsite_roi2_shopping_sku bigint,
+    onsite_roi2_shopping_value numeric(20,4),
+    onsite_mixed_real_roi2_shopping numeric(20,4),
+    metrics_extra jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.ad_daily ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.ad_daily_id_seq
+);
+
+
+-- Name: ad_monthly; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.ad_monthly (
+    id bigint NOT NULL,
+    seller_id text NOT NULL,
+    advertiser_id text NOT NULL,
+    campaign_id text NOT NULL,
+    product_id text NOT NULL,
+    endpoint text NOT NULL,
+    year_month text NOT NULL,
+    mixed_real_cost numeric(20,4),
+    onsite_roi2_shopping_sku bigint,
+    onsite_roi2_shopping_value numeric(20,4),
+    onsite_mixed_real_roi2_shopping numeric(20,4),
+    metrics_extra jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.ad_monthly ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.ad_monthly_id_seq
+);
+
+
+-- Name: ad_raw_log; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.ad_raw_log (
+    id bigint NOT NULL,
+    seller_id text NOT NULL,
+    advertiser_id text NOT NULL,
+    endpoint text NOT NULL,
+    campaign_id text,
+    product_id text,
+    kind text NOT NULL,
+    day date,
+    year_month text,
+    request_url text NOT NULL,
+    request_method text NOT NULL,
+    request_body jsonb,
+    response_status integer,
+    response_body jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    request_id text,
+    source text DEFAULT 'tiktok-shop-data-sync'::text,
+    CONSTRAINT ad_raw_log_kind_check CHECK ((kind = ANY (ARRAY['daily'::text, 'today'::text, 'monthly'::text])))
+);
+
+
+
+ALTER TABLE plugin.ad_raw_log ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.ad_raw_log_id_seq
+);
+
+
+-- Name: ad_today; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.ad_today (
+    id bigint NOT NULL,
+    seller_id text NOT NULL,
+    advertiser_id text NOT NULL,
+    campaign_id text NOT NULL,
+    product_id text NOT NULL,
+    endpoint text NOT NULL,
+    day date NOT NULL,
+    mixed_real_cost numeric(20,4),
+    onsite_roi2_shopping_sku bigint,
+    onsite_roi2_shopping_value numeric(20,4),
+    onsite_mixed_real_roi2_shopping numeric(20,4),
+    metrics_extra jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.ad_today ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.ad_today_id_seq
+);
+
+
 -- Name: order_lines; Type: TABLE; Schema: plugin; Owner: -
 
 CREATE TABLE IF NOT EXISTS plugin.order_lines (
@@ -966,6 +938,29 @@ CREATE TABLE IF NOT EXISTS plugin.orders (
 
 ALTER TABLE plugin.orders ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME plugin.orders_id_seq
+);
+
+
+-- Name: plugin_logs; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.plugin_logs (
+    id bigint NOT NULL,
+    seller_id text NOT NULL,
+    advertiser_id text NOT NULL,
+    plugin_version text NOT NULL,
+    level text NOT NULL,
+    message text NOT NULL,
+    context jsonb,
+    occurred_at timestamp with time zone NOT NULL,
+    received_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT plugin_logs_level_check CHECK ((level = ANY (ARRAY['info'::text, 'warn'::text, 'error'::text])))
+);
+
+
+
+ALTER TABLE plugin.plugin_logs ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.plugin_logs_id_seq
 );
 
 
@@ -1391,54 +1386,6 @@ ALTER TABLE ONLY after_sales.cases
     ADD CONSTRAINT uq_cases_account_ext UNIQUE (shop_pk, external_case_id);
 
 
--- Name: ad_daily ad_daily_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
-
-ALTER TABLE ONLY analytics.ad_daily
-    ADD CONSTRAINT ad_daily_pkey PRIMARY KEY (id);
-
-
--- Name: ad_monthly ad_monthly_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
-
-ALTER TABLE ONLY analytics.ad_monthly
-    ADD CONSTRAINT ad_monthly_pkey PRIMARY KEY (id);
-
-
--- Name: ad_raw_log ad_raw_log_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
-
-ALTER TABLE ONLY analytics.ad_raw_log
-    ADD CONSTRAINT ad_raw_log_pkey PRIMARY KEY (id);
-
-
--- Name: ad_today ad_today_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
-
-ALTER TABLE ONLY analytics.ad_today
-    ADD CONSTRAINT ad_today_pkey PRIMARY KEY (id);
-
-
--- Name: plugin_logs plugin_logs_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
-
-ALTER TABLE ONLY analytics.plugin_logs
-    ADD CONSTRAINT plugin_logs_pkey PRIMARY KEY (id);
-
-
--- Name: ad_daily uq_ad_daily; Type: CONSTRAINT; Schema: analytics; Owner: -
-
-ALTER TABLE ONLY analytics.ad_daily
-    ADD CONSTRAINT uq_ad_daily UNIQUE (seller_id, advertiser_id, endpoint, campaign_id, product_id, day);
-
-
--- Name: ad_monthly uq_ad_monthly; Type: CONSTRAINT; Schema: analytics; Owner: -
-
-ALTER TABLE ONLY analytics.ad_monthly
-    ADD CONSTRAINT uq_ad_monthly UNIQUE (seller_id, advertiser_id, endpoint, campaign_id, product_id, year_month);
-
-
--- Name: ad_today uq_ad_today; Type: CONSTRAINT; Schema: analytics; Owner: -
-
-ALTER TABLE ONLY analytics.ad_today
-    ADD CONSTRAINT uq_ad_today UNIQUE (seller_id, advertiser_id, endpoint, campaign_id, product_id, day);
-
-
 -- Name: shops channel_accounts_pkey; Type: CONSTRAINT; Schema: commerce; Owner: -
 
 ALTER TABLE ONLY commerce.shops
@@ -1715,6 +1662,30 @@ ALTER TABLE ONLY linkage.variant_links
     ADD CONSTRAINT variant_links_pkey PRIMARY KEY (id);
 
 
+-- Name: ad_daily ad_daily_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.ad_daily
+    ADD CONSTRAINT ad_daily_pkey PRIMARY KEY (id);
+
+
+-- Name: ad_monthly ad_monthly_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.ad_monthly
+    ADD CONSTRAINT ad_monthly_pkey PRIMARY KEY (id);
+
+
+-- Name: ad_raw_log ad_raw_log_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.ad_raw_log
+    ADD CONSTRAINT ad_raw_log_pkey PRIMARY KEY (id);
+
+
+-- Name: ad_today ad_today_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.ad_today
+    ADD CONSTRAINT ad_today_pkey PRIMARY KEY (id);
+
+
 -- Name: order_lines order_lines_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
 
 ALTER TABLE ONLY plugin.order_lines
@@ -1725,6 +1696,12 @@ ALTER TABLE ONLY plugin.order_lines
 
 ALTER TABLE ONLY plugin.orders
     ADD CONSTRAINT orders_pkey PRIMARY KEY (id);
+
+
+-- Name: plugin_logs plugin_logs_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.plugin_logs
+    ADD CONSTRAINT plugin_logs_pkey PRIMARY KEY (id);
 
 
 -- Name: raw_log raw_log_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
@@ -1755,6 +1732,24 @@ ALTER TABLE ONLY plugin.shipments
 
 ALTER TABLE ONLY plugin.tracking_events
     ADD CONSTRAINT tracking_events_pkey PRIMARY KEY (id);
+
+
+-- Name: ad_daily uq_ad_daily; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.ad_daily
+    ADD CONSTRAINT uq_ad_daily UNIQUE (seller_id, advertiser_id, endpoint, campaign_id, product_id, day);
+
+
+-- Name: ad_monthly uq_ad_monthly; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.ad_monthly
+    ADD CONSTRAINT uq_ad_monthly UNIQUE (seller_id, advertiser_id, endpoint, campaign_id, product_id, year_month);
+
+
+-- Name: ad_today uq_ad_today; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.ad_today
+    ADD CONSTRAINT uq_ad_today UNIQUE (seller_id, advertiser_id, endpoint, campaign_id, product_id, day);
 
 
 -- Name: order_lines uq_order_lines_order_sku; Type: CONSTRAINT; Schema: plugin; Owner: -
@@ -1940,46 +1935,6 @@ CREATE INDEX IF NOT EXISTS ix_cases_case_type_status ON after_sales.cases USING 
 CREATE INDEX IF NOT EXISTS ix_cases_sales_order ON after_sales.cases USING btree (order_pk);
 
 
--- Name: idx_ad_daily_coverage; Type: INDEX; Schema: analytics; Owner: -
-
-CREATE INDEX IF NOT EXISTS idx_ad_daily_coverage ON analytics.ad_daily USING btree (seller_id, advertiser_id, endpoint, campaign_id, day);
-
-
--- Name: idx_ad_daily_product_day; Type: INDEX; Schema: analytics; Owner: -
-
-CREATE INDEX IF NOT EXISTS idx_ad_daily_product_day ON analytics.ad_daily USING btree (product_id, day);
-
-
--- Name: idx_ad_monthly_coverage; Type: INDEX; Schema: analytics; Owner: -
-
-CREATE INDEX IF NOT EXISTS idx_ad_monthly_coverage ON analytics.ad_monthly USING btree (seller_id, advertiser_id, endpoint, campaign_id, year_month);
-
-
--- Name: idx_ad_raw_log_day; Type: INDEX; Schema: analytics; Owner: -
-
-CREATE INDEX IF NOT EXISTS idx_ad_raw_log_day ON analytics.ad_raw_log USING btree (day);
-
-
--- Name: idx_ad_raw_log_request_id; Type: INDEX; Schema: analytics; Owner: -
-
-CREATE INDEX IF NOT EXISTS idx_ad_raw_log_request_id ON analytics.ad_raw_log USING btree (request_id);
-
-
--- Name: idx_ad_today_coverage; Type: INDEX; Schema: analytics; Owner: -
-
-CREATE INDEX IF NOT EXISTS idx_ad_today_coverage ON analytics.ad_today USING btree (seller_id, advertiser_id, endpoint, campaign_id, day);
-
-
--- Name: idx_plugin_logs_level; Type: INDEX; Schema: analytics; Owner: -
-
-CREATE INDEX IF NOT EXISTS idx_plugin_logs_level ON analytics.plugin_logs USING btree (level, occurred_at DESC);
-
-
--- Name: idx_plugin_logs_seller_time; Type: INDEX; Schema: analytics; Owner: -
-
-CREATE INDEX IF NOT EXISTS idx_plugin_logs_seller_time ON analytics.plugin_logs USING btree (seller_id, occurred_at DESC);
-
-
 -- Name: ix_channel_accounts_status; Type: INDEX; Schema: commerce; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_channel_accounts_status ON commerce.shops USING btree (status);
@@ -2140,6 +2095,46 @@ CREATE INDEX IF NOT EXISTS ix_product_links_status ON linkage.product_links USIN
 CREATE INDEX IF NOT EXISTS ix_variant_links_validity ON linkage.variant_links USING btree (valid_from, valid_to);
 
 
+-- Name: idx_ad_daily_coverage; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_ad_daily_coverage ON plugin.ad_daily USING btree (seller_id, advertiser_id, endpoint, campaign_id, day);
+
+
+-- Name: idx_ad_daily_product_day; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_ad_daily_product_day ON plugin.ad_daily USING btree (product_id, day);
+
+
+-- Name: idx_ad_monthly_coverage; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_ad_monthly_coverage ON plugin.ad_monthly USING btree (seller_id, advertiser_id, endpoint, campaign_id, year_month);
+
+
+-- Name: idx_ad_raw_log_day; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_ad_raw_log_day ON plugin.ad_raw_log USING btree (day);
+
+
+-- Name: idx_ad_raw_log_request_id; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_ad_raw_log_request_id ON plugin.ad_raw_log USING btree (request_id);
+
+
+-- Name: idx_ad_today_coverage; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_ad_today_coverage ON plugin.ad_today USING btree (seller_id, advertiser_id, endpoint, campaign_id, day);
+
+
+-- Name: idx_plugin_logs_level; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_plugin_logs_level ON plugin.plugin_logs USING btree (level, occurred_at DESC);
+
+
+-- Name: idx_plugin_logs_seller_time; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_plugin_logs_seller_time ON plugin.plugin_logs USING btree (seller_id, occurred_at DESC);
+
+
 -- Name: ix_orders_main_order_status; Type: INDEX; Schema: plugin; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_orders_main_order_status ON plugin.orders USING btree (main_order_status);
@@ -2253,31 +2248,6 @@ CREATE OR REPLACE TRIGGER trg_after_sales_case_lines_touch BEFORE UPDATE ON afte
 -- Name: cases trg_after_sales_cases_touch; Type: TRIGGER; Schema: after_sales; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_after_sales_cases_touch BEFORE UPDATE ON after_sales.cases FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
--- Name: ad_daily trg_analytics_ad_daily_touch; Type: TRIGGER; Schema: analytics; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_analytics_ad_daily_touch BEFORE UPDATE ON analytics.ad_daily FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
--- Name: ad_monthly trg_analytics_ad_monthly_touch; Type: TRIGGER; Schema: analytics; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_analytics_ad_monthly_touch BEFORE UPDATE ON analytics.ad_monthly FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
--- Name: ad_raw_log trg_analytics_ad_raw_log_touch; Type: TRIGGER; Schema: analytics; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_analytics_ad_raw_log_touch BEFORE UPDATE ON analytics.ad_raw_log FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
--- Name: ad_today trg_analytics_ad_today_touch; Type: TRIGGER; Schema: analytics; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_analytics_ad_today_touch BEFORE UPDATE ON analytics.ad_today FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
--- Name: plugin_logs trg_analytics_plugin_logs_touch; Type: TRIGGER; Schema: analytics; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_analytics_plugin_logs_touch BEFORE UPDATE ON analytics.plugin_logs FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
 -- Name: shops trg_commerce_channel_accounts_touch; Type: TRIGGER; Schema: commerce; Owner: -
@@ -2408,6 +2378,31 @@ CREATE OR REPLACE TRIGGER trg_linkage_product_links_touch BEFORE UPDATE ON linka
 -- Name: variant_links trg_linkage_variant_links_touch; Type: TRIGGER; Schema: linkage; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_linkage_variant_links_touch BEFORE UPDATE ON linkage.variant_links FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: ad_daily trg_analytics_ad_daily_touch; Type: TRIGGER; Schema: plugin; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_analytics_ad_daily_touch BEFORE UPDATE ON plugin.ad_daily FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: ad_monthly trg_analytics_ad_monthly_touch; Type: TRIGGER; Schema: plugin; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_analytics_ad_monthly_touch BEFORE UPDATE ON plugin.ad_monthly FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: ad_raw_log trg_analytics_ad_raw_log_touch; Type: TRIGGER; Schema: plugin; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_analytics_ad_raw_log_touch BEFORE UPDATE ON plugin.ad_raw_log FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: ad_today trg_analytics_ad_today_touch; Type: TRIGGER; Schema: plugin; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_analytics_ad_today_touch BEFORE UPDATE ON plugin.ad_today FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: plugin_logs trg_analytics_plugin_logs_touch; Type: TRIGGER; Schema: plugin; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_analytics_plugin_logs_touch BEFORE UPDATE ON plugin.plugin_logs FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
 -- Name: manual_product_costs trg_procurement_manual_product_costs_touch; Type: TRIGGER; Schema: procurement; Owner: -

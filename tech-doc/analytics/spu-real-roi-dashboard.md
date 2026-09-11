@@ -27,7 +27,7 @@
 | # | 信息源 | 内容 | 抓取通道（仓库既有唯一出口） | 本库落点 | 状态 |
 | --- | --- | --- | --- | --- | --- |
 | S1 | TikTok Shop Open API | 商品目录 / 订单 / 售后（取消·仅退款·退货） | sync-worker `tiktok.*` jobs（AGENTS §1：打上游唯一路径） | `commerce.*`、`after_sales.*`、`integration.raw_records` | ✅ 在用 |
-| S2 | TikTok OEC 广告报表 | `post_product_list`（campaign×SPU×day 出单/消耗/GMV，含自然归因） | Chrome 扩展 `tk-adv-cost-monitor` → `POST /v2/analytics/sync/dumps` | `analytics.ad_raw_log` → `analytics.ad_daily` / `ad_today`（`_SQL_ROI_AD` 直读） | ✅ 在用（全窗口累计） |
+| S2 | TikTok OEC 广告报表 | `post_product_list`（campaign×SPU×day 出单/消耗/GMV，含自然归因） | Chrome 扩展 `tk-adv-cost-monitor` → `POST /v2/analytics/sync/dumps` | `plugin.ad_raw_log` → `plugin.ad_daily` / `ad_today`（`_SQL_ROI_AD` 直读） | ✅ 在用（全窗口累计） |
 | S3 | TikTok Shop 结算明细 | **59 列宽行、自带 `order_id`**（平台佣金 / 退货运费 / 退款管理费 / 平台补贴 / 运费等，见 §6.11） | sync-worker `tiktok.finance` job + **结算归属解析 job（已排期 D7）** | `integration.raw_records` 原样 + **解析结构化表 + view（待建）** | 🔶 解析 job 已排期（D7） |
 | S4 | 妙手开放平台 采购 | 商品目录（216）/ 采购单（0） | sync-worker `miaoshou.*` jobs | `procurement.*` | ⚠️ 采购单未跑；本期不用（成本走 K1） |
 | S5 | 汇率（固定值，本期） | USD→VND、CNY→USD | 不接在线源：**固定常量**（2026-09-05 取数，配置可改） | 配置常量（.env 或配置表）；无新 job / 无新表 | ✅ 固定值（在线化挂起，见 §4.6） |
@@ -41,8 +41,8 @@
 | `commerce.products_spu` / `shops` | SPU / 店铺维度 | 主表行源；ad join 键 | §6.1/6.2 |
 | `commerce.sales_orders` + `sales_order_lines` | 有效销售订单行（口径 B） | M5/M5b/M6（销售列） | §6.3/6.4 |
 | `after_sales.cases` + `case_lines` | 售后：取消/仅退款/退货退款（含金额、件数、原因） | M7–M12（退款列）+ M9 信息列 | §6.5/6.6 |
-| `analytics.ad_raw_log`（原始请求日志） | 广告逐日原始（按天拆窗口的唯一路径） | 校验 / 自定义日期范围 | §6.7 |
-| `analytics.ad_daily` ∪ `ad_today`（`spu_roi.py::_SQL_ROI_AD` 直读，**不再经视图**） | campaign×SPU 出单量/消耗/GMV + ERP 键 |
+| `plugin.ad_raw_log`（原始请求日志） | 广告逐日原始（按天拆窗口的唯一路径） | 校验 / 自定义日期范围 | §6.7 |
+| `plugin.ad_daily` ∪ `ad_today`（`spu_roi.py::_SQL_ROI_AD` 直读，**不再经视图**） | campaign×SPU 出单量/消耗/GMV + ERP 键 |
 
 > **注（2026-09-11）**：原规划经 `analytics.ad_product_links` VIEW 读广告数据，该视图连同 `ad_raw` / `ad_sync_audit` 已由 **migration 0020** 删除（视图零生产消费者 —— `spu_roi.py::_SQL_ROI_AD` 一直是直读结构化表）。上表已按现状修正。 M1/M2/M2b/M3/M4（广告列） | §6.8 |
 | `reporting.product_profit_daily` | (spu,day) units/gross_revenue 中间表 | M5/M6 复用源（可选） | §6.9 |
@@ -163,7 +163,7 @@
 | 分组 | 列 | 说明 | 币种/单位 |
 | --- | --- | --- | --- |
 | A 商品 | ✓ `spu_id`、主图、标题、上架状态（ACTIVATE/已下架）、店铺名 | 维度列，主键 = `spu_pk` | — |
-| B 广告 | ✓ 投放广告数（挂该 SPU 的 campaign 数）、✓ 广告消耗合计、✓ 平台出单 GMV、✓ 平台 GMV ROI（L0）、○ 观测窗口（first_day~last_day） | 来自 `analytics.ad_daily` ∪ `analytics.ad_today`，窗口=已捕获全量（§4.5 时间口径） | USD（原生） |
+| B 广告 | ✓ 投放广告数（挂该 SPU 的 campaign 数）、✓ 广告消耗合计、✓ 平台出单 GMV、✓ 平台 GMV ROI（L0）、○ 观测窗口（first_day~last_day） | 来自 `plugin.ad_daily` ∪ `plugin.ad_today`，窗口=已捕获全量（§4.5 时间口径） | USD（原生） |
 | C 销售 | ✓ 售出件数、✓ 销售金额、○ 订单数 | 只统计**有效销售订单**（口径 B：白名单、排除 CANCELLED/UNPAID/ON_HOLD），按 `paid_at` 落入所选范围 | USD（原币 VND 换算） |
 | D 退款 | ✓ 有效订单退款（仅退款+退货退款：单数/件数/金额，**计入净额**）、✓ 已付被取消订单退款（件数/金额，**信息列不计净额**）、✓ 退款率=有效订单退款÷销售金额 | case 状态完结才计入；件数取 `case_lines.quantity` | USD（原币 VND 换算） |
 | E 实际 ROI | ✓ **净利润**（M18，毛利口径：净现金(内部) − 全部售出货本 − 广告消耗，每 SPU 真赚多少，**页面金额核心列**）；✓ **全损退货货损**（M13b = 全损退货件数 × 单位成本解析值，人工优先/缺省 40 CNY ≈ $5.95/件）；✓ **实际 ROI** = (净现金(内部) − 退货货损) ÷ 广告消耗（M14）；✓ **保本实际 ROI**（M17，实际 ROI 低于它标红） | 净利润是“结余核心”（负值红字），实际 ROI 主指标，保本线是红绿判据；**净现金收入(M13) 仅内部中间量，不展示** | USD（原币 VND/CNY）/ 比值 |
@@ -180,7 +180,7 @@ SPU 无广告投放 → 广告列显示 0 与“无投放”文案（不隐藏�
 | --- | --- | --- |
 | 订单 | 该 SPU 涉及的订单（订单号/状态/件数/金额/paid_at/shipped_at），CANCELLED 单标红 | `commerce.sales_orders` + `sales_order_lines`（by `spu_pk`） |
 | 售后 | 该 SPU 的 case 明细（case 类型/状态/退款金额/原因 code+text/时间），未完结 case 标黄 | `after_sales.cases` + `case_lines`（经 order→line→spu） |
-| 广告 | 该 SPU 的 campaign×SPU 行（广告 ID/消耗/出单/窗口） | `analytics.ad_daily` ∪ `analytics.ad_today`（by `spu_id`/`spu_pk`） |
+| 广告 | 该 SPU 的 campaign×SPU 行（广告 ID/消耗/出单/窗口） | `plugin.ad_daily` ∪ `plugin.ad_today`（by `spu_id`/`spu_pk`） |
 
 ### 3.3 P2 进阶（预留，本期不做，仅记入需求）
 

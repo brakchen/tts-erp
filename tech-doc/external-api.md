@@ -260,7 +260,7 @@ curl -sS -H "X-API-Key: $TTS_ERP_RO_KEY" \
 | Endpoint | Role | Notes |
 | --- | --- | --- |
 | `POST /v2/admin/shops/register` | **readwrite** | 人工注册店铺。body `{"platform": "tiktok", "shop_id": str, "account_name"?: str, "region"?: str, "seller_type"?: str, "opened_date"?: "YYYY-MM-DD"}` → `{created: bool, shop: {...}}`。幂等：重复注册只补填仍为 NULL 的展示字段，**绝不覆盖** `credential_id`/`status`（店铺后续拿到 API 授权时由 OAuth callback 补 credential_id + `data_source` 翻转 `'plugin'→'api'`）。`shop_id` 必须是数字串，`TEST_`/`MOCK_` 前缀 422。注册只影响查询关联（spu-roi 店铺筛选等），数据同步不依赖注册。 |
-| `GET /v2/admin/shops/unregistered` | **readwrite** | 列出在 `plugin.*` / `analytics.*` 插件数据里出现、但 `commerce.shops` 无行的 shop_id → `{candidates: [{shop_id, sources}]}`；注册页的候选清单。 |
+| `GET /v2/admin/shops/unregistered` | **readwrite** | 列出在 `plugin.*` 插件数据里出现、但 `commerce.shops` 无行的 shop_id → `{candidates: [{shop_id, sources}]}`；注册页的候选清单。 |
 
 ### SPU images (`/v2/spu-images/*`)
 
@@ -437,7 +437,7 @@ Response `{spu_pk, cases[], meta}`。`cases[]` 每条 = `case_id, order_id(可�
 
 广告 tab 数据源（**无窗口参数**——广告全窗口累计，与主表一致）。
 
-Response `{spu_pk, ads[], meta}`。`ads[]` 每条 = `campaign_id, spend(USD), orders, first_day, last_day`（`analytics.ad_daily` ∪ `analytics.ad_today` 聚合（`spu_roi.py::_SQL_ROI_AD` 直读））。**不含 `campaign_name`**——v8 拍板不追（同步数据无名称字段）。
+Response `{spu_pk, ads[], meta}`。`ads[]` 每条 = `campaign_id, spend(USD), orders, first_day, last_day`（`plugin.ad_daily` ∪ `plugin.ad_today` 聚合（`spu_roi.py::_SQL_ROI_AD` 直读））。**不含 `campaign_name`**——v8 拍板不追（同步数据无名称字段）。
 
 #### 4 端点共享约定
 
@@ -604,7 +604,7 @@ Errors:
 
 单 dump 写入（dump architecture，2026-09-02 起；旧 `/batches` 批量协议
 已下线 404）。一次请求 = 一次完整 HTTP 交换的原始落库
-（`analytics.ad_raw_log`，原始请求日志）。plugin **严禁批量**：一页一
+（`plugin.ad_raw_log`，原始请求日志）。plugin **严禁批量**：一页一
 dump、一页一发，永不把 N 页 buffer 成一批（见
 `analytics/dump-architecture.md` D2）。
 
@@ -667,7 +667,7 @@ Success response (`code: 0`):
 `analytics.ad_sync_audit` 一行元数据审计（与主写同事务；30s today 常规刷新不写）。~~
 **（2026-09-11 起失效：v3 遗留对象已由 migration 0020 删除）**：v4 逐日协议不做取代审计 ——
 `ad_daily` 每日一行 `ON CONFLICT DO NOTHING` 写入后不可变，本就没有"被取代"概念；
-`ad_today` 用 `ON CONFLICT DO UPDATE` 原地刷新，跨天由 `analytics.solidify` 固化后删除。
+`ad_today` 用 `ON CONFLICT DO UPDATE` 原地刷新，跨天由 `plugin.ad_merge_today2daily` job 固化后删除。
 
 Errors:
 

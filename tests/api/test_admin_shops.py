@@ -58,7 +58,7 @@ def _cleanup_registered_shops(db_engine):
         )
         conn.execute(
             text(
-                "DELETE FROM analytics.ad_daily WHERE seller_id IN (:a, :b)"
+                "DELETE FROM plugin.ad_daily WHERE seller_id IN (:a, :b)"
             ).bindparams(a=SHOP_A, b=SHOP_B)
         )
 
@@ -252,7 +252,7 @@ def _insert_ad_daily(db_engine, seller_id: str) -> None:
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO analytics.ad_daily "
+                "INSERT INTO plugin.ad_daily "
                 "(seller_id, advertiser_id, campaign_id, product_id, "
                 " endpoint, day) "
                 "VALUES (:sid, 'adv1', 'c1', 'p1', "

@@ -36,10 +36,10 @@ ENDPOINT = "/oec_ads/shopping/v1/oec/stat/post_product_list"
 DAY = "2026-08-23"
 
 _CLEANUP_SQL = (
-    "DELETE FROM analytics.ad_daily WHERE seller_id = :s",
-    "DELETE FROM analytics.ad_today WHERE seller_id = :s",
-    "DELETE FROM analytics.ad_monthly WHERE seller_id = :s",
-    "DELETE FROM analytics.ad_raw_log WHERE seller_id = :s",
+    "DELETE FROM plugin.ad_daily WHERE seller_id = :s",
+    "DELETE FROM plugin.ad_today WHERE seller_id = :s",
+    "DELETE FROM plugin.ad_monthly WHERE seller_id = :s",
+    "DELETE FROM plugin.ad_raw_log WHERE seller_id = :s",
 )
 
 

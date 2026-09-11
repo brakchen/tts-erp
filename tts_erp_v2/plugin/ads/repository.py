@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 SQL_COVERAGE_DAILY = """
 SELECT campaign_id, array_agg(DISTINCT day ORDER BY day) AS days
-FROM analytics.ad_daily
+FROM plugin.ad_daily
 WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
   AND endpoint = :endpoint
   AND day BETWEEN :start_day AND :end_day
@@ -28,7 +28,7 @@ LIMIT :page_size OFFSET :offset
 
 SQL_COVERAGE_DAILY_COUNT = """
 SELECT count(DISTINCT campaign_id) AS total
-FROM analytics.ad_daily
+FROM plugin.ad_daily
 WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
   AND endpoint = :endpoint
   AND day BETWEEN :start_day AND :end_day
@@ -36,7 +36,7 @@ WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
 
 SQL_COVERAGE_MONTHLY = """
 SELECT campaign_id, array_agg(DISTINCT year_month ORDER BY year_month) AS months
-FROM analytics.ad_monthly
+FROM plugin.ad_monthly
 WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
   AND endpoint = :endpoint
   AND year_month BETWEEN :start_month AND :end_month
@@ -47,14 +47,14 @@ LIMIT :page_size OFFSET :offset
 
 SQL_COVERAGE_MONTHLY_COUNT = """
 SELECT count(DISTINCT campaign_id) AS total
-FROM analytics.ad_monthly
+FROM plugin.ad_monthly
 WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
   AND endpoint = :endpoint
   AND year_month BETWEEN :start_month AND :end_month
 """
 
 SQL_UPSERT_DAILY_ROW = """
-INSERT INTO analytics.ad_daily (
+INSERT INTO plugin.ad_daily (
     seller_id, advertiser_id, campaign_id, product_id, endpoint, day,
     mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value,
     onsite_mixed_real_roi2_shopping, metrics_extra, created_at
@@ -68,7 +68,7 @@ RETURNING id
 """
 
 SQL_UPSERT_TODAY_ROW = """
-INSERT INTO analytics.ad_today (
+INSERT INTO plugin.ad_today (
     seller_id, advertiser_id, campaign_id, product_id, endpoint, day,
     mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value,
     onsite_mixed_real_roi2_shopping, metrics_extra, created_at
@@ -87,7 +87,7 @@ ON CONFLICT ON CONSTRAINT uq_ad_today DO UPDATE SET
 """
 
 SQL_UPSERT_MONTHLY_ROW = """
-INSERT INTO analytics.ad_monthly (
+INSERT INTO plugin.ad_monthly (
     seller_id, advertiser_id, campaign_id, product_id, endpoint, year_month,
     mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value,
     onsite_mixed_real_roi2_shopping, metrics_extra, created_at
@@ -101,7 +101,7 @@ RETURNING id
 """
 
 SQL_INSERT_RAW_LOG = """
-INSERT INTO analytics.ad_raw_log (
+INSERT INTO plugin.ad_raw_log (
     seller_id, advertiser_id, endpoint, campaign_id, product_id,
     kind, day, year_month,
     request_url, request_method, request_body, response_status, response_body,
@@ -115,7 +115,7 @@ INSERT INTO analytics.ad_raw_log (
 """
 
 SQL_INSERT_PLUGIN_LOG = """
-INSERT INTO analytics.plugin_logs (
+INSERT INTO plugin.plugin_logs (
     seller_id, advertiser_id, plugin_version, level, message, context, occurred_at
 ) VALUES (
     :seller_id, :advertiser_id, :plugin_version, :level, :message,
@@ -628,7 +628,7 @@ def upsert_monthly_rows(
 # ─── Solidify (ad_today → ad_daily) ─────────────────────────────────
 
 
-def solidify_yesterday_scope_pairs(
+def list_merge_scope_pairs(
     sess: Session,
     yesterday: date,
 ) -> list[tuple[str, str]]:
@@ -637,7 +637,7 @@ def solidify_yesterday_scope_pairs(
     rows = sess.execute(
         text("""
             SELECT DISTINCT seller_id, advertiser_id
-            FROM analytics.ad_today
+            FROM plugin.ad_today
             WHERE day = :yesterday
             ORDER BY seller_id, advertiser_id
         """),
@@ -646,18 +646,18 @@ def solidify_yesterday_scope_pairs(
     return [(row[0], row[1]) for row in rows]
 
 
-def solidify_yesterday(
+def merge_today_into_daily(
     sess: Session,
     *,
     seller_id: str,
     advertiser_id: str,
     yesterday: date,
 ) -> None:
-    """ad_today 昨天数据 → ad_daily（固化），然后清空 ad_today。"""
+    """ad_today 昨天数据 → ad_daily（跨天合并），然后清空 ad_today。"""
     # pi-lens-ignore: python-sql-injection
     sess.execute(
         text("""
-            INSERT INTO analytics.ad_daily (
+            INSERT INTO plugin.ad_daily (
                 seller_id, advertiser_id, campaign_id, product_id, endpoint, day,
                 mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value,
                 onsite_mixed_real_roi2_shopping, metrics_extra, created_at
@@ -665,7 +665,7 @@ def solidify_yesterday(
             SELECT seller_id, advertiser_id, campaign_id, product_id, endpoint, day,
                    mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value,
                    onsite_mixed_real_roi2_shopping, metrics_extra, created_at
-            FROM analytics.ad_today
+            FROM plugin.ad_today
             WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
               AND day = :yesterday
             ON CONFLICT ON CONSTRAINT uq_ad_daily DO NOTHING
@@ -680,7 +680,7 @@ def solidify_yesterday(
     # pi-lens-ignore: python-sql-injection
     sess.execute(
         text("""
-            DELETE FROM analytics.ad_today
+            DELETE FROM plugin.ad_today
             WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
               AND day = :yesterday
         """),
@@ -731,8 +731,8 @@ __all__ = [
     "get_coverage_monthly",
     "insert_plugin_logs",
     "is_product_level_endpoint",
-    "solidify_yesterday",
-    "solidify_yesterday_scope_pairs",
+    "merge_today_into_daily",
+    "list_merge_scope_pairs",
     "upsert_daily_rows",
     "upsert_monthly_rows",
     "upsert_today_rows",

@@ -1,5 +1,29 @@
 # tts-erp CHANGELOG
 
+## 2026-09-11 — 插件数据收敛到 `plugin` schema（chrome_sync / analytics → plugin）
+
+**背景**：广告 dump 没有 server-side 同步（JOBS 里无 ad job），唯一入口是 Chrome 插件
+POST dumps；但 `api-managed` 守卫（commit `ae843a1`）把 `data_source='api'` 店铺的 dumps
+**全域静默吞掉** → 广告数据永远进不来。而守卫要防的「API/插件双写」在广告侧根本不存在。
+
+**方向**：api 同步数据（`commerce.*` 等）与插件 dump 数据（`plugin.*`）按 schema
+**物理隔离**，不再需要判定来源；`commerce.shops.data_source` 随之删除（lane 4）。
+
+- **migration `0023_chrome_sync_to_plugin`**：`ALTER SCHEMA chrome_sync RENAME TO plugin`
+  —— 7 张订单/物流/结算表 + 6 个 FK + 7 个 IDENTITY 序列随迁；数据一行不动。
+- **migration `0024_analytics_to_plugin`**：`ALTER TABLE analytics.{ad_today,ad_daily,
+  ad_monthly,ad_raw_log,plugin_logs} SET SCHEMA plugin` + `DROP SCHEMA analytics`
+  —— 广告/日志 5 张表并入同一 namespace，仍是零行级 DML。
+- **代码/包**：`tts_erp_v2/chrome_sync/` → `plugin/orders/`；`analytics/{domain,repository}.py`
+  → `plugin/ads/`；`db/models/{chrome_sync,analytics}.py` 合并为 `db/models/plugin.py`（12 表）。
+  ROI 看板读侧 `analytics/spu_roi.py` 留原位，只改 SQL 的 schema 名。
+- **job 改名**：`analytics.solidify` → **`plugin.ad_merge_today2daily`**
+  （模块 `jobs/ad_merge_today2daily.py`；`solidify_yesterday` → `merge_today_into_daily`）。
+- **工具**：`scripts/regen_schema.py` 新增 `--db-url`/`TTS_ERP_DB_URL` 覆盖（原硬编码读
+  `.env`=prod），使 `schema_tts_erp.sql` 可在不碰 prod 的前提下从 test 库再生成；
+  同时修掉 `\unrestrict` 随机 token（修后 regen 幂等）。
+- 端点路径**不变**（`/v2/analytics/sync/*` 仍是插件侧 stable 契约）。
+
 ## 2026-09-11 — 删除 v3 遗留对象（migration 0020）
 
 - **DROP** `analytics.ad_product_links`（视图）、`analytics.ad_raw`、
