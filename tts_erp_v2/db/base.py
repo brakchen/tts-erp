@@ -28,7 +28,7 @@ SCHEMAS: tuple[str, ...] = (
     "reporting",
     "security",
     "analytics",
-    "chrome_sync",
+    "plugin",
 )
 
 

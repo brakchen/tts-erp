@@ -1,4 +1,4 @@
-"""chrome_sync.* — Chrome 扩展订单/物流/结算数据同步。
+"""plugin.* — Chrome 扩展订单/物流/结算数据同步。
 
 7 张表：raw_log + orders + order_lines + shipments + tracking_events
          + settlements + settlement_details。
@@ -42,7 +42,7 @@ class RawLog(Base):
         Index("ix_raw_log_domain_shop", "domain", "shop_id"),
         Index("ix_raw_log_created", "created_at"),
         Index("ix_raw_log_endpoint", "endpoint"),
-        {"schema": "chrome_sync"},
+        {"schema": "plugin"},
     )
 
     id: Mapped[int] = mapped_column(
@@ -79,7 +79,7 @@ class ChromeOrder(Base):
         UniqueConstraint("shop_id", "order_id", name="uq_orders_shop_order"),
         Index("ix_orders_shop", "shop_id"),
         Index("ix_orders_status", "main_order_status"),
-        {"schema": "chrome_sync"},
+        {"schema": "plugin"},
     )
 
     id: Mapped[int] = mapped_column(
@@ -88,7 +88,7 @@ class ChromeOrder(Base):
         server_default=text("generate_always_as_identity()"),
     )
     log_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("chrome_sync.raw_log.id"), nullable=False
+        BigInteger, ForeignKey("plugin.raw_log.id"), nullable=False
     )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     order_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -122,7 +122,7 @@ class ChromeOrderLine(Base):
         UniqueConstraint(
             "shop_id", "order_id", "sku_id", name="uq_order_lines_order_sku"
         ),
-        {"schema": "chrome_sync"},
+        {"schema": "plugin"},
     )
 
     id: Mapped[int] = mapped_column(
@@ -131,7 +131,7 @@ class ChromeOrderLine(Base):
         server_default=text("generate_always_as_identity()"),
     )
     log_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("chrome_sync.raw_log.id"), nullable=False
+        BigInteger, ForeignKey("plugin.raw_log.id"), nullable=False
     )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     order_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -161,7 +161,7 @@ class ChromeShipment(Base):
     __table_args__ = (
         UniqueConstraint("shop_id", "package_id", name="uq_shipments_shop_pkg"),
         Index("ix_shipments_order", "shop_id", "order_id"),
-        {"schema": "chrome_sync"},
+        {"schema": "plugin"},
     )
 
     id: Mapped[int] = mapped_column(
@@ -171,7 +171,7 @@ class ChromeShipment(Base):
     )
     log_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("chrome_sync.raw_log.id"),
+        ForeignKey("plugin.raw_log.id"),
         nullable=False,
     )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -201,7 +201,7 @@ class ChromeTrackingEvent(Base):
             "event_key",
             name="uq_tracking_events_pkg_key",
         ),
-        {"schema": "chrome_sync"},
+        {"schema": "plugin"},
     )
 
     id: Mapped[int] = mapped_column(
@@ -211,7 +211,7 @@ class ChromeTrackingEvent(Base):
     )
     log_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("chrome_sync.raw_log.id"),
+        ForeignKey("plugin.raw_log.id"),
         nullable=False,
     )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -240,7 +240,7 @@ class ChromeSettlement(Base):
             name="uq_settlements_shop_stmt",
         ),
         Index("ix_settlements_shop", "shop_id"),
-        {"schema": "chrome_sync"},
+        {"schema": "plugin"},
     )
 
     id: Mapped[int] = mapped_column(
@@ -250,7 +250,7 @@ class ChromeSettlement(Base):
     )
     log_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("chrome_sync.raw_log.id"),
+        ForeignKey("plugin.raw_log.id"),
         nullable=False,
     )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -292,7 +292,7 @@ class ChromeSettlementDetail(Base):
             "shop_id", "sku_detail_id", name="uq_settlement_details_shop_sku"
         ),
         Index("ix_settlement_details_stmt", "shop_id", "statement_id"),
-        {"schema": "chrome_sync"},
+        {"schema": "plugin"},
     )
 
     id: Mapped[int] = mapped_column(
@@ -302,7 +302,7 @@ class ChromeSettlementDetail(Base):
     )
     log_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("chrome_sync.raw_log.id"),
+        ForeignKey("plugin.raw_log.id"),
         nullable=False,
     )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)

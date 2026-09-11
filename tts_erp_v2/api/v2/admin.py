@@ -192,16 +192,16 @@ _ANALYTICS_TABLES = [
     "analytics.plugin_logs",
 ]
 
-_CHROME_SYNC_CHILD_TABLES = [
-    "chrome_sync.order_lines",
-    "chrome_sync.orders",
-    "chrome_sync.shipments",
-    "chrome_sync.tracking_events",
-    "chrome_sync.settlement_details",
-    "chrome_sync.settlements",
+_PLUGIN_ORDER_CHILD_TABLES = [
+    "plugin.order_lines",
+    "plugin.orders",
+    "plugin.shipments",
+    "plugin.tracking_events",
+    "plugin.settlement_details",
+    "plugin.settlements",
 ]
 
-_CHROME_SYNC_RAW_LOG = "chrome_sync.raw_log"
+_PLUGIN_ORDER_RAW_LOG = "plugin.raw_log"
 
 
 @router.post(
@@ -209,11 +209,11 @@ _CHROME_SYNC_RAW_LOG = "chrome_sync.raw_log"
     summary="一键清除所有插件同步数据（admin only）",
 )
 def purge_plugin_data(request: Request) -> dict[str, Any]:
-    """Delete all Chrome extension synced data from analytics and chrome_sync schemas.
+    """Delete all Chrome extension synced data from analytics and plugin schemas.
 
     **Readwrite role required.** Clears 12 tables in a single transaction:
     - analytics: ad_today, ad_daily, ad_monthly, raw_log, plugin_logs
-    - chrome_sync: orders, order_lines, shipments, tracking_events,
+    - plugin: orders, order_lines, shipments, tracking_events,
       settlements, settlement_details, raw_log
 
     Returns per-table row counts before deletion.
@@ -230,7 +230,7 @@ def purge_plugin_data(request: Request) -> dict[str, Any]:
     with engine.begin() as conn:
         # Count rows first (for the response)
         all_tables = (
-            _ANALYTICS_TABLES + _CHROME_SYNC_CHILD_TABLES + [_CHROME_SYNC_RAW_LOG]
+            _ANALYTICS_TABLES + _PLUGIN_ORDER_CHILD_TABLES + [_PLUGIN_ORDER_RAW_LOG]
         )
         for table in all_tables:
             try:
@@ -243,7 +243,7 @@ def purge_plugin_data(request: Request) -> dict[str, Any]:
 
         # Delete in FK-safe order: children first, then parent
         for table in (
-            _CHROME_SYNC_CHILD_TABLES + [_CHROME_SYNC_RAW_LOG] + _ANALYTICS_TABLES
+            _PLUGIN_ORDER_CHILD_TABLES + [_PLUGIN_ORDER_RAW_LOG] + _ANALYTICS_TABLES
         ):
             if counts.get(table, 0) > 0:
                 conn.execute(
@@ -276,7 +276,7 @@ def purge_plugin_data(request: Request) -> dict[str, Any]:
 #     access, the OAuth callback's ``on_conflict_do_update`` backfills
 #     credential_id and flips ``data_source`` to 'api'.
 #   * data sync does NOT depend on registration: the plugin dumps
-#     endpoints write chrome_sync.*/analytics.* regardless.
+#     endpoints write plugin.*/analytics.* regardless.
 #   * registration only affects query-time association.
 
 # Non-production shop-id prefixes that must never be registered (mirrors
@@ -398,11 +398,11 @@ def register_shop(
 
 
 # Shop ids seen in plugin-synced data but with no commerce.shops row.
-# Sources: chrome_sync.raw_log.shop_id (order/logistics/settlement dumps)
+# Sources: plugin.raw_log.shop_id (order/logistics/settlement dumps)
 # + analytics seller_id (ad_today/ad_daily/plugin_logs).
 _SQL_UNREGISTERED_SHOPS = text(
     "SELECT shop_id, source FROM ("
-    "  SELECT shop_id, 'chrome_sync' AS source FROM chrome_sync.raw_log GROUP BY shop_id"
+    "  SELECT shop_id, 'plugin' AS source FROM plugin.raw_log GROUP BY shop_id"
     "  UNION"
     "  SELECT seller_id, 'analytics' FROM analytics.ad_today GROUP BY seller_id"
     "  UNION"
@@ -433,7 +433,7 @@ class UnregisteredShopsResponse(BaseModel):
     summary="列出插件数据里出现但未注册的店铺（readwrite+）",
 )
 def list_unregistered_shops(request: Request) -> UnregisteredShopsResponse:
-    """Shop ids present in plugin-synced tables (chrome_sync / analytics)
+    """Shop ids present in plugin-synced tables (plugin / analytics)
     but missing from ``commerce.shops`` — the candidate list for the
     manual registration page.
     """

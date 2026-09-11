@@ -214,8 +214,12 @@ tts_erp_v2/
 ├── jobs/                # 同步 job 实现：tiktok/*、miaoshou/*、
 │                        #   reporting（cost_snapshots 6h / profit_daily 1h）、token_refresh（6h）、runner
 ├── sync_worker/         # APScheduler；JOBS 注册表 + 调度状态（顶部 NOTE，以它为准）
-├── db/models/           # 10 schema SQLAlchemy 模型 — analytics 现为 ad_today/ad_daily/ad_monthly/ad_raw_log/plugin_logs
+├── db/models/           # 10 schema SQLAlchemy 模型 — analytics 现为 ad_today/ad_daily/ad_monthly/ad_raw_log/plugin_logs；
+│                        #   plugin.py 为插件 dumps 的 7 张表（orders/order_lines/shipments/tracking_events/
+│                        #   settlements/settlement_details/raw_log；原 chrome_sync.py）
 │                        #   （v3 的 ad_raw + ad_sync_audit 表 + ad_product_links 视图已于 2026-09-11 由 migration 0020 删除）
+├── plugin/orders/       # 插件 dump 数据访问层：解析 TikTok 响应 + upsert 到 plugin.*
+│                        #   （订单/物流/结算；原 tts_erp_v2/chrome_sync/）
 ├── analytics/ linkage/ reporting/ storage/
 └── static/
 

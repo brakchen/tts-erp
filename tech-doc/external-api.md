@@ -260,7 +260,7 @@ curl -sS -H "X-API-Key: $TTS_ERP_RO_KEY" \
 | Endpoint | Role | Notes |
 | --- | --- | --- |
 | `POST /v2/admin/shops/register` | **readwrite** | 人工注册店铺。body `{"platform": "tiktok", "shop_id": str, "account_name"?: str, "region"?: str, "seller_type"?: str, "opened_date"?: "YYYY-MM-DD"}` → `{created: bool, shop: {...}}`。幂等：重复注册只补填仍为 NULL 的展示字段，**绝不覆盖** `credential_id`/`status`（店铺后续拿到 API 授权时由 OAuth callback 补 credential_id + `data_source` 翻转 `'plugin'→'api'`）。`shop_id` 必须是数字串，`TEST_`/`MOCK_` 前缀 422。注册只影响查询关联（spu-roi 店铺筛选等），数据同步不依赖注册。 |
-| `GET /v2/admin/shops/unregistered` | **readwrite** | 列出在 `chrome_sync.*` / `analytics.*` 插件数据里出现、但 `commerce.shops` 无行的 shop_id → `{candidates: [{shop_id, sources}]}`；注册页的候选清单。 |
+| `GET /v2/admin/shops/unregistered` | **readwrite** | 列出在 `plugin.*` / `analytics.*` 插件数据里出现、但 `commerce.shops` 无行的 shop_id → `{candidates: [{shop_id, sources}]}`；注册页的候选清单。 |
 
 ### SPU images (`/v2/spu-images/*`)
 
@@ -686,7 +686,7 @@ Errors:
 ### Order Sync (`/v2/order-sync/*`)
 
 Chrome 扩展订单/物流/结算数据同步端点。插件从 TikTok Seller Center 抓取的
-HTTP 响应通过此端点写入后端 chrome_sync schema。Auth requires **readwrite** role。
+HTTP 响应通过此端点写入后端 plugin schema。Auth requires **readwrite** role。
 设计文档：`tech-doc/chrome-ext-order-sync-design.md`。
 
 #### `POST /v2/order-sync/has-data`
@@ -764,7 +764,7 @@ Body（≤ 2 MB）：
 ```
 
 - `status` ∈ `{inserted, parse_error, api_managed}`
-- `api_managed`（2026-09-11 起）：店铺的 `commerce.shops.data_source='api'`（已 OAuth 授权走 API 同步）时，dump **全域静默忽略**（不写 `chrome_sync.raw_log`、不写业务表），插件应停止该店的订单/物流/结算抓取
+- `api_managed`（2026-09-11 起）：店铺的 `commerce.shops.data_source='api'`（已 OAuth 授权走 API 同步）时，dump **全域静默忽略**（不写 `plugin.raw_log`、不写业务表），插件应停止该店的订单/物流/结算抓取
 - `parse_error` 时 `rowsWritten=0`，`parseError` 字段含原因
 
 #### `GET /v2/order-sync/synced-ids`

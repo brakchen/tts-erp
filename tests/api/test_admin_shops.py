@@ -15,7 +15,7 @@ Pins the contract for ``POST /v2/admin/shops/register`` and
   - a registered-but-credential-less shop is NOT enumerated by the sync
     worker; adding a credential flips it into the API-sync set
     (the plugin → API upgrade path)
-  - ``unregistered`` lists shop ids seen in chrome_sync / analytics
+  - ``unregistered`` lists shop ids seen in plugin / analytics
     plugin data that have no ``commerce.shops`` row
   - role matrix: readwrite+; readonly → 403, anonymous → 401
 """
@@ -53,7 +53,7 @@ def _cleanup_registered_shops(db_engine):
         # pi-lens-ignore: python-sql-injection — static DDL-shaped DELETE with bound params
         conn.execute(
             text(
-                "DELETE FROM chrome_sync.raw_log WHERE shop_id IN (:a, :b)"
+                "DELETE FROM plugin.raw_log WHERE shop_id IN (:a, :b)"
             ).bindparams(a=SHOP_A, b=SHOP_B)
         )
         conn.execute(
@@ -240,7 +240,7 @@ def _insert_raw_log(db_engine, shop_id: str) -> None:
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO chrome_sync.raw_log "
+                "INSERT INTO plugin.raw_log "
                 "(domain, shop_id, endpoint, captured_at, response_body) "
                 "VALUES ('orders', :sid, '/api/fulfillment/order/list', "
                 ":ts, '{}'::jsonb)"
@@ -273,7 +273,7 @@ def test_unregistered_lists_plugin_only_shops(api_client, admin_key, db_engine):
     assert r.status_code == 200, r.text
     candidates = {c["shop_id"]: c for c in r.json()["candidates"]}
     assert SHOP_A in candidates
-    assert "chrome_sync" in candidates[SHOP_A]["sources"]
+    assert "plugin" in candidates[SHOP_A]["sources"]
     assert SHOP_B in candidates
     assert "analytics" in candidates[SHOP_B]["sources"]
 

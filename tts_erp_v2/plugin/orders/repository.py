@@ -1,4 +1,4 @@
-"""chrome_sync 数据访问层。
+"""plugin.orders 数据访问层。
 
 所有 upsert 用 ON CONFLICT DO UPDATE 实现幂等。
 has_data_bulk 批量查业务表存在性。
@@ -16,7 +16,7 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.db.models.chrome_sync import (
+from tts_erp_v2.db.models.plugin import (
     ChromeOrder,
     ChromeOrderLine,
     ChromeSettlement,

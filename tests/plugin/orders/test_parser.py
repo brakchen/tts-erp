@@ -1,4 +1,4 @@
-"""chrome_sync 解析层单测。
+"""plugin.orders 解析层单测。
 
 覆盖 parse_order_response / parse_logistics_response /
 parse_statement_list_response / parse_statement_transaction_response /
@@ -14,14 +14,14 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.chrome_sync.parser import (
+from tts_erp_v2.plugin.orders.parser import (
     flatten_fees,
     parse_logistics_response,
     parse_order_response,
     parse_statement_list_response,
     parse_statement_transaction_response,
 )
-from tts_erp_v2.chrome_sync.repository import write_raw_log
+from tts_erp_v2.plugin.orders.repository import write_raw_log
 from tts_erp_v2.db.base import get_engine
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
@@ -29,13 +29,13 @@ pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 SHOP_ID = "TEST_parser-shop"
 
 _CLEANUP_SQLS = [
-    "DELETE FROM chrome_sync.tracking_events WHERE shop_id = :s",
-    "DELETE FROM chrome_sync.order_lines WHERE shop_id = :s",
-    "DELETE FROM chrome_sync.settlement_details WHERE shop_id = :s",
-    "DELETE FROM chrome_sync.settlements WHERE shop_id = :s",
-    "DELETE FROM chrome_sync.shipments WHERE shop_id = :s",
-    "DELETE FROM chrome_sync.orders WHERE shop_id = :s",
-    "DELETE FROM chrome_sync.raw_log WHERE shop_id = :s",
+    "DELETE FROM plugin.tracking_events WHERE shop_id = :s",
+    "DELETE FROM plugin.order_lines WHERE shop_id = :s",
+    "DELETE FROM plugin.settlement_details WHERE shop_id = :s",
+    "DELETE FROM plugin.settlements WHERE shop_id = :s",
+    "DELETE FROM plugin.shipments WHERE shop_id = :s",
+    "DELETE FROM plugin.orders WHERE shop_id = :s",
+    "DELETE FROM plugin.raw_log WHERE shop_id = :s",
 ]
 
 
