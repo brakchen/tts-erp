@@ -47,8 +47,6 @@
 | fix/analytics-dump-createdat | analytics/order-sync dump 时间键统一 `createdAt`（服务端 DumpBodyIn canonical + AliasChoices 兼容旧 `capturedAt` 别名），修复插件 0.1.127 的 v4 dump 全 400「dump.capturedAt Field required」卡同步；含 4 个测试文件改名 + v4 设计文档 wire 示例 `created_at`→`createdAt` 纠正（该文档正是插件照抄写错的源头）+ 测试库补 chrome_sync schema | 本 session（接管上一位未完成诊断） | master（已提交） | tts_erp_v2/api/v2/analytics.py、tts_erp_v2/api/v2/order_sync.py、tests/api/{test_analytics_dumps_v4,test_order_sync_contract,test_analytics_v2_errors,test_analytics_v2_contract}.py、tech-doc/analytics/daily-sync-with-coverage.md | merged (124c689) | 2026-09-10T15:45Z |
 
 
-| feature/api-managed-guard | 混合态防双写守卫（2026-09-11 用户拍板：TikTok 授权整店全 scope，混合态制度上不存在）：shops.data_source='api' 后插件 dumps 全域静默忽略——POST /v2/order-sync/dumps 与 /v2/analytics/sync/dumps 返回 200 {status:'api_managed'} 不写库；守卫 helper 放 api/deps.py；未注册店铺不受影响 | 本 session | .worktrees/api-managed-guard / feature/api-managed-guard | tts_erp_v2/api/deps.py、tts_erp_v2/api/v2/order_sync.py、tts_erp_v2/api/v2/analytics.py、tests/api/test_order_sync_contract.py、tests/api/test_analytics_dumps_v4.py、tech-doc、AGENTS.md、handoff/ACTIVE.md | draft | 2026-09-11T15:20Z |
-
 > **插件侧（chrome-plugins 仓库）的 lane 不登记在本表** ——
 > 见 `chrome-plugins/handoff/ACTIVE.md`（2026-09-11 起，避免两个真相源）。
 > 本表只管 tts-erp 自己的改动面。
