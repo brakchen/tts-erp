@@ -1,9 +1,44 @@
 # handoff.md — tts-erp 跨 session 交接笔记
 
 > 🔄 **当前在途工作注册（谁在改什么 / 谁接手）：先读 `handoff/ACTIVE.md`**（AGENTS.md §12.1）
+>
+> 上次 session: 2026-09-11（PLUGIN_ARCH_CLEANUP 四 lane 全部完成 + prod 部署）
+> 上次 session 主题: 插件数据收敛到 `plugin` schema + 删 `shops.data_source` + 拆 api-managed 守卫
 
-> 上次 session: 2026-09-11（fix/analytics-v4-campaign-rows 双端对齐完成并发布）
-> 上次 session 主题: v4 dump campaign-level rows 双端对齐（服务端白名单 + plugin 端 rows=[]）
+## TL;DR (2026-09-11 PLUGIN_ARCH_CLEANUP — 插件数据物理隔离)
+
+**背景**：广告 dump 无 server-side 同步路径，但 `api-managed` 守卫（`ae843a1`）把
+`shops.data_source='api'` 店铺的插件 dumps **全域静默吞掉** → 广告数据永远进不来。
+方向：api 同步数据与插件 dump 数据**按 schema 物理隔离**，不再需要来源判定。
+
+**四个 lane（均为串行 worktree，合并后 prod 已迁移 + 重启 + 冒烟 8/8）**：
+
+| lane | 内容 | migration | prod |
+| --- | --- | --- | --- |
+| 1 | AGENTS.md §6 加「不得删除/截断 prod 库数据」红线 | — | — |
+| 2 | `chrome_sync` schema → `plugin`（含包 `plugin/orders/`） | `0023_chrome_sync_to_plugin` | ✅ |
+| 3 | `analytics` 5 表 → `plugin` + `DROP SCHEMA analytics`（含包 `plugin/ads/`、job 改名 `plugin.ad_merge_today2daily`） | `0024_analytics_to_plugin` | ✅ |
+| 4 | 删 `commerce.shops.data_source` + 拆两处 api-managed 守卫 + 删 `shop_is_api_managed()` | `0025_drop_shops_data_source` | ✅ |
+
+- `data_source` 拆卸后，插件 dumps **不再被拦截**（已用「无效 kind 探针」在 prod 验证：
+  原返回 `200 api_managed` → 现走到校验返 `400`）。
+- `backend/commerce.shops` 删列前已备份：`backups/commerce_shops_pre_0025_20260911_160458.sql`。
+- 每个 lane：test 库全量 fast **0 新 fail**（13 个 pre-existing 逐条一致）、ruff 集合一致。
+
+**❗ 遗留缺口（待用户决策，未修）**：`plugin.*` 的时间字段约定不完整 ——
+
+- `plugin.raw_log` **无 `updated_at` 列**；
+- 7 张订单表（orders / order_lines / shipments / tracking_events / settlements /
+  settlement_details / raw_log）**无 `BEFORE UPDATE` 触发器**。
+
+二者是 `chrome_sync` 时期就存在的遗留（该 schema 从未被
+`tests/db/test_time_fields_convention.py::V2_SCHEMAS` 覆盖）。lane 3 修 `V2_SCHEMAS` 时
+发现了它们，但为避免引入新 fail，**只移除已消失的 `analytics`、未加入 `plugin`**。
+需要时另开 lane 补列 + 加触发器，并把 `plugin` 加入 `V2_SCHEMAS`。
+
+**完整记录**：`handoff/PLUGIN_ARCH_CLEANUP.md`（决策快照 / 每 lane 改动面 / 实测经验）。
+
+---
 
 ## TL;DR (2026-09-11 v4 dump campaign-level rows 双端对齐)
 

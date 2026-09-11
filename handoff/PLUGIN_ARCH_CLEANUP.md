@@ -261,7 +261,7 @@ systemctl --user restart tts-erp.service tts-erp-sync.service
 | 1 · AGENTS.md 红线 | —（master 直改） | `b4a3b9e` | docs-only | — | ✅ 已 push |
 | 2 · chrome_sync→plugin | `chore/rename-chrome-sync-to-plugin` | `5bc6451` / merge `1b47f0e` | 全量 fast 13 fail = baseline，**0 新 fail** | ✅ prod 已迁 `0023` + 重启，冒烟 8/8 | ✅ 已 push，worktree 已清 |
 | 3 · analytics→plugin | `chore/move-analytics-to-plugin` | `06feb95` / merge `8791a8a` | 全量 fast 13 = baseline，**0 新 fail**；ruff 集合一致 | ✅ prod 已迁 `0024` + 重启，冒烟 8/8，读 plugin 3 端点 200 | ✅ 已 push，worktree 已清 |
-| 4 · drop data_source | `chore/drop-shops-data-source` | — | — | — | ⬜ 待开工 |
+| 4 · drop data_source | `chore/drop-shops-data-source` | `827a0f7` / merge `43bcf2a` | 全量 fast 13 = baseline，**0 新 fail**；ruff 集合一致 | ✅ prod 已迁 `0025` + 重启，冒烟 8/8，**无效 kind 探针验证守卫已拆**（原 200 api_managed → 现 400） | ✅ 已 push，worktree 已清 |
 
 ### Lane 2 实际经验（给 lane 3/4 复用）
 
@@ -283,9 +283,22 @@ systemctl --user restart tts-erp.service tts-erp-sync.service
 
 ---
 
-**当前 HEAD**：`8791a8a`（lane 3 已合并 + push）
-**prod alembic**：`0024_analytics_to_plugin`
-**test alembic**：`0024_analytics_to_plugin`
+**任务已全部完成**：master = `43bcf2a`（已 push）
+**prod alembic**：`0025_drop_shops_data_source`
+**test alembic**：`0025_drop_shops_data_source`
+
+### Lane 4 实际经验
+
+1. **删列前先备份**：`pg_dump --data-only --table=commerce.shops` →
+   `backups/commerce_shops_pre_0025_20260911_160458.sql`。
+2. **旧代码会查被删的列** —— 旧版 `shop_is_api_managed()` 读 `shops.data_source`，迁移后列没了，
+   运行中的旧进程会在处理 dumps 时报 `column does not exist`。所以必须
+   **先停服务 → 迁移 → 立即启服务**（本次采用，stderr 零报错）。
+3. **验证「守卫已拆」不需要往 prod 写数据** —— 发一个包含无效 `kind`/`domain` 的 dump：
+   守卫还在会返回 `200 api_managed`（短路），守卫已拆则走到校验返回 `400 SCHEMA_INVALID`。
+4. 测试 fixture 面比初估大（38 个文件）：除 6 个已知的，还有 `tests/jobs_tiktok/*`、
+   `tests/reporting/*`、`tests/sync_worker/*` 等直接用 `ChannelAccount(data_source="api")`
+   建店铺的。批量替换前先 `grep -rc data_source tests/` 数清。
 
 ### Lane 3 实际经验
 
