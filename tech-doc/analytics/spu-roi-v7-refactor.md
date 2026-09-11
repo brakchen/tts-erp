@@ -332,7 +332,7 @@ meta 变更：
 | **订单·物流** | 该 SPU 窗口内订单列表：订单号 / 状态 / 件数 / 行金额 / paid_at / **is_settled** / **已到海外(38301)✓** / 全损标记；每行可再展开 **tracking 时间线**（`tracking_events` 按事件时间排序，action_code + 描述）；CANCELLED 单标红、全损单标 ⚠ | `commerce.sales_orders/lines` + `fulfillment.shipments/tracking_events` |
 | **结算** | 已结算订单的**组件拆分明细**：每单一张小表（GROSS_SALES / SELLER_DISCOUNT / PLATFORM_COMMISSION / AFFILIATE_COMMISSION / SHIPPING_FEE / ACTUAL_SHIPPING_FEE / PLATFORM_DISCOUNT / CUSTOMER_REFUND / FEE / **SETTLEMENT**），VND 原值 + USD 换算；statement 时间；**SPU 分摊比例**（line_gmv/order_gmv）；未结算订单不进明细，tab 底部一行汇总「未结算 N 单，估算净收入 $X（基线 r̂ ×(1−退货率)）」（行字段计算，用户拍板 2026-09-07） | `finance.settlement_transactions/components` |
 | **售后** | case 明细（**order_id 关联**（可跳订单 tab 对号）/ 类型/状态/退款金额/原因 code+text/时间），未完结标黄 | `after_sales.cases/case_lines`（P1 原规划） |
-| **广告** | campaign×SPU 行（campaign_id/消耗/出单/窗口；无名称字段——同步数据不含，已拍板不追） | `analytics.ad_daily` ∪ `ad_today`（2026-09-11 起直读；原规划的 `ad_product_links` 视图已由 migration 0020 删除） |
+| **广告** | campaign×SPU 行（campaign_id/消耗/出单/窗口；无名称字段——同步数据不含，已拍板不追） | `plugin.ad_daily` ∪ `ad_today`（2026-09-11 起直读；原规划的 `ad_product_links` 视图已由 migration 0020 删除） |
 
 **tab 结构统一为「顶部指标汇总区 + 下方明细记录」**（D8：主表移出的指标
 按域归位，不再做隐藏列）：

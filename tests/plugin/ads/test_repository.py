@@ -31,19 +31,19 @@ def _wipe(db_engine) -> None:
     with db_engine.begin() as conn:
         # pi-lens-ignore: python-sql-injection — literal SQL
         conn.execute(
-            text("DELETE FROM analytics.ad_daily WHERE seller_id LIKE 'TEST_%'")
+            text("DELETE FROM plugin.ad_daily WHERE seller_id LIKE 'TEST_%'")
         )
         conn.execute(
-            text("DELETE FROM analytics.ad_today WHERE seller_id LIKE 'TEST_%'")
+            text("DELETE FROM plugin.ad_today WHERE seller_id LIKE 'TEST_%'")
         )
         conn.execute(
-            text("DELETE FROM analytics.ad_monthly WHERE seller_id LIKE 'TEST_%'")
+            text("DELETE FROM plugin.ad_monthly WHERE seller_id LIKE 'TEST_%'")
         )
         conn.execute(
-            text("DELETE FROM analytics.ad_raw_log WHERE seller_id LIKE 'TEST_%'")
+            text("DELETE FROM plugin.ad_raw_log WHERE seller_id LIKE 'TEST_%'")
         )
         conn.execute(
-            text("DELETE FROM analytics.plugin_logs WHERE seller_id LIKE 'TEST_%'")
+            text("DELETE FROM plugin.plugin_logs WHERE seller_id LIKE 'TEST_%'")
         )
 
 
@@ -66,7 +66,7 @@ def _base_row(**overrides) -> dict:
 
 def test_upsert_daily_rows_inserts(db_session):
     """v4 daily rows 写入 ad_daily + ad_raw_log。"""
-    from tts_erp_v2.analytics import repository
+    from tts_erp_v2.plugin.ads import repository
 
     rows = [_base_row()]
     inserted = repository.upsert_daily_rows(
@@ -89,7 +89,7 @@ def test_upsert_daily_rows_inserts(db_session):
 
     # Verify ad_daily
     count = db_session.execute(
-        text("SELECT count(*) FROM analytics.ad_daily WHERE seller_id = :s"),
+        text("SELECT count(*) FROM plugin.ad_daily WHERE seller_id = :s"),
         {"s": _SELLER},
     ).scalar()
     assert count == 1
@@ -97,7 +97,7 @@ def test_upsert_daily_rows_inserts(db_session):
     # Verify ad_raw_log
     log_count = db_session.execute(
         text(
-            "SELECT count(*) FROM analytics.ad_raw_log WHERE seller_id = :s AND kind = 'daily'"
+            "SELECT count(*) FROM plugin.ad_raw_log WHERE seller_id = :s AND kind = 'daily'"
         ),
         {"s": _SELLER},
     ).scalar()
@@ -106,7 +106,7 @@ def test_upsert_daily_rows_inserts(db_session):
 
 def test_upsert_daily_rows_idempotent(db_session):
     """v4 daily rows 幂等（ON CONFLICT DO NOTHING）。"""
-    from tts_erp_v2.analytics import repository
+    from tts_erp_v2.plugin.ads import repository
 
     rows = [_base_row()]
     r1 = repository.upsert_daily_rows(
@@ -145,7 +145,7 @@ def test_upsert_daily_rows_idempotent(db_session):
     assert r2 == 0  # duplicate → nothing inserted
 
     count = db_session.execute(
-        text("SELECT count(*) FROM analytics.ad_daily WHERE seller_id = :s"),
+        text("SELECT count(*) FROM plugin.ad_daily WHERE seller_id = :s"),
         {"s": _SELLER},
     ).scalar()
     assert count == 1
@@ -158,7 +158,7 @@ def test_upsert_daily_rows_idempotent(db_session):
 
 def test_upsert_today_rows_upserts(db_session):
     """v4 today rows 写入 ad_today（ON CONFLICT DO UPDATE）。"""
-    from tts_erp_v2.analytics import repository
+    from tts_erp_v2.plugin.ads import repository
 
     rows = [_base_row()]
     repository.upsert_today_rows(
@@ -198,7 +198,7 @@ def test_upsert_today_rows_upserts(db_session):
     )
 
     count = db_session.execute(
-        text("SELECT count(*) FROM analytics.ad_today WHERE seller_id = :s"),
+        text("SELECT count(*) FROM plugin.ad_today WHERE seller_id = :s"),
         {"s": _SELLER},
     ).scalar()
     assert count == 1  # still one row (upsert)
@@ -211,7 +211,7 @@ def test_upsert_today_rows_upserts(db_session):
 
 def test_upsert_monthly_rows_inserts(db_session):
     """v4 monthly rows 写入 ad_monthly。"""
-    from tts_erp_v2.analytics import repository
+    from tts_erp_v2.plugin.ads import repository
 
     rows = [_base_row()]
     inserted = repository.upsert_monthly_rows(
@@ -233,7 +233,7 @@ def test_upsert_monthly_rows_inserts(db_session):
     assert inserted == 1
 
     count = db_session.execute(
-        text("SELECT count(*) FROM analytics.ad_monthly WHERE seller_id = :s"),
+        text("SELECT count(*) FROM plugin.ad_monthly WHERE seller_id = :s"),
         {"s": _SELLER},
     ).scalar()
     assert count == 1
@@ -246,7 +246,7 @@ def test_upsert_monthly_rows_inserts(db_session):
 
 def test_get_coverage_daily_returns_map(db_session):
     """coverage daily 查询返回 {campaign_id: [days]}。"""
-    from tts_erp_v2.analytics import repository
+    from tts_erp_v2.plugin.ads import repository
 
     repository.upsert_daily_rows(
         db_session,
@@ -296,7 +296,7 @@ def test_get_coverage_daily_returns_map(db_session):
 
 def test_get_coverage_monthly_returns_map(db_session):
     """coverage monthly 查询返回 {campaign_id: [months]}。"""
-    from tts_erp_v2.analytics import repository
+    from tts_erp_v2.plugin.ads import repository
 
     repository.upsert_monthly_rows(
         db_session,
@@ -332,9 +332,9 @@ def test_get_coverage_monthly_returns_map(db_session):
 # ---------------------------------------------------------------------------
 
 
-def test_solidify_yesterday_moves_today_to_daily(db_session):
+def test_merge_today_into_daily_moves_today_to_daily(db_session):
     """solidify: ad_today 昨天 → ad_daily，然后清空 ad_today。"""
-    from tts_erp_v2.analytics import repository
+    from tts_erp_v2.plugin.ads import repository
 
     # Insert today row for yesterday
     repository.upsert_today_rows(
@@ -355,12 +355,12 @@ def test_solidify_yesterday_moves_today_to_daily(db_session):
     )
 
     # Solidify
-    pairs = repository.solidify_yesterday_scope_pairs(
+    pairs = repository.list_merge_scope_pairs(
         db_session, yesterday=date(2026, 9, 9)
     )
     assert (_SELLER, _ADV) in pairs
 
-    repository.solidify_yesterday(
+    repository.merge_today_into_daily(
         db_session,
         seller_id=_SELLER,
         advertiser_id=_ADV,
@@ -370,7 +370,7 @@ def test_solidify_yesterday_moves_today_to_daily(db_session):
     # ad_today should be empty for that day
     today_count = db_session.execute(
         text(
-            "SELECT count(*) FROM analytics.ad_today WHERE seller_id = :s AND day = :d"
+            "SELECT count(*) FROM plugin.ad_today WHERE seller_id = :s AND day = :d"
         ),
         {"s": _SELLER, "d": date(2026, 9, 9)},
     ).scalar()
@@ -379,7 +379,7 @@ def test_solidify_yesterday_moves_today_to_daily(db_session):
     # ad_daily should have the row
     daily_count = db_session.execute(
         text(
-            "SELECT count(*) FROM analytics.ad_daily WHERE seller_id = :s AND day = :d"
+            "SELECT count(*) FROM plugin.ad_daily WHERE seller_id = :s AND day = :d"
         ),
         {"s": _SELLER, "d": date(2026, 9, 9)},
     ).scalar()
@@ -407,7 +407,7 @@ def _change_event_rows() -> list[dict]:
 
 def test_is_product_level_endpoint():
     """白名单区分 product-level 与 campaign-level endpoint。"""
-    from tts_erp_v2.analytics import repository
+    from tts_erp_v2.plugin.ads import repository
 
     assert repository.is_product_level_endpoint(
         "/oec_ads/shopping/v1/oec/stat/post_product_list"
@@ -422,7 +422,7 @@ def test_is_product_level_endpoint():
 
 def test_upsert_daily_rows_campaign_level_only_archives(db_session):
     """campaign-level endpoint:ad_daily 不写,ad_raw_log 写 1 行,product_id NULL。"""
-    from tts_erp_v2.analytics import repository
+    from tts_erp_v2.plugin.ads import repository
 
     rows = _change_event_rows()
     inserted = repository.upsert_daily_rows(
@@ -448,7 +448,7 @@ def test_upsert_daily_rows_campaign_level_only_archives(db_session):
 
     # ad_daily 不写
     daily_count = db_session.execute(
-        text("SELECT count(*) FROM analytics.ad_daily WHERE seller_id = :s"),
+        text("SELECT count(*) FROM plugin.ad_daily WHERE seller_id = :s"),
         {"s": _SELLER},
     ).scalar()
     assert daily_count == 0
@@ -457,7 +457,7 @@ def test_upsert_daily_rows_campaign_level_only_archives(db_session):
     raw_row = db_session.execute(
         text(
             "SELECT product_id, kind, endpoint, campaign_id, response_body::text "
-            "FROM analytics.ad_raw_log WHERE seller_id = :s"
+            "FROM plugin.ad_raw_log WHERE seller_id = :s"
         ),
         {"s": _SELLER},
     ).first()
@@ -474,7 +474,7 @@ def test_upsert_daily_rows_campaign_level_only_archives(db_session):
 
 def test_upsert_today_rows_campaign_level_only_archives(db_session):
     """campaign-level + kind=today:ad_today 不写,ad_raw_log 写 1 行。"""
-    from tts_erp_v2.analytics import repository
+    from tts_erp_v2.plugin.ads import repository
 
     inserted = repository.upsert_today_rows(
         db_session,
@@ -495,14 +495,14 @@ def test_upsert_today_rows_campaign_level_only_archives(db_session):
     assert inserted == 0
 
     today_count = db_session.execute(
-        text("SELECT count(*) FROM analytics.ad_today WHERE seller_id = :s"),
+        text("SELECT count(*) FROM plugin.ad_today WHERE seller_id = :s"),
         {"s": _SELLER},
     ).scalar()
     assert today_count == 0
 
     raw_count = db_session.execute(
         text(
-            "SELECT count(*) FROM analytics.ad_raw_log "
+            "SELECT count(*) FROM plugin.ad_raw_log "
             "WHERE seller_id = :s AND kind = 'today'"
         ),
         {"s": _SELLER},
@@ -512,7 +512,7 @@ def test_upsert_today_rows_campaign_level_only_archives(db_session):
 
 def test_upsert_monthly_rows_campaign_level_only_archives(db_session):
     """campaign-level + kind=monthly:ad_monthly 不写,ad_raw_log 写 1 行。"""
-    from tts_erp_v2.analytics import repository
+    from tts_erp_v2.plugin.ads import repository
 
     inserted = repository.upsert_monthly_rows(
         db_session,
@@ -533,14 +533,14 @@ def test_upsert_monthly_rows_campaign_level_only_archives(db_session):
     assert inserted == 0
 
     monthly_count = db_session.execute(
-        text("SELECT count(*) FROM analytics.ad_monthly WHERE seller_id = :s"),
+        text("SELECT count(*) FROM plugin.ad_monthly WHERE seller_id = :s"),
         {"s": _SELLER},
     ).scalar()
     assert monthly_count == 0
 
     raw_count = db_session.execute(
         text(
-            "SELECT count(*) FROM analytics.ad_raw_log "
+            "SELECT count(*) FROM plugin.ad_raw_log "
             "WHERE seller_id = :s AND kind = 'monthly' AND year_month = :ym"
         ),
         {"s": _SELLER, "ym": "2026-08"},

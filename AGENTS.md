@@ -6,7 +6,7 @@
 ## 1. Stack（项目栈）
 
 Python 3.14 · FastAPI + uvicorn（`:9877`）· SQLAlchemy 2 + psycopg3 · PostgreSQL 容器（`:5432`，
-10 schema / 37 表 + 2 view（v1 `public.*` 业务表 2026-09-05 归档删除；analytics 4 张僵尸表 migration 0007 drop）· APScheduler（独立 sync-worker 进程）· MinIO · Fernet 加密 · systemd user units。
+11 schema / 51 表 + 1 view（v1 `public.*` 业务表 2026-09-05 归档删除；analytics 4 张僵尸表 migration 0007 drop；2026-09-11 `chrome_sync`→`plugin`、`analytics` 并入 `plugin`）· APScheduler（独立 sync-worker 进程）· MinIO · Fernet 加密 · systemd user units。
 
 - **测试 DB 隔离（2026-09-07）**：tests 跑在专用 `tts_erp_v3_test` 库；prod `tts_erp` 仅 systemd API + 人工 dev
   连接，永不被测试污染。`.env.test`（gitignored）= `.env` 的 dbname 替身；`scripts/test.sh` 启动时 source
@@ -161,7 +161,7 @@ curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" \
   的运行进程会报 `relation does not exist`
 - ❌ 不要直连 v1 `oauth_tokens` 表（库已 DROP，备份 `backups/oauth_receiver_v1_legacy_*.sql.gz`）/
   不要自己拿 Fernet key 解密 `integration.credentials` —— 凭证只能走 `proxy.token_service`（见 §4.1）
-- ❌ 不要重建 / 依赖 `public.*` v1 遗留表（v2 只读 10 schema；v1 业务表 2026-09-05 已 DROP，归档在
+- ❌ 不要重建 / 依赖 `public.*` v1 遗留表（v2 只读 11 schema；v1 业务表 2026-09-05 已 DROP，归档在
   `/home/schan/backups/tts_erp_public_v1_legacy_*.sql.gz`）。`public` schema 现仅存 v2 基础设施：41 个
   updated_at 触发器依赖的 `public.fn_touch_updated_at()`——删它 = 全库 updated_at 停摆，动之前先确认
 - ❌ 不要接写端点：`POST /returns|/cancellations`（会在真实店铺创建退货/取消单）、
@@ -208,19 +208,23 @@ tts_erp_v2/
 ├── api/v2/              # 路由：commerce / linkage / reporting / pages / spu_images / auth /
 │                        #   llm_context / admin（rate-limit / purge-plugin-data / shops 注册：插件店铺人工登记进
 │                        #   commerce.shops，data_source='plugin'（枚举 api|plugin），仅服务查询关联，readwrite 角色） /
-│                        #   analytics（Chrome 扩展 ingest）
+│                        #   analytics（插件广告 dump ingest：/v2/analytics/sync/* → 落 plugin.* schema）
 ├── middleware/          # auth.py（角色矩阵）、session_auth.py、rate_limit.py、access_log.py
 ├── proxy/               # 出站层：tts_shop/（TikTok 签名+客户端）、miaoshou/、token_service.py
 ├── jobs/                # 同步 job 实现：tiktok/*、miaoshou/*、
-│                        #   reporting（cost_snapshots 6h / profit_daily 1h）、token_refresh（6h）、runner
+│                        #   reporting（cost_snapshots 6h / profit_daily 1h）、token_refresh（6h）、
+│                        #   ad_merge_today2daily（plugin.ad_merge_today2daily，ad_today→ad_daily 跨天固化）、runner
 ├── sync_worker/         # APScheduler；JOBS 注册表 + 调度状态（顶部 NOTE，以它为准）
-├── db/models/           # 10 schema SQLAlchemy 模型 — analytics 现为 ad_today/ad_daily/ad_monthly/ad_raw_log/plugin_logs；
-│                        #   plugin.py 为插件 dumps 的 7 张表（orders/order_lines/shipments/tracking_events/
-│                        #   settlements/settlement_details/raw_log；原 chrome_sync.py）
-│                        #   （v3 的 ad_raw + ad_sync_audit 表 + ad_product_links 视图已于 2026-09-11 由 migration 0020 删除）
+├── db/models/           # 11 schema SQLAlchemy 模型 — plugin.py 为插件 dump 的全部 12 张表：
+│                        #   订单/物流/结算 7 张（orders/order_lines/shipments/tracking_events/settlements/
+│                        #   settlement_details/raw_log，原 chrome_sync.py）+ 广告 5 张（ad_today/ad_daily/
+│                        #   ad_monthly/ad_raw_log/plugin_logs，原 analytics.py）
 ├── plugin/orders/       # 插件 dump 数据访问层：解析 TikTok 响应 + upsert 到 plugin.*
 │                        #   （订单/物流/结算；原 tts_erp_v2/chrome_sync/）
+├── plugin/ads/          # 插件广告 dump 数据访问层：coverage 查询 / upsert ad_* / plugin_logs
+│                        #   （原 tts_erp_v2/analytics/{domain,repository}.py）
 ├── analytics/ linkage/ reporting/ storage/
+│                        # analytics/ 只留读侧（spu_roi.py ROI 看板，读 plugin.ad_*）
 └── static/
 
 miaoshou/                # 妙手 SDK 包（独立包：client + miaoshou_signing.py；无 HTTP 路由，进程内用）

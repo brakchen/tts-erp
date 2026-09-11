@@ -222,9 +222,9 @@ JOBS: dict[str, JobSpec] = {
     # 固化到 ad_daily（coverage 查询走 ad_daily），然后清空 ad_today。
     # 每小时跑一次，空表时 early return（保护窗 UTC 00:00-01:00）。
     # Design: tech-doc/analytics/daily-sync-with-coverage.md §5.6。
-    "analytics.solidify": JobSpec(
-        job_name="analytics.solidify",
-        module_path="tts_erp_v2.jobs.analytics_solidify",
+    "plugin.ad_merge_today2daily": JobSpec(
+        job_name="plugin.ad_merge_today2daily",
+        module_path="tts_erp_v2.jobs.ad_merge_today2daily",
         interval_seconds=3600,  # 1 h — 只在昨天数据存在时执行
         is_tiktok=False,
         entrypoint="run",

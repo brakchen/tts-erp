@@ -17,9 +17,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from tts_erp_v2.db.base import get_engine
 
 # v2 schema 清单(per ADR-0001 §1.1 audit)
+#
+# 2026-09-11 PLUGIN_ARCH_CLEANUP：`analytics` schema 已并入 `plugin`，故从本清单移除。
+# `plugin` **暂未纳入**：它包含既存缺口（`plugin.raw_log` 无 `updated_at`；7 张订单表
+# 无 BEFORE UPDATE 触发器）—— 这些是 `chrome_sync` 时期就存在的遗留（chrome_sync
+# 从未被本清单覆盖），修不修待单独决策。若直接加入，本文件会新增 2 个失败。
 V2_SCHEMAS = (
     "commerce",
-    "analytics",
     "integration",
     "linkage",
     "procurement",

@@ -141,10 +141,10 @@ def _wipe(db_engine) -> None:
     with db_engine.begin() as conn:
         # pi-lens-ignore: python-sql-injection
         conn.execute(
-            text("DELETE FROM analytics.ad_daily WHERE seller_id LIKE 'TEST_%'")
+            text("DELETE FROM plugin.ad_daily WHERE seller_id LIKE 'TEST_%'")
         )
         conn.execute(
-            text("DELETE FROM analytics.ad_today WHERE seller_id LIKE 'TEST_%'")
+            text("DELETE FROM plugin.ad_today WHERE seller_id LIKE 'TEST_%'")
         )
         # pi-lens-ignore: python-sql-injection
         conn.execute(
@@ -245,7 +245,7 @@ def _seed_ad_dump(
     sess.execute(
         text(
             """
-            INSERT INTO analytics.ad_daily (
+            INSERT INTO plugin.ad_daily (
                 seller_id, advertiser_id, campaign_id, product_id, endpoint, day,
                 mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value,
                 onsite_mixed_real_roi2_shopping, metrics_extra, created_at

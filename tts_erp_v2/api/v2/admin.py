@@ -185,11 +185,11 @@ def reset_rate_limit(
 # Tables that store Chrome extension synced data. Deletion order matters:
 # child tables (FK → raw_log.id) first, then the parent raw_log.
 _ANALYTICS_TABLES = [
-    "analytics.ad_today",
-    "analytics.ad_daily",
-    "analytics.ad_monthly",
-    "analytics.ad_raw_log",
-    "analytics.plugin_logs",
+    "plugin.ad_today",
+    "plugin.ad_daily",
+    "plugin.ad_monthly",
+    "plugin.ad_raw_log",
+    "plugin.plugin_logs",
 ]
 
 _PLUGIN_ORDER_CHILD_TABLES = [
@@ -404,11 +404,11 @@ _SQL_UNREGISTERED_SHOPS = text(
     "SELECT shop_id, source FROM ("
     "  SELECT shop_id, 'plugin' AS source FROM plugin.raw_log GROUP BY shop_id"
     "  UNION"
-    "  SELECT seller_id, 'analytics' FROM analytics.ad_today GROUP BY seller_id"
+    "  SELECT seller_id, 'analytics' FROM plugin.ad_today GROUP BY seller_id"
     "  UNION"
-    "  SELECT seller_id, 'analytics' FROM analytics.ad_daily GROUP BY seller_id"
+    "  SELECT seller_id, 'analytics' FROM plugin.ad_daily GROUP BY seller_id"
     "  UNION"
-    "  SELECT seller_id, 'analytics' FROM analytics.plugin_logs GROUP BY seller_id"
+    "  SELECT seller_id, 'analytics' FROM plugin.plugin_logs GROUP BY seller_id"
     ") seen "
     "WHERE NOT EXISTS ("
     "  SELECT 1 FROM commerce.shops s "

@@ -14,12 +14,17 @@ from tts_erp_v2.db.models.after_sales import (
     CaseLine,
 )
 from tts_erp_v2.db.models.plugin import (
+    AdDaily,
+    AdMonthly,
+    AdRawLog,
+    AdToday,
     ChromeOrder,
     ChromeOrderLine,
     ChromeSettlement,
     ChromeSettlementDetail,
     ChromeShipment,
     ChromeTrackingEvent,
+    PluginLog,
     RawLog,
 )
 from tts_erp_v2.db.models.commerce import (
@@ -80,6 +85,10 @@ from tts_erp_v2.db.models.security import ApiKey
 
 __all__ = [
     "AccountLink",
+    "AdDaily",
+    "AdMonthly",
+    "AdRawLog",
+    "AdToday",
 
     "ApiKey",
     "ChromeOrder",
@@ -102,6 +111,7 @@ __all__ = [
     "LinkOverride",
     "ManualProductCost",
     "Payout",
+    "PluginLog",
     "ProcurementAccount",
     "ProcurementProduct",
     "ProcurementProductVariant",

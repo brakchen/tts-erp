@@ -1,10 +1,11 @@
-"""tts_erp_v2.analytics — Chrome extension (tk-adv-cost-monitor) analytics ingest 领域包。
+"""tts_erp_v2.analytics — 分析/看板读侧。
 
-2026-09-02 v2 化（tech-doc/analytics-v2-migration-plan.md）：从仓库根的
-``analytics_sync/`` 孤岛包迁入 v2 体系：
+本包只保留**读侧**逻辑（不写任何表）：
 
-- ``domain.py``     —— 纯类型 + 幂等键推导（协议契约代码，零逻辑平移）
-- ``repository.py`` —— 存储层（SQLAlchemy session 工厂，schema = analytics.ad_*）
+- ``spu_roi.py`` —— SPU 实际 ROI 看板 + 钻取面板（SQL 常量 + 公式实现）。
 
-HTTP handler 在 ``tts_erp_v2/api/v2/analytics.py``（/v2/analytics/sync/*）。
+插件 dump 的 **ingest**（写入）侧已于 2026-09-11 迁到
+``tts_erp_v2/plugin/ads/``（原 ``analytics/domain.py`` + ``repository.py``），
+写入目标 schema 也从 ``analytics.*`` 收敛为 ``plugin.*`` —— 插件数据与
+API 同步数据（``commerce.*`` 等）按 schema 物理隔离。
 """

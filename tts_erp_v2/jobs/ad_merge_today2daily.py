@@ -1,6 +1,6 @@
-"""Sync job: solidify_yesterday — ad_today → ad_daily daily固化。
+"""Sync job: merge_today_into_daily — ad_today → ad_daily 跨天合并。
 
-每天零点后将前一天的 ad_today 数据固化到 ad_daily，然后清空 ad_today 中
+每天零点后将前一天的 ad_today 数据并入 ad_daily，然后清空 ad_today 中
 对应日期的行。这样当天的数据在 ad_today 中持续更新（Chrome 扩展刷新），
 昨天及更早的数据归档到 ad_daily 不再变动，coverage 查询走 ad_daily。
 
@@ -21,30 +21,30 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.analytics.repository import solidify_yesterday_scope_pairs
+from tts_erp_v2.plugin.ads.repository import list_merge_scope_pairs
 from tts_erp_v2.jobs.runner import run_job
 
-log = logging.getLogger("tts_erp_v2.jobs.analytics_solidify")
+log = logging.getLogger("tts_erp_v2.jobs.ad_merge_today2daily")
 
-JOB_NAME = "analytics.solidify"
+JOB_NAME = "plugin.ad_merge_today2daily"
 
 
 def run(session: Session) -> dict[str, Any]:
-    """Solidify yesterday's ad_today data into ad_daily for all scopes.
+    """Merge yesterday's ad_today rows into ad_daily for all scopes.
 
     Returns counters for the sync_jobs row.
     """
     yesterday = (datetime.now(UTC) - timedelta(days=1)).date()
 
     with run_job(session, job_name=JOB_NAME) as job:
-        pairs = solidify_yesterday_scope_pairs(session, yesterday=yesterday)
+        pairs = list_merge_scope_pairs(session, yesterday=yesterday)
         total_pairs = len(pairs)
         success = 0
         failed = 0
 
         for seller_id, advertiser_id in pairs:
             try:
-                solidify_yesterday(
+                merge_today_into_daily(
                     session,
                     seller_id=seller_id,
                     advertiser_id=advertiser_id,
@@ -78,7 +78,7 @@ def run(session: Session) -> dict[str, Any]:
         }
 
 
-def solidify_yesterday(
+def merge_today_into_daily(
     session: Session,
     *,
     seller_id: str,
@@ -94,7 +94,7 @@ def solidify_yesterday(
     # pi-lens-ignore: python-sql-injection
     session.execute(
         text("""
-            INSERT INTO analytics.ad_daily (
+            INSERT INTO plugin.ad_daily (
                 seller_id, advertiser_id, campaign_id, product_id, endpoint, day,
                 mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value,
                 onsite_mixed_real_roi2_shopping, metrics_extra, created_at
@@ -102,7 +102,7 @@ def solidify_yesterday(
             SELECT seller_id, advertiser_id, campaign_id, product_id, endpoint, day,
                    mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value,
                    onsite_mixed_real_roi2_shopping, metrics_extra, created_at
-            FROM analytics.ad_today
+            FROM plugin.ad_today
             WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
               AND day = :yesterday
             ON CONFLICT ON CONSTRAINT uq_ad_daily DO NOTHING
@@ -117,7 +117,7 @@ def solidify_yesterday(
     # pi-lens-ignore: python-sql-injection
     session.execute(
         text("""
-            DELETE FROM analytics.ad_today
+            DELETE FROM plugin.ad_today
             WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
               AND day = :yesterday
         """),

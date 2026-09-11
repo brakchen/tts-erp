@@ -6,7 +6,7 @@
 >
 > 上游：Chrome 扩展 (tk-adv-cost-monitor) 推 `productAnalyses` / `sessionAnalyses` / `campaignChangeLogs` 三类分析 dump
 > 下游：（无，纯存储 + has-data 预检服务）
-> 存储：PostgreSQL `tts_erp` 数据库 · `analytics` schema · **5 张表**（`ad_today` / `ad_daily` / `ad_monthly` / `ad_raw_log` / `plugin_logs`）—— 2026-09-11 migration 0020 已删除 v3 遗留的 `ad_raw` / `ad_sync_audit` 表与 `ad_product_links` 视图—— 2026-09-05 reorg 后由 5 张收为 1 张（详见 `tech-doc/analytics/reorg-plan.md`），2026-09-07 v3 区间聚合再加审计表（见 `tech-doc/analytics/range-aggregate-history-sync.md`）
+> 存储：PostgreSQL `tts_erp` 数据库 · `plugin` schema · **5 张表**（`ad_today` / `ad_daily` / `ad_monthly` / `ad_raw_log` / `plugin_logs`）—— 2026-09-11 migration 0020 已删除 v3 遗留的 `ad_raw` / `ad_sync_audit` 表与 `ad_product_links` 视图—— 2026-09-05 reorg 后由 5 张收为 1 张（详见 `tech-doc/analytics/reorg-plan.md`），2026-09-07 v3 区间聚合再加审计表（见 `tech-doc/analytics/range-aggregate-history-sync.md`）
 >
 > **变更背景**：
 >
@@ -19,6 +19,11 @@
 > 现行存储是 v4 逐日协议（`ad_today` / `ad_daily` / `ad_monthly` / `ad_raw_log`），
 > 见 `tech-doc/analytics/daily-sync-with-coverage.md`。下文出现的 `ad_raw` 应读作
 > `ad_raw_log`，"视图"部分请以新文档为准。**本文件待整体重写。**
+>
+> **另外（2026-09-11 PLUGIN_ARCH_CLEANUP）**：这 5 张表所在 schema 已从 `analytics`
+> 改为 **`plugin`**（migration `0024_analytics_to_plugin`）—— 插件 dump 数据与 API
+> 同步数据（`commerce.*` 等）按 schema 物理隔离；下文所有 `analytics.` 前缀
+> 应读作 `plugin.`。
 >
 ## 是什么
 
@@ -47,7 +52,7 @@ Chrome 扩展（`tk-adv-cost-monitor`）在 TikTok 广告分析页拦截到一�
 | 工作模式              | 跟随 tts-erp v2 的 `TTS_ERP_AUTH_MODE`（默认 `enforce`）        |
 | Auth                  | tts-erp v2 `AuthMiddleware`（`security.api_keys`，Bearer / X-API-Key，60s TTL 缓存）|
 | RateLimit             | tts-erp v2 `RateLimitMiddleware`（默认 100/min/key，`TTS_ERP_RATE_LIMIT_PER_MIN` 可调）|
-| DB                    | `tts_erp` on `postgres` container :5432 · `analytics` schema（迁移 alembic 0004 + 0005）|
+| DB                    | `tts_erp` on `postgres` container :5432 · `plugin` schema（迁移 alembic 0004 + 0005；2026-09-11 migration 0024 由 `analytics` 改入 `plugin`）|
 | 测试覆盖              | `tests/api/test_analytics_v2_contract.py` + `test_analytics_v2_errors.py` + `test_endpoints_index.py` |
 | 协议版本              | `protocolVersion ∈ {1, 2}`（2 = dump 单 object 形状）            |
 | 设计文档              | `tech-doc/analytics/dump-architecture.md`（另见同目录 architecture.md / analytics-sync.md）|
@@ -77,7 +82,7 @@ Chrome 扩展（`tk-adv-cost-monitor`）在 TikTok 广告分析页拦截到一�
     └── analytics-v2-migration-plan.md # v2 化方案
 ```
 
-## PostgreSQL 表（`analytics` schema）
+## PostgreSQL 表（`plugin` schema）
 
 ```text
 database: tts_erp

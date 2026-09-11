@@ -709,7 +709,7 @@ Authorization: Bearer <key>
 | 现有组件 | 关系 |
 | --- | --- |
 | `commerce.*` / `fulfillment.*` / `finance.*` | **业务表完全隔离**。plugin 有自己独立的 orders/shipments/settlements 表，不建 FK、不共享数据、不走 sync-worker。**例外（2026-09-11）**：`commerce.shops` 是两种同步方式共享的店铺注册表——插件店铺由运营人工注册（`POST /v2/admin/shops/register`，readwrite），注册即完整店铺（status='active'，`data_source='plugin'` 枚举标识同步方式），只服务于查询关联（spu-roi 店铺筛选等），数据同步不依赖注册；店铺后续申请到 API 走 OAuth callback 后同行补 credential_id + `data_source` 翻转 'plugin'→'api'（不产生重复行）。**翻转后插件 dumps 被全域静默忽略**（两个 dumps 端点返回 200 `{status:'api_managed'}` 不写库，守卫在 `api/deps.py::shop_is_api_managed`）——TikTok 授权整店全 scope 一次下发，混合态制度上不存在 |
-| `analytics.ad_raw_log` | 模式相似（dump → 存储），但 analytics 用 raw 暂存 + sync-worker 派生；plugin 是 inline 解析 + raw_log 审计 |
+| `plugin.ad_raw_log` | 模式相似（dump → 存储），但 analytics 用 raw 暂存 + sync-worker 派生；plugin 是 inline 解析 + raw_log 审计 |
 | `integration.raw_records` | 旧 v1 遗物，存 sync-worker 拉的数据。plugin 来源完全不同（Chrome 扩展抓的） |
 | `sync_worker` | **不参与**。plugin 的解析在 API handler 内 inline 完成，不需要调度 |
 

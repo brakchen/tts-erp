@@ -96,7 +96,7 @@ _SQL_ROI_AD = text(
                d.mixed_real_cost, d.onsite_roi2_shopping_sku,
                d.onsite_roi2_shopping_value,
                cp.id AS spu_pk
-        FROM analytics.ad_daily d
+        FROM plugin.ad_daily d
         LEFT JOIN commerce.shops ca ON ca.platform = 'tiktok' AND ca.shop_id = d.seller_id
         LEFT JOIN commerce.products_spu cp ON cp.shop_pk = ca.id AND cp.spu_id = d.product_id
         WHERE d.endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'
@@ -105,7 +105,7 @@ _SQL_ROI_AD = text(
                t.mixed_real_cost, t.onsite_roi2_shopping_sku,
                t.onsite_roi2_shopping_value,
                cp.id AS spu_pk
-        FROM analytics.ad_today t
+        FROM plugin.ad_today t
         LEFT JOIN commerce.shops ca ON ca.platform = 'tiktok' AND ca.shop_id = t.seller_id
         LEFT JOIN commerce.products_spu cp ON cp.shop_pk = ca.id AND cp.spu_id = t.product_id
         WHERE t.endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'
@@ -301,10 +301,10 @@ _SQL_ROI_CATALOG = text(
 _SQL_ROI_WINDOW = text(
     "SELECT min(day) AS first_day, max(day) AS last_day "
     "FROM ("
-    "  SELECT day FROM analytics.ad_daily "
+    "  SELECT day FROM plugin.ad_daily "
     "  WHERE endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list' "
     "  UNION ALL "
-    "  SELECT day FROM analytics.ad_today "
+    "  SELECT day FROM plugin.ad_today "
     "  WHERE endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list' "
     ") combined"
 )
@@ -538,12 +538,12 @@ _SQL_DETAIL_ADS = text(
     FROM (
         SELECT campaign_id, product_id, day,
                mixed_real_cost, onsite_roi2_shopping_sku
-        FROM analytics.ad_daily
+        FROM plugin.ad_daily
         WHERE endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'
         UNION ALL
         SELECT campaign_id, product_id, day,
                mixed_real_cost, onsite_roi2_shopping_sku
-        FROM analytics.ad_today
+        FROM plugin.ad_today
         WHERE endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'
     ) combined
     WHERE product_id IN (

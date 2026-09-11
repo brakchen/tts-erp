@@ -48,10 +48,10 @@
 
 ## 1. 表设计
 
-### 1.1 `analytics.ad_today` — 今天实时表
+### 1.1 `plugin.ad_today` — 今天实时表
 
 ```sql
-CREATE TABLE analytics.ad_today (
+CREATE TABLE plugin.ad_today (
     id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 
     -- 维度
@@ -80,7 +80,7 @@ CREATE TABLE analytics.ad_today (
 );
 
 CREATE INDEX idx_ad_today_coverage
-    ON analytics.ad_today (seller_id, advertiser_id, endpoint, campaign_id, day);
+    ON plugin.ad_today (seller_id, advertiser_id, endpoint, campaign_id, day);
 ```
 
 **设计要点**：
@@ -89,10 +89,10 @@ CREATE INDEX idx_ad_today_coverage
 - 30s 刷新一次，`ON CONFLICT DO UPDATE`（覆盖）
 - 跨天时数据固化到 `ad_daily`，然后清空 `ad_today`
 
-### 1.2 `analytics.ad_daily` — 天级结构化表
+### 1.2 `plugin.ad_daily` — 天级结构化表
 
 ```sql
-CREATE TABLE analytics.ad_daily (
+CREATE TABLE plugin.ad_daily (
     id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 
     -- 维度
@@ -121,9 +121,9 @@ CREATE TABLE analytics.ad_daily (
 );
 
 CREATE INDEX idx_ad_daily_coverage
-    ON analytics.ad_daily (seller_id, advertiser_id, endpoint, campaign_id, day);
+    ON plugin.ad_daily (seller_id, advertiser_id, endpoint, campaign_id, day);
 CREATE INDEX idx_ad_daily_product_day
-    ON analytics.ad_daily (product_id, day);
+    ON plugin.ad_daily (product_id, day);
 ```
 
 **设计要点**：
@@ -134,10 +134,10 @@ CREATE INDEX idx_ad_daily_product_day
 - `metrics_extra` JSONB 放 query_list 中非核心字段，保持扩展性
 - 无 `kind` / `day_start` / `day_end` / `idempotency_key` —— 天生就是 daily，语义清晰
 
-### 1.3 `analytics.ad_monthly` — 月级结构化表
+### 1.3 `plugin.ad_monthly` — 月级结构化表
 
 ```sql
-CREATE TABLE analytics.ad_monthly (
+CREATE TABLE plugin.ad_monthly (
     id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 
     -- 维度（和 daily 结构一致，day → year_month）
@@ -166,7 +166,7 @@ CREATE TABLE analytics.ad_monthly (
 );
 
 CREATE INDEX idx_ad_monthly_coverage
-    ON analytics.ad_monthly (seller_id, advertiser_id, endpoint, campaign_id, year_month);
+    ON plugin.ad_monthly (seller_id, advertiser_id, endpoint, campaign_id, year_month);
 ```
 
 **设计要点**：
@@ -175,10 +175,10 @@ CREATE INDEX idx_ad_monthly_coverage
 - 独立同步，不依赖 daily 数据
 - TikTok API 传 `start_time=月初, end_time=月末` → 返回月级聚合数据
 
-### 1.4 `analytics.ad_raw_log` — 原始请求日志表
+### 1.4 `plugin.ad_raw_log` — 原始请求日志表
 
 ```sql
-CREATE TABLE analytics.ad_raw_log (
+CREATE TABLE plugin.ad_raw_log (
     id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 
     -- 请求标识
@@ -207,8 +207,8 @@ CREATE TABLE analytics.ad_raw_log (
     source           TEXT DEFAULT 'tiktok-shop-data-sync'
 );
 
-CREATE INDEX idx_ad_raw_log_day ON analytics.ad_raw_log (day);
-CREATE INDEX idx_ad_raw_log_request_id ON analytics.ad_raw_log (request_id);
+CREATE INDEX idx_ad_raw_log_day ON plugin.ad_raw_log (day);
+CREATE INDEX idx_ad_raw_log_request_id ON plugin.ad_raw_log (request_id);
 ```
 
 **设计要点**：
@@ -403,7 +403,7 @@ GET /v2/analytics/sync/coverage
 ```python
 SQL_COVERAGE_DAILY = """
 SELECT campaign_id, array_agg(DISTINCT day ORDER BY day) AS days
-FROM analytics.ad_daily
+FROM plugin.ad_daily
 WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
   AND endpoint = :endpoint
   AND day BETWEEN :start_day AND :end_day
@@ -412,7 +412,7 @@ GROUP BY campaign_id
 
 SQL_COVERAGE_MONTHLY = """
 SELECT campaign_id, array_agg(DISTINCT year_month ORDER BY year_month) AS months
-FROM analytics.ad_monthly
+FROM plugin.ad_monthly
 WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
   AND endpoint = :endpoint
   AND year_month BETWEEN :start_month AND :end_month
@@ -590,7 +590,7 @@ _SQL_ROI_AD = text("""
                d.mixed_real_cost, d.onsite_roi2_shopping_sku,
                d.onsite_roi2_shopping_value,
                cp.id AS spu_pk
-        FROM analytics.ad_daily d
+        FROM plugin.ad_daily d
         LEFT JOIN commerce.shops ca ON ca.platform = 'tiktok' AND ca.shop_id = d.seller_id
         LEFT JOIN commerce.products_spu cp ON cp.shop_pk = ca.id AND cp.spu_id = d.product_id
         WHERE d.endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'
@@ -599,7 +599,7 @@ _SQL_ROI_AD = text("""
                t.mixed_real_cost, t.onsite_roi2_shopping_sku,
                t.onsite_roi2_shopping_value,
                cp.id AS spu_pk
-        FROM analytics.ad_today t
+        FROM plugin.ad_today t
         LEFT JOIN commerce.shops ca ON ca.platform = 'tiktok' AND ca.shop_id = t.seller_id
         LEFT JOIN commerce.products_spu cp ON cp.shop_pk = ca.id AND cp.spu_id = t.product_id
         WHERE t.endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'
@@ -618,12 +618,12 @@ CREATE VIEW analytics.ad_product_links AS
 WITH all_rows AS (
     SELECT seller_id, advertiser_id, campaign_id, product_id, endpoint, day,
            mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value
-    FROM analytics.ad_daily
+    FROM plugin.ad_daily
     WHERE endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'
     UNION ALL
     SELECT seller_id, advertiser_id, campaign_id, product_id, endpoint, day,
            mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value
-    FROM analytics.ad_today
+    FROM plugin.ad_today
     WHERE endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'
 )
 SELECT
@@ -653,7 +653,7 @@ LEFT JOIN commerce.products_spu cp ON cp.shop_pk = ca.id AND cp.spu_id = ar.prod
 def solidify_yesterday(sess, *, seller_id, advertiser_id, yesterday):
     """ad_today 昨天数据 → ad_daily（固化），然后清空 ad_today。"""
     sess.execute(text("""
-        INSERT INTO analytics.ad_daily (
+        INSERT INTO plugin.ad_daily (
             seller_id, advertiser_id, campaign_id, product_id, endpoint, day,
             mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value,
             onsite_mixed_real_roi2_shopping, metrics_extra, created_at
@@ -661,14 +661,14 @@ def solidify_yesterday(sess, *, seller_id, advertiser_id, yesterday):
         SELECT seller_id, advertiser_id, campaign_id, product_id, endpoint, day,
                mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value,
                onsite_mixed_real_roi2_shopping, metrics_extra, created_at
-        FROM analytics.ad_today
+        FROM plugin.ad_today
         WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
           AND day = :yesterday
         ON CONFLICT ON CONSTRAINT uq_ad_daily DO NOTHING
     """), {"seller_id": seller_id, "advertiser_id": advertiser_id, "yesterday": yesterday})
 
     sess.execute(text("""
-        DELETE FROM analytics.ad_today
+        DELETE FROM plugin.ad_today
         WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
           AND day = :yesterday
     """), {"seller_id": seller_id, "advertiser_id": advertiser_id, "yesterday": yesterday})

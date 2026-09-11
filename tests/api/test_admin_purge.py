@@ -56,7 +56,7 @@ def test_purge_plugin_data_clears_ad_tables(api_client, admin_key, db_engine):
     with db_engine.begin() as conn:
         conn.execute(
             text("""
-            INSERT INTO analytics.ad_daily (
+            INSERT INTO plugin.ad_daily (
                 seller_id, advertiser_id, campaign_id, product_id,
                 endpoint, day, mixed_real_cost, onsite_roi2_shopping_sku,
                 onsite_roi2_shopping_value, created_at
@@ -68,7 +68,7 @@ def test_purge_plugin_data_clears_ad_tables(api_client, admin_key, db_engine):
         )
         conn.execute(
             text("""
-            INSERT INTO analytics.ad_raw_log (
+            INSERT INTO plugin.ad_raw_log (
                 seller_id, advertiser_id, endpoint, campaign_id,
                 product_id, kind, day, request_url, request_method,
                 request_body, response_status, response_body, source
@@ -82,7 +82,7 @@ def test_purge_plugin_data_clears_ad_tables(api_client, admin_key, db_engine):
 
     # Verify data exists
     with Session(db_engine) as sess:
-        count = sess.execute(text("SELECT COUNT(*) FROM analytics.ad_daily")).scalar()
+        count = sess.execute(text("SELECT COUNT(*) FROM plugin.ad_daily")).scalar()
         assert count == 1
 
     # Purge
@@ -92,17 +92,17 @@ def test_purge_plugin_data_clears_ad_tables(api_client, admin_key, db_engine):
     )
     assert r.status_code == 200
     body = r.json()
-    assert body["cleared"].get("analytics.ad_daily", 0) >= 1
+    assert body["cleared"].get("plugin.ad_daily", 0) >= 1
     assert body["total_rows_deleted"] >= 1
 
     # Verify tables are empty
     with Session(db_engine) as sess:
         for table in [
-            "analytics.ad_daily",
-            "analytics.ad_today",
-            "analytics.ad_monthly",
-            "analytics.ad_raw_log",
-            "analytics.plugin_logs",
+            "plugin.ad_daily",
+            "plugin.ad_today",
+            "plugin.ad_monthly",
+            "plugin.ad_raw_log",
+            "plugin.plugin_logs",
         ]:
             count = sess.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar()
             assert count == 0, f"{table} should be empty after purge"

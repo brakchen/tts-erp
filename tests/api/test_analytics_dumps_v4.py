@@ -31,20 +31,20 @@ def _cleanup(db_engine):
     """Wipe TEST_ data from all analytics tables this test touches."""
     with db_engine.begin() as conn:
         for stmt in (
-            "DELETE FROM analytics.ad_daily WHERE seller_id = :s",
-            "DELETE FROM analytics.ad_today WHERE seller_id = :s",
-            "DELETE FROM analytics.ad_monthly WHERE seller_id = :s",
-            "DELETE FROM analytics.ad_raw_log WHERE seller_id = :s",
+            "DELETE FROM plugin.ad_daily WHERE seller_id = :s",
+            "DELETE FROM plugin.ad_today WHERE seller_id = :s",
+            "DELETE FROM plugin.ad_monthly WHERE seller_id = :s",
+            "DELETE FROM plugin.ad_raw_log WHERE seller_id = :s",
         ):
             # pi-lens-ignore: python-sql-injection
             conn.execute(text(stmt), {"s": SELLER})
     yield
     with db_engine.begin() as conn:
         for stmt in (
-            "DELETE FROM analytics.ad_daily WHERE seller_id = :s",
-            "DELETE FROM analytics.ad_today WHERE seller_id = :s",
-            "DELETE FROM analytics.ad_monthly WHERE seller_id = :s",
-            "DELETE FROM analytics.ad_raw_log WHERE seller_id = :s",
+            "DELETE FROM plugin.ad_daily WHERE seller_id = :s",
+            "DELETE FROM plugin.ad_today WHERE seller_id = :s",
+            "DELETE FROM plugin.ad_monthly WHERE seller_id = :s",
+            "DELETE FROM plugin.ad_raw_log WHERE seller_id = :s",
         ):
             # pi-lens-ignore: python-sql-injection
             conn.execute(text(stmt), {"s": SELLER})
@@ -105,7 +105,7 @@ def _ad_daily_count(db_engine) -> int:
     with db_engine.connect() as conn:
         # pi-lens-ignore: python-sql-injection
         return conn.execute(
-            text("SELECT count(*) FROM analytics.ad_daily WHERE seller_id = :s"),
+            text("SELECT count(*) FROM plugin.ad_daily WHERE seller_id = :s"),
             {"s": SELLER},
         ).scalar()
 
@@ -114,7 +114,7 @@ def _ad_today_count(db_engine) -> int:
     with db_engine.connect() as conn:
         # pi-lens-ignore: python-sql-injection
         return conn.execute(
-            text("SELECT count(*) FROM analytics.ad_today WHERE seller_id = :s"),
+            text("SELECT count(*) FROM plugin.ad_today WHERE seller_id = :s"),
             {"s": SELLER},
         ).scalar()
 
@@ -123,7 +123,7 @@ def _ad_monthly_count(db_engine) -> int:
     with db_engine.connect() as conn:
         # pi-lens-ignore: python-sql-injection
         return conn.execute(
-            text("SELECT count(*) FROM analytics.ad_monthly WHERE seller_id = :s"),
+            text("SELECT count(*) FROM plugin.ad_monthly WHERE seller_id = :s"),
             {"s": SELLER},
         ).scalar()
 
@@ -132,7 +132,7 @@ def _ad_raw_log_count(db_engine) -> int:
     with db_engine.connect() as conn:
         # pi-lens-ignore: python-sql-injection
         return conn.execute(
-            text("SELECT count(*) FROM analytics.ad_raw_log WHERE seller_id = :s"),
+            text("SELECT count(*) FROM plugin.ad_raw_log WHERE seller_id = :s"),
             {"s": SELLER},
         ).scalar()
 
@@ -243,7 +243,7 @@ def test_dumps_v4_today_overwrite(api_client, readwrite_key, db_engine):
         # pi-lens-ignore: python-sql-injection
         cost = conn.execute(
             text(
-                "SELECT mixed_real_cost FROM analytics.ad_today "
+                "SELECT mixed_real_cost FROM plugin.ad_today "
                 "WHERE seller_id = :s AND day = '2026-09-09'"
             ),
             {"s": SELLER},
@@ -309,12 +309,12 @@ def test_dumps_v4_api_managed_seller_is_ignored(api_client, readwrite_key, db_en
     with db_engine.connect() as conn:
         # pi-lens-ignore: python-sql-injection — 字面量 SQL + 绑定参数
         n_daily = conn.execute(
-            text("SELECT count(*) FROM analytics.ad_daily WHERE seller_id = :s"),
+            text("SELECT count(*) FROM plugin.ad_daily WHERE seller_id = :s"),
             {"s": SELLER},
         ).scalar_one()
         # pi-lens-ignore: python-sql-injection — 字面量 SQL + 绑定参数
         n_raw = conn.execute(
-            text("SELECT count(*) FROM analytics.ad_raw_log WHERE seller_id = :s"),
+            text("SELECT count(*) FROM plugin.ad_raw_log WHERE seller_id = :s"),
             {"s": SELLER},
         ).scalar_one()
     assert n_daily == 0, "api_managed 店铺不得写 ad_daily"
@@ -394,7 +394,7 @@ def test_dumps_v4_campaign_change_log_only_archives(
         product_id, response_body = conn.execute(
             text(
                 "SELECT product_id, response_body::text "
-                "FROM analytics.ad_raw_log WHERE seller_id = :s"
+                "FROM plugin.ad_raw_log WHERE seller_id = :s"
             ),
             {"s": SELLER},
         ).first()

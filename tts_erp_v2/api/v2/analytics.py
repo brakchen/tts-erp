@@ -358,7 +358,7 @@ def get_coverage_endpoint(
                 path=audit_path,
             )
 
-    from tts_erp_v2.analytics.repository import (
+    from tts_erp_v2.plugin.ads.repository import (
         get_coverage_daily,
         get_coverage_monthly,
     )
@@ -705,7 +705,7 @@ def post_dumps(
                 path=_PATH_DUMPS,
             )
 
-    from tts_erp_v2.analytics.repository import (
+    from tts_erp_v2.plugin.ads.repository import (
         is_product_level_endpoint,
         upsert_daily_rows,
         upsert_monthly_rows,
@@ -1023,7 +1023,7 @@ def post_plugin_logs(
             retryable=False,
         )
 
-    from tts_erp_v2.analytics.repository import insert_plugin_logs
+    from tts_erp_v2.plugin.ads.repository import insert_plugin_logs
 
     log_dicts = [
         {
