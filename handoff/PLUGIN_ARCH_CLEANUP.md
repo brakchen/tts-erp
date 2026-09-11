@@ -38,6 +38,37 @@
 | D17 | 文档：更新 12 个（**跳过** `tech-doc/_archive/` 的 4 个） |
 | D18 | `.env.test` = `.env` **整份复制** + `sed` 改 dbname（已建，见 §5） |
 
+## 2.5 ⚠️ 本任务的特别授权（临时破例）
+
+**用户于 2026-09-11 特别授权：本任务（PLUGIN_ARCH_CLEANUP 的 4 个 lane）允许 agent 在 prod 执行
+migration 相关操作**（原本 AGENTS.md §6 规定 prod migration 只能由用户手动跑）。
+
+- 适用范围：**仅本任务的 lane 2 / lane 3 / lane 4** 的 migration（0023 / 0024 / 0025）
+- 任务完成后：**恢复 AGENTS.md §6 规则**（agent 不再自动跑 prod migration）
+- 仍遵守的红线：
+  - 迁移**只写 DDL、零行级 DML**（不得对 prod 数据 INSERT / UPDATE / DELETE）
+  - 破坏性操作（尤其 lane 4 的 `DROP COLUMN`）执行前先 `pg_dump` 备份
+  - 每个 lane 在 **test 库**先验证通过，才动 prod
+  - 改名类迁移与 `systemctl --user restart` **挨着执行**，缩小报错窗口
+
+**每个 lane 的 prod 部署序列**（顺序不可颠倒）：
+
+```bash
+# 1) 先把代码 merge 到 master（磁盘文件更新；运行中进程仍是旧代码，尚不受影响）
+git merge --no-ff <branch>
+# 2) 立即在 prod 跑迁移（此刻运行进程用旧 schema 名，会短暂报错）
+cd /home/schan/tts-erp && .venv/bin/alembic upgrade head
+# 3) 立即重启，让进程加载新代码 + 新 schema 名
+systemctl --user restart tts-erp.service tts-erp-sync.service
+# 4) 验证
+bash prod-switch/postswitch-smoke.sh
+```
+
+> 为什么必须「先 merge 再迁移」：systemd 服务读磁盘代码；若先迁移而磁盘代码未更新，重启后
+> 加载的仍是旧代码（写旧 schema 名）→ 持续报错。
+
+---
+
 ## 3. 四个 lane（串行，每个 merge 后才开下一个）
 
 ### Lane 1 — `chore/agents-md-prod-data-rule`（无 migration，docs-only）
