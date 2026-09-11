@@ -6,11 +6,12 @@ sales_orders / sales_order_lines.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
+    Date,
     ForeignKey,
     Index,
     Numeric,
@@ -50,6 +51,9 @@ class ChannelAccount(Base):
     credential_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("integration.credentials.id", ondelete="SET NULL")
     )
+    # 开店时间（天级，migration 0021）。人工注册时填写；OAuth 路径不覆盖
+    # （upsert set_ 不含本列）。NULL = 未知/未填。
+    opened_date: Mapped[date | None] = mapped_column(Date)
     source_updated_at: Mapped[datetime | None]
     synced_at: Mapped[datetime] = mapped_column(
         nullable=False, server_default=text("now()")

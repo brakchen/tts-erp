@@ -47,6 +47,26 @@ def test_manual_costs_page_requires_some_auth(api_client):
     assert r.status_code == 401, r.text
 
 
+def test_shops_page_returns_200_with_html(api_client, readonly_key):
+    """GET /v2/pages/shops → 200 text/html shell linking static assets."""
+    r = api_client.get(
+        "/v2/pages/shops",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"].startswith("text/html")
+    body = r.text
+    assert "../../static/vendor/bootstrap.min.css" in body
+    assert "../../static/js/shops.js" in body
+    assert 'href="/static/' not in body
+    assert 'src="/static/' not in body
+
+
+def test_shops_page_requires_some_auth(api_client):
+    r = api_client.get("/v2/pages/shops")
+    assert r.status_code == 401
+
+
 def test_endpoints_index_lists_included_router_routes(api_client):
     """/endpoints must expand FastAPI ≥0.141 lazy _IncludedRouter wrappers.
 
