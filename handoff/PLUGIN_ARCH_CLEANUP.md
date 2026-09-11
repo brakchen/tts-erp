@@ -260,7 +260,7 @@ systemctl --user restart tts-erp.service tts-erp-sync.service
 | --- | --- | --- | --- | --- | --- |
 | 1 · AGENTS.md 红线 | —（master 直改） | `b4a3b9e` | docs-only | — | ✅ 已 push |
 | 2 · chrome_sync→plugin | `chore/rename-chrome-sync-to-plugin` | `5bc6451` / merge `1b47f0e` | 全量 fast 13 fail = baseline，**0 新 fail** | ✅ prod 已迁 `0023` + 重启，冒烟 8/8 | ✅ 已 push，worktree 已清 |
-| 3 · analytics→plugin | `chore/move-analytics-to-plugin` | — | — | — | ⬜ 待开工 |
+| 3 · analytics→plugin | `chore/move-analytics-to-plugin` | `06feb95` / merge `8791a8a` | 全量 fast 13 = baseline，**0 新 fail**；ruff 集合一致 | ✅ prod 已迁 `0024` + 重启，冒烟 8/8，读 plugin 3 端点 200 | ✅ 已 push，worktree 已清 |
 | 4 · drop data_source | `chore/drop-shops-data-source` | — | — | — | ⬜ 待开工 |
 
 ### Lane 2 实际经验（给 lane 3/4 复用）
@@ -283,6 +283,30 @@ systemctl --user restart tts-erp.service tts-erp-sync.service
 
 ---
 
-**当前 HEAD**：`1b47f0e`（lane 2 已合并 + push）
-**prod alembic**：`0023_chrome_sync_to_plugin`
-**test alembic**：`0023_chrome_sync_to_plugin`
+**当前 HEAD**：`8791a8a`（lane 3 已合并 + push）
+**prod alembic**：`0024_analytics_to_plugin`
+**test alembic**：`0024_analytics_to_plugin`
+
+### Lane 3 实际经验
+
+1. **`db/models/analytics.py` 是孤儿文件** —— 无人 import、11 张表从未注册进 `Base.metadata`。
+   并入 `plugin.py` 后已在 `db/models/__init__.py` 正式注册。
+2. **`ALTER TABLE ... SET SCHEMA` 比 INSERT/DROP 干净得多**：索引/约束/IDENTITY 序列/触发器
+   自动跟随（已实测 FK 6 个、序列 12 个全对）。
+3. **改 schema 的 lane 会动 test 库形状** —— baseline 取法同 lane 2（downgrade → master 跑 → upgrade）。
+4. **测试路径重命名会让 fail 列表看起来变了** —— 比较时需归一化（`tests/analytics/` → `tests/plugin/ads/`）。
+5. prod 迁移前**先停两个 service**（plugin_logs 正在被写），迁移后立即 start —— 比「迁移+重启」
+   更干净；实测 533 行数据完整保留。
+
+### ⚠ Lane 3 发现、**待用户决策**的既有缺口
+
+`tests/db/test_time_fields_convention.py` 的 `V2_SCHEMAS` 原本含 `analytics`（且从无 `chrome_sync`）。
+把 `plugin` 加进去后暴露两个 **chrome_sync 时期就存在**的缺口：
+
+| 缺口 | 现状 |
+| --- | --- |
+| `plugin.raw_log` **无 `updated_at` 列** | 模型/表都没有（append-only 设计）；但同 schema 的 ad_raw_log 有 |
+| 7 张订单表**无 BEFORE UPDATE 触发器** | orders / order_lines / shipments / tracking_events / settlements / settlement_details / raw_log |
+
+处理：lane 3 的 `V2_SCHEMAS` **只移除已消失的 `analytics`，未加入 `plugin`**（否则新增 2 个失败）。
+是否需要单独 lane 补齐（加列 + 加触发器）待用户拍板。
