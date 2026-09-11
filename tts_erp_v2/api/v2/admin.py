@@ -265,18 +265,20 @@ def purge_plugin_data(request: Request) -> dict[str, Any]:
 # ``commerce.shops``) never creates a row for them — and every
 # ``LEFT JOIN commerce.shops`` (spu-roi shop filter etc.) misses them.
 # These endpoints let an operator register such a shop MANUALLY:
-# the row is created with ``credential_id = NULL``,
-# ``data_source = 'plugin'`` and ``status = 'active'`` — 注册即完整店铺，
-# 没有「待授权」中间态；同步方式由显式枚举 ``data_source`` 标记
-# （'api' | 'plugin'，migration 0022）。
+# the row is created with ``credential_id = NULL`` and ``status = 'active'``
+# —— 注册即完整店铺，没有「待授权」中间态。
+#
+# 2026-09-11（PLUGIN_ARCH_CLEANUP）：原先还有 ``data_source`` 枚举列标记
+# 同步方式，现已删除 —— 「是否走 API 同步」已可由 ``credential_id IS NOT NULL``
+# 完整推出，且 api/plugin 数据已按 schema 物理隔离（`plugin.*` / `commerce.*`
+# 等），无需来源判定。插件广告 dump 没有 server-side 替代路径，不再拦截。
 #
 # Invariants:
-#   * registration NEVER touches ``credential_id`` / ``status`` /
-#     ``data_source`` of an existing row — if the shop later obtains API
-#     access, the OAuth callback's ``on_conflict_do_update`` backfills
-#     credential_id and flips ``data_source`` to 'api'.
+#   * registration NEVER touches ``credential_id`` / ``status`` of an
+#     existing row — if the shop later obtains API access, the OAuth
+#     callback's ``on_conflict_do_update`` backfills ``credential_id``.
 #   * data sync does NOT depend on registration: the plugin dumps
-#     endpoints write plugin.*/analytics.* regardless.
+#     endpoints write plugin.* regardless.
 #   * registration only affects query-time association.
 
 # Non-production shop-id prefixes that must never be registered (mirrors
@@ -322,7 +324,6 @@ class ShopOut(BaseModel):
     status: str | None = None
     credential_id: int | None = None
     opened_date: date | None = None
-    data_source: str | None = None  # 'api' | 'plugin'
 
 
 class ShopRegisterResponse(BaseModel):
@@ -336,17 +337,16 @@ class ShopRegisterResponse(BaseModel):
 # xmax = 0 distinguishes the inserted row from a conflict-updated one.
 _SQL_REGISTER_SHOP = text(
     "INSERT INTO commerce.shops "
-    "(platform, shop_id, account_name, region, seller_type, status, opened_date, "
-    " data_source) "
+    "(platform, shop_id, account_name, region, seller_type, status, opened_date) "
     "VALUES (:platform, :shop_id, :account_name, :region, :seller_type, "
-    "        'active', :opened_date, 'plugin') "
+    "        'active', :opened_date) "
     "ON CONFLICT (platform, shop_id) DO UPDATE SET "
     "  account_name = COALESCE(shops.account_name, EXCLUDED.account_name), "
     "  region = COALESCE(shops.region, EXCLUDED.region), "
     "  seller_type = COALESCE(shops.seller_type, EXCLUDED.seller_type), "
     "  opened_date = COALESCE(shops.opened_date, EXCLUDED.opened_date) "
     "RETURNING id, platform, shop_id, account_name, region, seller_type, "
-    "          status, credential_id, opened_date, data_source, (xmax = 0) AS inserted"
+    "          status, credential_id, opened_date, (xmax = 0) AS inserted"
 )
 
 
@@ -392,7 +392,6 @@ def register_shop(
             status=row.status,
             credential_id=row.credential_id,
             opened_date=row.opened_date,
-            data_source=row.data_source,
         ),
     )
 

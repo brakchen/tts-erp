@@ -70,8 +70,9 @@
           return;
         }
         body.innerHTML = shops.map(function (s) {
-          // 同步方式 = shops.data_source 枚举（'api' | 'plugin'）
-          var isApi = s.data_source === "api";
+          // 同步方式：有 credential_id = 已 OAuth 授权走 API 同步，否则仅插件
+          // （2026-09-11 migration 0025 删除了 shops.data_source 枚举列）
+          var isApi = s.credential_id != null;
           var badge = isApi
             ? '<span class="badge badge-sync-api">API 同步</span>'
             : '<span class="badge badge-sync-plugin">仅插件</span>';

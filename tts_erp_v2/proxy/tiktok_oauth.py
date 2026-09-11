@@ -274,11 +274,9 @@ def complete_tiktok_authorization(
             "seller_type": seller_type,
             "status": "active",
             "credential_id": credential_id,
-            # 2026-09-11: 显式数据来源枚举。OAuth 路径 = api；若该行是人工
-            # 注册的插件店铺（data_source='plugin'），此处翻转为 api ——
-            # 插件→API 升级闭环。opened_date 刻意不在 set_ 里：人工填的
-            # 开店日期不被 OAuth 覆盖。
-            "data_source": "api",
+            # opened_date 刻意不在 set_ 里：人工填的开店日期不被 OAuth 覆盖。
+            # 2026-09-11（PLUGIN_ARCH_CLEANUP）：原 data_source 枚举列已删除
+            # —— 有 credential_id 即为 API 同步店铺，无需单独标记。
             "source_updated_at": now,
             "synced_at": now,
             "updated_at": now,
@@ -292,7 +290,6 @@ def complete_tiktok_authorization(
                 "seller_type": acct_vals["seller_type"],
                 "status": "active",
                 "credential_id": acct_vals["credential_id"],
-                "data_source": acct_vals["data_source"],
                 "source_updated_at": acct_vals["source_updated_at"],
                 "synced_at": acct_vals["synced_at"],
                 "updated_at": acct_vals["updated_at"],

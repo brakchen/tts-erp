@@ -185,7 +185,6 @@ def _seed_manual_cost_spu(db_session) -> ChannelProduct:
         shop_id="TEST_MS_RPT",
         account_name="test",
         status="ACTIVE",
-        data_source="api",
     )
     db_session.add(acct)
     db_session.flush()
@@ -228,7 +227,6 @@ def _seed_source_price(db_session, spu_id: str, *, master_cost: Decimal | None =
         shop_id=f"TEST_MS_RPT_{spu_id}",
         account_name="test",
         status="ACTIVE",
-        data_source="api",
     )
     db_session.add(acct)
     db_session.flush()
@@ -307,7 +305,6 @@ def test_run_profit_daily_counts_paid_order(db_session):
         shop_id="TEST_MS_RPT2",
         account_name="test",
         status="ACTIVE",
-        data_source="api",
     )
     db_session.add(acct)
     db_session.flush()

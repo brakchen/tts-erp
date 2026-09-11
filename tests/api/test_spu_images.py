@@ -102,8 +102,8 @@ def _seed_account_and_product(db_engine, external_account: str, external_product
             sess.execute(
                 text(
                     "INSERT INTO commerce.shops "
-                    "(platform, shop_id, account_name, status, data_source) "
-                    "VALUES ('tiktok', :ext, 'TEST acct', 'active', 'api')"
+                    "(platform, shop_id, account_name, status) "
+                    "VALUES ('tiktok', :ext, 'TEST acct', 'active')"
                 ),
                 {"ext": external_account},
             )

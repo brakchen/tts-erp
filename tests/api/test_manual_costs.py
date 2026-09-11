@@ -38,8 +38,8 @@ def _seed_channel_product(db_engine, external_id: str) -> int:
         sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
             text(
                 "INSERT INTO commerce.shops "
-                "(platform, shop_id, account_name, status, data_source) "
-                "VALUES ('tiktok', 'TEST_acct_for_costs', 'TEST acct', 'active', 'api')"
+                "(platform, shop_id, account_name, status) "
+                "VALUES ('tiktok', 'TEST_acct_for_costs', 'TEST acct', 'active')"
             )
         )
         acct_id = sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")

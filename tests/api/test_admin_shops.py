@@ -95,7 +95,6 @@ def test_register_creates_plugin_only_shop(api_client, admin_key, db_engine):
     assert shop["opened_date"] == "2026-06-01"
     assert shop["status"] == "active"  # 注册即完整店铺，无「待授权」中间态
     assert shop["credential_id"] is None
-    assert shop["data_source"] == "plugin"
 
     from sqlalchemy.orm import Session
 
@@ -108,7 +107,6 @@ def test_register_creates_plugin_only_shop(api_client, admin_key, db_engine):
         ).scalar_one()
     assert row.credential_id is None
     assert row.status == "active"
-    assert row.data_source == "plugin"
     assert str(row.opened_date) == "2026-06-01"
 
 
@@ -157,8 +155,8 @@ def test_register_never_clobbers_credential_link(api_client, admin_key, db_engin
         conn.execute(
             text(
                 "INSERT INTO commerce.shops "
-                "(platform, shop_id, account_name, status, credential_id, data_source) "
-                "VALUES ('tiktok', :sid, 'API Shop', 'active', :cid, 'api')"
+                "(platform, shop_id, account_name, status, credential_id) "
+                "VALUES ('tiktok', :sid, 'API Shop', 'active', :cid)"
             ).bindparams(sid=SHOP_A, cid=cred_id)
         )
     try:
@@ -169,7 +167,6 @@ def test_register_never_clobbers_credential_link(api_client, admin_key, db_engin
         shop = body["shop"]
         assert shop["credential_id"] == cred_id  # untouched
         assert shop["status"] == "active"  # untouched
-        assert shop["data_source"] == "api"  # untouched
         assert shop["account_name"] == "API Shop"  # untouched
     finally:
         with db_engine.begin() as conn:
@@ -328,4 +325,3 @@ def test_channel_accounts_exposes_opened_date(api_client, admin_key, readonly_ke
     assert SHOP_A in rows
     assert rows[SHOP_A]["opened_date"] == "2026-06-01"
     assert rows[SHOP_A]["credential_id"] is None  # 插件店铺，无 API 凭证
-    assert rows[SHOP_A]["data_source"] == "plugin"

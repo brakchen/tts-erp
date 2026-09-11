@@ -25,8 +25,6 @@ class ChannelAccountOut(BaseModel):
     status: str | None = None
     opened_date: date | None = None
     credential_id: int | None = None
-    # 显式数据来源枚举（2026-09-11，migration 0022）：'api' | 'plugin'
-    data_source: str | None = None
     synced_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None

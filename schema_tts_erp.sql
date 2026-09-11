@@ -161,9 +161,7 @@ CREATE TABLE IF NOT EXISTS commerce.shops (
     source_updated_at timestamp with time zone,
     synced_at timestamp with time zone DEFAULT now() CONSTRAINT channel_accounts_synced_at_not_null NOT NULL,
     updated_at timestamp with time zone DEFAULT now() CONSTRAINT channel_accounts_updated_at_not_null NOT NULL,
-    opened_date date,
-    data_source text NOT NULL,
-    CONSTRAINT ck_channel_accounts_data_source CHECK ((data_source = ANY (ARRAY['api'::text, 'plugin'::text])))
+    opened_date date
 );
 
 
