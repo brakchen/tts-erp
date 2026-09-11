@@ -596,6 +596,34 @@ def post_dumps(
             retryable=False,
         )
 
+    # api-managed 守卫（2026-09-11）：店铺已转 API 同步（shops.data_source
+    # ='api'）时，广告 dump 全域静默忽略 —— 不写 ad_*、不写 ad_raw_log，
+    # 返回 200 + status='api_managed' 让插件识别后停止该店的广告抓取。
+    # plugin-logs 不拦截：那是诊断日志，过渡期排查仍需要。
+    from tts_erp_v2.api.deps import shop_is_api_managed
+
+    if shop_is_api_managed(sess, shop_id=payload.scope.sellerId):
+        _log_ingest_event(
+            level=logging.INFO,
+            request_id=payload.requestId or request_id,
+            key_prefix=key_prefix,
+            method=method,
+            path=path,
+            status=200,
+            records_in=0,
+            records_ok=0,
+            records_rej=0,
+            error_code="API_MANAGED",
+        )
+        return JSONResponse(
+            status_code=200,
+            content={
+                "code": 0,
+                "requestId": request_id,
+                "data": {"status": "api_managed"},
+            },
+        )
+
     dump_kind = payload.dump.kind
     if dump_kind is None:
         return _audit_and_error(
