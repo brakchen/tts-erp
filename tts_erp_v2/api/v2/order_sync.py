@@ -350,6 +350,28 @@ def post_dumps(
     response_body = payload.dump.response.body
     main_order_id = payload.dump.mainOrderId
 
+    # api-managed 守卫（2026-09-11）：店铺已转 API 同步（shops.data_source
+    # ='api'）时，插件 dump 全域静默忽略 —— 不写 raw_log、不写业务表，
+    # 返回 200 + status='api_managed' 让插件识别后停止抓取该域。
+    from tts_erp_v2.api.deps import shop_is_api_managed
+
+    if shop_is_api_managed(sess, shop_id=shop_id):
+        _log_event(
+            level=logging.INFO,
+            request_id=request_id,
+            key_prefix=key_prefix,
+            method="POST",
+            path=audit_path,
+            status=200,
+            records_in=1,
+            records_ok=0,
+            message="api_managed: dump ignored (shop is API-synced)",
+        )
+        return _ok_response(
+            request_id=request_id,
+            data={"status": "api_managed"},
+        )
+
     # 1. 先写 raw_log 拿到 log_id（解析函数需要 log_id 关联）
     log_id = write_raw_log(
         sess,

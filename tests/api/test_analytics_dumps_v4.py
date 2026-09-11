@@ -279,3 +279,53 @@ def test_dumps_v4_missing_year_month(api_client, readwrite_key, db_engine):
     r = _post(api_client, readwrite_key, body)
     assert r.status_code == 400
     assert r.json()["code"] == "SCHEMA_INVALID"
+
+
+# ─── api-managed 守卫：data_source='api' 的店铺停止插件写入 ──────────
+
+
+def _seed_seller_data_source(db_engine, data_source: str) -> None:
+    """给 SELLER 种一行 shops（指定 data_source）；conftest TEST_ wipe 清理。"""
+    with db_engine.begin() as conn:
+        # pi-lens-ignore: python-sql-injection — 字面量 SQL + 绑定参数
+        conn.execute(
+            text(
+                "INSERT INTO commerce.shops "
+                "(platform, shop_id, account_name, status, data_source) "
+                "VALUES ('tiktok', :s, 'TEST shop', 'active', :ds) "
+                "ON CONFLICT (platform, shop_id) DO UPDATE SET data_source = :ds"
+            ),
+            {"s": SELLER, "ds": data_source},
+        )
+
+
+def test_dumps_v4_api_managed_seller_is_ignored(api_client, readwrite_key, db_engine):
+    """data_source='api' 的店铺：广告 dump 静默忽略（200 + api_managed），
+    ad_daily / ad_raw_log 都不写 —— 防广告域 API 与插件双写。"""
+    _seed_seller_data_source(db_engine, "api")
+    r = _post(api_client, readwrite_key, _dump_body_v4())
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["status"] == "api_managed"
+    with db_engine.connect() as conn:
+        # pi-lens-ignore: python-sql-injection — 字面量 SQL + 绑定参数
+        n_daily = conn.execute(
+            text("SELECT count(*) FROM analytics.ad_daily WHERE seller_id = :s"),
+            {"s": SELLER},
+        ).scalar_one()
+        # pi-lens-ignore: python-sql-injection — 字面量 SQL + 绑定参数
+        n_raw = conn.execute(
+            text("SELECT count(*) FROM analytics.ad_raw_log WHERE seller_id = :s"),
+            {"s": SELLER},
+        ).scalar_one()
+    assert n_daily == 0, "api_managed 店铺不得写 ad_daily"
+    assert n_raw == 0, "api_managed 店铺不得写 ad_raw_log"
+
+
+def test_dumps_v4_plugin_registered_seller_still_written(
+    api_client, readwrite_key, db_engine
+):
+    """对照组：同店 data_source='plugin'（人工注册）时 dump 照常写入。"""
+    _seed_seller_data_source(db_engine, "plugin")
+    r = _post(api_client, readwrite_key, _dump_body_v4())
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["inserted"] >= 1

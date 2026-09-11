@@ -660,7 +660,8 @@ Success response (`code: 0`):
 }
 ```
 
-`status ∈ {"inserted", "updated", "duplicate", "stale_ignored"}` — 全部视为成功。
+`status ∈ {"inserted", "updated", "duplicate", "stale_ignored", "api_managed"}` — 全部视为成功。
+`api_managed`（2026-09-11 起）：店铺的 `commerce.shops.data_source='api'`（已 OAuth 授权走 API 同步）时，dump **全域静默忽略**（不写 `ad_*`、不写 `ad_raw_log`），插件应停止该店的广告抓取。
 
 ~~内容被取代事件（history 替换/推进/重建、daily 折叠、today 跨天 reset）写
 `analytics.ad_sync_audit` 一行元数据审计（与主写同事务；30s today 常规刷新不写）。~~
@@ -762,7 +763,8 @@ Body（≤ 2 MB）：
 }
 ```
 
-- `status` ∈ `{inserted, parse_error}`
+- `status` ∈ `{inserted, parse_error, api_managed}`
+- `api_managed`（2026-09-11 起）：店铺的 `commerce.shops.data_source='api'`（已 OAuth 授权走 API 同步）时，dump **全域静默忽略**（不写 `chrome_sync.raw_log`、不写业务表），插件应停止该店的订单/物流/结算抓取
 - `parse_error` 时 `rowsWritten=0`，`parseError` 字段含原因
 
 #### `GET /v2/order-sync/synced-ids`
