@@ -22,6 +22,16 @@ WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
   AND endpoint = :endpoint
   AND day BETWEEN :start_day AND :end_day
 GROUP BY campaign_id
+ORDER BY campaign_id
+LIMIT :page_size OFFSET :offset
+"""
+
+SQL_COVERAGE_DAILY_COUNT = """
+SELECT count(DISTINCT campaign_id) AS total
+FROM analytics.ad_daily
+WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
+  AND endpoint = :endpoint
+  AND day BETWEEN :start_day AND :end_day
 """
 
 SQL_COVERAGE_MONTHLY = """
@@ -31,6 +41,16 @@ WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
   AND endpoint = :endpoint
   AND year_month BETWEEN :start_month AND :end_month
 GROUP BY campaign_id
+ORDER BY campaign_id
+LIMIT :page_size OFFSET :offset
+"""
+
+SQL_COVERAGE_MONTHLY_COUNT = """
+SELECT count(DISTINCT campaign_id) AS total
+FROM analytics.ad_monthly
+WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
+  AND endpoint = :endpoint
+  AND year_month BETWEEN :start_month AND :end_month
 """
 
 SQL_UPSERT_DAILY_ROW = """
@@ -126,9 +146,17 @@ def get_coverage_daily(
     endpoint: str,
     start_day: date,
     end_day: date,
-) -> dict[str, list[str]]:
-    """返回 {campaign_id: [day1, day2, ...]} 的映射。"""
-    # pi-lens-ignore: python-sql-injection
+    page: int = 1,
+    page_size: int = 500,
+) -> tuple[dict[str, list[str]], int]:
+    """返回 ({campaign_id: [day1, day2, ...]}, totalCampaigns) 的元组。
+
+    2026-09-11 加分页（隐患 #3）：page/page_size 取一段 campaign；totalCampaigns 是
+    整个查询窗口内的总 campaign 数（不随 page 变）。sort 用 ORDER BY campaign_id
+    保证分页结果稳定。
+    """
+    offset = (page - 1) * page_size
+    # pi-lens-ignore: python-sql-injection — LIMIT/OFFSET 走 :page_size/:offset 参数化
     rows = sess.execute(
         text(SQL_COVERAGE_DAILY),
         {
@@ -137,9 +165,27 @@ def get_coverage_daily(
             "endpoint": endpoint,
             "start_day": start_day,
             "end_day": end_day,
+            "page_size": page_size,
+            "offset": offset,
         },
     ).all()
-    return {row[0]: [d.isoformat() for d in row[1]] for row in rows}
+    # pi-lens-ignore: python-sql-injection — COUNT() 参数化
+    total_row = sess.execute(
+        text(SQL_COVERAGE_DAILY_COUNT),
+        {
+            "seller_id": seller_id,
+            "advertiser_id": advertiser_id,
+            "endpoint": endpoint,
+            "start_day": start_day,
+            "end_day": end_day,
+        },
+    ).first()
+    # 防御型: COUNT() 总是 integer；但万一返回 None（不应发生），fallback 到 0
+    try:
+        total = int(total_row[0]) if total_row is not None else 0
+    except (TypeError, ValueError):
+        total = 0
+    return {row[0]: [d.isoformat() for d in row[1]] for row in rows}, total
 
 
 def get_coverage_monthly(
@@ -150,8 +196,11 @@ def get_coverage_monthly(
     endpoint: str,
     start_month: str,
     end_month: str,
-) -> dict[str, list[str]]:
-    """返回 {campaign_id: ['2026-01', '2026-02', ...]} 的映射。"""
+    page: int = 1,
+    page_size: int = 500,
+) -> tuple[dict[str, list[str]], int]:
+    """返回 ({campaign_id: ['2026-01', ...]}, totalCampaigns) 的元组。"""
+    offset = (page - 1) * page_size
     # pi-lens-ignore: python-sql-injection
     rows = sess.execute(
         text(SQL_COVERAGE_MONTHLY),
@@ -161,9 +210,26 @@ def get_coverage_monthly(
             "endpoint": endpoint,
             "start_month": start_month,
             "end_month": end_month,
+            "page_size": page_size,
+            "offset": offset,
         },
     ).all()
-    return {row[0]: list(row[1]) for row in rows}
+    # pi-lens-ignore: python-sql-injection — COUNT() 参数化
+    total_row = sess.execute(
+        text(SQL_COVERAGE_MONTHLY_COUNT),
+        {
+            "seller_id": seller_id,
+            "advertiser_id": advertiser_id,
+            "endpoint": endpoint,
+            "start_month": start_month,
+            "end_month": end_month,
+        },
+    ).first()
+    try:
+        total = int(total_row[0]) if total_row is not None else 0
+    except (TypeError, ValueError):
+        total = 0
+    return {row[0]: list(row[1]) for row in rows}, total
 
 
 # ─── 结构化写入函数 ──────────────────────────────────────────────────

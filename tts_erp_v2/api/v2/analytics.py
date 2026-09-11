@@ -195,12 +195,19 @@ def get_coverage_endpoint(
     endDay: date | None = Query(default=None),
     startMonth: str | None = Query(default=None, max_length=7),
     endMonth: str | None = Query(default=None, max_length=7),
+    # 2026-09-11 加分页（隐患 #3）：默认 page=1, pageSize=500。客户端 fetchBatchCoverage
+    # 会自动迭代到最后一页，把所有 campaign 合并成一个 BatchCoverageResponse。
+    # 不在 Query 上加 le/ge 是因为 FastAPI 会返 422，与端点其它校验（返 400）不一致；
+    # 在下面手动校验返 400 SCHEMA_INVALID。
+    page: int = Query(default=1, description="分页页码，从 1 开始"),
+    pageSize: int = Query(default=500, description="每页 campaign 数，1-1000"),
     sess: Session = Depends(get_session),
 ) -> JSONResponse:
-    """Coverage 批量查询（方案 B）：一次返回所有 campaign 的覆盖数据。
+    """Coverage 批量查询（方案 B）：分页返回 campaign 的覆盖数据。
 
     tech-doc/analytics/daily-sync-with-coverage.md §5.1。
     支持 kind=daily 和 kind=monthly 两种粒度。
+    响应新增 pagination 字段：{page, pageSize, totalCampaigns, totalPages, hasMore}。
     """
     request_id = _request_id_from_headers(request)
     key_prefix = _key_prefix(request)
@@ -253,6 +260,32 @@ def get_coverage_endpoint(
             status=400,
             code="SCHEMA_INVALID",
             message="kind must be 'daily' or 'monthly'",
+            retryable=False,
+            key_prefix=key_prefix,
+            error_code="SCHEMA_INVALID",
+            method="GET",
+            path=audit_path,
+        )
+
+    # 2026-09-11：手动校验 page/pageSize（与端点其它校验返 400 一致）
+    if page < 1:
+        return _audit_and_error(
+            request_id=request_id,
+            status=400,
+            code="SCHEMA_INVALID",
+            message="page must be >= 1",
+            retryable=False,
+            key_prefix=key_prefix,
+            error_code="SCHEMA_INVALID",
+            method="GET",
+            path=audit_path,
+        )
+    if pageSize < 1 or pageSize > 1000:
+        return _audit_and_error(
+            request_id=request_id,
+            status=400,
+            code="SCHEMA_INVALID",
+            message="pageSize must be between 1 and 1000",
             retryable=False,
             key_prefix=key_prefix,
             error_code="SCHEMA_INVALID",
@@ -330,29 +363,50 @@ def get_coverage_endpoint(
         get_coverage_monthly,
     )
 
+    # 2026-09-11：分页实现。get_coverage_* 现在返回 (campaigns_page, totalCampaigns)
     if kind == "daily":
-        campaigns = get_coverage_daily(
+        campaigns, total_campaigns = get_coverage_daily(
             sess,
             seller_id=sellerId,
             advertiser_id=advertiserId,
             endpoint=endpoint,
             start_day=startDay,  # type: ignore[arg-type]
             end_day=endDay,  # type: ignore[arg-type]
+            page=page,
+            page_size=pageSize,
         )
         total_requested = (endDay - startDay).days + 1  # type: ignore[operator]
     else:
-        campaigns = get_coverage_monthly(
+        campaigns, total_campaigns = get_coverage_monthly(
             sess,
             seller_id=sellerId,
             advertiser_id=advertiserId,
             endpoint=endpoint,
             start_month=startMonth,  # type: ignore[arg-type]
             end_month=endMonth,  # type: ignore[arg-type]
+            page=page,
+            page_size=pageSize,
         )
-        # pi-lens-ignore: ast-grep:unchecked-throwing-call-python — 上方 regex 已锁 YYYY-MM
-        sy, sm = int(startMonth[:4]), int(startMonth[5:])  # type: ignore[index]
-        ey, em = int(endMonth[:4]), int(endMonth[5:])  # type: ignore[index]
+        # 防御型 parse：上方的 re.match 锁了 YYYY-MM 格式，但万一未来加了手调用。
+        try:
+            sy, sm = int(startMonth[:4]), int(startMonth[5:])  # type: ignore[index]
+            ey, em = int(endMonth[:4]), int(endMonth[5:])  # type: ignore[index]
+        except (TypeError, ValueError) as exc:
+            return _audit_and_error(
+                request_id=request_id,
+                status=400,
+                code="SCHEMA_INVALID",
+                message=f"startMonth/endMonth must be YYYY-MM format: {exc}",
+                retryable=False,
+                key_prefix=key_prefix,
+                error_code="SCHEMA_INVALID",
+                method="GET",
+                path=audit_path,
+            )
         total_requested = (ey - sy) * 12 + (em - sm + 1)
+
+    total_pages = (total_campaigns + pageSize - 1) // pageSize if total_campaigns > 0 else 0
+    has_more = page < total_pages
 
     coverage_data: dict[str, object] = {
         "kind": kind,
@@ -365,6 +419,13 @@ def get_coverage_endpoint(
                 "totalCovered": len(periods),
             }
             for cid, periods in campaigns.items()
+        },
+        "pagination": {
+            "page": page,
+            "pageSize": pageSize,
+            "totalCampaigns": total_campaigns,
+            "totalPages": total_pages,
+            "hasMore": has_more,
         },
     }
     if kind == "daily":
