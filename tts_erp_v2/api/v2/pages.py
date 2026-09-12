@@ -1156,7 +1156,7 @@ _DASHBOARD_PAGE_HTML = """<!doctype html>
     }
     .nav-cards {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(4, 1fr);
       gap: 16px;
     }
     @media (max-width: 768px) {
