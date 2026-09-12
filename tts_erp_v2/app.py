@@ -79,19 +79,21 @@ def _build_routes(app: FastAPI) -> None:
     # explicit ``require_role_at_least(request, "admin")`` in the
     # handler for defense-in-depth. See tts_erp_v2/api/v2/admin.py.
     app.include_router(admin.router, prefix="/v2/admin")
-    # analytics (Chrome extension upload + cursor) — 2026-09-02 v2 化：
-    # 原 analytics_sync 孤岛包拆除，路由迁入 api/v2/analytics.py，
-    # 存储走 tts_erp_v2/analytics/repository.py（analytics.ad_* 表）。
-    # 单挂 /v2/analytics/sync —— 旧 /v1/analytics/sync/* 随本次发布下线
-    # （用户拍板，无 alias；发布窗口必须与插件发版同步）。
+    # analytics (Chrome extension ad-data upload + coverage + cursor)。
+    # ⚠ 命名历史：URL 前缀 /v2/analytics/sync/* 是 Chrome 扩展的 stable 契约，
+    # 改路径需扩展同步发版，故保留 analytics 命名（AGENTS.md §9.1）。
+    # 实际数据 2026-09-11 起全部写入 plugin schema（plugin.ad_* 等），
+    # 存储层已迁到 tts_erp_v2/plugin/ads/repository.py；
+    # 路由 handler 仍在 tts_erp_v2/api/v2/analytics.py（仅文件名层面残留）。
     # Auth + rate-limit 继承父 app 中间件栈；handler 读
     # `request.scope["api_key_hash"]` / `request.scope["api_key_scopes"]`。
     app.include_router(analytics.router)
     # Chrome 扩展订单/物流/结算数据同步（readwrite；与 analytics 同级）。
     # 详见 tech-doc/chrome-ext-order-sync-design.md。
     app.include_router(order_sync.router)
-    # SPU 实际 ROI 看板主表(GET /v2/analytics/spu-roi,readonly)——单挂
-    # /v2/analytics 下独立 router,不蹭 /sync 前缀(readwrite 分类)。
+    # SPU 实际 ROI 看板主表(GET /v2/analytics/spu-roi, readonly)——
+    # 读 plugin.ad_* 表；URL 保持 /v2/analytics/ 前缀与 sync 端点同域。
+    # 模块 tts_erp_v2/analytics/spu_roi.py 名称同理为历史残留。
     app.include_router(analytics.roi_router)
     # SPU ROI 钻取面板四端点（D6 拍板：每 tab 一懒加载端点）
     app.include_router(analytics.drilldown_router)

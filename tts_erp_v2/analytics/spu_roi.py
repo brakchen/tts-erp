@@ -1,5 +1,11 @@
 """SPU 实际 ROI 看板 + 钻取面板（D6/D7/D8，2026-09-07）。
 
+⚠ 命名历史：本模块路径 ``tts_erp_v2/analytics/spu_roi.py`` 保留 ``analytics``
+名称，与 ``/v2/analytics/sync/*`` URL 前缀同源 —— Chrome 扩展 stable 契约
+不宜改路径（AGENTS.md §9.1）。实际读取的表全部在 ``plugin`` schema
+（``plugin.ad_today`` / ``ad_daily`` / ``ad_monthly``），非独立 ``analytics``
+schema。``analytics`` 仅是包名/URL 层面的历史残留。
+
 设计稿：``tech-doc/analytics/spu-roi-v7-refactor.md``（D1–D8 全拍板）。
 口径真理：``handoff/spu-roi-full-loss-rubric.md`` v7（v8 待升版同步）；
 ``tech-doc/analytics/spu-real-roi-dashboard.md`` §4/§5（v7 公式已就位）。

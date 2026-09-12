@@ -1,7 +1,14 @@
-"""/v2/analytics/sync/* — Chrome extension (tk-adv-cost-monitor) analytics ingest.
+"""/v2/analytics/sync/* — Chrome extension (tk-adv-cost-monitor) ad-data ingest.
+
+⚠ 命名历史：本模块及 URL 前缀 ``/v2/analytics/sync/*`` 保留 ``analytics``
+名称，原因是 Chrome 扩展侧已将此路径作为 stable 契约依赖，改 URL 需要
+扩展同步发版（AGENTS.md §9.1）。实际数据全部写入 ``plugin`` schema
+（``plugin.ad_today`` / ``ad_daily`` / ``ad_monthly`` / ``ad_raw_log`` /
+``plugin_logs``），仓储层在 ``tts_erp_v2/plugin/ads/repository.py``。
+``analytics`` 仅是路由文件名和 URL 前缀层面的历史残留，不代表独立 schema。
 
 v4 protocol（tech-doc/analytics/daily-sync-with-coverage.md）：
-- POST /dumps: 结构化 rows 写入 ad_today / ad_daily / ad_monthly
+- POST /dumps: 结构化 rows 写入 plugin.ad_today / plugin.ad_daily / plugin.ad_monthly
 - GET /coverage: 批量查询已同步的 coverage 数据
 - POST /plugin-logs: 插件运行时日志上传
 
