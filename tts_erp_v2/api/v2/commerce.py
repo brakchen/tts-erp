@@ -80,7 +80,13 @@ SQL_LIST_CHANNEL_PRODUCTS = (
     "       cp.source_created_at, cp.source_updated_at, "
     "       cp.main_image_url, cp.mirror_object_key, "
     "       m.unit_cost, m.currency, "
-    "       CASE WHEN m.id IS NULL THEN NULL ELSE 'MANUAL_ENTRY' END AS cost_method "
+    "       CASE WHEN m.id IS NULL THEN NULL ELSE 'MANUAL_ENTRY' END AS cost_method, "
+    "       (SELECT pp.source_unit_cost "
+    "        FROM procurement.procurement_products pp "
+    "        WHERE pp.external_product_id = cp.spu_id "
+    "          AND pp.source_unit_cost IS NOT NULL "
+    "        ORDER BY pp.synced_at DESC NULLS LAST, pp.id DESC "
+    "        LIMIT 1) AS source_unit_cost "
     "FROM commerce.products_spu cp "
     "LEFT JOIN procurement.manual_product_costs m "
     "  ON m.spu_pk = cp.id AND m.valid_to IS NULL "
@@ -119,8 +125,24 @@ _SORT_TAILS_CHANNEL_PRODUCTS = {
     "created_at-desc": "ORDER BY cp.source_created_at DESC NULLS LAST, cp.id",
     "updated_at-asc": "ORDER BY cp.source_updated_at ASC NULLS LAST, cp.id",
     "updated_at-desc": "ORDER BY cp.source_updated_at DESC NULLS LAST, cp.id",
-    "unit_cost-asc": ("ORDER BY m.unit_cost ASC NULLS LAST, cp.id"),
-    "unit_cost-desc": ("ORDER BY m.unit_cost DESC NULLS LAST, cp.id"),
+    "unit_cost-asc": (
+        "ORDER BY COALESCE(m.unit_cost, "
+        "(SELECT pp.source_unit_cost "
+        " FROM procurement.procurement_products pp "
+        " WHERE pp.external_product_id = cp.spu_id "
+        "   AND pp.source_unit_cost IS NOT NULL "
+        " ORDER BY pp.synced_at DESC NULLS LAST, pp.id DESC "
+        " LIMIT 1)) ASC NULLS LAST, cp.id"
+    ),
+    "unit_cost-desc": (
+        "ORDER BY COALESCE(m.unit_cost, "
+        "(SELECT pp.source_unit_cost "
+        " FROM procurement.procurement_products pp "
+        " WHERE pp.external_product_id = cp.spu_id "
+        "   AND pp.source_unit_cost IS NOT NULL "
+        " ORDER BY pp.synced_at DESC NULLS LAST, pp.id DESC "
+        " LIMIT 1)) DESC NULLS LAST, cp.id"
+    ),
     # Status sort (2026-09-06): stable by a fixed weight so the list
     # doesn't depend on upstream enum spelling. Weights mirror the page's
     # Chinese labels: 商家(ACTIVATE)=0 < 下架(DELETED)=1 < 停售
@@ -151,7 +173,13 @@ SQL_GET_CHANNEL_PRODUCT = (
     "       cp.source_created_at, cp.source_updated_at, "
     "       cp.main_image_url, cp.mirror_object_key, "
     "       m.unit_cost, m.currency, "
-    "       CASE WHEN m.id IS NULL THEN NULL ELSE 'MANUAL_ENTRY' END AS cost_method "
+    "       CASE WHEN m.id IS NULL THEN NULL ELSE 'MANUAL_ENTRY' END AS cost_method, "
+    "       (SELECT pp.source_unit_cost "
+    "        FROM procurement.procurement_products pp "
+    "        WHERE pp.external_product_id = cp.spu_id "
+    "          AND pp.source_unit_cost IS NOT NULL "
+    "        ORDER BY pp.synced_at DESC NULLS LAST, pp.id DESC "
+    "        LIMIT 1) AS source_unit_cost "
     "FROM commerce.products_spu cp "
     "LEFT JOIN procurement.manual_product_costs m "
     "  ON m.spu_pk = cp.id AND m.valid_to IS NULL "
@@ -255,6 +283,8 @@ def _row_to_channel_product(row: Any) -> ChannelProductOut:
         unit_cost=row.unit_cost,
         currency=row.currency,
         cost_method=row.cost_method,
+        # 货源价 fallback (from procurement.procurement_products)
+        source_unit_cost=getattr(row, "source_unit_cost", None),
         image_url=_resolve_mirror_url(row.mirror_object_key),
         main_image_url=row.main_image_url,
     )

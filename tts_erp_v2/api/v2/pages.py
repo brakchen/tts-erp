@@ -64,10 +64,10 @@ def _js_version(filename: str) -> str:
 def _page(html: str) -> HTMLResponse:
   """Render a page template, stamping the JS cache-bust versions."""
   return HTMLResponse(
-    html.replace("__JSV_CONSOLE__", _js_version("console.js")).replace(
-      "__JSV_SPU_ROI__", _js_version("spu-roi.js")
-    ).replace("__JSV_SHOPS__", _js_version("shops.js")
-    ).replace("__JSV_DASHBOARD__", _js_version("dashboard.js"))
+    html.replace("__JSV_CONSOLE__", _js_version("console.js"))
+    .replace("__JSV_SPU_ROI__", _js_version("spu-roi.js"))
+    .replace("__JSV_SHOPS__", _js_version("shops.js"))
+    .replace("__JSV_DASHBOARD__", _js_version("dashboard.js"))
   )
 
 
@@ -588,6 +588,17 @@ _PAGE_HTML = """<!doctype html>
       background: var(--paper-deep);
       color: var(--ink);
       pointer-events: none;
+    }
+    .op-source-badge {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      padding: 2px 6px;
+      margin-left: 6px;
+      border: 1px solid var(--rule-soft);
+      background: var(--paper-deep);
+      color: var(--muted);
+      vertical-align: middle;
     }
     .op-input-note {
       width: 100%;

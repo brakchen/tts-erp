@@ -756,13 +756,27 @@
       tr.dataset.origCurrency = it.currency || "CNY";
       var currency = it.currency || "CNY";
       var costCell;
-      // New row (no cost yet): CNY placeholder, empty input.
+      // New row (no cost yet): if a 货源价 (source_unit_cost) exists,
+      // pre-fill the input so the operator can see and submit it.
+      // Otherwise show empty with "缺" placeholder.
       if (it.unit_cost == null) {
-        costCell =
-          '<span class="op-cost-input" title="输入成本后点提交全部">' +
-          '<input type="number" class="op-input-cost" step="0.0001" min="0.0001" data-k="unit_cost" placeholder="缺" aria-label="单位成本">' +
-          '<span class="op-currency-fixed" aria-label="货币">CNY</span>' +
-          "</span>";
+        if (it.source_unit_cost == null) {
+          costCell =
+            '<span class="op-cost-input" title="输入成本后点提交全部">' +
+            '<input type="number" class="op-input-cost" step="0.0001" min="0.0001" data-k="unit_cost" placeholder="缺" aria-label="单位成本">' +
+            '<span class="op-currency-fixed" aria-label="货币">CNY</span>' +
+            "</span>";
+        } else {
+          tr.dataset.origCost = String(it.source_unit_cost);
+          costCell =
+            '<span class="op-cost-input" title="货源价（妙手采集）—— 点提交全部即可入库">' +
+            '<input type="number" class="op-input-cost" step="0.0001" min="0.0001" data-k="unit_cost" value="' +
+            esc(String(it.source_unit_cost)) +
+            '" aria-label="单位成本">' +
+            '<span class="op-currency-fixed" aria-label="货币">CNY</span>' +
+            "</span>" +
+            '<span class="op-source-badge" title="来源：妙手货源价">货源价</span>';
+        }
       } else {
         // Existing cost: pre-filled input + its currency badge. Editing
         // the number re-files under the SAME currency (the operator is
