@@ -53,7 +53,7 @@
 
 | lane_id | 主题 | owner(session) | branch/worktree | 拥有的文件/目录 | 状态 | updated(UTC) |
 | --- | --- | --- | --- | --- | --- | --- |
-| feat/intercept-config | 请求拦截配置管理：数据库 migration + API + 前端页面 + 统计 + 30天清理 | 主 agent 调度子 agent | .worktrees/intercept-config | tts_erp_v2/api/v2/intercept.py(新)、tts_erp_v2/api/v2/pages.py(改)、tts_erp_v2/static/js/intercept-*.js(新)、schema_tts_erp.sql、tests/api/test_intercept_*.py(新) | draft | 2026-09-12T10:00Z |
+| feat/intercept-config | 请求拦截配置管理：数据库 migration + API + 前端页面 + 统计 + 30天清理 | 主 agent 调度子 agent | merged to master | tts_erp_v2/api/v2/intercept.py、tts_erp_v2/api/v2/pages.py、tts_erp_v2/static/js/intercept-*.js、alembic/versions/0026_intercept_tables.py、tests/api/test_intercept_*.py | merged | 2026-09-12T12:00Z |
 
 <!-- 新 lane 示例（复制改）：
 | lane_id | 主题 | owner(session) | .worktrees/<slug> / branch | 文件列表 | draft | <UTC> |
