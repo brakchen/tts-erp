@@ -353,6 +353,30 @@ def post_dumps(
     response_body = payload.dump.response.body
     main_order_id = payload.dump.mainOrderId
 
+    # response.body 为 None 时（插件抓取失败 / 超时），只记 raw_log 不解析
+    if response_body is None:
+        log_id = write_raw_log(
+            sess,
+            domain=domain,
+            shop_id=shop_id,
+            endpoint=endpoint,
+            captured_at=captured_at,
+            request_params=request_params,
+            request_body=request_body,
+            response_body=None,
+            parse_error="response.body is None",
+            rows_written=0,
+        )
+        sess.commit()
+        return _ok_response(
+            request_id=request_id,
+            data={
+                "status": "empty_response",
+                "logId": log_id,
+                "rowsWritten": 0,
+            },
+        )
+
     # 1. 先写 raw_log 拿到 log_id（解析函数需要 log_id 关联）
     log_id = write_raw_log(
         sess,

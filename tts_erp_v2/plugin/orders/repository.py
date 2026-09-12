@@ -38,7 +38,7 @@ def write_raw_log(
     captured_at: datetime,
     request_params: dict | None,
     request_body: dict | None,
-    response_body: dict,
+    response_body: dict | None,
     parse_error: str | None,
     rows_written: int,
 ) -> int:
@@ -117,26 +117,38 @@ def has_data_bulk(
                 .all()
             )
         else:
-            requested = [(statement_id, versions[statement_id]) for statement_id in ids if statement_id in versions]
-            unversioned = [statement_id for statement_id in ids if statement_id not in versions]
+            requested = [
+                (statement_id, versions[statement_id])
+                for statement_id in ids
+                if statement_id in versions
+            ]
+            unversioned = [
+                statement_id for statement_id in ids if statement_id not in versions
+            ]
             predicates = [
-                and_(ChromeSettlement.statement_id == statement_id, ChromeSettlement.statement_version == version)
+                and_(
+                    ChromeSettlement.statement_id == statement_id,
+                    ChromeSettlement.statement_version == version,
+                )
                 for statement_id, version in requested
             ]
             if unversioned:
                 predicates.append(ChromeSettlement.statement_id.in_(unversioned))
-            rows = (
-                sess.execute(
-                    select(ChromeSettlement.statement_id, ChromeSettlement.statement_version).where(
-                        ChromeSettlement.shop_id == shop_id,
-                        or_(*predicates) if predicates else False,
-                    )
+            rows = sess.execute(
+                select(
+                    ChromeSettlement.statement_id, ChromeSettlement.statement_version
+                ).where(
+                    ChromeSettlement.shop_id == shop_id,
+                    or_(*predicates) if predicates else False,
                 )
-                .all()
-            )
+            ).all()
             found_pairs = set(rows)
             return {
-                id_: ((id_, versions[id_]) in found_pairs if id_ in versions else any(row_id == id_ for row_id, _ in found_pairs))
+                id_: (
+                    (id_, versions[id_]) in found_pairs
+                    if id_ in versions
+                    else any(row_id == id_ for row_id, _ in found_pairs)
+                )
                 for id_ in ids_set
             }
     else:

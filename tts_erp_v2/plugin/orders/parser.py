@@ -64,8 +64,18 @@ def parse_order_response(
 ) -> int:
     """解析 order/list 响应 → 写 orders + order_lines。返回写入行数。"""
     rows_written = 0
-    data = response_body.get("data") or {}
-    main_orders = data.get("main_orders") or []
+    # 兼容两种格式：
+    #   1. 完整 API 响应: {"data": {"main_orders": [...]}}
+    #   2. 单个订单对象: {"main_order_id": "...", "sku_module": [...], ...}
+    data = response_body.get("data")
+    if isinstance(data, dict) and "main_orders" in data:
+        # 格式1：完整 API 响应
+        main_orders = data.get("main_orders") or []
+    elif "main_order_id" in response_body:
+        # 格式2：单个订单对象
+        main_orders = [response_body]
+    else:
+        main_orders = data.get("main_orders") or [] if isinstance(data, dict) else []
 
     for order in main_orders:
         order_id = str(order.get("main_order_id", ""))
