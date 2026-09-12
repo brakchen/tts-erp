@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # pg_dump_hourly.sh — 每小时 pg_dump + 自动轮转（保留最近 N 份）
 # 用法: bash scripts/backup/pg_dump_hourly.sh
-# 依赖: docker（容器内执行 pg_dump）
+# 依赖: .env（TTS_ERP_DB_URL 或 PG* 变量）、docker（容器内执行）
 
 set -euo pipefail
 
