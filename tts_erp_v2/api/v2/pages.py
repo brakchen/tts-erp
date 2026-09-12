@@ -68,6 +68,9 @@ def _page(html: str) -> HTMLResponse:
     .replace("__JSV_SPU_ROI__", _js_version("spu-roi.js"))
     .replace("__JSV_SHOPS__", _js_version("shops.js"))
     .replace("__JSV_DASHBOARD__", _js_version("dashboard.js"))
+    .replace("__JSV_INTERCEPT_CONFIGS__", _js_version("intercept-configs.js"))
+    .replace("__JSV_INTERCEPT_REQUESTS__", _js_version("intercept-requests.js"))
+    .replace("__JSV_INTERCEPT_STATS__", _js_version("intercept-stats.js"))
   )
 
 
@@ -1393,6 +1396,11 @@ _DASHBOARD_PAGE_HTML = """<!doctype html>
             <span class="nav-card-title">店铺注册</span>
             <span class="nav-card-desc">管理插件同步店铺的注册与关联</span>
           </a>
+          <a href="../../v2/pages/intercept-configs" class="nav-card">
+            <span class="nav-card-icon">🔍</span>
+            <span class="nav-card-title">请求拦截</span>
+            <span class="nav-card-desc">管理 HTTP 请求拦截配置，查看拦截记录</span>
+          </a>
         </div>
       </section>
 
@@ -1460,6 +1468,588 @@ _DASHBOARD_PAGE_HTML = """<!doctype html>
   </main>
 
   <script src="../../static/js/dashboard.js?v=__JSV_DASHBOARD__" defer></script>
+</body>
+</html>
+"""
+
+
+@router.get("/intercept-configs", response_class=HTMLResponse)
+def intercept_configs_page() -> HTMLResponse:
+  """拦截配置管理页面。
+
+  功能：配置列表、新增/编辑弹窗、批量操作、导入导出、筛选分页。
+  行为在 static/js/intercept-configs.js。
+  """
+  return _page(_INTERCEPT_CONFIGS_PAGE_HTML)
+
+
+@router.get("/intercept-requests", response_class=HTMLResponse)
+def intercept_requests_page() -> HTMLResponse:
+  """拦截记录查询页面。
+
+  功能：记录列表、详情弹窗、筛选（域名/路径/状态码/白名单/时间）、分页。
+  行为在 static/js/intercept-requests.js。
+  """
+  return _page(_INTERCEPT_REQUESTS_PAGE_HTML)
+
+
+@router.get("/intercept-stats", response_class=HTMLResponse)
+def intercept_stats_page() -> HTMLResponse:
+  """拦截统计概览页面。
+
+  功能：总览统计卡片、按域名/方法/状态码分布、最近 7 天每日趋势。
+  行为在 static/js/intercept-stats.js。
+  """
+  return _page(_INTERCEPT_STATS_PAGE_HTML)
+
+
+_INTERCEPT_CONFIGS_PAGE_HTML = """<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>拦截配置 · tts-erp</title>
+  <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
+  <style>
+    :root {
+      --paper: #F4EFE4;
+      --paper-deep: #EAE3D2;
+      --ink: #1B1814;
+      --ink-soft: #4A4239;
+      --rule: #C9BFA8;
+      --rule-soft: #DDD4BF;
+      --accent: #B8390E;
+      --accent-deep: #8F2C09;
+      --muted: #6E6657;
+      --danger: #8C1A1A;
+      --ok: #2F6B3E;
+      --mono: ui-monospace, 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', Consolas, 'Liberation Mono', monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+      --serif: ui-serif, 'Iowan Old Style', 'Apple Garamond', 'Source Han Serif SC', 'Noto Serif CJK SC', serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { background: var(--paper); color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.4; margin: 0; -webkit-font-smoothing: antialiased; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-deep); }
+    .op-header { border-bottom: 1px solid var(--rule); padding: 18px 28px 14px; background: var(--paper); }
+    .op-header-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+    .op-header-titles { display: flex; flex-direction: column; gap: 2px; }
+    .op-eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+    .op-title { font-family: var(--serif); font-weight: 600; font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+    .op-identity { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+    .page-main { max-width: 1280px; margin: 0 auto; padding: 24px 28px 64px; }
+    .toolbar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--rule-soft); }
+    .toolbar-field { display: flex; align-items: center; gap: 8px; }
+    .toolbar-field label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+    .toolbar-field input, .toolbar-field select { font-family: var(--sans); font-size: 13px; background: transparent; border: 1px solid var(--rule); padding: 6px 10px; color: var(--ink); border-radius: 0; min-width: 140px; }
+    .toolbar-field input:focus, .toolbar-field select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .toolbar-spacer { flex: 1; }
+    .btn-primary { font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; padding: 8px 16px; background: var(--ink); color: var(--paper); border: 0; cursor: pointer; border-radius: 0; transition: background 120ms ease; }
+    .btn-primary:hover { background: var(--accent); }
+    .btn-primary:disabled { background: var(--rule); color: var(--paper); cursor: not-allowed; }
+    .btn-secondary { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; padding: 8px 16px; background: transparent; color: var(--ink); border: 1px solid var(--rule); cursor: pointer; border-radius: 0; transition: border-color 120ms ease; }
+    .btn-secondary:hover { border-color: var(--accent); }
+    .btn-secondary:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-icon { background: transparent; border: 0; cursor: pointer; font-size: 16px; padding: 4px; }
+    .btn-icon:hover { opacity: 0.7; }
+    .table-wrap { overflow-x: auto; }
+    .op-table { width: 100%; border-collapse: collapse; font-family: var(--sans); font-size: 13px; background: var(--paper); }
+    .op-th { text-align: left; font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); font-weight: 500; padding: 12px 12px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+    .op-table td { padding: 12px 12px; border-bottom: 1px solid var(--rule-soft); vertical-align: middle; }
+    .op-table tbody tr:hover { background: var(--paper-deep); }
+    .mono { font-family: var(--mono); font-size: 12px; }
+    .badge { display: inline-block; font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: 0.06em; padding: 2px 8px; border-radius: 0; }
+    .badge-ok { background: var(--ok); color: #fff; }
+    .badge-disabled { background: var(--rule); color: var(--ink); }
+    .tag { display: inline-block; font-family: var(--mono); font-size: 10px; padding: 2px 6px; border: 1px solid var(--rule); margin-right: 4px; }
+    .actions { white-space: nowrap; }
+    .pager { display: flex; align-items: center; gap: 18px; padding-top: 16px; border-top: 1px solid var(--rule-soft); font-family: var(--sans); font-size: 13px; }
+    .pager .btn-secondary:disabled { opacity: 0.45; cursor: not-allowed; }
+    .op-empty, .op-error { text-align: center; padding: 48px 20px; color: var(--muted); font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; }
+    .op-error { color: var(--danger); }
+    .modal-overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(20, 16, 10, 0.86); z-index: 1000; }
+    .modal-overlay.is-open { display: flex; }
+    .modal-box { background: var(--paper); border: 1px solid var(--rule); width: 560px; max-width: 95vw; max-height: 90vh; overflow-y: auto; }
+    .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--rule); }
+    .modal-header h2 { font-family: var(--serif); font-size: 18px; font-weight: 600; margin: 0; }
+    .modal-close { background: transparent; border: 0; font-size: 24px; cursor: pointer; color: var(--muted); line-height: 1; }
+    .modal-close:hover { color: var(--accent); }
+    .modal-body { padding: 20px; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+    .form-group input[type="text"], .form-group textarea { width: 100%; font-family: var(--sans); font-size: 13px; background: transparent; border: 1px solid var(--rule); padding: 8px 12px; color: var(--ink); border-radius: 0; }
+    .form-group input[type="text"]:focus, .form-group textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .form-group textarea { resize: vertical; min-height: 60px; }
+    .form-group .hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
+    .form-group-checkbox { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .form-group-checkbox label { font-family: var(--sans); font-size: 13px; color: var(--ink); margin: 0; text-transform: none; letter-spacing: 0; }
+    .form-group-checkbox input[type="checkbox"] { width: 16px; height: 16px; }
+    .form-radio { display: flex; gap: 16px; }
+    .form-radio label { display: flex; align-items: center; gap: 6px; font-family: var(--sans); font-size: 13px; color: var(--ink); text-transform: none; letter-spacing: 0; cursor: pointer; }
+    .form-error { color: var(--danger); font-size: 12px; margin-bottom: 12px; }
+    .modal-footer { display: flex; justify-content: flex-end; gap: 12px; padding: 16px 20px; border-top: 1px solid var(--rule); }
+    @media (max-width: 720px) { .toolbar { flex-direction: column; align-items: stretch; } .toolbar-field { flex-direction: column; align-items: stretch; } .toolbar-field input, .toolbar-field select { min-width: auto; } }
+  </style>
+</head>
+<body>
+  <header class="op-header">
+    <div class="op-header-row">
+      <div class="op-header-titles">
+        <span class="op-eyebrow">TikTok Shop · Interceptor</span>
+        <h1 class="op-title">拦截配置</h1>
+      </div>
+      <div class="op-identity" id="ops-identity"></div>
+    </div>
+  </header>
+
+  <main class="page-main">
+    <div class="toolbar">
+      <div class="toolbar-field">
+        <label for="filter-domain">域名</label>
+        <input id="filter-domain" type="text" placeholder="seller.tiktokglobalshop.com">
+      </div>
+      <div class="toolbar-field">
+        <label for="filter-enabled">状态</label>
+        <select id="filter-enabled">
+          <option value="">全部</option>
+          <option value="true">启用</option>
+          <option value="false">禁用</option>
+        </select>
+      </div>
+      <div class="toolbar-field">
+        <label for="filter-search">搜索</label>
+        <input id="filter-search" type="text" placeholder="域名或 endpoint">
+      </div>
+      <button class="btn-primary" id="btn-query">查询</button>
+      <span class="toolbar-spacer"></span>
+      <button class="btn-secondary" id="btn-import">导入</button>
+      <button class="btn-secondary" id="btn-export">导出</button>
+      <button class="btn-primary" id="btn-add">+ 新增配置</button>
+    </div>
+
+    <div class="toolbar" style="border-bottom: 0; padding-bottom: 0;">
+      <button class="btn-secondary" id="btn-batch-enable">批量启用</button>
+      <button class="btn-secondary" id="btn-batch-disable">批量禁用</button>
+      <button class="btn-secondary" id="btn-batch-delete" style="color: var(--danger);">批量删除</button>
+      <span class="toolbar-spacer"></span>
+      <span style="font-family: var(--mono); font-size: 11px; color: var(--muted);">共 <span id="config-total">0</span> 条</span>
+    </div>
+
+    <div class="table-wrap">
+      <table class="op-table">
+        <thead>
+          <tr>
+            <th class="op-th" width="40"><input type="checkbox" id="select-all"></th>
+            <th class="op-th" width="60">ID</th>
+            <th class="op-th">域名</th>
+            <th class="op-th">Endpoint</th>
+            <th class="op-th" width="80">状态</th>
+            <th class="op-th" width="160">标签</th>
+            <th class="op-th" width="80">操作</th>
+          </tr>
+        </thead>
+        <tbody id="config-tbody">
+          <tr><td colspan="7" class="op-empty">加载中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="pager">
+      <button class="btn-secondary" id="btn-prev" disabled>← 上一页</button>
+      <span id="pager-label">—</span>
+      <button class="btn-secondary" id="btn-next" disabled>下一页 →</button>
+    </div>
+  </main>
+
+  <!-- Config Modal -->
+  <div class="modal-overlay" id="config-modal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2 id="modal-title">新增拦截配置</h2>
+        <button class="modal-close" id="btn-modal-close">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="form-error" class="form-error"></div>
+        <form id="config-form">
+          <div class="form-group">
+            <label for="form-domain">域名 *</label>
+            <input id="form-domain" type="text" placeholder="seller.tiktokglobalshop.com">
+            <div class="hint">输入完整域名</div>
+          </div>
+          <div class="form-group">
+            <label for="form-endpoint">Endpoint *</label>
+            <input id="form-endpoint" type="text" placeholder="/api/v1/orders/*">
+            <div class="hint">支持 * 通配符，如 /api/* 匹配 /api/ 下所有路径</div>
+          </div>
+          <div class="form-group">
+            <label for="form-description">描述</label>
+            <textarea id="form-description" placeholder="可选描述"></textarea>
+          </div>
+          <div class="form-group">
+            <label for="form-tags">标签</label>
+            <input id="form-tags" type="text" placeholder="订单, 物流 (逗号分隔)">
+            <div class="hint">多个标签用逗号分隔</div>
+          </div>
+          <div class="form-group-checkbox">
+            <input id="form-capture-headers" type="checkbox" checked>
+            <label for="form-capture-headers">记录请求/响应头</label>
+          </div>
+          <div class="form-group-checkbox">
+            <input id="form-capture-body" type="checkbox" checked>
+            <label for="form-capture-body">记录请求/响应体</label>
+          </div>
+          <div class="form-group">
+            <label>状态</label>
+            <div class="form-radio">
+              <label><input type="radio" name="enabled" id="form-enabled" value="true" checked> 启用</label>
+              <label><input type="radio" name="enabled" value="false"> 禁用</label>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="btn-cancel">取消</button>
+        <button class="btn-primary" id="btn-save">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../../static/js/intercept-configs.js?v=__JSV_INTERCEPT_CONFIGS__" defer></script>
+</body>
+</html>
+"""
+
+
+_INTERCEPT_REQUESTS_PAGE_HTML = """<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>拦截记录 · tts-erp</title>
+  <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
+  <style>
+    :root {
+      --paper: #F4EFE4;
+      --paper-deep: #EAE3D2;
+      --ink: #1B1814;
+      --ink-soft: #4A4239;
+      --rule: #C9BFA8;
+      --rule-soft: #DDD4BF;
+      --accent: #B8390E;
+      --accent-deep: #8F2C09;
+      --muted: #6E6657;
+      --danger: #8C1A1A;
+      --ok: #2F6B3E;
+      --mono: ui-monospace, 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', Consolas, 'Liberation Mono', monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+      --serif: ui-serif, 'Iowan Old Style', 'Apple Garamond', 'Source Han Serif SC', 'Noto Serif CJK SC', serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { background: var(--paper); color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.4; margin: 0; -webkit-font-smoothing: antialiased; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-deep); }
+    .op-header { border-bottom: 1px solid var(--rule); padding: 18px 28px 14px; background: var(--paper); }
+    .op-header-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+    .op-header-titles { display: flex; flex-direction: column; gap: 2px; }
+    .op-eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+    .op-title { font-family: var(--serif); font-weight: 600; font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+    .op-identity { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+    .page-main { max-width: 1280px; margin: 0 auto; padding: 24px 28px 64px; }
+    .toolbar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--rule-soft); }
+    .toolbar-field { display: flex; align-items: center; gap: 8px; }
+    .toolbar-field label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+    .toolbar-field input, .toolbar-field select { font-family: var(--sans); font-size: 13px; background: transparent; border: 1px solid var(--rule); padding: 6px 10px; color: var(--ink); border-radius: 0; min-width: 120px; }
+    .toolbar-field input:focus, .toolbar-field select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .toolbar-spacer { flex: 1; }
+    .btn-primary { font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; padding: 8px 16px; background: var(--ink); color: var(--paper); border: 0; cursor: pointer; border-radius: 0; transition: background 120ms ease; }
+    .btn-primary:hover { background: var(--accent); }
+    .btn-secondary { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; padding: 8px 16px; background: transparent; color: var(--ink); border: 1px solid var(--rule); cursor: pointer; border-radius: 0; transition: border-color 120ms ease; }
+    .btn-secondary:hover { border-color: var(--accent); }
+    .btn-secondary:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-icon { background: transparent; border: 0; cursor: pointer; font-size: 16px; padding: 4px; }
+    .btn-icon:hover { opacity: 0.7; }
+    .table-wrap { overflow-x: auto; }
+    .op-table { width: 100%; border-collapse: collapse; font-family: var(--sans); font-size: 13px; background: var(--paper); }
+    .op-th { text-align: left; font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); font-weight: 500; padding: 12px 12px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+    .op-table td { padding: 10px 12px; border-bottom: 1px solid var(--rule-soft); vertical-align: middle; }
+    .op-table tbody tr:hover { background: var(--paper-deep); }
+    .op-table tbody tr.clickable-row { cursor: pointer; }
+    .mono { font-family: var(--mono); font-size: 12px; }
+    .badge { display: inline-block; font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: 0.06em; padding: 2px 8px; border-radius: 0; }
+    .badge-ok { background: var(--ok); color: #fff; }
+    .badge-muted { background: var(--rule); color: var(--ink); }
+    .method-badge { font-family: var(--mono); font-size: 10px; font-weight: 600; padding: 2px 6px; letter-spacing: 0.04em; }
+    .method-get { color: var(--ok); }
+    .method-post { color: var(--accent); }
+    .method-put { color: #8a6d1a; }
+    .method-delete { color: var(--danger); }
+    .status-ok { color: var(--ok); }
+    .status-err { color: var(--danger); }
+    .td-host { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .td-path { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pager { display: flex; align-items: center; gap: 18px; padding-top: 16px; border-top: 1px solid var(--rule-soft); font-family: var(--sans); font-size: 13px; }
+    .op-empty, .op-error { text-align: center; padding: 48px 20px; color: var(--muted); font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; }
+    .op-error { color: var(--danger); }
+    .modal-overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(20, 16, 10, 0.86); z-index: 1000; }
+    .modal-overlay.is-open { display: flex; }
+    .modal-box { background: var(--paper); border: 1px solid var(--rule); width: 720px; max-width: 95vw; max-height: 90vh; overflow-y: auto; }
+    .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--rule); }
+    .modal-header h2 { font-family: var(--serif); font-size: 18px; font-weight: 600; margin: 0; }
+    .modal-close { background: transparent; border: 0; font-size: 24px; cursor: pointer; color: var(--muted); line-height: 1; }
+    .modal-close:hover { color: var(--accent); }
+    .modal-body { padding: 20px; }
+    .detail-grid { display: flex; flex-direction: column; gap: 20px; }
+    .detail-section { border: 1px solid var(--rule-soft); padding: 16px; }
+    .detail-section-title { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px 0; padding-bottom: 8px; border-bottom: 1px solid var(--rule-soft); }
+    .detail-row { display: flex; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--rule-soft); }
+    .detail-row:last-child { border-bottom: 0; }
+    .detail-label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); min-width: 100px; flex-shrink: 0; }
+    .detail-value { font-family: var(--sans); font-size: 13px; word-break: break-all; }
+    .detail-url { word-break: break-all; }
+    .detail-pre { background: var(--paper-deep); border: 1px solid var(--rule-soft); padding: 12px; font-family: var(--mono); font-size: 12px; overflow-x: auto; margin: 0; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto; }
+    .text-danger { color: var(--danger); }
+    @media (max-width: 720px) { .toolbar { flex-direction: column; align-items: stretch; } .toolbar-field { flex-direction: column; align-items: stretch; } .toolbar-field input, .toolbar-field select { min-width: auto; } }
+  </style>
+</head>
+<body>
+  <header class="op-header">
+    <div class="op-header-row">
+      <div class="op-header-titles">
+        <span class="op-eyebrow">TikTok Shop · Interceptor</span>
+        <h1 class="op-title">拦截记录</h1>
+      </div>
+      <div class="op-identity" id="ops-identity"></div>
+    </div>
+  </header>
+
+  <main class="page-main">
+    <div class="toolbar">
+      <div class="toolbar-field">
+        <label for="filter-host">域名</label>
+        <input id="filter-host" type="text" placeholder="seller.tiktokglobalshop.com">
+      </div>
+      <div class="toolbar-field">
+        <label for="filter-path">路径</label>
+        <input id="filter-path" type="text" placeholder="/api/v1/orders">
+      </div>
+      <div class="toolbar-field">
+        <label for="filter-status">状态码</label>
+        <input id="filter-status" type="text" placeholder="200">
+      </div>
+      <div class="toolbar-field">
+        <label for="filter-whitelisted">白名单</label>
+        <select id="filter-whitelisted">
+          <option value="">全部</option>
+          <option value="true">是</option>
+          <option value="false">否</option>
+        </select>
+      </div>
+      <div class="toolbar-field">
+        <label for="filter-method">方法</label>
+        <select id="filter-method">
+          <option value="">全部</option>
+          <option value="GET">GET</option>
+          <option value="POST">POST</option>
+          <option value="PUT">PUT</option>
+          <option value="DELETE">DELETE</option>
+        </select>
+      </div>
+      <div class="toolbar-field">
+        <label for="filter-from">起始</label>
+        <input id="filter-from" type="date">
+      </div>
+      <div class="toolbar-field">
+        <label for="filter-to">截止</label>
+        <input id="filter-to" type="date">
+      </div>
+      <button class="btn-primary" id="btn-query">查询</button>
+    </div>
+
+    <div class="toolbar" style="border-bottom: 0; padding-bottom: 0;">
+      <span style="font-family: var(--mono); font-size: 11px; color: var(--muted);">共 <span id="req-total">0</span> 条</span>
+    </div>
+
+    <div class="table-wrap">
+      <table class="op-table">
+        <thead>
+          <tr>
+            <th class="op-th" width="160">时间</th>
+            <th class="op-th" width="70">方法</th>
+            <th class="op-th">域名</th>
+            <th class="op-th">路径</th>
+            <th class="op-th" width="70">状态</th>
+            <th class="op-th" width="80">耗时</th>
+            <th class="op-th" width="60">白名单</th>
+            <th class="op-th" width="50">详情</th>
+          </tr>
+        </thead>
+        <tbody id="req-tbody">
+          <tr><td colspan="8" class="op-empty">加载中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="pager">
+      <button class="btn-secondary" id="btn-prev" disabled>← 上一页</button>
+      <span id="pager-label">—</span>
+      <button class="btn-secondary" id="btn-next" disabled>下一页 →</button>
+    </div>
+  </main>
+
+  <!-- Detail Modal -->
+  <div class="modal-overlay" id="detail-modal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2 id="modal-title">请求详情</h2>
+        <button class="modal-close" id="btn-modal-close">×</button>
+      </div>
+      <div class="modal-body" id="detail-content">
+        <div class="op-empty">加载中…</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../../static/js/intercept-requests.js?v=__JSV_INTERCEPT_REQUESTS__" defer></script>
+</body>
+</html>
+"""
+
+
+_INTERCEPT_STATS_PAGE_HTML = """<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>拦截统计 · tts-erp</title>
+  <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
+  <style>
+    :root {
+      --paper: #F4EFE4;
+      --paper-deep: #EAE3D2;
+      --ink: #1B1814;
+      --ink-soft: #4A4239;
+      --rule: #C9BFA8;
+      --rule-soft: #DDD4BF;
+      --accent: #B8390E;
+      --accent-deep: #8F2C09;
+      --muted: #6E6657;
+      --danger: #8C1A1A;
+      --ok: #2F6B3E;
+      --mono: ui-monospace, 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', Consolas, 'Liberation Mono', monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+      --serif: ui-serif, 'Iowan Old Style', 'Apple Garamond', 'Source Han Serif SC', 'Noto Serif CJK SC', serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { background: var(--paper); color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.4; margin: 0; -webkit-font-smoothing: antialiased; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-deep); }
+    .op-header { border-bottom: 1px solid var(--rule); padding: 18px 28px 14px; background: var(--paper); }
+    .op-header-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+    .op-header-titles { display: flex; flex-direction: column; gap: 2px; }
+    .op-eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+    .op-title { font-family: var(--serif); font-weight: 600; font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+    .op-identity { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+    .page-main { max-width: 1280px; margin: 0 auto; padding: 24px 28px 64px; }
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 32px; }
+    @media (max-width: 768px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
+    .stat-card { background: var(--paper); border: 1px solid var(--rule); padding: 20px; text-align: center; }
+    .stat-icon { font-size: 28px; margin-bottom: 8px; }
+    .stat-value { font-family: var(--mono); font-weight: 700; font-size: 32px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+    .stat-value-warn { color: var(--accent); }
+    .stat-value-ok { color: var(--ok); }
+    .stat-label { font-size: 13px; color: var(--ink-soft); margin-top: 4px; }
+    .stat-hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
+    .section { margin-bottom: 32px; }
+    .section-title { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); font-weight: 500; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--rule-soft); }
+    .dist-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--rule-soft); }
+    .dist-row:last-child { border-bottom: 0; }
+    .dist-label { font-family: var(--mono); font-size: 12px; min-width: 200px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dist-bar-wrap { flex: 1; height: 20px; background: var(--paper-deep); border: 1px solid var(--rule-soft); }
+    .dist-bar { height: 100%; background: var(--accent); transition: width 300ms ease; }
+    .dist-value { font-family: var(--mono); font-size: 12px; min-width: 120px; text-align: right; color: var(--ink-soft); }
+    .dist-empty { text-align: center; padding: 24px; color: var(--muted); font-size: 13px; }
+    .daily-chart { display: flex; align-items: flex-end; gap: 8px; height: 200px; padding: 16px 0; }
+    .daily-col { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; }
+    .daily-bar-wrap { flex: 1; width: 100%; display: flex; align-items: flex-end; }
+    .daily-bar { width: 100%; background: var(--accent); transition: height 300ms ease; min-height: 2px; }
+    .daily-count { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); margin-top: 4px; }
+    .daily-date { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-top: 2px; }
+    .loading { text-align: center; padding: 48px; color: var(--muted); font-family: var(--mono); font-size: 12px; }
+    .error-msg { text-align: center; padding: 24px; color: var(--danger); font-size: 13px; display: none; }
+  </style>
+</head>
+<body>
+  <header class="op-header">
+    <div class="op-header-row">
+      <div class="op-header-titles">
+        <span class="op-eyebrow">TikTok Shop · Interceptor</span>
+        <h1 class="op-title">拦截统计</h1>
+      </div>
+      <div class="op-identity" id="ops-identity"></div>
+    </div>
+  </header>
+
+  <main class="page-main">
+    <div id="loading" class="loading">加载中…</div>
+    <div id="error-msg" class="error-msg"></div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon">📊</div>
+        <div class="stat-value" id="stat-total-requests">—</div>
+        <div class="stat-label">总请求数</div>
+        <div class="stat-hint">最近 7 天</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">✅</div>
+        <div class="stat-value stat-value-ok" id="stat-whitelisted">—</div>
+        <div class="stat-label">白名单命中</div>
+        <div class="stat-hint">完整记录的请求</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">📈</div>
+        <div class="stat-value" id="stat-today-requests">—</div>
+        <div class="stat-label">今日请求</div>
+        <div class="stat-hint">今天的拦截数</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">⚠️</div>
+        <div class="stat-value stat-value-warn" id="stat-error-requests">—</div>
+        <div class="stat-label">错误请求</div>
+        <div class="stat-hint">最近 7 天</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">最近 7 天每日趋势</div>
+      <div class="daily-chart" id="daily-chart">
+        <div class="dist-empty">加载中…</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">按域名分布</div>
+      <div id="dist-by-host">
+        <div class="dist-empty">加载中…</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">按方法分布</div>
+      <div id="dist-by-method">
+        <div class="dist-empty">加载中…</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">按状态码分布</div>
+      <div id="dist-by-status">
+        <div class="dist-empty">加载中…</div>
+      </div>
+    </div>
+  </main>
+
+  <script src="../../static/js/intercept-stats.js?v=__JSV_INTERCEPT_STATS__" defer></script>
 </body>
 </html>
 """
