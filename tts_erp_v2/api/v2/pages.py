@@ -1195,9 +1195,10 @@ _DASHBOARD_PAGE_HTML = """<!doctype html>
     }
     .summary-card {
       display: flex;
-      align-items: center;
-      gap: 14px;
-      padding: 16px;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 16px 18px;
       border: 1px solid var(--rule-soft);
       background: var(--paper);
       text-decoration: none;
@@ -1209,28 +1210,30 @@ _DASHBOARD_PAGE_HTML = """<!doctype html>
       color: var(--ink);
     }
     .summary-icon {
-      font-size: 24px;
-      flex-shrink: 0;
+      font-size: 22px;
+      line-height: 1;
     }
     .summary-content {
-      flex: 1;
-      min-width: 0;
+      width: 100%;
     }
     .summary-value {
       font-family: var(--mono);
       font-weight: 700;
-      font-size: 24px;
+      font-size: 26px;
       letter-spacing: -0.02em;
       font-variant-numeric: tabular-nums;
+      line-height: 1.1;
     }
     .summary-label {
-      font-size: 12px;
-      color: var(--muted);
+      font-size: 13px;
+      color: var(--ink-soft);
+      margin-top: 2px;
     }
     .summary-hint {
       font-size: 11px;
       color: var(--muted);
-      margin-top: 2px;
+      margin-top: 4px;
+      line-height: 1.4;
     }
     .summary-warn .summary-value { color: var(--accent); }
     .summary-ok .summary-value { color: var(--ok); }
