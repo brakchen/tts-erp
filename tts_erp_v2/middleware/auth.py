@@ -84,6 +84,9 @@ _READONLY_PREFIXES = (
     # Operator-console static assets (vendor/bootstrap / js/console.js). Not under
     # /v2/; any authenticated session may fetch them.
     "/static/",
+    # intercept 配置列表和请求查询 (GET only)
+    "/v2/intercept/configs",
+    "/v2/intercept/requests",
 )
 _READWRITE_EXACT = {
     "/v2/reporting/manual-costs",  # POST only — GET below stays readonly
@@ -101,6 +104,8 @@ _READONLY_EXACT = {
     "/v2/llm-context",  # GET — self-describing system + data dictionary for LLM agents
     "/v2/spu-images",  # GET — list ready images (no trailing slash in router)
     "/v2/analytics/spu-roi",  # GET — SPU 实际 ROI 看板主表(只读报表)
+    "/v2/intercept/config",  # GET — 配置下发（插件用）
+    "/v2/intercept/requests/stats",  # GET — 统计信息
     # TikTok seller OAuth: both pages are classified readonly at the
     # middleware so any logged-in operator can load the UI / see whether
     # generation works. The handler (oauth.py::authorize) still enforces

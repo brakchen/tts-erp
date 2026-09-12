@@ -1,7 +1,7 @@
 """intercept tables: configs + requests + sessions + cursors
 
-Revision ID: 0014
-Revises: 0013
+Revision ID: 0026
+Revises: 0025
 Create Date: 2026-09-12 10:00:00.000000
 """
 from __future__ import annotations
@@ -11,8 +11,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
 # revision identifiers
-revision = '0014'
-down_revision = '0013'
+revision: str = '0026_intercept_tables'
+down_revision: str | None = '0025_drop_shops_data_source'
 branch_labels = None
 depends_on = None
 

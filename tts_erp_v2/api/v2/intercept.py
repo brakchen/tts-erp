@@ -133,6 +133,21 @@ class InterceptSyncRequest(BaseModel):
 # ─── Helpers ─────────────────────────────────────────────────────────
 
 
+def _serialize_datetime(obj: Any) -> Any:
+    """序列化 datetime 对象为 ISO 格式字符串"""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    return obj
+
+
+def _serialize_config(config: dict) -> dict:
+    """序列化配置对象"""
+    return {
+        k: _serialize_datetime(v)
+        for k, v in config.items()
+    }
+
+
 def _compute_url_hash(url: str) -> str:
     """计算 URL 的 SHA-256 哈希"""
     return hashlib.sha256(url.encode("utf-8")).hexdigest()
@@ -169,8 +184,8 @@ router = APIRouter(prefix="/v2/intercept", tags=["intercept"])
 # ─── Config Management (readwrite) ───────────────────────────────────
 
 
-@router.get("/configs")
-def list_configs(
+@router.get("/configs/export")
+def export_configs(
     request: Request,
     enabled: bool | None = None,
     domain: str | None = None,
@@ -207,7 +222,7 @@ def list_configs(
 
     total = db.execute(text(count_query), count_params).scalar()
 
-    # 转换 JSON 字段
+    # 转换 JSON 字段和序列化 datetime
     for config in configs:
         if config.get("tags") and isinstance(config["tags"], str):
             try:
@@ -216,12 +231,12 @@ def list_configs(
                 config["tags"] = []
 
     return JSONResponse(
-        content={"configs": configs, "total": total}
+        content={"configs": [_serialize_config(c) for c in configs], "total": total}
     )
 
 
-@router.get("/configs/{config_id}")
-def get_config(
+@router.get("/configs")
+def list_configs(
     config_id: int,
     db: Session = Depends(get_session),
 ) -> Response:
@@ -241,7 +256,7 @@ def get_config(
         except json.JSONDecodeError:
             config["tags"] = []
 
-    return JSONResponse(content={"config": config})
+    return JSONResponse(content={"config": _serialize_config(config)})
 
 
 @router.post("/configs", status_code=status.HTTP_201_CREATED)
@@ -291,7 +306,7 @@ def create_config(
             config["tags"] = []
 
     log.info(f"Created intercept config: {config['id']}")
-    return JSONResponse(content={"config": config}, status_code=status.HTTP_201_CREATED)
+    return JSONResponse(content={"config": _serialize_config(config)}, status_code=status.HTTP_201_CREATED)
 
 
 @router.put("/configs/{config_id}")
@@ -353,7 +368,7 @@ def update_config(
             config["tags"] = []
 
     log.info(f"Updated intercept config: {config_id}")
-    return JSONResponse(content={"config": config})
+    return JSONResponse(content={"config": _serialize_config(config)})
 
 
 @router.delete("/configs/{config_id}")
@@ -407,7 +422,7 @@ def toggle_config(
             config["tags"] = []
 
     log.info(f"Toggled intercept config {config_id} to enabled={body.enabled}")
-    return JSONResponse(content={"config": config})
+    return JSONResponse(content={"config": _serialize_config(config)})
 
 
 @router.post("/configs/batch")
@@ -506,8 +521,8 @@ def import_configs(
     )
 
 
-@router.get("/configs/export")
-def export_configs(
+@router.get("/configs/{config_id}")
+def get_config(
     db: Session = Depends(get_session),
 ) -> Response:
     """导出配置"""
@@ -525,7 +540,7 @@ def export_configs(
                 config["tags"] = []
 
     return JSONResponse(
-        content={"configs": configs},
+        content={"configs": [_serialize_config(c) for c in configs]},
         headers={
             "Content-Disposition": "attachment; filename=intercept_configs.json"
         },
@@ -564,7 +579,7 @@ def get_config_for_plugin(
     return JSONResponse(
         content={
             "version": version,
-            "configs": configs,
+            "configs": [_serialize_config(c) for c in configs],
         }
     )
 
@@ -726,6 +741,59 @@ def sync_intercepted_requests(
 # ─── Data Query (readonly) ──────────────────────────────────────────
 
 
+@router.get("/requests/stats")
+def get_requests_stats(
+    request: Request,
+    db: Session = Depends(get_session),
+) -> Response:
+    """统计信息"""
+    # 总请求数
+    total = db.execute(
+        text("SELECT COUNT(*) FROM plugin.intercepted_requests")
+    ).scalar()
+
+    # 白名单请求数
+    whitelisted = db.execute(
+        text("SELECT COUNT(*) FROM plugin.intercepted_requests WHERE is_whitelisted = true")
+    ).scalar()
+
+    # 按域名分布
+    by_host_result = db.execute(
+        text(
+            """
+            SELECT endpoint_host, COUNT(*) as count
+            FROM plugin.intercepted_requests
+            GROUP BY endpoint_host
+            ORDER BY count DESC
+            LIMIT 10
+            """
+        )
+    )
+    by_host = {row.endpoint_host: row.count for row in by_host_result}
+
+    # 按方法分布
+    by_method_result = db.execute(
+        text(
+            """
+            SELECT method, COUNT(*) as count
+            FROM plugin.intercepted_requests
+            GROUP BY method
+            ORDER BY count DESC
+            """
+        )
+    )
+    by_method = {row.method: row.count for row in by_method_result}
+
+    return JSONResponse(
+        content={
+            "total": total,
+            "whitelisted": whitelisted,
+            "byHost": by_host,
+            "byMethod": by_method,
+        }
+    )
+
+
 @router.get("/requests")
 def list_requests(
     request: Request,
@@ -785,7 +853,7 @@ def list_requests(
     result = db.execute(text(query), params)
     requests = [dict(row._mapping) for row in result]
 
-    # 转换 JSON 字段
+    # 转换 JSON 字段和 datetime
     for req in requests:
         for field in ["request_headers", "request_body", "response_headers", "response_body", "business_context", "pagination"]:
             if req.get(field) and isinstance(req[field], str):
@@ -793,6 +861,10 @@ def list_requests(
                     req[field] = json.loads(req[field])
                 except json.JSONDecodeError:
                     req[field] = None
+        # 转换 datetime 为 ISO 格式字符串
+        for field in ["captured_at", "received_at"]:
+            if req.get(field) and isinstance(req[field], datetime):
+                req[field] = req[field].isoformat()
 
     return JSONResponse(
         content={
@@ -829,57 +901,9 @@ def get_request(
             except json.JSONDecodeError:
                 req[field] = None
 
+    # 转换 datetime 为 ISO 格式字符串
+    for field in ["captured_at", "received_at"]:
+        if req.get(field) and isinstance(req[field], datetime):
+            req[field] = req[field].isoformat()
+
     return JSONResponse(content={"request": req})
-
-
-@router.get("/requests/stats")
-def get_requests_stats(
-    request: Request,
-    db: Session = Depends(get_session),
-) -> Response:
-    """统计信息"""
-    # 总请求数
-    total = db.execute(
-        text("SELECT COUNT(*) FROM plugin.intercepted_requests")
-    ).scalar()
-
-    # 白名单请求数
-    whitelisted = db.execute(
-        text("SELECT COUNT(*) FROM plugin.intercepted_requests WHERE is_whitelisted = true")
-    ).scalar()
-
-    # 按域名分布
-    by_host_result = db.execute(
-        text(
-            """
-            SELECT endpoint_host, COUNT(*) as count
-            FROM plugin.intercepted_requests
-            GROUP BY endpoint_host
-            ORDER BY count DESC
-            LIMIT 10
-            """
-        )
-    )
-    by_host = {row.endpoint_host: row.count for row in by_host_result}
-
-    # 按方法分布
-    by_method_result = db.execute(
-        text(
-            """
-            SELECT method, COUNT(*) as count
-            FROM plugin.intercepted_requests
-            GROUP BY method
-            ORDER BY count DESC
-            """
-        )
-    )
-    by_method = {row.method: row.count for row in by_method_result}
-
-    return JSONResponse(
-        content={
-            "total": total,
-            "whitelisted": whitelisted,
-            "byHost": by_host,
-            "byMethod": by_method,
-        }
-    )
