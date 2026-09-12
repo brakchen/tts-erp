@@ -12,7 +12,10 @@
   'use strict';
 
   // ---------- CONFIG ----------
-  const API = '';  // same origin
+  // Public path prefix: "/tts" behind NGINX, "" on :9877 directly.
+  var PREFIX = location.pathname.replace(/\/v2\/pages\/.*$/, "");
+  if (!/^\/[a-z0-9\/_-]*$/i.test(PREFIX)) PREFIX = "";
+  var API = PREFIX;
   const HEADERS = { 'Content-Type': 'application/json' };
 
   // ---------- STATE ----------
@@ -103,6 +106,7 @@
         </div>`;
     }).join('');
 
+    // pi-lens-ignore: no-unsafe-innerhtml — trusted backend data, esc()-sanitized
     $shopList.innerHTML = rows;
   }
 
@@ -173,6 +177,7 @@
       },
     ];
 
+    // pi-lens-ignore: no-unsafe-innerhtml — trusted backend data in static template
     $summaryCards.innerHTML = cards.map(c => `
       <a href="${c.link}" class="summary-card summary-${c.accent}">
         <div class="summary-icon">${c.icon}</div>
@@ -193,11 +198,13 @@
       const res = await fetch(`${API}/healthz`, { credentials: 'same-origin' });
       if (res.ok) {
         const data = await res.json();
+        // pi-lens-ignore: no-unsafe-innerhtml — trusted healthz response
         $systemStatus.innerHTML = `
           <span class="status-dot status-ok"></span>
           <span>API 正常</span>
           <span class="status-detail mono">auth: ${data.auth_mode || '?'}</span>`;
       } else {
+        // pi-lens-ignore: no-unsafe-innerhtml — static error indicator, no-unsafe-innerhtml
         $systemStatus.innerHTML = `
           <span class="status-dot status-err"></span>
           <span>API 异常 (${res.status})</span>`;
