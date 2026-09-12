@@ -1,5 +1,11 @@
 # tts-erp CHANGELOG
 
+## 2026-09-12 — 修正结算版本覆盖查询
+
+- `/v2/order-sync/has-data` 支持可选 `versions`，结算域按 `statement_id + statement_version`
+  判断是否已同步，避免旧版本遮蔽新版本。
+- 未携带 `versions` 的旧插件继续按 `statement_id` 查询，保持协议兼容。
+
 ## 2026-09-11 — 插件数据收敛到 `plugin` schema（chrome_sync / analytics → plugin）
 
 **背景**：广告 dump 没有 server-side 同步（JOBS 里无 ad job），唯一入口是 Chrome 插件

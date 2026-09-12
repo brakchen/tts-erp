@@ -397,6 +397,45 @@ def test_has_data_statements_returns_true_after_dump(api_client, readwrite_key):
     assert r.json()["data"]["covered"] == {STATEMENT_ID_1: True, STATEMENT_ID_2: False}
 
 
+def test_has_data_statements_matches_requested_version(api_client, readwrite_key):
+    # 先写入 statement_version=0。
+    api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=_dump_payload(
+            "statements",
+            _statement_list_response([STATEMENT_ID_1]),
+            endpoint="/api/v1/pay/statement/list/detail",
+        ),
+    )
+
+    # 同一个 statement_id 的新版本不能被旧版本误报为已覆盖。
+    r = api_client.post(
+        "/v2/order-sync/has-data",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json={
+            "scope": {"sellerId": SHOP_ID, "shopId": SHOP_ID},
+            "domain": "statements",
+            "ids": [STATEMENT_ID_1],
+            "versions": {STATEMENT_ID_1: 1},
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["data"]["covered"] == {STATEMENT_ID_1: False}
+
+    # 未携带版本号的旧客户端仍保留按 statement_id 的兼容语义。
+    r = api_client.post(
+        "/v2/order-sync/has-data",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json={
+            "scope": {"sellerId": SHOP_ID, "shopId": SHOP_ID},
+            "domain": "statements",
+            "ids": [STATEMENT_ID_1],
+        },
+    )
+    assert r.json()["data"]["covered"] == {STATEMENT_ID_1: True}
+
+
 # ─── dumps: order inserted ─────────────────────────────────────────
 
 

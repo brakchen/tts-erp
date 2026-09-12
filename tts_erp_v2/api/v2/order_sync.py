@@ -111,6 +111,8 @@ class HasDataRequest(BaseModel):
     scope: ScopeIn
     domain: str = Field(min_length=1, max_length=32)
     ids: list[str] = Field(min_length=1, max_length=MAX_IDS)
+    # statements 的业务唯一键还包含 statement_version；缺省保持旧客户端兼容。
+    versions: dict[str, int] | None = None
 
     @field_validator("domain")
     @classmethod
@@ -265,6 +267,7 @@ def post_has_data(
         domain=payload.domain,
         shop_id=payload.scope.shopId,
         ids=payload.ids,
+        versions=payload.versions,
     )
 
     _log_event(

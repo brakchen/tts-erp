@@ -12,7 +12,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import and_, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -68,13 +68,14 @@ def has_data_bulk(
     domain: str,
     shop_id: str,
     ids: list[str],
+    versions: dict[str, int] | None = None,
 ) -> dict[str, bool]:
     """批量查业务表存在性。
 
     返回 {id: True/False}，True 表示已存在。
     - orders: 查 ChromeOrder.order_id
     - logistics: 查 ChromeShipment.order_id (distinct)
-    - statements: 查 ChromeSettlement.statement_id
+    - statements: 默认查 statement_id；提供 versions 时按 statement_id + version 查
     """
     if not ids:
         return {}
@@ -104,16 +105,40 @@ def has_data_bulk(
             .all()
         )
     elif domain == "statements":
-        rows = (
-            sess.execute(
-                select(ChromeSettlement.statement_id).where(
-                    ChromeSettlement.shop_id == shop_id,
-                    ChromeSettlement.statement_id.in_(ids),
+        if versions is None:
+            rows = (
+                sess.execute(
+                    select(ChromeSettlement.statement_id).where(
+                        ChromeSettlement.shop_id == shop_id,
+                        ChromeSettlement.statement_id.in_(ids),
+                    )
                 )
+                .scalars()
+                .all()
             )
-            .scalars()
-            .all()
-        )
+        else:
+            requested = [(statement_id, versions[statement_id]) for statement_id in ids if statement_id in versions]
+            unversioned = [statement_id for statement_id in ids if statement_id not in versions]
+            predicates = [
+                and_(ChromeSettlement.statement_id == statement_id, ChromeSettlement.statement_version == version)
+                for statement_id, version in requested
+            ]
+            if unversioned:
+                predicates.append(ChromeSettlement.statement_id.in_(unversioned))
+            rows = (
+                sess.execute(
+                    select(ChromeSettlement.statement_id, ChromeSettlement.statement_version).where(
+                        ChromeSettlement.shop_id == shop_id,
+                        or_(*predicates) if predicates else False,
+                    )
+                )
+                .all()
+            )
+            found_pairs = set(rows)
+            return {
+                id_: ((id_, versions[id_]) in found_pairs if id_ in versions else any(row_id == id_ for row_id, _ in found_pairs))
+                for id_ in ids_set
+            }
     else:
         return dict.fromkeys(ids, False)
 
