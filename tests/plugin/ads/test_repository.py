@@ -105,7 +105,7 @@ def test_upsert_daily_rows_inserts(db_session):
 
 
 def test_upsert_daily_rows_idempotent(db_session):
-    """v4 daily rows 幂等（ON CONFLICT DO NOTHING）。"""
+    """v4 daily rows 按自然键幂等，并允许后续 dump 校准指标。"""
     from tts_erp_v2.plugin.ads import repository
 
     rows = [_base_row()]
@@ -142,7 +142,7 @@ def test_upsert_daily_rows_idempotent(db_session):
         source="t",
     )
     assert r1 == 1
-    assert r2 == 0  # duplicate → nothing inserted
+    assert r2 == 1  # conflict update is an accepted/upserted row
 
     count = db_session.execute(
         text("SELECT count(*) FROM plugin.ad_daily WHERE seller_id = :s"),

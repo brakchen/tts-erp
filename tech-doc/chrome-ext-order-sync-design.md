@@ -25,7 +25,8 @@ Chrome 扩展新增了对 TikTok Seller Center **订单/物流/结算**三个域
 
 参照现有广告分析同步（`analytics/dump-architecture.md`）的成熟模式：
 
-- **cursor/has-data 端点**：插件先问后端"这些数据我已经有了吗"，避免重复抓取
+- **has-data 端点**：提供业务表覆盖查询和断点诊断；订单域的可变数据不能把存在性
+  当作新鲜度证明，插件仍会按当前 Seller Center 结果刷新
 - **dumps 端点**：插件把从 TikTok 抓到的原始 HTTP 响应上传到后端，后端做幂等存储
 - **raw 表**：原始 dump 的 source-of-truth，后续可派生规范化数据
 
@@ -35,7 +36,7 @@ Chrome 扩展新增了对 TikTok Seller Center **订单/物流/结算**三个域
 | --- | --- | --- |
 | 粒度 | 每 (campaign, endpoint, day) 一行 | 每 (order_id) 或 (statement_id) 一行 |
 | has-data 查询 | 单个单元存在性 | **批量查询**（一次传 N 个 order_id，按 shop_id 定位） |
-| 时效性 | history=永不过期, today=当日刷新 | 无保鲜窗口，以插件同步数据为准 |
+| 时效性 | history=永不过期, today=当日刷新 | 订单/物流/结算均可变，以插件本轮结果为准 |
 | 数据量 | 4 端点 × N campaign × M 天 | 订单/物流各 1 端点，结算 2 端点 |
 
 ### 2.3 架构总览
@@ -46,20 +47,15 @@ Chrome 插件                                    tts-erp 后端
 1. fetchOrderList()                           
    → 拿到 main_order_id[]                    
                                              
-2. POST /v2/order-sync/has-data              
-   body: {order_ids: [id1,id2,...id100]}     
-   ← {covered: {id1:true, id2:false, ...}}  
+2. fetchLogisticDetail(order_id)
+   （订单/物流状态可变，每轮按当前结果刷新）
                                              
-3. 只对 covered=false 的 order_id:           
-   fetchLogisticDetail(order_id)             
-                                             
-4. POST /v2/order-sync/dumps                 
+3. POST /v2/order-sync/dumps
    body: {domain:"logistics", ...}           
    ← {status:"inserted"}                    
                                              
-5. 下次重装插件，重复步骤 1-2:               
-   id1..id98 已 covered → 跳过              
-   只拉 id99, id100                          
+4. 下次轮询/重装插件，重复步骤 1-3；
+   后端自然键 upsert，已有记录也可被校准
 ```
 
 ## 3. 数据模型
@@ -95,7 +91,9 @@ CREATE SCHEMA IF NOT EXISTS plugin;
 ### 3.2 `plugin.raw_log` — 同步流水（完整 dump 存档）
 
 每条 dump 请求一行，只追加不修改。存储完整的原始 dump 内容，用于审计、
-问题排查和数据回溯。
+问题排查和数据回溯。若插件上传 `response.body = null`，为满足该列的
+`NOT NULL` 约束会存 `{}`，同时写入 `parse_error = "response.body is None"`，
+因此不会把空响应误当成成功数据。
 
 ```sql
 CREATE TABLE plugin.raw_log (
@@ -447,7 +445,9 @@ COMMENT ON COLUMN plugin.settlement_details.updated_at IS '最后更新时间';
 
 **这是解决 N+1 问题的核心端点。**
 
-插件拿到 order_id 列表后，一次请求查出哪些已有数据，只对缺失的发 TikTok 请求。
+插件拿到 order_id 列表后，可一次请求查询哪些业务键已经存在。该结果用于覆盖统计和
+兼容性诊断；订单、物流、结算的状态/金额/轨迹会变化，因此不能只对缺失 ID 发 TikTok 请求。
+结算版本查询时，`versions` 可为 `{statement_id: number[]}`，只有数组内版本全部存在才算 covered。
 
 ```http
 POST /v2/order-sync/has-data
@@ -621,18 +621,17 @@ Authorization: Bearer <key>
 │ 2. POST /v2/order-sync/dumps (domain=orders)                │
 │    → 后端立即解析 + 写入业务表 + 写 raw_log                   │
 │                                                             │
-│ 3. POST /v2/order-sync/has-data (domain=logistics, ids=[..])│
-│    → 返回 {id1:true, id2:false, ...}                        │
-│                                                             │
-│ 4. 只对 covered=false 的 id:                                 │
-│    fetchLogisticDetail(id)                                  │
+│ 3. fetchLogisticDetail(id)                                  │
 │    → POST /v2/order-sync/dumps (domain=logistics)           │
+│    （每轮刷新当前物流状态）                                  │
 │                                                             │
-│ 5. 结算同理：先 has-data 再 dumps                            │
+│ 4. 结算抓 statement/list 分页并按版本上传；                   │
+│    has-data 只记录覆盖情况，不阻断可变字段刷新                 │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**效果**：100 个订单，如果 90 个已有物流数据 → 只发 10 次物流请求（而非 100 次）。
+**效果**：已有数据仍会按自然键幂等更新，避免“已存在但状态已变化”长期不校准；
+物流请求仍受单飞和请求间隔控制。
 
 ### 5.2 插件重装后的恢复流程
 
@@ -642,11 +641,10 @@ Authorization: Bearer <key>
 │                                                             │
 │ 2. fetchOrderList() → 拿到当前页 order_id[]                  │
 │                                                             │
-│ 3. POST /v2/order-sync/has-data (domain=logistics, ids=[..])│
-│    → 大部分 covered=true（后端业务表数据还在）                │
+│ 3. 可调用 has-data 查看后端覆盖，但不以 covered=true 跳过刷新    │
 │                                                             │
-│ 4. 只对 covered=false 的新订单发物流请求                      │
-│    → 节省 90%+ 请求                                          │
+│ 4. 对当前订单发物流请求并按自然键 upsert                      │
+│    → 既补齐新订单，也校准状态变化                            │
 │                                                             │
 │ 5. 或者用 GET /v2/order-sync/synced-ids 做更粗粒度过滤       │
 └─────────────────────────────────────────────────────────────┘
@@ -660,7 +658,7 @@ Authorization: Bearer <key>
 │    → POST /v2/order-sync/dumps (domain=statements)          │
 │    → 后端解析写入 settlements 表                              │
 │                                                             │
-│ 2. 对每个 statement_id，抓取 transaction/detail               │
+│ 2. 若列表行提供 statement_sku_detail_id，抓取 transaction/detail│
 │    → POST /v2/order-sync/dumps (domain=statements)          │
 │    → 后端解析写入 settlement_details 表                       │
 │                                                             │
@@ -984,7 +982,7 @@ def flatten_fees(fee_list: list) -> list[dict]:
 | --- | --- | --- |
 | TikTok 订单模块内部字段名未确认 | 解析规则可能字段名不对 | 用域名观察功能抓一份完整响应确认 |
 | `trade_order_id` ↔ `main_order_id` 映射 | 结算明细无法关联到订单 | 补抓映射接口或用 `sku_id` 间接关联 |
-| `statement_sku_detail_id` 获取路径 | 无法从 statement list 构造 transaction detail 请求 | 补抓中间接口 |
+| `statement_sku_detail_id` 获取路径 | 只有列表返回 bridge ID 时才能构造 transaction detail 请求 | 捕获含该 ID 的列表/中间接口后补抓；未提供时保留单头数据 |
 
 ## 11. 风险与缓解
 
@@ -995,7 +993,7 @@ def flatten_fees(fee_list: list) -> list[dict]:
 | has-data 批量查询 500 id 性能 | unique 索引 + IN 查询，~1ms |
 | 解析逻辑 bug 导致数据损坏 | raw_log.response_body 保留完整原始数据，可重跑解析修复 |
 | TikTok 字段名变更 | raw_log.response_body 保留原始数据，可重跑解析修复 |
-| 保鲜窗口内物流状态未更新 | 无保鲜窗口，以插件同步数据为准 |
+| 保鲜窗口内物流状态未更新 | 每轮刷新可变订单域，后端自然键 upsert |
 
 ---
 

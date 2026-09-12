@@ -533,6 +533,7 @@ Query parameters:
 | `kind` | string | required；`daily` 或 `monthly` |
 | `startDay` / `endDay` | date | `kind=daily` 时必带，`YYYY-MM-DD`；`startDay` ≤ `endDay` |
 | `startMonth` / `endMonth` | string | `kind=monthly` 时必带，`YYYY-MM` 格式；`startMonth` ≤ `endMonth` |
+| `campaignId` | string[] | optional；可重复传入本轮完整计划集合。服务端会为没有任何覆盖的计划返回空 `coveredPeriods`，避免冷启动计划被误判为响应缺失 |
 
 `endpoint` 白名单（同 `/cursor` 和 `/dumps`）：
 
@@ -591,6 +592,11 @@ Query parameters:
 ```
 
 `totalRequested` = 请求区间内的总天数/月数；`coveredPeriods` = 该 campaign 已有数据的天/月列表（已排序）；`totalCovered` = 已覆盖的天/月数。
+
+当请求带有 `campaignId` 时，`campaigns` 以请求集合为准，缺少历史数据的计划也会返回
+`{ "coveredPeriods": [], "totalCovered": 0 }`。客户端因此可以安全地按零覆盖补齐；缺少
+计划不再被当作“跳过”。对于 campaign-level endpoint，coverage 从对应的
+`plugin.ad_raw_log` 计算；product-level endpoint 仍从结构化表计算。
 
 Errors:
 
@@ -669,7 +675,7 @@ Success response (`code: 0`):
 ~~内容被取代事件（history 替换/推进/重建、daily 折叠、today 跨天 reset）写
 `analytics.ad_sync_audit` 一行元数据审计（与主写同事务；30s today 常规刷新不写）。~~
 **（2026-09-11 起失效：v3 遗留对象已由 migration 0020 删除）**：v4 逐日协议不做取代审计 ——
-`ad_daily` 每日一行 `ON CONFLICT DO NOTHING` 写入后不可变，本就没有"被取代"概念；
+`ad_daily` 每日一行按自然键 upsert，允许 TikTok 延迟归因后的指标校准；
 `ad_today` 用 `ON CONFLICT DO UPDATE` 原地刷新，跨天由 `plugin.ad_merge_today2daily` job 固化后删除。
 
 Errors:
@@ -766,11 +772,14 @@ Body（≤ 2 MB）：
 }
 ```
 
-- `status` ∈ `{inserted, parse_error}`
+- `status` ∈ `{inserted, updated, duplicate, stale_ignored, parse_error, empty_response}`
 - **2026-09-11**：原 `api_managed` 状态已移除（连同 `commerce.shops.data_source` 列与
   `api/deps.py::shop_is_api_managed` 守卫）。插件与 API 同步数据现按 schema 物理隔离
   （`plugin.*` vs `commerce.*`/`fulfillment.*`/`finance.*`），不再需要来源判定。
 - `parse_error` 时 `rowsWritten=0`，`parseError` 字段含原因
+- 订单域的 `statements` 请求可以使用单条 statement 对象作为 `response.body`；同一
+  `statement_id` 的多个 `statement_version` 在 `has-data` 中以数组传递。订单、物流、
+  结算均按可变数据刷新，`has-data` 不作为更新闸门。
 
 #### `GET /v2/order-sync/synced-ids`
 

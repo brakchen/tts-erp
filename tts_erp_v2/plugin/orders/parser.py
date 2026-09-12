@@ -239,7 +239,20 @@ def parse_logistics_response(
 
         # track_list → status, shipped_at, delivered_at
         logistic_detail = pkg.get("logistic_detail") or {}
-        track_list = logistic_detail.get("track_list") or []
+        raw_track_list = logistic_detail.get("track_list") or []
+        # TikTok 不保证轨迹返回顺序；按业务时间排序后再取首/尾，避免倒序
+        # 响应把 Delivered 解析成发货状态，或把 delivered_at 丢掉。
+        track_list = [
+            track
+            for _index, track in sorted(
+                enumerate(raw_track_list),
+                key=lambda item: (
+                    _parse_track_time(item[1].get("time"))
+                    or datetime.min.replace(tzinfo=UTC),
+                    item[0],
+                ),
+            )
+        ]
 
         status = None
         shipped_at = None
@@ -269,8 +282,21 @@ def parse_logistics_response(
         rows_written += 1
 
         # tracking_events
-        for idx, track in enumerate(track_list):
-            event_key = f"{package_id}_{idx}"
+        for track in track_list:
+            event_id = track.get("event_id") or track.get("id")
+            event_key = (
+                f"{package_id}:{event_id}"
+                if event_id is not None
+                else ":".join(
+                    [
+                        package_id,
+                        str(track.get("time", "")),
+                        str(track.get("track_status", "")),
+                        str(track.get("action_code", "")),
+                        str(track.get("location", "")),
+                    ]
+                )
+            )
             event_at = _parse_track_time(track.get("time"))
             description = track.get("track_status")
             location = track.get("location")
@@ -324,7 +350,13 @@ def parse_statement_list_response(
     """解析 statement/list/detail 响应 → 写 settlements。返回写入行数。"""
     rows_written = 0
     data = response_body.get("data") or {}
-    statement_records = data.get("statement_records") or []
+    if "statement_id" in response_body:
+        # Plugin order polling intentionally sends one statement object per dump
+        # so the backend must accept that wire shape as well as the full list
+        # envelope.
+        statement_records = [response_body]
+    else:
+        statement_records = data.get("statement_records") or []
 
     for record in statement_records:
         statement_id = str(record.get("statement_id", ""))

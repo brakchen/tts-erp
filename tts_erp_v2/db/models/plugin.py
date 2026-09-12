@@ -344,7 +344,7 @@ class ChromeSettlementDetail(Base):
 
 # ad_today ────────────────────────────────────────────────────────────
 # 今天实时表（30s ON CONFLICT DO UPDATE 刷新，跨天固化到 ad_daily 后清空）。
-# 结构和 ad_daily 完全一致，唯一区别是用途（实时 vs 历史不可变）。
+# 结构和 ad_daily 完全一致，唯一区别是用途（实时 vs 历史可校准）。
 # tech-doc/analytics/daily-sync-with-coverage.md §1.1
 class AdToday(Base):
     __tablename__ = "ad_today"
@@ -397,7 +397,7 @@ class AdToday(Base):
 
 
 # ad_daily ────────────────────────────────────────────────────────────
-# 天级结构化表（历史数据 ON CONFLICT DO NOTHING，写入后不可变）。
+# 天级结构化表（历史数据按自然键 upsert，允许 TikTok 延迟归因后的校准）。
 # tech-doc/analytics/daily-sync-with-coverage.md §1.2
 class AdDaily(Base):
     __tablename__ = "ad_daily"

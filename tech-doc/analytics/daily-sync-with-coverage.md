@@ -37,7 +37,7 @@
 | D-3 | 天级和月级同步互相隔离，各自独立 | 月表从天表聚合（耦合，一天数据异常影响月表） |
 | D-4 | 写入时预解析结构化字段 | 查询时 VIEW 从 JSONB 解析（性能差） |
 | D-5 | 结束日期由代码固定为店铺昨天，用户只选开始日 | 用户可选结束日（重装时选错导致数据丢失） |
-| D-6 | 历史天/月数据写入后不可变（`ON CONFLICT DO NOTHING`） | 区间行原地更新（day_end 可被缩窄） |
+| D-6 | 历史天/月数据写入后不可变（`ON CONFLICT DO NOTHING`） | 自然键 upsert，允许延迟归因后的指标校准 |
 | D-7 | 今天的数据 30s 滚动刷新，写 `ad_today`（`ON CONFLICT DO UPDATE`） | 今天也固化（数据不准，TikTok 数据会延迟归因） |
 | D-8 | `ad_raw_log` 用 `kind` 区分 daily/monthly | 分两张日志表（冗余） |
 | D-9 | coverage 查询方案 B：一次返回所有 campaign 的覆盖数据 | 方案 A：逐 campaign 查询（30 次请求） |
@@ -116,7 +116,7 @@ CREATE TABLE plugin.ad_daily (
     created_at       TIMESTAMPTZ NOT NULL,
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    -- 唯一键：每天每商品每计划每端点只有一行，写入后不可变
+    -- 唯一键：每天每商品每计划每端点只有一行，允许后续校准
     CONSTRAINT uq_ad_daily UNIQUE (seller_id, advertiser_id, endpoint, campaign_id, product_id, day)
 );
 
@@ -128,7 +128,7 @@ CREATE INDEX idx_ad_daily_product_day
 
 **设计要点**：
 
-- 唯一键含 `product_id` + `day` → 每天每商品一行，写入后不可变
+- 唯一键含 `product_id` + `day` → 每天每商品一行，后续按自然键校准
 - `endpoint` 在键中 → 同一天同一商品可以有 product-analysis 和 session-analysis 两行
 - 核心指标字段名 = TikTok API 原名，无需映射
 - `metrics_extra` JSONB 放 query_list 中非核心字段，保持扩展性
@@ -280,9 +280,9 @@ CREATE INDEX idx_ad_raw_log_request_id ON plugin.ad_raw_log (request_id);
   → 服务端:
       1. 解析 rows 数组，提取结构化字段
       2. 对每一行 product:
-         kind=daily:   INSERT INTO ad_daily (...) ON CONFLICT DO NOTHING
+         kind=daily:   INSERT INTO ad_daily (...) ON CONFLICT DO UPDATE
          kind=today:   INSERT INTO ad_today (...) ON CONFLICT DO UPDATE SET ...
-         kind=monthly: INSERT INTO ad_monthly (...) ON CONFLICT DO NOTHING
+         kind=monthly: INSERT INTO ad_monthly (...) ON CONFLICT DO UPDATE
       3. INSERT INTO ad_raw_log (kind, day/year_month, request/response)
       4. COMMIT
 ```
@@ -298,7 +298,7 @@ CREATE INDEX idx_ad_raw_log_request_id ON plugin.ad_raw_log (request_id);
   → missing = [S..T-1] - coveredDays
   → 逐天: 抓 TikTok → POST /dumps (kind=daily)
   → 服务端: ad_daily + ad_raw_log（单事务）
-  → 每天增量: 零点后拉昨天（不可变）+ 30s 刷新今天（ad_today）
+  → 每天增量: 零点后拉昨天（可校准）+ 30s 刷新今天（ad_today）
 
 [插件同步任务 2: 逐月同步]（独立于任务 1）
   → GET /coverage?kind=monthly (方案 B)
@@ -523,7 +523,7 @@ def upsert_daily_rows(sess, *, seller_id, advertiser_id, endpoint, campaign_id,
                      "onsite_roi2_shopping_value", "onsite_mixed_real_roi2_shopping"}
         metrics_extra = {k: v for k, v in row.items() if k not in core_keys}
 
-        # INSERT ad_daily ON CONFLICT DO NOTHING
+        # INSERT ad_daily ON CONFLICT DO UPDATE
         result = sess.execute(text(SQL_UPSERT_DAILY_ROW), {
             "seller_id": seller_id, "advertiser_id": advertiser_id,
             "campaign_id": campaign_id, "product_id": product_id,
@@ -664,7 +664,7 @@ def solidify_yesterday(sess, *, seller_id, advertiser_id, yesterday):
         FROM plugin.ad_today
         WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
           AND day = :yesterday
-        ON CONFLICT ON CONSTRAINT uq_ad_daily DO NOTHING
+        ON CONFLICT ON CONSTRAINT uq_ad_daily DO UPDATE
     """), {"seller_id": seller_id, "advertiser_id": advertiser_id, "yesterday": yesterday})
 
     sess.execute(text("""
@@ -784,7 +784,7 @@ interface SyncProgress {
 | dumps daily 写入 | 解析 rows → ad_daily + ad_raw_log |
 | dumps today 写入 | 解析 rows → ad_today（覆盖） + ad_raw_log |
 | dumps monthly 写入 | 解析 rows → ad_monthly + ad_raw_log |
-| dumps 重复写入 | daily/monthly ON CONFLICT DO NOTHING |
+| dumps 重复写入 | daily/monthly 按自然键 ON CONFLICT DO UPDATE |
 | 跨天固化 | ad_today → ad_daily → 清空 ad_today |
 | spu_roi 读新表 | ROI 计算数值正确 |
 | ad_product_links VIEW | 读新表，JOIN shops/products_spu |

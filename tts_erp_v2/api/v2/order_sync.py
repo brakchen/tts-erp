@@ -112,7 +112,7 @@ class HasDataRequest(BaseModel):
     domain: str = Field(min_length=1, max_length=32)
     ids: list[str] = Field(min_length=1, max_length=MAX_IDS)
     # statements 的业务唯一键还包含 statement_version；缺省保持旧客户端兼容。
-    versions: dict[str, int] | None = None
+    versions: dict[str, int | list[int]] | None = None
 
     @field_validator("domain")
     @classmethod
@@ -355,6 +355,10 @@ def post_dumps(
 
     # response.body 为 None 时（插件抓取失败 / 超时），只记 raw_log 不解析
     if response_body is None:
+        # plugin.raw_log.response_body is a NOT NULL JSONB audit column. Keep
+        # the empty-response event durable with an explicit empty-object
+        # sentinel; parse_error still preserves the distinction from a valid
+        # TikTok `{}` response.
         log_id = write_raw_log(
             sess,
             domain=domain,
@@ -363,7 +367,7 @@ def post_dumps(
             captured_at=captured_at,
             request_params=request_params,
             request_body=request_body,
-            response_body=None,
+            response_body={},
             parse_error="response.body is None",
             rows_written=0,
         )
@@ -397,47 +401,57 @@ def post_dumps(
     rows_written = 0
 
     try:
-        if domain == "orders":
-            rows_written = parse_order_response(
-                sess,
-                log_id=log_id,
-                shop_id=shop_id,
-                response_body=response_body,
-                captured_at=captured_at,
-            )
-        elif domain == "logistics":
-            if not main_order_id:
-                parse_error = "mainOrderId is required for logistics domain"
-            else:
-                rows_written = parse_logistics_response(
-                    sess,
-                    log_id=log_id,
-                    shop_id=shop_id,
-                    order_id=main_order_id,
-                    response_body=response_body,
-                    captured_at=captured_at,
-                )
-        elif domain == "statements":
-            data = response_body.get("data") or {}
-            if "sku_record" in data:
-                rows_written = parse_statement_transaction_response(
+        # Keep the raw log in the outer transaction, but isolate all parser
+        # writes in a savepoint. A malformed child row must not leave a
+        # partially materialized order/statement behind.
+        with sess.begin_nested():
+            if domain == "orders":
+                rows_written = parse_order_response(
                     sess,
                     log_id=log_id,
                     shop_id=shop_id,
                     response_body=response_body,
                     captured_at=captured_at,
                 )
-            else:
-                rows_written = parse_statement_list_response(
-                    sess,
-                    log_id=log_id,
-                    shop_id=shop_id,
-                    response_body=response_body,
-                    captured_at=captured_at,
-                )
+            elif domain == "logistics":
+                if not main_order_id:
+                    parse_error = "mainOrderId is required for logistics domain"
+                else:
+                    rows_written = parse_logistics_response(
+                        sess,
+                        log_id=log_id,
+                        shop_id=shop_id,
+                        order_id=main_order_id,
+                        response_body=response_body,
+                        captured_at=captured_at,
+                    )
+            elif domain == "statements":
+                data = response_body.get("data") or {}
+                if "sku_record" in data:
+                    rows_written = parse_statement_transaction_response(
+                        sess,
+                        log_id=log_id,
+                        shop_id=shop_id,
+                        response_body=response_body,
+                        captured_at=captured_at,
+                    )
+                else:
+                    rows_written = parse_statement_list_response(
+                        sess,
+                        log_id=log_id,
+                        shop_id=shop_id,
+                        response_body=response_body,
+                        captured_at=captured_at,
+                    )
     except Exception as exc:
         parse_error = f"{type(exc).__name__}: {exc}"
         log.exception("parse error for domain=%s shop_id=%s", domain, shop_id)
+
+    # A successful HTTP response with no parsed order/statement rows is not a
+    # successful per-entity dump. Report it as parse_error so the plugin keeps
+    # the unit retryable instead of advancing its progress on rowsWritten=0.
+    if parse_error is None and rows_written == 0 and domain in {"orders", "statements"}:
+        parse_error = f"no {domain} rows parsed from response"
 
     # 3. 更新 raw_log 的解析结果
     if parse_error or rows_written > 0:

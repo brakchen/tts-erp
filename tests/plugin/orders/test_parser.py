@@ -263,6 +263,36 @@ class TestParseLogisticsResponse:
             sess.commit()
             assert rows == 1  # 1 shipment, 0 events
 
+    def test_track_list_is_sorted_oldest_to_newest_before_status_mapping(self):
+        """TikTok 返回倒序轨迹时，最新状态/发货时间不能取反。"""
+        eng = get_engine()
+        with Session(eng) as sess:
+            log_id = _make_log_id(sess)
+            resp = {
+                "code": 0,
+                "data": {
+                    "package_list": [{
+                        "package_id": "TEST_pkg-reversed",
+                        "logistic_detail": {"track_list": [
+                            {"time": "2026-09-02T15:00:00Z", "track_status": "Delivered"},
+                            {"time": "2026-09-01T10:00:00Z", "track_status": "Picked up"},
+                        ]},
+                    }],
+                },
+            }
+            parse_logistics_response(
+                sess, log_id=log_id, shop_id=SHOP_ID,
+                order_id="TEST_ord-reversed", response_body=resp,
+                captured_at=datetime.now(UTC),
+            )
+            row = sess.execute(
+                text("SELECT status, shipped_at, delivered_at FROM plugin.shipments WHERE shop_id = :s AND package_id = :p"),
+                {"s": SHOP_ID, "p": "TEST_pkg-reversed"},
+            ).one()
+            assert row.status == "Delivered"
+            assert row.shipped_at.isoformat().startswith("2026-09-01T10:00:00")
+            assert row.delivered_at.isoformat().startswith("2026-09-02T15:00:00")
+
 
 # ─── parse_statement_list_response ─────────────────────────────────
 

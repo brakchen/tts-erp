@@ -68,7 +68,7 @@ def has_data_bulk(
     domain: str,
     shop_id: str,
     ids: list[str],
-    versions: dict[str, int] | None = None,
+    versions: dict[str, int | list[int]] | None = None,
 ) -> dict[str, bool]:
     """批量查业务表存在性。
 
@@ -117,11 +117,13 @@ def has_data_bulk(
                 .all()
             )
         else:
-            requested = [
-                (statement_id, versions[statement_id])
-                for statement_id in ids
-                if statement_id in versions
-            ]
+            requested: list[tuple[str, int]] = []
+            for statement_id in ids:
+                raw_versions = versions.get(statement_id)
+                if raw_versions is None:
+                    continue
+                version_list = [raw_versions] if isinstance(raw_versions, int) else raw_versions
+                requested.extend((statement_id, version) for version in set(version_list))
             unversioned = [
                 statement_id for statement_id in ids if statement_id not in versions
             ]
@@ -145,7 +147,14 @@ def has_data_bulk(
             found_pairs = set(rows)
             return {
                 id_: (
-                    (id_, versions[id_]) in found_pairs
+                    all(
+                        (id_, version) in found_pairs
+                        for version in (
+                            [versions[id_]]
+                            if isinstance(versions[id_], int)
+                            else set(versions[id_])
+                        )
+                    )
                     if id_ in versions
                     else any(row_id == id_ for row_id, _ in found_pairs)
                 )

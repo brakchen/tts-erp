@@ -202,6 +202,8 @@ def get_coverage_endpoint(
     endDay: date | None = Query(default=None),
     startMonth: str | None = Query(default=None, max_length=7),
     endMonth: str | None = Query(default=None, max_length=7),
+    # 插件传入本轮已发现的完整计划集合；重复 query 参数对应多个 campaign。
+    campaignId: list[str] = Query(default=[]),
     # 2026-09-11 加分页（隐患 #3）：默认 page=1, pageSize=500。客户端 fetchBatchCoverage
     # 会自动迭代到最后一页，把所有 campaign 合并成一个 BatchCoverageResponse。
     # 不在 Query 上加 le/ge 是因为 FastAPI 会返 422，与端点其它校验（返 400）不一致；
@@ -300,6 +302,25 @@ def get_coverage_endpoint(
             path=audit_path,
         )
 
+    requested_campaign_ids = sorted({
+        campaign_id.strip()
+        for value in campaignId
+        for campaign_id in value.split(",")
+        if campaign_id.strip()
+    })
+    if len(requested_campaign_ids) > 5000:
+        return _audit_and_error(
+            request_id=request_id,
+            status=400,
+            code="SCHEMA_INVALID",
+            message="campaignId supports at most 5000 values",
+            retryable=False,
+            key_prefix=key_prefix,
+            error_code="SCHEMA_INVALID",
+            method="GET",
+            path=audit_path,
+        )
+
     if kind == "daily":
         if startDay is None or endDay is None:
             return _audit_and_error(
@@ -381,6 +402,7 @@ def get_coverage_endpoint(
             end_day=endDay,  # type: ignore[arg-type]
             page=page,
             page_size=pageSize,
+            requested_campaign_ids=requested_campaign_ids if campaignId else None,
         )
         total_requested = (endDay - startDay).days + 1  # type: ignore[operator]
     else:
@@ -393,6 +415,7 @@ def get_coverage_endpoint(
             end_month=endMonth,  # type: ignore[arg-type]
             page=page,
             page_size=pageSize,
+            requested_campaign_ids=requested_campaign_ids if campaignId else None,
         )
         # 防御型 parse：上方的 re.match 锁了 YYYY-MM 格式，但万一未来加了手调用。
         try:
@@ -697,6 +720,20 @@ def post_dumps(
         "monthly": upsert_monthly_rows,
     }[dump_kind]
 
+    # v4 product dumps carry the canonical row set in dump.rows. Newer plugins
+    # omit the duplicate response.data.table to stay below the 2 MB wire limit;
+    # restore that table only at the raw-log archive boundary.
+    stored_response_body = payload.dump.response
+    if is_product_level_endpoint(payload.dump.endpoint) and rows:
+        response_data = stored_response_body.get("body")
+        if isinstance(response_data, dict) and isinstance(response_data.get("data"), dict):
+            data = response_data["data"]
+            if "table" not in data:
+                stored_response_body = {
+                    **stored_response_body,
+                    "body": {**response_data, "data": {**data, "table": rows}},
+                }
+
     request_url = (
         (payload.dump.request.get("url") or "")
         if isinstance(payload.dump.request, dict)
@@ -719,7 +756,7 @@ def post_dumps(
             "request_url": request_url,
             "request_body": payload.dump.request,
             "response_status": response_status,
-            "response_body": payload.dump.response,
+            "response_body": stored_response_body,
             "created_at": payload.dump.createdAt,
             "request_id": payload.requestId or request_id,
             "source": payload.dump.source,

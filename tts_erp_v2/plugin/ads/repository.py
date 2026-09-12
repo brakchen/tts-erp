@@ -9,7 +9,7 @@ import json
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 # ─── daily-sync-with-coverage 结构化写入 SQL ─────────────────────────
@@ -34,6 +34,25 @@ WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
   AND day BETWEEN :start_day AND :end_day
 """
 
+SQL_COVERAGE_DAILY_RAW = """
+SELECT campaign_id, array_agg(DISTINCT day ORDER BY day) AS days
+FROM plugin.ad_raw_log
+WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
+  AND endpoint = :endpoint AND kind = 'daily'
+  AND day BETWEEN :start_day AND :end_day
+GROUP BY campaign_id
+ORDER BY campaign_id
+LIMIT :page_size OFFSET :offset
+"""
+
+SQL_COVERAGE_DAILY_RAW_COUNT = """
+SELECT count(DISTINCT campaign_id) AS total
+FROM plugin.ad_raw_log
+WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
+  AND endpoint = :endpoint AND kind = 'daily'
+  AND day BETWEEN :start_day AND :end_day
+"""
+
 SQL_COVERAGE_MONTHLY = """
 SELECT campaign_id, array_agg(DISTINCT year_month ORDER BY year_month) AS months
 FROM plugin.ad_monthly
@@ -53,6 +72,25 @@ WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
   AND year_month BETWEEN :start_month AND :end_month
 """
 
+SQL_COVERAGE_MONTHLY_RAW = """
+SELECT campaign_id, array_agg(DISTINCT year_month ORDER BY year_month) AS months
+FROM plugin.ad_raw_log
+WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
+  AND endpoint = :endpoint AND kind = 'monthly'
+  AND year_month BETWEEN :start_month AND :end_month
+GROUP BY campaign_id
+ORDER BY campaign_id
+LIMIT :page_size OFFSET :offset
+"""
+
+SQL_COVERAGE_MONTHLY_RAW_COUNT = """
+SELECT count(DISTINCT campaign_id) AS total
+FROM plugin.ad_raw_log
+WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
+  AND endpoint = :endpoint AND kind = 'monthly'
+  AND year_month BETWEEN :start_month AND :end_month
+"""
+
 SQL_UPSERT_DAILY_ROW = """
 INSERT INTO plugin.ad_daily (
     seller_id, advertiser_id, campaign_id, product_id, endpoint, day,
@@ -63,7 +101,13 @@ INSERT INTO plugin.ad_daily (
     :mixed_real_cost, :onsite_roi2_shopping_sku, :onsite_roi2_shopping_value,
     :onsite_mixed_real_roi2_shopping, CAST(:metrics_extra AS JSONB), :created_at
 )
-ON CONFLICT ON CONSTRAINT uq_ad_daily DO NOTHING
+ON CONFLICT ON CONSTRAINT uq_ad_daily DO UPDATE SET
+    mixed_real_cost = EXCLUDED.mixed_real_cost,
+    onsite_roi2_shopping_sku = EXCLUDED.onsite_roi2_shopping_sku,
+    onsite_roi2_shopping_value = EXCLUDED.onsite_roi2_shopping_value,
+    onsite_mixed_real_roi2_shopping = EXCLUDED.onsite_mixed_real_roi2_shopping,
+    metrics_extra = EXCLUDED.metrics_extra,
+    updated_at = now()
 RETURNING id
 """
 
@@ -96,7 +140,13 @@ INSERT INTO plugin.ad_monthly (
     :mixed_real_cost, :onsite_roi2_shopping_sku, :onsite_roi2_shopping_value,
     :onsite_mixed_real_roi2_shopping, CAST(:metrics_extra AS JSONB), :created_at
 )
-ON CONFLICT ON CONSTRAINT uq_ad_monthly DO NOTHING
+ON CONFLICT ON CONSTRAINT uq_ad_monthly DO UPDATE SET
+    mixed_real_cost = EXCLUDED.mixed_real_cost,
+    onsite_roi2_shopping_sku = EXCLUDED.onsite_roi2_shopping_sku,
+    onsite_roi2_shopping_value = EXCLUDED.onsite_roi2_shopping_value,
+    onsite_mixed_real_roi2_shopping = EXCLUDED.onsite_mixed_real_roi2_shopping,
+    metrics_extra = EXCLUDED.metrics_extra,
+    updated_at = now()
 RETURNING id
 """
 
@@ -231,6 +281,7 @@ def get_coverage_daily(
     end_day: date,
     page: int = 1,
     page_size: int = 500,
+    requested_campaign_ids: list[str] | None = None,
 ) -> tuple[dict[str, list[str]], int]:
     """返回 ({campaign_id: [day1, day2, ...]}, totalCampaigns) 的元组。
 
@@ -240,21 +291,41 @@ def get_coverage_daily(
     """
     offset = (page - 1) * page_size
     # pi-lens-ignore: python-sql-injection — LIMIT/OFFSET 走 :page_size/:offset 参数化
+    product_level = is_product_level_endpoint(endpoint)
+    coverage_sql = SQL_COVERAGE_DAILY if product_level else SQL_COVERAGE_DAILY_RAW
+    count_sql = SQL_COVERAGE_DAILY_COUNT if product_level else SQL_COVERAGE_DAILY_RAW_COUNT
+    params = {
+        "seller_id": seller_id,
+        "advertiser_id": advertiser_id,
+        "endpoint": endpoint,
+        "start_day": start_day,
+        "end_day": end_day,
+        "page_size": page_size,
+        "offset": offset,
+    }
+    requested = None if requested_campaign_ids is None else sorted(set(requested_campaign_ids))
+    if requested is not None:
+        page_ids = requested[offset:offset + page_size]
+        if not page_ids:
+            return {}, len(requested)
+        requested_sql = coverage_sql.replace(
+            "GROUP BY campaign_id",
+            "AND campaign_id IN :campaign_ids\nGROUP BY campaign_id",
+        )
+        rows = sess.execute(
+            text(requested_sql).bindparams(bindparam("campaign_ids", expanding=True)),
+            {**params, "offset": 0, "campaign_ids": page_ids},
+        ).all()
+        coverage = {row[0]: [d.isoformat() for d in row[1]] for row in rows}
+        return {campaign_id: coverage.get(campaign_id, []) for campaign_id in page_ids}, len(requested)
+
     rows = sess.execute(
-        text(SQL_COVERAGE_DAILY),
-        {
-            "seller_id": seller_id,
-            "advertiser_id": advertiser_id,
-            "endpoint": endpoint,
-            "start_day": start_day,
-            "end_day": end_day,
-            "page_size": page_size,
-            "offset": offset,
-        },
+        text(coverage_sql),
+        params,
     ).all()
     # pi-lens-ignore: python-sql-injection — COUNT() 参数化
     total_row = sess.execute(
-        text(SQL_COVERAGE_DAILY_COUNT),
+        text(count_sql),
         {
             "seller_id": seller_id,
             "advertiser_id": advertiser_id,
@@ -281,25 +352,46 @@ def get_coverage_monthly(
     end_month: str,
     page: int = 1,
     page_size: int = 500,
+    requested_campaign_ids: list[str] | None = None,
 ) -> tuple[dict[str, list[str]], int]:
     """返回 ({campaign_id: ['2026-01', ...]}, totalCampaigns) 的元组。"""
     offset = (page - 1) * page_size
     # pi-lens-ignore: python-sql-injection
+    product_level = is_product_level_endpoint(endpoint)
+    coverage_sql = SQL_COVERAGE_MONTHLY if product_level else SQL_COVERAGE_MONTHLY_RAW
+    count_sql = SQL_COVERAGE_MONTHLY_COUNT if product_level else SQL_COVERAGE_MONTHLY_RAW_COUNT
+    params = {
+        "seller_id": seller_id,
+        "advertiser_id": advertiser_id,
+        "endpoint": endpoint,
+        "start_month": start_month,
+        "end_month": end_month,
+        "page_size": page_size,
+        "offset": offset,
+    }
+    requested = None if requested_campaign_ids is None else sorted(set(requested_campaign_ids))
+    if requested is not None:
+        page_ids = requested[offset:offset + page_size]
+        if not page_ids:
+            return {}, len(requested)
+        requested_sql = coverage_sql.replace(
+            "GROUP BY campaign_id",
+            "AND campaign_id IN :campaign_ids\nGROUP BY campaign_id",
+        )
+        rows = sess.execute(
+            text(requested_sql).bindparams(bindparam("campaign_ids", expanding=True)),
+            {**params, "offset": 0, "campaign_ids": page_ids},
+        ).all()
+        coverage = {row[0]: list(row[1]) for row in rows}
+        return {campaign_id: coverage.get(campaign_id, []) for campaign_id in page_ids}, len(requested)
+
     rows = sess.execute(
-        text(SQL_COVERAGE_MONTHLY),
-        {
-            "seller_id": seller_id,
-            "advertiser_id": advertiser_id,
-            "endpoint": endpoint,
-            "start_month": start_month,
-            "end_month": end_month,
-            "page_size": page_size,
-            "offset": offset,
-        },
+        text(coverage_sql),
+        params,
     ).all()
     # pi-lens-ignore: python-sql-injection — COUNT() 参数化
     total_row = sess.execute(
-        text(SQL_COVERAGE_MONTHLY_COUNT),
+        text(count_sql),
         {
             "seller_id": seller_id,
             "advertiser_id": advertiser_id,
@@ -668,7 +760,13 @@ def merge_today_into_daily(
             FROM plugin.ad_today
             WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
               AND day = :yesterday
-            ON CONFLICT ON CONSTRAINT uq_ad_daily DO NOTHING
+            ON CONFLICT ON CONSTRAINT uq_ad_daily DO UPDATE SET
+                mixed_real_cost = EXCLUDED.mixed_real_cost,
+                onsite_roi2_shopping_sku = EXCLUDED.onsite_roi2_shopping_sku,
+                onsite_roi2_shopping_value = EXCLUDED.onsite_roi2_shopping_value,
+                onsite_mixed_real_roi2_shopping = EXCLUDED.onsite_mixed_real_roi2_shopping,
+                metrics_extra = EXCLUDED.metrics_extra,
+                updated_at = now()
         """),
         {
             "seller_id": seller_id,

@@ -183,20 +183,43 @@ def test_dumps_v4_monthly(api_client, readwrite_key, db_engine):
     assert _ad_raw_log_count(db_engine) == 1
 
 
-def test_dumps_v4_duplicate_daily(api_client, readwrite_key, db_engine):
-    """重复写入 daily → ON CONFLICT DO NOTHING（inserted=0）。"""
-    body = _dump_body_v4(kind="daily", day="2026-09-08")
-    r1 = _post(api_client, readwrite_key, body)
+def test_dumps_v4_daily_correction_updates_existing_natural_key(
+    api_client, readwrite_key, db_engine
+):
+    """天级数据同自然键重传时，后到的校准值必须覆盖旧值。"""
+    rows_v1 = [{
+        "product_id": "TEST_PROD_1",
+        "mixed_real_cost": "100.00",
+        "onsite_roi2_shopping_sku": 5,
+        "onsite_roi2_shopping_value": "1000.00",
+        "onsite_mixed_real_roi2_shopping": "10.00",
+    }]
+    rows_v2 = [{
+        "product_id": "TEST_PROD_1",
+        "mixed_real_cost": "200.00",
+        "onsite_roi2_shopping_sku": 15,
+        "onsite_roi2_shopping_value": "3000.00",
+        "onsite_mixed_real_roi2_shopping": "20.00",
+    }]
+    r1 = _post(api_client, readwrite_key, _dump_body_v4(kind="daily", day="2026-09-08", rows=rows_v1))
     assert r1.status_code == 200
     assert r1.json()["data"]["inserted"] == 1
 
-    # 同 (seller, adv, campaign, product, endpoint, day) 再次写入
-    r2 = _post(api_client, readwrite_key, body)
+    r2 = _post(
+        api_client, readwrite_key,
+        _dump_body_v4(kind="daily", day="2026-09-08", rows=rows_v2),
+    )
     assert r2.status_code == 200
     data2 = r2.json()["data"]
-    assert data2["inserted"] == 0
-    assert data2["duplicates"] == 1
+    assert data2["inserted"] == 1
+    assert data2["duplicates"] == 0
     assert _ad_daily_count(db_engine) == 1  # 仍只有 1 行
+    with db_engine.connect() as conn:
+        cost = conn.execute(
+            text("SELECT mixed_real_cost FROM plugin.ad_daily WHERE seller_id = :s AND day = '2026-09-08'"),
+            {"s": SELLER},
+        ).scalar()
+    assert str(cost) == "200.00"
 
 
 def test_dumps_v4_today_overwrite(api_client, readwrite_key, db_engine):

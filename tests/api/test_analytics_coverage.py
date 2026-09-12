@@ -158,6 +158,40 @@ def test_coverage_daily_empty(api_client, readwrite_key, db_engine):
     assert data["campaigns"] == {}
 
 
+def test_coverage_requested_campaign_ids_includes_empty_campaigns(
+    api_client, readwrite_key, db_engine
+):
+    """插件带 expected campaign IDs 时，零覆盖计划也必须返回空 entry。"""
+    _insert_ad_daily(db_engine, day="2026-09-03", campaign_id=CAMPAIGN_1)
+
+    r = _coverage_get(
+        api_client,
+        readwrite_key,
+        sellerId=SELLER,
+        advertiserId=ADVERTISER,
+        endpoint=ENDPOINT,
+        kind="daily",
+        startDay="2026-09-01",
+        endDay="2026-09-10",
+        campaignId=[CAMPAIGN_1, CAMPAIGN_2],
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert set(data["campaigns"]) == {CAMPAIGN_1, CAMPAIGN_2}
+    assert data["campaigns"][CAMPAIGN_1]["coveredPeriods"] == ["2026-09-03"]
+    assert data["campaigns"][CAMPAIGN_2] == {
+        "coveredPeriods": [],
+        "totalCovered": 0,
+    }
+    assert data["pagination"] == {
+        "page": 1,
+        "pageSize": 500,
+        "totalCampaigns": 2,
+        "totalPages": 1,
+        "hasMore": False,
+    }
+
+
 def test_coverage_daily_with_data(api_client, readwrite_key, db_engine):
     """插入 ad_daily 行后，对应日期在 coveredPeriods 中。"""
     _insert_ad_daily(db_engine, day="2026-09-03")
@@ -452,6 +486,26 @@ def test_coverage_pagination_default(api_client, readwrite_key, db_engine):
     assert p["totalPages"] == 1
     assert p["hasMore"] is False
     assert len(data["campaigns"]) == 3
+
+
+def test_coverage_requested_campaign_ids_page_two_keeps_empty_entries(
+    api_client, readwrite_key, db_engine
+):
+    """expected campaign 分页在第二页仍返回零覆盖计划，不被 SQL offset 二次跳过。"""
+    requested = ["TEST_requested-campaign-1", "TEST_requested-campaign-2", "TEST_requested-campaign-3"]
+    r = _coverage_get(
+        api_client,
+        readwrite_key,
+        **_params(page=2, pageSize=2, campaignId=requested),
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert data["campaigns"] == {
+        requested[2]: {"coveredPeriods": [], "totalCovered": 0},
+    }
+    assert data["pagination"]["totalCampaigns"] == 3
+    assert data["pagination"]["totalPages"] == 2
+    assert data["pagination"]["hasMore"] is False
 
 
 def test_coverage_pagination_basic(api_client, readwrite_key, db_engine):

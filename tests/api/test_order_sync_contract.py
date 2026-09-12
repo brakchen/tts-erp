@@ -57,7 +57,7 @@ def _cleanup_plugin_order_rows(db_engine):
 
 def _dump_payload(
     domain: str,
-    response_body: dict,
+    response_body: dict | None,
     *,
     main_order_id: str | None = None,
     endpoint: str = "/api/test",
@@ -435,6 +435,20 @@ def test_has_data_statements_matches_requested_version(api_client, readwrite_key
     )
     assert r.json()["data"]["covered"] == {STATEMENT_ID_1: True}
 
+    # 同一 statement 的多个版本必须全部存在才算 covered。
+    r = api_client.post(
+        "/v2/order-sync/has-data",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json={
+            "scope": {"sellerId": SHOP_ID, "shopId": SHOP_ID},
+            "domain": "statements",
+            "ids": [STATEMENT_ID_1],
+            "versions": {STATEMENT_ID_1: [0, 1]},
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["data"]["covered"] == {STATEMENT_ID_1: False}
+
 
 # ─── dumps: order inserted ─────────────────────────────────────────
 
@@ -456,6 +470,50 @@ def test_dumps_order_inserted(api_client, readwrite_key):
     assert body["data"]["status"] == "inserted"
     assert body["data"]["rowsWritten"] == 3  # 1 order + 2 lines
     assert body["data"]["logId"] > 0
+
+
+def test_dumps_order_with_no_parsed_rows_is_not_reported_as_inserted(
+    api_client, readwrite_key
+):
+    r = api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=_dump_payload(
+            "orders",
+            {"code": 0, "data": {"main_orders": []}},
+            endpoint="/api/fulfillment/order/list",
+            method="POST",
+        ),
+    )
+    assert r.status_code == 200
+    assert r.json()["data"]["status"] == "parse_error"
+    assert r.json()["data"]["rowsWritten"] == 0
+
+
+def test_dumps_empty_response_is_durable_and_retryable(api_client, readwrite_key, db_engine):
+    """response.body=null 不得因 raw_log NOT NULL 约束把整个接收请求打成 500。"""
+    r = api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=_dump_payload(
+            "orders",
+            None,
+            endpoint="/api/fulfillment/order/list",
+            method="POST",
+        ),
+    )
+    assert r.status_code == 200
+    assert r.json()["data"]["status"] == "empty_response"
+    with db_engine.connect() as conn:
+        parse_error, response_body = conn.execute(
+            text(
+                "SELECT parse_error, response_body "
+                "FROM plugin.raw_log WHERE shop_id = :s ORDER BY id DESC LIMIT 1"
+            ),
+            {"s": SHOP_ID},
+        ).one()
+    assert parse_error == "response.body is None"
+    assert response_body == {}
 
 
 # ─── dumps: logistics inserted ─────────────────────────────────────
@@ -495,6 +553,23 @@ def test_dumps_statement_list_inserted(api_client, readwrite_key):
     body = r.json()
     assert body["data"]["status"] == "inserted"
     assert body["data"]["rowsWritten"] == 2
+
+
+def test_dumps_single_statement_object_inserted(api_client, readwrite_key):
+    """插件逐 statement 上传的单对象 response.body 也必须写入结算表。"""
+    record = _statement_list_response([STATEMENT_ID_1])["data"]["statement_records"][0]
+    r = api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=_dump_payload(
+            "statements",
+            record,
+            endpoint="/api/v1/pay/statement/list/detail",
+        ),
+    )
+    assert r.status_code == 200
+    assert r.json()["data"]["status"] == "inserted"
+    assert r.json()["data"]["rowsWritten"] == 1
 
 
 # ─── dumps: statement transaction detail inserted ───────────────────
@@ -565,6 +640,45 @@ def test_dumps_logistics_missing_main_order_id_returns_parse_error(
     assert body["data"]["status"] == "parse_error"
     assert "mainOrderId is required" in body["data"]["parseError"]
     assert body["data"]["rowsWritten"] == 0
+
+
+def test_dumps_parse_failure_rolls_back_partial_business_rows(
+    api_client, readwrite_key, db_engine, monkeypatch
+):
+    """解析器先写一行再报错时，业务表不可留下半个 dump。"""
+    from datetime import UTC, datetime
+
+    from tts_erp_v2.api.v2 import order_sync as order_sync_api
+    from tts_erp_v2.plugin.orders.repository import upsert_order
+
+    def _partially_write_then_fail(sess, **kwargs):
+        upsert_order(
+            sess,
+            log_id=kwargs["log_id"],
+            shop_id=kwargs["shop_id"],
+            order_id=ORDER_ID_1,
+        )
+        raise RuntimeError("synthetic parser failure")
+
+    monkeypatch.setattr(order_sync_api, "parse_order_response", _partially_write_then_fail)
+    r = api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=_dump_payload("orders", _order_response([ORDER_ID_1])),
+    )
+    assert r.status_code == 200
+    assert r.json()["data"]["status"] == "parse_error"
+    with db_engine.connect() as conn:
+        order_count = conn.execute(
+            text("SELECT count(*) FROM plugin.orders WHERE shop_id = :s"),
+            {"s": SHOP_ID},
+        ).scalar()
+        raw_error = conn.execute(
+            text("SELECT parse_error FROM plugin.raw_log WHERE shop_id = :s ORDER BY id DESC LIMIT 1"),
+            {"s": SHOP_ID},
+        ).scalar()
+    assert order_count == 0
+    assert "synthetic parser failure" in raw_error
 
 
 # ─── dumps: 400 schema invalid ─────────────────────────────────────
