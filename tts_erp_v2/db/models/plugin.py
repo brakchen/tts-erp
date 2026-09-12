@@ -338,9 +338,9 @@ class ChromeSettlementDetail(Base):
     )
 
 
-
 # ── 广告消耗 dump（原 tts_erp_v2/db/models/analytics.py，2026-09-11 并入）───
 # 表已在 plugin schema：ad_today / ad_daily / ad_monthly / ad_raw_log / plugin_logs
+
 
 # ad_today ────────────────────────────────────────────────────────────
 # 今天实时表（30s ON CONFLICT DO UPDATE 刷新，跨天固化到 ad_daily 后清空）。
@@ -593,6 +593,7 @@ class CampaignOptLog(Base):
     记录推广计划的操作变更历史（谁在什么时间改了什么）。
     数据来源：Chrome 扩展同步 TikTok /oec_ads/shopping/v1/oec/stat/campaign_opt_log_list。
     """
+
     __tablename__ = "campaign_opt_logs"
     __table_args__ = (
         Index("idx_campaign_opt_logs_seller_time", "seller_id", "opt_time"),
@@ -607,7 +608,9 @@ class CampaignOptLog(Base):
     )
     seller_id: Mapped[str] = mapped_column(Text, nullable=False)
     advertiser_id: Mapped[str] = mapped_column(Text, nullable=False)
-    log_id: Mapped[str] = mapped_column(Text, nullable=False, unique=True)  # TikTok 操作日志 ID
+    log_id: Mapped[str] = mapped_column(
+        Text, nullable=False, unique=True
+    )  # TikTok 操作日志 ID
     campaign_id: Mapped[str] = mapped_column(Text, nullable=False)  # object_id
     user: Mapped[str | None] = mapped_column(Text)  # 操作人
     opt_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
