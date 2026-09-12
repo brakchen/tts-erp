@@ -1437,6 +1437,7 @@ _DASHBOARD_PAGE_HTML = """<!doctype html>
       <section class="section-card">
         <div class="section-header">
           <span class="section-title">数据摘要</span>
+          <span class="section-scope" id="summary-scope">全店铺</span>
         </div>
         <div id="summary-cards" class="summary-cards">
           <div class="summary-card">

@@ -26,6 +26,7 @@
   const $identity = document.getElementById('ops-identity');
   const $shopList = document.getElementById('shop-list');
   const $summaryCards = document.getElementById('summary-cards');
+  const $summaryScope = document.getElementById('summary-scope');
   const $systemStatus = document.getElementById('system-status');
 
 
@@ -88,13 +89,13 @@
     }
 
     const rows = shops.map(s => {
-      const id = s.external_account_id || s.shop_id || '?';
-      const name = s.name || '(未命名)';
+      const id = s.shop_id || s.external_account_id || '?';
+      const name = s.account_name || s.name || '(未命名)';
       const region = s.region || '?';
-      const source = s.data_source || 'api';
+      const source = s.source || s.data_source || 'api';
       const badgeClass = source === 'plugin' ? 'badge-plugin' : 'badge-api';
       return `
-        <div class="shop-item" data-shop-pk="${s.shop_pk || ''}">
+        <div class="shop-item" data-shop-pk="${s.id || s.shop_pk || ''}">
           <div class="shop-item-main">
             <span class="shop-name">${esc(name)}</span>
             <span class="shop-id mono">${esc(id)}</span>
@@ -149,6 +150,19 @@
 
   function renderSummary(summary) {
     if (!$summaryCards) return;
+
+    // 更新店铺范围标识
+    if ($summaryScope) {
+      if (shops.length === 0) {
+        $summaryScope.textContent = '无店铺';
+      } else if (shops.length === 1) {
+        const s = shops[0];
+        const name = s.account_name || s.name || '(未命名)';
+        $summaryScope.textContent = `${name} · ${s.region || '?'}`;
+      } else {
+        $summaryScope.textContent = `全店铺 (${shops.length})`;
+      }
+    }
 
     const cards = [
       {
