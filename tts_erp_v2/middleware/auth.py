@@ -88,6 +88,11 @@ _READONLY_PREFIXES = (
 _READWRITE_EXACT = {
     "/v2/reporting/manual-costs",  # POST only — GET below stays readonly
 }
+# intercept 配置管理端点: POST/PUT/DELETE/PATCH 需要 readwrite
+_READWRITE_PREFIXES = (
+    "/v2/intercept/configs",  # 配置管理 CRUD
+    "/v2/intercept/sync",  # 数据接收
+)
 # Exact-match paths (no trailing slash) that are readonly. These don't
 # fit the prefix pattern above (which requires ``/v2/xxx/`` with slash).
 # Keep this list small — prefer adding a new prefix when adding a
@@ -172,6 +177,10 @@ def required_role(method: str, path: str) -> int | None:
     # v2: manual-costs POST requires readwrite.
     if method.upper() == "POST" and p in _READWRITE_EXACT:
         return ROLE_LEVEL["readwrite"]
+    # intercept 配置管理和数据同步需要 readwrite
+    for prefix in _READWRITE_PREFIXES:
+        if p.startswith(prefix):
+            return ROLE_LEVEL["readwrite"]
     # v2: POST under /v2/spu-images/upload-url or /v2/spu-images/{id}/confirm
     # requires readwrite. The upload-url path is exact; the confirm path
     # is variable. We special-case both so we don't have to introduce a

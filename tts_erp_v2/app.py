@@ -42,6 +42,7 @@ from tts_erp_v2.api.v2 import (
     auth,
     commerce,
     fx,
+    intercept,
     linkage,
     llm_context,
     oauth,
@@ -88,6 +89,9 @@ def _build_routes(app: FastAPI) -> None:
     # Auth + rate-limit 继承父 app 中间件栈；handler 读
     # `request.scope["api_key_hash"]` / `request.scope["api_key_scopes"]`。
     app.include_router(analytics.router)
+    # HTTP 请求拦截配置管理和数据接收
+    # 详见 tech-doc/intercept-design.md
+    app.include_router(intercept.router)
     # Chrome 扩展订单/物流/结算数据同步（readwrite；与 analytics 同级）。
     # 详见 tech-doc/chrome-ext-order-sync-design.md。
     app.include_router(order_sync.router)
