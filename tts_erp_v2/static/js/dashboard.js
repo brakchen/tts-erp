@@ -24,7 +24,7 @@
   const $shopList = document.getElementById('shop-list');
   const $summaryCards = document.getElementById('summary-cards');
   const $systemStatus = document.getElementById('system-status');
-  const $authNote = document.getElementById('auth-note');
+
 
   // ---------- INIT ----------
   document.addEventListener('DOMContentLoaded', init);
@@ -43,24 +43,19 @@
     try {
       const res = await fetch(`${API}/v2/auth/me`, { credentials: 'same-origin' });
       if (!res.ok) {
-        showAuthNote('未登录', '请先登录以使用完整功能');
+        window.location.href = `${API}/v2/auth/login?next=${encodeURIComponent(location.pathname)}`;
         return;
       }
       currentUser = await res.json();
       if ($identity) {
         $identity.textContent = currentUser.role || 'unknown';
       }
-    } catch (e) {
-      console.error('Auth check failed:', e);
+    } catch {
+      console.error('Auth check failed');
     }
   }
 
-  function showAuthNote(title, msg) {
-    if ($authNote) {
-      $authNote.classList.remove('d-none');
-      $authNote.innerHTML = `<strong>${title}</strong> — ${msg} <a href="../../v2/auth/login?next=/v2/pages/dashboard">登录</a>`;
-    }
-  }
+
 
   // ---------- SHOPS ----------
   async function loadShops() {
@@ -207,7 +202,7 @@
           <span class="status-dot status-err"></span>
           <span>API 异常 (${res.status})</span>`;
       }
-    } catch (e) {
+    } catch {
       $systemStatus.innerHTML = `
         <span class="status-dot status-err"></span>
         <span>API 不可达</span>`;
