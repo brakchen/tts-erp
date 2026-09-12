@@ -5,7 +5,7 @@
 
 ## 1. Stack（项目栈）
 
-**技术栈**：Python 3.14 · FastAPI + uvicorn（`:9877`）· SQLAlchemy 2 + psycopg3 · PostgreSQL（`:5432`，11 schema / 51 表 + 1 view）· APScheduler（独立 sync-worker 进程）· MinIO · Fernet 加密 · systemd user units
+**技术栈**：Python 3.14 · FastAPI + uvicorn（`:9877`）· SQLAlchemy 2 + psycopg3 · PostgreSQL（`:5432`，11 schema / 54 表 + 1 view）· APScheduler（独立 sync-worker 进程）· MinIO · Fernet 加密 · systemd user units
 
 **业务模型**：TikTok Shop 销售 + 妙手采购 → 本地分析库 + 只读 API + 定时同步
 
@@ -138,8 +138,8 @@ journalctl --user -u tts-erp -n 50                 # systemd 日志
 - ❌ 不要跑 `tests/migration/` 或 `scripts/migrate_v1_to_v2/`（已归档到
   `tech-doc/_archive/migrate-v1-to-v2-2026-08-29/`，勿恢复；08-31 曾把生产凭证回退成 legacy 格式停摆 22h）
 - ❌ 不要假设 TikTok `code: 0` 是唯一 success（也有 `105005` scope 缺失 / `36009004` 字段缺失等）
-- ❌ 不要改 `tts_erp_v2/app.py` 中间件顺序（RateLimit 最内 → Auth → CORS → AccessLog 最外；Auth 必须在
-  RateLimit 之前才能按 key 分桶）
+- ❌ 不要改 `tts_erp_v2/app.py` 中间件顺序（注册顺序：RateLimit → Auth → CORS → AccessLog；
+  实际顺序：AccessLog 最外 → CORS → Auth → RateLimit 最内；Auth 必须在 RateLimit 之前才能按 key 分桶）
 - `tech-doc/_archive/` = 归档区：v1 时代文档 + 已归档代码（`sync-cron-legacy-2026-08/` v1 cron、
   `migrate-v1-to-v2-2026-08-29/` 迁移脚本），只作历史记录，勿恢复使用
 
