@@ -6,7 +6,7 @@ SQL 以模块级 text() 常量书写。表全部 schema 限定为 analytics.ad_*
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy import bindparam, text

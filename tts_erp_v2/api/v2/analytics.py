@@ -709,6 +709,7 @@ def post_dumps(
 
     from tts_erp_v2.plugin.ads.repository import (
         is_product_level_endpoint,
+        upsert_campaign_opt_logs,
         upsert_daily_rows,
         upsert_monthly_rows,
         upsert_today_rows,
@@ -803,12 +804,35 @@ def post_dumps(
         records_rej=0,
     )
 
+    # campaign_opt_log_list: 从 response_body 提取操作日志写入 campaign_opt_logs
+    opt_logs_inserted = 0
+    if payload.dump.endpoint == "/oec_ads/shopping/v1/oec/stat/campaign_opt_log_list":
+        try:
+            resp_body = payload.dump.response or {}
+            # 响应结构: {"body": {"data": {"logs": [...]}, ...}, "status": 200}
+            inner_body = resp_body.get("body", resp_body)
+            if isinstance(inner_body, dict):
+                data = inner_body.get("data", {})
+                if isinstance(data, dict):
+                    opt_logs = data.get("logs", [])
+                    if opt_logs:
+                        opt_logs_inserted = upsert_campaign_opt_logs(
+                            sess,
+                            seller_id=payload.scope.sellerId,
+                            advertiser_id=payload.scope.advertiserId,
+                            logs=opt_logs,
+                        )
+        except Exception:
+            log.exception("campaign_opt_log upsert failed")
+
     resp_data: dict[str, object] = {
         "kind": dump_kind,
         "rowCount": len(rows),
         "inserted": inserted,
         "duplicates": len(rows) - inserted,
     }
+    if opt_logs_inserted > 0:
+        resp_data["optLogsInserted"] = opt_logs_inserted
     # campaign-level endpoint（如 campaign_opt_log_list）的 rows 没有 product_id，
     # 不会进 ad_daily/ad_today/ad_monthly，只 ad_raw_log 存档；告诉插件这是
     # expected outcome、不要把"inserted=0"误读成失败。插件侧
