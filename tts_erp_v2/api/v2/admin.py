@@ -19,7 +19,7 @@ import os
 from datetime import date, datetime, timezone
 from typing import Any, Literal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 
@@ -382,6 +382,66 @@ def register_shop(
         ).one()
     return ShopRegisterResponse(
         created=bool(row.inserted),
+        shop=ShopOut(
+            id=row.id,
+            platform=row.platform,
+            shop_id=row.shop_id,
+            account_name=row.account_name,
+            region=row.region,
+            seller_type=row.seller_type,
+            status=row.status,
+            credential_id=row.credential_id,
+            opened_date=row.opened_date,
+        ),
+    )
+
+
+# ─── Update shop opened_date ─────────────────────────────────────────
+
+_SQL_UPDATE_OPENED_DATE = text(
+    "UPDATE commerce.shops SET opened_date = :opened_date "
+    "WHERE id = :shop_pk "
+    "RETURNING id, platform, shop_id, account_name, region, seller_type, "
+    "          status, credential_id, opened_date"
+)
+
+
+class ShopUpdateBody(BaseModel):
+    """PATCH body for ``/v2/admin/shops/{shop_pk}``."""
+
+    opened_date: date | None = Field(
+        description="开店时间（天级，YYYY-MM-DD）。设为 null 清空。",
+    )
+
+
+class ShopUpdateResponse(BaseModel):
+    shop: ShopOut
+
+
+@router.patch(
+    "/shops/{shop_pk}",
+    response_model=ShopUpdateResponse,
+    summary="更新店铺开业时间（readwrite+）",
+)
+def update_shop(
+    request: Request, shop_pk: int, body: ShopUpdateBody
+) -> ShopUpdateResponse:
+    """Update a shop's ``opened_date``. Only this field is mutable; all
+    other columns are left untouched.
+    """
+    require_role_at_least(request, "readwrite")
+
+    from tts_erp_v2.db.base import get_engine
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        row = conn.execute(  # pi-lens-ignore: python-sql-injection — module-level constant SQL, bound params only
+            _SQL_UPDATE_OPENED_DATE,
+            {"shop_pk": shop_pk, "opened_date": body.opened_date},
+        ).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"shop {shop_pk} not found")
+    return ShopUpdateResponse(
         shop=ShopOut(
             id=row.id,
             platform=row.platform,
