@@ -157,6 +157,9 @@ def login(body: LoginBody, request: Request) -> Response:
     role = _LEVEL_TO_NAME.get(level or 0, "readonly")
     cookie = session_auth.mint_session_cookie(body.key, role)
     resp = JSONResponse(content={"ok": True, "role": role})
+    # Scope the cookie to the NGINX prefix (e.g. /tts) so it is never
+    # sent to other paths on the same domain (e.g. /spu-roi).
+    cookie_path = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "/") or "/"
     resp.set_cookie(
         key=session_auth.SESSION_COOKIE_NAME,
         value=cookie,
@@ -164,7 +167,7 @@ def login(body: LoginBody, request: Request) -> Response:
         httponly=True,
         secure=session_auth.session_secure_flag(),
         samesite="lax",
-        path="/",
+        path=cookie_path,
     )
     return resp
 
@@ -173,7 +176,10 @@ def login(body: LoginBody, request: Request) -> Response:
 def logout() -> Response:
     """Clear the session cookie (idempotent, public)."""
     resp = Response(status_code=status.HTTP_204_NO_CONTENT)
-    resp.delete_cookie(session_auth.SESSION_COOKIE_NAME, path="/")
+    resp.delete_cookie(
+        session_auth.SESSION_COOKIE_NAME,
+        path=os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "/") or "/",
+    )
     return resp
 
 
