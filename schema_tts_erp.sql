@@ -2899,3 +2899,21 @@ ALTER TABLE ONLY reporting.shipment_tracking_summary
 -- PostgreSQL database dump complete
 
 
+
+-- campaign_opt_logs (广告操作日志)
+CREATE TABLE IF NOT EXISTS plugin.campaign_opt_logs (
+    id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    seller_id        TEXT NOT NULL,
+    advertiser_id    TEXT NOT NULL,
+    log_id           TEXT NOT NULL UNIQUE,        -- TikTok 操作日志 ID
+    campaign_id      TEXT NOT NULL,               -- object_id
+    user             TEXT,                         -- 操作人
+    opt_time         TIMESTAMPTZ NOT NULL,         -- 操作时间
+    object_type      TEXT,                         -- 如 "推广系列"
+    object_raw_type  TEXT,                         -- 如 "4"
+    activity_details JSONB,                        -- 变更详情数组
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_campaign_opt_logs_seller_time ON plugin.campaign_opt_logs (seller_id, opt_time);
+CREATE INDEX IF NOT EXISTS idx_campaign_opt_logs_campaign ON plugin.campaign_opt_logs (campaign_id);

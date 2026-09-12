@@ -102,84 +102,152 @@ _SHOPS_PAGE_HTML = """<!doctype html>
   <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
   <style>
     :root {
-      --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', Consolas, monospace;
+      --paper: #F4EFE4;
+      --paper-deep: #EAE3D2;
+      --ink: #1B1814;
+      --ink-soft: #4A4239;
+      --rule: #C9BFA8;
+      --rule-soft: #DDD4BF;
+      --accent: #B8390E;
+      --accent-deep: #8F2C09;
+      --muted: #6E6657;
+      --danger: #8C1A1A;
+      --ok: #2F6B3E;
+      --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', Consolas, ui-monospace, monospace;
       --sans: 'Inter', 'Noto Sans SC', 'Source Han Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+      --serif: 'Noto Serif SC', 'Source Han Serif SC', Georgia, ui-serif, serif;
     }
-    body {
-      background: #f6f7f9;
+    * { box-sizing: border-box; }
+    html, body {
+      background: var(--paper);
+      color: var(--ink);
       font-family: var(--sans);
-      font-size: 15px;
+      font-size: 16px;
       line-height: 1.6;
+      margin: 0;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
       text-rendering: optimizeLegibility;
     }
-    .shop-card { background: #fff; border: 1px solid #e3e6ea; border-radius: 8px; }
-    .shop-card h2 { font-size: 1.1rem; font-weight: 600; }
-    .badge-sync-api { background: #2F6B3E; }
-    .badge-sync-plugin { background: #8a6d1a; }
-    .mono { font-family: var(--mono); font-size: .9em; }
-    table td, table th { vertical-align: middle; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-deep); }
+    .op-header { border-bottom: 1px solid var(--rule); padding: 18px 28px 14px; background: var(--paper); }
+    .op-header-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+    .op-header-titles { display: flex; flex-direction: column; gap: 2px; }
+    .op-eyebrow { font-family: var(--mono); font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+    .op-title { font-family: var(--serif); font-weight: 600; font-size: 26px; margin: 0; letter-spacing: -0.01em; }
+    .op-identity { font-family: var(--mono); font-size: 14px; color: var(--muted); }
+    .page-main { max-width: 1280px; margin: 0 auto; padding: 24px 28px 64px; }
+    .op-section { background: var(--paper); border: 1px solid var(--rule); border-radius: 0; padding: 20px 24px; margin-bottom: 24px; }
+    .op-section-header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--rule-soft); flex-wrap: wrap; }
+    .op-section-title { font-family: var(--serif); font-weight: 600; font-size: 18px; margin: 0; color: var(--ink); }
+    .op-section-meta { font-family: var(--mono); font-size: 13px; color: var(--muted); }
+    .form-grid { display: grid; grid-template-columns: 1.2fr 1.4fr 0.6fr 0.8fr auto; gap: 14px; align-items: end; }
+    .form-field label { display: block; font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+    .form-field input { width: 100%; font-family: var(--sans); font-size: 14px; background: transparent; border: 0; border-bottom: 1px solid var(--rule); padding: 7px 2px; color: var(--ink); border-radius: 0; }
+    .form-field input:focus { outline: 0; border-bottom-color: var(--accent); }
+    .form-field input::placeholder { color: var(--rule); }
+    .form-field.mono input { font-family: var(--mono); }
+    .form-hint { margin-top: 8px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+    .btn-primary { font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; padding: 8px 18px; background: var(--ink); color: var(--paper); border: 0; cursor: pointer; border-radius: 0; transition: background 120ms ease; }
+    .btn-primary:hover { background: var(--accent); }
+    .btn-primary:disabled { background: var(--rule); color: var(--paper); cursor: not-allowed; }
+    .btn-secondary { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; padding: 7px 14px; background: transparent; color: var(--ink); border: 1px solid var(--rule); cursor: pointer; border-radius: 0; transition: border-color 120ms ease; }
+    .btn-secondary:hover { border-color: var(--accent); }
+    .op-table { width: 100%; border-collapse: collapse; font-family: var(--sans); font-size: 14px; background: var(--paper); }
+    .op-th { text-align: left; font-family: var(--mono); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); font-weight: 500; padding: 12px 12px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+    .op-table td { padding: 14px 12px; border-bottom: 1px solid var(--rule-soft); vertical-align: middle; }
+    .op-table tbody tr:hover { background: var(--paper-deep); }
+    .op-table tbody tr:last-child td { border-bottom: 0; }
+    .mono { font-family: var(--mono); font-size: 13px; }
+    .badge { display: inline-block; font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: 0.06em; padding: 3px 8px; border-radius: 0; }
+    .badge-api { background: var(--ok); color: #fff; }
+    .badge-plugin { background: #8a6d1a; color: #fff; }
+    .op-empty, .op-error { text-align: center; padding: 48px 20px; color: var(--muted); font-family: var(--mono); font-size: 13px; letter-spacing: 0.08em; }
+    .op-error { color: var(--danger); }
+    .op-note { padding: 12px 16px; border: 1px solid var(--rule); background: var(--paper-deep); color: var(--ink-soft); font-size: 13px; }
+    .op-error-note { padding: 12px 16px; border: 1px solid var(--danger); background: var(--paper); color: var(--danger); font-size: 13px; }
+    .op-hidden { display: none !important; }
+    @media (max-width: 720px) {
+      .form-grid { grid-template-columns: 1fr; }
+      .op-header { padding: 14px 16px 10px; }
+      .page-main { padding: 16px 16px 48px; }
+      .op-section { padding: 16px; }
+    }
   </style>
 </head>
 <body>
-<div class="container py-4" style="max-width: 960px">
-  <div class="d-flex align-items-baseline gap-3 mb-3">
-    <h1 class="h4 mb-0">店铺注册</h1>
-    <span class="text-muted small">插件同步店铺人工登记 — 仅影响查询关联，不影响数据同步</span>
-  </div>
-  <div id="auth-note" class="alert alert-warning d-none"></div>
-  <div id="err" class="alert alert-danger d-none"></div>
-
-  <div class="shop-card p-3 mb-4">
-    <h2 class="mb-3">注册店铺</h2>
-    <form id="register-form" class="row g-2 align-items-end">
-      <div class="col-md-3">
-        <label class="form-label small mb-1" for="f-shop-id">shop_id *</label>
-        <input id="f-shop-id" class="form-control form-control-sm mono" required
-               pattern="[0-9]+" placeholder="19 位数字">
+  <header class="op-header">
+    <div class="op-header-row">
+      <div class="op-header-titles">
+        <span class="op-eyebrow">TikTok Shop · Operations</span>
+        <h1 class="op-title">店铺注册</h1>
       </div>
-      <div class="col-md-3">
-        <label class="form-label small mb-1" for="f-name">店铺名称</label>
-        <input id="f-name" class="form-control form-control-sm">
-      </div>
-      <div class="col-md-2">
-        <label class="form-label small mb-1" for="f-region">区域</label>
-        <input id="f-region" class="form-control form-control-sm" placeholder="VN">
-      </div>
-      <div class="col-md-2">
-        <label class="form-label small mb-1" for="f-opened">开店日期</label>
-        <input id="f-opened" type="date" class="form-control form-control-sm">
-      </div>
-      <div class="col-md-2">
-        <button type="submit" class="btn btn-sm btn-dark w-100">注册</button>
-      </div>
-    </form>
-    <div class="form-text">重复注册幂等：只补填仍为空的字段，不会覆盖已有 credential / 状态。</div>
-  </div>
-
-  <div class="shop-card p-3 mb-4">
-    <h2 class="mb-2">待注册候选 <span id="cand-count" class="text-muted small"></span></h2>
-    <div class="table-responsive">
-      <table class="table table-sm mb-0">
-        <thead><tr><th>shop_id</th><th>数据来源</th><th></th></tr></thead>
-        <tbody id="cand-body"><tr><td colspan="3" class="text-muted">加载中…</td></tr></tbody>
-      </table>
+      <div class="op-identity" id="ops-identity"></div>
     </div>
-  </div>
+  </header>
 
-  <div class="shop-card p-3">
-    <h2 class="mb-2">已注册店铺</h2>
-    <div class="table-responsive">
-      <table class="table table-sm mb-0">
+  <main class="page-main">
+    <div id="auth-note" class="op-note op-hidden"></div>
+    <div id="err" class="op-error-note op-hidden"></div>
+
+    <section class="op-section">
+      <div class="op-section-header">
+        <h2 class="op-section-title">注册店铺</h2>
+        <span class="op-section-meta">插件同步店铺人工登记 — 仅影响查询关联，不影响数据同步</span>
+      </div>
+      <form id="register-form" class="form-grid">
+        <div class="form-field mono">
+          <label for="f-shop-id">shop_id *</label>
+          <input id="f-shop-id" type="text" required pattern="[0-9]+" placeholder="19 位数字" autocomplete="off">
+        </div>
+        <div class="form-field">
+          <label for="f-name">店铺名称</label>
+          <input id="f-name" type="text" placeholder="选填，留空时回填为"未命名"" autocomplete="off">
+        </div>
+        <div class="form-field">
+          <label for="f-region">区域</label>
+          <input id="f-region" type="text" placeholder="VN" autocomplete="off">
+        </div>
+        <div class="form-field">
+          <label for="f-opened">开店日期</label>
+          <input id="f-opened" type="date" autocomplete="off">
+        </div>
+        <div class="form-field">
+          <button type="submit" class="btn-primary">注册</button>
+        </div>
+      </form>
+      <div class="form-hint">重复注册幂等：只补填仍为空的字段，不会覆盖已有 credential / 状态。</div>
+    </section>
+
+    <section class="op-section">
+      <div class="op-section-header">
+        <h2 class="op-section-title">待注册候选</h2>
+        <span class="op-section-meta" id="cand-count">0 条</span>
+      </div>
+      <table class="op-table">
+        <thead><tr><th class="op-th">shop_id</th><th class="op-th">数据来源</th><th class="op-th" style="width: 120px;"></th></tr></thead>
+        <tbody id="cand-body"><tr><td colspan="3" class="op-empty">加载中…</td></tr></tbody>
+      </table>
+    </section>
+
+    <section class="op-section">
+      <div class="op-section-header">
+        <h2 class="op-section-title">已注册店铺</h2>
+        <span class="op-section-meta" id="shop-count">0 条</span>
+      </div>
+      <table class="op-table">
         <thead><tr>
-          <th>shop_id</th><th>名称</th><th>区域</th><th>开店日期</th><th>同步方式</th>
+          <th class="op-th">shop_id</th>
+          <th class="op-th">名称</th>
+          <th class="op-th">区域</th>
+          <th class="op-th">开店日期</th>
+          <th class="op-th">同步方式</th>
         </tr></thead>
-        <tbody id="shop-body"><tr><td colspan="5" class="text-muted">加载中…</td></tr></tbody>
+        <tbody id="shop-body"><tr><td colspan="5" class="op-empty">加载中…</td></tr></tbody>
       </table>
-    </div>
-  </div>
-</div>
+    </section>
+  </main>
 <script src="../../static/js/shops.js?v=__JSV_SHOPS__" defer></script>
 </body>
 </html>

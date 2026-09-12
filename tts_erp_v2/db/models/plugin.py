@@ -587,6 +587,44 @@ class PluginLog(Base):
     )
 
 
+class CampaignOptLog(Base):
+    """广告操作日志表（campaign_opt_log_list）。
+
+    记录推广计划的操作变更历史（谁在什么时间改了什么）。
+    数据来源：Chrome 扩展同步 TikTok /oec_ads/shopping/v1/oec/stat/campaign_opt_log_list。
+    """
+    __tablename__ = "campaign_opt_logs"
+    __table_args__ = (
+        Index("idx_campaign_opt_logs_seller_time", "seller_id", "opt_time"),
+        Index("idx_campaign_opt_logs_campaign", "campaign_id"),
+        {"schema": "plugin"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    seller_id: Mapped[str] = mapped_column(Text, nullable=False)
+    advertiser_id: Mapped[str] = mapped_column(Text, nullable=False)
+    log_id: Mapped[str] = mapped_column(Text, nullable=False, unique=True)  # TikTok 操作日志 ID
+    campaign_id: Mapped[str] = mapped_column(Text, nullable=False)  # object_id
+    user: Mapped[str | None] = mapped_column(Text)  # 操作人
+    opt_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    object_type: Mapped[str | None] = mapped_column(Text)  # 如 "推广系列"
+    object_raw_type: Mapped[str | None] = mapped_column(Text)  # 如 "4"
+    activity_details: Mapped[dict | None] = mapped_column(JSONB)  # 变更详情数组
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+        onupdate=text("now()"),
+    )
+
+
 __all__ = [
     # 订单/物流/结算
     "RawLog",
@@ -602,4 +640,6 @@ __all__ = [
     "AdMonthly",
     "AdRawLog",
     "PluginLog",
+    # 广告操作日志
+    "CampaignOptLog",
 ]

@@ -719,6 +719,74 @@ def insert_plugin_logs(sess: Session, *, logs: list[dict[str, Any]]) -> int:
     return inserted
 
 
+# ─── Campaign opt logs ──────────────────────────────────────────────────
+
+SQL_UPSERT_CAMPAIGN_OPT_LOG = """
+INSERT INTO plugin.campaign_opt_logs (
+    seller_id, advertiser_id, log_id, campaign_id,
+    "user", opt_time, object_type, object_raw_type, activity_details
+) VALUES (
+    :seller_id, :advertiser_id, :log_id, :campaign_id,
+    :user, :opt_time, :object_type, :object_raw_type, CAST(:activity_details AS JSONB)
+)
+ON CONFLICT (log_id) DO UPDATE SET
+    "user" = EXCLUDED."user",
+    opt_time = EXCLUDED.opt_time,
+    object_type = EXCLUDED.object_type,
+    object_raw_type = EXCLUDED.object_raw_type,
+    activity_details = EXCLUDED.activity_details,
+    updated_at = now()
+"""
+
+
+def upsert_campaign_opt_logs(
+    sess: Session,
+    *,
+    seller_id: str,
+    advertiser_id: str,
+    logs: list[dict[str, Any]],
+) -> int:
+    """写入广告操作日志，返回 inserted 数。
+
+    logs 数组每项结构：
+    {"id": "...", "user": "...", "opt_time": "...", "object_id": "...",
+     "object_type": "...", "object_raw_type": "...", "activity_details": [...]}
+    """
+    inserted = 0
+    for log in logs:
+        log_id = log.get("id")
+        if not log_id:
+            continue
+        opt_time_str = log.get("opt_time", "")
+        # opt_time 格式: "2026-09-12 15:40:46" (店铺时区)
+        try:
+            opt_time = datetime.strptime(opt_time_str, "%Y-%m-%d %H:%M:%S").replace(
+                tzinfo=UTC
+            )
+        except (ValueError, TypeError):
+            opt_time = datetime.now(UTC)
+
+        sess.execute(
+            text(SQL_UPSERT_CAMPAIGN_OPT_LOG),
+            {
+                "seller_id": seller_id,
+                "advertiser_id": advertiser_id,
+                "log_id": str(log_id),
+                "campaign_id": log.get("object_id", ""),
+                "user": log.get("user"),
+                "opt_time": opt_time,
+                "object_type": log.get("object_type"),
+                "object_raw_type": log.get("object_raw_type"),
+                "activity_details": json.dumps(
+                    log.get("activity_details", []), ensure_ascii=False
+                ),
+            },
+        )
+        inserted += 1
+    sess.commit()
+    return inserted
+
+
 __all__ = [
     "SQL_COVERAGE_DAILY",
     "SQL_COVERAGE_MONTHLY",
