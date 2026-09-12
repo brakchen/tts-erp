@@ -66,7 +66,8 @@ def _page(html: str) -> HTMLResponse:
   return HTMLResponse(
     html.replace("__JSV_CONSOLE__", _js_version("console.js")).replace(
       "__JSV_SPU_ROI__", _js_version("spu-roi.js")
-    ).replace("__JSV_SHOPS__", _js_version("shops.js"))
+    ).replace("__JSV_SHOPS__", _js_version("shops.js")
+    ).replace("__JSV_DASHBOARD__", _js_version("dashboard.js"))
   )
 
 
@@ -994,6 +995,457 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
 
   <div id="ops-tip" role="tooltip" hidden></div>
   <script src="../../static/js/spu-roi.js?v=__JSV_SPU_ROI__" defer></script>
+</body>
+</html>
+"""
+
+
+@router.get("/dashboard", response_class=HTMLResponse)
+def dashboard_page() -> HTMLResponse:
+  """主页仪表板 — 快速导航 + 店铺概览 + 数据摘要。
+
+  用途：运营入口页，提供：
+  1. 快速跳转到三个现有页面（采购工作台/ROI 看板/店铺注册）
+  2. 已注册店铺列表（精简版）
+  3. 关键业务指标摘要（待录成本/SPU 总数/店铺数量）
+  4. 系统状态指示
+
+  设计风格：延续工业操作台视觉语言（暖纸/等宽/细线），
+  但更轻量 — 卡片式布局，适合快速扫描和点击。
+  """
+  return _page(_DASHBOARD_PAGE_HTML)
+
+
+_DASHBOARD_PAGE_HTML = """<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>控制台 · tts-erp</title>
+  <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
+  <style>
+    /* ---------- tokens (shared with other pages) ---------- */
+    :root {
+      --paper: #F4EFE4;
+      --paper-deep: #EAE3D2;
+      --ink: #1B1814;
+      --ink-soft: #4A4239;
+      --rule: #C9BFA8;
+      --rule-soft: #DDD4BF;
+      --accent: #B8390E;
+      --accent-deep: #8F2C09;
+      --muted: #6E6657;
+      --danger: #8C1A1A;
+      --ok: #2F6B3E;
+      --mono: ui-monospace, 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', Consolas, 'Liberation Mono', monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+      --serif: ui-serif, 'Iowan Old Style', 'Apple Garamond', 'Source Han Serif SC', 'Noto Serif CJK SC', serif;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 14px;
+      line-height: 1.4;
+      margin: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-deep); }
+
+    /* ---------- HEADER ---------- */
+    .op-header {
+      border-bottom: 1px solid var(--rule);
+      padding: 18px 28px 14px;
+      background: var(--paper);
+    }
+    .op-header-row {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+    .op-header-titles { display: flex; flex-direction: column; gap: 2px; }
+    .op-eyebrow {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .op-title {
+      font-family: var(--serif);
+      font-weight: 600;
+      font-size: 22px;
+      margin: 0;
+      letter-spacing: -0.01em;
+    }
+    .op-identity {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    /* ---------- MAIN LAYOUT ---------- */
+    .dashboard {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px 28px 64px;
+    }
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+    @media (max-width: 768px) {
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* ---------- SECTION CARD ---------- */
+    .section-card {
+      background: var(--paper);
+      border: 1px solid var(--rule);
+      border-radius: 0;
+      padding: 20px 24px;
+    }
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--rule-soft);
+    }
+    .section-title {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 500;
+    }
+    .section-link {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      color: var(--accent);
+    }
+    .section-link:hover { color: var(--accent-deep); }
+
+    /* ---------- QUICK NAV ---------- */
+    .quick-nav {
+      grid-column: 1 / -1;
+    }
+    .nav-cards {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+    @media (max-width: 768px) {
+      .nav-cards {
+        grid-template-columns: 1fr;
+      }
+    }
+    .nav-card {
+      display: flex;
+      flex-direction: column;
+      padding: 20px;
+      border: 1px solid var(--rule);
+      background: var(--paper);
+      transition: border-color 120ms ease, background 120ms ease;
+      cursor: pointer;
+      text-decoration: none;
+      color: var(--ink);
+    }
+    .nav-card:hover {
+      border-color: var(--accent);
+      background: var(--paper-deep);
+      color: var(--ink);
+    }
+    .nav-card-icon {
+      font-size: 28px;
+      margin-bottom: 12px;
+    }
+    .nav-card-title {
+      font-family: var(--serif);
+      font-weight: 600;
+      font-size: 16px;
+      margin-bottom: 4px;
+    }
+    .nav-card-desc {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    /* ---------- SUMMARY CARDS ---------- */
+    .summary-cards {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+    @media (max-width: 480px) {
+      .summary-cards {
+        grid-template-columns: 1fr;
+      }
+    }
+    .summary-card {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 16px;
+      border: 1px solid var(--rule-soft);
+      background: var(--paper);
+      text-decoration: none;
+      color: var(--ink);
+      transition: border-color 120ms ease;
+    }
+    .summary-card:hover {
+      border-color: var(--accent);
+      color: var(--ink);
+    }
+    .summary-icon {
+      font-size: 24px;
+      flex-shrink: 0;
+    }
+    .summary-content {
+      flex: 1;
+      min-width: 0;
+    }
+    .summary-value {
+      font-family: var(--mono);
+      font-weight: 700;
+      font-size: 24px;
+      letter-spacing: -0.02em;
+      font-variant-numeric: tabular-nums;
+    }
+    .summary-label {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .summary-hint {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+    .summary-warn .summary-value { color: var(--accent); }
+    .summary-ok .summary-value { color: var(--ok); }
+
+    /* ---------- SHOP LIST ---------- */
+    .shop-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--rule-soft);
+    }
+    .shop-item:last-child { border-bottom: 0; }
+    .shop-item-main {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .shop-name {
+      font-weight: 500;
+      font-size: 14px;
+    }
+    .shop-id {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .shop-item-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .shop-region {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .badge {
+      display: inline-block;
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      padding: 2px 8px;
+      border-radius: 0;
+    }
+    .badge-api { background: var(--ok); color: #fff; }
+    .badge-plugin { background: #8a6d1a; color: #fff; }
+
+    .op-empty-state {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 24px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .op-empty-icon {
+      font-size: 24px;
+    }
+
+    /* ---------- SYSTEM STATUS ---------- */
+    .status-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 0;
+      font-size: 13px;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .status-ok { background: var(--ok); }
+    .status-err { background: var(--danger); }
+    .status-detail {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      margin-left: auto;
+    }
+
+    /* ---------- AUTH NOTE ---------- */
+    .auth-note {
+      grid-column: 1 / -1;
+      background: var(--paper-deep);
+      border: 1px solid var(--rule);
+      padding: 16px 20px;
+      font-size: 13px;
+      color: var(--ink-soft);
+    }
+    .auth-note strong {
+      color: var(--ink);
+    }
+
+    /* ---------- FOOTER ---------- */
+    .dashboard-footer {
+      margin-top: 32px;
+      padding-top: 16px;
+      border-top: 1px solid var(--rule-soft);
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+  </style>
+</head>
+<body>
+  <header class="op-header">
+    <div class="op-header-row">
+      <div class="op-header-titles">
+        <span class="op-eyebrow">TikTok Shop · Operations</span>
+        <h1 class="op-title">控制台</h1>
+      </div>
+      <div class="op-identity" id="ops-identity"></div>
+    </div>
+  </header>
+
+  <main class="dashboard">
+    <div id="auth-note" class="auth-note d-none"></div>
+
+    <div class="dashboard-grid">
+      <!-- Quick Navigation -->
+      <section class="section-card quick-nav">
+        <div class="section-header">
+          <span class="section-title">快速导航</span>
+        </div>
+        <div class="nav-cards">
+          <a href="../../v2/pages/manual-costs" class="nav-card">
+            <span class="nav-card-icon">📝</span>
+            <span class="nav-card-title">采购工作台</span>
+            <span class="nav-card-desc">录入 SPU 采购成本，管理商品成本数据</span>
+          </a>
+          <a href="../../v2/pages/spu-roi" class="nav-card">
+            <span class="nav-card-icon">📊</span>
+            <span class="nav-card-title">SPU ROI 看板</span>
+            <span class="nav-card-desc">查看商品实际 ROI，分析利润构成</span>
+          </a>
+          <a href="../../v2/pages/shops" class="nav-card">
+            <span class="nav-card-icon">🏪</span>
+            <span class="nav-card-title">店铺注册</span>
+            <span class="nav-card-desc">管理插件同步店铺的注册与关联</span>
+          </a>
+        </div>
+      </section>
+
+      <!-- Summary -->
+      <section class="section-card">
+        <div class="section-header">
+          <span class="section-title">数据摘要</span>
+        </div>
+        <div id="summary-cards" class="summary-cards">
+          <div class="summary-card">
+            <span class="summary-icon">⏳</span>
+            <div class="summary-content">
+              <div class="summary-value">—</div>
+              <div class="summary-label">加载中…</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Shop List -->
+      <section class="section-card">
+        <div class="section-header">
+          <span class="section-title">已注册店铺</span>
+          <a href="../../v2/pages/shops" class="section-link">管理 →</a>
+        </div>
+        <div id="shop-list">
+          <div class="op-empty-state">
+            <span class="op-empty-icon">⏳</span>
+            <span>加载中…</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- System Status -->
+      <section class="section-card">
+        <div class="section-header">
+          <span class="section-title">系统状态</span>
+        </div>
+        <div id="system-status" class="status-item">
+          <span class="status-dot" style="background: var(--muted)"></span>
+          <span>检查中…</span>
+        </div>
+        <div class="status-item">
+          <span class="status-dot status-ok"></span>
+          <span>数据库</span>
+          <span class="status-detail">PostgreSQL</span>
+        </div>
+        <div class="status-item">
+          <span class="status-dot status-ok"></span>
+          <span>存储</span>
+          <span class="status-detail">MinIO</span>
+        </div>
+        <div class="status-item">
+          <span class="status-dot status-ok"></span>
+          <span>同步服务</span>
+          <span class="status-detail">APScheduler</span>
+        </div>
+      </section>
+    </div>
+
+    <footer class="dashboard-footer">
+      <span>tts-erp v2.0</span>
+      <span>TikTok Shop · 妙手采购</span>
+    </footer>
+  </main>
+
+  <script src="../../static/js/dashboard.js?v=__JSV_DASHBOARD__" defer></script>
 </body>
 </html>
 """

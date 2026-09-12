@@ -67,7 +67,7 @@ if not any(
     login_logger.addHandler(_stdout)
     login_logger.propagate = False
 
-DEFAULT_NEXT = "/v2/pages/manual-costs"
+DEFAULT_NEXT = "/v2/pages/dashboard"
 _LEVEL_TO_NAME = {v: k for k, v in ROLE_LEVEL.items()}
 
 
@@ -200,61 +200,233 @@ def me(request: Request) -> dict:
 
 
 _LOGIN_HTML = """<!doctype html>
-<html lang="en">
+<html lang="zh-Hans">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>tts-erp · sign in</title>
-<style>
-  body { font-family: -apple-system, system-ui, sans-serif; background: #f6f8fa; margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; color: #1f2328; }
-  .card { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 28px 32px; width: 340px; box-shadow: 0 1px 3px rgba(27,31,36,.12); }
-  h1 { font-size: 18px; margin: 0 0 4px; }
-  .hint { font-size: 13px; color: #57606a; margin: 0 0 18px; }
-  input[type=password] { width: 100%; box-sizing: border-box; font: inherit; padding: 8px 10px; border: 1px solid #d0d7de; border-radius: 6px; margin-bottom: 12px; }
-  button { width: 100%; font: inherit; font-weight: 600; padding: 8px 12px; border: 1px solid #1f883d; border-radius: 6px; background: #1f883d; color: #fff; cursor: pointer; }
-  button:hover { background: #1a7f37; }
-  .err { font-size: 13px; color: #cf222e; margin: 12px 0 0; min-height: 1em; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>登录 · tts-erp</title>
+  <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
+  <style>
+    /* ---------- tokens (shared with dashboard) ---------- */
+    :root {
+      --paper: #F4EFE4;
+      --paper-deep: #EAE3D2;
+      --ink: #1B1814;
+      --ink-soft: #4A4239;
+      --rule: #C9BFA8;
+      --rule-soft: #DDD4BF;
+      --accent: #B8390E;
+      --accent-deep: #8F2C09;
+      --muted: #6E6657;
+      --danger: #8C1A1A;
+      --ok: #2F6B3E;
+      --mono: ui-monospace, 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', Consolas, 'Liberation Mono', monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+      --serif: ui-serif, 'Iowan Old Style', 'Apple Garamond', 'Source Han Serif SC', 'Noto Serif CJK SC', serif;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 14px;
+      line-height: 1.4;
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-deep); }
+
+    /* ---------- LOGIN CARD ---------- */
+    .login-card {
+      background: var(--paper);
+      border: 1px solid var(--rule);
+      padding: 32px 36px;
+      width: 380px;
+      max-width: 90vw;
+    }
+    .login-header {
+      margin-bottom: 24px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--rule-soft);
+    }
+    .login-eyebrow {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .login-title {
+      font-family: var(--serif);
+      font-weight: 600;
+      font-size: 22px;
+      margin: 0;
+      letter-spacing: -0.01em;
+    }
+    .login-hint {
+      font-size: 13px;
+      color: var(--muted);
+      margin: 8px 0 0;
+    }
+
+    /* ---------- FORM ---------- */
+    .form-group {
+      margin-bottom: 16px;
+    }
+    .form-label {
+      display: block;
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .form-input {
+      width: 100%;
+      font-family: var(--mono);
+      font-size: 14px;
+      padding: 10px 12px;
+      border: 1px solid var(--rule);
+      background: var(--paper-deep);
+      color: var(--ink);
+      border-radius: 0;
+    }
+    .form-input:focus {
+      outline: 0;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent);
+    }
+    .form-input::placeholder {
+      color: var(--rule);
+    }
+
+    /* ---------- BUTTON ---------- */
+    .btn-login {
+      width: 100%;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      padding: 12px 16px;
+      background: var(--ink);
+      color: var(--paper);
+      border: 0;
+      cursor: pointer;
+      border-radius: 0;
+      transition: background 120ms ease;
+    }
+    .btn-login:hover {
+      background: var(--accent);
+    }
+    .btn-login:disabled {
+      background: var(--rule);
+      color: var(--paper);
+      cursor: wait;
+    }
+    .btn-login:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    /* ---------- ERROR ---------- */
+    .form-error {
+      font-size: 13px;
+      color: var(--danger);
+      margin: 12px 0 0;
+      min-height: 1.5em;
+    }
+
+    /* ---------- FOOTER ---------- */
+    .login-footer {
+      margin-top: 24px;
+      padding-top: 16px;
+      border-top: 1px solid var(--rule-soft);
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      text-align: center;
+    }
+  </style>
 </head>
 <body>
-<div class="card">
-  <h1>tts-erp sign in</h1>
-  <p class="hint">Enter an operator API key to open the console.</p>
-  <form id="login-form">
-    <input type="password" id="key" placeholder="operator API key" autocomplete="current-password" required>
-    <input type="hidden" id="next" value="__NEXT__">
-    <button type="submit">sign in</button>
-    <p class="err" id="err"></p>
-  </form>
-</div>
-<script>
-// API base: works on :9877 (no prefix) and behind the NAT /tts prefix.
-const base = location.pathname.slice(0, location.pathname.indexOf("/v2/auth/login")) || "";
-const API = base + "/v2";
+  <div class="login-card">
+    <div class="login-header">
+      <div class="login-eyebrow">TikTok Shop · Operations</div>
+      <h1 class="login-title">运营控制台</h1>
+      <p class="login-hint">输入 API Key 登录以访问系统</p>
+    </div>
 
-document.getElementById("login-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const key = document.getElementById("key").value.trim();
-  const next = document.getElementById("next").value || "/v2/pages/manual-costs";
-  const err = document.getElementById("err");
-  err.textContent = "";
-  try {
-    const r = await fetch(API + "/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Requested-With": "tts-erp" },
-      body: JSON.stringify({ key: key, next: next }),
+    <form id="login-form">
+      <div class="form-group">
+        <label class="form-label" for="key">API Key</label>
+        <input type="password" id="key" class="form-input" placeholder="输入您的 API Key" autocomplete="current-password" required>
+      </div>
+      <input type="hidden" id="next" value="__NEXT__">
+      <button type="submit" class="btn-login" id="btn-login">登录</button>
+      <p class="form-error" id="err"></p>
+    </form>
+
+    <div class="login-footer">
+      <span>tts-erp v2.0</span>
+    </div>
+  </div>
+
+  <script>
+    // API base: works on :9877 (no prefix) and behind the NAT /tts prefix.
+    const base = location.pathname.slice(0, location.pathname.indexOf("/v2/auth/login")) || "";
+    const API = base + "/v2";
+
+    document.getElementById("login-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const key = document.getElementById("key").value.trim();
+      const next = document.getElementById("next").value || "/v2/pages/dashboard";
+      const err = document.getElementById("err");
+      const btn = document.getElementById("btn-login");
+
+      err.textContent = "";
+      btn.disabled = true;
+      btn.textContent = "登录中…";
+
+      try {
+        const r = await fetch(API + "/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Requested-With": "tts-erp" },
+          body: JSON.stringify({ key: key, next: next }),
+        });
+        if (r.ok) {
+          location.href = next;
+          return;
+        }
+        if (r.status === 401) {
+          err.textContent = "API Key 无效或已禁用";
+          return;
+        }
+        if (r.status === 429) {
+          err.textContent = "尝试次数过多，请稍后再试";
+          return;
+        }
+        if (r.status === 503) {
+          err.textContent = "服务未配置，请联系管理员";
+          return;
+        }
+        const t = await r.text();
+        err.textContent = "HTTP " + r.status + ": " + t;
+      } catch (ex) {
+        err.textContent = "网络错误: " + ex.message;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "登录";
+      }
     });
-    if (r.ok) { location.href = next; return; }
-    if (r.status === 401) { err.textContent = "invalid, disabled or expired api key"; return; }
-    if (r.status === 429) { err.textContent = "too many attempts — wait a minute and retry"; return; }
-    if (r.status === 503) { err.textContent = "login is not configured on the server"; return; }
-    const t = await r.text();
-    err.textContent = "HTTP " + r.status + ": " + t;
-  } catch (ex) {
-    err.textContent = "network error: " + ex.message;
-  }
-});
-</script>
+  </script>
 </body>
 </html>
 """
