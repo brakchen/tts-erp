@@ -84,10 +84,18 @@ _READONLY_PREFIXES = (
     # Operator-console static assets (vendor/bootstrap / js/console.js). Not under
     # /v2/; any authenticated session may fetch them.
     "/static/",
+    # intercept 配置列表和请求查询 (GET only)
+    "/v2/intercept/configs",
+    "/v2/intercept/requests",
 )
 _READWRITE_EXACT = {
     "/v2/reporting/manual-costs",  # POST only — GET below stays readonly
 }
+# intercept 配置管理端点: POST/PUT/DELETE/PATCH 需要 readwrite
+_READWRITE_PREFIXES = (
+    "/v2/intercept/configs",  # 配置管理 CRUD
+    "/v2/intercept/sync",  # 数据接收
+)
 # Exact-match paths (no trailing slash) that are readonly. These don't
 # fit the prefix pattern above (which requires ``/v2/xxx/`` with slash).
 # Keep this list small — prefer adding a new prefix when adding a
@@ -96,6 +104,8 @@ _READONLY_EXACT = {
     "/v2/llm-context",  # GET — self-describing system + data dictionary for LLM agents
     "/v2/spu-images",  # GET — list ready images (no trailing slash in router)
     "/v2/analytics/spu-roi",  # GET — SPU 实际 ROI 看板主表(只读报表)
+    "/v2/intercept/config",  # GET — 配置下发（插件用）
+    "/v2/intercept/requests/stats",  # GET — 统计信息
     # TikTok seller OAuth: both pages are classified readonly at the
     # middleware so any logged-in operator can load the UI / see whether
     # generation works. The handler (oauth.py::authorize) still enforces
@@ -172,6 +182,10 @@ def required_role(method: str, path: str) -> int | None:
     # v2: manual-costs POST requires readwrite.
     if method.upper() == "POST" and p in _READWRITE_EXACT:
         return ROLE_LEVEL["readwrite"]
+    # intercept 配置管理和数据同步需要 readwrite
+    for prefix in _READWRITE_PREFIXES:
+        if p.startswith(prefix):
+            return ROLE_LEVEL["readwrite"]
     # v2: POST under /v2/spu-images/upload-url or /v2/spu-images/{id}/confirm
     # requires readwrite. The upload-url path is exact; the confirm path
     # is variable. We special-case both so we don't have to introduce a

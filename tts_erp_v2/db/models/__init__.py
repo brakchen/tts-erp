@@ -27,6 +27,12 @@ from tts_erp_v2.db.models.plugin import (
     PluginLog,
     RawLog,
 )
+from tts_erp_v2.db.models.intercept import (
+    InterceptConfig,
+    InterceptedRequest,
+    InterceptSession,
+    InterceptSyncCursor,
+)
 from tts_erp_v2.db.models.commerce import (
     ChannelAccount,
     ChannelProduct,
@@ -106,6 +112,10 @@ __all__ = [
     "Credentials",
     "ExchangeRate",
     "ExchangeRateSnapshot",
+    "InterceptConfig",
+    "InterceptedRequest",
+    "InterceptSession",
+    "InterceptSyncCursor",
     "LinkEvidence",
     "LinkIssue",
     "LinkOverride",
