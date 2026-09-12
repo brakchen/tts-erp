@@ -84,6 +84,8 @@ def test_configs_route_readwrite_is_200(api_client, readwrite_key):
         "/v2/intercept/configs",
         headers=_auth_header(readwrite_key),
     )
+    print(f"Response status: {resp.status_code}")
+    print(f"Response body: {resp.text}")
     assert resp.status_code == 200
     data = resp.json()
     assert "configs" in data

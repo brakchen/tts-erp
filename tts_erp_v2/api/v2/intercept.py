@@ -184,8 +184,8 @@ router = APIRouter(prefix="/v2/intercept", tags=["intercept"])
 # ─── Config Management (readwrite) ───────────────────────────────────
 
 
-@router.get("/configs/export")
-def export_configs(
+@router.get("/configs")
+def list_configs(
     request: Request,
     enabled: bool | None = None,
     domain: str | None = None,
@@ -235,8 +235,34 @@ def export_configs(
     )
 
 
-@router.get("/configs")
-def list_configs(
+@router.get("/configs/export")
+def export_configs(
+    db: Session = Depends(get_session),
+) -> Response:
+    """导出配置"""
+    result = db.execute(
+        text("SELECT * FROM plugin.intercept_configs ORDER BY id")
+    )
+    configs = [dict(row._mapping) for row in result]
+
+    # 转换 JSON 字段
+    for config in configs:
+        if config.get("tags") and isinstance(config["tags"], str):
+            try:
+                config["tags"] = json.loads(config["tags"])
+            except json.JSONDecodeError:
+                config["tags"] = []
+
+    return JSONResponse(
+        content={"configs": [_serialize_config(c) for c in configs]},
+        headers={
+            "Content-Disposition": "attachment; filename=intercept_configs.json"
+        },
+    )
+
+
+@router.get("/configs/{config_id}")
+def get_config(
     config_id: int,
     db: Session = Depends(get_session),
 ) -> Response:
@@ -265,13 +291,14 @@ def create_config(
     db: Session = Depends(get_session),
 ) -> Response:
     """创建配置"""
-    # 检查唯一约束
+    # 检查是否已存在
     existing = db.execute(
         text(
             "SELECT id FROM plugin.intercept_configs WHERE domain = :domain AND endpoint = :endpoint"
         ),
         {"domain": body.domain, "endpoint": body.endpoint},
     ).first()
+
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -316,21 +343,23 @@ def update_config(
     db: Session = Depends(get_session),
 ) -> Response:
     """更新配置"""
-    # 检查配置是否存在
+    # 检查是否存在
     existing = db.execute(
         text("SELECT id FROM plugin.intercept_configs WHERE id = :id"),
         {"id": config_id},
     ).first()
+
     if not existing:
         raise HTTPException(status_code=404, detail="Config not found")
 
-    # 检查唯一约束（排除自身）
+    # 检查 domain + endpoint 唯一性（排除自身）
     duplicate = db.execute(
         text(
             "SELECT id FROM plugin.intercept_configs WHERE domain = :domain AND endpoint = :endpoint AND id != :id"
         ),
         {"domain": body.domain, "endpoint": body.endpoint, "id": config_id},
     ).first()
+
     if duplicate:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -381,11 +410,11 @@ def delete_config(
         text("DELETE FROM plugin.intercept_configs WHERE id = :id RETURNING id"),
         {"id": config_id},
     )
-    deleted = result.first()
-    if not deleted:
+    db.commit()
+
+    if not result.first():
         raise HTTPException(status_code=404, detail="Config not found")
 
-    db.commit()
     log.info(f"Deleted intercept config: {config_id}")
     return JSONResponse(content={"success": True})
 
@@ -408,11 +437,11 @@ def toggle_config(
         ),
         {"id": config_id, "enabled": body.enabled},
     )
+    db.commit()
+
     row = result.first()
     if not row:
         raise HTTPException(status_code=404, detail="Config not found")
-
-    db.commit()
 
     config = dict(row._mapping)
     if config.get("tags") and isinstance(config["tags"], str):
@@ -438,7 +467,6 @@ def batch_configs(
             ),
             {"ids": body.ids},
         )
-        affected = len(result.fetchall())
     else:
         enabled = body.action == "enable"
         result = db.execute(
@@ -452,10 +480,10 @@ def batch_configs(
             ),
             {"ids": body.ids, "enabled": enabled},
         )
-        affected = len(result.fetchall())
-
     db.commit()
-    log.info(f"Batch {body.action} on {affected} configs")
+
+    affected = len(result.fetchall())
+    log.info(f"Batch {body.action} intercept configs: {affected} affected")
     return JSONResponse(content={"affected": affected})
 
 
@@ -464,19 +492,19 @@ def import_configs(
     body: InterceptConfigImport,
     db: Session = Depends(get_session),
 ) -> Response:
-    """批量导入"""
+    """批量导入配置"""
     imported = 0
     skipped = 0
-    errors: list[dict[str, Any]] = []
+    errors = []
 
-    for config in body.configs:
+    for i, config_in in enumerate(body.configs):
         try:
             # 检查是否已存在
             existing = db.execute(
                 text(
                     "SELECT id FROM plugin.intercept_configs WHERE domain = :domain AND endpoint = :endpoint"
                 ),
-                {"domain": config.domain, "endpoint": config.endpoint},
+                {"domain": config_in.domain, "endpoint": config_in.endpoint},
             ).first()
 
             if existing:
@@ -491,27 +519,22 @@ def import_configs(
                     """
                 ),
                 {
-                    "domain": config.domain,
-                    "endpoint": config.endpoint,
-                    "capture_headers": config.capture_headers,
-                    "capture_body": config.capture_body,
-                    "description": config.description,
-                    "tags": json.dumps(config.tags),
-                    "enabled": config.enabled,
+                    "domain": config_in.domain,
+                    "endpoint": config_in.endpoint,
+                    "capture_headers": config_in.capture_headers,
+                    "capture_body": config_in.capture_body,
+                    "description": config_in.description,
+                    "tags": json.dumps(config_in.tags),
+                    "enabled": config_in.enabled,
                 },
             )
             imported += 1
         except Exception as e:
-            errors.append(
-                {
-                    "domain": config.domain,
-                    "endpoint": config.endpoint,
-                    "error": str(e),
-                }
-            )
+            errors.append({"index": i, "error": str(e)})
 
     db.commit()
-    log.info(f"Imported {imported} configs, skipped {skipped}, errors {len(errors)}")
+
+    log.info(f"Imported intercept configs: {imported} imported, {skipped} skipped")
     return JSONResponse(
         content={
             "imported": imported,
@@ -521,33 +544,7 @@ def import_configs(
     )
 
 
-@router.get("/configs/{config_id}")
-def get_config(
-    db: Session = Depends(get_session),
-) -> Response:
-    """导出配置"""
-    result = db.execute(
-        text("SELECT * FROM plugin.intercept_configs ORDER BY id")
-    )
-    configs = [dict(row._mapping) for row in result]
-
-    # 转换 JSON 字段
-    for config in configs:
-        if config.get("tags") and isinstance(config["tags"], str):
-            try:
-                config["tags"] = json.loads(config["tags"])
-            except json.JSONDecodeError:
-                config["tags"] = []
-
-    return JSONResponse(
-        content={"configs": [_serialize_config(c) for c in configs]},
-        headers={
-            "Content-Disposition": "attachment; filename=intercept_configs.json"
-        },
-    )
-
-
-# ─── Config Distribution (readonly) ─────────────────────────────────
+# ─── Config Distribution (readonly) ──────────────────────────────────
 
 
 @router.get("/config")
@@ -584,7 +581,7 @@ def get_config_for_plugin(
     )
 
 
-# ─── Data Sync (readwrite) ──────────────────────────────────────────
+# ─── Data Sync (readwrite) ───────────────────────────────────────────
 
 
 @router.post("/sync")
@@ -592,39 +589,42 @@ def sync_intercepted_requests(
     body: InterceptSyncRequest,
     db: Session = Depends(get_session),
 ) -> Response:
-    """数据接收"""
-    # 验证协议版本
+    """数据同步（插件用）"""
     if body.protocol_version not in SUPPORTED_PROTOCOL_VERSIONS:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Unsupported protocol version: {body.protocol_version}",
         )
 
-    # 更新或创建会话
+    accepted = 0
+    rejected = 0
+    errors = []
+
+    # 创建或更新会话
+    session_data = body.session
     db.execute(
         text(
             """
-            INSERT INTO plugin.intercept_sessions (session_id, tab_id, tab_url, started_at)
-            VALUES (:session_id, :tab_id, :tab_url, :started_at)
+            INSERT INTO plugin.intercept_sessions (session_id, tab_id, tab_url, started_at, total_requests)
+            VALUES (:session_id, :tab_id, :tab_url, :started_at, :total_requests)
             ON CONFLICT (session_id) DO UPDATE SET
-                tab_id = COALESCE(EXCLUDED.tab_id, plugin.intercept_sessions.tab_id),
-                tab_url = COALESCE(EXCLUDED.tab_url, plugin.intercept_sessions.tab_url),
-                last_request_at = now()
+                tab_id = EXCLUDED.tab_id,
+                tab_url = EXCLUDED.tab_url,
+                last_request_at = now(),
+                total_requests = plugin.intercept_sessions.total_requests + EXCLUDED.total_requests
             """
         ),
         {
-            "session_id": body.session.session_id,
-            "tab_id": body.session.tab_id,
-            "tab_url": body.session.tab_url,
-            "started_at": body.session.started_at,
+            "session_id": session_data.session_id,
+            "tab_id": session_data.tab_id,
+            "tab_url": session_data.tab_url,
+            "started_at": session_data.started_at,
+            "total_requests": len(body.requests),
         },
     )
 
-    accepted = 0
-    rejected = 0
-    errors: list[dict[str, Any]] = []
-
-    for req in body.requests:
+    # 插入请求记录
+    for i, req in enumerate(body.requests):
         try:
             url_hash = _compute_url_hash(req.url)
 
@@ -677,119 +677,146 @@ def sync_intercepted_requests(
             accepted += 1
         except Exception as e:
             rejected += 1
-            errors.append(
-                {
-                    "request_id": req.request_id,
-                    "error": str(e),
-                }
-            )
-
-    # 更新会话统计
-    db.execute(
-        text(
-            """
-            UPDATE plugin.intercept_sessions
-            SET total_requests = total_requests + :total,
-                whitelisted_requests = whitelisted_requests + :whitelisted,
-                metadata_only_requests = metadata_only_requests + :metadata_only
-            WHERE session_id = :session_id
-            """
-        ),
-        {
-            "session_id": body.session.session_id,
-            "total": accepted,
-            "whitelisted": sum(1 for r in body.requests if r.is_whitelisted),
-            "metadata_only": sum(1 for r in body.requests if not r.is_whitelisted),
-        },
-    )
-
-    # 更新同步游标
-    if body.request_id:
-        db.execute(
-            text(
-                """
-                INSERT INTO plugin.intercept_sync_cursors (cursor_key, last_synced_at, total_synced)
-                VALUES (:cursor_key, now(), :total_synced)
-                ON CONFLICT (cursor_key) DO UPDATE SET
-                    last_synced_at = now(),
-                    total_synced = plugin.intercept_sync_cursors.total_synced + :total_synced,
-                    updated_at = now()
-                """
-            ),
-            {
-                "cursor_key": body.request_id,
-                "total_synced": accepted,
-            },
-        )
+            errors.append({"index": i, "error": str(e)})
 
     db.commit()
 
-    log.info(f"Sync completed: accepted={accepted}, rejected={rejected}")
+    # 更新同步游标
+    cursor_key = body.scope.get("seller_id", "default")
+    db.execute(
+        text(
+            """
+            INSERT INTO plugin.intercept_sync_cursors (cursor_key, last_synced_at, total_synced)
+            VALUES (:cursor_key, now(), :total_synced)
+            ON CONFLICT (cursor_key) DO UPDATE SET
+                last_synced_at = now(),
+                total_synced = plugin.intercept_sync_cursors.total_synced + EXCLUDED.total_synced
+            """
+        ),
+        {"cursor_key": cursor_key, "total_synced": accepted},
+    )
+    db.commit()
+
+    log.info(
+        f"Synced intercepted requests: {accepted} accepted, {rejected} rejected"
+    )
+
     return JSONResponse(
         content={
             "accepted": accepted,
             "rejected": rejected,
             "errors": errors,
             "cursor": {
-                "lastSyncedId": body.request_id,
-                "syncedAt": datetime.now(UTC).isoformat(),
+                "key": cursor_key,
+                "total_synced": accepted,
             },
         }
     )
 
 
-# ─── Data Query (readonly) ──────────────────────────────────────────
+# ─── Data Query (readonly) ───────────────────────────────────────────
 
 
 @router.get("/requests/stats")
 def get_requests_stats(
     request: Request,
+    from_date: str | None = Query(None, alias="from"),
+    to_date: str | None = Query(None, alias="to"),
     db: Session = Depends(get_session),
 ) -> Response:
-    """统计信息"""
+    """获取拦截统计"""
+    # 默认最近 7 天
+    if not from_date:
+        from_date = (datetime.now(UTC) - timedelta(days=7)).isoformat()
+    if not to_date:
+        to_date = datetime.now(UTC).isoformat()
+
     # 总请求数
     total = db.execute(
-        text("SELECT COUNT(*) FROM plugin.intercepted_requests")
+        text(
+            "SELECT COUNT(*) FROM plugin.intercepted_requests WHERE captured_at >= :from_date AND captured_at <= :to_date"
+        ),
+        {"from_date": from_date, "to_date": to_date},
     ).scalar()
 
     # 白名单请求数
     whitelisted = db.execute(
-        text("SELECT COUNT(*) FROM plugin.intercepted_requests WHERE is_whitelisted = true")
+        text(
+            "SELECT COUNT(*) FROM plugin.intercepted_requests WHERE is_whitelisted = true AND captured_at >= :from_date AND captured_at <= :to_date"
+        ),
+        {"from_date": from_date, "to_date": to_date},
+    ).scalar()
+
+    # 今日请求数
+    today = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    today_count = db.execute(
+        text(
+            "SELECT COUNT(*) FROM plugin.intercepted_requests WHERE captured_at >= :today"
+        ),
+        {"today": today},
+    ).scalar()
+
+    # 错误请求数
+    errors = db.execute(
+        text(
+            "SELECT COUNT(*) FROM plugin.intercepted_requests WHERE error_type IS NOT NULL AND captured_at >= :from_date AND captured_at <= :to_date"
+        ),
+        {"from_date": from_date, "to_date": to_date},
     ).scalar()
 
     # 按域名分布
-    by_host_result = db.execute(
+    by_host = db.execute(
         text(
             """
             SELECT endpoint_host, COUNT(*) as count
             FROM plugin.intercepted_requests
+            WHERE captured_at >= :from_date AND captured_at <= :to_date
             GROUP BY endpoint_host
             ORDER BY count DESC
             LIMIT 10
             """
-        )
-    )
-    by_host = {row.endpoint_host: row.count for row in by_host_result}
+        ),
+        {"from_date": from_date, "to_date": to_date},
+    ).fetchall()
 
     # 按方法分布
-    by_method_result = db.execute(
+    by_method = db.execute(
         text(
             """
             SELECT method, COUNT(*) as count
             FROM plugin.intercepted_requests
+            WHERE captured_at >= :from_date AND captured_at <= :to_date
             GROUP BY method
             ORDER BY count DESC
             """
-        )
-    )
-    by_method = {row.method: row.count for row in by_method_result}
+        ),
+        {"from_date": from_date, "to_date": to_date},
+    ).fetchall()
+
+    # 按状态码分布
+    by_status = db.execute(
+        text(
+            """
+            SELECT response_status, COUNT(*) as count
+            FROM plugin.intercepted_requests
+            WHERE captured_at >= :from_date AND captured_at <= :to_date
+            GROUP BY response_status
+            ORDER BY count DESC
+            LIMIT 10
+            """
+        ),
+        {"from_date": from_date, "to_date": to_date},
+    ).fetchall()
 
     return JSONResponse(
         content={
             "total": total,
             "whitelisted": whitelisted,
-            "byHost": by_host,
-            "byMethod": by_method,
+            "today": today_count,
+            "errors": errors,
+            "by_host": [{"host": row[0], "count": row[1]} for row in by_host],
+            "by_method": [{"method": row[0], "count": row[1]} for row in by_method],
+            "by_status": [{"status": row[0], "count": row[1]} for row in by_status],
         }
     )
 
@@ -802,9 +829,9 @@ def list_requests(
     endpoint_path: str | None = None,
     is_whitelisted: bool | None = None,
     method: str | None = None,
-    status_code: int | None = None,
-    from_date: datetime | None = Query(None, alias="from"),
-    to_date: datetime | None = Query(None, alias="to"),
+    status_code: int | None = Query(None, alias="status"),
+    from_date: str | None = Query(None, alias="from"),
+    to_date: str | None = Query(None, alias="to"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_session),
@@ -822,8 +849,8 @@ def list_requests(
         params["endpoint_host"] = endpoint_host
 
     if endpoint_path:
-        query += " AND endpoint_path = :endpoint_path"
-        params["endpoint_path"] = endpoint_path
+        query += " AND endpoint_path LIKE :endpoint_path"
+        params["endpoint_path"] = f"%{endpoint_path}%"
 
     if is_whitelisted is not None:
         query += " AND is_whitelisted = :is_whitelisted"
@@ -845,36 +872,30 @@ def list_requests(
         query += " AND captured_at <= :to_date"
         params["to_date"] = to_date
 
-    # 计算总数
-    count_query = query.replace("SELECT *", "SELECT COUNT(*)")
-    total = db.execute(text(count_query), params).scalar()
-
     query += " ORDER BY captured_at DESC LIMIT :limit OFFSET :offset"
+
     result = db.execute(text(query), params)
     requests = [dict(row._mapping) for row in result]
 
-    # 转换 JSON 字段和 datetime
+    # 获取总数
+    count_query = query.replace("SELECT *", "SELECT COUNT(*)").split("ORDER BY")[0]
+    total = db.execute(text(count_query), params).scalar()
+
+    # 转换 JSON 字段
     for req in requests:
         for field in ["request_headers", "request_body", "response_headers", "response_body", "business_context", "pagination"]:
             if req.get(field) and isinstance(req[field], str):
                 try:
                     req[field] = json.loads(req[field])
                 except json.JSONDecodeError:
-                    req[field] = None
-        # 转换 datetime 为 ISO 格式字符串
-        for field in ["captured_at", "received_at"]:
-            if req.get(field) and isinstance(req[field], datetime):
-                req[field] = req[field].isoformat()
+                    pass
 
     return JSONResponse(
         content={
-            "requests": requests,
+            "requests": [_serialize_config(r) for r in requests],
             "total": total,
-            "pagination": {
-                "limit": limit,
-                "offset": offset,
-                "hasMore": offset + limit < total,
-            },
+            "limit": limit,
+            "offset": offset,
         }
     )
 
@@ -884,26 +905,24 @@ def get_request(
     request_id: str,
     db: Session = Depends(get_session),
 ) -> Response:
-    """查询单条记录详情"""
+    """查询单条记录"""
     result = db.execute(
         text("SELECT * FROM plugin.intercepted_requests WHERE request_id = :request_id"),
         {"request_id": request_id},
     )
     row = result.first()
+
     if not row:
         raise HTTPException(status_code=404, detail="Request not found")
 
     req = dict(row._mapping)
+
+    # 转换 JSON 字段
     for field in ["request_headers", "request_body", "response_headers", "response_body", "business_context", "pagination"]:
         if req.get(field) and isinstance(req[field], str):
             try:
                 req[field] = json.loads(req[field])
             except json.JSONDecodeError:
-                req[field] = None
+                pass
 
-    # 转换 datetime 为 ISO 格式字符串
-    for field in ["captured_at", "received_at"]:
-        if req.get(field) and isinstance(req[field], datetime):
-            req[field] = req[field].isoformat()
-
-    return JSONResponse(content={"request": req})
+    return JSONResponse(content={"request": _serialize_config(req)})
