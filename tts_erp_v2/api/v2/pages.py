@@ -101,12 +101,24 @@ _SHOPS_PAGE_HTML = """<!doctype html>
        behind the NGINX prefix. Do not make this absolute. -->
   <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
   <style>
-    body { background: #f6f7f9; }
+    :root {
+      --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', Consolas, monospace;
+      --sans: 'Inter', 'Noto Sans SC', 'Source Han Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+    }
+    body {
+      background: #f6f7f9;
+      font-family: var(--sans);
+      font-size: 15px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+    }
     .shop-card { background: #fff; border: 1px solid #e3e6ea; border-radius: 8px; }
-    .shop-card h2 { font-size: 1rem; font-weight: 600; }
+    .shop-card h2 { font-size: 1.1rem; font-weight: 600; }
     .badge-sync-api { background: #2F6B3E; }
     .badge-sync-plugin { background: #8a6d1a; }
-    .mono { font-family: ui-monospace, Consolas, monospace; font-size: .85em; }
+    .mono { font-family: var(--mono); font-size: .9em; }
     table td, table th { vertical-align: middle; }
   </style>
 </head>
@@ -880,7 +892,21 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
   <!-- Relative path: resolves to /static/... locally and /tts/static/... behind NGINX. Do not make absolute. -->
   <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
   <link rel="stylesheet" href="../../static/css/spu-roi.css?v=__JSV_SPU_ROI__">
-</head>
+  <style>
+    :root {
+      --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', Consolas, monospace;
+      --sans: 'Inter', 'Noto Sans SC', 'Source Han Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+      --serif: 'Noto Serif SC', 'Source Han Serif SC', Georgia, ui-serif, serif;
+    }
+    html, body {
+      font-family: var(--sans);
+      font-size: 15px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+    }
+  </style>
 <body>
   <header class="op-header">
     <div class="op-main px-2 px-md-4 py-3 d-flex flex-wrap justify-content-between align-items-end gap-2 gap-md-3">
@@ -1051,19 +1077,22 @@ _DASHBOARD_PAGE_HTML = """<!doctype html>
       --muted: #6E6657;
       --danger: #8C1A1A;
       --ok: #2F6B3E;
-      --mono: ui-monospace, 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', Consolas, 'Liberation Mono', monospace;
-      --sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
-      --serif: ui-serif, 'Iowan Old Style', 'Apple Garamond', 'Source Han Serif SC', 'Noto Serif CJK SC', serif;
+      --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', 'Fira Code', Consolas, 'Liberation Mono', ui-monospace, monospace;
+      --sans: 'Inter', 'Noto Sans SC', 'Source Han Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', sans-serif;
+      --serif: 'Noto Serif SC', 'Source Han Serif SC', 'Iowan Old Style', 'Apple Garamond', Georgia, ui-serif, serif;
     }
     * { box-sizing: border-box; }
     html, body {
       background: var(--paper);
       color: var(--ink);
       font-family: var(--sans);
-      font-size: 14px;
-      line-height: 1.4;
+      font-size: 15px;
+      line-height: 1.6;
       margin: 0;
       -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+      font-feature-settings: 'kern' 1, 'liga' 1;
     }
     a { color: var(--accent); text-decoration: none; }
     a:hover { color: var(--accent-deep); }
@@ -1084,7 +1113,7 @@ _DASHBOARD_PAGE_HTML = """<!doctype html>
     .op-header-titles { display: flex; flex-direction: column; gap: 2px; }
     .op-eyebrow {
       font-family: var(--mono);
-      font-size: 11px;
+      font-size: 12px;
       letter-spacing: 0.14em;
       text-transform: uppercase;
       color: var(--muted);
@@ -1092,13 +1121,13 @@ _DASHBOARD_PAGE_HTML = """<!doctype html>
     .op-title {
       font-family: var(--serif);
       font-weight: 600;
-      font-size: 22px;
+      font-size: 24px;
       margin: 0;
       letter-spacing: -0.01em;
     }
     .op-identity {
       font-family: var(--mono);
-      font-size: 12px;
+      font-size: 13px;
       color: var(--muted);
     }
 
@@ -1136,7 +1165,7 @@ _DASHBOARD_PAGE_HTML = """<!doctype html>
     }
     .section-title {
       font-family: var(--mono);
-      font-size: 11px;
+      font-size: 12px;
       letter-spacing: 0.14em;
       text-transform: uppercase;
       color: var(--muted);
@@ -1144,7 +1173,7 @@ _DASHBOARD_PAGE_HTML = """<!doctype html>
     }
     .section-link {
       font-family: var(--mono);
-      font-size: 11px;
+      font-size: 12px;
       letter-spacing: 0.08em;
       color: var(--accent);
     }

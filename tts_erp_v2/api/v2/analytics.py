@@ -413,7 +413,7 @@ def get_coverage_endpoint(
         total_requested = (ey - sy) * 12 + (em - sm + 1)
 
     total_pages = (
-        (total_campaigns + pageSize - 1) // pageSize if total_campaigns > 0 else 0
+        (total_campaigns + pageSize - 1) // pageSize if total_campaigns > 0 else 1
     )
     has_more = page < total_pages
 

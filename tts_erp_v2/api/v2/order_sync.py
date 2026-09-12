@@ -129,7 +129,7 @@ class DumpRequestIn(BaseModel):
 
 class DumpResponseIn(BaseModel):
     status: int
-    body: dict[str, Any]
+    body: dict[str, Any] | None = None
 
 
 class DumpBodyIn(BaseModel):
