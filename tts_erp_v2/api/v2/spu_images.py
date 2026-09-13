@@ -32,7 +32,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.api.deps import get_session, require_role_at_least
+from tts_erp_v2.api.deps import (
+    get_session,
+    require_destructive_guard,
+    require_role_at_least,
+)
 from tts_erp_v2.storage.minio_client import (
     ALLOWED_CONTENT_TYPES,
     MAX_SIZE_BYTES,
@@ -436,6 +440,7 @@ def delete_image(
 ) -> Response:
     """Soft-delete (mark deleted_at) and best-effort remove from MinIO."""
     require_role_at_least(request, "readwrite")
+    require_destructive_guard(request, op_name="spu_image.delete")
 
     row = sess.execute(
         _STMT_SOFT_DELETE, {"id": image_id},

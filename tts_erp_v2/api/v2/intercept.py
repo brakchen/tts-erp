@@ -26,7 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.api.deps import get_session
+from tts_erp_v2.api.deps import get_session, require_destructive_guard
 
 # ─── Config ───────────────────────────────────────────────────────────
 
@@ -432,10 +432,12 @@ def update_config(
 
 @router.delete("/configs/{config_id}")
 def delete_config(
+    request: Request,
     config_id: int,
     db: Session = Depends(get_session),
 ) -> Response:
     """删除配置"""
+    require_destructive_guard(request, op_name="intercept_config.delete")
     result = db.execute(
         text("DELETE FROM plugin.intercept_configs WHERE id = :id RETURNING id"),
         {"id": config_id},
@@ -486,11 +488,13 @@ def toggle_config(
 
 @router.post("/configs/batch")
 def batch_configs(
+    request: Request,
     body: InterceptConfigBatch,
     db: Session = Depends(get_session),
 ) -> Response:
     """批量操作"""
     if body.action == "delete":
+        require_destructive_guard(request, op_name="intercept_config.batch_delete")
         result = db.execute(
             text(
                 "DELETE FROM plugin.intercept_configs WHERE id = ANY(:ids) RETURNING id"

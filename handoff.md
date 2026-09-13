@@ -2,8 +2,40 @@
 
 > 🔄 **当前在途工作注册（谁在改什么 / 谁接手）：先读 `handoff/ACTIVE.md`**（AGENTS.md §12.1）
 >
-> 上次 session: 2026-09-13（P0 ad_daily purge recovery + 双 gate 加固部署）
-> 上次 session 主题: **prod plugin.ad_daily 被误清 13,683 行 → 恢复 15,437 行（含 chrome backfill 增量）+ purge 端点双 gate 加固 + conftest prod-shape hard fail**
+> 上次 session: 2026-09-13（统一 destructive 守卫部署 + 8 个入口加固）
+> 上次 session 主题: **把 `_is_prod_shaped_db()` 抽到 `tts_erp_v2/api/deps.py`，加 `require_destructive_guard` (HTTP) + `require_destructive_script_guard` (scripts/alembic/jobs)，装到 8 个 prod-shape destructive 入口（admin purge、intercept DELETE、spu_images DELETE、2 个 oneoff 脚本、alembic upgrade）；merge job 改 DO UPDATE → DO NOTHING 避免覆盖 chrome plugin backfill；15 个守卫单测 + scripts/test.sh fast 0 新 fail**
+
+## TL;DR (2026-09-13 fix/unify-destructive-guard — 统一 destructive 守卫)
+
+**背景**：9-13 P0 lane 已经修了 admin purge 端点和 conftest，但 audit 发现 codebase
+**还有 5 个 prod-shape destructive 入口没有守卫**（intercept DELETE × 2、spu_images DELETE、
+oneoff_finance_reset、oneoff_regen_finance_components），加上 alembic upgrade
+总 6 个。每个都是"裸跑就能删 prod 数据"的入口——只是因为历史没出过事、role 门槛
+较高、或者没人在 prod 上跑过，没暴露。**修复 = 抽公共守卫统一管**。
+
+**改动 (8 files / +370 lines / 0 new fail)**:
+
+1. **`tts_erp_v2/api/deps.py`** — 抽公共守卫:
+   - `is_prod_shaped_db()` — fail-closed, `tts_erp`/`tts_erp_prod`/`tts_erp_prod_*` → True, 未设 env → True
+   - `require_destructive_guard(request, op_name)` — FastAPI 端点用，prod-shape → 403（除非 `ALLOW_PROD_DESTRUCTIVE=1`）
+   - `require_destructive_script_guard(script_name, confirmation, dangerous)` — 脚本/alembic/job 用，prod-shape + confirmation → sys.exit(2); dry-run 在 prod 允许预览
+2. **`tts_erp_v2/api/v2/admin.py`** — `_is_prod_shaped_db` 删除, 改 import 公共版
+3. **`tts_erp_v2/api/v2/intercept.py`** — DELETE /configs/{id} + POST /configs/batch (delete) 装守卫
+4. **`tts_erp_v2/api/v2/spu_images.py`** — DELETE /{image_id} 装守卫
+5. **`scripts/oneoff_finance_reset.py`** + **`scripts/oneoff_regen_finance_components.py`** — sys.path 加项目根，args.confirm 时调 script_guard；dry-run 在 prod 允许
+6. **`alembic/env.py`** — `alembic upgrade --sql` 视为 dry-run（不执行），其他 upgrade head 拒绝
+7. **`tts_erp_v2/plugin/ads/repository.py`** — `merge_today_into_daily` 改 `ON CONFLICT DO UPDATE` → `DO NOTHING`，避免 merge job 用 ad_today 陈旧快照覆盖 ad_daily 已有的 chrome backfill 完整历史
+8. **`tests/api/test_destructive_guard.py`** — 15 个单测（is_prod_shaped_db 6 dbname 真值表 + 守卫行为 9 个）
+
+**测试**: scripts/test.sh fast lane 17 fail / master HEAD 17 fail 完全一致，**0 新 fail**
+（`test_run_cost_snapshots_no_active_spu_returns_zero` 是 pre-existing flake — 假设
+"test env 没 SPU" 但其他 test 会 seed，单独跑 master HEAD 也复现）。
+
+**事故复盘**: 延续 `tech-doc/incident-reports/2026-09-13-ad-daily-purge.md`（同一事故），
+未新增 incident report。
+
+**AGENTS.md §6 加新红线**: "统一 prod-shape destructive 守卫" + 列出 8 个已装守卫入口，
+新加 destructive 路径不装 = P1 review finding。
 
 ## TL;DR (2026-09-13 P0 ad_daily purge recovery)
 

@@ -23,7 +23,10 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 
-from tts_erp_v2.api.deps import require_role_at_least
+from tts_erp_v2.api.deps import (
+    require_destructive_guard,
+    require_role_at_least,
+)
 from tts_erp_v2.middleware.rate_limit import (
     ENV_VAR_NAME,
     reset_shared,
@@ -204,32 +207,11 @@ _PLUGIN_ORDER_CHILD_TABLES = [
 _PLUGIN_ORDER_RAW_LOG = "plugin.raw_log"
 
 
-def _is_prod_shaped_db() -> bool:
-    """Guard: refuse destructive ops on prod-shape dbnames.
-
-    2026-09-13 incident: ``tests/api/test_admin_purge.py::test_purge_plugin_data_clears_ad_tables``
-    was run against ``tts_erp`` (prod) because the worktree's ``.env`` symlinked
-    to the main repo's prod ``.env`` and the runner did not source ``.env.test``.
-    The wipe blanked 14,719 rows of prod ``plugin.ad_daily`` (246 campaigns ×
-    65 days). See ``tech-doc/incident-reports/2026-09-13-ad-daily-purge.md``.
-    Any future purge path MUST refuse to run on prod-shape dbnames unless
-    ``ALLOW_PROD_PURGE=1`` is explicitly set in the environment.
-    """
-    from urllib.parse import urlparse
-
-    db_url = os.environ.get("TTS_ERP_DB_URL", "")
-    if not db_url:
-        # If unset, refuse — fail-closed. Caller can override via ALLOW_PROD_PURGE.
-        return True
-    try:
-        # postgresql+psycopg://u:p@h:port/dbname
-        path = urlparse(db_url.replace("postgresql+psycopg://", "postgresql://")).path
-        dbname = path.lstrip("/").split("?")[0]
-    except Exception:
-        return True
-    # Prod dbnames: tts_erp / tts_erp_prod (per AGENTS.md §6).
-    # Test dbname: tts_erp_v3_test.
-    return dbname in {"tts_erp", "tts_erp_prod"} or dbname.startswith("tts_erp_prod_")
+# Re-export the shared prod-shape detector under the historical name
+# so the rest of this module keeps working without churn. The actual
+# implementation lives in :mod:`tts_erp_v2.api.deps` (single source of
+# truth as of 2026-09-13 fix/unify-destructive-guard).
+from tts_erp_v2.api.deps import is_prod_shaped_db as _is_prod_shaped_db  # noqa: E402
 
 
 @router.post(
