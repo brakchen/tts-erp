@@ -104,7 +104,7 @@
   function renderDistribution($container, data, label) {
     if (!$container || !data) return;
 
-    const entries = Object.entries(data).sort((a, b) => b[1] - a[1]);
+    const entries = normalizeDistribution(data).sort((a, b) => b[1] - a[1]);
     const total = entries.reduce((sum, [, v]) => sum + v, 0);
 
     if (entries.length === 0) {
@@ -128,6 +128,18 @@
 
     // pi-lens-ignore: no-unsafe-innerhtml — trusted backend data, esc()-sanitized
     $container.innerHTML = rows;
+  }
+
+  // API returns [{host|method|status, count}], while older deployments may
+  // still return an object map. Keep the page compatible with both shapes.
+  function normalizeDistribution(data) {
+    if (Array.isArray(data)) {
+      return data.map(item => {
+        const key = item.host ?? item.method ?? item.status ?? '未知';
+        return [String(key), Number(item.count) || 0];
+      });
+    }
+    return Object.entries(data).map(([key, value]) => [key, Number(value) || 0]);
   }
 
   function renderDailyChart() {

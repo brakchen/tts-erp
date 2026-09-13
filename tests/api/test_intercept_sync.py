@@ -56,36 +56,36 @@ def _sync_body(
             "advertiserId": ADVERTISER,
         },
         "session": {
-            "session_id": session_id,
-            "tab_id": 123,
-            "tab_url": "https://seller.tiktokglobalshop.com/",
-            "started_at": datetime.now(UTC).isoformat(),
+            "sessionId": session_id,
+            "tabId": 123,
+            "tabUrl": "https://seller.tiktokglobalshop.com/",
+            "startedAt": datetime.now(UTC).isoformat(),
         },
         "requests": [
             {
-                "request_id": request_id,
-                "trace_id": None,
-                "session_id": session_id,
+                "requestId": request_id,
+                "traceId": None,
+                "sessionId": session_id,
                 "method": "GET",
                 "url": "https://seller.tiktokglobalshop.com/api/v1/orders",
-                "endpoint_path": "/api/v1/orders",
-                "endpoint_host": "seller.tiktokglobalshop.com",
-                "is_whitelisted": True,
-                "matched_config_id": None,
-                "request_headers": {"content-type": "application/json"},
-                "request_body": None,
-                "response_status": 200,
-                "response_status_text": "OK",
-                "response_headers": {"content-type": "application/json"},
-                "response_body": {"code": 0, "data": []},
-                "duration_ms": 150,
-                "error_type": None,
-                "error_message": None,
-                "seller_id": SELLER,
-                "advertiser_id": ADVERTISER,
-                "business_context": None,
+                "endpointPath": "/api/v1/orders",
+                "endpointHost": "seller.tiktokglobalshop.com",
+                "isWhitelisted": True,
+                "matchedConfigId": None,
+                "requestHeaders": {"content-type": "application/json"},
+                "requestBody": None,
+                "responseStatus": 200,
+                "responseStatusText": "OK",
+                "responseHeaders": {"content-type": "application/json"},
+                "responseBody": {"code": 0, "data": []},
+                "durationMs": 150,
+                "errorType": None,
+                "errorMessage": None,
+                "sellerId": SELLER,
+                "advertiserId": ADVERTISER,
+                "businessContext": None,
                 "pagination": {"has_more": False, "total": 0},
-                "captured_at": datetime.now(UTC).isoformat(),
+                "capturedAt": datetime.now(UTC).isoformat(),
             }
         ],
         **kwargs,
@@ -130,6 +130,39 @@ def test_sync_route_readwrite_is_200(api_client, readwrite_key):
     assert data["rejected"] == 0
 
 
+def test_sync_uses_standard_camel_case_wire_and_json_scalar_payload(
+    api_client, readwrite_key
+):
+    """插件实际使用 camelCase 会话字段，JSON body 也不一定是对象。"""
+    body = _sync_body()
+    body["requests"][0]["requestBody"] = ["item-1", "item-2"]
+    body["requests"][0]["responseBody"] = "plain-text"
+
+    resp = api_client.post(
+        "/v2/intercept/sync",
+        json=body,
+        headers=_auth_header(readwrite_key),
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["inserted"] == 1
+
+
+def test_sync_rejects_nonstandard_snake_case_wire_fields(api_client, readwrite_key):
+    """协议只接受 camelCase，不通过后端兼容旧字段名。"""
+    body = _sync_body()
+    body["session"] = {
+        "session_id": body["session"]["sessionId"],
+        "started_at": body["session"]["startedAt"],
+    }
+    resp = api_client.post(
+        "/v2/intercept/sync",
+        json=body,
+        headers=_auth_header(readwrite_key),
+    )
+    assert resp.status_code == 422
+
+
 # ─── 数据同步 ────────────────────────────────────────────────────────
 
 
@@ -154,29 +187,29 @@ def test_sync_multiple_requests(api_client, readwrite_key):
     for i in range(5):
         body["requests"].append(
             {
-                "request_id": f"TEST_req-{uuid.uuid4().hex[:8]}",
-                "trace_id": None,
-                "session_id": SESSION_ID,
+                "requestId": f"TEST_req-{uuid.uuid4().hex[:8]}",
+                "traceId": None,
+                "sessionId": SESSION_ID,
                 "method": "POST",
                 "url": f"https://seller.tiktokglobalshop.com/api/v1/orders/{i}",
-                "endpoint_path": f"/api/v1/orders/{i}",
-                "endpoint_host": "seller.tiktokglobalshop.com",
-                "is_whitelisted": True,
-                "matched_config_id": None,
-                "request_headers": None,
-                "request_body": {"order_id": str(i)},
-                "response_status": 200,
-                "response_status_text": "OK",
-                "response_headers": None,
-                "response_body": {"code": 0},
-                "duration_ms": 100 + i,
-                "error_type": None,
-                "error_message": None,
-                "seller_id": SELLER,
-                "advertiser_id": ADVERTISER,
-                "business_context": None,
+                "endpointPath": f"/api/v1/orders/{i}",
+                "endpointHost": "seller.tiktokglobalshop.com",
+                "isWhitelisted": True,
+                "matchedConfigId": None,
+                "requestHeaders": None,
+                "requestBody": {"order_id": str(i)},
+                "responseStatus": 200,
+                "responseStatusText": "OK",
+                "responseHeaders": None,
+                "responseBody": {"code": 0},
+                "durationMs": 100 + i,
+                "errorType": None,
+                "errorMessage": None,
+                "sellerId": SELLER,
+                "advertiserId": ADVERTISER,
+                "businessContext": None,
                 "pagination": None,
-                "captured_at": datetime.now(UTC).isoformat(),
+                "capturedAt": datetime.now(UTC).isoformat(),
             }
         )
 
@@ -226,7 +259,7 @@ def test_sync_duplicate_request_idempotent(api_client, readwrite_key):
     # 重复请求可视为已处理，但不能再次增加实际同步游标。
     assert resp2.json()["accepted"] == 1
     assert resp2.json()["inserted"] == 0
-    assert resp2.json()["cursor"]["total_synced"] == 0
+    assert resp2.json()["cursor"]["totalSynced"] == 0
 
 
 def test_sync_cursor_uses_camel_case_seller_scope(api_client, readwrite_key):
@@ -238,6 +271,28 @@ def test_sync_cursor_uses_camel_case_seller_scope(api_client, readwrite_key):
     )
     assert resp.status_code == 200
     assert resp.json()["cursor"]["key"] == SELLER
+
+
+def test_sync_preserves_falsey_json_values(api_client, readwrite_key):
+    """空对象/空数组是有效 JSON，不能被写成 NULL。"""
+    body = _sync_body()
+    body["requests"][0]["requestBody"] = {}
+    body["requests"][0]["responseBody"] = []
+    resp = api_client.post(
+        "/v2/intercept/sync",
+        json=body,
+        headers=_auth_header(readwrite_key),
+    )
+    assert resp.status_code == 200
+
+    request_id = body["requests"][0]["requestId"]
+    stored = api_client.get(
+        f"/v2/intercept/requests/{request_id}",
+        headers=_auth_header(readwrite_key),
+    )
+    assert stored.status_code == 200
+    assert stored.json()["request"]["request_body"] == {}
+    assert stored.json()["request"]["response_body"] == []
 
 
 # ─── 会话管理 ────────────────────────────────────────────────────────
@@ -262,7 +317,7 @@ def test_sync_creates_session(api_client, readwrite_key):
     assert stats_resp.status_code == 200
 
 
-def test_sync_updates_session_stats(api_client, readwrite_key):
+def test_sync_updates_session_stats(api_client, readwrite_key, db_engine):
     """同步应更新会话统计"""
     session_id = f"TEST_session-{uuid.uuid4().hex[:8]}"
 
@@ -279,6 +334,17 @@ def test_sync_updates_session_stats(api_client, readwrite_key):
         json=_sync_body(session_id=session_id),
         headers=_auth_header(readwrite_key),
     )
+
+    with db_engine.connect() as conn:
+        total_requests = conn.execute(
+            text(
+                "SELECT total_requests FROM plugin.intercept_sessions "
+                "WHERE session_id = :session_id"
+            ),
+            {"session_id": session_id},
+        ).scalar_one()
+
+    assert total_requests == 1
 
     # 验证统计更新
     stats_resp = api_client.get(
