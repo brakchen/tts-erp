@@ -305,7 +305,7 @@ separate work items — same proxy + router pattern.
 
 ### Analytics — SPU 实际 ROI (`/v2/analytics/spu-roi`)
 
-**Stability: stable · 只读(readonly)**。按 SPU 一行的「广告消耗 → 有效销售 → 退款 → 净收入 → 货本 → 净利润 → 实际 ROI/保本线」账页数据源;页面 `GET /v2/pages/spu-roi` 消费它。**口径唯一真相** = [`analytics/spu-real-roi-dashboard.md`](analytics/spu-real-roi-dashboard.md) §4/§5(公式 M1–M19,v8 实测) + [`handoff/spu-roi-full-loss-rubric.md`](../handoff/spu-roi-full-loss-rubric.md) v8 记忆;本端点只读计算并序列化,不做任何写。
+**Stability: stable · 只读(readonly)**。按 SPU 一行的「广告消耗 → 有效销售 → 退款 → 净收入 → 货本 → 净利润 → 实际 ROI/保本线」账页数据源;页面 `GET /v2/pages/spu-roi` 消费它。**口径唯一真相** = [`analytics/spu-real-roi-dashboard.md`](analytics/spu-real-roi-dashboard.md) §4/§5(公式 M1–M19) + [`handoff/spu-roi-full-loss-rubric.md`](../handoff/spu-roi-full-loss-rubric.md)(**v9 当前**) + [`biz-doc/analytics/spu-roi-profit-calculation.md`](../biz-doc/analytics/spu-roi-profit-calculation.md);本端点只读计算并序列化,不做任何写。
 
 Query parameters:
 
@@ -324,7 +324,7 @@ Query parameters:
 
 Response envelope:`{items: [...], total, totals, meta}`。
 
-**v8 行字段契约（32 字段，**全量**——页面主列仅渲染 6 列 + 商品维度，其余由下钻面板消费）**：
+**v9 行字段契约（34 字段，**全量**——页面主列仅渲染 6 列 + 商品维度，其余由下钻面板消费）**：
 
 | 字段 | 类型 | 公式 / 含义 | 主列? |
 | --- | --- | --- | --- |
@@ -339,11 +339,13 @@ Response envelope:`{items: [...], total, totals, meta}`。
 | `roi_l0` | ratio-str/null | M4: `gmv_ad / spend` | — |
 | `ad_first_day` / `ad_last_day` | date/null | 广告观测窗口 | — |
 | `order_count` | int | M5b: 有效销售订单数（白名单状态，含 COD 在途） | **主列** |
-| `cancelled_order_count` | int | M5c: 取消订单数 | — |
+| `cancelled_order_count` | int | M5c: 取消订单数（**全部 CANCELLED，信息列口径不变**；取消率不再用它，见下两行拆分） | — |
+| **`domestic_cancelled_order_count`** | **int** | **v9 新增：国内取消单量 = CANCELLED ∧ 无 `tracking_events.action_code=38301`（物流未到海外）→ `cancel_rate` 分子** | — |
+| **`overseas_cancelled_order_count`** | **int** | **v9 新增：海外取消单量 = CANCELLED ∧ 38301 → 已入全损件数，不进取消率** | — |
 | `units_sold` | int | M5: 售出件数 | — |
 | `sales` | money-str (USD) | M6: 有效销售金额 = `Σ quantity×unit_price` | **主列**(标记为"有效GMV") |
 | `gmv_sales` | money-str (USD) | M6c: 全单 = sales + 取消原额 | — |
-| `cancel_rate` | ratio-str/null | M12b: 取消 ÷(有效+取消) | **主列** |
+| `cancel_rate` | ratio-str/null | M12b **v9**: 国内取消 ÷(有效+国内取消)；海外取消已入全损不重复计（与 `full_loss_rate` 互斥） | **主列** |
 | `refund_only_qty` / `refund_only_amount` | int/money | M7: 仅退款 | — |
 | `refund_return_qty` / `refund_return_amount` | int/money | M8: 退货退款 | — |
 | `refund_net_qty` / `refund_net_amount` | int/money | M10: M7+M8 | — |
@@ -354,10 +356,10 @@ Response envelope:`{items: [...], total, totals, meta}`。
 | **`settled_sales`** | **money-str (USD)** | **v8 新增：`SUM line_gmv WHERE settlement_vnd IS NOT NULL`** | 下钻·结算 tab |
 | **`unsettled_sales`** | **money-str (USD)** | **v8 新增：`SUM line_gmv WHERE settlement_vnd IS NULL`** | 下钻·结算 tab |
 | **`settled_order_count`** | **int** | **v8 新增：已结算订单数** | 下钻·结算 tab |
-| **`full_loss_qty`** | **int** | **v8 新增：38301 ∧ (完结 case ∨ CANCELLED) 件数 (127 实测)** | 下钻·结算 tab |
-| **`full_loss_cancelled_qty`** | **int** | **v8 新增：CANCELLED ∧ 38301 件数（COGS 补扣基数）** | 下钻·结算 tab |
-| **`full_loss_rate`** | **ratio-str/null** | **v8 新增(D8 主列)：`full_loss_qty ÷ (units_sold + full_loss_cancelled_qty)`；分母 0 → null；不钳位（>100% 标识数据异常）** | **主列**(标记为"全损率%") |
-| `return_loss` | money-str (USD) | **M13b v8** = `full_loss_qty × unit_cost_used` | — |
+| **`full_loss_qty`** | **int** | **v9（2026-09-13 落地）：完结退货(RETURN_AND_REFUND/REFUND_ONLY，不论物流，限已付白名单订单) + 海外取消(CANCELLED∧38301) 件数** | 下钻·结算 tab |
+| **`full_loss_cancelled_qty`** | **int** | **v9：其中海外取消件数（COGS 补扣基数；退货件已含在 units_sold 里不重复补扣）** | 下钻·结算 tab |
+| **`full_loss_rate`** | **ratio-str/null** | **v9(D8 主列)：`full_loss_qty ÷ (units_sold + full_loss_cancelled_qty)`；分母 0 → null；不钳位（>100% 标识数据异常）** | **主列**(标记为"全损退款率%") |
+| `return_loss` | money-str (USD) | **M13b v9** = `full_loss_qty × unit_cost_used` | — |
 | `unit_cost_used` | money-str (USD) | 单位成本 = `unit_cost × fx_cny_usd` | — |
 | `cost_source` | enum | **v8 扩为四值**：`MANUAL`(人工标注的采购成交价) \| `PURCHASE`(妙手采购单成交价) \| `SOURCE_PRICE`(1688 货源价) \| `DEFAULT_K1`(40 CNY/件) | — |
 | `net_profit` | money-str (USD) | **M18 v8** = `net_revenue − (units_sold + full_loss_cancelled_qty) × unit_cost − spend`（**不**扣 platform_fee：已结费用含 SETTLEMENT，未结按 (1−r̂) 折算） | **主列** |
@@ -366,6 +368,13 @@ Response envelope:`{items: [...], total, totals, meta}`。
 | `roi_breakeven` | ratio-str/null | **M17 v8** = `NC′ ÷ (NC′ − COGS_kept)`（fee_est 项移除） | 下钻·利润构成 |
 | `cpa` | money-str/null | M15: `spend / ad_orders` | — |
 
+> **v9 语义变化（2026-09-13，merge `3c8ea96`）**：
+>
+> - `cancel_rate` 只计**国内取消**（CANCELLED ∧ 无 38301）；海外取消改由全损口径承载——修复 v8 及之前两率重叠（海外取消同单重复计入取消率与全损退款率）
+> - `full_loss_qty` 从「38301 ∧ (完结 case ∨ CANCELLED)」切到 v9 两桶：**完结退货不论物流**（限已付白名单订单，保住 rule 0 未归属不变量）+ 海外取消
+> - 新增 2 字段：`domestic_cancelled_order_count` / `overseas_cancelled_order_count`
+> - `meta.rubric_version` = `v9`；钻取 orders 的 `full_loss` 旗标同 v9（完结退货 ∨ 海外取消）
+>
 > **v8 语义变化（breaking relative to v5 文本）**：
 >
 > - `net_profit / roi_real / roi_breakeven / platform_fee` 公式重写（见 M18/M14/M17/M19）
@@ -375,14 +384,14 @@ Response envelope:`{items: [...], total, totals, meta}`。
 > - 新增 6 字段：`net_revenue / settled_sales / unsettled_sales / settled_order_count / full_loss_qty / full_loss_cancelled_qty / full_loss_rate`
 > - 主列（D8）从 13 列精简为 6 列：商品 + `spend` + `sales` + `order_count` + `cancel_rate` + `full_loss_rate` + `net_profit`；其余 26 字段继续在 JSON 返回，由下钻面板消费
 
-格式化约定(§5.1):**money = 4 位小数字符串**、比率/ROI = 2 位小数字符串、件数/单量整数;`null` = 无解/除数为 0(页面显示 `—`);无投放 SPU `spend="0.0000"` + `ad_count=0`。全表金额统一 USD(原币 VND/CNY 服务端按 fx 快照一次换算,`meta.fx` 标注)。`totals` = 跨分页、当前筛选的加总:`row_count`(SPU 数)、单量(`order_count` 有效单 / `cancelled_order_count` 取消单 / `total_orders` = 两者之和,跨可见 SPU 全局去重)、`gmv`(全部订单销售额 = 白名单有效 ∪ 取消订单的原始行金额;money-str)与 `spend, sales, refund_net_amount, return_loss, net_profit`(行级 USD 服务端加总,4 位小数字符串)、`roi_real`(Σ(net_revenue−return_loss)/Σspend,Σspend=0 → null);`total` = 匹配行数。**口径注(2026-09-06 全链状态口径,COD 店)**:行级 `sales`/单量/`gmv` 全部按**订单状态**下单即算——白名单状态订单(含 COD 在途/待收款)计入 `sales` 与有效单量;取消订单只进 `gmv`/`cancelled_order_count`,不重复入 sales;净利润/退款率/ROI 等派生金额自动跟随状态口径 sales(回款前偏乐观)。窗口裁剪列 = `COALESCE(paid_at, order_time)`(已收款按收款日；COD 在途/取消未收款按下单日)。**主表行内列集(v8 D8 主表精简)**:**主列 = 商品 + 消耗USD/有效GMV(`sales`)/有效出单量(`order_count`)/取消率(`cancel_rate`)/全损率%(`full_loss_rate`)/净利润**;其余 26 字段（ROI/保本/平台佣金/全损货损金额/已结未结 GMV/退款拆分/广告归因/订单结构）由行内 accordion 钻取面板五 tab 顶部汇总区展示（详见下节）。`meta` 携带 fx/fee/cost_assumption/window/**`rubric_version`(v8 新增)**:"/"unattributed_refund_lines/computed_at/currency;`meta.window` 为 ad 视图观测窗口(供参考),销售/退款是否裁剪见 `note`。
+格式化约定(§5.1):**money = 4 位小数字符串**、比率/ROI = 2 位小数字符串、件数/单量整数;`null` = 无解/除数为 0(页面显示 `—`);无投放 SPU `spend="0.0000"` + `ad_count=0`。全表金额统一 USD(原币 VND/CNY 服务端按 fx 快照一次换算,`meta.fx` 标注)。`totals` = 跨分页、当前筛选的加总:`row_count`(SPU 数)、单量(`order_count` 有效单 / `cancelled_order_count` 取消单 / `total_orders` = 两者之和,跨可见 SPU 全局去重)、`gmv`(全部订单销售额 = 白名单有效 ∪ 取消订单的原始行金额;money-str)与 `spend, sales, refund_net_amount, return_loss, net_profit`(行级 USD 服务端加总,4 位小数字符串)、`roi_real`(Σ(net_revenue−return_loss)/Σspend,Σspend=0 → null);`total` = 匹配行数。**口径注(2026-09-06 全链状态口径,COD 店)**:行级 `sales`/单量/`gmv` 全部按**订单状态**下单即算——白名单状态订单(含 COD 在途/待收款)计入 `sales` 与有效单量;取消订单只进 `gmv`/`cancelled_order_count`,不重复入 sales;净利润/退款率/ROI 等派生金额自动跟随状态口径 sales(回款前偏乐观)。窗口裁剪列 = `COALESCE(paid_at, order_time)`(已收款按收款日；COD 在途/取消未收款按下单日)。**主表行内列集(v8 D8 主表精简,v9 口径)**:**主列 = 商品 + 消耗USD/有效GMV(`sales`)/有效出单量(`order_count`)/取消率(`cancel_rate`)/全损退款率%(`full_loss_rate`)/净利润**;其余 28 字段（ROI/保本/平台佣金/全损货损金额/已结未结 GMV/退款拆分/广告归因/订单结构）由行内 accordion 钻取面板五 tab 顶部汇总区展示（详见下节）。`meta` 携带 fx/fee/cost_assumption/window/**`rubric_version`(v8 新增,当前值 v9)**:/"unattributed_refund_lines/computed_at/currency;`meta.window` 为 ad 视图观测窗口(供参考),销售/退款是否裁剪见 `note`。
 
-**v8 默认值总览**：
+**v9 默认值总览**：
 
 - `sort="roi_real"`（API 契约不动；页面 JS 显式传 `sort=net_profit&order=asc`）
 - `fee_rate=0.308`（仅作用于未结算订单 `unsettled_sales × 0.308`，已结不受影响）
 - `include_all=false`、`limit=100`、`order="asc"`
-- `meta.rubric_version="v8"`（口径漂移一眼定位）
+- `meta.rubric_version="v9"`（口径漂移一眼定位）
 
 Example:
 
@@ -407,7 +416,7 @@ Auth 分类细节:`/v2/analytics/spu-roi` 命中 `_READONLY_EXACT`(readonly),与
 | --- | --- | --- | --- |
 | `w_start` / `w_end` | date | — | 销售/退款裁剪窗口（同主表语义：销售按 `COALESCE(paid_at, order_time)`、退款按 `updated_at_source`，含 `w_end` 当日） |
 
-Response `{spu_pk, spu_id, window, orders[], meta}`。`orders[]` 字段：`order_id, status, qty, line_gmv(USD), paid_at, is_settled(已结 ✓/未结), settled_net_share(SETTLEMENT × 分摊比例，未结 → null), arrived_overseas(38301 命中), full_loss(38301 ∧ (完结case ∨ CANCELLED)), shipment{status, tracking_number}, tracking[]`（按事件时间排序的 `tracking_events` 子集：`action_code, desc, event_at`）。
+Response `{spu_pk, spu_id, window, orders[], meta}`。`orders[]` 字段：`order_id, status, qty, line_gmv(USD), paid_at, is_settled(已结 ✓/未结), settled_net_share(SETTLEMENT × 分摊比例，未结 → null), arrived_overseas(38301 命中), full_loss(**v9：完结退货(RETURN_AND_REFUND/REFUND_ONLY，不论物流) ∨ 海外取消(CANCELLED∧38301)**), shipment{status, tracking_number}, tracking[]`（按事件时间排序的 `tracking_events` 子集：`action_code, desc, event_at`）。
 
 防呆：`orders` 上限 500 条；超限返回 `{meta.orders_truncated: true}`。404：spu_pk 不存在。金额与主表同序列化（money 4 位、USD）。
 

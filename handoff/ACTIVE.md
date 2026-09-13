@@ -66,6 +66,8 @@
 | lane_id | 主题 | owner(session) | .worktrees/<slug> / branch | 文件列表 | draft | <UTC> |
 -->
 
+| docs/spu-roi-v9-rates | 把 spu-roi v9 取消率/全损退款率口径修复（merge 3c8ea96）回写计算文档：biz-doc/spu-roi-profit-calculation.md 补取消率/全损退款率定义+实现记录；tech-doc/spu-real-roi-dashboard.md §4.2/§E 字段语义 v8→v9；external-api.md 端点契约同步（domestic/overseas_cancelled_order_count 新字段 + cancel_rate 口径） | 本 session | .worktrees/spu-roi-v9-docs / docs/spu-roi-v9-rates | biz-doc/analytics/spu-roi-profit-calculation.md、tech-doc/analytics/spu-real-roi-dashboard.md、tech-doc/external-api.md、handoff/ACTIVE.md | draft | 2026-09-13T14:50Z |
+
 ## 规则速记
 
 - 开新工作（尤其会动 master WT 未提交区 / 共享点文件）→ **先加一行再动工**。
