@@ -192,7 +192,7 @@ def test_sync_multiple_requests(api_client, readwrite_key):
 
 
 def test_sync_invalid_protocol_version(api_client, readwrite_key):
-    """无效协议版本应返回 400"""
+    """无效协议版本应返回 422"""
     body = _sync_body()
     body["protocolVersion"] = 999
     resp = api_client.post(
@@ -200,7 +200,7 @@ def test_sync_invalid_protocol_version(api_client, readwrite_key):
         json=body,
         headers=_auth_header(readwrite_key),
     )
-    assert resp.status_code == 400
+    assert resp.status_code == 422
 
 
 def test_sync_duplicate_request_idempotent(api_client, readwrite_key):
@@ -309,7 +309,8 @@ def test_list_requests(api_client, readwrite_key):
     data = resp.json()
     assert "requests" in data
     assert "total" in data
-    assert "pagination" in data
+    assert "limit" in data
+    assert "offset" in data
 
 
 def test_list_requests_filter_by_seller(api_client, readwrite_key):
