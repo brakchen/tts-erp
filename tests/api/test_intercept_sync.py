@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-import json
 import uuid
 from datetime import UTC, datetime
 
@@ -259,7 +258,8 @@ def test_sync_duplicate_request_idempotent(api_client, readwrite_key):
     # 重复请求可视为已处理，但不能再次增加实际同步游标。
     assert resp2.json()["accepted"] == 1
     assert resp2.json()["inserted"] == 0
-    assert resp2.json()["cursor"]["totalSynced"] == 0
+    # 游标返回累计总数，重复不增加但也不回零
+    assert resp2.json()["cursor"]["totalSynced"] == 1
 
 
 def test_sync_cursor_uses_camel_case_seller_scope(api_client, readwrite_key):
@@ -375,7 +375,8 @@ def test_list_requests(api_client, readwrite_key):
     data = resp.json()
     assert "requests" in data
     assert "total" in data
-    assert "pagination" in data
+    assert "limit" in data
+    assert "offset" in data
 
 
 def test_list_requests_filter_by_seller(api_client, readwrite_key):
