@@ -223,8 +223,21 @@ def test_sync_duplicate_request_idempotent(api_client, readwrite_key):
         headers=_auth_header(readwrite_key),
     )
     assert resp2.status_code == 200
-    # 由于 ON CONFLICT DO NOTHING，accepted 可能是 1（PostgreSQL 的行为）
-    # 但不会报错
+    # 重复请求可视为已处理，但不能再次增加实际同步游标。
+    assert resp2.json()["accepted"] == 1
+    assert resp2.json()["inserted"] == 0
+    assert resp2.json()["cursor"]["total_synced"] == 0
+
+
+def test_sync_cursor_uses_camel_case_seller_scope(api_client, readwrite_key):
+    """插件使用 sellerId 时，游标不能错误落到 default。"""
+    resp = api_client.post(
+        "/v2/intercept/sync",
+        json=_sync_body(),
+        headers=_auth_header(readwrite_key),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["cursor"]["key"] == SELLER
 
 
 # ─── 会话管理 ────────────────────────────────────────────────────────

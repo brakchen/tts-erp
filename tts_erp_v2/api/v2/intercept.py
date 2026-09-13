@@ -597,6 +597,7 @@ def sync_intercepted_requests(
         )
 
     accepted = 0
+    inserted = 0
     rejected = 0
     errors = []
 
@@ -628,53 +629,55 @@ def sync_intercepted_requests(
         try:
             url_hash = _compute_url_hash(req.url)
 
-            db.execute(
-                text(
-                    """
-                    INSERT INTO plugin.intercepted_requests (
-                        request_id, trace_id, session_id, method, url, url_hash,
-                        endpoint_path, endpoint_host, is_whitelisted, matched_config_id,
-                        request_headers, request_body, response_status, response_status_text,
-                        response_headers, response_body, duration_ms, error_type, error_message,
-                        seller_id, advertiser_id, business_context, pagination, captured_at
-                    ) VALUES (
-                        :request_id, :trace_id, :session_id, :method, :url, :url_hash,
-                        :endpoint_path, :endpoint_host, :is_whitelisted, :matched_config_id,
-                        :request_headers, :request_body, :response_status, :response_status_text,
-                        :response_headers, :response_body, :duration_ms, :error_type, :error_message,
-                        :seller_id, :advertiser_id, :business_context, :pagination, :captured_at
-                    )
-                    ON CONFLICT (request_id) DO NOTHING
-                    """
-                ),
-                {
-                    "request_id": req.request_id,
-                    "trace_id": req.trace_id,
-                    "session_id": req.session_id,
-                    "method": req.method,
-                    "url": req.url,
-                    "url_hash": url_hash,
-                    "endpoint_path": req.endpoint_path,
-                    "endpoint_host": req.endpoint_host,
-                    "is_whitelisted": req.is_whitelisted,
-                    "matched_config_id": req.matched_config_id,
-                    "request_headers": json.dumps(req.request_headers) if req.request_headers else None,
-                    "request_body": json.dumps(req.request_body) if req.request_body else None,
-                    "response_status": req.response_status,
-                    "response_status_text": req.response_status_text,
-                    "response_headers": json.dumps(req.response_headers) if req.response_headers else None,
-                    "response_body": json.dumps(req.response_body) if req.response_body else None,
-                    "duration_ms": req.duration_ms,
-                    "error_type": req.error_type,
-                    "error_message": req.error_message,
-                    "seller_id": req.seller_id,
-                    "advertiser_id": req.advertiser_id,
-                    "business_context": json.dumps(req.business_context) if req.business_context else None,
-                    "pagination": json.dumps(req.pagination) if req.pagination else None,
-                    "captured_at": req.captured_at,
-                },
-            )
+            with db.begin_nested():
+                insert_result = db.execute(
+                    text(
+                        """
+                        INSERT INTO plugin.intercepted_requests (
+                            request_id, trace_id, session_id, method, url, url_hash,
+                            endpoint_path, endpoint_host, is_whitelisted, matched_config_id,
+                            request_headers, request_body, response_status, response_status_text,
+                            response_headers, response_body, duration_ms, error_type, error_message,
+                            seller_id, advertiser_id, business_context, pagination, captured_at
+                        ) VALUES (
+                            :request_id, :trace_id, :session_id, :method, :url, :url_hash,
+                            :endpoint_path, :endpoint_host, :is_whitelisted, :matched_config_id,
+                            :request_headers, :request_body, :response_status, :response_status_text,
+                            :response_headers, :response_body, :duration_ms, :error_type, :error_message,
+                            :seller_id, :advertiser_id, :business_context, :pagination, :captured_at
+                        )
+                        ON CONFLICT (request_id) DO NOTHING
+                        """
+                    ),
+                    {
+                        "request_id": req.request_id,
+                        "trace_id": req.trace_id,
+                        "session_id": req.session_id,
+                        "method": req.method,
+                        "url": req.url,
+                        "url_hash": url_hash,
+                        "endpoint_path": req.endpoint_path,
+                        "endpoint_host": req.endpoint_host,
+                        "is_whitelisted": req.is_whitelisted,
+                        "matched_config_id": req.matched_config_id,
+                        "request_headers": json.dumps(req.request_headers) if req.request_headers else None,
+                        "request_body": json.dumps(req.request_body) if req.request_body else None,
+                        "response_status": req.response_status,
+                        "response_status_text": req.response_status_text,
+                        "response_headers": json.dumps(req.response_headers) if req.response_headers else None,
+                        "response_body": json.dumps(req.response_body) if req.response_body else None,
+                        "duration_ms": req.duration_ms,
+                        "error_type": req.error_type,
+                        "error_message": req.error_message,
+                        "seller_id": req.seller_id,
+                        "advertiser_id": req.advertiser_id,
+                        "business_context": json.dumps(req.business_context) if req.business_context else None,
+                        "pagination": json.dumps(req.pagination) if req.pagination else None,
+                        "captured_at": req.captured_at,
+                    },
+                )
             accepted += 1
+            inserted += int(insert_result.rowcount or 0)
         except Exception as e:
             rejected += 1
             errors.append({"index": i, "error": str(e)})
@@ -682,7 +685,7 @@ def sync_intercepted_requests(
     db.commit()
 
     # 更新同步游标
-    cursor_key = body.scope.get("seller_id", "default")
+    cursor_key = body.scope.get("sellerId") or body.scope.get("seller_id") or "default"
     db.execute(
         text(
             """
@@ -693,22 +696,23 @@ def sync_intercepted_requests(
                 total_synced = plugin.intercept_sync_cursors.total_synced + EXCLUDED.total_synced
             """
         ),
-        {"cursor_key": cursor_key, "total_synced": accepted},
+        {"cursor_key": cursor_key, "total_synced": inserted},
     )
     db.commit()
 
     log.info(
-        f"Synced intercepted requests: {accepted} accepted, {rejected} rejected"
+        f"Synced intercepted requests: {accepted} accepted, {inserted} inserted, {rejected} rejected"
     )
 
     return JSONResponse(
         content={
             "accepted": accepted,
+            "inserted": inserted,
             "rejected": rejected,
             "errors": errors,
             "cursor": {
                 "key": cursor_key,
-                "total_synced": accepted,
+                "total_synced": inserted,
             },
         }
     )
@@ -811,12 +815,19 @@ def get_requests_stats(
     return JSONResponse(
         content={
             "total": total,
+            "total_requests": total,
             "whitelisted": whitelisted,
+            "whitelisted_requests": whitelisted,
             "today": today_count,
+            "today_requests": today_count,
             "errors": errors,
+            "error_requests": errors,
             "by_host": [{"host": row[0], "count": row[1]} for row in by_host],
+            "byHost": [{"host": row[0], "count": row[1]} for row in by_host],
             "by_method": [{"method": row[0], "count": row[1]} for row in by_method],
+            "byMethod": [{"method": row[0], "count": row[1]} for row in by_method],
             "by_status": [{"status": row[0], "count": row[1]} for row in by_status],
+            "byStatus": [{"status": row[0], "count": row[1]} for row in by_status],
         }
     )
 
