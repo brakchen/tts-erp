@@ -11,6 +11,13 @@ Design ref: tech-doc/analytics/daily-sync-with-coverage.md §5.6。
 
 Bookkeeping: uses :func:`tts_erp_v2.jobs.runner.run_job`, which does
 NOT commit — the scheduler's system-job executor commits on success.
+
+⚠️  DISABLED — 2026-09-13 (user request, fix/disable-ad-merge-today2daily)
+    Job 仍由 scheduler 每小时调度一次，但 :func:`run` 一开始就早返回，
+    不进入 ``run_job`` 上下文，也不会 INSERT/DELETE plugin.ad_*。
+    JobSpec 注册保留以保持 jobs registry count = 17（见
+    tests/sync_worker/test_scheduler_jobs_coverage.py）。
+    重新启用：删除 :data:`_DISABLED` 与 :func:`run` 内的早返回分支。
 """
 
 from __future__ import annotations
@@ -28,12 +35,38 @@ log = logging.getLogger("tts_erp_v2.jobs.ad_merge_today2daily")
 
 JOB_NAME = "plugin.ad_merge_today2daily"
 
+# 2026-09-13: 临时禁用。root cause 待定（怀疑 UTC 跨天时 Chrome 扩展仍
+# 在写入"昨天"的 ad_today 行 → 过早 DELETE 会截断延迟归因数据）。
+# Re-enable: set to False.
+_DISABLED = True
+
 
 def run(session: Session) -> dict[str, Any]:
     """Merge yesterday's ad_today rows into ad_daily for all scopes.
 
     Returns counters for the sync_jobs row.
+
+    When :data:`_DISABLED` is True, this early-returns without touching
+    ``plugin.ad_today`` / ``plugin.ad_daily`` and without writing a
+    ``sync_jobs`` row (intentional — we don't want a "succeeded" record
+    for a no-op).
     """
+    if _DISABLED:
+        yesterday = (datetime.now(UTC) - timedelta(days=1)).date()
+        log.warning(
+            "[%s] DISABLED (_DISABLED=True) — skipping merge for %s",
+            JOB_NAME,
+            yesterday.isoformat(),
+        )
+        return {
+            "disabled": True,
+            "reason": "_DISABLED=True (see module docstring)",
+            "yesterday": yesterday.isoformat(),
+            "scopes_total": 0,
+            "scopes_solidified": 0,
+            "scopes_failed": 0,
+        }
+
     yesterday = (datetime.now(UTC) - timedelta(days=1)).date()
 
     with run_job(session, job_name=JOB_NAME) as job:
