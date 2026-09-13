@@ -166,9 +166,9 @@ INSERT INTO plugin.ad_raw_log (
 
 SQL_INSERT_PLUGIN_LOG = """
 INSERT INTO plugin.plugin_logs (
-    seller_id, advertiser_id, plugin_version, level, message, context, occurred_at
+    seller_id, advertiser_id, plugin_version, plugin_name, level, message, context, occurred_at
 ) VALUES (
-    :seller_id, :advertiser_id, :plugin_version, :level, :message,
+    :seller_id, :advertiser_id, :plugin_version, :plugin_name, :level, :message,
     CAST(:context AS JSONB), :occurred_at
 )
 """
@@ -806,6 +806,7 @@ def insert_plugin_logs(sess: Session, *, logs: list[dict[str, Any]]) -> int:
                 "seller_id": log["seller_id"],
                 "advertiser_id": log["advertiser_id"],
                 "plugin_version": log.get("plugin_version", ""),
+                "plugin_name": log.get("plugin_name", ""),
                 "level": log.get("level", "info"),
                 "message": log["message"],
                 "context": json.dumps(log.get("context", {}), ensure_ascii=False),

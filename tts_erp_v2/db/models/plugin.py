@@ -559,6 +559,7 @@ class PluginLog(Base):
         ),
         Index("idx_plugin_logs_seller_time", "seller_id", "occurred_at"),
         Index("idx_plugin_logs_level", "level", "occurred_at"),
+        Index("idx_plugin_logs_plugin_name", "plugin_name"),
         {"schema": "plugin"},
     )
 
@@ -570,6 +571,9 @@ class PluginLog(Base):
     seller_id: Mapped[str] = mapped_column(Text, nullable=False)
     advertiser_id: Mapped[str] = mapped_column(Text, nullable=False)
     plugin_version: Mapped[str] = mapped_column(Text, nullable=False)
+    plugin_name: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
     level: Mapped[str] = mapped_column(Text, nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     context: Mapped[dict | None] = mapped_column(JSONB)

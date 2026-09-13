@@ -767,6 +767,7 @@ def post_dumps(
         else:
             common_kwargs["day"] = payload.dump.day
         inserted = repo_fn(**common_kwargs)
+    # pi-lens-ignore: no-boolean-in-except
     except Exception as exc:  # noqa: BLE001 — 落库失败统一转 500，细节进 stderr/ingest log
         exc_class = type(exc).__name__
         sys.stderr.write(
@@ -995,6 +996,7 @@ class PluginLogEntryIn(BaseModel):
 class PluginLogsRequest(BaseModel):
     scope: ScopeIn
     pluginVersion: str = Field(min_length=1, max_length=64)
+    pluginName: str = Field(default="", max_length=128)
     logs: list[PluginLogEntryIn] = Field(min_length=1, max_length=1000)
 
 
@@ -1070,6 +1072,7 @@ def post_plugin_logs(
             "seller_id": payload.scope.sellerId,
             "advertiser_id": payload.scope.advertiserId,
             "plugin_version": payload.pluginVersion,
+            "plugin_name": payload.pluginName,
             "level": entry.level,
             "message": entry.message,
             "context": entry.context or {},
