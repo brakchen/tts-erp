@@ -734,6 +734,50 @@ image_url = image_obj.get("url_list", [None])[0]  # 从 url_list 取第一张
 2. 或扩展侧改用 declarativeNetRequest + 自建 header 注入
 3. 或后端改用 cookie 中的 `sid_guard` / `tt_token` 推断 seller_id（v3 抓不到的话可能需要 fallback 到 IP / shop_id path）
 
+### 7.3.1 seller_id fallback 修复（lane feat/settlement-data-usability，13:21 burst 揭示）
+
+13:21 burst 抓到的 URL query string 里**全都带 `oec_seller_id` 和 `seller_id` 作为客户端身份**——这是 TikTok OEC SDK (aid=6556 / app_name=i18n_ecom_shop) 的标准做法，client 身份不进 cookie 而是走 URL 参数。
+
+**实测**（500 条抽样）：
+| URL key | 出现次数 | 说明 |
+| --- | ---:| --- |
+| `oec_seller_id` | 96 | 99% 同时有 `seller_id`（api16 域 JSON API），2 条仅 oec_seller_id |
+| `seller_id` | 94 | 与 `oec_seller_id` 几乎重叠 |
+| `aid=6556` | 98 | OEC app 标识（仅 api16 + seller 域 JSON API）|
+| `aid` 为空 | 402 | 监控/CDN/HTML 页 — 本来就不需 seller 信息 |
+
+**修复**：`tts_erp_v2/api/v2/intercept.py:618+` 的 `/v2/intercept/sync` 端点，在 INSERT 时把 `req.seller_id or _extract_seller_id_from_url(req.url)` 作为新值。辅助函数 `_extract_seller_id_from_url` ：
+
+```python
+_URL_SELLER_ID_KEYS = ("oec_seller_id", "seller_id")  # 优先 oec_seller_id
+
+def _extract_seller_id_from_url(url: str) -> str | None:
+    try:
+        qs = parse_qs(urlparse(url).query, keep_blank_values=False)
+    except (ValueError, TypeError):
+        return None
+    for key in _URL_SELLER_ID_KEYS:
+        values = qs.get(key)
+        if values:
+            value = values[0].strip()
+            if value:
+                return value[:128]
+    return None
+```
+
+**优先级**：body 显式 `sellerId` > URL `oec_seller_id` > URL `seller_id` > NULL。body 显式传的不会被 URL 覆盖。
+
+**测试**（`tests/api/test_intercept_sync.py` 新增 4 条）：
+- `test_sync_extracts_seller_id_from_oec_seller_id_query_param`：URL 提取 + list filter 验证
+- `test_sync_falls_back_to_seller_id_query_param`：fallback seller_id
+- `test_sync_keeps_explicit_seller_id_over_url_extraction`：body 优先级
+- `test_sync_url_without_seller_id_leaves_seller_id_null`：URL 缺失时仍为 null
+
+**未做**：
+- 现有 3638 条历史记录的 seller_id 列仍为 NULL（这 lane 只改未来写入的逻辑；backfill 需另外 lane、且只对能从中提取 oec_seller_id 的记录有效）
+- advertiser_id 未做同样提取（URL 里没看到稳定 key，待确认）
+- 扩展侧 headers 漏抓本身（webRequest.onBeforeSendHeaders 拿不到 cookie/authorization）仍未修
+
 ### 7.4 订单 19 个 module 完整结构（实测 n=50 orders）
 
 `POST /api/fulfillment/order/list` 响应中每个 `main_orders[i]` 包含 19 个 module：
@@ -911,6 +955,76 @@ image_url = image_obj.get("url_list", [None])[0]  # 从 url_list 取第一张
 **v1→v2 经验**：
 - seller 域 REST 风格路径猜测全部失败，下次新增 seller 域 whitelist 应**先实测再配置**，不要从 REST 命名习惯推断
 - 路径风格差异（api16 = `/api/v1/*` REST，seller = `/finance/*` web-style）是 TikTok Seller Center 的统一模式，记住
+
+### 7.6.2 13:21 settlement burst 实测（lane feat/settlement-data-usability）
+
+13:17~13:20 seller 访问了 finance 页面，**11 个 settlement endpoint 被抓到**（全部命中 #288 /\* 通配）：
+
+| # | endpoint | method | 作用 | sample key |
+| -: | --- | :-: | --- | --- |
+| 1 | `/api/v1/pay/statement/order/list` | POST | **已结算+未结算订单列表**（按 `settlement_status` 区分） | `total_record=143`(已结算) / `38`(未结算) |
+| 2 | `/api/v1/pay/statement/transaction/detail` | POST | 单条已结算交易详情 | `fees / in_come / fee_list[]` |
+| 3 | `/api/v1/pay/statement/stat/info` | POST | **未结算聚合** | `to_settle_amount_stat.amount=66021528 VND` |
+| 4 | `/api/v1/pay/statement/payment/list` | POST | 支付列表（当前空） | `total_record=0` |
+| 5 | `/api/v1/pay/statement/balance/detail/query` | POST | 余额明细（当前空） | `total=0` |
+| 6 | `/api/v1/pay/statement/gray` | POST | 灰度检查 | `gray_scene_list=[1]` |
+| 7 | `/api/v1/pay/settlement/settings` | GET | 结算设置 | `reserve_version / statement_version / pc_finance_setting` |
+| 8 | `/api/v1/pay/settlement/file/list` | POST | 结算文件 v1（空） | — |
+| 9 | `/api/v2/pay/settlement/file/list` | POST | 结算文件 v2（空） | — |
+| 10 | `/api/v1/pay/settlement/payout/query_payout_config` | POST | 提现配置 | REQ.body 含 `oec_id` （与 seller_id 同源） |
+| 11 | `/api/v1/pay/settlement/payout/reverse_block_check` | POST | 提现反向块检查 | `payout_blocked=false` |
+
+**已结算/未结算 filter 机制**（关键）：
+
+同一个 `/api/v1/pay/statement/order/list` 端点靠 query string 区分：
+- `settlement_status=1` + `page_type=10` → 已结算（total_record=143）
+- `settlement_status=2` + `page_type=6` → 未结算（total_record=38）
+- 带 `reference_id` / `statement_id` → 单条详情
+
+seller.js SPA bundle 里 `apiPrefix='https://api16-normal-sg.tiktokshopglobalselling.com'` → **全部走 api16 域**。
+
+**已结算订单结构**（settlement_status=1，12 字段）：
+```
+fees, payment_id, trade_type, bill_period, placed_time, sku_records[],
+statement_id, earning_amount, payment_status, trade_order_id,
+settlement_amount, settlement_status, statement_version
+```
+
+**未结算订单结构**（settlement_status=2，**22 字段**，比已结算多 10）：
+```
+新增字段:
+  delivery_time              "0"               # 0=未送达（本次样本就是这个）
+  settlement_time            "1789268421260"   # 计划结算
+  estimate_settle_time       "1789343999000"   # 预计结算
+  estimate_settle_time_not_delivery: {params:["3"], starling_text:"送达后 3 天"}
+  payment_status             20               # 已付但未结
+  shipping_amount            {...}             # 运费
+  settlement_amount          {...}             # 结算金额
+  settlement_status 2                # 未结
+  statement_detail_id        "7684672666385008391"
+  trade_order_id             "586037160850720255"  # = main_order_id 关联到订单表
+  platform_name              ""
+```
+
+**未结算聚合**（`/api/v1/pay/statement/stat/info`）：
+- 总未结算 = **66,021,528 VND**（≈ 1.9万 RMB）
+- `reasons_detail[]` 按原因拆分：
+  - **49.9% (32,924,847 VND)** = 等待包裹妥投 (reason=1, 7天到账)
+  - 2.8% = 退货申请进行中
+  - 其他原因（未完整读到）
+- 每条带 `starling_text` i18n 文案 + `params` (天数)
+
+**业务洞察**：
+- 卖家 143 单已结算 + 38 单未结算 = 181 单总订单（符合 11:31 burst 看到的 11:31 burst是 50 单 × 多页）
+- 未结算资金在 VN 卖家这里 ≈ 1.9万 RMB，主要是“在途资金”
+- 同一个 endpoint 用不同 status filter → 后端大概率是同一 SQL 表，区别是 status 字段
+
+**§7.6 原始结论已被修正**：
+- ~~结算数据缺失~~ → 已抓全（11 个 endpoint × 2 个 status 维度）
+- ~~可能在独立 host~~ → 100% 在 api16 域（同一域、同一通配 #288）
+- ~~可能叫 /api/v1/settlement/*~~ → 实际是 `/api/v1/pay/statement/*` 和 `/api/v1/pay/settlement/*`（两个不同模块）
+
+**#288 验证**：10/10 个 settlement 命中 matched_config_id=288（api16 域 /\* 通配）✓ **无需新增 config**。
 
 ### 7.7 高频轮询与重复调用
 

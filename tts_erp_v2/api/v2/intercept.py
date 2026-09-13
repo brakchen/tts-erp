@@ -19,6 +19,7 @@ import sys
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
@@ -178,6 +179,32 @@ def _jsonb_parameter(value: Any) -> str | None:
 def _compute_url_hash(url: str) -> str:
     """计算 URL 的 SHA-256 哈希"""
     return hashlib.sha256(url.encode("utf-8")).hexdigest()
+
+
+# TikTok OEC SDK (i18n_ecom_shop, aid=6556) 在所有 JSON API URL 的 query string 里
+# 都带这两个 key 作为客户端身份。Manifest V3 下的扩展侧 webRequest API 默认拿不到
+# Cookie / Authorization (见 §7.3)，所以即使 request_headers 只有 1~2 个 key，
+# 也能从 URL 里把卖家 / 广告主 id 捡回来。优先 oec_seller_id（更稳定）。
+_URL_SELLER_ID_KEYS = ("oec_seller_id", "seller_id")
+
+
+def _extract_seller_id_from_url(url: str) -> str | None:
+    """从 URL query string 里提取卖家 id。
+
+    优先 ``oec_seller_id``，fallback 到 ``seller_id``；两者都取不到返回 None。
+    只取第一个值（OEC SDK 总是单值），不入库为多值列表。
+    """
+    try:
+        qs = parse_qs(urlparse(url).query, keep_blank_values=False)
+    except (ValueError, TypeError):
+        return None
+    for key in _URL_SELLER_ID_KEYS:
+        values = qs.get(key)
+        if values:
+            value = values[0].strip()
+            if value:
+                return value[:128]
+    return None
 
 
 def _match_endpoint_pattern(path: str, pattern: str) -> bool:
@@ -681,7 +708,7 @@ def sync_intercepted_requests(
                         "duration_ms": req.duration_ms,
                         "error_type": req.error_type,
                         "error_message": req.error_message,
-                        "seller_id": req.seller_id,
+                        "seller_id": req.seller_id or _extract_seller_id_from_url(req.url),
                         "advertiser_id": req.advertiser_id,
                         "business_context": _jsonb_parameter(req.business_context),
                         "pagination": _jsonb_parameter(req.pagination),
