@@ -524,7 +524,8 @@ def test_sync_extracts_seller_id_from_oec_seller_id_query_param(
     assert data["total"] >= 1, "URL 提取的 seller_id 应已写入 DB 并可被 filter 命中"
     matched = next(
         (
-            r for r in data["requests"]
+            r
+            for r in data["requests"]
             if r["request_id"] == body["requests"][0]["requestId"]
         ),
         None,
@@ -554,9 +555,7 @@ def test_sync_falls_back_to_seller_id_query_param(api_client, readwrite_key):
     assert list_resp.json()["total"] >= 1
 
 
-def test_sync_keeps_explicit_seller_id_over_url_extraction(
-    api_client, readwrite_key
-):
+def test_sync_keeps_explicit_seller_id_over_url_extraction(api_client, readwrite_key):
     """body 显式传了 sellerId 时优先用它，不被 URL 提取覆盖。"""
     body = _sync_body(request_id=f"TEST_req-{uuid.uuid4().hex[:8]}")
     body["requests"][0]["url"] = (
@@ -577,7 +576,11 @@ def test_sync_keeps_explicit_seller_id_over_url_extraction(
     data = list_resp.json()
     assert data["total"] >= 1
     matched = next(
-        (r for r in data["requests"] if r["request_id"] == body["requests"][0]["requestId"]),
+        (
+            r
+            for r in data["requests"]
+            if r["request_id"] == body["requests"][0]["requestId"]
+        ),
         None,
     )
     assert matched["seller_id"] == "BODY_seller_should_win"
@@ -600,6 +603,8 @@ def test_sync_url_without_seller_id_leaves_seller_id_null(api_client, readwrite_
     )
     assert list_resp.status_code == 200
     rows = list_resp.json()["requests"]
-    matched = next((r for r in rows if r["request_id"] == body["requests"][0]["requestId"]), None)
+    matched = next(
+        (r for r in rows if r["request_id"] == body["requests"][0]["requestId"]), None
+    )
     if matched is not None:
         assert matched["seller_id"] is None
