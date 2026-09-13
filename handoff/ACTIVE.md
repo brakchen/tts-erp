@@ -53,6 +53,7 @@
 
 | lane_id | 主题 | owner(session) | branch/worktree | 拥有的文件/目录 | 状态 | updated(UTC) |
 | --- | --- | --- | --- | --- | --- | --- |
+| fix/recover-ad-daily-purge-guard | P0: prod plugin.ad_daily 被误清 13,683 行（9-13 08:19 UTC session 1537 purge_plugin_data 裸 DELETE）→ 恢复 15,437 行（06:00 preserved + 9-13 chrome backfill 残骸）+ 三道加固：① conftest prod-shape hard fail ② purge 端点双 gate (?confirm=true + prod-shape 守卫) ③ role 回退 admin；事故复盘 tech-doc/incident-reports/2026-09-13-ad-daily-purge.md；AGENTS.md §6 加双 gate 红线 | 本 session | .worktrees/recover-ad-daily-purge-guard / fix/recover-ad-daily-purge-guard | tts_erp_v2/api/v2/admin.py、tests/conftest.py、tests/api/test_admin_purge.py、tech-doc/incident-reports/2026-09-13-ad-daily-purge.md(新)、AGENTS.md §6、handoff.md、handoff/ACTIVE.md | done（待合入 master + push） | 2026-09-13T17:25Z |
 | feat/intercept-config | 请求拦截配置管理：数据库 migration + API + 前端页面 + 统计 + 30天清理 | 主 agent 调度子 agent | merged to master | tts_erp_v2/api/v2/intercept.py、tts_erp_v2/api/v2/pages.py、tts_erp_v2/static/js/intercept-*.js、alembic/versions/0026_intercept_tables.py、tests/api/test_intercept_*.py | merged | 2026-09-12T12:00Z |
 
 <!-- 新 lane 示例（复制改）：

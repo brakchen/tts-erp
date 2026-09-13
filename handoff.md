@@ -2,8 +2,33 @@
 
 > 🔄 **当前在途工作注册（谁在改什么 / 谁接手）：先读 `handoff/ACTIVE.md`**（AGENTS.md §12.1）
 >
-> 上次 session: 2026-09-11（PLUGIN_ARCH_CLEANUP 四 lane 全部完成 + prod 部署）
-> 上次 session 主题: 插件数据收敛到 `plugin` schema + 删 `shops.data_source` + 拆 api-managed 守卫
+> 上次 session: 2026-09-13（P0 ad_daily purge recovery + 双 gate 加固部署）
+> 上次 session 主题: **prod plugin.ad_daily 被误清 13,683 行 → 恢复 15,437 行（含 chrome backfill 增量）+ purge 端点双 gate 加固 + conftest prod-shape hard fail**
+
+## TL;DR (2026-09-13 P0 ad_daily purge recovery)
+
+**背景**：9-13 08:19 UTC（北京时间 16:19），有人在 prod tts_erp 库跑了
+`tests/api/test_admin_purge.py::test_purge_plugin_data_clears_ad_tables`（worktree `.env` 软链到
+主仓 prod `.env` + 裸 pytest 走 prod），session 1537 第 2 段事务 = `purge_plugin_data` 端点的 11 个
+SELECT COUNT + 2 个裸 DELETE（清空 14,719 行 → 残 1,036 行）。
+
+**恢复（已完成）**：
+- 06:00 preserved pgdump 14,306 行 + 9-13 早上 prod 残骸里 staging 漏的 1,131 行（chrome backfill）= **15,437 行恢复**
+- 维度：111 products / 246 campaigns / 65 days（7-10 ~ 9-12）/ 总成本 ¥6,389.59
+- id_seq 修复到 59,500（next=59,501）
+- 原 prod 残骸 1,138 行保留在 `plugin.ad_daily_rescue_20260913`（紧急回滚源）
+
+**加固（已落地，commit fix/recover-ad-daily-purge-guard）**：
+1. **`tests/conftest.py`** — prod-shape dbname WARNING → `pytest.exit(2)` hard fail；只有
+   `TTS_ERP_TEST_OFF=1` 临时绕过（且打醒目 banner `LIVE DATA AT RISK`）
+2. **`tts_erp_v2/api/v2/admin.py::purge_plugin_data`** — 双 gate：
+   - Gate 1: `_is_prod_shaped_db()` 检查 `TTS_ERP_DB_URL`，prod-shape 返 403（除非 `ALLOW_PROD_PURGE=1`）
+   - Gate 2: 必须 `?confirm=true` 才真删，无 confirm = dry-run（返行数 + `dry_run: true` + `next_step` 提示）
+   - role 复位：admin（2026-09-10 bfb6b71 降到 readwrite 的改动回滚）
+3. **`tests/api/test_admin_purge.py`** — 重写以适配双 gate，新增 dry-run 测试
+
+**事故完整复盘**：见 `tech-doc/incident-reports/2026-09-13-ad-daily-purge.md`（含 PG log 时间线、
+5-Why 根因、HTTP access log 为什么看不到、恢复脚本、教训）。
 
 ## TL;DR (2026-09-11 PLUGIN_ARCH_CLEANUP — 插件数据物理隔离)
 

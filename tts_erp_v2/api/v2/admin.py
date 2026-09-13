@@ -19,7 +19,7 @@ import os
 from datetime import date, datetime, timezone
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 
@@ -204,21 +204,80 @@ _PLUGIN_ORDER_CHILD_TABLES = [
 _PLUGIN_ORDER_RAW_LOG = "plugin.raw_log"
 
 
+def _is_prod_shaped_db() -> bool:
+    """Guard: refuse destructive ops on prod-shape dbnames.
+
+    2026-09-13 incident: ``tests/api/test_admin_purge.py::test_purge_plugin_data_clears_ad_tables``
+    was run against ``tts_erp`` (prod) because the worktree's ``.env`` symlinked
+    to the main repo's prod ``.env`` and the runner did not source ``.env.test``.
+    The wipe blanked 14,719 rows of prod ``plugin.ad_daily`` (246 campaigns ×
+    65 days). See ``tech-doc/incident-reports/2026-09-13-ad-daily-purge.md``.
+    Any future purge path MUST refuse to run on prod-shape dbnames unless
+    ``ALLOW_PROD_PURGE=1`` is explicitly set in the environment.
+    """
+    from urllib.parse import urlparse
+
+    db_url = os.environ.get("TTS_ERP_DB_URL", "")
+    if not db_url:
+        # If unset, refuse — fail-closed. Caller can override via ALLOW_PROD_PURGE.
+        return True
+    try:
+        # postgresql+psycopg://u:p@h:port/dbname
+        path = urlparse(db_url.replace("postgresql+psycopg://", "postgresql://")).path
+        dbname = path.lstrip("/").split("?")[0]
+    except Exception:
+        return True
+    # Prod dbnames: tts_erp / tts_erp_prod (per AGENTS.md §6).
+    # Test dbname: tts_erp_v3_test.
+    return dbname in {"tts_erp", "tts_erp_prod"} or dbname.startswith("tts_erp_prod_")
+
+
 @router.post(
     "/purge-plugin-data",
     summary="一键清除所有插件同步数据（admin only）",
 )
-def purge_plugin_data(request: Request) -> dict[str, Any]:
+def purge_plugin_data(
+    request: Request,
+    confirm: bool = Query(False, description="Must be true to actually delete. Dry-run by default."),
+    allow_prod: bool = Query(False, description="Override prod-shape guard (only honored when TTS_ERP_ENVIRONMENT=dev)."),
+) -> dict[str, Any]:
     """Delete all Chrome extension synced data from analytics and plugin schemas.
 
-    **Readwrite role required.** Clears 12 tables in a single transaction:
+    **Admin role required.** Clears 12 tables in a single transaction:
     - analytics: ad_today, ad_daily, ad_monthly, raw_log, plugin_logs
     - plugin: orders, order_lines, shipments, tracking_events,
       settlements, settlement_details, raw_log
 
-    Returns per-table row counts before deletion.
+    Two safety gates (2026-09-13 hardening):
+    1. ``confirm=true`` query param required to actually delete; without it
+       the endpoint returns row counts only (dry-run).
+    2. Refuses to run on prod-shape dbnames (``tts_erp`` / ``tts_erp_prod``)
+       unless ``ALLOW_PROD_PURGE=1`` is set in the env (or the explicit
+       ``allow_prod=true`` query param is passed AND ``TTS_ERP_ENVIRONMENT=dev``).
+       Returns 403 with a clear refusal message — does NOT count or touch rows.
+
+    Returns per-table row counts, plus ``dry_run`` and ``executed`` flags.
     """
-    require_role_at_least(request, "readwrite")
+    require_role_at_least(request, "admin")
+
+    # Gate 1: prod-shape dbname guard.
+    is_prod = _is_prod_shaped_db()
+    allow_prod_env = os.environ.get("ALLOW_PROD_PURGE", "0") == "1"
+    dev_env = os.environ.get("TTS_ERP_ENVIRONMENT", "").lower() == "dev"
+    if is_prod and not (allow_prod_env or (allow_prod and dev_env)):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Refused: refuse to purge on prod-shape dbname. "
+                f"dbname appears prod-shaped (TTS_ERP_DB_URL set). "
+                "Set ALLOW_PROD_PURGE=1 in the environment, or run against "
+                "the dedicated test database (tts_erp_v3_test via scripts/test.sh)."
+            ),
+        )
+
+    # Gate 2: dry-run unless confirm=true.
+    dry_run = not confirm
+    executed = confirm and (not is_prod or allow_prod_env or (allow_prod and dev_env))
 
     from sqlalchemy import text
 
@@ -228,7 +287,7 @@ def purge_plugin_data(request: Request) -> dict[str, Any]:
     counts: dict[str, int] = {}
 
     with engine.begin() as conn:
-        # Count rows first (for the response)
+        # Count rows first (for the response — always, even on dry-run).
         all_tables = (
             _ANALYTICS_TABLES + _PLUGIN_ORDER_CHILD_TABLES + [_PLUGIN_ORDER_RAW_LOG]
         )
@@ -241,20 +300,31 @@ def purge_plugin_data(request: Request) -> dict[str, Any]:
             except Exception:
                 counts[table] = -1  # table doesn't exist
 
-        # Delete in FK-safe order: children first, then parent
-        for table in (
-            _PLUGIN_ORDER_CHILD_TABLES + [_PLUGIN_ORDER_RAW_LOG] + _ANALYTICS_TABLES
-        ):
-            if counts.get(table, 0) > 0:
-                conn.execute(
-                    text(f"DELETE FROM {table}")
-                )  # pi-lens-ignore: python-sql-injection — hardcoded table names
+        # Only delete if not dry-run.
+        if executed:
+            # Delete in FK-safe order: children first, then parent
+            for table in (
+                _PLUGIN_ORDER_CHILD_TABLES + [_PLUGIN_ORDER_RAW_LOG] + _ANALYTICS_TABLES
+            ):
+                if counts.get(table, 0) > 0:
+                    conn.execute(
+                        text(f"DELETE FROM {table}")
+                    )  # pi-lens-ignore: python-sql-injection — hardcoded table names
 
     return {
+        "dry_run": dry_run,
+        "executed": executed,
         "cleared": {k: v for k, v in counts.items() if v > 0},
-        "total_rows_deleted": sum(v for v in counts.values() if v > 0),
+        "total_rows_deleted": (
+            sum(v for v in counts.values() if v > 0) if executed else 0
+        ),
         "purged_by": str(request.scope.get("api_key_hash", "") or "")[:12],
         "purged_at": datetime.now(timezone.utc).isoformat(),
+        "prod_guarded": is_prod,
+        "next_step": (
+            None if executed else
+            "Pass ?confirm=true (and ?allow_prod=true on dev env) to actually delete."
+        ),
     }
 
 
