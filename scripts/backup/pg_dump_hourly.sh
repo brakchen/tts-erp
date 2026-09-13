@@ -7,7 +7,7 @@ set -euo pipefail
 
 # ─── 配置 ─────────────────────────────────────────────────────────────────────
 BACKUP_DIR="${BACKUP_DIR:-/home/schan/backups/tts_erp_pgdump}"
-KEEP_COUNT="${KEEP_COUNT:-3}"    # 保留最近 N 份
+KEEP_COUNT="${KEEP_COUNT:-24}"   # 保留最近 N 份
 DB_NAME="${PGDATABASE:-tts_erp}" # 要 dump 的库
 CONTAINER="postgres"             # Docker 容器名
 LOG_FILE="${BACKUP_DIR}/pgbackup.log"
