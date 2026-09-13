@@ -483,3 +483,123 @@ def test_get_requests_stats_empty(api_client, readwrite_key):
     data = resp.json()
     assert data["total"] == 0
     assert data["whitelisted"] == 0
+
+
+# ─── seller_id 从 URL query string 提取（§7.3 修复）──────────────────
+
+
+def test_sync_extracts_seller_id_from_oec_seller_id_query_param(
+    api_client, readwrite_key
+):
+    """body 没传 sellerId 但 URL 含 oec_seller_id 时，回填 seller_id 列。
+
+    背景：Manifest V3 扩展的 webRequest.onBeforeSendHeaders 拿不到 cookie/authorization，
+    但 TikTok OEC SDK (aid=6556) 在所有 JSON API URL 的 query string 里都带
+    oec_seller_id 作为客户端身份标识（见 tech-doc/tiktok-seller-center-api-catalog.md §7.3）。
+    """
+    body = _sync_body(
+        request_id=f"TEST_req-{uuid.uuid4().hex[:8]}",
+    )
+    # 关键：URL 含 oec_seller_id，body 里 sellerId = None
+    body["requests"][0]["url"] = (
+        "https://api16-normal-sg.tiktokshopglobalselling.com/api/v1/pay/statement/order/list"
+        "?oec_seller_id=EXTRACTED_seller_abc123"
+    )
+    body["requests"][0]["sellerId"] = None
+
+    resp = api_client.post(
+        "/v2/intercept/sync",
+        json=body,
+        headers=_auth_header(readwrite_key),
+    )
+    assert resp.status_code == 200
+
+    # 验证回填：list 接口 filter by seller_id 应该能找到
+    list_resp = api_client.get(
+        "/v2/intercept/requests?seller_id=EXTRACTED_seller_abc123&limit=10",
+        headers=_auth_header(readwrite_key),
+    )
+    assert list_resp.status_code == 200
+    data = list_resp.json()
+    assert data["total"] >= 1, "URL 提取的 seller_id 应已写入 DB 并可被 filter 命中"
+    matched = next(
+        (
+            r for r in data["requests"]
+            if r["request_id"] == body["requests"][0]["requestId"]
+        ),
+        None,
+    )
+    assert matched is not None
+    assert matched["seller_id"] == "EXTRACTED_seller_abc123"
+
+
+def test_sync_falls_back_to_seller_id_query_param(api_client, readwrite_key):
+    """URL 只有 seller_id（无 oec_seller_id）时也能提取。"""
+    body = _sync_body(request_id=f"TEST_req-{uuid.uuid4().hex[:8]}")
+    body["requests"][0]["url"] = (
+        "https://example.com/api/x?seller_id=fallback_seller_xyz"
+    )
+    body["requests"][0]["sellerId"] = None
+
+    resp = api_client.post(
+        "/v2/intercept/sync", json=body, headers=_auth_header(readwrite_key)
+    )
+    assert resp.status_code == 200
+
+    list_resp = api_client.get(
+        "/v2/intercept/requests?seller_id=fallback_seller_xyz&limit=10",
+        headers=_auth_header(readwrite_key),
+    )
+    assert list_resp.status_code == 200
+    assert list_resp.json()["total"] >= 1
+
+
+def test_sync_keeps_explicit_seller_id_over_url_extraction(
+    api_client, readwrite_key
+):
+    """body 显式传了 sellerId 时优先用它，不被 URL 提取覆盖。"""
+    body = _sync_body(request_id=f"TEST_req-{uuid.uuid4().hex[:8]}")
+    body["requests"][0]["url"] = (
+        "https://example.com/api/x?oec_seller_id=URL_seller_should_lose"
+    )
+    body["requests"][0]["sellerId"] = "BODY_seller_should_win"
+
+    resp = api_client.post(
+        "/v2/intercept/sync", json=body, headers=_auth_header(readwrite_key)
+    )
+    assert resp.status_code == 200
+
+    list_resp = api_client.get(
+        "/v2/intercept/requests?seller_id=BODY_seller_should_win&limit=10",
+        headers=_auth_header(readwrite_key),
+    )
+    assert list_resp.status_code == 200
+    data = list_resp.json()
+    assert data["total"] >= 1
+    matched = next(
+        (r for r in data["requests"] if r["request_id"] == body["requests"][0]["requestId"]),
+        None,
+    )
+    assert matched["seller_id"] == "BODY_seller_should_win"
+
+
+def test_sync_url_without_seller_id_leaves_seller_id_null(api_client, readwrite_key):
+    """URL 完全没有 seller_id / oec_seller_id 时，seller_id 保持 null。"""
+    body = _sync_body(request_id=f"TEST_req-{uuid.uuid4().hex[:8]}")
+    body["requests"][0]["url"] = "https://monitor.example.com/api/health?biz_id=42"
+    body["requests"][0]["sellerId"] = None
+
+    resp = api_client.post(
+        "/v2/intercept/sync", json=body, headers=_auth_header(readwrite_key)
+    )
+    assert resp.status_code == 200
+
+    list_resp = api_client.get(
+        f"/v2/intercept/requests?request_id={body['requests'][0]['requestId']}",
+        headers=_auth_header(readwrite_key),
+    )
+    assert list_resp.status_code == 200
+    rows = list_resp.json()["requests"]
+    matched = next((r for r in rows if r["request_id"] == body["requests"][0]["requestId"]), None)
+    if matched is not None:
+        assert matched["seller_id"] is None
