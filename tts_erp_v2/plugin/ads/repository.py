@@ -760,13 +760,20 @@ def merge_today_into_daily(
             FROM plugin.ad_today
             WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
               AND day = :yesterday
-            ON CONFLICT ON CONSTRAINT uq_ad_daily DO UPDATE SET
-                mixed_real_cost = EXCLUDED.mixed_real_cost,
-                onsite_roi2_shopping_sku = EXCLUDED.onsite_roi2_shopping_sku,
-                onsite_roi2_shopping_value = EXCLUDED.onsite_roi2_shopping_value,
-                onsite_mixed_real_roi2_shopping = EXCLUDED.onsite_mixed_real_roi2_shopping,
-                metrics_extra = EXCLUDED.metrics_extra,
-                updated_at = now()
+            -- 2026-09-13 P0 fix/recover-ad-daily-purge-guard: was DO UPDATE.
+            -- That overwrote ``plugin.ad_daily`` rows with potentially
+            -- stale ``plugin.ad_today`` snapshots, silently destroying
+            -- data that the Chrome plugin had later backfilled into
+            -- ad_daily via re-dumps (e.g. a new (campaign × product × day)
+            -- combination discovered weeks after the original dump).
+            -- The merge job's job is to MOVE yesterday's ad_today rows
+            -- into ad_daily history, not to re-merge / overwrite. If
+            -- a row already exists in ad_daily, the historical record
+            -- is authoritative. Re-enable DO UPDATE only after
+            -- ``feat/cursor-hasdata-cache`` (or successor) reliably
+            -- guarantees ad_today is a strict superset of ad_daily
+            -- for the same key.
+            ON CONFLICT ON CONSTRAINT uq_ad_daily DO NOTHING
         """),
         {
             "seller_id": seller_id,

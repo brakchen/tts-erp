@@ -125,6 +125,20 @@ journalctl --user -u tts-erp -n 50                 # systemd 日志
   (2) **拒绝 prod-shape dbname**（`_is_prod_shaped_db()` 检查 `TTS_ERP_DB_URL`）—— 只有
   `ALLOW_PROD_PURGE=1` 或（`?allow_prod=true` 且 `TTS_ERP_ENVIRONMENT=dev`）才放行；prod 上误调
   会返 403，不会清库。role 要求 `admin`（2026-09-10 bfb6b71 降到 readwrite 的改动已回滚为 admin）。
+- ❌ **统一 prod-shape destructive 守卫（2026-09-13 P1 教训：6 个 destructive 入口都要用）**：
+  所有 DELETE / TRUNCATE / DROP / irreversible UPDATE 路径（HTTP 端点 / CLI 脚本 / alembic upgrade /
+  定时 job）都必须从 `tts_erp_v2.api.deps` import 以下守卫之一，先调用再发语句：
+  - HTTP 端点用 `require_destructive_guard(request, op_name=...)` — 返 403 拒绝 prod-shape dbname
+    （除非 `ALLOW_PROD_DESTRUCTIVE=1`）
+  - CLI/alembic/job 用 `require_destructive_script_guard(script_name=..., confirmation=..., dangerous=...)`
+    — exit 2 拒绝；`--dry-run` 走 `dangerous=False` 在 prod-shape 库允许预览但不执行
+  - 检测函数 `is_prod_shaped_db()` 是 single source of truth（`tts_erp` / `tts_erp_prod` / `tts_erp_prod_*` →
+    True；TTS_ERP_DB_URL 未设 → True fail-closed）
+  - **当前已装守卫的入口**：`/v2/admin/purge-plugin-data`、`/v2/intercept/configs/{id}` DELETE、
+    `/v2/intercept/configs/batch` (action=delete)、`/v2/spu_images/{id}` DELETE、
+    `scripts/oneoff_finance_reset.py`、`scripts/oneoff_regen_finance_components.py`、`alembic upgrade`
+  - **新加 destructive 路径不装守卫 = P1 review finding**；守卫未覆盖到的路径立即报，不等待事故
+  - 事故复盘：`tech-doc/incident-reports/2026-09-13-ad-daily-purge.md`
 - ❌ 不要直连 v1 `oauth_tokens` 表（库已 DROP，备份 `backups/oauth_receiver_v1_legacy_*.sql.gz`）/
   不要自己拿 Fernet key 解密 `integration.credentials` —— 凭证只能走 `proxy.token_service`（见 §2.1）
 - ❌ 不要重建 / 依赖 `public.*` v1 遗留表（v2 只读 11 schema；v1 业务表 2026-09-05 已 DROP，归档在
