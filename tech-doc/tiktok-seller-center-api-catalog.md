@@ -598,3 +598,332 @@ image_url = image_obj.get("url_list", [None])[0]  # 从 url_list 取第一张
 | `trade_order_id` ↔ `main_order_id` 映射关系 | 已确认 | `trade_order_id_mapper` 提供映射 |
 | `statement_sku_detail_id` 获取路径 | 待确认 | 需在结算页面捕获 |
 | 退货订单列表接口 | 待捕获 | 需在退货页面浏览时抓取 |
+
+---
+
+## 7. 增量观测 2026-09-13（Chrome 扩展首屏 burst 捕获）
+
+> 状态：临时快照，后续开发要参考的数据点都集中在这里。
+> 不替换原 §1~§6 内容；本节是相对 2026-09-09 catalog 的纯增量。
+> 数据采集方式：同一卖家 tab 在订单管理页首屏加载的 1 分钟内自动上传。
+
+### 7.1 数据上下文
+
+| 项 | 值 |
+| --- | --- |
+| 采样时间窗（UTC） | 2026-09-13 11:31:23 → 11:32:31（约 68 秒） |
+| 表 `plugin.intercepted_requests` 总记录 | 1962 条（**全库都在这 1 分钟内**，更早无数据） |
+| 触发会话 | `tab-1789299056241-yenoznznk`（单 tab） |
+| seller_id | `7494763368967603447`（与 09-09 catalog 一致） |
+| 区域 | shop_region=VN / x-tt-oec-region=VN / IDC=Singapore-Central |
+| 入口页面 | TikTok Seller Center → 订单管理 |
+| 间隔 9 分钟后 | 11:41 起 10 分钟窗口 0 写入——**扩展后续上传链路疑似中断**（见 §7.7） |
+
+### 7.2 新发现的 endpoint（相对 09-09 catalog）
+
+10 分钟窗口内 api16-normal-sg.tiktokshopglobalselling.com 共触发 **53 个不同 endpoint**（09-09 仅列了约 25 个），按域分组：
+
+#### 7.2.1 卖家账户 / 上下文（10 个）
+
+| 路径 | 方法 | count | 备注 |
+| --- | --- | --- | --- |
+| `/api/v3/seller/common/get` | GET | 3 | **新**：账户全量 profile，21 keys（含 `markets / global_seller / verified_documents / delegation_mode`） |
+| `/api/v1/seller/account/common/cerberus/resource/get` | GET | 3 | **新**：Cerberus 权限网关 |
+| `/api/v1/seller/onboard/v2/config/get` | GET | 3 | 已有 |
+| `/api/v1/seller/tasks/config/get` | GET | 2 | 已有 |
+| `/api/v1/seller/homepage_allowlist/get` | GET | 4 | **新**：首页白名单（决定模块可见性） |
+| `/api/v1/seller/workbench/get_all_sellers` | POST | 2 | 已有（catalog 写 GET，实测是 POST） |
+| `/api/v1/seller/feelgood/access_token/get` | POST | 2 | **新**：满意度调研 token |
+| `/api/v1/seller/global_product_permission/get` | GET | 1 | **新** |
+| `/api/v1/seller/shop_limit_status/get` | GET | 2 | 已有 |
+| `/api/v1/seller/badge/is_read/get` | GET | 1 | **新**：红点徽章已读状态 |
+
+#### 7.2.2 消息 / 通知（6 个，含一个高频轮询）
+
+| 路径 | 方法 | count | 备注 |
+| --- | --- | --- | --- |
+| `/api/v1/sellerassistant/discover_chatbotevent` | GET | **9** | **新**：chatbot 事件探测，**1 分钟 9 次 ≈ 6.7s 一次**，疑似常驻轮询源 |
+| `/api/v1/seller/message/pull_by_category_v2` | GET | 4 | 已有（catalog 写 POST，实测 GET） |
+| `/api/v1/seller/message/outage/list` | GET | 4 | 已有（catalog 写 POST，实测 GET） |
+| `/api/v1/seller/message/list` | GET | 2 | 已有（catalog 写 POST，实测 GET） |
+| `/api/v1/seller/message/get_page_channels` | GET | 2 | **新** |
+| `/api/v2/seller/message/get_msg_tabs` | GET | 2 | 已有 |
+
+#### 7.2.3 弹窗 / Island / Banner / 店铺 IM（9 个）
+
+| 路径 | 方法 | count | 备注 |
+| --- | --- | --- | --- |
+| `/api/v1/seller/popup/list` | GET | 2 | **新** |
+| `/api/v1/pop/seller_common/island/event/get` | GET | 2 | **新**：Island 浮岛组件事件 |
+| `/api/v1/pop/seller_common/entrusted_exporter/popup/get` | GET | 2 | **新**：受托出口商弹窗 |
+| `/api/v1/pop/seller_common/entity_change_todo_list/get` | GET | 2 | **新**：实体变更待办 |
+| `/api/v1/seller/banner/list` | GET | 1 | **新** |
+| `/api/v1/logistics/orderBff/tcc_banners` | GET | 1 | **新**：物流 banner |
+| `/api/v1/fulfillment/reach/banner_list` | POST | 1 | **新** |
+| `/api/v1/product/stock/banner/check` | GET | 1 | **新** |
+| `/api/v1/shop_im/shop/user/get_shop_live_metrics` | GET | 3 | **新**：店铺 IM 实时指标（`delay_seconds / shop_live_metrics`） |
+
+#### 7.2.4 订单 / 履约（14 个，含慢接口）
+
+| 路径 | 方法 | count | 备注 |
+| --- | --- | --- | --- |
+| `/api/fulfillment/order/list` | POST | 1 | 已有，**本次耗时 10.7s**（详见 §7.5） |
+| `/api/fulfillment/order/search_count` | POST | 2 | 已有，**本次耗时 9.4s**；请求 body 一次性查 5 个状态码 `["100","101","1100","1200","102"]` |
+| `/api/fulfillment/order/search_layout/get` | POST | 1 | 已有 |
+| `/api/fulfillment/order/export_record/get` | POST | 1 | 已有 |
+| `/api/fulfillment/dashboard/get` | POST | 1 | 已有 |
+| `/api/fulfillment/rule_express/list` | POST | 1 | **新**：规则表达式（`ruleExpressScene: [7,6,8]` = 待处理/进行中/已完成） |
+| `/api/fulfillment/next_day_delivery/score/get` | POST | 1 | **新**：次日达评分 |
+| `/api/v1/fulfillment/shipping/options` | POST | 1 | **新**：物流选项（17 keys：SC/SOF/Invoice/Manifest/drop_off/logistics_services...） |
+| `/api/v1/fulfillment/strategy/pickup_type/get` | POST | 1 | **新**：取件策略 |
+| `/api/fulfillment/seller_create_label_setting/get` | GET | 1 | **新**：面单创建设置 |
+| `/api/fulfillment/seller_print_setting/get` | GET | 1 | **新**：打印设置 |
+| `/api/fulfillment/print/seller_config/get` | POST | 1 | 已有 |
+| `/api/v1/trade/orders/warehouse/list` | GET | 1 | 已有，**但与下条重复**（见 §7.7） |
+| `/api/v1/product/list/seller/warehouses` | GET | 1 | **新**：与上一条同一数据，product 域重复拉一次 |
+
+#### 7.2.5 商品管理 / SPO（8 个）
+
+| 路径 | 方法 | count | 备注 |
+| --- | --- | --- | --- |
+| `/api/v1/product/local/products/list` | GET | 4 | 已有 |
+| `/api/v1/product/local/same_products/list` | POST | 2 | 已有 |
+| `/api/v1/product/tab/count/get` | GET | 2 | 已有（catalog 写 `products/tab_count`，实测是 `product/tab/count/get`） |
+| `/api/v1/product/actions/list` | POST | 2 | **新**：商品批量操作列表（5 项 action） |
+| `/api/v1/product/product_creation/preload` | GET | 2 | **新**：**发布预加载 99 keys**（所有发布规则/灰度/SKU 限制/AIGC 开关） |
+| `/api/v1/product/regions/mget` | GET | 1 | **新**：可售区域 |
+| `/api/v1/product/commission/config/get` | POST | 1 | **新**：平台佣金配置 |
+| `/api/v1/product/oc/seller_product_opportunity/product/performance/Card` | POST | 1 | **新**：SPO 表现卡片（12 指标：pv/ctr/sale_rate/gmv/in_checking_spo_num...） |
+
+#### 7.2.6 增长 / AIGC 视频工具（5 个）
+
+| 路径 | 方法 | count | 备注 |
+| --- | --- | --- | --- |
+| `/api/v1/sea_product/growth/product_list` | POST | 2 | **新**：增长候选商品（`stage_id / page_num / filter_criteria`） |
+| `/api/v1/sea_product/growth/batch/recommendation/tasks` | GET | 2 | **新** |
+| `/api/v1/sea_product/growth/aigc_video` | POST | 2 | **新**：生成 AIGC 视频（body 为 `{}`） |
+| `/api/v1/sea_product/growth/aigc_video/info` | GET | 2 | 已有 |
+| `/api/v1/sea_product/growth/aigc_video/batch_tasks` | GET | 2 | **新** |
+
+### 7.3 ⚠️ request_headers 捕获严重不全（需修复）
+
+虽然 config #288 设置 `capture_headers=true`，但实际只截到 1~2 个 key：
+
+```jsonc
+// GET /api/v1/seller/message/list
+{ "x-tt-oec-region": "VN" }
+
+// POST /api/fulfillment/order/list
+{ "content-type": "application/json", "x-tt-oec-region": "VN" }
+```
+
+**缺**：cookie / authorization / user-agent / referer / x-tt-token / x-shop-id 等。
+
+| 字段填充率（106 条 host 记录） | 值 |
+| --- | --- |
+| request_headers | 106/106（都有，但**只 1~2 key**） |
+| request_body | 28/106（≈ POST 数，少 3 条 POST 没 body） |
+| response_headers | 103/106 |
+| response_body | 102/106 |
+| `seller_id` / `advertiser_id` 列 | **全 null** ← headers 漏抓的下游症状 |
+
+**怀疑**：扩展 `webRequest.onBeforeSendHeaders` 在 Manifest V3 下，Cookie / Authorization 这类敏感头默认**禁止读取**（需要 `extraHeaders` + `host_permissions` 配合，或迁移到 `chrome.webRequest.onBeforeRequest` 不带 headers，或用 declarativeNetRequest）。
+
+**修复方向**（待评估）：
+1. 检查 `manifest.json` 是否声明 `"webRequestExtraHeaders"` 和 `"host_permissions": ["<all_urls>"]`
+2. 或扩展侧改用 declarativeNetRequest + 自建 header 注入
+3. 或后端改用 cookie 中的 `sid_guard` / `tt_token` 推断 seller_id（v3 抓不到的话可能需要 fallback 到 IP / shop_id path）
+
+### 7.4 订单 19 个 module 完整结构（实测 n=50 orders）
+
+`POST /api/fulfillment/order/list` 响应中每个 `main_orders[i]` 包含 19 个 module：
+
+| # | module | 类型 | 关键字段 | 用途 |
+| -: | --- | --- | --- | --- |
+| 1 | `main_order_id` | string | `"586043638880437647"` | 主单 ID |
+| 2 | `sku_module` | array | `sku_id / sku_name / sku_unit_price / product_image.url_list[0]` | SKU 行 |
+| 3 | `fulfill_line_module` | array | 同 `sku_module` 字段 | 履约行（结构与 sku_module 相同，可能是冗余） |
+| 4 | `price_module` | object | `sub_total / grand_total`（VND，价格在 `price_val` 字符串） | 价格 |
+| 5 | `order_status_module` | array | `main_order_status / sku_display_status`（整数状态码） | 订单状态 |
+| 6 | `fulfillment_module` | array | `fulfillment_status_v2=19000 / rts_time / print_time / ship_exception_code` | 履约 |
+| 7 | `delivery_module` | array | 详见下文 §7.4.1 | 物流 + 仓库 |
+| 8 | `trade_order_module` | object | `pay_method / sale_region / create_time / shipping_fee` | 交易 |
+| 9 | `trade_order_id_mapper` | object | `main_order_id ↔ order_line_ids[]` | 映射 |
+| 10 | `fulfill_unit_id_mapper` | array | `package_id / fulfill_unit_id` | 履约单元 |
+| 11 | `buyer_info_module` | object | `buyer_nickname / cpf / avatar / delivery_preference` | 买家 |
+| 12 | `order_label_module` | array | `isPreOrder` | 标签 |
+| 13 | `note_module` | object | `has_buyer_note / has_seller_note` | 备注 |
+| 14 | `action_module` | object | `action_list[]`（整数动作码）+ `buyer_im_action_link` | 操作 |
+| 15 | `logistics_info_module` | array | `fulfill_unit_id + logistics_detail_item.{timestamp,display_msg}` | 物流轨迹文案 |
+| 16 | `print_label_module` | array | `label_status=50 / picking_list_status / packing_list_status` | 面单 |
+| 17 | `reminder_module` | array | `order_line_id`（仅占位） | 提醒 |
+| 18 | `reverse_module` | array | `reverse_type / reverse_status / refund_time / cancel_desc` | 退款（9/50 有） |
+| 19 | （无独立 `settlement_module`） | — | — | **结算字段见 §7.6** |
+
+#### 7.4.1 `delivery_module[]` 完整结构（**取物流信息的主入口**）
+
+```jsonc
+{
+  "pkg_attr": {
+    "weight":   { "unit": 1, "weight": "260" },        // 克
+    "dimension":{ "unit": 1, "width": "11", "height": "5", "length": "11" }  // cm
+  },
+  "receipt_id":       "1210841489937433999",
+  "fulfill_unit_id":  "1210841489937433999",
+  "tracking_no":      "WSWH3398821253",                 // ✅ 当前快递单号
+  "last_tracking_no": "TTCB7040449215",                 // 上一个单号（换单时用）
+  "pickup_type":      2,
+  "buyer_region":     "VN",                              // 收货地
+  "warehouse_id":     "7661207737776293652",
+  "warehouse_name":   "优航义乌仓库",
+  "warehouse_region": "CN",                              // 发货地
+  "warehouse_sub_type": 3,
+  "payment_total": {
+    "symbol": "₫", "currency": "VND",
+    "price_val": "577523", "format_price": "577.523₫"
+  },
+  "shipping_fee": {},                                    // 空对象
+  "logistics_service_info": {
+    "logistics_service_id":   "7156147842033714945",
+    "logistics_service_name": "全球经济运输服务",          // 服务名（中文）
+    "logistics_service_type": 0,
+    "logistics_service_level": "经济运输",
+    "logistics_service_name_key": "ecom_logistics_type_cb_economy",
+    "logistics_service_type_key": "logistic_service_type_shipping_via_platform",
+    "logistics_service_delivery_option": 3
+  },
+  "shipment_provider_info": {
+    "id":   "7439297584469903122",
+    "name": "Wise Express - DCS",                         // ✅ 承运商
+    "icon_url": "https://p16-oec-sg.ibyteimg.com/.../icon.jpeg"
+  }
+}
+```
+
+**3 个样本**：全部 Wise Express - DCS，从义乌发越南。
+
+#### 7.4.2 `logistics_info_module[]`（**轨迹文案**）
+
+```jsonc
+[
+  {
+    "fulfill_unit_id": "1210841489937433999",
+    "logistics_detail_item": {
+      "timestamp": 1789293724140,
+      "display_msg": "你的包裹已取消配送。"
+    }
+  }
+]
+```
+
+3 个样本的 display_msg 分布：
+- "你的包裹已取消配送。"（×2）
+- "你的订单已由商家打包，正在等待承运商上门取件并运送至配送中心。"（×1）
+
+#### 7.4.3 `action_module.action_list[]`（动作码）
+
+实测 3 个主单的 action_list：
+
+| 样本 | action_list | 含义推测 |
+| --- | --- | --- |
+| order[0] | `[1000, 300, 900]` | 取消 / 标记 / 重新发货？需对照 |
+| order[13] | `[100, 900]` | 已付款 / 重新发货？ |
+| order[14] | `[100, 900]` | 同上 |
+
+> ⚠ 待对照 seller center 操作菜单确认。
+
+#### 7.4.4 `reverse_module[]`（9/50 单有退款）
+
+```jsonc
+{
+  "cancel_desc":        "系统自动批准取消申请",
+  "cancelled_time":     "1789293723",          // 秒级字符串
+  "refund_time":        "1789293723",          // 退款时间（**关键字段**）
+  "reverse_from":       1,
+  "reverse_type":       4,                      // 4=买家取消？
+  "reverse_status":     100,
+  "reverse_order_id":   "4042312456781923727",
+  "reverse_reason":     "不想要了",
+  "reverse_reminder":   { "items": [...] },     // 文案提醒
+  "order_line_ids":     ["586043638880503183"]
+}
+```
+
+### 7.5 关键接口实测性能
+
+按 host `api16-normal-sg.tiktokshopglobalselling.com` 内 106 条统计：
+
+| 路径 | 耗时 | 备注 |
+| --- | --- | --- |
+| `/api/fulfillment/order/list` | **10690ms** | 50 单/页，total=959 — 后端聚合慢 |
+| `/api/fulfillment/order/search_count` | **9415ms**（×2） | 一次性查 5 个状态码，可拆并行 |
+| `/api/v1/product/local/products/list` | 4225ms median / 7216ms max | 商品列表聚合慢 |
+| `/api/v1/seller/message/outage/list` | 5267ms median | 公告列表 |
+| `/api/v1/sellerassistant/discover_chatbotevent` | 613ms median / **6277ms max** | 9 次调用，长尾 6.3s |
+| `/api/v1/product/actions/list` | 7235ms median | 商品操作聚合 |
+| `/api/v1/seller/popup/list` | 6164ms median | 弹窗聚合 |
+| `/api/v1/product/product_creation/preload` | 1716ms median | 99 keys 一次返回，体积大可接受 |
+| `/api/v3/seller/common/get` | 1688ms median / 4771ms max | 账户全量 |
+
+**整体**：host p95 ≈ 6.3s，p50 ≈ 1.5s。订单页主查询 10s 级是 TikTok 后端慢，不是我们问题。
+
+### 7.6 结算 / 未结算数据缺失
+
+**当前 api16 域未发现任何 settlement/finance endpoint**。对 1962 条全库 + 50 条订单 detail 用 16 个关键词（`settlement / settle / finance / billing / fund / payout / withdraw / revenue / income / balance / ledger / cash / escrow / payable / receivable` + `账期/结算/账单/资金/提现/应收/应付`）扫描：
+
+| 扫描维度 | 结果 |
+| --- | --- |
+| endpoint_path 含关键词 | **0** |
+| response_body 顶层 key 含关键词 | **0**（最相关的是 `reverse_module[].refund_time`，是退款不是结算） |
+| order module 名含关键词 | **0**（无 `settlement_module`） |
+| 中文 string 含"结算" | 1 条（订单搜索筛选器文案："赔付结算中"） |
+| 中文 string 含"提现" | 3 条（消息中心消息分类名） |
+
+**结论**：卖家今天只打开了订单管理页，**未访问 Finance / Earnings 页**——结算数据在独立域或独立 tab，本次 burst 没覆盖。
+
+**可能位置**（待验证）：
+- `seller.tiktokshopglobalselling.com`（config #287 标 blacklist，但实际可能是 Finance 域）
+- `fund.tiktokshopglobalselling.com` / `earnings.tiktokshopglobalselling.com`（推测，未观测）
+- `/api/v1/finance/*` 或 `/api/v1/settlement/*`（路径推测，未观测）
+
+### 7.7 高频轮询与重复调用
+
+| 现象 | 数据 | 说明 |
+| --- | --- | --- |
+| chatbot 事件高频轮询 | `/api/v1/sellerassistant/discover_chatbotevent` ×9/68s ≈ **6.7s 一次** | 后台 heartbeat；卖家中心常驻源 |
+| 仓库列表跨域重复 | `trade/orders/warehouse/list` + `product/list/seller/warehouses` 同一数据各拉一次 | 前端未去重 |
+| 域名解析 (catalog 已记) | `/api/v1/common/region_domain` 高频 | catalog 已记录 |
+| 埋点上报 | `/api/v1/bs/rt` | catalog 已记录 |
+
+**扩展上传链路疑似中断**：
+
+- 11:32:31 最后一条 `captured_at`
+- 11:41:00 之后 10 分钟窗口 0 写入
+- 11:50:32 仍 0 写入
+- 整个 DB 共 1962 条，**全部位于 11:31:23~11:32:31 这 68 秒**
+
+排查方向：
+1. 扩展 `chrome.alarms` / 后台 service worker 是否被休眠
+2. `sync` 端点是否 4xx/5xx（可查 `plugin.intercepted_requests.error_type`）
+3. 11:32 之后用户是否真离开了 tab
+
+### 7.8 更新 §6 待确认事项
+
+| 项目 | 状态（09-09） | 状态（09-13） | 备注 |
+| --- | --- | --- | --- |
+| `main_order_status` 状态码映射 | 待确认 | **部分确认** | 104=已取消，101=已发货，见样本 |
+| `sku_display_status` 状态码映射 | 待确认 | 待确认 | 样本 140=已取消 |
+| `trade_order_module.fulfillment_type` 枚举 | 待确认 | 待确认 | 样本 0 |
+| `trade_order_id` ↔ `main_order_id` | 已确认 | 已确认 | — |
+| `statement_sku_detail_id` 获取路径 | 待确认 | **仍未捕获** | §7.6 解释：未访问 Finance 页 |
+| 退货订单列表接口 | 待捕获 | 待捕获 | 仍是 `list_seller_announcement`（公告），不是列表 |
+| **新增**：action_list 整数动作码 | — | **新增待确认** | §7.4.3 |
+| **新增**：request_headers 漏抓 | — | **新增阻塞** | §7.3，扩展侧 bug |
+| **新增**：`discover_chatbotevent` 是否应纳入轮询预算 | — | **新增观察项** | §7.7 |
+| **新增**：Finance / Earnings 域 host 与 endpoint | — | **新增待捕获** | §7.6 |
+
+### 7.9 临时快照使用提示
+
+> 本节是 09-13 当时观察到的真实数据快照，不是规范。
+> 如果后续 burst 又抓到新数据，请**新增 §8 增量（YYYY-MM-DD）**，不要直接覆盖本节。
+> §1~§6 的"已有 endpoint"基线仍然有效，新发现的 endpoint 列在 §7.2。
