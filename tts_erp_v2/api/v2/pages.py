@@ -174,12 +174,15 @@ _SHOPS_PAGE_HTML = """<!doctype html>
       .page-main { padding: 16px 16px 48px; }
       .op-section { padding: 16px; }
     }
+    .op-home-link { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-decoration: none; padding: 4px 8px; border: 1px solid var(--rule); transition: border-color 120ms ease; display: inline-block; }
+    .op-home-link:hover { border-color: var(--accent); color: var(--accent); }
   </style>
 </head>
 <body>
   <header class="op-header">
     <div class="op-header-row">
       <div class="op-header-titles">
+        <a href="../../v2/pages/dashboard" class="op-home-link">← 首页</a>
         <span class="op-eyebrow">TikTok Shop · Operations</span>
         <h1 class="op-title">店铺注册</h1>
       </div>
@@ -840,12 +843,15 @@ _PAGE_HTML = """<!doctype html>
       }
       .op-td-action { text-align: left; }
     }
+    .op-home-link { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-decoration: none; padding: 4px 8px; border: 1px solid var(--rule); transition: border-color 120ms ease; display: inline-block; }
+    .op-home-link:hover { border-color: var(--accent); color: var(--accent); }
   </style>
 </head>
 <body>
   <header class="op-header">
     <div class="op-header-row">
       <div class="op-header-titles">
+        <a href="../../v2/pages/dashboard" class="op-home-link">← 首页</a>
         <span class="op-eyebrow">TikTok Shop · Operations</span>
         <h1 class="op-title">采购工作台</h1>
       </div>
@@ -974,10 +980,13 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       -moz-osx-font-smoothing: grayscale;
       text-rendering: optimizeLegibility;
     }
+    .op-home-link { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-decoration: none; padding: 4px 8px; border: 1px solid var(--rule); transition: border-color 120ms ease; display: inline-block; }
+    .op-home-link:hover { border-color: var(--accent); color: var(--accent); }
   </style>
 <body>
   <header class="op-header">
     <div class="op-main px-2 px-md-4 py-3 d-flex flex-wrap justify-content-between align-items-end gap-2 gap-md-3">
+      <a href="../../v2/pages/dashboard" class="op-home-link">← 首页</a>
       <div>
         <div class="op-eyebrow mb-1">TikTok Shop · Analytics</div>
         <h1 class="op-title mb-0">SPU 实际 ROI</h1>
@@ -1697,12 +1706,15 @@ _INTERCEPT_CONFIGS_PAGE_HTML = """<!doctype html>
     .form-error { color: var(--danger); font-size: 13px; margin-bottom: 12px; }
     .modal-footer { display: flex; justify-content: flex-end; gap: 12px; padding: 16px 20px; border-top: 1px solid var(--rule); }
     @media (max-width: 720px) { .toolbar { flex-direction: column; align-items: stretch; } .toolbar-field { flex-direction: column; align-items: stretch; } .toolbar-field input, .toolbar-field select { min-width: auto; } }
+    .op-home-link { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-decoration: none; padding: 4px 8px; border: 1px solid var(--rule); transition: border-color 120ms ease; display: inline-block; }
+    .op-home-link:hover { border-color: var(--accent); color: var(--accent); }
   </style>
 </head>
 <body>
   <header class="op-header">
     <div class="op-header-row">
       <div class="op-header-titles">
+        <a href="../../v2/pages/dashboard" class="op-home-link">← 首页</a>
         <span class="op-eyebrow">TikTok Shop · Interceptor</span>
         <h1 class="op-title">拦截配置</h1>
       </div>
@@ -1927,12 +1939,15 @@ _INTERCEPT_REQUESTS_PAGE_HTML = """<!doctype html>
     .detail-pre { background: var(--paper-deep); border: 1px solid var(--rule-soft); padding: 12px; font-family: var(--mono); font-size: 12px; overflow-x: auto; margin: 0; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto; }
     .text-danger { color: var(--danger); }
     @media (max-width: 720px) { .toolbar { flex-direction: column; align-items: stretch; } .toolbar-field { flex-direction: column; align-items: stretch; } .toolbar-field input, .toolbar-field select { min-width: auto; } }
+    .op-home-link { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-decoration: none; padding: 4px 8px; border: 1px solid var(--rule); transition: border-color 120ms ease; display: inline-block; }
+    .op-home-link:hover { border-color: var(--accent); color: var(--accent); }
   </style>
 </head>
 <body>
   <header class="op-header">
     <div class="op-header-row">
       <div class="op-header-titles">
+        <a href="../../v2/pages/dashboard" class="op-home-link">← 首页</a>
         <span class="op-eyebrow">TikTok Shop · Interceptor</span>
         <h1 class="op-title">拦截记录</h1>
       </div>
@@ -2104,12 +2119,15 @@ _INTERCEPT_STATS_PAGE_HTML = """<!doctype html>
     .daily-date { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-top: 2px; }
     .loading { text-align: center; padding: 48px; color: var(--muted); font-family: var(--mono); font-size: 12px; }
     .error-msg { text-align: center; padding: 24px; color: var(--danger); font-size: 13px; display: none; }
+    .op-home-link { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-decoration: none; padding: 4px 8px; border: 1px solid var(--rule); transition: border-color 120ms ease; display: inline-block; }
+    .op-home-link:hover { border-color: var(--accent); color: var(--accent); }
   </style>
 </head>
 <body>
   <header class="op-header">
     <div class="op-header-row">
       <div class="op-header-titles">
+        <a href="../../v2/pages/dashboard" class="op-home-link">← 首页</a>
         <span class="op-eyebrow">TikTok Shop · Interceptor</span>
         <h1 class="op-title">拦截统计</h1>
       </div>

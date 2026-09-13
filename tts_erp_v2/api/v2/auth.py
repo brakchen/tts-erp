@@ -59,150 +59,150 @@ login_logger = logging.getLogger("tts_erp_v2.auth.login")
 # handler runs.
 login_logger.setLevel(logging.INFO)
 if not any(
-    isinstance(h, logging.StreamHandler) and h.stream is sys.stdout
-    for h in login_logger.handlers
+  isinstance(h, logging.StreamHandler) and h.stream is sys.stdout
+  for h in login_logger.handlers
 ):
-    _stdout = logging.StreamHandler(sys.stdout)
-    _stdout.setFormatter(logging.Formatter("%(message)s"))
-    login_logger.addHandler(_stdout)
-    login_logger.propagate = False
+  _stdout = logging.StreamHandler(sys.stdout)
+  _stdout.setFormatter(logging.Formatter("%(message)s"))
+  login_logger.addHandler(_stdout)
+  login_logger.propagate = False
 
 DEFAULT_NEXT = "/v2/pages/dashboard"
 _LEVEL_TO_NAME = {v: k for k, v in ROLE_LEVEL.items()}
 
 
 class LoginBody(BaseModel):
-    key: str = Field(min_length=1, max_length=512)
-    next: str | None = None
+  key: str = Field(min_length=1, max_length=512)
+  next: str | None = None
 
 
 def _valid_next(raw: str | None) -> str:
-    """Open-redirect guard: only same-origin absolute paths are allowed."""
-    if not raw:
-        return DEFAULT_NEXT
-    if raw.startswith("/") and not raw.startswith("//") and "\\" not in raw:
-        return raw
+  """Open-redirect guard: only same-origin absolute paths are allowed."""
+  if not raw:
     return DEFAULT_NEXT
+  if raw.startswith("/") and not raw.startswith("//") and "\\" not in raw:
+    return raw
+  return DEFAULT_NEXT
 
 
 def _client_bucket(request: Request) -> str:
-    """Throttle bucket for one login client.
+  """Throttle bucket for one login client.
 
-    Uses the direct peer IP (the NAT proxy in production). X-Forwarded-For
-    is deliberately NOT trusted — it is client-spoofable, while a shared
-    proxy bucket is acceptable for a single-operator tool.
-    """
-    return request.client.host if request.client else "?"
+  Uses the direct peer IP (the NAT proxy in production). X-Forwarded-For
+  is deliberately NOT trusted — it is client-spoofable, while a shared
+  proxy bucket is acceptable for a single-operator tool.
+  """
+  return request.client.host if request.client else "?"
 
 
 @router.get("/login", response_class=HTMLResponse)
 def login_page(request: Request) -> HTMLResponse:
-    """Render the login form (public). Injects the validated ``next``
-    (prepended with the NGINX prefix so the post-login redirect lands
-    on a path NGINX actually serves)."""
-    raw_next = _valid_next(request.query_params.get("next"))
-    prefix = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "")
-    next_url = f"{prefix}{raw_next}" if prefix else raw_next
-    return HTMLResponse(_LOGIN_HTML.replace("__NEXT__", _html.escape(next_url)))
+  """Render the login form (public). Injects the validated ``next``
+  (prepended with the NGINX prefix so the post-login redirect lands
+  on a path NGINX actually serves)."""
+  raw_next = _valid_next(request.query_params.get("next"))
+  prefix = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "")
+  next_url = f"{prefix}{raw_next}" if prefix else raw_next
+  return HTMLResponse(_LOGIN_HTML.replace("__NEXT__", _html.escape(next_url)))
 
 
 @router.post("/login")
 def login(body: LoginBody, request: Request) -> Response:
-    """Validate an API key and mint a session cookie."""
-    key_prefix = _key_prefix(body.key)
-    retry_after = session_auth.login_throttle_hit(_client_bucket(request))
-    if retry_after is not None:
-        login_logger.info(
-            "result=throttled key=%s retry_after=%d",
-            key_prefix,
-            retry_after,
-        )
-        return JSONResponse(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            content={
-                "detail": "too many login attempts",
-                "retry_after_s": retry_after,
-            },
-        )
-    if not session_auth.session_secret_configured():
-        login_logger.warning("result=secret_not_configured")
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={"detail": "TTS_ERP_SESSION_SECRET not configured"},
-        )
-    try:
-        result = lookup_role(body.key)
-    except Exception as exc:  # noqa: BLE001 — auth store unreachable → fail closed
-        # Auth store unreachable — mirror the middleware's fail-closed 503.
-        login_logger.warning(
-            "result=store_unavailable key=%s error=%s",
-            key_prefix,
-            type(exc).__name__,
-        )
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={"detail": f"auth store unavailable: {type(exc).__name__}"},
-        )
-    if result is None:
-        # The most common failure mode in production: user pastes a
-        # stale or revoked key. The access log has the real client IP
-        # + status; this event is the only place the ATTEMPTED key
-        # shows up. Pair these two for a complete picture.
-        login_logger.info("result=invalid key=%s", key_prefix)
-        return JSONResponse(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            content={"detail": "invalid, disabled or expired api key"},
-        )
-    level, _scopes = result
-    role = _LEVEL_TO_NAME.get(level or 0, "readonly")
-    cookie = session_auth.mint_session_cookie(body.key, role)
-    resp = JSONResponse(content={"ok": True, "role": role})
-    # Scope the cookie to the NGINX prefix (e.g. /tts) so it is never
-    # sent to other paths on the same domain (e.g. /spu-roi).
-    cookie_path = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "/") or "/"
-    resp.set_cookie(
-        key=session_auth.SESSION_COOKIE_NAME,
-        value=cookie,
-        max_age=session_auth.session_ttl_seconds(),
-        httponly=True,
-        secure=session_auth.session_secure_flag(),
-        samesite="lax",
-        path=cookie_path,
+  """Validate an API key and mint a session cookie."""
+  key_prefix = _key_prefix(body.key)
+  retry_after = session_auth.login_throttle_hit(_client_bucket(request))
+  if retry_after is not None:
+    login_logger.info(
+      "result=throttled key=%s retry_after=%d",
+      key_prefix,
+      retry_after,
     )
-    return resp
+    return JSONResponse(
+      status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+      content={
+        "detail": "too many login attempts",
+        "retry_after_s": retry_after,
+      },
+    )
+  if not session_auth.session_secret_configured():
+    login_logger.warning("result=secret_not_configured")
+    return JSONResponse(
+      status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+      content={"detail": "TTS_ERP_SESSION_SECRET not configured"},
+    )
+  try:
+    result = lookup_role(body.key)
+  except Exception as exc:  # noqa: BLE001 — auth store unreachable → fail closed
+    # Auth store unreachable — mirror the middleware's fail-closed 503.
+    login_logger.warning(
+      "result=store_unavailable key=%s error=%s",
+      key_prefix,
+      type(exc).__name__,
+    )
+    return JSONResponse(
+      status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+      content={"detail": f"auth store unavailable: {type(exc).__name__}"},
+    )
+  if result is None:
+    # The most common failure mode in production: user pastes a
+    # stale or revoked key. The access log has the real client IP
+    # + status; this event is the only place the ATTEMPTED key
+    # shows up. Pair these two for a complete picture.
+    login_logger.info("result=invalid key=%s", key_prefix)
+    return JSONResponse(
+      status_code=status.HTTP_401_UNAUTHORIZED,
+      content={"detail": "invalid, disabled or expired api key"},
+    )
+  level, _scopes = result
+  role = _LEVEL_TO_NAME.get(level or 0, "readonly")
+  cookie = session_auth.mint_session_cookie(body.key, role)
+  resp = JSONResponse(content={"ok": True, "role": role})
+  # Scope the cookie to the NGINX prefix (e.g. /tts) so it is never
+  # sent to other paths on the same domain (e.g. /spu-roi).
+  cookie_path = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "/") or "/"
+  resp.set_cookie(
+    key=session_auth.SESSION_COOKIE_NAME,
+    value=cookie,
+    max_age=session_auth.session_ttl_seconds(),
+    httponly=True,
+    secure=session_auth.session_secure_flag(),
+    samesite="lax",
+    path=cookie_path,
+  )
+  return resp
 
 
 @router.post("/logout")
 def logout() -> Response:
-    """Clear the session cookie (idempotent, public)."""
-    resp = Response(status_code=status.HTTP_204_NO_CONTENT)
-    resp.delete_cookie(
-        session_auth.SESSION_COOKIE_NAME,
-        path=os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "/") or "/",
-    )
-    return resp
+  """Clear the session cookie (idempotent, public)."""
+  resp = Response(status_code=status.HTTP_204_NO_CONTENT)
+  resp.delete_cookie(
+    session_auth.SESSION_COOKIE_NAME,
+    path=os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "/") or "/",
+  )
+  return resp
 
 
 @router.get("/me")
 def me(request: Request) -> dict:
-    """Return session state for page JS (public; self-validates the cookie).
+  """Return session state for page JS (public; self-validates the cookie).
 
-    The DB is re-checked so a revoked key reports ``authenticated: false``
-    (within the auth cache TTL, same as every other request).
-    """
-    raw = request.cookies.get(session_auth.SESSION_COOKIE_NAME)
-    if not raw:
-        return {"authenticated": False}
-    info = session_auth.verify_session_cookie(raw)
-    if info is None:
-        return {"authenticated": False}
-    try:
-        result = lookup_role_by_hash(info["kh"])
-    except Exception:  # noqa: BLE001 — auth store unreachable; report unauthenticated
-        result = None
-    if result is None:
-        return {"authenticated": False}
-    return {"authenticated": True, "role": info["role"]}
+  The DB is re-checked so a revoked key reports ``authenticated: false``
+  (within the auth cache TTL, same as every other request).
+  """
+  raw = request.cookies.get(session_auth.SESSION_COOKIE_NAME)
+  if not raw:
+    return {"authenticated": False}
+  info = session_auth.verify_session_cookie(raw)
+  if info is None:
+    return {"authenticated": False}
+  try:
+    result = lookup_role_by_hash(info["kh"])
+  except Exception:  # noqa: BLE001 — auth store unreachable; report unauthenticated
+    result = None
+  if result is None:
+    return {"authenticated": False}
+  return {"authenticated": True, "role": info["role"]}
 
 
 _LOGIN_HTML = """<!doctype html>
@@ -389,6 +389,21 @@ _LOGIN_HTML = """<!doctype html>
     // API base: works on :9877 (no prefix) and behind the NAT /tts prefix.
     const base = location.pathname.slice(0, location.pathname.indexOf("/v2/auth/login")) || "";
     const API = base + "/v2";
+
+    // If already logged in, redirect to dashboard (or the ?next target).
+    (async () => {
+      try {
+        const r = await fetch(API + "/auth/me", { headers: { "X-Requested-With": "tts-erp" } });
+        if (r.ok) {
+          const data = await r.json();
+          if (data.authenticated) {
+            const next = document.getElementById("next").value || (base + "/v2/pages/dashboard");
+            location.replace(next);
+            return;
+          }
+        }
+      } catch (_) { /* network error — stay on login page */ }
+    })();
 
     document.getElementById("login-form").addEventListener("submit", async (e) => {
       e.preventDefault();
