@@ -66,7 +66,6 @@
 | lane_id | 主题 | owner(session) | .worktrees/<slug> / branch | 文件列表 | draft | <UTC> |
 -->
 
-
 ## 规则速记
 
 - 开新工作（尤其会动 master WT 未提交区 / 共享点文件）→ **先加一行再动工**。
