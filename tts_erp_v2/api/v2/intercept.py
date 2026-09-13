@@ -54,6 +54,11 @@ class InterceptConfigIn(BaseModel):
 
     domain: str = Field(min_length=1, max_length=255)
     endpoint: str = Field(min_length=1, max_length=512)
+    mode: str = Field(
+        default="whitelist",
+        pattern=r"^(whitelist|blacklist)$",
+        description="whitelist = 记录匹配请求; blacklist = 完全跳过",
+    )
     capture_headers: bool = True
     capture_body: bool = True
     description: str | None = None
@@ -330,14 +335,15 @@ def create_config(
     result = db.execute(
         text(
             """
-            INSERT INTO plugin.intercept_configs (domain, endpoint, capture_headers, capture_body, description, tags, enabled)
-            VALUES (:domain, :endpoint, :capture_headers, :capture_body, :description, :tags, :enabled)
+            INSERT INTO plugin.intercept_configs (domain, endpoint, mode, capture_headers, capture_body, description, tags, enabled)
+            VALUES (:domain, :endpoint, :mode, :capture_headers, :capture_body, :description, :tags, :enabled)
             RETURNING *
             """
         ),
         {
             "domain": body.domain,
             "endpoint": body.endpoint,
+            "mode": body.mode,
             "capture_headers": body.capture_headers,
             "capture_body": body.capture_body,
             "description": body.description,
@@ -392,8 +398,9 @@ def update_config(
         text(
             """
             UPDATE plugin.intercept_configs
-            SET domain = :domain, endpoint = :endpoint, capture_headers = :capture_headers,
-                capture_body = :capture_body, description = :description, tags = :tags, enabled = :enabled
+            SET domain = :domain, endpoint = :endpoint, mode = :mode,
+                capture_headers = :capture_headers, capture_body = :capture_body,
+                description = :description, tags = :tags, enabled = :enabled
             WHERE id = :id
             RETURNING *
             """
@@ -402,6 +409,7 @@ def update_config(
             "id": config_id,
             "domain": body.domain,
             "endpoint": body.endpoint,
+            "mode": body.mode,
             "capture_headers": body.capture_headers,
             "capture_body": body.capture_body,
             "description": body.description,
@@ -536,13 +544,14 @@ def import_configs(
             db.execute(
                 text(
                     """
-                    INSERT INTO plugin.intercept_configs (domain, endpoint, capture_headers, capture_body, description, tags, enabled)
-                    VALUES (:domain, :endpoint, :capture_headers, :capture_body, :description, :tags, :enabled)
+                    INSERT INTO plugin.intercept_configs (domain, endpoint, mode, capture_headers, capture_body, description, tags, enabled)
+                    VALUES (:domain, :endpoint, :mode, :capture_headers, :capture_body, :description, :tags, :enabled)
                     """
                 ),
                 {
                     "domain": config_in.domain,
                     "endpoint": config_in.endpoint,
+                    "mode": config_in.mode,
                     "capture_headers": config_in.capture_headers,
                     "capture_body": config_in.capture_body,
                     "description": config_in.description,
