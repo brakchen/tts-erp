@@ -886,6 +886,32 @@ image_url = image_obj.get("url_list", [None])[0]  # 从 url_list 取第一张
 - `fund.tiktokshopglobalselling.com` / `earnings.tiktokshopglobalselling.com`（推测，未观测）
 - `/api/v1/finance/*` 或 `/api/v1/settlement/*`（路径推测，未观测）
 
+### 7.6.1 12:55 新 burst 修正（lane fix/seller-finance-path-correction）
+
+12:55 seller 实际访问了 Finance 页，扩展重新上传了 458 条新数据，揭示真实路径模式（**原 §7.6 推测错了一半**）：
+
+| host | 真实路径 | 触发 config |
+| --- | --- | --- |
+| `api16-normal-sg.tiktokshopglobalselling.com` | `/api/v1/finance/acquiring/query/account`（×3） | **#288 /\* 通配** ✓ |
+| `seller.tiktokshopglobalselling.com` | `/finance/analysis`（×2）、`/finance/bills`（×1）、`/finance/bills/1`（×1，账单详情）、`/finance/bill-payment`（×2） | ❌ **之前无 config 匹配** |
+
+**关键发现**：
+- **seller 中心 web app 用 `/finance/*` 短前缀**，**不带 `/api/v1` 前缀**（与之前猜的 `/api/v1/finance/*` 不一样）
+- api16 才是 REST API server，用 `/api/v1/*`
+- seller 是 web app，路径风格更 web-style（`/finance`、`/passport`、`/ttwid`）
+
+**v1 config 错误原因**：第一波 burst 卖家只访问订单管理页，没看到任何 finance 路径；lane `fix/seller-host-path-whitelist` (c2f14eb) 按 REST API 习惯猜了 `/api/v1/{wallet,refund,payout,finance}/*` 4 条，全部没命中（matched=None + whitelisted=False → 只存了 metadata）。
+
+**v2 修复**（lane `fix/seller-finance-path-correction`）：
+- POST config **#314**：`seller.tiktokshopglobalselling.com / /finance/* / whitelist`（实测正确路径）
+- PATCH /toggle disable #287/#311/#312/#313（v1 4 条错路径全关）
+- 当前 enabled = 2 条：`#288 (api16 /*) + #314 (seller /finance/*)`
+- v2 burst 验证：#314 命中后 seller 域 finance 请求会从 metadata-only 升级为 full capture（含 headers/body）
+
+**v1→v2 经验**：
+- seller 域 REST 风格路径猜测全部失败，下次新增 seller 域 whitelist 应**先实测再配置**，不要从 REST 命名习惯推断
+- 路径风格差异（api16 = `/api/v1/*` REST，seller = `/finance/*` web-style）是 TikTok Seller Center 的统一模式，记住
+
 ### 7.7 高频轮询与重复调用
 
 | 现象 | 数据 | 说明 |
