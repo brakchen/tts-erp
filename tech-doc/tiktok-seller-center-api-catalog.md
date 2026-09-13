@@ -1026,6 +1026,228 @@ settlement_amount, settlement_status, statement_version
 
 **#288 验证**：10/10 个 settlement 命中 matched_config_id=288（api16 域 /\* 通配）✓ **无需新增 config**。
 
+### 7.6.3 精简版端到端数据 lineage（3 endpoint）
+
+> §7.6.2 是 burst 抓取快照（11 个 settlement endpoint + 结构）；本节是从 53+ endpoint 中**只留链路核心 3 个**后的精简 lineage（与产品对齐 2026-09-13 21:50 会议后拍板）。采集/物流/各配置/各 banner 端点全部进「附录（§7.6.4）」。
+
+#### 7.6.3.1 核心 3 个 endpoint
+
+| 域 | endpoint | method | 作用 |
+|---|---|:-:|---|
+| 订单 | `/api/fulfillment/order/list` | POST | **订单列表主入口**，返 `main_orders[]`（含 19 modules） |
+| 结算 | `/api/v1/pay/statement/order/list` | POST | 已结算+未结算列表，靠 `settlement_status=1/2` 区分 |
+| 结算 | `/api/v1/pay/statement/transaction/detail` | POST | 单条已结详情，返 `order_record {fees, in_come, fee_list[]}` |
+
+> 被排除的 50+ endpoint 及原因见 §7.6.4。
+
+#### 7.6.3.2 ID 连接键矩阵
+
+```
+oec_seller_id (URL query 提取，e1ca6ba lane)
+   ↓
+main_order_id (订单主键)
+   ├─ order_line_id → sku_id → product_id
+   ├─ fulfill_unit_id (包裹)
+   │     ├─ warehouse_id / name / region    ← 内联在 delivery_module
+   │     ├─ shipment_provider_info          ← 内联
+   │     └─ logistics_service_info          ← 内联
+   └─ payment_id
+         ├─ statement_id (已结)
+         └─ statement_detail_id (SKU 级)
+```
+
+**别名**：`reference_id` (settlement list 单条) = `trade_order_id` (settlement 字段) = `main_order_id` (订单)
+
+#### 7.6.3.3 端到端数据流
+
+```
+[订单] /api/fulfillment/order/list
+        POST body: {sort_info, search_condition, search_cursor, count, offset}
+        out:  main_orders[] {
+                 main_order_id  ──────────────────┐
+                 fulfillment_module {status_v2}   │
+                 delivery_module[] {            │
+                   warehouse_*,                 │ 内联
+                   shipment_provider_info,      │ 物流
+                   logistics_service_info,      │
+                   tracking_no,                 │
+                   fulfill_unit_id ─────────────┤
+                 }                              │
+                 payment_id  ───────────────────┤
+                 reverse_module[] (有退款时)     │
+                 price_module, sku_module[], ...  │
+               }                                ↓
+[结算] /api/v1/pay/statement/order/list        │
+        ?settlement_status=1 (已结)             │
+        ?settlement_status=2 (未结)             │
+        ?reference_id=<main_order_id> (单条)    │
+        out: order_records[] {                   │
+                statement_id,                     │
+                payment_id,                       │
+                trade_order_id = main_order_id,   │
+                statement_detail_id,               │
+                settlement_status, payment_status, │
+                ... 22 字段 (settlement_status=2)  │
+              }                                   │
+                                               ↓
+[结算] /api/v1/pay/statement/transaction/detail
+        out: order_record { fees, in_come, fee_list[] }
+```
+
+#### 7.6.3.4 4 域采集/物流**无独立 endpoint**（精简后总图）
+
+```
+采集 (context)          订单 (data)               物流 (内联)            结算 (data)
+─────────          ─────────────────          ────────────         ──────────────
+oec_seller_id   →   main_order_id         ←   (delivery_module     →   statement_id
+                                              自带:                statement_detail_id
+  来源:                                          warehouse_id          payment_id
+  1. URL query (e1ca6ba)                       tracking_no           trade_order_id
+  2. body.sellerId                            fulfillment_module)
+```
+
+- **采集**：oec_seller_id 现在从 URL query 提取（e1ca6ba lane），不需要额外 endpoint
+- **物流**：完整信息内联在 `delivery_module[]`（`warehouse_*` / `shipment_provider_info` / `logistics_service_info` / `tracking_no` / `fulfill_unit_id` ），零独立 endpoint
+- **结算**：`statement_id` / `statement_detail_id` / `payment_id` 是链路终点
+
+#### 7.6.3.5 典型场景
+
+**场景 A：一笔订单从下单到结算**
+
+```
+T0  main_order_id=586037160850720255 出现在 /order/list
+    ├─ delivery_module[0].fulfill_unit_id=1210841489937433999
+    └─ delivery_module[0].payment_id=3701052790941189367
+T1  包裹发货  →  delivery_module[0].tracking_no="WSWH3398821253"
+    └─ logistics_info_module 追加 "等待承运商上门取件" 文案
+T2  结算周期触发
+    →  /api/v1/pay/statement/order/list?settlement_status=1
+       出现新 record: { statement_id, statement_detail_id, trade_order_id=586037160850720255, ... }
+T3  /api/v1/pay/statement/transaction/detail
+    返回 fee_list[] 各 SKU 收税/活动/运费明细
+```
+
+**场景 B：退款影响结算**
+
+```
+买家发起退款
+  → order list 同一条 main_order 出现 reverse_module[0] 字段填充
+    ├─ reverse_module[0].refund_time = unix_ts
+    └─ reverse_module[0].reverse_status = 100 (?)
+  → /statement/order/list?settlement_status=2
+    ├─ status 仍 2 (未结)
+    └─ amount 减或从 to_settle 移除
+```
+
+### 7.6.4 附录：被排除的 50+ endpoint 及原因
+
+> 本节是完整 burst 抓取清单的精简版，记录被排除的 endpoint 与原因（审计用，不进数据 lineage）。
+
+#### 7.6.4.1 Banner 噪声（×6，UI 广告位，零数据价值）
+
+```
+/api/v1/logistics/orderBff/tcc_banners
+/api/v1/fulfillment/reach/banner_list
+/api/v1/seller/banner/list
+/api/v1/product/stock/banner/check
+/api/v1/seller/popup/list
+/api/v1/pop/seller_common/island/event/get
+```
+
+#### 7.6.4.2 配置中心 / 身份（×5，seller/common/get 可作身份汇总但不入数据 lineage）
+
+```
+/api/v3/seller/common/get                → 21 keys 身份元数据（不进数据流；oec_seller_id 从 URL 提取替代）
+/api/v1/arch/config_center_gw/get_config        → 灰度/功能开关
+/api/v1/arch/config_center_gw/mget_config_by_app_name
+/api/v1/common/region_domain                    → 域名解析
+/api/v1/seller/onboard/v2/config/get            → 入驻配置
+/api/v1/seller/homepage_allowlist/get           → 首页白名单
+```
+
+#### 7.6.4.3 遥测 / 轮询（×2，噪声）
+
+```
+/api/v1/bs/rt                            → 埋点上报
+/api/v1/sellerassistant/discover_chatbotevent  → chatbot 6.7s/次 高频轮询
+```
+
+#### 7.6.4.4 消息中心（×6，独立域，不进订单/结算 lineage）
+
+```
+/api/v1/seller/message/pull_by_category_v2
+/api/v1/seller/message/outage/list
+/api/v1/seller/message/list
+/api/v1/seller/message/get_page_channels
+/api/v2/seller/message/get_msg_tabs
+/api/v1/seller/feelgood/access_token/get
+```
+
+#### 7.6.4.5 物流配置（×7，元数据，不进 lineage）
+
+```
+/api/v1/trade/orders/warehouse/list        → 仓库元数据（与 delivery_module 重复）
+/api/v1/product/list/seller/warehouses    → 同上跨 product 域重复调用
+/api/v1/fulfillment/shipping/options      → 17 keys 发货配置
+/api/v1/fulfillment/strategy/pickup_type/get
+/api/fulfillment/seller_create_label_setting/get
+/api/fulfillment/seller_print_setting/get
+/api/fulfillment/print/seller_config/get
+/api/fulfillment/rule_express/list
+/api/fulfillment/dashboard/get
+/api/fulfillment/next_day_delivery/score/get
+```
+
+#### 7.6.4.6 结算 meta/辅助（×5，备用，按需启用）
+
+```
+/api/v1/pay/statement/stat/info                  → 聚合 66M VND（list 已按订单给明细，冗余）
+/api/v1/pay/settlement/payout/query_payout_config → REQ.body 含 oec_id 但现在 URL 提取取代
+/api/v1/finance/acquiring/query/account            → 资金账户 biz_scene 9/10，按需用
+/api/v1/pay/settlement/settings                    → 元数据
+/api/v1/pay/settlement/file/list (v1+v2)          → 恒空
+/api/v1/pay/settlement/payout/reverse_block_check
+/api/v1/pay/statement/payment/list                → 恒空
+/api/v1/pay/statement/balance/detail/query         → 恒空
+/api/v1/pay/statement/gray                         → 灰度 meta
+```
+
+#### 7.6.4.7 订单管理 UI 辅助（×3，count/UI 配置）
+
+```
+/api/fulfillment/order/search_count       → UI tab 数字（list 已给明细，count 是 derived）
+/api/fulfillment/order/search_layout/get  → 搜索栏 UI 配置
+/api/fulfillment/order/export_record/get  → 导出历史
+```
+
+#### 7.6.4.8 商品（×9，不在订单/结算 lineage）
+
+```
+/api/v1/product/local/products/list
+/api/v1/product/local/same_products/list
+/api/v1/product/tab/count/get
+/api/v1/product/actions/list
+/api/v1/product/product_creation/preload
+/api/v1/product/regions/mget
+/api/v1/product/commission/config/get
+/api/v1/product/oc/seller_product_opportunity/product/performance/Card
+```
+
+#### 7.6.4.9 IM 实时指标（×1，卖家中心辅助面板）
+
+```
+/api/v1/shop_im/shop/user/get_shop_live_metrics
+```
+
+#### 7.6.4.10 物流实时跟踪（未抓到，**未来按需补抓**）
+
+```
+推测 endpoint: /api/v1/logistics/tracking/query?fulfill_unit_id=...
+返回: { tracking_events: [{timestamp, location, status}, ...] }
+现状: burst 未触发（卖家未点 "查看完整物流" 按钮）
+补抓: 卖家手动点一次后加 whitelist，再开新 lane 补 §7.6.3
+```
+
 ### 7.7 高频轮询与重复调用
 
 | 现象 | 数据 | 说明 |
