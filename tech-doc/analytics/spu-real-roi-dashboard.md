@@ -238,9 +238,9 @@ SPU 无广告投放 → 广告列显示 0 与“无投放”文案（不隐藏�
 | M5b | 有效销售订单数 | `order_count(s)` | `COUNT(DISTINCT sales_orders.id)`（同一有效销售过滤；**状态口径：白名单状态全部订单，含 COD 在途**） | 按日可拆 | 同上 |
 | M6 | 销售金额(gross) | `sales(s)` | `Σ quantity × unit_price`（同上过滤条件；**状态口径：下单即算，含 COD 在途未收款**；CANCELLED 不计入） | 按日可拆 | 同上 |
 | | M5c | 取消订单数 | `cancelled_order_count(s)` | `COUNT(DISTINCT id)` status=CANCELLED（状态口径，含未收款取消；2026-09-06 行内新列，与结余带取消单量同口径） | 按日可拆 | sales_orders |
-| M5d | **全损件数（v9 口径）** | `full_loss_qty(s)` | `退货件数 + 海外取消件数`：退货 = `Σ case_lines.quantity WHERE case_type IN ('RETURN_AND_REFUND','REFUND_ONLY') AND status='RETURN_OR_REFUND_REQUEST_COMPLETE'`；海外取消 = `Σ sales_order_lines.quantity WHERE sales_orders.status='CANCELLED' AND EXISTS(tracking_events.action_code=38301)`；**国内取消(物流未到海外) ≠ 全损，不计入**；实测：退货 27 + 海外取消 133 = 全损 160 件，国内取消 182 件不计 | 范围求和 | case_lines + fulfillment.tracking_events + sales_orders |
+| M5d | **全损件数（v9 口径）** | `full_loss_qty(s)` | `退货件数 + 海外取消件数`：退货 = `Σ case_lines.quantity WHERE case_type IN ('RETURN_AND_REFUND','REFUND_ONLY') AND status='RETURN_OR_REFUND_REQUEST_COMPLETE'`；海外取消 = `Σ sales_order_lines.quantity WHERE sales_orders.status='CANCELLED' AND EXISTS(tracking_events.action_code=38301)`；**国内取消(物流未到海外) ≠ 全损，不计入**；实测：退货 27 + 海外取消 133 = 全损 160 件，国内取消 182 件不计。**实现注记（2026-09-13 merge 3c8ea96 落地 v9）**：① 退货桶限定订单 ∈ 已付白名单状态（保住 §4.2 rule 0：UNPAID 等异常单退款进未归属、不进全损）；② 窗口裁剪：退货桶按 case `updated_at_source`（与退款桶同语义）、海外取消桶按订单 `COALESCE(paid_at, order_time)`；③ 派生 `full_loss_rate = full_loss_qty ÷ (units_sold + full_loss_cancelled_qty)`（分子 ⊆ 分母，退货件含在 units_sold 里） | 范围求和 | case_lines + fulfillment.tracking_events + sales_orders |
 | M6c | 行内销售(GMV 全单) | `gmv_sales(s)` | 有效销售 + 取消原额（= 结余带 GMV 的行级版；2026-09-06） | 按日可拆 | M6+M6b 行级 |
-| M12b | 取消率 | `cancel_rate(s)` | 取消单量 ÷ (有效单量+取消单量)（单量口径，2026-09-06） | 范围 | M5b/M5c |
+| M12b | 取消率 | `cancel_rate(s)` | **v9（2026-09-13 实现落地，merge 3c8ea96）**：国内取消单量 ÷ (有效单量 + 国内取消单量)；国内取消 = `CANCELLED AND NOT EXISTS(tracking_events.action_code=38301)`（物流未到海外）。**海外取消(CANCELLED∧38301)已计入全损 M5d，不再计入取消率——取消率与全损退款率互斥不重叠**（v8 及之前取消率含全部 CANCELLED，与全损重复计海外取消，已修）；`cancelled_order_count` 信息列保持全部取消单口径不变，行级另拆 `domestic_cancelled_order_count` / `overseas_cancelled_order_count` | 范围 | M5b + 取消拆分 |
 | M12c | 退货率（单量口径） | `refund_rate_qty(s)` | 退货订单数 ÷ 有效单量（退款 case 去重订单数，非金额；2026-09-06 行内主列） | 范围 | case 去重订单 / M5b |
 | M6b | 全部订单销售额(gross,状态口径) | `gmv(s)` | `Σ quantity × unit_price`（白名单状态 ∪ CANCELLED 全单原始行金额；**下单即计、不看 paid_at**，2026-09-06 修订：COD 店在途/未收款取消也算单，对应结余带 GMV 格） | 按日可拆 | 同 M5/M6 过滤 + 状态桶 |
 | M7 | 仅退款金额（计净额） | `refund_only(s)` | `Σ` 已完结 REFUND_ONLY case 退款，**且其订单 ∈ 有效销售订单** | 按完结时间 | cases(+case_lines) |
@@ -373,7 +373,7 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
 | C 销售 | 售出件数 | `units_sold` | int | M5：`Σ quantity`（同过滤） |
 | C 销售 | 取消订单数（主列） | `cancelled_order_count` | int | M5c：`COUNT(DISTINCT id)` status=CANCELLED（状态口径，含未收款取消） |
 | C 销售 | 销售(GMV 全单,主列) | `gmv_sales` | money-str | M6c：`sales + 取消原额` = 结余带 GMV 行级版 |
-| C 销售 | 取消率%（主列） | `cancel_rate` | ratio-str/null | M12b：`取消单量/(有效单量+取消单量)`；分母 0 → null |
+| C 销售 | 取消率%（主列） | `cancel_rate` | ratio-str/null | M12b **v9**：`国内取消单量 ÷ (有效单量+国内取消单量)`；海外取消(38301)已入全损不重复计；分母 0 → null |
 | C 销售 | 销售金额（USD，原币 VND） | `sales` | money-str | M6：`Σ quantity × unit_price`（同过滤，原生 VND → ÷usd_vnd） |
 | D 退款 | 仅退款：件数/金额 | `refund_only_qty, refund_only_amount` | int/money | M7：已完结 REFUND_ONLY 且订单 ∈ 有效销售（金额 = case_lines 行级直取） |
 | D 退款 | 退货退款：件数/金额 | `refund_return_qty, refund_return_amount` | int/money | M8：已完结 RETURN_AND_REFUND 且订单 ∈ 有效销售（同上） |
@@ -385,10 +385,10 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
 | **E 实际 ROI** | 已结算 GMV（已结算订单的 line_gmv 之和） | **`settled_sales`** | **money-str** | **v8 新增：`SUM line_gmv WHERE settlement_vnd IS NOT NULL`** |
 | **E 实际 ROI** | 未结算 GMV（未结算订单的 line_gmv 之和） | **`unsettled_sales`** | **money-str** | **v8 新增：`SUM line_gmv WHERE settlement_vnd IS NULL`** |
 | **E 实际 ROI** | 已结算订单数 | **`settled_order_count`** | **int** | **v8 新增：`COUNT(DISTINCT order_pk) WHERE settlement_vnd IS NOT NULL`** |
-| **E 实际 ROI** | 全损件数（38301 口径） | **`full_loss_qty`** | **int** | **v8 新增：38301 ∧ (完结 case ∨ CANCELLED) 件数；127（实测）** |
-| **E 实际 ROI** | 其中 CANCELLED 已出海件数（COGS 补扣基数） | **`full_loss_cancelled_qty`** | **int** | **v8 新增：CANCELLED ∧ 38301 件数** |
-| **E 实际 ROI** | 全损率% | **`full_loss_rate`** | **ratio-str/null** | **v8 新增(D8 主列)：`full_loss_qty ÷ (units_sold + full_loss_cancelled_qty)`；分母 0 → null；不钳位（>100% 标识数据异常需人工核查）** |
-| E 实际 ROI | 退货货损（全损，USD） | `return_loss` | money-str | **M13b v8：全损件数 × 单位成本解析值（人工/采购单/货源价/40 CNY 兑底，§4.2）= `full_loss_qty × unit_cost_used` → 折 USD；不再用完结退货件（v7 口径）** |
+| **E 实际 ROI** | 全损件数（v9 口径） | **`full_loss_qty`** | **int** | **v9（2026-09-13 实现落地，替代 v8 的 38301∧(完结case∨CANCELLED)）：完结退货(RETURN_AND_REFUND/REFUND_ONLY，不论物流是否到海外) + 海外取消(CANCELLED∧38301) 件数；160（2026-09-07 实测）** |
+| **E 实际 ROI** | 其中海外取消件数（COGS 补扣基数） | **`full_loss_cancelled_qty`** | **int** | **v9：CANCELLED ∧ 38301 件数（= 全损中的取消桶；退货桶不含在内——退货件已含在 units_sold 里）** |
+| **E 实际 ROI** | 全损率% | **`full_loss_rate`** | **ratio-str/null** | **v9(D8 主列，标记「全损退款率%」)：`full_loss_qty ÷ (units_sold + full_loss_cancelled_qty)`；分母 0 → null；不钳位（>100% 标识数据异常需人工核查）；与 cancel_rate 互斥不重叠（M12b v9）** |
+| E 实际 ROI | 退货货损（全损，USD） | `return_loss` | money-str | **M13b v9：全损件数(M5d v9) × 单位成本解析值（人工标注价格 > 货源价 > 40 CNY 兜底，§4.2）= `full_loss_qty × unit_cost_used` → 折 USD** |
 | E 实际 ROI | 单件货本来源（成本链解析结果） | `unit_cost_used, cost_source` | money/enum | **v8 扩为三值：`cost_source ∈ 人工标注价格 / 货源价 / 默认兜底价格(40 CNY/件 ≈ $5.95)`，价格优先链 人工标注价格→货源价→默认兜底价格；**默认兜底价格 → 页面该行 ⚠ + tooltip，可跳 manual-costs 页补录** |
 | E 实际 ROI | **净利润（毛利口径，页面金额核心列）** | `net_profit` | money-str | **M18 v8：`net_revenue − (units_sold + full_loss_cancelled_qty) × unit_cost_used − spend`（**不**二次扣 fee：已结算订单费用已含在 SETTLEMENT 里，未结算订单费用由 `× (1−r̂)` 部分折算）；**负值红字**（与 roi<保本同号，§5.4-6）；M13 net_cash 已退役为内部中间量** |
 | E 实际 ROI | 平台佣金（渠道费用，信息列） | `platform_fee` | money-str | **M19 v8：`r̂ × unsettled_sales`（仅未结算部分，**不**再是 M18 输入）；已结算订单费用已内含在 SETTLEMENT 不再单计；页面可覆写 `fee_rate`** |
@@ -419,15 +419,17 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
     "net_revenue": "…",              // v8 新增:M18 输入 = 已结 SETTLEMENT 分摊 + 未结 × 0.692×(1−退款率)
     "settled_sales": "…", "unsettled_sales": "…",  // v8 新增:已/未结 GMV 拆分
     "settled_order_count": 51,        // v8 新增:已结订单数(示例占位)
-    "full_loss_qty": 4,               // v8 新增:全损件数(38301 口径,本例 4 件)
-    "full_loss_cancelled_qty": 0,     // v8 新增:CANCELLED 已出海件数
-    "full_loss_rate": "0.13",         // v8 新增(D8 主列):4 ÷ (27+0) ≈ 0.15
+    "full_loss_qty": 4,               // v9:全损件数(完结退货不论物流 + 海外取消38301,本例 4 件)
+    "full_loss_cancelled_qty": 0,     // v9:其中海外取消(CANCELLED∧38301)件数
+    "full_loss_rate": "0.13",         // v9(D8 主列):full_loss_qty ÷ (units_sold + full_loss_cancelled_qty)
+    "domestic_cancelled_order_count": 3,   // v9 新增:国内取消单量(无 38301) → cancel_rate 分子
+    "overseas_cancelled_order_count": 0,   // v9 新增:海外取消单量(38301) → 已入全损,不进取消率
     "refund_only_qty": 1, "refund_only_amount": "19.5430",
     "refund_return_qty": 4, "refund_return_amount": "89.5445",
     "refund_net_qty": 5, "refund_net_amount": "109.0875", "refund_rate": "0.20",
     "refund_cancelled_qty": 37, "refund_cancelled_amount": "19.2912",
     "refund_cancelled_missing_lines": 36,
-    "return_loss": "23.6752",         // v8 改 M13b = full_loss_qty 4 × cost 5.9188（待 reconcile 复核）
+    "return_loss": "23.6752",         // v9 M13b = full_loss_qty 4 × cost 5.9188（待 reconcile 复核）
     "net_profit": "…",                // v8 改 M18, 数字待 reconcile 后回填
     "platform_fee": "…",              // v8 = r̂ × unsettled_sales 唯一来源(信息列,不入 M18)
     "roi_real": "…", "roi_breakeven": "…", "cpa": "6.0538",
@@ -443,7 +445,7 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
     "cost_assumption": "成本链：MANUAL(人工标注的采购成交价) → PURCHASE(妙手采购单成交价) → SOURCE_PRICE(1688 货源价) → DEFAULT_K1(40 CNY/件 ≈ $5.95)；DEFAULT_K1 行页面 ⚠",
     "fee": {"mode": "baseline", "rate": "0.308", "override": null, "note": "v8: 仅作用于未结算订单 (r̂ × unsettled_sales)；已结算订单费用已内含在 SETTLEMENT 不再单计"},
     "window": {"first_day": "…", "last_day": "…", "note": "ad=视图全窗口累计(供参考)；销售/退款=全历史(可传 w_start/w_end)"},
-    "rubric_version": "v8",        // v8 新增:口径漂移一眼定位
+    "rubric_version": "v9",        // 口径漂移一眼定位(v9:全损=完结退货+海外取消,取消率只计国内取消)
     "unattributed_refund_lines": 66,
     "computed_at": "…", "currency": {"display": "USD", "native": {"ad": "USD", "sales_refund": "VND", "cost": "CNY"}}
   }
@@ -455,7 +457,7 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
 - **L0** = `gmv_ad/spend`（平台归因，好看）
 - **净收入 M18 输入**：`Σ SETTLEMENT 分摊 + Σ 未结 line_gmv × (1−r̂) × (1−refund_rate_spu)`
 - **实际 ROI M14** = `(net_revenue − return_loss) / spend`
-- **M13b 货本 v8**：`full_loss_qty × unit_cost`（按 38301 口径，本例 4 件 × 5.9188 = 23.6752；不再用 v7 完结退货件 4 件口径的 17.73）
+- **M13b 货本 v9**：`full_loss_qty × unit_cost`（v9 全损 = 完结退货不论物流 + 海外取消 38301，本例 4 件 × 5.9188 = 23.6752）
 - **净利润 M18 v8** = `net_revenue − (units_sold + full_loss_cancelled_qty) × unit_cost − spend`（**不**再扣 platform_fee——已结费用含 SETTLEMENT、未结按 (1−r̂) 折算）
 - **保本线 M17 v8**：`NC′ ÷ (NC′ − COGS_kept)`（fee_est 项移除，分母仅剩货本）
 - **红绿判据**：`net_profit ≥ 0 ⇔ roi_real ≥ roi_breakeven`（M17 fee_est 移除后恒等式仍成立）

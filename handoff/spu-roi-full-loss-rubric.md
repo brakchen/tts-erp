@@ -95,8 +95,18 @@ v9 采购成本更高(含退货件的货本),但总净收入也更高(排除退�
 ## 与文档差异(待同步)
 
 - `tech-doc/analytics/spu-real-roi-dashboard.md` §2 全损口径 → v9 已同步
-- `tech-doc/analytics/spu-real-roi-dashboard.md` §4.2 M18/M19 → v6 补丁 + v9 改动
+- `tech-doc/analytics/spu-real-roi-dashboard.md` §4.2 M5d/M12b + §E 字段语义 → **v9 已同步（2026-09-13）**
+- `biz-doc/analytics/spu-roi-profit-calculation.md` §3 M5d/M12b/M5e + §5 版本历史 → **v9 实现落地已记录（2026-09-13）**
 - `biz-doc/analytics/post-product-list-field-semantics.md` §9 → 全损联表说明(v9 口径)
+- `tech-doc/external-api.md` spu-roi 端点契约 → **v9 已同步（2026-09-13）**
+
+## 实现落地（2026-09-13，merge 3c8ea96）
+
+页面/API 代码（`tts_erp_v2/analytics/spu_roi.py`）此前停在 v8：全损要求 38301 才计
+（漏掉无物流的完结退货），取消率含全部 CANCELLED（与全损重复计海外取消）。
+已修：全损 SQL = 退货桶(完结 RETURN_AND_REFUND/REFUND_ONLY，不论物流，限已付
+白名单订单) + 海外取消桶(CANCELLED∧38301)；取消率只计国内取消；钻取 full_loss
+旗标同口径；`meta.rubric_version = v9`。测试：tests/api/test_spu_roi_api.py。
 
 ## action_code 速查
 

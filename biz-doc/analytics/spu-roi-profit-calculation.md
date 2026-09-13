@@ -140,6 +140,25 @@ $$
 \text{full\_loss\_qty} = \underbrace{\sum \text{case\_lines.quantity}}_{\text{退货：RETURN\_AND\_REFUND + REFUND\_ONLY}} + \underbrace{\sum \text{sol.quantity}}_{\text{海外取消：CANCELLED} \cap \text{action\_code}=38301}
 $$
 
+### M12b: 取消率（v9，与全损退款率互斥）
+
+$$
+\text{cancel\_rate} = \frac{\text{国内取消单量}}{\text{有效单量} + \text{国内取消单量}}
+$$
+
+- **国内取消** = `CANCELLED` 且**无** `tracking_events.action_code=38301`（物流未到海外，货拿得回来，不算全损）
+- **海外取消**（`CANCELLED` ∧ 38301）已计入全损件数 M5d，**不再计入取消率**——两个率互斥不重叠（v8 及之前取消率含全部 CANCELLED，海外取消被重复计算，2026-09-13 已修）
+- 信息列 `cancelled_order_count` 保持全部取消单口径；行级另拆 `domestic_cancelled_order_count` / `overseas_cancelled_order_count`
+
+### M5e: 全损退款率（v9）
+
+$$
+\text{full\_loss\_rate} = \frac{\text{full\_loss\_qty}}{\text{units\_sold} + \text{full\_loss\_cancelled\_qty}}
+$$
+
+- 分子 ⊆ 分母（退货件含在 units_sold 里、海外取消件 = full_loss_cancelled_qty）→ 正常值域 [0,1]
+- 分母 0 → null（页面显示 —）；不钳位（>100% 标识数据异常需人工核查）
+
 ### M18: 净利润
 
 $$
@@ -196,6 +215,9 @@ $$
 | v6 | + CANCELLED 货本补扣 | 127 | +$2,384 |
 | v7 | + 已结算/未结算分层（SETTLEMENT） | 127 | −$1,368 |
 | **v9** | **退货=全损 + 海外取消=全损 + 国内取消≠全损** | **160** | **−$1,230** |
+| v9 实现落地（2026-09-13，merge `3c8ea96`） | 页面/API 代码对齐 v9：此前实现停在 v8（全损要求 38301 才计、取消率含海外取消 → 两率重叠）。修复：全损 SQL 重写为退货+海外取消两桶；取消率只计国内取消；新增 `domestic/overseas_cancelled_order_count` 拆分字段；钻取订单 `full_loss` 旗标同口径；`meta.rubric_version` = `v9` | 同 v9 | 同 v9 |
+
+**实现偏差注记（2026-09-13）**：退货桶在代码实现里限定订单 ∈ 已付白名单状态（`PAID_SALES_ORDER_STATUSES`），与本文 §2.2 的 SQL 描述略有出入——原因是保住 §4.2 rule 0 不变量：UNPAID 等异常订单的完结退款走「未归属退款」计数（`meta.unattributed_refund_lines`），不进任何业务桶，也不应计全损货本。窗口裁剪：退货桶按 case 完结时间（`updated_at_source`，与退款桶同语义），海外取消桶按订单时间（`COALESCE(paid_at, order_time)`）。
 
 ## 六、实测验证点（2026-09-07）
 
