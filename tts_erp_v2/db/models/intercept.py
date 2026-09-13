@@ -1,7 +1,7 @@
 """plugin.intercept_* — 请求拦截配置与记录（4 张表）。
 
 拦截配置（1 张）：
-  intercept_configs — 域名 + endpoint 白名单规则
+  intercept_configs — 域名 + endpoint 拦截规则（白名单 / 黑名单）
 
 拦截记录（3 张）：
   intercepted_requests — 拦截的 HTTP 请求记录
@@ -26,13 +26,14 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+# pi-lens-ignore: no-enum-column — mode 使用 Text + CHECK 约束，避免 SQLAlchemy Enum 类型漂移
 from sqlalchemy.orm import Mapped, mapped_column
 
 from tts_erp_v2.db.base import Base
 
 
 # ── intercept_configs ────────────────────────────────────────────────
-# 拦截配置白名单：domain + endpoint 唯一组合
+# 拦截配置：domain + endpoint 唯一组合，mode 区分白名单 / 黑名单
 class InterceptConfig(Base):
     __tablename__ = "intercept_configs"
     __table_args__ = (
@@ -60,6 +61,10 @@ class InterceptConfig(Base):
     )
     domain: Mapped[str] = mapped_column(Text, nullable=False)
     endpoint: Mapped[str] = mapped_column(Text, nullable=False)
+    mode: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'whitelist'"),
+        comment="whitelist = 仅记录匹配请求（含 headers/body）; blacklist = 完全跳过不上传",
+    )
     capture_headers: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
     )

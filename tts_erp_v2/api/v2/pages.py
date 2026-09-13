@@ -1678,6 +1678,7 @@ _INTERCEPT_CONFIGS_PAGE_HTML = """<!doctype html>
     .badge { display: inline-block; font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: 0.06em; padding: 3px 8px; border-radius: 0; }
     .badge-ok { background: var(--ok); color: #fff; }
     .badge-disabled { background: var(--rule); color: var(--ink); }
+    .badge-blacklist { background: var(--danger); color: #fff; }
     .tag { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 2px 7px; border: 1px solid var(--rule); margin-right: 4px; }
     .actions { white-space: nowrap; }
     .pager { display: flex; align-items: center; gap: 18px; padding-top: 16px; border-top: 1px solid var(--rule-soft); font-family: var(--sans); font-size: 14px; }
@@ -1763,13 +1764,14 @@ _INTERCEPT_CONFIGS_PAGE_HTML = """<!doctype html>
             <th class="op-th" width="60">ID</th>
             <th class="op-th">域名</th>
             <th class="op-th">Endpoint</th>
+            <th class="op-th" width="80">模式</th>
             <th class="op-th" width="80">状态</th>
             <th class="op-th" width="160">标签</th>
             <th class="op-th" width="80">操作</th>
           </tr>
         </thead>
         <tbody id="config-tbody">
-          <tr><td colspan="7" class="op-empty">加载中…</td></tr>
+          <tr><td colspan="8" class="op-empty">加载中…</td></tr>
         </tbody>
       </table>
     </div>
@@ -1800,6 +1802,14 @@ _INTERCEPT_CONFIGS_PAGE_HTML = """<!doctype html>
             <label for="form-endpoint">Endpoint *</label>
             <input id="form-endpoint" type="text" placeholder="/api/v1/orders/*">
             <div class="hint">支持 * 通配符，如 /api/* 匹配 /api/ 下所有路径</div>
+          </div>
+          <div class="form-group">
+            <label>模式 *</label>
+            <div class="form-radio">
+              <label><input type="radio" name="mode" id="form-mode-whitelist" value="whitelist" checked> 白名单（记录匹配请求）</label>
+              <label><input type="radio" name="mode" id="form-mode-blacklist" value="blacklist"> 黑名单（完全跳过）</label>
+            </div>
+            <div class="hint">白名单 = 记录 headers/body；黑名单 = 域名命中后完全不上传</div>
           </div>
           <div class="form-group">
             <label for="form-description">描述</label>
