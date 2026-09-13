@@ -7,8 +7,9 @@
 schema。``analytics`` 仅是包名/URL 层面的历史残留。
 
 设计稿：``tech-doc/analytics/spu-roi-v7-refactor.md``（D1–D8 全拍板）。
-口径真理：``handoff/spu-roi-full-loss-rubric.md`` v7（v8 待升版同步）；
-``tech-doc/analytics/spu-real-roi-dashboard.md`` §4/§5（v7 公式已就位）。
+口径真理：``handoff/spu-roi-full-loss-rubric.md`` **v9（当前唯一有效版）** +
+``biz-doc/analytics/spu-roi-profit-calculation.md``（全损 = 退货 + 海外取消；
+国内取消 ≠ 全损；``tech-doc/analytics/spu-real-roi-dashboard.md`` §4/§5）。
 
 模块边界（D3）：
   - 主表路由：``GET  /v2/analytics/spu-roi``        （薄 handler → ``_query_spu_roi``）
@@ -170,37 +171,75 @@ _SQL_ROI_SALES = text(
     """
 )
 
-# 主表 SQL ── 全损件数（D4 B 口径：38301 ∨ 完结 case ∨ CANCELLED）
+# 主表 SQL ── 全损件数（v9 口径：全损 = 退货 + 海外取消；国内取消 ≠ 全损）
+#   退货桶：RETURN_AND_REFUND / REFUND_ONLY 已完结（不论物流是否到海外，
+#     rubric v9「退货 = 直接全损」），件数取 case_lines.quantity；
+#     窗口按 case updated_at_source（与 _SQL_ROI_REFUNDS 退款桶同语义）；
+#     限定已付白名单订单 —— 异常单(UNPAID 等)退款仍按 §4.2 rule 0 进未归属
+#   海外取消桶：CANCELLED + tracking_events.action_code=38301（已到目的国），
+#     件数取行 quantity；窗口按订单 coalesce(paid_at, order_time)
 _SQL_ROI_FULL_LOSS = text(
     """
-    SELECT sl.spu_pk,
-           sum(sl.quantity)                                                AS full_loss_qty,
-           sum(sl.quantity) FILTER (WHERE so.status = 'CANCELLED')        AS full_loss_cancelled_qty
-    FROM commerce.sales_order_lines sl
-    JOIN commerce.sales_orders so ON so.id = sl.order_pk
-    WHERE sl.spu_pk IS NOT NULL
-      AND EXISTS (SELECT 1 FROM fulfillment.shipments sh
-                  JOIN fulfillment.tracking_events te
-                    ON te.shipment_id = sh.id AND te.action_code = :ac
-                  WHERE sh.order_pk = so.id)
-      AND (so.status = 'CANCELLED'
-           OR EXISTS (SELECT 1 FROM after_sales.cases c
-                      WHERE c.order_pk = so.id
-                        AND c.status IN (:st0, :st1)))
-      AND (CAST(:ws AS timestamptz) IS NULL
-           OR coalesce(so.paid_at, so.order_time) >= CAST(:ws AS timestamptz))
-      AND (CAST(:we AS timestamptz) IS NULL
-           OR coalesce(so.paid_at, so.order_time) <  CAST(:we AS timestamptz))
-    GROUP BY sl.spu_pk
+    WITH buckets AS (
+        SELECT sl.spu_pk AS spu_pk,
+               cl.quantity AS qty,
+               0::numeric AS cancel_qty
+        FROM after_sales.cases c
+        JOIN after_sales.case_lines cl ON cl.case_id = c.id
+        JOIN commerce.sales_order_lines sl ON sl.id = cl.sales_order_line_id
+        JOIN commerce.sales_orders so ON so.id = c.order_pk
+        WHERE c.case_type IN ('RETURN_AND_REFUND', 'REFUND_ONLY')
+          AND c.status = :st_return
+          AND sl.spu_pk IS NOT NULL
+          AND so.status = ANY(CAST(:paid_statuses AS text[]))
+          AND (CAST(:ws AS timestamptz) IS NULL
+               OR c.updated_at_source >= CAST(:ws AS timestamptz))
+          AND (CAST(:we AS timestamptz) IS NULL
+               OR c.updated_at_source <  CAST(:we AS timestamptz))
+        UNION ALL
+        SELECT sl.spu_pk AS spu_pk,
+               sl.quantity AS qty,
+               sl.quantity AS cancel_qty
+        FROM commerce.sales_order_lines sl
+        JOIN commerce.sales_orders so ON so.id = sl.order_pk
+        WHERE sl.spu_pk IS NOT NULL
+          AND so.status = 'CANCELLED'
+          AND EXISTS (SELECT 1 FROM fulfillment.shipments sh
+                      JOIN fulfillment.tracking_events te
+                        ON te.shipment_id = sh.id AND te.action_code = :ac
+                      WHERE sh.order_pk = so.id)
+          AND (CAST(:ws AS timestamptz) IS NULL
+               OR coalesce(so.paid_at, so.order_time) >= CAST(:ws AS timestamptz))
+          AND (CAST(:we AS timestamptz) IS NULL
+               OR coalesce(so.paid_at, so.order_time) <  CAST(:we AS timestamptz))
+    )
+    SELECT spu_pk,
+           sum(qty)         AS full_loss_qty,
+           sum(cancel_qty)  AS full_loss_cancelled_qty
+    FROM buckets
+    GROUP BY spu_pk
     """
 )
 
-# 主表 SQL ── 行级取消/退货订单统计（不变）
+# 主表 SQL ── 行级取消/退货订单统计（v9：取消拆国内/海外两桶，
+# 海外取消(CANCELLED∧38301)与全损重叠 → 取消率只计国内取消）
 _SQL_ROI_ROW_STATUS = text(
     """
     SELECT sl.spu_pk,
            count(DISTINCT so.id) FILTER (
                WHERE so.status = 'CANCELLED')                              AS cancelled_order_count,
+           count(DISTINCT so.id) FILTER (
+               WHERE so.status = 'CANCELLED'
+                 AND NOT EXISTS (SELECT 1 FROM fulfillment.shipments sh
+                                 JOIN fulfillment.tracking_events te
+                                   ON te.shipment_id = sh.id AND te.action_code = :ac
+                                 WHERE sh.order_pk = so.id))                AS domestic_cancelled_order_count,
+           count(DISTINCT so.id) FILTER (
+               WHERE so.status = 'CANCELLED'
+                 AND EXISTS (SELECT 1 FROM fulfillment.shipments sh
+                             JOIN fulfillment.tracking_events te
+                               ON te.shipment_id = sh.id AND te.action_code = :ac
+                             WHERE sh.order_pk = so.id))                    AS overseas_cancelled_order_count,
            coalesce(sum(sl.quantity * sl.unit_price) FILTER (
                WHERE so.status = 'CANCELLED'), 0)                          AS cancelled_sales,
            count(DISTINCT so.id) FILTER (
@@ -435,7 +474,9 @@ _SQL_DETAIL_ORDERS = text(
                    WHERE sh.order_pk = so.id) AS arrived_overseas,
            EXISTS (SELECT 1 FROM after_sales.cases c
                    WHERE c.order_pk = so.id
-                     AND c.status IN (:st0, :st1)) AS has_completed_case,
+                     AND c.status = :st_return
+                     AND c.case_type IN ('RETURN_AND_REFUND', 'REFUND_ONLY')
+                  ) AS has_completed_return_case,
            so.status = 'CANCELLED' AS is_cancelled,
            (SELECT SUM(sc.amount) FROM finance.settlement_transactions st
             JOIN finance.settlement_components sc
@@ -760,8 +801,7 @@ def _query_spu_roi(
             {
                 "paid_statuses": paid_statuses,
                 "ac": _TRACK_ACTION_CODE_OVERSEAS,
-                "st0": st0,
-                "st1": st1,
+                "st_return": _CASE_COMPLETED_STATUSES[1],
                 "ws": ws_dt,
                 "we": we_dt,
             },
@@ -780,6 +820,7 @@ def _query_spu_roi(
                 "paid_statuses": paid_statuses,
                 "st0": st0,
                 "st1": st1,
+                "ac": _TRACK_ACTION_CODE_OVERSEAS,
                 "ws": ws_dt,
                 "we": we_dt,
             },
@@ -857,6 +898,12 @@ def _query_spu_roi(
 
         rs = rs_map.get(pk)
         cancelled_orders = _row_int(rs["cancelled_order_count"]) if rs else 0
+        domestic_cancelled_orders = (
+            _row_int(rs["domestic_cancelled_order_count"]) if rs else 0
+        )
+        overseas_cancelled_orders = (
+            _row_int(rs["overseas_cancelled_order_count"]) if rs else 0
+        )
         cancelled_sales_vnd = Decimal(rs["cancelled_sales"]) if rs else Decimal(0)
 
         refund = refund_map.get(pk)
@@ -904,13 +951,14 @@ def _query_spu_roi(
             Decimal(1) - rate
         ) * (Decimal(1) - refund_rate_spu)
 
-        # COGS（v6 补扣：售出 + 全损取消）
+        # COGS（v9：售出件 + 全损取消件；售出件含后被退回的件，
+        # 与全损桶不重叠——退货件在售出件里、海外取消件在 flc 里）
         cogs_all_usd = (Decimal(units_sold) + Decimal(flc_qty)) * unit_cost_usd
 
         # platform_fee = r̂ × unsettled_sales_usd（信息列，不进 net_profit）
         platform_fee_usd = rate * unsettled_sales_usd
 
-        # return_loss（M13b 切 38301 全损口径，D4 B）
+        # return_loss（M13b v9：全损件数 = 完结退货(不论物流) + 海外取消(38301)）
         return_loss_usd = Decimal(full_loss_qty) * unit_cost_usd
 
         # net_profit（v7）：net_revenue − COGS_all − spend
@@ -936,16 +984,19 @@ def _query_spu_roi(
         refund_rate_usd = refund_net_usd / sales_usd if sales_usd > 0 else None
         gmv_sales_usd = sales_usd + cancelled_sales_usd
 
-        # full_loss_rate（D8 主列），分母 0 → None；不钳位（B2 拍板原值展示）
+        # full_loss_rate（v9 主列）：全损件数 ÷ (售出件数+海外取消件数)；
+        # 分子 ⊆ 分母（退货 ⊆ units_sold、海外取消 = flc）；分母 0 → None；不钳位
         fl_rate_denom = Decimal(units_sold) + Decimal(flc_qty)
         full_loss_rate: Decimal | None = None
         if fl_rate_denom > 0:
             full_loss_rate = Decimal(full_loss_qty) / fl_rate_denom
 
+        # cancel_rate（v9：只计国内取消——海外取消已入全损桶，两率不重叠）
         cancel_rate_usd = None
-        if (order_count + cancelled_orders) > 0:
-            cancel_rate_usd = Decimal(cancelled_orders) / Decimal(
-                order_count + cancelled_orders
+        cancel_denom = order_count + domestic_cancelled_orders
+        if cancel_denom > 0:
+            cancel_rate_usd = Decimal(domestic_cancelled_orders) / Decimal(
+                cancel_denom
             )
         refund_rate_qty_usd = None
         if order_count > 0:
@@ -972,6 +1023,8 @@ def _query_spu_roi(
                 "ad_last_day": ad_last_day,
                 "order_count": order_count,
                 "cancelled_order_count": cancelled_orders,
+                "domestic_cancelled_order_count": domestic_cancelled_orders,
+                "overseas_cancelled_order_count": overseas_cancelled_orders,
                 "units_sold": units_sold,
                 "sales": sales_usd,
                 "gmv_sales": gmv_sales_usd,
@@ -1161,7 +1214,7 @@ def _query_spu_roi(
         },
         "unattributed_refund_lines": unattributed["n"] if unattributed else 0,
         "computed_at": datetime.now(UTC).isoformat(),
-        "rubric_version": "v8",
+        "rubric_version": "v9",
         "currency": {
             "display": "USD",
             "native": {"ad": "USD", "sales_refund": "VND", "cost": "CNY"},
@@ -1194,6 +1247,8 @@ def _query_spu_roi(
                 else None,
                 "order_count": r["order_count"],
                 "cancelled_order_count": r["cancelled_order_count"],
+                "domestic_cancelled_order_count": r["domestic_cancelled_order_count"],
+                "overseas_cancelled_order_count": r["overseas_cancelled_order_count"],
                 "units_sold": r["units_sold"],
                 "sales": _fmt_money(r["sales"]),
                 "gmv_sales": _fmt_money(r["gmv_sales"]),
@@ -1246,8 +1301,7 @@ def _detail_orders(
             {
                 "spu_pk": spu_pk,
                 "ac": _TRACK_ACTION_CODE_OVERSEAS,
-                "st0": _CASE_COMPLETED_STATUSES[0],
-                "st1": _CASE_COMPLETED_STATUSES[1],
+                "st_return": _CASE_COMPLETED_STATUSES[1],
                 "ws": ws_dt,
                 "we": we_dt,
                 "lim": _ORDERS_MAX,
@@ -1286,9 +1340,10 @@ def _detail_orders(
             settled_net_share = _fmt_money((settlement_vnd * share_ratio) / fx_usd_vnd)
 
         arrived_overseas = bool(r["arrived_overseas"])
-        has_completed_case = bool(r["has_completed_case"])
+        has_completed_return_case = bool(r["has_completed_return_case"])
         is_cancelled = bool(r["is_cancelled"])
-        full_loss = arrived_overseas and (has_completed_case or is_cancelled)
+        # v9 全损旗标：完结退货(不论物流) ∨ 海外取消(CANCELLED∧38301)
+        full_loss = has_completed_return_case or (is_cancelled and arrived_overseas)
 
         # tracking 时间线（按 event_at 升序）
         tracking: list[dict] = []
@@ -1348,7 +1403,7 @@ def _detail_orders(
         "orders": orders,
         "meta": {
             "orders_truncated": truncated,
-            "rubric_version": "v8",
+            "rubric_version": "v9",
             "computed_at": datetime.now(UTC).isoformat(),
         },
     }
@@ -1436,7 +1491,7 @@ def _detail_settlements(
         "spu_pk": spu_pk,
         "settlements": settlements,
         "meta": {
-            "rubric_version": "v8",
+            "rubric_version": "v9",
             "computed_at": datetime.now(UTC).isoformat(),
         },
     }
@@ -1491,7 +1546,7 @@ def _detail_cases(
         "spu_pk": spu_pk,
         "cases": cases,
         "meta": {
-            "rubric_version": "v8",
+            "rubric_version": "v9",
             "computed_at": datetime.now(UTC).isoformat(),
         },
     }
@@ -1514,7 +1569,7 @@ def _detail_ads(sess: Session, spu_pk: int) -> dict:
         "spu_pk": spu_pk,
         "ads": ads,
         "meta": {
-            "rubric_version": "v8",
+            "rubric_version": "v9",
             "computed_at": datetime.now(UTC).isoformat(),
             "note": "广告域全窗口累计，不随日期裁剪",
         },
@@ -1545,9 +1600,10 @@ def list_spu_roi(
 ) -> dict:
     """SPU 实际 ROI 主表（每 SPU 一行）。readonly。
 
-    v7（D1–D8）：净收入按已结算 SETTLEMENT + 未结算 ×(1−r̂)×(1−退款率) 分层；
-    成本走四层链（MANUAL→PURCHASE→SOURCE_PRICE→DEFAULT 40 CNY）；
-    M13b 切 38301 全损口径；M19 缩为信息列；新增 full_loss_rate 主列。
+    v9（全损口径升版）：净收入按已结算 SETTLEMENT + 未结算 ×(1−r̂)×(1−退款率) 分层；
+    成本走三层链（MANUAL→SOURCE_PRICE→DEFAULT 40 CNY）；全损 = 完结退货(不论物流)
+    + 海外取消(CANCELLED∧38301)，国内取消 ≠ 全损；取消率只计国内取消（与全损不重叠）；
+    M19 缩为信息列；full_loss_rate 主列 = 全损件数 ÷ (售出件数+海外取消件数)。
     端点 sort 默认值保持 "roi_real" 不变（D8 不动 API 契约）。
     """
     if sort not in _ROI_SORT_FIELDS:

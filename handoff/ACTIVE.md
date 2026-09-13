@@ -65,6 +65,8 @@
 | lane_id | 主题 | owner(session) | .worktrees/<slug> / branch | 文件列表 | draft | <UTC> |
 -->
 
+| fix/spu-roi-v9-rates | spu-roi 取消率/全损退款率重叠修复（按 v9 口径）：全损 SQL 重写为两桶（退货=RETURN_AND_REFUND/REFUND_ONLY 完结、不论物流 + 海外取消=CANCELLED∧38301）；取消率只计国内取消（CANCELLED∧无38301），剔除与全损的重叠；钻取 full_loss 旗标同口径；tooltip/hint/rubric_version 同步 v9 | 本 session | .worktrees/spu-roi-v9-rates / fix/spu-roi-v9-rates | tts_erp_v2/analytics/spu_roi.py、tts_erp_v2/api/v2/pages.py、tts_erp_v2/static/js/spu-roi.js、tests/api/test_spu_roi_api.py、handoff/ACTIVE.md | draft | 2026-09-13T13:45Z |
+
 ## 规则速记
 
 - 开新工作（尤其会动 master WT 未提交区 / 共享点文件）→ **先加一行再动工**。

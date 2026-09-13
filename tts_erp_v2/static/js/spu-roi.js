@@ -581,7 +581,7 @@
     var HINT_LAYER_REV =
       "净收入 = 已结算 SETTLEMENT 分摊 + 未结算 ×(1-r̂)×(1-SPU 退款率);v7 D5 口径";
     var HINT_LAYER_COGS =
-      "货本 = (售出件 + 全损取消件) × 单位成本;售出件=units_sold,全损取消件=full_loss_cancelled_qty(v7 D4 B)";
+      "货本 = (售出件 + 全损取消件) × 单位成本;售出件=units_sold,全损取消件=full_loss_cancelled_qty=海外取消件数(v9 口径)";
     var HINT_LAYER_AD =
       "广告消耗 = Σreal_cost_total 广告视图全窗口累计(USD);作为减项计入净利润";
     var HINT_LAYER_NP =
@@ -593,7 +593,7 @@
     var HINT_COGS_SOLD =
       "售出件 = 实际售出件数 units_sold(已付白名单状态);v7 单位成本 × 件数";
     var HINT_COGS_FLC =
-      "全损取消件 = full_loss_cancelled_qty = 已出海(38301) + 已取消订单的件数;v7 D4 B 补扣口径,货拿不回来按全损计";
+      "全损取消件 = full_loss_cancelled_qty = 海外取消件数(CANCELLED + 物流已到海外 action_code=38301);v9 口径:货已出海拿不回来按全损计;国内取消(未到海外)不计货本、不计全损";
     var HINT_AD_SPEND =
       "广告消耗 = Σ real_cost_total(广告视图全窗口累计,USD);作为减项计入净利润";
 
