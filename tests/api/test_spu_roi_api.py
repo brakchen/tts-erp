@@ -1496,6 +1496,70 @@ def test_spu_roi_date_window_clips_ad(api_client, readonly_key, db_engine):
     assert "ad 同窗口裁剪" in r_crop.json()["meta"]["window"]["note"]
 
 
+def test_spu_roi_ad_window_single_side_only(api_client, readonly_key, db_engine):
+    """v8 §6.4 覆盖：仅传 :ws 或 :we 时 NULL 短路另一侧。
+
+    _SQL_ROI_AD (tts_erp_v2/analytics/spu_roi.py:101) 使用：
+      AND (CAST(:ws AS timestamptz) IS NULL OR t.day >= :ws::date)
+      AND (CAST(:we AS timestamptz) IS NULL OR t.day <  :we::date)
+    仅传 w_start → 仅下界过滤，上界短路 = 不卡上界；仅传 w_end 同理。
+
+    场景：4 条 ad 跨 06-01 / 09-10 / 09-25 / 10-05 四个日期；验证：
+    - 仅 w_start=09-01 → 留 09-10+09-25+10-05（10-05 无上界束缚）
+    - 仅 w_end=09-30 → 留 06-01+09-10+09-25（10-05 被上界裁）
+    - 双边界 w_start=09-01 & w_end=09-30 → 仅 09-10+09-25（边界全开）
+    """
+    with Session(db_engine) as sess:
+        shop_pk = _seed_shop(sess, "TEST_SELLER_WADSS")  # noqa: F841 — 传入 _seed_spu
+        _seed_spu(sess, shop_pk, "TEST_ROI_SPU_WADSS")
+        # 4 天 ad：过远过去 / 窗内早 / 窗内晚 / 过远未来
+        for day, camp, spend in (
+            ("2026-06-01", "CAMP_D1", "10"),
+            ("2026-09-10", "CAMP_D2", "20"),
+            ("2026-09-25", "CAMP_D3", "30"),
+            ("2026-10-05", "CAMP_D4", "40"),
+        ):
+            _seed_ad_dump(
+                sess,
+                seller="TEST_SELLER_WADSS",
+                product_id="TEST_ROI_SPU_WADSS",
+                campaign_id=camp,
+                spend=spend,
+                orders="0",
+                gmv="0",
+                day=day,
+            )
+        sess.commit()
+    h = {"Authorization": f"Bearer {readonly_key}"}
+    base = {"q": "TEST_ROI_SPU_WADSS"}
+
+    # 仅 w_start=09-01：无上界束缚，09-10/09-25/10-05 留下
+    r_ws = api_client.get(
+        "/v2/analytics/spu-roi", headers=h, params={**base, "w_start": "2026-09-01"}
+    )
+    item_ws = r_ws.json()["items"][0]
+    assert item_ws["ad_count"] == 3, item_ws  # 10+30+40 = 90
+    assert item_ws["spend"] == "90.0000"
+
+    # 仅 w_end=09-30：无下界束缚，06-01/09-10/09-25 留下（10-05 被上界裁）
+    r_we = api_client.get(
+        "/v2/analytics/spu-roi", headers=h, params={**base, "w_end": "2026-09-30"}
+    )
+    item_we = r_we.json()["items"][0]
+    assert item_we["ad_count"] == 3, item_we  # 10+20+30 = 60
+    assert item_we["spend"] == "60.0000"
+
+    # 双边界：09-01~09-30，仅 09-10/09-25
+    r_both = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=h,
+        params={**base, "w_start": "2026-09-01", "w_end": "2026-09-30"},
+    )
+    item_both = r_both.json()["items"][0]
+    assert item_both["ad_count"] == 2, item_both  # 20+30 = 50
+    assert item_both["spend"] == "50.0000"
+
+
 def test_spu_roi_sort_whitelist_covers_page_sortable_columns(
     api_client, readonly_key, db_engine
 ):
