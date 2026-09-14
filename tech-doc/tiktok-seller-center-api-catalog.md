@@ -891,6 +891,53 @@ def _extract_seller_id_from_url(url: str) -> str | None:
   "reverse_reminder":   { "items": [...] },     // 文案提醒
   "order_line_ids":     ["586043638880503183"]
 }
+
+#### 7.4.5 `price_module` 拆解：8 单运费样例
+
+**字段名修正**（catalog §7.4 之前写的 `.amount` 是错的）：
+
+```jsonc{
+  "price_module": {
+    "sub_total":   { "symbol": "₫", "currency": "VND", "price_val": "577523", "format_price": "577.523₫" },
+    "grand_total": { "symbol": "₫", "currency": "VND", "price_val": "577523", "format_price": "577.523₫" },
+    "main_order_id": "586043638880437647"
+  }
+}
+```
+
+实际字段是 `price_val`，不是 `amount`。
+
+**公式**（50/50 验证通过）：
+
+```
+grand_total = sum(sku_total_price) + shipping_fee
+```
+
+**8 单运费明细**（从 11:31 burst 50 单中挑出，`sub_total < grand_total` 的全部 8 单）：
+
+| # | main_order_id | sub_total | shipping_fee | grand_total | ratio | SKU |
+| - | --- | ---: | ---: | ---: | ---: | --- |
+| 1 | `586026126655260356` | 690,850 | **17,000** | 707,850 | 2.46% | Xanh mực, 2XL(70-77.5kg) |
+| 2 | `586014607863481477` | 750,462 | **17,000** | 767,462 | 2.27% | Màu đen, M 57.5KG-67.5KG |
+| 3 | `585992484307765000` | 547,523 | **17,000** | 564,523 | 3.10% | Sọc cam, M (45-57.5 kg) |
+| 4 | `585992300305745672` | 577,523 | **17,000** | 594,523 | 2.94% | Sọc đen, M (45-57.5 kg) |
+| 5 | `585968306069014066` | 577,523 | **17,000** | 594,523 | 2.94% | Sọc xám, 4XL (87.5-95 kg) |
+| 6 | `585986403696936677` | 716,645 | **30,000** | 746,645 | 4.19% | Xanh nhạt, L 57.5KG-65KG |
+| 7 | `585971536482567908` | 554,901 | **30,000** | 584,901 | 5.41% | Màu trắng, XXL |
+| 8 | `585971299152660196` | 647,917 | **30,000** | 677,917 | 4.63% | Đen, 2XL 72.5-80 kg |
+
+**未解问题**（需新 lane 抓已结后 `statement/transaction/detail` 验证）：
+
+- 17000 / 30000 VND 是定档，比例 2.27%–5.41% 不固定——**是运费（按订单金额阶梯）还是平台佣金（按比例）？**需要查看对应单在 `fee_list[]` 中 `subtotal_after_discount` 与 `subtotal_before_discount` 的差额。
+- `delivery_module[0].shipping_fee = {}`（空对象）与 `trade_order_module.shipping_fee = 0/17000/30000` 的语义差异是**订单级 vs 包裹级**——需多包裹单验证。
+- 8 单全为 1 个 SKU、越南跨境+COD 样本；未覆盖多 SKU/非 COD/多包裹场景。
+
+**summary**：
+
+- 8/50 单（16%）有运费，42/50 单（84%）包邮
+- 2 个运费档位：17000 VND 与 30000 VND（都是 0.71~0.75 USD）
+- 5 个 `17000` 档平均比 3 个 `30000` 档**低**（金额区间不同，不是商品价不同）
+
 ```
 
 ### 7.5 关键接口实测性能
