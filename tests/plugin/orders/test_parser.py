@@ -60,12 +60,12 @@ def _cleanup(db_engine):
     params = {"s": SHOP_ID}
     with db_engine.begin() as conn:
         for stmt in _CLEANUP_SQLS:
-            # noqa: python-sql-injection — 字面量 SQL, bind :s
+            # pi-lens-ignore: python-sql-injection — _CLEANUP_SQLS 字面量 SQL, bind :s
             conn.execute(text(stmt), params)
     yield
     with db_engine.begin() as conn:
         for stmt in _CLEANUP_SQLS:
-            # noqa: python-sql-injection — 字面量 SQL, bind :s
+            # pi-lens-ignore: python-sql-injection — _CLEANUP_SQLS 字面量 SQL, bind :s
             conn.execute(text(stmt), params)
 
 
@@ -285,7 +285,7 @@ class TestParseLogisticsResponse:
                 order_id="TEST_ord-reversed", response_body=resp,
                 captured_at=datetime.now(UTC),
             )
-            row = sess.execute(
+            row = sess.execute(  # pi-lens-ignore: python-sql-injection — 字面量 SQL, bind :s/:p
                 text("SELECT status, shipped_at, delivered_at FROM plugin.shipments WHERE shop_id = :s AND package_id = :p"),
                 {"s": SHOP_ID, "p": "TEST_pkg-reversed"},
             ).one()
