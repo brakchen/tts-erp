@@ -109,3 +109,4 @@ ACTIVE.md 的 `owner(session)` 列只写「本 session」/「未登记」等自�
 
 - 局限：跨 lane 同关键词可能多命中（按时间窗过滤）；session 日志可能被 rotate（过老的 lane 查不到）；lane 中途换 session 会留下多条候选，按时长/操作密度挑主体。
 | fix/spu-roi-ad-window-clip | SPU ROI 广告消耗按日期切片：_SQL_ROI_AD 删 ad_daily UNION ALL + 加 ws/we 过滤；_SQL_DETAIL_ADS 同步；test_spu_roi_date_window_does_not_clip_ad 反向断言(现在要 clip)；tech-doc §6.2 v7→v8 升版；window_note 文案改写 | 本 session | .worktrees/spu-roi-ad-window-clip / fix/spu-roi-ad-window-clip | tts_erp_v2/analytics/spu_roi.py、tests/api/test_spu_roi_api.py、tech-doc/analytics/spu-roi-v7-refactor.md、handoff/ACTIVE.md | merged (7290c73) | 2026-09-15T...Z |
+| docs/spu-roi-v8-ad-window | spu-roi v8 技术方案文档：tech-doc/analytics/spu-roi-v8-ad-window.md（背景/决策/SQL 改动/端点/数据迁移/测试/UI/与 v7 差异） | 本 session | .worktrees/spu-roi-v8-doc / docs/spu-roi-v8-ad-window | tech-doc/analytics/spu-roi-v8-ad-window.md(新)、handoff/ACTIVE.md | draft | 2026-09-15T...Z |
