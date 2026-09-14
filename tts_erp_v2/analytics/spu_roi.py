@@ -88,16 +88,17 @@ _ORDERS_MAX = 500
 # §3.2 SQL 常量集
 # ═════════════════════════════════════════════════════════════════════
 
-# 主表 SQL ── 广告域（v8：随日期切片 + 单源 ad_today）
-# 2026-09-15 之前从 plugin.ad_daily ∪ ad_today 全窗口累计，ROI 分母恒定；
-# 选日期范围时 spend 不变（用户反复报"切了日期广告消耗不变"）。
-# 现改为：
-#   - 只读 plugin.ad_today（merge job 自 2026-09-13 禁用后 ad_daily 已冻结；
-#     ad_today 是 Chrome 扩展 kind=today 的活跃写入源）。
+# 主表 SQL ── 广告域（v8.1：随日期切片 + 单源 ad_daily）
+# 2026-09-15 之前从 plugin.ad_daily ∪ ad_today 全窗口累计（v7），ROI 分母恒定。
+# v8.1 修 v8 选错源问题：v8 误读 ad_today（已被遗弃的临时表，仅 09-13+ 2 天），
+# 切到 ad_daily 才是当前生产主源（覆盖 07-10 ~ 09-13，45 天 × 17k+ 行）。
+#   - 只读 plugin.ad_daily；ad_today 调为未来 merge job 重新启用后的回填目标，
+#     不进 SQL 取数路径。
 #   - 按 day BETWEEN :ws AND :we 裁剪（与销售/退款同语义）；:ws/:we 任一为 NULL
 #     时该侧条件短路（沿用 spu_roi 既有可空窗口约定）。
-# 影响：选日期范围 < 2026-09-13 时广告消耗归零（ad_today 历史未回填）；
-# ad_daily 历史数据已不在 SQL 取数路径上。回填另起 migration（不在本 lane）。
+# 已知数据窗口缺口：merge job 2026-09-13 禁用后 ad_daily 未增——09-14+ 选
+# 日期范围 ad 消耗仍为 0。需重启用 merge job 或迁移 Chrome 扩展写入
+# 路径以填实 09-14+（不在本 lane；v8 §10 follow-up 提级为 P0）。
 _SQL_ROI_AD = text(
     """
     SELECT spu_pk,
@@ -108,18 +109,18 @@ _SQL_ROI_AD = text(
            min(day)                                  AS ad_first_day,
            max(day)                                  AS ad_last_day
     FROM (
-        SELECT t.campaign_id, t.product_id, t.day,
-               t.mixed_real_cost, t.onsite_roi2_shopping_sku,
-               t.onsite_roi2_shopping_value,
+        SELECT d.campaign_id, d.product_id, d.day,
+               d.mixed_real_cost, d.onsite_roi2_shopping_sku,
+               d.onsite_roi2_shopping_value,
                cp.id AS spu_pk
-        FROM plugin.ad_today t
-        LEFT JOIN commerce.shops ca ON ca.platform = 'tiktok' AND ca.shop_id = t.seller_id
-        LEFT JOIN commerce.products_spu cp ON cp.shop_pk = ca.id AND cp.spu_id = t.product_id
-        WHERE t.endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'
+        FROM plugin.ad_daily d
+        LEFT JOIN commerce.shops ca ON ca.platform = 'tiktok' AND ca.shop_id = d.seller_id
+        LEFT JOIN commerce.products_spu cp ON cp.shop_pk = ca.id AND cp.spu_id = d.product_id
+        WHERE d.endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'
           AND (CAST(:ws AS timestamptz) IS NULL
-               OR t.day >= CAST(:ws AS timestamptz)::date)
+               OR d.day >= CAST(:ws AS timestamptz)::date)
           AND (CAST(:we AS timestamptz) IS NULL
-               OR t.day <  CAST(:we AS timestamptz)::date)
+               OR d.day <  CAST(:we AS timestamptz)::date)
     ) combined
     WHERE spu_pk IS NOT NULL
     GROUP BY spu_pk
@@ -349,7 +350,7 @@ _SQL_ROI_CATALOG = text(
 
 _SQL_ROI_WINDOW = text(
     "SELECT min(day) AS first_day, max(day) AS last_day "
-    "FROM plugin.ad_today "
+    "FROM plugin.ad_daily "
     "WHERE endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list' "
 )
 
@@ -585,7 +586,7 @@ _SQL_DETAIL_ADS = text(
     FROM (
         SELECT campaign_id, product_id, day,
                mixed_real_cost, onsite_roi2_shopping_sku
-        FROM plugin.ad_today
+        FROM plugin.ad_daily
         WHERE endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'
           AND (CAST(:ws AS timestamptz) IS NULL
                OR day >= CAST(:ws AS timestamptz)::date)

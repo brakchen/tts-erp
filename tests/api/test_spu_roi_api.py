@@ -267,17 +267,18 @@ def _seed_ad_dump(
     gmv: str,
     day: str = DAY,
 ) -> None:
-    """post_product_list 一条 ad_today(1 campaign×SPU×1 day)。
+    """post_product_list 一条 ad_daily(1 campaign×SPU×1 day)。
 
-    v8（2026-09-15 fix/spu-roi-ad-window-clip）后，_SQL_ROI_AD / _SQL_DETAIL_ADS
-    只读 plugin.ad_today，ad_daily 不再在取数路径上。所以测试夹具必须写
-    ad_today，否则 ROI 计算会拿到 spend=0。
+    v8.1（2026-09-15 fix/spu-roi-v81-ad-source）后，_SQL_ROI_AD / _SQL_DETAIL_ADS
+    只读 plugin.ad_daily。ad_today 是被遗弃的临时表（merge job 2026-09-13
+    禁用前作为当天暂存区），不再进 SQL 取数路径。所以测试夹具必须写
+    ad_daily，否则 ROI 计算会拿到 spend=0。
     """
     # pi-lens-ignore: python-sql-injection
     sess.execute(
         text(
             """
-            INSERT INTO plugin.ad_today (
+            INSERT INTO plugin.ad_daily (
                 seller_id, advertiser_id, campaign_id, product_id, endpoint, day,
                 mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value,
                 onsite_mixed_real_roi2_shopping, metrics_extra, created_at
@@ -288,7 +289,7 @@ def _seed_ad_dump(
                 CAST(:spend AS NUMERIC), CAST(:orders AS BIGINT), CAST(:gmv AS NUMERIC),
                 NULL, '{}'::JSONB, now()
             )
-            ON CONFLICT ON CONSTRAINT uq_ad_today DO UPDATE SET
+            ON CONFLICT ON CONSTRAINT uq_ad_daily DO UPDATE SET
                 mixed_real_cost = EXCLUDED.mixed_real_cost,
                 onsite_roi2_shopping_sku = EXCLUDED.onsite_roi2_shopping_sku,
                 onsite_roi2_shopping_value = EXCLUDED.onsite_roi2_shopping_value,

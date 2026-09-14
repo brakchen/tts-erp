@@ -59,11 +59,31 @@ GROUP BY spu_pk
 但 v7 落地时只把口径写在了 tooltip / `window_note` 里，**没有强提示**；
 用户根本看不到——他们只看主表的数字，发现"切了日期 spend 不动"就报 bug。
 
-### 1.4 ad_daily 已冻结（merge job 2026-09-13 禁用）
+### 1.4 ad_daily / ad_today 现状（v8.1 修正）
 
-`jobs/ad_merge_today2daily.py` 自 2026-09-13 起被禁用（`_DISABLED = True`，
-根因调查：UTC 跨天时 Chrome 扩展仍写入"昨天"的 ad_today 行 → 过早 DELETE
-会截断延迟归因数据）。后果：
+**v8 错误判断**：v8 上线时看 ad_daily last_update 停在 2026-09-13 23:15，
+推断“ad_daily 冻结、ad_today 是新生产源”，只读 ad_today。但 2026-09-15
+探测发现 ad_daily last_update=2026-09-14 17:22:48（仍在写入）— merge job
+禁用只防了 ad_today→ad_daily 跨天清理，没停 ad_daily 写入口；Chrome 扩
+展 kind=daily dumps 继续走 `upsert_daily_rows` 写 ad_daily。
+
+**表实际状态**（2026-09-15 17:25 探测）：
+
+| 表 | 行数 | 日期范围 | 最后更新 | 判定 |
+| --- | ---: | --- | --- | --- |
+| `plugin.ad_daily` | 25,471 | 2026-07-10 ~ 09-14 | 2026-09-14 17:22 | **生产主源**（覆盖全历史 + 今日） |
+| `plugin.ad_today` | 1,142 | 2026-09-13 ~ 09-15 | 2026-09-14 17:23 | 临时表（重复写入，未走 SQL） |
+
+**v8.1 修法**（fix/spu-roi-v81-ad-source，2026-09-15 17:25 现场修复）：
+恢复读 ad_daily（v7 行为），但保留 v8 的 `day BETWEEN :ws AND :we` 裁剪。
+三条 SQL 都回到 ad_daily 单源；ad_today 仍接 Chrome 扩展 kind=today
+写入以供未来 merge job 重启后回填。
+
+**遗留问题**：ad_today 9-13~9-15 1,142 行未回填 ad_daily（Chrome 扩
+展 kind=today 仍在写，ad_daily 同时收到 kind=daily dumps，双写部分
+略有不一致——例如 09-14 ad_daily 340 行 spend=$0 vs ad_today 469
+行 spend=$11.79，原因是 ad_today 收到较新的 dump 而 ad_daily 被
+ON CONFLICT DO NOTHING 挡住或未接）。修法见 §10.1。
 
 | 表 | 行数（2026-09-15 实测） | 日期范围 | 最后写入 |
 | --- | --- | --- | --- |
