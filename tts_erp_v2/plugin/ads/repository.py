@@ -6,11 +6,14 @@ SQL 以模块级 text() 常量书写。表全部 schema 限定为 analytics.ad_*
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
+
+log = logging.getLogger("tts_erp_v2.plugin.ads.repository")
 
 # ─── daily-sync-with-coverage 结构化写入 SQL ─────────────────────────
 # tech-doc/analytics/daily-sync-with-coverage.md §5.1 / §5.3
@@ -859,18 +862,27 @@ def upsert_campaign_opt_logs(
      "object_type": "...", "object_raw_type": "...", "activity_details": [...]}
     """
     inserted = 0
-    for log in logs:
-        log_id = log.get("id")
+    skipped = 0
+    for item in logs:
+        log_id = item.get("id")
         if not log_id:
             continue
-        opt_time_str = log.get("opt_time", "")
+        opt_time_str = item.get("opt_time", "")
         # opt_time 格式: "2026-09-12 15:40:46" (店铺时区)
         try:
             opt_time = datetime.strptime(opt_time_str, "%Y-%m-%d %H:%M:%S").replace(
                 tzinfo=UTC
             )
         except (ValueError, TypeError):
-            opt_time = datetime.now(UTC)
+            # 2026-09-14 review：解析失败用 now() 顶替 = 静默写错数据（比 NULL 更糟），
+            # 改为跳过该行 + warning。这是操作日志表，丢一行比错一行好。
+            log.warning(
+                "campaign_opt_log id=%s unparseable opt_time %r, skipped",
+                log_id,
+                opt_time_str,
+            )
+            skipped += 1
+            continue
 
         sess.execute(
             text(SQL_UPSERT_CAMPAIGN_OPT_LOG),
@@ -878,18 +890,20 @@ def upsert_campaign_opt_logs(
                 "seller_id": seller_id,
                 "advertiser_id": advertiser_id,
                 "log_id": str(log_id),
-                "campaign_id": log.get("object_id", ""),
-                "user": log.get("user"),
+                "campaign_id": item.get("object_id", ""),
+                "user": item.get("user"),
                 "opt_time": opt_time,
-                "object_type": log.get("object_type"),
-                "object_raw_type": log.get("object_raw_type"),
+                "object_type": item.get("object_type"),
+                "object_raw_type": item.get("object_raw_type"),
                 "activity_details": json.dumps(
-                    log.get("activity_details", []), ensure_ascii=False
+                    item.get("activity_details", []), ensure_ascii=False
                 ),
             },
         )
         inserted += 1
     sess.commit()
+    if skipped:
+        log.warning("campaign_opt_logs: %d inserted, %d skipped (bad opt_time)", inserted, skipped)
     return inserted
 
 

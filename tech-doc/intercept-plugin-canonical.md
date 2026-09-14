@@ -187,6 +187,16 @@ response_body 不符合预期 schema
 
 → **raw_log 是 source-of-truth，业务表是 derived view**。dump 永不丢，失败可重放。
 
+> **2026-09-14 教训（字段级静默失败）**：`_ts_to_datetime` 的 str 分支只认 ISO 格式，
+> 而 create_time/update_time 实测是**数字字符串**（秒/毫秒/微秒都有），导致
+> plugin.orders 四个时间字段几乎全 NULL 且无任何信号——parse_error 只覆盖整 dump 级
+> 失败，字段级失败不可观测。修复（commit 122cad1）：数字字符串解析 + 不可解析值
+> log.warning。原则：**字段级解析失败不落 parse_error（避免整批重试），但必须
+> log.warning 显式可见**；`_to_decimal` 同策略（带 field 标签）。
+> 另：logistics 域 353 条 dump 全部 `response.body=null`（插件端 logistic_detail
+> 抓取 100% 返回非 JSON/空 body，仍上传空 dump 并被按 RETRYABLE 无限重试）——
+> 修复在插件仓：payload==null 不上传 + 带 responseReadError 诊断。
+
 ---
 
 ## 3. 订单 / 物流 / 结算 / 售后 4 域数据关联
@@ -278,6 +288,22 @@ plugin.raw_log
 
 **关键原则**：物流终态**独立于**订单终态判断。即使订单已 COMPLETED，只要物流还没拿到 50101 签收事件，插件继续拉直到拿到为止（避免漏抓延迟回传的签收事件）。
 
+### 3.5+ main_order_status 码值实测交叉验证（2026-09-14）
+
+prod 店铺 7494864868604150914，494 单逐码取样 raw_log 原始响应（`order_status_module` + 伴随字段）：
+
+| main_order_status | 单数 | 伴随证据 | 推断文本态 |
+| --- | ---: | --- | --- |
+| 100 | 1 | 无 tracking_no、无 reverse_module | UNPAID（待付款） |
+| 101 | 71 | 有 tracking_no/receipt_id（面单已建）、无 reverse | AWAITING_SHIPMENT（待发货） |
+| 102 | 329 | 有 tracking_no、18 单带 reverse | 已发货/运输中（IN_TRANSIT 一类） |
+| 103 | 7 | 7/7 带 reverse_module（reverse_type=3 退货） | 售后/退货中 |
+| 104 | 86 | 86/86 带 reverse_module（reverse_type=4 买家取消） | CANCELLED |
+
+- raw 响应**只有 int 码**（main_order_status / sku_display_status / main_sub_order_status），无文本枚举
+- 104/103 高置信（reverse_module 全量伴随）；101/102 需 Seller Center 页面 tab 对照终验
+- **reverse_module 内嵌在 order/list 响应里**（reverse_order_id / reverse_type / reverse_reason / refund_time 齐全），取消/售后可从订单 dump 挖掘；reverse_type 枚举（3=退货 / 4=取消）为样本推断待核实
+
 ### 3.5 跨表 JOIN 模板（4 域合一查询）
 
 ```sql
@@ -317,9 +343,9 @@ WHERE o.shop_id = ?
 
 | # | 内容 | 状态 | 谁负责 |
 |---|---|---|---|
-| 1 | `plugin.cancellations` 结构化表 | ❌ TODO | 待 lane（order-domain-business-rules.md §3 TODO #2）|
+| 1 | `plugin.cancellations` 结构化表 | ✅ 已由 0030 建为 `plugin.after_sales` + `after_sale_items`（2026-09-14 merged 7d98a28） | feat/after-sales-table |
 | 2 | 取消 endpoint 解析器（/return_refund/.../cancellations/search）| ❌ TODO | 同上 |
-| 3 | `main_order_status` 状态码字典（101/102/... 全集）| ❌ TODO | catalog §7.4.5 TODO |
+| 3 | `main_order_status` 状态码字典（101/102/... 全集）| 🔄 部分（§3.5+ 实测 100-104 交叉验证，101/102 待 tab 终验） | feature/plugin-shop-analytics |
 | 4 | 物流 tracking_events 字段完整结构 | ❌ TODO | 未抓到完整 burst |
 | 5 | settlement `reasons_detail[].reason` 码表 | ❌ TODO | catalog §7.4.5 TODO |
 | 6 | multi-package 订单 | ❌ TODO | catalog §7.4.6.3 TODO |

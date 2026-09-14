@@ -7,6 +7,7 @@ write_raw_log 写同步流水。
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -27,6 +28,8 @@ from tts_erp_v2.db.models.plugin import (
     ChromeTrackingEvent,
     RawLog,
 )
+
+log = logging.getLogger("tts_erp_v2.plugin.orders.repository")
 
 # ── raw_log ─────────────────────────────────────────────────────────
 
@@ -219,19 +222,49 @@ def list_synced_ids(
 
 
 def _ts_to_datetime(value: Any) -> datetime | None:
-    """TikTok 时间戳 → datetime(UTC)。0 或 None → None。"""
+    """TikTok 时间戳 → datetime(UTC)。0 / None / 空串 → None。
+
+    支持的形态（按 prod raw_log 实测）：
+    - int/float 秒级（< 1e12）或毫秒级（>= 1e12）
+    - 数字字符串（Seller Center order/list 实测形态：create_time 秒级、
+      update_time 毫秒级）——2026-09-14 前 str 分支只认 ISO，数字字符串
+      被静默吞成 None，导致 plugin.orders.order_time 全 NULL
+    - ISO 字符串
+    无法解析的非空值：log.warning 后返回 None（字段级失败不中断整批 dump，
+    批量信号由 parse_error / NULL 率对账承担）。
+    """
     if value is None:
         return None
     if isinstance(value, (int, float)):
         if value == 0:
             return None
-        # 秒级时间戳（< 10^12）；毫秒级（>= 10^12）需除以 1000
-        if value > 1e12:
+        # 秒级（< 1e12）/ 毫秒级（1e12）/ 微秒级（1e15）：循环除 1000 归一到秒
+        while value > 1e12:
             value = value / 1000
-        return datetime.fromtimestamp(value, tz=UTC)
+        try:
+            return datetime.fromtimestamp(value, tz=UTC)
+        except (OverflowError, OSError, ValueError):
+            log.warning("out-of-range timestamp value: %r", value)
+            return None
     if isinstance(value, str):
+        value = value.strip()
         if value in ("", "0"):
             return None
+        # 数字字符串（秒/毫秒），与 int 分支同一启发式
+        try:
+            num = float(value)
+        except ValueError:
+            num = None
+        if num is not None:
+            if num == 0:
+                return None
+            while num > 1e12:
+                num = num / 1000
+            try:
+                return datetime.fromtimestamp(num, tz=UTC)
+            except (OverflowError, OSError, ValueError):
+                log.warning("out-of-range timestamp string: %r", value)
+                return None
         # ISO 字符串
         try:
             dt = datetime.fromisoformat(value)
@@ -239,12 +272,18 @@ def _ts_to_datetime(value: Any) -> datetime | None:
                 dt = dt.replace(tzinfo=UTC)
             return dt
         except (ValueError, TypeError):
+            log.warning("unparseable timestamp string: %r", value)
             return None
     return None
 
 
-def _to_decimal(value: Any) -> Decimal | None:
-    """金额字符串/数字 → Decimal。None/缺失 → None。"""
+def _to_decimal(value: Any, *, field: str = "") -> Decimal | None:
+    """金额字符串/数字 → Decimal。None/缺失/空串 → None。
+
+    解析失败（非空但非法）：log.warning 带字段名 + 原始值后返回 None——
+    字段级失败不中断整批 dump，但必须在日志里可见（2026-09-14 review
+    结论：静默 None 不可接受）。
+    """
     if value is None:
         return None
     if isinstance(value, (int, float)):
@@ -255,7 +294,9 @@ def _to_decimal(value: Any) -> Decimal | None:
         try:
             return Decimal(value)
         except Exception:  # noqa: BLE001 — Decimal 可抛多种异常
+            log.warning("unparseable decimal %s: %r", field or "<unknown>", value)
             return None
+    log.warning("unparseable decimal %s: %r (type %s)", field or "<unknown>", value, type(value).__name__)
     return None
 
 
