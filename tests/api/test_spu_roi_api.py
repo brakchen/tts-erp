@@ -267,12 +267,17 @@ def _seed_ad_dump(
     gmv: str,
     day: str = DAY,
 ) -> None:
-    """post_product_list 一条 ad_daily(1 campaign×SPU×1 day)。"""
+    """post_product_list 一条 ad_today(1 campaign×SPU×1 day)。
+
+    v8（2026-09-15 fix/spu-roi-ad-window-clip）后，_SQL_ROI_AD / _SQL_DETAIL_ADS
+    只读 plugin.ad_today，ad_daily 不再在取数路径上。所以测试夹具必须写
+    ad_today，否则 ROI 计算会拿到 spend=0。
+    """
     # pi-lens-ignore: python-sql-injection
     sess.execute(
         text(
             """
-            INSERT INTO plugin.ad_daily (
+            INSERT INTO plugin.ad_today (
                 seller_id, advertiser_id, campaign_id, product_id, endpoint, day,
                 mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value,
                 onsite_mixed_real_roi2_shopping, metrics_extra, created_at
@@ -283,7 +288,7 @@ def _seed_ad_dump(
                 CAST(:spend AS NUMERIC), CAST(:orders AS BIGINT), CAST(:gmv AS NUMERIC),
                 NULL, '{}'::JSONB, now()
             )
-            ON CONFLICT ON CONSTRAINT uq_ad_daily DO UPDATE SET
+            ON CONFLICT ON CONSTRAINT uq_ad_today DO UPDATE SET
                 mixed_real_cost = EXCLUDED.mixed_real_cost,
                 onsite_roi2_shopping_sku = EXCLUDED.onsite_roi2_shopping_sku,
                 onsite_roi2_shopping_value = EXCLUDED.onsite_roi2_shopping_value,
@@ -1360,8 +1365,8 @@ def test_spu_roi_window_params_clip_sales_and_refunds(
     assert item["sales"] == "100.0000"
     assert item["refund_return_qty"] == 2
     assert item["refund_return_amount"] == "40.0000"
-    # meta.window 如实注记:ad=视图全窗口累计;销售/退款=全历史(未裁剪)
-    assert "ad=视图全窗口累计" in body["meta"]["window"]["note"]
+    # meta.window 如实注记(v8：销售/退款=全历史未裁剪；ad 不再“全窗累计”说明)
+    assert "ad=视图全窗口累计" not in body["meta"]["window"]["note"]
     assert "未裁剪" in body["meta"]["window"]["note"]
     # 日期可裁剪数据(销售∪退款)的真实跨度:窗外 2026-08-10/2026-08-20 +
     # 窗内 2026-09-10/2026-09-12 → min=08-10, max=09-12(页面回填日期框)
@@ -1401,17 +1406,21 @@ def test_spu_roi_window_params_clip_sales_and_refunds(
     assert body["totals"]["total_orders"] == 2
 
 
-def test_spu_roi_date_window_does_not_clip_ad(api_client, readonly_key, db_engine):
-    """review 结论实证:起始/截止日只裁剪销售(paid_at)与退款(updated_at_source),
-    广告 spend/gmv/ad_count 不受 w_start/w_end 影响(ad=视图全窗口累计供参考)。
+def test_spu_roi_date_window_clips_ad(api_client, readonly_key, db_engine):
+    """v8 (2026-09-15 fix/spu-roi-ad-window-clip)：起始/截止日同时裁剪广告。
 
-    回归护栏:防止将来有人把 ad 也悄悄按日期切片 → ROI 分母(全窗口 spend)
-    与分子(裁剪后净现金)口径错配而无提示。
+    逆向 ``test_spu_roi_date_window_does_not_clip_ad`` (v7 回归护栏)：
+    v8 主动从 _SQL_ROI_AD / _SQL_DETAIL_ADS 删 ad_daily ∪ ad_today 的“全窗
+    累计”逻辑，改成 ad_today.day BETWEEN :ws AND :we — 选日期范围时
+    spend / gmv_ad / ad_count 全部随窗口变化，与销售/退款同语义。
+
+    场景：窗内 ad (09-10 spend=15) + 窗外 ad (06-01 spend=25)；裁剪后只
+    留窗内 spend。
     """
     with Session(db_engine) as sess:
         shop_pk = _seed_shop(sess, "TEST_SELLER_WAD")
         spu_pk = _seed_spu(sess, shop_pk, "TEST_ROI_SPU_WAD")
-        # 广告行落在窗口之外(2026-06-01)——若 ad 被日期裁剪就会消失
+        # 窗外 ad：v7 会计入 spend=25，v8 被裁掉
         _seed_ad_dump(
             sess,
             seller="TEST_SELLER_WAD",
@@ -1422,7 +1431,18 @@ def test_spu_roi_date_window_does_not_clip_ad(api_client, readonly_key, db_engin
             gmv="30",
             day="2026-06-01",
         )
-        # 两笔销售:窗内(09-10)与窗外(08-10)各 $20
+        # 窗内 ad：保留 spend=15、orders=2
+        _seed_ad_dump(
+            sess,
+            seller="TEST_SELLER_WAD",
+            product_id="TEST_ROI_SPU_WAD",
+            campaign_id="CAMP_INSIDE_WINDOW",
+            spend="15",
+            orders="2",
+            gmv="20",
+            day="2026-09-10",
+        )
+        # 两笔销售：窗内(09-10)与窗外(08-10)各 $20
         _seed_order_line(
             sess,
             shop_pk=shop_pk,
@@ -1449,16 +1469,16 @@ def test_spu_roi_date_window_does_not_clip_ad(api_client, readonly_key, db_engin
         )
         sess.commit()  # handler 用独立连接读,必须真提交(SQLAlchemy 2 上下文不自动 commit)
     h = {"Authorization": f"Bearer {readonly_key}"}
-    # 不限窗口:ad spend 25 / sales 40 / 2 单
+    # 不限窗口:ad spend=25+15=40 (两条都在),sales=40,2 单
     r_all = api_client.get(
         "/v2/analytics/spu-roi", headers=h, params={"q": "TEST_ROI_SPU_WAD"}
     )
     item_all = r_all.json()["items"][0]
-    assert item_all["ad_count"] == 1
-    assert item_all["spend"] == "25.0000"
+    assert item_all["ad_count"] == 2
+    assert item_all["spend"] == "40.0000"
     assert item_all["sales"] == "40.0000"
     assert item_all["order_count"] == 2
-    # 裁剪到 09-01~09-30:销售只剩 1 单 $20;ad 依旧全窗口(窗外广告行仍在)
+    # 裁剪到 09-01~09-30：销售只 1 单 $20；ad 只留窗内 spend=15 / ad_count=1
     r_crop = api_client.get(
         "/v2/analytics/spu-roi",
         headers=h,
@@ -1469,11 +1489,12 @@ def test_spu_roi_date_window_does_not_clip_ad(api_client, readonly_key, db_engin
         },
     )
     item_crop = r_crop.json()["items"][0]
-    assert item_crop["ad_count"] == 1, item_crop  # 广告不被日期裁剪
-    assert item_crop["spend"] == "25.0000"
+    assert item_crop["ad_count"] == 1, item_crop  # v8：窗外 ad 被裁
+    assert item_crop["spend"] == "15.0000"
     assert item_crop["sales"] == "20.0000"
     assert item_crop["order_count"] == 1
     assert "已裁剪" in r_crop.json()["meta"]["window"]["note"]
+    assert "ad 同窗口裁剪" in r_crop.json()["meta"]["window"]["note"]
 
 
 def test_spu_roi_sort_whitelist_covers_page_sortable_columns(
@@ -1785,8 +1806,8 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
     assert meta["cost_assumption"]
     assert "first_day" in meta["window"]
     assert "last_day" in meta["window"]
-    # meta.window = ad 视图全窗口供参考(§4.5:销售/退款默认不裁剪)
-    assert "ad=视图全窗口累计" in meta["window"]["note"]
+    # meta.window (v8)：销售/退款默认不裁剪，但 ad 不再是“视图全窗口”
+    assert "ad=视图全窗口累计" not in meta["window"]["note"]
     assert "w_start/w_end" in meta["window"]["note"]
     assert meta["unattributed_refund_lines"] >= 0
     assert meta["computed_at"]
