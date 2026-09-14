@@ -2916,3 +2916,54 @@ CREATE TABLE IF NOT EXISTS plugin.campaign_opt_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_campaign_opt_logs_seller_time ON plugin.campaign_opt_logs (seller_id, opt_time);
 CREATE INDEX IF NOT EXISTS idx_campaign_opt_logs_campaign ON plugin.campaign_opt_logs (campaign_id);
+
+-- Name: after_sales; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.after_sales (
+    id bigint NOT NULL,
+    log_id bigint NOT NULL,
+    shop_id text NOT NULL,
+    cancel_id text NOT NULL,
+    cancel_type text NOT NULL,
+    cancel_status text NOT NULL,
+    main_order_id text,
+    reason text,
+    request_time timestamp with time zone,
+    complete_time timestamp with time zone,
+    raw_payload jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.after_sales ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.after_sales_id_seq
+);
+
+
+
+-- Name: after_sale_items; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.after_sale_items (
+    id bigint NOT NULL,
+    log_id bigint NOT NULL,
+    shop_id text NOT NULL,
+    cancel_id text NOT NULL,
+    line_item_id text NOT NULL,
+    order_line_item_id text,
+    sku_id text,
+    product_id text,
+    quantity numeric(20,4),
+    refund_amount numeric(20,4),
+    currency text,
+    raw_payload jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.after_sale_items ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.after_sale_items_id_seq
+);

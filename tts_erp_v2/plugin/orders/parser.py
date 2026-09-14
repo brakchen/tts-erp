@@ -22,6 +22,8 @@ from tts_erp_v2.plugin.orders.repository import (
     _payment_status_to_text,
     _to_decimal,
     _ts_to_datetime,
+    upsert_after_sale,
+    upsert_after_sale_item,
     upsert_order,
     upsert_order_line,
     upsert_settlement,
@@ -478,5 +480,116 @@ def parse_statement_transaction_response(
         seller_app_cut_flow=seller_app_cut_flow,
     )
     rows_written += 1
+
+    return rows_written
+
+
+# ── 售后/退款 解析 ──────────────────────────────────────
+def parse_after_sales_response(
+    sess: Session,
+    *,
+    log_id: int,
+    shop_id: str,
+    response_body: dict,
+    captured_at: datetime,
+) -> int:
+    """解析 /return_refund/202309/cancellations/search 响应。
+
+    返回 plugin.after_sales + plugin.after_sale_items 写入行数。
+
+    响应结构（假设，按 order-domain-business-rules.md §3 描述设计；
+    chrome 扩展未抓到过 0 hit 数据，待首次真实响应后调整字段名）：
+
+    {
+      "code": 0, "message": "success",
+      "data": {
+        "cancellations": [
+          {
+            "cancel_id": "...",
+            "cancel_type": "BUYER_CANCEL" | "CANCEL",
+            "cancel_status": "CANCELLATION_REQUEST_COMPLETE" | ...,
+            "order_id": "<main_order_id>",
+            "reason": "...",
+            "request_time": <iso str or unix ms>,
+            "complete_time": ...,
+            "cancel_line_items": [
+              {
+                "id": "<line_item_id>",
+                "order_line_item_id": "...",
+                "sku_id": "...",
+                "product_id": "...",
+                "quantity": 1,
+                "refund_amount": { "amount": "0", "currency": "VND" }
+              }
+            ]
+          }
+        ]
+      }
+    }
+    """
+    rows_written = 0
+    data = response_body.get("data") or {}
+    if isinstance(data, dict) and "cancellations" in data:
+        cancellations = data.get("cancellations") or []
+    elif "cancel_id" in response_body:
+        cancellations = [response_body]
+    else:
+        cancellations = []
+
+    for c in cancellations:
+        cancel_id = str(c.get("cancel_id") or "")
+        if not cancel_id:
+            log.warning("after_sale missing cancel_id, skipping: %s", c)
+            continue
+        cancel_type = str(c.get("cancel_type") or "")
+        cancel_status = str(c.get("cancel_status") or "")
+        main_order_id = c.get("order_id") or c.get("main_order_id")
+        reason = c.get("reason")
+        request_time = _ts_to_datetime(c.get("request_time"))
+        complete_time = _ts_to_datetime(c.get("complete_time"))
+
+        upsert_after_sale(
+            sess,
+            log_id=log_id,
+            shop_id=shop_id,
+            cancel_id=cancel_id,
+            cancel_type=cancel_type,
+            cancel_status=cancel_status,
+            main_order_id=str(main_order_id) if main_order_id else None,
+            reason=reason,
+            request_time=request_time,
+            complete_time=complete_time,
+            raw_payload=c,
+        )
+        rows_written += 1
+
+        for li in c.get("cancel_line_items") or []:
+            line_item_id = str(li.get("id") or li.get("line_item_id") or "")
+            if not line_item_id:
+                log.warning("after_sale_item missing id, skipping")
+                continue
+            order_line_item_id = li.get("order_line_item_id")
+            sku_id = li.get("sku_id")
+            product_id = li.get("product_id")
+            quantity = _to_decimal(li.get("quantity"))
+            refund_amount_obj = li.get("refund_amount") or {}
+            refund_amount = _to_decimal(refund_amount_obj.get("amount"))
+            currency = refund_amount_obj.get("currency")
+
+            upsert_after_sale_item(
+                sess,
+                log_id=log_id,
+                shop_id=shop_id,
+                cancel_id=cancel_id,
+                line_item_id=line_item_id,
+                order_line_item_id=str(order_line_item_id) if order_line_item_id else None,
+                sku_id=str(sku_id) if sku_id else None,
+                product_id=str(product_id) if product_id else None,
+                quantity=quantity,
+                refund_amount=refund_amount,
+                currency=currency,
+                raw_payload=li,
+            )
+            rows_written += 1
 
     return rows_written
