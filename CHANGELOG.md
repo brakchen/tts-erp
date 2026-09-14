@@ -22,8 +22,8 @@
   - 结余带“广告消耗”格 tooltip、表头 tooltip、钻取面板 HINT 同步改“随选中日期窗口裁剪”。
   - 日期框 tooltip 改“销售/退款/广告同口径裁剪”。
 - **测试**（`tests/api/test_spu_roi_api.py`）：
+  - 删除 v7 `test_spu_roi_date_window_does_not_clip_ad`（v7“全窗口累计”护栏与 v8 行为反向，留存只会误导）。
   - 新增 `test_spu_roi_date_window_clips_ad`（v8 行为护栏：窗外 ad 被裁，窗内 ad 留下）。
-  - 保留 v7 `test_spu_roi_date_window_does_not_clip_ad` 名字重写为“逆断言”验证现在必被裁。
   - `_seed_ad_dump` 夹具改为写 `plugin.ad_today`（v8 后 ad_daily 不在取数路径）。
 - **文档**（`tech-doc/analytics/spu-roi-v7-refactor.md`）：
   - §6.2 / §6.3 / §6.4 / §8.13 同步 v8 口径；`ad_today` 是 ROI 主源说明。

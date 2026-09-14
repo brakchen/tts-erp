@@ -1409,7 +1409,6 @@ def test_spu_roi_window_params_clip_sales_and_refunds(
 def test_spu_roi_date_window_clips_ad(api_client, readonly_key, db_engine):
     """v8 (2026-09-15 fix/spu-roi-ad-window-clip)：起始/截止日同时裁剪广告。
 
-    逆向 ``test_spu_roi_date_window_does_not_clip_ad`` (v7 回归护栏)：
     v8 主动从 _SQL_ROI_AD / _SQL_DETAIL_ADS 删 ad_daily ∪ ad_today 的“全窗
     累计”逻辑，改成 ad_today.day BETWEEN :ws AND :we — 选日期范围时
     spend / gmv_ad / ad_count 全部随窗口变化，与销售/退款同语义。
