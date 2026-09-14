@@ -238,10 +238,14 @@ def _ts_to_datetime(value: Any) -> datetime | None:
     if isinstance(value, (int, float)):
         if value == 0:
             return None
-        # 秒级时间戳（< 10^12）；毫秒级（>= 10^12）需除以 1000
-        if value > 1e12:
+        # 秒级（< 1e12）/ 毫秒级（1e12）/ 微秒级（1e15）：循环除 1000 归一到秒
+        while value > 1e12:
             value = value / 1000
-        return datetime.fromtimestamp(value, tz=UTC)
+        try:
+            return datetime.fromtimestamp(value, tz=UTC)
+        except (OverflowError, OSError, ValueError):
+            log.warning("out-of-range timestamp value: %r", value)
+            return None
     if isinstance(value, str):
         value = value.strip()
         if value in ("", "0"):
@@ -254,9 +258,13 @@ def _ts_to_datetime(value: Any) -> datetime | None:
         if num is not None:
             if num == 0:
                 return None
-            if num > 1e12:
+            while num > 1e12:
                 num = num / 1000
-            return datetime.fromtimestamp(num, tz=UTC)
+            try:
+                return datetime.fromtimestamp(num, tz=UTC)
+            except (OverflowError, OSError, ValueError):
+                log.warning("out-of-range timestamp string: %r", value)
+                return None
         # ISO 字符串
         try:
             dt = datetime.fromisoformat(value)

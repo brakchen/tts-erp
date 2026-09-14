@@ -419,6 +419,13 @@ class TestTsToDatetime:
     def test_numeric_string_milliseconds(self):
         assert _ts_to_datetime("1788961712000") == datetime.fromtimestamp(1788961712, tz=UTC)
 
+    def test_numeric_string_microseconds(self):
+        # prod 实测：update_time 有微秒级形态
+        assert _ts_to_datetime("1789313764908000") == datetime.fromtimestamp(1789313764.908, tz=UTC)
+
+    def test_out_of_range_returns_none(self):
+        assert _ts_to_datetime("999999999999999999999") is None
+
     def test_iso_string(self):
         assert _ts_to_datetime("2026-09-01T10:00:00") == datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
 
