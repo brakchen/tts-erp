@@ -76,3 +76,32 @@
 - 每步完成更新状态；被接手 / 被卡住 → 更新 owner / abandoned。
 - 找"这是谁的 WIP" → 先查本表，再 `git fetch` 对比 `origin/master` 看 HEAD 是否在动
   （AGENTS.md §12.3 接手协议）。
+
+## 反查 lane ↔ session（2026-09-14 fix/remove-order-shipping-fee 验证可行）
+
+ACTIVE.md 的 `owner(session)` 列只写「本 session」/「未登记」等自由文本——表内不存 session UUID。
+反查靠 **pi session 日志**（不存进表，保持单写者规则）：
+
+- 日志目录：`~/.pi/agent/sessions/--<project-path>--/`（chrome-plugins 走自己的 `--home-schan-chrome-plugins--/`）
+- 文件名 = `<ISO8601-timestamp>_<session-uuid>.jsonl`，`<session-uuid>` 即 pi 里 `/resume <uuid>` 的 ID
+- Recipe（取 lane 的 commit 时间窗 ± 30min + commit message 关键词 grep session JSONL）：
+
+  ```bash
+  lane=fix/remove-order-shipping-fee
+  commit=$(git log --grep="$lane" --format=%H | head -1)
+  git log -1 --format=%cI "$commit"   # author time，定位窗口
+
+  # 跨 session 搜 + 关键词命中（python3 示例）
+  python3 - <<'PY'
+  import json, glob
+  kws = ['shipping_fee', 'remove-order-shipping-fee']   # ← commit message / 改的文件关键词
+  for f in sorted(glob.glob('/home/schan/.pi/agent/sessions/--home-schan-tts-erp--/2026-09-14*.jsonl')):
+      sid = f.split('_')[1].replace('.jsonl','')
+      hits = sum(1 for line in open(f) if any(k in line for k in kws))
+      if hits: print(f'{sid}: {hits} hits')
+  PY
+  # → 01a09e63-f091-74ac-94b2-7e9267021ea9: 47 hits
+  pi 内 /resume 01a09e63-f091-74ac-94b2-7e9267021ea9  # ← 续上这条 lane
+  ```
+
+- 局限：跨 lane 同关键词可能多命中（按时间窗过滤）；session 日志可能被 rotate（过老的 lane 查不到）；lane 中途换 session 会留下多条候选，按时长/操作密度挑主体。
