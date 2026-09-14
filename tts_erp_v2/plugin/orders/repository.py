@@ -269,8 +269,13 @@ def _ts_to_datetime(value: Any) -> datetime | None:
     return None
 
 
-def _to_decimal(value: Any) -> Decimal | None:
-    """金额字符串/数字 → Decimal。None/缺失 → None。"""
+def _to_decimal(value: Any, *, field: str = "") -> Decimal | None:
+    """金额字符串/数字 → Decimal。None/缺失/空串 → None。
+
+    解析失败（非空但非法）：log.warning 带字段名 + 原始值后返回 None——
+    字段级失败不中断整批 dump，但必须在日志里可见（2026-09-14 review
+    结论：静默 None 不可接受）。
+    """
     if value is None:
         return None
     if isinstance(value, (int, float)):
@@ -281,7 +286,9 @@ def _to_decimal(value: Any) -> Decimal | None:
         try:
             return Decimal(value)
         except Exception:  # noqa: BLE001 — Decimal 可抛多种异常
+            log.warning("unparseable decimal %s: %r", field or "<unknown>", value)
             return None
+    log.warning("unparseable decimal %s: %r (type %s)", field or "<unknown>", value, type(value).__name__)
     return None
 
 

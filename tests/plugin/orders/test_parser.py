@@ -452,7 +452,29 @@ class TestParseOrderResponseTimes:
             sess.commit()
             assert rows == 1
             row = sess.execute(
+                # pi-lens-ignore: python-sql-injection — 字面量 SQL
                 text("SELECT order_time, update_time FROM plugin.orders WHERE order_id = 'TEST_ord-times'")
             ).one()
             assert row.order_time == datetime.fromtimestamp(1788362478, tz=UTC)
             assert row.update_time == datetime.fromtimestamp(1788961712, tz=UTC)
+
+
+# ─── _to_decimal（2026-09-14：解析失败 log.warning，不再静默 None）───
+
+
+class TestToDecimal:
+    def test_valid(self):
+        from tts_erp_v2.plugin.orders.repository import _to_decimal
+        assert _to_decimal("299000") == 299000
+        assert _to_decimal(1.5) is not None
+
+    def test_invalid_returns_none_and_warns(self, caplog):
+        from tts_erp_v2.plugin.orders.repository import _to_decimal
+        with caplog.at_level("WARNING"):
+            assert _to_decimal("not-a-number", field="test.field") is None
+        assert "test.field" in caplog.text
+
+    def test_none_and_empty(self):
+        from tts_erp_v2.plugin.orders.repository import _to_decimal
+        assert _to_decimal(None) is None
+        assert _to_decimal("") is None

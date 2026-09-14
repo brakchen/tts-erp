@@ -101,8 +101,8 @@ def parse_order_response(
         main_order_status = osm_first.get("main_order_status")  # 整数
         sku_display_status = osm_first.get("sku_display_status")  # 整数
         currency = grand_total.get("currency") or sub_total.get("currency")
-        payment_amount = _to_decimal(grand_total.get("price_val"))
-        total_amount = _to_decimal(sub_total.get("price_val"))
+        payment_amount = _to_decimal(grand_total.get("price_val"), field="orders.payment_amount")
+        total_amount = _to_decimal(sub_total.get("price_val"), field="orders.total_amount")
         fulfillment_type = tom.get("fulfillment_type")  # 整数
         pay_method = tom.get("pay_method")  # 文本
         sale_region = tom.get("sale_region")  # 如 "VN"
@@ -149,12 +149,12 @@ def parse_order_response(
             # product_image.url_list[0]（不是 sku_image 字符串）
             image_obj = item.get("product_image") or {}
             image_url = (image_obj.get("url_list") or [None])[0]
-            quantity = _to_decimal(item.get("quantity"))
+            quantity = _to_decimal(item.get("quantity"), field="order_lines.quantity")
             # sku_unit_price.price_val（不是 sale_price.amount）
             unit_price_obj = item.get("sku_unit_price") or {}
             total_price_obj = item.get("sku_total_price") or {}
-            unit_price = _to_decimal(unit_price_obj.get("price_val"))
-            total_price = _to_decimal(total_price_obj.get("price_val"))
+            unit_price = _to_decimal(unit_price_obj.get("price_val"), field="order_lines.unit_price")
+            total_price = _to_decimal(total_price_obj.get("price_val"), field="order_lines.total_price")
             line_currency = unit_price_obj.get("currency")
             # order_status_module 按 order_line_id 关联
             line_ids = item.get("order_line_ids") or []
@@ -323,7 +323,7 @@ def _parse_amount(amount_obj: dict | None) -> Decimal | None:
     """TikTok {amount, currency} 对象 → Decimal。"""
     if not amount_obj:
         return None
-    return _to_decimal(amount_obj.get("amount"))
+    return _to_decimal(amount_obj.get("amount"), field="fee_component.amount")
 
 
 def _parse_iso_dt(value: str | None) -> datetime | None:
@@ -435,7 +435,7 @@ def parse_statement_transaction_response(
     sku_id = str(sku_record.get("sku_id", "")) or None
     product_name = sku_record.get("product_name")
     sku_name = sku_record.get("sku_name")
-    quantity = _to_decimal(sku_record.get("quantity"))
+    quantity = _to_decimal(sku_record.get("quantity"), field="settlement_details.quantity")
     settlement_status = (
         str(sku_record.get("settlement_status", ""))
         if sku_record.get("settlement_status") is not None
@@ -571,9 +571,9 @@ def parse_after_sales_response(
             order_line_item_id = li.get("order_line_item_id")
             sku_id = li.get("sku_id")
             product_id = li.get("product_id")
-            quantity = _to_decimal(li.get("quantity"))
+            quantity = _to_decimal(li.get("quantity"), field="after_sale_items.quantity")
             refund_amount_obj = li.get("refund_amount") or {}
-            refund_amount = _to_decimal(refund_amount_obj.get("amount"))
+            refund_amount = _to_decimal(refund_amount_obj.get("amount"), field="after_sale_items.refund_amount")
             currency = refund_amount_obj.get("currency")
 
             upsert_after_sale_item(
