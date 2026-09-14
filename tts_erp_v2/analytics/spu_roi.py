@@ -88,7 +88,16 @@ _ORDERS_MAX = 500
 # §3.2 SQL 常量集
 # ═════════════════════════════════════════════════════════════════════
 
-# 主表 SQL ── 广告域（不变）
+# 主表 SQL ── 广告域（v8：随日期切片 + 单源 ad_today）
+# 2026-09-15 之前从 plugin.ad_daily ∪ ad_today 全窗口累计，ROI 分母恒定；
+# 选日期范围时 spend 不变（用户反复报"切了日期广告消耗不变"）。
+# 现改为：
+#   - 只读 plugin.ad_today（merge job 自 2026-09-13 禁用后 ad_daily 已冻结；
+#     ad_today 是 Chrome 扩展 kind=today 的活跃写入源）。
+#   - 按 day BETWEEN :ws AND :we 裁剪（与销售/退款同语义）；:ws/:we 任一为 NULL
+#     时该侧条件短路（沿用 spu_roi 既有可空窗口约定）。
+# 影响：选日期范围 < 2026-09-13 时广告消耗归零（ad_today 历史未回填）；
+# ad_daily 历史数据已不在 SQL 取数路径上。回填另起 migration（不在本 lane）。
 _SQL_ROI_AD = text(
     """
     SELECT spu_pk,
@@ -99,15 +108,6 @@ _SQL_ROI_AD = text(
            min(day)                                  AS ad_first_day,
            max(day)                                  AS ad_last_day
     FROM (
-        SELECT d.campaign_id, d.product_id, d.day,
-               d.mixed_real_cost, d.onsite_roi2_shopping_sku,
-               d.onsite_roi2_shopping_value,
-               cp.id AS spu_pk
-        FROM plugin.ad_daily d
-        LEFT JOIN commerce.shops ca ON ca.platform = 'tiktok' AND ca.shop_id = d.seller_id
-        LEFT JOIN commerce.products_spu cp ON cp.shop_pk = ca.id AND cp.spu_id = d.product_id
-        WHERE d.endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'
-        UNION ALL
         SELECT t.campaign_id, t.product_id, t.day,
                t.mixed_real_cost, t.onsite_roi2_shopping_sku,
                t.onsite_roi2_shopping_value,
@@ -116,6 +116,10 @@ _SQL_ROI_AD = text(
         LEFT JOIN commerce.shops ca ON ca.platform = 'tiktok' AND ca.shop_id = t.seller_id
         LEFT JOIN commerce.products_spu cp ON cp.shop_pk = ca.id AND cp.spu_id = t.product_id
         WHERE t.endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'
+          AND (CAST(:ws AS timestamptz) IS NULL
+               OR t.day >= CAST(:ws AS timestamptz)::date)
+          AND (CAST(:we AS timestamptz) IS NULL
+               OR t.day <  CAST(:we AS timestamptz)::date)
     ) combined
     WHERE spu_pk IS NOT NULL
     GROUP BY spu_pk
@@ -345,13 +349,8 @@ _SQL_ROI_CATALOG = text(
 
 _SQL_ROI_WINDOW = text(
     "SELECT min(day) AS first_day, max(day) AS last_day "
-    "FROM ("
-    "  SELECT day FROM plugin.ad_daily "
-    "  WHERE endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list' "
-    "  UNION ALL "
-    "  SELECT day FROM plugin.ad_today "
-    "  WHERE endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list' "
-    ") combined"
+    "FROM plugin.ad_today "
+    "WHERE endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list' "
 )
 
 _SQL_ROI_DATA_WINDOW = text(
@@ -574,7 +573,8 @@ _SQL_DETAIL_CASES = text(
     """
 )
 
-# /ads — campaign × SPU（无窗口；广告全窗口累计）
+# /ads — campaign × SPU（v8：随日期切片 + 单源 ad_today）
+# 主表 _SQL_ROI_AD 同语义；空窗口时按 NULL 短路；不传 :ws/:we 仍走全历史。
 _SQL_DETAIL_ADS = text(
     """
     SELECT campaign_id,
@@ -585,13 +585,12 @@ _SQL_DETAIL_ADS = text(
     FROM (
         SELECT campaign_id, product_id, day,
                mixed_real_cost, onsite_roi2_shopping_sku
-        FROM plugin.ad_daily
-        WHERE endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'
-        UNION ALL
-        SELECT campaign_id, product_id, day,
-               mixed_real_cost, onsite_roi2_shopping_sku
         FROM plugin.ad_today
         WHERE endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'
+          AND (CAST(:ws AS timestamptz) IS NULL
+               OR day >= CAST(:ws AS timestamptz)::date)
+          AND (CAST(:we AS timestamptz) IS NULL
+               OR day <  CAST(:we AS timestamptz)::date)
     ) combined
     WHERE product_id IN (
         SELECT cp.spu_id FROM commerce.products_spu cp WHERE cp.id = :spu_pk
@@ -778,7 +777,10 @@ def _query_spu_roi(
         .all()
     )
 
-    ad_rows = sess.execute(_SQL_ROI_AD).mappings().all()
+    ad_rows = sess.execute(
+        _SQL_ROI_AD,
+        {"ws": ws_dt, "we": we_dt},
+    ).mappings().all()
     ad_map = {
         int(r["spu_pk"]): r for r in ad_rows if r["spu_pk"] is not None
     }  # pi-lens-ignore: no-try-except
@@ -1156,14 +1158,15 @@ def _query_spu_roi(
     override_rate = None if fee_rate is None else str(fee_rate)
     if w_start is None and w_end is None:
         window_note = (
-            "ad=视图全窗口累计(供参考)；销售/退款=全历史(未裁剪,可传 w_start/w_end)；"
+            "销售/退款=全历史(未裁剪,可传 w_start/w_end)；"
             "概览单量/GMV 按下单状态全量累计"
         )
     else:
         window_note = (
-            "ad=视图全窗口累计(供参考)；销售/退款已裁剪:"
+            "销售/退款已裁剪:"
             f"{w_start.isoformat() if w_start else '不限'}"
             f" ~ {w_end.isoformat() if w_end else '不限'}(含 w_end 当日)；"
+            "ad 同窗口裁剪（v8）；"
             "概览单量/GMV 按 COALESCE(paid_at, order_time) 裁剪"
         )
 
@@ -1552,8 +1555,13 @@ def _detail_cases(
     }
 
 
-def _detail_ads(sess: Session, spu_pk: int) -> dict:
-    rows = sess.execute(_SQL_DETAIL_ADS, {"spu_pk": spu_pk}).mappings().all()
+def _detail_ads(
+    sess: Session, spu_pk: int, w_start: date | None, w_end: date | None
+) -> dict:
+    ws_dt, we_dt = _window_dates(w_start, w_end)
+    rows = sess.execute(
+        _SQL_DETAIL_ADS, {"spu_pk": spu_pk, "ws": ws_dt, "we": we_dt}
+    ).mappings().all()
     ads: list[dict] = []
     for r in rows:
         ads.append(
@@ -1571,7 +1579,7 @@ def _detail_ads(sess: Session, spu_pk: int) -> dict:
         "meta": {
             "rubric_version": "v9",
             "computed_at": datetime.now(UTC).isoformat(),
-            "note": "广告域全窗口累计，不随日期裁剪",
+            "note": "广告域与日期窗口同语义裁剪（v8）",
         },
     }
 
@@ -1675,6 +1683,10 @@ def list_cases(
 def list_ads(
     spu_pk: int,
     sess: Session = Depends(get_session),  # noqa: B008
+    w_start: date | None = Query(default=None),  # noqa: B008
+    w_end: date | None = Query(default=None),  # noqa: B008
 ) -> dict:
     _check_spu_or_404(sess, spu_pk)
-    return _detail_ads(sess, spu_pk)
+    if w_start is not None and w_end is not None and w_start > w_end:
+        raise HTTPException(status_code=422, detail="w_start must be <= w_end")
+    return _detail_ads(sess, spu_pk, w_start, w_end)

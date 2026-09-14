@@ -276,7 +276,8 @@ meta 变更：
 
 **新增端点**（钻取面板数据源，详见 §6.3；D6 已拍板 = 每 tab 懒加载）：
 `GET /v2/analytics/spu-roi/{spu_pk}/{orders|settlements|cases|ads}`（readonly），
-窗口参数与主表同语义（ads 无窗口——广告全窗口累计，与主表一致）。
+窗口参数与主表同语义（v8 fix/spu-roi-ad-window-clip：ads 也接受 w_start/w_end，
+与主表同口径裁剪，不再“全窗口累计”）。
 
 ## 5. 页面改造（`api/v2/pages.py` 模板 + `static/js/spu-roi.js`）
 
@@ -286,7 +287,7 @@ meta 变更：
 | 主表列 | 字段 | 说明 |
 | --- | --- | --- |
 | 商品 | `spu_id / title / main_image_url / status` | 维度列（⚠ DEFAULT_K1 标记保留在标题旁） |
-| 广告消耗 | `spend` | USD，广告全窗口累计 |
+| 广告消耗 | `spend` | USD，v8 起随日期窗口裁剪（只读 plugin.ad_today） |
 | 有效GMV | `sales` | 白名单有效销售，USD |
 | 有效出单量 | `order_count` | 白名单订单数 |
 | 取消率 | `cancel_rate` | 取消 ÷（有效+取消） |
@@ -332,7 +333,7 @@ meta 变更：
 | **订单·物流** | 该 SPU 窗口内订单列表：订单号 / 状态 / 件数 / 行金额 / paid_at / **is_settled** / **已到海外(38301)✓** / 全损标记；每行可再展开 **tracking 时间线**（`tracking_events` 按事件时间排序，action_code + 描述）；CANCELLED 单标红、全损单标 ⚠ | `commerce.sales_orders/lines` + `fulfillment.shipments/tracking_events` |
 | **结算** | 已结算订单的**组件拆分明细**：每单一张小表（GROSS_SALES / SELLER_DISCOUNT / PLATFORM_COMMISSION / AFFILIATE_COMMISSION / SHIPPING_FEE / ACTUAL_SHIPPING_FEE / PLATFORM_DISCOUNT / CUSTOMER_REFUND / FEE / **SETTLEMENT**），VND 原值 + USD 换算；statement 时间；**SPU 分摊比例**（line_gmv/order_gmv）；未结算订单不进明细，tab 底部一行汇总「未结算 N 单，估算净收入 $X（基线 r̂ ×(1−退货率)）」（行字段计算，用户拍板 2026-09-07） | `finance.settlement_transactions/components` |
 | **售后** | case 明细（**order_id 关联**（可跳订单 tab 对号）/ 类型/状态/退款金额/原因 code+text/时间），未完结标黄 | `after_sales.cases/case_lines`（P1 原规划） |
-| **广告** | campaign×SPU 行（campaign_id/消耗/出单/窗口；无名称字段——同步数据不含，已拍板不追） | `plugin.ad_daily` ∪ `ad_today`（2026-09-11 起直读；原规划的 `ad_product_links` 视图已由 migration 0020 删除） |
+| **广告** | campaign×SPU 行（campaign_id/消耗/出单/窗口；无名称字段——同步数据不含，已拍板不追）。v8（fix/spu-roi-ad-window-clip）起随主表窗口裁剪，与销售/退款同口径 | `plugin.ad_today`（v8：删 `ad_daily` UNION ALL，仅 ad_today 为主源；merge job 自 2026-09-13 禁用后 ad_daily 已冻结） |
 
 **tab 结构统一为「顶部指标汇总区 + 下方明细记录」**（D8：主表移出的指标
 按域归位，不再做隐藏列）：
@@ -348,8 +349,10 @@ meta 变更：
 - **售后**：顶部 = 退款指标（净退款额 / 退款率金额·单量两口径 /
   仅退·退货拆分 / 已付被取消信息列含 missing_lines）
 - **广告**：顶部 = 广告指标（投放广告数 / 平台出单量 / 平台 GMV / ROI₀ /
-  观测窗口），并明示「广告域全窗口累计，不随日期裁剪」（与主表窗口的
-  差异必须可见，否则用户对不上数）
+  观测窗口）。v8（fix/spu-roi-ad-window-clip）起广告消耗与主表窗口同口径
+  裁剪，观测窗口=ad_today 当前覆盖范围；不再“全窗口累计”。**注意**：
+  ad_today 当前仅覆盖 09-13 以后的日期（merge job 2026-09-13 禁用），
+  选更早日期时广告消耗会归零 —— 历史回填另起 migration（不在本 lane）。
 
 ### 6.3 端点设计（D6 ✅ 已拍板：每 tab 一个懒加载端点）
 
@@ -357,7 +360,7 @@ meta 变更：
 GET /v2/analytics/spu-roi/{spu_pk}/orders?w_start&w_end      → 订单·物流 tab
 GET /v2/analytics/spu-roi/{spu_pk}/settlements?w_start&w_end → 结算 tab
 GET /v2/analytics/spu-roi/{spu_pk}/cases?w_start&w_end       → 售后 tab
-GET /v2/analytics/spu-roi/{spu_pk}/ads                       → 广告 tab（全窗口，无日期参数）
+GET /v2/analytics/spu-roi/{spu_pk}/ads?w_start&w_end         → 广告 tab（v8：接受窗口参数，与主表同口径裁剪）
 ```
 
 利润构成 tab **不发请求**——数据全部来自主表行已有字段（net_revenue 拆分 / COGS
@@ -397,7 +400,7 @@ SQL 简单独立；面板一打开就全量拉四个域反而浪费。代价是�
     "refund_amount": "…", "reason": "…", "updated_at": "…" }],
   "meta": {…} }
 
-// GET …/ads（无窗口参数）
+// GET …/ads（v8：接受 w_start/w_end）
 { "spu_pk": 1448,
   "ads": [{ "campaign_id": "…", "spend": "…", "orders": 12,
     "first_day": "…", "last_day": "…" }],
@@ -409,7 +412,9 @@ SQL 简单独立；面板一打开就全量拉四个域反而浪费。代价是�
 - 金额序列化与主表一致（money-str 4 位小数，USD；结算组件同时给 VND 原值）。
 - `orders` 上限 500 条 + `meta.orders_truncated` 防呆（单 SPU 实测最大数十单，打不到）。
 - 窗口参数 `w_start/w_end` 与主表同语义（COALESCE(paid_at, order_time)）；
-  tracking / settlement / cases 随订单走，不单独裁剪；`ads` 无窗口（§4.5 广告全窗口）。
+  tracking / settlement / cases 随订单走，不单独裁剪。v8（fix/spu-roi-ad-window-clip）：
+  `ads` 也接受 `w_start/w_end`，按 `plugin.ad_today.day` 同口径裁剪
+  （与原 v7 “ads 无窗口”语义反向，详 §6.2）。
 - spu_pk 不存在 → 404；鉴权沿用 readonly 角色矩阵。
 
 ### 6.4 后续展示 backlog（2026-09-07 取舍完毕）
@@ -455,8 +460,8 @@ TEST_ 前缀行，走 `tests/conftest.py` 事务回滚隔离惯例）。
 11. `orders` 端点：`is_settled` / 38301 到达标志 / tracking 时间线按事件时间排序
 12. `settlements` 端点：已结算订单返回组件拆分 + SPU 分摊比例（Σ share ≈ 单内占比）；
     未结算订单不出现
-13. 钻取端点通用：spu_pk 不存在 → 404；窗口参数与主表一致裁剪（ads 无窗口）；
-    readonly 角色矩阵沿用
+13. 钻取端点通用：spu_pk 不存在 → 404；窗口参数与主表一致裁剪
+    （v8：ads 也接受窗口，与主表同口径，不再“无窗口”）；readonly 角色矩阵沿用
 14. 成本链优先级（D1）：MANUAL > PURCHASE > SOURCE_PRICE > DEFAULT(40)，
     逐层命中/穿透各一例
 15. PURCHASE 层多单取最新（updated_at 倒序）；SOURCE 层直取 NULL → 走 offer 桥

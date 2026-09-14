@@ -1002,7 +1002,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     <!-- 结余带:row-cols 栅格降密度(xs 2 / sm 3 / md 4 / lg 5 两行),JS 只写 #sum-* 文本 + is-err/is-ok -->
     <section class="op-counter px-2 px-md-4 py-3 py-md-4" id="summaries" aria-live="polite">
       <div class="row g-2 g-md-3 text-center row-cols-2 row-cols-sm-3 row-cols-md-4 row-cols-lg-5">
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">广告消耗<span class="op-hint" data-tip="广告消耗 = Σ real_cost_total（广告视图全窗口累计，USD；作为减项计入净利润）">?</span></span><span class="op-counter-num" id="sum-spend">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">广告消耗<span class="op-hint" data-tip="广告消耗 = Σ mixed_real_cost（plugin.ad_today；随选中日期窗口裁剪，与销售/退款同口径；作为减项计入净利润）">?</span></span><span class="op-counter-num" id="sum-spend">—</span></span></div>
         <div class="col"><span class="op-counter-item"><span class="op-counter-label">有效销售<span class="op-hint" data-tip="有效销售订单金额 = Σ quantity×unit_price（状态口径 2026-09-06：白名单状态全部订单，含 COD 在途/待收款，下单即算）；退款不在此扣减，见「退款净额」">?</span></span><span class="op-counter-num" id="sum-sales">—</span></span></div>
         <div class="col"><span class="op-counter-item"><span class="op-counter-label">GMV<span class="op-hint" data-tip="全部订单销售额 = 白名单有效 ∪ 取消订单的原始行金额（下单即计，含 COD 在途未收款与取消单原额）；有效销售 + 取消单原额 = 全单口径；≠ 行内「平台GMV」广告归因口径">?</span></span><span class="op-counter-num" id="sum-gmv">—</span></span></div>
         <div class="col"><span class="op-counter-item"><span class="op-counter-label">有效单量<span class="op-hint" data-tip="有效订单数（跨可见 SPU 全局去重；按订单状态计：已付白名单状态全部订单，含 COD 在途/待收款，下单即算订单口径）">?</span></span><span class="op-counter-num" id="sum-orders">—</span></span></div>
@@ -1028,7 +1028,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
             <option value="">全部店铺</option>
           </select>
         </label>
-        <label class="op-field op-field--date" for="filter-w-start" data-tip="销售/退款日期范围（空 = 全历史；广告窗口始终全量）">
+        <label class="op-field op-field--date" for="filter-w-start" data-tip="日期范围（销售/退款/广告同口径裁剪；空 = 全历史）">
           <span class="op-fld-label">起始日</span>
           <input id="filter-w-start" type="date" class="form-control" aria-label="销售/退款起始日期（空 = 不限）">
         </label>
@@ -1064,7 +1064,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
         <thead>
           <tr>
             <th scope="col" class="op-th op-th-left" width="140">商品</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="spend" data-tip="广告消耗（USD，广告窗口全量累计；作为减项计入净利润）" width="200">广告消耗</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="spend" data-tip="广告消耗（USD，plugin.ad_today，随选中日期窗口裁剪；作为减项计入净利润）" width="200">广告消耗</th>
             <th scope="col" class="op-th op-th-sort" data-sort="sales" data-tip="有效GMV = 白名单状态订单行金额（USD；排除已取消订单，B1 拍板）" width="200">有效GMV</th>
             <th scope="col" class="op-th op-th-sort" data-sort="order_count" data-tip="有效出单量 = 白名单有效订单数（distinct）" width="160">有效出单量</th>
             <th scope="col" class="op-th op-th-sort" data-sort="cancel_rate" data-tip="取消率 = 国内取消单量 ÷ (有效单量 + 国内取消单量)；v9 口径：只计物流未到海外的取消单，海外取消(已到目的国 38301)已计入全损退款率，两处不重叠" width="180">取消率%</th>
