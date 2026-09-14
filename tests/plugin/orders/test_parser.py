@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from tts_erp_v2.db.base import get_engine
 from tts_erp_v2.plugin.orders.parser import (
     flatten_fees,
     parse_logistics_response,
@@ -22,7 +23,6 @@ from tts_erp_v2.plugin.orders.parser import (
     parse_statement_transaction_response,
 )
 from tts_erp_v2.plugin.orders.repository import write_raw_log
-from tts_erp_v2.db.base import get_engine
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
