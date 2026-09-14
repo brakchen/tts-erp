@@ -938,6 +938,74 @@ grand_total = sum(sku_total_price) + shipping_fee
 - 2 个运费档位：17000 VND 与 30000 VND（都是 0.71~0.75 USD）
 - 5 个 `17000` 档平均比 3 个 `30000` 档**低**（金额区间不同，不是商品价不同）
 
+> **2026-09-13 21:50 补注**：17k/30k 拆解（运费 vs 佣金）经产品确认**不拆**。业务侧只需 `price_module.grand_total` 一个数字作为"买家实付总额"，运费/佣金明细不影响使用。问题 1 关闭，不需等 8 单自然结算后反查。
+
+#### 7.4.6 `pay_method` 枚举值 + 多 SKU 订单样例
+
+##### 7.4.6.1 `pay_method` 枚举全集（11:31 burst 50 单实测）
+
+| pay_method | 出现次数 | 含义（猜测） | 业务范围 |
+| --- | ---: | --- | --- |
+| `Cash on delivery` | 42 | 货到付款（COD） | 跨境 + 越南本地 |
+| `MoMo 电子钱包` | 3 | 越南本地电子钱包 | 越南本地买家 |
+| `Credit/debit card` | 2 | 信用卡 / 借记卡 | 跨境 + 越南本地 |
+| `TikTok Shop Balance` | 2 | TikTok 钱包余额 | 跨境 + 越南本地 |
+| `VNPAY` | 1 | 越南本地聚合支付 | 越南本地 |
+
+**可能未覆盖的**（需更多 burst 验证）：Apple Pay、Google Pay、PayPal、Bank Transfer、COD 之外的其他本地钱包。
+
+**8 运费档单的 pay_method 交叉**（验证运费与支付方式无关）：
+
+| main_order_id | 差额 (VND) | pay_method |
+| --- | ---: | --- |
+| `586026126655260356` | 17,000 | **MoMo 电子钱包** |
+| `586014607863481477` | 17,000 | Cash on delivery |
+| `585992484307765000` | 17,000 | Cash on delivery |
+| `585992300305745672` | 17,000 | Cash on delivery |
+| `585968306069014066` | 17,000 | **Credit/debit card** |
+| `585986403696936677` | 30,000 | Cash on delivery |
+| `585971536482567908` | 30,000 | Cash on delivery |
+| `585971299152660196` | 30,000 | Cash on delivery |
+
+→ **17k/30k 不是 COD 专属**，MoMo 和 Credit card 也有 17k。排除"仅 COD 运费"假设。
+
+##### 7.4.6.2 1 单多 SKU 样例（11:31 burst 50 单里唯一）
+
+| 字段 | 值 |
+| --- | --- |
+| `main_order_id` | **`586042625860273841`** |
+| `sku_module.length` | **2** （99% 单是 1 个 SKU，这单罕见） |
+| `fulfill_line_module.length` | 2 （与 sku_module 同结构，可能冗余） |
+| `delivery_module.length` | 1 |
+| `price_module.sub_total` | 1,184,712 VND |
+| `price_module.grand_total` | **1,184,712 VND** (= sum(sku_total_price) + shipping_fee 0) |
+| `trade_order_module.shipping_fee` | 0 VND |
+| `trade_order_module.pay_method` | Cash on delivery |
+
+**2 个 SKU 详情**：
+
+| sku_id | sku_name | product_id | qty | unit_price | total_price |
+| --- | --- | --- | ---: | ---: | ---: |
+| `1736527243602265335` | Màu xanh lục Xám, L(55-62.5kg) | `1736527242804888823` | 1 | 674,134 | 674,134 |
+| `1736931118053491959` | Màu tím, L 57.5KG-65KG | `1736931118766392567` | 1 | 510,578 | 510,578 |
+| **sum** |  |  | 2 |  | **1,184,712** ✓ |
+
+**核心结论**：多 SKU 订单的 `grand_total` 计算与单 SKU **完全相同**——仍是 `sum(sku_total_price) + shipping_fee`。`sku_module` 是数组，按位置遍历求和即可。
+
+##### 7.4.6.3 TODO：多包裹订单（`delivery_module.length > 1`）
+
+> **状态**：未抓到。
+> **11:31 burst 50 单实测**：`delivery_module` 长度分布 `{1: 50}`，**全 50 单都是 1 包裹**。
+> **需要的触发场景**：卖家操作 1 单多包裹的发货（如多 SKU 订单分仓发货、或者大件拆 2 个包裹）。
+> **目前推测的字段含义**（需验证）：
+> - `trade_order_module.shipping_fee` = 订单级运费（业务定义）
+> - `delivery_module[].shipping_fee` = 包裹级运费（实际承运商收的；单包裹时观察到 `{}` 空对象，原因待查）
+> - `delivery_module[].payment_total` = 包裹实付总额（与 `price_module.grand_total` 应相等，单包裹时已验证）
+> **补抓方式**：
+> 1. 让卖家操作 1 单多包裹订单（自然等待 1~2 周）
+> 2. 或卖家手动在卖家中心后台拆分一个 1 单多包裹订单触发
+> 3. 抓到后对比 `delivery_module[].shipping_fee` vs `trade_order_module.shipping_fee`，确认是 "订单级 ≠ sum(包裹级)" 还是 "相等"
+
 ```
 
 ### 7.5 关键接口实测性能
