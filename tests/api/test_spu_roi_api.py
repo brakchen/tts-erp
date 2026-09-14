@@ -140,12 +140,8 @@ def _fx_online_consts(db_engine, _isolate_state):
 def _wipe(db_engine) -> None:
     with db_engine.begin() as conn:
         # pi-lens-ignore: python-sql-injection
-        conn.execute(
-            text("DELETE FROM plugin.ad_daily WHERE seller_id LIKE 'TEST_%'")
-        )
-        conn.execute(
-            text("DELETE FROM plugin.ad_today WHERE seller_id LIKE 'TEST_%'")
-        )
+        conn.execute(text("DELETE FROM plugin.ad_daily WHERE seller_id LIKE 'TEST_%'"))
+        conn.execute(text("DELETE FROM plugin.ad_today WHERE seller_id LIKE 'TEST_%'"))
         # pi-lens-ignore: python-sql-injection
         conn.execute(
             text(
