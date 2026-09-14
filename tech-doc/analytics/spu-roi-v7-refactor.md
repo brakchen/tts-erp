@@ -230,7 +230,7 @@ spu_pk→(cost, currency, source) map），口径与 jobs 版 1:1（同一 SQL �
 
 | 数据源 | 金额字段 | 币种 | 实测证据 |
 | --- | --- | --- | --- |
-| 广告（`ad_daily` ∪ `ad_today` 聚合） | 广告消耗 / 平台出单 GMV | **USD** | 拍板口径（OEC 账号显示币种），无需换算 |
+| 广告（`plugin.ad_today`，v8 起单源；删 `ad_daily` UNION ALL） | 广告消耗 / 平台出单 GMV | **USD** | 拍板口径（OEC 账号显示币种），无需换算 |
 | 销售 `commerce.sales_order_lines` | `unit_price` | **VND** | 928/928 行全 VND |
 | 订单 `commerce.sales_orders` | `total_amount` / `payment_amount` | **VND** | 888/888 行全 VND |
 | 退款 `after_sales.case_lines` | `refund_amount` | **VND**（假设） | 58 行 VND + ⚠ 231/289 行 currency IS NULL——按店铺币种 VND 处理（现有代码已隐含此假设） |
