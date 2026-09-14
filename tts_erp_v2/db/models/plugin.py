@@ -337,6 +337,87 @@ class ChromeSettlementDetail(Base):
     )
 
 
+# ── after_sales ─────────────────────────────────────────────────────
+# 售后/退款结构化数据，来自 /return_refund/202309/cancellations/search。
+# tech-doc/order-domain-business-rules.md §3 + tech-doc/intercept-plugin-canonical.md §1.3
+class ChromeAfterSale(Base):
+    __tablename__ = "after_sales"
+    __table_args__ = (
+        UniqueConstraint(
+            "shop_id", "cancel_id", name="uq_after_sales_shop_cancel"
+        ),
+        Index("ix_after_sales_shop_order", "shop_id", "main_order_id"),
+        {"schema": "plugin"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    log_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("plugin.raw_log.id"), nullable=False
+    )
+    shop_id: Mapped[str] = mapped_column(Text, nullable=False)
+    cancel_id: Mapped[str] = mapped_column(Text, nullable=False)
+    cancel_type: Mapped[str] = mapped_column(Text, nullable=False)
+    cancel_status: Mapped[str] = mapped_column(Text, nullable=False)
+    main_order_id: Mapped[str | None] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
+    request_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    complete_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    raw_payload: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+# ── after_sale_items ───────────────────────────────────────────────
+# 售后/退款行项目（cancel_line_items[]），SKU 级粒度，支持部分取消。
+class ChromeAfterSaleItem(Base):
+    __tablename__ = "after_sale_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "shop_id", "line_item_id", name="uq_after_sale_items_shop_line"
+        ),
+        Index("ix_after_sale_items_shop_cancel", "shop_id", "cancel_id"),
+        Index(
+            "ix_after_sale_items_shop_order_line",
+            "shop_id",
+            "order_line_item_id",
+        ),
+        {"schema": "plugin"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    log_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("plugin.raw_log.id"), nullable=False
+    )
+    shop_id: Mapped[str] = mapped_column(Text, nullable=False)
+    cancel_id: Mapped[str] = mapped_column(Text, nullable=False)
+    line_item_id: Mapped[str] = mapped_column(Text, nullable=False)
+    order_line_item_id: Mapped[str | None] = mapped_column(Text)
+    sku_id: Mapped[str | None] = mapped_column(Text)
+    product_id: Mapped[str | None] = mapped_column(Text)
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    refund_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    currency: Mapped[str | None] = mapped_column(Text)
+    raw_payload: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
 # ── 广告消耗 dump（原 tts_erp_v2/db/models/analytics.py，2026-09-11 并入）───
 # 表已在 plugin schema：ad_today / ad_daily / ad_monthly / ad_raw_log / plugin_logs
 

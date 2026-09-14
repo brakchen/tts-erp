@@ -26,7 +26,8 @@
 | `plugin.tracking_events` | 轨迹事件 | `POST /logistic_detail/list` (track_list[]) | 随 shipment |
 | `plugin.settlements` | 结算单头 | `POST /api/v1/pay/statement/order/list?settlement_status=1` | 终态后 |
 | `plugin.settlement_details` | 结算明细 | `POST /api/v1/pay/statement/transaction/detail` | 随 settlement |
-| `plugin.cancellations` | **TODO** 取消/退款 | `/return_refund/202309/cancellations/search` | （待建表）|
+| `plugin.after_sales` | 售后/取消单头 | `POST /return_refund/202309/cancellations/search` | 每天 + on-demand |
+| `plugin.after_sale_items` | 售后/取消行项目（SKU 级，支持部分取消）| 同上 (cancel_line_items[]) | 随 after_sales |
 | `plugin.raw_log` | 原始 dump 流水 | （所有 endpoint 的 raw body 都在这） | 每次 dump 1 行 |
 
 ### 1.2 广告消耗 5 张表（2026-09-11 由 analytics schema 并入 plugin）
@@ -64,7 +65,7 @@ POST /oec_ads/shopping/v1/oec_ads/stat/campaign_opt_log_list ← 变更日志
 | 结算 | `POST /api/v1/pay/statement/transaction/detail` | 单条费用拆分 | 随 settlement |
 | 取消 | `/return_refund/202309/cancellations/search` | 取消/退款 | 每天 |
 
-**取消 endpoint 当前没建结构化表**（TODO #2 见 `order-domain-business-rules.md`），原始 dump 暂存 `plugin.raw_log` 和 `integration.raw_records`。
+**取消/售后 endpoint 已有结构化表**（`plugin.after_sales` + `plugin.after_sale_items`，2026-09-13 lane feat/after-sales-table 建，migration 0030）。chrome 扩展未抓到过 0 hit 数据，schema 基于 `order-domain-business-rules.md §3` 描述设计（BUYER_CANCEL / CANCEL 两种 cancel_type、CANCELLATION_REQUEST_COMPLETE 状态、行项目级 cancel_line_items）。parser: `tts_erp_v2/plugin/orders/parser.py::parse_after_sales_response`。
 
 ---
 

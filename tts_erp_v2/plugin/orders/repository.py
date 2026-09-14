@@ -17,6 +17,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models.plugin import (
+    ChromeAfterSale,
+    ChromeAfterSaleItem,
     ChromeOrder,
     ChromeOrderLine,
     ChromeSettlement,
@@ -695,6 +697,121 @@ def upsert_settlement_detail(
                 "fee_components": fee_components,
                 "seller_web_cut_flow": seller_web_cut_flow,
                 "seller_app_cut_flow": seller_app_cut_flow,
+                "updated_at": now,
+            },
+        )
+    )
+    sess.execute(stmt)
+    return "inserted"
+
+
+# ── after_sales (售后/退款) ──────────────────────────────────
+def upsert_after_sale(
+    sess: Session,
+    *,
+    log_id: int,
+    shop_id: str,
+    cancel_id: str,
+    cancel_type: str,
+    cancel_status: str,
+    main_order_id: str | None,
+    reason: str | None,
+    request_time: datetime | None,
+    complete_time: datetime | None,
+    raw_payload: dict | None,
+) -> str:
+    """upsert plugin.after_sales。幂等键 (shop_id, cancel_id)。
+
+    返回 "inserted" 或 "updated" 供 caller 计入 rows_written。
+    """
+    now = datetime.now(UTC)
+    stmt = (
+        pg_insert(ChromeAfterSale)
+        .values(
+            log_id=log_id,
+            shop_id=shop_id,
+            cancel_id=cancel_id,
+            cancel_type=cancel_type,
+            cancel_status=cancel_status,
+            main_order_id=main_order_id,
+            reason=reason,
+            request_time=request_time,
+            complete_time=complete_time,
+            raw_payload=raw_payload,
+            created_at=now,
+            updated_at=now,
+        )
+        .on_conflict_do_update(
+            index_elements=[
+                ChromeAfterSale.shop_id,
+                ChromeAfterSale.cancel_id,
+            ],
+            set_={
+                "log_id": log_id,
+                "cancel_type": cancel_type,
+                "cancel_status": cancel_status,
+                "main_order_id": main_order_id,
+                "reason": reason,
+                "request_time": request_time,
+                "complete_time": complete_time,
+                "raw_payload": raw_payload,
+                "updated_at": now,
+            },
+        )
+    )
+    sess.execute(stmt)
+    return "inserted"
+
+
+def upsert_after_sale_item(
+    sess: Session,
+    *,
+    log_id: int,
+    shop_id: str,
+    cancel_id: str,
+    line_item_id: str,
+    order_line_item_id: str | None,
+    sku_id: str | None,
+    product_id: str | None,
+    quantity: Decimal | None,
+    refund_amount: Decimal | None,
+    currency: str | None,
+    raw_payload: dict | None,
+) -> str:
+    """upsert plugin.after_sale_items。幂等键 (shop_id, line_item_id)。"""
+    now = datetime.now(UTC)
+    stmt = (
+        pg_insert(ChromeAfterSaleItem)
+        .values(
+            log_id=log_id,
+            shop_id=shop_id,
+            cancel_id=cancel_id,
+            line_item_id=line_item_id,
+            order_line_item_id=order_line_item_id,
+            sku_id=sku_id,
+            product_id=product_id,
+            quantity=quantity,
+            refund_amount=refund_amount,
+            currency=currency,
+            raw_payload=raw_payload,
+            created_at=now,
+            updated_at=now,
+        )
+        .on_conflict_do_update(
+            index_elements=[
+                ChromeAfterSaleItem.shop_id,
+                ChromeAfterSaleItem.line_item_id,
+            ],
+            set_={
+                "log_id": log_id,
+                "cancel_id": cancel_id,
+                "order_line_item_id": order_line_item_id,
+                "sku_id": sku_id,
+                "product_id": product_id,
+                "quantity": quantity,
+                "refund_amount": refund_amount,
+                "currency": currency,
+                "raw_payload": raw_payload,
                 "updated_at": now,
             },
         )
