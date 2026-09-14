@@ -7,6 +7,7 @@ write_raw_log 写同步流水。
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -27,6 +28,8 @@ from tts_erp_v2.db.models.plugin import (
     ChromeTrackingEvent,
     RawLog,
 )
+
+log = logging.getLogger("tts_erp_v2.plugin.orders.repository")
 
 # ── raw_log ─────────────────────────────────────────────────────────
 
@@ -219,7 +222,17 @@ def list_synced_ids(
 
 
 def _ts_to_datetime(value: Any) -> datetime | None:
-    """TikTok 时间戳 → datetime(UTC)。0 或 None → None。"""
+    """TikTok 时间戳 → datetime(UTC)。0 / None / 空串 → None。
+
+    支持的形态（按 prod raw_log 实测）：
+    - int/float 秒级（< 1e12）或毫秒级（>= 1e12）
+    - 数字字符串（Seller Center order/list 实测形态：create_time 秒级、
+      update_time 毫秒级）——2026-09-14 前 str 分支只认 ISO，数字字符串
+      被静默吞成 None，导致 plugin.orders.order_time 全 NULL
+    - ISO 字符串
+    无法解析的非空值：log.warning 后返回 None（字段级失败不中断整批 dump，
+    批量信号由 parse_error / NULL 率对账承担）。
+    """
     if value is None:
         return None
     if isinstance(value, (int, float)):
@@ -230,8 +243,20 @@ def _ts_to_datetime(value: Any) -> datetime | None:
             value = value / 1000
         return datetime.fromtimestamp(value, tz=UTC)
     if isinstance(value, str):
+        value = value.strip()
         if value in ("", "0"):
             return None
+        # 数字字符串（秒/毫秒），与 int 分支同一启发式
+        try:
+            num = float(value)
+        except ValueError:
+            num = None
+        if num is not None:
+            if num == 0:
+                return None
+            if num > 1e12:
+                num = num / 1000
+            return datetime.fromtimestamp(num, tz=UTC)
         # ISO 字符串
         try:
             dt = datetime.fromisoformat(value)
@@ -239,6 +264,7 @@ def _ts_to_datetime(value: Any) -> datetime | None:
                 dt = dt.replace(tzinfo=UTC)
             return dt
         except (ValueError, TypeError):
+            log.warning("unparseable timestamp string: %r", value)
             return None
     return None
 

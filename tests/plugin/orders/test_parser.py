@@ -22,7 +22,7 @@ from tts_erp_v2.plugin.orders.parser import (
     parse_statement_list_response,
     parse_statement_transaction_response,
 )
-from tts_erp_v2.plugin.orders.repository import write_raw_log
+from tts_erp_v2.plugin.orders.repository import _ts_to_datetime, write_raw_log
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -399,3 +399,60 @@ def test_flatten_fees_result_is_json_serializable():
     ]
     result = flatten_fees(fees)
     json.dumps(result)  # must not raise
+
+
+# ─── _ts_to_datetime（2026-09-14 修复：数字字符串静默吞 None 导致 order_time 全 NULL）───
+
+
+class TestTsToDatetime:
+    """prod raw_log 实测形态：create_time 秒级数字字符串、update_time 毫秒级数字字符串。"""
+
+    def test_int_seconds(self):
+        assert _ts_to_datetime(1788362478) == datetime.fromtimestamp(1788362478, tz=UTC)
+
+    def test_int_milliseconds(self):
+        assert _ts_to_datetime(1788961712000) == datetime.fromtimestamp(1788961712, tz=UTC)
+
+    def test_numeric_string_seconds(self):
+        assert _ts_to_datetime("1788362478") == datetime.fromtimestamp(1788362478, tz=UTC)
+
+    def test_numeric_string_milliseconds(self):
+        assert _ts_to_datetime("1788961712000") == datetime.fromtimestamp(1788961712, tz=UTC)
+
+    def test_iso_string(self):
+        assert _ts_to_datetime("2026-09-01T10:00:00") == datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
+
+    @pytest.mark.parametrize("value", [None, 0, "0", "", "  "])
+    def test_empty_values(self, value):
+        assert _ts_to_datetime(value) is None
+
+    def test_garbage_string_returns_none(self):
+        assert _ts_to_datetime("not-a-timestamp") is None
+
+
+class TestParseOrderResponseTimes:
+    """数字字符串时间戳必须落库（回归：修复前 order_time/update_time 全 NULL）。"""
+
+    def test_numeric_string_times_persisted(self):
+        eng = get_engine()
+        with Session(eng) as sess:
+            log_id = _make_log_id(sess)
+            resp = {
+                "main_order_id": "TEST_ord-times",
+                "trade_order_module": {
+                    "create_time": "1788362478",
+                    "update_time": "1788961712000",
+                },
+                "sku_module": [],
+            }
+            rows = parse_order_response(
+                sess, log_id=log_id, shop_id=SHOP_ID,
+                response_body=resp, captured_at=datetime.now(UTC),
+            )
+            sess.commit()
+            assert rows == 1
+            row = sess.execute(
+                text("SELECT order_time, update_time FROM plugin.orders WHERE order_id = 'TEST_ord-times'")
+            ).one()
+            assert row.order_time == datetime.fromtimestamp(1788362478, tz=UTC)
+            assert row.update_time == datetime.fromtimestamp(1788961712, tz=UTC)
