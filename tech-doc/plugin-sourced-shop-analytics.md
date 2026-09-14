@@ -105,6 +105,16 @@ v9 口径用文本白名单 `PAID_SALES_ORDER_STATUSES`。需建 int → 文本�
 - [x] `plugin.order_lines`：币种全 VND，product_id 全覆盖（504/504）✓
 - [x] `plugin.orders.main_order_status` 码值分布：100×1 / 101×71 / 102×329 / 103×7 / 104×86
       → 待与 Seller Center 页面显示核对后固化映射
+- [x] **状态码交叉验证（2026-09-14，raw_log 原始响应逐码取样）**：
+      raw 里只有 int 码（`main_order_status` / `sku_display_status` / `main_sub_order_status`），
+      无文本枚举；伴随字段交叉推断——104: 86/86 全部带 `reverse_module`（reverse_type=4
+      买家取消）→ CANCELLED 高置信；103: 7/7 带 reverse_module（reverse_type=3 "商品与描述不符"）
+      → 售后/退货中；102: 329 单有 tracking_no、18 单带 reverse → 已发货/运输中；
+      101: 71 单有面单无 reverse → 待发货；100: 1 单无面单 → 待付款。
+      101/102 语义需 Seller Center tab 对照终验
+- [x] **意外收获：order/list 响应内嵌 `reverse_module`**（reverse_order_id / reverse_type /
+      reverse_reason / 时间戳齐全）→ 售后数据可从现有 dump 部分挖掘，不一定需要独立售后接口；
+      `reverse_type` 枚举（3=退货? 4=取消?）待核实
 - [ ] **`plugin.orders.order_time` 494 行全 NULL、update_time 仅 8 行非空**——
       parser 时间字段路径有 bug，不修则窗口切日不可用（P0 前置）
 - [ ] **`plugin.settlements / settlement_details` 0 行**——raw_log 无 statement 端点记录，
