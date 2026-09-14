@@ -157,7 +157,6 @@ CREATE TABLE plugin.orders (
     fulfillment_type INT,                       -- ✅ 实测确认: trade_order_module.fulfillment_type
     pay_method      TEXT,                       -- ✅ 实测确认: trade_order_module.pay_method
     sale_region     TEXT,                       -- ✅ 实测确认: trade_order_module.sale_region
-    shipping_fee    NUMERIC(20,4),              -- ✅ 实测确认: trade_order_module.shipping_fee.price_val
     order_time      TIMESTAMPTZ,               -- ✅ 实测确认: trade_order_module.create_time（秒级字符串）
     update_time     TIMESTAMPTZ,               -- ✅ 实测确认: trade_order_module.update_time（毫秒级字符串）
     latest_rts_time TIMESTAMPTZ,               -- ✅ 实测确认: trade_order_module.latest_rts_time
@@ -185,7 +184,6 @@ COMMENT ON COLUMN plugin.orders.total_amount IS '✅ 订单总额（price_module
 COMMENT ON COLUMN plugin.orders.fulfillment_type IS '✅ 履约类型（trade_order_module.fulfillment_type，整数）';
 COMMENT ON COLUMN plugin.orders.pay_method IS '✅ 支付方式（trade_order_module.pay_method，如 Cash on delivery）';
 COMMENT ON COLUMN plugin.orders.sale_region IS '✅ 销售区域（trade_order_module.sale_region，如 VN）';
-COMMENT ON COLUMN plugin.orders.shipping_fee IS '✅ 运费（trade_order_module.shipping_fee.price_val）';
 COMMENT ON COLUMN plugin.orders.order_time IS '✅ 下单时间（trade_order_module.create_time，秒级时间戳字符串）';
 COMMENT ON COLUMN plugin.orders.update_time IS '✅ 更新时间（trade_order_module.update_time，毫秒级时间戳字符串）';
 COMMENT ON COLUMN plugin.orders.latest_rts_time IS '✅ 最晚发货时间（trade_order_module.latest_rts_time）';

@@ -925,7 +925,6 @@ CREATE TABLE IF NOT EXISTS plugin.orders (
     fulfillment_type integer,
     pay_method text,
     sale_region text,
-    shipping_fee numeric(20,4),
     update_time timestamp with time zone,
     latest_rts_time timestamp with time zone,
     latest_tts_time timestamp with time zone,

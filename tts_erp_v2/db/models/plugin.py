@@ -105,7 +105,6 @@ class ChromeOrder(Base):
     fulfillment_type: Mapped[int | None] = mapped_column(Integer)
     pay_method: Mapped[str | None] = mapped_column(Text)
     sale_region: Mapped[str | None] = mapped_column(Text)
-    shipping_fee: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
     order_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     latest_rts_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

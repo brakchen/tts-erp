@@ -560,7 +560,7 @@ image_url = image_obj.get("url_list", [None])[0]  # 从 url_list 取第一张
 | ---------- | ------ | -------- |
 | `trade_order_module.pay_method` | 支付方式 | orders.payment_method |
 | `trade_order_module.sale_region` | 销售区域 | orders.region |
-| `trade_order_module.shipping_fee` | 运费 | orders.shipping_fee |
+| `trade_order_module.shipping_fee` | 运费 | —（2026-09-14 删除：解析时不提取、orders 表已无此列） |
 | `trade_order_module.business_line` | 业务线 | orders.business_line |
 | `delivery_module[].logistics_service_info` | 物流服务详情 | shipments.logistics_service |
 | `delivery_module[].shipment_provider_info` | 承运商信息 | shipments.carrier |
