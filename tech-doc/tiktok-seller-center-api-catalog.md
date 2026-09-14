@@ -826,7 +826,7 @@ def _extract_seller_id_from_url(url: str) -> str | None:
     "symbol": "₫", "currency": "VND",
     "price_val": "577523", "format_price": "577.523₫"
   },
-  "shipping_fee": {},                                    // 空对象
+  "shipping_fee": {},                                    // 空对象（本 sample 是包邮单；16% 单运费非 0，详见 §7.4.5 8 单运费样例）
   "logistics_service_info": {
     "logistics_service_id":   "7156147842033714945",
     "logistics_service_name": "全球经济运输服务",          // 服务名（中文）
@@ -894,7 +894,7 @@ def _extract_seller_id_from_url(url: str) -> str | None:
 
 #### 7.4.5 `price_module` 拆解：8 单运费样例
 
-**字段名修正**（catalog §7.4 之前写的 `.amount` 是错的）：
+**字段名确认**（订单域用 `price_val`，结算域用 `amount`）：
 
 ```jsonc{
   "price_module": {
@@ -905,7 +905,7 @@ def _extract_seller_id_from_url(url: str) -> str | None:
 }
 ```
 
-实际字段是 `price_val`，不是 `amount`。
+订单域金额字段使用 `price_val`（§7.4 / §7.4.1 / §7.4.5 均一致）。**结算域**（`/api/v1/pay/statement/...`）使用 `amount`（如 `total_balance.amount`、`in_come.amount`、`fees.amount`），不要混用。
 
 **公式**（50/50 验证通过）：
 
