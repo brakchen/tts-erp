@@ -119,7 +119,12 @@ v9 口径用文本白名单 `PAID_SALES_ORDER_STATUSES`。需建 int → 文本�
       parser 时间字段路径有 bug，不修则窗口切日不可用（P0 前置）
 - [ ] **`plugin.settlements / settlement_details` 0 行**——raw_log 无 statement 端点记录，
       插件尚未抓结算（P0 前置；此前已结算净额只能全走 0.692 估算）
-- [ ] **`plugin.shipments / tracking_events` 0 行**但 raw_log 有数百条 logistic_detail dump
-      ——parser 未写出行，需排查 parse_error / package_list 为空（P0 前置）
+- [x] **`plugin.shipments / tracking_events` 0 行根因已查明（2026-09-14）**：
+      353 条 logistic dump 全部 `response.body=null`——插件端 logistic_detail GET 抓取
+      100% 返回非 JSON/空 body（`payload=null`），background 仍上传空 dump，
+      服务端正确落 `parse_error="response.body is None"`，插件按 RETRYABLE 无限重试。
+      **修复在插件仓**（chrome-plugins）：payload==null 时不上传、记抓取失败并带
+      responseReadError/responseTextLength 诊断字段。服务端 0 行闸**不加** logistics
+      （合法空 package_list 存在，加闸会导致待发货订单无限重试）
 - [ ] `plugin.settlement_details.fee_components` 与 finance SETTLEMENT 口径对账（有数据后）
 - [ ] Seller Center 售后列表接口可拦截性（插件侧 spike）
