@@ -285,7 +285,7 @@ def test_get_coverage_daily_returns_map(db_session):
         source="t",
     )
 
-    result = repository.get_coverage_daily(
+    coverage, total = repository.get_coverage_daily(
         db_session,
         seller_id=_SELLER,
         advertiser_id=_ADV,
@@ -293,9 +293,10 @@ def test_get_coverage_daily_returns_map(db_session):
         start_day=date(2026, 9, 1),
         end_day=date(2026, 9, 30),
     )
-    assert _CAMPAIGN in result
-    assert "2026-09-01" in result[_CAMPAIGN]
-    assert "2026-09-02" in result[_CAMPAIGN]
+    assert total == 1
+    assert _CAMPAIGN in coverage
+    assert "2026-09-01" in coverage[_CAMPAIGN]
+    assert "2026-09-02" in coverage[_CAMPAIGN]
 
 
 def test_get_coverage_monthly_returns_map(db_session):
@@ -319,7 +320,7 @@ def test_get_coverage_monthly_returns_map(db_session):
         source="t",
     )
 
-    result = repository.get_coverage_monthly(
+    coverage, total = repository.get_coverage_monthly(
         db_session,
         seller_id=_SELLER,
         advertiser_id=_ADV,
@@ -327,8 +328,9 @@ def test_get_coverage_monthly_returns_map(db_session):
         start_month="2026-07",
         end_month="2026-12",
     )
-    assert _CAMPAIGN in result
-    assert "2026-08" in result[_CAMPAIGN]
+    assert total == 1
+    assert _CAMPAIGN in coverage
+    assert "2026-08" in coverage[_CAMPAIGN]
 
 
 # ---------------------------------------------------------------------------
