@@ -104,7 +104,6 @@ def parse_order_response(
         fulfillment_type = tom.get("fulfillment_type")  # 整数
         pay_method = tom.get("pay_method")  # 文本
         sale_region = tom.get("sale_region")  # 如 "VN"
-        shipping_fee = _to_decimal((tom.get("shipping_fee") or {}).get("price_val"))
         order_time = _ts_to_datetime(tom.get("create_time"))  # 秒级字符串
         update_time = _ts_to_datetime(tom.get("update_time"))  # 毫秒级字符串
         latest_rts_time = _ts_to_datetime(tom.get("latest_rts_time"))
@@ -124,7 +123,6 @@ def parse_order_response(
             fulfillment_type=fulfillment_type,
             pay_method=pay_method,
             sale_region=sale_region,
-            shipping_fee=shipping_fee,
             order_time=order_time,
             update_time=update_time,
             latest_rts_time=latest_rts_time,
