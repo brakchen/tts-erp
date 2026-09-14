@@ -285,8 +285,8 @@ class TestParseLogisticsResponse:
                 order_id="TEST_ord-reversed", response_body=resp,
                 captured_at=datetime.now(UTC),
             )
-            row = sess.execute(  # pi-lens-ignore: python-sql-injection — 字面量 SQL, bind :s/:p
-                text("SELECT status, shipped_at, delivered_at FROM plugin.shipments WHERE shop_id = :s AND package_id = :p"),
+            row = sess.execute(  # pi-lens-ignore: python-sql-injection
+                text("SELECT status, shipped_at, delivered_at FROM plugin.shipments WHERE shop_id = :s AND package_id = :p"),  # pi-lens-ignore: python-sql-injection
                 {"s": SHOP_ID, "p": "TEST_pkg-reversed"},
             ).one()
             assert row.status == "Delivered"
