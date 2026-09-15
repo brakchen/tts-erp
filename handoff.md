@@ -2,8 +2,8 @@
 
 > 🔄 **当前在途工作注册（谁在改什么 / 谁接手）：先读 `handoff/ACTIVE.md`**（AGENTS.md §12.1）
 >
-> 上次 session: 2026-09-15（chore/tech-doc-enums 沉淀枚举值参考手册）
-> 上次 session 主题: **`tech-doc/enums/` 全新子目录，38 个枚举值空间一个文件（action_code 23 字段、main_order_status int、cancel_type/cancel_status/cancel_reason、reverse_type/reverse_status、case_type、settlement_component_code 58 字段 EAV、cost_method、link_overrides decision、sync_job_status、api_key_role 等），统一结构（来源/取值表/等级 ✅🟡🔴/已知 gap/引用）；README 索引 + conventions.md 维护约定；纯文档 lane（0 改动 tts_erp_v2/ + tests/），merge + push 完成**
+> 上次 session: 2026-09-15（chore/enum-annotate-per-value 逐行等级标注 + 未固化值速查）
+> 上次 session 主题: **针对 review「未固化枚举值需要标注」要求：①每个枚举的'取值'表首列加'等级'（✅/🟡/🔴） ②含未固化值的 18 个文件在每段末尾加 '⚠️ 未固化值速查' 段 ③scripts/annotate_enums.py + scripts/add_unfixed_summary.py 两个维护脚本（带 --dry-run + PER_FILE_STATUS 知识库严格不允许猜） ④conventions.md 补 §3.2/§3.3 等级标注规范 + §6 维护脚本 ⑤README 加未固化值汇总表；纯文档 lane，merge + push 完成**
 
 ## TL;DR (2026-09-15 chore/tech-doc-enums — 枚举值参考手册)
 
