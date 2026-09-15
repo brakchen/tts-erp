@@ -1,5 +1,13 @@
 # tts-erp CHANGELOG
 
+## 2026-09-15 — biz-doc：撤掉版本历史与实测快照（防干扰 agent 计算）
+
+`spu-roi-profit-calculation.md`：删除 §六版本历史表 + §七实测验证点——旧版规则/数字与
+时点快照（655 件、−$1,230.45 等）和当前口径并排出现，其他 agent 取数时可能抓错行。
+内容无丢失：版本历史与实测数字本就在 `handoff/spu-roi-full-loss-rubric.md` 有副本；
+唯二缺口的 95.4% 已结算比例 / 35.9% 实测扣费已补进 rubric 参数表（标注时点快照）。
+原文档 §六改为文档关系节，新增指针说明。
+
 ## 2026-09-15 — biz-doc：v9 提升为文档整体口径
 
 `spu-roi-profit-calculation.md`：header 明写「当前口径版本：v9 —— 本文档所有章节共同构成
