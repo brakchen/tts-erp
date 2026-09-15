@@ -147,6 +147,26 @@ def test_sync_uses_standard_camel_case_wire_and_json_scalar_payload(
     assert resp.json()["inserted"] == 1
 
 
+def test_sync_accepts_urls_longer_than_2048(api_client, readwrite_key):
+    """TikTok 批量查询 URL 超过 2048 字符时仍应落库。"""
+    body = _sync_body()
+    long_query = "&".join(f"orderId{i}=TEST_order-{i}" for i in range(180))
+    body["requests"][0]["url"] = (
+        "https://api16-normal-sg.tiktokshopglobalselling.com/"
+        f"chat/api/seller/mGetContactBuyerLinkByOrder?{long_query}"
+    )
+
+    resp = api_client.post(
+        "/v2/intercept/sync",
+        json=body,
+        headers=_auth_header(readwrite_key),
+    )
+
+    assert len(body["requests"][0]["url"]) > 2048
+    assert resp.status_code == 200
+    assert resp.json()["inserted"] == 1
+
+
 def test_sync_rejects_nonstandard_snake_case_wire_fields(api_client, readwrite_key):
     """协议只接受 camelCase，不通过后端兼容旧字段名。"""
     body = _sync_body()

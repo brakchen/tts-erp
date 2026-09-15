@@ -110,7 +110,7 @@ class InterceptedRequestIn(BaseModel):
     trace_id: str | None = Field(None, alias="traceId")
     session_id: str = Field(min_length=1, max_length=128, alias="sessionId")
     method: str = Field(min_length=1, max_length=16)
-    url: str = Field(min_length=1, max_length=2048)
+    url: str = Field(min_length=1)
     endpoint_path: str = Field(min_length=1, max_length=512, alias="endpointPath")
     endpoint_host: str = Field(min_length=1, max_length=255, alias="endpointHost")
     is_whitelisted: bool = Field(alias="isWhitelisted")
