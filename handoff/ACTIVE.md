@@ -54,6 +54,7 @@
 | lane_id | 主题 | owner(session) | branch/worktree | 拥有的文件/目录 | 状态 | updated(UTC) |
 | --- | --- | --- | --- | --- | --- | --- |
 | feat/intercept-config | 请求拦截配置管理：数据库 migration + API + 前端页面 + 统计 + 30天清理 | 主 agent 调度子 agent | merged to master | tts_erp_v2/api/v2/intercept.py、tts_erp_v2/api/v2/pages.py、tts_erp_v2/static/js/intercept-*.js、alembic/versions/0026_intercept_tables.py、tests/api/test_intercept_*.py | merged | 2026-09-12T12:00Z |
+| fix/intercept-contract | 修复 Chrome 拦截同步协议、数据类型、游标/会话幂等、统计接口契约与事务一致性 | 本 session | .worktrees/intercept-contract / fix/intercept-contract | tts_erp_v2/api/v2/intercept.py、tts_erp_v2/static/js/intercept-stats.js、tests/api/test_intercept_sync.py | done | 2026-09-13T02:45Z |
 
 <!-- 新 lane 示例（复制改）：
 | lane_id | 主题 | owner(session) | .worktrees/<slug> / branch | 文件列表 | draft | <UTC> |
