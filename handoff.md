@@ -2,8 +2,8 @@
 
 > 🔄 **当前在途工作注册（谁在改什么 / 谁接手）：先读 `handoff/ACTIVE.md`**（AGENTS.md §12.1）
 >
-> 上次 session: 2026-09-15（chore/enum-annotate-per-value 逐行等级标注 + 未固化值速查）
-> 上次 session 主题: **针对 review「未固化枚举值需要标注」要求：①每个枚举的'取值'表首列加'等级'（✅/🟡/🔴） ②含未固化值的 18 个文件在每段末尾加 '⚠️ 未固化值速查' 段 ③scripts/annotate_enums.py + scripts/add_unfixed_summary.py 两个维护脚本（带 --dry-run + PER_FILE_STATUS 知识库严格不允许猜） ④conventions.md 补 §3.2/§3.3 等级标注规范 + §6 维护脚本 ⑤README 加未固化值汇总表；纯文档 lane，merge + push 完成**
+> 上次 session: 2026-09-15（chore/api-catalog-enum-update 6 处 API catalog 补 enums 关联）
+> 上次 session 主题: **`tech-doc/tiktok-seller-center-api-catalog.md` 6 处更新：①§2.1/§2.7/§2.8 加 enums/ inline 链接（main-order-status / sku-display-status / fulfillment-type / pay-method / sale-region / case-type / reverse-type 等） ②§7.4.3 加 'action_list ≠ 物流 action_code' 警告 ③§7.4.4.1 完整 `585900098675508729` 案例（系统取消 vs 买家取消差异表 + 43 事件时间线 + should_replenish_stock=true） ④§7.8 待确认事项表加 09-15 列 + 字典位置列（11 项推进，6 项维持 🔴） ⑤§6 加指针指向 §7.8 ⑥顶部'相关文档'段按 ✅已确认 / 🟡部分观测 / 🔴待观测 三张表重排；纯文档 lane，merge + push 完成**
 
 ## TL;DR (2026-09-15 chore/tech-doc-enums — 枚举值参考手册)
 
@@ -14,6 +14,7 @@
 **改动 (40 files / +1440 lines / 纯 docs / 0 code change / 0 test change)**:
 
 按域归类:
+
 - **订单/物流** 7 文件: `order-status.md`、`main-order-status.md`(🟡 int 推断)、
   `sku-display-status.md`(🟡)、`fulfillment-type.md`(双口径)、
   `pay-method.md`、`sale-region.md`、`line-status.md`(🔴)
@@ -34,6 +35,7 @@
 - **索引** 2: `README.md`(分层索引 + 已知 gap 表)、`conventions.md`(统一模板)
 
 **关键发现**（封堵"拍脑袋"风险）:
+
 1. `plugin.orders.main_order_status` int 100~104 → 文本状态**未固化**，
    prod 实测推断（100=UNPAID / 101=AWAITING_SHIPMENT / 102=IN_TRANSIT-or-... /
    103=售后中 / 104=CANCELLED），`tech-doc/plugin-sourced-shop-analytics.md §4.2` 已标 TODO
@@ -43,6 +45,7 @@
 5. `plugin.tracking_events` **没存 action_code 列** — `tech-doc/plugin-sourced-shop-analytics.md §4.3` 标 P0 TODO
 
 **未做**（明确留给后续 lane）:
+
 - 真正把 main_order_status int → text 映射**落地**到 `tts_erp_v2/db/constants.py`
 - 给 `plugin.tracking_events` 加 action_code 列（解海外取消桶为空）
 
@@ -88,12 +91,14 @@ oneoff_finance_reset、oneoff_regen_finance_components），加上 alembic upgra
 SELECT COUNT + 2 个裸 DELETE（清空 14,719 行 → 残 1,036 行）。
 
 **恢复（已完成）**：
+
 - 06:00 preserved pgdump 14,306 行 + 9-13 早上 prod 残骸里 staging 漏的 1,131 行（chrome backfill）= **15,437 行恢复**
 - 维度：111 products / 246 campaigns / 65 days（7-10 ~ 9-12）/ 总成本 ¥6,389.59
 - id_seq 修复到 59,500（next=59,501）
 - 原 prod 残骸 1,138 行保留在 `plugin.ad_daily_rescue_20260913`（紧急回滚源）
 
 **加固（已落地，commit fix/recover-ad-daily-purge-guard）**：
+
 1. **`tests/conftest.py`** — prod-shape dbname WARNING → `pytest.exit(2)` hard fail；只有
    `TTS_ERP_TEST_OFF=1` 临时绕过（且打醒目 banner `LIVE DATA AT RISK`）
 2. **`tts_erp_v2/api/v2/admin.py::purge_plugin_data`** — 双 gate：
