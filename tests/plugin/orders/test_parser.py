@@ -22,7 +22,7 @@ from tts_erp_v2.plugin.orders.parser import (
     parse_statement_list_response,
     parse_statement_transaction_response,
 )
-from tts_erp_v2.plugin.orders.repository import _ts_to_datetime, write_raw_log
+from tts_erp_v2.plugin.orders.repository import _ts_to_datetime
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -37,22 +37,6 @@ _CLEANUP_SQLS = [
     "DELETE FROM plugin.orders WHERE shop_id = :s",
     "DELETE FROM plugin.raw_log WHERE shop_id = :s",
 ]
-
-
-def _make_log_id(sess: Session) -> int:
-    """创建一条 raw_log 并返回 log_id（供 FK 引用）。"""
-    return write_raw_log(
-        sess,
-        domain="test",
-        shop_id=SHOP_ID,
-        endpoint="/test",
-        captured_at=datetime.now(UTC),
-        request_params=None,
-        request_body=None,
-        response_body={"test": True},
-        parse_error=None,
-        rows_written=0,
-    )
 
 
 @pytest.fixture(autouse=True)
@@ -133,7 +117,6 @@ class TestParseOrderResponse:
     def test_basic_parse(self):
         eng = get_engine()
         with Session(eng) as sess:
-            log_id = _make_log_id(sess)
             resp = self._make_response([
                 {
                     "main_order_id": "TEST_ord-1",
@@ -154,7 +137,7 @@ class TestParseOrderResponse:
                 }
             ])
             rows = parse_order_response(
-                sess, log_id=log_id, shop_id=SHOP_ID,
+                sess, shop_id=SHOP_ID,
                 response_body=resp, captured_at=datetime.now(UTC),
             )
             sess.commit()
@@ -163,9 +146,8 @@ class TestParseOrderResponse:
     def test_empty_main_orders(self):
         eng = get_engine()
         with Session(eng) as sess:
-            log_id = _make_log_id(sess)
             rows = parse_order_response(
-                sess, log_id=log_id, shop_id=SHOP_ID,
+                sess, shop_id=SHOP_ID,
                 response_body={"code": 0, "data": {"main_orders": []}},
                 captured_at=datetime.now(UTC),
             )
@@ -175,7 +157,6 @@ class TestParseOrderResponse:
         """同 sku_id 出现两次只写一次。"""
         eng = get_engine()
         with Session(eng) as sess:
-            log_id = _make_log_id(sess)
             resp = self._make_response([
                 {
                     "main_order_id": "TEST_ord-dedup",
@@ -186,7 +167,7 @@ class TestParseOrderResponse:
                 }
             ])
             rows = parse_order_response(
-                sess, log_id=log_id, shop_id=SHOP_ID,
+                sess, shop_id=SHOP_ID,
                 response_body=resp, captured_at=datetime.now(UTC),
             )
             sess.commit()
@@ -200,7 +181,6 @@ class TestParseLogisticsResponse:
     def test_multi_package(self):
         eng = get_engine()
         with Session(eng) as sess:
-            log_id = _make_log_id(sess)
             resp = {
                 "code": 0,
                 "data": {
@@ -232,7 +212,7 @@ class TestParseLogisticsResponse:
                 },
             }
             rows = parse_logistics_response(
-                sess, log_id=log_id, shop_id=SHOP_ID,
+                sess, shop_id=SHOP_ID,
                 order_id="TEST_ord-log-1",
                 response_body=resp, captured_at=datetime.now(UTC),
             )
@@ -242,7 +222,6 @@ class TestParseLogisticsResponse:
     def test_empty_track_list(self):
         eng = get_engine()
         with Session(eng) as sess:
-            log_id = _make_log_id(sess)
             resp = {
                 "code": 0,
                 "data": {
@@ -256,7 +235,7 @@ class TestParseLogisticsResponse:
                 },
             }
             rows = parse_logistics_response(
-                sess, log_id=log_id, shop_id=SHOP_ID,
+                sess, shop_id=SHOP_ID,
                 order_id="TEST_ord-ntrl",
                 response_body=resp, captured_at=datetime.now(UTC),
             )
@@ -267,7 +246,6 @@ class TestParseLogisticsResponse:
         """TikTok 返回倒序轨迹时，最新状态/发货时间不能取反。"""
         eng = get_engine()
         with Session(eng) as sess:
-            log_id = _make_log_id(sess)
             resp = {
                 "code": 0,
                 "data": {
@@ -281,7 +259,7 @@ class TestParseLogisticsResponse:
                 },
             }
             parse_logistics_response(
-                sess, log_id=log_id, shop_id=SHOP_ID,
+                sess, shop_id=SHOP_ID,
                 order_id="TEST_ord-reversed", response_body=resp,
                 captured_at=datetime.now(UTC),
             )
@@ -301,7 +279,6 @@ class TestParseStatementListResponse:
     def test_basic(self):
         eng = get_engine()
         with Session(eng) as sess:
-            log_id = _make_log_id(sess)
             resp = {
                 "code": 0,
                 "data": {
@@ -325,7 +302,7 @@ class TestParseStatementListResponse:
                 },
             }
             rows = parse_statement_list_response(
-                sess, log_id=log_id, shop_id=SHOP_ID,
+                sess, shop_id=SHOP_ID,
                 response_body=resp, captured_at=datetime.now(UTC),
             )
             sess.commit()
@@ -339,7 +316,6 @@ class TestParseStatementTransactionResponse:
     def test_basic(self):
         eng = get_engine()
         with Session(eng) as sess:
-            log_id = _make_log_id(sess)
             resp = {
                 "code": 0,
                 "data": {
@@ -381,7 +357,7 @@ class TestParseStatementTransactionResponse:
                 "seller_app_cut_flow": False,
             }
             rows = parse_statement_transaction_response(
-                sess, log_id=log_id, shop_id=SHOP_ID,
+                sess, shop_id=SHOP_ID,
                 response_body=resp, captured_at=datetime.now(UTC),
             )
             sess.commit()
@@ -443,7 +419,6 @@ class TestParseOrderResponseTimes:
     def test_numeric_string_times_persisted(self):
         eng = get_engine()
         with Session(eng) as sess:
-            log_id = _make_log_id(sess)
             resp = {
                 "main_order_id": "TEST_ord-times",
                 "trade_order_module": {
@@ -453,7 +428,7 @@ class TestParseOrderResponseTimes:
                 "sku_module": [],
             }
             rows = parse_order_response(
-                sess, log_id=log_id, shop_id=SHOP_ID,
+                sess, shop_id=SHOP_ID,
                 response_body=resp, captured_at=datetime.now(UTC),
             )
             sess.commit()

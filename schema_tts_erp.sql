@@ -882,7 +882,7 @@ ALTER TABLE plugin.ad_today ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 
 CREATE TABLE IF NOT EXISTS plugin.order_lines (
     id bigint NOT NULL,
-    log_id bigint NOT NULL,
+    log_id bigint,  -- plugin.raw_log.id FK; nullable since Phase 1 (chore/deprecate-plugin-raw-log, 2026-09-15)
     shop_id text NOT NULL,
     order_id text NOT NULL,
     sku_id text NOT NULL,
@@ -911,7 +911,7 @@ ALTER TABLE plugin.order_lines ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY 
 
 CREATE TABLE IF NOT EXISTS plugin.orders (
     id bigint NOT NULL,
-    log_id bigint NOT NULL,
+    log_id bigint,  -- plugin.raw_log.id FK; nullable since Phase 1 (chore/deprecate-plugin-raw-log, 2026-09-15)
     shop_id text NOT NULL,
     order_id text NOT NULL,
     currency text,
@@ -989,7 +989,7 @@ ALTER TABLE plugin.raw_log ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 
 CREATE TABLE IF NOT EXISTS plugin.settlement_details (
     id bigint NOT NULL,
-    log_id bigint NOT NULL,
+    log_id bigint,  -- plugin.raw_log.id FK; nullable since Phase 1 (chore/deprecate-plugin-raw-log, 2026-09-15)
     shop_id text NOT NULL,
     statement_id text NOT NULL,
     statement_version integer DEFAULT 0 NOT NULL,
@@ -1023,7 +1023,7 @@ ALTER TABLE plugin.settlement_details ALTER COLUMN id ADD GENERATED ALWAYS AS ID
 
 CREATE TABLE IF NOT EXISTS plugin.settlements (
     id bigint NOT NULL,
-    log_id bigint NOT NULL,
+    log_id bigint,  -- plugin.raw_log.id FK; nullable since Phase 1 (chore/deprecate-plugin-raw-log, 2026-09-15)
     shop_id text NOT NULL,
     statement_id text NOT NULL,
     statement_version integer DEFAULT 0 NOT NULL,
@@ -1059,7 +1059,7 @@ ALTER TABLE plugin.settlements ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY 
 
 CREATE TABLE IF NOT EXISTS plugin.shipments (
     id bigint NOT NULL,
-    log_id bigint NOT NULL,
+    log_id bigint,  -- plugin.raw_log.id FK; nullable since Phase 1 (chore/deprecate-plugin-raw-log, 2026-09-15)
     shop_id text NOT NULL,
     order_id text NOT NULL,
     package_id text NOT NULL,
@@ -1083,7 +1083,7 @@ ALTER TABLE plugin.shipments ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 
 CREATE TABLE IF NOT EXISTS plugin.tracking_events (
     id bigint NOT NULL,
-    log_id bigint NOT NULL,
+    log_id bigint,  -- plugin.raw_log.id FK; nullable since Phase 1 (chore/deprecate-plugin-raw-log, 2026-09-15)
     shop_id text NOT NULL,
     package_id text NOT NULL,
     event_key text NOT NULL,
@@ -2921,7 +2921,7 @@ CREATE INDEX IF NOT EXISTS idx_campaign_opt_logs_campaign ON plugin.campaign_opt
 
 CREATE TABLE IF NOT EXISTS plugin.after_sales (
     id bigint NOT NULL,
-    log_id bigint NOT NULL,
+    log_id bigint,  -- plugin.raw_log.id FK; nullable since Phase 1 (chore/deprecate-plugin-raw-log, 2026-09-15)
     shop_id text NOT NULL,
     cancel_id text NOT NULL,
     cancel_type text NOT NULL,
@@ -2947,7 +2947,7 @@ ALTER TABLE plugin.after_sales ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY 
 
 CREATE TABLE IF NOT EXISTS plugin.after_sale_items (
     id bigint NOT NULL,
-    log_id bigint NOT NULL,
+    log_id bigint,  -- plugin.raw_log.id FK; nullable since Phase 1 (chore/deprecate-plugin-raw-log, 2026-09-15)
     shop_id text NOT NULL,
     cancel_id text NOT NULL,
     line_item_id text NOT NULL,

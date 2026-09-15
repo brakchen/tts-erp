@@ -20,11 +20,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import AliasChoices, BaseModel, Field, ValidationError, field_validator
-from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import get_session
-from tts_erp_v2.db.models.plugin import RawLog
 from tts_erp_v2.plugin.orders.parser import (
     parse_logistics_response,
     parse_order_response,
@@ -34,7 +32,6 @@ from tts_erp_v2.plugin.orders.parser import (
 from tts_erp_v2.plugin.orders.repository import (
     has_data_bulk,
     list_synced_ids,
-    write_raw_log,
 )
 
 # ─── Config ───────────────────────────────────────────────────────────
@@ -353,62 +350,34 @@ def post_dumps(
     response_body = payload.dump.response.body
     main_order_id = payload.dump.mainOrderId
 
-    # response.body 为 None 时（插件抓取失败 / 超时），只记 raw_log 不解析
+    # response.body 为 None 时（插件抓取失败 / 超时），直接返，不记 raw_log
+    # （Phase 1 起 raw_log 不再写——不保留 dump 原 body 的需求以本仓不再负责，
+    # chrome-plugins 仓自带持久化）
     if response_body is None:
-        # plugin.raw_log.response_body is a NOT NULL JSONB audit column. Keep
-        # the empty-response event durable with an explicit empty-object
-        # sentinel; parse_error still preserves the distinction from a valid
-        # TikTok `{}` response.
-        log_id = write_raw_log(
-            sess,
-            domain=domain,
-            shop_id=shop_id,
-            endpoint=endpoint,
-            captured_at=captured_at,
-            request_params=request_params,
-            request_body=request_body,
-            response_body={},
-            parse_error="response.body is None",
-            rows_written=0,
-        )
-        sess.commit()
         return _ok_response(
             request_id=request_id,
             data={
                 "status": "empty_response",
-                "logId": log_id,
+                "logId": 0,  # Phase 1: raw_log no-op，log_id 永远 0；Phase 3 删字段
                 "rowsWritten": 0,
             },
         )
 
-    # 1. 先写 raw_log 拿到 log_id（解析函数需要 log_id 关联）
-    log_id = write_raw_log(
-        sess,
-        domain=domain,
-        shop_id=shop_id,
-        endpoint=endpoint,
-        captured_at=captured_at,
-        request_params=request_params,
-        request_body=request_body,
-        response_body=response_body,
-        parse_error=None,  # 先写成功，解析失败再更新
-        rows_written=0,
-    )
-    sess.flush()  # 确保 log_id 可用
+    # 1. 写 raw_log 已废弃（Phase 1 no-op，见 tts_erp_v2/plugin/orders/repository.py::write_raw_log）
+    #    原流程：write_raw_log → flush → parse → sa_update(RawLog)
+    #    现在直接 parse；write_raw_log 仍被调用（caller 兼容签名），但内部只 log.warning + return 0
 
-    # 2. 解析 → 写业务表（传入真实 log_id）
+    # 2. 解析 → 写业务表（Phase 1 不再传 log_id——业务表列已 nullable）
     parse_error: str | None = None
     rows_written = 0
 
     try:
-        # Keep the raw log in the outer transaction, but isolate all parser
-        # writes in a savepoint. A malformed child row must not leave a
-        # partially materialized order/statement behind.
+        # Isolate parser writes in a savepoint. A malformed child row must not
+        # leave a partially materialized order/statement behind.
         with sess.begin_nested():
             if domain == "orders":
                 rows_written = parse_order_response(
                     sess,
-                    log_id=log_id,
                     shop_id=shop_id,
                     response_body=response_body,
                     captured_at=captured_at,
@@ -419,7 +388,6 @@ def post_dumps(
                 else:
                     rows_written = parse_logistics_response(
                         sess,
-                        log_id=log_id,
                         shop_id=shop_id,
                         order_id=main_order_id,
                         response_body=response_body,
@@ -430,7 +398,6 @@ def post_dumps(
                 if "sku_record" in data:
                     rows_written = parse_statement_transaction_response(
                         sess,
-                        log_id=log_id,
                         shop_id=shop_id,
                         response_body=response_body,
                         captured_at=captured_at,
@@ -438,7 +405,6 @@ def post_dumps(
                 else:
                     rows_written = parse_statement_list_response(
                         sess,
-                        log_id=log_id,
                         shop_id=shop_id,
                         response_body=response_body,
                         captured_at=captured_at,
@@ -452,14 +418,6 @@ def post_dumps(
     # the unit retryable instead of advancing its progress on rowsWritten=0.
     if parse_error is None and rows_written == 0 and domain in {"orders", "statements"}:
         parse_error = f"no {domain} rows parsed from response"
-
-    # 3. 更新 raw_log 的解析结果
-    if parse_error or rows_written > 0:
-        sess.execute(
-            sa_update(RawLog)
-            .where(RawLog.id == log_id)
-            .values(parse_error=parse_error, rows_written=rows_written)
-        )
 
     # commit
     sess.commit()
@@ -481,7 +439,7 @@ def post_dumps(
             request_id=request_id,
             data={
                 "status": "parse_error",
-                "logId": log_id,
+                "logId": 0,
                 "rowsWritten": 0,
                 "parseError": parse_error,
             },
@@ -502,7 +460,7 @@ def post_dumps(
         request_id=request_id,
         data={
             "status": "inserted",
-            "logId": log_id,
+            "logId": 0,
             "rowsWritten": rows_written,
         },
     )

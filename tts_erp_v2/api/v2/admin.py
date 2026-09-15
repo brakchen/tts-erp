@@ -187,6 +187,9 @@ def reset_rate_limit(
 
 # Tables that store Chrome extension synced data. Deletion order matters:
 # child tables (FK → raw_log.id) first, then the parent raw_log.
+# Phase 1 (2026-09-15, chore/deprecate-plugin-raw-log): raw_log 停止新写入，
+# 本常量仍参与 purge（仅清历史数据），业务表 log_id 列已 nullable；Phase 3
+# 删整张 raw_log + 业务表 log_id 列 + 6 条 FK。
 _ANALYTICS_TABLES = [
     "plugin.ad_today",
     "plugin.ad_daily",
@@ -204,7 +207,7 @@ _PLUGIN_ORDER_CHILD_TABLES = [
     "plugin.settlements",
 ]
 
-_PLUGIN_ORDER_RAW_LOG = "plugin.raw_log"
+_PLUGIN_ORDER_RAW_LOG = "plugin.raw_log"  # Phase 1 DEPRECATED (chore/deprecate-plugin-raw-log, 2026-09-15) — 仍参与 purge 仅清历史，Phase 3 drop
 
 
 # Re-export the shared prod-shape detector under the historical name

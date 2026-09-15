@@ -43,29 +43,10 @@ def _cleanup(db_engine):
         )
 
 
-def _write_raw_log(db_engine, shop_id: str) -> int:
-    with db_engine.begin() as conn:
-        result = conn.execute(
-            text(
-                "INSERT INTO plugin.raw_log (domain, shop_id, endpoint, captured_at, "
-                "request_params, request_body, response_body, parse_error, rows_written) "
-                "VALUES ('tiktok', :sid, '/return_refund/202309/cancellations/search', "
-                ":cap, NULL, NULL, :rb, NULL, 0) RETURNING id"
-            ),
-            {
-                "sid": shop_id,
-                "cap": datetime.now(UTC),
-                "rb": '{"code":0,"data":{}}',
-            },
-        )
-        return result.scalar_one()
-
-
 def test_parse_after_sales_full_response(db_engine, db_session):
     """完整 /return_refund/.../cancellations/search 响应：1 个 cancel + 2 个 line items。"""
     from tts_erp_v2.plugin.orders.parser import parse_after_sales_response
 
-    log_id = _write_raw_log(db_engine, SHOP)
     captured_at = datetime.now(UTC)
 
     response_body = {
@@ -106,7 +87,6 @@ def test_parse_after_sales_full_response(db_engine, db_session):
 
     rows = parse_after_sales_response(
         db_session,
-        log_id=log_id,
         shop_id=SHOP,
         response_body=response_body,
         captured_at=captured_at,
@@ -158,7 +138,6 @@ def test_parse_after_sales_no_line_items(db_engine, db_session):
     """cancel_line_items 缺失时：只写 header，0 line items。"""
     from tts_erp_v2.plugin.orders.parser import parse_after_sales_response
 
-    log_id = _write_raw_log(db_engine, SHOP)
     response_body = {
         "code": 0,
         "data": {
@@ -175,7 +154,6 @@ def test_parse_after_sales_no_line_items(db_engine, db_session):
     }
     rows = parse_after_sales_response(
         db_session,
-        log_id=log_id,
         shop_id=SHOP,
         response_body=response_body,
         captured_at=datetime.now(UTC),
@@ -191,7 +169,6 @@ def test_parse_after_sales_missing_cancel_id_is_skipped(
     """cancel_id 缺失的记录跳过，warnings 但不抛异常。"""
     from tts_erp_v2.plugin.orders.parser import parse_after_sales_response
 
-    log_id = _write_raw_log(db_engine, SHOP)
     response_body = {
         "code": 0,
         "data": {
@@ -208,7 +185,6 @@ def test_parse_after_sales_missing_cancel_id_is_skipped(
     }
     rows = parse_after_sales_response(
         db_session,
-        log_id=log_id,
         shop_id=SHOP,
         response_body=response_body,
         captured_at=datetime.now(UTC),
@@ -223,7 +199,6 @@ def test_parse_after_sales_upsert_idempotent(db_engine, db_session):
     """同 cancel_id 二次解析：update 不 insert，rows_written 仍报 1（仅 1 header）。"""
     from tts_erp_v2.plugin.orders.parser import parse_after_sales_response
 
-    log_id = _write_raw_log(db_engine, SHOP)
     response_body = {
         "code": 0,
         "data": {
@@ -240,7 +215,6 @@ def test_parse_after_sales_upsert_idempotent(db_engine, db_session):
     # 第 1 次：PENDING
     rows1 = parse_after_sales_response(
         db_session,
-        log_id=log_id,
         shop_id=SHOP,
         response_body=response_body,
         captured_at=datetime.now(UTC),
@@ -252,7 +226,6 @@ def test_parse_after_sales_upsert_idempotent(db_engine, db_session):
     db_session.expire_all()  # 让 PG INSERT ... ON CONFLICT 重新评估
     rows2 = parse_after_sales_response(
         db_session,
-        log_id=log_id,
         shop_id=SHOP,
         response_body=response_body,
         captured_at=datetime.now(UTC),

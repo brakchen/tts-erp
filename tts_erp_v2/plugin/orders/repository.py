@@ -2,7 +2,9 @@
 
 所有 upsert 用 ON CONFLICT DO UPDATE 实现幂等。
 has_data_bulk 批量查业务表存在性。
-write_raw_log 写同步流水。
+write_raw_log **DEPRECATED Phase 1** (chore/deprecate-plugin-raw-log,
+2026-09-15) → 保留函数签名供 Phase 2 观察期兼容，但内部不再 INSERT，
+永远 return 0；Phase 3 将删除函数 + drop plugin.raw_log 表。
 """
 
 from __future__ import annotations
@@ -26,42 +28,42 @@ from tts_erp_v2.db.models.plugin import (
     ChromeSettlementDetail,
     ChromeShipment,
     ChromeTrackingEvent,
-    RawLog,
 )
 
 log = logging.getLogger("tts_erp_v2.plugin.orders.repository")
 
-# ── raw_log ─────────────────────────────────────────────────────────
+# ── raw_log (DEPRECATED Phase 1: 2026-09-15) ──────────────────────────
+# write_raw_log 自 Phase 1 起为 no-op；保留签名兼容现有 caller，
+# Phase 3 将整段删除（同时 drop plugin.raw_log 表）。每次调用会 log.info
+# 一条废弃标记，便于观察期监控是否还有 caller 引用——1 天观察期内应当归零。
 
 
 def write_raw_log(
-    sess: Session,
+    sess: Session,  # noqa: ARG001 — kept for signature compat
     *,
     domain: str,
     shop_id: str,
     endpoint: str,
-    captured_at: datetime,
-    request_params: dict | None,
-    request_body: dict | None,
-    response_body: dict | None,
-    parse_error: str | None,
-    rows_written: int,
+    captured_at: datetime,  # noqa: ARG001
+    request_params: dict | None,  # noqa: ARG001
+    request_body: dict | None,  # noqa: ARG001
+    response_body: dict | None,  # noqa: ARG001
+    parse_error: str | None,  # noqa: ARG001
+    rows_written: int,  # noqa: ARG001
 ) -> int:
-    """写同步流水，返回 raw_log.id。"""
-    log = RawLog(
-        domain=domain,
-        shop_id=shop_id,
-        endpoint=endpoint,
-        captured_at=captured_at,
-        request_params=request_params,
-        request_body=request_body,
-        response_body=response_body,
-        parse_error=parse_error,
-        rows_written=rows_written,
+    """Phase 1 no-op：原写 plugin.raw_log 流水，现返回 0 不写任何行。
+
+    Returns:
+        占位值 0；caller 不要把它当真实 raw_log.id 用——Phase 1 业务表
+        log_id 列已 nullable，调用方应改传 None（write_raw_log 调用仍
+        保留以便观察期观察剩余 caller 数）。
+    """
+    log.warning(
+        "write_raw_log DEPRECATED Phase 1 no-op call: "
+        "domain=%s shop_id=%s endpoint=%s",
+        domain, shop_id, endpoint,
     )
-    sess.add(log)
-    sess.flush()
-    return log.id  # type: ignore[return-value]
+    return 0
 
 
 # ── has_data_bulk ───────────────────────────────────────────────────
@@ -338,7 +340,6 @@ def _payment_status_to_text(value: Any) -> str | None:
 def upsert_order(
     sess: Session,
     *,
-    log_id: int,
     shop_id: str,
     order_id: str,
     main_order_status: int | None = None,
@@ -360,7 +361,6 @@ def upsert_order(
     stmt = (
         pg_insert(ChromeOrder)
         .values(
-            log_id=log_id,
             shop_id=shop_id,
             order_id=order_id,
             main_order_status=main_order_status,
@@ -382,7 +382,6 @@ def upsert_order(
         .on_conflict_do_update(
             index_elements=[ChromeOrder.shop_id, ChromeOrder.order_id],
             set_={
-                "log_id": log_id,
                 "main_order_status": main_order_status,
                 "sku_display_status": sku_display_status,
                 "currency": currency,
@@ -410,7 +409,6 @@ def upsert_order(
 def upsert_order_line(
     sess: Session,
     *,
-    log_id: int,
     shop_id: str,
     order_id: str,
     sku_id: str,
@@ -430,7 +428,6 @@ def upsert_order_line(
     stmt = (
         pg_insert(ChromeOrderLine)
         .values(
-            log_id=log_id,
             shop_id=shop_id,
             order_id=order_id,
             sku_id=sku_id,
@@ -454,7 +451,6 @@ def upsert_order_line(
                 ChromeOrderLine.sku_id,
             ],
             set_={
-                "log_id": log_id,
                 "product_id": product_id,
                 "product_name": product_name,
                 "variant_name": variant_name,
@@ -479,7 +475,6 @@ def upsert_order_line(
 def upsert_shipment(
     sess: Session,
     *,
-    log_id: int,
     shop_id: str,
     order_id: str,
     package_id: str,
@@ -494,7 +489,6 @@ def upsert_shipment(
     stmt = (
         pg_insert(ChromeShipment)
         .values(
-            log_id=log_id,
             shop_id=shop_id,
             order_id=order_id,
             package_id=package_id,
@@ -509,7 +503,6 @@ def upsert_shipment(
         .on_conflict_do_update(
             index_elements=[ChromeShipment.shop_id, ChromeShipment.package_id],
             set_={
-                "log_id": log_id,
                 "order_id": order_id,
                 "tracking_number": tracking_number,
                 "carrier_name": carrier_name,
@@ -530,7 +523,6 @@ def upsert_shipment(
 def upsert_tracking_event(
     sess: Session,
     *,
-    log_id: int,
     shop_id: str,
     package_id: str,
     event_key: str,
@@ -543,7 +535,6 @@ def upsert_tracking_event(
     stmt = (
         pg_insert(ChromeTrackingEvent)
         .values(
-            log_id=log_id,
             shop_id=shop_id,
             package_id=package_id,
             event_key=event_key,
@@ -560,7 +551,6 @@ def upsert_tracking_event(
                 ChromeTrackingEvent.event_key,
             ],
             set_={
-                "log_id": log_id,
                 "event_at": event_at,
                 "description": description,
                 "location": location,
@@ -578,7 +568,6 @@ def upsert_tracking_event(
 def upsert_settlement(
     sess: Session,
     *,
-    log_id: int,
     shop_id: str,
     statement_id: str,
     statement_version: int = 0,
@@ -605,7 +594,6 @@ def upsert_settlement(
     stmt = (
         pg_insert(ChromeSettlement)
         .values(
-            log_id=log_id,
             shop_id=shop_id,
             statement_id=statement_id,
             statement_version=statement_version,
@@ -636,7 +624,6 @@ def upsert_settlement(
                 ChromeSettlement.statement_version,
             ],
             set_={
-                "log_id": log_id,
                 "bill_period": bill_period,
                 "period_start": period_start,
                 "period_end": period_end,
@@ -668,7 +655,6 @@ def upsert_settlement(
 def upsert_settlement_detail(
     sess: Session,
     *,
-    log_id: int,
     shop_id: str,
     statement_id: str,
     statement_version: int = 0,
@@ -693,7 +679,6 @@ def upsert_settlement_detail(
     stmt = (
         pg_insert(ChromeSettlementDetail)
         .values(
-            log_id=log_id,
             shop_id=shop_id,
             statement_id=statement_id,
             statement_version=statement_version,
@@ -721,7 +706,6 @@ def upsert_settlement_detail(
                 ChromeSettlementDetail.sku_detail_id,
             ],
             set_={
-                "log_id": log_id,
                 "statement_id": statement_id,
                 "statement_version": statement_version,
                 "trade_order_id": trade_order_id,
@@ -750,7 +734,6 @@ def upsert_settlement_detail(
 def upsert_after_sale(
     sess: Session,
     *,
-    log_id: int,
     shop_id: str,
     cancel_id: str,
     cancel_type: str,
@@ -769,7 +752,6 @@ def upsert_after_sale(
     stmt = (
         pg_insert(ChromeAfterSale)
         .values(
-            log_id=log_id,
             shop_id=shop_id,
             cancel_id=cancel_id,
             cancel_type=cancel_type,
@@ -788,7 +770,6 @@ def upsert_after_sale(
                 ChromeAfterSale.cancel_id,
             ],
             set_={
-                "log_id": log_id,
                 "cancel_type": cancel_type,
                 "cancel_status": cancel_status,
                 "main_order_id": main_order_id,
@@ -807,7 +788,6 @@ def upsert_after_sale(
 def upsert_after_sale_item(
     sess: Session,
     *,
-    log_id: int,
     shop_id: str,
     cancel_id: str,
     line_item_id: str,
@@ -824,7 +804,6 @@ def upsert_after_sale_item(
     stmt = (
         pg_insert(ChromeAfterSaleItem)
         .values(
-            log_id=log_id,
             shop_id=shop_id,
             cancel_id=cancel_id,
             line_item_id=line_item_id,
@@ -844,7 +823,6 @@ def upsert_after_sale_item(
                 ChromeAfterSaleItem.line_item_id,
             ],
             set_={
-                "log_id": log_id,
                 "cancel_id": cancel_id,
                 "order_line_item_id": order_line_item_id,
                 "sku_id": sku_id,

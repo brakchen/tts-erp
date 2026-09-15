@@ -9,7 +9,7 @@
 | 问题 | 答案 |
 | --- | --- |
 | ads-data-sync 抓什么 | 4 张表 8 个 endpoint 群（ad 域 + 订单/物流/结算/售后）|
-| dumps 怎么解析 | 1 事务 1 张表，所有 dump 写 `plugin.raw_log`，业务表 FK 引用 |
+| dumps 怎么解析 | 1 事务 1 张表，dump body 写 `plugin.raw_log` **（Phase 1 deprecated，见 §5）**，业务表 FK 引用 |
 | 4 域数据怎么关联 | `shop_id` 跨域唯一键 + 4 类 ID 映射（main_order_id / fulfill_unit_id / statement_id / reverse_order_id）|
 
 ---
@@ -351,3 +351,42 @@ WHERE o.shop_id = ?
 | 6 | multi-package 订单 | ❌ TODO | catalog §7.4.6.3 TODO |
 | 7 | chrome 端抓取规则 + 权限 | ❌ 跨仓 | chrome-plugins |
 | 8 | dumps 上传失败重试策略 | ❌ 跨仓 | chrome-plugins |
+
+## 5. plugin.raw_log 下线计划（chore/deprecate-plugin-raw-log，2026-09-15 起）
+
+**状态**：Phase 1 已发布（停写 + 1 天观察期）；Phase 3 待 Phase 2 观察结果触发。
+
+### 历史背景
+
+- `plugin.raw_log` 是 chrome-ext dumps 流水表，v3 协议（约 2024 末）创建
+- 设计目的：保留 dump 原始 body 用于事后重放（重解析 + 历史回填）
+- prod 实测（2026-09-15）：38,037 行 / 24h 32,777 行 / ~2,257 行/h
+- **6 张业务表（shipments / tracking_events / settlements / settlement_details / after_sales / after_sale_items）FK 引用但完全空** → raw_log 实际只服务 `orders` + `order_lines` 两张
+- 唯一存活的 history-backfill 用例：`oneoff_backfill_plugin_order_times.py`（9d8ad11，2026-09-14 已跑）
+
+### Phase 1（2026-09-15 上线，本 lane 提交）
+
+- alembic 0032_make_plugin_log_id_nullable：8 张业务表 `log_id` 列 `DROP NOT NULL`
+- `tts_erp_v2/plugin/orders/repository.py::write_raw_log` 改 no-op（log.warning + return 0）
+- `tts_erp_v2/api/v2/order_sync.py::post_dumps` 不再调 `write_raw_log`，parse → 业务表 INSERT 不带 `log_id`
+- 所有 `upsert_*` / `parse_*` 函数移除 `log_id` 参数
+- 测试更新：`_make_log_id` / `_write_raw_log` helper 删除，`logId` 字段恒 0
+- chrome-plugins 端无感知（API 仍返 `logId` 字段，值=0）
+
+### Phase 2（1 天观察期，2026-09-15 → 2026-09-16）
+
+- 监控 prod：业务表 `orders` / `order_lines` 是否还在 upsert（chrome-plugins 不停 = 业务表应当继续增长）
+- 监控 prod：`plugin.raw_log` 不再有新行（SELECT MAX(created_at) 应当停在 Phase 1 上线时刻附近）
+- 监控 prod：chrome-plugins 端 stderr / plugin_logs 是否报错（plugins 端不应该感知 API 变化）
+
+### Phase 3（条件触发，2026-09-16+ 用户拍板）
+
+- alembic 0033_drop_plugin_raw_log：DROP CONSTRAINT × 6 + DROP COLUMN log_id × 8 + DROP TABLE plugin.raw_log + DROP SEQUENCE raw_log_id_seq
+- `tts_erp_v2/plugin/orders/repository.py::write_raw_log` 删除
+- `tts_erp_v2/db/models/plugin.py::RawLog` 删除
+- `tts_erp_v2/api/v2/admin.py::_PLUGIN_ORDER_RAW_LOG` / `list_known_shops` SELECT 删除
+- `tech-doc/intercept-plugin-canonical.md` §5 本节改写为历史归档
+- `tests/conftest.py:225` cleanup 行删除
+- `scripts/oneoff_backfill_plugin_order_times.py` 删除（已无意义）
+
+**前置检查**：如果 Phase 2 观察发现业务表停止 upsert 或 chrome 端报错，应回滚 Phase 1（write_raw_log 恢复 INSERT + 业务表 INSERT 恢复 log_id）。

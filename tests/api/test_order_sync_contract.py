@@ -469,7 +469,8 @@ def test_dumps_order_inserted(api_client, readwrite_key):
     assert body["code"] == 0
     assert body["data"]["status"] == "inserted"
     assert body["data"]["rowsWritten"] == 3  # 1 order + 2 lines
-    assert body["data"]["logId"] > 0
+    # Phase 1: logId 恒 0（raw_log no-op），保留字段兼容契约，不验证 >0
+    assert body["data"]["logId"] == 0
 
 
 def test_dumps_order_with_no_parsed_rows_is_not_reported_as_inserted(
@@ -490,8 +491,8 @@ def test_dumps_order_with_no_parsed_rows_is_not_reported_as_inserted(
     assert r.json()["data"]["rowsWritten"] == 0
 
 
-def test_dumps_empty_response_is_durable_and_retryable(api_client, readwrite_key, db_engine):
-    """response.body=null 不得因 raw_log NOT NULL 约束把整个接收请求打成 500。"""
+def test_dumps_empty_response_returns_clean_status(api_client, readwrite_key):
+    """response.body=null 不打成 500；Phase 1 后不再写 raw_log，契约退化为 status 字段。"""
     r = api_client.post(
         "/v2/order-sync/dumps",
         headers={"Authorization": f"Bearer {readwrite_key}"},
@@ -504,16 +505,8 @@ def test_dumps_empty_response_is_durable_and_retryable(api_client, readwrite_key
     )
     assert r.status_code == 200
     assert r.json()["data"]["status"] == "empty_response"
-    with db_engine.connect() as conn:
-        parse_error, response_body = conn.execute(
-            text(
-                "SELECT parse_error, response_body "
-                "FROM plugin.raw_log WHERE shop_id = :s ORDER BY id DESC LIMIT 1"
-            ),
-            {"s": SHOP_ID},
-        ).one()
-    assert parse_error == "response.body is None"
-    assert response_body == {}
+    assert r.json()["data"]["rowsWritten"] == 0
+    # Phase 1: logId 是占位 0（raw_log no-op），不验证具体值
 
 
 # ─── dumps: logistics inserted ─────────────────────────────────────
@@ -614,8 +607,9 @@ def test_dumps_order_idempotent_replay(api_client, readwrite_key):
     )
     assert r1.json()["data"]["status"] == "inserted"
     assert r2.json()["data"]["status"] == "inserted"
-    # logId 不同（raw_log 每次都写）
-    assert r1.json()["data"]["logId"] != r2.json()["data"]["logId"]
+    # Phase 1: logId 恒 0（raw_log no-op），改验证 rowsWritten 一致（幂等）
+    assert r1.json()["data"]["logId"] == r2.json()["data"]["logId"] == 0
+    assert r1.json()["data"]["rowsWritten"] == r2.json()["data"]["rowsWritten"]
 
 
 # ─── dumps: 解析失败返回 parse_error ──────────────────────────────
@@ -654,7 +648,6 @@ def test_dumps_parse_failure_rolls_back_partial_business_rows(
     def _partially_write_then_fail(sess, **kwargs):
         upsert_order(
             sess,
-            log_id=kwargs["log_id"],
             shop_id=kwargs["shop_id"],
             order_id=ORDER_ID_1,
         )
@@ -673,12 +666,8 @@ def test_dumps_parse_failure_rolls_back_partial_business_rows(
             text("SELECT count(*) FROM plugin.orders WHERE shop_id = :s"),
             {"s": SHOP_ID},
         ).scalar()
-        raw_error = conn.execute(
-            text("SELECT parse_error FROM plugin.raw_log WHERE shop_id = :s ORDER BY id DESC LIMIT 1"),
-            {"s": SHOP_ID},
-        ).scalar()
     assert order_count == 0
-    assert "synthetic parser failure" in raw_error
+    # Phase 1: parse_error 不再落 raw_log，由 response JSON 验证（上一行 r.json()['data']['parseError']）
 
 
 # ─── dumps: 400 schema invalid ─────────────────────────────────────
