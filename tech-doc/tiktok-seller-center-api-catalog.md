@@ -17,6 +17,7 @@
 | `/api/fulfillment/dashboard/get` | POST | 履约仪表盘 | 偶尔 |
 | `/api/fulfillment/print/seller_config/get` | POST | 打印配置 | 偶尔 |
 | `/api/v1/trade/orders/buyer` | POST | 批量查买家信息 | 按需 |
+| `/api/fulfillment/order/get` | POST | 订单详情（含 reverse_type） | 点订单详情时 |
 | `/order/detail` | GET | 订单详情页（HTML） | 浏览器导航 |
 
 ### 1.2 退货/售后域
@@ -25,6 +26,7 @@
 | ------ | ------ | ------ | --------- |
 | `/api/v1/reverse/orders/list_seller_announcement` | POST | 退货公告列表 | 每次打开订单页 |
 | `/api/v1/reverse/orders/get_export_history` | POST | 退货导出历史 | 偶尔 |
+| `/api/v1/reverse/component/orders/list` | POST | **退款订单列表（核心：reverseType/return_price/reason/reverse_main_order_id）** | 每次打开售后页 |
 
 ### 1.3 商品域
 
@@ -406,6 +408,71 @@
 
 ### 2.6 商品列表 `/api/v1/product/local/products/list`
 
+### 2.7 退款订单列表 `/api/v1/reverse/component/orders/list`
+
+**核心 endpoint** — 利润计算中"退款扣减项"的唯一结构化数据源。
+
+**request**:
+```json
+{
+  "count": 50,
+  "offset": 0,
+  "pagination_type": 0,
+  "search_condition": {
+    "tab": {"str_value_list": ["800"|"100"]},
+    "sub_tab_pending": {"str_value_list": ["sub_tab_pending_all"]},
+    "order_sort_comp": {"str_value_list": ["OrderSort_UPADTE_TIME_DESC"]}
+  },
+  "component_version": "hit_ui_opt"
+}
+```
+
+- `search_condition.tab`：`800` = 待处理；`100` = 全部
+- `sub_tab_pending`：仅 tab=800 时生效，指定 pending 子筛选
+
+**response.data**:
+- `cards[]` — 每张卡 = 一笔退款
+  - `biz_data` ← **结构化数据，直接用于利润计算**：
+    - `main_order_id` (str) — 原始订单号
+    - `reverse_main_order_id` (str) — 独立售后单号（与 main_order_id 1:N）
+    - `reverseType` (int) — 退款类型码（已知 `3` = 改变主意；其他值待映射，§6）
+    - `return_price` (str + currency suffix) — 退款金额（如 `"544.116₫"`）
+    - `tagged` (bool) — 是否打标
+  - `card.blocks[].content[].text_pair.content.content` — **i18n 本地化文案**（含 reason 中文显示，**不是结构化字段**，仅供前端渲染）
+  - `linked_cards[]` — 关联卡片（如时间线）
+- `total_count` (int) — 总条数
+- `search_next_cursor` / `search_previous_cursor` — 翻页游标
+
+**利润计算用法**:
+- 每笔退款 = 1 row in `cards[]`
+- 实际退款金额 = `biz_data.return_price`（去掉 currency 后缀再 parse Float）
+- 关联原订单 = `biz_data.main_order_id` → 配 `statement/transaction/detail` 拿原订单成交金额
+- 退款维度利润 = `∑ return_price` over cards，按月/周聚合
+
+**示例**（实测 2026-09-14 16:59:38 burst，main_order_id=585921002913891915）:
+```json
+{"biz_data": {
+  "tagged": false,
+  "reverseType": 3,
+  "return_price": "544.116₫",
+  "main_order_id": "585921002913891915",
+  "reverse_main_order_id": "4042326121400600139"
+}}
+```
+
+### 2.8 订单详情 `/api/fulfillment/order/get`
+
+`/api/fulfillment/order/list` 的详情接口。点订单条目时触发。
+
+**response 关键字段**:
+- `main_order_id` — 主订单号
+- `sku_id`, `sku_name`, `product_id`, `product_name`
+- `quantity`
+- `reverse_type` (int) — 单订单退款状态枚举
+- `currency` (str)
+
+**用法**：list 拿 `main_order_id` → get 拿完整 modules + 单订单 refund 状态。与 §2.7 的退款列表互为补充：get 看单订单 reverse_type（是否退过），§2.7 看每笔退款的金额。
+
 **请求**：GET，关键 query params：
 
 | 参数 | 说明 |
@@ -579,7 +646,7 @@ image_url = image_obj.get("url_list", [None])[0]  # 从 url_list 取第一张
 
 **缺失的退货接口**（需要在退货页面浏览时捕获）：
 
-- 退货订单列表（类似 `/api/v1/reverse/orders/list`）
+- 退货订单列表（类似 `/api/v1/reverse/orders/list`） — **已补** → §2.7（实测路径 `/api/v1/reverse/component/orders/list`）
 - 退货详情
 - 退款详情
 - 退货物流跟踪
@@ -597,7 +664,8 @@ image_url = image_obj.get("url_list", [None])[0]  # 从 url_list 取第一张
 | `trade_order_module.fulfillment_type` 枚举 | 待确认 | 0=? 1=? |
 | `trade_order_id` ↔ `main_order_id` 映射关系 | 已确认 | `trade_order_id_mapper` 提供映射 |
 | `statement_sku_detail_id` 获取路径 | 待确认 | 需在结算页面捕获 |
-| 退货订单列表接口 | 待捕获 | 需在退货页面浏览时抓取 |
+| 退货订单列表接口 | **已捕获** | `/api/v1/reverse/component/orders/list` → §2.7 |
+| `reverseType` 枚举映射 | 待确认 | 已知 `3`=改变主意（实测）；其他值需扫描全表 `biz_data.reverseType` + `cards[].card.blocks[].text_pair.content.content` 中的本地化 reason 反查 |
 
 ---
 
