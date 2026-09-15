@@ -9,27 +9,43 @@
 本目录涉及的所有 int / text 枚举值在 [`tech-doc/enums/`](enums/) 有独立维护文件。
 **遇到 int / text 码不知含义时（如 `main_order_status` / `reverse_type` / `action_code` / `cancel_reason` 等），先查 [`enums/README.md`](enums/README.md) 的"未固化值汇总"表**——`/docs(enum): 逐行加 ✅/🟡/🔴 等级标注` 后的状态都登记了。
 
-### 按本目录章节映射
+**最新状态**（09-15）见 [§7.8](#sec-7-8) 三列对比表。下面是按本目录章节快速跳转表。
+
+### ✅ 已确认字典（可信赖）
 
 | 本目录章节 / 字段 | 关键枚举 | enum 文件 |
 | --- | --- | --- |
-| §2.1 订单列表 `order_status_module[].main_order_status` | 卖家中心 int 主订单状态（🟡 未固化） | [`main-order-status.md`](enums/main-order-status.md) |
-| §2.1 订单列表 `order_status_module[].sku_display_status` | 卖家中心 int SKU 展示状态（🟡 未固化） | [`sku-display-status.md`](enums/sku-display-status.md) |
+| §2.1 订单列表 `order_status_module[].main_order_status` | 卖家中心 int 主订单状态 | [`main-order-status.md`](enums/main-order-status.md) |
+| §2.1 订单列表 `order_status_module[].sku_display_status` | 卖家中心 int SKU 展示状态 | [`sku-display-status.md`](enums/sku-display-status.md) |
 | §2.1 订单列表 `trade_order_module.fulfillment_type` | 履约类型（双口径：text + int） | [`fulfillment-type.md`](enums/fulfillment-type.md) |
 | §2.1 订单列表 `trade_order_module.pay_method` | 支付方式（自由文本） | [`pay-method.md`](enums/pay-method.md) |
 | §2.1 订单列表 `trade_order_module.sale_region` | 销售地区（ISO 3166-1） | [`sale-region.md`](enums/sale-region.md) |
 | §2.2 订单状态计数（v2 标准化） | `commerce.sales_orders.status`（AWAITING_SHIPMENT/CANCELLED/...） | [`order-status.md`](enums/order-status.md) |
-| §2.5 退货公告 `reverse_module.reverse_type` | 卖家中心 int 售后/取消子类型（🟡 未固化） | [`reverse-type.md`](enums/reverse-type.md) |
+| §2.5 退货公告 `reverse_module.reverse_type` | 卖家中心 int 售后/取消子类型 | [`reverse-type.md`](enums/reverse-type.md) |
 | §2.5 退货公告 `reverse_module.reverse_status` | 卖家中心 int 售后状态 | [`reverse-status.md`](enums/reverse-status.md) |
 | §2.7 退款订单列表 `biz_data.caseType` | v2 标准化售后工单类型 | [`case-type.md`](enums/case-type.md) |
 | §2.7 退款订单列表 `cancel_type`（API 原始） | `BUYER_CANCEL` / `CANCEL` | [`cancel-type.md`](enums/cancel-type.md) |
-| §2.7 退款 `cancel_status` / `cancel_reason` | 取消单状态 + 取消原因 | [`cancel-status.md`](enums/cancel-status.md), [`cancel-reason.md`](enums/cancel-reason.md) |
 | §2 物流 `track_list[].action_code`（API） | 23 个事件码（38301 = 海外取消判据） | [`action-code.md`](enums/action-code.md) |
 | §2 物流 终态白名单 | `LOGISTICS_TERMINAL_CODES` = {50101, 80101, 110101} | [`logistics-terminal-codes.md`](enums/logistics-terminal-codes.md) |
-| §2 物流 `track_list[].track_status`（Chrome ext） | 自由文本 | [`track-status.md`](enums/track-status.md) |
-| §2 结算 `settlement_details.settlement_status` | 已结算 int 码（🟡） | [`settlement-status.md`](enums/settlement-status.md) |
-| §2 结算 `settlements.payment_status` | 付款 int 码（🟡） | [`payment-status.md`](enums/payment-status.md) |
 | §2 结算 `settlement_components.component_code` | 53 个 EAV 字段（GROSS_SALES / PLATFORM_COMMISSION / ...） | [`settlement-component-code.md`](enums/settlement-component-code.md) |
+
+### 🟡 部分已观测（仅参考，**禁止拍脑袋补全**）
+
+| 本目录章节 / 字段 | 关键枚举 | enum 文件 |
+| --- | --- | --- |
+| §2.7 退款 `cancel_status` | 仅 1 码 `CANCELLATION_REQUEST_COMPLETE` 已观测 | [`cancel-status.md`](enums/cancel-status.md) |
+| §2.7 退款 `cancel_reason` | 9+ 种已观测（文档原仅 1 种） | [`cancel-reason.md`](enums/cancel-reason.md) |
+| §2 物流 `track_list[].track_status`（Chrome ext） | 自由文本，2 个样本 | [`track-status.md`](enums/track-status.md) |
+| §2 结算 `settlement_details.settlement_status` | 1 码 `2` 已观测 | [`settlement-status.md`](enums/settlement-status.md) |
+| §2 结算 `settlements.payment_status` | 1 码 `1` 已观测 | [`payment-status.md`](enums/payment-status.md) |
+
+### 🔴 待观测（**字典未知**）
+
+| 本目录章节 / 字段 | 关键枚举 | enum 文件 |
+| --- | --- | --- |
+| §2 结算 `plugin.settlements.statement_type` int | 0 个样本 | [`statement-type.md`](enums/statement-type.md) |
+| §2 结算 `plugin.settlements.payment_pending_reason` int | 0 个样本 | [`payment-pending-reason.md`](enums/payment-pending-reason.md) |
+| §7.4.3 `action_module.action_list[]` | 卖家中心操作码（**与物流 `action_code` 无关**） | — |
 
 > **完整 38 个枚举值空间 + 逐行 ✅/🟡/🔴 等级标注**见 [`enums/README.md`](enums/README.md)（含"未固化值汇总"表）。
 
@@ -186,6 +202,7 @@
 - **不是** `order_status` 字符串，是 `main_order_status` 整数
 - 每个 order_line 一个元素（按 `order_line_id` 关联）
 - 无 `create_time`/`paid_time` 等时间戳（时间戳在 `trade_order_module`）
+- **枚举值见** [`enums/main-order-status.md`](enums/main-order-status.md)（🟡 部分确认，5 个码）、[`enums/sku-display-status.md`](enums/sku-display-status.md)（🟡 7 个码）
 
 #### ⚠️ `price_module` — 字段名与推断不同
 
@@ -236,6 +253,11 @@
   },
   "update_time": "1788918894223"        // 毫秒级时间戳字符串
 }
+```
+
+- `fulfillment_type` 整数枚举：完整字典见 [`enums/fulfillment-type.md`](enums/fulfillment-type.md)（双口径：text 端 + plugin 端，0=FBM）
+- `pay_method` 自由文本：实测 5 种（Cash on delivery / MoMo 电子钱包 / Credit/debit card / TikTok Shop Balance / VNPAY），见 [`enums/pay-method.md`](enums/pay-method.md)
+- `sale_region` ISO 3166-1 alpha-2：实测 `VN`，其他 5 种未观测，见 [`enums/sale-region.md`](enums/sale-region.md)
 ```
 
 #### ⚠️ `sku_module[]` — 价格字段名不同
@@ -471,6 +493,7 @@
     - `reverseType` (int) — 退款类型码（已知 `3` = 改变主意；其他值待映射，§6）
     - `return_price` (str + currency suffix) — 退款金额（如 `"544.116₫"`）
     - `tagged` (bool) — 是否打标
+    - **枚举值见** [`enums/case-type.md`](enums/case-type.md)（v2 标准化 3 类：CANCELLATION/REFUND_ONLY/RETURN_AND_REFUND）和 [`enums/reverse-type.md`](enums/reverse-type.md)（卖家中心原始码，🟡 3 个已观测 1/3/4）
   - `card.blocks[].content[].text_pair.content.content` — **i18n 本地化文案**（含 reason 中文显示，**不是结构化字段**，仅供前端渲染）
   - `linked_cards[]` — 关联卡片（如时间线）
 - `total_count` (int) — 总条数
@@ -501,7 +524,8 @@
 - `main_order_id` — 主订单号
 - `sku_id`, `sku_name`, `product_id`, `product_name`
 - `quantity`
-- `reverse_type` (int) — 单订单退款状态枚举
+- `reverse_type` (int) — 单订单退款状态枚举；字典见 [`enums/reverse-type.md`](enums/reverse-type.md)
+- `reverse_status` (int) — 字典见 [`enums/reverse-status.md`](enums/reverse-status.md)
 - `currency` (str)
 
 **用法**：list 拿 `main_order_id` → get 拿完整 modules + 单订单 refund 状态。与 §2.7 的退款列表互为补充：get 看单订单 reverse_type（是否退过），§2.7 看每笔退款的金额。
@@ -689,6 +713,9 @@ image_url = image_obj.get("url_list", [None])[0]  # 从 url_list 取第一张
 ---
 
 ## 6. 待确认事项
+
+> **本节为初始状态。最新进展见 [§7.8](#sec-7-8) 三列对比表（09-09 / 09-13 / 09-15）。**
+> 本节保留作为“起点状态”，便于追踪每个项是怎么从“待确认”演进到“已确认”的。
 
 | 项目 | 状态 | 说明 |
 | ------ | ------ | ------ |
@@ -977,6 +1004,9 @@ def _extract_seller_id_from_url(url: str) -> str | None:
 
 > ⚠ 待对照 seller center 操作菜单确认。
 
+> ⚠️ **命名混淆警告**：本节 `action_list[]` 是**卖家中心操作动作码**（"取消/标记/重新发货"），**不是**物流跟踪事件 `action_code`（§2 物流 24 个事件码，含 `38301` = 海外取消判据）。两者**字段名相近但完全无关**。
+> 物流 `action_code` 完整字典见 [`enums/action-code.md`](enums/action-code.md)；本节 `action_list` 字典未文档化（🔴 未观测）。
+
 #### 7.4.4 `reverse_module[]`（9/50 单有退款）
 
 ```jsonc
@@ -995,6 +1025,60 @@ def _extract_seller_id_from_url(url: str) -> str | None:
 ```
 
 > **2026-09-13 补注（lane feat/after-sales-table）**：上面是 `intercepted_requests.response_body` 里内嵌的 `reverse_module[]`（订单 list 拉到的快照）。独立的售后/取消 API（`/return_refund/202309/cancellations/search`）现在有专门结构化表 `plugin.after_sales` + `plugin.after_sale_items`（migration 0030），见 `tech-doc/intercept-plugin-canonical.md §1.1 / §3`。
+
+##### 7.4.4.1 完整样本：`585900098675508729` 海外取消案例（system cancel vs buyer cancel 区别）
+
+> 这是 §7.8 表里 `reverse_type=1` / `reverse_status=100` 的**唯一已观测样本**——证明 1 类是**系统取消**（不是买家主动取消）。
+
+```jsonc
+// 原始 cancelled 时间: 2026-09-14 07:01:46 (UTC+0)
+{
+  "role":                "SYSTEM",                                  // 关键：SYSTEM 表明系统自动生成
+  "order_id":            "585900098675508729",
+  "cancel_id":           "4042323178361161209",                     // 独立售后单号
+  "cancel_type":         "CANCEL",                                  // 系统/卖家取消（不是 BUYER_CANCEL）
+  "cancel_status":       "CANCELLATION_REQUEST_COMPLETE",          // 终态
+  "cancel_reason":       "returned_to_shipper_other",               // 原因：退件
+  "cancel_reason_text":  "Package delivery failed",                 // 人类可读描述
+  "create_time":         1789369306,                                // = 2026-09-14 07:01:46 UTC
+  "update_time":         1789369306,
+  "should_replenish_stock": true,                                   // 库存回补
+  "cancel_line_items": [{
+    "sku_id":             "1737133142893102327",
+    "sku_name":           "Xám, L 57.5KG‑62.5KG",
+    "product_name":       "Áo thun nam tay ngắn cổ đứng cài ba nút, họa tiết sọc ngang dệt thoáng tông xám, phong cách lịch lãm",
+    "product_image":      {"url": "https://p16-oec-sg.ibyteimg.com/..."},
+    "order_line_item_id": "585900098675574265",
+    "cancel_line_item_id": "4042323178361226745"
+  }]
+}
+```
+
+**对应物流时间线**（完整 43 事件，从 `integration.raw_records` 实证）：
+
+```
+2026-09-05 03:52  10101  下单（VN Bridge nook，COD，585,540 VND）
+2026-09-05 06:48  20101  卖家已打包
+2026-09-06 ~09-07     始发国（CN 义乌分拣/离境/出口清关）
+2026-09-08 09:20  34301  Departed CN
+2026-09-08 12:00  38301  ★ 抵达越南口岸（=海外取消判据的"海外"）
+2026-09-08 ~09-10     越南境内运输（Bạc Liêu）
+2026-09-10 10:22  40601  ★ 客户拒收（=海外取消触发）
+2026-09-10 ~09-14     退件途中（70201 × 15）
+2026-09-14 07:00  80101  ★ 退回卖家（=物流终态）
+2026-09-14 07:01  —      系统取消订单（cancel_id=4042323178361161209）
+```
+
+**关键差异**（`reverse_type=1` vs `reverse_type=4`）：
+
+| 字段 | `reverse_type=1`（系统取消，本样本） | `reverse_type=4`（买家取消，14 单样本） |
+| --- | --- | --- |
+| 触发原因 | 物流失败（`returned_to_shipper_other`） | 买家主动（"不想要了"/"发现更优惠的价格"/"需要更改收货地址"等） |
+| 物流状态 | 必含 38301（已到目的国） + 终态码（80101/110101） | 不一定含海外物流（可能未发货就取消） |
+| 取消时序 | `cancelled_time` = 物流终态后 几小时 | 可能在发货前 |
+| 库存回补 | `should_replenish_stock=true` | 视情况 |
+
+> **完整 reverse_type / reverse_status 枚举见 [`enums/reverse-type.md`](enums/reverse-type.md) 和 [`enums/reverse-status.md`](enums/reverse-status.md)。cancel_reason 全部 9+ 种已观测样本见 [`enums/cancel-reason.md`](enums/cancel-reason.md)。**
 
 #### 7.4.5 `price_module` 拆解：8 单运费样例
 
@@ -1488,20 +1572,34 @@ T3  /api/v1/pay/statement/transaction/detail
 2. `sync` 端点是否 4xx/5xx（可查 `plugin.intercepted_requests.error_type`）
 3. 11:32 之后用户是否真离开了 tab
 
-### 7.8 更新 §6 待确认事项
+<a id="sec-7-8"></a>
+### 7.8 更新 §6 待确认事项（三列对比：09-09 / 09-13 / 09-15）
 
-| 项目 | 状态（09-09） | 状态（09-13） | 备注 |
-| --- | --- | --- | --- |
-| `main_order_status` 状态码映射 | 待确认 | **部分确认** | 104=已取消，101=已发货，见样本 |
-| `sku_display_status` 状态码映射 | 待确认 | 待确认 | 样本 140=已取消 |
-| `trade_order_module.fulfillment_type` 枚举 | 待确认 | 待确认 | 样本 0 |
-| `trade_order_id` ↔ `main_order_id` | 已确认 | 已确认 | — |
-| `statement_sku_detail_id` 获取路径 | 待确认 | **仍未捕获** | §7.6 解释：未访问 Finance 页 |
-| 退货订单列表接口 | 待捕获 | 待捕获 | 仍是 `list_seller_announcement`（公告），不是列表 |
-| **新增**：action_list 整数动作码 | — | **新增待确认** | §7.4.3 |
-| **新增**：request_headers 漏抓 | — | **新增阻塞** | §7.3，扩展侧 bug |
-| **新增**：`discover_chatbotevent` 是否应纳入轮询预算 | — | **新增观察项** | §7.7 |
-| **新增**：Finance / Earnings 域 host 与 endpoint | — | **新增待捕获** | §7.6 |
+| 项目 | 状态（09-09） | 状态（09-13） | **状态（09-15）** | 字典位置 |
+| --- | --- | --- | --- | --- |
+| `main_order_status` 状态码映射 | 待确认 | **部分确认** | ✅ **已确认 5 码**（100/101/102/103/104） | [`enums/main-order-status.md`](enums/main-order-status.md) |
+| `sku_display_status` 状态码映射 | 待确认 | 待确认 | 🟡 **部分确认 7 码**（100/111/112/121/122/130/140） | [`enums/sku-display-status.md`](enums/sku-display-status.md) |
+| `trade_order_module.fulfillment_type` 枚举 | 待确认 | 待确认 (0) | 🟡 **0=FBM 已确认** | [`enums/fulfillment-type.md`](enums/fulfillment-type.md) |
+| `pay_method` 枚举 | 未列 | §7.4.6 5 个 | ✅ **5 码已确认**（Cash on delivery / MoMo 电子钱包 / Credit/debit card / TikTok Shop Balance / VNPAY） | [`enums/pay-method.md`](enums/pay-method.md) |
+| `reverse_type` 完整枚举 | 未列 | "待核实" | 🟡 **3 码已观测**（1=系统取消 / 3=退货退款 / 4=买家取消） | [`enums/reverse-type.md`](enums/reverse-type.md) |
+| `reverse_status` 完整枚举 | 未列 | 未列 | 🟡 **2 码已观测**（4=处理中 / 100=已完成） | [`enums/reverse-status.md`](enums/reverse-status.md) |
+| `cancel_type` 完整枚举 | 未列 | 未列 | ✅ **已确认**（BUYER_CANCEL / CANCEL） | [`enums/cancel-type.md`](enums/cancel-type.md) |
+| `cancel_status` 完整枚举 | 未列 | 未列 | 🟡 **1 码已观测**（CANCELLATION_REQUEST_COMPLETE） | [`enums/cancel-status.md`](enums/cancel-status.md) |
+| `cancel_reason` 完整枚举 | 未列 | 仅 1 种（`returned_to_shipper_other`） | 🟡 **9+ 码已观测** | [`enums/cancel-reason.md`](enums/cancel-reason.md) |
+| `track_status` 自由文本 | 未列 | §7.7 提到 | 🟡 **2 码已观测**（Package picked up / Delivered） | [`enums/track-status.md`](enums/track-status.md) |
+| `track_status` 终结（plugin 路径） | 未列 | 未列 | 🔴 **完全未观测**（plugin.shipments 零行） | [`enums/track-status.md`](enums/track-status.md) |
+| `statement_type` int 枚举 | 未列 | 未列 | 🔴 **完全无样本** | [`enums/statement-type.md`](enums/statement-type.md) |
+| `payment_pending_reason` int 枚举 | 未列 | 未列 | 🔴 **完全无样本** | [`enums/payment-pending-reason.md`](enums/payment-pending-reason.md) |
+| `trade_order_id` ↔ `main_order_id` | 已确认 | 已确认 | ✅ 已确认 | — |
+| `statement_sku_detail_id` 获取路径 | 待确认 | **仍未捕获** | 🔴 **仍未捕获** | §7.6 解释：未访问 Finance 页 |
+| 退货订单列表接口 | 待捕获 | 待捕获 | 🔴 **仍为公告**，**不是列表** | — |
+| **新增**：action_list 整数动作码 | — | **新增待确认** | 🔴 **未对照** | §7.4.3（与物流 `action_code` 无关，见 §7.4.3 ⚠️ 警告） |
+| **新增**：request_headers 漏抓 | — | **新增阻塞** | 🔴 **仍为 bug** | §7.3，扩展侧 bug |
+| **新增**：`discover_chatbotevent` 是否应纳入轮询预算 | — | **新增观察项** | 🟡 观察中 | §7.7 |
+| **新增**：Finance / Earnings 域 host 与 endpoint | — | **新增待捕获** | 🔴 **仍未捕获** | §7.6 |
+| **新增**（09-15）：订单详情 `reverse_type`/`reverse_status` 路径 | — | — | ✅ §2.8 已加 enums 链接 | — |
+| **新增**（09-15）：`should_replenish_stock` 字段 | — | — | 🟡 **已观测**（=true 1 例，§7.4.4.1） | （写入 cancel-reason.md） |
+| **新增**（09-15）：`/tracking` 端点 24 个 action_code 字典 | — | — | ✅ **已文档化** | [`enums/action-code.md`](enums/action-code.md) |
 
 ### 7.9 临时快照使用提示
 
