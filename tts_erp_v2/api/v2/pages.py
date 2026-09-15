@@ -174,12 +174,15 @@ _SHOPS_PAGE_HTML = """<!doctype html>
       .page-main { padding: 16px 16px 48px; }
       .op-section { padding: 16px; }
     }
+    .op-home-link { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-decoration: none; padding: 4px 8px; border: 1px solid var(--rule); transition: border-color 120ms ease; display: inline-block; }
+    .op-home-link:hover { border-color: var(--accent); color: var(--accent); }
   </style>
 </head>
 <body>
   <header class="op-header">
     <div class="op-header-row">
       <div class="op-header-titles">
+        <a href="../../v2/pages/dashboard" class="op-home-link">← 首页</a>
         <span class="op-eyebrow">TikTok Shop · Operations</span>
         <h1 class="op-title">店铺注册</h1>
       </div>
@@ -840,12 +843,15 @@ _PAGE_HTML = """<!doctype html>
       }
       .op-td-action { text-align: left; }
     }
+    .op-home-link { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-decoration: none; padding: 4px 8px; border: 1px solid var(--rule); transition: border-color 120ms ease; display: inline-block; }
+    .op-home-link:hover { border-color: var(--accent); color: var(--accent); }
   </style>
 </head>
 <body>
   <header class="op-header">
     <div class="op-header-row">
       <div class="op-header-titles">
+        <a href="../../v2/pages/dashboard" class="op-home-link">← 首页</a>
         <span class="op-eyebrow">TikTok Shop · Operations</span>
         <h1 class="op-title">采购工作台</h1>
       </div>
@@ -974,10 +980,13 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       -moz-osx-font-smoothing: grayscale;
       text-rendering: optimizeLegibility;
     }
+    .op-home-link { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-decoration: none; padding: 4px 8px; border: 1px solid var(--rule); transition: border-color 120ms ease; display: inline-block; }
+    .op-home-link:hover { border-color: var(--accent); color: var(--accent); }
   </style>
 <body>
   <header class="op-header">
     <div class="op-main px-2 px-md-4 py-3 d-flex flex-wrap justify-content-between align-items-end gap-2 gap-md-3">
+      <a href="../../v2/pages/dashboard" class="op-home-link">← 首页</a>
       <div>
         <div class="op-eyebrow mb-1">TikTok Shop · Analytics</div>
         <h1 class="op-title mb-0">SPU 实际 ROI</h1>
@@ -993,13 +1002,13 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     <!-- 结余带:row-cols 栅格降密度(xs 2 / sm 3 / md 4 / lg 5 两行),JS 只写 #sum-* 文本 + is-err/is-ok -->
     <section class="op-counter px-2 px-md-4 py-3 py-md-4" id="summaries" aria-live="polite">
       <div class="row g-2 g-md-3 text-center row-cols-2 row-cols-sm-3 row-cols-md-4 row-cols-lg-5">
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">广告消耗<span class="op-hint" data-tip="广告消耗 = Σ real_cost_total（广告视图全窗口累计，USD；作为减项计入净利润）">?</span></span><span class="op-counter-num" id="sum-spend">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">广告消耗<span class="op-hint" data-tip="广告消耗 = Σ mixed_real_cost（plugin.ad_today；随选中日期窗口裁剪，与销售/退款同口径；作为减项计入净利润）">?</span></span><span class="op-counter-num" id="sum-spend">—</span></span></div>
         <div class="col"><span class="op-counter-item"><span class="op-counter-label">有效销售<span class="op-hint" data-tip="有效销售订单金额 = Σ quantity×unit_price（状态口径 2026-09-06：白名单状态全部订单，含 COD 在途/待收款，下单即算）；退款不在此扣减，见「退款净额」">?</span></span><span class="op-counter-num" id="sum-sales">—</span></span></div>
         <div class="col"><span class="op-counter-item"><span class="op-counter-label">GMV<span class="op-hint" data-tip="全部订单销售额 = 白名单有效 ∪ 取消订单的原始行金额（下单即计，含 COD 在途未收款与取消单原额）；有效销售 + 取消单原额 = 全单口径；≠ 行内「平台GMV」广告归因口径">?</span></span><span class="op-counter-num" id="sum-gmv">—</span></span></div>
         <div class="col"><span class="op-counter-item"><span class="op-counter-label">有效单量<span class="op-hint" data-tip="有效订单数（跨可见 SPU 全局去重；按订单状态计：已付白名单状态全部订单，含 COD 在途/待收款，下单即算订单口径）">?</span></span><span class="op-counter-num" id="sum-orders">—</span></span></div>
         <div class="col"><span class="op-counter-item"><span class="op-counter-label">总单量<span class="op-hint" data-tip="总单量 = 有效订单数 + 取消订单数（按订单状态计，含 COD 在途与未收款取消；跨可见 SPU 去重）= 与 TikTok 订单管理一致">?</span></span><span class="op-counter-num" id="sum-total-orders">—</span></span></div>
         <div class="col"><span class="op-counter-item"><span class="op-counter-label">退款净额<span class="op-hint" data-tip="有效已付订单中已完结退款的净退款额 = 仅退款(REFUND_ONLY) + 退货退款(RETURN_AND_REFUND) 的退款金额，VND→USD 换算。不含：已付被取消订单退款（见 ⚙ 列开关『已付被取消』信息列）、异常单(UNPAID 等)退款、未关联到 SPU 的退款行（页脚『未归属退款 N 行』只计行数不计金额）。与『全损退款』不同维度：这里是退给客户的钱，货的成本损失在下一格">?</span></span><span class="op-counter-num" id="sum-refund">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">全损退款<span class="op-hint" data-tip="全损退款 = 已完结退货(RETURN_AND_REFUND)按全损计（M13b）= 退货件数 × 该 SPU 单位成本(USD)。单位成本：人工成本(MANUAL)有效行优先，未录入按默认 30 CNY/件(≈$4.43)换算。注意这是成本维度，不是退款金额（退款金额见上一格）；未关联 SPU 的退货件不计入。缺人工成本的 SPU 用默认值会在行内标 ⚠">?</span></span><span class="op-counter-num" id="sum-loss">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">全损退款<span class="op-hint" data-tip="全损退款 = 全损件数 × 该 SPU 单位成本(USD)（M13b，v9 口径：全损 = 完结退货 RETURN_AND_REFUND/REFUND_ONLY（不论物流是否到海外）+ 海外取消 CANCELLED∧38301；国内取消不计）。单位成本：人工成本(MANUAL)优先，其次 1688 货源价(SOURCE_PRICE)，未命中按默认 40 CNY/件(≈$5.91)换算。注意这是成本维度，不是退款金额（退款金额见上一格）；缺成本的 SPU 会在行内标 ⚠">?</span></span><span class="op-counter-num" id="sum-loss">—</span></span></div>
         <div class="col"><span class="op-counter-item"><span class="op-counter-label">取消单量<span class="op-hint" data-tip="取消订单数（status=CANCELLED，按订单状态计，含未收款即取消的 COD 拒收/超时单）。原始金额已计入 GMV；退款仅信息列展示、不计净额">?</span></span><span class="op-counter-num" id="sum-cancelled-orders">—</span></span></div>
         <div class="col"><span class="op-counter-item"><span class="op-counter-label">净利润<span class="op-hint" data-tip="净利润 = (有效销售 − 净退款) − 全部售出件货本 − 广告消耗 − 平台佣金估算（USD）；负值红字。状态口径：销售含 COD 在途未收款单，回款前偏乐观">?</span></span><span class="op-counter-num" id="sum-profit">—</span></span></div>
         <div class="col"><span class="op-counter-item"><span class="op-counter-label">整体实际 ROI<span class="op-hint" data-tip="实际 ROI = (有效销售 − 净退款 − 全损退款(M13b 货损成本)) ÷ 广告消耗（M14）；≥ 保本 = 赚，< 保本 = 亏（主判据）。状态口径：销售含 COD 在途未收款单；无广告消耗 → —">?</span></span><span class="op-counter-num" id="sum-roi">—</span></span></div>
@@ -1019,7 +1028,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
             <option value="">全部店铺</option>
           </select>
         </label>
-        <label class="op-field op-field--date" for="filter-w-start" data-tip="销售/退款日期范围（空 = 全历史；广告窗口始终全量）">
+        <label class="op-field op-field--date" for="filter-w-start" data-tip="日期范围（销售/退款/广告同口径裁剪；空 = 全历史）">
           <span class="op-fld-label">起始日</span>
           <input id="filter-w-start" type="date" class="form-control" aria-label="销售/退款起始日期（空 = 不限）">
         </label>
@@ -1055,11 +1064,11 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
         <thead>
           <tr>
             <th scope="col" class="op-th op-th-left" width="140">商品</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="spend" data-tip="广告消耗（USD，广告窗口全量累计；作为减项计入净利润）" width="200">广告消耗</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="spend" data-tip="广告消耗（USD，plugin.ad_today，随选中日期窗口裁剪；作为减项计入净利润）" width="200">广告消耗</th>
             <th scope="col" class="op-th op-th-sort" data-sort="sales" data-tip="有效GMV = 白名单状态订单行金额（USD；排除已取消订单，B1 拍板）" width="200">有效GMV</th>
             <th scope="col" class="op-th op-th-sort" data-sort="order_count" data-tip="有效出单量 = 白名单有效订单数（distinct）" width="160">有效出单量</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="cancel_rate" data-tip="取消率 = 取消单量 ÷ (有效单量 + 取消单量)" width="180">取消率%</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="full_loss_rate" data-tip="全损退款率% = 全损件数(38301) ÷ (售出件数+全损取消件数);D4 B 口径;分母0 → —" width="200">全损退款率%</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="cancel_rate" data-tip="取消率 = 国内取消单量 ÷ (有效单量 + 国内取消单量)；v9 口径：只计物流未到海外的取消单，海外取消(已到目的国 38301)已计入全损退款率，两处不重叠" width="180">取消率%</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="full_loss_rate" data-tip="全损退款率% = 全损件数 ÷ (售出件数+海外取消件数)；v9 口径：全损件数 = 完结退货(RETURN_AND_REFUND/REFUND_ONLY，不论物流) + 海外取消(CANCELLED∧38301)；国内取消不计全损；分母0 → —" width="200">全损退款率%</th>
             <th scope="col" class="op-th op-th-sort" data-sort="net_profit" data-tip="净利润 v7(M18):已结算 SETTLEMENT + 未结算 ×(1−r̂)×(1−退款率) − 货本含全损取消 − 广告;负值红字。Red/green 仅按净利判(C3 拍板,删 ROI&lt;1 硬亏档)" width="200">净利润</th>
           </tr>
         </thead>
@@ -1669,6 +1678,7 @@ _INTERCEPT_CONFIGS_PAGE_HTML = """<!doctype html>
     .badge { display: inline-block; font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: 0.06em; padding: 3px 8px; border-radius: 0; }
     .badge-ok { background: var(--ok); color: #fff; }
     .badge-disabled { background: var(--rule); color: var(--ink); }
+    .badge-blacklist { background: var(--danger); color: #fff; }
     .tag { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 2px 7px; border: 1px solid var(--rule); margin-right: 4px; }
     .actions { white-space: nowrap; }
     .pager { display: flex; align-items: center; gap: 18px; padding-top: 16px; border-top: 1px solid var(--rule-soft); font-family: var(--sans); font-size: 14px; }
@@ -1697,12 +1707,15 @@ _INTERCEPT_CONFIGS_PAGE_HTML = """<!doctype html>
     .form-error { color: var(--danger); font-size: 13px; margin-bottom: 12px; }
     .modal-footer { display: flex; justify-content: flex-end; gap: 12px; padding: 16px 20px; border-top: 1px solid var(--rule); }
     @media (max-width: 720px) { .toolbar { flex-direction: column; align-items: stretch; } .toolbar-field { flex-direction: column; align-items: stretch; } .toolbar-field input, .toolbar-field select { min-width: auto; } }
+    .op-home-link { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-decoration: none; padding: 4px 8px; border: 1px solid var(--rule); transition: border-color 120ms ease; display: inline-block; }
+    .op-home-link:hover { border-color: var(--accent); color: var(--accent); }
   </style>
 </head>
 <body>
   <header class="op-header">
     <div class="op-header-row">
       <div class="op-header-titles">
+        <a href="../../v2/pages/dashboard" class="op-home-link">← 首页</a>
         <span class="op-eyebrow">TikTok Shop · Interceptor</span>
         <h1 class="op-title">拦截配置</h1>
       </div>
@@ -1751,13 +1764,14 @@ _INTERCEPT_CONFIGS_PAGE_HTML = """<!doctype html>
             <th class="op-th" width="60">ID</th>
             <th class="op-th">域名</th>
             <th class="op-th">Endpoint</th>
+            <th class="op-th" width="80">模式</th>
             <th class="op-th" width="80">状态</th>
             <th class="op-th" width="160">标签</th>
             <th class="op-th" width="80">操作</th>
           </tr>
         </thead>
         <tbody id="config-tbody">
-          <tr><td colspan="7" class="op-empty">加载中…</td></tr>
+          <tr><td colspan="8" class="op-empty">加载中…</td></tr>
         </tbody>
       </table>
     </div>
@@ -1788,6 +1802,14 @@ _INTERCEPT_CONFIGS_PAGE_HTML = """<!doctype html>
             <label for="form-endpoint">Endpoint *</label>
             <input id="form-endpoint" type="text" placeholder="/api/v1/orders/*">
             <div class="hint">支持 * 通配符，如 /api/* 匹配 /api/ 下所有路径</div>
+          </div>
+          <div class="form-group">
+            <label>模式 *</label>
+            <div class="form-radio">
+              <label><input type="radio" name="mode" id="form-mode-whitelist" value="whitelist" checked> 白名单（记录匹配请求）</label>
+              <label><input type="radio" name="mode" id="form-mode-blacklist" value="blacklist"> 黑名单（完全跳过）</label>
+            </div>
+            <div class="hint">白名单 = 记录 headers/body；黑名单 = 域名命中后完全不上传</div>
           </div>
           <div class="form-group">
             <label for="form-description">描述</label>
@@ -1927,12 +1949,15 @@ _INTERCEPT_REQUESTS_PAGE_HTML = """<!doctype html>
     .detail-pre { background: var(--paper-deep); border: 1px solid var(--rule-soft); padding: 12px; font-family: var(--mono); font-size: 12px; overflow-x: auto; margin: 0; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto; }
     .text-danger { color: var(--danger); }
     @media (max-width: 720px) { .toolbar { flex-direction: column; align-items: stretch; } .toolbar-field { flex-direction: column; align-items: stretch; } .toolbar-field input, .toolbar-field select { min-width: auto; } }
+    .op-home-link { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-decoration: none; padding: 4px 8px; border: 1px solid var(--rule); transition: border-color 120ms ease; display: inline-block; }
+    .op-home-link:hover { border-color: var(--accent); color: var(--accent); }
   </style>
 </head>
 <body>
   <header class="op-header">
     <div class="op-header-row">
       <div class="op-header-titles">
+        <a href="../../v2/pages/dashboard" class="op-home-link">← 首页</a>
         <span class="op-eyebrow">TikTok Shop · Interceptor</span>
         <h1 class="op-title">拦截记录</h1>
       </div>
@@ -2104,12 +2129,15 @@ _INTERCEPT_STATS_PAGE_HTML = """<!doctype html>
     .daily-date { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-top: 2px; }
     .loading { text-align: center; padding: 48px; color: var(--muted); font-family: var(--mono); font-size: 12px; }
     .error-msg { text-align: center; padding: 24px; color: var(--danger); font-size: 13px; display: none; }
+    .op-home-link { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-decoration: none; padding: 4px 8px; border: 1px solid var(--rule); transition: border-color 120ms ease; display: inline-block; }
+    .op-home-link:hover { border-color: var(--accent); color: var(--accent); }
   </style>
 </head>
 <body>
   <header class="op-header">
     <div class="op-header-row">
       <div class="op-header-titles">
+        <a href="../../v2/pages/dashboard" class="op-home-link">← 首页</a>
         <span class="op-eyebrow">TikTok Shop · Interceptor</span>
         <h1 class="op-title">拦截统计</h1>
       </div>

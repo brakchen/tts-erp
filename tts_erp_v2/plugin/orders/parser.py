@@ -22,6 +22,8 @@ from tts_erp_v2.plugin.orders.repository import (
     _payment_status_to_text,
     _to_decimal,
     _ts_to_datetime,
+    upsert_after_sale,
+    upsert_after_sale_item,
     upsert_order,
     upsert_order_line,
     upsert_settlement,
@@ -99,12 +101,11 @@ def parse_order_response(
         main_order_status = osm_first.get("main_order_status")  # 整数
         sku_display_status = osm_first.get("sku_display_status")  # 整数
         currency = grand_total.get("currency") or sub_total.get("currency")
-        payment_amount = _to_decimal(grand_total.get("price_val"))
-        total_amount = _to_decimal(sub_total.get("price_val"))
+        payment_amount = _to_decimal(grand_total.get("price_val"), field="orders.payment_amount")
+        total_amount = _to_decimal(sub_total.get("price_val"), field="orders.total_amount")
         fulfillment_type = tom.get("fulfillment_type")  # 整数
         pay_method = tom.get("pay_method")  # 文本
         sale_region = tom.get("sale_region")  # 如 "VN"
-        shipping_fee = _to_decimal((tom.get("shipping_fee") or {}).get("price_val"))
         order_time = _ts_to_datetime(tom.get("create_time"))  # 秒级字符串
         update_time = _ts_to_datetime(tom.get("update_time"))  # 毫秒级字符串
         latest_rts_time = _ts_to_datetime(tom.get("latest_rts_time"))
@@ -124,7 +125,6 @@ def parse_order_response(
             fulfillment_type=fulfillment_type,
             pay_method=pay_method,
             sale_region=sale_region,
-            shipping_fee=shipping_fee,
             order_time=order_time,
             update_time=update_time,
             latest_rts_time=latest_rts_time,
@@ -149,12 +149,12 @@ def parse_order_response(
             # product_image.url_list[0]（不是 sku_image 字符串）
             image_obj = item.get("product_image") or {}
             image_url = (image_obj.get("url_list") or [None])[0]
-            quantity = _to_decimal(item.get("quantity"))
+            quantity = _to_decimal(item.get("quantity"), field="order_lines.quantity")
             # sku_unit_price.price_val（不是 sale_price.amount）
             unit_price_obj = item.get("sku_unit_price") or {}
             total_price_obj = item.get("sku_total_price") or {}
-            unit_price = _to_decimal(unit_price_obj.get("price_val"))
-            total_price = _to_decimal(total_price_obj.get("price_val"))
+            unit_price = _to_decimal(unit_price_obj.get("price_val"), field="order_lines.unit_price")
+            total_price = _to_decimal(total_price_obj.get("price_val"), field="order_lines.total_price")
             line_currency = unit_price_obj.get("currency")
             # order_status_module 按 order_line_id 关联
             line_ids = item.get("order_line_ids") or []
@@ -323,7 +323,7 @@ def _parse_amount(amount_obj: dict | None) -> Decimal | None:
     """TikTok {amount, currency} 对象 → Decimal。"""
     if not amount_obj:
         return None
-    return _to_decimal(amount_obj.get("amount"))
+    return _to_decimal(amount_obj.get("amount"), field="fee_component.amount")
 
 
 def _parse_iso_dt(value: str | None) -> datetime | None:
@@ -435,7 +435,7 @@ def parse_statement_transaction_response(
     sku_id = str(sku_record.get("sku_id", "")) or None
     product_name = sku_record.get("product_name")
     sku_name = sku_record.get("sku_name")
-    quantity = _to_decimal(sku_record.get("quantity"))
+    quantity = _to_decimal(sku_record.get("quantity"), field="settlement_details.quantity")
     settlement_status = (
         str(sku_record.get("settlement_status", ""))
         if sku_record.get("settlement_status") is not None
@@ -480,5 +480,116 @@ def parse_statement_transaction_response(
         seller_app_cut_flow=seller_app_cut_flow,
     )
     rows_written += 1
+
+    return rows_written
+
+
+# ── 售后/退款 解析 ──────────────────────────────────────
+def parse_after_sales_response(
+    sess: Session,
+    *,
+    log_id: int,
+    shop_id: str,
+    response_body: dict,
+    captured_at: datetime,
+) -> int:
+    """解析 /return_refund/202309/cancellations/search 响应。
+
+    返回 plugin.after_sales + plugin.after_sale_items 写入行数。
+
+    响应结构（假设，按 order-domain-business-rules.md §3 描述设计；
+    chrome 扩展未抓到过 0 hit 数据，待首次真实响应后调整字段名）：
+
+    {
+      "code": 0, "message": "success",
+      "data": {
+        "cancellations": [
+          {
+            "cancel_id": "...",
+            "cancel_type": "BUYER_CANCEL" | "CANCEL",
+            "cancel_status": "CANCELLATION_REQUEST_COMPLETE" | ...,
+            "order_id": "<main_order_id>",
+            "reason": "...",
+            "request_time": <iso str or unix ms>,
+            "complete_time": ...,
+            "cancel_line_items": [
+              {
+                "id": "<line_item_id>",
+                "order_line_item_id": "...",
+                "sku_id": "...",
+                "product_id": "...",
+                "quantity": 1,
+                "refund_amount": { "amount": "0", "currency": "VND" }
+              }
+            ]
+          }
+        ]
+      }
+    }
+    """
+    rows_written = 0
+    data = response_body.get("data") or {}
+    if isinstance(data, dict) and "cancellations" in data:
+        cancellations = data.get("cancellations") or []
+    elif "cancel_id" in response_body:
+        cancellations = [response_body]
+    else:
+        cancellations = []
+
+    for c in cancellations:
+        cancel_id = str(c.get("cancel_id") or "")
+        if not cancel_id:
+            log.warning("after_sale missing cancel_id, skipping: %s", c)
+            continue
+        cancel_type = str(c.get("cancel_type") or "")
+        cancel_status = str(c.get("cancel_status") or "")
+        main_order_id = c.get("order_id") or c.get("main_order_id")
+        reason = c.get("reason")
+        request_time = _ts_to_datetime(c.get("request_time"))
+        complete_time = _ts_to_datetime(c.get("complete_time"))
+
+        upsert_after_sale(
+            sess,
+            log_id=log_id,
+            shop_id=shop_id,
+            cancel_id=cancel_id,
+            cancel_type=cancel_type,
+            cancel_status=cancel_status,
+            main_order_id=str(main_order_id) if main_order_id else None,
+            reason=reason,
+            request_time=request_time,
+            complete_time=complete_time,
+            raw_payload=c,
+        )
+        rows_written += 1
+
+        for li in c.get("cancel_line_items") or []:
+            line_item_id = str(li.get("id") or li.get("line_item_id") or "")
+            if not line_item_id:
+                log.warning("after_sale_item missing id, skipping")
+                continue
+            order_line_item_id = li.get("order_line_item_id")
+            sku_id = li.get("sku_id")
+            product_id = li.get("product_id")
+            quantity = _to_decimal(li.get("quantity"), field="after_sale_items.quantity")
+            refund_amount_obj = li.get("refund_amount") or {}
+            refund_amount = _to_decimal(refund_amount_obj.get("amount"), field="after_sale_items.refund_amount")
+            currency = refund_amount_obj.get("currency")
+
+            upsert_after_sale_item(
+                sess,
+                log_id=log_id,
+                shop_id=shop_id,
+                cancel_id=cancel_id,
+                line_item_id=line_item_id,
+                order_line_item_id=str(order_line_item_id) if order_line_item_id else None,
+                sku_id=str(sku_id) if sku_id else None,
+                product_id=str(product_id) if product_id else None,
+                quantity=quantity,
+                refund_amount=refund_amount,
+                currency=currency,
+                raw_payload=li,
+            )
+            rows_written += 1
 
     return rows_written

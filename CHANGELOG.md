@@ -1,5 +1,73 @@
 # tts-erp CHANGELOG
 
+## 2026-09-15 — SPU ROI 广告消耗按日期切片 v8.1（v8 选错源修正）
+
+**v8 失误**：v8 上线时看 ad_daily last_update 停在 2026-09-13 23:15（merge job
+被禁用后的表身 last_update），推断“ad_daily 冻结、ad_today 是新生产
+源”，把 `_SQL_ROI_AD` / `_SQL_DETAIL_ADS` / `_SQL_ROI_WINDOW` 改读
+`ad_today`。但 2026-09-15 17:20 现场反馈“八月广告消耗只有 $25”
+调试发现 ad_daily last_update 实际是 2026-09-14 17:22:48——merge job
+禁用只防了 ad_today→ad_daily 跨天清理，没停 ad_daily 写入口；Chrome 扩
+展 kind=daily dumps 仍走 `upsert_daily_rows` 写 ad_daily。用户选择“主要看
+ad_daily 的数据”，v8.1 回切到 ad_daily。
+
+**改动**：
+- **后端**（`tts_erp_v2/analytics/spu_roi.py`）：
+  - `_SQL_ROI_AD` / `_SQL_DETAIL_ADS` / `_SQL_ROI_WINDOW` 3 处都改回读
+    `plugin.ad_daily`（v7 源）；保留 v8 加的 `day BETWEEN :ws AND :we` 裁剪。
+  - 注释从“v8: ad_today 单源”改为“v8.1: ad_daily 单源；ad_today 为临时表”。
+- **测试**（`tests/api/test_spu_roi_api.py`）：
+  - `_seed_ad_dump` 夹具从写 ad_today 改回写 ad_daily（v7 行为）。
+  - 既有 v8 行为测试（`test_spu_roi_date_window_clips_ad` /
+    `test_spu_roi_ad_window_single_side_only`）不变——SQL 语义同 v8，只是
+    数据源调换，裁剪逻辑仍有效。
+- **设计文档**（`tech-doc/analytics/spu-roi-v8-ad-window.md`）：§1.4 重写
+  为“ad_daily / ad_today 现状（v8.1 修正）”，明写 v8 选错源原因与 v8.1
+  选 ad_daily 依据。
+
+**表状态**（2026-09-15 17:25）：
+
+| 表 | 行数 | 日期范围 | 判 |
+| --- | ---: | --- | --- |
+| `plugin.ad_daily` | 25,471 | 2026-07-10 ~ 09-14 | 生产主源（v8.1 读） |
+| `plugin.ad_today` | 1,142 | 2026-09-13 ~ 09-15 | 重复写入临时表 |
+
+**遗留**：ad_today 9-13~9-15 1,142 行未回填 ad_daily（Chrome 扩展
+kind=today 仍在写）。见 `tech-doc/analytics/spu-roi-v8-ad-window.md`
+§10.1。
+
+## 2026-09-15 — SPU ROI 广告消耗按日期切片（v8）
+
+**背景**：v7 上线起 `pages/spu-roi` 的"广告消耗"始终为全窗口累计（`ad_daily ∪ ad_today`
+全表），与销售/退款可随日期裁剪不对称——选起始/截止日后 spend / gmv_ad / ad_count
+都不变，被用户反复报为“广告消耗不随日期变”。同期 `plugin.ad_merge_today2daily`
+自 2026-09-13 被禁用（UTC 跨天延迟归因调查），`ad_daily` 已冻结，历史数据需回填
+才能完整覆盖——本改动不包含回填。
+
+**改动**：
+
+- **后端**（`tts_erp_v2/analytics/spu_roi.py`）：
+  - `_SQL_ROI_AD` / `_SQL_DETAIL_ADS` 删 `ad_daily` UNION ALL，仅读 `plugin.ad_today`；
+    加 `day BETWEEN :ws AND :we` 过滤（与销售/退款同语义）。
+  - `/v2/analytics/spu-roi/{spu_pk}/ads` 端点新增 `w_start` / `w_end` query 参数
+    （原端点不接受窗口）。
+  - `_SQL_ROI_WINDOW` 改为只查 `ad_today`，`meta.window.first_day/last_day`
+    现仅反映 ad_today 当前覆盖范围。
+  - `window_note` 文案改为“ad 同窗口裁剪（v8）”，删“ad=视图全窗口累计”说明。
+- **前端**（`pages/spu-roi`）：
+  - 结余带“广告消耗”格 tooltip、表头 tooltip、钻取面板 HINT 同步改“随选中日期窗口裁剪”。
+  - 日期框 tooltip 改“销售/退款/广告同口径裁剪”。
+- **测试**（`tests/api/test_spu_roi_api.py`）：
+  - 删除 v7 `test_spu_roi_date_window_does_not_clip_ad`（v7“全窗口累计”护栏与 v8 行为反向，留存只会误导）。
+  - 新增 `test_spu_roi_date_window_clips_ad`（v8 行为护栏：窗外 ad 被裁，窗内 ad 留下）。
+  - `_seed_ad_dump` 夹具改为写 `plugin.ad_today`（v8 后 ad_daily 不在取数路径）。
+- **文档**（`tech-doc/analytics/spu-roi-v7-refactor.md`）：
+  - §6.2 / §6.3 / §6.4 / §8.13 同步 v8 口径；`ad_today` 是 ROI 主源说明。
+
+**数据库**：`plugin.ad_today` 仍是主源；`plugin.ad_daily` 仍在表上但不再被读。
+历史广告数据（2026-07-10 ~ 2026-09-12）需另起 migration 从 `ad_daily` 回填到 `ad_today`
+（不在本 lane）。回填前选更早日期范围会出现“广告消耗归零”现象。
+
 ## 2026-09-12 — 修正结算版本覆盖查询
 
 - `/v2/order-sync/has-data` 支持可选 `versions`，结算域按 `statement_id + statement_version`

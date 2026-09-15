@@ -96,14 +96,40 @@ elif _db_url_prod:
     # ``scripts/test.sh`` when a developer has only ``.env`` on disk.
     try:
         _dbname = (_urlparse(_db_url).path or "").lstrip("/")
-        if _dbname in {"tts_erp", "tts_erp_prod"}:
+        if _dbname in {"tts_erp", "tts_erp_prod"} or _dbname.startswith("tts_erp_prod_"):
+            # 2026-09-13 incident: warning was not loud enough. The
+            # ``tests/api/test_admin_purge.py::test_purge_plugin_data_clears_ad_tables``
+            # ran against prod ``tts_erp`` from a worktree whose ``.env``
+            # symlinked to the main repo's prod ``.env`` and the runner
+            # did not source ``.env.test``. The wipe blanked 14,719 rows
+            # of ``plugin.ad_daily`` (246 campaigns × 65 days). We now
+            # FAIL FAST on prod-shaped dbnames by default — only an
+            # explicit env opt-in (TTS_ERP_TEST_OFF=1) can override, and
+            # even then stderr still gets a loud banner. See
+            # ``tech-doc/incident-reports/2026-09-13-ad-daily-purge.md``.
+            test_off = os.environ.get("TTS_ERP_TEST_OFF", "0") == "1"
+            if not test_off:
+                # NOTE: We use ``sys.exit(2)`` instead of ``pytest.exit()``
+                # because pytest catches its own Exit class to set
+                # returncode and continue collection. ``sys.exit`` raises
+                # SystemExit which propagates through pytest's collect
+                # phase as a collection error — session aborts immediately.
+                import sys as _sys2
+                _sys2.stderr.write(
+                    "\n[conftest] REFUSED: prod-shaped DB ``"
+                    f"{_dbname}``\n"
+                    "             Use ``bash scripts/test.sh fast`` (sources "
+                    "``.env.test``),\n"
+                    "             or set TTS_ERP_DB_URL_TEST to point at the\n"
+                    "             dedicated test DB. TTS_ERP_TEST_OFF=1 bypasses\n"
+                    "             this guard (NOT recommended; you will run\n"
+                    "             tests against prod and may damage live data).\n\n"
+                )
+                _sys2.stderr.flush()
+                raise SystemExit(2)
             sys.stderr.write(
-                "\n[conftest] WARNING: TTS_ERP_DB_URL_TEST not set; tests\n"
-                "             will run against the production-shaped DB\n"
-                "             ``{db}``. Use ``bash scripts/test.sh fast``\n"
-                "             (or ``cp .env .env.test && sed -i\n"
-                "             's|/tts_erp\\b|/tts_erp_v3_test|' .env.test``)\n"
-                "             to isolate.\n\n".format(db=_dbname)
+                "\n[conftest] !!! TTS_ERP_TEST_OFF=1 !!! Running tests against\n"
+                f"             prod-shaped DB ``{_dbname}``. LIVE DATA AT RISK.\n\n"
             )
     except Exception:  # noqa: BLE001 — defensive: URL parse failure
         # must never block a test run; we already have a usable _db_url.

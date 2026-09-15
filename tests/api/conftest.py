@@ -171,6 +171,26 @@ def _wipe_test_rows(db_engine) -> None:
                 "WHERE job_name LIKE 'TEST_%' OR external_id LIKE 'TEST_%'"
             )
         )
+        # 2026-09-13 P0 (fix/recover-ad-daily-purge-guard): wipe plugin.*
+        # rows created by test bodies (test_purge_plugin_data_clears_ad_tables
+        # INSERTs TEST_SELLER into ad_daily/ad_raw_log outside the session
+        # savepoint, so the test session rollback doesn't catch them).
+        # Without this, the next test run hits duplicate-key on uq_ad_daily.
+        conn.execute(
+            _text("DELETE FROM plugin.ad_daily WHERE seller_id LIKE 'TEST_%'")
+        )
+        conn.execute(
+            _text("DELETE FROM plugin.ad_today WHERE seller_id LIKE 'TEST_%'")
+        )
+        conn.execute(
+            _text("DELETE FROM plugin.ad_monthly WHERE seller_id LIKE 'TEST_%'")
+        )
+        conn.execute(
+            _text("DELETE FROM plugin.ad_raw_log WHERE seller_id LIKE 'TEST_%'")
+        )
+        conn.execute(
+            _text("DELETE FROM plugin.plugin_logs WHERE seller_id LIKE 'TEST_%'")
+        )
 
 
 def select_func(col):

@@ -88,6 +88,14 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 from _db_url import normalize_db_url  # noqa: E402 — imported after sys.path mutation
 
+# Make ``tts_erp_v2`` importable from any CWD (the package lives in
+# the project root, one level up from scripts/). This lets
+# ``from tts_erp_v2.api.deps import require_destructive_script_guard``
+# resolve whether the operator invoked the script via absolute path,
+# via ``bash scripts/...``, or from inside scripts/.
+PROJECT_ROOT = SCRIPTS_DIR.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
 
 # Same env-var loading as conftest.py — operator script must work from
 # any CWD without a project-root dependency.
@@ -174,6 +182,19 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(
             "Must pass either --dry-run (preview only) or --confirm (actually execute)."
         )
+
+    # Prod-shape guard (2026-09-13 fix/unify-destructive-guard):
+    # refuses destructive ops on prod-shape dbnames unless
+    # ``ALLOW_PROD_DESTRUCTIVE=1`` is set in the environment. Dry-run
+    # previews on prod are still allowed (they only print).
+    from tts_erp_v2.api.deps import require_destructive_script_guard
+
+    require_destructive_script_guard(
+        script_name="oneoff_finance_reset",
+        confirmation=args.confirm,
+        dangerous=args.confirm,  # dry-run is safe even on prod
+        allow_env="ALLOW_PROD_DESTRUCTIVE",
+    )
 
     db_url = _resolve_db_url()
 

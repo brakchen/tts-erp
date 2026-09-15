@@ -114,10 +114,31 @@ journalctl --user -u tts-erp -n 50                 # systemd 日志
   `DROP TABLE` / `DROP SCHEMA` 必须先开 admin 端点 + 人工决策（`/v2/admin/purge-plugin-data`
   是唯一合法路径），或者**仅在专用 test 库 `tts_erp_v3_test` 操作**。所有测试**只能**连 test 库
   （走 `bash scripts/test.sh`，它自动 source `.env.test`；**禁止裸跑 `.venv/bin/pytest`** —— 它读
-  `.env` = prod `tts_erp`）；禁止直接连 prod dbname（`tts_erp` / `tts_erp_prod`）跑测试 / 迁移 /
-  手动 SQL。prod schema 改名 / 数据搬迁 migration 由用户**手动触发** `alembic upgrade head`，
+  `.env` = prod `tts_erp`）。`tests/conftest.py` 现在对 prod-shape dbname **硬 fail-fast**
+  （`pytest.exit(2)`），不再只是 WARNING；只有 `TTS_ERP_TEST_OFF=1` 才能临时绕过（**强烈不建议**，
+  banner 会明确警告 `LIVE DATA AT RISK`）。禁止直接连 prod dbname（`tts_erp` / `tts_erp_prod`）跑
+  测试 / 迁移 / 手动 SQL。prod schema 改名 / 数据搬迁 migration 由用户**手动触发** `alembic upgrade head`，
   agent **绝不**自动跑（agent 只在 test 库验证）；改名类迁移要与服务重启挨着做，否则旧 schema 名
   的运行进程会报 `relation does not exist`
+- ❌ **`/v2/admin/purge-plugin-data` 的双 gate（2026-09-13 P0 教训）**：
+  (1) 必须 `?confirm=true` query param 才真删（无 confirm = dry-run，只返行数）；
+  (2) **拒绝 prod-shape dbname**（`_is_prod_shaped_db()` 检查 `TTS_ERP_DB_URL`）—— 只有
+  `ALLOW_PROD_PURGE=1` 或（`?allow_prod=true` 且 `TTS_ERP_ENVIRONMENT=dev`）才放行；prod 上误调
+  会返 403，不会清库。role 要求 `admin`（2026-09-10 bfb6b71 降到 readwrite 的改动已回滚为 admin）。
+- ❌ **统一 prod-shape destructive 守卫（2026-09-13 P1 教训：6 个 destructive 入口都要用）**：
+  所有 DELETE / TRUNCATE / DROP / irreversible UPDATE 路径（HTTP 端点 / CLI 脚本 / alembic upgrade /
+  定时 job）都必须从 `tts_erp_v2.api.deps` import 以下守卫之一，先调用再发语句：
+  - HTTP 端点用 `require_destructive_guard(request, op_name=...)` — 返 403 拒绝 prod-shape dbname
+    （除非 `ALLOW_PROD_DESTRUCTIVE=1`）
+  - CLI/alembic/job 用 `require_destructive_script_guard(script_name=..., confirmation=..., dangerous=...)`
+    — exit 2 拒绝；`--dry-run` 走 `dangerous=False` 在 prod-shape 库允许预览但不执行
+  - 检测函数 `is_prod_shaped_db()` 是 single source of truth（`tts_erp` / `tts_erp_prod` / `tts_erp_prod_*` →
+    True；TTS_ERP_DB_URL 未设 → True fail-closed）
+  - **当前已装守卫的入口**：`/v2/admin/purge-plugin-data`、`/v2/intercept/configs/{id}` DELETE、
+    `/v2/intercept/configs/batch` (action=delete)、`/v2/spu_images/{id}` DELETE、
+    `scripts/oneoff_finance_reset.py`、`scripts/oneoff_regen_finance_components.py`、`alembic upgrade`
+  - **新加 destructive 路径不装守卫 = P1 review finding**；守卫未覆盖到的路径立即报，不等待事故
+  - 事故复盘：`tech-doc/incident-reports/2026-09-13-ad-daily-purge.md`
 - ❌ 不要直连 v1 `oauth_tokens` 表（库已 DROP，备份 `backups/oauth_receiver_v1_legacy_*.sql.gz`）/
   不要自己拿 Fernet key 解密 `integration.credentials` —— 凭证只能走 `proxy.token_service`（见 §2.1）
 - ❌ 不要重建 / 依赖 `public.*` v1 遗留表（v2 只读 11 schema；v1 业务表 2026-09-05 已 DROP，归档在

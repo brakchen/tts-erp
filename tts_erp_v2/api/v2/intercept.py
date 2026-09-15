@@ -19,14 +19,15 @@ import sys
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.api.deps import get_session
+from tts_erp_v2.api.deps import get_session, require_destructive_guard
 
 # ─── Config ───────────────────────────────────────────────────────────
 
@@ -54,6 +55,11 @@ class InterceptConfigIn(BaseModel):
 
     domain: str = Field(min_length=1, max_length=255)
     endpoint: str = Field(min_length=1, max_length=512)
+    mode: str = Field(
+        default="whitelist",
+        pattern=r"^(whitelist|blacklist)$",
+        description="whitelist = 记录匹配请求; blacklist = 完全跳过",
+    )
     capture_headers: bool = True
     capture_body: bool = True
     description: str | None = None
@@ -83,51 +89,68 @@ class InterceptConfigImport(BaseModel):
 class SessionIn(BaseModel):
     """会话信息"""
 
-    session_id: str = Field(min_length=1, max_length=128)
-    tab_id: int | None = None
-    tab_url: str | None = None
-    started_at: datetime
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(
+        min_length=1,
+        max_length=128,
+        alias="sessionId",
+    )
+    tab_id: int | None = Field(None, alias="tabId")
+    tab_url: str | None = Field(None, alias="tabUrl")
+    started_at: datetime = Field(alias="startedAt")
 
 
 class InterceptedRequestIn(BaseModel):
     """拦截的请求记录"""
 
-    request_id: str = Field(min_length=1, max_length=128)
-    trace_id: str | None = None
-    session_id: str = Field(min_length=1, max_length=128)
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: str = Field(min_length=1, max_length=128, alias="requestId")
+    trace_id: str | None = Field(None, alias="traceId")
+    session_id: str = Field(min_length=1, max_length=128, alias="sessionId")
     method: str = Field(min_length=1, max_length=16)
     url: str = Field(min_length=1, max_length=2048)
-    endpoint_path: str = Field(min_length=1, max_length=512)
-    endpoint_host: str = Field(min_length=1, max_length=255)
-    is_whitelisted: bool
-    matched_config_id: int | None = None
-    request_headers: dict[str, Any] | None = None
-    request_body: dict[str, Any] | None = None
-    response_status: int | None = None
-    response_status_text: str | None = None
-    response_headers: dict[str, Any] | None = None
-    response_body: dict[str, Any] | None = None
-    duration_ms: int | None = None
-    error_type: str | None = None
-    error_message: str | None = None
-    seller_id: str | None = None
-    advertiser_id: str | None = None
-    business_context: dict[str, Any] | None = None
-    pagination: dict[str, Any] | None = None
-    captured_at: datetime
+    endpoint_path: str = Field(min_length=1, max_length=512, alias="endpointPath")
+    endpoint_host: str = Field(min_length=1, max_length=255, alias="endpointHost")
+    is_whitelisted: bool = Field(alias="isWhitelisted")
+    matched_config_id: int | None = Field(None, alias="matchedConfigId")
+    request_headers: dict[str, Any] | None = Field(None, alias="requestHeaders")
+    request_body: Any | None = Field(None, alias="requestBody")
+    response_status: int | None = Field(None, alias="responseStatus")
+    response_status_text: str | None = Field(None, alias="responseStatusText")
+    response_headers: dict[str, Any] | None = Field(None, alias="responseHeaders")
+    response_body: Any | None = Field(None, alias="responseBody")
+    duration_ms: int | None = Field(None, alias="durationMs")
+    error_type: str | None = Field(None, alias="errorType")
+    error_message: str | None = Field(None, alias="errorMessage")
+    seller_id: str | None = Field(None, alias="sellerId")
+    advertiser_id: str | None = Field(None, alias="advertiserId")
+    business_context: dict[str, Any] | None = Field(None, alias="businessContext")
+    pagination: dict[str, Any] | None = Field(None, alias="pagination")
+    captured_at: datetime = Field(alias="capturedAt")
+
+
+class InterceptScope(BaseModel):
+    """同步协议 scope（wire 字段统一使用 camelCase）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    seller_id: str | None = Field(None, alias="sellerId")
+    advertiser_id: str | None = Field(None, alias="advertiserId")
 
 
 class InterceptSyncRequest(BaseModel):
     """数据同步请求"""
 
+    model_config = ConfigDict(extra="forbid")
+
     protocol_version: int = Field(alias="protocolVersion")
     request_id: str | None = Field(None, alias="requestId")
-    scope: dict[str, str]
+    scope: InterceptScope
     session: SessionIn
     requests: list[InterceptedRequestIn]
 
-    class Config:
-        populate_by_name = True
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────
@@ -148,9 +171,40 @@ def _serialize_config(config: dict) -> dict:
     }
 
 
+def _jsonb_parameter(value: Any) -> str | None:
+    """Serialize JSONB values without dropping valid falsey values."""
+    return None if value is None else json.dumps(value)
+
+
 def _compute_url_hash(url: str) -> str:
     """计算 URL 的 SHA-256 哈希"""
     return hashlib.sha256(url.encode("utf-8")).hexdigest()
+
+
+# TikTok OEC SDK (i18n_ecom_shop, aid=6556) 在所有 JSON API URL 的 query string 里
+# 都带这两个 key 作为客户端身份。Manifest V3 下的扩展侧 webRequest API 默认拿不到
+# Cookie / Authorization (见 §7.3)，所以即使 request_headers 只有 1~2 个 key，
+# 也能从 URL 里把卖家 / 广告主 id 捡回来。优先 oec_seller_id（更稳定）。
+_URL_SELLER_ID_KEYS = ("oec_seller_id", "seller_id")
+
+
+def _extract_seller_id_from_url(url: str) -> str | None:
+    """从 URL query string 里提取卖家 id。
+
+    优先 ``oec_seller_id``，fallback 到 ``seller_id``；两者都取不到返回 None。
+    只取第一个值（OEC SDK 总是单值），不入库为多值列表。
+    """
+    try:
+        qs = parse_qs(urlparse(url).query, keep_blank_values=False)
+    except (ValueError, TypeError):
+        return None
+    for key in _URL_SELLER_ID_KEYS:
+        values = qs.get(key)
+        if values:
+            value = values[0].strip()
+            if value:
+                return value[:128]
+    return None
 
 
 def _match_endpoint_pattern(path: str, pattern: str) -> bool:
@@ -308,14 +362,15 @@ def create_config(
     result = db.execute(
         text(
             """
-            INSERT INTO plugin.intercept_configs (domain, endpoint, capture_headers, capture_body, description, tags, enabled)
-            VALUES (:domain, :endpoint, :capture_headers, :capture_body, :description, :tags, :enabled)
+            INSERT INTO plugin.intercept_configs (domain, endpoint, mode, capture_headers, capture_body, description, tags, enabled)
+            VALUES (:domain, :endpoint, :mode, :capture_headers, :capture_body, :description, :tags, :enabled)
             RETURNING *
             """
         ),
         {
             "domain": body.domain,
             "endpoint": body.endpoint,
+            "mode": body.mode,
             "capture_headers": body.capture_headers,
             "capture_body": body.capture_body,
             "description": body.description,
@@ -370,8 +425,9 @@ def update_config(
         text(
             """
             UPDATE plugin.intercept_configs
-            SET domain = :domain, endpoint = :endpoint, capture_headers = :capture_headers,
-                capture_body = :capture_body, description = :description, tags = :tags, enabled = :enabled
+            SET domain = :domain, endpoint = :endpoint, mode = :mode,
+                capture_headers = :capture_headers, capture_body = :capture_body,
+                description = :description, tags = :tags, enabled = :enabled
             WHERE id = :id
             RETURNING *
             """
@@ -380,6 +436,7 @@ def update_config(
             "id": config_id,
             "domain": body.domain,
             "endpoint": body.endpoint,
+            "mode": body.mode,
             "capture_headers": body.capture_headers,
             "capture_body": body.capture_body,
             "description": body.description,
@@ -402,10 +459,12 @@ def update_config(
 
 @router.delete("/configs/{config_id}")
 def delete_config(
+    request: Request,
     config_id: int,
     db: Session = Depends(get_session),
 ) -> Response:
     """删除配置"""
+    require_destructive_guard(request, op_name="intercept_config.delete")
     result = db.execute(
         text("DELETE FROM plugin.intercept_configs WHERE id = :id RETURNING id"),
         {"id": config_id},
@@ -456,11 +515,13 @@ def toggle_config(
 
 @router.post("/configs/batch")
 def batch_configs(
+    request: Request,
     body: InterceptConfigBatch,
     db: Session = Depends(get_session),
 ) -> Response:
     """批量操作"""
     if body.action == "delete":
+        require_destructive_guard(request, op_name="intercept_config.batch_delete")
         result = db.execute(
             text(
                 "DELETE FROM plugin.intercept_configs WHERE id = ANY(:ids) RETURNING id"
@@ -514,13 +575,14 @@ def import_configs(
             db.execute(
                 text(
                     """
-                    INSERT INTO plugin.intercept_configs (domain, endpoint, capture_headers, capture_body, description, tags, enabled)
-                    VALUES (:domain, :endpoint, :capture_headers, :capture_body, :description, :tags, :enabled)
+                    INSERT INTO plugin.intercept_configs (domain, endpoint, mode, capture_headers, capture_body, description, tags, enabled)
+                    VALUES (:domain, :endpoint, :mode, :capture_headers, :capture_body, :description, :tags, :enabled)
                     """
                 ),
                 {
                     "domain": config_in.domain,
                     "endpoint": config_in.endpoint,
+                    "mode": config_in.mode,
                     "capture_headers": config_in.capture_headers,
                     "capture_body": config_in.capture_body,
                     "description": config_in.description,
@@ -592,7 +654,7 @@ def sync_intercepted_requests(
     """数据同步（插件用）"""
     if body.protocol_version not in SUPPORTED_PROTOCOL_VERSIONS:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported protocol version: {body.protocol_version}",
         )
 
@@ -600,29 +662,6 @@ def sync_intercepted_requests(
     inserted = 0
     rejected = 0
     errors = []
-
-    # 创建或更新会话
-    session_data = body.session
-    db.execute(
-        text(
-            """
-            INSERT INTO plugin.intercept_sessions (session_id, tab_id, tab_url, started_at, total_requests)
-            VALUES (:session_id, :tab_id, :tab_url, :started_at, :total_requests)
-            ON CONFLICT (session_id) DO UPDATE SET
-                tab_id = EXCLUDED.tab_id,
-                tab_url = EXCLUDED.tab_url,
-                last_request_at = now(),
-                total_requests = plugin.intercept_sessions.total_requests + EXCLUDED.total_requests
-            """
-        ),
-        {
-            "session_id": session_data.session_id,
-            "tab_id": session_data.tab_id,
-            "tab_url": session_data.tab_url,
-            "started_at": session_data.started_at,
-            "total_requests": len(body.requests),
-        },
-    )
 
     # 插入请求记录
     for i, req in enumerate(body.requests):
@@ -660,19 +699,19 @@ def sync_intercepted_requests(
                         "endpoint_host": req.endpoint_host,
                         "is_whitelisted": req.is_whitelisted,
                         "matched_config_id": req.matched_config_id,
-                        "request_headers": json.dumps(req.request_headers) if req.request_headers else None,
-                        "request_body": json.dumps(req.request_body) if req.request_body else None,
+                        "request_headers": _jsonb_parameter(req.request_headers),
+                        "request_body": _jsonb_parameter(req.request_body),
                         "response_status": req.response_status,
                         "response_status_text": req.response_status_text,
-                        "response_headers": json.dumps(req.response_headers) if req.response_headers else None,
-                        "response_body": json.dumps(req.response_body) if req.response_body else None,
+                        "response_headers": _jsonb_parameter(req.response_headers),
+                        "response_body": _jsonb_parameter(req.response_body),
                         "duration_ms": req.duration_ms,
                         "error_type": req.error_type,
                         "error_message": req.error_message,
-                        "seller_id": req.seller_id,
+                        "seller_id": req.seller_id or _extract_seller_id_from_url(req.url),
                         "advertiser_id": req.advertiser_id,
-                        "business_context": json.dumps(req.business_context) if req.business_context else None,
-                        "pagination": json.dumps(req.pagination) if req.pagination else None,
+                        "business_context": _jsonb_parameter(req.business_context),
+                        "pagination": _jsonb_parameter(req.pagination),
                         "captured_at": req.captured_at,
                     },
                 )
@@ -682,23 +721,53 @@ def sync_intercepted_requests(
             rejected += 1
             errors.append({"index": i, "error": str(e)})
 
-    db.commit()
-
-    # 更新同步游标
-    cursor_key = body.scope.get("sellerId") or body.scope.get("seller_id") or "default"
+    # 会话统计只增加实际新插入的请求，避免重试/重复 request_id 造成膨胀。
+    session_data = body.session
     db.execute(
         text(
             """
-            INSERT INTO plugin.intercept_sync_cursors (cursor_key, last_synced_at, total_synced)
-            VALUES (:cursor_key, now(), :total_synced)
-            ON CONFLICT (cursor_key) DO UPDATE SET
-                last_synced_at = now(),
-                total_synced = plugin.intercept_sync_cursors.total_synced + EXCLUDED.total_synced
+            INSERT INTO plugin.intercept_sessions (session_id, tab_id, tab_url, started_at, total_requests)
+            VALUES (:session_id, :tab_id, :tab_url, :started_at, :total_requests)
+            ON CONFLICT (session_id) DO UPDATE SET
+                tab_id = EXCLUDED.tab_id,
+                tab_url = EXCLUDED.tab_url,
+                last_request_at = now(),
+                total_requests = plugin.intercept_sessions.total_requests + EXCLUDED.total_requests
             """
         ),
-        {"cursor_key": cursor_key, "total_synced": inserted},
+        {
+            "session_id": session_data.session_id,
+            "tab_id": session_data.tab_id,
+            "tab_url": session_data.tab_url,
+            "started_at": session_data.started_at,
+            "total_requests": inserted,
+        },
     )
-    db.commit()
+
+    # 更新同步游标
+    cursor_key = (
+        body.scope.seller_id
+        or next((req.seller_id for req in body.requests if req.seller_id), "default")
+    )
+    try:
+        cursor_total = db.execute(
+            text(
+                """
+                INSERT INTO plugin.intercept_sync_cursors (cursor_key, last_synced_at, total_synced)
+                VALUES (:cursor_key, now(), :total_synced)
+                ON CONFLICT (cursor_key) DO UPDATE SET
+                    last_synced_at = now(),
+                    total_synced = plugin.intercept_sync_cursors.total_synced + EXCLUDED.total_synced
+                RETURNING total_synced
+                """
+            ),
+            {"cursor_key": cursor_key, "total_synced": inserted},
+        ).scalar_one()
+        # 请求、会话和游标必须在同一事务中提交，避免游标永久落后。
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     log.info(
         f"Synced intercepted requests: {accepted} accepted, {inserted} inserted, {rejected} rejected"
@@ -712,7 +781,7 @@ def sync_intercepted_requests(
             "errors": errors,
             "cursor": {
                 "key": cursor_key,
-                "total_synced": inserted,
+                "totalSynced": cursor_total,
             },
         }
     )
@@ -724,6 +793,7 @@ def sync_intercepted_requests(
 @router.get("/requests/stats")
 def get_requests_stats(
     request: Request,
+    days: int = Query(7, ge=1, le=31),
     from_date: str | None = Query(None, alias="from"),
     to_date: str | None = Query(None, alias="to"),
     db: Session = Depends(get_session),
@@ -731,7 +801,7 @@ def get_requests_stats(
     """获取拦截统计"""
     # 默认最近 7 天
     if not from_date:
-        from_date = (datetime.now(UTC) - timedelta(days=7)).isoformat()
+        from_date = (datetime.now(UTC) - timedelta(days=days)).isoformat()
     if not to_date:
         to_date = datetime.now(UTC).isoformat()
 
@@ -812,6 +882,19 @@ def get_requests_stats(
         {"from_date": from_date, "to_date": to_date},
     ).fetchall()
 
+    daily = db.execute(
+        text(
+            """
+            SELECT DATE(captured_at AT TIME ZONE 'UTC') AS day, COUNT(*) AS count
+            FROM plugin.intercepted_requests
+            WHERE captured_at >= :from_date AND captured_at <= :to_date
+            GROUP BY day
+            ORDER BY day
+            """
+        ),
+        {"from_date": from_date, "to_date": to_date},
+    ).fetchall()
+
     return JSONResponse(
         content={
             "total": total,
@@ -828,6 +911,7 @@ def get_requests_stats(
             "byMethod": [{"method": row[0], "count": row[1]} for row in by_method],
             "by_status": [{"status": row[0], "count": row[1]} for row in by_status],
             "byStatus": [{"status": row[0], "count": row[1]} for row in by_status],
+            "daily": [{"date": str(row[0]), "count": row[1]} for row in daily],
         }
     )
 

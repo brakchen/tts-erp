@@ -45,6 +45,10 @@ def _wipe(db_engine) -> None:
         conn.execute(
             text("DELETE FROM plugin.plugin_logs WHERE seller_id LIKE 'TEST_%'")
         )
+        # pi-lens-ignore: python-sql-injection — literal SQL
+        conn.execute(
+            text("DELETE FROM plugin.campaign_opt_logs WHERE seller_id LIKE 'TEST_%'")
+        )
 
 
 def _base_row(**overrides) -> dict:
@@ -281,7 +285,7 @@ def test_get_coverage_daily_returns_map(db_session):
         source="t",
     )
 
-    result = repository.get_coverage_daily(
+    coverage, total = repository.get_coverage_daily(
         db_session,
         seller_id=_SELLER,
         advertiser_id=_ADV,
@@ -289,9 +293,10 @@ def test_get_coverage_daily_returns_map(db_session):
         start_day=date(2026, 9, 1),
         end_day=date(2026, 9, 30),
     )
-    assert _CAMPAIGN in result
-    assert "2026-09-01" in result[_CAMPAIGN]
-    assert "2026-09-02" in result[_CAMPAIGN]
+    assert total == 1
+    assert _CAMPAIGN in coverage
+    assert "2026-09-01" in coverage[_CAMPAIGN]
+    assert "2026-09-02" in coverage[_CAMPAIGN]
 
 
 def test_get_coverage_monthly_returns_map(db_session):
@@ -315,7 +320,7 @@ def test_get_coverage_monthly_returns_map(db_session):
         source="t",
     )
 
-    result = repository.get_coverage_monthly(
+    coverage, total = repository.get_coverage_monthly(
         db_session,
         seller_id=_SELLER,
         advertiser_id=_ADV,
@@ -323,8 +328,9 @@ def test_get_coverage_monthly_returns_map(db_session):
         start_month="2026-07",
         end_month="2026-12",
     )
-    assert _CAMPAIGN in result
-    assert "2026-08" in result[_CAMPAIGN]
+    assert total == 1
+    assert _CAMPAIGN in coverage
+    assert "2026-08" in coverage[_CAMPAIGN]
 
 
 # ---------------------------------------------------------------------------
@@ -546,3 +552,30 @@ def test_upsert_monthly_rows_campaign_level_only_archives(db_session):
         {"s": _SELLER, "ym": "2026-08"},
     ).scalar()
     assert raw_count == 1
+
+
+# ---------------------------------------------------------------------------
+# upsert_campaign_opt_logs（2026-09-14：bad opt_time 不再用 now() 顶替，跳过该行）
+# ---------------------------------------------------------------------------
+
+
+def test_upsert_campaign_opt_logs_skips_bad_opt_time(db_session):
+    from tts_erp_v2.plugin.ads import repository
+
+    inserted = repository.upsert_campaign_opt_logs(
+        db_session,
+        seller_id=_SELLER,
+        advertiser_id=_ADV,
+        logs=[
+            {"id": "TEST_opt_ok", "opt_time": "2026-09-12 15:40:46", "object_id": "c1"},
+            {"id": "TEST_opt_bad", "opt_time": "garbage", "object_id": "c1"},
+        ],
+    )
+    assert inserted == 1
+    rows = db_session.execute(
+        text("SELECT log_id, opt_time FROM plugin.campaign_opt_logs WHERE seller_id = :s"),
+        {"s": _SELLER},
+    ).all()
+    assert [r[0] for r in rows] == ["TEST_opt_ok"]
+    # 好行的时间必须是解析出来的真实值，不是 now()
+    assert rows[0][1].replace(tzinfo=None) == datetime(2026, 9, 12, 15, 40, 46)

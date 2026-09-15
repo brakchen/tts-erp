@@ -45,7 +45,7 @@ _Q4 = Decimal("0.0001")
 _Q2 = Decimal("0.01")
 
 # v7 框架常量（与实现一致）
-RUBRIC_VERSION = "v8"
+RUBRIC_VERSION = "v9"
 FEE_NOTE_V7 = (
     "平台佣金=平台从销售额直接扣除的全部费用(抽佣/联盟/运费类)；"
     "v7 已结算=实到账(SETTLEMENT，已含扣费)；未结算=sales×r̂×(1−spu退款率)(D5)；"
@@ -140,12 +140,8 @@ def _fx_online_consts(db_engine, _isolate_state):
 def _wipe(db_engine) -> None:
     with db_engine.begin() as conn:
         # pi-lens-ignore: python-sql-injection
-        conn.execute(
-            text("DELETE FROM plugin.ad_daily WHERE seller_id LIKE 'TEST_%'")
-        )
-        conn.execute(
-            text("DELETE FROM plugin.ad_today WHERE seller_id LIKE 'TEST_%'")
-        )
+        conn.execute(text("DELETE FROM plugin.ad_daily WHERE seller_id LIKE 'TEST_%'"))
+        conn.execute(text("DELETE FROM plugin.ad_today WHERE seller_id LIKE 'TEST_%'"))
         # pi-lens-ignore: python-sql-injection
         conn.execute(
             text(
@@ -164,6 +160,33 @@ def _wipe(db_engine) -> None:
                 "DELETE FROM after_sales.cases c "
                 "WHERE c.shop_pk IN ("
                 "  SELECT id FROM commerce.shops WHERE shop_id LIKE 'TEST_%'"
+                ")"
+            )
+        )
+        # pi-lens-ignore: python-sql-injection
+        conn.execute(
+            text(
+                "DELETE FROM fulfillment.tracking_events "
+                "WHERE shipment_id IN ("
+                "  SELECT sh.id FROM fulfillment.shipments sh "
+                "  WHERE sh.order_pk IN ("
+                "    SELECT id FROM commerce.sales_orders "
+                "    WHERE shop_pk IN ("
+                "      SELECT id FROM commerce.shops WHERE shop_id LIKE 'TEST_%'"
+                "    )"
+                "  )"
+                ")"
+            )
+        )
+        # pi-lens-ignore: python-sql-injection
+        conn.execute(
+            text(
+                "DELETE FROM fulfillment.shipments "
+                "WHERE order_pk IN ("
+                "  SELECT id FROM commerce.sales_orders "
+                "  WHERE shop_pk IN ("
+                "    SELECT id FROM commerce.shops WHERE shop_id LIKE 'TEST_%'"
+                "  )"
                 ")"
             )
         )
@@ -240,7 +263,13 @@ def _seed_ad_dump(
     gmv: str,
     day: str = DAY,
 ) -> None:
-    """post_product_list 一条 ad_daily(1 campaign×SPU×1 day)。"""
+    """post_product_list 一条 ad_daily(1 campaign×SPU×1 day)。
+
+    v8.1（2026-09-15 fix/spu-roi-v81-ad-source）后，_SQL_ROI_AD / _SQL_DETAIL_ADS
+    只读 plugin.ad_daily。ad_today 是被遗弃的临时表（merge job 2026-09-13
+    禁用前作为当天暂存区），不再进 SQL 取数路径。所以测试夹具必须写
+    ad_daily，否则 ROI 计算会拿到 spend=0。
+    """
     # pi-lens-ignore: python-sql-injection
     sess.execute(
         text(
@@ -833,11 +862,13 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
       net_revenue = 0 + 100×0.692×0.80 = 55.36
       cogs_all = 5件 × 40×0.14774 = 29.5440
       net_profit = 55.36 − 29.5440 − 10 = 15.8160
-      return_loss = full_loss_qty×cost = 0×... = 0（场景无 38301 物流）
-      roi_real = 55.36/10 = 5.54
-      COGS_kept = (5−1)×5.9088 = 23.6352；breakeven = 55.36/(55.36−23.6352) = 1.75
+      v9 全损：完结退货(不论物流)也算全损 → full_loss_qty=1(退货桶)
+      return_loss = 1×5.9096 = 5.9096
+      roi_real = (55.36−5.9096)/10 = 4.95
+      COGS_kept = (5−1)×5.9096 = 23.6384；breakeven = 49.4504/(49.4504−23.6384) = 1.92
       platform_fee = 0.308×100 = 30.80
-      full_loss_rate = 0/(5+0) = 0.00
+      full_loss_rate = 1/(5+0) = 0.20
+      cancel_rate = 1/(1+1) = 0.50（CANCELLED 单无 38301 → 国内取消）
     """
     with Session(db_engine) as sess:
         spu_pk = _seed(sess, _seed_scenario_a)
@@ -893,10 +924,14 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert item["refund_cancelled_amount"] == "20.0000"
     assert item["refund_cancelled_missing_lines"] == 1
 
-    # v7 全损（场景无 38301 → full_loss_qty=0；分母 5 → rate=0.00）
-    assert item["full_loss_qty"] == 0
+    # v9 全损：完结退货不论物流直接计全损（场景无 38301 仍计 1 件退货）
+    assert item["full_loss_qty"] == 1
     assert item["full_loss_cancelled_qty"] == 0
-    assert item["full_loss_rate"] == "0.00"
+    assert item["full_loss_rate"] == "0.20"
+    # v9 取消率只计国内取消：1 国内取消 /(1 有效 + 1 国内取消) = 0.50
+    assert item["cancel_rate"] == "0.50"
+    assert item["domestic_cancelled_order_count"] == 1
+    assert item["overseas_cancelled_order_count"] == 0
 
     # 成本：DEFAULT_K1 = 40 CNY × 0.14774 ≈ 5.9088
     assert item["cost_source"] == "DEFAULT_K1"
@@ -904,12 +939,12 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
         _Q4, rounding=ROUND_HALF_UP
     )
 
-    # v7 利润域
-    assert Decimal(item["return_loss"]) == Decimal("0.0000")
+    # v9 利润域（return_loss = 完结退货 1 件 × 5.9096）
+    assert Decimal(item["return_loss"]) == Decimal("5.9096")
     assert Decimal(item["platform_fee"]) == Decimal("30.8000")
     assert Decimal(item["net_profit"]) == Decimal("15.8120")
-    assert item["roi_real"] == "5.54"
-    assert item["roi_breakeven"] == "1.75"
+    assert item["roi_real"] == "4.95"
+    assert item["roi_breakeven"] == "1.92"
     assert item["cpa"] == "2.0000"
 
     # meta v7
@@ -1146,11 +1181,12 @@ def test_spu_roi_totals_order_status_scope_cod_shop(
 def test_spu_roi_manual_cost_source(api_client, readonly_key, db_engine):
     """命中 manual_product_costs 有效行 → cost_source=MANUAL,unit_cost_used 用真值。
 
-    v7 公式（D1 MANUAL + D4 B 全损口径）:
-      cost=25 CNY → unit_cost=25×0.14774=3.6935；no tracking → full_loss_qty=0
+    v9 公式（D1 MANUAL + 完结退货直接全损）:
+      cost=25 CNY → unit_cost=25×0.14774=3.6935；完结退货 1 件 → full_loss_qty=1
       net_revenue = 0 + 100×(1−0.308)×(1−0.20) = 55.36
       cogs = 5 × 3.6935 = 18.4675
       net_profit = 55.36 − 18.4675 − 10 = 26.8925
+      return_loss = 1 × 3.6935 = 3.6935
     """
     with Session(db_engine) as sess:
         spu_pk = _seed(sess, _seed_spu_manual)
@@ -1166,8 +1202,8 @@ def test_spu_roi_manual_cost_source(api_client, readonly_key, db_engine):
     assert item["spu_pk"] == spu_pk
     assert item["cost_source"] == "MANUAL"
     assert Decimal(item["unit_cost_used"]) == Decimal(25) * CNY_USD  # 3.6935
-    # D4 B: return_loss 基于 38301 全损口径（场景无物流 → 0）
-    assert Decimal(item["return_loss"]) == Decimal("0.0000")
+    # v9: return_loss = 完结退货件数 × 单位成本（不论是否有物流轨迹）
+    assert Decimal(item["return_loss"]) == Decimal("3.6935")
     # v7 net_profit（D1 MANUAL 25 CNY 成本 + D5 未结算折算）
     assert Decimal(item["net_profit"]) == Decimal("26.8925")
 
@@ -1326,8 +1362,8 @@ def test_spu_roi_window_params_clip_sales_and_refunds(
     assert item["sales"] == "100.0000"
     assert item["refund_return_qty"] == 2
     assert item["refund_return_amount"] == "40.0000"
-    # meta.window 如实注记:ad=视图全窗口累计;销售/退款=全历史(未裁剪)
-    assert "ad=视图全窗口累计" in body["meta"]["window"]["note"]
+    # meta.window 如实注记(v8：销售/退款=全历史未裁剪；ad 不再“全窗累计”说明)
+    assert "ad=视图全窗口累计" not in body["meta"]["window"]["note"]
     assert "未裁剪" in body["meta"]["window"]["note"]
     # 日期可裁剪数据(销售∪退款)的真实跨度:窗外 2026-08-10/2026-08-20 +
     # 窗内 2026-09-10/2026-09-12 → min=08-10, max=09-12(页面回填日期框)
@@ -1367,17 +1403,20 @@ def test_spu_roi_window_params_clip_sales_and_refunds(
     assert body["totals"]["total_orders"] == 2
 
 
-def test_spu_roi_date_window_does_not_clip_ad(api_client, readonly_key, db_engine):
-    """review 结论实证:起始/截止日只裁剪销售(paid_at)与退款(updated_at_source),
-    广告 spend/gmv/ad_count 不受 w_start/w_end 影响(ad=视图全窗口累计供参考)。
+def test_spu_roi_date_window_clips_ad(api_client, readonly_key, db_engine):
+    """v8 (2026-09-15 fix/spu-roi-ad-window-clip)：起始/截止日同时裁剪广告。
 
-    回归护栏:防止将来有人把 ad 也悄悄按日期切片 → ROI 分母(全窗口 spend)
-    与分子(裁剪后净现金)口径错配而无提示。
+    v8 主动从 _SQL_ROI_AD / _SQL_DETAIL_ADS 删 ad_daily ∪ ad_today 的“全窗
+    累计”逻辑，改成 ad_today.day BETWEEN :ws AND :we — 选日期范围时
+    spend / gmv_ad / ad_count 全部随窗口变化，与销售/退款同语义。
+
+    场景：窗内 ad (09-10 spend=15) + 窗外 ad (06-01 spend=25)；裁剪后只
+    留窗内 spend。
     """
     with Session(db_engine) as sess:
         shop_pk = _seed_shop(sess, "TEST_SELLER_WAD")
         spu_pk = _seed_spu(sess, shop_pk, "TEST_ROI_SPU_WAD")
-        # 广告行落在窗口之外(2026-06-01)——若 ad 被日期裁剪就会消失
+        # 窗外 ad：v7 会计入 spend=25，v8 被裁掉
         _seed_ad_dump(
             sess,
             seller="TEST_SELLER_WAD",
@@ -1388,7 +1427,18 @@ def test_spu_roi_date_window_does_not_clip_ad(api_client, readonly_key, db_engin
             gmv="30",
             day="2026-06-01",
         )
-        # 两笔销售:窗内(09-10)与窗外(08-10)各 $20
+        # 窗内 ad：保留 spend=15、orders=2
+        _seed_ad_dump(
+            sess,
+            seller="TEST_SELLER_WAD",
+            product_id="TEST_ROI_SPU_WAD",
+            campaign_id="CAMP_INSIDE_WINDOW",
+            spend="15",
+            orders="2",
+            gmv="20",
+            day="2026-09-10",
+        )
+        # 两笔销售：窗内(09-10)与窗外(08-10)各 $20
         _seed_order_line(
             sess,
             shop_pk=shop_pk,
@@ -1415,16 +1465,16 @@ def test_spu_roi_date_window_does_not_clip_ad(api_client, readonly_key, db_engin
         )
         sess.commit()  # handler 用独立连接读,必须真提交(SQLAlchemy 2 上下文不自动 commit)
     h = {"Authorization": f"Bearer {readonly_key}"}
-    # 不限窗口:ad spend 25 / sales 40 / 2 单
+    # 不限窗口:ad spend=25+15=40 (两条都在),sales=40,2 单
     r_all = api_client.get(
         "/v2/analytics/spu-roi", headers=h, params={"q": "TEST_ROI_SPU_WAD"}
     )
     item_all = r_all.json()["items"][0]
-    assert item_all["ad_count"] == 1
-    assert item_all["spend"] == "25.0000"
+    assert item_all["ad_count"] == 2
+    assert item_all["spend"] == "40.0000"
     assert item_all["sales"] == "40.0000"
     assert item_all["order_count"] == 2
-    # 裁剪到 09-01~09-30:销售只剩 1 单 $20;ad 依旧全窗口(窗外广告行仍在)
+    # 裁剪到 09-01~09-30：销售只 1 单 $20；ad 只留窗内 spend=15 / ad_count=1
     r_crop = api_client.get(
         "/v2/analytics/spu-roi",
         headers=h,
@@ -1435,11 +1485,76 @@ def test_spu_roi_date_window_does_not_clip_ad(api_client, readonly_key, db_engin
         },
     )
     item_crop = r_crop.json()["items"][0]
-    assert item_crop["ad_count"] == 1, item_crop  # 广告不被日期裁剪
-    assert item_crop["spend"] == "25.0000"
+    assert item_crop["ad_count"] == 1, item_crop  # v8：窗外 ad 被裁
+    assert item_crop["spend"] == "15.0000"
     assert item_crop["sales"] == "20.0000"
     assert item_crop["order_count"] == 1
     assert "已裁剪" in r_crop.json()["meta"]["window"]["note"]
+    assert "ad 同窗口裁剪" in r_crop.json()["meta"]["window"]["note"]
+
+
+def test_spu_roi_ad_window_single_side_only(api_client, readonly_key, db_engine):
+    """v8 §6.4 覆盖：仅传 :ws 或 :we 时 NULL 短路另一侧。
+
+    _SQL_ROI_AD (tts_erp_v2/analytics/spu_roi.py:101) 使用：
+      AND (CAST(:ws AS timestamptz) IS NULL OR t.day >= :ws::date)
+      AND (CAST(:we AS timestamptz) IS NULL OR t.day <  :we::date)
+    仅传 w_start → 仅下界过滤，上界短路 = 不卡上界；仅传 w_end 同理。
+
+    场景：4 条 ad 跨 06-01 / 09-10 / 09-25 / 10-05 四个日期；验证：
+    - 仅 w_start=09-01 → 留 09-10+09-25+10-05（10-05 无上界束缚）
+    - 仅 w_end=09-30 → 留 06-01+09-10+09-25（10-05 被上界裁）
+    - 双边界 w_start=09-01 & w_end=09-30 → 仅 09-10+09-25（边界全开）
+    """
+    with Session(db_engine) as sess:
+        shop_pk = _seed_shop(sess, "TEST_SELLER_WADSS")  # noqa: F841 — 传入 _seed_spu
+        _seed_spu(sess, shop_pk, "TEST_ROI_SPU_WADSS")
+        # 4 天 ad：过远过去 / 窗内早 / 窗内晚 / 过远未来
+        for day, camp, spend in (
+            ("2026-06-01", "CAMP_D1", "10"),
+            ("2026-09-10", "CAMP_D2", "20"),
+            ("2026-09-25", "CAMP_D3", "30"),
+            ("2026-10-05", "CAMP_D4", "40"),
+        ):
+            _seed_ad_dump(
+                sess,
+                seller="TEST_SELLER_WADSS",
+                product_id="TEST_ROI_SPU_WADSS",
+                campaign_id=camp,
+                spend=spend,
+                orders="0",
+                gmv="0",
+                day=day,
+            )
+        sess.commit()
+    h = {"Authorization": f"Bearer {readonly_key}"}
+    base = {"q": "TEST_ROI_SPU_WADSS"}
+
+    # 仅 w_start=09-01：无上界束缚，09-10/09-25/10-05 留下
+    r_ws = api_client.get(
+        "/v2/analytics/spu-roi", headers=h, params={**base, "w_start": "2026-09-01"}
+    )
+    item_ws = r_ws.json()["items"][0]
+    assert item_ws["ad_count"] == 3, item_ws  # 10+30+40 = 90
+    assert item_ws["spend"] == "90.0000"
+
+    # 仅 w_end=09-30：无下界束缚，06-01/09-10/09-25 留下（10-05 被上界裁）
+    r_we = api_client.get(
+        "/v2/analytics/spu-roi", headers=h, params={**base, "w_end": "2026-09-30"}
+    )
+    item_we = r_we.json()["items"][0]
+    assert item_we["ad_count"] == 3, item_we  # 10+20+30 = 60
+    assert item_we["spend"] == "60.0000"
+
+    # 双边界：09-01~09-30，仅 09-10/09-25
+    r_both = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=h,
+        params={**base, "w_start": "2026-09-01", "w_end": "2026-09-30"},
+    )
+    item_both = r_both.json()["items"][0]
+    assert item_both["ad_count"] == 2, item_both  # 20+30 = 50
+    assert item_both["spend"] == "50.0000"
 
 
 def test_spu_roi_sort_whitelist_covers_page_sortable_columns(
@@ -1507,7 +1622,7 @@ def test_spu_roi_totals_roi_real_native_reconciliation(
     items = {it["spu_id"]: it for it in body["items"]}
     # 场景 B/C 走默认 DEFAULT_K1 = 40 CNY
     # v7：net_revenue = sales × (1−0.308) × (1−refund_rate_spu)
-    # return_loss = full_loss_qty × unit_cost（场景无 38301 → 0）
+    # return_loss = full_loss_qty × unit_cost（v9：完结退货不论物流也计）
     # 三 SPU 默认成本 × 5件（unit_cost = 40 × 0.14774 = 5.9096）
     # A：sales=$100, refund=$20, units=5；net=100×0.692×0.80=55.36
     # B：sales=?, refund=?, units=? （按 _seed_spu_b）
@@ -1751,8 +1866,8 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
     assert meta["cost_assumption"]
     assert "first_day" in meta["window"]
     assert "last_day" in meta["window"]
-    # meta.window = ad 视图全窗口供参考(§4.5:销售/退款默认不裁剪)
-    assert "ad=视图全窗口累计" in meta["window"]["note"]
+    # meta.window (v8)：销售/退款默认不裁剪，但 ad 不再是“视图全窗口”
+    assert "ad=视图全窗口累计" not in meta["window"]["note"]
     assert "w_start/w_end" in meta["window"]["note"]
     assert meta["unattributed_refund_lines"] >= 0
     assert meta["computed_at"]
@@ -2212,16 +2327,18 @@ def _seed_source_price_via_offer(
 def _seed_tracking_event_overseas(
     sess, *, order_pk: int, action_code: int = 38301
 ) -> int:
-    """插入包裹 + 38301 海外到达事件，助 D4 B 全损口径测试。"""
+    """插入包裹 + 38301 海外到达事件，助全损口径测试（v9）。
+
+    注意：fulfillment.shipments 无 shop_pk 列（2026-09-13 修），按 order_pk 挂。
+    """
     ship_pk = sess.execute(
         text(
             "INSERT INTO fulfillment.shipments ("
-            " shop_pk, order_pk, external_package_id, tracking_number,"
+            " order_pk, external_package_id, tracking_number,"
             " provider_name, status, shipped_at"
-            ") SELECT s.id, :op, 'TEST_PKG', 'TN_001', 'TEST',"
+            ") SELECT :op, 'TEST_PKG', 'TN_001', 'TEST',"
             " 'in_transit', coalesce(so.paid_at, so.order_time)"
             " FROM commerce.sales_orders so"
-            " JOIN commerce.shops s ON s.id = so.shop_pk"
             " WHERE so.id = :op"
             " RETURNING id"
         ),
@@ -2230,10 +2347,10 @@ def _seed_tracking_event_overseas(
     sess.execute(
         text(
             "INSERT INTO fulfillment.tracking_events ("
-            " shipment_id, action_code, event_at, description"
-            ") VALUES (:sp, :ac, now(), 'TEST 到达海外')"
+            " shipment_id, external_event_key, action_code, event_at, description"
+            ") VALUES (:sp, :eek, :ac, now(), 'TEST 到达海外')"
         ),
-        {"sp": ship_pk, "ac": action_code},
+        {"sp": ship_pk, "ac": action_code, "eek": f"TEST_EV_{ship_pk}_{action_code}"},
     )
     return ship_pk
 
@@ -2290,3 +2407,141 @@ def test_spu_roi_drilldown_requires_auth(api_client):
     """钻取端点 readonly 鉴权（与主表一致：401 无 key）。"""
     for tab in ("orders", "settlements", "cases", "ads"):
         assert api_client.get(f"/v2/analytics/spu-roi/1/{tab}").status_code == 401
+
+
+# ═════════════════════════════════════════════════════════════════════
+# v9 全损口径（rubric v9：全损 = 完结退货(不论物流) + 海外取消(38301)；
+# 国内取消 ≠ 全损；取消率只计国内取消，与全损退款率不重叠）
+# ═════════════════════════════════════════════════════════════════════
+
+
+def _seed_v9_bucket_split(sess) -> int:
+    """v9 三桶分离场景：完结退货 vs 海外取消 vs 国内取消。
+
+    - 有效单 TEST_ORDER_V9_1：DELIVERED 已付 4 件 × 263,300 VND ($10) = $40
+      - 完结退货 RETURN_AND_REFUND 1 件（无 38301 物流，v9 仍计全损）
+      - 完结仅退款 REFUND_ONLY 1 件（v9 也入全损退货桶）
+    - 海外取消单 TEST_ORDER_V9_2：CANCELLED 已付 2 件 × $10 + 38301 → 全损取消桶
+    - 国内取消单 TEST_ORDER_V9_3：CANCELLED 已付 1 件 × $10，无物流 → 非全损
+
+    期望：full_loss_qty = 1+1+2 = 4、full_loss_cancelled_qty = 2、
+      full_loss_rate = 4/(4+2) = 0.67、return_loss = 4×5.9096 = 23.6384、
+      cancelled_order_count = 2（信息列=全部取消单）、domestic=1/overseas=1、
+      cancel_rate = 1/(1+1) = 0.50（只计国内取消；若含海外取消则错为 0.67）。
+    """
+    seller = "TEST_SELLER_V9"
+    shop_pk = _seed_shop(sess, seller)
+    spu_pk = _seed_spu(sess, shop_pk, "TEST_ROI_SPU_V9")
+    o1 = _seed_order_line(
+        sess,
+        shop_pk=shop_pk,
+        spu_pk=spu_pk,
+        order_id="TEST_ORDER_V9_1",
+        status=PAID_ORDER_STATUS,
+        line_ext="TEST_LINE_V9_1",
+        qty="4",
+        unit_price="263300",
+        paid=True,
+    )
+    line1 = _fetch_spu_line_id(sess, "TEST_ORDER_V9_1")
+    _seed_case(
+        sess,
+        shop_pk=shop_pk,
+        order_pk=o1,
+        ext_case="TEST_CASE_V9_1",
+        case_type="RETURN_AND_REFUND",
+        status="RETURN_OR_REFUND_REQUEST_COMPLETE",
+        lines=[(line1, "TEST_CLINE_V9_1", "1", "263300")],
+    )
+    _seed_case(
+        sess,
+        shop_pk=shop_pk,
+        order_pk=o1,
+        ext_case="TEST_CASE_V9_2",
+        case_type="REFUND_ONLY",
+        status="RETURN_OR_REFUND_REQUEST_COMPLETE",
+        lines=[(line1, "TEST_CLINE_V9_2", "1", "263300")],
+    )
+    o2 = _seed_order_line(
+        sess,
+        shop_pk=shop_pk,
+        spu_pk=spu_pk,
+        order_id="TEST_ORDER_V9_2",
+        status="CANCELLED",
+        line_ext="TEST_LINE_V9_2",
+        qty="2",
+        unit_price="263300",
+        paid=True,
+    )
+    _seed_tracking_event_overseas(sess, order_pk=o2)
+    _seed_order_line(
+        sess,
+        shop_pk=shop_pk,
+        spu_pk=spu_pk,
+        order_id="TEST_ORDER_V9_3",
+        status="CANCELLED",
+        line_ext="TEST_LINE_V9_3",
+        qty="1",
+        unit_price="263300",
+        paid=True,
+    )
+    return spu_pk
+
+
+def test_spu_roi_v9_full_loss_two_buckets_and_disjoint_cancel_rate(
+    api_client, readonly_key, db_engine
+):
+    """v9 口径主断言：全损两桶 + 取消率/全损退款率不重叠。
+
+    - 完结退货（RETURN_AND_REFUND + REFUND_ONLY，无 38301）也计全损件数
+    - 海外取消（CANCELLED∧38301）计全损取消件
+    - 国内取消（CANCELLED 无 38301）不计全损，只进取消率
+    - cancel_rate 分子不含海外取消（与全损退款率不重叠）
+    """
+    with Session(db_engine) as sess:
+        _seed(sess, _seed_v9_bucket_split)
+
+    h = {"Authorization": f"Bearer {readonly_key}"}
+    r = api_client.get(
+        "/v2/analytics/spu-roi", headers=h, params={"q": "TEST_ROI_SPU_V9"}
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["total"] == 1, body["items"]
+    item = body["items"][0]
+
+    # 全损 = 完结退货 2 件（不论物流）+ 海外取消 2 件
+    assert item["full_loss_qty"] == 4
+    assert item["full_loss_cancelled_qty"] == 2
+    assert item["full_loss_rate"] == "0.67"  # 4 / (4 售出 + 2 海外取消)
+    assert Decimal(item["return_loss"]) == Decimal("23.6384")  # 4 × 5.9096
+
+    # 取消：信息列仍是全部取消单；取消率只计国内取消（1/(1+1)，不是 2/(1+2)）
+    assert item["cancelled_order_count"] == 2
+    assert item["domestic_cancelled_order_count"] == 1
+    assert item["overseas_cancelled_order_count"] == 1
+    assert item["cancel_rate"] == "0.50"
+
+    # 退款桶口径不变（退货+仅退款都在 refund_net）
+    assert item["refund_return_qty"] == 1
+    assert item["refund_only_qty"] == 1
+    assert item["refund_net_amount"] == "20.0000"
+
+
+def test_spu_roi_v9_drill_orders_full_loss_flag(api_client, readonly_key, db_engine):
+    """钻取 orders 的 full_loss 旗标同 v9 口径：
+    完结退货(不论物流)=⚠、海外取消=⚠、国内取消≠全损。"""
+    with Session(db_engine) as sess:
+        spu_pk = _seed(sess, _seed_v9_bucket_split)
+
+    h = {"Authorization": f"Bearer {readonly_key}"}
+    r = api_client.get(f"/v2/analytics/spu-roi/{spu_pk}/orders", headers=h)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["meta"]["rubric_version"] == "v9"
+    by_id = {o["order_id"]: o for o in body["orders"]}
+    assert by_id["TEST_ORDER_V9_1"]["full_loss"] is True  # 完结退货，无 38301 也全损
+    assert by_id["TEST_ORDER_V9_2"]["full_loss"] is True  # 海外取消
+    assert by_id["TEST_ORDER_V9_3"]["full_loss"] is False  # 国内取消 ≠ 全损
+    assert by_id["TEST_ORDER_V9_2"]["arrived_overseas"] is True
+    assert by_id["TEST_ORDER_V9_3"]["arrived_overseas"] is False

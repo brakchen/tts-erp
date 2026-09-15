@@ -19,11 +19,14 @@ import os
 from datetime import date, datetime, timezone
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 
-from tts_erp_v2.api.deps import require_role_at_least
+from tts_erp_v2.api.deps import (
+    require_destructive_guard,
+    require_role_at_least,
+)
 from tts_erp_v2.middleware.rate_limit import (
     ENV_VAR_NAME,
     reset_shared,
@@ -204,21 +207,59 @@ _PLUGIN_ORDER_CHILD_TABLES = [
 _PLUGIN_ORDER_RAW_LOG = "plugin.raw_log"
 
 
+# Re-export the shared prod-shape detector under the historical name
+# so the rest of this module keeps working without churn. The actual
+# implementation lives in :mod:`tts_erp_v2.api.deps` (single source of
+# truth as of 2026-09-13 fix/unify-destructive-guard).
+from tts_erp_v2.api.deps import is_prod_shaped_db as _is_prod_shaped_db  # noqa: E402
+
+
 @router.post(
     "/purge-plugin-data",
     summary="一键清除所有插件同步数据（admin only）",
 )
-def purge_plugin_data(request: Request) -> dict[str, Any]:
+def purge_plugin_data(
+    request: Request,
+    confirm: bool = Query(False, description="Must be true to actually delete. Dry-run by default."),
+    allow_prod: bool = Query(False, description="Override prod-shape guard (only honored when TTS_ERP_ENVIRONMENT=dev)."),
+) -> dict[str, Any]:
     """Delete all Chrome extension synced data from analytics and plugin schemas.
 
-    **Readwrite role required.** Clears 12 tables in a single transaction:
+    **Admin role required.** Clears 12 tables in a single transaction:
     - analytics: ad_today, ad_daily, ad_monthly, raw_log, plugin_logs
     - plugin: orders, order_lines, shipments, tracking_events,
       settlements, settlement_details, raw_log
 
-    Returns per-table row counts before deletion.
+    Two safety gates (2026-09-13 hardening):
+    1. ``confirm=true`` query param required to actually delete; without it
+       the endpoint returns row counts only (dry-run).
+    2. Refuses to run on prod-shape dbnames (``tts_erp`` / ``tts_erp_prod``)
+       unless ``ALLOW_PROD_PURGE=1`` is set in the env (or the explicit
+       ``allow_prod=true`` query param is passed AND ``TTS_ERP_ENVIRONMENT=dev``).
+       Returns 403 with a clear refusal message — does NOT count or touch rows.
+
+    Returns per-table row counts, plus ``dry_run`` and ``executed`` flags.
     """
-    require_role_at_least(request, "readwrite")
+    require_role_at_least(request, "admin")
+
+    # Gate 1: prod-shape dbname guard.
+    is_prod = _is_prod_shaped_db()
+    allow_prod_env = os.environ.get("ALLOW_PROD_PURGE", "0") == "1"
+    dev_env = os.environ.get("TTS_ERP_ENVIRONMENT", "").lower() == "dev"
+    if is_prod and not (allow_prod_env or (allow_prod and dev_env)):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Refused: refuse to purge on prod-shape dbname. "
+                f"dbname appears prod-shaped (TTS_ERP_DB_URL set). "
+                "Set ALLOW_PROD_PURGE=1 in the environment, or run against "
+                "the dedicated test database (tts_erp_v3_test via scripts/test.sh)."
+            ),
+        )
+
+    # Gate 2: dry-run unless confirm=true.
+    dry_run = not confirm
+    executed = confirm and (not is_prod or allow_prod_env or (allow_prod and dev_env))
 
     from sqlalchemy import text
 
@@ -228,7 +269,7 @@ def purge_plugin_data(request: Request) -> dict[str, Any]:
     counts: dict[str, int] = {}
 
     with engine.begin() as conn:
-        # Count rows first (for the response)
+        # Count rows first (for the response — always, even on dry-run).
         all_tables = (
             _ANALYTICS_TABLES + _PLUGIN_ORDER_CHILD_TABLES + [_PLUGIN_ORDER_RAW_LOG]
         )
@@ -241,20 +282,31 @@ def purge_plugin_data(request: Request) -> dict[str, Any]:
             except Exception:
                 counts[table] = -1  # table doesn't exist
 
-        # Delete in FK-safe order: children first, then parent
-        for table in (
-            _PLUGIN_ORDER_CHILD_TABLES + [_PLUGIN_ORDER_RAW_LOG] + _ANALYTICS_TABLES
-        ):
-            if counts.get(table, 0) > 0:
-                conn.execute(
-                    text(f"DELETE FROM {table}")
-                )  # pi-lens-ignore: python-sql-injection — hardcoded table names
+        # Only delete if not dry-run.
+        if executed:
+            # Delete in FK-safe order: children first, then parent
+            for table in (
+                _PLUGIN_ORDER_CHILD_TABLES + [_PLUGIN_ORDER_RAW_LOG] + _ANALYTICS_TABLES
+            ):
+                if counts.get(table, 0) > 0:
+                    conn.execute(
+                        text(f"DELETE FROM {table}")
+                    )  # pi-lens-ignore: python-sql-injection — hardcoded table names
 
     return {
+        "dry_run": dry_run,
+        "executed": executed,
         "cleared": {k: v for k, v in counts.items() if v > 0},
-        "total_rows_deleted": sum(v for v in counts.values() if v > 0),
+        "total_rows_deleted": (
+            sum(v for v in counts.values() if v > 0) if executed else 0
+        ),
         "purged_by": str(request.scope.get("api_key_hash", "") or "")[:12],
         "purged_at": datetime.now(timezone.utc).isoformat(),
+        "prod_guarded": is_prod,
+        "next_step": (
+            None if executed else
+            "Pass ?confirm=true (and ?allow_prod=true on dev env) to actually delete."
+        ),
     }
 
 

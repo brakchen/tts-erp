@@ -156,6 +156,9 @@
 
     const rows = configs.map(c => {
       const checked = selectedIds.has(c.id) ? 'checked' : '';
+      const modeBadge = c.mode === 'blacklist'
+        ? '<span class="badge badge-blacklist">黑名单</span>'
+        : '<span class="badge badge-ok">白名单</span>';
       const statusBadge = c.enabled
         ? '<span class="badge badge-ok">启用</span>'
         : '<span class="badge badge-disabled">禁用</span>';
@@ -166,6 +169,7 @@
           <td class="mono">${esc(String(c.id))}</td>
           <td class="mono">${esc(c.domain)}</td>
           <td class="mono">${esc(c.endpoint)}</td>
+          <td>${modeBadge}</td>
           <td>${statusBadge}</td>
           <td>${tags}</td>
           <td class="actions">
@@ -201,7 +205,7 @@
 
   function renderError(msg) {
     if (!$tbody) return;
-    $tbody.innerHTML = `<tr><td colspan="7" class="op-error">${esc(msg)}</td></tr>`;
+    $tbody.innerHTML = `<tr><td colspan="8" class="op-error">${esc(msg)}</td></tr>`;
   }
 
   // ---------- PAGINATION ----------
@@ -271,12 +275,22 @@
     if ($formCaptureHeaders) $formCaptureHeaders.checked = config.capture_headers !== false;
     if ($formCaptureBody) $formCaptureBody.checked = config.capture_body !== false;
     if ($formEnabled) $formEnabled.checked = config.enabled !== false;
+    // mode radio
+    const modeBlacklist = document.getElementById('form-mode-blacklist');
+    const modeWhitelist = document.getElementById('form-mode-whitelist');
+    if (modeBlacklist && modeWhitelist) {
+      if (config.mode === 'blacklist') {
+        modeBlacklist.checked = true;
+      } else {
+        modeWhitelist.checked = true;
+      }
+    }
   }
 
   // ---------- ADD / EDIT ----------
   function onAdd() {
     editingId = null;
-    populateForm({ capture_headers: true, capture_body: true, enabled: true });
+    populateForm({ mode: 'whitelist', capture_headers: true, capture_body: true, enabled: true });
     showModal('新增拦截配置');
   }
 
@@ -291,9 +305,9 @@
         alert(err.detail || `加载配置失败 (${res.status})`);
         return;
       }
-      const config = await res.json();
+      const data = await res.json();
       editingId = id;
-      populateForm(config);
+      populateForm(data.config || data);
       showModal('编辑拦截配置');
     } catch (e) {
       console.error('Failed to load config:', e);
@@ -318,6 +332,7 @@
     const body = {
       domain,
       endpoint,
+      mode: document.querySelector('input[name="mode"]:checked')?.value || 'whitelist',
       description: $formDescription ? $formDescription.value.trim() : null,
       tags: $formTags ? $formTags.value.split(',').map(s => s.trim()).filter(Boolean) : [],
       capture_headers: $formCaptureHeaders ? $formCaptureHeaders.checked : true,
