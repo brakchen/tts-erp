@@ -1,5 +1,11 @@
 # tts-erp CHANGELOG
 
+## 2026-09-15 — biz-doc 术语改名：单位成本 → 采购成本（单价）
+
+`biz-doc/analytics/spu-roi-profit-calculation.md`：「单位成本」改名「采购成本（单价）」；
+原指合计金额的「采购成本」改名「采购成本合计」消歧（净利润公式减项同步更新）。
+纯术语改动，口径与公式数值不变。
+
 ## 2026-09-15 — biz-doc 拆分：利润口径（纯概念）与数据源映射分离
 
 **问题**：`biz-doc/analytics/spu-roi-profit-calculation.md` 混杂了两层内容——
