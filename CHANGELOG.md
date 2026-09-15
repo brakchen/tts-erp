@@ -1,5 +1,10 @@
 # tts-erp CHANGELOG
 
+## 2026-09-15 — biz-doc 名词归类修正：采购成本（单价）挪入金额层
+
+`spu-roi-profit-calculation.md`：「采购成本（单价，unit_cost）」从 §1.2 数量层概念挪到
+§1.3 金额层概念——单价是价格不是数量，原归类不当。数量层现只剩有效件数 / 全损件数。
+
 ## 2026-09-15 — biz-doc 术语改名：单位成本 → 采购成本（单价）
 
 `biz-doc/analytics/spu-roi-profit-calculation.md`：「单位成本」改名「采购成本（单价）」；
