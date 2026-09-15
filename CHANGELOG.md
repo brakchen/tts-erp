@@ -1,5 +1,11 @@
 # tts-erp CHANGELOG
 
+## 2026-09-15 — biz-doc 术语改名：全损退款率 → 全损率
+
+`spu-roi-profit-calculation.md`：「全损退款率」改名「全损率」，定义明写分子全程含
+退货退款件 + 海外取消两部分（旧名易被误读为只含退款）。口径公式不变。
+⚠ 页面列名（`pages.py` 「全损退款率%」）与 tech-doc 引用暂仍为旧名，待随 UI 改名同步。
+
 ## 2026-09-15 — biz-doc 名词归类修正：采购成本（单价）挪入金额层
 
 `spu-roi-profit-calculation.md`：「采购成本（单价，unit_cost）」从 §1.2 数量层概念挪到
