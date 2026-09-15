@@ -11,13 +11,13 @@
 
 ## 取值（✅ 固化）
 
-| 值 | 含义 | 白名单 | 验证日期 |
-| --- | --- | :---: | --- |
-| `ACTIVATE` | 已上架（在售） | active | 2026-08-30 prod 实测 |
-| `DEACTIVATE` | 已下架（卖家手动下架） | delisted | — |
-| `DELETED` | 已删除 | delisted | — |
-| `SUSPENDED` | 已暂停（平台处罚 / 审核中） | delisted | — |
-| `ARCHIVED` | 已归档 | delisted | — |
+| 等级 |  值 | 含义 | 白名单 | 验证日期 |
+| :---: | --- | --- | :---: | --- |
+| ✅ |  `ACTIVATE` | 已上架（在售） | active | 2026-08-30 prod 实测 |
+| ✅ |  `DEACTIVATE` | 已下架（卖家手动下架） | delisted | — |
+| ✅ |  `DELETED` | 已删除 | delisted | — |
+| ✅ |  `SUSPENDED` | 已暂停（平台处罚 / 审核中） | delisted | — |
+| ✅ |  `ARCHIVED` | 已归档 | delisted | — |
 
 ## 固化的常量（`tts_erp_v2/db/constants.py`）
 

@@ -11,11 +11,11 @@
 
 ## 取值（✅ 固化）
 
-| 值 | 含义 | 来源原始字段 | v9 业务归类 |
-| --- | --- | --- | --- |
-| `CANCELLATION` | 仅取消（含拒收、超时未付款、自动取消） | `cancellations/search` 的 `cancel_type=BUYER_CANCEL \| CANCEL` | 国内取消（无 38301）/ 海外取消（有 38301） |
-| `REFUND_ONLY` | 仅退款（货已发出但退款） | `returns/search` 的 `return_type=REFUND_ONLY` | 完结退货（无论物流） |
-| `RETURN_AND_REFUND` | 退货退款（货退回 + 退款） | `returns/search` 的 `return_type=RETURN_AND_REFUND` | 完结退货（无论物流） |
+| 等级 |  值 | 含义 | 来源原始字段 | v9 业务归类 |
+| :---: | --- | --- | --- | --- |
+| ✅ |  `CANCELLATION` | 仅取消（含拒收、超时未付款、自动取消） | `cancellations/search` 的 `cancel_type=BUYER_CANCEL \| CANCEL` | 国内取消（无 38301）/ 海外取消（有 38301） |
+| ✅ |  `REFUND_ONLY` | 仅退款（货已发出但退款） | `returns/search` 的 `return_type=REFUND_ONLY` | 完结退货（无论物流） |
+| ✅ |  `RETURN_AND_REFUND` | 退货退款（货退回 + 退款） | `returns/search` 的 `return_type=RETURN_AND_REFUND` | 完结退货（无论物流） |
 
 ## 业务映射
 

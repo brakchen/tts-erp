@@ -10,16 +10,23 @@
 - 上游: TikTok 卖家中心 `/api/v1/fulfillment/logistic_detail/list`
 - 文档锚点: `tech-doc/chrome-ext-order-sync-design.md §3 / §5`、`tech-doc/order-domain-business-rules.md §5`
 
-## 实测样本
+## 取值
 
-> `tech-doc/chrome-ext-order-sync-design.md §6.2` 给出的样本：
+| 等级 | 值 | 含义（推断） | 来源 |
+| :---: | --- | --- | --- |
+| 🟡 | `Package picked up` | 包裹已揽收 | `tech-doc/chrome-ext-order-sync-design.md §6.2` 示例 |
+| 🟡 | `Delivered` | 已签收 | `tech-doc/chrome-ext-order-sync-design.md §6.2` 示例 |
+| 🔴 | （其他 - 自由文本） | 任何卖家中心实际显示的文案 | 见已知 gap #1 |
 
-```json
-[
-  { "time": "2026-09-08T10:00:00Z", "track_status": "Package picked up" },
-  { "time": "2026-09-10T14:00:00Z", "track_status": "Delivered" }
-]
-```
+## ⚠️ 未固化值速查
+
+- 🟡 **2 个值实测但未固化** —— 含义命名按 prod `description` 字段直译/推断。
+  - 🟡 ``Package picked up`` — 包裹已揽收
+  - 🟡 ``Delivered`` — 已签收
+
+- 🔴 **1 个值未观测** —— 枚举可能存在但本项目无样本，禁止拍脑袋假设。
+  - 🔴 `（其他 - 自由文本）` — 任何卖家中心实际显示的文案
+
 
 ## 已知 gap
 

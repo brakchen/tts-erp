@@ -9,11 +9,11 @@
 
 ## 取值（✅ 固化，3 级）
 
-| 值 | 含义 | 权限 |
-| --- | --- | --- |
-| `readonly` | 只读 | GET 类端点 |
-| `readwrite` | 读写 | GET + POST/PUT（不含 destructive） |
-| `admin` | 管理员 | 全部（含 destructive 端点） |
+| 等级 |  值 | 含义 | 权限 |
+| :---: | --- | --- | --- |
+| ✅ |  `readonly` | 只读 | GET 类端点 |
+| ✅ |  `readwrite` | 读写 | GET + POST/PUT（不含 destructive） |
+| ✅ |  `admin` | 管理员 | 全部（含 destructive 端点） |
 
 ## 引用
 - 代码: `tts_erp_v2/db/models/security.py:12-14`、`tts_erp_v2/middleware/auth.py`

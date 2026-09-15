@@ -12,10 +12,10 @@
 
 ## 取值（✅ 固化）
 
-| 值 | 含义 | 实测样本 |
-| --- | --- | ---: |
-| `BUYER_CANCEL` | 买家主动取消（"不想要了"、"发现更优惠的价格"等） | 678 (老数据，已 2026-08-29 归档) |
-| `CANCEL` | 系统/卖家取消（`returned_to_shipper_other`、超时未付款等） | 765 |
+| 等级 |  值 | 含义 | 实测样本 |
+| :---: | --- | --- | ---: |
+| ✅ |  `BUYER_CANCEL` | 买家主动取消（"不想要了"、"发现更优惠的价格"等） | 678 (老数据，已 2026-08-29 归档) |
+| ✅ |  `CANCEL` | 系统/卖家取消（`returned_to_shipper_other`、超时未付款等） | 765 |
 
 > 文档 `tech-doc/order-domain-business-rules.md §3` 标注："**全部为 `CANCELLATION_REQUEST_COMPLETE`**"。
 

@@ -10,11 +10,11 @@
 
 ## 取值（✅ 固化在文档中）
 
-| code | 描述 | 含义 |
-| ---: | --- | --- |
-| `50101` | "Your package was delivered!" | 已签收 |
-| `80101` | "returned to seller by shipping provider" | 退回卖家 |
-| `110101` | "Your package delivery was canceled" | 配送取消 |
+| 等级 |  code | 描述 | 含义 |
+| :---: | ---: | --- | --- |
+| ✅ |  `50101` | "Your package was delivered!" | 已签收 |
+| ✅ |  `80101` | "returned to seller by shipping provider" | 退回卖家 |
+| ✅ |  `110101` | "Your package delivery was canceled" | 配送取消 |
 
 ## 判断逻辑
 

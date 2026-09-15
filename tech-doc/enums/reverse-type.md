@@ -10,13 +10,29 @@
 - 上游: TikTok 卖家中心 `/api/fulfillment/order/list` 响应 `main_orders[].reverse_module[0].reverse_type`
 - 文档锚点: `tech-doc/plugin-sourced-shop-analytics.md §8`、`tech-doc/intercept-plugin-canonical.md §3`
 
-## 取值（🟡 实测 3 种，**枚举待核实**）
+## 取值
 
-| int 码 | 含义（推断） | 实测样本 | 来源 |
-| ---: | --- | ---: | --- |
-| `1` | 系统取消 / 超时未付款 | 2 单（VN Bridge nook） | "客户超时支付" |
-| `3` | 退货退款 | 0（`/api/fulfillment/order/list` 路径下未出现） | `tech-doc/plugin-sourced-shop-analytics.md §8` 推断 |
-| `4` | 买家取消 | 14 单（VN Bridge nook） | "不想要了" / "发现更优惠的价格" / "需要更改收货地址/付款方式" / "预计送达时间过晚" |
+| 等级 | int 码 | 含义（推断） | 实测样本 | 来源 |
+| :---: | ---: | --- | ---: | --- |
+| 🟡 | `1` | 系统取消 / 超时未付款 | 2 单（VN Bridge nook） | "客户超时支付" |
+| 🟡 | `3` | 退货退款 | 0（`/api/fulfillment/order/list` 路径下未出现） | `tech-doc/plugin-sourced-shop-analytics.md §8` 推断 |
+| 🟡 | `4` | 买家取消 | 14 单（VN Bridge nook） | "不想要了" / "发现更优惠的价格" / "需要更改收货地址/付款方式" / "预计送达时间过晚" |
+| 🔴 | `2` | （未观测） | 0 | 未知——可能"仅退款"或"申诉"等场景 |
+| 🔴 | `0` | （未观测） | 0 | 未知——可能"未审核/草稿" |
+| 🔴 | `5+` | （未观测） | 0 | 未知——上游可能有更多码 |
+
+## ⚠️ 未固化值速查
+
+- 🟡 **3 个值实测但未固化** —— 含义命名按 prod `description` 字段直译/推断。
+  - 🟡 ``1`` — 系统取消 / 超时未付款
+  - 🟡 ``3`` — 退货退款
+  - 🟡 ``4`` — 买家取消
+
+- 🔴 **3 个值未观测** —— 枚举可能存在但本项目无样本，禁止拍脑袋假设。
+  - 🔴 ``2`` — （未观测）
+  - 🔴 ``0`` — （未观测）
+  - 🔴 ``5+`` — （未观测）
+
 
 ## 与 `cancel_type` 关系
 

@@ -10,11 +10,11 @@
 
 ## 取值（✅ 固化）
 
-| 值 | 含义 | 业务行为 |
-| --- | --- | --- |
-| `ALLOW` | 允许该链接 | 强制纳入 effective links |
-| `DENY` | 拒绝该链接 | 强制排除 |
-| `PRIMARY` | 标记为主链接 | 同 ALLOW + 标记 is_primary=true |
+| 等级 |  值 | 含义 | 业务行为 |
+| :---: | --- | --- | --- |
+| ✅ |  `ALLOW` | 允许该链接 | 强制纳入 effective links |
+| ✅ |  `DENY` | 拒绝该链接 | 强制排除 |
+| ✅ |  `PRIMARY` | 标记为主链接 | 同 ALLOW + 标记 is_primary=true |
 
 ## 引用
 - 代码: `tts_erp_v2/db/models/linkage.py:202-205`

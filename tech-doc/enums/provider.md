@@ -10,10 +10,10 @@
 
 ## 取值（✅ 固化）
 
-| 值 | 含义 | 凭证类型 |
-| --- | --- | --- |
-| `tiktok` | TikTok OpenAPI 凭证 | access_token / refresh_token（Fernet 加密） |
-| `miaoshou` | 妙手 license | licenseId / appSecret |
+| 等级 |  值 | 含义 | 凭证类型 |
+| :---: | --- | --- | --- |
+| ✅ |  `tiktok` | TikTok OpenAPI 凭证 | access_token / refresh_token（Fernet 加密） |
+| ✅ |  `miaoshou` | 妙手 license | licenseId / appSecret |
 
 ## 引用
 - 代码: `tts_erp_v2/db/models/integration.py:51-65`

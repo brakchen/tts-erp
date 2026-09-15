@@ -10,63 +10,45 @@
 - 上游: TikTok OpenAPI `/fulfillment/202309/orders/{order_id}/tracking` 响应事件数组
 - 文档锚点: `tech-doc/order-domain-business-rules.md §5`、`tech-doc/analytics/spu_roi.py:184`、`tech-doc/_archive/data-model-v1.md §3`
 
-## 取值（🟡 实测 23 个，全部来自 VN Bridge nook 货流）
+## 取值
 
-### 下单/打包
-| code | 含义 | 首次出现 |
-| ---: | --- | --- |
-| `10101` | Order placed（用户下单） | T0 |
-| `20101` | Packed by seller（卖家已打包） | 0~2h after 10101 |
+| 等级 | code | 区段 | 含义 | 备注 |
+| :---: | ---: | --- | --- | --- |
+| 🟡 | `10101` | 下单/打包 | Order placed（用户下单） | T0 |
+| 🟡 | `20101` | 下单/打包 | Packed by seller（卖家已打包） | 0~2h after 10101 |
+| 🟡 | `30201` | 始发国(CN) | Arrived at sorting center in CN | 1~2 day after 20101 |
+| 🟡 | `30301` | 始发国(CN) | In transit in CN | 同日 |
+| 🟡 | `30401` | 始发国(CN) | Handed over to next carrier in CN | 0.5 day |
+| 🟡 | `30501` | 始发国(CN) | Handed over to international carrier | 1~2 day after 30401 |
+| 🟡 | `31701` | 始发国(CN) | Export clearance completed | < 1 day |
+| 🟡 | `38701` | 始发国(CN) | Awaiting international departure | < 1 day |
+| 🟡 | `34301` | 始发国(CN) | Departed CN | 0.5 day after 31701 |
+| 🟡 | **`38301`** | **跨境** | **Arrived in Vietnam, port of entry** | **★ 海外取消判据必含** |
+| 🟡 | `34701` | 目的国境内 | Import clearance completed（越南进口清关） | — |
+| 🟡 | `30801` | 目的国境内 | Handed over to local carrier | — |
+| 🟡 | `31201` | 目的国境内 | In transit in `<address>` | — |
+| 🟡 | `31301` | 目的国境内 | Now in `<sub-district>` | — |
+| 🟡 | `31401` | 目的国境内 | Now in `<from>` and will be transferred to `<to>` | — |
+| 🟡 | `32401` | 目的国境内 | In transit（在途，多次出现） | — |
+| 🟡 | `32601` | 目的国境内 | Now in `<address>` | — |
+| 🟡 | `40101` | 末端派送 | Now in `<address>`（末端站） | — |
+| 🟡 | `40501` | 末端派送 | Will be delivered soon, please pay attention to delivery information | — |
+| 🟡 | **`40601`** | **派送失败** | **Customer has rejected the package. Delivery will be rescheduled, so please check for updates.** | **★ 海外取消触发典型** |
+| 🟡 | `70201` | 退件 | Returning（**退件途中，可多次重复**） | — |
+| 🟡 | `50101` | 签收 | Your package was delivered!（**物流终态**） | — |
+| 🟡 | **`80101`** | **退件** | **Returned to the seller by the shipping provider**（**物流终态**） | — |
+| 🟡 | `110101` | 退件 | Your package delivery was canceled（**物流终态**） | — |
 
-### 始发国（CN）
-| code | 含义 | 间隔（参考） |
-| ---: | --- | --- |
-| `30201` | Arrived at sorting center in CN | 1~2 day after 20101 |
-| `30301` | In transit in CN | 同日 |
-| `30401` | Handed over to next carrier in CN | 0.5 day |
-| `30501` | Handed over to international carrier | 1~2 day after 30401 |
-| `31701` | Export clearance completed | < 1 day |
-| `38701` | Awaiting international departure | < 1 day |
-| `34301` | Departed CN | 0.5 day after 31701 |
+## ⚠️ 未固化值速查
 
-### 跨境
-| code | 含义 | **海外取消判据** |
-| ---: | --- | :---: |
-| **`38301`** | **Arrived in Vietnam, port of entry** | **★ 必含** |
+- 🟡 **24 个值实测但未固化** —— 含义命名按 prod `description` 字段直译/推断。
+  - 🟡 ``10101`` — 下单/打包
+  - 🟡 ``20101`` — 下单/打包
+  - 🟡 ``30201`` — 始发国(CN)
+  - 🟡 ``30301`` — 始发国(CN)
+  - 🟡 ``30401`` — 始发国(CN)
+  - …（其余 19 个见下方"## 取值"表）
 
-### 目的国境内
-| code | 含义 |
-| ---: | --- |
-| `34701` | Import clearance completed（越南进口清关） |
-| `30801` | Handed over to local carrier |
-| `31201` | In transit in <address> |
-| `31301` | Now in <sub-district> |
-| `31401` | Now in <from> and will be transferred to <to> |
-| `32401` | In transit（在途，多次出现） |
-| `32601` | Now in <address> |
-
-### 末端派送
-| code | 含义 |
-| ---: | --- |
-| `40101` | Now in <address>（末端站） |
-| `40501` | Will be delivered soon, please pay attention to delivery information |
-
-### 派送失败
-| code | 含义 | 海外取消触发 |
-| ---: | --- | :---: |
-| **`40601`** | **Customer has rejected the package. Delivery will be rescheduled, so please check for updates.** | **★ 典型** |
-
-### 退件
-| code | 含义 |
-| ---: | --- |
-| `70201` | Returning（**退件途中，可多次重复**） |
-| **`80101`** | **Returned to the seller by the shipping provider**（**物流终态**） |
-| `110101` | Your package delivery was canceled（**物流终态**） |
-
-### 签收
-| code | 含义 |
-| ---: | --- |
-| `50101` | Your package was delivered!（**物流终态**） |
 
 ## 三个物流终态白名单
 
@@ -85,6 +67,7 @@
 - ❌ **plugin 端没单独存 action_code**——`plugin.tracking_events` 表只有 `description`，没有 `action_code` 列。`tech-doc/plugin-sourced-shop-analytics.md:67-68` 标注为 P0 TODO：
   > "`plugin.tracking_events` 未存 action_code 独立列（仅无 event_id 时拼进 `event_key`）。处理：`plugin.tracking_events` 加 `action_code` 列 + parser 补写，历史数据可从 `event_key` 部分回填。**加列前插件页面海外取消桶为空**。"
 - ❌ **Chrome ext 抓的 `track_list[].action_code` 是否每次都拿到** —— `tech-doc/order-domain-business-rules.md §5` 提到卖家中心页面 response 不一定包含 action_code 数字编码（可能只有 `track_status` 自由文本）。需要实测确认。
+- 🔴 **完整 action_code 总集未知** —— 本表 24 个码来自 VN Bridge nook 单店样本，TikTok 其他区域可能有未观测码
 
 ## 引用
 - 代码: `tts_erp_v2/jobs/tiktok/logistics.py:97-100,113`、`tts_erp_v2/db/models/fulfillment.py:121`

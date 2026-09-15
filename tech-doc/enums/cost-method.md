@@ -10,13 +10,13 @@
 
 ## 取值（✅ 固化，5 种）
 
-| 值 | 含义 | 优先级 | 备注 |
-| --- | --- | :---: | --- |
-| `MANUAL_ENTRY` | 人工录入（`procurement.manual_product_costs`） | 🥇 最高 | 运营手动维护，**最准确** |
-| `LATEST_PURCHASE_COST` | 最近一笔采购单成交价 | 🥈 | 来自 `procurement.purchase_order_lines.unit_cost`（最近 N 笔） |
-| `PERIOD_AVERAGE_COST` | 期间平均采购价 | 🥉 | 时间窗口内算术平均 |
-| `WEIGHTED_AVERAGE_COST` | 加权平均采购价 | 🥉 | 按数量加权 |
-| `SOURCE_PRICE` | 货源价（妙手公共采集箱挂牌价） | 兜底 | **估算**口径——报表必须标注"估算成本" |
+| 等级 |  值 | 含义 | 优先级 | 备注 |
+| :---: | --- | --- | :---: | --- |
+| ✅ |  `MANUAL_ENTRY` | 人工录入（`procurement.manual_product_costs`） | 🥇 最高 | 运营手动维护，**最准确** |
+| ✅ |  `LATEST_PURCHASE_COST` | 最近一笔采购单成交价 | 🥈 | 来自 `procurement.purchase_order_lines.unit_cost`（最近 N 笔） |
+| ✅ |  `PERIOD_AVERAGE_COST` | 期间平均采购价 | 🥉 | 时间窗口内算术平均 |
+| ✅ |  `WEIGHTED_AVERAGE_COST` | 加权平均采购价 | 🥉 | 按数量加权 |
+| ✅ |  `SOURCE_PRICE` | 货源价（妙手公共采集箱挂牌价） | 兜底 | **估算**口径——报表必须标注"估算成本" |
 
 ## 兜底行为
 

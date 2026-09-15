@@ -11,11 +11,11 @@
 
 ## 取值（✅ CK 约束固化）
 
-| 值 | 含义 | 用途 |
-| --- | --- | --- |
-| `daily` | 天级 dump | 历史日数据 |
-| `today` | 实时 dump | 30s ON CONFLICT DO UPDATE 刷新 |
-| `monthly` | 月级 dump | 月度聚合 |
+| 等级 |  值 | 含义 | 用途 |
+| :---: | --- | --- | --- |
+| ✅ |  `daily` | 天级 dump | 历史日数据 |
+| ✅ |  `today` | 实时 dump | 30s ON CONFLICT DO UPDATE 刷新 |
+| ✅ |  `monthly` | 月级 dump | 月度聚合 |
 
 ## 引用
 - 代码: `tts_erp_v2/db/models/plugin.py:497-501`

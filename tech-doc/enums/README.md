@@ -133,5 +133,35 @@
 ## 当前覆盖
 
 - **38 个枚举值空间**已沉淀（含本目录）
+- **逐行等级标注** 已在 18 个含未固化值的文件中加入"等级"首列 + "## ⚠️ 未固化值速查" 段
 - **5 个**枚举仅观察到部分合法值（含 `cancel-status`、`reverse-type`、`reverse-status`、 `api-key-status`、 `procurement-products-status`）
 - **3 个**枚举完全无样本（`statement-type`、`payment-pending-reason`、`line-status`）
+
+## 未固化值汇总（按文件列举）
+
+| 文件 | 🟡 实测 | 🔴 未观测 | 备注 |
+| --- | ---: | ---: | --- |
+| `action-code.md` | 24 | 0 | 海外取消判据 38301 在内 |
+| `main-order-status.md` | 5 | 0 | plugin 卖家中心 int 码 |
+| `sku-display-status.md` | 7 | 0 | plugin 卖家中心 SKU 状态 |
+| `fulfillment-type.md` | 1 | 3 | 双口径（text + int） |
+| `reverse-type.md` | 3 | 3 | `2`/其它未观测 |
+| `reverse-status.md` | 2 | 5 | |
+| `cancel-type.md` | 0 | 0 | 全部 ✅ |
+| `cancel-status.md` | 1 | 2 | PENDING/REJECTED 未观测 |
+| `cancel-reason.md` | 10 | 0 | 文档仅列 1 种，实际 ≥10 |
+| `settlement-status.md` | 1 | 0 |  |
+| `payment-status.md` | 1 | 0 |  |
+| `statement-type.md` | 0 | 0 | 表内无任何值（NULL） |
+| `payment-pending-reason.md` | 0 | 0 | 同上 |
+| `api-key-status.md` | 1 | 3 | |
+| `line-status.md` | 0 | 0 | 无任何样本 |
+| `pay-method.md` | 2 | 0 |  |
+| `procurement-products-status.md` | 6 | 0 | |
+| `track-status.md` | 2 | 0 | |
+| `sale-region.md` | 1 | 5 | VN 已观测，其他未观测 |
+| `region.md` | 1 | 0 | |
+| `currency.md` | 7 | 2 | CNY/EUR 未观测 |
+
+> 随时手补：`scripts/annotate_enums.py` 顶部 `PER_FILE_STATUS` dict 是状态知识库的唯一来源。
+> 运行 `python3 scripts/annotate_enums.py` 可重新写入等级列；`python3 scripts/add_unfixed_summary.py` 重生成速查段。

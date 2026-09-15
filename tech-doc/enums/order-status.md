@@ -11,17 +11,17 @@
 
 ## 取值（✅ 固化）
 
-| 值 | 含义 | 终态？ | 关键时间戳 |
-| --- | --- | :---: | --- |
-| `UNPAID` | 未付款 | ❌ | `order_time` |
-| `ON_HOLD` | 挂起 | ❌ | — |
-| `AWAITING_SHIPMENT` | 待发货 | ❌ | `paid_at` |
-| `PARTIAL_SHIPPING` | 部分发货 | ❌ | `shipped_at` (first) |
-| `AWAITING_COLLECTION` | 待揽收 | ❌ | `shipped_at` |
-| `IN_TRANSIT` | 在途 | ❌ | `shipped_at` |
-| `DELIVERED` | 已签收（未完结） | ❌ | `delivered_at` |
-| `COMPLETED` | 已完结 | ✅ 绝对终态 | `delivered_at`, `paid_at`, `shipped_at` 全有；无取消 |
-| `CANCELLED` | 已取消 | ✅ 绝对终态 | `cancelled_at` 必有 |
+| 等级 |  值 | 含义 | 终态？ | 关键时间戳 |
+| :---: | --- | --- | :---: | --- |
+| ✅ |  `UNPAID` | 未付款 | ❌ | `order_time` |
+| ✅ |  `ON_HOLD` | 挂起 | ❌ | — |
+| ✅ |  `AWAITING_SHIPMENT` | 待发货 | ❌ | `paid_at` |
+| ✅ |  `PARTIAL_SHIPPING` | 部分发货 | ❌ | `shipped_at` (first) |
+| ✅ |  `AWAITING_COLLECTION` | 待揽收 | ❌ | `shipped_at` |
+| ✅ |  `IN_TRANSIT` | 在途 | ❌ | `shipped_at` |
+| ✅ |  `DELIVERED` | 已签收（未完结） | ❌ | `delivered_at` |
+| ✅ |  `COMPLETED` | 已完结 | ✅ 绝对终态 | `delivered_at`, `paid_at`, `shipped_at` 全有；无取消 |
+| ✅ |  `CANCELLED` | 已取消 | ✅ 绝对终态 | `cancelled_at` 必有 |
 
 ## 已固化的白名单
 

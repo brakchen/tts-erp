@@ -17,13 +17,23 @@
 > 推断依据 = `tech-doc/plugin-sourced-shop-analytics.md §8` prod 样本（494 单）按
 > `tracking_no`（有无面单）+ `reverse_module`（有无售后/取消）交叉分类。
 
-| int 码 | 推断文本 | 推断依据 | 实测 n |
-| ---: | --- | --- | ---: |
-| `100` | UNPAID（未付款） | 1 单无面单无 tracking | 1 |
-| `101` | AWAITING_SHIPMENT（待发货） | 71 单有面单无 reverse | 71 |
-| `102` | IN_TRANSIT（在途）/ AWAITING_COLLECTION / DELIVERED | 329 单有 tracking_no，18 单带 reverse | 329 |
-| `103` | 售后/退货中 | 7/7 带 `reverse_type=3`（"商品与描述不符"） | 7 |
-| `104` | CANCELLED | 86/86 全部带 `reverse_type=4`（买家取消） | 86 |
+| 等级 |  int 码 | 推断文本 | 推断依据 | 实测 n |
+| :---: | ---: | --- | --- | ---: |
+| 🟡 |  `100` | UNPAID（未付款） | 1 单无面单无 tracking | 1 |
+| 🟡 |  `101` | AWAITING_SHIPMENT（待发货） | 71 单有面单无 reverse | 71 |
+| 🟡 |  `102` | IN_TRANSIT（在途）/ AWAITING_COLLECTION / DELIVERED | 329 单有 tracking_no，18 单带 reverse | 329 |
+| 🟡 |  `103` | 售后/退货中 | 7/7 带 `reverse_type=3`（"商品与描述不符"） | 7 |
+| 🟡 |  `104` | CANCELLED | 86/86 全部带 `reverse_type=4`（买家取消） | 86 |
+
+## ⚠️ 未固化值速查
+
+- 🟡 **5 个值实测但未固化** —— 含义命名按 prod `description` 字段直译/推断。
+  - 🟡 ``100`` — UNPAID（未付款）
+  - 🟡 ``101`` — AWAITING_SHIPMENT（待发货）
+  - 🟡 ``102`` — IN_TRANSIT（在途）/ AWAITING_COLLECTION / DELIVERED
+  - 🟡 ``103`` — 售后/退货中
+  - 🟡 ``104`` — CANCELLED
+
 
 ## 与 `commerce.sales_orders.status` 关系
 

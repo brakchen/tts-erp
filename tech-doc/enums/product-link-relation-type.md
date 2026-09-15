@@ -10,11 +10,11 @@
 
 ## 取值（✅ 固化）
 
-| 值 | 含义 | 业务场景 |
-| --- | --- | --- |
-| `MIAOSHOU_PUBLISHED_TO_TIKTOK` | 妙手采集并发布到 TikTok | 主动上架流程（采集箱→发布） |
-| `MIAOSHOU_BOUND_TO_TIKTOK` | 妙手已有产品，绑定到 TikTok 已上架产品 | 库存/订单关联（不上新架） |
-| `MIAOSHOU_PROCUREMENT_SOURCE` | 妙手作为 TikTok 货源（采购源） | 采购链路（1688 等） |
+| 等级 |  值 | 含义 | 业务场景 |
+| :---: | --- | --- | --- |
+| ✅ |  `MIAOSHOU_PUBLISHED_TO_TIKTOK` | 妙手采集并发布到 TikTok | 主动上架流程（采集箱→发布） |
+| ✅ |  `MIAOSHOU_BOUND_TO_TIKTOK` | 妙手已有产品，绑定到 TikTok 已上架产品 | 库存/订单关联（不上新架） |
+| ✅ |  `MIAOSHOU_PROCUREMENT_SOURCE` | 妙手作为 TikTok 货源（采购源） | 采购链路（1688 等） |
 
 ## 引用
 - 代码: `tts_erp_v2/db/models/linkage.py:114-117`
