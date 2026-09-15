@@ -96,7 +96,7 @@ v9 采购成本更高(含退货件的货本),但总净收入也更高(排除退�
 
 - `tech-doc/analytics/spu-real-roi-dashboard.md` §2 全损口径 → v9 已同步
 - `tech-doc/analytics/spu-real-roi-dashboard.md` §4.2 M5d/M12b + §E 字段语义 → **v9 已同步（2026-09-13）**
-- `biz-doc/analytics/spu-roi-profit-calculation.md` §3 M5d/M12b/M5e + §5 版本历史 → **v9 实现落地已记录（2026-09-13）**
+- `biz-doc/analytics/spu-roi-profit-calculation.md` §一 名词定义 + §六 版本历史 → **v9 实现落地已记录（2026-09-13）**；2026-09-15 该文档拆分为纯口径文档，表/字段映射移至 `biz-doc/analytics/spu-roi-data-sources.md`
 - `biz-doc/analytics/post-product-list-field-semantics.md` §9 → 全损联表说明(v9 口径)
 - `tech-doc/external-api.md` spu-roi 端点契约 → **v9 已同步（2026-09-13）**
 

@@ -1,225 +1,170 @@
 # SPU ROI 利润计算口径（业务文档）
 
-> 来源：`tech-doc/analytics/spu-real-roi-dashboard.md` §4.2 + `tech-doc/analytics/roi-calc-prompt.md`
+> **本文档只定义业务概念与公式，不出现任何表名 / 字段名 / SQL。**
+> 「某个概念在数据库里到底是哪张表哪个字段」见
+> [`biz-doc/analytics/spu-roi-data-sources.md`](spu-roi-data-sources.md)（API 数据源 + plugin 数据源两部分）。
 > 底层权威：`handoff/spu-roi-full-loss-rubric.md`（v9 当前）
-> 整理日期：2026-09-07
+> 整理日期：2026-09-07；拆分纯化：2026-09-15
 
 ---
 
-## 一、利润公式
+## 一、名词定义
 
-$$
-\text{净利润} = \text{GMV}_{\text{USD}} - \text{退款}_{\text{USD}} - \text{广告消耗}_{\text{USD}} - \text{采购成本}_{\text{USD}}
-$$
+本节是唯一权威的概念定义。所有公式、看板、报表用到这些词时，以本节为准。
 
-### 1.1 净收入（按订单分层计算）
+### 1.1 订单层概念
 
-$$
-\text{总净收入}_{\text{USD}} = \frac{\sum \text{line\_net\_vnd}}{\text{USD\_VND}}
-$$
+| 名词 | 定义 |
+| --- | --- |
+| **订单** | 买家在店铺下的一笔交易。一个订单可含多个商品行（SKU 行）。 |
+| **有效销售订单**（口径 B） | 买家已付款、且未被取消的订单。状态枚举层面 = 已付款白名单（待发货 / 部分发货 / 待揽收 / 运输中 / 已送达 / 已完成），**不含**未付款、挂起、已取消。 |
+| **取消订单** | 终态为「已取消」的订单。按取消时货的位置拆两种互斥子类（见下两行）。 |
+| **国内取消** | 取消时货**还没到**目的国（物流未出境）。货拿得回来，不算损失。 |
+| **海外取消** | 取消时货**已到**目的国（物流已出境）。货拿不回来，等同于全损。 |
+| **退货** | 买家已付款、货已发出，事后发起并**已完结**的退货退款 / 仅退款售后单。不论货到哪，一律算全损。 |
+| **全损** | **退货 ∪ 海外取消**。这批货的采购成本实打实亏掉，要计入货本。国内取消**不是**全损。 |
+| **已结算订单** | 平台已出结算单、卖家已实际到账的订单。净收入用实际到账金额。 |
+| **未结算订单** | 平台还没结算的订单。净收入只能按估算费率折算。 |
 
-其中每行的净收入:
+口语记忆：
 
-$$
-\text{line\_net\_vnd} =
-\begin{cases}
-\text{order\_SETTLEMENT} \times \dfrac{\text{line\_gmv}}{\text{order\_gmv}} & \text{已结算订单} \\
-\text{line\_gmv} \times 0.692 & \text{未结算订单}
-\end{cases}
-$$
-
-**已结算订单**：在 `finance.settlement_transactions` 中有记录。`order_SETTLEMENT` = 该订单的 `SETTLEMENT` component 金额，按行 GMV 比例分摊。已扣完所有平台费 + 运费 + 联盟佣金 + 退款调整。
-
-**未结算订单**：无 SETTLEMENT 记录，按 $1 - 30.8\% = 69.2\%$ 估算（30.8% 为平台佣金基线 $\hat{r}$，2026-09-06 实测；实测验证实际扣费 ≈ 35.9%，差 5.1pp 为联盟 + 运费 + 平台补贴）。
-
-**判定是否已结算**：
-
-```sql
-EXISTS (
-    SELECT 1 FROM finance.settlement_transactions st
-    WHERE st.order_pk = sales_orders.id
-)
+```text
+有效销售额 = 所有已付款订单 − 取消订单 − 退货
+             （其中「取消订单」里的海外取消虽已取消，货本仍要算——它是全损）
+全损件数   = 退货件数 + 海外取消件数
 ```
 
-### 1.2 采购成本
+### 1.2 数量层概念
 
-$$
-\text{采购成本}_{\text{USD}} = (\text{effective\_qty} + \text{full\_loss\_qty}) \times \text{unit\_cost}_{\text{CNY}} \times \text{CNY\_USD}
-$$
+| 名词 | 定义 |
+| --- | --- |
+| **有效件数**（effective_qty） | 有效销售订单的商品件数合计（排除退货 case 波及的行）。 |
+| **全损件数**（full_loss_qty） | 退货件数 + 海外取消件数。 |
+| **单位成本**（unit_cost） | 一件商品的采购成本（人民币）。取值有优先级链，见 §四。 |
 
-- $\text{effective\_qty}$：有效件数（PAID_SALES_ORDER_STATUSES 白名单，排除退货 case）
-- $\text{full\_loss\_qty}$：全损件数 = 退货件数(27) + 海外取消件数(133) = **160**
-- $\text{unit\_cost}_{\text{CNY}}$：真实成本（人工标注价格 > 货源价 > 默认兜底价格 40 CNY）
-- $\text{CNY\_USD}$：在线 fx 快照（2026-09-07: 0.148823）
+### 1.3 金额层概念
 
-### 1.3 利润
-
-$$
-\text{profit}_{\text{USD}} = \text{total\_net}_{\text{USD}} - \text{ad\_cost}_{\text{USD}} - \text{procurement}_{\text{USD}}
-$$
-
----
-
-## 二、口径定义
-
-### 2.1 有效销售订单（口径 B）
-
-`PAID_SALES_ORDER_STATUSES`（`tts_erp_v2/db/constants.py`）：
-
-| 状态 | 计入有效? |
-| --- | :---: |
-| AWAITING_SHIPMENT / PARTIAL_SHIPPING / AWAITING_COLLECTION / IN_TRANSIT / DELIVERED / COMPLETED | ✓ |
-| UNPAID / ON_HOLD / **CANCELLED** | ✗ |
-
-### 2.2 订单分类（v9 口径）
-
-$$
-\text{全损件} = \text{退货件数} + \text{海外取消件数}
-$$
-
-| 类别 | 条件 | 计入有效? | 全损? | 计入采购? |
-| --- | --- | :---: | :---: | :---: |
-| 有效订单 | PAID_STATUSES + 无退货 case | ✓ | ✗ | ✓ |
-| 退货 | RETURN_AND_REFUND / REFUND_ONLY 已完结 | ✗ | ✓ | ✓(计入全损) |
-| 海外取消 | CANCELLED + `action_code=38301` | ✗ | ✓ | ✓(计入全损) |
-| 国内取消 | CANCELLED + 未到海外 | ✗ | ✗ | ✗ |
-
-**海外判定**：`fulfillment.tracking_events.action_code = 38301`（"Arrived in destination country/region"）
-
-**实测数据（2026-09-07）**：
-
-| 类别 | 件数 |
-| --- | ---: |
-| 有效件数(排除退货) | 655 |
-| 退货(RETURN_AND_REFUND + REFUND_ONLY 已完结) | 27 |
-| 海外取消(CANCELLED + action_code=38301) | 133 |
-| **全损合计** | **160** |
-| 国内取消(物流未到海外) | 182 |
-
-### 2.3 采购成本优先级链
-
-| 优先级 | 来源 | 表 | 说明 |
-| ---: | --- | --- | --- |
-| 1 | 人工标注价格 | `procurement.manual_product_costs` | `valid_to IS NULL` |
-| 2 | 货源价 | `procurement.procurement_products.source_unit_cost` | 按 `synced_at DESC` 取最新 |
-| 3 | 默认兜底价格 | 硬编码 40 CNY/件 | 兜底 |
-
-### 2.4 汇率
-
-| 币种对 | 在线 fx 值(2026-09-07) |
-| --- | ---: |
-| $\text{USD→VND}$ | 26,001.886 |
-| $\text{CNY→USD}$ | 0.148823 ($= 1/6.7194$) |
-
-数据源：`fx.exchange_rate_snapshots` 最新快照。
-
-### 2.5 平台佣金
-
-- 已结算订单：`SETTLEMENT` 已扣完所有费，无需二次扣
-- 未结算订单：基线 $\hat{r} = 30.8\%$（实测 35.9%，差 5.1pp 为联盟 + 运费 + 补贴）
+| 名词 | 定义 |
+| --- | --- |
+| **有效 GMV** | 有效销售订单的商品成交金额（店铺当地币种），未扣任何平台费用。 |
+| **净收入** | 平台结完账后卖家真正拿到的钱。已结算订单用实际到账；未结算订单用 GMV × (1 − 平台费率基线) 估算。详见 §二。 |
+| **广告消耗** | 广告平台统计的真实花费（美元）。GMV Max 归因含自然单，不是纯广告增量。 |
+| **采购成本** | (有效件数 + 全损件数) × 单位成本，换算成美元。**全损件数要计货本**（货没了钱花了）。 |
+| **净利润** | 净收入 − 广告消耗 − 采购成本。 |
+| **实际 ROI** | 有效 GMV ÷ 广告消耗。 |
+| **保本 ROI** | 净利润 = 0 时的 ROI 临界值；实际 ROI 低于它即亏。 |
+| **取消率** | 国内取消单量 ÷ (有效单量 + 国内取消单量)。**只含国内取消**——海外取消已计入全损，两个率互斥不重叠（v9 修正）。 |
+| **全损退款率** | 全损件数 ÷ (售出件数 + 海外取消件数)。正常值域 [0, 1]；分母为 0 显示 —；>100% 标识数据异常需人工核查。 |
 
 ---
 
-## 三、各指标计算方法
-
-### M1: 广告消耗合计
+## 二、利润公式
 
 $$
-\text{ad\_cost}(s) = \sum \text{ad\_product\_links.real\_cost\_total}
+\text{净利润} = \text{净收入}_{\text{USD}} - \text{广告消耗}_{\text{USD}} - \text{采购成本}_{\text{USD}}
 $$
 
-### M5: 售出件数（有效销售）
+### 2.1 净收入（按订单是否已结算分层）
 
 $$
-\text{effective\_qty}(s) = \sum \text{sales\_order\_lines.quantity} \cdot \mathbb{1}[\text{status} \in \text{PAID\_STATUSES}] \cdot \mathbb{1}[\text{无退货 case}]
+\text{净收入}_{\text{USD}} = \frac{\sum \text{line\_net}}{\text{USD 汇率}}
 $$
 
-### M5d: 全损件数（v9）
+每个商品行的净收入：
 
 $$
-\text{full\_loss\_qty} = \underbrace{\sum \text{case\_lines.quantity}}_{\text{退货：RETURN\_AND\_REFUND + REFUND\_ONLY}} + \underbrace{\sum \text{sol.quantity}}_{\text{海外取消：CANCELLED} \cap \text{action\_code}=38301}
-$$
-
-### M12b: 取消率（v9，与全损退款率互斥）
-
-$$
-\text{cancel\_rate} = \frac{\text{国内取消单量}}{\text{有效单量} + \text{国内取消单量}}
-$$
-
-- **国内取消** = `CANCELLED` 且**无** `tracking_events.action_code=38301`（物流未到海外，货拿得回来，不算全损）
-- **海外取消**（`CANCELLED` ∧ 38301）已计入全损件数 M5d，**不再计入取消率**——两个率互斥不重叠（v8 及之前取消率含全部 CANCELLED，海外取消被重复计算，2026-09-13 已修）
-- 信息列 `cancelled_order_count` 保持全部取消单口径；行级另拆 `domestic_cancelled_order_count` / `overseas_cancelled_order_count`
-
-### M5e: 全损退款率（v9）
-
-$$
-\text{full\_loss\_rate} = \frac{\text{full\_loss\_qty}}{\text{units\_sold} + \text{full\_loss\_cancelled\_qty}}
-$$
-
-- 分子 ⊆ 分母（退货件含在 units_sold 里、海外取消件 = full_loss_cancelled_qty）→ 正常值域 [0,1]
-- 分母 0 → null（页面显示 —）；不钳位（>100% 标识数据异常需人工核查）
-
-### M18: 净利润
-
-$$
-\text{net\_profit} = \frac{\sum \text{line\_net\_vnd}}{\text{USD\_VND}} - \text{ad\_cost} - \text{procurement\_usd}
-$$
-
-其中：
-
-$$
-\text{line\_net\_vnd} =
+\text{line\_net} =
 \begin{cases}
-\text{order\_SETTLEMENT} \times \dfrac{\text{line\_gmv}}{\text{order\_gmv}} & \text{已结算} \\[6pt]
-\text{line\_gmv} \times (1 - 0.308) & \text{未结算}
+\text{订单实际到账} \times \dfrac{\text{行 GMV}}{\text{订单 GMV}} & \text{已结算订单} \\[8pt]
+\text{行 GMV} \times (1 - \hat{r}) & \text{未结算订单}
 \end{cases}
 $$
 
-$$
-\text{procurement\_usd} = (\text{effective\_qty} + \text{full\_loss\_qty}) \times \text{unit\_cost}_{\text{CNY}} \times \text{CNY\_USD}
-$$
+- **已结算订单**：平台结算单上的「实际到账」金额已扣完所有平台费 + 运费 + 联盟佣金 + 退款调整，按行 GMV 占比分摊到每个商品行。
+- **未结算订单**：按平台费率基线 $\hat{r} = 30.8\%$ 估算（即净收入 ≈ GMV × 0.692）。2026-09-06 实测实际扣费 ≈ 35.9%，差 5.1pp 为联盟 + 运费 + 平台补贴。
+
+### 2.2 采购成本
 
 $$
-\text{判亏条件：} \text{net\_profit} < 0 \iff \text{实际 ROI} < \text{保本 ROI}
+\text{采购成本}_{\text{USD}} = (\text{有效件数} + \text{全损件数}) \times \text{单位成本}_{\text{CNY}} \times \text{CNY 汇率}
+$$
+
+### 2.3 判亏条件
+
+$$
+\text{净利润} < 0 \iff \text{实际 ROI} < \text{保本 ROI}
 $$
 
 ---
 
-## 四、Prompt（可复用分析）
+## 三、订单分类矩阵（v9 口径）
+
+| 类别 | 条件 | 计入有效销售? | 全损? | 计入采购货本? |
+| --- | --- | :---: | :---: | :---: |
+| 有效订单 | 已付款白名单 + 无退货 case | ✓ | ✗ | ✓ |
+| 退货 | 退货退款 / 仅退款售后单已完结 | ✗ | ✓ | ✓（计入全损） |
+| 海外取消 | 已取消 + 物流已到目的国 | ✗ | ✓ | ✓（计入全损） |
+| 国内取消 | 已取消 + 物流未出境 | ✗ | ✗ | ✗ |
+| 未付款 / 挂起 | 未过支付门槛 | ✗ | ✗ | ✗ |
+
+**实现偏差注记（2026-09-13）**：代码实现里退货桶限定订单 ∈ 已付款白名单，与上表字面略有出入——原因是保住 rule 0 不变量：未付款等异常订单的完结退款走「未归属退款」计数，不进任何业务桶，也不应计全损货本。窗口裁剪：退货桶按售后单完结时间，海外取消桶按订单付款/下单时间。
+
+---
+
+## 四、参数与优先级链
+
+### 4.1 单位成本优先级链（从高到低）
+
+| 优先级 | 来源 | 说明 |
+| ---: | --- | --- |
+| 1 | 人工标注价格 | 运营手工录入的当前有效价 |
+| 2 | 货源价 | 采购平台（妙手）同步的最新货源单价 |
+| 3 | 默认兜底价格 | 40 CNY/件 |
+
+### 4.2 关键参数
+
+| 参数 | 值 | 说明 |
+| --- | --- | --- |
+| 平台费率基线 $\hat{r}$ | 30.8% | 2026-09-06 实测；未结算订单净收入估算用 |
+| 未结算折算系数 | 0.692 | = 1 − 30.8% |
+| 汇率 | 在线快照 | USD/VND、CNY/USD 取最新汇率快照，不用硬编码 |
+
+**不要用过期常量**：USD/VND 26,330、CNY/USD 0.1477（已过期 ~1%）。
+
+---
+
+## 五、可复用分析 Prompt
 
 按以下口径计算每个在售 SPU 的净利润、实际 ROI、保本 ROI，输出主表。
 
-**有效销售订单**：`status ∈ {AWAITING_SHIPMENT, PARTIAL_SHIPPING, AWAITING_COLLECTION, IN_TRANSIT, DELIVERED, COMPLETED}`，排除退货 case。
+**有效销售订单**：已付款白名单状态，排除退货 case。
 
-**全损件数**：
+**全损件数**：退货（退货退款 / 仅退款已完结）+ 海外取消（已取消且物流已到目的国）；国内取消 ≠ 全损，不计货本。
 
-- 退货 = RETURN_AND_REFUND / REFUND_ONLY 已完结件数
-- 海外取消 = CANCELLED + `tracking_events.action_code=38301` 件数
-- 国内取消（物流未到海外）≠ 全损，不计货本
+**净收入**：已结算按实际到账 × (行 GMV / 订单 GMV) 分摊；未结算按行 GMV × 0.692。
 
-**净收入**：已结算用 `SETTLEMENT × (line_gmv/order_gmv)` 分摊；未结算用 `line_gmv × 0.692`。
+**采购成本**：单位成本 = 人工标注价格 > 货源价 > 兜底 40 CNY；采购 = (有效件数 + 全损件数) × 单位成本 × CNY 汇率。
 
-**采购成本**：`unit_cost = 人工标注价格 > 货源价 > 默认兜底价格 40 CNY`，`procurement = (effective_qty + full_loss_qty) × unit_cost × CNY_USD`
-
-**利润**：`profit = Σ line_net_vnd / USD_VND − ad_cost − procurement`
+**利润**：净利润 = 净收入 − 广告消耗 − 采购成本。
 
 **输出字段**：SPU | 广告$ | 有效GMV$ | 采购$ | 退款$ | 净利润$ | 实际ROI | 保本ROI | 全损件
 
+> 每个概念对应的数据表 / 字段 / 枚举值，查
+> [`spu-roi-data-sources.md`](spu-roi-data-sources.md)。
+
 ---
 
-## 五、版本历史
+## 六、版本历史
 
 | 版本 | 关键变化 | 全损件数 | 净利润 |
 | --- | --- | ---: | ---: |
-| v5 | `action_code=38301` 替代 `delivered_at` | 127 | +$2,938 |
-| v6 | + CANCELLED 货本补扣 | 127 | +$2,384 |
-| v7 | + 已结算/未结算分层（SETTLEMENT） | 127 | −$1,368 |
+| v5 | 物流「已到目的国」事件替代「已送达」判海外 | 127 | +$2,938 |
+| v6 | + 已取消订单货本补扣 | 127 | +$2,384 |
+| v7 | + 已结算/未结算分层 | 127 | −$1,368 |
 | **v9** | **退货=全损 + 海外取消=全损 + 国内取消≠全损** | **160** | **−$1,230** |
-| v9 实现落地（2026-09-13，merge `3c8ea96`） | 页面/API 代码对齐 v9：此前实现停在 v8（全损要求 38301 才计、取消率含海外取消 → 两率重叠）。修复：全损 SQL 重写为退货+海外取消两桶；取消率只计国内取消；新增 `domestic/overseas_cancelled_order_count` 拆分字段；钻取订单 `full_loss` 旗标同口径；`meta.rubric_version` = `v9` | 同 v9 | 同 v9 |
+| v9 实现落地（2026-09-13，merge `3c8ea96`） | 页面/API 代码对齐 v9：此前实现停在 v8（全损要求到海外才计、取消率含海外取消 → 两率重叠）。修复：全损重写为退货+海外取消两桶；取消率只计国内取消；钻取订单全损旗标同口径 | 同 v9 | 同 v9 |
 
-**实现偏差注记（2026-09-13）**：退货桶在代码实现里限定订单 ∈ 已付白名单状态（`PAID_SALES_ORDER_STATUSES`），与本文 §2.2 的 SQL 描述略有出入——原因是保住 §4.2 rule 0 不变量：UNPAID 等异常订单的完结退款走「未归属退款」计数（`meta.unattributed_refund_lines`），不进任何业务桶，也不应计全损货本。窗口裁剪：退货桶按 case 完结时间（`updated_at_source`，与退款桶同语义），海外取消桶按订单时间（`COALESCE(paid_at, order_time)`）。
-
-## 六、实测验证点（2026-09-07）
+## 七、实测验证点（2026-09-07）
 
 | 检查项 | 结果 |
 | --- | --- |
@@ -233,9 +178,10 @@ $$
 | 平台基线 $\hat{r}$ | 30.8% |
 | 净利润 | −$1,230.45 |
 
-## 七、文档关系
+## 八、文档关系
 
-- `tech-doc/analytics/spu-real-roi-dashboard.md` §4.2：M1–M19 完整公式（本文件是业务友好摘要）
-- `tech-doc/analytics/roi-calc-prompt.md`：可复用 Prompt（本文件 §4 精简版）
+- [`spu-roi-data-sources.md`](spu-roi-data-sources.md)：本文所有概念在 **API 数据源**和 **plugin 数据源**里的表 / 字段 / 枚举映射（2026-09-15 新增，从本文拆出）
+- `tech-doc/analytics/spu-real-roi-dashboard.md` §4.2：M1–M19 完整公式（技术版，含实现 SQL）
+- `tech-doc/analytics/roi-calc-prompt.md`：可复用 Prompt（本文 §五同源）
 - `handoff/spu-roi-full-loss-rubric.md`：项目记忆 v9 全损口径
 - `biz-doc/analytics/post-product-list-field-semantics.md` §9：全损 SQL 查询

@@ -20,7 +20,9 @@ biz-doc/
 └── analytics/
     ├── post-product-list-field-semantics.md    ← post_product_list 字段语义
     ├── endpoint-join-keys.md                   ← 端点间关联键(JOIN 模板)
-    ├── ad-product-links-view.md                ← analytics.ad_product_links 视图(广告×商品关联+出单/消耗)
+    ├── spu-roi-profit-calculation.md           ← SPU ROI 利润口径(v9,纯概念+公式,不含表名字段名)
+    ├── spu-roi-data-sources.md                 ← 口径概念 → 物理表/字段/枚举映射(API 数据源 + plugin 数据源)
+    ├── ad-product-links-view.md                ← ⚠ 历史档案:视图已被 migration 0020 删除,勿作取数依据
     ├── post-session-list-field-semantics.md    ← (待补)
     └── campaign-opt-log-list-field-semantics.md ← (待补)
 ```

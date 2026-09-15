@@ -1,5 +1,24 @@
 # tts-erp CHANGELOG
 
+## 2026-09-15 — biz-doc 拆分：利润口径（纯概念）与数据源映射分离
+
+**问题**：`biz-doc/analytics/spu-roi-profit-calculation.md` 混杂了两层内容——
+业务概念/公式定义（理论上与数据源无关）和物理表/字段/SQL（数据源绑定）。
+且随 v8.1 实现切换与 migration 0020 删视图，文中 `ad_product_links.real_cost_total`
+等取数引用已过时。
+
+**改动**（docs-only，无代码变动）：
+- `spu-roi-profit-calculation.md` 重写为纯口径文档：只含名词定义（§一）+ 公式（§二）+
+  分类矩阵 / 参数 / Prompt / 版本历史，不再出现任何表名、字段名、SQL。
+- 新增 `biz-doc/analytics/spu-roi-data-sources.md`：概念 → 物理表/字段/枚举映射，
+  分 **API 数据源**（commerce/finance/fulfillment/after_sales，含状态枚举、
+  action_code 速查、case_type 完结枚举）与 **plugin 数据源**（plugin.*，含
+  main_order_status 100–104 码值表、cancel_type 枚举、settlement_details.trade_order_id
+  关联键、tracking_events 无 action_code 列等已知缺口）两部分；广告/汇率/采购
+  两路共用部分单列。
+- `biz-doc/README.md` 目录清单更新；`ad-product-links-view.md` 标注为历史档案
+  （视图已被 migration 0020 删除）。
+
 ## 2026-09-15 — SPU ROI 广告消耗按日期切片 v8.1（v8 选错源修正）
 
 **v8 失误**：v8 上线时看 ad_daily last_update 停在 2026-09-13 23:15（merge job
