@@ -43,6 +43,8 @@ profit_usd = 总净收入(USD) − 广告消耗(USD) − 采购成本(USD)
 | `CNY_USD` | 0.148823 | 同上(1/6.7194) |
 | `PROCUREMENT_CNY` | 40 CNY/件 | 用户指定(默认 30) |
 | `FEE_BASELINE` | 0.308 | tech-doc D10(2026-09-06 实测) |
+| 实测平台扣费 | 35.9% | 2026-09-07 时点快照（对照基线 r̂=30.8%，差 5.1pp 为联盟+运费+补贴） |
+| 已结算订单比例 | 608/637 = 95.4% | 2026-09-07 时点快照 |
 | 物流判定字段 | `tracking_events.action_code = 38301` | "Arrived in destination country/region" |
 
 **不要用过期常量**: 26,330 / 0.1477(已过期 ~1%)
