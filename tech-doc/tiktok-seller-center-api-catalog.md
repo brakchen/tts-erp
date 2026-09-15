@@ -4,6 +4,39 @@
 > 插件版本：0.1.117，店铺：VN 区域，seller_id=7494763368967603447。
 > 本文档记录实际观测到的接口结构，作为解析规则的 truth source。
 
+## 相关文档
+
+本目录涉及的所有 int / text 枚举值在 [`tech-doc/enums/`](enums/) 有独立维护文件。
+**遇到 int / text 码不知含义时（如 `main_order_status` / `reverse_type` / `action_code` / `cancel_reason` 等），先查 [`enums/README.md`](enums/README.md) 的"未固化值汇总"表**——`/docs(enum): 逐行加 ✅/🟡/🔴 等级标注` 后的状态都登记了。
+
+### 按本目录章节映射
+
+| 本目录章节 / 字段 | 关键枚举 | enum 文件 |
+| --- | --- | --- |
+| §2.1 订单列表 `order_status_module[].main_order_status` | 卖家中心 int 主订单状态（🟡 未固化） | [`main-order-status.md`](enums/main-order-status.md) |
+| §2.1 订单列表 `order_status_module[].sku_display_status` | 卖家中心 int SKU 展示状态（🟡 未固化） | [`sku-display-status.md`](enums/sku-display-status.md) |
+| §2.1 订单列表 `trade_order_module.fulfillment_type` | 履约类型（双口径：text + int） | [`fulfillment-type.md`](enums/fulfillment-type.md) |
+| §2.1 订单列表 `trade_order_module.pay_method` | 支付方式（自由文本） | [`pay-method.md`](enums/pay-method.md) |
+| §2.1 订单列表 `trade_order_module.sale_region` | 销售地区（ISO 3166-1） | [`sale-region.md`](enums/sale-region.md) |
+| §2.2 订单状态计数（v2 标准化） | `commerce.sales_orders.status`（AWAITING_SHIPMENT/CANCELLED/...） | [`order-status.md`](enums/order-status.md) |
+| §2.5 退货公告 `reverse_module.reverse_type` | 卖家中心 int 售后/取消子类型（🟡 未固化） | [`reverse-type.md`](enums/reverse-type.md) |
+| §2.5 退货公告 `reverse_module.reverse_status` | 卖家中心 int 售后状态 | [`reverse-status.md`](enums/reverse-status.md) |
+| §2.7 退款订单列表 `biz_data.caseType` | v2 标准化售后工单类型 | [`case-type.md`](enums/case-type.md) |
+| §2.7 退款订单列表 `cancel_type`（API 原始） | `BUYER_CANCEL` / `CANCEL` | [`cancel-type.md`](enums/cancel-type.md) |
+| §2.7 退款 `cancel_status` / `cancel_reason` | 取消单状态 + 取消原因 | [`cancel-status.md`](enums/cancel-status.md), [`cancel-reason.md`](enums/cancel-reason.md) |
+| §2 物流 `track_list[].action_code`（API） | 23 个事件码（38301 = 海外取消判据） | [`action-code.md`](enums/action-code.md) |
+| §2 物流 终态白名单 | `LOGISTICS_TERMINAL_CODES` = {50101, 80101, 110101} | [`logistics-terminal-codes.md`](enums/logistics-terminal-codes.md) |
+| §2 物流 `track_list[].track_status`（Chrome ext） | 自由文本 | [`track-status.md`](enums/track-status.md) |
+| §2 结算 `settlement_details.settlement_status` | 已结算 int 码（🟡） | [`settlement-status.md`](enums/settlement-status.md) |
+| §2 结算 `settlements.payment_status` | 付款 int 码（🟡） | [`payment-status.md`](enums/payment-status.md) |
+| §2 结算 `settlement_components.component_code` | 53 个 EAV 字段（GROSS_SALES / PLATFORM_COMMISSION / ...） | [`settlement-component-code.md`](enums/settlement-component-code.md) |
+
+> **完整 38 个枚举值空间 + 逐行 ✅/🟡/🔴 等级标注**见 [`enums/README.md`](enums/README.md)（含"未固化值汇总"表）。
+
+### 互引（上游）
+
+`tech-doc/enums/` 里的 enum 文件也反向引用本目录章节作为"上游来源"。
+
 ## 1. 接口总览
 
 ### 1.1 订单/履约域
