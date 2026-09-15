@@ -1,5 +1,11 @@
 # tts-erp CHANGELOG
 
+## 2026-09-15 — biz-doc：消除与 rubric 的循环引用
+
+`spu-roi-profit-calculation.md` 头部「底层权威 = rubric」改为「本文档 = 利润口径唯一
+truth source（计算依据）；rubric = 历史演进与实测档案（非计算依据）」。
+rubric 头部本就以 biz-doc 为基准文档，方向不变——权威指向现在单向。
+
 ## 2026-09-15 — biz-doc：撤掉版本历史与实测快照（防干扰 agent 计算）
 
 `spu-roi-profit-calculation.md`：删除 §六版本历史表 + §七实测验证点——旧版规则/数字与
