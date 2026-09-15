@@ -4,7 +4,8 @@
 > **本文档只定义业务概念与公式，不出现任何表名 / 字段名 / SQL。**
 > 「某个概念在数据库里到底是哪张表哪个字段」见
 > [`biz-doc/analytics/spu-roi-data-sources.md`](spu-roi-data-sources.md)（API 数据源 + plugin 数据源两部分）。
-> 底层权威：`handoff/spu-roi-full-loss-rubric.md`（v9 当前）
+> **本文档 = 利润口径的唯一 truth source（计算依据）**。
+> 历史演进与实测档案：`handoff/spu-roi-full-loss-rubric.md`（v3–v9 版本史 + 时点数字，**非计算依据**）
 > 整理日期：2026-09-07；拆分纯化：2026-09-15
 
 ---
