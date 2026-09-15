@@ -2,8 +2,51 @@
 
 > 🔄 **当前在途工作注册（谁在改什么 / 谁接手）：先读 `handoff/ACTIVE.md`**（AGENTS.md §12.1）
 >
-> 上次 session: 2026-09-13（统一 destructive 守卫部署 + 8 个入口加固）
-> 上次 session 主题: **把 `_is_prod_shaped_db()` 抽到 `tts_erp_v2/api/deps.py`，加 `require_destructive_guard` (HTTP) + `require_destructive_script_guard` (scripts/alembic/jobs)，装到 8 个 prod-shape destructive 入口（admin purge、intercept DELETE、spu_images DELETE、2 个 oneoff 脚本、alembic upgrade）；merge job 改 DO UPDATE → DO NOTHING 避免覆盖 chrome plugin backfill；15 个守卫单测 + scripts/test.sh fast 0 新 fail**
+> 上次 session: 2026-09-15（chore/tech-doc-enums 沉淀枚举值参考手册）
+> 上次 session 主题: **`tech-doc/enums/` 全新子目录，38 个枚举值空间一个文件（action_code 23 字段、main_order_status int、cancel_type/cancel_status/cancel_reason、reverse_type/reverse_status、case_type、settlement_component_code 58 字段 EAV、cost_method、link_overrides decision、sync_job_status、api_key_role 等），统一结构（来源/取值表/等级 ✅🟡🔴/已知 gap/引用）；README 索引 + conventions.md 维护约定；纯文档 lane（0 改动 tts_erp_v2/ + tests/），merge + push 完成**
+
+## TL;DR (2026-09-15 chore/tech-doc-enums — 枚举值参考手册)
+
+**背景**：本项目 enum 字段散落 11 个 schema、30+ 个表，"这个 int 码是啥意思"反复出现——
+代码不固化、文档不汇总、跨表口径不一（plugin 卖家中心 int vs commerce v2 text）。
+**修复 = 集中沉淀 + 标注来源 + 等级**（✅已固化 / 🟡实测推断 / 🔴未知）。
+
+**改动 (40 files / +1440 lines / 纯 docs / 0 code change / 0 test change)**:
+
+按域归类:
+- **订单/物流** 7 文件: `order-status.md`、`main-order-status.md`(🟡 int 推断)、
+  `sku-display-status.md`(🟡)、`fulfillment-type.md`(双口径)、
+  `pay-method.md`、`sale-region.md`、`line-status.md`(🔴)
+- **物流事件** 3: `action-code.md`(23 字段全表)、`logistics-terminal-codes.md`、
+  `track-status.md`
+- **售后/取消** 6: `case-type.md`、`cancel-type.md`、`cancel-status.md`、
+  `cancel-reason.md`、`reverse-type.md`(🟡)、`reverse-status.md`(🟡)
+- **结算** 5: `settlement-status.md`、`payment-status.md`、`statement-type.md`(🔴)、
+  `payment-pending-reason.md`(🔴)、`settlement-component-code.md`(58 字段 EAV)
+- **商品/链接** 4: `product-status.md`、`product-link-relation-type.md`、
+  `link-override-decision.md`、`link-issue-type.md`
+- **成本/采购** 3: `cost-method.md`、`procurement-product-type.md`、
+  `procurement-products-status.md`(妙手 free-text)
+- **集成/同步/安全** 8: `provider.md`、`platform.md`、`sync-job-status.md`、
+  `plugin-log-level.md`、`ad-raw-log-kind.md`、`api-key-role.md`、
+  `api-key-status.md`(🟡)、`intercept-mode.md`
+- **地理/货币** 2: `region.md`、`sale-region.md`、`currency.md`
+- **索引** 2: `README.md`(分层索引 + 已知 gap 表)、`conventions.md`(统一模板)
+
+**关键发现**（封堵"拍脑袋"风险）:
+1. `plugin.orders.main_order_status` int 100~104 → 文本状态**未固化**，
+   prod 实测推断（100=UNPAID / 101=AWAITING_SHIPMENT / 102=IN_TRANSIT-or-... /
+   103=售后中 / 104=CANCELLED），`tech-doc/plugin-sourced-shop-analytics.md §4.2` 已标 TODO
+2. `cancel_reason` 文档只列 1 种 (`returned_to_shipper_other`)，prod 实测至少 9 种
+3. `reverse_type` 只见过 1/3/4，`tech-doc/plugin-sourced-shop-analytics.md §8` 标 "枚举待核实"
+4. `fulfillment_type` 同一业务有 text (commerce) + int (plugin) **两套编码**无自动转换
+5. `plugin.tracking_events` **没存 action_code 列** — `tech-doc/plugin-sourced-shop-analytics.md §4.3` 标 P0 TODO
+
+**未做**（明确留给后续 lane）:
+- 真正把 main_order_status int → text 映射**落地**到 `tts_erp_v2/db/constants.py`
+- 给 `plugin.tracking_events` 加 action_code 列（解海外取消桶为空）
+
+**reverted 风险**: 无（纯文档）。**push**: `1dd77e5` master 已就位。
 
 ## TL;DR (2026-09-13 fix/unify-destructive-guard — 统一 destructive 守卫)
 
