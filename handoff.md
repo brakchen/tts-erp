@@ -2,7 +2,8 @@
 
 > 🔄 **当前在途工作注册（谁在改什么 / 谁接手）：先读 `handoff/ACTIVE.md`**（AGENTS.md §12.1）
 >
-> 上次 session: 2026-09-15（chore/api-catalog-enum-update 6 处 API catalog 补 enums 关联）
+> 上次 session: 2026-09-15（chore/dumps-data-contract 端到端契约文档）
+> 上次 session 主题: **`tech-doc/dumps-data-contract.md`（434 行）—— Chrome 插件 ↔ tts-erp dumps 端契约：①2 参与者 + 1 端点（POST /v2/order-sync/dumps，has-data/synced-ids 不属于契约）②dumps 请求 schema Python Pydantic ↔ TS Zod 镜像表 + 5 类错误码 ③4 域 × dumps 路由表（订单/物流/售后/结算 × 4 列，售后整列空白）④**6 张 plugin 业务表字段映射**（orders / order_lines / shipments / tracking_events / settlements / settlement_details，每行 4 列：API path → parser 变量 → upsert → plugin 列+类型）⑤4 项已知 gap（只列现象+假设不下结论：售后 0 行 / 结算 0 行 4 个假设路径 / 物流 0 行 / order_time NULL）；纯文档 lane，merge + push 完成**
 > 上次 session 主题: **`tech-doc/tiktok-seller-center-api-catalog.md` 6 处更新：①§2.1/§2.7/§2.8 加 enums/ inline 链接（main-order-status / sku-display-status / fulfillment-type / pay-method / sale-region / case-type / reverse-type 等） ②§7.4.3 加 'action_list ≠ 物流 action_code' 警告 ③§7.4.4.1 完整 `585900098675508729` 案例（系统取消 vs 买家取消差异表 + 43 事件时间线 + should_replenish_stock=true） ④§7.8 待确认事项表加 09-15 列 + 字典位置列（11 项推进，6 项维持 🔴） ⑤§6 加指针指向 §7.8 ⑥顶部'相关文档'段按 ✅已确认 / 🟡部分观测 / 🔴待观测 三张表重排；纯文档 lane，merge + push 完成**
 
 ## TL;DR (2026-09-15 chore/tech-doc-enums — 枚举值参考手册)
