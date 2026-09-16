@@ -59,7 +59,6 @@ def flatten_fees(fee_list: list[dict] | None) -> list[dict]:
 def parse_order_response(
     sess: Session,
     *,
-    log_id: int,
     shop_id: str,
     response_body: dict,
     captured_at: datetime,
@@ -114,7 +113,6 @@ def parse_order_response(
 
         upsert_order(
             sess,
-            log_id=log_id,
             shop_id=shop_id,
             order_id=order_id,
             main_order_status=main_order_status,
@@ -172,7 +170,6 @@ def parse_order_response(
 
             upsert_order_line(
                 sess,
-                log_id=log_id,
                 shop_id=shop_id,
                 order_id=order_id,
                 sku_id=sku_id,
@@ -217,7 +214,6 @@ def _parse_track_time(value: Any) -> datetime | None:
 def parse_logistics_response(
     sess: Session,
     *,
-    log_id: int,
     shop_id: str,
     order_id: str,
     response_body: dict,
@@ -269,7 +265,6 @@ def parse_logistics_response(
 
         upsert_shipment(
             sess,
-            log_id=log_id,
             shop_id=shop_id,
             order_id=order_id,
             package_id=package_id,
@@ -303,7 +298,6 @@ def parse_logistics_response(
 
             upsert_tracking_event(
                 sess,
-                log_id=log_id,
                 shop_id=shop_id,
                 package_id=package_id,
                 event_key=event_key,
@@ -342,7 +336,6 @@ def _parse_iso_dt(value: str | None) -> datetime | None:
 def parse_statement_list_response(
     sess: Session,
     *,
-    log_id: int,
     shop_id: str,
     response_body: dict,
     captured_at: datetime,
@@ -384,7 +377,6 @@ def parse_statement_list_response(
 
         upsert_settlement(
             sess,
-            log_id=log_id,
             shop_id=shop_id,
             statement_id=statement_id,
             statement_version=statement_version,
@@ -414,7 +406,6 @@ def parse_statement_list_response(
 def parse_statement_transaction_response(
     sess: Session,
     *,
-    log_id: int,
     shop_id: str,
     response_body: dict,
     captured_at: datetime,
@@ -459,7 +450,6 @@ def parse_statement_transaction_response(
 
     upsert_settlement_detail(
         sess,
-        log_id=log_id,
         shop_id=shop_id,
         statement_id=statement_id,
         statement_version=statement_version,
@@ -488,7 +478,6 @@ def parse_statement_transaction_response(
 def parse_after_sales_response(
     sess: Session,
     *,
-    log_id: int,
     shop_id: str,
     response_body: dict,
     captured_at: datetime,
@@ -550,7 +539,6 @@ def parse_after_sales_response(
 
         upsert_after_sale(
             sess,
-            log_id=log_id,
             shop_id=shop_id,
             cancel_id=cancel_id,
             cancel_type=cancel_type,
@@ -578,7 +566,6 @@ def parse_after_sales_response(
 
             upsert_after_sale_item(
                 sess,
-                log_id=log_id,
                 shop_id=shop_id,
                 cancel_id=cancel_id,
                 line_item_id=line_item_id,

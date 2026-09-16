@@ -93,7 +93,7 @@ class ChromeOrder(Base):
         server_default=text("generate_always_as_identity()"),
     )
     log_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("plugin.raw_log.id"), nullable=False
+        BigInteger, ForeignKey("plugin.raw_log.id"), nullable=True
     )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     order_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -135,7 +135,7 @@ class ChromeOrderLine(Base):
         server_default=text("generate_always_as_identity()"),
     )
     log_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("plugin.raw_log.id"), nullable=False
+        BigInteger, ForeignKey("plugin.raw_log.id"), nullable=True
     )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     order_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -176,7 +176,7 @@ class ChromeShipment(Base):
     log_id: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("plugin.raw_log.id"),
-        nullable=False,
+        nullable=True,
     )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     order_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -216,7 +216,7 @@ class ChromeTrackingEvent(Base):
     log_id: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("plugin.raw_log.id"),
-        nullable=False,
+        nullable=True,
     )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     package_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -255,7 +255,7 @@ class ChromeSettlement(Base):
     log_id: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("plugin.raw_log.id"),
-        nullable=False,
+        nullable=True,
     )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     statement_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -307,7 +307,7 @@ class ChromeSettlementDetail(Base):
     log_id: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("plugin.raw_log.id"),
-        nullable=False,
+        nullable=True,
     )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     statement_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -356,7 +356,7 @@ class ChromeAfterSale(Base):
         server_default=text("generate_always_as_identity()"),
     )
     log_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("plugin.raw_log.id"), nullable=False
+        BigInteger, ForeignKey("plugin.raw_log.id"), nullable=True
     )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     cancel_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -398,7 +398,7 @@ class ChromeAfterSaleItem(Base):
         server_default=text("generate_always_as_identity()"),
     )
     log_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("plugin.raw_log.id"), nullable=False
+        BigInteger, ForeignKey("plugin.raw_log.id"), nullable=True
     )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     cancel_id: Mapped[str] = mapped_column(Text, nullable=False)
