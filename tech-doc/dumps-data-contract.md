@@ -62,27 +62,27 @@
 
 | 字段 | 类型 | 必填 | Pydantic 校验（server `tts_erp_v2/api/v2/order_sync.py:125-170`） | Zod 校验（plugin `src/core/order-sync-schemas.ts:46-65`） |
 | --- | --- | --- | --- | --- |
-| `protocolVersion` | int | 否（默认 1） | `Field(default=PROTOCOL_VERSION)` | `z.number()`（必填，无 default） |
+| `protocolVersion` | int | **是**（必填，Lane F 已落地） | `int` 无 default | `z.number()` |
 | `requestId` | string\|null | 否 | `Field(default=None, min_length=1, max_length=128)` | `z.string().optional()` |
 | `scope.sellerId` | string | 是 | `Field(min_length=1, max_length=128)` | `z.string().min(1)` |
 | `scope.shopId` | string | 是 | `Field(min_length=1, max_length=128)` | `z.string().min(1)` |
-| `dump.domain` | enum | 是 | `Field(min_length=1, max_length=32)` + `_domain_must_be_valid`（`{"orders", "logistics", "statements"}`） | `z.enum(['orders', 'logistics', 'statements'])` |
+| `dump.domain` | enum | 是 | `Field(min_length=1, max_length=32)` + `_domain_must_be_valid`（`{"orders", "logistics", "statements", "after_sales"}`） | `z.enum(['orders', 'logistics', 'statements', 'after_sales'])` |
 | `dump.mainOrderId` | string\|null | logistics 必填 | `Field(default=None, max_length=128)` | `z.string().optional()` |
 | `dump.statementId` | string\|null | 结算明细必填 | `Field(default=None, max_length=128)` | `z.string().optional()` |
 | `dump.statementVersion` | int\|null | 结算必填 | `Field(default=None)` | `z.number().optional()` |
 | `dump.endpoint` | string | 是 | `Field(min_length=1, max_length=512)` | `z.string().min(1)` |
 | `dump.method` | string | 是 | `Field(min_length=1, max_length=16)` | `z.string().min(1)` |
-| `dump.request.params` | object\|null | 否 | `DumpRequestIn.params`（任意 dict） | `z.record(z.string(), z.unknown()).optional()` |
-| `dump.request.body` | object\|null | 否 | `DumpRequestIn.body`（任意） | `z.unknown().optional()` |
+| `dump.request.params` | object\|null | 否 | `DumpRequestIn.params`（任意 dict，**服务端不读**） | `z.record(z.string(), z.unknown()).optional()` |
+| `dump.request.body` | object\|null | 否 | `DumpRequestIn.body`（任意，**服务端不读**） | `z.unknown().optional()` |
 | `dump.response.status` | int | 是 | `DumpResponseIn.status` | `z.number()` |
-| `dump.response.body` | object\|null | **是（语义必填）** | `DumpResponseIn.body`（`null` 走 `empty_response` 特殊路径） | `z.unknown()` |
+| `dump.response.body` | object\|null | **是（语义必填）** | `DumpResponseIn.body`（`null` 走 `EMPTY_RESPONSE_BODY` 422 路径） | `z.unknown()` |
 | `dump.createdAt` | ISO8601 string | 是 | `_created_at_must_be_utc` —— **必须带 tz**（naive datetime 拒收） | `z.string().min(1)` |
 
 **两端校验差异（一致性陷阱）**：
 
 | 差异 | server | plugin |
 | --- | --- | --- |
-| `protocolVersion` | **可选**（默认 1） | **必填**（无 default） |
+| `protocolVersion` | **必填**（Lane F 已对齐） | **必填**（无 default） |
 | `createdAt` 时区 | **必须带 tz**（naive datetime 报错） | 仅 min(1)（plugin 端 `new Date().toISOString()` 默认带 Z，所以实际上不会触发） |
 | `requestId` | 可选 | 可选 |
 
@@ -133,17 +133,29 @@
 }
 ```
 
-### 2.3 错误码清单
+### 2.3 错误码清单（AGENTS.md §2.5 严格 HTTP 语义）
 
-| HTTP | `code` (response body) | 触发条件 | dumps 端处理 |
+**铁律**：2xx 仅在数据/副作用已落库时返；4xx/5xx 必须带 `code`（string）+ `message` + `requestId`。失败语义按 HTTP code 分类，不依赖 `data.status` 隐式信号。
+
+| HTTP | `code` (response body) | 触发条件 | chrome-plugins 端行为 |
 | --- | --- | --- | --- |
-| 200 | `code: 0` | dump 接受并解析（即使 rowsWritten=0） | 正常返回 `{data: {status, logId, rowsWritten}}` |
-| 200 | `code: 0` + `data.status: "parse_error"` | 解析失败（`dump.response.body` 有内容但 parser 抛异常） | 仍返 200，让 plugin 知道是数据问题（**不是协议问题**） |
-| 200 | `code: 0` + `data.status: "empty_response"` | `dump.response.body is None`（插件抓取失败/超时） | 写 raw_log + 空响应占位，**不解析** |
-| 400 | `code: "MALFORMED_JSON"` | body 不是合法 JSON | — |
-| 400 | `code: "SCHEMA_INVALID"` | Pydantic 校验失败（domain 不在 3 选 1 / createdAt 无 tz 等） | — |
-| 413 | `code: "PAYLOAD_TOO_LARGE"` | body > 2 MB | — |
-| 401 | `code: "UNAUTHORIZED"` | 缺/错 `syncToken`（参见 §1 鉴权） | — |
+| 200 | `code: 0` + `message: "success"` | dump 接受并解析成功（空 list 也是 success，不当 parse_error） | isDumpAccepted 不再存在，2xx 即 success |
+| **422** | `code: "PARSE_ERROR"` | 解析失败（parser 抛异常 / 关键字段缺失 / logistics 缺 mainOrderId） | `OrderSyncError('PERMANENT')`（response.status >= 500 才 RETRYABLE） |
+| **422** | `code: "EMPTY_RESPONSE_BODY"` | `dump.response.body is None`（插件抓取失败/超时 = TikTok 问题，重试无意义） | `OrderSyncError('PERMANENT')` |
+| 400 | `code: "MALFORMED_JSON"` | body 不是合法 JSON | PERMANENT |
+| 400 | `code: "SCHEMA_INVALID"` | Pydantic 校验失败（protocolVersion 缺失 / domain 不在 enum / createdAt 无 tz 等） | PERMANENT |
+| 413 | `code: "PAYLOAD_TOO_LARGE"` | body > 2 MB | PERMANENT |
+| 401 | `code: "UNAUTHORIZED"` | 缺/错 `syncToken`（参见 §1 鉴权） | PERMANENT |
+| 5xx | `code: "INTERNAL_ERROR"` | 异常未被捕获 / DB 故障 / 上游依赖不可用 | RETRYABLE |
+
+**4 字段 envelope 200 / 非 200 一致**：
+
+| 字段 | 200 | 4xx / 5xx |
+| --- | --- | --- |
+| `code` | `0` (int) | string (错误码) |
+| `message` | `"success"` | 具体错误描述 |
+| `requestId` | request_id（`x-request-id` header 或生成 `req-{uuid}`） | 同上 |
+| `data` | 业务负载（dumps 端返空 dict 即可；查询类端点含实际数据）| 不出现 |
 
 ### 2.4 dumps 成功响应 envelope
 

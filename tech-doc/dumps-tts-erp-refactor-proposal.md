@@ -233,15 +233,15 @@ empty body 改 PERMANENT 是 §5.3 物流 0 行事故的**根本修复**——pl
 
 > 若 Lane C 诊断结论为 dumps 端 parser 有 bug，**仅修 parser**（不需要回填）。若根因为 chrome 端，跨仓独立 lane。
 
-### 3.5 Lane E：`fix/strict-http-semantics`（P0-1b，**严格 HTTP 语义落地 + envelope 一致化**）
+### 3.5 Lane E：`fix/strict-http-semantics`（P0-1b，**严格 HTTP 语义落地 + envelope 一致化**）—— ✅ 已完成（本次 lane 修复 + chrome-plugins 94e357d）
 
 | 项目 | 内容 |
 | --- | --- |
 | 文件 | `tts_erp_v2/api/v2/order_sync.py`（`empty_response` / `parse_error` 改 422 + 删 `logId` 字段 + 删 `rowsWritten` 字段 + 删 `data.status` 字段 + 删 `rowsWritten=0` hack + `_ok_response` 加 `message="success"`）<br>`tests/api/test_order_sync_contract.py`（`empty_response` / `parse_error` / `idempotent_dumps` 等 4 个 case 反转 status_code 断言 + 删 logId/rowsWritten/data.status 断言 + 加 200 envelope 完整性断言）<br>`tech-doc/dumps-data-contract.md` §2.3 错误码清单重写 + §2.4 成功 envelope 重新定义（明确 4 字段结构 200/非 200 一致）<br>`AGENTS.md §2.5`（已提交） |
-| 改动量 | ~35 行 order_sync.py + 35 行测试 + 30 行文档（**净删比净增多**）|
+| 改动量 | ~96 行 order_sync.py + ~173 行测试 + 30 行文档（**净删比净增多**）|
 | 风险 | 中（HTTP code 语义变化 + chrome-plugins 端业务逻辑改动 — `isDumpAccepted` / `parse_error` / `empty_response` 分支删除）|
-| 依赖 | 跨仓协调（chrome-plugins 仓需同步升级 `recordOrderProgress` 逻辑 + 删 `DumpResponse.rowsWritten` schema 字段 + `isDumpAccepted` 等业务逻辑调整）|
-| 验证 | test 库：`empty_response → 422 + EMPTY_RESPONSE_BODY`、`parse_error → 422 + PARSE_ERROR`；成功响应断言 4 字段齐全（`code=0` + `message="success"` + `requestId` + `data`）且不含 `rowsWritten` / `logId` / `data.status`；chrome-plugins 端 schema 同步发布 |
+| 依赖 | 跨仓协调（chrome-plugins 仓需同步升级 `recordOrderProgress` 逻辑 + 删 `DumpResponse.rowsWritten` schema 字段 + `isDumpAccepted` 等业务逻辑调整）—— ✅ chrome-plugins 端 94e357d 已合并同步 |
+| 验证 | test 库：`empty_response → 422 + EMPTY_RESPONSE_BODY`、`parse_error → 422 + PARSE_ERROR`；成功响应断言 4 字段齐全（`code=0` + `message="success"` + `requestId` + `data`）且不含 `rowsWritten` / `logId` / `data.status`；chrome-plugins 端 schema 同步发布 ✅ |
 
 ### 3.6 Lane F：`fix/dumps-validation-align`（P1-2）
 
