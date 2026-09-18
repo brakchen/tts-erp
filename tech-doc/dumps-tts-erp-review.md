@@ -39,7 +39,7 @@
 | ~~**B5**~~ | ~~`intercept-plugin-canonical.md` deprecate vs 加 banner？~~ | **已通过 lane `docs/merge-canonical-into-contract` 解决**：合并到 contract 后直接删除 | ~~(α) 加 banner；(β) 移到 `tech-doc/_archive/`~~ |
 | **B6** | chrome-plugins 仓协调机制？ | 当前 proposal §7 建议直接 IM + handoff.md 摘要 | (α) 直接 IM；(β) 走 handoff.md 正式 |
 | **B7** | Lane 命名风格？ | 当前用 `feat/*` / `fix/*` / `docs/*` | 待确认 |
-| **B9** | `_error_response` 中 `request_id or f"req-{uuid.uuid4()}"` 兜底逻辑要不要？ | 当前几乎不会触发（调用前已生成 request_id） | (α) 保留（防御性）；(β) 删（强约束 request_id 必须传） |
+| ~~**B9**~~ | ~~`_error_response` 中 `request_id or f"req-{uuid.uuid4()}"` 兜底逻辑要不要？~~ | **A14 已拍板：保留（α）** | — |
 =======
 | ~~**B-α/β**~~ | ~~empty_response 是 RETRYABLE 还是 PERMANENT？~~ | **A12 已拍板：PERMANENT**（empty body = TikTok 问题 = 重试无意义） | — |
 | **B3** | Lane 合并顺序 | proposal §5 安排 | **⏵ 推荐 α**：Week 1 合低风险（Lane A / F / G），Week 2 等跨仓同步后合（Lane B / E），Lane C/D 按诊断结论走 |
@@ -47,7 +47,7 @@
 | **B5** | canonical.md 处置 | proposal §7 建议 banner | **⏵ 推荐 α**：加顶部 banner 保留，迁 _archive/ 需要 AGENTS.md §9 业务信息索引同步改（额外工作）；等没人引用时再归档 |
 | **B6** | chrome-plugins 协调 | proposal §7 建议直接 IM | **⏵ 推荐 α**：直接 IM 协商 + 本仓 `handoff.md` 留摘要记录；不另起一仓的 `handoff/ACTIVE.md` 同步机制 |
 | **B7** | Lane 命名风格 | proposal §3 提案 | **⏵ 推荐沿用方案**：`feat/after-sales-routing` / `fix/logistics-empty-response` / `fix/statements-gaps-diagnose` / `feat/statements-backfill` / `fix/strict-http-semantics` / `fix/dumps-validation-align` / `docs/dumps-doc-rationalize`（conventional commits） |
-| **B9** | `_error_response` 兜底逻辑 | 几乎永不触发 | **⏵ 推荐 α**：保留（防御性）；成本几乎为 0，避免未来引入 None request_id 路径漏改 |
+| ~~**B9**~~ | ~~`_error_response` 兜底逻辑~~ | **A14 已拍板：保留（α）** | — |
 >>>>>>> Stashed changes
 
 ---
