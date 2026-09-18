@@ -60,6 +60,110 @@ canonical GET : {app_secret}{path}{app_key}{value}{shop_cipher}{value}{timestamp
 
 > 📖 **详细说明**：`tech-doc/architecture-overview.md` §3
 
+### 2.5 服务端交互协议严格 HTTP 语义
+
+**铁律**（2026-09-18 用户拍板，适用范围：所有 tts-erp 服务端端点）：
+
+> **如果使用 HTTP 状态码表达"成功 / 失败"，那么 `2xx` 必须严格意味着"数据已按契约写入或 / 处理成功"。在数据 / 副作用落库之前，**禁止**返回 `200`。**
+
+**严格语义分层**：
+
+| HTTP 状态 | 含义 | 必须满足的条件 | 触发 |
+|---|---|---|---|
+| `200 OK` | **解析 + upsert 走完** | parser 走完且无异常（含合法空 list —— 0 行 upsert 但数据层语义合法）| dumps 解析成功；GET 查询返空结果 |
+| `201 Created` | 资源已创建 | POST 创建资源且资源已落库 | 极少用 |
+| `204 No Content` | 已处理无返回 | DELETE 等 | 极少用 |
+| `400 Bad Request` | 协议层错误 | body 非 JSON / Pydantic 校验失败 / domain 不在 enum 内 | `MALFORMED_JSON` / `SCHEMA_INVALID` |
+| `413 Payload Too Large` | 请求过大 | body > 限制 | `PAYLOAD_TOO_LARGE` |
+| `422 Unprocessable Entity` | 协议 OK 但数据无法处理 | `response.body` 为 null / 解析抛异常 / 响应结构关键字段缺失（如 `main_orders` 字段不存在） | `EMPTY_RESPONSE_BODY` / `PARSE_ERROR` |
+| `5xx` | 服务端内部错误 | 异常未被捕获 / DB 故障 / 上游依赖不可用 | `INTERNAL_ERROR` |
+
+**严禁的反模式**（实测踩坑，2026-09-18 dumps-data-contract §5.3 物流 empty body 事故）：
+
+```python
+# ❌ 严禁：空响应返 200，plugin 误把 0 行当成功并推进度
+if response_body is None:
+    return _ok_response(
+        data={"status": "empty_response", "logId": 0, "rowsWritten": 0}
+    )  # HTTP 200！
+
+# ✓ 正确：协议层收到，数据层无法处理 → 422
+if response_body is None:
+    return _error_response(
+        status=422,
+        code="EMPTY_RESPONSE_BODY",
+        message="dump.response.body is null; plugin must not advance progress",
+    )
+```
+
+```python
+# ❌ 严禁：解析失败但返 200（plugin 误当 OK）
+if parse_error:
+    return _ok_response(
+        data={"status": "parse_error", "logId": 0, "rowsWritten": 0, ...}
+    )  # HTTP 200！
+
+# ✓ 正确：解析失败 → 422 + PARSE_ERROR
+if parse_error:
+    return _error_response(
+        status=422,
+        code="PARSE_ERROR",
+        message=parse_error,
+    )
+```
+
+**body 字段语义收敛**：
+
+- **不返** `rowsWritten` / `logId` / `data.status` 等数据层计数器 / 隐式状态字段 —— 这些是**服务端 audit log metrics**（`_log_event` 内部用）或**死字段**（chrome-plugins 从不读取）；**HTTP code 是唯一成功/失败信号**
+- **响应 envelope 200 / 非 200 必须结构一致**（2026-09-18 用户拍板）：
+
+  | 字段 | 200 | 4xx / 5xx |
+  |---|---|---|
+  | `code` | `0` (int) | 错误码字符串（如 `"MALFORMED_JSON"`）|
+  | `message` | `"success"` | 具体错误描述 |
+  | `requestId` | request_id（来自 `x-request-id` header 或生成 `req-{uuid}`）| 同上 |
+  | `data` | 业务负载（dumps 端点返空 dict 即可；查询类端点含实际数据）| 不出现 |
+
+  `code` 类型不一致是有意设计：`0`（int）= 成功；字符串 = 错误码（与 `analytics.py:484/850/1125` 同模式）。
+
+**字段命名规则**（2026-09-18 用户拍板，per-layer 划分）：
+
+- **不强制单 casing 统一** —— 但**有明确分工**：
+
+  | 层 | casing | 例子 |
+  |---|---|---|
+  | **wire format**（HTTP envelope / JSON body / Pydantic schema field / TS 变量 / Zod schema）| `requestId`（camelCase）| `body.requestId` / `parsed.data.requestId` / `Field(alias="requestId")` |
+  | **Python 内部**（函数参数 / 局部变量 / 函数返回值）| `request_id`（snake_case）| `def _log_event(*, request_id, ...)` / `request_id = _request_id(request)` |
+  | **DB 列名**（SQL DDL / SQLAlchemy column）| `request_id`（snake_case）| `plugin.intercepted_requests.request_id` |
+  | **URL 路径参数**（FastAPI path param）| `request_id`（snake_case）| `/requests/{request_id}` |
+  | **HTTP header** | `x-request-id`（lowercase-with-hyphen）| RFC 7230 标准，与 Python/TS 都无关 |
+
+- **Pydantic 用 `Field(alias="requestId")` 桥接** Python 内部（`body.request_id`）与 JSON wire（`"requestId"`）—— 这是 Pydantic V2 官方模式，不是技术债
+- **TS 端** 用 camelCase 是 JS/TS 行业惯例；不允许出现 `request_id` snake_case 变量
+- **DB / URL** 用 snake_case 是 Python/SQL 行业惯例；不允许出现 camelCase（alembic 迁移 + URL 路径都是 breaking change）
+- **跨仓不重命名** —— wire format（`requestId`）已经是 dumps 契约的一部分，改动要同步 chrome-plugins + Pydantic schema + 契约文档，**零工程价值**
+
+**为什么不强制统一**：变更这两个 casing 中任一个 → 改 10+ 处 Pydantic schema + DB 列 + URL 路径 + 契约文档 + 跨仓同步 → 但实际项目里每个 layer 内部本来就一致，跨层不统一是**惯例选择**（不是疏漏）。强行统一会同时违反 Python / SQL / JS / TS / JSON / RFC 各自的命名惯例。
+
+**为什么删 `rowsWritten` / `logId` / `data.status`**：
+
+- `rowsWritten`：plugin 端 `order-sync.ts:54-57` `isDumpAccepted()` 仅看 `data.status`，从不读 `rowsWritten`；typed schema 保留仅为类型对齐；把 `rowsWritten=0` 当 parse-error 探测 hack 是错工具做错事
+- `logId`：Phase 3 已 drop `plugin.raw_log` 表，logId 字段恒 0，已是死字段
+- `data.status`：HTTP code 已是成功/失败信号，再带 `"inserted" / "parse_error" / "empty_response"` 是双重语义；plugin 端对应分支（`order-sync.ts:287/290`）也必须同步删除（详见 §6 cross-仓协同）
+
+**适用范围**：
+
+- 本仓所有写入端点（`POST /v2/*/dumps`、同步端点等）
+- 不适用：`GET` 查询类端点（可返 200 + 空结果列表）
+- 不适用：纯粹健康检查 / 状态端点
+
+**跨仓协同**：
+
+- chrome-plugins 端依赖此语义：收到 `2xx` 推进度，收到 `4xx/5xx` 走 RETRYABLE
+- dumps-data-contract.md §2.3 错误码清单是落地载体，修改时必须同步 chrome-plugins 仓的 `src/core/order-sync-schemas.ts` 和 `entrypoints/background.ts`
+
+> 📖 **详细说明 + 错误码清单**：[`tech-doc/dumps-data-contract.md` §2.3](tech-doc/dumps-data-contract.md)
+
 ## 3. 代码风格
 
 ```python
