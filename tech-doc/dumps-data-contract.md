@@ -8,6 +8,10 @@
 > **数据查询入口**：DB 行数核对、endpoint 抓取统计见 §5 "已知 gap"（2026-09-15 prod 数据）。
 >
 > **文档历史**：原 `tech-doc/intercept-plugin-canonical.md`（2026-09-18）的有用内容（ad 域详情、4 域 ID 映射、时间线、ER、状态终态、JOIN 模板、TODO 清单）已合并到 §6-§13；该文件已删除。
+>
+> **当前改造方案**：详见 [`tech-doc/dumps-tts-erp-refactor-proposal.md`](dumps-tts-erp-refactor-proposal.md)（7 个 lane，已完成 Lane A/C/F/G，待 Lane B/E）。
+>
+> **设计稿**（部分内容已落后）：[`tech-doc/chrome-ext-order-sync-design.md`](chrome-ext-order-sync-design.md)（§3.2 raw_log 已下线，§3.3 业务表 log_id FK 已删除）。
 
 ---
 
