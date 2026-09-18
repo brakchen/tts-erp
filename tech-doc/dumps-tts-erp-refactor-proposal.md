@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | **契约与代码的差距** | dumps 路由 `VALID_DOMAINS` 不含 `after_sales` → 售后 parser 函数 247 行孤儿 | P0 接入 `after_sales` 域 |
 | **物流域完全断流** | `plugin.shipments` / `plugin.tracking_events` 均 0 行，chrome-plugins 抓 100% 空 body 但仍重试 | P0 server 端 `empty_response` 改 422（严格 HTTP 语义）+ plugin 端协议外修复（跨仓） |
-| **结算域完全断流** | `plugin.settlements` / `plugin.settlement_details` 均 0 行；`plugin.intercepted_requests` 已抓到 148 条 statement 响应 | P0 根因定位（4 候选）+ P1 旁路回填 |
+| **结算域完全断流** | `plugin.settlements` / `plugin.settlement_details` 均 0 行；`plugin.intercepted_requests` 已抓到 148 条 statement 响应 | P0 根因定位（4 候选）—— **不做回填**（A13，见 §3.4 + §5）|
 | **响应 envelope 与 schema 漂移** | `logId: 0` 仍在返（Phase 3 已 drop 列，但响应字段未删）；`createdAt` 双向别名 + 校验不一致；**宽松 HTTP 语义违反 AGENTS.md §2.5 铁律** | P0 响应契约收敛（严格 HTTP 语义） |
 | **文档多版本混乱** | `intercept-plugin-canonical.md`（用户原话"看着不太对"，已合并删除 — 见 lane docs/merge-canonical-into-contract）+ `chrome-ext-order-sync-design.md`（设计稿，已落后）+ `dumps-data-contract.md`（现状契约，已扩到 §6-§13 涵盖 ad 域 + 4 域 ID 映射 + 时间线 + ER + 终态 + JOIN + TODO） 三层文档职责不清 | P2 文档分层 + 单一指针（**本 lane 已完成**：canonical 已并入 contract） |
 
@@ -24,7 +24,6 @@
 | **P0 接入 `after_sales` 域** | 1 天 | 1 改动点 + 3 测试 | 低（parser 已存在，只缺路由） |
 | **P0 物流/结算断流根因定位** | 2-3 天 | chrome-plugins 仓协调 | 中（跨仓） |
 | **P0 严格 HTTP 语义落地（empty + parse_error 改 422）** | 1.5-2 天 | 单仓改动 + 跨仓同步 | 中（跨仓） |
-| **P1 结算旁路回填 148 条** | 1 天 | 一次性脚本 | 低（数据已在仓） |
 | **P2 文档分层 / deprecation 标记** | 0.5 天 | 2 文件改动 | 极低 |
 
 ---
@@ -42,7 +41,7 @@ plugin.settlements            0   ❌ 结算域 0 行（旁路 148 条）
 plugin.settlement_details     0   ❌
 plugin.after_sales           -1   ❌ 售后域未采集（VALID_DOMAINS 不含）
 plugin.after_sale_items      -1   ❌
-plugin.intercepted_requests 768691   ✅ 抓取端旁路（5 域全抓到，包括结算 148 条）
+plugin.intercepted_requests 768691   ✅ 抓取端旁路（5 域全抓到，包括结算 148 条 —— **A13 不回填，仅供 Lane C 诊断**）
 plugin.raw_log             (DROP)   Phase 3 已下
 ```
 
@@ -109,12 +108,13 @@ plugin.raw_log             (DROP)   Phase 3 已下
 1. **第 1 步（定位）**：本仓在 `order_sync.py::post_dumps` 增加"per-domain health counter"，写到 `plugin.plugin_logs`（已有表，level=info 字段齐）
    - 维度：`domain`、`shop_id`、`endpoint`、`rows_written`、`parse_error_class`、`captured_at`、`server_received_at`
    - 目的：补 evidence 给 chrome-plugins 仓定位（按 `domain=statements AND rows_written=0` 即可定位是否 dump 端问题）
-2. **第 2 步（兜底）**：诊断结论后**两类修复**（不互斥）：
+2. **第 2 步（修复）**：诊断结论后**两类修复**（不互斥）：
    - 若根因在 chrome 端 → 跨仓修（独立 lane）
    - 若根因在 dumps 端 → 本仓 `parse_statement_list_response` 加 fallback：识别空 list、`summary.total` 字段；非空但解析失败的，写一行 `plugin.plugin_logs` level=warn message=具体字段缺失
-3. **第 3 步（旁路回填）**：定位 + chrome 修复后，用 `plugin.intercepted_requests` 里 148 条 statement 响应**回填** `plugin.settlements` / `plugin.settlement_details`（一次性脚本 `scripts/oneoff_backfill_settlements_from_intercepted.py`，装 `require_destructive_script_guard`，参考 `scripts/oneoff_backfill_intercept_seller_id.py` 的 guard 模式）
 
-**预估**：2-3 天（定位 + 修复）+ 1 天（回填脚本）。
+**预估**：2-3 天（定位 + 修复）。
+
+> **A13：不做旁路回填**（用户拍板）—— chrome-plugins 修复 dumps 流后自然增量补齐更新数据。148 条 `plugin.intercepted_requests` 数据 stale（1-2 周），回填旧数据风险 > 价值。Lane D（`feat/statements-backfill`）从方案中**删除**。
 
 ### P0-1b 响应 envelope 漂移清理（严格 HTTP 语义落地 + Phase 3 残留 + rowsWritten 死字段清理）
 
@@ -225,16 +225,13 @@ empty body 改 PERMANENT 是 §5.3 物流 0 行事故的**根本修复**——pl
 | 改动量 | ~30 行（独立函数 `_record_dump_health(sess, ...)`） |
 | 风险 | 低（仅新增日志写入） |
 | 验证 | 24h 后从 `plugin.plugin_logs` 取 `domain=statements AND rows_written=0` 的样本，按 `parse_error_class` 分布决定根因 |
-| 收尾 | merge → push → 监控 24h → 决定 Lane D 是否必要 |
+| 收尾 | merge → push → 监控 24h |
 
-### 3.4 Lane D（条件性）：`fix/statements-parser-fallback` 或 `feat/statements-backfill`
+### 3.4 ~~Lane D（条件性）~~ — **A13 已取消**
 
-仅当 Lane C 诊断结论为"dumps 端问题"时启动；根因为 chrome 端时，跨仓独立 lane。
+~~`fix/statements-parser-fallback` 或 `feat/statements-backfill`~~ — **不需要**：chrome-plugins 修复 dumps 流后自然增量补齐；148 条 `plugin.intercepted_requests` 数据 stale，回填旧数据风险 > 价值。
 
-| 子 lane | 内容 |
-| --- | --- |
-| `fix/statements-parser-fallback` | `parser.py::parse_statement_list_response` 加 null-safe；空 list + summary.total=0 → 写 0 行但不报 parse_error；非空但解析失败 → `plugin.plugin_logs` warn |
-| `feat/statements-backfill` | `scripts/oneoff_backfill_settlements_from_intercepted.py`（新），复用 `_extract_seller_id_from_url` 模式；从 `plugin.intercepted_requests` 取 148 条 statement response，调现有 parser 落库；装 `require_destructive_script_guard`；`--dry-run` 预览 + `--confirm` 实写 |
+> 若 Lane C 诊断结论为 dumps 端 parser 有 bug，**仅修 parser**（不需要回填）。若根因为 chrome 端，跨仓独立 lane。
 
 ### 3.5 Lane E：`fix/strict-http-semantics`（P0-1b，**严格 HTTP 语义落地 + envelope 一致化**）
 
@@ -280,9 +277,11 @@ empty body 改 PERMANENT 是 §5.3 物流 0 行事故的**根本修复**——pl
 | F (validation) | chrome-plugins 端实际已正确 | 不需要协调 |
 | G (docs) | 无 | 本仓独立 |
 
-### 4.2 数据回填策略
+### 4.2 ~~数据回填策略~~ — **A13 已取消**
 
-仅 `plugin.intercepted_requests` 里有 statement 148 条可回填。物流域无 body 无法回填——只能等 chrome-plugins 修复后自然增量补齐。
+~~仅 `plugin.intercepted_requests` 里有 statement 148 条可回填。物流域无 body 无法回填——只能等 chrome-plugins 修复后自然增量补齐。~~
+
+**A13 拍板**：不做任何回填。chrome-plugins 修复 dumps 流后，自然增量补齐**更新**数据（最新 1 周/1 月结算）；148 条 intercepted_requests 旧数据 stale，回填旧数据风险 > 价值。物流域无旁路数据可回填，必须等 chrome-plugins 修复 + 自然增量。
 
 ### 4.3 不做什么（明确 out-of-scope）
 
@@ -312,13 +311,14 @@ Week 1 (Sep 22-26)
 Week 2 (Sep 29 - Oct 3)
 ├── Day 1-2 (Mon-Tue): Lane B fix/logistics-empty-response  [P0-2] 1 天
 │                      （前提：chrome-plugins 仓 B-frontend 已合并）
-├── Day 3-5 (Wed-Fri): Lane D feat/statements-backfill + parser fallback
-│                      [P0-3 step 2/3]（前提：Lane C 诊断结论）
+├── Day 3-4 (Wed-Thu): Lane C fix/statements-parser-fallback [P0-3] 2 天
+│                      （前提：Lane C 诊断结论；仅修 parser，不回填 — A13）
 └── Day 5 (Fri):  Lane G docs/dumps-doc-rationalize [P2]  0.5 天
 ```
 
 **关键路径**：chrome-plugins 仓修复（Lane B-frontend + Lane E-frontend）→ 本仓 Lane B 才能合并。
 但 **Lane E（本仓严格 HTTP 语义）不需等跨仓**：本仓先合、不推 prod，等跨仓同步后一齐上。
+**Lane D（回填）已取消**（A13）：不实施，只剩 Lane C 诊断 + parser 修复。
 
 ---
 
@@ -342,8 +342,8 @@ Week 2 (Sep 29 - Oct 3)
    - `feat/after-sales-routing` (新增能力)
    - `fix/logistics-empty-response` (修空 body 处理)
    - `fix/statements-gaps-diagnose` (诊断性)
-   - `feat/statements-backfill` (一次性回填)
-   - `fix/dumps-envelope-cleanup` (清理)
+   - ~~`feat/statements-backfill` (一次性回填)~~ — **A13 已取消**
+   - `fix/strict-http-semantics` (严格 HTTP 语义落地)
    - `fix/dumps-validation-align` (对齐)
    - `docs/dumps-doc-rationalize` (文档)
 
@@ -352,9 +352,10 @@ Week 2 (Sep 29 - Oct 3)
    - Day 4-5（Lane F + Lane G）一起合并（无依赖 + 都是低风险）
    - Lane B / Lane E 必须等跨仓，先合并 docs/contracts，代码 lane 排 Week 2
 
-3. **回填脚本是否要等 Lane C 诊断结论** — 还是 24h 监控就先并行写？
-   - 建议：等诊断结论。如果 dumps 端没问题，chrome 端修了自然有数据；148 条不是紧急数据
-   - 如果 dumps 端有 bug，回填脚本反而会用错 parser 重写脏数据
+3. ~~**回填脚本是否要等 Lane C 诊断结论** — 还是 24h 监控就先并行写？~~
+   - ~~建议：等诊断结论。如果 dumps 端没问题，chrome 端修了自然有数据；148 条不是紧急数据~~
+   - ~~如果 dumps 端有 bug，回填脚本反而会用错 parser 重写脏数据~~
+   - **A13 已拍板：不回填**（用户原话 "B4 不需要回填，我重新抓取就可以了"）—— chrome-plugins 修复 dumps 流后自然增量补齐更新数据；148 条 intercepted_requests 旧数据 stale，回填风险 > 价值
 
 4. ~~**`intercept-plugin-canonical.md` 是否要 deprecate（移到 `_archive/`）**，还是仅顶部加 banner 保留历史？~~ — **已通过 Lane `docs/merge-canonical-into-contract` 解决**：合并有效内容到 `dumps-data-contract.md` 后直接删除 canonical.md
 
