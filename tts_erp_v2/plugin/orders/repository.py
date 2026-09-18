@@ -2,9 +2,6 @@
 
 所有 upsert 用 ON CONFLICT DO UPDATE 实现幂等。
 has_data_bulk 批量查业务表存在性。
-write_raw_log **DEPRECATED Phase 1** (chore/deprecate-plugin-raw-log,
-2026-09-15) → 保留函数签名供 Phase 2 观察期兼容，但内部不再 INSERT，
-永远 return 0；Phase 3 将删除函数 + drop plugin.raw_log 表。
 """
 
 from __future__ import annotations
@@ -31,39 +28,6 @@ from tts_erp_v2.db.models.plugin import (
 )
 
 log = logging.getLogger("tts_erp_v2.plugin.orders.repository")
-
-# ── raw_log (DEPRECATED Phase 1: 2026-09-15) ──────────────────────────
-# write_raw_log 自 Phase 1 起为 no-op；保留签名兼容现有 caller，
-# Phase 3 将整段删除（同时 drop plugin.raw_log 表）。每次调用会 log.info
-# 一条废弃标记，便于观察期监控是否还有 caller 引用——1 天观察期内应当归零。
-
-
-def write_raw_log(
-    sess: Session,  # noqa: ARG001 — kept for signature compat
-    *,
-    domain: str,
-    shop_id: str,
-    endpoint: str,
-    captured_at: datetime,  # noqa: ARG001
-    request_params: dict | None,  # noqa: ARG001
-    request_body: dict | None,  # noqa: ARG001
-    response_body: dict | None,  # noqa: ARG001
-    parse_error: str | None,  # noqa: ARG001
-    rows_written: int,  # noqa: ARG001
-) -> int:
-    """Phase 1 no-op：原写 plugin.raw_log 流水，现返回 0 不写任何行。
-
-    Returns:
-        占位值 0；caller 不要把它当真实 raw_log.id 用——Phase 1 业务表
-        log_id 列已 nullable，调用方应改传 None（write_raw_log 调用仍
-        保留以便观察期观察剩余 caller 数）。
-    """
-    log.warning(
-        "write_raw_log DEPRECATED Phase 1 no-op call: "
-        "domain=%s shop_id=%s endpoint=%s",
-        domain, shop_id, endpoint,
-    )
-    return 0
 
 
 # ── has_data_bulk ───────────────────────────────────────────────────

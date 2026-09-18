@@ -882,7 +882,6 @@ ALTER TABLE plugin.ad_today ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 
 CREATE TABLE IF NOT EXISTS plugin.order_lines (
     id bigint NOT NULL,
-    log_id bigint,  -- plugin.raw_log.id FK; nullable since Phase 1 (chore/deprecate-plugin-raw-log, 2026-09-15)
     shop_id text NOT NULL,
     order_id text NOT NULL,
     sku_id text NOT NULL,
@@ -911,7 +910,6 @@ ALTER TABLE plugin.order_lines ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY 
 
 CREATE TABLE IF NOT EXISTS plugin.orders (
     id bigint NOT NULL,
-    log_id bigint,  -- plugin.raw_log.id FK; nullable since Phase 1 (chore/deprecate-plugin-raw-log, 2026-09-15)
     shop_id text NOT NULL,
     order_id text NOT NULL,
     currency text,
@@ -961,35 +959,11 @@ ALTER TABLE plugin.plugin_logs ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY 
 );
 
 
--- Name: raw_log; Type: TABLE; Schema: plugin; Owner: -
-
-CREATE TABLE IF NOT EXISTS plugin.raw_log (
-    id bigint NOT NULL,
-    domain text NOT NULL,
-    shop_id text NOT NULL,
-    endpoint text NOT NULL,
-    captured_at timestamp with time zone NOT NULL,
-    request_params jsonb,
-    request_body jsonb,
-    response_body jsonb NOT NULL,
-    parse_error text,
-    rows_written integer DEFAULT 0 NOT NULL,
-    source text DEFAULT 'chrome-ext'::text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
-
-ALTER TABLE plugin.raw_log ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME plugin.raw_log_id_seq
-);
-
 
 -- Name: settlement_details; Type: TABLE; Schema: plugin; Owner: -
 
 CREATE TABLE IF NOT EXISTS plugin.settlement_details (
     id bigint NOT NULL,
-    log_id bigint,  -- plugin.raw_log.id FK; nullable since Phase 1 (chore/deprecate-plugin-raw-log, 2026-09-15)
     shop_id text NOT NULL,
     statement_id text NOT NULL,
     statement_version integer DEFAULT 0 NOT NULL,
@@ -1023,7 +997,6 @@ ALTER TABLE plugin.settlement_details ALTER COLUMN id ADD GENERATED ALWAYS AS ID
 
 CREATE TABLE IF NOT EXISTS plugin.settlements (
     id bigint NOT NULL,
-    log_id bigint,  -- plugin.raw_log.id FK; nullable since Phase 1 (chore/deprecate-plugin-raw-log, 2026-09-15)
     shop_id text NOT NULL,
     statement_id text NOT NULL,
     statement_version integer DEFAULT 0 NOT NULL,
@@ -1059,7 +1032,6 @@ ALTER TABLE plugin.settlements ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY 
 
 CREATE TABLE IF NOT EXISTS plugin.shipments (
     id bigint NOT NULL,
-    log_id bigint,  -- plugin.raw_log.id FK; nullable since Phase 1 (chore/deprecate-plugin-raw-log, 2026-09-15)
     shop_id text NOT NULL,
     order_id text NOT NULL,
     package_id text NOT NULL,
@@ -1083,7 +1055,6 @@ ALTER TABLE plugin.shipments ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 
 CREATE TABLE IF NOT EXISTS plugin.tracking_events (
     id bigint NOT NULL,
-    log_id bigint,  -- plugin.raw_log.id FK; nullable since Phase 1 (chore/deprecate-plugin-raw-log, 2026-09-15)
     shop_id text NOT NULL,
     package_id text NOT NULL,
     event_key text NOT NULL,
@@ -1701,11 +1672,6 @@ ALTER TABLE ONLY plugin.plugin_logs
     ADD CONSTRAINT plugin_logs_pkey PRIMARY KEY (id);
 
 
--- Name: raw_log raw_log_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
-
-ALTER TABLE ONLY plugin.raw_log
-    ADD CONSTRAINT raw_log_pkey PRIMARY KEY (id);
-
 
 -- Name: settlement_details settlement_details_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
 
@@ -2142,19 +2108,7 @@ CREATE INDEX IF NOT EXISTS ix_orders_main_order_status ON plugin.orders USING bt
 CREATE INDEX IF NOT EXISTS ix_orders_shop ON plugin.orders USING btree (shop_id);
 
 
--- Name: ix_raw_log_created; Type: INDEX; Schema: plugin; Owner: -
 
-CREATE INDEX IF NOT EXISTS ix_raw_log_created ON plugin.raw_log USING btree (created_at);
-
-
--- Name: ix_raw_log_domain_shop; Type: INDEX; Schema: plugin; Owner: -
-
-CREATE INDEX IF NOT EXISTS ix_raw_log_domain_shop ON plugin.raw_log USING btree (domain, shop_id);
-
-
--- Name: ix_raw_log_endpoint; Type: INDEX; Schema: plugin; Owner: -
-
-CREATE INDEX IF NOT EXISTS ix_raw_log_endpoint ON plugin.raw_log USING btree (endpoint);
 
 
 -- Name: ix_settlement_details_stmt; Type: INDEX; Schema: plugin; Owner: -
@@ -2754,37 +2708,31 @@ ALTER TABLE ONLY linkage.variant_links
 -- Name: order_lines order_lines_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
 
 ALTER TABLE ONLY plugin.order_lines
-    ADD CONSTRAINT order_lines_log_id_fkey FOREIGN KEY (log_id) REFERENCES plugin.raw_log(id);
 
 
 -- Name: orders orders_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
 
 ALTER TABLE ONLY plugin.orders
-    ADD CONSTRAINT orders_log_id_fkey FOREIGN KEY (log_id) REFERENCES plugin.raw_log(id);
 
 
 -- Name: settlement_details settlement_details_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
 
 ALTER TABLE ONLY plugin.settlement_details
-    ADD CONSTRAINT settlement_details_log_id_fkey FOREIGN KEY (log_id) REFERENCES plugin.raw_log(id);
 
 
 -- Name: settlements settlements_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
 
 ALTER TABLE ONLY plugin.settlements
-    ADD CONSTRAINT settlements_log_id_fkey FOREIGN KEY (log_id) REFERENCES plugin.raw_log(id);
 
 
 -- Name: shipments shipments_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
 
 ALTER TABLE ONLY plugin.shipments
-    ADD CONSTRAINT shipments_log_id_fkey FOREIGN KEY (log_id) REFERENCES plugin.raw_log(id);
 
 
 -- Name: tracking_events tracking_events_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
 
 ALTER TABLE ONLY plugin.tracking_events
-    ADD CONSTRAINT tracking_events_log_id_fkey FOREIGN KEY (log_id) REFERENCES plugin.raw_log(id);
 
 
 -- Name: manual_product_costs manual_product_costs_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
@@ -2921,7 +2869,6 @@ CREATE INDEX IF NOT EXISTS idx_campaign_opt_logs_campaign ON plugin.campaign_opt
 
 CREATE TABLE IF NOT EXISTS plugin.after_sales (
     id bigint NOT NULL,
-    log_id bigint,  -- plugin.raw_log.id FK; nullable since Phase 1 (chore/deprecate-plugin-raw-log, 2026-09-15)
     shop_id text NOT NULL,
     cancel_id text NOT NULL,
     cancel_type text NOT NULL,
@@ -2947,7 +2894,6 @@ ALTER TABLE plugin.after_sales ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY 
 
 CREATE TABLE IF NOT EXISTS plugin.after_sale_items (
     id bigint NOT NULL,
-    log_id bigint,  -- plugin.raw_log.id FK; nullable since Phase 1 (chore/deprecate-plugin-raw-log, 2026-09-15)
     shop_id text NOT NULL,
     cancel_id text NOT NULL,
     line_item_id text NOT NULL,

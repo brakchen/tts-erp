@@ -185,11 +185,9 @@ def reset_rate_limit(
 
 # ─── Plugin sync data purge ────────────────────────────────────────────
 
-# Tables that store Chrome extension synced data. Deletion order matters:
-# child tables (FK → raw_log.id) first, then the parent raw_log.
-# Phase 1 (2026-09-15, chore/deprecate-plugin-raw-log): raw_log 停止新写入，
-# 本常量仍参与 purge（仅清历史数据），业务表 log_id 列已 nullable；Phase 3
-# 删整张 raw_log + 业务表 log_id 列 + 6 条 FK。
+# Tables that store Chrome extension synced data (ad 域 + business tables)。
+# business tables 已移除 log_id FK (2026-09-17 chore/deprecate-plugin-raw-log
+# Phase 3)，现在各业务表互相独立，没有 FK 父子依赖。
 _ANALYTICS_TABLES = [
     "plugin.ad_today",
     "plugin.ad_daily",
@@ -206,8 +204,6 @@ _PLUGIN_ORDER_CHILD_TABLES = [
     "plugin.settlement_details",
     "plugin.settlements",
 ]
-
-_PLUGIN_ORDER_RAW_LOG = "plugin.raw_log"  # Phase 1 DEPRECATED (chore/deprecate-plugin-raw-log, 2026-09-15) — 仍参与 purge 仅清历史，Phase 3 drop
 
 
 # Re-export the shared prod-shape detector under the historical name
@@ -274,7 +270,7 @@ def purge_plugin_data(
     with engine.begin() as conn:
         # Count rows first (for the response — always, even on dry-run).
         all_tables = (
-            _ANALYTICS_TABLES + _PLUGIN_ORDER_CHILD_TABLES + [_PLUGIN_ORDER_RAW_LOG]
+            _ANALYTICS_TABLES + _PLUGIN_ORDER_CHILD_TABLES
         )
         for table in all_tables:
             try:
@@ -287,10 +283,9 @@ def purge_plugin_data(
 
         # Only delete if not dry-run.
         if executed:
-            # Delete in FK-safe order: children first, then parent
-            for table in (
-                _PLUGIN_ORDER_CHILD_TABLES + [_PLUGIN_ORDER_RAW_LOG] + _ANALYTICS_TABLES
-            ):
+            # ad 域和 business tables 现在互相独立（raw_log FK 链 2026-09-17 drop），
+            # 无 FK 依赖顺序要求，之间任意顺序 DELETE 都可以。
+            for table in (_ANALYTICS_TABLES + _PLUGIN_ORDER_CHILD_TABLES):
                 if counts.get(table, 0) > 0:
                     conn.execute(
                         text(f"DELETE FROM {table}")
@@ -512,13 +507,12 @@ def update_shop(
 
 
 # Shop ids seen in plugin-synced data but with no commerce.shops row.
-# Sources: plugin.raw_log.shop_id (order/logistics/settlement dumps)
-# + analytics seller_id (ad_today/ad_daily/plugin_logs).
+# Sources: analytics seller_id (ad_today/ad_daily/plugin_logs)。plugin 业务表
+# 的 shop_id 在订单 INSERT 时已校验过（FK → commerce.shops.shop_id），所以不再
+# 从 raw_log / 业务表枚举未注册店铺（2026-09-17 raw_log 表已 drop）。
 _SQL_UNREGISTERED_SHOPS = text(
     "SELECT shop_id, source FROM ("
-    "  SELECT shop_id, 'plugin' AS source FROM plugin.raw_log GROUP BY shop_id"
-    "  UNION"
-    "  SELECT seller_id, 'analytics' FROM plugin.ad_today GROUP BY seller_id"
+    "  SELECT seller_id AS shop_id, 'analytics' AS source FROM plugin.ad_today GROUP BY seller_id"
     "  UNION"
     "  SELECT seller_id, 'analytics' FROM plugin.ad_daily GROUP BY seller_id"
     "  UNION"

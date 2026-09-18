@@ -222,7 +222,6 @@ def _check_schema_prereq(db_engine) -> None:
         "reporting.product_profit_daily",
         "reporting.shipment_tracking_summary",
         "security.api_keys",
-        "plugin.raw_log",
         "plugin.orders",
         "plugin.order_lines",
         "plugin.shipments",

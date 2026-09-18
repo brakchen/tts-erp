@@ -35,12 +35,6 @@ def _cleanup(db_engine):
             ),
             {"sid": SHOP},
         )
-        conn.execute(
-            text(
-                "DELETE FROM plugin.raw_log WHERE shop_id LIKE 'TEST_%' OR shop_id = :sid"
-            ),
-            {"sid": SHOP},
-        )
 
 
 def test_parse_after_sales_full_response(db_engine, db_session):

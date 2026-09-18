@@ -33,8 +33,7 @@ def _cleanup(db_engine):
             "DELETE FROM plugin.ad_today WHERE seller_id = :s",
             "DELETE FROM plugin.ad_monthly WHERE seller_id = :s",
             "DELETE FROM plugin.ad_raw_log WHERE seller_id = :s",
-            "DELETE FROM plugin.raw_log WHERE shop_id = :s",
-        ):
+                    ):
             conn.execute(text(statement), {"s": SELLER})
     yield
     with db_engine.begin() as conn:
@@ -49,8 +48,7 @@ def _cleanup(db_engine):
             "DELETE FROM plugin.ad_today WHERE seller_id = :s",
             "DELETE FROM plugin.ad_monthly WHERE seller_id = :s",
             "DELETE FROM plugin.ad_raw_log WHERE seller_id = :s",
-            "DELETE FROM plugin.raw_log WHERE shop_id = :s",
-        ):
+                    ):
             conn.execute(text(statement), {"s": SELLER})
 
 
