@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import get_session
 from tts_erp_v2.plugin.orders.parser import (
+    parse_after_sales_response,
     parse_logistics_response,
     parse_order_response,
     parse_statement_list_response,
@@ -39,7 +40,7 @@ from tts_erp_v2.plugin.orders.repository import (
 PROTOCOL_VERSION = 1
 MAX_BODY_BYTES = 2 * 1024 * 1024  # 2 MB
 MAX_IDS = 500
-VALID_DOMAINS = {"orders", "logistics", "statements"}
+VALID_DOMAINS = {"orders", "logistics", "statements", "after_sales"}
 
 _PATH_HAS_DATA = "/v2/order-sync/has-data"
 _PATH_DUMPS = "/v2/order-sync/dumps"
@@ -405,6 +406,13 @@ def post_dumps(
                         response_body=response_body,
                         captured_at=captured_at,
                     )
+            elif domain == "after_sales":
+                rows_written = parse_after_sales_response(
+                    sess,
+                    shop_id=shop_id,
+                    response_body=response_body,
+                    captured_at=captured_at,
+                )
     except Exception as exc:
         parse_error = f"{type(exc).__name__}: {exc}"
         log.exception("parse error for domain=%s shop_id=%s", domain, shop_id)

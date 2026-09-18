@@ -168,7 +168,7 @@
 | --- | --- | --- | --- | --- |
 | **订单** | `/api/fulfillment/order/list`（POST） | `"orders"` | `parse_order_response` | `orders` / `order_lines` |
 | **物流** | `/api/v1/fulfillment/logistic_detail/list`（GET） | `"logistics"` | `parse_logistics_response` | `shipments` / `tracking_events` |
-| **售后** | **（chrome 端未采集）** | **`"after_sales"` 不在 `VALID_DOMAINS` 里** | `parse_after_sales_response`（孤儿函数，dumps 路由表没接） | `after_sales` / `after_sale_items` 永远 0 行 |
+| **售后** | **（chrome 端未采集）** | **`"after_sales"` 已加入 `VALID_DOMAINS`（Lane A）** | `parse_after_sales_response`（孤儿函数，dumps 路由表已接） | `after_sales` / `after_sale_items` 期待 chrome 端首次真实 dump |
 | **结算** | `/api/v1/pay/statement/list/detail`（GET） | `"statements"` | `parse_statement_list_response` 或 `parse_statement_transaction_response`（按 `dump.response.body.data` 是否有 `sku_record` 字段分流） | `settlements` / `settlement_details` |
 
 `dump.domain` 路由判定逻辑（`tts_erp_v2/api/v2/order_sync.py:407-446`）：
@@ -192,7 +192,7 @@ elif domain == "statements":
 **关键约束**：
 - `mainOrderId` 在 `domain=logistics` 时**必填**（缺则 `parse_error`，不写库）
 - `statementId` + `statementVersion` 在 `domain=statements` 时**强烈建议填**（`has-data` 用作幂等键），但 dumps 端不强校验
-- **`domain=after_sales`** 完全不存在 → 即使 plugin 端开始采集 `/return_refund/202309/cancellations/search`，目前 dumps 端会返 400 `SCHEMA_INVALID`
+- **`domain=after_sales`** 已接入 `VALID_DOMAINS`（Lane `feat/after-sales-routing` 完成）→ chrome 端开始采集 `/return_refund/202309/cancellations/search` 后即可 dump 走通
 
 ---
 
@@ -375,10 +375,10 @@ elif domain == "statements":
 | --- | --- |
 | **现象** | `plugin.after_sales` 0 行 / `plugin.after_sale_items` 0 行 |
 | Chrome 端采集 | **0 hit** —— 整个 `~/chrome-plugins/ads-data-sync/` 无 `cancellations/search` / `returns/search` / `reverse` 引用（`grep` 0 hit） |
-| Dumps 端路由 | `VALID_DOMAINS` 仅含 `{"orders", "logistics", "statements"}` —— `domain=after_sales` 会返 400 `SCHEMA_INVALID` |
-| Parser 函数 | `parse_after_sales_response` **存在**于 `tts_erp_v2/plugin/orders/parser.py`（247 行未触达）|
-| 假设根因 | (a1) chrome 端未开发 `/return_refund/202309/cancellations/search` 拦截；(a2) 无明确 schedule 触发；(a3) parser 已在 dumps 路由表**未注册** |
-| 修复路径 | chrome 加采集 + dumps 把 `after_sales` 加入 `VALID_DOMAINS` + 在 `order_sync.py:408` `if/elif` 链加 `elif domain == "after_sales":` 分支 |
+| Dumps 端路由 | `VALID_DOMAINS` **已包含** `after_sales`（Lane `feat/after-sales-routing`）—— chrome 端开始采集后即可走通 |
+| Parser 函数 | `parse_after_sales_response` **已接入路由表**（不再是孤儿函数）|
+| 假设根因 | (a1) chrome 端未开发 `/return_refund/202309/cancellations/search` 拦截；(a2) 无明确 schedule 触发 |
+| 修复路径 | chrome 加采集即可（dumps 端已 ready）|
 
 ### §5.2 (b) 结算域：chrome 抓了但 dumps 没收到
 
@@ -703,7 +703,7 @@ WHERE o.shop_id = ?
 
 | # | 内容 | 状态 | 谁负责 |
 |---|---|---|---|
-| 1 | dumps 端 `after_sales` 域接入（VALID_DOMAINS 加 + if/elif 链）| ❌ TODO | 见 `tech-doc/dumps-tts-erp-refactor-proposal.md` Lane A |
+| 1 | ~~dumps 端 `after_sales` 域接入（VALID_DOMAINS 加 + if/elif 链）~~ | ✅ 已完成（Lane `feat/after-sales-routing`） | — |
 | 2 | 取消 endpoint 解析器（/return_refund/.../cancellations/search）| ❌ TODO | 同上 |
 | 3 | `main_order_status` 状态码字典全集（§11 部分覆盖 100-104）| 🔄 部分 | feature/plugin-shop-analytics |
 | 4 | 物流 tracking_events 字段完整结构 | ❌ TODO | 未抓到完整 burst |
