@@ -205,6 +205,37 @@ def _statement_transaction_response(sku_detail_id: str) -> dict:
     }
 
 
+def _after_sales_response(cancel_id: str = "TEST_cancel-001") -> dict:
+    """构造 /return_refund/202309/cancellations/search 响应体。"""
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "cancellations": [
+                {
+                    "cancel_id": cancel_id,
+                    "cancel_type": "BUYER_CANCEL",
+                    "cancel_status": "CANCELLATION_REQUEST_COMPLETE",
+                    "order_id": "TEST_order-001",
+                    "reason": "Changed mind",
+                    "request_time": "2026-09-15T10:00:00Z",
+                    "complete_time": "2026-09-15T12:00:00Z",
+                    "cancel_line_items": [
+                        {
+                            "id": "line_item_1",
+                            "order_line_item_id": "SKU-001",
+                            "sku_id": "SKU-001",
+                            "product_id": "PROD-001",
+                            "quantity": 1,
+                            "refund_amount": {"amount": "100000", "currency": "VND"},
+                        }
+                    ],
+                }
+            ]
+        },
+    }
+
+
 # ─── Auth: anonymous 401 ───────────────────────────────────────────
 
 
@@ -581,6 +612,43 @@ def test_dumps_statement_transaction_inserted(api_client, readwrite_key):
     body = r.json()
     assert body["data"]["status"] == "inserted"
     assert body["data"]["rowsWritten"] == 1
+
+
+# ─── dumps: after_sales inserted ────────────────────────────────────
+
+
+def test_dumps_after_sales_inserted(api_client, readwrite_key):
+    """after_sales 域接入：VALID_DOMAINS + 路由分支。"""
+    r = api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=_dump_payload(
+            "after_sales",
+            _after_sales_response(),
+            endpoint="/return_refund/202309/cancellations/search",
+            method="POST",
+        ),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["code"] == 0
+    assert body["data"]["status"] == "inserted"
+    assert body["data"]["rowsWritten"] == 2  # 1 after_sale + 1 after_sale_item
+
+
+def test_dumps_invalid_domain_returns_400(api_client, readwrite_key):
+    """非法 domain 走 Pydantic V2 校验，返 400。"""
+    r = api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=_dump_payload(
+            "invalid_domain",
+            {"code": 0, "data": {}},
+            endpoint="/api/test",
+            method="GET",
+        ),
+    )
+    assert r.status_code == 400  # Pydantic V2 校验 + SCHEMA_INVALID
 
 
 # ─── dumps: 幂等重放 ──────────────────────────────────────────────
