@@ -392,7 +392,7 @@ elif domain == "statements":
 |  | (b3) chrome `fetchStatementRows` 在 main-frame fetch schema 校验失败返回 `[]`（`background.ts:724-728` 直接 `recordOrderProgress(... 'ok', '...返回 0 行...')`） |
 |  | (b4) dumps 端 `parse_statement_list_response` 解析失败但 `_ok_response` 仍返 200，错误被吞在 `raw_log.parse_error` 字段里（**可查证**：补查 `plugin.raw_log WHERE endpoint LIKE '%statement%' AND parse_error IS NOT NULL`） |
 | 现状 | **数据流路径上有 4 个可能断点**；**未 root cause**。Owner 拍板前不动 |
-| 旁路 | `plugin.intercepted_requests.response_body` 已抓到 148 条 statement 响应 —— **绕过 dumps 直接用**，可作为临时数据源（schema 在 §4.5/§4.6 兼容） |
+| 旁路 | `plugin.intercepted_requests.response_body` 已抓到 148 条 statement 响应 —— **A13 不回填**（用户原话 "B4 不需要回填，我重新抓取就可以了"），仅供 Lane C 诊断证据使用 |
 
 ### §5.3 (c) 物流域：接口响应全空
 
@@ -712,5 +712,5 @@ WHERE o.shop_id = ?
 | 7 | chrome 端抓取规则 + 权限 | ❌ 跨仓 | chrome-plugins |
 | 8 | dumps 上传失败重试策略 | ❌ 跨仓 | chrome-plugins |
 | 9 | 物流空 body 修复（插件端 + 服务端 422 落地）| ❌ TODO | `dumps-tts-erp-refactor-proposal.md` Lane B |
-| 10 | 结算 0 行根因定位 + 旁路回填 148 条 | ❌ TODO | `dumps-tts-erp-refactor-proposal.md` Lane C/D |
+| 10 | 结算 0 行根因定位（Lane C 诊断 + parser fallback） | ❌ TODO | `dumps-tts-erp-refactor-proposal.md` Lane C（**不做回填**，见 review §G7 A13） |
 | 11 | 严格 HTTP 语义落地（empty_response 改 422 + rowsWritten/data.status 删）| ❌ TODO | `dumps-tts-erp-refactor-proposal.md` Lane E |

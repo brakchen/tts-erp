@@ -22,6 +22,7 @@
 | **A10** | **命名 casing 不强制全仓统一**：dumps 端点沿用 `requestId`（camelCase），其他模块跟随文件本地惯例；不引入跨仓重命名 | 用户原话 "全仓库统一，现在逻辑里面写的是requestId 就用，逻辑里面写的是request_id 就用 request_id" | AGENTS.md §2.5 "字段命名规则" |
 | **A11** | **per-layer 命名规则明确化**：wire format（HTTP envelope / JSON / Pydantic schema field / TS 变量）= camelCase `requestId`；Python 内部 / DB / URL = snake_case `request_id`；HTTP header = `x-request-id`（RFC 7230） | 调研发现当前仓库已经按层划分（`analytics.py` / `intercept.py` / `test_intercept_sync.py` 都同时存在两种 casing 但分工清晰） | AGENTS.md §2.5 "字段命名规则"（5 行表格 + 5 类约束） |
 | **A12** | **empty_response = PERMANENT**（α 方案）：empty body 返 422 → plugin 跳过 + 记日志 + 等下次 alarm，不再无限重试 | 用户原话 "empty body 是 TikTok 那边的问题，重试无意义" | proposal §2 P0-1b step 5；contract §2.3/§2.4 同步 |
+| **A13** | **不需要回填 settlement 148 条**：chrome-plugins 修复 dumps 流后自然增量补齐；148 条 `plugin.intercepted_requests` 数据 stale（1-2 周），回填旧数据风险 > 价值 | 用户原话 "B4 不需要回填，我重新抓取就可以了" | review §G7 取消 Lane D；proposal §3.4 + §5 移除回填；contract §13 移除 TODO #10 |
 
 ---
 
@@ -334,15 +335,11 @@ Pydantic validator 校验对齐：
 - `schema_tts_erp.sql` + `alembic/0030` 注释清理（F11）
 - `tts_erp_v2/api/v2/admin.py` + `tts_erp_v2/db/models/plugin.py` raw_log 残留清理（F12 + F13）
 
-### G7. 【P2，方案 Lane D（条件性）】
+### G7. ~~【P2，方案 Lane D（条件性）】~~ — **A13 已取消**
 
-结算旁路回填：
+~~结算旁路回填：~~ — **不需要**：chrome-plugins 修复 dumps 流后自然增量补齐；148 条 `plugin.intercepted_requests` 数据 stale（1-2 周），回填旧数据风险 > 价值。
 
-- `scripts/oneoff_backfill_settlements_from_intercepted.py`（新），复用 `_extract_seller_id_from_url` 模式
-- 从 `plugin.intercepted_requests` 取 148 条 statement 响应
-- 装 `require_destructive_script_guard`
-- `--dry-run` + `--confirm`
-- **前提**：Lane C 诊断结论为 dumps 端问题；否则等 chrome 端修复自然增量
+> Lane D（`feat/statements-backfill`）整体从方案移除。Lane C（诊断）仍保留 —— 148 条 intercepted_requests 仍有诊断价值（看 dumps 链路是 chrome 没传 / 传了被吞 / parser 挂）。
 
 ### G8. 【P1 观察项】
 
