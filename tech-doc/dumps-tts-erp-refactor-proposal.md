@@ -293,30 +293,37 @@ empty body 改 PERMANENT 是 §5.3 物流 0 行事故的**根本修复**——pl
 
 ---
 
-## §5 实施节奏（推荐顺序）
+## §5 实施节奏（推荐顺序）—— A15 推荐1 修正
+
+> **修正**：以下不严格按 Week 1 / Week 2 时间分周。7 个 lane 并行开 worktree，merge 按依赖关系走（A/C/F/G 无依赖立即合；B/E 等 chrome-plugins 同步发布后再合）。详见 review §A15 + B3 决策。
 
 ```
-Week 1 (Sep 22-26)
-├── Day 1 (Mon):  Lane A feat/after-sales-routing        [P0-1]  1 天
-├── Day 2-3 (Tue-Wed): Lane E fix/strict-http-semantics  [P0-1b] 1.5-2 天
-│                        （本仓只动 order_sync.py + 4 个测试 + dumps-data-contract.md；
-│                        跨仓同步需同步协调，但本仓先行 merge 没问题）
-├── Day 4 (Thu): Lane F fix/dumps-validation-align  [P1-2]  0.5 天
-└── Day 5 (Fri): Lane C fix/statements-gaps-diagnose  [P0-3 step 1] 2 天
+【独立 — 可随时 merge】
+├── Lane A  feat/after-sales-routing      [P0-1]  1 天
+├── Lane C  fix/statements-gaps-diagnose   [P0-3 step 1] 2 天
+├── Lane F  fix/dumps-validation-align     [P1-2]  0.5 天
+├── Lane G  docs/dumps-doc-rationalize     [P2]   0.5 天
 
-跨仓等待（异步）：
-- 等 chrome-plugins 仓 Lane B-frontend（response_body=null 不上传）合并
-- 等 chrome-plugins 仓 Lane E-frontend（HTTP status code 严格判别 升级）
-
-Week 2 (Sep 29 - Oct 3)
-├── Day 1-2 (Mon-Tue): Lane B fix/logistics-empty-response  [P0-2] 1 天
-│                      （前提：chrome-plugins 仓 B-frontend 已合并）
-├── Day 3-4 (Wed-Thu): Lane C fix/statements-parser-fallback [P0-3] 2 天
-│                      （前提：Lane C 诊断结论；仅修 parser，不回填 — A13）
-└── Day 5 (Fri):  Lane G docs/dumps-doc-rationalize [P2]  0.5 天
+【需跨仓同步 — chrome-plugins 仓对应 lane 发布后才合】
+├── Lane E  fix/strict-http-semantics      [P0-1b] 1.5-2 天
+│           本仓只动 order_sync.py + 4 个测试 + dumps-data-contract.md；
+│           跨仓同步需同步协调，但本仓先行 merge 没问题（chrome-plugins 仓升级前
+│           不会返非 200，旧 plugin 仍按 200 + data.status 走，不影响现有功能）
+└── Lane B  fix/logistics-empty-response   [P0-2] 1 天
+           （前提：chrome-plugins 仓 B-frontend（response_body=null 不上传）合并）
 ```
 
-**关键路径**：chrome-plugins 仓修复（Lane B-frontend + Lane E-frontend）→ 本仓 Lane B 才能合并。
+**并行模式**：
+- 所有 7 个 lane 可同时在 7 个 worktree 并行开发
+- 跨仓协调通过 A16 推荐的正式"跨仓 handoff"模式（每个仓维护自己的 `handoff/ACTIVE.md`）
+- 本仓 merge 不依赖 chrome-plugins 仓发布（A/C/F/G 无依赖；E/B 等 chrome-plugins ready）
+
+**关键路径**（依赖图）：
+```
+chrome-plugins 仓 B-frontend → 本仓 Lane B merge
+chrome-plugins 仓 E-frontend → 本仓 Lane E merge
+（其余 5 lane 无跨仓依赖）
+```
 但 **Lane E（本仓严格 HTTP 语义）不需等跨仓**：本仓先合、不推 prod，等跨仓同步后一齐上。
 **Lane D（回填）已取消**（A13）：不实施，只剩 Lane C 诊断 + parser 修复。
 
@@ -347,10 +354,11 @@ Week 2 (Sep 29 - Oct 3)
    - `fix/dumps-validation-align` (对齐)
    - `docs/dumps-doc-rationalize` (文档)
 
-2. **合并顺序** — 推荐：
-   - Day 1（Lane A）单 lane merge → push
-   - Day 4-5（Lane F + Lane G）一起合并（无依赖 + 都是低风险）
-   - Lane B / Lane E 必须等跨仓，先合并 docs/contracts，代码 lane 排 Week 2
+2. ~~**合并顺序** — 推荐：~~
+   - ~~Day 1（Lane A）单 lane merge → push~~
+   - ~~Day 4-5（Lane F + Lane G）一起合并（无依赖 + 都是低风险）~~
+   - ~~Lane B / Lane E 必须等跨仓，先合并 docs/contracts，代码 lane 排 Week 2~~
+   - **A15 已拍板（推荐1）**：7 个 lane 并行开 worktree，merge 按依赖关系走（A/C/F/G 无依赖立即合，B/E 等 chrome-plugins 同步发布后再合）。详见 §5 修正版。
 
 3. ~~**回填脚本是否要等 Lane C 诊断结论** — 还是 24h 监控就先并行写？~~
    - ~~建议：等诊断结论。如果 dumps 端没问题，chrome 端修了自然有数据；148 条不是紧急数据~~
