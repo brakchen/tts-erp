@@ -10,7 +10,7 @@
 - DB column: `plugin.orders.main_order_status` (Integer, nullable) / `plugin.order_lines.main_order_status`
 - 类型: **int**（卖家中心原始码）
 - 上游: TikTok 卖家中心 `/api/fulfillment/order/list` 响应 `order_status_module[].main_order_status`
-- 文档锚点: `tech-doc/plugin-sourced-shop-analytics.md §4.2 / §8`、`tech-doc/intercept-plugin-canonical.md §2 / §3`
+- 文档锚点: `tech-doc/plugin-sourced-shop-analytics.md §4.2 / §8`、`tech-doc/dumps-data-contract.md §5.5 / §11`
 
 ## 取值（🟡 实测推断，**未固化**）
 
@@ -53,5 +53,5 @@
 
 ## 引用
 - 代码: `tts_erp_v2/plugin/orders/parser.py:100-105`、`tts_erp_v2/db/models/plugin.py:100,151`
-- 文档: `tech-doc/plugin-sourced-shop-analytics.md §4.2 / §8`、`tech-doc/intercept-plugin-canonical.md §3`、`tech-doc/chrome-ext-order-sync-design.md §3 / §5`
+- 文档: `tech-doc/plugin-sourced-shop-analytics.md §4.2 / §8`、`tech-doc/dumps-data-contract.md §11`、`tech-doc/chrome-ext-order-sync-design.md §3 / §5`
 - API 文档: `tech-doc/tiktok-seller-center-api-catalog.md:142-148`

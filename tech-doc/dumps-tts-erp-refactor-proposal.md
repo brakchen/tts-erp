@@ -15,7 +15,7 @@
 | **物流域完全断流** | `plugin.shipments` / `plugin.tracking_events` 均 0 行，chrome-plugins 抓 100% 空 body 但仍重试 | P0 server 端 `empty_response` 改 422（严格 HTTP 语义）+ plugin 端协议外修复（跨仓） |
 | **结算域完全断流** | `plugin.settlements` / `plugin.settlement_details` 均 0 行；`plugin.intercepted_requests` 已抓到 148 条 statement 响应 | P0 根因定位（4 候选）+ P1 旁路回填 |
 | **响应 envelope 与 schema 漂移** | `logId: 0` 仍在返（Phase 3 已 drop 列，但响应字段未删）；`createdAt` 双向别名 + 校验不一致；**宽松 HTTP 语义违反 AGENTS.md §2.5 铁律** | P0 响应契约收敛（严格 HTTP 语义） |
-| **文档多版本混乱** | `intercept-plugin-canonical.md`（用户原话"看着不太对"）+ `chrome-ext-order-sync-design.md`（设计稿，已落后）+ `dumps-data-contract.md`（现状契约） 三层文档职责不清 | P2 文档分层 + 单一指针 |
+| **文档多版本混乱** | `intercept-plugin-canonical.md`（用户原话"看着不太对"，已合并删除 — 见 lane docs/merge-canonical-into-contract）+ `chrome-ext-order-sync-design.md`（设计稿，已落后）+ `dumps-data-contract.md`（现状契约，已扩到 §6-§13 涵盖 ad 域 + 4 域 ID 映射 + 时间线 + ER + 终态 + JOIN + TODO） 三层文档职责不清 | P2 文档分层 + 单一指针（**本 lane 已完成**：canonical 已并入 contract） |
 
 **实施节奏**（详见 §5）：
 
@@ -91,7 +91,7 @@ plugin.raw_log             (DROP)   Phase 3 已下
 **修复路径**：
 1. **本仓（必走）**：`order_sync.py:380-389` 把 empty_response 从 200 改成 `422 Unprocessable Entity` + `code=EMPTY_RESPONSE_BODY`+ `message="dump.response.body is null; plugin must not advance progress"`
 2. **本仓**：测试加 case `empty_response → 422 + plugin 收到非 200 不前进`（与现行断言 `assert r.status_code == 200` 反转）
-3. **跨仓**：协调 chrome-plugins 仓修复 — 这是 `intercept-plugin-canonical.md §2.5` 已记录的已知坑，本方案**仅负责本仓侧**，跨仓修复另开 lane
+3. **跨仓**：协调 chrome-plugins 仓修复 — 这是 `dumps-data-contract.md §5.6`（从原 canonical §2.5 合并）已记录的已知坑，本方案**仅负责本仓侧**，跨仓修复另开 lane
 
 **预估**：1 天（仅本仓）。
 
@@ -179,12 +179,12 @@ empty body 改 PERMANENT 是 §5.3 物流 0 行事故的**根本修复**——pl
 ### P2 文档分层与单一指针
 
 **现状**：3 个 dumps 相关文档职责不清：
-- `intercept-plugin-canonical.md`（21KB，2026-09-13）：概念拍板稿，但用户原话"看着不太对"
+- ~~`intercept-plugin-canonical.md`（21KB，2026-09-13）：概念拍板稿，但用户原话"看着不太对"~~ — **已合并并删除**（lane `docs/merge-canonical-into-contract`）
 - `chrome-ext-order-sync-design.md`（53KB，2026-09-14）：设计稿，已部分落后（raw_log 设计仍存在，Phase 3 已 drop）
 - `dumps-data-contract.md`（28KB，2026-09-16）：现状契约（代码为准）
 
 **修复路径**：
-1. `intercept-plugin-canonical.md` 加顶部 banner：`> ⚠ 本文档为 09-13 拍板稿，已部分被 dumps-data-contract.md 取代。**当前契约 single-source-of-truth 是 dumps-data-contract.md**。本文档保留作为历史快照。`
+1. ~~`intercept-plugin-canonical.md` 加顶部 banner~~ — **已合并并删除**（lane `docs/merge-canonical-into-contract`）
 2. `chrome-ext-order-sync-design.md` 加头部 banner 标注哪些章节被 dumps-data-contract 取代（具体 §3.x raw_log 设计、§5 progress 协议等）
 3. `dumps-data-contract.md` §0 TL;DR 加指向性交叉链接（来自 §3 路由表、§4 字段映射、§5 已知 gap）
 
@@ -259,7 +259,7 @@ empty body 改 PERMANENT 是 §5.3 物流 0 行事故的**根本修复**——pl
 
 | 项目 | 内容 |
 | --- | --- |
-| 文件 | `tech-doc/intercept-plugin-canonical.md`（顶部 banner）<br>`tech-doc/chrome-ext-order-sync-design.md`（§3.x raw_log 设计 banner）<br>`tech-doc/dumps-data-contract.md`（§0 交叉链接） |
+| 文件 | ~~`tech-doc/intercept-plugin-canonical.md`（顶部 banner）~~ — **已合并并删除**<br>`tech-doc/chrome-ext-order-sync-design.md`（§3.x raw_log 设计 banner）<br>`tech-doc/dumps-data-contract.md`（§0 交叉链接） |
 | 改动量 | ~30 行（3 文件各 10 行） |
 | 风险 | 极低 |
 | 验证 | 人工 review 文档一致性 |
@@ -356,8 +356,7 @@ Week 2 (Sep 29 - Oct 3)
    - 建议：等诊断结论。如果 dumps 端没问题，chrome 端修了自然有数据；148 条不是紧急数据
    - 如果 dumps 端有 bug，回填脚本反而会用错 parser 重写脏数据
 
-4. **`intercept-plugin-canonical.md` 是否要 deprecate（移到 `_archive/`）**，还是仅顶部加 banner 保留历史？
-   - 当前倾向：加 banner 保留（用户已习惯跳转到这里），如未来不再被引用再 archive
+4. ~~**`intercept-plugin-canonical.md` 是否要 deprecate（移到 `_archive/`）**，还是仅顶部加 banner 保留历史？~~ — **已通过 Lane `docs/merge-canonical-into-contract` 解决**：合并有效内容到 `dumps-data-contract.md` 后直接删除 canonical.md
 
 5. **chrome-plugins 仓协调机制**：本仓 owner 直接联系 chrome-plugins 仓 owner，还是通过 `handoff.md` 提需求？
    - 当前倾向：直接 IM/口头 + 本仓写 RFC-like 摘要贴回 `handoff.md`
@@ -368,7 +367,7 @@ Week 2 (Sep 29 - Oct 3)
 
 - 现状契约（single-source-of-truth）：[`tech-doc/dumps-data-contract.md`](dumps-data-contract.md)
 - 设计稿（部分落后）：[`tech-doc/chrome-ext-order-sync-design.md`](chrome-ext-order-sync-design.md)
-- 概念拍板稿（用户原话"不太对"）：[`tech-doc/intercept-plugin-canonical.md`](intercept-plugin-canonical.md)
+- ~~概念拍板稿（用户原话"不太对"）：[`tech-doc/intercept-plugin-canonical.md`](intercept-plugin-canonical.md)~~ — 已合并删除
 - API catalog（53+ endpoint 全清单）：[`tech-doc/tiktok-seller-center-api-catalog.md`](tiktok-seller-center-api-catalog.md)
 - 订单业务规则：`tech-doc/order-domain-business-rules.md`
 - AGENTS.md §6（destructive guard）、§7（worktree 纪律）、§11（master 重测）、§12（WIP 归属）

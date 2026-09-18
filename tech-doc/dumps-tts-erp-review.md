@@ -15,7 +15,7 @@
 | **A3** | **响应 envelope 200 / 非 200 必须结构一致**：4 字段 `code` / `message` / `requestId` / `data` 都有；差别仅在 `code` 类型（int=0 vs str=错误码）和 `data` 是否出现 | 用户原话 "body 200 和 非200时要保持一致，200 时就是 code=0 message=success request_id={genereated id}" | AGENTS.md §2.5；proposal §3.5 Lane E |
 | **A4** | **`rowsWritten` 是死字段，删掉** —— chrome-plugins `isDumpAccepted()` 仅看 `data.status`，从不读 `rowsWritten` | 用户原话 "为什么要对 rowsWritten 计数？" | AGENTS.md §2.5；proposal §2 P0-1b step 1 |
 | **A5** | **`if parse_error is None and rows_written == 0` hack 删掉** —— 把协议层信号塞进数据计数器是错工具做错事 | 用户原话（隐含）"rowsWritten 的含义本身就不清晰... 如果是解析类的失败直接返回非200 即可" | proposal §2 P0-1b step 2 |
-| **A6** | **`intercept-plugin-canonical.md` 不是 single-source-of-truth**，契约以 `dumps-data-contract.md` 为准 | 用户原话 "这份文件看着不太对" | （详见 G8 + proposal §3.7 Lane G） |
+| **A6** | ~~**`intercept-plugin-canonical.md` 不是 single-source-of-truth**~~ → 已通过 lane `docs/merge-canonical-into-contract` 解决：合并到 contract 后删除 canonical.md | 用户原话 "这份文件看着不太对" | （详见 G8 + proposal §3.7 Lane G；现已合并删除） |
 | **A7** | **物流 empty response 的范围严格限定在 chrome-ext dumps 同步链路** —— 不引入 `integration.raw_records` 旁路 | 用户原话 "我再说一遍，这是插件的数据同步，不要扯到另一条服务端 API" | 方案已修正 |
 | **A8** | **scope of "通用元素" = 所有 tts-erp 服务端端点**（不只是 dumps） | 用户原话 + AGENTS.md §2.5 适用范围 | AGENTS.md §2.5 |
 | **A9** | **`data.status` 字段全删**（empty_response / parse_error / inserted 三处都不再返）| 用户原话 "如果没用就删除" | proposal §2 P0-1b step 3；AGENTS.md §2.5 |
@@ -34,7 +34,7 @@
 | ~~**B-α/β**~~ | ~~empty_response 是 RETRYABLE 还是 PERMANENT？~~ | **A12 已拍板：PERMANENT**（empty body = TikTok 问题 = 重试无意义）| — |
 | **B3** | Lane 合并顺序：Week 1 先合低风险 4 个，Week 2 等跨仓？ | 当前 proposal §5 安排 | 待确认 |
 | **B4** | 回填脚本是否等 Lane C 诊断结论？ | 当前 proposal §7 建议等（避免用错 parser 写脏数据） | (α) 等 24h 诊断；(β) 并行写 |
-| **B5** | `intercept-plugin-canonical.md` deprecate vs 加 banner？ | 当前 proposal §7 建议加 banner 保留 | (α) 加 banner；(β) 移到 `tech-doc/_archive/` |
+| ~~**B5**~~ | ~~`intercept-plugin-canonical.md` deprecate vs 加 banner？~~ | **已通过 lane `docs/merge-canonical-into-contract` 解决**：合并到 contract 后直接删除 | ~~(α) 加 banner；(β) 移到 `tech-doc/_archive/`~~ |
 | **B6** | chrome-plugins 仓协调机制？ | 当前 proposal §7 建议直接 IM + handoff.md 摘要 | (α) 直接 IM；(β) 走 handoff.md 正式 |
 | **B7** | Lane 命名风格？ | 当前用 `feat/*` / `fix/*` / `docs/*` | 待确认 |
 | **B9** | `_error_response` 中 `request_id or f"req-{uuid.uuid4()}"` 兜底逻辑要不要？ | 当前几乎不会触发（调用前已生成 request_id） | (α) 保留（防御性）；(β) 删（强约束 request_id 必须传） |
@@ -250,7 +250,7 @@ elif domain == "logistics":
 | **F5** | `parse_after_sales_response` 247 行孤儿函数 | `parser.py:478` + 4 个 test | routes 未接（D1）；接入后是活函数，不删 |
 | **F6** | `plugin.raw_log` 表 | 已 DROP（Phase 3）| 已删 |
 | **F7** | `plugin.raw_log` 残留引用 | alembic 0030 注释 `log_id BIGINT NOT NULL REFERENCES plugin.raw_log(id)`；`schema_tts_erp.sql` 残留注释；canonical 文档 §2.4 / §2.5；`scripts/oneoff_backfill_plugin_order_times.py` | Phase 3 后清理不彻底 |
-| **F8** | `intercept-plugin-canonical.md` | `tech-doc/intercept-plugin-canonical.md`（21KB）| 用户原话"看着不太对"；与 `dumps-data-contract.md` 职责重叠（A6）；建议加 banner（B5） |
+| ~~**F8**~~ | ~~`intercept-plugin-canonical.md`~~ | ~~`tech-doc/intercept-plugin-canonical.md`（21KB）~~ | ~~用户原话"看着不太对"；与 `dumps-data-contract.md` 职责重叠（A6）；建议加 banner（B5）~~ — **已合并并删除**（lane `docs/merge-canonical-into-contract`） |
 | **F9** | `chrome-ext-order-sync-design.md` raw_log 设计章节 | §3.x 整段 | raw_log 已 drop，设计稿章节过时 |
 | **F10** | `test_dumps_empty_response_returns_clean_status` 等 4 个 case | `tests/api/test_order_sync_contract.py:493` 等 | 断言反转后改名（如 `_returns_422`）；删所有 rowsWritten 断言 |
 | **F11** | `tts_erp_v2/api/v2/order_sync.py:353-355` 注释 "（Phase 1 起 raw_log 不再写...）" | `order_sync.py` | Phase 3 后 raw_log 整个 drop，注释更新 |
@@ -303,7 +303,7 @@ Pydantic validator 校验对齐：
 ### G6. 【P2，方案 Lane G】
 
 文档分层：
-- `intercept-plugin-canonical.md` 加顶部 banner（B5 待定）
+- ~~`intercept-plugin-canonical.md` 加顶部 banner（B5 待定）~~ — **已通过 lane `docs/merge-canonical-into-contract` 解决**
 - `chrome-ext-order-sync-design.md` §3.x 加 raw_log 已 drop banner
 - `dumps-data-contract.md` §0 加交叉链接
 - `schema_tts_erp.sql` + `alembic/0030` 注释清理（F11）
@@ -320,7 +320,7 @@ Pydantic validator 校验对齐：
 
 ### G8. 【P1 观察项】
 
-`intercept-plugin-canonical.md` 弃用机制：
+~~`intercept-plugin-canonical.md` 弃用机制：~~ — 已通过 lane `docs/merge-canonical-into-contract` 解决（合并后删除）
 - 当前 AGENTS.md §5 端点速查、§9 业务信息索引都引用它
 - 一旦 dumps-data-contract.md 接手，canonical 文档应显式标注 "已 superseded by dumps-data-contract.md"
 - 用户原话"看着不太对"是这个意图
@@ -331,7 +331,7 @@ Pydantic validator 校验对齐：
 
 - **现状契约**（single-source-of-truth）：[`tech-doc/dumps-data-contract.md`](dumps-data-contract.md)
 - **设计稿**（部分落后）：[`tech-doc/chrome-ext-order-sync-design.md`](chrome-ext-order-sync-design.md)
-- **概念拍板稿**（用户原话"不太对"）：[`tech-doc/intercept-plugin-canonical.md`](intercept-plugin-canonical.md)
+- ~~**概念拍板稿**（用户原话"不太对"）：[`tech-doc/intercept-plugin-canonical.md`](intercept-plugin-canonical.md)~~ — 已合并删除
 - **API catalog**（53+ endpoint 全清单）：[`tech-doc/tiktok-seller-center-api-catalog.md`](tiktok-seller-center-api-catalog.md)
 - **订单业务规则**：`tech-doc/order-domain-business-rules.md`
 - **AGENTS.md §2.5**（新）：严格 HTTP 语义铁律

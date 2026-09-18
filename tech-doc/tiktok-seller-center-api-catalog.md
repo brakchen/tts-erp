@@ -1024,7 +1024,7 @@ def _extract_seller_id_from_url(url: str) -> str | None:
 }
 ```
 
-> **2026-09-13 补注（lane feat/after-sales-table）**：上面是 `intercepted_requests.response_body` 里内嵌的 `reverse_module[]`（订单 list 拉到的快照）。独立的售后/取消 API（`/return_refund/202309/cancellations/search`）现在有专门结构化表 `plugin.after_sales` + `plugin.after_sale_items`（migration 0030），见 `tech-doc/intercept-plugin-canonical.md §1.1 / §3`。
+> **2026-09-13 补注（lane feat/after-sales-table）**：上面是 `intercepted_requests.response_body` 里内嵌的 `reverse_module[]`（订单 list 拉到的快照）。独立的售后/取消 API（`/return_refund/202309/cancellations/search`）现在有专门结构化表 `plugin.after_sales` + `plugin.after_sale_items`（migration 0030），见 `tech-doc/dumps-data-contract.md §1 / §3`。
 
 ##### 7.4.4.1 完整样本：`585900098675508729` 海外取消案例（system cancel vs buyer cancel 区别）
 
