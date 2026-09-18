@@ -497,15 +497,16 @@ def test_dumps_order_inserted(api_client, readwrite_key):
     assert r.status_code == 200
     body = r.json()
     assert body["code"] == 0
-    assert body["data"]["status"] == "inserted"
-    assert body["data"]["rowsWritten"] == 3  # 1 order + 2 lines
-    # Phase 1: logId 恒 0（raw_log no-op），保留字段兼容契约，不验证 >0
-    assert body["data"]["logId"] == 0
+    assert body["message"] == "success"
+    # AGENTS.md §2.5: 4 字段 envelope（data 可为空 dict）
+    assert body["data"] == {}
 
 
 def test_dumps_order_with_no_parsed_rows_is_not_reported_as_inserted(
     api_client, readwrite_key
 ):
+    # AGENTS.md §2.5: 解析成功但 0 行 → 200 + empty data
+    # （原 rowsWritten=0 hack 删除，HTTP code 不再作为 parse-error 信号）
     r = api_client.post(
         "/v2/order-sync/dumps",
         headers={"Authorization": f"Bearer {readwrite_key}"},
@@ -517,12 +518,12 @@ def test_dumps_order_with_no_parsed_rows_is_not_reported_as_inserted(
         ),
     )
     assert r.status_code == 200
-    assert r.json()["data"]["status"] == "parse_error"
-    assert r.json()["data"]["rowsWritten"] == 0
+    assert r.json()["code"] == 0
+    assert r.json()["data"] == {}
 
 
-def test_dumps_empty_response_returns_clean_status(api_client, readwrite_key):
-    """response.body=null 不打成 500；Phase 1 后不再写 raw_log，契约退化为 status 字段。"""
+def test_dumps_empty_response_returns_422(api_client, readwrite_key):
+    """AGENTS.md §2.5: response.body=null → 422 EMPTY_RESPONSE_BODY（PERMANENT）。"""
     r = api_client.post(
         "/v2/order-sync/dumps",
         headers={"Authorization": f"Bearer {readwrite_key}"},
@@ -533,10 +534,10 @@ def test_dumps_empty_response_returns_clean_status(api_client, readwrite_key):
             method="POST",
         ),
     )
-    assert r.status_code == 200
-    assert r.json()["data"]["status"] == "empty_response"
-    assert r.json()["data"]["rowsWritten"] == 0
-    # Phase 1: logId 是占位 0（raw_log no-op），不验证具体值
+    assert r.status_code == 422
+    body = r.json()
+    assert body["code"] == "EMPTY_RESPONSE_BODY"
+    assert "plugin must not advance progress" in body["message"]
 
 
 # ─── dumps: logistics inserted ─────────────────────────────────────
@@ -555,8 +556,8 @@ def test_dumps_logistics_inserted(api_client, readwrite_key):
     )
     assert r.status_code == 200
     body = r.json()
-    assert body["data"]["status"] == "inserted"
-    assert body["data"]["rowsWritten"] == 3  # 1 shipment + 2 tracking events
+    assert body["code"] == 0
+    assert body["message"] == "success"
 
 
 # ─── dumps: statement list inserted ─────────────────────────────────
@@ -574,8 +575,8 @@ def test_dumps_statement_list_inserted(api_client, readwrite_key):
     )
     assert r.status_code == 200
     body = r.json()
-    assert body["data"]["status"] == "inserted"
-    assert body["data"]["rowsWritten"] == 2
+    assert body["code"] == 0
+    assert body["message"] == "success"
 
 
 def test_dumps_single_statement_object_inserted(api_client, readwrite_key):
@@ -591,8 +592,8 @@ def test_dumps_single_statement_object_inserted(api_client, readwrite_key):
         ),
     )
     assert r.status_code == 200
-    assert r.json()["data"]["status"] == "inserted"
-    assert r.json()["data"]["rowsWritten"] == 1
+    assert r.json()["code"] == 0
+    assert r.json()["message"] == "success"
 
 
 # ─── dumps: statement transaction detail inserted ───────────────────
@@ -610,8 +611,8 @@ def test_dumps_statement_transaction_inserted(api_client, readwrite_key):
     )
     assert r.status_code == 200
     body = r.json()
-    assert body["data"]["status"] == "inserted"
-    assert body["data"]["rowsWritten"] == 1
+    assert body["code"] == 0
+    assert body["message"] == "success"
 
 
 # ─── dumps: after_sales inserted ────────────────────────────────────
@@ -632,8 +633,7 @@ def test_dumps_after_sales_inserted(api_client, readwrite_key):
     assert r.status_code == 200
     body = r.json()
     assert body["code"] == 0
-    assert body["data"]["status"] == "inserted"
-    assert body["data"]["rowsWritten"] == 2  # 1 after_sale + 1 after_sale_item
+    assert body["message"] == "success"
 
 
 def test_dumps_invalid_domain_returns_400(api_client, readwrite_key):
@@ -686,19 +686,19 @@ def test_dumps_health_counter_logs_successful_dump(api_client, readwrite_key):
 
 
 def test_dumps_health_counter_logs_failed_dump(api_client, readwrite_key):
-    """parse_error dump 应写入 plugin_logs（level=warn）。"""
+    """AGENTS.md §2.5: parse_error dump 应写入 plugin_logs（level=warn，422）。"""
+    # 用 logistics 域缺 mainOrderId 触发真 parse_error
     r = api_client.post(
         "/v2/order-sync/dumps",
         headers={"Authorization": f"Bearer {readwrite_key}"},
         json=_dump_payload(
-            "orders",
-            {"code": 0, "data": {"main_orders": []}},  # 空 list → parse_error
-            endpoint="/api/fulfillment/order/list",
-            method="POST",
+            "logistics",
+            _logistics_response("any"),
+            # main_order_id=None → parse_error
+            endpoint="/api/v1/fulfillment/logistic_detail/list",
         ),
     )
-    assert r.status_code == 200
-    # plugin_logs 应有写入（level=warn）
+    assert r.status_code == 422
     from tts_erp_v2.db.base import get_session_factory
     Session = get_session_factory()
     with Session() as sess:
@@ -712,9 +712,11 @@ def test_dumps_health_counter_logs_failed_dump(api_client, readwrite_key):
         ).fetchone()
     assert row is not None, "plugin_logs 应有 order-sync 健康记录"
     assert row[0] == "warn", "parse_error dump 应是 warn level"
-    assert "domain=orders" in row[1]
+    assert "domain=logistics" in row[1]
     assert "parse_error=" in row[1]
     assert row[2]["rows_written"] == 0
+    # spec §3.3 7 维度验证
+    assert "captured_at" in row[2], "context 应含 captured_at 维度"
 
 
 # ─── dumps: protocolVersion 必填 ──────────────────────────────────
@@ -753,7 +755,8 @@ def test_dumps_protocol_version_1_accepts(api_client, readwrite_key):
         json=payload,
     )
     assert r.status_code == 200
-    assert r.json()["data"]["status"] == "inserted"
+    assert r.json()["code"] == 0
+    assert r.json()["message"] == "success"
 
 
 # ─── dumps: 幂等重放 ──────────────────────────────────────────────
@@ -777,20 +780,20 @@ def test_dumps_order_idempotent_replay(api_client, readwrite_key):
         headers={"Authorization": f"Bearer {readwrite_key}"},
         json=payload,
     )
-    assert r1.json()["data"]["status"] == "inserted"
-    assert r2.json()["data"]["status"] == "inserted"
-    # Phase 1: logId 恒 0（raw_log no-op），改验证 rowsWritten 一致（幂等）
-    assert r1.json()["data"]["logId"] == r2.json()["data"]["logId"] == 0
-    assert r1.json()["data"]["rowsWritten"] == r2.json()["data"]["rowsWritten"]
+    assert r1.json()["data"] == {}
+    assert r2.json()["data"] == {}
+    # 幂等：两次都返 200 + empty data（空 list + 空 data 不再当 parse_error）
+    assert r1.status_code == 200
+    assert r2.status_code == 200
 
 
-# ─── dumps: 解析失败返回 parse_error ──────────────────────────────
+# ─── dumps: 解析失败返回 422 PARSE_ERROR ────────────────────────────
 
 
-def test_dumps_logistics_missing_main_order_id_returns_parse_error(
+def test_dumps_logistics_missing_main_order_id_returns_422(
     api_client, readwrite_key
 ):
-    """logistics 域缺 mainOrderId → 解析失败。"""
+    """AGENTS.md §2.5: logistics 域缺 mainOrderId → 422 PARSE_ERROR。"""
     r = api_client.post(
         "/v2/order-sync/dumps",
         headers={"Authorization": f"Bearer {readwrite_key}"},
@@ -801,11 +804,10 @@ def test_dumps_logistics_missing_main_order_id_returns_parse_error(
             endpoint="/api/v1/fulfillment/logistic_detail/list",
         ),
     )
-    assert r.status_code == 200
+    assert r.status_code == 422
     body = r.json()
-    assert body["data"]["status"] == "parse_error"
-    assert "mainOrderId is required" in body["data"]["parseError"]
-    assert body["data"]["rowsWritten"] == 0
+    assert body["code"] == "PARSE_ERROR"
+    assert "mainOrderId is required" in body["message"]
 
 
 def test_dumps_parse_failure_rolls_back_partial_business_rows(
@@ -831,8 +833,8 @@ def test_dumps_parse_failure_rolls_back_partial_business_rows(
         headers={"Authorization": f"Bearer {readwrite_key}"},
         json=_dump_payload("orders", _order_response([ORDER_ID_1])),
     )
-    assert r.status_code == 200
-    assert r.json()["data"]["status"] == "parse_error"
+    assert r.status_code == 422
+    assert r.json()["code"] == "PARSE_ERROR"
     with db_engine.connect() as conn:
         order_count = conn.execute(
             text("SELECT count(*) FROM plugin.orders WHERE shop_id = :s"),

@@ -97,6 +97,7 @@ def _record_dump_health(
         "endpoint": endpoint,
         "rows_written": rows_written,
         "parse_error_class": parse_error_class,
+        "captured_at": captured_at.isoformat(),  # proposal §3.3 7 维度
         "server_received_at": datetime.now(UTC).isoformat(),
     }
     message = (
@@ -280,10 +281,12 @@ def _ok_response(
     request_id: str,
     data: dict[str, Any],
 ) -> JSONResponse:
+    # AGENTS.md §2.5: 4 字段 envelope（code/message/requestId/data）200/非 200 一致
     return JSONResponse(
         status_code=200,
         content={
             "code": 0,
+            "message": "success",
             "requestId": request_id,
             "data": data,
         },
@@ -417,22 +420,20 @@ def post_dumps(
     domain = payload.dump.domain
     endpoint = payload.dump.endpoint
     captured_at = payload.dump.createdAt
-    request_params = payload.dump.request.params
-    request_body = payload.dump.request.body
     response_body = payload.dump.response.body
     main_order_id = payload.dump.mainOrderId
 
-    # response.body 为 None 时（插件抓取失败 / 超时），直接返，不记 raw_log
-    # （Phase 1 起 raw_log 不再写——不保留 dump 原 body 的需求以本仓不再负责，
-    # chrome-plugins 仓自带持久化）
+    # AGENTS.md §2.5: response.body 为 None（插件抓取失败/超时）→ 422 + EMPTY_RESPONSE_BODY
+    # 理由：empty body 是 TikTok 那边的问题（chrome-plugins 侧修复前），重试无意义 = PERMANENT
     if response_body is None:
-        return _ok_response(
+        return _audit_and_error(
             request_id=request_id,
-            data={
-                "status": "empty_response",
-                "logId": 0,  # Phase 1: raw_log no-op，log_id 永远 0；Phase 3 删字段
-                "rowsWritten": 0,
-            },
+            status=422,
+            code="EMPTY_RESPONSE_BODY",
+            message="dump.response.body is null; plugin must not advance progress",
+            key_prefix=key_prefix,
+            method="POST",
+            path=audit_path,
         )
 
     # 解析 → 写业务表
@@ -488,13 +489,10 @@ def post_dumps(
         parse_error = f"{type(exc).__name__}: {exc}"
         log.exception("parse error for domain=%s shop_id=%s", domain, shop_id)
 
-    # A successful HTTP response with no parsed order/statement rows is not a
-    # successful per-entity dump. Report it as parse_error so the plugin keeps
-    # the unit retryable instead of advancing its progress on rowsWritten=0.
-    if parse_error is None and rows_written == 0 and domain in {"orders", "statements"}:
-        parse_error = f"no {domain} rows parsed from response"
-
     # Write per-domain health metric to plugin_logs (for diagnosis).
+    # AGENTS.md §2.5: rowsWritten=0 不是 parse_error 探测信号——HTTP code 是唯一失败信号。
+    # （原 hack `if parse_error is None and rows_written == 0 and domain in {...}` 删除：
+    #  会漏判 logistics + after_sales 域静默返 200，导致 §5.3 物流 0 行额外根因。）
     _record_dump_health(
         sess,
         shop_id=shop_id,
@@ -515,20 +513,21 @@ def post_dumps(
             key_prefix=key_prefix,
             method="POST",
             path=audit_path,
-            status=200,
+            status=422,
             records_in=1,
             records_ok=0,
             error_code="PARSE_ERROR",
             message=parse_error,
         )
-        return _ok_response(
+        # AGENTS.md §2.5: parse_error 返 422 PERMANENT
+        return _audit_and_error(
             request_id=request_id,
-            data={
-                "status": "parse_error",
-                "logId": 0,
-                "rowsWritten": 0,
-                "parseError": parse_error,
-            },
+            status=422,
+            code="PARSE_ERROR",
+            message=parse_error,
+            key_prefix=key_prefix,
+            method="POST",
+            path=audit_path,
         )
 
     _log_event(
@@ -544,11 +543,7 @@ def post_dumps(
 
     return _ok_response(
         request_id=request_id,
-        data={
-            "status": "inserted",
-            "logId": 0,
-            "rowsWritten": rows_written,
-        },
+        data={},
     )
 
 
