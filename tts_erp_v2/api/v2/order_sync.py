@@ -14,12 +14,13 @@ import json
 import logging
 import sys
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import AliasChoices, BaseModel, Field, ValidationError, field_validator
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import get_session
@@ -45,6 +46,76 @@ VALID_DOMAINS = {"orders", "logistics", "statements", "after_sales"}
 _PATH_HAS_DATA = "/v2/order-sync/has-data"
 _PATH_DUMPS = "/v2/order-sync/dumps"
 _PATH_SYNCED_IDS = "/v2/order-sync/synced-ids"
+
+
+# ─── Logger ───────────────────────────────────────────────────────────
+
+# ─── Health counter ─────────────────────────────────────────────────
+
+_SQL_INSERT_DUMP_HEALTH = """
+INSERT INTO plugin.plugin_logs (
+    seller_id,
+    advertiser_id,
+    plugin_version,
+    plugin_name,
+    level,
+    message,
+    context,
+    occurred_at
+) VALUES (
+    :seller_id,
+    :advertiser_id,
+    :plugin_version,
+    :plugin_name,
+    :level,
+    :message,
+    CAST(:context AS JSONB),
+    :occurred_at
+)
+"""
+
+
+def _record_dump_health(
+    sess: Session,
+    *,
+    shop_id: str,
+    domain: str,
+    endpoint: str,
+    rows_written: int,
+    parse_error_class: str | None,
+    captured_at: datetime,
+) -> None:
+    """Write per-domain dump health metric to plugin.plugin_logs.
+
+    Purpose: diagnose why certain domains (e.g., statements) have 0 rows.
+    Called as part of the dump transaction (before sess.commit).
+    """
+    level = "info" if rows_written > 0 and not parse_error_class else "warn"
+    context = {
+        "domain": domain,
+        "shop_id": shop_id,
+        "endpoint": endpoint,
+        "rows_written": rows_written,
+        "parse_error_class": parse_error_class,
+        "server_received_at": datetime.now(UTC).isoformat(),
+    }
+    message = (
+        f"dump_processed domain={domain} rows={rows_written}"
+        + (f" parse_error={parse_error_class}" if parse_error_class else "")
+    )
+    sess.execute(
+        text(_SQL_INSERT_DUMP_HEALTH),
+        {
+            "seller_id": shop_id,
+            "advertiser_id": "",
+            "plugin_version": "order-sync-v1",
+            "plugin_name": "order-sync",
+            "level": level,
+            "message": message,
+            "context": json.dumps(context, ensure_ascii=False),
+            "occurred_at": captured_at,
+        },
+    )
 
 
 # ─── Logger ───────────────────────────────────────────────────────────
@@ -422,6 +493,17 @@ def post_dumps(
     # the unit retryable instead of advancing its progress on rowsWritten=0.
     if parse_error is None and rows_written == 0 and domain in {"orders", "statements"}:
         parse_error = f"no {domain} rows parsed from response"
+
+    # Write per-domain health metric to plugin_logs (for diagnosis).
+    _record_dump_health(
+        sess,
+        shop_id=shop_id,
+        domain=domain,
+        endpoint=endpoint,
+        rows_written=rows_written,
+        parse_error_class=parse_error,
+        captured_at=captured_at,
+    )
 
     # commit
     sess.commit()
