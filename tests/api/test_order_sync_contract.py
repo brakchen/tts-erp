@@ -651,6 +651,72 @@ def test_dumps_invalid_domain_returns_400(api_client, readwrite_key):
     assert r.status_code == 400  # Pydantic V2 校验 + SCHEMA_INVALID
 
 
+# ─── dumps: health counter 写入 plugin_logs ──────────────────────
+
+
+def test_dumps_health_counter_logs_successful_dump(api_client, readwrite_key):
+    """成功 dump 应写入 plugin_logs（level=info）。"""
+    r = api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=_dump_payload(
+            "orders",
+            _order_response([ORDER_ID_1], sku_count=1),
+            endpoint="/api/fulfillment/order/list",
+            method="POST",
+        ),
+    )
+    assert r.status_code == 200
+    # plugin_logs 应有写入（level=info）
+    from tts_erp_v2.db.base import get_session_factory
+    Session = get_session_factory()
+    with Session() as sess:
+        row = sess.execute(
+            __import__("sqlalchemy").text(
+                "SELECT level, message, context FROM plugin.plugin_logs"
+                " WHERE seller_id = :shop_id AND plugin_name = 'order-sync'"
+                " ORDER BY occurred_at DESC LIMIT 1"
+            ),
+            {"shop_id": SHOP_ID},
+        ).fetchone()
+    assert row is not None, "plugin_logs 应有 order-sync 健康记录"
+    assert row[0] == "info", "成功 dump 应是 info level"
+    assert "domain=orders" in row[1]
+    assert row[2]["rows_written"] >= 1
+
+
+def test_dumps_health_counter_logs_failed_dump(api_client, readwrite_key):
+    """parse_error dump 应写入 plugin_logs（level=warn）。"""
+    r = api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=_dump_payload(
+            "orders",
+            {"code": 0, "data": {"main_orders": []}},  # 空 list → parse_error
+            endpoint="/api/fulfillment/order/list",
+            method="POST",
+        ),
+    )
+    assert r.status_code == 200
+    # plugin_logs 应有写入（level=warn）
+    from tts_erp_v2.db.base import get_session_factory
+    Session = get_session_factory()
+    with Session() as sess:
+        row = sess.execute(
+            __import__("sqlalchemy").text(
+                "SELECT level, message, context FROM plugin.plugin_logs"
+                " WHERE seller_id = :shop_id AND plugin_name = 'order-sync'"
+                " ORDER BY occurred_at DESC LIMIT 1"
+            ),
+            {"shop_id": SHOP_ID},
+        ).fetchone()
+    assert row is not None, "plugin_logs 应有 order-sync 健康记录"
+    assert row[0] == "warn", "parse_error dump 应是 warn level"
+    assert "domain=orders" in row[1]
+    assert "parse_error=" in row[1]
+    assert row[2]["rows_written"] == 0
+
+
 # ─── dumps: 幂等重放 ──────────────────────────────────────────────
 
 
