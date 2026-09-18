@@ -717,6 +717,45 @@ def test_dumps_health_counter_logs_failed_dump(api_client, readwrite_key):
     assert row[2]["rows_written"] == 0
 
 
+# ─── dumps: protocolVersion 必填 ──────────────────────────────────
+
+
+def test_dumps_protocol_version_required(api_client, readwrite_key):
+    """protocolVersion 缺失应返 400（Pydantic V2 校验 + SCHEMA_INVALID）。"""
+    payload = _dump_payload(
+        "orders",
+        _order_response([ORDER_ID_1]),
+        endpoint="/api/fulfillment/order/list",
+        method="POST",
+    )
+    # 删除 protocolVersion 字段
+    del payload["protocolVersion"]
+    r = api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=payload,
+    )
+    assert r.status_code == 400  # Pydantic V2 校验 + SCHEMA_INVALID
+
+
+def test_dumps_protocol_version_1_accepts(api_client, readwrite_key):
+    """protocolVersion=1 应成功。"""
+    payload = _dump_payload(
+        "orders",
+        _order_response([ORDER_ID_1]),
+        endpoint="/api/fulfillment/order/list",
+        method="POST",
+    )
+    assert payload["protocolVersion"] == 1
+    r = api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=payload,
+    )
+    assert r.status_code == 200
+    assert r.json()["data"]["status"] == "inserted"
+
+
 # ─── dumps: 幂等重放 ──────────────────────────────────────────────
 
 
