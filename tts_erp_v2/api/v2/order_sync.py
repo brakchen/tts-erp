@@ -233,7 +233,7 @@ class DumpBodyIn(BaseModel):
 
 
 class DumpRequest(BaseModel):
-    protocolVersion: int = Field(default=PROTOCOL_VERSION)
+    protocolVersion: int
     requestId: str | None = Field(default=None, min_length=1, max_length=128)
     scope: ScopeIn
     dump: DumpBodyIn
