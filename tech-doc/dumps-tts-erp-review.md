@@ -23,6 +23,10 @@
 | **A11** | **per-layer 命名规则明确化**：wire format（HTTP envelope / JSON / Pydantic schema field / TS 变量）= camelCase `requestId`；Python 内部 / DB / URL = snake_case `request_id`；HTTP header = `x-request-id`（RFC 7230） | 调研发现当前仓库已经按层划分（`analytics.py` / `intercept.py` / `test_intercept_sync.py` 都同时存在两种 casing 但分工清晰） | AGENTS.md §2.5 "字段命名规则"（5 行表格 + 5 类约束） |
 | **A12** | **empty_response = PERMANENT**（α 方案）：empty body 返 422 → plugin 跳过 + 记日志 + 等下次 alarm，不再无限重试 | 用户原话 "empty body 是 TikTok 那边的问题，重试无意义" | proposal §2 P0-1b step 5；contract §2.3/§2.4 同步 |
 | **A13** | **不需要回填 settlement 148 条**：chrome-plugins 修复 dumps 流后自然增量补齐；148 条 `plugin.intercepted_requests` 数据 stale（1-2 周），回填旧数据风险 > 价值 | 用户原话 "B4 不需要回填，我重新抓取就可以了" | review §G7 取消 Lane D；proposal §3.4 + §5 移除回填；contract §13 移除 TODO #10 |
+| **A14** | **`_error_response` 保留 `request_id or f"req-{uuid.uuid4()}"` 兜底**（建议1）：防御性编程，1 行代码成本、零运行时开销、防未来漏传破坏 contract | 用户原话 "保留" | order_sync.py:_error_response 当前实现不动 |
+| **A15** | **B3 Lane 合并顺序（建议1）**：7 个 lane 并行开 worktree，merge 按依赖关系走——A/C/F/G 无依赖立即合；B/E 等 chrome-plugins 同步发布后再合 | 用户原话 "B3:建议1"（质疑原 "Week 1/Week 2" 分周是错谈）| proposal §5 修正：无 inherent 时间分周，A/C/F/G 可以并行不同 week merge |
+| **A16** | **B6 chrome-plugins 协调机制（建议2）**：走正式"跨仓 handoff"模式——每个仓维护自己的 `handoff/ACTIVE.md`（chrome-plugins 仓 2026-09-11 起已有），改动时双向同步；本仓也在 `handoff/ACTIVE.md` 加跨仓协调行 | 用户原话 "B6:走正式跨仓 handoff" | 本仓 `handoff/ACTIVE.md` 加"跨仓协调行"；chrome-plugins 仓实现需协调（仅记录，本 lane 不实施）|
+| **A17** | **B7 Lane 命名风格（建议1）**：沿用 conventional commits（`feat/*` / `fix/*` / `docs/*`）| 用户原话 "沿用方案——conventional commits" | proposal §7.1 lane 命名表已是 conventional commits 格式，无需改动 |
 
 ---
 
@@ -34,19 +38,19 @@
 | ~~**B2**~~ | ~~`requestId` vs `request_id` casing？~~ | **A11 已拍板：per-layer 划分（wire format camelCase / Python 内部 snake_case），不强制统一** | — |
 <<<<<<< Updated upstream
 | ~~**B-α/β**~~ | ~~empty_response 是 RETRYABLE 还是 PERMANENT？~~ | **A12 已拍板：PERMANENT**（empty body = TikTok 问题 = 重试无意义）| — |
-| **B3** | Lane 合并顺序：Week 1 先合低风险 4 个，Week 2 等跨仓？ | 当前 proposal §5 安排 | 待确认 |
-| **B4** | 回填脚本是否等 Lane C 诊断结论？ | 当前 proposal §7 建议等（避免用错 parser 写脏数据） | (α) 等 24h 诊断；(β) 并行写 |
+| ~~**B3**~~ | ~~Lane 合并顺序：Week 1 先合低风险 4 个，Week 2 等跨仓？~~ | ~~当前 proposal §5 安排~~ | **A15 已拍板：建议1** —— 7 个 lane 并行 worktree，merge 按依赖关系走（A/C/F/G 立即合，B/E 等跨仓同步后合）|
+| ~~**B4**~~ | ~~回填脚本是否等 Lane C 诊断结论？~~ | ~~当前 proposal §7 建议等（避免用错 parser 写脏数据）~~ | **A13 已拍板：跳过回填**（用户原话 "B4 不需要回填，我重新抓取就可以了"）|
 | ~~**B5**~~ | ~~`intercept-plugin-canonical.md` deprecate vs 加 banner？~~ | **已通过 lane `docs/merge-canonical-into-contract` 解决**：合并到 contract 后直接删除 | ~~(α) 加 banner；(β) 移到 `tech-doc/_archive/`~~ |
-| **B6** | chrome-plugins 仓协调机制？ | 当前 proposal §7 建议直接 IM + handoff.md 摘要 | (α) 直接 IM；(β) 走 handoff.md 正式 |
-| **B7** | Lane 命名风格？ | 当前用 `feat/*` / `fix/*` / `docs/*` | 待确认 |
+| ~~**B6**~~ | ~~chrome-plugins 仓协调机制？~~ | ~~当前 proposal §7 建议直接 IM + handoff.md 摘要~~ | **A16 已拍板：建议2** —— 走正式"跨仓 handoff"，每仓 `handoff/ACTIVE.md` 双向同步 |
+| ~~**B7**~~ | ~~Lane 命名风格？~~ | ~~当前用 `feat/*` / `fix/*` / `docs/*`~~ | **A17 已拍板：建议1** —— 沿用 conventional commits（feat/* / fix/* / docs/*）|
 | ~~**B9**~~ | ~~`_error_response` 中 `request_id or f"req-{uuid.uuid4()}"` 兜底逻辑要不要？~~ | **A14 已拍板：保留（α）** | — |
 =======
 | ~~**B-α/β**~~ | ~~empty_response 是 RETRYABLE 还是 PERMANENT？~~ | **A12 已拍板：PERMANENT**（empty body = TikTok 问题 = 重试无意义） | — |
-| **B3** | Lane 合并顺序 | proposal §5 安排 | **⏵ 推荐 α**：Week 1 合低风险（Lane A / F / G），Week 2 等跨仓同步后合（Lane B / E），Lane C/D 按诊断结论走 |
-| **B4** | 回填脚本时机 | proposal §7 建议等 | **⏵ 推荐 α**：等 24h Lane C 诊断结论再决定，避免用错 parser 写脏数据；148 条不紧急 |
-| **B5** | canonical.md 处置 | proposal §7 建议 banner | **⏵ 推荐 α**：加顶部 banner 保留，迁 _archive/ 需要 AGENTS.md §9 业务信息索引同步改（额外工作）；等没人引用时再归档 |
-| **B6** | chrome-plugins 协调 | proposal §7 建议直接 IM | **⏵ 推荐 α**：直接 IM 协商 + 本仓 `handoff.md` 留摘要记录；不另起一仓的 `handoff/ACTIVE.md` 同步机制 |
-| **B7** | Lane 命名风格 | proposal §3 提案 | **⏵ 推荐沿用方案**：`feat/after-sales-routing` / `fix/logistics-empty-response` / `fix/statements-gaps-diagnose` / `feat/statements-backfill` / `fix/strict-http-semantics` / `fix/dumps-validation-align` / `docs/dumps-doc-rationalize`（conventional commits） |
+| ~~**B3**~~ | ~~Lane 合并顺序~~ | ~~proposal §5 安排~~ | **A15 已拍板：建议1** |
+| ~~**B4**~~ | ~~回填脚本时机~~ | ~~proposal §7 建议等~~ | **A13 已拍板：跳过回填**（用户原话 "B4 不需要回填，我重新抓取就可以了"）|
+| ~~**B5**~~ | ~~canonical.md 处置~~ | ~~proposal §7 建议 banner~~ | **已通过 lane `docs/merge-canonical-into-contract` 解决**：合并到 contract 后直接删除 |
+| ~~**B6**~~ | ~~chrome-plugins 协调~~ | ~~proposal §7 建议直接 IM~~ | **A16 已拍板：建议2** |
+| ~~**B7**~~ | ~~Lane 命名风格~~ | ~~proposal §3 提案~~ | **A17 已拍板：建议1** |
 | ~~**B9**~~ | ~~`_error_response` 兜底逻辑~~ | **A14 已拍板：保留（α）** | — |
 >>>>>>> Stashed changes
 
