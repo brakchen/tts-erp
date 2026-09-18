@@ -8,7 +8,7 @@
 - 持久化: `plugin.intercepted_requests.response_body[].reverse_module[0].reverse_type`（response_body JSONB）
 - 类型: **int**（卖家中心原始码）
 - 上游: TikTok 卖家中心 `/api/fulfillment/order/list` 响应 `main_orders[].reverse_module[0].reverse_type`
-- 文档锚点: `tech-doc/plugin-sourced-shop-analytics.md §8`、`tech-doc/intercept-plugin-canonical.md §3`
+- 文档锚点: `tech-doc/plugin-sourced-shop-analytics.md §8`、`tech-doc/dumps-data-contract.md §11`
 
 ## 取值
 
@@ -53,4 +53,4 @@
 
 ## 引用
 - 代码: `tts_erp_v2/plugin/orders/parser.py:280-310`（读但没写库）
-- 文档: `tech-doc/plugin-sourced-shop-analytics.md §4.4 / §8`、`tech-doc/intercept-plugin-canonical.md §3`、`tech-doc/tiktok-seller-center-api-catalog.md §2.5`
+- 文档: `tech-doc/plugin-sourced-shop-analytics.md §4.4 / §8`、`tech-doc/dumps-data-contract.md §11`、`tech-doc/tiktok-seller-center-api-catalog.md §2.5`

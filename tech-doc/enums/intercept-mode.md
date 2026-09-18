@@ -5,7 +5,7 @@
 ## 来源
 - DB column: `plugin.intercept_configs.mode` (Text, NOT NULL, default `'whitelist'`)
 - 类型: **text**（项目内部定义）
-- 文档锚点: `tts_erp_v2/db/models/intercept.py:64-67`（注释）、`tech-doc/intercept-plugin-canonical.md`
+- 文档锚点: `tts_erp_v2/db/models/intercept.py:64-67`（注释）、`tech-doc/dumps-data-contract.md`
 
 ## 取值（✅ 固化）
 
@@ -16,4 +16,4 @@
 
 ## 引用
 - 代码: `tts_erp_v2/db/models/intercept.py:64-67`
-- 文档: `tech-doc/intercept-plugin-canonical.md §1.2`、`tech-doc/chrome-ext-order-sync-design.md §1`
+- 文档: `tech-doc/dumps-data-contract.md §6.1`、`tech-doc/chrome-ext-order-sync-design.md §1`

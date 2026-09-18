@@ -280,7 +280,7 @@ class ChromeSettlementDetail(Base):
 
 # ── after_sales ─────────────────────────────────────────────────────
 # 售后/退款结构化数据，来自 /return_refund/202309/cancellations/search。
-# tech-doc/order-domain-business-rules.md §3 + tech-doc/intercept-plugin-canonical.md §1.3
+# tech-doc/order-domain-business-rules.md §3 + tech-doc/dumps-data-contract.md §1 / §3
 class ChromeAfterSale(Base):
     __tablename__ = "after_sales"
     __table_args__ = (
