@@ -1,5 +1,12 @@
 # Chrome 扩展 订单/物流/结算 数据同步方案
 
+> **⚠ 本文档为设计稿（2026-09-08 创建），部分内容已落后**：
+> - `plugin.raw_log` 表已下线（Phase 3, 2026-09-17）
+> - 8 张业务表 `log_id` FK 已删除
+> - 本文档 §3.2 raw_log 相关内容已失效
+> - **当前契约以 [`tech-doc/dumps-data-contract.md`](dumps-data-contract.md) 为准**
+> - 当前改造方案以 [`tech-doc/dumps-tts-erp-refactor-proposal.md`](dumps-tts-erp-refactor-proposal.md) 为准
+
 > Date: 2026-09-08. Reference: `analytics/dump-architecture.md` (canonical pattern),
 > `chrome-plugins/ads-data-sync/docs/HANDOFF-2026-09-08.md` (plugin side).
 
@@ -72,14 +79,16 @@ Chrome 插件                                    tts-erp 后端
 │  1. 校验请求                         │
 │  2. 解析 TikTok 响应（inline）       │
 │  3. 写入 plugin 业务表          │
-│  4. 写入 plugin.raw_log（流水） │
-│  5. 返回 inserted/updated/stale      │
+│  4. 返回 inserted/updated/stale      │
 └─────────────────────────────────────┘
 ```
 
+> **注意**：原设计中第 4 步「写入 plugin.raw_log（流水）」已于 2026-09-17 Phase 3 下线。
+> 当前 dumps handler 直接解析并写入业务表，不再经过 raw_log。
+
 **核心原则**：
 
-- `raw_log` = 同步流水日志（每条 dump 一行），**不是暂存表**，不需要"未处理"状态
+- ~~`raw_log` = 同步流水日志（每条 dump 一行），**不是暂存表**，不需要"未处理"状态~~ **已下线**
 - 解析在 dump handler 内 **inline 完成**，不经过 sync-worker
 - 业务表 = 查询 source of truth，has-data 查这里
 - 与 `commerce`/`fulfillment`/`finance` **完全隔离**，不建 FK、不共享数据
@@ -88,7 +97,12 @@ Chrome 插件                                    tts-erp 后端
 CREATE SCHEMA IF NOT EXISTS plugin;
 ```
 
-### 3.2 `plugin.raw_log` — 同步流水（完整 dump 存档）
+### 3.2 ~~`plugin.raw_log` — 同步流水（完整 dump 存档）~~ — **已下线（Phase 3, 2026-09-17）**
+
+> **⚠ 历史记录**：`plugin.raw_log` 表已于 2026-09-17 Phase 3 正式 drop（commit b77cf83 + 9d0a636 + Phase 3 commit）。
+> 原 8 张业务表的 `log_id` FK 列已删除，`plugin.raw_log` 表及 sequence 全部删除。
+> 如需了解历史实现细节，请参考 git log 或 `tech-doc/_archive/` 归档文档。
+> 当前契约以 [`tech-doc/dumps-data-contract.md`](dumps-data-contract.md) 为准。
 
 每条 dump 请求一行，只追加不修改。存储完整的原始 dump 内容，用于审计、
 问题排查和数据回溯。若插件上传 `response.body = null`，为满足该列的
@@ -140,6 +154,10 @@ CREATE INDEX ix_raw_log_endpoint ON plugin.raw_log(endpoint);
 - **数据回溯**：业务表数据有问题时，可从 raw_log.response_body 重跑解析修复
 
 ### 3.3 业务表
+
+> **⚠ 历史设计**：以下 CREATE TABLE 语句为 2026-09-08 设计稿中的原始 schema。
+> 实际实现中 `log_id` 列已于 2026-09-17 Phase 3 删除（raw_log 下线后，业务表不再需要 log_id FK）。
+> 当前实际 schema 请参考 `schema_tts_erp.sql` 或 `tech-doc/dumps-data-contract.md` §4 字段映射。
 
 #### `plugin.orders` — 订单
 
