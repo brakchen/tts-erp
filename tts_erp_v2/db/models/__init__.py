@@ -18,6 +18,8 @@ from tts_erp_v2.db.models.plugin import (
     AdMonthly,
     AdRawLog,
     AdToday,
+    ChromeAfterSale,
+    ChromeAfterSaleItem,
     ChromeOrder,
     ChromeOrderLine,
     ChromeSettlement,
@@ -25,7 +27,6 @@ from tts_erp_v2.db.models.plugin import (
     ChromeShipment,
     ChromeTrackingEvent,
     PluginLog,
-    RawLog,
 )
 from tts_erp_v2.db.models.intercept import (
     InterceptConfig,
@@ -130,7 +131,6 @@ __all__ = [
     "ProductProfitDaily",
     "PurchaseOrder",
     "PurchaseOrderLine",
-    "RawLog",
     "RawRecord",
     "SalesOrder",
     "SalesOrderLine",

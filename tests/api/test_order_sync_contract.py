@@ -34,7 +34,6 @@ _CLEANUP_SQLS = [
     "DELETE FROM plugin.settlements WHERE shop_id = :s",
     "DELETE FROM plugin.shipments WHERE shop_id = :s",
     "DELETE FROM plugin.orders WHERE shop_id = :s",
-    "DELETE FROM plugin.raw_log WHERE shop_id = :s",
 ]
 
 

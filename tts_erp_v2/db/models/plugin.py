@@ -1,15 +1,19 @@
-"""plugin.* — Chrome 插件 dump 的全部落库表（12 张）。
+"""plugin.* — Chrome 插件 dump 解析后的结构化业务表（10 张）。
 
 订单/物流/结算（7 张）：
-  raw_log + orders + order_lines + shipments + tracking_events
+  orders + order_lines + shipments + tracking_events
   + settlements + settlement_details
 
-广告消耗 + 插件日志（5 张，2026-09-11 由 analytics schema 并入）：
+售后（2 张，2026-09-13 feat/after-sales-table 建）：
+  after_sales + after_sale_items
+
+广告消耗 + 插件日志（4 张，2026-09-11 由 analytics schema 并入）：
   ad_today + ad_daily + ad_monthly + ad_raw_log + plugin_logs
 
 数据来源：Chrome 扩展从 TikTok Seller Center 抓取的 HTTP 响应，
-通过 /v2/order-sync/dumps 端点写入。raw_log 存完整原始 dump，
-业务表存解析后的结构化数据。每张业务表有 log_id FK 回 raw_log 用于溯源。
+通过 /v2/order-sync/dumps 端点写入并直接解析为结构化数据落库
+（不再写原始 dump body，2026-09-17 chore/deprecate-plugin-raw-log
+Phase 3 移除 plugin.raw_log 表）。
 
 详见 tech-doc/chrome-ext-order-sync-design.md。
 """
@@ -39,44 +43,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from tts_erp_v2.db.base import Base
 
 
-# ── raw_log ─────────────────────────────────────────────────────────
-# 同步流水日志。每条 dump 请求一行，只追加不修改。
-class RawLog(Base):
-    __tablename__ = "raw_log"
-    __table_args__ = (
-        Index("ix_raw_log_domain_shop", "domain", "shop_id"),
-        Index("ix_raw_log_created", "created_at"),
-        Index("ix_raw_log_endpoint", "endpoint"),
-        {"schema": "plugin"},
-    )
-
-    id: Mapped[int] = mapped_column(
-        BigInteger,
-        primary_key=True,
-        server_default=text("generate_always_as_identity()"),
-    )
-    domain: Mapped[str] = mapped_column(Text, nullable=False)
-    shop_id: Mapped[str] = mapped_column(Text, nullable=False)
-    endpoint: Mapped[str] = mapped_column(Text, nullable=False)
-    captured_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    request_params: Mapped[dict | None] = mapped_column(JSONB)
-    request_body: Mapped[dict | None] = mapped_column(JSONB)
-    response_body: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    parse_error: Mapped[str | None] = mapped_column(Text)
-    rows_written: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("0")
-    )
-    source: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'chrome-ext'")
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()")
-    )
-
-
-# ── orders ──────────────────────────────────────────────────────────
+# ── orders ─
 # 订单头，来自 order/list 响应。
 class ChromeOrder(Base):
     __tablename__ = "orders"
@@ -91,9 +58,6 @@ class ChromeOrder(Base):
         BigInteger,
         primary_key=True,
         server_default=text("generate_always_as_identity()"),
-    )
-    log_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("plugin.raw_log.id"), nullable=True
     )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     order_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -134,9 +98,6 @@ class ChromeOrderLine(Base):
         primary_key=True,
         server_default=text("generate_always_as_identity()"),
     )
-    log_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("plugin.raw_log.id"), nullable=True
-    )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     order_id: Mapped[str] = mapped_column(Text, nullable=False)
     sku_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -173,11 +134,6 @@ class ChromeShipment(Base):
         primary_key=True,
         server_default=text("generate_always_as_identity()"),
     )
-    log_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("plugin.raw_log.id"),
-        nullable=True,
-    )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     order_id: Mapped[str] = mapped_column(Text, nullable=False)
     package_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -213,11 +169,6 @@ class ChromeTrackingEvent(Base):
         primary_key=True,
         server_default=text("generate_always_as_identity()"),
     )
-    log_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("plugin.raw_log.id"),
-        nullable=True,
-    )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     package_id: Mapped[str] = mapped_column(Text, nullable=False)
     event_key: Mapped[str] = mapped_column(Text, nullable=False)
@@ -251,11 +202,6 @@ class ChromeSettlement(Base):
         BigInteger,
         primary_key=True,
         server_default=text("generate_always_as_identity()"),
-    )
-    log_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("plugin.raw_log.id"),
-        nullable=True,
     )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     statement_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -304,11 +250,6 @@ class ChromeSettlementDetail(Base):
         primary_key=True,
         server_default=text("generate_always_as_identity()"),
     )
-    log_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("plugin.raw_log.id"),
-        nullable=True,
-    )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     statement_id: Mapped[str] = mapped_column(Text, nullable=False)
     statement_version: Mapped[int] = mapped_column(
@@ -355,9 +296,6 @@ class ChromeAfterSale(Base):
         primary_key=True,
         server_default=text("generate_always_as_identity()"),
     )
-    log_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("plugin.raw_log.id"), nullable=True
-    )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     cancel_id: Mapped[str] = mapped_column(Text, nullable=False)
     cancel_type: Mapped[str] = mapped_column(Text, nullable=False)
@@ -396,9 +334,6 @@ class ChromeAfterSaleItem(Base):
         BigInteger,
         primary_key=True,
         server_default=text("generate_always_as_identity()"),
-    )
-    log_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("plugin.raw_log.id"), nullable=True
     )
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     cancel_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -714,7 +649,6 @@ class CampaignOptLog(Base):
 
 __all__ = [
     # 订单/物流/结算
-    "RawLog",
     "ChromeOrder",
     "ChromeOrderLine",
     "ChromeShipment",

@@ -363,11 +363,7 @@ def post_dumps(
             },
         )
 
-    # 1. 写 raw_log 已废弃（Phase 1 no-op，见 tts_erp_v2/plugin/orders/repository.py::write_raw_log）
-    #    原流程：write_raw_log → flush → parse → sa_update(RawLog)
-    #    现在直接 parse；write_raw_log 仍被调用（caller 兼容签名），但内部只 log.warning + return 0
-
-    # 2. 解析 → 写业务表（Phase 1 不再传 log_id——业务表列已 nullable）
+    # 解析 → 写业务表
     parse_error: str | None = None
     rows_written = 0
 

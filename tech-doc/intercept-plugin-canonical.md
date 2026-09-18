@@ -9,7 +9,7 @@
 | 问题 | 答案 |
 | --- | --- |
 | ads-data-sync 抓什么 | 4 张表 8 个 endpoint 群（ad 域 + 订单/物流/结算/售后）|
-| dumps 怎么解析 | 1 事务 1 张表，dump body 写 `plugin.raw_log` **（Phase 1 deprecated，见 §5）**，业务表 FK 引用 |
+| dumps 怎么解析 | 1 事务 1 张表，dump body 直接 inline 解析为业务表行（不再写 plugin.raw_log，2026-09-17 chore/deprecate-plugin-raw-log Phase 3 已下掉）|
 | 4 域数据怎么关联 | `shop_id` 跨域唯一键 + 4 类 ID 映射（main_order_id / fulfill_unit_id / statement_id / reverse_order_id）|
 
 ---
@@ -352,19 +352,19 @@ WHERE o.shop_id = ?
 | 7 | chrome 端抓取规则 + 权限 | ❌ 跨仓 | chrome-plugins |
 | 8 | dumps 上传失败重试策略 | ❌ 跨仓 | chrome-plugins |
 
-## 5. plugin.raw_log 下线计划（chore/deprecate-plugin-raw-log，2026-09-15 起）
+## 5. plugin.raw_log 下线（chore/deprecate-plugin-raw-log，2026-09-15 → 2026-09-17，已完成 ✅）
 
-**状态**：Phase 1 已发布（停写 + 1 天观察期）；Phase 3 待 Phase 2 观察结果触发。
+**状态**：三阶段全部完成（commit b77cf83 + 9d0a636 + Phase 3 commit）；prod alembic_version=0033_drop_plugin_raw_log；plugin.raw_log 表及 8 条 log_id_fk FK / 8 列 log_id / raw_log_id_seq 均已 drop。
 
-### 历史背景
+### 历史背景（为啥下）
 
 - `plugin.raw_log` 是 chrome-ext dumps 流水表，v3 协议（约 2024 末）创建
 - 设计目的：保留 dump 原始 body 用于事后重放（重解析 + 历史回填）
-- prod 实测（2026-09-15）：38,037 行 / 24h 32,777 行 / ~2,257 行/h
-- **6 张业务表（shipments / tracking_events / settlements / settlement_details / after_sales / after_sale_items）FK 引用但完全空** → raw_log 实际只服务 `orders` + `order_lines` 两张
-- 唯一存活的 history-backfill 用例：`oneoff_backfill_plugin_order_times.py`（9d8ad11，2026-09-14 已跑）
+- prod 实测（2026-09-15）：52k 行 / ~2,257 行/h；6 张业务表 FK 引用但完全空（raw_log 实际只服务 orders + order_lines 两张）；1,456 orders + 1,493 order_lines 的 log_id FK 指向仍存在的 dump body
+- 唯一存活的 history-backfill 用例：`oneoff_backfill_plugin_order_times.py`（9d8ad11，2026-09-14 已跑）——Phase 3 同步删脚本（历史 raw_log 已不在）
+- 决策（2026-09-17 用户拍板）：**跳过 Phase 2 1 天观察期**，直接 Phase 3。理由是 chrome-plugins 端于 2026-09-16 06:23 UTC 停摆（与 Phase 1 部署无关），prod 52h+ 无流量，无法观察 Phase 2；code + test 库 review 充分
 
-### Phase 1（2026-09-15 上线，本 lane 提交）
+### Phase 1（2026-09-15，commit b77cf83）
 
 - alembic 0032_make_plugin_log_id_nullable：8 张业务表 `log_id` 列 `DROP NOT NULL`
 - `tts_erp_v2/plugin/orders/repository.py::write_raw_log` 改 no-op（log.warning + return 0）
@@ -372,21 +372,24 @@ WHERE o.shop_id = ?
 - 所有 `upsert_*` / `parse_*` 函数移除 `log_id` 参数
 - 测试更新：`_make_log_id` / `_write_raw_log` helper 删除，`logId` 字段恒 0
 - chrome-plugins 端无感知（API 仍返 `logId` 字段，值=0）
+- prod 跑：`ALLOW_PROD_DESTRUCTIVE=1 alembic upgrade head`（2026-09-17 09:25 UTC），alembic_version=0032
 
-### Phase 2（1 天观察期，2026-09-15 → 2026-09-16）
+### Phase 2（1 天观察期，**跳过**）
 
-- 监控 prod：业务表 `orders` / `order_lines` 是否还在 upsert（chrome-plugins 不停 = 业务表应当继续增长）
-- 监控 prod：`plugin.raw_log` 不再有新行（SELECT MAX(created_at) 应当停在 Phase 1 上线时刻附近）
-- 监控 prod：chrome-plugins 端 stderr / plugin_logs 是否报错（plugins 端不应该感知 API 变化）
+- chrome-plugins 端停摆 52h+，无观察流量；用户拍板直接进 Phase 3
+- test 库 62 passed + Phase 1 代码 review 充分 → 接受"无真实流量验证"风险
 
-### Phase 3（条件触发，2026-09-16+ 用户拍板）
+### Phase 3（2026-09-17，commit 紧接的 alphabet commit）
 
-- alembic 0033_drop_plugin_raw_log：DROP CONSTRAINT × 6 + DROP COLUMN log_id × 8 + DROP TABLE plugin.raw_log + DROP SEQUENCE raw_log_id_seq
-- `tts_erp_v2/plugin/orders/repository.py::write_raw_log` 删除
-- `tts_erp_v2/db/models/plugin.py::RawLog` 删除
-- `tts_erp_v2/api/v2/admin.py::_PLUGIN_ORDER_RAW_LOG` / `list_known_shops` SELECT 删除
-- `tech-doc/intercept-plugin-canonical.md` §5 本节改写为历史归档
-- `tests/conftest.py:225` cleanup 行删除
-- `scripts/oneoff_backfill_plugin_order_times.py` 删除（已无意义）
+- alembic 0033_drop_plugin_raw_log：DROP CONSTRAINT × 8（之前估 6，实际 8，after_sales / after_sale_items 也有 FK）+ DROP COLUMN log_id × 8 + DROP TABLE plugin.raw_log CASCADE（含 3 索引 + sequence）
+- `tts_erp_v2/db/models/plugin.py`：`RawLog` 类删除 + 8 处 log_id 字段删除 + 头注释改写
+- `tts_erp_v2/db/models/__init__.py`：`RawLog` 导入 + `__all__` 项删除
+- `tts_erp_v2/plugin/orders/repository.py`：`write_raw_log` 函数删除 + 还原 docstring
+- `tts_erp_v2/api/v2/order_sync.py`：清 Phase 1 历史注释（write_raw_log no-op 那 3 行）
+- `tts_erp_v2/api/v2/admin.py`：`_PLUGIN_ORDER_RAW_LOG` 常量删除 + purge 列表项删除 + `list_known_shops` 的 raw_log SELECT 删除
+- `schema_tts_erp.sql`：8 log_id 列删除 + 6 FK 约束删除 + CREATE TABLE plugin.raw_log 块删除 + 3 ix_raw_log_* 索引删除 + raw_log_pkey 删除
+- `tests/conftest.py`：cleanup 列表 `"plugin.raw_log"` 行删除
+- `tests/db/test_time_fields_convention.py`：raw_log 豁免注释删除 + 把 `plugin` schema 加入 V2_SCHEMAS 清单（之前因 raw_log 无 updated_at 豁免；raw_log 已 drop，业务表均有 updated_at + 触发器）
+- `scripts/oneoff_backfill_plugin_order_times.py`：整文件删除（历史 raw_log 已不在，脚本无意义）
 
-**前置检查**：如果 Phase 2 观察发现业务表停止 upsert 或 chrome 端报错，应回滚 Phase 1（write_raw_log 恢复 INSERT + 业务表 INSERT 恢复 log_id）。
+**不可逆**：raw_log 全部 dump body 永久丢失；8 张业务表 1,456 + 1,493 历史行的 log_id FK 列值永久丢失。如未来需恢复，从 `/home/schan/backups/` 的 2026-09-13 之前 prod 7d 全量备份恢复整库。

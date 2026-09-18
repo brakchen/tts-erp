@@ -50,12 +50,6 @@ def _cleanup_registered_shops(db_engine):
         conn.execute(
             delete(ChannelAccount).where(ChannelAccount.shop_id.in_(SHOP_IDS))
         )
-        # pi-lens-ignore: python-sql-injection — static DDL-shaped DELETE with bound params
-        conn.execute(
-            text(
-                "DELETE FROM plugin.raw_log WHERE shop_id IN (:a, :b)"
-            ).bindparams(a=SHOP_A, b=SHOP_B)
-        )
         conn.execute(
             text(
                 "DELETE FROM plugin.ad_daily WHERE seller_id IN (:a, :b)"
@@ -233,18 +227,6 @@ def test_registered_shop_not_synced_until_credential(api_client, admin_key):
 # ─── GET /v2/admin/shops/unregistered ──────────────────────────────────
 
 
-def _insert_raw_log(db_engine, shop_id: str) -> None:
-    with db_engine.begin() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO plugin.raw_log "
-                "(domain, shop_id, endpoint, captured_at, response_body) "
-                "VALUES ('orders', :sid, '/api/fulfillment/order/list', "
-                ":ts, '{}'::jsonb)"
-            ).bindparams(sid=shop_id, ts=datetime.now(UTC))
-        )
-
-
 def _insert_ad_daily(db_engine, seller_id: str) -> None:
     with db_engine.begin() as conn:
         conn.execute(
@@ -259,8 +241,11 @@ def _insert_ad_daily(db_engine, seller_id: str) -> None:
         )
 
 
-def test_unregistered_lists_plugin_only_shops(api_client, admin_key, db_engine):
-    _insert_raw_log(db_engine, SHOP_A)
+def test_unregistered_lists_analytics_source_only(api_client, admin_key, db_engine):
+    """Phase 3 之后 (2026-09-17)：raw_log 表已 drop，plugin 域 source 移除。
+    /v2/admin/shops/unregistered 现在只从 analytics 域 (ad_today / ad_daily /
+    ad_monthly / plugin_logs) 枚举未注册店铺。
+    """
     _insert_ad_daily(db_engine, SHOP_B)
 
     r = api_client.get(
@@ -269,14 +254,13 @@ def test_unregistered_lists_plugin_only_shops(api_client, admin_key, db_engine):
     )
     assert r.status_code == 200, r.text
     candidates = {c["shop_id"]: c for c in r.json()["candidates"]}
-    assert SHOP_A in candidates
-    assert "plugin" in candidates[SHOP_A]["sources"]
     assert SHOP_B in candidates
     assert "analytics" in candidates[SHOP_B]["sources"]
+    # plugin source 已下线（Phase 3 drop plugin.raw_log）
+    assert "plugin" not in {src for c in candidates.values() for src in c["sources"]}
 
 
 def test_unregistered_excludes_registered_shops(api_client, admin_key, db_engine):
-    _insert_raw_log(db_engine, SHOP_A)
     _register(api_client, admin_key)
 
     r = api_client.get(
@@ -285,6 +269,8 @@ def test_unregistered_excludes_registered_shops(api_client, admin_key, db_engine
     )
     assert r.status_code == 200, r.text
     ids = {c["shop_id"] for c in r.json()["candidates"]}
+    # Phase 3 之后 SHOP_A 仅在 raw_log 里才有；raw_log drop 后它根本不会进入
+    # unregistered 候选列表（不需要走 _register 豁免路径）
     assert SHOP_A not in ids
 
 
