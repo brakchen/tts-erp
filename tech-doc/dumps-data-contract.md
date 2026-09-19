@@ -162,17 +162,13 @@
 ```json
 {
   "code": 0,
+  "message": "success",
   "requestId": "550e8400-e29b-41d4-a716-446655440000",
-  "data": {
-    "status": "inserted" | "updated" | "stale_ignored" | "duplicate" | "parse_error" | "empty_response",
-    "parseError": "<exception message，parse_error 时存在>",
-    "logId": 12345,
-    "rowsWritten": 1
-  }
+  "data": {}
 }
 ```
 
-> ⚠️ `data` 各字段**全部可选** —— 硬契约只到 `code === 0`；缺字段不报错（参见 `order-sync-schemas.ts:75` 注释：`硬契约只有 envelope 的 code === 0；data 字段防御式读取并给默认值`）。
+> `data` 为空 dict —— 硬契约只到 `code === 0`；`rowsWritten` / `logId` / `data.status` 已删除（Phase 3 起，per-domain health 诊断写入 `plugin.plugin_logs` 而非 response body）。
 
 ---
 
@@ -184,7 +180,7 @@
 | --- | --- | --- | --- | --- |
 | **订单** | `/api/fulfillment/order/list`（POST） | `"orders"` | `parse_order_response` | `orders` / `order_lines` |
 | **物流** | `/api/v1/fulfillment/logistic_detail/list`（GET） | `"logistics"` | `parse_logistics_response` | `shipments` / `tracking_events` |
-| **售后** | **（chrome 端未采集）** | **`"after_sales"` 已加入 `VALID_DOMAINS`（Lane A）** | `parse_after_sales_response`（孤儿函数，dumps 路由表已接） | `after_sales` / `after_sale_items` 期待 chrome 端首次真实 dump |
+| **售后** | **（chrome 端未采集）** | **`"after_sales"` 已加入 `VALID_DOMAINS`（Lane A）** | `parse_after_sales_response`（**已接入路由表**） | `after_sales` / `after_sale_items` 期待 chrome 端首次真实 dump |
 | **结算** | `/api/v1/pay/statement/list/detail`（GET） | `"statements"` | `parse_statement_list_response` 或 `parse_statement_transaction_response`（按 `dump.response.body.data` 是否有 `sku_record` 字段分流） | `settlements` / `settlement_details` |
 
 `dump.domain` 路由判定逻辑（`tts_erp_v2/api/v2/order_sync.py:407-446`）：
@@ -239,7 +235,7 @@ elif domain == "statements":
 | `trade_order_module.latest_rts_time` | `latest_rts_time` (datetime\|None) | `↳` | `latest_rts_time` TIMESTAMP |
 | `trade_order_module.latest_tts_time` | `latest_tts_time` (datetime\|None) | `↳` | `latest_tts_time` TIMESTAMP |
 | `buyer_info_module.buyer_nickname` | `buyer_nickname` (str\|None) | `↳` | `buyer_nickname` Text |
-| `log_id` (dumps 端注入) | `log_id` (int) | `↳` | `log_id` BIGINT FK |
+| `log_id` (dumps 端注入) | `log_id` (int) | `↳` | ~~`log_id` BIGINT FK~~ **已删除**（Phase 3） |
 | `shop_id` (dumps 端注入) | `shop_id` (str) | `↳` | `shop_id` Text |
 
 **业务表自然键**：`UNIQUE (shop_id, order_id)` —— dump 同一订单多次上传是 upsert（覆盖写），不是 insert。
@@ -279,7 +275,7 @@ elif domain == "statements":
 | `logistic_detail.track_list[-1].time`（按时间排序末条，且 status 含 "elivered"） | `delivered_at` (datetime\|None) | `↳` | `delivered_at` TIMESTAMP |
 | `dump.mainOrderId`（dumps 端注入） | `order_id` (str) | `↳` | `order_id` Text |
 | `dump.scope.shopId` | `shop_id` (str) | `↳` | `shop_id` Text |
-| `log_id` (dumps 端注入) | `log_id` (int) | `↳` | `log_id` BIGINT FK |
+| `log_id` (dumps 端注入) | `log_id` (int) | `↳` | ~~`log_id` BIGINT FK~~ **已删除**（Phase 3） |
 
 **业务表自然键**：`UNIQUE (shop_id, package_id)` —— 同一包裹多次上传 upsert。
 
@@ -296,7 +292,7 @@ elif domain == "statements":
 | `location` | `location` (str\|None) | `↳` | `location` Text |
 | `{package_id}:{event_id}` 或 5 元组 fallback（`{package_id}:{time}:{track_status}:{action_code}:{location}`） | `event_key` (str) | `↳` | `event_key` Text |
 | `dump.scope.shopId` | `shop_id` (str) | `↳` | `shop_id` Text |
-| `log_id` (dumps 端注入) | `log_id` (int) | `↳` | `log_id` BIGINT FK |
+| `log_id` (dumps 端注入) | `log_id` (int) | `↳` | ~~`log_id` BIGINT FK~~ **已删除**（Phase 3） |
 
 **业务表自然键**：`UNIQUE (shop_id, package_id, event_key)` —— 同一事件多次上报 upsert。
 
@@ -328,7 +324,7 @@ elif domain == "statements":
 | `total_reserve_amount.amount` | `total_reserve_amount` (Decimal\|None) | `↳` | `total_reserve_amount` Numeric(20,4) |
 | `settle_amount.currency` | `currency` (str\|None) | `↳` | `currency` Text |
 | `dump.scope.shopId` | `shop_id` (str) | `↳` | `shop_id` Text |
-| `log_id` (dumps 端注入) | `log_id` (int) | `↳` | `log_id` BIGINT FK |
+| `log_id` (dumps 端注入) | `log_id` (int) | `↳` | ~~`log_id` BIGINT FK~~ **已删除**（Phase 3） |
 
 **业务表自然键**：`UNIQUE (shop_id, statement_id, statement_version)` —— 同一 statement 不同版本都保留。
 
@@ -356,7 +352,7 @@ elif domain == "statements":
 | `seller_web_cut_flow`（bool） | `seller_web_cut_flow` (bool\|None) | `↳` | `seller_web_cut_flow` Boolean |
 | `seller_app_cut_flow`（bool） | `seller_app_cut_flow` (bool\|None) | `↳` | `seller_app_cut_flow` Boolean |
 | `dump.scope.shopId` | `shop_id` (str) | `↳` | `shop_id` Text |
-| `log_id` (dumps 端注入) | `log_id` (int) | `↳` | `log_id` BIGINT FK |
+| `log_id` (dumps 端注入) | `log_id` (int) | `↳` | ~~`log_id` BIGINT FK~~ **已删除**（Phase 3） |
 
 `fee_components` JSONB 结构：
 
@@ -406,7 +402,7 @@ elif domain == "statements":
 | 假设根因 | (b1) `logistic_detail` 等失败触发 `clearBoundDataSyncTab('statement_authentication_failed')` 提前退出 → 0 条 statement 上传（`background.ts:768-775`） |
 |  | (b2) 60min alarm 没真触发过（绑定的 tab 访问 Finance 页 < 60min） |
 |  | (b3) chrome `fetchStatementRows` 在 main-frame fetch schema 校验失败返回 `[]`（`background.ts:724-728` 直接 `recordOrderProgress(... 'ok', '...返回 0 行...')`） |
-|  | (b4) dumps 端 `parse_statement_list_response` 解析失败但 `_ok_response` 仍返 200，错误被吞在 `raw_log.parse_error` 字段里（**可查证**：补查 `plugin.raw_log WHERE endpoint LIKE '%statement%' AND parse_error IS NOT NULL`） |
+|  | (b4) dumps 端 `parse_statement_list_response` 解析失败但 `_ok_response` 仍返 200，错误被吞在 `plugin.plugin_logs`（per-domain health metric，通过 `record_dump_health` 写入）（**可查证**：补查 `SELECT * FROM plugin.plugin_logs WHERE context->>'domain'='statements' AND context->>'parse_error_class' IS NOT NULL`） |
 | 现状 | **数据流路径上有 4 个可能断点**；**未 root cause**。Owner 拍板前不动 |
 | 旁路 | `plugin.intercepted_requests.response_body` 已抓到 148 条 statement 响应 —— **A13 不回填**（用户原话 "B4 不需要回填，我重新抓取就可以了"），仅供 Lane C 诊断证据使用 |
 
