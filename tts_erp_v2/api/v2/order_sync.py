@@ -12,17 +12,21 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
-import uuid
 from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import AliasChoices, BaseModel, Field, ValidationError, field_validator
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from tts_erp_v2.api.v2._common import (
+    audit_and_error as _audit_and_error,
+    key_prefix as _key_prefix,
+    log_event as _log_event,
+    ok_response as _ok_response,
+    request_id as _request_id,
+)
 from tts_erp_v2.api.deps import get_session
 from tts_erp_v2.plugin.orders.parser import (
     parse_after_sales_response,
@@ -34,6 +38,7 @@ from tts_erp_v2.plugin.orders.parser import (
 from tts_erp_v2.plugin.orders.repository import (
     has_data_bulk,
     list_synced_ids,
+    record_dump_health,
 )
 
 # ─── Config ───────────────────────────────────────────────────────────
@@ -50,118 +55,8 @@ _PATH_SYNCED_IDS = "/v2/order-sync/synced-ids"
 
 # ─── Logger ───────────────────────────────────────────────────────────
 
-# ─── Health counter ─────────────────────────────────────────────────
-
-_SQL_INSERT_DUMP_HEALTH = """
-INSERT INTO plugin.plugin_logs (
-    seller_id,
-    advertiser_id,
-    plugin_version,
-    plugin_name,
-    level,
-    message,
-    context,
-    occurred_at
-) VALUES (
-    :seller_id,
-    :advertiser_id,
-    :plugin_version,
-    :plugin_name,
-    :level,
-    :message,
-    CAST(:context AS JSONB),
-    :occurred_at
-)
-"""
-
-
-def _record_dump_health(
-    sess: Session,
-    *,
-    shop_id: str,
-    domain: str,
-    endpoint: str,
-    rows_written: int,
-    parse_error_class: str | None,
-    captured_at: datetime,
-) -> None:
-    """Write per-domain dump health metric to plugin.plugin_logs.
-
-    Purpose: diagnose why certain domains (e.g., statements) have 0 rows.
-    Called as part of the dump transaction (before sess.commit).
-    """
-    level = "info" if rows_written > 0 and not parse_error_class else "warn"
-    context = {
-        "domain": domain,
-        "shop_id": shop_id,
-        "endpoint": endpoint,
-        "rows_written": rows_written,
-        "parse_error_class": parse_error_class,
-        "captured_at": captured_at.isoformat(),  # proposal §3.3 7 维度
-        "server_received_at": datetime.now(UTC).isoformat(),
-    }
-    message = (
-        f"dump_processed domain={domain} rows={rows_written}"
-        + (f" parse_error={parse_error_class}" if parse_error_class else "")
-    )
-    sess.execute(
-        text(_SQL_INSERT_DUMP_HEALTH),
-        {
-            "seller_id": shop_id,
-            "advertiser_id": "",
-            "plugin_version": "order-sync-v1",
-            "plugin_name": "order-sync",
-            "level": level,
-            "message": message,
-            "context": json.dumps(context, ensure_ascii=False),
-            "occurred_at": captured_at,
-        },
-    )
-
-
-# ─── Logger ───────────────────────────────────────────────────────────
-
 log = logging.getLogger("tts_erp_v2.order_sync.ingest")
-log.setLevel(logging.INFO)
-if not any(
-    isinstance(h, logging.StreamHandler) and h.stream is sys.stdout
-    for h in log.handlers
-):
-    _ingest_stdout = logging.StreamHandler(sys.stdout)
-    _ingest_stdout.setFormatter(logging.Formatter("%(message)s"))
-    log.addHandler(_ingest_stdout)
 
-
-def _log_event(
-    *,
-    level: int,
-    request_id: str | None,
-    key_prefix: str | None,
-    method: str,
-    path: str,
-    status: int,
-    records_in: int | None = None,
-    records_ok: int | None = None,
-    error_code: str | None = None,
-    message: str | None = None,
-) -> None:
-    parts: list[str] = [
-        f"request_id={request_id or '-'}",
-        f"key_prefix={key_prefix or '-'}",
-        f"method={method}",
-        f"path={path}",
-        f"status={status}",
-    ]
-    if records_in is not None:
-        parts.append(f"records_in={records_in}")
-    if records_ok is not None:
-        parts.append(f"records_ok={records_ok}")
-    if error_code:
-        parts.append(f"error_code={error_code}")
-    if message:
-        safe_msg = " ".join(str(message).split())[:500]
-        parts.append(f"message={safe_msg}")
-    log.log(level, " ".join(parts))
 
 
 # ─── Router ───────────────────────────────────────────────────────────
@@ -247,50 +142,7 @@ async def _raw_body(request: Request) -> bytes:
     return await request.body()
 
 
-def _request_id(request: Request) -> str:
-    rid = request.headers.get("x-request-id")
-    if rid:
-        return rid[:128]
-    return f"req-{uuid.uuid4()}"
 
-
-def _key_prefix(request: Request) -> str | None:
-    key_hash = request.scope.get("api_key_hash")
-    return key_hash[:16] if isinstance(key_hash, str) else None
-
-
-def _error_response(
-    *,
-    status: int,
-    code: str,
-    message: str,
-    request_id: str | None,
-) -> JSONResponse:
-    return JSONResponse(
-        status_code=status,
-        content={
-            "code": code,
-            "message": message,
-            "requestId": request_id or f"req-{uuid.uuid4()}",
-        },
-    )
-
-
-def _ok_response(
-    *,
-    request_id: str,
-    data: dict[str, Any],
-) -> JSONResponse:
-    # AGENTS.md §2.5: 4 字段 envelope（code/message/requestId/data）200/非 200 一致
-    return JSONResponse(
-        status_code=200,
-        content={
-            "code": 0,
-            "message": "success",
-            "requestId": request_id,
-            "data": data,
-        },
-    )
 
 
 # ─── has-data endpoint ───────────────────────────────────────────────
@@ -319,6 +171,7 @@ def post_has_data(
             key_prefix=key_prefix,
             method="POST",
             path=audit_path,
+            logger=log,
         )
 
     try:
@@ -332,6 +185,7 @@ def post_has_data(
             key_prefix=key_prefix,
             method="POST",
             path=audit_path,
+            logger=log,
         )
 
     covered = has_data_bulk(
@@ -343,6 +197,7 @@ def post_has_data(
     )
 
     _log_event(
+        logger=log,
         level=logging.INFO,
         request_id=request_id,
         key_prefix=key_prefix,
@@ -386,6 +241,7 @@ def post_dumps(
             key_prefix=key_prefix,
             method="POST",
             path=audit_path,
+            logger=log,
         )
 
     # JSON 解析
@@ -400,6 +256,7 @@ def post_dumps(
             key_prefix=key_prefix,
             method="POST",
             path=audit_path,
+            logger=log,
         )
 
     # Pydantic 校验
@@ -414,6 +271,7 @@ def post_dumps(
             key_prefix=key_prefix,
             method="POST",
             path=audit_path,
+            logger=log,
         )
 
     shop_id = payload.scope.shopId
@@ -434,6 +292,7 @@ def post_dumps(
             key_prefix=key_prefix,
             method="POST",
             path=audit_path,
+            logger=log,
         )
 
     # 解析 → 写业务表
@@ -493,7 +352,7 @@ def post_dumps(
     # AGENTS.md §2.5: rowsWritten=0 不是 parse_error 探测信号——HTTP code 是唯一失败信号。
     # （原 hack `if parse_error is None and rows_written == 0 and domain in {...}` 删除：
     #  会漏判 logistics + after_sales 域静默返 200，导致 §5.3 物流 0 行额外根因。）
-    _record_dump_health(
+    record_dump_health(
         sess,
         shop_id=shop_id,
         domain=domain,
@@ -508,17 +367,18 @@ def post_dumps(
 
     if parse_error:
         _log_event(
-            level=logging.WARNING,
-            request_id=request_id,
-            key_prefix=key_prefix,
-            method="POST",
-            path=audit_path,
-            status=422,
-            records_in=1,
-            records_ok=0,
-            error_code="PARSE_ERROR",
-            message=parse_error,
-        )
+        logger=log,
+        level=logging.WARNING,
+        request_id=request_id,
+        key_prefix=key_prefix,
+        method="POST",
+        path=audit_path,
+        status=422,
+        records_in=1,
+        records_ok=0,
+        error_code="PARSE_ERROR",
+        message=parse_error,
+    )
         # AGENTS.md §2.5: parse_error 返 422 PERMANENT
         return _audit_and_error(
             request_id=request_id,
@@ -528,9 +388,11 @@ def post_dumps(
             key_prefix=key_prefix,
             method="POST",
             path=audit_path,
+            logger=log,
         )
 
     _log_event(
+        logger=log,
         level=logging.INFO,
         request_id=request_id,
         key_prefix=key_prefix,
@@ -573,6 +435,7 @@ def get_synced_ids(
             key_prefix=key_prefix,
             method="GET",
             path=audit_path,
+            logger=log,
         )
 
     ids, total = list_synced_ids(
@@ -584,6 +447,7 @@ def get_synced_ids(
     )
 
     _log_event(
+        logger=log,
         level=logging.INFO,
         request_id=request_id,
         key_prefix=key_prefix,
@@ -605,39 +469,3 @@ def get_synced_ids(
         },
     )
 
-
-# ─── audit + error helper ────────────────────────────────────────────
-
-
-def _audit_and_error(
-    *,
-    request_id: str,
-    status: int,
-    code: str,
-    message: str,
-    key_prefix: str | None,
-    method: str,
-    path: str,
-) -> JSONResponse:
-    safe_message = " ".join(str(message).split())[:500]
-    sys.stderr.write(
-        f"[order-sync] reject status={status} code={code} "
-        f"request_id={request_id} key_prefix={key_prefix or '-'} "
-        f"method={method} path={path} message={safe_message}\n"
-    )
-    _log_event(
-        level=logging.WARNING,
-        request_id=request_id,
-        key_prefix=key_prefix,
-        method=method,
-        path=path,
-        status=status,
-        error_code=code,
-        message=safe_message,
-    )
-    return _error_response(
-        status=status,
-        code=code,
-        message=message,
-        request_id=request_id,
-    )

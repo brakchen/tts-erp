@@ -6,6 +6,7 @@ has_data_bulk 批量查业务表存在性。
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import UTC, date, datetime
@@ -801,3 +802,72 @@ def upsert_after_sale_item(
     )
     sess.execute(stmt)
     return "inserted"
+
+
+# ── record_dump_health ──────────────────────────────────────────────
+
+_SQL_INSERT_DUMP_HEALTH = """
+INSERT INTO plugin.plugin_logs (
+    seller_id,
+    advertiser_id,
+    plugin_version,
+    plugin_name,
+    level,
+    message,
+    context,
+    occurred_at
+) VALUES (
+    :seller_id,
+    :advertiser_id,
+    :plugin_version,
+    :plugin_name,
+    :level,
+    :message,
+    CAST(:context AS JSONB),
+    :occurred_at
+)
+"""
+
+
+def record_dump_health(
+    sess: Session,
+    *,
+    shop_id: str,
+    domain: str,
+    endpoint: str,
+    rows_written: int,
+    parse_error_class: str | None,
+    captured_at: datetime,
+) -> None:
+    """Write per-domain dump health metric to plugin.plugin_logs.
+
+    Purpose: diagnose why certain domains (e.g., statements) have 0 rows.
+    Called as part of the dump transaction (before sess.commit).
+    """
+    level = "info" if rows_written > 0 and not parse_error_class else "warn"
+    context = {
+        "domain": domain,
+        "shop_id": shop_id,
+        "endpoint": endpoint,
+        "rows_written": rows_written,
+        "parse_error_class": parse_error_class,
+        "captured_at": captured_at.isoformat(),
+        "server_received_at": datetime.now(UTC).isoformat(),
+    }
+    message = (
+        f"dump_processed domain={domain} rows={rows_written}"
+        + (f" parse_error={parse_error_class}" if parse_error_class else "")
+    )
+    sess.execute(
+        text(_SQL_INSERT_DUMP_HEALTH),
+        {
+            "seller_id": shop_id,
+            "advertiser_id": "",
+            "plugin_version": "order-sync-v1",
+            "plugin_name": "order-sync",
+            "level": level,
+            "message": message,
+            "context": json.dumps(context, ensure_ascii=False),
+            "occurred_at": captured_at,
+        },
+    )
