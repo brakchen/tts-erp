@@ -38,6 +38,9 @@ SPU_ID = "1736527242804888823"
 
 e = get_engine()
 
+# NOTE: with e.connect() 不创建新 scope（Python 的 with 块不隔离变量）。
+# sales/ad/flc/refunds/USD_VND 等变量在 with 块内定义，在块外的 for 循环中使用。
+# 这是合法的 Python，但拆分两段容易让人误以为变量不可用。
 with e.connect() as c:
     # ====== 1. 在线 fx ======
     snap = c.execute(
@@ -75,6 +78,8 @@ with e.connect() as c:
     spu_pk = c.execute(
         text("SELECT id FROM commerce.products_spu WHERE spu_id=:sid"), {"sid": SPU_ID}
     ).scalar()
+    if spu_pk is None:
+        raise SystemExit(f"SPU {SPU_ID} not found in commerce.products_spu")
 
     # ====== 2. 成本解析链(D1) ======
     row = c.execute(
@@ -156,6 +161,7 @@ with e.connect() as c:
         order_gmv AS (
             SELECT order_pk, SUM(quantity * unit_price) AS order_gmv_vnd
             FROM commerce.sales_order_lines
+            WHERE spu_pk = :spk
             GROUP BY order_pk
         ),
         lines AS (
@@ -192,9 +198,9 @@ with e.connect() as c:
         sales[str(r.d)] = {
             "valid_orders": r.valid_orders,
             "valid_units": int(r.valid_units or 0),
-            "valid_sales_vnd": float(r.valid_sales_vnd or 0),
-            "unsettled_sales_vnd": float(r.unsettled_sales_vnd or 0),
-            "settled_net_vnd": float(r.settled_net_vnd or 0),
+            "valid_sales_vnd": Decimal(str(r.valid_sales_vnd or 0)),
+            "unsettled_sales_vnd": Decimal(str(r.unsettled_sales_vnd or 0)),
+            "settled_net_vnd": Decimal(str(r.settled_net_vnd or 0)),
         }
 
     # ====== 4. 每日 ad spend ======

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -43,7 +43,10 @@ from tts_erp_v2.plugin.orders.repository import (
 
 # ─── Config ───────────────────────────────────────────────────────────
 
-PROTOCOL_VERSION = 1
+# NOTE: PROTOCOL_VERSION was previously used as Field(default=PROTOCOL_VERSION)
+# on DumpRequest.protocolVersion but the default was removed. Unlike analytics.py
+# which has SUPPORTED_PROTOCOL_VERSIONS and rejects incompatible versions, this
+# module accepts any integer value without validation. Dead constant removed.
 MAX_BODY_BYTES = 2 * 1024 * 1024  # 2 MB
 MAX_IDS = 500
 VALID_DOMAINS = {"orders", "logistics", "statements", "after_sales"}
@@ -366,20 +369,8 @@ def post_dumps(
     sess.commit()
 
     if parse_error:
-        _log_event(
-        logger=log,
-        level=logging.WARNING,
-        request_id=request_id,
-        key_prefix=key_prefix,
-        method="POST",
-        path=audit_path,
-        status=422,
-        records_in=1,
-        records_ok=0,
-        error_code="PARSE_ERROR",
-        message=parse_error,
-    )
         # AGENTS.md §2.5: parse_error 返 422 PERMANENT
+        # _audit_and_error 内部已处理 log_event + log.warning，此处不再重复记录
         return _audit_and_error(
             request_id=request_id,
             status=422,
