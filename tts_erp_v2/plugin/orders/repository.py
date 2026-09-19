@@ -13,7 +13,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import and_, or_, select, text
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -139,50 +139,249 @@ def has_data_bulk(
     return {id_: (id_ in found) for id_ in ids_set}
 
 
-# ── synced_ids ──────────────────────────────────────────────────────
+# ── reconcile ───────────────────────────────────────────────────────
 
 
-def list_synced_ids(
+ORDER_RECONCILE_SORT_INFO = "6"
+ORDER_RECONCILE_SORT_FIELD = "order_time"
+ORDER_RECONCILE_SORT_DIRECTION = "asc"
+ORDER_RECONCILE_TIE_BREAKER = "order_id"
+
+# 这是可迭代的业务规则，而不是 TikTok 状态码的完整字典。只有已经明确表示
+# 包裹不会继续流转的状态才进入这里；未知状态保持 active，宁可多查一次。
+_LOGISTICS_TERMINAL_TERMS = (
+    "delivered",
+    "signed",
+    "received",
+    "complete",
+    "completed",
+    "returned",
+    "return to sender",
+    "cancelled",
+    "canceled",
+    "refunded",
+    "lost",
+    "destroyed",
+    "已签收",
+    "签收",
+    "已送达",
+    "已完成",
+    "已退回",
+    "已取消",
+    "退款",
+    "丢失",
+    "损坏",
+    "破损",
+)
+
+
+def reconcile_orders(
     sess: Session,
     *,
-    domain: str,
     shop_id: str,
-    limit: int = 500,
-    offset: int = 0,
-) -> tuple[list[str], int]:
-    """查询已同步 id 列表。返回 (ids, total)。"""
-    if domain == "orders":
-        base = select(ChromeOrder.order_id).where(ChromeOrder.shop_id == shop_id)
-        count_q = (
-            select(text("count(*)"))
-            .select_from(ChromeOrder)
+    sort_info: str,
+    anchor_positions: list[int],
+    hot_window_size: int,
+) -> dict[str, Any]:
+    """返回订单服务端计数和确定性锚点。
+
+    TikTok `sortInfo=6` 的服务端顺序由 order_time + order_id 对齐。存在历史
+    记录缺少 order_time 时，不能把 offset 当成安全增量窗口，插件会自动回退
+    到完整分页校验。
+    """
+    scope = ChromeOrder.shop_id == shop_id
+    total = int(
+        sess.execute(
+            select(func.count(ChromeOrder.id)).where(scope)
+        ).scalar_one()
+    )
+    missing_order_time = int(
+        sess.execute(
+            select(func.count(ChromeOrder.id)).where(
+                scope,
+                ChromeOrder.order_time.is_(None),
+            )
+        ).scalar_one()
+    )
+    order_by = (
+        ChromeOrder.order_time.asc().nulls_last(),
+        ChromeOrder.order_id.asc(),
+    )
+
+    anchors: list[dict[str, Any]] = []
+    seen_positions: set[int] = set()
+    for raw_position in anchor_positions:
+        position = int(raw_position)
+        if position < 0 or position in seen_positions or position >= total:
+            continue
+        seen_positions.add(position)
+        order_id = sess.execute(
+            select(ChromeOrder.order_id)
+            .where(scope)
+            .order_by(*order_by)
+            .offset(position)
+            .limit(1)
+        ).scalar_one_or_none()
+        if order_id is not None:
+            anchors.append({"position": position, "orderId": order_id})
+
+    offset_safe = sort_info == ORDER_RECONCILE_SORT_INFO and missing_order_time == 0
+    return {
+        "serverTotal": total,
+        "anchors": anchors,
+        "canIncremental": offset_safe,
+        "offsetSafe": offset_safe,
+        "ordering": {
+            "field": ORDER_RECONCILE_SORT_FIELD,
+            "direction": ORDER_RECONCILE_SORT_DIRECTION,
+            "tieBreaker": ORDER_RECONCILE_TIE_BREAKER,
+        },
+        "hotWindowSize": max(0, int(hot_window_size)),
+    }
+
+
+def _terminal_reason(*values: Any) -> str | None:
+    for value in values:
+        if value is None:
+            continue
+        normalized = str(value).strip().casefold()
+        if not normalized:
+            continue
+        for term in _LOGISTICS_TERMINAL_TERMS:
+            if term.casefold() in normalized:
+                return str(value).strip()[:160]
+    return None
+
+
+def reconcile_logistics(
+    sess: Session,
+    *,
+    shop_id: str,
+    limit: int,
+    cursor: str | None,
+) -> dict[str, Any]:
+    """按订单游标返回物流采集候选，并标记已知终态订单。
+
+    订单表和包裹表取并集：订单刚写入但还没有包裹记录时仍然会被返回，
+    避免后端已有包裹记录才会继续采集的闭环。游标是稳定排序后的 offset，
+    仅用于一次 reconcile 分页，不作为业务数据的持久化状态。
+    """
+    order_ids = set(
+        sess.execute(
+            select(ChromeOrder.order_id)
             .where(ChromeOrder.shop_id == shop_id)
         )
-    elif domain == "logistics":
-        base = select(ChromeShipment.order_id.distinct()).where(
-            ChromeShipment.shop_id == shop_id
-        )
-        # distinct count
-        count_q = select(text("count(*)")).select_from(
-            select(ChromeShipment.order_id.distinct())
+        .scalars()
+        .all()
+    )
+    shipment_order_ids = set(
+        sess.execute(
+            select(ChromeShipment.order_id)
             .where(ChromeShipment.shop_id == shop_id)
-            .subquery()
+            .distinct()
         )
-    elif domain == "statements":
-        base = select(ChromeSettlement.statement_id).where(
-            ChromeSettlement.shop_id == shop_id
-        )
-        count_q = (
-            select(text("count(*)"))
-            .select_from(ChromeSettlement)
-            .where(ChromeSettlement.shop_id == shop_id)
-        )
-    else:
-        return [], 0
+        .scalars()
+        .all()
+    )
+    candidate_ids = sorted(order_ids | shipment_order_ids)
+    total = len(candidate_ids)
 
-    total = sess.execute(count_q).scalar() or 0
-    rows = sess.execute(base.offset(offset).limit(limit)).scalars().all()
-    return list(rows), total
+    try:
+        offset = max(0, int(cursor or "0"))
+    except ValueError:
+        offset = 0
+    offset = min(offset, total)
+    page_ids = candidate_ids[offset : offset + limit]
+
+    shipments = (
+        sess.execute(
+            select(ChromeShipment)
+            .where(
+                ChromeShipment.shop_id == shop_id,
+                ChromeShipment.order_id.in_(page_ids),
+            )
+            .order_by(ChromeShipment.order_id.asc(), ChromeShipment.package_id.asc())
+        )
+        .scalars()
+        .all()
+        if page_ids
+        else []
+    )
+    shipments_by_order: dict[str, list[ChromeShipment]] = {}
+    package_ids = []
+    for shipment in shipments:
+        shipments_by_order.setdefault(shipment.order_id, []).append(shipment)
+        package_ids.append(shipment.package_id)
+
+    latest_events: dict[str, ChromeTrackingEvent] = {}
+    if package_ids:
+        events = (
+            sess.execute(
+                select(ChromeTrackingEvent)
+                .where(
+                    ChromeTrackingEvent.shop_id == shop_id,
+                    ChromeTrackingEvent.package_id.in_(package_ids),
+                )
+                .order_by(
+                    ChromeTrackingEvent.package_id.asc(),
+                    ChromeTrackingEvent.event_at.desc().nulls_last(),
+                    ChromeTrackingEvent.id.desc(),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for event in events:
+            latest_events.setdefault(event.package_id, event)
+
+    terminal_by_order: dict[str, tuple[bool, list[str], str | None]] = {}
+    for order_id in page_ids:
+        order_shipments = shipments_by_order.get(order_id, [])
+        if not order_shipments:
+            terminal_by_order[order_id] = (False, [], None)
+            continue
+        reasons: list[str] = []
+        all_terminal = True
+        for shipment in order_shipments:
+            event = latest_events.get(shipment.package_id)
+            reason = (
+                "delivered_at"
+                if shipment.delivered_at is not None
+                else _terminal_reason(
+                    shipment.status,
+                    event.description if event else None,
+                    event.location if event else None,
+                )
+            )
+            if reason is None:
+                all_terminal = False
+            else:
+                reasons.append(reason)
+        terminal_by_order[order_id] = (
+            all_terminal,
+            [s.package_id for s in order_shipments],
+            reasons[0] if reasons else None,
+        )
+
+    items: list[dict[str, Any]] = []
+    for order_id in page_ids:
+        is_terminal, package_ids_for_order, reason = terminal_by_order[order_id]
+        items.append(
+            {
+                "orderId": order_id,
+                "packageIds": package_ids_for_order,
+                "isTerminal": is_terminal,
+                "terminalReason": reason,
+                "nextCheckAt": None,
+            }
+        )
+
+    next_offset = offset + len(page_ids)
+    return {
+        "complete": next_offset >= total,
+        "items": items,
+        "nextCursor": str(next_offset) if next_offset < total else None,
+    }
 
 
 # ── 时间戳转换 helpers ──────────────────────────────────────────────

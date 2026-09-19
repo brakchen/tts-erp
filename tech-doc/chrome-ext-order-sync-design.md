@@ -603,27 +603,65 @@ def post_dumps(request):
 - `captured_at` 单调守卫：新 captured_at > 旧 → updated；≤ 旧 → stale_ignored
 - raw_log **始终追加**（不做幂等，每次 dump 都是一行日志）
 
-### 4.3 `GET /v2/order-sync/synced-ids` — 查询已同步的 id 列表
+### 4.3 `POST /v2/order-sync/reconcile` — 统一增量校验与物流候选
+
+订单和物流共用一个查询接口，避免为了判断是否需要同步而维护另一套
+旧的 ID 列表查询接口。订单使用服务端总数、确定性锚点和排序安全性做增量
+校验；物流使用游标分页返回订单及包裹终态候选。
 
 ```http
-GET /v2/order-sync/synced-ids?shopId=7493838482981827388&domain=orders&limit=500&offset=0
+POST /v2/order-sync/reconcile
 Authorization: Bearer <key>
+Content-Type: application/json
 ```
 
-**响应**：
+```json
+{
+  "protocolVersion": 1,
+  "scope": {"sellerId": "7493838482981827388", "shopId": "7493838482981827388"},
+  "domains": ["orders", "logistics"],
+  "orders": {
+    "pageSize": 20,
+    "sortInfo": "6",
+    "anchorPositions": [0, 400, 899],
+    "hotWindowSize": 40
+  },
+  "logistics": {"limit": 500, "cursor": null}
+}
+```
+
+响应：
 
 ```json
 {
   "code": 0,
   "data": {
-    "domain": "orders",
-    "ids": ["id1", "id2", ...],
-    "total": 1234,
-    "limit": 500,
-    "offset": 0
+    "orders": {
+      "serverTotal": 900,
+      "anchors": [{"position": 0, "orderId": "id1"}],
+      "canIncremental": true,
+      "offsetSafe": true,
+      "ordering": {"field": "order_time", "direction": "asc", "tieBreaker": "order_id"},
+      "hotWindowSize": 40
+    },
+    "logistics": {
+      "complete": true,
+      "items": [{
+        "orderId": "id1",
+        "packageIds": ["pkg1"],
+        "isTerminal": false,
+        "terminalReason": null,
+        "nextCheckAt": null
+      }],
+      "nextCursor": null
+    }
   }
 }
 ```
+
+`offsetSafe=false`（例如历史订单缺少 `order_time` 或排序参数不匹配）时，
+插件必须回退全量分页并用锚点校验；物流只有所有已知包裹都命中明确终态时
+才允许跳过，未知状态和无包裹订单继续作为可同步候选。
 
 ## 5. 插件侧对接流程
 
@@ -662,7 +700,7 @@ Authorization: Bearer <key>
 │ 4. 对当前订单发物流请求并按自然键 upsert                      │
 │    → 既补齐新订单，也校准状态变化                            │
 │                                                             │
-│ 5. 或者用 GET /v2/order-sync/synced-ids 做更粗粒度过滤       │
+│ 5. 调用 POST /v2/order-sync/reconcile 做总数/锚点校验和物流续跑 │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -696,7 +734,7 @@ Authorization: Bearer <key>
 
 | 文件 | 内容 |
 | --- | --- |
-| `tts_erp_v2/api/v2/order_sync.py` | 新路由：`/v2/order-sync/{has-data,dumps,synced-ids}` |
+| `tts_erp_v2/api/v2/order_sync.py` | 路由：`/v2/order-sync/{has-data,dumps,reconcile}` |
 | `tts_erp_v2/plugin/parser.py` | 解析函数：`parse_order_response()` / `parse_logistics_response()` / `parse_statement_response()` |
 | `tts_erp_v2/plugin/repository.py` | `has_data_bulk()` / `upsert_order()` / `upsert_logistics()` / `upsert_statement()` / `write_raw_log()` |
 | `tts_erp_v2/app.py` | 挂载新路由 |
@@ -737,7 +775,7 @@ Authorization: Bearer <key>
 
 | 阶段 | 做什么 | 价值 |
 | --- | --- | --- |
-| **Phase 1（本次）** | `plugin` 7 张表 + has-data/dumps/synced-ids 端点 + inline 解析 | 解决插件重复拉取问题，数据立即可查 |
+| **Phase 1（本次）** | `plugin` 7 张表 + has-data/dumps/reconcile 端点 + inline 解析 | 解决插件重复拉取问题，数据立即可查 |
 | **Phase 2** | 结算明细关联订单（补 `trade_order_id` → `order_id` 映射） | 结算数据可按订单维度聚合 |
 | **Phase 3（可选）** | plugin → commerce/fulfillment/finance 数据桥接 | 如果需要把 Chrome 扩展数据纳入主分析链路 |
 

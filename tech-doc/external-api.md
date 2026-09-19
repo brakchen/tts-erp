@@ -48,6 +48,7 @@ cookie (see [Browser session login](#browser-session-login)).
 | SPU image list / upload / delete | `GET /v2/spu-images`, `POST /v2/spu-images/upload-url`, `POST /v2/spu-images/{id}/confirm`, `DELETE /v2/spu-images/{id}` | readonly / readwrite |
 | Browser login / logout / whoami | `GET\|POST /v2/auth/login`, `POST /v2/auth/logout`, `GET /v2/auth/me` | public |
 | Analytics cursor has-data / dump ingest (Chrome ext) | `GET /v2/analytics/sync/cursor`, `POST /v2/analytics/sync/dumps` | readwrite + scope |
+| Order / logistics reconcile and dump ingest (Chrome ext) | `POST /v2/order-sync/{reconcile,has-data,dumps}` | readwrite + scope |
 | Start TikTok seller authorization | `GET /v2/oauth/tiktok/authorize` | **readwrite** or above (handler-enforced) |
 | TikTok OAuth redirect target (new-shop onboarding) | `GET /v2/oauth/tiktok/callback?code&state` | **public** — see [`tech-doc/api/tiktok-shop-oauth.md`](api/tiktok-shop-oauth.md) |
 
@@ -790,32 +791,60 @@ Body（≤ 2 MB）：
   `statement_id` 的多个 `statement_version` 在 `has-data` 中以数组传递。订单、物流、
   结算均按可变数据刷新，`has-data` 不作为更新闸门。
 
-#### `GET /v2/order-sync/synced-ids`
+#### `POST /v2/order-sync/reconcile`
 
-查询已同步 id 列表（分页）。
+订单和物流共用的增量校验接口。订单返回服务端总数、锚点和排序是否允许
+offset 增量；物流返回可恢复游标分页及明确终态的包裹候选。该接口替代
+独立的 ID 列表查询，避免维护两套同步判定协议。
 
-| 参数 | 类型 | 说明 |
-| --- | --- | --- |
-| `shopId` | string | required |
-| `domain` | string | required；`orders`/`logistics`/`statements` |
-| `limit` | int | 1-500，默认 500 |
-| `offset` | int | ≥ 0，默认 0 |
+请求：
 
-响应（`code: 0`）：
+```json
+{
+  "protocolVersion": 1,
+  "scope": {"sellerId": "...", "shopId": "..."},
+  "domains": ["orders", "logistics"],
+  "orders": {
+    "pageSize": 20,
+    "sortInfo": "6",
+    "anchorPositions": [0, 400, 899],
+    "hotWindowSize": 40
+  },
+  "logistics": {"limit": 500, "cursor": null}
+}
+```
+
+响应关键字段：
 
 ```json
 {
   "code": 0,
-  "requestId": "req-...",
   "data": {
-    "domain": "orders",
-    "ids": ["order-1", "order-2"],
-    "total": 2,
-    "limit": 500,
-    "offset": 0
+    "orders": {
+      "serverTotal": 900,
+      "anchors": [{"position": 0, "orderId": "order-1"}],
+      "canIncremental": true,
+      "offsetSafe": true,
+      "ordering": {"field": "order_time", "direction": "asc", "tieBreaker": "order_id"},
+      "hotWindowSize": 40
+    },
+    "logistics": {
+      "complete": false,
+      "items": [{
+        "orderId": "order-1",
+        "packageIds": ["package-1"],
+        "isTerminal": false,
+        "terminalReason": null,
+        "nextCheckAt": null
+      }],
+      "nextCursor": "500"
+    }
   }
 }
 ```
+
+`offsetSafe=false` 时客户端回退全量分页校验；物流只有所有已知包裹均命中
+明确终态时才跳过，未知状态和缺少包裹记录的订单继续返回为候选。
 
 ### Misc
 

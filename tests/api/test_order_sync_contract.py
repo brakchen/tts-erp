@@ -3,7 +3,7 @@
 端点契约：
 1. POST /v2/order-sync/has-data — 批量查业务表存在性
 2. POST /v2/order-sync/dumps — 接收 dump → inline 解析 → 写业务表 + raw_log
-3. GET  /v2/order-sync/synced-ids — 查询已同步 id 列表
+3. POST /v2/order-sync/reconcile — 订单锚点与物流候选统一查询
 
 auth 分类 = readwrite：匿名 401、readonly 403、readwrite 通过。
 
@@ -259,10 +259,14 @@ def test_dumps_anonymous_is_401(api_client):
     assert r.status_code == 401
 
 
-def test_synced_ids_anonymous_is_401(api_client):
-    r = api_client.get(
-        "/v2/order-sync/synced-ids",
-        params={"shopId": SHOP_ID, "domain": "orders"},
+def test_reconcile_anonymous_is_401(api_client):
+    r = api_client.post(
+        "/v2/order-sync/reconcile",
+        json={
+            "scope": {"sellerId": SHOP_ID, "shopId": SHOP_ID},
+            "domains": ["orders"],
+            "orders": {"anchorPositions": [0]},
+        },
     )
     assert r.status_code == 401
 
@@ -292,11 +296,15 @@ def test_dumps_readonly_is_403(api_client, readonly_key):
     assert r.status_code == 403
 
 
-def test_synced_ids_readonly_is_403(api_client, readonly_key):
-    r = api_client.get(
-        "/v2/order-sync/synced-ids",
+def test_reconcile_readonly_is_403(api_client, readonly_key):
+    r = api_client.post(
+        "/v2/order-sync/reconcile",
         headers={"Authorization": f"Bearer {readonly_key}"},
-        params={"shopId": SHOP_ID, "domain": "orders"},
+        json={
+            "scope": {"sellerId": SHOP_ID, "shopId": SHOP_ID},
+            "domains": ["orders"],
+            "orders": {"anchorPositions": [0]},
+        },
     )
     assert r.status_code == 403
 
@@ -870,27 +878,38 @@ def test_dumps_400_on_malformed_json(api_client, readwrite_key):
     assert r.json()["code"] == "MALFORMED_JSON"
 
 
-# ─── synced-ids: 空库空列表 ────────────────────────────────────────
+# ─── reconcile: 空库返回空状态 ─────────────────────────────────────
 
 
-def test_synced_ids_empty_db_returns_empty(api_client, readwrite_key):
-    r = api_client.get(
-        "/v2/order-sync/synced-ids",
+def test_reconcile_empty_db_returns_empty_orders_and_logistics(
+    api_client, readwrite_key
+):
+    r = api_client.post(
+        "/v2/order-sync/reconcile",
         headers={"Authorization": f"Bearer {readwrite_key}"},
-        params={"shopId": SHOP_ID, "domain": "orders"},
+        json={
+            "scope": {"sellerId": SHOP_ID, "shopId": SHOP_ID},
+            "domains": ["orders", "logistics"],
+            "orders": {"anchorPositions": [0]},
+            "logistics": {"limit": 10},
+        },
     )
     assert r.status_code == 200
     body = r.json()
     assert body["code"] == 0
-    assert body["data"]["ids"] == []
-    assert body["data"]["total"] == 0
+    assert body["data"]["orders"]["serverTotal"] == 0
+    assert body["data"]["orders"]["anchors"] == []
+    assert body["data"]["logistics"]["complete"] is True
+    assert body["data"]["logistics"]["items"] == []
+    assert body["data"]["logistics"]["nextCursor"] is None
 
 
-# ─── synced-ids: 有数据返回 ────────────────────────────────────────
+# ─── reconcile: 订单锚点与物流终态 ─────────────────────────────────
 
 
-def test_synced_ids_returns_inserted_orders(api_client, readwrite_key):
-    # 写入2个订单
+def test_reconcile_returns_order_anchors_and_terminal_logistics(
+    api_client, readwrite_key
+):
     api_client.post(
         "/v2/order-sync/dumps",
         headers={"Authorization": f"Bearer {readwrite_key}"},
@@ -901,14 +920,62 @@ def test_synced_ids_returns_inserted_orders(api_client, readwrite_key):
             method="POST",
         ),
     )
-    r = api_client.get(
-        "/v2/order-sync/synced-ids",
+    api_client.post(
+        "/v2/order-sync/dumps",
         headers={"Authorization": f"Bearer {readwrite_key}"},
-        params={"shopId": SHOP_ID, "domain": "orders"},
+        json=_dump_payload(
+            "logistics",
+            _logistics_response(LOGISTICS_ORDER_ID),
+            main_order_id=LOGISTICS_ORDER_ID,
+            endpoint="/api/v1/fulfillment/logistic_detail/list",
+        ),
     )
+
+    r = api_client.post(
+        "/v2/order-sync/reconcile",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json={
+            "scope": {"sellerId": SHOP_ID, "shopId": SHOP_ID},
+            "domains": ["orders", "logistics"],
+            "orders": {
+                "sortInfo": "6",
+                "anchorPositions": [0, 1, 99],
+                "hotWindowSize": 40,
+            },
+            "logistics": {"limit": 10},
+        },
+    )
+    assert r.status_code == 200
     body = r.json()
-    assert body["data"]["total"] == 2
-    assert set(body["data"]["ids"]) == {ORDER_ID_1, ORDER_ID_2}
+    orders = body["data"]["orders"]
+    assert orders["serverTotal"] == 2
+    assert [anchor["position"] for anchor in orders["anchors"]] == [0, 1]
+    assert {anchor["orderId"] for anchor in orders["anchors"]} == {
+        ORDER_ID_1,
+        ORDER_ID_2,
+    }
+    assert orders["offsetSafe"] is False  # fixture deliberately has no order_time
+
+    logistics = body["data"]["logistics"]
+    terminal_item = next(
+        item for item in logistics["items"] if item["orderId"] == LOGISTICS_ORDER_ID
+    )
+    assert terminal_item["isTerminal"] is True
+    assert terminal_item["packageIds"] == [f"{LOGISTICS_ORDER_ID}_pkg_0"]
+    assert terminal_item["terminalReason"] == "Delivered"
+
+
+def test_reconcile_rejects_unknown_domain(api_client, readwrite_key):
+    r = api_client.post(
+        "/v2/order-sync/reconcile",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json={
+            "scope": {"sellerId": SHOP_ID, "shopId": SHOP_ID},
+            "domains": ["statements"],
+        },
+    )
+    assert r.status_code == 400
+    assert r.json()["code"] == "SCHEMA_INVALID"
 
 
 # ─── has-data: 400 invalid domain ──────────────────────────────────

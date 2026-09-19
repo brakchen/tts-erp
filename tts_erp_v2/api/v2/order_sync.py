@@ -3,7 +3,7 @@
 插件从 TikTok Seller Center 抓取的 HTTP 响应通过此端点写入后端。
 - POST /has-data: 批量查业务表存在性
 - POST /dumps: 接收 dump → inline 解析 → 写业务表 + raw_log
-- GET /synced-ids: 查询已同步 id 列表
+- POST /reconcile: 统一返回订单锚点与物流增量候选
 
 详见 tech-doc/chrome-ext-order-sync-design.md。
 """
@@ -15,9 +15,16 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from pydantic import AliasChoices, BaseModel, Field, ValidationError, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.v2._common import (
@@ -37,8 +44,9 @@ from tts_erp_v2.plugin.orders.parser import (
 )
 from tts_erp_v2.plugin.orders.repository import (
     has_data_bulk,
-    list_synced_ids,
     record_dump_health,
+    reconcile_logistics,
+    reconcile_orders,
 )
 
 # ─── Config ───────────────────────────────────────────────────────────
@@ -53,7 +61,7 @@ VALID_DOMAINS = {"orders", "logistics", "statements", "after_sales"}
 
 _PATH_HAS_DATA = "/v2/order-sync/has-data"
 _PATH_DUMPS = "/v2/order-sync/dumps"
-_PATH_SYNCED_IDS = "/v2/order-sync/synced-ids"
+_PATH_RECONCILE = "/v2/order-sync/reconcile"
 
 
 # ─── Logger ───────────────────────────────────────────────────────────
@@ -88,6 +96,54 @@ class HasDataRequest(BaseModel):
         if v not in VALID_DOMAINS:
             raise ValueError(f"domain must be one of {sorted(VALID_DOMAINS)}")
         return v
+
+
+class ReconcileOrdersRequest(BaseModel):
+    pageSize: int = Field(default=20, ge=1, le=500)
+    sortInfo: str = Field(default="6", min_length=1, max_length=32)
+    anchorPositions: list[int] = Field(default_factory=list, max_length=16)
+    hotWindowSize: int = Field(default=40, ge=0, le=500)
+
+    @field_validator("anchorPositions")
+    @classmethod
+    def _anchor_positions_must_be_non_negative(cls, values: list[int]) -> list[int]:
+        if any(value < 0 for value in values):
+            raise ValueError("anchorPositions must contain non-negative integers")
+        return values
+
+
+class ReconcileLogisticsRequest(BaseModel):
+    limit: int = Field(default=500, ge=1, le=500)
+    cursor: str | None = Field(default=None, max_length=128)
+
+
+class ReconcileRequest(BaseModel):
+    protocolVersion: int = Field(default=PROTOCOL_VERSION)
+    scope: ScopeIn
+    domains: list[str] = Field(min_length=1, max_length=2)
+    orders: ReconcileOrdersRequest | None = None
+    logistics: ReconcileLogisticsRequest | None = None
+
+    @field_validator("domains")
+    @classmethod
+    def _domains_must_be_valid_and_unique(cls, values: list[str]) -> list[str]:
+        allowed = {"orders", "logistics"}
+        if len(set(values)) != len(values):
+            raise ValueError("domains must not contain duplicates")
+        invalid = set(values) - allowed
+        if invalid:
+            raise ValueError(f"domains must be one of {sorted(allowed)}")
+        return values
+
+    @model_validator(mode="after")
+    def _domain_blocks_must_be_present(self) -> ReconcileRequest:
+        if "orders" in self.domains and self.orders is None:
+            raise ValueError("orders block is required when domains contains orders")
+        if "logistics" in self.domains and self.logistics is None:
+            raise ValueError(
+                "logistics block is required when domains contains logistics"
+            )
+        return self
 
 
 class DumpRequestIn(BaseModel):
@@ -218,6 +274,81 @@ def post_has_data(
             "covered": covered,
         },
     )
+
+
+# ─── reconcile endpoint ─────────────────────────────────────────────
+
+
+@router.post("/reconcile")
+def post_reconcile(
+    request: Request,
+    body_bytes: bytes = Depends(_raw_body),
+    sess: Session = Depends(get_session),  # noqa: B008
+) -> JSONResponse:
+    """统一返回订单增量校验锚点和物流可恢复同步候选。"""
+    request_id = _request_id(request)
+    key_prefix = _key_prefix(request)
+
+    if len(body_bytes) > MAX_BODY_BYTES:
+        return _audit_and_error(
+            request_id=request_id,
+            status=413,
+            code="PAYLOAD_TOO_LARGE",
+            message=f"body size {len(body_bytes)} exceeds maximum {MAX_BODY_BYTES}",
+            key_prefix=key_prefix,
+            method="POST",
+            path=_PATH_RECONCILE,
+            logger=log,
+        )
+
+    try:
+        payload = ReconcileRequest.model_validate_json(body_bytes)
+    except ValidationError as exc:
+        return _audit_and_error(
+            request_id=request_id,
+            status=400,
+            code="SCHEMA_INVALID",
+            message=str(exc),
+            key_prefix=key_prefix,
+            method="POST",
+            path=_PATH_RECONCILE,
+            logger=log,
+        )
+
+    data: dict[str, Any] = {}
+    records_ok = 0
+    if "orders" in payload.domains and payload.orders is not None:
+        order_data = reconcile_orders(
+            sess,
+            shop_id=payload.scope.shopId,
+            sort_info=payload.orders.sortInfo,
+            anchor_positions=payload.orders.anchorPositions,
+            hot_window_size=payload.orders.hotWindowSize,
+        )
+        data["orders"] = order_data
+        records_ok += int(order_data["serverTotal"])
+    if "logistics" in payload.domains and payload.logistics is not None:
+        logistics_data = reconcile_logistics(
+            sess,
+            shop_id=payload.scope.shopId,
+            limit=payload.logistics.limit,
+            cursor=payload.logistics.cursor,
+        )
+        data["logistics"] = logistics_data
+        records_ok += len(logistics_data["items"])
+
+    _log_event(
+        level=logging.INFO,
+        request_id=request_id,
+        key_prefix=key_prefix,
+        method="POST",
+        path=_PATH_RECONCILE,
+        status=200,
+        records_in=len(payload.domains),
+        records_ok=records_ok,
+        logger=log,
+    )
+    return _ok_response(request_id=request_id, data=data)
 
 
 # ─── dumps endpoint ──────────────────────────────────────────────────
@@ -397,66 +528,5 @@ def post_dumps(
     return _ok_response(
         request_id=request_id,
         data={},
-    )
-
-
-# ─── synced-ids endpoint ─────────────────────────────────────────────
-
-
-@router.get("/synced-ids")
-def get_synced_ids(
-    request: Request,
-    shopId: str = Query(min_length=1, max_length=128),
-    domain: str = Query(min_length=1, max_length=32),
-    limit: int = Query(default=500, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
-    sess: Session = Depends(get_session),  # noqa: B008
-) -> JSONResponse:
-    """查询已同步 id 列表。"""
-    request_id = _request_id(request)
-    key_prefix = _key_prefix(request)
-    audit_path = f"{_PATH_SYNCED_IDS}?shopId={shopId}&domain={domain}"
-
-    if domain not in VALID_DOMAINS:
-        return _audit_and_error(
-            request_id=request_id,
-            status=400,
-            code="SCHEMA_INVALID",
-            message=f"domain must be one of {sorted(VALID_DOMAINS)}",
-            key_prefix=key_prefix,
-            method="GET",
-            path=audit_path,
-            logger=log,
-        )
-
-    ids, total = list_synced_ids(
-        sess,
-        domain=domain,
-        shop_id=shopId,
-        limit=limit,
-        offset=offset,
-    )
-
-    _log_event(
-        logger=log,
-        level=logging.INFO,
-        request_id=request_id,
-        key_prefix=key_prefix,
-        method="GET",
-        path=audit_path,
-        status=200,
-        records_in=1,
-        records_ok=total,
-    )
-
-    return _ok_response(
-        request_id=request_id,
-        data={
-            "domain": domain,
-            "ids": ids,
-            "total": total,
-            "limit": limit,
-            "offset": offset,
-        },
     )
 
