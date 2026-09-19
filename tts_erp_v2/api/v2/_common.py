@@ -7,7 +7,6 @@ _audit_and_error between order_sync.py and analytics.py.
 from __future__ import annotations
 
 import logging
-import sys
 import uuid
 from typing import Any
 
