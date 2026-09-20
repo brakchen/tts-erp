@@ -144,7 +144,7 @@ def has_data_bulk(
 
 ORDER_RECONCILE_SORT_INFO = "6"
 ORDER_RECONCILE_SORT_FIELD = "order_time"
-ORDER_RECONCILE_SORT_DIRECTION = "asc"
+ORDER_RECONCILE_SORT_DIRECTION = "desc"
 ORDER_RECONCILE_TIE_BREAKER = "order_id"
 
 # 这是可迭代的业务规则，而不是 TikTok 状态码的完整字典。只有已经明确表示
@@ -173,6 +173,8 @@ _LOGISTICS_TERMINAL_TERMS = (
     "损坏",
     "破损",
 )
+
+_LOGISTICS_TERMINAL_CODES = frozenset({50101, 80101, 110101})
 
 
 def reconcile_orders(
@@ -204,7 +206,7 @@ def reconcile_orders(
         ).scalar_one()
     )
     order_by = (
-        ChromeOrder.order_time.asc().nulls_last(),
+        ChromeOrder.order_time.desc().nulls_last(),
         ChromeOrder.order_id.asc(),
     )
 
@@ -240,16 +242,28 @@ def reconcile_orders(
     }
 
 
-def _terminal_reason(*values: Any) -> str | None:
-    for value in values:
+def _terminal_reason(
+    *,
+    action_code: Any = None,
+    status: Any = None,
+    description: Any = None,
+) -> str | None:
+    try:
+        code = int(action_code) if action_code is not None else None
+    except (TypeError, ValueError):
+        code = None
+    if code in _LOGISTICS_TERMINAL_CODES:
+        return f"action_code:{code}"
+
+    # Compatibility for rows written before action_code was persisted. Match
+    # the complete status only; substring matching misclassifies phrases such
+    # as "not delivered", "未签收", and location text.
+    for value in (status, description):
         if value is None:
             continue
         normalized = str(value).strip().casefold()
-        if not normalized:
-            continue
-        for term in _LOGISTICS_TERMINAL_TERMS:
-            if term.casefold() in normalized:
-                return str(value).strip()[:160]
+        if normalized and any(normalized == term.casefold() for term in _LOGISTICS_TERMINAL_TERMS):
+            return str(value).strip()[:160]
     return None
 
 
@@ -313,7 +327,7 @@ def reconcile_logistics(
         shipments_by_order.setdefault(shipment.order_id, []).append(shipment)
         package_ids.append(shipment.package_id)
 
-    latest_events: dict[str, ChromeTrackingEvent] = {}
+    events_by_package: dict[str, list[ChromeTrackingEvent]] = {}
     if package_ids:
         events = (
             sess.execute(
@@ -332,7 +346,7 @@ def reconcile_logistics(
             .all()
         )
         for event in events:
-            latest_events.setdefault(event.package_id, event)
+            events_by_package.setdefault(event.package_id, []).append(event)
 
     terminal_by_order: dict[str, tuple[bool, list[str], str | None]] = {}
     for order_id in page_ids:
@@ -343,16 +357,15 @@ def reconcile_logistics(
         reasons: list[str] = []
         all_terminal = True
         for shipment in order_shipments:
-            event = latest_events.get(shipment.package_id)
-            reason = (
-                "delivered_at"
-                if shipment.delivered_at is not None
-                else _terminal_reason(
-                    shipment.status,
-                    event.description if event else None,
-                    event.location if event else None,
-                )
-            )
+            reason = _terminal_reason(status=shipment.status)
+            if reason is None:
+                for event in events_by_package.get(shipment.package_id, []):
+                    reason = _terminal_reason(
+                        action_code=event.action_code,
+                        description=event.description,
+                    )
+                    if reason is not None:
+                        break
             if reason is None:
                 all_terminal = False
             else:
@@ -690,6 +703,7 @@ def upsert_tracking_event(
     shop_id: str,
     package_id: str,
     event_key: str,
+    action_code: int | None = None,
     event_at: datetime | None = None,
     description: str | None = None,
     location: str | None = None,
@@ -702,6 +716,7 @@ def upsert_tracking_event(
             shop_id=shop_id,
             package_id=package_id,
             event_key=event_key,
+            action_code=action_code,
             event_at=event_at,
             description=description,
             location=location,
@@ -716,6 +731,7 @@ def upsert_tracking_event(
             ],
             set_={
                 "event_at": event_at,
+                "action_code": action_code,
                 "description": description,
                 "location": location,
                 "updated_at": now,

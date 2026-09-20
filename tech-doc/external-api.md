@@ -825,7 +825,7 @@ offset 增量；物流返回可恢复游标分页及明确终态的包裹候选�
       "anchors": [{"position": 0, "orderId": "order-1"}],
       "canIncremental": true,
       "offsetSafe": true,
-      "ordering": {"field": "order_time", "direction": "asc", "tieBreaker": "order_id"},
+      "ordering": {"field": "order_time", "direction": "desc", "tieBreaker": "order_id"},
       "hotWindowSize": 40
     },
     "logistics": {

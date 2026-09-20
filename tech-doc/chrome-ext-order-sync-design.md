@@ -302,6 +302,7 @@ CREATE TABLE plugin.tracking_events (
     shop_id         TEXT NOT NULL,
     package_id      TEXT NOT NULL,              -- 关联 plugin.shipments.package_id
     event_key       TEXT NOT NULL,              -- 合成唯一键（package_id + index）
+    action_code     INT,                        -- TikTok 物流事件码
     event_at        TIMESTAMPTZ,               -- ✅ 实测确认: track_list[].time
     description     TEXT,                       -- ✅ 实测确认: track_list[].track_status
     location        TEXT,                       -- 推断自 track_list[].location，codex 未确认该字段存在
@@ -551,7 +552,7 @@ Content-Type: application/json
     "method": "GET",
     "request": { "params": {"main_order_id": "57694276327119"}, "body": null },
     "response": { "status": 200, "body": { ... } },
-    "capturedAt": "2026-09-08T10:30:00.000Z"
+    "createdAt": "2026-09-08T10:30:00.000Z"
   }
 }
 ```
@@ -585,7 +586,7 @@ def post_dumps(request):
         domain=payload.dump.domain,
         shop_id=shop_id,
         endpoint=payload.dump.endpoint,
-        captured_at=payload.dump.capturedAt,
+        captured_at=payload.dump.createdAt,
         request_params=payload.dump.request.params,  // URL query params
         request_body=payload.dump.request.body,
         response_body=payload.dump.response.body,
@@ -641,7 +642,7 @@ Content-Type: application/json
       "anchors": [{"position": 0, "orderId": "id1"}],
       "canIncremental": true,
       "offsetSafe": true,
-      "ordering": {"field": "order_time", "direction": "asc", "tieBreaker": "order_id"},
+      "ordering": {"field": "order_time", "direction": "desc", "tieBreaker": "order_id"},
       "hotWindowSize": 40
     },
     "logistics": {
@@ -928,7 +929,7 @@ TikTok `logistic_detail/list` 响应：
 | `shipped_at` | `track_list[0].time` | 首条轨迹；空 → `NULL` |
 | `delivered_at` | `track_list[-1].time` | 仅当 status 含 "elivered"；否则 `NULL` |
 | `raw_response` | 完整 response body | JSONB 直存 |
-| `captured_at` | dump 请求的 `capturedAt` | 直传 |
+| `captured_at` | dump 请求的 `createdAt` | 直传 |
 
 #### `plugin.tracking_events` 字段映射
 

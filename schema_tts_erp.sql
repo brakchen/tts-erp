@@ -1058,6 +1058,7 @@ CREATE TABLE IF NOT EXISTS plugin.tracking_events (
     shop_id text NOT NULL,
     package_id text NOT NULL,
     event_key text NOT NULL,
+    action_code integer,
     event_at timestamp with time zone,
     description text,
     location text,

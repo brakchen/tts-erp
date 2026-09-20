@@ -4,7 +4,7 @@
 > 用来判断"是否还需要继续抓物流事件"——见 `tech-doc/order-domain-business-rules.md §5`。
 
 ## 来源
-- 定义: `tech-doc/order-domain-business-rules.md §5` 的 `LOGISTICS_TERMINAL_CODES` 常量（**未在 Python 代码里固化**）
+- 定义: `tts_erp_v2/plugin/orders/repository.py` 的 `_LOGISTICS_TERMINAL_CODES`（与 `tech-doc/order-domain-business-rules.md §5` 保持一致）
 - 类型: `set[int]`
 - 文档锚点: `tech-doc/order-domain-business-rules.md §5`
 
@@ -36,11 +36,11 @@ def is_logistics_terminal(tracking_events: list[dict]) -> bool:
 - 订单状态 `COMPLETED` 后，物流可能还没到 `50101`（签收事件延迟回传），插件仍继续拉
 - 这就解决了"订单已终态但物流事件还没全部回传"的缺口
 
-## 已知 gap
+## 实现状态
 
-- ❌ **常量没在 `tts_erp_v2/db/constants.py` 落地**——只在文档里
-- ❌ 插件端 `plugin.tracking_events` 没有 `action_code` 列，所以"物流终态判定"在 plugin 路径下目前**只能靠 `description` 文本匹配**（fragile）
+- ✅ 后端已在 `tts_erp_v2/plugin/orders/repository.py` 固化 `{50101, 80101, 110101}` 白名单
+- ✅ 插件端已持久化 `action_code`；物流终态优先按白名单判断，旧数据或缺码数据只做完整文本匹配，未知状态继续采集。
 
 ## 引用
-- 代码: 无（仅文档定义）
+- 代码: `tts_erp_v2/plugin/orders/repository.py::_LOGISTICS_TERMINAL_CODES`
 - 文档: `tech-doc/order-domain-business-rules.md §5`

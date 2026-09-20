@@ -172,6 +172,7 @@ class ChromeTrackingEvent(Base):
     shop_id: Mapped[str] = mapped_column(Text, nullable=False)
     package_id: Mapped[str] = mapped_column(Text, nullable=False)
     event_key: Mapped[str] = mapped_column(Text, nullable=False)
+    action_code: Mapped[int | None] = mapped_column(Integer)
     event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     description: Mapped[str | None] = mapped_column(Text)
     location: Mapped[str | None] = mapped_column(Text)

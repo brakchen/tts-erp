@@ -64,8 +64,7 @@
 
 ## 已知 gap
 
-- ❌ **plugin 端没单独存 action_code**——`plugin.tracking_events` 表只有 `description`，没有 `action_code` 列。`tech-doc/plugin-sourced-shop-analytics.md:67-68` 标注为 P0 TODO：
-  > "`plugin.tracking_events` 未存 action_code 独立列（仅无 event_id 时拼进 `event_key`）。处理：`plugin.tracking_events` 加 `action_code` 列 + parser 补写，历史数据可从 `event_key` 部分回填。**加列前插件页面海外取消桶为空**。"
+- ✅ **plugin 端已单独存 action_code**——migration `0034_plugin_tracking_action_code` 增加列，parser 写入新抓取轨迹；迁移前历史行的 NULL 按未知状态处理。
 - ❌ **Chrome ext 抓的 `track_list[].action_code` 是否每次都拿到** —— `tech-doc/order-domain-business-rules.md §5` 提到卖家中心页面 response 不一定包含 action_code 数字编码（可能只有 `track_status` 自由文本）。需要实测确认。
 - 🔴 **完整 action_code 总集未知** —— 本表 24 个码来自 VN Bridge nook 单店样本，TikTok 其他区域可能有未观测码
 

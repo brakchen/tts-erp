@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -51,10 +51,7 @@ from tts_erp_v2.plugin.orders.repository import (
 
 # ─── Config ───────────────────────────────────────────────────────────
 
-# NOTE: PROTOCOL_VERSION was previously used as Field(default=PROTOCOL_VERSION)
-# on DumpRequest.protocolVersion but the default was removed. Unlike analytics.py
-# which has SUPPORTED_PROTOCOL_VERSIONS and rejects incompatible versions, this
-# module accepts any integer value without validation. Dead constant removed.
+SUPPORTED_PROTOCOL_VERSION = 1
 MAX_BODY_BYTES = 2 * 1024 * 1024  # 2 MB
 MAX_IDS = 500
 VALID_DOMAINS = {"orders", "logistics", "statements", "after_sales"}
@@ -114,11 +111,11 @@ class ReconcileOrdersRequest(BaseModel):
 
 class ReconcileLogisticsRequest(BaseModel):
     limit: int = Field(default=500, ge=1, le=500)
-    cursor: str | None = Field(default=None, max_length=128)
+    cursor: str | None = Field(default=None, max_length=128, pattern=r"^[0-9]+$")
 
 
 class ReconcileRequest(BaseModel):
-    protocolVersion: int
+    protocolVersion: Literal[SUPPORTED_PROTOCOL_VERSION]
     scope: ScopeIn
     domains: list[str] = Field(min_length=1, max_length=2)
     orders: ReconcileOrdersRequest | None = None
@@ -188,7 +185,7 @@ class DumpBodyIn(BaseModel):
 
 
 class DumpRequest(BaseModel):
-    protocolVersion: int
+    protocolVersion: Literal[SUPPORTED_PROTOCOL_VERSION]
     requestId: str | None = Field(default=None, min_length=1, max_length=128)
     scope: ScopeIn
     dump: DumpBodyIn
@@ -360,7 +357,7 @@ def post_dumps(
     body_bytes: bytes = Depends(_raw_body),
     sess: Session = Depends(get_session),  # noqa: B008
 ) -> JSONResponse:
-    """接收 dump → 解析 → 写业务表 + raw_log。"""
+    """接收 dump → 解析 → 写业务表，并记录 plugin_logs 健康日志。"""
     request_id = _request_id(request)
     key_prefix = _key_prefix(request)
     audit_path = _PATH_DUMPS
@@ -418,6 +415,18 @@ def post_dumps(
     # AGENTS.md §2.5: response.body 为 None（插件抓取失败/超时）→ 422 + EMPTY_RESPONSE_BODY
     # 理由：empty body 是 TikTok 那边的问题（chrome-plugins 侧修复前），重试无意义 = PERMANENT
     if response_body is None:
+        # Keep the domain-level health trail even though no parser can run.
+        # The HTTP error still prevents the plugin from advancing its queue.
+        record_dump_health(
+            sess,
+            shop_id=shop_id,
+            domain=domain,
+            endpoint=endpoint,
+            rows_written=0,
+            parse_error_class="EMPTY_RESPONSE_BODY",
+            captured_at=captured_at,
+        )
+        sess.commit()
         return _audit_and_error(
             request_id=request_id,
             status=422,

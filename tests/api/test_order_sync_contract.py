@@ -17,6 +17,8 @@ import uuid
 import pytest
 from sqlalchemy import text
 
+from tts_erp_v2.plugin.orders.repository import _terminal_reason
+
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
 SHOP_ID = "TEST_shop-001"
@@ -203,6 +205,14 @@ def _statement_transaction_response(sku_detail_id: str) -> dict:
         "seller_web_cut_flow": True,
         "seller_app_cut_flow": False,
     }
+
+
+def test_logistics_terminal_rule_requires_code_or_exact_status():
+    assert _terminal_reason(description="Received at sorting center") is None
+    assert _terminal_reason(description="Not delivered") is None
+    assert _terminal_reason(description="未签收") is None
+    assert _terminal_reason(action_code=50101, description="In transit") == "action_code:50101"
+    assert _terminal_reason(description="Delivered") == "Delivered"
 
 
 def _after_sales_response(cancel_id: str = "TEST_cancel-001") -> dict:

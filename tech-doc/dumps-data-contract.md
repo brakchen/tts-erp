@@ -9,7 +9,7 @@
 >
 > **文档历史**：原 `tech-doc/intercept-plugin-canonical.md`（2026-09-18）的有用内容（ad 域详情、4 域 ID 映射、时间线、ER、状态终态、JOIN 模板、TODO 清单）已合并到 §6-§13；该文件已删除。
 >
-> **当前改造方案**：详见 [`tech-doc/dumps-tts-erp-refactor-proposal.md`](dumps-tts-erp-refactor-proposal.md)（7 个 lane，已完成 Lane A/C/F/G，待 Lane B/E）。
+> **实现说明**：旧改造方案文档仅作历史参考；当前实现以本契约、`tts_erp_v2/api/v2/order_sync.py` 和插件端代码为准。`plugin.raw_log` 已下线，dump 健康记录统一写入 `plugin.plugin_logs`。
 >
 > **设计稿**（部分内容已落后）：[`tech-doc/chrome-ext-order-sync-design.md`](chrome-ext-order-sync-design.md)（§3.2 raw_log 已下线，§3.3 业务表 log_id FK 已删除）。
 
@@ -62,19 +62,20 @@
 
 | 字段 | 类型 | 必填 | Pydantic 校验（server `tts_erp_v2/api/v2/order_sync.py:125-170`） | Zod 校验（plugin `src/core/order-sync-schemas.ts:46-65`） |
 | --- | --- | --- | --- | --- |
-| `protocolVersion` | int | **是**（必填，Lane F 已落地） | `int` 无 default | `z.number()` |
-| `requestId` | string\|null | 否 | `Field(default=None, min_length=1, max_length=128)` | `z.string().optional()` |
-| `scope.sellerId` | string | 是 | `Field(min_length=1, max_length=128)` | `z.string().min(1)` |
-| `scope.shopId` | string | 是 | `Field(min_length=1, max_length=128)` | `z.string().min(1)` |
+| `protocolVersion` | int | **是**（仅支持 `1`） | `Literal[1]` | `z.literal(1)` |
+| `requestId` | string\|null | 否 | `Field(default=None, min_length=1, max_length=128)` | `z.string().min(1).max(128).optional()` |
+| `scope.sellerId` | string | 是 | `Field(min_length=1, max_length=128)` | `z.string().min(1).max(128)` |
+| `scope.shopId` | string | 是 | `Field(min_length=1, max_length=128)` | `z.string().min(1).max(128)` |
 | `dump.domain` | enum | 是 | `Field(min_length=1, max_length=32)` + `_domain_must_be_valid`（`{"orders", "logistics", "statements", "after_sales"}`） | `z.enum(['orders', 'logistics', 'statements', 'after_sales'])` |
-| `dump.mainOrderId` | string\|null | logistics 必填 | `Field(default=None, max_length=128)` | `z.string().optional()` |
-| `dump.statementId` | string\|null | 结算明细必填 | `Field(default=None, max_length=128)` | `z.string().optional()` |
-| `dump.statementVersion` | int\|null | 结算必填 | `Field(default=None)` | `z.number().optional()` |
-| `dump.endpoint` | string | 是 | `Field(min_length=1, max_length=512)` | `z.string().min(1)` |
-| `dump.method` | string | 是 | `Field(min_length=1, max_length=16)` | `z.string().min(1)` |
-| `dump.request.params` | object\|null | 否 | `DumpRequestIn.params`（任意 dict，**服务端不读**） | `z.record(z.string(), z.unknown()).optional()` |
-| `dump.request.body` | object\|null | 否 | `DumpRequestIn.body`（任意，**服务端不读**） | `z.unknown().optional()` |
-| `dump.response.status` | int | 是 | `DumpResponseIn.status` | `z.number()` |
+| `dump.mainOrderId` | string\|null | logistics 必填 | `Field(default=None, max_length=128)` | `z.string().max(128).optional()` |
+| `dump.statementId` | string\|null | 结算明细必填 | `Field(default=None, max_length=128)` | `z.string().max(128).optional()` |
+| `dump.statementVersion` | int\|null | 结算必填 | `Field(default=None)` | `z.number().int().optional()` |
+| `dump.endpoint` | string | 是 | `Field(min_length=1, max_length=512)` | `z.string().min(1).max(512)` |
+| `dump.method` | string | 是 | `Field(min_length=1, max_length=16)` | `z.string().min(1).max(16)` |
+| `dump.request.params` | object\|null | 否 | `DumpRequestIn.params`（任意 dict，**服务端不读**） | `z.record(z.string(), z.unknown()).nullable().optional()` |
+| `dump.request.body` | object\|null | 否 | `DumpRequestIn.body`（任意 dict，**服务端不读**） | `z.record(z.string(), z.unknown()).nullable().optional()` |
+| `dump.response.status` | int | 是 | `DumpResponseIn.status` | `z.number().int()` |
+| `dump.response.body` | object\|null | 语义必填；null 返回 422 | `dict\|None` | `z.record(...).nullable().optional()` |
 | `dump.response.body` | object\|null | **是（语义必填）** | `DumpResponseIn.body`（`null` 走 `EMPTY_RESPONSE_BODY` 422 路径） | `z.unknown()` |
 | `dump.createdAt` | ISO8601 string | 是 | `_created_at_must_be_utc` —— **必须带 tz**（naive datetime 拒收） | `z.string().min(1)` |
 
@@ -83,7 +84,7 @@
 | 差异 | server | plugin |
 | --- | --- | --- |
 | `protocolVersion` | **必填**（Lane F 已对齐） | **必填**（无 default） |
-| `createdAt` 时区 | **必须带 tz**（naive datetime 报错） | 仅 min(1)（plugin 端 `new Date().toISOString()` 默认带 Z，所以实际上不会触发） |
+| `createdAt` 时区 | **必须带 tz**（naive datetime 报错） | 仅非空字符串（plugin 端 `new Date().toISOString()` 默认带 Z，所以实际上不会触发） |
 | `requestId` | 可选 | 可选 |
 
 ### 2.2 完整例子
@@ -296,7 +297,7 @@ elif domain == "statements":
 
 **业务表自然键**：`UNIQUE (shop_id, package_id, event_key)` —— 同一事件多次上报 upsert。
 
-> ⚠️ **`action_code` 列不存在于 `plugin.tracking_events`**！原始 `track_list[]` 里有 `action_code` 字段（参考 [`tech-doc/enums/action-code.md`](enums/action-code.md) 23 个事件码字典），但 parser 没写库。这是 §5 (c) 已知 gap 的一部分。
+> `plugin.tracking_events.action_code` 已通过 migration `0034_plugin_tracking_action_code` 持久化。parser 直接写入原始 `track_list[].action_code`；历史行在迁移后保持 NULL，按未知状态继续采集。
 
 ### §4.5 结算域 → `plugin.settlements`
 
@@ -392,17 +393,17 @@ elif domain == "statements":
 | 假设根因 | (a1) chrome 端未开发 `/return_refund/202309/cancellations/search` 拦截；(a2) 无明确 schedule 触发 |
 | 修复路径 | chrome 加采集即可（dumps 端已 ready）|
 
-### §5.2 (b) 结算域：chrome 抓了但 dumps 没收到
+### §5.2 (历史快照) (b) 结算域：chrome 抓了但 dumps 没收到
 
 | 维度 | 现状（2026-09-15 prod） |
 | --- | --- | --- |
-| **现象** | `plugin.settlements` 0 行 / `plugin.settlement_details` 0 行 / `plugin.raw_log` 含 `statement` endpoint **0 条** |
+| **历史现象（2026-09-15）** | `plugin.settlements` 0 行 / `plugin.settlement_details` 0 行；当时以 `plugin.raw_log` 判断，现已改查 `plugin.plugin_logs` 与运行日志 |
 | Chrome 端采集 | ✅ 抓到了 —— `plugin.intercepted_requests` 含 statement endpoint **148 条**（`/list/detail` × 19、`/transaction/detail` × 13、`/order/list` × 42 等） |
-| Chrome 端 dumps 上传 | ⚠️ 代码看似做了 —— `background.ts:702` `pollOrderDomain('statements')` → `uploadOrderSyncDump(domain='statements', ...)`。**但 raw_log 实际 0 条** —— 说明此分支从未真触发 / 上传失败被吞 |
+| Chrome 端 dumps 上传 | 历史快照：当时以 `raw_log` 是否落库判断；当前应结合 `plugin.plugin_logs`、插件 runtime log 和 HTTP 响应判断 |
 | 假设根因 | (b1) `logistic_detail` 等失败触发 `clearBoundDataSyncTab('statement_authentication_failed')` 提前退出 → 0 条 statement 上传（`background.ts:768-775`） |
 |  | (b2) 60min alarm 没真触发过（绑定的 tab 访问 Finance 页 < 60min） |
 |  | (b3) chrome `fetchStatementRows` 在 main-frame fetch schema 校验失败返回 `[]`（`background.ts:724-728` 直接 `recordOrderProgress(... 'ok', '...返回 0 行...')`） |
-|  | (b4) dumps 端 `parse_statement_list_response` 解析失败但 `_ok_response` 仍返 200，错误被吞在 `plugin.plugin_logs`（per-domain health metric，通过 `record_dump_health` 写入）（**可查证**：补查 `SELECT * FROM plugin.plugin_logs WHERE context->>'domain'='statements' AND context->>'parse_error_class' IS NOT NULL`） |
+|  | (b4) 历史实现曾以 200 + 隐式字段表达解析结果；当前解析失败返回 422，并在 `plugin.plugin_logs` 留健康记录（可查 `context->>'domain'='statements'`） |
 | 现状 | **数据流路径上有 4 个可能断点**；**未 root cause**。Owner 拍板前不动 |
 | 旁路 | `plugin.intercepted_requests.response_body` 已抓到 148 条 statement 响应 —— **A13 不回填**（用户原话 "B4 不需要回填，我重新抓取就可以了"），仅供 Lane C 诊断证据使用 |
 
@@ -411,12 +412,12 @@ elif domain == "statements":
 | 维度 | 现状（2026-09-15 prod） |
 | --- | --- |
 | **现象** | `plugin.shipments` 0 行 / `plugin.tracking_events` 0 行 |
-| Chrome 端 | `logistic_detail/list` 100% 返回 `response.body=null`（参见 `tech-doc/plugin-sourced-shop-analytics.md §8`） |
+| Chrome 端（历史快照） | `logistic_detail/list` 曾出现 `response.body=null`（参见 `tech-doc/plugin-sourced-shop-analytics.md §8`）；当前插件会记录完整诊断并将空 body 作为失败处理 |
 | 假设根因 | (c1) Chrome ext `logistic_detail/list` GET 抓取逻辑 bug（不同于 POST `order/list`） |
 |  | (c2) TikTok 卖家中心改了 API（auth/session 限制）|
 |  | (c3) Chrome ext 没有触发到详情页（点了订单详情才发出 `logistic_detail/list`） |
 | 旁路 | `action_code` 已能通过 `/fulfillment/202309/orders/{order_id}/tracking` 服务端 API 拿到（`integration.raw_records.payload[].action_code`，参考 [`tech-doc/enums/action-code.md`](enums/action-code.md) 24 个事件码字典）—— 但**未写入 plugin.tracking_events** |
-| 已知 TODO | `tech-doc/plugin-sourced-shop-analytics.md §4.3`：给 `plugin.tracking_events` 加 `action_code` 列 |
+| 已完成 | migration `0034_plugin_tracking_action_code` 增加 `plugin.tracking_events.action_code`，并由 parser 写入；物流终态由 action-code 白名单判断 |
 
 ### §5.4 (d) 订单域：`order_time` / `update_time` NULL
 
@@ -723,6 +724,6 @@ WHERE o.shop_id = ?
 | 6 | multi-package 订单 | ❌ TODO | catalog §7.4.6.3 TODO |
 | 7 | chrome 端抓取规则 + 权限 | ❌ 跨仓 | chrome-plugins |
 | 8 | dumps 上传失败重试策略 | ❌ 跨仓 | chrome-plugins |
-| 9 | 物流空 body 修复（插件端 + 服务端 422 落地）| ❌ TODO | `dumps-tts-erp-refactor-proposal.md` Lane B |
+| 9 | 物流空 body 修复（插件端 + 服务端 422 落地）| ✅ 已完成 | 插件记录诊断；服务端写 `plugin_logs` 并返 422 |
 | 10 | 结算 0 行根因定位（Lane C 诊断 + parser fallback） | ❌ TODO | `dumps-tts-erp-refactor-proposal.md` Lane C（**不做回填**，见 review §G7 A13） |
-| 11 | 严格 HTTP 语义落地（empty_response 改 422 + rowsWritten/data.status 删）| ❌ TODO | `dumps-tts-erp-refactor-proposal.md` Lane E |
+| 11 | 严格 HTTP 语义落地（empty_response 改 422 + rowsWritten/data.status 删）| ✅ 已完成 | `/v2/order-sync/dumps` 当前以 HTTP 状态和 `code` 为准 |

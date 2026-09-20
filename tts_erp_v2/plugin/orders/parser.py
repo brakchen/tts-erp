@@ -262,6 +262,18 @@ def parse_logistics_response(
             # 仅当 status 含 "elivered" 时填 delivered_at
             if status and "elivered" in status.lower():
                 delivered_at = last_time
+            else:
+                delivered_at = None
+            # The exact status/action-code guard below removes substring false positives.
+            try:
+                last_action_code = int(last_track.get("action_code"))
+            except (TypeError, ValueError):
+                last_action_code = None
+            if delivered_at is not None and last_action_code != 50101 and not (
+                isinstance(status, str)
+                and status.strip().casefold() in {"delivered", "已签收", "签收", "已送达"}
+            ):
+                delivered_at = None
 
         upsert_shipment(
             sess,
@@ -301,6 +313,7 @@ def parse_logistics_response(
                 shop_id=shop_id,
                 package_id=package_id,
                 event_key=event_key,
+                action_code=(int(track["action_code"]) if str(track.get("action_code", "")).isdigit() else None),
                 event_at=event_at,
                 description=description,
                 location=location,
