@@ -201,8 +201,15 @@ def _parse_track_time(value: Any) -> datetime | None:
     if isinstance(value, (int, float)):
         return _ts_to_datetime(value)
     if isinstance(value, str):
+        value = value.strip()
         if value in ("", "0"):
             return None
+        try:
+            numeric_value = float(value)
+        except ValueError:
+            numeric_value = None
+        if numeric_value is not None:
+            return _ts_to_datetime(numeric_value)
         try:
             dt = datetime.fromisoformat(value)
             if dt.tzinfo is None:
