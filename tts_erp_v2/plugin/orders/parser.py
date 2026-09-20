@@ -71,12 +71,14 @@ def parse_order_response(
     data = response_body.get("data")
     if isinstance(data, dict) and "main_orders" in data:
         # 格式1：完整 API 响应
-        main_orders = data.get("main_orders") or []
+        main_orders = data["main_orders"]
+        if not isinstance(main_orders, list):
+            raise ValueError("order response data.main_orders must be a list")
     elif "main_order_id" in response_body:
         # 格式2：单个订单对象
         main_orders = [response_body]
     else:
-        main_orders = data.get("main_orders") or [] if isinstance(data, dict) else []
+        raise ValueError("order response missing data.main_orders")
 
     for order in main_orders:
         order_id = str(order.get("main_order_id", ""))
@@ -221,8 +223,12 @@ def parse_logistics_response(
 ) -> int:
     """解析 logistic_detail/list 响应 → 写 shipments + tracking_events。返回写入行数。"""
     rows_written = 0
-    data = response_body.get("data") or {}
-    package_list = data.get("package_list") or []
+    data = response_body.get("data")
+    if not isinstance(data, dict) or "package_list" not in data:
+        raise ValueError("logistics response missing data.package_list")
+    package_list = data["package_list"]
+    if not isinstance(package_list, list):
+        raise ValueError("logistics response data.package_list must be a list")
 
     for pkg in package_list:
         package_id = str(pkg.get("package_id", ""))
@@ -355,14 +361,18 @@ def parse_statement_list_response(
 ) -> int:
     """解析 statement/list/detail 响应 → 写 settlements。返回写入行数。"""
     rows_written = 0
-    data = response_body.get("data") or {}
     if "statement_id" in response_body:
         # Plugin order polling intentionally sends one statement object per dump
         # so the backend must accept that wire shape as well as the full list
         # envelope.
         statement_records = [response_body]
     else:
-        statement_records = data.get("statement_records") or []
+        data = response_body.get("data")
+        if not isinstance(data, dict) or "statement_records" not in data:
+            raise ValueError("statement response missing data.statement_records")
+        statement_records = data["statement_records"]
+        if not isinstance(statement_records, list):
+            raise ValueError("statement response data.statement_records must be a list")
 
     for record in statement_records:
         statement_id = str(record.get("statement_id", ""))
@@ -425,13 +435,16 @@ def parse_statement_transaction_response(
 ) -> int:
     """解析 statement/transaction/detail 响应 → 写 settlement_details。返回写入行数。"""
     rows_written = 0
-    data = response_body.get("data") or {}
-    sku_record = data.get("sku_record") or {}
+    data = response_body.get("data")
+    if not isinstance(data, dict) or "sku_record" not in data:
+        raise ValueError("statement transaction response missing data.sku_record")
+    sku_record = data["sku_record"]
+    if not isinstance(sku_record, dict):
+        raise ValueError("statement transaction response data.sku_record must be an object")
 
     sku_detail_id = str(sku_record.get("statement_sku_detail_id", ""))
     if not sku_detail_id:
-        log.warning("sku_record missing statement_sku_detail_id")
-        return 0
+        raise ValueError("statement transaction response missing statement_sku_detail_id")
 
     statement_id = str(sku_record.get("statement_id", ""))
     statement_version = sku_record.get("statement_version", 0)
@@ -530,13 +543,15 @@ def parse_after_sales_response(
     }
     """
     rows_written = 0
-    data = response_body.get("data") or {}
+    data = response_body.get("data")
     if isinstance(data, dict) and "cancellations" in data:
-        cancellations = data.get("cancellations") or []
+        cancellations = data["cancellations"]
+        if not isinstance(cancellations, list):
+            raise ValueError("after-sales response data.cancellations must be a list")
     elif "cancel_id" in response_body:
         cancellations = [response_body]
     else:
-        cancellations = []
+        raise ValueError("after-sales response missing data.cancellations")
 
     for c in cancellations:
         cancel_id = str(c.get("cancel_id") or "")

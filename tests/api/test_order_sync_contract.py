@@ -560,6 +560,22 @@ def test_dumps_empty_response_returns_422(api_client, readwrite_key):
     assert "plugin must not advance progress" in body["message"]
 
 
+def test_dumps_order_missing_main_orders_returns_422(api_client, readwrite_key):
+    """code=0 但缺少结构字段不能被当成成功空页。"""
+    r = api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=_dump_payload(
+            "orders",
+            {"code": 0, "data": {}},
+            endpoint="/api/fulfillment/order/list",
+            method="POST",
+        ),
+    )
+    assert r.status_code == 422
+    assert r.json()["code"] == "PARSE_ERROR"
+
+
 # ─── dumps: logistics inserted ─────────────────────────────────────
 
 
@@ -578,6 +594,22 @@ def test_dumps_logistics_inserted(api_client, readwrite_key):
     body = r.json()
     assert body["code"] == 0
     assert body["message"] == "success"
+
+
+def test_dumps_logistics_missing_package_list_returns_422(api_client, readwrite_key):
+    """code=0 但缺少 package_list 不能推进物流游标。"""
+    r = api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=_dump_payload(
+            "logistics",
+            {"code": 0, "data": {}},
+            main_order_id=LOGISTICS_ORDER_ID,
+            endpoint="/api/v1/fulfillment/logistic_detail/list",
+        ),
+    )
+    assert r.status_code == 422
+    assert r.json()["code"] == "PARSE_ERROR"
 
 
 # ─── dumps: statement list inserted ─────────────────────────────────
@@ -616,6 +648,21 @@ def test_dumps_single_statement_object_inserted(api_client, readwrite_key):
     assert r.json()["message"] == "success"
 
 
+def test_dumps_statement_missing_records_returns_422(api_client, readwrite_key):
+    """code=0 但缺少 statement_records 不能被当成成功空页。"""
+    r = api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=_dump_payload(
+            "statements",
+            {"code": 0, "data": {}},
+            endpoint="/api/v1/pay/statement/list/detail",
+        ),
+    )
+    assert r.status_code == 422
+    assert r.json()["code"] == "PARSE_ERROR"
+
+
 # ─── dumps: statement transaction detail inserted ───────────────────
 
 
@@ -651,6 +698,22 @@ def test_dumps_after_sales_inserted(api_client, readwrite_key):
         ),
     )
     assert r.status_code == 200
+
+
+def test_dumps_after_sales_missing_cancellations_returns_422(api_client, readwrite_key):
+    """code=0 但缺少 cancellations 不能被当成成功空页。"""
+    r = api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=_dump_payload(
+            "after_sales",
+            {"code": 0, "data": {}},
+            endpoint="/return_refund/202309/cancellations/search",
+            method="POST",
+        ),
+    )
+    assert r.status_code == 422
+    assert r.json()["code"] == "PARSE_ERROR"
     body = r.json()
     assert body["code"] == 0
     assert body["message"] == "success"
