@@ -81,10 +81,11 @@ def parse_order_response(
         raise ValueError("order response missing data.main_orders")
 
     for order in main_orders:
+        if not isinstance(order, dict):
+            raise ValueError("order response data.main_orders items must be objects")
         order_id = str(order.get("main_order_id", ""))
         if not order_id:
-            log.warning("order missing main_order_id, skipping: %s", order)
-            continue
+            raise ValueError("order response data.main_orders item missing main_order_id")
 
         # ✅ 实测确认（2026-09-09 域名观察）
         # order_status_module 是数组，每个 order_line 一个元素
@@ -238,10 +239,11 @@ def parse_logistics_response(
         raise ValueError("logistics response data.package_list must be a list")
 
     for pkg in package_list:
+        if not isinstance(pkg, dict):
+            raise ValueError("logistics response data.package_list items must be objects")
         package_id = str(pkg.get("package_id", ""))
         if not package_id:
-            log.warning("package missing package_id, skipping: %s", pkg)
-            continue
+            raise ValueError("logistics response data.package_list item missing package_id")
 
         tracking_number = pkg.get("tracking_no")
         carrier_name = pkg.get("logistic_supplier")
@@ -270,6 +272,8 @@ def parse_logistics_response(
             first_track = track_list[0]
             last_track = track_list[-1]
             status = last_track.get("track_status")
+            if status is not None and not isinstance(status, str):
+                status = str(status)
             shipped_at = _parse_track_time(first_track.get("time"))
             last_time = _parse_track_time(last_track.get("time"))
             # 仅当 status 含 "elivered" 时填 delivered_at
@@ -287,6 +291,12 @@ def parse_logistics_response(
                 and status.strip().casefold() in {"delivered", "已签收", "签收", "已送达"}
             ):
                 delivered_at = None
+            # Status may be localized (for example, 已签收) and therefore
+            # cannot rely on an English substring check above. Recompute the
+            # terminal timestamp from the exact status/action-code contract.
+            normalized_status = status.strip().casefold() if isinstance(status, str) else ""
+            is_delivered_status = normalized_status in {"delivered", "已签收", "签收", "已送达"}
+            delivered_at = last_time if last_action_code == 50101 or is_delivered_status else None
 
         upsert_shipment(
             sess,
@@ -382,10 +392,11 @@ def parse_statement_list_response(
             raise ValueError("statement response data.statement_records must be a list")
 
     for record in statement_records:
+        if not isinstance(record, dict):
+            raise ValueError("statement response data.statement_records items must be objects")
         statement_id = str(record.get("statement_id", ""))
         if not statement_id:
-            log.warning("statement missing statement_id, skipping: %s", record)
-            continue
+            raise ValueError("statement response data.statement_records item missing statement_id")
 
         statement_version = record.get("statement_version", 0)
         bill_period = record.get("bill_period")
@@ -561,10 +572,11 @@ def parse_after_sales_response(
         raise ValueError("after-sales response missing data.cancellations")
 
     for c in cancellations:
+        if not isinstance(c, dict):
+            raise ValueError("after-sales response data.cancellations items must be objects")
         cancel_id = str(c.get("cancel_id") or "")
         if not cancel_id:
-            log.warning("after_sale missing cancel_id, skipping: %s", c)
-            continue
+            raise ValueError("after-sales response data.cancellations item missing cancel_id")
         cancel_type = str(c.get("cancel_type") or "")
         cancel_status = str(c.get("cancel_status") or "")
         main_order_id = c.get("order_id") or c.get("main_order_id")
