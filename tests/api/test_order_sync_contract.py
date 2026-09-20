@@ -576,6 +576,22 @@ def test_dumps_order_missing_main_orders_returns_422(api_client, readwrite_key):
     assert r.json()["code"] == "PARSE_ERROR"
 
 
+def test_dumps_order_with_malformed_main_order_returns_422(api_client, readwrite_key):
+    """非空订单数组含缺少主键的记录时，不能静默跳过并推进游标。"""
+    r = api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=_dump_payload(
+            "orders",
+            {"code": 0, "data": {"main_orders": [{}]}},
+            endpoint="/api/fulfillment/order/list",
+            method="POST",
+        ),
+    )
+    assert r.status_code == 422
+    assert r.json()["code"] == "PARSE_ERROR"
+
+
 # ─── dumps: logistics inserted ─────────────────────────────────────
 
 
@@ -604,6 +620,22 @@ def test_dumps_logistics_missing_package_list_returns_422(api_client, readwrite_
         json=_dump_payload(
             "logistics",
             {"code": 0, "data": {}},
+            main_order_id=LOGISTICS_ORDER_ID,
+            endpoint="/api/v1/fulfillment/logistic_detail/list",
+        ),
+    )
+    assert r.status_code == 422
+    assert r.json()["code"] == "PARSE_ERROR"
+
+
+def test_dumps_logistics_with_malformed_package_returns_422(api_client, readwrite_key):
+    """非空物流包裹数组含缺少 package_id 的记录时必须报解析错误。"""
+    r = api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=_dump_payload(
+            "logistics",
+            {"code": 0, "data": {"package_list": [{}]}},
             main_order_id=LOGISTICS_ORDER_ID,
             endpoint="/api/v1/fulfillment/logistic_detail/list",
         ),
@@ -663,6 +695,21 @@ def test_dumps_statement_missing_records_returns_422(api_client, readwrite_key):
     assert r.json()["code"] == "PARSE_ERROR"
 
 
+def test_dumps_statement_with_malformed_record_returns_422(api_client, readwrite_key):
+    """非空结算数组含缺少 statement_id 的记录时必须报解析错误。"""
+    r = api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=_dump_payload(
+            "statements",
+            {"code": 0, "data": {"statement_records": [{}]}},
+            endpoint="/api/v1/pay/statement/list/detail",
+        ),
+    )
+    assert r.status_code == 422
+    assert r.json()["code"] == "PARSE_ERROR"
+
+
 # ─── dumps: statement transaction detail inserted ───────────────────
 
 
@@ -714,9 +761,22 @@ def test_dumps_after_sales_missing_cancellations_returns_422(api_client, readwri
     )
     assert r.status_code == 422
     assert r.json()["code"] == "PARSE_ERROR"
-    body = r.json()
-    assert body["code"] == 0
-    assert body["message"] == "success"
+
+
+def test_dumps_after_sales_with_malformed_cancellation_returns_422(api_client, readwrite_key):
+    """非空售后数组含缺少 cancel_id 的记录时必须报解析错误。"""
+    r = api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=_dump_payload(
+            "after_sales",
+            {"code": 0, "data": {"cancellations": [{}]}},
+            endpoint="/return_refund/202309/cancellations/search",
+            method="POST",
+        ),
+    )
+    assert r.status_code == 422
+    assert r.json()["code"] == "PARSE_ERROR"
 
 
 def test_dumps_invalid_domain_returns_400(api_client, readwrite_key):

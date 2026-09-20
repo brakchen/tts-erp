@@ -298,6 +298,34 @@ class TestParseLogisticsResponse:
             assert row.shipped_at == datetime.fromtimestamp(1788362478, tz=UTC)
             assert row.delivered_at == datetime.fromtimestamp(1788961712, tz=UTC)
 
+    def test_localized_delivered_status_sets_delivered_at(self):
+        """中文签收状态也必须落 delivered_at，不能因英文判断漏记终态。"""
+        eng = get_engine()
+        with Session(eng) as sess:
+            resp = {
+                "code": 0,
+                "data": {
+                    "package_list": [{
+                        "package_id": "TEST_pkg-localized-delivered",
+                        "logistic_detail": {"track_list": [{
+                            "time": "2026-09-19T12:00:00Z",
+                            "track_status": "已签收",
+                            "action_code": 50101,
+                        }]},
+                    }],
+                },
+            }
+            parse_logistics_response(
+                sess, shop_id=SHOP_ID, order_id="TEST_ord-localized-delivered",
+                response_body=resp, captured_at=datetime.now(UTC),
+            )
+            sess.commit()
+            row = sess.execute(  # pi-lens-ignore: python-sql-injection
+                text("SELECT delivered_at FROM plugin.shipments WHERE shop_id = :s AND package_id = :p"),
+                {"s": SHOP_ID, "p": "TEST_pkg-localized-delivered"},
+            ).one()
+            assert row.delivered_at == datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+
 
 # ─── parse_statement_list_response ─────────────────────────────────
 
