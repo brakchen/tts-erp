@@ -1,7 +1,7 @@
 # `dumps-data-contract` — Chrome 插件 ↔ tts-erp dumps 端契约
 
 > **范围**：订单/物流/结算/售后 + 广告 5 域同步的端到端契约 —— Chrome 插件（在 Seller Center 页面拦截 TikTok 接口）↔ tts-erp 后端 dumps 端点 ↔ `plugin.*` 业务表。
-> **不涵盖**：`/v2/order-sync/has-data` 和 `/v2/order-sync/synced-ids` —— 这两个端点是 progress/diagnostic 用的，**不属于同步契约**（参见 [`chrome-ext-order-sync-design.md §5`](chrome-ext-order-sync-design.md)）。
+> **补充**：`/v2/order-sync/reconcile` 是订单/物流的 progress/diagnostic 校验端点；`/v2/order-sync/has-data` 仅保留给结算版本存在性诊断，均不替代 dumps 写入契约。
 >
 > **设计稿 vs 契约稿**：本文档是**现状契约**（`chrome-plugins/ads-data-sync` + `tts_erp_v2/api/v2/order_sync.py` + `tts_erp_v2/plugin/orders/parser.py` + `tts_erp_v2/analytics/*.py` 实际代码为准）；设计稿见 [`chrome-ext-order-sync-design.md`](chrome-ext-order-sync-design.md)。
 >
@@ -467,7 +467,7 @@ elif domain == "statements":
 | Chrome 端 endpoint 路径常量 | `chrome-plugins/ads-data-sync/src/core/tiktok-order-endpoints.ts` | — |
 |  | `chrome-plugins/ads-data-sync/src/core/tiktok-statement-endpoints.ts` | — |
 | Chrome 端同步调度 | `chrome-plugins/ads-data-sync/entrypoints/background.ts:141-152` (常量) / `:262-280` (alarm 路由) / `:590-680` (orders alarm handler) / `:681-790` (logistics+statements handler) | — |
-| Chrome 端 progress/diagnostic 端点 | `POST /v2/order-sync/has-data`（plugin `hasDataBulk`） / `GET /v2/order-sync/synced-ids`（plugin `fetchSyncedIds`） —— **不属于本契约** | — |
+| Chrome 端 progress/diagnostic 端点 | `POST /v2/order-sync/reconcile`（订单锚点 / 物流候选） / `POST /v2/order-sync/has-data`（结算存在性诊断） —— **不属于 dumps 写入契约** | — |
 | 错误码 + 空响应处理 | `tts_erp_v2/api/v2/order_sync.py:328-345`（`empty_response`）/ `:352-360`（`parse_error`） | — |
 
 ---

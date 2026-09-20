@@ -2,7 +2,7 @@
 
 插件从 TikTok Seller Center 抓取的 HTTP 响应通过此端点写入后端。
 - POST /has-data: 批量查业务表存在性
-- POST /dumps: 接收 dump → inline 解析 → 写业务表 + raw_log
+- POST /dumps: 接收 dump → inline 解析 → 写业务表 + plugin_logs 健康记录
 - POST /reconcile: 统一返回订单锚点与物流增量候选
 
 详见 tech-doc/chrome-ext-order-sync-design.md。
@@ -118,7 +118,7 @@ class ReconcileLogisticsRequest(BaseModel):
 
 
 class ReconcileRequest(BaseModel):
-    protocolVersion: int = Field(default=PROTOCOL_VERSION)
+    protocolVersion: int
     scope: ScopeIn
     domains: list[str] = Field(min_length=1, max_length=2)
     orders: ReconcileOrdersRequest | None = None

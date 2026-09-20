@@ -35,7 +35,7 @@ Chrome 扩展新增了对 TikTok Seller Center **订单/物流/结算**三个域
 - **has-data 端点**：提供业务表覆盖查询和断点诊断；订单域的可变数据不能把存在性
   当作新鲜度证明，插件仍会按当前 Seller Center 结果刷新
 - **dumps 端点**：插件把从 TikTok 抓到的原始 HTTP 响应上传到后端，后端做幂等存储
-- **raw 表**：原始 dump 的 source-of-truth，后续可派生规范化数据
+- **plugin_logs**：记录每次 dump 的域、endpoint、写入行数和解析错误，作为同步健康诊断
 
 ### 2.2 与 analytics 的关键差异
 
@@ -673,7 +673,7 @@ Content-Type: application/json
 │    → 提取 main_order_id[]                                   │
 │                                                             │
 │ 2. POST /v2/order-sync/dumps (domain=orders)                │
-│    → 后端立即解析 + 写入业务表 + 写 raw_log                   │
+│    → 后端立即解析 + 写入业务表 + 写 plugin_logs 健康记录        │
 │                                                             │
 │ 3. fetchLogisticDetail(id)                                  │
 │    → POST /v2/order-sync/dumps (domain=logistics)           │
@@ -716,7 +716,7 @@ Content-Type: application/json
 │    → POST /v2/order-sync/dumps (domain=statements)          │
 │    → 后端解析写入 settlement_details 表                       │
 │                                                             │
-│ 3. raw_log 记录每次同步流水                                    │
+│ 3. plugin_logs 记录每次同步健康结果                            │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -736,7 +736,7 @@ Content-Type: application/json
 | --- | --- |
 | `tts_erp_v2/api/v2/order_sync.py` | 路由：`/v2/order-sync/{has-data,dumps,reconcile}` |
 | `tts_erp_v2/plugin/parser.py` | 解析函数：`parse_order_response()` / `parse_logistics_response()` / `parse_statement_response()` |
-| `tts_erp_v2/plugin/repository.py` | `has_data_bulk()` / `upsert_order()` / `upsert_logistics()` / `upsert_statement()` / `write_raw_log()` |
+| `tts_erp_v2/plugin/orders/repository.py` | `has_data_bulk()` / `reconcile_orders()` / `reconcile_logistics()` / `record_dump_health()` |
 | `tts_erp_v2/app.py` | 挂载新路由 |
 
 ### 6.3 测试
@@ -790,7 +790,7 @@ POST /dumps 请求到达
     ├─ domain=logistics → parse_logistics_response() → upsert plugin.shipments + tracking_events
     └─ domain=statements→ parse_statement_response() → upsert plugin.settlements + settlement_details
     │
-    └─ write_raw_log()（无论成功失败都写）
+    └─ record_dump_health() → plugin.plugin_logs（记录成功/失败与行数）
 ```
 
 解析在 dump handler 内 **同步完成**，数据立即可查。

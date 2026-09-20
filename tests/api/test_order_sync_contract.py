@@ -2,7 +2,7 @@
 
 端点契约：
 1. POST /v2/order-sync/has-data — 批量查业务表存在性
-2. POST /v2/order-sync/dumps — 接收 dump → inline 解析 → 写业务表 + raw_log
+2. POST /v2/order-sync/dumps — 接收 dump → inline 解析 → 写业务表 + plugin_logs 健康记录
 3. POST /v2/order-sync/reconcile — 订单锚点与物流候选统一查询
 
 auth 分类 = readwrite：匿名 401、readonly 403、readwrite 通过。
@@ -263,6 +263,7 @@ def test_reconcile_anonymous_is_401(api_client):
     r = api_client.post(
         "/v2/order-sync/reconcile",
         json={
+            "protocolVersion": 1,
             "scope": {"sellerId": SHOP_ID, "shopId": SHOP_ID},
             "domains": ["orders"],
             "orders": {"anchorPositions": [0]},
@@ -301,6 +302,7 @@ def test_reconcile_readonly_is_403(api_client, readonly_key):
         "/v2/order-sync/reconcile",
         headers={"Authorization": f"Bearer {readonly_key}"},
         json={
+            "protocolVersion": 1,
             "scope": {"sellerId": SHOP_ID, "shopId": SHOP_ID},
             "domains": ["orders"],
             "orders": {"anchorPositions": [0]},
@@ -888,6 +890,7 @@ def test_reconcile_empty_db_returns_empty_orders_and_logistics(
         "/v2/order-sync/reconcile",
         headers={"Authorization": f"Bearer {readwrite_key}"},
         json={
+            "protocolVersion": 1,
             "scope": {"sellerId": SHOP_ID, "shopId": SHOP_ID},
             "domains": ["orders", "logistics"],
             "orders": {"anchorPositions": [0]},
@@ -935,6 +938,7 @@ def test_reconcile_returns_order_anchors_and_terminal_logistics(
         "/v2/order-sync/reconcile",
         headers={"Authorization": f"Bearer {readwrite_key}"},
         json={
+            "protocolVersion": 1,
             "scope": {"sellerId": SHOP_ID, "shopId": SHOP_ID},
             "domains": ["orders", "logistics"],
             "orders": {
@@ -970,6 +974,7 @@ def test_reconcile_rejects_unknown_domain(api_client, readwrite_key):
         "/v2/order-sync/reconcile",
         headers={"Authorization": f"Bearer {readwrite_key}"},
         json={
+            "protocolVersion": 1,
             "scope": {"sellerId": SHOP_ID, "shopId": SHOP_ID},
             "domains": ["statements"],
         },
