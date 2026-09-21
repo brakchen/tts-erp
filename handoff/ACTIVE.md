@@ -11,7 +11,6 @@
 
 | lane_id | 主题 | owner(session) | branch/worktree | 拥有的文件/目录 | 状态 | updated(UTC) |
 | --- | --- | --- | --- | --- | --- | --- |
-| fix/order-sync-checkpoint-backend | 订单同步 checkpoint 方案的服务端契约文档：明确订单 reconcile 仅诊断，has-data 用于精确补洞；物流 reconcile 行为不变 | 本 session | .worktrees/order-sync-checkpoint / fix/order-sync-checkpoint | tech-doc/chrome-ext-order-sync-design.md, tech-doc/external-api.md, handoff/ACTIVE.md | done | 2026-09-21T04:50Z |
 | feat/spu-roi-page-ui | ROI 看板 UI：主图点击放大 / 缩略图加大(34→56)+单元格布局 / 汇率 stamp 与汇总重叠修复 | (接管 manual-costs-v2 之后的独立 UI lane) | .worktrees/spu-roi-page-ui | tts_erp_v2/api/v2/pages.py(ROI 模板段)、tts_erp_v2/static/js/spu-roi.js、handoff/ACTIVE.md | merged (9253965) | 2026-09-06T06:16Z |
 | feat/manual-costs-v2 | manual-costs 页 v2（全部 SPU tab / 事件绑定修复） | 未登记（owner session 见 .worktrees/manual-costs-v2 @ 5324f95） | .worktrees/manual-costs-v2 | tts_erp_v2/api/v2/pages.py、tts_erp_v2/static/js/spu-roi.js、console.js（master WT 在途 M） | **abandoned（2026-09-07，用户拍板直接放弃；核心修复 5324f95/dd21055 已在 master；分支/worktree 均无残留，pages.py/spu-roi.js 文件面释放给 spu-roi-v7）** | 2026-09-07 |
 | fix/fx-test-isolation | fx 测试脱敏：fx.sync 每日真实 USD snapshot 入库后，假设 fx 表无真实数据的 fx/rates/sync/api 测试被环境性破坏（HEAD 复现），改为互斥 base_code + 夹具内清理，不含对生产行的假设 | 本 session | .worktrees/fx-test-isolation / fix/fx-test-isolation | tests/fx/*.py、tests/api/test_fx_api.py、tests/conftest.py（如涉及共享夹具） | draft | 2026-09-06T07:14Z |
