@@ -147,6 +147,11 @@ ORDER_RECONCILE_SORT_FIELD = "order_time"
 ORDER_RECONCILE_SORT_DIRECTION = "desc"
 ORDER_RECONCILE_TIE_BREAKER = "order_id"
 
+# TikTok Seller Center main_order_status=104 is the observed CANCELLED state.
+# Keep the raw value in orders; this constant only controls logistics
+# candidate selection so cancelled orders are not queried for packages.
+TIKTOK_CANCELLED_MAIN_ORDER_STATUS = 104
+
 # 这是可迭代的业务规则，而不是 TikTok 状态码的完整字典。只有已经明确表示
 # 包裹不会继续流转的状态才进入这里；未知状态保持 active，宁可多查一次。
 _LOGISTICS_TERMINAL_TERMS = (
@@ -297,7 +302,18 @@ def reconcile_logistics(
         .scalars()
         .all()
     )
-    candidate_ids = sorted(order_ids | shipment_order_ids)
+    cancelled_order_ids = set(
+        sess.execute(
+            select(ChromeOrder.order_id)
+            .where(
+                ChromeOrder.shop_id == shop_id,
+                ChromeOrder.main_order_status == TIKTOK_CANCELLED_MAIN_ORDER_STATUS,
+            )
+        )
+        .scalars()
+        .all()
+    )
+    candidate_ids = sorted((order_ids | shipment_order_ids) - cancelled_order_ids)
     total = len(candidate_ids)
 
     try:

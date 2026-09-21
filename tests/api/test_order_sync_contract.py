@@ -111,6 +111,14 @@ def _order_response(order_ids: list[str], sku_count: int = 1) -> dict:
     return {"code": 0, "message": "success", "data": {"main_orders": orders}}
 
 
+def _order_response_with_main_status(order_id: str, status: int) -> dict:
+    response = _order_response([order_id])
+    response["data"]["main_orders"][0]["order_status_module"] = [
+        {"main_order_status": status, "sku_display_status": 140}
+    ]
+    return response
+
+
 def _logistics_response(order_id: str, package_count: int = 1) -> dict:
     """构造 logistic_detail/list 响应体。"""
     packages = []
@@ -1100,6 +1108,41 @@ def test_reconcile_returns_order_anchors_and_terminal_logistics(
     assert terminal_item["isTerminal"] is True
     assert terminal_item["packageIds"] == [f"{LOGISTICS_ORDER_ID}_pkg_0"]
     assert terminal_item["terminalReason"] == "Delivered"
+
+
+def test_reconcile_excludes_cancelled_main_order_status_from_logistics(
+    api_client, readwrite_key
+):
+    cancelled_order_id = "TEST_cancelled-order-104"
+    active_order_id = "TEST_active-order-101"
+    for order_id, status in ((cancelled_order_id, 104), (active_order_id, 101)):
+        response = api_client.post(
+            "/v2/order-sync/dumps",
+            headers={"Authorization": f"Bearer {readwrite_key}"},
+            json=_dump_payload(
+                "orders",
+                _order_response_with_main_status(order_id, status),
+                endpoint="/api/fulfillment/order/list",
+                method="POST",
+            ),
+        )
+        assert response.status_code == 200
+
+    r = api_client.post(
+        "/v2/order-sync/reconcile",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json={
+            "protocolVersion": 1,
+            "scope": {"sellerId": SHOP_ID, "shopId": SHOP_ID},
+            "domains": ["logistics"],
+            "logistics": {"limit": 10},
+        },
+    )
+    assert r.status_code == 200
+    items = r.json()["data"]["logistics"]["items"]
+    item_ids = {item["orderId"] for item in items}
+    assert cancelled_order_id not in item_ids
+    assert active_order_id in item_ids
 
 
 def test_reconcile_rejects_unknown_domain(api_client, readwrite_key):
