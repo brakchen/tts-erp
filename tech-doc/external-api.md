@@ -710,8 +710,10 @@ HTTP 响应通过此端点写入后端 plugin schema。Auth requires **readwrite
 
 #### `POST /v2/order-sync/has-data`
 
-批量查业务表存在性。插件拿到 order_id 列表后，一次请求查出哪些已有数据，
-只对缺失的发 TikTok 请求（解决物流 N+1 问题）。
+批量查业务表存在性。插件拿到 order_id 列表后，一次请求查出哪些已有数据。
+物流域用它减少 N+1 详情请求；订单域在 checkpoint 丢失、窗口变化或轮转精确
+巡检时用它识别服务端缺失订单。`covered=true` 只代表存在，不代表数据新鲜，
+订单/物流/结算的热区刷新不能被它阻断。
 
 Body：
 
@@ -741,8 +743,9 @@ Body：
 
 #### `POST /v2/order-sync/dumps`
 
-接收 dump → inline 解析 → 写业务表 + raw_log。每个 dump 对应一次 TikTok
-HTTP 交换的完整原始响应。
+接收 dump → inline 解析 → 写业务表，并记录 `plugin_logs` 健康指标。每个 dump
+仍携带一次 TikTok HTTP 交换的完整原始响应，供解析使用和诊断；当前订单同步
+接口不再写入旧的 `raw_log` 表。
 
 Body（≤ 2 MB）：
 
@@ -768,21 +771,19 @@ Body（≤ 2 MB）：
 - `statements` 域根据响应体自动判断 list / transaction detail
 - `capturedAt` 必须带时区
 
-响应（`code: 0`）：
+成功响应（HTTP 200，`code: 0`）：
 
 ```json
 {
   "code": 0,
   "requestId": "req-...",
-  "data": {
-    "status": "inserted",
-    "logId": 42,
-    "rowsWritten": 3
-  }
+  "data": {}
 }
 ```
 
-- `status` ∈ `{inserted, updated, duplicate, stale_ignored, parse_error, empty_response}`
+- `rowsWritten` 仅作为服务端内部健康指标写入 `plugin_logs`，不是客户端成功判定条件。
+- 解析失败返回 HTTP 422 / `PARSE_ERROR`；`dump.response.body` 为 `null` 返回 HTTP 422 /
+  `EMPTY_RESPONSE_BODY`，客户端不得推进该条队列。
 - **2026-09-11**：原 `api_managed` 状态已移除（连同 `commerce.shops.data_source` 列与
   `api/deps.py::shop_is_api_managed` 守卫）。插件与 API 同步数据现按 schema 物理隔离
   （`plugin.*` vs `commerce.*`/`fulfillment.*`/`finance.*`），不再需要来源判定。
@@ -793,9 +794,11 @@ Body（≤ 2 MB）：
 
 #### `POST /v2/order-sync/reconcile`
 
-订单和物流共用的增量校验接口。订单返回服务端总数、锚点和排序是否允许
-offset 增量；物流返回可恢复游标分页及明确终态的包裹候选。该接口替代
-独立的 ID 列表查询，避免维护两套同步判定协议。
+订单和物流共用的查询接口。物流返回可恢复游标分页及明确终态的包裹候选；
+订单返回服务端总数、锚点和排序诊断信息，保留用于观测和旧版本兼容，但不得
+把订单 `serverTotal` 与 TikTok 当前滚动窗口 `total_count` 直接比较，也不得仅
+凭此字段触发订单全量上传。订单增量真值由插件本地 TikTok checkpoint 提供；
+checkpoint 异常或精确巡检时，插件按页调用 `has-data` 只补缺失订单。
 
 请求：
 
@@ -843,7 +846,11 @@ offset 增量；物流返回可恢复游标分页及明确终态的包裹候选�
 }
 ```
 
-`offsetSafe=false` 时客户端回退全量分页校验；物流只有所有已知包裹均命中
+订单 reconcile 返回的 `offsetSafe` / `canIncremental` 仅作诊断和兼容旧客户端，
+不直接作为订单客户端的增量门禁；客户端根据本地 checkpoint、当前窗口、锚点、
+排序方向和游标分页的逻辑位置决定快速路径或安全修复路径。安全修复可以读取全量
+当前列表，但应通过 `has-data` 避免无条件重复上传服务端已有订单。`has-data` 请求失败时
+必须保守上传当前页，不能把未知状态判为已覆盖。物流只有所有已知包裹均命中
 明确终态时才跳过，未知状态和缺少包裹记录的订单继续返回为候选。
 
 ### Misc
