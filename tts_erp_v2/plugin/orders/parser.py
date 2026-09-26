@@ -87,7 +87,9 @@ def parse_order_response(
             raise ValueError("order response data.main_orders items must be objects")
         order_id = str(order.get("main_order_id", ""))
         if not order_id:
-            raise ValueError("order response data.main_orders item missing main_order_id")
+            raise ValueError(
+                "order response data.main_orders item missing main_order_id"
+            )
 
         # ✅ 实测确认（2026-09-09 域名观察）
         # order_status_module 是数组，每个 order_line 一个元素
@@ -250,10 +252,14 @@ def parse_logistics_response(
 
     for pkg in package_list:
         if not isinstance(pkg, dict):
-            raise ValueError("logistics response data.package_list items must be objects")
+            raise ValueError(
+                "logistics response data.package_list items must be objects"
+            )
         package_id = str(pkg.get("package_id", ""))
         if not package_id:
-            raise ValueError("logistics response data.package_list item missing package_id")
+            raise ValueError(
+                "logistics response data.package_list item missing package_id"
+            )
 
         tracking_number = pkg.get("tracking_no")
         carrier_name = (pkg.get("logistic_supplier") or {}).get("supplier_name")
@@ -309,9 +315,18 @@ def parse_logistics_response(
             # Status may be localized (for example, 已签收) and therefore
             # cannot rely on an English substring check above. Recompute the
             # terminal timestamp from the exact status/action-code contract.
-            normalized_status = status.strip().casefold() if isinstance(status, str) else ""
-            is_delivered_status = normalized_status in {"delivered", "已签收", "签收", "已送达"}
-            delivered_at = last_time if last_action_code == 50101 or is_delivered_status else None
+            normalized_status = (
+                status.strip().casefold() if isinstance(status, str) else ""
+            )
+            is_delivered_status = normalized_status in {
+                "delivered",
+                "已签收",
+                "签收",
+                "已送达",
+            }
+            delivered_at = (
+                last_time if last_action_code == 50101 or is_delivered_status else None
+            )
 
         upsert_shipment(
             sess,
@@ -411,10 +426,14 @@ def parse_statement_list_response(
 
     for record in statement_records:
         if not isinstance(record, dict):
-            raise ValueError("statement response data.statement_records items must be objects")
+            raise ValueError(
+                "statement response data.statement_records items must be objects"
+            )
         statement_id = str(record.get("statement_id", ""))
         if not statement_id:
-            raise ValueError("statement response data.statement_records item missing statement_id")
+            raise ValueError(
+                "statement response data.statement_records item missing statement_id"
+            )
 
         statement_version = record.get("statement_version", 0)
         bill_period = record.get("bill_period")
@@ -476,11 +495,15 @@ def parse_statement_transaction_response(
         raise ValueError("statement transaction response missing data.sku_record")
     sku_record = data["sku_record"]
     if not isinstance(sku_record, dict):
-        raise ValueError("statement transaction response data.sku_record must be an object")
+        raise ValueError(
+            "statement transaction response data.sku_record must be an object"
+        )
 
     sku_detail_id = str(sku_record.get("statement_sku_detail_id", ""))
     if not sku_detail_id:
-        raise ValueError("statement transaction response missing statement_sku_detail_id")
+        raise ValueError(
+            "statement transaction response missing statement_sku_detail_id"
+        )
 
     statement_id = str(sku_record.get("statement_id", ""))
     statement_version = sku_record.get("statement_version", 0)
@@ -593,10 +616,14 @@ def parse_after_sales_response(
 
     for c in cancellations:
         if not isinstance(c, dict):
-            raise ValueError("after-sales response data.cancellations items must be objects")
+            raise ValueError(
+                "after-sales response data.cancellations items must be objects"
+            )
         cancel_id = str(c.get("cancel_id") or "")
         if not cancel_id:
-            raise ValueError("after-sales response data.cancellations item missing cancel_id")
+            raise ValueError(
+                "after-sales response data.cancellations item missing cancel_id"
+            )
         cancel_type = str(c.get("cancel_type") or "")
         cancel_status = str(c.get("cancel_status") or "")
         main_order_id = c.get("order_id") or c.get("main_order_id")
@@ -705,14 +732,18 @@ def parse_order_detail_response(
         lsi = dm.get("logistics_service_info") or {}
         # promotion_infos
         raw_promos = pm.get("promotion_infos") or []
-        promotion_infos = [
-            {
-                "name": p.get("promotion_name"),
-                "cost": p.get("promotion_cost"),
-                "type": p.get("promotion_type"),
-            }
-            for p in raw_promos
-        ] if raw_promos else None
+        promotion_infos = (
+            [
+                {
+                    "name": p.get("promotion_name"),
+                    "cost": p.get("promotion_cost"),
+                    "type": p.get("promotion_type"),
+                }
+                for p in raw_promos
+            ]
+            if raw_promos
+            else None
+        )
 
         fields = {
             # trade_order_module
@@ -725,16 +756,44 @@ def parse_order_detail_response(
             "latest_tts_time": _ts_to_datetime(tom.get("latest_tts_time")),
             "close_sla_time": _ts_to_datetime(tom.get("close_sla_time")),
             # price_module
-            "sub_total": _to_decimal((pm.get("sub_total") or {}).get("price_val"), field="order_details.sub_total"),
-            "grand_total": _to_decimal((pm.get("grand_total") or {}).get("price_val"), field="order_details.grand_total"),
-            "shipping_fee": _to_decimal((pm.get("shipping_fee") or {}).get("price_val"), field="order_details.shipping_fee"),
-            "platform_discount": _to_decimal((pm.get("platform_discount_total") or {}).get("price_val"), field="order_details.platform_discount"),
-            "seller_discount": _to_decimal((pm.get("seller_discount_total") or {}).get("price_val"), field="order_details.seller_discount"),
-            "origin_sale_price": _to_decimal((pm.get("main_order_origin_sale_price") or {}).get("price_val"), field="order_details.origin_sale_price"),
-            "shipping_origin_fee": _to_decimal((pm.get("shipping_origin_fee") or {}).get("price_val"), field="order_details.shipping_origin_fee"),
-            "shipping_fee_discount_seller": _to_decimal((pm.get("shipping_fee_discount_seller") or {}).get("price_val"), field="order_details.shipping_fee_discount_seller"),
-            "shipping_fee_discount_platform": _to_decimal((pm.get("shipping_fee_discount_platform") or {}).get("price_val"), field="order_details.shipping_fee_discount_platform"),
-            "currency": (pm.get("grand_total") or {}).get("currency") or (pm.get("sub_total") or {}).get("currency"),
+            "sub_total": _to_decimal(
+                (pm.get("sub_total") or {}).get("price_val"),
+                field="order_details.sub_total",
+            ),
+            "grand_total": _to_decimal(
+                (pm.get("grand_total") or {}).get("price_val"),
+                field="order_details.grand_total",
+            ),
+            "shipping_fee": _to_decimal(
+                (pm.get("shipping_fee") or {}).get("price_val"),
+                field="order_details.shipping_fee",
+            ),
+            "platform_discount": _to_decimal(
+                (pm.get("platform_discount_total") or {}).get("price_val"),
+                field="order_details.platform_discount",
+            ),
+            "seller_discount": _to_decimal(
+                (pm.get("seller_discount_total") or {}).get("price_val"),
+                field="order_details.seller_discount",
+            ),
+            "origin_sale_price": _to_decimal(
+                (pm.get("main_order_origin_sale_price") or {}).get("price_val"),
+                field="order_details.origin_sale_price",
+            ),
+            "shipping_origin_fee": _to_decimal(
+                (pm.get("shipping_origin_fee") or {}).get("price_val"),
+                field="order_details.shipping_origin_fee",
+            ),
+            "shipping_fee_discount_seller": _to_decimal(
+                (pm.get("shipping_fee_discount_seller") or {}).get("price_val"),
+                field="order_details.shipping_fee_discount_seller",
+            ),
+            "shipping_fee_discount_platform": _to_decimal(
+                (pm.get("shipping_fee_discount_platform") or {}).get("price_val"),
+                field="order_details.shipping_fee_discount_platform",
+            ),
+            "currency": (pm.get("grand_total") or {}).get("currency")
+            or (pm.get("sub_total") or {}).get("currency"),
             "promotion_infos": promotion_infos,
             # buyer_info_module
             "buyer_nickname": bim.get("buyer_nickname"),

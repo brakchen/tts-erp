@@ -316,22 +316,34 @@ class TestParseLogisticsResponse:
             resp = {
                 "code": 0,
                 "data": {
-                    "package_list": [{
-                        "package_id": "TEST_pkg-numeric-time",
-                        "logistic_detail": {"track_list": [
-                            {"time": "1788362478", "track_status": "Picked up"},
-                            {"time": "1788961712000", "track_status": "Delivered"},
-                        ]},
-                    }],
+                    "package_list": [
+                        {
+                            "package_id": "TEST_pkg-numeric-time",
+                            "logistic_detail": {
+                                "track_list": [
+                                    {"time": "1788362478", "track_status": "Picked up"},
+                                    {
+                                        "time": "1788961712000",
+                                        "track_status": "Delivered",
+                                    },
+                                ]
+                            },
+                        }
+                    ],
                 },
             }
             parse_logistics_response(
-                sess, shop_id=SHOP_ID, order_id="TEST_ord-numeric-time",
-                response_body=resp, captured_at=datetime.now(UTC),
+                sess,
+                shop_id=SHOP_ID,
+                order_id="TEST_ord-numeric-time",
+                response_body=resp,
+                captured_at=datetime.now(UTC),
             )
             sess.commit()
             row = sess.execute(  # pi-lens-ignore: python-sql-injection
-                text("SELECT shipped_at, delivered_at FROM plugin.shipments WHERE shop_id = :s AND package_id = :p"),
+                text(
+                    "SELECT shipped_at, delivered_at FROM plugin.shipments WHERE shop_id = :s AND package_id = :p"
+                ),
                 {"s": SHOP_ID, "p": "TEST_pkg-numeric-time"},
             ).one()
             assert row.shipped_at == datetime.fromtimestamp(1788362478, tz=UTC)
@@ -344,23 +356,34 @@ class TestParseLogisticsResponse:
             resp = {
                 "code": 0,
                 "data": {
-                    "package_list": [{
-                        "package_id": "TEST_pkg-localized-delivered",
-                        "logistic_detail": {"track_list": [{
-                            "time": "2026-09-19T12:00:00Z",
-                            "track_status": "已签收",
-                            "action_code": 50101,
-                        }]},
-                    }],
+                    "package_list": [
+                        {
+                            "package_id": "TEST_pkg-localized-delivered",
+                            "logistic_detail": {
+                                "track_list": [
+                                    {
+                                        "time": "2026-09-19T12:00:00Z",
+                                        "track_status": "已签收",
+                                        "action_code": 50101,
+                                    }
+                                ]
+                            },
+                        }
+                    ],
                 },
             }
             parse_logistics_response(
-                sess, shop_id=SHOP_ID, order_id="TEST_ord-localized-delivered",
-                response_body=resp, captured_at=datetime.now(UTC),
+                sess,
+                shop_id=SHOP_ID,
+                order_id="TEST_ord-localized-delivered",
+                response_body=resp,
+                captured_at=datetime.now(UTC),
             )
             sess.commit()
             row = sess.execute(  # pi-lens-ignore: python-sql-injection
-                text("SELECT delivered_at FROM plugin.shipments WHERE shop_id = :s AND package_id = :p"),
+                text(
+                    "SELECT delivered_at FROM plugin.shipments WHERE shop_id = :s AND package_id = :p"
+                ),
                 {"s": SHOP_ID, "p": "TEST_pkg-localized-delivered"},
             ).one()
             assert row.delivered_at == datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
