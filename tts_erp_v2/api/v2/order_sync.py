@@ -38,6 +38,8 @@ from tts_erp_v2.api.deps import get_session
 from tts_erp_v2.plugin.orders.parser import (
     parse_after_sales_response,
     parse_logistics_response,
+    parse_order_detail_response,
+    parse_order_history_response,
     parse_order_response,
     parse_statement_list_response,
     parse_statement_transaction_response,
@@ -54,7 +56,7 @@ from tts_erp_v2.plugin.orders.repository import (
 SUPPORTED_PROTOCOL_VERSION = 1
 MAX_BODY_BYTES = 2 * 1024 * 1024  # 2 MB
 MAX_IDS = 500
-VALID_DOMAINS = {"orders", "logistics", "statements", "after_sales"}
+VALID_DOMAINS = {"orders", "logistics", "statements", "after_sales", "order_details", "order_history"}
 
 _PATH_HAS_DATA = "/v2/order-sync/has-data"
 _PATH_DUMPS = "/v2/order-sync/dumps"
@@ -453,6 +455,24 @@ def post_dumps(
                     response_body=response_body,
                     captured_at=captured_at,
                 )
+            elif domain == "order_details":
+                rows_written = parse_order_detail_response(
+                    sess,
+                    shop_id=shop_id,
+                    response_body=response_body,
+                    captured_at=captured_at,
+                )
+            elif domain == "order_history":
+                if not main_order_id:
+                    parse_error = "mainOrderId is required for order_history domain"
+                else:
+                    rows_written = parse_order_history_response(
+                        sess,
+                        shop_id=shop_id,
+                        order_id=main_order_id,
+                        response_body=response_body,
+                        captured_at=captured_at,
+                    )
             elif domain == "logistics":
                 if not main_order_id:
                     parse_error = "mainOrderId is required for logistics domain"

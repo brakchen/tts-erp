@@ -354,6 +354,117 @@ class ChromeAfterSaleItem(Base):
     )
 
 
+# ── order_details ──────────────────────────────────────────────────────
+# 订单全量详情，来自 order/get 响应（独立于 plugin.orders，不复用）。
+class ChromeOrderDetail(Base):
+    __tablename__ = "order_details"
+    __table_args__ = (
+        UniqueConstraint("shop_id", "order_id", name="uq_order_details_shop_order"),
+        Index("ix_order_details_shop", "shop_id"),
+        {"schema": "plugin"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    shop_id: Mapped[str] = mapped_column(Text, nullable=False)
+    order_id: Mapped[str] = mapped_column(Text, nullable=False)
+    # trade_order_module
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    payment_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    pay_method: Mapped[str | None] = mapped_column(Text)
+    sale_region: Mapped[str | None] = mapped_column(Text)
+    fulfillment_type: Mapped[int | None] = mapped_column(Integer)
+    latest_rts_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    latest_tts_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    close_sla_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # price_module
+    sub_total: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    grand_total: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    shipping_fee: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    platform_discount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    seller_discount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    origin_sale_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    shipping_origin_fee: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    shipping_fee_discount_seller: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    shipping_fee_discount_platform: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    currency: Mapped[str | None] = mapped_column(Text)
+    promotion_infos: Mapped[dict | None] = mapped_column(JSONB)
+    # buyer_info_module
+    buyer_nickname: Mapped[str | None] = mapped_column(Text)
+    buyer_address: Mapped[dict | None] = mapped_column(JSONB)
+    # reverse_module（退货摘要，取第一条）
+    reverse_status: Mapped[int | None] = mapped_column(Integer)
+    reverse_type: Mapped[int | None] = mapped_column(Integer)
+    reverse_reason: Mapped[str | None] = mapped_column(Text)
+    reverse_order_id: Mapped[str | None] = mapped_column(Text)
+    cancelled_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # delivery_module（物流摘要）
+    tracking_number: Mapped[str | None] = mapped_column(Text)
+    warehouse_id: Mapped[str | None] = mapped_column(Text)
+    warehouse_name: Mapped[str | None] = mapped_column(Text)
+    warehouse_region: Mapped[str | None] = mapped_column(Text)
+    buyer_region: Mapped[str | None] = mapped_column(Text)
+    logistics_service_name: Mapped[str | None] = mapped_column(Text)
+    logistics_service_level: Mapped[str | None] = mapped_column(Text)
+    carrier_name: Mapped[str | None] = mapped_column(Text)
+    carrier_id: Mapped[str | None] = mapped_column(Text)
+    # pkg_attr
+    weight_value: Mapped[str | None] = mapped_column(Text)
+    weight_unit: Mapped[int | None] = mapped_column(Integer)
+    dimension_length: Mapped[str | None] = mapped_column(Text)
+    dimension_width: Mapped[str | None] = mapped_column(Text)
+    dimension_height: Mapped[str | None] = mapped_column(Text)
+    dimension_unit: Mapped[int | None] = mapped_column(Integer)
+    # order_status_module
+    main_order_status: Mapped[int | None] = mapped_column(Integer)
+    main_sub_order_status: Mapped[int | None] = mapped_column(Integer)
+    sku_display_status: Mapped[int | None] = mapped_column(Integer)
+    # raw
+    raw_payload: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+# ── order_timeline ─────────────────────────────────────────────────────
+# 订单状态变更时间线，来自 order/history 响应。
+class ChromeOrderTimeline(Base):
+    __tablename__ = "order_timeline"
+    __table_args__ = (
+        UniqueConstraint(
+            "shop_id", "order_id", "event_index",
+            name="uq_order_timeline_shop_order_idx",
+        ),
+        Index("ix_order_timeline_shop_order", "shop_id", "order_id"),
+        {"schema": "plugin"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    shop_id: Mapped[str] = mapped_column(Text, nullable=False)
+    order_id: Mapped[str] = mapped_column(Text, nullable=False)
+    event_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    detail: Mapped[str | None] = mapped_column(Text)
+    raw_payload: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
 # ── 广告消耗 dump（原 tts_erp_v2/db/models/analytics.py，2026-09-11 并入）───
 # 表已在 plugin schema：ad_today / ad_daily / ad_monthly / ad_raw_log / plugin_logs
 

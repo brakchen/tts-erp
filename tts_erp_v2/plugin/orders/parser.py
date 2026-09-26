@@ -25,7 +25,9 @@ from tts_erp_v2.plugin.orders.repository import (
     upsert_after_sale,
     upsert_after_sale_item,
     upsert_order,
+    upsert_order_detail,
     upsert_order_line,
+    upsert_order_timeline,
     upsert_settlement,
     upsert_settlement_detail,
     upsert_shipment,
@@ -625,5 +627,165 @@ def parse_after_sales_response(
                 raw_payload=li,
             )
             rows_written += 1
+
+    return rows_written
+
+
+# ── order/get 解析（独立 parser，不复用 parse_order_response）─────────
+
+
+def parse_order_detail_response(
+    sess: Session,
+    *,
+    shop_id: str,
+    response_body: dict,
+    captured_at: datetime,
+) -> int:
+    """解析 order/get 响应 → 写 plugin.order_details。返回写入行数。
+
+    与 parse_order_response 完全独立：order/get 返回全量详情字段
+    （价格明细、物流仓库、退货、买家地址），存储到独立的 order_details 表。
+    """
+    rows_written = 0
+    data = response_body.get("data") or {}
+    main_orders = data.get("main_order") or []
+
+    for order in main_orders:
+        order_id = str(order.get("main_order_id", ""))
+        if not order_id:
+            log.warning("order/get missing main_order_id, skipping")
+            continue
+
+        # trade_order_module
+        tom = order.get("trade_order_module") or {}
+        # price_module
+        pm = order.get("price_module") or {}
+        # buyer_info_module
+        bim = order.get("buyer_info_module") or {}
+        # order_status_module（取第一条）
+        osm_list = order.get("order_status_module") or []
+        osm = osm_list[0] if isinstance(osm_list, list) and osm_list else {}
+        # delivery_module（取第一条）
+        dm_list = order.get("delivery_module") or []
+        dm = dm_list[0] if isinstance(dm_list, list) and dm_list else {}
+        # reverse_module（取第一条）
+        rm_list = order.get("reverse_module") or []
+        rm = rm_list[0] if isinstance(rm_list, list) and rm_list else {}
+        # pkg_attr
+        pkg = dm.get("pkg_attr") or {}
+        weight = pkg.get("weight") or {}
+        dim = pkg.get("dimension") or {}
+        # shipment_provider_info
+        sp = dm.get("shipment_provider_info") or {}
+        # logistics_service_info
+        lsi = dm.get("logistics_service_info") or {}
+        # promotion_infos
+        raw_promos = pm.get("promotion_infos") or []
+        promotion_infos = [
+            {
+                "name": p.get("promotion_name"),
+                "cost": p.get("promotion_cost"),
+                "type": p.get("promotion_type"),
+            }
+            for p in raw_promos
+        ] if raw_promos else None
+
+        fields = {
+            # trade_order_module
+            "create_time": _ts_to_datetime(tom.get("create_time")),
+            "payment_time": _ts_to_datetime(tom.get("payment_time")),
+            "pay_method": tom.get("pay_method"),
+            "sale_region": tom.get("sale_region"),
+            "fulfillment_type": tom.get("fulfillment_type"),
+            "latest_rts_time": _ts_to_datetime(tom.get("latest_rts_time")),
+            "latest_tts_time": _ts_to_datetime(tom.get("latest_tts_time")),
+            "close_sla_time": _ts_to_datetime(tom.get("close_sla_time")),
+            # price_module
+            "sub_total": _to_decimal((pm.get("sub_total") or {}).get("price_val"), field="order_details.sub_total"),
+            "grand_total": _to_decimal((pm.get("grand_total") or {}).get("price_val"), field="order_details.grand_total"),
+            "shipping_fee": _to_decimal((pm.get("shipping_fee") or {}).get("price_val"), field="order_details.shipping_fee"),
+            "platform_discount": _to_decimal((pm.get("platform_discount_total") or {}).get("price_val"), field="order_details.platform_discount"),
+            "seller_discount": _to_decimal((pm.get("seller_discount_total") or {}).get("price_val"), field="order_details.seller_discount"),
+            "origin_sale_price": _to_decimal((pm.get("main_order_origin_sale_price") or {}).get("price_val"), field="order_details.origin_sale_price"),
+            "shipping_origin_fee": _to_decimal((pm.get("shipping_origin_fee") or {}).get("price_val"), field="order_details.shipping_origin_fee"),
+            "shipping_fee_discount_seller": _to_decimal((pm.get("shipping_fee_discount_seller") or {}).get("price_val"), field="order_details.shipping_fee_discount_seller"),
+            "shipping_fee_discount_platform": _to_decimal((pm.get("shipping_fee_discount_platform") or {}).get("price_val"), field="order_details.shipping_fee_discount_platform"),
+            "currency": (pm.get("grand_total") or {}).get("currency") or (pm.get("sub_total") or {}).get("currency"),
+            "promotion_infos": promotion_infos,
+            # buyer_info_module
+            "buyer_nickname": bim.get("buyer_nickname"),
+            "buyer_address": bim.get("shipping_address"),
+            # reverse_module
+            "reverse_status": rm.get("reverse_status"),
+            "reverse_type": rm.get("reverse_type"),
+            "reverse_reason": rm.get("reverse_reason"),
+            "reverse_order_id": rm.get("reverse_order_id"),
+            "cancelled_time": _ts_to_datetime(rm.get("cancelled_time")),
+            # delivery_module
+            "tracking_number": dm.get("tracking_no") or dm.get("last_tracking_no"),
+            "warehouse_id": dm.get("warehouse_id"),
+            "warehouse_name": dm.get("warehouse_name"),
+            "warehouse_region": dm.get("warehouse_region"),
+            "buyer_region": dm.get("buyer_region"),
+            "logistics_service_name": lsi.get("logistics_service_name"),
+            "logistics_service_level": lsi.get("logistics_service_level"),
+            "carrier_name": sp.get("name"),
+            "carrier_id": sp.get("id"),
+            # pkg_attr
+            "weight_value": weight.get("weight"),
+            "weight_unit": weight.get("unit"),
+            "dimension_length": dim.get("length"),
+            "dimension_width": dim.get("width"),
+            "dimension_height": dim.get("height"),
+            "dimension_unit": dim.get("unit"),
+            # order_status_module
+            "main_order_status": osm.get("main_order_status"),
+            "main_sub_order_status": osm.get("main_sub_order_status"),
+            "sku_display_status": osm.get("sku_display_status"),
+            # raw
+            "raw_payload": order,
+        }
+
+        upsert_order_detail(sess, shop_id=shop_id, order_id=order_id, fields=fields)
+        rows_written += 1
+
+    return rows_written
+
+
+# ── order/history 解析（独立 parser）───────────────────────────────────
+
+
+def parse_order_history_response(
+    sess: Session,
+    *,
+    shop_id: str,
+    order_id: str,
+    response_body: dict,
+    captured_at: datetime,
+) -> int:
+    """解析 order/history 响应 → 写 plugin.order_timeline。返回写入行数。
+
+    时间线按 event_index 排序存储（0 = 最早事件），支持后续分析。
+    """
+    rows_written = 0
+    data = response_body.get("data") or {}
+    history = data.get("order_history") or []
+
+    for index, event in enumerate(history):
+        description = event.get("description")
+        event_at = _ts_to_datetime(event.get("timestamp"))
+        detail = event.get("detail")
+
+        upsert_order_timeline(
+            sess,
+            shop_id=shop_id,
+            order_id=order_id,
+            event_index=index,
+            description=description,
+            event_at=event_at,
+            detail=detail,
+            raw_payload=event,
+        )
+        rows_written += 1
 
     return rows_written

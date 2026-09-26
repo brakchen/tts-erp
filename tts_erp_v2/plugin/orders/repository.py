@@ -21,7 +21,9 @@ from tts_erp_v2.db.models.plugin import (
     ChromeAfterSale,
     ChromeAfterSaleItem,
     ChromeOrder,
+    ChromeOrderDetail,
     ChromeOrderLine,
+    ChromeOrderTimeline,
     ChromeSettlement,
     ChromeSettlementDetail,
     ChromeShipment,
@@ -1102,3 +1104,78 @@ def record_dump_health(
             "occurred_at": captured_at,
         },
     )
+
+
+# ── order_details upsert ──────────────────────────────────────────────
+
+
+def upsert_order_detail(
+    sess: Session,
+    *,
+    shop_id: str,
+    order_id: str,
+    fields: dict[str, Any],
+) -> str:
+    """UPSERT 订单全量详情（order/get）。返回 'inserted'。"""
+    now = datetime.now(UTC)
+    values = {"shop_id": shop_id, "order_id": order_id, "created_at": now, "updated_at": now}
+    values.update(fields)
+    stmt = (
+        pg_insert(ChromeOrderDetail)
+        .values(**values)
+        .on_conflict_do_update(
+            index_elements=[ChromeOrderDetail.shop_id, ChromeOrderDetail.order_id],
+            set_={k: v for k, v in fields.items()},
+        )
+    )
+    stmt = stmt.values(updated_at=now)
+    sess.execute(stmt)
+    return "inserted"
+
+
+# ── order_timeline upsert ─────────────────────────────────────────────
+
+
+def upsert_order_timeline(
+    sess: Session,
+    *,
+    shop_id: str,
+    order_id: str,
+    event_index: int,
+    description: str | None = None,
+    event_at: datetime | None = None,
+    detail: str | None = None,
+    raw_payload: dict | None = None,
+) -> str:
+    """UPSERT 订单时间线事件（order/history）。返回 'inserted'。"""
+    now = datetime.now(UTC)
+    stmt = (
+        pg_insert(ChromeOrderTimeline)
+        .values(
+            shop_id=shop_id,
+            order_id=order_id,
+            event_index=event_index,
+            description=description,
+            event_at=event_at,
+            detail=detail,
+            raw_payload=raw_payload,
+            created_at=now,
+            updated_at=now,
+        )
+        .on_conflict_do_update(
+            index_elements=[
+                ChromeOrderTimeline.shop_id,
+                ChromeOrderTimeline.order_id,
+                ChromeOrderTimeline.event_index,
+            ],
+            set_={
+                "description": description,
+                "event_at": event_at,
+                "detail": detail,
+                "raw_payload": raw_payload,
+                "updated_at": now,
+            },
+        )
+    )
+    sess.execute(stmt)
+    return "inserted"
