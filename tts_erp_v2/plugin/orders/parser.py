@@ -105,8 +105,12 @@ def parse_order_response(
         main_order_status = osm_first.get("main_order_status")  # 整数
         sku_display_status = osm_first.get("sku_display_status")  # 整数
         currency = grand_total.get("currency") or sub_total.get("currency")
-        payment_amount = _to_decimal(grand_total.get("price_val"), field="orders.payment_amount")
-        total_amount = _to_decimal(sub_total.get("price_val"), field="orders.total_amount")
+        payment_amount = _to_decimal(
+            grand_total.get("price_val"), field="orders.payment_amount"
+        )
+        total_amount = _to_decimal(
+            sub_total.get("price_val"), field="orders.total_amount"
+        )
         fulfillment_type = tom.get("fulfillment_type")  # 整数
         pay_method = tom.get("pay_method")  # 文本
         sale_region = tom.get("sale_region")  # 如 "VN"
@@ -156,8 +160,12 @@ def parse_order_response(
             # sku_unit_price.price_val（不是 sale_price.amount）
             unit_price_obj = item.get("sku_unit_price") or {}
             total_price_obj = item.get("sku_total_price") or {}
-            unit_price = _to_decimal(unit_price_obj.get("price_val"), field="order_lines.unit_price")
-            total_price = _to_decimal(total_price_obj.get("price_val"), field="order_lines.total_price")
+            unit_price = _to_decimal(
+                unit_price_obj.get("price_val"), field="order_lines.unit_price"
+            )
+            total_price = _to_decimal(
+                total_price_obj.get("price_val"), field="order_lines.total_price"
+            )
             line_currency = unit_price_obj.get("currency")
             # order_status_module 按 order_line_id 关联
             line_ids = item.get("order_line_ids") or []
@@ -248,7 +256,7 @@ def parse_logistics_response(
             raise ValueError("logistics response data.package_list item missing package_id")
 
         tracking_number = pkg.get("tracking_no")
-        carrier_name = pkg.get("logistic_supplier")
+        carrier_name = (pkg.get("logistic_supplier") or {}).get("supplier_name")
 
         # track_list → status, shipped_at, delivered_at
         logistic_detail = pkg.get("logistic_detail") or {}
@@ -279,7 +287,7 @@ def parse_logistics_response(
             shipped_at = _parse_track_time(first_track.get("time"))
             last_time = _parse_track_time(last_track.get("time"))
             # 仅当 status 含 "elivered" 时填 delivered_at
-            if status and "elivered" in status.lower():
+            if isinstance(status, str) and "elivered" in status.lower():
                 delivered_at = last_time
             else:
                 delivered_at = None
@@ -288,9 +296,14 @@ def parse_logistics_response(
                 last_action_code = int(last_track.get("action_code"))
             except (TypeError, ValueError):
                 last_action_code = None
-            if delivered_at is not None and last_action_code != 50101 and not (
-                isinstance(status, str)
-                and status.strip().casefold() in {"delivered", "已签收", "签收", "已送达"}
+            if (
+                delivered_at is not None
+                and last_action_code != 50101
+                and not (
+                    isinstance(status, str)
+                    and status.strip().casefold()
+                    in {"delivered", "已签收", "签收", "已送达"}
+                )
             ):
                 delivered_at = None
             # Status may be localized (for example, 已签收) and therefore
@@ -323,14 +336,13 @@ def parse_logistics_response(
                     [
                         package_id,
                         str(track.get("time", "")),
+                        str(track.get("title", "")),
                         str(track.get("track_status", "")),
-                        str(track.get("action_code", "")),
-                        str(track.get("location", "")),
                     ]
                 )
             )
             event_at = _parse_track_time(track.get("time"))
-            description = track.get("track_status")
+            description = track.get("title") or track.get("content")
             location = track.get("location")
 
             upsert_tracking_event(
@@ -338,7 +350,11 @@ def parse_logistics_response(
                 shop_id=shop_id,
                 package_id=package_id,
                 event_key=event_key,
-                action_code=(int(track["action_code"]) if str(track.get("action_code", "")).isdigit() else None),
+                action_code=(
+                    int(track["action_code"])
+                    if str(track.get("action_code", "")).isdigit()
+                    else None
+                ),
                 event_at=event_at,
                 description=description,
                 location=location,
@@ -472,7 +488,9 @@ def parse_statement_transaction_response(
     sku_id = str(sku_record.get("sku_id", "")) or None
     product_name = sku_record.get("product_name")
     sku_name = sku_record.get("sku_name")
-    quantity = _to_decimal(sku_record.get("quantity"), field="settlement_details.quantity")
+    quantity = _to_decimal(
+        sku_record.get("quantity"), field="settlement_details.quantity"
+    )
     settlement_status = (
         str(sku_record.get("settlement_status", ""))
         if sku_record.get("settlement_status") is not None
@@ -608,9 +626,13 @@ def parse_after_sales_response(
             order_line_item_id = li.get("order_line_item_id")
             sku_id = li.get("sku_id")
             product_id = li.get("product_id")
-            quantity = _to_decimal(li.get("quantity"), field="after_sale_items.quantity")
+            quantity = _to_decimal(
+                li.get("quantity"), field="after_sale_items.quantity"
+            )
             refund_amount_obj = li.get("refund_amount") or {}
-            refund_amount = _to_decimal(refund_amount_obj.get("amount"), field="after_sale_items.refund_amount")
+            refund_amount = _to_decimal(
+                refund_amount_obj.get("amount"), field="after_sale_items.refund_amount"
+            )
             currency = refund_amount_obj.get("currency")
 
             upsert_after_sale_item(
@@ -618,7 +640,9 @@ def parse_after_sales_response(
                 shop_id=shop_id,
                 cancel_id=cancel_id,
                 line_item_id=line_item_id,
-                order_line_item_id=str(order_line_item_id) if order_line_item_id else None,
+                order_line_item_id=str(order_line_item_id)
+                if order_line_item_id
+                else None,
                 sku_id=str(sku_id) if sku_id else None,
                 product_id=str(product_id) if product_id else None,
                 quantity=quantity,

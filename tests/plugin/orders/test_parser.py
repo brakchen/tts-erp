@@ -76,7 +76,10 @@ class TestFlattenFees:
                 "type": "PLATFORM_COMMISSION",
                 "amount": {"amount": "8000", "currency": "VND"},
                 "sub_fees": [
-                    {"type": "COMMISSION_TAX", "amount": {"amount": "2000", "currency": "VND"}},
+                    {
+                        "type": "COMMISSION_TAX",
+                        "amount": {"amount": "2000", "currency": "VND"},
+                    },
                 ],
             },
         ]
@@ -116,28 +119,32 @@ class TestParseOrderResponse:
     def test_basic_parse(self):
         eng = get_engine()
         with Session(eng) as sess:
-            resp = self._make_response([
-                {
-                    "main_order_id": "TEST_ord-1",
-                    "order_status_module": {"order_status": "DELIVERED"},
-                    "price_module": {
-                        "payment": {"amount": "299000", "currency": "VND"},
-                        "total_amount": {"amount": "329000", "currency": "VND"},
-                    },
-                    "sku_module": [
-                        {
-                            "sku_id": "sku-1",
-                            "product_id": "prod-1",
-                            "product_name": "Widget",
-                            "quantity": 2,
-                            "sale_price": {"amount": "149500", "currency": "VND"},
+            resp = self._make_response(
+                [
+                    {
+                        "main_order_id": "TEST_ord-1",
+                        "order_status_module": {"order_status": "DELIVERED"},
+                        "price_module": {
+                            "payment": {"amount": "299000", "currency": "VND"},
+                            "total_amount": {"amount": "329000", "currency": "VND"},
                         },
-                    ],
-                }
-            ])
+                        "sku_module": [
+                            {
+                                "sku_id": "sku-1",
+                                "product_id": "prod-1",
+                                "product_name": "Widget",
+                                "quantity": 2,
+                                "sale_price": {"amount": "149500", "currency": "VND"},
+                            },
+                        ],
+                    }
+                ]
+            )
             rows = parse_order_response(
-                sess, shop_id=SHOP_ID,
-                response_body=resp, captured_at=datetime.now(UTC),
+                sess,
+                shop_id=SHOP_ID,
+                response_body=resp,
+                captured_at=datetime.now(UTC),
             )
             sess.commit()
             assert rows == 2  # 1 order + 1 line
@@ -146,7 +153,8 @@ class TestParseOrderResponse:
         eng = get_engine()
         with Session(eng) as sess:
             rows = parse_order_response(
-                sess, shop_id=SHOP_ID,
+                sess,
+                shop_id=SHOP_ID,
                 response_body={"code": 0, "data": {"main_orders": []}},
                 captured_at=datetime.now(UTC),
             )
@@ -156,18 +164,22 @@ class TestParseOrderResponse:
         """同 sku_id 出现两次只写一次。"""
         eng = get_engine()
         with Session(eng) as sess:
-            resp = self._make_response([
-                {
-                    "main_order_id": "TEST_ord-dedup",
-                    "sku_module": [
-                        {"sku_id": "sku-dup", "product_id": "p1"},
-                        {"sku_id": "sku-dup", "product_id": "p1"},
-                    ],
-                }
-            ])
+            resp = self._make_response(
+                [
+                    {
+                        "main_order_id": "TEST_ord-dedup",
+                        "sku_module": [
+                            {"sku_id": "sku-dup", "product_id": "p1"},
+                            {"sku_id": "sku-dup", "product_id": "p1"},
+                        ],
+                    }
+                ]
+            )
             rows = parse_order_response(
-                sess, shop_id=SHOP_ID,
-                response_body=resp, captured_at=datetime.now(UTC),
+                sess,
+                shop_id=SHOP_ID,
+                response_body=resp,
+                captured_at=datetime.now(UTC),
             )
             sess.commit()
             assert rows == 2  # 1 order + 1 line (deduped)
@@ -191,8 +203,14 @@ class TestParseLogisticsResponse:
                             "logistic_supplier": "VNPost",
                             "logistic_detail": {
                                 "track_list": [
-                                    {"time": "2026-09-01T10:00:00Z", "track_status": "Picked up"},
-                                    {"time": "2026-09-02T15:00:00Z", "track_status": "Delivered"},
+                                    {
+                                        "time": "2026-09-01T10:00:00Z",
+                                        "track_status": "Picked up",
+                                    },
+                                    {
+                                        "time": "2026-09-02T15:00:00Z",
+                                        "track_status": "Delivered",
+                                    },
                                 ]
                             },
                         },
@@ -203,7 +221,10 @@ class TestParseLogisticsResponse:
                             "logistic_supplier": "GHN",
                             "logistic_detail": {
                                 "track_list": [
-                                    {"time": "2026-09-03T08:00:00Z", "track_status": "In transit"},
+                                    {
+                                        "time": "2026-09-03T08:00:00Z",
+                                        "track_status": "In transit",
+                                    },
                                 ]
                             },
                         },
@@ -211,9 +232,11 @@ class TestParseLogisticsResponse:
                 },
             }
             rows = parse_logistics_response(
-                sess, shop_id=SHOP_ID,
+                sess,
+                shop_id=SHOP_ID,
                 order_id="TEST_ord-log-1",
-                response_body=resp, captured_at=datetime.now(UTC),
+                response_body=resp,
+                captured_at=datetime.now(UTC),
             )
             sess.commit()
             assert rows == 5  # 2 shipments + 3 tracking events
@@ -234,9 +257,11 @@ class TestParseLogisticsResponse:
                 },
             }
             rows = parse_logistics_response(
-                sess, shop_id=SHOP_ID,
+                sess,
+                shop_id=SHOP_ID,
                 order_id="TEST_ord-ntrl",
-                response_body=resp, captured_at=datetime.now(UTC),
+                response_body=resp,
+                captured_at=datetime.now(UTC),
             )
             sess.commit()
             assert rows == 1  # 1 shipment, 0 events
@@ -248,22 +273,36 @@ class TestParseLogisticsResponse:
             resp = {
                 "code": 0,
                 "data": {
-                    "package_list": [{
-                        "package_id": "TEST_pkg-reversed",
-                        "logistic_detail": {"track_list": [
-                            {"time": "2026-09-02T15:00:00Z", "track_status": "Delivered"},
-                            {"time": "2026-09-01T10:00:00Z", "track_status": "Picked up"},
-                        ]},
-                    }],
+                    "package_list": [
+                        {
+                            "package_id": "TEST_pkg-reversed",
+                            "logistic_detail": {
+                                "track_list": [
+                                    {
+                                        "time": "2026-09-02T15:00:00Z",
+                                        "track_status": "Delivered",
+                                    },
+                                    {
+                                        "time": "2026-09-01T10:00:00Z",
+                                        "track_status": "Picked up",
+                                    },
+                                ]
+                            },
+                        }
+                    ],
                 },
             }
             parse_logistics_response(
-                sess, shop_id=SHOP_ID,
-                order_id="TEST_ord-reversed", response_body=resp,
+                sess,
+                shop_id=SHOP_ID,
+                order_id="TEST_ord-reversed",
+                response_body=resp,
                 captured_at=datetime.now(UTC),
             )
             row = sess.execute(  # pi-lens-ignore: python-sql-injection
-                text("SELECT status, shipped_at, delivered_at FROM plugin.shipments WHERE shop_id = :s AND package_id = :p"),  # pi-lens-ignore: python-sql-injection
+                text(
+                    "SELECT status, shipped_at, delivered_at FROM plugin.shipments WHERE shop_id = :s AND package_id = :p"
+                ),  # pi-lens-ignore: python-sql-injection
                 {"s": SHOP_ID, "p": "TEST_pkg-reversed"},
             ).one()
             assert row.status == "Delivered"
@@ -357,8 +396,10 @@ class TestParseStatementListResponse:
                 },
             }
             rows = parse_statement_list_response(
-                sess, shop_id=SHOP_ID,
-                response_body=resp, captured_at=datetime.now(UTC),
+                sess,
+                shop_id=SHOP_ID,
+                response_body=resp,
+                captured_at=datetime.now(UTC),
             )
             sess.commit()
             assert rows == 1
@@ -391,7 +432,10 @@ class TestParseStatementTransactionResponse:
                         "in_come": {
                             "amount": {"amount": "100000", "currency": "VND"},
                             "fee_list": [
-                                {"type": "GROSS_SALES", "amount": {"amount": "100000", "currency": "VND"}},
+                                {
+                                    "type": "GROSS_SALES",
+                                    "amount": {"amount": "100000", "currency": "VND"},
+                                },
                             ],
                         },
                         "out_come": {
@@ -401,7 +445,13 @@ class TestParseStatementTransactionResponse:
                                     "type": "PLATFORM_COMMISSION",
                                     "amount": {"amount": "8000", "currency": "VND"},
                                     "sub_fees": [
-                                        {"type": "COMMISSION_TAX", "amount": {"amount": "2000", "currency": "VND"}},
+                                        {
+                                            "type": "COMMISSION_TAX",
+                                            "amount": {
+                                                "amount": "2000",
+                                                "currency": "VND",
+                                            },
+                                        },
                                     ],
                                 },
                             ],
@@ -412,8 +462,10 @@ class TestParseStatementTransactionResponse:
                 "seller_app_cut_flow": False,
             }
             rows = parse_statement_transaction_response(
-                sess, shop_id=SHOP_ID,
-                response_body=resp, captured_at=datetime.now(UTC),
+                sess,
+                shop_id=SHOP_ID,
+                response_body=resp,
+                captured_at=datetime.now(UTC),
             )
             sess.commit()
             assert rows == 1
@@ -424,9 +476,13 @@ class TestParseStatementTransactionResponse:
 
 def test_flatten_fees_result_is_json_serializable():
     fees = [
-        {"type": "A", "amount": {"amount": "1", "currency": "VND"}, "sub_fees": [
-            {"type": "B", "amount": {"amount": "2", "currency": "VND"}},
-        ]},
+        {
+            "type": "A",
+            "amount": {"amount": "1", "currency": "VND"},
+            "sub_fees": [
+                {"type": "B", "amount": {"amount": "2", "currency": "VND"}},
+            ],
+        },
     ]
     result = flatten_fees(fees)
     json.dumps(result)  # must not raise
@@ -442,23 +498,33 @@ class TestTsToDatetime:
         assert _ts_to_datetime(1788362478) == datetime.fromtimestamp(1788362478, tz=UTC)
 
     def test_int_milliseconds(self):
-        assert _ts_to_datetime(1788961712000) == datetime.fromtimestamp(1788961712, tz=UTC)
+        assert _ts_to_datetime(1788961712000) == datetime.fromtimestamp(
+            1788961712, tz=UTC
+        )
 
     def test_numeric_string_seconds(self):
-        assert _ts_to_datetime("1788362478") == datetime.fromtimestamp(1788362478, tz=UTC)
+        assert _ts_to_datetime("1788362478") == datetime.fromtimestamp(
+            1788362478, tz=UTC
+        )
 
     def test_numeric_string_milliseconds(self):
-        assert _ts_to_datetime("1788961712000") == datetime.fromtimestamp(1788961712, tz=UTC)
+        assert _ts_to_datetime("1788961712000") == datetime.fromtimestamp(
+            1788961712, tz=UTC
+        )
 
     def test_numeric_string_microseconds(self):
         # prod 实测：update_time 有微秒级形态
-        assert _ts_to_datetime("1789313764908000") == datetime.fromtimestamp(1789313764.908, tz=UTC)
+        assert _ts_to_datetime("1789313764908000") == datetime.fromtimestamp(
+            1789313764.908, tz=UTC
+        )
 
     def test_out_of_range_returns_none(self):
         assert _ts_to_datetime("999999999999999999999") is None
 
     def test_iso_string(self):
-        assert _ts_to_datetime("2026-09-01T10:00:00") == datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
+        assert _ts_to_datetime("2026-09-01T10:00:00") == datetime(
+            2026, 9, 1, 10, 0, tzinfo=UTC
+        )
 
     @pytest.mark.parametrize("value", [None, 0, "0", "", "  "])
     def test_empty_values(self, value):
@@ -483,14 +549,18 @@ class TestParseOrderResponseTimes:
                 "sku_module": [],
             }
             rows = parse_order_response(
-                sess, shop_id=SHOP_ID,
-                response_body=resp, captured_at=datetime.now(UTC),
+                sess,
+                shop_id=SHOP_ID,
+                response_body=resp,
+                captured_at=datetime.now(UTC),
             )
             sess.commit()
             assert rows == 1
             row = sess.execute(
                 # pi-lens-ignore: python-sql-injection — 字面量 SQL
-                text("SELECT order_time, update_time FROM plugin.orders WHERE order_id = 'TEST_ord-times'")
+                text(
+                    "SELECT order_time, update_time FROM plugin.orders WHERE order_id = 'TEST_ord-times'"
+                )
             ).one()
             assert row.order_time == datetime.fromtimestamp(1788362478, tz=UTC)
             assert row.update_time == datetime.fromtimestamp(1788961712, tz=UTC)
@@ -502,16 +572,19 @@ class TestParseOrderResponseTimes:
 class TestToDecimal:
     def test_valid(self):
         from tts_erp_v2.plugin.orders.repository import _to_decimal
+
         assert _to_decimal("299000") == 299000
         assert _to_decimal(1.5) is not None
 
     def test_invalid_returns_none_and_warns(self, caplog):
         from tts_erp_v2.plugin.orders.repository import _to_decimal
+
         with caplog.at_level("WARNING"):
             assert _to_decimal("not-a-number", field="test.field") is None
         assert "test.field" in caplog.text
 
     def test_none_and_empty(self):
         from tts_erp_v2.plugin.orders.repository import _to_decimal
+
         assert _to_decimal(None) is None
         assert _to_decimal("") is None
