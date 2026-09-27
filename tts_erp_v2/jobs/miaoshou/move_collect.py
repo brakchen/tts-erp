@@ -45,7 +45,6 @@ from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models.linkage import LinkEvidence
 from tts_erp_v2.jobs.miaoshou._common import (
-    MiaoshouContext,
     resolve_miaoshou_context,
 )
 from tts_erp_v2.jobs.runner import record_raw_payload, record_sync_issue, run_job
@@ -172,11 +171,21 @@ def sync_move_collect(
             """
             data = (payload.get("data") or {}) if isinstance(payload, dict) else {}
             items = data.get("moveCollectDetailList") or []
+            # Miaoshou 的 totalPage 字段实际返回的是总条数（如 382），不是总页数。
+            # 用实际返回的 item 数量推断 page_size，再算出真实页数。
+            raw_total_count = data.get("total")
+            raw_total_page = data.get("totalPage") or data.get("total_pages")
+            actual_total_pages: int | None = None
+            if isinstance(raw_total_count, int) and raw_total_count > 0:
+                effective_page_size = len(items) if items else PAGE_SIZE
+                actual_total_pages = -(-raw_total_count // effective_page_size)  # ceil division
+            elif isinstance(raw_total_page, int) and raw_total_page > 0:
+                actual_total_pages = raw_total_page
             return PageResult(
                 items=list(items) if isinstance(items, list) else [],
                 page=payload.get("page") or 0,
-                total_count=data.get("total"),
-                total_pages=data.get("totalPage") or data.get("total_pages"),
+                total_count=raw_total_count,
+                total_pages=actual_total_pages,
             )
 
         # Re-wrap fetch_page so the paginator receives PageResult.

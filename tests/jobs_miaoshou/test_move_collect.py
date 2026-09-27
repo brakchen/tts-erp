@@ -92,7 +92,9 @@ def _build_paginated_side_effect(
                     _make_task(f"t_{page}_{i}") for i in range(items_per_page)
                 ],
                 "total": items_per_page * total_pages,
-                "totalPage": total_pages,
+                # Miaoshou API 的 totalPage 实际返回总条数，不是总页数。
+                # 测试数据要和真实 API 一致（条数 = items_per_page * total_pages）。
+                "totalPage": items_per_page * total_pages,
             },
         }
 
