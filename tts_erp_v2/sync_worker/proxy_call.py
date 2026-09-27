@@ -133,6 +133,7 @@ def _reactive_refresh(session: Session, shop_id: str):
             provider="tiktok",
             external_account_id=shop_id,
             refresher=_refresher,
+            force=True,  # 401 已证明 token 过期，跳过 is_expired 检查
         )
         return view
     except Exception as e:  # noqa: BLE001

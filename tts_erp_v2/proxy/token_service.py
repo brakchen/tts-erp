@@ -324,6 +324,7 @@ def refresh_if_needed(
     external_account_id: str,
     refresher: RefresherFn,
     skew: timedelta = DEFAULT_REFRESH_SKEW,
+    force: bool = False,
 ) -> CredentialsView | None:
     """If the credentials are expired (or within skew), call refresher and persist.
 
@@ -333,6 +334,10 @@ def refresh_if_needed(
         external_account_id: shop_id / licenseId.
         refresher: callable(provider, external_account_id) returning a dict.
         skew: refresh window.
+        force: skip the ``is_expired`` check and always call the refresher.
+            Used by reactive-refresh paths where the caller already
+            received a 401 — that's definitive proof the token is dead,
+            regardless of what ``expires_at`` says (it may be NULL).
 
     Returns:
         A :class:`CredentialsView` (post-refresh if refreshed, original
@@ -347,7 +352,7 @@ def refresh_if_needed(
     if row is None:
         return None
 
-    if not is_expired(row.expires_at, skew=skew):
+    if not force and not is_expired(row.expires_at, skew=skew):
         return CredentialsView.from_row(row)
 
     # Call the refresher (caller-supplied; tested with a fake).

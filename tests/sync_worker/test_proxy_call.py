@@ -299,9 +299,10 @@ def test_reactive_refresh_on_401_retries_once(
         external_account_id: str,
         refresher: Any,
         skew: Any = None,
+        force: bool = False,
     ) -> Any:
         refresh_calls.append(
-            {"provider": provider, "external_account_id": external_account_id}
+            {"provider": provider, "external_account_id": external_account_id, "force": force}
         )
         return _refreshed_view(provider, external_account_id)
 
@@ -315,6 +316,7 @@ def test_reactive_refresh_on_401_retries_once(
 
     assert len(refresh_calls) == 1
     assert refresh_calls[0]["external_account_id"] == "TEST_TT_PROXY"
+    assert refresh_calls[0]["force"] is True  # 401 路径必须 force
 
     # The retry used the NEW access_token.
     assert len(fake_client.calls) == 1
@@ -357,8 +359,9 @@ def test_reactive_refresh_on_401_no_infinite_loop(
         external_account_id: str,
         refresher: Any,
         skew: Any = None,
+        force: bool = False,
     ) -> Any:
-        refresh_calls.append({"external_account_id": external_account_id})
+        refresh_calls.append({"external_account_id": external_account_id, "force": force})
         return _refreshed_view(provider, external_account_id)
 
     monkeypatch.setattr(
