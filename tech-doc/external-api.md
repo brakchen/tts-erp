@@ -159,15 +159,18 @@ Content-Type: application/json
 
 ## CORS
 
-Default: **no browser cross-origin access allowed** (empty allow-origin
-list). To enable specific origins, set:
+Default: browser access is limited to the signed production
+`ads-data-sync` extension origin. To replace that allow-list or add a
+managed browser client, set:
 
 ```dotenv
-TTS_ERP_CORS_ALLOW_ORIGINS=https://app.example.com,https://admin.example.com
+TTS_ERP_CORS_ALLOW_ORIGINS=chrome-extension://obpgdepgjmchplabmkoeboceddbmlbok,https://app.example.com
 ```
 
-For dev/internal deploys, `TTS_ERP_CORS_ALLOW_ORIGINS=wildcard` enables
-`*` — do not use in production.
+The analytics extension sends `Authorization`, `X-API-Key`, and `X-Request-Id`
+headers; the server allows these headers during the CORS preflight. For
+dev/internal deploys, `TTS_ERP_CORS_ALLOW_ORIGINS=wildcard` enables `*` — do
+not use in production.
 
 ## Endpoints
 
