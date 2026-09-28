@@ -187,8 +187,31 @@
     order: DEFAULT_ORDER,
     offset: 0,
     loading: false,
+    enumMap: {}, // 枚举中文化映射,page load 时从 /v2/config/enum-map 获取
   };
   var lastTotal = 0;
+
+  // ---------- 枚举翻译 (GET /v2/config/enum-map) ----------
+  function loadEnumMap() {
+    return fetch(`${PREFIX}/v2/config/enum-map`, {
+      credentials: "include",
+      headers: { Accept: "application/json" },
+    })
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((data) => { state.enumMap = data || {}; })
+      .catch(() => {});
+  }
+  // 用 enumMap 翻译枚举值;type = enum_type, val = 原始英文值
+  function tr(type, val) {
+    if (val == null || val === "") return "—";
+    var map = state.enumMap[type];
+    return map && map[val] ? map[val] : val; // 无映射 → 原值兜底
+  }
+  // 用 column_header 翻译表头
+  function th(label) {
+    var ch = state.enumMap.column_header;
+    return ch && ch[label] ? ch[label] : label;
+  }
 
   // ---------- 顶部操作员(/v2/auth/me → {authenticated, role}) ----------
   function loadMe() {
@@ -660,9 +683,9 @@
             "tr",
             null,
             el("th", null, "订单号"),
-            el("th", null, "SETTLEMENT", hintSpan("SETTLEMENT = 订单 SETTLEMENT 净额(已扣完全部平台费+联盟+运费+退款调整);v7 净利润核心输入")),
+            el("th", null, "SETTLEMENT"), // 表头用 column_header 翻译
             el("th", null, "分摊比", hintSpan("分摊比 = line_gmv / order_gmv;SETTLEMENT 按这个比例分到各行")),
-            el("th", null, "statement", hintSpan("statement_time = 结算单落库时间(settle_transactions.synced_at)")),
+            el("th", null, "statement"), // 表头用 column_header 翻译
           ),
         ),
         el("tbody", null, srows),
@@ -676,7 +699,7 @@
           "tr",
           null,
           el("td", null, o.order_id),
-          el("td", null, o.status),
+          el("td", null, tr("order_status", o.status)),
           el("td", null, o.qty),
           el("td", null, o.is_settled ? "✓" : "—"),
           el("td", null, o.arrived_overseas ? "✓" : "—"),
@@ -695,8 +718,8 @@
             el("th", null, "订单号"),
             el("th", null, "状态"),
             el("th", null, "件"),
-            el("th", null, "is_settled"),
-            el("th", null, "38301"),
+            el("th", null, th("is_settled")),
+            el("th", null, th("38301")),
             el("th", null, "全损"),
           ),
         ),
@@ -712,8 +735,8 @@
           null,
           el("td", null, c.case_id),
           el("td", null, c.order_id || "—"),
-          el("td", null, c.type),
-          el("td", null, c.status),
+          el("td", null, tr("case_type", c.type)),
+          el("td", null, tr("case_status", c.status)),
           el("td", null, fmtMoney(c.refund_amount)),
         ),
       );
@@ -726,7 +749,7 @@
           el(
             "tr",
             null,
-            el("th", null, "case", hintSpan("case_id = 售后 case 外部 ID(after_sales.cases.external_case_id)")),
+            el("th", null, th("case"), hintSpan("case_id = 售后 case 外部 ID(after_sales.cases.external_case_id)")),
             el("th", null, "订单", hintSpan("order_id = 关联订单 ID(after_sales.cases.order_pk → commerce.sales_orders.order_id)")),
             el("th", null, "类型", hintSpan("case_type = RETURN_AND_REFUND(退货退款) / REFUND_ONLY(仅退款) / CANCELLATION(取消)")),
             el("th", null, "状态", hintSpan("case 状态;RETURN_OR_REFUND_REQUEST_COMPLETE / CANCELLATION_REQUEST_COMPLETE 表示完结")),
@@ -758,9 +781,9 @@
           el(
             "tr",
             null,
-            el("th", null, "campaign_id"),
-            el("th", null, "spend"),
-            el("th", null, "orders"),
+            el("th", null, th("campaign_id")),
+            el("th", null, th("spend")),
+            el("th", null, th("orders")),
             el("th", null, "窗口"),
           ),
         ),
@@ -1153,7 +1176,7 @@
     wireZoom(); // 主图点击放大(委托)
     loadMe();
     loadShops(); // 店铺选项异步填充;失败不影响主表
-    load();
+    loadEnumMap().then(() => load()); // 先加载枚举映射,再加载主表数据
   }
 
   document.addEventListener("DOMContentLoaded", bindControls);
