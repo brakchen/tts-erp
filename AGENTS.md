@@ -105,6 +105,7 @@ cred = load_credentials(session, provider="tiktok", external_account_id=shop_id)
 - Commit and push the task branch before merge or before pausing for user input. If the network is unavailable, commit locally and report that push remains pending.
 - Merge into master with `--no-ff`, rerun the required checks on master, remove the worktree only after the branch is fully merged, then push master without force.
 - Commit messages use `feat/fix/chore/docs/style/merge` plus a concise Chinese description.
+- In a worktree, never use `git add -A`, `git add .`, or `-A`-style wildcards for staging. They sweep in the worktree's `.venv` symlink, `.env*`, and other gitignored-but-not-protected local files, and the resulting commit will silently wipe a teammate's real venv on merge checkout. Always stage with explicit file paths (e.g. `git add tts_erp_v2/.../spu-roi.js tests/...`). If you used `-A`, run `git status` before `git commit` and unstage anything that is not your own change.
 
 Definition of done:
 

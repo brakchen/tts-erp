@@ -2230,6 +2230,13 @@ def test_spu_roi_js_shop_switch_listener_before_early_return():
     assert "showShopModal" in src
     assert "REDIRECT_COUNTDOWN_SEC" not in src
     assert "秒后自动返回首页" not in src
+    # 2026-09-28 review P2: loadShops 拉取店铺失败(非 401)弹错并提供重试,
+    # 不能静默吞错导致页面卡在加载中。
+    assert "店铺列表加载失败，请检查网络后重试" in src
+    assert "重试" in src
+    # 2026-09-28 review P2: shop_pk 无效时下拉复位 sel.value = "",
+    # 避免视觉上默认显示第一个店铺造成误导
+    assert 'sel.value = ""' in src
 
 
 # ─── 在线汇率接入(D1 落地 2026-09-06)─────────────────────────────────

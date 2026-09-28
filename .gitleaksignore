@@ -1,0 +1,30 @@
+# Gitleaks ignore fingerprints (2026-09-28, fix/spu-roi-review-followups).
+#
+# gitleaks scans tracked files and (depending on invocation) the working tree.
+# Lines below are explicit false positives that keep tripping the linter.
+# Format: <path>:<rule-id>:<line> for filesystem scans; git-history scans
+# additionally need the commit SHA. Update line numbers if the source moves;
+# do NOT widen this list without justification.
+
+# ─── Test-only / gitignored creds (never committed, local dev only) ───
+# .env.test is the test-DB stand-in for .env per AGENTS.md §2.4; it holds
+# real-looking secrets but is gitignored and never reaches the repo. The
+# keys are TEST_/local-only and only ever present in the developer's
+# filesystem.
+.env.test:generic-api-key:6
+.env.test:generic-api-key:16
+.env.test:generic-api-key:24
+.env.test:generic-api-key:52
+
+# ─── Archived v1 documentation (historical reference, never loaded at runtime) ───
+# tech-doc/_archive/data-model-survey-v1.md:1475 — sample idempotency_key
+# (64-hex SHA-256) from a v1 data-model survey example. Not a credential.
+tech-doc/_archive/data-model-survey-v1.md:generic-api-key:1475
+
+# ─── Stale / pre-refactor line numbers ───
+# AGENTS.md line 222 reported by gitleaks but the file is 135 lines after
+# 2026-09-28 agents-md-refactor (94cf541); the finding refers to a pre-
+# refactor blob. Add the commit fingerprint when gitleaks reports from git.
+# scripts/test.sh:36 — `PYTEST=".venv/bin/pytest"` path assignment;
+# gitleaks generic-api-key rule false-positive on the substring.
+scripts/test.sh:generic-api-key:36
