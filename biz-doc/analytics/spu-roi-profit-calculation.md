@@ -144,17 +144,17 @@ $$
 | 指标 | 公式 | 说明 |
 | --- | --- | --- |
 | 广告消耗 | Σ mixed_real_cost（单店铺所有广告消耗） | 后端 `totals.spend` |
-| 有效销售额 | 有效销售订单 GMV，已送达/已完成减去退款金额 | 后端 `totals.sales`（已含退款扣除） |
-| 有效单量 | 有效订单数 − 退款订单数 | 后端 `totals.order_count - totals.refund_order_count` |
-| 退款数 | 退款订单数（订单维度去重） | 后端 `totals.refund_order_count` |
-| 退款率 | 退款订单数 ÷ 全部订单 | 后端数据，前端格式化 |
-| 全损量 | 退款订单数 + 海外取消订单数 | 后端 `totals.refund_order_count + totals.overseas_cancelled_order_count` |
-| 全损率 | 全损量 ÷ 全部订单 | 后端数据，前端格式化 |
-| 取消量 | 国内取消订单数（排除海外取消） | 后端 `totals.domestic_cancelled_order_count` |
-| 取消率 | 国内取消订单数 ÷ 全部订单 | 后端数据，前端格式化 |
+| 有效销售额 | 有效销售订单 GMV − 退款金额 | 后端 `totals.effective_sales` |
+| 有效单量 | 有效订单数 − 退款订单数 | 后端 `totals.effective_order_count` |
+| 退款数 | 退款订单数（订单维度去重，按售后单完结时间窗口） | 后端 `totals.refund_order_count` |
+| 退款率 | 退款订单数 ÷ 全部订单 | 后端 `totals.refund_rate` |
+| 全损量 | 退款订单数 + 海外取消订单数（订单维度） | 后端 `totals.full_loss_order_count` |
+| 全损率 | 全损量 ÷ 全部订单 | 后端 `totals.full_loss_rate` |
+| 取消量 | 国内取消订单数（排除海外取消，全局去重） | 后端 `totals.domestic_cancelled_order_count` |
+| 取消率 | 国内取消订单数 ÷ 全部订单 | 后端 `totals.cancel_rate` |
 | 实际ROI | NC' ÷ 广告消耗 | 后端 `totals.roi_real` |
 | 实际保本ROI | NC' ÷ (NC' − COGS_kept) | 后端 `totals.roi_breakeven` |
-| 广告系统保本ROI | = 实际ROI | 前端复制实际ROI值 |
+| 广告系统保本ROI | TODO 公式待定，暂不展示 | 前端显示 — |
 
 ---
 

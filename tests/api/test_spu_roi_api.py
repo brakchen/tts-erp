@@ -1858,6 +1858,12 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
         "domestic_cancelled_order_count": 0,
         "overseas_cancelled_order_count": 0,
         "roi_breakeven": None,
+        "effective_sales": "0.0000",
+        "effective_order_count": 0,
+        "full_loss_order_count": 0,
+        "refund_rate": None,
+        "full_loss_rate": None,
+        "cancel_rate": None,
     }
     meta = body["meta"]
     assert meta["fx"] == {

@@ -321,10 +321,11 @@ _SQL_ROI_REFUND_SCOPE = text(
       AND so.status = ANY(CAST(:paid_statuses AS text[]))
       AND c.status IN (:st0, :st1)
       AND c.case_type IN ('REFUND_ONLY', 'RETURN_AND_REFUND')
+      /* v9 口径：退款桶按售后单完结时间窗口（与 _SQL_ROI_REFUNDS 退款金额同窗） */
       AND (CAST(:ws AS timestamptz) IS NULL
-           OR coalesce(so.paid_at, so.order_time) >= CAST(:ws AS timestamptz))
+           OR c.updated_at_source >= CAST(:ws AS timestamptz))
       AND (CAST(:we AS timestamptz) IS NULL
-           OR coalesce(so.paid_at, so.order_time) <  CAST(:we AS timestamptz))
+           OR c.updated_at_source <  CAST(:we AS timestamptz))
     """
 )
 
@@ -336,6 +337,18 @@ _SQL_ROI_ORDER_SCOPE = text(
           WHERE so.status = ANY(CAST(:paid_statuses AS text[])))        AS order_count,
       count(DISTINCT so.id) FILTER (
           WHERE so.status = 'CANCELLED')                                AS cancelled_order_count,
+      count(DISTINCT so.id) FILTER (
+          WHERE so.status = 'CANCELLED'
+            AND NOT EXISTS (SELECT 1 FROM fulfillment.shipments sh
+                            JOIN fulfillment.tracking_events te
+                              ON te.shipment_id = sh.id AND te.action_code = :ac
+                            WHERE sh.order_pk = so.id))                  AS domestic_cancelled_order_count,
+      count(DISTINCT so.id) FILTER (
+          WHERE so.status = 'CANCELLED'
+            AND EXISTS (SELECT 1 FROM fulfillment.shipments sh
+                        JOIN fulfillment.tracking_events te
+                          ON te.shipment_id = sh.id AND te.action_code = :ac
+                        WHERE sh.order_pk = so.id))                      AS overseas_cancelled_order_count,
       coalesce(sum(sl.quantity * sl.unit_price) FILTER (
           WHERE so.status = ANY(CAST(:paid_statuses AS text[]))
              OR so.status = 'CANCELLED'), 0)                            AS gmv
@@ -1122,6 +1135,7 @@ def _query_spu_roi(
                 {
                     "paid_statuses": paid_statuses,
                     "pks": spu_pks_visible,
+                    "ac": _TRACK_ACTION_CODE_OVERSEAS,
                     "ws": ws_dt,
                     "we": we_dt,
                 },
@@ -1133,9 +1147,16 @@ def _query_spu_roi(
     cancelled_orders_total = (
         _row_int(scope_row["cancelled_order_count"]) if scope_row else 0
     )
+    # 取消拆分：全局 distinct（不再 per-SPU 求和，避免跨 SPU 订单重复计数）
+    total_domestic_cancelled = (
+        _row_int(scope_row["domestic_cancelled_order_count"]) if scope_row else 0
+    )
+    total_overseas_cancelled = (
+        _row_int(scope_row["overseas_cancelled_order_count"]) if scope_row else 0
+    )
     gmv_total = Decimal(scope_row["gmv"]) / fx_usd_vnd if scope_row else Decimal(0)
 
-    # 全局退款订单数（distinct orders with refund cases）
+    # 全局退款订单数（distinct orders with refund cases；v9 售后完结时间窗）
     refund_scope_row = None
     if spu_pks_visible:
         refund_scope_row = (
@@ -1157,16 +1178,10 @@ def _query_spu_roi(
         _row_int(refund_scope_row["refund_order_count"]) if refund_scope_row else 0
     )
 
-    # 从行级数据聚合：全损量、国内取消、海外取消、COGS_kept
+    # 从行级数据聚合：全损件数、COGS_kept（件数口径，用于 return_loss/roi）
     total_full_loss_qty = sum((r["full_loss_qty"] for r in plain), 0)
     total_full_loss_cancelled_qty = sum(
         (r["full_loss_cancelled_qty"] for r in plain), 0
-    )
-    total_domestic_cancelled = sum(
-        (r["domestic_cancelled_order_count"] for r in plain), 0
-    )
-    total_overseas_cancelled = sum(
-        (r["overseas_cancelled_order_count"] for r in plain), 0
     )
     total_cogs_kept = Decimal(0)
     for r in plain:
@@ -1178,6 +1193,24 @@ def _query_spu_roi(
 
     # 全量订单 = 有效订单 + 取消订单
     total_orders_count = eff_orders + cancelled_orders_total
+
+    # v10 大盘指标（全部由后端计算，前端只做格式化）：
+    # 有效销售额 = 有效销售 GMV − 退款金额（v10：已送达/已完成减退款）
+    effective_sales_total = money_total["sales"] - money_total["refund_net_amount"]
+    # 有效单量 = 有效订单数 − 退款订单数（v10）
+    effective_order_count = max(0, eff_orders - refund_order_count_total)
+    # 全损量（订单维度）= 退款订单数 + 海外取消订单数
+    full_loss_order_count = refund_order_count_total + total_overseas_cancelled
+
+    # 三个率：分子/分母同为订单维度，分母 = 全部订单
+    def _rate(numer: int) -> str | None:
+        if total_orders_count <= 0:
+            return None
+        return _fmt_ratio(Decimal(numer) / Decimal(total_orders_count))
+
+    refund_rate_total = _rate(refund_order_count_total)
+    full_loss_rate_total = _rate(full_loss_order_count)
+    cancel_rate_total = _rate(total_domestic_cancelled)
 
     # 整体保本 ROI = NC' / (NC' - COGS_kept)
     overall_nc_prime = total_net_revenue_usd - total_return_loss
@@ -1204,6 +1237,12 @@ def _query_spu_roi(
         "domestic_cancelled_order_count": total_domestic_cancelled,
         "overseas_cancelled_order_count": total_overseas_cancelled,
         "roi_breakeven": overall_breakeven,
+        "effective_sales": _fmt_money(effective_sales_total),
+        "effective_order_count": effective_order_count,
+        "full_loss_order_count": full_loss_order_count,
+        "refund_rate": refund_rate_total,
+        "full_loss_rate": full_loss_rate_total,
+        "cancel_rate": cancel_rate_total,
     }
 
     # meta（§4 v7）

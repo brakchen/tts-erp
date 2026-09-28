@@ -322,39 +322,26 @@
     var meta = payload.meta || {};
     lastTotal = payload.total || 0;
 
-    // 结余带(全部由后端 totals 提供，前端只做格式化)
+    // 结余带(全部由后端 totals 提供，前端只做格式化，禁止前端计算)
     $("#sum-spend").textContent = fmtMoney(totals.spend);
-    $("#sum-sales").textContent = fmtMoney(totals.sales);
-    $("#sum-orders").textContent = fmtInt(totals.order_count || 0);
-    // 退款数 = 全局 distinct 退款订单数(后端计算)
+    // 有效销售额 = 有效GMV − 退款金额(后端 effective_sales)
+    $("#sum-sales").textContent = fmtMoney(totals.effective_sales);
+    // 有效单量 = 有效订单 − 退款订单(后端 effective_order_count)
+    $("#sum-orders").textContent = fmtInt(totals.effective_order_count || 0);
+    // 退款数 = 全局 distinct 退款订单数(后端)
     $("#sum-refund-count").textContent = fmtInt(totals.refund_order_count || 0);
-    // 退款率 = 退款单量 / 全部订单(后端提供数据，前端格式化)
-    var totalOrdersForRate =
-      (totals.order_count || 0) + (totals.cancelled_order_count || 0);
-    var refundRateVal =
-      totalOrdersForRate > 0
-        ? (totals.refund_order_count || 0) / totalOrdersForRate
-        : null;
-    $("#sum-refund-rate").textContent = fmtPct(refundRateVal);
-    // 全损量 = 退款订单 + 海外取消订单(后端计算)
-    var fullLossQty =
-      (totals.refund_order_count || 0) +
-      (totals.overseas_cancelled_order_count || 0);
-    $("#sum-loss-qty").textContent = fmtInt(fullLossQty);
-    // 全损率 = 全损量 / 全部订单
-    var lossRateVal =
-      totalOrdersForRate > 0 ? fullLossQty / totalOrdersForRate : null;
-    $("#sum-loss-rate").textContent = fmtPct(lossRateVal);
-    // 取消量 = 国内取消(后端计算)
+    // 退款率(后端)
+    $("#sum-refund-rate").textContent = fmtPct(totals.refund_rate);
+    // 全损量 = 退款订单 + 海外取消订单(后端 full_loss_order_count)
+    $("#sum-loss-qty").textContent = fmtInt(totals.full_loss_order_count || 0);
+    // 全损率(后端)
+    $("#sum-loss-rate").textContent = fmtPct(totals.full_loss_rate);
+    // 取消量 = 国内取消(后端)
     $("#sum-cancel-count").textContent = fmtInt(
       totals.domestic_cancelled_order_count || 0,
     );
-    // 取消率 = 国内取消 / 全部订单
-    var cancelRateVal =
-      totalOrdersForRate > 0
-        ? (totals.domestic_cancelled_order_count || 0) / totalOrdersForRate
-        : null;
-    $("#sum-cancel-rate").textContent = fmtPct(cancelRateVal);
+    // 取消率(后端)
+    $("#sum-cancel-rate").textContent = fmtPct(totals.cancel_rate);
     // 实际ROI(后端计算)
     var roiEl = $("#sum-roi");
     var roiOverall = totals.roi_real;
