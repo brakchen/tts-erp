@@ -58,6 +58,21 @@ from tts_erp_v2.middleware.auth import AuthMiddleware
 from tts_erp_v2.middleware.rate_limit import RateLimitMiddleware
 
 
+# The production ads-data-sync extension has a stable signed ID. Keep this
+# narrow instead of enabling every chrome-extension origin; operators can
+# replace it entirely with TTS_ERP_CORS_ALLOW_ORIGINS when deploying a
+# different signed extension build or additional browser clients.
+DEFAULT_CORS_ORIGINS = [
+    "chrome-extension://obpgdepgjmchplabmkoeboceddbmlbok",
+]
+DEFAULT_CORS_ALLOW_HEADERS = [
+    "Authorization",
+    "X-API-Key",
+    "X-Request-Id",
+    "Content-Type",
+]
+
+
 def _build_routes(app: FastAPI) -> None:
     app.include_router(commerce.router)
     app.include_router(linkage.router)
@@ -194,14 +209,15 @@ def build_app() -> FastAPI:
     # and the handler so the limiter can bucket by authenticated key.
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(AuthMiddleware)
-    # CORS: default DENY (empty allow-origin). Operators set
-    # TTS_ERP_CORS_ALLOW_ORIGINS to a comma-list, or the token "wildcard".
+    # CORS: allow only the signed production extension by default. Operators
+    # can replace that list with TTS_ERP_CORS_ALLOW_ORIGINS (comma-list) or
+    # the token "wildcard" for explicitly managed internal deployments.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_parse_cors_origins(),
         allow_credentials=True,
         allow_methods=["GET", "POST"],
-        allow_headers=["Authorization", "X-API-Key", "Content-Type"],
+        allow_headers=DEFAULT_CORS_ALLOW_HEADERS,
         max_age=600,
     )
     # Outermost: one structured line per request to stdout. The
@@ -218,7 +234,7 @@ def build_app() -> FastAPI:
 def _parse_cors_origins() -> list[str]:
     raw = _env_cors()
     if not raw:
-        return []
+        return DEFAULT_CORS_ORIGINS.copy()
     if raw.strip() == "wildcard":
         return ["*"]
     return [o.strip() for o in raw.split(",") if o.strip()]
