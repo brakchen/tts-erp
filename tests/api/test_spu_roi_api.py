@@ -2191,6 +2191,34 @@ def test_spu_roi_js_review_fixes_present():
     assert "datesTouched" in src
 
 
+def test_spu_roi_js_shop_switch_listener_before_early_return():
+    """2026-09-28 回归守卫:loadShops() 的 change listener 必须绑定在 early return 之前。
+
+    bug 原貌:URL 无 shop_pk(或 shop_pk 无效)时 loadShops() 先
+    showToast + return null,后面的 sel.addEventListener("change", …) 永远
+    执行不到 → 用户首次访问选店铺无任何反应。
+    契约:change 绑定的源码位置必须早于 "请先选择店铺" 的 early return。
+    """
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "spu-roi.js"
+    ).read_text(encoding="utf-8")
+    bind_idx = src.find('sel.addEventListener("change"')
+    early_return_idx = src.find("请先选择店铺")
+    assert bind_idx != -1, "spu-roi.js 找不到店铺切换 change listener"
+    assert early_return_idx != -1, "spu-roi.js 找不到 shop_pk 缺失 toast 分支"
+    assert bind_idx < early_return_idx, (
+        "change listener 必须绑定在 early return 之前,否则 URL 无 shop_pk 时选店铺不生效"
+    )
+    # 首次选中时若 enumMap 还没拉(loadEnumMap 被 pk=null 跳过),change 里要补拉
+    assert "loadEnumMap().then(() => load())" in src
+
+
 # ─── 在线汇率接入(D1 落地 2026-09-06)─────────────────────────────────
 
 

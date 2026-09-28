@@ -964,6 +964,21 @@
           opt.textContent = s.account_name || `#${s.id} (${s.region || "?"})`;
           sel.appendChild(opt);
         });
+        // 先绑切换事件,再做 URL shop_pk 校验 —— 否则 URL 无 shop_pk / shop_pk 无效时
+        // 提前 return null,change listener 永远没绑上,用户选店铺无任何反应
+        // (2026-09-28 用户反馈 bug)。首次选中时若 enumMap 还没拉(初次访问无 shop_pk
+        // 时 bindControls 的 loadEnumMap 被 pk=null 跳过),先补拉再 load。
+        sel.addEventListener("change", () => {
+          hideToast(); // 切换时取消倒计时
+          state.shopPk = sel.value;
+          setShopPkInUrl(sel.value);
+          state.offset = 0;
+          if (!Object.keys(state.enumMap).length) {
+            loadEnumMap().then(() => load());
+          } else {
+            load();
+          }
+        });
         // 从 URL 读 shop_pk
         var urlPk = getShopPkFromUrl();
         if (urlPk) {
@@ -980,14 +995,6 @@
           showToast("请先选择店铺", REDIRECT_COUNTDOWN_SEC);
           return null;
         }
-        // 切换事件
-        sel.addEventListener("change", () => {
-          hideToast(); // 切换时取消倒计时
-          state.shopPk = sel.value;
-          setShopPkInUrl(sel.value);
-          state.offset = 0;
-          load();
-        });
         return sel.value;
       })
       .catch(() => null);
