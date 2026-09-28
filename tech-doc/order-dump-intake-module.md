@@ -1,6 +1,6 @@
 # Order dump intake deep module 技术方案
 
-> 状态：**已决策，可开发**。
+> 状态：**已实现，待用户 review；不得 merge master**。
 >
 > 本方案对应架构评审 Candidate 01「收拢订单 dump 解释与落库」。根据用户授权，
 > 本轮 grilling 的每个问题均默认采用本文的推荐答案，不等待逐项回复。问题、建议、

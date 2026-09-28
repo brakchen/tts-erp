@@ -2,7 +2,7 @@
 
 插件从 TikTok Seller Center 抓取的 HTTP 响应通过此端点写入后端。
 - POST /has-data: 批量查业务表存在性
-- POST /dumps: 接收 dump → inline 解析 → 写业务表 + plugin_logs 健康记录
+- POST /dumps: wire adapter → order dump intake deep module
 - POST /reconcile: 统一返回订单锚点与物流增量候选
 
 详见 tech-doc/chrome-ext-order-sync-design.md。
@@ -25,38 +25,32 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.api.v2._common import (
-    audit_and_error as _audit_and_error,
-    key_prefix as _key_prefix,
-    log_event as _log_event,
-    ok_response as _ok_response,
-    request_id as _request_id,
-)
 from tts_erp_v2.api.deps import get_session
-from tts_erp_v2.plugin.orders.parser import (
-    parse_after_sales_response,
-    parse_logistics_response,
-    parse_order_detail_response,
-    parse_order_history_response,
-    parse_order_response,
-    parse_statement_list_response,
-    parse_statement_transaction_response,
+from tts_erp_v2.api.v2._common import audit_and_error as _audit_and_error
+from tts_erp_v2.api.v2._common import key_prefix as _key_prefix
+from tts_erp_v2.api.v2._common import log_event as _log_event
+from tts_erp_v2.api.v2._common import ok_response as _ok_response
+from tts_erp_v2.api.v2._common import request_id as _request_id
+from tts_erp_v2.plugin.orders.intake import (
+    DumpDomain,
+    DumpIntakeRequest,
+    IntakeStatus,
+    intake_dump,
 )
 from tts_erp_v2.plugin.orders.repository import (
     has_data_bulk,
-    record_dump_health,
     reconcile_logistics,
     reconcile_orders,
 )
 
 # ─── Config ───────────────────────────────────────────────────────────
 
-SUPPORTED_PROTOCOL_VERSION = 1
 MAX_BODY_BYTES = 2 * 1024 * 1024  # 2 MB
 MAX_IDS = 500
-VALID_DOMAINS = {"orders", "logistics", "statements", "after_sales", "order_details", "order_history"}
+VALID_DOMAINS = {domain.value for domain in DumpDomain}
 
 _PATH_HAS_DATA = "/v2/order-sync/has-data"
 _PATH_DUMPS = "/v2/order-sync/dumps"
@@ -117,7 +111,7 @@ class ReconcileLogisticsRequest(BaseModel):
 
 
 class ReconcileRequest(BaseModel):
-    protocolVersion: Literal[SUPPORTED_PROTOCOL_VERSION]
+    protocolVersion: Literal[1]
     scope: ScopeIn
     domains: list[str] = Field(min_length=1, max_length=2)
     orders: ReconcileOrdersRequest | None = None
@@ -187,7 +181,7 @@ class DumpBodyIn(BaseModel):
 
 
 class DumpRequest(BaseModel):
-    protocolVersion: Literal[SUPPORTED_PROTOCOL_VERSION]
+    protocolVersion: Literal[1]
     requestId: str | None = Field(default=None, min_length=1, max_length=128)
     scope: ScopeIn
     dump: DumpBodyIn
@@ -407,135 +401,42 @@ def post_dumps(
             logger=log,
         )
 
-    shop_id = payload.scope.shopId
-    domain = payload.dump.domain
-    endpoint = payload.dump.endpoint
-    captured_at = payload.dump.createdAt
-    response_body = payload.dump.response.body
-    main_order_id = payload.dump.mainOrderId
-
-    # AGENTS.md §2.5: response.body 为 None（插件抓取失败/超时）→ 422 + EMPTY_RESPONSE_BODY
-    # 理由：empty body 是 TikTok 那边的问题（chrome-plugins 侧修复前），重试无意义 = PERMANENT
-    if response_body is None:
-        # Keep the domain-level health trail even though no parser can run.
-        # The HTTP error still prevents the plugin from advancing its queue.
-        record_dump_health(
-            sess,
-            shop_id=shop_id,
-            domain=domain,
-            endpoint=endpoint,
-            rows_written=0,
-            parse_error_class="EMPTY_RESPONSE_BODY",
-            captured_at=captured_at,
+    intake_request = DumpIntakeRequest(
+        domain=DumpDomain(payload.dump.domain),
+        shop_id=payload.scope.shopId,
+        endpoint=payload.dump.endpoint,
+        captured_at=payload.dump.createdAt,
+        response_body=payload.dump.response.body,
+        main_order_id=payload.dump.mainOrderId,
+    )
+    try:
+        outcome = intake_dump(sess, request=intake_request)
+    except SQLAlchemyError:
+        log.exception(
+            "dump intake persistence failed domain=%s shop_id=%s",
+            intake_request.domain.value,
+            intake_request.shop_id,
         )
-        sess.commit()
         return _audit_and_error(
             request_id=request_id,
-            status=422,
-            code="EMPTY_RESPONSE_BODY",
-            message="dump.response.body is null; plugin must not advance progress",
+            status=500,
+            code="INTERNAL_ERROR",
+            message="dump intake persistence failed",
             key_prefix=key_prefix,
             method="POST",
             path=audit_path,
             logger=log,
         )
 
-    # 解析 → 写业务表
-    parse_error: str | None = None
-    rows_written = 0
-
-    try:
-        # Isolate parser writes in a savepoint. A malformed child row must not
-        # leave a partially materialized order/statement behind.
-        with sess.begin_nested():
-            if domain == "orders":
-                rows_written = parse_order_response(
-                    sess,
-                    shop_id=shop_id,
-                    response_body=response_body,
-                    captured_at=captured_at,
-                )
-            elif domain == "order_details":
-                rows_written = parse_order_detail_response(
-                    sess,
-                    shop_id=shop_id,
-                    response_body=response_body,
-                    captured_at=captured_at,
-                )
-            elif domain == "order_history":
-                if not main_order_id:
-                    parse_error = "mainOrderId is required for order_history domain"
-                else:
-                    rows_written = parse_order_history_response(
-                        sess,
-                        shop_id=shop_id,
-                        order_id=main_order_id,
-                        response_body=response_body,
-                        captured_at=captured_at,
-                    )
-            elif domain == "logistics":
-                if not main_order_id:
-                    parse_error = "mainOrderId is required for logistics domain"
-                else:
-                    rows_written = parse_logistics_response(
-                        sess,
-                        shop_id=shop_id,
-                        order_id=main_order_id,
-                        response_body=response_body,
-                        captured_at=captured_at,
-                    )
-            elif domain == "statements":
-                data = response_body.get("data") or {}
-                if "sku_record" in data:
-                    rows_written = parse_statement_transaction_response(
-                        sess,
-                        shop_id=shop_id,
-                        response_body=response_body,
-                        captured_at=captured_at,
-                    )
-                else:
-                    rows_written = parse_statement_list_response(
-                        sess,
-                        shop_id=shop_id,
-                        response_body=response_body,
-                        captured_at=captured_at,
-                    )
-            elif domain == "after_sales":
-                rows_written = parse_after_sales_response(
-                    sess,
-                    shop_id=shop_id,
-                    response_body=response_body,
-                    captured_at=captured_at,
-                )
-    except Exception as exc:
-        parse_error = f"{type(exc).__name__}: {exc}"
-        log.exception("parse error for domain=%s shop_id=%s", domain, shop_id)
-
-    # Write per-domain health metric to plugin_logs (for diagnosis).
-    # AGENTS.md §2.5: rowsWritten=0 不是 parse_error 探测信号——HTTP code 是唯一失败信号。
-    # （原 hack `if parse_error is None and rows_written == 0 and domain in {...}` 删除：
-    #  会漏判 logistics + after_sales 域静默返 200，导致 §5.3 物流 0 行额外根因。）
-    record_dump_health(
-        sess,
-        shop_id=shop_id,
-        domain=domain,
-        endpoint=endpoint,
-        rows_written=rows_written,
-        parse_error_class=parse_error,
-        captured_at=captured_at,
-    )
-
-    # commit
-    sess.commit()
-
-    if parse_error:
-        # AGENTS.md §2.5: parse_error 返 422 PERMANENT
-        # _audit_and_error 内部已处理 log_event + log.warning，此处不再重复记录
+    if outcome.status is IntakeStatus.REJECTED:
+        failure = outcome.failure
+        if failure is None:
+            raise AssertionError("rejected dump intake outcome must include failure")
         return _audit_and_error(
             request_id=request_id,
             status=422,
-            code="PARSE_ERROR",
-            message=parse_error,
+            code=failure.code.value,
+            message=failure.message,
             key_prefix=key_prefix,
             method="POST",
             path=audit_path,
@@ -551,11 +452,8 @@ def post_dumps(
         path=audit_path,
         status=200,
         records_in=1,
-        records_ok=rows_written,
+        records_ok=outcome.rows_written,
     )
 
-    return _ok_response(
-        request_id=request_id,
-        data={},
-    )
+    return _ok_response(request_id=request_id, data={})
 

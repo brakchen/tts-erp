@@ -698,14 +698,21 @@ def parse_order_detail_response(
     （价格明细、物流仓库、退货、买家地址），存储到独立的 order_details 表。
     """
     rows_written = 0
-    data = response_body.get("data") or {}
-    main_orders = data.get("main_order") or []
+    data = response_body.get("data")
+    if not isinstance(data, dict) or "main_order" not in data:
+        raise ValueError("order detail response missing data.main_order")
+    main_orders = data["main_order"]
+    if not isinstance(main_orders, list):
+        raise TypeError("order detail response data.main_order must be a list")
 
     for order in main_orders:
+        if not isinstance(order, dict):
+            raise TypeError("order detail response data.main_order items must be objects")
         order_id = str(order.get("main_order_id", ""))
         if not order_id:
-            log.warning("order/get missing main_order_id, skipping")
-            continue
+            raise ValueError(
+                "order detail response data.main_order item missing main_order_id"
+            )
 
         # trade_order_module
         tom = order.get("trade_order_module") or {}
@@ -851,10 +858,18 @@ def parse_order_history_response(
     时间线按 event_index 排序存储（0 = 最早事件），支持后续分析。
     """
     rows_written = 0
-    data = response_body.get("data") or {}
-    history = data.get("order_history") or []
+    data = response_body.get("data")
+    if not isinstance(data, dict) or "order_history" not in data:
+        raise ValueError("order history response missing data.order_history")
+    history = data["order_history"]
+    if not isinstance(history, list):
+        raise TypeError("order history response data.order_history must be a list")
 
     for index, event in enumerate(history):
+        if not isinstance(event, dict):
+            raise TypeError(
+                "order history response data.order_history items must be objects"
+            )
         description = event.get("description")
         event_at = _ts_to_datetime(event.get("timestamp"))
         detail = event.get("detail")
