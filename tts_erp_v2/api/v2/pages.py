@@ -58,7 +58,7 @@ _JS_DIR = Path(__file__).resolve().parents[2] / "static" / "js"
 _SIDEBAR_CSS = """
     body { margin-left: 220px; }
     .op-home-link { display: none; }
-    .sidebar-link.active { border-left: 3px solid var(--accent); padding-left: 9px; }
+    .sidebar-link.active { border-left: 3px solid var(--accent); padding-left: 9px; border-bottom: 0; }
     .sidebar { transition: transform 200ms ease; }
     @media (max-width: 991.98px) {
       body { margin-left: 0; }
