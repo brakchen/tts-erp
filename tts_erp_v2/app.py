@@ -30,6 +30,7 @@ All other routes go through v2 routers and require auth.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -112,6 +113,35 @@ def _build_routes(app: FastAPI) -> None:
     )
 
 
+
+
+def _downgrade_nullable(obj: Any) -> None:
+    """Recursively rewrite OpenAPI 3.1 anyOf+null to 3.0 nullable:true.
+
+    ``anyOf: [{…schema…}, {type: "null"}]``  →  ``{…schema…, nullable: true}``
+    Only applies when the anyOf has exactly 2 members and one is {type:"null"}.
+    """
+    if isinstance(obj, dict):
+        any_of = obj.get("anyOf")
+        if isinstance(any_of, list) and len(any_of) == 2:
+            null_idx = next(
+                (i for i, m in enumerate(any_of) if isinstance(m, dict) and m.get("type") == "null"),
+                None,
+            )
+            if null_idx is not None:
+                other = any_of[1 - null_idx]
+                if isinstance(other, dict):
+                    # Merge the non-null schema into the parent, mark nullable
+                    obj.clear()
+                    obj.update(other)
+                    obj["nullable"] = True
+        for v in obj.values():
+            _downgrade_nullable(v)
+    elif isinstance(obj, list):
+        for item in obj:
+            _downgrade_nullable(item)
+
+
 def build_app() -> FastAPI:
     """Construct the v2 FastAPI app.
 
@@ -124,6 +154,38 @@ def build_app() -> FastAPI:
         version="2.0.0",
         description="Refactored tts-erp API — see tech-doc/refactor-tech-plan-v2.md",
     )
+    # --- OpenAPI 3.1 → 3.0.3 down-conversion ---
+    # Pydantic v2 + FastAPI 0.141 default to OpenAPI 3.1 which uses
+    # ``anyOf: [{…}, {type: "null"}]`` for nullable fields.  Swagger
+    # UI 5.x (loaded from CDN for /docs) has incomplete 3.1 support
+    # and renders these as broken schemas.  We force 3.0.3 and
+    # post-process to rewrite anyOf+null → nullable:true.
+    _original_openapi = app.openapi
+
+    def _openapi_30_compat() -> dict[str, Any]:
+        from fastapi.openapi.utils import get_openapi  # noqa: F811
+
+        if not app.openapi_schema:
+            app.openapi_schema = get_openapi(
+                title=app.title,
+                version=app.version,
+                openapi_version="3.0.3",
+                summary=app.summary,
+                description=app.description,
+                terms_of_service=app.terms_of_service,
+                contact=app.contact,
+                license_info=app.license_info,
+                routes=app.routes,
+                webhooks=app.webhooks.routes,
+                tags=app.openapi_tags,
+                servers=app.servers,
+                separate_input_output_schemas=app.separate_input_output_schemas,
+                external_docs=app.openapi_external_docs,
+            )
+            _downgrade_nullable(app.openapi_schema)
+        return app.openapi_schema
+
+    app.openapi = _openapi_30_compat  # type: ignore[method-assign]
 
     # --- Middleware registration (LAST = OUTERMOST) ---
     # Innermost first, then Auth (next layer out), then CORS, then
