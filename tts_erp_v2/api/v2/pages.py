@@ -73,8 +73,8 @@ _SIDEBAR_CSS = """
     .sidebar.is-collapsed .nav-link { text-align: center; padding-left: 0; padding-right: 0; border-left: 0; }
     .sidebar.is-collapsed .nav-link.active { border-left: 0; border-bottom: 2px solid var(--accent); padding-left: 0; }
     .sidebar.is-collapsed .sidebar-collapse-icon { transform: rotate(180deg); }
-    .sidebar-collapse-btn { cursor: pointer; background: none; border: 0; color: var(--muted); padding: 8px; }
-    .sidebar-collapse-btn:hover { color: var(--accent); }
+    .sidebar-collapse-btn { cursor: pointer; background: none; border: 1px solid var(--rule); color: var(--muted); padding: 6px 12px; border-radius: 0; width: 100%; text-align: left; display: flex; align-items: center; gap: 8px; }
+    .sidebar-collapse-btn:hover { color: var(--accent); border-color: var(--accent); }
     @media (max-width: 991.98px) {
       body { margin-left: 0; }
       body.sidebar-collapsed { margin-left: 0; }
@@ -86,7 +86,7 @@ _SIDEBAR_CSS = """
       .sidebar.is-collapsed .nav-link span,
       .sidebar.is-collapsed .sidebar-user { display: block; }
       .sidebar.is-collapsed .nav-link { text-align: left; padding-left: 12px; }
-      .sidebar-collapse-btn { display: none; }
+      .sidebar-collapse-btn { display: none !important; }
       .op-header { padding-left: 56px; }
     }
 """
@@ -140,7 +140,7 @@ def _sidebar_html(current_page: str) -> str:
 
     <div class="px-3 py-2 border-top">
       <div class="small text-muted sidebar-user" id="sidebar-user"></div>
-      <button class="sidebar-collapse-btn d-none d-lg-flex align-items-center gap-2 mt-2 w-100"
+      <button class="sidebar-collapse-btn mt-2"
         id="sidebar-collapse" aria-label="折叠侧边栏">
         <span class="sidebar-collapse-icon">«</span>
         <span class="sidebar-collapse-text small">折叠</span>
