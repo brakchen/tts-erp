@@ -31,7 +31,6 @@ from __future__ import annotations
 import html as _html
 import json
 import logging
-import os
 from typing import Any
 
 from fastapi import (
@@ -634,7 +633,7 @@ def onboard_page(request: Request) -> HTMLResponse:
     tab. Readonly sessions see an inline 403 hint instead. No shop/DB
     data is rendered server-side; the shell is static.
     """
-    prefix = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "")
+    prefix = request.scope.get("root_path", "")
     redirect_hint = f"{prefix}/v2/oauth/tiktok/callback"
     return HTMLResponse(
         _ONBOARD_PAGE_HTML.replace(

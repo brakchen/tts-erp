@@ -227,12 +227,11 @@ def test_browser_redirect_keeps_query(api_client):
     )
 
 
-def test_browser_redirect_respects_external_prefix(api_client, monkeypatch):
-    monkeypatch.setenv("TTS_ERP_EXTERNAL_PREFIX", "/tts")
-    # Location path stays prefix-free (the NAT nginx re-adds /tts to
-    # redirect headers); the next value carries the prefix (client-side
-    # consumption bypasses the proxy).
-    r = api_client.get(
+def test_browser_redirect_respects_external_prefix(prefixed_client):
+    # Location carries the app root_path prefix (/tts) so the browser lands
+    # on the public URL the gateway serves; the next value stays
+    # route-relative (login page re-prepends root_path when rendering).
+    r = prefixed_client.get(
         "/v2/pages/manual-costs",
         headers={"Accept": "text/html"},
         follow_redirects=False,
@@ -254,7 +253,7 @@ def test_api_accept_keeps_json_401(api_client):
 def test_login_page_validates_next(api_client):
     r = api_client.get("/v2/auth/login", params={"next": "https://evil.example/x"})
     assert r.status_code == 200
-    assert 'value="/v2/pages/manual-costs"' in r.text
+    assert 'value="/v2/pages/dashboard"' in r.text
     assert "evil.example" not in r.text
 
 

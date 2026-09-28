@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import html as _html
 import logging
-import os
 import sys
 
 from fastapi import APIRouter, Request, Response, status
@@ -101,7 +100,9 @@ def login_page(request: Request) -> HTMLResponse:
   (prepended with the NGINX prefix so the post-login redirect lands
   on a path NGINX actually serves)."""
   raw_next = _valid_next(request.query_params.get("next"))
-  prefix = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "")
+  # root_path (set once from TTS_ERP_EXTERNAL_PREFIX in app.py) is the
+  # single source of truth for the external mount prefix.
+  prefix = request.scope.get("root_path", "")
   next_url = f"{prefix}{raw_next}" if prefix else raw_next
   return HTMLResponse(_LOGIN_HTML.replace("__NEXT__", _html.escape(next_url)))
 
@@ -157,9 +158,9 @@ def login(body: LoginBody, request: Request) -> Response:
   role = _LEVEL_TO_NAME.get(level or 0, "readonly")
   cookie = session_auth.mint_session_cookie(body.key, role)
   resp = JSONResponse(content={"ok": True, "role": role})
-  # Scope the cookie to the NGINX prefix (e.g. /tts) so it is never
-  # sent to other paths on the same domain (e.g. /spu-roi).
-  cookie_path = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "/") or "/"
+  # Scope the cookie to the external mount prefix (e.g. /tts) so it is
+  # never sent to other paths on the same domain (e.g. /spu-roi).
+  cookie_path = request.scope.get("root_path", "") or "/"
   resp.set_cookie(
     key=session_auth.SESSION_COOKIE_NAME,
     value=cookie,
@@ -173,12 +174,12 @@ def login(body: LoginBody, request: Request) -> Response:
 
 
 @router.post("/logout")
-def logout() -> Response:
+def logout(request: Request) -> Response:
   """Clear the session cookie (idempotent, public)."""
   resp = Response(status_code=status.HTTP_204_NO_CONTENT)
   resp.delete_cookie(
     session_auth.SESSION_COOKIE_NAME,
-    path=os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "/") or "/",
+    path=request.scope.get("root_path", "") or "/",
   )
   return resp
 

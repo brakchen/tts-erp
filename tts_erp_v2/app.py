@@ -209,6 +209,11 @@ def build_app() -> FastAPI:
     with ``tts_erp_v2.app:build_app()`` (the factory; uvicorn picks the
     returned instance).
     """
+    # root_path 是外部挂载前缀的唯一真相源（2026-09-28 收敛）：仅在此处
+    # 读一次 TTS_ERP_EXTERNAL_PREFIX，下游（auth middleware 分类 / 302
+    # Location / cookie path / oauth redirect hint / StaticFiles）一律从
+    # scope["root_path"] 派生，不再各自读 env。nginx 侧契约：/tts/ 必须
+    # 透传完整前缀（proxy_pass 不带尾斜杠），见 ~/setup/nginx/conf.d/services.conf。
     root_path = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "")
     app = FastAPI(
         title="tts-erp v2",
