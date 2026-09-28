@@ -16,7 +16,7 @@ pattern as ``tts_erp_v2/api/v2/linkage.py::overrides``.
 from __future__ import annotations
 
 import os
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -24,7 +24,6 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 
 from tts_erp_v2.api.deps import (
-    require_destructive_guard,
     require_role_at_least,
 )
 from tts_erp_v2.middleware.rate_limit import (
@@ -179,7 +178,7 @@ def reset_rate_limit(
         # the full token — only its first-12 hex prefix.
         reset_by=str(request.scope.get("api_key_hash", "") or "")[:12],
         reset_by_role=str(request.scope.get("api_key_role", "") or ""),
-        reset_at=datetime.now(timezone.utc),
+        reset_at=datetime.now(UTC),
     )
 
 
@@ -210,7 +209,7 @@ _PLUGIN_ORDER_CHILD_TABLES = [
 # so the rest of this module keeps working without churn. The actual
 # implementation lives in :mod:`tts_erp_v2.api.deps` (single source of
 # truth as of 2026-09-13 fix/unify-destructive-guard).
-from tts_erp_v2.api.deps import is_prod_shaped_db as _is_prod_shaped_db  # noqa: E402
+from tts_erp_v2.api.deps import is_prod_shaped_db as _is_prod_shaped_db
 
 
 @router.post(
@@ -250,7 +249,7 @@ def purge_plugin_data(
             status_code=403,
             detail=(
                 "Refused: refuse to purge on prod-shape dbname. "
-                f"dbname appears prod-shaped (TTS_ERP_DB_URL set). "
+                "dbname appears prod-shaped (TTS_ERP_DB_URL set). "
                 "Set ALLOW_PROD_PURGE=1 in the environment, or run against "
                 "the dedicated test database (tts_erp_v3_test via scripts/test.sh)."
             ),
@@ -299,7 +298,7 @@ def purge_plugin_data(
             sum(v for v in counts.values() if v > 0) if executed else 0
         ),
         "purged_by": str(request.scope.get("api_key_hash", "") or "")[:12],
-        "purged_at": datetime.now(timezone.utc).isoformat(),
+        "purged_at": datetime.now(UTC).isoformat(),
         "prod_guarded": is_prod,
         "next_step": (
             None if executed else
@@ -447,11 +446,13 @@ def register_shop(
     )
 
 
-# ─── Update shop opened_date ─────────────────────────────────────────
+# ─── Update shop metadata ─────────────────────────────────────────
 
 _SQL_UPDATE_SHOP = text(
     "UPDATE commerce.shops "
-    "SET opened_date = COALESCE(:opened_date, opened_date), "
+    "SET account_name = COALESCE(:account_name, account_name), "
+    "    region = COALESCE(:region, region), "
+    "    opened_date = COALESCE(:opened_date, opened_date), "
     "    service_id = COALESCE(:service_id, service_id), "
     "    updated_at = now() "
     "WHERE id = :shop_pk "
@@ -461,8 +462,22 @@ _SQL_UPDATE_SHOP = text(
 
 
 class ShopUpdateBody(BaseModel):
-    """PATCH body for ``/v2/admin/shops/{shop_pk}``."""
+    """PATCH body for ``/v2/admin/shops/{shop_pk}``.
 
+    All fields are optional; ``null``/缺省 = 保持原值（COALESCE 语义，
+    与 register 的 backfill-only 不同 —— PATCH 会覆盖已有非空值）。
+    """
+
+    account_name: str | None = Field(
+        default=None,
+        max_length=200,
+        description="店铺名称。设为 null 不修改。",
+    )
+    region: str | None = Field(
+        default=None,
+        max_length=16,
+        description="国家/地区代码（如 VN）。设为 null 不修改。",
+    )
     opened_date: date | None = Field(
         default=None,
         description="开店时间（天级，YYYY-MM-DD）。设为 null 不修改。",
@@ -480,14 +495,14 @@ class ShopUpdateResponse(BaseModel):
 @router.patch(
     "/shops/{shop_pk}",
     response_model=ShopUpdateResponse,
-    summary="更新店铺信息（readwrite+）",
+    summary="更新店铺元信息（名称/区域/开店日期/service_id，readwrite+）",
 )
 def update_shop(
     request: Request, shop_pk: int, body: ShopUpdateBody
 ) -> ShopUpdateResponse:
-    """Update a shop's ``opened_date`` and/or ``service_id``.
-    Pass null to keep the existing value unchanged.
-    """
+    """Update a shop's metadata fields (``account_name`` / ``region`` /
+    ``opened_date`` / ``service_id``). Pass null to keep the existing
+    value unchanged (COALESCE semantics — null never clears a value)."""
     require_role_at_least(request, "readwrite")
 
     from tts_erp_v2.db.base import get_engine
@@ -496,7 +511,13 @@ def update_shop(
     with engine.begin() as conn:
         row = conn.execute(  # pi-lens-ignore: python-sql-injection — module-level constant SQL, bound params only
             _SQL_UPDATE_SHOP,
-            {"shop_pk": shop_pk, "opened_date": body.opened_date, "service_id": body.service_id},
+            {
+                "shop_pk": shop_pk,
+                "account_name": body.account_name,
+                "region": body.region,
+                "opened_date": body.opened_date,
+                "service_id": body.service_id,
+            },
         ).one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail=f"shop {shop_pk} not found")

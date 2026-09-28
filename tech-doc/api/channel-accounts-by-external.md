@@ -48,6 +48,7 @@ A single `ChannelAccountOut` (see `tts_erp_v2/api/schemas.py`):
   "region": "VN",
   "seller_type": "CROSS_BORDER",
   "status": "active",
+  "service_id": null,
   "synced_at": "2026-09-04T13:22:11Z",
   "created_at": "2026-08-01T08:00:00Z",
   "updated_at": "2026-09-04T13:22:11Z"
