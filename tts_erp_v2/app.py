@@ -29,6 +29,7 @@ All other routes go through v2 routers and require auth.
 
 from __future__ import annotations
 
+import base64
 import os
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
 
 from tts_erp_v2.api.v2 import (
     admin,
@@ -158,6 +162,42 @@ def _downgrade_nullable(obj: Any) -> None:
             _downgrade_nullable(item)
 
 
+class DocsAuthMiddleware(BaseHTTPMiddleware):
+    """HTTP Basic Auth for /docs, /openapi.json, /redoc.
+
+    Only activates when TTS_ERP_DOCS_USER and TTS_ERP_DOCS_PASSWORD are
+    both set in the environment.  When unset, docs remain public.
+    """
+
+    _PROTECTED = {"/docs", "/openapi.json", "/redoc", "/docs/oauth2-redirect"}
+
+    def __init__(self, app):  # type: ignore[no-untyped-def]
+        super().__init__(app)
+        self._user = os.environ.get("TTS_ERP_DOCS_USER", "")
+        self._password = os.environ.get("TTS_ERP_DOCS_PASSWORD", "")
+        self._enabled = bool(self._user and self._password)
+
+    async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+        if not self._enabled or request.url.path not in self._PROTECTED:
+            return await call_next(request)
+
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Basic "):
+            try:
+                decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
+                user, password = decoded.split(":", 1)
+                if user == self._user and password == self._password:
+                    return await call_next(request)
+            except (ValueError, UnicodeDecodeError):
+                pass  # malformed Basic header — fall through to 401
+
+        return Response(
+            status_code=401,
+            headers={"WWW-Authenticate": 'Basic realm="tts-erp docs"'},
+            content="Unauthorized",
+        )
+
+
 def build_app() -> FastAPI:
     """Construct the v2 FastAPI app.
 
@@ -212,6 +252,9 @@ def build_app() -> FastAPI:
     # and the handler so the limiter can bucket by authenticated key.
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(AuthMiddleware)
+    # Basic Auth for /docs, /openapi.json, /redoc when
+    # TTS_ERP_DOCS_USER + TTS_ERP_DOCS_PASSWORD are set.
+    app.add_middleware(DocsAuthMiddleware)
     # CORS: allow only the signed production extension by default. Operators
     # can replace that list with TTS_ERP_CORS_ALLOW_ORIGINS (comma-list) or
     # the token "wildcard" for explicitly managed internal deployments.
