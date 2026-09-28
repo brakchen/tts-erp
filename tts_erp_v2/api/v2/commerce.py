@@ -305,6 +305,36 @@ def _row_to_sales_order(row: Any) -> SalesOrderOut:
     )
 
 
+def _require_tiktok_region(row: Any, *, platform: str, shop_id: str) -> None:
+    """Reject an unusable TikTok account before it reaches sync clients.
+
+    ``region`` is optional for non-TikTok commerce accounts, but it is a
+    required routing/calendar input for every TikTok sync.  Returning a 200
+    response with ``region=null`` makes the client look like the failing
+    component and, worse, allows callers to continue with an incomplete
+    scope.  Keep this guard at the canonical external-account lookup so all
+    clients get the same actionable error.
+    """
+    if platform.strip().lower() != "tiktok":
+        return
+    region = row.region.strip() if isinstance(row.region, str) else ""
+    if region:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail={
+            "code": "SHOP_REGION_REQUIRED",
+            "message": (
+                "TikTok 店铺地区未配置，无法开始同步。"
+                "请先在 TTS-ERP 店铺账号中填写国家/地区代码（如 VN）。"
+            ),
+            "field": "region",
+            "platform": platform,
+            "shop_id": shop_id,
+        },
+    )
+
+
 @router.get("/channel-accounts", response_model=list[ChannelAccountOut])
 def list_shops(
     sess: Session = Depends(get_session),
@@ -362,6 +392,21 @@ def list_shops(
         401: {"description": "Missing / invalid / disabled API key."},
         403: {"description": "API key role < readonly."},
         404: {"description": "No `commerce.shops` row matches `(platform, shop_id)`."},
+        422: {
+            "description": "TikTok account exists but its required region is not configured.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": {
+                            "code": "SHOP_REGION_REQUIRED",
+                            "message": "TikTok 店铺地区未配置，无法开始同步。请先在 TTS-ERP 店铺账号中填写国家/地区代码（如 VN）。",
+                            "field": "region",
+                            "platform": "tiktok",
+                        }
+                    }
+                }
+            },
+        },
     },
 )
 def get_channel_account_by_external(
@@ -391,6 +436,7 @@ def get_channel_account_by_external(
             status.HTTP_404_NOT_FOUND,
             f"channel account not found for platform={platform!r} shop_id={shop_id!r}",
         )
+    _require_tiktok_region(row, platform=platform, shop_id=shop_id)
     return _row_to_channel_account(row)
 
 

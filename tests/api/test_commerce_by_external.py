@@ -145,6 +145,30 @@ def test_by_external_404_when_platform_mismatched(
     assert r.status_code == 404, r.text
 
 
+def test_by_external_rejects_tiktok_account_without_region(api_client, readonly_key, db_engine):
+    """A TikTok account without a region must never look sync-ready."""
+    accounts_tbl = Base.metadata.tables["commerce.shops"]
+    missing_region = "TEST_byext_missing_region"
+    with db_engine.begin() as conn:
+        conn.execute(
+            insert(accounts_tbl).values(
+                platform="tiktok",
+                shop_id=missing_region,
+                account_name="TEST missing region",
+                region=None,
+                status="active",
+            )
+        )
+
+    r = api_client.get(_url(missing_region), headers=_auth(readonly_key))
+
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert detail["code"] == "SHOP_REGION_REQUIRED"
+    assert detail["field"] == "region"
+    assert "地区未配置" in detail["message"]
+
+
 def test_by_external_401_without_key(api_client):
     r = api_client.get(
         _url(EXT_ACCT),
