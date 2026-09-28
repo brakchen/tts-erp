@@ -73,7 +73,7 @@
   function copyToClipboard(text, btn) {
     function done(ok) {
       btn.textContent = ok ? "已复制" : "复制失败";
-      setTimeout(function () { btn.textContent = "复制链接"; }, 1500);
+      setTimeout(() => { btn.textContent = "复制链接"; }, 1500);
     }
     function legacy() {
       var ta = document.createElement("textarea");
@@ -85,7 +85,7 @@
     }
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(
-        function () { done(true); },
+        () => { done(true); },
         legacy,
       );
     } else {
@@ -105,7 +105,7 @@
     copy.type = "button";
     copy.className = "btn btn-sm btn-outline-dark ms-1";
     copy.textContent = "复制链接";
-    copy.addEventListener("click", function () { copyToClipboard(url, copy); });
+    copy.addEventListener("click", () => { copyToClipboard(url, copy); });
     var hint = document.createElement("div");
     hint.className = "text-muted small";
     var exp = expiresAt

@@ -24,6 +24,12 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 
 from tts_erp_v2.api.deps import (
+    # Re-exported as `_is_prod_shaped_db` for the prod-shape guard in
+    # ``purge-plugin-data`` (single source of truth lives in tts_erp_v2.api.deps
+    # as of 2026-09-13 fix/unify-destructive-guard; moved here from mid-file
+    # on 2026-09-28 feat/shops-page-meta-auth to avoid the module-level-import
+    # linter flag — alias name is unchanged for back-compat).
+    is_prod_shaped_db as _is_prod_shaped_db,
     require_role_at_least,
 )
 from tts_erp_v2.middleware.rate_limit import (
@@ -203,13 +209,6 @@ _PLUGIN_ORDER_CHILD_TABLES = [
     "plugin.settlement_details",
     "plugin.settlements",
 ]
-
-
-# Re-export the shared prod-shape detector under the historical name
-# so the rest of this module keeps working without churn. The actual
-# implementation lives in :mod:`tts_erp_v2.api.deps` (single source of
-# truth as of 2026-09-13 fix/unify-destructive-guard).
-from tts_erp_v2.api.deps import is_prod_shaped_db as _is_prod_shaped_db
 
 
 @router.post(
