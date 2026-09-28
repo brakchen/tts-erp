@@ -1934,7 +1934,8 @@ def test_spu_roi_page_toolbar_shop_and_date_filters(api_client, readonly_key):
     """§7.1 header 店铺切换 + 工具条日期筛选:页面 HTML 含对应控件 id。
 
     店铺切换器在 header 区(#shop-switcher),非工具栏;shop_pk 必选(URL 参数);
-    无"全部店铺"选项;toast 容器用于 shop_pk 缺失/无效时的错误提示。
+    无"全部店铺"选项;shop_pk 缺失/无效时弹店铺选择弹窗(2026-09-28 用户拍板:
+    弹窗选店铺,不再 toast + 60s 倒计时强跳首页)。
     """
     r = api_client.get(
         "/v2/pages/spu-roi",
@@ -1945,9 +1946,14 @@ def test_spu_roi_page_toolbar_shop_and_date_filters(api_client, readonly_key):
     assert 'id="shop-switcher"' in body
     # shop_pk 必选:无"全部店铺"占位项
     assert "全部店铺" not in body
-    # error toast 容器(shop_pk 缺失/无效时显示,60s 倒计时跳转)
-    assert 'id="ops-toast"' in body
-    assert 'id="toast-countdown"' in body
+    # 店铺选择弹窗(shop_pk 缺失/无效时弹出,点选店铺后写回 URL 并加载;
+    # 不再有倒计时强跳 dashboard 的 toast)
+    assert 'id="ops-shop-modal"' in body
+    assert 'id="shop-modal-list"' in body
+    assert 'role="dialog"' in body
+    assert "请选择店铺" in body
+    assert 'id="ops-toast"' not in body
+    assert 'id="toast-countdown"' not in body
     # 日期范围输入(空 = 不限 → w_start/w_end 不传 = 全历史)
     assert 'id="filter-w-start"' in body
     assert 'id="filter-w-end"' in body
@@ -2197,7 +2203,7 @@ def test_spu_roi_js_shop_switch_listener_before_early_return():
     bug 原貌:URL 无 shop_pk(或 shop_pk 无效)时 loadShops() 先
     showToast + return null,后面的 sel.addEventListener("change", …) 永远
     执行不到 → 用户首次访问选店铺无任何反应。
-    契约:change 绑定的源码位置必须早于 "请先选择店铺" 的 early return。
+    契约:change 绑定的源码位置必须早于所有 showShopModal + return null 分支。
     """
     from pathlib import Path
 
@@ -2209,14 +2215,21 @@ def test_spu_roi_js_shop_switch_listener_before_early_return():
         / "spu-roi.js"
     ).read_text(encoding="utf-8")
     bind_idx = src.find('sel.addEventListener("change"')
-    early_return_idx = src.find("请先选择店铺")
+    # 注意要用调用点('showShopModal(shops, "")')作标记,不能用函数名——
+    # 定义 function showShopModal(shops, note) 在 loadShops 之前,会先命中
+    early_return_idx = src.find('showShopModal(shops, "")')
     assert bind_idx != -1, "spu-roi.js 找不到店铺切换 change listener"
-    assert early_return_idx != -1, "spu-roi.js 找不到 shop_pk 缺失 toast 分支"
+    assert early_return_idx != -1, "spu-roi.js 找不到 shop_pk 缺失/无效的弹窗分支"
     assert bind_idx < early_return_idx, (
         "change listener 必须绑定在 early return 之前,否则 URL 无 shop_pk 时选店铺不生效"
     )
     # 首次选中时若 enumMap 还没拉(loadEnumMap 被 pk=null 跳过),change 里要补拉
     assert "loadEnumMap().then(() => load())" in src
+    # 2026-09-28 用户拍板:shop_pk 缺失/无效 → 弹窗选店铺,
+    # 不再 toast + 60s 倒计时强跳首页
+    assert "showShopModal" in src
+    assert "REDIRECT_COUNTDOWN_SEC" not in src
+    assert "秒后自动返回首页" not in src
 
 
 # ─── 在线汇率接入(D1 落地 2026-09-06)─────────────────────────────────

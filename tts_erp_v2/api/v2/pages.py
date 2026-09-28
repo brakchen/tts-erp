@@ -1460,9 +1460,15 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     </section>
   </main>
 
-  <div id="ops-toast" class="op-toast" hidden>
-    <span class="op-toast-msg" id="toast-msg"></span>
-    <span class="op-toast-countdown" id="toast-countdown"></span>
+  <!-- shop_pk 缺失/无效时的店铺选择弹窗(2026-09-28 用户拍板:弹窗让用户选店铺,
+       不再 toast + 60s 倒计时强跳首页) -->
+  <div id="ops-shop-modal" class="op-shop-modal" hidden>
+    <div class="op-shop-modal-box" role="dialog" aria-modal="true" aria-labelledby="shop-modal-title">
+      <div class="op-shop-modal-title" id="shop-modal-title">请选择店铺</div>
+      <div class="op-shop-modal-note" id="shop-modal-note"></div>
+      <div class="op-shop-modal-list" id="shop-modal-list"></div>
+      <div class="op-shop-modal-foot"><a href="../../v2/pages/dashboard">← 返回首页</a></div>
+    </div>
   </div>
   <div id="ops-tip" role="tooltip" hidden></div>
   <script src="../../static/js/spu-roi.js?v=__JSV_SPU_ROI__" defer></script>

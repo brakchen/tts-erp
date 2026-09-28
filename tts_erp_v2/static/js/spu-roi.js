@@ -47,8 +47,6 @@
 
   // §7.2 标色默认阈值(常量,页面 ⚙ 可调预留,不锁死)
   var REFUND_RATE_ALERT = 0.3; // 退款率警戒线:> 30% → 标题⚠ + 红字
-  var REDIRECT_COUNTDOWN_SEC = 60;
-  var DASHBOARD_PATH = "/v2/pages/dashboard";
 
   // Public path prefix: "/tts" behind NGINX, "" on :9877 directly.
   var PREFIX = location.pathname.replace(/\/v2\/pages\/.*$/, "");
@@ -904,36 +902,46 @@
     history.replaceState(null, "", u.toString());
   }
 
-  // ---------- toast + countdown ----------
-  var _countdownTimer = null;
-  function showToast(msg, countdownSec) {
-    var toast = $("#ops-toast");
-    var msgEl = $("#toast-msg");
-    var cdEl = $("#toast-countdown");
-    if (!toast) return;
-    toast.hidden = false;
-    msgEl.textContent = msg;
-    var remaining = countdownSec;
-    cdEl.textContent = remaining + " 秒后自动返回首页";
-    if (_countdownTimer) clearInterval(_countdownTimer);
-    _countdownTimer = setInterval(() => {
-      remaining--;
-      if (remaining <= 0) {
-        clearInterval(_countdownTimer);
-        _countdownTimer = null;
-        window.location.href = PREFIX + DASHBOARD_PATH; // pi-lens-ignore: no-open-redirect-js
-        return;
-      }
-      cdEl.textContent = remaining + " 秒后自动返回首页";
-    }, 1000);
+  // ---------- 店铺选择弹窗(shop_pk 缺失/无效时强制选择 ----------
+  // 2026-09-28 用户拍板:URL 拿不到店铺时弹窗让用户选,不再 toast + 60s 倒计时强跳首页。
+  function showShopModal(shops, note) {
+    var modal = $("#ops-shop-modal");
+    if (!modal) return;
+    $("#shop-modal-note").textContent = note || "";
+    var list = $("#shop-modal-list");
+    list.textContent = "";
+    shops.forEach((s) => {
+      var label = s.account_name || `#${s.id} (${s.region || "?"})`;
+      var btn = el("button", {
+        type: "button",
+        class: "op-shop-modal-item",
+        text: label,
+      });
+      btn.addEventListener("click", () => {
+        hideShopModal();
+        var sel = $("#shop-switcher");
+        if (sel) sel.value = String(s.id);
+        selectShop(String(s.id));
+      });
+      list.appendChild(btn);
+    });
+    modal.hidden = false;
   }
-  function hideToast() {
-    if (_countdownTimer) {
-      clearInterval(_countdownTimer);
-      _countdownTimer = null;
+  function hideShopModal() {
+    var modal = $("#ops-shop-modal");
+    if (modal) modal.hidden = true;
+  }
+  // 下拉切换 / 弹窗点选共用的选中逻辑:写 state + 回写 URL,必要时补拉枚举映射
+  // (初次访问无 shop_pk 时 bindControls 的 loadEnumMap 被 pk=null 跳过),然后加载。
+  function selectShop(pk) {
+    state.shopPk = pk;
+    setShopPkInUrl(pk);
+    state.offset = 0;
+    if (!Object.keys(state.enumMap).length) {
+      loadEnumMap().then(() => load());
+    } else {
+      load();
     }
-    var toast = $("#ops-toast");
-    if (toast) toast.hidden = true;
   }
 
   // ---------- 店铺下拉(必选:shop_pk 来自 URL → 切换写回 URL) ----------
@@ -953,8 +961,12 @@
       .then((shops) => {
         var sel = $("#shop-switcher");
         if (!sel || !Array.isArray(shops)) return null;
+        // 先绑切换事件,再做任何 early return —— 否则 URL 无 shop_pk / shop_pk 无效
+        // 时提前 return null,change listener 永远没绑上,用户选店铺无任何反应
+        // (2026-09-28 用户反馈 bug)。
+        sel.addEventListener("change", () => selectShop(sel.value));
         if (!shops.length) {
-          showToast("无可用店铺", REDIRECT_COUNTDOWN_SEC);
+          showShopModal([], "当前没有可用店铺，请先在「店铺注册」页完成注册");
           return null;
         }
         // 填充下拉选项
@@ -964,35 +976,20 @@
           opt.textContent = s.account_name || `#${s.id} (${s.region || "?"})`;
           sel.appendChild(opt);
         });
-        // 先绑切换事件,再做 URL shop_pk 校验 —— 否则 URL 无 shop_pk / shop_pk 无效时
-        // 提前 return null,change listener 永远没绑上,用户选店铺无任何反应
-        // (2026-09-28 用户反馈 bug)。首次选中时若 enumMap 还没拉(初次访问无 shop_pk
-        // 时 bindControls 的 loadEnumMap 被 pk=null 跳过),先补拉再 load。
-        sel.addEventListener("change", () => {
-          hideToast(); // 切换时取消倒计时
-          state.shopPk = sel.value;
-          setShopPkInUrl(sel.value);
-          state.offset = 0;
-          if (!Object.keys(state.enumMap).length) {
-            loadEnumMap().then(() => load());
-          } else {
-            load();
-          }
-        });
         // 从 URL 读 shop_pk
         var urlPk = getShopPkFromUrl();
         if (urlPk) {
           // 验证 URL 中的 shop_pk 是否在列表中
           var found = shops.some((s) => String(s.id) === urlPk);
           if (!found) {
-            showToast(`店铺 ${urlPk} 不存在`, REDIRECT_COUNTDOWN_SEC);
+            showShopModal(shops, `URL 中的店铺 ${urlPk} 不存在，请重新选择`);
             return null;
           }
           sel.value = urlPk;
           state.shopPk = sel.value;
         } else {
-          // URL 无 shop_pk → 弹 toast 提示用户主动选择
-          showToast("请先选择店铺", REDIRECT_COUNTDOWN_SEC);
+          // URL 无 shop_pk → 弹窗让用户选店铺(不倒计时、不强跳首页)
+          showShopModal(shops, "");
           return null;
         }
         return sel.value;
@@ -1203,7 +1200,7 @@
       load();
     });
 
-    // 店铺切换:已由 loadShops() 内部绑定(#shop-switcher change → hideToast + setShopPkInUrl + load)
+    // 店铺切换:已由 loadShops() 内部绑定(#shop-switcher change → selectShop)
 
     // 日期范围:空 = 不限;yyyy-mm-dd 直接作 w_start/w_end(含 w_end 当日)
     // 校验: w_start 不能晚于 w_end(否则报错并重置为当前输入的字段)
@@ -1272,7 +1269,7 @@
     wireTooltips(); // 悬停说明气泡(data-tip 委托,含重渲染后的新行)
     wireZoom(); // 主图点击放大(委托)
     loadMe();
-    // 店铺必选:先加载店铺,再加载数据;loadShops 内部处理 shop_pk 校验 + toast + 倒计时
+    // 店铺必选:先加载店铺,再加载数据;loadShops 内部处理 shop_pk 校验 + 选择弹窗
     loadShops().then((pk) => {
       if (pk) loadEnumMap().then(() => load());
     });
