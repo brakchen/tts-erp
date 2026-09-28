@@ -29,6 +29,7 @@ All other routes go through v2 routers and require auth.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -149,10 +150,12 @@ def build_app() -> FastAPI:
     with ``tts_erp_v2.app:build_app()`` (the factory; uvicorn picks the
     returned instance).
     """
+    root_path = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "")
     app = FastAPI(
         title="tts-erp v2",
         version="2.0.0",
         description="Refactored tts-erp API — see tech-doc/refactor-tech-plan-v2.md",
+        root_path=root_path,
     )
     # --- OpenAPI 3.1 → 3.0.3 down-conversion ---
     # Pydantic v2 + FastAPI 0.141 default to OpenAPI 3.1 which uses
