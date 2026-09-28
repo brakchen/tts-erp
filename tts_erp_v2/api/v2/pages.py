@@ -58,7 +58,7 @@ _JS_DIR = Path(__file__).resolve().parents[2] / "static" / "js"
 _SIDEBAR_CSS = """
     body { margin-left: 220px; }
     .op-home-link { display: none; }
-    .sidebar-link.active { border-left: 3px solid var(--accent); padding-left: 9px; border-bottom: 0; }
+    .nav-link.active { border-left: 3px solid var(--accent); padding-left: 9px; border-bottom: 0; }
     .sidebar { transition: transform 200ms ease; }
     @media (max-width: 991.98px) {
       body { margin-left: 0; }
@@ -68,17 +68,18 @@ _SIDEBAR_CSS = """
     }
 """
 
+
 def _sidebar_html(current_page: str) -> str:
   """Return Bootstrap-styled sidebar HTML with the given page marked as active."""
   pages = [
-    ("dashboard",            "控制台",    "__group__"),
-    ("manual-costs",         "采购工作台", "运营"),
-    ("spu-roi",              "SPU ROI",   "运营"),
-    ("shops",                "店铺注册",  "店铺"),
-    ("enum-map",             "枚举映射",  "数据"),
-    ("intercept-configs",    "拦截配置",  "拦截"),
-    ("intercept-requests",   "拦截记录",  "拦截"),
-    ("intercept-stats",      "拦截统计",  "拦截"),
+    ("dashboard", "控制台", "__group__"),
+    ("manual-costs", "采购工作台", "运营"),
+    ("spu-roi", "SPU ROI", "运营"),
+    ("shops", "店铺注册", "店铺"),
+    ("enum-map", "枚举映射", "数据"),
+    ("intercept-configs", "拦截配置", "拦截"),
+    ("intercept-requests", "拦截记录", "拦截"),
+    ("intercept-stats", "拦截统计", "拦截"),
   ]
   links = []
   current_group = None
@@ -118,6 +119,7 @@ def _sidebar_html(current_page: str) -> str:
     </div>
   </nav>"""
 
+
 _SIDEBAR_TOGGLE_JS = """
 (function() {
   var btn = document.getElementById('sidebar-toggle');
@@ -147,8 +149,7 @@ def _page(html: str, *, current_page: str = "") -> HTMLResponse:
   sidebar navigation is injected into the page.
   """
   html = (
-    html
-    .replace("__JSV_CONSOLE__", _js_version("console.js"))
+    html.replace("__JSV_CONSOLE__", _js_version("console.js"))
     .replace("__JSV_SPU_ROI__", _js_version("spu-roi.js"))
     .replace("__JSV_SHOPS__", _js_version("shops.js"))
     .replace("__JSV_DASHBOARD__", _js_version("dashboard.js"))
@@ -163,8 +164,7 @@ def _page(html: str, *, current_page: str = "") -> HTMLResponse:
     # Inject sidebar HTML + toggle JS after <body>
     html = html.replace(
       "<body>",
-      "<body>\n  " + sidebar_html +
-      "\n  <script>" + _SIDEBAR_TOGGLE_JS + "</script>",
+      "<body>\n  " + sidebar_html + "\n  <script>" + _SIDEBAR_TOGGLE_JS + "</script>",
       1,
     )
     # Remove the per-page "← 首页" home link (sidebar replaces it)
