@@ -177,6 +177,9 @@ def required_role(method: str, path: str) -> int | None:
     p = _strip_external_prefix(p)
     if p in EXEMPT_PATHS:
         return None
+    # Static assets (CSS/JS/images) — public, prefix match.
+    if p.startswith("/static/"):
+        return None
     # analytics ingest 是 readwrite（Chrome extension 上传）。
     # 2026-09-02 v2 化：/v1/analytics/sync 随发布下线，单挂 /v2。
     if p.startswith("/v2/analytics/sync"):
