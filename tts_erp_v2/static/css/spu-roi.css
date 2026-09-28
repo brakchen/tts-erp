@@ -1010,3 +1010,67 @@ textarea[data-tip] {
  padding: 10px 14px !important;
  text-align: left !important;
 }
+
+/* ═══ 店铺选择弹窗(shop_pk 缺失/无效时强制选择,2026-09-28 用户拍板) ═══ */
+.op-shop-modal {
+ position: fixed;
+ inset: 0;
+ z-index: 1200;
+ background: rgba(20, 16, 10, 0.55);
+ display: flex;
+ align-items: center;
+ justify-content: center;
+ padding: 24px;
+}
+.op-shop-modal[hidden] {
+ display: none; /* bootstrap reboot 的 [hidden]!important 已兜,此处双保险 */
+}
+.op-shop-modal-box {
+ background: var(--paper);
+ border: 1px solid var(--rule);
+ box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+ width: 100%;
+ max-width: 420px;
+ padding: 20px 24px;
+}
+.op-shop-modal-title {
+ font-size: 16px;
+ font-weight: 600;
+ color: var(--ink);
+}
+.op-shop-modal-note {
+ margin-top: 6px;
+ font-size: 13px;
+ color: var(--danger);
+}
+.op-shop-modal-note:empty {
+ display: none;
+}
+.op-shop-modal-list {
+ margin-top: 14px;
+ display: flex;
+ flex-direction: column;
+ gap: 8px;
+ max-height: 50vh;
+ overflow-y: auto;
+}
+.op-shop-modal-item {
+ display: block;
+ width: 100%;
+ text-align: left;
+ padding: 10px 14px;
+ border: 1px solid var(--rule);
+ border-radius: 0;
+ background: var(--paper);
+ color: var(--ink);
+ font-size: 14px;
+ cursor: pointer;
+}
+.op-shop-modal-item:hover {
+ border-color: var(--accent);
+ color: var(--accent-deep);
+}
+.op-shop-modal-foot {
+ margin-top: 14px;
+ font-size: 13px;
+}
