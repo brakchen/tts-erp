@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Index, String, Text, UniqueConstraint
+from sqlalchemy import Index, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from tts_erp_v2.db.base import Base

@@ -9,9 +9,9 @@ DELETE /v2/config/enum-map/{id} — 删除单条映射（admin）
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import get_session, require_role_at_least
@@ -95,10 +95,11 @@ def list_enum_map(sess: Session = Depends(get_session)) -> list[dict]:
 @router.put("/enum-map")
 def upsert_enum_map(
     body: EnumMapUpsert,
+    request: Request,
     sess: Session = Depends(get_session),
 ) -> dict:
     """新增或更新一条枚举映射。admin 角色。"""
-    require_role_at_least("admin")
+    require_role_at_least(request, "admin")
 
     existing = sess.execute(
         select(EnumMap).where(
@@ -130,10 +131,11 @@ def upsert_enum_map(
 @router.delete("/enum-map/{id}")
 def delete_enum_map(
     id: int,
+    request: Request,
     sess: Session = Depends(get_session),
 ) -> dict:
     """删除一条枚举映射。admin 角色。"""
-    require_role_at_least("admin")
+    require_role_at_least(request, "admin")
 
     row = sess.get(EnumMap, id)
     if not row:
