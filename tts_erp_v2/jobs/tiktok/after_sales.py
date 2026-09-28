@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -61,6 +61,16 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+# V3 §14.2（2026-09-28 修复）：永久失败的 sync_issue 自动 resolve。
+# 后置理由：§14.1 改为只推成功 case 的 watermark 后，永久失败的
+# case（订单永远不存在 / TikTok 永久缺字段）会卡在窗口内被无限
+# 重试——API 调用白耗 + sync_issues 单条 dedup 表里挂着不增长但
+# 永远 unresolved。上限：after_sales 每 15min 跑一次 → 14 天 = ~1344
+# 次重试足够了（订单/退货同步通常 < 10min）；超过则标 permanent，
+# 让 case 退出窗口，下次推进 watermark 时跳过。
+_AUTO_RESOLVE_AFTER_DAYS = 14
 
 
 def _to_decimal(v):
@@ -260,9 +270,22 @@ def _process_one_type(
     case_type: str,
     endpoint: str,
     raw_cases: list[dict],
-) -> tuple[int, int, int]:
-    """Returns (total, inserted, failed) for one case_type."""
+) -> tuple[list[bool], int, int, int]:
+    """Process one case_type batch.
+
+    Returns ``(ok_flags, total, inserted, failed)`` where ``ok_flags[i]``
+    indicates whether ``raw_cases[i]`` was successfully inserted/updated
+    in this run. ``ok_flags`` lets the caller advance the watermark ONLY
+    over successfully-resolved items — failed ones stay inside the
+    watermark window so the next run naturally retries them.
+
+    历史教训（2026-09-28）：原版 ``return total, inserted, failed`` 让
+    调用方被前置条件 ``max_update_ms`` 推过失败 case → UNKNOWN_ORDER
+    case 永远卡在 watermark 后面被丢（典型 case：after_sales 15min/次
+    早于 orders 10min/次，case 先到订单未到，订单到后已过水位线）。
+    """
     total = len(raw_cases)
+    ok_flags: list[bool] = []
     inserted = 0
     failed = 0
     for raw in raw_cases:
@@ -276,6 +299,7 @@ def _process_one_type(
             fields = _parse_case(case_type, raw)
         except ParseError as exc:
             failed += 1
+            ok_flags.append(False)
             record_sync_issue(
                 session,
                 job_name=JOB_NAME,
@@ -299,6 +323,7 @@ def _process_one_type(
                 details={"order_id": fields["order_id"]},
             )
             failed += 1
+            ok_flags.append(False)
             continue
 
         raw_row = RawRecord(
@@ -404,8 +429,9 @@ def _process_one_type(
                 )
             )
         inserted += 1
+        ok_flags.append(True)
 
-    return total, inserted, failed
+    return ok_flags, total, inserted, failed
 
 
 def run(
@@ -442,7 +468,7 @@ def run(
         proxy_call, endpoint=CANCELLATIONS_ENDPOINT, base_body=base_body
     )
 
-    r_total, r_ins, r_fail = _process_one_type(
+    r_ok, r_total, r_ins, r_fail = _process_one_type(
         session,
         proxy_call=proxy_call,
         account_id=account.id,
@@ -450,7 +476,7 @@ def run(
         endpoint=RETURNS_ENDPOINT,
         raw_cases=returns,
     )
-    c_total, c_ins, c_fail = _process_one_type(
+    c_ok, c_total, c_ins, c_fail = _process_one_type(
         session,
         proxy_call=proxy_call,
         account_id=account.id,
@@ -463,9 +489,17 @@ def run(
     inserted = r_ins + c_ins
     failed = r_fail + c_fail
 
-    # Watermark: advance only when at least one row was processed
+    # Watermark: advance ONLY over successfully-resolved items.
+    # V3 §14.1（2026-09-28 修复）：原版把 max_update_ms 在成功+失败 case 上
+    # 都累加 → 失败 case（典型 UNKNOWN_ORDER：case 早于订单 15min/10min
+    # 时序差到达）一旦被算进 max，watermark 就跨过去了，下轮自然
+    # 不再 fetch → case 永久丢失。改为只算 ok=True 的 update_time：
+    # 失败的留在水位线内，下轮自动重抓（order 同步通常 10min 内到
+    # → 重试成功）。永久失败的 case 走 §14.2 的 auto-resolve 兜底。
     max_update_ms: int | None = None
-    for raw in (*returns, *cancellations):
+    for raw, ok in (*zip(returns, r_ok), *zip(cancellations, c_ok)):
+        if not ok:
+            continue
         ts = _epoch_seconds_to_utc(raw.get("update_time"))
         if ts:
             ms = _safe_int(ts.timestamp() * 1000)
@@ -473,7 +507,7 @@ def run(
                 max_update_ms = ms
 
     new_cursor_ms: int | None = None
-    if max_update_ms is not None and (
+    if max_update_ms is not None and inserted > 0 and (
         watermark_ms is None
         or max_update_ms > _safe_int(watermark_ms)
     ):
@@ -485,12 +519,44 @@ def run(
         )
         new_cursor_ms = max_update_ms
 
+    # V3 §14.2（2026-09-28）：永久失败的 sync_issue 自动 resolve。
+    # 仅限本 job：超过 _AUTO_RESOLVE_AFTER_DAYS 天仍未恢复的，标 permanent
+    # 让 watermark 可以推过。dedup 表里单条不动但 resolved_at IS NOT NULL。
+    _auto_resolve_stale_issues(session, JOB_NAME, _AUTO_RESOLVE_AFTER_DAYS)
+
     return JobResult(
         rows_total=total,
         rows_inserted=inserted,
         rows_failed=failed,
         cursor=new_cursor_ms,
     )
+
+
+def _auto_resolve_stale_issues(session: Session, job_name: str, days: int) -> int:
+    """把超过 ``days`` 天仍未解决的同 job_name sync_issue 标 resolved。
+
+    目的：§14.1 让永久失败的 case 留在 watermark 窗口内重试，但
+    永久失败（订单/数据永远拿不到）的 case 不能无限重试——超期
+    后标 resolved 让下轮推 watermark 时跳过。返回 resolve 行数（供
+    JobResult 监控可见）。
+    """
+    from datetime import UTC, datetime, timedelta
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    try:
+        rows = session.execute(
+            text(
+                "UPDATE integration.sync_issues "
+                "SET resolved_at = :now "
+                "WHERE job_name = :job "
+                "  AND resolved_at IS NULL "
+                "  AND detected_at < :cutoff"
+            ),
+            {"now": datetime.now(UTC), "job": job_name, "cutoff": cutoff},
+        ).rowcount
+        return int(rows or 0)
+    except Exception:
+        # never let safeguard failure break the main job
+        return 0
 
 
 __all__ = [

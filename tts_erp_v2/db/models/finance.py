@@ -70,15 +70,22 @@ class Payout(Base):
 
 
 class SettlementStatement(Base):
-    """Statement header. Owns many transactions."""
+    """Statement header. Owns many transactions.
+
+    V3 §14.3（2026-09-28）：payout_id 可 NULL——部分历史 statement
+    payload 不携带 payment_id，无法挂到 payouts，V14.1 修复后允许
+    以 NULL payout_id 入库，不连带丢其 transactions。唯一性改用两
+    个 partial unique index（DB 迁移），保持 upsert 单调性。
+    """
 
     __tablename__ = "settlement_statements"
     __table_args__ = (
-        UniqueConstraint(
-            "payout_id",
-            "external_statement_id",
-            name="uq_settlement_statements_payout_ext",
-        ),
+        # V3 §14.3：原行级 UniqueConstraint(payout_id, external_statement_id)
+        # 已迁移为 partial unique index uq_settlement_statements_ext
+        # （单列 external_statement_id，上游全局唯一，覆盖 NULL/非 NULL
+        # payout_id）。模型侧显式声明 Index（不参与 DDL——DDL 由 alembic
+        # 迁移负责）以让 SQLAlchemy 知道它的存在用于 ON CONFLICT 推断。
+        Index("uq_settlement_statements_ext", "external_statement_id", unique=True),
         Index("ix_settlement_statements_statement_time", "statement_time"),
         {"schema": "finance"},
     )
@@ -88,10 +95,10 @@ class SettlementStatement(Base):
         primary_key=True,
         server_default=text("generate_always_as_identity()"),
     )
-    payout_id: Mapped[int] = mapped_column(
+    payout_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("finance.payouts.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
     )
     external_statement_id: Mapped[str] = mapped_column(Text, nullable=False)
     statement_time: Mapped[datetime | None]

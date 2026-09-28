@@ -366,14 +366,17 @@ def _upsert_statement(session, *, fields: dict, raw_record_id: int) -> int:
     session.execute(
         pg_insert(SettlementStatement)
         .values(**insert_values)
+        # V3 §14.3：冲突键改 external_statement_id（上游全局唯一）。
+        # 原 (payout_id, external_statement_id) 复合键在 payout_id=NULL
+        # 的新分支上不匹配（NULL 集合 distinct），会报表层 `no unique or
+        # exclusion constraint matching` 报错。
         .on_conflict_do_update(
-            index_elements=["payout_id", "external_statement_id"],
+            index_elements=["external_statement_id"],
             set_=update_cols,
         )
     )
     row = session.execute(
         select(SettlementStatement).where(
-            SettlementStatement.payout_id == fields["payout_id"],
             SettlementStatement.external_statement_id
             == fields["external_statement_id"],
         )
@@ -682,9 +685,13 @@ def _sync_statements(
         # ``payment_id``; the other 16 don't (TikTok dropped it from
         # earlier payloads). We MUST NOT silently attach — the FK would
         # be wrong, and we'd lose the chance to back-fill later.
+        # V3 §14.3（2026-09-28）：payment_id 缺失时 statement 以
+        # payout_id=NULL 入库 + transactions 照抓（之前是“干胶 statement
+        # + transactions”被跳过）。sync_issue 仍然记（人工可追），但不
+        # 阻断数据入库。transaction 抓取后续跑逐行 _upsert_transaction
+        # 路径同主流程 §Step 3。
         payment_id = raw_s.get("payment_id")
         if not payment_id:
-            failed += 1
             session.add(
                 SyncIssue(
                     job_name=JOB_NAME,
@@ -696,6 +703,103 @@ def _sync_statements(
                     },
                 )
             )
+            try:
+                s_fields = _parse_statement(raw_s, payout_id=None)
+            except ParseError as exc:
+                failed += 1
+                session.add(
+                    SyncIssue(
+                        job_name=JOB_NAME,
+                        issue_type="PARSE_ERROR",
+                        external_id=ext_stmt_id,
+                        details={"error": str(exc), "section": "statements"},
+                    )
+                )
+                continue
+            raw_s_row = _store_raw(
+                session,
+                endpoint=STATEMENTS_ENDPOINT,
+                external_id=s_fields["external_statement_id"],
+                payload=raw_s,
+            )
+            stmt_id = _upsert_statement(
+                session,
+                fields=s_fields,
+                raw_record_id=raw_s_row.id,
+            )
+            # watermark 推进：statement 本身入库了，可以推进。
+            if s_fields["statement_time"] is not None:
+                stime_ms = _safe_int(s_fields["statement_time"].timestamp() * 1000)
+                if stime_ms and (
+                    max_statement_ms is None or stime_ms > max_statement_ms
+                ):
+                    max_statement_ms = stime_ms
+            # Step 3（import 同主流程）：抓 transactions。
+            raw_txns = _walk_pages(
+                proxy_call,
+                endpoint=STATEMENT_TRANSACTIONS_TEMPLATE.format(
+                    statement_id=s_fields["external_statement_id"]
+                ),
+                base_body={"page_size": page_size},
+                items_key="statement_transactions",
+            )
+            for raw_t in raw_txns:
+                ext_txn_id = str(
+                    raw_t.get("transaction_id") or raw_t.get("id") or "<unknown>"
+                )
+                try:
+                    t_fields = _parse_transaction(raw_t)
+                except ParseError as exc:
+                    failed += 1
+                    session.add(
+                        SyncIssue(
+                            job_name=JOB_NAME,
+                            issue_type="PARSE_ERROR",
+                            external_id=ext_txn_id,
+                            details={
+                                "error": str(exc),
+                                "section": "transactions",
+                            },
+                        )
+                    )
+                    continue
+                order_id_ext = raw_t.get("order_id")
+                if order_id_ext:
+                    order_pk = session.execute(
+                        select(SalesOrder.id).where(
+                            SalesOrder.shop_pk == account.id,
+                            SalesOrder.order_id == str(order_id_ext),
+                        )
+                    ).scalar_one_or_none()
+                    t_fields["order_pk"] = order_pk
+                    if order_pk is None:
+                        failed += 1
+                        session.add(
+                            SyncIssue(
+                                job_name=JOB_NAME,
+                                issue_type="TXN_ORDER_NOT_FOUND",
+                                external_id=ext_txn_id,
+                                details={
+                                    "section": "transactions",
+                                    "order_id": str(order_id_ext),
+                                },
+                            )
+                        )
+                raw_t_row = _store_raw(
+                    session,
+                    endpoint=STATEMENT_TRANSACTIONS_TEMPLATE.format(
+                        statement_id=s_fields["external_statement_id"]
+                    ),
+                    external_id=t_fields["external_transaction_id"],
+                    payload=raw_t,
+                )
+                _upsert_transaction(
+                    session,
+                    stmt_id=stmt_id,
+                    fields=t_fields,
+                    raw_record_id=raw_t_row.id,
+                )
+            inserted += 1
             continue
 
         payout_row = session.execute(
