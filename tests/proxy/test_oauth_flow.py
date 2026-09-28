@@ -112,15 +112,38 @@ def test_register_state_round_trip(db_session, fernet_key: str) -> None:
     assert isinstance(raw, str) and len(raw) >= 32
     assert expires_at > datetime.now(UTC)
 
-    status, sid = pop_state(db_session, raw)
+    status, sid, extra = pop_state(db_session, raw)
     assert status == "ok"
     assert sid is not None
+    assert extra is None  # register_state 时未传 extra
 
     row = db_session.execute(
         select(OAuthState).where(OAuthState.id == sid)
     ).scalar_one()
     assert row.provider == "tiktok"
     assert row.consumed_at is not None
+
+
+def test_register_state_with_extra_round_trip(db_session, fernet_key: str) -> None:
+    """register_state with extra → pop_state returns the extra."""
+    from tts_erp_v2.db.models.integration import OAuthState
+    from tts_erp_v2.proxy.tiktok_oauth import pop_state, register_state
+
+    raw, expires_at = register_state(
+        db_session, extra={"service_id": "svc_123"}
+    )
+    assert isinstance(raw, str) and len(raw) >= 32
+
+    status, sid, extra = pop_state(db_session, raw)
+    assert status == "ok"
+    assert sid is not None
+    assert extra == {"service_id": "svc_123"}
+
+    row = db_session.execute(
+        select(OAuthState).where(OAuthState.id == sid)
+    ).scalar_one()
+    assert row.provider == "tiktok"
+    assert row.extra == {"service_id": "svc_123"}
 
 
 def test_register_state_is_unguessable(db_session, fernet_key: str) -> None:
@@ -137,9 +160,9 @@ def test_pop_state_is_single_use(db_session, fernet_key: str) -> None:
     from tts_erp_v2.proxy.tiktok_oauth import pop_state, register_state
 
     raw, _ = register_state(db_session)
-    status, _ = pop_state(db_session, raw)
+    status, _, _ = pop_state(db_session, raw)
     assert status == "ok"
-    status2, sid2 = pop_state(db_session, raw)
+    status2, sid2, _ = pop_state(db_session, raw)
     assert status2 == "reused"
     assert sid2 is None
 
@@ -148,9 +171,10 @@ def test_pop_state_unknown(db_session, fernet_key: str) -> None:
     """A state we never registered → 'unknown' (CSRF gate fails closed)."""
     from tts_erp_v2.proxy.tiktok_oauth import pop_state
 
-    status, sid = pop_state(db_session, "never_registered_state")
+    status, sid, extra = pop_state(db_session, "never_registered_state")
     assert status == "unknown"
     assert sid is None
+    assert extra is None
 
 
 def test_pop_state_expired(db_session, fernet_key: str) -> None:
@@ -167,9 +191,10 @@ def test_pop_state_expired(db_session, fernet_key: str) -> None:
     )
     db_session.commit()
 
-    status, sid = pop_state(db_session, "stale_state")
+    status, sid, extra = pop_state(db_session, "stale_state")
     assert status == "expired"
     assert sid is None
+    assert extra is None
 
 
 # ─── complete_tiktok_authorization ──────────────────────────────────
@@ -197,7 +222,7 @@ def test_complete_authorization_bootstraps_rows(
     assert out["shops"][0]["credential_id"] is not None
 
     # State consumed (single use).
-    status, _ = pop_state(db_session, raw)
+    status, _, _ = pop_state(db_session, raw)
     assert status == "reused"
 
     # Credentials row with decrypted envelope.
@@ -452,7 +477,7 @@ def test_complete_authorization_upstream_failure_consumes_state(
     raw, _ = register_state(db_session)
     with pytest.raises(UpstreamHttpError):
         complete_tiktok_authorization(db_session, code="stale", state=raw)
-    status, _ = pop_state(db_session, raw)
+    status, _, _ = pop_state(db_session, raw)
     assert status == "reused"
 
 
@@ -477,5 +502,5 @@ def test_complete_authorization_shops_failure_consumes_state(
     raw, _ = register_state(db_session)
     with pytest.raises(UpstreamHttpError):
         complete_tiktok_authorization(db_session, code="stale", state=raw)
-    status, _ = pop_state(db_session, raw)
+    status, _, _ = pop_state(db_session, raw)
     assert status == "reused"

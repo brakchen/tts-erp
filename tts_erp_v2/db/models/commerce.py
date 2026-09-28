@@ -51,6 +51,10 @@ class ChannelAccount(Base):
     credential_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("integration.credentials.id", ondelete="SET NULL")
     )
+    # TikTok Partner Center 的 service_id（App & Service 页面）。选填；
+    # 不同店铺可能绑不同的 service_id（开发者授权用）。NULL = 未指定
+    # （authorize 时 fallback 到环境变量 TIKTOK_SERVICE_ID）。
+    service_id: Mapped[str | None] = mapped_column(Text)
     # 开店时间（天级，migration 0021）。人工注册时填写；OAuth 路径不覆盖
     # （upsert set_ 不含本列）。NULL = 未知/未填。
     opened_date: Mapped[date | None] = mapped_column(Date)

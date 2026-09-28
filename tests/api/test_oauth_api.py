@@ -145,13 +145,41 @@ def test_authorize_returns_link(
 def test_authorize_missing_service_id_is_500(
     api_client, readwrite_key, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """No TIKTOK_SERVICE_ID → clear config error, not a bogus link."""
+    """No TIKTOK_SERVICE_ID env var and no service_id param → 500 config error."""
     monkeypatch.delenv("TIKTOK_SERVICE_ID", raising=False)
     r = api_client.get(
         AUTHZ, headers=_bearer(readwrite_key), params={"format": "json"}
     )
     assert r.status_code == 500, r.text
-    assert "TIKTOK_SERVICE_ID" in r.text
+    assert "service_id" in r.text.lower()
+
+
+def test_authorize_explicit_service_id_overrides_env(
+    api_client, readwrite_key, app_env: None, db_session
+) -> None:
+    """显式传入 service_id 参数时，优先使用参数值。"""
+    r = api_client.get(
+        AUTHZ,
+        headers=_bearer(readwrite_key),
+        params={"format": "json", "service_id": "explicit_svc_789"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    url = body["authorize_url"]
+    assert "service_id=explicit_svc_789" in url
+    # 环境变量中的值不应出现
+    assert "test_service_api_1" not in url
+
+    # state extra 中应包含 service_id
+    state = _state_from_url(url)
+    from tts_erp_v2.db.models.integration import OAuthState
+    from tts_erp_v2.proxy.tiktok_oauth import _state_hash
+
+    row = db_session.execute(
+        select(OAuthState).where(OAuthState.state_hash == _state_hash(state))
+    ).scalar_one_or_none()
+    assert row is not None
+    assert row.extra == {"service_id": "explicit_svc_789"}
 
 
 # ─── callback ────────────────────────────────────────────────────────

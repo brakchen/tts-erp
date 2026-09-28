@@ -130,6 +130,11 @@ def authorize(
         default=None,
         description="(display hint only) where the operator should land after the flow.",
     ),
+    service_id: str | None = Query(
+        default=None,
+        description="TikTok Partner Center service_id (App & Service 页面)。"
+            "选填；不传时 fallback 到环境变量 TIKTOK_SERVICE_ID。",
+    ),
 ):
     """Mint a single-use CSRF state and build the TikTok authorization link.
 
@@ -140,13 +145,16 @@ def authorize(
     mutates ``integration.credentials`` + ``commerce.shops``, and that
     surface stays under the public OAuth handshake.
 
-    Requires ``TIKTOK_SERVICE_ID`` (Partner Center App & Service page)
-    in the server env — else 500 with a config message.
+    ``service_id`` 选填：传入时存入 OAuthState.extra，callback 后写入
+    commerce.shops；不传时 fallback 到环境变量 ``TIKTOK_SERVICE_ID``。
     """
     require_role_at_least(request, "readwrite")
+    state_extra = {"service_id": service_id} if service_id else None
     try:
-        raw_state, expires_at = register_state(sess)
-        authorize_url = build_authorize_url(state=raw_state)
+        raw_state, expires_at = register_state(sess, extra=state_extra)
+        authorize_url = build_authorize_url(
+            state=raw_state, service_id=service_id
+        )
     except SigningError as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
@@ -236,7 +244,7 @@ def _handle_json(
     # Seller rejected at the consent screen.
     if error:
         if state_present:
-            pop_state(sess, state)  # spend the CSRF token best-effort
+            pop_state(sess, state)  # spend the CSRF token best-effort; ignore return
         log.warning(
             "oauth callback json denied: error=%s state_present=%s",
             error,

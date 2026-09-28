@@ -254,6 +254,33 @@ def test_build_authorize_url_default_row_host(
     assert "state=csrf_state_abc" in url
 
 
+def test_build_authorize_url_explicit_service_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """显式传入 service_id 时，优先使用参数值而非环境变量。"""
+    from tts_erp_v2.proxy import tiktok_auth
+
+    url = tiktok_auth.build_authorize_url(
+        state="s1", service_id="explicit_svc_456"
+    )
+    assert "service_id=explicit_svc_456" in url
+    # 环境变量中的值不应出现
+    assert "test_service_id_123" not in url
+
+
+def test_build_authorize_url_explicit_service_id_overrides_env(
+    monkeypatch: pytest.MonkeyPatch, authorize_creds: None
+) -> None:
+    """显式 service_id 优先于环境变量。"""
+    from tts_erp_v2.proxy import tiktok_auth
+
+    url = tiktok_auth.build_authorize_url(
+        state="s1", service_id="override_svc"
+    )
+    assert "service_id=override_svc" in url
+    assert "test_service_id_123" not in url
+
+
 def test_build_authorize_url_us_market_override(
     monkeypatch: pytest.MonkeyPatch, authorize_creds: None
 ) -> None:
@@ -268,15 +295,27 @@ def test_build_authorize_url_us_market_override(
 def test_build_authorize_url_missing_service_id_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """TIKTOK_SERVICE_ID unset → SigningError naming the var (operator must
-    copy it from Partner Center App & Service)."""
+    """TIKTOK_SERVICE_ID unset 且无显式参数 → SigningError。"""
     from tts_erp_v2.proxy import tiktok_auth
     from tts_erp_v2.proxy.errors import SigningError
 
     monkeypatch.delenv("TIKTOK_SERVICE_ID", raising=False)
     with pytest.raises(SigningError) as ei:
         tiktok_auth.build_authorize_url(state="s1")
-    assert "TIKTOK_SERVICE_ID" in str(ei.value)
+    assert "service_id" in str(ei.value).lower()
+
+
+def test_build_authorize_url_no_env_but_explicit_ok(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """环境变量缺失但显式传入 service_id 时，不报错。"""
+    from tts_erp_v2.proxy import tiktok_auth
+
+    monkeypatch.delenv("TIKTOK_SERVICE_ID", raising=False)
+    url = tiktok_auth.build_authorize_url(
+        state="s1", service_id="fallback_ok"
+    )
+    assert "service_id=fallback_ok" in url
 
 
 def test_build_authorize_url_rejects_non_http_host(

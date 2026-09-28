@@ -83,12 +83,17 @@ def register_state(
     *,
     provider: str = "tiktok",
     ttl: timedelta = STATE_TTL,
+    extra: dict | None = None,
 ) -> tuple[str, datetime]:
     """Mint + persist a CSRF state for an authorization flow.
 
     Returns ``(raw_state, expires_at)``. The raw token is returned
     exactly once (embed in the authorize-link URL); only its sha256 is
     persisted, so a DB leak does not hand out usable states.
+
+    Args:
+        extra: 任意附加元数据（如 ``service_id``），存入 OAuthState.extra，
+            callback 时可取出。
     """
     raw = secrets.token_urlsafe(32)
     expires_at = datetime.now(UTC) + ttl
@@ -97,14 +102,19 @@ def register_state(
             provider=provider,
             state_hash=_state_hash(raw),
             expires_at=expires_at,
+            extra=extra,
         )
     )
     session.commit()
     return raw, expires_at
 
 
-def pop_state(session: Session, raw_state: str | None) -> tuple[str, int | None]:
-    """Atomically consume a state token. Returns ``(status, oauth_state_id)``.
+def pop_state(
+    session: Session, raw_state: str | None
+) -> tuple[str, int | None, dict | None]:
+    """Atomically consume a state token.
+
+    Returns ``(status, oauth_state_id, extra)``.
 
     Status is one of:
 
@@ -115,9 +125,12 @@ def pop_state(session: Session, raw_state: str | None) -> tuple[str, int | None]
 
     Consumption is a single conditional UPDATE ... RETURNING so two
     racing callbacks cannot both win.
+
+    ``extra`` 是注册时存入的附加元数据（如 ``service_id``），仅
+    ``status == "ok"`` 时有效。
     """
     if not raw_state:
-        return "unknown", None
+        return "unknown", None, None
     state_hash = _state_hash(raw_state)
     now = datetime.now(UTC)
 
@@ -129,20 +142,20 @@ def pop_state(session: Session, raw_state: str | None) -> tuple[str, int | None]
             OAuthState.expires_at > now,
         )
         .values(consumed_at=now)
-        .returning(OAuthState.id)
+        .returning(OAuthState.id, OAuthState.extra)
     ).first()
     if consumed is not None:
         session.commit()
-        return "ok", consumed[0]  # BigInteger id is already int
+        return "ok", consumed[0], consumed[1]  # id, extra
 
     row = session.execute(
         select(OAuthState).where(OAuthState.state_hash == state_hash)
     ).scalar_one_or_none()
     if row is None:
-        return "unknown", None
+        return "unknown", None, None
     if row.consumed_at is not None:
-        return "reused", None
-    return "expired", None
+        return "reused", None, None
+    return "expired", None, None
 
 
 def complete_tiktok_authorization(
@@ -174,6 +187,10 @@ def complete_tiktok_authorization(
     land one credentials + shops pair per shop; the sync worker fans
     out over all of them on its next tick.
 
+    ``service_id`` 从 OAuthState.extra 取出（authorize 时存入），写入
+    commerce.shops。如果 authorize 时未指定 service_id，extra 中无此
+    字段，shops 表该列保持 NULL。
+
     Returns ``{"shops": [{shop_id, credential_id, account_id,
     account_name, region, seller_type, granted_scopes, expires_at}]}``.
 
@@ -186,7 +203,7 @@ def complete_tiktok_authorization(
             entry keys so a renamed upstream field is decidable in one
             run instead of guesswork).
     """
-    status, _sid = pop_state(session, state)
+    status, _sid, state_extra = pop_state(session, state)
     if status == "reused":
         raise OAuthFlowError(
             "state_reused",
@@ -198,6 +215,11 @@ def complete_tiktok_authorization(
             "unknown or expired authorization state — restart the flow "
             "from /v2/oauth/tiktok/authorize",
         )
+
+    # 从 state extra 中取出 service_id（authorize 时存入）
+    service_id_from_state: str | None = None
+    if isinstance(state_extra, dict):
+        service_id_from_state = state_extra.get("service_id")
 
     grant = exchange_auth_code(auth_code=code)
 
@@ -274,6 +296,7 @@ def complete_tiktok_authorization(
             "seller_type": seller_type,
             "status": "active",
             "credential_id": credential_id,
+            "service_id": service_id_from_state,
             # opened_date 刻意不在 set_ 里：人工填的开店日期不被 OAuth 覆盖。
             # 2026-09-11（PLUGIN_ARCH_CLEANUP）：原 data_source 枚举列已删除
             # —— 有 credential_id 即为 API 同步店铺，无需单独标记。
@@ -290,6 +313,7 @@ def complete_tiktok_authorization(
                 "seller_type": acct_vals["seller_type"],
                 "status": "active",
                 "credential_id": acct_vals["credential_id"],
+                "service_id": acct_vals["service_id"],
                 "source_updated_at": acct_vals["source_updated_at"],
                 "synced_at": acct_vals["synced_at"],
                 "updated_at": acct_vals["updated_at"],

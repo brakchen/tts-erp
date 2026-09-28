@@ -388,18 +388,40 @@ def exchange_auth_code(*, auth_code: str) -> dict[str, Any]:
     }
 
 
-def build_authorize_url(*, state: str) -> str:
+def build_authorize_url(
+    *,
+    state: str,
+    service_id: str | None = None,
+) -> str:
     """Build the seller authorization link for ``state``.
 
     Returns ``{authorize_host}/open/authorize?service_id=...&state=...``
     per the Authorization overview doc (the Redirect URL itself is
     configured in Partner Center, so it is NOT a link parameter).
 
+    Args:
+        state: CSRF state token.
+        service_id: TikTok Partner Center service_id. 优先使用此值；
+            为 None 时 fallback 到环境变量 ``TIKTOK_SERVICE_ID``。
+
     Raises:
-        SigningError: ``TIKTOK_SERVICE_ID`` missing, or the authorize
-        host is not http(s).
+        SigningError: service_id 缺失（参数和环境变量都没有），或
+            authorize host 非 http(s)。
     """
-    service_id, authorize_host = _resolve_service_credentials()
+    authorize_host = (
+        os.environ.get("TIKTOK_AUTHORIZE_HOST", "").strip()
+        or DEFAULT_TIKTOK_AUTHORIZE_HOST
+    )
+    resolved_service_id = (
+        service_id
+        or os.environ.get("TIKTOK_SERVICE_ID", "").strip()
+    )
+    if not resolved_service_id:
+        raise SigningError(
+            "service_id not provided and TIKTOK_SERVICE_ID env var is not "
+            "configured (set it in .env or pass service_id to "
+            "build_authorize_url)."
+        )
 
     parsed = urllib.parse.urlparse(authorize_host)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
@@ -408,7 +430,9 @@ def build_authorize_url(*, state: str) -> str:
             f"scheme={parsed.scheme!r} (host={authorize_host[:120]!r})"
         )
 
-    qs = urllib.parse.urlencode({"service_id": service_id, "state": state})
+    qs = urllib.parse.urlencode(
+        {"service_id": resolved_service_id, "state": state}
+    )
     return f"{authorize_host.rstrip('/')}{AUTHORIZE_PATH}?{qs}"
 
 
