@@ -52,6 +52,172 @@ router = APIRouter(prefix="/v2/pages", tags=["pages"])
 # the fresh JS without any manual refresh.
 _JS_DIR = Path(__file__).resolve().parents[2] / "static" / "js"
 
+# ── Shared sidebar navigation ─────────────────────────────────────────
+# Reused by all pages for consistent left-nav layout.
+
+_SIDEBAR_CSS = """
+    /* ---------- SIDEBAR NAV ---------- */
+    .sidebar {
+      position: fixed; top: 0; left: 0;
+      width: 220px; height: 100vh;
+      background: var(--paper-deep);
+      border-right: 1px solid var(--rule);
+      display: flex; flex-direction: column;
+      overflow-y: auto;
+      z-index: 100;
+    }
+    .sidebar-brand {
+      padding: 20px 20px 16px;
+      border-bottom: 1px solid var(--rule);
+    }
+    .sidebar-brand-link {
+      display: flex; align-items: center; gap: 10px;
+      text-decoration: none; color: var(--ink);
+    }
+    .sidebar-brand-link:hover { color: var(--ink); }
+    .sidebar-brand-icon {
+      font-size: 18px; color: var(--accent);
+      line-height: 1;
+    }
+    .sidebar-brand-text {
+      font-family: var(--mono);
+      font-size: 14px; font-weight: 600;
+      letter-spacing: 0.08em;
+    }
+    .sidebar-nav { flex: 1; padding: 16px 0; overflow-y: auto; }
+    .sidebar-section {
+      padding: 0 16px;
+      margin-bottom: 20px;
+    }
+    .sidebar-section:last-child { margin-bottom: 0; }
+    .sidebar-section-title {
+      font-family: var(--mono);
+      font-size: 10px; font-weight: 600;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 0 8px 8px;
+    }
+    .sidebar-link {
+      display: block;
+      font-family: var(--sans);
+      font-size: 14px;
+      color: var(--ink-soft);
+      text-decoration: none;
+      padding: 7px 12px;
+      transition: background 100ms ease, color 100ms ease;
+    }
+    .sidebar-link:hover {
+      background: var(--paper);
+      color: var(--ink);
+    }
+    .sidebar-link.is-active {
+      background: var(--paper);
+      color: var(--accent);
+      font-weight: 600;
+      border-left: 3px solid var(--accent);
+      padding-left: 9px;
+    }
+    .sidebar-footer {
+      padding: 14px 20px;
+      border-top: 1px solid var(--rule);
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .sidebar-user { font-size: 11px; }
+
+    /* Desktop: shift main content right */
+    body { margin-left: 220px; }
+    .op-header { margin-left: 0; }
+    .op-home-link { display: none; }
+
+    /* Mobile toggle button */
+    .sidebar-toggle {
+      display: none;
+      position: fixed; top: 12px; left: 12px;
+      z-index: 200;
+      width: 36px; height: 36px;
+      background: var(--paper);
+      border: 1px solid var(--rule);
+      cursor: pointer;
+      font-size: 18px; line-height: 1;
+      color: var(--ink);
+      padding: 0;
+      align-items: center; justify-content: center;
+    }
+    .sidebar-toggle:hover { border-color: var(--accent); color: var(--accent); }
+    .sidebar-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(20, 16, 10, 0.5);
+      z-index: 90;
+    }
+
+    @media (max-width: 768px) {
+      body { margin-left: 0; }
+      .sidebar { transform: translateX(-100%); transition: transform 200ms ease; }
+      .sidebar.is-open { transform: translateX(0); }
+      .sidebar-toggle { display: flex; }
+      .sidebar-overlay.is-open { display: block; }
+      .op-header { padding-left: 56px; }
+    }
+"""
+
+def _sidebar_html(current_page: str) -> str:
+  """Return sidebar HTML with the given page marked as active."""
+  pages = [
+    ("dashboard",            "控制台",    "__group__"),
+    ("manual-costs",         "采购工作台", "运营"),
+    ("spu-roi",              "SPU ROI",   "运营"),
+    ("shops",                "店铺注册",  "店铺"),
+    ("enum-map",             "枚举映射",  "数据"),
+    ("intercept-configs",    "拦截配置",  "拦截"),
+    ("intercept-requests",   "拦截记录",  "拦截"),
+    ("intercept-stats",      "拦截统计",  "拦截"),
+  ]
+  links = []
+  current_group = None
+  for page_id, label, group in pages:
+    if group != "__group__" and group != current_group:
+      current_group = group
+      links.append(f'<div class="sidebar-section-title">{group}</div>')
+    active = " is-active" if page_id == current_page else ""
+    links.append(f'<a href="../../v2/pages/{page_id}" class="sidebar-link{active}">{label}</a>')
+  nav_html = "\n      ".join(links)
+  return f"""<button class="sidebar-toggle" id="sidebar-toggle" aria-label="菜单">☰</button>
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <a href="../../v2/pages/dashboard" class="sidebar-brand-link">
+        <span class="sidebar-brand-icon">◆</span>
+        <span class="sidebar-brand-text">tts-erp</span>
+      </a>
+    </div>
+    <div class="sidebar-nav">
+      {nav_html}
+    </div>
+    <div class="sidebar-footer">
+      <div class="sidebar-user" id="sidebar-user"></div>
+    </div>
+  </nav>"""
+
+_SIDEBAR_TOGGLE_JS = """
+// Sidebar mobile toggle
+(function() {
+  var btn = document.getElementById('sidebar-toggle');
+  var sidebar = document.getElementById('sidebar');
+  var overlay = document.getElementById('sidebar-overlay');
+  if (!btn || !sidebar) return;
+  function toggle() {
+    sidebar.classList.toggle('is-open');
+    overlay.classList.toggle('is-open');
+  }
+  btn.addEventListener('click', toggle);
+  overlay.addEventListener('click', toggle);
+})();
+"""
+
 
 def _js_version(filename: str) -> str:
   try:
@@ -61,10 +227,16 @@ def _js_version(filename: str) -> str:
   return digest[:8]
 
 
-def _page(html: str) -> HTMLResponse:
-  """Render a page template, stamping the JS cache-bust versions."""
-  return HTMLResponse(
-    html.replace("__JSV_CONSOLE__", _js_version("console.js"))
+def _page(html: str, *, current_page: str = "") -> HTMLResponse:
+  """Render a page template, stamping the JS cache-bust versions.
+
+  *current_page* is the sidebar slug for the active link
+  (e.g. ``"manual-costs"``, ``"spu-roi"``). When non-empty the shared
+  sidebar navigation is injected into the page.
+  """
+  html = (
+    html
+    .replace("__JSV_CONSOLE__", _js_version("console.js"))
     .replace("__JSV_SPU_ROI__", _js_version("spu-roi.js"))
     .replace("__JSV_SHOPS__", _js_version("shops.js"))
     .replace("__JSV_DASHBOARD__", _js_version("dashboard.js"))
@@ -72,6 +244,25 @@ def _page(html: str) -> HTMLResponse:
     .replace("__JSV_INTERCEPT_REQUESTS__", _js_version("intercept-requests.js"))
     .replace("__JSV_INTERCEPT_STATS__", _js_version("intercept-stats.js"))
   )
+  if current_page:
+    sidebar_html = _sidebar_html(current_page)
+    # Inject sidebar CSS into <style> block
+    html = html.replace("<style>", "<style>" + _SIDEBAR_CSS, 1)
+    # Inject sidebar HTML + toggle JS after <body>
+    html = html.replace(
+      "<body>",
+      "<body>\n  " + sidebar_html +
+      "\n  <script>" + _SIDEBAR_TOGGLE_JS + "</script>",
+      1,
+    )
+    # Remove the per-page "← 首页" home link (sidebar replaces it)
+    for _home_link in [
+      '<a href="../../v2/pages/dashboard" class="op-home-link">← 首页</a>\n        ',
+      '<a href="../../v2/pages/dashboard" class="op-home-link">← 首页</a>\n      ',
+      '<a href="../../v2/pages/dashboard" class="op-home-link">← 首页</a>',
+    ]:
+      html = html.replace(_home_link, "")
+  return HTMLResponse(html)
 
 
 @router.get("/shops", response_class=HTMLResponse)
@@ -88,7 +279,7 @@ def shops_page() -> HTMLResponse:
   static/js/shops.js；写入端点 POST /v2/admin/shops/register 要 readwrite
   会话（readonly 会话降级只读展示）。
   """
-  return _page(_SHOPS_PAGE_HTML)
+  return _page(_SHOPS_PAGE_HTML, current_page="shops")
 
 
 _SHOPS_PAGE_HTML = """<!doctype html>
@@ -267,7 +458,7 @@ def spu_roi_page() -> HTMLResponse:
   布局 = Bootstrap 5.3.8 栅格/工具类 + 手机端适配(见 shell 头注释),行为在
   static/js/spu-roi.js。
   """
-  return _page(_SPU_ROI_PAGE_HTML)
+  return _page(_SPU_ROI_PAGE_HTML, current_page="spu-roi")
 
 
 @router.get("/manual-costs", response_class=HTMLResponse)
@@ -288,7 +479,7 @@ def manual_costs_page() -> HTMLResponse:
   into local MinIO (``image_url`` from the backend, fallback icon when the
   mirror hasn't finished); cost currency is fixed to CNY.
   """
-  return _page(_PAGE_HTML)
+  return _page(_PAGE_HTML, current_page="manual-costs")
 
 
 # Marker for the legacy token-paste UI — kept as a comment so future
@@ -1133,7 +1324,7 @@ def dashboard_page() -> HTMLResponse:
   设计风格：延续工业操作台视觉语言（暖纸/等宽/细线），
   但更轻量 — 卡片式布局，适合快速扫描和点击。
   """
-  return _page(_DASHBOARD_PAGE_HTML)
+  return _page(_DASHBOARD_PAGE_HTML, current_page="dashboard")
 
 
 _DASHBOARD_PAGE_HTML = """<!doctype html>
@@ -1590,7 +1781,7 @@ def intercept_configs_page() -> HTMLResponse:
   功能：配置列表、新增/编辑弹窗、批量操作、导入导出、筛选分页。
   行为在 static/js/intercept-configs.js。
   """
-  return _page(_INTERCEPT_CONFIGS_PAGE_HTML)
+  return _page(_INTERCEPT_CONFIGS_PAGE_HTML, current_page="intercept-configs")
 
 
 @router.get("/intercept-requests", response_class=HTMLResponse)
@@ -1600,7 +1791,7 @@ def intercept_requests_page() -> HTMLResponse:
   功能：记录列表、详情弹窗、筛选（域名/路径/状态码/白名单/时间）、分页。
   行为在 static/js/intercept-requests.js。
   """
-  return _page(_INTERCEPT_REQUESTS_PAGE_HTML)
+  return _page(_INTERCEPT_REQUESTS_PAGE_HTML, current_page="intercept-requests")
 
 
 @router.get("/intercept-stats", response_class=HTMLResponse)
@@ -1610,7 +1801,7 @@ def intercept_stats_page() -> HTMLResponse:
   功能：总览统计卡片、按域名/方法/状态码分布、最近 7 天每日趋势。
   行为在 static/js/intercept-stats.js。
   """
-  return _page(_INTERCEPT_STATS_PAGE_HTML)
+  return _page(_INTERCEPT_STATS_PAGE_HTML, current_page="intercept-stats")
 
 
 _INTERCEPT_CONFIGS_PAGE_HTML = """<!doctype html>
@@ -2286,4 +2477,4 @@ _ENUM_MAP_PAGE_HTML = """<!doctype html>
 @router.get("/enum-map", response_class=HTMLResponse)
 def enum_map_page() -> HTMLResponse:
   """枚举映射管理页面。CRUD 管理 config.enum_map 枚举翻译。"""
-  return _page(_ENUM_MAP_PAGE_HTML)
+  return _page(_ENUM_MAP_PAGE_HTML, current_page="enum-map")
