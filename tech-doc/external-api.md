@@ -251,6 +251,19 @@ curl -sS -H "X-API-Key: $TTS_ERP_RO_KEY" \
   "http://127.0.0.1:9877/v2/fx/convert?amount=100&from_code=CNY&to_code=USD"
 ```
 
+### Sync status (`/v2/sync/*`)
+
+sync-worker 周期作业健康展示（dashboard「数据同步状态」卡片的数据源，2026-09-28 新增）。
+
+| Endpoint | Role | Notes |
+| --- | --- | --- |
+| `GET /v2/sync/status` | readonly | → `{server_time, jobs: [{job_name, interval_seconds, last_run_at, last_finished_at, last_status, last_error, next_expected_at, lag_seconds, cycles_late, severity}]}`。周期取自 `sync_worker.scheduler.JOBS` 注册表（单一真相源），运行记录取自 `integration.sync_jobs`（tiktok 作业按 shop 扇出多行，按 job_name 聚合取最新一行）。红灯规则：`now - last_run_at >= 2 × interval_seconds` → `severity="crit"`；≥1 周期 `"warn"`；周期内 `"ok"`；从未运行或注册表外 job `"unknown"`。只读、零上游外呼。 |
+
+```bash
+curl -sS -H "X-API-Key: $TTS_ERP_RO_KEY" \
+  "http://127.0.0.1:9877/v2/sync/status"
+```
+
 ### Pages
 
 | Endpoint | Role | Notes |
@@ -983,6 +996,7 @@ Stable external endpoints (safe to build dashboards / agents on):
 | `GET /v2/reporting/*` | readonly | v2 |
 | `POST /v2/reporting/manual-costs` | readwrite | v2 |
 | `GET /v2/fx/latest`, `/v2/fx/convert` | readonly | v2 — cached (fx.sync ≈1 上游请求/天，API 路径零上游) |
+| `GET /v2/sync/status` | readonly | v2 — sync-worker 周期作业健康（红灯 = 落后 ≥2 周期） |
 | `GET /v2/pages/manual-costs` | readonly | v2 (HTML — not a machine contract) |
 | `GET /v2/pages/spu-roi` | readonly | v2 (HTML — not a machine contract) |
 | `GET /v2/analytics/spu-roi` | readonly | stable 只读（口径见 `analytics/spu-real-roi-dashboard.md`） |
