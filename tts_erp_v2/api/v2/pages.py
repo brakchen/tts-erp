@@ -53,119 +53,23 @@ router = APIRouter(prefix="/v2/pages", tags=["pages"])
 _JS_DIR = Path(__file__).resolve().parents[2] / "static" / "js"
 
 # ── Shared sidebar navigation ─────────────────────────────────────────
-# Reused by all pages for consistent left-nav layout.
+# Bootstrap 5 utilities + minimal custom CSS (active accent + responsive).
 
 _SIDEBAR_CSS = """
-    /* ---------- SIDEBAR NAV ---------- */
-    .sidebar {
-      position: fixed; top: 0; left: 0;
-      width: 220px; height: 100vh;
-      background: var(--paper-deep);
-      border-right: 1px solid var(--rule);
-      display: flex; flex-direction: column;
-      overflow-y: auto;
-      z-index: 100;
-    }
-    .sidebar-brand {
-      padding: 20px 20px 16px;
-      border-bottom: 1px solid var(--rule);
-    }
-    .sidebar-brand-link {
-      display: flex; align-items: center; gap: 10px;
-      text-decoration: none; color: var(--ink);
-    }
-    .sidebar-brand-link:hover { color: var(--ink); }
-    .sidebar-brand-icon {
-      font-size: 18px; color: var(--accent);
-      line-height: 1;
-    }
-    .sidebar-brand-text {
-      font-family: var(--mono);
-      font-size: 14px; font-weight: 600;
-      letter-spacing: 0.08em;
-    }
-    .sidebar-nav { flex: 1; padding: 16px 0; overflow-y: auto; }
-    .sidebar-section {
-      padding: 0 16px;
-      margin-bottom: 20px;
-    }
-    .sidebar-section:last-child { margin-bottom: 0; }
-    .sidebar-section-title {
-      font-family: var(--mono);
-      font-size: 10px; font-weight: 600;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: var(--muted);
-      padding: 0 8px 8px;
-    }
-    .sidebar-link {
-      display: block;
-      font-family: var(--sans);
-      font-size: 14px;
-      color: var(--ink-soft);
-      text-decoration: none;
-      padding: 7px 12px;
-      transition: background 100ms ease, color 100ms ease;
-    }
-    .sidebar-link:hover {
-      background: var(--paper);
-      color: var(--ink);
-    }
-    .sidebar-link.is-active {
-      background: var(--paper);
-      color: var(--accent);
-      font-weight: 600;
-      border-left: 3px solid var(--accent);
-      padding-left: 9px;
-    }
-    .sidebar-footer {
-      padding: 14px 20px;
-      border-top: 1px solid var(--rule);
-      font-family: var(--mono);
-      font-size: 11px;
-      color: var(--muted);
-    }
-    .sidebar-user { font-size: 11px; }
-
-    /* Desktop: shift main content right */
     body { margin-left: 220px; }
-    .op-header { margin-left: 0; }
     .op-home-link { display: none; }
-
-    /* Mobile toggle button */
-    .sidebar-toggle {
-      display: none;
-      position: fixed; top: 12px; left: 12px;
-      z-index: 200;
-      width: 36px; height: 36px;
-      background: var(--paper);
-      border: 1px solid var(--rule);
-      cursor: pointer;
-      font-size: 18px; line-height: 1;
-      color: var(--ink);
-      padding: 0;
-      align-items: center; justify-content: center;
-    }
-    .sidebar-toggle:hover { border-color: var(--accent); color: var(--accent); }
-    .sidebar-overlay {
-      display: none;
-      position: fixed; inset: 0;
-      background: rgba(20, 16, 10, 0.5);
-      z-index: 90;
-    }
-
-    @media (max-width: 768px) {
+    .sidebar-link.active { border-left: 3px solid var(--accent); padding-left: 9px; }
+    .sidebar { transition: transform 200ms ease; }
+    @media (max-width: 991.98px) {
       body { margin-left: 0; }
-      .sidebar { transform: translateX(-100%); transition: transform 200ms ease; }
+      .sidebar { transform: translateX(-100%); }
       .sidebar.is-open { transform: translateX(0); }
-      .sidebar-toggle { display: flex; }
-      .sidebar-overlay.is-open { display: block; }
       .op-header { padding-left: 56px; }
     }
 """
 
 def _sidebar_html(current_page: str) -> str:
-  """Return sidebar HTML with the given page marked as active."""
+  """Return Bootstrap-styled sidebar HTML with the given page marked as active."""
   pages = [
     ("dashboard",            "控制台",    "__group__"),
     ("manual-costs",         "采购工作台", "运营"),
@@ -181,40 +85,48 @@ def _sidebar_html(current_page: str) -> str:
   for page_id, label, group in pages:
     if group != "__group__" and group != current_group:
       current_group = group
-      links.append(f'<div class="sidebar-section-title">{group}</div>')
-    active = " is-active" if page_id == current_page else ""
-    links.append(f'<a href="../../v2/pages/{page_id}" class="sidebar-link{active}">{label}</a>')
+      links.append(
+        f'<div class="text-uppercase fw-semibold text-muted px-3 pt-3 pb-1"'
+        f' style="font-size:10px;letter-spacing:0.18em">{group}</div>'
+      )
+    active = " active" if page_id == current_page else ""
+    links.append(
+      f'<a href="../../v2/pages/{page_id}"'
+      f' class="nav-link px-3 py-1{active}">{label}</a>'
+    )
   nav_html = "\n      ".join(links)
-  return f"""<button class="sidebar-toggle" id="sidebar-toggle" aria-label="菜单">☰</button>
-  <div class="sidebar-overlay" id="sidebar-overlay"></div>
-  <nav class="sidebar" id="sidebar">
-    <div class="sidebar-brand">
-      <a href="../../v2/pages/dashboard" class="sidebar-brand-link">
-        <span class="sidebar-brand-icon">◆</span>
-        <span class="sidebar-brand-text">tts-erp</span>
+  return f"""<button class="btn btn-sm btn-outline-secondary d-lg-none position-fixed top-0 start-0 mt-2 ms-2"
+    id="sidebar-toggle" style="z-index:110" aria-label="菜单">☰</button>
+  <div class="d-none position-fixed top-0 start-0 w-100 h-100"
+    id="sidebar-overlay" style="background:rgba(20,16,10,.5);z-index:102"></div>
+  <nav class="d-flex flex-column position-fixed top-0 start-0 h-100 border-end overflow-auto"
+    id="sidebar" style="width:220px;background:var(--paper-deep);z-index:105">
+
+    <div class="p-3 pb-2 border-bottom">
+      <a href="../../v2/pages/dashboard" class="d-flex align-items-center gap-2 text-decoration-none text-dark">
+        <span style="color:var(--accent)">◆</span>
+        <span class="fw-semibold">tts-erp</span>
       </a>
     </div>
-    <div class="sidebar-nav">
+
+    <div class="flex-grow-1 py-2 overflow-auto">
       {nav_html}
     </div>
-    <div class="sidebar-footer">
-      <div class="sidebar-user" id="sidebar-user"></div>
+
+    <div class="px-3 py-2 border-top">
+      <div class="small text-muted" id="sidebar-user"></div>
     </div>
   </nav>"""
 
 _SIDEBAR_TOGGLE_JS = """
-// Sidebar mobile toggle
 (function() {
   var btn = document.getElementById('sidebar-toggle');
-  var sidebar = document.getElementById('sidebar');
-  var overlay = document.getElementById('sidebar-overlay');
-  if (!btn || !sidebar) return;
-  function toggle() {
-    sidebar.classList.toggle('is-open');
-    overlay.classList.toggle('is-open');
-  }
+  var sb = document.getElementById('sidebar');
+  var ov = document.getElementById('sidebar-overlay');
+  if (!btn || !sb) return;
+  function toggle() { sb.classList.toggle('is-open'); ov.classList.toggle('d-none'); }
   btn.addEventListener('click', toggle);
-  overlay.addEventListener('click', toggle);
+  ov.addEventListener('click', toggle);
 })();
 """
 
