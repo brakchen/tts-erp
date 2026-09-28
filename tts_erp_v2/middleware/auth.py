@@ -73,6 +73,8 @@ _READONLY_PREFIXES = (
     "/v2/linkage/",
     "/v2/reporting/",
     "/v2/fx/",  # cached exchange rates + conversion (readonly; served from fx.* cache)
+    # sync-worker 周期作业同步状态（GET /v2/sync/status；只读 integration.sync_jobs）
+    "/v2/sync/",
     "/v2/pages/",
     # SPU image reads — GET /v2/spu-images[/...] → readonly.
     # POST upload-url / {id}/confirm and DELETE /{id} are classified

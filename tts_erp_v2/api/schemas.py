@@ -25,6 +25,9 @@ class ChannelAccountOut(BaseModel):
     status: str | None = None
     opened_date: date | None = None
     credential_id: int | None = None
+    # TikTok Partner Center service_id（2026-09-28 补上读面：shops 页面
+    # 元信息编辑 / 授权链接生成需要它；additive 字段，不破坏外部契约）
+    service_id: str | None = None
     synced_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -171,7 +174,7 @@ class ManualCostIn(BaseModel):
     """
 
     spu_id: str = Field(min_length=1, max_length=128)
-    unit_cost: Decimal = Field(gt=Decimal("0"))
+    unit_cost: Decimal = Field(gt=Decimal(0))
     currency: str = Field(min_length=3, max_length=3, pattern="^[A-Z]{3}$")
     valid_from: datetime | None = None
     note: str | None = Field(default=None, max_length=500)

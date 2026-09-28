@@ -927,7 +927,7 @@
     history.replaceState(null, "", u.toString());
   }
 
-  // ---------- 店铺选择弹窗(shop_pk 缺失/无效时强制选择 ----------
+  // ---------- 店铺选择弹窗(shop_pk 缺失/无效时强制选择) ----------
   // 2026-09-28 用户拍板:URL 拿不到店铺时弹窗让用户选,不再 toast + 60s 倒计时强跳首页。
   function showShopModal(shops, note) {
     var modal = $("#ops-shop-modal");
@@ -1007,6 +1007,7 @@
           // 验证 URL 中的 shop_pk 是否在列表中
           var found = shops.some((s) => String(s.id) === urlPk);
           if (!found) {
+            sel.value = ""; // 复位下拉,避免视觉上默认显示第一个店铺造成误导(2026-09-28 review P2)
             showShopModal(shops, `URL 中的店铺 ${urlPk} 不存在，请重新选择`);
             return null;
           }
@@ -1019,7 +1020,29 @@
         }
         return sel.value;
       })
-      .catch(() => null);
+      .catch((err) => {
+        // 401 已在 loadShops 内跳转登录,不要为它弹错
+        if (err && err.message === "unauthorized") return null;
+        // 非 401 失败(网络/5xx/反序列化):不能静默卡死。弹错并提供重试入口
+        // (2026-09-28 review P2)。
+        showShopModal([], "店铺列表加载失败，请检查网络后重试");
+        var list = $("#shop-modal-list");
+        if (list) {
+          var retry = el("button", {
+            type: "button",
+            class: "op-shop-modal-item",
+            text: "重试",
+          });
+          retry.addEventListener("click", () => {
+            hideShopModal();
+            loadShops().then((pk) => {
+              if (pk) loadEnumMap().then(() => load());
+            });
+          });
+          list.appendChild(retry);
+        }
+        return null;
+      });
   }
 
   // ---------- load ----------

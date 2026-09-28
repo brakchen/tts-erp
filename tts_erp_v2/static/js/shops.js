@@ -4,9 +4,13 @@
  *   GET  /v2/commerce/channel-accounts   已注册店铺（readonly）
  *   GET  /v2/admin/shops/unregistered    插件数据里出现但未注册的 shop_id（admin）
  *   POST /v2/admin/shops/register        人工注册（admin，cookie 会话带 CSRF 头）
+ *   PATCH /v2/admin/shops/{shop_pk}      元信息编辑（名称/区域/开店日期/service_id，readwrite+）
+ *   GET  /v2/oauth/tiktok/authorize      获取授权链接（readwrite+，format=json）
  *
  * 权限降级：非 admin 会话时 unregistered/register 会 403 —— 页面仍可
  * 只读展示已注册列表，表单区提示需要 admin 登录。
+ * 2026-09-28：已注册列表「操作」列新增「获取授权链接」按钮（复用
+ * OAuth authorize 端点；有 service_id 的店铺会带上它，callback 后回填）。
  */
 (() => {
   var PREFIX = location.pathname.replace(/\/v2\/pages\/.*$/, "");
@@ -20,10 +24,14 @@
   function showErr(msg) {
     var el = $("#err");
     el.textContent = msg;
+    // HTML 初始隐藏类是 op-hidden（页面 CSS）；d-none 一起清掉防歧义。
     el.classList.remove("d-none");
+    el.classList.remove("op-hidden");
   }
   function clearErr() {
-    $("#err").classList.add("d-none");
+    var el = $("#err");
+    el.classList.add("d-none");
+    el.classList.add("op-hidden");
   }
 
   function api(path, opts) {
@@ -61,6 +69,92 @@
     );
   }
 
+  // ---------- 授权链接 ----------
+  function copyToClipboard(text, btn) {
+    function done(ok) {
+      btn.textContent = ok ? "已复制" : "复制失败";
+      setTimeout(() => { btn.textContent = "复制链接"; }, 1500);
+    }
+    function legacy() {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      try { done(document.execCommand("copy")); } catch (e) { done(false); }
+      document.body.removeChild(ta);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(
+        () => { done(true); },
+        legacy,
+      );
+    } else {
+      legacy();
+    }
+  }
+
+  function renderAuthLink(btn, url, expiresAt) {
+    var td = btn.closest("td");
+    td.textContent = "";
+    var a = document.createElement("a");
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.textContent = "打开授权页";
+    var copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "btn btn-sm btn-outline-dark ms-1";
+    copy.textContent = "复制链接";
+    copy.addEventListener("click", () => { copyToClipboard(url, copy); });
+    var hint = document.createElement("div");
+    hint.className = "text-muted small";
+    var exp = expiresAt
+      ? expiresAt.replace("T", " ").replace(/\.\d+Z$/, "Z")
+      : "";
+    hint.textContent = "state 单次使用" + (exp ? " · 有效至 " + exp + " UTC" : "");
+    td.appendChild(a);
+    td.appendChild(copy);
+    td.appendChild(hint);
+  }
+
+  function fetchAuthLink(btn) {
+    clearErr();
+    // service_id 点击时从行内单元格实时读（可能被内联编辑改过）；
+    // 有值时带给 authorize，callback 后回填到 commerce.shops。
+    var row = btn.closest("tr");
+    var svcCell = row.querySelector('[data-field="service_id"]');
+    var svcId = svcCell ? svcCell.textContent.trim() : "";
+    if (svcId === "—") svcId = "";
+    btn.disabled = true;
+    var path = "/v2/oauth/tiktok/authorize?format=json" +
+      (svcId ? "&service_id=" + encodeURIComponent(svcId) : "");
+    api(path)
+      .then((r) => {
+        if (!r) return null;
+        if (r.status === 403) {
+          showErr("获取授权链接需要 readwrite 及以上会话（当前会话角色不足）。");
+          return null;
+        }
+        return r.json().then((d) => ({ httpOk: r.ok, body: d }));
+      })
+      .then((res) => {
+        if (!res) return;
+        var d = res.body || {};
+        if (res.httpOk && d.ok && d.authorize_url) {
+          renderAuthLink(btn, d.authorize_url, d.state_expires_at);
+        } else {
+          var detail = d.detail || d.error;
+          showErr("获取授权链接失败：" + (detail || "HTTP 错误"));
+        }
+      })
+      .catch((err) => {
+        showErr(err.message || String(err));
+      })
+      .then(() => {
+        if (btn.isConnected) btn.disabled = false;
+      });
+  }
+
   // ---------- 已注册店铺 ----------
   function loadShops() {
     return api("/v2/commerce/channel-accounts?platform=tiktok&limit=500")
@@ -77,7 +171,7 @@
         var body = $("#shop-body");
         if (!shops.length) {
           body.innerHTML =
-            '<tr><td colspan="5" class="text-muted">暂无店铺</td></tr>';
+            '<tr><td colspan="7" class="text-muted">暂无店铺</td></tr>';
           return;
         }
         body.innerHTML = shops
@@ -98,10 +192,10 @@
               '<td class="mono">' +
               esc(s.shop_id) +
               "</td>" +
-              "<td>" +
+              '<td class="editable" data-field="account_name" title="点击修改">' +
               esc(s.account_name || "—") +
               "</td>" +
-              "<td>" +
+              '<td class="editable" data-field="region" title="点击修改">' +
               esc(s.region || "—") +
               "</td>" +
               '<td class="editable" data-field="service_id" title="点击修改">' +
@@ -115,10 +209,14 @@
               ' <span class="text-muted small">' +
               esc(s.status || "") +
               "</span></td>" +
+              '<td><button type="button" class="btn btn-sm btn-outline-dark btn-auth">获取授权链接</button></td>' +
               "</tr>"
             );
           })
           .join("");
+        body.querySelectorAll(".btn-auth").forEach((btn) => {
+          btn.addEventListener("click", () => fetchAuthLink(btn));
+        });
         // 点击 .editable 列进入编辑模式
         body.querySelectorAll(".editable").forEach((td) => {
           td.style.cursor = "pointer";
@@ -132,7 +230,7 @@
             input.type = field === "opened_date" ? "date" : "text";
             input.className = "form-control form-control-sm";
             input.value = current === "—" || current === "" ? "" : current;
-            if (field === "service_id") input.placeholder = "留空不修改";
+            input.placeholder = "留空不修改";
             td.textContent = "";
             td.appendChild(input);
             input.focus();
@@ -283,8 +381,9 @@
         if (me && me.role === "readonly") {
           var note = $("#auth-note");
           note.textContent =
-            "当前会话角色为 readonly — 可以查看已注册列表，注册/候选列表需要 readwrite 及以上会话。";
+            "当前会话角色为 readonly — 可以查看已注册列表，注册/编辑/候选列表/获取授权链接需要 readwrite 及以上会话。";
           note.classList.remove("d-none");
+          note.classList.remove("op-hidden");
         }
       });
     });

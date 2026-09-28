@@ -251,13 +251,26 @@ curl -sS -H "X-API-Key: $TTS_ERP_RO_KEY" \
   "http://127.0.0.1:9877/v2/fx/convert?amount=100&from_code=CNY&to_code=USD"
 ```
 
+### Sync status (`/v2/sync/*`)
+
+sync-worker 周期作业健康展示（dashboard「数据同步状态」卡片的数据源，2026-09-28 新增）。
+
+| Endpoint | Role | Notes |
+| --- | --- | --- |
+| `GET /v2/sync/status` | readonly | → `{server_time, jobs: [{job_name, interval_seconds, last_run_at, last_finished_at, last_status, last_error, next_expected_at, lag_seconds, cycles_late, severity}]}`。周期取自 `sync_worker.scheduler.JOBS` 注册表（单一真相源），运行记录取自 `integration.sync_jobs`（tiktok 作业按 shop 扇出多行，按 job_name 聚合取最新一行）。红灯规则：`now - last_run_at >= 2 × interval_seconds` → `severity="crit"`；≥1 周期 `"warn"`；周期内 `"ok"`；从未运行或注册表外 job `"unknown"`。只读、零上游外呼。 |
+
+```bash
+curl -sS -H "X-API-Key: $TTS_ERP_RO_KEY" \
+  "http://127.0.0.1:9877/v2/sync/status"
+```
+
 ### Pages
 
 | Endpoint | Role | Notes |
 | --- | --- | --- |
 | `GET /v2/pages/manual-costs` | readonly | Server-rendered operator console (shop switcher + needs-cost / needs-photo / recently-filed tabs). Browser without a session → 302 to `/v2/auth/login`. Static assets under `/static/*` are readonly-classified too. |
 | `GET /v2/pages/spu-roi` | readonly | SPU 实际 ROI 看板(账页式)。Server-rendered HTML shell;数据来自 `GET /v2/analytics/spu-roi`;JS 在 `/static/js/spu-roi.js`。 |
-| `GET /v2/pages/shops` | readonly | 店铺注册台。人工注册插件同步店铺（`commerce.shops` 补登记）；写入走 `POST /v2/admin/shops/register`（readwrite 会话）；JS 在 `/static/js/shops.js`。 |
+| `GET /v2/pages/shops` | readonly | 店铺注册台。人工注册插件同步店铺（`commerce.shops` 补登记）；写入走 `POST /v2/admin/shops/register`（readwrite 会话）；行内元信息编辑走 `PATCH /v2/admin/shops/{shop_pk}`（名称/区域/开店日期/service_id）；「获取授权链接」按钮走 `GET /v2/oauth/tiktok/authorize?format=json`（readwrite）；JS 在 `/static/js/shops.js`。 |
 
 ### Admin (`/v2/admin/*`, handler-enforced roles)
 
@@ -265,6 +278,7 @@ curl -sS -H "X-API-Key: $TTS_ERP_RO_KEY" \
 | --- | --- | --- |
 | `POST /v2/admin/shops/register` | **readwrite** | 人工注册店铺。body `{"platform": "tiktok", "shop_id": str, "account_name"?: str, "region"?: str, "seller_type"?: str, "opened_date"?: "YYYY-MM-DD"}` → `{created: bool, shop: {...}}`。幂等：重复注册只补填仍为 NULL 的展示字段，**绝不覆盖** `credential_id`/`status`（店铺后续拿到 API 授权时由 OAuth callback 补 `credential_id`，同行升级、不产生重复行）。`shop_id` 必须是数字串，`TEST_`/`MOCK_` 前缀 422。注册只影响查询关联（spu-roi 店铺筛选等），数据同步不依赖注册。 |
 | `GET /v2/admin/shops/unregistered` | **readwrite** | 列出在 `plugin.*` 插件数据里出现、但 `commerce.shops` 无行的 shop_id → `{candidates: [{shop_id, sources}]}`；注册页的候选清单。 |
+| `PATCH /v2/admin/shops/{shop_pk}` | **readwrite** | 更新店铺元信息。body `{"account_name"?: str, "region"?: str, "opened_date"?: "YYYY-MM-DD", "service_id"?: str}` → `{shop: {...}}`。COALESCE 语义：字段传 null/缺省 = 保持原值（无法用 PATCH 清成 NULL）。只动展示字段，`credential_id`/`status` 不可通过此端点修改；404 = shop_pk 不存在。 |
 
 ### SPU images (`/v2/spu-images/*`)
 
@@ -983,6 +997,7 @@ Stable external endpoints (safe to build dashboards / agents on):
 | `GET /v2/reporting/*` | readonly | v2 |
 | `POST /v2/reporting/manual-costs` | readwrite | v2 |
 | `GET /v2/fx/latest`, `/v2/fx/convert` | readonly | v2 — cached (fx.sync ≈1 上游请求/天，API 路径零上游) |
+| `GET /v2/sync/status` | readonly | v2 — sync-worker 周期作业健康（红灯 = 落后 ≥2 周期） |
 | `GET /v2/pages/manual-costs` | readonly | v2 (HTML — not a machine contract) |
 | `GET /v2/pages/spu-roi` | readonly | v2 (HTML — not a machine contract) |
 | `GET /v2/analytics/spu-roi` | readonly | stable 只读（口径见 `analytics/spu-real-roi-dashboard.md`） |
