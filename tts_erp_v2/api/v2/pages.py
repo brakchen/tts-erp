@@ -117,7 +117,7 @@ def _sidebar_html(current_page: str) -> str:
     links.append(
       f'<a href="../../v2/pages/{page_id}"'
       f' class="nav-link px-3 py-1{active}">'
-      f'{icon} <span>{label}</span></a>'
+      f"{icon} <span>{label}</span></a>"
     )
   nav_html = "\n      ".join(links)
   return f"""<button class="btn btn-sm btn-outline-secondary d-lg-none position-fixed top-0 start-0 mt-2 ms-2"

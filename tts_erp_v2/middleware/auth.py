@@ -95,7 +95,7 @@ _READONLY_PREFIXES = (
     # public avoids the "session expired → all assets 401 → page broken" UX bug
     # (browser resource requests don't carry Accept: text/html, so the auth
     # middleware returns JSON 401 instead of a 302 redirect to the login page).
-    #"/static/",  # moved to EXEMPT_PATHS — no auth needed for static assets
+    # "/static/",  # moved to EXEMPT_PATHS — no auth needed for static assets
     # intercept 配置列表和请求查询 (GET only)
     "/v2/intercept/configs",
     "/v2/intercept/requests",
@@ -415,7 +415,9 @@ class AuthMiddleware:
 
         # Static assets (CSS/JS/images) — pass through without any auth.
         # Check before prefix stripping to avoid false negatives.
-        if scope.get("path", "").startswith("/static/") or scope.get("path", "").startswith("/tts/static/"):
+        if scope.get("path", "").startswith("/static/") or scope.get(
+            "path", ""
+        ).startswith("/tts/static/"):
             await self.app(scope, receive, send)
             return
 
