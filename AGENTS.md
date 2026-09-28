@@ -282,21 +282,23 @@ journalctl --user -u tts-erp -n 50                 # systemd 日志
 
   ```bash
   git worktree add .worktrees/<slug> -b <prefix>/<slug>
-  cd .worktrees/<slug> && ln -s ../../.env .env   # 软链主仓 .env；已有 worktree 全是软链，永远最新不过期
+  cd .worktrees/<slug>
+  ln -s ../../.env .env   # 软链主仓 .env；已有 worktree 全是软链，永远最新不过期
+  ln -s ../../.venv .venv # 软链主仓 .venv；pi-lens test runner 需要 .venv/bin/python 来避免 ENOENT
   # 备选：cp /home/schan/tts-erp/.env .env —— 独立副本也行，但 .env 一改（key rotate / DB URL /
   #   TTS_ERP_AUTH_MODE 切换）副本就过期，症状更诡异；软链是仓库惯例，优先软链
-  bash scripts/test.sh fast                      # ✓ 能跑（test.sh 已自动 fallback 主仓 venv）
+  bash scripts/test.sh fast                      # ✓ 能跑（test.sh 已自动 fallback 主仓 venv + 自动建 .venv 软链）
   /home/schan/tts-erp/.venv/bin/pytest tests/<domain>/ -q   # 裸 pytest 用绝对路径，别用 .venv/bin/pytest
   ```
 
-  - venv 同理不在 worktree：一律显式用主仓绝对路径 `/home/schan/tts-erp/.venv/bin/...`，不要在 worktree 里
-    新造 venv；§4 的 `.venv/bin/pytest` 只对 master 有效
+  - venv 软链（`ln -s ../../.venv .venv`）是为了让 pi-lens 的 test runner 能发现 `.venv/bin/python`；
+    裸 pytest 仍用绝对路径 `/home/schan/tts-erp/.venv/bin/...`，不要在 worktree 里新造 venv；§4 的 `.venv/bin/pytest` 只对 master 有效
   - **不要改 / 删 worktree 里的 .env**：软链会写穿/穿透到主仓 `.env`（全 lane 共享凭证），只由 master 维护
   - **调试 .env 副作用警告**：所有 worktree 软链到主仓同一 `.env`，任一 lane 临时改 `.env`（比如
     `TTS_ERP_AUTH_MODE=off` 本地调试、`TTS_ERP_DB_URL` 切测试库）会**立即污染所有 lane**。调试后
     **必须立即还原**，或用 `.env.local` 覆盖软链（gitignored，不写穿到主仓）
-  - pi-lens 自动检查报 `spawn python ENOENT` / "test runner error" = 已知假报错（runner 在 worktree 找不到
-    python），忽略即可，以自己用绝对 venv 实测的结果为准
+  - pi-lens `spawn python ENOENT`：如未建 `.venv` 软链会出现此报错——pi-lens 的 `detectPythonVenv()` 需要
+    `.venv/bin/python` 存在才能启动 test runner。按上述步骤建软链即可修复；`scripts/test.sh` 也会自动建软链
   - bash / edit / read 的路径按**当前 cwd 的 worktree** 解析：先 `cd .worktrees/<slug>` 或全程写绝对路径，
     别用相对路径跨 worktree 操作（实测多次把 edit 落进 master 公共区，还要 stash/pop 收拾）
 - **worktree 收尾**：master 上 `git merge <branch> --no-ff -m "merge: <slug> (lane <lane-id>)"` →

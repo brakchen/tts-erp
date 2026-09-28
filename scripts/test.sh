@@ -22,6 +22,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Worktree auto-setup: if .venv doesn't exist but the main repo's .venv does,
+# create a symlink so pi-lens test runner can find .venv/bin/python.
+if [ ! -e .venv ] && [ -d ../../.venv ]; then
+  ln -s ../../.venv .venv
+fi
+
 PYTEST=".venv/bin/pytest"
 if [ ! -x "$PYTEST" ]; then
   # Worktrees share the parent repo's venv; fall back to the absolute path.
