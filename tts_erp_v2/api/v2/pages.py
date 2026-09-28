@@ -1798,6 +1798,65 @@ _DASHBOARD_PAGE_HTML = """<!doctype html>
       margin-left: auto;
     }
 
+    /* ---------- SYNC STATUS ---------- */
+    .sync-status-card { grid-column: 1 / -1; }
+    .sync-table-wrap { overflow-x: auto; }
+    .sync-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .sync-table th {
+      text-align: left;
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 500;
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--rule);
+      white-space: nowrap;
+    }
+    .sync-table td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--rule-soft);
+      font-family: var(--mono);
+      font-size: 12px;
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+    .sync-table tbody tr:last-child td { border-bottom: 0; }
+    .sync-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+    .sync-dot-ok { background: var(--ok); }
+    .sync-dot-warn { background: #8a6d1a; }
+    .sync-dot-crit { background: var(--danger); box-shadow: 0 0 0 3px rgba(140, 26, 26, 0.18); }
+    .sync-dot-unknown { background: var(--muted); }
+    .sync-sev-crit td { color: var(--danger); }
+    .sync-sev-crit td.sync-col-name { font-weight: 600; }
+    .sync-status-text-failed { color: var(--danger); }
+    .sync-loading {
+      text-align: center;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 12px;
+      padding: 20px;
+    }
+    .sync-err-msg {
+      display: block;
+      font-size: 10px;
+      color: var(--danger);
+      max-width: 360px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     /* ---------- AUTH NOTE ---------- */
     .auth-note {
       grid-column: 1 / -1;
@@ -1924,6 +1983,31 @@ _DASHBOARD_PAGE_HTML = """<!doctype html>
           <span class="status-dot status-ok"></span>
           <span>同步服务</span>
           <span class="status-detail">APScheduler</span>
+        </div>
+      </section>
+
+      <!-- Sync Status -->
+      <section class="section-card sync-status-card">
+        <div class="section-header">
+          <span class="section-title">数据同步状态</span>
+          <span class="section-scope" id="sync-updated-at">—</span>
+        </div>
+        <div class="sync-table-wrap">
+          <table class="sync-table">
+            <thead>
+              <tr>
+                <th style="width: 20px;"></th>
+                <th>作业</th>
+                <th>周期</th>
+                <th>最近一次同步</th>
+                <th>预计下次同步</th>
+                <th>状态</th>
+              </tr>
+            </thead>
+            <tbody id="sync-status-body">
+              <tr><td colspan="6" class="sync-loading">加载中…</td></tr>
+            </tbody>
+          </table>
         </div>
       </section>
     </div>
