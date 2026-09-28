@@ -53,56 +53,203 @@ router = APIRouter(prefix="/v2/pages", tags=["pages"])
 _JS_DIR = Path(__file__).resolve().parents[2] / "static" / "js"
 
 # ── Shared sidebar navigation ─────────────────────────────────────────
-# Bootstrap 5 utilities + minimal custom CSS (active accent + responsive).
+# Bootstrap 5 utilities + a shared responsive navigation shell.
 
 _SIDEBAR_CSS = """
-    body { margin-left: 220px; transition: margin-left 200ms ease; }
+    /* Shared sidebar shell: injected after each page's own styles on purpose. */
+    body {
+      --sidebar-width: 220px;
+      --sidebar-rail-width: 64px;
+      --sidebar-paper: var(--paper, var(--bg, #F4EFE4));
+      --sidebar-paper-deep: var(--paper-deep, var(--card, #EAE3D2));
+      --sidebar-ink: var(--ink, var(--text, #1B1814));
+      --sidebar-ink-soft: var(--ink-soft, var(--muted, #4A4239));
+      --sidebar-rule: var(--rule, var(--border, #C9BFA8));
+      --sidebar-rule-soft: var(--rule-soft, var(--border, #DDD4BF));
+      --sidebar-accent: var(--accent, #B8390E);
+      --sidebar-accent-deep: var(--accent-deep, var(--accent, #8F2C09));
+      --sidebar-muted: var(--muted, #6E6657);
+      --sidebar-mono: var(--mono, ui-monospace, monospace);
+      margin-left: var(--sidebar-width);
+      transition: margin-left 180ms ease;
+    }
+    body.sidebar-collapsed { margin-left: var(--sidebar-rail-width); }
+    body.sidebar-mobile-open { overflow: hidden; }
     .op-home-link { display: none; }
-    /* Sidebar link colors: override Bootstrap .nav-link blue → warm-paper ink */
-    #sidebar .nav-link { color: var(--ink-soft); }
-    #sidebar .nav-link:hover { color: var(--ink); background: var(--paper); }
-    #sidebar .nav-link.active { color: var(--accent); border-left: 3px solid var(--accent); padding-left: 9px; border-bottom: 0; }
-    .sidebar { width: 220px; transition: width 200ms ease, transform 200ms ease; }
-    /* Collapsed state (desktop) */
-    body.sidebar-collapsed { margin-left: 56px; }
-    .sidebar.is-collapsed { width: 56px !important; }
-    .sidebar.is-collapsed .sidebar-brand-text,
-    .sidebar.is-collapsed .sidebar-section-title,
-    .sidebar.is-collapsed .nav-link span,
-    .sidebar.is-collapsed .sidebar-user { display: none; }
-    .sidebar.is-collapsed .nav-link { text-align: center; padding-left: 0; padding-right: 0; border-left: 0; }
-    .sidebar.is-collapsed .nav-link.active { border-left: 0; border-bottom: 2px solid var(--accent); padding-left: 0; }
-    .sidebar.is-collapsed .sidebar-collapse-icon { transform: rotate(180deg); }
-    .sidebar-collapse-btn { cursor: pointer; background: none; border: 1px solid var(--rule); color: var(--muted); padding: 6px 12px; border-radius: 0; width: 100%; text-align: left; display: flex; align-items: center; gap: 8px; }
-    .sidebar-collapse-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+    #sidebar.sidebar {
+      width: var(--sidebar-width);
+      background: var(--sidebar-paper-deep);
+      color: var(--sidebar-ink);
+      z-index: 105;
+      box-shadow: 1px 0 0 var(--sidebar-rule);
+      transition: width 180ms ease, transform 180ms ease;
+    }
+    #sidebar .sidebar-brand {
+      min-height: 58px;
+      color: var(--sidebar-ink);
+      letter-spacing: 0.04em;
+    }
+    #sidebar .sidebar-brand-mark { color: var(--sidebar-accent); }
+    #sidebar .sidebar-nav { scrollbar-width: thin; }
+    #sidebar .sidebar-section-title {
+      color: var(--sidebar-muted) !important;
+      font-family: var(--sidebar-mono);
+      font-size: 10px;
+      letter-spacing: 0.18em;
+    }
+    #sidebar .nav-link {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-height: 38px;
+      margin: 2px 8px;
+      padding: 7px 10px !important;
+      border: 1px solid transparent;
+      color: var(--sidebar-ink-soft);
+      line-height: 1.25;
+      white-space: nowrap;
+      transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+    }
+    #sidebar .nav-link:hover {
+      color: var(--sidebar-ink);
+      background: color-mix(in srgb, var(--sidebar-paper) 74%, transparent);
+      border-color: var(--sidebar-rule-soft);
+    }
+    #sidebar .nav-link:focus-visible,
+    .sidebar-collapse-btn:focus-visible,
+    .sidebar-mobile-toggle:focus-visible {
+      outline: 2px solid var(--sidebar-accent);
+      outline-offset: 2px;
+    }
+    #sidebar .nav-link.active {
+      color: var(--sidebar-accent-deep);
+      background: var(--sidebar-paper);
+      border-color: var(--sidebar-rule);
+      box-shadow: inset 3px 0 0 var(--sidebar-accent);
+      font-weight: 600;
+    }
+    #sidebar .sidebar-nav-icon {
+      display: inline-grid;
+      place-items: center;
+      width: 22px;
+      min-width: 22px;
+      height: 22px;
+      border: 1px solid var(--sidebar-rule);
+      color: var(--sidebar-muted);
+      font-family: var(--sidebar-mono);
+      font-size: 11px;
+      line-height: 1;
+    }
+    #sidebar .nav-link.active .sidebar-nav-icon {
+      border-color: var(--sidebar-accent);
+      color: var(--sidebar-accent);
+    }
+    #sidebar .sidebar-footer { background: var(--sidebar-paper-deep); }
+    .sidebar-collapse-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 7px 10px;
+      border: 1px solid var(--sidebar-rule);
+      border-radius: 0;
+      background: transparent;
+      color: var(--sidebar-muted);
+      cursor: pointer;
+      text-align: left;
+    }
+    .sidebar-collapse-btn:hover {
+      color: var(--sidebar-accent);
+      border-color: var(--sidebar-accent);
+      background: var(--sidebar-paper);
+    }
+    .sidebar-collapse-icon {
+      display: inline-grid;
+      place-items: center;
+      width: 20px;
+      min-width: 20px;
+      font-family: var(--sidebar-mono);
+    }
+    .sidebar-mobile-toggle {
+      z-index: 110;
+      border-radius: 0;
+      background: var(--sidebar-paper-deep);
+      color: var(--sidebar-ink);
+    }
+    #sidebar-overlay {
+      z-index: 102;
+      background: rgba(27, 24, 20, 0.52);
+      backdrop-filter: blur(1px);
+    }
+
+    /* Collapsed desktop rail. Labels hide, but distinct icons keep it usable. */
+    #sidebar.sidebar.is-collapsed { width: var(--sidebar-rail-width); }
+    #sidebar.is-collapsed .sidebar-brand { justify-content: center; padding-inline: 0 !important; }
+    #sidebar.is-collapsed .sidebar-brand-text,
+    #sidebar.is-collapsed .sidebar-section-title,
+    #sidebar.is-collapsed .sidebar-label { display: none; }
+    #sidebar.is-collapsed .sidebar-nav { padding-top: 8px !important; }
+    #sidebar.is-collapsed .nav-link {
+      justify-content: center;
+      min-height: 42px;
+      margin-inline: 7px;
+      padding-inline: 0 !important;
+    }
+    #sidebar.is-collapsed .nav-link.active {
+      box-shadow: inset 0 -2px 0 var(--sidebar-accent);
+    }
+    #sidebar.is-collapsed .sidebar-footer { padding: 8px !important; }
+    #sidebar.is-collapsed .sidebar-collapse-btn { justify-content: center; padding-inline: 0; }
+    #sidebar.is-collapsed .sidebar-collapse-text { display: none; }
+
     @media (max-width: 991.98px) {
-      body { margin-left: 0; }
+      body,
       body.sidebar-collapsed { margin-left: 0; }
-      .sidebar { transform: translateX(-100%); }
-      .sidebar.is-open { transform: translateX(0); }
-      .sidebar.is-collapsed { width: 220px !important; }
-      .sidebar.is-collapsed .sidebar-brand-text,
-      .sidebar.is-collapsed .sidebar-section-title,
-      .sidebar.is-collapsed .nav-link span,
-      .sidebar.is-collapsed .sidebar-user { display: block; }
-      .sidebar.is-collapsed .nav-link { text-align: left; padding-left: 12px; }
+      #sidebar.sidebar,
+      #sidebar.sidebar.is-collapsed {
+        width: min(280px, calc(100vw - 48px));
+        transform: translateX(-100%);
+        box-shadow: 8px 0 24px rgba(27, 24, 20, 0.18);
+      }
+      #sidebar.sidebar.is-open { transform: translateX(0); }
+      #sidebar.is-collapsed .sidebar-brand { justify-content: flex-start; padding-inline: 1rem !important; }
+      #sidebar.is-collapsed .sidebar-brand-text,
+      #sidebar.is-collapsed .sidebar-section-title,
+      #sidebar.is-collapsed .sidebar-label { display: block; }
+      #sidebar.is-collapsed .sidebar-nav { padding-top: 0.5rem !important; }
+      #sidebar.is-collapsed .nav-link {
+        justify-content: flex-start;
+        min-height: 38px;
+        margin-inline: 8px;
+        padding: 7px 10px !important;
+      }
+      #sidebar.is-collapsed .nav-link.active { box-shadow: inset 3px 0 0 var(--sidebar-accent); }
       .sidebar-collapse-btn { display: none !important; }
       .op-header { padding-left: 56px; }
+    }
+    @media (min-width: 992px) {
+      #sidebar-overlay { display: none !important; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      body,
+      #sidebar.sidebar { transition: none; }
     }
 """
 
 
 def _sidebar_html(current_page: str) -> str:
-  """Return Bootstrap-styled sidebar HTML with the given page marked as active."""
+  """Return the shared sidebar with the current page marked as active."""
   pages = [
-    ("dashboard", "\u25ce", "控制台", "__group__"),
-    ("manual-costs", "\u270e", "采购工作台", "运营"),
-    ("spu-roi", "\u2630", "SPU ROI", "运营"),
-    ("shops", "\u25ce", "店铺注册", "店铺"),
-    ("enum-map", "\u25ce", "枚举映射", "数据"),
-    ("intercept-configs", "\u25ce", "拦截配置", "拦截"),
-    ("intercept-requests", "\u25ce", "拦截记录", "拦截"),
-    ("intercept-stats", "\u25ce", "拦截统计", "拦截"),
+    ("dashboard", "台", "控制台", "__group__"),
+    ("manual-costs", "采", "采购工作台", "运营"),
+    ("spu-roi", "益", "SPU ROI", "运营"),
+    ("shops", "店", "店铺注册", "店铺"),
+    ("enum-map", "映", "枚举映射", "数据"),
+    ("intercept-configs", "配", "拦截配置", "拦截"),
+    ("intercept-requests", "录", "拦截记录", "拦截"),
+    ("intercept-stats", "计", "拦截统计", "拦截"),
   ]
   links = []
   current_group = None
@@ -110,39 +257,40 @@ def _sidebar_html(current_page: str) -> str:
     if group != "__group__" and group != current_group:
       current_group = group
       links.append(
-        f'<div class="sidebar-section-title text-uppercase fw-semibold text-muted px-3 pt-3 pb-1"'
-        f' style="font-size:10px;letter-spacing:0.18em">{group}</div>'
+        '<div class="sidebar-section-title text-uppercase fw-semibold px-3 pt-3 pb-1">'
+        f"{group}</div>"
       )
     active = " active" if page_id == current_page else ""
+    aria_current = ' aria-current="page"' if page_id == current_page else ""
     links.append(
-      f'<a href="../../v2/pages/{page_id}"'
-      f' class="nav-link px-3 py-1{active}">'
-      f"{icon} <span>{label}</span></a>"
+      f'<a href="../../v2/pages/{page_id}" class="nav-link{active}"'
+      f' title="{label}"{aria_current}>'
+      f'<span class="sidebar-nav-icon" aria-hidden="true">{icon}</span>'
+      f'<span class="sidebar-label">{label}</span></a>'
     )
   nav_html = "\n      ".join(links)
-  return f"""<button class="btn btn-sm btn-outline-secondary d-lg-none position-fixed top-0 start-0 mt-2 ms-2"
-    id="sidebar-toggle" style="z-index:110" aria-label="菜单">☰</button>
+  return f"""<button type="button"
+    class="sidebar-mobile-toggle btn btn-sm d-lg-none position-fixed top-0 start-0 mt-2 ms-2"
+    id="sidebar-toggle" aria-label="打开主导航" aria-controls="sidebar" aria-expanded="false">☰</button>
   <div class="d-none position-fixed top-0 start-0 w-100 h-100"
-    id="sidebar-overlay" style="background:rgba(20,16,10,.5);z-index:102"></div>
-  <nav class="d-flex flex-column position-fixed top-0 start-0 h-100 border-end overflow-auto"
-    id="sidebar" style="background:var(--paper-deep);z-index:105">
+    id="sidebar-overlay" aria-hidden="true"></div>
+  <nav class="sidebar d-flex flex-column position-fixed top-0 start-0 h-100 border-end"
+    id="sidebar" aria-label="主导航">
 
-    <div class="p-3 pb-2 border-bottom">
-      <a href="../../v2/pages/dashboard" class="d-flex align-items-center gap-2 text-decoration-none text-dark">
-        <span style="color:var(--accent)">◆</span>
-        <span class="sidebar-brand-text fw-semibold">tts-erp</span>
-      </a>
-    </div>
+    <a href="../../v2/pages/dashboard"
+      class="sidebar-brand d-flex align-items-center gap-2 p-3 border-bottom text-decoration-none">
+      <span class="sidebar-brand-mark" aria-hidden="true">◆</span>
+      <span class="sidebar-brand-text fw-semibold">tts-erp</span>
+    </a>
 
-    <div class="flex-grow-1 py-2 overflow-auto">
+    <div class="sidebar-nav flex-grow-1 py-2 overflow-auto">
       {nav_html}
     </div>
 
-    <div class="px-3 py-2 border-top">
-      <div class="small text-muted sidebar-user" id="sidebar-user"></div>
-      <button class="sidebar-collapse-btn mt-2"
-        id="sidebar-collapse" aria-label="折叠侧边栏">
-        <span class="sidebar-collapse-icon">«</span>
+    <div class="sidebar-footer px-3 py-2 border-top">
+      <button type="button" class="sidebar-collapse-btn"
+        id="sidebar-collapse" aria-label="折叠侧边栏" aria-controls="sidebar" aria-expanded="true">
+        <span class="sidebar-collapse-icon" aria-hidden="true">«</span>
         <span class="sidebar-collapse-text small">折叠</span>
       </button>
     </div>
@@ -155,40 +303,75 @@ _SIDEBAR_TOGGLE_JS = """
   var sb = document.getElementById('sidebar');
   var ov = document.getElementById('sidebar-overlay');
   var collapseBtn = document.getElementById('sidebar-collapse');
-  if (!btn || !sb) return;
-  function open()  { sb.classList.add('is-open'); ov.classList.remove('d-none'); }
-  function close() { sb.classList.remove('is-open'); ov.classList.add('d-none'); }
-  function toggle() { sb.classList.contains('is-open') ? close() : open(); }
-  btn.addEventListener('click', toggle);
-  ov.addEventListener('click', close);
-  // Escape key closes sidebar (mobile accessibility)
-  document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape' && sb.classList.contains('is-open')) close();
-  });
-  // Desktop collapse toggle
-  if (collapseBtn) {
-    if (localStorage.getItem('sidebar-collapsed') === '1') {
-      sb.classList.add('is-collapsed');
-      document.body.classList.add('sidebar-collapsed');
+  var desktopQuery = window.matchMedia('(min-width: 992px)');
+  if (!btn || !sb || !ov) return;
+
+  function readCollapsed() {
+    try { return localStorage.getItem('sidebar-collapsed') === '1'; }
+    catch (_) { return false; }
+  }
+
+  function setCollapsed(collapsed, persist) {
+    sb.classList.toggle('is-collapsed', collapsed);
+    document.body.classList.toggle('sidebar-collapsed', collapsed);
+    if (collapseBtn) {
+      var icon = collapseBtn.querySelector('.sidebar-collapse-icon');
+      var text = collapseBtn.querySelector('.sidebar-collapse-text');
+      if (icon) icon.textContent = collapsed ? '»' : '«';
+      if (text) text.textContent = collapsed ? '展开' : '折叠';
+      collapseBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      collapseBtn.setAttribute('aria-label', collapsed ? '展开侧边栏' : '折叠侧边栏');
+      collapseBtn.title = collapsed ? '展开侧边栏' : '折叠侧边栏';
     }
+    if (persist) {
+      try { localStorage.setItem('sidebar-collapsed', collapsed ? '1' : '0'); }
+      catch (_) { /* Storage can be unavailable in privacy mode. */ }
+    }
+  }
+
+  function setMobileOpen(open, restoreFocus) {
+    var shouldOpen = open && !desktopQuery.matches;
+    sb.classList.toggle('is-open', shouldOpen);
+    ov.classList.toggle('d-none', !shouldOpen);
+    var hidden = !desktopQuery.matches && !shouldOpen;
+    sb.toggleAttribute('inert', hidden);
+    if (hidden) sb.setAttribute('aria-hidden', 'true');
+    else sb.removeAttribute('aria-hidden');
+    ov.setAttribute('aria-hidden', shouldOpen ? 'false' : 'true');
+    btn.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+    btn.setAttribute('aria-label', shouldOpen ? '关闭主导航' : '打开主导航');
+    document.body.classList.toggle('sidebar-mobile-open', shouldOpen);
+    if (!shouldOpen && restoreFocus) btn.focus();
+  }
+
+  setMobileOpen(false, false);
+  btn.addEventListener('click', function() {
+    setMobileOpen(!sb.classList.contains('is-open'), false);
+  });
+  ov.addEventListener('click', function() { setMobileOpen(false, true); });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && sb.classList.contains('is-open')) {
+      setMobileOpen(false, true);
+    }
+  });
+
+  if (collapseBtn) {
+    setCollapsed(readCollapsed(), false);
     collapseBtn.addEventListener('click', function() {
-      var collapsed = sb.classList.toggle('is-collapsed');
-      document.body.classList.toggle('sidebar-collapsed', collapsed);
-      localStorage.setItem('sidebar-collapsed', collapsed ? '1' : '0');
-      collapseBtn.querySelector('.sidebar-collapse-icon').textContent = collapsed ? '»' : '«';
-      collapseBtn.querySelector('.sidebar-collapse-text').textContent = collapsed ? '展开' : '折叠';
+      setCollapsed(!sb.classList.contains('is-collapsed'), true);
     });
   }
-  // nav link + brand link click: close sidebar then navigate after animation
-  sb.querySelectorAll('.nav-link, a[href]').forEach(function(a) {
-    a.addEventListener('click', function(e) {
-      if (window.innerWidth >= 992) return;
-      if (!a.getAttribute('href') || a.getAttribute('href') === '#') return;
-      e.preventDefault();
-      var href = a.getAttribute('href');
-      close();
-      setTimeout(function() { window.location.href = href; }, 220);
-    });
+
+  function handleBreakpointChange() { setMobileOpen(false, false); }
+  if (desktopQuery.addEventListener) {
+    desktopQuery.addEventListener('change', handleBreakpointChange);
+  } else {
+    desktopQuery.addListener(handleBreakpointChange);
+  }
+
+  // Navigation closes the mobile drawer immediately; normal link navigation continues.
+  sb.querySelectorAll('a[href]').forEach(function(a) {
+    a.addEventListener('click', function() { setMobileOpen(false, false); });
   });
 })();
 """
@@ -220,8 +403,8 @@ def _page(html: str, *, current_page: str = "") -> HTMLResponse:
   )
   if current_page:
     sidebar_html = _sidebar_html(current_page)
-    # Inject sidebar CSS into <style> block
-    html = html.replace("<style>", "<style>" + _SIDEBAR_CSS, 1)
+    # Append shared CSS so page-level ``margin`` shorthands cannot erase the shell offset.
+    html = html.replace("</style>", _SIDEBAR_CSS + "\n  </style>", 1)
     # Inject sidebar HTML + toggle JS after <body>
     html = html.replace(
       "<body>",
