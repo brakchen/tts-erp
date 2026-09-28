@@ -413,6 +413,12 @@ class AuthMiddleware:
             await self.app(scope, receive, send)
             return
 
+        # Static assets (CSS/JS/images) — pass through without any auth.
+        # Check before prefix stripping to avoid false negatives.
+        if scope.get("path", "").startswith("/static/") or scope.get("path", "").startswith("/tts/static/"):
+            await self.app(scope, receive, send)
+            return
+
         # 2026-09-01: NGINX in production was observed forwarding some
         # routes with the TTS_ERP_EXTERNAL_PREFIX intact (not stripped
         # by ``proxy_pass ... /;``) while stripping the prefix for
