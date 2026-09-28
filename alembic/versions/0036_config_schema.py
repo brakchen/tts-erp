@@ -92,14 +92,9 @@ def upgrade() -> None:
             """
         )
     )
+    op.execute(text("CREATE INDEX ix_enum_map_type ON config.enum_map (enum_type)"))
     op.execute(
-        text("CREATE INDEX ix_enum_map_type ON config.enum_map (enum_type)")
-    )
-    op.execute(
-        text(
-            "COMMENT ON TABLE config.enum_map IS "
-            "'SPU ROI 钻取面板枚举值中文化映射表'"
-        )
+        text("COMMENT ON TABLE config.enum_map IS 'SPU ROI 钻取面板枚举值中文化映射表'")
     )
     op.execute(
         text(
@@ -108,16 +103,8 @@ def upgrade() -> None:
             "cost_source/shipment_status/column_header'"
         )
     )
-    op.execute(
-        text(
-            "COMMENT ON COLUMN config.enum_map.enum_value IS '原始英文枚举值'"
-        )
-    )
-    op.execute(
-        text(
-            "COMMENT ON COLUMN config.enum_map.label_zh IS '中文显示标签'"
-        )
-    )
+    op.execute(text("COMMENT ON COLUMN config.enum_map.enum_value IS '原始英文枚举值'"))
+    op.execute(text("COMMENT ON COLUMN config.enum_map.label_zh IS '中文显示标签'"))
 
     # updated_at 触发器（复用 public.fn_touch_updated_at）
     op.execute(
