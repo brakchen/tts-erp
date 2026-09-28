@@ -189,6 +189,14 @@
         link: '../../v2/pages/shops',
         accent: 'neutral',
       },
+      {
+        label: '枚举映射',
+        value: '管理',
+        icon: '🔤',
+        hint: '配置 SPU ROI 钻取面板的枚举中文化翻译',
+        link: '../../v2/pages/enum-map',
+        accent: 'neutral',
+      },
     ];
 
     // pi-lens-ignore: no-unsafe-innerhtml — trusted backend data in static template
