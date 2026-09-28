@@ -667,6 +667,17 @@ def _fmt_ratio(value: Decimal | None) -> str | None:
     return format(value.quantize(_RATIO_Q, rounding=ROUND_HALF_UP), ".2f")
 
 
+def _fmt_rate(value: Decimal | None) -> str | None:
+    """率字段（退款率/全损率/取消率）格式化：4 位小数，供前端 ×100 显示 1 位百分比。
+
+    与 _fmt_ratio(2dp) 区分：ROI 用 2 位足够，率字段 2 位会把 0.0226 砍成
+    '0.02' → 前端显示 '2%'（正确值 2.3%），精度不可接受。
+    """
+    if value is None:
+        return None
+    return format(value.quantize(_MONEY_Q, rounding=ROUND_HALF_UP), ".4f")
+
+
 def _row_int(value: Any) -> int:
     try:
         return int(value) if value is not None else 0
@@ -1206,7 +1217,7 @@ def _query_spu_roi(
     def _rate(numer: int) -> str | None:
         if total_orders_count <= 0:
             return None
-        return _fmt_ratio(Decimal(numer) / Decimal(total_orders_count))
+        return _fmt_rate(Decimal(numer) / Decimal(total_orders_count))
 
     refund_rate_total = _rate(refund_order_count_total)
     full_loss_rate_total = _rate(full_loss_order_count)
