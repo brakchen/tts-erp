@@ -26,9 +26,9 @@ router = APIRouter(prefix="/v2/config", tags=["config"])
 class EnumMapUpsert(BaseModel):
     """PUT body: 新增或更新一条枚举映射。"""
 
-    enum_type: str = Field(..., max_length=64)
-    enum_value: str = Field(..., max_length=128)
-    label_zh: str = Field(..., max_length=256)
+    enum_type: str = Field(..., min_length=1, max_length=64)
+    enum_value: str = Field(..., min_length=1, max_length=128)
+    label_zh: str = Field(..., min_length=1, max_length=256)
     sort_order: int = Field(default=0, ge=0)
 
 
@@ -56,9 +56,13 @@ def get_enum_map(sess: Session = Depends(get_session)) -> dict[str, dict[str, st
       ...
     }
     """
-    rows = sess.execute(
-        select(EnumMap).order_by(EnumMap.enum_type, EnumMap.sort_order, EnumMap.id)
-    ).scalars().all()
+    rows = (
+        sess.execute(
+            select(EnumMap).order_by(EnumMap.enum_type, EnumMap.sort_order, EnumMap.id)
+        )
+        .scalars()
+        .all()
+    )
 
     result: dict[str, dict[str, str]] = {}
     for r in rows:
@@ -74,9 +78,13 @@ def get_enum_map(sess: Session = Depends(get_session)) -> dict[str, dict[str, st
 @router.get("/enum-map/list")
 def list_enum_map(sess: Session = Depends(get_session)) -> list[dict]:
     """返回所有枚举映射（带 id），管理页面 CRUD 用。"""
-    rows = sess.execute(
-        select(EnumMap).order_by(EnumMap.enum_type, EnumMap.sort_order, EnumMap.id)
-    ).scalars().all()
+    rows = (
+        sess.execute(
+            select(EnumMap).order_by(EnumMap.enum_type, EnumMap.sort_order, EnumMap.id)
+        )
+        .scalars()
+        .all()
+    )
     return [
         {
             "id": r.id,
@@ -112,6 +120,7 @@ def upsert_enum_map(
         existing.label_zh = body.label_zh
         existing.sort_order = body.sort_order
         sess.flush()
+        sess.commit()
         return {"id": existing.id, "action": "updated"}
 
     new_row = EnumMap(
@@ -122,6 +131,7 @@ def upsert_enum_map(
     )
     sess.add(new_row)
     sess.flush()
+    sess.commit()
     return {"id": new_row.id, "action": "created"}
 
 
@@ -142,4 +152,5 @@ def delete_enum_map(
         raise HTTPException(status_code=404, detail="enum_map entry not found")
     sess.delete(row)
     sess.flush()
+    sess.commit()
     return {"deleted": id}
