@@ -364,11 +364,12 @@ _SHOPS_PAGE_HTML = """<!doctype html>
           <th class="op-th">shop_id</th>
           <th class="op-th">名称</th>
           <th class="op-th">区域</th>
+          <th class="op-th">service_id</th>
           <th class="op-th">开店日期</th>
           <th class="op-th">同步方式</th>
           <th class="op-th" style="width:120px;">操作</th>
         </tr></thead>
-        <tbody id="shop-body"><tr><td colspan="5" class="op-empty">加载中…</td></tr></tbody>
+        <tbody id="shop-body"><tr><td colspan="6" class="op-empty">加载中…</td></tr></tbody>
       </table>
     </section>
   </main>

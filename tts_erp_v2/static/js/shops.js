@@ -76,49 +76,55 @@
             : '<span class="badge badge-sync-plugin">仅插件</span>';
           var pk = s.shop_pk || s.id;
           var dateVal = s.opened_date || "";
+          var svcId = s.service_id || "";
           return "<tr data-shop-pk=" + pk + ">" +
             '<td class="mono">' + esc(s.shop_id) + "</td>" +
             "<td>" + esc(s.account_name || "—") + "</td>" +
             "<td>" + esc(s.region || "—") + "</td>" +
-            '<td class="opened-date" style="cursor:pointer" title="点击修改">' +
+            '<td class="editable" data-field="service_id" title="点击修改">' +
+              esc(svcId || "—") + "</td>" +
+            '<td class="editable" data-field="opened_date" title="点击修改">' +
               esc(dateVal || "—") + "</td>" +
             "<td>" + badge + ' <span class="text-muted small">' + esc(s.status || "") + "</span></td>" +
             "</tr>";
         }).join("");
-        // 点击 opened_date 列进入编辑模式
-        body.querySelectorAll(".opened-date").forEach((td) => {
+        // 点击 .editable 列进入编辑模式
+        body.querySelectorAll(".editable").forEach((td) => {
+          td.style.cursor = "pointer";
           td.addEventListener("click", () => {
             if (td.querySelector("input")) return; // 已在编辑
             var row = td.closest("tr");
-            // pi-lens-ignore: no-unsafe-innerhtml
             var pk = row.getAttribute("data-shop-pk");
+            var field = td.getAttribute("data-field");
             var current = td.textContent.trim();
             var input = document.createElement("input");
-            input.type = "date";
+            input.type = field === "opened_date" ? "date" : "text";
             input.className = "form-control form-control-sm";
-            input.value = current === "—" ? "" : current;
-            // pi-lens-ignore: no-unsafe-innerhtml
+            input.value = (current === "—" || current === "") ? "" : current;
+            if (field === "service_id") input.placeholder = "留空不修改";
             td.textContent = "";
-            // pi-lens-ignore: no-unsafe-innerhtml
             td.appendChild(input);
             input.focus();
             function save() {
-              var newVal = input.value || null;
+              var raw = input.value.trim();
+              var newVal = raw || null;
               td.textContent = newVal || "—";
               if (newVal === current || (newVal === null && current === "—")) return;
+              var payload = {};
+              payload[field] = newVal;
               api("/v2/admin/shops/" + pk, {
                 method: "PATCH",
-                body: JSON.stringify({ opened_date: newVal }),
+                body: JSON.stringify(payload),
               }).then((r) => {
                 if (!r.ok) {
                   showErr("更新失败: HTTP " + r.status);
-                  td.textContent = current; // 回滚
+                  td.textContent = current;
                   return;
                 }
                 return r.json();
               }).then((data) => {
                 if (data && data.shop) {
-                  td.textContent = data.shop.opened_date || "—";
+                  td.textContent = data.shop[field] || "—";
                 }
               }).catch((err) => {
                 showErr(err.message || String(err));
