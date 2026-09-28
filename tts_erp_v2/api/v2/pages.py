@@ -62,7 +62,7 @@ _SIDEBAR_CSS = """
     #sidebar .nav-link { color: var(--ink-soft); }
     #sidebar .nav-link:hover { color: var(--ink); background: var(--paper); }
     #sidebar .nav-link.active { color: var(--accent); border-left: 3px solid var(--accent); padding-left: 9px; border-bottom: 0; }
-    .sidebar { transition: width 200ms ease, transform 200ms ease; }
+    .sidebar { width: 220px; transition: width 200ms ease, transform 200ms ease; }
     /* Collapsed state (desktop) */
     body.sidebar-collapsed { margin-left: 56px; }
     .sidebar.is-collapsed { width: 56px !important; }
@@ -125,7 +125,7 @@ def _sidebar_html(current_page: str) -> str:
   <div class="d-none position-fixed top-0 start-0 w-100 h-100"
     id="sidebar-overlay" style="background:rgba(20,16,10,.5);z-index:102"></div>
   <nav class="d-flex flex-column position-fixed top-0 start-0 h-100 border-end overflow-auto"
-    id="sidebar" style="width:220px;background:var(--paper-deep);z-index:105">
+    id="sidebar" style="background:var(--paper-deep);z-index:105">
 
     <div class="p-3 pb-2 border-bottom">
       <a href="../../v2/pages/dashboard" class="d-flex align-items-center gap-2 text-decoration-none text-dark">
