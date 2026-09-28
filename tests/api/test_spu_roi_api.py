@@ -1852,6 +1852,12 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
         "return_loss": "0.0000",
         "net_profit": "0.0000",
         "roi_real": None,  # Σspend=0 → null(页面显示 —)
+        "refund_order_count": 0,
+        "full_loss_qty": 0,
+        "full_loss_cancelled_qty": 0,
+        "domestic_cancelled_order_count": 0,
+        "overseas_cancelled_order_count": 0,
+        "roi_breakeven": None,
     }
     meta = body["meta"]
     assert meta["fx"] == {
@@ -1999,8 +2005,9 @@ def test_spu_roi_js_targets_dashboard_hooks():
 
 
 def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
-    """§7.1 结余带(2026-09-06):去 SPU 数;新增 GMV/有效单量/总单量/取消单量;
-    全损货损改名全损退款(数值仍 = totals.return_loss);每个概览格带 ? 口径说明。
+    """§7.1 结余带:11 格指标(广告消耗/有效销售/有效单量/退款数/退款率/
+    全损量/全损率/取消量/取消率/实际ROI/实际保本ROI/广告系统保本ROI);
+    每个概览格带 ? 口径说明。
     """
     from pathlib import Path
 
@@ -2009,23 +2016,26 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     body = r.text
-    # 10 格指标 id 齐全(顺序 = 页面骨架)
+    # 11 格指标 id 齐全(顺序 = 页面骨架)
     for cell_id in (
         "sum-spend",
         "sum-sales",
-        "sum-gmv",
         "sum-orders",
-        "sum-total-orders",
-        "sum-refund",
-        "sum-loss",
-        "sum-cancelled-orders",
-        "sum-profit",
+        "sum-refund-count",
+        "sum-refund-rate",
+        "sum-loss-qty",
+        "sum-loss-rate",
+        "sum-cancel-count",
+        "sum-cancel-rate",
         "sum-roi",
+        "sum-roi-breakeven",
+        "sum-roi-ad",
     ):
         assert f'id="{cell_id}"' in body, f"结余带缺 {cell_id} 格"
     # 不再展示 SPU 个数
     assert 'id="sum-n"' not in body
-    assert "全损退款" in body  # 全损货损改名
+    assert "全损量" in body
+    assert "退款数" in body
     # D8(2026-09-07)主表精确匹配 th 表头文本
     main_th_labels = re.findall(r'<th[^>]*scope="col"[^>]*>([^<]+)</th>', body)
     for col_label in (
@@ -2065,7 +2075,7 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert "tpl-drilldown-panel" in body
     # 每个概览格都有 ? 口径悬停
     assert body.count('class="op-hint"') >= 10
-    # JS 必须填充全损格与新格
+    # JS 必须填充新格
     js_src = (
         Path(__file__).resolve().parents[2]
         / "tts_erp_v2"
@@ -2073,11 +2083,11 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
         / "js"
         / "spu-roi.js"
     ).read_text(encoding="utf-8")
-    assert '("#sum-loss")' in js_src
-    assert "totals.return_loss" in js_src
-    assert '("#sum-gmv")' in js_src
-    assert '("#sum-total-orders")' in js_src
-    assert '("#sum-cancelled-orders")' in js_src
+    assert '("#sum-loss-qty")' in js_src
+    assert '("#sum-refund-count")' in js_src
+    assert '("#sum-cancel-count")' in js_src
+    assert '("#sum-roi-breakeven")' in js_src
+    assert '("#sum-roi-ad")' in js_src
 
 
 def test_spu_roi_page_d8_no_column_toggles(api_client, readonly_key):

@@ -246,6 +246,7 @@ _SHOPS_PAGE_HTML = """<!doctype html>
           <th class="op-th">区域</th>
           <th class="op-th">开店日期</th>
           <th class="op-th">同步方式</th>
+          <th class="op-th" style="width:120px;">操作</th>
         </tr></thead>
         <tbody id="shop-body"><tr><td colspan="5" class="op-empty">加载中…</td></tr></tbody>
       </table>
@@ -1002,16 +1003,18 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     <!-- 结余带:row-cols 栅格降密度(xs 2 / sm 3 / md 4 / lg 5 两行),JS 只写 #sum-* 文本 + is-err/is-ok -->
     <section class="op-counter px-2 px-md-4 py-3 py-md-4" id="summaries" aria-live="polite">
       <div class="row g-2 g-md-3 text-center row-cols-2 row-cols-sm-3 row-cols-md-4 row-cols-lg-5">
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">广告消耗<span class="op-hint" data-tip="广告消耗 = Σ mixed_real_cost（plugin.ad_today；随选中日期窗口裁剪，与销售/退款同口径；作为减项计入净利润）">?</span></span><span class="op-counter-num" id="sum-spend">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">有效销售<span class="op-hint" data-tip="有效销售订单金额 = Σ quantity×unit_price（状态口径 2026-09-06：白名单状态全部订单，含 COD 在途/待收款，下单即算）；退款不在此扣减，见「退款净额」">?</span></span><span class="op-counter-num" id="sum-sales">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">GMV<span class="op-hint" data-tip="全部订单销售额 = 白名单有效 ∪ 取消订单的原始行金额（下单即计，含 COD 在途未收款与取消单原额）；有效销售 + 取消单原额 = 全单口径；≠ 行内「平台GMV」广告归因口径">?</span></span><span class="op-counter-num" id="sum-gmv">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">有效单量<span class="op-hint" data-tip="有效订单数（跨可见 SPU 全局去重；按订单状态计：已付白名单状态全部订单，含 COD 在途/待收款，下单即算订单口径）">?</span></span><span class="op-counter-num" id="sum-orders">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">总单量<span class="op-hint" data-tip="总单量 = 有效订单数 + 取消订单数（按订单状态计，含 COD 在途与未收款取消；跨可见 SPU 去重）= 与 TikTok 订单管理一致">?</span></span><span class="op-counter-num" id="sum-total-orders">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">退款净额<span class="op-hint" data-tip="有效已付订单中已完结退款的净退款额 = 仅退款(REFUND_ONLY) + 退货退款(RETURN_AND_REFUND) 的退款金额，VND→USD 换算。不含：已付被取消订单退款（见 ⚙ 列开关『已付被取消』信息列）、异常单(UNPAID 等)退款、未关联到 SPU 的退款行（页脚『未归属退款 N 行』只计行数不计金额）。与『全损退款』不同维度：这里是退给客户的钱，货的成本损失在下一格">?</span></span><span class="op-counter-num" id="sum-refund">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">全损退款<span class="op-hint" data-tip="全损退款 = 全损件数 × 该 SPU 单位成本(USD)（M13b，v9 口径：全损 = 完结退货 RETURN_AND_REFUND/REFUND_ONLY（不论物流是否到海外）+ 海外取消 CANCELLED∧38301；国内取消不计）。单位成本：人工成本(MANUAL)优先，其次 1688 货源价(SOURCE_PRICE)，未命中按默认 40 CNY/件(≈$5.91)换算。注意这是成本维度，不是退款金额（退款金额见上一格）；缺成本的 SPU 会在行内标 ⚠">?</span></span><span class="op-counter-num" id="sum-loss">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">取消单量<span class="op-hint" data-tip="取消订单数（status=CANCELLED，按订单状态计，含未收款即取消的 COD 拒收/超时单）。原始金额已计入 GMV；退款仅信息列展示、不计净额">?</span></span><span class="op-counter-num" id="sum-cancelled-orders">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">净利润<span class="op-hint" data-tip="净利润 = (有效销售 − 净退款) − 全部售出件货本 − 广告消耗 − 平台佣金估算（USD）；负值红字。状态口径：销售含 COD 在途未收款单，回款前偏乐观">?</span></span><span class="op-counter-num" id="sum-profit">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">整体实际 ROI<span class="op-hint" data-tip="实际 ROI = (有效销售 − 净退款 − 全损退款(M13b 货损成本)) ÷ 广告消耗（M14）；≥ 保本 = 赚，< 保本 = 亏（主判据）。状态口径：销售含 COD 在途未收款单；无广告消耗 → —">?</span></span><span class="op-counter-num" id="sum-roi">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">广告消耗<span class="op-hint" data-tip="单店铺所有广告消耗 = Σ mixed_real_cost（plugin.ad_daily；随选中日期窗口裁剪；作为减项计入净利润）">?</span></span><span class="op-counter-num" id="sum-spend">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">有效销售<span class="op-hint" data-tip="有效销售额：订单状态为待发货、部分发货、待揽收、运输中、已送达、已完成；已送达和已完成减去退款金额算作有效销售额。已结算按实际到账，未结算按 GMV ×(1−平台费率) ×(1−退款率) 估算">?</span></span><span class="op-counter-num" id="sum-sales">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">有效单量<span class="op-hint" data-tip="有效单量：订单状态为待发货、部分发货、待揽收、运输中、已送达、已完成，再减去其中退款的单量">?</span></span><span class="op-counter-num" id="sum-orders">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">退款数<span class="op-hint" data-tip="订单状态为退款的单量（仅退款/退货退款已完结 case 关联的有效订单，按订单去重）">?</span></span><span class="op-counter-num" id="sum-refund-count">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">退款率<span class="op-hint" data-tip="退款率 = 订单状态为退款的单量 / 全部订单（有效订单 + 取消订单）">?</span></span><span class="op-counter-num" id="sum-refund-rate">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">全损量<span class="op-hint" data-tip="全损量 = 订单状态为退款的单量 + 取消订单中海外取消（物流已到目的国 action_code=38301 的 CANCELLED 订单）。M13b 口径：全损 = 退货（RETURN_AND_REFUND/REFUND_ONLY 已完结，不论物流是否到海外）+ 海外取消（CANCELLED∧38301）；国内取消不计全损。采购成本实亏，计入货本">?</span></span><span class="op-counter-num" id="sum-loss-qty">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">全损率<span class="op-hint" data-tip="全损率 = (订单状态为退款的单量 + 取消订单中海外取消) / 全部订单（有效订单 + 取消订单）">?</span></span><span class="op-counter-num" id="sum-loss-rate">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">取消量<span class="op-hint" data-tip="取消量 = 取消订单中国内取消（排除海外取消）。海外取消已计入全损，两率互斥不重叠">?</span></span><span class="op-counter-num" id="sum-cancel-count">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">取消率<span class="op-hint" data-tip="取消率 = 取消订单中国内取消（排除海外取消）/ 全部订单（有效订单 + 取消订单）">?</span></span><span class="op-counter-num" id="sum-cancel-rate">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">实际ROI<span class="op-hint" data-tip="实际ROI = (净收入 − 全损成本) ÷ 广告消耗。≥ 保本ROI = 赚，< 保本ROI = 亏（主判据）；无广告消耗 → —">?</span></span><span class="op-counter-num" id="sum-roi">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">实际保本ROI<span class="op-hint" data-tip="实际保本ROI = NC' ÷ (NC' − COGS_kept)，其中 NC' = 净收入 − 全损成本，COGS_kept = (售出件 − 退货件) × 单位成本。净利润 = 0 时的 ROI 临界值；实际ROI低于此值即亏">?</span></span><span class="op-counter-num" id="sum-roi-breakeven">—</span></span></div>
+        <div class="col"><span class="op-counter-item"><span class="op-counter-label">广告系统保本ROI<span class="op-hint" data-tip="TODO: 广告系统保本ROI 公式待定。当前暂不展示，后续对接广告系统数据后补充计算口径">?</span></span><span class="op-counter-num" id="sum-roi-ad">—</span></span></div>
       </div>
     </section>
 

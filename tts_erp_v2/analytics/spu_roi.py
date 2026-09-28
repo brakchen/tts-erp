@@ -309,6 +309,25 @@ _SQL_ROI_REFUNDS = text(
     """
 )
 
+# 主表 SQL ── 跨 SPU 范围退款订单数（全局 distinct refunded orders）
+_SQL_ROI_REFUND_SCOPE = text(
+    """
+    SELECT count(DISTINCT so.id)::int AS refund_order_count
+    FROM commerce.sales_order_lines sl
+    JOIN commerce.sales_orders so ON so.id = sl.order_pk
+    JOIN after_sales.case_lines cl ON cl.sales_order_line_id = sl.id
+    JOIN after_sales.cases c ON c.id = cl.case_id
+    WHERE sl.spu_pk = ANY(CAST(:pks AS bigint[]))
+      AND so.status = ANY(CAST(:paid_statuses AS text[]))
+      AND c.status IN (:st0, :st1)
+      AND c.case_type IN ('REFUND_ONLY', 'RETURN_AND_REFUND')
+      AND (CAST(:ws AS timestamptz) IS NULL
+           OR coalesce(so.paid_at, so.order_time) >= CAST(:ws AS timestamptz))
+      AND (CAST(:we AS timestamptz) IS NULL
+           OR coalesce(so.paid_at, so.order_time) <  CAST(:we AS timestamptz))
+    """
+)
+
 # 主表 SQL ── 跨 SPU 范围 distinct（order_count/cancelled/total/GMV）
 _SQL_ROI_ORDER_SCOPE = text(
     """
@@ -778,10 +797,14 @@ def _query_spu_roi(
         .all()
     )
 
-    ad_rows = sess.execute(
-        _SQL_ROI_AD,
-        {"ws": ws_dt, "we": we_dt},
-    ).mappings().all()
+    ad_rows = (
+        sess.execute(
+            _SQL_ROI_AD,
+            {"ws": ws_dt, "we": we_dt},
+        )
+        .mappings()
+        .all()
+    )
     ad_map = {
         int(r["spu_pk"]): r for r in ad_rows if r["spu_pk"] is not None
     }  # pi-lens-ignore: no-try-except
@@ -998,9 +1021,7 @@ def _query_spu_roi(
         cancel_rate_usd = None
         cancel_denom = order_count + domestic_cancelled_orders
         if cancel_denom > 0:
-            cancel_rate_usd = Decimal(domestic_cancelled_orders) / Decimal(
-                cancel_denom
-            )
+            cancel_rate_usd = Decimal(domestic_cancelled_orders) / Decimal(cancel_denom)
         refund_rate_qty_usd = None
         if order_count > 0:
             # 退货订单数：白名单订单中有完结 case 的（SAME 行内口径）
@@ -1113,11 +1134,63 @@ def _query_spu_roi(
         _row_int(scope_row["cancelled_order_count"]) if scope_row else 0
     )
     gmv_total = Decimal(scope_row["gmv"]) / fx_usd_vnd if scope_row else Decimal(0)
+
+    # 全局退款订单数（distinct orders with refund cases）
+    refund_scope_row = None
+    if spu_pks_visible:
+        refund_scope_row = (
+            sess.execute(
+                _SQL_ROI_REFUND_SCOPE,
+                {
+                    "paid_statuses": paid_statuses,
+                    "pks": spu_pks_visible,
+                    "st0": st0,
+                    "st1": st1,
+                    "ws": ws_dt,
+                    "we": we_dt,
+                },
+            )
+            .mappings()
+            .first()
+        )
+    refund_order_count_total = (
+        _row_int(refund_scope_row["refund_order_count"]) if refund_scope_row else 0
+    )
+
+    # 从行级数据聚合：全损量、国内取消、海外取消、COGS_kept
+    total_full_loss_qty = sum((r["full_loss_qty"] for r in plain), 0)
+    total_full_loss_cancelled_qty = sum(
+        (r["full_loss_cancelled_qty"] for r in plain), 0
+    )
+    total_domestic_cancelled = sum(
+        (r["domestic_cancelled_order_count"] for r in plain), 0
+    )
+    total_overseas_cancelled = sum(
+        (r["overseas_cancelled_order_count"] for r in plain), 0
+    )
+    total_cogs_kept = Decimal(0)
+    for r in plain:
+        unit_cost = r["unit_cost_used"] or Decimal(0)
+        total_cogs_kept += max(
+            Decimal(0),
+            (Decimal(r["units_sold"]) - Decimal(r["refund_return_qty"])) * unit_cost,
+        )
+
+    # 全量订单 = 有效订单 + 取消订单
+    total_orders_count = eff_orders + cancelled_orders_total
+
+    # 整体保本 ROI = NC' / (NC' - COGS_kept)
+    overall_nc_prime = total_net_revenue_usd - total_return_loss
+    overall_breakeven: str | None = None
+    breakeven_denom = overall_nc_prime - total_cogs_kept
+    if total_spend != 0 and breakeven_denom > 0:
+        overall_breakeven = _fmt_ratio(overall_nc_prime / breakeven_denom)
+
     totals = {
         "row_count": len(plain),
         "order_count": eff_orders,
         "cancelled_order_count": cancelled_orders_total,
-        "total_orders": eff_orders + cancelled_orders_total,
+        "total_orders": total_orders_count,
         "spend": _fmt_money(money_total["spend"]),
         "sales": _fmt_money(money_total["sales"]),
         "gmv": _fmt_money(gmv_total),
@@ -1125,6 +1198,12 @@ def _query_spu_roi(
         "return_loss": _fmt_money(money_total["return_loss"]),
         "net_profit": _fmt_money(money_total["net_profit"]),
         "roi_real": overall_roi,
+        "refund_order_count": refund_order_count_total,
+        "full_loss_qty": total_full_loss_qty,
+        "full_loss_cancelled_qty": total_full_loss_cancelled_qty,
+        "domestic_cancelled_order_count": total_domestic_cancelled,
+        "overseas_cancelled_order_count": total_overseas_cancelled,
+        "roi_breakeven": overall_breakeven,
     }
 
     # meta（§4 v7）
@@ -1560,9 +1639,11 @@ def _detail_ads(
     sess: Session, spu_pk: int, w_start: date | None, w_end: date | None
 ) -> dict:
     ws_dt, we_dt = _window_dates(w_start, w_end)
-    rows = sess.execute(
-        _SQL_DETAIL_ADS, {"spu_pk": spu_pk, "ws": ws_dt, "we": we_dt}
-    ).mappings().all()
+    rows = (
+        sess.execute(_SQL_DETAIL_ADS, {"spu_pk": spu_pk, "ws": ws_dt, "we": we_dt})
+        .mappings()
+        .all()
+    )
     ads: list[dict] = []
     for r in rows:
         ads.append(
