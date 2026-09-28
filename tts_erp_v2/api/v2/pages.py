@@ -131,10 +131,15 @@ _SIDEBAR_TOGGLE_JS = """
   function toggle() { sb.classList.contains('is-open') ? close() : open(); }
   btn.addEventListener('click', toggle);
   ov.addEventListener('click', close);
-  // nav link click: close sidebar then navigate after animation
-  sb.querySelectorAll('.nav-link').forEach(function(a) {
+  // Escape key closes sidebar (mobile accessibility)
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && sb.classList.contains('is-open')) close();
+  });
+  // nav link + brand link click: close sidebar then navigate after animation
+  sb.querySelectorAll('.nav-link, a[href]').forEach(function(a) {
     a.addEventListener('click', function(e) {
-      if (window.innerWidth >= 992) return; // desktop: no-op
+      if (window.innerWidth >= 992) return;
+      if (!a.getAttribute('href') || a.getAttribute('href') === '#') return;
       e.preventDefault();
       var href = a.getAttribute('href');
       close();
