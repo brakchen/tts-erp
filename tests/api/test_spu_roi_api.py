@@ -1,7 +1,7 @@
 """TDD 契约测试:GET /v2/analytics/spu-roi(SPU 实际 ROI 看板只读端点)+ /v2/pages/spu-roi。
 
-口径唯一真相 = tech-doc/analytics/spu-real-roi-dashboard.md §4/§5(固定汇率
-USD→VND=26330、CNY→USD=0.14774、K1=30 CNY/件、平台佣金基线 0.308（2026-09-06 实测重定）)。
+口径唯一真相 = biz-doc/analytics/spu-roi-profit-calculation.md v10（汇率必须来自
+数据库快照、K1=40 CNY/件、平台佣金基线 0.308）。
 本文件锁定:
 1. auth:无 key 401 / readonly 200 / admin 200(端点挂 _READONLY_EXACT)
 2. 分页 / spu_id 子串搜索 / 默认排序实际 ROI 升序 / sort+order
@@ -26,13 +26,24 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable, Mapping
+from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
+from typing import TypeVar
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-import tts_erp_v2.analytics.spu_roi as spu_roi_mod
+from tts_erp_v2.analytics.spu_profitability import (
+    EvidenceKind,
+    EvidenceRequest,
+    ProfitScope,
+    RowView,
+    explain_spu,
+    read_overview,
+)
+from tts_erp_v2.analytics.spu_profitability import _implementation as profitability_impl
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -45,7 +56,7 @@ _Q4 = Decimal("0.0001")
 _Q2 = Decimal("0.01")
 
 # v7 框架常量（与实现一致）
-RUBRIC_VERSION = "v9"
+RUBRIC_VERSION = "v10"
 FEE_NOTE_V7 = (
     "平台佣金=平台从销售额直接扣除的全部费用(抽佣/联盟/运费类)；"
     "v7 已结算=实到账(SETTLEMENT，已含扣费)；未结算=sales×r̂×(1−spu退款率)(D5)；"
@@ -142,6 +153,25 @@ def _wipe(db_engine) -> None:
         # pi-lens-ignore: python-sql-injection
         conn.execute(text("DELETE FROM plugin.ad_daily WHERE seller_id LIKE 'TEST_%'"))
         conn.execute(text("DELETE FROM plugin.ad_today WHERE seller_id LIKE 'TEST_%'"))
+        conn.execute(
+            text(
+                "DELETE FROM finance.settlement_components WHERE transaction_id IN ("
+                "SELECT id FROM finance.settlement_transactions "
+                "WHERE external_transaction_id LIKE 'TEST_%')"
+            )
+        )
+        conn.execute(
+            text(
+                "DELETE FROM finance.settlement_transactions "
+                "WHERE external_transaction_id LIKE 'TEST_%'"
+            )
+        )
+        conn.execute(
+            text(
+                "DELETE FROM finance.settlement_statements "
+                "WHERE external_statement_id LIKE 'TEST_%'"
+            )
+        )
         # pi-lens-ignore: python-sql-injection
         conn.execute(
             text(
@@ -821,7 +851,10 @@ def _commit_all(sess) -> None:
     sess.commit()
 
 
-def _seed(sess, fn) -> int:
+_SeedResult = TypeVar("_SeedResult")
+
+
+def _seed(sess: Session, fn: Callable[[Session], _SeedResult]) -> _SeedResult:
     """在真 commit 的 session 里执行一个 seed 函数。"""
     result = fn(sess)
     sess.commit()
@@ -949,8 +982,9 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
 
     # meta v7
     assert body["meta"]["rubric_version"] == RUBRIC_VERSION
-    assert body["meta"]["fee"]["note"] == FEE_NOTE_V7
-    assert body["meta"]["cost_assumption"] == COST_ASSUMPTION_V7
+    assert "SETTLEMENT" in body["meta"]["fee"]["note"]
+    assert "1688" in body["meta"]["cost_assumption"]
+    assert "40 CNY" in body["meta"]["cost_assumption"]
 
     # totals
     assert body["totals"]["row_count"] == 1
@@ -962,6 +996,95 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert body["totals"]["total_orders"] == 2
     assert body["totals"]["refund_net_amount"] == "20.0000"
     assert body["totals"]["net_profit"] == "15.8120"
+
+
+def test_profitability_public_interface_returns_typed_consistent_result(
+    db_engine,
+):
+    with Session(db_engine) as seed_session:
+        spu_pk = _seed(seed_session, _seed_scenario_a)
+        shop_pk = seed_session.execute(
+            text("SELECT shop_pk FROM commerce.products_spu WHERE id = :pk"),
+            {"pk": spu_pk},
+        ).scalar_one()
+
+    with Session(db_engine) as session:
+        result = read_overview(
+            session,
+            scope=ProfitScope(shop_pk=shop_pk),
+            view=RowView(search="TEST_ROI_SPU_A"),
+        )
+        assert session.execute(text("SHOW transaction_isolation")).scalar_one() == (
+            "repeatable read"
+        )
+        assert session.execute(text("SHOW transaction_read_only")).scalar_one() == "on"
+
+    assert result.total == 1
+    assert isinstance(result.items[0].net_profit, Decimal)
+    assert result.items[0].net_profit.quantize(_Q4, rounding=ROUND_HALF_UP) == Decimal(
+        "15.8120"
+    )
+    assert isinstance(result.totals.net_profit, Decimal)
+    assert result.basis.rubric_version == "v10"
+    assert result.basis.fx.snapshot_id > 0
+    assert result.basis.calculated_at.tzinfo is not None
+
+    with Session(db_engine) as session:
+        explanation = explain_spu(
+            session,
+            scope=ProfitScope(shop_pk=shop_pk),
+            spu_pk=spu_pk,
+            evidence=EvidenceRequest(frozenset({EvidenceKind.ORDERS})),
+        )
+    assert explanation.result.spu_pk == spu_pk
+    assert explanation.basis.calculated_at.tzinfo is not None
+    assert EvidenceKind.ORDERS in explanation.evidence.rows
+    order_evidence = explanation.evidence.rows[EvidenceKind.ORDERS][0]
+    assert isinstance(order_evidence["line_gmv"], Decimal)
+    assert isinstance(order_evidence["paid_at"], datetime)
+
+
+def test_profitability_public_include_inactive_semantics(db_engine) -> None:
+    with Session(db_engine) as session:
+        shop_pk = _seed_shop(session, "TEST_SELLER_PUBLIC_SCOPE")
+        active_pk = _seed_spu(
+            session, shop_pk, "TEST_ROI_PUBLIC_ACTIVE", status="ACTIVATE"
+        )
+        inactive_pk = _seed_spu(
+            session, shop_pk, "TEST_ROI_PUBLIC_INACTIVE", status="DEACTIVATE"
+        )
+        for spu_pk, suffix in ((active_pk, "A"), (inactive_pk, "I")):
+            _seed_order_line(
+                session,
+                shop_pk=shop_pk,
+                spu_pk=spu_pk,
+                order_id=f"TEST_ORDER_PUBLIC_{suffix}",
+                status=PAID_ORDER_STATUS,
+                line_ext=f"TEST_LINE_PUBLIC_{suffix}",
+                qty="1",
+                unit_price="263300",
+                paid=True,
+            )
+        session.commit()
+
+    with Session(db_engine) as session:
+        active_only = read_overview(
+            session,
+            scope=ProfitScope(shop_pk=shop_pk, include_inactive=False),
+            view=RowView(),
+        )
+    assert {row.spu_pk for row in active_only.items} == {active_pk}
+
+    with Session(db_engine) as session:
+        including_inactive = read_overview(
+            session,
+            scope=ProfitScope(shop_pk=shop_pk, include_inactive=True),
+            view=RowView(),
+        )
+    assert {row.spu_pk for row in including_inactive.items} == {
+        active_pk,
+        inactive_pk,
+    }
 
 
 def test_spu_roi_totals_cross_spu_dedup_and_gmv_split(
@@ -996,6 +1119,23 @@ def test_spu_roi_totals_cross_spu_dedup_and_gmv_split(
     assert by_id["TEST_ROI_SPU_Y"]["sales"] == "10.0000"
     assert by_id["TEST_ROI_SPU_X"]["order_count"] == 1
     assert by_id["TEST_ROI_SPU_Y"]["order_count"] == 1
+
+    with Session(db_engine) as sess:
+        shop_pk = sess.execute(
+            text(
+                "SELECT shop_pk FROM commerce.products_spu "
+                "WHERE spu_id = 'TEST_ROI_SPU_X'"
+            )
+        ).scalar_one()
+    filtered = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=h,
+        params={"shop_pk": shop_pk, "q": "TEST_ROI_SPU_X"},
+    ).json()
+    assert filtered["total"] == 1
+    assert filtered["items"][0]["spu_id"] == "TEST_ROI_SPU_X"
+    assert filtered["totals"]["row_count"] == 2
+    assert filtered["totals"]["order_count"] == 1
 
 
 def _seed_refund_on_shared_order_y_line(sess) -> tuple[int, int]:
@@ -1068,6 +1208,154 @@ def test_spu_roi_refund_order_count_attributed_to_own_line(
         by_id["TEST_ROI_SPU_RY_Y"]["refund_rate_qty"] == "1.00"
     )  # 1 退货单 / 1 有效单
     assert by_id["TEST_ROI_SPU_RY_Y"]["refund_net_amount"] == "10.0000"
+
+
+def test_profitability_order_evidence_attributes_refund_to_own_spu_line(
+    db_engine,
+) -> None:
+    with Session(db_engine) as session:
+        x_pk, y_pk = _seed(session, _seed_refund_on_shared_order_y_line)
+        shop_pk = session.execute(
+            text("SELECT shop_pk FROM commerce.products_spu WHERE id = :pk"),
+            {"pk": x_pk},
+        ).scalar_one()
+
+    explanations = {}
+    for spu_pk in (x_pk, y_pk):
+        with Session(db_engine) as session:
+            explanations[spu_pk] = explain_spu(
+                session,
+                scope=ProfitScope(shop_pk=shop_pk),
+                spu_pk=spu_pk,
+                evidence=EvidenceRequest(frozenset({EvidenceKind.ORDERS})),
+            )
+
+    x_order = explanations[x_pk].evidence.rows[EvidenceKind.ORDERS][0]
+    y_order = explanations[y_pk].evidence.rows[EvidenceKind.ORDERS][0]
+    assert explanations[x_pk].result.full_loss_qty == 0
+    assert x_order["full_loss"] is False
+    assert explanations[y_pk].result.full_loss_qty == 1
+    assert y_order["full_loss"] is True
+
+
+def test_profitability_settlement_evidence_uses_order_window(db_engine) -> None:
+    with Session(db_engine) as session:
+        spu_pk = _seed_scenario_a(session)
+        order_pk, shop_pk = session.execute(
+            text(
+                "SELECT so.id, so.shop_pk FROM commerce.sales_orders so "
+                "JOIN commerce.sales_order_lines sl ON sl.order_pk = so.id "
+                "WHERE sl.spu_pk = :spu_pk AND so.order_id = 'TEST_ORDER_A1'"
+            ),
+            {"spu_pk": spu_pk},
+        ).one()
+        statement_pk = session.execute(
+            text(
+                "INSERT INTO finance.settlement_statements "
+                "(external_statement_id, statement_time, currency) "
+                "VALUES ('TEST_STATEMENT_LATE', '2026-10-01T00:00:00+00:00', 'VND') "
+                "RETURNING id"
+            )
+        ).scalar_one()
+        transaction_pk = session.execute(
+            text(
+                "INSERT INTO finance.settlement_transactions "
+                "(settlement_statement_id, external_transaction_id, order_pk, "
+                "transaction_time) VALUES (:statement_pk, 'TEST_TXN_LATE', :order_pk, "
+                "'2026-10-01T00:00:00+00:00') RETURNING id"
+            ),
+            {"statement_pk": statement_pk, "order_pk": order_pk},
+        ).scalar_one()
+        session.execute(
+            text(
+                "INSERT INTO finance.settlement_components "
+                "(transaction_id, component_code, amount, currency) "
+                "VALUES (:transaction_pk, 'SETTLEMENT', 1.0000, 'VND')"
+            ),
+            {"transaction_pk": transaction_pk},
+        )
+        session.commit()
+
+    with Session(db_engine) as session:
+        explanation = explain_spu(
+            session,
+            scope=ProfitScope(
+                shop_pk=shop_pk,
+                start_date=date(2026, 9, 1),
+                end_date=date(2026, 9, 1),
+            ),
+            spu_pk=spu_pk,
+            evidence=EvidenceRequest(frozenset({EvidenceKind.SETTLEMENTS})),
+        )
+
+    assert explanation.result.settled_order_count == 1
+    settlement = explanation.evidence.rows[EvidenceKind.SETTLEMENTS][0]
+    assert isinstance(settlement["statement_time"], datetime)
+    components = settlement["components"]
+    assert isinstance(components, tuple)
+    component = components[0]
+    assert isinstance(component, Mapping)
+    assert component["amount_vnd"] == Decimal("1.0000")
+    assert component["amount"] == Decimal("1.0000") / Decimal(26330)
+
+
+def test_profitability_settlement_share_includes_unattributed_order_lines(
+    db_engine,
+) -> None:
+    with Session(db_engine) as session:
+        spu_pk = _seed_scenario_a(session)
+        order_pk, shop_pk = session.execute(
+            text(
+                "SELECT so.id, so.shop_pk FROM commerce.sales_orders so "
+                "WHERE so.order_id = 'TEST_ORDER_A1'"
+            )
+        ).one()
+        session.execute(
+            text(
+                "INSERT INTO commerce.sales_order_lines "
+                "(order_pk, external_line_id, spu_pk, quantity, unit_price, currency) "
+                "VALUES (:order_pk, 'TEST_LINE_UNATTRIBUTED', NULL, 5, 526600, 'VND')"
+            ),
+            {"order_pk": order_pk},
+        )
+        statement_pk = session.execute(
+            text(
+                "INSERT INTO finance.settlement_statements "
+                "(external_statement_id, statement_time, currency) "
+                "VALUES ('TEST_STATEMENT_SHARE', '2026-09-02T00:00:00+00:00', 'VND') "
+                "RETURNING id"
+            )
+        ).scalar_one()
+        transaction_pk = session.execute(
+            text(
+                "INSERT INTO finance.settlement_transactions "
+                "(settlement_statement_id, external_transaction_id, order_pk, "
+                "transaction_time) VALUES (:statement_pk, 'TEST_TXN_SHARE', :order_pk, "
+                "'2026-09-02T00:00:00+00:00') RETURNING id"
+            ),
+            {"statement_pk": statement_pk, "order_pk": order_pk},
+        ).scalar_one()
+        session.execute(
+            text(
+                "INSERT INTO finance.settlement_components "
+                "(transaction_id, component_code, amount, currency) "
+                "VALUES (:transaction_pk, 'SETTLEMENT', 2633000, 'VND')"
+            ),
+            {"transaction_pk": transaction_pk},
+        )
+        session.commit()
+
+    with Session(db_engine) as session:
+        explanation = explain_spu(
+            session,
+            scope=ProfitScope(shop_pk=shop_pk),
+            spu_pk=spu_pk,
+            evidence=EvidenceRequest(frozenset({EvidenceKind.SETTLEMENTS})),
+        )
+
+    assert explanation.result.settled_net == Decimal(50)
+    settlement = explanation.evidence.rows[EvidenceKind.SETTLEMENTS][0]
+    assert settlement["share_ratio"] == Decimal("0.5")
 
 
 def _seed_cod_and_unpaid_cancelled(sess) -> int:
@@ -1864,14 +2152,15 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
         "refund_rate": None,
         "full_loss_rate": None,
         "cancel_rate": None,
+        "ad_system_breakeven_roi": "0.00",
+        "ad_system_breakeven_roi_status": "formula_pending",
     }
     meta = body["meta"]
-    assert meta["fx"] == {
-        "usd_vnd": "26330.0000",
-        "cny_usd": "0.1477",
-        "as_of": "2099-09-06",  # 在线 fx 快照注入(autouse),非 D9 常量日期
-        "source": "fx-cache",
-    }
+    assert meta["fx"]["usd_vnd"] == "26330.0000"
+    assert meta["fx"]["cny_usd"] == "0.1477"
+    assert meta["fx"]["as_of"] == "2099-09-06"
+    assert meta["fx"]["source"] == "fx-cache"
+    assert isinstance(meta["fx"]["snapshot_id"], int)
     assert meta["fee"]["mode"] == "baseline"
     assert meta["fee"]["rate"] == "0.308"
     assert meta["fee"]["override"] is None
@@ -2197,6 +2486,29 @@ def test_spu_roi_js_review_fixes_present():
     assert "datesTouched" in src
 
 
+def test_spu_roi_frontend_only_displays_backend_profitability() -> None:
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "spu-roi.js"
+    ).read_text(encoding="utf-8")
+    assert "Number(it.unsettled_net" in src
+    assert "Number(it.cogs_sold" in src
+    assert "Number(it.cogs_full_loss_cancelled" in src
+    assert "netRevenue - settledNet" not in src
+    assert "* unitCost" not in src
+    assert 'err.code === "FX_RATE_UNAVAILABLE"' in src
+    assert 'renderError("汇率数据缺失，无法计算结果", true)' in src
+    assert "summaries.hidden = true" in src
+    assert "pager.hidden = true" in src
+    assert "footnotes.hidden = true" in src
+    assert 'roiAdStatus === "formula_pending"' in src
+
+
 def test_spu_roi_js_shop_switch_listener_before_early_return():
     """2026-09-28 回归守卫:loadShops() 的 change listener 必须绑定在 early return 之前。
 
@@ -2274,30 +2586,80 @@ def test_spu_roi_meta_uses_live_fx_rates(api_client, readonly_key, monkeypatch):
             "CNY": Decimal("6.9"),
         },
     )
-    monkeypatch.setattr(spu_roi_mod, "load_rate_map", lambda sess, base_code="USD": rm)
+    monkeypatch.setattr(
+        profitability_impl, "load_rate_map", lambda sess, base_code="USD": rm
+    )
     fx = _fx_meta_of_empty_query(api_client, readonly_key)
     assert fx == {
         "usd_vnd": "26000.0000",
         "cny_usd": "0.1449",  # 1/6.9 = 0.14492753… → .4f
         "as_of": "2026-09-06",
+        "snapshot_id": 999_000_001,
         "source": "fx-cache",
     }
 
 
-def test_spu_roi_fx_fallback_to_fixed_const_when_no_snapshot(
+def test_spu_roi_fails_closed_when_no_fx_snapshot(
     api_client, readonly_key, monkeypatch
 ):
-    """缓存未就绪(无 USD 快照)→ 回退 D9 固定常量,金额换算不空白。"""
+    """无完整数据库 FX 快照时整页不可计算，禁止固定汇率兜底。"""
     monkeypatch.setattr(
-        spu_roi_mod, "load_rate_map", lambda sess, base_code="USD": None
+        profitability_impl, "load_rate_map", lambda sess, base_code="USD": None
     )
-    fx = _fx_meta_of_empty_query(api_client, readonly_key)
-    assert fx == {
-        "usd_vnd": "26330.0000",
-        "cny_usd": "0.1477",
-        "as_of": "2026-09-05",
-        "source": "fixed-const",
-    }
+    response = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+        params={"q": "TEST_NO_MATCH_XYZ"},
+    )
+    assert response.status_code == 503
+    body = response.json()
+    assert body["code"] == "FX_RATE_UNAVAILABLE"
+    assert body["message"] == "汇率数据缺失，无法计算结果"
+    assert body["retryable"] is True
+    assert body["requestId"]
+    assert "data" not in body
+
+
+@pytest.mark.parametrize(
+    ("cny_rate", "vnd_rate"),
+    [
+        (Decimal(0), Decimal(26330)),
+        (Decimal("6.8"), Decimal(-1)),
+        (Decimal("NaN"), Decimal(26330)),
+    ],
+)
+def test_spu_roi_rejects_malformed_fx_snapshot_as_unavailable(
+    api_client,
+    readonly_key,
+    monkeypatch,
+    cny_rate,
+    vnd_rate,
+):
+    from datetime import UTC
+
+    from tts_erp_v2.fx.rates import RateMap
+
+    now = datetime(2026, 9, 6, tzinfo=UTC)
+    rate_map = RateMap(
+        snapshot_id=999_000_002,
+        base_code="USD",
+        upstream_last_update=now,
+        next_update_at=now,
+        fetched_at=now,
+        rates={"USD": Decimal(1), "CNY": cny_rate, "VND": vnd_rate},
+    )
+    monkeypatch.setattr(
+        profitability_impl,
+        "load_rate_map",
+        lambda sess, base_code="USD": rate_map,
+    )
+    response = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+        params={"q": "TEST_NO_MATCH_XYZ"},
+    )
+    assert response.status_code == 503
+    assert response.json()["code"] == "FX_RATE_UNAVAILABLE"
 
 
 # ─── D7/D6 钻取面板(行内 accordion + tab 懒加载)──────────────────────────────
@@ -2482,6 +2844,65 @@ def test_spu_roi_drilldown_requires_auth(api_client):
 # ═════════════════════════════════════════════════════════════════════
 
 
+def _seed_refund_only_breakeven(sess) -> int:
+    seller = "TEST_SELLER_REFUND_ONLY_BE"
+    shop_pk = _seed_shop(sess, seller)
+    spu_pk = _seed_spu(sess, shop_pk, "TEST_ROI_REFUND_ONLY_BE")
+    _seed_ad_dump(
+        sess,
+        seller=seller,
+        product_id="TEST_ROI_REFUND_ONLY_BE",
+        campaign_id="TEST_CAMP_REFUND_ONLY_BE",
+        spend="10.00",
+        orders="1",
+        gmv="100.00",
+    )
+    order_pk = _seed_order_line(
+        sess,
+        shop_pk=shop_pk,
+        spu_pk=spu_pk,
+        order_id="TEST_ORDER_REFUND_ONLY_BE",
+        status=PAID_ORDER_STATUS,
+        line_ext="TEST_LINE_REFUND_ONLY_BE",
+        qty="10",
+        unit_price="263300",
+        paid=True,
+    )
+    line_pk = _fetch_spu_line_id(sess, "TEST_ORDER_REFUND_ONLY_BE")
+    _seed_case(
+        sess,
+        shop_pk=shop_pk,
+        order_pk=order_pk,
+        ext_case="TEST_CASE_REFUND_ONLY_BE",
+        case_type="REFUND_ONLY",
+        status="RETURN_OR_REFUND_REQUEST_COMPLETE",
+        lines=[(line_pk, "TEST_CLINE_REFUND_ONLY_BE", "1", "263300")],
+    )
+    return spu_pk
+
+
+def test_refund_only_reduces_row_and_global_breakeven_cogs(
+    api_client, readonly_key, db_engine
+):
+    with Session(db_engine) as session:
+        _seed(session, _seed_refund_only_breakeven)
+
+    response = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+        params={"q": "TEST_ROI_REFUND_ONLY_BE"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    item = body["items"][0]
+    totals = body["totals"]
+    assert item["refund_only_qty"] == 1
+    assert item["roi_breakeven"] == "17.70"
+    assert totals["roi_breakeven"] == item["roi_breakeven"]
+    assert Decimal(item["net_profit"]) < 0
+    assert Decimal(item["roi_real"]) < Decimal(item["roi_breakeven"])
+
+
 def _seed_v9_bucket_split(sess) -> int:
     """v9 三桶分离场景：完结退货 vs 海外取消 vs 国内取消。
 
@@ -2605,7 +3026,7 @@ def test_spu_roi_v9_drill_orders_full_loss_flag(api_client, readonly_key, db_eng
     r = api_client.get(f"/v2/analytics/spu-roi/{spu_pk}/orders", headers=h)
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["meta"]["rubric_version"] == "v9"
+    assert body["meta"]["rubric_version"] == "v10"
     by_id = {o["order_id"]: o for o in body["orders"]}
     assert by_id["TEST_ORDER_V9_1"]["full_loss"] is True  # 完结退货，无 38301 也全损
     assert by_id["TEST_ORDER_V9_2"]["full_loss"] is True  # 海外取消

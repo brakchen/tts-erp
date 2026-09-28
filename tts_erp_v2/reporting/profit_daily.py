@@ -1,4 +1,17 @@
-"""reporting.profit_daily — rebuild product_profit_daily.
+"""reporting.profit_daily — rebuild the legacy coarse-margin snapshot.
+
+.. deprecated::
+    ``product_profit_daily`` is not the canonical SPU profitability model.
+    It only approximates gross margin as sales revenue minus procurement cost;
+    v10 SPU profitability is the sole truth source for profit semantics. Do not
+    add new consumers here.
+
+    Deletion gate: first migrate or retire ``GET /v2/reporting/profit-daily``
+    and the scheduled reporting rebuild, then decide how long historical rows
+    must be retained. Dropping ``reporting.product_profit_daily`` is a separate
+    destructive migration and must use the repository's production guard plus
+    explicit user execution. Until those gates pass, keep this module readable
+    but treat its output as a coarse-margin snapshot, never as SPU profit.
 
 The rebuild is incremental on calculation_version: each run writes a new
 ``(spu_pk, profit_date, calculation_version)`` row and
