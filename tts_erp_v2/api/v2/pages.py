@@ -126,9 +126,21 @@ _SIDEBAR_TOGGLE_JS = """
   var sb = document.getElementById('sidebar');
   var ov = document.getElementById('sidebar-overlay');
   if (!btn || !sb) return;
-  function toggle() { sb.classList.toggle('is-open'); ov.classList.toggle('d-none'); }
+  function open()  { sb.classList.add('is-open'); ov.classList.remove('d-none'); }
+  function close() { sb.classList.remove('is-open'); ov.classList.add('d-none'); }
+  function toggle() { sb.classList.contains('is-open') ? close() : open(); }
   btn.addEventListener('click', toggle);
-  ov.addEventListener('click', toggle);
+  ov.addEventListener('click', close);
+  // nav link click: close sidebar then navigate after animation
+  sb.querySelectorAll('.nav-link').forEach(function(a) {
+    a.addEventListener('click', function(e) {
+      if (window.innerWidth >= 992) return; // desktop: no-op
+      e.preventDefault();
+      var href = a.getAttribute('href');
+      close();
+      setTimeout(function() { window.location.href = href; }, 220);
+    });
+  });
 })();
 """
 
