@@ -32,7 +32,8 @@ Python 3.14 · FastAPI + uvicorn（`:9877`）· SQLAlchemy 2 + psycopg3 · Postg
 - 无前缀的 `daqiang.nat100.top/v2/...` 落在 ProfitLens 前端 404
 - 给用户的 URL / TikTok 填的 redirect URL / 纯公网 curl 一律 `http://daqiang.nat100.top/tts/<path>`
 - 本地直连 `127.0.0.1:9877/v2/...` 才不带 `/tts`
-- 前缀取自 `TTS_ERP_EXTERNAL_PREFIX`，当前 `/tts`；middleware 剥前缀匹配豁免，两端一致
+- 前缀取自 `TTS_ERP_EXTERNAL_PREFIX`，当前 `/tts`（仅在 `app.py` 构建时读一次 → `FastAPI(root_path=...)`；middleware/handlers 一律从 `scope["root_path"]` 派生）
+- **nginx 契约（2026-09-28 起）**：`/tts/` location 的 `proxy_pass` **不带尾斜杠**，完整前缀透传；app 侧 AuthMiddleware 会把不带前缀的请求归一化为带前缀（对两种转发模式都鲁棒），路由分类/匹配统一在 route-relative 路径上进行
 
 ## 3. 测试 DB 隔离（2026-09-07）
 

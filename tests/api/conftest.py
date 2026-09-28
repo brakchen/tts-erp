@@ -224,6 +224,25 @@ def api_client(db_engine) -> Iterator[TestClient]:
 
 
 @pytest.fixture()
+def prefixed_client(db_engine, monkeypatch) -> Iterator[TestClient]:
+    """TestClient with the app mounted at ``root_path=/tts`` (production shape).
+
+    The external prefix is read once by ``build_app()`` into
+    ``FastAPI(root_path=...)``; the auth middleware and handlers derive
+    everything from ``scope["root_path"]`` (2026-09-28 convergence — no
+    per-request env reads remain). Use this fixture for tests exercising
+    the prefixed wire form (``/tts/...``) or prefix-aware redirects.
+    """
+    from tts_erp_v2.app import build_app
+
+    monkeypatch.setenv("TTS_ERP_EXTERNAL_PREFIX", "/tts")
+    monkeypatch.setenv("TTS_ERP_AUTH_MODE", "enforce")
+    app = build_app()
+    with TestClient(app) as client:
+        yield client
+
+
+@pytest.fixture()
 def api_client_off(db_engine) -> Iterator[TestClient]:
     """TestClient with auth off — for /healthz probes only."""
     from tts_erp_v2.app import build_app
