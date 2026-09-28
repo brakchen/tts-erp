@@ -22,8 +22,6 @@ Pins the contract for ``POST /v2/admin/shops/register`` and
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 import pytest
 from sqlalchemy import delete, select, text
 
@@ -295,6 +293,115 @@ def test_unregistered_role_matrix(api_client, readwrite_key, readonly_key):
 def test_unregistered_anonymous_is_401(api_client):
     r = api_client.get("/v2/admin/shops/unregistered")
     assert r.status_code == 401
+
+
+# ─── PATCH /v2/admin/shops/{shop_pk} ─────────────────────────────────
+
+
+def _patch(api_client, key, shop_pk, **fields):
+    return api_client.patch(
+        f"/v2/admin/shops/{shop_pk}",
+        headers={"Authorization": f"Bearer {key}"},
+        json=fields,
+    )
+
+
+def test_update_shop_metadata_full(api_client, admin_key):
+    """PATCH 覆盖全部四个可编辑元信息字段（2026-09-28 扩展 name/region）。"""
+    r = _register(api_client, admin_key, account_name="Old Name", region="VN")
+    assert r.status_code == 200
+    pk = r.json()["shop"]["id"]
+
+    r = _patch(
+        api_client,
+        admin_key,
+        pk,
+        account_name="New Name",
+        region="TH",
+        opened_date="2026-09-01",
+        service_id="svc_123",
+    )
+    assert r.status_code == 200, r.text
+    shop = r.json()["shop"]
+    assert shop["id"] == pk
+    assert shop["account_name"] == "New Name"
+    assert shop["region"] == "TH"
+    assert shop["opened_date"] == "2026-09-01"
+    assert shop["service_id"] == "svc_123"
+
+
+def test_update_shop_partial_keeps_existing(api_client, admin_key):
+    """未传字段（null/缺省）保持原值 —— COALESCE 语义。"""
+    r = _register(
+        api_client,
+        admin_key,
+        account_name="Keep Me",
+        region="VN",
+        opened_date="2026-06-01",
+    )
+    assert r.status_code == 200
+    pk = r.json()["shop"]["id"]
+
+    r = _patch(api_client, admin_key, pk, region="ID")
+    assert r.status_code == 200, r.text
+    shop = r.json()["shop"]
+    assert shop["region"] == "ID"
+    assert shop["account_name"] == "Keep Me"  # 未被清掉
+    assert shop["opened_date"] == "2026-06-01"  # 未被清掉
+
+
+def test_update_shop_never_touches_credential_or_status(api_client, admin_key):
+    """PATCH 只动元信息；credential_id / status 不在可改面内。"""
+    r = _register(api_client, admin_key)
+    pk = r.json()["shop"]["id"]
+
+    r = _patch(api_client, admin_key, pk, account_name="Renamed")
+    assert r.status_code == 200, r.text
+    shop = r.json()["shop"]
+    assert shop["credential_id"] is None
+    assert shop["status"] == "active"
+
+
+def test_update_shop_not_found(api_client, admin_key):
+    r = _patch(api_client, admin_key, 999999999, account_name="Ghost")
+    assert r.status_code == 404, r.text
+
+
+def test_update_shop_role_matrix(api_client, admin_key, readwrite_key, readonly_key):
+    r = _register(api_client, admin_key, shop_id=SHOP_B)
+    pk = r.json()["shop"]["id"]
+
+    r = _patch(api_client, readwrite_key, pk, account_name="RW Edit")
+    assert r.status_code == 200, r.text
+    assert r.json()["shop"]["account_name"] == "RW Edit"
+
+    r = _patch(api_client, readonly_key, pk, account_name="RO Edit")
+    assert r.status_code == 403, (
+        f"readonly should be 403, got {r.status_code}: {r.text}"
+    )
+
+
+def test_update_shop_anonymous_is_401(api_client, admin_key):
+    r = _register(api_client, admin_key)
+    pk = r.json()["shop"]["id"]
+    r = api_client.patch(f"/v2/admin/shops/{pk}", json={"account_name": "X"})
+    assert r.status_code == 401
+
+
+def test_channel_accounts_exposes_service_id(api_client, admin_key, readonly_key):
+    """channel-accounts 读面返回 service_id（shops 页编辑/授权链接依赖它）。"""
+    r = _register(api_client, admin_key)
+    pk = r.json()["shop"]["id"]
+    r = _patch(api_client, admin_key, pk, service_id="svc_456")
+    assert r.status_code == 200
+
+    r = api_client.get(
+        "/v2/commerce/channel-accounts",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    rows = {row["shop_id"]: row for row in r.json()}
+    assert rows[SHOP_A]["service_id"] == "svc_456"
 
 
 # ─── channel-accounts read surface ─────────────────────────────────────
