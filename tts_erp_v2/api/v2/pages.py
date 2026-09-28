@@ -56,14 +56,34 @@ _JS_DIR = Path(__file__).resolve().parents[2] / "static" / "js"
 # Bootstrap 5 utilities + minimal custom CSS (active accent + responsive).
 
 _SIDEBAR_CSS = """
-    body { margin-left: 220px; }
+    body { margin-left: 220px; transition: margin-left 200ms ease; }
     .op-home-link { display: none; }
     .nav-link.active { border-left: 3px solid var(--accent); padding-left: 9px; border-bottom: 0; }
-    .sidebar { transition: transform 200ms ease; }
+    .sidebar { transition: width 200ms ease, transform 200ms ease; }
+    /* Collapsed state (desktop) */
+    body.sidebar-collapsed { margin-left: 56px; }
+    .sidebar.is-collapsed { width: 56px !important; }
+    .sidebar.is-collapsed .sidebar-brand-text,
+    .sidebar.is-collapsed .sidebar-section-title,
+    .sidebar.is-collapsed .nav-link span,
+    .sidebar.is-collapsed .sidebar-user { display: none; }
+    .sidebar.is-collapsed .nav-link { text-align: center; padding-left: 0; padding-right: 0; border-left: 0; }
+    .sidebar.is-collapsed .nav-link.active { border-left: 0; border-bottom: 2px solid var(--accent); padding-left: 0; }
+    .sidebar.is-collapsed .sidebar-collapse-icon { transform: rotate(180deg); }
+    .sidebar-collapse-btn { cursor: pointer; background: none; border: 0; color: var(--muted); padding: 8px; }
+    .sidebar-collapse-btn:hover { color: var(--accent); }
     @media (max-width: 991.98px) {
       body { margin-left: 0; }
+      body.sidebar-collapsed { margin-left: 0; }
       .sidebar { transform: translateX(-100%); }
       .sidebar.is-open { transform: translateX(0); }
+      .sidebar.is-collapsed { width: 220px !important; }
+      .sidebar.is-collapsed .sidebar-brand-text,
+      .sidebar.is-collapsed .sidebar-section-title,
+      .sidebar.is-collapsed .nav-link span,
+      .sidebar.is-collapsed .sidebar-user { display: block; }
+      .sidebar.is-collapsed .nav-link { text-align: left; padding-left: 12px; }
+      .sidebar-collapse-btn { display: none; }
       .op-header { padding-left: 56px; }
     }
 """
@@ -72,28 +92,29 @@ _SIDEBAR_CSS = """
 def _sidebar_html(current_page: str) -> str:
   """Return Bootstrap-styled sidebar HTML with the given page marked as active."""
   pages = [
-    ("dashboard", "控制台", "__group__"),
-    ("manual-costs", "采购工作台", "运营"),
-    ("spu-roi", "SPU ROI", "运营"),
-    ("shops", "店铺注册", "店铺"),
-    ("enum-map", "枚举映射", "数据"),
-    ("intercept-configs", "拦截配置", "拦截"),
-    ("intercept-requests", "拦截记录", "拦截"),
-    ("intercept-stats", "拦截统计", "拦截"),
+    ("dashboard", "\u25ce", "控制台", "__group__"),
+    ("manual-costs", "\u270e", "采购工作台", "运营"),
+    ("spu-roi", "\u2630", "SPU ROI", "运营"),
+    ("shops", "\u25ce", "店铺注册", "店铺"),
+    ("enum-map", "\u25ce", "枚举映射", "数据"),
+    ("intercept-configs", "\u25ce", "拦截配置", "拦截"),
+    ("intercept-requests", "\u25ce", "拦截记录", "拦截"),
+    ("intercept-stats", "\u25ce", "拦截统计", "拦截"),
   ]
   links = []
   current_group = None
-  for page_id, label, group in pages:
+  for page_id, icon, label, group in pages:
     if group != "__group__" and group != current_group:
       current_group = group
       links.append(
-        f'<div class="text-uppercase fw-semibold text-muted px-3 pt-3 pb-1"'
+        f'<div class="sidebar-section-title text-uppercase fw-semibold text-muted px-3 pt-3 pb-1"'
         f' style="font-size:10px;letter-spacing:0.18em">{group}</div>'
       )
     active = " active" if page_id == current_page else ""
     links.append(
       f'<a href="../../v2/pages/{page_id}"'
-      f' class="nav-link px-3 py-1{active}">{label}</a>'
+      f' class="nav-link px-3 py-1{active}">'
+      f'{icon} <span>{label}</span></a>'
     )
   nav_html = "\n      ".join(links)
   return f"""<button class="btn btn-sm btn-outline-secondary d-lg-none position-fixed top-0 start-0 mt-2 ms-2"
@@ -106,7 +127,7 @@ def _sidebar_html(current_page: str) -> str:
     <div class="p-3 pb-2 border-bottom">
       <a href="../../v2/pages/dashboard" class="d-flex align-items-center gap-2 text-decoration-none text-dark">
         <span style="color:var(--accent)">◆</span>
-        <span class="fw-semibold">tts-erp</span>
+        <span class="sidebar-brand-text fw-semibold">tts-erp</span>
       </a>
     </div>
 
@@ -115,7 +136,12 @@ def _sidebar_html(current_page: str) -> str:
     </div>
 
     <div class="px-3 py-2 border-top">
-      <div class="small text-muted" id="sidebar-user"></div>
+      <div class="small text-muted sidebar-user" id="sidebar-user"></div>
+      <button class="sidebar-collapse-btn d-none d-lg-flex align-items-center gap-2 mt-2 w-100"
+        id="sidebar-collapse" aria-label="折叠侧边栏">
+        <span class="sidebar-collapse-icon">«</span>
+        <span class="sidebar-collapse-text small">折叠</span>
+      </button>
     </div>
   </nav>"""
 
@@ -125,6 +151,7 @@ _SIDEBAR_TOGGLE_JS = """
   var btn = document.getElementById('sidebar-toggle');
   var sb = document.getElementById('sidebar');
   var ov = document.getElementById('sidebar-overlay');
+  var collapseBtn = document.getElementById('sidebar-collapse');
   if (!btn || !sb) return;
   function open()  { sb.classList.add('is-open'); ov.classList.remove('d-none'); }
   function close() { sb.classList.remove('is-open'); ov.classList.add('d-none'); }
@@ -135,6 +162,20 @@ _SIDEBAR_TOGGLE_JS = """
   document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape' && sb.classList.contains('is-open')) close();
   });
+  // Desktop collapse toggle
+  if (collapseBtn) {
+    if (localStorage.getItem('sidebar-collapsed') === '1') {
+      sb.classList.add('is-collapsed');
+      document.body.classList.add('sidebar-collapsed');
+    }
+    collapseBtn.addEventListener('click', function() {
+      var collapsed = sb.classList.toggle('is-collapsed');
+      document.body.classList.toggle('sidebar-collapsed', collapsed);
+      localStorage.setItem('sidebar-collapsed', collapsed ? '1' : '0');
+      collapseBtn.querySelector('.sidebar-collapse-icon').textContent = collapsed ? '»' : '«';
+      collapseBtn.querySelector('.sidebar-collapse-text').textContent = collapsed ? '展开' : '折叠';
+    });
+  }
   // nav link + brand link click: close sidebar then navigate after animation
   sb.querySelectorAll('.nav-link, a[href]').forEach(function(a) {
     a.addEventListener('click', function(e) {
