@@ -322,22 +322,40 @@
     var meta = payload.meta || {};
     lastTotal = payload.total || 0;
 
-    // 结余带(§7.1 2026-09-06 扩展:去 SPU 数,新增 GMV/有效单量/总单量/取消单量)
+    // 结余带(全部由后端 totals 提供，前端只做格式化)
     $("#sum-spend").textContent = fmtMoney(totals.spend);
     $("#sum-sales").textContent = fmtMoney(totals.sales);
-    $("#sum-gmv").textContent = fmtMoney(totals.gmv);
     $("#sum-orders").textContent = fmtInt(totals.order_count || 0);
-    $("#sum-total-orders").textContent = fmtInt(totals.total_orders || 0);
-    $("#sum-refund").textContent = fmtMoney(totals.refund_net_amount);
-    $("#sum-loss").textContent = fmtMoney(totals.return_loss); // §7.1 全损退款(= return_loss 成本口径)
-    $("#sum-cancelled-orders").textContent = fmtInt(
-      totals.cancelled_order_count || 0,
+    // 退款数 = 全局 distinct 退款订单数(后端计算)
+    $("#sum-refund-count").textContent = fmtInt(totals.refund_order_count || 0);
+    // 退款率 = 退款单量 / 全部订单(后端提供数据，前端格式化)
+    var totalOrdersForRate =
+      (totals.order_count || 0) + (totals.cancelled_order_count || 0);
+    var refundRateVal =
+      totalOrdersForRate > 0
+        ? (totals.refund_order_count || 0) / totalOrdersForRate
+        : null;
+    $("#sum-refund-rate").textContent = fmtPct(refundRateVal);
+    // 全损量 = 退款订单 + 海外取消订单(后端计算)
+    var fullLossQty =
+      (totals.refund_order_count || 0) +
+      (totals.overseas_cancelled_order_count || 0);
+    $("#sum-loss-qty").textContent = fmtInt(fullLossQty);
+    // 全损率 = 全损量 / 全部订单
+    var lossRateVal =
+      totalOrdersForRate > 0 ? fullLossQty / totalOrdersForRate : null;
+    $("#sum-loss-rate").textContent = fmtPct(lossRateVal);
+    // 取消量 = 国内取消(后端计算)
+    $("#sum-cancel-count").textContent = fmtInt(
+      totals.domestic_cancelled_order_count || 0,
     );
-    var profit = parseFloat(totals.net_profit);
-    var profitEl = $("#sum-profit");
-    profitEl.textContent = fmtMoney(totals.net_profit);
-    profitEl.classList.toggle("is-err", Number.isFinite(profit) && profit < 0);
-    // 整体实际 ROI = totals.roi_real(服务端已算好,§5.1-1 页面不反推)
+    // 取消率 = 国内取消 / 全部订单
+    var cancelRateVal =
+      totalOrdersForRate > 0
+        ? (totals.domestic_cancelled_order_count || 0) / totalOrdersForRate
+        : null;
+    $("#sum-cancel-rate").textContent = fmtPct(cancelRateVal);
+    // 实际ROI(后端计算)
     var roiEl = $("#sum-roi");
     var roiOverall = totals.roi_real;
     var roiNum = parseFloat(roiOverall);
@@ -350,9 +368,26 @@
       roiEl.textContent = fmtRatio(roiOverall);
       roiEl.classList.toggle("is-err", roiNum < 0);
     } else {
-      roiEl.textContent = "—"; // Σspend=0 → null
+      roiEl.textContent = "—";
       roiEl.classList.remove("is-err");
     }
+    // 实际保本ROI(后端计算)
+    var roiBreakevenEl = $("#sum-roi-breakeven");
+    var roiBreakevenVal = totals.roi_breakeven;
+    var roiBreakevenNum = parseFloat(roiBreakevenVal);
+    if (
+      roiBreakevenVal !== null &&
+      roiBreakevenVal !== undefined &&
+      roiBreakevenVal !== "" &&
+      Number.isFinite(roiBreakevenNum)
+    ) {
+      roiBreakevenEl.textContent = fmtRatio(roiBreakevenVal);
+    } else {
+      roiBreakevenEl.textContent = "—";
+    }
+    // 广告系统保本ROI(TODO: 公式待定，暂显示 —)
+    var roiAdEl = $("#sum-roi-ad");
+    roiAdEl.textContent = "—";
     $("#sum-stamp").textContent =
       `全表 USD · 固定汇率 ${meta.fx ? meta.fx.as_of : ""} · ROI 账页`;
 
@@ -570,13 +605,7 @@
       return el(
         "div",
         { class: klass },
-        el(
-          "span",
-          { class: "op-pnl-row-label" },
-          label,
-          " ",
-          hintSpan(hint),
-        ),
+        el("span", { class: "op-pnl-row-label" }, label, " ", hintSpan(hint)),
         el(
           "span",
           { class: "op-pnl-row-val" },
@@ -1126,7 +1155,11 @@
       // 起始 > 截止 → 拒绝这次查询、重置该输入、提示错误
       if (state.wStart && state.wEnd && state.wStart > state.wEnd) {
         renderError(
-          "起始日期不能晚于截止日期（当前：" + state.wStart + " ~ " + state.wEnd + "）",
+          "起始日期不能晚于截止日期（当前：" +
+            state.wStart +
+            " ~ " +
+            state.wEnd +
+            "）",
         );
         e.target.value = "";
         if (which === "start") state.wStart = "";
@@ -1136,8 +1169,12 @@
       state.offset = 0;
       load();
     }
-    $("#filter-w-start").addEventListener("change", (e) => _dateFieldChanged("start", e));
-    $("#filter-w-end").addEventListener("change", (e) => _dateFieldChanged("end", e));
+    $("#filter-w-start").addEventListener("change", (e) =>
+      _dateFieldChanged("start", e),
+    );
+    $("#filter-w-end").addEventListener("change", (e) =>
+      _dateFieldChanged("end", e),
+    );
 
     $("#btn-refresh").addEventListener("click", () => load());
     $("#btn-prev").addEventListener("click", () => {
