@@ -935,12 +935,12 @@
             return null;
           }
           sel.value = urlPk;
+          state.shopPk = sel.value;
         } else {
-          // URL 无 shop_pk → 默认选中第一个店铺
-          sel.value = String(shops[0].id);
-          setShopPkInUrl(sel.value);
+          // URL 无 shop_pk → 弹 toast 提示用户主动选择
+          showToast("请先选择店铺", REDIRECT_COUNTDOWN_SEC);
+          return null;
         }
-        state.shopPk = sel.value;
         // 切换事件
         sel.addEventListener("change", () => {
           hideToast(); // 切换时取消倒计时
