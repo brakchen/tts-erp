@@ -9,6 +9,7 @@ Cursor: epoch ms in ``integration.sync_cursors`` (scope=shop_id).
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -28,6 +29,8 @@ from tts_erp_v2.db.models import (
 )
 from tts_erp_v2.jobs.runner import record_sync_issue
 from tts_erp_v2.sync_worker.job_runner import JobResult
+
+log = logging.getLogger(__name__)
 
 JOB_NAME = "tiktok.after_sales"
 RETURNS_ENDPOINT = "/return_refund/202309/returns/search"
@@ -158,13 +161,49 @@ def _walk_pages(proxy_call, *, endpoint: str, base_body: dict) -> list[dict]:
                 f"{endpoint} non-zero code={code} message={resp.get('message')!r}"
             )
         data = resp.get("data") or {}
-        # returns: data.returns; cancellations: data.cancellations
-        items = data.get("returns") or data.get("cancellations") or []
+        # returns/search 的列表字段在 2026-08-31 前后从 data.returns 改名为
+        # data.return_orders（实测 2026-09-28：{next_page_token, return_orders,
+        # total_count}）；cancellations/search 仍是 data.cancellations。
+        # 两个名字都兼容，防止上游再改名时静默丢数据。
+        items = (
+            data.get("return_orders")
+            or data.get("returns")
+            or data.get("cancellations")
+            or []
+        )
+        if not items and endpoint == RETURNS_ENDPOINT and data.get("total_count"):
+            # 2026-09 事故：字段名不匹配时 items 静默为空、无报错无告警，
+            # 9 月退款全部丢失。total_count > 0 但取不到列表 = 一定是字段
+            # 名又变了，必须告警；total_count=0/缺失 = 合法空页，不打扰。
+            log.warning(
+                "returns/search total_count=%s but 0 items parsed; data keys=%s "
+                "(upstream field rename — check payload)",
+                data.get("total_count"),
+                sorted(data.keys()),
+            )
         collected.extend(items)
         next_token = data.get("next_page_token") or None
         if not next_token:
             break
     return collected
+
+
+# payload return_type → after_sales.cases.case_type 映射（与 2026-08 迁移数据
+# 及全部分析查询过滤枚举一致）。分析查询只认 'REFUND_ONLY'/'RETURN_AND_REFUND'，
+# 硬编码 'RETURN' 会让数据即使入库也被静默漏掉（2026-09-28 实测教训）。
+_RETURN_TYPE_TO_CASE_TYPE = {
+    "RETURN_AND_REFUND": "RETURN_AND_REFUND",
+    "REFUND": "REFUND_ONLY",
+    "REFUND_ONLY": "REFUND_ONLY",
+}
+
+
+def _resolve_case_type(raw: dict, fallback: str) -> str:
+    """returns 的 case_type 从 payload return_type 映射；cancellations 用 fallback('CANCEL')。"""
+    rt = raw.get("return_type")
+    if rt in _RETURN_TYPE_TO_CASE_TYPE:
+        return _RETURN_TYPE_TO_CASE_TYPE[rt]
+    return fallback
 
 
 def _parse_case(case_type: str, raw: dict) -> dict:
@@ -178,12 +217,23 @@ def _parse_case(case_type: str, raw: dict) -> dict:
     )
     case_refund_amount, case_currency = _parse_case_refund(raw.get("refund_amount"))
     return {
-        "case_type": case_type,
+        "case_type": _resolve_case_type(raw, case_type),
         "external_case_id": str(cid),
         "order_id": str(order_id) if order_id else None,
         "status": raw.get("status") or raw.get("return_status") or raw.get("cancel_status"),
-        "reason_code": raw.get("reason_code"),
-        "reason_text": raw.get("reason_text"),
+        # reason 字段名：returns 是 return_reason/return_reason_text，
+        # cancellations 是 cancel_reason/cancel_reason_text（9 月 CANCEL
+        # case reason 全 NULL 就是因为只读了不存在的 reason_code）。
+        "reason_code": (
+            raw.get("reason_code")
+            or raw.get("return_reason")
+            or raw.get("cancel_reason")
+        ),
+        "reason_text": (
+            raw.get("reason_text")
+            or raw.get("return_reason_text")
+            or raw.get("cancel_reason_text")
+        ),
         "created_at_source": _epoch_seconds_to_utc(raw.get("create_time")),
         "updated_at_source": _epoch_seconds_to_utc(raw.get("update_time")),
         "refund_amount": case_refund_amount,
