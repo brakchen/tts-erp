@@ -57,6 +57,12 @@ EXEMPT_PATHS = {
     # seller's browser here; there is no API key to present. The route
     # validates its single-use CSRF state before doing anything.
     "/v2/oauth/tiktok/callback",
+    # Static assets (CSS/JS/images) — public, no auth required. Actual business
+    # data is gated at the API endpoints. Making static files public avoids the
+    # "session expired → assets 401 → page broken" UX bug (browser resource
+    # requests don't carry Accept: text/html, so the auth middleware returns
+    # JSON 401 instead of a 302 redirect to the login page).
+    "/static/",
 }
 
 # Path-level required role for the v2 app.
@@ -84,8 +90,12 @@ _READONLY_PREFIXES = (
     # the proxy layer and ``tts-partner-api-docs/`` for the contract.
     "/v2/tiktok-shop/",
     # Operator-console static assets (vendor/bootstrap / js/console.js). Not under
-    # /v2/; any authenticated session may fetch them.
-    "/static/",
+    # /v2/; public (no auth required). CSS/JS/images don't contain sensitive data;
+    # actual business data is gated at the API endpoints. Making static files
+    # public avoids the "session expired → all assets 401 → page broken" UX bug
+    # (browser resource requests don't carry Accept: text/html, so the auth
+    # middleware returns JSON 401 instead of a 302 redirect to the login page).
+    #"/static/",  # moved to EXEMPT_PATHS — no auth needed for static assets
     # intercept 配置列表和请求查询 (GET only)
     "/v2/intercept/configs",
     "/v2/intercept/requests",
