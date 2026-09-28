@@ -58,7 +58,10 @@ _JS_DIR = Path(__file__).resolve().parents[2] / "static" / "js"
 _SIDEBAR_CSS = """
     body { margin-left: 220px; transition: margin-left 200ms ease; }
     .op-home-link { display: none; }
-    .nav-link.active { border-left: 3px solid var(--accent); padding-left: 9px; border-bottom: 0; }
+    /* Sidebar link colors: override Bootstrap .nav-link blue → warm-paper ink */
+    #sidebar .nav-link { color: var(--ink-soft); }
+    #sidebar .nav-link:hover { color: var(--ink); background: var(--paper); }
+    #sidebar .nav-link.active { color: var(--accent); border-left: 3px solid var(--accent); padding-left: 9px; border-bottom: 0; }
     .sidebar { transition: width 200ms ease, transform 200ms ease; }
     /* Collapsed state (desktop) */
     body.sidebar-collapsed { margin-left: 56px; }
