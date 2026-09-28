@@ -64,6 +64,67 @@ a:hover {
  outline-offset: 1px;
 }
 
+/* ═══ header meta 区(shop-switcher + identity) ═══ */
+.op-header-meta {
+ display: flex;
+ flex-direction: column;
+ align-items: flex-end;
+ gap: 6px;
+}
+.op-shop {
+ display: inline-flex;
+ align-items: center;
+ gap: 6px;
+ font-size: 13px;
+ color: var(--muted);
+}
+.op-shop span {
+ white-space: nowrap;
+}
+.op-shop-select {
+ font-family: var(--mono);
+ font-size: 13px;
+ color: var(--ink);
+ background: var(--paper);
+ border: 1px solid var(--rule);
+ border-radius: 0;
+ padding: 3px 24px 3px 8px;
+ cursor: pointer;
+ appearance: auto;
+}
+.op-shop-select:focus {
+ outline: 2px solid var(--accent);
+ outline-offset: 1px;
+}
+.op-shop-select:hover {
+ border-color: var(--accent);
+}
+
+/* ═══ error toast ═══ */
+.op-toast {
+ position: fixed;
+ top: 20px;
+ left: 50%;
+ transform: translateX(-50%);
+ z-index: 1100;
+ display: flex;
+ align-items: center;
+ gap: 12px;
+ background: var(--danger, #8c1a1a);
+ color: var(--paper, #f4efe4);
+ padding: 12px 20px;
+ font-size: 14px;
+ font-weight: 500;
+ box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+ white-space: nowrap;
+}
+.op-toast-countdown {
+ font-family: var(--mono);
+ font-size: 12px;
+ opacity: 0.85;
+ white-space: nowrap;
+}
+
 /* ═══ 头 ═══ */
 .op-header {
  border-bottom: 1px solid var(--rule);
