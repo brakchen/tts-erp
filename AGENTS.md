@@ -69,8 +69,8 @@ canonical GET : {app_secret}{path}{app_key}{value}{shop_cipher}{value}{timestamp
 **严格语义分层**：
 
 | HTTP 状态 | 含义 | 必须满足的条件 | 触发 |
-|---|---|---|---|
-| `200 OK` | **解析 + upsert 走完** | parser 走完且无异常（含合法空 list —— 0 行 upsert 但数据层语义合法）| dumps 解析成功；GET 查询返空结果 |
+| --- | --- | --- | --- |
+| `200 OK` | **解析 + upsert 走完** | parser 走完且无异常（含合法空 list —— 0 行 upsert 但数据层语义合法） | dumps 解析成功；GET 查询返空结果 |
 | `201 Created` | 资源已创建 | POST 创建资源且资源已落库 | 极少用 |
 | `204 No Content` | 已处理无返回 | DELETE 等 | 极少用 |
 | `400 Bad Request` | 协议层错误 | body 非 JSON / Pydantic 校验失败 / domain 不在 enum 内 | `MALFORMED_JSON` / `SCHEMA_INVALID` |
@@ -118,11 +118,11 @@ if parse_error:
 - **响应 envelope 200 / 非 200 必须结构一致**（2026-09-18 用户拍板）：
 
   | 字段 | 200 | 4xx / 5xx |
-  |---|---|---|
-  | `code` | `0` (int) | 错误码字符串（如 `"MALFORMED_JSON"`）|
+  | --- | --- | --- |
+  | `code` | `0` (int) | 错误码字符串（如 `"MALFORMED_JSON"`） |
   | `message` | `"success"` | 具体错误描述 |
-  | `requestId` | request_id（来自 `x-request-id` header 或生成 `req-{uuid}`）| 同上 |
-  | `data` | 业务负载（dumps 端点返空 dict 即可；查询类端点含实际数据）| 不出现 |
+  | `requestId` | request_id（来自 `x-request-id` header 或生成 `req-{uuid}`） | 同上 |
+  | `data` | 业务负载（dumps 端点返空 dict 即可；查询类端点含实际数据） | 不出现 |
 
   `code` 类型不一致是有意设计：`0`（int）= 成功；字符串 = 错误码（与 `analytics.py:484/850/1125` 同模式）。
 
@@ -131,12 +131,12 @@ if parse_error:
 - **不强制单 casing 统一** —— 但**有明确分工**：
 
   | 层 | casing | 例子 |
-  |---|---|---|
-  | **wire format**（HTTP envelope / JSON body / Pydantic schema field / TS 变量 / Zod schema）| `requestId`（camelCase）| `body.requestId` / `parsed.data.requestId` / `Field(alias="requestId")` |
-  | **Python 内部**（函数参数 / 局部变量 / 函数返回值）| `request_id`（snake_case）| `def _log_event(*, request_id, ...)` / `request_id = _request_id(request)` |
-  | **DB 列名**（SQL DDL / SQLAlchemy column）| `request_id`（snake_case）| `plugin.intercepted_requests.request_id` |
-  | **URL 路径参数**（FastAPI path param）| `request_id`（snake_case）| `/requests/{request_id}` |
-  | **HTTP header** | `x-request-id`（lowercase-with-hyphen）| RFC 7230 标准，与 Python/TS 都无关 |
+  | --- | --- | --- |
+  | **wire format**（HTTP envelope / JSON body / Pydantic schema field / TS 变量 / Zod schema） | `requestId`（camelCase） | `body.requestId` / `parsed.data.requestId` / `Field(alias="requestId")` |
+  | **Python 内部**（函数参数 / 局部变量 / 函数返回值） | `request_id`（snake_case） | `def _log_event(*, request_id, ...)` / `request_id = _request_id(request)` |
+  | **DB 列名**（SQL DDL / SQLAlchemy column） | `request_id`（snake_case） | `plugin.intercepted_requests.request_id` |
+  | **URL 路径参数**（FastAPI path param） | `request_id`（snake_case） | `/requests/{request_id}` |
+  | **HTTP header** | `x-request-id`（lowercase-with-hyphen） | RFC 7230 标准，与 Python/TS 都无关 |
 
 - **Pydantic 用 `Field(alias="requestId")` 桥接** Python 内部（`body.request_id`）与 JSON wire（`"requestId"`）—— 这是 Pydantic V2 官方模式，不是技术债
 - **TS 端** 用 camelCase 是 JS/TS 行业惯例；不允许出现 `request_id` snake_case 变量
