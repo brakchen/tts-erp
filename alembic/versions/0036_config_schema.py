@@ -137,8 +137,7 @@ def upgrade() -> None:
                 "INSERT INTO config.enum_map "
                 "(enum_type, enum_value, label_zh, sort_order) "
                 "VALUES (:t, :v, :l, :s)"
-            ),
-            {"t": enum_type, "v": enum_value, "l": label_zh, "s": sort_order},
+            ).bindparams(t=enum_type, v=enum_value, l=label_zh, s=sort_order)
         )
 
 
