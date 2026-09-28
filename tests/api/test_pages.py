@@ -13,9 +13,59 @@ This file keeps the two load-bearing contract checks:
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
+from tts_erp_v2.api.v2.pages import (
+    _SIDEBAR_CSS,
+    _SIDEBAR_TOGGLE_JS,
+    _sidebar_html,
+    dashboard_page,
+    enum_map_page,
+)
+
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
+
+
+def test_sidebar_markup_connects_shared_styles_and_accessible_controls():
+    """Sidebar markup must activate its CSS and expose truthful control state."""
+    body = _sidebar_html("dashboard")
+
+    assert re.search(r'<nav class="[^"]*\bsidebar\b[^"]*"[^>]+id="sidebar"', body)
+    assert 'aria-label="主导航"' in body
+    assert 'aria-controls="sidebar"' in body
+    assert 'aria-expanded="false"' in body
+    assert 'aria-current="page"' in body
+
+
+def test_sidebar_script_synchronizes_persisted_and_responsive_state():
+    """Restored collapse state and breakpoint changes use the same state setters."""
+    assert "function setCollapsed(collapsed, persist)" in _SIDEBAR_TOGGLE_JS
+    assert "setCollapsed(readCollapsed(), false);" in _SIDEBAR_TOGGLE_JS
+    assert "function setMobileOpen(open, restoreFocus)" in _SIDEBAR_TOGGLE_JS
+    assert "setMobileOpen(false, false);" in _SIDEBAR_TOGGLE_JS
+    assert "sb.toggleAttribute('inert', hidden);" in _SIDEBAR_TOGGLE_JS
+    assert "desktopQuery.addEventListener('change'" in _SIDEBAR_TOGGLE_JS
+
+
+def test_sidebar_css_is_injected_after_page_styles():
+    """Page-level ``margin`` declarations must not override the sidebar offset."""
+    body = bytes(dashboard_page().body).decode()
+    sidebar_css_at = body.index(_SIDEBAR_CSS.strip())
+
+    assert body.index("html, body {") < sidebar_css_at < body.index("</style>")
+    assert "margin-left: var(--sidebar-width);" in _SIDEBAR_CSS
+
+
+def test_sidebar_tokens_fall_back_on_pages_with_a_different_theme_vocabulary():
+    """The enum-map page uses ``--bg``/``--text`` instead of paper tokens."""
+    body = bytes(enum_map_page().body).decode()
+
+    assert "--sidebar-paper-deep: var(--paper-deep, var(--card, #EAE3D2));" in body
+    assert "--sidebar-ink: var(--ink, var(--text, #1B1814));" in body
+    assert "background: var(--sidebar-paper-deep);" in body
+    assert "font-family: var(--mono);" not in _SIDEBAR_CSS
 
 
 def test_manual_costs_page_returns_200_with_html(api_client, readonly_key):
