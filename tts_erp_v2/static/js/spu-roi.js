@@ -165,8 +165,15 @@
         window.location.href = loginUrl(); // pi-lens-ignore: no-open-redirect-js
         throw new Error("unauthorized");
       }
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.json();
+      return r.json().then((payload) => {
+        if (!r.ok) {
+          var err = new Error(payload.message || `HTTP ${r.status}`);
+          err.code = payload.code || null;
+          err.status = r.status;
+          throw err;
+        }
+        return payload;
+      });
     });
   }
 
@@ -295,7 +302,17 @@
     );
   }
 
-  function renderError(msg) {
+  function renderError(msg, wholePage) {
+    closeDrillPanel();
+    if (wholePage) {
+      var summaries = $("#summaries");
+      var pager = document.querySelector("main .op-pager");
+      var footnotes = $("#footnotes");
+      if (summaries) summaries.hidden = true;
+      if (pager) pager.hidden = true;
+      if (footnotes) footnotes.hidden = true;
+      $("#sum-stamp").textContent = "";
+    }
     html(
       $("#rows"),
       `<tr><td colspan="7" class="op-error">${esc(msg)} · <a href="#" id="retry-link">重试</a></td></tr>`,
@@ -317,6 +334,12 @@
   }
 
   function render(payload) {
+    var summaries = $("#summaries");
+    var pager = document.querySelector("main .op-pager");
+    var footnotes = $("#footnotes");
+    if (summaries) summaries.hidden = false;
+    if (pager) pager.hidden = false;
+    if (footnotes) footnotes.hidden = false;
     var items = unwrap(payload);
     var totals = payload.totals || {};
     var meta = payload.meta || {};
@@ -372,11 +395,15 @@
     } else {
       roiBreakevenEl.textContent = "—";
     }
-    // 广告系统保本ROI(TODO: 公式待定，暂显示 —)
+    // 广告系统保本ROI：后端返回临时 0 + formula_pending；pending 永远显示 —。
     var roiAdEl = $("#sum-roi-ad");
-    roiAdEl.textContent = "—";
+    var roiAdStatus = totals.ad_system_breakeven_roi_status;
+    roiAdEl.textContent =
+      roiAdStatus === "formula_pending"
+        ? "—"
+        : fmtRatio(totals.ad_system_breakeven_roi);
     $("#sum-stamp").textContent =
-      `全表 USD · 固定汇率 ${meta.fx ? meta.fx.as_of : ""} · ROI 账页`;
+      `全表 USD · 数据库汇率快照 ${meta.fx ? meta.fx.as_of : ""} · 盈利 v10`;
 
     // 表格
     if (items.length) {
@@ -573,13 +600,11 @@
   }
   function renderProfitTab(it) {
     // B1 fix: 用后端暴露的 settled_net(SETTLEMENT 净额),不用 gross settled_sales 比例拆
+    // 金额分解全部由后端 v10 module 给出；前端只格式化，不重算盈利。
     var settledNet = Number(it.settled_net || 0);
-    var netRevenue = Number(it.net_revenue || 0);
-    var unsettledNet = netRevenue - settledNet;
-    var flc = Number(it.full_loss_cancelled_qty || 0);
-    var unitCost = Number(it.unit_cost_used || 0);
-    var cogsSold = Number(it.units_sold || 0) * unitCost;
-    var cogsFlc = flc * unitCost;
+    var unsettledNet = Number(it.unsettled_net || 0);
+    var cogsSold = Number(it.cogs_sold || 0);
+    var cogsFlc = Number(it.cogs_full_loss_cancelled || 0);
     var spend = Number(it.spend || 0);
     var np = Number(it.net_profit || 0);
 
@@ -1030,9 +1055,11 @@
       .catch((err) => {
         state.loading = false;
         if (err && err.message === "unauthorized") return;
-        renderError(
-          `加载失败 · ${err && err.message ? err.message : "未知错误"}`,
-        );
+        if (err && err.code === "FX_RATE_UNAVAILABLE") {
+          renderError("汇率数据缺失，无法计算结果", true);
+          return;
+        }
+        renderError(`加载失败 · ${err && err.message ? err.message : "未知错误"}`);
       });
   }
 

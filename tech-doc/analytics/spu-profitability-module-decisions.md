@@ -1,6 +1,6 @@
 # SPU 盈利 deep module — 已确认决策
 
-> 状态：grilling 进行中；本文只记录已确认约束，不设计具体 interface。
+> 状态：interface 已确认并进入实现；业务约束仍以本文与 v10 口径为准。
 > 业务口径唯一 truth source：`biz-doc/analytics/spu-roi-profit-calculation.md` v10。
 
 ## 1. 权威口径
@@ -48,3 +48,38 @@
 - 数据库中没有可用汇率快照时，整个盈利结果不可计算，不返回部分 `items` 或 `totals`。
 - HTTP 返回 `503 Service Unavailable`，错误码为 `FX_RATE_UNAVAILABLE`。
 - SPU ROI 页面必须显示整页错误状态：“汇率数据缺失，无法计算结果”，并提供重试入口；不得显示空表或全零。
+
+## 6. 已确认 public interface
+
+```python
+read_overview(
+    session,
+    *,
+    scope: ProfitScope,
+    view: RowView,
+) -> ProfitabilityOverview
+
+explain_spu(
+    session,
+    *,
+    scope: ProfitScope,
+    spu_pk: int,
+    evidence: EvidenceRequest,
+) -> SpuProfitExplanation
+```
+
+- `ProfitScope` 只包含店铺、日期窗口与是否包含非在售 SPU。
+- `RowView` 只包含搜索、排序、分页；它不能改变盈利大盘。
+- `EvidenceRequest` 明确选择订单、结算、售后与广告证据。
+- 两个入口各自建立一个只读 `REPEATABLE READ` 快照。
+- `explain_spu` 在同一快照内重新计算 SPU 盈利与证据，二者共享一个 `calculated_at`。
+- 领域结果保持 `Decimal`、`date`、`datetime` 与枚举；历史 `/v2/analytics/spu-roi` adapter 负责字符串格式化。
+- 历史 `fee_rate` query param 暂由私有 compatibility adapter 承接；它不进入新的 public interface，也不得扩散到新调用者。
+
+## 7. implementation locality
+
+- module：`tts_erp_v2.analytics.spu_profitability`
+- interface：包级 `read_overview`、`explain_spu` 与 immutable domain types
+- implementation：`_implementation.py` 拥有 PostgreSQL 查询和归一化；`_formula_v10.py` 是纯公式 seam；`_snapshot.py` 拥有请求级一致快照。
+- adapter：`tts_erp_v2.analytics.spu_roi` 仅保留稳定 URL、参数校验、HTTP error envelope 与 wire serialization。
+- frontend：只显示 adapter 返回的盈利结果和分解字段，不重新计算净收入、COGS、净利润或 ROI。

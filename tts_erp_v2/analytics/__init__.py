@@ -11,5 +11,7 @@ ingest（写入）侧已于 2026-09-11 迁到 ``tts_erp_v2/plugin/ads/``
 
 本包只保留**读侧**逻辑：
 
-- ``spu_roi.py`` —— SPU 实际 ROI 看板 + 钻取面板（读 ``plugin.ad_*``）。
+- ``spu_profitability`` —— v10 SPU 盈利 deep module；拥有 PostgreSQL 查询、
+  归一化、公式、一致快照与盈利证据。
+- ``spu_roi.py`` —— 历史稳定 URL 的薄 HTTP adapter；只做参数与 wire 格式。
 """
