@@ -225,7 +225,7 @@ def _q(compiled_stmt, params: dict, sess: Session):
     data flows only through the ``params`` dict — never into the SQL
     string itself.
     """
-    return sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: module-level text() constants + bound params only
+    return sess.execute(  # pi-lens-ignore: python-sql-injection — module-level text() constants + bound params only
         compiled_stmt, params
     )
 
