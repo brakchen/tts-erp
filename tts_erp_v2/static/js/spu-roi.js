@@ -47,6 +47,8 @@
 
   // §7.2 标色默认阈值(常量,页面 ⚙ 可调预留,不锁死)
   var REFUND_RATE_ALERT = 0.3; // 退款率警戒线:> 30% → 标题⚠ + 红字
+  var REDIRECT_COUNTDOWN_SEC = 60;
+  var DASHBOARD_PATH = "/v2/pages/dashboard";
 
   // Public path prefix: "/tts" behind NGINX, "" on :9877 directly.
   var PREFIX = location.pathname.replace(/\/v2\/pages\/.*$/, "");
@@ -889,18 +891,59 @@
     });
   }
 
-  // ---------- 店铺下拉(GET /v2/commerce/channel-accounts,readonly) ----------
-  // 值 = 内部 id/shop_pk,显示 = account_name;默认"全部店铺"(不传 shop_pk =
-  // 全部店铺全历史)。401 → 跳登录(与主表 load() 一致);失败只留占位项,
-  // 不阻塞主表(空态文案即占位项"全部店铺")。
+  // ---------- shop_pk URL param (必选) ----------
+  function getShopPkFromUrl() {
+    var u = new URLSearchParams(location.search);
+    var v = u.get("shop_pk");
+    return v && v !== "" ? v : null;
+  }
+  function setShopPkInUrl(pk) {
+    var u = new URL(location.href);
+    if (pk) u.searchParams.set("shop_pk", pk);
+    else u.searchParams.delete("shop_pk");
+    history.replaceState(null, "", u.toString());
+  }
+
+  // ---------- toast + countdown ----------
+  var _countdownTimer = null;
+  function showToast(msg, countdownSec) {
+    var toast = $("#ops-toast");
+    var msgEl = $("#toast-msg");
+    var cdEl = $("#toast-countdown");
+    if (!toast) return;
+    toast.hidden = false;
+    msgEl.textContent = msg;
+    var remaining = countdownSec;
+    cdEl.textContent = remaining + " 秒后自动返回首页";
+    if (_countdownTimer) clearInterval(_countdownTimer);
+    _countdownTimer = setInterval(() => {
+      remaining--;
+      if (remaining <= 0) {
+        clearInterval(_countdownTimer);
+        _countdownTimer = null;
+        window.location.href = PREFIX + DASHBOARD_PATH; // pi-lens-ignore: no-open-redirect-js
+        return;
+      }
+      cdEl.textContent = remaining + " 秒后自动返回首页";
+    }, 1000);
+  }
+  function hideToast() {
+    if (_countdownTimer) {
+      clearInterval(_countdownTimer);
+      _countdownTimer = null;
+    }
+    var toast = $("#ops-toast");
+    if (toast) toast.hidden = true;
+  }
+
+  // ---------- 店铺下拉(必选:shop_pk 来自 URL → 切换写回 URL) ----------
   function loadShops() {
-    fetch(`${PREFIX}/v2/commerce/channel-accounts?platform=tiktok&limit=500`, {
+    return fetch(`${PREFIX}/v2/commerce/channel-accounts?platform=tiktok&limit=500`, {
       credentials: "include",
       headers: { Accept: "application/json" },
     })
       .then((r) => {
         if (r.status === 401) {
-          // 401 → 跳登录(console.js 家族行为)
           window.location.href = loginUrl(); // pi-lens-ignore: no-open-redirect-js
           throw new Error("unauthorized");
         }
@@ -908,17 +951,46 @@
         return r.json();
       })
       .then((shops) => {
-        var sel = $("#filter-shop");
-        if (!sel || !Array.isArray(shops)) return;
-        // 保留 HTML 里的"全部店铺"占位项,其后追加店铺选项
+        var sel = $("#shop-switcher");
+        if (!sel || !Array.isArray(shops)) return null;
+        if (!shops.length) {
+          showToast("无可用店铺", REDIRECT_COUNTDOWN_SEC);
+          return null;
+        }
+        // 填充下拉选项
         shops.forEach((s) => {
           var opt = document.createElement("option");
           opt.value = String(s.id);
-          opt.textContent = s.account_name || `#${s.id}`;
+          opt.textContent = s.account_name || `#${s.id} (${s.region || "?"})`;
           sel.appendChild(opt);
         });
+        // 从 URL 读 shop_pk
+        var urlPk = getShopPkFromUrl();
+        if (urlPk) {
+          // 验证 URL 中的 shop_pk 是否在列表中
+          var found = shops.some((s) => String(s.id) === urlPk);
+          if (!found) {
+            showToast(`店铺 ${urlPk} 不存在`, REDIRECT_COUNTDOWN_SEC);
+            return null;
+          }
+          sel.value = urlPk;
+          state.shopPk = sel.value;
+        } else {
+          // URL 无 shop_pk → 弹 toast 提示用户主动选择
+          showToast("请先选择店铺", REDIRECT_COUNTDOWN_SEC);
+          return null;
+        }
+        // 切换事件
+        sel.addEventListener("change", () => {
+          hideToast(); // 切换时取消倒计时
+          state.shopPk = sel.value;
+          setShopPkInUrl(sel.value);
+          state.offset = 0;
+          load();
+        });
+        return sel.value;
       })
-      .catch(() => {});
+      .catch(() => null);
   }
 
   // ---------- load ----------
@@ -1124,13 +1196,7 @@
       load();
     });
 
-    // 店铺筛选:空值 = 全部店铺(不传 shop_pk = 全历史语义)
-    $("#filter-shop").addEventListener("change", (e) => {
-      var v = e.target.value;
-      state.shopPk = v === "" ? null : v;
-      state.offset = 0;
-      load();
-    });
+    // 店铺切换:已由 loadShops() 内部绑定(#shop-switcher change → hideToast + setShopPkInUrl + load)
 
     // 日期范围:空 = 不限;yyyy-mm-dd 直接作 w_start/w_end(含 w_end 当日)
     // 校验: w_start 不能晚于 w_end(否则报错并重置为当前输入的字段)
@@ -1199,8 +1265,10 @@
     wireTooltips(); // 悬停说明气泡(data-tip 委托,含重渲染后的新行)
     wireZoom(); // 主图点击放大(委托)
     loadMe();
-    loadShops(); // 店铺选项异步填充;失败不影响主表
-    loadEnumMap().then(() => load()); // 先加载枚举映射,再加载主表数据
+    // 店铺必选:先加载店铺,再加载数据;loadShops 内部处理 shop_pk 校验 + toast + 倒计时
+    loadShops().then((pk) => {
+      if (pk) loadEnumMap().then(() => load());
+    });
   }
 
   document.addEventListener("DOMContentLoaded", bindControls);

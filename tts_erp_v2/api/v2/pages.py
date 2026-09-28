@@ -1095,7 +1095,11 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
         <div class="op-eyebrow mb-1">TikTok Shop · Analytics</div>
         <h1 class="op-title mb-0">SPU 实际 ROI</h1>
       </div>
-      <div class="d-flex flex-column align-items-start align-items-sm-end text-sm-end">
+      <div class="op-header-meta">
+        <label class="op-shop" for="shop-switcher">
+          <span>店铺</span>
+          <select id="shop-switcher" name="shop_pk" class="op-shop-select" aria-label="当前店铺"></select>
+        </label>
         <span class="op-identity" id="ops-identity"></span>
         <span class="op-scope-note" id="sum-stamp">ROI · 账页</span>
       </div>
@@ -1128,12 +1132,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
           <span class="op-fld-label">搜索 spu_id</span>
           <input id="filter-q" type="search" class="form-control" placeholder="spu_id 或标题" autocomplete="off" aria-label="按 spu_id 或标题搜索">
         </label>
-        <label class="op-field op-field--shop" for="filter-shop" data-tip="店铺筛选：仅看该店铺 SPU（默认全部店铺）">
-          <span class="op-fld-label">店铺</span>
-          <select id="filter-shop" class="form-select" aria-label="筛选店铺（全部店铺 = 不限）">
-            <option value="">全部店铺</option>
-          </select>
-        </label>
+
         <label class="op-field op-field--date" for="filter-w-start" data-tip="日期范围（销售/退款/广告同口径裁剪；空 = 全历史）">
           <span class="op-fld-label">起始日</span>
           <input id="filter-w-start" type="date" class="form-control" aria-label="销售/退款起始日期（空 = 不限）">
@@ -1216,6 +1215,10 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     </section>
   </main>
 
+  <div id="ops-toast" class="op-toast" hidden>
+    <span class="op-toast-msg" id="toast-msg"></span>
+    <span class="op-toast-countdown" id="toast-countdown"></span>
+  </div>
   <div id="ops-tip" role="tooltip" hidden></div>
   <script src="../../static/js/spu-roi.js?v=__JSV_SPU_ROI__" defer></script>
 </body>
