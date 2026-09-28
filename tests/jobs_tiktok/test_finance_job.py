@@ -27,7 +27,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from tts_erp_v2.db.models import (
     ChannelAccount,
@@ -211,7 +211,9 @@ def _cursor_value(session, *, job_name: str, scope: str) -> int | None:
 def _test_account_statements(
     session, account: ChannelAccount
 ) -> list[SettlementStatement]:
-    """Return SettlementStatements whose payout belongs to ``account``.
+    """Return SettlementStatements whose payout belongs to ``account``
+    OR whose ``payout_id IS NULL`` (V3 §14.3：payment_id 缺失的 statement
+    以 NULL payout_id 入库，join Payout 会漏掉）。
 
     The shared ``db_session`` fixture joins an outer rollback
     transaction, so reads see committed production data (1080 replicated
@@ -222,8 +224,8 @@ def _test_account_statements(
     return list(
         session.execute(
             select(SettlementStatement)
-            .join(Payout, SettlementStatement.payout_id == Payout.id)
-            .where(Payout.shop_pk == account.id)
+            .outerjoin(Payout, SettlementStatement.payout_id == Payout.id)
+            .where(or_(Payout.shop_pk == account.id, SettlementStatement.payout_id.is_(None)))
         )
         .scalars()
         .all()
@@ -504,12 +506,12 @@ def test_finance_statement_attaches_only_to_own_payout(db_session) -> None:
     assert payout_c.id != stmts[0].payout_id
 
 
-def test_finance_statement_without_payment_id_skipped_with_issue(db_session) -> None:
-    """A statement payload lacking ``payment_id`` must NOT be silently
-    attached. Surface as ``SyncIssue(STATEMENT_PAYMENT_ID_MISSING)`` and
-    skip — the statements cursor MUST NOT advance past it (otherwise a
-    later batch with the real payment_id would be re-fetched, and an
-    early termination would lose visibility).
+def test_finance_statement_without_payment_id_ingested_with_null_payout(db_session) -> None:
+    """A statement payload lacking ``payment_id`` must be ingested
+    with ``payout_id=NULL`` (NOT silently skipped) and a
+    ``SyncIssue(STATEMENT_PAYMENT_ID_MISSING)`` recorded. Pre-fix
+    (V3 §14.3 之前) 这类 statement 被 continue 跳过→其 transactions 也
+    不抓→连带丢 31 个订单的结算数据（生产审计 2026-09-28）。
     """
     account = _make_account(db_session)
     proxy = FakeProxy(
@@ -523,7 +525,9 @@ def test_finance_statement_without_payment_id_skipped_with_issue(db_session) -> 
                 },
             }
         ],
-        transactions_pages=[],  # never called
+        # 不回 transactions：验证 statement 能入库不依赖 transactions（·
+        # 修复后即使 transactions 抓取失败，statement 本体也已在）。
+        transactions_pages=[],
     )
     run_with_sync_job(
         db_session,
@@ -532,12 +536,12 @@ def test_finance_statement_without_payment_id_skipped_with_issue(db_session) -> 
         inner=finance_job.run,
         inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
     )
-    # No statement row should exist (skip, not silent attach). Scoped to
-    # the test account so production's 1080 replicated rows don't pollute.
-    assert _test_account_statements(db_session, account) == []
-    # SyncIssue recorded. Filter by (job_name, external_id) — prod has 23
-    # STATEMENT_PAYMENT_ID_MISSING rows for other jobs that would inflate
-    # the count.
+    # Statement 必须入库，且 payout_id 为 NULL
+    rows = _test_account_statements(db_session, account)
+    assert len(rows) == 1
+    assert rows[0].external_statement_id == "STM_X"
+    assert rows[0].payout_id is None  # NULL FK
+    # SyncIssue 仍然记——人可追“这个 statement 为什么孤儿”
     issues = (
         db_session.execute(
             select(SyncIssue).where(
@@ -550,18 +554,16 @@ def test_finance_statement_without_payment_id_skipped_with_issue(db_session) -> 
         .all()
     )
     assert len(issues) == 1
-    assert issues[0].external_id == "STM_X"
-    # Cursor MUST NOT have advanced past the missing-payment_id row, so
-    # the next tick re-fetches it (TikTok might add payment_id later, or
-    # we might back-fill).
+    # Cursor 推进：statement 本身入库了（V3 §14.1 修复后 watermark 只
+    # 按成功入库推进）。“光让 cursor 卡住 → 可能永久退出不了该 case”
+    # 的问题由 §14.2 的 stale-issue auto-resolve 兑底。
     stmts_cursor = _cursor_value(
         db_session,
         job_name="tiktok.finance.statements",
         scope=account.shop_id,
     )
-    assert stmts_cursor is None, (
-        "statements cursor advanced past a row we couldn't ingest; "
-        "next tick would skip it forever"
+    assert stmts_cursor is not None, (
+        "statements cursor did not advance for a statement ingeste'd with payout_id=NULL"
     )
 
 
