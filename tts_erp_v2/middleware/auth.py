@@ -76,6 +76,8 @@ _READONLY_PREFIXES = (
     # 主表 /v2/analytics/spu-roi 在下方 _READONLY_EXACT 中(无尾斜杠);子路径
     # 补 prefix,避免 fallback 到默认 admin(role=readonly session → 403)。
     "/v2/analytics/spu-roi/",
+    # config schema 枚举映射 GET（readonly；PUT/DELETE 在 handler 层 require_role_at_least("admin")）
+    "/v2/config/",
     # TikTok Shop Partner API read-through proxy (live, no DB caching).
     # All endpoints here are GETs that hand the upstream payload back
     # verbatim. See ``tts_erp_v2/proxy/tts_shop/products_api.py`` for

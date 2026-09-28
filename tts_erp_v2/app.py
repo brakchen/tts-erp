@@ -47,6 +47,7 @@ from tts_erp_v2.api.v2 import (
     analytics,
     auth,
     commerce,
+    config as config_router,
     fx,
     intercept,
     linkage,
@@ -101,6 +102,9 @@ def _build_routes(app: FastAPI) -> None:
     # Chrome 扩展订单/物流/结算数据同步（readwrite；与 analytics 同级）。
     # 详见 tech-doc/chrome-ext-order-sync-design.md。
     app.include_router(order_sync.router)
+    # config schema 枚举映射 CRUD（GET readonly；PUT/DELETE admin）。
+    # 详见 tech-doc/spu-roi-enum-translation-plan.md。
+    app.include_router(config_router.router)
     # SPU 实际 ROI 看板主表(GET /v2/analytics/spu-roi, readonly)——
     # 读 plugin.ad_* 表；URL 保持 /v2/analytics/ 前缀与 sync 端点同域。
     # 模块 tts_erp_v2/analytics/spu_roi.py 名称同理为历史残留。

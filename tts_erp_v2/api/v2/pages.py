@@ -2209,3 +2209,78 @@ _INTERCEPT_STATS_PAGE_HTML = """<!doctype html>
 </body>
 </html>
 """
+
+# ── enum-map 管理页面 ─────────────────────────────────────────────────
+
+_ENUM_MAP_PAGE_HTML = """<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>枚举映射管理 · tts-erp</title>
+  <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
+  <style>
+    :root {
+      --mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+      --sans: 'Inter', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+      --bg: #f8f6f3; --card: #fff; --border: #e2ddd5; --accent: #5b6abf;
+      --text: #2c2c2c; --muted: #888; --danger: #c0392b;
+    }
+    html, body { font-family: var(--sans); font-size: 14px; background: var(--bg); color: var(--text); margin: 0; }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 24px 20px 64px; }
+    .header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+    .header h1 { font-size: 20px; margin: 0; }
+    .header a { font-family: var(--mono); font-size: 12px; color: var(--muted); text-decoration: none; border: 1px solid var(--border); padding: 3px 8px; }
+    .header a:hover { border-color: var(--accent); color: var(--accent); }
+    .tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 16px; }
+    .tabs button { font-family: var(--sans); font-size: 13px; padding: 6px 14px; border: 1px solid var(--border); background: var(--card); cursor: pointer; border-radius: 4px; }
+    .tabs button.is-active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .tabs button:hover:not(.is-active) { border-color: var(--accent); }
+    table { width: 100%; border-collapse: collapse; background: var(--card); }
+    th, td { padding: 8px 12px; border: 1px solid var(--border); text-align: left; font-size: 13px; }
+    th { background: #f0ede8; font-weight: 600; }
+    td input { width: 100%; border: 1px solid var(--border); padding: 4px 6px; font-size: 13px; font-family: var(--sans); box-sizing: border-box; }
+    td input:focus { outline: none; border-color: var(--accent); }
+    .actions { display: flex; gap: 6px; }
+    .btn { font-family: var(--sans); font-size: 12px; padding: 4px 10px; border: 1px solid var(--border); background: var(--card); cursor: pointer; border-radius: 3px; }
+    .btn:hover { border-color: var(--accent); }
+    .btn-danger { color: var(--danger); border-color: var(--danger); }
+    .btn-danger:hover { background: var(--danger); color: #fff; }
+    .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .btn-primary:hover { opacity: 0.85; }
+    .add-row { display: flex; gap: 8px; align-items: center; margin-top: 12px; padding: 10px 12px; background: var(--card); border: 1px solid var(--border); }
+    .add-row input { flex: 1; min-width: 120px; border: 1px solid var(--border); padding: 5px 8px; font-size: 13px; }
+    .toast { position: fixed; bottom: 20px; right: 20px; padding: 10px 18px; background: #27ae60; color: #fff; border-radius: 4px; font-size: 13px; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+    .toast.show { opacity: 1; }
+    .empty { padding: 40px; text-align: center; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <a href="../../v2/pages/spu-roi">← SPU ROI</a>
+      <h1>枚举映射管理</h1>
+    </div>
+    <div class="tabs" id="type-tabs"></div>
+    <table>
+      <thead><tr><th>英文值</th><th>中文标签</th><th>排序</th><th>操作</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="add-row" id="add-row">
+      <input id="add-value" placeholder="英文值" autocomplete="off">
+      <input id="add-label" placeholder="中文标签" autocomplete="off">
+      <input id="add-sort" placeholder="排序" type="number" value="0" style="width:60px;flex:none">
+      <button class="btn btn-primary" id="btn-add">添加</button>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script src="../../static/js/enum-map.js" defer></script>
+</body>
+</html>
+"""
+
+
+@router.get("/enum-map", response_class=HTMLResponse)
+def enum_map_page() -> HTMLResponse:
+  """枚举映射管理页面。CRUD 管理 config.enum_map 枚举翻译。"""
+  return _page(_ENUM_MAP_PAGE_HTML)

@@ -89,6 +89,7 @@ from tts_erp_v2.db.models.reporting import (
     ShipmentTrackingSummary,
 )
 from tts_erp_v2.db.models.security import ApiKey
+from tts_erp_v2.db.models.config import EnumMap
 
 __all__ = [
     "AccountLink",
@@ -113,6 +114,7 @@ __all__ = [
     "Credentials",
     "ExchangeRate",
     "ExchangeRateSnapshot",
+    "EnumMap",
     "InterceptConfig",
     "InterceptedRequest",
     "InterceptSession",
