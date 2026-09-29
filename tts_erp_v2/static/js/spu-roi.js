@@ -756,76 +756,59 @@
       : null;
   }
   function renderProfitSummary(it) {
-    function m(v) {
-      return v == null || v === "" ? "—" : fmtMoney(v);
+    // 明细大盘与页首实际大盘完全同组同口径；值均由后端行字段给出，前端只格式化。
+    function money(value) {
+      return value == null || value === "" ? "—" : fmtMoney(value);
     }
-    function cell(label, value, hint, warn) {
-      var val = value == null ? "—" : value;
+    function cell(label, value, hint) {
       var hintEl = hint
         ? el("span", { class: "op-hint", "data-tip": hint }, "?")
         : null;
-      // DEFAULT_K1 兑底时,值后面加 ⚠ + tooltip 提示
-      var warnEl = warn
-        ? el(
-            "span",
-            {
-              class: "op-warn",
-              "data-tip":
-                "采用 40 CNY 兑底成本价（无人工标注采购价、无 1688 货源价）\n" +
-                "实际成本可能远低于 40 CNY,净利润可能被高估",
-            },
-            "⚠",
-          )
-        : null;
-      var valChildren = warnEl ? [String(val), " ", warnEl] : [String(val)];
       return el(
         "div",
         { class: "col" },
         el(
           "div",
-          {
-            class:
-              "op-drill-cell h-100" +
-              (warn ? " op-drill-cell-fallback" : ""),
-          },
+          { class: "op-drill-cell h-100" },
           el("span", { class: "op-drill-lbl" }, label, hintEl),
-          el("span", { class: "op-drill-val" }, valChildren),
+          el("span", { class: "op-drill-val" }, String(value == null ? "—" : value)),
         ),
       );
     }
+    var adSystemBreakeven =
+      it.ad_system_breakeven_roi == null || it.ad_system_breakeven_roi === ""
+        ? "—"
+        : (it.ad_system_breakeven_roi_status === "estimated_known_costs" ? "≈" : "") +
+          fmtRatio(it.ad_system_breakeven_roi);
     return el(
       "div",
       {
         class:
-          "row row-cols-2 row-cols-sm-3 row-cols-lg-3 row-cols-xxl-3 g-2 op-drill-grid",
+          "row row-cols-2 row-cols-sm-3 row-cols-lg-4 row-cols-xxl-4 g-2 op-drill-grid",
       },
-      cell("ROI 实际", fmtRatio(it.roi_real)),
-      cell("ROI 保本", fmtRatio(it.roi_breakeven)),
+      cell("总单量", String(it.total_orders || 0)),
+      cell("广告消耗", money(it.spend)),
+      cell("有效单量", String(it.effective_order_count || 0)),
+      cell("有效销售", money(it.effective_sales)),
+      cell("退款数", String(it.refund_order_count || 0)),
+      cell("退款率", fmtPct(it.refund_rate)),
+      cell("全损量", String(it.full_loss_order_count || 0)),
+      cell("全损率", fmtPct(it.full_loss_rate)),
+      cell("国内取消量", String(it.domestic_cancelled_order_count || 0)),
+      cell("国内取消率", fmtPct(it.cancel_rate)),
+      cell("净利润", money(it.net_profit)),
+      cell("实际ROI", fmtRatio(it.roi_real)),
+      cell("实际保本ROI", fmtRatio(it.roi_breakeven)),
       cell(
-        "广告系统实际 ROI",
+        "广告系统实际ROI",
         fmtRatio(it.ad_system_actual_roi),
         "广告系统实际 ROI = 广告归因 GMV ÷ 广告实际消耗；无广告消耗时显示 —",
       ),
       cell(
-        "广告系统保本 ROI",
-        it.ad_system_breakeven_roi == null ||
-          it.ad_system_breakeven_roi === ""
-          ? "—"
-          : (it.ad_system_breakeven_roi_status === "estimated_known_costs"
-              ? "≈"
-              : "") + fmtRatio(it.ad_system_breakeven_roi),
+        "广告系统保本ROI",
+        adSystemBreakeven,
         "广告系统保本 ROI = 广告归因 GMV ÷ 最大可承受广告费；当前未结构化录入退货运费、提现费、汇兑损失、包装耗材等结算外成本，≈ 表示已知成本下限估算",
       ),
-      cell("CPA", m(it.cpa)),
-      cell(
-        "单位成本",
-        m(it.unit_cost_used),
-        "成本链路: 人工标注(MANUAL) > 1688 货源价(SOURCE_PRICE) > 40 CNY 兑底(DEFAULT_K1)",
-        it.cost_source === "DEFAULT_K1",
-      ),
-      cell("已结算单", String(it.settled_order_count || 0)),
-      cell("全损件数", String(it.full_loss_qty || 0)),
-      cell("净收入", m(it.net_revenue)),
     );
   }
   function renderProfitTab(it) {
