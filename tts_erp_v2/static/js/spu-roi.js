@@ -883,8 +883,14 @@
       .then((data) => {
         var content = renderDrillTabBody(which, data);
         if (content && content.tagName === "TABLE") {
-          content.className =
-            "table table-sm table-hover align-middle mb-0 op-tab-table";
+          content.classList.add(
+            "table",
+            "table-sm",
+            "table-hover",
+            "align-middle",
+            "mb-0",
+            "op-tab-table",
+          );
           content = el("div", { class: "table-responsive" }, content);
         }
         body.replaceChildren(content);

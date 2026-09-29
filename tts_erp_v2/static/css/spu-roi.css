@@ -38,6 +38,10 @@
 * {
  box-sizing: border-box;
 }
+/* Bootstrap display utilities use !important. Semantic hidden must always win. */
+[hidden] {
+ display: none !important;
+}
 html,
 body {
  background: var(--paper);
@@ -644,6 +648,10 @@ textarea[data-tip] {
  border-top: 1px solid var(--rule-soft);
 }
 .op-drill-tabs {
+ --bs-nav-tabs-link-active-color: var(--accent);
+ --bs-nav-tabs-link-active-bg: var(--paper);
+ --bs-nav-tabs-link-active-border-color: var(--rule) var(--rule) var(--paper);
+ --bs-nav-tabs-link-hover-border-color: transparent transparent var(--rule);
  margin-bottom: 14px;
  border-bottom-color: var(--rule);
  scrollbar-width: thin;
@@ -883,13 +891,17 @@ textarea[data-tip] {
  z-index: 1200;
  background: rgba(20, 16, 10, 0.55);
 }
+.op-shop-modal:not([hidden]) {
+ display: flex;
+}
 .op-shop-modal[hidden] {
- display: none; /* bootstrap reboot 的 [hidden]!important 已兜,此处双保险 */
+ display: none !important;
 }
 .op-shop-modal-box {
  width: 100%;
  max-width: 420px;
  border: 1px solid var(--rule);
+ border-radius: 0;
  background: var(--paper);
  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
 }
@@ -923,6 +935,7 @@ textarea[data-tip] {
 }
 .op-shop-modal-item:hover {
  border-color: var(--accent);
+ background-color: var(--paper-deep);
  color: var(--accent-deep);
 }
 .op-shop-modal-foot {
