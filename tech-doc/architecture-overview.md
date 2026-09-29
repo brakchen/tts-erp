@@ -71,13 +71,16 @@ shop_cipher = cred.shop_cipher
 
 - 除豁免路径（`/healthz`、`/endpoints`、`/openapi.json`、`/docs`、`/redoc`、`/docs/oauth2-redirect`、
   `/v2/auth/{login,logout,me}`）外，所有端点要 `Authorization: Bearer <key>` 或 `X-API-Key: <key>`；
-  无 key 401、角色不够 403。完整角色矩阵见 `tech-doc/external-api.md` + `middleware/auth.py::required_role()`
-- 三级角色 `readonly` < `readwrite` < `admin`；handler 内再校验：linkage overrides=admin、
-  issues/{id}/resolve=readwrite、admin/reset-rate-limit=admin
+  无 key 401、角色不够 403。完整角色矩阵见 `tech-doc/external-api.md`；实现集中在
+  `tts_erp_v2/access/`，`middleware/auth.py` 仅为 ASGI adapter
+- 三级角色 `readonly` < `readwrite` < `admin`；handler gate 读取同一 typed `AccessGrant`：
+  linkage overrides=admin、issues/{id}/resolve=readwrite、admin/reset-rate-limit=admin
 - 浏览器会话：`POST /v2/auth/login` 用 API key 换 `tts_session` cookie（见 `tech-doc/browser-login-design.md`）；
   cookie 会话做 mutation 必须带 `X-Requested-With: tts-erp`（CSRF 闸）
 - key 入库只存 SHA-256 哈希（`security.api_keys`）；模式开关 `.env TTS_ERP_AUTH_MODE=off|shadow|enforce`
-  （生产 = enforce）；cron/脚本用 `.env TTS_ERP_SERVICE_KEY`
+  （生产 = enforce；非法值记录错误并 fail closed）；cron/脚本用 `.env TTS_ERP_SERVICE_KEY`
+- deployment path 由 `tts_erp_v2.access.canonicalize_path()` 统一解释，Auth 与 DocsAuth
+  共用 route-relative 结果；不得在其他 middleware 重新读取 external-prefix env
 
 ## 6. External API（外部契约）
 

@@ -32,7 +32,7 @@ from __future__ import annotations
 import base64
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,12 +42,12 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from tts_erp_v2.access import DeploymentPathInput, canonicalize_path
 from tts_erp_v2.api.v2 import (
     admin,
     analytics,
     auth,
     commerce,
-    config as config_router,
     fx,
     intercept,
     linkage,
@@ -60,10 +60,10 @@ from tts_erp_v2.api.v2 import (
     sync_status,
     tiktok_shop,
 )
+from tts_erp_v2.api.v2 import config as config_router
 from tts_erp_v2.middleware.access_log import AccessLogMiddleware
 from tts_erp_v2.middleware.auth import AuthMiddleware
 from tts_erp_v2.middleware.rate_limit import RateLimitMiddleware
-
 
 # The production ads-data-sync extension has a stable signed ID. Keep this
 # narrow instead of enabling every chrome-extension origin; operators can
@@ -131,9 +131,9 @@ def _build_routes(app: FastAPI) -> None:
     # dashboard「数据同步状态」卡片数据源，只读 integration.sync_jobs。
     app.include_router(sync_status.router)
 
-    # Operator-console static assets (vendor/bootstrap.min.css / js/console.js). Auth is
-    # readonly-level via the "/static/" prefix in middleware/auth.py —
-    # any authenticated session passes; anonymous requests get 401.
+    # Operator-console static assets (vendor/bootstrap.min.css / js/console.js)
+    # are public. Business data remains protected at API endpoints; public assets
+    # keep an expired browser session from degrading every page into CSS/JS 401s.
     app.mount(
         "/static",
         StaticFiles(directory=Path(__file__).parent / "static"),
@@ -177,7 +177,12 @@ class DocsAuthMiddleware(BaseHTTPMiddleware):
     both set in the environment.  When unset, docs remain public.
     """
 
-    _PROTECTED = {"/docs", "/openapi.json", "/redoc", "/docs/oauth2-redirect"}
+    _PROTECTED: ClassVar[set[str]] = {
+        "/docs",
+        "/openapi.json",
+        "/redoc",
+        "/docs/oauth2-redirect",
+    }
 
     def __init__(self, app):  # type: ignore[no-untyped-def]
         super().__init__(app)
@@ -186,7 +191,14 @@ class DocsAuthMiddleware(BaseHTTPMiddleware):
         self._enabled = bool(self._user and self._password)
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
-        if not self._enabled or request.url.path not in self._PROTECTED:
+        canonical = canonicalize_path(
+            DeploymentPathInput(
+                path=request.scope.get("path", ""),
+                raw_path=request.scope.get("raw_path"),
+                root_path=request.scope.get("root_path", ""),
+            )
+        )
+        if not self._enabled or canonical.route_path not in self._PROTECTED:
             return await call_next(request)
 
         auth_header = request.headers.get("authorization", "")
@@ -234,7 +246,7 @@ def build_app() -> FastAPI:
     _original_openapi = app.openapi
 
     def _openapi_30_compat() -> dict[str, Any]:
-        from fastapi.openapi.utils import get_openapi  # noqa: F811
+        from fastapi.openapi.utils import get_openapi
 
         if not app.openapi_schema:
             app.openapi_schema = get_openapi(

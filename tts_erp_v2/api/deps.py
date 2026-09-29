@@ -21,6 +21,8 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from tts_erp_v2.access import AccessGrant, Role
+
 
 def get_session() -> Session:
     """Yield a request-scoped ORM session; rollback at end of request."""
@@ -54,17 +56,22 @@ def caller_role(request: Request) -> str | None:
 
 
 def require_role_at_least(request: Request, min_role: str) -> None:
-    """Raise 403 if the caller's role is below ``min_role``.
+    """Require one role through the access module's shared grant semantics."""
 
-    Mirror of the middleware check, but raised from a dependency so
-    individual endpoints can be tighter without registering a brand-new
-    path class in ``required_role()``.
-    """
-    from tts_erp_v2.middleware.auth import ROLE_LEVEL
-
-    level = ROLE_LEVEL.get(request.scope.get("api_key_role") or "")
-    needed = ROLE_LEVEL[min_role]
-    if level is None or level < needed:
+    needed = Role(min_role)
+    grant = request.scope.get("access_grant")
+    if isinstance(grant, AccessGrant):
+        allowed = grant.allows(needed)
+    else:
+        # Compatibility for direct dependency tests and callers that construct a
+        # Request without passing through AuthMiddleware.
+        raw_role = request.scope.get("api_key_role")
+        try:
+            role = Role(raw_role)
+        except (TypeError, ValueError):
+            role = None
+        allowed = role is not None and role.level >= needed.level
+    if not allowed:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"requires {min_role}",

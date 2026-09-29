@@ -107,11 +107,13 @@ def verify_session_cookie(value: str) -> dict | None:
     role = payload.get("role")
     if not isinstance(kh, str) or len(kh) != 64:
         return None
-    # Lazy import: middleware.auth imports this module, so a module-level
-    # import would be circular.
-    from tts_erp_v2.middleware.auth import ROLE_LEVEL
+    from tts_erp_v2.access import Role
 
-    if not isinstance(role, str) or role not in ROLE_LEVEL:
+    if not isinstance(role, str):
+        return None
+    try:
+        Role(role)
+    except ValueError:
         return None
     try:
         exp = int(payload.get("exp", 0))

@@ -35,9 +35,9 @@ from fastapi import APIRouter, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
+from tts_erp_v2.access import authenticate_hash, authenticate_key
 from tts_erp_v2.middleware import session_auth
 from tts_erp_v2.middleware.access_log import _key_prefix
-from tts_erp_v2.middleware.auth import ROLE_LEVEL, lookup_role, lookup_role_by_hash
 
 router = APIRouter(prefix="/v2/auth", tags=["auth"])
 
@@ -67,7 +67,6 @@ if not any(
   login_logger.propagate = False
 
 DEFAULT_NEXT = "/v2/pages/dashboard"
-_LEVEL_TO_NAME = {v: k for k, v in ROLE_LEVEL.items()}
 
 
 class LoginBody(BaseModel):
@@ -132,7 +131,7 @@ def login(body: LoginBody, request: Request) -> Response:
       content={"detail": "TTS_ERP_SESSION_SECRET not configured"},
     )
   try:
-    result = lookup_role(body.key)
+    credential = authenticate_key(body.key)
   except Exception as exc:  # noqa: BLE001 — auth store unreachable → fail closed
     # Auth store unreachable — mirror the middleware's fail-closed 503.
     login_logger.warning(
@@ -144,7 +143,7 @@ def login(body: LoginBody, request: Request) -> Response:
       status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
       content={"detail": f"auth store unavailable: {type(exc).__name__}"},
     )
-  if result is None:
+  if credential is None:
     # The most common failure mode in production: user pastes a
     # stale or revoked key. The access log has the real client IP
     # + status; this event is the only place the ATTEMPTED key
@@ -154,8 +153,7 @@ def login(body: LoginBody, request: Request) -> Response:
       status_code=status.HTTP_401_UNAUTHORIZED,
       content={"detail": "invalid, disabled or expired api key"},
     )
-  level, _scopes = result
-  role = _LEVEL_TO_NAME.get(level or 0, "readonly")
+  role = credential.role.value
   cookie = session_auth.mint_session_cookie(body.key, role)
   resp = JSONResponse(content={"ok": True, "role": role})
   # Scope the cookie to the external mount prefix (e.g. /tts) so it is
@@ -198,12 +196,12 @@ def me(request: Request) -> dict:
   if info is None:
     return {"authenticated": False}
   try:
-    result = lookup_role_by_hash(info["kh"])
+    credential = authenticate_hash(info["kh"])
   except Exception:  # noqa: BLE001 — auth store unreachable; report unauthenticated
-    result = None
-  if result is None:
+    credential = None
+  if credential is None:
     return {"authenticated": False}
-  return {"authenticated": True, "role": info["role"]}
+  return {"authenticated": True, "role": credential.role.value}
 
 
 _LOGIN_HTML = """<!doctype html>

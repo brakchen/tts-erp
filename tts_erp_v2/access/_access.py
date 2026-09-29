@@ -1,0 +1,205 @@
+"""Typed access decisions independent of ASGI rendering."""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from anyio.to_thread import run_sync
+
+from tts_erp_v2.access._credentials import (
+    authenticate_hash,
+    authenticate_key,
+    hash_key,
+)
+from tts_erp_v2.access._policy import required_role
+from tts_erp_v2.access._types import (
+    AccessDecision,
+    AccessEffect,
+    AccessGrant,
+    AccessRequest,
+    AuthMode,
+    Credential,
+)
+
+_MISSING_CREDENTIAL = (
+    "missing bearer token (Authorization: Bearer <key> or X-API-Key: <key>)"
+)
+_INVALID_CREDENTIAL = "invalid, disabled or expired api key"
+_STORE_UNAVAILABLE = "auth store unavailable"
+
+
+def _grant(
+    mode: AuthMode,
+    credential: Credential | None = None,
+    *,
+    auth_method: Literal["cookie", "bearer"] | None = None,
+    bypass: bool = False,
+) -> AccessGrant:
+    return AccessGrant(
+        mode=mode,
+        role=credential.role if credential else None,
+        key_hash=credential.key_hash if credential else None,
+        scopes=credential.scopes if credential else (),
+        auth_method=auth_method,
+        bypass=bypass,
+    )
+
+
+async def evaluate_access(
+    request: AccessRequest,
+    *,
+    mode: AuthMode,
+) -> AccessDecision:
+    """Evaluate one canonical request and return a rendering-neutral decision."""
+
+    needed = required_role(request.method, request.route_path)
+    if mode is AuthMode.OFF:
+        return AccessDecision(
+            effect=AccessEffect.ALLOW,
+            grant=_grant(mode, bypass=True),
+            required_role=needed,
+        )
+    if needed is None:
+        return AccessDecision(
+            effect=AccessEffect.ALLOW,
+            grant=_grant(mode),
+        )
+
+    from tts_erp_v2.middleware import session_auth
+
+    cookie_info = (
+        session_auth.verify_session_cookie(request.session_cookie)
+        if request.session_cookie
+        else None
+    )
+    credential: Credential | None = None
+    auth_method: Literal["cookie", "bearer"] | None = None
+    auth_state = "none"
+    attempted_key = request.bearer_key or request.api_key
+
+    if cookie_info is not None:
+        try:
+            credential = await run_sync(authenticate_hash, cookie_info["kh"])
+        except Exception:  # noqa: BLE001 — map auth-store failure to outcome
+            return _store_unavailable(mode, needed)
+        if credential is not None:
+            auth_state = "credential"
+            auth_method = "cookie"
+        else:
+            auth_state = "invalid"
+
+    if credential is None and attempted_key:
+        try:
+            credential = await run_sync(authenticate_key, attempted_key)
+        except Exception:  # noqa: BLE001 — map auth-store failure to outcome
+            return _store_unavailable(mode, needed)
+        if credential is not None:
+            auth_state = "credential"
+            auth_method = "bearer"
+        elif auth_state == "none":
+            auth_state = "invalid"
+
+    grant = _grant(
+        mode,
+        credential,
+        auth_method=auth_method,
+        bypass=mode is AuthMode.SHADOW,
+    )
+    denied_status: int | None = None
+    detail: str | None = None
+    if auth_state == "none":
+        denied_status = 401
+        detail = _MISSING_CREDENTIAL
+    elif auth_state == "invalid":
+        denied_status = 401
+        detail = _INVALID_CREDENTIAL
+    elif credential is not None and not grant.allows(needed):
+        denied_status = 403
+        detail = f"requires {needed.value}"
+
+    if denied_status is None:
+        return AccessDecision(
+            effect=AccessEffect.ALLOW,
+            grant=grant,
+            required_role=needed,
+        )
+    if mode is AuthMode.SHADOW:
+        return AccessDecision(
+            effect=AccessEffect.SHADOW_ALLOW,
+            grant=grant,
+            required_role=needed,
+            status=denied_status,
+            detail=detail,
+            challenge=denied_status == 401,
+        )
+
+    from tts_erp_v2.middleware import rate_limit
+
+    bucket_id = _denied_bucket(
+        request=request,
+        credential=credential,
+        cookie_info=cookie_info,
+        attempted_key=attempted_key,
+    )
+    retry_after = rate_limit.shared_hit(bucket_id)
+    if retry_after is not None:
+        counter = rate_limit.shared_counter()
+        return AccessDecision(
+            effect=AccessEffect.RATE_LIMITED,
+            grant=grant,
+            required_role=needed,
+            status=429,
+            detail="too many requests",
+            retry_after=retry_after,
+            rate_limit=counter.limit,
+        )
+
+    effect = (
+        AccessEffect.REDIRECT
+        if denied_status == 401
+        and request.method.upper() == "GET"
+        and request.accepts_html
+        else AccessEffect.DENY
+    )
+    return AccessDecision(
+        effect=effect,
+        grant=grant,
+        required_role=needed,
+        status=302 if effect is AccessEffect.REDIRECT else denied_status,
+        detail=detail,
+        challenge=effect is AccessEffect.DENY and denied_status == 401,
+    )
+
+
+def _store_unavailable(mode: AuthMode, needed) -> AccessDecision:
+    if mode is AuthMode.SHADOW:
+        return AccessDecision(
+            effect=AccessEffect.SHADOW_ALLOW,
+            grant=_grant(mode, bypass=True),
+            required_role=needed,
+            status=503,
+            detail=_STORE_UNAVAILABLE,
+        )
+    return AccessDecision(
+        effect=AccessEffect.UNAVAILABLE,
+        grant=_grant(mode),
+        required_role=needed,
+        status=503,
+        detail=_STORE_UNAVAILABLE,
+    )
+
+
+def _denied_bucket(
+    *,
+    request: AccessRequest,
+    credential: Credential | None,
+    cookie_info: dict | None,
+    attempted_key: str | None,
+) -> str:
+    if credential is not None:
+        return credential.key_hash
+    if attempted_key:
+        return hash_key(attempted_key)
+    if cookie_info is not None:
+        return cookie_info["kh"]
+    return f"ip:{request.client_ip}"
