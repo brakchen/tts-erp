@@ -4,7 +4,7 @@
  *   GET  /v2/commerce/channel-accounts   已注册店铺（readonly）
  *   GET  /v2/admin/shops/unregistered    插件数据里出现但未注册的 shop_id（admin）
  *   POST /v2/admin/shops/register        人工注册（admin，cookie 会话带 CSRF 头）
- *   PATCH /v2/admin/shops/{shop_pk}      元信息编辑（readwrite+）/ App 凭证（admin）
+ *   PATCH /v2/admin/shops/{shop_pk}      元信息编辑 / App 凭证（均 readwrite+）
  *   GET  /v2/oauth/tiktok/authorize      获取授权链接（readwrite+，format=json）
  *
  * 权限降级：非 admin 会话时 unregistered/register 会 403 —— 页面仍可
@@ -80,13 +80,39 @@
     );
   }
 
+  // ---------- toast（操作反馈不写进表格，2026-09-29 用户拍板） ----------
+  function toastRoot() {
+    var root = document.getElementById("toast-root");
+    if (root) return root;
+    var style = document.createElement("style");
+    style.textContent =
+      "#toast-root{position:fixed;right:16px;bottom:16px;z-index:9999;" +
+      "display:flex;flex-direction:column;gap:8px;max-width:min(420px,80vw)}" +
+      "#toast-root .toast-item{padding:10px 14px;border-radius:8px;" +
+      "font-size:13px;line-height:1.5;color:#fff;background:#333;" +
+      "box-shadow:0 4px 14px rgba(0,0,0,.18);cursor:pointer;word-break:break-all}" +
+      "#toast-root .toast-ok{background:var(--ok,#2e7d32)}" +
+      "#toast-root .toast-err{background:#b3261e}" +
+      // 操作列按钮同一行排列，避免竖排撑高行
+      "#shop-body .auth-actions{display:inline-flex;gap:6px;flex-wrap:wrap}";
+    document.head.append(style);
+    root = document.createElement("div");
+    root.id = "toast-root";
+    document.body.append(root);
+    return root;
+  }
+  function showToast(msg, ok) {
+    var item = document.createElement("div");
+    item.className = "toast-item " + (ok === false ? "toast-err" : "toast-ok");
+    item.textContent = msg;
+    item.addEventListener("click", () => item.remove());
+    toastRoot().append(item);
+    setTimeout(() => { item.remove(); }, 5000);
+  }
+
   // ---------- 授权链接 ----------
-  function copyToClipboard(text, btn, onDone) {
-    function done(ok) {
-      btn.textContent = ok ? "已复制" : "复制失败";
-      setTimeout(() => { btn.textContent = "复制链接"; }, 1500);
-      if (onDone) onDone(ok);
-    }
+  function copyToClipboard(text, onDone) {
+    function done(ok) { if (onDone) onDone(ok); }
     function legacy() {
       var ta = document.createElement("textarea");
       ta.value = text;
@@ -112,27 +138,31 @@
     a.href = url;
     a.target = "_blank";
     a.rel = "noopener";
+    a.className = "btn btn-sm btn-dark";
     a.textContent = "打开授权页";
     var copy = document.createElement("button");
     copy.type = "button";
-    copy.className = "btn btn-sm btn-outline-dark ms-1";
+    copy.className = "btn btn-sm btn-outline-dark";
     copy.textContent = "复制链接";
-    copy.addEventListener("click", () => { copyToClipboard(url, copy); });
-    var hint = document.createElement("div");
-    hint.className = "text-muted small";
+    copy.addEventListener("click", () => {
+      copyToClipboard(url, (ok) =>
+        showToast(ok ? "已复制到剪贴板" : "复制失败，请重试", ok),
+      );
+    });
+    container.append(a, copy);
     var exp = expiresAt
       ? expiresAt.replace("T", " ").replace(/\.\d+Z$/, "Z")
       : "";
     var expText = exp ? " · 有效至 " + exp + " UTC" : "";
-    hint.textContent = "state 单次使用" + expText;
-    container.append(a, copy, hint);
     // 一键化（2026-09-29）：生成成功后立即自动复制，用户无需再点第二次。
     // 注意 transient user activation：fetch 几秒内返回时 clipboard API 仍
-    // 视为用户手势；超时/被拒时按钮会显示「复制失败」，用户可手动再点。
-    copyToClipboard(url, copy, (ok) => {
-      hint.textContent =
-        (ok ? "已复制到剪贴板" : "自动复制失败，请点「复制链接」") +
-        " · state 单次使用" + expText;
+    // 视为用户手势；超时/被拒时 toast 提示手动点「复制链接」。
+    copyToClipboard(url, (ok) => {
+      showToast(
+        (ok ? "授权链接已复制到剪贴板" : "自动复制失败，请点「复制链接」") +
+          " · state 单次使用" + expText,
+        ok,
+      );
     });
   }
 
