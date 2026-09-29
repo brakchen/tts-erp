@@ -9,8 +9,8 @@
                   ↑ 实际 SETTLEMENT 金额（按 line 比例分摊）
     cogs = (units_sold + flc_qty) × unit_cost
     net_profit = net_revenue - cogs - spend
-- 销售日界: COALESCE(paid_at, order_time) UTC
-- 退款日界: case.updated_at_source UTC
+- 销售日界: COALESCE(order_time, paid_at) UTC
+- 退款日界: 关联订单 COALESCE(order_time, paid_at) UTC
 - 全损海外取消日界: 同销售日界
 - FX: fx.exchange_rate_snapshots 在线(USD→VND、CNY→USD),无则回退 D9
 - 成本解析链: MANUAL → SOURCE_PRICE → DEFAULT_K1(40 CNY)
@@ -171,7 +171,7 @@ with e.connect() as c:
                    sl.quantity * sl.unit_price AS line_gmv_vnd,
                    og.order_gmv_vnd,
                    os.settlement_vnd,
-                   (coalesce(so.paid_at, so.order_time) AT TIME ZONE 'UTC')::date AS event_day
+                   (coalesce(so.order_time, so.paid_at) AT TIME ZONE 'UTC')::date AS event_day
             FROM commerce.sales_order_lines sl
             JOIN commerce.sales_orders so ON so.id = sl.order_pk
             JOIN order_gmv og ON og.order_pk = sl.order_pk
@@ -217,12 +217,12 @@ with e.connect() as c:
         ).all()
     }
 
-    # ====== 5. 每日退款（case.updated_at_source）======
+    # ====== 5. 每日退款（跟随关联订单的下单日归属）======
     refunds = {
         str(r.d): float(r.refund_vnd or 0)
         for r in c.execute(
             text("""
-        SELECT (c.updated_at_source AT TIME ZONE 'UTC')::date AS d,
+        SELECT (coalesce(so.order_time, so.paid_at) AT TIME ZONE 'UTC')::date AS d,
                sum(cl.refund_amount) AS refund_vnd
         FROM after_sales.cases c
         JOIN after_sales.case_lines cl ON cl.case_id=c.id
@@ -243,7 +243,7 @@ with e.connect() as c:
         str(r.d): int(r.flc_qty or 0)
         for r in c.execute(
             text("""
-        SELECT (coalesce(so.paid_at, so.order_time) AT TIME ZONE 'UTC')::date AS d,
+        SELECT (coalesce(so.order_time, so.paid_at) AT TIME ZONE 'UTC')::date AS d,
                sum(sl.quantity) AS flc_qty
         FROM commerce.sales_orders so
         JOIN commerce.sales_order_lines sl ON sl.order_pk=so.id

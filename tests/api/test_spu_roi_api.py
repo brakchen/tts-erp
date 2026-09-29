@@ -838,6 +838,39 @@ def _seed_window_spu(sess) -> int:
         lines=[(line2, "TEST_CLINE_W2", "1", "526600")],
         updated_iso="2026-09-12T00:00:00+00:00",
     )
+    statement_pk = sess.execute(
+        text(
+            "INSERT INTO finance.settlement_statements "
+            "(external_statement_id, statement_time, currency) "
+            "VALUES ('TEST_STATEMENT_WINDOW', '2026-09-15T00:00:00+00:00', 'VND') "
+            "RETURNING id"
+        )
+    ).scalar_one()
+    for suffix, order_pk, amount in (
+        ("W1", o1, "1579800"),
+        ("W2", o2, "1053200"),
+    ):
+        transaction_pk = sess.execute(
+            text(
+                "INSERT INTO finance.settlement_transactions "
+                "(settlement_statement_id, external_transaction_id, order_pk, "
+                "transaction_time) VALUES (:statement_pk, :external_id, :order_pk, "
+                "'2026-09-15T00:00:00+00:00') RETURNING id"
+            ),
+            {
+                "statement_pk": statement_pk,
+                "external_id": f"TEST_TXN_{suffix}",
+                "order_pk": order_pk,
+            },
+        ).scalar_one()
+        sess.execute(
+            text(
+                "INSERT INTO finance.settlement_components "
+                "(transaction_id, component_code, amount, currency) "
+                "VALUES (:transaction_pk, 'SETTLEMENT', :amount, 'VND')"
+            ),
+            {"transaction_pk": transaction_pk, "amount": amount},
+        )
     return spu_pk
 
 
@@ -1862,6 +1895,27 @@ def test_spu_roi_window_params_clip_sales_and_refunds_by_order_time(
     assert item3["refund_return_qty"] == 1
     assert item3["refund_return_amount"] == cny4_from_usd("20")
     assert item3["full_loss_qty"] == 1
+
+    orders_response = api_client.get(
+        f"/v2/analytics/spu-roi/{spu_pk}/orders",
+        headers=h,
+        params=order_day,
+    )
+    assert orders_response.status_code == 200, orders_response.text
+    orders = orders_response.json()["orders"]
+    assert [order["order_id"] for order in orders] == ["TEST_ORDER_W1"]
+    assert orders[0]["paid_at"].startswith("2026-09-10")
+
+    settlements_response = api_client.get(
+        f"/v2/analytics/spu-roi/{spu_pk}/settlements",
+        headers=h,
+        params=order_day,
+    )
+    assert settlements_response.status_code == 200, settlements_response.text
+    settlements = settlements_response.json()["settlements"]
+    assert [settlement["order_id"] for settlement in settlements] == [
+        "TEST_ORDER_W1"
+    ]
 
     cases = api_client.get(
         f"/v2/analytics/spu-roi/{spu_pk}/cases",

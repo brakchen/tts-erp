@@ -513,7 +513,7 @@ _SQL_DETAIL_ORDERS = text(
     SELECT so.id AS order_pk,
            so.order_id,
            so.status,
-           coalesce(so.order_time, so.paid_at) AS paid_at,
+           coalesce(so.paid_at, so.order_time) AS paid_at,
            sl.quantity AS qty,
            (sl.quantity * sl.unit_price) AS line_gmv_vnd,
            EXISTS (SELECT 1 FROM fulfillment.shipments sh
