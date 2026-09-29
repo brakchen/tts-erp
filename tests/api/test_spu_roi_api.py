@@ -2636,7 +2636,7 @@ def test_spu_roi_page_uses_bootstrap_responsive_layout(api_client, readonly_key)
         / "spu-roi.js"
     )
     src = js_path.read_text(encoding="utf-8")
-    assert "row-cols-2 row-cols-sm-3 row-cols-lg-3 row-cols-xxl-3" in src
+    assert "row-cols-2 row-cols-sm-3 row-cols-lg-4 row-cols-xxl-4" in src
     assert "content.classList.add(" in src
     for table_class in ("table-sm", "table-hover", "align-middle", "op-tab-table"):
         assert f'"{table_class}"' in src
@@ -2746,8 +2746,8 @@ def test_spu_roi_dashboard_metrics_are_never_truncated() -> None:
         assert "overflow-wrap: anywhere" in declarations
 
 
-def test_spu_roi_drill_summary_omits_removed_metrics() -> None:
-    """每个 SPU 明细大盘保留核心指标，并补充广告系统两个 ROI。"""
+def test_spu_roi_drill_summary_matches_actual_dashboard_metrics() -> None:
+    """每个 SPU 展开的明细大盘必须与页首实际大盘展示相同指标。"""
     from pathlib import Path
 
     src = (
@@ -2761,38 +2761,30 @@ def test_spu_roi_drill_summary_omits_removed_metrics() -> None:
         "function renderProfitTab", 1
     )[0]
 
-    for removed_label in (
-        "平台佣金",
-        "已结 GMV",
-        "未结 GMV",
-        "全损货损$",
-        "全损取消",
-    ):
-        assert removed_label not in summary
-    for removed_field in (
-        "it.platform_fee",
-        "it.settled_sales",
-        "it.unsettled_sales",
-        "it.return_loss",
-        "it.full_loss_cancelled_qty",
-    ):
-        assert removed_field not in summary
+    expected_metrics = {
+        "总单量": "it.total_orders",
+        "广告消耗": "it.spend",
+        "有效单量": "it.effective_order_count",
+        "有效销售": "it.effective_sales",
+        "退款数": "it.refund_order_count",
+        "退款率": "it.refund_rate",
+        "全损量": "it.full_loss_order_count",
+        "全损率": "it.full_loss_rate",
+        "取消量": "it.domestic_cancelled_order_count",
+        "取消率": "it.cancel_rate",
+        "净利润": "it.net_profit",
+        "实际ROI": "it.roi_real",
+        "实际保本ROI": "it.roi_breakeven",
+        "广告系统实际ROI": "it.ad_system_actual_roi",
+        "广告系统保本ROI": "it.ad_system_breakeven_roi",
+    }
+    for label, field in expected_metrics.items():
+        assert label in summary
+        assert field in summary
 
-    for retained_label in (
-        "ROI 实际",
-        "ROI 保本",
-        "广告系统实际 ROI",
-        "广告系统保本 ROI",
-        "CPA",
-        "单位成本",
-        "已结算单",
-        "全损件数",
-        "净收入",
-    ):
-        assert retained_label in summary
-    assert "row-cols-xxl-3" in summary
-    assert "it.ad_system_actual_roi" in summary
-    assert "it.ad_system_breakeven_roi" in summary
+    for legacy_label in ("CPA", "单位成本", "已结算单", "全损件数", "净收入"):
+        assert legacy_label not in summary
+    assert "row-cols-xxl-4" in summary
 
 
 def test_spu_roi_js_targets_dashboard_hooks():
