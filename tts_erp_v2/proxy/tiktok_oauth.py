@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -40,7 +41,11 @@ from tts_erp_v2.proxy.tiktok_auth import (
     exchange_auth_code,
     fetch_authorized_shops,
 )
-from tts_erp_v2.proxy.token_service import upsert_credentials
+from tts_erp_v2.proxy.token_service import (
+    mask_secret,
+    resolve_tiktok_app_credentials,
+    upsert_credentials,
+)
 
 log = logging.getLogger("tts_erp_v2.proxy.tiktok_oauth")
 
@@ -63,8 +68,8 @@ class OAuthFlowError(ValueError):
     ``kind`` is a stable machine-readable tag the HTTP layer maps to a
     message + status:
     ``state_invalid`` / ``state_reused`` / ``user_type`` /
-    ``no_authorized_shop`` / ``missing_shop_id`` /
-    ``missing_shop_cipher``.
+    ``app_credentials`` / ``app_key_mismatch`` / ``no_authorized_shop`` /
+    ``missing_shop_id`` / ``missing_shop_cipher``.
     """
 
     def __init__(self, kind: str, message: str) -> None:
@@ -163,6 +168,7 @@ def complete_tiktok_authorization(
     *,
     code: str,
     state: str,
+    callback_app_key: str | None = None,
 ) -> dict[str, Any]:
     """Run the callback end-to-end for a TikTok seller grant.
 
@@ -187,9 +193,9 @@ def complete_tiktok_authorization(
     land one credentials + shops pair per shop; the sync worker fans
     out over all of them on its next tick.
 
-    ``service_id`` 从 OAuthState.extra 取出（authorize 时存入），写入
-    commerce.shops。如果 authorize 时未指定 service_id，extra 中无此
-    字段，shops 表该列保持 NULL。
+    ``service_id`` 从 OAuthState.extra 取出（authorize 时始终存入），用于
+    解析同一组 App Key/App Secret，并同时绑定到 commerce.shops 与新签发的
+    integration.credentials token。后续签名/续期只信任 token 的签发绑定。
 
     Returns ``{"shops": [{shop_id, credential_id, account_id,
     account_name, region, seller_type, granted_scopes, expires_at}]}``.
@@ -216,12 +222,39 @@ def complete_tiktok_authorization(
             "from /v2/oauth/tiktok/authorize",
         )
 
-    # 从 state extra 中取出 service_id（authorize 时存入）
+    # 从 state extra 中取出 service_id（authorize 时始终存入）。
     service_id_from_state: str | None = None
     if isinstance(state_extra, dict):
         service_id_from_state = state_extra.get("service_id")
+    # Rolling-deploy compatibility for states minted by the previous build:
+    # new authorize calls always persist the effective service_id, but a state
+    # already in flight for up to 45 minutes may still have ``extra=NULL``.
+    service_id_from_state = service_id_from_state or os.environ.get(
+        "TIKTOK_SERVICE_ID", ""
+    ).strip()
+    if not service_id_from_state:
+        raise OAuthFlowError(
+            "app_credentials",
+            "authorization state carried no service_id — start a fresh link",
+        )
 
-    grant = exchange_auth_code(auth_code=code)
+    app_credentials = resolve_tiktok_app_credentials(
+        session,
+        service_id=service_id_from_state,
+    )
+    if callback_app_key and callback_app_key != app_credentials.app_key:
+        raise OAuthFlowError(
+            "app_key_mismatch",
+            "TikTok callback app_key does not match the App credentials "
+            f"configured for service_id={service_id_from_state!r} "
+            f"(callback={mask_secret(callback_app_key)}, "
+            f"configured={mask_secret(app_credentials.app_key)})",
+        )
+
+    grant = exchange_auth_code(
+        auth_code=code,
+        app_credentials=app_credentials,
+    )
 
     user_type = grant.get("user_type")
     if user_type not in ALLOWED_USER_TYPES:
@@ -236,7 +269,10 @@ def complete_tiktok_authorization(
 
     # token/get carries NO shop identity (user-level token). Enumerate
     # the granted shops — each entry carries shop_id + shop_cipher.
-    shops = fetch_authorized_shops(access_token=access_token)
+    shops = fetch_authorized_shops(
+        access_token=access_token,
+        app_credentials=app_credentials,
+    )
     if not shops:
         raise OAuthFlowError(
             "no_authorized_shop",
@@ -285,6 +321,7 @@ def complete_tiktok_authorization(
             account_label=account_name,
             expires_at=grant.get("expires_at"),
             granted_scopes=granted_scopes,
+            service_id=service_id_from_state,
         )
         credential_id = cred_row.id
 

@@ -63,6 +63,7 @@ from tts_erp_v2.db.models.fx import (
 from tts_erp_v2.db.models.integration import (
     Credentials,
     RawRecord,
+    TikTokAppCredential,
     SyncCursor,
     SyncIssue,
     SyncJob,
@@ -145,6 +146,7 @@ __all__ = [
     "SyncCursor",
     "SyncIssue",
     "SyncJob",
+    "TikTokAppCredential",
     "TrackingEvent",
     "VariantLink",
 ]

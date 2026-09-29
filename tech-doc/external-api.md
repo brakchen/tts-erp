@@ -187,7 +187,7 @@ All list endpoints accept `limit` (1..500, default 100) + `offset` (≥0).
 
 | Endpoint | Extra query params | Returns |
 | --- | --- | --- |
-| `GET /v2/commerce/channel-accounts` | `platform` (e.g. `tiktok`) | list of `{id, platform, shop_id, account_name, region, seller_type, status, opened_date, credential_id, synced_at}` — `credential_id` 非空 = 已 OAuth 授权走 API 同步，为空 = 仅插件同步 |
+| `GET /v2/commerce/channel-accounts` | `platform` (e.g. `tiktok`) | list of `{id, platform, shop_id, account_name, region, seller_type, status, opened_date, credential_id, service_id, app_credentials_configured, synced_at}` — `credential_id` 非空 = 已 OAuth 授权走 API 同步；`app_credentials_configured` 只表示 service_id 有可解析 App pair，不泄露 Secret |
 | `GET /v2/commerce/channel-accounts/{shop_pk}` | — | one account; 404 if unknown |
 | `GET /v2/commerce/channel-accounts/by-external/{shop_id}` | [`api/channel-accounts-by-external.md`](api/channel-accounts-by-external.md) | reverse-lookup by upstream shop_id; `?platform=tiktok` default; 404 if unknown |
 | `GET /v2/commerce/channel-accounts/{shop_pk}/order-stats` | — | `{order_count, payment_amount_sum}` aggregate (0/0 when empty) |
@@ -278,15 +278,15 @@ curl -sS -H "X-API-Key: $TTS_ERP_RO_KEY" \
 | --- | --- | --- |
 | `GET /v2/pages/manual-costs` | readonly | Server-rendered operator console (shop switcher + needs-cost / needs-photo / recently-filed tabs). Browser without a session → 302 to `/v2/auth/login`. Static assets under `/static/*` are readonly-classified too. |
 | `GET /v2/pages/spu-roi` | readonly | SPU 实际 ROI 看板(账页式)。Server-rendered HTML shell;数据来自 `GET /v2/analytics/spu-roi`;JS 在 `/static/js/spu-roi.js`。 |
-| `GET /v2/pages/shops` | readonly | 店铺注册台。人工注册插件同步店铺（`commerce.shops` 补登记）；写入走 `POST /v2/admin/shops/register`（readwrite 会话）；行内元信息编辑走 `PATCH /v2/admin/shops/{shop_pk}`（名称/区域/开店日期/service_id）；「获取授权链接」按钮走 `GET /v2/oauth/tiktok/authorize?format=json`（readwrite）；JS 在 `/static/js/shops.js`。 |
+| `GET /v2/pages/shops` | readonly | 店铺注册台。人工注册插件同步店铺（`commerce.shops` 补登记）；写入走 `POST /v2/admin/shops/register`（元信息 readwrite；提交 App Key/Secret 时 admin）；行内元信息编辑走 `PATCH /v2/admin/shops/{shop_pk}`；App pair 按 service_id 加密保存；「获取授权链接」按钮走 `GET /v2/oauth/tiktok/authorize?format=json`（readwrite）。 |
 
 ### Admin (`/v2/admin/*`, handler-enforced roles)
 
 | Endpoint | Role | Notes |
 | --- | --- | --- |
-| `POST /v2/admin/shops/register` | **readwrite** | 人工注册店铺。body `{"platform": "tiktok", "shop_id": str, "account_name"?: str, "region"?: str, "seller_type"?: str, "opened_date"?: "YYYY-MM-DD"}` → `{created: bool, shop: {...}}`。幂等：重复注册只补填仍为 NULL 的展示字段，**绝不覆盖** `credential_id`/`status`（店铺后续拿到 API 授权时由 OAuth callback 补 `credential_id`，同行升级、不产生重复行）。`shop_id` 必须是数字串，`TEST_`/`MOCK_` 前缀 422。注册只影响查询关联（spu-roi 店铺筛选等），数据同步不依赖注册。 |
+| `POST /v2/admin/shops/register` | **readwrite**（含 App Secret 时 **admin**） | 人工注册店铺。body 可含 `service_id/app_key/app_secret`；App Key/Secret 必须成对且 service_id 必填，同一事务写入 `integration.tiktok_app_credentials`，Secret 只加密存储、不返回。无 Secret 的原元信息注册行为保持 readwrite 与幂等。 |
 | `GET /v2/admin/shops/unregistered` | **readwrite** | 列出在 `plugin.*` 插件数据里出现、但 `commerce.shops` 无行的 shop_id → `{candidates: [{shop_id, sources}]}`；注册页的候选清单。 |
-| `PATCH /v2/admin/shops/{shop_pk}` | **readwrite** | 更新店铺元信息。body `{"account_name"?: str, "region"?: str, "opened_date"?: "YYYY-MM-DD", "service_id"?: str}` → `{shop: {...}}`。COALESCE 语义：字段传 null/缺省 = 保持原值（无法用 PATCH 清成 NULL）。只动展示字段，`credential_id`/`status` 不可通过此端点修改；404 = shop_pk 不存在。 |
+| `PATCH /v2/admin/shops/{shop_pk}` | **readwrite**（含 App Secret 时 **admin**） | 更新店铺元信息或原子配置 `service_id/app_key/app_secret`。App pair 按 service_id 共享并加密；App Key/Secret 必须成对。只改 service_id 时目标 App pair 必须已存在（否则 409），防止生成必然失败的授权链接。`credential_id`/`status` 不可修改。 |
 
 ### SPU images (`/v2/spu-images/*`)
 
@@ -316,9 +316,9 @@ returns `text/markdown`; `?format=json` returns
 
 Live, **uncached** pass-throughs to the TikTok Shop Partner API
 documented in `tts-partner-api-docs/`. Each call resolves the seller's
-credentials via `proxy/token_service.load_credentials()` (key by
-internal `shop_pk` → upstream `shop_id` → `access_token` +
-`shop_cipher`) and hands the upstream `data` payload back verbatim.
+token via `proxy/token_service.load_credentials()` and then resolves the
+issuing `service_id` to its encrypted App Key/App Secret pair before signing
+(`shop_pk` → `shop_id` → token + shop_cipher + issuing service_id).
 
 | Endpoint | Spec | Upstream | Required upstream scope |
 | --- | --- | --- | --- |

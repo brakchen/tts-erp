@@ -133,7 +133,7 @@ def _map_proxy_error(exc: ProxyError) -> HTTPException:
         "Errors: 401 (no key), 403 (role < readonly), 404 (channel_account or "
         "credentials missing), 422 (validation / mutually-exclusive flags), "
         "429 (upstream rate-limit after retries), 502 (upstream code != 0 / "
-        "auth / http / transient), 500 (TIKTOK_APP_KEY missing). See spec doc "
+        "auth / http / transient), 500 (issuing service_id has no App pair). See spec doc "
         "for the full status matrix + example payloads."
     ),
     responses={
@@ -171,8 +171,8 @@ def _map_proxy_error(exc: ProxyError) -> HTTPException:
             "network blip after retries."
         },
         500: {
-            "description": "`TIKTOK_APP_KEY` / `TIKTOK_APP_SECRET` / "
-            "`TTS_ERP_FERNET_KEY` not configured."
+            "description": "The token's issuing service_id has no matching "
+            "App Key/App Secret pair, or `TTS_ERP_FERNET_KEY` is unavailable."
         },
     },
 )

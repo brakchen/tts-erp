@@ -14,8 +14,9 @@ v2 app（oauth-receiver 库已于 2026-09-05 DROP）。sync worker **不**负责
 ```text
 操作者(admin)                    TikTok Seller Center               tts-erp
 ─────────────                    ───────────────────                ───────
-GET /v2/oauth/tiktok/authorize ───────────────────────────────► 注册一次性 state
-   ◄── {authorize_url, state}                                    (存 sha256, TTL 45min)
+GET /v2/oauth/tiktok/authorize ───────────────────────────────► 按 service_id 解析 App 凭证
+   ◄── {authorize_url, state}                                    注册一次性 state
+                                                                (存 sha256+service_id, TTL 45min)
 浏览器打开 authorize_url ──► seller 登录/同意
                               └─► redirect → /v2/oauth/tiktok/callback?code&state
                                                               ► pop_state(单次消费)
@@ -58,9 +59,10 @@ GET /v2/oauth/tiktok/authorize ────────────────�
   }
   ```
 
-- **错误**: `500`（`TIKTOK_SERVICE_ID` 未配置 / authorize host 非 http(s)）、
-  `401/403`（无 key / role < readwrite）。
-- **副作用**: `integration.oauth_states` 插一行（只存 `sha256(state)`）。
+- **错误**: `500`（service_id 无对应 App Key/App Secret、`TIKTOK_SERVICE_ID`
+  未配置、authorize host 非 http(s)）、`401/403`（无 key / role < readwrite）。
+- **副作用**: `integration.oauth_states` 插一行（只存 `sha256(state)`；
+  `extra.service_id` 始终写入有效 service_id，不存 App Secret）。
 
 ### `GET /v2/oauth/tiktok/callback` — TikTok 重定向目标（public）
 
@@ -70,7 +72,8 @@ GET /v2/oauth/tiktok/authorize ────────────────�
 - **Query**: `code`（一次性 auth_code，30 分钟有效）、`state`（上一步返回的
   raw token）、`error`（seller 拒绝时为 `auth_denied`）、`format=json`（可选）。
 - **行为顺序**: 校验并**原子消费** state（single-use；未知/过期/重用全部
-  fail-closed，且不触发上游调用）→ 消费成功才调
+  fail-closed，且不触发上游调用）→ 按 state 中的 `service_id` 解密对应 App
+  Key/App Secret，并校验 TikTok callback 的 `app_key` 一致 → 消费成功才调
   `GET auth.tiktok-shops.com/api/v2/token/get?app_key&app_secret&auth_code&grant_type=authorized_code`
   拿**用户级 token**（open_id/seller_*，**无 shop 身份**）→ `user_type ∈ {0,4,5}`
   （seller / global-selling；creator=1 / partner=2,3 拒绝）→ 调
@@ -80,7 +83,10 @@ GET /v2/oauth/tiktok/authorize ────────────────�
 - **落库**（同一事务，**一店一对行**；多店 seller 自动逐店落）:
   - `integration.credentials`：key `(provider='tiktok', external_account_id=shop_id)`；
     envelope 存 `access_token/refresh_token/shop_cipher`（Fernet；token 为用户级共享，
-    shop_cipher 为该店专属），`account_label=店名`，`expires_at`，`granted_scopes`。
+    shop_cipher 为该店专属），并用独立列 `service_id` 固化**签发应用**；
+    `account_label=店名`，`expires_at`，`granted_scopes`。
+  - `integration.tiktok_app_credentials`：key `service_id`；`app_key` 明文标识，
+    `app_secret_ciphertext` Fernet 加密。多个店铺可以共享同一 service_id。
   - `commerce.shops`：`(platform='tiktok', shop_id)` upsert →
     `account_name/region/seller_type/status='active'/credential_id` 关联。
   - **幂等**：同一 shop 重复授权 = 续期路径，两行原地更新，不产生重复。
@@ -91,7 +97,8 @@ GET /v2/oauth/tiktok/authorize ────────────────�
     credential_id, account_id, account_name, region, seller_type, expires_at, granted_scopes}]}}`
   - seller 拒绝 → `200 {"ok": false, "kind": "denied", "error": "auth_denied"}`
   - state 无效/过期 → `400 kind=state_invalid`；重用 → `400 kind=state_reused`
-  - `user_type` 不支持 → `400 kind=user_type`；店铺列表为空 → `400 kind=no_authorized_shop`
+  - callback app_key 与 service_id 配置不一致 → `400 kind=app_key_mismatch`；
+    `user_type` 不支持 → `400 kind=user_type`；店铺列表为空 → `400 kind=no_authorized_shop`
   - 店铺条目缺 `shop_id`/`shop_cipher` → `400 kind=missing_shop_id` / `missing_shop_cipher`
     （跨境路由/签名必需，宁可不落库；错误附条目 raw keys 可当场判断上游改版）
   - 上游 token/get 拒绝（如 code 已用过）→ `502 kind=upstream`（state 已消费，
@@ -104,8 +111,8 @@ GET /v2/oauth/tiktok/authorize ────────────────�
 
 | 变量 | 必需 | 说明 |
 | --- | --- | --- |
-| `TIKTOK_SERVICE_ID` | ✅ authorize 前 | Partner Center **App & Service** 页的 `service_id`（OAuth client id，≠ app_key） |
-| `TIKTOK_APP_KEY` / `TIKTOK_APP_SECRET` | ✅ | token/get 与刷新共用（已有） |
+| `TIKTOK_SERVICE_ID` | 兼容旧店 | 单应用部署的默认 service_id；新店优先使用 `commerce.shops.service_id` |
+| `TIKTOK_APP_KEY` / `TIKTOK_APP_SECRET` | 兼容旧店 | 仅当请求的 service_id **精确等于** `TIKTOK_SERVICE_ID` 时作为旧配置 fallback；多应用凭证存 `integration.tiktok_app_credentials` |
 | `TIKTOK_AUTHORIZE_HOST` | 可选 | 授权域名。默认 ROW `https://services.tiktokshop.com`；US 市场设 `https://services.us.tiktokshop.com` |
 | `TIKTOK_AUTH_HOST` | 可选 | token 域名，默认 `https://auth.tiktok-shops.com`（已有） |
 | `TIKTOK_API_HOST` | ✅ 回调 | Get Authorized Shops 域名，默认 `https://open-api.tiktokglobalshop.com`（已有） |
@@ -113,7 +120,9 @@ GET /v2/oauth/tiktok/authorize ────────────────�
 
 ## Partner Center 一次性配置（人类操作，agent 不代办）
 
-1. App **App & Service** 页抄 `service_id` → 写 `.env TIKTOK_SERVICE_ID`。
+1. App **App & Service** 页取得 `service_id`、App Key、App Secret；在店铺注册台
+   对该店一次性保存三者。App Secret 只进入 Fernet 加密列，不回显。旧单应用店可
+   暂时继续使用 `.env TIKTOK_SERVICE_ID/TIKTOK_APP_KEY/TIKTOK_APP_SECRET`。
 2. **Redirect URL** 填公网可达的 callback —— **必须带外部前缀 `/tts`**（nginx
    只把 `/tts/*` 转给 :9877 API，无前缀的 `daqiang.nat100.top/v2/...` 会落在
    ProfitLens 前端 404 页）：
@@ -145,6 +154,10 @@ timestamp，无 shop_cipher；头带 `x-tts-access-token`；响应 `data.shops[]
 
 ## 生命周期备注
 
+- **签名与 token 续期**：每个 token 使用 `integration.credentials.service_id`
+  绑定的 App 凭证；修改店铺下一次授权目标不会把旧 token 与新 App 混用。App Secret
+  轮换后新 client cache key 自动生效。旧 token 若 service_id=NULL，仅可走精确的
+  环境默认 fallback，重新授权后会固化绑定。
 - **续期**：授权将到期 → 让 seller 重新点一次 authorize link（同一 shop_id →
   幂等更新）。30 天前 TikTok 会推 "Upcoming authorization expiration" webhook
   —— v2 尚未订阅 webhook（无接收端点），续期靠人工/监控 token.refresh 失败告警。

@@ -13,15 +13,14 @@ Why this adapter exists
 * Jobs receive an open SQLAlchemy ``Session`` (not a request-scoped
   state), so the adapter resolves the long-lived
   ``Credentials`` row + ``TiktokShopClient`` once per call.
-* The ``TiktokShopClient`` is **cached per ``app_key``** so we don't
-  re-build signing state on every page request. The cache lives in
-  process memory only — fine because ``app_key`` is a single-tenant
-  constant read from ``.env``.
+* The ``TiktokShopClient`` is cached per App Key + App Secret fingerprint +
+  API host, so multiple service_id applications and secret rotation cannot
+  reuse stale signing state.
 
 Failure surface
 ---------------
-* Missing ``TIKTOK_APP_KEY`` / ``TIKTOK_APP_SECRET`` →
-  :class:`RuntimeError` with the exact env var name. The job's
+* Missing App credentials for the token's issuing service_id →
+  :class:`SigningError`. The job's
   :func:`run_with_sync_job` wrapper turns this into a
   ``sync_jobs.status='failed'`` row.
 * No ``Credentials`` row for ``(provider, shop_id)`` →
@@ -34,6 +33,7 @@ Failure surface
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 from collections.abc import Callable
@@ -41,7 +41,12 @@ from collections.abc import Callable
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.proxy.errors import AuthenticationError
-from tts_erp_v2.proxy.token_service import load_credentials, refresh_if_needed
+from tts_erp_v2.proxy.tiktok_auth import resolve_tiktok_app_credentials_for_shop
+from tts_erp_v2.proxy.token_service import (
+    TikTokAppCredentials,
+    load_credentials,
+    refresh_if_needed,
+)
 from tts_erp_v2.proxy.tts_shop.client import (
     DEFAULT_API_HOST,
     TiktokShopClient,
@@ -68,33 +73,17 @@ QUERY_STRING_KEYS: frozenset[str] = frozenset(
 _TOKEN_ALIAS = {"next_page_token": "page_token"}
 
 
-def _resolve_app_credentials() -> tuple[str, str, str]:
-    """Read ``TIKTOK_APP_KEY`` / ``TIKTOK_APP_SECRET`` / ``TIKTOK_API_HOST``.
-
-    Returns ``(app_key, app_secret, api_host)``. Raises if either of the
-    secret-bearing vars is missing — we never fall back to empty strings,
-    which would silently sign requests with an empty key and produce
-    bogus 106001 errors upstream.
-    """
-    app_key = os.environ.get("TIKTOK_APP_KEY", "").strip()
-    app_secret = os.environ.get("TIKTOK_APP_SECRET", "").strip()
-    api_host = os.environ.get("TIKTOK_API_HOST", "").strip() or DEFAULT_API_HOST
-    if not app_key or not app_secret:
-        raise RuntimeError(
-            "TIKTOK_APP_KEY and TIKTOK_APP_SECRET are not configured in "
-            "the sync-worker environment (set them in /home/schan/tts-erp/.env; "
-            "the systemd unit's EnvironmentFile= forwards them at start)."
-        )
-    return app_key, app_secret, api_host
+# Process-wide cache keyed by app identity + a non-reversible secret
+# fingerprint + API host. Including the fingerprint prevents an App Secret
+# rotation from reusing a client that still signs with the old secret.
+_CLIENT_CACHE: dict[tuple[str, str, str], TiktokShopClient] = {}
 
 
-# Process-wide cache of TiktokShopClient keyed by app_key. Single-tenant
-# today (one TikTok app per deployment), but the keyed shape makes it
-# trivial to extend when/if multiple apps appear.
-_CLIENT_CACHE: dict[str, TiktokShopClient] = {}
-
-
-def _reactive_refresh(session: Session, shop_id: str):
+def _reactive_refresh(
+    session: Session,
+    shop_id: str,
+    app_credentials: TikTokAppCredentials,
+):
     """Call :func:`refresh_if_needed` to rotate the shop's TikTok token.
 
     Used by :func:`proxy_call` when the upstream returns
@@ -125,7 +114,10 @@ def _reactive_refresh(session: Session, shop_id: str):
     current_rt = _current_refresh_token(session, shop_id)
 
     def _refresher(_p: str, _eid: str) -> dict:
-        return refresh_tiktok_token(refresh_token=current_rt)
+        return refresh_tiktok_token(
+            refresh_token=current_rt,
+            app_credentials=app_credentials,
+        )
 
     try:
         view = refresh_if_needed(
@@ -164,11 +156,13 @@ def _current_refresh_token(session: Session, shop_id: str) -> str:
 
 
 def _get_client(app_key: str, app_secret: str, api_host: str) -> TiktokShopClient:
-    cached = _CLIENT_CACHE.get(app_key)
+    secret_fingerprint = hashlib.sha256(app_secret.encode("utf-8")).hexdigest()
+    cache_key = (app_key, secret_fingerprint, api_host)
+    cached = _CLIENT_CACHE.get(cache_key)
     if cached is not None:
         return cached
     client = TiktokShopClient(app_key=app_key, app_secret=app_secret, api_host=api_host)
-    _CLIENT_CACHE[app_key] = client
+    _CLIENT_CACHE[cache_key] = client
     return client
 
 
@@ -179,14 +173,20 @@ def build_proxy_call(
 ) -> Callable[..., dict]:
     """Return a ``proxy_call(method, path, *, body=None) -> dict`` closure.
 
-    The closure resolves the shop's OAuth token via
-    :func:`load_credentials` on every call — tokens can refresh
-    out-of-band (token.refresh job) and we don't want to keep a stale
-    in-process copy. The :class:`TiktokShopClient` itself IS cached
-    (signing state only, no per-shop secrets).
+    The closure resolves the token's immutable issuing service_id once and
+    builds the matching signed client. It still reloads the shop's OAuth token
+    on every call so out-of-band refresh cannot leave a stale access token.
     """
-    app_key, app_secret, api_host = _resolve_app_credentials()
-    client = _get_client(app_key, app_secret, api_host)
+    app_credentials = resolve_tiktok_app_credentials_for_shop(
+        session,
+        shop_id=shop_id,
+    )
+    api_host = os.environ.get("TIKTOK_API_HOST", "").strip() or DEFAULT_API_HOST
+    client = _get_client(
+        app_credentials.app_key,
+        app_credentials.app_secret,
+        api_host,
+    )
 
     def proxy_call(method: str, path: str, *, body: dict | None = None) -> dict:
         view = load_credentials(session, "tiktok", shop_id)
@@ -226,7 +226,7 @@ def build_proxy_call(
                 # Reactive refresh on 401 — POST path. Same retry budget
                 # as GET (one attempt). Failure propagates as-is so the
                 # caller's run_with_sync_job marks the job 'failed'.
-                view = _reactive_refresh(session, shop_id)
+                view = _reactive_refresh(session, shop_id, app_credentials)
                 if view is None:
                     raise RuntimeError(
                         f"reactive refresh returned no view for "
@@ -259,7 +259,7 @@ def build_proxy_call(
                     extra_params=extra_params,
                 )
             except AuthenticationError:
-                view = _reactive_refresh(session, shop_id)
+                view = _reactive_refresh(session, shop_id, app_credentials)
                 if view is None:
                     raise RuntimeError(
                         f"reactive refresh returned no view for "

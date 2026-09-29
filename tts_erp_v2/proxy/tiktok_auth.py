@@ -43,7 +43,11 @@ from typing import Any
 from sqlalchemy.orm import Session, sessionmaker
 
 from tts_erp_v2.proxy.errors import SigningError, UpstreamHttpError
-from tts_erp_v2.proxy.token_service import load_credentials
+from tts_erp_v2.proxy.token_service import (
+    TikTokAppCredentials,
+    load_credentials,
+    resolve_tiktok_app_credentials,
+)
 from tts_erp_v2.proxy.tts_shop.signing import sign_request
 
 log = logging.getLogger("tts_erp_v2.proxy.tiktok_auth")
@@ -69,7 +73,11 @@ RefresherFn = Callable[[str, str], dict]
 
 
 def _resolve_app_credentials() -> tuple[str, str, str]:
-    """Read TIKTOK_APP_KEY / TIKTOK_APP_SECRET / TIKTOK_AUTH_HOST.
+    """Read the legacy environment App pair and token host.
+
+    Runtime shop operations pass a :class:`TikTokAppCredentials` resolved by
+    service_id.  This adapter remains for direct low-level callers and the
+    legacy environment-backed service_id during rollout.
 
     Returns ``(app_key, app_secret, auth_host)``. Raises
     :class:`SigningError` if either of the secret-bearing vars is
@@ -90,6 +98,16 @@ def _resolve_app_credentials() -> tuple[str, str, str]:
     return app_key, app_secret, auth_host
 
 
+def resolve_service_id(service_id: str | None = None) -> str:
+    """Return an explicit service_id or the legacy environment default."""
+    resolved = (service_id or os.environ.get("TIKTOK_SERVICE_ID", "")).strip()
+    if not resolved:
+        raise SigningError(
+            "service_id not provided and TIKTOK_SERVICE_ID is not configured"
+        )
+    return resolved
+
+
 def _resolve_service_credentials() -> tuple[str, str]:
     """Read TIKTOK_SERVICE_ID / TIKTOK_AUTHORIZE_HOST.
 
@@ -98,7 +116,7 @@ def _resolve_service_credentials() -> tuple[str, str]:
     OAuth client id shown on the Partner Center **App & Service** page
     (``service_id``, distinct from ``app_key``).
     """
-    service_id = os.environ.get("TIKTOK_SERVICE_ID", "").strip()
+    service_id = resolve_service_id()
     authorize_host = (
         os.environ.get("TIKTOK_AUTHORIZE_HOST", "").strip()
         or DEFAULT_TIKTOK_AUTHORIZE_HOST
@@ -130,7 +148,51 @@ def _validate_scheme(url: str) -> tuple[str, str]:
     return host, parsed.hostname and (parsed.path or "/") or "/"
 
 
-def refresh_tiktok_token(*, refresh_token: str) -> dict[str, Any]:
+def _http_app_pair(
+    app_credentials: TikTokAppCredentials | None,
+) -> tuple[str, str, str]:
+    """Return ``(app_key, app_secret, auth_host)`` for one HTTP operation."""
+    if app_credentials is None:
+        return _resolve_app_credentials()
+    auth_host = (
+        os.environ.get("TIKTOK_AUTH_HOST", "").strip()
+        or DEFAULT_TIKTOK_AUTH_HOST
+    )
+    return app_credentials.app_key, app_credentials.app_secret, auth_host
+
+
+def resolve_tiktok_app_credentials_for_shop(
+    session: Session,
+    *,
+    shop_id: str,
+) -> TikTokAppCredentials:
+    """Resolve the app pair that issued a shop's current OAuth token.
+
+    New OAuth callbacks persist ``integration.credentials.service_id``. A
+    NULL binding is a legacy token and may use only the exact environment
+    ``TIKTOK_SERVICE_ID`` pair until the seller reauthorizes. Mutable
+    ``commerce.shops.service_id`` is deliberately not consulted because it
+    represents the next authorization target, not token provenance.
+    """
+    view = load_credentials(session, "tiktok", shop_id)
+    if view is None:
+        raise SigningError(
+            f"credentials row not found for tiktok shop_id={shop_id!r}"
+        )
+    service_id = view.service_id or os.environ.get("TIKTOK_SERVICE_ID", "").strip()
+    if not service_id:
+        raise SigningError(
+            f"tiktok shop_id={shop_id!r} token has no issuing service_id; "
+            "reauthorize the shop or configure the legacy TIKTOK_SERVICE_ID"
+        )
+    return resolve_tiktok_app_credentials(session, service_id=service_id)
+
+
+def refresh_tiktok_token(
+    *,
+    refresh_token: str,
+    app_credentials: TikTokAppCredentials | None = None,
+) -> dict[str, Any]:
     """Exchange a TikTok refresh_token for a fresh access_token.
 
     Args:
@@ -148,7 +210,7 @@ def refresh_tiktok_token(*, refresh_token: str) -> dict[str, Any]:
         SigningError: missing app_key/app_secret or non-http(s) URL.
         UpstreamHttpError: HTTP 4xx/5xx, or ``code != 0`` in the body.
     """
-    app_key, app_secret, auth_host = _resolve_app_credentials()
+    app_key, app_secret, auth_host = _http_app_pair(app_credentials)
 
     query = {
         "app_key": app_key,
@@ -263,7 +325,11 @@ def _expires_at_from_expiry(data: dict[str, Any]) -> datetime | None:
     return None
 
 
-def exchange_auth_code(*, auth_code: str) -> dict[str, Any]:
+def exchange_auth_code(
+    *,
+    auth_code: str,
+    app_credentials: TikTokAppCredentials | None = None,
+) -> dict[str, Any]:
     """Exchange a callback ``auth_code`` for an access-token envelope.
 
     Performs one GET to TikTok's ``/api/v2/token/get`` with
@@ -286,7 +352,7 @@ def exchange_auth_code(*, auth_code: str) -> dict[str, Any]:
         UpstreamHttpError: HTTP 4xx/5xx, or ``code != 0`` in the body,
         or a code-0 response with no ``access_token``.
     """
-    app_key, app_secret, auth_host = _resolve_app_credentials()
+    app_key, app_secret, auth_host = _http_app_pair(app_credentials)
 
     query = {
         "app_key": app_key,
@@ -412,10 +478,7 @@ def build_authorize_url(
         os.environ.get("TIKTOK_AUTHORIZE_HOST", "").strip()
         or DEFAULT_TIKTOK_AUTHORIZE_HOST
     )
-    resolved_service_id = (
-        service_id
-        or os.environ.get("TIKTOK_SERVICE_ID", "").strip()
-    )
+    resolved_service_id = resolve_service_id(service_id)
     if not resolved_service_id:
         raise SigningError(
             "service_id not provided and TIKTOK_SERVICE_ID env var is not "
@@ -447,7 +510,11 @@ def _resolve_api_host() -> str:
     return os.environ.get("TIKTOK_API_HOST", "").strip() or DEFAULT_TIKTOK_API_HOST
 
 
-def fetch_authorized_shops(*, access_token: str) -> list[dict[str, Any]]:
+def fetch_authorized_shops(
+    *,
+    access_token: str,
+    app_credentials: TikTokAppCredentials | None = None,
+) -> list[dict[str, Any]]:
     """List the shops the just-authorized user granted to this app.
 
     ``token/get`` (service_id flow) returns a **user-level** token
@@ -474,7 +541,7 @@ def fetch_authorized_shops(*, access_token: str) -> list[dict[str, Any]]:
         SigningError: missing app_key/app_secret or non-http(s) URL.
         UpstreamHttpError: HTTP 4xx/5xx, or ``code != 0`` in the body.
     """
-    app_key, app_secret, _auth_host = _resolve_app_credentials()
+    app_key, app_secret, _auth_host = _http_app_pair(app_credentials)
     api_host = _resolve_api_host()
 
     parsed = urllib.parse.urlparse(api_host)
@@ -609,9 +676,16 @@ def _tiktok_refresher(
                     )
                     return {"access_token": ""}
                 current_rt = view.refresh_token
+                app_credentials = resolve_tiktok_app_credentials_for_shop(
+                    session,
+                    shop_id=eid,
+                )
             finally:
                 session.close()
-            return refresh_tiktok_token(refresh_token=current_rt)
+            return refresh_tiktok_token(
+                refresh_token=current_rt,
+                app_credentials=app_credentials,
+            )
 
         return _refresher
 

@@ -86,6 +86,7 @@ class _FakeConn:
 @pytest.fixture()
 def app_creds(monkeypatch: pytest.MonkeyPatch) -> None:
     """Ensure TIKTOK_APP_KEY / TIKTOK_APP_SECRET / TIKTOK_AUTH_HOST are set."""
+    monkeypatch.setenv("TIKTOK_SERVICE_ID", "TEST_AUTH_SERVICE")
     monkeypatch.setenv("TIKTOK_APP_KEY", "test_app_key_xyz")
     monkeypatch.setenv("TIKTOK_APP_SECRET", "test_app_secret_xyz")
     monkeypatch.setenv("TIKTOK_AUTH_HOST", "https://auth.example.test")
@@ -115,9 +116,8 @@ def test_refresh_tiktok_token_success(
         tiktok_auth.http.client, "HTTPSConnection", lambda *a, **kw: fake
     )
 
-    out = tiktok_auth.refresh_tiktok_token(
-        **{RT_KEY: "current_rt_abc"}
-    )
+    rt_value = "current_rt_abc"
+    out = tiktok_auth.refresh_tiktok_token(refresh_token=rt_value)
 
     assert out[AT_KEY] == "new_at_xyz"
     assert out[RT_KEY] == "new_rt_xyz"
@@ -157,8 +157,9 @@ def test_refresh_tiktok_token_non_zero_code_raises(
         tiktok_auth.http.client, "HTTPSConnection", lambda *a, **kw: fake
     )
 
+    rt_value = "bad_rt"
     with pytest.raises(UpstreamHttpError) as ei:
-        tiktok_auth.refresh_tiktok_token(**{RT_KEY: "bad_rt"})
+        tiktok_auth.refresh_tiktok_token(refresh_token=rt_value)
     assert "98001004" in str(ei.value)
     assert "invalid refresh_token" in str(ei.value)
 
@@ -178,8 +179,9 @@ def test_refresh_tiktok_token_http_error_raises(
         tiktok_auth.http.client, "HTTPSConnection", lambda *a, **kw: fake
     )
 
+    rt_value = "rt"
     with pytest.raises(UpstreamHttpError) as ei:
-        tiktok_auth.refresh_tiktok_token(**{RT_KEY: "rt"})
+        tiktok_auth.refresh_tiktok_token(refresh_token=rt_value)
     assert ei.value.status_code == 500
 
 
@@ -193,8 +195,9 @@ def test_refresh_tiktok_token_missing_app_key_raises(
     monkeypatch.delenv("TIKTOK_APP_KEY", raising=False)
     monkeypatch.delenv("TIKTOK_APP_SECRET", raising=False)
 
+    rt_value = "rt"
     with pytest.raises(SigningError) as ei:
-        tiktok_auth.refresh_tiktok_token(**{RT_KEY: "rt"})
+        tiktok_auth.refresh_tiktok_token(refresh_token=rt_value)
     assert "TIKTOK_APP_KEY" in str(ei.value)
 
 
@@ -206,8 +209,9 @@ def test_refresh_tiktok_token_rejects_non_http_scheme(
     from tts_erp_v2.proxy.errors import SigningError
 
     monkeypatch.setenv("TIKTOK_AUTH_HOST", "file:///etc/passwd")
+    rt_value = "rt"
     with pytest.raises(SigningError) as ei:
-        tiktok_auth.refresh_tiktok_token(**{RT_KEY: "rt"})
+        tiktok_auth.refresh_tiktok_token(refresh_token=rt_value)
     assert "scheme" in str(ei.value).lower()
 
 
@@ -255,9 +259,12 @@ def test_build_token_registry_tiktok_invokes_refresh(
     from sqlalchemy.orm import sessionmaker
 
     from tts_erp_v2.db.base import get_engine
-    from tts_erp_v2.db.models.integration import Credentials
+    from tts_erp_v2.db.models.integration import Credentials, TikTokAppCredential
     from tts_erp_v2.proxy import tiktok_auth
-    from tts_erp_v2.proxy.token_service import upsert_credentials
+    from tts_erp_v2.proxy.token_service import (
+        upsert_credentials,
+        upsert_tiktok_app_credentials,
+    )
 
     response_body = {
         "code": 0,
@@ -278,6 +285,7 @@ def test_build_token_registry_tiktok_invokes_refresh(
     Sess = sessionmaker(bind=engine)
 
     external_id = "TEST_TT_REGISTRY_REFRESH"
+    service_id = "TEST_TT_REGISTRY_SERVICE"
 
     # Seed credentials via the production upsert path. Use variable
     # indirection so ruff's S105 false-positive (literal password-like
@@ -290,6 +298,12 @@ def test_build_token_registry_tiktok_invokes_refresh(
 
     sess = Sess()
     try:
+        upsert_tiktok_app_credentials(
+            sess,
+            service_id=service_id,
+            app_key="TEST_TT_REGISTRY_APP_KEY",
+            plaintext_app_secret="TEST_TT_REGISTRY_APP_SECRET",
+        )
         upsert_credentials(
             sess,
             provider="tiktok",
@@ -298,6 +312,7 @@ def test_build_token_registry_tiktok_invokes_refresh(
             plaintext_refresh_token=seed_rt,
             plaintext_shop_cipher=seed_sc,
             expires_at=seed_exp,
+            service_id=service_id,
         )
         sess.commit()
     finally:
@@ -311,6 +326,7 @@ def test_build_token_registry_tiktok_invokes_refresh(
         assert out[AT_KEY] == "rotated_at_xyz"
         assert out[RT_KEY] == "rotated_rt_xyz"
         assert out[SC_KEY] == "rotated_cipher_xyz"
+        assert "app_key=TEST_TT_REGISTRY_APP_KEY" in fake.calls[0]["path"]
     finally:
         cleanup = Sess()
         try:
@@ -321,6 +337,9 @@ def test_build_token_registry_tiktok_invokes_refresh(
             ).scalar_one_or_none()
             if row is not None:
                 cleanup.delete(row)
-                cleanup.commit()
+            app_row = cleanup.get(TikTokAppCredential, service_id)
+            if app_row is not None:
+                cleanup.delete(app_row)
+            cleanup.commit()
         finally:
             cleanup.close()

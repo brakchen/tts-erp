@@ -44,6 +44,7 @@ def session_factory() -> sessionmaker:
 @pytest.fixture()
 def env_setup(monkeypatch: pytest.MonkeyPatch) -> None:
     """Provide TIKTOK_APP_KEY / TIKTOK_APP_SECRET so build_proxy_call doesn't raise."""
+    monkeypatch.setenv("TIKTOK_SERVICE_ID", "TEST_SCHEDULER_SERVICE")
     monkeypatch.setenv("TIKTOK_APP_KEY", "test_app_key_xyz")
     monkeypatch.setenv("TIKTOK_APP_SECRET", "test_app_secret_xyz")
 

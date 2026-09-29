@@ -20,8 +20,9 @@ from datetime import UTC, date, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import (
     # Re-exported as `_is_prod_shaped_db` for the prod-shape guard in
@@ -36,6 +37,11 @@ from tts_erp_v2.middleware.rate_limit import (
     ENV_VAR_NAME,
     reset_shared,
     shared_config,
+)
+from tts_erp_v2.proxy.errors import SigningError
+from tts_erp_v2.proxy.token_service import (
+    resolve_tiktok_app_credentials,
+    upsert_tiktok_app_credentials,
 )
 
 router = APIRouter()
@@ -347,6 +353,26 @@ class ShopRegisterBody(BaseModel):
         default=None,
         description="开店时间（天级，YYYY-MM-DD）。可空。",
     )
+    service_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description="TikTok Partner Center service_id。",
+    )
+    app_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        repr=False,
+        description="与 service_id 配套的 App Key；必须与 app_secret 同时提交。",
+    )
+    app_secret: SecretStr | None = Field(
+        default=None,
+        min_length=1,
+        max_length=512,
+        repr=False,
+        description="与 service_id 配套的 App Secret；只加密存储，不返回。",
+    )
 
     @field_validator("shop_id")
     @classmethod
@@ -361,6 +387,22 @@ class ShopRegisterBody(BaseModel):
             raise ValueError(f"shop_id prefix not registerable: {v!r}")
         return v
 
+    @field_validator("service_id", "app_key")
+    @classmethod
+    def _strip_optional_value(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        stripped = v.strip()
+        return stripped or None
+
+    @model_validator(mode="after")
+    def _validate_app_pair(self) -> ShopRegisterBody:
+        if (self.app_key is None) != (self.app_secret is None):
+            raise ValueError("app_key and app_secret must be provided together")
+        if self.app_key is not None and self.service_id is None:
+            raise ValueError("service_id is required with app_key/app_secret")
+        return self
+
 
 class ShopOut(BaseModel):
     id: int
@@ -372,6 +414,7 @@ class ShopOut(BaseModel):
     status: str | None = None
     credential_id: int | None = None
     service_id: str | None = None
+    app_credentials_configured: bool = False
     opened_date: date | None = None
 
 
@@ -386,17 +429,60 @@ class ShopRegisterResponse(BaseModel):
 # xmax = 0 distinguishes the inserted row from a conflict-updated one.
 _SQL_REGISTER_SHOP = text(
     "INSERT INTO commerce.shops "
-    "(platform, shop_id, account_name, region, seller_type, status, opened_date) "
+    "(platform, shop_id, account_name, region, seller_type, status, "
+    " opened_date, service_id) "
     "VALUES (:platform, :shop_id, :account_name, :region, :seller_type, "
-    "        'active', :opened_date) "
+    "        'active', :opened_date, :service_id) "
     "ON CONFLICT (platform, shop_id) DO UPDATE SET "
     "  account_name = COALESCE(shops.account_name, EXCLUDED.account_name), "
     "  region = COALESCE(shops.region, EXCLUDED.region), "
     "  seller_type = COALESCE(shops.seller_type, EXCLUDED.seller_type), "
-    "  opened_date = COALESCE(shops.opened_date, EXCLUDED.opened_date) "
+    "  opened_date = COALESCE(shops.opened_date, EXCLUDED.opened_date), "
+    "  service_id = COALESCE(shops.service_id, EXCLUDED.service_id) "
     "RETURNING id, platform, shop_id, account_name, region, seller_type, "
-    "          status, credential_id, opened_date, (xmax = 0) AS inserted"
+    "          status, credential_id, service_id, opened_date, "
+    "          (xmax = 0) AS inserted"
 )
+
+
+def _app_credentials_configured(
+    session: Session,
+    *,
+    service_id: str | None,
+) -> bool:
+    if service_id is None:
+        return False
+    try:
+        resolve_tiktok_app_credentials(session, service_id=service_id)
+    except SigningError:
+        return False
+    return True
+
+
+def _configure_or_validate_app_credentials(
+    session: Session,
+    *,
+    service_id: str | None,
+    app_key: str | None,
+    app_secret: str | None,
+) -> bool:
+    """Write a supplied pair or verify that service_id already resolves."""
+    if service_id is None:
+        return False
+    if app_key is not None and app_secret is not None:
+        upsert_tiktok_app_credentials(
+            session,
+            service_id=service_id,
+            app_key=app_key,
+            plaintext_app_secret=app_secret,
+        )
+        return True
+    if not _app_credentials_configured(session, service_id=service_id):
+        try:
+            resolve_tiktok_app_credentials(session, service_id=service_id)
+        except SigningError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return True
 
 
 @router.post(
@@ -407,18 +493,20 @@ _SQL_REGISTER_SHOP = text(
 def register_shop(
     request: Request, body: ShopRegisterBody
 ) -> ShopRegisterResponse:
-    """Register a shop row manually (plugin-synced shops without an API
-    credential). Idempotent on ``(platform, shop_id)``; re-registering
-    backfills still-NULL display fields and never clobbers an existing
-    credential link or status.
+    """Register a shop and optionally configure its service App pair.
+
+    App Key/App Secret writes require admin and share the same transaction as
+    the shop/service_id write. Metadata-only registration remains readwrite.
     """
     require_role_at_least(request, "readwrite")
+    if body.app_key is not None:
+        require_role_at_least(request, "admin")
 
     from tts_erp_v2.db.base import get_engine
 
     engine = get_engine()
-    with engine.begin() as conn:
-        row = conn.execute(  # pi-lens-ignore: python-sql-injection — module-level constant SQL, bound params only
+    with Session(engine) as session, session.begin():
+        row = session.execute(  # pi-lens-ignore: python-sql-injection — module-level constant SQL, bound params only
             _SQL_REGISTER_SHOP,
             {
                 "platform": body.platform,
@@ -427,8 +515,33 @@ def register_shop(
                 "region": body.region,
                 "seller_type": body.seller_type,
                 "opened_date": body.opened_date,
+                "service_id": body.service_id,
             },
         ).one()
+        if body.app_key is not None and row.service_id != body.service_id:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "shop already uses a different service_id; update the shop "
+                    "explicitly before rotating App credentials"
+                ),
+            )
+        if body.service_id is not None or body.app_key is not None:
+            app_credentials_configured = _configure_or_validate_app_credentials(
+                session,
+                service_id=row.service_id,
+                app_key=body.app_key,
+                app_secret=(
+                    body.app_secret.get_secret_value()
+                    if body.app_secret is not None
+                    else None
+                ),
+            )
+        else:
+            app_credentials_configured = _app_credentials_configured(
+                session,
+                service_id=row.service_id,
+            )
     return ShopRegisterResponse(
         created=bool(row.inserted),
         shop=ShopOut(
@@ -440,6 +553,8 @@ def register_shop(
             seller_type=row.seller_type,
             status=row.status,
             credential_id=row.credential_id,
+            service_id=row.service_id,
+            app_credentials_configured=app_credentials_configured,
             opened_date=row.opened_date,
         ),
     )
@@ -483,8 +598,38 @@ class ShopUpdateBody(BaseModel):
     )
     service_id: str | None = Field(
         default=None,
+        min_length=1,
+        max_length=64,
         description="TikTok Partner Center service_id。设为 null 不修改。",
     )
+    app_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        repr=False,
+        description="配套 App Key；与 app_secret 同时提交，且需要 admin。",
+    )
+    app_secret: SecretStr | None = Field(
+        default=None,
+        min_length=1,
+        max_length=512,
+        repr=False,
+        description="配套 App Secret；只加密存储，不返回，且需要 admin。",
+    )
+
+    @field_validator("service_id", "app_key")
+    @classmethod
+    def _strip_optional_value(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        stripped = v.strip()
+        return stripped or None
+
+    @model_validator(mode="after")
+    def _validate_app_pair(self) -> ShopUpdateBody:
+        if (self.app_key is None) != (self.app_secret is None):
+            raise ValueError("app_key and app_secret must be provided together")
+        return self
 
 
 class ShopUpdateResponse(BaseModel):
@@ -499,16 +644,22 @@ class ShopUpdateResponse(BaseModel):
 def update_shop(
     request: Request, shop_pk: int, body: ShopUpdateBody
 ) -> ShopUpdateResponse:
-    """Update a shop's metadata fields (``account_name`` / ``region`` /
-    ``opened_date`` / ``service_id``). Pass null to keep the existing
-    value unchanged (COALESCE semantics — null never clears a value)."""
+    """Update shop metadata and optionally rotate its service App pair.
+
+    App Key/App Secret writes require admin and are committed atomically with
+    the service_id change. A service_id-only change is accepted only when the
+    target pair already resolves from the encrypted table or exact legacy env
+    fallback.
+    """
     require_role_at_least(request, "readwrite")
+    if body.app_key is not None:
+        require_role_at_least(request, "admin")
 
     from tts_erp_v2.db.base import get_engine
 
     engine = get_engine()
-    with engine.begin() as conn:
-        row = conn.execute(  # pi-lens-ignore: python-sql-injection — module-level constant SQL, bound params only
+    with Session(engine) as session, session.begin():
+        row = session.execute(  # pi-lens-ignore: python-sql-injection — module-level constant SQL, bound params only
             _SQL_UPDATE_SHOP,
             {
                 "shop_pk": shop_pk,
@@ -518,8 +669,29 @@ def update_shop(
                 "service_id": body.service_id,
             },
         ).one_or_none()
-    if row is None:
-        raise HTTPException(status_code=404, detail=f"shop {shop_pk} not found")
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"shop {shop_pk} not found")
+        if body.app_key is not None and row.service_id is None:
+            raise HTTPException(
+                status_code=409,
+                detail="shop must have service_id before App credentials can be saved",
+            )
+        if body.service_id is not None or body.app_key is not None:
+            app_credentials_configured = _configure_or_validate_app_credentials(
+                session,
+                service_id=row.service_id,
+                app_key=body.app_key,
+                app_secret=(
+                    body.app_secret.get_secret_value()
+                    if body.app_secret is not None
+                    else None
+                ),
+            )
+        else:
+            app_credentials_configured = _app_credentials_configured(
+                session,
+                service_id=row.service_id,
+            )
     return ShopUpdateResponse(
         shop=ShopOut(
             id=row.id,
@@ -531,6 +703,7 @@ def update_shop(
             status=row.status,
             credential_id=row.credential_id,
             service_id=row.service_id,
+            app_credentials_configured=app_credentials_configured,
             opened_date=row.opened_date,
         ),
     )

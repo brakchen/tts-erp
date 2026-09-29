@@ -470,6 +470,7 @@ CREATE TABLE IF NOT EXISTS integration.credentials (
     ciphertext bytea NOT NULL,
     expires_at timestamp with time zone,
     granted_scopes jsonb,
+    service_id text,
     company_secret_ciphertext bytea,
     extra jsonb,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -480,6 +481,17 @@ CREATE TABLE IF NOT EXISTS integration.credentials (
 
 ALTER TABLE integration.credentials ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME integration.credentials_id_seq
+);
+
+
+-- Name: tiktok_app_credentials; Type: TABLE; Schema: integration; Owner: -
+
+CREATE TABLE IF NOT EXISTS integration.tiktok_app_credentials (
+    service_id text NOT NULL,
+    app_key text NOT NULL,
+    app_secret_ciphertext bytea NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -1523,6 +1535,12 @@ ALTER TABLE ONLY integration.credentials
     ADD CONSTRAINT credentials_pkey PRIMARY KEY (id);
 
 
+-- Name: tiktok_app_credentials tiktok_app_credentials_pkey; Type: CONSTRAINT; Schema: integration; Owner: -
+
+ALTER TABLE ONLY integration.tiktok_app_credentials
+    ADD CONSTRAINT tiktok_app_credentials_pkey PRIMARY KEY (service_id);
+
+
 -- Name: oauth_states oauth_states_pkey; Type: CONSTRAINT; Schema: integration; Owner: -
 
 ALTER TABLE ONLY integration.oauth_states
@@ -1988,6 +2006,8 @@ CREATE INDEX IF NOT EXISTS ix_fx_snapshots_base_id ON fx.exchange_rate_snapshots
 
 CREATE INDEX IF NOT EXISTS ix_credentials_provider ON integration.credentials USING btree (provider);
 
+CREATE INDEX IF NOT EXISTS ix_credentials_service_id ON integration.credentials USING btree (service_id) WHERE (service_id IS NOT NULL);
+
 
 -- Name: ix_oauth_states_created_at; Type: INDEX; Schema: integration; Owner: -
 
@@ -2275,6 +2295,11 @@ CREATE OR REPLACE TRIGGER trg_fx_exchange_rates_touch BEFORE UPDATE ON fx.exchan
 -- Name: credentials trg_integration_credentials_touch; Type: TRIGGER; Schema: integration; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_integration_credentials_touch BEFORE UPDATE ON integration.credentials FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: tiktok_app_credentials trg_integration_tiktok_app_credentials_touch; Type: TRIGGER; Schema: integration; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_integration_tiktok_app_credentials_touch BEFORE UPDATE ON integration.tiktok_app_credentials FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
 -- Name: oauth_states trg_integration_oauth_states_touch; Type: TRIGGER; Schema: integration; Owner: -

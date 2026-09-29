@@ -20,7 +20,8 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from sqlalchemy.orm import Session
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -79,12 +80,16 @@ def fake_exchange(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         }
     ]
 
-    def _fake(*, auth_code: str) -> dict[str, Any]:
+    def _fake(*, auth_code: str, app_credentials) -> dict[str, Any]:
         payload["auth_code_seen"] = auth_code
+        payload["app_service_id_seen"] = app_credentials.service_id
+        payload["app_key_seen"] = app_credentials.app_key
         return payload
 
-    def _fake_shops(*, access_token: str) -> list[dict[str, Any]]:
+    def _fake_shops(*, access_token: str, app_credentials) -> list[dict[str, Any]]:
         payload["shops_access_token_seen"] = access_token
+        assert app_credentials.service_id == payload["app_service_id_seen"]
+        assert app_credentials.app_key == payload["app_key_seen"]
         return shops
 
     monkeypatch.setattr(flow, "exchange_auth_code", _fake)
@@ -155,31 +160,48 @@ def test_authorize_missing_service_id_is_500(
 
 
 def test_authorize_explicit_service_id_overrides_env(
-    api_client, readwrite_key, app_env: None, db_session
+    api_client, readwrite_key, app_env: None, db_session, db_engine
 ) -> None:
-    """显式传入 service_id 参数时，优先使用参数值。"""
-    r = api_client.get(
-        AUTHZ,
-        headers=_bearer(readwrite_key),
-        params={"format": "json", "service_id": "explicit_svc_789"},
-    )
-    assert r.status_code == 200, r.text
-    body = r.json()
-    url = body["authorize_url"]
-    assert "service_id=explicit_svc_789" in url
-    # 环境变量中的值不应出现
-    assert "test_service_api_1" not in url
-
-    # state extra 中应包含 service_id
-    state = _state_from_url(url)
-    from tts_erp_v2.db.models.integration import OAuthState
+    """显式 service_id 使用其独立加密 App pair，而不是环境默认。"""
+    from tts_erp_v2.db.models.integration import OAuthState, TikTokAppCredential
     from tts_erp_v2.proxy.tiktok_oauth import _state_hash
+    from tts_erp_v2.proxy.token_service import upsert_tiktok_app_credentials
 
-    row = db_session.execute(
-        select(OAuthState).where(OAuthState.state_hash == _state_hash(state))
-    ).scalar_one_or_none()
-    assert row is not None
-    assert row.extra == {"service_id": "explicit_svc_789"}
+    service_id = "TEST_EXPLICIT_SERVICE_789"
+    with Session(db_engine) as session:
+        upsert_tiktok_app_credentials(
+            session,
+            service_id=service_id,
+            app_key="TEST_EXPLICIT_APP_KEY",
+            plaintext_app_secret="TEST_EXPLICIT_APP_SECRET",
+        )
+        session.commit()
+    try:
+        r = api_client.get(
+            AUTHZ,
+            headers=_bearer(readwrite_key),
+            params={"format": "json", "service_id": service_id},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        url = body["authorize_url"]
+        assert f"service_id={service_id}" in url
+        assert "test_service_api_1" not in url
+
+        state = _state_from_url(url)
+        row = db_session.execute(
+            select(OAuthState).where(OAuthState.state_hash == _state_hash(state))
+        ).scalar_one_or_none()
+        assert row is not None
+        assert row.extra == {"service_id": service_id}
+    finally:
+        with Session(db_engine) as session:
+            session.execute(
+                delete(TikTokAppCredential).where(
+                    TikTokAppCredential.service_id == service_id
+                )
+            )
+            session.commit()
 
 
 # ─── callback ────────────────────────────────────────────────────────
@@ -219,6 +241,33 @@ def test_callback_forged_state_fails_closed(
     assert r.status_code == 400, r.text
     assert r.json()["kind"] == "state_invalid"
     assert "auth_code_seen" not in fake_exchange  # upstream never called
+
+
+def test_callback_rejects_app_key_mismatch_before_exchange(
+    api_client,
+    readwrite_key,
+    app_env: None,
+    fake_exchange: dict[str, Any],
+) -> None:
+    r = api_client.get(
+        AUTHZ,
+        headers=_bearer(readwrite_key),
+        params={"format": "json"},
+    )
+    state = _state_from_url(r.json()["authorize_url"])
+
+    r = api_client.get(
+        CALLBACK,
+        params={
+            "format": "json",
+            "code": "code_wrong_app",
+            "state": state,
+            "app_key": "TEST_WRONG_CALLBACK_APP_KEY",
+        },
+    )
+    assert r.status_code == 400, r.text
+    assert r.json()["kind"] == "app_key_mismatch"
+    assert "auth_code_seen" not in fake_exchange
 
 
 def test_callback_happy_path_bootstraps_rows(

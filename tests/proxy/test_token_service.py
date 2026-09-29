@@ -99,6 +99,63 @@ def test_is_expired_respects_skew(fernet_key: str) -> None:
     assert not is_expired(None, now=now)
 
 
+def test_tiktok_app_credentials_round_trip(db_session, fernet_key: str) -> None:
+    """App Secret is encrypted and resolved by service_id."""
+    from sqlalchemy import select
+
+    from tts_erp_v2.db.models.integration import TikTokAppCredential
+    from tts_erp_v2.proxy.token_service import (
+        resolve_tiktok_app_credentials,
+        upsert_tiktok_app_credentials,
+    )
+
+    upsert_tiktok_app_credentials(
+        db_session,
+        service_id="TEST_SERVICE_001",
+        app_key="TEST_APP_KEY_001",
+        plaintext_app_secret="TEST_APP_SECRET_001",
+    )
+    db_session.commit()
+
+    resolved = resolve_tiktok_app_credentials(
+        db_session, service_id="TEST_SERVICE_001"
+    )
+    assert resolved.service_id == "TEST_SERVICE_001"
+    assert resolved.app_key == "TEST_APP_KEY_001"
+    assert resolved.app_secret == "TEST_APP_SECRET_001"
+    assert resolved.source == "database"
+
+    persisted = db_session.execute(
+        select(TikTokAppCredential).where(
+            TikTokAppCredential.service_id == "TEST_SERVICE_001"
+        )
+    ).scalar_one()
+    assert persisted.app_secret_ciphertext != b"TEST_APP_SECRET_001"
+
+
+def test_tiktok_app_credentials_exact_env_fallback(
+    db_session, fernet_key: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tts_erp_v2.proxy.errors import SigningError
+    from tts_erp_v2.proxy.token_service import resolve_tiktok_app_credentials
+
+    monkeypatch.setenv("TIKTOK_SERVICE_ID", "TEST_ENV_SERVICE")
+    monkeypatch.setenv("TIKTOK_APP_KEY", "TEST_ENV_KEY")
+    monkeypatch.setenv("TIKTOK_APP_SECRET", "TEST_ENV_SECRET")
+
+    resolved = resolve_tiktok_app_credentials(
+        db_session, service_id="TEST_ENV_SERVICE"
+    )
+    assert resolved.app_key == "TEST_ENV_KEY"
+    assert resolved.app_secret == "TEST_ENV_SECRET"
+    assert resolved.source == "environment"
+
+    with pytest.raises(SigningError, match="TEST_OTHER_SERVICE"):
+        resolve_tiktok_app_credentials(
+            db_session, service_id="TEST_OTHER_SERVICE"
+        )
+
+
 def test_upsert_and_load_credentials(db_session, fernet_key: str) -> None:
     """Persist a row, then load it back and verify plaintext survives."""
     from tts_erp_v2.db.models.integration import Credentials
@@ -118,6 +175,7 @@ def test_upsert_and_load_credentials(db_session, fernet_key: str) -> None:
         plaintext_shop_cipher="cipher_plain",
         expires_at=datetime.now(UTC) + timedelta(hours=2),
         granted_scopes=["orders", "products"],
+        service_id="TEST_SERVICE_ISSUER",
     )
     db_session.commit()
 
@@ -129,6 +187,7 @@ def test_upsert_and_load_credentials(db_session, fernet_key: str) -> None:
     assert loaded.refresh_token == "rt_plain"
     assert loaded.shop_cipher == "cipher_plain"
     assert loaded.granted_scopes == ["orders", "products"]
+    assert loaded.service_id == "TEST_SERVICE_ISSUER"
     assert loaded.expires_at is not None
     # Ciphertext is NOT plaintext on disk — query the row directly to confirm.
     from sqlalchemy import select
