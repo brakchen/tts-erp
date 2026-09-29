@@ -353,7 +353,7 @@ Query parameters:
 | `w_start` | date | — | ISO `yyyy-mm-dd`;销售与退款均按关联订单 `COALESCE(order_time, paid_at)` 裁剪；退款跟随原订单归属（含当日） |
 | `w_end` | date | — | ISO `yyyy-mm-dd`;与 `w_start` 配对使用；例如 9 月 1 日订单在 9 月 10 日退款，仍归入 9 月 1 日；不提供窗口 = 销售/退款全历史累计 |
 
-Response envelope:`{items: [...], total, totals, meta}`。`spu_ids` 属于盈利范围：金额从命中 SPU 行聚合，订单/取消/退款 totals 在命中 SPU 集合内跨 SPU 去重，且 totals 不受分页影响。页面使用 Bootstrap 5 + 自托管 Tom Select Bootstrap 5 主题的原生 `<select multiple>` 选择/搜索/粘贴 SPU，点击「查询」后才应用 scope。
+Response envelope:`{items: [...], total, totals, meta}`。`spu_ids` 属于盈利范围：金额从命中 SPU 行聚合，订单/取消/退款 totals 在命中 SPU 集合内跨 SPU 去重，且 totals 不受分页影响。页面使用 Bootstrap 5 + 自托管 Tom Select Bootstrap 5 主题的原生 `<select multiple>` 选择/搜索/粘贴 SPU，点击「查询」后才应用 scope；已应用的 scope 会同步到页面 URL，刷新或分享链接后恢复。批量粘贴校验期间可点「清空」取消，最多选择 100 个 SPU。
 
 **当前行字段契约（页面主列仅渲染 6 列 + 商品维度，其余由下钻面板或外部分析消费）**：
 

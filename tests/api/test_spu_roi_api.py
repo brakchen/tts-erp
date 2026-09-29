@@ -2885,9 +2885,39 @@ def test_spu_roi_js_targets_dashboard_hooks():
     # 回归:手动删空草稿后，只要已应用 SPU scope 仍非空，「清空」必须可用；
     # 「查询」由草稿/已应用集合差异驱动，且删除/清空事件都刷新按钮状态。
     assert "hasAppliedSpuScope = state.spuIds.length > 0" in src
-    assert "(!selected.length && !hasAppliedSpuScope)" in src
+    assert "(!selected.length && !hasAppliedSpuScope && !pendingCount)" in src
     assert "onItemRemove: updateSpuSelectionUi" in src
     assert "onClear: updateSpuSelectionUi" in src
+    # 批量粘贴可被清空/换店取消，且并发校验也要占用 100 条配额。
+    assert "spuSelectionVersion" in src
+    assert "pendingSpuIds" in src
+    assert "cancelPendingSpuResolutions" in src
+    assert "controller.abort()" in src
+    # 主表请求始终以最新筛选条件为准，已应用 scope 可由 URL 恢复。
+    assert "loadVersion" in src
+    assert "loadController" in src
+    assert "setSpuIdsInUrl(state.spuIds)" in src
+    assert "restoreSpuScopeFromUrl" in src
+
+
+def test_spu_roi_filter_actions_keep_a_stable_mobile_layout():
+    """SPU 选择器宽度与两个操作按钮的触控高度不能随断点退化。"""
+    from pathlib import Path
+
+    css_path = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "css"
+        / "spu-roi.css"
+    )
+    css = css_path.read_text(encoding="utf-8")
+    assert ".op-toolbar .ts-wrapper" in css
+    assert "width: 100%;" in css
+    assert "#btn-spu-clear" in css
+    assert "#btn-spu-apply" in css
+    assert "min-height: 38px;" in css
+    assert "@media (max-width" not in css  # Bootstrap 栅格负责断点布局
 
 
 def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
