@@ -1,6 +1,6 @@
 # Candidate 02：访问策略深模块——实现审阅报告
 
-> 审阅状态：**reviewer PASS / Merge verdict OK；用户已确认并批准合并**
+> 审阅状态：**reviewer PASS / Merge verdict OK；已合并到 `master`**（合并提交 `5fecb28`）
 >
 > 分支：`redesign/access-policy-implementation`
 >
@@ -209,7 +209,8 @@ bash scripts/test.sh fast \
 - master：18 个既有失败；
 - implementation branch：10 个失败；
 - **新增失败：0**；
-- 8 个 OpenAPI 基线失败在本分支未复现，不作为本 lane 的目标或承诺。
+- 8 个 OpenAPI 基线失败在本分支未复现，不作为本 lane 的目标或承诺；
+- merge 后 `master`：18 个失败，与 merge 前 baseline 相同，新增失败 0。
 
 ### Reviewer 修复闭环
 
@@ -282,4 +283,4 @@ bash scripts/test.sh fast \
 4. 302 纳入 denied budget 后可能返回 429；
 5. 合并到 `master`。
 
-本报告记录的 implementation 已获合并批准。
+本报告记录的 implementation 已通过 `5fecb28` 合并到 `master`。
