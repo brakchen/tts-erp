@@ -67,18 +67,90 @@
     body.append(row);
   }
 
-  function esc(s) {
-    return String(s == null ? "" : s).replace(
-      /[&<>"']/g,
-      (c) =>
-        ({
-          "&": "&amp;",
-          "<": "&lt;",
-          ">": "&gt;",
-          '"': "&quot;",
-          "'": "&#39;",
-        })[c],
+  // DOM API 构造单行店铺表格，规避 innerHTML/insertAdjacentHTML 的 XSS 风险。
+  // 类名必须跟 pages.py shops 页 CSS 对齐（badge-api / badge-plugin；
+  // 曾误用 badge-sync-* 导致徽标无底色，2026-09-29 修复）。
+  function buildShopRow(s) {
+    // 同步方式：有 credential_id = 已 OAuth 授权走 API 同步，否则仅插件
+    // （2026-09-11 migration 0025 删除了 shops.data_source 枚举列）
+    var isApi = s.credential_id != null;
+    var pk = s.shop_pk || s.id;
+    var dateVal = s.opened_date || "";
+    var svcId = s.service_id || "";
+
+    function badge(cls, text) {
+      var el = document.createElement("span");
+      el.className = cls;
+      el.textContent = text;
+      return el;
+    }
+
+    function plainCell(text, cls) {
+      var cell = document.createElement("td");
+      if (cls) cell.className = cls;
+      cell.textContent = text;
+      return cell;
+    }
+
+    function editCell(text, field) {
+      var cell = plainCell(text, "editable");
+      cell.setAttribute("data-field", field);
+      cell.title = "点击修改";
+      return cell;
+    }
+
+    var row = document.createElement("tr");
+    row.setAttribute("data-shop-pk", String(pk));
+
+    row.appendChild(plainCell(s.shop_id, "mono"));
+    row.appendChild(editCell(s.account_name || "—", "account_name"));
+    row.appendChild(editCell(s.region || "—", "region"));
+    row.appendChild(editCell(svcId || "—", "service_id"));
+
+    // App 凭证状态徽标
+    var appCls = s.app_credentials_configured
+      ? "app-credentials-status badge badge-api"
+      : "app-credentials-status badge badge-plugin";
+    var appTd = document.createElement("td");
+    appTd.appendChild(
+      badge(appCls, s.app_credentials_configured ? "已配置" : "未配置")
     );
+    row.appendChild(appTd);
+
+    row.appendChild(editCell(dateVal || "—", "opened_date"));
+
+    // 同步方式徽标 + 状态文本
+    var syncTd = document.createElement("td");
+    syncTd.appendChild(
+      badge(isApi ? "badge badge-api" : "badge badge-plugin",
+            isApi ? "API 同步" : "仅插件")
+    );
+    syncTd.appendChild(document.createTextNode(" "));
+    var statusSpan = document.createElement("span");
+    statusSpan.className = "text-muted small";
+    statusSpan.textContent = s.status || "";
+    syncTd.appendChild(statusSpan);
+    row.appendChild(syncTd);
+
+    // 操作按钮
+    var actionsTd = document.createElement("td");
+    var configBtn = document.createElement("button");
+    configBtn.type = "button";
+    configBtn.className = "btn btn-sm btn-outline-dark btn-config-app";
+    configBtn.textContent = "配置 App";
+    actionsTd.appendChild(configBtn);
+    actionsTd.appendChild(document.createTextNode(" "));
+    var authWrap = document.createElement("span");
+    authWrap.className = "auth-actions";
+    var authBtn = document.createElement("button");
+    authBtn.type = "button";
+    authBtn.className = "btn btn-sm btn-outline-dark btn-auth";
+    authBtn.textContent = "获取授权链接";
+    authWrap.appendChild(authBtn);
+    actionsTd.appendChild(authWrap);
+    row.appendChild(actionsTd);
+
+    return row;
   }
 
   // ---------- toast（操作反馈不写进表格，2026-09-29 用户拍板） ----------
@@ -108,25 +180,33 @@
     item.textContent = msg;
     item.addEventListener("click", () => item.remove());
     toastRoot().append(item);
-    setTimeout(() => { item.remove(); }, 5000);
+    setTimeout(() => {
+      item.remove();
+    }, 5000);
   }
 
   // ---------- 授权链接 ----------
   function copyToClipboard(text, onDone) {
-    function done(ok) { if (onDone) onDone(ok); }
+    function done(ok) {
+      if (onDone) onDone(ok);
+    }
     function legacy() {
       var ta = document.createElement("textarea");
       ta.value = text;
       document.body.append(ta);
       ta.select();
-      try { done(document.execCommand("copy")); } catch (e) { done(false); }
+      try {
+        done(document.execCommand("copy"));
+      } catch (e) {
+        console.error("clipboard copy failed:", e);
+        done(false);
+      }
       document.body.removeChild(ta);
     }
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(
-        () => { done(true); },
-        legacy,
-      );
+      navigator.clipboard.writeText(text).then(() => {
+        done(true);
+      }, legacy);
     } else {
       legacy();
     }
@@ -161,7 +241,8 @@
     copyToClipboard(url, (ok) => {
       showToast(
         (ok ? "授权链接已复制到剪贴板" : "自动复制失败，请点「复制链接」") +
-          " · state 单次使用" + expText,
+          " · state 单次使用" +
+          expText,
         ok,
       );
     });
@@ -176,13 +257,16 @@
     var svcId = svcCell ? svcCell.textContent.trim() : "";
     if (svcId === "—") svcId = "";
     btn.disabled = true;
-    var path = "/v2/oauth/tiktok/authorize?format=json" +
+    var path =
+      "/v2/oauth/tiktok/authorize?format=json" +
       (svcId ? "&service_id=" + encodeURIComponent(svcId) : "");
     api(path)
       .then((r) => {
         if (!r) return null;
         if (r.status === 403) {
-          showErr("获取授权链接需要 readwrite 及以上会话（当前会话角色不足）。");
+          showErr(
+            "获取授权链接需要 readwrite 及以上会话（当前会话角色不足）。",
+          );
           return null;
         }
         return r.json().then((d) => ({ httpOk: r.ok, body: d }));
@@ -258,7 +342,9 @@
         method: "PATCH",
         body: JSON.stringify(payload),
       })
-        .then((r) => r.json().then((body) => ({ httpOk: r.ok, status: r.status, body })))
+        .then((r) =>
+          r.json().then((body) => ({ httpOk: r.ok, status: r.status, body })),
+        )
         .then((res) => {
           if (!res.httpOk) {
             if (res.status === 403) {
@@ -268,8 +354,12 @@
           }
           var shop = res.body && res.body.shop;
           if (shop && appDialogRow) {
-            var svcCell = appDialogRow.querySelector('[data-field="service_id"]');
-            var statusCell = appDialogRow.querySelector(".app-credentials-status");
+            var svcCell = appDialogRow.querySelector(
+              '[data-field="service_id"]',
+            );
+            var statusCell = appDialogRow.querySelector(
+              ".app-credentials-status",
+            );
             if (svcCell) svcCell.textContent = shop.service_id || "—";
             if (statusCell) {
               statusCell.className = "app-credentials-status badge badge-api";
@@ -278,8 +368,12 @@
           }
           closeAppCredentialsDialog();
         })
-        .catch((err) => showErr("保存 App 凭证失败：" + (err.message || String(err))))
-        .then(() => { submit.disabled = false; });
+        .catch((err) =>
+          showErr("保存 App 凭证失败：" + (err.message || String(err))),
+        )
+        .then(() => {
+          submit.disabled = false;
+        });
     });
   }
 
@@ -301,55 +395,9 @@
           renderEmptyRow(body, 8, "暂无店铺");
           return;
         }
-        // innerHTML 渲染是本文件既有模式：插值均经 esc() 转义
-        var rowsHtml = shops
-          .map((s) => {
-            // 同步方式：有 credential_id = 已 OAuth 授权走 API 同步，否则仅插件
-            // （2026-09-11 migration 0025 删除了 shops.data_source 枚举列）
-            var isApi = s.credential_id != null;
-            // 类名必须跟 pages.py shops 页 CSS 对齐（badge-api / badge-plugin；
-            // 曾误用 badge-sync-* 导致徽标无底色，2026-09-29 修复）
-            var badge = isApi
-              ? '<span class="badge badge-api">API 同步</span>'
-              : '<span class="badge badge-plugin">仅插件</span>';
-            var pk = s.shop_pk || s.id;
-            var dateVal = s.opened_date || "";
-            var svcId = s.service_id || "";
-            var appBadge = s.app_credentials_configured
-              ? '<span class="app-credentials-status badge badge-api">已配置</span>'
-              : '<span class="app-credentials-status badge badge-plugin">未配置</span>';
-            return (
-              "<tr data-shop-pk=" +
-              pk +
-              ">" +
-              '<td class="mono">' +
-              esc(s.shop_id) +
-              "</td>" +
-              '<td class="editable" data-field="account_name" title="点击修改">' +
-              esc(s.account_name || "—") +
-              "</td>" +
-              '<td class="editable" data-field="region" title="点击修改">' +
-              esc(s.region || "—") +
-              "</td>" +
-              '<td class="editable" data-field="service_id" title="点击修改">' +
-              esc(svcId || "—") +
-              "</td>" +
-              "<td>" + appBadge + "</td>" +
-              '<td class="editable" data-field="opened_date" title="点击修改">' +
-              esc(dateVal || "—") +
-              "</td>" +
-              "<td>" +
-              badge +
-              ' <span class="text-muted small">' +
-              esc(s.status || "") +
-              "</span></td>" +
-              '<td><button type="button" class="btn btn-sm btn-outline-dark btn-config-app">配置 App</button> ' +
-              '<span class="auth-actions"><button type="button" class="btn btn-sm btn-outline-dark btn-auth">获取授权链接</button></span></td>' +
-              "</tr>"
-            );
-          })
-          .join("");
-        body.innerHTML = rowsHtml; // pi-lens-ignore: no-inner-html-js
+        // DOM API 渲染：与 renderEmptyRow 同模式，避免 innerHTML/insertAdjacentHTML
+        body.textContent = "";
+        shops.forEach((s) => body.appendChild(buildShopRow(s)));
         body.querySelectorAll(".btn-auth").forEach((btn) => {
           btn.addEventListener("click", () => fetchAuthLink(btn));
         });
