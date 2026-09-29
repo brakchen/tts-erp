@@ -47,7 +47,7 @@
 
 - v10 的所有金额领域值、HTTP `items/totals` 金额和盈利证据金额统一为人民币 CNY；`ProfitabilityBasis.display_currency` 与 `meta.currency.display` 固定为 `CNY`。
 - 广告消耗与广告归因 GMV 原生 USD，按 `USD × rates[CNY]` 换算 CNY；销售、退款、结算原生 VND，按 `VND ÷ (rates[VND] / rates[CNY])` 换算 CNY；采购成本原生 CNY，不再先换成 USD。`FxBasis` 必须保留快照的精确 `usd_cny`，不得通过已量化的倒数恢复。
-- 同一个结果中的所有换算必须使用同一个数据库汇率快照；前端只加 `¥` 和格式化，不得二次换汇。
+- 同一个结果中的所有换算必须使用同一个数据库汇率快照；前端只做千分位格式化（2026-09-29 反馈：不加货币符号），不得二次换汇。
 - ROI、退款率等无量纲比例不因展示币种改变；广告系统实际 ROI 可直接使用同源 USD 分子/分母计算以避免 Decimal 换算尾差。
 - v10 只能使用数据库中的汇率快照。
 - 禁止使用编译期固定汇率或无来源兜底汇率。
