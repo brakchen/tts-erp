@@ -132,9 +132,9 @@ def _build_routes(app: FastAPI) -> None:
     # dashboard「数据同步状态」卡片数据源，只读 integration.sync_jobs。
     app.include_router(sync_status.router)
 
-    # Operator-console static assets (vendor/bootstrap.min.css / js/console.js). Auth is
-    # readonly-level via the "/static/" prefix in middleware/auth.py —
-    # any authenticated session passes; anonymous requests get 401.
+    # Operator-console static assets (vendor/bootstrap.min.css / js/console.js)
+    # are public. Business data remains protected at API endpoints; public assets
+    # keep an expired browser session from degrading every page into CSS/JS 401s.
     app.mount(
         "/static",
         StaticFiles(directory=Path(__file__).parent / "static"),
