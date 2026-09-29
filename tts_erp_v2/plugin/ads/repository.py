@@ -720,88 +720,6 @@ def upsert_monthly_rows(
     return inserted
 
 
-# ─── Solidify (ad_today → ad_daily) ─────────────────────────────────
-
-
-def list_merge_scope_pairs(
-    sess: Session,
-    yesterday: date,
-) -> list[tuple[str, str]]:
-    """Return distinct (seller_id, advertiser_id) pairs in ad_today for *yesterday*."""
-    # pi-lens-ignore: python-sql-injection
-    rows = sess.execute(
-        text("""
-            SELECT DISTINCT seller_id, advertiser_id
-            FROM plugin.ad_today
-            WHERE day = :yesterday
-            ORDER BY seller_id, advertiser_id
-        """),
-        {"yesterday": yesterday},
-    ).all()
-    return [(row[0], row[1]) for row in rows]
-
-
-def merge_today_into_daily(
-    sess: Session,
-    *,
-    seller_id: str,
-    advertiser_id: str,
-    yesterday: date,
-) -> None:
-    """ad_today 昨天数据 → ad_daily（跨天合并），然后清空 ad_today。"""
-    # pi-lens-ignore: python-sql-injection
-    sess.execute(
-        text("""
-            INSERT INTO plugin.ad_daily (
-                seller_id, advertiser_id, campaign_id, product_id, endpoint, day,
-                mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value,
-                onsite_mixed_real_roi2_shopping, metrics_extra, created_at
-            )
-            SELECT seller_id, advertiser_id, campaign_id, product_id, endpoint, day,
-                   mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value,
-                   onsite_mixed_real_roi2_shopping, metrics_extra, created_at
-            FROM plugin.ad_today
-            WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
-              AND day = :yesterday
-            -- 2026-09-13 P0 fix/recover-ad-daily-purge-guard: was DO UPDATE.
-            -- That overwrote ``plugin.ad_daily`` rows with potentially
-            -- stale ``plugin.ad_today`` snapshots, silently destroying
-            -- data that the Chrome plugin had later backfilled into
-            -- ad_daily via re-dumps (e.g. a new (campaign × product × day)
-            -- combination discovered weeks after the original dump).
-            -- The merge job's job is to MOVE yesterday's ad_today rows
-            -- into ad_daily history, not to re-merge / overwrite. If
-            -- a row already exists in ad_daily, the historical record
-            -- is authoritative. Re-enable DO UPDATE only after
-            -- ``feat/cursor-hasdata-cache`` (or successor) reliably
-            -- guarantees ad_today is a strict superset of ad_daily
-            -- for the same key.
-            ON CONFLICT ON CONSTRAINT uq_ad_daily DO NOTHING
-        """),
-        {
-            "seller_id": seller_id,
-            "advertiser_id": advertiser_id,
-            "yesterday": yesterday,
-        },
-    )
-
-    # pi-lens-ignore: python-sql-injection
-    sess.execute(
-        text("""
-            DELETE FROM plugin.ad_today
-            WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
-              AND day = :yesterday
-        """),
-        {
-            "seller_id": seller_id,
-            "advertiser_id": advertiser_id,
-            "yesterday": yesterday,
-        },
-    )
-
-    sess.commit()
-
-
 # ─── Plugin logs ─────────────────────────────────────────────────────
 
 
@@ -919,8 +837,6 @@ __all__ = [
     "get_coverage_monthly",
     "insert_plugin_logs",
     "is_product_level_endpoint",
-    "merge_today_into_daily",
-    "list_merge_scope_pairs",
     "upsert_daily_rows",
     "upsert_monthly_rows",
     "upsert_today_rows",
