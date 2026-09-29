@@ -961,24 +961,133 @@ def test_dumps_logistics_missing_main_order_id_returns_422(
     assert "mainOrderId is required" in body["message"]
 
 
+@pytest.mark.parametrize(
+    ("domain", "response_body", "main_order_id", "message"),
+    [
+        (
+            "order_details",
+            {},
+            None,
+            "order detail response missing data.main_order",
+        ),
+        (
+            "order_history",
+            {},
+            ORDER_ID_1,
+            "order history response missing data.order_history",
+        ),
+        (
+            "order_details",
+            {"data": {"main_order": [{}]}},
+            None,
+            "missing main_order_id",
+        ),
+    ],
+)
+def test_dumps_new_order_domains_reject_missing_required_structures(
+    api_client,
+    readwrite_key,
+    domain,
+    response_body,
+    main_order_id,
+    message,
+):
+    response = api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=_dump_payload(
+            domain,
+            response_body,
+            main_order_id=main_order_id,
+        ),
+    )
+    assert response.status_code == 422
+    body = response.json()
+    assert body["code"] == "PARSE_ERROR"
+    assert message in body["message"]
+
+
+@pytest.mark.parametrize(
+    ("domain", "response_body", "main_order_id"),
+    [
+        ("order_details", {"data": {"main_order": []}}, None),
+        (
+            "order_history",
+            {"data": {"order_history": []}},
+            ORDER_ID_1,
+        ),
+    ],
+)
+def test_dumps_new_order_domains_accept_explicit_empty_collections(
+    api_client,
+    readwrite_key,
+    domain,
+    response_body,
+    main_order_id,
+):
+    response = api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=_dump_payload(
+            domain,
+            response_body,
+            main_order_id=main_order_id,
+        ),
+    )
+    assert response.status_code == 200
+    assert response.json()["code"] == 0
+
+
+def test_dumps_order_history_requires_main_order_id(api_client, readwrite_key):
+    response = api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=_dump_payload(
+            "order_history",
+            {"data": {"order_history": []}},
+        ),
+    )
+    assert response.status_code == 422
+    assert response.json()["code"] == "PARSE_ERROR"
+    assert "mainOrderId is required" in response.json()["message"]
+
+
+def test_dumps_parse_error_message_is_single_line_and_bounded(
+    api_client, readwrite_key, monkeypatch
+):
+    from tts_erp_v2.plugin.orders.intake import _service as intake_service
+
+    def _fail(*_args, **_kwargs):
+        raise ValueError("line one\n" + "x" * 600)
+
+    monkeypatch.setattr(intake_service, "_dispatch_dump", _fail)
+    response = api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=_dump_payload("orders", _order_response([ORDER_ID_1])),
+    )
+    assert response.status_code == 422
+    message = response.json()["message"]
+    assert "\n" not in message
+    assert len(message) == 500
+
+
 def test_dumps_parse_failure_rolls_back_partial_business_rows(
     api_client, readwrite_key, db_engine, monkeypatch
 ):
     """解析器先写一行再报错时，业务表不可留下半个 dump。"""
-    from datetime import UTC, datetime
-
-    from tts_erp_v2.api.v2 import order_sync as order_sync_api
+    from tts_erp_v2.plugin.orders.intake import _service as intake_service
     from tts_erp_v2.plugin.orders.repository import upsert_order
 
-    def _partially_write_then_fail(sess, **kwargs):
+    def _partially_write_then_fail(sess, request):
         upsert_order(
             sess,
-            shop_id=kwargs["shop_id"],
+            shop_id=request.shop_id,
             order_id=ORDER_ID_1,
         )
         raise RuntimeError("synthetic parser failure")
 
-    monkeypatch.setattr(order_sync_api, "parse_order_response", _partially_write_then_fail)
+    monkeypatch.setattr(intake_service, "_dispatch_dump", _partially_write_then_fail)
     r = api_client.post(
         "/v2/order-sync/dumps",
         headers={"Authorization": f"Bearer {readwrite_key}"},
@@ -993,6 +1102,30 @@ def test_dumps_parse_failure_rolls_back_partial_business_rows(
         ).scalar()
     assert order_count == 0
     # Phase 1: parse_error 不再落 raw_log，由 response JSON 验证（上一行 r.json()['data']['parseError']）
+
+
+def test_dumps_database_failure_returns_retryable_500_envelope(
+    api_client, readwrite_key, monkeypatch
+):
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from tts_erp_v2.api.v2 import order_sync as order_sync_api
+
+    def _database_failure(*_args, **_kwargs):
+        raise SQLAlchemyError("synthetic database failure")
+
+    monkeypatch.setattr(order_sync_api, "intake_dump", _database_failure)
+    response = api_client.post(
+        "/v2/order-sync/dumps",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json=_dump_payload("orders", _order_response([ORDER_ID_1])),
+    )
+    assert response.status_code == 500
+    body = response.json()
+    assert body["code"] == "INTERNAL_ERROR"
+    assert body["message"] == "dump intake persistence failed"
+    assert body["requestId"]
+    assert "data" not in body
 
 
 # ─── dumps: 400 schema invalid ─────────────────────────────────────

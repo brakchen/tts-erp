@@ -3,13 +3,13 @@
 > **范围**：订单/物流/结算/售后 + 广告 5 域同步的端到端契约 —— Chrome 插件（在 Seller Center 页面拦截 TikTok 接口）↔ tts-erp 后端 dumps 端点 ↔ `plugin.*` 业务表。
 > **补充**：`/v2/order-sync/reconcile` 是订单/物流的 progress/diagnostic 校验端点；`/v2/order-sync/has-data` 仅保留给结算版本存在性诊断，均不替代 dumps 写入契约。
 >
-> **设计稿 vs 契约稿**：本文档是**现状契约**（`chrome-plugins/ads-data-sync` + `tts_erp_v2/api/v2/order_sync.py` + `tts_erp_v2/plugin/orders/parser.py` + `tts_erp_v2/analytics/*.py` 实际代码为准）；设计稿见 [`chrome-ext-order-sync-design.md`](chrome-ext-order-sync-design.md)。
+> **设计稿 vs 契约稿**：本文档是**现状契约**（`chrome-plugins/ads-data-sync` + `tts_erp_v2/api/v2/order_sync.py` + `tts_erp_v2/plugin/orders/intake/` + `tts_erp_v2/plugin/orders/parser.py` 实际代码为准）；设计稿见 [`chrome-ext-order-sync-design.md`](chrome-ext-order-sync-design.md) 和 [`order-dump-intake-module.md`](order-dump-intake-module.md)。
 >
 > **数据查询入口**：DB 行数核对、endpoint 抓取统计见 §5 "已知 gap"（2026-09-15 prod 数据）。
 >
 > **文档历史**：原 `tech-doc/intercept-plugin-canonical.md`（2026-09-18）的有用内容（ad 域详情、4 域 ID 映射、时间线、ER、状态终态、JOIN 模板、TODO 清单）已合并到 §6-§13；该文件已删除。
 >
-> **实现说明**：旧改造方案文档仅作历史参考；当前实现以本契约、`tts_erp_v2/api/v2/order_sync.py` 和插件端代码为准。`plugin.raw_log` 已下线，dump 健康记录统一写入 `plugin.plugin_logs`。
+> **实现说明**：`order_sync.py` 是 wire adapter；validated dump 的 domain dispatch、payload interpretation、savepoint、health 与 commit 由 `plugin.orders.intake` deep module 拥有。`plugin.raw_log` 已下线，dump 健康记录统一写入 `plugin.plugin_logs`。
 >
 > **设计稿**（部分内容已落后）：[`tech-doc/chrome-ext-order-sync-design.md`](chrome-ext-order-sync-design.md)（§3.2 raw_log 已下线，§3.3 业务表 log_id FK 已删除）。
 
@@ -23,8 +23,8 @@
 │ (ads-data-sync)  │  POST   │ POST /v2/order-sync/  │ 解析    │                      │
 │                 ├────────►│ dumps                 ├────────►│ orders               │
 │ - 拦截 page fetch│         │                      │         │ order_lines          │
-│ - 打包 DumpRequest│        │ 1. 调 parser_*        │         │ shipments            │
-│ - Zod 校验        │         │ 2. upsert 业务表       │         │ tracking_events      │
+│ - 打包 DumpRequest│        │ 1. wire 校验           │         │ shipments            │
+│ - Zod 校验        │         │ 2. intake module       │         │ tracking_events      │
 │ - 401/429 重试    │         │ 3. 返 4 字段 envelope  │         │ settlements          │
 │                 │ ◄───────┤    (code/message/reqId/data)│  settlement_details  │
 │                 │ 2xx/4xx │    （HTTP code 是唯一成功/│  after_sales         │
@@ -36,13 +36,13 @@
 
 **2 参与者**：
 - **Chrome 插件**：在 Seller Center tab 上拦截 TikTok page fetch，按 `domain` 拆条 POST
-- **tts-erp 后端**：接 dump，调 parser 落 `plugin.*` 业务表（Phase 3 起 `plugin.raw_log` 已 drop，不再写原始 dump body）
+- **tts-erp 后端**：adapter 校验 wire 后调用 `intake_dump`；module 原子落 `plugin.*` 业务表与 health（Phase 3 起 `plugin.raw_log` 已 drop，不再写原始 dump body）
 
 **1 端点**：
-- `POST /v2/order-sync/dumps` —— 订单/物流/结算/售后 4 域单一契约入口
+- `POST /v2/order-sync/dumps` —— server 支持 6 个 domain；基线插件使用订单/物流/结算/售后 4 域，详情/历史插件另用 `order_details` / `order_history`
 - **ad 域独立端点**：`POST /v2/analytics/sync/dumps`（v4 协议，详见 §6）
 
-**4 个 Chrome 端采集 endpoint（订单域）**：
+**基线 Chrome 端采集 endpoint（4 域；详情/历史见 §3 compatibility note）**：
 
 | 域 | endpoint path | method | 触发场景 | 状态 |
 | --- | --- | --- | --- | --- |
@@ -66,8 +66,8 @@
 | `requestId` | string\|null | 否 | `Field(default=None, min_length=1, max_length=128)` | `z.string().min(1).max(128).optional()` |
 | `scope.sellerId` | string | 是 | `Field(min_length=1, max_length=128)` | `z.string().min(1).max(128)` |
 | `scope.shopId` | string | 是 | `Field(min_length=1, max_length=128)` | `z.string().min(1).max(128)` |
-| `dump.domain` | enum | 是 | `Field(min_length=1, max_length=32)` + `_domain_must_be_valid`（`{"orders", "logistics", "statements", "after_sales"}`） | `z.enum(['orders', 'logistics', 'statements', 'after_sales'])` |
-| `dump.mainOrderId` | string\|null | logistics 必填 | `Field(default=None, max_length=128)` | `z.string().max(128).optional()` |
+| `dump.domain` | enum | 是 | `DumpDomain` 六值：`orders` / `order_details` / `order_history` / `logistics` / `statements` / `after_sales` | 基线插件包含四个批量域；发送详情/历史的插件版本必须镜像增加 `order_details` / `order_history` |
+| `dump.mainOrderId` | string\|null | logistics、order_history 必填 | `Field(default=None, max_length=128)` | `z.string().max(128).optional()` |
 | `dump.statementId` | string\|null | 结算明细必填 | `Field(default=None, max_length=128)` | `z.string().max(128).optional()` |
 | `dump.statementVersion` | int\|null | 结算必填 | `Field(default=None)` | `z.number().int().optional()` |
 | `dump.endpoint` | string | 是 | `Field(min_length=1, max_length=512)` | `z.string().min(1).max(512)` |
@@ -173,37 +173,44 @@
 
 ---
 
-## §3 4 域 × dumps 路由总表
+## §3 6 域 × dumps 路由总表
 
-> dumps 路由 = `dump.domain` 字段 → 调哪个 parser 函数 → 落哪些 plugin 表
+> dumps 路由 = `dump.domain` 字段 → intake implementation 调哪个 parser → 落哪些 plugin 表。
+> `orders` / `logistics` / `statements` / `after_sales` 是基线 Chrome 协议；
+> `order_details` / `order_history` 是后续详情采集协议，旧插件不会发送但服务端保持兼容。
 
 | 域 | chrome 采集 endpoint（plugin `tiktok-*-endpoints.ts`） | dumps `domain` | parser 函数（`tts_erp_v2/plugin/orders/parser.py`） | 落 plugin 表 |
 | --- | --- | --- | --- | --- |
 | **订单** | `/api/fulfillment/order/list`（POST） | `"orders"` | `parse_order_response` | `orders` / `order_lines` |
+| **订单详情** | Seller Center `order/get` | `"order_details"` | `parse_order_detail_response` | `order_details` |
+| **订单历史** | Seller Center `order/history` | `"order_history"` | `parse_order_history_response` | `order_timeline` |
 | **物流** | `/api/v1/fulfillment/logistic_detail/list`（GET） | `"logistics"` | `parse_logistics_response` | `shipments` / `tracking_events` |
 | **售后** | **（chrome 端未采集）** | **`"after_sales"` 已加入 `VALID_DOMAINS`（Lane A）** | `parse_after_sales_response`（**已接入路由表**） | `after_sales` / `after_sale_items` 期待 chrome 端首次真实 dump |
 | **结算** | `/api/v1/pay/statement/list/detail`（GET） | `"statements"` | `parse_statement_list_response` 或 `parse_statement_transaction_response`（按 `dump.response.body.data` 是否有 `sku_record` 字段分流） | `settlements` / `settlement_details` |
 
-`dump.domain` 路由判定逻辑（`tts_erp_v2/api/v2/order_sync.py:407-446`）：
+HTTP adapter 只构造 deep module request：
 
 ```python
-if domain == "orders":
-    rows = parse_order_response(sess, log_id, shop_id, response_body, captured_at)
-elif domain == "logistics":
-    if not main_order_id:
-        parse_error = "mainOrderId is required for logistics domain"
-    else:
-        rows = parse_logistics_response(...)
-elif domain == "statements":
-    data = response_body.get("data") or {}
-    if "sku_record" in data:
-        rows = parse_statement_transaction_response(...)  # → settlement_details
-    else:
-        rows = parse_statement_list_response(...)          # → settlements
+outcome = intake_dump(
+    session,
+    request=DumpIntakeRequest(
+        domain=DumpDomain(payload.dump.domain),
+        shop_id=payload.scope.shopId,
+        endpoint=payload.dump.endpoint,
+        captured_at=payload.dump.createdAt,
+        response_body=payload.dump.response.body,
+        main_order_id=payload.dump.mainOrderId,
+    ),
+)
 ```
 
+`plugin.orders.intake` implementation 内部拥有 domain 路由、statements list/detail shape 判定、
+业务 savepoint、health 记录与 commit。expected payload failure 返回 typed rejected outcome；
+SQLAlchemy/数据库异常向上抛出，由 adapter 映射为 `500 INTERNAL_ERROR`。
+
 **关键约束**：
-- `mainOrderId` 在 `domain=logistics` 时**必填**（缺则 `parse_error`，不写库）
+- `mainOrderId` 在 `domain=logistics` 或 `domain=order_history` 时**必填**（缺则 `parse_error`，不写库）
+- `order_details.data.main_order` 与 `order_history.data.order_history` 必须显式存在且为 list；显式空 list 是成功空页，缺结构是 `PARSE_ERROR`
 - `statementId` + `statementVersion` 在 `domain=statements` 时**强烈建议填**（`has-data` 用作幂等键），但 dumps 端不强校验
 - **`domain=after_sales`** 已接入 `VALID_DOMAINS`（Lane `feat/after-sales-routing` 完成）→ chrome 端开始采集 `/return_refund/202309/cancellations/search` 后即可 dump 走通
 
@@ -458,18 +465,18 @@ elif domain == "statements":
 
 | 模块 | 路径 | 行数 |
 | --- | --- | --- |
-| Dumps 端点 + 路由 | `tts_erp_v2/api/v2/order_sync.py` | 604 |
-| Schema 定义 | `tts_erp_v2/api/v2/order_sync.py:105-170` | — |
-| Domain 路由判定 | `tts_erp_v2/api/v2/order_sync.py:407-446` | — |
-| 错误码返回 | `tts_erp_v2/api/v2/order_sync.py:192-225` | — |
-| Parser 总入口 | `tts_erp_v2/plugin/orders/parser.py` | 600 |
+| Dumps HTTP adapter + wire schema | `tts_erp_v2/api/v2/order_sync.py` | — |
+| Dump intake public interface | `tts_erp_v2/plugin/orders/intake/__init__.py` | — |
+| Domain dispatch + transaction + health | `tts_erp_v2/plugin/orders/intake/_service.py` | — |
+| Typed request/outcome | `tts_erp_v2/plugin/orders/intake/_types.py` | — |
+| Payload parser implementation | `tts_erp_v2/plugin/orders/parser.py` | — |
 | Chrome 端 schema（Zod 镜像） | `chrome-plugins/ads-data-sync/src/core/order-sync-schemas.ts` | 117 |
 | Chrome 端 dumps 封装 | `chrome-plugins/ads-data-sync/src/core/order-sync.ts` | ~500 |
 | Chrome 端 endpoint 路径常量 | `chrome-plugins/ads-data-sync/src/core/tiktok-order-endpoints.ts` | — |
 |  | `chrome-plugins/ads-data-sync/src/core/tiktok-statement-endpoints.ts` | — |
 | Chrome 端同步调度 | `chrome-plugins/ads-data-sync/entrypoints/background.ts:141-152` (常量) / `:262-280` (alarm 路由) / `:590-680` (orders alarm handler) / `:681-790` (logistics+statements handler) | — |
 | Chrome 端 progress/diagnostic 端点 | `POST /v2/order-sync/reconcile`（订单锚点 / 物流候选） / `POST /v2/order-sync/has-data`（结算存在性诊断） —— **不属于 dumps 写入契约** | — |
-| 错误码 + 空响应处理 | `tts_erp_v2/api/v2/order_sync.py:328-345`（`empty_response`）/ `:352-360`（`parse_error`） | — |
+| Error outcome 与空响应语义 | `tts_erp_v2/plugin/orders/intake/_service.py` + `tts_erp_v2/api/v2/order_sync.py` | — |
 
 ---
 
