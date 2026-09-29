@@ -19,6 +19,8 @@ exercise the wiring without holding the test thread hostage.
 from __future__ import annotations
 
 import logging
+import logging.handlers
+import sys
 from unittest.mock import MagicMock
 
 import pytest
@@ -115,6 +117,57 @@ def test_configure_logging_respects_env_override(
     monkeypatch.setenv("TTS_ERP_SYNC_LOG_LEVEL", "DEBUG")
     main_mod._configure_logging()
     assert logging.getLogger().level == logging.DEBUG
+
+
+def test_sync_log_filename_is_test_variant_under_pytest() -> None:
+    """Under pytest the file handler targets test_sync_worker.log.
+
+    2026-09-29 fix/test-log-isolation: writing the prod
+    ``sync_worker.log`` from test runs let fake-job tracebacks
+    (``TEST_token.refresh`` *simulated scheduler tick crash*) masquerade
+    as live failures in the systemd unit's log file.
+    """
+    # This test itself runs under pytest, so "pytest" is in sys.modules.
+    assert main_mod._sync_log_filename() == "test_sync_worker.log"
+
+
+def test_sync_log_filename_is_prod_name_without_pytest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Service context (no pytest in sys.modules) → sync_worker.log."""
+    monkeypatch.delitem(sys.modules, "pytest", raising=False)
+    assert main_mod._sync_log_filename() == "sync_worker.log"
+
+
+def test_configure_logging_never_attaches_prod_log_under_pytest() -> None:
+    """After configure, no root file handler may point at sync_worker.log."""
+    main_mod._configure_logging()
+    root = logging.getLogger()
+    prod_targets = [
+        h
+        for h in root.handlers
+        if isinstance(h, logging.handlers.RotatingFileHandler)
+        and getattr(h, "baseFilename", "").endswith("/logs/sync_worker.log")
+    ]
+    assert prod_targets == []
+
+
+def test_configure_logging_dedupes_file_handler() -> None:
+    """Repeat calls must not stack duplicate handlers for the same file.
+
+    Tests call _configure_logging() once per test in a shared process;
+    the 2026-09-29 log audit showed 9x-duplicated lines from exactly
+    this stacking.
+    """
+    main_mod._configure_logging()
+    main_mod._configure_logging()
+    root = logging.getLogger()
+    targets = [
+        getattr(h, "baseFilename", "")
+        for h in root.handlers
+        if isinstance(h, logging.handlers.RotatingFileHandler)
+    ]
+    assert len(targets) == len(set(targets))
 
 
 # ─── _fmt_duration ─────────────────────────────────────────────────

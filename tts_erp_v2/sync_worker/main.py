@@ -75,15 +75,32 @@ def _require_env() -> None:
         sys.exit(2)
 
 
+def _sync_log_filename() -> str:
+    """Log file name for the current process.
+
+    2026-09-29 fix/test-log-isolation: under pytest we must NOT write
+    ``sync_worker.log`` — that file belongs to the live systemd unit.
+    Test runs from the main checkout (where ``logs/`` exists) otherwise
+    sprinkle fake-job tracebacks (``TEST_token.refresh`` *simulated
+    scheduler tick crash*, ``hooks.example`` watchdog rows, …) into the
+    prod log, where they read as live failures. Pytest output goes to
+    ``test_sync_worker.log`` instead (still rotated, still gitignored),
+    so the debuggability the file handler exists for is preserved.
+    """
+    return "test_sync_worker.log" if "pytest" in sys.modules else "sync_worker.log"
+
+
 def _configure_logging() -> None:
     """INFO to stderr + a rotating file under logs/.
 
     systemd captures stderr to journalctl; the file handler is a second
     copy so bursty failure windows (misfire replays, journald rate
     limiting) never drop the real traceback that the sentinel
-    ``tick raised`` row points at. Path is relative to the repo root
-    (cwd of the systemd unit); pytest environments without a ``logs/``
-    dir fall back to stderr-only via the guard below.
+    ``tick raised`` row points at. Path is relative to the package root
+    (resolves to the worktree / checkout the code runs from); pytest
+    runs get ``test_sync_worker.log`` (see :func:`_sync_log_filename`),
+    and checkouts without a ``logs/`` dir fall back to stderr-only via
+    the guard below.
     """
     level = os.environ.get("TTS_ERP_SYNC_LOG_LEVEL", "INFO").upper()
     logging.basicConfig(
@@ -100,19 +117,28 @@ def _configure_logging() -> None:
     logging.getLogger().setLevel(level)
     log_dir = pathlib.Path(__file__).resolve().parent.parent.parent / "logs"
     if log_dir.is_dir():
-        _log_file = log_dir / "sync_worker.log"
-        fh = logging.handlers.RotatingFileHandler(
-            _log_file,
-            maxBytes=5 * 1024 * 1024,
-            backupCount=5,
-            encoding="utf-8",
-        )
-        fh.setLevel(logging.DEBUG)
-        fh.setFormatter(
-            logging.Formatter("%(asctime)s %(levelname)-7s %(name)s | %(message)s")
-        )
-        logging.getLogger().addHandler(fh)
-        log.info("sync_worker file logging -> %s", _log_file)
+        _log_file = log_dir / _sync_log_filename()
+        root = logging.getLogger()
+        # Dedup guard: tests call _configure_logging() once per test in
+        # the same process; without this each call stacks another file
+        # handler (observed as 9x-duplicated log lines).
+        if not any(
+            isinstance(h, logging.handlers.RotatingFileHandler)
+            and getattr(h, "baseFilename", "") == str(_log_file)
+            for h in root.handlers
+        ):
+            fh = logging.handlers.RotatingFileHandler(
+                _log_file,
+                maxBytes=5 * 1024 * 1024,
+                backupCount=5,
+                encoding="utf-8",
+            )
+            fh.setLevel(logging.DEBUG)
+            fh.setFormatter(
+                logging.Formatter("%(asctime)s %(levelname)-7s %(name)s | %(message)s")
+            )
+            root.addHandler(fh)
+            log.info("sync_worker file logging -> %s", _log_file)
 
 
 # ─── Subcommand handlers ───────────────────────────────────────────
