@@ -2595,6 +2595,12 @@ def test_spu_roi_page_toolbar_shop_and_date_filters(api_client, readonly_key):
     assert 'id="filter-w-start"' in body
     assert 'id="filter-w-end"' in body
     assert 'type="date"' in body
+    # 分页是表格底部的单一操作区；工具栏不再放“每页”选择器。
+    assert body.count('id="filter-limit"') == 1
+    assert body.index('id="filter-limit"') > body.index('id="rows"')
+    assert 'id="pager-pages"' in body
+    assert 'class="pagination mb-0 op-pagination"' in body
+    assert 'aria-label="页码导航"' in body
     # 含无活动 hover 问号解释(? 悬停出现,data-tip 委托)
     assert "含无活动" in body
     assert 'class="op-hint"' in body
@@ -2926,6 +2932,25 @@ def test_spu_roi_filter_actions_keep_a_stable_mobile_layout():
     assert "@media (max-width" not in css  # Bootstrap 栅格负责断点布局
 
 
+def test_spu_roi_pagination_uses_bootstrap_page_navigation():
+    """页码、上一页/下一页和每页选择均由表格底部的 Bootstrap 分页区管理。"""
+    from pathlib import Path
+
+    js_path = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "spu-roi.js"
+    )
+    js = js_path.read_text(encoding="utf-8")
+    assert "function pagerSequence" in js
+    assert "function renderPager" in js
+    assert '$("#pager-pages").addEventListener("click"' in js
+    assert '$("#btn-prev")' not in js
+    assert '$("#btn-next")' not in js
+
+
 def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     """§7.1 结余带:15 格指标完整，并按同类指标相邻排列。"""
     from pathlib import Path
@@ -2975,12 +3000,16 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
         "广告系统实际ROI",
         "广告系统保本ROI",
         "有效销售",
+        "总单量",
         "有效单量",
         "取消率%",
         "全损率%",
         "净利润",
     ):
         assert col_label in main_th_labels, f"主表缺列 {col_label}"
+    assert main_th_labels.index("有效销售") < main_th_labels.index(
+        "总单量"
+    ) < main_th_labels.index("有效单量"), "总单量应位于有效销售和有效单量之间"
     # D8 删除:原 13 列里只在 th 表头出现过的标签
     for removed in (
         "销售$",
@@ -3027,6 +3056,7 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert "var netProfitValue = totals.net_profit" in js_src
     assert "fmtMoney(netProfitValue)" in js_src
     assert "fmtMoney(it.effective_sales)" in js_src
+    assert "fmtInt(it.total_orders)" in js_src
     assert "fmtInt(it.effective_order_count)" in js_src
     assert "fmtRatio(it.ad_system_actual_roi)" in js_src
     assert "adSystemBreakevenRoi" in js_src
@@ -3329,7 +3359,7 @@ def test_spu_roi_page_drilldown_template_present(api_client, readonly_key):
 
 
 def test_spu_roi_page_no_old_columns(api_client, readonly_key):
-    """主表无旧隐藏列或通用 ROI 列；保留广告系统两个 ROI 与 6 个经营指标。"""
+    """主表无旧隐藏列或通用 ROI 列；保留广告系统两个 ROI 与 7 个经营指标。"""
     r = api_client.get(
         "/v2/pages/spu-roi",
         headers={"Authorization": f"Bearer {readonly_key}"},
@@ -3354,6 +3384,7 @@ def test_spu_roi_page_no_old_columns(api_client, readonly_key):
         "广告系统实际ROI",
         "广告系统保本ROI",
         "有效销售",
+        "总单量",
         "有效单量",
         "取消率%",
         "全损率%",

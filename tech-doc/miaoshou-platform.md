@@ -50,17 +50,25 @@ sign = MD5(busData + companySecret).upper()
 
 **锁定向量**：`tests/miaoshou/test_signing.py::test_build_sign_doc_824327_vector`
 
-## 5. 测试
+## 5. EWM 采购单列表
+
+- Apifox：api-479599781（发布状态）。
+- 请求：`POST /open/v1/ewm/goods_purchase_order/goods_purchase_order/fetch/search_goods_purchase_order_page`。
+- 请求体：`page`（从 1 开始）和 `pageSize`（10–100）；同步任务使用 100。
+- 响应：`data.goodsPurchaseOrderList`，行项目为
+  `goodsPurchaseOrderSkuList`，并以 `data.total` 记录总条数。
+- 调度：`miaoshou.purchase_orders` 每小时执行一次。
+- Apifox 同时列出 `timerToken` 查询参数和 `Cookie` 头，但未标为必填；
+  当前同步沿用 ERP HMAC 认证（`x-app-key` / `x-timestamp` / `x-sign`）。
+
+## 6. 测试
 
 ```bash
-# 妙手 SDK 测试（91 个 test / 15 文件）
-.venv/bin/pytest tests/miaoshou/ -q
-
-# 妙手 jobs 测试
-.venv/bin/pytest tests/jobs_miaoshou/ -q
+# 妙手 jobs（测试包装器会强制使用 tts_erp_v3_test）
+bash scripts/test.sh miaoshou
 ```
 
-## 6. 注意事项
+## 7. 注意事项
 
 - **Miaoshou 已无任何 HTTP 面**：不要等它回来
 - **出站代理和回调端点未挂 v2**：实测 404

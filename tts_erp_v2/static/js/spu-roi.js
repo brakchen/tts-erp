@@ -535,7 +535,7 @@
         : (it.ad_system_breakeven_roi_status === "estimated_known_costs"
             ? "≈"
             : "") + fmtRatio(it.ad_system_breakeven_roi);
-    // 行级与大盘同口径:广告消耗 / 广告系统 ROI / 有效销售 / 有效单量 / 取消率 / 全损率 / 净利润
+    // 行级与大盘同口径:广告消耗 / 广告系统 ROI / 有效销售 / 总单量 / 有效单量 / 取消率 / 全损率 / 净利润
     return (
       `<tr class="${isBad ? "row-bad" : ""}" data-spupk="${esc(it.spu_pk)}">` +
       `<td class="td-left"><span class="td-spu-cell">${img}<span class="td-spu-meta">` +
@@ -545,6 +545,7 @@
       `<td>${fmtRatio(it.ad_system_actual_roi)}</td>` +
       `<td>${adSystemBreakevenRoi}</td>` +
       `<td>${fmtMoney(it.effective_sales)}</td>` +
+      `<td>${fmtInt(it.total_orders)}</td>` +
       `<td>${fmtInt(it.effective_order_count)}</td>` +
       `<td>${fmtPctOrDash(it.cancel_rate)}</td>` +
       `<td>${fmtPctOrDash(it.full_loss_rate)}</td>` +
@@ -566,7 +567,7 @@
     }
     html(
       $("#rows"),
-      `<tr><td colspan="9" class="op-error">${esc(msg)} · <a href="#" id="retry-link">重试</a></td></tr>`,
+      `<tr><td colspan="10" class="op-error">${esc(msg)} · <a href="#" id="retry-link">重试</a></td></tr>`,
     );
     var link = $("#retry-link");
     if (link) {
@@ -580,7 +581,7 @@
   function renderEmpty() {
     html(
       $("#rows"),
-      '<tr><td colspan="9" class="op-empty">没有匹配所选 SPU 和当前条件的数据</td></tr>',
+      '<tr><td colspan="10" class="op-empty">没有匹配所选 SPU 和当前条件的数据</td></tr>',
     );
   }
 
@@ -655,6 +656,77 @@
     fbEl.hidden = !degraded;
 
     card.hidden = false;
+  }
+
+  function pagerSequence(current, total) {
+    var candidates = [1, current - 1, current, current + 1, total]
+      .filter((page) => page >= 1 && page <= total)
+      .sort((a, b) => a - b)
+      .filter((page, index, pages) => index === 0 || page !== pages[index - 1]);
+    var sequence = [];
+    candidates.forEach((page) => {
+      var previous = sequence.length ? sequence[sequence.length - 1] : null;
+      if (previous !== null && page - previous > 1) sequence.push(null);
+      sequence.push(page);
+    });
+    return sequence;
+  }
+
+  function renderPager(page, pages) {
+    var pager = $("#pager-pages");
+    if (!pager) return;
+    pager.replaceChildren();
+
+    function addButton(label, target, options) {
+      var isActive = options && options.active;
+      var isDisabled = options && options.disabled;
+      var item = el("li", {
+        class:
+          "page-item" +
+          (isActive ? " active" : "") +
+          (isDisabled && !isActive ? " disabled" : ""),
+      });
+      var button = el(
+        "button",
+        {
+          type: "button",
+          class: "page-link",
+          "data-page": String(target),
+          "aria-label": options.label,
+        },
+        label,
+      );
+      button.disabled = Boolean(isDisabled);
+      if (isActive) button.setAttribute("aria-current", "page");
+      item.appendChild(button);
+      pager.appendChild(item);
+    }
+
+    addButton("‹", "previous", {
+      disabled: page <= 1,
+      label: "上一页",
+    });
+    pagerSequence(page, pages).forEach((target) => {
+      if (target === null) {
+        pager.appendChild(
+          el(
+            "li",
+            { class: "page-item disabled", "aria-hidden": "true" },
+            el("span", { class: "page-link" }, "…"),
+          ),
+        );
+        return;
+      }
+      addButton(String(target), target, {
+        active: target === page,
+        disabled: target === page,
+        label: `跳转到第 ${target} 页`,
+      });
+    });
+    addButton("›", "next", {
+      disabled: page >= pages,
+      label: "下一页",
+    });
   }
 
   function render(payload) {
@@ -770,15 +842,12 @@
       renderEmpty();
     }
 
-    // 分页
+    // 分页：服务端仍使用 offset + limit；前端仅把它呈现为可跳转的 Bootstrap 页码。
     var page = Math.floor(state.offset / state.limit) + 1;
     var pages = Math.max(1, Math.ceil(lastTotal / state.limit));
     $("#pager-label").textContent =
-      `第 ${page} / ${pages} 页 · 共 ${lastTotal} 行 · 每页 ${state.limit} 条`;
-    var prev = $("#btn-prev");
-    var next = $("#btn-next");
-    prev.disabled = state.offset <= 0;
-    next.disabled = state.offset + state.limit >= lastTotal;
+      `第 ${page} / ${pages} 页 · 共 ${lastTotal} 个 SPU`;
+    renderPager(page, pages);
 
     // 页脚口径行
     var notes = [];
@@ -1569,7 +1638,7 @@
     state.loading = true;
     html(
       $("#rows"),
-      '<tr><td colspan="9" class="op-loading">加载中…</td></tr>',
+      '<tr><td colspan="10" class="op-loading">加载中…</td></tr>',
     );
     var feeParam = null;
     if (state.feeRate !== null && state.feeRate !== "") {
@@ -1828,17 +1897,21 @@
     );
 
     $("#btn-refresh").addEventListener("click", () => load());
-    $("#btn-prev").addEventListener("click", () => {
-      if (state.offset > 0) {
-        state.offset = Math.max(0, state.offset - state.limit);
-        load();
-      }
-    });
-    $("#btn-next").addEventListener("click", () => {
-      if (state.offset + state.limit < lastTotal) {
-        state.offset += state.limit;
-        load();
-      }
+    $("#pager-pages").addEventListener("click", (event) => {
+      var button = event.target.closest("button[data-page]");
+      if (!button || button.disabled || state.loading) return;
+      var target = button.dataset.page;
+      var current = Math.floor(state.offset / state.limit) + 1;
+      var pages = Math.max(1, Math.ceil(lastTotal / state.limit));
+      var nextPage =
+        target === "previous"
+          ? current - 1
+          : target === "next"
+            ? current + 1
+            : parseInt(target, 10);
+      if (!Number.isInteger(nextPage) || nextPage < 1 || nextPage > pages) return;
+      state.offset = (nextPage - 1) * state.limit;
+      load();
     });
 
     // 列头排序:同列 asc ↔ desc 双向切换;新列首方向 asc
