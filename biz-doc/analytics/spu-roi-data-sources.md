@@ -42,7 +42,7 @@
 | 已结算判定 | `EXISTS (SELECT 1 FROM finance.settlement_transactions st WHERE st.order_pk = sales_orders.id)` | |
 | 实际到账（SETTLEMENT） | `finance.settlement_components.amount`，`component_code = 'SETTLEMENT'`，经 `transaction_id = settlement_transactions.id` 关联 | 按订单 SUM 后按行 GMV 占比分摊 |
 | 退货 / 退款售后单 | `after_sales.cases` + `after_sales.case_lines` | 枚举见 §1.3；`case_lines.quantity` = 退货件数，`refund_amount` = 退款额 |
-| 售后单完结时间 | `cases.updated_at_source` | 退货桶窗口裁剪按它 |
+| 售后单完结时间 | `cases.updated_at_source` | 只用于判断售后是否已完成及明细展示；退款窗口跟随关联订单的 `COALESCE(paid_at, order_time)` |
 | 物流 | `fulfillment.shipments`（`order_pk`）→ `fulfillment.tracking_events`（`shipment_id`） | |
 | 已到目的国判定 | `tracking_events.action_code = 38301` | integer 列，见 §1.4 |
 

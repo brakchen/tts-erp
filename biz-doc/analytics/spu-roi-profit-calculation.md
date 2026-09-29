@@ -148,7 +148,7 @@ $$
 | 广告消耗 | Σ mixed_real_cost（单店铺所有广告消耗） | `items[].spend` / `totals.spend` |
 | 有效销售额 | 有效销售订单 GMV − 退款金额 | `items[].effective_sales` / `totals.effective_sales` |
 | 有效单量 | 有效订单数 − 退款订单数 | `items[].effective_order_count` / `totals.effective_order_count` |
-| 退款数 | 退款订单数（订单维度去重，按售后单完结时间窗口） | `items[].refund_order_count` / `totals.refund_order_count` |
+| 退款数 | 退款订单数（订单维度去重；退款跟随原订单，按订单 `COALESCE(paid_at, order_time)` 时间窗口归属） | `items[].refund_order_count` / `totals.refund_order_count` |
 | 退款率 | 退款订单数 ÷ 全部订单 | `items[].refund_rate` / `totals.refund_rate` |
 | 全损量 | 退款订单数 + 海外取消订单数（订单维度） | `items[].full_loss_order_count` / `totals.full_loss_order_count` |
 | 全损率 | 全损量 ÷ 全部订单 | `items[].full_loss_rate` / `totals.full_loss_rate` |
@@ -170,7 +170,7 @@ $$
 | 国内取消 | 已取消 + 物流未出境 | ✗ | ✗ | ✗ | ✗ |
 | 未付款 / 挂起 | 未过支付门槛 | ✗ | ✗ | ✗ | ✗ |
 
-**实现偏差注记（2026-09-13）**：代码实现里退货桶限定订单 ∈ 已付款白名单，与上表字面略有出入——原因是保住 rule 0 不变量：未付款等异常订单的完结退款走「未归属退款」计数，不进任何业务桶，也不应计全损货本。窗口裁剪：退货桶按售后单完结时间，海外取消桶按订单付款/下单时间。
+**实现偏差注记（2026-09-13）**：代码实现里退货桶限定订单 ∈ 已付款白名单，与上表字面略有出入——原因是保住 rule 0 不变量：未付款等异常订单的完结退款走「未归属退款」计数，不进任何业务桶，也不应计全损货本。窗口裁剪统一跟随原订单：退货、退款金额/件数、退款订单数与海外取消都按订单 `COALESCE(paid_at, order_time)` 归属；售后完结时间只用于判断是否已完成及明细展示。例如 9 月 1 日订单在 9 月 10 日退款，退款仍归入 9 月 1 日。
 
 ---
 

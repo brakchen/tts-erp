@@ -161,10 +161,10 @@ _SQL_ROI_SALES = text(
 # 主表 SQL ── 全损件数（v9 口径：全损 = 退货 + 海外取消；国内取消 ≠ 全损）
 #   退货桶：RETURN_AND_REFUND / REFUND_ONLY 已完结（不论物流是否到海外，
 #     rubric v9「退货 = 直接全损」），件数取 case_lines.quantity；
-#     窗口按 case updated_at_source（与 _SQL_ROI_REFUNDS 退款桶同语义）；
+#     窗口跟随原订单 coalesce(paid_at, order_time)，跨日退款回归订单日；
 #     限定已付白名单订单 —— 异常单(UNPAID 等)退款仍按 §4.2 rule 0 进未归属
 #   海外取消桶：CANCELLED + tracking_events.action_code=38301（已到目的国），
-#     件数取行 quantity；窗口按订单 coalesce(paid_at, order_time)
+#     件数取行 quantity；窗口同样按订单 coalesce(paid_at, order_time)
 _SQL_ROI_FULL_LOSS = text(
     """
     WITH buckets AS (
@@ -180,9 +180,9 @@ _SQL_ROI_FULL_LOSS = text(
           AND sl.spu_pk IS NOT NULL
           AND so.status = ANY(CAST(:paid_statuses AS text[]))
           AND (CAST(:ws AS timestamptz) IS NULL
-               OR c.updated_at_source >= CAST(:ws AS timestamptz))
+               OR coalesce(so.paid_at, so.order_time) >= CAST(:ws AS timestamptz))
           AND (CAST(:we AS timestamptz) IS NULL
-               OR c.updated_at_source <  CAST(:we AS timestamptz))
+               OR coalesce(so.paid_at, so.order_time) <  CAST(:we AS timestamptz))
         UNION ALL
         SELECT sl.spu_pk AS spu_pk,
                sl.quantity AS qty,
@@ -250,7 +250,7 @@ _SQL_ROI_ROW_STATUS = text(
     """
 )
 
-# 主表 SQL ── 退款拆分（不变）
+# 主表 SQL ── 退款拆分（窗口跟随原订单，退款发生时间只作明细展示）
 _SQL_ROI_REFUNDS = text(
     """
     SELECT sl.spu_pk,
@@ -284,9 +284,9 @@ _SQL_ROI_REFUNDS = text(
     WHERE c.status IN (:st0, :st1)
       AND sl.spu_pk IS NOT NULL
       AND (CAST(:ws AS timestamptz) IS NULL
-           OR c.updated_at_source >= CAST(:ws AS timestamptz))
+           OR coalesce(so.paid_at, so.order_time) >= CAST(:ws AS timestamptz))
       AND (CAST(:we AS timestamptz) IS NULL
-           OR c.updated_at_source <  CAST(:we AS timestamptz))
+           OR coalesce(so.paid_at, so.order_time) <  CAST(:we AS timestamptz))
     GROUP BY sl.spu_pk
     """
 )
@@ -303,11 +303,11 @@ _SQL_ROI_REFUND_SCOPE = text(
       AND so.status = ANY(CAST(:paid_statuses AS text[]))
       AND c.status IN (:st0, :st1)
       AND c.case_type IN ('REFUND_ONLY', 'RETURN_AND_REFUND')
-      /* v9 口径：退款桶按售后单完结时间窗口（与 _SQL_ROI_REFUNDS 退款金额同窗） */
+      /* 退款跟随原订单归属：跨日售后仍回到订单时间窗口。 */
       AND (CAST(:ws AS timestamptz) IS NULL
-           OR c.updated_at_source >= CAST(:ws AS timestamptz))
+           OR coalesce(so.paid_at, so.order_time) >= CAST(:ws AS timestamptz))
       AND (CAST(:we AS timestamptz) IS NULL
-           OR c.updated_at_source <  CAST(:we AS timestamptz))
+           OR coalesce(so.paid_at, so.order_time) <  CAST(:we AS timestamptz))
     """
 )
 
@@ -377,8 +377,9 @@ _SQL_ROI_DATA_WINDOW = text(
           AND (CAST(:shop_pk AS bigint) IS NULL
                OR so.shop_pk = CAST(:shop_pk AS bigint))
         UNION
-        SELECT (c.updated_at_source AT TIME ZONE 'UTC')::date AS d
+        SELECT (coalesce(so.paid_at, so.order_time) AT TIME ZONE 'UTC')::date AS d
         FROM after_sales.cases c
+        JOIN commerce.sales_orders so ON so.id = c.order_pk
         WHERE c.status IN (:st0, :st1)
           AND (CAST(:shop_pk AS bigint) IS NULL
                OR c.shop_pk = CAST(:shop_pk AS bigint))
@@ -587,9 +588,9 @@ _SQL_DETAIL_CASES = text(
     LEFT JOIN commerce.sales_orders so ON so.id = c.order_pk
     WHERE sl.spu_pk = :spu_pk
       AND (CAST(:ws AS timestamptz) IS NULL
-           OR c.updated_at_source >= CAST(:ws AS timestamptz))
+           OR coalesce(so.paid_at, so.order_time) >= CAST(:ws AS timestamptz))
       AND (CAST(:we AS timestamptz) IS NULL
-           OR c.updated_at_source <  CAST(:we AS timestamptz))
+           OR coalesce(so.paid_at, so.order_time) <  CAST(:we AS timestamptz))
     ORDER BY c.updated_at_source DESC NULLS LAST, c.id DESC
     """
 )
@@ -1141,7 +1142,7 @@ def _query_spu_roi(
     )
     gmv_total = Decimal(scope_row["gmv"]) / fx_usd_vnd if scope_row else Decimal(0)
 
-    # 全局退款订单数（distinct orders with refund cases；v9 售后完结时间窗）
+    # 全局退款订单数（distinct orders with refund cases；窗口跟随原订单）
     refund_scope_row = None
     if spu_pks_in_scope:
         refund_scope_row = (
