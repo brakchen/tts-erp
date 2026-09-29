@@ -284,6 +284,25 @@ def test_auth_mode_off_lets_requests_through(api_client_off):
     assert r.status_code == 200, r.text
 
 
+def test_auth_mode_off_bypasses_handler_role_gate(api_client_off):
+    response = api_client_off.post("/v2/linkage/issues/999999999/resolve")
+
+    assert response.status_code == 404
+
+
+def test_invalid_auth_mode_fails_closed(db_engine, monkeypatch, capsys):
+    from fastapi.testclient import TestClient
+
+    from tts_erp_v2.app import build_app
+
+    monkeypatch.setenv("TTS_ERP_AUTH_MODE", "invalid-mode")
+    with TestClient(build_app()) as client:
+        response = client.get("/v2/commerce/sales-orders")
+
+    assert response.status_code == 401
+    assert "failing closed as enforce" in capsys.readouterr().err
+
+
 def test_shadow_html_request_logs_only_and_passes_through(db_engine, monkeypatch):
     """Shadow mode must not redirect a browser would-deny request."""
     from fastapi.testclient import TestClient
@@ -299,6 +318,18 @@ def test_shadow_html_request_logs_only_and_passes_through(db_engine, monkeypatch
         )
 
     assert response.status_code == 200
+
+
+def test_shadow_mode_bypasses_handler_role_gate(db_engine, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from tts_erp_v2.app import build_app
+
+    monkeypatch.setenv("TTS_ERP_AUTH_MODE", "shadow")
+    with TestClient(build_app()) as client:
+        response = client.post("/v2/linkage/issues/999999999/resolve")
+
+    assert response.status_code == 404
 
 
 def test_prefixed_docs_path_requires_docs_basic_auth(db_engine, monkeypatch):
