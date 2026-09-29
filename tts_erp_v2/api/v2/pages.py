@@ -1498,14 +1498,6 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
           <label class="form-label op-fld-label mb-1" for="filter-w-end">截止日</label>
           <input id="filter-w-end" type="date" class="form-control form-control-sm" aria-label="销售/退款截止日期（空 = 不限）">
         </div>
-        <div class="col-6 col-md-3 col-xl-1">
-          <label class="form-label op-fld-label mb-1" for="filter-limit">每页</label>
-          <select id="filter-limit" class="form-select form-select-sm" aria-label="每页条数">
-            <option value="50">50</option>
-            <option value="100" selected>100</option>
-            <option value="200">200</option>
-          </select>
-        </div>
         <div class="col-6 col-md-3 col-xl-1" data-tip="平台佣金费率 r̂：默认用店铺实测（每24h按该店近180天已结算订单 Σ|FEE|/Σ行GMV 重算；行GMV=客户实付金额，非折扣前挂牌价。窗口内只要有一单已结算即产出），无可用实测的店铺回退基线 30.8%；在此填数可临时覆写（仅影响本页请求，不写回店铺）">
           <label class="form-label op-fld-label mb-1" for="filter-fee">临时覆写费率 %</label>
           <input id="filter-fee" type="text" class="form-control form-control-sm" placeholder="30.8" inputmode="decimal" autocomplete="off" aria-label="临时覆写平台佣金费率（留空则用店铺实测/全局基线）">
@@ -1580,17 +1572,21 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       </tr>
     </template>
 
-    <section class="op-pager px-3 px-lg-4 py-3 pb-4">
-      <div class="row g-2 align-items-center">
-        <div class="col-6 col-md-auto order-2 order-md-1 d-grid">
-          <button type="button" class="btn btn-sm op-btn" id="btn-prev">← 上一页</button>
+    <!-- 分页是表格本身的操作：每页条数、页码跳转与前后页都集中在表格底部。 -->
+    <section class="op-pager px-3 px-lg-4 py-3 pb-4" aria-label="SPU ROI 分页">
+      <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3">
+        <div class="d-flex align-items-center justify-content-center justify-content-lg-start gap-2 order-2 order-lg-1">
+          <label class="op-fld-label mb-0" for="filter-limit">每页显示</label>
+          <select id="filter-limit" class="form-select form-select-sm op-pager-limit" aria-label="每页条数">
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="200">200</option>
+          </select>
         </div>
-        <div class="col-12 col-md text-center order-1 order-md-2">
-          <span class="op-pager-page" id="pager-label">—</span>
-        </div>
-        <div class="col-6 col-md-auto order-3 d-grid">
-          <button type="button" class="btn btn-sm op-btn" id="btn-next">下一页 →</button>
-        </div>
+        <span class="op-pager-page text-center order-1 order-lg-2" id="pager-label" aria-live="polite">—</span>
+        <nav class="d-flex justify-content-center justify-content-lg-end order-3" aria-label="页码导航">
+          <ul class="pagination mb-0 op-pagination" id="pager-pages"></ul>
+        </nav>
       </div>
     </section>
 

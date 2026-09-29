@@ -2595,6 +2595,12 @@ def test_spu_roi_page_toolbar_shop_and_date_filters(api_client, readonly_key):
     assert 'id="filter-w-start"' in body
     assert 'id="filter-w-end"' in body
     assert 'type="date"' in body
+    # 分页是表格底部的单一操作区；工具栏不再放“每页”选择器。
+    assert body.count('id="filter-limit"') == 1
+    assert body.index('id="filter-limit"') > body.index('id="rows"')
+    assert 'id="pager-pages"' in body
+    assert 'class="pagination mb-0 op-pagination"' in body
+    assert 'aria-label="页码导航"' in body
     # 含无活动 hover 问号解释(? 悬停出现,data-tip 委托)
     assert "含无活动" in body
     assert 'class="op-hint"' in body
@@ -2924,6 +2930,25 @@ def test_spu_roi_filter_actions_keep_a_stable_mobile_layout():
     assert "#btn-spu-apply" in css
     assert "min-height: 38px;" in css
     assert "@media (max-width" not in css  # Bootstrap 栅格负责断点布局
+
+
+def test_spu_roi_pagination_uses_bootstrap_page_navigation():
+    """页码、上一页/下一页和每页选择均由表格底部的 Bootstrap 分页区管理。"""
+    from pathlib import Path
+
+    js_path = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "spu-roi.js"
+    )
+    js = js_path.read_text(encoding="utf-8")
+    assert "function pagerSequence" in js
+    assert "function renderPager" in js
+    assert '$("#pager-pages").addEventListener("click"' in js
+    assert '$("#btn-prev")' not in js
+    assert '$("#btn-next")' not in js
 
 
 def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):

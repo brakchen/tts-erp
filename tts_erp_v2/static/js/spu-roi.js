@@ -657,6 +657,77 @@
     card.hidden = false;
   }
 
+  function pagerSequence(current, total) {
+    var candidates = [1, current - 1, current, current + 1, total]
+      .filter((page) => page >= 1 && page <= total)
+      .sort((a, b) => a - b)
+      .filter((page, index, pages) => index === 0 || page !== pages[index - 1]);
+    var sequence = [];
+    candidates.forEach((page) => {
+      var previous = sequence.length ? sequence[sequence.length - 1] : null;
+      if (previous !== null && page - previous > 1) sequence.push(null);
+      sequence.push(page);
+    });
+    return sequence;
+  }
+
+  function renderPager(page, pages) {
+    var pager = $("#pager-pages");
+    if (!pager) return;
+    pager.replaceChildren();
+
+    function addButton(label, target, options) {
+      var isActive = options && options.active;
+      var isDisabled = options && options.disabled;
+      var item = el("li", {
+        class:
+          "page-item" +
+          (isActive ? " active" : "") +
+          (isDisabled && !isActive ? " disabled" : ""),
+      });
+      var button = el(
+        "button",
+        {
+          type: "button",
+          class: "page-link",
+          "data-page": String(target),
+          "aria-label": options.label,
+        },
+        label,
+      );
+      button.disabled = Boolean(isDisabled);
+      if (isActive) button.setAttribute("aria-current", "page");
+      item.appendChild(button);
+      pager.appendChild(item);
+    }
+
+    addButton("‹", "previous", {
+      disabled: page <= 1,
+      label: "上一页",
+    });
+    pagerSequence(page, pages).forEach((target) => {
+      if (target === null) {
+        pager.appendChild(
+          el(
+            "li",
+            { class: "page-item disabled", "aria-hidden": "true" },
+            el("span", { class: "page-link" }, "…"),
+          ),
+        );
+        return;
+      }
+      addButton(String(target), target, {
+        active: target === page,
+        disabled: target === page,
+        label: `跳转到第 ${target} 页`,
+      });
+    });
+    addButton("›", "next", {
+      disabled: page >= pages,
+      label: "下一页",
+    });
+  }
+
   function render(payload) {
     var summaries = $("#summaries");
     var pager = document.querySelector("main .op-pager");
@@ -770,15 +841,12 @@
       renderEmpty();
     }
 
-    // 分页
+    // 分页：服务端仍使用 offset + limit；前端仅把它呈现为可跳转的 Bootstrap 页码。
     var page = Math.floor(state.offset / state.limit) + 1;
     var pages = Math.max(1, Math.ceil(lastTotal / state.limit));
     $("#pager-label").textContent =
-      `第 ${page} / ${pages} 页 · 共 ${lastTotal} 行 · 每页 ${state.limit} 条`;
-    var prev = $("#btn-prev");
-    var next = $("#btn-next");
-    prev.disabled = state.offset <= 0;
-    next.disabled = state.offset + state.limit >= lastTotal;
+      `第 ${page} / ${pages} 页 · 共 ${lastTotal} 个 SPU`;
+    renderPager(page, pages);
 
     // 页脚口径行
     var notes = [];
@@ -1828,17 +1896,21 @@
     );
 
     $("#btn-refresh").addEventListener("click", () => load());
-    $("#btn-prev").addEventListener("click", () => {
-      if (state.offset > 0) {
-        state.offset = Math.max(0, state.offset - state.limit);
-        load();
-      }
-    });
-    $("#btn-next").addEventListener("click", () => {
-      if (state.offset + state.limit < lastTotal) {
-        state.offset += state.limit;
-        load();
-      }
+    $("#pager-pages").addEventListener("click", (event) => {
+      var button = event.target.closest("button[data-page]");
+      if (!button || button.disabled || state.loading) return;
+      var target = button.dataset.page;
+      var current = Math.floor(state.offset / state.limit) + 1;
+      var pages = Math.max(1, Math.ceil(lastTotal / state.limit));
+      var nextPage =
+        target === "previous"
+          ? current - 1
+          : target === "next"
+            ? current + 1
+            : parseInt(target, 10);
+      if (!Number.isInteger(nextPage) || nextPage < 1 || nextPage > pages) return;
+      state.offset = (nextPage - 1) * state.limit;
+      load();
     });
 
     // 列头排序:同列 asc ↔ desc 双向切换;新列首方向 asc
