@@ -1200,10 +1200,10 @@
     setShopPkInUrl(pk);
     state.offset = 0;
     resetSpuSelectForShop();
-    if (!Object.keys(state.enumMap).length) {
-      loadEnumMap().then(() => load());
-    } else {
+    if (Object.keys(state.enumMap).length) {
       load();
+    } else {
+      loadEnumMap().then(() => load());
     }
   }
 
