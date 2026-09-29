@@ -2441,6 +2441,38 @@ def test_spu_roi_hidden_state_overrides_bootstrap_display_utilities(
     assert 'content.className =\n            "table table-sm' not in js
 
 
+def test_spu_roi_mobile_sticky_product_cells_use_opaque_backgrounds() -> None:
+    """sticky 商品列必须不透明，避免横向滚动后的百分比/金额透出重叠。"""
+    import re
+    from pathlib import Path
+
+    css = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "css"
+        / "spu-roi.css"
+    ).read_text(encoding="utf-8")
+
+    def rule(selector: str) -> str:
+        match = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", css)
+        assert match is not None, selector
+        return match.group(1)
+
+    base_sticky = rule("table.op-table tbody td:first-child")
+    loss_sticky = rule("table.op-table tbody tr.row-bad td:first-child")
+    assert "background: var(--paper)" in base_sticky
+    assert "background: var(--paper-danger)" in loss_sticky
+    assert "rgba(" not in loss_sticky
+    assert "transparent" not in loss_sticky
+
+    product_meta = rule(".td-spu-meta")
+    product_id = rule(".td-spu")
+    assert "overflow: hidden" in product_meta
+    assert "overflow: hidden" in product_id
+    assert "text-overflow: ellipsis" in product_id
+
+
 def test_spu_roi_js_targets_dashboard_hooks():
     """spu-roi.js 必须存在且渲染表格与结余带。"""
     from pathlib import Path
