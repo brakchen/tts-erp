@@ -63,6 +63,8 @@ _MONEY_FIELDS = {
     "cogs_total",
     "gmv",
     "effective_sales",
+    "ad_system_max_ad_spend",
+    "ad_system_remaining_ad_spend_capacity",
     "line_gmv",
     "settled_net_share",
     "refund_amount",
@@ -80,6 +82,7 @@ _RATIO_FIELDS = {
     "full_loss_rate",
     "full_loss_qty_rate",
     "share_ratio",
+    "ad_system_actual_roi",
     "ad_system_breakeven_roi",
 }
 _TOTAL_RATE_FIELDS = {"refund_rate", "full_loss_rate", "cancel_rate"}
@@ -158,6 +161,9 @@ def _meta_payload(result, scope: ProfitScope, fee_rate: Decimal | None) -> dict[
         "fx": {
             "usd_vnd": _fmt(basis.fx.usd_vnd, _MONEY_Q),
             "cny_usd": _fmt(basis.fx.cny_usd, _MONEY_Q),
+            "usd_cny": format(basis.fx.usd_cny, "f"),
+            "cny_vnd": format(basis.fx.usd_vnd / basis.fx.usd_cny, "f"),
+            "vnd_cny": format(basis.fx.usd_cny / basis.fx.usd_vnd, "f"),
             "as_of": basis.fx.as_of.date().isoformat(),
             "snapshot_id": basis.fx.snapshot_id,
             "source": "fx-cache",
@@ -189,8 +195,22 @@ def _meta_payload(result, scope: ProfitScope, fee_rate: Decimal | None) -> dict[
         "computed_at": basis.calculated_at.isoformat(),
         "rubric_version": basis.rubric_version,
         "currency": {
-            "display": "USD",
+            "display": basis.display_currency,
             "native": {"ad": "USD", "sales_refund": "VND", "cost": "CNY"},
+        },
+        "ad_system_roi": {
+            "actual_formula": "广告归因GMV ÷ 广告实际消耗",
+            "max_ad_spend_formula": "预计净结算收入 − 同范围采购成本 − 结算外必要成本",
+            "breakeven_formula": "广告归因GMV ÷ 最大可承受广告费",
+            "settlement_basis": "已结算实际到账 + 未结算净额估算",
+            "cost_scope": "与收入同日期范围的售出货本 + 海外取消全损货本",
+            "spend_basis": "mixed_real_cost 广告实际消耗；不混入广告赠金",
+            "advertising_credit_status": "not_available_separately",
+            "additional_costs_status": "not_modeled",
+            "warning": (
+                "当前未结构化录入退货运费、提现费、汇兑损失、包装耗材等"
+                "结算外必要成本；广告系统保本ROI仅为已知成本下限估算"
+            ),
         },
     }
 
@@ -318,6 +338,10 @@ def _evidence_payload(explanation, kind: EvidenceKind, scope: ProfitScope) -> di
         "meta": {
             "rubric_version": explanation.basis.rubric_version,
             "computed_at": explanation.basis.calculated_at.isoformat(),
+            "currency": {
+                "display": explanation.basis.display_currency,
+                "native": {"ad": "USD", "sales_refund": "VND", "cost": "CNY"},
+            },
         },
     }
     if kind is EvidenceKind.ORDERS:

@@ -7,12 +7,13 @@ enums.  The legacy ``/v2/analytics/spu-roi`` adapter owns wire formatting.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Mapping, cast
+from typing import cast
 
 
 class ProfitabilityError(RuntimeError):
@@ -67,7 +68,7 @@ class EvidenceKind(StrEnum):
 
 class FormulaStatus(StrEnum):
     CALCULATED = "calculated"
-    FORMULA_PENDING = "formula_pending"
+    ESTIMATED_KNOWN_COSTS = "estimated_known_costs"
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +132,7 @@ class EvidenceRequest:
 @dataclass(frozen=True, slots=True)
 class FxBasis:
     snapshot_id: int
+    usd_cny: Decimal
     cny_usd: Decimal
     usd_vnd: Decimal
     as_of: datetime
@@ -148,6 +150,7 @@ class ProfitabilityBasis:
     ad_first_day: date | None
     ad_last_day: date | None
     unattributed_refund_lines: int
+    display_currency: str = "CNY"
     warnings: tuple[str, ...] = ()
 
 
@@ -213,8 +216,11 @@ class SpuProfitability:
     full_loss_cancelled_qty: int
     full_loss_rate: Decimal | None
     full_loss_qty_rate: Decimal | None
-    ad_system_breakeven_roi: Decimal = Decimal(0)
-    ad_system_breakeven_roi_status: FormulaStatus = FormulaStatus.FORMULA_PENDING
+    ad_system_actual_roi: Decimal | None
+    ad_system_breakeven_roi: Decimal | None
+    ad_system_max_ad_spend: Decimal
+    ad_system_remaining_ad_spend_capacity: Decimal
+    ad_system_breakeven_roi_status: FormulaStatus
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,8 +248,11 @@ class ProfitabilityTotals:
     refund_rate: Decimal | None
     full_loss_rate: Decimal | None
     cancel_rate: Decimal | None
-    ad_system_breakeven_roi: Decimal = Decimal(0)
-    ad_system_breakeven_roi_status: FormulaStatus = FormulaStatus.FORMULA_PENDING
+    ad_system_actual_roi: Decimal | None
+    ad_system_breakeven_roi: Decimal | None
+    ad_system_max_ad_spend: Decimal
+    ad_system_remaining_ad_spend_capacity: Decimal
+    ad_system_breakeven_roi_status: FormulaStatus
 
 
 @dataclass(frozen=True, slots=True)

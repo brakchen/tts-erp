@@ -1418,17 +1418,18 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
           <div class="op-counter-group h-100">
             <div class="op-counter-group-label">利润</div>
             <div class="row g-0 row-cols-2">
-              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">净利润<span class="op-hint" data-tip="净利润 = 净收入 − 货本（含全损）− 广告消耗；已结算订单按实际到账，未结算订单按平台费率估算；全表统一 USD">?</span></span><span class="op-counter-num" id="sum-net-profit">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">净利润<span class="op-hint" data-tip="净利润 = 净收入 − 货本（含全损）− 广告消耗；已结算订单按实际到账，未结算订单按平台费率估算；全表统一 CNY">?</span></span><span class="op-counter-num" id="sum-net-profit">—</span></span></div>
               <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">实际ROI<span class="op-hint" data-tip="实际ROI = (净收入 − 全损成本) ÷ 广告消耗。≥ 保本ROI = 赚，< 保本ROI = 亏（主判据）；无广告消耗 → —">?</span></span><span class="op-counter-num" id="sum-roi">—</span></span></div>
             </div>
           </div>
         </div>
         <div class="col">
           <div class="op-counter-group h-100">
-            <div class="op-counter-group-label">保本</div>
+            <div class="op-counter-group-label">ROI</div>
             <div class="row g-0 row-cols-2">
               <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">实际保本ROI<span class="op-hint" data-tip="实际保本ROI = NC' ÷ (NC' − COGS_kept)，其中 NC' = 净收入 − 全损成本，COGS_kept = (售出件 − 退货件) × 单位成本。净利润 = 0 时的 ROI 临界值；实际ROI低于此值即亏">?</span></span><span class="op-counter-num" id="sum-roi-breakeven">—</span></span></div>
-              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">广告系统保本ROI<span class="op-hint" data-tip="TODO: 广告系统保本ROI 公式待定。当前暂不展示，后续对接广告系统数据后补充计算口径">?</span></span><span class="op-counter-num" id="sum-roi-ad">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">广告系统实际ROI<span class="op-hint" data-tip="广告系统实际ROI = 广告归因GMV ÷ 广告实际消耗；无广告消耗时显示 —">?</span></span><span class="op-counter-num" id="sum-roi-ad-actual">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">广告系统保本ROI<span class="op-hint" data-tip="广告系统保本ROI = 广告归因GMV ÷ 最大可承受广告费；最大可承受广告费 = 预计净结算收入 − 同范围采购成本 − 结算外必要成本。当前系统尚未结构化录入退货运费、提现费、汇兑损失、包装耗材等结算外成本，因此页面以 ≈ 标记已知成本下限估算；分母≤0或无归因GMV时显示 —">?</span></span><span class="op-counter-num" id="sum-roi-ad">—</span></span></div>
             </div>
           </div>
         </div>
@@ -1497,8 +1498,8 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
         <thead>
           <tr>
             <th scope="col" class="op-th op-th-left">商品</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="spend" data-tip="广告消耗（USD，plugin.ad_today，随选中日期窗口裁剪；作为减项计入净利润）">广告消耗</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="effective_sales" data-tip="有效销售 = 有效销售订单 GMV − 退款金额（USD）；与大盘 totals.effective_sales 同口径">有效销售</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="spend" data-tip="广告消耗（源数据 USD，服务端按汇率快照换算为 CNY；随选中日期窗口裁剪；作为减项计入净利润）">广告消耗</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="effective_sales" data-tip="有效销售 = 有效销售订单 GMV − 退款金额（CNY）；与大盘 totals.effective_sales 同口径">有效销售</th>
             <th scope="col" class="op-th op-th-sort" data-sort="effective_order_count" data-tip="有效单量 = 有效销售订单数 − 退款订单数；与大盘 totals.effective_order_count 同口径">有效单量</th>
             <th scope="col" class="op-th op-th-sort" data-sort="cancel_rate" data-tip="取消率 = 国内取消订单数 ÷ 全部订单；全部订单 = 有效销售订单 + 国内取消 + 海外取消，海外取消只进入全损分子">取消率%</th>
             <th scope="col" class="op-th op-th-sort" data-sort="full_loss_rate" data-tip="全损率 = (退款订单数 + 海外取消订单数) ÷ 全部订单；订单维度按当前 SPU 去重，与大盘同口径">全损率%</th>

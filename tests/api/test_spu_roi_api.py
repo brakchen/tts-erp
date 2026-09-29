@@ -49,7 +49,7 @@ pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
 # ─── 口径常量(v7,与实现对齐；期望值推导用)─────────────────────────────
 USD_VND = Decimal(26330)
-CNY_USD = Decimal("0.14774")
+USD_CNY = Decimal("6.7686473")
 K1_CNY = Decimal(40)  # v7 D1: 原 30 → 40
 FEE_BASELINE = Decimal("0.308")  # D10 实测重定
 _Q4 = Decimal("0.0001")
@@ -64,7 +64,7 @@ FEE_NOTE_V7 = (
 )
 COST_ASSUMPTION_V7 = (
     "按 SPU 解析：人工标注采购成交价(MANUAL)优先，其次采购单成交价(PURCHASE)、"
-    "1688 货源价(SOURCE_PRICE)；均未命中 → 默认 40 CNY/件 ≈ $5.95/件；"
+    "1688 货源价(SOURCE_PRICE)；均未命中 → 默认 40 CNY/件；"
     "DEFAULT_K1 行页面 ⚠ 可跳 manual-costs 补录"
 )
 
@@ -79,6 +79,24 @@ def m4(v: Decimal) -> str:
 
 def m2(v: Decimal) -> str:
     return format(v.quantize(_Q2, rounding=ROUND_HALF_UP), ".2f")
+
+
+def cny4_from_usd(value: str | Decimal) -> str:
+    """Return the CNY wire amount for a native/legacy USD amount."""
+    return m4(Decimal(value) * USD_CNY)
+
+
+def scenario_a_net_revenue_cny() -> Decimal:
+    sales_cny = Decimal(2_633_000) / (USD_VND / USD_CNY)
+    return sales_cny * Decimal("0.692") * Decimal("0.8")
+
+
+def scenario_a_max_ad_spend_cny() -> Decimal:
+    return scenario_a_net_revenue_cny() - Decimal(5) * K1_CNY
+
+
+def scenario_a_net_profit_cny() -> Decimal:
+    return scenario_a_max_ad_spend_cny() - Decimal(10) * USD_CNY
 
 
 # ─── 清理(module autouse)────────────────────────────────────────────
@@ -102,7 +120,7 @@ def _wipe_spu_roi_rows(db_engine, _isolate_state):
 # 全部金额/ROI 期望(26330 / 0.14774 派生)不变,同时让实现路径走 fx-cache。
 FX_SEED_TS = "2099-09-06T00:00:00+00:00"
 FX_SEED_VND = "26330"
-FX_SEED_CNY = "6.7686473"  # 1/CNY 量化 8dp = 0.14774001 → .4f 0.1477
+FX_SEED_CNY = str(USD_CNY)  # CNY per USD；反向 cny_usd → .4f 0.1477
 
 
 def _seed_fx(db_engine) -> None:
@@ -887,17 +905,15 @@ def test_spu_roi_readonly_and_admin_ok(api_client, readonly_key, admin_key):
 def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine):
     """单 SPU(1 有效单 + 1 已完结退货退款 + 1 已付被取消单)v7 公式断言。
 
-    K1=40 CNY/件（v7 D1）；净利 v7（D1/D5）:
-      net_revenue = settled(0) + 100×(1−0.308)×(1−refund_rate_spu)
-      refund_rate_spu = refund_net / sales = 20/100 = 0.20
-      net_revenue = 0 + 100×0.692×0.80 = 55.36
-      cogs_all = 5件 × 40×0.14774 = 29.5440
-      net_profit = 55.36 − 29.5440 − 10 = 15.8160
+    原生广告金额为 USD、销售/退款为 VND、采购成本为 CNY；公式入口按
+    同一汇率快照统一换算为 CNY 后再计算。下列旧 USD 推导值仅用于说明比例：
+      net_revenue = 55.36 USD ÷ cny_usd
+      cogs_all = 5件 × 40 CNY = 200 CNY
+      net_profit = 15.812 USD ÷ cny_usd
       v9 全损：完结退货(不论物流)也算全损 → full_loss_qty=1(退货桶)
-      return_loss = 1×5.9096 = 5.9096
-      roi_real = (55.36−5.9096)/10 = 4.95
-      COGS_kept = (5−1)×5.9096 = 23.6384；breakeven = 49.4504/(49.4504−23.6384) = 1.92
-      platform_fee = 0.308×100 = 30.80
+      return_loss = 1 × 40 CNY
+      roi_real 与 roi_breakeven 为无量纲比例，换币前后保持不变
+      platform_fee = 30.80 USD ÷ cny_usd
       full_loss_rate = 1/(5+0) = 0.20
       cancel_rate = 1/(1+1) = 0.50（CANCELLED 单无 38301 → 国内取消）
     """
@@ -920,12 +936,19 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert item["status"] == "ACTIVATE"
     assert item["shop_name"] == "TEST_SELLER_A 店铺"
 
-    # 广告侧(USD 原生)
+    # 广告侧原生 USD；API 金额统一输出 CNY。
     assert item["ad_count"] == 1
     assert item["ad_orders"] == 5
-    assert item["spend"] == "10.0000"
-    assert item["gmv_ad"] == "50.0000"
+    assert item["spend"] == cny4_from_usd("10")
+    assert item["gmv_ad"] == cny4_from_usd("50")
     assert item["roi_l0"] == "5.00"
+    assert item["ad_system_actual_roi"] == "5.00"
+    assert item["ad_system_breakeven_roi"] == "1.94"
+    assert item["ad_system_max_ad_spend"] == m4(scenario_a_max_ad_spend_cny())
+    assert item["ad_system_remaining_ad_spend_capacity"] == m4(
+        scenario_a_net_profit_cny()
+    )
+    assert item["ad_system_breakeven_roi_status"] == "estimated_known_costs"
     assert item["ad_first_day"] == DAY
     assert item["ad_last_day"] == DAY
 
@@ -935,30 +958,30 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert item["total_orders"] == 2
     assert item["effective_order_count"] == 0
     assert item["units_sold"] == 5
-    assert item["sales"] == "100.0000"
-    assert item["effective_sales"] == "80.0000"
+    assert item["sales"] == cny4_from_usd("100")
+    assert item["effective_sales"] == cny4_from_usd("80")
 
     # v7 分层字段（场景无 SETTLEMENT → settled=0, unsettled=100）
     assert item["settled_order_count"] == 0
-    assert Decimal(item["net_revenue"]) == Decimal("55.3600")
-    assert Decimal(item["settled_sales"]) == Decimal("0.0000")
-    assert Decimal(item["unsettled_sales"]) == Decimal("100.0000")
-    assert Decimal(item["settled_net"]) == Decimal("0.0000")
+    assert item["net_revenue"] == cny4_from_usd("55.3600")
+    assert item["settled_sales"] == "0.0000"
+    assert item["unsettled_sales"] == cny4_from_usd("100")
+    assert item["settled_net"] == "0.0000"
 
     # 退款桶不变
     assert item["refund_only_qty"] == 0
     assert item["refund_only_amount"] == "0.0000"
     assert item["refund_return_qty"] == 1
-    assert item["refund_return_amount"] == "20.0000"
+    assert item["refund_return_amount"] == cny4_from_usd("20")
     assert item["refund_net_qty"] == 1
-    assert item["refund_net_amount"] == "20.0000"
+    assert item["refund_net_amount"] == cny4_from_usd("20")
     assert item["refund_order_count"] == 1
     assert item["refund_rate"] == "0.50"
     assert item["refund_amount_rate"] == "0.20"
 
     # 已付被取消订单退款（信息列）
     assert item["refund_cancelled_qty"] == 2
-    assert item["refund_cancelled_amount"] == "20.0000"
+    assert item["refund_cancelled_amount"] == cny4_from_usd("20")
     assert item["refund_cancelled_missing_lines"] == 1
 
     # v9 全损：完结退货不论物流直接计全损（场景无 38301 仍计 1 件退货）
@@ -972,36 +995,53 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert item["domestic_cancelled_order_count"] == 1
     assert item["overseas_cancelled_order_count"] == 0
 
-    # 成本：DEFAULT_K1 = 40 CNY × 0.14774 ≈ 5.9088
+    # 成本与全部利润金额统一使用 CNY。
     assert item["cost_source"] == "DEFAULT_K1"
-    assert Decimal(item["unit_cost_used"]) == Decimal(K1_CNY * CNY_USD).quantize(
-        _Q4, rounding=ROUND_HALF_UP
-    )
+    assert Decimal(item["unit_cost_used"]) == K1_CNY
 
-    # v9 利润域（return_loss = 完结退货 1 件 × 5.9096）
-    assert Decimal(item["return_loss"]) == Decimal("5.9096")
-    assert Decimal(item["platform_fee"]) == Decimal("30.8000")
-    assert Decimal(item["net_profit"]) == Decimal("15.8120")
+    # v9 利润域（return_loss = 完结退货 1 件 × 40 CNY）
+    assert item["return_loss"] == "40.0000"
+    assert item["platform_fee"] == cny4_from_usd("30.8000")
+    assert item["net_profit"] == m4(scenario_a_net_profit_cny())
     assert item["roi_real"] == "4.95"
     assert item["roi_breakeven"] == "1.92"
-    assert item["cpa"] == "2.0000"
+    assert item["cpa"] == cny4_from_usd("2")
 
     # meta v7
     assert body["meta"]["rubric_version"] == RUBRIC_VERSION
+    assert body["meta"]["currency"]["display"] == "CNY"
+    assert Decimal(body["meta"]["fx"]["usd_cny"]) == USD_CNY
+    assert body["meta"]["fx"]["cny_vnd"] == format(USD_VND / USD_CNY, "f")
+    assert body["meta"]["fx"]["vnd_cny"] == format(USD_CNY / USD_VND, "f")
+    reconstructed_spend = Decimal("10") * Decimal(body["meta"]["fx"]["usd_cny"])
+    reconstructed_sales = Decimal(2_633_000) / Decimal(
+        body["meta"]["fx"]["cny_vnd"]
+    )
+    assert item["spend"] == m4(reconstructed_spend)
+    assert item["sales"] == m4(reconstructed_sales)
     assert "SETTLEMENT" in body["meta"]["fee"]["note"]
     assert "1688" in body["meta"]["cost_assumption"]
     assert "40 CNY" in body["meta"]["cost_assumption"]
 
     # totals
     assert body["totals"]["row_count"] == 1
-    assert body["totals"]["spend"] == "10.0000"
-    assert body["totals"]["sales"] == "100.0000"
-    assert body["totals"]["gmv"] == "140.0000"
+    assert body["totals"]["spend"] == cny4_from_usd("10")
+    assert body["totals"]["sales"] == cny4_from_usd("100")
+    assert body["totals"]["gmv"] == cny4_from_usd("140")
     assert body["totals"]["order_count"] == 1
     assert body["totals"]["cancelled_order_count"] == 1
     assert body["totals"]["total_orders"] == 2
-    assert body["totals"]["refund_net_amount"] == "20.0000"
-    assert body["totals"]["net_profit"] == "15.8120"
+    assert body["totals"]["refund_net_amount"] == cny4_from_usd("20")
+    assert body["totals"]["net_profit"] == m4(scenario_a_net_profit_cny())
+    assert body["totals"]["ad_system_actual_roi"] == "5.00"
+    assert body["totals"]["ad_system_breakeven_roi"] == "1.94"
+    assert body["totals"]["ad_system_max_ad_spend"] == m4(
+        scenario_a_max_ad_spend_cny()
+    )
+    assert body["totals"]["ad_system_remaining_ad_spend_capacity"] == m4(
+        scenario_a_net_profit_cny()
+    )
+    assert body["totals"]["ad_system_breakeven_roi_status"] == "estimated_known_costs"
 
 
 def test_profitability_public_interface_returns_typed_consistent_result(
@@ -1028,10 +1068,19 @@ def test_profitability_public_interface_returns_typed_consistent_result(
     assert result.total == 1
     assert isinstance(result.items[0].net_profit, Decimal)
     assert result.items[0].net_profit.quantize(_Q4, rounding=ROUND_HALF_UP) == Decimal(
-        "15.8120"
+        m4(scenario_a_net_profit_cny())
     )
     assert isinstance(result.totals.net_profit, Decimal)
+    assert result.items[0].ad_system_actual_roi == Decimal(5)
+    assert result.items[0].ad_system_max_ad_spend.quantize(
+        _Q4, rounding=ROUND_HALF_UP
+    ) == Decimal(m4(scenario_a_max_ad_spend_cny()))
+    assert result.totals.ad_system_breakeven_roi is not None
+    assert result.totals.ad_system_remaining_ad_spend_capacity.quantize(
+        _Q4, rounding=ROUND_HALF_UP
+    ) == Decimal(m4(scenario_a_net_profit_cny()))
     assert result.basis.rubric_version == "v10"
+    assert result.basis.display_currency == "CNY"
     assert result.basis.fx.snapshot_id > 0
     assert result.basis.calculated_at.tzinfo is not None
 
@@ -1100,7 +1149,7 @@ def test_spu_roi_totals_cross_spu_dedup_and_gmv_split(
 
     - 行加总 ∑order_count = 2(X/Y 各 1)≠ totals.order_count = 1(全局去重)
     - 已付被取消同理:totals.cancelled_order_count = 1
-    - GMV 拆分:X/Y 各分摊有效 $10 + 取消原额 $5 → totals.gmv = 20+10
+    - GMV 拆分:X/Y 各分摊有效 10 USD + 取消原额 5 USD；API 统一换算 CNY
     """
     with Session(db_engine) as sess:
         x, _y = _seed(sess, _seed_cross_spu_orders)
@@ -1130,12 +1179,12 @@ def test_spu_roi_totals_cross_spu_dedup_and_gmv_split(
     assert t["order_count"] == 1, "跨 SPU 订单在 totals 应全局去重"
     assert t["cancelled_order_count"] == 1
     assert t["total_orders"] == 2
-    assert t["sales"] == "20.0000"  # 10+10(行级各自归属)
-    assert t["gmv"] == "30.0000"  # 有效 20 + 取消原额 10
+    assert t["sales"] == cny4_from_usd("20")  # 10+10(行级各自归属)
+    assert t["gmv"] == cny4_from_usd("30")  # 有效 20 + 取消原额 10
     # 单行归属校验:每 SPU 只带自己那行金额
     by_id = {i["spu_id"]: i for i in body["items"]}
-    assert by_id["TEST_ROI_SPU_X"]["sales"] == "10.0000"
-    assert by_id["TEST_ROI_SPU_Y"]["sales"] == "10.0000"
+    assert by_id["TEST_ROI_SPU_X"]["sales"] == cny4_from_usd("10")
+    assert by_id["TEST_ROI_SPU_Y"]["sales"] == cny4_from_usd("10")
     assert by_id["TEST_ROI_SPU_X"]["order_count"] == 1
     assert by_id["TEST_ROI_SPU_Y"]["order_count"] == 1
     # 行和大盘公式相同，但多 SPU 订单数量必须在大盘范围重新去重。
@@ -1191,7 +1240,7 @@ def test_spu_roi_totals_cross_spu_dedup_and_gmv_split(
     assert only_x_body["totals"]["row_count"] == 1
     assert only_x_body["totals"]["order_count"] == 1
     assert only_x_body["totals"]["cancelled_order_count"] == 1
-    assert only_x_body["totals"]["gmv"] == "15.0000"
+    assert only_x_body["totals"]["gmv"] == cny4_from_usd("15")
 
     options = api_client.get(
         "/v2/commerce/channel-product-options",
@@ -1286,7 +1335,7 @@ def test_spu_roi_refund_order_count_attributed_to_own_line(
     assert (
         by_id["TEST_ROI_SPU_RY_Y"]["refund_rate_qty"] == "1.00"
     )  # 1 退货单 / 1 有效单
-    assert by_id["TEST_ROI_SPU_RY_Y"]["refund_net_amount"] == "10.0000"
+    assert by_id["TEST_ROI_SPU_RY_Y"]["refund_net_amount"] == cny4_from_usd("10")
 
 
 def test_profitability_order_evidence_attributes_refund_to_own_spu_line(
@@ -1317,7 +1366,9 @@ def test_profitability_order_evidence_attributes_refund_to_own_spu_line(
     assert y_order["full_loss"] is True
 
 
-def test_profitability_settlement_evidence_uses_order_window(db_engine) -> None:
+def test_profitability_settlement_evidence_uses_order_window(
+    api_client, readonly_key, db_engine
+) -> None:
     with Session(db_engine) as session:
         spu_pk = _seed_scenario_a(session)
         order_pk, shop_pk = session.execute(
@@ -1375,11 +1426,23 @@ def test_profitability_settlement_evidence_uses_order_window(db_engine) -> None:
     component = components[0]
     assert isinstance(component, Mapping)
     assert component["amount_vnd"] == Decimal("1.0000")
-    assert component["amount"] == Decimal("1.0000") / Decimal(26330)
+    assert component["amount"] == Decimal("1.0000") / (USD_VND / USD_CNY)
+
+    response = api_client.get(
+        f"/v2/analytics/spu-roi/{spu_pk}/settlements",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+        params={"w_start": "2026-09-01", "w_end": "2026-09-01"},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["meta"]["currency"]["display"] == "CNY"
+    wire_component = payload["settlements"][0]["components"][0]
+    assert wire_component["amount_vnd"] == "1.0000"
+    assert wire_component["amount"] == m4(Decimal(1) / (USD_VND / USD_CNY))
 
 
 def test_profitability_settlement_share_includes_unattributed_order_lines(
-    db_engine,
+    api_client, readonly_key, db_engine
 ) -> None:
     with Session(db_engine) as session:
         spu_pk = _seed_scenario_a(session)
@@ -1432,9 +1495,20 @@ def test_profitability_settlement_share_includes_unattributed_order_lines(
             evidence=EvidenceRequest(frozenset({EvidenceKind.SETTLEMENTS})),
         )
 
-    assert explanation.result.settled_net == Decimal(50)
+    assert explanation.result.settled_net == Decimal(1316500) / (USD_VND / USD_CNY)
     settlement = explanation.evidence.rows[EvidenceKind.SETTLEMENTS][0]
     assert settlement["share_ratio"] == Decimal("0.5")
+
+    response = api_client.get(
+        f"/v2/analytics/spu-roi/{spu_pk}/orders",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["meta"]["currency"]["display"] == "CNY"
+    order = next(row for row in payload["orders"] if row["order_id"] == "TEST_ORDER_A1")
+    assert order["line_gmv"] == cny4_from_usd("100")
+    assert order["settled_net_share"] == cny4_from_usd("50")
 
 
 def _seed_cod_and_unpaid_cancelled(sess) -> int:
@@ -1522,18 +1596,18 @@ def test_spu_roi_totals_order_status_scope_cod_shop(
     # 行级也按状态口径(2026-09-06 全链):COD 在途算有效订单/件数/销售
     assert item["order_count"] == 2, "行级有效订单数含 COD 在途单"
     assert item["units_sold"] == 5  # 3(已收) + 2(在途)
-    assert item["sales"] == "50.0000"  # 30 + 20,含在途 COD
+    assert item["sales"] == cny4_from_usd("50")  # 30 + 20,含在途 COD
     assert item["refund_net_amount"] == "0.0000"
     # 派生:净现金 50 − COGS_all(5×4.4322=22.161) − spend 10 − fee(50×0.1156=5.78)
-    assert item["platform_fee"] == m4(Decimal(50) * FEE_BASELINE)  # 5.7800
-    assert item["net_profit"] == m4(
-        Decimal(50)
-        - Decimal(5) * K1_CNY * CNY_USD
-        - Decimal(10)
-        - Decimal(50) * FEE_BASELINE
+    assert item["platform_fee"] == cny4_from_usd(Decimal(50) * FEE_BASELINE)
+    expected_net_profit = (
+        Decimal(50) * USD_CNY * (Decimal(1) - FEE_BASELINE)
+        - Decimal(5) * K1_CNY
+        - Decimal(10) * USD_CNY
     )
+    assert item["net_profit"] == m4(expected_net_profit)
     # 行内新列(2026-09-06 列集):销售=GMV全单(50+10 取消原额)、取消单量、取消率、退货率(单量)
-    assert item["gmv_sales"] == "60.0000", "行内销售 = 有效销售 + 取消原额"
+    assert item["gmv_sales"] == cny4_from_usd("60"), "行内销售 = 有效销售 + 取消原额"
     assert item["cancelled_order_count"] == 1
     assert item["cancel_rate"] == m2(Decimal(1) / Decimal(3))  # 1/(2+1)=0.33
     assert item["refund_rate_qty"] == "0.00"  # 0 退货订单 / 2 有效单
@@ -1541,19 +1615,20 @@ def test_spu_roi_totals_order_status_scope_cod_shop(
     assert t["order_count"] == 2
     assert t["cancelled_order_count"] == 1, "未收款取消单应计入取消单(状态口径)"
     assert t["total_orders"] == 3
-    assert t["sales"] == "50.0000"  # totals.sales 现在与行级一致 = 状态口径
-    assert t["gmv"] == "60.0000", "GMV=全部订单原始行金额(含在途COD与取消原额)"
+    assert t["sales"] == cny4_from_usd("50")  # 与行级一致 = 状态口径
+    assert t["gmv"] == cny4_from_usd("60"), (
+        "GMV=全部订单原始行金额(含在途COD与取消原额)"
+    )
 
 
 def test_spu_roi_manual_cost_source(api_client, readonly_key, db_engine):
     """命中 manual_product_costs 有效行 → cost_source=MANUAL,unit_cost_used 用真值。
 
-    v9 公式（D1 MANUAL + 完结退货直接全损）:
-      cost=25 CNY → unit_cost=25×0.14774=3.6935；完结退货 1 件 → full_loss_qty=1
-      net_revenue = 0 + 100×(1−0.308)×(1−0.20) = 55.36
-      cogs = 5 × 3.6935 = 18.4675
-      net_profit = 55.36 − 18.4675 − 10 = 26.8925
-      return_loss = 1 × 3.6935 = 3.6935
+    v10 公式（D1 MANUAL + 完结退货直接全损）统一输出 CNY:
+      cost=25 CNY；完结退货 1 件 → full_loss_qty=1
+      net_revenue、广告消耗从原生币种换算为 CNY
+      net_profit 等于旧 USD 结果 26.8925 ÷ cny_usd
+      return_loss = 1 × 25 CNY = 3.6935
     """
     with Session(db_engine) as sess:
         spu_pk = _seed(sess, _seed_spu_manual)
@@ -1568,11 +1643,11 @@ def test_spu_roi_manual_cost_source(api_client, readonly_key, db_engine):
     item = body["items"][0]
     assert item["spu_pk"] == spu_pk
     assert item["cost_source"] == "MANUAL"
-    assert Decimal(item["unit_cost_used"]) == Decimal(25) * CNY_USD  # 3.6935
+    assert Decimal(item["unit_cost_used"]) == Decimal(25)
     # v9: return_loss = 完结退货件数 × 单位成本（不论是否有物流轨迹）
-    assert Decimal(item["return_loss"]) == Decimal("3.6935")
-    # v7 net_profit（D1 MANUAL 25 CNY 成本 + D5 未结算折算）
-    assert Decimal(item["net_profit"]) == Decimal("26.8925")
+    assert item["return_loss"] == "25.0000"
+    # v10 net_profit（D1 MANUAL 25 CNY 成本 + D5 未结算折算）
+    assert item["net_profit"] == cny4_from_usd("26.8925")
 
 
 def test_spu_roi_unpaid_order_refund_defensive_unattributed(
@@ -1600,10 +1675,10 @@ def test_spu_roi_unpaid_order_refund_defensive_unattributed(
     assert body["total"] == 1, body["items"]
     item = body["items"][0]
 
-    # 销售侧不受影响:UNPAID 单不进有效销售(DELIVERED 单 5 件×$20)
+    # 销售侧不受影响:UNPAID 单不进有效销售(DELIVERED 单 5 件×20 USD)
     assert item["order_count"] == 1
     assert item["units_sold"] == 5
-    assert item["sales"] == "100.0000"
+    assert item["sales"] == cny4_from_usd("100")
 
     # 异常订单退款不进 refund_net 桶(REFUND_ONLY/RETURN 桶都保持 0)
     assert item["refund_return_qty"] == 0
@@ -1618,8 +1693,8 @@ def test_spu_roi_unpaid_order_refund_defensive_unattributed(
     assert item["return_loss"] == "0.0000"
     # 行内金额视同无此退款:v7 net_profit = 100×(1−0.308)×1.0 − 5×5.9096 − 0
     # = 69.2 − 29.5480 = 39.6520
-    assert item["platform_fee"] == "30.8000"
-    assert Decimal(item["net_profit"]) == Decimal("39.6520")
+    assert item["platform_fee"] == cny4_from_usd("30.8000")
+    assert item["net_profit"] == cny4_from_usd("39.6520")
 
     # 防御性进未归属:meta 计数 +1(不静默)
     assert body["meta"]["unattributed_refund_lines"] == base + 1, body["meta"]
@@ -1725,10 +1800,10 @@ def test_spu_roi_window_params_clip_sales_and_refunds_by_order_time(
     item = body["items"][0]
     assert item["order_count"] == 2
     assert item["units_sold"] == 5
-    assert item["sales"] == "100.0000"
+    assert item["sales"] == cny4_from_usd("100")
     assert item["refund_order_count"] == 2
     assert item["refund_return_qty"] == 2
-    assert item["refund_return_amount"] == "40.0000"
+    assert item["refund_return_amount"] == cny4_from_usd("40")
     assert body["totals"]["refund_order_count"] == 2
     assert "ad=视图全窗口累计" not in body["meta"]["window"]["note"]
     assert "未裁剪" in body["meta"]["window"]["note"]
@@ -1752,16 +1827,16 @@ def test_spu_roi_window_params_clip_sales_and_refunds_by_order_time(
     item2 = body2["items"][0]
     assert item2["order_count"] == 1, item2
     assert item2["units_sold"] == 3
-    assert item2["sales"] == "60.0000"
+    assert item2["sales"] == cny4_from_usd("60")
     assert item2["refund_order_count"] == 1
     assert item2["refund_return_qty"] == 1
-    assert item2["refund_return_amount"] == "20.0000"
+    assert item2["refund_return_amount"] == cny4_from_usd("20")
     assert item2["full_loss_qty"] == 1
     assert body2["totals"]["refund_order_count"] == 1
     assert body2["totals"]["full_loss_order_count"] == 1
     assert "跟随原订单" in body2["meta"]["window"]["note"]
-    assert body2["totals"]["sales"] == "60.0000"
-    assert body2["totals"]["gmv"] == "60.0000"
+    assert body2["totals"]["sales"] == cny4_from_usd("60")
+    assert body2["totals"]["gmv"] == cny4_from_usd("60")
     assert body2["totals"]["order_count"] == 1
     assert body2["totals"]["cancelled_order_count"] == 0
     assert body2["totals"]["total_orders"] == 1
@@ -1776,7 +1851,7 @@ def test_spu_roi_window_params_clip_sales_and_refunds_by_order_time(
     item3 = r3.json()["items"][0]
     assert item3["refund_order_count"] == 1
     assert item3["refund_return_qty"] == 1
-    assert item3["refund_return_amount"] == "20.0000"
+    assert item3["refund_return_amount"] == cny4_from_usd("20")
     assert item3["full_loss_qty"] == 1
 
     cases = api_client.get(
@@ -1801,8 +1876,8 @@ def test_spu_roi_window_params_clip_sales_and_refunds_by_order_time(
     assert refund_day["totals"]["refund_order_count"] == 0
 
     # 不传窗口 = 全历史:两单都在(与上面 item 断言同源)
-    assert body["totals"]["sales"] == "100.0000"
-    assert body["totals"]["gmv"] == "100.0000"
+    assert body["totals"]["sales"] == cny4_from_usd("100")
+    assert body["totals"]["gmv"] == cny4_from_usd("100")
     assert body["totals"]["order_count"] == 2
     assert body["totals"]["total_orders"] == 2
 
@@ -1875,8 +1950,8 @@ def test_spu_roi_date_window_clips_ad(api_client, readonly_key, db_engine):
     )
     item_all = r_all.json()["items"][0]
     assert item_all["ad_count"] == 2
-    assert item_all["spend"] == "40.0000"
-    assert item_all["sales"] == "40.0000"
+    assert item_all["spend"] == cny4_from_usd("40")
+    assert item_all["sales"] == cny4_from_usd("40")
     assert item_all["order_count"] == 2
     # 裁剪到 09-01~09-30：销售只 1 单 $20；ad 只留窗内 spend=15 / ad_count=1
     r_crop = api_client.get(
@@ -1890,8 +1965,8 @@ def test_spu_roi_date_window_clips_ad(api_client, readonly_key, db_engine):
     )
     item_crop = r_crop.json()["items"][0]
     assert item_crop["ad_count"] == 1, item_crop  # v8：窗外 ad 被裁
-    assert item_crop["spend"] == "15.0000"
-    assert item_crop["sales"] == "20.0000"
+    assert item_crop["spend"] == cny4_from_usd("15")
+    assert item_crop["sales"] == cny4_from_usd("20")
     assert item_crop["order_count"] == 1
     assert "已裁剪" in r_crop.json()["meta"]["window"]["note"]
     assert "ad 同窗口裁剪" in r_crop.json()["meta"]["window"]["note"]
@@ -1940,7 +2015,7 @@ def test_spu_roi_ad_window_single_side_only(api_client, readonly_key, db_engine)
     )
     item_ws = r_ws.json()["items"][0]
     assert item_ws["ad_count"] == 3, item_ws  # 10+30+40 = 90
-    assert item_ws["spend"] == "90.0000"
+    assert item_ws["spend"] == cny4_from_usd("90")
 
     # 仅 w_end=09-30：无下界束缚，06-01/09-10/09-25 留下（10-05 被上界裁）
     r_we = api_client.get(
@@ -1948,7 +2023,7 @@ def test_spu_roi_ad_window_single_side_only(api_client, readonly_key, db_engine)
     )
     item_we = r_we.json()["items"][0]
     assert item_we["ad_count"] == 3, item_we  # 10+20+30 = 60
-    assert item_we["spend"] == "60.0000"
+    assert item_we["spend"] == cny4_from_usd("60")
 
     # 双边界：09-01~09-30，仅 09-10/09-25
     r_both = api_client.get(
@@ -1958,7 +2033,7 @@ def test_spu_roi_ad_window_single_side_only(api_client, readonly_key, db_engine)
     )
     item_both = r_both.json()["items"][0]
     assert item_both["ad_count"] == 2, item_both  # 20+30 = 50
-    assert item_both["spend"] == "50.0000"
+    assert item_both["spend"] == cny4_from_usd("50")
 
 
 def test_spu_roi_sort_whitelist_covers_page_sortable_columns(
@@ -2007,11 +2082,9 @@ def test_spu_roi_sort_whitelist_covers_page_sortable_columns(
 def test_spu_roi_totals_roi_real_native_reconciliation(
     api_client, readonly_key, db_engine
 ):
-    """totals.roi_real v7 对账：(Σnet_revenue − Σreturn_loss)/Σspend，USD 口径。
+    """totals.roi_real 对账：(Σnet_revenue − Σreturn_loss)/Σspend，CNY 口径。
 
-    v7：net_revenue 已含汇率换算，Σ跨 SPU 累加后除 Σspend（§5.4-4）。
-    直接断言现计算值（各 SPUs 已在全 USD 累加）；不强求旧的「全为整」的
-    Σ原币=198 USD=整数（v5 行为）。
+    net_revenue 已含汇率换算，Σ跨 SPU 累加后除 Σspend；比例换币前后不变。
     """
     with Session(db_engine) as sess:
         _seed(sess, _seed_scenario_a)  # spend 10
@@ -2032,10 +2105,10 @@ def test_spu_roi_totals_roi_real_native_reconciliation(
     # B：sales=?, refund=?, units=? （按 _seed_spu_b）
     # C：sales=?, refund=?, units=? （按 _seed_spu_c）
     # 统一验证：totals.roi_real == (Σnet_revenue − Σreturn_loss) / Σspend
-    total_net_revenue_usd = sum(Decimal(it["net_revenue"]) for it in items.values())
-    total_return_loss_usd = sum(Decimal(it["return_loss"]) for it in items.values())
-    total_spend_usd = sum(Decimal(it["spend"]) for it in items.values())
-    expected = (total_net_revenue_usd - total_return_loss_usd) / total_spend_usd
+    total_net_revenue_cny = sum(Decimal(it["net_revenue"]) for it in items.values())
+    total_return_loss_cny = sum(Decimal(it["return_loss"]) for it in items.values())
+    total_spend_cny = sum(Decimal(it["spend"]) for it in items.values())
+    expected = (total_net_revenue_cny - total_return_loss_cny) / total_spend_cny
     assert body["totals"]["roi_real"] == m2(Decimal(expected))
 
 
@@ -2145,10 +2218,12 @@ def test_spu_roi_default_sort_roi_asc_pagination_and_totals(
     assert totals["order_count"] == 3
     assert totals["cancelled_order_count"] == 1
     assert totals["total_orders"] == 4
-    assert totals["spend"] == "70.0000"
-    assert totals["sales"] == "220.0000"
-    assert totals["gmv"] == "260.0000"
-    assert totals["refund_net_amount"] == "20.0000"
+    assert totals["spend"] == m4(
+        sum((Decimal(v) * USD_CNY for v in (10, 50, 10)), Decimal(0))
+    )
+    assert totals["sales"] == cny4_from_usd("220")
+    assert totals["gmv"] == cny4_from_usd("260")
+    assert totals["refund_net_amount"] == cny4_from_usd("20")
 
     # totals = 行加总（money 4 位）
     row_sum = {
@@ -2159,10 +2234,9 @@ def test_spu_roi_default_sort_roi_asc_pagination_and_totals(
         ),
         "net_profit": sum((Decimal(i["net_profit"]) for i in items), Decimal(0)),
     }
-    assert m4(row_sum["spend"]) == totals["spend"]
-    assert m4(row_sum["sales"]) == totals["sales"]
-    assert m4(row_sum["refund_net_amount"]) == totals["refund_net_amount"]
-    assert m4(row_sum["net_profit"]) == totals["net_profit"]
+    # totals 按服务端未量化 Decimal 加总；逐行 wire 值已量化 4 位，允许 1 个最小单位尾差。
+    for field, value in row_sum.items():
+        assert abs(value - Decimal(totals[field])) <= _Q4
 
     # 分页：limit=2 → B,C;offset=2 → A
     r2 = api_client.get(
@@ -2327,12 +2401,18 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
         "refund_rate": None,
         "full_loss_rate": None,
         "cancel_rate": None,
-        "ad_system_breakeven_roi": "0.00",
-        "ad_system_breakeven_roi_status": "formula_pending",
+        "ad_system_actual_roi": None,
+        "ad_system_breakeven_roi": None,
+        "ad_system_max_ad_spend": "0.0000",
+        "ad_system_remaining_ad_spend_capacity": "0.0000",
+        "ad_system_breakeven_roi_status": "estimated_known_costs",
     }
     meta = body["meta"]
     assert meta["fx"]["usd_vnd"] == "26330.0000"
     assert meta["fx"]["cny_usd"] == "0.1477"
+    assert Decimal(meta["fx"]["usd_cny"]) == USD_CNY
+    assert meta["fx"]["cny_vnd"] == format(USD_VND / USD_CNY, "f")
+    assert meta["fx"]["vnd_cny"] == format(USD_CNY / USD_VND, "f")
     assert meta["fx"]["as_of"] == "2099-09-06"
     assert meta["fx"]["source"] == "fx-cache"
     assert isinstance(meta["fx"]["snapshot_id"], int)
@@ -2348,9 +2428,17 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
     assert meta["unattributed_refund_lines"] >= 0
     assert meta["computed_at"]
     assert meta["currency"] == {
-        "display": "USD",
+        "display": "CNY",
         "native": {"ad": "USD", "sales_refund": "VND", "cost": "CNY"},
     }
+    assert meta["ad_system_roi"]["actual_formula"] == "广告归因GMV ÷ 广告实际消耗"
+    assert meta["ad_system_roi"]["additional_costs_status"] == "not_modeled"
+    assert meta["ad_system_roi"]["advertising_credit_status"] == (
+        "not_available_separately"
+    )
+    assert "不混入广告赠金" in meta["ad_system_roi"]["spend_basis"]
+    assert "已知成本下限估算" in meta["ad_system_roi"]["warning"]
+    assert "ad_system_other_necessary_costs_not_modeled" in meta["warnings"]
     # 金额列可 JSON 序列化(Decimal 已转字符串)
     json.dumps(body)
 
@@ -2370,12 +2458,15 @@ def test_spu_roi_fee_rate_override_meta(api_client, readonly_key, db_engine):
     assert meta["fee"]["mode"] == "override"
     assert meta["fee"]["rate"] == "0.20"
     assert meta["fee"]["override"] == "0.20"
-    # v7：fee_rate=0.20 + 无结算 + refund_rate=0.20
-    # net_revenue = 0 + 100×0.80×0.80 = 64；cogs=5×5.9096=29.5480
-    # net_profit = 64−29.5480−10 = 24.4520
+    # fee_rate=0.20 + 无结算 + refund_rate=0.20；金额统一输出 CNY。
     item = body["items"][0]
-    assert item["platform_fee"] == "20.0000"
-    assert Decimal(item["net_profit"]) == Decimal("24.4520")
+    assert item["platform_fee"] == cny4_from_usd("20")
+    expected_net_profit = (
+        Decimal(2633000) / (USD_VND / USD_CNY) * Decimal("0.8") * Decimal("0.8")
+        - Decimal(5) * K1_CNY
+        - Decimal(10) * USD_CNY
+    )
+    assert item["net_profit"] == m4(expected_net_profit)
 
 
 # ─── 页面契约 ─────────────────────────────────────────────────────────
@@ -2545,7 +2636,7 @@ def test_spu_roi_page_uses_bootstrap_responsive_layout(api_client, readonly_key)
         / "spu-roi.js"
     )
     src = js_path.read_text(encoding="utf-8")
-    assert "row-cols-2 row-cols-sm-3 row-cols-lg-4 row-cols-xxl-4" in src
+    assert "row-cols-2 row-cols-sm-3 row-cols-lg-3 row-cols-xxl-3" in src
     assert "content.classList.add(" in src
     for table_class in ("table-sm", "table-hover", "align-middle", "op-tab-table"):
         assert f'"{table_class}"' in src
@@ -2656,7 +2747,7 @@ def test_spu_roi_dashboard_metrics_are_never_truncated() -> None:
 
 
 def test_spu_roi_drill_summary_omits_removed_metrics() -> None:
-    """每个 SPU 的明细大盘只保留用户确认的 7 个核心指标。"""
+    """每个 SPU 明细大盘保留核心指标，并补充广告系统两个 ROI。"""
     from pathlib import Path
 
     src = (
@@ -2690,6 +2781,8 @@ def test_spu_roi_drill_summary_omits_removed_metrics() -> None:
     for retained_label in (
         "ROI 实际",
         "ROI 保本",
+        "广告系统实际 ROI",
+        "广告系统保本 ROI",
         "CPA",
         "单位成本",
         "已结算单",
@@ -2697,7 +2790,9 @@ def test_spu_roi_drill_summary_omits_removed_metrics() -> None:
         "净收入",
     ):
         assert retained_label in summary
-    assert "row-cols-xxl-4" in summary
+    assert "row-cols-xxl-3" in summary
+    assert "it.ad_system_actual_roi" in summary
+    assert "it.ad_system_breakeven_roi" in summary
 
 
 def test_spu_roi_js_targets_dashboard_hooks():
@@ -2720,6 +2815,8 @@ def test_spu_roi_js_targets_dashboard_hooks():
     assert "roi_breakeven" in src  # 红绿判据字段
     assert "cost_source" in src
     assert "DEFAULT_K1" in src  # ⚠ 判断
+    assert '"¥" +' in src
+    assert "金额已由服务端统一换算 CNY" in src
     # Bootstrap 多选由 Tom Select 驱动，精确 scope 通过独立 spu_ids 参数提交。
     assert 'window["TomSelect"]' in src
     assert "/v2/commerce/channel-product-options" in src
@@ -2729,7 +2826,7 @@ def test_spu_roi_js_targets_dashboard_hooks():
 
 
 def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
-    """§7.1 结余带:14 格指标完整，并按同类的量/额或量/率相邻排列。"""
+    """§7.1 结余带:15 格指标完整，并按同类指标相邻排列。"""
     from pathlib import Path
 
     r = api_client.get(
@@ -2751,6 +2848,7 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
         "sum-net-profit",
         "sum-roi",
         "sum-roi-breakeven",
+        "sum-roi-ad-actual",
         "sum-roi-ad",
     )
     summary_positions = []
@@ -2765,6 +2863,9 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert "净利润" in body
     assert "全损量" in body
     assert "退款数" in body
+    assert "广告系统实际ROI = 广告归因GMV ÷ 广告实际消耗" in body
+    assert "广告系统保本ROI = 广告归因GMV ÷ 最大可承受广告费" in body
+    assert "TODO: 广告系统保本ROI 公式待定" not in body
     # 主表指标名与大盘 v10 口径一致
     main_th_labels = re.findall(r'<th[^>]*scope="col"[^>]*>([^<]+)</th>', body)
     for col_label in (
@@ -2825,7 +2926,11 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert "fmtMoney(it.effective_sales)" in js_src
     assert "fmtInt(it.effective_order_count)" in js_src
     assert '("#sum-roi-breakeven")' in js_src
+    assert '("#sum-roi-ad-actual")' in js_src
+    assert "totals.ad_system_actual_roi" in js_src
     assert '("#sum-roi-ad")' in js_src
+    assert 'roiAdStatus === "estimated_known_costs"' in js_src
+    assert "formula_pending" not in js_src
 
 
 def test_spu_roi_page_d8_no_column_toggles(api_client, readonly_key):
@@ -2936,7 +3041,10 @@ def test_spu_roi_frontend_only_displays_backend_profitability() -> None:
     assert "summaries.hidden = true" in src
     assert "pager.hidden = true" in src
     assert "footnotes.hidden = true" in src
-    assert 'roiAdStatus === "formula_pending"' in src
+    assert 'roiAdStatus === "estimated_known_costs"' in src
+    assert "ad_system_max_ad_spend" not in src  # 前端不重算，只展示后端 ROI
+    assert 'meta.currency.display) || "CNY"' in src
+    assert "全表 USD" not in src
 
 
 def test_spu_roi_js_shop_switch_listener_before_early_return():
@@ -2998,7 +3106,8 @@ def _fx_meta_of_empty_query(api_client, readonly_key) -> dict:
 def test_spu_roi_meta_uses_live_fx_rates(api_client, readonly_key, monkeypatch):
     """换算汇率来自在线 fx 快照:monkeypatch 一张非 D9 值的 USD 快照,
     验证实现真正走 fx-cache —— 值/来源/日期都取自已注入的快照(不是常量)。
-    派生数学:CNY→USD = 1/rates[CNY] 量化 8dp;USD→VND = rates[VND]。
+    派生数学:CNY→USD = 1/rates[CNY] 量化 8dp；同时暴露 USD→CNY
+    与 VND/CNY 供 CNY 金额对账。
     """
     from datetime import UTC, datetime
 
@@ -3020,9 +3129,13 @@ def test_spu_roi_meta_uses_live_fx_rates(api_client, readonly_key, monkeypatch):
         profitability_impl, "load_rate_map", lambda sess, base_code="USD": rm
     )
     fx = _fx_meta_of_empty_query(api_client, readonly_key)
+    usd_cny = Decimal("6.9")
     assert fx == {
         "usd_vnd": "26000.0000",
         "cny_usd": "0.1449",  # 1/6.9 = 0.14492753… → .4f
+        "usd_cny": format(usd_cny, "f"),
+        "cny_vnd": format(Decimal(26000) / usd_cny, "f"),
+        "vnd_cny": format(usd_cny / Decimal(26000), "f"),
         "as_of": "2026-09-06",
         "snapshot_id": 999_000_001,
         "source": "fx-cache",
@@ -3259,13 +3372,42 @@ def test_spu_roi_cost_source_price_direct_layer(api_client, readonly_key, db_eng
     assert body["total"] == 1
     item = body["items"][0]
     assert item["cost_source"] == "SOURCE_PRICE", item
-    assert Decimal(item["unit_cost_used"]) == Decimal("35") * CNY_USD  # ≈5.1718
+    assert Decimal(item["unit_cost_used"]) == Decimal(35)
 
 
 def test_spu_roi_drilldown_requires_auth(api_client):
     """钻取端点 readonly 鉴权（与主表一致：401 无 key）。"""
     for tab in ("orders", "settlements", "cases", "ads"):
         assert api_client.get(f"/v2/analytics/spu-roi/1/{tab}").status_code == 401
+
+
+def test_spu_roi_case_and_ad_drill_money_use_cny(
+    api_client, readonly_key, db_engine
+):
+    with Session(db_engine) as sess:
+        spu_pk = _seed(sess, _seed_scenario_a)
+
+    headers = {"Authorization": f"Bearer {readonly_key}"}
+    cases_response = api_client.get(
+        f"/v2/analytics/spu-roi/{spu_pk}/cases",
+        headers=headers,
+    )
+    assert cases_response.status_code == 200, cases_response.text
+    cases_payload = cases_response.json()
+    assert cases_payload["meta"]["currency"]["display"] == "CNY"
+    refund_case = next(
+        row for row in cases_payload["cases"] if row["case_id"] == "TEST_CASE_A1"
+    )
+    assert refund_case["refund_amount"] == cny4_from_usd("20")
+
+    ads_response = api_client.get(
+        f"/v2/analytics/spu-roi/{spu_pk}/ads",
+        headers=headers,
+    )
+    assert ads_response.status_code == 200, ads_response.text
+    ads_payload = ads_response.json()
+    assert ads_payload["meta"]["currency"]["display"] == "CNY"
+    assert ads_payload["ads"][0]["spend"] == cny4_from_usd("10")
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -3434,7 +3576,7 @@ def test_spu_roi_v9_full_loss_two_buckets_and_disjoint_cancel_rate(
     assert item["full_loss_order_count"] == 2  # 1 退款订单 + 1 海外取消订单
     assert item["full_loss_rate"] == "0.67"  # 2 / 3 全部订单
     assert item["full_loss_qty_rate"] == "0.67"  # 旧件数解释口径 4/(4+2)
-    assert Decimal(item["return_loss"]) == Decimal("23.6384")  # 4 × 5.9096
+    assert item["return_loss"] == "160.0000"  # 4 × 40 CNY
 
     # 取消：信息列仍是全部取消单；分子仅国内取消，分母是全部 3 单。
     assert item["cancelled_order_count"] == 2
@@ -3446,7 +3588,7 @@ def test_spu_roi_v9_full_loss_two_buckets_and_disjoint_cancel_rate(
     # 退款桶口径不变（退货+仅退款都在 refund_net）
     assert item["refund_return_qty"] == 1
     assert item["refund_only_qty"] == 1
-    assert item["refund_net_amount"] == "20.0000"
+    assert item["refund_net_amount"] == cny4_from_usd("20")
 
 
 def test_spu_roi_v9_drill_orders_full_loss_flag(api_client, readonly_key, db_engine):
