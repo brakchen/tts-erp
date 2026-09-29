@@ -1439,10 +1439,10 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
         </div>
         <div class="col">
           <div class="op-counter-group h-100">
-            <div class="op-counter-group-label">取消</div>
+            <div class="op-counter-group-label">国内取消</div>
             <div class="row g-0 row-cols-2">
-              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">取消量<span class="op-hint" data-tip="取消量 = 取消订单中国内取消（排除海外取消）。海外取消已计入全损，两率互斥不重叠">?</span></span><span class="op-counter-num" id="sum-cancel-count">—</span></span></div>
-              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">取消率<span class="op-hint" data-tip="取消率 = 取消订单中国内取消（排除海外取消）/ 全部订单（有效订单 + 取消订单）">?</span></span><span class="op-counter-num" id="sum-cancel-rate">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">国内取消量<span class="op-hint" data-tip="取消量 = 取消订单中国内取消（排除海外取消）。海外取消已计入全损，两率互斥不重叠">?</span></span><span class="op-counter-num" id="sum-cancel-count">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">国内取消率<span class="op-hint" data-tip="取消率 = 取消订单中国内取消（排除海外取消）/ 全部订单（有效订单 + 取消订单）">?</span></span><span class="op-counter-num" id="sum-cancel-rate">—</span></span></div>
             </div>
           </div>
         </div>
