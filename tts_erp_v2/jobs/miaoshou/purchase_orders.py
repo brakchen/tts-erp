@@ -1,20 +1,21 @@
 """Miaoshou sync job: purchase_orders (1h cadence).
 
-Syncs the **procurement-side purchase order** list from
-``search_goods_purchase_order_page`` into ``procurement.purchase_orders``
-+ ``procurement.purchase_order_lines``. Current production dataset is
-**empty** (the operator hasn't enabled miaoshou purchasing); the job
-must terminate cleanly on an empty-list path.
+Syncs the **procurement-side purchase order** list from the EWM
+``search_goods_purchase_order_page`` endpoint into
+``procurement.purchase_orders`` + ``procurement.purchase_order_lines``.
+Current production data can be empty; the job must terminate cleanly on
+an empty-list path.
 
-⚠ Parameter names differ from the legacy ``pageNo`` convention.
-The upstream apifox spec uses ``page`` / ``pageSize`` (NOT ``pageNo``).
-We send exactly what the upstream expects.
+The upstream requires ``page`` / ``pageSize`` (not ``pageNo``). Optional
+``timerToken`` and ``Cookie`` parameters shown by Apifox are not required by
+this HMAC-authenticated ERP client.
 
 Endpoint
 --------
-``POST /open/v1/product/purchase/goods_purchase_order/search_goods_purchase_order_page``
-(per refactor-tech-plan-v2.md §4.1 + §9.4). Body: ``{"page", "pageSize"}``.
-Response shape (apifox): ``{"result":"success","data":{"goodsPurchaseOrderList":[...], "total": N}}``.
+``POST /open/v1/ewm/goods_purchase_order/goods_purchase_order/fetch/search_goods_purchase_order_page``.
+Body: ``{"page", "pageSize"}`` (``pageSize`` 10–100). Response shape:
+``{"result":"success","data":{"goodsPurchaseOrderList":[...], "total": N}}``;
+each order's lines are ``goodsPurchaseOrderSkuList``.
 
 Output
 ------
@@ -58,7 +59,7 @@ log = logging.getLogger("tts_erp_v2.jobs.miaoshou.purchase_orders")
 
 JOB_NAME = "miaoshou.purchase_orders"
 ENDPOINT = "miaoshou.purchase_order.search_goods_purchase_order_page"
-PAGE_SIZE = 50  # upstream default for this endpoint; no documented cap
+PAGE_SIZE = 100  # EWM contract maximum
 MAX_PAGES = 1000
 
 
@@ -72,48 +73,49 @@ def _fetch_page(
 ) -> dict[str, Any]:
     """★ Note the upstream parameter names: ``page`` + ``pageSize`` (NOT pageNo)."""
     return client._call_erp(
-        path="/open/v1/product/purchase/goods_purchase_order/search_goods_purchase_order_page",
+        path=(
+            "/open/v1/ewm/goods_purchase_order/goods_purchase_order/fetch/"
+            "search_goods_purchase_order_page"
+        ),
         body={"page": page, "pageSize": page_size},
     )
 
 
 def _parse_order_header(order: dict[str, Any]) -> dict[str, Any] | None:
-    """Map a raw order dict → ``purchase_orders`` upsert values.
-
-    Returns ``None`` when the order has no id — caller drops to issue.
-    """
-    oid = order.get("goodsPurchaseOrderId") or order.get("purchaseOrderId") or order.get("id")
-    if not oid:
+    """Map one EWM purchase-order object to ``purchase_orders`` values."""
+    order_id = order.get("goodsPurchaseOrderId")
+    if not order_id:
         return None
+    supplier = order.get("goodsPurchaseOrderSupplier")
+    supplier_id = supplier.get("sellerId") if isinstance(supplier, dict) else None
     return {
-        "external_purchase_order_id": str(oid),
-        "supplier_id": str(order.get("supplierId"))
-        if order.get("supplierId") is not None
-        else None,
-        "status": order.get("status") or order.get("orderStatus"),
-        "currency": order.get("currency"),
-        "total_amount": _to_decimal(order.get("totalAmount") or order.get("amount")),
-        "paid_at": _parse_iso(order.get("paidTime") or order.get("paidAt")),
-        "completed_at": _parse_iso(
-            order.get("completedTime") or order.get("completedAt")
-        ),
-        "source_created_at": _parse_iso(order.get("gmtCreate") or order.get("createTime")),
-        "source_updated_at": _parse_iso(order.get("gmtModified") or order.get("updateTime")),
+        "external_purchase_order_id": str(order_id),
+        "supplier_id": str(supplier_id) if supplier_id is not None else None,
+        "status": order.get("status"),
+        "currency": None,
+        "total_amount": _to_decimal(order.get("goodsPurchaseOrderAmount")),
+        "paid_at": None,
+        "completed_at": None,
+        "source_created_at": _parse_iso(order.get("gmtCreate")),
+        "source_updated_at": None,
     }
 
 
 def _parse_order_line(order_id_ext: str, line: dict[str, Any]) -> dict[str, Any] | None:
-    """Map a raw order line → ``purchase_order_lines`` upsert values."""
-    line_id = line.get("goodsPurchaseOrderLineId") or line.get("lineId") or line.get("id")
+    """Map one EWM ``goodsPurchaseOrderSkuList`` item to line values."""
+    line_id = line.get("goodsPurchaseOrderSkuId")
     if not line_id:
         return None
+    external_product_id = line.get("goodsSkuId")
     return {
         "external_line_id": str(line_id),
-        "external_product_id": str(line.get("goodsId") or line.get("productId") or ""),
-        "quantity": _to_decimal(line.get("quantity") or line.get("qty")),
-        "unit_cost": _to_decimal(line.get("unitPrice") or line.get("unitCost")),
-        "currency": line.get("currency"),
-        "line_status": line.get("status") or line.get("lineStatus"),
+        "external_product_id": str(external_product_id)
+        if external_product_id is not None
+        else "",
+        "quantity": _to_decimal(line.get("purchaseNum")),
+        "unit_cost": _to_decimal(line.get("purchasePrice")),
+        "currency": None,
+        "line_status": None,
         "_order_external_id": order_id_ext,
     }
 
@@ -192,11 +194,15 @@ def sync_purchase_orders(
         def unwrap_page(payload: dict[str, Any]) -> PageResult:
             data = (payload.get("data") or {}) if isinstance(payload, dict) else {}
             items = data.get("goodsPurchaseOrderList") or []
+            total_count = data.get("total")
+            total_pages = data.get("totalPage") or data.get("total_pages")
+            if total_pages is None and isinstance(total_count, int):
+                total_pages = (total_count + PAGE_SIZE - 1) // PAGE_SIZE
             return PageResult(
                 items=list(items) if isinstance(items, list) else [],
                 page=payload.get("page") or 0,
-                total_count=data.get("total"),
-                total_pages=data.get("totalPage") or data.get("total_pages"),
+                total_count=total_count,
+                total_pages=total_pages,
             )
 
         def wrapped_fetch(page: int) -> PageResult:
@@ -253,7 +259,7 @@ def sync_purchase_orders(
                 )
                 orders_upserted += 1
 
-                for line in order.get("goodsPurchaseOrderLineList") or order.get("lines") or []:
+                for line in order.get("goodsPurchaseOrderSkuList") or []:
                     line_parsed = _parse_order_line(
                         header["external_purchase_order_id"], line
                     )
@@ -298,11 +304,7 @@ def sync_purchase_orders(
                     session,
                     job_name=JOB_NAME,
                     issue_type="PURCHASE_ORDER_PARSE_FAILED",
-                    external_id=str(
-                        order.get("goodsPurchaseOrderId")
-                        or order.get("purchaseOrderId")
-                        or order.get("id")
-                    ),
+                    external_id=str(order.get("goodsPurchaseOrderId")),
                     details={"error": f"{type(e).__name__}: {e}"},
                 )
                 issues += 1

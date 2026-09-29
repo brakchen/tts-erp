@@ -86,10 +86,11 @@ def test_jobs_registry_has_expected_count() -> None:
     2026-09-19：plugin.ad_merge_today2daily 移除（同步逻辑删除，保留 ad_today 表）→ 17 → 16。
     2026-09-29：analytics.shop_fee_rate 加入（店铺级平台抽成费率，
     24h 重算 → reporting.shop_fee_rate_estimates，供 spu-roi 未结算估算）→ 16 → 17。
+    2026-09-29：miaoshou.purchase_orders 改用已发布 EWM 接口并加入调度 → 17 → 18。
     """
-    # 6 tiktok + 11 system (token + 5 miaoshou + 2 reporting + image_mirror
+    # 6 tiktok + 12 system (token + 6 miaoshou + 2 reporting + image_mirror
     # + fx.sync + shop_fee_rate) — keep the number pinned so we don't drift silently.
-    assert len(JOBS) == 17
+    assert len(JOBS) == 18
 
 
 @pytest.mark.parametrize(
@@ -113,10 +114,12 @@ def test_jobs_registry_tiktok_jobs_default_to_is_tiktok_true() -> None:
         assert JOBS[name].needs_token_registry is False
 
 
-def test_jobs_registry_miaoshou_purchase_orders_intentionally_absent() -> None:
-    """Per the AGENTS.md / scheduler.py docstring: the endpoint path
-    404s in prod; intentionally NOT in the registry."""
-    assert "miaoshou.purchase_orders" not in JOBS
+def test_jobs_registry_includes_miaoshou_purchase_orders() -> None:
+    spec = JOBS["miaoshou.purchase_orders"]
+    assert spec.module_path == "tts_erp_v2.jobs.miaoshou.purchase_orders"
+    assert spec.entrypoint == "sync_purchase_orders"
+    assert spec.interval_seconds == 3600
+    assert spec.is_tiktok is False
 
 
 # ─── build_scheduler wiring ───────────────────────────────────────
