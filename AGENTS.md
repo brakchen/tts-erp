@@ -107,6 +107,54 @@ cred = load_credentials(session, provider="tiktok", external_account_id=shop_id)
 - Commit messages use `feat/fix/chore/docs/style/merge` plus a concise Chinese description.
 - In a worktree, never use `git add -A`, `git add .`, or `-A`-style wildcards for staging. They sweep in the worktree's `.venv` symlink, `.env*`, and other gitignored-but-not-protected local files, and the resulting commit will silently wipe a teammate's real venv on merge checkout. Always stage with explicit file paths (e.g. `git add tts_erp_v2/.../spu-roi.js tests/...`). If you used `-A`, run `git status` before `git commit` and unstage anything that is not your own change.
 
+### 7.1 pi-lens 测试运行器（`spawn python ENOENT`）
+
+pi-lens 的 `test-runner-client.js::resolveExec()` 解析 pytest 的顺序是：
+
+1. `<cwd>/node_modules/.bin/pytest` —— Node 生态假设，Python 项目没有；
+2. `findGlobalBinary("pytest")` —— **只遍历 npm/pnpm/yarn/bun 的 global bin，
+   完全不看 `PATH`**（所以放个 `pytest` 到 PATH 上是无效的）；
+3. 回退硬编码 `{ command: "python", args: ["-m","pytest",…] }`。
+
+本机 PATH 上只有 `python3`（无 `python`），第 3 步就报 `spawn python ENOENT`。
+
+修法：放一个 **venv 感知的 `python` shim** 到 **Pi 进程 PATH 首位目录**
+`/home/schan/.pi/agent/bin/`（`~/.local/bin` 不够 —— 它只写在 `~/.profile` /
+`~/.bashrc`，Pi 启动时不加载）。shim 从 `cwd` 向上找最近的
+`.venv/bin/python` 并 `exec`，于是 `python -m pytest` 用的是项目自己 venv 的
+解释器（依赖完整），而不是只有标准库的系统 `python3`。
+
+同一目录下也放了一个 `pytest` shim（对直接调用的场景有用，但不是本问题的关键路径）。
+
+这与 `scripts/test.sh` 的 worktree 自动建 `.venv` 软链是两回事：后者保证 venv 存在，
+前者保证 pi-lens 能找得到它。
+
+### 7.2 pi-lens 抑制注释的正确写法
+
+`pi-lens-ignore` 必须写在被标记行的 **紧邻上一行**（`docs/dispositions.md`），
+**行尾注释无效**；而且规则 id 必须**精确**，`— 原因` 后缀会让匹配失败：
+
+```python
+# ✅ 正确
+# pi-lens-ignore: python-sql-injection
+conn.execute(text("..."))
+```
+
+```python
+# ❌ 无效（行尾）
+conn.execute(text("..."))  # pi-lens-ignore: python-sql-injection
+# ❌ 无效（带原因后缀，规则 id 匹配不上）
+# pi-lens-ignore: python-sql-injection — bound params
+conn.execute(text("..."))
+```
+
+仓库里历史遗留的抑制注释大多是行尾写法，因此从未生效。新写的请按上面的正确形式。
+
+另：pi-lens 自带的 ruff 配置（`config/ruff/core.toml`，`select` 含 `I`）与仓库
+`pyproject.toml` 不一致时，以 **能同时通过两者的写法** 为准；若两边都报而重排无法
+同时满足，先用 `.venv/bin/ruff check --config <pi-lens 自带 core.toml> <file>` 核实
+是否为误报。
+
 Definition of done:
 
 1. Run the narrowest relevant test command.

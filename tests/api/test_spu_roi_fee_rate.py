@@ -26,7 +26,7 @@ FX_SEED_TS = "2099-09-29T00:00:00+00:00"
 
 def _seed_fx(db_engine) -> None:
     with db_engine.begin() as conn:
-        # pi-lens-ignore: python-sql-injection — literal insert, bound params
+        # pi-lens-ignore: python-sql-injection
         sid = conn.execute(
             text(
                 "INSERT INTO fx.exchange_rate_snapshots "
@@ -36,7 +36,7 @@ def _seed_fx(db_engine) -> None:
             {"ts": FX_SEED_TS, "ts2": "2099-09-30T00:00:00+00:00"},
         ).scalar()
         for code, rate in [("USD", "1"), ("VND", "26330"), ("CNY", "6.7686473")]:
-            # pi-lens-ignore: python-sql-injection — literal insert, bound params
+            # pi-lens-ignore: python-sql-injection
             conn.execute(
                 text(
                     "INSERT INTO fx.exchange_rates "
@@ -49,7 +49,7 @@ def _seed_fx(db_engine) -> None:
 
 def _wipe(db_engine) -> None:
     with db_engine.begin() as conn:
-        # pi-lens-ignore: python-sql-injection — static cleanup statements
+        # pi-lens-ignore: python-sql-injection
         conn.execute(
             text(
                 "DELETE FROM reporting.shop_fee_rate_estimates WHERE shop_pk IN ("
@@ -57,9 +57,7 @@ def _wipe(db_engine) -> None:
             )
         )
         conn.execute(
-            text(
-                "DELETE FROM commerce.products_spu WHERE spu_id LIKE 'TEST_FEEAPI_%'"
-            )
+            text("DELETE FROM commerce.products_spu WHERE spu_id LIKE 'TEST_FEEAPI_%'")
         )
         conn.execute(
             text("DELETE FROM commerce.shops WHERE shop_id LIKE 'TEST_FEEAPI_%'")
@@ -88,7 +86,7 @@ def _fx(db_engine):
 
 def _seed_shop_with_spu(db_engine, shop_id: str, spu_id: str) -> int:
     with db_engine.begin() as conn:
-        # pi-lens-ignore: python-sql-injection — bound params
+        # pi-lens-ignore: python-sql-injection
         shop_pk = conn.execute(
             text(
                 "INSERT INTO commerce.shops (platform, shop_id, account_name, status) "
@@ -116,7 +114,7 @@ def _seed_estimate(
 ) -> None:
     """写入一份店铺费率快照；``calculated_on_offset_days`` 用于造过期快照。"""
     with db_engine.begin() as conn:
-        # pi-lens-ignore: python-sql-injection — bound params
+        # pi-lens-ignore: python-sql-injection
         conn.execute(
             text(
                 "INSERT INTO reporting.shop_fee_rate_estimates "

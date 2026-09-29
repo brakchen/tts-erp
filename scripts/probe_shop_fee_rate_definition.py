@@ -147,7 +147,8 @@ def _f(value: Decimal | float) -> float:
     不可能出现非数字字符串，因此这里的转换不会抛 ValueError。集中到一处是
     为了只保留一个 pi-lens 抑制点，而不是在每个调用点各撒一条。
     """
-    return float(value)  # pi-lens-ignore: unchecked-throwing-call-python
+    # pi-lens-ignore: unchecked-throwing-call-python
+    return float(value)
 
 
 def main() -> int:
@@ -180,6 +181,7 @@ def main() -> int:
         conn.execute(text("SET TRANSACTION READ ONLY"))
         # 用 set_config + 绑定参数设超时（而不是拼字符串），既无注入面，
         # 也不用 int() 转换（argparse 已 type=int）。
+        # pi-lens-ignore: python-sql-injection
         conn.execute(
             text("SELECT set_config('statement_timeout', :v, true)"),
             {"v": f"{args.statement_timeout_ms}ms"},
@@ -196,6 +198,7 @@ def main() -> int:
         )
 
         rows = (
+            # pi-lens-ignore: python-sql-injection
             conn.execute(
                 text(_PER_ORDER),
                 {
@@ -265,9 +268,7 @@ def main() -> int:
         - (_f(r["line_gmv"]) + _f(r["fee_signed"]) + _f(r["customer_refund"]))
         for r in rows
     ]
-    rel = sorted(
-        abs(x) / _f(r["line_gmv"]) for x, r in zip(resid, rows, strict=True)
-    )
+    rel = sorted(abs(x) / _f(r["line_gmv"]) for x, r in zip(resid, rows, strict=True))
     within1 = sum(1 for v in rel if v <= 0.01)
     within5 = sum(1 for v in rel if v <= 0.05)
 

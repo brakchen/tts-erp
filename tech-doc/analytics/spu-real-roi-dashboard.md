@@ -849,7 +849,6 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 - 主表和钻取表统一放进 `table-responsive`，所有列保留，以横向滚动代替按 `nth-child` 隐藏；
 - 钻取指标、P&L 分层、分页、页脚和店铺弹窗均使用 Bootstrap 栅格/工具类。
 
-
 > 单一口径：**行级与 totals 都按下单订单状态计（COD 店下单即算，不看 paid_at）**。
 > 有效订单 = 白名单状态（含 COD 在途/待收款）；取消订单 = 全部 CANCELLED（含未收款取消）。
 > GMV 再含取消单原额。金额主指标（净利润/ROI）自动跟随状态口径 sales——

@@ -106,7 +106,8 @@
   }
   // Single choke point for markup writes.
   function html(el, markup) {
-    el.innerHTML = markup; // pi-lens-ignore: no-inner-html-js
+    // pi-lens-ignore: no-inner-html-js
+    el.innerHTML = markup;
   }
   // Unwrap API envelopes: { items: [...], total: N, totals, meta }.
   function unwrap(payload) {
@@ -165,7 +166,8 @@
       clearDrillCache();
       if (r.status === 401) {
         // 401 → 跳登录(console.js 家族行为)
-        window.location.href = loginUrl(); // pi-lens-ignore: no-open-redirect-js
+        // pi-lens-ignore: no-open-redirect-js
+        window.location.href = loginUrl();
         throw new Error("unauthorized");
       }
       return r.json().then((payload) => {
@@ -268,7 +270,8 @@
       headers: { Accept: "application/json" },
     }).then((response) => {
       if (response.status === 401) {
-        window.location.href = loginUrl(); // pi-lens-ignore: no-open-redirect-js
+        // pi-lens-ignore: no-open-redirect-js
+        window.location.href = loginUrl();
         throw new Error("unauthorized");
       }
       if (!response.ok) throw new Error(`SPU options HTTP ${response.status}`);
@@ -428,7 +431,8 @@
               })
                 .catch(() => {})
                 .then(() => {
-                  window.location.href = loginUrl(); // pi-lens-ignore: no-open-redirect-js
+                  // pi-lens-ignore: no-open-redirect-js
+                  window.location.href = loginUrl();
                 });
             });
           }
@@ -825,7 +829,8 @@
     })
       .then((r) => {
         if (r.status === 401) {
-          window.location.href = loginUrl(); // pi-lens-ignore: no-open-redirect-js
+          // pi-lens-ignore: no-open-redirect-js
+          window.location.href = loginUrl();
           throw new Error("unauthorized");
         }
         if (!r.ok) throw new Error("HTTP " + r.status);
@@ -1301,7 +1306,8 @@
     var u;
     try {
       u = new URL(location.href);
-    } catch (_error) {
+    } catch {
+      // 可选 catch 绑定（ES2019）：这里不需要错误对象，且避免 unused-var 告警。
       return;
     }
     if (pk) u.searchParams.set("shop_pk", pk);
@@ -1363,7 +1369,8 @@
     )
       .then((r) => {
         if (r.status === 401) {
-          window.location.href = loginUrl(); // pi-lens-ignore: no-open-redirect-js
+          // pi-lens-ignore: no-open-redirect-js
+          window.location.href = loginUrl();
           throw new Error("unauthorized");
         }
         if (!r.ok) throw new Error(`shops HTTP ${r.status}`);
