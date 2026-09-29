@@ -1,0 +1,39 @@
+# Project-level gitleaks config (2026-09-29).
+# pi-lens's gitleaks runner does NOT read .gitleaksignore fingerprints; it
+# generates a scoped config that extends THIS file (LOCAL_GITLEAKS_CONFIG_NAMES).
+# .gitleaksignore remains for plain `gitleaks` CLI runs.
+# Keep this list narrow: real committed secrets must still be caught.
+[extend]
+useDefault = true
+
+# ─── Local-only files (gitignored, never committed) ───
+[[allowlists]]
+description = "Local env files (.env, .env.test, .env.bak.*) — gitignored runtime/test config"
+paths = ['''^\.env''']
+
+[[allowlists]]
+description = "Local runtime dump json — gitignored (see .gitignore)"
+paths = ['''^tiktok-data-sync-runtime-.*\.json$''']
+
+# ─── Non-source artifacts ───
+[[allowlists]]
+description = "Python bytecode cache — binary noise mirroring source findings"
+paths = ['''__pycache__''']
+
+# ─── Third-party TikTok official partner API docs (sample tokens from TikTok) ───
+[[allowlists]]
+description = "Vendored TikTok partner API docs; every token inside is TikTok's own doc sample"
+paths = ['''^tts-partner-api-docs/''']
+
+# ─── Obvious fake fixtures in tests / docstrings / tech-doc examples ───
+[[allowlists]]
+description = "Canonical fake values: test fixtures (ak_1234567890abcdef, abcdef0123456789, abc123def456), TikTok doc sample auth_code reused in tests, doc example hashes/UUIDs"
+regexTarget = "match"
+regexes = [
+  '''ak_1234567890abcdef''',
+  '''abcdef012345''',
+  '''abc123def456''',
+  '''TTP_FeBoANmHP3yqdoUI9fZOCw''',
+  '''73b716cce7f8b2c4220b1be3e5ab6327''',
+  '''e50184ff-1b52-429a-a9ae-d7294403435b''',
+]
