@@ -604,7 +604,7 @@ _SHOPS_PAGE_HTML = """<!doctype html>
           <th class="op-th">同步方式</th>
           <th class="op-th" style="width:120px;">操作</th>
         </tr></thead>
-        <tbody id="shop-body"><tr><td colspan="6" class="op-empty">加载中…</td></tr></tbody>
+        <tbody id="shop-body"><tr><td colspan="7" class="op-empty">加载中…</td></tr></tbody>
       </table>
     </section>
   </main>
@@ -1320,6 +1320,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
   <title>SPU 实际 ROI · tts-erp</title>
   <!-- Relative path: resolves to /static/... locally and /tts/static/... behind NGINX. Do not make absolute. -->
   <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
+  <link rel="stylesheet" href="../../static/vendor/tom-select.bootstrap5.min.css">
   <link rel="stylesheet" href="../../static/css/spu-roi.css?v=__CSSV_SPU_ROI__">
   <style>
     :root {
@@ -1435,13 +1436,26 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       </div>
     </section>
 
-    <!-- 工具栏:列宽与换行完全交给 Bootstrap grid 断点 -->
+    <!-- 工具栏:原生 select multiple 由 Tom Select Bootstrap 5 主题增强；不自研多选组件。 -->
     <section class="op-toolbar px-3 px-lg-4 py-3" id="toolbar">
-      <div class="row g-2 g-lg-3 align-items-end">
-        <div class="col-12 col-md-6 col-xl-3">
-          <label class="form-label op-fld-label mb-1" for="filter-q">搜索 spu_id</label>
-          <input id="filter-q" type="search" class="form-control form-control-sm" placeholder="spu_id 或标题" autocomplete="off" aria-label="按 spu_id 或标题搜索">
+      <div class="row g-2 g-lg-3 align-items-end mb-2">
+        <div class="col-12 col-xl">
+          <label class="form-label op-fld-label mb-1" for="filter-spu-ids">SPU 筛选</label>
+          <select id="filter-spu-ids" class="form-select" multiple aria-label="批量选择 SPU" disabled></select>
+          <div class="form-text op-spu-help">
+            支持搜索或批量粘贴中英文逗号分隔的 SPU；最多 100 个。
+            <span id="spu-selection-count">已选择 0 个</span>
+          </div>
+          <div class="invalid-feedback" id="spu-filter-feedback"></div>
         </div>
+        <div class="col-6 col-sm-auto d-grid">
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-spu-clear" disabled>清空</button>
+        </div>
+        <div class="col-6 col-sm-auto d-grid">
+          <button type="button" class="btn btn-sm btn-primary" id="btn-spu-apply" disabled>查询</button>
+        </div>
+      </div>
+      <div class="row g-2 g-lg-3 align-items-end">
         <div class="col-6 col-md-3 col-xl-2" data-tip="日期范围（销售/退款/广告同口径裁剪；空 = 全历史）">
           <label class="form-label op-fld-label mb-1" for="filter-w-start">起始日</label>
           <input id="filter-w-start" type="date" class="form-control form-control-sm" aria-label="销售/退款起始日期（空 = 不限）">
@@ -1551,6 +1565,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     </div>
   </div>
   <div id="ops-tip" role="tooltip" hidden></div>
+  <script src="../../static/vendor/tom-select.complete.min.js" defer></script>
   <script src="../../static/js/spu-roi.js?v=__JSV_SPU_ROI__" defer></script>
 </body>
 </html>

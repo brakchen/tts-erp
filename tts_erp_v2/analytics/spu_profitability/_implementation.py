@@ -357,6 +357,8 @@ _SQL_ROI_CATALOG = text(
     WHERE (CAST(:shop_pk AS bigint) IS NULL
            OR cp.shop_pk = CAST(:shop_pk AS bigint))
       AND (CAST(:q AS text) IS NULL OR cp.spu_id ILIKE '%' || :q || '%')
+      AND (CAST(:spu_ids AS text[]) IS NULL
+           OR cp.spu_id = ANY(CAST(:spu_ids AS text[])))
       AND (CAST(:active_only AS boolean) IS NOT TRUE
            OR cp.status ILIKE 'activate')
     ORDER BY cp.id
@@ -761,6 +763,7 @@ def _query_spu_roi(
     *,
     q: str | None,
     shop_pk: int | None,
+    spu_ids: tuple[str, ...] | None,
     active_only: bool,
     include_without_activity: bool,
     sort_field: str,
@@ -788,7 +791,12 @@ def _query_spu_roi(
     cats = (
         sess.execute(
             _SQL_ROI_CATALOG,
-            {"shop_pk": shop_pk, "q": catalog_q, "active_only": active_only},
+            {
+                "shop_pk": shop_pk,
+                "q": catalog_q,
+                "spu_ids": list(spu_ids) if spu_ids is not None else None,
+                "active_only": active_only,
+            },
         )
         .mappings()
         .all()

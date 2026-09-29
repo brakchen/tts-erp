@@ -32,6 +32,7 @@ from tts_erp_v2.analytics.spu_profitability import (
 )
 from tts_erp_v2.analytics.spu_profitability._compat import read_legacy_overview
 from tts_erp_v2.api.deps import get_session
+from tts_erp_v2.api.query_params import parse_spu_ids
 from tts_erp_v2.api.v2._common import error_response, request_id
 
 _MONEY_Q = Decimal("0.0001")
@@ -242,13 +243,20 @@ def _parse_fee_rate(raw: str | None) -> Decimal | None:
     return value
 
 
-def _scope(shop_pk, include_all, w_start, w_end) -> ProfitScope:
+def _scope(
+    shop_pk,
+    include_all,
+    w_start,
+    w_end,
+    spu_ids: tuple[str, ...] | None = None,
+) -> ProfitScope:
     try:
         return ProfitScope(
             shop_pk=shop_pk,
             start_date=w_start,
             end_date=w_end,
             include_inactive=include_all,
+            spu_ids=spu_ids,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -272,6 +280,7 @@ def list_spu_roi(
     request: Request,
     sess: Session = Depends(get_session),  # noqa: B008
     q: str | None = Query(default=None, max_length=200),
+    spu_ids: str | None = Query(default=None, max_length=4096),
     sort: str = Query(default="roi_real"),
     order: str = Query(default="asc"),
     limit: int = Query(default=100, ge=1, le=500),
@@ -290,7 +299,15 @@ def list_spu_roi(
             detail=f"sort must be one of {tuple(field.value for field in SortField)}",
         ) from exc
     fee_value = _parse_fee_rate(fee_rate)
-    scope = _scope(shop_pk, include_all, w_start, w_end)
+    try:
+        parsed_spu_ids = parse_spu_ids(spu_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if parsed_spu_ids is not None and shop_pk is None:
+        raise HTTPException(status_code=422, detail="shop_pk is required with spu_ids")
+    if parsed_spu_ids is not None and q is not None and q.strip():
+        raise HTTPException(status_code=422, detail="q and spu_ids cannot be combined")
+    scope = _scope(shop_pk, include_all, w_start, w_end, parsed_spu_ids)
     view = RowView(
         search=q or None,
         sort=sort_field,
