@@ -1,0 +1,613 @@
+"""plugin.orders 解析层单测。
+
+覆盖 parse_order_response / parse_logistics_response /
+parse_statement_list_response / parse_statement_transaction_response /
+flatten_fees。
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime
+
+import pytest
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from tts_erp_v2.db.base import get_engine
+from tts_erp_v2.plugin.orders.parser import (
+    flatten_fees,
+    parse_logistics_response,
+    parse_order_response,
+    parse_statement_list_response,
+    parse_statement_transaction_response,
+)
+from tts_erp_v2.plugin.orders.repository import _ts_to_datetime
+
+pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
+
+SHOP_ID = "TEST_parser-shop"
+
+_CLEANUP_SQLS = [
+    "DELETE FROM plugin.tracking_events WHERE shop_id = :s",
+    "DELETE FROM plugin.order_lines WHERE shop_id = :s",
+    "DELETE FROM plugin.settlement_details WHERE shop_id = :s",
+    "DELETE FROM plugin.settlements WHERE shop_id = :s",
+    "DELETE FROM plugin.shipments WHERE shop_id = :s",
+    "DELETE FROM plugin.orders WHERE shop_id = :s",
+]
+
+
+@pytest.fixture(autouse=True)
+def _cleanup(db_engine):
+    params = {"s": SHOP_ID}
+    with db_engine.begin() as conn:
+        for stmt in _CLEANUP_SQLS:
+            # pi-lens-ignore: python-sql-injection — _CLEANUP_SQLS 字面量 SQL, bind :s
+            conn.execute(text(stmt), params)
+    yield
+    with db_engine.begin() as conn:
+        for stmt in _CLEANUP_SQLS:
+            # pi-lens-ignore: python-sql-injection — _CLEANUP_SQLS 字面量 SQL, bind :s
+            conn.execute(text(stmt), params)
+
+
+# ─── flatten_fees ───────────────────────────────────────────────────
+
+
+class TestFlattenFees:
+    def test_empty(self):
+        assert flatten_fees(None) == []
+        assert flatten_fees([]) == []
+
+    def test_flat_list(self):
+        fees = [
+            {"type": "GROSS_SALES", "amount": {"amount": "100", "currency": "VND"}},
+            {"type": "REFUND", "amount": {"amount": "0", "currency": "VND"}},
+        ]
+        result = flatten_fees(fees)
+        assert len(result) == 2
+        assert result[0]["code"] == "GROSS_SALES"
+        assert result[0]["amount"] == "100"
+
+    def test_nested_sub_fees(self):
+        fees = [
+            {
+                "type": "PLATFORM_COMMISSION",
+                "amount": {"amount": "8000", "currency": "VND"},
+                "sub_fees": [
+                    {
+                        "type": "COMMISSION_TAX",
+                        "amount": {"amount": "2000", "currency": "VND"},
+                    },
+                ],
+            },
+        ]
+        result = flatten_fees(fees)
+        assert len(result) == 2
+        assert result[0]["code"] == "PLATFORM_COMMISSION"
+        assert result[1]["code"] == "COMMISSION_TAX"
+
+    def test_deeply_nested(self):
+        fees = [
+            {
+                "type": "A",
+                "amount": {"amount": "1", "currency": "VND"},
+                "sub_fees": [
+                    {
+                        "type": "B",
+                        "amount": {"amount": "2", "currency": "VND"},
+                        "sub_fees": [
+                            {"type": "C", "amount": {"amount": "3", "currency": "VND"}},
+                        ],
+                    },
+                ],
+            },
+        ]
+        result = flatten_fees(fees)
+        assert len(result) == 3
+        assert [r["code"] for r in result] == ["A", "B", "C"]
+
+
+# ─── parse_order_response ───────────────────────────────────────────
+
+
+class TestParseOrderResponse:
+    def _make_response(self, orders: list[dict]) -> dict:
+        return {"code": 0, "data": {"main_orders": orders}}
+
+    def test_basic_parse(self):
+        eng = get_engine()
+        with Session(eng) as sess:
+            resp = self._make_response(
+                [
+                    {
+                        "main_order_id": "TEST_ord-1",
+                        "order_status_module": {"order_status": "DELIVERED"},
+                        "price_module": {
+                            "payment": {"amount": "299000", "currency": "VND"},
+                            "total_amount": {"amount": "329000", "currency": "VND"},
+                        },
+                        "sku_module": [
+                            {
+                                "sku_id": "sku-1",
+                                "product_id": "prod-1",
+                                "product_name": "Widget",
+                                "quantity": 2,
+                                "sale_price": {"amount": "149500", "currency": "VND"},
+                            },
+                        ],
+                    }
+                ]
+            )
+            rows = parse_order_response(
+                sess,
+                shop_id=SHOP_ID,
+                response_body=resp,
+                captured_at=datetime.now(UTC),
+            )
+            sess.commit()
+            assert rows == 2  # 1 order + 1 line
+
+    def test_empty_main_orders(self):
+        eng = get_engine()
+        with Session(eng) as sess:
+            rows = parse_order_response(
+                sess,
+                shop_id=SHOP_ID,
+                response_body={"code": 0, "data": {"main_orders": []}},
+                captured_at=datetime.now(UTC),
+            )
+            assert rows == 0
+
+    def test_sku_dedup(self):
+        """同 sku_id 出现两次只写一次。"""
+        eng = get_engine()
+        with Session(eng) as sess:
+            resp = self._make_response(
+                [
+                    {
+                        "main_order_id": "TEST_ord-dedup",
+                        "sku_module": [
+                            {"sku_id": "sku-dup", "product_id": "p1"},
+                            {"sku_id": "sku-dup", "product_id": "p1"},
+                        ],
+                    }
+                ]
+            )
+            rows = parse_order_response(
+                sess,
+                shop_id=SHOP_ID,
+                response_body=resp,
+                captured_at=datetime.now(UTC),
+            )
+            sess.commit()
+            assert rows == 2  # 1 order + 1 line (deduped)
+
+
+# ─── parse_logistics_response ──────────────────────────────────────
+
+
+class TestParseLogisticsResponse:
+    def test_multi_package(self):
+        eng = get_engine()
+        with Session(eng) as sess:
+            resp = {
+                "code": 0,
+                "data": {
+                    "package_list": [
+                        {
+                            "main_order_id": "TEST_ord-log-1",
+                            "package_id": "pkg-1",
+                            "tracking_no": "TN1",
+                            "logistic_supplier": "VNPost",
+                            "logistic_detail": {
+                                "track_list": [
+                                    {
+                                        "time": "2026-09-01T10:00:00Z",
+                                        "track_status": "Picked up",
+                                    },
+                                    {
+                                        "time": "2026-09-02T15:00:00Z",
+                                        "track_status": "Delivered",
+                                    },
+                                ]
+                            },
+                        },
+                        {
+                            "main_order_id": "TEST_ord-log-1",
+                            "package_id": "pkg-2",
+                            "tracking_no": "TN2",
+                            "logistic_supplier": "GHN",
+                            "logistic_detail": {
+                                "track_list": [
+                                    {
+                                        "time": "2026-09-03T08:00:00Z",
+                                        "track_status": "In transit",
+                                    },
+                                ]
+                            },
+                        },
+                    ]
+                },
+            }
+            rows = parse_logistics_response(
+                sess,
+                shop_id=SHOP_ID,
+                order_id="TEST_ord-log-1",
+                response_body=resp,
+                captured_at=datetime.now(UTC),
+            )
+            sess.commit()
+            assert rows == 5  # 2 shipments + 3 tracking events
+
+    def test_empty_track_list(self):
+        eng = get_engine()
+        with Session(eng) as sess:
+            resp = {
+                "code": 0,
+                "data": {
+                    "package_list": [
+                        {
+                            "main_order_id": "TEST_ord-ntrl",
+                            "package_id": "pkg-ntrl",
+                            "logistic_detail": {"track_list": []},
+                        }
+                    ]
+                },
+            }
+            rows = parse_logistics_response(
+                sess,
+                shop_id=SHOP_ID,
+                order_id="TEST_ord-ntrl",
+                response_body=resp,
+                captured_at=datetime.now(UTC),
+            )
+            sess.commit()
+            assert rows == 1  # 1 shipment, 0 events
+
+    def test_track_list_is_sorted_oldest_to_newest_before_status_mapping(self):
+        """TikTok 返回倒序轨迹时，最新状态/发货时间不能取反。"""
+        eng = get_engine()
+        with Session(eng) as sess:
+            resp = {
+                "code": 0,
+                "data": {
+                    "package_list": [
+                        {
+                            "package_id": "TEST_pkg-reversed",
+                            "logistic_detail": {
+                                "track_list": [
+                                    {
+                                        "time": "2026-09-02T15:00:00Z",
+                                        "track_status": "Delivered",
+                                    },
+                                    {
+                                        "time": "2026-09-01T10:00:00Z",
+                                        "track_status": "Picked up",
+                                    },
+                                ]
+                            },
+                        }
+                    ],
+                },
+            }
+            parse_logistics_response(
+                sess,
+                shop_id=SHOP_ID,
+                order_id="TEST_ord-reversed",
+                response_body=resp,
+                captured_at=datetime.now(UTC),
+            )
+            row = sess.execute(  # pi-lens-ignore: python-sql-injection
+                text(
+                    "SELECT status, shipped_at, delivered_at FROM plugin.shipments WHERE shop_id = :s AND package_id = :p"
+                ),  # pi-lens-ignore: python-sql-injection
+                {"s": SHOP_ID, "p": "TEST_pkg-reversed"},
+            ).one()
+            assert row.status == "Delivered"
+            assert row.shipped_at.isoformat().startswith("2026-09-01T10:00:00")
+            assert row.delivered_at.isoformat().startswith("2026-09-02T15:00:00")
+
+    def test_numeric_string_track_times_are_persisted(self):
+        """物流轨迹时间戳可能以数字字符串返回，不能静默变成 NULL。"""
+        eng = get_engine()
+        with Session(eng) as sess:
+            resp = {
+                "code": 0,
+                "data": {
+                    "package_list": [
+                        {
+                            "package_id": "TEST_pkg-numeric-time",
+                            "logistic_detail": {
+                                "track_list": [
+                                    {"time": "1788362478", "track_status": "Picked up"},
+                                    {
+                                        "time": "1788961712000",
+                                        "track_status": "Delivered",
+                                    },
+                                ]
+                            },
+                        }
+                    ],
+                },
+            }
+            parse_logistics_response(
+                sess,
+                shop_id=SHOP_ID,
+                order_id="TEST_ord-numeric-time",
+                response_body=resp,
+                captured_at=datetime.now(UTC),
+            )
+            sess.commit()
+            row = sess.execute(  # pi-lens-ignore: python-sql-injection
+                text(
+                    "SELECT shipped_at, delivered_at FROM plugin.shipments WHERE shop_id = :s AND package_id = :p"
+                ),
+                {"s": SHOP_ID, "p": "TEST_pkg-numeric-time"},
+            ).one()
+            assert row.shipped_at == datetime.fromtimestamp(1788362478, tz=UTC)
+            assert row.delivered_at == datetime.fromtimestamp(1788961712, tz=UTC)
+
+    def test_localized_delivered_status_sets_delivered_at(self):
+        """中文签收状态也必须落 delivered_at，不能因英文判断漏记终态。"""
+        eng = get_engine()
+        with Session(eng) as sess:
+            resp = {
+                "code": 0,
+                "data": {
+                    "package_list": [
+                        {
+                            "package_id": "TEST_pkg-localized-delivered",
+                            "logistic_detail": {
+                                "track_list": [
+                                    {
+                                        "time": "2026-09-19T12:00:00Z",
+                                        "track_status": "已签收",
+                                        "action_code": 50101,
+                                    }
+                                ]
+                            },
+                        }
+                    ],
+                },
+            }
+            parse_logistics_response(
+                sess,
+                shop_id=SHOP_ID,
+                order_id="TEST_ord-localized-delivered",
+                response_body=resp,
+                captured_at=datetime.now(UTC),
+            )
+            sess.commit()
+            row = sess.execute(  # pi-lens-ignore: python-sql-injection
+                text(
+                    "SELECT delivered_at FROM plugin.shipments WHERE shop_id = :s AND package_id = :p"
+                ),
+                {"s": SHOP_ID, "p": "TEST_pkg-localized-delivered"},
+            ).one()
+            assert row.delivered_at == datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+
+
+# ─── parse_statement_list_response ─────────────────────────────────
+
+
+class TestParseStatementListResponse:
+    def test_basic(self):
+        eng = get_engine()
+        with Session(eng) as sess:
+            resp = {
+                "code": 0,
+                "data": {
+                    "statement_records": [
+                        {
+                            "statement_id": "TEST_stmt-1",
+                            "statement_version": 0,
+                            "bill_period": "2026-09-01~2026-09-07",
+                            "settlement_time": "2026-09-08T00:00:00Z",
+                            "payment_id": "pay-1",
+                            "payment_status": 2,
+                            "settle_amount": {"amount": "1000000", "currency": "VND"},
+                            "earning_amount": {"amount": "900000", "currency": "VND"},
+                            "fee_amount": {"amount": "100000", "currency": "VND"},
+                            "adjust_amount": {"amount": "0", "currency": "VND"},
+                            "payable_amount": {"amount": "900000", "currency": "VND"},
+                            "shipping_amount": {"amount": "50000", "currency": "VND"},
+                            "total_reserve_amount": {"amount": "0", "currency": "VND"},
+                        }
+                    ]
+                },
+            }
+            rows = parse_statement_list_response(
+                sess,
+                shop_id=SHOP_ID,
+                response_body=resp,
+                captured_at=datetime.now(UTC),
+            )
+            sess.commit()
+            assert rows == 1
+
+
+# ─── parse_statement_transaction_response ──────────────────────────
+
+
+class TestParseStatementTransactionResponse:
+    def test_basic(self):
+        eng = get_engine()
+        with Session(eng) as sess:
+            resp = {
+                "code": 0,
+                "data": {
+                    "sku_record": {
+                        "statement_sku_detail_id": "TEST_ssd-1",
+                        "statement_id": "TEST_stmt-tx-1",
+                        "statement_version": 0,
+                        "trade_order_id": "TO-1",
+                        "sku_id": "SKU-1",
+                        "product_name": "Widget",
+                        "sku_name": "Blue",
+                        "quantity": 2,
+                        "settlement_status": 1,
+                        "placed_time": "2026-09-01T08:00:00Z",
+                        "settlement_amount": {"amount": "100000", "currency": "VND"},
+                        "earning_amount": {"amount": "90000", "currency": "VND"},
+                        "fees": {"amount": "10000", "currency": "VND"},
+                        "in_come": {
+                            "amount": {"amount": "100000", "currency": "VND"},
+                            "fee_list": [
+                                {
+                                    "type": "GROSS_SALES",
+                                    "amount": {"amount": "100000", "currency": "VND"},
+                                },
+                            ],
+                        },
+                        "out_come": {
+                            "amount": {"amount": "10000", "currency": "VND"},
+                            "fee_list": [
+                                {
+                                    "type": "PLATFORM_COMMISSION",
+                                    "amount": {"amount": "8000", "currency": "VND"},
+                                    "sub_fees": [
+                                        {
+                                            "type": "COMMISSION_TAX",
+                                            "amount": {
+                                                "amount": "2000",
+                                                "currency": "VND",
+                                            },
+                                        },
+                                    ],
+                                },
+                            ],
+                        },
+                    }
+                },
+                "seller_web_cut_flow": True,
+                "seller_app_cut_flow": False,
+            }
+            rows = parse_statement_transaction_response(
+                sess,
+                shop_id=SHOP_ID,
+                response_body=resp,
+                captured_at=datetime.now(UTC),
+            )
+            sess.commit()
+            assert rows == 1
+
+
+# ─── JSON 可序列化 ─────────────────────────────────────────────────
+
+
+def test_flatten_fees_result_is_json_serializable():
+    fees = [
+        {
+            "type": "A",
+            "amount": {"amount": "1", "currency": "VND"},
+            "sub_fees": [
+                {"type": "B", "amount": {"amount": "2", "currency": "VND"}},
+            ],
+        },
+    ]
+    result = flatten_fees(fees)
+    json.dumps(result)  # must not raise
+
+
+# ─── _ts_to_datetime（2026-09-14 修复：数字字符串静默吞 None 导致 order_time 全 NULL）───
+
+
+class TestTsToDatetime:
+    """prod raw_log 实测形态：create_time 秒级数字字符串、update_time 毫秒级数字字符串。"""
+
+    def test_int_seconds(self):
+        assert _ts_to_datetime(1788362478) == datetime.fromtimestamp(1788362478, tz=UTC)
+
+    def test_int_milliseconds(self):
+        assert _ts_to_datetime(1788961712000) == datetime.fromtimestamp(
+            1788961712, tz=UTC
+        )
+
+    def test_numeric_string_seconds(self):
+        assert _ts_to_datetime("1788362478") == datetime.fromtimestamp(
+            1788362478, tz=UTC
+        )
+
+    def test_numeric_string_milliseconds(self):
+        assert _ts_to_datetime("1788961712000") == datetime.fromtimestamp(
+            1788961712, tz=UTC
+        )
+
+    def test_numeric_string_microseconds(self):
+        # prod 实测：update_time 有微秒级形态
+        assert _ts_to_datetime("1789313764908000") == datetime.fromtimestamp(
+            1789313764.908, tz=UTC
+        )
+
+    def test_out_of_range_returns_none(self):
+        assert _ts_to_datetime("999999999999999999999") is None
+
+    def test_iso_string(self):
+        assert _ts_to_datetime("2026-09-01T10:00:00") == datetime(
+            2026, 9, 1, 10, 0, tzinfo=UTC
+        )
+
+    @pytest.mark.parametrize("value", [None, 0, "0", "", "  "])
+    def test_empty_values(self, value):
+        assert _ts_to_datetime(value) is None
+
+    def test_garbage_string_returns_none(self):
+        assert _ts_to_datetime("not-a-timestamp") is None
+
+
+class TestParseOrderResponseTimes:
+    """数字字符串时间戳必须落库（回归：修复前 order_time/update_time 全 NULL）。"""
+
+    def test_numeric_string_times_persisted(self):
+        eng = get_engine()
+        with Session(eng) as sess:
+            resp = {
+                "main_order_id": "TEST_ord-times",
+                "trade_order_module": {
+                    "create_time": "1788362478",
+                    "update_time": "1788961712000",
+                },
+                "sku_module": [],
+            }
+            rows = parse_order_response(
+                sess,
+                shop_id=SHOP_ID,
+                response_body=resp,
+                captured_at=datetime.now(UTC),
+            )
+            sess.commit()
+            assert rows == 1
+            row = sess.execute(
+                # pi-lens-ignore: python-sql-injection — 字面量 SQL
+                text(
+                    "SELECT order_time, update_time FROM plugin.orders WHERE order_id = 'TEST_ord-times'"
+                )
+            ).one()
+            assert row.order_time == datetime.fromtimestamp(1788362478, tz=UTC)
+            assert row.update_time == datetime.fromtimestamp(1788961712, tz=UTC)
+
+
+# ─── _to_decimal（2026-09-14：解析失败 log.warning，不再静默 None）───
+
+
+class TestToDecimal:
+    def test_valid(self):
+        from tts_erp_v2.plugin.orders.repository import _to_decimal
+
+        assert _to_decimal("299000") == 299000
+        assert _to_decimal(1.5) is not None
+
+    def test_invalid_returns_none_and_warns(self, caplog):
+        from tts_erp_v2.plugin.orders.repository import _to_decimal
+
+        with caplog.at_level("WARNING"):
+            assert _to_decimal("not-a-number", field="test.field") is None
+        assert "test.field" in caplog.text
+
+    def test_none_and_empty(self):
+        from tts_erp_v2.plugin.orders.repository import _to_decimal
+
+        assert _to_decimal(None) is None
+        assert _to_decimal("") is None

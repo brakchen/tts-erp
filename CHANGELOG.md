@@ -1,5 +1,221 @@
 # tts-erp CHANGELOG
 
+## 2026-09-15 — biz-doc：消除与 rubric 的循环引用
+
+`spu-roi-profit-calculation.md` 头部「底层权威 = rubric」改为「本文档 = 利润口径唯一
+truth source（计算依据）；rubric = 历史演进与实测档案（非计算依据）」。
+rubric 头部本就以 biz-doc 为基准文档，方向不变——权威指向现在单向。
+
+## 2026-09-15 — biz-doc：撤掉版本历史与实测快照（防干扰 agent 计算）
+
+`spu-roi-profit-calculation.md`：删除 §六版本历史表 + §七实测验证点——旧版规则/数字与
+时点快照（655 件、−$1,230.45 等）和当前口径并排出现，其他 agent 取数时可能抓错行。
+内容无丢失：版本历史与实测数字本就在 `handoff/spu-roi-full-loss-rubric.md` 有副本；
+唯二缺口的 95.4% 已结算比例 / 35.9% 实测扣费已补进 rubric 参数表（标注时点快照）。
+原文档 §六改为文档关系节，新增指针说明。
+
+## 2026-09-15 — biz-doc：v9 提升为文档整体口径
+
+`spu-roi-profit-calculation.md`：header 明写「当前口径版本：v9 —— 本文档所有章节共同构成
+v9 口径整体，不存在子口径」；去掉节级「（v9 口径）」「（v9 修正）」标签（避免误读为
+只有该节是 v9）；版本历史表标注 v9 = 当前，并加注「仅为历史演进记录」。
+
+## 2026-09-15 — biz-doc 术语改名：全损退款率 → 全损率
+
+`spu-roi-profit-calculation.md`：「全损退款率」改名「全损率」，定义明写分子全程含
+退货退款件 + 海外取消两部分（旧名易被误读为只含退款）。口径公式不变。
+⚠ 页面列名（`pages.py` 「全损退款率%」）与 tech-doc 引用暂仍为旧名，待随 UI 改名同步。
+
+## 2026-09-15 — biz-doc 名词归类修正：采购成本（单价）挪入金额层
+
+`spu-roi-profit-calculation.md`：「采购成本（单价，unit_cost）」从 §1.2 数量层概念挪到
+§1.3 金额层概念——单价是价格不是数量，原归类不当。数量层现只剩有效件数 / 全损件数。
+
+## 2026-09-15 — biz-doc 术语改名：单位成本 → 采购成本（单价）
+
+`biz-doc/analytics/spu-roi-profit-calculation.md`：「单位成本」改名「采购成本（单价）」；
+原指合计金额的「采购成本」改名「采购成本合计」消歧（净利润公式减项同步更新）。
+纯术语改动，口径与公式数值不变。
+
+## 2026-09-15 — biz-doc 拆分：利润口径（纯概念）与数据源映射分离
+
+**问题**：`biz-doc/analytics/spu-roi-profit-calculation.md` 混杂了两层内容——
+业务概念/公式定义（理论上与数据源无关）和物理表/字段/SQL（数据源绑定）。
+且随 v8.1 实现切换与 migration 0020 删视图，文中 `ad_product_links.real_cost_total`
+等取数引用已过时。
+
+**改动**（docs-only，无代码变动）：
+- `spu-roi-profit-calculation.md` 重写为纯口径文档：只含名词定义（§一）+ 公式（§二）+
+  分类矩阵 / 参数 / Prompt / 版本历史，不再出现任何表名、字段名、SQL。
+- 新增 `biz-doc/analytics/spu-roi-data-sources.md`：概念 → 物理表/字段/枚举映射，
+  分 **API 数据源**（commerce/finance/fulfillment/after_sales，含状态枚举、
+  action_code 速查、case_type 完结枚举）与 **plugin 数据源**（plugin.*，含
+  main_order_status 100–104 码值表、cancel_type 枚举、settlement_details.trade_order_id
+  关联键、tracking_events 无 action_code 列等已知缺口）两部分；广告/汇率/采购
+  两路共用部分单列。
+- `biz-doc/README.md` 目录清单更新；`ad-product-links-view.md` 标注为历史档案
+  （视图已被 migration 0020 删除）。
+
+## 2026-09-15 — SPU ROI 广告消耗按日期切片 v8.1（v8 选错源修正）
+
+**v8 失误**：v8 上线时看 ad_daily last_update 停在 2026-09-13 23:15（merge job
+被禁用后的表身 last_update），推断“ad_daily 冻结、ad_today 是新生产
+源”，把 `_SQL_ROI_AD` / `_SQL_DETAIL_ADS` / `_SQL_ROI_WINDOW` 改读
+`ad_today`。但 2026-09-15 17:20 现场反馈“八月广告消耗只有 $25”
+调试发现 ad_daily last_update 实际是 2026-09-14 17:22:48——merge job
+禁用只防了 ad_today→ad_daily 跨天清理，没停 ad_daily 写入口；Chrome 扩
+展 kind=daily dumps 仍走 `upsert_daily_rows` 写 ad_daily。用户选择“主要看
+ad_daily 的数据”，v8.1 回切到 ad_daily。
+
+**改动**：
+- **后端**（`tts_erp_v2/analytics/spu_roi.py`）：
+  - `_SQL_ROI_AD` / `_SQL_DETAIL_ADS` / `_SQL_ROI_WINDOW` 3 处都改回读
+    `plugin.ad_daily`（v7 源）；保留 v8 加的 `day BETWEEN :ws AND :we` 裁剪。
+  - 注释从“v8: ad_today 单源”改为“v8.1: ad_daily 单源；ad_today 为临时表”。
+- **测试**（`tests/api/test_spu_roi_api.py`）：
+  - `_seed_ad_dump` 夹具从写 ad_today 改回写 ad_daily（v7 行为）。
+  - 既有 v8 行为测试（`test_spu_roi_date_window_clips_ad` /
+    `test_spu_roi_ad_window_single_side_only`）不变——SQL 语义同 v8，只是
+    数据源调换，裁剪逻辑仍有效。
+- **设计文档**（`tech-doc/analytics/spu-roi-v8-ad-window.md`）：§1.4 重写
+  为“ad_daily / ad_today 现状（v8.1 修正）”，明写 v8 选错源原因与 v8.1
+  选 ad_daily 依据。
+
+**表状态**（2026-09-15 17:25）：
+
+| 表 | 行数 | 日期范围 | 判 |
+| --- | ---: | --- | --- |
+| `plugin.ad_daily` | 25,471 | 2026-07-10 ~ 09-14 | 生产主源（v8.1 读） |
+| `plugin.ad_today` | 1,142 | 2026-09-13 ~ 09-15 | 重复写入临时表 |
+
+**遗留**：ad_today 9-13~9-15 1,142 行未回填 ad_daily（Chrome 扩展
+kind=today 仍在写）。见 `tech-doc/analytics/spu-roi-v8-ad-window.md`
+§10.1。
+
+## 2026-09-15 — SPU ROI 广告消耗按日期切片（v8）
+
+**背景**：v7 上线起 `pages/spu-roi` 的"广告消耗"始终为全窗口累计（`ad_daily ∪ ad_today`
+全表），与销售/退款可随日期裁剪不对称——选起始/截止日后 spend / gmv_ad / ad_count
+都不变，被用户反复报为“广告消耗不随日期变”。同期 `plugin.ad_merge_today2daily`
+自 2026-09-13 被禁用（UTC 跨天延迟归因调查），`ad_daily` 已冻结，历史数据需回填
+才能完整覆盖——本改动不包含回填。
+
+**改动**：
+
+- **后端**（`tts_erp_v2/analytics/spu_roi.py`）：
+  - `_SQL_ROI_AD` / `_SQL_DETAIL_ADS` 删 `ad_daily` UNION ALL，仅读 `plugin.ad_today`；
+    加 `day BETWEEN :ws AND :we` 过滤（与销售/退款同语义）。
+  - `/v2/analytics/spu-roi/{spu_pk}/ads` 端点新增 `w_start` / `w_end` query 参数
+    （原端点不接受窗口）。
+  - `_SQL_ROI_WINDOW` 改为只查 `ad_today`，`meta.window.first_day/last_day`
+    现仅反映 ad_today 当前覆盖范围。
+  - `window_note` 文案改为“ad 同窗口裁剪（v8）”，删“ad=视图全窗口累计”说明。
+- **前端**（`pages/spu-roi`）：
+  - 结余带“广告消耗”格 tooltip、表头 tooltip、钻取面板 HINT 同步改“随选中日期窗口裁剪”。
+  - 日期框 tooltip 改“销售/退款/广告同口径裁剪”。
+- **测试**（`tests/api/test_spu_roi_api.py`）：
+  - 删除 v7 `test_spu_roi_date_window_does_not_clip_ad`（v7“全窗口累计”护栏与 v8 行为反向，留存只会误导）。
+  - 新增 `test_spu_roi_date_window_clips_ad`（v8 行为护栏：窗外 ad 被裁，窗内 ad 留下）。
+  - `_seed_ad_dump` 夹具改为写 `plugin.ad_today`（v8 后 ad_daily 不在取数路径）。
+- **文档**（`tech-doc/analytics/spu-roi-v7-refactor.md`）：
+  - §6.2 / §6.3 / §6.4 / §8.13 同步 v8 口径；`ad_today` 是 ROI 主源说明。
+
+**数据库**：`plugin.ad_today` 仍是主源；`plugin.ad_daily` 仍在表上但不再被读。
+历史广告数据（2026-07-10 ~ 2026-09-12）需另起 migration 从 `ad_daily` 回填到 `ad_today`
+（不在本 lane）。回填前选更早日期范围会出现“广告消耗归零”现象。
+
+## 2026-09-12 — 修正结算版本覆盖查询
+
+- `/v2/order-sync/has-data` 支持可选 `versions`，结算域按 `statement_id + statement_version`
+  判断是否已同步，避免旧版本遮蔽新版本。
+- 未携带 `versions` 的旧插件继续按 `statement_id` 查询，保持协议兼容。
+
+## 2026-09-11 — 插件数据收敛到 `plugin` schema（chrome_sync / analytics → plugin）
+
+**背景**：广告 dump 没有 server-side 同步（JOBS 里无 ad job），唯一入口是 Chrome 插件
+POST dumps；但 `api-managed` 守卫（commit `ae843a1`）把 `data_source='api'` 店铺的 dumps
+**全域静默吞掉** → 广告数据永远进不来。而守卫要防的「API/插件双写」在广告侧根本不存在。
+
+**方向**：api 同步数据（`commerce.*` 等）与插件 dump 数据（`plugin.*`）按 schema
+**物理隔离**，不再需要判定来源；`commerce.shops.data_source` 随之删除（lane 4）。
+
+- **migration `0023_chrome_sync_to_plugin`**：`ALTER SCHEMA chrome_sync RENAME TO plugin`
+  —— 7 张订单/物流/结算表 + 6 个 FK + 7 个 IDENTITY 序列随迁；数据一行不动。
+- **migration `0024_analytics_to_plugin`**：`ALTER TABLE analytics.{ad_today,ad_daily,
+  ad_monthly,ad_raw_log,plugin_logs} SET SCHEMA plugin` + `DROP SCHEMA analytics`
+  —— 广告/日志 5 张表并入同一 namespace，仍是零行级 DML。
+- **代码/包**：`tts_erp_v2/chrome_sync/` → `plugin/orders/`；`analytics/{domain,repository}.py`
+  → `plugin/ads/`；`db/models/{chrome_sync,analytics}.py` 合并为 `db/models/plugin.py`（12 表）。
+  ROI 看板读侧 `analytics/spu_roi.py` 留原位，只改 SQL 的 schema 名。
+- **job 改名**：`analytics.solidify` → **`plugin.ad_merge_today2daily`**
+  （模块 `jobs/ad_merge_today2daily.py`；`solidify_yesterday` → `merge_today_into_daily`）。
+- **工具**：`scripts/regen_schema.py` 新增 `--db-url`/`TTS_ERP_DB_URL` 覆盖（原硬编码读
+  `.env`=prod），使 `schema_tts_erp.sql` 可在不碰 prod 的前提下从 test 库再生成；
+  同时修掉 `\unrestrict` 随机 token（修后 regen 幂等）。
+- 端点路径**不变**（`/v2/analytics/sync/*` 仍是插件侧 stable 契约）。
+
+## 2026-09-11 — 删除 v3 遗留对象（migration 0020）
+
+- **DROP** `analytics.ad_product_links`（视图）、`analytics.ad_raw`、
+  `analytics.ad_sync_audit` —— migration `0020_drop_v3_analytics_leftovers`。
+- 引用面审计（删前完成）：生产 Python **零引用**该视图；SPU ROI 的 `_SQL_ROI_AD`
+  直接读 `ad_daily ∪ ad_today` 并自行 JOIN `commerce`。`ad_raw` 自 v4 上线即冻结
+  （只写 `ad_raw_log`），最后真实写入 2026-09-09。
+- 配套：删 `tests/analytics/test_ad_product_links_view.py`（9 用例）；
+  `schema_tts_erp.sql` 重生成；`models/analytics.py` 注释更新；
+  一批现行文档同步（`external-api.md` / `setup/analytics-sync.md` /
+  `spu-real-roi-dashboard.md` 等），历史设计记录加废弃标注。
+- 备份：`/home/schan/backups/analytics_ad_raw_20260911_0118.sql.gz`（1467 行）、
+  `analytics_ad_sync_audit_20260911_0120.sql.gz`（2287 行）。
+
+## 2026-09-07 (refactor) — pages/spu-roi v7 重构（rubric v8 / D1-D8 全拍板）
+
+设计稿 `tech-doc/analytics/spu-roi-v7-refactor.md` 落地。生产库实测 v8 新基线：
+净利 −$911.23 / 盈利 14 SPU / 全损 127 件（rubric v7 旧 -$2,266.87 / 盈利 25 SPU 失效）。
+
+- **D3 后端模块抽取**：`tts_erp_v2/analytics/spu_roi.py` 新建（1,464 行），含常量、9 条
+  SQL、`_query_spu_roi`、成本链、`_resolve_fx_rates`、4 个钻取端点 handler；
+  `api/v2/analytics.py` ROI 段全删，瘦身 892 行，仅 re-export。
+- **D2 数据层零值落库**（先行 lane：feat/settlement-zero-components）：
+  `_write_components` 删 amount==0 跳过；历史回填 2,339 行；「有交易必有
+  SETTLEMENT 行」实测成立（605/605）。
+- **D1 成本链 4 层**：MANUAL → PURCHASE → SOURCE_PRICE → DEFAULT_K1=40 CNY
+  （D1 拍板：原 30→40）；`cost_source` 枚举扩四值。
+- **D4 M13b 切 38301 全损口径**：`return_loss = full_loss_qty × cost`（含已出海
+  取消件），不再用完结退货件数口径。
+- **D5 已结/未结分层**：已结算按 SETTLEMENT 实到账分摊，未结算按
+  `gmv × (1−0.308) × (1−SPU退款率)` 估算；M19 缩为信息列。
+- **D6 钻取端点懒加载**：每 tab 一端点（orders/settlements/cases/ads），主表
+  筛选变化清缓存。
+- **D7 行内 accordion 钻取面板**：5 tab（利润构成/订单·物流/结算/售后/广告）。
+- **D8 主表精简 6 列**：广告消耗 / 有效GMV / 有效出单量 / 取消率 / 全损退款率% /
+  净利润；⚙ 列开关组全部取消；红绿判据简化为亏损=红字。
+- **API 契约新增 7 字段**：`net_revenue / settled_sales / unsettled_sales /
+  settled_order_count / full_loss_qty / full_loss_cancelled_qty / full_loss_rate`。
+- **文档同步**：rubric 升 v8；dashboard §5.2/§5.3、external-api.md spu-roi 段升 v8。
+- **测试**：`tests/api/test_spu_roi_api.py` 33 个测试通过；新增 4 个钻取端点测试。
+- **结余带别名**：原"全损退款" → "全损货损\$"（金额口径），主列同名指标改为
+  "全损退款率%"（件数率口径）。
+
+## 2026-09-07 (feature) — analytics 区间聚合同步（protocol v3, Design A）
+
+服务端落地 `tech-doc/analytics/range-aggregate-history-sync.md`（与 Chrome 扩展
+v3 同窗口发布）：
+
+- **schema**（migration 0012/0013/0014）：`analytics.ad_raw` 从「一行=一天」升级
+  为 `kind(history/today/daily) + [day_start..day_end]`；live 行按
+  (seller,advertiser,endpoint,campaign,kind) partial-unique，daily 行保留旧
+  5 元组唯一；新增 `analytics.ad_sync_audit` 元数据审计表；
+  `ad_product_links` 视图改读 live 快照（未转换 campaign 回退 daily 保口径）。
+- **/dumps**：protocolVersion 3（kind/dayStart/dayEnd）；status 扩展
+  `updated` / `stale_ignored`（capturedAt 单调守卫防旧覆盖新）；v3 history 写入
+  同事务折叠被覆盖的 legacy daily 行 + 写审计。v2 旧客户端仍兼容（daily）。
+- **/cursor**：新增 v3 coverage 模式（kind + campaignId → 返回 live 行
+  hasRow/dayStart/dayEnd/capturedAt）；legacy has-data 改为覆盖语义（daily 或
+  live 区间含该日）。`has_data_cache` 只缓存 live 行（无 stale-true）。
+- 测试：`tests/analytics/*`（37）+ `tests/api/test_analytics_v3_range.py`（12）
+  新增/适配；analytics 相关全量 111 passed。
+
 ## 2026-09-06 (fix) — SPU 实际 ROI 看板 fee_rate 量级上限
 
 - **fee_rate 量级上限 → 422**：`GET /v2/analytics/spu-roi` 的 `fee_rate` 增加 `|fee_rate| > 1e6` 校验（用 `Decimal.copy_abs()`，避开默认算术 context 对超大指数的 Overflow），与既有非有限值/负值校验并列，杜绝 `1e9999999` 这类值穿透到 quantize 造成 500；`tests/api/test_spu_roi_api.py` 补充 `fee_rate=1e9999999 → 422` 断言。
@@ -79,6 +295,34 @@ miaoshou/ak_... 均已就位且 scope 齐全），v1 oauth_receiver 库失去回
   1. `gunzip backups/oauth_receiver_v1_legacy_20260905T134439Z.sql.gz | docker exec -i postgres psql -U postgres -d postgres`（先 CREATE DATABASE oauth_receiver）
   2. 跑 `tech-doc/_archive/migrate-v1-to-v2-2026-08-29/scripts/re_encrypt_credentials.py` 把 legacy 格式转回 v2 envelope
   3. 恢复 oauth-receiver.service unit + .env 的 OAUTH_* 两行
+
+## 2026-09-06 (feat) — 新店授权控制台页 `GET /v2/oauth/tiktok/onboard`（浏览器 UI）
+
+- 操作台页（readonly 壳页 + 内联 JS）：未登录浏览器 302 → 登录页；`/v2/auth/me`
+  探测角色，非 admin 显示角色门槛。点「生成授权链接」按需调
+  `GET /v2/oauth/tiktok/authorize?format=json`（admin 闸不变）→ 每次生成全新链接
+  （单次使用 state、45min TTL、不缓存），一键复制 / 新窗口打开，附到期时间与操作步骤。
+- `middleware/auth.py` `_READONLY_EXACT` 增 `/v2/oauth/tiktok/onboard`（页面只读；授权动作仍 admin）。
+- 契约测试：未登录 302→login、readonly 可见壳、admin 同壳（tests/api/test_oauth_api.py +3）。
+
+## 2026-09-06 (fix) — oauth 回调两段式落库：Get Authorized Shops 枚举店铺（真实上游验证）
+
+真实授权首跑实测：service_id 流 token/get 返回**用户级 token**（data 无 shop_id/shop_cipher，
+Authorization overview 字段表在此准确），原假设「token/get 直给店铺身份」不成立 → 补第二段调用：
+
+- `proxy/tiktok_auth.py` 新增 `fetch_authorized_shops`：HMAC 签名 GET
+  `{TIKTOK_API_HOST}/authorization/202309/shops`（app_key+timestamp 签名、无 shop_cipher，
+  同 v1 生产 fetch_shops；`x-tts-access-token` 头），容错解析
+  `id|shop_id / cipher|shop_cipher / name|shop_name / region|shop_region`，raw keys 记日志
+- `complete_tiktok_authorization` 改两段式：token/get（用户级）→ Get Authorized Shops →
+  **每店** upsert credentials + commerce.shops（共享用户 token + 每店 cipher）；多店 seller
+  自动逐店落库；新增 `kind=no_authorized_shop`；店铺条目缺 id/cipher → missing_shop_id /
+  missing_shop_cipher 显式失败不落半残行（错误附 raw keys）
+- 成功结果改 `{"shops":[...]}`（HTML 逐店渲染 / JSON 数组）
+- 单测：fetch_authorized_shops HTTP 5 例 + flow 多店/空店列表/条目缺字段 + api 契约适配
+- spec：`tech-doc/api/tiktok-shop-oauth.md`「上游契约确认」节按实测定稿
+- 附带：oauth 回调全路径结构化日志（kind/upstream_code/成功逐店），真实授权失败可当场定位
+
 ## 2026-09-06 (feat) — 新店 TikTok seller 授权流程上线（Lane E 收尾合入部署）
 
 Lane E 的 `/v2/oauth/tiktok/*`（v1 oauth-receiver `/authorize`+`/callback` 职责迁入 v2）收尾合入并部署
@@ -101,7 +345,6 @@ alembic **0011_oauth_states** 重编号接入 0007→0009→0010 链并 stamp，
   生产同款 token/get 读取验证，见 spec「上游契约确认」节）+ external-api.md TL;DR
 - 测试：proxy HTTP 单测 + DB 编排集成 + API 契约共 31 个新用例
 - 已知边界：授权到期/取消的 webhook 接收未做（见 spec 生命周期备注），续期=重走本流程（幂等）
-
 
 ## 2026-09-05 (refactor) — commerce 域命名重构上线（ADR-0003，live 已应用 migration 0007）
 

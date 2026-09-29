@@ -1,6 +1,8 @@
 # ─── Secrets ─────────────────────────────────────────
 .env
 .env.local
+.env.test
+.env.test.local
 *.pem
 *.key
 
@@ -15,6 +17,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+
+# Python 虚拟环境（本地环境，永不入库——2026-09-28 事故：worktree 的 .venv
+# 软链被误 commit 进 ab9c224，merge 时 git checkout 用软链覆盖主仓真实 venv）
+.venv
 
 # ─── Python build / install ─────────────────────────
 build/
@@ -58,3 +64,6 @@ tdd/.env
 # 生成的广告报表导出 / 上游 API 文档抓取（一次性，不入库）
 reports/
 tts-partner-api-docs/
+
+# 插件诊断导出（一次性排查产物，不入库）
+tiktok-data-sync-runtime-*.json

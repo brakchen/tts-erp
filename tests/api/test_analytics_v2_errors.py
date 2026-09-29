@@ -60,7 +60,7 @@ def _valid_dump() -> dict:
         "campaignId": "TEST_campaign-1",
         "request": {"url": "https://ads.tiktok.com/report", "headers": {}},
         "response": {"status": 200, "body": {"data": []}},
-        "capturedAt": "2026-08-30T18:43:00.000Z",
+        "createdAt": "2026-08-30T18:43:00.000Z",
         "schemaVersion": 2,
     }
 
@@ -85,7 +85,7 @@ def test_schema_invalid_logs_field_detail_to_stderr(api_client, readwrite_key, c
     """
     r = api_client.post(
         _BATCHES,
-        json=_payload(capturedAt="2026-08-30T18:43:00"),  # no timezone → invalid
+        json=_payload(createdAt="2026-08-30T18:43:00"),  # no timezone → invalid
         headers={
             "Authorization": f"Bearer {readwrite_key}",
             # Correlation id travels in the header (plugin-integration §2):
@@ -103,7 +103,7 @@ def test_schema_invalid_logs_field_detail_to_stderr(api_client, readwrite_key, c
     )
     assert "SCHEMA_INVALID" in err
     # Field-level detail from the Pydantic message must be present.
-    assert "capturedAt" in err
+    assert "createdAt" in err
     # Request correlation id for joining against the audit table.
     assert "TEST_req-observability" in err
 
@@ -114,7 +114,7 @@ def test_schema_invalid_stderr_line_does_not_leak_credentials(
     """The diagnostic line must not echo the bearer token or request body."""
     r = api_client.post(
         _BATCHES,
-        json=_payload(capturedAt="2026-08-30T18:43:00"),
+        json=_payload(createdAt="2026-08-30T18:43:00"),
         headers={"Authorization": f"Bearer {readwrite_key}"},
     )
     assert r.status_code == 400, r.text
@@ -193,7 +193,7 @@ def test_schema_invalid_response_carries_structured_errors_single_field(
     """A single failing field shows up as one structured entry."""
     r = api_client.post(
         _BATCHES,
-        json=_payload(capturedAt="2026-08-30T18:43:00"),  # missing timezone
+        json=_payload(createdAt="2026-08-30T18:43:00"),  # missing timezone
         headers={"Authorization": f"Bearer {readwrite_key}"},
     )
     assert r.status_code == 400
@@ -205,7 +205,7 @@ def test_schema_invalid_response_carries_structured_errors_single_field(
     err = body["errors"][0]
     # Safe identifier triple only — no raw input values, no ctx, no url.
     assert set(err.keys()) == {"loc", "msg", "type"}
-    assert err["loc"] == ["dump", "capturedAt"]
+    assert err["loc"] == ["dump", "createdAt"]
     assert err["type"] == "value_error"
     assert "timezone" in err["msg"]
 
@@ -248,11 +248,11 @@ def test_schema_invalid_response_strips_input_and_ctx_from_structured_errors(
 
     Regression guard: a future cleanup that pipes Pydantic's errors()
     straight through would leak ``input: '2026-08-30T18:43:00'`` for the
-    naive-capturedAt test, or ``ctx: {min_length: ...}`` for the same.
+    naive-createdAt test, or ``ctx: {min_length: ...}`` for the same.
     """
     r = api_client.post(
         _BATCHES,
-        json=_payload(capturedAt="2026-08-30T18:43:00"),  # 缺时区 → invalid
+        json=_payload(createdAt="2026-08-30T18:43:00"),  # 缺时区 → invalid
         headers={"Authorization": f"Bearer {readwrite_key}"},
     )
     body = r.json()
@@ -271,7 +271,7 @@ def test_schema_invalid_response_does_not_leak_token_or_body(
     stderr-line test but on the structured side."""
     r = api_client.post(
         _BATCHES,
-        json=_payload(capturedAt="not-a-real-datetime-bearer-abcdef"),
+        json=_payload(createdAt="not-a-real-datetime-bearer-abcdef"),
         headers={"Authorization": f"Bearer {readwrite_key}"},
     )
     body = r.json()
@@ -324,13 +324,13 @@ def test_schema_invalid_persists_message_in_ingest_log(
     锁定的契约：
     - 一次 SCHEMA_INVALID 拒绝 → 一行 logger.warning 行
     - error_code=SCHEMA_INVALID, message 与 stderr 同款 ≤500 字符消毒载荷
-    - message 含 field-level 提示（capturedAt / timezone）
+    - message 含 field-level 提示（createdAt / timezone）
     """
     request_id = "TEST_req-audit-error-message"
     caplog.set_level(logging.WARNING, logger="tts_erp_v2.analytics.ingest")
     r = api_client.post(
         _BATCHES,
-        json=_payload(capturedAt="2026-08-30T18:43:00"),
+        json=_payload(createdAt="2026-08-30T18:43:00"),
         headers={
             "Authorization": f"Bearer {readwrite_key}",
             "X-Request-Id": request_id,
@@ -352,7 +352,7 @@ def test_schema_invalid_persists_message_in_ingest_log(
     )
     msg = matches[-1].getMessage()
     # sanitized: whitespace-flattened, ≤500 chars, no newlines
-    assert "capturedAt" in msg
+    assert "createdAt" in msg
     assert "timezone" in msg
     assert "\n" not in msg
     assert len(msg) <= 500 + 200  # key=value 前缀 + ≤500 message

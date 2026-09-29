@@ -94,11 +94,12 @@ AuthMiddleware：优先验会话 cookie（key_hash → DB 复查仍有效）→ 
    （浏览器导航特征）→ 302 到 `/v2/auth/login?next=<path+query>`；
    否则（curl / fetch，`Accept: */*` 或 json）→ 保持现有 JSON 401。
    - 注意：fetch 默认 `Accept: */*`，不误伤 API 客户端
-   - **prefix 分工（已对 daqiang.nat100.top 实测验证）**：NAT nginx 会对
-     upstream 的 redirect `Location` **自动加回 `/tts` 前缀**，所以应用侧
-     的 Location 路径**必须不带前缀**（否则 `/tts/tts/...` 双前缀）；而
-     `next` 查询值由登录页 JS 在客户端 `location.href` 直接消费、不经
-     nginx，所以 `next` **必须带完整外部前缀**（`TTS_ERP_EXTERNAL_PREFIX`）。
+   - **prefix 分工（2026-09-28 收敛为 root_path 单源）**：外部前缀的唯一真相源是
+     app 的 `root_path`（`app.py` 构建时从 `TTS_ERP_EXTERNAL_PREFIX` 读一次）。
+     应用侧的 302 `Location` **自己带前缀**（从 `scope["root_path"]` 派生）；
+     nginx `/tts/` 透传完整前缀（`proxy_pass` 无尾斜线），其 `proxy_redirect`
+     规则含 `(?!tts/)` 负向前瞻，不会双前缀；`next` 查询值保持 route-relative
+     （不带前缀），登录页渲染表单隐藏字段时再拼上 `root_path`。
 
 ## 6. 页面改动
 

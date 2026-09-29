@@ -20,6 +20,7 @@ from sqlalchemy import select
 
 from tts_erp_v2.db.models import (
     ChannelAccount,
+    ChannelProduct,
     Credentials,
     RawRecord,
     SalesOrder,
@@ -461,3 +462,49 @@ def test_detail_explicit_order_ids_still_resolves(db_session) -> None:
         select(SyncIssue).where(SyncIssue.external_id == "O_EXPLICIT")
     ).scalar_one()
     assert issue.resolved_at is not None
+
+
+def test_detail_links_spu_when_catalog_known(db_session) -> None:
+    """order_detail 写行时也按 snapshot 关联 products_spu(与 orders 同规则)。"""
+    account = _make_account(db_session)
+    prod = ChannelProduct(shop_pk=account.id, spu_id="P1", title="TEST 目录商品")
+    db_session.add(prod)
+    db_session.flush()
+    proxy = FakeProxy(
+        pages={
+            "O_LINK": {
+                "code": 0,
+                "message": "ok",
+                "data": {
+                    "order": _order_payload(
+                        "O_LINK",
+                        lines=[
+                            {
+                                "line_id": "L1",
+                                "product_id": "P1",
+                                "sku_id": "S1",
+                                "quantity": 1,
+                                "sale_price": {"amount": "9.99", "currency": "USD"},
+                            }
+                        ],
+                    )
+                },
+            }
+        }
+    )
+    _, result = run_with_sync_job(
+        db_session,
+        job_name="tiktok.order_detail",
+        credential_id=account.credential_id,
+        inner=order_detail.run,
+        inner_kwargs={
+            "proxy_call": proxy,
+            "shop_id": account.shop_id,
+            "order_ids": ["O_LINK"],
+        },
+    )
+    assert result.rows_inserted == 1
+    line = db_session.execute(
+        select(SalesOrderLine).where(SalesOrderLine.external_line_id == "L1")
+    ).scalar_one()
+    assert line.spu_pk == prod.id

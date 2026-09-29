@@ -491,3 +491,97 @@ def test_console_js_status_label_mapping_and_sort():
     # Default catalogue sort: in-sale products first.
     assert 'key: "status"' in src, "default sort must be by status"
     assert 'order: "asc"' in src, "default order must be asc (在售 first)"
+
+
+def test_page_has_pager_controls(api_client, readonly_key):
+    """The catalogue has prev/next paging + a row-count label.
+
+    2026-09-06: channel-products is a bare-array contract, so the total
+    travels in X-Total-Count; the pager lives under the table.
+    """
+    r = api_client.get(
+        "/v2/pages/manual-costs",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.text
+    assert 'id="grid-pager"' in body, "pager section missing"
+    assert 'id="btn-prev"' in body, "prev button missing"
+    assert 'id="btn-next"' in body, "next button missing"
+    assert 'id="pager-label"' in body, "pager label missing"
+    assert "上一页" in body and "下一页" in body, "pager button labels missing"
+
+    from pathlib import Path
+
+    js = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "console.js"
+    )
+    src = js.read_text(encoding="utf-8")
+    assert "function updatePager(total, pageLen)" in src, (
+        "updatePager missing from console.js"
+    )
+    assert "pageOffset" in src, "page offset state missing"
+    assert "pageLimit" in src, "page limit state missing"
+    assert "X-Total-Count" in src, "console.js must read X-Total-Count"
+    assert '"#filter-limit"' in src or "filter-limit" in src, (
+        "每页 dropdown must be wired"
+    )
+
+
+def test_page_script_has_cache_bust_version(api_client, readonly_key):
+    """console.js must be referenced with ?v=<content hash>.
+
+    2026-09-06: /static has no Cache-Control and browsers heuristically
+    cache console.js, so users kept seeing the previous build (e.g. the
+    pre-pagination 50-row catalogue). Stamping a content-hash query makes
+    every deploy invalidate the stale copy automatically.
+    """
+    r = api_client.get(
+        "/v2/pages/manual-costs",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.text
+    import re
+
+    m = re.search(r'src="([^"]*console\.js[^"]*)"', body)
+    assert m, "console.js script tag missing"
+    src = m.group(1)
+    assert "?v=" in src, f"console.js src must carry ?v= cache-bust, got: {src}"
+    version = src.split("?v=")[1]
+    assert re.fullmatch(r"[0-9a-f]{8}", version), (
+        f"version must be an 8-char content hash, got: {version!r}"
+    )
+
+
+def test_page_has_has_orders_toggle(api_client, readonly_key):
+    """The toolbar exposes 仅看有单 (id="filter-has-orders") and console.js
+    forwards has_orders=true on the channel-products request."""
+    r = api_client.get(
+        "/v2/pages/manual-costs",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.text
+    assert 'id="filter-has-orders"' in body, "has-orders checkbox missing"
+    assert "仅看有单" in body, "has-orders label missing"
+
+    from pathlib import Path
+
+    js = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "console.js"
+    )
+    src = js.read_text(encoding="utf-8")
+    assert "catalogueHasOrders" in src, "has-orders state missing"
+    assert "has_orders=true" in src, "loadAll must forward has_orders=true"
+    assert 'id="filter-has-orders"' in src or "filter-has-orders" in src, (
+        "checkbox binding missing"
+    )

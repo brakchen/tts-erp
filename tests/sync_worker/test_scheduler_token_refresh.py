@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
@@ -91,13 +92,26 @@ def test_run_token_refresh_writes_succeeded_sync_job(
     monkeypatch: pytest.MonkeyPatch,
     env_setup: None,
 ) -> None:
-    """A clean tick leaves a sync_jobs row with status='succeeded'."""
+    """A clean tick leaves a sync_jobs row with status='succeeded'.
+
+    2026-09-07 audit fix: previously this test (and the two below)
+    used the production ``job_name='token.refresh'`` when building
+    the ``JobSpec`` and when querying the resulting ``sync_jobs`` row.
+    Each run committed a row with the production job_name to the
+    shared prod DB — accumulating fake-but-prod-named ticks over
+    time. The autouse ``tests/sync_worker/conftest.py`` wipe catches
+    the rows from this test on teardown, but we additionally use a
+    per-run UUID-suffixed job_name so even if the wipe is ever
+    disabled, the row cannot be confused with a real prod tick
+    (which would inflate the watchdog's "last_success_at" baseline).
+    """
     from tts_erp_v2.sync_worker.scheduler import (
         JobSpec,
         _run_system_job,
     )
 
     external_id = "TEST_TT_TK_REFRESH_OK"
+    test_job_name = f"TEST_token.refresh.{uuid4().hex[:12]}"
     _seed_credentials(
         session_factory,
         external_id=external_id,
@@ -127,8 +141,24 @@ def test_run_token_refresh_writes_succeeded_sync_job(
 
     monkeypatch.setattr(tiktok_auth, "build_token_registry", fake_registry)
 
+    # Patch the production JOB_NAME constant so the SyncJob row written
+    # by ``run_job`` inside ``sync_token_refresh`` carries our
+    # TEST_-prefixed name. Without this, the production code's
+    # ``JOB_NAME = "token.refresh"`` (a module-level constant in
+    # ``jobs/token_refresh.py``) leaks a SyncJob row with the production
+    # name every time the test runs. Before the 2026-09-07 audit fix,
+    # the original test asserted against production rows by accident
+    # — real sync-worker ticks left rows with ``job_name='token.refresh'``
+    # in the shared DB and the test's ``len(rows) >= 1`` passed by
+    # matching those, not by the scheduler writing a new row in this
+    # test. Patching ``JOB_NAME`` decouples the test from any production
+    # state.
+    import tts_erp_v2.jobs.token_refresh as tr_mod
+
+    monkeypatch.setattr(tr_mod, "JOB_NAME", test_job_name)
+
     spec = JobSpec(
-        job_name="token.refresh",
+        job_name=test_job_name,
         module_path="tts_erp_v2.jobs.token_refresh",
         interval_seconds=21600,
         is_tiktok=False,
@@ -141,7 +171,9 @@ def test_run_token_refresh_writes_succeeded_sync_job(
     sess = session_factory()
     try:
         rows = (
-            sess.execute(select(SyncJob).where(SyncJob.job_name == "token.refresh"))
+            sess.execute(
+                select(SyncJob).where(SyncJob.job_name == test_job_name)
+            )
             .scalars()
             .all()
         )
@@ -163,6 +195,17 @@ def test_run_token_refresh_writes_failed_sync_job_on_exception(
     """If sync_token_refresh itself raises, the scheduler still writes
     a 'failed' sync_jobs row in a fresh transaction so operators can
     see the tick happened.
+
+    See ``test_run_token_refresh_writes_succeeded_sync_job`` for the
+    2026-09-07 audit fix rationale on using a UUID-suffixed
+    ``test_job_name`` instead of the production ``'token.refresh'``.
+
+    This test mocks ``sync_token_refresh`` directly with ``boom()``,
+    which calls ``run_job(session, job_name=test_job_name)`` and the
+    scheduler's exception path uses ``spec.job_name`` for the
+    sentinel row — so both code paths already use ``test_job_name``,
+    and the patch on ``JOB_NAME`` is belt-and-braces against future
+    refactors that might let the real constant leak in.
     """
     from tts_erp_v2.sync_worker.scheduler import (
         JobSpec,
@@ -170,6 +213,7 @@ def test_run_token_refresh_writes_failed_sync_job_on_exception(
     )
 
     external_id = "TEST_TT_TK_REFRESH_FAIL"
+    test_job_name = f"TEST_token.refresh.{uuid4().hex[:12]}"
     _seed_credentials(
         session_factory,
         external_id=external_id,
@@ -181,12 +225,18 @@ def test_run_token_refresh_writes_failed_sync_job_on_exception(
     # commit — this is the production scenario the fix targets).
     import tts_erp_v2.jobs.token_refresh as tr_mod
 
+    # Belt-and-braces: even though boom() uses test_job_name directly,
+    # any future change that delegates back to the real constant
+    # would otherwise leak the production 'token.refresh' name. Pin
+    # it for the duration of this test.
+    monkeypatch.setattr(tr_mod, "JOB_NAME", test_job_name)
+
     def boom(session: Any, **kwargs: Any) -> Any:
         # Commit a 'failed' row first to simulate the original run_job
         # behavior, then raise.
         from tts_erp_v2.jobs.runner import run_job
 
-        with run_job(session, job_name="token.refresh") as job:
+        with run_job(session, job_name=test_job_name) as job:
             job.rows_total = 0
         session.commit()
         raise RuntimeError("simulated scheduler tick crash")
@@ -194,7 +244,7 @@ def test_run_token_refresh_writes_failed_sync_job_on_exception(
     monkeypatch.setattr(tr_mod, "sync_token_refresh", boom)
 
     spec = JobSpec(
-        job_name="token.refresh",
+        job_name=test_job_name,
         module_path="tts_erp_v2.jobs.token_refresh",
         interval_seconds=21600,
         is_tiktok=False,
@@ -208,7 +258,9 @@ def test_run_token_refresh_writes_failed_sync_job_on_exception(
     sess = session_factory()
     try:
         rows = (
-            sess.execute(select(SyncJob).where(SyncJob.job_name == "token.refresh"))
+            sess.execute(
+                select(SyncJob).where(SyncJob.job_name == test_job_name)
+            )
             .scalars()
             .all()
         )
@@ -234,6 +286,16 @@ def test_run_token_refresh_wires_real_tiktok_refresher(
     """The scheduler calls build_token_registry (the new TikTok refresher
     factory), not the old no-op stub. Verifies the registry injection
     is wired in.
+
+    This test doesn't assert on ``sync_jobs`` rows (it only checks that
+    ``build_token_registry`` was invoked), but the scheduler still
+    calls the real ``sync_token_refresh`` which writes a SyncJob row
+    via ``run_job``. Without the ``JOB_NAME`` patch below, that row
+    would carry the production ``'token.refresh'`` name during the
+    test's lifetime. The autouse ``tests/sync_worker/conftest.py``
+    wipe catches it on teardown, but we additionally patch
+    ``JOB_NAME`` for belt-and-braces so the row is unmistakably a
+    test row even in the brief window between commit and teardown.
     """
     from tts_erp_v2.sync_worker.scheduler import (
         JobSpec,
@@ -241,6 +303,7 @@ def test_run_token_refresh_wires_real_tiktok_refresher(
     )
 
     external_id = "TEST_TT_TK_REFRESH_WIRED"
+    test_job_name = f"TEST_token.refresh.{uuid4().hex[:12]}"
     _seed_credentials(
         session_factory,
         external_id=external_id,
@@ -270,8 +333,16 @@ def test_run_token_refresh_wires_real_tiktok_refresher(
 
     monkeypatch.setattr(tiktok_auth, "build_token_registry", fake_registry)
 
+    # Pin JOB_NAME so the SyncJob row written by the real
+    # sync_token_refresh carries our TEST_-prefixed name (see
+    # test_run_token_refresh_writes_succeeded_sync_job docstring for
+    # the audit-fix context).
+    import tts_erp_v2.jobs.token_refresh as tr_mod
+
+    monkeypatch.setattr(tr_mod, "JOB_NAME", test_job_name)
+
     spec = JobSpec(
-        job_name="token.refresh",
+        job_name=test_job_name,
         module_path="tts_erp_v2.jobs.token_refresh",
         interval_seconds=21600,
         is_tiktok=False,

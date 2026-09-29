@@ -128,11 +128,12 @@ def _wipe_test_rows(db_engine) -> None:
     )
 
     with db_engine.begin() as conn:
+        # pi-lens-ignore: python-sql-injection — static literal SQL（spu_images wipe，TEST_ 常量）
         conn.execute(spu_images_wipe)
         # fx.* exchange-rate cache (2026-09-06): TEST_-prefixed base codes
         # only — the snapshot delete cascades to fx.exchange_rates rows.
-        # pi-lens-ignore: python-sql-injection — literal SQL, bound LIKE param only
         # pi-lens-ignore opengrep.sqlalchemy.sql-injection: static DELETE, bound LIKE, no user input
+        # pi-lens-ignore: python-sql-injection — literal SQL, bound LIKE param only
         conn.execute(
             _text(
                 "DELETE FROM fx.exchange_rate_snapshots WHERE base_code LIKE 'TEST_%'"
@@ -174,6 +175,44 @@ def _wipe_test_rows(db_engine) -> None:
         )
         conn.execute(delete(shops_tbl).where(shops_tbl.c.shop_id.like("TEST_%")))
         conn.execute(delete(api_keys_tbl).where(api_keys_tbl.c.name.like("TEST_%")))
+        # 2026-09-07: test_oauth_api.py::test_callback_happy_path_bootstraps_rows
+        # creates TEST_OAUTH_SHOP_API_1 credentials that were never cleaned
+        # up by the api/_isolate_state fixture (wipe only covered api_keys).
+        # Wipe TEST_ credentials to prevent leakage into prod.
+        creds_tbl = Base.metadata.tables["integration.credentials"]
+        conn.execute(
+            delete(creds_tbl).where(
+                creds_tbl.c.external_account_id.like("TEST_%")
+            )
+        )
+        # sync_issues can accumulate TEST_-prefixed rows (e.g.
+        # token.refresh TEST_ issues from test_scheduler_token_refresh).
+        conn.execute(
+            _text(
+                "DELETE FROM integration.sync_issues "
+                "WHERE job_name LIKE 'TEST_%' OR external_id LIKE 'TEST_%'"
+            )
+        )
+        # 2026-09-13 P0 (fix/recover-ad-daily-purge-guard): wipe plugin.*
+        # rows created by test bodies (test_purge_plugin_data_clears_ad_tables
+        # INSERTs TEST_SELLER into ad_daily/ad_raw_log outside the session
+        # savepoint, so the test session rollback doesn't catch them).
+        # Without this, the next test run hits duplicate-key on uq_ad_daily.
+        conn.execute(
+            _text("DELETE FROM plugin.ad_daily WHERE seller_id LIKE 'TEST_%'")
+        )
+        conn.execute(
+            _text("DELETE FROM plugin.ad_today WHERE seller_id LIKE 'TEST_%'")
+        )
+        conn.execute(
+            _text("DELETE FROM plugin.ad_monthly WHERE seller_id LIKE 'TEST_%'")
+        )
+        conn.execute(
+            _text("DELETE FROM plugin.ad_raw_log WHERE seller_id LIKE 'TEST_%'")
+        )
+        conn.execute(
+            _text("DELETE FROM plugin.plugin_logs WHERE seller_id LIKE 'TEST_%'")
+        )
 
 
 def select_func(col):
@@ -204,6 +243,25 @@ def api_client(db_engine) -> Iterator[TestClient]:
         os.environ.pop("TTS_ERP_AUTH_MODE", None)
     else:
         os.environ["TTS_ERP_AUTH_MODE"] = prev_mode
+
+
+@pytest.fixture()
+def prefixed_client(db_engine, monkeypatch) -> Iterator[TestClient]:
+    """TestClient with the app mounted at ``root_path=/tts`` (production shape).
+
+    The external prefix is read once by ``build_app()`` into
+    ``FastAPI(root_path=...)``; the auth middleware and handlers derive
+    everything from ``scope["root_path"]`` (2026-09-28 convergence — no
+    per-request env reads remain). Use this fixture for tests exercising
+    the prefixed wire form (``/tts/...``) or prefix-aware redirects.
+    """
+    from tts_erp_v2.app import build_app
+
+    monkeypatch.setenv("TTS_ERP_EXTERNAL_PREFIX", "/tts")
+    monkeypatch.setenv("TTS_ERP_AUTH_MODE", "enforce")
+    app = build_app()
+    with TestClient(app) as client:
+        yield client
 
 
 @pytest.fixture()

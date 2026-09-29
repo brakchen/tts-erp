@@ -8,7 +8,7 @@ serialized as a string by default to avoid float drift on
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -23,6 +23,11 @@ class ChannelAccountOut(BaseModel):
     region: str | None = None
     seller_type: str | None = None
     status: str | None = None
+    opened_date: date | None = None
+    credential_id: int | None = None
+    # TikTok Partner Center service_id（2026-09-28 补上读面：shops 页面
+    # 元信息编辑 / 授权链接生成需要它；additive 字段，不破坏外部契约）
+    service_id: str | None = None
     synced_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -42,6 +47,10 @@ class ChannelProductOut(BaseModel):
     unit_cost: Decimal | None = None
     currency: str | None = None
     cost_method: str | None = None
+    # 2026-09 货源价 fallback: when no manual cost exists, the 货源价
+    # from procurement.procurement_products is exposed so the frontend
+    # can display it as a pre-filled default.
+    source_unit_cost: Decimal | None = None
     image_url: str | None = None
     main_image_url: str | None = None
 
@@ -165,7 +174,7 @@ class ManualCostIn(BaseModel):
     """
 
     spu_id: str = Field(min_length=1, max_length=128)
-    unit_cost: Decimal = Field(gt=Decimal("0"))
+    unit_cost: Decimal = Field(gt=Decimal(0))
     currency: str = Field(min_length=3, max_length=3, pattern="^[A-Z]{3}$")
     valid_from: datetime | None = None
     note: str | None = Field(default=None, max_length=500)

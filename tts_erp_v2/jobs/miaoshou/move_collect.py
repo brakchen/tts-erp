@@ -34,6 +34,7 @@ Upstream rate-limit responses are caught + retried by
 errors propagate up; ``run_job`` marks the SyncJob row ``failed``
 and re-raises so the caller (APScheduler / CLI) decides retry policy.
 """
+
 from __future__ import annotations
 
 import logging
@@ -45,7 +46,6 @@ from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models.linkage import LinkEvidence
 from tts_erp_v2.jobs.miaoshou._common import (
-    MiaoshouContext,
     resolve_miaoshou_context,
 )
 from tts_erp_v2.jobs.runner import record_raw_payload, record_sync_issue, run_job
@@ -61,8 +61,14 @@ MAX_PAGES = 1000  # paginate_with_retry also has its own safety cap
 class _MiaoshouClientProto(Protocol):
     """Minimal protocol — the job only needs ``_call_erp``."""
 
-    def _call_erp(self, *, path: str, body: dict | None = None, query: dict | None = None,
-                  extra_headers: dict | None = None) -> dict[str, Any]: ...
+    def _call_erp(
+        self,
+        *,
+        path: str,
+        body: dict | None = None,
+        query: dict | None = None,
+        extra_headers: dict | None = None,
+    ) -> dict[str, Any]: ...
 
 
 def _fetch_page(
@@ -143,11 +149,10 @@ def sync_move_collect(
         # injected client (e.g. tests).
         ctx = resolve_miaoshou_context(session, license_id=license_id)
         if ctx is None:
-            raise RuntimeError(
-                "no miaoshou credentials row; cannot construct context"
-            )
+            raise RuntimeError("no miaoshou credentials row; cannot construct context")
         if client is None:
             from tts_erp_v2.jobs.miaoshou._common import miaoshou_client_factory
+
             client = miaoshou_client_factory(ctx)
 
         rate_limit_retries = 0
@@ -157,7 +162,8 @@ def sync_move_collect(
             rate_limit_retries += 1
             log.warning(
                 "miaoshou.move_collect page retry attempt=%d err=%r",
-                attempt, err,
+                attempt,
+                err,
             )
 
         def fetch_page(page: int) -> dict[str, Any]:
@@ -172,11 +178,23 @@ def sync_move_collect(
             """
             data = (payload.get("data") or {}) if isinstance(payload, dict) else {}
             items = data.get("moveCollectDetailList") or []
+            # Miaoshou 的 totalPage 字段实际返回的是总条数（如 382），不是总页数。
+            # 用实际返回的 item 数量推断 page_size，再算出真实页数。
+            raw_total_count = data.get("total")
+            raw_total_page = data.get("totalPage") or data.get("total_pages")
+            actual_total_pages: int | None = None
+            if isinstance(raw_total_count, int) and raw_total_count > 0:
+                effective_page_size = len(items) if items else PAGE_SIZE
+                actual_total_pages = -(
+                    -raw_total_count // effective_page_size
+                )  # ceil division
+            elif isinstance(raw_total_page, int) and raw_total_page > 0:
+                actual_total_pages = raw_total_page
             return PageResult(
                 items=list(items) if isinstance(items, list) else [],
                 page=payload.get("page") or 0,
-                total_count=data.get("total"),
-                total_pages=data.get("totalPage") or data.get("total_pages"),
+                total_count=raw_total_count,
+                total_pages=actual_total_pages,
             )
 
         # Re-wrap fetch_page so the paginator receives PageResult.

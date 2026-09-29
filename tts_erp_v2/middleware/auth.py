@@ -26,7 +26,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from anyio.to_thread import run_sync
 
@@ -57,6 +57,12 @@ EXEMPT_PATHS = {
     # seller's browser here; there is no API key to present. The route
     # validates its single-use CSRF state before doing anything.
     "/v2/oauth/tiktok/callback",
+    # Static assets (CSS/JS/images) — public, no auth required. Actual business
+    # data is gated at the API endpoints. Making static files public avoids the
+    # "session expired → assets 401 → page broken" UX bug (browser resource
+    # requests don't carry Accept: text/html, so the auth middleware returns
+    # JSON 401 instead of a 302 redirect to the login page).
+    "/static/",
 }
 
 # Path-level required role for the v2 app.
@@ -67,23 +73,43 @@ _READONLY_PREFIXES = (
     "/v2/linkage/",
     "/v2/reporting/",
     "/v2/fx/",  # cached exchange rates + conversion (readonly; served from fx.* cache)
+    # sync-worker 周期作业同步状态（GET /v2/sync/status；只读 integration.sync_jobs）
+    "/v2/sync/",
     "/v2/pages/",
     # SPU image reads — GET /v2/spu-images[/...] → readonly.
     # POST upload-url / {id}/confirm and DELETE /{id} are classified
     # by the _READWRITE_EXACT entries below.
     "/v2/spu-images/",
+    # SPU 实际 ROI 钻取面板 4 端点({spu_pk}/{orders|settlements|cases|ads})。
+    # 主表 /v2/analytics/spu-roi 在下方 _READONLY_EXACT 中(无尾斜杠);子路径
+    # 补 prefix,避免 fallback 到默认 admin(role=readonly session → 403)。
+    "/v2/analytics/spu-roi/",
+    # config schema 枚举映射 GET（readonly；PUT/DELETE 在 handler 层 require_role_at_least("admin")）
+    "/v2/config/",
     # TikTok Shop Partner API read-through proxy (live, no DB caching).
     # All endpoints here are GETs that hand the upstream payload back
     # verbatim. See ``tts_erp_v2/proxy/tts_shop/products_api.py`` for
     # the proxy layer and ``tts-partner-api-docs/`` for the contract.
     "/v2/tiktok-shop/",
     # Operator-console static assets (vendor/bootstrap / js/console.js). Not under
-    # /v2/; any authenticated session may fetch them.
-    "/static/",
+    # /v2/; public (no auth required). CSS/JS/images don't contain sensitive data;
+    # actual business data is gated at the API endpoints. Making static files
+    # public avoids the "session expired → all assets 401 → page broken" UX bug
+    # (browser resource requests don't carry Accept: text/html, so the auth
+    # middleware returns JSON 401 instead of a 302 redirect to the login page).
+    # "/static/",  # moved to EXEMPT_PATHS — no auth needed for static assets
+    # intercept 配置列表和请求查询 (GET only)
+    "/v2/intercept/configs",
+    "/v2/intercept/requests",
 )
 _READWRITE_EXACT = {
     "/v2/reporting/manual-costs",  # POST only — GET below stays readonly
 }
+# intercept 配置管理端点: POST/PUT/DELETE/PATCH 需要 readwrite
+_READWRITE_PREFIXES = (
+    "/v2/intercept/configs",  # 配置管理 CRUD
+    "/v2/intercept/sync",  # 数据接收
+)
 # Exact-match paths (no trailing slash) that are readonly. These don't
 # fit the prefix pattern above (which requires ``/v2/xxx/`` with slash).
 # Keep this list small — prefer adding a new prefix when adding a
@@ -92,6 +118,19 @@ _READONLY_EXACT = {
     "/v2/llm-context",  # GET — self-describing system + data dictionary for LLM agents
     "/v2/spu-images",  # GET — list ready images (no trailing slash in router)
     "/v2/analytics/spu-roi",  # GET — SPU 实际 ROI 看板主表(只读报表)
+    "/v2/intercept/config",  # GET — 配置下发（插件用）
+    "/v2/intercept/requests/stats",  # GET — 统计信息
+    # TikTok seller OAuth: both pages are classified readonly at the
+    # middleware so any logged-in operator can load the UI / see whether
+    # generation works. The handler (oauth.py::authorize) still enforces
+    # ``require_role_at_least("readwrite")`` as a fine-grained gate —
+    # readonly users get 403 from the handler, readwrite and admin
+    # pass. The CSRF ``state`` row inserted by authorize is harmless
+    # (single-use, 45-min TTL, no business-data side effect — the real
+    # ``integration.credentials`` + ``commerce.shops`` writes happen in
+    # the public ``/callback`` handshake).
+    "/v2/oauth/tiktok/onboard",
+    "/v2/oauth/tiktok/authorize",
 }
 # All other /v2/* paths default to admin (defensive: unknown = privileged).
 
@@ -100,49 +139,53 @@ def clear_cache() -> None:
     _cache.clear()
 
 
-def _strip_external_prefix(path: str) -> str:
-    """Remove the TTS_ERP_EXTERNAL_PREFIX from the front of a request path.
+def _route_path(scope: dict) -> str:
+    """Request path relative to the app root (``root_path`` stripped).
 
-    2026-09-01: NGINX in production was observed forwarding some routes
-    with the /tts/... prefix intact (not stripped by ``proxy_pass ... /;``)
-    while stripping the prefix for others. The downstream routing logic
-    was matching against canonical internal paths (e.g. ``/v2/auth/login``)
-    and missed the prefixed forms, producing a redirect loop: each 302
-    Location carried the prefixed path as the ``next`` value, the browser
-    re-fetched that path, NGINX forwarded it again, the middleware 401'd
-    it, and so on.
+    Single source of truth for the external mount prefix is the app's
+    ``root_path`` (``FastAPI.__call__`` injects it into every scope; set
+    once from ``TTS_ERP_EXTERNAL_PREFIX`` at app construction in app.py).
+    Starlette's router matches against path-minus-root_path; this helper
+    applies the same derivation for middleware-layer classification so a
+    request classifies identically whether the upstream proxy forwarded
+    ``/tts/v2/...`` (prefix intact) or ``/v2/...`` (prefix stripped).
 
-    Stripping here makes classification idempotent — the same internal
-    path matches regardless of whether NGINX (or any other reverse proxy)
-    chose to strip the prefix on a given request. The cost is one
-    string-prefix check per request.
+    Same stripping rule as ``starlette._utils.get_route_path``: only
+    strip when the path is exactly root_path or continues with "/".
     """
-    raw_prefix = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "")
-    if not raw_prefix:
-        return path
-    # Normalise: ensure prefix ends with "/" so ``/tts`` matches ``/tts/...``
-    # but not ``/ttsfoo``. The env value is the operator's choice; we
-    # don't second-guess its content beyond that.
-    prefix = raw_prefix if raw_prefix.endswith("/") else raw_prefix + "/"
-    if path.startswith(prefix):
-        remainder = path[len(prefix) :]
-        return "/" + remainder if not remainder.startswith("/") else remainder
+    path: str = scope.get("path", "")
+    root: str = scope.get("root_path", "")
+    if root and path.startswith(root):
+        if len(path) == len(root):
+            return "/"
+        if path[len(root)] == "/":
+            return path[len(root) :]
     return path
 
 
 def required_role(method: str, path: str) -> int | None:
-    """Return the minimum role level for ``(method, path)``, or None if exempt."""
+    """Return the minimum role level for ``(method, path)``, or None if exempt.
+
+    ``path`` must be the route-relative path (root_path already stripped —
+    callers use ``_route_path(scope)``).
+    """
     # Strip query string if any.
     p = path.split("?", 1)[0]
-    # 2026-09-01: strip the external prefix (TTS_ERP_EXTERNAL_PREFIX) so
-    # classification is correct whether or not the upstream proxy chose
-    # to forward the prefixed form. See _strip_external_prefix.
-    p = _strip_external_prefix(p)
     if p in EXEMPT_PATHS:
+        return None
+    # Static assets (CSS/JS/images) — public, prefix match.
+    if p.startswith("/static/"):
         return None
     # analytics ingest 是 readwrite（Chrome extension 上传）。
     # 2026-09-02 v2 化：/v1/analytics/sync 随发布下线，单挂 /v2。
     if p.startswith("/v2/analytics/sync"):
+        return ROLE_LEVEL["readwrite"]
+    # order-sync (Chrome 扩展订单/物流/结算同步) 也是 readwrite。
+    if p.startswith("/v2/order-sync"):
+        return ROLE_LEVEL["readwrite"]
+    # 店铺人工注册（插件店铺补登记，2026-09-11）：readwrite。
+    # 未知 /v2/admin/* 仍默认 admin（fail-closed）。
+    if p.startswith("/v2/admin/shops/"):
         return ROLE_LEVEL["readwrite"]
     # Miaoshou callback nodes are public (TikTok shop server-to-server push).
     if p.startswith("/miaoshou/callback"):
@@ -150,6 +193,10 @@ def required_role(method: str, path: str) -> int | None:
     # v2: manual-costs POST requires readwrite.
     if method.upper() == "POST" and p in _READWRITE_EXACT:
         return ROLE_LEVEL["readwrite"]
+    # intercept 配置管理和数据同步需要 readwrite
+    for prefix in _READWRITE_PREFIXES:
+        if p.startswith(prefix):
+            return ROLE_LEVEL["readwrite"]
     # v2: POST under /v2/spu-images/upload-url or /v2/spu-images/{id}/confirm
     # requires readwrite. The upload-url path is exact; the confirm path
     # is variable. We special-case both so we don't have to introduce a
@@ -210,12 +257,12 @@ def _db_lookup(key_hash: str) -> tuple[int | None, tuple[str, ...]] | None:
         if row.status != "active":
             return None
         if row.last_used_at is not None and (
-            row.last_used_at < datetime(1970, 1, 1, tzinfo=timezone.utc)
+            row.last_used_at < datetime(1970, 1, 1, tzinfo=UTC)
         ):
             return None  # defensive: corrupted last_used_at
         # Bump last_used_at on cache miss (best-effort, ignore failure).
         try:
-            row.last_used_at = datetime.now(timezone.utc)
+            row.last_used_at = datetime.now(UTC)
             sess.commit()
         except Exception:
             sess.rollback()
@@ -362,34 +409,37 @@ class AuthMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # 2026-09-01: NGINX in production was observed forwarding some
-        # routes with the TTS_ERP_EXTERNAL_PREFIX intact (not stripped
-        # by ``proxy_pass ... /;``) while stripping the prefix for
-        # others. The auth middleware classified against canonical
-        # internal paths, the router matched the prefixed form, and
-        # the 302 Location compounded the prefix on each redirect —
-        # producing an infinite loop on daqiang.nat100.top. Rewriting
-        # scope["path"] (and scope["raw_path"]) to the internal form
-        # here makes every downstream layer — auth, router, access
-        # log — see the same canonical path. No-op when the upstream
-        # proxy already stripped.
-        external_prefix = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "")
-        if external_prefix:
-            normalized = (
-                external_prefix
-                if external_prefix.endswith("/")
-                else external_prefix + "/"
-            )
-            req_path = scope.get("path", "")
-            if req_path.startswith(normalized):
-                stripped = req_path[len(normalized) :]
-                scope["path"] = (
-                    "/" + stripped if not stripped.startswith("/") else stripped
-                )
-                # FastAPI uses raw_path for the actual route match; keep
-                # it in sync so /v2/auth/login (no prefix) registers.
-                if scope.get("raw_path"):
-                    scope["raw_path"] = scope["path"].encode("latin-1")
+        # Path normalisation: make scope["path"] always carry root_path.
+        #
+        # 2026-09-28: the app runs with root_path=TTS_ERP_EXTERNAL_PREFIX
+        # (/tts in production). Whether the upstream proxy strips the
+        # prefix (proxy_pass with trailing slash) or passes it through,
+        # downstream layers must see ONE canonical shape — otherwise
+        # Starlette's StaticFiles (which computes the file path as
+        # scope["path"] minus scope["root_path"]) mis-resolves stripped
+        # requests to ``static/static/...`` and 404s every asset
+        # (2026-09-28 /tts/static/* 404 incident). Prepending root_path
+        # when absent converges both forwarding modes; the router strips
+        # it again via get_route_path, so route matching is unaffected.
+        root_path = scope.get("root_path", "")
+        req_path = scope.get("path", "")
+        if (
+            root_path
+            and req_path != root_path
+            and not req_path.startswith(root_path + "/")
+        ):
+            scope["path"] = root_path + req_path
+            # Keep raw_path in sync — FastAPI route matching reads it.
+            if scope.get("raw_path"):
+                scope["raw_path"] = scope["path"].encode("latin-1")
+
+        # Route-relative path for all classification below.
+        route_path = _route_path(scope)
+
+        # Static assets (CSS/JS/images) — pass through without any auth.
+        if route_path.startswith("/static/"):
+            await self.app(scope, receive, send)
+            return
 
         mode = os.environ.get("TTS_ERP_AUTH_MODE", "off")
         if mode == "off":
@@ -398,7 +448,7 @@ class AuthMiddleware:
 
         method = scope["method"]
         path = scope["path"]
-        needed = required_role(method, path)
+        needed = required_role(method, route_path)
         if needed is None:
             await self.app(scope, receive, send)
             return
@@ -516,29 +566,21 @@ class AuthMiddleware:
         # carries `Accept: */*` or `application/json`. The browser path
         # is JSON-friendly (curl, fetch) for backwards compat; the
         # browser path gets a 302 so the operator sees the login form,
-        # not a wall of JSON. TTS_ERP_EXTERNAL_PREFIX re-prepends the
-        # NAT proxy's /tts/... prefix inside the `next` value so the
-        # SPA reloads against the same public URL it started on.
+        # not a wall of JSON.
         if denied[0] == 401 and method == "GET" and _accept_text_html(scope):
             qs = scope.get("query_string", b"").decode("latin-1")
-            # 2026-09-01: use the INTERNAL path (prefix-stripped) as the
-            # ``next`` value. The login page prepends the prefix when
-            # rendering the form's hidden field, so passing the prefixed
-            # form here would double-stack on every redirect. The Location
-            # header below still uses the prefix so the browser lands
-            # on the correct public URL.
-            internal_path = _strip_external_prefix(path)
-            next_value = internal_path + (("?" + qs) if qs else "")
-            prefix = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "")
-            # The login page itself lives behind the NGINX prefix in
+            # ``next`` carries the route-relative path (no prefix); the
+            # login page prepends root_path when rendering the form's
+            # hidden field, so a prefixed value here would double-stack
+            # on every redirect (2026-09-01 redirect-loop incident).
+            next_value = route_path + (("?" + qs) if qs else "")
+            # The login page lives behind the external prefix in
             # production (daqiang.nat100.top/tts/v2/auth/login), so the
-            # 302 Location must carry that prefix — otherwise the
-            # browser navigates to /v2/auth/login which NGINX has no
-            # location for (returns 404 / routes to the default site).
-            # The ``next`` value stays prefix-free; ``login_page`` in
-            # api/v2/auth.py prepends the prefix when rendering the
-            # form's hidden field, so the two consumers stay in sync.
-            location = f"{prefix}/v2/auth/login?next={next_value}"
+            # 302 Location must carry it — otherwise the browser
+            # navigates to /v2/auth/login which the gateway has no
+            # location for. root_path is the single source of truth for
+            # the prefix (set once from TTS_ERP_EXTERNAL_PREFIX in app.py).
+            location = f"{root_path}/v2/auth/login?next={next_value}"
             await send(
                 {
                     "type": "http.response.start",

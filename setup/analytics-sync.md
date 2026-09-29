@@ -6,13 +6,25 @@
 >
 > 上游：Chrome 扩展 (tk-adv-cost-monitor) 推 `productAnalyses` / `sessionAnalyses` / `campaignChangeLogs` 三类分析 dump
 > 下游：（无，纯存储 + has-data 预检服务）
-> 存储：PostgreSQL `tts_erp` 数据库 · `analytics` schema · **1 张表**（`ad_raw`）—— 2026-09-05 reorg 后由 5 张收为 1 张（详见 `tech-doc/analytics/reorg-plan.md`）
+> 存储：PostgreSQL `tts_erp` 数据库 · `plugin` schema · **5 张表**（`ad_today` / `ad_daily` / `ad_monthly` / `ad_raw_log` / `plugin_logs`）—— 2026-09-11 migration 0020 已删除 v3 遗留的 `ad_raw` / `ad_sync_audit` 表与 `ad_product_links` 视图—— 2026-09-05 reorg 后由 5 张收为 1 张（详见 `tech-doc/analytics/reorg-plan.md`），2026-09-07 v3 区间聚合再加审计表（见 `tech-doc/analytics/range-aggregate-history-sync.md`）
 >
 > **变更背景**：
 >
 > - 2026-09-02 v2 化 + 路径硬切：`analytics_sync/` 包删除，路由由 `tts_erp_v2/api/v2/analytics.py` 提供；schema 独立 `analytics`，表名 `ad_*`（migration 0004 `SET SCHEMA` + `RENAME`）。`/v1/analytics/sync/*` 硬切下线（404）。
 > - 2026-09-02 dump architecture（migration 0005，见 `tech-doc/analytics/dump-architecture.md`）：删除 plugin 端 page-task 状态机与 server 端 cursor work-list；`/batches`（批量 records[]）换为 `/dumps`（**单 dump object，严禁批量**）；新增 `ad_raw` source-of-truth 表；cursor 降级为 **has-data 预检**。
+> - 2026-09-07 区间聚合同步（protocol v3，migration 0012-0014，见 `tech-doc/analytics/range-aggregate-history-sync.md`）：插件改为「历史整段 `[S..T-1]` 聚合 + 今日 30s 快照」，每 `(scope,endpoint,campaign,kind)` 至多一行 live；扩展插件与 tts-erp **同窗口发布**。
 
+> **⚠ 本文的存储层描述以 v3 为主，已部分过期（2026-09-11）。**
+> v3 的 `analytics.ad_raw` 单表 + `ad_product_links` 视图已由 **migration 0020** 删除；
+> 现行存储是 v4 逐日协议（`ad_today` / `ad_daily` / `ad_monthly` / `ad_raw_log`），
+> 见 `tech-doc/analytics/daily-sync-with-coverage.md`。下文出现的 `ad_raw` 应读作
+> `ad_raw_log`，"视图"部分请以新文档为准。**本文件待整体重写。**
+>
+> **另外（2026-09-11 PLUGIN_ARCH_CLEANUP）**：这 5 张表所在 schema 已从 `analytics`
+> 改为 **`plugin`**（migration `0024_analytics_to_plugin`）—— 插件 dump 数据与 API
+> 同步数据（`commerce.*` 等）按 schema 物理隔离；下文所有 `analytics.` 前缀
+> 应读作 `plugin.`。
+>
 ## 是什么
 
 Chrome 扩展（`tk-adv-cost-monitor`）在 TikTok 广告分析页拦截到一次 HTTP 交换
@@ -40,7 +52,7 @@ Chrome 扩展（`tk-adv-cost-monitor`）在 TikTok 广告分析页拦截到一�
 | 工作模式              | 跟随 tts-erp v2 的 `TTS_ERP_AUTH_MODE`（默认 `enforce`）        |
 | Auth                  | tts-erp v2 `AuthMiddleware`（`security.api_keys`，Bearer / X-API-Key，60s TTL 缓存）|
 | RateLimit             | tts-erp v2 `RateLimitMiddleware`（默认 100/min/key，`TTS_ERP_RATE_LIMIT_PER_MIN` 可调）|
-| DB                    | `tts_erp` on `postgres` container :5432 · `analytics` schema（迁移 alembic 0004 + 0005）|
+| DB                    | `tts_erp` on `postgres` container :5432 · `plugin` schema（迁移 alembic 0004 + 0005；2026-09-11 migration 0024 由 `analytics` 改入 `plugin`）|
 | 测试覆盖              | `tests/api/test_analytics_v2_contract.py` + `test_analytics_v2_errors.py` + `test_endpoints_index.py` |
 | 协议版本              | `protocolVersion ∈ {1, 2}`（2 = dump 单 object 形状）            |
 | 设计文档              | `tech-doc/analytics/dump-architecture.md`（另见同目录 architecture.md / analytics-sync.md）|
@@ -70,7 +82,7 @@ Chrome 扩展（`tk-adv-cost-monitor`）在 TikTok 广告分析页拦截到一�
     └── analytics-v2-migration-plan.md # v2 化方案
 ```
 
-## PostgreSQL 表（`analytics` schema）
+## PostgreSQL 表（`plugin` schema）
 
 ```text
 database: tts_erp
@@ -285,11 +297,15 @@ cookie / 完整请求头。
 - **当前**：`protocolVersion: 2`（dump 单 object 形状）；1 仍接受（同形状）
 - **未来 breaking 触发条件**：改 dump 字段语义 / 改 idempotency key 算法 /
   恢复批量 / 改 scope 语义等
-- **保留策略**：
-  - `ad_raw`：forever（source-of-truth）
-  - `ad_records`：90 天（sync-worker `analytics.retention` job）
-  - `ad_audit_log`：30 天
-  - `ad_shop_timezones`：forever
+- **保留策略**（2026-09-19 起，按 plugin schema 当前形态）：
+  - `plugin.ad_raw_log`：forever（source-of-truth，每条 dump 原始 payload）
+  - `plugin.ad_today`：当前无跨天固化 job,数据由 dump 持续 ON CONFLICT 覆盖
+    （v8.1 起 ROI 只读 ad_daily）
+  - `plugin.ad_daily`：forever（每日累计主表,ROI 看板只读此表）
+  - `plugin.ad_monthly`：forever（按月聚合）
+  - `plugin.plugin_logs`：forever（插件运行时日志,排查用）
+  - 已 drop（0007/0024）: `analytics.ad_records` / `ad_audit_log` /
+    `ad_shop_timezones` / `ad_daily_completeness`
 
 ## 相关文档
 

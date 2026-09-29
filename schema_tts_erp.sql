@@ -35,11 +35,6 @@ SELECT pg_catalog.set_config('search_path', '', false);
 CREATE SCHEMA after_sales;
 
 
--- Name: analytics; Type: SCHEMA; Schema: -; Owner: -
-
-CREATE SCHEMA analytics;
-
-
 -- Name: commerce; Type: SCHEMA; Schema: -; Owner: -
 
 CREATE SCHEMA commerce;
@@ -68,6 +63,11 @@ CREATE SCHEMA integration;
 -- Name: linkage; Type: SCHEMA; Schema: -; Owner: -
 
 CREATE SCHEMA linkage;
+
+
+-- Name: plugin; Type: SCHEMA; Schema: -; Owner: -
+
+CREATE SCHEMA plugin;
 
 
 -- Name: procurement; Type: SCHEMA; Schema: -; Owner: -
@@ -147,50 +147,6 @@ ALTER TABLE after_sales.cases ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 );
 
 
--- Name: ad_raw; Type: TABLE; Schema: analytics; Owner: -
-
-CREATE TABLE IF NOT EXISTS analytics.ad_raw (
-    id bigint CONSTRAINT analytics_raw_id_not_null NOT NULL,
-    idempotency_key text CONSTRAINT analytics_raw_idempotency_key_not_null NOT NULL,
-    seller_id text CONSTRAINT analytics_raw_seller_id_not_null NOT NULL,
-    advertiser_id text CONSTRAINT analytics_raw_advertiser_id_not_null NOT NULL,
-    endpoint text CONSTRAINT analytics_raw_endpoint_not_null NOT NULL,
-    method text CONSTRAINT analytics_raw_method_not_null NOT NULL,
-    day date CONSTRAINT analytics_raw_day_not_null NOT NULL,
-    campaign_id text CONSTRAINT analytics_raw_campaign_id_not_null NOT NULL,
-    request jsonb CONSTRAINT analytics_raw_request_not_null NOT NULL,
-    response jsonb CONSTRAINT analytics_raw_response_not_null NOT NULL,
-    captured_at timestamp with time zone CONSTRAINT analytics_raw_captured_at_not_null NOT NULL,
-    received_at timestamp with time zone DEFAULT now() CONSTRAINT analytics_raw_received_at_not_null NOT NULL,
-    source text,
-    request_id text,
-    protocol_version integer DEFAULT 2 CONSTRAINT analytics_raw_protocol_version_not_null NOT NULL,
-    schema_version integer DEFAULT 1 CONSTRAINT analytics_raw_schema_version_not_null NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT ck_analytics_raw_protocol CHECK ((protocol_version > 0)),
-    CONSTRAINT ck_analytics_raw_schema CHECK ((schema_version > 0))
-);
-
-
--- Name: products_spu; Type: TABLE; Schema: commerce; Owner: -
-
-CREATE TABLE IF NOT EXISTS commerce.products_spu (
-    id bigint CONSTRAINT channel_products_id_not_null NOT NULL,
-    shop_pk bigint CONSTRAINT channel_products_channel_account_id_not_null NOT NULL,
-    spu_id text CONSTRAINT channel_products_external_product_id_not_null NOT NULL,
-    title text,
-    category_id text,
-    status text,
-    main_image_url text,
-    source_created_at timestamp with time zone,
-    source_updated_at timestamp with time zone,
-    raw_record_id bigint,
-    synced_at timestamp with time zone DEFAULT now() CONSTRAINT channel_products_synced_at_not_null NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() CONSTRAINT channel_products_updated_at_not_null NOT NULL,
-    mirror_object_key text
-);
-
-
 -- Name: shops; Type: TABLE; Schema: commerce; Owner: -
 
 CREATE TABLE IF NOT EXISTS commerce.shops (
@@ -204,74 +160,9 @@ CREATE TABLE IF NOT EXISTS commerce.shops (
     credential_id bigint,
     source_updated_at timestamp with time zone,
     synced_at timestamp with time zone DEFAULT now() CONSTRAINT channel_accounts_synced_at_not_null NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() CONSTRAINT channel_accounts_updated_at_not_null NOT NULL
+    updated_at timestamp with time zone DEFAULT now() CONSTRAINT channel_accounts_updated_at_not_null NOT NULL,
+    opened_date date
 );
-
-
--- Name: ad_product_links; Type: VIEW; Schema: analytics; Owner: -
-
-CREATE VIEW analytics.ad_product_links AS
- WITH daily AS (
-         SELECT r.seller_id,
-            r.advertiser_id,
-            r.campaign_id,
-            r.day,
-            (el.value ->> 'product_id'::text) AS product_id,
-            (el.value ->> 'product_name'::text) AS product_name,
-            (el.value ->> 'product_status'::text) AS product_status,
-            (el.value ->> 'gmv_max_bid_type'::text) AS gmv_max_bid_type,
-                CASE
-                    WHEN ((el.value ->> 'mixed_real_cost'::text) ~ '^[0-9]+([.][0-9]+)?$'::text) THEN ((el.value ->> 'mixed_real_cost'::text))::numeric
-                    ELSE NULL::numeric
-                END AS real_cost,
-                CASE
-                    WHEN ((el.value ->> 'onsite_roi2_shopping_sku'::text) ~ '^[0-9]+$'::text) THEN ((el.value ->> 'onsite_roi2_shopping_sku'::text))::bigint
-                    ELSE NULL::bigint
-                END AS order_sku,
-                CASE
-                    WHEN ((el.value ->> 'onsite_roi2_shopping_value'::text) ~ '^[0-9]+([.][0-9]+)?$'::text) THEN ((el.value ->> 'onsite_roi2_shopping_value'::text))::numeric
-                    ELSE NULL::numeric
-                END AS order_value
-           FROM (analytics.ad_raw r
-             CROSS JOIN LATERAL jsonb_array_elements((((r.response -> 'body'::text) -> 'data'::text) -> 'table'::text)) el(value))
-          WHERE ((r.endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'::text) AND (el.value ? 'product_id'::text) AND (NULLIF((el.value ->> 'product_id'::text), ''::text) IS NOT NULL))
-        ), latest AS (
-         SELECT DISTINCT ON (daily.seller_id, daily.advertiser_id, daily.campaign_id, daily.product_id) daily.seller_id,
-            daily.advertiser_id,
-            daily.campaign_id,
-            daily.product_id,
-            daily.product_name,
-            daily.product_status,
-            daily.gmv_max_bid_type
-           FROM daily
-          ORDER BY daily.seller_id, daily.advertiser_id, daily.campaign_id, daily.product_id, daily.day DESC
-        )
- SELECT d.seller_id,
-    d.advertiser_id,
-    d.campaign_id,
-    d.product_id,
-    l.product_name,
-    l.product_status,
-    l.gmv_max_bid_type,
-    count(DISTINCT d.day) AS observed_days,
-    min(d.day) AS first_day,
-    max(d.day) AS last_day,
-    (COALESCE(sum(d.order_sku), (0)::numeric))::bigint AS order_sku_total,
-    (COALESCE(sum(d.real_cost), (0)::numeric))::numeric(20,4) AS real_cost_total,
-    (COALESCE(sum(d.order_value), (0)::numeric))::numeric(20,4) AS order_value_total,
-    ca.id AS shop_pk,
-    cp.id AS spu_pk
-   FROM (((daily d
-     JOIN latest l USING (seller_id, advertiser_id, campaign_id, product_id))
-     LEFT JOIN commerce.shops ca ON (((ca.platform = 'tiktok'::text) AND (ca.shop_id = d.seller_id))))
-     LEFT JOIN commerce.products_spu cp ON (((cp.shop_pk = ca.id) AND (cp.spu_id = d.product_id))))
-  GROUP BY d.seller_id, d.advertiser_id, d.campaign_id, d.product_id, l.product_name, l.product_status, l.gmv_max_bid_type, ca.id, cp.id;
-
-
-
-
-
-
 
 
 
@@ -301,6 +192,25 @@ CREATE TABLE IF NOT EXISTS commerce.products_sku (
 
 ALTER TABLE commerce.products_sku ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME commerce.channel_product_variants_id_seq
+);
+
+
+-- Name: products_spu; Type: TABLE; Schema: commerce; Owner: -
+
+CREATE TABLE IF NOT EXISTS commerce.products_spu (
+    id bigint CONSTRAINT channel_products_id_not_null NOT NULL,
+    shop_pk bigint CONSTRAINT channel_products_channel_account_id_not_null NOT NULL,
+    spu_id text CONSTRAINT channel_products_external_product_id_not_null NOT NULL,
+    title text,
+    category_id text,
+    status text,
+    main_image_url text,
+    source_created_at timestamp with time zone,
+    source_updated_at timestamp with time zone,
+    raw_record_id bigint,
+    synced_at timestamp with time zone DEFAULT now() CONSTRAINT channel_products_synced_at_not_null NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() CONSTRAINT channel_products_updated_at_not_null NOT NULL,
+    mirror_object_key text
 );
 
 
@@ -753,7 +663,10 @@ CREATE TABLE IF NOT EXISTS procurement.procurement_products (
     raw_record_id bigint,
     source_updated_at timestamp with time zone,
     synced_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    source_unit_cost numeric(20,4),
+    source_min_unit_cost numeric(20,4),
+    source_max_unit_cost numeric(20,4)
 );
 
 
@@ -853,6 +766,310 @@ CREATE TABLE IF NOT EXISTS linkage.variant_links (
 
 ALTER TABLE linkage.variant_links ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME linkage.variant_links_id_seq
+);
+
+
+-- Name: ad_daily; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.ad_daily (
+    id bigint NOT NULL,
+    seller_id text NOT NULL,
+    advertiser_id text NOT NULL,
+    campaign_id text NOT NULL,
+    product_id text NOT NULL,
+    endpoint text NOT NULL,
+    day date NOT NULL,
+    mixed_real_cost numeric(20,4),
+    onsite_roi2_shopping_sku bigint,
+    onsite_roi2_shopping_value numeric(20,4),
+    onsite_mixed_real_roi2_shopping numeric(20,4),
+    metrics_extra jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.ad_daily ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.ad_daily_id_seq
+);
+
+
+-- Name: ad_monthly; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.ad_monthly (
+    id bigint NOT NULL,
+    seller_id text NOT NULL,
+    advertiser_id text NOT NULL,
+    campaign_id text NOT NULL,
+    product_id text NOT NULL,
+    endpoint text NOT NULL,
+    year_month text NOT NULL,
+    mixed_real_cost numeric(20,4),
+    onsite_roi2_shopping_sku bigint,
+    onsite_roi2_shopping_value numeric(20,4),
+    onsite_mixed_real_roi2_shopping numeric(20,4),
+    metrics_extra jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.ad_monthly ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.ad_monthly_id_seq
+);
+
+
+-- Name: ad_raw_log; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.ad_raw_log (
+    id bigint NOT NULL,
+    seller_id text NOT NULL,
+    advertiser_id text NOT NULL,
+    endpoint text NOT NULL,
+    campaign_id text,
+    product_id text,
+    kind text NOT NULL,
+    day date,
+    year_month text,
+    request_url text NOT NULL,
+    request_method text NOT NULL,
+    request_body jsonb,
+    response_status integer,
+    response_body jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    request_id text,
+    source text DEFAULT 'tiktok-shop-data-sync'::text,
+    CONSTRAINT ad_raw_log_kind_check CHECK ((kind = ANY (ARRAY['daily'::text, 'today'::text, 'monthly'::text])))
+);
+
+
+
+ALTER TABLE plugin.ad_raw_log ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.ad_raw_log_id_seq
+);
+
+
+-- Name: ad_today; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.ad_today (
+    id bigint NOT NULL,
+    seller_id text NOT NULL,
+    advertiser_id text NOT NULL,
+    campaign_id text NOT NULL,
+    product_id text NOT NULL,
+    endpoint text NOT NULL,
+    day date NOT NULL,
+    mixed_real_cost numeric(20,4),
+    onsite_roi2_shopping_sku bigint,
+    onsite_roi2_shopping_value numeric(20,4),
+    onsite_mixed_real_roi2_shopping numeric(20,4),
+    metrics_extra jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.ad_today ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.ad_today_id_seq
+);
+
+
+-- Name: order_lines; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.order_lines (
+    id bigint NOT NULL,
+    shop_id text NOT NULL,
+    order_id text NOT NULL,
+    sku_id text NOT NULL,
+    product_id text,
+    product_name text,
+    variant_name text,
+    image_url text,
+    quantity numeric(20,4),
+    unit_price numeric(20,4),
+    currency text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    total_price numeric(20,4),
+    main_order_status integer,
+    sku_display_status integer
+);
+
+
+
+ALTER TABLE plugin.order_lines ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.order_lines_id_seq
+);
+
+
+-- Name: orders; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.orders (
+    id bigint NOT NULL,
+    shop_id text NOT NULL,
+    order_id text NOT NULL,
+    currency text,
+    payment_amount numeric(20,4),
+    total_amount numeric(20,4),
+    order_time timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    main_order_status integer,
+    sku_display_status integer,
+    fulfillment_type integer,
+    pay_method text,
+    sale_region text,
+    update_time timestamp with time zone,
+    latest_rts_time timestamp with time zone,
+    latest_tts_time timestamp with time zone,
+    buyer_nickname text
+);
+
+
+
+ALTER TABLE plugin.orders ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.orders_id_seq
+);
+
+
+-- Name: plugin_logs; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.plugin_logs (
+    id bigint NOT NULL,
+    seller_id text NOT NULL,
+    advertiser_id text NOT NULL,
+    plugin_version text NOT NULL,
+    level text NOT NULL,
+    message text NOT NULL,
+    context jsonb,
+    occurred_at timestamp with time zone NOT NULL,
+    received_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT plugin_logs_level_check CHECK ((level = ANY (ARRAY['info'::text, 'warn'::text, 'error'::text])))
+);
+
+
+
+ALTER TABLE plugin.plugin_logs ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.plugin_logs_id_seq
+);
+
+
+
+-- Name: settlement_details; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.settlement_details (
+    id bigint NOT NULL,
+    shop_id text NOT NULL,
+    statement_id text NOT NULL,
+    statement_version integer DEFAULT 0 NOT NULL,
+    sku_detail_id text NOT NULL,
+    trade_order_id text,
+    sku_id text,
+    product_name text,
+    sku_name text,
+    quantity numeric(20,4),
+    settlement_status text,
+    placed_time timestamp with time zone,
+    settlement_amount numeric(20,4),
+    earning_amount numeric(20,4),
+    fees_amount numeric(20,4),
+    currency text,
+    fee_components jsonb,
+    seller_web_cut_flow boolean,
+    seller_app_cut_flow boolean,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.settlement_details ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.settlement_details_id_seq
+);
+
+
+-- Name: settlements; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.settlements (
+    id bigint NOT NULL,
+    shop_id text NOT NULL,
+    statement_id text NOT NULL,
+    statement_version integer DEFAULT 0 NOT NULL,
+    bill_period text,
+    period_start date,
+    period_end date,
+    settlement_time timestamp with time zone,
+    settlement_id text,
+    payment_id text,
+    payment_status text,
+    statement_type integer,
+    payment_pending_reason integer,
+    settle_amount numeric(20,4),
+    earning_amount numeric(20,4),
+    fee_amount numeric(20,4),
+    adjust_amount numeric(20,4),
+    payable_amount numeric(20,4),
+    shipping_amount numeric(20,4),
+    total_reserve_amount numeric(20,4),
+    currency text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.settlements ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.settlements_id_seq
+);
+
+
+-- Name: shipments; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.shipments (
+    id bigint NOT NULL,
+    shop_id text NOT NULL,
+    order_id text NOT NULL,
+    package_id text NOT NULL,
+    tracking_number text,
+    carrier_name text,
+    status text,
+    shipped_at timestamp with time zone,
+    delivered_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.shipments ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.shipments_id_seq
+);
+
+
+-- Name: tracking_events; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.tracking_events (
+    id bigint NOT NULL,
+    shop_id text NOT NULL,
+    package_id text NOT NULL,
+    event_key text NOT NULL,
+    action_code integer,
+    event_at timestamp with time zone,
+    description text,
+    location text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.tracking_events ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.tracking_events_id_seq
 );
 
 
@@ -1114,10 +1331,6 @@ ALTER TABLE security.api_keys ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 );
 
 
--- Name: ad_raw id; Type: DEFAULT; Schema: analytics; Owner: -
-
-
-
 -- Name: case_lines case_lines_pkey; Type: CONSTRAINT; Schema: after_sales; Owner: -
 
 ALTER TABLE ONLY after_sales.case_lines
@@ -1140,18 +1353,6 @@ ALTER TABLE ONLY after_sales.case_lines
 
 ALTER TABLE ONLY after_sales.cases
     ADD CONSTRAINT uq_cases_account_ext UNIQUE (shop_pk, external_case_id);
-
-
--- Name: ad_raw analytics_raw_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
-
-ALTER TABLE ONLY analytics.ad_raw
-    ADD CONSTRAINT analytics_raw_pkey PRIMARY KEY (id);
-
-
--- Name: ad_raw uq_analytics_raw_unit_day; Type: CONSTRAINT; Schema: analytics; Owner: -
-
-ALTER TABLE ONLY analytics.ad_raw
-    ADD CONSTRAINT uq_analytics_raw_unit_day UNIQUE (seller_id, advertiser_id, endpoint, day, campaign_id);
 
 
 -- Name: shops channel_accounts_pkey; Type: CONSTRAINT; Schema: commerce; Owner: -
@@ -1430,6 +1631,127 @@ ALTER TABLE ONLY linkage.variant_links
     ADD CONSTRAINT variant_links_pkey PRIMARY KEY (id);
 
 
+-- Name: ad_daily ad_daily_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.ad_daily
+    ADD CONSTRAINT ad_daily_pkey PRIMARY KEY (id);
+
+
+-- Name: ad_monthly ad_monthly_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.ad_monthly
+    ADD CONSTRAINT ad_monthly_pkey PRIMARY KEY (id);
+
+
+-- Name: ad_raw_log ad_raw_log_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.ad_raw_log
+    ADD CONSTRAINT ad_raw_log_pkey PRIMARY KEY (id);
+
+
+-- Name: ad_today ad_today_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.ad_today
+    ADD CONSTRAINT ad_today_pkey PRIMARY KEY (id);
+
+
+-- Name: order_lines order_lines_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.order_lines
+    ADD CONSTRAINT order_lines_pkey PRIMARY KEY (id);
+
+
+-- Name: orders orders_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.orders
+    ADD CONSTRAINT orders_pkey PRIMARY KEY (id);
+
+
+-- Name: plugin_logs plugin_logs_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.plugin_logs
+    ADD CONSTRAINT plugin_logs_pkey PRIMARY KEY (id);
+
+
+
+-- Name: settlement_details settlement_details_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.settlement_details
+    ADD CONSTRAINT settlement_details_pkey PRIMARY KEY (id);
+
+
+-- Name: settlements settlements_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.settlements
+    ADD CONSTRAINT settlements_pkey PRIMARY KEY (id);
+
+
+-- Name: shipments shipments_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.shipments
+    ADD CONSTRAINT shipments_pkey PRIMARY KEY (id);
+
+
+-- Name: tracking_events tracking_events_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.tracking_events
+    ADD CONSTRAINT tracking_events_pkey PRIMARY KEY (id);
+
+
+-- Name: ad_daily uq_ad_daily; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.ad_daily
+    ADD CONSTRAINT uq_ad_daily UNIQUE (seller_id, advertiser_id, endpoint, campaign_id, product_id, day);
+
+
+-- Name: ad_monthly uq_ad_monthly; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.ad_monthly
+    ADD CONSTRAINT uq_ad_monthly UNIQUE (seller_id, advertiser_id, endpoint, campaign_id, product_id, year_month);
+
+
+-- Name: ad_today uq_ad_today; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.ad_today
+    ADD CONSTRAINT uq_ad_today UNIQUE (seller_id, advertiser_id, endpoint, campaign_id, product_id, day);
+
+
+-- Name: order_lines uq_order_lines_order_sku; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.order_lines
+    ADD CONSTRAINT uq_order_lines_order_sku UNIQUE (shop_id, order_id, sku_id);
+
+
+-- Name: orders uq_orders_shop_order; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.orders
+    ADD CONSTRAINT uq_orders_shop_order UNIQUE (shop_id, order_id);
+
+
+-- Name: settlement_details uq_settlement_details_shop_sku; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.settlement_details
+    ADD CONSTRAINT uq_settlement_details_shop_sku UNIQUE (shop_id, sku_detail_id);
+
+
+-- Name: settlements uq_settlements_shop_stmt; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.settlements
+    ADD CONSTRAINT uq_settlements_shop_stmt UNIQUE (shop_id, statement_id, statement_version);
+
+
+-- Name: shipments uq_shipments_shop_pkg; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.shipments
+    ADD CONSTRAINT uq_shipments_shop_pkg UNIQUE (shop_id, package_id);
+
+
+-- Name: tracking_events uq_tracking_events_pkg_key; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.tracking_events
+    ADD CONSTRAINT uq_tracking_events_pkg_key UNIQUE (shop_id, package_id, event_key);
+
+
 -- Name: manual_product_costs manual_product_costs_pkey; Type: CONSTRAINT; Schema: procurement; Owner: -
 
 ALTER TABLE ONLY procurement.manual_product_costs
@@ -1575,21 +1897,6 @@ CREATE INDEX IF NOT EXISTS ix_cases_case_type_status ON after_sales.cases USING 
 -- Name: ix_cases_sales_order; Type: INDEX; Schema: after_sales; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_cases_sales_order ON after_sales.cases USING btree (order_pk);
-
-
--- Name: idx_analytics_raw_received; Type: INDEX; Schema: analytics; Owner: -
-
-CREATE INDEX IF NOT EXISTS idx_analytics_raw_received ON analytics.ad_raw USING btree (received_at DESC);
-
-
--- Name: idx_analytics_raw_request; Type: INDEX; Schema: analytics; Owner: -
-
-CREATE INDEX IF NOT EXISTS idx_analytics_raw_request ON analytics.ad_raw USING btree (request_id);
-
-
--- Name: idx_analytics_raw_scope; Type: INDEX; Schema: analytics; Owner: -
-
-CREATE INDEX IF NOT EXISTS idx_analytics_raw_scope ON analytics.ad_raw USING btree (seller_id, advertiser_id, endpoint, day);
 
 
 -- Name: ix_channel_accounts_status; Type: INDEX; Schema: commerce; Owner: -
@@ -1752,6 +2059,74 @@ CREATE INDEX IF NOT EXISTS ix_product_links_status ON linkage.product_links USIN
 CREATE INDEX IF NOT EXISTS ix_variant_links_validity ON linkage.variant_links USING btree (valid_from, valid_to);
 
 
+-- Name: idx_ad_daily_coverage; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_ad_daily_coverage ON plugin.ad_daily USING btree (seller_id, advertiser_id, endpoint, campaign_id, day);
+
+
+-- Name: idx_ad_daily_product_day; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_ad_daily_product_day ON plugin.ad_daily USING btree (product_id, day);
+
+
+-- Name: idx_ad_monthly_coverage; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_ad_monthly_coverage ON plugin.ad_monthly USING btree (seller_id, advertiser_id, endpoint, campaign_id, year_month);
+
+
+-- Name: idx_ad_raw_log_day; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_ad_raw_log_day ON plugin.ad_raw_log USING btree (day);
+
+
+-- Name: idx_ad_raw_log_request_id; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_ad_raw_log_request_id ON plugin.ad_raw_log USING btree (request_id);
+
+
+-- Name: idx_ad_today_coverage; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_ad_today_coverage ON plugin.ad_today USING btree (seller_id, advertiser_id, endpoint, campaign_id, day);
+
+
+-- Name: idx_plugin_logs_level; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_plugin_logs_level ON plugin.plugin_logs USING btree (level, occurred_at DESC);
+
+
+-- Name: idx_plugin_logs_seller_time; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_plugin_logs_seller_time ON plugin.plugin_logs USING btree (seller_id, occurred_at DESC);
+
+
+-- Name: ix_orders_main_order_status; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_orders_main_order_status ON plugin.orders USING btree (main_order_status);
+
+
+-- Name: ix_orders_shop; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_orders_shop ON plugin.orders USING btree (shop_id);
+
+
+
+
+
+-- Name: ix_settlement_details_stmt; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_settlement_details_stmt ON plugin.settlement_details USING btree (shop_id, statement_id);
+
+
+-- Name: ix_settlements_shop; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_settlements_shop ON plugin.settlements USING btree (shop_id);
+
+
+-- Name: ix_shipments_order; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_shipments_order ON plugin.shipments USING btree (shop_id, order_id);
+
+
 -- Name: ix_manual_costs_channel_product_valid; Type: INDEX; Schema: procurement; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_manual_costs_channel_product_valid ON procurement.manual_product_costs USING btree (spu_pk, valid_from);
@@ -1825,11 +2200,6 @@ CREATE OR REPLACE TRIGGER trg_after_sales_case_lines_touch BEFORE UPDATE ON afte
 -- Name: cases trg_after_sales_cases_touch; Type: TRIGGER; Schema: after_sales; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_after_sales_cases_touch BEFORE UPDATE ON after_sales.cases FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
--- Name: ad_raw trg_analytics_ad_raw_touch; Type: TRIGGER; Schema: analytics; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_analytics_ad_raw_touch BEFORE UPDATE ON analytics.ad_raw FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
 -- Name: shops trg_commerce_channel_accounts_touch; Type: TRIGGER; Schema: commerce; Owner: -
@@ -1960,6 +2330,31 @@ CREATE OR REPLACE TRIGGER trg_linkage_product_links_touch BEFORE UPDATE ON linka
 -- Name: variant_links trg_linkage_variant_links_touch; Type: TRIGGER; Schema: linkage; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_linkage_variant_links_touch BEFORE UPDATE ON linkage.variant_links FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: ad_daily trg_analytics_ad_daily_touch; Type: TRIGGER; Schema: plugin; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_analytics_ad_daily_touch BEFORE UPDATE ON plugin.ad_daily FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: ad_monthly trg_analytics_ad_monthly_touch; Type: TRIGGER; Schema: plugin; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_analytics_ad_monthly_touch BEFORE UPDATE ON plugin.ad_monthly FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: ad_raw_log trg_analytics_ad_raw_log_touch; Type: TRIGGER; Schema: plugin; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_analytics_ad_raw_log_touch BEFORE UPDATE ON plugin.ad_raw_log FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: ad_today trg_analytics_ad_today_touch; Type: TRIGGER; Schema: plugin; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_analytics_ad_today_touch BEFORE UPDATE ON plugin.ad_today FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: plugin_logs trg_analytics_plugin_logs_touch; Type: TRIGGER; Schema: plugin; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_analytics_plugin_logs_touch BEFORE UPDATE ON plugin.plugin_logs FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
 -- Name: manual_product_costs trg_procurement_manual_product_costs_touch; Type: TRIGGER; Schema: procurement; Owner: -
@@ -2311,6 +2706,36 @@ ALTER TABLE ONLY linkage.variant_links
     ADD CONSTRAINT variant_links_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
 
 
+-- Name: order_lines order_lines_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.order_lines
+
+
+-- Name: orders orders_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.orders
+
+
+-- Name: settlement_details settlement_details_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.settlement_details
+
+
+-- Name: settlements settlements_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.settlements
+
+
+-- Name: shipments shipments_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.shipments
+
+
+-- Name: tracking_events tracking_events_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.tracking_events
+
+
 -- Name: manual_product_costs manual_product_costs_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
 
 ALTER TABLE ONLY procurement.manual_product_costs
@@ -2421,5 +2846,71 @@ ALTER TABLE ONLY reporting.shipment_tracking_summary
 
 -- PostgreSQL database dump complete
 
-\unrestrict eGDe9NaxPGHQ5JUOrisXJt2Fsbx7uunhafY8d8Oa8ft8HbUvRSYpR29CnYijW2u
 
+
+-- campaign_opt_logs (广告操作日志)
+CREATE TABLE IF NOT EXISTS plugin.campaign_opt_logs (
+    id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    seller_id        TEXT NOT NULL,
+    advertiser_id    TEXT NOT NULL,
+    log_id           TEXT NOT NULL UNIQUE,        -- TikTok 操作日志 ID
+    campaign_id      TEXT NOT NULL,               -- object_id
+    user             TEXT,                         -- 操作人
+    opt_time         TIMESTAMPTZ NOT NULL,         -- 操作时间
+    object_type      TEXT,                         -- 如 "推广系列"
+    object_raw_type  TEXT,                         -- 如 "4"
+    activity_details JSONB,                        -- 变更详情数组
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_campaign_opt_logs_seller_time ON plugin.campaign_opt_logs (seller_id, opt_time);
+CREATE INDEX IF NOT EXISTS idx_campaign_opt_logs_campaign ON plugin.campaign_opt_logs (campaign_id);
+
+-- Name: after_sales; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.after_sales (
+    id bigint NOT NULL,
+    shop_id text NOT NULL,
+    cancel_id text NOT NULL,
+    cancel_type text NOT NULL,
+    cancel_status text NOT NULL,
+    main_order_id text,
+    reason text,
+    request_time timestamp with time zone,
+    complete_time timestamp with time zone,
+    raw_payload jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.after_sales ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.after_sales_id_seq
+);
+
+
+
+-- Name: after_sale_items; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.after_sale_items (
+    id bigint NOT NULL,
+    shop_id text NOT NULL,
+    cancel_id text NOT NULL,
+    line_item_id text NOT NULL,
+    order_line_item_id text,
+    sku_id text,
+    product_id text,
+    quantity numeric(20,4),
+    refund_amount numeric(20,4),
+    currency text,
+    raw_payload jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.after_sale_items ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.after_sale_items_id_seq
+);

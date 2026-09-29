@@ -54,6 +54,12 @@ import os
 import sys
 from pathlib import Path
 
+# Make ``tts_erp_v2`` importable from any CWD (the package lives in
+# the project root, one level up from scripts/). Required for the
+# prod-shape destructive guard imported below.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
 
 def _load_env() -> None:
     env_path = Path(__file__).resolve().parent.parent / ".env"
@@ -90,6 +96,19 @@ def _run() -> None:
     args = parser.parse_args()
     if not args.dry_run and not args.confirm:
         parser.error("pass either --dry-run (preview) or --confirm (execute)")
+
+    # Prod-shape guard (2026-09-13 fix/unify-destructive-guard):
+    # refuses destructive ops on prod-shape dbnames unless
+    # ``ALLOW_PROD_DESTRUCTIVE=1`` is set in the environment. Dry-run
+    # previews on prod are still allowed (they only print).
+    from tts_erp_v2.api.deps import require_destructive_script_guard
+
+    require_destructive_script_guard(
+        script_name="oneoff_regen_finance_components",
+        confirmation=args.confirm,
+        dangerous=args.confirm,  # dry-run is safe even on prod
+        allow_env="ALLOW_PROD_DESTRUCTIVE",
+    )
 
     try:
         import psycopg

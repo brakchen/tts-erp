@@ -17,9 +17,17 @@ from sqlalchemy.orm import Session, sessionmaker
 from tts_erp_v2.db.base import get_engine
 
 # v2 schema 清单(per ADR-0001 §1.1 audit)
+#
+# 2026-09-11 PLUGIN_ARCH_CLEANUP：`analytics` schema 已并入 `plugin`，故从本清单移除。
+# 2026-09-17 chore/deprecate-plugin-raw-log Phase 3：plugin.raw_log 表已 drop，
+# 业务表 log_id 列已 drop，原文「plugin.raw_log 无 updated_at」豁免理由部分失效
+# （业务表大多有 updated_at + trg_*_touch 触发器，但 plugin.intercept_sessions /
+# plugin.intercepted_requests 仍无 updated_at；多个 plugin.* 表缺 BEFORE UPDATE 触发器）。
+# 这些是 pre-existing gap，与本 lane 无关，**留待单独 docs-only lane 修**——本
+# lane 仅负责 drop raw_log，不顺手补这些缺口（会引入新 fail）。
+# 维持原状：`plugin` schema 不加入本清单（与 Phase 3 前一致）。
 V2_SCHEMAS = (
     "commerce",
-    "analytics",
     "integration",
     "linkage",
     "procurement",

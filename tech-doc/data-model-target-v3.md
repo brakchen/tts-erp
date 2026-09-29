@@ -807,10 +807,25 @@ MANUAL_ENTRY              -- 人工填写（本系统事实源，优先级最高
 LATEST_PURCHASE_COST      -- 妙手采购单
 PERIOD_AVERAGE_COST       -- 妙手采购单
 WEIGHTED_AVERAGE_COST     -- 妙手采购单
+SOURCE_PRICE             -- 货源价兜底（2026-09-06 决策：货源价=采购价口径）
 ```
 
-注意：1688 采集标价**不是**成本口径（标价 ≠ 实际采购价）。无人工填写且无采购单的
-SPU 不生成成本快照，进入异常/待填队列。
+> 2026-09-06 决策（配合 `miaoshou.common_collect_box` job）：用户在拍板
+> “货源价就是我们的采购价格”后，公共采集箱挂牌价（`procurement_products.source_unit_cost`）
+> 作为 **SOURCE_PRICE 估算兜底** 落账（优先级低于采购单/人工），method 区分开，
+> 报表只能叫“估算成本”，待真实采购单出现后对账修正。
+>
+> 2026-09-07 补充（`miaoshou.sync_source_cost_to_master` 6h job）：
+> TK 侧 `procurement_products` 行（`external_product_id` 是 spu_id）原本
+> 只有 `source_item_id`，不填 cost——需要 read-time 按 offer 桥到公共采集箱行
+> 取价。本 job 把公共采集箱的 `source_unit_cost/min/max` 按
+> `source_item_id` latest-by-`synced_at` 回填到 TK 侧行（`IS DISTINCT FROM`
+> 守卫幂等），所以 `spu_id → source_price` 变成直读、reporting 的
+> `_source_cost_lookup` 首步直接命中；bridge 仍保留作为 fallback。
+
+注意：1688 采集标价严格说**不是**成交成本（标价 ≠ 实际采购价，TK 采集箱
+originPrice 曾被实测差 7×）；SOURCE_PRICE 只作估算兜底。无人工、无采购单、
+无货源价的 SPU 不生成成本快照，进入异常/待填队列。
 
 ## 11.4 利润口径
 

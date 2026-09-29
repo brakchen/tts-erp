@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -58,19 +58,21 @@ def _resolve_mirror_url(mirror_object_key: str | None) -> str | None:
 # --- SQL constants (no interpolation) ------------------------------------
 SQL_LIST_CHANNEL_ACCOUNTS = (
     "SELECT id, platform, shop_id, account_name, region, "
-    "seller_type, status, synced_at "
+    "seller_type, status, synced_at, opened_date, credential_id, service_id "
     "FROM commerce.shops "
     "WHERE (CAST(:platform AS text) IS NULL OR platform = CAST(:platform AS text)) "
     "ORDER BY id LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
 )
 SQL_GET_CHANNEL_ACCOUNT = (
     "SELECT id, platform, shop_id, account_name, region, "
-    "seller_type, status, synced_at FROM commerce.shops "
+    "seller_type, status, synced_at, opened_date, credential_id, service_id "
+    "FROM commerce.shops "
     "WHERE id = :id"
 )
 SQL_GET_CHANNEL_ACCOUNT_BY_EXTERNAL = (
     "SELECT id, platform, shop_id, account_name, region, "
-    "seller_type, status, synced_at FROM commerce.shops "
+    "seller_type, status, synced_at, opened_date, credential_id, service_id "
+    "FROM commerce.shops "
     "WHERE platform = :platform AND shop_id = :ext"
 )
 SQL_LIST_CHANNEL_PRODUCTS = (
@@ -78,12 +80,39 @@ SQL_LIST_CHANNEL_PRODUCTS = (
     "       cp.source_created_at, cp.source_updated_at, "
     "       cp.main_image_url, cp.mirror_object_key, "
     "       m.unit_cost, m.currency, "
-    "       CASE WHEN m.id IS NULL THEN NULL ELSE 'MANUAL_ENTRY' END AS cost_method "
+    "       CASE WHEN m.id IS NULL THEN NULL ELSE 'MANUAL_ENTRY' END AS cost_method, "
+    "       (SELECT pp.source_unit_cost "
+    "        FROM procurement.procurement_products pp "
+    "        WHERE pp.external_product_id = cp.spu_id "
+    "          AND pp.source_unit_cost IS NOT NULL "
+    "        ORDER BY pp.synced_at DESC NULLS LAST, pp.id DESC "
+    "        LIMIT 1) AS source_unit_cost "
     "FROM commerce.products_spu cp "
     "LEFT JOIN procurement.manual_product_costs m "
     "  ON m.spu_pk = cp.id AND m.valid_to IS NULL "
     "WHERE (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
     "AND (CAST(:status AS text) IS NULL OR cp.status = CAST(:status AS text)) "
+    "AND (NOT CAST(:has_orders AS boolean) OR EXISTS ("
+    "  SELECT 1 FROM commerce.sales_order_lines sol "
+    "  WHERE sol.spu_pk = cp.id AND sol.spu_pk IS NOT NULL"
+    "))"
+)
+# Total row count for the SAME filter (no sort / page suffix) — surfaced as
+# the X-Total-Count header so the page can render 共 N 行 / paging without
+# switching the JSON body to an envelope (the bare-array shape is a stable
+# external contract). The LEFT JOIN cannot inflate the count: at most one
+# open manual_product_costs row per SPU (partial unique index); the
+# has-orders EXISTS also cannot inflate it.
+SQL_COUNT_CHANNEL_PRODUCTS = (
+    "SELECT COUNT(*) AS n FROM commerce.products_spu cp "
+    "LEFT JOIN procurement.manual_product_costs m "
+    "  ON m.spu_pk = cp.id AND m.valid_to IS NULL "
+    "WHERE (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
+    "AND (CAST(:status AS text) IS NULL OR cp.status = CAST(:status AS text)) "
+    "AND (NOT CAST(:has_orders AS boolean) OR EXISTS ("
+    "  SELECT 1 FROM commerce.sales_order_lines sol "
+    "  WHERE sol.spu_pk = cp.id AND sol.spu_pk IS NOT NULL"
+    "))"
 )
 # All-SPU catalogue sorters (2026-09-06): the tail of SQL_LIST_CHANNEL_PRODUCTS.
 # Values come from the allowlist below — no request input ever reaches the
@@ -96,8 +125,24 @@ _SORT_TAILS_CHANNEL_PRODUCTS = {
     "created_at-desc": "ORDER BY cp.source_created_at DESC NULLS LAST, cp.id",
     "updated_at-asc": "ORDER BY cp.source_updated_at ASC NULLS LAST, cp.id",
     "updated_at-desc": "ORDER BY cp.source_updated_at DESC NULLS LAST, cp.id",
-    "unit_cost-asc": ("ORDER BY m.unit_cost ASC NULLS LAST, cp.id"),
-    "unit_cost-desc": ("ORDER BY m.unit_cost DESC NULLS LAST, cp.id"),
+    "unit_cost-asc": (
+        "ORDER BY COALESCE(m.unit_cost, "
+        "(SELECT pp.source_unit_cost "
+        " FROM procurement.procurement_products pp "
+        " WHERE pp.external_product_id = cp.spu_id "
+        "   AND pp.source_unit_cost IS NOT NULL "
+        " ORDER BY pp.synced_at DESC NULLS LAST, pp.id DESC "
+        " LIMIT 1)) ASC NULLS LAST, cp.id"
+    ),
+    "unit_cost-desc": (
+        "ORDER BY COALESCE(m.unit_cost, "
+        "(SELECT pp.source_unit_cost "
+        " FROM procurement.procurement_products pp "
+        " WHERE pp.external_product_id = cp.spu_id "
+        "   AND pp.source_unit_cost IS NOT NULL "
+        " ORDER BY pp.synced_at DESC NULLS LAST, pp.id DESC "
+        " LIMIT 1)) DESC NULLS LAST, cp.id"
+    ),
     # Status sort (2026-09-06): stable by a fixed weight so the list
     # doesn't depend on upstream enum spelling. Weights mirror the page's
     # Chinese labels: 商家(ACTIVATE)=0 < 下架(DELETED)=1 < 停售
@@ -128,7 +173,13 @@ SQL_GET_CHANNEL_PRODUCT = (
     "       cp.source_created_at, cp.source_updated_at, "
     "       cp.main_image_url, cp.mirror_object_key, "
     "       m.unit_cost, m.currency, "
-    "       CASE WHEN m.id IS NULL THEN NULL ELSE 'MANUAL_ENTRY' END AS cost_method "
+    "       CASE WHEN m.id IS NULL THEN NULL ELSE 'MANUAL_ENTRY' END AS cost_method, "
+    "       (SELECT pp.source_unit_cost "
+    "        FROM procurement.procurement_products pp "
+    "        WHERE pp.external_product_id = cp.spu_id "
+    "          AND pp.source_unit_cost IS NOT NULL "
+    "        ORDER BY pp.synced_at DESC NULLS LAST, pp.id DESC "
+    "        LIMIT 1) AS source_unit_cost "
     "FROM commerce.products_spu cp "
     "LEFT JOIN procurement.manual_product_costs m "
     "  ON m.spu_pk = cp.id AND m.valid_to IS NULL "
@@ -174,7 +225,9 @@ def _q(compiled_stmt, params: dict, sess: Session):
     data flows only through the ``params`` dict — never into the SQL
     string itself.
     """
-    return sess.execute(compiled_stmt, params)
+    return sess.execute(  # pi-lens-ignore: python-sql-injection — module-level text() constants + bound params only
+        compiled_stmt, params
+    )
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -192,6 +245,7 @@ def _safe_int(value: Any, default: int = 0) -> int:
 _STMT_LIST_CHANNEL_ACCOUNTS = text(SQL_LIST_CHANNEL_ACCOUNTS)
 _STMT_GET_CHANNEL_ACCOUNT = text(SQL_GET_CHANNEL_ACCOUNT)
 _STMT_GET_CHANNEL_ACCOUNT_BY_EXTERNAL = text(SQL_GET_CHANNEL_ACCOUNT_BY_EXTERNAL)
+_STMT_COUNT_CHANNEL_PRODUCTS = text(SQL_COUNT_CHANNEL_PRODUCTS)
 _STMT_GET_CHANNEL_PRODUCT = text(SQL_GET_CHANNEL_PRODUCT)
 _STMT_LIST_CHANNEL_VARIANTS = text(SQL_LIST_CHANNEL_VARIANTS)
 _STMT_LIST_SALES_ORDERS = text(SQL_LIST_SALES_ORDERS)
@@ -210,6 +264,9 @@ def _row_to_channel_account(row: Any) -> ChannelAccountOut:
         seller_type=row.seller_type,
         status=row.status,
         synced_at=row.synced_at,
+        opened_date=row.opened_date,
+        credential_id=row.credential_id,
+        service_id=row.service_id,
     )
 
 
@@ -227,6 +284,8 @@ def _row_to_channel_product(row: Any) -> ChannelProductOut:
         unit_cost=row.unit_cost,
         currency=row.currency,
         cost_method=row.cost_method,
+        # 货源价 fallback (from procurement.procurement_products)
+        source_unit_cost=getattr(row, "source_unit_cost", None),
         image_url=_resolve_mirror_url(row.mirror_object_key),
         main_image_url=row.main_image_url,
     )
@@ -244,6 +303,36 @@ def _row_to_sales_order(row: Any) -> SalesOrderOut:
         order_time=row.order_time,
         order_modify_time=row.order_modify_time,
         paid_at=row.paid_at,
+    )
+
+
+def _require_tiktok_region(row: Any, *, platform: str, shop_id: str) -> None:
+    """Reject an unusable TikTok account before it reaches sync clients.
+
+    ``region`` is optional for non-TikTok commerce accounts, but it is a
+    required routing/calendar input for every TikTok sync.  Returning a 200
+    response with ``region=null`` makes the client look like the failing
+    component and, worse, allows callers to continue with an incomplete
+    scope.  Keep this guard at the canonical external-account lookup so all
+    clients get the same actionable error.
+    """
+    if platform.strip().lower() != "tiktok":
+        return
+    region = row.region.strip() if isinstance(row.region, str) else ""
+    if region:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail={
+            "code": "SHOP_REGION_REQUIRED",
+            "message": (
+                "TikTok 店铺地区未配置，无法开始同步。"
+                "请先在 TTS-ERP 店铺账号中填写国家/地区代码（如 VN）。"
+            ),
+            "field": "region",
+            "platform": platform,
+            "shop_id": shop_id,
+        },
     )
 
 
@@ -304,6 +393,21 @@ def list_shops(
         401: {"description": "Missing / invalid / disabled API key."},
         403: {"description": "API key role < readonly."},
         404: {"description": "No `commerce.shops` row matches `(platform, shop_id)`."},
+        422: {
+            "description": "TikTok account exists but its required region is not configured.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": {
+                            "code": "SHOP_REGION_REQUIRED",
+                            "message": "TikTok 店铺地区未配置，无法开始同步。请先在 TTS-ERP 店铺账号中填写国家/地区代码（如 VN）。",
+                            "field": "region",
+                            "platform": "tiktok",
+                        }
+                    }
+                }
+            },
+        },
     },
 )
 def get_channel_account_by_external(
@@ -333,6 +437,7 @@ def get_channel_account_by_external(
             status.HTTP_404_NOT_FOUND,
             f"channel account not found for platform={platform!r} shop_id={shop_id!r}",
         )
+    _require_tiktok_region(row, platform=platform, shop_id=shop_id)
     return _row_to_channel_account(row)
 
 
@@ -359,6 +464,14 @@ def list_products_spu(
     sess: Session = Depends(get_session),
     shop_pk: int | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
+    has_orders: bool = Query(
+        default=False,
+        description=(
+            "Only return SPUs that appear on at least one sales order "
+            "line (spu_pk bound). False (default) returns the whole "
+            "catalogue."
+        ),
+    ),
     sort: str = Query(
         default="id",
         pattern="^(id|created_at|updated_at|unit_cost|status)$",
@@ -366,23 +479,38 @@ def list_products_spu(
             "Catalogue column to sort on: id (insertion order), "
             "created_at / updated_at (source timestamps), unit_cost "
             "(current effective manual cost; cost-less rows always tail), "
-            "or status (ACTIVATE=商家 first, then DELETED, then "
+            "or status (ACTIVATE=在售 first, then DELETED, then "
             "SELLER_DEACTIVATED)."
         ),
     ),
     order: str = Query(default="asc", pattern="^(asc|desc)$"),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    response: Response = None,  # type: ignore[assignment]  # injected by FastAPI
 ) -> list[ChannelProductOut]:
     key = _sort_key(sort, order)
+    params = {
+        "acct_id": shop_pk,
+        "status": status_filter,
+        "has_orders": has_orders,
+    }
+    # Total matching rows (same filter, ignoring page bounds) — exposed as
+    # X-Total-Count so the UI can render 共 N 行 without switching the
+    # bare-array body to an envelope. Missing response (unit test without
+    # FastAPI injection) simply skips the header.
+    if response is not None:
+        total = _q(
+            _STMT_COUNT_CHANNEL_PRODUCTS,
+            params,
+            sess,
+        ).scalar()
+        response.headers["X-Total-Count"] = str(total or 0)
+    page_params = dict(params)
+    page_params["limit"] = limit
+    page_params["offset"] = offset
     rows = _q(
         _SQL_LIST_CHANNEL_PRODUCTS[key],
-        {
-            "acct_id": shop_pk,
-            "status": status_filter,
-            "limit": limit,
-            "offset": offset,
-        },
+        page_params,
         sess,
     ).all()
     return [_row_to_channel_product(r) for r in rows]

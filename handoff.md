@@ -1,9 +1,248 @@
 # handoff.md — tts-erp 跨 session 交接笔记
 
 > 🔄 **当前在途工作注册（谁在改什么 / 谁接手）：先读 `handoff/ACTIVE.md`**（AGENTS.md §12.1）
+>
+> 上次 session: 2026-09-15（chore/dumps-data-contract 端到端契约文档）
+> 上次 session 主题: **`tech-doc/dumps-data-contract.md`（434 行）—— Chrome 插件 ↔ tts-erp dumps 端契约：①2 参与者 + dumps 写入端点 + 订单/物流 reconcile 校验端点 ②dumps 请求 schema Python Pydantic ↔ TS Zod 镜像表 + 5 类错误码 ③4 域 × dumps 路由表（订单/物流/售后/结算 × 4 列，售后整列空白）④**6 张 plugin 业务表字段映射**（orders / order_lines / shipments / tracking_events / settlements / settlement_details，每行 4 列：API path → parser 变量 → upsert → plugin 列+类型）⑤4 项已知 gap（只列现象+假设不下结论：售后 0 行 / 结算 0 行 4 个假设路径 / 物流 0 行 / order_time NULL）；纯文档 lane，merge + push 完成**
+> 上次 session 主题: **`tech-doc/tiktok-seller-center-api-catalog.md` 6 处更新：①§2.1/§2.7/§2.8 加 enums/ inline 链接（main-order-status / sku-display-status / fulfillment-type / pay-method / sale-region / case-type / reverse-type 等） ②§7.4.3 加 'action_list ≠ 物流 action_code' 警告 ③§7.4.4.1 完整 `585900098675508729` 案例（系统取消 vs 买家取消差异表 + 43 事件时间线 + should_replenish_stock=true） ④§7.8 待确认事项表加 09-15 列 + 字典位置列（11 项推进，6 项维持 🔴） ⑤§6 加指针指向 §7.8 ⑥顶部'相关文档'段按 ✅已确认 / 🟡部分观测 / 🔴待观测 三张表重排；纯文档 lane，merge + push 完成**
 
-> 上次 session: 2026-09-05（v1 oauth_receiver 库 DROP + public.* 19 张业务表归档）
-> 上次 session 主题: v1 oauth_receiver 库整体废弃并 DROP（提前 21 天结束 4 周观察期）+ 配套清理
+## TL;DR (2026-09-15 chore/tech-doc-enums — 枚举值参考手册)
+
+**背景**：本项目 enum 字段散落 11 个 schema、30+ 个表，"这个 int 码是啥意思"反复出现——
+代码不固化、文档不汇总、跨表口径不一（plugin 卖家中心 int vs commerce v2 text）。
+**修复 = 集中沉淀 + 标注来源 + 等级**（✅已固化 / 🟡实测推断 / 🔴未知）。
+
+**改动 (40 files / +1440 lines / 纯 docs / 0 code change / 0 test change)**:
+
+按域归类:
+
+- **订单/物流** 7 文件: `order-status.md`、`main-order-status.md`(🟡 int 推断)、
+  `sku-display-status.md`(🟡)、`fulfillment-type.md`(双口径)、
+  `pay-method.md`、`sale-region.md`、`line-status.md`(🔴)
+- **物流事件** 3: `action-code.md`(23 字段全表)、`logistics-terminal-codes.md`、
+  `track-status.md`
+- **售后/取消** 6: `case-type.md`、`cancel-type.md`、`cancel-status.md`、
+  `cancel-reason.md`、`reverse-type.md`(🟡)、`reverse-status.md`(🟡)
+- **结算** 5: `settlement-status.md`、`payment-status.md`、`statement-type.md`(🔴)、
+  `payment-pending-reason.md`(🔴)、`settlement-component-code.md`(58 字段 EAV)
+- **商品/链接** 4: `product-status.md`、`product-link-relation-type.md`、
+  `link-override-decision.md`、`link-issue-type.md`
+- **成本/采购** 3: `cost-method.md`、`procurement-product-type.md`、
+  `procurement-products-status.md`(妙手 free-text)
+- **集成/同步/安全** 8: `provider.md`、`platform.md`、`sync-job-status.md`、
+  `plugin-log-level.md`、`ad-raw-log-kind.md`、`api-key-role.md`、
+  `api-key-status.md`(🟡)、`intercept-mode.md`
+- **地理/货币** 2: `region.md`、`sale-region.md`、`currency.md`
+- **索引** 2: `README.md`(分层索引 + 已知 gap 表)、`conventions.md`(统一模板)
+
+**关键发现**（封堵"拍脑袋"风险）:
+
+1. `plugin.orders.main_order_status` int 100~104 → 文本状态**未固化**，
+   prod 实测推断（100=UNPAID / 101=AWAITING_SHIPMENT / 102=IN_TRANSIT-or-... /
+   103=售后中 / 104=CANCELLED），`tech-doc/plugin-sourced-shop-analytics.md §4.2` 已标 TODO
+2. `cancel_reason` 文档只列 1 种 (`returned_to_shipper_other`)，prod 实测至少 9 种
+3. `reverse_type` 只见过 1/3/4，`tech-doc/plugin-sourced-shop-analytics.md §8` 标 "枚举待核实"
+4. `fulfillment_type` 同一业务有 text (commerce) + int (plugin) **两套编码**无自动转换
+5. `plugin.tracking_events` **没存 action_code 列** — `tech-doc/plugin-sourced-shop-analytics.md §4.3` 标 P0 TODO
+
+**未做**（明确留给后续 lane）:
+
+- 真正把 main_order_status int → text 映射**落地**到 `tts_erp_v2/db/constants.py`
+- 给 `plugin.tracking_events` 加 action_code 列（解海外取消桶为空）
+
+**reverted 风险**: 无（纯文档）。**push**: `1dd77e5` master 已就位。
+
+## TL;DR (2026-09-13 fix/unify-destructive-guard — 统一 destructive 守卫)
+
+**背景**：9-13 P0 lane 已经修了 admin purge 端点和 conftest，但 audit 发现 codebase
+**还有 5 个 prod-shape destructive 入口没有守卫**（intercept DELETE × 2、spu_images DELETE、
+oneoff_finance_reset、oneoff_regen_finance_components），加上 alembic upgrade
+总 6 个。每个都是"裸跑就能删 prod 数据"的入口——只是因为历史没出过事、role 门槛
+较高、或者没人在 prod 上跑过，没暴露。**修复 = 抽公共守卫统一管**。
+
+**改动 (8 files / +370 lines / 0 new fail)**:
+
+1. **`tts_erp_v2/api/deps.py`** — 抽公共守卫:
+   - `is_prod_shaped_db()` — fail-closed, `tts_erp`/`tts_erp_prod`/`tts_erp_prod_*` → True, 未设 env → True
+   - `require_destructive_guard(request, op_name)` — FastAPI 端点用，prod-shape → 403（除非 `ALLOW_PROD_DESTRUCTIVE=1`）
+   - `require_destructive_script_guard(script_name, confirmation, dangerous)` — 脚本/alembic/job 用，prod-shape + confirmation → sys.exit(2); dry-run 在 prod 允许预览
+2. **`tts_erp_v2/api/v2/admin.py`** — `_is_prod_shaped_db` 删除, 改 import 公共版
+3. **`tts_erp_v2/api/v2/intercept.py`** — DELETE /configs/{id} + POST /configs/batch (delete) 装守卫
+4. **`tts_erp_v2/api/v2/spu_images.py`** — DELETE /{image_id} 装守卫
+5. **`scripts/oneoff_finance_reset.py`** + **`scripts/oneoff_regen_finance_components.py`** — sys.path 加项目根，args.confirm 时调 script_guard；dry-run 在 prod 允许
+6. **`alembic/env.py`** — `alembic upgrade --sql` 视为 dry-run（不执行），其他 upgrade head 拒绝
+7. **`tts_erp_v2/plugin/ads/repository.py`** — `merge_today_into_daily` 改 `ON CONFLICT DO UPDATE` → `DO NOTHING`，避免 merge job 用 ad_today 陈旧快照覆盖 ad_daily 已有的 chrome backfill 完整历史
+8. **`tests/api/test_destructive_guard.py`** — 15 个单测（is_prod_shaped_db 6 dbname 真值表 + 守卫行为 9 个）
+
+**测试**: scripts/test.sh fast lane 17 fail / master HEAD 17 fail 完全一致，**0 新 fail**
+（`test_run_cost_snapshots_no_active_spu_returns_zero` 是 pre-existing flake — 假设
+"test env 没 SPU" 但其他 test 会 seed，单独跑 master HEAD 也复现）。
+
+**事故复盘**: 延续 `tech-doc/incident-reports/2026-09-13-ad-daily-purge.md`（同一事故），
+未新增 incident report。
+
+**AGENTS.md §6 加新红线**: "统一 prod-shape destructive 守卫" + 列出 8 个已装守卫入口，
+新加 destructive 路径不装 = P1 review finding。
+
+## TL;DR (2026-09-13 P0 ad_daily purge recovery)
+
+**背景**：9-13 08:19 UTC（北京时间 16:19），有人在 prod tts_erp 库跑了
+`tests/api/test_admin_purge.py::test_purge_plugin_data_clears_ad_tables`（worktree `.env` 软链到
+主仓 prod `.env` + 裸 pytest 走 prod），session 1537 第 2 段事务 = `purge_plugin_data` 端点的 11 个
+SELECT COUNT + 2 个裸 DELETE（清空 14,719 行 → 残 1,036 行）。
+
+**恢复（已完成）**：
+
+- 06:00 preserved pgdump 14,306 行 + 9-13 早上 prod 残骸里 staging 漏的 1,131 行（chrome backfill）= **15,437 行恢复**
+- 维度：111 products / 246 campaigns / 65 days（7-10 ~ 9-12）/ 总成本 ¥6,389.59
+- id_seq 修复到 59,500（next=59,501）
+- 原 prod 残骸 1,138 行保留在 `plugin.ad_daily_rescue_20260913`（紧急回滚源）
+
+**加固（已落地，commit fix/recover-ad-daily-purge-guard）**：
+
+1. **`tests/conftest.py`** — prod-shape dbname WARNING → `pytest.exit(2)` hard fail；只有
+   `TTS_ERP_TEST_OFF=1` 临时绕过（且打醒目 banner `LIVE DATA AT RISK`）
+2. **`tts_erp_v2/api/v2/admin.py::purge_plugin_data`** — 双 gate：
+   - Gate 1: `_is_prod_shaped_db()` 检查 `TTS_ERP_DB_URL`，prod-shape 返 403（除非 `ALLOW_PROD_PURGE=1`）
+   - Gate 2: 必须 `?confirm=true` 才真删，无 confirm = dry-run（返行数 + `dry_run: true` + `next_step` 提示）
+   - role 复位：admin（2026-09-10 bfb6b71 降到 readwrite 的改动回滚）
+3. **`tests/api/test_admin_purge.py`** — 重写以适配双 gate，新增 dry-run 测试
+
+**事故完整复盘**：见 `tech-doc/incident-reports/2026-09-13-ad-daily-purge.md`（含 PG log 时间线、
+5-Why 根因、HTTP access log 为什么看不到、恢复脚本、教训）。
+
+## TL;DR (2026-09-11 PLUGIN_ARCH_CLEANUP — 插件数据物理隔离)
+
+**背景**：广告 dump 无 server-side 同步路径，但 `api-managed` 守卫（`ae843a1`）把
+`shops.data_source='api'` 店铺的插件 dumps **全域静默吞掉** → 广告数据永远进不来。
+方向：api 同步数据与插件 dump 数据**按 schema 物理隔离**，不再需要来源判定。
+
+**四个 lane（均为串行 worktree，合并后 prod 已迁移 + 重启 + 冒烟 8/8）**：
+
+| lane | 内容 | migration | prod |
+| --- | --- | --- | --- |
+| 1 | AGENTS.md §6 加「不得删除/截断 prod 库数据」红线 | — | — |
+| 2 | `chrome_sync` schema → `plugin`（含包 `plugin/orders/`） | `0023_chrome_sync_to_plugin` | ✅ |
+| 3 | `analytics` 5 表 → `plugin` + `DROP SCHEMA analytics`（含包 `plugin/ads/`、job 改名 `plugin.ad_merge_today2daily`） | `0024_analytics_to_plugin` | ✅ |
+| 4 | 删 `commerce.shops.data_source` + 拆两处 api-managed 守卫 + 删 `shop_is_api_managed()` | `0025_drop_shops_data_source` | ✅ |
+
+- `data_source` 拆卸后，插件 dumps **不再被拦截**（已用「无效 kind 探针」在 prod 验证：
+  原返回 `200 api_managed` → 现走到校验返 `400`）。
+- `backend/commerce.shops` 删列前已备份：`backups/commerce_shops_pre_0025_20260911_160458.sql`。
+- 每个 lane：test 库全量 fast **0 新 fail**（13 个 pre-existing 逐条一致）、ruff 集合一致。
+
+**❗ 遗留缺口（待用户决策，未修）**：`plugin.*` 的时间字段约定不完整 ——
+
+- `plugin.raw_log` **无 `updated_at` 列**；
+- 7 张订单表（orders / order_lines / shipments / tracking_events / settlements /
+  settlement_details / raw_log）**无 `BEFORE UPDATE` 触发器**。
+
+二者是 `chrome_sync` 时期就存在的遗留（该 schema 从未被
+`tests/db/test_time_fields_convention.py::V2_SCHEMAS` 覆盖）。lane 3 修 `V2_SCHEMAS` 时
+发现了它们，但为避免引入新 fail，**只移除已消失的 `analytics`、未加入 `plugin`**。
+需要时另开 lane 补列 + 加触发器，并把 `plugin` 加入 `V2_SCHEMAS`。
+
+### ❗ 订单域插件同步：用户 2026-09-11 拍板「先不处理，先观察」（选项 B）—— 属预期状态，勿当 bug 修
+
+- **背景**：订单/物流/结算已有 server-side API 同步（`tiktok.orders` / `order_detail` /
+  `logistics` / `finance` / `after_sales` jobs → `commerce.*` / `fulfillment.*` /
+  `finance.*`），插件侧仍有一套并行的 order-sync；插件的 TikTok 请求**不经过 ad 的
+  `tiktokRequestPacer`**（自带 3s/单 的 N+1 间隔），因此两条链路会争抢上游配额。
+- **lane 4 拆守卫后的新变化**：order dumps 从「被静默丢弃（`200 api_managed`）」变为
+  **真正落库** → `plugin.orders / order_lines / shipments / tracking_events /
+  settlements / settlement_details / raw_log` **会开始增长**（之前一直 0 行）。
+- **预期现象**：同一事实在两处各存一份 —— `commerce.sales_orders`（API）vs
+  `plugin.orders`（插件）、`fulfillment.shipments` vs `plugin.shipments` 等。
+  **这是用户拍板的「schema 物理隔离 + 后续再选读哪个」设计，不是双写 bug。**
+- **已知代价**（接受）：① 上游请求配额轻微争抢；② 7 张插件订单表无业务读者却持续增长；
+  ③ 上文的时间字段缺口。
+- **若日后要下线**：应作为**整个插件订单域下线**（7 表 + `tts_erp_v2/plugin/orders/` +
+  `api/v2/order_sync.py` router + `tests/plugin/orders/` + **chrome-plugins 侧 order-sync 全套**），
+  **不要单独删 `plugin.raw_log`**（它是 6 张订单表的 FK 父表）。下线前需先确认插件订单同步
+  是否仍是「API scope 缺失时的兜底」。
+
+**完整记录**：`handoff/PLUGIN_ARCH_CLEANUP.md`（决策快照 / 每 lane 改动面 / 实测经验）。
+
+---
+
+## TL;DR (2026-09-11 v4 dump campaign-level rows 双端对齐)
+
+**修复 Bridge nook 店铺 09-10 18:45 UTC 起 dumps 500 KeyError 持续失败**（`75c84c5` tts-erp
+merge + `a70d078` handoff；`8595167` chrome-plugins merge + `e35fc2c` handoff）：
+
+1. **服务端** — `tts_erp_v2/analytics/repository.py` 加 `_PRODUCT_LEVEL_ENDPOINTS` 白名单
+   (post_product_list + post_session_list)，不在白名单的 endpoint（如
+   campaign_opt_log_list）走 `_archive_raw_log_only` 路径：rows 只入 ad_raw_log
+   (response_body 完整保留)，不入 ad_daily/ad_today/ad_monthly，product_id 存 NULL。
+   `tts_erp_v2/api/v2/analytics.py` 在 dumps 响应里加 `status='campaign_level'` 字段。
+2. **插件端** — chrome-plugins `entrypoints/background.ts` 加 `extractRowsForV4Dump()`
+   helper：campaign-level endpoint → dump.rows=[]，product-level endpoint 走原
+   `extractRowsFromResponse`。三处调用 (daily/today/monthly) 全部换过去。
+3. **协议不变量** — 双端对齐让 "dump.rows 必须是 product-level 行" 成为 v4 协议明确
+   不变量。服务端 `is_product_level_endpoint()` 是公开 API（`__all__` 暴露），未来新
+   endpoint 默认走 product-level 保守暴露 KeyError，让开发者补白名单（AGENTS.md §6
+   fail-loud）。
+4. **测试** — tts-erp 加 7 个新测试（3 个 dumps endpoint + 4 个 repository 层），全部通过；
+   chrome-plugins 加 9 个新测试，全量 668 测试通过。master HEAD 仍是 19 个 pre-existing
+   fail（跟我无关），0 新 fail。
+5. **线上验证** — 重启后手工 curl 测 campaign_opt_log_list dump → 200 + `status=campaign_level`
+   - ad_raw_log 写 1 行 product_id=NULL。stderr KeyError 计数停在上轮 809 不再涨。
+6. **postswhitch-smoke 8/8 通过** + master push 成功 + 双方 worktree 收尾清理。
+7. **已知遗留** — Bridge nook 当前被 `feature/api-managed-guard` lane 标 api_managed，
+   ad_*表数据来源实际是另一条 path；本次修复重点是让 plugin 上传不再 500，
+   实际 ad_* 数据恢复需要看 api-managed 守卫 review。
+
+**修过的根因**：lane `feat(analytics): v4 结构化 rows 同步协议`（`124c689`，09-10 merge）
+假设每行都有 product_id，但 campaign_opt_log_list 是 campaign-level 变更事件永远没
+product_id → KeyError → dumps 500 → plugin 持续重试失败 → 14512 条 plugin_logs 错误。
+
+## TL;DR (2026-09-07 AGENTS.md 多 agent 规则补漏 + §11 细化)
+
+**AGENTS.md 多 agent 协作规则审查并补漏**（`95b399b` merge + `a203fd1` merge，2 条 lane）：
+
+1. **§6 合法清理手段清单**：禁止 `git reset --hard / checkout -- . / clean -f`，新增合法替代：`git revert` / `git stash / restore / checkout -- <file>`（指定文件非全清）
+2. **§11 worktree 收尾**：merge 后 master 重跑 `scripts/test.sh fast`（新节点）+ `git log --oneline master..<branch>` 预检（防 -D 丢 commit）
+3. **§11 .env 软链警告**：所有 worktree 共享 `.env`，任一 lane 临时改 `.env` 污染全部 lane；调试后必须还原或用 `.env.local` 覆盖
+4. **§12.1 单写者规则**：ACTIVE.md 同一时刻只允许一个 session/agent 写入；写前 git diff 确认、写后立即 git add
+5. **§12.3 接手步骤 6**：接手后 ACTIVE.md 必须更新（原 owner 改 abandoned + 新增接手行）
+6. **§12.4 错峰量化**：flock / 轮询 / 分 ephemeral DB 三种串行方案
+7. **§11 §11 测试规则细化**："merge 后必须 0 fail" 硬规则在 master HEAD pre-existing fail 下不可达 → 改为按 lane 代码改动面分类判定（`git diff <merge-base>..HEAD -- 'tts_erp_v2/**' 'tests/**' | wc -l` = 0 → 文档-only lane 直接 push；> 0 → fail-before/fail-after diff 对比）
+
+**stash@{0} 处理**：stash 内容（"master-wip-before-spu-image-mirror-merge"）apply 触发 7 个 conflict，评估后放弃（master 后续 commit 已吸收核心内容），snapshot 存 `/tmp/stash-0-snapshot-*.patch`。
+
+**新工具**：`scripts/test_lock.sh`（§12.4 flock 包装，防并发测试互清）。
+
+**已知问题**：settlement-zero-components merge 引入 61 新 fail（tests/api/ 下 17 文件），为代码 lane 应由该 owner 按 §11 新规 fail-before/fail-after 对比处理。
+
+**活跃 worktree**（截至 2026-09-07 21:45）：channel-account-by-external / docs-spu-roi-v7 / fx-test-isolation / spu-roi-v7 / spu-roi-v7-frontend（共 5 条）。
+
+## TL;DR (2026-09-06 结余带 10 格重构 + 订单行→SPU 关联断裂修复)
+
+- **结余带 10 格重构**(merge 5cbf518):去掉 SPU 数,新增 GMV(全部订单销售额 M6+M6b)/有效单量/
+  总单量/取消单量;全损货损改名全损退款(数值=return_loss 不变);每格带 ? 口径气泡;栅格
+  xs2/sm3/md4/lg5。后端 totals 新增 4 键(_SQL_ROI_ORDER_SCOPE 跨可见 SPU 全局去重)。
+- **订单行→SPU 关联断裂修复**(merge 833d823):8-31 后 orders/order_detail 写行 spu_pk 恒 NULL
+  ("later join" 注释但无 job 执行)→ SPU 级报表整单丢失。修复=写时目录解析(orders/order_detail)+
+  products 同步后 backfill(spu_link.py)+ oneoff 存量(scripts/oneoff_backfill_order_line_spu.py,
+  已 apply 241 行)。修复后 totals: order 431→**510**、cancelled 10→**26**、total 441→**536**、
+  GMV 10118→**12126**。sync-worker 已重启。测试 +8 全绿(jobs_tiktok 全域,mirror 已知环境失败除外)。
+- 已知环境失败(非本 lane,另一 session 在修):`tests/fx/*` + `tests/api/test_fx_api.py`(fx.sync 真实
+  snapshot 干扰,见 ACTIVE fix/fx-test-isolation)、`tests/jobs_tiktok/test_spu_image_mirror_job.py`
+  (live spu.image_mirror job 在 dev DB 残留 MIRROR_DOWNLOAD_FAILED 行)。全量 0 fail 待 fx lane 落地。
+- 提醒:master WT 有其它 lane 未提交 WIP(console.js 等)——收尾前先看 ACTIVE。
+
+## TL;DR (2026-09-06 spu-roi Bootstrap 重构 + 手机端适配)
+
+- spu-roi 页(`/v2/pages/spu-roi`)重构为 **Bootstrap 5.3.8 栅格/工具类布局**:结余带 row-cols
+  (xs2→md4→lg7)、工具栏 flex-wrap 纵向堆叠、`<details>` 列开关、`.table-responsive` 横滚 +
+  首列/表头 sticky(≤lg)、小屏 nth-child 裁次要列(广告数/平台GMV/ROI₀/件数),580→
+  页面样式仍 warm-paper 家族(`--bs-*` 变量收编 + 零圆角)。spu-roi.js **零改动**(纯 CSS/HTML)。
+  merge 6136245,已重启 + 公网冒烟,已 push。
+- 已知环境失败(非本 lane,另一 session 在修):`tests/fx/*` + `tests/api/test_fx_api.py`(fx.sync 真实
+  snapshot 干扰,见 ACTIVE fix/fx-test-isolation)、`tests/jobs_tiktok/test_spu_image_mirror_job.py`
+  (live spu.image_mirror job 在 dev DB 残留 MIRROR_DOWNLOAD_FAILED 行)。全量 0 fail 待 fx lane 落地。
+- 提醒:master WT 有 feat/cursor-hasdata-cache lane 的未提交 WIP(analytics.py/repository.py/
+  conftest.py/console.js 等,已在 ACTIVE 注册)——任何人收尾前先看 ACTIVE。
 
 ## TL;DR (2026-09-05 oauth_receiver DROP)
 

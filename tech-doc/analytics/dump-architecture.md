@@ -2,6 +2,16 @@
 
 > 接 `analytics-v2-migration-plan.md`：v2 切流（`/v2/analytics/sync/{cursor,batches}`）落地后，发现 cursor 协议和 batches 协议仍然承载了过多 **client-side 状态机**（page task 队列、lease、expected_page_count、isCompleteDailyUploadUnit、跨 batch 一致性检查等）。本方案把 plugin 彻底简化为 "dumb dump"，所有派生状态由 tts-erp 从 **ad_raw 源** 推导。
 
+> **⚠ 状态（2026-09-11）：本文所述 v3 区间聚合协议已废弃，遗留对象已删除。**
+> `analytics.ad_raw` / `analytics.ad_sync_audit` 两张表与 `analytics.ad_product_links`
+> 视图已由 **migration 0020** 删除。背景：`ad_raw` 自 v4 逐日协议上线后即冻结
+> （现行 `repository.py` 只写 `ad_raw_log`），而 `ad_product_links` 是 `ad_raw` 的
+> 唯一依赖者却**零生产消费者** —— SPU ROI 的 `_SQL_ROI_AD`
+> （`tts_erp_v2/analytics/spu_roi.py`）一直直接读 `ad_daily ∪ ad_today` 并自行 JOIN
+> `commerce`，从不经过该视图。**本文保留为当时的设计记录，不再反映现状**；
+> 现行架构见 `tech-doc/analytics/daily-sync-with-coverage.md`，引用面审计见
+> `alembic/versions/0020_drop_v3_analytics_leftovers.py` 的模块 docstring。
+
 ## 1. 现状问题（commit cc04490 之后的代码事实）
 
 ### 1.1 plugin 端状态机（`entrypoints/background.ts` ~1700 行）
@@ -206,6 +216,35 @@ Response 200:
 
 ---
 
+### 3.6 cursor has-data 缓存（2026-09-06，实现见 `analytics/has_data_cache.py`）
+
+背景：cursor 请求 99.8% 带 campaignId（实测 251,397 / 251,861），是扩展扫历史
+时对同一批 (campaign × endpoint × day) 的重复存在性检查；hasData 对
+(scope, endpoint, day, campaign) 恒定（ad_raw 只 upsert 不删，无 stale-true），
+天然可缓存。
+
+设计：
+
+- **key = (seller_id, advertiser_id, campaign_id)** —— campaign_id 只在 scope 内
+  唯一，裸 campaign_id 在多店铺时会撞车。无 campaignId 请求（scope 级任意行
+  存在性，~60/天）**不缓存**，走 has_data 原 EXISTS DB 路径。
+- **value = 该 campaign 已存在的 (endpoint, day) 集合**（frozenset，内存 frozenset
+  成员检查 = 命中判定），TTL 10 min（loaded_at 单调钟）。miss 回源一条
+  `SELECT DISTINCT endpoint, day ...`（`repository.load_campaign_pairs`）——
+  只拉两列，不碰 request/response JSONB blob。
+- **写穿透**：/dumps 落库成功后 `mark_present` 把 (endpoint, day) 标进桶 ——
+  否则 10 min stale-false 会让扩展重复打 TikTok（正是预检闸要防的事）。桶未
+  加载时 no-op（下次 GET 全量回源，新行已落库，结果必对），禁止建半桶。
+- **命中路径不碰 DB/session**：get_cursor 不再无条件 `Depends(get_session)`，
+  命中直接内存返回；仅 miss 按需开 session。
+- 进程内 dict + lock（uvicorn 单进程）；tests/api/conftest `_isolate_state`
+  每测 reset；单测用假时钟推 TTL，见 tests/analytics/test_has_data_cache.py。
+
+收益边界（2026-09-06 压测基线）：单进程全 DB 路径实测上限 ~200 qps、并发 8+
+即排队（p50 30ms+）；命中路径预计单请求 ~0.5-1ms，重复扫历史的稳态负载
+从 DB 问题变成纯内存问题。冷启动（从未见过的 campaign 首次扫描）仍全 miss。
+
+---
 ## 4. 实施步骤（commit-by-commit）
 
 | # | 内容 | commit | 状态 |

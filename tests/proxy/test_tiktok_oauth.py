@@ -29,6 +29,7 @@ SC_KEY = "shop_cipher"
 
 pytestmark = [pytest.mark.domain_proxy, pytest.mark.layer_integration]
 
+
 # Reuse the same fake-HTTP harness as test_tiktok_auth.py.
 class _FakeHTTPResponse:
     def __init__(self, status: int, body: bytes) -> None:
@@ -253,15 +254,40 @@ def test_build_authorize_url_default_row_host(
     assert "state=csrf_state_abc" in url
 
 
+def test_build_authorize_url_explicit_service_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """显式传入 service_id 时，优先使用参数值而非环境变量。"""
+    from tts_erp_v2.proxy import tiktok_auth
+
+    url = tiktok_auth.build_authorize_url(
+        state="s1", service_id="explicit_svc_456"
+    )
+    assert "service_id=explicit_svc_456" in url
+    # 环境变量中的值不应出现
+    assert "test_service_id_123" not in url
+
+
+def test_build_authorize_url_explicit_service_id_overrides_env(
+    monkeypatch: pytest.MonkeyPatch, authorize_creds: None
+) -> None:
+    """显式 service_id 优先于环境变量。"""
+    from tts_erp_v2.proxy import tiktok_auth
+
+    url = tiktok_auth.build_authorize_url(
+        state="s1", service_id="override_svc"
+    )
+    assert "service_id=override_svc" in url
+    assert "test_service_id_123" not in url
+
+
 def test_build_authorize_url_us_market_override(
     monkeypatch: pytest.MonkeyPatch, authorize_creds: None
 ) -> None:
     """US-market apps point at services.us.tiktokshop.com via env override."""
     from tts_erp_v2.proxy import tiktok_auth
 
-    monkeypatch.setenv(
-        "TIKTOK_AUTHORIZE_HOST", "https://services.us.tiktokshop.com"
-    )
+    monkeypatch.setenv("TIKTOK_AUTHORIZE_HOST", "https://services.us.tiktokshop.com")
     url = tiktok_auth.build_authorize_url(state="s1")
     assert url.startswith("https://services.us.tiktokshop.com/open/authorize?")
 
@@ -269,15 +295,27 @@ def test_build_authorize_url_us_market_override(
 def test_build_authorize_url_missing_service_id_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """TIKTOK_SERVICE_ID unset → SigningError naming the var (operator must
-    copy it from Partner Center App & Service)."""
+    """TIKTOK_SERVICE_ID unset 且无显式参数 → SigningError。"""
     from tts_erp_v2.proxy import tiktok_auth
     from tts_erp_v2.proxy.errors import SigningError
 
     monkeypatch.delenv("TIKTOK_SERVICE_ID", raising=False)
     with pytest.raises(SigningError) as ei:
         tiktok_auth.build_authorize_url(state="s1")
-    assert "TIKTOK_SERVICE_ID" in str(ei.value)
+    assert "service_id" in str(ei.value).lower()
+
+
+def test_build_authorize_url_no_env_but_explicit_ok(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """环境变量缺失但显式传入 service_id 时，不报错。"""
+    from tts_erp_v2.proxy import tiktok_auth
+
+    monkeypatch.delenv("TIKTOK_SERVICE_ID", raising=False)
+    url = tiktok_auth.build_authorize_url(
+        state="s1", service_id="fallback_ok"
+    )
+    assert "service_id=fallback_ok" in url
 
 
 def test_build_authorize_url_rejects_non_http_host(
@@ -291,3 +329,136 @@ def test_build_authorize_url_rejects_non_http_host(
     with pytest.raises(SigningError) as ei:
         tiktok_auth.build_authorize_url(state="s1")
     assert "scheme" in str(ei.value).lower()
+
+
+# ─── fetch_authorized_shops() ────────────────────────────────────────
+
+
+_USER_AT = (
+    "TTP_user_at"  # dummy bearer; S105-safe via const (tests/ ruff-ignored anyway)
+)
+
+
+def _shops_body(*raw_shops: dict) -> dict:
+    return {"code": 0, "message": "success", "data": {"shops": list(raw_shops)}}
+
+
+def test_fetch_authorized_shops_success(
+    monkeypatch: pytest.MonkeyPatch, app_creds: None
+) -> None:
+    """GET /authorization/202309/shops with the x-tts-access-token header
+    + HMAC sign returns parsed per-shop identity (id/cipher/name names)."""
+    from tts_erp_v2.proxy import tiktok_auth
+
+    fake = _FakeConn(
+        status=200,
+        body=_shops_body(
+            {
+                "id": "S1",
+                "cipher": "CIPHER1",
+                "name": "Shop One",
+                "region": "VN",
+                "seller_type": "CROSS_BORDER",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        tiktok_auth.http.client, "HTTPSConnection", lambda *a, **kw: fake
+    )
+
+    shops = tiktok_auth.fetch_authorized_shops(access_token=_USER_AT)
+    assert shops == [
+        {
+            "shop_id": "S1",
+            "shop_cipher": "CIPHER1",
+            "account_name": "Shop One",
+            "region": "VN",
+            "seller_type": "CROSS_BORDER",
+            "_raw_keys": ["cipher", "id", "name", "region", "seller_type"],
+        }
+    ]
+
+    call = fake.calls[0]
+    assert call["method"] == "GET"
+    assert "/authorization/202309/shops" in call["path"]
+    assert "app_key=test_app_key_xyz" in call["path"]
+    assert "timestamp=" in call["path"]
+    assert "sign=" in call["path"]
+    headers_lower = {k.lower(): v for k, v in (call["headers"] or {}).items()}
+    assert headers_lower.get("x-tts-access-token") == "TTP_user_at"
+
+
+def test_fetch_authorized_shops_alternate_field_names(
+    monkeypatch: pytest.MonkeyPatch, app_creds: None
+) -> None:
+    """Upstream naming drift (shop_id/shop_cipher/shop_name/shop_region)
+    is absorbed by the tolerant parser."""
+    from tts_erp_v2.proxy import tiktok_auth
+
+    fake = _FakeConn(
+        status=200,
+        body=_shops_body(
+            {
+                "shop_id": "7494763368967603447",
+                "shop_cipher": "cipher_x",
+                "shop_name": "Bridge nook",
+                "shop_region": "VN",
+                "seller_type": "CROSS_BORDER",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        tiktok_auth.http.client, "HTTPSConnection", lambda *a, **kw: fake
+    )
+    shops = tiktok_auth.fetch_authorized_shops(access_token=_USER_AT)
+    assert shops[0]["shop_id"] == "7494763368967603447"
+    assert shops[0]["shop_cipher"] == "cipher_x"
+    assert shops[0]["account_name"] == "Bridge nook"
+    assert shops[0]["region"] == "VN"
+
+
+def test_fetch_authorized_shops_empty_list(
+    monkeypatch: pytest.MonkeyPatch, app_creds: None
+) -> None:
+    """code=0 with an empty/absent shops array → [] (caller decides)."""
+    from tts_erp_v2.proxy import tiktok_auth
+
+    fake = _FakeConn(status=200, body={"code": 0, "message": "success", "data": {}})
+    monkeypatch.setattr(
+        tiktok_auth.http.client, "HTTPSConnection", lambda *a, **kw: fake
+    )
+    assert tiktok_auth.fetch_authorized_shops(access_token=_USER_AT) == []
+
+
+def test_fetch_authorized_shops_nonzero_code_raises(
+    monkeypatch: pytest.MonkeyPatch, app_creds: None
+) -> None:
+    """Upstream code != 0 → UpstreamHttpError carrying upstream_code."""
+    from tts_erp_v2.proxy import tiktok_auth
+    from tts_erp_v2.proxy.errors import UpstreamHttpError
+
+    fake = _FakeConn(
+        status=200,
+        body={"code": 10001, "message": "not authorized", "data": {}},
+    )
+    monkeypatch.setattr(
+        tiktok_auth.http.client, "HTTPSConnection", lambda *a, **kw: fake
+    )
+    with pytest.raises(UpstreamHttpError) as ei:
+        tiktok_auth.fetch_authorized_shops(access_token=_USER_AT)
+    assert ei.value.upstream_code == 10001
+
+
+def test_fetch_authorized_shops_http_error_raises(
+    monkeypatch: pytest.MonkeyPatch, app_creds: None
+) -> None:
+    """HTTP 5xx from the endpoint → UpstreamHttpError (no silent [])."""
+    from tts_erp_v2.proxy import tiktok_auth
+    from tts_erp_v2.proxy.errors import UpstreamHttpError
+
+    fake = _FakeConn(status=500, body={"code": 0, "message": ""})
+    monkeypatch.setattr(
+        tiktok_auth.http.client, "HTTPSConnection", lambda *a, **kw: fake
+    )
+    with pytest.raises(UpstreamHttpError):
+        tiktok_auth.fetch_authorized_shops(access_token=_USER_AT)

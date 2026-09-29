@@ -63,6 +63,8 @@ EXPECTED_JOB_INTERVALS = {
     "miaoshou.shops": 21600,
     "miaoshou.collect_box": 1800,
     "miaoshou.move_collect": 1800,
+    "miaoshou.common_collect_box": 21600,
+    "miaoshou.sync_source_cost_to_master": 21600,
     "reporting.cost_snapshots": 21600,
     "reporting.profit_daily": 3600,
     "spu.image_mirror": 1800,
@@ -71,7 +73,7 @@ EXPECTED_JOB_INTERVALS = {
 
 
 def test_jobs_registry_has_expected_count() -> None:
-    """14 jobs total — keeps us honest if a new one slips in unannounced.
+    """16 jobs total — keeps us honest if a new one slips in unannounced.
 
     2026-09-05 reorg: ``analytics.retention`` 已从 JOBS 摘除（见
     tech-doc/analytics/reorg-plan.md 决策 #1-#4）—— ad_records /
@@ -80,10 +82,11 @@ def test_jobs_registry_has_expected_count() -> None:
     到本地 MinIO，页面渲染不再直连 TikTok CDN）→ 12 → 13。
     2026-09-06：fx.sync 加入（ExchangeRate-API 汇率缓存，horizon-gated
     ≈1 请求/天）→ 13 → 14。
+    2026-09-19：plugin.ad_merge_today2daily 移除（同步逻辑删除，保留 ad_today 表）→ 17 → 16。
     """
-    # 6 tiktok + 8 system (token + 3 miaoshou + 2 reporting + image_mirror
+    # 6 tiktok + 10 system (token + 5 miaoshou + 2 reporting + image_mirror
     # + fx.sync) — keep the number pinned so we don't drift silently.
-    assert len(JOBS) == 14
+    assert len(JOBS) == 16
 
 
 @pytest.mark.parametrize(
@@ -410,16 +413,37 @@ def test_enumerate_tiktok_shops_skips_prefix_and_orphan_credentials() -> None:
 
 
 def test_record_failed_tick_writes_a_failed_row() -> None:
-    """Sentinel SyncJob row is committed even when the inner job crashed."""
+    """Sentinel SyncJob row is committed even when the inner job crashed.
+
+    2026-09-07 audit fix: previously this test used the production
+    ``job_name='reporting.cost_snapshots'`` with a constant
+    ``error_message='simulated boom'``, and cleanup matched by that
+    constant — both fragile (a prior run that left a zombie row with
+    the same error_message would either trip the cleanup's DELETE or
+    be silently skipped, depending on luck) and dangerous (the
+    production DB accumulated 20 leaked rows with the production
+    job_name, which the watchdog treated as real failures and which
+    inflated the ``integration.sync_jobs`` row count).
+
+    We now use a per-run UUID suffix on both fields. Combined with
+    ``tests/sync_worker/conftest.py::_wipe_test_sync_jobs_and_credentials``
+    (autouse, runs before & after every test in this directory), this
+    leaves zero residue even if the test aborts mid-cleanup.
+    """
+    import uuid as _uuid
+
     factory = _factory()
+    run_id = _uuid.uuid4().hex[:12]
+    test_job_name = f"TEST_record_failed_tick_{run_id}"
+    test_error_message = f"simulated boom {run_id}"
     spec = JobSpec(
-        job_name="reporting.cost_snapshots",
+        job_name=test_job_name,
         module_path="tts_erp_v2.jobs.reporting",
         interval_seconds=60,
         is_tiktok=False,
         entrypoint="run_cost_snapshots",
     )
-    _record_failed_tick(factory, spec, "simulated boom")
+    _record_failed_tick(factory, spec, test_error_message)
 
     session = factory()
     try:
@@ -427,31 +451,31 @@ def test_record_failed_tick_writes_a_failed_row() -> None:
         row = session.execute(
             text(
                 "SELECT status, error_message FROM integration.sync_jobs "
-                "WHERE job_name = 'reporting.cost_snapshots' "
+                "WHERE job_name = :job "
                 "ORDER BY started_at DESC LIMIT 1"
-            )
+            ),
+            {"job": test_job_name},
         ).first()
         assert row is not None
-        # Either this sentinel row, OR a previously-recorded one — both are 'failed'
         assert row[0] == "failed"
-        # The reason may already be in DB from prior tests; assert it contains our reason
-        # OR we just created it. Either way, the value should be a non-empty string.
         assert isinstance(row[1], str)
         assert row[1]  # non-empty
     finally:
-        # Clean the row we wrote (job_name is not TEST_*-prefixed).
+        # Belt-and-braces: explicit per-test cleanup in case the
+        # autouse wipe in conftest.py is ever disabled. The UUID-suffixed
+        # job_name + error_message make this DELETE exact (no risk of
+        # matching a row from a prior run or from another test).
         session.rollback()
         session.close()
         session = factory()
         try:
-            # pi-lens-ignore: python-sql-injection — bound :msg param, literal SQL
+            # pi-lens-ignore: python-sql-injection — bound :j/:msg params, literal SQL
             session.execute(
                 text(
                     "DELETE FROM integration.sync_jobs "
-                    "WHERE job_name = 'reporting.cost_snapshots' "
-                    "AND error_message = :msg"
+                    "WHERE job_name = :job AND error_message = :msg"
                 ),
-                {"msg": "simulated boom"},
+                {"job": test_job_name, "msg": test_error_message},
             )
             session.commit()
         finally:

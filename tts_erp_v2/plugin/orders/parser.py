@@ -1,0 +1,889 @@
+"""plugin.orders 解析层。
+
+三个解析函数，每个函数：
+1. 从 TikTok 响应 JSON 提取结构化数据
+2. 调用 repository 写入业务表
+3. 返回写入行数
+
+解析规则严格按 tech-doc/chrome-ext-order-sync-design.md §10。
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import UTC, datetime
+from decimal import Decimal
+from typing import Any
+
+from sqlalchemy.orm import Session
+
+from tts_erp_v2.plugin.orders.repository import (
+    _parse_bill_period,
+    _payment_status_to_text,
+    _to_decimal,
+    _ts_to_datetime,
+    upsert_after_sale,
+    upsert_after_sale_item,
+    upsert_order,
+    upsert_order_detail,
+    upsert_order_line,
+    upsert_order_timeline,
+    upsert_settlement,
+    upsert_settlement_detail,
+    upsert_shipment,
+    upsert_tracking_event,
+)
+
+log = logging.getLogger("tts_erp_v2.plugin.orders.parser")
+
+
+# ── helpers ─────────────────────────────────────────────────────────
+
+
+def flatten_fees(fee_list: list[dict] | None) -> list[dict]:
+    """递归展开 fee_list 为扁平 [{code, amount, currency}]。"""
+    if not fee_list:
+        return []
+    result: list[dict] = []
+    for fee in fee_list:
+        code = fee.get("type", "UNKNOWN")
+        amount_obj = fee.get("amount") or {}
+        amount = amount_obj.get("amount", "0")
+        currency = amount_obj.get("currency", "")
+        result.append({"code": code, "amount": amount, "currency": currency})
+        result.extend(flatten_fees(fee.get("sub_fees")))
+    return result
+
+
+# ── 订单解析 ────────────────────────────────────────────────────────
+
+
+def parse_order_response(
+    sess: Session,
+    *,
+    shop_id: str,
+    response_body: dict,
+    captured_at: datetime,
+) -> int:
+    """解析 order/list 响应 → 写 orders + order_lines。返回写入行数。"""
+    rows_written = 0
+    # 兼容两种格式：
+    #   1. 完整 API 响应: {"data": {"main_orders": [...]}}
+    #   2. 单个订单对象: {"main_order_id": "...", "sku_module": [...], ...}
+    data = response_body.get("data")
+    if isinstance(data, dict) and "main_orders" in data:
+        # 格式1：完整 API 响应
+        main_orders = data["main_orders"]
+        if not isinstance(main_orders, list):
+            raise ValueError("order response data.main_orders must be a list")
+    elif "main_order_id" in response_body:
+        # 格式2：单个订单对象
+        main_orders = [response_body]
+    else:
+        raise ValueError("order response missing data.main_orders")
+
+    for order in main_orders:
+        if not isinstance(order, dict):
+            raise ValueError("order response data.main_orders items must be objects")
+        order_id = str(order.get("main_order_id", ""))
+        if not order_id:
+            raise ValueError(
+                "order response data.main_orders item missing main_order_id"
+            )
+
+        # ✅ 实测确认（2026-09-09 域名观察）
+        # order_status_module 是数组，每个 order_line 一个元素
+        osm_list = order.get("order_status_module") or []
+        osm_first = osm_list[0] if isinstance(osm_list, list) and osm_list else {}
+        # price_module: grand_total=实付, sub_total=总额
+        pm = order.get("price_module") or {}
+        grand_total = pm.get("grand_total") or {}
+        sub_total = pm.get("sub_total") or {}
+        # 时间戳在 trade_order_module（不在 order_status_module）
+        tom = order.get("trade_order_module") or {}
+        # buyer 信息
+        bim = order.get("buyer_info_module") or {}
+
+        main_order_status = osm_first.get("main_order_status")  # 整数
+        sku_display_status = osm_first.get("sku_display_status")  # 整数
+        currency = grand_total.get("currency") or sub_total.get("currency")
+        payment_amount = _to_decimal(
+            grand_total.get("price_val"), field="orders.payment_amount"
+        )
+        total_amount = _to_decimal(
+            sub_total.get("price_val"), field="orders.total_amount"
+        )
+        fulfillment_type = tom.get("fulfillment_type")  # 整数
+        pay_method = tom.get("pay_method")  # 文本
+        sale_region = tom.get("sale_region")  # 如 "VN"
+        order_time = _ts_to_datetime(tom.get("create_time"))  # 秒级字符串
+        update_time = _ts_to_datetime(tom.get("update_time"))  # 毫秒级字符串
+        latest_rts_time = _ts_to_datetime(tom.get("latest_rts_time"))
+        latest_tts_time = _ts_to_datetime(tom.get("latest_tts_time"))
+        buyer_nickname = bim.get("buyer_nickname")
+
+        upsert_order(
+            sess,
+            shop_id=shop_id,
+            order_id=order_id,
+            main_order_status=main_order_status,
+            sku_display_status=sku_display_status,
+            currency=currency,
+            payment_amount=payment_amount,
+            total_amount=total_amount,
+            fulfillment_type=fulfillment_type,
+            pay_method=pay_method,
+            sale_region=sale_region,
+            order_time=order_time,
+            update_time=update_time,
+            latest_rts_time=latest_rts_time,
+            latest_tts_time=latest_tts_time,
+            buyer_nickname=buyer_nickname,
+        )
+        rows_written += 1
+
+        # sku_module 优先，fulfill_line_module 备选
+        sku_items = order.get("sku_module") or order.get("fulfill_line_module") or []
+        seen_skus: set[str] = set()
+        for item in sku_items:
+            sku_id = str(item.get("sku_id", ""))
+            if not sku_id or sku_id in seen_skus:
+                continue
+            seen_skus.add(sku_id)
+
+            # ✅ 实测确认（2026-09-09）
+            product_id = item.get("product_id")
+            product_name = item.get("product_name")
+            variant_name = item.get("sku_name")
+            # product_image.url_list[0]（不是 sku_image 字符串）
+            image_obj = item.get("product_image") or {}
+            image_url = (image_obj.get("url_list") or [None])[0]
+            quantity = _to_decimal(item.get("quantity"), field="order_lines.quantity")
+            # sku_unit_price.price_val（不是 sale_price.amount）
+            unit_price_obj = item.get("sku_unit_price") or {}
+            total_price_obj = item.get("sku_total_price") or {}
+            unit_price = _to_decimal(
+                unit_price_obj.get("price_val"), field="order_lines.unit_price"
+            )
+            total_price = _to_decimal(
+                total_price_obj.get("price_val"), field="order_lines.total_price"
+            )
+            line_currency = unit_price_obj.get("currency")
+            # order_status_module 按 order_line_id 关联
+            line_ids = item.get("order_line_ids") or []
+            line_main_status = None
+            line_sku_status = None
+            if line_ids:
+                for osm_item in osm_list:
+                    if (
+                        isinstance(osm_item, dict)
+                        and osm_item.get("order_line_id") == line_ids[0]
+                    ):
+                        line_main_status = osm_item.get("main_order_status")
+                        line_sku_status = osm_item.get("sku_display_status")
+                        break
+
+            upsert_order_line(
+                sess,
+                shop_id=shop_id,
+                order_id=order_id,
+                sku_id=sku_id,
+                product_id=str(product_id) if product_id is not None else None,
+                product_name=product_name,
+                variant_name=variant_name,
+                image_url=image_url,
+                quantity=quantity,
+                unit_price=unit_price,
+                total_price=total_price,
+                currency=line_currency,
+                main_order_status=line_main_status,
+                sku_display_status=line_sku_status,
+            )
+            rows_written += 1
+
+    return rows_written
+
+
+# ── 物流解析 ────────────────────────────────────────────────────────
+
+
+def _parse_track_time(value: Any) -> datetime | None:
+    """track_list[].time → datetime。ISO 字符串或时间戳。"""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return _ts_to_datetime(value)
+    if isinstance(value, str):
+        value = value.strip()
+        if value in ("", "0"):
+            return None
+        try:
+            numeric_value = float(value)
+        except ValueError:
+            numeric_value = None
+        if numeric_value is not None:
+            return _ts_to_datetime(numeric_value)
+        try:
+            dt = datetime.fromisoformat(value)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=UTC)
+            return dt
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
+def parse_logistics_response(
+    sess: Session,
+    *,
+    shop_id: str,
+    order_id: str,
+    response_body: dict,
+    captured_at: datetime,
+) -> int:
+    """解析 logistic_detail/list 响应 → 写 shipments + tracking_events。返回写入行数。"""
+    rows_written = 0
+    data = response_body.get("data")
+    if not isinstance(data, dict) or "package_list" not in data:
+        raise ValueError("logistics response missing data.package_list")
+    package_list = data["package_list"]
+    if not isinstance(package_list, list):
+        raise ValueError("logistics response data.package_list must be a list")
+
+    for pkg in package_list:
+        if not isinstance(pkg, dict):
+            raise ValueError(
+                "logistics response data.package_list items must be objects"
+            )
+        package_id = str(pkg.get("package_id", ""))
+        if not package_id:
+            raise ValueError(
+                "logistics response data.package_list item missing package_id"
+            )
+
+        tracking_number = pkg.get("tracking_no")
+        carrier_name = (pkg.get("logistic_supplier") or {}).get("supplier_name")
+
+        # track_list → status, shipped_at, delivered_at
+        logistic_detail = pkg.get("logistic_detail") or {}
+        raw_track_list = logistic_detail.get("track_list") or []
+        # TikTok 不保证轨迹返回顺序；按业务时间排序后再取首/尾，避免倒序
+        # 响应把 Delivered 解析成发货状态，或把 delivered_at 丢掉。
+        track_list = [
+            track
+            for _index, track in sorted(
+                enumerate(raw_track_list),
+                key=lambda item: (
+                    _parse_track_time(item[1].get("time"))
+                    or datetime.min.replace(tzinfo=UTC),
+                    item[0],
+                ),
+            )
+        ]
+
+        status = None
+        shipped_at = None
+        delivered_at = None
+        if track_list:
+            first_track = track_list[0]
+            last_track = track_list[-1]
+            status = last_track.get("track_status")
+            if status is not None and not isinstance(status, str):
+                status = str(status)
+            shipped_at = _parse_track_time(first_track.get("time"))
+            last_time = _parse_track_time(last_track.get("time"))
+            # 仅当 status 含 "elivered" 时填 delivered_at
+            if isinstance(status, str) and "elivered" in status.lower():
+                delivered_at = last_time
+            else:
+                delivered_at = None
+            # The exact status/action-code guard below removes substring false positives.
+            try:
+                last_action_code = int(last_track.get("action_code"))
+            except (TypeError, ValueError):
+                last_action_code = None
+            if (
+                delivered_at is not None
+                and last_action_code != 50101
+                and not (
+                    isinstance(status, str)
+                    and status.strip().casefold()
+                    in {"delivered", "已签收", "签收", "已送达"}
+                )
+            ):
+                delivered_at = None
+            # Status may be localized (for example, 已签收) and therefore
+            # cannot rely on an English substring check above. Recompute the
+            # terminal timestamp from the exact status/action-code contract.
+            normalized_status = (
+                status.strip().casefold() if isinstance(status, str) else ""
+            )
+            is_delivered_status = normalized_status in {
+                "delivered",
+                "已签收",
+                "签收",
+                "已送达",
+            }
+            delivered_at = (
+                last_time if last_action_code == 50101 or is_delivered_status else None
+            )
+
+        upsert_shipment(
+            sess,
+            shop_id=shop_id,
+            order_id=order_id,
+            package_id=package_id,
+            tracking_number=tracking_number,
+            carrier_name=carrier_name,
+            status=status,
+            shipped_at=shipped_at,
+            delivered_at=delivered_at,
+        )
+        rows_written += 1
+
+        # tracking_events
+        for track in track_list:
+            event_id = track.get("event_id") or track.get("id")
+            event_key = (
+                f"{package_id}:{event_id}"
+                if event_id is not None
+                else ":".join(
+                    [
+                        package_id,
+                        str(track.get("time", "")),
+                        str(track.get("title", "")),
+                        str(track.get("track_status", "")),
+                    ]
+                )
+            )
+            event_at = _parse_track_time(track.get("time"))
+            description = track.get("title") or track.get("content")
+            location = track.get("location")
+
+            upsert_tracking_event(
+                sess,
+                shop_id=shop_id,
+                package_id=package_id,
+                event_key=event_key,
+                action_code=(
+                    int(track["action_code"])
+                    if str(track.get("action_code", "")).isdigit()
+                    else None
+                ),
+                event_at=event_at,
+                description=description,
+                location=location,
+            )
+            rows_written += 1
+
+    return rows_written
+
+
+# ── 结算解析 ────────────────────────────────────────────────────────
+
+
+def _parse_amount(amount_obj: dict | None) -> Decimal | None:
+    """TikTok {amount, currency} 对象 → Decimal。"""
+    if not amount_obj:
+        return None
+    return _to_decimal(amount_obj.get("amount"), field="fee_component.amount")
+
+
+def _parse_iso_dt(value: str | None) -> datetime | None:
+    """ISO 字符串 → datetime(UTC)。"""
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt
+    except (ValueError, TypeError):
+        return None
+
+
+def parse_statement_list_response(
+    sess: Session,
+    *,
+    shop_id: str,
+    response_body: dict,
+    captured_at: datetime,
+) -> int:
+    """解析 statement/list/detail 响应 → 写 settlements。返回写入行数。"""
+    rows_written = 0
+    if "statement_id" in response_body:
+        # Plugin order polling intentionally sends one statement object per dump
+        # so the backend must accept that wire shape as well as the full list
+        # envelope.
+        statement_records = [response_body]
+    else:
+        data = response_body.get("data")
+        if not isinstance(data, dict) or "statement_records" not in data:
+            raise ValueError("statement response missing data.statement_records")
+        statement_records = data["statement_records"]
+        if not isinstance(statement_records, list):
+            raise ValueError("statement response data.statement_records must be a list")
+
+    for record in statement_records:
+        if not isinstance(record, dict):
+            raise ValueError(
+                "statement response data.statement_records items must be objects"
+            )
+        statement_id = str(record.get("statement_id", ""))
+        if not statement_id:
+            raise ValueError(
+                "statement response data.statement_records item missing statement_id"
+            )
+
+        statement_version = record.get("statement_version", 0)
+        bill_period = record.get("bill_period")
+        period_start, period_end = _parse_bill_period(bill_period)
+        settlement_time = _parse_iso_dt(record.get("settlement_time"))
+        settlement_id = record.get("settlement_id")
+        payment_id = record.get("payment_id")
+        payment_status = _payment_status_to_text(record.get("payment_status"))
+        statement_type = record.get("statement_type")
+        payment_pending_reason = record.get("payment_pending_reason")
+
+        settle_amount_obj = record.get("settle_amount") or {}
+        earning_amount_obj = record.get("earning_amount") or {}
+        fee_amount_obj = record.get("fee_amount") or {}
+        adjust_amount_obj = record.get("adjust_amount") or {}
+        payable_amount_obj = record.get("payable_amount") or {}
+        shipping_amount_obj = record.get("shipping_amount") or {}
+        total_reserve_amount_obj = record.get("total_reserve_amount") or {}
+
+        upsert_settlement(
+            sess,
+            shop_id=shop_id,
+            statement_id=statement_id,
+            statement_version=statement_version,
+            bill_period=bill_period,
+            period_start=period_start,
+            period_end=period_end,
+            settlement_time=settlement_time,
+            settlement_id=settlement_id,
+            payment_id=payment_id,
+            payment_status=payment_status,
+            statement_type=statement_type,
+            payment_pending_reason=payment_pending_reason,
+            settle_amount=_parse_amount(settle_amount_obj),
+            earning_amount=_parse_amount(earning_amount_obj),
+            fee_amount=_parse_amount(fee_amount_obj),
+            adjust_amount=_parse_amount(adjust_amount_obj),
+            payable_amount=_parse_amount(payable_amount_obj),
+            shipping_amount=_parse_amount(shipping_amount_obj),
+            total_reserve_amount=_parse_amount(total_reserve_amount_obj),
+            currency=settle_amount_obj.get("currency"),
+        )
+        rows_written += 1
+
+    return rows_written
+
+
+def parse_statement_transaction_response(
+    sess: Session,
+    *,
+    shop_id: str,
+    response_body: dict,
+    captured_at: datetime,
+) -> int:
+    """解析 statement/transaction/detail 响应 → 写 settlement_details。返回写入行数。"""
+    rows_written = 0
+    data = response_body.get("data")
+    if not isinstance(data, dict) or "sku_record" not in data:
+        raise ValueError("statement transaction response missing data.sku_record")
+    sku_record = data["sku_record"]
+    if not isinstance(sku_record, dict):
+        raise ValueError(
+            "statement transaction response data.sku_record must be an object"
+        )
+
+    sku_detail_id = str(sku_record.get("statement_sku_detail_id", ""))
+    if not sku_detail_id:
+        raise ValueError(
+            "statement transaction response missing statement_sku_detail_id"
+        )
+
+    statement_id = str(sku_record.get("statement_id", ""))
+    statement_version = sku_record.get("statement_version", 0)
+    trade_order_id = sku_record.get("trade_order_id")
+    sku_id = str(sku_record.get("sku_id", "")) or None
+    product_name = sku_record.get("product_name")
+    sku_name = sku_record.get("sku_name")
+    quantity = _to_decimal(
+        sku_record.get("quantity"), field="settlement_details.quantity"
+    )
+    settlement_status = (
+        str(sku_record.get("settlement_status", ""))
+        if sku_record.get("settlement_status") is not None
+        else None
+    )
+    placed_time = _parse_iso_dt(sku_record.get("placed_time"))
+
+    settlement_amount_obj = sku_record.get("settlement_amount") or {}
+    earning_amount_obj = sku_record.get("earning_amount") or {}
+    fees_obj = sku_record.get("fees") or {}
+
+    # 递归展开费用树
+    in_come = sku_record.get("in_come") or {}
+    out_come = sku_record.get("out_come") or {}
+    fee_components = flatten_fees(in_come.get("fee_list")) + flatten_fees(
+        out_come.get("fee_list")
+    )
+
+    seller_web_cut_flow = response_body.get("seller_web_cut_flow")
+    seller_app_cut_flow = response_body.get("seller_app_cut_flow")
+
+    upsert_settlement_detail(
+        sess,
+        shop_id=shop_id,
+        statement_id=statement_id,
+        statement_version=statement_version,
+        sku_detail_id=sku_detail_id,
+        trade_order_id=trade_order_id,
+        sku_id=sku_id,
+        product_name=product_name,
+        sku_name=sku_name,
+        quantity=quantity,
+        settlement_status=settlement_status,
+        placed_time=placed_time,
+        settlement_amount=_parse_amount(settlement_amount_obj),
+        earning_amount=_parse_amount(earning_amount_obj),
+        fees_amount=_parse_amount(fees_obj),
+        currency=settlement_amount_obj.get("currency"),
+        fee_components=fee_components if fee_components else None,
+        seller_web_cut_flow=seller_web_cut_flow,
+        seller_app_cut_flow=seller_app_cut_flow,
+    )
+    rows_written += 1
+
+    return rows_written
+
+
+# ── 售后/退款 解析 ──────────────────────────────────────
+def parse_after_sales_response(
+    sess: Session,
+    *,
+    shop_id: str,
+    response_body: dict,
+    captured_at: datetime,
+) -> int:
+    """解析 /return_refund/202309/cancellations/search 响应。
+
+    返回 plugin.after_sales + plugin.after_sale_items 写入行数。
+
+    响应结构（假设，按 order-domain-business-rules.md §3 描述设计；
+    chrome 扩展未抓到过 0 hit 数据，待首次真实响应后调整字段名）：
+
+    {
+      "code": 0, "message": "success",
+      "data": {
+        "cancellations": [
+          {
+            "cancel_id": "...",
+            "cancel_type": "BUYER_CANCEL" | "CANCEL",
+            "cancel_status": "CANCELLATION_REQUEST_COMPLETE" | ...,
+            "order_id": "<main_order_id>",
+            "reason": "...",
+            "request_time": <iso str or unix ms>,
+            "complete_time": ...,
+            "cancel_line_items": [
+              {
+                "id": "<line_item_id>",
+                "order_line_item_id": "...",
+                "sku_id": "...",
+                "product_id": "...",
+                "quantity": 1,
+                "refund_amount": { "amount": "0", "currency": "VND" }
+              }
+            ]
+          }
+        ]
+      }
+    }
+    """
+    rows_written = 0
+    data = response_body.get("data")
+    if isinstance(data, dict) and "cancellations" in data:
+        cancellations = data["cancellations"]
+        if not isinstance(cancellations, list):
+            raise ValueError("after-sales response data.cancellations must be a list")
+    elif "cancel_id" in response_body:
+        cancellations = [response_body]
+    else:
+        raise ValueError("after-sales response missing data.cancellations")
+
+    for c in cancellations:
+        if not isinstance(c, dict):
+            raise ValueError(
+                "after-sales response data.cancellations items must be objects"
+            )
+        cancel_id = str(c.get("cancel_id") or "")
+        if not cancel_id:
+            raise ValueError(
+                "after-sales response data.cancellations item missing cancel_id"
+            )
+        cancel_type = str(c.get("cancel_type") or "")
+        cancel_status = str(c.get("cancel_status") or "")
+        main_order_id = c.get("order_id") or c.get("main_order_id")
+        reason = c.get("reason")
+        request_time = _ts_to_datetime(c.get("request_time"))
+        complete_time = _ts_to_datetime(c.get("complete_time"))
+
+        upsert_after_sale(
+            sess,
+            shop_id=shop_id,
+            cancel_id=cancel_id,
+            cancel_type=cancel_type,
+            cancel_status=cancel_status,
+            main_order_id=str(main_order_id) if main_order_id else None,
+            reason=reason,
+            request_time=request_time,
+            complete_time=complete_time,
+            raw_payload=c,
+        )
+        rows_written += 1
+
+        for li in c.get("cancel_line_items") or []:
+            line_item_id = str(li.get("id") or li.get("line_item_id") or "")
+            if not line_item_id:
+                log.warning("after_sale_item missing id, skipping")
+                continue
+            order_line_item_id = li.get("order_line_item_id")
+            sku_id = li.get("sku_id")
+            product_id = li.get("product_id")
+            quantity = _to_decimal(
+                li.get("quantity"), field="after_sale_items.quantity"
+            )
+            refund_amount_obj = li.get("refund_amount") or {}
+            refund_amount = _to_decimal(
+                refund_amount_obj.get("amount"), field="after_sale_items.refund_amount"
+            )
+            currency = refund_amount_obj.get("currency")
+
+            upsert_after_sale_item(
+                sess,
+                shop_id=shop_id,
+                cancel_id=cancel_id,
+                line_item_id=line_item_id,
+                order_line_item_id=str(order_line_item_id)
+                if order_line_item_id
+                else None,
+                sku_id=str(sku_id) if sku_id else None,
+                product_id=str(product_id) if product_id else None,
+                quantity=quantity,
+                refund_amount=refund_amount,
+                currency=currency,
+                raw_payload=li,
+            )
+            rows_written += 1
+
+    return rows_written
+
+
+# ── order/get 解析（独立 parser，不复用 parse_order_response）─────────
+
+
+def parse_order_detail_response(
+    sess: Session,
+    *,
+    shop_id: str,
+    response_body: dict,
+    captured_at: datetime,
+) -> int:
+    """解析 order/get 响应 → 写 plugin.order_details。返回写入行数。
+
+    与 parse_order_response 完全独立：order/get 返回全量详情字段
+    （价格明细、物流仓库、退货、买家地址），存储到独立的 order_details 表。
+    """
+    rows_written = 0
+    data = response_body.get("data")
+    if not isinstance(data, dict) or "main_order" not in data:
+        raise ValueError("order detail response missing data.main_order")
+    main_orders = data["main_order"]
+    if not isinstance(main_orders, list):
+        raise TypeError("order detail response data.main_order must be a list")
+
+    for order in main_orders:
+        if not isinstance(order, dict):
+            raise TypeError("order detail response data.main_order items must be objects")
+        order_id = str(order.get("main_order_id", ""))
+        if not order_id:
+            raise ValueError(
+                "order detail response data.main_order item missing main_order_id"
+            )
+
+        # trade_order_module
+        tom = order.get("trade_order_module") or {}
+        # price_module
+        pm = order.get("price_module") or {}
+        # buyer_info_module
+        bim = order.get("buyer_info_module") or {}
+        # order_status_module（取第一条）
+        osm_list = order.get("order_status_module") or []
+        osm = osm_list[0] if isinstance(osm_list, list) and osm_list else {}
+        # delivery_module（取第一条）
+        dm_list = order.get("delivery_module") or []
+        dm = dm_list[0] if isinstance(dm_list, list) and dm_list else {}
+        # reverse_module（取第一条）
+        rm_list = order.get("reverse_module") or []
+        rm = rm_list[0] if isinstance(rm_list, list) and rm_list else {}
+        # pkg_attr
+        pkg = dm.get("pkg_attr") or {}
+        weight = pkg.get("weight") or {}
+        dim = pkg.get("dimension") or {}
+        # shipment_provider_info
+        sp = dm.get("shipment_provider_info") or {}
+        # logistics_service_info
+        lsi = dm.get("logistics_service_info") or {}
+        # promotion_infos
+        raw_promos = pm.get("promotion_infos") or []
+        promotion_infos = (
+            [
+                {
+                    "name": p.get("promotion_name"),
+                    "cost": p.get("promotion_cost"),
+                    "type": p.get("promotion_type"),
+                }
+                for p in raw_promos
+            ]
+            if raw_promos
+            else None
+        )
+
+        fields = {
+            # trade_order_module
+            "create_time": _ts_to_datetime(tom.get("create_time")),
+            "payment_time": _ts_to_datetime(tom.get("payment_time")),
+            "pay_method": tom.get("pay_method"),
+            "sale_region": tom.get("sale_region"),
+            "fulfillment_type": tom.get("fulfillment_type"),
+            "latest_rts_time": _ts_to_datetime(tom.get("latest_rts_time")),
+            "latest_tts_time": _ts_to_datetime(tom.get("latest_tts_time")),
+            "close_sla_time": _ts_to_datetime(tom.get("close_sla_time")),
+            # price_module
+            "sub_total": _to_decimal(
+                (pm.get("sub_total") or {}).get("price_val"),
+                field="order_details.sub_total",
+            ),
+            "grand_total": _to_decimal(
+                (pm.get("grand_total") or {}).get("price_val"),
+                field="order_details.grand_total",
+            ),
+            "shipping_fee": _to_decimal(
+                (pm.get("shipping_fee") or {}).get("price_val"),
+                field="order_details.shipping_fee",
+            ),
+            "platform_discount": _to_decimal(
+                (pm.get("platform_discount_total") or {}).get("price_val"),
+                field="order_details.platform_discount",
+            ),
+            "seller_discount": _to_decimal(
+                (pm.get("seller_discount_total") or {}).get("price_val"),
+                field="order_details.seller_discount",
+            ),
+            "origin_sale_price": _to_decimal(
+                (pm.get("main_order_origin_sale_price") or {}).get("price_val"),
+                field="order_details.origin_sale_price",
+            ),
+            "shipping_origin_fee": _to_decimal(
+                (pm.get("shipping_origin_fee") or {}).get("price_val"),
+                field="order_details.shipping_origin_fee",
+            ),
+            "shipping_fee_discount_seller": _to_decimal(
+                (pm.get("shipping_fee_discount_seller") or {}).get("price_val"),
+                field="order_details.shipping_fee_discount_seller",
+            ),
+            "shipping_fee_discount_platform": _to_decimal(
+                (pm.get("shipping_fee_discount_platform") or {}).get("price_val"),
+                field="order_details.shipping_fee_discount_platform",
+            ),
+            "currency": (pm.get("grand_total") or {}).get("currency")
+            or (pm.get("sub_total") or {}).get("currency"),
+            "promotion_infos": promotion_infos,
+            # buyer_info_module
+            "buyer_nickname": bim.get("buyer_nickname"),
+            "buyer_address": bim.get("shipping_address"),
+            # reverse_module
+            "reverse_status": rm.get("reverse_status"),
+            "reverse_type": rm.get("reverse_type"),
+            "reverse_reason": rm.get("reverse_reason"),
+            "reverse_order_id": rm.get("reverse_order_id"),
+            "cancelled_time": _ts_to_datetime(rm.get("cancelled_time")),
+            # delivery_module
+            "tracking_number": dm.get("tracking_no") or dm.get("last_tracking_no"),
+            "warehouse_id": dm.get("warehouse_id"),
+            "warehouse_name": dm.get("warehouse_name"),
+            "warehouse_region": dm.get("warehouse_region"),
+            "buyer_region": dm.get("buyer_region"),
+            "logistics_service_name": lsi.get("logistics_service_name"),
+            "logistics_service_level": lsi.get("logistics_service_level"),
+            "carrier_name": sp.get("name"),
+            "carrier_id": sp.get("id"),
+            # pkg_attr
+            "weight_value": weight.get("weight"),
+            "weight_unit": weight.get("unit"),
+            "dimension_length": dim.get("length"),
+            "dimension_width": dim.get("width"),
+            "dimension_height": dim.get("height"),
+            "dimension_unit": dim.get("unit"),
+            # order_status_module
+            "main_order_status": osm.get("main_order_status"),
+            "main_sub_order_status": osm.get("main_sub_order_status"),
+            "sku_display_status": osm.get("sku_display_status"),
+            # raw
+            "raw_payload": order,
+        }
+
+        upsert_order_detail(sess, shop_id=shop_id, order_id=order_id, fields=fields)
+        rows_written += 1
+
+    return rows_written
+
+
+# ── order/history 解析（独立 parser）───────────────────────────────────
+
+
+def parse_order_history_response(
+    sess: Session,
+    *,
+    shop_id: str,
+    order_id: str,
+    response_body: dict,
+    captured_at: datetime,
+) -> int:
+    """解析 order/history 响应 → 写 plugin.order_timeline。返回写入行数。
+
+    时间线按 event_index 排序存储（0 = 最早事件），支持后续分析。
+    """
+    rows_written = 0
+    data = response_body.get("data")
+    if not isinstance(data, dict) or "order_history" not in data:
+        raise ValueError("order history response missing data.order_history")
+    history = data["order_history"]
+    if not isinstance(history, list):
+        raise TypeError("order history response data.order_history must be a list")
+
+    for index, event in enumerate(history):
+        if not isinstance(event, dict):
+            raise TypeError(
+                "order history response data.order_history items must be objects"
+            )
+        description = event.get("description")
+        event_at = _ts_to_datetime(event.get("timestamp"))
+        detail = event.get("detail")
+
+        upsert_order_timeline(
+            sess,
+            shop_id=shop_id,
+            order_id=order_id,
+            event_index=index,
+            description=description,
+            event_at=event_at,
+            detail=detail,
+            raw_payload=event,
+        )
+        rows_written += 1
+
+    return rows_written

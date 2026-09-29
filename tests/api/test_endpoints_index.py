@@ -76,8 +76,8 @@ def test_endpoints_lists_analytics_sync_routes(api_client):
     r = api_client.get("/endpoints")
     payload = r.json()
     paths = _path_set(payload)
-    assert "/v2/analytics/sync/cursor" in paths, (
-        f"/v2/analytics/sync/cursor missing from /endpoints; got paths={sorted(paths)}"
+    assert "/v2/analytics/sync/coverage" in paths, (
+        f"/v2/analytics/sync/coverage missing from /endpoints; got paths={sorted(paths)}"
     )
     assert "/v2/analytics/sync/dumps" in paths
 

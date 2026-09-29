@@ -1,7 +1,7 @@
 # SPU 实际 ROI 看板 — 需求 · 信息源/数据源 · 计算口径 · 技术方案
 
 > 状态：**draft → 2026-09-05 口径 + 页面样式已拍板（见文末 §11），待方案评审**
-> 决策记录：① 广告币种全 USD；跨币换算**本期用固定汇率常量**（2026-09-05：USD→VND=26,330 / CNY→USD=0.1477，配置可改），在线汇率机制挂起（§4.6）；② 销售口径 = 排除 CANCELLED 后的**有效销售订单**（口径 B）；③ 平台佣金等不做分项建模，净现金以**每笔订单的结算金额**（净额）为权威口径；④ 货物成本：**按 SPU 解析（人工成本有效行优先，未命中才默认 30 CNY/件）**，使用默认的页面行打 ⚠；退货按**全损退货口径**；⑤ 页面样式 = 方案 A 账页式（§7）；⑥ **金额列统一以 USD 展示**（底层按原币 VND/CNY 计算，输出层一次换算）；⑦ 页面金额核心列 = 净利润（M18，毛利口径），净现金收入仅作内部中间量不展示；⑧ 结算归属解析 job + view 已排期（D7）；**平台佣金 = 平台从销售额直接扣除的全部费用**（抽佣+联盟+运费类等）；已结算订单按**实际扣费**，未结算订单按**参考基线 ≈11.6%** 估算，页面可覆写（D10）
+> 决策记录：① 广告币种全 USD；跨币换算**本期用固定汇率常量**（2026-09-05：USD→VND=26,330 / CNY→USD=0.148823，配置可改），在线汇率机制挂起（§4.6）；② 销售口径 = 排除 CANCELLED 后的**有效销售订单**（口径 B）；③ 平台佣金等不做分项建模，净现金以**每笔订单的结算金额**（净额）为权威口径；④ 货物成本：**按 SPU 解析（人工成本有效行优先，未命中才默认 40 CNY/件）**，使用默认的页面行打 ⚠；退货按**全损退货口径**；⑤ 页面样式 = 方案 A 账页式（§7）；⑥ **金额列统一以 USD 展示**（底层按原币 VND/CNY 计算，输出层一次换算）；⑦ 页面金额核心列 = 净利润（M18，毛利口径），净现金收入仅作内部中间量不展示；⑧ 结算归属解析 job + view 已排期（D7）；**平台佣金 = 平台从销售额直接扣除的全部费用**（抽佣+联盟+运费类等）；已结算订单按**实际扣费**，未结算订单按**参考基线 ≈30.8%** 估算，页面可覆写（D10）
 
 > 2026-09-06 更新：跨币换算已切换为**在线 fx 缓存**（fx.* schema，见 `tech-doc/fx-exchange-rates.md` / `tech-doc/fx-agent-handbook.md`）：ROI 换算
 > 直读最新 USD 快照（USD→VND = rates[VND]，CNY→USD = 1/rates[CNY] 量化 8dp，meta.fx.source=fx-cache）；快照缺失自动回退本节固定常量
@@ -27,11 +27,11 @@
 | # | 信息源 | 内容 | 抓取通道（仓库既有唯一出口） | 本库落点 | 状态 |
 | --- | --- | --- | --- | --- | --- |
 | S1 | TikTok Shop Open API | 商品目录 / 订单 / 售后（取消·仅退款·退货） | sync-worker `tiktok.*` jobs（AGENTS §1：打上游唯一路径） | `commerce.*`、`after_sales.*`、`integration.raw_records` | ✅ 在用 |
-| S2 | TikTok OEC 广告报表 | `post_product_list`（campaign×SPU×day 出单/消耗/GMV，含自然归因） | Chrome 扩展 `tk-adv-cost-monitor` → `POST /v2/analytics/sync/dumps` | `analytics.ad_raw` → `analytics.ad_product_links`（VIEW） | ✅ 在用（全窗口累计） |
+| S2 | TikTok OEC 广告报表 | `post_product_list`（campaign×SPU×day 出单/消耗/GMV，含自然归因） | Chrome 扩展 `tk-adv-cost-monitor` → `POST /v2/analytics/sync/dumps` | `plugin.ad_raw_log` → `plugin.ad_daily` / `ad_today`（`_SQL_ROI_AD` 直读） | ✅ 在用（全窗口累计） |
 | S3 | TikTok Shop 结算明细 | **59 列宽行、自带 `order_id`**（平台佣金 / 退货运费 / 退款管理费 / 平台补贴 / 运费等，见 §6.11） | sync-worker `tiktok.finance` job + **结算归属解析 job（已排期 D7）** | `integration.raw_records` 原样 + **解析结构化表 + view（待建）** | 🔶 解析 job 已排期（D7） |
 | S4 | 妙手开放平台 采购 | 商品目录（216）/ 采购单（0） | sync-worker `miaoshou.*` jobs | `procurement.*` | ⚠️ 采购单未跑；本期不用（成本走 K1） |
 | S5 | 汇率（固定值，本期） | USD→VND、CNY→USD | 不接在线源：**固定常量**（2026-09-05 取数，配置可改） | 配置常量（.env 或配置表）；无新 job / 无新表 | ✅ 固定值（在线化挂起，见 §4.6） |
-| S6 | 货物成本 | 人工录入 / 采购价（真实值） | manual-costs 页 + cost snapshots job | `procurement.manual_product_costs` / `reporting.product_cost_snapshots` | ⚠️ 人工成本近空（现网 2 行）→ 未命中走默认 K1=30 CNY/件（页面 ⚠） |
+| S6 | 货物成本 | 人工录入 / 采购价（真实值） | manual-costs 页 + cost snapshots job | `procurement.manual_product_costs` / `reporting.product_cost_snapshots` | ⚠️ 人工成本近空（现网 2 行）→ 未命中走默认 K1=40 CNY/件（页面 ⚠） |
 | S7 | 用户手工假设 | 及格线 / 退款率警戒 / 成本占位 / 日期窗口 / 汇率兜底 | 页面 ⚙ 配置 | 前端本地或配置 | 可调，不参与口径定义 |
 
 ### A.2 数据源 → 用途总映射
@@ -41,8 +41,10 @@
 | `commerce.products_spu` / `shops` | SPU / 店铺维度 | 主表行源；ad join 键 | §6.1/6.2 |
 | `commerce.sales_orders` + `sales_order_lines` | 有效销售订单行（口径 B） | M5/M5b/M6（销售列） | §6.3/6.4 |
 | `after_sales.cases` + `case_lines` | 售后：取消/仅退款/退货退款（含金额、件数、原因） | M7–M12（退款列）+ M9 信息列 | §6.5/6.6 |
-| `analytics.ad_raw`（原始 dump） | 广告逐日原始（按天拆窗口的唯一路径） | 校验 / 自定义日期范围 | §6.7 |
-| `analytics.ad_product_links`（VIEW） | campaign×SPU 出单量/消耗/GMV + ERP 键 | M1/M2/M2b/M3/M4（广告列） | §6.8 |
+| `plugin.ad_raw_log`（原始请求日志） | 广告逐日原始（按天拆窗口的唯一路径） | 校验 / 自定义日期范围 | §6.7 |
+| `plugin.ad_daily` ∪ `ad_today`（`spu_roi.py::_SQL_ROI_AD` 直读，**不再经视图**） | campaign×SPU 出单量/消耗/GMV + ERP 键 |
+
+> **注（2026-09-11）**：原规划经 `analytics.ad_product_links` VIEW 读广告数据，该视图连同 `ad_raw` / `ad_sync_audit` 已由 **migration 0020** 删除（视图零生产消费者 —— `spu_roi.py::_SQL_ROI_AD` 一直是直读结构化表）。上表已按现状修正。 M1/M2/M2b/M3/M4（广告列） | §6.8 |
 | `reporting.product_profit_daily` | (spu,day) units/gross_revenue 中间表 | M5/M6 复用源（可选） | §6.9 |
 | 成本链表（`procurement.manual_product_costs` / `reporting.product_cost_snapshots` / `linkage.effective_product_links`） | 单位成本解析（人工优先，未命中默认 K1） | M13b 货损 / M18 净利润 / M17 保本的 unit_cost 来源 | §6.10 |
 | `integration.raw_records`（`…/statement_transactions` 59 列） | **结算归属 + 退货运费承担判定的数据源** | M16（未来）、退货运费扣项（未来） | §6.11/§9-3 |
@@ -56,34 +58,34 @@
 | C1 | 广告币种 | USD（D1，09-05） | 原生即 USD | 广告列 $ | — |
 | C2 | 销售口径 | **有效销售订单** = 排除 CANCELLED（D2/口径 B） | §4.1 白名单；M5/M6/M5b | 销售列只计有效单 | 与 profit_daily 同款白名单 |
 | C3 | 已付被取消单 | 不进销售；退款=信息列 | M9（不扣净额） | “已付被取消”信息列 | 避免重复扣 |
-| C4 | 退货口径 | **全损退货**：RETURN_AND_REFUND 已完结即全损（D4） | 件数 M11；金额 M8 | 退货列 + 货损列 | 实测 26/26 均妥投后退 |
-| C5 | 货物成本（单位成本解析） | **人工成本优先，未命中 → 默认 K1=30 CNY/件（D4）** ≈ $4.43/件 | ① `manual_product_costs` 有效行(valid_to IS NULL) → MANUAL；② 未命中 → DEFAULT_K1（§4.2） | 使用默认的行打 ⚠，可跳 manual-costs 补录 | 现网人工成本仅 2 行，绝大多数 SPU 本期走默认 |
+| C4 | 退货/取消口径 | **全损退货（v9）**：退货(RETURN_AND_REFUND/REFUND_ONLY)直接算全损；海外取消(CANCELLED + 物流已到海外 action_code=38301)也算全损；国内取消(物流未到海外) ≠ 全损 | 件数 M11 + M5d；金额 M8 | 退货列 + 货损列 | 退货 27 件 + 海外取消 133 件 = 全损 160 件；国内取消 182 件不计全损 |
+| C5 | 货物成本（单位成本解析） | **人工成本优先，未命中 → 默认 K1=40 CNY/件（D4）** ≈ $5.95/件 | ① `manual_product_costs` 有效行(valid_to IS NULL) → MANUAL；② 未命中 → DEFAULT_K1（§4.2） | 使用默认的行打 ⚠，可跳 manual-costs 补录 | 现网人工成本仅 2 行，绝大多数 SPU 本期走默认 |
 | C6 | 平台佣金/运费 | **不手工建模**（D3）；净现金权威口径 = 每笔订单结算净额 M16（落地后作 net_cash 的内部替代基础） | M16（待解析 job） | 净利润/保本按“未含平台费”口径并在页面标注，M16 落地后自动变准 | §9-3 |
 | C7 | 退货运费谁承担 | 结算明细 `return_shipping_fee_amount≠0`（09-05 探查，608 行→5 单，5/5=R&R） | 待解析 job 归属后作扣项 | 未来列 | 勿用 reason_code 猜 |
 | C8 | 显示币种 | **全表 USD**（D6） | 原币算 → 输出层一次换算 | 单币种表格 | fx 时间标注 |
-| C9 | 汇率 | **固定常量（D9 更新 D1）**：USD→VND=26,330 / CNY→USD=0.1477（2026-09-05，配置可改） | 金额换算 / 保本 / ROI 直接按固定值 | 全表 USD 换算 | 在线机制挂起（§4.6） |
+| C9 | 汇率 | **固定常量（D9 更新 D1）**：USD→VND=26,330 / CNY→USD=0.148823（2026-09-05，配置可改） | 金额换算 / 保本 / ROI 直接按固定值 | 全表 USD 换算 | 在线机制挂起（§4.6） |
 | C10 | 主指标 | **实际 ROI（M14）** = (净现金 − 全损货损) ÷ 广告 | NC′/spend（全 USD） | 主列 + 合计带 | 退款已含在净现金 |
 | C11 | 保本线 | **M17 动态** = NC′ ÷ (NC′ − 正常卖出件货本 − 平台费用 fee) | roi_real≥roi_be ⇔ 净利润≥0 | 红绿判据（默认） | 结构性亏→无解 |
 | C12 | 退款金额缺失 | 净额桶 27/27 齐全直取；取消桶缺 219/246 → **报 unknown 行数，不造数** | — | 双字段上报 | §5.6 |
 | C13 | 未归属退款 | 66 行无法到 SPU | — | meta + 页脚提示 | 不静默丢 |
 | C14 | 明细 / 交互 | 行内展开三 tab；方案 A 账页；默认排序 实际ROI↑（D5） | — | §7 | 及格线/退款率可调 |
 | C15 | 结算/保本精度路径 | **解析归属 job + view 已排期（D7，2026-09-05）**；过渡期平台佣金用**费率基线**扣（D10） | M16→落地后自动含平台费/退货运费 | 落地前按费率估扣 | §6.11/§9-3 |
-| C16 | 平台佣金（渠道费用）扣法 | **定义 = 平台从销售额直接扣除的全部费用**（抽佣+联盟佣金+运费类+其它扣款；单笔总扣 = 交易级 fee_amount）。**已结算订单 → 实际扣费（固定）；未结算订单 → sales × 参考基线 r̂**（Σ\|fee_amount\|/Σgross，实测 ≈11.6%，页面可覆写 %） | fee = 实际 + 估算（M19） | 默认用基线 r̂；解析上线后自动分层 | D10 |
+| C16 | 平台佣金（渠道费用）扣法 | **定义 = 平台从销售额直接扣除的全部费用**（抽佣+联盟佣金+运费类+其它扣款；单笔总扣 = 交易级 fee_amount）。**已结算订单 → 实际扣费（固定）；未结算订单 → sales × 参考基线 r̂**（Σ\|fee_amount\|/Σgross，实测 ≈30.8%（2026-09-06 重定，旧 30.8% 重定；页面可覆写 %） | fee = 实际 + 估算（M19） | 默认用基线 r̂；解析上线后自动分层 | D10 |
 
 ### A.4 决策台账（D1–D10）
 
 | 决策 | 内容 | 位置 |
 | --- | --- | --- |
-| D1 | 广告全 USD；跨币换算**本期固定汇率常量**（26,330 / 0.1477，配置可改），在线汇率挂起 | §4.6 |
+| D1 | 广告全 USD；跨币换算**本期固定汇率常量**（26,330 / 0.148823，配置可改），在线汇率挂起 | §4.6 |
 | D2 | 销售 = 排除 CANCELLED 后的有效销售订单（口径 B） | §4.1 |
 | D3 | 平台佣金等不手工分项建模；净现金以每笔订单结算净额（M16）为权威 | §6.11/§9-3 |
-| D4 | 退货 = 全损口径；单位成本 = 人工成本有效行优先，未命中默认 K1=30 CNY/件（页面 ⚠，可跳补录） | §2/§4.2 |
+| D4 | 退货 = 全损口径；单位成本 = 人工成本有效行优先，未命中默认 K1=40 CNY/件（页面 ⚠，可跳补录） | §2/§4.2 |
 | D5 | 页面样式 = 方案 A 账页式（红绿判据 = 实际 ROI vs 保本线） | §7 |
 | D6 | 全表金额统一 USD 展示（输出层一次换算） | §3.4/§4.2 |
 | D7（已拍板，2026-09-05） | 结算归属解析 job + 视图排期：把 59 列结算 raw 解析为按订单/行/case 归属的结构化数据并建只读 view（M16 数据底座） | §6.11/§9-3/§10 |
 | D8（2026-09-05） | 页面金额核心列 = **净利润（毛利口径，M18）**；净现金收入(M13) 仅内部中间量，不展示 | §3.1/§4.2/§5.2/§7 |
-| D9（2026-09-05） | 汇率**本期固定常量**（USD→VND=26,330 / CNY→USD=0.1477，配置可改）；在线汇率机制（原 D1）挂起，待后续排期 | §4.6/§6.12 |
-| D10（2026-09-05） | 平台佣金（渠道费用）= **平台从销售额直接扣除的全部费用**（抽佣/联盟/运费类等）；**已结算订单用实际扣费，未结算订单用参考基线 r̂ ≈ 11.6%**（Σ\|fee_amount\|/Σgross）估算，页面可覆写；解析 job 上线后自动分层（已结算不再估） | §4.2/§5.2/§6.11 |
+| D9（2026-09-05） | 汇率**本期固定常量**（USD→VND=26,330 / CNY→USD=0.148823，配置可改）；在线汇率机制（原 D1）挂起，待后续排期 | §4.6/§6.12 |
+| D10（2026-09-05） | 平台佣金（渠道费用）= **平台从销售额直接扣除的全部费用**（抽佣/联盟/运费类等）；**已结算订单用实际扣费，未结算订单用参考基线 r̂ ≈ 30.8%**（Σ\|fee_amount\|/Σgross）估算，页面可覆写；解析 job 上线后自动分层（已结算不再估） | §4.2/§5.2/§6.11 |
 
 ---
 
@@ -118,7 +120,7 @@
 
 - 不做素材 / 广告计划级的利润归因（只看 SPU 汇总，明细可钻取但不下钻利润）
 - 不做归因模型（TikTok GMV Max 归因含自然单，无法拆“纯广告增量”，只能标注口径警告）
-- 不做自研汇率换算引擎 —— **本期用固定汇率常量**（USD→VND=26,330 / CNY→USD=0.1477，2026-09-05，配置可改）；在线汇率查询为后续方向（原 D1 挂起，机制见 §4.6）
+- 不做自研汇率换算引擎 —— **本期用固定汇率常量**（USD→VND=26,330 / CNY→USD=0.148823，2026-09-05，配置可改）；在线汇率查询为后续方向（原 D1 挂起，机制见 §4.6）
 - 不做预测 / 补货建议
 
 ---
@@ -128,7 +130,7 @@
 | 术语 | 定义 |
 | --- | --- |
 | SPU | TikTok 商品（`commerce.products_spu` 一行）。对外 ID = `spu_id`（如 `1736527242804888823`）；内部主键 = `spu_pk`（BigInteger id，**过滤/聚合一律用它**，`spu_id` 只做展示与搜索） |
-| 广告消耗（ad spend） | TikTok OEC `post_product_list` 的 `mixed_real_cost`（真实消耗），跨天求和 = `ad_product_links.real_cost_total`。**币种 = USD（2026-09-05 已确认：广告账户为 USD）**，与订单币种 VND 不同 |
+| 广告消耗（ad spend） | TikTok OEC `post_product_list` 的 `mixed_real_cost`（真实消耗），跨天求和 = `ad_daily` + `ad_today` 的 `mixed_real_cost` 求和。**币种 = USD（2026-09-05 已确认：广告账户为 USD）**，与订单币种 VND 不同 |
 | 出单 GMV（平台归因） | `onsite_roi2_shopping_value` 求和。**归因口径，含自然单**，只用于展示“平台说你卖了多少”，不是回款 |
 | **有效销售订单**（口径 B，2026-09-05 拍板） | status ∈ `PAID_SALES_ORDER_STATUSES`（§4.1）且已支付的订单；**CANCELLED / UNPAID / ON_HOLD 一律排除**。排除后即视为有效销售订单 —— 销售金额 / 售出件数 / 订单数全以它为基数，不做任何事后剔除（含“已付后被取消”的单，它们不进销售） |
 | 销售金额（ERP） | Σ **有效销售订单**行 `quantity × unit_price` 按 SPU 汇总，原生币 VND（生产 870/870 单全 VND；**展示统一 USD**） |
@@ -136,11 +138,11 @@
 | case / case_lines | 售后单：`after_sales.cases`（单头）+ `after_sales.case_lines`（按订单行拆分） |
 | case 状态完结 | 见 §4.3：`CANCELLATION_REQUEST_COMPLETE` / `RETURN_OR_REFUND_REQUEST_COMPLETE` 才代表钱已退 |
 | 实际 ROI | 对照档 **L0** = 平台 GMV ROI（广告口径，仅供对照）；**主指标 = 实际 ROI（M14）= (净现金收入 − 全损退货货损) ÷ 广告消耗（全 USD）**；**保本实际 ROI（M17）= 每 SPU 的动态盈亏线**（实际 ROI 低于它即亏，公式见 §4.2）。公式见 §5 |
-| **净利润（毛利口径，页面金额核心列）** | M18 = 净现金收入(内部 M13) − 全部售出件货本 − 广告消耗 − **平台佣金（M19：已结算实际 + 未结算 sales×r̂）**（全 USD）；**≥ 0 ⇔ 实际 ROI ≥ 保本 ROI**；r̂ 默认 = 已结算参考基线（≈11.6%，含抽佣/联盟/运费等全部直接扣除），页面可覆写；解析上线后已结算部分自动用实际值。净现金收入本身**不展示** |
+| **净利润（毛利口径，页面金额核心列）** | M18 = 净现金收入(内部 M13) − 全部售出件货本 − 广告消耗 − **平台佣金（M19：已结算实际 + 未结算 sales×r̂）**（全 USD）；**≥ 0 ⇔ 实际 ROI ≥ 保本 ROI**；r̂ 默认 = 已结算参考基线（≈30.8%，2026-09-06 实测重定，含抽佣/联盟/运费等全部直接扣除），页面可覆写；解析上线后已结算部分自动用实际值。净现金收入本身**不展示** |
 | 订单结算金额 | 每笔订单在 TikTok 结算单里的**净额**（平台扣费/退款调整已含其中，净现金口径不做手工分项建模——决策 3）。净现金的**权威口径**（M16）；解析 job + view 已排期（D7），当前未落地（§6.11/§9-3） |
-| **平台佣金（渠道费用）** | 平台从销售额**直接扣除的全部费用**（交易抽佣 + 联盟佣金 + 运费类 + 其它扣款；单笔总扣 = 结算交易级 `fee_amount`）。**已结算订单 = 实际扣费；未结算订单 = sales × 参考基线 r̂**（Σ\|fee_amount\|/Σgross，≈11.6%，页面可覆写 %）；解析 job 上线后自动分层（D10/M19，§4.2/§6.11） |
-| **全损退货**（口径，2026-09-05 拍板） | RETURN_AND_REFUND 已完结即视为**全损**：货已妥投海外、退不回/不可再售（实测 26/26 全为发货后）→ 除退给买家的钱（已计入退款）外，**每件另计货损** = 件数 × 单位成本解析值（人工优先/缺省 30 CNY ≈ $4.43/件）。REFUND_ONLY（仅退款）不产生货损 |
-| **货物成本（占位）** | 2026-09-05 拍板：**按 SPU 解析**——先查 `procurement.manual_product_costs` 有效行（`valid_to IS NULL`），命中即用（`cost_source=MANUAL`，**表内保证人民币 CNY**）；未命中才用默认 **K1 = 30 CNY/件**（`DEFAULT_K1`，页面 ⚠）。两者均为 CNY，统一经 CNY→USD 在线汇率换 USD。 |
+| **平台佣金（渠道费用）** | 平台从销售额**直接扣除的全部费用**（交易抽佣 + 联盟佣金 + 运费类 + 其它扣款；单笔总扣 = 结算交易级 `fee_amount`）。**已结算订单 = 实际扣费；未结算订单 = sales × 参考基线 r̂**（Σ\|fee_amount\|/Σgross，≈30.8%，页面可覆写 %）；解析 job 上线后自动分层（D10/M19，§4.2/§6.11） |
+| **全损退货（v9 口径，2026-09-07 拍板）** | 退货 + 海外取消均视为**全损**：① 退货(RETURN_AND_REFUND/REFUND_ONLY)直接算全损，除退给买家的钱（已计入退款）外，**每件另计货损** = 件数 × 单位成本解析值（人工优先/缺省 40 CNY ≈ $5.95/件）；② **海外取消**：CANCELLED + 物流已到海外（`action_code=38301`）→ 也计全损（货本已付出）；③ 国内取消(物流未到海外) ≠ 全损，不计货本 |
+| **货物成本（占位）** | 2026-09-05 拍板：**按 SPU 解析**——先查 `procurement.manual_product_costs` 有效行（`valid_to IS NULL`），命中即用（`cost_source=MANUAL`，**表内保证人民币 CNY**）；未命中才用默认 **K1 = 40 CNY/件**（`DEFAULT_K1`，页面 ⚠）。两者均为 CNY，统一经 CNY→USD 在线汇率换 USD。 |
 | **显示币种（2026-09-05 拍板）** | **全表金额列统一 USD，不再分 USD/VND 栏**：VND 金额 ÷ USD→VND、货损 CNY × CNY→USD（均用在线汇率）；底层计算保持原币（防舍入），输出层一次换算、四舍五入；列头/提示行标注所用 fx 与取值时间 |
 
 ---
@@ -161,12 +163,12 @@
 | 分组 | 列 | 说明 | 币种/单位 |
 | --- | --- | --- | --- |
 | A 商品 | ✓ `spu_id`、主图、标题、上架状态（ACTIVATE/已下架）、店铺名 | 维度列，主键 = `spu_pk` | — |
-| B 广告 | ✓ 投放广告数（挂该 SPU 的 campaign 数）、✓ 广告消耗合计、✓ 平台出单 GMV、✓ 平台 GMV ROI（L0）、○ 观测窗口（first_day~last_day） | 来自 `analytics.ad_product_links`，窗口=已捕获全量（§4.5 时间口径） | USD（原生） |
+| B 广告 | ✓ 投放广告数（挂该 SPU 的 campaign 数）、✓ 广告消耗合计、✓ 平台出单 GMV、✓ 平台 GMV ROI（L0）、○ 观测窗口（first_day~last_day） | 来自 `plugin.ad_daily` ∪ `plugin.ad_today`，窗口=已捕获全量（§4.5 时间口径） | USD（原生） |
 | C 销售 | ✓ 售出件数、✓ 销售金额、○ 订单数 | 只统计**有效销售订单**（口径 B：白名单、排除 CANCELLED/UNPAID/ON_HOLD），按 `paid_at` 落入所选范围 | USD（原币 VND 换算） |
 | D 退款 | ✓ 有效订单退款（仅退款+退货退款：单数/件数/金额，**计入净额**）、✓ 已付被取消订单退款（件数/金额，**信息列不计净额**）、✓ 退款率=有效订单退款÷销售金额 | case 状态完结才计入；件数取 `case_lines.quantity` | USD（原币 VND 换算） |
-| E 实际 ROI | ✓ **净利润**（M18，毛利口径：净现金(内部) − 全部售出货本 − 广告消耗，每 SPU 真赚多少，**页面金额核心列**）；✓ **全损退货货损**（M13b = 全损退货件数 × 单位成本解析值，人工优先/缺省 30 CNY ≈ $4.43/件）；✓ **实际 ROI** = (净现金(内部) − 退货货损) ÷ 广告消耗（M14）；✓ **保本实际 ROI**（M17，实际 ROI 低于它标红） | 净利润是“结余核心”（负值红字），实际 ROI 主指标，保本线是红绿判据；**净现金收入(M13) 仅内部中间量，不展示** | USD（原币 VND/CNY）/ 比值 |
+| E 实际 ROI | ✓ **净利润**（M18，毛利口径：净现金(内部) − 全部售出货本 − 广告消耗，每 SPU 真赚多少，**页面金额核心列**）；✓ **全损退货货损**（M13b = 全损退货件数 × 单位成本解析值，人工优先/缺省 40 CNY ≈ $5.95/件）；✓ **实际 ROI** = (净现金(内部) − 退货货损) ÷ 广告消耗（M14）；✓ **保本实际 ROI**（M17，实际 ROI 低于它标红） | 净利润是“结余核心”（负值红字），实际 ROI 主指标，保本线是红绿判据；**净现金收入(M13) 仅内部中间量，不展示** | USD（原币 VND/CNY）/ 比值 |
 
-顶部**合计条**（跟随当前筛选实时汇总，家族 signature，**全 USD**）：共 N 个 SPU · 广告消耗 $x · 有效销售 $x · 有效订单退款 $x · 全损货损 $x · **净利润 $x** · **整体实际 ROI n**（固定汇率 D9：26,330 / 0.1477，§4.6）。
+顶部**合计条**（跟随当前筛选实时汇总，家族 signature，**全 USD**，2026-09-06 定稿 10 格）：广告消耗 $x · 有效销售 $x · GMV $x（全部订单销售额）· 有效单量 · 总单量 · 退款净额 $x · 全损退款 $x（M13b 成本口径，原「全损货损」改名）· 取消单量 · **净利润 $x** · **整体实际 ROI n**（固定汇率 D9：26,330 / 0.148823，§4.6）。
 
 **排序默认「实际 ROI 升序」**（最亏的排最前，决策 D5），列头可切：广告消耗 / 退款率 / 净利润 / 销售（交互见 §7.3）。
 **搜索框**：`spu_id` 子串（对齐广告报表里看到的商品 ID）。分页 limit/offset 沿用 v2 约定。
@@ -178,7 +180,7 @@ SPU 无广告投放 → 广告列显示 0 与“无投放”文案（不隐藏�
 | --- | --- | --- |
 | 订单 | 该 SPU 涉及的订单（订单号/状态/件数/金额/paid_at/shipped_at），CANCELLED 单标红 | `commerce.sales_orders` + `sales_order_lines`（by `spu_pk`） |
 | 售后 | 该 SPU 的 case 明细（case 类型/状态/退款金额/原因 code+text/时间），未完结 case 标黄 | `after_sales.cases` + `case_lines`（经 order→line→spu） |
-| 广告 | 该 SPU 的 campaign×SPU 行（广告 ID/消耗/出单/窗口） | `analytics.ad_product_links`（by `spu_id`/`spu_pk`） |
+| 广告 | 该 SPU 的 campaign×SPU 行（广告 ID/消耗/出单/窗口） | `plugin.ad_daily` ∪ `plugin.ad_today`（by `spu_id`/`spu_pk`） |
 
 ### 3.3 P2 进阶（预留，本期不做，仅记入需求）
 
@@ -215,12 +217,12 @@ SPU 无广告投放 → 广告列显示 0 与“无投放”文案（不隐藏�
 
 记当前 SPU 为 `s`，日期范围 `W`（订单按 `paid_at`，退款按完结时间）。
 
-**单位成本解析（每 SPU，人工优先 → 默认 30 元）**：
+**单位成本解析（每 SPU，人工优先 → 默认 40 元）**：
 
 ```text
-① 命中 procurement.manual_product_costs 有效行（valid_to IS NULL，每 SPU 至多一条） → unit_cost = 行值（**2026-09-05 确认：人工表录入保证为人民币 CNY** → 统一走 CNY→USD fx），cost_source = MANUAL
-② 未命中 → unit_cost = K1 = 30 CNY/件（≈ $4.43/件），cost_source = DEFAULT_K1
-   → 页面该行打 ⚠：无人工成本记录，按默认 30 元/件计算（可点去 /v2/pages/manual-costs 补录）
+① 命中 procurement.manual_product_costs 有效行（valid_to IS NULL，每 SPU 至多一条） → unit_cost = 行值（**2026-09-05 确认：人工表录入保证为人民币 CNY** → 统一走 CNY→USD fx），cost_source = 人工标注价格
+② 未命中 → unit_cost = 默认兜底价格 = 40 CNY/件（≈ $5.95/件），cost_source = DEFAULT_K1
+   → 页面该行打 ⚠：无人工成本记录，按默认 40 元/件计算（可点去 /v2/pages/manual-costs 补录）
 ```
 
 （人工成本入口 = `POST /v2/reporting/manual-costs` + `GET /v2/pages/manual-costs`；`GET /v2/reporting/missing-cost-products` = 当前无成本的 SPU 清单，即 MANUAL 未命中者的补录入口。）
@@ -232,25 +234,31 @@ SPU 无广告投放 → 广告列显示 0 与“无投放”文案（不隐藏�
 | M2b | 平台出单量（SKU 口径，信息列） | `ad_orders(s)` | `Σ order_sku_total`（跨 campaign 求和；TikTok Orders(SKU)，含自然归因） | 广告窗口全量 | 视图 |
 | M3 | 平台出单 GMV | `gmv_ad(s)` | `Σ order_value_total`（归因口径，含自然单） | 同上 | 同上 |
 | M4 | 平台 GMV ROI | `roiL0(s)` | `gmv_ad(s) / spend(s)`；`spend=0 → NULL`（页面显示 `—`） | 同上 | M3/M1 |
-| M5 | 售出件数（有效销售） | `units(s)` | `Σ sales_order_lines.quantity`（join **有效销售订单**且 `paid_at∈W`，`spu_pk=s`） | 按日可拆 | sales_order_lines + sales_orders |
-| M5b | 有效销售订单数 | `order_count(s)` | `COUNT(DISTINCT sales_orders.id)`（同一有效销售过滤） | 按日可拆 | 同上 |
-| M6 | 销售金额(gross) | `sales(s)` | `Σ quantity × unit_price`（同上过滤条件） | 按日可拆 | 同上 |
+| M5 | 售出件数（有效销售） | `units(s)` | `Σ sales_order_lines.quantity`（join **有效销售订单**且 `coalesce(paid_at, order_time)∈W`，`spu_pk=s`；**状态口径 2026-09-06：白名单状态即算，含 COD 在途未收款**） | 按日可拆 | sales_order_lines + sales_orders |
+| M5b | 有效销售订单数 | `order_count(s)` | `COUNT(DISTINCT sales_orders.id)`（同一有效销售过滤；**状态口径：白名单状态全部订单，含 COD 在途**） | 按日可拆 | 同上 |
+| M6 | 销售金额(gross) | `sales(s)` | `Σ quantity × unit_price`（同上过滤条件；**状态口径：下单即算，含 COD 在途未收款**；CANCELLED 不计入） | 按日可拆 | 同上 |
+| | M5c | 取消订单数 | `cancelled_order_count(s)` | `COUNT(DISTINCT id)` status=CANCELLED（状态口径，含未收款取消；2026-09-06 行内新列，与结余带取消单量同口径） | 按日可拆 | sales_orders |
+| M5d | **全损件数（v9 口径）** | `full_loss_qty(s)` | `退货件数 + 海外取消件数`：退货 = `Σ case_lines.quantity WHERE case_type IN ('RETURN_AND_REFUND','REFUND_ONLY') AND status='RETURN_OR_REFUND_REQUEST_COMPLETE'`；海外取消 = `Σ sales_order_lines.quantity WHERE sales_orders.status='CANCELLED' AND EXISTS(tracking_events.action_code=38301)`；**国内取消(物流未到海外) ≠ 全损，不计入**；实测：退货 27 + 海外取消 133 = 全损 160 件，国内取消 182 件不计。**实现注记（2026-09-13 merge 3c8ea96 落地 v9）**：① 退货桶限定订单 ∈ 已付白名单状态（保住 §4.2 rule 0：UNPAID 等异常单退款进未归属、不进全损）；② 窗口裁剪：退货桶按 case `updated_at_source`（与退款桶同语义）、海外取消桶按订单 `COALESCE(paid_at, order_time)`；③ 派生 `full_loss_rate = full_loss_qty ÷ (units_sold + full_loss_cancelled_qty)`（分子 ⊆ 分母，退货件含在 units_sold 里） | 范围求和 | case_lines + fulfillment.tracking_events + sales_orders |
+| M6c | 行内销售(GMV 全单) | `gmv_sales(s)` | 有效销售 + 取消原额（= 结余带 GMV 的行级版；2026-09-06） | 按日可拆 | M6+M6b 行级 |
+| M12b | 取消率 | `cancel_rate(s)` | **v9（2026-09-13 实现落地，merge 3c8ea96）**：国内取消单量 ÷ (有效单量 + 国内取消单量)；国内取消 = `CANCELLED AND NOT EXISTS(tracking_events.action_code=38301)`（物流未到海外）。**海外取消(CANCELLED∧38301)已计入全损 M5d，不再计入取消率——取消率与全损退款率互斥不重叠**（v8 及之前取消率含全部 CANCELLED，与全损重复计海外取消，已修）；`cancelled_order_count` 信息列保持全部取消单口径不变，行级另拆 `domestic_cancelled_order_count` / `overseas_cancelled_order_count` | 范围 | M5b + 取消拆分 |
+| M12c | 退货率（单量口径） | `refund_rate_qty(s)` | 退货订单数 ÷ 有效单量（退款 case 去重订单数，非金额；2026-09-06 行内主列） | 范围 | case 去重订单 / M5b |
+| M6b | 全部订单销售额(gross,状态口径) | `gmv(s)` | `Σ quantity × unit_price`（白名单状态 ∪ CANCELLED 全单原始行金额；**下单即计、不看 paid_at**，2026-09-06 修订：COD 店在途/未收款取消也算单，对应结余带 GMV 格） | 按日可拆 | 同 M5/M6 过滤 + 状态桶 |
 | M7 | 仅退款金额（计净额） | `refund_only(s)` | `Σ` 已完结 REFUND_ONLY case 退款，**且其订单 ∈ 有效销售订单** | 按完结时间 | cases(+case_lines) |
 | M8 | 退货退款金额（计净额） | `refund_return(s)` | `Σ` 已完结 RETURN_AND_REFUND case 退款，**且其订单 ∈ 有效销售订单** | 同上 | 同上 |
-| M9 | 已付被取消订单退款（信息列） | `refund_cancelled(s)` | `Σ` 已完结 CANCELLATION/CANCEL case 退款（订单 status=CANCELLED —— 该单销售本就不在 M6 里，故只展示不扣净额）。**行级金额缺失时不造数**：输出「已知金额小计 + 未知行数」（实测缺失 219/246，见 §5.6） | 同上 | 同上 |
+| M9 | 取消订单退款（信息列） | `refund_cancelled(s)` | `Σ` 已完结 CANCELLATION/CANCEL case 退款（订单 status=CANCELLED —— 该单销售本就不在 M6 里，故只展示不扣净额；2026-09-06 起含未收款即取消的 COD 拒收/超时单，退款行通常为 0）。**行级金额缺失时不造数**：输出「已知金额小计 + 未知行数」（实测缺失 219/246，见 §5.6） | 同上 | 同上 |
 | M10 | 有效订单退款合计（计净额） | `refund_net(s)` | `refund_only(s) + refund_return(s)` | 同上 | M7+M8 |
 | M11 | 退款件数 | `units_refunded(s)` | `Σ case_lines.quantity`（M7/M8 对应 case 的件数；取消件数 = M9 对应 case 的 quantity，另列展示；件数无缺失问题，与金额的“未知”处理不同） | 同上 | case_lines→cases |
 | M12 | 退款率 | `refund_rate(s)` | `refund_net(s) / sales(s)`（金额口径；另给件数版 `units_refunded/units`） | 同上 | M10/M6 |
 | M13 | 净现金收入（**内部中间量，不直接展示**） | `net_cash(s)` | `sales(s) − refund_net(s)`（订单行金额朴素口径：未含平台扣费/运费；供 M18 净利润 / M14 ROI / M17 保本线使用） | 范围求和 | M6−M10 |
-| M13b | **全损退货货损** | `return_loss(s)` | `全损退货件数(M11 退货桶) × 单位成本解析值(§4.2，人工优先/缺省 30 CNY) × CNY→USD 汇率`（全损口径：退货即货本全损，§2） | 范围求和 | M11 + 成本解析 + fx(§4.6) |
+| M13b | **全损退货货损** | `return_loss(s)` | `全损退货件数(M11 退货桶) × 单位成本解析值(§4.2，人工优先/缺省 40 CNY) × CNY→USD 汇率`（全损口径：退货即货本全损，§2） | 范围求和 | M11 + 成本解析 + fx(§4.6) |
 | M14 | **实际 ROI（页面主指标）** | `roi_real(s)` | `(net_cash(s) − return_loss(s)) / spend(s)`（净现金/货损已由原币经固定汇率换算成 USD，spend 原生 USD，**同币相除无汇率因子**）；`spend=0` 或固定汇率配置缺失/异常 → `null` | 范围 | M13−M13b / M1 |
 | M15 | 单订单广告成本 | `cpa(s)` | `spend(s) / ad_orders(s)`（= M1/M2b，平台出单量口径） | 范围 | M1/M2b |
-| M16 | **订单结算金额（净现金权威口径，待 finance 落地）** | `settlement_net(s)` | `Σ` 有效销售订单的**每笔订单结算净额**（TikTok 结算单订单级净额，平台扣费/退款调整已含；**不做佣金等分项建模**——决策 3） | 按结算周期 | finance（§6.11） |
+| M16 | **订单结算金额（净现金权威口径，v7 已落地）** | `settlement_net(s)` | `Σ` 有效销售订单的**每笔订单 SETTLEMENT 净额**（TikTok 结算单订单级净额，平台扣费/退款调整已含；**v7 落地**：从 `finance.settlement_components` 取 `component_code='SETTLEMENT'`，通过 `finance.settlement_transactions.order_pk` 关联；不做佣金等分项建模——决策 3） | 按结算周期 | finance.settlement_components + finance.settlement_transactions |
 | M17 | **保本实际 ROI（每 SPU 动态线）** | `roi_breakeven(s)` | 见下方“保本线口径”：`NC′ ÷ (NC′ − COGS_kept − fee_est)`；`COGS_kept + fee_est ≥ NC′ → NULL`（结构性亏损，无保本线） | 范围 | 由 M13/M13b/M11/M5/M19 推导 |
-| M18 | **净利润（毛利口径，页面金额核心列）** | `net_profit(s)` | `net_cash(s) − COGS_all(s) − spend(s) − fee_est(s)`，`COGS_all = units_sold × 单位成本解析值`（全部售出件货本，含退回件——不再单扣 return_loss，避免重复）；**`net_profit ≥ 0 ⇔ roi_real ≥ roi_breakeven`（与 M17 同号）**；fee_est 见 M19（分层：已结算用实际、未结算按 r̂；净额已含部分不再单计） | 范围求和 | M13/M5/M6 + 成本解析 + M1 + M19 |
-| M19 | **平台佣金（渠道费用）** | `platform_fee(s)` | `已结算订单实际扣费(Σ\|fee_amount\|) + 未结算订单 sales × r̂`；`r̂` = 参考基线（Σ\|fee_amount\| / Σgross_sales_amount，**2026-09-05 去重实测 ≈ 11.6%**，页面可覆写输入 %）；解析 job 未上线前全按 r̂ 估（本期）；已结算部分用实际后不再估 | 范围 | M6 + 基线（§6.11） |
+| M18 | **净利润（毛利口径，页面金额核心列）** | `net_profit(s)` | `(Σ line_net_vnd / USD_VND) − ad_cost_usd − procurement_usd`；其中 `line_net_vnd = is_settled ? order_SETTLEMENT × line_gmv / order_gmv : line_gmv × (1 − 0.308)`，`procurement_usd = (units_sold + full_loss_cancelled_qty) × unit_cost × CNY_USD`（**2026-09-07 v7 关键改动**：净利润按"已结算 vs 未结算"分层算 — **已结算订单**用 `finance.settlement_components.SETTLEMENT`（卖家实际到账 VND，已扣完所有平台费 + 运费 + 联盟佣金 + 退款调整），按 line_gmv / order_gmv 比例分摊到各行；**未结算订单**按 `line_gmv × (1 − 30.8%)` 估算；v6 的 `COGS_all = (units_sold + full_loss_cancelled_qty) × unit_cost` 沿用；`is_settled` 判定 = `EXISTS (SELECT 1 FROM finance.settlement_transactions WHERE order_pk = sales_orders.id)`）；**`net_profit ≥ 0 ⇔ roi_real ≥ roi_breakeven`（与 M17 同号）**；**实测基线 35.9%**(v7 已结算订单验证)比 30.8% 高 5.1pp(联盟+运费+补贴),未来 finance job 落地后未结算部分应改用实测基线 | 范围求和 | finance.settlement_components + commerce + fx + 成本解析 |
+| M19 | **平台佣金基线（v7 DUAL-LAYER）** | `platform_fee(s)` | `r̂ × sales_unsettled(s)`（**2026-09-07 v7 改动**：已结算订单的扣费不再作为 M18 的输入——已隐含在 SETTLEMENT 净额里；本字段只剩"未结算订单 × 基线"部分；`r̂` = 参考基线（Σ\|fee_amount\| / Σgross_sales_amount，**2026-09-06 重定 ≈ 30.8%**（D10 旧值 11.6% 低估了联盟/运费等所有直接扣除，2026-09-06 重定实测 30.8%）；解析 job 上线后自动切换为已结算用实际、未结算按 r̂ 的双层结构）；页面可覆写输入 % | 范围 | M6(未结算子集) + 基线 |
 
-> 净现金两种口径：M13 = 订单行金额朴素估算（本期先上）；M16 = 每笔订单结算金额（落地后作为 net_cash 的**内部替代基础** → 净利润 M18 / 实际 ROI M14 / 保本 M17 的已结算部分自动含平台扣费/退款调整——此时**已结算部分不再单计 fee**（净额已含），未结算部分仍按参考基线 r̂ 计（M19 分层），避免重复扣）。两者差异 ≈ 平台扣费 ± 退款调整时差。
+> 净现金两种口径（v7 已统一到 M18）：M13 = 订单行金额朴素估算（不直接用，作内部中间量）；**M16 = 每笔订单 SETTLEMENT 净额（v7 已成为净利润的核心输入）**——已结算订单用 M16 当净收入，未结算订单用 `line_gmv × (1 − 30.8%)` 估算，二者按订单粒度逐笔加总。两者差异 ≈ 平台扣费 ± 退款调整时差。**v7 不再用 `net_cash − fee_est` 二次扣减**(避免重复扣)。
 
 **平台佣金（渠道费用）处理（D10：已结算按实际，未结算按基线）**：
 
@@ -263,10 +271,10 @@ SPU 无广告投放 → 广告列显示 0 与“无投放”文案（不隐藏�
 fee(SPU) = Σ 已结算订单的实际扣费（解析 view 按 order 汇总 |fee_amount|）
          + Σ 未结算订单 sales × r̂
 参考基线 r̂ = Σ|fee_amount| ÷ Σgross_sales_amount（已结算交易；作用域 = 当前窗口 + 店铺）
-           = 2026-09-05 去重实测 ≈ 11.6%
+           = 2026-09-05 去重实测 ≈ 30.8%
 ```
 
-- 本期（解析 job 未上线，无法区分已/未结算）：全按基线估 —— `platform_fee = sales × r̂`（≈11.6%），页面可覆写输入 %（M19）。（下文 M17/M18 公式中以 `fee_est` 作为该费用的代数简写，= M19 `platform_fee`。）
+- 本期（解析 job 未上线，无法区分已/未结算）：全按基线估 —— `platform_fee = sales × r̂`（≈30.8%，2026-09-06 重定；页面可覆写输入 %（M19）。（下文 M17/M18 公式中以 `fee_est` 作为该费用的代数简写，= M19 `platform_fee`。）
 - 解析 job 上线后：自动切“已结算 → 实际 fee_amount、未结算 → 基线 r̂”；同时 net_cash 基础切 M16 后，已结算订单的净额已含扣费，不再重复计 fee。
 - fee 只扣进 **净利润（M18）与保本线（M17）**；实际 ROI（M14）分子 NC′ 不含 fee（同 COGS_kept 的处理：扣减项体现在保本线判断上，红绿判据仍与净利润同号，见 §5.4-6）。
 
@@ -274,7 +282,7 @@ fee(SPU) = Σ 已结算订单的实际扣费（解析 view 按 order 汇总 |fee
 
 ```text
 记 NC′ = net_cash − return_loss            # 扣除退款与退回件货损后的净进账（USD）
-   COGS_kept = (units_sold − 全损退货件数) × 单位成本解析值(§4.2，人工优先/缺省 30 CNY) × CNY→USD fx   # 正常卖出件的货本
+   COGS_kept = (units_sold − 全损退货件数) × 单位成本解析值(§4.2，人工优先/缺省 40 CNY) × CNY→USD fx   # 正常卖出件的货本
 利润(毛利口径) = NC′ − COGS_kept − fee_est − 广告消耗           # fee_est = 平台佣金（M19/D10：已结算用实际、未结算按 r̂；净额已含扣费的部分不再单计）
 保本条件：利润 ≥ 0  ⇔  实际ROI(M14) ≥ roi_breakeven(M17)
 roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_est ≥ NC′ → 无解（结构性亏损）
@@ -282,8 +290,8 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
 ```
 
 - 推导自洽：M14 的分母就是 NC′，因此 `实际ROI ≥ 保本ROI ⇔ 利润 ≥ 0`，页面红/绿与盈亏同源，不会出现“红色却赚钱”。
-- 样例（§5.3 同款 SPU）：NC′=430.39 USD、COGS_kept=(27−4)×4.4322=101.94 USD、fee=sales 557.21×11.56%≈64.40 USD → `roi_breakeven = 430.39 ÷ (430.39−101.94−64.40) = 1.63`；实际 ROI 2.73 ≥ 1.63 → 绿。
-- **注（平台佣金/运费）**：费率 r̂ 默认 = 参考基线（≈11.6%，页面可覆写）；解析 job 上线后分层——已结算用实际 fee_amount（净额含扣费部分不再单计）、未结算仍按 r̂；卖家承担的退货运费待解析 job 落地后并入（§6.11/§9-3）。
+- 样例（§5.3 同款 SPU）：NC′=430.39 USD、COGS_kept=(27−4)×4.4322=101.94 USD、fee=sales 557.21×30.8%≈171.68 USD → `roi_breakeven = 430.39 ÷ (430.39−101.94−171.68) = 2.75`；实际 ROI 2.73 ≥ 1.63 → 绿。
+- **注（平台佣金/运费）**：费率 r̂ 默认 = 参考基线（≈30.8%，2026-09-06 重定；页面可覆写）；解析 job 上线后分层——已结算用实际 fee_amount（净额含扣费部分不再单计）、未结算仍按 r̂；卖家承担的退货运费待解析 job 落地后并入（§6.11/§9-3）。
 
 **退款金额归属规则（重要，防重不漏）**：
 0. **先按订单有效性分桶**：join `sales_orders.status` —— 白名单内订单的已完结退款 → M7/M8（按 case_type 分）；`CANCELLED` 订单 → M9（信息列）；`UNPAID/ON_HOLD` 等异常 → 防御性进「未归属」。**实测覆盖（2026-09-05，完结状态）**：净额桶金额 27/27 行齐全 → 行级金额直取即可、无需分摊；取消桶仅 27/246 行有金额 → M9 缺失行如实报「未知行数」，不从 case 级/占比去猜数。
@@ -328,8 +336,8 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
 
 ### 4.6 汇率换算（D1/D9：广告全 USD；本期固定汇率常量，在线机制挂起）
 
-- **决策（D9，2026-09-05）**：**不接在线汇率源**，统一使用**固定汇率常量**（放配置，可改）：`USD→VND = 26,330`、`CNY→USD = 0.14774`（**展示/四舍五入 0.1477；30 CNY/件 = $4.4322**；取数日 2026-09-05，来源越南银行卖出价 / investing / xe）。**改动常量 → 下次计算即时生效；不重算历史。**
-- **换算方向**：VND ÷ 26,330 → USD（销售/退款等）；CNY × 0.1477 → USD（货本）；CNY→VND 交叉值 ≈ 3,890 仅作核对。
+- **决策（D9，2026-09-05）**：**不接在线汇率源**，统一使用**固定汇率常量**（放配置，可改）：`USD→VND = 26,330`、`CNY→USD = 0.1488234`（**展示/四舍五入 0.148823；30 CNY/件 = $5.9096**；取数日 2026-09-05，来源越南银行卖出价 / investing / xe）。**改动常量 → 下次计算即时生效；不重算历史。**
+- **换算方向**：VND ÷ 26,330 → USD（销售/退款等）；CNY × 0.148823 → USD（货本）；CNY→VND 交叉值 ≈ 3,890 仅作核对。
 - **口径说明**：全页换算基于同一组固定常量，页面无需“取值时间”（meta 保留 `as_of` + `source=fixed-const` 供审计）。
 - **在线化（原 D1，挂起，后续方案）**：如需自动更新，按既有机制落地——sync-worker 定时取数 job（候选 open.er-api.com / Frankfurter 等主源+兜底源）→ 落 `reporting.fx_rates`（currency_pair/rate/fetched_at/source）→ 读路径零外网、失败保留上次值、过期标注。**本期不建 job、不建表**；届时固定常量退役。
 
@@ -361,27 +369,44 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
 | B 广告 | 平台出单 GMV（USD，归因） | `gmv_ad` | money-str | M3：`Σ order_value_total`；仅展示非回款 |
 | B 广告 | 平台 GMV ROI | `roi_l0` | ratio-str/null | M4：`gmv_ad/spend`；`spend=0 → null` |
 | B 广告 | 观测窗口 | `ad_first_day, ad_last_day` | date | 该 spu 的 `MIN(first_day)/MAX(last_day)`（meta 也给全局窗口） |
-| C 销售 | 有效销售订单数 | `order_count` | int | M5b：`COUNT(DISTINCT sales_orders.id)`（有效销售过滤 + `paid_at∈W`） |
+| C 销售 | 有效销售订单数 | `order_count` | int | M5b：`COUNT(DISTINCT sales_orders.id)`（状态口径 2026-09-06：白名单状态全部，含 COD 在途，COALESCE 窗口） |
 | C 销售 | 售出件数 | `units_sold` | int | M5：`Σ quantity`（同过滤） |
+| C 销售 | 取消订单数（主列） | `cancelled_order_count` | int | M5c：`COUNT(DISTINCT id)` status=CANCELLED（状态口径，含未收款取消） |
+| C 销售 | 销售(GMV 全单,主列) | `gmv_sales` | money-str | M6c：`sales + 取消原额` = 结余带 GMV 行级版 |
+| C 销售 | 取消率%（主列） | `cancel_rate` | ratio-str/null | M12b **v9**：`国内取消单量 ÷ (有效单量+国内取消单量)`；海外取消(38301)已入全损不重复计；分母 0 → null |
 | C 销售 | 销售金额（USD，原币 VND） | `sales` | money-str | M6：`Σ quantity × unit_price`（同过滤，原生 VND → ÷usd_vnd） |
 | D 退款 | 仅退款：件数/金额 | `refund_only_qty, refund_only_amount` | int/money | M7：已完结 REFUND_ONLY 且订单 ∈ 有效销售（金额 = case_lines 行级直取） |
 | D 退款 | 退货退款：件数/金额 | `refund_return_qty, refund_return_amount` | int/money | M8：已完结 RETURN_AND_REFUND 且订单 ∈ 有效销售（同上） |
 | D 退款 | 有效订单退款小计 | `refund_net_qty, refund_net_amount` | int/money | M10：M7+M8（**计入净现金的唯一退款桶**） |
-| D 退款 | 退款率 | `refund_rate` | ratio-str/null | M12：`refund_net_amount/sales`；`sales=0 → null` |
+| D 退款 | 退款率（金额口径,隐藏） | `refund_rate` | ratio-str/null | M12：`refund_net_amount/sales`；`sales=0 → null` |
+| D 退款 | 退货率%（主列,单量口径） | `refund_rate_qty` | ratio-str/null | M12c：`退货订单数(order∈白名单且有已完结净额退款 case 的行,行级归属) ÷ 有效单量`；`order_count=0 → null` |
 | D 退款 | 已付被取消订单退款（信息列） | `refund_cancelled_qty, refund_cancelled_amount, refund_cancelled_missing_lines` | int/money/int | M9：已完结 CANCELLATION/CANCEL 且订单=CANCELLED；`amount` = **已知行金额小计**，缺失行不造数 → `missing_lines` 上报（页面显示“另有 N 行金额未知”） |
-| E 实际 ROI | 退货货损（全损，USD） | `return_loss` | money-str | M13b：全损退货件数 × 单位成本解析值（人工优先，缺省 **30 CNY/件 ≈ $4.43**）→ 折 USD |
-| E 实际 ROI | 单件货本来源（成本解析结果） | `unit_cost_used, cost_source` | money/enum | §4.2：`cost_source` ∈ `MANUAL`（命中 manual_product_costs 有效行）/ `DEFAULT_K1`（默认 30 元）；**`DEFAULT_K1` → 页面该行 ⚠ + tooltip，可跳 manual-costs 页补录** |
-| E 实际 ROI | **净利润（毛利口径，页面金额核心列）** | `net_profit` | money-str | M18：`net_cash(内部) − units_sold×unit_cost_used − spend − platform_fee`；**负值红字**（与 roi<保本同号，§5.4-6）；M13 net_cash 仅内部不输出 |
-| E 实际 ROI | 平台佣金（渠道费用，⚙ 可选列） | `platform_fee` | money-str | M19：已结算实际扣费 + 未结算 `sales × r̂`（本期全按 r̂ ≈11.6% 估；页面可覆写）；解析上线后自动分层 |
-| E 实际 ROI | **实际 ROI（主指标）** | `roi_real` | ratio-str/null | M14：`(net_cash − return_loss) / spend`（全 USD 口径）；`spend=0` 或固定汇率配置缺失/异常 → `null` |
-| E 实际 ROI | 保本实际 ROI（每 SPU 动态线） | `roi_breakeven` | ratio-str/null | M17：`NC′ ÷ (NC′ − COGS_kept − fee_est)`；`COGS_kept + fee_est ≥ NC′ → null`（结构性亏损，无保本线） |
+| **E 实际 ROI** | 净收入（已结算 SETTLEMENT + 未结算折算） | **`net_revenue`** | **money-str** | **v8 新增（v7 DUAL-LAYER）：`Σ 已结算 SETTLEMENT 分摊 + Σ 未结算 line_gmv × (1−r̂) × (1−refund_rate_spu)`，USD；已结算部分 = `Σ (SETTLEMENT × line_gmv/order_gmv)`，未结算部分 = `line_gmv × 0.692 × (1−退款率_spu)`；是 `net_profit` 的输入** |
+| **E 实际 ROI** | 已结算 GMV（已结算订单的 line_gmv 之和） | **`settled_sales`** | **money-str** | **v8 新增：`SUM line_gmv WHERE settlement_vnd IS NOT NULL`** |
+| **E 实际 ROI** | 未结算 GMV（未结算订单的 line_gmv 之和） | **`unsettled_sales`** | **money-str** | **v8 新增：`SUM line_gmv WHERE settlement_vnd IS NULL`** |
+| **E 实际 ROI** | 已结算订单数 | **`settled_order_count`** | **int** | **v8 新增：`COUNT(DISTINCT order_pk) WHERE settlement_vnd IS NOT NULL`** |
+| **E 实际 ROI** | 全损件数（v9 口径） | **`full_loss_qty`** | **int** | **v9（2026-09-13 实现落地，替代 v8 的 38301∧(完结case∨CANCELLED)）：完结退货(RETURN_AND_REFUND/REFUND_ONLY，不论物流是否到海外) + 海外取消(CANCELLED∧38301) 件数；160（2026-09-07 实测）** |
+| **E 实际 ROI** | 其中海外取消件数（COGS 补扣基数） | **`full_loss_cancelled_qty`** | **int** | **v9：CANCELLED ∧ 38301 件数（= 全损中的取消桶；退货桶不含在内——退货件已含在 units_sold 里）** |
+| **E 实际 ROI** | 全损率% | **`full_loss_rate`** | **ratio-str/null** | **v9(D8 主列，标记「全损退款率%」)：`full_loss_qty ÷ (units_sold + full_loss_cancelled_qty)`；分母 0 → null；不钳位（>100% 标识数据异常需人工核查）；与 cancel_rate 互斥不重叠（M12b v9）** |
+| E 实际 ROI | 退货货损（全损，USD） | `return_loss` | money-str | **M13b v9：全损件数(M5d v9) × 单位成本解析值（人工标注价格 > 货源价 > 40 CNY 兜底，§4.2）= `full_loss_qty × unit_cost_used` → 折 USD** |
+| E 实际 ROI | 单件货本来源（成本链解析结果） | `unit_cost_used, cost_source` | money/enum | **v8 扩为三值：`cost_source ∈ 人工标注价格 / 货源价 / 默认兜底价格(40 CNY/件 ≈ $5.95)`，价格优先链 人工标注价格→货源价→默认兜底价格；**默认兜底价格 → 页面该行 ⚠ + tooltip，可跳 manual-costs 页补录** |
+| E 实际 ROI | **净利润（毛利口径，页面金额核心列）** | `net_profit` | money-str | **M18 v8：`net_revenue − (units_sold + full_loss_cancelled_qty) × unit_cost_used − spend`（**不**二次扣 fee：已结算订单费用已含在 SETTLEMENT 里，未结算订单费用由 `× (1−r̂)` 部分折算）；**负值红字**（与 roi<保本同号，§5.4-6）；M13 net_cash 已退役为内部中间量** |
+| E 实际 ROI | 平台佣金（渠道费用，信息列） | `platform_fee` | money-str | **M19 v8：`r̂ × unsettled_sales`（仅未结算部分，**不**再是 M18 输入）；已结算订单费用已内含在 SETTLEMENT 不再单计；页面可覆写 `fee_rate`** |
+| E 实际 ROI | **实际 ROI（主指标）** | `roi_real` | ratio-str/null | **M14 v8：`(net_revenue − return_loss) / spend`（全 USD 口径）；`spend=0` 或固定汇率配置缺失/异常 → `null`** |
+| E 实际 ROI | 保本实际 ROI（每 SPU 动态线） | `roi_breakeven` | ratio-str/null | **M17 v8：`NC′ ÷ (NC′ − COGS_kept)`**（fee_est 项移除：已结含在 NC 里，未结已按 `× (1−r̂)` 折算）；`COGS_kept ≥ NC′ → null`（结构性亏损，无保本线） |
 | E 实际 ROI | 单订单广告成本 | `cpa` | money-str/null | M15：`spend / ad_orders`；`ad_orders=0 → null`（○ 可选列） |
-| — 预留 | 订单结算金额 | — | — | M16：未输出（finance 归属落地后加列，见 §6.11） |
+| — 预留 | 订单结算金额 | `net_revenue` 部分使用 | — | M16：v8 已落地为 `net_revenue` 字段的已结算部分（SETTLEMENT 分摊） |
 
 > D 组列与旧版草案的“取消退款计入退款合计”**已作废**：取消桶 = 信息列（M9），净现金只减 M10。
 > **全表金额统一 USD（决策 D6）**：C/D/E 组金额均已是换算后的 USD（原生 VND/CNY 只存在于服务端中间量，见 §4.2 通用规则），不再有“物理分栏标币种”。
 
-### 5.3 端点 envelope 与样例行（实测数值，2026-09-05 窗口全量）
+### 5.3 端点 envelope 与样例行（v8 实测数值，**待 reconcile 后回填**）
+
+> v8 公式含 D2/D4/D5 三个新改动（D2 零值落库已落地、D4 M13b 切 38301、D5 未结按 SPU 退款率折算），
+> 净利/ROI/盈利 SPU 数等关键数字会与 v7 rubric 旧值（净利 −$2,266.87 等）不一致。实施步骤
+> `tech-doc/analytics/spu-roi-v7-refactor.md §8-6` 会用 v8 公式在生产库跑
+> `scripts/oneoff_roi_v7_reconcile.py` 出新基线 → 用户确认 → 写回本节替换占位。下例用 v7 旧值
+> 标"**待 reconcile 后回填**"。
 
 ```json
 {
@@ -391,33 +416,55 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
     "ad_count": 1, "ad_orders": 26, "spend": "157.4000", "gmv_ad": "472.9100",
     "roi_l0": "3.00", "ad_first_day": "2026-08-28", "ad_last_day": "2026-09-05",
     "order_count": 55, "units_sold": 27, "sales": "557.2078",
+    "net_revenue": "…",              // v8 新增:M18 输入 = 已结 SETTLEMENT 分摊 + 未结 × 0.692×(1−退款率)
+    "settled_sales": "…", "unsettled_sales": "…",  // v8 新增:已/未结 GMV 拆分
+    "settled_order_count": 51,        // v8 新增:已结订单数(示例占位)
+    "full_loss_qty": 4,               // v9:全损件数(完结退货不论物流 + 海外取消38301,本例 4 件)
+    "full_loss_cancelled_qty": 0,     // v9:其中海外取消(CANCELLED∧38301)件数
+    "full_loss_rate": "0.13",         // v9(D8 主列):full_loss_qty ÷ (units_sold + full_loss_cancelled_qty)
+    "domestic_cancelled_order_count": 3,   // v9 新增:国内取消单量(无 38301) → cancel_rate 分子
+    "overseas_cancelled_order_count": 0,   // v9 新增:海外取消单量(38301) → 已入全损,不进取消率
     "refund_only_qty": 1, "refund_only_amount": "19.5430",
     "refund_return_qty": 4, "refund_return_amount": "89.5445",
     "refund_net_qty": 5, "refund_net_amount": "109.0875", "refund_rate": "0.20",
     "refund_cancelled_qty": 37, "refund_cancelled_amount": "19.2912",
     "refund_cancelled_missing_lines": 36,
-    "net_profit": "106.6544",   // M18: net_cash(内部)448.12 − COGS_all 119.67 − 广告157.40 − 平台费用64.40(≈11.6%) = 赚
-    "platform_fee": "64.3965",  // M19: sales 557.21 × 11.56%（参考基线，见 meta.fee）
-    "return_loss": "17.7288",   // 4 件全损退货 × 30 CNY × 0.1477（占位 K1 ≈ $4.43/件，见 meta.cost_assumption）
-    "roi_real": "2.73", "roi_breakeven": "1.63", "cpa": "6.0538",
-    "unit_cost_used": "4.4322", "cost_source": "DEFAULT_K1"   // 本样例无人工成本 → 默认 30 元 → 页面 ⚠
+    "return_loss": "23.6752",         // v9 M13b = full_loss_qty 4 × cost 5.9188（待 reconcile 复核）
+    "net_profit": "…",                // v8 改 M18, 数字待 reconcile 后回填
+    "platform_fee": "…",              // v8 = r̂ × unsettled_sales 唯一来源(信息列,不入 M18)
+    "roi_real": "…", "roi_breakeven": "…", "cpa": "6.0538",
+    "unit_cost_used": "5.9188", "cost_source": "MANUAL"  // v8:示例命中人工标注
   }],
   "total": 111,
-  "totals": {"row_count": 111, "spend": "1414.7700", "sales": "…",
-              "refund_net_amount": "…", "net_profit": "…", "roi_real": "…"},   // 金额均为 USD(原币加总后一次换算);roi_real = Σ(net_cash−return_loss)/Σspend(服务端)
+  "totals": {"row_count": 111, "order_count": …, "cancelled_order_count": …, "total_orders": …,
+              "spend": "1414.7700", "sales": "…", "gmv": "…",
+              "refund_net_amount": "…", "return_loss": "…", "net_profit": "…", "roi_real": "…"},
   "meta": {
-    "fx": {"usd_vnd": "26330.0000", "cny_usd": "0.1477",   // 实现常量 0.14774（30 CNY≈$4.4322/件）
-          "as_of": "2026-09-05", "source": "fixed-const（在线机制挂起，§4.6）"},
-    "cost_assumption": "按 SPU 解析：人工成本(MANUAL)优先，无记录 → K1=30 CNY/件 ≈ $4.43/件（本样例 DEFAULT_K1，页面 ⚠）",
-    "fee": {"mode": "baseline", "rate": "0.1156", "override": null, "note": "平台佣金=全部直接扣除(抽佣/联盟/运费类)；已结算按实际，未结算按基线；解析上线后自动分层"},
-    "window": {"first_day": "2026-08-28", "last_day": "2026-09-05", "note": "ad=视图全窗口累计(供参考)；销售/退款=全历史(未裁剪，可传 w_start/w_end)"},
+    "fx": {"usd_vnd": "26001.8860", "cny_usd": "0.1488",   // v8: 9-7 在线快照
+          "as_of": "2026-09-07", "source": "fx-cache"},
+    "cost_assumption": "成本链：MANUAL(人工标注的采购成交价) → PURCHASE(妙手采购单成交价) → SOURCE_PRICE(1688 货源价) → DEFAULT_K1(40 CNY/件 ≈ $5.95)；DEFAULT_K1 行页面 ⚠",
+    "fee": {"mode": "baseline", "rate": "0.308", "override": null, "note": "v8: 仅作用于未结算订单 (r̂ × unsettled_sales)；已结算订单费用已内含在 SETTLEMENT 不再单计"},
+    "window": {"first_day": "…", "last_day": "…", "note": "ad=视图全窗口累计(供参考)；销售/退款=全历史(可传 w_start/w_end)"},
+    "rubric_version": "v9",        // 口径漂移一眼定位(v9:全损=完结退货+海外取消,取消率只计国内取消)
     "unattributed_refund_lines": 66,
     "computed_at": "…", "currency": {"display": "USD", "native": {"ad": "USD", "sales_refund": "VND", "cost": "CNY"}}
   }
 }
 ```
 
-样例对账（同一 SPU，金额已统一 USD）：`L0 = 472.91/157.40 = 3.00`（平台口径，好看）；`实际 ROI = (448.12 − 17.73)/157.40 = 2.73`（17.73 = 4 件全损退货 × 30 CNY × 0.1477）。L0→实际的差距 = 平台归因 GMV（含自然单）≠ ERP 有效销售 + 有效订单退款 109.09 USD + 全损货本 17.73 USD。保本线校验：`COGS_kept = (27−4) 件 × 4.4322 = 101.94 USD`、`platform_fee = 557.21×11.56% = 64.40 USD` → `roi_breakeven = 430.39 ÷ (430.39−101.94−64.40) = 1.63`，实际 2.73 ≥ 1.63 → 绿（赚）。净利润校验：`net_profit = net_cash(内部) 448.12 − COGS_all 119.67 − 广告 157.40 − 平台费用 64.40 = +106.65 USD ≥ 0` —— 净利润为负 ⇔ 实际 ROI < 保本（§5.4-6），两条判断同号。
+样例对账逻辑（口径描述不变；具体值待 reconcile）：
+
+- **L0** = `gmv_ad/spend`（平台归因，好看）
+- **净收入 M18 输入**：`Σ SETTLEMENT 分摊 + Σ 未结 line_gmv × (1−r̂) × (1−refund_rate_spu)`
+- **实际 ROI M14** = `(net_revenue − return_loss) / spend`
+- **M13b 货本 v9**：`full_loss_qty × unit_cost`（v9 全损 = 完结退货不论物流 + 海外取消 38301，本例 4 件 × 5.9188 = 23.6752）
+- **净利润 M18 v8** = `net_revenue − (units_sold + full_loss_cancelled_qty) × unit_cost − spend`（**不**再扣 platform_fee——已结费用含 SETTLEMENT、未结按 (1−r̂) 折算）
+- **保本线 M17 v8**：`NC′ ÷ (NC′ − COGS_kept)`（fee_est 项移除，分母仅剩货本）
+- **红绿判据**：`net_profit ≥ 0 ⇔ roi_real ≥ roi_breakeven`（M17 fee_est 移除后恒等式仍成立）
+
+> **待 reconcile 后回填**：本节示例数字（return_loss 23.6752、unit_cost 5.9188、settled_order_count 51 等）为占位估算。
+> 实施步骤 §8-6 跑 `scripts/oneoff_roi_v7_reconcile.py`（建议改名为 `..._reconcile_v8.py`）出生产库实测新基线，
+> 用户确认后写回本节替换占位；rubric v8 的"净利 −$2,266.87"等旧值作废。
 
 ### 5.4 对齐不变式（端点单测 + 对账脚本断言）
 
@@ -506,7 +553,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 
 | 验证项 | 结果 | 结论 |
 | --- | --- | --- |
-| 样例 SPU 1736929955366339831 全链可算 | 广告(1 计划, spend 157.40 USD, GMV 472.91, L0=3.00) × 有效销售(55 单/27 件/557.21 USD) × 退款(净额 109.09 USD；取消已知 19.29+缺失 36 行) → **净现金(内部) 448.12 − 货本 119.67 − 广告 157.40 − 平台费用 64.40 → 净利润 106.65 USD → 实际 ROI 2.73 / 保本 1.63** | 输出列全部能按 §5.2 计算，金额统一 USD；净利润含平台费用（基线 ≈11.6%） |
+| 样例 SPU 1736929955366339831 全链可算 | 广告(1 计划, spend 157.40 USD, GMV 472.91, L0=3.00) × 有效销售(55 单/27 件/557.21 USD) × 退款(净额 109.09 USD；取消已知 19.29+缺失 36 行) → **净现金(内部) 448.12 − 货本 119.67 − 广告 157.40 − 平台费用 64.40 → 净利润 106.65 USD → 实际 ROI 2.73 / 保本 1.63** | 输出列全部能按 §5.2 计算，金额统一 USD；净利润含平台费用（基线 ≈30.8%） |
 | 净额桶金额覆盖 | 完结状态 27 case/27 line，金额 **27/27（100%）** | M7/M8 行级金额直取即可，无需分摊造数 |
 | 取消桶金额覆盖 | 完结状态可归行 236 case/246 line，仅 27 行有金额（缺 219；另 14 个取消 case 无行可归 → 计入未归属） | M9 必须“已知金额+缺失行数”双字段（§5.2） |
 | 未归属规模 | 完结状态 66 条 case line 无法落到 spu（无 line 键或行无 spu） | meta `unattributed_refund_lines` + 页脚提示必需 |
@@ -639,7 +686,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 | `currency` / `cost_method` | text | 币种（VND）/ 成本法 | 标注 |
 | `calculation_version` / `calculated_at` | int/ts | 版本（重算增量保留旧版） | 取最新版本 |
 
-### 6.10 成本链（本期 K1 = 30 CNY/件 占位；成本页上线后切换真实值）
+### 6.10 成本链（本期 K1 = 40 CNY/件 占位；成本页上线后切换真实值）
 
 **`procurement.manual_product_costs`**（人工成本录入，生产仅 2 行）
 
@@ -668,7 +715,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 > `purchase_orders / purchase_order_lines` **0 行**（妙手采购单未同步/未跑），故“最新采购价”成本源不可用；
 > coverage 端点 `GET /v2/reporting/missing-cost-products` 即“无成本 SPU”清单（页面可链过去）。
 
-> **本期口径（决策 4/6 + 2026-09-05 成本解析确认）**：单位成本**按 SPU 解析**——① 命中 `procurement.manual_product_costs` 有效行（`valid_to IS NULL`，每 SPU 一条）→ 用录入值（**人工表保证人民币 CNY** → CNY→USD fx，`cost_source=MANUAL`）；② 未命中 → **默认 K1 = 30 CNY/件**（`cost_source=DEFAULT_K1`）→ 页面该行 ⚠ 提示并可跳 manual-costs 补录。货损 M13b / 保本 COGS_kept 共用同一解析值；同一公式只换“unit_cost 来源”。现网人工成本仅 2 行 → 绝大多数 SPU 本期显示 ⚠（默认 30 元），属预期。
+> **本期口径（决策 4/6 + 2026-09-05 成本解析确认）**：单位成本**按 SPU 解析**——① 命中 `procurement.manual_product_costs` 有效行（`valid_to IS NULL`，每 SPU 一条）→ 用录入值（**人工表保证人民币 CNY** → CNY→USD fx，`cost_source=MANUAL`）；② 未命中 → **默认 K1 = 40 CNY/件**（`cost_source=DEFAULT_K1`）→ 页面该行 ⚠ 提示并可跳 manual-costs 补录。货损 M13b / 保本 COGS_kept 共用同一解析值；同一公式只换“unit_cost 来源”。现网人工成本仅 2 行 → 绝大多数 SPU 本期显示 ⚠（默认 40 元），属预期。
 
 ### 6.11 `finance.settlement_*` + 结算归属解析 job/view —— M16 数据底座（净现金权威口径；解析已排期 D7）
 
@@ -681,7 +728,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 
 > 决策 3（净现金口径）：以每笔订单结算净额 M16 为准、不做手工费用分项建模；D10 补充过渡层 —— **平台费用 = 已结算实际 fee_amount + 未结算 sales × r̂**（见 §4.2 M19）。
 > 现状：结构化表未解析，原始 59 列（含 fee_amount / 退货运费 / 佣金）已在 raw_records，可经 order_id → 订单 → case → lines(spu) 归属（2026-09-05 验证 5/5 命中 RETURN_AND_REFUND）；**解析 job + view 已排期（D7）**。
-> 落地前：净现金(M13, 内部) 用 sales − refund_net 预估，净利润/保本按「未含真实平台扣费（按费率基线 ≈11.6% 估）」口径并标注。
+> 落地前：净现金(M13, 内部) 用 sales − refund_net 预估，净利润/保本按「未含真实平台扣费（按费率基线 ≈30.8% 估）」口径并标注。
 
 **退货运费承担判定（2026-09-05 数据探查）**：
 
@@ -699,7 +746,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 - 输入：`integration.raw_records` `…/statement_transactions`（59 列），按 `payload->>'id'` 去重（同一交易会被多次抓取重复入库）。
 - 输出：结构化表（按 order_pk 归属，含 settlement_amount / gross_sales_amount / platform_commission_amount / return_shipping_fee_amount / refund 系列等，不再只留 settlement_amount 一个 component）+ **只读 view**（如 `finance.v_settlement_order`；模式参照 `analytics.ad_product_links`：DB 层 view、无 HTTP 端点、端点只读 view）。
 - 归属链：`payload->>'order_id'` → `commerce.sales_orders` → `after_sales.cases`（退货/运费按 case）→ case_lines → spu_pk；多 SPU 订单按订单行金额占比分摊到 SPU。
-- 参考基线：`r̂ = Σ|fee_amount| ÷ Σgross_sales_amount`（已结算交易级；作用域 = 当前窗口 + 店铺；2026-09-05 去重实测 ≈ **11.6%**）。
+- 参考基线：`r̂ = Σ|fee_amount| ÷ Σgross_sales_amount`（已结算交易级；作用域 = 当前窗口 + 店铺；2026-09-06 重定实测 ≈ **30.8%**（D10 重定，2026-09-05 旧值 11.6% 低估联盟/运费等直接扣除））。
 
 **费用字段字典（2026-09-05 实测，已结算交易去重后）：**
 
@@ -721,14 +768,14 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 
 | 配置项 | 默认值 | 影响口径 | 决策/出处 |
 | --- | --- | --- | --- |
-| `K1` 单位货本（**仅作未命中人工成本时的默认**） | **30 CNY/件 ≈ $4.43/件** | 货损 M13b / COGS_kept（M17）；命中人工成本时不用它 | D4；解析见 §4.2 |
+| `K1` 单位货本（**仅作未命中人工成本时的默认**） | **30 CNY/件 ≈ $5.95/件** | 货损 M13b / COGS_kept（M17）；命中人工成本时不用它 | D4；解析见 §4.2 |
 | 及格线（心理线，不标红） | 1.5（可关） | 浅橙标注 | §7.2 |
 | 退款率警戒线 | 30% | ⚠ + 红字 | §7.2 |
 | 广告回本线（实际 ROI < 1.0） | 1.0 | 更深红（红底浅字） | §7.2 |
-| 汇率（固定常量，D9） | **USD→VND = 26,330 / CNY→USD = 0.14774**（展示 0.1477；30 CNY ≈ $4.4322/件；2026-09-05，配置可改） | 全表金额换算 / 净利润 / 保本 / ROI | §4.6 |
+| 汇率（固定常量，D9） | **USD→VND = 26,330 / CNY→USD = 0.1488234**（展示 0.148823；40 CNY ≈ $5.9522/件；2026-09-05，配置可改） | 全表金额换算 / 净利润 / 保本 / ROI | §4.6 |
 | 日期窗口(端点参数,2026-09 review 补) | **默认不传 = 销售/退款全历史累计**;可选 `w_start`/`w_end`(ISO 日期)裁剪(销售 paid_at / 退款 updated_at_source);ad 无日期参数,恒整窗累计 | 行/合计同筛选 | §4.5/§5.1-6 |
 | 行范围 | 有活动 SPU；可选 `include_all` | 空行金额全 0 | §5.1-7 |
-| 平台佣金费率 r̂ | **参考基线 ≈11.6%（Σ\|fee_amount\|/Σgross，含抽佣/联盟/运费等全部直接扣除；页面可覆写 %；无结算样本 → 0 并标注）** | 保本 M17 / 净利润 M18 的 platform_fee（M19） | D10；解析上线后已结算部分自动用实际值 |
+| 平台佣金费率 r̂ | **参考基线 ≈30.8%（Σ\|fee_amount\|/Σgross，含抽佣/联盟/运费等全部直接扣除；页面可覆写 %；无结算样本 → 0 并标注）** | 保本 M17 / 净利润 M18 的 platform_fee（M19） | D10；解析上线后已结算部分自动用实际值 |
 
 > 这些只影响**显示 / 换算策略 / 标色**，不改变底层原币口径定义（§4.2）。
 
@@ -740,28 +787,62 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 
 ```text
 ┌ [tts-erp]  SPU 实际 ROI ── 数据截至 2026-09-05（ad 窗口 08-28 ~ 09-05 全量）────┐
-│ 结余带:  N 个 SPU · 消耗 $x · 销售 $x · 退款 $x · 货损 $x · 净利润 $x        │
-│         · 整体实际 ROI n        （全表 USD · 固定汇率 D9 · 09-05）        │
+│ 结余带:  总览(总单量/广告消耗) · 有效(单量/销售额) · 退款(数/率)          │
+│          · 全损(量/率) · 取消(量/率) · 利润(净利润/实际ROI) · 保本(双ROI) │
+│          （Bootstrap 分组卡自适应；每格带 ? 口径气泡；金额统一 USD）       │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ [🔍 搜索 spu_id…] [店铺▾] [日期▾] [列开关⚙] [保本线=动态] [及格线▾1.5(可关)]  默认排序: 实际ROI↑ │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│  商品        │ 广告          │ 销售（有效单）   │ 退款               │ 净/ROI                     │
-│ 图·spu_id·标题│广告数│消耗│平台GMV│ROI₀│有效单│件数│销售$│仅退│退货退款$│退款率│净利润$│货损$│保本│实际ROI│
-│ 1736… Áo…   │  1  │157.40│472.91│3.00│ 55 │ 27 │557.21│…│109.09  │19.6%│106.65│17.73│1.63│ 2.73 │
-│ 1736… 爆退品  │  4  │312.00│…   │3.80│ 90 │ 98 │930.50│…│372.20  │40.0%│−295.66│44.32│1.90│0.85  │ ← 红边：净利润<0（ROI 0.85<保本 ≈1.9）
+│  商品        │ 广告      │ 销售        │ 退款    │ 取消/比率            │ 净/ROI                       │
+│ 图·spu_id·标题│广告数│消耗USD│销售$│有效销售$│退货$│取消单量│取消率│退货率│全损退款$│净利润$│实际ROI│保本ROI│
+│ 1736… Áo…   │  1  │157.40│557.21│529.01│109.09│  5  │ 9.1% │11.8% │ 17.73 │106.65│ 2.73  │ 1.63  │
+│ 1736… 爆退品  │  4  │312.00│930.50│880.10│372.20│ 12  │11.8% │12.5% │ 44.32 │−295.66│ 0.85  │ 1.90  │ ← 红边：净利润<0（ROI 0.85<保本 ≈1.9）
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ ← 上一页  p/M  下一页 →   每页 100 条                                        │
 └─────────────────────────────────────────────────────────────────────────────┘
-[提示行] “全表 USD（原币 VND/CNY 服务端换算）· N 个 SPU 使用默认 30 元/件成本(⚠) · 已付被取消退款 N 行金额未知 · 未归属退款 N 行”
+[提示行] “全表 USD（原币 VND/CNY 服务端换算）· N 个 SPU 使用默认 40 元/件成本(⚠) · 已付被取消退款 N 行金额未知 · 未归属退款 N 行”
 [警告 chip] GMV Max 归因含自然单、数据滞后修正 —— 广告列仅供对照，实际 ROI 以 ERP 侧为准
 ```
+
+**结余带 14 格口径（2026-09-29 Bootstrap 重构：7 个两指标业务组，量/额或量/率始终同组；全部带 `?` 气泡，数值来自 `totals`）**：
+
+响应式只依赖 Bootstrap 5 断点与工具类：
+
+- 页头使用 `container-fluid + row + col-*`，手机纵向堆叠、桌面同行；
+- 结余带使用 `row-cols-1/2/3/4`，每个业务组内部固定 `row-cols-2`，不会把成对指标拆散；
+- 筛选栏使用 `col-12/6/3/...` 自适应，不再由自定义 media query 计算宽度；
+- 主表和钻取表统一放进 `table-responsive`，所有列保留，以横向滚动代替按 `nth-child` 隐藏；
+- 钻取指标、P&L 分层、分页、页脚和店铺弹窗均使用 Bootstrap 栅格/工具类。
+
+
+> 单一口径：**行级与 totals 都按下单订单状态计（COD 店下单即算，不看 paid_at）**。
+> 有效订单 = 白名单状态（含 COD 在途/待收款）；取消订单 = 全部 CANCELLED（含未收款取消）。
+> GMV 再含取消单原额。金额主指标（净利润/ROI）自动跟随状态口径 sales——
+> 注意 COD 在途单未回款前数字偏乐观，回款后（状态推进/妥投）自然收敛。
+
+| 格 | 数值来源 | 口径 |
+| --- | --- | --- |
+| 总单量 | `totals.total_orders` | 有效订单 + 取消订单；当前店铺和日期范围内按订单去重 |
+| 广告消耗 | `totals.spend` | M1：选中日期窗口内广告消耗累计，USD |
+| 有效单量 | `totals.effective_order_count` | 有效订单数减去退款订单数 |
+| 有效销售 | `totals.effective_sales` | 有效订单金额减去退款净额；已结算按实际到账，未结算按基线估算 |
+| 退款数 | `totals.refund_order_count` | 已完结退款 case 关联的有效订单数，按订单去重 |
+| 退款率 | `totals.refund_rate` | 退款数 ÷ 总单量 |
+| 全损量 | `totals.full_loss_order_count` | 退款订单数 + 海外取消订单数 |
+| 全损率 | `totals.full_loss_rate` | 全损量 ÷ 总单量 |
+| 取消量 | `totals.domestic_cancelled_order_count` | 国内取消订单数；海外取消已计入全损，不重复计入 |
+| 取消率 | `totals.cancel_rate` | 国内取消量 ÷ 总单量 |
+| 净利润 | `totals.net_profit` | M18：净收入 − 货本（含全损）− 广告消耗，USD；负值标红 |
+| 实际 ROI | `totals.roi_real` | M14；Σspend=0 → `—` |
+| 实际保本 ROI | `totals.roi_breakeven` | 净利润为 0 时的 ROI 临界值；无解 → `—` |
+| 广告系统保本 ROI | `totals.ad_system_breakeven_roi` | 公式未定时状态为 `formula_pending`，页面显示 `—` |
 
 ### 7.2 标色与阈值（默认值，页面 ⚙ 可调，不锁死）
 
 | 情形 | 默认阈值（可调） | 视觉 |
 | --- | --- | --- |
 | 实际 ROI < 保本ROI（该 SPU 动态线 M17） | 结构亏损线（**默认主红判**） | 整行浅红边 + ROI 红字；显示“实际 x.xx < 保本 y.yy” |
-| 使用默认成本（`cost_source=DEFAULT_K1`） | — | 标题旁/货损列 ⚠ + tooltip“无人工成本记录，按默认 30 元/件计算”，可点跳 manual-costs 补录 |
+| 使用默认成本（`cost_source=DEFAULT_K1`） | — | 标题旁 ⚠ + tooltip“无人工成本记录，按默认 40 元/件计算，可去 manual-costs 补录”（提示性文案，无直达跳转） |
 | 实际 ROI < 1.0 | 广告回本线（实际 ROI < 1.0 = 连广告费都带不回） | 更深红（红底浅字），置顶视觉更重 |
 | 实际 ROI ≥ 保本 但 < 及格线 | **1.5**（心理及格线，⚙ 可调/可关） | 浅橙标注，不标红 |
 | 退款率 > 警戒线 | **30%** | 商品标题旁 ⚠ + 退款率红字 |
@@ -777,35 +858,37 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 
 ### 7.4 展示细节（数字格式 / 口径标注）
 
-- 金额：服务端下发 USD 字符串 → 前端千分位 `$`（2 位小数）；货损列头随行标注单件成本来源（人工价 MANUAL，或 `默认 30元/件 ≈ $4.43 ⚠`）；件数整数；ROI 2 位、退款率百分比显示。
+- 金额：服务端下发 USD 字符串 → 前端千分位 `$`（2 位小数）；货损单元格 hover 标注单件成本来源（人工价 MANUAL，或 `默认 30元/件 ≈ $5.95 ⚠`）；件数整数；ROI 2 位、退款率百分比显示。
 - **换算单点**：换算只发生在服务端输出层一次（先原币加总再换，§4.2/§4.6）；页面拿到即 USD，不做二次换算；fx 取值时间随 meta 展示（合计带旁一行小字）。
-- 列开关 ⚙：整组收/展（如“已付被取消（信息列）”“平台出单量(ad_orders)/单订单成本(cpa)”默认折叠，想看再开；平台 GMV 默认显示，对齐 §7.1 骨架）。
+- 列开关 ⚙（2026-09-06 重组）：主列 = 用户清单 12 项(见 §7.5)；隐藏组 = 广告归因对照(cg-adref:平台GMV归因/ROI₀)、订单结构(cg-structure:有效单/件数)、仅退/退货拆分、取消明细、平台佣金——默认折叠，想看再开。
 - 顶部提示行 + 结余带随筛选实时刷新；每页 100（上限 500 走 v2 分页约定）。
-- 移动端：表格 `overflow-x:auto` + 最小列宽；生产机器以桌面为准。
+- 移动端（2026-09-06 重构）：布局走 Bootstrap 5.3.8 栅格/工具类 —— 结余带
+  xs 2 / sm 3 / md 4 / lg 5 列（两行）降密度、工具栏 flex-wrap 纵向堆叠、列开关折叠进 `<details>`；表格
+  `.table-responsive` + `max-height` 双轴滚动框（表头在框内吸顶、首列横向溢出时吸左，
+  不限断点），小屏按断点 nth-child 裁掉次要列（≤575 裁 广告数/取消率/退货率/保本ROI，
+  576–991 裁 取消率/退货率）降低横滚量；列开关信息列（§7.5）全尺寸可用。
 
 ### 7.5 列可见性默认（⚙ 开关分组）
 
 | 分组 / 列 | 默认 | 说明 |
 | --- | --- | --- |
 | 商品：图 / spu_id / 标题 / 状态 | 显示 | 标题 ellipsis + hover 全文 |
-| 店铺 / 观测窗口 | 折叠 | ⚙ 可开 |
-| 广告：广告数 / 消耗 / ROI₀ | 显示 | L0 仅供对照 |
-| 广告：平台GMV | 显示 | 默认可见，对齐 §7.1 定稿骨架（页首/行内与 ROI₀ 同组对照） |
-| 广告：平台出单量(ad_orders) / 单订单成本(cpa) | 折叠 | 信息列，⚙ 可开 |
-| 销售：有效单 / 件数 / 销售$ | 显示 | |
-| 退款：净额小计 / 退款率 | 显示 | |
-| 退款：仅退 / 退货退款拆分、已付被取消（含 unknown 行数） | 折叠 | 钻取 tab 内可见；“另有 N 行金额未知”提示行保留在页脚 |
-| 净/ROI：**净利润$** / 货损$ / 保本 / 实际ROI | 显示 | 主区域（净现金收入不展示；净利润负值红字，与红绿判据同号；平台费用（渠道费用）为 ⚙ 可选列） |
+| **主列(2026-09-06 用户清单)**：广告数 / 消耗 USD / 销售$ / 有效销售$ / 退货$ / 取消单量 / 取消率% / 退货率% / 全损退款$ / 净利润$ / 实际ROI / 保本ROI | 显示 | 口径与结余带一致：销售$=GMV 全单(有效+取消原额)、有效销售$=白名单、退货$=净退款、取消率=取消/(有效+取消)、退货率=退货订单数÷有效单量(单量口径) |
+| ⚙ 广告归因对照(cg-adref)：平台GMV(归因) / ROI₀ | 折叠 | 广告侧对照列(2026-09-06 从主列移入隐藏组) |
+| ⚙ 订单结构(cg-structure)：有效单 / 件数 | 折叠 | 2026-09-06 新增隐藏组 |
+| ⚙ 仅退/退货拆分(cg-refundsplit)：仅退件/$、退货件/$ | 折叠 | 钻取信息 |
+| ⚙ 取消明细(cg-cancel)：取消件 / 取消退款$ / 金额未知行 | 折叠 | “另有 N 行金额未知”提示行保留在页脚 |
+| ⚙ 平台佣金(cg-fee) | 折叠 | 渠道费用 |
 
 > 折叠列仍参与排序与合计，只是不占横向空间。
-> 成本 ⚠ 不占独立列：凡 `cost_source=DEFAULT_K1` 的行在标题旁 + 货损列头显示 ⚠，tooltip 文案见 §7.2，点击可跳 `/v2/pages/manual-costs` 补录。
+> 成本 ⚠ 不占独立列：凡 `cost_source=DEFAULT_K1` 的行在标题旁显示 ⚠，tooltip 文案见 §7.2（提示可去 `/v2/pages/manual-costs` 补录，页面无直达跳转链接）。
 
 ### 7.6 状态、文案与交互细则
 
 - **加载**：首载表格 skeleton；筛选/翻页只刷新数据区与结余带（局部更新）。
 - **错误态**：5xx/超时 → 表格区留白 + “加载失败 · 重试”；401 → 跳 login（沿用 console.js 的 fetch 401 处理）；403 → “无权限查看”。
 - **空态**：搜索无结果 → “没有匹配该 spu_id 的 SPU（试试完整 ID）”；全窗口无任何活动 → “所选窗口暂无广告/销售/退款记录”。
-- **口径 tooltip**（列头 hover 一句话，含 M# + 公式摘要 + 币种说明）：例：净利润 = “(净现金收入(内部) − 全部售出件货本) − 广告消耗 − 平台费用（已结算按实际、未结算按参考基线，页面可覆写）（USD）；≥ 0 = 赚，< 0 = 亏”；实际ROI = “净利润 ≥ 0 ⇔ ≥ 保本线”；货损 = “全损退货件数 × 单位成本解析值（默认 30元/件 ≈ $4.43，可改）”。
+- **口径 tooltip**（列头 hover 一句话，含 M# + 公式摘要 + 币种说明）：例：净利润 = “(净现金收入(内部) − 全部售出件货本) − 广告消耗 − 平台费用（已结算按实际、未结算按参考基线，页面可覆写）（USD）；≥ 0 = 赚，< 0 = 亏”；实际ROI = “净利润 ≥ 0 ⇔ ≥ 保本线”；货损 = “全损退货件数 × 单位成本解析值（默认 30元/件 ≈ $5.95，可改）”。
 - **排序次级键**：实际 ROI 升序遇同值时按 广告消耗降序 排（结果可复现）。
 - **刷新**：手动刷新按钮；进页/切窗口/改配置后重拉；不做自动轮询（报表型数据，避免跳动）。
 - **键盘/a11y**：可见 focus、sticky thead + `scope`、结余带与加载态 `aria-live`、行内展开按钮可 Tab 到、`prefers-reduced-motion` 关闭过渡。
@@ -823,9 +906,9 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 | 广告消耗/出单（B 组） | ✅ | ad_raw 7,754 行；视图 337 对（228 广告 / 111 SPU）；窗口 08-28~09-05；其中 106 SPU 能带出 spu_pk | M1–M4 可算 |
 | 销售（C 组） | ✅ | 870 单 / 907 行全 VND；**有效销售订单（白名单，口径 B）625 单**；679/907 行有 spu_pk（其余靠 snapshot，见 §6.4 兜底） | M5/M6 可算 |
 | 退款（D 组） | ⚠️ 部分 | 281 case：取消 250（可归行 236 → M9 信息列）/ 退货退款 30 / 仅退款 1；**完结金额覆盖：净额桶 27/27、取消桶 27/246**；未归属 66 行 | M7–M12 可算：净额桶金额齐全直取；取消桶缺失行如实报 unknown（§5.2/§5.6） |
-| 净利润（M18）/ 实际 ROI（M14） | ✅ | M18 = net_cash(M13, 内部) − 售出货本 − 广告消耗 − 平台费用（费率基线 ≈11.6%，M19）；M14 = (net_cash − 货损) ÷ 消耗（**金额统一 USD**，固定汇率 D9：26,330 / 0.1477） | 净利润/实际 ROI/保本本期即可算（固定汇率 + 费率基线） |
-| 订单结算金额（M16）/ 退货运费 | 🔶 解析 job 已排期（D7） | raw 59 列已含 order_id 与 fee_amount / 退货运费 / 佣金等；`finance.settlement_*` 结构化解析 + view 排期中 | 落地前：净利润/保本用 M13 + 平台费用基线（M19 ≈11.6%）预估并标注；落地后按实际自动变准 |
-| 货物成本（货损 M13b） | ⚠️ 人工优先+默认 | 人工成本**现网仅 2 行**；解析 = 命中 `manual_product_costs` 有效行 → MANUAL，未命中 → **默认 30 CNY/件（DEFAULT_K1）** | 货损可算；DEFAULT_K1 的行页面 ⚠ 并可跳 manual-costs 补录（§4.2/§7.2） |
+| 净利润（M18）/ 实际 ROI（M14） | ✅ | M18 = net_cash(M13, 内部) − 售出货本 − 广告消耗 − 平台费用（费率基线 ≈30.8%，M19）；M14 = (net_cash − 货损) ÷ 消耗（**金额统一 USD**，固定汇率 D9：26,330 / 0.148823） | 净利润/实际 ROI/保本本期即可算（固定汇率 + 费率基线） |
+| 订单结算金额（M16）/ 退货运费 | 🔶 解析 job 已排期（D7） | raw 59 列已含 order_id 与 fee_amount / 退货运费 / 佣金等；`finance.settlement_*` 结构化解析 + view 排期中 | 落地前：净利润/保本用 M13 + 平台费用基线（M19 ≈30.8%）预估并标注；落地后按实际自动变准 |
+| 货物成本（货损 M13b） | ⚠️ 人工优先+默认 | 人工成本**现网仅 2 行**；解析 = 命中 `manual_product_costs` 有效行 → MANUAL，未命中 → **默认 40 CNY/件（DEFAULT_K1）** | 货损可算；DEFAULT_K1 的行页面 ⚠ 并可跳 manual-costs 补录（§4.2/§7.2） |
 | profit_daily | ⚠️ | 1,509 行 VND（08-31~09-05）；cogs/profit/fees/refunds 全 NULL | 只复用 units/gross_revenue |
 
 **结论：P0 页面的“消耗(USD) / 销售(有效销售订单，口径 B) / 退款件数 / 退款金额(净额+信息列分桶、缺失兜底) / 净利润 M18（净现金 M13 为内部中间量）/ 全损货损 M13b / 实际 ROI M14 / 保本线 M17”本期全部可做（固定汇率 D9 → M14/M17/M18 本期即可算）；M16 结算口径与退货运费扣项依赖 finance 归属**解析 job**（解析 job 已排期，D7，见 §6.11/§9-3）。**
@@ -835,8 +918,8 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 ## 9. 数据缺口与阻塞项（诚实清单）
 
 1. ~~**币种不统一（主指标换算阻塞）**~~ → **已解决（2026-09-05 拍板）**：广告账户币种 = USD，销售/退款 = VND；跨币换算走**在线最新汇率**（机制见 §4.6）。唯一残留 = 汇率是**外部在线依赖**，需 job + 落库 + 失败/过期降级（机制已定，属实施项，不再是口径阻塞）。
-2. **货物成本：按 SPU 解析——人工成本优先，未命中才默认 30 CNY/件（已解，不再阻塞）**：现网人工成本仅 2 行（快照/采购单近空）。2026-09-05 确认解析顺序：① `manual_product_costs` 有效行（valid_to IS NULL）→ 用录入值（MANUAL）；② 未命中 → 默认 K1=30 CNY/件（DEFAULT_K1）并**页面 ⚠ 提示（可跳 manual-costs 补录）**。命中率低 → 多数 SPU 显示 ⚠ 属预期；成本页铺开后自动切真实值。成本币种 CNY → USD 走在线汇率（§4.6 已含 CNY/USD 币对）。
-3. **每笔订单结算金额（M16）→ 解析 job 已排期（D7，2026-09-05）**：数据源已定位（`integration.raw_records` 的 `/finance/…/statement_transactions` 59 列 + 自带 order_id，交易级 `fee_amount` = 平台总扣除，与分项自洽）。交付 = finance 归属解析 job + 只读 view（§6.11 规格）。**落地前**：净利润/保本以 M13 + 平台费用基线（M19 ≈11.6%）预估并标注口径；**落地后**：已结算订单用实际 fee、未结算用基线 r̂，M16 净额基础启用后已结算部分不再单扣，均自动变准。
+2. **货物成本：按 SPU 解析——人工成本优先，未命中才默认 40 CNY/件（已解，不再阻塞）**：现网人工成本仅 2 行（快照/采购单近空）。2026-09-05 确认解析顺序：① `manual_product_costs` 有效行（valid_to IS NULL）→ 用录入值（MANUAL）；② 未命中 → 默认 K1=40 CNY/件（DEFAULT_K1）并**页面 ⚠ 提示（可跳 manual-costs 补录）**。命中率低 → 多数 SPU 显示 ⚠ 属预期；成本页铺开后自动切真实值。成本币种 CNY → USD 走在线汇率（§4.6 已含 CNY/USD 币对）。
+3. **每笔订单结算金额（M16）→ 解析 job 已排期（D7，2026-09-05）**：数据源已定位（`integration.raw_records` 的 `/finance/…/statement_transactions` 59 列 + 自带 order_id，交易级 `fee_amount` = 平台总扣除，与分项自洽）。交付 = finance 归属解析 job + 只读 view（§6.11 规格）。**落地前**：净利润/保本以 M13 + 平台费用基线（M19 ≈30.8%）预估并标注口径；**落地后**：已结算订单用实际 fee、未结算用基线 r̂，M16 净额基础启用后已结算部分不再单扣，均自动变准。
 4. **取消退款金额大面积缺失（M9 信息列精度受限）**：完结状态取消桶 246 行仅 27 行有金额（缺 219）；净额桶 27/27 齐全不受影响。处理：M9 输出「已知金额小计 + 缺失行数」如实上报，**不造数**；如需要精确取消退款额，走 `integration.raw_records` 反查 cancellation payload 的 refund_amount blob（P2）。另有完结状态 66 条 case line 无法归属 SPU（无 line 键/行无 spu）→ meta `unattributed_refund_lines` 页脚提示。
 5. **广告归因非纯广告增量**：GMV Max 归因含自然单，且 TikTok 数据有滞后/回滚修正（已退订单在广告侧可能隔天才剔除）。页面只标警告，不做修正。
 6. **广告消耗无“截止某日”精确口径**：ad_product_links 全窗口累计（§4.5），自定义日期范围会口径错位——默认窗口方案规避。
@@ -863,15 +946,15 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 
 **已拍板（2026-09-05）**：
 
-1. **币种与汇率（D9 更新）**：广告全部按 USD；跨币换算**本期用固定汇率常量**（USD→VND=26,330 / CNY→USD=0.1477，配置可改，§4.6）；在线汇率（原 D1）挂起。
+1. **币种与汇率（D9 更新）**：广告全部按 USD；跨币换算**本期用固定汇率常量**（USD→VND=26,330 / CNY→USD=0.148823，配置可改，§4.6）；在线汇率（原 D1）挂起。
 2. **销售口径 = 口径 B**：排除 CANCELLED（含已付后被取消的单），排除后即**有效销售订单**（白名单见 §4.1）——销售金额/件数全以它为基数；已付被取消订单的退款进 M9 信息列，**不扣净额**，避免“没算过的销售又被扣一遍”。
 3. **不建模平台佣金/运费手工分项（决策 3，净现金口径）**：净现金权威口径 = **每笔订单结算金额**（净额，M16，含平台扣费与退款调整）；解析 job 已排期（D7）；未落地前用 M13（sales − refund_net）预估，并以费率基线补偿平台费用（D10，见已拍板 9）。
-4. **退货 = 全损口径；单位成本 = 人工成本优先**：RETURN_AND_REFUND 已完结即全损（实测 26/26 妥投后退、货退不回）；每件货损 M13b = 全损件数 × 单位成本解析值（命中 `manual_product_costs` 用真实 CNY 价，未命中默认 30 CNY ≈ $4.43 并 ⚠）；**实际 ROI（M14）= (净现金(内部) − 全损货损) ÷ 广告消耗（全 USD）**。命中人工成本即自动换真实值，公式不变。
+4. **退货 = 全损口径；单位成本 = 人工成本优先**：RETURN_AND_REFUND 已完结即全损（实测 26/26 妥投后退、货退不回）；每件货损 M13b = 全损件数 × 单位成本解析值（命中 `manual_product_costs` 用真实 CNY 价，未命中默认 40 CNY ≈ $5.95 并 ⚠）；**实际 ROI（M14）= (净现金(内部) − 全损货损) ÷ 广告消耗（全 USD）**。命中人工成本即自动换真实值，公式不变。
 5. **页面样式 = 方案 A 账页式（D5）**（2026-09-05）：沿用操作台家族（米白+砖红+mono）；默认排序实际 ROI 升序；**红绿判据 = 实际 ROI vs 该 SPU 保本线（M17，动态）**，广告回本线（实际 ROI<1.0）/ 退款率警戒 30% 为辅（⚙ 可调）；点行行内展开订单/售后/广告三 tab。UI 定稿见 §7。
 6. **全表金额统一 USD 展示（D6）**：不再分 USD/VND 栏——VND（销售/退款金额）÷ USD→VND、CNY（货本 30 元）× CNY→USD 均在服务端输出层一次换算；底层计算保持原币防舍入；固定汇率常量随配置（D9，见 §4.6/§3.4）。
 7. **页面不展示净现金收入（2026-09-05）**：净现金收入(M13) 仅作内部中间量；金额核心列 = **净利润（毛利口径，M18）**（负值红字），与 ROI/保本判据同号（§5.4-6）。
 8. **结算归属解析 job + view 排期（D7）**：把 59 列结算 raw 解析为按订单/行/case 归属的结构化数据并建只读 view（§6.11 规格），作为 M16 数据底座与佣金参考基线的来源。
-9. **保本线/净利润扣除平台佣金（D10）**：平台佣金 = 平台从销售额直接扣除的全部费用（抽佣/联盟/运费类等；单笔总扣 = 交易级 `fee_amount`）。**已结算订单 → 实际扣费；未结算订单 → sales × 参考基线 r̂**（Σ\|fee_amount\|/Σgross，实测 ≈11.6%），页面可覆写输入 %；解析上线后自动分层。
+9. **保本线/净利润扣除平台佣金（D10）**：平台佣金 = 平台从销售额直接扣除的全部费用（抽佣/联盟/运费类等；单笔总扣 = 交易级 `fee_amount`）。**已结算订单 → 实际扣费；未结算订单 → sales × 参考基线 r̂**（Σ\|fee_amount\|/Σgross，实测 ≈30.8%），页面可覆写输入 %；解析上线后自动分层。
 
 **剩余实施级小问题（不阻塞需求定稿，方案评审时定）**：
 

@@ -1,0 +1,778 @@
+"""plugin.* — Chrome 插件 dump 解析后的结构化业务表（10 张）。
+
+订单/物流/结算（7 张）：
+  orders + order_lines + shipments + tracking_events
+  + settlements + settlement_details
+
+售后（2 张，2026-09-13 feat/after-sales-table 建）：
+  after_sales + after_sale_items
+
+广告消耗 + 插件日志（4 张，2026-09-11 由 analytics schema 并入）：
+  ad_today + ad_daily + ad_monthly + ad_raw_log + plugin_logs
+
+数据来源：Chrome 扩展从 TikTok Seller Center 抓取的 HTTP 响应，
+通过 /v2/order-sync/dumps 端点写入并直接解析为结构化数据落库
+（不再写原始 dump body，2026-09-17 chore/deprecate-plugin-raw-log
+Phase 3 移除 plugin.raw_log 表）。
+
+详见 tech-doc/chrome-ext-order-sync-design.md。
+"""
+
+from __future__ import annotations
+
+from datetime import date, datetime
+from decimal import Decimal
+
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    Text,
+    UniqueConstraint,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, mapped_column
+
+from tts_erp_v2.db.base import Base
+
+
+# ── orders ─
+# 订单头，来自 order/list 响应。
+class ChromeOrder(Base):
+    __tablename__ = "orders"
+    __table_args__ = (
+        UniqueConstraint("shop_id", "order_id", name="uq_orders_shop_order"),
+        Index("ix_orders_shop", "shop_id"),
+        Index("ix_orders_status", "main_order_status"),
+        {"schema": "plugin"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    shop_id: Mapped[str] = mapped_column(Text, nullable=False)
+    order_id: Mapped[str] = mapped_column(Text, nullable=False)
+    main_order_status: Mapped[int | None] = mapped_column(Integer)
+    sku_display_status: Mapped[int | None] = mapped_column(Integer)
+    currency: Mapped[str | None] = mapped_column(Text)
+    payment_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    total_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    fulfillment_type: Mapped[int | None] = mapped_column(Integer)
+    pay_method: Mapped[str | None] = mapped_column(Text)
+    sale_region: Mapped[str | None] = mapped_column(Text)
+    order_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    latest_rts_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    latest_tts_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    buyer_nickname: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+# ── order_lines ─────────────────────────────────────────────────────
+# 订单行（SKU 级），来自 order/list 的 sku_module/fulfill_line_module。
+class ChromeOrderLine(Base):
+    __tablename__ = "order_lines"
+    __table_args__ = (
+        UniqueConstraint(
+            "shop_id", "order_id", "sku_id", name="uq_order_lines_order_sku"
+        ),
+        {"schema": "plugin"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    shop_id: Mapped[str] = mapped_column(Text, nullable=False)
+    order_id: Mapped[str] = mapped_column(Text, nullable=False)
+    sku_id: Mapped[str] = mapped_column(Text, nullable=False)
+    product_id: Mapped[str | None] = mapped_column(Text)
+    product_name: Mapped[str | None] = mapped_column(Text)
+    variant_name: Mapped[str | None] = mapped_column(Text)
+    image_url: Mapped[str | None] = mapped_column(Text)
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    unit_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    total_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    currency: Mapped[str | None] = mapped_column(Text)
+    main_order_status: Mapped[int | None] = mapped_column(Integer)
+    sku_display_status: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+# ── shipments ───────────────────────────────────────────────────────
+# 物流包裹，来自 logistic_detail/list 的 package_list[]。
+class ChromeShipment(Base):
+    __tablename__ = "shipments"
+    __table_args__ = (
+        UniqueConstraint("shop_id", "package_id", name="uq_shipments_shop_pkg"),
+        Index("ix_shipments_order", "shop_id", "order_id"),
+        {"schema": "plugin"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    shop_id: Mapped[str] = mapped_column(Text, nullable=False)
+    order_id: Mapped[str] = mapped_column(Text, nullable=False)
+    package_id: Mapped[str] = mapped_column(Text, nullable=False)
+    tracking_number: Mapped[str | None] = mapped_column(Text)
+    carrier_name: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str | None] = mapped_column(Text)
+    shipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+# ── tracking_events ─────────────────────────────────────────────────
+# 物流轨迹事件，来自 logistic_detail/list 的 track_list[]。
+class ChromeTrackingEvent(Base):
+    __tablename__ = "tracking_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "shop_id",
+            "package_id",
+            "event_key",
+            name="uq_tracking_events_pkg_key",
+        ),
+        {"schema": "plugin"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    shop_id: Mapped[str] = mapped_column(Text, nullable=False)
+    package_id: Mapped[str] = mapped_column(Text, nullable=False)
+    event_key: Mapped[str] = mapped_column(Text, nullable=False)
+    action_code: Mapped[int | None] = mapped_column(Integer)
+    event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    description: Mapped[str | None] = mapped_column(Text)
+    location: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+# ── settlements ─────────────────────────────────────────────────────
+# 结算单头，来自 statement/list/detail。
+class ChromeSettlement(Base):
+    __tablename__ = "settlements"
+    __table_args__ = (
+        UniqueConstraint(
+            "shop_id",
+            "statement_id",
+            "statement_version",
+            name="uq_settlements_shop_stmt",
+        ),
+        Index("ix_settlements_shop", "shop_id"),
+        {"schema": "plugin"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    shop_id: Mapped[str] = mapped_column(Text, nullable=False)
+    statement_id: Mapped[str] = mapped_column(Text, nullable=False)
+    statement_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    bill_period: Mapped[str | None] = mapped_column(Text)
+    period_start: Mapped[date | None] = mapped_column(Date)
+    period_end: Mapped[date | None] = mapped_column(Date)
+    settlement_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    settlement_id: Mapped[str | None] = mapped_column(Text)
+    payment_id: Mapped[str | None] = mapped_column(Text)
+    payment_status: Mapped[str | None] = mapped_column(Text)
+    statement_type: Mapped[int | None] = mapped_column(Integer)
+    payment_pending_reason: Mapped[int | None] = mapped_column(Integer)
+    settle_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    earning_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    fee_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    adjust_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    payable_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    shipping_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    total_reserve_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    currency: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+# ── settlement_details ──────────────────────────────────────────────
+# SKU 级结算明细 + 费用拆分，来自 statement/transaction/detail。
+class ChromeSettlementDetail(Base):
+    __tablename__ = "settlement_details"
+    __table_args__ = (
+        UniqueConstraint(
+            "shop_id", "sku_detail_id", name="uq_settlement_details_shop_sku"
+        ),
+        Index("ix_settlement_details_stmt", "shop_id", "statement_id"),
+        {"schema": "plugin"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    shop_id: Mapped[str] = mapped_column(Text, nullable=False)
+    statement_id: Mapped[str] = mapped_column(Text, nullable=False)
+    statement_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    sku_detail_id: Mapped[str] = mapped_column(Text, nullable=False)
+    trade_order_id: Mapped[str | None] = mapped_column(Text)
+    sku_id: Mapped[str | None] = mapped_column(Text)
+    product_name: Mapped[str | None] = mapped_column(Text)
+    sku_name: Mapped[str | None] = mapped_column(Text)
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    settlement_status: Mapped[str | None] = mapped_column(Text)
+    placed_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    settlement_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    earning_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    fees_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    currency: Mapped[str | None] = mapped_column(Text)
+    fee_components: Mapped[dict | None] = mapped_column(JSONB)
+    seller_web_cut_flow: Mapped[bool | None] = mapped_column(Boolean)
+    seller_app_cut_flow: Mapped[bool | None] = mapped_column(Boolean)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+# ── after_sales ─────────────────────────────────────────────────────
+# 售后/退款结构化数据，来自 /return_refund/202309/cancellations/search。
+# tech-doc/order-domain-business-rules.md §3 + tech-doc/dumps-data-contract.md §1 / §3
+class ChromeAfterSale(Base):
+    __tablename__ = "after_sales"
+    __table_args__ = (
+        UniqueConstraint(
+            "shop_id", "cancel_id", name="uq_after_sales_shop_cancel"
+        ),
+        Index("ix_after_sales_shop_order", "shop_id", "main_order_id"),
+        {"schema": "plugin"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    shop_id: Mapped[str] = mapped_column(Text, nullable=False)
+    cancel_id: Mapped[str] = mapped_column(Text, nullable=False)
+    cancel_type: Mapped[str] = mapped_column(Text, nullable=False)
+    cancel_status: Mapped[str] = mapped_column(Text, nullable=False)
+    main_order_id: Mapped[str | None] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
+    request_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    complete_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    raw_payload: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+# ── after_sale_items ───────────────────────────────────────────────
+# 售后/退款行项目（cancel_line_items[]），SKU 级粒度，支持部分取消。
+class ChromeAfterSaleItem(Base):
+    __tablename__ = "after_sale_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "shop_id", "line_item_id", name="uq_after_sale_items_shop_line"
+        ),
+        Index("ix_after_sale_items_shop_cancel", "shop_id", "cancel_id"),
+        Index(
+            "ix_after_sale_items_shop_order_line",
+            "shop_id",
+            "order_line_item_id",
+        ),
+        {"schema": "plugin"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    shop_id: Mapped[str] = mapped_column(Text, nullable=False)
+    cancel_id: Mapped[str] = mapped_column(Text, nullable=False)
+    line_item_id: Mapped[str] = mapped_column(Text, nullable=False)
+    order_line_item_id: Mapped[str | None] = mapped_column(Text)
+    sku_id: Mapped[str | None] = mapped_column(Text)
+    product_id: Mapped[str | None] = mapped_column(Text)
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    refund_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    currency: Mapped[str | None] = mapped_column(Text)
+    raw_payload: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+# ── order_details ──────────────────────────────────────────────────────
+# 订单全量详情，来自 order/get 响应（独立于 plugin.orders，不复用）。
+class ChromeOrderDetail(Base):
+    __tablename__ = "order_details"
+    __table_args__ = (
+        UniqueConstraint("shop_id", "order_id", name="uq_order_details_shop_order"),
+        Index("ix_order_details_shop", "shop_id"),
+        {"schema": "plugin"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    shop_id: Mapped[str] = mapped_column(Text, nullable=False)
+    order_id: Mapped[str] = mapped_column(Text, nullable=False)
+    # trade_order_module
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    payment_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    pay_method: Mapped[str | None] = mapped_column(Text)
+    sale_region: Mapped[str | None] = mapped_column(Text)
+    fulfillment_type: Mapped[int | None] = mapped_column(Integer)
+    latest_rts_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    latest_tts_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    close_sla_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # price_module
+    sub_total: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    grand_total: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    shipping_fee: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    platform_discount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    seller_discount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    origin_sale_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    shipping_origin_fee: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    shipping_fee_discount_seller: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    shipping_fee_discount_platform: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    currency: Mapped[str | None] = mapped_column(Text)
+    promotion_infos: Mapped[dict | None] = mapped_column(JSONB)
+    # buyer_info_module
+    buyer_nickname: Mapped[str | None] = mapped_column(Text)
+    buyer_address: Mapped[dict | None] = mapped_column(JSONB)
+    # reverse_module（退货摘要，取第一条）
+    reverse_status: Mapped[int | None] = mapped_column(Integer)
+    reverse_type: Mapped[int | None] = mapped_column(Integer)
+    reverse_reason: Mapped[str | None] = mapped_column(Text)
+    reverse_order_id: Mapped[str | None] = mapped_column(Text)
+    cancelled_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # delivery_module（物流摘要）
+    tracking_number: Mapped[str | None] = mapped_column(Text)
+    warehouse_id: Mapped[str | None] = mapped_column(Text)
+    warehouse_name: Mapped[str | None] = mapped_column(Text)
+    warehouse_region: Mapped[str | None] = mapped_column(Text)
+    buyer_region: Mapped[str | None] = mapped_column(Text)
+    logistics_service_name: Mapped[str | None] = mapped_column(Text)
+    logistics_service_level: Mapped[str | None] = mapped_column(Text)
+    carrier_name: Mapped[str | None] = mapped_column(Text)
+    carrier_id: Mapped[str | None] = mapped_column(Text)
+    # pkg_attr
+    weight_value: Mapped[str | None] = mapped_column(Text)
+    weight_unit: Mapped[int | None] = mapped_column(Integer)
+    dimension_length: Mapped[str | None] = mapped_column(Text)
+    dimension_width: Mapped[str | None] = mapped_column(Text)
+    dimension_height: Mapped[str | None] = mapped_column(Text)
+    dimension_unit: Mapped[int | None] = mapped_column(Integer)
+    # order_status_module
+    main_order_status: Mapped[int | None] = mapped_column(Integer)
+    main_sub_order_status: Mapped[int | None] = mapped_column(Integer)
+    sku_display_status: Mapped[int | None] = mapped_column(Integer)
+    # raw
+    raw_payload: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+# ── order_timeline ─────────────────────────────────────────────────────
+# 订单状态变更时间线，来自 order/history 响应。
+class ChromeOrderTimeline(Base):
+    __tablename__ = "order_timeline"
+    __table_args__ = (
+        UniqueConstraint(
+            "shop_id", "order_id", "event_index",
+            name="uq_order_timeline_shop_order_idx",
+        ),
+        Index("ix_order_timeline_shop_order", "shop_id", "order_id"),
+        {"schema": "plugin"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    shop_id: Mapped[str] = mapped_column(Text, nullable=False)
+    order_id: Mapped[str] = mapped_column(Text, nullable=False)
+    event_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    detail: Mapped[str | None] = mapped_column(Text)
+    raw_payload: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+# ── 广告消耗 dump（原 tts_erp_v2/db/models/analytics.py，2026-09-11 并入）───
+# 表已在 plugin schema：ad_today / ad_daily / ad_monthly / ad_raw_log / plugin_logs
+
+
+# ad_today ────────────────────────────────────────────────────────────
+# 今天实时表（30s ON CONFLICT DO UPDATE 刷新，跨天固化到 ad_daily 后清空）。
+# 结构和 ad_daily 完全一致，唯一区别是用途（实时 vs 历史可校准）。
+# tech-doc/analytics/daily-sync-with-coverage.md §1.1
+class AdToday(Base):
+    __tablename__ = "ad_today"
+    __table_args__ = (
+        Index(
+            "uq_ad_today",
+            "seller_id",
+            "advertiser_id",
+            "endpoint",
+            "campaign_id",
+            "product_id",
+            "day",
+            unique=True,
+        ),
+        Index(
+            "idx_ad_today_coverage",
+            "seller_id",
+            "advertiser_id",
+            "endpoint",
+            "campaign_id",
+            "day",
+        ),
+        {"schema": "plugin"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    seller_id: Mapped[str] = mapped_column(Text, nullable=False)
+    advertiser_id: Mapped[str] = mapped_column(Text, nullable=False)
+    campaign_id: Mapped[str] = mapped_column(Text, nullable=False)
+    product_id: Mapped[str] = mapped_column(Text, nullable=False)
+    endpoint: Mapped[str] = mapped_column(Text, nullable=False)
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+    mixed_real_cost: Mapped[float | None] = mapped_column(Numeric(20, 4))
+    onsite_roi2_shopping_sku: Mapped[int | None] = mapped_column(BigInteger)
+    onsite_roi2_shopping_value: Mapped[float | None] = mapped_column(Numeric(20, 4))
+    onsite_mixed_real_roi2_shopping: Mapped[float | None] = mapped_column(
+        Numeric(20, 4)
+    )
+    metrics_extra: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+# ad_daily ────────────────────────────────────────────────────────────
+# 天级结构化表（历史数据按自然键 upsert，允许 TikTok 延迟归因后的校准）。
+# tech-doc/analytics/daily-sync-with-coverage.md §1.2
+class AdDaily(Base):
+    __tablename__ = "ad_daily"
+    __table_args__ = (
+        Index(
+            "uq_ad_daily",
+            "seller_id",
+            "advertiser_id",
+            "endpoint",
+            "campaign_id",
+            "product_id",
+            "day",
+            unique=True,
+        ),
+        Index(
+            "idx_ad_daily_coverage",
+            "seller_id",
+            "advertiser_id",
+            "endpoint",
+            "campaign_id",
+            "day",
+        ),
+        Index("idx_ad_daily_product_day", "product_id", "day"),
+        {"schema": "plugin"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    seller_id: Mapped[str] = mapped_column(Text, nullable=False)
+    advertiser_id: Mapped[str] = mapped_column(Text, nullable=False)
+    campaign_id: Mapped[str] = mapped_column(Text, nullable=False)
+    product_id: Mapped[str] = mapped_column(Text, nullable=False)
+    endpoint: Mapped[str] = mapped_column(Text, nullable=False)
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+    mixed_real_cost: Mapped[float | None] = mapped_column(Numeric(20, 4))
+    onsite_roi2_shopping_sku: Mapped[int | None] = mapped_column(BigInteger)
+    onsite_roi2_shopping_value: Mapped[float | None] = mapped_column(Numeric(20, 4))
+    onsite_mixed_real_roi2_shopping: Mapped[float | None] = mapped_column(
+        Numeric(20, 4)
+    )
+    metrics_extra: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+# ad_monthly ──────────────────────────────────────────────────────────
+# 月级结构化表（独立同步，不依赖 daily；TikTok API 传月初/月末返回月级聚合）。
+# tech-doc/analytics/daily-sync-with-coverage.md §1.3
+class AdMonthly(Base):
+    __tablename__ = "ad_monthly"
+    __table_args__ = (
+        Index(
+            "uq_ad_monthly",
+            "seller_id",
+            "advertiser_id",
+            "endpoint",
+            "campaign_id",
+            "product_id",
+            "year_month",
+            unique=True,
+        ),
+        Index(
+            "idx_ad_monthly_coverage",
+            "seller_id",
+            "advertiser_id",
+            "endpoint",
+            "campaign_id",
+            "year_month",
+        ),
+        {"schema": "plugin"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    seller_id: Mapped[str] = mapped_column(Text, nullable=False)
+    advertiser_id: Mapped[str] = mapped_column(Text, nullable=False)
+    campaign_id: Mapped[str] = mapped_column(Text, nullable=False)
+    product_id: Mapped[str] = mapped_column(Text, nullable=False)
+    endpoint: Mapped[str] = mapped_column(Text, nullable=False)
+    year_month: Mapped[str] = mapped_column(Text, nullable=False)
+    mixed_real_cost: Mapped[float | None] = mapped_column(Numeric(20, 4))
+    onsite_roi2_shopping_sku: Mapped[int | None] = mapped_column(BigInteger)
+    onsite_roi2_shopping_value: Mapped[float | None] = mapped_column(Numeric(20, 4))
+    onsite_mixed_real_roi2_shopping: Mapped[float | None] = mapped_column(
+        Numeric(20, 4)
+    )
+    metrics_extra: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+# ad_raw_log ──────────────────────────────────────────────────────────
+# 原始请求日志（kind CHECK: daily/today/monthly）。纯日志表，不参与业务查询。
+# 保留原始 request/response 用于调试、审计、数据恢复；建议 retention 90 天自动清理。
+# tech-doc/analytics/daily-sync-with-coverage.md §1.4
+class AdRawLog(Base):
+    __tablename__ = "ad_raw_log"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('daily', 'today', 'monthly')",
+            name="ck_ad_raw_log_kind",
+        ),
+        Index("idx_ad_raw_log_day", "day"),
+        Index("idx_ad_raw_log_request_id", "request_id"),
+        {"schema": "plugin"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    seller_id: Mapped[str] = mapped_column(Text, nullable=False)
+    advertiser_id: Mapped[str] = mapped_column(Text, nullable=False)
+    endpoint: Mapped[str] = mapped_column(Text, nullable=False)
+    campaign_id: Mapped[str | None] = mapped_column(Text)
+    product_id: Mapped[str | None] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    day: Mapped[date | None] = mapped_column(Date)
+    year_month: Mapped[str | None] = mapped_column(Text)
+    request_url: Mapped[str] = mapped_column(Text, nullable=False)
+    request_method: Mapped[str] = mapped_column(Text, nullable=False)
+    request_body: Mapped[dict | None] = mapped_column(JSONB)
+    response_status: Mapped[int | None] = mapped_column(Integer)
+    response_body: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    request_id: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str | None] = mapped_column(Text)
+
+
+# plugin_logs ────────────────────────────────────────────────────────
+# 插件端日志上传表（Chrome 扩展运行时日志）。
+# migration 0019；所有读写走 tts_erp_v2/plugin/ads/repository.py（raw SQL）。
+class PluginLog(Base):
+    __tablename__ = "plugin_logs"
+    __table_args__ = (
+        CheckConstraint(
+            "level IN ('info', 'warn', 'error')",
+            name="ck_plugin_logs_level",
+        ),
+        Index("idx_plugin_logs_seller_time", "seller_id", "occurred_at"),
+        Index("idx_plugin_logs_level", "level", "occurred_at"),
+        Index("idx_plugin_logs_plugin_name", "plugin_name"),
+        {"schema": "plugin"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    seller_id: Mapped[str] = mapped_column(Text, nullable=False)
+    advertiser_id: Mapped[str] = mapped_column(Text, nullable=False)
+    plugin_version: Mapped[str] = mapped_column(Text, nullable=False)
+    plugin_name: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
+    level: Mapped[str] = mapped_column(Text, nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    context: Mapped[dict | None] = mapped_column(JSONB)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+        onupdate=text("now()"),
+    )
+
+
+class CampaignOptLog(Base):
+    """广告操作日志表（campaign_opt_log_list）。
+
+    记录推广计划的操作变更历史（谁在什么时间改了什么）。
+    数据来源：Chrome 扩展同步 TikTok /oec_ads/shopping/v1/oec/stat/campaign_opt_log_list。
+    """
+
+    __tablename__ = "campaign_opt_logs"
+    __table_args__ = (
+        Index("idx_campaign_opt_logs_seller_time", "seller_id", "opt_time"),
+        Index("idx_campaign_opt_logs_campaign", "campaign_id"),
+        {"schema": "plugin"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    seller_id: Mapped[str] = mapped_column(Text, nullable=False)
+    advertiser_id: Mapped[str] = mapped_column(Text, nullable=False)
+    log_id: Mapped[str] = mapped_column(
+        Text, nullable=False, unique=True
+    )  # TikTok 操作日志 ID
+    campaign_id: Mapped[str] = mapped_column(Text, nullable=False)  # object_id
+    user: Mapped[str | None] = mapped_column(Text)  # 操作人
+    opt_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    object_type: Mapped[str | None] = mapped_column(Text)  # 如 "推广系列"
+    object_raw_type: Mapped[str | None] = mapped_column(Text)  # 如 "4"
+    activity_details: Mapped[dict | None] = mapped_column(JSONB)  # 变更详情数组
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+        onupdate=text("now()"),
+    )
+
+
+__all__ = [
+    # 订单/物流/结算
+    "ChromeOrder",
+    "ChromeOrderLine",
+    "ChromeShipment",
+    "ChromeTrackingEvent",
+    "ChromeSettlement",
+    "ChromeSettlementDetail",
+    # 广告消耗 + 插件日志
+    "AdToday",
+    "AdDaily",
+    "AdMonthly",
+    "AdRawLog",
+    "PluginLog",
+    # 广告操作日志
+    "CampaignOptLog",
+]

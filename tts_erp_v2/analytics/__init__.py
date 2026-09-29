@@ -1,10 +1,17 @@
-"""tts_erp_v2.analytics — Chrome extension (tk-adv-cost-monitor) analytics ingest 领域包。
+"""tts_erp_v2.analytics — 广告/ROI 看板读侧。
 
-2026-09-02 v2 化（tech-doc/analytics-v2-migration-plan.md）：从仓库根的
-``analytics_sync/`` 孤岛包迁入 v2 体系：
+⚠ 命名历史：本包保留 ``analytics`` 名称，原因是 ``/v2/analytics/sync/*``
+URL 前缀是 Chrome 扩展的 stable 契约（AGENTS.md §9.1），路由文件
+``api/v2/analytics.py`` 与之同名，本包作为读侧模块沿用同一命名。
+实际数据全部在 ``plugin`` schema（``plugin.ad_today`` 等），本包只读不写。
 
-- ``domain.py``     —— 纯类型 + 幂等键推导（协议契约代码，零逻辑平移）
-- ``repository.py`` —— 存储层（SQLAlchemy session 工厂，schema = analytics.ad_*）
+ingest（写入）侧已于 2026-09-11 迁到 ``tts_erp_v2/plugin/ads/``
+（原 ``analytics/domain.py`` + ``repository.py``），schema 从 ``analytics.*``
+收敛为 ``plugin.*`` —— 插件数据与 API 同步数据（``commerce.*`` 等）物理隔离。
 
-HTTP handler 在 ``tts_erp_v2/api/v2/analytics.py``（/v2/analytics/sync/*）。
+本包只保留**读侧**逻辑：
+
+- ``spu_profitability`` —— v10 SPU 盈利 deep module；拥有 PostgreSQL 查询、
+  归一化、公式、一致快照与盈利证据。
+- ``spu_roi.py`` —— 历史稳定 URL 的薄 HTTP adapter；只做参数与 wire 格式。
 """

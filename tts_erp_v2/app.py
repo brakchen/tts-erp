@@ -29,30 +29,55 @@ All other routes go through v2 routers and require auth.
 
 from __future__ import annotations
 
+import base64
+import os
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
 
 from tts_erp_v2.api.v2 import (
     admin,
     analytics,
     auth,
     commerce,
+    config as config_router,
     fx,
+    intercept,
     linkage,
     llm_context,
     oauth,
+    order_sync,
     pages,
     reporting,
     spu_images,
+    sync_status,
     tiktok_shop,
 )
 from tts_erp_v2.middleware.access_log import AccessLogMiddleware
 from tts_erp_v2.middleware.auth import AuthMiddleware
 from tts_erp_v2.middleware.rate_limit import RateLimitMiddleware
+
+
+# The production ads-data-sync extension has a stable signed ID. Keep this
+# narrow instead of enabling every chrome-extension origin; operators can
+# replace it entirely with TTS_ERP_CORS_ALLOW_ORIGINS when deploying a
+# different signed extension build or additional browser clients.
+DEFAULT_CORS_ORIGINS = [
+    "chrome-extension://obpgdepgjmchplabmkoeboceddbmlbok",
+]
+DEFAULT_CORS_ALLOW_HEADERS = [
+    "Authorization",
+    "X-API-Key",
+    "X-Request-Id",
+    "Content-Type",
+]
 
 
 def _build_routes(app: FastAPI) -> None:
@@ -78,17 +103,33 @@ def _build_routes(app: FastAPI) -> None:
     # explicit ``require_role_at_least(request, "admin")`` in the
     # handler for defense-in-depth. See tts_erp_v2/api/v2/admin.py.
     app.include_router(admin.router, prefix="/v2/admin")
-    # analytics (Chrome extension upload + cursor) — 2026-09-02 v2 化：
-    # 原 analytics_sync 孤岛包拆除，路由迁入 api/v2/analytics.py，
-    # 存储走 tts_erp_v2/analytics/repository.py（analytics.ad_* 表）。
-    # 单挂 /v2/analytics/sync —— 旧 /v1/analytics/sync/* 随本次发布下线
-    # （用户拍板，无 alias；发布窗口必须与插件发版同步）。
+    # analytics (Chrome extension ad-data upload + coverage + cursor)。
+    # ⚠ 命名历史：URL 前缀 /v2/analytics/sync/* 是 Chrome 扩展的 stable 契约，
+    # 改路径需扩展同步发版，故保留 analytics 命名（AGENTS.md §9.1）。
+    # 实际数据 2026-09-11 起全部写入 plugin schema（plugin.ad_* 等），
+    # 存储层已迁到 tts_erp_v2/plugin/ads/repository.py；
+    # 路由 handler 仍在 tts_erp_v2/api/v2/analytics.py（仅文件名层面残留）。
     # Auth + rate-limit 继承父 app 中间件栈；handler 读
     # `request.scope["api_key_hash"]` / `request.scope["api_key_scopes"]`。
     app.include_router(analytics.router)
-    # SPU 实际 ROI 看板主表(GET /v2/analytics/spu-roi,readonly)——单挂
-    # /v2/analytics 下独立 router,不蹭 /sync 前缀(readwrite 分类)。
+    # HTTP 请求拦截配置管理和数据接收
+    # 详见 tech-doc/intercept-design.md
+    app.include_router(intercept.router)
+    # Chrome 扩展订单/物流/结算数据同步（readwrite；与 analytics 同级）。
+    # 详见 tech-doc/chrome-ext-order-sync-design.md。
+    app.include_router(order_sync.router)
+    # config schema 枚举映射 CRUD（GET readonly；PUT/DELETE admin）。
+    # 详见 tech-doc/spu-roi-enum-translation-plan.md。
+    app.include_router(config_router.router)
+    # SPU 实际 ROI 看板主表(GET /v2/analytics/spu-roi, readonly)——
+    # 读 plugin.ad_* 表；URL 保持 /v2/analytics/ 前缀与 sync 端点同域。
+    # 模块 tts_erp_v2/analytics/spu_roi.py 名称同理为历史残留。
     app.include_router(analytics.roi_router)
+    # SPU ROI 钻取面板四端点（D6 拍板：每 tab 一懒加载端点）
+    app.include_router(analytics.drilldown_router)
+    # sync-worker 周期作业同步状态（GET /v2/sync/status, readonly）——
+    # dashboard「数据同步状态」卡片数据源，只读 integration.sync_jobs。
+    app.include_router(sync_status.router)
 
     # Operator-console static assets (vendor/bootstrap.min.css / js/console.js). Auth is
     # readonly-level via the "/static/" prefix in middleware/auth.py —
@@ -100,6 +141,71 @@ def _build_routes(app: FastAPI) -> None:
     )
 
 
+
+
+def _downgrade_nullable(obj: Any) -> None:
+    """Recursively rewrite OpenAPI 3.1 anyOf+null to 3.0 nullable:true.
+
+    ``anyOf: [{…schema…}, {type: "null"}]``  →  ``{…schema…, nullable: true}``
+    Only applies when the anyOf has exactly 2 members and one is {type:"null"}.
+    """
+    if isinstance(obj, dict):
+        any_of = obj.get("anyOf")
+        if isinstance(any_of, list) and len(any_of) == 2:
+            null_idx = next(
+                (i for i, m in enumerate(any_of) if isinstance(m, dict) and m.get("type") == "null"),
+                None,
+            )
+            if null_idx is not None:
+                other = any_of[1 - null_idx]
+                if isinstance(other, dict):
+                    # Merge the non-null schema into the parent, mark nullable
+                    obj.clear()
+                    obj.update(other)
+                    obj["nullable"] = True
+        for v in obj.values():
+            _downgrade_nullable(v)
+    elif isinstance(obj, list):
+        for item in obj:
+            _downgrade_nullable(item)
+
+
+class DocsAuthMiddleware(BaseHTTPMiddleware):
+    """HTTP Basic Auth for /docs, /openapi.json, /redoc.
+
+    Only activates when TTS_ERP_DOCS_USER and TTS_ERP_DOCS_PASSWORD are
+    both set in the environment.  When unset, docs remain public.
+    """
+
+    _PROTECTED = {"/docs", "/openapi.json", "/redoc", "/docs/oauth2-redirect"}
+
+    def __init__(self, app):  # type: ignore[no-untyped-def]
+        super().__init__(app)
+        self._user = os.environ.get("TTS_ERP_DOCS_USER", "")
+        self._password = os.environ.get("TTS_ERP_DOCS_PASSWORD", "")
+        self._enabled = bool(self._user and self._password)
+
+    async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+        if not self._enabled or request.url.path not in self._PROTECTED:
+            return await call_next(request)
+
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Basic "):
+            try:
+                decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
+                user, password = decoded.split(":", 1)
+                if user == self._user and password == self._password:
+                    return await call_next(request)
+            except (ValueError, UnicodeDecodeError):
+                pass  # malformed Basic header — fall through to 401
+
+        return Response(
+            status_code=401,
+            headers={"WWW-Authenticate": 'Basic realm="tts-erp docs"'},
+            content="Unauthorized",
+        )
+
+
 def build_app() -> FastAPI:
     """Construct the v2 FastAPI app.
 
@@ -107,11 +213,50 @@ def build_app() -> FastAPI:
     with ``tts_erp_v2.app:build_app()`` (the factory; uvicorn picks the
     returned instance).
     """
+    # root_path 是外部挂载前缀的唯一真相源（2026-09-28 收敛）：仅在此处
+    # 读一次 TTS_ERP_EXTERNAL_PREFIX，下游（auth middleware 分类 / 302
+    # Location / cookie path / oauth redirect hint / StaticFiles）一律从
+    # scope["root_path"] 派生，不再各自读 env。nginx 侧契约：/tts/ 必须
+    # 透传完整前缀（proxy_pass 不带尾斜杠），见 ~/setup/nginx/conf.d/services.conf。
+    root_path = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "")
     app = FastAPI(
         title="tts-erp v2",
         version="2.0.0",
         description="Refactored tts-erp API — see tech-doc/refactor-tech-plan-v2.md",
+        root_path=root_path,
     )
+    # --- OpenAPI 3.1 → 3.0.3 down-conversion ---
+    # Pydantic v2 + FastAPI 0.141 default to OpenAPI 3.1 which uses
+    # ``anyOf: [{…}, {type: "null"}]`` for nullable fields.  Swagger
+    # UI 5.x (loaded from CDN for /docs) has incomplete 3.1 support
+    # and renders these as broken schemas.  We force 3.0.3 and
+    # post-process to rewrite anyOf+null → nullable:true.
+    _original_openapi = app.openapi
+
+    def _openapi_30_compat() -> dict[str, Any]:
+        from fastapi.openapi.utils import get_openapi  # noqa: F811
+
+        if not app.openapi_schema:
+            app.openapi_schema = get_openapi(
+                title=app.title,
+                version=app.version,
+                openapi_version="3.0.3",
+                summary=app.summary,
+                description=app.description,
+                terms_of_service=app.terms_of_service,
+                contact=app.contact,
+                license_info=app.license_info,
+                routes=app.routes,
+                webhooks=app.webhooks.routes,
+                tags=app.openapi_tags,
+                servers=app.servers,
+                separate_input_output_schemas=app.separate_input_output_schemas,
+                external_docs=app.openapi_external_docs,
+            )
+            _downgrade_nullable(app.openapi_schema)
+        return app.openapi_schema
+
+    app.openapi = _openapi_30_compat  # type: ignore[method-assign]
 
     # --- Middleware registration (LAST = OUTERMOST) ---
     # Innermost first, then Auth (next layer out), then CORS, then
@@ -120,14 +265,18 @@ def build_app() -> FastAPI:
     # and the handler so the limiter can bucket by authenticated key.
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(AuthMiddleware)
-    # CORS: default DENY (empty allow-origin). Operators set
-    # TTS_ERP_CORS_ALLOW_ORIGINS to a comma-list, or the token "wildcard".
+    # Basic Auth for /docs, /openapi.json, /redoc when
+    # TTS_ERP_DOCS_USER + TTS_ERP_DOCS_PASSWORD are set.
+    app.add_middleware(DocsAuthMiddleware)
+    # CORS: allow only the signed production extension by default. Operators
+    # can replace that list with TTS_ERP_CORS_ALLOW_ORIGINS (comma-list) or
+    # the token "wildcard" for explicitly managed internal deployments.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_parse_cors_origins(),
         allow_credentials=True,
         allow_methods=["GET", "POST"],
-        allow_headers=["Authorization", "X-API-Key", "Content-Type"],
+        allow_headers=DEFAULT_CORS_ALLOW_HEADERS,
         max_age=600,
     )
     # Outermost: one structured line per request to stdout. The
@@ -144,7 +293,7 @@ def build_app() -> FastAPI:
 def _parse_cors_origins() -> list[str]:
     raw = _env_cors()
     if not raw:
-        return []
+        return DEFAULT_CORS_ORIGINS.copy()
     if raw.strip() == "wildcard":
         return ["*"]
     return [o.strip() for o in raw.split(",") if o.strip()]

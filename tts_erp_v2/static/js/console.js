@@ -237,6 +237,13 @@
   // ---------- tabs ----------
   var currentTab = TAB_ALL;
   var costFilter = "";
+  // Catalogue paging (2026-09-06): the backend returns pages via
+  // limit/offset and reports the filtered total in X-Total-Count.
+  // pageLimit follows the 每页 dropdown (25/50/100); pageOffset is the
+  // first row of the current page.
+  var pageLimit = 50;
+  var pageOffset = 0;
+  var pageTotal = null; // null = not fetched yet (no pager shown)
   // All-SPU catalogue sort state (2026-09-06): the active sort column
   // + direction. Column headers carry data-sort; clicking toggles asc→
   // desc→(reload). Default = status asc so in-sale (在售/ACTIVATE)
@@ -246,6 +253,10 @@
   // Status dropdown filter (2026-09-06): '' = all statuses, otherwise
   // the raw upstream code forwarded as ?status= on channel-products.
   var catalogueStatus = "";
+  // Only-show-SPUs-with-orders toggle (2026-09-06): when on, the request
+  // carries has_orders=true and the backend restricts to SPUs that appear
+  // on at least one sales order line.
+  var catalogueHasOrders = false;
 
   function setActiveTab(name) {
     currentTab = name;
@@ -258,7 +269,8 @@
     // recent = change-log count.
     var label = $("#op-counter-label");
     var sub = $("#op-counter-sub");
-    if (label) label.textContent = name === TAB_RECENT ? "最近提交" : "全部 SPU";
+    if (label)
+      label.textContent = name === TAB_RECENT ? "最近提交" : "全部 SPU";
     if (sub)
       sub.textContent =
         name === TAB_RECENT
@@ -266,13 +278,13 @@
           : "目录 · 编辑成本后提交全部";
     var stamp = $(".op-counter-stamp");
     if (stamp)
-      stamp.textContent = name === TAB_RECENT ? "CHANGELOG · N/M" : "CATALOG · ALL";
+      stamp.textContent =
+        name === TAB_RECENT ? "CHANGELOG · N/M" : "CATALOG · ALL";
     // Submit-all is an all-tab action (files the edited rows).
     var submitAll = $('[data-act="submit-all"]');
     if (submitAll) submitAll.style.display = name === TAB_ALL ? "" : "none";
     var batchStatus = $(".op-batch-status");
-    if (batchStatus)
-      batchStatus.style.display = name === TAB_ALL ? "" : "none";
+    if (batchStatus) batchStatus.style.display = name === TAB_ALL ? "" : "none";
     applyTableHead(name);
     refreshActiveTab();
   }
@@ -331,19 +343,23 @@
       var key = th.getAttribute("data-sort");
       if (!key) return;
       var isActive = catalogueSort.key === key;
-      th.classList.toggle("is-sorted-asc", isActive && catalogueSort.order === "asc");
+      th.classList.toggle(
+        "is-sorted-asc",
+        isActive && catalogueSort.order === "asc",
+      );
       th.classList.toggle(
         "is-sorted-desc",
         isActive && catalogueSort.order === "desc",
       );
       th.addEventListener("click", () => {
         if (catalogueSort.key === key) {
-          catalogueSort.order =
-            catalogueSort.order === "asc" ? "desc" : "asc";
+          catalogueSort.order = catalogueSort.order === "asc" ? "desc" : "asc";
         } else {
           catalogueSort.key = key;
           catalogueSort.order = "desc";
         }
+        // New sort order starts from page 1.
+        pageOffset = 0;
         loadAll();
       });
     });
@@ -415,7 +431,6 @@
       retry();
     });
   }
-
 
   // Mirror image cell (2026-09-05 page-rework lane): the operator no
   // longer uploads supplier reference photos. The row shows the SPU's
@@ -577,10 +592,7 @@
       var banner = $(".op-batch-status");
       if (!banner) return;
       var msg =
-        "已提交 " +
-        filed +
-        " 行" +
-        (failed ? " · 失败 " + failed + " 行" : "");
+        "已提交 " + filed + " 行" + (failed ? " · 失败 " + failed + " 行" : "");
       banner.textContent = msg;
       banner.classList.toggle("is-err", failed > 0);
       banner.classList.toggle("is-ok", filed > 0 && failed === 0);
@@ -629,8 +641,7 @@
     }
     items.forEach((it) => {
       var tr = document.createElement("tr");
-      var prevTxt =
-        it.prev_unit_cost == null ? "—" : esc(it.prev_unit_cost);
+      var prevTxt = it.prev_unit_cost == null ? "—" : esc(it.prev_unit_cost);
       var curTxt = esc(it.unit_cost);
       html(
         tr,
@@ -676,28 +687,56 @@
     html(tbody, loadingRow());
     var url =
       "/v2/commerce/channel-products?limit=" +
-      DEFAULT_LIMIT +
+      pageLimit +
+      "&offset=" +
+      pageOffset +
       "&sort=" +
       encodeURIComponent(catalogueSort.key) +
       "&order=" +
       encodeURIComponent(catalogueSort.order);
-    if (catalogueStatus) url += "&status=" + encodeURIComponent(catalogueStatus);
+    if (catalogueStatus)
+      url += "&status=" + encodeURIComponent(catalogueStatus);
+    if (catalogueHasOrders) url += "&has_orders=true";
     if (acct) url += "&shop_pk=" + acct;
     api(url)
       .then((r) => {
         if (!r.ok) throw new Error("HTTP " + r.status);
+        var totalHdr = r.headers.get("X-Total-Count");
+        if (totalHdr != null) {
+          var n = parseInt(totalHdr, 10);
+          pageTotal = isNaN(n) ? null : n;
+        }
         return r.json();
       })
       .then((payload) => {
         var items = unwrap(payload);
         renderAllRows(items);
-        setBadge("badge-all", items.length);
-        setCounterNum(items.length);
+        setBadge("badge-all", pageTotal == null ? items.length : pageTotal);
+        setCounterNum(pageTotal == null ? items.length : pageTotal);
+        updatePager(pageTotal == null ? items.length : pageTotal, items.length);
         setCounterReady();
       })
       .catch((e) => {
         errorRow(e, loadAll);
       });
+  }
+
+  // Pager footer (2026-09-06): prev / next buttons + 共 N 行 · 第 X/Y 页.
+  // The pager reflects the all-tab's filtered total (X-Total-Count); it is
+  // hidden when the backend didn't report a total or there is only one page.
+  function updatePager(total, pageLen) {
+    var pager = $(".op-pager");
+    if (!pager) return;
+    var pages = Math.max(1, Math.ceil(total / pageLimit));
+    var cur = Math.floor(pageOffset / pageLimit) + 1;
+    var label = $("#pager-label");
+    if (label)
+      label.textContent =
+        "共 " + total + " 行 · 第 " + cur + " / " + pages + " 页";
+    var prev = $("#btn-prev");
+    var next = $("#btn-next");
+    if (prev) prev.disabled = pageOffset <= 0;
+    if (next) next.disabled = pageOffset + pageLen >= total;
   }
 
   function renderAllRows(items) {
@@ -717,13 +756,27 @@
       tr.dataset.origCurrency = it.currency || "CNY";
       var currency = it.currency || "CNY";
       var costCell;
-      // New row (no cost yet): CNY placeholder, empty input.
+      // New row (no cost yet): if a 货源价 (source_unit_cost) exists,
+      // pre-fill the input so the operator can see and submit it.
+      // Otherwise show empty with "缺" placeholder.
       if (it.unit_cost == null) {
-        costCell =
-          '<span class="op-cost-input" title="输入成本后点提交全部">' +
-          '<input type="number" class="op-input-cost" step="0.0001" min="0.0001" data-k="unit_cost" placeholder="缺" aria-label="单位成本">' +
-          '<span class="op-currency-fixed" aria-label="货币">CNY</span>' +
-          "</span>";
+        if (it.source_unit_cost == null) {
+          costCell =
+            '<span class="op-cost-input" title="输入成本后点提交全部">' +
+            '<input type="number" class="op-input-cost" step="0.0001" min="0.0001" data-k="unit_cost" placeholder="缺" aria-label="单位成本">' +
+            '<span class="op-currency-fixed" aria-label="货币">CNY</span>' +
+            "</span>";
+        } else {
+          tr.dataset.origCost = String(it.source_unit_cost);
+          costCell =
+            '<span class="op-cost-input" title="货源价（妙手采集）—— 点提交全部即可入库">' +
+            '<input type="number" class="op-input-cost" step="0.0001" min="0.0001" data-k="unit_cost" value="' +
+            esc(String(it.source_unit_cost)) +
+            '" aria-label="单位成本">' +
+            '<span class="op-currency-fixed" aria-label="货币">CNY</span>' +
+            "</span>" +
+            '<span class="op-source-badge" title="来源：妙手货源价">货源价</span>';
+        }
       } else {
         // Existing cost: pre-filled input + its currency badge. Editing
         // the number re-files under the SAME currency (the operator is
@@ -897,9 +950,45 @@
       populateStatusFilter(statusFilter);
       statusFilter.addEventListener("change", () => {
         catalogueStatus = statusFilter.value;
+        pageOffset = 0;
         if (currentTab === TAB_ALL) loadAll();
       });
     }
+    // Only-show-SPUs-with-orders toggle (2026-09-06): forwards
+    // has_orders=true so the catalogue narrows to SPUs with sales.
+    var hasOrdersBox = $("#filter-has-orders");
+    if (hasOrdersBox)
+      hasOrdersBox.addEventListener("change", () => {
+        catalogueHasOrders = hasOrdersBox.checked;
+        pageOffset = 0;
+        if (currentTab === TAB_ALL) loadAll();
+      });
+    // 每页 dropdown drives the catalogue page size (2026-09-06).
+    var limitSel = $("#filter-limit");
+    if (limitSel) {
+      var initial = parseInt(limitSel.value, 10);
+      if (!isNaN(initial) && initial > 0) pageLimit = initial;
+      limitSel.addEventListener("change", () => {
+        var v = parseInt(limitSel.value, 10);
+        if (isNaN(v) || v <= 0) return;
+        pageLimit = v;
+        pageOffset = 0;
+        if (currentTab === TAB_ALL) loadAll();
+      });
+    }
+    var btnPrev = $("#btn-prev");
+    var btnNext = $("#btn-next");
+    if (btnPrev)
+      btnPrev.addEventListener("click", () => {
+        if (pageOffset - pageLimit < 0) pageOffset = 0;
+        else pageOffset -= pageLimit;
+        if (currentTab === TAB_ALL) loadAll();
+      });
+    if (btnNext)
+      btnNext.addEventListener("click", () => {
+        pageOffset += pageLimit;
+        if (currentTab === TAB_ALL) loadAll();
+      });
     loadShops()
       .then(loadMe)
       .then(() => {

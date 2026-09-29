@@ -9,12 +9,13 @@ Cursor: epoch ms in ``integration.sync_cursors`` (scope=shop_id).
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -28,6 +29,8 @@ from tts_erp_v2.db.models import (
 )
 from tts_erp_v2.jobs.runner import record_sync_issue
 from tts_erp_v2.sync_worker.job_runner import JobResult
+
+log = logging.getLogger(__name__)
 
 JOB_NAME = "tiktok.after_sales"
 RETURNS_ENDPOINT = "/return_refund/202309/returns/search"
@@ -47,7 +50,7 @@ def _epoch_seconds_to_utc(seconds: int | None):
     if seconds is None or seconds <= 0:
         return None
     try:
-        return datetime.fromtimestamp(_safe_int(seconds), tz=timezone.utc)
+        return datetime.fromtimestamp(_safe_int(seconds), tz=UTC)
     except (TypeError, ValueError, OverflowError):
         return None
 
@@ -58,6 +61,16 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+# V3 §14.2（2026-09-28 修复）：永久失败的 sync_issue 自动 resolve。
+# 后置理由：§14.1 改为只推成功 case 的 watermark 后，永久失败的
+# case（订单永远不存在 / TikTok 永久缺字段）会卡在窗口内被无限
+# 重试——API 调用白耗 + sync_issues 单条 dedup 表里挂着不增长但
+# 永远 unresolved。上限：after_sales 每 15min 跑一次 → 14 天 = ~1344
+# 次重试足够了（订单/退货同步通常 < 10min）；超过则标 permanent，
+# 让 case 退出窗口，下次推进 watermark 时跳过。
+_AUTO_RESOLVE_AFTER_DAYS = 14
 
 
 def _to_decimal(v):
@@ -158,13 +171,49 @@ def _walk_pages(proxy_call, *, endpoint: str, base_body: dict) -> list[dict]:
                 f"{endpoint} non-zero code={code} message={resp.get('message')!r}"
             )
         data = resp.get("data") or {}
-        # returns: data.returns; cancellations: data.cancellations
-        items = data.get("returns") or data.get("cancellations") or []
+        # returns/search 的列表字段在 2026-08-31 前后从 data.returns 改名为
+        # data.return_orders（实测 2026-09-28：{next_page_token, return_orders,
+        # total_count}）；cancellations/search 仍是 data.cancellations。
+        # 两个名字都兼容，防止上游再改名时静默丢数据。
+        items = (
+            data.get("return_orders")
+            or data.get("returns")
+            or data.get("cancellations")
+            or []
+        )
+        if not items and endpoint == RETURNS_ENDPOINT and data.get("total_count"):
+            # 2026-09 事故：字段名不匹配时 items 静默为空、无报错无告警，
+            # 9 月退款全部丢失。total_count > 0 但取不到列表 = 一定是字段
+            # 名又变了，必须告警；total_count=0/缺失 = 合法空页，不打扰。
+            log.warning(
+                "returns/search total_count=%s but 0 items parsed; data keys=%s "
+                "(upstream field rename — check payload)",
+                data.get("total_count"),
+                sorted(data.keys()),
+            )
         collected.extend(items)
         next_token = data.get("next_page_token") or None
         if not next_token:
             break
     return collected
+
+
+# payload return_type → after_sales.cases.case_type 映射（与 2026-08 迁移数据
+# 及全部分析查询过滤枚举一致）。分析查询只认 'REFUND_ONLY'/'RETURN_AND_REFUND'，
+# 硬编码 'RETURN' 会让数据即使入库也被静默漏掉（2026-09-28 实测教训）。
+_RETURN_TYPE_TO_CASE_TYPE = {
+    "RETURN_AND_REFUND": "RETURN_AND_REFUND",
+    "REFUND": "REFUND_ONLY",
+    "REFUND_ONLY": "REFUND_ONLY",
+}
+
+
+def _resolve_case_type(raw: dict, fallback: str) -> str:
+    """returns 的 case_type 从 payload return_type 映射；cancellations 用 fallback('CANCEL')。"""
+    rt = raw.get("return_type")
+    if rt in _RETURN_TYPE_TO_CASE_TYPE:
+        return _RETURN_TYPE_TO_CASE_TYPE[rt]
+    return fallback
 
 
 def _parse_case(case_type: str, raw: dict) -> dict:
@@ -178,12 +227,23 @@ def _parse_case(case_type: str, raw: dict) -> dict:
     )
     case_refund_amount, case_currency = _parse_case_refund(raw.get("refund_amount"))
     return {
-        "case_type": case_type,
+        "case_type": _resolve_case_type(raw, case_type),
         "external_case_id": str(cid),
         "order_id": str(order_id) if order_id else None,
         "status": raw.get("status") or raw.get("return_status") or raw.get("cancel_status"),
-        "reason_code": raw.get("reason_code"),
-        "reason_text": raw.get("reason_text"),
+        # reason 字段名：returns 是 return_reason/return_reason_text，
+        # cancellations 是 cancel_reason/cancel_reason_text（9 月 CANCEL
+        # case reason 全 NULL 就是因为只读了不存在的 reason_code）。
+        "reason_code": (
+            raw.get("reason_code")
+            or raw.get("return_reason")
+            or raw.get("cancel_reason")
+        ),
+        "reason_text": (
+            raw.get("reason_text")
+            or raw.get("return_reason_text")
+            or raw.get("cancel_reason_text")
+        ),
         "created_at_source": _epoch_seconds_to_utc(raw.get("create_time")),
         "updated_at_source": _epoch_seconds_to_utc(raw.get("update_time")),
         "refund_amount": case_refund_amount,
@@ -210,9 +270,22 @@ def _process_one_type(
     case_type: str,
     endpoint: str,
     raw_cases: list[dict],
-) -> tuple[int, int, int]:
-    """Returns (total, inserted, failed) for one case_type."""
+) -> tuple[list[bool], int, int, int]:
+    """Process one case_type batch.
+
+    Returns ``(ok_flags, total, inserted, failed)`` where ``ok_flags[i]``
+    indicates whether ``raw_cases[i]`` was successfully inserted/updated
+    in this run. ``ok_flags`` lets the caller advance the watermark ONLY
+    over successfully-resolved items — failed ones stay inside the
+    watermark window so the next run naturally retries them.
+
+    历史教训（2026-09-28）：原版 ``return total, inserted, failed`` 让
+    调用方被前置条件 ``max_update_ms`` 推过失败 case → UNKNOWN_ORDER
+    case 永远卡在 watermark 后面被丢（典型 case：after_sales 15min/次
+    早于 orders 10min/次，case 先到订单未到，订单到后已过水位线）。
+    """
     total = len(raw_cases)
+    ok_flags: list[bool] = []
     inserted = 0
     failed = 0
     for raw in raw_cases:
@@ -226,6 +299,7 @@ def _process_one_type(
             fields = _parse_case(case_type, raw)
         except ParseError as exc:
             failed += 1
+            ok_flags.append(False)
             record_sync_issue(
                 session,
                 job_name=JOB_NAME,
@@ -249,6 +323,7 @@ def _process_one_type(
                 details={"order_id": fields["order_id"]},
             )
             failed += 1
+            ok_flags.append(False)
             continue
 
         raw_row = RawRecord(
@@ -354,8 +429,9 @@ def _process_one_type(
                 )
             )
         inserted += 1
+        ok_flags.append(True)
 
-    return total, inserted, failed
+    return ok_flags, total, inserted, failed
 
 
 def run(
@@ -392,7 +468,7 @@ def run(
         proxy_call, endpoint=CANCELLATIONS_ENDPOINT, base_body=base_body
     )
 
-    r_total, r_ins, r_fail = _process_one_type(
+    r_ok, r_total, r_ins, r_fail = _process_one_type(
         session,
         proxy_call=proxy_call,
         account_id=account.id,
@@ -400,7 +476,7 @@ def run(
         endpoint=RETURNS_ENDPOINT,
         raw_cases=returns,
     )
-    c_total, c_ins, c_fail = _process_one_type(
+    c_ok, c_total, c_ins, c_fail = _process_one_type(
         session,
         proxy_call=proxy_call,
         account_id=account.id,
@@ -413,9 +489,17 @@ def run(
     inserted = r_ins + c_ins
     failed = r_fail + c_fail
 
-    # Watermark: advance only when at least one row was processed
+    # Watermark: advance ONLY over successfully-resolved items.
+    # V3 §14.1（2026-09-28 修复）：原版把 max_update_ms 在成功+失败 case 上
+    # 都累加 → 失败 case（典型 UNKNOWN_ORDER：case 早于订单 15min/10min
+    # 时序差到达）一旦被算进 max，watermark 就跨过去了，下轮自然
+    # 不再 fetch → case 永久丢失。改为只算 ok=True 的 update_time：
+    # 失败的留在水位线内，下轮自动重抓（order 同步通常 10min 内到
+    # → 重试成功）。永久失败的 case 走 §14.2 的 auto-resolve 兜底。
     max_update_ms: int | None = None
-    for raw in (*returns, *cancellations):
+    for raw, ok in (*zip(returns, r_ok), *zip(cancellations, c_ok)):
+        if not ok:
+            continue
         ts = _epoch_seconds_to_utc(raw.get("update_time"))
         if ts:
             ms = _safe_int(ts.timestamp() * 1000)
@@ -423,7 +507,7 @@ def run(
                 max_update_ms = ms
 
     new_cursor_ms: int | None = None
-    if max_update_ms is not None and (
+    if max_update_ms is not None and inserted > 0 and (
         watermark_ms is None
         or max_update_ms > _safe_int(watermark_ms)
     ):
@@ -435,6 +519,11 @@ def run(
         )
         new_cursor_ms = max_update_ms
 
+    # V3 §14.2（2026-09-28）：永久失败的 sync_issue 自动 resolve。
+    # 仅限本 job：超过 _AUTO_RESOLVE_AFTER_DAYS 天仍未恢复的，标 permanent
+    # 让 watermark 可以推过。dedup 表里单条不动但 resolved_at IS NOT NULL。
+    _auto_resolve_stale_issues(session, JOB_NAME, _AUTO_RESOLVE_AFTER_DAYS)
+
     return JobResult(
         rows_total=total,
         rows_inserted=inserted,
@@ -443,12 +532,39 @@ def run(
     )
 
 
+def _auto_resolve_stale_issues(session: Session, job_name: str, days: int) -> int:
+    """把超过 ``days`` 天仍未解决的同 job_name sync_issue 标 resolved。
+
+    目的：§14.1 让永久失败的 case 留在 watermark 窗口内重试，但
+    永久失败（订单/数据永远拿不到）的 case 不能无限重试——超期
+    后标 resolved 让下轮推 watermark 时跳过。返回 resolve 行数（供
+    JobResult 监控可见）。
+    """
+    from datetime import UTC, datetime, timedelta
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    try:
+        rows = session.execute(
+            text(
+                "UPDATE integration.sync_issues "
+                "SET resolved_at = :now "
+                "WHERE job_name = :job "
+                "  AND resolved_at IS NULL "
+                "  AND detected_at < :cutoff"
+            ),
+            {"now": datetime.now(UTC), "job": job_name, "cutoff": cutoff},
+        ).rowcount
+        return int(rows or 0)
+    except Exception:
+        # never let safeguard failure break the main job
+        return 0
+
+
 __all__ = [
-    "run",
+    "CANCELLATIONS_ENDPOINT",
     "JOB_NAME",
     "RETURNS_ENDPOINT",
-    "CANCELLATIONS_ENDPOINT",
+    "ParseError",
     "ProxyCall",
     "UpstreamJobError",
-    "ParseError",
+    "run",
 ]

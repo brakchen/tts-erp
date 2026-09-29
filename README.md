@@ -1,6 +1,6 @@
 # tts-erp
 
-> TikTok Shop 销售 + 妙手采购 数据整合分析系统 · 10-schema PostgreSQL + FastAPI/uvicorn (端口 9877) + APScheduler 同步
+> TikTok Shop 销售 + 妙手采购 数据整合分析系统 · 11-schema PostgreSQL + FastAPI/uvicorn (端口 9877) + APScheduler 同步
 
 ## 它是干什么的
 
@@ -33,7 +33,7 @@
 │           └──────────┬───────────┘                    │            │
 │                      ▼                                ▼            │
 │           ┌─────────────────────────────────────────────┐           │
-│           │      PostgreSQL tts_erp (10 schemas)        │           │
+│           │      PostgreSQL tts_erp (11 schemas)        │           │
 │           │  integration / commerce / procurement       │
 │           │  fulfillment / after_sales / finance        │
 │           │  linkage / reporting / security             │
@@ -54,7 +54,7 @@
 > （v1 oauth-receiver 库 + systemd unit 已于 2026-09-05 整体废弃并 DROP，
 > 备份 `backups/oauth_receiver_v1_legacy_*.sql.gz`）。
 
-## 数据模型（10 schema / 37 表 + 2 view）
+## 数据模型（11 schema / 54 表 + 1 view）
 
 权威定义：[`tech-doc/data-model-target-v3.md`](tech-doc/data-model-target-v3.md)（2026-09-05
 按 ADR-0003 §2.6 同步，commerce 域列名已更新到 live DB）

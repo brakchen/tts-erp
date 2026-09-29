@@ -13,8 +13,26 @@ from tts_erp_v2.db.models.after_sales import (
     Case,
     CaseLine,
 )
-from tts_erp_v2.db.models.analytics import (
-    AdRaw,
+from tts_erp_v2.db.models.plugin import (
+    AdDaily,
+    AdMonthly,
+    AdRawLog,
+    AdToday,
+    ChromeAfterSale,
+    ChromeAfterSaleItem,
+    ChromeOrder,
+    ChromeOrderLine,
+    ChromeSettlement,
+    ChromeSettlementDetail,
+    ChromeShipment,
+    ChromeTrackingEvent,
+    PluginLog,
+)
+from tts_erp_v2.db.models.intercept import (
+    InterceptConfig,
+    InterceptedRequest,
+    InterceptSession,
+    InterceptSyncCursor,
 )
 from tts_erp_v2.db.models.commerce import (
     ChannelAccount,
@@ -71,11 +89,22 @@ from tts_erp_v2.db.models.reporting import (
     ShipmentTrackingSummary,
 )
 from tts_erp_v2.db.models.security import ApiKey
+from tts_erp_v2.db.models.config import EnumMap
 
 __all__ = [
     "AccountLink",
-    "AdRaw",
+    "AdDaily",
+    "AdMonthly",
+    "AdRawLog",
+    "AdToday",
+
     "ApiKey",
+    "ChromeOrder",
+    "ChromeOrderLine",
+    "ChromeSettlement",
+    "ChromeSettlementDetail",
+    "ChromeShipment",
+    "ChromeTrackingEvent",
     "Base",
     "Case",
     "CaseLine",
@@ -85,11 +114,17 @@ __all__ = [
     "Credentials",
     "ExchangeRate",
     "ExchangeRateSnapshot",
+    "EnumMap",
+    "InterceptConfig",
+    "InterceptedRequest",
+    "InterceptSession",
+    "InterceptSyncCursor",
     "LinkEvidence",
     "LinkIssue",
     "LinkOverride",
     "ManualProductCost",
     "Payout",
+    "PluginLog",
     "ProcurementAccount",
     "ProcurementProduct",
     "ProcurementProductVariant",

@@ -3,7 +3,7 @@
 - **Status**: accepted
 - **Date**: 2026-09-04
 - **Deciders**: tts-erp backend
-- **Scope**: tts-erp v2 全部 schema(commerce / analytics / integration / linkage / procurement / after_sales / finance / fulfillment / reporting / security)
+- **Scope**: tts-erp v2 全部 schema(commerce / plugin / integration / linkage / procurement / after_sales / finance / fulfillment / reporting / security)
 - **Related**: AGENTS.md §2(schema 变更流程), §6(无灰度要求,本系统为后台运行可直切)
 
 ## 1. Context(背景)
@@ -44,7 +44,7 @@
 |---|---|---|
 | `created_at` | 行首次入库时间(server 本地) | 大多数业务表 |
 | `updated_at` | 行最近一次修改时间(server 本地,BEFORE UPDATE trigger 自动维护) | 任何会被 UPDATE 的表 |
-| `synced_at` | 第三方数据首次入库时间(等效 `created_at` 但语义强调"sync 落地") | sync_worker 同步的表(`commerce.*` / `analytics.*` / `integration.*` / `procurement.*`) |
+| `synced_at` | 第三方数据首次入库时间(等效 `created_at` 但语义强调"sync 落地") | sync_worker 同步的表(`commerce.*` / `plugin.*` / `integration.*` / `procurement.*`) |
 | `captured_at` | 上游 API 数据被截获时间 | `integration.raw_records` |
 | `received_at` | server 收到请求时间 | 请求日志表 |
 | `started_at` | job 启动时间 | `integration.sync_jobs` |

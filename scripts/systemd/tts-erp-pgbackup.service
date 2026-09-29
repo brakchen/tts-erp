@@ -1,0 +1,14 @@
+[Unit]
+Description=TTS-ERP hourly PostgreSQL dump
+After=docker.service postgres.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/schan/tts-erp
+ExecStart=/home/schan/tts-erp/scripts/backup/pg_dump_hourly.sh
+EnvironmentFile=/home/schan/tts-erp/.env
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

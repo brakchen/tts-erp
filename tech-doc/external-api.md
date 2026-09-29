@@ -48,7 +48,8 @@ cookie (see [Browser session login](#browser-session-login)).
 | SPU image list / upload / delete | `GET /v2/spu-images`, `POST /v2/spu-images/upload-url`, `POST /v2/spu-images/{id}/confirm`, `DELETE /v2/spu-images/{id}` | readonly / readwrite |
 | Browser login / logout / whoami | `GET\|POST /v2/auth/login`, `POST /v2/auth/logout`, `GET /v2/auth/me` | public |
 | Analytics cursor has-data / dump ingest (Chrome ext) | `GET /v2/analytics/sync/cursor`, `POST /v2/analytics/sync/dumps` | readwrite + scope |
-| Start TikTok seller authorization | `GET /v2/oauth/tiktok/authorize` | **admin** (handler-enforced) |
+| Order / logistics reconcile and dump ingest (Chrome ext) | `POST /v2/order-sync/{reconcile,has-data,dumps}` | readwrite + scope |
+| Start TikTok seller authorization | `GET /v2/oauth/tiktok/authorize` | **readwrite** or above (handler-enforced) |
 | TikTok OAuth redirect target (new-shop onboarding) | `GET /v2/oauth/tiktok/callback?code&state` | **public** — see [`tech-doc/api/tiktok-shop-oauth.md`](api/tiktok-shop-oauth.md) |
 
 Key gotchas (read these before writing code):
@@ -158,15 +159,18 @@ Content-Type: application/json
 
 ## CORS
 
-Default: **no browser cross-origin access allowed** (empty allow-origin
-list). To enable specific origins, set:
+Default: browser access is limited to the signed production
+`ads-data-sync` extension origin. To replace that allow-list or add a
+managed browser client, set:
 
 ```dotenv
-TTS_ERP_CORS_ALLOW_ORIGINS=https://app.example.com,https://admin.example.com
+TTS_ERP_CORS_ALLOW_ORIGINS=chrome-extension://obpgdepgjmchplabmkoeboceddbmlbok,https://app.example.com
 ```
 
-For dev/internal deploys, `TTS_ERP_CORS_ALLOW_ORIGINS=wildcard` enables
-`*` — do not use in production.
+The analytics extension sends `Authorization`, `X-API-Key`, and `X-Request-Id`
+headers; the server allows these headers during the CORS preflight. For
+dev/internal deploys, `TTS_ERP_CORS_ALLOW_ORIGINS=wildcard` enables `*` — do
+not use in production.
 
 ## Endpoints
 
@@ -176,7 +180,7 @@ All list endpoints accept `limit` (1..500, default 100) + `offset` (≥0).
 
 | Endpoint | Extra query params | Returns |
 | --- | --- | --- |
-| `GET /v2/commerce/channel-accounts` | `platform` (e.g. `tiktok`) | list of `{id, platform, shop_id, account_name, region, seller_type, status, synced_at}` |
+| `GET /v2/commerce/channel-accounts` | `platform` (e.g. `tiktok`) | list of `{id, platform, shop_id, account_name, region, seller_type, status, opened_date, credential_id, synced_at}` — `credential_id` 非空 = 已 OAuth 授权走 API 同步，为空 = 仅插件同步 |
 | `GET /v2/commerce/channel-accounts/{shop_pk}` | — | one account; 404 if unknown |
 | `GET /v2/commerce/channel-accounts/by-external/{shop_id}` | [`api/channel-accounts-by-external.md`](api/channel-accounts-by-external.md) | reverse-lookup by upstream shop_id; `?platform=tiktok` default; 404 if unknown |
 | `GET /v2/commerce/channel-accounts/{shop_pk}/order-stats` | — | `{order_count, payment_amount_sum}` aggregate (0/0 when empty) |
@@ -247,12 +251,34 @@ curl -sS -H "X-API-Key: $TTS_ERP_RO_KEY" \
   "http://127.0.0.1:9877/v2/fx/convert?amount=100&from_code=CNY&to_code=USD"
 ```
 
+### Sync status (`/v2/sync/*`)
+
+sync-worker 周期作业健康展示（dashboard「数据同步状态」卡片的数据源，2026-09-28 新增）。
+
+| Endpoint | Role | Notes |
+| --- | --- | --- |
+| `GET /v2/sync/status` | readonly | → `{server_time, jobs: [{job_name, interval_seconds, last_run_at, last_finished_at, last_status, last_error, next_expected_at, lag_seconds, cycles_late, severity}]}`。周期取自 `sync_worker.scheduler.JOBS` 注册表（单一真相源），运行记录取自 `integration.sync_jobs`（tiktok 作业按 shop 扇出多行，按 job_name 聚合取最新一行）。红灯规则：`now - last_run_at >= 2 × interval_seconds` → `severity="crit"`；≥1 周期 `"warn"`；周期内 `"ok"`；从未运行或注册表外 job `"unknown"`。只读、零上游外呼。 |
+
+```bash
+curl -sS -H "X-API-Key: $TTS_ERP_RO_KEY" \
+  "http://127.0.0.1:9877/v2/sync/status"
+```
+
 ### Pages
 
 | Endpoint | Role | Notes |
 | --- | --- | --- |
 | `GET /v2/pages/manual-costs` | readonly | Server-rendered operator console (shop switcher + needs-cost / needs-photo / recently-filed tabs). Browser without a session → 302 to `/v2/auth/login`. Static assets under `/static/*` are readonly-classified too. |
 | `GET /v2/pages/spu-roi` | readonly | SPU 实际 ROI 看板(账页式)。Server-rendered HTML shell;数据来自 `GET /v2/analytics/spu-roi`;JS 在 `/static/js/spu-roi.js`。 |
+| `GET /v2/pages/shops` | readonly | 店铺注册台。人工注册插件同步店铺（`commerce.shops` 补登记）；写入走 `POST /v2/admin/shops/register`（readwrite 会话）；行内元信息编辑走 `PATCH /v2/admin/shops/{shop_pk}`（名称/区域/开店日期/service_id）；「获取授权链接」按钮走 `GET /v2/oauth/tiktok/authorize?format=json`（readwrite）；JS 在 `/static/js/shops.js`。 |
+
+### Admin (`/v2/admin/*`, handler-enforced roles)
+
+| Endpoint | Role | Notes |
+| --- | --- | --- |
+| `POST /v2/admin/shops/register` | **readwrite** | 人工注册店铺。body `{"platform": "tiktok", "shop_id": str, "account_name"?: str, "region"?: str, "seller_type"?: str, "opened_date"?: "YYYY-MM-DD"}` → `{created: bool, shop: {...}}`。幂等：重复注册只补填仍为 NULL 的展示字段，**绝不覆盖** `credential_id`/`status`（店铺后续拿到 API 授权时由 OAuth callback 补 `credential_id`，同行升级、不产生重复行）。`shop_id` 必须是数字串，`TEST_`/`MOCK_` 前缀 422。注册只影响查询关联（spu-roi 店铺筛选等），数据同步不依赖注册。 |
+| `GET /v2/admin/shops/unregistered` | **readwrite** | 列出在 `plugin.*` 插件数据里出现、但 `commerce.shops` 无行的 shop_id → `{candidates: [{shop_id, sources}]}`；注册页的候选清单。 |
+| `PATCH /v2/admin/shops/{shop_pk}` | **readwrite** | 更新店铺元信息。body `{"account_name"?: str, "region"?: str, "opened_date"?: "YYYY-MM-DD", "service_id"?: str}` → `{shop: {...}}`。COALESCE 语义：字段传 null/缺省 = 保持原值（无法用 PATCH 清成 NULL）。只动展示字段，`credential_id`/`status` 不可通过此端点修改；404 = shop_pk 不存在。 |
 
 ### SPU images (`/v2/spu-images/*`)
 
@@ -297,35 +323,157 @@ separate work items — same proxy + router pattern.
 
 ### Analytics — SPU 实际 ROI (`/v2/analytics/spu-roi`)
 
-**Stability: stable · 只读(readonly)**。按 SPU 一行的「广告消耗 → 有效销售 → 退款 → 净利润 → 实际 ROI/保本线」账页数据源;页面 `GET /v2/pages/spu-roi` 消费它。**口径唯一真相** = [`analytics/spu-real-roi-dashboard.md`](analytics/spu-real-roi-dashboard.md) §4/§5(公式 M1–M19);本端点只读计算并序列化,不做任何写。
+**Stability: stable · 只读(readonly)**。按 SPU 一行的「广告消耗 → 有效销售 → 退款 → 净收入 → 货本 → 净利润 → 实际 ROI/保本线」账页数据源;页面 `GET /v2/pages/spu-roi` 消费它。**口径唯一真相** = [`analytics/spu-real-roi-dashboard.md`](analytics/spu-real-roi-dashboard.md) §4/§5(公式 M1–M19) + [`handoff/spu-roi-full-loss-rubric.md`](../handoff/spu-roi-full-loss-rubric.md)(**v9 当前**) + [`biz-doc/analytics/spu-roi-profit-calculation.md`](../biz-doc/analytics/spu-roi-profit-calculation.md);本端点只读计算并序列化,不做任何写。
 
 Query parameters:
 
 | name | type | default | notes |
 | --- | --- | --- | --- |
 | `q` | string | — | `spu_id` 子串搜索(ILIKE) |
-| `sort` | enum | `roi_real` | `roi_real` \| `spend` \| `refund_rate` \| `net_profit` \| `sales` \| `ad_count` \| `gmv_ad` \| `order_count` \| `units_sold` \| `refund_net_amount` \| `return_loss` \| `roi_breakeven`(与页面可排序列一致;同值次级键 spend DESC 保证可复现) |
-| `order` | enum | `asc` | `asc` \| `desc`;默认实际 ROI 升序(最亏在前) |
+| `sort` | enum | `roi_real` | `roi_real` \| `spend` \| `refund_rate` \| `refund_rate_qty` \| `cancel_rate` \| `net_profit` \| `sales` \| `gmv_sales` \| `ad_count` \| `gmv_ad` \| `order_count` \| `cancelled_order_count` \| `units_sold` \| `refund_net_amount` \| `return_loss` \| `roi_breakeven` \| **`full_loss_rate`**(v8 新增);同值次级键 spend DESC 保证可复现 |
+| `order` | enum | `asc` | `asc` \| `desc`;**默认 `sort="roi_real"` 升序保持不变**——避免改 API 契约;**页面 JS 显式传 `sort=net_profit&order=asc` 实现「最亏在前」视图** |
 | `limit` | int | 100 | 1..500(分页 v2 约定) |
 | `offset` | int | 0 | ≥ 0 |
 | `include_all` | bool | `false` | `false` 只含有广告∨有效销售∨退款的 SPU;`true` 拉全部 **ACTIVE**(status ILIKE 'activate')目录 SPU(DEACTIVATE/DELETED 等排除) |
 | `shop_pk` | int | — | 店铺过滤(内部主键) |
-| `fee_rate` | decimal-str | — | 平台佣金费率页面覆写;缺省固定基线 `0.1156`(决策 D10) |
+| `fee_rate` | decimal-str | — | 平台佣金费率页面覆写;缺省固定基线 `0.308`(决策 D10,2026-09-06 实测重定);**v8 语义变化：仅作用于未结算订单 (r̂ × unsettled_sales)，已结算订单费用已含在 SETTLEMENT 不受此影响** |
 | `w_start` | date | — | ISO `yyyy-mm-dd`;提供时销售按 `paid_at`、退款按 `updated_at_source` 裁剪(含当日) |
 | `w_end` | date | — | ISO `yyyy-mm-dd`;与 `w_start` 配对使用;不提供 `w_start`/`w_end` = 销售/退款**全历史累计**(ad 无日期参数,恒整窗累计,§4.5) |
 
-Response envelope:`{items: [...], total, totals, meta}`。每行字段与公式一一对应(`spu_pk, spu_id, title, status, main_image_url, shop_id, shop_name, ad_count, ad_orders, spend, gmv_ad, roi_l0, ad_first_day, ad_last_day, order_count, units_sold, sales, refund_only_qty, refund_only_amount, refund_return_qty, refund_return_amount, refund_net_qty, refund_net_amount, refund_rate, refund_cancelled_qty, refund_cancelled_amount, refund_cancelled_missing_lines, return_loss, net_profit, platform_fee, roi_real, roi_breakeven, cpa, unit_cost_used, cost_source`)。
+Response envelope:`{items: [...], total, totals, meta}`。
 
-格式化约定(§5.1):**money = 4 位小数字符串**、比率/ROI = 2 位小数字符串、件数整数;`null` = 无解/除数为 0(页面显示 `—`);无投放 SPU `spend="0.0000"` + `ad_count=0`。全表金额统一 USD(原币 VND/CNY 服务端按固定汇率 26,330 / 0.14774 一次换算,meta.fx 标注)。`totals` = 跨分页、当前筛选的行级服务端加总(`row_count, spend, sales, refund_net_amount, return_loss, net_profit, roi_real`;`roi_real` = Σ(net_cash−return_loss)/Σspend,原生合计后一次换算,Σspend=0 → null);`total` = 匹配行数。`meta` 携带 fx/fee/cost_assumption/window/unattributed_refund_lines/computed_at/currency;`meta.window` 为 ad 视图观测窗口(供参考),销售/退款是否裁剪见 `note`。
+**v9 行字段契约（34 字段，**全量**——页面主列仅渲染 6 列 + 商品维度，其余由下钻面板消费）**：
+
+| 字段 | 类型 | 公式 / 含义 | 主列? |
+| --- | --- | --- | --- |
+| `spu_pk` | int | `commerce.products_spu.id` 内部主键 | — |
+| `spu_id` | str | 业务 SPU 编号（TikTok 端） | 商品列 |
+| `title` / `status` / `main_image_url` | str | 商品维度列 | 商品列 |
+| `shop_id` / `shop_name` | str/int | 店铺维度 | 商品列 |
+| `ad_count` | int | M2: 投放广告数 | — |
+| `ad_orders` | int | M2b: 平台出单量 | — |
+| `spend` | money-str (USD) | M1: 广告消耗 = `Σ real_cost_total` | **主列** |
+| `gmv_ad` | money-str (USD) | M3: 平台归因 GMV | — |
+| `roi_l0` | ratio-str/null | M4: `gmv_ad / spend` | — |
+| `ad_first_day` / `ad_last_day` | date/null | 广告观测窗口 | — |
+| `order_count` | int | M5b: 有效销售订单数（白名单状态，含 COD 在途） | **主列** |
+| `cancelled_order_count` | int | M5c: 取消订单数（**全部 CANCELLED，信息列口径不变**；取消率不再用它，见下两行拆分） | — |
+| **`domestic_cancelled_order_count`** | **int** | **v9 新增：国内取消单量 = CANCELLED ∧ 无 `tracking_events.action_code=38301`（物流未到海外）→ `cancel_rate` 分子** | — |
+| **`overseas_cancelled_order_count`** | **int** | **v9 新增：海外取消单量 = CANCELLED ∧ 38301 → 已入全损件数，不进取消率** | — |
+| `units_sold` | int | M5: 售出件数 | — |
+| `sales` | money-str (USD) | M6: 有效销售金额 = `Σ quantity×unit_price` | **主列**(标记为"有效GMV") |
+| `gmv_sales` | money-str (USD) | M6c: 全单 = sales + 取消原额 | — |
+| `cancel_rate` | ratio-str/null | M12b **v9**: 国内取消 ÷(有效+国内取消)；海外取消已入全损不重复计（与 `full_loss_rate` 互斥） | **主列** |
+| `refund_only_qty` / `refund_only_amount` | int/money | M7: 仅退款 | — |
+| `refund_return_qty` / `refund_return_amount` | int/money | M8: 退货退款 | — |
+| `refund_net_qty` / `refund_net_amount` | int/money | M10: M7+M8 | — |
+| `refund_rate` | ratio-str/null | M12: 净额 ÷ sales | — |
+| `refund_rate_qty` | ratio-str/null | M12c: 单量口径 | — |
+| `refund_cancelled_qty` / `refund_cancelled_amount` / `refund_cancelled_missing_lines` | int/money/int | M9: 已付被取消信息列 | — |
+| **`net_revenue`** | **money-str (USD)** | **v8 新增：DUAL-LAYER = `Σ SETTLEMENT 分摊` + `Σ 未结 line_gmv × (1−r̂) × (1−refund_rate_spu)`；是 `net_profit` 的输入** | 下钻·结算 tab |
+| **`settled_sales`** | **money-str (USD)** | **v8 新增：`SUM line_gmv WHERE settlement_vnd IS NOT NULL`** | 下钻·结算 tab |
+| **`unsettled_sales`** | **money-str (USD)** | **v8 新增：`SUM line_gmv WHERE settlement_vnd IS NULL`** | 下钻·结算 tab |
+| **`settled_order_count`** | **int** | **v8 新增：已结算订单数** | 下钻·结算 tab |
+| **`full_loss_qty`** | **int** | **v9（2026-09-13 落地）：完结退货(RETURN_AND_REFUND/REFUND_ONLY，不论物流，限已付白名单订单) + 海外取消(CANCELLED∧38301) 件数** | 下钻·结算 tab |
+| **`full_loss_cancelled_qty`** | **int** | **v9：其中海外取消件数（COGS 补扣基数；退货件已含在 units_sold 里不重复补扣）** | 下钻·结算 tab |
+| **`full_loss_rate`** | **ratio-str/null** | **v9(D8 主列)：`full_loss_qty ÷ (units_sold + full_loss_cancelled_qty)`；分母 0 → null；不钳位（>100% 标识数据异常）** | **主列**(标记为"全损退款率%") |
+| `return_loss` | money-str (USD) | **M13b v9** = `full_loss_qty × unit_cost_used` | — |
+| `unit_cost_used` | money-str (USD) | 单位成本 = `unit_cost × fx_cny_usd` | — |
+| `cost_source` | enum | **v8 扩为四值**：`MANUAL`(人工标注的采购成交价) \| `PURCHASE`(妙手采购单成交价) \| `SOURCE_PRICE`(1688 货源价) \| `DEFAULT_K1`(40 CNY/件) | — |
+| `net_profit` | money-str (USD) | **M18 v8** = `net_revenue − (units_sold + full_loss_cancelled_qty) × unit_cost − spend`（**不**扣 platform_fee：已结费用含 SETTLEMENT，未结按 (1−r̂) 折算） | **主列** |
+| `platform_fee` | money-str (USD) | **M19 v8** = `r̂ × unsettled_sales`（**信息列，不**进 M18） | — |
+| `roi_real` | ratio-str/null | **M14 v8** = `(net_revenue − return_loss) / spend` | 下钻·利润构成 |
+| `roi_breakeven` | ratio-str/null | **M17 v8** = `NC′ ÷ (NC′ − COGS_kept)`（fee_est 项移除） | 下钻·利润构成 |
+| `cpa` | money-str/null | M15: `spend / ad_orders` | — |
+
+> **v9 语义变化（2026-09-13，merge `3c8ea96`）**：
+>
+> - `cancel_rate` 只计**国内取消**（CANCELLED ∧ 无 38301）；海外取消改由全损口径承载——修复 v8 及之前两率重叠（海外取消同单重复计入取消率与全损退款率）
+> - `full_loss_qty` 从「38301 ∧ (完结 case ∨ CANCELLED)」切到 v9 两桶：**完结退货不论物流**（限已付白名单订单，保住 rule 0 未归属不变量）+ 海外取消
+> - 新增 2 字段：`domestic_cancelled_order_count` / `overseas_cancelled_order_count`
+> - `meta.rubric_version` = `v9`；钻取 orders 的 `full_loss` 旗标同 v9（完结退货 ∨ 海外取消）
+>
+> **v8 语义变化（breaking relative to v5 文本）**：
+>
+> - `net_profit / roi_real / roi_breakeven / platform_fee` 公式重写（见 M18/M14/M17/M19）
+> - `return_loss` 口径从"完结退货件 × cost"切到"全损件数 × cost"（M13b v8）
+> - `cost_source` 从两值扩为四值
+> - `unit_cost_used` 来源从 manual+30 兜底切到 MANUAL→PURCHASE→SOURCE_PRICE→40 兜底链
+> - 新增 6 字段：`net_revenue / settled_sales / unsettled_sales / settled_order_count / full_loss_qty / full_loss_cancelled_qty / full_loss_rate`
+> - 主列（D8）从 13 列精简为 6 列：商品 + `spend` + `sales` + `order_count` + `cancel_rate` + `full_loss_rate` + `net_profit`；其余 26 字段继续在 JSON 返回，由下钻面板消费
+
+格式化约定(§5.1):**money = 4 位小数字符串**、比率/ROI = 2 位小数字符串、件数/单量整数;`null` = 无解/除数为 0(页面显示 `—`);无投放 SPU `spend="0.0000"` + `ad_count=0`。全表金额统一 USD(原币 VND/CNY 服务端按 fx 快照一次换算,`meta.fx` 标注)。`totals` = 跨分页、当前筛选的加总:`row_count`(SPU 数)、单量(`order_count` 有效单 / `cancelled_order_count` 取消单 / `total_orders` = 两者之和,跨可见 SPU 全局去重)、`gmv`(全部订单销售额 = 白名单有效 ∪ 取消订单的原始行金额;money-str)与 `spend, sales, refund_net_amount, return_loss, net_profit`(行级 USD 服务端加总,4 位小数字符串)、`roi_real`(Σ(net_revenue−return_loss)/Σspend,Σspend=0 → null);`total` = 匹配行数。**口径注(2026-09-06 全链状态口径,COD 店)**:行级 `sales`/单量/`gmv` 全部按**订单状态**下单即算——白名单状态订单(含 COD 在途/待收款)计入 `sales` 与有效单量;取消订单只进 `gmv`/`cancelled_order_count`,不重复入 sales;净利润/退款率/ROI 等派生金额自动跟随状态口径 sales(回款前偏乐观)。窗口裁剪列 = `COALESCE(paid_at, order_time)`(已收款按收款日；COD 在途/取消未收款按下单日)。**主表行内列集(v8 D8 主表精简,v9 口径)**:**主列 = 商品 + 消耗USD/有效GMV(`sales`)/有效出单量(`order_count`)/取消率(`cancel_rate`)/全损退款率%(`full_loss_rate`)/净利润**;其余 28 字段（ROI/保本/平台佣金/全损货损金额/已结未结 GMV/退款拆分/广告归因/订单结构）由行内 accordion 钻取面板五 tab 顶部汇总区展示（详见下节）。`meta` 携带 fx/fee/cost_assumption/window/**`rubric_version`(v8 新增,当前值 v9)**:/"unattributed_refund_lines/computed_at/currency;`meta.window` 为 ad 视图观测窗口(供参考),销售/退款是否裁剪见 `note`。
+
+**v9 默认值总览**：
+
+- `sort="roi_real"`（API 契约不动；页面 JS 显式传 `sort=net_profit&order=asc`）
+- `fee_rate=0.308`（仅作用于未结算订单 `unsettled_sales × 0.308`，已结不受影响）
+- `include_all=false`、`limit=100`、`order="asc"`
+- `meta.rubric_version="v9"`（口径漂移一眼定位）
 
 Example:
 
 ```bash
 curl -sS -H "X-API-Key: $KEY" \
-  'http://127.0.0.1:9877/v2/analytics/spu-roi?sort=roi_real&order=asc&limit=5'
+  'http://127.0.0.1:9877/v2/analytics/spu-roi?sort=net_profit&order=asc&limit=5'  # 页面视图
+curl -sS -H "X-API-Key: $KEY" \
+  'http://127.0.0.1:9877/v2/analytics/spu-roi?sort=roi_real&order=asc&limit=5'  # API 默认（外部分析兼容）
 ```
 
 Auth 分类细节:`/v2/analytics/spu-roi` 命中 `_READONLY_EXACT`(readonly),与 `/v2/analytics/sync/*`(readwrite,Chrome 扩展 ingest)是两条不相干的路由。
+
+### Analytics — SPU 实际 ROI 钻取 (`/v2/analytics/spu-roi/{spu_pk}/...`)
+
+**Stability: stable · 只读(readonly)**。v8 D6 拍板的"每 tab 懒加载"端点集——行内 accordion 展开详情面板时，前端按 `(spu_pk, tab, 窗口)` 缓存，首次激活 tab 才请求。利润构成 tab **不发请求**（主表行字段直出）。4 个端点 + 共享约定如下。
+
+#### `GET /v2/analytics/spu-roi/{spu_pk}/orders`
+
+订单·物流 tab 数据源。
+
+| query | type | default | notes |
+| --- | --- | --- | --- |
+| `w_start` / `w_end` | date | — | 销售/退款裁剪窗口（同主表语义：销售按 `COALESCE(paid_at, order_time)`、退款按 `updated_at_source`，含 `w_end` 当日） |
+
+Response `{spu_pk, spu_id, window, orders[], meta}`。`orders[]` 字段：`order_id, status, qty, line_gmv(USD), paid_at, is_settled(已结 ✓/未结), settled_net_share(SETTLEMENT × 分摊比例，未结 → null), arrived_overseas(38301 命中), full_loss(**v9：完结退货(RETURN_AND_REFUND/REFUND_ONLY，不论物流) ∨ 海外取消(CANCELLED∧38301)**), shipment{status, tracking_number}, tracking[]`（按事件时间排序的 `tracking_events` 子集：`action_code, desc, event_at`）。
+
+防呆：`orders` 上限 500 条；超限返回 `{meta.orders_truncated: true}`。404：spu_pk 不存在。金额与主表同序列化（money 4 位、USD）。
+
+#### `GET /v2/analytics/spu-roi/{spu_pk}/settlements`
+
+结算 tab 数据源（已结订单组件拆分）。
+
+| query | type | default | notes |
+| --- | --- | --- | --- |
+| `w_start` / `w_end` | date | — | 同 orders |
+
+Response `{spu_pk, settlements[], meta}`。`settlements[]` 每条 = 一笔已结订单：`order_id, statement_time, share_ratio(该 SPU 行占整单 GMV 比例), components[]`。`components[]` = 完整 53 字段（v8 D2 零值落库后含 0 行），每条 `{code(如 SETTLEMENT/GROSS_SALES/PLATFORM_COMMISSION…), amount_vnd(VND 原值), amount(USD 换算)}`。
+
+未结算订单 **不**进 `settlements[]`（tab 底部由行字段 `settled_order_count / unsettled_sales` 计算一行汇总："未结算 N 单，估算净收入 $X（基线 r̂ × (1−退款率)）"）。
+
+#### `GET /v2/analytics/spu-roi/{spu_pk}/cases`
+
+售后 tab 数据源。
+
+| query | type | default | notes |
+| --- | --- | --- | --- |
+| `w_start` / `w_end` | date | — | 同 orders |
+
+Response `{spu_pk, cases[], meta}`。`cases[]` 每条 = `case_id, order_id(可跳订单 tab 对号), type(REFUND_ONLY/RETURN_AND_REFUND/CANCELLATION), status(未完结标黄), refund_amount, reason(code+text), updated_at`。退款金额按 `case_lines.sales_order_line_id → sales_order_lines.spu_pk` 归集（同主表 M7/M8/M9）。
+
+#### `GET /v2/analytics/spu-roi/{spu_pk}/ads`
+
+广告 tab 数据源（**无窗口参数**——广告全窗口累计，与主表一致）。
+
+Response `{spu_pk, ads[], meta}`。`ads[]` 每条 = `campaign_id, spend(USD), orders, first_day, last_day`（`plugin.ad_daily` ∪ `plugin.ad_today` 聚合（`spu_roi.py::_SQL_ROI_AD` 直读））。**不含 `campaign_name`**——v8 拍板不追（同步数据无名称字段）。
+
+#### 4 端点共享约定
+
+- 鉴权：`_READONLY_EXACT`（readonly 角色矩阵沿用主表）
+- 404：`spu_pk` 不存在
+- 金额：money 4 位小数字符串（USD，原币字段同时给 VND）；比率 2 位
+- 窗口：`w_start/w_end` 与主表同语义；`tracking / settlement / cases` 随订单走，不单独裁剪；`ads` 无窗口
+- 缓存：前端按 `(spu_pk, tab, 窗口)` 缓存；主表筛选变化 → 清缓存
+- 错误：参数非法 → 422；未授权 → 401/403（沿用 auth middleware 矩阵）
 
 ### Analytics Sync (`/v2/analytics/sync/*`)
 
@@ -335,16 +483,24 @@ Mounted under tts-erp at `/v2/analytics/sync/*`（2026-09-02 从
 extension. Auth requires **readwrite** role plus a per-seller scope grant
 (the api_key's `scopes` array). Full protocol lives in
 [`analytics/dump-architecture.md`](analytics/dump-architecture.md);
+[`analytics/range-aggregate-history-sync.md`](analytics/range-aggregate-history-sync.md)
+is the v3 区间聚合方案（2026-09-07 起，插件端 v3 + 服务端双模式）；
 this section is the agent-facing quick reference.
 
 #### `GET /v2/analytics/sync/cursor`
 
-has-data 预检（dump architecture，2026-09-02 起）：查这个
-`(scope, endpoint, day[, campaignId])` 是否已有 dump 落库
-（`analytics.ad_raw` existence）。plugin 在打 TikTok 前先问一次，
-`hasData: true` → 跳过该天的抓取（防风控）。work-list 模式
-（`items` / `nextRequiredDay` / `pageSize` / `cursor` / `timezone`）
-已随 dump architecture 删除（见 `analytics/dump-architecture.md`）。
+双模式预检（dump architecture + v3 range-aggregate）：
+
+- **v3 coverage（带 `kind=history|today` + `campaignId`）**：返回该
+  `(scope, endpoint, campaign)` 的 live 行状态 `{kind, hasRow, dayStart,
+  dayEnd, capturedAt}`。plugin 据此决策 history 是否已 settled（无行 / 区间
+  不匹配 → 抓取整段；精确覆盖 → 跳过）。
+- **legacy has-data（无 `kind` + `day`）**：查该
+  `(scope, endpoint, day[, campaignId])` 是否已被覆盖（daily 单日 或 live 区间含该日）。
+  `hasData: true` → 跳过该天的抓取（防风控）。
+
+work-list 模式（`items` / `nextRequiredDay` / `pageSize` / `cursor` /
+`timezone`）已随 dump architecture 删除（见 `analytics/dump-architecture.md`）。
 
 Query parameters:
 
@@ -353,8 +509,10 @@ Query parameters:
 | `sellerId` | string | required, ≤ 128 chars |
 | `advertiserId` | string | required, ≤ 128 chars |
 | `endpoint` | string | required；必须在 dump 白名单（见下） |
-| `day` | date | required, `YYYY-MM-DD` |
-| `campaignId` | string | optional, ≤ 128 chars；缺省查整 day |
+| `kind` | string | optional；`history`/`today` 时启用 v3 coverage 模式 |
+| `campaignId` | string | coverage 模式必带；legacy 模式可选 |
+| `dayStart` / `dayEnd` | date | optional（coverage 模式请求冗余回显） |
+| `day` | date | legacy 模式必带, `YYYY-MM-DD` |
 
 `endpoint` 白名单（server 据此推导 `storageKey`）：
 
@@ -362,32 +520,124 @@ Query parameters:
 - `/oec_ads/shopping/v1/oec/stat/post_session_list` → `sessionAnalyses`
 - `/oec_ads/shopping/v1/oec/stat/campaign_opt_log_list` → `campaignChangeLogs`
 
-白名单外的 endpoint → `400 SCHEMA_INVALID`。
+白名单外的 endpoint → `400 SCHEMA_INVALID`。coverage 模式缺 `campaignId` /
+非法 `kind` → `400 SCHEMA_INVALID`。
 
-Response (`code: 0`):
+coverage 响应示例（`code: 0`）：
 
 ```json
 {
   "code": 0,
   "requestId": "req-…",
   "data": {
-    "day": "2026-08-23",
-    "endpoint": "/oec_ads/shopping/v1/oec/stat/post_product_list",
+    "endpoint": "…/post_product_list",
     "storageKey": "productAnalyses",
-    "hasData": false
+    "kind": "history",
+    "hasRow": true,
+    "campaignId": "campaign-1",
+    "dayStart": "2026-07-01",
+    "dayEnd": "2026-09-05",
+    "capturedAt": "2026-09-05T12:00:00.000Z"
   }
 }
 ```
 
-带 `campaignId` 查询时响应多带 `"campaignId"` 字段。`403 SCOPE_DENIED`
-if the api_key's `scopes[]` doesn't cover the requested
-`(sellerId, advertiserId)`.
+legacy has-data 响应仍为 `{day, endpoint, storageKey, hasData[, campaignId]}`。
+
+#### `GET /v2/analytics/sync/coverage`
+
+批量 coverage 查询（方案 B）：一次返回所有 campaign 的覆盖数据。支持天级（`kind=daily`）和月级（`kind=monthly`）两种粒度。设计文档：`analytics/daily-sync-with-coverage.md` §5.1。
+
+Auth：**readwrite** + per-seller scope grant（同 `/cursor` 和 `/dumps`）。
+
+Query parameters:
+
+| name | type | notes |
+| --- | --- | --- |
+| `sellerId` | string | required, ≤ 128 chars |
+| `advertiserId` | string | required, ≤ 128 chars |
+| `endpoint` | string | required；必须在 dump 白名单（同 `/cursor`） |
+| `kind` | string | required；`daily` 或 `monthly` |
+| `startDay` / `endDay` | date | `kind=daily` 时必带，`YYYY-MM-DD`；`startDay` ≤ `endDay` |
+| `startMonth` / `endMonth` | string | `kind=monthly` 时必带，`YYYY-MM` 格式；`startMonth` ≤ `endMonth` |
+| `campaignId` | string[] | optional；可重复传入本轮完整计划集合。服务端会为没有任何覆盖的计划返回空 `coveredPeriods`，避免冷启动计划被误判为响应缺失 |
+
+`endpoint` 白名单（同 `/cursor` 和 `/dumps`）：
+
+- `/oec_ads/shopping/v1/oec/stat/post_product_list` → `productAnalyses`
+- `/oec_ads/shopping/v1/oec/stat/post_session_list` → `sessionAnalyses`
+- `/oec_ads/shopping/v1/oec/stat/campaign_opt_log_list` → `campaignChangeLogs`
+
+响应示例（`kind=daily`）：
+
+```json
+{
+  "code": 0,
+  "requestId": "req-…",
+  "data": {
+    "kind": "daily",
+    "endpoint": "/oec_ads/…/post_product_list",
+    "storageKey": "productAnalyses",
+    "startDay": "2026-01-01",
+    "endDay": "2026-10-08",
+    "totalRequested": 281,
+    "campaigns": {
+      "campaign-1": {
+        "coveredPeriods": ["2026-01-01", "2026-01-02", "..."],
+        "totalCovered": 280
+      },
+      "campaign-2": {
+        "coveredPeriods": ["2026-03-15", "2026-03-16", "..."],
+        "totalCovered": 207
+      }
+    }
+  }
+}
+```
+
+响应示例（`kind=monthly`）：
+
+```json
+{
+  "code": 0,
+  "requestId": "req-…",
+  "data": {
+    "kind": "monthly",
+    "endpoint": "/oec_ads/…/post_product_list",
+    "storageKey": "productAnalyses",
+    "startMonth": "2026-01",
+    "endMonth": "2026-09",
+    "totalRequested": 9,
+    "campaigns": {
+      "campaign-1": {
+        "coveredPeriods": ["2026-01", "2026-02", "..."],
+        "totalCovered": 8
+      }
+    }
+  }
+}
+```
+
+`totalRequested` = 请求区间内的总天数/月数；`coveredPeriods` = 该 campaign 已有数据的天/月列表（已排序）；`totalCovered` = 已覆盖的天/月数。
+
+当请求带有 `campaignId` 时，`campaigns` 以请求集合为准，缺少历史数据的计划也会返回
+`{ "coveredPeriods": [], "totalCovered": 0 }`。客户端因此可以安全地按零覆盖补齐；缺少
+计划不再被当作“跳过”。对于 campaign-level endpoint，coverage 从对应的
+`plugin.ad_raw_log` 计算；product-level endpoint 仍从结构化表计算。
+
+Errors:
+
+| code | meaning |
+| --- | --- |
+| 400 `SCHEMA_INVALID` | endpoint 不在白名单 / kind 非法 / 必填日期参数缺失 / 日期格式错误 / startDay > endDay |
+| 403 `SCOPE_DENIED` | scope mismatch |
+| 401 | missing or invalid Bearer token |
 
 #### `POST /v2/analytics/sync/dumps`
 
 单 dump 写入（dump architecture，2026-09-02 起；旧 `/batches` 批量协议
 已下线 404）。一次请求 = 一次完整 HTTP 交换的原始落库
-（`analytics.ad_raw`，source-of-truth）。plugin **严禁批量**：一页一
+（`plugin.ad_raw_log`，原始请求日志）。plugin **严禁批量**：一页一
 dump、一页一发，永不把 N 页 buffer 成一批（见
 `analytics/dump-architecture.md` D2）。
 
@@ -395,31 +645,40 @@ Body（≤ 2 MB）：
 
 ```json
 {
-  "protocolVersion": 2,
+  "protocolVersion": 3,
   "requestId": "req-…",
   "scope": {"sellerId": "seller-1", "advertiserId": "adv-1"},
   "dump": {
     "endpoint": "/oec_ads/shopping/v1/oec/stat/post_product_list",
     "method": "POST",
-    "day": "2026-08-23",
+    "kind": "history",
+    "dayStart": "2026-07-01",
+    "dayEnd": "2026-09-05",
     "campaignId": "campaign-1",
     "request": {"url": "…", "headers": {}, "body": {}},
     "response": {"status": 200, "headers": {}, "body": {"data": []}},
-    "capturedAt": "2026-08-23T03:00:00.000Z"
+    "capturedAt": "2026-09-05T12:00:00.000Z"
   }
 }
 ```
 
-- `request` / `response` = plugin 抓的完整 HTTP 交换（JSONB 原样落 ad_raw）。
+- v3（`protocolVersion: 3`）：`kind` ∈ `history`/`today`，`dayStart`/`dayEnd`
+  必带；`day` 保留为兼容冗余（必须 == `dayEnd`）。每 `(scope, endpoint,
+  campaign, kind)` 至多一行 live（Design A 快照）。
+- v2（`protocolVersion: 2`，无 `kind`/区间）：legacy daily 单日写入兼容
+  （`day_start=day_end=day`），首个覆盖它们的 v3 history 写入时被同事务折叠。
+- `request` / `response` = plugin 抓的完整 HTTP 交换（JSONB 原样落 `ad_raw_log`）。
 - `capturedAt` 必须带时区（`Z` 或 `+00:00`）。
 - 不带 `page`（隐式 = 1）/ `expectedPageCount` / `storageKey` /
   `sourceRecordId` —— 这些概念在 dump architecture 已删除；`storageKey`
   由 server 从 `endpoint` 推导。
 
-幂等：server 重算 canonical idempotency key（6 字段 SHA-256，page 固定
-1），`ad_raw` 的 5 元组 unique 约束
-`(seller_id, advertiser_id, endpoint, day, campaign_id)` 兜底 ——
-同 dump 重放 → `duplicate`，不是错误。
+幂等（server 自算 canonical key）：
+
+- v3：6 字段 SHA-256 `(sellerId, advertiserId, storageKey, campaignId, kind,
+  dayStart, dayEnd)` + capturedAt 单调守卫 —— 同一 live 行重放 → `updated`；
+  更旧 capturedAt 的迟到重试 → `stale_ignored`（视为成功，不覆盖新快照）。
+- v2：6 字段 SHA-256（含 day + page=1），daily 行重放 → `duplicate`。
 
 Success response (`code: 0`):
 
@@ -434,7 +693,19 @@ Success response (`code: 0`):
 }
 ```
 
-`status ∈ {"inserted", "duplicate"}` — 两者都是成功。
+`status ∈ {"inserted", "updated", "duplicate", "stale_ignored"}` — 全部视为成功。
+> **2026-09-11 变更**：原 `api_managed` 状态已移除。当时该状态会把已 OAuth 授权店铺的广告 dump
+> **全域静默忽略**，但广告数据没有 server-side 同步路径（JOBS 里无 ad job），等于把唯一数据来源
+> 挡掉。现插件数据统一落 `plugin.*` schema，与 API 同步数据（`commerce.*` 等）按 schema 物理隔离，
+> 不再需要「来源判定」来决定是否拦截。
+
+~~内容被取代事件（history 替换/推进/重建、daily 折叠、today 跨天 reset）写
+`analytics.ad_sync_audit` 一行元数据审计（与主写同事务；30s today 常规刷新不写）。~~
+**（2026-09-11 起失效：v3 遗留对象已由 migration 0020 删除）**：v4 逐日协议不做取代审计 ——
+`ad_daily` 每日一行按自然键 upsert，允许 TikTok 延迟归因后的指标校准；
+`ad_today` 用 `ON CONFLICT DO UPDATE` 原地刷新；2026-09-19 起跨天固化
+job (`plugin.ad_merge_today2daily`) 已停用——ad_today 当前无清理路径，作为未来
+merge job 重新启用后的回填目标保留（v8.1 起 ROI 看板只读 `ad_daily`）。
 
 Errors:
 
@@ -449,6 +720,157 @@ Errors:
 
 `SCHEMA_INVALID` 响应带结构化 `errors[]`（`loc`/`msg`/`type` 安全三元组，
 无 input/ctx）；其余错误码不带 `errors` 字段。
+
+### Order Sync (`/v2/order-sync/*`)
+
+Chrome 扩展订单/物流/结算数据同步端点。插件从 TikTok Seller Center 抓取的
+HTTP 响应通过此端点写入后端 plugin schema。Auth requires **readwrite** role。
+设计文档：`tech-doc/chrome-ext-order-sync-design.md`。
+
+#### `POST /v2/order-sync/has-data`
+
+批量查业务表存在性。插件拿到 order_id 列表后，一次请求查出哪些已有数据。
+物流域用它减少 N+1 详情请求；订单域在 checkpoint 丢失、窗口变化或轮转精确
+巡检时用它识别服务端缺失订单。`covered=true` 只代表存在，不代表数据新鲜，
+订单/物流/结算的热区刷新不能被它阻断。
+
+Body：
+
+```json
+{
+  "scope": {"sellerId": "...", "shopId": "..."},
+  "domain": "logistics",
+  "ids": ["order-1", "order-2", "order-3"]
+}
+```
+
+- `domain` ∈ `{orders, logistics, statements}`
+- `ids` 最多 500 个
+
+响应（`code: 0`）：
+
+```json
+{
+  "code": 0,
+  "requestId": "req-...",
+  "data": {
+    "domain": "logistics",
+    "covered": {"order-1": true, "order-2": false, "order-3": true}
+  }
+}
+```
+
+#### `POST /v2/order-sync/dumps`
+
+接收 dump → inline 解析 → 写业务表，并记录 `plugin_logs` 健康指标。每个 dump
+仍携带一次 TikTok HTTP 交换的完整原始响应，供解析使用和诊断；当前订单同步
+接口不再写入旧的 `raw_log` 表。
+
+Body（≤ 2 MB）：
+
+```json
+{
+  "protocolVersion": 1,
+  "requestId": "req-...",
+  "scope": {"sellerId": "...", "shopId": "..."},
+  "dump": {
+    "domain": "logistics",
+    "mainOrderId": "order-1",
+    "endpoint": "/api/v1/fulfillment/logistic_detail/list",
+    "method": "GET",
+    "request": {"params": {"main_order_id": "order-1"}, "body": null},
+    "response": {"status": 200, "body": {"code": 0, "data": {"package_list": [...]}}},
+    "capturedAt": "2026-09-08T10:00:00.000Z"
+  }
+}
+```
+
+- `domain` ∈ `{orders, logistics, statements}`
+- `logistics` 域必须带 `mainOrderId`
+- `statements` 域根据响应体自动判断 list / transaction detail
+- `capturedAt` 必须带时区
+
+成功响应（HTTP 200，`code: 0`）：
+
+```json
+{
+  "code": 0,
+  "requestId": "req-...",
+  "data": {}
+}
+```
+
+- `rowsWritten` 仅作为服务端内部健康指标写入 `plugin_logs`，不是客户端成功判定条件。
+- 解析失败返回 HTTP 422 / `PARSE_ERROR`；`dump.response.body` 为 `null` 返回 HTTP 422 /
+  `EMPTY_RESPONSE_BODY`，客户端不得推进该条队列。
+- **2026-09-11**：原 `api_managed` 状态已移除（连同 `commerce.shops.data_source` 列与
+  `api/deps.py::shop_is_api_managed` 守卫）。插件与 API 同步数据现按 schema 物理隔离
+  （`plugin.*` vs `commerce.*`/`fulfillment.*`/`finance.*`），不再需要来源判定。
+- `parse_error` 时 `rowsWritten=0`，`parseError` 字段含原因
+- 订单域的 `statements` 请求可以使用单条 statement 对象作为 `response.body`；同一
+  `statement_id` 的多个 `statement_version` 在 `has-data` 中以数组传递。订单、物流、
+  结算均按可变数据刷新，`has-data` 不作为更新闸门。
+
+#### `POST /v2/order-sync/reconcile`
+
+订单和物流共用的查询接口。物流返回可恢复游标分页及明确终态的包裹候选；
+订单返回服务端总数、锚点和排序诊断信息，保留用于观测和旧版本兼容，但不得
+把订单 `serverTotal` 与 TikTok 当前滚动窗口 `total_count` 直接比较，也不得仅
+凭此字段触发订单全量上传。订单增量真值由插件本地 TikTok checkpoint 提供；
+checkpoint 异常或精确巡检时，插件按页调用 `has-data` 只补缺失订单。
+
+请求：
+
+```json
+{
+  "protocolVersion": 1,
+  "scope": {"sellerId": "...", "shopId": "..."},
+  "domains": ["orders", "logistics"],
+  "orders": {
+    "pageSize": 20,
+    "sortInfo": "6",
+    "anchorPositions": [0, 400, 899],
+    "hotWindowSize": 40
+  },
+  "logistics": {"limit": 500, "cursor": null}
+}
+```
+
+响应关键字段：
+
+```json
+{
+  "code": 0,
+  "data": {
+    "orders": {
+      "serverTotal": 900,
+      "anchors": [{"position": 0, "orderId": "order-1"}],
+      "canIncremental": true,
+      "offsetSafe": true,
+      "ordering": {"field": "order_time", "direction": "desc", "tieBreaker": "order_id"},
+      "hotWindowSize": 40
+    },
+    "logistics": {
+      "complete": false,
+      "items": [{
+        "orderId": "order-1",
+        "packageIds": ["package-1"],
+        "isTerminal": false,
+        "terminalReason": null,
+        "nextCheckAt": null
+      }],
+      "nextCursor": "500"
+    }
+  }
+}
+```
+
+订单 reconcile 返回的 `offsetSafe` / `canIncremental` 仅作诊断和兼容旧客户端，
+不直接作为订单客户端的增量门禁；客户端根据本地 checkpoint、当前窗口、锚点、
+排序方向和游标分页的逻辑位置决定快速路径或安全修复路径。安全修复可以读取全量
+当前列表，但应通过 `has-data` 避免无条件重复上传服务端已有订单。`has-data` 请求失败时
+必须保守上传当前页，不能把未知状态判为已覆盖。物流只有所有已知包裹均命中
+明确终态时才跳过，未知状态和缺少包裹记录的订单继续返回为候选。
 
 ### Misc
 
@@ -577,13 +999,14 @@ Stable external endpoints (safe to build dashboards / agents on):
 | `GET /v2/reporting/*` | readonly | v2 |
 | `POST /v2/reporting/manual-costs` | readwrite | v2 |
 | `GET /v2/fx/latest`, `/v2/fx/convert` | readonly | v2 — cached (fx.sync ≈1 上游请求/天，API 路径零上游) |
+| `GET /v2/sync/status` | readonly | v2 — sync-worker 周期作业健康（红灯 = 落后 ≥2 周期） |
 | `GET /v2/pages/manual-costs` | readonly | v2 (HTML — not a machine contract) |
 | `GET /v2/pages/spu-roi` | readonly | v2 (HTML — not a machine contract) |
 | `GET /v2/analytics/spu-roi` | readonly | stable 只读（口径见 `analytics/spu-real-roi-dashboard.md`） |
 | `GET /v2/spu-images`, upload/confirm/delete | readonly / readwrite | v2 |
 | `GET /v2/llm-context` | readonly | v2 (content evolves with the schema) |
 | `GET\|POST /v2/auth/*` | public | v2 |
-| `GET /v2/analytics/sync/cursor`, `POST /v2/analytics/sync/dumps` | readwrite + scope | analytics（自有 envelope，frozen） |
+| `GET /v2/analytics/sync/cursor`, `POST /v2/analytics/sync/dumps`, `GET /v2/analytics/sync/coverage` | readwrite + scope | analytics（自有 envelope，frozen） |
 
 Retired (404 since the 2026-08-29 hard switch — do NOT build on these;
 they exist only in git history):
