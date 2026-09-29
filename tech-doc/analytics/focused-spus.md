@@ -1,8 +1,8 @@
 # 重点关注 SPU 页面技术方案
 
-> 状态：Draft v3，等待产品确认后开发
+> 状态：Draft v4，等待产品确认后开发
 > 日期：2026-09-29
-> v3 修订：按深模块原则完成多方案比较，收敛 interface/seam，补齐无限关注范围的性能、错误和测试契约
+> v4 修订：增加 PageProfile、受控 view projection 与演进规则，使两页可差异化而不分叉公共生命周期
 > 关联现有页面：`GET /v2/pages/spu-roi`
 > 口径真相源：`GET /v2/analytics/spu-roi`
 
@@ -101,7 +101,7 @@
 - 浏览器只公开 `mountSpuProfitabilityPage()`；两种 selection adapter 是真实 seam，因为已有两个行为不同的 adapter。
 - 关注持久化独立为一个深模块，FastAPI 只做 wire adapter。
 - 页面 shell 是领域专用 module，不做通用 dashboard/table 框架。
-- 暂不引入 projection、saved-view、repository port；等第二个真实调用方出现再建立对应 seam。
+- 引入两个真实 PageProfile 和受控 view projection，承接已明确会出现的页面差异；不引入动态 plugin registry、saved-view 或 repository port。
 
 删除测试：如果删除公共盈利页面模块，汇总、表格、分页、钻取、错误生命周期会重新散落到两个页面；如果删除 selection adapter seam，两种互斥的编辑语义会重新混进公共文件。两者都能让复杂度明显重新出现，因此不是浅层转发。
 
@@ -274,16 +274,35 @@ FocusedSelection 的 implementation 必须：
 ```js
 const page = window.ttsErp.spuProfitability.mount({
   root,
-  pagePath,
-  selectionAdapter,
-  defaults: { includeAll, limit, sort, order },
+  profile: focusedSpusProfile,
 });
 
 page.reload();
 page.destroy();
 ```
 
-不公开 renderer、formatter、state、fetch helper、pager 或 drilldown helper。`selectionAdapter` 是真正会变化的 seam；目前恰好有两个 adapter：
+`PageProfile` 是页面差异的聚合 value，不是布尔开关集合：
+
+```js
+{
+  id: "focused-spus",
+  pagePath: "/v2/pages/focused-spus",
+  defaults: { includeAll: true, limit: 100, sort: "roi_real", order: "asc" },
+  selectionAdapter,
+  view: {
+    summaryIds: [/* allowlisted domain ids */],
+    columnIds: [/* allowlisted domain ids */],
+    drillTabIds: ["pnl", "orders", "settlements", "cases", "ads"],
+  },
+  extensions: [/* bounded slot extensions */],
+}
+```
+
+标准页和重点关注页各有一个显式 profile。v1 可以选择相同的 summary/column 集合，但以后调整某一页的列、顺序或 drill tab 时只修改该 profile，不修改公共状态机，也不复制 renderer。
+
+`summaryIds/columnIds/drillTabIds` 只能引用公共 module 内 allowlist 的领域定义；profile 不能传任意计算 callback。新增业务指标必须先进入后端盈利 module 和 wire contract，再由公共 renderer 登记，不能在 profile 中写前端公式。
+
+不公开 renderer、formatter、state、fetch helper、pager 或 drilldown helper。`selectionAdapter` 是第一个真实变化 seam；目前恰好有两个 adapter：
 
 ```text
 load(shopPk, signal)
@@ -314,7 +333,34 @@ FocusedSelectionAdapter
 
 adapter 只能决定“范围从哪里来、如何编辑、怎样翻译成 selection query”。公共 module 始终自行加入 `shop_pk`、日期、费率、include-all、排序和分页，并拒绝 adapter 覆盖这些公共键。adapter 不能访问汇总卡、主表、分页和钻取 DOM，也不参与盈利计算。
 
-#### D5.2 必须抽到公共模块的内容
+#### D5.2 页面差异的扩展矩阵
+
+扩展性不靠不断增加 `if (profile.id === ...)`，而是把每类变化送到对应 seam：
+
+| 将来出现的差异 | 放置位置 | 约束 |
+| --- | --- | --- |
+| SPU 范围来源、编辑和持久化 | `SelectionAdapter` | 只能贡献 selection query |
+| 标题、默认值、登录回跳、空态文案 | `PageProfile` | 纯配置/文案，不接触盈利计算 |
+| 汇总卡、列、顺序、可见 drill tab | `ViewProfile` 的 allowlisted IDs | 只能组合后端已有字段 |
+| 关注提示条、页面专属操作区 | bounded extension slot | 只访问分配的 region 和只读 snapshot |
+| 行级“取消关注”等操作 | row-action extension slot | 通过 selection command 执行，不修改公共 row 数据 |
+| 新金额、ROI 或口径 | 后端盈利 module | 禁止前端 extension 计算 |
+| 完全不同的请求生命周期 | 新页面 module | 不强迫现有 kernel 继续泛化 |
+
+extension interface 保持很窄：
+
+```text
+mount({region, commands}) -> {onSnapshot(readonlySnapshot), destroy()}
+```
+
+- `region` 只能是 shell 预留的命名 slot，例如 `scope-banner`、`toolbar-end`、`row-actions`、`empty-state`；
+- `commands` 只提供 `reload()`、`openSelectionEditor()` 等受控操作，不暴露可变 state；
+- `readonlySnapshot` 只提供当前 shop、selection 摘要、loading/error 和已序列化 overview；
+- 新 slot 只在第二个真实页面差异出现时加入，不预设任意插槽或直接交出 root DOM。
+
+由此可以允许页面逐步出现差异，同时保证请求竞态、错误生命周期、totals、分页和钻取仍只有一份 implementation。
+
+#### D5.3 必须抽到公共模块的内容
 
 以下行为两页完全一致，集中到 `spu-profitability-page.js`，作为私有 implementation，不逐个暴露：
 
@@ -348,7 +394,7 @@ BOOTING → AWAITING_SHOP → RESOLVING_SELECTION
 
 这些内容被抽走后，修复一处表格、钻取、分页或错误处理，两页同时生效。
 
-#### D5.3 保留在各自 adapter 的内容
+#### D5.4 保留在各自 adapter/profile 的内容
 
 以下行为语义不同，不应硬塞进公共模块：
 
@@ -356,7 +402,7 @@ BOOTING → AWAITING_SHOP → RESOLVING_SELECTION
 - 重点关注页：关注列表 GET/PATCH、服务端分页搜索、编辑草稿、软移除、readonly 禁用编辑。
 - 两页各自的标题、说明文字、空状态 CTA、侧边栏 active 状态和登录回跳路径。
 
-#### D5.4 HTML 与 CSS 的抽象
+#### D5.5 HTML 与 CSS 的抽象
 
 服务端新增 `_render_spu_profitability_page(config)`，从同一 HTML shell 生成两页。config 是内部 typed value，只允许仓库内的固定页面：
 
@@ -366,25 +412,26 @@ class SpuProfitabilityPageConfig:
     slug: Literal["spu-roi", "focused-spus"]
     title: str
     page_path: str
-    selection_slot: Literal["adhoc", "focused"]
+    profile_id: Literal["standard-roi", "focused-spus"]
     entrypoint_js: str
-    include_all_default: bool
 ```
 
-公共 shell 包含汇总卡、日期/费率控件、主表、钻取模板、分页、错误区和公共资产。renderer 不接受任意 HTML/JS URL，也不通过复制整段常量或脆弱的全页字符串替换派生页面。
+公共 shell 包含汇总卡、日期/费率控件、主表、钻取模板、分页、错误区、命名 extension regions 和公共资产。页面 defaults、selection、view 与 extensions 由固定 profile 提供。renderer 不接受任意 HTML/JS URL，也不通过复制整段常量或脆弱的全页字符串替换派生页面。
 
 CSS 分两层：
 
 - `spu-roi.css`（后续可更名为 `spu-profitability.css`）：公共账页 token、汇总卡、工具栏、主表、钻取、分页、tooltip、lightbox、响应式。
 - `focused-spus.css`：仅关注编辑器、关注计数和重点关注空状态。
 
-#### D5.5 明确不做的抽象
+页面专属规则统一挂在 `[data-page-profile="focused-spus"]` 下，不能通过高 specificity 覆盖公共表格/钻取基础规则。若某页确实需要不同表格表现，应先形成 view/profile 差异，再增加受控 modifier，避免 CSS 漂移成两份隐式实现。
+
+#### D5.6 明确不做的抽象
 
 - 不做通用 dashboard/table/form 框架；列名和盈利语义继续是领域代码。
-- 不预建 projection registry、saved-view adapter 或通用 persisted-scope provider；当前没有第二个真实调用方。
+- 不做动态/用户自定义 projection registry、saved-view adapter 或通用 persisted-scope provider；只支持仓库内 allowlisted view IDs 和两个固定 PageProfile。
 - 不新增 repository port 或内存假实现；PostgreSQL 是 local-substitutable，直接用专用测试库验证真实 SQL。
 - 不把每个 formatter 或 DOM helper 都变成公共导出；它们是公共模块的私有 implementation。
-- 不用一个巨大的 `if (mode === "focused")` 文件同时承载两套编辑逻辑；变化点必须留在 selection adapter。
+- 公共 kernel 不出现散落的 `if (profile.id === "focused-spus")`；差异必须进入 PageProfile、selection adapter、view descriptor 或明确的 extension slot。
 - 不复制 `spu-roi.js` 后再分别维护。
 
 建议文件结构：
@@ -608,8 +655,11 @@ X-Requested-With: tts-erp
 4. 店铺切换 abort 旧 selection/overview/drilldown；旧响应不能渲染。
 5. 401 使用配置的 `pagePath`；FX、网络、畸形 payload 和重试生命周期两页一致。
 6. PATCH 发送 CSRF header；失败保留草稿，成功刷新管理页/计数/ROI。
-7. 相同 overview fixture 在两种 adapter 下产生相同汇总、表格、分页和钻取行为。
-8. 将现有依赖 source grep 的断言逐步替换为对 mount interface 的可执行 DOM 测试；不测试私有 formatter 或 renderer。
+7. 共享 conformance suite 对两个 PageProfile 各跑一次：竞态、401、FX、分页、排序、钻取和 retry 必须一致。
+8. profile-specific suite 验证不同标题、默认值、列/汇总排列、空态、扩展 slot 和专属操作，不要求两页 DOM 完全相同。
+9. adapter/profile 试图覆盖 `shop_pk`、日期、费率、排序或分页等公共 query key 时必须拒绝。
+10. 相同 overview fixture 在相同 ViewProfile 下产生相同汇总、表格、分页和钻取行为；不同 ViewProfile 只改变 allowlisted 组合。
+11. 将现有依赖 source grep 的断言逐步替换为对 mount interface 的可执行 DOM 测试；不测试私有 formatter 或 renderer。
 
 ### 9.5 验证命令
 
@@ -665,13 +715,14 @@ flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast
 4. **最近状态不等于完整审计**：软状态表只记录当前状态和最近操作；完整审计如有需求另建事件表。
 5. **actor 标识**：优先记录认证 key hash/稳定主体标识，绝不接收浏览器自报 actor；若当前 grant 无稳定主体则允许空值并记录为待补能力。
 6. **`include_all` 命名误导**：本功能只保持兼容，不顺手修语义，避免把架构重构和业务口径改动混在一起。
+7. **PageProfile 变成配置垃圾场**：profile 只允许 identity/defaults/selection/view/extensions；任何影响请求竞态、错误生命周期、totals 或钻取缓存的属性都拒绝进入 profile。新 variation 只有在第二个真实页面差异出现时才建立 seam。
 
 ## 13. 开发前待确认
 
 以下为本方案的推荐默认值，等待确认后再开始开发：
 
 1. **每店关注总数不设业务上限**：管理列表服务端分页，ROI 使用 `scope=focused` 在数据库内解析范围；现有 `spu_ids` 的 100 个限制只保留给临时筛选。
-2. **采用最小 interface + 端到端 seam**：具体 Activity/Exact/Focused selection；一个公共浏览器 mount；独立关注集合 module；不预建 provider/projection/saved-view 框架。
+2. **采用最小 interface + 端到端 seam**：具体 Activity/Exact/Focused selection；一个公共浏览器 mount；两个固定 PageProfile；allowlisted ViewProfile；独立关注集合 module；不预建动态 plugin/provider/saved-view 框架。
 3. **PATCH 返回有界 mutation receipt**：不返回无限增长的完整关注集合，成功后重读当前分页。
 4. **readonly 可看、readwrite 可编辑**：与普通运营写操作一致。
 5. **软移除**：页面表现为删除，数据库保留 inactive 当前状态和最近操作元数据，但不宣称完整事件历史。
