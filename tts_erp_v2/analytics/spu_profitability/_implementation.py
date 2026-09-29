@@ -679,9 +679,7 @@ def _resolve_fx_basis(sess: Session) -> FxBasis:
         raise FxRateUnavailable(
             "USD exchange-rate snapshot must contain finite positive rates"
         )
-    cny_usd = (Decimal(1) / cny_rate).quantize(
-        _RATE_Q8, rounding=ROUND_HALF_UP
-    )
+    cny_usd = (Decimal(1) / cny_rate).quantize(_RATE_Q8, rounding=ROUND_HALF_UP)
     return FxBasis(
         snapshot_id=rm.snapshot_id,
         usd_cny=cny_rate,
@@ -1212,9 +1210,7 @@ def _query_spu_roi(
                 "ad_system_remaining_ad_spend_capacity": (
                     ad_system_remaining_ad_spend_capacity
                 ),
-                "ad_system_breakeven_roi_status": (
-                    FormulaStatus.ESTIMATED_KNOWN_COSTS
-                ),
+                "ad_system_breakeven_roi_status": (FormulaStatus.ESTIMATED_KNOWN_COSTS),
                 "fee_rate_used": row_rate,
                 "fee_source": row_fee_source,
             }
@@ -1249,9 +1245,7 @@ def _query_spu_roi(
     money_total: dict[str, Decimal] = {
         "spend": sum((r["spend"] for r in scope_plain), Decimal(0)),
         "sales": sum((r["sales"] for r in scope_plain), Decimal(0)),
-        "effective_sales": sum(
-            (r["effective_sales"] for r in scope_plain), Decimal(0)
-        ),
+        "effective_sales": sum((r["effective_sales"] for r in scope_plain), Decimal(0)),
         "refund_net_amount": sum(
             (r["refund_net_amount"] for r in scope_plain), Decimal(0)
         ),
@@ -1270,17 +1264,13 @@ def _query_spu_roi(
     ad_system_actual_roi: Decimal | None = None
     if money_total["spend"] != 0:
         ad_system_actual_roi = money_total["gmv_ad"] / money_total["spend"]
-    ad_system_max_ad_spend = (
-        money_total["net_revenue"] - money_total["cogs_total"]
-    )
+    ad_system_max_ad_spend = money_total["net_revenue"] - money_total["cogs_total"]
     ad_system_remaining_ad_spend_capacity = (
         ad_system_max_ad_spend - money_total["spend"]
     )
     ad_system_breakeven_roi: Decimal | None = None
     if ad_system_max_ad_spend > 0 and money_total["gmv_ad"] > 0:
-        ad_system_breakeven_roi = (
-            money_total["gmv_ad"] / ad_system_max_ad_spend
-        )
+        ad_system_breakeven_roi = money_total["gmv_ad"] / ad_system_max_ad_spend
 
     spu_pks_in_scope = [r["spu_pk"] for r in scope_plain]
     scope_row = None
@@ -1399,12 +1389,8 @@ def _query_spu_roi(
         ad_system_actual_roi=ad_system_actual_roi,
         ad_system_breakeven_roi=ad_system_breakeven_roi,
         ad_system_max_ad_spend=ad_system_max_ad_spend,
-        ad_system_remaining_ad_spend_capacity=(
-            ad_system_remaining_ad_spend_capacity
-        ),
-        ad_system_breakeven_roi_status=(
-            FormulaStatus.ESTIMATED_KNOWN_COSTS
-        ),
+        ad_system_remaining_ad_spend_capacity=(ad_system_remaining_ad_spend_capacity),
+        ad_system_breakeven_roi_status=(FormulaStatus.ESTIMATED_KNOWN_COSTS),
     )
 
     # meta（§4 v7）
@@ -1439,9 +1425,7 @@ def _query_spu_roi(
     warnings: list[str] = []
     if any(row["cost_source"] == "DEFAULT_K1" for row in scope_plain):
         warnings.append("default_unit_cost_used")
-    if any(
-        row["settled_order_count"] < row["order_count"] for row in scope_plain
-    ):
+    if any(row["settled_order_count"] < row["order_count"] for row in scope_plain):
         warnings.append("unsettled_orders_estimated")
     warnings.append("ad_system_other_necessary_costs_not_modeled")
 

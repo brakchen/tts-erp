@@ -96,7 +96,9 @@ class ProfitScope:
             if len(set(self.spu_ids)) != len(self.spu_ids):
                 raise ValueError("spu_ids must contain unique ids")
             if any(not value or len(value) > 128 for value in self.spu_ids):
-                raise ValueError("each spu_id must contain between 1 and 128 characters")
+                raise ValueError(
+                    "each spu_id must contain between 1 and 128 characters"
+                )
         if (
             self.start_date is not None
             and self.end_date is not None

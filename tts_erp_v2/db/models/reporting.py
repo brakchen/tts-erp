@@ -250,9 +250,7 @@ class ShopFeeRateEstimate(Base):
     fee_rate: Mapped[Decimal] = mapped_column(Numeric(8, 6), nullable=False)
     kept_order_count: Mapped[int] = mapped_column(Integer, nullable=False)
     kept_line_gmv: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
-    window_line_gmv: Mapped[Decimal] = mapped_column(
-        Numeric(20, 4), nullable=False
-    )
+    window_line_gmv: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
     kept_share: Mapped[Decimal] = mapped_column(Numeric(8, 6), nullable=False)
     total_fee: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
     currency: Mapped[str] = mapped_column(Text, nullable=False)
