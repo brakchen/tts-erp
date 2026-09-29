@@ -32,6 +32,8 @@ from tts_erp_v2.analytics.spu_profitability._types import (
     ProfitabilityBasis,
     ProfitabilityOverview,
     ProfitabilityTotals,
+    ShopFeeRateEntry,
+    ShopFeeRateEstimate,
     SpuProfitability,
 )
 from tts_erp_v2.db.constants import PAID_SALES_ORDER_STATUSES
@@ -46,6 +48,9 @@ log = logging.getLogger(__name__)
 # K1 默认 = 40 CNY/件（D1 拍板：原 K1=30 作废；≈ $5.95/件 @0.148823）
 K1_DEFAULT_CNY = Decimal(40)
 # 平台佣金基线 r̂（dashboard D10 2026-09-06 实测重定）
+# 2026-09-29 起为兜底值：config.shop_fee_rate 有实测行的店铺用店铺费率
+# （analytics.shop_fee_rate 任务每 24h 按近 30 天已结算订单重算），
+# 无实测样本的店铺回退此基线。
 FEE_RATE_BASELINE = Decimal("0.308")
 
 _RATE_Q8 = Decimal("0.00000001")
@@ -371,6 +376,31 @@ _SQL_ROI_WINDOW = text(
     "WHERE endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list' "
 )
 
+# 店铺级平台抽成费率日快照（analytics.shop_fee_rate 任务产出）。
+# 取每店最新一行；读取侧按 MAX_ESTIMATE_AGE_DAYS 判过期后回退基线。
+_SQL_SHOP_FEE_RATES = text(
+    """
+    SELECT DISTINCT ON (shop_pk)
+           shop_pk, fee_rate, calculated_on, calculated_at, lookback_days,
+           eligible_order_count, line_gmv_covered, line_gmv_total,
+           coverage_ratio, total_fee, currency
+    FROM reporting.shop_fee_rate_estimates
+    ORDER BY shop_pk, calculated_at DESC
+    """
+)
+
+# 表存在性探测。用 ``to_regclass``（不存在返回 NULL，永不报错）而不是 try/except：
+# ``consistent_read_snapshot`` 开的是真事务（非 savepoint），语句报错会毒化整个
+# 事务（后续查询全部 "current transaction is aborted"）—— 那样「回退基线」
+# 反而会把整页打挂。
+_SQL_SHOP_FEE_TABLE_EXISTS = text(
+    "SELECT to_regclass('reporting.shop_fee_rate_estimates') IS NOT NULL"
+)
+
+#: 店铺费率快照的最大有效期（天）。超过即视为过期并回退全局基线 —— job 长
+#: 期未跑时不应继续用陈旧费率估算未结算净额。
+MAX_ESTIMATE_AGE_DAYS = 7
+
 _SQL_ROI_DATA_WINDOW = text(
     """
     WITH croppable AS (
@@ -692,6 +722,73 @@ def _spu_pk_exists(sess: Session, spu_pk: int) -> bool:
     return row is not None
 
 
+def _load_shop_fee_estimates(
+    sess: Session,
+) -> dict[int, ShopFeeRateEstimate]:
+    """加载每店最新费率快照：``{shop_pk: ShopFeeRateEstimate}``。
+
+    表不存在（迁移未跑）时按空 map 处理，全量回退全局基线 —— 读路径不因
+    快照表缺失而失败（存在性用 ``to_regclass`` 探测，不走异常）。
+    """
+    if not sess.execute(_SQL_SHOP_FEE_TABLE_EXISTS).scalar():
+        log.warning(
+            "reporting.shop_fee_rate_estimates missing (migration not applied?); "
+            "falling back to baseline %s",
+            FEE_RATE_BASELINE,
+        )
+        return {}
+    rows = sess.execute(_SQL_SHOP_FEE_RATES).mappings().all()
+    return {
+        int(r["shop_pk"]): ShopFeeRateEstimate(
+            calculated_on=r["calculated_on"],
+            calculated_at=r["calculated_at"],
+            lookback_days=int(r["lookback_days"]),
+            fee_rate=Decimal(r["fee_rate"]),
+            eligible_order_count=int(r["eligible_order_count"]),
+            line_gmv_covered=Decimal(r["line_gmv_covered"]),
+            line_gmv_total=Decimal(r["line_gmv_total"]),
+            coverage_ratio=Decimal(r["coverage_ratio"]),
+            total_fee=Decimal(r["total_fee"]),
+            currency=r["currency"],
+        )
+        for r in rows
+    }
+
+
+def _resolve_shop_fee(
+    shop_pk: int,
+    *,
+    shop_name: str | None,
+    override_rate: Decimal | None,
+    estimates: dict[int, ShopFeeRateEstimate],
+    fresh_before: date,
+) -> ShopFeeRateEntry:
+    """解析单店费率：页面覆写 > 未过期实测快照 > 全局基线。"""
+    if override_rate is not None:
+        return ShopFeeRateEntry(
+            shop_pk=shop_pk,
+            shop_name=shop_name,
+            fee_rate=override_rate,
+            source="user_override",
+        )
+    estimate = estimates.get(shop_pk)
+    if estimate is not None and estimate.calculated_on >= fresh_before:
+        return ShopFeeRateEntry(
+            shop_pk=shop_pk,
+            shop_name=shop_name,
+            fee_rate=estimate.fee_rate,
+            source="shop_estimate",
+            estimate=estimate,
+        )
+    return ShopFeeRateEntry(
+        shop_pk=shop_pk,
+        shop_name=shop_name,
+        fee_rate=FEE_RATE_BASELINE,
+        source="baseline",
+        fallback_reason="no_estimate" if estimate is None else "stale_estimate",
+    )
+
+
 # ═════════════════════════════════════════════════════════════════════
 # 成本链批量解析
 # ═════════════════════════════════════════════════════════════════════
@@ -776,7 +873,13 @@ def _query_spu_roi(
     w_start: date | None = None,
     w_end: date | None = None,
 ) -> ProfitabilityOverview:
-    rate = fee_rate if fee_rate is not None else FEE_RATE_BASELINE
+    # 费率解析优先级（2026-09-29 用户拍板）：页面覆写 > 店铺实测 > 全局基线。
+    # 覆写时全 scope 统一；否则逐店取 reporting.shop_fee_rate_estimates 的
+    # 最新快照（超 MAX_ESTIMATE_AGE_DAYS 视为过期），无可用快照的店回退
+    # FEE_RATE_BASELINE。
+    shop_fee_estimates = _load_shop_fee_estimates(sess)
+    override_rate = fee_rate
+    fee_fresh_before = calculated_at.date() - timedelta(days=MAX_ESTIMATE_AGE_DAYS)
     fx_basis = _resolve_fx_basis(sess)
     fx_usd_cny = fx_basis.usd_cny
     fx_usd_vnd = fx_basis.usd_vnd
@@ -803,6 +906,21 @@ def _query_spu_roi(
     )
     if only_spu_pk is not None:
         cats = [cat for cat in cats if int(cat["spu_pk"]) == only_spu_pk]
+
+    # 店铺费率解析（覆写 > 实测快照 > 基线）按 shop_pk 一次性算好，行级与
+    # meta 共用同一份结果，避免两处各自推导出不一致口径。
+    shop_fee: dict[int, ShopFeeRateEntry] = {}
+    for cat in cats:
+        spk = int(cat["shop_pk"])
+        if spk in shop_fee:
+            continue
+        shop_fee[spk] = _resolve_shop_fee(
+            spk,
+            shop_name=cat["shop_name"],
+            override_rate=override_rate,
+            estimates=shop_fee_estimates,
+            fresh_before=fee_fresh_before,
+        )
 
     ad_rows = (
         sess.execute(
@@ -958,6 +1076,8 @@ def _query_spu_roi(
         )
         # 成本解析（D1 全链）与纯 v10 公式。
         unit_cost_cny, cost_source = cost_map.get(pk, (K1_DEFAULT_CNY, "DEFAULT_K1"))
+        fee_entry = shop_fee[int(cat["shop_pk"])]
+        row_rate, row_fee_source = fee_entry.fee_rate, fee_entry.source
         formula = calculate(
             FormulaInput(
                 spend_usd=spend_usd,
@@ -984,7 +1104,7 @@ def _query_spu_roi(
                 unit_cost_cny=unit_cost_cny,
                 usd_cny=fx_usd_cny,
                 usd_vnd=fx_usd_vnd,
-                unsettled_fee_rate=rate,
+                unsettled_fee_rate=row_rate,
             )
         )
         spend_cny = formula.spend_cny
@@ -1093,6 +1213,8 @@ def _query_spu_roi(
                 "ad_system_breakeven_roi_status": (
                     FormulaStatus.ESTIMATED_KNOWN_COSTS
                 ),
+                "fee_rate_used": row_rate,
+                "fee_source": row_fee_source,
             }
         )
         total_spend += spend_cny
@@ -1321,11 +1443,26 @@ def _query_spu_roi(
         warnings.append("unsettled_orders_estimated")
     warnings.append("ad_system_other_necessary_costs_not_modeled")
 
+    # 费率 meta：标量 source/rate 在 scope 内口径唯一时可信；多口径混合时
+    # 为 "mixed" + 基线参考值。per_shop 携带逐店铺真实口径与实测样本
+    # （含覆盖率、样本量、快照日期），前端/对账以它为准。
+    fee_per_shop = [shop_fee[spk] for spk in sorted(shop_fee)]
+    if override_rate is not None:
+        meta_fee_rate, meta_fee_source = override_rate, "user_override"
+    else:
+        distinct = {(e.source, e.fee_rate) for e in fee_per_shop}
+        if len(distinct) == 1:
+            meta_fee_source, meta_fee_rate = next(iter(distinct))
+        elif not distinct:
+            meta_fee_source, meta_fee_rate = "baseline", FEE_RATE_BASELINE
+        else:
+            meta_fee_source, meta_fee_rate = "mixed", FEE_RATE_BASELINE
+
     basis = ProfitabilityBasis(
         calculated_at=calculated_at,
         fx=fx_basis,
-        fee_rate=rate,
-        fee_mode="override" if fee_rate is not None else "baseline",
+        fee_rate=meta_fee_rate,
+        fee_source=meta_fee_source,
         rubric_version="v10",
         coverage_first_day=(
             data_window_row["first_day"]
@@ -1341,6 +1478,7 @@ def _query_spu_roi(
         ad_last_day=window_row["last_day"] if window_row else None,
         unattributed_refund_lines=_row_int(unattributed["n"]) if unattributed else 0,
         warnings=tuple(warnings),
+        fee_per_shop=tuple(fee_per_shop),
     )
 
     page = plain[offset : offset + limit]

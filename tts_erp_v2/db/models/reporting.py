@@ -1,9 +1,10 @@
 """reporting.* — derived tables, rebuildable, versioned.
 
-3 tables: product_cost_snapshots / product_profit_daily /
-shipment_tracking_summary. All are deterministic functions of upstream
-tables + effective_product_links view; the cost_snapshots job rebuilds
-them with calculation_version monotonically incremented.
+4 tables: product_cost_snapshots / product_profit_daily /
+shipment_tracking_summary / shop_fee_rate_estimates. All are deterministic
+functions of upstream tables + effective_product_links view; the
+cost_snapshots job rebuilds them with calculation_version monotonically
+incremented.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
+    CheckConstraint,
     Date,
     ForeignKey,
     Index,
@@ -186,4 +188,88 @@ class ShipmentTrackingSummary(Base):
     )
     calculated_at: Mapped[datetime] = mapped_column(
         nullable=False, server_default=text("now()")
+    )
+
+
+class ShopFeeRateEstimate(Base):
+    """Per-(shop, day) measured platform commission rate for spu-roi estimation.
+
+    口径：``fee_rate = Σ|FEE| / Σ line_gmv``。``line_gmv`` = 订单行
+    ``quantity × unit_price`` = **客户实付（折扣后）**；**不是** ``GROSS_SALES``
+    （那是折扣前挂牌价，实测是 line_gmv 的 169%）—— 用错分母会得出 12.5%
+    而不是正确的 21.2%。``FEE`` 是交易级平台总扣除（``fee_amount``：已含
+    抽佣 + 联盟 + 运费类），**不是** ``PLATFORM_COMMISSION``（仅为抽佣分项，
+    约占一半）。
+
+    生产库逐单验证（1204 笔已结算订单，中位残差 0.000%）::
+
+        SETTLEMENT ≈ line_gmv + FEE + CUSTOMER_REFUND
+
+    即 FEE 已覆盖运费类，**不可再加运费分项**（会重复扣）。
+
+    ``coverage_ratio`` 暴露历史订单缺 ``FEE`` 分项的数据缺口（生产库当前
+    100%，作为安全网保留）：覆盖率偏低的快照不应作为费率依据，计算任务
+    会在覆盖率不达门槛时直接跳过该店（不写行）。
+
+    由 ``analytics.shop_fee_rate`` 任务每日写一份快照（同店同日唯一）；
+    读取侧取每店最新一行，超出 ``MAX_ESTIMATE_AGE_DAYS`` 视为过期并回退
+    全局基线。无行 = 该店铺无可用样本。
+    """
+
+    __tablename__ = "shop_fee_rate_estimates"
+    __table_args__ = (
+        UniqueConstraint(
+            "shop_pk",
+            "calculated_on",
+            name="uq_shop_fee_rate_est_shop_day",
+        ),
+        CheckConstraint(
+            "fee_rate >= 0 AND fee_rate <= 1",
+            name="ck_shop_fee_rate_est_rate",
+        ),
+        CheckConstraint(
+            "coverage_ratio >= 0 AND coverage_ratio <= 1",
+            name="ck_shop_fee_rate_est_coverage",
+        ),
+        Index("ix_shop_fee_rate_est_shop_calc_at", "shop_pk", "calculated_at"),
+        {"schema": "reporting"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    shop_pk: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("commerce.shops.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    calculated_on: Mapped[date] = mapped_column(Date, nullable=False)
+    lookback_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    fee_rate: Mapped[Decimal] = mapped_column(Numeric(8, 6), nullable=False)
+    eligible_order_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    line_gmv_covered: Mapped[Decimal] = mapped_column(
+        Numeric(20, 4), nullable=False
+    )
+    line_gmv_total: Mapped[Decimal] = mapped_column(
+        Numeric(20, 4), nullable=False
+    )
+    coverage_ratio: Mapped[Decimal] = mapped_column(Numeric(8, 6), nullable=False)
+    total_fee: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
+    currency: Mapped[str] = mapped_column(Text, nullable=False)
+    calculation_version: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'fee-v1'")
+    )
+    calculated_at: Mapped[datetime] = mapped_column(
+        nullable=False, server_default=text("now()")
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        nullable=False,
+        server_default=text("now()"),
+        onupdate=text("now()"),
     )

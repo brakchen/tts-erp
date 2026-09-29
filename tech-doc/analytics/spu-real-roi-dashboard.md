@@ -256,7 +256,7 @@ SPU 无广告投放 → 广告列显示 0 与“无投放”文案（不隐藏�
 | M16 | **订单结算金额（净现金权威口径，v7 已落地）** | `settlement_net(s)` | `Σ` 有效销售订单的**每笔订单 SETTLEMENT 净额**（TikTok 结算单订单级净额，平台扣费/退款调整已含；**v7 落地**：从 `finance.settlement_components` 取 `component_code='SETTLEMENT'`，通过 `finance.settlement_transactions.order_pk` 关联；不做佣金等分项建模——决策 3） | 按结算周期 | finance.settlement_components + finance.settlement_transactions |
 | M17 | **保本实际 ROI（每 SPU 动态线）** | `roi_breakeven(s)` | 见下方“保本线口径”：`NC′ ÷ (NC′ − COGS_kept − fee_est)`；`COGS_kept + fee_est ≥ NC′ → NULL`（结构性亏损，无保本线） | 范围 | 由 M13/M13b/M11/M5/M19 推导 |
 | M18 | **净利润（毛利口径，页面金额核心列）** | `net_profit(s)` | `(Σ line_net_vnd ÷ VND_per_CNY) − (ad_cost_usd × USD_CNY) − procurement_cny`；其中 `line_net_vnd = is_settled ? order_SETTLEMENT × line_gmv / order_gmv : line_gmv × (1 − 0.308)`，`procurement_cny = (units_sold + full_loss_cancelled_qty) × unit_cost_cny`（**2026-09-07 v7 关键改动**：净利润按"已结算 vs 未结算"分层算 — **已结算订单**用 `finance.settlement_components.SETTLEMENT`（卖家实际到账 VND，已扣完所有平台费 + 运费 + 联盟佣金 + 退款调整），按 line_gmv / order_gmv 比例分摊到各行；**未结算订单**按 `line_gmv × (1 − 30.8%)` 估算；v6 的 `COGS_all = (units_sold + full_loss_cancelled_qty) × unit_cost` 沿用；`is_settled` 判定 = `EXISTS (SELECT 1 FROM finance.settlement_transactions WHERE order_pk = sales_orders.id)`）；**`net_profit ≥ 0 ⇔ roi_real ≥ roi_breakeven`（与 M17 同号）**；**实测基线 35.9%**(v7 已结算订单验证)比 30.8% 高 5.1pp(联盟+运费+补贴),未来 finance job 落地后未结算部分应改用实测基线 | 范围求和 | finance.settlement_components + commerce + fx + 成本解析 |
-| M19 | **平台佣金基线（v7 DUAL-LAYER）** | `platform_fee(s)` | `r̂ × sales_unsettled(s)`（**2026-09-07 v7 改动**：已结算订单的扣费不再作为 M18 的输入——已隐含在 SETTLEMENT 净额里；本字段只剩"未结算订单 × 基线"部分；`r̂` = 参考基线（Σ\|fee_amount\| / Σgross_sales_amount，**2026-09-06 重定 ≈ 30.8%**（D10 旧值 11.6% 低估了联盟/运费等所有直接扣除，2026-09-06 重定实测 30.8%）；解析 job 上线后自动切换为已结算用实际、未结算按 r̂ 的双层结构）；页面可覆写输入 % | 范围 | M6(未结算子集) + 基线 |
+| M19 | **平台佣金基线（v7 DUAL-LAYER）** | `platform_fee(s)` | `r̂ × sales_unsettled(s)`（**2026-09-07 v7 改动**：已结算订单的扣费不再作为 M18 的输入——已隐含在 SETTLEMENT 净额里；本字段只剩"未结算订单 × 基线"部分；`r̂` = **店铺实测费率**（**2026-09-29 起**：`analytics.shop_fee_rate` 任务每 24h 按该店近 180 天已结算订单 **Σ\|FEE\| ÷ Σ行GMV** 重算，行GMV = `quantity × unit_price` = **客户实付**（非折扣前挂牌价 `GROSS_SALES`）；写入 `reporting.shop_fee_rate_estimates` 日快照，需样本 ≥50 单且覆盖率 ≥80%，快照 >7 天视为过期）；无可用实测的店铺回退全局基线 30.8%（2026-09-06 D10 重定，旧值 11.6% 低估了联盟/运费等所有直接扣除）；页面可临时覆写输入 %（仅影响本次请求，不写回店铺） | 范围 | M6(未结算子集) + 店铺实测费率 |
 
 > 净现金两种口径（v7 已统一到 M18）：M13 = 订单行金额朴素估算（不直接用，作内部中间量）；**M16 = 每笔订单 SETTLEMENT 净额（v7 已成为净利润的核心输入）**——已结算订单用 M16 当净收入，未结算订单用 `line_gmv × (1 − 30.8%)` 估算，二者按订单粒度逐笔加总。两者差异 ≈ 平台扣费 ± 退款调整时差。**v7 不再用 `net_cash − fee_est` 二次扣减**(避免重复扣)。
 
@@ -270,8 +270,23 @@ SPU 无广告投放 → 广告列显示 0 与“无投放”文案（不隐藏�
 
 fee(SPU) = Σ 已结算订单的实际扣费（解析 view 按 order 汇总 |fee_amount|）
          + Σ 未结算订单 sales × r̂
-参考基线 r̂ = Σ|fee_amount| ÷ Σgross_sales_amount（已结算交易；作用域 = 当前窗口 + 店铺）
-           = 2026-09-05 去重实测 ≈ 30.8%
+参考基线 r̂ = Σ|fee_amount| ÷ Σgross_sales_amount（已结算交易）
+店铺实测 r̂ = Σ|FEE| ÷ Σ行GMV（行GMV = quantity × unit_price = **客户实付**）
+           → analytics.shop_fee_rate 任务每 24h 写入 reporting.shop_fee_rate_estimates
+             （日快照；样本 ≥50 单且覆盖率 ≥80% 才产出；快照 >7 天视为过期）
+全局基线   = 2026-09-05 去重实测 ≈ 30.8%（无可用实测 / 实测过期时的兜底）
+
+⚠️ 分母口径（2026-09-29 生产库实测确定，详见 shop-fee-rate-definition-gap.md）：
+   分母必须用行GMV（客户实付），**不是** GROSS_SALES。生产库实测：
+   GROSS_SALES 是折扣前挂牌价 = 行GMV 的 169%（卖家折扣占毛销售 39.4%），
+   用错分母会把 r̂ 算小 41%（12.55% vs 正确的 21.23%）。
+   逐单恒等式（1204 笔，中位残差 0.000%）：
+       SETTLEMENT ≈ line_gmv + FEE + CUSTOMER_REFUND
+   即 FEE 已含运费类，**不可再叠加运费分项**（会重复扣）。
+
+覆盖率 = Σ 行GMV(有 FEE 分项的订单) ÷ Σ 行GMV(窗口内全部已结算订单)
+  历史遗留数据可能只有 SETTLEMENT 没有 FEE 分项；若把缺 FEE 的订单当 fee=0
+  计入分母会系统性拉低费率，故覆盖率不达门槛的店铺不产快照、直接回退基线。
 ```
 
 - 本期（解析 job 未上线，无法区分已/未结算）：全按基线估 —— `platform_fee = sales × r̂`（≈30.8%，2026-09-06 重定；页面可覆写输入 %（M19）。（下文 M17/M18 公式中以 `fee_est` 作为该费用的代数简写，= M19 `platform_fee`。）
@@ -761,7 +776,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 - 输入：`integration.raw_records` `…/statement_transactions`（59 列），按 `payload->>'id'` 去重（同一交易会被多次抓取重复入库）。
 - 输出：结构化表（按 order_pk 归属，含 settlement_amount / gross_sales_amount / platform_commission_amount / return_shipping_fee_amount / refund 系列等，不再只留 settlement_amount 一个 component）+ **只读 view**（如 `finance.v_settlement_order`；模式参照 `analytics.ad_product_links`：DB 层 view、无 HTTP 端点、端点只读 view）。
 - 归属链：`payload->>'order_id'` → `commerce.sales_orders` → `after_sales.cases`（退货/运费按 case）→ case_lines → spu_pk；多 SPU 订单按订单行金额占比分摊到 SPU。
-- 参考基线：`r̂ = Σ|fee_amount| ÷ Σgross_sales_amount`（已结算交易级；作用域 = 当前窗口 + 店铺；2026-09-06 重定实测 ≈ **30.8%**（D10 重定，2026-09-05 旧值 11.6% 低估联盟/运费等直接扣除））。
+- 参考基线：`r̂ = Σ|fee_amount| ÷ Σgross_sales_amount`（已结算交易级；2026-09-06 重定实测 ≈ **30.8%**（D10 重定，2026-09-05 旧值 11.6% 低估联盟/运费等直接扣除））。**2026-09-29 起**该基线退化为兜底值，主路径改为 `analytics.shop_fee_rate` 任务的**店铺实测日快照**（`reporting.shop_fee_rate_estimates`；分母 = 行GMV/客户实付，近 180 天、样本 ≥50 单、覆盖率 ≥80%、快照 ≤7 天）。⚠️ 注意 30.8% 与它声称的公式并不一致（生产实测该公式只给出 12.55%），口径定位见 `shop-fee-rate-definition-gap.md`。
 
 **费用字段字典（2026-09-05 实测，已结算交易去重后）：**
 
