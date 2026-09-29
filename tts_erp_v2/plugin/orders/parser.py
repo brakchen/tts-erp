@@ -262,7 +262,14 @@ def parse_logistics_response(
             )
 
         tracking_number = pkg.get("tracking_no")
-        carrier_name = (pkg.get("logistic_supplier") or {}).get("supplier_name")
+        supplier = pkg.get("logistic_supplier")
+        carrier_name = (
+            supplier.get("supplier_name")
+            if isinstance(supplier, dict)
+            else str(supplier)
+            if supplier
+            else None
+        )
 
         # track_list → status, shipped_at, delivered_at
         logistic_detail = pkg.get("logistic_detail") or {}
@@ -621,9 +628,15 @@ def parse_after_sales_response(
             )
         cancel_id = str(c.get("cancel_id") or "")
         if not cancel_id:
-            raise ValueError(
-                "after-sales response data.cancellations item missing cancel_id"
-            )
+            # A non-empty array entry can be safely skipped without
+            # discarding valid sibling cancellations. An empty object is a
+            # malformed response, not a partial cancellation.
+            if not c:
+                raise ValueError(
+                    "after-sales response data.cancellations item missing cancel_id"
+                )
+            log.warning("after_sales cancellation missing cancel_id, skipping")
+            continue
         cancel_type = str(c.get("cancel_type") or "")
         cancel_status = str(c.get("cancel_status") or "")
         main_order_id = c.get("order_id") or c.get("main_order_id")

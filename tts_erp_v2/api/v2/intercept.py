@@ -654,7 +654,7 @@ def sync_intercepted_requests(
     """数据同步（插件用）"""
     if body.protocol_version not in SUPPORTED_PROTOCOL_VERSIONS:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Unsupported protocol version: {body.protocol_version}",
         )
 

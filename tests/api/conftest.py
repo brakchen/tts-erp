@@ -76,6 +76,10 @@ def _isolate_state(db_engine, monkeypatch):
     # flag off, no NAT prefix). Individual tests may monkeypatch on top.
     monkeypatch.setenv("TTS_ERP_SESSION_SECURE", "0")
     monkeypatch.delenv("TTS_ERP_EXTERNAL_PREFIX", raising=False)
+    # Docs Basic Auth is production configuration; API tests that need it set
+    # explicit test credentials before constructing their own application.
+    monkeypatch.delenv("TTS_ERP_DOCS_USER", raising=False)
+    monkeypatch.delenv("TTS_ERP_DOCS_PASSWORD", raising=False)
     # Silence the access log middleware during tests — the api_client
     # fixture builds the full v2 app, which means every TestClient
     # request would otherwise write a structured line to stderr.
