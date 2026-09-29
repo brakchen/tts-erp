@@ -2309,10 +2309,7 @@ def test_spu_roi_js_targets_dashboard_hooks():
 
 
 def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
-    """§7.1 结余带:11 格指标(广告消耗/有效销售/有效单量/退款数/退款率/
-    全损量/全损率/取消量/取消率/实际ROI/实际保本ROI/广告系统保本ROI);
-    每个概览格带 ? 口径说明。
-    """
+    """§7.1 结余带:14 格指标完整，并按同类的量/额或量/率相邻排列。"""
     from pathlib import Path
 
     r = api_client.get(
@@ -2320,24 +2317,32 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     body = r.text
-    # 11 格指标 id 齐全(顺序 = 页面骨架)
-    for cell_id in (
-        "sum-spend",
-        "sum-sales",
+    summary_ids = (
+        "sum-total-orders",
         "sum-orders",
+        "sum-sales",
         "sum-refund-count",
         "sum-refund-rate",
         "sum-loss-qty",
         "sum-loss-rate",
         "sum-cancel-count",
         "sum-cancel-rate",
+        "sum-spend",
+        "sum-net-profit",
         "sum-roi",
         "sum-roi-breakeven",
         "sum-roi-ad",
-    ):
-        assert f'id="{cell_id}"' in body, f"结余带缺 {cell_id} 格"
+    )
+    summary_positions = []
+    for cell_id in summary_ids:
+        marker = f'id="{cell_id}"'
+        assert marker in body, f"结余带缺 {cell_id} 格"
+        summary_positions.append(body.index(marker))
+    assert summary_positions == sorted(summary_positions), "结余带同类指标顺序被打乱"
     # 不再展示 SPU 个数
     assert 'id="sum-n"' not in body
+    assert "总单量" in body
+    assert "净利润" in body
     assert "全损量" in body
     assert "退款数" in body
     # D8(2026-09-07)主表精确匹配 th 表头文本
@@ -2378,7 +2383,9 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert "op-drill" in body
     assert "tpl-drilldown-panel" in body
     # 每个概览格都有 ? 口径悬停
-    assert body.count('class="op-hint"') >= 10
+    summary_start = body.index('id="summaries"')
+    summary_html = body[summary_start : body.index("</section>", summary_start)]
+    assert summary_html.count('class="op-hint"') == len(summary_ids)
     # JS 必须填充新格
     js_src = (
         Path(__file__).resolve().parents[2]
@@ -2387,9 +2394,14 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
         / "js"
         / "spu-roi.js"
     ).read_text(encoding="utf-8")
+    assert '("#sum-total-orders")' in js_src
+    assert "fmtInt(totals.total_orders || 0)" in js_src
     assert '("#sum-loss-qty")' in js_src
     assert '("#sum-refund-count")' in js_src
     assert '("#sum-cancel-count")' in js_src
+    assert '("#sum-net-profit")' in js_src
+    assert "var netProfitValue = totals.net_profit" in js_src
+    assert "fmtMoney(netProfitValue)" in js_src
     assert '("#sum-roi-breakeven")' in js_src
     assert '("#sum-roi-ad")' in js_src
 
