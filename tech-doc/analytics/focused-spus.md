@@ -1,7 +1,8 @@
 # 重点关注 SPU 页面技术方案
 
-> 状态：Draft，等待产品确认后开发
+> 状态：Draft v2，等待产品确认后开发
 > 日期：2026-09-29
+> v2 修订：取消每店 100 个业务上限；增加公共盈利页面深模块与 selection adapter 设计
 > 关联现有页面：`GET /v2/pages/spu-roi`
 > 口径真相源：`GET /v2/analytics/spu-roi`
 
@@ -56,23 +57,25 @@
 点击“编辑关注 SPU”：
 ┌─────────────────────────────────────────────────────────────┐
 │ 编辑 Bridge nook 的重点关注 SPU                             │
-│ [Tom Select：搜索、输入精确 ID、批量粘贴、逐项移除]         │
-│ 已选择 12 / 100                         [取消] [保存修改]    │
+│ [输入精确 ID / 搜索标题 / 批量粘贴]              [加入草稿] │
+│ 当前关注（可搜索、分页）                                    │
+│ 1729…  商品 A  ACTIVATE                              [移除] │
+│ 1730…  商品 B  ACTIVATE                              [移除] │
+│ 待新增 2 个 · 待移除 1 个                 [取消] [保存修改] │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ### 4.3 编辑行为
 
 1. 必须先选择店铺；未选店铺时禁用编辑按钮。
-2. 编辑器复用现有 `channel-product-options` 搜索能力：
+2. 新增区复用现有 `channel-product-options` 搜索能力：
    - 输入 SPU ID 或标题搜索；
    - 支持中英文逗号批量粘贴；
-   - 精确校验 SPU 必须属于当前店铺；
-   - 最多关注 100 个 SPU。
-3. 打开编辑器时，以数据库中的当前关注集合为草稿。
-4. 删除一个 tag 只修改草稿；点击「取消」不写库。
-5. 点击「保存修改」时，前端计算 `add_spu_ids` / `remove_spu_ids` 两个差量，一次提交。
-6. 保存成功后关闭编辑器、刷新关注集合，再请求 SPU ROI 数据。
+   - 精确校验 SPU 必须属于当前店铺。
+3. 每店关注总数不设业务上限；关注列表使用服务端搜索和分页，不把所有关注项一次塞进 Tom Select 或 URL。
+4. 打开编辑器时加载当前关注列表；新增与移除先进入差量草稿，点击「取消」不写库。
+5. 点击「保存修改」时提交 `add_spu_ids` / `remove_spu_ids`；单次请求可以限制批量大小，但该限制不是店铺关注总数上限。
+6. 保存成功后关闭编辑器、刷新关注计数，再以服务端 focused scope 请求 SPU ROI 数据。
 7. 保存失败时保留草稿，明确显示失败原因，不静默关闭。
 
 ### 4.4 空状态与过滤状态
@@ -115,7 +118,7 @@ CREATE TABLE reporting.focused_spus (
 );
 ```
 
-另建 `(shop_pk, active)` 索引，并使用现有 `public.fn_touch_updated_at()` 维护 `updated_at`。
+另建活动行 partial index：`(shop_pk, spu_id) WHERE active IS TRUE`，供 focused scope、计数和分页读取使用；继续使用现有 `public.fn_touch_updated_at()` 维护 `updated_at`。
 
 ### D2. 移除关注采用软删除
 
@@ -146,18 +149,18 @@ API 接收新增集合和移除集合：
 - `add_spu_ids` 与 `remove_spu_ids` 不得重叠；
 - 去空、trim、去重；
 - 单个 ID 最长 128 字符；
-- 操作后的有效关注总数不得超过 100；
+- 每店关注总数不设业务上限；
 - 任一新增 SPU 不属于当前店铺时，整次请求 422，不能部分成功；
 - 移除一个当前未关注的 SPU 视为幂等成功。
 
-### D4. 盈利计算只调用现有 SPU ROI API
+### D4. 盈利计算只调用现有 SPU ROI 深模块
 
-关注集合读取成功后，页面请求：
+重点关注页不把全部 ID 拼进 URL，而给现有端点增加一个可选的服务端范围：
 
 ```http
 GET /v2/analytics/spu-roi
   ?shop_pk=<当前店铺内部主键>
-  &spu_ids=<关注 SPU ID，逗号分隔>
+  &scope=focused
   &w_start=<可选>
   &w_end=<可选>
   &fee_rate=<可选>
@@ -168,7 +171,18 @@ GET /v2/analytics/spu-roi
   &offset=<分页>
 ```
 
-由此自动继承：
+`scope=focused` 必须与 `shop_pk` 同传；服务端通过 `reporting.focused_spus` 的 `EXISTS`/JOIN 约束 SPU 范围。它不受现有手工 `spu_ids` 查询参数“最多 100 个”的限制，也不受 URL 长度限制。
+
+盈利模块的外部 interface 仍是“给定 ProfitScope + RowView，返回 overview”。只把范围选择从单一 `spu_ids` 扩为领域内的 selection：
+
+```text
+SpuSelection
+├─ ActivitySelection        # 现有整店/活动范围
+├─ ExactIdsSelection        # 现有手工 SPU 筛选，保留 100 个限制
+└─ FocusedSelection         # 新增，DB 内按 shop_pk 解析，无总数上限
+```
+
+三种 selection 只决定基础 SPU 集合；金额公式、汇率、费率、退款/取消/全损口径、排序、分页、totals 和 evidence 全部继续走同一实现。由此自动继承：
 
 - SPU ROI 当前 v10 盈利模块；
 - `meta.currency` / `meta.fx`；
@@ -179,20 +193,90 @@ GET /v2/analytics/spu-roi
 
 禁止在重点关注页前端重新计算金额、ROI、费率或汇总。
 
-### D5. 共享一个页面实现，不复制 ROI 页面
+### D5. 抽出公共盈利页面深模块，不用模式分支堆进原文件
 
-不复制 `spu-roi.js` 或 `spu-roi.css`。拟采用页面模式配置：
+可以抽象，而且应当抽象。但抽象目标不是“通用表格框架”，而是一个领域明确的 **SPU 盈利页面深模块**：用很小的 interface 封装现有页面的大量共同实现。
 
-```html
-<body data-spu-page-mode="focused">
+#### D5.1 公共 seam 与 interface
+
+新增公共文件 `static/js/spu-profitability-page.js`，只暴露一个挂载 interface：
+
+```js
+mountSpuProfitabilityPage({
+  root,
+  pagePath,
+  selectionAdapter,
+  defaults,
+});
 ```
 
-`spu-roi.js` 读取模式：
+`selectionAdapter` 是真正会变化的 seam。目前恰好有两个 adapter，因此不是为假想未来过度设计：
 
-- `standard`：保持现有 `/v2/pages/spu-roi` 行为；
-- `focused`：先加载关注集合，以关注集合固定 `spu_ids` scope，再复用相同渲染、排序、分页、钻取和错误处理。
+```text
+AdHocSelectionAdapter
+  load(shopPk)             从 URL 恢复 spu_ids
+  analyticsParams(scope)   返回 {spu_ids: "..."}
+  mountEditor(context)     绑定现有 Tom Select / 查询 / 清空
 
-HTML 骨架由同一 `_SPU_ROI_PAGE_HTML` 派生，仅替换标题、页面说明和关注编辑区。这样后续表格列或口径展示变化只维护一处。
+FocusedSelectionAdapter
+  load(shopPk)             从 focused-spus API 读取关注计数
+  analyticsParams(scope)   返回 {scope: "focused"}
+  mountEditor(context)     绑定关注列表、搜索、新增、移除、保存
+```
+
+adapter interface 只负责“范围从哪里来、如何编辑、怎样翻译成 analytics query”。它不参与表格渲染和盈利计算。
+
+#### D5.2 必须抽到公共模块的内容
+
+以下行为两页完全一致，集中到 `spu-profitability-page.js`，作为私有 implementation，不逐个暴露：
+
+1. 页面状态机：当前店铺、日期、费率、include-all、排序、分页、loading version、AbortController。
+2. overview 请求生命周期：参数组装、取消旧请求、401 跳登录、FX 错误、竞态保护、空态处理。
+3. 汇总卡渲染：`totals` / `meta` / 店铺费率状态卡。
+4. 主表渲染：商品、广告、销售、取消、全损、净利润列及红绿/警告状态。
+5. 排序和分页：列头状态、页码、每页数量、上一页/下一页。
+6. 钻取交互：accordion、四类 evidence 懒加载、缓存 key、筛选变化清缓存。
+7. 公共格式化：money、ratio、percent、整数、枚举翻译。
+8. 店铺切换、日期校验、临时费率、刷新、登录身份和退出。
+9. tooltip、主图 lightbox、无障碍与移动端行为。
+
+这些内容被抽走后，修复一处表格、钻取、分页或错误处理，两页同时生效。
+
+#### D5.3 保留在各自 adapter 的内容
+
+以下行为语义不同，不应硬塞进公共模块：
+
+- 标准 ROI 页：临时选择 SPU、批量粘贴、查询/清空、`spu_ids` URL 同步。
+- 重点关注页：关注列表 GET/PATCH、服务端分页搜索、编辑草稿、软移除、readonly 禁用编辑。
+- 两页各自的标题、说明文字、空状态 CTA、侧边栏 active 状态和登录回跳路径。
+
+#### D5.4 HTML 与 CSS 的抽象
+
+服务端新增 `_render_spu_profitability_page(config)`，从同一 HTML shell 生成两页。公共 shell 包含汇总卡、筛选器、费率卡、主表、钻取模板和分页；config 只提供页面标题、mode、scope 编辑区和入口脚本，避免复制整段 HTML 或依赖脆弱的字符串替换。
+
+CSS 分两层：
+
+- `spu-roi.css`（后续可更名为 `spu-profitability.css`）：公共账页 token、汇总卡、工具栏、主表、钻取、分页、tooltip、lightbox、响应式。
+- `focused-spus.css`：仅关注编辑器、关注计数和重点关注空状态。
+
+#### D5.5 明确不做的抽象
+
+- 不做通用 dashboard/table/form 框架；列名和盈利语义继续是领域代码。
+- 不把每个 formatter 或 DOM helper 都变成公共导出；它们是公共模块的私有 implementation。
+- 不用一个巨大的 `if (mode === "focused")` 文件同时承载两套编辑逻辑；变化点必须留在 selection adapter。
+- 不复制 `spu-roi.js` 后再分别维护。
+
+建议文件结构：
+
+```text
+static/js/spu-profitability-page.js   # 公共深模块
+static/js/spu-roi.js                  # 小型 AdHoc adapter + bootstrap
+static/js/focused-spus.js             # 小型 Focused adapter + bootstrap
+static/css/spu-roi.css                # 公共视觉
+static/css/focused-spus.css           # focused-only 增量
+```
+
+这样删除公共模块时，汇总、表格、分页、钻取、错误处理等复杂度会重新散落到两个页面；说明这个模块确实提供了深度和复用价值，而不是简单转发。
 
 ### D6. 权限
 
@@ -216,10 +300,10 @@ readonly 用户可以查看页面和关注数据；编辑按钮禁用并提示�
 ### 6.1 获取某店关注集合
 
 ```http
-GET /v2/reporting/focused-spus/{shop_pk}
+GET /v2/reporting/focused-spus/{shop_pk}?q=<可选>&limit=50&offset=0
 ```
 
-响应：
+关注管理列表服务端分页；`q` 搜索 `spu_id/title`。响应：
 
 ```json
 {
@@ -234,9 +318,9 @@ GET /v2/reporting/focused-spus/{shop_pk}
       "updated_at": "2026-09-29T08:00:00Z"
     }
   ],
-  "spu_ids": ["1729000000000000001"],
-  "total": 1,
-  "max_items": 100
+  "total": 126,
+  "limit": 50,
+  "offset": 0
 }
 ```
 
@@ -271,8 +355,8 @@ X-Requested-With: tts-erp
 - 403：角色低于 readwrite；
 - 404：店铺不存在；
 - 422 `SPU_NOT_FOUND_IN_SHOP`：新增 SPU 不属于该店；
-- 422 `FOCUSED_SPU_LIMIT_EXCEEDED`：操作后超过 100 个；
-- 422 `FOCUSED_SPU_PATCH_CONFLICT`：同一 ID 同时出现在新增和移除列表。
+- 422 `FOCUSED_SPU_PATCH_CONFLICT`：同一 ID 同时出现在新增和移除列表；
+- 422：单次 PATCH body 超出批处理大小或字段格式非法。
 
 ## 7. 数据流
 
@@ -285,10 +369,11 @@ X-Requested-With: tts-erp
    ├─ 空集合 ──> 渲染空状态，不调用 ROI API
    │
    └─ 非空集合
-           └─ GET /v2/analytics/spu-roi?shop_pk=...&spu_ids=...
+           └─ GET /v2/analytics/spu-roi?shop_pk=...&scope=focused
+                  ├─ FocusedSelection 在 DB 内解析完整关注范围
                   ├─ 现有 spu_profitability 计算模块
                   ├─ totals / meta / items
-                  └─ 同一 spu-roi.js 渲染
+                  └─ 公共 spu-profitability-page.js 渲染
 
 编辑并保存
    │
@@ -307,9 +392,15 @@ X-Requested-With: tts-erp
 | `tts_erp_v2/api/v2/focused_spus.py` | GET + PATCH API；校验、事务、软移除 |
 | `tts_erp_v2/app.py` | 注册新 router |
 | `tts_erp_v2/access/_policy.py` | GET readonly、PATCH readwrite |
-| `tts_erp_v2/api/v2/pages.py` | 新页面路由、侧边栏入口、共享 ROI shell 模式 |
-| `tts_erp_v2/static/js/spu-roi.js` | 增加 focused 模式；复用所有展示与钻取逻辑 |
-| `tts_erp_v2/static/css/spu-roi.css` | 仅补编辑弹窗/空状态所需少量样式 |
+| `tts_erp_v2/analytics/spu_profitability/_types.py` | 将范围建模为 Activity / ExactIds / Focused selection |
+| `tts_erp_v2/analytics/spu_profitability/_implementation.py` | 在基础 SPU scope 中实现 focused DB predicate，复用全部公式 |
+| `tts_erp_v2/analytics/spu_roi.py` | 解析 `scope=focused` 并保持现有响应契约 |
+| `tts_erp_v2/api/v2/pages.py` | 新页面路由、侧边栏入口、`_render_spu_profitability_page(config)` 共享 shell |
+| `tts_erp_v2/static/js/spu-profitability-page.js` | 新公共深模块：状态、overview、汇总、表格、分页、钻取和公共交互 |
+| `tts_erp_v2/static/js/spu-roi.js` | 收敛为 AdHoc selection adapter + bootstrap |
+| `tts_erp_v2/static/js/focused-spus.js` | Focused selection adapter + bootstrap |
+| `tts_erp_v2/static/css/spu-roi.css` | 保留公共盈利账页视觉 |
+| `tts_erp_v2/static/css/focused-spus.css` | 仅关注编辑器、关注计数和空状态 |
 | `tests/api/test_focused_spus.py` | API、权限、店铺隔离、原子性、软移除测试 |
 | `tests/api/test_spu_roi_api.py` | 新页面 shell 与共享前端模式回归测试 |
 | `tech-doc/external-api.md` | 页面和 API 契约登记 |
@@ -328,15 +419,15 @@ X-Requested-With: tts-erp
 6. 移除后数据库行仍存在且 `active=false`。
 7. 新增不存在或属于其他店的 SPU 返回 422，整次事务不产生部分写入。
 8. 新增/移除重叠返回 422。
-9. 操作后超过 100 个返回 422。
+9. 单店关注数超过 100 后仍可分页读取，`scope=focused` 能覆盖完整集合。
 10. 空关注集合 GET 返回 `items=[]`，页面不得退化为整店 ROI。
 
 ### 9.2 页面契约测试
 
 1. `/v2/pages/focused-spus` 使用同一 ROI CSS/JS 资产。
 2. 页面有 `data-spu-page-mode="focused"`、店铺选择器、编辑按钮、汇总卡、主表、分页和钻取模板。
-3. focused 模式先拉关注集合，再拉 ROI；空集合不拉 ROI。
-4. ROI 请求始终同时带 `shop_pk` 与精确 `spu_ids`。
+3. Focused adapter 先拉关注计数，再拉 ROI；空集合不拉 ROI。
+4. 重点关注 ROI 请求始终同时带 `shop_pk` 与 `scope=focused`，不拼完整 ID 列表。
 5. 保存时发送差量 PATCH 和 CSRF header。
 6. 401 跳登录；403 显示只读提示；422 保留编辑草稿。
 7. 标准 SPU ROI 页面原有交互不变。
@@ -363,7 +454,7 @@ flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast
 3. 人工在生产执行 migration 0043。
 4. 部署并重启 API 服务。
 5. 用 readwrite 会话选择店铺、添加 1 个 SPU、刷新确认持久化。
-6. 对比同一 `shop_pk + spu_ids + 日期范围` 下重点关注页与 SPU ROI 页的 API 响应，确认金额和 totals 完全一致。
+6. 用关注集合中的同一批 SPU，对比 `scope=focused` 与标准页精确 SPU scope 在相同日期范围下的响应，确认金额和 totals 完全一致。
 
 ### 回滚
 
@@ -385,8 +476,9 @@ flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast
 
 以下为本方案的推荐默认值，等待确认后再开始开发：
 
-1. **每店最多关注 100 个 SPU**：与现有 `spu_ids` API 上限一致，避免新增第二套范围协议。
-2. **readonly 可看、readwrite 可编辑**：与普通运营写操作一致。
-3. **软移除**：页面表现为删除，数据库保留 inactive 历史。
-4. **重点关注页默认勾选“含无活动”**：优先让被关注但当前窗口无活动的 ACTIVE SPU 仍可见。
-5. **不做关注备注/分组/告警**：v1 只交付店铺级关注集合和 ROI 展示。
+1. **每店关注总数不设业务上限**：管理列表服务端分页，ROI 使用 `scope=focused` 在数据库内解析范围；现有 `spu_ids` 的 100 个限制只保留给临时筛选。
+2. **公共盈利页面深模块 + 两个 selection adapter**：共享汇总、表格、分页、钻取和错误处理；各自保留不同的范围编辑语义。
+3. **readonly 可看、readwrite 可编辑**：与普通运营写操作一致。
+4. **软移除**：页面表现为删除，数据库保留 inactive 历史。
+5. **重点关注页默认勾选“含无活动”**：优先让被关注但当前窗口无活动的 ACTIVE SPU 仍可见。
+6. **不做关注备注/分组/告警**：v1 只交付店铺级关注集合和 ROI 展示。
