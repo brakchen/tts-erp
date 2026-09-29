@@ -1524,13 +1524,15 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       </div>
     </section>
 
-    <!-- 主表 6 指标与大盘 v10 同口径：广告消耗 / 有效销售 / 有效单量 / 取消率 / 全损率 / 净利润 -->
+    <!-- 主表 8 指标与大盘 v10 同口径：广告消耗 / 广告系统实际ROI / 广告系统保本ROI / 有效销售 / 有效单量 / 取消率 / 全损率 / 净利润 -->
     <div class="op-table-wrap table-responsive" tabindex="0" aria-label="SPU ROI 明细，可横向滚动">
       <table class="table table-hover align-middle mb-0 op-table" aria-live="polite">
         <thead>
           <tr>
             <th scope="col" class="op-th op-th-left">商品</th>
             <th scope="col" class="op-th op-th-sort" data-sort="spend" data-tip="广告消耗（源数据 USD，服务端按汇率快照换算为 CNY；随选中日期窗口裁剪；作为减项计入净利润）">广告消耗</th>
+            <th scope="col" class="op-th" data-tip="广告系统实际ROI = 广告归因GMV ÷ 广告实际消耗；无广告消耗时显示 —">广告系统实际ROI</th>
+            <th scope="col" class="op-th" data-tip="广告系统保本ROI = 广告归因GMV ÷ 最大可承受广告费；当前以 ≈ 标记已知成本下限估算，分母≤0或无归因GMV时显示 —">广告系统保本ROI</th>
             <th scope="col" class="op-th op-th-sort" data-sort="effective_sales" data-tip="有效销售 = 有效销售订单 GMV − 退款金额（CNY）；与大盘 totals.effective_sales 同口径">有效销售</th>
             <th scope="col" class="op-th op-th-sort" data-sort="effective_order_count" data-tip="有效单量 = 有效销售订单数 − 退款订单数；与大盘 totals.effective_order_count 同口径">有效单量</th>
             <th scope="col" class="op-th op-th-sort" data-sort="cancel_rate" data-tip="取消率 = 国内取消订单数 ÷ 全部订单；全部订单 = 有效销售订单 + 国内取消 + 海外取消，海外取消只进入全损分子">取消率%</th>
@@ -1539,7 +1541,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
           </tr>
         </thead>
         <tbody class="op-rows" id="rows">
-          <tr><td colspan="7" class="op-loading">加载中…</td></tr>
+          <tr><td colspan="9" class="op-loading">加载中…</td></tr>
         </tbody>
       </table>
     </div>
@@ -1547,7 +1549,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     <!-- D7 钻取面板模板（行内 accordion，由 spu-roi.js openDrillPanel 克隆插入） -->
     <template id="tpl-drilldown-panel">
       <tr class="op-drill-row" aria-live="polite">
-        <td colspan="7" class="op-drill-wrap">
+        <td colspan="9" class="op-drill-wrap">
           <div class="op-drill p-2 p-md-3" data-state="loading">
             <nav class="nav nav-tabs flex-nowrap overflow-x-auto op-drill-tabs" role="tablist">
               <button type="button" class="nav-link active op-drill-tab is-active" role="tab" aria-selected="true" data-tab="pnl">利润构成</button>
