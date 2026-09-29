@@ -83,7 +83,7 @@ MIN_ELIGIBLE_ORDER_COUNT = 50
 MIN_COVERAGE_RATIO = Decimal("0.80")
 
 #: 费率合法区间；越界样本跳过（DB CHECK 约束同步兜底）。
-RATE_MIN = Decimal("0")
+RATE_MIN = Decimal(0)
 RATE_MAX = Decimal("0.95")
 
 _RATE_Q = Decimal("0.000001")
@@ -234,7 +234,7 @@ def compute_shop_fee_rates(
             continue
 
         coverage_ratio = (
-            _q(covered / gmv_total, _RATE_Q) if gmv_total > 0 else Decimal("0")
+            _q(covered / gmv_total, _RATE_Q) if gmv_total > 0 else Decimal(0)
         )
         if coverage_ratio < MIN_COVERAGE_RATIO:
             _skip(

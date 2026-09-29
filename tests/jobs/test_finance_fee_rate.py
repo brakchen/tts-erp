@@ -200,10 +200,10 @@ def test_gmv_weighted_rate_per_shop(db_session) -> None:
     rates = _rates(db_session)
     assert rates[shop_a.id].fee_rate == Decimal("0.265")
     assert rates[shop_a.id].eligible_order_count == 50
-    assert rates[shop_a.id].line_gmv_covered == Decimal("50000")
-    assert rates[shop_a.id].line_gmv_total == Decimal("50000")
-    assert rates[shop_a.id].coverage_ratio == Decimal("1")
-    assert rates[shop_a.id].total_fee == Decimal("13250")
+    assert rates[shop_a.id].line_gmv_covered == Decimal(50000)
+    assert rates[shop_a.id].line_gmv_total == Decimal(50000)
+    assert rates[shop_a.id].coverage_ratio == Decimal(1)
+    assert rates[shop_a.id].total_fee == Decimal(13250)
     assert rates[shop_a.id].currency == "VND"
     assert rates[shop_b.id].fee_rate == Decimal("0.380")
 
@@ -230,7 +230,7 @@ def test_gross_sales_component_does_not_affect_rate(db_session) -> None:
     compute_shop_fee_rates(db_session, now=_NOW)
 
     row = _rates(db_session)[shop.id]
-    assert row.line_gmv_total == Decimal("50000")
+    assert row.line_gmv_total == Decimal(50000)
     assert row.fee_rate == Decimal("0.300")  # 15000/50000，不是 15000/100000
 
 
@@ -256,7 +256,7 @@ def test_fee_component_is_used_not_platform_commission(db_session) -> None:
         SettlementComponent(
             transaction_id=first_txn.id,
             component_code="PLATFORM_COMMISSION",
-            amount=Decimal("-150"),
+            amount=Decimal(-150),
             currency="VND",
         )
     )
@@ -285,7 +285,7 @@ def test_multi_transaction_order_counts_line_gmv_once(db_session) -> None:
 
     row = _rates(db_session)[shop.id]
     assert row.eligible_order_count == MIN_ELIGIBLE_ORDER_COUNT
-    assert row.line_gmv_total == Decimal("50000")  # 不是 150000
+    assert row.line_gmv_total == Decimal(50000)  # 不是 150000
     assert row.fee_rate == Decimal("0.300")
 
 
@@ -337,8 +337,8 @@ def test_coverage_just_at_threshold_passes(db_session) -> None:
 
     row = _rates(db_session)[shop.id]
     assert row.eligible_order_count == 50
-    assert row.line_gmv_total == Decimal("62000")
-    assert row.line_gmv_covered == Decimal("50000")
+    assert row.line_gmv_total == Decimal(62000)
+    assert row.line_gmv_covered == Decimal(50000)
     assert row.coverage_ratio >= MIN_COVERAGE_RATIO
     assert row.fee_rate == Decimal("0.300")
 

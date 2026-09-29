@@ -47,7 +47,6 @@ import argparse
 import os
 import sys
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
 
 from sqlalchemy import create_engine, text
 
@@ -203,7 +202,7 @@ def main() -> int:
           f"{_ratio(commission, line_gmv)}")
     print(f"  |运费类|                              {shipping:>18,.0f}  "
           f"{_ratio(shipping, line_gmv)}")
-    print(f"  * FEE 已含运费类 → 不可相加（会重复扣）")
+    print("  * FEE 已含运费类 → 不可相加（会重复扣）")
     print()
 
     print("## 逐单恒等式核验：SETTLEMENT ≈ line_gmv + FEE + CUSTOMER_REFUND")
