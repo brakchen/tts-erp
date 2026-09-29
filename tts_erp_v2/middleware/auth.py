@@ -30,6 +30,8 @@ from datetime import UTC, datetime
 
 from anyio.to_thread import run_sync
 
+from tts_erp_v2.access import DeploymentPathInput, canonicalize_path
+
 ROLE_LEVEL = {"readonly": 1, "readwrite": 2, "admin": 3}
 _LEVEL_NAME = {v: k for k, v in ROLE_LEVEL.items()}
 
@@ -409,32 +411,19 @@ class AuthMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Path normalisation: make scope["path"] always carry root_path.
-        #
-        # 2026-09-28: the app runs with root_path=TTS_ERP_EXTERNAL_PREFIX
-        # (/tts in production). Whether the upstream proxy strips the
-        # prefix (proxy_pass with trailing slash) or passes it through,
-        # downstream layers must see ONE canonical shape — otherwise
-        # Starlette's StaticFiles (which computes the file path as
-        # scope["path"] minus scope["root_path"]) mis-resolves stripped
-        # requests to ``static/static/...`` and 404s every asset
-        # (2026-09-28 /tts/static/* 404 incident). Prepending root_path
-        # when absent converges both forwarding modes; the router strips
-        # it again via get_route_path, so route matching is unaffected.
-        root_path = scope.get("root_path", "")
-        req_path = scope.get("path", "")
-        if (
-            root_path
-            and req_path != root_path
-            and not req_path.startswith(root_path + "/")
-        ):
-            scope["path"] = root_path + req_path
-            # Keep raw_path in sync — FastAPI route matching reads it.
-            if scope.get("raw_path"):
-                scope["raw_path"] = scope["path"].encode("latin-1")
+        canonical = canonicalize_path(
+            DeploymentPathInput(
+                path=scope.get("path", ""),
+                raw_path=scope.get("raw_path"),
+                root_path=scope.get("root_path", ""),
+            )
+        )
+        scope["path"] = canonical.downstream_path
+        if canonical.downstream_raw_path is not None:
+            scope["raw_path"] = canonical.downstream_raw_path
 
-        # Route-relative path for all classification below.
-        route_path = _route_path(scope)
+        root_path = canonical.root_path
+        route_path = canonical.route_path
 
         # Static assets (CSS/JS/images) — pass through without any auth.
         if route_path.startswith("/static/"):

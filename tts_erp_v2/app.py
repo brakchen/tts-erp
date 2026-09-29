@@ -42,6 +42,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from tts_erp_v2.access import DeploymentPathInput, canonicalize_path
 from tts_erp_v2.api.v2 import (
     admin,
     analytics,
@@ -186,7 +187,14 @@ class DocsAuthMiddleware(BaseHTTPMiddleware):
         self._enabled = bool(self._user and self._password)
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
-        if not self._enabled or request.url.path not in self._PROTECTED:
+        canonical = canonicalize_path(
+            DeploymentPathInput(
+                path=request.scope.get("path", ""),
+                raw_path=request.scope.get("raw_path"),
+                root_path=request.scope.get("root_path", ""),
+            )
+        )
+        if not self._enabled or canonical.route_path not in self._PROTECTED:
             return await call_next(request)
 
         auth_header = request.headers.get("authorization", "")
