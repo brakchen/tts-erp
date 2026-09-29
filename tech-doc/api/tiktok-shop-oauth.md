@@ -118,6 +118,20 @@ GET /v2/oauth/tiktok/authorize ────────────────�
 | `TIKTOK_API_HOST` | ✅ 回调 | Get Authorized Shops 域名，默认 `https://open-api.tiktokglobalshop.com`（已有） |
 | `TIKTOK_REDIRECT_URI` | 可选 | 仅展示/文档用。Partner Center 里配的实际 Redirect URL 才是生效值 |
 
+## Migration 0039 部署（人类操作）
+
+代码合并并拉取后，由人工在项目根目录执行：
+
+```bash
+ALLOW_PROD_DESTRUCTIVE=1 \
+  bash scripts/oneoff_migrate_0039_tiktok_app_credentials.sh --confirm --restart
+```
+
+脚本会调用共享 production guard、只升级到
+`0039_tiktok_app_credentials`、验证表/列/revision，并在显式 `--restart`
+时重启 API 与 sync worker。脚本不会自动设置 `ALLOW_PROD_DESTRUCTIVE`，也不会
+读取或输出任何 App Secret 密文。
+
 ## Partner Center 一次性配置（人类操作，agent 不代办）
 
 1. App **App & Service** 页取得 `service_id`、App Key、App Secret；在店铺注册台
