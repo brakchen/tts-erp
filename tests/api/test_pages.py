@@ -123,8 +123,12 @@ def test_shops_page_js_manages_service_app_credentials() -> None:
     source = Path("tts_erp_v2/static/js/shops.js").read_text()
     assert "app_secret: appSecret || null" in source
     assert (
-        'configBtn.className = "btn btn-sm btn-outline-dark btn-config-app"' in source
+        'configBtn.className = "shop-action shop-action--credentials btn-config-app"'
+        in source
     )
+    assert 'authBtn.className = "shop-action shop-action--authorize btn-auth"' in source
+    assert 'setActionContent(configBtn, "⚙", "配置 App")' in source
+    assert "shop-action:focus-visible" in source
     assert "app_credentials_configured" in source
     assert "bindAppCredentialsDialog();" in source
     assert "admin 会话" in source

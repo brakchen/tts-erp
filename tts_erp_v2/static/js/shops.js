@@ -132,43 +132,73 @@
     syncTd.appendChild(statusSpan);
     row.appendChild(syncTd);
 
-    // 操作按钮
+    // 操作按钮：将凭证管理（设置）和 OAuth 授权（跳转）做成清晰的两级操作。
     var actionsTd = document.createElement("td");
+    actionsTd.className = "shop-actions-cell";
+    var actions = document.createElement("div");
+    actions.className = "shop-actions";
     var configBtn = document.createElement("button");
     configBtn.type = "button";
-    configBtn.className = "btn btn-sm btn-outline-dark btn-config-app";
-    configBtn.textContent = "配置 App";
-    actionsTd.appendChild(configBtn);
-    actionsTd.appendChild(document.createTextNode(" "));
+    configBtn.className = "shop-action shop-action--credentials btn-config-app";
+    configBtn.title = "配置 TikTok App Key 与 App Secret";
+    setActionContent(configBtn, "⚙", "配置 App");
+    actions.appendChild(configBtn);
     var authWrap = document.createElement("span");
+    // display: contents 让授权状态替换后的按钮继续占据操作栈中的独立一行。
     authWrap.className = "auth-actions";
     var authBtn = document.createElement("button");
     authBtn.type = "button";
-    authBtn.className = "btn btn-sm btn-outline-dark btn-auth";
-    authBtn.textContent = "获取授权链接";
+    authBtn.className = "shop-action shop-action--authorize btn-auth";
+    authBtn.title = "生成并复制 TikTok OAuth 授权链接";
+    setActionContent(authBtn, "↗", "获取授权链接");
     authWrap.appendChild(authBtn);
-    actionsTd.appendChild(authWrap);
+    actions.appendChild(authWrap);
+    actionsTd.appendChild(actions);
     row.appendChild(actionsTd);
 
     return row;
   }
 
-  // ---------- toast（操作反馈不写进表格，2026-09-29 用户拍板） ----------
-  function toastRoot() {
-    var root = document.getElementById("toast-root");
-    if (root) return root;
+  function setActionContent(button, icon, label) {
+    var iconEl = document.createElement("span");
+    iconEl.className = "shop-action-icon";
+    iconEl.setAttribute("aria-hidden", "true");
+    iconEl.textContent = icon;
+    var labelEl = document.createElement("span");
+    labelEl.className = "shop-action-label";
+    labelEl.textContent = label;
+    button.replaceChildren(iconEl, labelEl);
+  }
+
+  function ensurePageUiStyles() {
+    if ($("#shops-page-ui-styles")) return;
     var style = document.createElement("style");
+    style.id = "shops-page-ui-styles";
     style.textContent =
-      "#toast-root{position:fixed;right:16px;bottom:16px;z-index:9999;" +
-      "display:flex;flex-direction:column;gap:8px;max-width:min(420px,80vw)}" +
-      "#toast-root .toast-item{padding:10px 14px;border-radius:8px;" +
-      "font-size:13px;line-height:1.5;color:#fff;background:#333;" +
-      "box-shadow:0 4px 14px rgba(0,0,0,.18);cursor:pointer;word-break:break-all}" +
+      "#shop-body .shop-actions-cell{min-width:164px;white-space:normal}" +
+      "#shop-body .shop-actions{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;min-width:148px}" +
+      "#shop-body .auth-actions{display:contents}" +
+      "#shop-body .shop-action{display:grid;grid-template-columns:18px minmax(0,1fr);align-items:center;gap:7px;min-height:34px;width:100%;padding:6px 10px;border:1px solid var(--rule,#c9bfa8);border-radius:0;background:transparent;color:var(--ink,#1b1814);font-family:var(--mono,monospace);font-size:11px;font-weight:600;letter-spacing:.04em;line-height:1.2;text-align:left;cursor:pointer;transition:background 120ms ease,border-color 120ms ease,color 120ms ease}" +
+      "#shop-body .shop-action-icon{font-size:14px;line-height:1;text-align:center}" +
+      "#shop-body .shop-action-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
+      "#shop-body .shop-action--credentials:hover{border-color:var(--accent,#b8390e);color:var(--accent,#b8390e);background:var(--paper-deep,#eae3d2)}" +
+      "#shop-body .shop-action--authorize{border-color:var(--ink,#1b1814);box-shadow:inset 3px 0 0 var(--accent,#b8390e);background:var(--ink,#1b1814);color:var(--paper,#f4efe4)}" +
+      "#shop-body .shop-action--authorize:hover{border-color:var(--accent,#b8390e);background:var(--accent,#b8390e);color:#fff}" +
+      "#shop-body .shop-action:focus-visible{outline:2px solid var(--accent,#b8390e);outline-offset:2px;position:relative;z-index:1}" +
+      "#shop-body .shop-action:disabled{cursor:wait;opacity:.58}" +
+      "#toast-root{position:fixed;right:16px;bottom:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;max-width:min(420px,80vw)}" +
+      "#toast-root .toast-item{padding:10px 14px;border-radius:8px;font-size:13px;line-height:1.5;color:#fff;background:#333;box-shadow:0 4px 14px rgba(0,0,0,.18);cursor:pointer;word-break:break-all}" +
       "#toast-root .toast-ok{background:var(--ok,#2e7d32)}" +
       "#toast-root .toast-err{background:#b3261e}" +
-      // 操作列按钮同一行排列，避免竖排撑高行
-      "#shop-body .auth-actions{display:inline-flex;gap:6px;flex-wrap:wrap}";
+      "@media (prefers-reduced-motion:reduce){#shop-body .shop-action{transition:none}}";
     document.head.append(style);
+  }
+
+  // ---------- toast（操作反馈不写进表格，2026-09-29 用户拍板） ----------
+  function toastRoot() {
+    var root = $("#toast-root");
+    if (root) return root;
+    ensurePageUiStyles();
     root = document.createElement("div");
     root.id = "toast-root";
     document.body.append(root);
@@ -219,12 +249,14 @@
     a.href = url;
     a.target = "_blank";
     a.rel = "noopener";
-    a.className = "btn btn-sm btn-dark";
-    a.textContent = "打开授权页";
+    a.className = "shop-action shop-action--authorize";
+    a.title = "在新标签页打开 TikTok 授权页面";
+    setActionContent(a, "↗", "打开授权页");
     var copy = document.createElement("button");
     copy.type = "button";
-    copy.className = "btn btn-sm btn-outline-dark";
-    copy.textContent = "复制链接";
+    copy.className = "shop-action shop-action--credentials";
+    copy.title = "复制授权链接到剪贴板";
+    setActionContent(copy, "⧉", "复制链接");
     copy.addEventListener("click", () => {
       copyToClipboard(url, (ok) =>
         showToast(ok ? "已复制到剪贴板" : "复制失败，请重试", ok),
@@ -537,6 +569,7 @@
   }
 
   document.addEventListener("DOMContentLoaded", () => {
+    ensurePageUiStyles();
     bindForm();
     bindAppCredentialsDialog();
     probeAuth()
