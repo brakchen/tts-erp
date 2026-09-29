@@ -100,21 +100,29 @@ def test_x_api_key_header_also_accepted(api_client, readonly_key):
 def test_authorization_header_wins_regardless_of_header_order(
     api_client, readonly_key, readwrite_key
 ):
-    response = api_client.post(
-        "/v2/reporting/manual-costs",
-        headers=[
+    header_orders = (
+        [
             ("X-API-Key", readwrite_key),
             ("Authorization", f"Bearer {readonly_key}"),
         ],
-        json={
-            "spu_id": "TEST_header_precedence",
-            "unit_cost": "12.34",
-            "currency": "USD",
-        },
+        [
+            ("Authorization", f"Bearer {readonly_key}"),
+            ("X-API-Key", readwrite_key),
+        ],
     )
+    for headers in header_orders:
+        response = api_client.post(
+            "/v2/reporting/manual-costs",
+            headers=headers,
+            json={
+                "spu_id": "TEST_header_precedence",
+                "unit_cost": "12.34",
+                "currency": "USD",
+            },
+        )
 
-    assert response.status_code == 403
-    assert response.json()["detail"] == "requires readwrite"
+        assert response.status_code == 403
+        assert response.json()["detail"] == "requires readwrite"
 
 
 def test_browser_auth_denials_share_the_rate_limit_budget(api_client):
@@ -138,6 +146,39 @@ def test_browser_auth_denials_share_the_rate_limit_budget(api_client):
     assert first.status_code == 302
     assert second.status_code == 429
     assert int(second.headers["retry-after"]) >= 1
+
+
+def test_insufficient_role_denials_share_the_rate_limit_budget(
+    api_client, readonly_key
+):
+    from tts_erp_v2.middleware.rate_limit import reset_shared
+
+    reset_shared(limit=1)
+    headers = {"Authorization": f"Bearer {readonly_key}"}
+    try:
+        first = api_client.post(
+            "/v2/reporting/manual-costs",
+            headers=headers,
+            json={
+                "spu_id": "TEST_denied_budget",
+                "unit_cost": "12.34",
+                "currency": "USD",
+            },
+        )
+        second = api_client.post(
+            "/v2/reporting/manual-costs",
+            headers=headers,
+            json={
+                "spu_id": "TEST_denied_budget",
+                "unit_cost": "12.34",
+                "currency": "USD",
+            },
+        )
+    finally:
+        reset_shared()
+
+    assert first.status_code == 403
+    assert second.status_code == 429
 
 
 def test_rate_limit_returns_429_with_retry_after(api_client, readonly_key, monkeypatch):
@@ -165,7 +206,7 @@ def test_rate_limit_returns_429_with_retry_after(api_client, readonly_key, monke
 # ---------------------------------------------------------------------------
 # Prefix / root_path regression coverage.
 # 2026-09-01: daqiang.nat100.top redirect loop — prefixed requests
-# mis-classified → infinite 302 chain. 2026-09-28: /tts/static/* all 404 —
+# misclassified → infinite 302 chain. 2026-09-28: /tts/static/* all 404 —
 # nginx stripped the prefix while root_path=/tts made StaticFiles resolve
 # static/static/.... Fix: prefix lives ONLY in FastAPI root_path; the auth
 # middleware normalises scope["path"] to always carry root_path and
@@ -304,20 +345,28 @@ def test_invalid_auth_mode_fails_closed(db_engine, monkeypatch, capsys):
 
 
 def test_shadow_html_request_logs_only_and_passes_through(db_engine, monkeypatch):
-    """Shadow mode must not redirect a browser would-deny request."""
+    """Shadow would-deny requests neither redirect nor consume denied budget."""
     from fastapi.testclient import TestClient
 
     from tts_erp_v2.app import build_app
+    from tts_erp_v2.middleware.rate_limit import reset_shared
 
     monkeypatch.setenv("TTS_ERP_AUTH_MODE", "shadow")
-    with TestClient(build_app()) as client:
-        response = client.get(
-            "/v2/pages/manual-costs",
-            headers={"Accept": "text/html,application/xhtml+xml"},
-            follow_redirects=False,
-        )
+    reset_shared(limit=1)
+    try:
+        with TestClient(build_app()) as client:
+            responses = [
+                client.get(
+                    "/v2/pages/manual-costs",
+                    headers={"Accept": "text/html,application/xhtml+xml"},
+                    follow_redirects=False,
+                )
+                for _ in range(2)
+            ]
+    finally:
+        reset_shared()
 
-    assert response.status_code == 200
+    assert [response.status_code for response in responses] == [200, 200]
 
 
 def test_shadow_mode_bypasses_handler_role_gate(db_engine, monkeypatch):
@@ -334,6 +383,8 @@ def test_shadow_mode_bypasses_handler_role_gate(db_engine, monkeypatch):
 
 def test_prefixed_docs_path_requires_docs_basic_auth(db_engine, monkeypatch):
     """Docs Basic Auth must classify the route-relative path behind /tts."""
+    import base64
+
     from fastapi.testclient import TestClient
 
     from tts_erp_v2.app import build_app
@@ -342,9 +393,14 @@ def test_prefixed_docs_path_requires_docs_basic_auth(db_engine, monkeypatch):
     monkeypatch.setenv("TTS_ERP_AUTH_MODE", "enforce")
     monkeypatch.setenv("TTS_ERP_DOCS_USER", "TEST_docs_user")
     monkeypatch.setenv("TTS_ERP_DOCS_PASSWORD", "TEST_docs_password")
+    basic = base64.b64encode(b"TEST_docs_user:TEST_docs_password").decode()
 
     with TestClient(build_app()) as client:
-        response = client.get("/tts/docs")
+        denied = client.get("/tts/docs")
+        allowed = client.get(
+            "/tts/docs", headers={"Authorization": f"Basic {basic}"}
+        )
 
-    assert response.status_code == 401
-    assert response.headers["www-authenticate"] == 'Basic realm="tts-erp docs"'
+    assert denied.status_code == 401
+    assert denied.headers["www-authenticate"] == 'Basic realm="tts-erp docs"'
+    assert allowed.status_code == 200

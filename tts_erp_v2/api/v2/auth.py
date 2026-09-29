@@ -35,7 +35,7 @@ from fastapi import APIRouter, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from tts_erp_v2.access._credentials import authenticate_hash, authenticate_key
+from tts_erp_v2.access import authenticate_hash, authenticate_key
 from tts_erp_v2.middleware import session_auth
 from tts_erp_v2.middleware.access_log import _key_prefix
 

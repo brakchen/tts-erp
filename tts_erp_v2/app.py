@@ -32,7 +32,7 @@ from __future__ import annotations
 import base64
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -48,7 +48,6 @@ from tts_erp_v2.api.v2 import (
     analytics,
     auth,
     commerce,
-    config as config_router,
     fx,
     intercept,
     linkage,
@@ -61,10 +60,10 @@ from tts_erp_v2.api.v2 import (
     sync_status,
     tiktok_shop,
 )
+from tts_erp_v2.api.v2 import config as config_router
 from tts_erp_v2.middleware.access_log import AccessLogMiddleware
 from tts_erp_v2.middleware.auth import AuthMiddleware
 from tts_erp_v2.middleware.rate_limit import RateLimitMiddleware
-
 
 # The production ads-data-sync extension has a stable signed ID. Keep this
 # narrow instead of enabling every chrome-extension origin; operators can
@@ -178,7 +177,12 @@ class DocsAuthMiddleware(BaseHTTPMiddleware):
     both set in the environment.  When unset, docs remain public.
     """
 
-    _PROTECTED = {"/docs", "/openapi.json", "/redoc", "/docs/oauth2-redirect"}
+    _PROTECTED: ClassVar[set[str]] = {
+        "/docs",
+        "/openapi.json",
+        "/redoc",
+        "/docs/oauth2-redirect",
+    }
 
     def __init__(self, app):  # type: ignore[no-untyped-def]
         super().__init__(app)
@@ -242,7 +246,7 @@ def build_app() -> FastAPI:
     _original_openapi = app.openapi
 
     def _openapi_30_compat() -> dict[str, Any]:
-        from fastapi.openapi.utils import get_openapi  # noqa: F811
+        from fastapi.openapi.utils import get_openapi
 
         if not app.openapi_schema:
             app.openapi_schema = get_openapi(

@@ -53,6 +53,20 @@ def test_canonicalize_path_does_not_treat_similar_prefix_as_root() -> None:
     assert result.route_path == "/ttsx/v2/data"
 
 
+def test_canonicalize_path_preserves_percent_encoded_raw_bytes() -> None:
+    result = canonicalize_path(
+        DeploymentPathInput(
+            path="/商品/%2Fsku",
+            raw_path=b"/%E5%95%86%E5%93%81/%2Fsku",
+            root_path="/tts",
+        )
+    )
+
+    assert result.downstream_path == "/tts/商品/%2Fsku"
+    assert result.downstream_raw_path == b"/tts/%E5%95%86%E5%93%81/%2Fsku"
+    assert result.route_path == "/商品/%2Fsku"
+
+
 def test_canonicalize_path_preserves_absent_raw_path() -> None:
     result = canonicalize_path(
         DeploymentPathInput(path="/healthz", raw_path=None, root_path="")

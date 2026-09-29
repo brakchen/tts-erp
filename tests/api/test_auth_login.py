@@ -184,6 +184,38 @@ def test_tampered_cookie_rejected(api_client, readwrite_key):
     assert r.status_code == 401, r.text
 
 
+def test_valid_cookie_wins_over_stronger_bearer(
+    api_client, readonly_key, admin_key
+):
+    cookie = session_auth.mint_session_cookie(readonly_key, "readonly")
+    response = api_client.get(
+        "/v2/future-admin-route",
+        headers={
+            "Cookie": f"tts_session={cookie}",
+            "Authorization": f"Bearer {admin_key}",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "requires admin"
+
+
+def test_invalid_cookie_falls_back_to_bearer(
+    api_client, readwrite_key, readonly_key
+):
+    cookie = session_auth.mint_session_cookie(readwrite_key, "readwrite")
+    tampered = cookie[:-1] + ("0" if cookie[-1] != "0" else "1")
+    response = api_client.get(
+        "/v2/commerce/sales-orders",
+        headers={
+            "Cookie": f"tts_session={tampered}",
+            "Authorization": f"Bearer {readonly_key}",
+        },
+    )
+
+    assert response.status_code == 200
+
+
 def test_expired_cookie_rejected(api_client, readwrite_key):
     # exp = now_base + ttl; push the base past ttl so exp is already gone.
     cookie = session_auth.mint_session_cookie(
