@@ -31,30 +31,30 @@ CONFIRMED=0
 RESTART=0
 RUN_JOB=0
 for arg in "$@"; do
-  case "$arg" in
+    case "$arg" in
     --confirm) CONFIRMED=1 ;;
     --restart) RESTART=1 ;;
     --run-job) RUN_JOB=1 ;;
-    -h|--help)
-      sed -n '2,26p' "$SCRIPT_PATH"
-      exit 0
-      ;;
+    -h | --help)
+        sed -n '2,26p' "$SCRIPT_PATH"
+        exit 0
+        ;;
     *)
-      echo "❌ 未知参数: $arg" >&2
-      exit 2
-      ;;
-  esac
+        echo "❌ 未知参数: $arg" >&2
+        exit 2
+        ;;
+    esac
 done
 
 if [[ "$CONFIRMED" -ne 1 ]]; then
-  echo "❌ 必须显式传入 --confirm" >&2
-  echo "用法: ALLOW_PROD_DESTRUCTIVE=1 bash $SCRIPT_PATH --confirm [--restart] [--run-job]" >&2
-  exit 2
+    echo "❌ 必须显式传入 --confirm" >&2
+    echo "用法: ALLOW_PROD_DESTRUCTIVE=1 bash $SCRIPT_PATH --confirm [--restart] [--run-job]" >&2
+    exit 2
 fi
 
 if [[ ! -f .env ]]; then
-  echo "❌ .env 不存在（脚本依赖它取 TTS_ERP_DB_URL）" >&2
-  exit 1
+    echo "❌ .env 不存在（脚本依赖它取 TTS_ERP_DB_URL）" >&2
+    exit 1
 fi
 set -a
 # shellcheck disable=SC1091
@@ -64,23 +64,23 @@ set +a
 PYTHON=".venv/bin/python"
 ALEMBIC=".venv/bin/alembic"
 if [[ ! -x "$PYTHON" || ! -x "$ALEMBIC" ]]; then
-  echo "❌ .venv 不完整，请先恢复项目虚拟环境" >&2
-  exit 1
+    echo "❌ .venv 不完整，请先恢复项目虚拟环境" >&2
+    exit 1
 fi
 if [[ -z "${TTS_ERP_DB_URL:-}" ]]; then
-  echo "❌ TTS_ERP_DB_URL 未设置" >&2
-  exit 1
+    echo "❌ TTS_ERP_DB_URL 未设置" >&2
+    exit 1
 fi
 
-MIGRATION_FILE="alembic/versions/0040_shop_fee_rate_estimates.py"
-TARGET="0040_shop_fee_rate_estimates"
+MIGRATION_FILE="alembic/versions/0041_shop_fee_rate_kept_only.py"
+TARGET="0041_shop_fee_rate_kept_only"
 if [[ ! -f "$MIGRATION_FILE" ]]; then
-  echo "❌ 当前代码不包含 migration 0040，请先把 feature/shop-fee-rate 合并到 master 并拉取" >&2
-  exit 1
+    echo "❌ 当前代码不包含 migration 0040，请先把 feature/shop-fee-rate 合并到 master 并拉取" >&2
+    exit 1
 fi
 
 read -r DB_NAME DB_HOST < <(
-  "$PYTHON" - <<'PY'
+    "$PYTHON" - <<'PY'
 import os
 from sqlalchemy.engine import make_url
 url = make_url(os.environ["TTS_ERP_DB_URL"])
@@ -117,8 +117,8 @@ HEADS=$(timeout 30 "$ALEMBIC" heads)
 echo "── Alembic heads ──"
 printf '%s\n' "$HEADS"
 if [[ "$HEADS" != *"$TARGET"* ]]; then
-  echo "❌ 当前代码的 Alembic head 不是 ${TARGET}，停止执行（避免误升级到别的版本）" >&2
-  exit 1
+    echo "❌ 当前代码的 Alembic head 不是 ${TARGET}，停止执行（避免误升级到别的版本）" >&2
+    exit 1
 fi
 
 echo
@@ -134,7 +134,7 @@ from sqlalchemy import create_engine, text
 engine = create_engine(os.environ["TTS_ERP_DB_URL"])
 with engine.connect() as conn:
     revision = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-    if revision != "0040_shop_fee_rate_estimates":
+    if revision != "0041_shop_fee_rate_kept_only":
         raise SystemExit(f"❌ alembic revision 异常: {revision}")
 
     table_ok = conn.execute(
@@ -148,8 +148,8 @@ with engine.connect() as conn:
 
     expected_cols = {
         "shop_pk", "calculated_on", "lookback_days", "fee_rate",
-        "eligible_order_count", "line_gmv_covered", "line_gmv_total",
-        "coverage_ratio", "total_fee", "currency", "calculation_version",
+        "kept_order_count", "kept_line_gmv", "window_line_gmv",
+        "kept_share", "total_fee", "currency", "calculation_version",
         "calculated_at", "created_at", "updated_at",
     }
     cols = {
@@ -177,7 +177,7 @@ with engine.connect() as conn:
     for need in (
         "uq_shop_fee_rate_est_shop_day",
         "ck_shop_fee_rate_est_rate",
-        "ck_shop_fee_rate_est_coverage",
+        "ck_shop_fee_rate_est_kept_share",
     ):
         if need not in constraints:
             raise SystemExit(f"❌ 缺约束: {need}")
@@ -192,37 +192,37 @@ with engine.connect() as conn:
     if not idx_ok:
         raise SystemExit("❌ 缺索引 ix_shop_fee_rate_est_shop_calc_at")
 
-print("✅ revision = 0040_shop_fee_rate_estimates")
+print("✅ revision = 0041_shop_fee_rate_kept_only")
 print("✅ reporting.shop_fee_rate_estimates 表 / 14 列 / 唯一+CHECK 约束 / 索引 齐备")
 PY
 
 if [[ "$RESTART" -eq 1 ]]; then
-  echo
-  echo "── 重启 API 与 sync worker ──"
-  echo "   （API 重启加载 pages.py / spu_roi.py 改动；sync worker 重启注册新 job）"
-  timeout 30 systemctl --user restart tts-erp.service
-  timeout 30 systemctl --user restart tts-erp-sync.service
-  sleep 3
-  timeout 20 systemctl --user is-active --quiet tts-erp.service
-  timeout 20 systemctl --user is-active --quiet tts-erp-sync.service
-  PORT="${TTS_ERP_PORT:-9877}"
-  curl -fsS -m 10 "http://127.0.0.1:${PORT}/healthz" >/dev/null
-  echo "✅ 两个服务 active，healthz 正常"
+    echo
+    echo "── 重启 API 与 sync worker ──"
+    echo "   （API 重启加载 pages.py / spu_roi.py 改动；sync worker 重启注册新 job）"
+    timeout 30 systemctl --user restart tts-erp.service
+    timeout 30 systemctl --user restart tts-erp-sync.service
+    sleep 3
+    timeout 20 systemctl --user is-active --quiet tts-erp.service
+    timeout 20 systemctl --user is-active --quiet tts-erp-sync.service
+    PORT="${TTS_ERP_PORT:-9877}"
+    curl -fsS -m 10 "http://127.0.0.1:${PORT}/healthz" >/dev/null
+    echo "✅ 两个服务 active，healthz 正常"
 else
-  echo
-  echo "ℹ️ 未重启服务。代码部署完成后执行："
-  echo "   bash restart.sh"
-  echo "   systemctl --user restart tts-erp-sync.service"
+    echo
+    echo "ℹ️ 未重启服务。代码部署完成后执行："
+    echo "   bash restart.sh"
+    echo "   systemctl --user restart tts-erp-sync.service"
 fi
 
 if [[ "$RUN_JOB" -eq 1 ]]; then
-  echo
-  echo "── 立即跑一次 analytics.shop_fee_rate（否则要等满 24h 才首跑）──"
-  timeout 900 "$PYTHON" -m tts_erp_v2.sync_worker.main run analytics.shop_fee_rate
+    echo
+    echo "── 立即跑一次 analytics.shop_fee_rate（否则要等满 24h 才首跑）──"
+    timeout 900 "$PYTHON" -m tts_erp_v2.sync_worker.main run analytics.shop_fee_rate
 else
-  echo
-  echo "ℹ️ 未跑 job。若不想等 24h，可执行："
-  echo "   ${PYTHON} -m tts_erp_v2.sync_worker.main run analytics.shop_fee_rate"
+    echo
+    echo "ℹ️ 未跑 job。若不想等 24h，可执行："
+    echo "   ${PYTHON} -m tts_erp_v2.sync_worker.main run analytics.shop_fee_rate"
 fi
 
 echo
@@ -240,8 +240,8 @@ with engine.connect() as conn:
                    e.shop_pk,
                    e.calculated_on,
                    e.fee_rate,
-                   e.eligible_order_count,
-                   e.coverage_ratio,
+                   e.kept_order_count,
+                   e.kept_share,
                    e.lookback_days,
                    e.currency
             FROM reporting.shop_fee_rate_estimates e
@@ -258,7 +258,7 @@ with engine.connect() as conn:
     ).scalar_one()
 
 if not rows:
-    print("（空）—— 若刚跑过 job，说明所有店铺都没过门槛（样本 <50 单或覆盖率 <80%），")
+    print("（空）—— 若刚跑过 job，说明窗口内没有任何已结算订单（或有已结算订单但无 FEE 分项），")
     print("       或窗口内没有带 FEE 分项的已结算交易。详情看 job 日志与")
     print("       integration.sync_jobs 里 job_name='analytics.shop_fee_rate' 那行的 extra。")
 else:
@@ -278,7 +278,7 @@ echo "1. 打开 http://127.0.0.1:${PORT}/v2/pages/spu-roi"
 echo "2. 选一个刚才有实测费率的店铺 → 应出现「店铺实测」徽章的费率状态卡，"
 echo "   并显示样本量 / 覆盖率 / 重算日期"
 echo "3. 在「临时覆写费率 %」填数字 → 徽章应变「页面覆写」；清空 → 回到实测/基线"
-echo "4. 若某店显示「全局基线」并带红色降级提示 → 该店样本或覆盖率未达标，属预期行为"
+echo "4. 若某店显示「全局基线」+ 红色降级提示 → 该店在窗口内暂无已结算订单（或快照已过期），属预期行为"
 echo
 echo "回滚（如需）：${ALEMBIC} downgrade 0039_tiktok_app_credentials"
 echo

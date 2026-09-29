@@ -121,8 +121,8 @@ def _seed_estimate(
             text(
                 "INSERT INTO reporting.shop_fee_rate_estimates "
                 "(shop_pk, calculated_on, lookback_days, fee_rate, "
-                " eligible_order_count, line_gmv_covered, line_gmv_total, "
-                " coverage_ratio, total_fee, currency, calculation_version) "
+                " kept_order_count, kept_line_gmv, window_line_gmv, "
+                " kept_share, total_fee, currency, calculation_version) "
                 "VALUES (:shop, (CURRENT_DATE - :off), 180, :rate, "
                 "        128, 182340000, 190000000, 0.959684, 65463060, "
                 "        'VND', 'fee-v1')"
@@ -159,9 +159,9 @@ def test_shop_estimate_applies(api_client, readonly_key, _fx, db_engine) -> None
     assert entry["fallback_reason"] is None
     est = entry["estimate"]
     assert est is not None
-    assert est["eligible_order_count"] == 128
+    assert est["kept_order_count"] == 128
     assert est["lookback_days"] == 180
-    assert est["coverage_ratio"] == "0.9597"
+    assert est["kept_share"] == "0.9597"
     assert est["currency"] == "VND"
     assert est["calculated_on"]
 

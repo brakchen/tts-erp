@@ -170,7 +170,9 @@
       }
       return r.json().then((payload) => {
         if (!r.ok) {
-          var err = new Error(payload.detail || payload.message || `HTTP ${r.status}`);
+          var err = new Error(
+            payload.detail || payload.message || `HTTP ${r.status}`,
+          );
           err.code = payload.code || null;
           err.status = r.status;
           throw err;
@@ -229,7 +231,9 @@
     var clear = $("#btn-spu-clear");
     var apply = $("#btn-spu-apply");
     // 清空要同时考虑“草稿”和“已应用 scope”：手动删空草稿后，仍必须能一键恢复初始状态。
-    if (clear) clear.disabled = !canUseSpuFilter || (!selected.length && !hasAppliedSpuScope);
+    if (clear)
+      clear.disabled =
+        !canUseSpuFilter || (!selected.length && !hasAppliedSpuScope);
     if (apply) apply.disabled = !canUseSpuFilter || !dirty;
   }
 
@@ -298,7 +302,9 @@
         state.spuSelect.refreshItems();
         var missing = pasted.filter((value) => !matched.has(value));
         if (missing.length) {
-          setSpuFeedback(`未找到 ${missing.length} 个 SPU：${missing.join("、")}`);
+          setSpuFeedback(
+            `未找到 ${missing.length} 个 SPU：${missing.join("、")}`,
+          );
         }
         updateSpuSelectionUi();
       })
@@ -364,9 +370,7 @@
     });
     state.spuSelect.disable();
     state.spuSelect.control_input.addEventListener("paste", (event) => {
-      var text = event.clipboardData
-        ? event.clipboardData.getData("text")
-        : "";
+      var text = event.clipboardData ? event.clipboardData.getData("text") : "";
       if (!text || !/[,，]/.test(text)) return;
       event.preventDefault();
       resolvePastedSpuIds(text);
@@ -381,7 +385,9 @@
       headers: { Accept: "application/json" },
     })
       .then((r) => (r.ok ? r.json() : {}))
-      .then((data) => { state.enumMap = data || {}; })
+      .then((data) => {
+        state.enumMap = data || {};
+      })
       .catch(() => {});
   }
   // 用 enumMap 翻译枚举值;type = enum_type, val = 原始英文值
@@ -546,18 +552,18 @@
 
     // 逐店铺明细：实测口径列样本量/覆盖率/窗口/快照日；基线口径说明降级原因。
     var parts = [];
-    (fee.per_shop || []).forEach(function (s) {
+    (fee.per_shop || []).forEach((s) => {
       var name = s.shop_name || String(s.shop_pk);
       if (s.source === "shop_estimate" && s.estimate) {
-        var cov = (parseFloat(s.estimate.coverage_ratio) * 100).toFixed(1);
+        var kept = (parseFloat(s.estimate.kept_share) * 100).toFixed(1);
         parts.push(
           name +
             " 实测 " +
             (parseFloat(s.rate) * 100).toFixed(2) +
-            "%（样本 " +
-            s.estimate.eligible_order_count +
-            " 单 · 覆盖 " +
-            cov +
+            "%（未退款订单 " +
+            s.estimate.kept_order_count +
+            " 单 · 占窗口 GMV " +
+            kept +
             "% · 近 " +
             s.estimate.lookback_days +
             " 天 · " +
@@ -582,12 +588,10 @@
     estEl.textContent = parts.join(" · ");
     estEl.hidden = parts.length === 0;
 
-    var degraded = (fee.per_shop || []).some(function (s) {
-      return s.source === "baseline";
-    });
+    var degraded = (fee.per_shop || []).some((s) => s.source === "baseline");
     var fbEl = $("#fee-card-fallback");
     fbEl.textContent = degraded
-      ? "⚠ 未使用店铺实测费率：近窗口有效样本量或覆盖率未达标，按全局基线估算"
+      ? "⚠ 未使用店铺实测费率：该店在窗口内暂无已结算订单（或快照已过期），按全局基线估算"
       : "";
     fbEl.hidden = !degraded;
 
@@ -862,15 +866,20 @@
           "div",
           { class: "op-drill-cell h-100" },
           el("span", { class: "op-drill-lbl" }, label, hintEl),
-          el("span", { class: "op-drill-val" }, String(value == null ? "—" : value)),
+          el(
+            "span",
+            { class: "op-drill-val" },
+            String(value == null ? "—" : value),
+          ),
         ),
       );
     }
     var adSystemBreakeven =
       it.ad_system_breakeven_roi == null || it.ad_system_breakeven_roi === ""
         ? "—"
-        : (it.ad_system_breakeven_roi_status === "estimated_known_costs" ? "≈" : "") +
-          fmtRatio(it.ad_system_breakeven_roi);
+        : (it.ad_system_breakeven_roi_status === "estimated_known_costs"
+            ? "≈"
+            : "") + fmtRatio(it.ad_system_breakeven_roi);
     return el(
       "div",
       {
@@ -1037,7 +1046,14 @@
             null,
             el("th", null, "订单号"),
             el("th", null, "SETTLEMENT"), // 表头用 column_header 翻译
-            el("th", null, "分摊比", hintSpan("分摊比 = line_gmv / order_gmv;SETTLEMENT 按这个比例分到各行")),
+            el(
+              "th",
+              null,
+              "分摊比",
+              hintSpan(
+                "分摊比 = line_gmv / order_gmv;SETTLEMENT 按这个比例分到各行",
+              ),
+            ),
             el("th", null, "statement"), // 表头用 column_header 翻译
           ),
         ),
@@ -1102,11 +1118,46 @@
           el(
             "tr",
             null,
-            el("th", null, th("case"), hintSpan("case_id = 售后 case 外部 ID(after_sales.cases.external_case_id)")),
-            el("th", null, "订单", hintSpan("order_id = 关联订单 ID(after_sales.cases.order_pk → commerce.sales_orders.order_id)")),
-            el("th", null, "类型", hintSpan("case_type = RETURN_AND_REFUND(退货退款) / REFUND_ONLY(仅退款) / CANCELLATION(取消)")),
-            el("th", null, "状态", hintSpan("case 状态;RETURN_OR_REFUND_REQUEST_COMPLETE / CANCELLATION_REQUEST_COMPLETE 表示完结")),
-            el("th", null, "退款", hintSpan("refund_amount = 该 case 退款金额(CNY,服务端由VND换算,已从 GMV 减除)")),
+            el(
+              "th",
+              null,
+              th("case"),
+              hintSpan(
+                "case_id = 售后 case 外部 ID(after_sales.cases.external_case_id)",
+              ),
+            ),
+            el(
+              "th",
+              null,
+              "订单",
+              hintSpan(
+                "order_id = 关联订单 ID(after_sales.cases.order_pk → commerce.sales_orders.order_id)",
+              ),
+            ),
+            el(
+              "th",
+              null,
+              "类型",
+              hintSpan(
+                "case_type = RETURN_AND_REFUND(退货退款) / REFUND_ONLY(仅退款) / CANCELLATION(取消)",
+              ),
+            ),
+            el(
+              "th",
+              null,
+              "状态",
+              hintSpan(
+                "case 状态;RETURN_OR_REFUND_REQUEST_COMPLETE / CANCELLATION_REQUEST_COMPLETE 表示完结",
+              ),
+            ),
+            el(
+              "th",
+              null,
+              "退款",
+              hintSpan(
+                "refund_amount = 该 case 退款金额(CNY,服务端由VND换算,已从 GMV 减除)",
+              ),
+            ),
           ),
         ),
         el("tbody", null, crows),
@@ -1303,10 +1354,13 @@
 
   // ---------- 店铺下拉(必选:shop_pk 来自 URL → 切换写回 URL) ----------
   function loadShops() {
-    return fetch(`${PREFIX}/v2/commerce/channel-accounts?platform=tiktok&limit=500`, {
-      credentials: "include",
-      headers: { Accept: "application/json" },
-    })
+    return fetch(
+      `${PREFIX}/v2/commerce/channel-accounts?platform=tiktok&limit=500`,
+      {
+        credentials: "include",
+        headers: { Accept: "application/json" },
+      },
+    )
       .then((r) => {
         if (r.status === 401) {
           window.location.href = loginUrl(); // pi-lens-ignore: no-open-redirect-js
@@ -1419,7 +1473,9 @@
           renderError("汇率数据缺失，无法计算结果", true);
           return;
         }
-        renderError(`加载失败 · ${err && err.message ? err.message : "未知错误"}`);
+        renderError(
+          `加载失败 · ${err && err.message ? err.message : "未知错误"}`,
+        );
       });
   }
 

@@ -382,8 +382,8 @@ _SQL_SHOP_FEE_RATES = text(
     """
     SELECT DISTINCT ON (shop_pk)
            shop_pk, fee_rate, calculated_on, calculated_at, lookback_days,
-           eligible_order_count, line_gmv_covered, line_gmv_total,
-           coverage_ratio, total_fee, currency
+           kept_order_count, kept_line_gmv, window_line_gmv,
+           kept_share, total_fee, currency
     FROM reporting.shop_fee_rate_estimates
     ORDER BY shop_pk, calculated_at DESC
     """
@@ -738,16 +738,18 @@ def _load_shop_fee_estimates(
         )
         return {}
     rows = sess.execute(_SQL_SHOP_FEE_RATES).mappings().all()
+    # 这里不再套 int()：列值是 psycopg 直接返回的 Python int/Decimal，
+    # 多余的类型转换还会触发 pi-lens 的 unchecked-throwing-call-python。
     return {
-        int(r["shop_pk"]): ShopFeeRateEstimate(
+        r["shop_pk"]: ShopFeeRateEstimate(
             calculated_on=r["calculated_on"],
             calculated_at=r["calculated_at"],
-            lookback_days=int(r["lookback_days"]),
+            lookback_days=r["lookback_days"],
             fee_rate=Decimal(r["fee_rate"]),
-            eligible_order_count=int(r["eligible_order_count"]),
-            line_gmv_covered=Decimal(r["line_gmv_covered"]),
-            line_gmv_total=Decimal(r["line_gmv_total"]),
-            coverage_ratio=Decimal(r["coverage_ratio"]),
+            kept_order_count=r["kept_order_count"],
+            kept_line_gmv=Decimal(r["kept_line_gmv"]),
+            window_line_gmv=Decimal(r["window_line_gmv"]),
+            kept_share=Decimal(r["kept_share"]),
             total_fee=Decimal(r["total_fee"]),
             currency=r["currency"],
         )

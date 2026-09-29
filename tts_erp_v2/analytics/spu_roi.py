@@ -97,7 +97,7 @@ _FEE_NOTE = (
     "平台佣金=平台从销售额直接扣除的全部费用；已结算=SETTLEMENT 实到账；"
     "未结算=sales×r̂×(1−SPU退款率)；信息列不重复计入净利。"
     "r̂ 优先级：页面覆写 > 店铺实测（近180天已结算单 Σ|FEE|/Σ行GMV，行GMV=客户实付；"
-    "每24h重算且需达标样本量与覆盖率） > 全局基线 0.308"
+    "每24h重算，窗口内有一单已结算即产出） > 全局基线 0.308"
 )
 
 
@@ -130,7 +130,9 @@ def _wire_value(key: str, value: Any, *, totals: bool = False) -> Any:
         return str(value)
     if is_dataclass(value):
         return {
-            field.name: _wire_value(field.name, getattr(value, field.name), totals=totals)
+            field.name: _wire_value(
+                field.name, getattr(value, field.name), totals=totals
+            )
             for field in fields(value)
         }
     if isinstance(value, Mapping):
@@ -162,16 +164,18 @@ def _estimate_payload(estimate) -> dict[str, Any] | None:
         "calculated_on": estimate.calculated_on.isoformat(),
         "calculated_at": estimate.calculated_at.isoformat(),
         "lookback_days": estimate.lookback_days,
-        "eligible_order_count": estimate.eligible_order_count,
-        "line_gmv_covered": str(estimate.line_gmv_covered),
-        "line_gmv_total": str(estimate.line_gmv_total),
-        "coverage_ratio": _fmt_rate(estimate.coverage_ratio),
+        "kept_order_count": estimate.kept_order_count,
+        "kept_line_gmv": str(estimate.kept_line_gmv),
+        "window_line_gmv": str(estimate.window_line_gmv),
+        "kept_share": _fmt_rate(estimate.kept_share),
         "total_fee": str(estimate.total_fee),
         "currency": estimate.currency,
     }
 
 
-def _meta_payload(result, scope: ProfitScope, fee_rate: Decimal | None) -> dict[str, Any]:
+def _meta_payload(
+    result, scope: ProfitScope, fee_rate: Decimal | None
+) -> dict[str, Any]:
     basis = result.basis
     if scope.start_date is None and scope.end_date is None:
         window_note = (
@@ -221,9 +225,7 @@ def _meta_payload(result, scope: ProfitScope, fee_rate: Decimal | None) -> dict[
                 else None
             ),
             "coverage_last_day": (
-                basis.coverage_last_day.isoformat()
-                if basis.coverage_last_day
-                else None
+                basis.coverage_last_day.isoformat() if basis.coverage_last_day else None
             ),
             "note": window_note,
         },
@@ -267,7 +269,9 @@ def _parse_fee_rate(raw: str | None) -> Decimal | None:
     try:
         value = Decimal(raw.strip())
     except Exception as exc:
-        raise HTTPException(status_code=422, detail="fee_rate must be a decimal") from exc
+        raise HTTPException(
+            status_code=422, detail="fee_rate must be a decimal"
+        ) from exc
     if not value.is_finite():
         raise HTTPException(status_code=422, detail="fee_rate must be a finite decimal")
     if value.copy_abs() > Decimal("1e6"):
@@ -386,7 +390,9 @@ def _evidence_payload(explanation, kind: EvidenceKind, scope: ProfitScope) -> di
             {
                 "spu_id": explanation.result.spu_id,
                 "window": {
-                    "w_start": scope.start_date.isoformat() if scope.start_date else None,
+                    "w_start": scope.start_date.isoformat()
+                    if scope.start_date
+                    else None,
                     "w_end": scope.end_date.isoformat() if scope.end_date else None,
                 },
             }

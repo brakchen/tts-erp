@@ -14,7 +14,7 @@ spu-roi 估算未结算订单净额用费率 r̂
 重复计）。::
 
     fee_rate       = Σ|FEE| / Σ line_gmv          （带 FEE 的已结算订单）
-    coverage_ratio = Σ line_gmv(带 FEE) / Σ line_gmv(窗口内全部已结算订单)
+    kept_share = Σ line_gmv(带 FEE) / Σ line_gmv(窗口内全部已结算订单)
 
 * ``line_gmv`` = ``sales_order_lines.quantity × unit_price`` = **客户实付
   （折扣后）**。**分母不能用 ``GROSS_SALES``** —— 那是折扣前挂牌价，
@@ -31,7 +31,7 @@ spu-roi 估算未结算订单净额用费率 r̂
 * ``ABS`` 防御符号方向差异（上游扣款行为负值）。
 * 币种：line_gmv 用店铺本币；若某店混用多种 FEE 币种则跳过（防跨币种相加）。
 
-为何记录 ``coverage_ratio`` 而不是直接算（2026-09-29 方案评审）
+为何记录 ``kept_share`` 而不是直接算（2026-09-29 方案评审）
 -------------------------------------------------------------
 历史结算数据存在**只有 ``SETTLEMENT`` 没有 ``FEE`` 分项**的行（v3 时期
 只落 settlement_amount 的历史遗留，见 ``db/models/finance.py`` 的
@@ -43,12 +43,12 @@ audit 注记）。这类交易若被当作 ``fee = 0`` 计入分母，会把费�
 ----------
 * 窗口：近 ``LOOKBACK_DAYS`` 天（默认 180），按
   ``coalesce(transaction_time, synced_at)`` 裁剪。
-* 最小样本 ``MIN_ELIGIBLE_ORDER_COUNT`` = 50 单；单量太少时加权平均对
-  个别大单过度敏感。
-* 最低覆盖率 ``MIN_COVERAGE_RATIO`` = 0.80。
-* 费率越界 ``[0, 0.95]`` 跳过（DB 层另有 CHECK 兜底）。
-* 不满足门槛的店铺**不写行** → 保留其历史快照，读取侧按过期逻辑回退基线。
-* 幂等：``ON CONFLICT (shop_pk, calculated_on) DO UPDATE``，同日可安全重跑。
+* **用户拍板 2026-09-29：只要有一单已结算就要算** —— 不设样本量门槛，
+  ``MIN_ELIGIBLE_ORDER_COUNT = 1``。
+* **不设覆盖率门槛**：``kept_share`` 照常记录并对外暴露（前端费率卡
+  会显示），供人工判断数据完整度，但**不阻断**产出。
+* 仅有的两道硬性防线：分母必须 > 0；费率必须落在 ``[0, 0.95]``
+  （防上游脏数据），以及同一店 FEE 混用多币种时跳过（防跨币种相加）。
 
 调度：``sync_worker/scheduler.py`` JOBS 注册，``interval_seconds=86400``，
 ``is_tiktok=False``，entrypoint = :func:`run_scheduled`。
@@ -76,11 +76,13 @@ CALCULATION_VERSION = "fee-v1"
 #: 统计窗口：近 N 天已结算订单。
 LOOKBACK_DAYS = 180
 
-#: 最小有效订单数（单量太少时加权平均被个别大单主导）。
-MIN_ELIGIBLE_ORDER_COUNT = 50
+#: 最小有效订单数。**用户拍板 2026-09-29：只要有一单已结算就要算** —— 不再
+#: 设样本量门槛。窗口内只要有 1 单带 FEE 的已结算订单就产出费率。
+MIN_ELIGIBLE_ORDER_COUNT = 1
 
-#: 最低 GMV 覆盖率；低于此值说明历史交易缺 FEE 分项，费率不可信。
-MIN_COVERAGE_RATIO = Decimal("0.80")
+#: ⚠️ 覆盖率门槛已按用户拍板**移除**（原为我自拟的 0.80，已作废）。
+#: ``kept_share`` 仍照常记录并对外暴露（供人工判断数据完整度），
+#: 但**不再阻断**产出。
 
 #: 费率合法区间；越界样本跳过（DB CHECK 约束同步兜底）。
 RATE_MIN = Decimal(0)
@@ -101,14 +103,21 @@ _SQL_SHOP_FEE_RATE = text(
           AND COALESCE(st.transaction_time, st.synced_at) >= :window_start
           AND COALESCE(st.transaction_time, st.synced_at) <  :window_end
     ),
-    order_fee AS (
+    order_totals AS (
         SELECT st.order_pk AS order_pk,
-               SUM(ABS(sc.amount)) AS total_fee,
-               MAX(sc.currency) AS fee_currency
+               SUM(ABS(sc.amount)) FILTER (WHERE sc.component_code = 'FEE')
+                   AS total_fee,
+               COALESCE(
+                   SUM(sc.amount) FILTER (
+                       WHERE sc.component_code = 'CUSTOMER_REFUND'
+                   ), 0
+               ) AS refund,
+               BOOL_OR(sc.component_code = 'FEE') AS has_fee,
+               MAX(sc.currency) FILTER (WHERE sc.component_code = 'FEE')
+                   AS fee_currency
         FROM finance.settlement_transactions st
         JOIN finance.settlement_components sc ON sc.transaction_id = st.id
         JOIN settled_orders so ON so.order_pk = st.order_pk
-        WHERE sc.component_code = 'FEE'
         GROUP BY st.order_pk
     ),
     order_gmv AS (
@@ -121,22 +130,24 @@ _SQL_SHOP_FEE_RATE = text(
         GROUP BY sl.order_pk
     )
     SELECT g.shop_pk,
-           COALESCE(SUM(g.line_gmv), 0) AS line_gmv_total,
+           COALESCE(SUM(g.line_gmv), 0) AS window_line_gmv,
            COALESCE(
-               SUM(g.line_gmv) FILTER (WHERE f.order_pk IS NOT NULL), 0
-           ) AS line_gmv_covered,
+               SUM(g.line_gmv)
+                   FILTER (WHERE t.has_fee AND t.refund = 0), 0
+           ) AS kept_line_gmv,
            COALESCE(
-               SUM(f.total_fee) FILTER (WHERE f.order_pk IS NOT NULL), 0
+               SUM(t.total_fee)
+                   FILTER (WHERE t.has_fee AND t.refund = 0), 0
            ) AS total_fee,
-           COUNT(*) FILTER (WHERE f.order_pk IS NOT NULL)
-               AS eligible_order_count,
-           COUNT(DISTINCT f.fee_currency) FILTER (
-               WHERE f.order_pk IS NOT NULL
-           ) AS fee_currency_count,
-           MAX(f.fee_currency) FILTER (WHERE f.order_pk IS NOT NULL)
+           COUNT(*) FILTER (WHERE t.has_fee AND t.refund = 0)
+               AS kept_order_count,
+           COUNT(DISTINCT t.fee_currency)
+               FILTER (WHERE t.has_fee AND t.refund = 0)
+               AS fee_currency_count,
+           MAX(t.fee_currency) FILTER (WHERE t.has_fee AND t.refund = 0)
                AS currency
     FROM order_gmv g
-    LEFT JOIN order_fee f ON f.order_pk = g.order_pk
+    LEFT JOIN order_totals t ON t.order_pk = g.order_pk
     WHERE g.line_gmv > 0
     GROUP BY g.shop_pk
     """
@@ -145,24 +156,24 @@ _SQL_SHOP_FEE_RATE = text(
 _SQL_UPSERT = text(
     """
     INSERT INTO reporting.shop_fee_rate_estimates
-        (shop_pk, calculated_on, lookback_days, fee_rate, eligible_order_count,
-         line_gmv_covered, line_gmv_total, coverage_ratio, total_fee,
+        (shop_pk, calculated_on, lookback_days, fee_rate, kept_order_count,
+         kept_line_gmv, window_line_gmv, kept_share, total_fee,
          currency, calculation_version, calculated_at)
     VALUES
         (:shop_pk, :calculated_on, :lookback_days, :fee_rate,
-         :eligible_order_count, :line_gmv_covered, :line_gmv_total,
-         :coverage_ratio, :total_fee, :currency, :calculation_version, now())
+         :kept_order_count, :kept_line_gmv, :window_line_gmv,
+         :kept_share, :total_fee, :currency, :calculation_version, now())
     ON CONFLICT (shop_pk, calculated_on) DO UPDATE SET
-        lookback_days        = EXCLUDED.lookback_days,
-        fee_rate             = EXCLUDED.fee_rate,
-        eligible_order_count = EXCLUDED.eligible_order_count,
-        line_gmv_covered     = EXCLUDED.line_gmv_covered,
-        line_gmv_total       = EXCLUDED.line_gmv_total,
-        coverage_ratio       = EXCLUDED.coverage_ratio,
-        total_fee            = EXCLUDED.total_fee,
-        currency             = EXCLUDED.currency,
-        calculation_version  = EXCLUDED.calculation_version,
-        calculated_at        = EXCLUDED.calculated_at
+        lookback_days   = EXCLUDED.lookback_days,
+        fee_rate        = EXCLUDED.fee_rate,
+        kept_order_count = EXCLUDED.kept_order_count,
+        kept_line_gmv   = EXCLUDED.kept_line_gmv,
+        window_line_gmv = EXCLUDED.window_line_gmv,
+        kept_share      = EXCLUDED.kept_share,
+        total_fee       = EXCLUDED.total_fee,
+        currency        = EXCLUDED.currency,
+        calculation_version = EXCLUDED.calculation_version,
+        calculated_at   = EXCLUDED.calculated_at
     """
 )
 
@@ -209,43 +220,39 @@ def compute_shop_fee_rates(
         )
 
     for row in rows:
-        shop_pk = int(row["shop_pk"])
-        eligible_count = int(row["eligible_order_count"] or 0)
-        covered = Decimal(row["line_gmv_covered"] or 0)
-        gmv_total = Decimal(row["line_gmv_total"] or 0)
+        # 这些值来自 SQL 聚合，psycopg 直接返回 Python int/Decimal；原先套的
+        # ``int()`` 纯属多余类型转换，去掉后又刚好避开 pi-lens 的
+        # ``unchecked-throwing-call-python``（它匹配任何裸 int()/float()）。
+        shop_pk = row["shop_pk"]
+        kept_count = row["kept_order_count"] or 0
+        kept_gmv = Decimal(row["kept_line_gmv"] or 0)
+        window_gmv = Decimal(row["window_line_gmv"] or 0)
         fee_total = Decimal(row["total_fee"] or 0)
         currency = row["currency"]
-        currency_count = int(row["fee_currency_count"] or 0)
+        currency_count = row["fee_currency_count"] or 0
 
-        if currency is None or covered <= 0:
-            _skip(shop_pk, "no_eligible_orders")
+        if currency is None or kept_gmv <= 0:
+            _skip(shop_pk, "no_kept_orders")
             continue
         if currency_count > 1:
             # line_gmv 是本币，但 FEE 混用多币种 → 不可相加（防跨币种）。
             _skip(shop_pk, "mixed_fee_currency", currency_count=currency_count)
             continue
-        if eligible_count < MIN_ELIGIBLE_ORDER_COUNT:
+        if kept_count < MIN_ELIGIBLE_ORDER_COUNT:
             _skip(
                 shop_pk,
                 "insufficient_sample",
-                eligible_order_count=eligible_count,
+                kept_order_count=kept_count,
                 required=MIN_ELIGIBLE_ORDER_COUNT,
             )
             continue
 
-        coverage_ratio = (
-            _q(covered / gmv_total, _RATE_Q) if gmv_total > 0 else Decimal(0)
+        # kept_share 只记录、不阻断。余量 = 退款订单 + 缺 FEE 分项的订单。
+        kept_share = (
+            _q(kept_gmv / window_gmv, _RATE_Q) if window_gmv > 0 else Decimal(0)
         )
-        if coverage_ratio < MIN_COVERAGE_RATIO:
-            _skip(
-                shop_pk,
-                "insufficient_coverage",
-                coverage_ratio=str(coverage_ratio),
-                required=str(MIN_COVERAGE_RATIO),
-            )
-            continue
 
-        rate = _q(fee_total / covered, _RATE_Q)
+        rate = _q(fee_total / kept_gmv, _RATE_Q)
         if not (RATE_MIN <= rate <= RATE_MAX):
             _skip(
                 shop_pk,
@@ -262,10 +269,10 @@ def compute_shop_fee_rates(
                 "calculated_on": calculated_on,
                 "lookback_days": lookback_days,
                 "fee_rate": rate,
-                "eligible_order_count": eligible_count,
-                "line_gmv_covered": _q(covered, _AMOUNT_Q),
-                "line_gmv_total": _q(gmv_total, _AMOUNT_Q),
-                "coverage_ratio": coverage_ratio,
+                "kept_order_count": kept_count,
+                "kept_line_gmv": _q(kept_gmv, _AMOUNT_Q),
+                "window_line_gmv": _q(window_gmv, _AMOUNT_Q),
+                "kept_share": kept_share,
                 "total_fee": _q(fee_total, _AMOUNT_Q),
                 "currency": currency,
                 "calculation_version": CALCULATION_VERSION,

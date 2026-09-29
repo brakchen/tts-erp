@@ -194,26 +194,26 @@ class ShipmentTrackingSummary(Base):
 class ShopFeeRateEstimate(Base):
     """Per-(shop, day) measured platform commission rate for spu-roi estimation.
 
-    口径：``fee_rate = Σ|FEE| / Σ line_gmv``。``line_gmv`` = 订单行
-    ``quantity × unit_price`` = **客户实付（折扣后）**；**不是** ``GROSS_SALES``
-    （那是折扣前挂牌价，实测是 line_gmv 的 169%）—— 用错分母会得出 12.5%
-    而不是正确的 21.2%。``FEE`` 是交易级平台总扣除（``fee_amount``：已含
-    抽佣 + 联盟 + 运费类），**不是** ``PLATFORM_COMMISSION``（仅为抽佣分项，
-    约占一半）。
+    口径：``fee_rate = Σ|FEE| / Σ line_gmv``，作用域**只限未退款(kept)订单**。
+    ``line_gmv`` = 订单行 ``quantity × unit_price`` = **客户实付（折扣后）**；
+    **不是** ``GROSS_SALES``（那是折扣前挂牌价，实测是 line_gmv 的 169%）。
+    ``FEE`` 是交易级平台总扣除（``fee_amount``：已含抽佣 + 联盟 + 运费类），
+    **不是** ``PLATFORM_COMMISSION``（仅为抽佣分项）。
 
-    生产库逐单验证（1204 笔已结算订单，中位残差 0.000%）::
+    ⚠️ **为何必须排除退款订单**（2026-09-29 生产实测反证）：页面公式
+    ``unsettled_net = line_gmv × (1−r̂) × (1−退款率)`` 里 ``(1−退款率)``
+    已单独扣过一次退款；若 r̂ 的样本里再混入全额退款订单（其 FEE 仅 ~3%），
+    退款效应被算两遍。生产反证：kept 口径预测误差 ±1%，混合物口径高估 ~16%。
+
+    生产库逐单验证（中位残差 0.000%）::
 
         SETTLEMENT ≈ line_gmv + FEE + CUSTOMER_REFUND
 
     即 FEE 已覆盖运费类，**不可再加运费分项**（会重复扣）。
 
-    ``coverage_ratio`` 暴露历史订单缺 ``FEE`` 分项的数据缺口（生产库当前
-    100%，作为安全网保留）：覆盖率偏低的快照不应作为费率依据，计算任务
-    会在覆盖率不达门槛时直接跳过该店（不写行）。
-
-    由 ``analytics.shop_fee_rate`` 任务每日写一份快照（同店同日唯一）；
-    读取侧取每店最新一行，超出 ``MAX_ESTIMATE_AGE_DAYS`` 视为过期并回退
-    全局基线。无行 = 该店铺无可用样本。
+    ``kept_share`` = ``kept_line_gmv / window_line_gmv``，余量 = 退款订单 +
+    缺 FEE 分项的订单；**仅供观测**（前端费率卡会显示），不作门槛 ——
+    用户拍板：窗口内只要有一单已结算就算。
     """
 
     __tablename__ = "shop_fee_rate_estimates"
@@ -228,8 +228,8 @@ class ShopFeeRateEstimate(Base):
             name="ck_shop_fee_rate_est_rate",
         ),
         CheckConstraint(
-            "coverage_ratio >= 0 AND coverage_ratio <= 1",
-            name="ck_shop_fee_rate_est_coverage",
+            "kept_share >= 0 AND kept_share <= 1",
+            name="ck_shop_fee_rate_est_kept_share",
         ),
         Index("ix_shop_fee_rate_est_shop_calc_at", "shop_pk", "calculated_at"),
         {"schema": "reporting"},
@@ -248,14 +248,12 @@ class ShopFeeRateEstimate(Base):
     calculated_on: Mapped[date] = mapped_column(Date, nullable=False)
     lookback_days: Mapped[int] = mapped_column(Integer, nullable=False)
     fee_rate: Mapped[Decimal] = mapped_column(Numeric(8, 6), nullable=False)
-    eligible_order_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    line_gmv_covered: Mapped[Decimal] = mapped_column(
+    kept_order_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    kept_line_gmv: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
+    window_line_gmv: Mapped[Decimal] = mapped_column(
         Numeric(20, 4), nullable=False
     )
-    line_gmv_total: Mapped[Decimal] = mapped_column(
-        Numeric(20, 4), nullable=False
-    )
-    coverage_ratio: Mapped[Decimal] = mapped_column(Numeric(8, 6), nullable=False)
+    kept_share: Mapped[Decimal] = mapped_column(Numeric(8, 6), nullable=False)
     total_fee: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
     currency: Mapped[str] = mapped_column(Text, nullable=False)
     calculation_version: Mapped[str] = mapped_column(
