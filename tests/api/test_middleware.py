@@ -97,6 +97,49 @@ def test_x_api_key_header_also_accepted(api_client, readonly_key):
     assert r.status_code == 200, r.text
 
 
+def test_authorization_header_wins_regardless_of_header_order(
+    api_client, readonly_key, readwrite_key
+):
+    response = api_client.post(
+        "/v2/reporting/manual-costs",
+        headers=[
+            ("X-API-Key", readwrite_key),
+            ("Authorization", f"Bearer {readonly_key}"),
+        ],
+        json={
+            "spu_id": "TEST_header_precedence",
+            "unit_cost": "12.34",
+            "currency": "USD",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "requires readwrite"
+
+
+def test_browser_auth_denials_share_the_rate_limit_budget(api_client):
+    from tts_erp_v2.middleware.rate_limit import reset_shared
+
+    reset_shared(limit=1)
+    try:
+        first = api_client.get(
+            "/v2/pages/manual-costs",
+            headers={"Accept": "text/html"},
+            follow_redirects=False,
+        )
+        second = api_client.get(
+            "/v2/pages/manual-costs",
+            headers={"Accept": "text/html"},
+            follow_redirects=False,
+        )
+    finally:
+        reset_shared()
+
+    assert first.status_code == 302
+    assert second.status_code == 429
+    assert int(second.headers["retry-after"]) >= 1
+
+
 def test_rate_limit_returns_429_with_retry_after(api_client, readonly_key, monkeypatch):
     """Burst above the per-key limit → 429 with Retry-After header."""
     # Force a tiny limit so the test stays fast.
@@ -239,6 +282,23 @@ def test_auth_mode_off_lets_requests_through(api_client_off):
     r = api_client_off.get("/v2/commerce/sales-orders")
     # 200, not 401
     assert r.status_code == 200, r.text
+
+
+def test_shadow_html_request_logs_only_and_passes_through(db_engine, monkeypatch):
+    """Shadow mode must not redirect a browser would-deny request."""
+    from fastapi.testclient import TestClient
+
+    from tts_erp_v2.app import build_app
+
+    monkeypatch.setenv("TTS_ERP_AUTH_MODE", "shadow")
+    with TestClient(build_app()) as client:
+        response = client.get(
+            "/v2/pages/manual-costs",
+            headers={"Accept": "text/html,application/xhtml+xml"},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 200
 
 
 def test_prefixed_docs_path_requires_docs_basic_auth(db_engine, monkeypatch):
