@@ -512,8 +512,8 @@ def register_shop(
 ) -> ShopRegisterResponse:
     """Register a shop and optionally configure its service App pair.
 
-    App Key/App Secret writes require admin and share the same transaction as
-    the shop/service_id write. Metadata-only registration remains readwrite.
+    App Key/App Secret writes are readwrite and share the same transaction as
+    the shop/service_id write. Secret is only stored encrypted, never returned.
     """
     require_role_at_least(request, "readwrite")
     plaintext_app_secret = _validated_plaintext_app_secret(
@@ -521,8 +521,6 @@ def register_shop(
         app_key=body.app_key,
         app_secret=body.app_secret,
     )
-    if body.app_key is not None or body.app_secret is not None:
-        require_role_at_least(request, "admin")
 
     from tts_erp_v2.db.base import get_engine
 
@@ -625,12 +623,12 @@ class ShopUpdateBody(BaseModel):
         min_length=1,
         max_length=128,
         repr=False,
-        description="配套 App Key；与 app_secret 同时提交，且需要 admin。",
+        description="配套 App Key；与 app_secret 同时提交（readwrite+）。",
     )
     app_secret: SecretStr | None = Field(
         default=None,
         repr=False,
-        description="配套 App Secret；只加密存储，不返回，且需要 admin。",
+        description="配套 App Secret；只加密存储，不返回（readwrite+）。",
     )
 
     @field_validator("service_id", "app_key")
@@ -656,7 +654,7 @@ def update_shop(
 ) -> ShopUpdateResponse:
     """Update shop metadata and optionally rotate its service App pair.
 
-    App Key/App Secret writes require admin and are committed atomically with
+    App Key/App Secret writes are readwrite and are committed atomically with
     the service_id change. A service_id-only change is accepted only when the
     target pair already resolves from the encrypted table or exact legacy env
     fallback.
@@ -667,8 +665,6 @@ def update_shop(
         app_key=body.app_key,
         app_secret=body.app_secret,
     )
-    if body.app_key is not None or body.app_secret is not None:
-        require_role_at_least(request, "admin")
 
     from tts_erp_v2.db.base import get_engine
 

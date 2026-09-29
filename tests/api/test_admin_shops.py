@@ -219,7 +219,8 @@ def test_register_role_matrix(api_client, readwrite_key, readonly_key):
     )
 
 
-def test_register_app_credentials_require_admin(api_client, readwrite_key):
+def test_register_app_credentials_allow_readwrite(api_client, readwrite_key):
+    """App Key/Secret 保存 readwrite 即可（2026-09-29 用户拍板，不再要求 admin）。"""
     r = _register(
         api_client,
         readwrite_key,
@@ -228,7 +229,11 @@ def test_register_app_credentials_require_admin(api_client, readwrite_key):
         app_key="TEST_ADMIN_APP_KEY_456",
         app_secret="TEST_ADMIN_APP_SECRET_456",
     )
-    assert r.status_code == 403, r.text
+    assert r.status_code == 200, r.text
+    shop = r.json()["shop"]
+    assert shop["service_id"] == SERVICE_B
+    assert shop["app_credentials_configured"] is True
+    assert "app_secret" not in r.text
 
 
 def test_register_anonymous_is_401(api_client):
@@ -413,9 +418,10 @@ def test_update_shop_never_touches_credential_or_status(api_client, admin_key):
     assert shop["status"] == "active"
 
 
-def test_update_app_credentials_require_admin(
+def test_update_app_credentials_allow_readwrite(
     api_client, admin_key, readwrite_key
 ):
+    """PATCH 配置 App pair readwrite 即可（2026-09-29 用户拍板）。"""
     r = _register(api_client, admin_key, shop_id=SHOP_B)
     pk = r.json()["shop"]["id"]
     r = _patch(
@@ -426,7 +432,8 @@ def test_update_app_credentials_require_admin(
         app_key="TEST_ADMIN_APP_KEY_456",
         app_secret="TEST_ADMIN_APP_SECRET_456",
     )
-    assert r.status_code == 403, r.text
+    assert r.status_code == 200, r.text
+    assert r.json()["shop"]["app_credentials_configured"] is True
 
 
 def test_update_service_id_requires_resolvable_app_pair(api_client, admin_key):

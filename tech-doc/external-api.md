@@ -278,15 +278,15 @@ curl -sS -H "X-API-Key: $TTS_ERP_RO_KEY" \
 | --- | --- | --- |
 | `GET /v2/pages/manual-costs` | readonly | Server-rendered operator console (shop switcher + needs-cost / needs-photo / recently-filed tabs). Browser without a session → 302 to `/v2/auth/login`. Static assets under `/static/*` are readonly-classified too. |
 | `GET /v2/pages/spu-roi` | readonly | SPU 实际 ROI 看板(账页式)。Server-rendered HTML shell;数据来自 `GET /v2/analytics/spu-roi`;JS 在 `/static/js/spu-roi.js`。 |
-| `GET /v2/pages/shops` | readonly | 店铺注册台。人工注册插件同步店铺（`commerce.shops` 补登记）；写入走 `POST /v2/admin/shops/register`（元信息 readwrite；提交 App Key/Secret 时 admin）；行内元信息编辑走 `PATCH /v2/admin/shops/{shop_pk}`；App pair 按 service_id 加密保存；「获取授权链接」按钮走 `GET /v2/oauth/tiktok/authorize?format=json`（readwrite）。 |
+| `GET /v2/pages/shops` | readonly | 店铺注册台。人工注册插件同步店铺（`commerce.shops` 补登记）；写入走 `POST /v2/admin/shops/register`（含 App Key/Secret 均 readwrite）；行内元信息编辑走 `PATCH /v2/admin/shops/{shop_pk}`；App pair 按 service_id 加密保存；「获取授权链接」按钮走 `GET /v2/oauth/tiktok/authorize?format=json`（readwrite）。 |
 
 ### Admin (`/v2/admin/*`, handler-enforced roles)
 
 | Endpoint | Role | Notes |
 | --- | --- | --- |
-| `POST /v2/admin/shops/register` | **readwrite**（含 App Secret 时 **admin**） | 人工注册店铺。body 可含 `service_id/app_key/app_secret`；App Key/Secret 必须成对且 service_id 必填，同一事务写入 `integration.tiktok_app_credentials`，Secret 只加密存储、不返回。无 Secret 的原元信息注册行为保持 readwrite 与幂等。 |
+| `POST /v2/admin/shops/register` | **readwrite** | 人工注册店铺。body 可含 `service_id/app_key/app_secret`；App Key/Secret 必须成对且 service_id 必填，同一事务写入 `integration.tiktok_app_credentials`，Secret 只加密存储、不返回。注册幂等。 |
 | `GET /v2/admin/shops/unregistered` | **readwrite** | 列出在 `plugin.*` 插件数据里出现、但 `commerce.shops` 无行的 shop_id → `{candidates: [{shop_id, sources}]}`；注册页的候选清单。 |
-| `PATCH /v2/admin/shops/{shop_pk}` | **readwrite**（含 App Secret 时 **admin**） | 更新店铺元信息或原子配置 `service_id/app_key/app_secret`。App pair 按 service_id 共享并加密；App Key/Secret 必须成对。只改 service_id 时目标 App pair 必须已存在（否则 409），防止生成必然失败的授权链接。`credential_id`/`status` 不可修改。 |
+| `PATCH /v2/admin/shops/{shop_pk}` | **readwrite** | 更新店铺元信息或原子配置 `service_id/app_key/app_secret`。App pair 按 service_id 共享并加密；App Key/Secret 必须成对。只改 service_id 时目标 App pair 必须已存在（否则 409），防止生成必然失败的授权链接。`credential_id`/`status` 不可修改。 |
 
 ### SPU images (`/v2/spu-images/*`)
 
