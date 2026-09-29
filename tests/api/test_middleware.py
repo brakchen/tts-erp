@@ -239,3 +239,21 @@ def test_auth_mode_off_lets_requests_through(api_client_off):
     r = api_client_off.get("/v2/commerce/sales-orders")
     # 200, not 401
     assert r.status_code == 200, r.text
+
+
+def test_prefixed_docs_path_requires_docs_basic_auth(db_engine, monkeypatch):
+    """Docs Basic Auth must classify the route-relative path behind /tts."""
+    from fastapi.testclient import TestClient
+
+    from tts_erp_v2.app import build_app
+
+    monkeypatch.setenv("TTS_ERP_EXTERNAL_PREFIX", "/tts")
+    monkeypatch.setenv("TTS_ERP_AUTH_MODE", "enforce")
+    monkeypatch.setenv("TTS_ERP_DOCS_USER", "TEST_docs_user")
+    monkeypatch.setenv("TTS_ERP_DOCS_PASSWORD", "TEST_docs_password")
+
+    with TestClient(build_app()) as client:
+        response = client.get("/tts/docs")
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == 'Basic realm="tts-erp docs"'
