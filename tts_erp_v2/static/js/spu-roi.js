@@ -419,13 +419,24 @@
     } else {
       roiBreakevenEl.textContent = "—";
     }
-    // 广告系统保本ROI：后端返回临时 0 + formula_pending；pending 永远显示 —。
+    // 广告系统保本ROI：广告归因GMV ÷ 已知成本下最大可承受广告费。
+    // estimated_known_costs 表示尚未纳入结算外必要成本，必须用 ≈ 明示估算。
     var roiAdEl = $("#sum-roi-ad");
     var roiAdStatus = totals.ad_system_breakeven_roi_status;
-    roiAdEl.textContent =
-      roiAdStatus === "formula_pending"
-        ? "—"
-        : fmtRatio(totals.ad_system_breakeven_roi);
+    var roiAdValue = totals.ad_system_breakeven_roi;
+    var roiAdNum = parseFloat(roiAdValue);
+    if (
+      roiAdValue !== null &&
+      roiAdValue !== undefined &&
+      roiAdValue !== "" &&
+      Number.isFinite(roiAdNum)
+    ) {
+      roiAdEl.textContent =
+        (roiAdStatus === "estimated_known_costs" ? "≈" : "") +
+        fmtRatio(roiAdValue);
+    } else {
+      roiAdEl.textContent = "—";
+    }
     $("#sum-stamp").textContent =
       `全表 USD · 数据库汇率快照 ${meta.fx ? meta.fx.as_of : ""} · 盈利 v10`;
 

@@ -26,6 +26,7 @@ from tts_erp_v2.analytics.spu_profitability._formula_v10 import (
     calculate_order_metrics,
 )
 from tts_erp_v2.analytics.spu_profitability._types import (
+    FormulaStatus,
     FxBasis,
     FxRateUnavailable,
     ProfitabilityBasis,
@@ -992,6 +993,12 @@ def _query_spu_roi(
         net_profit_usd = formula.net_profit_usd
         roi_real_usd = formula.roi_real
         roi_breakeven_usd = formula.roi_breakeven
+        ad_system_actual_roi = formula.ad_system_actual_roi
+        ad_system_breakeven_roi = formula.ad_system_breakeven_roi
+        ad_system_max_ad_spend = formula.ad_system_max_ad_spend_usd
+        ad_system_remaining_ad_spend_capacity = (
+            formula.ad_system_remaining_ad_spend_capacity_usd
+        )
         cpa_usd = formula.cpa_usd
         roi_l0_usd = formula.roi_l0
         refund_rate_usd = formula.refund_rate
@@ -1065,6 +1072,15 @@ def _query_spu_roi(
                 "full_loss_cancelled_qty": flc_qty,
                 "full_loss_rate": full_loss_rate,
                 "full_loss_qty_rate": full_loss_qty_rate,
+                "ad_system_actual_roi": ad_system_actual_roi,
+                "ad_system_breakeven_roi": ad_system_breakeven_roi,
+                "ad_system_max_ad_spend": ad_system_max_ad_spend,
+                "ad_system_remaining_ad_spend_capacity": (
+                    ad_system_remaining_ad_spend_capacity
+                ),
+                "ad_system_breakeven_roi_status": (
+                    FormulaStatus.ESTIMATED_KNOWN_COSTS
+                ),
             }
         )
         total_spend += spend
@@ -1094,7 +1110,7 @@ def _query_spu_roi(
     plain.sort(key=_key)
 
     # totals（§3.3：跨分页/当前筛选；行级 USD 服务端加总）
-    money_total = {
+    money_total: dict[str, Decimal] = {
         "spend": sum((r["spend"] for r in scope_plain), Decimal(0)),
         "sales": sum((r["sales"] for r in scope_plain), Decimal(0)),
         "effective_sales": sum(
@@ -1105,12 +1121,30 @@ def _query_spu_roi(
         ),
         "return_loss": sum((r["return_loss"] for r in scope_plain), Decimal(0)),
         "net_profit": sum((r["net_profit"] for r in scope_plain), Decimal(0)),
+        "gmv_ad": sum((r["gmv_ad"] for r in scope_plain), Decimal(0)),
+        "net_revenue": sum((r["net_revenue"] for r in scope_plain), Decimal(0)),
+        "cogs_total": sum((r["cogs_total"] for r in scope_plain), Decimal(0)),
     }
     # 整体实际 ROI = ΣNC′ / Σspend（全 USD）。领域层保留 Decimal。
     overall_roi: Decimal | None = None
     if total_spend != 0:
         overall_nc_prime = total_net_revenue_usd - total_return_loss
         overall_roi = overall_nc_prime / total_spend
+
+    ad_system_actual_roi: Decimal | None = None
+    if money_total["spend"] != 0:
+        ad_system_actual_roi = money_total["gmv_ad"] / money_total["spend"]
+    ad_system_max_ad_spend = (
+        money_total["net_revenue"] - money_total["cogs_total"]
+    )
+    ad_system_remaining_ad_spend_capacity = (
+        ad_system_max_ad_spend - money_total["spend"]
+    )
+    ad_system_breakeven_roi: Decimal | None = None
+    if ad_system_max_ad_spend > 0 and money_total["gmv_ad"] > 0:
+        ad_system_breakeven_roi = (
+            money_total["gmv_ad"] / ad_system_max_ad_spend
+        )
 
     spu_pks_in_scope = [r["spu_pk"] for r in scope_plain]
     scope_row = None
@@ -1225,6 +1259,15 @@ def _query_spu_roi(
         refund_rate=dashboard_orders.refund_rate,
         full_loss_rate=dashboard_orders.full_loss_rate,
         cancel_rate=dashboard_orders.cancel_rate,
+        ad_system_actual_roi=ad_system_actual_roi,
+        ad_system_breakeven_roi=ad_system_breakeven_roi,
+        ad_system_max_ad_spend=ad_system_max_ad_spend,
+        ad_system_remaining_ad_spend_capacity=(
+            ad_system_remaining_ad_spend_capacity
+        ),
+        ad_system_breakeven_roi_status=(
+            FormulaStatus.ESTIMATED_KNOWN_COSTS
+        ),
     )
 
     # meta（§4 v7）
@@ -1263,6 +1306,7 @@ def _query_spu_roi(
         row["settled_order_count"] < row["order_count"] for row in scope_plain
     ):
         warnings.append("unsettled_orders_estimated")
+    warnings.append("ad_system_other_necessary_costs_not_modeled")
 
     basis = ProfitabilityBasis(
         calculated_at=calculated_at,

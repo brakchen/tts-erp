@@ -926,6 +926,11 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert item["spend"] == "10.0000"
     assert item["gmv_ad"] == "50.0000"
     assert item["roi_l0"] == "5.00"
+    assert item["ad_system_actual_roi"] == "5.00"
+    assert item["ad_system_breakeven_roi"] == "1.94"
+    assert item["ad_system_max_ad_spend"] == "25.8120"
+    assert item["ad_system_remaining_ad_spend_capacity"] == "15.8120"
+    assert item["ad_system_breakeven_roi_status"] == "estimated_known_costs"
     assert item["ad_first_day"] == DAY
     assert item["ad_last_day"] == DAY
 
@@ -1002,6 +1007,14 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert body["totals"]["total_orders"] == 2
     assert body["totals"]["refund_net_amount"] == "20.0000"
     assert body["totals"]["net_profit"] == "15.8120"
+    assert body["totals"]["ad_system_actual_roi"] == "5.00"
+    assert body["totals"]["ad_system_breakeven_roi"] == "1.94"
+    assert body["totals"]["ad_system_max_ad_spend"] == "25.8120"
+    assert body["totals"]["ad_system_remaining_ad_spend_capacity"] == "15.8120"
+    assert (
+        body["totals"]["ad_system_breakeven_roi_status"]
+        == "estimated_known_costs"
+    )
 
 
 def test_profitability_public_interface_returns_typed_consistent_result(
@@ -1031,6 +1044,14 @@ def test_profitability_public_interface_returns_typed_consistent_result(
         "15.8120"
     )
     assert isinstance(result.totals.net_profit, Decimal)
+    assert result.items[0].ad_system_actual_roi == Decimal("5")
+    assert result.items[0].ad_system_max_ad_spend.quantize(
+        _Q4, rounding=ROUND_HALF_UP
+    ) == Decimal("25.8120")
+    assert result.totals.ad_system_breakeven_roi is not None
+    assert result.totals.ad_system_remaining_ad_spend_capacity.quantize(
+        _Q4, rounding=ROUND_HALF_UP
+    ) == Decimal("15.8120")
     assert result.basis.rubric_version == "v10"
     assert result.basis.fx.snapshot_id > 0
     assert result.basis.calculated_at.tzinfo is not None
@@ -2239,8 +2260,11 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
         "refund_rate": None,
         "full_loss_rate": None,
         "cancel_rate": None,
-        "ad_system_breakeven_roi": "0.00",
-        "ad_system_breakeven_roi_status": "formula_pending",
+        "ad_system_actual_roi": None,
+        "ad_system_breakeven_roi": None,
+        "ad_system_max_ad_spend": "0.0000",
+        "ad_system_remaining_ad_spend_capacity": "0.0000",
+        "ad_system_breakeven_roi_status": "estimated_known_costs",
     }
     meta = body["meta"]
     assert meta["fx"]["usd_vnd"] == "26330.0000"
@@ -2263,6 +2287,14 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
         "display": "USD",
         "native": {"ad": "USD", "sales_refund": "VND", "cost": "CNY"},
     }
+    assert meta["ad_system_roi"]["actual_formula"] == "广告归因GMV ÷ 广告实际消耗"
+    assert meta["ad_system_roi"]["additional_costs_status"] == "not_modeled"
+    assert meta["ad_system_roi"]["advertising_credit_status"] == (
+        "not_available_separately"
+    )
+    assert "不混入广告赠金" in meta["ad_system_roi"]["spend_basis"]
+    assert "已知成本下限估算" in meta["ad_system_roi"]["warning"]
+    assert "ad_system_other_necessary_costs_not_modeled" in meta["warnings"]
     # 金额列可 JSON 序列化(Decimal 已转字符串)
     json.dumps(body)
 
@@ -2660,6 +2692,8 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert "净利润" in body
     assert "全损量" in body
     assert "退款数" in body
+    assert "广告系统保本ROI = 广告归因GMV ÷ 最大可承受广告费" in body
+    assert "TODO: 广告系统保本ROI 公式待定" not in body
     # 主表指标名与大盘 v10 口径一致
     main_th_labels = re.findall(r'<th[^>]*scope="col"[^>]*>([^<]+)</th>', body)
     for col_label in (
@@ -2721,6 +2755,8 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert "fmtInt(it.effective_order_count)" in js_src
     assert '("#sum-roi-breakeven")' in js_src
     assert '("#sum-roi-ad")' in js_src
+    assert 'roiAdStatus === "estimated_known_costs"' in js_src
+    assert "formula_pending" not in js_src
 
 
 def test_spu_roi_page_d8_no_column_toggles(api_client, readonly_key):
@@ -2831,7 +2867,8 @@ def test_spu_roi_frontend_only_displays_backend_profitability() -> None:
     assert "summaries.hidden = true" in src
     assert "pager.hidden = true" in src
     assert "footnotes.hidden = true" in src
-    assert 'roiAdStatus === "formula_pending"' in src
+    assert 'roiAdStatus === "estimated_known_costs"' in src
+    assert "ad_system_max_ad_spend" not in src  # 前端不重算，只展示后端 ROI
 
 
 def test_spu_roi_js_shop_switch_listener_before_early_return():
