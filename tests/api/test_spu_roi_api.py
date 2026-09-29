@@ -2382,6 +2382,30 @@ def test_spu_roi_page_shell_contract(api_client, readonly_key):
         assert forbidden not in body, f"inline handler found: {forbidden}"
 
 
+def test_spu_roi_page_cache_busts_css_and_js_from_their_own_content(
+    api_client, readonly_key
+):
+    """CSS-only 发布必须生成新 URL，不能继续复用 spu-roi.js 的旧 hash。"""
+    import hashlib
+    from pathlib import Path
+
+    response = api_client.get(
+        "/v2/pages/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    body = response.text
+    static_dir = Path(__file__).resolve().parents[2] / "tts_erp_v2" / "static"
+    css_version = hashlib.sha256(
+        (static_dir / "css" / "spu-roi.css").read_bytes()
+    ).hexdigest()[:8]
+    js_version = hashlib.sha256(
+        (static_dir / "js" / "spu-roi.js").read_bytes()
+    ).hexdigest()[:8]
+
+    assert f"../../static/css/spu-roi.css?v={css_version}" in body
+    assert f"../../static/js/spu-roi.js?v={js_version}" in body
+
+
 def test_spu_roi_page_uses_bootstrap_responsive_layout(api_client, readonly_key):
     """整页响应式布局由 Bootstrap 栅格/工具类驱动，不再手写断点隐藏列。"""
     from pathlib import Path

@@ -44,13 +44,12 @@ from fastapi.responses import HTMLResponse
 router = APIRouter(prefix="/v2/pages", tags=["pages"])
 
 
-# Cache-busting (2026-09-06): the operator console has no Cache-Control on
-# /static, so browsers heuristically cache console.js / spu-roi.js and keep
-# serving a stale build until a manual hard refresh. Each page appends
-# ?v=<hash-of-content> to its script src: the version only changes when the
-# file's bytes change, so a deploy ships a new URL and the browser fetches
-# the fresh JS without any manual refresh.
-_JS_DIR = Path(__file__).resolve().parents[2] / "static" / "js"
+# Cache-busting: /static has no explicit Cache-Control, so every mutable asset
+# gets its own content hash. CSS and JS must not share a version token: a CSS-
+# only hotfix otherwise keeps the old URL and remains stale on mobile browsers.
+_STATIC_DIR = Path(__file__).resolve().parents[2] / "static"
+_JS_DIR = _STATIC_DIR / "js"
+_CSS_DIR = _STATIC_DIR / "css"
 
 # ── Shared sidebar navigation ─────────────────────────────────────────
 # Bootstrap 5 utilities + a shared responsive navigation shell.
@@ -377,12 +376,20 @@ _SIDEBAR_TOGGLE_JS = """
 """
 
 
-def _js_version(filename: str) -> str:
+def _asset_version(path: Path) -> str:
   try:
-    digest = hashlib.sha256((_JS_DIR / filename).read_bytes()).hexdigest()
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
   except OSError:
     return "0"
   return digest[:8]
+
+
+def _js_version(filename: str) -> str:
+  return _asset_version(_JS_DIR / filename)
+
+
+def _css_version(filename: str) -> str:
+  return _asset_version(_CSS_DIR / filename)
 
 
 def _page(html: str, *, current_page: str = "") -> HTMLResponse:
@@ -394,6 +401,7 @@ def _page(html: str, *, current_page: str = "") -> HTMLResponse:
   """
   html = (
     html.replace("__JSV_CONSOLE__", _js_version("console.js"))
+    .replace("__CSSV_SPU_ROI__", _css_version("spu-roi.css"))
     .replace("__JSV_SPU_ROI__", _js_version("spu-roi.js"))
     .replace("__JSV_SHOPS__", _js_version("shops.js"))
     .replace("__JSV_DASHBOARD__", _js_version("dashboard.js"))
@@ -1312,7 +1320,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
   <title>SPU 实际 ROI · tts-erp</title>
   <!-- Relative path: resolves to /static/... locally and /tts/static/... behind NGINX. Do not make absolute. -->
   <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
-  <link rel="stylesheet" href="../../static/css/spu-roi.css?v=__JSV_SPU_ROI__">
+  <link rel="stylesheet" href="../../static/css/spu-roi.css?v=__CSSV_SPU_ROI__">
   <style>
     :root {
       --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', Consolas, monospace;
