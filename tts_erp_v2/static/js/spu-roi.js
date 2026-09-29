@@ -465,13 +465,23 @@
     var profitClass = npNeg ? ' class="np-red"' : "";
     var fmtPctOrDash = (v) =>
       v === null || v === undefined || v === "" ? "—" : fmtPct(v);
-    // 行级与大盘同口径:广告消耗 / 有效销售 / 有效单量 / 取消率 / 全损率 / 净利润
+    var adSystemBreakevenRoi =
+      it.ad_system_breakeven_roi === null ||
+      it.ad_system_breakeven_roi === undefined ||
+      it.ad_system_breakeven_roi === ""
+        ? "—"
+        : (it.ad_system_breakeven_roi_status === "estimated_known_costs"
+            ? "≈"
+            : "") + fmtRatio(it.ad_system_breakeven_roi);
+    // 行级与大盘同口径:广告消耗 / 广告系统 ROI / 有效销售 / 有效单量 / 取消率 / 全损率 / 净利润
     return (
       `<tr class="${isBad ? "row-bad" : ""}" data-spupk="${esc(it.spu_pk)}">` +
       `<td class="td-left"><span class="td-spu-cell">${img}<span class="td-spu-meta">` +
       `<span class="td-spu">${esc(it.spu_id)}</span>` +
       `<span class="td-title" data-tip="${esc(it.title || "")}">${warnUnsettled}${warnDefault ? warn : ""}${warnRr}${esc(it.title || "")}${status}</span></span></span></td>` +
       `<td>${fmtMoney(it.spend)}</td>` +
+      `<td>${fmtRatio(it.ad_system_actual_roi)}</td>` +
+      `<td>${adSystemBreakevenRoi}</td>` +
       `<td>${fmtMoney(it.effective_sales)}</td>` +
       `<td>${fmtInt(it.effective_order_count)}</td>` +
       `<td>${fmtPctOrDash(it.cancel_rate)}</td>` +
@@ -494,7 +504,7 @@
     }
     html(
       $("#rows"),
-      `<tr><td colspan="7" class="op-error">${esc(msg)} · <a href="#" id="retry-link">重试</a></td></tr>`,
+      `<tr><td colspan="9" class="op-error">${esc(msg)} · <a href="#" id="retry-link">重试</a></td></tr>`,
     );
     var link = $("#retry-link");
     if (link) {
@@ -508,7 +518,7 @@
   function renderEmpty() {
     html(
       $("#rows"),
-      '<tr><td colspan="7" class="op-empty">没有匹配所选 SPU 和当前条件的数据</td></tr>',
+      '<tr><td colspan="9" class="op-empty">没有匹配所选 SPU 和当前条件的数据</td></tr>',
     );
   }
 
@@ -1311,7 +1321,7 @@
     state.loading = true;
     html(
       $("#rows"),
-      '<tr><td colspan="7" class="op-loading">加载中…</td></tr>',
+      '<tr><td colspan="9" class="op-loading">加载中…</td></tr>',
     );
     var feeParam = null;
     if (state.feeRate !== null && state.feeRate !== "") {

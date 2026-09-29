@@ -2872,11 +2872,13 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert "广告系统实际ROI = 广告归因GMV ÷ 广告实际消耗" in body
     assert "广告系统保本ROI = 广告归因GMV ÷ 最大可承受广告费" in body
     assert "TODO: 广告系统保本ROI 公式待定" not in body
-    # 主表指标名与大盘 v10 口径一致
+    # 主表指标名与大盘 v10 口径一致，广告系统两个 ROI 紧随广告消耗展示。
     main_th_labels = re.findall(r'<th[^>]*scope="col"[^>]*>([^<]+)</th>', body)
     for col_label in (
         "商品",
         "广告消耗",
+        "广告系统实际ROI",
+        "广告系统保本ROI",
         "有效销售",
         "有效单量",
         "取消率%",
@@ -2931,6 +2933,8 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert "fmtMoney(netProfitValue)" in js_src
     assert "fmtMoney(it.effective_sales)" in js_src
     assert "fmtInt(it.effective_order_count)" in js_src
+    assert "fmtRatio(it.ad_system_actual_roi)" in js_src
+    assert "adSystemBreakevenRoi" in js_src
     assert '("#sum-roi-breakeven")' in js_src
     assert '("#sum-roi-ad-actual")' in js_src
     assert "totals.ad_system_actual_roi" in js_src
@@ -3230,7 +3234,7 @@ def test_spu_roi_page_drilldown_template_present(api_client, readonly_key):
 
 
 def test_spu_roi_page_no_old_columns(api_client, readonly_key):
-    """D8(2026-09-07)主表无隐藏列、无 ⚙ 开关、无 ROI 列;6 列标签齐全。"""
+    """主表无旧隐藏列或通用 ROI 列；保留广告系统两个 ROI 与 6 个经营指标。"""
     r = api_client.get(
         "/v2/pages/spu-roi",
         headers={"Authorization": f"Bearer {readonly_key}"},
@@ -3252,6 +3256,8 @@ def test_spu_roi_page_no_old_columns(api_client, readonly_key):
     for col in (
         "商品",
         "广告消耗",
+        "广告系统实际ROI",
+        "广告系统保本ROI",
         "有效销售",
         "有效单量",
         "取消率%",
