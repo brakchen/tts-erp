@@ -70,10 +70,11 @@
   }
 
   // ---------- 授权链接 ----------
-  function copyToClipboard(text, btn) {
+  function copyToClipboard(text, btn, onDone) {
     function done(ok) {
       btn.textContent = ok ? "已复制" : "复制失败";
       setTimeout(() => { btn.textContent = "复制链接"; }, 1500);
+      if (onDone) onDone(ok);
     }
     function legacy() {
       var ta = document.createElement("textarea");
@@ -111,10 +112,19 @@
     var exp = expiresAt
       ? expiresAt.replace("T", " ").replace(/\.\d+Z$/, "Z")
       : "";
-    hint.textContent = "state 单次使用" + (exp ? " · 有效至 " + exp + " UTC" : "");
+    var expText = exp ? " · 有效至 " + exp + " UTC" : "";
+    hint.textContent = "state 单次使用" + expText;
     td.appendChild(a);
     td.appendChild(copy);
     td.appendChild(hint);
+    // 一键化（2026-09-29）：生成成功后立即自动复制，用户无需再点第二次。
+    // 注意 transient user activation：fetch 几秒内返回时 clipboard API 仍
+    // 视为用户手势；超时/被拒时按钮会显示「复制失败」，用户可手动再点。
+    copyToClipboard(url, copy, (ok) => {
+      hint.textContent =
+        (ok ? "已复制到剪贴板" : "自动复制失败，请点「复制链接」") +
+        " · state 单次使用" + expText;
+    });
   }
 
   function fetchAuthLink(btn) {
