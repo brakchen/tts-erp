@@ -346,11 +346,12 @@
     lastTotal = payload.total || 0;
 
     // 结余带(全部由后端 totals 提供，前端只做格式化，禁止前端计算)
-    $("#sum-spend").textContent = fmtMoney(totals.spend);
-    // 有效销售额 = 有效GMV − 退款金额(后端 effective_sales)
-    $("#sum-sales").textContent = fmtMoney(totals.effective_sales);
+    // 总单量 = 有效订单 + 取消订单(后端全局 distinct)
+    $("#sum-total-orders").textContent = fmtInt(totals.total_orders || 0);
     // 有效单量 = 有效订单 − 退款订单(后端 effective_order_count)
     $("#sum-orders").textContent = fmtInt(totals.effective_order_count || 0);
+    // 有效销售额 = 有效GMV − 退款金额(后端 effective_sales)
+    $("#sum-sales").textContent = fmtMoney(totals.effective_sales);
     // 退款数 = 全局 distinct 退款订单数(后端)
     $("#sum-refund-count").textContent = fmtInt(totals.refund_order_count || 0);
     // 退款率(后端)
@@ -365,6 +366,25 @@
     );
     // 取消率(后端)
     $("#sum-cancel-rate").textContent = fmtPct(totals.cancel_rate);
+    // 广告消耗(后端)
+    $("#sum-spend").textContent = fmtMoney(totals.spend);
+    // 净利润(后端)：金额与 ROI 相邻，负值沿用大盘红色语义
+    var netProfitEl = $("#sum-net-profit");
+    var netProfitValue = totals.net_profit;
+    var netProfitNum = parseFloat(netProfitValue);
+    netProfitEl.textContent = fmtMoney(netProfitValue);
+    netProfitEl.classList.toggle(
+      "is-err",
+      netProfitValue !== null &&
+        netProfitValue !== undefined &&
+        netProfitValue !== "" &&
+        Number.isFinite(netProfitNum) &&
+        netProfitNum < 0,
+    );
+    netProfitEl.classList.toggle(
+      "is-ok",
+      Number.isFinite(netProfitNum) && netProfitNum > 0,
+    );
     // 实际ROI(后端计算)
     var roiEl = $("#sum-roi");
     var roiOverall = totals.roi_real;

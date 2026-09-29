@@ -787,9 +787,9 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 
 ```text
 ┌ [tts-erp]  SPU 实际 ROI ── 数据截至 2026-09-05（ad 窗口 08-28 ~ 09-05 全量）────┐
-│ 结余带:  广告消耗 $x · 有效销售 $x · GMV $x · 有效单量 · 总单量          │
-│          · 退款净额 $x · 全损退款 $x · 取消单量 · 净利润 $x · 整体 ROI n │
-│          （每格带 ? 口径气泡;全表 USD · 固定汇率 D9 · 09-05）           │
+│ 结余带:  总单量 · 有效单量/有效销售 · 退款数/率 · 全损量/率 · 取消量/率   │
+│          · 广告消耗 · 净利润/实际ROI · 实际保本ROI/广告系统保本ROI       │
+│          （同类量/额或量/率相邻；每格带 ? 口径气泡；金额统一 USD）        │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ [🔍 搜索 spu_id…] [店铺▾] [日期▾] [列开关⚙] [保本线=动态] [及格线▾1.5(可关)]  默认排序: 实际ROI↑ │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -804,7 +804,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 [警告 chip] GMV Max 归因含自然单、数据滞后修正 —— 广告列仅供对照，实际 ROI 以 ERP 侧为准
 ```
 
-**结余带 10 格口径（2026-09-06 全链状态口径，全部带 `?` 气泡，数值来自 `totals`）**：
+**结余带 14 格口径（2026-09-29 排列：同类量/额或量/率相邻；全部带 `?` 气泡，数值来自 `totals`）**：
 
 > 单一口径：**行级与 totals 都按下单订单状态计（COD 店下单即算，不看 paid_at）**。
 > 有效订单 = 白名单状态（含 COD 在途/待收款）；取消订单 = 全部 CANCELLED（含未收款取消）。
@@ -813,16 +813,20 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 
 | 格 | 数值来源 | 口径 |
 | --- | --- | --- |
-| 广告消耗 | `totals.spend` | M1：广告视图全窗口累计（无日期参数） |
-| 有效销售 | `totals.sales` | M6：白名单状态全部订单行金额（下单即算，含 COD 在途；不含取消） |
-| GMV | `totals.gmv` | 全部订单销售额 = 白名单 ∪ CANCELLED 原始行金额（含在途 COD 与取消原额；≠ 广告归因「平台GMV」） |
-| 有效单量 | `totals.order_count` | 有效订单数（白名单状态全部，含 COD 在途；跨可见 SPU 全局去重） |
-| 总单量 | `totals.total_orders` | 有效单量 + 取消单量（= 与 TikTok 订单管理总数一致） |
-| 退款净额 | `totals.refund_net_amount` | M10：仅退 + 退货退款（不含取消订单退款，取消退款仅信息列） |
-| 全损退款 | `totals.return_loss` | M13b：已完结退货按全损计（成本维度；2026-09-06 由「全损货损」改名，数值/口径不变） |
-| 取消单量 | `totals.cancelled_order_count` | 取消订单数（全部 status=CANCELLED，含未收款即取消；跨可见 SPU 去重） |
-| 净利润 | `totals.net_profit` | M18（状态口径：sales 含 COD 在途，回款前偏乐观） |
-| 整体实际 ROI | `totals.roi_real` | M14（状态口径同 sales）；Σspend=0 → `—` |
+| 总单量 | `totals.total_orders` | 有效订单 + 取消订单；当前店铺和日期范围内按订单去重 |
+| 有效单量 | `totals.effective_order_count` | 有效订单数减去退款订单数 |
+| 有效销售 | `totals.effective_sales` | 有效订单金额减去退款净额；已结算按实际到账，未结算按基线估算 |
+| 退款数 | `totals.refund_order_count` | 已完结退款 case 关联的有效订单数，按订单去重 |
+| 退款率 | `totals.refund_rate` | 退款数 ÷ 总单量 |
+| 全损量 | `totals.full_loss_order_count` | 退款订单数 + 海外取消订单数 |
+| 全损率 | `totals.full_loss_rate` | 全损量 ÷ 总单量 |
+| 取消量 | `totals.domestic_cancelled_order_count` | 国内取消订单数；海外取消已计入全损，不重复计入 |
+| 取消率 | `totals.cancel_rate` | 国内取消量 ÷ 总单量 |
+| 广告消耗 | `totals.spend` | M1：选中日期窗口内广告消耗累计，USD |
+| 净利润 | `totals.net_profit` | M18：净收入 − 货本（含全损）− 广告消耗，USD；负值标红 |
+| 实际 ROI | `totals.roi_real` | M14；Σspend=0 → `—` |
+| 实际保本 ROI | `totals.roi_breakeven` | 净利润为 0 时的 ROI 临界值；无解 → `—` |
+| 广告系统保本 ROI | `totals.ad_system_breakeven_roi` | 公式未定时状态为 `formula_pending`，页面显示 `—` |
 
 ### 7.2 标色与阈值（默认值，页面 ⚙ 可调，不锁死）
 
