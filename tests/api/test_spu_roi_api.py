@@ -2388,8 +2388,57 @@ def test_spu_roi_page_uses_bootstrap_responsive_layout(api_client, readonly_key)
     )
     src = js_path.read_text(encoding="utf-8")
     assert "row-cols-2 row-cols-sm-3 row-cols-lg-4 row-cols-xxl-6" in src
-    assert "table table-sm table-hover align-middle mb-0 op-tab-table" in src
+    assert "content.classList.add(" in src
+    for table_class in ("table-sm", "table-hover", "align-middle", "op-tab-table"):
+        assert f'"{table_class}"' in src
     assert 'class: "table-responsive"' in src
+
+
+def test_spu_roi_hidden_state_overrides_bootstrap_display_utilities(
+    api_client, readonly_key
+):
+    """hidden 必须稳定隐藏弹窗/页脚，不能被 Bootstrap d-flex !important 覆盖。"""
+    import re
+    from pathlib import Path
+
+    response = api_client.get(
+        "/v2/pages/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    body = response.text
+    modal_tag = re.search(r'<div id="ops-shop-modal"[^>]+>', body)
+    assert modal_tag is not None
+    assert " d-flex" not in modal_tag.group(0)
+
+    css = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "css"
+        / "spu-roi.css"
+    ).read_text(encoding="utf-8")
+    assert re.search(
+        r"\[hidden\]\s*\{[^}]*display:\s*none\s*!important",
+        css,
+        flags=re.DOTALL,
+    )
+    assert re.search(
+        r"\.op-shop-modal:not\(\[hidden\]\)\s*\{[^}]*display:\s*flex",
+        css,
+        flags=re.DOTALL,
+    )
+
+    js = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "spu-roi.js"
+    ).read_text(encoding="utf-8")
+    assert "modal.hidden = false" in js
+    assert "modal.hidden = true" in js
+    assert "content.classList.add(" in js
+    assert 'content.className =\n            "table table-sm' not in js
 
 
 def test_spu_roi_js_targets_dashboard_hooks():

@@ -1531,7 +1531,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
 
   <!-- shop_pk 缺失/无效时的店铺选择弹窗(2026-09-28 用户拍板:弹窗让用户选店铺,
        不再 toast + 60s 倒计时强跳首页) -->
-  <div id="ops-shop-modal" class="op-shop-modal position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center p-3" hidden>
+  <div id="ops-shop-modal" class="op-shop-modal position-fixed top-0 start-0 w-100 h-100 align-items-center justify-content-center p-3" hidden>
     <div class="card rounded-0 op-shop-modal-box" role="dialog" aria-modal="true" aria-labelledby="shop-modal-title">
       <div class="card-body p-3 p-md-4">
         <div class="card-title op-shop-modal-title" id="shop-modal-title">请选择店铺</div>
