@@ -102,7 +102,15 @@ def login_page(request: Request) -> HTMLResponse:
   # root_path (set once from TTS_ERP_EXTERNAL_PREFIX in app.py) is the
   # single source of truth for the external mount prefix.
   prefix = request.scope.get("root_path", "")
-  next_url = f"{prefix}{raw_next}" if prefix else raw_next
+  # Middleware redirects keep ``next`` route-relative, but page JS from older
+  # deployments may already include root_path (for example /tts/v2/pages/...).
+  # Prefix idempotently so either caller lands on exactly one external prefix;
+  # a duplicated /tts/tts/... path is unknown to the policy and falls back to
+  # admin, producing a misleading readwrite 403.
+  already_prefixed = bool(prefix) and (
+    raw_next == prefix or raw_next.startswith(f"{prefix}/")
+  )
+  next_url = raw_next if already_prefixed else f"{prefix}{raw_next}"
   return HTMLResponse(_LOGIN_HTML.replace("__NEXT__", _html.escape(next_url)))
 
 
