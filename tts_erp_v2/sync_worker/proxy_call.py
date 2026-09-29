@@ -43,6 +43,7 @@ from sqlalchemy.orm import Session
 from tts_erp_v2.proxy.errors import AuthenticationError
 from tts_erp_v2.proxy.tiktok_auth import resolve_tiktok_app_credentials_for_shop
 from tts_erp_v2.proxy.token_service import (
+    CredentialsView,
     TikTokAppCredentials,
     load_credentials,
     refresh_if_needed,
@@ -128,7 +129,7 @@ def _reactive_refresh(
             force=True,  # 401 已证明 token 过期，跳过 is_expired 检查
         )
         return view
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log.warning(
             "reactive_refresh: refresh_if_needed failed for shop=%s: %s",
             shop_id,
@@ -140,6 +141,19 @@ def _reactive_refresh(
         raise AuthenticationError(
             f"reactive refresh failed for shop={shop_id!r}: {e}"
         ) from e
+
+
+def _require_refreshed_view(
+    view: CredentialsView | None,
+    *,
+    shop_id: str,
+) -> CredentialsView:
+    if view is None:
+        raise RuntimeError(
+            "reactive refresh returned no view for "
+            f"provider=tiktok external_account_id={shop_id!r}"
+        )
+    return view
 
 
 def _current_refresh_token(session: Session, shop_id: str) -> str:
@@ -226,12 +240,10 @@ def build_proxy_call(
                 # Reactive refresh on 401 — POST path. Same retry budget
                 # as GET (one attempt). Failure propagates as-is so the
                 # caller's run_with_sync_job marks the job 'failed'.
-                view = _reactive_refresh(session, shop_id, app_credentials)
-                if view is None:
-                    raise RuntimeError(
-                        f"reactive refresh returned no view for "
-                        f"provider=tiktok external_account_id={shop_id!r}"
-                    ) from None
+                view = _require_refreshed_view(
+                    _reactive_refresh(session, shop_id, app_credentials),
+                    shop_id=shop_id,
+                )
                 extra_params["shop_cipher"] = view.shop_cipher or ""
                 result = client.post(
                     path=path,
@@ -259,12 +271,10 @@ def build_proxy_call(
                     extra_params=extra_params,
                 )
             except AuthenticationError:
-                view = _reactive_refresh(session, shop_id, app_credentials)
-                if view is None:
-                    raise RuntimeError(
-                        f"reactive refresh returned no view for "
-                        f"provider=tiktok external_account_id={shop_id!r}"
-                    ) from None
+                view = _require_refreshed_view(
+                    _reactive_refresh(session, shop_id, app_credentials),
+                    shop_id=shop_id,
+                )
                 extra_params["shop_cipher"] = view.shop_cipher or ""
                 result = client.get(
                     path=path,

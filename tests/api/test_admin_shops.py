@@ -450,6 +450,23 @@ def test_update_app_key_secret_must_be_submitted_together(api_client, admin_key)
     assert r.status_code == 422, r.text
 
 
+def test_update_invalid_app_secret_is_never_echoed(api_client, admin_key):
+    r = _register(api_client, admin_key, shop_id=SHOP_B)
+    pk = r.json()["shop"]["id"]
+    invalid_secret = "S" * 513
+    r = _patch(
+        api_client,
+        admin_key,
+        pk,
+        service_id=SERVICE_B,
+        app_key="TEST_ADMIN_APP_KEY_456",
+        app_secret=invalid_secret,
+    )
+    assert r.status_code == 422, r.text
+    assert invalid_secret not in r.text
+    assert "app_secret length is invalid" in r.text
+
+
 def test_update_shop_not_found(api_client, admin_key):
     r = _patch(api_client, admin_key, 999999999, account_name="Ghost")
     assert r.status_code == 404, r.text

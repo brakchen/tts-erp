@@ -20,7 +20,7 @@ from datetime import UTC, date, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -31,6 +31,8 @@ from tts_erp_v2.api.deps import (
     # on 2026-09-28 feat/shops-page-meta-auth to avoid the module-level-import
     # linter flag — alias name is unchanged for back-compat).
     is_prod_shaped_db as _is_prod_shaped_db,
+)
+from tts_erp_v2.api.deps import (
     require_role_at_least,
 )
 from tts_erp_v2.middleware.rate_limit import (
@@ -368,8 +370,6 @@ class ShopRegisterBody(BaseModel):
     )
     app_secret: SecretStr | None = Field(
         default=None,
-        min_length=1,
-        max_length=512,
         repr=False,
         description="与 service_id 配套的 App Secret；只加密存储，不返回。",
     )
@@ -394,14 +394,6 @@ class ShopRegisterBody(BaseModel):
             return None
         stripped = v.strip()
         return stripped or None
-
-    @model_validator(mode="after")
-    def _validate_app_pair(self) -> ShopRegisterBody:
-        if (self.app_key is None) != (self.app_secret is None):
-            raise ValueError("app_key and app_secret must be provided together")
-        if self.app_key is not None and self.service_id is None:
-            raise ValueError("service_id is required with app_key/app_secret")
-        return self
 
 
 class ShopOut(BaseModel):
@@ -443,6 +435,31 @@ _SQL_REGISTER_SHOP = text(
     "          status, credential_id, service_id, opened_date, "
     "          (xmax = 0) AS inserted"
 )
+
+
+def _validated_plaintext_app_secret(
+    *,
+    service_id: str | None,
+    app_key: str | None,
+    app_secret: SecretStr | None,
+) -> str | None:
+    """Validate the secret pair without echoing plaintext in 422 responses."""
+    plaintext = app_secret.get_secret_value() if app_secret is not None else None
+    if (app_key is None) != (plaintext is None):
+        raise HTTPException(
+            status_code=422,
+            detail="app_key and app_secret must be provided together",
+        )
+    if plaintext is None:
+        return None
+    if not plaintext or len(plaintext) > 512:
+        raise HTTPException(status_code=422, detail="app_secret length is invalid")
+    if service_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="service_id is required with app_key/app_secret",
+        )
+    return plaintext
 
 
 def _app_credentials_configured(
@@ -499,7 +516,12 @@ def register_shop(
     the shop/service_id write. Metadata-only registration remains readwrite.
     """
     require_role_at_least(request, "readwrite")
-    if body.app_key is not None:
+    plaintext_app_secret = _validated_plaintext_app_secret(
+        service_id=body.service_id,
+        app_key=body.app_key,
+        app_secret=body.app_secret,
+    )
+    if body.app_key is not None or body.app_secret is not None:
         require_role_at_least(request, "admin")
 
     from tts_erp_v2.db.base import get_engine
@@ -531,11 +553,7 @@ def register_shop(
                 session,
                 service_id=row.service_id,
                 app_key=body.app_key,
-                app_secret=(
-                    body.app_secret.get_secret_value()
-                    if body.app_secret is not None
-                    else None
-                ),
+                app_secret=plaintext_app_secret,
             )
         else:
             app_credentials_configured = _app_credentials_configured(
@@ -611,8 +629,6 @@ class ShopUpdateBody(BaseModel):
     )
     app_secret: SecretStr | None = Field(
         default=None,
-        min_length=1,
-        max_length=512,
         repr=False,
         description="配套 App Secret；只加密存储，不返回，且需要 admin。",
     )
@@ -624,12 +640,6 @@ class ShopUpdateBody(BaseModel):
             return None
         stripped = v.strip()
         return stripped or None
-
-    @model_validator(mode="after")
-    def _validate_app_pair(self) -> ShopUpdateBody:
-        if (self.app_key is None) != (self.app_secret is None):
-            raise ValueError("app_key and app_secret must be provided together")
-        return self
 
 
 class ShopUpdateResponse(BaseModel):
@@ -652,7 +662,12 @@ def update_shop(
     fallback.
     """
     require_role_at_least(request, "readwrite")
-    if body.app_key is not None:
+    plaintext_app_secret = _validated_plaintext_app_secret(
+        service_id=body.service_id,
+        app_key=body.app_key,
+        app_secret=body.app_secret,
+    )
+    if body.app_key is not None or body.app_secret is not None:
         require_role_at_least(request, "admin")
 
     from tts_erp_v2.db.base import get_engine
@@ -681,11 +696,7 @@ def update_shop(
                 session,
                 service_id=row.service_id,
                 app_key=body.app_key,
-                app_secret=(
-                    body.app_secret.get_secret_value()
-                    if body.app_secret is not None
-                    else None
-                ),
+                app_secret=plaintext_app_secret,
             )
         else:
             app_credentials_configured = _app_credentials_configured(

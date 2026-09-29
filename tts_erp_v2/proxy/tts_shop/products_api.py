@@ -55,7 +55,8 @@ class ProductClient(Protocol):
         path: str,
         access_token: str,
         extra_params: dict[str, str] | None = None,
-    ) -> TiktokCallResult: ...
+    ) -> TiktokCallResult:
+        raise AssertionError("ProductClient protocol method has no runtime body")
 
 
 # Upstream path template (versioned per tts-partner-api-docs/Get Product.md).
@@ -161,8 +162,14 @@ def _check_envelope(payload: Mapping[str, Any]) -> dict[str, Any]:
             f"upstream response missing 'code': keys={list(payload.keys())}"
         )
     if code != 0:
+        try:
+            upstream_code = int(code)
+        except (TypeError, ValueError) as exc:
+            raise ProxyError(
+                f"upstream response carried non-integer code: {code!r}"
+            ) from exc
         raise UpstreamBusinessError(
-            code=int(code),
+            code=upstream_code,
             message=str(payload.get("message", "")),
             request_id=payload.get("request_id"),
         )
@@ -257,8 +264,8 @@ def get_product(
 
 __all__ = [
     "GET_PRODUCT_PATH_TEMPLATE",
-    "UpstreamBusinessError",
     "ChannelAccountNotFound",
     "CredentialsMissing",
+    "UpstreamBusinessError",
     "get_product",
 ]

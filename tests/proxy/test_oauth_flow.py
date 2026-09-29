@@ -144,7 +144,7 @@ def test_register_state_with_extra_round_trip(db_session, fernet_key: str) -> No
     from tts_erp_v2.db.models.integration import OAuthState
     from tts_erp_v2.proxy.tiktok_oauth import pop_state, register_state
 
-    raw, expires_at = register_state(
+    raw, _expires_at = register_state(
         db_session, extra={"service_id": "svc_123"}
     )
     assert isinstance(raw, str) and len(raw) >= 32

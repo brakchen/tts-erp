@@ -55,6 +55,17 @@
     return PREFIX + "/v2/auth/login?next=" + PREFIX + "/v2/pages/shops";
   }
 
+  function renderEmptyRow(body, colspan, message) {
+    body.textContent = "";
+    var row = document.createElement("tr");
+    var cell = document.createElement("td");
+    cell.colSpan = colspan;
+    cell.className = "text-muted";
+    cell.textContent = message;
+    row.append(cell);
+    body.append(row);
+  }
+
   function esc(s) {
     return String(s == null ? "" : s).replace(
       /[&<>"']/g,
@@ -79,7 +90,7 @@
     function legacy() {
       var ta = document.createElement("textarea");
       ta.value = text;
-      document.body.appendChild(ta);
+      document.body.append(ta);
       ta.select();
       try { done(document.execCommand("copy")); } catch (e) { done(false); }
       document.body.removeChild(ta);
@@ -114,9 +125,7 @@
       : "";
     var expText = exp ? " · 有效至 " + exp + " UTC" : "";
     hint.textContent = "state 单次使用" + expText;
-    container.appendChild(a);
-    container.appendChild(copy);
-    container.appendChild(hint);
+    container.append(a, copy, hint);
     // 一键化（2026-09-29）：生成成功后立即自动复制，用户无需再点第二次。
     // 注意 transient user activation：fetch 几秒内返回时 clipboard API 仍
     // 视为用户手势；超时/被拒时按钮会显示「复制失败」，用户可手动再点。
@@ -248,8 +257,7 @@
     return api("/v2/commerce/channel-accounts?platform=tiktok&limit=500")
       .then((r) => {
         if (r.status === 401) {
-          // pi-lens-ignore: no-open-redirect-js — loginUrl() is fixed same-origin path
-          window.location.href = loginUrl();
+          window.location.assign(loginUrl());
           return null;
         }
         if (!r.ok) throw new Error("shops HTTP " + r.status);
@@ -259,9 +267,7 @@
         if (!shops) return;
         var body = $("#shop-body");
         if (!shops.length) {
-          // pi-lens-ignore: no-inner-html-js — static empty-state markup
-          body.innerHTML =
-            '<tr><td colspan="8" class="text-muted">暂无店铺</td></tr>';
+          renderEmptyRow(body, 8, "暂无店铺");
           return;
         }
         body.innerHTML = shops
@@ -332,7 +338,7 @@
             input.value = current === "—" || current === "" ? "" : current;
             input.placeholder = "留空不修改";
             td.textContent = "";
-            td.appendChild(input);
+            td.append(input);
             input.focus();
             function save() {
               var raw = input.value.trim();
@@ -398,9 +404,7 @@
           : "";
         var body = $("#cand-body");
         if (!cands.length) {
-          // pi-lens-ignore: no-inner-html-js — static empty-state markup
-          body.innerHTML =
-            '<tr><td colspan="3" class="text-muted">没有待注册的店铺</td></tr>';
+          renderEmptyRow(body, 3, "没有待注册的店铺");
           return;
         }
         // pi-lens-ignore: no-unsafe-innerhtml
