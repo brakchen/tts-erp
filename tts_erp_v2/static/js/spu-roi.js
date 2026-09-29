@@ -608,17 +608,11 @@
       "div",
       {
         class:
-          "row row-cols-2 row-cols-sm-3 row-cols-lg-4 row-cols-xxl-6 g-2 op-drill-grid",
+          "row row-cols-2 row-cols-sm-3 row-cols-lg-4 row-cols-xxl-4 g-2 op-drill-grid",
       },
       cell("ROI 实际", fmtRatio(it.roi_real)),
       cell("ROI 保本", fmtRatio(it.roi_breakeven)),
-      cell(
-        "平台佣金",
-        m(it.platform_fee),
-        "平台从销售额直接扣除的全部费用（抽佣/联盟/运费类）",
-      ),
       cell("CPA", m(it.cpa)),
-      cell("全损货损$", m(it.return_loss)),
       cell(
         "单位成本",
         m(it.unit_cost_used),
@@ -626,10 +620,7 @@
         it.cost_source === "DEFAULT_K1",
       ),
       cell("已结算单", String(it.settled_order_count || 0)),
-      cell("已结 GMV", m(it.settled_sales)),
-      cell("未结 GMV", m(it.unsettled_sales)),
       cell("全损件数", String(it.full_loss_qty || 0)),
-      cell("全损取消", String(it.full_loss_cancelled_qty || 0)),
       cell("净收入", m(it.net_revenue)),
     );
   }

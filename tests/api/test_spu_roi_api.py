@@ -2446,7 +2446,7 @@ def test_spu_roi_page_uses_bootstrap_responsive_layout(api_client, readonly_key)
         / "spu-roi.js"
     )
     src = js_path.read_text(encoding="utf-8")
-    assert "row-cols-2 row-cols-sm-3 row-cols-lg-4 row-cols-xxl-6" in src
+    assert "row-cols-2 row-cols-sm-3 row-cols-lg-4 row-cols-xxl-4" in src
     assert "content.classList.add(" in src
     for table_class in ("table-sm", "table-hover", "align-middle", "op-tab-table"):
         assert f'"{table_class}"' in src
@@ -2554,6 +2554,51 @@ def test_spu_roi_dashboard_metrics_are_never_truncated() -> None:
         assert "white-space: nowrap" not in declarations
         assert "white-space: normal" in declarations
         assert "overflow-wrap: anywhere" in declarations
+
+
+def test_spu_roi_drill_summary_omits_removed_metrics() -> None:
+    """每个 SPU 的明细大盘只保留用户确认的 7 个核心指标。"""
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "spu-roi.js"
+    ).read_text(encoding="utf-8")
+    summary = src.split("function renderProfitSummary", 1)[1].split(
+        "function renderProfitTab", 1
+    )[0]
+
+    for removed_label in (
+        "平台佣金",
+        "已结 GMV",
+        "未结 GMV",
+        "全损货损$",
+        "全损取消",
+    ):
+        assert removed_label not in summary
+    for removed_field in (
+        "it.platform_fee",
+        "it.settled_sales",
+        "it.unsettled_sales",
+        "it.return_loss",
+        "it.full_loss_cancelled_qty",
+    ):
+        assert removed_field not in summary
+
+    for retained_label in (
+        "ROI 实际",
+        "ROI 保本",
+        "CPA",
+        "单位成本",
+        "已结算单",
+        "全损件数",
+        "净收入",
+    ):
+        assert retained_label in summary
+    assert "row-cols-xxl-4" in summary
 
 
 def test_spu_roi_js_targets_dashboard_hooks():
