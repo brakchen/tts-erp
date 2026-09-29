@@ -250,9 +250,9 @@ curl -sS http://127.0.0.1:9877/healthz | jq
 ## 测试
 
 测试的唯一入口是 `scripts/test.sh`。运行前必须准备 gitignored 的 `.env.test`，
-其中 `TTS_ERP_DB_URL_TEST` 指向专用数据库 `tts_erp_v3_test`；脚本仅在该文件存在且
-未直接设置 `TTS_ERP_DB_URL_TEST` 时加载它。`tests/conftest.py` 会拒绝已识别的
-production-shaped 数据库。
+其中 `TTS_ERP_DB_URL`（或显式设置的 `TTS_ERP_DB_URL_TEST`）必须指向专用数据库
+`tts_erp_v3_test`。脚本仅在该文件存在且未直接设置 `TTS_ERP_DB_URL_TEST` 时加载它；
+`tests/conftest.py` 会拒绝已识别的 production-shaped 数据库。
 
 ```bash
 # 日常快速套件
@@ -351,7 +351,7 @@ handoff/ACTIVE.md            # 当前 lane 文件所有权
 | [`tech-doc/fx-exchange-rates.md`](tech-doc/fx-exchange-rates.md) | 汇率快照与同步 |
 | [`tech-doc/miaoshou-platform.md`](tech-doc/miaoshou-platform.md) | 妙手 SDK 与数据语义 |
 | [`tech-doc/agent-safety.md`](tech-doc/agent-safety.md) | 数据库、凭证、生产与 destructive guard |
-| [`CHANGELOG.md`](CHANGELOG.md) | 历史变更 |
+| [`CHANGELOG.md`](./CHANGELOG.md) | 历史变更 |
 
 ## License
 
