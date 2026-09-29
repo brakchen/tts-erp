@@ -2807,7 +2807,7 @@ def test_spu_roi_js_targets_dashboard_hooks():
     assert "roi_breakeven" in src  # 红绿判据字段
     assert "cost_source" in src
     assert "DEFAULT_K1" in src  # ⚠ 判断
-    assert '"¥" +' in src
+    assert '"¥"' not in src  # 2026-09-29 反馈：金额前缀去掉，纯数字
     assert "金额已由服务端统一换算 CNY" in src
     # Bootstrap 多选由 Tom Select 驱动，精确 scope 通过独立 spu_ids 参数提交。
     assert 'window["TomSelect"]' in src

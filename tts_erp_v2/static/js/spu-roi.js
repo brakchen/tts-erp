@@ -1,7 +1,7 @@
 /* tts-erp — SPU 实际 ROI 看板页 JS.
    No frameworks. Plain DOM + fetch. Wired from /v2/pages/spu-roi.
    数据全部来自只读端点 GET /v2/analytics/spu-roi(服务端已算好,§5.1-1),
-   本文件只做格式化与展示:金额 ¥2 位千分位、比率/百分比、红绿判据、分页、
+   本文件只做格式化与展示:金额纯数字 · 2 位千分位、比率/百分比、红绿判据、分页、
    排序(asc ↔ desc 双向),401 → login。样式复用页面 warm-paper token,零外链。 */
 
 (() => {
@@ -118,13 +118,10 @@
     if (v == null || v === "") return "—";
     var n = parseFloat(v);
     if (!Number.isFinite(n)) return "—";
-    return (
-      "¥" +
-      n.toLocaleString("zh-CN", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      })
-    );
+    return n.toLocaleString("zh-CN", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
   }
   function fmtRatio(v) {
     if (v == null || v === "") return "—";
