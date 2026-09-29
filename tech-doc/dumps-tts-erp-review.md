@@ -15,7 +15,7 @@
 | --- | --- | --- | --- |
 | **A1** | **采用严格 HTTP 语义**：2xx = 数据已写入；4xx/5xx = 协议失败/数据失败 | 用户原话 "如果使用 http status code 那 tts-erp 没写入数据之前，就不能返回200，这是严令禁止的行为" | AGENTS.md §2.5；proposal §2 P0-1b |
 | **A2** | **通用规则写在 AGENTS.md §2**（与 §2.1/2.2/2.3/2.4 同级）—— 服务端交互协议严格语义是 agent 必读红线 | 用户原话 "这种服务端交互协议非常严格的通用元素，要求 agent 必须遵守，应该写在哪里" | AGENTS.md §2.5 新增 |
-| **A3** | **响应 envelope 200 / 非 200 必须结构一致**：4 字段 `code` / `message` / `requestId` / `data` 都有；差别仅在 `code` 类型（int=0 vs str=错误码）和 `data` 是否出现 | 用户原话 "body 200 和 非200时要保持一致，200 时就是 code=0 message=success request_id={genereated id}" | AGENTS.md §2.5；proposal §3.5 Lane E |
+| **A3** | **响应 envelope 200 / 非 200 必须结构一致**：4 字段 `code` / `message` / `requestId` / `data` 都有；差别仅在 `code` 类型（int=0 vs str=错误码）和 `data` 是否出现 | 用户原话 "body 200 和 非200时要保持一致，200 时就是 code=0 message=success request_id={generated id}" | AGENTS.md §2.5；proposal §3.5 Lane E |
 | **A4** | **`rowsWritten` 是死字段，删掉** —— chrome-plugins `isDumpAccepted()` 仅看 `data.status`，从不读 `rowsWritten` | 用户原话 "为什么要对 rowsWritten 计数？" | AGENTS.md §2.5；proposal §2 P0-1b step 1 |
 | **A5** | **`if parse_error is None and rows_written == 0` hack 删掉** —— 把协议层信号塞进数据计数器是错工具做错事 | 用户原话（隐含）"rowsWritten 的含义本身就不清晰... 如果是解析类的失败直接返回非200 即可" | proposal §2 P0-1b step 2 |
 | **A6** | ~~**`intercept-plugin-canonical.md` 不是 single-source-of-truth**~~ → 已通过 lane `docs/merge-canonical-into-contract` 解决：合并到 contract 后删除 canonical.md | 用户原话 "这份文件看着不太对" | （详见 G8 + proposal §3.7 Lane G；现已合并删除） |
@@ -343,7 +343,7 @@ Pydantic validator 校验对齐：
 
 - **现状契约**（single-source-of-truth）：[`tech-doc/dumps-data-contract.md`](dumps-data-contract.md)
 - **设计稿**（部分落后）：[`tech-doc/chrome-ext-order-sync-design.md`](chrome-ext-order-sync-design.md)
-- ~~**概念拍板稿**（用户原话"不太对"）：[`tech-doc/intercept-plugin-canonical.md`](intercept-plugin-canonical.md)~~ — 已合并删除
+- ~~**概念拍板稿**（用户原话“不太对”）：`tech-doc/intercept-plugin-canonical.md`~~ — 已合并删除
 - **API catalog**（53+ endpoint 全清单）：[`tech-doc/tiktok-seller-center-api-catalog.md`](tiktok-seller-center-api-catalog.md)
 - **订单业务规则**：`tech-doc/order-domain-business-rules.md`
 - **AGENTS.md §2.5**（新）：严格 HTTP 语义铁律
