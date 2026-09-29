@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import text
@@ -219,7 +220,7 @@ def test_dumps_v4_daily_correction_updates_existing_natural_key(
             text("SELECT mixed_real_cost FROM plugin.ad_daily WHERE seller_id = :s AND day = '2026-09-08'"),
             {"s": SELLER},
         ).scalar()
-    assert str(cost) == "200.00"
+    assert Decimal(str(cost)) == Decimal("200.00")
 
 
 def test_dumps_v4_today_overwrite(api_client, readwrite_key, db_engine):

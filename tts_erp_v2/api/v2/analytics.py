@@ -435,9 +435,9 @@ def get_coverage_endpoint(
             )
         total_requested = (ey - sy) * 12 + (em - sm + 1)
 
-    total_pages = (
-        (total_campaigns + pageSize - 1) // pageSize if total_campaigns > 0 else 1
-    )
+    # Empty results intentionally have zero pages; callers can distinguish an
+    # empty scope from a non-empty single-page response.
+    total_pages = (total_campaigns + pageSize - 1) // pageSize
     has_more = page < total_pages
 
     coverage_data: dict[str, object] = {

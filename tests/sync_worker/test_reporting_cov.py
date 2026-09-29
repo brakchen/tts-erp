@@ -321,12 +321,19 @@ def test_run_cost_snapshots_records_calculation_version_and_valid_from_in_extra(
     assert "valid_from" in job_row.extra
 
 
-def test_run_cost_snapshots_no_active_spu_returns_zero(db_session) -> None:
-    """No ACTIVE SPU rows (test env: no rows seeded) → ``written=0`` →
-    the SyncJob row still records the run."""
-    from tts_erp_v2.db.models.integration import SyncJob
+def test_run_cost_snapshots_no_active_spu_returns_zero(db_session, monkeypatch) -> None:
+    """A no-op rebuild records a successful zero-row job.
 
-    # Don't seed any active SPUs.
+    The shared test database can contain active ``TEST_`` SPUs from other
+    tests, so patch the global rebuild boundary instead of assuming an empty
+    database.
+    """
+    from tts_erp_v2.db.models.integration import SyncJob
+    from tts_erp_v2.jobs import reporting as reporting_job
+
+    monkeypatch.setattr(
+        reporting_job.cost_snapshots, "rebuild_snapshots", lambda *_args, **_kwargs: 0
+    )
     out = run_cost_snapshots(db_session)
     assert out["snapshots_written"] == 0
 
