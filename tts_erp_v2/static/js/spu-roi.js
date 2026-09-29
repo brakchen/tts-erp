@@ -223,14 +223,17 @@
   function updateSpuSelectionUi() {
     var selected = selectedSpuDraft();
     var dirty = selected.join("\u0000") !== state.spuIds.join("\u0000");
+    var hasAppliedSpuScope = state.spuIds.length > 0;
+    var canUseSpuFilter = Boolean(state.shopPk) && !state.loading;
     var count = $("#spu-selection-count");
     if (count) {
       count.textContent = `已选择 ${selected.length} 个${dirty ? "（待查询）" : ""}`;
     }
     var clear = $("#btn-spu-clear");
     var apply = $("#btn-spu-apply");
-    if (clear) clear.disabled = !state.shopPk || state.loading || !selected.length;
-    if (apply) apply.disabled = !state.shopPk || state.loading || !dirty;
+    // 清空要同时考虑“草稿”和“已应用 scope”：手动删空草稿后，仍必须能一键恢复初始状态。
+    if (clear) clear.disabled = !canUseSpuFilter || (!selected.length && !hasAppliedSpuScope);
+    if (apply) apply.disabled = !canUseSpuFilter || !dirty;
   }
 
   function parsePastedSpuIds(raw) {
@@ -359,6 +362,8 @@
         no_results: () => '<div class="no-results">没有匹配的 SPU</div>',
       },
       onChange: updateSpuSelectionUi,
+      onItemRemove: updateSpuSelectionUi,
+      onClear: updateSpuSelectionUi,
     });
     state.spuSelect.disable();
     state.spuSelect.control_input.addEventListener("paste", (event) => {

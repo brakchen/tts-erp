@@ -2823,6 +2823,12 @@ def test_spu_roi_js_targets_dashboard_hooks():
     assert "spu_ids" in src
     assert "clipboardData" in src
     assert 'replace(/，/g, ",")' in src
+    # 回归:手动删空草稿后，只要已应用 SPU scope 仍非空，「清空」必须可用；
+    # 「查询」由草稿/已应用集合差异驱动，且删除/清空事件都刷新按钮状态。
+    assert "hasAppliedSpuScope = state.spuIds.length > 0" in src
+    assert "(!selected.length && !hasAppliedSpuScope)" in src
+    assert "onItemRemove: updateSpuSelectionUi" in src
+    assert "onClear: updateSpuSelectionUi" in src
 
 
 def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
