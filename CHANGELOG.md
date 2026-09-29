@@ -1,5 +1,16 @@
 # tts-erp CHANGELOG
 
+## 2026-09-29 — SPU ROI Bootstrap 批量多选筛选
+
+- 页面将旧的单值模糊搜索框替换为 Bootstrap 5 风格的标签式多选：原生
+  `<select multiple>` 由自托管 Tom Select 2.6.2 Bootstrap 5 主题增强，支持
+  下拉搜索、单项删除和中英文逗号批量粘贴；选择后点击「查询」统一应用。
+- 新增只读 `GET /v2/commerce/channel-product-options`，按店铺提供轻量
+  `{spu_id,title,status}` 选项并支持搜索/精确列表解析。
+- `GET /v2/analytics/spu-roi` 新增 `spu_ids` 精确 scope；表格、匹配数和
+  全部 totals 使用同一 SPU 集合，跨 SPU 订单仍全局去重，分页不改变大盘。
+- 旧 `q` 参数保持展示层兼容语义，但与 `spu_ids` 同传返回 422，避免范围歧义。
+
 ## 2026-09-15 — biz-doc：消除与 rubric 的循环引用
 
 `spu-roi-profit-calculation.md` 头部「底层权威 = rubric」改为「本文档 = 利润口径唯一

@@ -171,7 +171,7 @@
 顶部**合计条**（跟随当前筛选实时汇总，家族 signature，**全 USD**，2026-09-06 定稿 10 格）：广告消耗 $x · 有效销售 $x · GMV $x（全部订单销售额）· 有效单量 · 总单量 · 退款净额 $x · 全损退款 $x（M13b 成本口径，原「全损货损」改名）· 取消单量 · **净利润 $x** · **整体实际 ROI n**（固定汇率 D9：26,330 / 0.148823，§4.6）。
 
 **排序默认「实际 ROI 升序」**（最亏的排最前，决策 D5），列头可切：广告消耗 / 退款率 / 净利润 / 销售（交互见 §7.3）。
-**搜索框**：`spu_id` 子串（对齐广告报表里看到的商品 ID）。分页 limit/offset 沿用 v2 约定。
+**SPU 多选筛选**：Bootstrap 5 页面中的原生 `<select multiple>` 由自托管 Tom Select Bootstrap 5 主题增强；支持下拉搜索和粘贴中英文逗号列表。选中的 `spu_id` 通过 `spu_ids` 精确 scope 提交，行、匹配数与顶部 totals 同时联动。兼容参数 `q` 仅保留给旧 API 调用方，不再作为页面主控件。分页 limit/offset 沿用 v2 约定。
 SPU 无广告投放 → 广告列显示 0 与“无投放”文案（不隐藏该行——卖得多没投广告也是信息，NULL 语义见 §5.1-5）。
 
 ### 3.2 P1 明细钻取（点击行 → 该 SPU 的三个 tab）
@@ -789,6 +789,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 | 汇率（固定常量，D9） | **USD→VND = 26,330 / CNY→USD = 0.1488234**（展示 0.148823；40 CNY ≈ $5.9522/件；2026-09-05，配置可改） | 全表金额换算 / 净利润 / 保本 / ROI | §4.6 |
 | 日期窗口(端点参数,2026-09 review 补) | **默认不传 = 销售/退款全历史累计**；可选 `w_start`/`w_end`(ISO 日期)裁剪，销售与退款统一按关联订单 `COALESCE(paid_at, order_time)` 归属；ad 按自身日期窗口裁剪 | 行/合计同筛选 | §4.5/§5.1-6 |
 | 行范围 | 有活动 SPU；可选 `include_all` | 空行金额全 0 | §5.1-7 |
+| 精确 SPU scope | `spu_ids` 缺省 = 当前店铺全部；最多 100 个 | 精确命中的 SPU 同时限定行、`total` 与所有 totals；订单 totals 在该集合内跨 SPU 去重 | §5.1 |
 | 平台佣金费率 r̂ | **参考基线 ≈30.8%（Σ\|fee_amount\|/Σgross，含抽佣/联盟/运费等全部直接扣除；页面可覆写 %；无结算样本 → 0 并标注）** | 保本 M17 / 净利润 M18 的 platform_fee（M19） | D10；解析上线后已结算部分自动用实际值 |
 
 > 这些只影响**显示 / 换算策略 / 标色**，不改变底层原币口径定义（§4.2）。
@@ -805,7 +806,8 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 │          · 全损(量/率) · 取消(量/率) · 利润(净利润/实际ROI) · 保本(双ROI) │
 │          （Bootstrap 分组卡自适应；每格带 ? 口径气泡；金额统一 USD）       │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ [🔍 搜索 spu_id…] [店铺▾] [日期▾] [列开关⚙] [保本线=动态] [及格线▾1.5(可关)]  默认排序: 实际ROI↑ │
+│ [SPU 多选: 1736… ×  1737… ×  搜索/粘贴… ▾] [清空] [查询]             │
+│ [店铺▾] [起始日] [截止日] [每页] [费率] [含无活动] [刷新]  默认排序: 实际ROI↑ │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  商品        │ 广告      │ 销售        │ 退款    │ 取消/比率            │ 净/ROI                       │
 │ 图·spu_id·标题│广告数│消耗USD│销售$│有效销售$│退货$│取消单量│取消率│退货率│全损退款$│净利润$│实际ROI│保本ROI│
@@ -824,7 +826,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 
 - 页头使用 `container-fluid + row + col-*`，手机纵向堆叠、桌面同行；
 - 结余带使用 `row-cols-1/2/3/4`，每个业务组内部固定 `row-cols-2`，不会把成对指标拆散；
-- 筛选栏使用 `col-12/6/3/...` 自适应，不再由自定义 media query 计算宽度；
+- 筛选栏使用 `col-12/6/3/...` 自适应，不再由自定义 media query 计算宽度；SPU 控件是真实 `<select multiple>`，只由 Tom Select 官方 Bootstrap 5 主题增强，不自研 chips/下拉/键盘行为；
 - 主表和钻取表统一放进 `table-responsive`，所有列保留，以横向滚动代替按 `nth-child` 隐藏；
 - 钻取指标、P&L 分层、分页、页脚和店铺弹窗均使用 Bootstrap 栅格/工具类。
 
@@ -867,7 +869,8 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 
 - **默认排序：实际 ROI 升序（最亏的排最前）**；列头可点切（消耗降序 / 退款率降序 / 净利润 / 销售）升/降三态。
 - **行内展开（不跳页）**：点行 → 下方展开该 SPU 三个 tab —— `订单`（CANCELLED 标红）/ `售后`（未完结标黄、显示未知金额行）/ `广告 campaign×SPU`；再点收起。
-- 搜索：spu_id 子串（placeholder 给示例引导）；去抖 300ms；空态给方向性文案。
+- SPU 筛选：下拉按 `spu_id/title` 搜索；已选项以可删除标签显示；粘贴 `A,B，C` 时后端精确解析并把命中项加入标签，未命中项用 Bootstrap invalid feedback 提示；最多 100 个。
+- 应用时机：选择/删除只更新草稿，点击「查询」才刷新表格和 totals；「清空」恢复当前店铺全量，避免每选一项都执行盈利重算。
 - 加载 skeleton、`aria-live` 结余带、sticky thead、focus 可见、键盘可达、`prefers-reduced-motion` 关过渡；401 → 跳 login（沿用 console.js）。
 
 ### 7.4 展示细节（数字格式 / 口径标注）

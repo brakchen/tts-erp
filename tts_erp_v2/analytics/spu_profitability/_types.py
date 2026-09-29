@@ -74,18 +74,28 @@ class FormulaStatus(StrEnum):
 class ProfitScope:
     """Facts that define both rows and the global overview.
 
-    Search, sort, and pagination intentionally do not belong here: they are row
-    presentation choices and must never change global totals.
+    Exact SPU ids belong here because they constrain both rows and global totals.
+    Fuzzy search, sort, and pagination remain presentation-only choices.
     """
 
     shop_pk: int | None
     start_date: date | None = None
     end_date: date | None = None
     include_inactive: bool = False
+    spu_ids: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         if self.shop_pk is not None and self.shop_pk < 1:
             raise ValueError("shop_pk must be >= 1")
+        if self.spu_ids is not None:
+            if not self.spu_ids:
+                raise ValueError("spu_ids must not be empty")
+            if len(self.spu_ids) > 100:
+                raise ValueError("spu_ids must contain at most 100 unique ids")
+            if len(set(self.spu_ids)) != len(self.spu_ids):
+                raise ValueError("spu_ids must contain unique ids")
+            if any(not value or len(value) > 128 for value in self.spu_ids):
+                raise ValueError("each spu_id must contain between 1 and 128 characters")
         if (
             self.start_date is not None
             and self.end_date is not None

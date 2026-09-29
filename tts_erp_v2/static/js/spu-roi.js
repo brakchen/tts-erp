@@ -7,6 +7,8 @@
 (() => {
   // ---------- constants ----------
   var ENDPOINT_PATH = "/v2/analytics/spu-roi";
+  var SPU_OPTIONS_PATH = "/v2/commerce/channel-product-options";
+  var MAX_SELECTED_SPUS = 100;
   var DEFAULT_SORT = "roi_real";
   var DEFAULT_ORDER = "asc";
   var SORT_LABEL = {
@@ -171,7 +173,7 @@
       }
       return r.json().then((payload) => {
         if (!r.ok) {
-          var err = new Error(payload.message || `HTTP ${r.status}`);
+          var err = new Error(payload.detail || payload.message || `HTTP ${r.status}`);
           err.code = payload.code || null;
           err.status = r.status;
           throw err;
@@ -184,6 +186,8 @@
   // ---------- state ----------
   var state = {
     q: "",
+    spuIds: [], // 已应用到大盘的精确 SPU scope；Tom Select 内部值是待应用草稿
+    spuSelect: null,
     limit: 100,
     includeAll: false,
     shopPk: null, // 店铺筛选(null/""=全部店铺)
@@ -201,6 +205,172 @@
     enumMap: {}, // 枚举中文化映射,page load 时从 /v2/config/enum-map 获取
   };
   var lastTotal = 0;
+
+  // ---------- Bootstrap 5 SPU 多选(Tom Select 官方 Bootstrap 主题) ----------
+  function selectedSpuDraft() {
+    if (!state.spuSelect) return [];
+    var value = state.spuSelect.getValue();
+    return Array.isArray(value) ? value : value ? [value] : [];
+  }
+
+  function setSpuFeedback(message) {
+    var feedback = $("#spu-filter-feedback");
+    if (!feedback) return;
+    feedback.textContent = message || "";
+    feedback.classList.toggle("d-block", Boolean(message));
+  }
+
+  function updateSpuSelectionUi() {
+    var selected = selectedSpuDraft();
+    var dirty = selected.join("\u0000") !== state.spuIds.join("\u0000");
+    var count = $("#spu-selection-count");
+    if (count) {
+      count.textContent = `已选择 ${selected.length} 个${dirty ? "（待查询）" : ""}`;
+    }
+    var clear = $("#btn-spu-clear");
+    var apply = $("#btn-spu-apply");
+    if (clear) clear.disabled = !state.shopPk || state.loading || !selected.length;
+    if (apply) apply.disabled = !state.shopPk || state.loading || !dirty;
+  }
+
+  function parsePastedSpuIds(raw) {
+    var ids = [];
+    var seen = new Set();
+    String(raw || "")
+      .replace(/，/g, ",")
+      .split(",")
+      .forEach((part) => {
+        var value = part.trim();
+        if (value && !seen.has(value)) {
+          seen.add(value);
+          ids.push(value);
+        }
+      });
+    return ids;
+  }
+
+  function fetchSpuOptions(params) {
+    if (!state.shopPk) return Promise.resolve([]);
+    var qs = new URLSearchParams({
+      shop_pk: String(state.shopPk),
+      limit: String(params.limit || 50),
+    });
+    if (params.q) qs.set("q", params.q);
+    if (params.spuIds && params.spuIds.length) {
+      qs.set("spu_ids", params.spuIds.join(","));
+    }
+    return fetch(`${PREFIX}${SPU_OPTIONS_PATH}?${qs.toString()}`, {
+      credentials: "include",
+      headers: { Accept: "application/json" },
+    }).then((response) => {
+      if (response.status === 401) {
+        window.location.href = loginUrl(); // pi-lens-ignore: no-open-redirect-js
+        throw new Error("unauthorized");
+      }
+      if (!response.ok) throw new Error(`SPU options HTTP ${response.status}`);
+      return response.json();
+    });
+  }
+
+  function resolvePastedSpuIds(raw) {
+    var pasted = parsePastedSpuIds(raw);
+    if (!pasted.length) {
+      setSpuFeedback("请粘贴至少一个有效 SPU");
+      return;
+    }
+    var merged = new Set(selectedSpuDraft());
+    pasted.forEach((value) => merged.add(value));
+    if (merged.size > MAX_SELECTED_SPUS) {
+      setSpuFeedback(`最多选择 ${MAX_SELECTED_SPUS} 个 SPU`);
+      return;
+    }
+    setSpuFeedback("");
+    var requestedShop = state.shopPk;
+    fetchSpuOptions({ spuIds: pasted, limit: MAX_SELECTED_SPUS })
+      .then((options) => {
+        if (!state.spuSelect || state.shopPk !== requestedShop) return;
+        var matched = new Set();
+        options.forEach((option) => {
+          matched.add(option.spu_id);
+          state.spuSelect.addOption(option);
+          state.spuSelect.addItem(option.spu_id, true);
+        });
+        state.spuSelect.refreshItems();
+        var missing = pasted.filter((value) => !matched.has(value));
+        if (missing.length) {
+          setSpuFeedback(`未找到 ${missing.length} 个 SPU：${missing.join("、")}`);
+        }
+        updateSpuSelectionUi();
+      })
+      .catch((error) => {
+        if (error && error.message === "unauthorized") return;
+        setSpuFeedback("SPU 列表解析失败，请重试");
+      });
+  }
+
+  function resetSpuSelectForShop() {
+    state.spuIds = [];
+    if (!state.spuSelect) return;
+    state.spuSelect.clear(true);
+    state.spuSelect.clearOptions();
+    setSpuFeedback("");
+    if (state.shopPk) {
+      state.spuSelect.enable();
+      state.spuSelect.load("");
+    } else {
+      state.spuSelect.disable();
+    }
+    updateSpuSelectionUi();
+  }
+
+  function initSpuSelect() {
+    var select = $("#filter-spu-ids");
+    var TomSelectClass = Reflect.get(window, "TomSelect");
+    if (!select || typeof TomSelectClass !== "function") {
+      setSpuFeedback("SPU 多选组件加载失败，请刷新页面");
+      return;
+    }
+    state.spuSelect = new TomSelectClass(select, {
+      plugins: { remove_button: { title: "移除 SPU" } },
+      valueField: "spu_id",
+      labelField: "spu_id",
+      searchField: ["spu_id", "title"],
+      maxItems: MAX_SELECTED_SPUS,
+      create: false,
+      closeAfterSelect: false,
+      hideSelected: true,
+      preload: "focus",
+      loadThrottle: 250,
+      placeholder: "请选择 SPU（支持搜索或批量粘贴）",
+      shouldLoad: () => Boolean(state.shopPk),
+      load: (query, callback) => {
+        var requestedShop = state.shopPk;
+        fetchSpuOptions({ q: query, limit: 50 })
+          .then((options) => {
+            callback(state.shopPk === requestedShop ? options : []);
+          })
+          .catch(() => callback());
+      },
+      render: {
+        option: (data, escapeHtml) =>
+          `<div><div class="d-flex justify-content-between gap-2"><span class="op-spu-option-id">${escapeHtml(data.spu_id)}</span><span class="badge text-bg-light">${escapeHtml(data.status || "未知")}</span></div><div class="op-spu-option-title">${escapeHtml(data.title || "无标题")}</div></div>`,
+        item: (data, escapeHtml) =>
+          `<div title="${escapeHtml(data.title || data.spu_id)}">${escapeHtml(data.spu_id)}</div>`,
+        no_results: () => '<div class="no-results">没有匹配的 SPU</div>',
+      },
+      onChange: updateSpuSelectionUi,
+    });
+    state.spuSelect.disable();
+    state.spuSelect.control_input.addEventListener("paste", (event) => {
+      var text = event.clipboardData
+        ? event.clipboardData.getData("text")
+        : "";
+      if (!text || !/[,，]/.test(text)) return;
+      event.preventDefault();
+      resolvePastedSpuIds(text);
+    });
+    updateSpuSelectionUi();
+  }
 
   // ---------- 枚举翻译 (GET /v2/config/enum-map) ----------
   function loadEnumMap() {
@@ -333,7 +503,7 @@
   function renderEmpty() {
     html(
       $("#rows"),
-      '<tr><td colspan="7" class="op-empty">没有匹配该 spu_id 的 SPU（试试完整 ID）</td></tr>',
+      '<tr><td colspan="7" class="op-empty">没有匹配所选 SPU 和当前条件的数据</td></tr>',
     );
   }
 
@@ -1010,6 +1180,7 @@
     state.shopPk = pk;
     setShopPkInUrl(pk);
     state.offset = 0;
+    resetSpuSelectForShop();
     if (!Object.keys(state.enumMap).length) {
       loadEnumMap().then(() => load());
     } else {
@@ -1061,6 +1232,7 @@
           }
           sel.value = urlPk;
           state.shopPk = sel.value;
+          resetSpuSelectForShop();
         } else {
           // URL 无 shop_pk → 弹窗让用户选店铺(不倒计时、不强跳首页)
           showShopModal(shops, "");
@@ -1107,8 +1279,10 @@
       var f = parseFloat(state.feeRate);
       feeParam = Number.isFinite(f) ? String(f) : null;
     }
+    updateSpuSelectionUi();
     api({
       q: state.q || null,
+      spu_ids: state.spuIds.length ? state.spuIds.join(",") : null,
       sort: state.sort,
       order: state.order,
       limit: state.limit,
@@ -1122,9 +1296,11 @@
       .then((payload) => {
         render(payload);
         state.loading = false;
+        updateSpuSelectionUi();
       })
       .catch((err) => {
         state.loading = false;
+        updateSpuSelectionUi();
         if (err && err.message === "unauthorized") return;
         if (err && err.code === "FX_RATE_UNAVAILABLE") {
           renderError("汇率数据缺失，无法计算结果", true);
@@ -1260,15 +1436,22 @@
 
   // ---------- 交互绑定 ----------
   function bindControls() {
-    var q = $("#filter-q");
-    q.addEventListener(
-      "input",
-      debounce(() => {
-        state.q = q.value.trim();
-        state.offset = 0;
-        load();
-      }, 300),
-    );
+    initSpuSelect();
+    $("#btn-spu-apply").addEventListener("click", () => {
+      state.spuIds = selectedSpuDraft();
+      state.q = "";
+      state.offset = 0;
+      setSpuFeedback("");
+      load();
+    });
+    $("#btn-spu-clear").addEventListener("click", () => {
+      if (state.spuSelect) state.spuSelect.clear(true);
+      state.spuIds = [];
+      state.offset = 0;
+      setSpuFeedback("");
+      updateSpuSelectionUi();
+      load();
+    });
 
     $("#filter-limit").addEventListener("change", (e) => {
       state.limit = parseInt(e.target.value, 10) || 100;
