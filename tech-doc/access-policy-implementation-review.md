@@ -206,8 +206,8 @@ bash scripts/test.sh fast \
 
 在相同 master revision 和共享 DB lock 下：
 
-- master：25 个既有失败；
-- implementation branch：17 个失败；
+- master：18 个既有失败；
+- implementation branch：10 个失败；
 - **新增失败：0**；
 - 8 个 OpenAPI 基线失败在本分支未复现，不作为本 lane 的目标或承诺。
 
@@ -232,12 +232,13 @@ bash scripts/test.sh fast \
 
 分支 rebase 后的主要提交：
 
-- `a7b2d8f`：提取 deployment path module；
-- `595ebd0`：提取 access policy 深模块；
-- `84fde1d`：统一 access mode 与 handler role gate；
-- `54db50c`：类型与 lint 收尾；
-- `b6ccc08`：更新现行鉴权契约；
-- `eb1c32d`：完成 reviewer 修复与本审阅报告。
+- `97364d9`：提取 deployment path module；
+- `69563ec`：提取 access policy 深模块；
+- `b7171af`：统一 access mode 与 handler role gate；
+- `e3cc368`：类型与 lint 收尾；
+- `c2c2e38`：更新现行鉴权契约；
+- `bcd80dd`：完成 reviewer 修复与本审阅报告；
+- `c8a447a`：记录用户合并批准。
 
 
 ## 8. 兼容性与明确变化
