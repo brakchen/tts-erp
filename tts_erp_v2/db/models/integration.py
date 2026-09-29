@@ -1,7 +1,8 @@
 """integration.* — raw API captures, sync bookkeeping, credentials.
 
-6 tables: credentials / raw_records / sync_jobs / sync_cursors /
-sync_issues / oauth_states (one-time CSRF state, see proxy/tiktok_oauth).
+7 tables: credentials / tiktok_app_credentials / raw_records / sync_jobs /
+sync_cursors / sync_issues / oauth_states (one-time CSRF state, see
+proxy/tiktok_oauth).
 
 All times timestamptz, internal PK bigint identity, external ids text.
 """
@@ -55,11 +56,39 @@ class Credentials(Base):
     # TikTok-specific:
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     granted_scopes: Mapped[list | None] = mapped_column(JSONB)
+    # TikTok application that issued this token. Immutable across refresh;
+    # only a fresh OAuth callback may replace it.
+    service_id: Mapped[str | None] = mapped_column(Text)
     # Miaoshou-specific (kept here so the table stays single):
     company_secret_ciphertext: Mapped[bytes | None]
     extra: Mapped[dict | None] = mapped_column(JSONB)
     updated_at: Mapped[datetime] = mapped_column(
         nullable=False, server_default=text("now()")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        nullable=False, server_default=text("now()")
+    )
+
+
+# ─── tiktok_app_credentials ───────────────────────────────────────────
+class TikTokAppCredential(Base):
+    """TikTok Partner App credentials keyed by Partner Center service_id.
+
+    ``app_key`` is an identifier and remains queryable. ``app_secret`` is
+    always Fernet-encrypted through :mod:`tts_erp_v2.proxy.token_service`.
+    Multiple shops may share one service_id/application pair.
+    """
+
+    __tablename__ = "tiktok_app_credentials"
+    __table_args__ = ({"schema": "integration"},)
+
+    service_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    app_key: Mapped[str] = mapped_column(Text, nullable=False)
+    app_secret_ciphertext: Mapped[bytes] = mapped_column(nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        nullable=False,
+        server_default=text("now()"),
+        onupdate=text("now()"),
     )
     created_at: Mapped[datetime] = mapped_column(
         nullable=False, server_default=text("now()")

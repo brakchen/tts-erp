@@ -34,6 +34,8 @@ pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 SHOP_A = "8800000000000000001"
 SHOP_B = "8800000000000000002"
 SHOP_IDS = (SHOP_A, SHOP_B)
+SERVICE_A = "TEST_ADMIN_SERVICE_123"
+SERVICE_B = "TEST_ADMIN_SERVICE_456"
 
 
 @pytest.fixture(autouse=True)
@@ -52,6 +54,12 @@ def _cleanup_registered_shops(db_engine):
             text(
                 "DELETE FROM plugin.ad_daily WHERE seller_id IN (:a, :b)"
             ).bindparams(a=SHOP_A, b=SHOP_B)
+        )
+        conn.execute(
+            text(
+                "DELETE FROM integration.tiktok_app_credentials "
+                "WHERE service_id IN (:a, :b)"
+            ).bindparams(a=SERVICE_A, b=SERVICE_B)
         )
 
 
@@ -100,6 +108,22 @@ def test_register_creates_plugin_only_shop(api_client, admin_key, db_engine):
     assert row.credential_id is None
     assert row.status == "active"
     assert str(row.opened_date) == "2026-06-01"
+
+
+def test_register_with_service_app_pair_is_atomic(api_client, admin_key):
+    r = _register(
+        api_client,
+        admin_key,
+        shop_id=SHOP_B,
+        service_id=SERVICE_B,
+        app_key="TEST_ADMIN_APP_KEY_456",
+        app_secret="TEST_ADMIN_APP_SECRET_456",
+    )
+    assert r.status_code == 200, r.text
+    shop = r.json()["shop"]
+    assert shop["service_id"] == SERVICE_B
+    assert shop["app_credentials_configured"] is True
+    assert shop["credential_id"] is None
 
 
 def test_register_is_idempotent_and_backfills_null_fields(
@@ -193,6 +217,18 @@ def test_register_role_matrix(api_client, readwrite_key, readonly_key):
     assert r.status_code == 403, (
         f"readonly should be 403, got {r.status_code}: {r.text}"
     )
+
+
+def test_register_app_credentials_require_admin(api_client, readwrite_key):
+    r = _register(
+        api_client,
+        readwrite_key,
+        shop_id=SHOP_B,
+        service_id=SERVICE_B,
+        app_key="TEST_ADMIN_APP_KEY_456",
+        app_secret="TEST_ADMIN_APP_SECRET_456",
+    )
+    assert r.status_code == 403, r.text
 
 
 def test_register_anonymous_is_401(api_client):
@@ -306,7 +342,7 @@ def _patch(api_client, key, shop_pk, **fields):
     )
 
 
-def test_update_shop_metadata_full(api_client, admin_key):
+def test_update_shop_metadata_full(api_client, admin_key, db_engine):
     """PATCH 覆盖全部四个可编辑元信息字段（2026-09-28 扩展 name/region）。"""
     r = _register(api_client, admin_key, account_name="Old Name", region="VN")
     assert r.status_code == 200
@@ -319,15 +355,30 @@ def test_update_shop_metadata_full(api_client, admin_key):
         account_name="New Name",
         region="TH",
         opened_date="2026-09-01",
-        service_id="svc_123",
+        service_id=SERVICE_A,
+        app_key="TEST_ADMIN_APP_KEY_123",
+        app_secret="TEST_ADMIN_APP_SECRET_123",
     )
     assert r.status_code == 200, r.text
+    assert "TEST_ADMIN_APP_SECRET_123" not in r.text
     shop = r.json()["shop"]
     assert shop["id"] == pk
     assert shop["account_name"] == "New Name"
     assert shop["region"] == "TH"
     assert shop["opened_date"] == "2026-09-01"
-    assert shop["service_id"] == "svc_123"
+    assert shop["service_id"] == SERVICE_A
+    assert shop["app_credentials_configured"] is True
+    with db_engine.connect() as conn:
+        persisted = conn.execute(
+            text(
+                "SELECT app_key, app_secret_ciphertext "
+                "FROM integration.tiktok_app_credentials "
+                "WHERE service_id = :service_id"
+            ),
+            {"service_id": SERVICE_A},
+        ).one()
+    assert persisted.app_key == "TEST_ADMIN_APP_KEY_123"
+    assert persisted.app_secret_ciphertext != b"TEST_ADMIN_APP_SECRET_123"
 
 
 def test_update_shop_partial_keeps_existing(api_client, admin_key):
@@ -362,6 +413,60 @@ def test_update_shop_never_touches_credential_or_status(api_client, admin_key):
     assert shop["status"] == "active"
 
 
+def test_update_app_credentials_require_admin(
+    api_client, admin_key, readwrite_key
+):
+    r = _register(api_client, admin_key, shop_id=SHOP_B)
+    pk = r.json()["shop"]["id"]
+    r = _patch(
+        api_client,
+        readwrite_key,
+        pk,
+        service_id=SERVICE_B,
+        app_key="TEST_ADMIN_APP_KEY_456",
+        app_secret="TEST_ADMIN_APP_SECRET_456",
+    )
+    assert r.status_code == 403, r.text
+
+
+def test_update_service_id_requires_resolvable_app_pair(api_client, admin_key):
+    r = _register(api_client, admin_key, shop_id=SHOP_B)
+    pk = r.json()["shop"]["id"]
+    r = _patch(api_client, admin_key, pk, service_id=SERVICE_B)
+    assert r.status_code == 409, r.text
+    assert "not configured" in r.text
+
+
+def test_update_app_key_secret_must_be_submitted_together(api_client, admin_key):
+    r = _register(api_client, admin_key, shop_id=SHOP_B)
+    pk = r.json()["shop"]["id"]
+    r = _patch(
+        api_client,
+        admin_key,
+        pk,
+        service_id=SERVICE_B,
+        app_key="TEST_ADMIN_APP_KEY_456",
+    )
+    assert r.status_code == 422, r.text
+
+
+def test_update_invalid_app_secret_is_never_echoed(api_client, admin_key):
+    r = _register(api_client, admin_key, shop_id=SHOP_B)
+    pk = r.json()["shop"]["id"]
+    invalid_secret = "S" * 513
+    r = _patch(
+        api_client,
+        admin_key,
+        pk,
+        service_id=SERVICE_B,
+        app_key="TEST_ADMIN_APP_KEY_456",
+        app_secret=invalid_secret,
+    )
+    assert r.status_code == 422, r.text
+    assert invalid_secret not in r.text
+    assert "app_secret length is invalid" in r.text
+
+
 def test_update_shop_not_found(api_client, admin_key):
     r = _patch(api_client, admin_key, 999999999, account_name="Ghost")
     assert r.status_code == 404, r.text
@@ -392,7 +497,14 @@ def test_channel_accounts_exposes_service_id(api_client, admin_key, readonly_key
     """channel-accounts 读面返回 service_id（shops 页编辑/授权链接依赖它）。"""
     r = _register(api_client, admin_key)
     pk = r.json()["shop"]["id"]
-    r = _patch(api_client, admin_key, pk, service_id="svc_456")
+    r = _patch(
+        api_client,
+        admin_key,
+        pk,
+        service_id=SERVICE_B,
+        app_key="TEST_ADMIN_APP_KEY_456",
+        app_secret="TEST_ADMIN_APP_SECRET_456",
+    )
     assert r.status_code == 200
 
     r = api_client.get(
@@ -401,7 +513,8 @@ def test_channel_accounts_exposes_service_id(api_client, admin_key, readonly_key
     )
     assert r.status_code == 200, r.text
     rows = {row["shop_id"]: row for row in r.json()}
-    assert rows[SHOP_A]["service_id"] == "svc_456"
+    assert rows[SHOP_A]["service_id"] == SERVICE_B
+    assert rows[SHOP_A]["app_credentials_configured"] is True
 
 
 # ─── channel-accounts read surface ─────────────────────────────────────

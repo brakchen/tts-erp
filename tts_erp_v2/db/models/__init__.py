@@ -13,27 +13,6 @@ from tts_erp_v2.db.models.after_sales import (
     Case,
     CaseLine,
 )
-from tts_erp_v2.db.models.plugin import (
-    AdDaily,
-    AdMonthly,
-    AdRawLog,
-    AdToday,
-    ChromeAfterSale,
-    ChromeAfterSaleItem,
-    ChromeOrder,
-    ChromeOrderLine,
-    ChromeSettlement,
-    ChromeSettlementDetail,
-    ChromeShipment,
-    ChromeTrackingEvent,
-    PluginLog,
-)
-from tts_erp_v2.db.models.intercept import (
-    InterceptConfig,
-    InterceptedRequest,
-    InterceptSession,
-    InterceptSyncCursor,
-)
 from tts_erp_v2.db.models.commerce import (
     ChannelAccount,
     ChannelProduct,
@@ -41,6 +20,7 @@ from tts_erp_v2.db.models.commerce import (
     SalesOrder,
     SalesOrderLine,
 )
+from tts_erp_v2.db.models.config import EnumMap
 from tts_erp_v2.db.models.finance import (
     Payout,
     SettlementComponent,
@@ -66,6 +46,13 @@ from tts_erp_v2.db.models.integration import (
     SyncCursor,
     SyncIssue,
     SyncJob,
+    TikTokAppCredential,
+)
+from tts_erp_v2.db.models.intercept import (
+    InterceptConfig,
+    InterceptedRequest,
+    InterceptSession,
+    InterceptSyncCursor,
 )
 from tts_erp_v2.db.models.linkage import (
     AccountLink,
@@ -74,6 +61,21 @@ from tts_erp_v2.db.models.linkage import (
     LinkOverride,
     ProductLink,
     VariantLink,
+)
+from tts_erp_v2.db.models.plugin import (
+    AdDaily,
+    AdMonthly,
+    AdRawLog,
+    AdToday,
+    ChromeAfterSale,
+    ChromeAfterSaleItem,
+    ChromeOrder,
+    ChromeOrderLine,
+    ChromeSettlement,
+    ChromeSettlementDetail,
+    ChromeShipment,
+    ChromeTrackingEvent,
+    PluginLog,
 )
 from tts_erp_v2.db.models.procurement import (
     ManualProductCost,
@@ -89,7 +91,6 @@ from tts_erp_v2.db.models.reporting import (
     ShipmentTrackingSummary,
 )
 from tts_erp_v2.db.models.security import ApiKey
-from tts_erp_v2.db.models.config import EnumMap
 
 __all__ = [
     "AccountLink",
@@ -97,28 +98,29 @@ __all__ = [
     "AdMonthly",
     "AdRawLog",
     "AdToday",
-
     "ApiKey",
-    "ChromeOrder",
-    "ChromeOrderLine",
-    "ChromeSettlement",
-    "ChromeSettlementDetail",
-    "ChromeShipment",
-    "ChromeTrackingEvent",
     "Base",
     "Case",
     "CaseLine",
     "ChannelAccount",
     "ChannelProduct",
     "ChannelProductVariant",
+    "ChromeAfterSale",
+    "ChromeAfterSaleItem",
+    "ChromeOrder",
+    "ChromeOrderLine",
+    "ChromeSettlement",
+    "ChromeSettlementDetail",
+    "ChromeShipment",
+    "ChromeTrackingEvent",
     "Credentials",
+    "EnumMap",
     "ExchangeRate",
     "ExchangeRateSnapshot",
-    "EnumMap",
     "InterceptConfig",
-    "InterceptedRequest",
     "InterceptSession",
     "InterceptSyncCursor",
+    "InterceptedRequest",
     "LinkEvidence",
     "LinkIssue",
     "LinkOverride",
@@ -145,6 +147,7 @@ __all__ = [
     "SyncCursor",
     "SyncIssue",
     "SyncJob",
+    "TikTokAppCredential",
     "TrackingEvent",
     "VariantLink",
 ]

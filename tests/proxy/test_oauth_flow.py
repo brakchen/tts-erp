@@ -33,6 +33,9 @@ TEST_SHOP_ID = "TEST_OAUTH_SHOP_1"  # TEST_ prefix = sentinel (conftest cleanup)
 TEST_SHOP_ID_2 = "TEST_OAUTH_SHOP_2"
 AT_KEY = "access_token"
 RT_KEY = "refresh_token"
+TEST_SERVICE_ID = "TEST_OAUTH_SERVICE"
+TEST_APP_KEY = "TEST_OAUTH_APP_KEY"
+TEST_APP_SECRET = "TEST_OAUTH_APP_SECRET"
 
 
 def _grant_payload() -> dict[str, Any]:
@@ -81,16 +84,28 @@ class _FakeCtx:
         self.exchange_calls: list[str] = []
         self.shops_calls: list[str] = []
 
-        def _fake_exchange(*, auth_code: str) -> dict[str, Any]:
+        def _fake_exchange(*, auth_code: str, app_credentials) -> dict[str, Any]:
+            assert app_credentials.service_id == TEST_SERVICE_ID
+            assert app_credentials.app_key == TEST_APP_KEY
             self.exchange_calls.append(auth_code)
             return self.grant
 
-        def _fake_shops(*, access_token: str) -> list[dict[str, Any]]:
+        def _fake_shops(*, access_token: str, app_credentials) -> list[dict[str, Any]]:
+            assert app_credentials.service_id == TEST_SERVICE_ID
+            assert app_credentials.app_key == TEST_APP_KEY
             self.shops_calls.append(access_token)
             return list(self.shops)
 
         monkeypatch.setattr(flow, "exchange_auth_code", _fake_exchange)
         monkeypatch.setattr(flow, "fetch_authorized_shops", _fake_shops)
+
+
+@pytest.fixture(autouse=True)
+def app_credentials_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Legacy adapter for old state rows that predate service_id in extra."""
+    monkeypatch.setenv("TIKTOK_SERVICE_ID", TEST_SERVICE_ID)
+    monkeypatch.setenv("TIKTOK_APP_KEY", TEST_APP_KEY)
+    monkeypatch.setenv("TIKTOK_APP_SECRET", TEST_APP_SECRET)
 
 
 @pytest.fixture()
@@ -129,7 +144,7 @@ def test_register_state_with_extra_round_trip(db_session, fernet_key: str) -> No
     from tts_erp_v2.db.models.integration import OAuthState
     from tts_erp_v2.proxy.tiktok_oauth import pop_state, register_state
 
-    raw, expires_at = register_state(
+    raw, _expires_at = register_state(
         db_session, extra={"service_id": "svc_123"}
     )
     assert isinstance(raw, str) and len(raw) >= 32
@@ -235,6 +250,7 @@ def test_complete_authorization_bootstraps_rows(
     assert view.shop_cipher == "grant_cipher_abc"
     assert view.account_label == "Test Shop VN"  # per-shop name from the list
     assert view.granted_scopes == ["seller.order.read", "seller.product.read"]
+    assert view.service_id == TEST_SERVICE_ID
     assert view.expires_at is not None
 
     # Channel-account row linked to the credential.
@@ -249,6 +265,7 @@ def test_complete_authorization_bootstraps_rows(
     assert acct.seller_type == "CROSS_BORDER"
     assert acct.status == "active"
     assert acct.credential_id == out["shops"][0]["credential_id"]
+    assert acct.service_id == TEST_SERVICE_ID
     assert out["shops"][0]["account_id"] == acct.id
 
 
@@ -372,6 +389,30 @@ def test_complete_authorization_unknown_state_rejected(
     assert cred_count == 0
 
 
+def test_complete_authorization_rejects_callback_app_key_mismatch(
+    db_session, fernet_key: str, fake_exchange: _FakeCtx
+) -> None:
+    from tts_erp_v2.proxy.tiktok_oauth import (
+        OAuthFlowError,
+        complete_tiktok_authorization,
+        register_state,
+    )
+
+    raw, _ = register_state(
+        db_session,
+        extra={"service_id": TEST_SERVICE_ID},
+    )
+    with pytest.raises(OAuthFlowError) as exc_info:
+        complete_tiktok_authorization(
+            db_session,
+            code="code_x",
+            state=raw,
+            callback_app_key="TEST_WRONG_APP_KEY",
+        )
+    assert exc_info.value.kind == "app_key_mismatch"
+    assert fake_exchange.exchange_calls == []
+
+
 def test_complete_authorization_unsupported_user_type(
     db_session, fernet_key: str, fake_exchange: _FakeCtx
 ) -> None:
@@ -467,7 +508,8 @@ def test_complete_authorization_upstream_failure_consumes_state(
         register_state,
     )
 
-    def _boom(*, auth_code: str) -> dict[str, Any]:
+    def _boom(*, auth_code: str, app_credentials) -> dict[str, Any]:
+        assert app_credentials.service_id == TEST_SERVICE_ID
         raise UpstreamHttpError(200, "tiktok token get code=10001 used")
 
     import tts_erp_v2.proxy.tiktok_oauth as flow
@@ -492,7 +534,8 @@ def test_complete_authorization_shops_failure_consumes_state(
         register_state,
     )
 
-    def _boom(*, access_token: str) -> list[dict[str, Any]]:
+    def _boom(*, access_token: str, app_credentials) -> list[dict[str, Any]]:
+        assert app_credentials.service_id == TEST_SERVICE_ID
         raise UpstreamHttpError(200, "tiktok authorized shops code=10001 denied")
 
     import tts_erp_v2.proxy.tiktok_oauth as flow

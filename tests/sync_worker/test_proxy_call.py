@@ -112,6 +112,7 @@ def _seed_credentials(db_session, *, external_id: str = "TEST_TT_PROXY") -> None
         plaintext_refresh_token=seed_rt,
         plaintext_shop_cipher=seed_sc,
         expires_at=seed_exp,
+        service_id="TEST_PROXY_SERVICE",
     )
     db_session.commit()
 
@@ -134,6 +135,7 @@ def _refreshed_view(provider: str, external_account_id: str):
         shop_cipher=REFRESHED_SC,
         expires_at=None,
         granted_scopes=None,
+        service_id="TEST_PROXY_SERVICE",
         extra=None,
     )
 
@@ -168,11 +170,70 @@ def fake_client(monkeypatch: pytest.MonkeyPatch) -> _CaptureClient:
 @pytest.fixture()
 def env_setup(monkeypatch: pytest.MonkeyPatch) -> None:
     """Provide TIKTOK_APP_KEY / TIKTOK_APP_SECRET so build_proxy_call doesn't raise."""
+    monkeypatch.setenv("TIKTOK_SERVICE_ID", "TEST_PROXY_SERVICE")
     monkeypatch.setenv("TIKTOK_APP_KEY", "test_app_key_xyz")
     monkeypatch.setenv("TIKTOK_APP_SECRET", "test_app_secret_xyz")
 
 
 # ─── GET lifts ALL body keys to query ───────────────────────────────
+
+
+def test_client_cache_changes_when_app_secret_rotates() -> None:
+    from tts_erp_v2.sync_worker.proxy_call import _get_client
+
+    first = _get_client("TEST_CACHE_KEY", "TEST_CACHE_SECRET_V1", "https://example.test")
+    same = _get_client("TEST_CACHE_KEY", "TEST_CACHE_SECRET_V1", "https://example.test")
+    rotated = _get_client("TEST_CACHE_KEY", "TEST_CACHE_SECRET_V2", "https://example.test")
+
+    assert same is first
+    assert rotated is not first
+
+
+def test_build_proxy_call_uses_token_bound_service_app_pair(
+    db_session,
+    env_setup: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tts_erp_v2.proxy.token_service import (
+        upsert_credentials,
+        upsert_tiktok_app_credentials,
+    )
+    from tts_erp_v2.sync_worker import proxy_call
+
+    service_id = "TEST_PROXY_DATABASE_SERVICE"
+    upsert_tiktok_app_credentials(
+        db_session,
+        service_id=service_id,
+        app_key="TEST_DATABASE_APP_KEY",
+        plaintext_app_secret="TEST_DATABASE_APP_SECRET",
+    )
+    upsert_credentials(
+        db_session,
+        provider="tiktok",
+        external_account_id="TEST_TT_PROXY_DATABASE",
+        plaintext_access_token="TEST_DATABASE_ACCESS_TOKEN",
+        plaintext_refresh_token="TEST_DATABASE_REFRESH_TOKEN",
+        plaintext_shop_cipher="TEST_DATABASE_SHOP_CIPHER",
+        service_id=service_id,
+    )
+    db_session.commit()
+
+    captured: dict[str, str] = {}
+    client = _CaptureClient()
+
+    def capture_client(app_key: str, app_secret: str, api_host: str):
+        captured.update(
+            app_key=app_key,
+            app_secret=app_secret,
+            api_host=api_host,
+        )
+        return client
+
+    monkeypatch.setattr(proxy_call, "_get_client", capture_client)
+    proxy_call.build_proxy_call(db_session, shop_id="TEST_TT_PROXY_DATABASE")
+
+    assert captured["app_key"] == "TEST_DATABASE_APP_KEY"
+    assert captured["app_secret"] == "TEST_DATABASE_APP_SECRET"
 
 
 def test_get_lifts_all_body_keys_to_query(

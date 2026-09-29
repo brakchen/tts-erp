@@ -497,7 +497,8 @@ _SHOPS_PAGE_HTML = """<!doctype html>
     .op-section-header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--rule-soft); flex-wrap: wrap; }
     .op-section-title { font-family: var(--serif); font-weight: 600; font-size: 18px; margin: 0; color: var(--ink); }
     .op-section-meta { font-family: var(--mono); font-size: 13px; color: var(--muted); }
-    .form-grid { display: grid; grid-template-columns: 1.2fr 1.4fr 0.6fr 0.8fr auto; gap: 14px; align-items: end; }
+    .form-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; align-items: end; }
+    .form-actions { display: flex; justify-content: flex-end; align-items: end; }
     .form-field label { display: block; font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
     .form-field input { width: 100%; font-family: var(--sans); font-size: 14px; background: transparent; border: 0; border-bottom: 1px solid var(--rule); padding: 7px 2px; color: var(--ink); border-radius: 0; }
     .form-field input:focus { outline: 0; border-bottom-color: var(--accent); }
@@ -523,6 +524,11 @@ _SHOPS_PAGE_HTML = """<!doctype html>
     .op-note { padding: 12px 16px; border: 1px solid var(--rule); background: var(--paper-deep); color: var(--ink-soft); font-size: 13px; }
     .op-error-note { padding: 12px 16px; border: 1px solid var(--danger); background: var(--paper); color: var(--danger); font-size: 13px; }
     .op-hidden { display: none !important; }
+    .op-dialog { width: min(520px, calc(100vw - 32px)); border: 1px solid var(--rule); border-radius: 0; background: var(--paper); color: var(--ink); padding: 22px 24px; }
+    .op-dialog::backdrop { background: rgba(27, 24, 20, 0.48); }
+    .op-dialog h2 { margin: 0 0 6px; font-family: var(--serif); font-size: 20px; }
+    .op-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+    .op-dialog .form-field { margin-top: 14px; }
     @media (max-width: 720px) {
       .form-grid { grid-template-columns: 1fr; }
       .op-header { padding: 14px 16px 10px; }
@@ -571,11 +577,23 @@ _SHOPS_PAGE_HTML = """<!doctype html>
           <label for="f-opened">开店日期</label>
           <input id="f-opened" type="date" autocomplete="off">
         </div>
-        <div class="form-field">
+        <div class="form-field mono">
+          <label for="f-service-id">service_id</label>
+          <input id="f-service-id" type="text" placeholder="Partner Center Service ID" autocomplete="off">
+        </div>
+        <div class="form-field mono">
+          <label for="f-app-key">App Key</label>
+          <input id="f-app-key" type="text" placeholder="与 service_id 配套" autocomplete="off">
+        </div>
+        <div class="form-field mono">
+          <label for="f-app-secret">App Secret</label>
+          <input id="f-app-secret" type="password" placeholder="仅加密存储，不回显" autocomplete="new-password">
+        </div>
+        <div class="form-field form-actions">
           <button type="submit" class="btn-primary">注册</button>
         </div>
       </form>
-      <div class="form-hint">重复注册幂等：只补填仍为空的字段，不会覆盖已有 credential / 状态。</div>
+      <div class="form-hint">重复注册幂等：只补填仍为空的字段，不会覆盖已有 credential / 状态。App Key 与 App Secret 必须成对填写，保存应用凭证需要 admin。</div>
     </section>
 
     <section class="op-section">
@@ -600,14 +618,39 @@ _SHOPS_PAGE_HTML = """<!doctype html>
           <th class="op-th">名称</th>
           <th class="op-th">区域</th>
           <th class="op-th">service_id</th>
+          <th class="op-th">App 凭证</th>
           <th class="op-th">开店日期</th>
           <th class="op-th">同步方式</th>
           <th class="op-th" style="width:120px;">操作</th>
         </tr></thead>
-        <tbody id="shop-body"><tr><td colspan="7" class="op-empty">加载中…</td></tr></tbody>
+        <tbody id="shop-body"><tr><td colspan="8" class="op-empty">加载中…</td></tr></tbody>
       </table>
     </section>
   </main>
+
+  <dialog id="app-credentials-dialog" class="op-dialog">
+    <h2>配置 TikTok App 凭证</h2>
+    <p class="form-hint">按 service_id 共享。App Secret 只加密存储，不会回显；保存需要 admin。</p>
+    <form id="app-credentials-form">
+      <input id="d-shop-pk" type="hidden">
+      <div class="form-field mono">
+        <label for="d-service-id">service_id *</label>
+        <input id="d-service-id" type="text" required autocomplete="off">
+      </div>
+      <div class="form-field mono">
+        <label for="d-app-key">App Key *</label>
+        <input id="d-app-key" type="text" required autocomplete="off">
+      </div>
+      <div class="form-field mono">
+        <label for="d-app-secret">App Secret *</label>
+        <input id="d-app-secret" type="password" required autocomplete="new-password">
+      </div>
+      <div class="op-dialog-actions">
+        <button id="d-cancel" type="button" class="btn-secondary">取消</button>
+        <button type="submit" class="btn-primary">保存凭证</button>
+      </div>
+    </form>
+  </dialog>
 <script src="../../static/js/shops.js?v=__JSV_SHOPS__" defer></script>
 </body>
 </html>

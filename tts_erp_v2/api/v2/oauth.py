@@ -46,13 +46,14 @@ from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import get_session, require_role_at_least
 from tts_erp_v2.proxy.errors import ProxyError, SigningError, UpstreamHttpError
-from tts_erp_v2.proxy.tiktok_auth import build_authorize_url
+from tts_erp_v2.proxy.tiktok_auth import build_authorize_url, resolve_service_id
 from tts_erp_v2.proxy.tiktok_oauth import (
     OAuthFlowError,
     complete_tiktok_authorization,
     pop_state,
     register_state,
 )
+from tts_erp_v2.proxy.token_service import resolve_tiktok_app_credentials
 
 router = APIRouter(prefix="/v2/oauth/tiktok", tags=["oauth-tiktok"])
 
@@ -144,15 +145,24 @@ def authorize(
     mutates ``integration.credentials`` + ``commerce.shops``, and that
     surface stays under the public OAuth handshake.
 
-    ``service_id`` 选填：传入时存入 OAuthState.extra，callback 后写入
-    commerce.shops；不传时 fallback 到环境变量 ``TIKTOK_SERVICE_ID``。
+    ``service_id`` 选填：不传时 fallback 到环境变量
+    ``TIKTOK_SERVICE_ID``。解析后的有效值始终写入 OAuthState.extra；生成
+    链接前必须存在与该 service_id 配套的 App Key/App Secret。
     """
     require_role_at_least(request, "readwrite")
-    state_extra = {"service_id": service_id} if service_id else None
     try:
-        raw_state, expires_at = register_state(sess, extra=state_extra)
+        effective_service_id = resolve_service_id(service_id)
+        resolve_tiktok_app_credentials(
+            sess,
+            service_id=effective_service_id,
+        )
+        raw_state, expires_at = register_state(
+            sess,
+            extra={"service_id": effective_service_id},
+        )
         authorize_url = build_authorize_url(
-            state=raw_state, service_id=service_id
+            state=raw_state,
+            service_id=effective_service_id,
         )
     except SigningError as exc:
         raise HTTPException(
@@ -205,6 +215,7 @@ def callback(
     state: str | None = Query(default=None),
     error: str | None = Query(default=None),
     format: str | None = Query(default=None),
+    app_key: str | None = Query(default=None),
 ):
     """Handle TikTok's redirect after the seller approves/rejects.
 
@@ -231,12 +242,29 @@ def callback(
             bool(state),
         )
     if fmt:
-        return _handle_json(code=code, state=state, error=error, sess=sess)
-    return _handle_html(code=code, state=state, error=error, sess=sess)
+        return _handle_json(
+            code=code,
+            state=state,
+            error=error,
+            callback_app_key=app_key,
+            sess=sess,
+        )
+    return _handle_html(
+        code=code,
+        state=state,
+        error=error,
+        callback_app_key=app_key,
+        sess=sess,
+    )
 
 
 def _handle_json(
-    *, code: str | None, state: str | None, error: str | None, sess: Any
+    *,
+    code: str | None,
+    state: str | None,
+    error: str | None,
+    callback_app_key: str | None,
+    sess: Any,
 ) -> JSONResponse:
     code_pfx = (code or "")[:10]
     state_present = bool(state)
@@ -264,7 +292,12 @@ def _handle_json(
             error="callback hit without ?code — start from /v2/oauth/tiktok/authorize",
         )
     try:
-        out = complete_tiktok_authorization(sess, code=code, state=state or "")
+        out = complete_tiktok_authorization(
+            sess,
+            code=code,
+            state=state or "",
+            callback_app_key=callback_app_key,
+        )
     except OAuthFlowError as exc:
         log.warning(
             "oauth callback json rejected: kind=%s code_prefix=%s state_present=%s msg=%s",
@@ -311,7 +344,12 @@ def _handle_json(
 
 
 def _handle_html(
-    *, code: str | None, state: str | None, error: str | None, sess: Any
+    *,
+    code: str | None,
+    state: str | None,
+    error: str | None,
+    callback_app_key: str | None,
+    sess: Any,
 ) -> HTMLResponse:
     code_pfx = (code or "")[:10]
     state_present = bool(state)
@@ -341,7 +379,12 @@ def _handle_html(
             status_code=status.HTTP_400_BAD_REQUEST,
         )
     try:
-        out = complete_tiktok_authorization(sess, code=code, state=state or "")
+        out = complete_tiktok_authorization(
+            sess,
+            code=code,
+            state=state or "",
+            callback_app_key=callback_app_key,
+        )
     except OAuthFlowError as exc:
         log.warning(
             "oauth callback rejected: kind=%s code_prefix=%s state_present=%s msg=%s",

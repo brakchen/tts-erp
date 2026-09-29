@@ -41,15 +41,19 @@ GET /v2/tiktok-shop/products/{product_id}
 
 ---
 
-## 3. Required server-side env (operator)
+## 3. Required server-side credentials
 
-| Var | Source | Purpose |
+| Item | Source | Purpose |
 | --- | --- | --- |
-| `TIKTOK_APP_KEY` | `.env` | TikTok Partner App app_key, placed in the `app_key` query param + HMAC canonical |
-| `TIKTOK_APP_SECRET` | `.env` | TikTok Partner App app_secret, used for HMAC-SHA256 signing per AGENTS.md §2.2 |
-| `TTS_ERP_FERNET_KEY` | `.env` | Decrypts `integration.credentials.ciphertext` (Fernet envelope) |
+| Issuing `service_id` | `integration.credentials.service_id` | Binds the shop token to the TikTok Partner App that issued it |
+| App Key | `integration.tiktok_app_credentials.app_key` | Placed in the `app_key` query param + HMAC canonical |
+| App Secret | `integration.tiktok_app_credentials.app_secret_ciphertext` | Fernet-decrypted in memory for HMAC-SHA256 signing |
+| `TTS_ERP_FERNET_KEY` | `.env` | Decrypts token and App Secret ciphertext |
 
-Any of these missing → 500 with `detail: "signing/config error: ..."`.
+Legacy rows with `integration.credentials.service_id IS NULL` may use
+`TIKTOK_SERVICE_ID/TIKTOK_APP_KEY/TIKTOK_APP_SECRET` only as one exact
+single-app fallback until reauthorization. Missing or unresolved credentials →
+500 with `detail: "signing/config error: ..."`.
 
 ---
 
@@ -97,7 +101,7 @@ Abridged example (real payload is far larger — see `tts-partner-api-docs/Get P
 | **502** | upstream auth rejected (401/403 from TikTok) | `{"detail": "upstream auth rejected: ..."}` |
 | **502** | upstream 4xx/5xx (non-retryable) | `{"detail": "upstream http error: ..."}` |
 | **502** | network blip, retry budget exhausted | `{"detail": "transient upstream error: ..."}` |
-| **500** | `TIKTOK_APP_KEY` / `TIKTOK_APP_SECRET` / `TTS_ERP_FERNET_KEY` not configured | `{"detail": "signing/config error: ..."}` |
+| **500** | issuing service_id has no matching App pair, or `TTS_ERP_FERNET_KEY` is unavailable | `{"detail": "signing/config error: ..."}` |
 
 ---
 
@@ -194,7 +198,7 @@ curl -sS -H "X-API-Key: $KEY" \
 | Proxy wrapper (credential resolve + envelope check) | `tts_erp_v2/proxy/tts_shop/products_api.py::get_product` |
 | HTTP transport (HMAC signing, retry, classification) | `tts_erp_v2/proxy/tts_shop/client.py::TiktokShopClient` |
 | Credential resolve | `tts_erp_v2/proxy/token_service.py::load_credentials` |
-| App-key / app-secret resolve | `tts_erp_v2/proxy/tiktok_auth.py::_resolve_app_credentials` |
+| App-key / app-secret resolve | `tts_erp_v2/proxy/token_service.py::resolve_tiktok_app_credentials` + `tiktok_auth.resolve_tiktok_app_credentials_for_shop` |
 | Role classification (readonly) | `tts_erp_v2/middleware/auth.py::_READONLY_PREFIXES` (`/v2/tiktok-shop/`) |
 | Tests (proxy layer) | `tests/proxy/test_tts_shop_products_api.py` (14 cases) |
 | Tests (API layer) | `tests/api/test_tiktok_shop_get_product.py` (14 + OpenAPI regression cases) |

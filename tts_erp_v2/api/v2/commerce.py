@@ -13,6 +13,7 @@ values from request inputs flow only through the params dict.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -60,20 +61,29 @@ def _resolve_mirror_url(mirror_object_key: str | None) -> str | None:
 # --- SQL constants (no interpolation) ------------------------------------
 SQL_LIST_CHANNEL_ACCOUNTS = (
     "SELECT id, platform, shop_id, account_name, region, "
-    "seller_type, status, synced_at, opened_date, credential_id, service_id "
+    "seller_type, status, synced_at, opened_date, credential_id, service_id, "
+    "EXISTS (SELECT 1 FROM integration.tiktok_app_credentials tac "
+    "        WHERE tac.service_id = commerce.shops.service_id) "
+    "  AS app_credentials_configured "
     "FROM commerce.shops "
     "WHERE (CAST(:platform AS text) IS NULL OR platform = CAST(:platform AS text)) "
     "ORDER BY id LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
 )
 SQL_GET_CHANNEL_ACCOUNT = (
     "SELECT id, platform, shop_id, account_name, region, "
-    "seller_type, status, synced_at, opened_date, credential_id, service_id "
+    "seller_type, status, synced_at, opened_date, credential_id, service_id, "
+    "EXISTS (SELECT 1 FROM integration.tiktok_app_credentials tac "
+    "        WHERE tac.service_id = commerce.shops.service_id) "
+    "  AS app_credentials_configured "
     "FROM commerce.shops "
     "WHERE id = :id"
 )
 SQL_GET_CHANNEL_ACCOUNT_BY_EXTERNAL = (
     "SELECT id, platform, shop_id, account_name, region, "
-    "seller_type, status, synced_at, opened_date, credential_id, service_id "
+    "seller_type, status, synced_at, opened_date, credential_id, service_id, "
+    "EXISTS (SELECT 1 FROM integration.tiktok_app_credentials tac "
+    "        WHERE tac.service_id = commerce.shops.service_id) "
+    "  AS app_credentials_configured "
     "FROM commerce.shops "
     "WHERE platform = :platform AND shop_id = :ext"
 )
@@ -271,6 +281,13 @@ _STMT_ACCOUNT_ORDER_STATS = text(SQL_ACCOUNT_ORDER_STATS)
 
 
 def _row_to_channel_account(row: Any) -> ChannelAccountOut:
+    env_service_id = os.environ.get("TIKTOK_SERVICE_ID", "").strip()
+    env_configured = bool(
+        env_service_id
+        and row.service_id in (None, env_service_id)
+        and os.environ.get("TIKTOK_APP_KEY", "").strip()
+        and os.environ.get("TIKTOK_APP_SECRET", "").strip()
+    )
     return ChannelAccountOut(
         id=row.id,
         platform=row.platform,
@@ -283,6 +300,9 @@ def _row_to_channel_account(row: Any) -> ChannelAccountOut:
         opened_date=row.opened_date,
         credential_id=row.credential_id,
         service_id=row.service_id,
+        app_credentials_configured=(
+            bool(row.app_credentials_configured) or env_configured
+        ),
     )
 
 

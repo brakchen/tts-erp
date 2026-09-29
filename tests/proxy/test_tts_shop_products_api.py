@@ -73,7 +73,7 @@ class _FakeClient:
     def __init__(
         self,
         *,
-        payload: dict[str, Any] | None = None,
+        payload: Any = None,
         error: Exception | None = None,
     ) -> None:
         self.payload = payload
@@ -155,6 +155,7 @@ def _seed_credentials(
     access_token: str = "TPP_test_at",
     shop_cipher: str | None = "TEST_cipher_abc",
     refresh_token: str | None = "TPP_test_rt",
+    service_id: str | None = None,
 ) -> None:
     """Insert credentials via the production :func:`upsert_credentials` path."""
     upsert_credentials(
@@ -166,6 +167,7 @@ def _seed_credentials(
         plaintext_shop_cipher=shop_cipher,
         account_label=f"TEST shop {shop_id}",
         granted_scopes=["seller.product.basic"],
+        service_id=service_id,
     )
 
 
@@ -194,6 +196,48 @@ def test_get_product_returns_data_on_success(db_session, fernet_key: str):
     assert call["path"] == f"/product/202309/products/{PRODUCT_ID}"
     assert call["extra_params"] == {"shop_cipher": "TEST_cipher_abc"}
     assert call["access_token"] == "TPP_test_at"
+
+
+def test_get_product_default_client_uses_token_bound_service_app_pair(
+    db_session,
+    fernet_key: str,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from tts_erp_v2.proxy.token_service import upsert_tiktok_app_credentials
+
+    service_id = "TEST_PRODUCT_SERVICE"
+    acct_id = _seed_account(db_session)
+    upsert_tiktok_app_credentials(
+        db_session,
+        service_id=service_id,
+        app_key="TEST_PRODUCT_APP_KEY",
+        plaintext_app_secret="TEST_PRODUCT_APP_SECRET",
+    )
+    _seed_credentials(db_session, service_id=service_id)
+    db_session.flush()
+
+    data = {"id": PRODUCT_ID, "title": "Test Tee"}
+    fake = _FakeClient(payload=_success_envelope(data))
+    captured: dict[str, str] = {}
+
+    def fake_client_factory(*, app_key: str, app_secret: str, api_host: str):
+        captured.update(
+            app_key=app_key,
+            app_secret=app_secret,
+            api_host=api_host,
+        )
+        return fake
+
+    monkeypatch.setattr(products_api, "TiktokShopClient", fake_client_factory)
+    result = products_api.get_product(
+        session=db_session,
+        shop_pk=acct_id,
+        product_id=PRODUCT_ID,
+    )
+
+    assert result == data
+    assert captured["app_key"] == "TEST_PRODUCT_APP_KEY"
+    assert captured["app_secret"] == "TEST_PRODUCT_APP_SECRET"
 
 
 # ---------------------------------------------------------------------------

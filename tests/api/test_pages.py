@@ -14,6 +14,7 @@ This file keeps the two load-bearing contract checks:
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 
@@ -108,8 +109,23 @@ def test_shops_page_returns_200_with_html(api_client, readonly_key):
     body = r.text
     assert "../../static/vendor/bootstrap.min.css" in body
     assert "../../static/js/shops.js" in body
+    assert 'id="f-service-id"' in body
+    assert 'id="f-app-key"' in body
+    assert 'id="f-app-secret"' in body
+    assert 'id="app-credentials-dialog"' in body
+    assert 'id="d-app-secret"' in body
+    assert body.count('type="password"') >= 2
     assert 'href="/static/' not in body
     assert 'src="/static/' not in body
+
+
+def test_shops_page_js_manages_service_app_credentials() -> None:
+    source = Path("tts_erp_v2/static/js/shops.js").read_text()
+    assert 'app_secret: appSecret || null' in source
+    assert 'class="btn btn-sm btn-outline-dark btn-config-app"' in source
+    assert 'app_credentials_configured' in source
+    assert 'bindAppCredentialsDialog();' in source
+    assert 'admin 会话' in source
 
 
 def test_shops_page_requires_some_auth(api_client):

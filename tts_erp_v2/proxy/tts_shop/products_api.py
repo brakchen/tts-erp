@@ -29,16 +29,34 @@ Conventions
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Protocol, cast
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.proxy.errors import ProxyError
-from tts_erp_v2.proxy.tiktok_auth import _resolve_app_credentials
+from tts_erp_v2.proxy.tiktok_auth import resolve_tiktok_app_credentials_for_shop
 from tts_erp_v2.proxy.token_service import CredentialsView, load_credentials
-from tts_erp_v2.proxy.tts_shop.client import TiktokCallResult, TiktokShopClient
+from tts_erp_v2.proxy.tts_shop.client import (
+    DEFAULT_API_HOST,
+    TiktokCallResult,
+    TiktokShopClient,
+)
+
+
+class ProductClient(Protocol):
+    """Small signing-client seam used by production and test adapters."""
+
+    def get(
+        self,
+        *,
+        path: str,
+        access_token: str,
+        extra_params: dict[str, str] | None = None,
+    ) -> TiktokCallResult:
+        raise AssertionError("ProductClient protocol method has no runtime body")
 
 
 # Upstream path template (versioned per tts-partner-api-docs/Get Product.md).
@@ -113,15 +131,18 @@ def _load_tiktok_credentials(session: Session, shop_id: str) -> CredentialsView:
     return cred
 
 
-def _build_default_client() -> TiktokShopClient:
-    """Construct a :class:`TiktokShopClient` from ``TIKTOK_APP_KEY`` /
-    ``TIKTOK_APP_SECRET``.
-
-    Reads env via ``_resolve_app_credentials`` (the same helper the
-    legacy auth flow uses); failures bubble up as :class:`SigningError`.
-    """
-    app_key, app_secret, _auth_host = _resolve_app_credentials()
-    return TiktokShopClient(app_key=app_key, app_secret=app_secret)
+def _build_default_client(session: Session, shop_id: str) -> TiktokShopClient:
+    """Construct a client with the App pair that issued this shop token."""
+    app_credentials = resolve_tiktok_app_credentials_for_shop(
+        session,
+        shop_id=shop_id,
+    )
+    api_host = os.environ.get("TIKTOK_API_HOST", "").strip() or DEFAULT_API_HOST
+    return TiktokShopClient(
+        app_key=app_credentials.app_key,
+        app_secret=app_credentials.app_secret,
+        api_host=api_host,
+    )
 
 
 def _check_envelope(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -141,8 +162,14 @@ def _check_envelope(payload: Mapping[str, Any]) -> dict[str, Any]:
             f"upstream response missing 'code': keys={list(payload.keys())}"
         )
     if code != 0:
+        try:
+            upstream_code = int(code)
+        except (TypeError, ValueError) as exc:
+            raise ProxyError(
+                f"upstream response carried non-integer code: {code!r}"
+            ) from exc
         raise UpstreamBusinessError(
-            code=int(code),
+            code=upstream_code,
             message=str(payload.get("message", "")),
             request_id=payload.get("request_id"),
         )
@@ -162,7 +189,7 @@ def get_product(
     return_under_review_version: bool = False,
     return_draft_version: bool = False,
     locale: str | None = None,
-    client: TiktokShopClient | None = None,
+    client: ProductClient | None = None,
 ) -> dict[str, Any]:
     """Fetch one product's full details from TikTok Shop Partner API.
 
@@ -190,8 +217,8 @@ def get_product(
         locale: BCP-47 locale code (e.g. ``en-US``); ``None`` → upstream
             uses the shop's default locale.
         client: Optional pre-built :class:`TiktokShopClient` (test
-            hook). ``None`` → build from ``TIKTOK_APP_KEY`` /
-            ``TIKTOK_APP_SECRET`` env.
+            hook). ``None`` → resolve the token's issuing service_id and
+            its encrypted App Key/App Secret pair.
 
     Returns:
         The ``data`` portion of the upstream response (full product dict).
@@ -214,10 +241,12 @@ def get_product(
     shop_id = _resolve_shop_id(session, shop_pk)
     cred = _load_tiktok_credentials(session, shop_id)
     if client is None:
-        client = _build_default_client()
+        client = _build_default_client(session, shop_id)
 
     path = GET_PRODUCT_PATH_TEMPLATE.format(product_id=product_id)
-    extra_params: dict[str, str] = {"shop_cipher": cred.shop_cipher}
+    extra_params: dict[str, str] = {
+        "shop_cipher": cast(str, cred.shop_cipher)
+    }
     if return_under_review_version:
         extra_params["return_under_review_version"] = "true"
     if return_draft_version:
@@ -235,8 +264,8 @@ def get_product(
 
 __all__ = [
     "GET_PRODUCT_PATH_TEMPLATE",
-    "UpstreamBusinessError",
     "ChannelAccountNotFound",
     "CredentialsMissing",
+    "UpstreamBusinessError",
     "get_product",
 ]

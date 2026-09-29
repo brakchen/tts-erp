@@ -28,6 +28,9 @@ class ChannelAccountOut(BaseModel):
     # TikTok Partner Center service_id（2026-09-28 补上读面：shops 页面
     # 元信息编辑 / 授权链接生成需要它；additive 字段，不破坏外部契约）
     service_id: str | None = None
+    # True when a database pair or exact legacy environment fallback exists;
+    # never exposes App Key/App Secret plaintext.
+    app_credentials_configured: bool = False
     synced_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None

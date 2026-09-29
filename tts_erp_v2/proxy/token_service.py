@@ -41,11 +41,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.db.models.integration import Credentials
+from tts_erp_v2.db.models.integration import Credentials, TikTokAppCredential
 from tts_erp_v2.proxy.errors import DecryptionError, SigningError
 
 log = logging.getLogger("tts_erp_v2.proxy.token_service")
@@ -120,6 +120,116 @@ def mask_secret(secret: str) -> str:
     return f"{secret[:8]}...{secret[-4:]}  (len={len(secret)})"
 
 
+# ---- TikTok Partner App credentials --------------------------------
+
+
+@dataclass(frozen=True)
+class TikTokAppCredentials:
+    """Decrypted TikTok Partner App pair resolved by ``service_id``."""
+
+    service_id: str
+    app_key: str
+    app_secret: str
+    source: str
+
+
+def upsert_tiktok_app_credentials(
+    session: Session,
+    *,
+    service_id: str,
+    app_key: str,
+    plaintext_app_secret: str,
+) -> TikTokAppCredential:
+    """Atomically insert or rotate one service_id's App Key/Secret pair.
+
+    The App Secret is encrypted before any SQL is emitted.  The returned ORM
+    row never carries plaintext secret material; callers must commit.
+    """
+    service_id = service_id.strip()
+    app_key = app_key.strip()
+    if not service_id:
+        raise SigningError("service_id is required")
+    if not app_key:
+        raise SigningError("app_key is required")
+    if not plaintext_app_secret:
+        raise SigningError("app_secret is required")
+
+    values = {
+        "service_id": service_id,
+        "app_key": app_key,
+        "app_secret_ciphertext": encrypt(plaintext_app_secret),
+        "updated_at": datetime.now(UTC),
+    }
+    insert_stmt = pg_insert(TikTokAppCredential).values(**values)
+    session.execute(
+        insert_stmt.on_conflict_do_update(
+            index_elements=["service_id"],
+            set_={
+                "app_key": values["app_key"],
+                "app_secret_ciphertext": values["app_secret_ciphertext"],
+                "updated_at": values["updated_at"],
+            },
+        )
+    )
+    return session.execute(
+        select(TikTokAppCredential).where(
+            TikTokAppCredential.service_id == service_id
+        )
+    ).scalar_one()
+
+
+def resolve_tiktok_app_credentials(
+    session: Session,
+    *,
+    service_id: str,
+) -> TikTokAppCredentials:
+    """Resolve one Partner App pair by service_id without exposing storage.
+
+    Database configuration wins.  The process-global environment pair remains
+    a narrow compatibility adapter only for the exact ``TIKTOK_SERVICE_ID``;
+    an arbitrary service_id can never silently borrow another app's secret.
+    """
+    service_id = service_id.strip()
+    if not service_id:
+        raise SigningError("service_id is required to resolve TikTok App credentials")
+
+    row = session.execute(
+        select(TikTokAppCredential).where(
+            TikTokAppCredential.service_id == service_id
+        )
+    ).scalar_one_or_none()
+    if row is not None:
+        app_secret = decrypt(row.app_secret_ciphertext)
+        if not row.app_key or not app_secret:
+            raise SigningError(
+                f"TikTok App credentials are incomplete for service_id={service_id!r}"
+            )
+        return TikTokAppCredentials(
+            service_id=service_id,
+            app_key=row.app_key,
+            app_secret=app_secret,
+            source="database",
+        )
+
+    env_service_id = os.environ.get("TIKTOK_SERVICE_ID", "").strip()
+    if service_id == env_service_id:
+        app_key = os.environ.get("TIKTOK_APP_KEY", "").strip()
+        app_secret = os.environ.get("TIKTOK_APP_SECRET", "").strip()
+        if app_key and app_secret:
+            return TikTokAppCredentials(
+                service_id=service_id,
+                app_key=app_key,
+                app_secret=app_secret,
+                source="environment",
+            )
+
+    raise SigningError(
+        "TikTok App credentials are not configured for "
+        f"service_id={service_id!r}; save the matching App Key/App Secret "
+        "on the shop before authorizing"
+    )
+
+
 # ---- Expires-at helpers --------------------------------------------
 
 
@@ -162,6 +272,7 @@ class CredentialsView:
     shop_cipher: str | None
     expires_at: datetime | None
     granted_scopes: list | None
+    service_id: str | None
     extra: dict | None
 
     @classmethod
@@ -198,6 +309,7 @@ class CredentialsView:
                 shop_cipher=None,
                 expires_at=row.expires_at,
                 granted_scopes=row.granted_scopes,
+                service_id=row.service_id,
                 extra=row.extra,
             )
         if not isinstance(envelope, dict) or "access_token" not in envelope:
@@ -215,6 +327,7 @@ class CredentialsView:
             shop_cipher=envelope.get("shop_cipher"),
             expires_at=row.expires_at,
             granted_scopes=row.granted_scopes,
+            service_id=row.service_id,
             extra=row.extra,
         )
 
@@ -233,6 +346,7 @@ def upsert_credentials(
     account_label: str | None = None,
     expires_at: datetime | None = None,
     granted_scopes: list | None = None,
+    service_id: str | None = None,
     extra: dict | None = None,
 ) -> Credentials:
     """Insert or update a Credentials row keyed by (provider, external_account_id).
@@ -262,6 +376,7 @@ def upsert_credentials(
         "account_label": account_label,
         "expires_at": expires_at,
         "granted_scopes": granted_scopes,
+        "service_id": service_id,
         "extra": extra,
         "updated_at": datetime.now(UTC),
     }
@@ -273,6 +388,10 @@ def upsert_credentials(
             "account_label": values["account_label"],
             "expires_at": values["expires_at"],
             "granted_scopes": values["granted_scopes"],
+            "service_id": func.coalesce(
+                insert_stmt.excluded.service_id,
+                Credentials.service_id,
+            ),
             "extra": values["extra"],
             "updated_at": values["updated_at"],
         },
@@ -396,6 +515,7 @@ def refresh_if_needed(
         account_label=row.account_label,
         expires_at=expires_at,
         granted_scopes=row.granted_scopes,
+        service_id=row.service_id,
         extra=row.extra,
     )
     session.commit()
