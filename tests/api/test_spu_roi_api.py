@@ -1240,7 +1240,7 @@ def test_spu_roi_totals_cross_spu_dedup_and_gmv_split(
     assert only_x_body["totals"]["row_count"] == 1
     assert only_x_body["totals"]["order_count"] == 1
     assert only_x_body["totals"]["cancelled_order_count"] == 1
-    assert only_x_body["totals"]["gmv"] == "15.0000"
+    assert only_x_body["totals"]["gmv"] == cny4_from_usd("15")
 
     options = api_client.get(
         "/v2/commerce/channel-product-options",
