@@ -48,6 +48,7 @@ from tts_erp_v2.api.v2 import (
     analytics,
     auth,
     commerce,
+    focused_spus,
     fx,
     intercept,
     linkage,
@@ -84,6 +85,7 @@ def _build_routes(app: FastAPI) -> None:
     app.include_router(commerce.router)
     app.include_router(linkage.router)
     app.include_router(reporting.router)
+    app.include_router(focused_spus.router)
     app.include_router(
         fx.router
     )  # cached exchange rates + local conversion (readonly; never dials upstream)

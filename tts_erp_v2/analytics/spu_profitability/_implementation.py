@@ -25,6 +25,7 @@ from tts_erp_v2.analytics.spu_profitability._formula_v10 import (
     calculate,
     calculate_order_metrics,
 )
+from tts_erp_v2.analytics.spu_profitability._selection import resolve_selected_spus
 from tts_erp_v2.analytics.spu_profitability._types import (
     FormulaStatus,
     FxBasis,
@@ -35,6 +36,7 @@ from tts_erp_v2.analytics.spu_profitability._types import (
     ShopFeeRateEntry,
     ShopFeeRateEstimate,
     SpuProfitability,
+    SpuSelection,
 )
 from tts_erp_v2.db.constants import (
     PAID_SALES_ORDER_STATUSES,
@@ -103,6 +105,7 @@ _SQL_ROI_AD = text(
         LEFT JOIN commerce.shops ca ON ca.platform = 'tiktok' AND ca.shop_id = d.seller_id
         LEFT JOIN commerce.products_spu cp ON cp.shop_pk = ca.id AND cp.spu_id = d.product_id
         WHERE d.endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'
+          AND cp.id = ANY(CAST(:selected_pks AS bigint[]))
           AND (CAST(:ws AS timestamptz) IS NULL
                OR d.day >= CAST(:ws AS timestamptz)::date)
           AND (CAST(:we AS timestamptz) IS NULL
@@ -116,18 +119,24 @@ _SQL_ROI_AD = text(
 # 主表 SQL ── 销售域（v7 CTE：已/未结算分层 + line_net 分摊 + per-SPU 桶）
 _SQL_ROI_SALES = text(
     """
-    WITH order_settlement AS (
+    WITH selected_orders AS (
+        SELECT DISTINCT order_pk
+        FROM commerce.sales_order_lines
+        WHERE spu_pk = ANY(CAST(:selected_pks AS bigint[]))
+    ),
+    order_settlement AS (
         SELECT st.order_pk, SUM(sc.amount) AS settlement_vnd
-        FROM finance.settlement_transactions st
+        FROM selected_orders selected
+        JOIN finance.settlement_transactions st ON st.order_pk = selected.order_pk
         JOIN finance.settlement_components sc
           ON sc.transaction_id = st.id AND sc.component_code = 'SETTLEMENT'
-        WHERE st.order_pk IS NOT NULL
         GROUP BY st.order_pk
     ),
     order_gmv AS (
-        SELECT order_pk, SUM(quantity * unit_price) AS order_gmv_vnd
-        FROM commerce.sales_order_lines
-        GROUP BY order_pk
+        SELECT sl.order_pk, SUM(sl.quantity * sl.unit_price) AS order_gmv_vnd
+        FROM selected_orders selected
+        JOIN commerce.sales_order_lines sl ON sl.order_pk = selected.order_pk
+        GROUP BY sl.order_pk
     ),
     lines AS (
         SELECT sl.spu_pk,
@@ -142,7 +151,7 @@ _SQL_ROI_SALES = text(
         JOIN commerce.sales_orders so ON so.id = sl.order_pk
         JOIN order_gmv og ON og.order_pk = sl.order_pk
         LEFT JOIN order_settlement os ON os.order_pk = sl.order_pk
-        WHERE sl.spu_pk IS NOT NULL
+        WHERE sl.spu_pk = ANY(CAST(:selected_pks AS bigint[]))
           AND so.status = ANY(CAST(:paid_statuses AS text[]))
           /* 窗口裁剪：下单时间 order_time 优先（COALESCE(order_time, paid_at)）UTC 日 */
           AND (CAST(:ws AS timestamptz) IS NULL
@@ -186,7 +195,7 @@ _SQL_ROI_FULL_LOSS = text(
         JOIN commerce.sales_orders so ON so.id = c.order_pk
         WHERE c.case_type IN ('RETURN_AND_REFUND', 'REFUND_ONLY')
           AND c.status = :st_return
-          AND sl.spu_pk IS NOT NULL
+          AND sl.spu_pk = ANY(CAST(:selected_pks AS bigint[]))
           AND so.status = ANY(CAST(:paid_statuses AS text[]))
           AND (CAST(:ws AS timestamptz) IS NULL
                OR coalesce(so.order_time, so.paid_at) >= CAST(:ws AS timestamptz))
@@ -198,7 +207,7 @@ _SQL_ROI_FULL_LOSS = text(
                sl.quantity AS cancel_qty
         FROM commerce.sales_order_lines sl
         JOIN commerce.sales_orders so ON so.id = sl.order_pk
-        WHERE sl.spu_pk IS NOT NULL
+        WHERE sl.spu_pk = ANY(CAST(:selected_pks AS bigint[]))
           AND so.status = 'CANCELLED'
           AND EXISTS (SELECT 1 FROM fulfillment.shipments sh
                       JOIN fulfillment.tracking_events te
@@ -248,7 +257,7 @@ _SQL_ROI_ROW_STATUS = text(
                                AND c2.case_type IN ('REFUND_ONLY', 'RETURN_AND_REFUND'))) AS refund_order_count
     FROM commerce.sales_order_lines sl
     JOIN commerce.sales_orders so ON so.id = sl.order_pk
-    WHERE sl.spu_pk IS NOT NULL
+    WHERE sl.spu_pk = ANY(CAST(:selected_pks AS bigint[]))
       AND (so.status = ANY(CAST(:paid_statuses AS text[]))
            OR so.status = 'CANCELLED')
       AND (CAST(:ws AS timestamptz) IS NULL
@@ -291,7 +300,7 @@ _SQL_ROI_REFUNDS = text(
     JOIN commerce.sales_order_lines sl ON sl.id = cl.sales_order_line_id
     JOIN commerce.sales_orders so ON so.id = c.order_pk
     WHERE c.status IN (:st0, :st1)
-      AND sl.spu_pk IS NOT NULL
+      AND sl.spu_pk = ANY(CAST(:selected_pks AS bigint[]))
       AND (CAST(:ws AS timestamptz) IS NULL
            OR coalesce(so.order_time, so.paid_at) >= CAST(:ws AS timestamptz))
       AND (CAST(:we AS timestamptz) IS NULL
@@ -352,24 +361,6 @@ _SQL_ROI_ORDER_SCOPE = text(
            OR coalesce(so.order_time, so.paid_at) >= CAST(:ws AS timestamptz))
       AND (CAST(:we AS timestamptz) IS NULL
            OR coalesce(so.order_time, so.paid_at) <  CAST(:we AS timestamptz))
-    """
-)
-
-# 主表 SQL ── SPU 目录（不变）
-_SQL_ROI_CATALOG = text(
-    """
-    SELECT cp.id AS spu_pk, cp.shop_pk, cp.spu_id, cp.title, cp.status,
-           cp.main_image_url, s.shop_id, s.account_name AS shop_name
-    FROM commerce.products_spu cp
-    LEFT JOIN commerce.shops s ON s.id = cp.shop_pk
-    WHERE (CAST(:shop_pk AS bigint) IS NULL
-           OR cp.shop_pk = CAST(:shop_pk AS bigint))
-      AND (CAST(:q AS text) IS NULL OR cp.spu_id ILIKE '%' || :q || '%')
-      AND (CAST(:spu_ids AS text[]) IS NULL
-           OR cp.spu_id = ANY(CAST(:spu_ids AS text[])))
-      AND (CAST(:active_only AS boolean) IS NOT TRUE
-           OR cp.status ILIKE 'activate')
-    ORDER BY cp.id
     """
 )
 
@@ -871,7 +862,7 @@ def _query_spu_roi(
     *,
     q: str | None,
     shop_pk: int | None,
-    spu_ids: tuple[str, ...] | None,
+    selection: SpuSelection,
     active_only: bool,
     include_without_activity: bool,
     sort_field: str,
@@ -902,18 +893,12 @@ def _query_spu_roi(
     # bounded scope.  Once a shop is present (the production page contract), q
     # is presentation-only and must not alter the profitability overview.
     catalog_q = q if shop_pk is None else None
-    cats = (
-        sess.execute(
-            _SQL_ROI_CATALOG,
-            {
-                "shop_pk": shop_pk,
-                "q": catalog_q,
-                "spu_ids": list(spu_ids) if spu_ids is not None else None,
-                "active_only": active_only,
-            },
-        )
-        .mappings()
-        .all()
+    cats = resolve_selected_spus(
+        sess,
+        selection=selection,
+        shop_pk=shop_pk,
+        catalog_search=catalog_q,
+        active_only=active_only,
     )
     if only_spu_pk is not None:
         cats = [cat for cat in cats if int(cat["spu_pk"]) == only_spu_pk]
@@ -933,13 +918,21 @@ def _query_spu_roi(
             fresh_before=fee_fresh_before,
         )
 
+    # Resolve the selected relation once, then push it into every expensive fact
+    # query. This keeps focused scopes bounded without duplicating formulas.
+    selected_pks = [
+        int(cat["spu_pk"]) for cat in cats
+    ]  # pi-lens-ignore: no-try-except
+    common_fact_params = {
+        "selected_pks": selected_pks,
+        "ws": ws_dt,
+        "we": we_dt,
+    }
+
     ad_rows = (
-        sess.execute(
-            _SQL_ROI_AD,
-            {"ws": ws_dt, "we": we_dt},
-        )
-        .mappings()
-        .all()
+        sess.execute(_SQL_ROI_AD, common_fact_params).mappings().all()
+        if selected_pks
+        else []
     )
     ad_map = {
         int(r["spu_pk"]): r for r in ad_rows if r["spu_pk"] is not None
@@ -948,10 +941,12 @@ def _query_spu_roi(
     sales_rows = (
         sess.execute(
             _SQL_ROI_SALES,
-            {"paid_statuses": paid_statuses, "ws": ws_dt, "we": we_dt},
+            {**common_fact_params, "paid_statuses": paid_statuses},
         )
         .mappings()
         .all()
+        if selected_pks
+        else []
     )
     sales_map = {
         int(r["spu_pk"]): r for r in sales_rows if r["spu_pk"] is not None
@@ -961,15 +956,16 @@ def _query_spu_roi(
         sess.execute(
             _SQL_ROI_FULL_LOSS,
             {
+                **common_fact_params,
                 "paid_statuses": paid_statuses,
                 "ac": _TRACK_ACTION_CODE_OVERSEAS,
                 "st_return": _CASE_COMPLETED_STATUSES[1],
-                "ws": ws_dt,
-                "we": we_dt,
             },
         )
         .mappings()
         .all()
+        if selected_pks
+        else []
     )
     fl_map = {
         int(r["spu_pk"]): r for r in fl_rows if r["spu_pk"] is not None
@@ -979,16 +975,17 @@ def _query_spu_roi(
         sess.execute(
             _SQL_ROI_ROW_STATUS,
             {
+                **common_fact_params,
                 "paid_statuses": paid_statuses,
                 "st0": st0,
                 "st1": st1,
                 "ac": _TRACK_ACTION_CODE_OVERSEAS,
-                "ws": ws_dt,
-                "we": we_dt,
             },
         )
         .mappings()
         .all()
+        if selected_pks
+        else []
     )
     rs_map = {
         int(r["spu_pk"]): r for r in rs_rows if r["spu_pk"] is not None
@@ -998,23 +995,23 @@ def _query_spu_roi(
         sess.execute(
             _SQL_ROI_REFUNDS,
             {
+                **common_fact_params,
                 "paid_statuses": paid_statuses,
                 "st0": st0,
                 "st1": st1,
-                "ws": ws_dt,
-                "we": we_dt,
             },
         )
         .mappings()
         .all()
+        if selected_pks
+        else []
     )
     refund_map = {
         int(r["spu_pk"]): r for r in refund_rows if r["spu_pk"] is not None
     }  # pi-lens-ignore: no-try-except
 
     # 成本链批量解析（D1）
-    spu_pks_all = [int(c["spu_pk"]) for c in cats]  # pi-lens-ignore: no-try-except
-    cost_map = _resolve_costs_batch(sess, spu_pks_all)
+    cost_map = _resolve_costs_batch(sess, selected_pks)
 
     plain: list[dict] = []
     total_spend = Decimal(0)
@@ -1241,14 +1238,14 @@ def _query_spu_roi(
             or needle in str(row["title"] or "").casefold()
         ]
 
-    # 排序（None 沉底；按 spend 决胜可复现）
-    def _key(r: dict) -> tuple[bool, Decimal, Decimal]:
+    # 排序（None 沉底；spend 后以 spu_pk ASC 最终决胜，分页稳定）。
+    def _key(r: dict) -> tuple[bool, Decimal, Decimal, int]:
         v = r[sort_field]
         if v is None:
-            return (True, Decimal(0), Decimal(0))
+            return (True, Decimal(0), Decimal(0), int(r["spu_pk"]))
         primary = v if ascending else -v
         tie = -r["spend"] if ascending else r["spend"]
-        return (False, primary, tie)
+        return (False, primary, tie, int(r["spu_pk"]))
 
     plain.sort(key=_key)
 

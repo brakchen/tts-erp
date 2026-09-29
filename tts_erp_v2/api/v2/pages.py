@@ -36,7 +36,9 @@ that retired ``/static/css/console.css``), and no webfonts (no CDN).
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
@@ -244,6 +246,7 @@ def _sidebar_html(current_page: str) -> str:
     ("dashboard", "台", "控制台", "__group__"),
     ("manual-costs", "采", "采购工作台", "运营"),
     ("spu-roi", "益", "SPU ROI", "运营"),
+    ("focused-spus", "关", "重点关注", "运营"),
     ("shops", "店", "店铺注册", "店铺"),
     ("enum-map", "映", "枚举映射", "数据"),
     ("intercept-configs", "配", "拦截配置", "拦截"),
@@ -402,7 +405,12 @@ def _page(html: str, *, current_page: str = "") -> HTMLResponse:
   html = (
     html.replace("__JSV_CONSOLE__", _js_version("console.js"))
     .replace("__CSSV_SPU_ROI__", _css_version("spu-roi.css"))
+    .replace("__CSSV_FOCUSED_SPUS__", _css_version("focused-spus.css"))
     .replace("__JSV_SPU_ROI__", _js_version("spu-roi.js"))
+    .replace("__JSV_FOCUSED_SPUS__", _js_version("focused-spus.js"))
+    .replace(
+      "__JSV_SPU_PROFITABILITY__", _js_version("spu-profitability-page.js")
+    )
     .replace("__JSV_SHOPS__", _js_version("shops.js"))
     .replace("__JSV_DASHBOARD__", _js_version("dashboard.js"))
     .replace("__JSV_INTERCEPT_CONFIGS__", _js_version("intercept-configs.js"))
@@ -646,6 +654,14 @@ _SHOPS_PAGE_HTML = """<!doctype html>
 """
 
 
+@dataclass(frozen=True, slots=True)
+class _SpuProfitabilityPageConfig:
+  slug: Literal["spu-roi", "focused-spus"]
+  title: str
+  profile_id: Literal["standard-roi", "focused-spus"]
+  entrypoint_js: Literal["spu-roi.js", "focused-spus.js"]
+
+
 @router.get("/spu-roi", response_class=HTMLResponse)
 def spu_roi_page() -> HTMLResponse:
   """SPU 实际 ROI 看板(账页式,§7 of tech-doc/analytics/spu-real-roi-dashboard.md)。
@@ -655,7 +671,27 @@ def spu_roi_page() -> HTMLResponse:
   布局 = Bootstrap 5.3.8 栅格/工具类 + 手机端适配(见 shell 头注释),行为在
   static/js/spu-roi.js。
   """
-  return _page(_SPU_ROI_PAGE_HTML, current_page="spu-roi")
+  return _render_spu_profitability_page(
+    _SpuProfitabilityPageConfig(
+      slug="spu-roi",
+      title="SPU 实际 ROI",
+      profile_id="standard-roi",
+      entrypoint_js="spu-roi.js",
+    )
+  )
+
+
+@router.get("/focused-spus", response_class=HTMLResponse)
+def focused_spus_page() -> HTMLResponse:
+  """Persistent shop-scoped focused SPUs rendered by the shared page kernel."""
+  return _render_spu_profitability_page(
+    _SpuProfitabilityPageConfig(
+      slug="focused-spus",
+      title="重点关注 SPU",
+      profile_id="focused-spus",
+      entrypoint_js="focused-spus.js",
+    )
+  )
 
 
 @router.get("/manual-costs", response_class=HTMLResponse)
@@ -1349,12 +1385,13 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SPU 实际 ROI · tts-erp</title>
+  <title>__PAGE_TITLE__ · tts-erp</title>
   <!-- Relative path: resolves to /static/... locally and /tts/static/... behind NGINX. Do not make absolute. -->
   <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
   <link rel="stylesheet" href="../../static/vendor/tom-select.bootstrap5.min.css">
   <link rel="stylesheet" href="../../static/css/spu-roi.css?v=__CSSV_SPU_ROI__">
-  <style>
+  __PROFILE_CSS__
+  <style data-page-profile="__PROFILE_ID__">
     :root {
       --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', Consolas, monospace;
       --sans: 'Inter', 'Noto Sans SC', 'Source Han Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
@@ -1381,7 +1418,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
         </div>
         <div class="col">
           <div class="op-eyebrow mb-1">TikTok Shop · Analytics</div>
-          <h1 class="op-title mb-0">SPU 实际 ROI</h1>
+          <h1 class="op-title mb-0">__PAGE_TITLE__</h1>
         </div>
         <div class="col-12 col-lg-auto">
           <div class="op-header-meta d-flex flex-column flex-sm-row align-items-stretch align-items-sm-center justify-content-sm-end gap-2 gap-sm-3">
@@ -1397,7 +1434,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     </div>
   </header>
 
-  <main class="container-fluid px-0 op-main">
+  <main class="container-fluid px-0 op-main" data-page-profile="__PROFILE_ID__">
     <!-- 结余带:Bootstrap 外层断点 + 每组 row-cols-2；同类量/额或量/率始终成对 -->
     <section class="op-counter px-3 px-lg-4 py-3 py-lg-4" id="summaries" aria-live="polite">
       <div class="row g-2 g-xl-3 row-cols-1 row-cols-md-2 row-cols-xl-3 row-cols-xxl-4">
@@ -1470,7 +1507,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
 
     <!-- 工具栏:原生 select multiple 由 Tom Select Bootstrap 5 主题增强；不自研多选组件。 -->
     <section class="op-toolbar px-3 px-lg-4 py-3" id="toolbar">
-      <div class="op-spu-filter border p-2 p-lg-3 mb-3">
+      <div class="op-spu-filter border p-2 p-lg-3 mb-3" id="selection-slot">
         <div class="op-spu-filter__header d-flex flex-wrap align-items-center justify-content-between gap-1 mb-2">
           <label class="form-label op-fld-label mb-0" for="filter-spu-ids">SPU 筛选</label>
           <span class="op-spu-selection-count" id="spu-selection-count">已选择 0 个</span>
@@ -1535,16 +1572,16 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       <table class="table table-hover align-middle mb-0 op-table" aria-live="polite">
         <thead>
           <tr>
-            <th scope="col" class="op-th op-th-left">商品</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="spend" data-tip="广告消耗（源数据 USD，服务端按汇率快照换算为 CNY；随选中日期窗口裁剪；作为减项计入净利润）">广告消耗</th>
-            <th scope="col" class="op-th" data-tip="广告系统实际ROI = 广告归因GMV ÷ 广告实际消耗；无广告消耗时显示 —">广告系统实际ROI</th>
-            <th scope="col" class="op-th" data-tip="广告系统保本ROI = 广告归因GMV ÷ 最大可承受广告费；当前以 ≈ 标记已知成本下限估算，分母≤0或无归因GMV时显示 —">广告系统保本ROI</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="effective_sales" data-tip="有效销售 = 有效销售订单 GMV − 退款金额（CNY）；与大盘 totals.effective_sales 同口径">有效销售</th>
-            <th scope="col" class="op-th" data-tip="总单量 = 有效销售订单 + 国内取消订单 + 海外取消订单；在当前店铺和日期范围内按订单去重">总单量</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="effective_order_count" data-tip="有效单量 = 有效销售订单数 − 退款订单数；与大盘 totals.effective_order_count 同口径">有效单量</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="cancel_rate" data-tip="取消率 = 国内取消订单数 ÷ 全部订单；全部订单 = 有效销售订单 + 国内取消 + 海外取消，海外取消只进入全损分子">取消率%</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="full_loss_rate" data-tip="全损率 = (退款订单数 + 海外取消订单数) ÷ 全部订单；订单维度按当前 SPU 去重，与大盘同口径">全损率%</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="net_profit" data-tip="净利润 v7(M18):已结算 SETTLEMENT + 未结算 ×(1−r̂)×(1−退款率) − 货本含全损取消 − 广告;r̂=店铺实测(近180天已结算单 Σ|FEE|/Σ行GMV,每24h重算,有一单已结算即产出)或基线30.8%;负值红字。Red/green 仅按净利判(C3 拍板,删 ROI&lt;1 硬亏档)">净利润</th>
+            <th scope="col" class="op-th op-th-left" data-column-id="product">商品</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="spend" data-column-id="spend" data-tip="广告消耗（源数据 USD，服务端按汇率快照换算为 CNY；随选中日期窗口裁剪；作为减项计入净利润）">广告消耗</th>
+            <th scope="col" class="op-th" data-column-id="ad-actual-roi" data-tip="广告系统实际ROI = 广告归因GMV ÷ 广告实际消耗；无广告消耗时显示 —">广告系统实际ROI</th>
+            <th scope="col" class="op-th" data-column-id="ad-breakeven-roi" data-tip="广告系统保本ROI = 广告归因GMV ÷ 最大可承受广告费；当前以 ≈ 标记已知成本下限估算，分母≤0或无归因GMV时显示 —">广告系统保本ROI</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="effective_sales" data-column-id="effective-sales" data-tip="有效销售 = 有效销售订单 GMV − 退款金额（CNY）；与大盘 totals.effective_sales 同口径">有效销售</th>
+            <th scope="col" class="op-th" data-column-id="total-orders" data-tip="总单量 = 有效销售订单 + 国内取消订单 + 海外取消订单；在当前店铺和日期范围内按订单去重">总单量</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="effective_order_count" data-column-id="effective-orders" data-tip="有效单量 = 有效销售订单数 − 退款订单数；与大盘 totals.effective_order_count 同口径">有效单量</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="cancel_rate" data-column-id="cancel-rate" data-tip="取消率 = 国内取消订单数 ÷ 全部订单；全部订单 = 有效销售订单 + 国内取消 + 海外取消，海外取消只进入全损分子">取消率%</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="full_loss_rate" data-column-id="full-loss-rate" data-tip="全损率 = (退款订单数 + 海外取消订单数) ÷ 全部订单；订单维度按当前 SPU 去重，与大盘同口径">全损率%</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="net_profit" data-column-id="net-profit" data-tip="净利润 v7(M18):已结算 SETTLEMENT + 未结算 ×(1−r̂)×(1−退款率) − 货本含全损取消 − 广告;r̂=店铺实测(近180天已结算单 Σ|FEE|/Σ行GMV,每24h重算,有一单已结算即产出)或基线30.8%;负值红字。Red/green 仅按净利判(C3 拍板,删 ROI&lt;1 硬亏档)">净利润</th>
           </tr>
         </thead>
         <tbody class="op-rows" id="rows">
@@ -1611,10 +1648,35 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
   </div>
   <div id="ops-tip" role="tooltip" hidden></div>
   <script src="../../static/vendor/tom-select.complete.min.js" defer></script>
-  <script src="../../static/js/spu-roi.js?v=__JSV_SPU_ROI__" defer></script>
+  __PROFILE_SCRIPT__
+  <script src="../../static/js/spu-profitability-page.js?v=__JSV_SPU_PROFITABILITY__" defer></script>
 </body>
 </html>
 """
+
+
+def _render_spu_profitability_page(
+  config: _SpuProfitabilityPageConfig,
+) -> HTMLResponse:
+  profile_css = (
+    '<link rel="stylesheet" href="../../static/css/focused-spus.css?'
+    'v=__CSSV_FOCUSED_SPUS__">'
+    if config.profile_id == "focused-spus"
+    else ""
+  )
+  profile_script = (
+    '<script src="../../static/js/focused-spus.js?'
+    'v=__JSV_FOCUSED_SPUS__" defer></script>'
+    if config.entrypoint_js == "focused-spus.js"
+    else '<script src="../../static/js/spu-roi.js?v=__JSV_SPU_ROI__" defer></script>'
+  )
+  html = (
+    _SPU_ROI_PAGE_HTML.replace("__PAGE_TITLE__", config.title)
+    .replace("__PROFILE_ID__", config.profile_id)
+    .replace("__PROFILE_CSS__", profile_css)
+    .replace("__PROFILE_SCRIPT__", profile_script)
+  )
+  return _page(html, current_page=config.slug)
 
 
 @router.get("/dashboard", response_class=HTMLResponse)

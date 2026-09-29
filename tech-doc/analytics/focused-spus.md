@@ -1,6 +1,6 @@
 # 重点关注 SPU 页面技术方案
 
-> 状态：Draft v4，等待产品确认后开发
+> 状态：Implemented，产品已确认并完成实现
 > 日期：2026-09-29
 > v4 修订：增加 PageProfile、受控 view projection 与演进规则，使两页可差异化而不分叉公共生命周期
 > 关联现有页面：`GET /v2/pages/spu-roi`
@@ -602,9 +602,8 @@ X-Requested-With: tts-erp
 | `tts_erp_v2/static/css/spu-roi.css` | 保留公共盈利账页视觉 |
 | `tts_erp_v2/static/css/focused-spus.css` | 仅关注编辑器、关注计数和空状态 |
 | `tests/reporting/test_focused_spus.py` | 通过关注集合 module interface 测分页、搜索、原子 patch、软移除和恢复 |
-| `tests/analytics/test_spu_profitability_selection.py` | 通过盈利 module interface 验证 Focused 与 Exact 等价及 >100 范围 |
-| `tests/api/test_focused_spus.py` | wire、权限、camelCase、错误映射和 CSRF |
-| `tests/api/test_spu_roi_api.py` | 新页面 shell 与现有端点兼容回归 |
+| `tests/api/test_spu_roi_api.py` | 通过盈利 module interface 验证 Focused/Exact 等价与空集合；同时覆盖新页面 shell 和现有端点兼容回归 |
+| `tests/api/test_focused_spus.py` | wire、权限、camelCase、错误映射、CSRF 与 profile/kernel 契约 |
 | 浏览器 DOM harness（路径按现有测试基础设施确定） | 通过 mount interface 测竞态、错误、空态、分页与草稿保留 |
 | `tech-doc/external-api.md` | 页面和 API 契约登记 |
 
@@ -669,7 +668,6 @@ X-Requested-With: tts-erp
 flock -n /tmp/tts-erp-test.lock \
   bash scripts/test.sh fast \
   tests/reporting/test_focused_spus.py \
-  tests/analytics/test_spu_profitability_selection.py \
   tests/api/test_focused_spus.py \
   tests/api/test_spu_roi_api.py
 

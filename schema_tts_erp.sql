@@ -40,6 +40,11 @@ CREATE SCHEMA after_sales;
 CREATE SCHEMA commerce;
 
 
+-- Name: config; Type: SCHEMA; Schema: -; Owner: -
+
+CREATE SCHEMA config;
+
+
 -- Name: finance; Type: SCHEMA; Schema: -; Owner: -
 
 CREATE SCHEMA finance;
@@ -161,7 +166,8 @@ CREATE TABLE IF NOT EXISTS commerce.shops (
     source_updated_at timestamp with time zone,
     synced_at timestamp with time zone DEFAULT now() CONSTRAINT channel_accounts_synced_at_not_null NOT NULL,
     updated_at timestamp with time zone DEFAULT now() CONSTRAINT channel_accounts_updated_at_not_null NOT NULL,
-    opened_date date
+    opened_date date,
+    service_id text
 );
 
 
@@ -278,6 +284,26 @@ ALTER TABLE commerce.sales_orders ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTI
 );
 
 
+-- Name: enum_map; Type: TABLE; Schema: config; Owner: -
+
+CREATE TABLE IF NOT EXISTS config.enum_map (
+    id integer NOT NULL,
+    enum_type character varying(64) NOT NULL,
+    enum_value character varying(128) NOT NULL,
+    label_zh character varying(256) NOT NULL,
+    sort_order integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+    AS integer
+
+
+
+
+
 -- Name: payouts; Type: TABLE; Schema: finance; Owner: -
 
 CREATE TABLE IF NOT EXISTS finance.payouts (
@@ -325,7 +351,7 @@ ALTER TABLE finance.settlement_components ALTER COLUMN id ADD GENERATED ALWAYS A
 
 CREATE TABLE IF NOT EXISTS finance.settlement_statements (
     id bigint NOT NULL,
-    payout_id bigint NOT NULL,
+    payout_id bigint,
     external_statement_id text NOT NULL,
     statement_time timestamp with time zone,
     period_start date,
@@ -470,28 +496,17 @@ CREATE TABLE IF NOT EXISTS integration.credentials (
     ciphertext bytea NOT NULL,
     expires_at timestamp with time zone,
     granted_scopes jsonb,
-    service_id text,
     company_secret_ciphertext bytea,
     extra jsonb,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    service_id text
 );
 
 
 
 ALTER TABLE integration.credentials ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME integration.credentials_id_seq
-);
-
-
--- Name: tiktok_app_credentials; Type: TABLE; Schema: integration; Owner: -
-
-CREATE TABLE IF NOT EXISTS integration.tiktok_app_credentials (
-    service_id text NOT NULL,
-    app_key text NOT NULL,
-    app_secret_ciphertext bytea NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -599,6 +614,17 @@ CREATE TABLE IF NOT EXISTS integration.sync_jobs (
 
 ALTER TABLE integration.sync_jobs ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME integration.sync_jobs_id_seq
+);
+
+
+-- Name: tiktok_app_credentials; Type: TABLE; Schema: integration; Owner: -
+
+CREATE TABLE IF NOT EXISTS integration.tiktok_app_credentials (
+    service_id text NOT NULL,
+    app_key text NOT NULL,
+    app_secret_ciphertext bytea NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -890,6 +916,247 @@ ALTER TABLE plugin.ad_today ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 );
 
 
+-- Name: after_sale_items; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.after_sale_items (
+    id bigint NOT NULL,
+    shop_id text NOT NULL,
+    cancel_id text NOT NULL,
+    line_item_id text NOT NULL,
+    order_line_item_id text,
+    sku_id text,
+    product_id text,
+    quantity numeric(20,4),
+    refund_amount numeric(20,4),
+    currency text,
+    raw_payload jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.after_sale_items ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.after_sale_items_id_seq
+);
+
+
+-- Name: after_sales; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.after_sales (
+    id bigint NOT NULL,
+    shop_id text NOT NULL,
+    cancel_id text NOT NULL,
+    cancel_type text NOT NULL,
+    cancel_status text NOT NULL,
+    main_order_id text,
+    reason text,
+    request_time timestamp with time zone,
+    complete_time timestamp with time zone,
+    raw_payload jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.after_sales ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.after_sales_id_seq
+);
+
+
+-- Name: campaign_opt_logs; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.campaign_opt_logs (
+    id bigint NOT NULL,
+    seller_id text NOT NULL,
+    advertiser_id text NOT NULL,
+    log_id text NOT NULL,
+    campaign_id text NOT NULL,
+    "user" text,
+    opt_time timestamp with time zone NOT NULL,
+    object_type text,
+    object_raw_type text,
+    activity_details jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.campaign_opt_logs ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.campaign_opt_logs_id_seq
+);
+
+
+-- Name: intercept_configs; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.intercept_configs (
+    id bigint NOT NULL,
+    domain text NOT NULL,
+    endpoint text NOT NULL,
+    capture_headers boolean DEFAULT true,
+    capture_body boolean DEFAULT true,
+    description text,
+    tags jsonb DEFAULT '[]'::jsonb,
+    enabled boolean DEFAULT true,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    mode text DEFAULT 'whitelist'::text NOT NULL,
+    CONSTRAINT intercept_configs_mode_check CHECK ((mode = ANY (ARRAY['whitelist'::text, 'blacklist'::text])))
+);
+
+
+
+ALTER TABLE plugin.intercept_configs ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.intercept_configs_id_seq
+);
+
+
+-- Name: intercept_sessions; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.intercept_sessions (
+    id bigint NOT NULL,
+    session_id text NOT NULL,
+    tab_id integer,
+    tab_url text,
+    user_agent text,
+    total_requests integer DEFAULT 0,
+    whitelisted_requests integer DEFAULT 0,
+    metadata_only_requests integer DEFAULT 0,
+    started_at timestamp with time zone NOT NULL,
+    last_request_at timestamp with time zone,
+    ended_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.intercept_sessions ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.intercept_sessions_id_seq
+);
+
+
+-- Name: intercept_sync_cursors; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.intercept_sync_cursors (
+    id bigint NOT NULL,
+    cursor_key text NOT NULL,
+    last_synced_id bigint,
+    last_synced_at timestamp with time zone,
+    total_synced integer DEFAULT 0,
+    last_error text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.intercept_sync_cursors ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.intercept_sync_cursors_id_seq
+);
+
+
+-- Name: intercepted_requests; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.intercepted_requests (
+    id bigint NOT NULL,
+    request_id text NOT NULL,
+    trace_id text,
+    session_id text NOT NULL,
+    method text NOT NULL,
+    url text NOT NULL,
+    url_hash text NOT NULL,
+    endpoint_path text NOT NULL,
+    endpoint_host text NOT NULL,
+    is_whitelisted boolean NOT NULL,
+    matched_config_id bigint,
+    request_headers jsonb,
+    request_body jsonb,
+    response_status integer,
+    response_status_text text,
+    response_headers jsonb,
+    response_body jsonb,
+    duration_ms integer,
+    error_type text,
+    error_message text,
+    seller_id text,
+    advertiser_id text,
+    business_context jsonb,
+    pagination jsonb,
+    captured_at timestamp with time zone NOT NULL,
+    received_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.intercepted_requests ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.intercepted_requests_id_seq
+);
+
+
+-- Name: order_details; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.order_details (
+    id bigint NOT NULL,
+    shop_id text NOT NULL,
+    order_id text NOT NULL,
+    create_time timestamp with time zone,
+    payment_time timestamp with time zone,
+    pay_method text,
+    sale_region text,
+    fulfillment_type integer,
+    latest_rts_time timestamp with time zone,
+    latest_tts_time timestamp with time zone,
+    close_sla_time timestamp with time zone,
+    sub_total numeric(20,4),
+    grand_total numeric(20,4),
+    shipping_fee numeric(20,4),
+    platform_discount numeric(20,4),
+    seller_discount numeric(20,4),
+    origin_sale_price numeric(20,4),
+    shipping_origin_fee numeric(20,4),
+    shipping_fee_discount_seller numeric(20,4),
+    shipping_fee_discount_platform numeric(20,4),
+    currency text,
+    promotion_infos jsonb,
+    buyer_nickname text,
+    buyer_address jsonb,
+    reverse_status integer,
+    reverse_type integer,
+    reverse_reason text,
+    reverse_order_id text,
+    cancelled_time timestamp with time zone,
+    tracking_number text,
+    warehouse_id text,
+    warehouse_name text,
+    warehouse_region text,
+    buyer_region text,
+    logistics_service_name text,
+    logistics_service_level text,
+    carrier_name text,
+    carrier_id text,
+    weight_value text,
+    weight_unit integer,
+    dimension_length text,
+    dimension_width text,
+    dimension_height text,
+    dimension_unit integer,
+    main_order_status integer,
+    main_sub_order_status integer,
+    sku_display_status integer,
+    raw_payload jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.order_details ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.order_details_id_seq
+);
+
+
 -- Name: order_lines; Type: TABLE; Schema: plugin; Owner: -
 
 CREATE TABLE IF NOT EXISTS plugin.order_lines (
@@ -915,6 +1182,28 @@ CREATE TABLE IF NOT EXISTS plugin.order_lines (
 
 ALTER TABLE plugin.order_lines ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME plugin.order_lines_id_seq
+);
+
+
+-- Name: order_timeline; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.order_timeline (
+    id bigint NOT NULL,
+    shop_id text NOT NULL,
+    order_id text NOT NULL,
+    event_index integer NOT NULL,
+    description text,
+    event_at timestamp with time zone,
+    detail text,
+    raw_payload jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE plugin.order_timeline ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME plugin.order_timeline_id_seq
 );
 
 
@@ -961,6 +1250,7 @@ CREATE TABLE IF NOT EXISTS plugin.plugin_logs (
     occurred_at timestamp with time zone NOT NULL,
     received_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    plugin_name text DEFAULT ''::text NOT NULL,
     CONSTRAINT plugin_logs_level_check CHECK ((level = ANY (ARRAY['info'::text, 'warn'::text, 'error'::text])))
 );
 
@@ -969,7 +1259,6 @@ CREATE TABLE IF NOT EXISTS plugin.plugin_logs (
 ALTER TABLE plugin.plugin_logs ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME plugin.plugin_logs_id_seq
 );
-
 
 
 -- Name: settlement_details; Type: TABLE; Schema: plugin; Owner: -
@@ -1070,12 +1359,12 @@ CREATE TABLE IF NOT EXISTS plugin.tracking_events (
     shop_id text NOT NULL,
     package_id text NOT NULL,
     event_key text NOT NULL,
-    action_code integer,
     event_at timestamp with time zone,
     description text,
     location text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    action_code integer
 );
 
 
@@ -1243,6 +1532,21 @@ CREATE TABLE IF NOT EXISTS public.alembic_version (
 );
 
 
+-- Name: focused_spus; Type: TABLE; Schema: reporting; Owner: -
+
+CREATE TABLE IF NOT EXISTS reporting.focused_spus (
+    shop_pk bigint NOT NULL,
+    spu_id text NOT NULL,
+    active boolean DEFAULT true NOT NULL,
+    added_by text,
+    removed_by text,
+    removed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_focused_spus_spu_id_length CHECK (((length(spu_id) >= 1) AND (length(spu_id) <= 128)))
+);
+
+
 -- Name: product_cost_snapshots; Type: TABLE; Schema: reporting; Owner: -
 
 CREATE TABLE IF NOT EXISTS reporting.product_cost_snapshots (
@@ -1321,6 +1625,35 @@ ALTER TABLE reporting.shipment_tracking_summary ALTER COLUMN id ADD GENERATED AL
 );
 
 
+-- Name: shop_fee_rate_estimates; Type: TABLE; Schema: reporting; Owner: -
+
+CREATE TABLE IF NOT EXISTS reporting.shop_fee_rate_estimates (
+    id bigint NOT NULL,
+    shop_pk bigint NOT NULL,
+    calculated_on date NOT NULL,
+    lookback_days integer NOT NULL,
+    fee_rate numeric(8,6) NOT NULL,
+    kept_order_count integer CONSTRAINT shop_fee_rate_estimates_eligible_order_count_not_null NOT NULL,
+    kept_line_gmv numeric(20,4) CONSTRAINT shop_fee_rate_estimates_line_gmv_covered_not_null NOT NULL,
+    window_line_gmv numeric(20,4) CONSTRAINT shop_fee_rate_estimates_line_gmv_total_not_null NOT NULL,
+    kept_share numeric(8,6) CONSTRAINT shop_fee_rate_estimates_coverage_ratio_not_null NOT NULL,
+    total_fee numeric(20,4) NOT NULL,
+    currency text NOT NULL,
+    calculation_version text DEFAULT 'fee-v2'::text NOT NULL,
+    calculated_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_shop_fee_rate_est_kept_share CHECK (((kept_share >= (0)::numeric) AND (kept_share <= (1)::numeric))),
+    CONSTRAINT ck_shop_fee_rate_est_rate CHECK (((fee_rate >= (0)::numeric) AND (fee_rate <= (1)::numeric)))
+);
+
+
+
+ALTER TABLE reporting.shop_fee_rate_estimates ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME reporting.shop_fee_rate_estimates_id_seq
+);
+
+
 -- Name: api_keys; Type: TABLE; Schema: security; Owner: -
 
 CREATE TABLE IF NOT EXISTS security.api_keys (
@@ -1341,6 +1674,10 @@ CREATE TABLE IF NOT EXISTS security.api_keys (
 ALTER TABLE security.api_keys ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME security.api_keys_id_seq
 );
+
+
+-- Name: enum_map id; Type: DEFAULT; Schema: config; Owner: -
+
 
 
 -- Name: case_lines case_lines_pkey; Type: CONSTRAINT; Schema: after_sales; Owner: -
@@ -1427,6 +1764,18 @@ ALTER TABLE ONLY commerce.sales_orders
     ADD CONSTRAINT uq_sales_orders_account_ext UNIQUE (shop_pk, order_id);
 
 
+-- Name: enum_map enum_map_pkey; Type: CONSTRAINT; Schema: config; Owner: -
+
+ALTER TABLE ONLY config.enum_map
+    ADD CONSTRAINT enum_map_pkey PRIMARY KEY (id);
+
+
+-- Name: enum_map uq_enum_map_type_value; Type: CONSTRAINT; Schema: config; Owner: -
+
+ALTER TABLE ONLY config.enum_map
+    ADD CONSTRAINT uq_enum_map_type_value UNIQUE (enum_type, enum_value);
+
+
 -- Name: payouts payouts_pkey; Type: CONSTRAINT; Schema: finance; Owner: -
 
 ALTER TABLE ONLY finance.payouts
@@ -1461,12 +1810,6 @@ ALTER TABLE ONLY finance.payouts
 
 ALTER TABLE ONLY finance.settlement_components
     ADD CONSTRAINT uq_settlement_components_txn_code UNIQUE (transaction_id, component_code);
-
-
--- Name: settlement_statements uq_settlement_statements_payout_ext; Type: CONSTRAINT; Schema: finance; Owner: -
-
-ALTER TABLE ONLY finance.settlement_statements
-    ADD CONSTRAINT uq_settlement_statements_payout_ext UNIQUE (payout_id, external_statement_id);
 
 
 -- Name: settlement_transactions uq_settlement_txn_stmt_ext; Type: CONSTRAINT; Schema: finance; Owner: -
@@ -1535,12 +1878,6 @@ ALTER TABLE ONLY integration.credentials
     ADD CONSTRAINT credentials_pkey PRIMARY KEY (id);
 
 
--- Name: tiktok_app_credentials tiktok_app_credentials_pkey; Type: CONSTRAINT; Schema: integration; Owner: -
-
-ALTER TABLE ONLY integration.tiktok_app_credentials
-    ADD CONSTRAINT tiktok_app_credentials_pkey PRIMARY KEY (service_id);
-
-
 -- Name: oauth_states oauth_states_pkey; Type: CONSTRAINT; Schema: integration; Owner: -
 
 ALTER TABLE ONLY integration.oauth_states
@@ -1569,6 +1906,12 @@ ALTER TABLE ONLY integration.sync_issues
 
 ALTER TABLE ONLY integration.sync_jobs
     ADD CONSTRAINT sync_jobs_pkey PRIMARY KEY (id);
+
+
+-- Name: tiktok_app_credentials tiktok_app_credentials_pkey; Type: CONSTRAINT; Schema: integration; Owner: -
+
+ALTER TABLE ONLY integration.tiktok_app_credentials
+    ADD CONSTRAINT tiktok_app_credentials_pkey PRIMARY KEY (service_id);
 
 
 -- Name: credentials uq_credentials_provider_account; Type: CONSTRAINT; Schema: integration; Owner: -
@@ -1673,10 +2016,94 @@ ALTER TABLE ONLY plugin.ad_today
     ADD CONSTRAINT ad_today_pkey PRIMARY KEY (id);
 
 
+-- Name: after_sale_items after_sale_items_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.after_sale_items
+    ADD CONSTRAINT after_sale_items_pkey PRIMARY KEY (id);
+
+
+-- Name: after_sales after_sales_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.after_sales
+    ADD CONSTRAINT after_sales_pkey PRIMARY KEY (id);
+
+
+-- Name: campaign_opt_logs campaign_opt_logs_log_id_key; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.campaign_opt_logs
+    ADD CONSTRAINT campaign_opt_logs_log_id_key UNIQUE (log_id);
+
+
+-- Name: campaign_opt_logs campaign_opt_logs_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.campaign_opt_logs
+    ADD CONSTRAINT campaign_opt_logs_pkey PRIMARY KEY (id);
+
+
+-- Name: intercept_configs intercept_configs_domain_endpoint_unique; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.intercept_configs
+    ADD CONSTRAINT intercept_configs_domain_endpoint_unique UNIQUE (domain, endpoint);
+
+
+-- Name: intercept_configs intercept_configs_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.intercept_configs
+    ADD CONSTRAINT intercept_configs_pkey PRIMARY KEY (id);
+
+
+-- Name: intercept_sessions intercept_sessions_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.intercept_sessions
+    ADD CONSTRAINT intercept_sessions_pkey PRIMARY KEY (id);
+
+
+-- Name: intercept_sessions intercept_sessions_session_id_key; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.intercept_sessions
+    ADD CONSTRAINT intercept_sessions_session_id_key UNIQUE (session_id);
+
+
+-- Name: intercept_sync_cursors intercept_sync_cursors_cursor_key_key; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.intercept_sync_cursors
+    ADD CONSTRAINT intercept_sync_cursors_cursor_key_key UNIQUE (cursor_key);
+
+
+-- Name: intercept_sync_cursors intercept_sync_cursors_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.intercept_sync_cursors
+    ADD CONSTRAINT intercept_sync_cursors_pkey PRIMARY KEY (id);
+
+
+-- Name: intercepted_requests intercepted_requests_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.intercepted_requests
+    ADD CONSTRAINT intercepted_requests_pkey PRIMARY KEY (id);
+
+
+-- Name: intercepted_requests intercepted_requests_request_id_key; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.intercepted_requests
+    ADD CONSTRAINT intercepted_requests_request_id_key UNIQUE (request_id);
+
+
+-- Name: order_details order_details_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.order_details
+    ADD CONSTRAINT order_details_pkey PRIMARY KEY (id);
+
+
 -- Name: order_lines order_lines_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
 
 ALTER TABLE ONLY plugin.order_lines
     ADD CONSTRAINT order_lines_pkey PRIMARY KEY (id);
+
+
+-- Name: order_timeline order_timeline_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.order_timeline
+    ADD CONSTRAINT order_timeline_pkey PRIMARY KEY (id);
 
 
 -- Name: orders orders_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
@@ -1689,7 +2116,6 @@ ALTER TABLE ONLY plugin.orders
 
 ALTER TABLE ONLY plugin.plugin_logs
     ADD CONSTRAINT plugin_logs_pkey PRIMARY KEY (id);
-
 
 
 -- Name: settlement_details settlement_details_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
@@ -1734,10 +2160,34 @@ ALTER TABLE ONLY plugin.ad_today
     ADD CONSTRAINT uq_ad_today UNIQUE (seller_id, advertiser_id, endpoint, campaign_id, product_id, day);
 
 
+-- Name: after_sale_items uq_after_sale_items_shop_line; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.after_sale_items
+    ADD CONSTRAINT uq_after_sale_items_shop_line UNIQUE (shop_id, line_item_id);
+
+
+-- Name: after_sales uq_after_sales_shop_cancel; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.after_sales
+    ADD CONSTRAINT uq_after_sales_shop_cancel UNIQUE (shop_id, cancel_id);
+
+
+-- Name: order_details uq_order_details_shop_order; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.order_details
+    ADD CONSTRAINT uq_order_details_shop_order UNIQUE (shop_id, order_id);
+
+
 -- Name: order_lines uq_order_lines_order_sku; Type: CONSTRAINT; Schema: plugin; Owner: -
 
 ALTER TABLE ONLY plugin.order_lines
     ADD CONSTRAINT uq_order_lines_order_sku UNIQUE (shop_id, order_id, sku_id);
+
+
+-- Name: order_timeline uq_order_timeline_shop_order_idx; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.order_timeline
+    ADD CONSTRAINT uq_order_timeline_shop_order_idx UNIQUE (shop_id, order_id, event_index);
 
 
 -- Name: orders uq_orders_shop_order; Type: CONSTRAINT; Schema: plugin; Owner: -
@@ -1854,6 +2304,12 @@ ALTER TABLE ONLY public.alembic_version
     ADD CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num);
 
 
+-- Name: focused_spus pk_focused_spus; Type: CONSTRAINT; Schema: reporting; Owner: -
+
+ALTER TABLE ONLY reporting.focused_spus
+    ADD CONSTRAINT pk_focused_spus PRIMARY KEY (shop_pk, spu_id);
+
+
 -- Name: product_cost_snapshots product_cost_snapshots_pkey; Type: CONSTRAINT; Schema: reporting; Owner: -
 
 ALTER TABLE ONLY reporting.product_cost_snapshots
@@ -1872,6 +2328,12 @@ ALTER TABLE ONLY reporting.shipment_tracking_summary
     ADD CONSTRAINT shipment_tracking_summary_pkey PRIMARY KEY (id);
 
 
+-- Name: shop_fee_rate_estimates shop_fee_rate_estimates_pkey; Type: CONSTRAINT; Schema: reporting; Owner: -
+
+ALTER TABLE ONLY reporting.shop_fee_rate_estimates
+    ADD CONSTRAINT shop_fee_rate_estimates_pkey PRIMARY KEY (id);
+
+
 -- Name: product_cost_snapshots uq_cost_snapshots_pivot_version; Type: CONSTRAINT; Schema: reporting; Owner: -
 
 ALTER TABLE ONLY reporting.product_cost_snapshots
@@ -1882,6 +2344,12 @@ ALTER TABLE ONLY reporting.product_cost_snapshots
 
 ALTER TABLE ONLY reporting.product_profit_daily
     ADD CONSTRAINT uq_profit_daily_pivot_version UNIQUE (spu_pk, profit_date, calculation_version);
+
+
+-- Name: shop_fee_rate_estimates uq_shop_fee_rate_est_shop_day; Type: CONSTRAINT; Schema: reporting; Owner: -
+
+ALTER TABLE ONLY reporting.shop_fee_rate_estimates
+    ADD CONSTRAINT uq_shop_fee_rate_est_shop_day UNIQUE (shop_pk, calculated_on);
 
 
 -- Name: shipment_tracking_summary uq_tracking_summary_shipment_version; Type: CONSTRAINT; Schema: reporting; Owner: -
@@ -1952,6 +2420,11 @@ CREATE INDEX IF NOT EXISTS ix_sales_orders_paid_at ON commerce.sales_orders USIN
 CREATE INDEX IF NOT EXISTS ix_sales_orders_status ON commerce.sales_orders USING btree (status);
 
 
+-- Name: ix_enum_map_type; Type: INDEX; Schema: config; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_enum_map_type ON config.enum_map USING btree (enum_type);
+
+
 -- Name: ix_payouts_status; Type: INDEX; Schema: finance; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_payouts_status ON finance.payouts USING btree (status);
@@ -1982,6 +2455,11 @@ CREATE INDEX IF NOT EXISTS ix_settlement_txn_order_line ON finance.settlement_tr
 CREATE INDEX IF NOT EXISTS ix_settlement_txn_sales_order ON finance.settlement_transactions USING btree (order_pk);
 
 
+-- Name: uq_settlement_statements_ext; Type: INDEX; Schema: finance; Owner: -
+
+CREATE UNIQUE INDEX uq_settlement_statements_ext ON finance.settlement_statements USING btree (external_statement_id);
+
+
 -- Name: ix_shipments_status; Type: INDEX; Schema: fulfillment; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_shipments_status ON fulfillment.shipments USING btree (status);
@@ -2005,6 +2483,9 @@ CREATE INDEX IF NOT EXISTS ix_fx_snapshots_base_id ON fx.exchange_rate_snapshots
 -- Name: ix_credentials_provider; Type: INDEX; Schema: integration; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_credentials_provider ON integration.credentials USING btree (provider);
+
+
+-- Name: ix_credentials_service_id; Type: INDEX; Schema: integration; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_credentials_service_id ON integration.credentials USING btree (service_id) WHERE (service_id IS NOT NULL);
 
@@ -2109,14 +2590,104 @@ CREATE INDEX IF NOT EXISTS idx_ad_raw_log_request_id ON plugin.ad_raw_log USING 
 CREATE INDEX IF NOT EXISTS idx_ad_today_coverage ON plugin.ad_today USING btree (seller_id, advertiser_id, endpoint, campaign_id, day);
 
 
+-- Name: idx_campaign_opt_logs_campaign; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_campaign_opt_logs_campaign ON plugin.campaign_opt_logs USING btree (campaign_id);
+
+
+-- Name: idx_campaign_opt_logs_seller_time; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_campaign_opt_logs_seller_time ON plugin.campaign_opt_logs USING btree (seller_id, opt_time);
+
+
+-- Name: idx_intercept_configs_domain; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_intercept_configs_domain ON plugin.intercept_configs USING btree (domain) WHERE (enabled = true);
+
+
+-- Name: idx_intercept_configs_domain_endpoint; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE UNIQUE INDEX idx_intercept_configs_domain_endpoint ON plugin.intercept_configs USING btree (domain, endpoint);
+
+
+-- Name: idx_intercept_configs_mode; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_intercept_configs_mode ON plugin.intercept_configs USING btree (mode) WHERE (enabled = true);
+
+
+-- Name: idx_intercepted_requests_captured_at; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_intercepted_requests_captured_at ON plugin.intercepted_requests USING btree (captured_at);
+
+
+-- Name: idx_intercepted_requests_config; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_intercepted_requests_config ON plugin.intercepted_requests USING btree (matched_config_id) WHERE (matched_config_id IS NOT NULL);
+
+
+-- Name: idx_intercepted_requests_endpoint; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_intercepted_requests_endpoint ON plugin.intercepted_requests USING btree (endpoint_host, endpoint_path);
+
+
+-- Name: idx_intercepted_requests_seller; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_intercepted_requests_seller ON plugin.intercepted_requests USING btree (seller_id) WHERE (seller_id IS NOT NULL);
+
+
+-- Name: idx_intercepted_requests_session; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_intercepted_requests_session ON plugin.intercepted_requests USING btree (session_id, captured_at);
+
+
+-- Name: idx_intercepted_requests_url_hash; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_intercepted_requests_url_hash ON plugin.intercepted_requests USING btree (url_hash);
+
+
+-- Name: idx_intercepted_requests_whitelisted; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_intercepted_requests_whitelisted ON plugin.intercepted_requests USING btree (is_whitelisted, captured_at);
+
+
 -- Name: idx_plugin_logs_level; Type: INDEX; Schema: plugin; Owner: -
 
 CREATE INDEX IF NOT EXISTS idx_plugin_logs_level ON plugin.plugin_logs USING btree (level, occurred_at DESC);
 
 
+-- Name: idx_plugin_logs_plugin_name; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS idx_plugin_logs_plugin_name ON plugin.plugin_logs USING btree (plugin_name);
+
+
 -- Name: idx_plugin_logs_seller_time; Type: INDEX; Schema: plugin; Owner: -
 
 CREATE INDEX IF NOT EXISTS idx_plugin_logs_seller_time ON plugin.plugin_logs USING btree (seller_id, occurred_at DESC);
+
+
+-- Name: ix_after_sale_items_shop_cancel; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_after_sale_items_shop_cancel ON plugin.after_sale_items USING btree (shop_id, cancel_id);
+
+
+-- Name: ix_after_sale_items_shop_order_line; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_after_sale_items_shop_order_line ON plugin.after_sale_items USING btree (shop_id, order_line_item_id);
+
+
+-- Name: ix_after_sales_shop_order; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_after_sales_shop_order ON plugin.after_sales USING btree (shop_id, main_order_id);
+
+
+-- Name: ix_order_details_shop; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_order_details_shop ON plugin.order_details USING btree (shop_id);
+
+
+-- Name: ix_order_timeline_shop_order; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_order_timeline_shop_order ON plugin.order_timeline USING btree (shop_id, order_id);
 
 
 -- Name: ix_orders_main_order_status; Type: INDEX; Schema: plugin; Owner: -
@@ -2127,9 +2698,6 @@ CREATE INDEX IF NOT EXISTS ix_orders_main_order_status ON plugin.orders USING bt
 -- Name: ix_orders_shop; Type: INDEX; Schema: plugin; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_orders_shop ON plugin.orders USING btree (shop_id);
-
-
-
 
 
 -- Name: ix_settlement_details_stmt; Type: INDEX; Schema: plugin; Owner: -
@@ -2202,9 +2770,24 @@ CREATE UNIQUE INDEX uq_manual_costs_one_open ON procurement.manual_product_costs
 CREATE INDEX IF NOT EXISTS ix_cost_snapshots_method ON reporting.product_cost_snapshots USING btree (cost_method);
 
 
+-- Name: ix_focused_spus_active_membership; Type: INDEX; Schema: reporting; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_focused_spus_active_membership ON reporting.focused_spus USING btree (shop_pk, spu_id) WHERE (active IS TRUE);
+
+
+-- Name: ix_focused_spus_active_updated; Type: INDEX; Schema: reporting; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_focused_spus_active_updated ON reporting.focused_spus USING btree (shop_pk, updated_at DESC, spu_id) WHERE (active IS TRUE);
+
+
 -- Name: ix_profit_daily_profit_date; Type: INDEX; Schema: reporting; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_profit_daily_profit_date ON reporting.product_profit_daily USING btree (profit_date);
+
+
+-- Name: ix_shop_fee_rate_est_shop_calc_at; Type: INDEX; Schema: reporting; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_shop_fee_rate_est_shop_calc_at ON reporting.shop_fee_rate_estimates USING btree (shop_pk, calculated_at);
 
 
 -- Name: ix_api_keys_role; Type: INDEX; Schema: security; Owner: -
@@ -2245,6 +2828,11 @@ CREATE OR REPLACE TRIGGER trg_commerce_sales_order_lines_touch BEFORE UPDATE ON 
 -- Name: sales_orders trg_commerce_sales_orders_touch; Type: TRIGGER; Schema: commerce; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_commerce_sales_orders_touch BEFORE UPDATE ON commerce.sales_orders FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: enum_map trg_enum_map_updated_at; Type: TRIGGER; Schema: config; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_enum_map_updated_at BEFORE UPDATE ON config.enum_map FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
 -- Name: payouts trg_finance_payouts_touch; Type: TRIGGER; Schema: finance; Owner: -
@@ -2297,11 +2885,6 @@ CREATE OR REPLACE TRIGGER trg_fx_exchange_rates_touch BEFORE UPDATE ON fx.exchan
 CREATE OR REPLACE TRIGGER trg_integration_credentials_touch BEFORE UPDATE ON integration.credentials FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
--- Name: tiktok_app_credentials trg_integration_tiktok_app_credentials_touch; Type: TRIGGER; Schema: integration; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_integration_tiktok_app_credentials_touch BEFORE UPDATE ON integration.tiktok_app_credentials FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
 -- Name: oauth_states trg_integration_oauth_states_touch; Type: TRIGGER; Schema: integration; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_integration_oauth_states_touch BEFORE UPDATE ON integration.oauth_states FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
@@ -2325,6 +2908,11 @@ CREATE OR REPLACE TRIGGER trg_integration_sync_issues_touch BEFORE UPDATE ON int
 -- Name: sync_jobs trg_integration_sync_jobs_touch; Type: TRIGGER; Schema: integration; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_integration_sync_jobs_touch BEFORE UPDATE ON integration.sync_jobs FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: tiktok_app_credentials trg_integration_tiktok_app_credentials_touch; Type: TRIGGER; Schema: integration; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_integration_tiktok_app_credentials_touch BEFORE UPDATE ON integration.tiktok_app_credentials FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
 -- Name: account_links trg_linkage_account_links_touch; Type: TRIGGER; Schema: linkage; Owner: -
@@ -2417,6 +3005,11 @@ CREATE OR REPLACE TRIGGER trg_procurement_purchase_orders_touch BEFORE UPDATE ON
 CREATE OR REPLACE TRIGGER trg_procurement_spu_images_touch BEFORE UPDATE ON procurement.spu_images FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
+-- Name: focused_spus trg_reporting_focused_spus_touch; Type: TRIGGER; Schema: reporting; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_reporting_focused_spus_touch BEFORE UPDATE ON reporting.focused_spus FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
 -- Name: product_cost_snapshots trg_reporting_product_cost_snapshots_touch; Type: TRIGGER; Schema: reporting; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_reporting_product_cost_snapshots_touch BEFORE UPDATE ON reporting.product_cost_snapshots FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
@@ -2430,6 +3023,11 @@ CREATE OR REPLACE TRIGGER trg_reporting_product_profit_daily_touch BEFORE UPDATE
 -- Name: shipment_tracking_summary trg_reporting_shipment_tracking_summary_touch; Type: TRIGGER; Schema: reporting; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_reporting_shipment_tracking_summary_touch BEFORE UPDATE ON reporting.shipment_tracking_summary FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: shop_fee_rate_estimates trg_reporting_shop_fee_rate_estimates_touch; Type: TRIGGER; Schema: reporting; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_reporting_shop_fee_rate_estimates_touch BEFORE UPDATE ON reporting.shop_fee_rate_estimates FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
 -- Name: api_keys trg_security_api_keys_touch; Type: TRIGGER; Schema: security; Owner: -
@@ -2731,36 +3329,6 @@ ALTER TABLE ONLY linkage.variant_links
     ADD CONSTRAINT variant_links_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
 
 
--- Name: order_lines order_lines_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
-
-ALTER TABLE ONLY plugin.order_lines
-
-
--- Name: orders orders_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
-
-ALTER TABLE ONLY plugin.orders
-
-
--- Name: settlement_details settlement_details_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
-
-ALTER TABLE ONLY plugin.settlement_details
-
-
--- Name: settlements settlements_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
-
-ALTER TABLE ONLY plugin.settlements
-
-
--- Name: shipments shipments_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
-
-ALTER TABLE ONLY plugin.shipments
-
-
--- Name: tracking_events tracking_events_log_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
-
-ALTER TABLE ONLY plugin.tracking_events
-
-
 -- Name: manual_product_costs manual_product_costs_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
 
 ALTER TABLE ONLY procurement.manual_product_costs
@@ -2851,6 +3419,18 @@ ALTER TABLE ONLY procurement.spu_images
     ADD CONSTRAINT spu_images_uploaded_by_key_id_fkey FOREIGN KEY (uploaded_by_key_id) REFERENCES security.api_keys(id) ON DELETE SET NULL;
 
 
+-- Name: focused_spus fk_focused_spus_product; Type: FK CONSTRAINT; Schema: reporting; Owner: -
+
+ALTER TABLE ONLY reporting.focused_spus
+    ADD CONSTRAINT fk_focused_spus_product FOREIGN KEY (shop_pk, spu_id) REFERENCES commerce.products_spu(shop_pk, spu_id) ON DELETE RESTRICT;
+
+
+-- Name: focused_spus fk_focused_spus_shop; Type: FK CONSTRAINT; Schema: reporting; Owner: -
+
+ALTER TABLE ONLY reporting.focused_spus
+    ADD CONSTRAINT fk_focused_spus_shop FOREIGN KEY (shop_pk) REFERENCES commerce.shops(id) ON DELETE RESTRICT;
+
+
 -- Name: product_cost_snapshots product_cost_snapshots_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: reporting; Owner: -
 
 ALTER TABLE ONLY reporting.product_cost_snapshots
@@ -2869,73 +3449,10 @@ ALTER TABLE ONLY reporting.shipment_tracking_summary
     ADD CONSTRAINT shipment_tracking_summary_shipment_id_fkey FOREIGN KEY (shipment_id) REFERENCES fulfillment.shipments(id) ON DELETE CASCADE;
 
 
+-- Name: shop_fee_rate_estimates shop_fee_rate_estimates_shop_pk_fkey; Type: FK CONSTRAINT; Schema: reporting; Owner: -
+
+ALTER TABLE ONLY reporting.shop_fee_rate_estimates
+    ADD CONSTRAINT shop_fee_rate_estimates_shop_pk_fkey FOREIGN KEY (shop_pk) REFERENCES commerce.shops(id) ON DELETE CASCADE;
+
+
 -- PostgreSQL database dump complete
-
-
-
--- campaign_opt_logs (广告操作日志)
-CREATE TABLE IF NOT EXISTS plugin.campaign_opt_logs (
-    id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    seller_id        TEXT NOT NULL,
-    advertiser_id    TEXT NOT NULL,
-    log_id           TEXT NOT NULL UNIQUE,        -- TikTok 操作日志 ID
-    campaign_id      TEXT NOT NULL,               -- object_id
-    user             TEXT,                         -- 操作人
-    opt_time         TIMESTAMPTZ NOT NULL,         -- 操作时间
-    object_type      TEXT,                         -- 如 "推广系列"
-    object_raw_type  TEXT,                         -- 如 "4"
-    activity_details JSONB,                        -- 变更详情数组
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_campaign_opt_logs_seller_time ON plugin.campaign_opt_logs (seller_id, opt_time);
-CREATE INDEX IF NOT EXISTS idx_campaign_opt_logs_campaign ON plugin.campaign_opt_logs (campaign_id);
-
--- Name: after_sales; Type: TABLE; Schema: plugin; Owner: -
-
-CREATE TABLE IF NOT EXISTS plugin.after_sales (
-    id bigint NOT NULL,
-    shop_id text NOT NULL,
-    cancel_id text NOT NULL,
-    cancel_type text NOT NULL,
-    cancel_status text NOT NULL,
-    main_order_id text,
-    reason text,
-    request_time timestamp with time zone,
-    complete_time timestamp with time zone,
-    raw_payload jsonb,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
-
-ALTER TABLE plugin.after_sales ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME plugin.after_sales_id_seq
-);
-
-
-
--- Name: after_sale_items; Type: TABLE; Schema: plugin; Owner: -
-
-CREATE TABLE IF NOT EXISTS plugin.after_sale_items (
-    id bigint NOT NULL,
-    shop_id text NOT NULL,
-    cancel_id text NOT NULL,
-    line_item_id text NOT NULL,
-    order_line_item_id text,
-    sku_id text,
-    product_id text,
-    quantity numeric(20,4),
-    refund_amount numeric(20,4),
-    currency text,
-    raw_payload jsonb,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
-
-ALTER TABLE plugin.after_sale_items ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME plugin.after_sale_items_id_seq
-);

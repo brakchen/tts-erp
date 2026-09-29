@@ -114,6 +114,7 @@ def _wipe_test_rows(db_engine) -> None:
 
     api_keys_tbl = Base.metadata.tables["security.api_keys"]
     manual_costs_tbl = Base.metadata.tables["procurement.manual_product_costs"]
+    focused_spus_tbl = Base.metadata.tables["reporting.focused_spus"]
     products_spu_tbl = Base.metadata.tables["commerce.products_spu"]
     shops_tbl = Base.metadata.tables["commerce.shops"]
     # 2026-08-31 procurement.spu_images — RESTRICT FK from products_spu
@@ -173,6 +174,9 @@ def _wipe_test_rows(db_engine) -> None:
                     )
                 )
             )
+        )
+        conn.execute(
+            delete(focused_spus_tbl).where(focused_spus_tbl.c.spu_id.like("TEST_%"))
         )
         conn.execute(
             delete(products_spu_tbl).where(products_spu_tbl.c.spu_id.like("TEST_%"))

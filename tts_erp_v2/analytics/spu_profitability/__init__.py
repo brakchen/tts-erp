@@ -20,8 +20,11 @@ from sqlalchemy.orm import Session
 from tts_erp_v2.analytics.spu_profitability import _implementation
 from tts_erp_v2.analytics.spu_profitability._snapshot import consistent_read_snapshot
 from tts_erp_v2.analytics.spu_profitability._types import (
+    ActivitySelection,
     EvidenceKind,
     EvidenceRequest,
+    ExactIdsSelection,
+    FocusedSelection,
     FormulaStatus,
     FxBasis,
     FxRateUnavailable,
@@ -38,27 +41,32 @@ from tts_erp_v2.analytics.spu_profitability._types import (
     SpuNotFound,
     SpuProfitability,
     SpuProfitExplanation,
+    SpuSelection,
 )
 
 __all__ = [
+    "ActivitySelection",
     "EvidenceKind",
     "EvidenceRequest",
+    "ExactIdsSelection",
+    "FocusedSelection",
     "FormulaStatus",
     "FxBasis",
     "FxRateUnavailable",
+    "ProfitScope",
     "ProfitabilityBasis",
     "ProfitabilityError",
     "ProfitabilityEvidence",
     "ProfitabilityOverview",
     "ProfitabilityTotals",
-    "ProfitScope",
     "RowView",
     "SnapshotIsolationUnavailable",
     "SortDirection",
     "SortField",
     "SpuNotFound",
-    "SpuProfitability",
     "SpuProfitExplanation",
+    "SpuProfitability",
+    "SpuSelection",
     "explain_spu",
     "read_overview",
 ]
@@ -74,11 +82,11 @@ def _read_overview_in_snapshot(
     fee_rate: Decimal | None = None,
     legacy_include_all: bool | None = None,
 ) -> ProfitabilityOverview:
-    return _implementation._query_spu_roi(  # noqa: SLF001 — package implementation seam
+    return _implementation._query_spu_roi(
         session,
         q=view.search or None,
         shop_pk=scope.shop_pk,
-        spu_ids=scope.spu_ids,
+        selection=scope.effective_selection,
         active_only=(
             legacy_include_all
             if legacy_include_all is not None

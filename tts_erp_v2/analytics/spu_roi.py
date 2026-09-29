@@ -13,7 +13,7 @@ from dataclasses import fields, is_dataclass
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from tts_erp_v2.analytics.spu_profitability import (
     EvidenceKind,
     EvidenceRequest,
+    FocusedSelection,
     FxRateUnavailable,
     ProfitScope,
     RowView,
@@ -294,6 +295,8 @@ def _scope(
     w_start,
     w_end,
     spu_ids: tuple[str, ...] | None = None,
+    *,
+    focused: bool = False,
 ) -> ProfitScope:
     try:
         return ProfitScope(
@@ -302,6 +305,7 @@ def _scope(
             end_date=w_end,
             include_inactive=include_all,
             spu_ids=spu_ids,
+            selection=FocusedSelection() if focused else None,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -326,6 +330,7 @@ def list_spu_roi(
     sess: Session = Depends(get_session),  # noqa: B008
     q: str | None = Query(default=None, max_length=200),
     spu_ids: str | None = Query(default=None, max_length=4096),
+    scope: Literal["focused"] | None = Query(default=None),
     sort: str = Query(default="roi_real"),
     order: str = Query(default="asc"),
     limit: int = Query(default=100, ge=1, le=500),
@@ -352,7 +357,21 @@ def list_spu_roi(
         raise HTTPException(status_code=422, detail="shop_pk is required with spu_ids")
     if parsed_spu_ids is not None and q is not None and q.strip():
         raise HTTPException(status_code=422, detail="q and spu_ids cannot be combined")
-    scope = _scope(shop_pk, include_all, w_start, w_end, parsed_spu_ids)
+    if scope == "focused" and shop_pk is None:
+        raise HTTPException(status_code=422, detail="shop_pk is required with focused scope")
+    if scope == "focused" and parsed_spu_ids is not None:
+        raise HTTPException(
+            status_code=422,
+            detail="scope=focused and spu_ids cannot be combined",
+        )
+    profit_scope = _scope(
+        shop_pk,
+        include_all,
+        w_start,
+        w_end,
+        parsed_spu_ids,
+        focused=scope == "focused",
+    )
     view = RowView(
         search=q or None,
         sort=sort_field,
@@ -363,13 +382,13 @@ def list_spu_roi(
     try:
         result = read_legacy_overview(
             sess,
-            scope=scope,
+            scope=profit_scope,
             view=view,
             fee_rate=fee_value,
         )
     except FxRateUnavailable:
         return _fx_error(request)
-    return _overview_payload(result, scope, fee_value)
+    return _overview_payload(result, profit_scope, fee_value)
 
 
 drilldown_router = APIRouter(prefix="/v2/analytics/spu-roi", tags=["analytics"])

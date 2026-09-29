@@ -1,10 +1,8 @@
 """reporting.* — derived tables, rebuildable, versioned.
 
-4 tables: product_cost_snapshots / product_profit_daily /
-shipment_tracking_summary / shop_fee_rate_estimates. All are deterministic
-functions of upstream tables + effective_product_links view; the
-cost_snapshots job rebuilds them with calculation_version monotonically
-incremented.
+Derived profitability tables plus the operator-owned ``focused_spus`` scope.
+The calculated tables are deterministic functions of upstream facts; focused
+SPUs are durable shop-scoped UI state and are intentionally not rebuilt.
 """
 
 from __future__ import annotations
@@ -14,9 +12,11 @@ from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     Date,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
@@ -263,6 +263,65 @@ class ShopFeeRateEstimate(Base):
         nullable=False, server_default=text("now()")
     )
 
+    created_at: Mapped[datetime] = mapped_column(
+        nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        nullable=False,
+        server_default=text("now()"),
+        onupdate=text("now()"),
+    )
+
+
+class FocusedSpu(Base):
+    """Current shop-scoped focused-SPU membership.
+
+    ``active=False`` is a soft removal. The row keeps only current state and
+    latest-operation metadata; it is not an append-only audit log.
+    """
+
+    __tablename__ = "focused_spus"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["shop_pk"],
+            ["commerce.shops.id"],
+            name="fk_focused_spus_shop",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["shop_pk", "spu_id"],
+            ["commerce.products_spu.shop_pk", "commerce.products_spu.spu_id"],
+            name="fk_focused_spus_product",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "length(spu_id) BETWEEN 1 AND 128",
+            name="ck_focused_spus_spu_id_length",
+        ),
+        Index(
+            "ix_focused_spus_active_membership",
+            "shop_pk",
+            "spu_id",
+            postgresql_where=text("active IS TRUE"),
+        ),
+        Index(
+            "ix_focused_spus_active_updated",
+            "shop_pk",
+            text("updated_at DESC"),
+            "spu_id",
+            postgresql_where=text("active IS TRUE"),
+        ),
+        {"schema": "reporting"},
+    )
+
+    shop_pk: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    spu_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    added_by: Mapped[str | None] = mapped_column(Text)
+    removed_by: Mapped[str | None] = mapped_column(Text)
+    removed_at: Mapped[datetime | None]
     created_at: Mapped[datetime] = mapped_column(
         nullable=False, server_default=text("now()")
     )
