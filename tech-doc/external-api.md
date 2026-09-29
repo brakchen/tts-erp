@@ -98,15 +98,17 @@ X-API-Key: <your-api-key>
 `Authorization` takes precedence if both are present. Keys are prefixed by
 role (`ttserp_ro_…` readonly, `ttserp_rw_…` readwrite, `ttserp_admin_…`
 admin). Roles are linearly ordered `readonly < readwrite < admin`; the
-path classification lives in
-`tts_erp_v2/middleware/auth.py::required_role()` — unmatched paths default
-to **admin** (fail-closed). A few write endpoints
-(`POST /v2/linkage/overrides`, `POST /v2/linkage/issues/{id}/resolve`)
-enforce their role **inside the handler** on top of the middleware.
+path classification lives in `tts_erp_v2.access` — unmatched paths default
+to **admin** (fail-closed). Handler-level gates such as
+`POST /v2/linkage/overrides` and `POST /v2/linkage/issues/{id}/resolve`
+consume the same typed `AccessGrant`, so `off` and `shadow` semantics remain
+consistent through the handler.
 
-Public (auth-exempt) paths: `/healthz`, `/endpoints`, `/openapi.json`,
+Public (API-key auth-exempt) paths: `/healthz`, `/endpoints`, `/openapi.json`,
 `/docs`, `/redoc`, `/docs/oauth2-redirect`, `/v2/auth/login`,
-`/v2/auth/logout`, `/v2/auth/me`.
+`/v2/auth/logout`, `/v2/auth/me`, `/static/*`. Docs paths can still be protected
+by `TTS_ERP_DOCS_USER` / `TTS_ERP_DOCS_PASSWORD`; classification uses the
+route-relative path and therefore also covers `/tts/docs` deployments.
 
 **Errors**:
 
@@ -116,8 +118,11 @@ Public (auth-exempt) paths: `/healthz`, `/endpoints`, `/openapi.json`,
 
 The mode is set by env `TTS_ERP_AUTH_MODE=off|shadow|enforce`. In
 `enforce` (production default since 2026-08-20) the service returns the
-error; in `shadow` the would-deny is only logged; `off` bypasses auth
-entirely (development only).
+error; in `shadow` the would-deny is only logged and never redirected or
+rejected; `off` bypasses middleware and handler role gates entirely
+(development only). Invalid mode values are logged and fail closed as `enforce`.
+Enforced 401/403 requests, including browser 302 attempts, consume the shared
+denied-request rate-limit budget before response presentation is selected.
 
 ## Browser session login
 
@@ -131,7 +136,9 @@ system (design: [`browser-login-design.md`](browser-login-design.md)):
   stores only the key hash, re-validated against the DB per request —
   revoking the key kills the session within the cache TTL).
 - `POST /v2/auth/logout` — clears the cookie.
-- `GET /v2/auth/me` — `{authenticated, role}` for the current cookie.
+- `GET /v2/auth/me` — `{authenticated, role}` for the current cookie; `role`
+  is read from the current database credential, not the role embedded when the
+  cookie was minted.
 
 Browser navigations (`Accept: text/html`) that fail auth get a **302** to
 `/v2/auth/login?next=...` instead of a JSON 401. Cookie-authed
