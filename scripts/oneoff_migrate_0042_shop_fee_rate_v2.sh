@@ -1,42 +1,27 @@
 #!/usr/bin/env bash
-# Apply migration 0040 (reporting.shop_fee_rate_estimates — 店铺级平台抽成费率
-# 日快照), verify it, optionally restart the API + sync worker, and optionally run
-# the new analytics.shop_fee_rate job once so the page has data immediately.
+# Apply migration 0042 (fee-v2 kept-only snapshot contract), verify it, restart
+# API + sync worker, and immediately rebuild all shop fee-rate snapshots.
 #
-# 前置：feature/shop-fee-rate 已合并到 master（脚本要求 migration 文件存在），
-#      且 master 工作区是干净的可部署状态。
+# Production use (human-operated only):
+#   ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0042_shop_fee_rate_v2.sh --confirm
 #
-# 生产用法（仅人工执行）：
-#   ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0040_shop_fee_rate.sh --confirm
-#   ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0040_shop_fee_rate.sh --confirm --restart
-#   ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0040_shop_fee_rate.sh --confirm --restart --run-job
+# ``--confirm`` is mandatory. Restart and recomputation are intentionally not
+# optional: 0042 invalidates ambiguous fee-v1 rows, and the new reader accepts
+# only fee-v2. A coordinated restart plus immediate job run avoids both old-code
+# column access and a 24-hour baseline-only window.
 #
-# 参数：
-#   --confirm    必填。没有它脚本什么都不做（对齐 alembic env.py 的守卫约定）。
-#   --restart    迁移成功后重启 tts-erp.service（API）与 tts-erp-sync.service。
-#   --run-job    立即跑一次 analytics.shop_fee_rate，最后打印每店费率。
-#
-# 为什么 --run-job 很重要：
-#   新 job 以 APScheduler IntervalTrigger(seconds=86400) 注册，**首跑要等满
-#   24 小时**（add_job 未设 next_run_time）。不加 --run-job 的话，spu-roi 会连续
-#   24h 走全局基线 0.308 —— 不是错误，但你会以为功能没生效。
-#
-# 幂等：重复执行安全。alembic upgrade 到已应用的版本是 no-op（会打印
-#       "already at head"）；job 按 (shop_pk, calculated_on) UPSERT。
+# Idempotent: Alembic upgrade at head is a no-op; the job UPSERTs by
+# (shop_pk, calculated_on).
 set -euo pipefail
 SCRIPT_PATH=$(realpath "$0")
 cd "$(dirname "$SCRIPT_PATH")/.."
 
 CONFIRMED=0
-RESTART=0
-RUN_JOB=0
 for arg in "$@"; do
     case "$arg" in
     --confirm) CONFIRMED=1 ;;
-    --restart) RESTART=1 ;;
-    --run-job) RUN_JOB=1 ;;
     -h | --help)
-        sed -n '2,26p' "$SCRIPT_PATH"
+        sed -n '2,16p' "$SCRIPT_PATH"
         exit 0
         ;;
     *)
@@ -48,7 +33,7 @@ done
 
 if [[ "$CONFIRMED" -ne 1 ]]; then
     echo "❌ 必须显式传入 --confirm" >&2
-    echo "用法: ALLOW_PROD_DESTRUCTIVE=1 bash $SCRIPT_PATH --confirm [--restart] [--run-job]" >&2
+    echo "用法: ALLOW_PROD_DESTRUCTIVE=1 bash $SCRIPT_PATH --confirm" >&2
     exit 2
 fi
 
@@ -72,10 +57,10 @@ if [[ -z "${TTS_ERP_DB_URL:-}" ]]; then
     exit 1
 fi
 
-MIGRATION_FILE="alembic/versions/0041_shop_fee_rate_kept_only.py"
-TARGET="0041_shop_fee_rate_kept_only"
+MIGRATION_FILE="alembic/versions/0042_shop_fee_rate_v2.py"
+TARGET="0042_shop_fee_rate_v2"
 if [[ ! -f "$MIGRATION_FILE" ]]; then
-    echo "❌ 当前代码不包含 migration 0040，请先把 feature/shop-fee-rate 合并到 master 并拉取" >&2
+    echo "❌ 当前代码不包含 migration 0042，请先部署 fix/shop-fee-rate-review" >&2
     exit 1
 fi
 
@@ -89,12 +74,12 @@ PY
 )
 
 echo "╔════════════════════════════════════════════════════════════════╗"
-echo "║ Migration 0040: 店铺级平台抽成费率日快照                       ║"
+echo "║ Migration 0042: 店铺平台费率 fee-v2                            ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
 echo "数据库:      ${DB_NAME} @ ${DB_HOST}"
 echo "目标版本:    ${TARGET}"
-echo "restart:     ${RESTART}"
-echo "run-job:     ${RUN_JOB}"
+echo "restart:     required"
+echo "run-job:     required"
 echo
 
 # 共享的 prod-shape 守卫。脚本自己不设 ALLOW_PROD_DESTRUCTIVE —— 必须由人工显式
@@ -102,7 +87,7 @@ echo
 "$PYTHON" - <<'PY'
 from tts_erp_v2.api.deps import require_destructive_script_guard
 require_destructive_script_guard(
-    script_name="oneoff_migrate_0040_shop_fee_rate",
+    script_name="oneoff_migrate_0042_shop_fee_rate_v2",
     confirmation=True,
     dangerous=True,
     allow_env="ALLOW_PROD_DESTRUCTIVE",
@@ -122,7 +107,7 @@ if [[ "$HEADS" != *"$TARGET"* ]]; then
 fi
 
 echo
-echo "── 执行迁移（additive：只新建一张派生表）──"
+echo "── 执行迁移（保留旧行但标记 legacy；默认版本切到 fee-v2）──"
 timeout 300 "$ALEMBIC" upgrade "$TARGET"
 
 echo
@@ -134,7 +119,7 @@ from sqlalchemy import create_engine, text
 engine = create_engine(os.environ["TTS_ERP_DB_URL"])
 with engine.connect() as conn:
     revision = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-    if revision != "0041_shop_fee_rate_kept_only":
+    if revision != "0042_shop_fee_rate_v2":
         raise SystemExit(f"❌ alembic revision 异常: {revision}")
 
     table_ok = conn.execute(
@@ -165,6 +150,17 @@ with engine.connect() as conn:
     if missing:
         raise SystemExit(f"❌ 缺列: {sorted(missing)}")
 
+    version_default = conn.execute(
+        text(
+            "SELECT column_default FROM information_schema.columns "
+            "WHERE table_schema='reporting' "
+            "AND table_name='shop_fee_rate_estimates' "
+            "AND column_name='calculation_version'"
+        )
+    ).scalar_one()
+    if "fee-v2" not in (version_default or ""):
+        raise SystemExit(f"❌ calculation_version 默认值异常: {version_default}")
+
     constraints = {
         r[0]
         for r in conn.execute(
@@ -192,38 +188,24 @@ with engine.connect() as conn:
     if not idx_ok:
         raise SystemExit("❌ 缺索引 ix_shop_fee_rate_est_shop_calc_at")
 
-print("✅ revision = 0041_shop_fee_rate_kept_only")
-print("✅ reporting.shop_fee_rate_estimates 表 / 14 列 / 唯一+CHECK 约束 / 索引 齐备")
+print("✅ revision = 0042_shop_fee_rate_v2")
+print("✅ reporting.shop_fee_rate_estimates 表 / 15 列 / 唯一+CHECK 约束 / 索引 齐备")
 PY
 
-if [[ "$RESTART" -eq 1 ]]; then
-    echo
-    echo "── 重启 API 与 sync worker ──"
-    echo "   （API 重启加载 pages.py / spu_roi.py 改动；sync worker 重启注册新 job）"
-    timeout 30 systemctl --user restart tts-erp.service
-    timeout 30 systemctl --user restart tts-erp-sync.service
-    sleep 3
-    timeout 20 systemctl --user is-active --quiet tts-erp.service
-    timeout 20 systemctl --user is-active --quiet tts-erp-sync.service
-    PORT="${TTS_ERP_PORT:-9877}"
-    curl -fsS -m 10 "http://127.0.0.1:${PORT}/healthz" >/dev/null
-    echo "✅ 两个服务 active，healthz 正常"
-else
-    echo
-    echo "ℹ️ 未重启服务。代码部署完成后执行："
-    echo "   bash restart.sh"
-    echo "   systemctl --user restart tts-erp-sync.service"
-fi
+echo
+echo "── 重启 API 与 sync worker（0042 强制协调步骤）──"
+timeout 30 systemctl --user restart tts-erp.service
+timeout 30 systemctl --user restart tts-erp-sync.service
+sleep 3
+timeout 20 systemctl --user is-active --quiet tts-erp.service
+timeout 20 systemctl --user is-active --quiet tts-erp-sync.service
+PORT="${TTS_ERP_PORT:-9877}"
+curl -fsS -m 10 "http://127.0.0.1:${PORT}/healthz" >/dev/null
+echo "✅ 两个服务 active，healthz 正常"
 
-if [[ "$RUN_JOB" -eq 1 ]]; then
-    echo
-    echo "── 立即跑一次 analytics.shop_fee_rate（否则要等满 24h 才首跑）──"
-    timeout 900 "$PYTHON" -m tts_erp_v2.sync_worker.main run analytics.shop_fee_rate
-else
-    echo
-    echo "ℹ️ 未跑 job。若不想等 24h，可执行："
-    echo "   ${PYTHON} -m tts_erp_v2.sync_worker.main run analytics.shop_fee_rate"
-fi
+echo
+echo "── 立即重算 analytics.shop_fee_rate（写入 fee-v2）──"
+timeout 900 "$PYTHON" -m tts_erp_v2.sync_worker.main run analytics.shop_fee_rate
 
 echo
 echo "── 当前快照（最新一日的每店费率；无行 = 该店回退基线）──"
@@ -243,12 +225,16 @@ with engine.connect() as conn:
                    e.kept_order_count,
                    e.kept_share,
                    e.lookback_days,
-                   e.currency
+                   e.currency,
+                   e.calculation_version
             FROM reporting.shop_fee_rate_estimates e
             JOIN commerce.shops s ON s.id = e.shop_pk
-            WHERE e.calculated_on = (
-                SELECT max(calculated_on) FROM reporting.shop_fee_rate_estimates
-            )
+            WHERE e.calculation_version = 'fee-v2'
+              AND e.calculated_on = (
+                  SELECT max(calculated_on)
+                  FROM reporting.shop_fee_rate_estimates
+                  WHERE calculation_version = 'fee-v2'
+              )
             ORDER BY e.fee_rate DESC
             """
         )
@@ -262,11 +248,11 @@ if not rows:
     print("       或窗口内没有带 FEE 分项的已结算交易。详情看 job 日志与")
     print("       integration.sync_jobs 里 job_name='analytics.shop_fee_rate' 那行的 extra。")
 else:
-    print(f"{'shop_id':>22}  {'费率':>9}  {'未退款单':>8}  {'占窗口GMV':>9}  窗口  币种")
+    print(f"{'shop_id':>22}  {'费率':>9}  {'未退款单':>8}  {'占窗口GMV':>9}  窗口  币种  版本")
     for r in rows:
         print(
             f"{r[0]:>22}  {float(r[3]) * 100:8.2f}%  {r[4]:>7}  "
-            f"{float(r[5]) * 100:7.1f}%  {r[6]:>4}d  {r[7]}"
+            f"{float(r[5]) * 100:7.1f}%  {r[6]:>4}d  {r[7]}  {r[8]}"
         )
     print()
     print(f"覆盖 {len(rows)} / {total_shops} 个 TikTok 店铺；其余走全局基线 0.308。")
@@ -280,6 +266,6 @@ echo "   并显示未退款订单数 / 占窗口GMV 比 / 重算日期"
 echo "3. 在「临时覆写费率 %」填数字 → 徽章应变「页面覆写」；清空 → 回到实测/基线"
 echo "4. 若某店显示「全局基线」+ 红色降级提示 → 该店在窗口内暂无已结算订单（或快照已过期），属预期行为"
 echo
-echo "回滚（如需）：${ALEMBIC} downgrade 0039_tiktok_app_credentials"
+echo "回滚（如需）：${ALEMBIC} downgrade 0041_shop_fee_rate_kept_only"
 echo
-echo "✅ Migration 0040 完成"
+echo "✅ Migration 0042 完成"

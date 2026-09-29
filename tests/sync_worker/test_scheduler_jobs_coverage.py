@@ -85,7 +85,7 @@ def test_jobs_registry_has_expected_count() -> None:
     ≈1 请求/天）→ 13 → 14。
     2026-09-19：plugin.ad_merge_today2daily 移除（同步逻辑删除，保留 ad_today 表）→ 17 → 16。
     2026-09-29：analytics.shop_fee_rate 加入（店铺级平台抽成费率，
-    24h 重算 → config.shop_fee_rate，供 spu-roi 未结算估算）→ 16 → 17。
+    24h 重算 → reporting.shop_fee_rate_estimates，供 spu-roi 未结算估算）→ 16 → 17。
     """
     # 6 tiktok + 11 system (token + 5 miaoshou + 2 reporting + image_mirror
     # + fx.sync + shop_fee_rate) — keep the number pinned so we don't drift silently.

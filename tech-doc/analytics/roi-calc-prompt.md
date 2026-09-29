@@ -50,7 +50,7 @@
 - 采购成本 CNY/件：读 `procurement.manual_product_costs WHERE valid_to IS NULL`
   （cost_source=人工标注价格）；未录入默认 40 CNY/件（默认兜底价格，行标 ⚠）。
 - 广告成本：原生 USD，以用户给定总广告花费为准；进入公式后按同一快照换算为 CNY。ERP 归因 spend 仅作对照。
-- 平台费基线 fee_rate = 30.8%（`FEE_RATE_BASELINE`，2026-09-06 实测重定，可覆写）。
+- 平台费 fee_rate：优先使用 7 天内店铺 `fee-v2` 实测快照；无可用快照时回退 30.8%（`FEE_RATE_BASELINE`）；可临时覆写。
 
 ### 3.1 平台佣金费率 r̂ 的完整口径（务必按此，勿凭直觉）
 
@@ -69,7 +69,7 @@
 3. **样本 = 只统计未退款(kept)订单**（`CUSTOMER_REFUND = 0`）。
    因为本公式已另有 `(1 − 退款率)` 扣过一次退款；若 r̂ 的样本里再混入全额退款
    订单（其费率仅 ~3% of 行GMV），退款效应被**算两遍**。
-4. **作用域** = 单店铺 + 近 180 天（由 `analytics.shop_fee_rate` 任务每 24h 快照）。
+4. **作用域** = 单店铺 + 近 180 天（由 `analytics.shop_fee_rate` 每 24h 写 `fee-v2` 快照；旧 `fee-v1-legacy` 不可用于计算）。
 
 生产反证（把已结算订单当作未结算来预测，与真实 ΣSETTLEMENT 比）：
 kept 口径误差 **±1%**；混合口径（含退款单）高估 **~16%**。

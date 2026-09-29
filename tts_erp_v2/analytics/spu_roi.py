@@ -200,6 +200,10 @@ def _meta_payload(
         },
         "cost_assumption": _COST_ASSUMPTION,
         "fee": {
+            # Stable-contract compatibility: pre shop-estimate clients consume
+            # ``mode`` ∈ {override, baseline}.  Keep it as a deprecated alias;
+            # ``source`` carries the richer per-shop semantics.
+            "mode": ("override" if basis.fee_source == "user_override" else "baseline"),
             "source": basis.fee_source,
             "rate": _fmt_rate(basis.fee_rate),
             "override": _fmt_rate(fee_rate) if fee_rate is not None else None,

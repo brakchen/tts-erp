@@ -27,6 +27,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from tts_erp_v2.db.base import Base
+from tts_erp_v2.db.constants import SHOP_FEE_RATE_CALCULATION_VERSION
 
 
 class ProductCostSnapshot(Base):
@@ -213,7 +214,8 @@ class ShopFeeRateEstimate(Base):
 
     ``kept_share`` = ``kept_line_gmv / window_line_gmv``，余量 = 退款订单 +
     缺 FEE 分项的订单；**仅供观测**（前端费率卡会显示），不作门槛 ——
-    用户拍板：窗口内只要有一单已结算就算。
+    用户拍板：窗口内只要有一单已结算就算。当前口径版本是 ``fee-v2``；
+    ``fee-v1``/``fee-v1-legacy`` 均不可被读取侧用于盈利计算。
     """
 
     __tablename__ = "shop_fee_rate_estimates"
@@ -255,7 +257,7 @@ class ShopFeeRateEstimate(Base):
     total_fee: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
     currency: Mapped[str] = mapped_column(Text, nullable=False)
     calculation_version: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'fee-v1'")
+        Text, nullable=False, server_default=SHOP_FEE_RATE_CALCULATION_VERSION
     )
     calculated_at: Mapped[datetime] = mapped_column(
         nullable=False, server_default=text("now()")

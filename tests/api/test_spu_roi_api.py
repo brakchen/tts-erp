@@ -2481,8 +2481,8 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
     assert meta["fx"]["as_of"] == "2099-09-06"
     assert meta["fx"]["source"] == "fx-cache"
     assert isinstance(meta["fx"]["snapshot_id"], int)
-    # feature/shop-fee-rate：``mode`` 更名为 ``source``（值也细化为
-    # user_override / shop_estimate / baseline / mixed），费率统一 4 位小数。
+    # ``mode`` 是 stable API 的兼容别名；``source`` 提供细化后的逐店来源。
+    assert meta["fee"]["mode"] == "baseline"
     assert meta["fee"]["source"] == "baseline"
     assert meta["fee"]["rate"] == "0.3080"
     assert meta["fee"]["override"] is None

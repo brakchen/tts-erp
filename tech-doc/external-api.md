@@ -349,11 +349,20 @@ Query parameters:
 | `offset` | int | 0 | ≥ 0 |
 | `include_all` | bool | `false` | `false` 只含有广告∨有效销售∨退款的 SPU;`true` 拉全部 **ACTIVE**(status ILIKE 'activate')目录 SPU(DEACTIVATE/DELETED 等排除) |
 | `shop_pk` | int | — | 店铺过滤(内部主键) |
-| `fee_rate` | decimal-str | — | 平台佣金费率页面覆写;缺省固定基线 `0.308`(决策 D10,2026-09-06 实测重定);**v8 语义变化：仅作用于未结算订单 (r̂ × unsettled_sales)，已结算订单费用已含在 SETTLEMENT 不受此影响** |
+| `fee_rate` | decimal-str | — | 临时页面覆写（仅本次请求，不持久化）；缺省按店铺取当前 `fee-v2` 实测快照，缺失/超过 7 天才回退基线 `0.308`。只作用于未结算订单 `r̂ × unsettled_sales`，已结算费用已含在 SETTLEMENT |
 | `w_start` | date | — | ISO `yyyy-mm-dd`;销售与退款均按关联订单 `COALESCE(order_time, paid_at)` 裁剪；退款跟随原订单归属（含当日） |
 | `w_end` | date | — | ISO `yyyy-mm-dd`;与 `w_start` 配对使用；例如 9 月 1 日订单在 9 月 10 日退款，仍归入 9 月 1 日；不提供窗口 = 销售/退款全历史累计 |
 
 Response envelope:`{items: [...], total, totals, meta}`。`spu_ids` 属于盈利范围：金额从命中 SPU 行聚合，订单/取消/退款 totals 在命中 SPU 集合内跨 SPU 去重，且 totals 不受分页影响。页面使用 Bootstrap 5 + 自托管 Tom Select Bootstrap 5 主题的原生 `<select multiple>` 选择/搜索/粘贴 SPU，点击「查询」后才应用 scope；已应用的 scope 会同步到页面 URL，刷新或分享链接后恢复。批量粘贴校验期间可点「清空」取消，最多选择 100 个 SPU。
+
+`meta.fee` 契约：
+
+- `source`: `user_override | shop_estimate | baseline | mixed`，表示本次范围实际费率来源；
+- `mode`: **deprecated 兼容字段**，仅为旧客户端保留，值仍是 `override | baseline`；`shop_estimate`/`mixed` 映射为 `baseline`，新客户端必须读取 `source`；
+- `rate`: 本次范围展示费率（4 位小数字符串；多店不同费率时 `source=mixed`，逐店真实值见 `per_shop`）；
+- `override`: 页面覆写值，否则 `null`；
+- `per_shop[]`: `shop_pk/shop_name/rate/source/fallback_reason/estimate`；实测 `estimate` 包含 `calculated_on/calculated_at/lookback_days/kept_order_count/kept_line_gmv/window_line_gmv/kept_share/total_fee/currency`；
+- 解析优先级：页面覆写 > 7 天内 `fee-v2` 店铺实测 > `0.308` 基线。
 
 **当前行字段契约（页面主列仅渲染 6 列 + 商品维度，其余由下钻面板或外部分析消费）**：
 
@@ -400,6 +409,8 @@ Response envelope:`{items: [...], total, totals, meta}`。`spu_ids` 属于盈利
 | `cost_source` | enum | **v8 扩为四值**：`MANUAL`(人工标注的采购成交价) \| `PURCHASE`(妙手采购单成交价) \| `SOURCE_PRICE`(1688 货源价) \| `DEFAULT_K1`(40 CNY/件) | — |
 | `net_profit` | money-str (CNY) | **M18 v8** = `net_revenue − (units_sold + full_loss_cancelled_qty) × unit_cost − spend`（**不**扣 platform_fee：已结费用含 SETTLEMENT，未结按 (1−r̂) 折算） | **主列** |
 | `platform_fee` | money-str (CNY) | **M19 v8** = `r̂ × unsettled_sales`（**信息列，不**进 M18） | — |
+| `fee_rate_used` | ratio-str | 本行实际使用的 r̂（4 位小数字符串） | — |
+| `fee_source` | enum | `user_override | shop_estimate | baseline`；逐行来源，不出现聚合层 `mixed` | — |
 | `roi_real` | ratio-str/null | **M14 v8** = `(net_revenue − return_loss) / spend` | 下钻·利润构成 |
 | `roi_breakeven` | ratio-str/null | **M17 v8** = `NC′ ÷ (NC′ − COGS_kept)`（fee_est 项移除） | 下钻·利润构成 |
 | `cpa` | money-str/null | M15: `spend / ad_orders` | — |
@@ -427,7 +438,7 @@ Response envelope:`{items: [...], total, totals, meta}`。`spu_ids` 属于盈利
 **v9 默认值总览**：
 
 - `sort="roi_real"`（API 契约不动；页面 JS 显式传 `sort=net_profit&order=asc`）
-- `fee_rate=0.308`（仅作用于未结算订单 `unsettled_sales × 0.308`，已结不受影响）
+- `fee_rate` 不传：逐店使用 7 天内 `fee-v2` 实测快照，无可用快照时回退 `0.308`；只作用于未结算订单
 - `include_all=false`、`limit=100`、`order="asc"`
 - `meta.rubric_version="v9"`（口径漂移一眼定位）
 

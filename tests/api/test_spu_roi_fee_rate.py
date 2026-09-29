@@ -19,6 +19,8 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import text
 
+from tts_erp_v2.db.constants import SHOP_FEE_RATE_CALCULATION_VERSION
+
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
 FX_SEED_TS = "2099-09-29T00:00:00+00:00"
@@ -111,6 +113,7 @@ def _seed_estimate(
     *,
     rate: str = "0.3590",
     calculated_on_offset_days: int = 0,
+    calculation_version: str = SHOP_FEE_RATE_CALCULATION_VERSION,
 ) -> None:
     """写入一份店铺费率快照；``calculated_on_offset_days`` 用于造过期快照。"""
     with db_engine.begin() as conn:
@@ -123,9 +126,14 @@ def _seed_estimate(
                 " kept_share, total_fee, currency, calculation_version) "
                 "VALUES (:shop, (CURRENT_DATE - :off), 180, :rate, "
                 "        128, 182340000, 190000000, 0.959684, 65463060, "
-                "        'VND', 'fee-v1')"
+                "        'VND', :version)"
             ),
-            {"shop": shop_pk, "rate": rate, "off": calculated_on_offset_days},
+            {
+                "shop": shop_pk,
+                "rate": rate,
+                "off": calculated_on_offset_days,
+                "version": calculation_version,
+            },
         )
 
 
@@ -146,6 +154,7 @@ def test_shop_estimate_applies(api_client, readonly_key, _fx, db_engine) -> None
     payload = _get(api_client, readonly_key, shop_pk=shop_pk)
 
     fee = payload["meta"]["fee"]
+    assert fee["mode"] == "baseline"  # deprecated compatibility alias
     assert fee["source"] == "shop_estimate"
     assert fee["rate"] == "0.3590"
     assert fee["override"] is None
@@ -176,6 +185,7 @@ def test_missing_estimate_falls_back_to_baseline(
     payload = _get(api_client, readonly_key, shop_pk=shop_pk)
 
     fee = payload["meta"]["fee"]
+    assert fee["mode"] == "baseline"
     assert fee["source"] == "baseline"
     assert fee["rate"] == "0.3080"
     entry = fee["per_shop"][0]
@@ -185,6 +195,25 @@ def test_missing_estimate_falls_back_to_baseline(
     row = payload["items"][0]
     assert row["fee_source"] == "baseline"
     assert row["fee_rate_used"] == "0.3080"
+
+
+def test_legacy_calculation_version_falls_back_to_baseline(
+    api_client, readonly_key, _fx, db_engine
+) -> None:
+    shop_pk = _seed_shop_with_spu(
+        db_engine,
+        "TEST_FEEAPI_LEGACY",
+        "TEST_FEEAPI_SPU_LEGACY",
+    )
+    _seed_estimate(db_engine, shop_pk, calculation_version="fee-v1")
+
+    payload = _get(api_client, readonly_key, shop_pk=shop_pk)
+
+    fee = payload["meta"]["fee"]
+    assert fee["mode"] == "baseline"
+    assert fee["source"] == "baseline"
+    assert fee["per_shop"][0]["fallback_reason"] == "no_estimate"
+    assert payload["items"][0]["fee_rate_used"] == "0.3080"
 
 
 def test_stale_estimate_falls_back_to_baseline(
@@ -214,6 +243,7 @@ def test_override_beats_shop_estimate(api_client, readonly_key, _fx, db_engine) 
     payload = _get(api_client, readonly_key, shop_pk=shop_pk, fee_rate="0.5")
 
     fee = payload["meta"]["fee"]
+    assert fee["mode"] == "override"
     assert fee["source"] == "user_override"
     assert fee["rate"] == "0.5000"
     assert fee["override"] == "0.5000"
