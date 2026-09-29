@@ -79,10 +79,19 @@ UNPAID_SALES_ORDER_STATUSES: Final[frozenset[str]] = frozenset(
 )
 
 
+# ─── Shop fee-rate snapshot contract ────────────────────────────────
+# ``fee-v1`` mixed refunded and kept orders.  ``fee-v2`` is the first
+# version that measures only non-refunded orders, matching the ROI formula's
+# separate refund-rate factor.  Readers must filter to this version so a
+# migrated legacy row is never silently reinterpreted under the new formula.
+SHOP_FEE_RATE_CALCULATION_VERSION: Final[str] = "fee-v2"
+
+
 __all__ = [
     "ACTIVE_PRODUCT_STATUS",
     "ACTIVE_PRODUCT_STATUSES",
     "DELISTED_PRODUCT_STATUSES",
     "PAID_SALES_ORDER_STATUSES",
+    "SHOP_FEE_RATE_CALCULATION_VERSION",
     "UNPAID_SALES_ORDER_STATUSES",
 ]

@@ -34,6 +34,7 @@ from tts_erp_v2.db.models import (
     ShopFeeRateEstimate,
 )
 from tts_erp_v2.jobs.finance_fee_rate import (
+    CALCULATION_VERSION,
     LOOKBACK_DAYS,
     MIN_ELIGIBLE_ORDER_COUNT,
     compute_shop_fee_rates,
@@ -176,12 +177,17 @@ def _bulk(
         )
 
 
-def _rates(session) -> dict[int, ShopFeeRateEstimate]:
-    """只取本测试造的店铺行。
+def _compute_for(session, *shops: ChannelAccount, now: datetime = _NOW) -> dict:
+    """只重算本测试拥有的店铺，绝不触碰共享测试库的非 TEST_ 行。"""
+    return compute_shop_fee_rates(
+        session,
+        now=now,
+        shop_pks=tuple(shop.id for shop in shops),
+    )
 
-    ``compute_shop_fee_rates`` 是全库聚合（共享测试库里有真实店铺的真实结算
-    数据），断言必须收窄到自己的样本。
-    """
+
+def _rates(session) -> dict[int, ShopFeeRateEstimate]:
+    """只取本测试造的店铺行。"""
     rows = (
         session.execute(
             select(ShopFeeRateEstimate)
@@ -208,7 +214,7 @@ def test_gmv_weighted_rate_per_shop(db_session) -> None:
     # B: 50 单 line_gmv=1000/fee=-380 → 0.380
     _bulk(db_session, shop_b, count=50, txn_time=recent, fee="-380")
 
-    result = compute_shop_fee_rates(db_session, now=_NOW)
+    result = _compute_for(db_session, shop_a, shop_b)
 
     assert result["calculated_on"] == _NOW.date().isoformat()
     assert result["lookback_days"] == LOOKBACK_DAYS
@@ -220,7 +226,22 @@ def test_gmv_weighted_rate_per_shop(db_session) -> None:
     assert rates[shop_a.id].kept_share == Decimal(1)
     assert rates[shop_a.id].total_fee == Decimal(13250)
     assert rates[shop_a.id].currency == "VND"
+    assert rates[shop_a.id].calculation_version == CALCULATION_VERSION
     assert rates[shop_b.id].fee_rate == Decimal("0.380")
+
+
+def test_shop_scope_does_not_touch_unrequested_shops(db_session) -> None:
+    requested = _make_shop(db_session, "TEST_FEERATE_SCOPE_A")
+    untouched = _make_shop(db_session, "TEST_FEERATE_SCOPE_B")
+    recent = _NOW - timedelta(days=1)
+    _bulk(db_session, requested, count=1, txn_time=recent, fee="-300")
+    _bulk(db_session, untouched, count=1, txn_time=recent, fee="-400")
+
+    _compute_for(db_session, requested)
+
+    rates = _rates(db_session)
+    assert requested.id in rates
+    assert untouched.id not in rates
 
 
 def test_gross_sales_component_does_not_affect_rate(db_session) -> None:
@@ -242,7 +263,7 @@ def test_gross_sales_component_does_not_affect_rate(db_session) -> None:
             gross_sales="2000",  # 2× line_gmv
         )
 
-    compute_shop_fee_rates(db_session, now=_NOW)
+    _compute_for(db_session, shop)
 
     row = _rates(db_session)[shop.id]
     assert row.window_line_gmv == Decimal(50000)
@@ -277,7 +298,7 @@ def test_fee_component_is_used_not_platform_commission(db_session) -> None:
     )
     db_session.flush()
 
-    compute_shop_fee_rates(db_session, now=_NOW)
+    _compute_for(db_session, shop)
 
     assert _rates(db_session)[shop.id].fee_rate == Decimal("0.300")
 
@@ -296,7 +317,7 @@ def test_multi_transaction_order_counts_line_gmv_once(db_session) -> None:
             extra_txns=2,  # 每单共 3 笔结算交易
         )
 
-    compute_shop_fee_rates(db_session, now=_NOW)
+    _compute_for(db_session, shop)
 
     row = _rates(db_session)[shop.id]
     assert row.kept_order_count == _BULK
@@ -316,7 +337,7 @@ def test_single_settled_order_is_enough(db_session) -> None:
         fee="-300",
     )
 
-    compute_shop_fee_rates(db_session, now=_NOW)
+    _compute_for(db_session, shop)
 
     row = _rates(db_session)[shop.id]
     assert row.kept_order_count == 1
@@ -335,7 +356,7 @@ def test_low_coverage_still_produces_row(db_session) -> None:
     _bulk(db_session, shop, count=10, txn_time=recent, fee="-300")
     _bulk(db_session, shop, count=90, txn_time=recent, fee=None)
 
-    result = compute_shop_fee_rates(db_session, now=_NOW)
+    result = _compute_for(db_session, shop)
 
     assert "insufficient_coverage" not in result["skipped_reasons"]
     row = _rates(db_session)[shop.id]
@@ -351,7 +372,7 @@ def test_kept_share_is_recorded(db_session) -> None:
     _bulk(db_session, shop, count=50, txn_time=recent, fee="-300")
     _bulk(db_session, shop, count=12, txn_time=recent, fee=None)
 
-    compute_shop_fee_rates(db_session, now=_NOW)
+    _compute_for(db_session, shop)
 
     row = _rates(db_session)[shop.id]
     assert row.kept_order_count == 50
@@ -383,7 +404,7 @@ def test_refunded_orders_are_excluded_from_rate(db_session) -> None:
             refund="-1000",
         )
 
-    compute_shop_fee_rates(db_session, now=_NOW)
+    _compute_for(db_session, shop)
 
     row = _rates(db_session)[shop.id]
     # 只算未退款的 50 单 → 0.30；若混入退款单会是 16500/100000 = 0.165
@@ -422,10 +443,46 @@ def test_mixed_fee_currency_is_skipped(db_session) -> None:
     comp.currency = "USD"
     db_session.flush()
 
-    result = compute_shop_fee_rates(db_session, now=_NOW)
+    result = _compute_for(db_session, shop)
 
     assert shop.id not in _rates(db_session)
     assert result["skipped_reasons"].get("mixed_fee_currency", 0) >= 1
+
+
+def test_same_order_mixed_fee_currency_is_skipped(db_session) -> None:
+    """同一订单的不同结算交易混币种，也必须跳过而非先被 MAX 压扁。"""
+    shop = _make_shop(db_session, "TEST_FEERATE_FX_ORDER")
+    order_pk = _make_settled_order(
+        db_session,
+        shop=shop,
+        txn_time=_NOW - timedelta(days=1),
+        fee="-300",
+        fee_currency="VND",
+        extra_txns=1,
+    )
+    txns = (
+        db_session.execute(
+            select(SettlementTransaction)
+            .where(SettlementTransaction.order_pk == order_pk)
+            .order_by(SettlementTransaction.id)
+        )
+        .scalars()
+        .all()
+    )
+    db_session.add(
+        SettlementComponent(
+            transaction_id=txns[1].id,
+            component_code="FEE",
+            amount=Decimal(-10),
+            currency="USD",
+        )
+    )
+    db_session.flush()
+
+    result = _compute_for(db_session, shop)
+
+    assert shop.id not in _rates(db_session)
+    assert result["skipped_reasons"].get("mixed_fee_currency", 0) == 1
 
 
 def test_zero_line_gmv_is_skipped(db_session) -> None:
@@ -440,7 +497,7 @@ def test_zero_line_gmv_is_skipped(db_session) -> None:
         fee="0",
     )
 
-    result = compute_shop_fee_rates(db_session, now=_NOW)
+    result = _compute_for(db_session, shop)
 
     # line_gmv = 0 的订单被 SQL 侧 ``WHERE g.line_gmv > 0`` 滤掉，该店连
     # 聚合结果行都不存在（既不是 upsert 也不是 skip）。
@@ -458,7 +515,7 @@ def test_out_of_window_orders_ignored(db_session) -> None:
         fee="-300",
     )
 
-    compute_shop_fee_rates(db_session, now=_NOW)
+    _compute_for(db_session, shop)
 
     assert shop.id not in _rates(db_session)
 
@@ -475,8 +532,8 @@ def test_upsert_idempotent_same_day_and_new_row_next_day(db_session) -> None:
         fee="-310",
     )
 
-    compute_shop_fee_rates(db_session, now=_NOW)
-    compute_shop_fee_rates(db_session, now=_NOW + timedelta(hours=6))
+    _compute_for(db_session, shop)
+    _compute_for(db_session, shop, now=_NOW + timedelta(hours=6))
     same_day = (
         db_session.execute(
             select(ShopFeeRateEstimate).where(ShopFeeRateEstimate.shop_pk == shop.id)
@@ -488,7 +545,7 @@ def test_upsert_idempotent_same_day_and_new_row_next_day(db_session) -> None:
     assert same_day[0].fee_rate == Decimal("0.310")
 
     next_day = _NOW + timedelta(days=1)
-    compute_shop_fee_rates(db_session, now=next_day)
+    _compute_for(db_session, shop, now=next_day)
     rows = (
         db_session.execute(
             select(ShopFeeRateEstimate)

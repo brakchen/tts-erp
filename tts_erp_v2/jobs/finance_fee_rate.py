@@ -13,8 +13,8 @@ spu-roi 估算未结算订单净额用费率 r̂
 按**订单**聚合（一笔订单可能有多笔结算交易，按交易求和会把 line_gmv
 重复计）。::
 
-    fee_rate       = Σ|FEE| / Σ line_gmv          （带 FEE 的已结算订单）
-    kept_share = Σ line_gmv(带 FEE) / Σ line_gmv(窗口内全部已结算订单)
+    fee_rate  = Σ|FEE| / Σ line_gmv       （带 FEE 且未退款的已结算订单）
+    kept_share = Σ line_gmv(未退款且带 FEE) / Σ line_gmv(窗口内全部已结算订单)
 
 * ``line_gmv`` = ``sales_order_lines.quantity × unit_price`` = **客户实付
   （折扣后）**。**分母不能用 ``GROSS_SALES``** —— 那是折扣前挂牌价，
@@ -36,8 +36,8 @@ spu-roi 估算未结算订单净额用费率 r̂
 历史结算数据存在**只有 ``SETTLEMENT`` 没有 ``FEE`` 分项**的行（v3 时期
 只落 settlement_amount 的历史遗留，见 ``db/models/finance.py`` 的
 audit 注记）。这类交易若被当作 ``fee = 0`` 计入分母，会把费率系统性拉低。
-因此本任务把「有 FEE 的 GMV」与「窗口内全部已结算 GMV」分开统计，覆盖率
-不达 ``MIN_COVERAGE_RATIO`` 的店铺直接跳过（不写快照，读取侧回退基线）。
+因此本任务把「未退款且有 FEE 的 GMV」与「窗口内全部已结算 GMV」分开统计。
+``kept_share`` 仅供观测历史数据完整度，不作写入门槛。
 
 门槛与守卫
 ----------
@@ -64,14 +64,15 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from tts_erp_v2.db.constants import SHOP_FEE_RATE_CALCULATION_VERSION
 from tts_erp_v2.jobs.runner import run_job
 
 log = logging.getLogger("tts_erp_v2.jobs.finance_fee_rate")
 
 JOB_NAME = "analytics.shop_fee_rate"
 
-#: 口径版本；改动聚合方式 / 组件集合时递增，便于对新旧快照分群对比。
-CALCULATION_VERSION = "fee-v1"
+#: 口径版本；fee-v1 混入退款订单，fee-v2 起仅统计未退款订单。
+CALCULATION_VERSION = SHOP_FEE_RATE_CALCULATION_VERSION
 
 #: 统计窗口：近 N 天已结算订单。
 LOOKBACK_DAYS = 180
@@ -100,6 +101,8 @@ _SQL_SHOP_FEE_RATE = text(
         FROM finance.settlement_transactions st
         JOIN commerce.sales_orders so ON so.id = st.order_pk
         WHERE st.order_pk IS NOT NULL
+          AND (CAST(:shop_pks AS bigint[]) IS NULL
+               OR so.shop_pk = ANY(CAST(:shop_pks AS bigint[])))
           AND COALESCE(st.transaction_time, st.synced_at) >= :window_start
           AND COALESCE(st.transaction_time, st.synced_at) <  :window_end
     ),
@@ -113,6 +116,9 @@ _SQL_SHOP_FEE_RATE = text(
                    ), 0
                ) AS refund,
                BOOL_OR(sc.component_code = 'FEE') AS has_fee,
+               COUNT(DISTINCT sc.currency)
+                   FILTER (WHERE sc.component_code = 'FEE')
+                   AS order_fee_currency_count,
                MAX(sc.currency) FILTER (WHERE sc.component_code = 'FEE')
                    AS fee_currency
         FROM finance.settlement_transactions st
@@ -144,6 +150,10 @@ _SQL_SHOP_FEE_RATE = text(
            COUNT(DISTINCT t.fee_currency)
                FILTER (WHERE t.has_fee AND t.refund = 0)
                AS fee_currency_count,
+           COALESCE(
+               MAX(t.order_fee_currency_count)
+                   FILTER (WHERE t.has_fee AND t.refund = 0), 0
+           ) AS max_order_fee_currency_count,
            MAX(t.fee_currency) FILTER (WHERE t.has_fee AND t.refund = 0)
                AS currency
     FROM order_gmv g
@@ -187,11 +197,13 @@ def compute_shop_fee_rates(
     *,
     now: datetime | None = None,
     lookback_days: int = LOOKBACK_DAYS,
+    shop_pks: tuple[int, ...] | None = None,
 ) -> dict[str, Any]:
-    """重算全部店铺的费率快照并 upsert。返回计数摘要（供测试与日志）。
+    """重算费率快照并 upsert；默认全店，测试可显式收窄店铺。
 
-    不满足样本量 / 覆盖率 / 费率区间门槛的店铺**不写行**，其跳过原因计入
-    ``skipped_reasons``（按店计数）以便运维定位是数据缺口还是样本不足。
+    ``shop_pks`` 仅用于隔离测试或定向运维重算；定时任务始终传 ``None``。
+    无未退款 FEE 样本、混币种或费率越界的店铺不写行，原因记录在
+    ``skipped_reasons``。样本量和 ``kept_share`` 都不是阻断门槛。
     """
     now = now or datetime.now(UTC)
     window_end = now
@@ -201,7 +213,11 @@ def compute_shop_fee_rates(
     rows = (
         session.execute(
             _SQL_SHOP_FEE_RATE,
-            {"window_start": window_start, "window_end": window_end},
+            {
+                "window_start": window_start,
+                "window_end": window_end,
+                "shop_pks": list(shop_pks) if shop_pks is not None else None,
+            },
         )
         .mappings()
         .all()
@@ -230,13 +246,19 @@ def compute_shop_fee_rates(
         fee_total = Decimal(row["total_fee"] or 0)
         currency = row["currency"]
         currency_count = row["fee_currency_count"] or 0
+        max_order_currency_count = row["max_order_fee_currency_count"] or 0
 
         if currency is None or kept_gmv <= 0:
             _skip(shop_pk, "no_kept_orders")
             continue
-        if currency_count > 1:
-            # line_gmv 是本币，但 FEE 混用多币种 → 不可相加（防跨币种）。
-            _skip(shop_pk, "mixed_fee_currency", currency_count=currency_count)
+        if currency_count > 1 or max_order_currency_count > 1:
+            # 同店跨订单、同一订单跨交易的混币种都不可相加。
+            _skip(
+                shop_pk,
+                "mixed_fee_currency",
+                currency_count=currency_count,
+                max_order_currency_count=max_order_currency_count,
+            )
             continue
         if kept_count < MIN_ELIGIBLE_ORDER_COUNT:
             _skip(

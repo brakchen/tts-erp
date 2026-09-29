@@ -36,7 +36,10 @@ from tts_erp_v2.analytics.spu_profitability._types import (
     ShopFeeRateEstimate,
     SpuProfitability,
 )
-from tts_erp_v2.db.constants import PAID_SALES_ORDER_STATUSES
+from tts_erp_v2.db.constants import (
+    PAID_SALES_ORDER_STATUSES,
+    SHOP_FEE_RATE_CALCULATION_VERSION,
+)
 from tts_erp_v2.fx.rates import load_rate_map
 
 log = logging.getLogger(__name__)
@@ -48,9 +51,9 @@ log = logging.getLogger(__name__)
 # K1 默认 = 40 CNY/件（D1 拍板：原 K1=30 作废；≈ $5.95/件 @0.148823）
 K1_DEFAULT_CNY = Decimal(40)
 # 平台佣金基线 r̂（dashboard D10 2026-09-06 实测重定）
-# 2026-09-29 起为兜底值：config.shop_fee_rate 有实测行的店铺用店铺费率
-# （analytics.shop_fee_rate 任务每 24h 按近 30 天已结算订单重算），
-# 无实测样本的店铺回退此基线。
+# 2026-09-29 起为兜底值：reporting.shop_fee_rate_estimates 有当前口径实测行的
+# 店铺使用近 180 天费率；analytics.shop_fee_rate 每 24h 重算。无新鲜实测样本
+# 的店铺回退此基线。
 FEE_RATE_BASELINE = Decimal("0.308")
 
 _RATE_Q8 = Decimal("0.00000001")
@@ -385,6 +388,7 @@ _SQL_SHOP_FEE_RATES = text(
            kept_order_count, kept_line_gmv, window_line_gmv,
            kept_share, total_fee, currency
     FROM reporting.shop_fee_rate_estimates
+    WHERE calculation_version = :calculation_version
     ORDER BY shop_pk, calculated_at DESC
     """
 )
@@ -735,7 +739,14 @@ def _load_shop_fee_estimates(
             FEE_RATE_BASELINE,
         )
         return {}
-    rows = sess.execute(_SQL_SHOP_FEE_RATES).mappings().all()
+    rows = (
+        sess.execute(
+            _SQL_SHOP_FEE_RATES,
+            {"calculation_version": SHOP_FEE_RATE_CALCULATION_VERSION},
+        )
+        .mappings()
+        .all()
+    )
     # 这里不再套 int()：列值是 psycopg 直接返回的 Python int/Decimal，
     # 多余的类型转换还会触发 pi-lens 的 unchecked-throwing-call-python。
     return {

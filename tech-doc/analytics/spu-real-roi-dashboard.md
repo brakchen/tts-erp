@@ -83,7 +83,7 @@
 | D7（已拍板，2026-09-05） | 结算归属解析 job + 视图排期：把 59 列结算 raw 解析为按订单/行/case 归属的结构化数据并建只读 view（M16 数据底座） | §6.11/§9-3/§10 |
 | D8（2026-09-05） | 页面金额核心列 = **净利润（毛利口径，M18）**；净现金收入(M13) 仅内部中间量，不展示 | §3.1/§4.2/§5.2/§7 |
 | D9（历史，已被 D11 覆盖） | 曾规定固定汇率常量 | §4.6/§6.12 |
-| D10（2026-09-05） | 平台佣金（渠道费用）= **平台从销售额直接扣除的全部费用**（抽佣/联盟/运费类等）；**已结算订单用实际扣费，未结算订单用参考基线 r̂ ≈ 30.8%**（Σ\|fee_amount\|/Σgross）估算，页面可覆写；解析 job 上线后自动分层（已结算不再估） | §4.2/§5.2/§6.11 |
+| D10（2026-09-05；2026-09-29 补充） | 平台佣金（渠道费用）= **平台从销售额直接扣除的全部费用**（抽佣/联盟/运费类等）；已结算订单用 SETTLEMENT 实际净额，未结算订单优先使用店铺 fee-v2 实测 r̂；无新鲜实测才回退 30.8%，页面可临时覆写 | §4.2/§5.2/§6.11 |
 | D11（2026-09-29） | **所有金额统一 CNY 计算和展示**：广告 USD × `rates[CNY]`；销售/退款 VND ÷ (`rates[VND] / rates[CNY]`)；采购成本直接用 CNY。汇率来自同一数据库快照，缺失失败关闭；D11 覆盖 D1/D6/D9 的固定汇率和 USD 展示决策 | §3.4/§4.2/§4.6/§5.2/§7 |
 
 ---
@@ -137,9 +137,9 @@
 | case / case_lines | 售后单：`after_sales.cases`（单头）+ `after_sales.case_lines`（按订单行拆分） |
 | case 状态完结 | 见 §4.3：`CANCELLATION_REQUEST_COMPLETE` / `RETURN_OR_REFUND_REQUEST_COMPLETE` 才代表钱已退 |
 | 实际 ROI | 对照档 **L0** = 平台 GMV ROI（广告口径，仅供对照）；**主指标 = 实际 ROI（M14）= (净现金收入 − 全损退货货损) ÷ 广告消耗（全 CNY；比值无量纲）**；**保本实际 ROI（M17）= 每 SPU 的动态盈亏线**（实际 ROI 低于它即亏，公式见 §4.2）。公式见 §5 |
-| **净利润（毛利口径，页面金额核心列）** | M18 = 净现金收入(内部 M13) − 全部售出件货本 − 广告消耗 − **平台佣金（M19：已结算实际 + 未结算 sales×r̂）**（全 CNY）；**≥ 0 ⇔ 实际 ROI ≥ 保本 ROI**；r̂ 默认 = 已结算参考基线（≈30.8%，2026-09-06 实测重定，含抽佣/联盟/运费等全部直接扣除），页面可覆写；解析上线后已结算部分自动用实际值。净现金收入本身**不展示** |
+| **净利润（毛利口径，页面金额核心列）** | M18 = 已结算 SETTLEMENT 实际净额 + 未结算 `line_gmv×(1−r̂)` − 全部售出件货本 − 广告消耗（全 CNY）；**≥ 0 ⇔ 实际 ROI ≥ 保本 ROI**。r̂ 优先取店铺 fee-v2 实测，无新鲜快照回退 30.8%，页面可临时覆写。净现金收入本身**不展示** |
 | 订单结算金额 | 每笔订单在 TikTok 结算单里的**净额**（平台扣费/退款调整已含其中，净现金口径不做手工分项建模——决策 3）。净现金的**权威口径**（M16）；解析 job + view 已排期（D7），当前未落地（§6.11/§9-3） |
-| **平台佣金（渠道费用）** | 平台从销售额**直接扣除的全部费用**（交易抽佣 + 联盟佣金 + 运费类 + 其它扣款；单笔总扣 = 结算交易级 `fee_amount`）。**已结算订单 = 实际扣费；未结算订单 = sales × 参考基线 r̂**（Σ\|fee_amount\|/Σgross，≈30.8%，页面可覆写 %）；解析 job 上线后自动分层（D10/M19，§4.2/§6.11） |
+| **平台佣金（渠道费用）** | 平台从销售额**直接扣除的全部费用**（交易抽佣 + 联盟佣金 + 运费类 + 其它扣款；单笔总扣 = 结算交易级 `fee_amount`）。已结算订单的费用已含在 SETTLEMENT 净额；未结算订单按店铺 fee-v2 实测 r̂ 估算，无新鲜快照回退 30.8%，页面可临时覆写（D10/M19，§4.2/§6.11） |
 | **全损退货（v9 口径，2026-09-07 拍板）** | 退货 + 海外取消均视为**全损**：① 退货(RETURN_AND_REFUND/REFUND_ONLY)直接算全损，除退给买家的钱（已计入退款）外，**每件另计货损** = 件数 × 单位成本解析值（人工优先/缺省 40 CNY/件）；② **海外取消**：CANCELLED + 物流已到海外（`action_code=38301`）→ 也计全损（货本已付出）；③ 国内取消(物流未到海外) ≠ 全损，不计货本 |
 | **货物成本（占位）** | 2026-09-05 拍板：**按 SPU 解析**——先查 `procurement.manual_product_costs` 有效行（`valid_to IS NULL`），命中即用（`cost_source=MANUAL`，**表内保证人民币 CNY**）；未命中才用默认 **K1 = 40 CNY/件**（`DEFAULT_K1`，页面 ⚠）。两者均为 CNY，直接进入 CNY 公式，不做无意义的往返换汇。 |
 | **显示币种（D11，2026-09-29）** | **全表金额列统一 CNY**：广告 USD × USD→CNY；销售/退款 VND ÷ VND-per-CNY；货本保持 CNY。同一请求使用同一数据库 fx 快照，列头/提示行标注 fx 时点；缺失时失败关闭 |
@@ -255,10 +255,10 @@ SPU 无广告投放 → 广告列显示 0 与“无投放”文案（不隐藏�
 | M15 | 单订单广告成本 | `cpa(s)` | `spend(s) / ad_orders(s)`（= M1/M2b，平台出单量口径） | 范围 | M1/M2b |
 | M16 | **订单结算金额（净现金权威口径，v7 已落地）** | `settlement_net(s)` | `Σ` 有效销售订单的**每笔订单 SETTLEMENT 净额**（TikTok 结算单订单级净额，平台扣费/退款调整已含；**v7 落地**：从 `finance.settlement_components` 取 `component_code='SETTLEMENT'`，通过 `finance.settlement_transactions.order_pk` 关联；不做佣金等分项建模——决策 3） | 按结算周期 | finance.settlement_components + finance.settlement_transactions |
 | M17 | **保本实际 ROI（每 SPU 动态线）** | `roi_breakeven(s)` | 见下方“保本线口径”：`NC′ ÷ (NC′ − COGS_kept − fee_est)`；`COGS_kept + fee_est ≥ NC′ → NULL`（结构性亏损，无保本线） | 范围 | 由 M13/M13b/M11/M5/M19 推导 |
-| M18 | **净利润（毛利口径，页面金额核心列）** | `net_profit(s)` | `(Σ line_net_vnd ÷ VND_per_CNY) − (ad_cost_usd × USD_CNY) − procurement_cny`；其中 `line_net_vnd = is_settled ? order_SETTLEMENT × line_gmv / order_gmv : line_gmv × (1 − 0.308)`，`procurement_cny = (units_sold + full_loss_cancelled_qty) × unit_cost_cny`（**2026-09-07 v7 关键改动**：净利润按"已结算 vs 未结算"分层算 — **已结算订单**用 `finance.settlement_components.SETTLEMENT`（卖家实际到账 VND，已扣完所有平台费 + 运费 + 联盟佣金 + 退款调整），按 line_gmv / order_gmv 比例分摊到各行；**未结算订单**按 `line_gmv × (1 − 30.8%)` 估算；v6 的 `COGS_all = (units_sold + full_loss_cancelled_qty) × unit_cost` 沿用；`is_settled` 判定 = `EXISTS (SELECT 1 FROM finance.settlement_transactions WHERE order_pk = sales_orders.id)`）；**`net_profit ≥ 0 ⇔ roi_real ≥ roi_breakeven`（与 M17 同号）**；**实测基线 35.9%**(v7 已结算订单验证)比 30.8% 高 5.1pp(联盟+运费+补贴),未来 finance job 落地后未结算部分应改用实测基线 | 范围求和 | finance.settlement_components + commerce + fx + 成本解析 |
+| M18 | **净利润（毛利口径，页面金额核心列）** | `net_profit(s)` | `(Σ line_net_vnd ÷ VND_per_CNY) − (ad_cost_usd × USD_CNY) − procurement_cny`；其中 `line_net_vnd = is_settled ? order_SETTLEMENT × line_gmv / order_gmv : line_gmv × (1 − r̂_shop)`，`procurement_cny = (units_sold + full_loss_cancelled_qty) × unit_cost_cny`（**2026-09-07 v7 关键改动**：净利润按"已结算 vs 未结算"分层算 — **已结算订单**用 `finance.settlement_components.SETTLEMENT`（卖家实际到账 VND，已扣完所有平台费 + 运费 + 联盟佣金 + 退款调整），按 line_gmv / order_gmv 比例分摊到各行；**未结算订单**按 `line_gmv × (1 − r̂_shop)` 估算（店铺 fee-v2 实测优先，0.308 仅兜底）；v6 的 `COGS_all = (units_sold + full_loss_cancelled_qty) × unit_cost` 沿用；`is_settled` 判定 = `EXISTS (SELECT 1 FROM finance.settlement_transactions WHERE order_pk = sales_orders.id)`）；**`net_profit ≥ 0 ⇔ roi_real ≥ roi_breakeven`（与 M17 同号）**；未结算部分已切换为店铺 fee-v2 实测费率，30.8% 仅作无可用快照时的兜底 | 范围求和 | finance.settlement_components + commerce + fx + 成本解析 |
 | M19 | **平台佣金基线（v7 DUAL-LAYER）** | `platform_fee(s)` | `r̂ × sales_unsettled(s)`（**2026-09-07 v7 改动**：已结算订单的扣费不再作为 M18 的输入——已隐含在 SETTLEMENT 净额里；本字段只剩"未结算订单 × 基线"部分；`r̂` = **店铺实测费率**（**2026-09-29 起**：`analytics.shop_fee_rate` 任务每 24h 按该店近 180 天**未退款(kept)** 已结算订单 **Σ\|FEE\| ÷ Σ行GMV** 重算，行GMV = `quantity × unit_price` = **客户实付**（非折扣前挂牌价 `GROSS_SALES`）；写入 `reporting.shop_fee_rate_estimates` 日快照；快照 >7 天视为过期）；无可用实测的店铺回退全局基线 30.8%；页面可临时覆写输入 %（仅影响本次请求，不写回店铺） | 范围 | M6(未结算子集) + 店铺实测费率 |
 
-> 净现金两种口径（v7 已统一到 M18）：M13 = 订单行金额朴素估算（不直接用，作内部中间量）；**M16 = 每笔订单 SETTLEMENT 净额（v7 已成为净利润的核心输入）**——已结算订单用 M16 当净收入，未结算订单用 `line_gmv × (1 − 30.8%)` 估算，二者按订单粒度逐笔加总。两者差异 ≈ 平台扣费 ± 退款调整时差。**v7 不再用 `net_cash − fee_est` 二次扣减**(避免重复扣)。
+> 净现金两种口径（v7 已统一到 M18）：M13 = 订单行金额朴素估算（不直接用，作内部中间量）；**M16 = 每笔订单 SETTLEMENT 净额（v7 已成为净利润的核心输入）**——已结算订单用 M16 当净收入，未结算订单用 `line_gmv × (1 − r̂_shop)` 估算（fee-v2 实测优先，0.308 兜底），二者按订单粒度逐笔加总。两者差异 ≈ 平台扣费 ± 退款调整时差。**v7 不再用 `net_cash − fee_est` 二次扣减**(避免重复扣)。
 
 **平台佣金（渠道费用）处理（D10：已结算按实际，未结算按基线）**：
 
@@ -270,11 +270,11 @@ SPU 无广告投放 → 广告列显示 0 与“无投放”文案（不隐藏�
 
 fee(SPU) = Σ 已结算订单的实际扣费（解析 view 按 order 汇总 |fee_amount|）
          + Σ 未结算订单 sales × r̂
-参考基线 r̂ = Σ|fee_amount| ÷ Σgross_sales_amount（已结算交易）
+历史参考基线 r̂ = 30.8%（仅在无可用店铺实测时兜底）
 店铺实测 r̂ = Σ|FEE| ÷ Σ行GMV，**只统计未退款(kept)订单**
            （行GMV = quantity × unit_price = 客户实付）
            → analytics.shop_fee_rate 任务每 24h 写入 reporting.shop_fee_rate_estimates
-             （日快照；窗口内有一单已结算即产出；快照 >7 天视为过期）
+             （fee-v2 日快照；窗口内有一单已结算即产出；快照 >7 天视为过期）
 全局基线   = 2026-09-05 去重实测 ≈ 30.8%（无可用实测 / 实测过期时的兜底）
 
 ⚠️ 分母口径（2026-09-29 生产库实测 + 反证确定，详见 shop-fee-rate-definition-gap.md）：
@@ -292,8 +292,7 @@ kept_share = Σ 行GMV(kept) ÷ Σ 行GMV(窗口内全部已结算)
   余量 = 退款订单 + 缺 FEE 分项的订单；**仅供观测，不作门槛**。
 ```
 
-- 本期（解析 job 未上线，无法区分已/未结算）：全按基线估 —— `platform_fee = sales × r̂`（≈30.8%，2026-09-06 重定；页面可覆写输入 %（M19）。（下文 M17/M18 公式中以 `fee_est` 作为该费用的代数简写，= M19 `platform_fee`。）
-- 解析 job 上线后：自动切“已结算 → 实际 fee_amount、未结算 → 基线 r̂”；同时 net_cash 基础切 M16 后，已结算订单的净额已含扣费，不再重复计 fee。
+- 当前实现：自动切“已结算 → SETTLEMENT 实际净额、未结算 → 店铺 fee-v2 实测 r̂”；无新鲜 fee-v2 快照时才回退 0.308，页面可临时覆写。已结算订单的净额已含扣费，不再重复计 fee。
 - fee 只扣进 **净利润（M18）与保本线（M17）**；实际 ROI（M14）分子 NC′ 不含 fee（同 COGS_kept 的处理：扣减项体现在保本线判断上，红绿判据仍与净利润同号，见 §5.4-6）。
 
 **保本线口径（M17，2026-09-05 需求）**：
@@ -309,7 +308,7 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
 
 - 推导自洽：M14 的分母就是 NC′，因此 `实际ROI ≥ 保本ROI ⇔ 利润 ≥ 0`，页面红/绿与盈亏同源，不会出现“红色却赚钱”。
 - 样例（§5.3 同款 SPU）：NC′=430.39 USD、COGS_kept=(27−4)×4.4322=101.94 USD、fee=sales 557.21×30.8%≈171.68 USD → `roi_breakeven = 430.39 ÷ (430.39−101.94−171.68) = 2.75`；实际 ROI 2.73 ≥ 1.63 → 绿。
-- **注（平台佣金/运费）**：费率 r̂ 默认 = 参考基线（≈30.8%，2026-09-06 重定；页面可覆写）；解析 job 上线后分层——已结算用实际 fee_amount（净额含扣费部分不再单计）、未结算仍按 r̂；卖家承担的退货运费待解析 job 落地后并入（§6.11/§9-3）。
+- **注（平台佣金/运费）**：费率 r̂ 默认按店铺取 7 天内 fee-v2 实测快照，无可用快照时回退 30.8%，页面可临时覆写；已结算用 SETTLEMENT 实际净额（不再单计扣费）、未结算按 r̂；卖家承担的退货运费待数据源补齐后并入（§6.11/§9-3）。
 
 **退款金额归属规则（重要，防重不漏）**：
 0. **先按订单有效性分桶**：join `sales_orders.status` —— 白名单内订单的已完结退款 → M7/M8（按 case_type 分）；`CANCELLED` 订单 → M9（信息列）；`UNPAID/ON_HOLD` 等异常 → 防御性进「未归属」。**实测覆盖（2026-09-05，完结状态）**：净额桶金额 27/27 行齐全 → 行级金额直取即可、无需分摊；取消桶仅 27/246 行有金额 → M9 缺失行如实报「未知行数」，不从 case 级/占比去猜数。
@@ -780,7 +779,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 - 输入：`integration.raw_records` `…/statement_transactions`（59 列），按 `payload->>'id'` 去重（同一交易会被多次抓取重复入库）。
 - 输出：结构化表（按 order_pk 归属，含 settlement_amount / gross_sales_amount / platform_commission_amount / return_shipping_fee_amount / refund 系列等，不再只留 settlement_amount 一个 component）+ **只读 view**（如 `finance.v_settlement_order`；模式参照 `analytics.ad_product_links`：DB 层 view、无 HTTP 端点、端点只读 view）。
 - 归属链：`payload->>'order_id'` → `commerce.sales_orders` → `after_sales.cases`（退货/运费按 case）→ case_lines → spu_pk；多 SPU 订单按订单行金额占比分摊到 SPU。
-- 参考基线：`r̂ = Σ|fee_amount| ÷ Σgross_sales_amount`（已结算交易级；2026-09-06 重定实测 ≈ **30.8%**）。**2026-09-29 起**主路径改为 `analytics.shop_fee_rate` 任务的**店铺实测日快照**（`reporting.shop_fee_rate_estimates`；分母 = 行GMV/客户实付、**仅未退款订单**，近 180 天、有一单即产出、快照 ≤7 天），基线退化为兜底值。口径定位与反证见 `shop-fee-rate-definition-gap.md`（结论：30.8% 量级正确）。
+- 参考基线：**30.8%**（只作无实测兜底；2026-09-06 实测重定）。**2026-09-29 起**主路径改为 `analytics.shop_fee_rate` 任务的**店铺实测日快照**（`reporting.shop_fee_rate_estimates`；分母 = 行GMV/客户实付、**仅未退款订单**，近 180 天、有一单即产出、快照 ≤7 天），基线退化为兜底值。口径定位与反证见 `shop-fee-rate-definition-gap.md`（结论：30.8% 量级正确）。
 
 **费用字段字典（2026-09-05 实测，已结算交易去重后）：**
 
@@ -810,7 +809,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 | 日期窗口(端点参数,2026-09 review 补) | **默认不传 = 销售/退款全历史累计**；可选 `w_start`/`w_end`(ISO 日期)裁剪，销售与退款统一按关联订单下单时间 `COALESCE(order_time, paid_at)` 归属；ad 按自身日期窗口裁剪 | 行/合计同筛选 | §4.5/§5.1-6 |
 | 行范围 | 有活动 SPU；可选 `include_all` | 空行金额全 0 | §5.1-7 |
 | 精确 SPU scope | `spu_ids` 缺省 = 当前店铺全部；最多 100 个 | 精确命中的 SPU 同时限定行、`total` 与所有 totals；订单 totals 在该集合内跨 SPU 去重 | §5.1 |
-| 平台佣金费率 r̂ | **参考基线 ≈30.8%（Σ\|fee_amount\|/Σgross，含抽佣/联盟/运费等全部直接扣除；页面可覆写 %；无结算样本 → 0 并标注）** | 保本 M17 / 净利润 M18 的 platform_fee（M19） | D10；解析上线后已结算部分自动用实际值 |
+| 平台佣金费率 r̂ | **7 天内 fee-v2 店铺实测（近 180 天未退款订单 Σ\|FEE\|/Σ行GMV）优先；无实测回退 30.8%；页面可临时覆写，不持久化** | 未结算净收入 M18 / platform_fee 信息列 M19 | D10 + shop-fee-rate-definition-gap.md |
 
 > 这些只影响**显示 / 换算策略 / 标色**，不改变底层原币口径定义（§4.2）。
 
