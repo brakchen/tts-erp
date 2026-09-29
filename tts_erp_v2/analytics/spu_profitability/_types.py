@@ -39,10 +39,12 @@ class SortField(StrEnum):
     CANCEL_RATE = "cancel_rate"
     NET_PROFIT = "net_profit"
     SALES = "sales"
+    EFFECTIVE_SALES = "effective_sales"
     GMV_SALES = "gmv_sales"
     AD_COUNT = "ad_count"
     GMV_AD = "gmv_ad"
     ORDER_COUNT = "order_count"
+    EFFECTIVE_ORDER_COUNT = "effective_order_count"
     CANCELLED_ORDER_COUNT = "cancelled_order_count"
     UNITS_SOLD = "units_sold"
     REFUND_NET_AMOUNT = "refund_net_amount"
@@ -157,10 +159,15 @@ class SpuProfitability:
     ad_last_day: date | None
     order_count: int
     cancelled_order_count: int
+    total_orders: int
+    effective_order_count: int
+    refund_order_count: int
+    full_loss_order_count: int
     domestic_cancelled_order_count: int
     overseas_cancelled_order_count: int
     units_sold: int
     sales: Decimal
+    effective_sales: Decimal
     gmv_sales: Decimal
     cancel_rate: Decimal | None
     refund_rate_qty: Decimal | None
@@ -171,6 +178,7 @@ class SpuProfitability:
     refund_net_qty: int
     refund_net_amount: Decimal
     refund_rate: Decimal | None
+    refund_amount_rate: Decimal | None
     refund_cancelled_qty: int
     refund_cancelled_amount: Decimal
     refund_cancelled_missing_lines: int
@@ -194,6 +202,7 @@ class SpuProfitability:
     full_loss_qty: int
     full_loss_cancelled_qty: int
     full_loss_rate: Decimal | None
+    full_loss_qty_rate: Decimal | None
     ad_system_breakeven_roi: Decimal = Decimal(0)
     ad_system_breakeven_roi_status: FormulaStatus = FormulaStatus.FORMULA_PENDING
 

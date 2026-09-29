@@ -1469,17 +1469,17 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       </div>
     </section>
 
-    <!-- 主表 D8 精简为 7 列（商品 + 6 指标：广告消耗 / 有效GMV / 有效出单量 / 取消率% / 全损退款率% / 净利润） -->
+    <!-- 主表 6 指标与大盘 v10 同口径：广告消耗 / 有效销售 / 有效单量 / 取消率 / 全损率 / 净利润 -->
     <div class="op-table-wrap table-responsive" tabindex="0" aria-label="SPU ROI 明细，可横向滚动">
       <table class="table table-hover align-middle mb-0 op-table" aria-live="polite">
         <thead>
           <tr>
             <th scope="col" class="op-th op-th-left">商品</th>
             <th scope="col" class="op-th op-th-sort" data-sort="spend" data-tip="广告消耗（USD，plugin.ad_today，随选中日期窗口裁剪；作为减项计入净利润）">广告消耗</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="sales" data-tip="有效GMV = 白名单状态订单行金额（USD；排除已取消订单，B1 拍板）">有效GMV</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="order_count" data-tip="有效出单量 = 白名单有效订单数（distinct）">有效出单量</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="cancel_rate" data-tip="取消率 = 国内取消单量 ÷ (有效单量 + 国内取消单量)；v9 口径：只计物流未到海外的取消单，海外取消(已到目的国 38301)已计入全损退款率，两处不重叠">取消率%</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="full_loss_rate" data-tip="全损退款率% = 全损件数 ÷ (售出件数+海外取消件数)；v9 口径：全损件数 = 完结退货(RETURN_AND_REFUND/REFUND_ONLY，不论物流) + 海外取消(CANCELLED∧38301)；国内取消不计全损；分母0 → —">全损退款率%</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="effective_sales" data-tip="有效销售 = 有效销售订单 GMV − 退款金额（USD）；与大盘 totals.effective_sales 同口径">有效销售</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="effective_order_count" data-tip="有效单量 = 有效销售订单数 − 退款订单数；与大盘 totals.effective_order_count 同口径">有效单量</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="cancel_rate" data-tip="取消率 = 国内取消订单数 ÷ 全部订单；全部订单 = 有效销售订单 + 国内取消 + 海外取消，海外取消只进入全损分子">取消率%</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="full_loss_rate" data-tip="全损率 = (退款订单数 + 海外取消订单数) ÷ 全部订单；订单维度按当前 SPU 去重，与大盘同口径">全损率%</th>
             <th scope="col" class="op-th op-th-sort" data-sort="net_profit" data-tip="净利润 v7(M18):已结算 SETTLEMENT + 未结算 ×(1−r̂)×(1−退款率) − 货本含全损取消 − 广告;负值红字。Red/green 仅按净利判(C3 拍板,删 ROI&lt;1 硬亏档)">净利润</th>
           </tr>
         </thead>

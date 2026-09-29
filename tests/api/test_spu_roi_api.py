@@ -931,10 +931,14 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert item["ad_first_day"] == DAY
     assert item["ad_last_day"] == DAY
 
-    # 销售侧(有效单,VND→USD)
+    # 销售侧：保留有效销售订单原始值，同时暴露与大盘同口径的净有效指标
     assert item["order_count"] == 1
+    assert item["cancelled_order_count"] == 1
+    assert item["total_orders"] == 2
+    assert item["effective_order_count"] == 0
     assert item["units_sold"] == 5
     assert item["sales"] == "100.0000"
+    assert item["effective_sales"] == "80.0000"
 
     # v7 分层字段（场景无 SETTLEMENT → settled=0, unsettled=100）
     assert item["settled_order_count"] == 0
@@ -950,7 +954,9 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert item["refund_return_amount"] == "20.0000"
     assert item["refund_net_qty"] == 1
     assert item["refund_net_amount"] == "20.0000"
-    assert item["refund_rate"] == "0.20"
+    assert item["refund_order_count"] == 1
+    assert item["refund_rate"] == "0.50"
+    assert item["refund_amount_rate"] == "0.20"
 
     # 已付被取消订单退款（信息列）
     assert item["refund_cancelled_qty"] == 2
@@ -960,8 +966,10 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     # v9 全损：完结退货不论物流直接计全损（场景无 38301 仍计 1 件退货）
     assert item["full_loss_qty"] == 1
     assert item["full_loss_cancelled_qty"] == 0
-    assert item["full_loss_rate"] == "0.20"
-    # v9 取消率只计国内取消：1 国内取消 /(1 有效 + 1 国内取消) = 0.50
+    assert item["full_loss_order_count"] == 1
+    assert item["full_loss_rate"] == "0.50"
+    assert item["full_loss_qty_rate"] == "0.20"
+    # v10 取消率：国内取消 ÷ 全部订单 = 1/2
     assert item["cancel_rate"] == "0.50"
     assert item["domestic_cancelled_order_count"] == 1
     assert item["overseas_cancelled_order_count"] == 0
@@ -1119,6 +1127,13 @@ def test_spu_roi_totals_cross_spu_dedup_and_gmv_split(
     assert by_id["TEST_ROI_SPU_Y"]["sales"] == "10.0000"
     assert by_id["TEST_ROI_SPU_X"]["order_count"] == 1
     assert by_id["TEST_ROI_SPU_Y"]["order_count"] == 1
+    # 行和大盘公式相同，但多 SPU 订单数量必须在大盘范围重新去重。
+    assert sum(i["total_orders"] for i in body["items"]) == 4
+    assert t["total_orders"] == 2
+    assert sum(i["effective_order_count"] for i in body["items"]) == 2
+    assert t["effective_order_count"] == 1
+    assert {i["cancel_rate"] for i in body["items"]} == {"0.50"}
+    assert t["cancel_rate"] == "0.5000"
 
     with Session(db_engine) as sess:
         shop_pk = sess.execute(
@@ -1943,6 +1958,43 @@ def test_spu_roi_totals_roi_real_single_row_matches_item(
     assert body2["totals"]["roi_real"] == body2["items"][0]["roi_real"]
 
 
+def test_spu_roi_single_spu_row_metrics_align_with_dashboard_totals(
+    api_client, readonly_key, db_engine
+):
+    """单 SPU 范围内，行级明细和盈利大盘必须使用完全相同的 v10 口径。
+
+    多 SPU 大盘仍需按订单全局去重，不能简单累加行；单 SPU 是排除跨 SPU
+    重复后的最小对齐反馈环。
+    """
+    with Session(db_engine) as sess:
+        _seed(sess, _seed_scenario_a)
+
+    response = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+        params={"q": "TEST_ROI_SPU_A"},
+    )
+    body = response.json()
+    assert response.status_code == 200
+    assert body["total"] == 1
+    row = body["items"][0]
+    totals = body["totals"]
+
+    for field in (
+        "total_orders",
+        "effective_order_count",
+        "refund_order_count",
+        "full_loss_order_count",
+        "domestic_cancelled_order_count",
+        "overseas_cancelled_order_count",
+    ):
+        assert row[field] == totals[field], field
+
+    assert Decimal(row["effective_sales"]) == Decimal(totals["effective_sales"])
+    for field in ("refund_rate", "full_loss_rate", "cancel_rate"):
+        assert Decimal(row[field]) == Decimal(totals[field]), field
+
+
 # ─── 分页 / 搜索 / 排序 ───────────────────────────────────────────────
 
 
@@ -2399,15 +2451,15 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert "净利润" in body
     assert "全损量" in body
     assert "退款数" in body
-    # D8(2026-09-07)主表精确匹配 th 表头文本
+    # 主表指标名与大盘 v10 口径一致
     main_th_labels = re.findall(r'<th[^>]*scope="col"[^>]*>([^<]+)</th>', body)
     for col_label in (
         "商品",
         "广告消耗",
-        "有效GMV",
-        "有效出单量",
+        "有效销售",
+        "有效单量",
         "取消率%",
-        "全损退款率%",
+        "全损率%",
         "净利润",
     ):
         assert col_label in main_th_labels, f"主表缺列 {col_label}"
@@ -2456,15 +2508,14 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert '("#sum-net-profit")' in js_src
     assert "var netProfitValue = totals.net_profit" in js_src
     assert "fmtMoney(netProfitValue)" in js_src
+    assert "fmtMoney(it.effective_sales)" in js_src
+    assert "fmtInt(it.effective_order_count)" in js_src
     assert '("#sum-roi-breakeven")' in js_src
     assert '("#sum-roi-ad")' in js_src
 
 
 def test_spu_roi_page_d8_no_column_toggles(api_client, readonly_key):
-    """D8(2026-09-07):⚙ 列开关组全部删除;主表无 data-cg/col-hidden 信息列;
-    可排序列 = D8 新白名单 spend/sales/order_count/cancel_rate/
-    full_loss_rate/net_profit。
-    """
+    """主表无列开关；有效销售/有效单量排序字段与实际展示口径一致。"""
     r = api_client.get(
         "/v2/pages/spu-roi",
         headers={"Authorization": f"Bearer {readonly_key}"},
@@ -2478,12 +2529,12 @@ def test_spu_roi_page_d8_no_column_toggles(api_client, readonly_key):
     )
     assert set(sortable) == {
         "spend",
-        "sales",
-        "order_count",
+        "effective_sales",
+        "effective_order_count",
         "cancel_rate",
         "full_loss_rate",
         "net_profit",
-    }, f"D8 主表可点列异常: {sortable}"
+    }, f"主表可点列异常: {sortable}"
 
 
 def test_spu_roi_page_sortable_headers_within_endpoint_whitelist(
@@ -2768,13 +2819,13 @@ def test_spu_roi_page_no_old_columns(api_client, readonly_key):
     for col in (
         "商品",
         "广告消耗",
-        "有效GMV",
-        "有效出单量",
+        "有效销售",
+        "有效单量",
         "取消率%",
-        "全损退款率%",
+        "全损率%",
         "净利润",
     ):
-        assert col in main_th_labels, f"D8 主表缺列 {col}"
+        assert col in main_th_labels, f"主表缺列 {col}"
     assert "op-th col-hidden" not in body
     assert "td.col-hidden" not in body
 
@@ -3066,14 +3117,17 @@ def test_spu_roi_v9_full_loss_two_buckets_and_disjoint_cancel_rate(
     # 全损 = 完结退货 2 件（不论物流）+ 海外取消 2 件
     assert item["full_loss_qty"] == 4
     assert item["full_loss_cancelled_qty"] == 2
-    assert item["full_loss_rate"] == "0.67"  # 4 / (4 售出 + 2 海外取消)
+    assert item["full_loss_order_count"] == 2  # 1 退款订单 + 1 海外取消订单
+    assert item["full_loss_rate"] == "0.67"  # 2 / 3 全部订单
+    assert item["full_loss_qty_rate"] == "0.67"  # 旧件数解释口径 4/(4+2)
     assert Decimal(item["return_loss"]) == Decimal("23.6384")  # 4 × 5.9096
 
-    # 取消：信息列仍是全部取消单；取消率只计国内取消（1/(1+1)，不是 2/(1+2)）
+    # 取消：信息列仍是全部取消单；分子仅国内取消，分母是全部 3 单。
     assert item["cancelled_order_count"] == 2
+    assert item["total_orders"] == 3
     assert item["domestic_cancelled_order_count"] == 1
     assert item["overseas_cancelled_order_count"] == 1
-    assert item["cancel_rate"] == "0.50"
+    assert item["cancel_rate"] == "0.33"
 
     # 退款桶口径不变（退货+仅退款都在 refund_net）
     assert item["refund_return_qty"] == 1

@@ -17,8 +17,10 @@ class FormulaInput:
     ad_gmv_usd: Decimal
     ad_orders: int
     order_count: int
-    units_sold: int
+    cancelled_orders: int
     domestic_cancelled_orders: int
+    overseas_cancelled_orders: int
+    units_sold: int
     full_loss_cancelled_qty: int
     full_loss_qty: int
     refund_order_count: int
@@ -42,6 +44,11 @@ class FormulaInput:
 class FormulaOutput:
     unit_cost_usd: Decimal
     sales_usd: Decimal
+    effective_sales_usd: Decimal
+    total_orders: int
+    effective_order_count: int
+    refund_order_count: int
+    full_loss_order_count: int
     settled_net_usd: Decimal
     settled_sales_usd: Decimal
     unsettled_sales_usd: Decimal
@@ -64,10 +71,55 @@ class FormulaOutput:
     cpa_usd: Decimal | None
     roi_l0: Decimal | None
     refund_rate: Decimal | None
+    refund_amount_rate: Decimal | None
     refund_rate_qty: Decimal | None
     cancel_rate: Decimal | None
     full_loss_rate: Decimal | None
+    full_loss_qty_rate: Decimal | None
     gmv_sales_usd: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class OrderMetrics:
+    """Canonical order-dimension metrics shared by SPU rows and the dashboard."""
+
+    total_orders: int
+    effective_order_count: int
+    refund_order_count: int
+    full_loss_order_count: int
+    refund_rate: Decimal | None
+    full_loss_rate: Decimal | None
+    cancel_rate: Decimal | None
+
+
+def calculate_order_metrics(
+    *,
+    order_count: int,
+    cancelled_orders: int,
+    domestic_cancelled_orders: int,
+    overseas_cancelled_orders: int,
+    refund_order_count: int,
+) -> OrderMetrics:
+    """Apply the v10 order funnel definitions at any aggregation scope."""
+
+    total_orders = order_count + cancelled_orders
+    effective_order_count = max(0, order_count - refund_order_count)
+    full_loss_order_count = refund_order_count + overseas_cancelled_orders
+
+    def rate(numerator: int) -> Decimal | None:
+        if total_orders <= 0:
+            return None
+        return Decimal(numerator) / Decimal(total_orders)
+
+    return OrderMetrics(
+        total_orders=total_orders,
+        effective_order_count=effective_order_count,
+        refund_order_count=refund_order_count,
+        full_loss_order_count=full_loss_order_count,
+        refund_rate=rate(refund_order_count),
+        full_loss_rate=rate(full_loss_order_count),
+        cancel_rate=rate(domestic_cancelled_orders),
+    )
 
 
 def calculate(inputs: FormulaInput) -> FormulaOutput:
@@ -81,8 +133,17 @@ def calculate(inputs: FormulaInput) -> FormulaOutput:
     refund_only_usd = inputs.refund_only_vnd / inputs.usd_vnd
     refund_return_usd = inputs.refund_return_vnd / inputs.usd_vnd
     refund_net_usd = refund_only_usd + refund_return_usd
+    effective_sales_usd = sales_usd - refund_net_usd
     refund_cancelled_usd = inputs.refund_cancelled_vnd / inputs.usd_vnd
     cancelled_sales_usd = inputs.cancelled_sales_vnd / inputs.usd_vnd
+
+    order_metrics = calculate_order_metrics(
+        order_count=inputs.order_count,
+        cancelled_orders=inputs.cancelled_orders,
+        domestic_cancelled_orders=inputs.domestic_cancelled_orders,
+        overseas_cancelled_orders=inputs.overseas_cancelled_orders,
+        refund_order_count=inputs.refund_order_count,
+    )
 
     refund_rate_spu = Decimal(0)
     if inputs.sales_vnd > 0:
@@ -130,20 +191,16 @@ def calculate(inputs: FormulaInput) -> FormulaOutput:
     roi_l0 = (
         inputs.ad_gmv_usd / inputs.spend_usd if inputs.spend_usd != 0 else None
     )
-    refund_rate = refund_net_usd / sales_usd if sales_usd > 0 else None
+
+    # 保留金额/件数旧口径的显式字段，仅用于解释，不能再冒充大盘三率。
+    refund_amount_rate = refund_net_usd / sales_usd if sales_usd > 0 else None
     refund_rate_qty = (
         Decimal(inputs.refund_order_count) / Decimal(inputs.order_count)
         if inputs.order_count > 0
         else None
     )
-    cancel_denom = inputs.order_count + inputs.domestic_cancelled_orders
-    cancel_rate = (
-        Decimal(inputs.domestic_cancelled_orders) / Decimal(cancel_denom)
-        if cancel_denom > 0
-        else None
-    )
     full_loss_denom = inputs.units_sold + inputs.full_loss_cancelled_qty
-    full_loss_rate = (
+    full_loss_qty_rate = (
         Decimal(inputs.full_loss_qty) / Decimal(full_loss_denom)
         if full_loss_denom > 0
         else None
@@ -152,6 +209,11 @@ def calculate(inputs: FormulaInput) -> FormulaOutput:
     return FormulaOutput(
         unit_cost_usd=unit_cost_usd,
         sales_usd=sales_usd,
+        effective_sales_usd=effective_sales_usd,
+        total_orders=order_metrics.total_orders,
+        effective_order_count=order_metrics.effective_order_count,
+        refund_order_count=order_metrics.refund_order_count,
+        full_loss_order_count=order_metrics.full_loss_order_count,
         settled_net_usd=settled_net_usd,
         settled_sales_usd=settled_sales_usd,
         unsettled_sales_usd=unsettled_sales_usd,
@@ -173,9 +235,11 @@ def calculate(inputs: FormulaInput) -> FormulaOutput:
         roi_breakeven=roi_breakeven,
         cpa_usd=cpa_usd,
         roi_l0=roi_l0,
-        refund_rate=refund_rate,
+        refund_rate=order_metrics.refund_rate,
+        refund_amount_rate=refund_amount_rate,
         refund_rate_qty=refund_rate_qty,
-        cancel_rate=cancel_rate,
-        full_loss_rate=full_loss_rate,
+        cancel_rate=order_metrics.cancel_rate,
+        full_loss_rate=order_metrics.full_loss_rate,
+        full_loss_qty_rate=full_loss_qty_rate,
         gmv_sales_usd=sales_usd + cancelled_sales_usd,
     )
