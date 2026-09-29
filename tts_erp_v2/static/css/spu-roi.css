@@ -284,11 +284,21 @@ a:hover {
  font-size: 12px;
  color: var(--muted);
 }
-/* Tom Select uses its official Bootstrap 5 theme; these variables only align
-   the mature component with this page's existing Bootstrap color tokens. */
+/* SPU 筛选：输入区占满可用列宽；清空/查询始终同高、成组且有稳定触控面积。 */
 .op-toolbar .ts-wrapper {
  min-width: 0;
+ width: 100%;
 }
+.op-toolbar #btn-spu-clear,
+.op-toolbar #btn-spu-apply {
+ min-width: 5.5rem;
+ min-height: 38px;
+ font-weight: 600;
+ letter-spacing: 0.03em;
+ white-space: nowrap;
+}
+/* Tom Select uses its official Bootstrap 5 theme; these variables only align
+   the mature component with this page's existing Bootstrap color tokens. */
 .op-toolbar .ts-control,
 .op-toolbar .ts-dropdown {
  color: var(--ink);
