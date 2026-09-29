@@ -86,10 +86,11 @@ from tts_erp_v2.db.models.procurement import (
     PurchaseOrderLine,
 )
 from tts_erp_v2.db.models.reporting import (
+    FocusedSpu,
     ProductCostSnapshot,
     ProductProfitDaily,
-    ShopFeeRateEstimate,
     ShipmentTrackingSummary,
+    ShopFeeRateEstimate,
 )
 from tts_erp_v2.db.models.security import ApiKey
 
@@ -116,9 +117,9 @@ __all__ = [
     "ChromeTrackingEvent",
     "Credentials",
     "EnumMap",
-    "ShopFeeRateEstimate",
     "ExchangeRate",
     "ExchangeRateSnapshot",
+    "FocusedSpu",
     "InterceptConfig",
     "InterceptSession",
     "InterceptSyncCursor",
@@ -146,6 +147,7 @@ __all__ = [
     "Shipment",
     "ShipmentLine",
     "ShipmentTrackingSummary",
+    "ShopFeeRateEstimate",
     "SyncCursor",
     "SyncIssue",
     "SyncJob",

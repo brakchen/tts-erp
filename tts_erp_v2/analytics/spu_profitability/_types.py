@@ -72,11 +72,41 @@ class FormulaStatus(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class ActivitySelection:
+    """The ordinary catalog/activity scope."""
+
+
+@dataclass(frozen=True, slots=True)
+class ExactIdsSelection:
+    """A bounded, temporary exact-ID scope."""
+
+    spu_ids: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.spu_ids:
+            raise ValueError("spu_ids must not be empty")
+        if len(self.spu_ids) > 100:
+            raise ValueError("spu_ids must contain at most 100 unique ids")
+        if len(set(self.spu_ids)) != len(self.spu_ids):
+            raise ValueError("spu_ids must contain unique ids")
+        if any(not value or len(value) > 128 for value in self.spu_ids):
+            raise ValueError("each spu_id must contain between 1 and 128 characters")
+
+
+@dataclass(frozen=True, slots=True)
+class FocusedSelection:
+    """The unbounded active membership stored for one shop."""
+
+
+SpuSelection = ActivitySelection | ExactIdsSelection | FocusedSelection
+
+
+@dataclass(frozen=True, slots=True)
 class ProfitScope:
     """Facts that define both rows and the global overview.
 
-    Exact SPU ids belong here because they constrain both rows and global totals.
-    Fuzzy search, sort, and pagination remain presentation-only choices.
+    ``spu_ids`` remains as a compatibility constructor field for existing typed
+    callers. New callers should pass one explicit ``selection``.
     """
 
     shop_pk: int | None
@@ -84,27 +114,31 @@ class ProfitScope:
     end_date: date | None = None
     include_inactive: bool = False
     spu_ids: tuple[str, ...] | None = None
+    selection: SpuSelection | None = None
 
     def __post_init__(self) -> None:
         if self.shop_pk is not None and self.shop_pk < 1:
             raise ValueError("shop_pk must be >= 1")
+        if self.spu_ids is not None and self.selection is not None:
+            raise ValueError("spu_ids and selection cannot be combined")
         if self.spu_ids is not None:
-            if not self.spu_ids:
-                raise ValueError("spu_ids must not be empty")
-            if len(self.spu_ids) > 100:
-                raise ValueError("spu_ids must contain at most 100 unique ids")
-            if len(set(self.spu_ids)) != len(self.spu_ids):
-                raise ValueError("spu_ids must contain unique ids")
-            if any(not value or len(value) > 128 for value in self.spu_ids):
-                raise ValueError(
-                    "each spu_id must contain between 1 and 128 characters"
-                )
+            ExactIdsSelection(self.spu_ids)
+        if isinstance(self.selection, FocusedSelection) and self.shop_pk is None:
+            raise ValueError("shop_pk is required with focused selection")
         if (
             self.start_date is not None
             and self.end_date is not None
             and self.start_date > self.end_date
         ):
             raise ValueError("start_date must be <= end_date")
+
+    @property
+    def effective_selection(self) -> SpuSelection:
+        if self.selection is not None:
+            return self.selection
+        if self.spu_ids is not None:
+            return ExactIdsSelection(self.spu_ids)
+        return ActivitySelection()
 
 
 @dataclass(frozen=True, slots=True)

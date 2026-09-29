@@ -218,6 +218,7 @@ def _check_schema_prereq(db_engine) -> None:
         "linkage.link_evidence",
         "linkage.link_overrides",
         "linkage.link_issues",
+        "reporting.focused_spus",
         "reporting.product_cost_snapshots",
         "reporting.product_profit_daily",
         "reporting.shipment_tracking_summary",

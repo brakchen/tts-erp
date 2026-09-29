@@ -38,6 +38,8 @@ from sqlalchemy.orm import Session
 from tts_erp_v2.analytics.spu_profitability import (
     EvidenceKind,
     EvidenceRequest,
+    ExactIdsSelection,
+    FocusedSelection,
     ProfitScope,
     RowView,
     explain_spu,
@@ -1141,6 +1143,92 @@ def test_profitability_public_interface_returns_typed_consistent_result(
     assert isinstance(order_evidence["paid_at"], datetime)
 
 
+def test_profitability_focused_selection_matches_exact_scope(db_engine) -> None:
+    with Session(db_engine) as seed_session:
+        spu_pk = _seed(seed_session, _seed_scenario_a)
+        row = seed_session.execute(
+            text("SELECT shop_pk, spu_id FROM commerce.products_spu WHERE id = :pk"),
+            {"pk": spu_pk},
+        ).one()
+        shop_pk, spu_id = int(row.shop_pk), str(row.spu_id)
+        seed_session.execute(
+            text(
+                "INSERT INTO reporting.focused_spus (shop_pk, spu_id) "
+                "VALUES (:shop_pk, :spu_id)"
+            ),
+            {"shop_pk": shop_pk, "spu_id": spu_id},
+        )
+        seed_session.commit()
+
+    with Session(db_engine) as session:
+        exact = read_overview(
+            session,
+            scope=ProfitScope(
+                shop_pk=shop_pk,
+                selection=ExactIdsSelection((spu_id,)),
+            ),
+            view=RowView(),
+        )
+    with Session(db_engine) as session:
+        focused = read_overview(
+            session,
+            scope=ProfitScope(shop_pk=shop_pk, selection=FocusedSelection()),
+            view=RowView(),
+        )
+
+    assert focused.items == exact.items
+    assert focused.totals == exact.totals
+    assert focused.basis.rubric_version == exact.basis.rubric_version
+
+
+def test_profitability_empty_focused_selection_never_falls_back(db_engine) -> None:
+    with Session(db_engine) as seed_session:
+        spu_pk = _seed(seed_session, _seed_scenario_a)
+        shop_pk = int(
+            seed_session.execute(
+                text("SELECT shop_pk FROM commerce.products_spu WHERE id = :pk"),
+                {"pk": spu_pk},
+            ).scalar_one()
+        )
+
+    with Session(db_engine) as session:
+        result = read_overview(
+            session,
+            scope=ProfitScope(shop_pk=shop_pk, selection=FocusedSelection()),
+            view=RowView(),
+        )
+
+    assert result.items == ()
+    assert result.total == 0
+    assert result.totals.row_count == 0
+
+
+def test_spu_roi_focused_scope_validation(api_client, readonly_key) -> None:
+    headers = {"Authorization": f"Bearer {readonly_key}"}
+    missing_shop = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=headers,
+        params={"scope": "focused"},
+    )
+    assert missing_shop.status_code == 422
+    conflict = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=headers,
+        params={
+            "scope": "focused",
+            "shop_pk": 1,
+            "spu_ids": "TEST_ROI_SPU_A",
+        },
+    )
+    assert conflict.status_code == 422
+    unknown = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=headers,
+        params={"scope": "unknown", "shop_pk": 1},
+    )
+    assert unknown.status_code == 422
+
+
 def test_profitability_public_include_inactive_semantics(db_engine) -> None:
     with Session(db_engine) as session:
         shop_pk = _seed_shop(session, "TEST_SELLER_PUBLIC_SCOPE")
@@ -2104,11 +2192,7 @@ def test_spu_roi_ad_window_single_side_only(api_client, readonly_key, db_engine)
 def test_spu_roi_sort_whitelist_covers_page_sortable_columns(
     api_client, readonly_key, db_engine
 ):
-    """页面 spu-roi.js 可排序列名 ⊆ 端点 sort 白名单(不再 422)。
-
-    spu-roi.js 的 SORTABLE 集合与端点 Literal 白名单必须同步:遍历
-    JS 中每个可排序列名 → sort=<列> 请求必须 200。
-    """
+    """共享盈利 kernel 的可排序列名必须落在端点白名单内。"""
     import re
     from pathlib import Path
 
@@ -2117,7 +2201,7 @@ def test_spu_roi_sort_whitelist_covers_page_sortable_columns(
         / "tts_erp_v2"
         / "static"
         / "js"
-        / "spu-roi.js"
+        / "spu-profitability-page.js"
     )
     src = js_path.read_text(encoding="utf-8")
     m = re.search(r"(?s)var SORTABLE = new Set\(\[(.*?)\]\);", src)
@@ -2668,9 +2752,15 @@ def test_spu_roi_page_cache_busts_css_and_js_from_their_own_content(
     js_version = hashlib.sha256(
         (static_dir / "js" / "spu-roi.js").read_bytes()
     ).hexdigest()[:8]
+    kernel_version = hashlib.sha256(
+        (static_dir / "js" / "spu-profitability-page.js").read_bytes()
+    ).hexdigest()[:8]
 
     assert f"../../static/css/spu-roi.css?v={css_version}" in body
     assert f"../../static/js/spu-roi.js?v={js_version}" in body
+    assert (
+        f"../../static/js/spu-profitability-page.js?v={kernel_version}" in body
+    )
 
 
 def test_spu_roi_page_uses_bootstrap_responsive_layout(api_client, readonly_key):
@@ -2710,7 +2800,7 @@ def test_spu_roi_page_uses_bootstrap_responsive_layout(api_client, readonly_key)
         / "tts_erp_v2"
         / "static"
         / "js"
-        / "spu-roi.js"
+        / "spu-profitability-page.js"
     )
     src = js_path.read_text(encoding="utf-8")
     assert "row-cols-2 row-cols-sm-3 row-cols-lg-4 row-cols-xxl-4" in src
@@ -2759,7 +2849,7 @@ def test_spu_roi_hidden_state_overrides_bootstrap_display_utilities(
         / "tts_erp_v2"
         / "static"
         / "js"
-        / "spu-roi.js"
+        / "spu-profitability-page.js"
     ).read_text(encoding="utf-8")
     assert "modal.hidden = false" in js
     assert "modal.hidden = true" in js
@@ -2832,7 +2922,7 @@ def test_spu_roi_drill_summary_matches_actual_dashboard_metrics() -> None:
         / "tts_erp_v2"
         / "static"
         / "js"
-        / "spu-roi.js"
+        / "spu-profitability-page.js"
     ).read_text(encoding="utf-8")
     summary = src.split("function renderProfitSummary", 1)[1].split(
         "function renderProfitTab", 1
@@ -2865,7 +2955,7 @@ def test_spu_roi_drill_summary_matches_actual_dashboard_metrics() -> None:
 
 
 def test_spu_roi_js_targets_dashboard_hooks():
-    """spu-roi.js 必须存在且渲染表格与结余带。"""
+    """共享盈利 kernel 必须渲染表格与结余带。"""
     from pathlib import Path
 
     js_path = (
@@ -2873,7 +2963,7 @@ def test_spu_roi_js_targets_dashboard_hooks():
         / "tts_erp_v2"
         / "static"
         / "js"
-        / "spu-roi.js"
+        / "spu-profitability-page.js"
     )
     src = js_path.read_text(encoding="utf-8")
     # 必须消费 /v2/analytics/spu-roi(带 PREFIX 推导)
@@ -2941,7 +3031,7 @@ def test_spu_roi_pagination_uses_bootstrap_page_navigation():
         / "tts_erp_v2"
         / "static"
         / "js"
-        / "spu-roi.js"
+        / "spu-profitability-page.js"
     )
     js = js_path.read_text(encoding="utf-8")
     assert "function pagerSequence" in js
@@ -3039,13 +3129,13 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     summary_start = body.index('id="summaries"')
     summary_html = body[summary_start : body.index("</section>", summary_start)]
     assert summary_html.count('class="op-hint"') == len(summary_ids)
-    # JS 必须填充新格
+    # 共享 kernel 必须填充新格
     js_src = (
         Path(__file__).resolve().parents[2]
         / "tts_erp_v2"
         / "static"
         / "js"
-        / "spu-roi.js"
+        / "spu-profitability-page.js"
     ).read_text(encoding="utf-8")
     assert '("#sum-total-orders")' in js_src
     assert "fmtInt(totals.total_orders || 0)" in js_src
@@ -3127,7 +3217,7 @@ def test_spu_roi_js_review_fixes_present():
         / "tts_erp_v2"
         / "static"
         / "js"
-        / "spu-roi.js"
+        / "spu-profitability-page.js"
     )
     src = js_path.read_text(encoding="utf-8")
     # finding 6:loadMe 用 authenticated===true 守卫(而非不存在的 key_prefix)
@@ -3164,7 +3254,7 @@ def test_spu_roi_frontend_only_displays_backend_profitability() -> None:
         / "tts_erp_v2"
         / "static"
         / "js"
-        / "spu-roi.js"
+        / "spu-profitability-page.js"
     ).read_text(encoding="utf-8")
     assert "Number(it.unsettled_net" in src
     assert "Number(it.cogs_sold" in src
@@ -3197,7 +3287,7 @@ def test_spu_roi_js_shop_switch_listener_before_early_return():
         / "tts_erp_v2"
         / "static"
         / "js"
-        / "spu-roi.js"
+        / "spu-profitability-page.js"
     ).read_text(encoding="utf-8")
     bind_idx = src.find('sel.addEventListener("change"')
     # 注意要用调用点('showShopModal(shops, "")')作标记,不能用函数名——

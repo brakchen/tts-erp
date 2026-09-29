@@ -16,6 +16,7 @@ from tts_erp_v2.access import (
     clear_credential_cache,
     evaluate_access,
 )
+from tts_erp_v2.access._policy import required_role
 from tts_erp_v2.db.models.security import ApiKey
 from tts_erp_v2.middleware.rate_limit import reset_shared
 
@@ -42,6 +43,13 @@ def readonly_key(db_engine) -> Iterator[str]:
         session.execute(delete(ApiKey).where(ApiKey.key_hash == key_hash))
         session.commit()
     clear_credential_cache()
+
+
+def test_focused_spus_roles_are_method_specific() -> None:
+    path = "/v2/reporting/focused-spus/42"
+    assert required_role("GET", path) is Role.READONLY
+    assert required_role("PATCH", path) is Role.READWRITE
+    assert required_role("PATCH", "/v2/reporting/other/42") is Role.READONLY
 
 
 def test_unknown_route_fails_closed_for_anonymous_request() -> None:

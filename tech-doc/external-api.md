@@ -40,11 +40,14 @@ cookie (see [Browser session login](#browser-session-login)).
 | Coverage / health snapshot | `GET /v2/reporting/coverage` | readonly |
 | Active SPUs missing a cost | `GET /v2/reporting/missing-cost-products` | readonly |
 | Submit a manual cost | `POST /v2/reporting/manual-costs` | readwrite |
+| List focused SPUs for one shop | `GET /v2/reporting/focused-spus/{shop_pk}` | readonly |
+| Add/remove focused SPUs | `PATCH /v2/reporting/focused-spus/{shop_pk}` | readwrite |
 | Latest cached FX rates | `GET /v2/fx/latest` | readonly |
 | Currency conversion (local, cached) | `GET /v2/fx/convert` | readonly |
 | Operator console (HTML) | `GET /v2/pages/manual-costs` | readonly (browser → 302 login) |
 | SPU 实际 ROI 看板主表 | `GET /v2/analytics/spu-roi` | readonly — 口径见 [`analytics/spu-real-roi-dashboard.md`](analytics/spu-real-roi-dashboard.md) |
 | SPU 实际 ROI 页面 (HTML) | `GET /v2/pages/spu-roi` | readonly (browser → 302 login) |
+| 重点关注 SPU 页面 (HTML) | `GET /v2/pages/focused-spus` | readonly (browser → 302 login) |
 | SPU image list / upload / delete | `GET /v2/spu-images`, `POST /v2/spu-images/upload-url`, `POST /v2/spu-images/{id}/confirm`, `DELETE /v2/spu-images/{id}` | readonly / readwrite |
 | Browser login / logout / whoami | `GET\|POST /v2/auth/login`, `POST /v2/auth/logout`, `GET /v2/auth/me` | public |
 | Analytics cursor has-data / dump ingest (Chrome ext) | `GET /v2/analytics/sync/cursor`, `POST /v2/analytics/sync/dumps` | readwrite + scope |
@@ -223,6 +226,10 @@ Note: the merged "effective links" view exists only at the DB layer
 | `GET /v2/reporting/coverage` | readonly | — → `{total_spus, active_spus, linked_spus, missing_cost_spus, calculation_version}` |
 | `GET /v2/reporting/missing-cost-products` | readonly | `shop_pk`, `limit` (default 200), `offset` → `{items: [{spu_pk, spu_id, title, shop_pk, missing_photo}], total_missing_photo}` |
 | `POST /v2/reporting/manual-costs` | readwrite | body `{"spu_id": str, "unit_cost": decimal>0, "currency": "VND", "valid_from"?: datetime, "note"?: str}` → 201 `ManualCostOut`; auto-closes the previous effective row for the SPU |
+| `GET /v2/reporting/focused-spus/{shop_pk}` | readonly | `q`, `limit` (default 50), `offset` → `{shopPk, items:[{spuPk,spuId,title,status,createdAt,updatedAt}], total, matchedTotal, limit, offset}`；按 `updated_at DESC, spu_id ASC` 稳定排序 |
+| `PATCH /v2/reporting/focused-spus/{shop_pk}` | readwrite | body `{"addSpuIds": [...], "removeSpuIds": [...]}`；单次最多 500 个 ID、整批原子校验、移除为软删除；返回有界 `{shopPk,total,addedSpuIds,removedSpuIds}`。Cookie mutation 必须带 `X-Requested-With: tts-erp` |
+
+Focused membership 按 `(shop_pk, spu_id)` 隔离；每店 active 关注总数没有业务上限。新增 ID 必须属于路径店铺；add/remove trim/去空/去重后重叠返回 422。详见 [`analytics/focused-spus.md`](analytics/focused-spus.md)。
 
 Cost semantics: `MANUAL_ENTRY` (this endpoint) > 妙手采购单 > (1688 采集标价
 **禁用**). See `tech-doc/refactor-tech-plan-v2.md` §6 decisions 10/12.
@@ -277,7 +284,8 @@ curl -sS -H "X-API-Key: $TTS_ERP_RO_KEY" \
 | Endpoint | Role | Notes |
 | --- | --- | --- |
 | `GET /v2/pages/manual-costs` | readonly | Server-rendered operator console (shop switcher + needs-cost / needs-photo / recently-filed tabs). Browser without a session → 302 to `/v2/auth/login`. Static assets under `/static/*` are readonly-classified too. |
-| `GET /v2/pages/spu-roi` | readonly | SPU 实际 ROI 看板(账页式)。Server-rendered HTML shell;数据来自 `GET /v2/analytics/spu-roi`;JS 在 `/static/js/spu-roi.js`。 |
+| `GET /v2/pages/spu-roi` | readonly | SPU 实际 ROI 看板。与重点关注页共享 `/static/js/spu-profitability-page.js` kernel；`/static/js/spu-roi.js` 只定义标准 PageProfile。 |
+| `GET /v2/pages/focused-spus` | readonly | 重点关注 SPU。使用相同盈利汇总、表格、分页和钻取；`/static/js/focused-spus.js` 提供持久 selection adapter 与编辑器。 |
 | `GET /v2/pages/shops` | readonly | 店铺注册台。人工注册插件同步店铺（`commerce.shops` 补登记）；写入走 `POST /v2/admin/shops/register`（含 App Key/Secret 均 readwrite）；行内元信息编辑走 `PATCH /v2/admin/shops/{shop_pk}`；App pair 按 service_id 加密保存；「获取授权链接」按钮走 `GET /v2/oauth/tiktok/authorize?format=json`（readwrite）。 |
 
 ### Admin (`/v2/admin/*`, handler-enforced roles)
@@ -342,8 +350,9 @@ Query parameters:
 | name | type | default | notes |
 | --- | --- | --- | --- |
 | `q` | string | — | 兼容的 `spu_id` 子串搜索；页面标准调用（带 `shop_pk`）中只改变 `items/total`、不改变大盘 `totals`；不能和 `spu_ids` 同传 |
-| `spu_ids` | comma-list | — | 当前店铺内按 `spu_id` 精确匹配的 scope，使用时 `shop_pk` 必填；同时约束 `items/total/totals`。支持 `,`/`，`、trim/去空/去重，最多 100 个且单项最多 128 字符；只有分隔符、缺 `shop_pk` 或与 `q` 同传 → 422 |
-| `sort` | enum | `roi_real` | `roi_real` \| `spend` \| `refund_rate` \| `refund_rate_qty` \| `cancel_rate` \| `net_profit` \| `sales` \| `gmv_sales` \| `ad_count` \| `gmv_ad` \| `order_count` \| `cancelled_order_count` \| `units_sold` \| `refund_net_amount` \| `return_loss` \| `roi_breakeven` \| **`full_loss_rate`**(v8 新增);同值次级键 spend DESC 保证可复现 |
+| `spu_ids` | comma-list | — | 当前店铺内按 `spu_id` 精确匹配的临时 scope，使用时 `shop_pk` 必填；同时约束 `items/total/totals`。支持 `,`/`，`、trim/去空/去重，最多 100 个且单项最多 128 字符；只有分隔符、缺 `shop_pk` 或与 `q` 同传 → 422 |
+| `scope` | enum | — | 目前仅 `focused`：从 `reporting.focused_spus` 解析该店完整 active 集合，不受 100-ID/URL 长度限制；`shop_pk` 必填且不能与 `spu_ids` 同传。空集合返回空 overview，绝不回退整店 |
+| `sort` | enum | `roi_real` | `roi_real` \| `spend` \| `refund_rate` \| `refund_rate_qty` \| `cancel_rate` \| `net_profit` \| `sales` \| `gmv_sales` \| `ad_count` \| `gmv_ad` \| `order_count` \| `cancelled_order_count` \| `units_sold` \| `refund_net_amount` \| `return_loss` \| `roi_breakeven` \| **`full_loss_rate`**(v8 新增);同值次级键 spend、最终 `spu_pk ASC` 保证分页稳定 |
 | `order` | enum | `asc` | `asc` \| `desc`;**默认 `sort="roi_real"` 升序保持不变**——避免改 API 契约;**页面 JS 显式传 `sort=net_profit&order=asc` 实现「最亏在前」视图** |
 | `limit` | int | 100 | 1..500(分页 v2 约定) |
 | `offset` | int | 0 | ≥ 0 |
