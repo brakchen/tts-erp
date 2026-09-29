@@ -382,7 +382,7 @@ _SQL_SHOP_FEE_RATES = text(
     """
     SELECT DISTINCT ON (shop_pk)
            shop_pk, fee_rate, calculated_on, calculated_at, lookback_days,
-           eligible_order_count, gross_sales_covered, gross_sales_total,
+           eligible_order_count, line_gmv_covered, line_gmv_total,
            coverage_ratio, total_fee, currency
     FROM reporting.shop_fee_rate_estimates
     ORDER BY shop_pk, calculated_at DESC
@@ -745,8 +745,8 @@ def _load_shop_fee_estimates(
             lookback_days=int(r["lookback_days"]),
             fee_rate=Decimal(r["fee_rate"]),
             eligible_order_count=int(r["eligible_order_count"]),
-            gross_sales_covered=Decimal(r["gross_sales_covered"]),
-            gross_sales_total=Decimal(r["gross_sales_total"]),
+            line_gmv_covered=Decimal(r["line_gmv_covered"]),
+            line_gmv_total=Decimal(r["line_gmv_total"]),
             coverage_ratio=Decimal(r["coverage_ratio"]),
             total_fee=Decimal(r["total_fee"]),
             currency=r["currency"],

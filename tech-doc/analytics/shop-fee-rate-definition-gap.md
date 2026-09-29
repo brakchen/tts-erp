@@ -1,81 +1,91 @@
-# 店铺抽成费率 r̂ 的口径矛盾（待拍板）
+# 店铺抽成费率 r̂ 的分母口径（已定位）
 
-> 状态：**未决** — 需要在 feature/shop-fee-rate 上线前确认。
-> 发现日期：2026-09-29。发现方式：实现 `analytics.shop_fee_rate` 后，
-> 按文档公式实测得 12.2%，与文档写的 30.8% 差 2.5 倍。
+> 状态：**已确定**（2026-09-29，在生产库 `tts_erp` 上只读实测）。
+> 结论：`r̂ = Σ|FEE| / Σ line_gmv`，`line_gmv` = 订单行 `quantity × unit_price`
+> = **客户实付（折扣后）**。
+> 复现命令：`.venv/bin/python scripts/probe_shop_fee_rate_definition.py`
 
-## 1. 矛盾是什么
+## 1. 起点：文档里的 30.8% 对不上
 
-仓库多份文档写：
+仓库多份文档写 `r̂ = Σ|fee_amount| ÷ Σgross_sales_amount ≈ 30.8%`。
+但按这个公式在生产库实测只有 **12.55%**；而且同一份
+`spu-real-roi-dashboard.md` 的「费用字段字典」又记 `fee_amount` 实测占毛销售
+**−11.58%** —— 字段表与公式自相矛盾，30.8% 无来源。
+
+## 2. 生产库实测（tts_erp，近 180 天，1204 笔已结算订单）
+
+### 2.1 分母到底是什么
+
+| 候选分母 | 合计 | 相对 line_gmv |
+| --- | ---: | ---: |
+| `Σ(quantity × unit_price)` = **line_gmv** | 727,148,240 | 100.00% |
+| `CUSTOMER_PAYMENT`（客户实付） | 728,896,839 | **100.24%** |
+| `AFTER_SELLER_DISCOUNTS_SUBTOTAL` | 745,386,338 | 102.51% |
+| `GROSS_SALES`（折扣前挂牌价） | 1,230,117,867 | **169.17%** |
+
+**关键**：`sales_order_lines.unit_price` 存的是**折扣后实付价**
+（与结算单 `CUSTOMER_PAYMENT` 只差 0.24%），而 `GROSS_SALES` 是
+**折扣前挂牌价**（= `AFTER_SELLER_DISCOUNTS_SUBTOTAL` + `|SELLER_DISCOUNT|`，
+卖家折扣实测占毛销售 39.4%）。
+
+### 2.2 逐单恒等式（决定性证据）
 
 ```text
-r̂ = Σ|fee_amount| ÷ Σgross_sales_amount ≈ 30.8%   （2026-09-06 D10 重定）
+SETTLEMENT ≈ line_gmv + FEE + CUSTOMER_REFUND      （FEE/退款为上游负值）
 ```
 
-出处：`tech-doc/analytics/spu-real-roi-dashboard.md` §4.2/§5.2/§6.11、
-`tech-doc/analytics/roi-calc-prompt.md`、`biz-doc/analytics/spu-roi-profit-calculation.md`。
-
-但按这个公式在真实数据上算，得到的是 **12.2%**：
-
-| 口径 | 实测（tts_erp_v3_test，近 180 天，604 笔已结算交易） |
+| 指标 | 结果 |
 | --- | ---: |
-| `Σ\|FEE\| / Σ GROSS_SALES` | **12.23%** |
-| `(Σ\|FEE\| + Σ\|运费类\|) / Σ GROSS_SALES` | 21.47% |
-| `Σ\|抽佣+联盟+运费\| / Σ GROSS_SALES` | 14.99% |
-| `1 − SETTLEMENT / GROSS_SALES` | 76.20% |
+| 相对残差中位数 | **0.000%** |
+| \|残差\| ≤ 1% line_gmv | 61.0% |
+| \|残差\| ≤ 5% line_gmv | 91.3% |
+| 汇总差 | +1.75% of line_gmv |
 
-而且**文档自己就自相矛盾**：同一份 `spu-real-roi-dashboard.md` 的「费用字段字典」
-记 `fee_amount` 实测占毛销售 **−11.58%** —— 这个值与 A 口径的 12.23% 吻合，
-与 30.8% 不吻合。
+这条恒等式说明：**`FEE` 已经是「平台从卖家结算款里扣掉的全部」，且其基准
+就是 line_gmv**。因此：
 
-也就是说：**30.8% 与它自己声称的公式对不上**。这是仓库既有问题，
-不是 2026-09-29 店铺级改造引入的；改造只是把 30.8% 换成逐店铺实测后，
-矛盾才被显式暴露出来。
+* 用 `line_gmv` 当分母 → **21.23%**（正确）
+* 用 `GROSS_SALES` 当分母 → 12.55%（错：分母被放大 69%）
+* 把 `FEE + 运费类` 相加 → 错：**运费已在 FEE 内**，相加会重复扣
+  （`|FEE|` = 154.4M，`|PLATFORM_COMMISSION|` 只有 69.8M，运费类 116.4M）
 
-## 2. 复现方式（只读，可直接在生产库跑）
+### 2.3 逐店铺 r̂（正确口径）
 
-```bash
-set -a; source .env; set +a
-.venv/bin/python scripts/probe_shop_fee_rate_definition.py
-# 可选：--days 90 / --shop-pk 12
-```
+| shop_pk | r̂ | 已结算订单数 | line_gmv |
+| ---: | ---: | ---: | ---: |
+| 314 | **21.35%** | 908 | 549,173,618 |
+| 68234 | **20.85%** | 296 | 177,974,622 |
 
-脚本只发 SELECT 且事务设为 READ ONLY，不写库、不需要 `ALLOW_PROD_DESTRUCTIVE`。
+两店覆盖率均 100%、样本量远超 50 单门槛，都会正常产出快照。
 
-## 3. 为什么必须在上线前定
+## 3. 为什么分母必须是 line_gmv（而不只是「实测更准」）
 
-`r̂` 直接决定未结算订单的净利估算：
+页面估算未结算订单用的公式是：
 
 ```text
 unsettled_net = unsettled_sales × (1 − r̂) × (1 − 退款率)
 ```
 
-r̂ 从 30.8% 变成 12.2%，等量 GMV 的估算净收入会高约 27%
-（`(1−0.122)/(1−0.308) ≈ 1.27`）。这会直接改变 SPU ROI 页的净利润与保本线，
-进而影响投放决策。不能由实现者单方面选择。
+其中 `unsettled_sales` = 同一套 `line_gmv`（`quantity × unit_price`）。
+费率的分母必须与它作用的变量同基准，否则 `(1 − r̂)` 不是「扣掉平台费后的比例」。
+用 `GROSS_SALES` 当分母会把 r̂ 算小 41%，使未结算订单的估算净收入系统性偏高。
 
-## 4. 待拍板选项
+## 4. 影响与遗留
 
-| 选项 | 含义 | 需要改什么 |
-| --- | --- | --- |
-| **A. 采用 `Σ\|FEE\| / ΣGROSS_SALES`** | 认为文档的 30.8% 是历史错算，当前实现正确 | 改文档：把 30.8% 重定为实测值；`FEE_RATE_BASELINE` 重定；UI 文案同步 |
-| **B. 采用更宽口径**（`FEE` + 运费类 = 21.47%，或抽佣+联盟+运费 = 14.99%） | 认为「平台抽成」应含卖家承担的运费 | 改 `jobs/finance_fee_rate.py` 的 component 集合；同步改 `FEE_RATE_BASELINE` 与文档 |
-| **C. 维持 30.8%** | 认为 30.8% 来自某个尚未查明的、更宽的口径 | **需要先给出 30.8% 的确切推导式**（哪个 component 集合 + 哪个分母 + 哪个作用域），否则无法复现，也无法按店铺细化 |
+**已随实现修正**：
 
-## 5. 实现现状
+* `analytics.shop_fee_rate` 的分母改为订单级 `line_gmv`
+  （表列 `line_gmv_covered` / `line_gmv_total`），并加「一单多笔结算交易时
+  line_gmv 只计一次」的处理。
+* 测试用 `test_gross_sales_component_does_not_affect_rate` 钉死「GROSS_SALES
+  不得影响费率」。
+* 文档与 UI 文案同步改为 `Σ|FEE|/Σ行GMV`。
 
-当前 `analytics.shop_fee_rate` 实现的是**选项 A**：
+**仍待人工拍板**：
 
-```text
-fee_rate       = Σ|FEE| / Σ GROSS_SALES          （仅 FEE 与 GROSS_SALES 币种一致的交易）
-coverage_ratio = Σ GROSS_SALES(有 FEE) / Σ GROSS_SALES(窗口内全部已结算)
-```
-
-- 未过门槛（样本 <50 单 / 覆盖率 <80%）的店铺**不写行**，读取侧回退全局基线
-  `FEE_RATE_BASELINE = 0.308`。
-- 前端费率状态卡会**同时显示**来源（页面覆写 / 店铺实测 / 全局基线）、
-  样本量、覆盖率与快照日期 —— 所以「实测 12% 而基线 30.8%」这个差异是
-  可见的，不会被静默吞掉。
-
-调整为 B/C 只需改 `tts_erp_v2/jobs/finance_fee_rate.py` 里的
-`_SQL_SHOP_FEE_RATE` component 集合 + `FEE_RATE_BASELINE`，测试相应更新。
+* `FEE_RATE_BASELINE = 0.308`（无实测样本店铺的兜底值）。生产实测是 ~21%，
+  所以 0.308 会让兜底店铺的未结算净收入被**低估**（`1−0.308` vs `1−0.21`）。
+  改它会影响所有尚未产出快照的店铺，属业务口径变更，需用户确认后再动。
+* `tech-doc/analytics/spu-real-roi-dashboard.md` 里 M18/M19 多处仍写
+  「≈30.8%」作为历史说明，仅 M19 主行已更新为店铺实测；是否全量重写该文档
+  可按需要另开文档 lane。

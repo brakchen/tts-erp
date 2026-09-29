@@ -96,7 +96,7 @@ _COST_ASSUMPTION = (
 _FEE_NOTE = (
     "平台佣金=平台从销售额直接扣除的全部费用；已结算=SETTLEMENT 实到账；"
     "未结算=sales×r̂×(1−SPU退款率)；信息列不重复计入净利。"
-    "r̂ 优先级：页面覆写 > 店铺实测（近180天已结算单 Σ|FEE|/ΣGROSS_SALES，"
+    "r̂ 优先级：页面覆写 > 店铺实测（近180天已结算单 Σ|FEE|/Σ行GMV，行GMV=客户实付；"
     "每24h重算且需达标样本量与覆盖率） > 全局基线 0.308"
 )
 
@@ -163,8 +163,8 @@ def _estimate_payload(estimate) -> dict[str, Any] | None:
         "calculated_at": estimate.calculated_at.isoformat(),
         "lookback_days": estimate.lookback_days,
         "eligible_order_count": estimate.eligible_order_count,
-        "gross_sales_covered": str(estimate.gross_sales_covered),
-        "gross_sales_total": str(estimate.gross_sales_total),
+        "line_gmv_covered": str(estimate.line_gmv_covered),
+        "line_gmv_total": str(estimate.line_gmv_total),
         "coverage_ratio": _fmt_rate(estimate.coverage_ratio),
         "total_fee": str(estimate.total_fee),
         "currency": estimate.currency,

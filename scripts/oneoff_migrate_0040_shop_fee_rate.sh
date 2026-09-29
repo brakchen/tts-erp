@@ -148,7 +148,7 @@ with engine.connect() as conn:
 
     expected_cols = {
         "shop_pk", "calculated_on", "lookback_days", "fee_rate",
-        "eligible_order_count", "gross_sales_covered", "gross_sales_total",
+        "eligible_order_count", "line_gmv_covered", "line_gmv_total",
         "coverage_ratio", "total_fee", "currency", "calculation_version",
         "calculated_at", "created_at", "updated_at",
     }

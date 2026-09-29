@@ -142,9 +142,11 @@ class FxBasis:
 class ShopFeeRateEstimate:
     """一次店铺费率实测快照（``reporting.shop_fee_rate_estimates`` 的一行）。
 
-    ``fee_rate = total_fee / gross_sales_covered``（GMV 加权，口径见
-    ``jobs/finance_fee_rate.py``）；``coverage_ratio`` 记录该快照覆盖了多少
-    窗口内已结算 GMV，偏低说明历史交易缺 ``FEE`` 分项，不应作为费率依据。
+    ``fee_rate = total_fee / line_gmv_covered``（GMV 加权，口径见
+    ``jobs/finance_fee_rate.py``）；``line_gmv`` = 订单行
+    ``quantity × unit_price`` = 客户实付（非折扣前挂牌价）。
+    ``coverage_ratio`` 记录该快照覆盖了多少窗口内已结算 line_gmv，偏低说明
+    历史订单缺 ``FEE`` 分项，不应作为费率依据。
     """
 
     calculated_on: date
@@ -152,8 +154,8 @@ class ShopFeeRateEstimate:
     lookback_days: int
     fee_rate: Decimal
     eligible_order_count: int
-    gross_sales_covered: Decimal
-    gross_sales_total: Decimal
+    line_gmv_covered: Decimal
+    line_gmv_total: Decimal
     coverage_ratio: Decimal
     total_fee: Decimal
     currency: str

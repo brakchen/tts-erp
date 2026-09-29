@@ -10,22 +10,26 @@ spu-roi 估算未结算订单净额用费率 r̂
 
 口径
 ----
-先按**结算交易**聚合，再按店铺汇总（两个都成立才对，不能直接对
-component 行求 SUM —— 一笔交易同时有 ``GROSS_SALES`` 与 ``FEE`` 时按交易
-配对，避免把不同交易的分项混算）::
+按**订单**聚合（一笔订单可能有多笔结算交易，按交易求和会把 line_gmv
+重复计）。::
 
-    fee_rate       = Σ|FEE| / Σ GROSS_SALES          （eligible 交易子集）
-    coverage_ratio = Σ GROSS_SALES(eligible) / Σ GROSS_SALES(窗口内全部)
+    fee_rate       = Σ|FEE| / Σ line_gmv          （带 FEE 的已结算订单）
+    coverage_ratio = Σ line_gmv(带 FEE) / Σ line_gmv(窗口内全部已结算订单)
 
-* 分子 ``FEE`` = 交易级平台总扣除（``fee_amount``：交易抽佣 + 联盟佣金 +
-  运费类 + 其它扣款，与分项自洽）。**不是** ``PLATFORM_COMMISSION`` ——
-  后者只是抽佣分项，实测仅约一半，会显著低估。
-* 分母 ``GROSS_SALES`` = 交易级毛销售额。**不能用**
-  ``GROSS_SALES − SETTLEMENT`` 当扣费（settlement 含未结款/退款偏移，
-  实测会得出 ≈78% 的假象）。
+* ``line_gmv`` = ``sales_order_lines.quantity × unit_price`` = **客户实付
+  （折扣后）**。**分母不能用 ``GROSS_SALES``** —— 那是折扣前挂牌价，
+  实测是 line_gmv 的 169%（= AFTER_SELLER_DISCOUNTS_SUBTOTAL +
+  SELLER_DISCOUNT），用错会得出 12.5% 而不是正确的 21.2%。
+  生产库实测：Σ line_gmv 与结算单 ``CUSTOMER_PAYMENT`` 只差 0.24%。
+* 分子 ``FEE`` = 交易级平台总扣除（``fee_amount``）。逐单恒等式已验证
+  （1204 笔，中位残差 0.000%，91.3% 在 ±5% 内）::
+
+      SETTLEMENT ≈ line_gmv + FEE + CUSTOMER_REFUND
+
+  即 FEE 已含运费类，**不可再叠加运费分项**（会重复扣）；也不是
+  ``PLATFORM_COMMISSION``（只是抽佣分项，约占 FEE 的一半）。
 * ``ABS`` 防御符号方向差异（上游扣款行为负值）。
-* eligible 条件：该交易有 ``FEE``、``GROSS_SALES > 0``、且两者币种一致
-  （防止把 VND 与 USD 混加）。
+* 币种：line_gmv 用店铺本币；若某店混用多种 FEE 币种则跳过（防跨币种相加）。
 
 为何记录 ``coverage_ratio`` 而不是直接算（2026-09-29 方案评审）
 -------------------------------------------------------------
@@ -85,55 +89,56 @@ RATE_MAX = Decimal("0.95")
 _RATE_Q = Decimal("0.000001")
 _AMOUNT_Q = Decimal("0.0001")
 
-# 交易级聚合：一笔结算交易一行，取 GROSS_SALES（分母）与 |FEE|（分子），
-# 并记录两者币种以便判定 eligible。窗口按 coalesce(transaction_time, synced_at)。
+# 订单级聚合。一笔订单可能对应多笔结算交易，所以 line_gmv 必须按订单
+# 去重后再汇总（按交易求和会重复计分母）。
 _SQL_SHOP_FEE_RATE = text(
     """
-    WITH txn AS (
-        SELECT so.shop_pk,
-               st.id AS txn_id,
-               st.order_pk,
-               COALESCE(
-                   SUM(sc.amount) FILTER (
-                       WHERE sc.component_code = 'GROSS_SALES'
-                   ), 0
-               ) AS gross_sales,
-               COALESCE(
-                   SUM(ABS(sc.amount)) FILTER (
-                       WHERE sc.component_code = 'FEE'
-                   ), 0
-               ) AS fee_amount,
-               MAX(sc.currency) FILTER (
-                   WHERE sc.component_code = 'GROSS_SALES'
-               ) AS gross_currency,
-               MAX(sc.currency) FILTER (
-                   WHERE sc.component_code = 'FEE'
-               ) AS fee_currency
+    WITH settled_orders AS (
+        SELECT DISTINCT st.order_pk AS order_pk
         FROM finance.settlement_transactions st
         JOIN commerce.sales_orders so ON so.id = st.order_pk
-        JOIN finance.settlement_components sc ON sc.transaction_id = st.id
         WHERE st.order_pk IS NOT NULL
-          AND sc.component_code IN ('FEE', 'GROSS_SALES')
           AND COALESCE(st.transaction_time, st.synced_at) >= :window_start
           AND COALESCE(st.transaction_time, st.synced_at) <  :window_end
-        GROUP BY so.shop_pk, st.id, st.order_pk
     ),
-    scored AS (
-        SELECT txn.*,
-               (fee_currency IS NOT NULL
-                AND fee_currency = gross_currency
-                AND gross_sales > 0) AS is_eligible
-        FROM txn
+    order_fee AS (
+        SELECT st.order_pk AS order_pk,
+               SUM(ABS(sc.amount)) AS total_fee,
+               MAX(sc.currency) AS fee_currency
+        FROM finance.settlement_transactions st
+        JOIN finance.settlement_components sc ON sc.transaction_id = st.id
+        JOIN settled_orders so ON so.order_pk = st.order_pk
+        WHERE sc.component_code = 'FEE'
+        GROUP BY st.order_pk
+    ),
+    order_gmv AS (
+        SELECT sl.order_pk AS order_pk,
+               MAX(so.shop_pk) AS shop_pk,
+               SUM(sl.quantity * sl.unit_price) AS line_gmv
+        FROM commerce.sales_order_lines sl
+        JOIN commerce.sales_orders so ON so.id = sl.order_pk
+        JOIN settled_orders so2 ON so2.order_pk = sl.order_pk
+        GROUP BY sl.order_pk
     )
-    SELECT shop_pk,
-           COALESCE(SUM(gross_sales), 0)                           AS gross_sales_total,
-           COALESCE(SUM(gross_sales) FILTER (WHERE is_eligible), 0)
-                                                                   AS gross_sales_covered,
-           COALESCE(SUM(fee_amount) FILTER (WHERE is_eligible), 0) AS total_fee,
-           COUNT(DISTINCT order_pk) FILTER (WHERE is_eligible)     AS eligible_order_count,
-           MAX(fee_currency) FILTER (WHERE is_eligible)            AS currency
-    FROM scored
-    GROUP BY shop_pk
+    SELECT g.shop_pk,
+           COALESCE(SUM(g.line_gmv), 0) AS line_gmv_total,
+           COALESCE(
+               SUM(g.line_gmv) FILTER (WHERE f.order_pk IS NOT NULL), 0
+           ) AS line_gmv_covered,
+           COALESCE(
+               SUM(f.total_fee) FILTER (WHERE f.order_pk IS NOT NULL), 0
+           ) AS total_fee,
+           COUNT(*) FILTER (WHERE f.order_pk IS NOT NULL)
+               AS eligible_order_count,
+           COUNT(DISTINCT f.fee_currency) FILTER (
+               WHERE f.order_pk IS NOT NULL
+           ) AS fee_currency_count,
+           MAX(f.fee_currency) FILTER (WHERE f.order_pk IS NOT NULL)
+               AS currency
+    FROM order_gmv g
+    LEFT JOIN order_fee f ON f.order_pk = g.order_pk
+    WHERE g.line_gmv > 0
+    GROUP BY g.shop_pk
     """
 )
 
@@ -141,18 +146,18 @@ _SQL_UPSERT = text(
     """
     INSERT INTO reporting.shop_fee_rate_estimates
         (shop_pk, calculated_on, lookback_days, fee_rate, eligible_order_count,
-         gross_sales_covered, gross_sales_total, coverage_ratio, total_fee,
+         line_gmv_covered, line_gmv_total, coverage_ratio, total_fee,
          currency, calculation_version, calculated_at)
     VALUES
         (:shop_pk, :calculated_on, :lookback_days, :fee_rate,
-         :eligible_order_count, :gross_sales_covered, :gross_sales_total,
+         :eligible_order_count, :line_gmv_covered, :line_gmv_total,
          :coverage_ratio, :total_fee, :currency, :calculation_version, now())
     ON CONFLICT (shop_pk, calculated_on) DO UPDATE SET
         lookback_days        = EXCLUDED.lookback_days,
         fee_rate             = EXCLUDED.fee_rate,
         eligible_order_count = EXCLUDED.eligible_order_count,
-        gross_sales_covered  = EXCLUDED.gross_sales_covered,
-        gross_sales_total    = EXCLUDED.gross_sales_total,
+        line_gmv_covered     = EXCLUDED.line_gmv_covered,
+        line_gmv_total       = EXCLUDED.line_gmv_total,
         coverage_ratio       = EXCLUDED.coverage_ratio,
         total_fee            = EXCLUDED.total_fee,
         currency             = EXCLUDED.currency,
@@ -206,13 +211,18 @@ def compute_shop_fee_rates(
     for row in rows:
         shop_pk = int(row["shop_pk"])
         eligible_count = int(row["eligible_order_count"] or 0)
-        covered = Decimal(row["gross_sales_covered"] or 0)
-        gross_total = Decimal(row["gross_sales_total"] or 0)
+        covered = Decimal(row["line_gmv_covered"] or 0)
+        gmv_total = Decimal(row["line_gmv_total"] or 0)
         fee_total = Decimal(row["total_fee"] or 0)
         currency = row["currency"]
+        currency_count = int(row["fee_currency_count"] or 0)
 
         if currency is None or covered <= 0:
-            _skip(shop_pk, "no_eligible_transactions")
+            _skip(shop_pk, "no_eligible_orders")
+            continue
+        if currency_count > 1:
+            # line_gmv 是本币，但 FEE 混用多币种 → 不可相加（防跨币种）。
+            _skip(shop_pk, "mixed_fee_currency", currency_count=currency_count)
             continue
         if eligible_count < MIN_ELIGIBLE_ORDER_COUNT:
             _skip(
@@ -224,7 +234,7 @@ def compute_shop_fee_rates(
             continue
 
         coverage_ratio = (
-            _q(covered / gross_total, _RATE_Q) if gross_total > 0 else Decimal("0")
+            _q(covered / gmv_total, _RATE_Q) if gmv_total > 0 else Decimal("0")
         )
         if coverage_ratio < MIN_COVERAGE_RATIO:
             _skip(
@@ -253,8 +263,8 @@ def compute_shop_fee_rates(
                 "lookback_days": lookback_days,
                 "fee_rate": rate,
                 "eligible_order_count": eligible_count,
-                "gross_sales_covered": _q(covered, _AMOUNT_Q),
-                "gross_sales_total": _q(gross_total, _AMOUNT_Q),
+                "line_gmv_covered": _q(covered, _AMOUNT_Q),
+                "line_gmv_total": _q(gmv_total, _AMOUNT_Q),
                 "coverage_ratio": coverage_ratio,
                 "total_fee": _q(fee_total, _AMOUNT_Q),
                 "currency": currency,

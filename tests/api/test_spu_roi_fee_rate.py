@@ -121,7 +121,7 @@ def _seed_estimate(
             text(
                 "INSERT INTO reporting.shop_fee_rate_estimates "
                 "(shop_pk, calculated_on, lookback_days, fee_rate, "
-                " eligible_order_count, gross_sales_covered, gross_sales_total, "
+                " eligible_order_count, line_gmv_covered, line_gmv_total, "
                 " coverage_ratio, total_fee, currency, calculation_version) "
                 "VALUES (:shop, (CURRENT_DATE - :off), 180, :rate, "
                 "        128, 182340000, 190000000, 0.959684, 65463060, "

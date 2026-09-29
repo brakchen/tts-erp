@@ -1504,7 +1504,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
             <option value="200">200</option>
           </select>
         </div>
-        <div class="col-6 col-md-3 col-xl-1" data-tip="平台佣金费率 r̂：默认用店铺实测（每24h按该店近180天已结算订单 Σ|FEE|/ΣGROSS_SALES 重算，需样本量与覆盖率达标），无可用实测的店铺回退基线 30.8%；在此填数可临时覆写（仅影响本页请求，不写回店铺）">
+        <div class="col-6 col-md-3 col-xl-1" data-tip="平台佣金费率 r̂：默认用店铺实测（每24h按该店近180天已结算订单 Σ|FEE|/Σ行GMV 重算；行GMV=客户实付金额，非折扣前挂牌价。需样本量与覆盖率达标），无可用实测的店铺回退基线 30.8%；在此填数可临时覆写（仅影响本页请求，不写回店铺）">
           <label class="form-label op-fld-label mb-1" for="filter-fee">临时覆写费率 %</label>
           <input id="filter-fee" type="text" class="form-control form-control-sm" placeholder="30.8" inputmode="decimal" autocomplete="off" aria-label="临时覆写平台佣金费率（留空则用店铺实测/全局基线）">
         </div>
@@ -1547,7 +1547,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
             <th scope="col" class="op-th op-th-sort" data-sort="effective_order_count" data-tip="有效单量 = 有效销售订单数 − 退款订单数；与大盘 totals.effective_order_count 同口径">有效单量</th>
             <th scope="col" class="op-th op-th-sort" data-sort="cancel_rate" data-tip="取消率 = 国内取消订单数 ÷ 全部订单；全部订单 = 有效销售订单 + 国内取消 + 海外取消，海外取消只进入全损分子">取消率%</th>
             <th scope="col" class="op-th op-th-sort" data-sort="full_loss_rate" data-tip="全损率 = (退款订单数 + 海外取消订单数) ÷ 全部订单；订单维度按当前 SPU 去重，与大盘同口径">全损率%</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="net_profit" data-tip="净利润 v7(M18):已结算 SETTLEMENT + 未结算 ×(1−r̂)×(1−退款率) − 货本含全损取消 − 广告;r̂=店铺实测(近180天已结算单,每24h重算,需达标样本量与覆盖率)或基线30.8%;负值红字。Red/green 仅按净利判(C3 拍板,删 ROI&lt;1 硬亏档)">净利润</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="net_profit" data-tip="净利润 v7(M18):已结算 SETTLEMENT + 未结算 ×(1−r̂)×(1−退款率) − 货本含全损取消 − 广告;r̂=店铺实测(近180天已结算单 Σ|FEE|/Σ行GMV,每24h重算,需达标样本量与覆盖率)或基线30.8%;负值红字。Red/green 仅按净利判(C3 拍板,删 ROI&lt;1 硬亏档)">净利润</th>
           </tr>
         </thead>
         <tbody class="op-rows" id="rows">

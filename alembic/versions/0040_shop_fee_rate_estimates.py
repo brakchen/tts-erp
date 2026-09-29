@@ -14,14 +14,29 @@ spu-roi 估算未结算订单抽成用的费率 r̂ 此前是全局硬编码基�
 
 口径（与 dashboard D10 基线同定义，作用域收窄到单店）::
 
-    fee_rate       = Σ|FEE| / Σ GROSS_SALES     （已结算交易，币种一致）
-    coverage_ratio = Σ GROSS_SALES(有 FEE 的交易)
-                   / Σ GROSS_SALES(窗口内全部已结算交易)
+    fee_rate       = Σ|FEE| / Σ line_gmv      （已结算并带 FEE 分项的订单）
+    coverage_ratio = Σ line_gmv(有 FEE 的订单) / Σ line_gmv(窗口内全部已结算订单)
 
-``FEE`` 是交易级平台总扣除（``fee_amount``，含交易抽佣 + 联盟 + 运费等），
-**不是** ``PLATFORM_COMMISSION``（后者只是抽佣分项，会显著低估）。
-覆盖率用于暴露历史交易缺 ``FEE`` 分项的数据缺口 —— 覆盖不足时该店不产出
-可用快照。
+**分母必须是 `line_gmv`（订单行 `quantity × unit_price`，= 客户实付），
+不是 `GROSS_SALES`**。2026-09-29 在生产库实测确认：
+
+* `sales_order_lines.unit_price` 是**折扣后实付价**（Σ line_gmv 与结算单的
+  `CUSTOMER_PAYMENT` 只差 0.24%），而 `GROSS_SALES` 是**折扣前挂牌价**
+  （= `AFTER_SELLER_DISCOUNTS_SUBTOTAL` + `SELLER_DISCOUNT`，1 230M vs 727M，差 69%）。
+* 逐单恒等式（1204 笔已结算订单，中位残差 **0.000%**，91.3% 在 ±5% 内）::
+
+      SETTLEMENT ≈ line_gmv + FEE + CUSTOMER_REFUND
+
+  即 `FEE` 已含全部从卖家结算款扣掉的项目（含运费类）；把分母换成
+  `GROSS_SALES` 会得出 12.5%，而公式里真正使用的变量是 `line_gmv`，
+  对应 21.2%。
+* `FEE` 是交易级平台总扣除（``fee_amount``），**不是**
+  ``PLATFORM_COMMISSION``（后者只是抽佣分项，实测仅占一半）。
+  另：`FEE + 运费类` 会**重复扣**（运费已在 FEE 内），勿相加。
+
+``coverage_ratio`` 暴露历史交易缺 ``FEE`` 分项的数据缺口（生产库当前 100%，
+作为安全网保留）：覆盖率偏低的快照不应作为费率依据，计算任务会在覆盖率
+不达门槛时直接跳过该店（不写行）。
 
 每日一份快照（``uq_shop_fee_rate_est_shop_day``），保留费率变化历史以便
 解释某周净利润波动；读取侧取每店最新一行，超过
@@ -59,8 +74,8 @@ def upgrade() -> None:
         sa.Column("lookback_days", sa.Integer, nullable=False),
         sa.Column("fee_rate", sa.Numeric(8, 6), nullable=False),
         sa.Column("eligible_order_count", sa.Integer, nullable=False),
-        sa.Column("gross_sales_covered", sa.Numeric(20, 4), nullable=False),
-        sa.Column("gross_sales_total", sa.Numeric(20, 4), nullable=False),
+        sa.Column("line_gmv_covered", sa.Numeric(20, 4), nullable=False),
+        sa.Column("line_gmv_total", sa.Numeric(20, 4), nullable=False),
         sa.Column("coverage_ratio", sa.Numeric(8, 6), nullable=False),
         sa.Column("total_fee", sa.Numeric(20, 4), nullable=False),
         sa.Column("currency", sa.Text, nullable=False),
@@ -128,16 +143,25 @@ def upgrade() -> None:
     op.execute(
         "COMMENT ON TABLE reporting.shop_fee_rate_estimates IS "
         "'店铺级平台抽成费率日快照（analytics.shop_fee_rate 任务每 24h 按近 N 天"
-        "已结算订单 Σ|FEE|/ΣGROSS_SALES 重算）；无快照或快照过期 = 回退全局基线 0.308'"
+        "已结算订单 Σ|FEE|/Σline_gmv 重算）；无快照或快照过期 = 回退全局基线 0.308'"
     )
     op.execute(
         "COMMENT ON COLUMN reporting.shop_fee_rate_estimates.fee_rate IS "
-        "'GMV 加权平均抽成率 = Σ|FEE| / ΣGROSS_SALES（仅含 FEE 与 GROSS_SALES "
-        "币种一致的已结算交易）'"
+        "'GMV 加权平均抽成率 = Σ|FEE| / Σline_gmv（line_gmv = 订单行 quantity×unit_price"
+        "= 客户实付；不是折扣前的 GROSS_SALES）'"
+    )
+    op.execute(
+        "COMMENT ON COLUMN reporting.shop_fee_rate_estimates.line_gmv_covered IS "
+        "'带 FEE 分项的已结算订单的 line_gmv 合计，即费率的分子分母基准'"
+    )
+    op.execute(
+        "COMMENT ON COLUMN reporting.shop_fee_rate_estimates.line_gmv_total IS "
+        "'窗口内全部已结算订单的 line_gmv 合计；与 covered 之比即覆盖率，"
+        "偏低说明历史订单缺 FEE 分项'"
     )
     op.execute(
         "COMMENT ON COLUMN reporting.shop_fee_rate_estimates.coverage_ratio IS "
-        "'覆盖率 = 有 FEE 分项交易的 GROSS_SALES / 窗口内全部已结算 GROSS_SALES；"
+        "'覆盖率 = 有 FEE 订单的 line_gmv / 窗口内全部已结算订单的 line_gmv；"
         "偏低说明历史交易缺 FEE 分项，该行不应作为费率依据'"
     )
 
