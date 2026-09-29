@@ -14,7 +14,7 @@
 
 | 版本 | 日期 | 变更内容 |
 | --- | --- | --- |
-| v10 | 2026-10-07 | **大盘指标口径重写**：(1) 有效单量 = 有效订单 − 退款订单；(2) 退款数/退款率改为订单维度（退款订单数 / 全部订单）；(3) 全损量/全损率改为订单维度（退款订单 + 海外取消订单）；(4) 取消量/取消率 = 国内取消订单（排除海外取消）；(5) 新增实际保本ROI（NC′ / (NC′ − COGS_kept)）；广告系统保本ROI 是独立推算指标，公式待定、当前默认 0；前端展示指标名称，数值显示 `--`；(6) 所有大盘指标由后端 totals 计算，前端只做格式化 |
+| v10 | 2026-10-07 | **大盘与 SPU 明细指标口径统一**：(1) 有效单量 = 有效订单 − 退款订单；(2) 退款数/退款率改为订单维度（退款订单数 / 全部订单）；(3) 全损量/全损率改为订单维度（退款订单 + 海外取消订单）；(4) 取消量/取消率 = 国内取消订单（排除海外取消）；(5) 新增实际保本ROI（NC′ / (NC′ − COGS_kept)）；广告系统保本ROI 是独立推算指标，公式待定、当前默认 0；前端展示指标名称，数值显示 `--`；(6) 每个 SPU 行与大盘使用同一公式；多 SPU 大盘的订单级事实独立全局去重，不能简单累加 SPU 行；(7) 前端只格式化后端结果 |
 | v9 | 2026-09-15 | 全损 = 完结退货(不论物流) + 海外取消(38301)；国内取消 ≠ 全损 |
 | v8 | 2026-09-15 | 广告消耗按日期窗口裁剪（与销售/退款同语义） |
 | v7 | 2026-09-07 | 净收入分层（已结算用实际到账、未结算用估算费率） |
@@ -135,23 +135,27 @@ $$
 \text{净利润} < 0 \iff \text{实际 ROI} < \text{保本 ROI}
 $$
 
-### 2.5 大盘指标公式
+### 2.5 大盘与 SPU 明细指标公式
 
-大盘（结余带）指标由后端 `GET /v2/analytics/spu-roi` 的 `totals` 字段直接提供，前端只做格式化展示。
+同一套公式同时适用于 `GET /v2/analytics/spu-roi` 的每个 `items[]` SPU 明细和 `totals` 盈利大盘。前端只做格式化展示：
+
+- 单 SPU 范围内，行级的有效销售、有效单量、退款数/率、全损量/率、取消量/率必须与大盘相等；
+- 多 SPU 范围内，金额可以按行加总；订单可能包含多个 SPU，因此大盘订单数与三个率必须在整体范围内按订单全局去重，不能简单累加 SPU 行；
+- 旧金额退款率与件数全损率只作为解释字段 `refund_amount_rate` / `full_loss_qty_rate` 保留，不得用于主表或冒充大盘三率。
 
 | 指标 | 公式 | 说明 |
 | --- | --- | --- |
-| 广告消耗 | Σ mixed_real_cost（单店铺所有广告消耗） | 后端 `totals.spend` |
-| 有效销售额 | 有效销售订单 GMV − 退款金额 | 后端 `totals.effective_sales` |
-| 有效单量 | 有效订单数 − 退款订单数 | 后端 `totals.effective_order_count` |
-| 退款数 | 退款订单数（订单维度去重，按售后单完结时间窗口） | 后端 `totals.refund_order_count` |
-| 退款率 | 退款订单数 ÷ 全部订单 | 后端 `totals.refund_rate` |
-| 全损量 | 退款订单数 + 海外取消订单数（订单维度） | 后端 `totals.full_loss_order_count` |
-| 全损率 | 全损量 ÷ 全部订单 | 后端 `totals.full_loss_rate` |
-| 取消量 | 国内取消订单数（排除海外取消，全局去重） | 后端 `totals.domestic_cancelled_order_count` |
-| 取消率 | 国内取消订单数 ÷ 全部订单 | 后端 `totals.cancel_rate` |
-| 实际ROI | NC' ÷ 广告消耗 | 后端 `totals.roi_real` |
-| 实际保本ROI | NC' ÷ (NC' − COGS_kept) | 后端 `totals.roi_breakeven` |
+| 广告消耗 | Σ mixed_real_cost（单店铺所有广告消耗） | `items[].spend` / `totals.spend` |
+| 有效销售额 | 有效销售订单 GMV − 退款金额 | `items[].effective_sales` / `totals.effective_sales` |
+| 有效单量 | 有效订单数 − 退款订单数 | `items[].effective_order_count` / `totals.effective_order_count` |
+| 退款数 | 退款订单数（订单维度去重，按售后单完结时间窗口） | `items[].refund_order_count` / `totals.refund_order_count` |
+| 退款率 | 退款订单数 ÷ 全部订单 | `items[].refund_rate` / `totals.refund_rate` |
+| 全损量 | 退款订单数 + 海外取消订单数（订单维度） | `items[].full_loss_order_count` / `totals.full_loss_order_count` |
+| 全损率 | 全损量 ÷ 全部订单 | `items[].full_loss_rate` / `totals.full_loss_rate` |
+| 取消量 | 国内取消订单数（排除海外取消） | `items[].domestic_cancelled_order_count` / `totals.domestic_cancelled_order_count` |
+| 取消率 | 国内取消订单数 ÷ 全部订单 | `items[].cancel_rate` / `totals.cancel_rate` |
+| 实际ROI | NC' ÷ 广告消耗 | `items[].roi_real` / `totals.roi_real` |
+| 实际保本ROI | NC' ÷ (NC' − COGS_kept) | `items[].roi_breakeven` / `totals.roi_breakeven` |
 | 广告系统保本ROI | 0（临时默认；正式公式待定） | 展示指标名称，数值显示 `--`，不得解释为已计算值 |
 
 ---
@@ -210,7 +214,7 @@ $$
 
 **ROI**：实际 ROI = (净收入 − 全损成本) ÷ 广告消耗；保本 ROI = (净收入 − 全损成本) ÷ (净收入 − 全损成本 − COGS_kept)。
 
-**输出字段**：SPU | 广告$ | 有效GMV$ | 采购$ | 退款$ | 净利润$ | 实际ROI | 保本ROI | 全损件
+**输出字段**：SPU | 广告$ | 有效销售$ | 有效单量 | 采购$ | 退款率 | 全损率 | 取消率 | 净利润$ | 实际ROI | 保本ROI
 
 > 每个概念对应的数据表 / 字段 / 枚举值，查
 > [`spu-roi-data-sources.md`](spu-roi-data-sources.md)。

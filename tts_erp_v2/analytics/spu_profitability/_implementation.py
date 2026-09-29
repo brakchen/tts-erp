@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from tts_erp_v2.analytics.spu_profitability._formula_v10 import (
     FormulaInput,
     calculate,
+    calculate_order_metrics,
 )
 from tts_erp_v2.analytics.spu_profitability._types import (
     FxBasis,
@@ -924,6 +925,7 @@ def _query_spu_roi(
         overseas_cancelled_orders = (
             _row_int(rs["overseas_cancelled_order_count"]) if rs else 0
         )
+        refund_order_count = _row_int(rs["refund_order_count"]) if rs else 0
         cancelled_sales_vnd = Decimal(rs["cancelled_sales"]) if rs else Decimal(0)
 
         refund = refund_map.get(pk)
@@ -950,11 +952,13 @@ def _query_spu_roi(
                 ad_gmv_usd=gmv_ad,
                 ad_orders=ad_orders,
                 order_count=order_count,
-                units_sold=units_sold,
+                cancelled_orders=cancelled_orders,
                 domestic_cancelled_orders=domestic_cancelled_orders,
+                overseas_cancelled_orders=overseas_cancelled_orders,
+                units_sold=units_sold,
                 full_loss_cancelled_qty=flc_qty,
                 full_loss_qty=full_loss_qty,
-                refund_order_count=_row_int(rs["refund_order_count"]) if rs else 0,
+                refund_order_count=refund_order_count,
                 refund_only_qty=refund_only_qty,
                 refund_return_qty=refund_return_qty,
                 sales_vnd=sales_vnd,
@@ -973,6 +977,7 @@ def _query_spu_roi(
         )
         unit_cost_usd = formula.unit_cost_usd
         sales_usd = formula.sales_usd
+        effective_sales_usd = formula.effective_sales_usd
         settled_net_usd = formula.settled_net_usd
         settled_sales_usd = formula.settled_sales_usd
         unsettled_sales_usd = formula.unsettled_sales_usd
@@ -989,8 +994,10 @@ def _query_spu_roi(
         cpa_usd = formula.cpa_usd
         roi_l0_usd = formula.roi_l0
         refund_rate_usd = formula.refund_rate
+        refund_amount_rate = formula.refund_amount_rate
         gmv_sales_usd = formula.gmv_sales_usd
         full_loss_rate = formula.full_loss_rate
+        full_loss_qty_rate = formula.full_loss_qty_rate
         cancel_rate_usd = formula.cancel_rate
         refund_rate_qty_usd = formula.refund_rate_qty
 
@@ -1012,10 +1019,15 @@ def _query_spu_roi(
                 "ad_last_day": ad_last_day,
                 "order_count": order_count,
                 "cancelled_order_count": cancelled_orders,
+                "total_orders": formula.total_orders,
+                "effective_order_count": formula.effective_order_count,
+                "refund_order_count": formula.refund_order_count,
+                "full_loss_order_count": formula.full_loss_order_count,
                 "domestic_cancelled_order_count": domestic_cancelled_orders,
                 "overseas_cancelled_order_count": overseas_cancelled_orders,
                 "units_sold": units_sold,
                 "sales": sales_usd,
+                "effective_sales": effective_sales_usd,
                 "gmv_sales": gmv_sales_usd,
                 "cancel_rate": cancel_rate_usd,
                 "refund_rate_qty": refund_rate_qty_usd,
@@ -1026,6 +1038,7 @@ def _query_spu_roi(
                 "refund_net_qty": refund_only_qty + refund_return_qty,
                 "refund_net_amount": refund_net_usd,
                 "refund_rate": refund_rate_usd,
+                "refund_amount_rate": refund_amount_rate,
                 "refund_cancelled_qty": refund_cancelled_qty,
                 "refund_cancelled_amount": refund_cancelled_usd,
                 "refund_cancelled_missing_lines": refund_cancelled_missing,
@@ -1050,6 +1063,7 @@ def _query_spu_roi(
                 "full_loss_qty": full_loss_qty,
                 "full_loss_cancelled_qty": flc_qty,
                 "full_loss_rate": full_loss_rate,
+                "full_loss_qty_rate": full_loss_qty_rate,
             }
         )
         total_spend += spend
@@ -1082,6 +1096,9 @@ def _query_spu_roi(
     money_total = {
         "spend": sum((r["spend"] for r in scope_plain), Decimal(0)),
         "sales": sum((r["sales"] for r in scope_plain), Decimal(0)),
+        "effective_sales": sum(
+            (r["effective_sales"] for r in scope_plain), Decimal(0)
+        ),
         "refund_net_amount": sum(
             (r["refund_net_amount"] for r in scope_plain), Decimal(0)
         ),
@@ -1164,26 +1181,17 @@ def _query_spu_roi(
             * unit_cost,
         )
 
-    # 全量订单 = 有效订单 + 取消订单
-    total_orders_count = eff_orders + cancelled_orders_total
+    # 行级和大盘共用同一个 v10 订单漏斗公式；大盘只替换为全局去重事实。
+    dashboard_orders = calculate_order_metrics(
+        order_count=eff_orders,
+        cancelled_orders=cancelled_orders_total,
+        domestic_cancelled_orders=total_domestic_cancelled,
+        overseas_cancelled_orders=total_overseas_cancelled,
+        refund_order_count=refund_order_count_total,
+    )
 
-    # v10 大盘指标（全部由后端计算，前端只做格式化）：
-    # 有效销售额 = 有效销售 GMV − 退款金额（v10：已送达/已完成减退款）
-    effective_sales_total = money_total["sales"] - money_total["refund_net_amount"]
-    # 有效单量 = 有效订单数 − 退款订单数（v10）
-    effective_order_count = max(0, eff_orders - refund_order_count_total)
-    # 全损量（订单维度）= 退款订单数 + 海外取消订单数
-    full_loss_order_count = refund_order_count_total + total_overseas_cancelled
-
-    # 三个率：分子/分母同为订单维度，分母 = 全部订单
-    def _rate(numer: int) -> Decimal | None:
-        if total_orders_count <= 0:
-            return None
-        return Decimal(numer) / Decimal(total_orders_count)
-
-    refund_rate_total = _rate(refund_order_count_total)
-    full_loss_rate_total = _rate(full_loss_order_count)
-    cancel_rate_total = _rate(total_domestic_cancelled)
+    # 有效销售额可按 SPU 行加总；订单数量必须使用上面的全局去重事实。
+    effective_sales_total = money_total["effective_sales"]
 
     # 整体保本 ROI = NC' / (NC' - COGS_kept)
     overall_nc_prime = total_net_revenue_usd - total_return_loss
@@ -1196,7 +1204,7 @@ def _query_spu_roi(
         row_count=len(scope_plain),
         order_count=eff_orders,
         cancelled_order_count=cancelled_orders_total,
-        total_orders=total_orders_count,
+        total_orders=dashboard_orders.total_orders,
         spend=money_total["spend"],
         sales=money_total["sales"],
         gmv=gmv_total,
@@ -1211,11 +1219,11 @@ def _query_spu_roi(
         overseas_cancelled_order_count=total_overseas_cancelled,
         roi_breakeven=overall_breakeven,
         effective_sales=effective_sales_total,
-        effective_order_count=effective_order_count,
-        full_loss_order_count=full_loss_order_count,
-        refund_rate=refund_rate_total,
-        full_loss_rate=full_loss_rate_total,
-        cancel_rate=cancel_rate_total,
+        effective_order_count=dashboard_orders.effective_order_count,
+        full_loss_order_count=dashboard_orders.full_loss_order_count,
+        refund_rate=dashboard_orders.refund_rate,
+        full_loss_rate=dashboard_orders.full_loss_rate,
+        cancel_rate=dashboard_orders.cancel_rate,
     )
 
     # meta（§4 v7）

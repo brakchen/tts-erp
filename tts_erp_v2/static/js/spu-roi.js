@@ -16,11 +16,13 @@
     refund_rate_qty: "退货率",
     cancel_rate: "取消率",
     net_profit: "净利润",
-    sales: "有效销售",
+    sales: "有效销售 GMV",
+    effective_sales: "有效销售",
     gmv_sales: "销售",
     gmv_ad: "平台GMV",
     roi_l0: "ROI₀",
-    order_count: "有效单",
+    order_count: "有效销售订单",
+    effective_order_count: "有效单量",
     cancelled_order_count: "取消单量",
     units_sold: "件数",
     refund_net_amount: "退货",
@@ -35,8 +37,10 @@
     "cancel_rate",
     "net_profit",
     "sales",
+    "effective_sales",
     "gmv_sales",
     "order_count",
+    "effective_order_count",
     "cancelled_order_count",
     "units_sold",
     "return_loss",
@@ -286,15 +290,15 @@
     var profitClass = npNeg ? ' class="np-red"' : "";
     var fmtPctOrDash = (v) =>
       v === null || v === undefined || v === "" ? "—" : fmtPct(v);
-    // D8 6 指标列(§5): 广告消耗 / 有效GMV / 有效出单量 / 取消率 / 全损退款率% / 净利润
+    // 行级与大盘同口径:广告消耗 / 有效销售 / 有效单量 / 取消率 / 全损率 / 净利润
     return (
       `<tr class="${isBad ? "row-bad" : ""}" data-spupk="${esc(it.spu_pk)}">` +
       `<td class="td-left"><span class="td-spu-cell">${img}<span class="td-spu-meta">` +
       `<span class="td-spu">${esc(it.spu_id)}</span>` +
       `<span class="td-title" data-tip="${esc(it.title || "")}">${warnUnsettled}${warnDefault ? warn : ""}${warnRr}${esc(it.title || "")}${status}</span></span></span></td>` +
       `<td>${fmtMoney(it.spend)}</td>` +
-      `<td>${fmtMoney(it.sales)}</td>` +
-      `<td>${fmtInt(it.order_count)}</td>` +
+      `<td>${fmtMoney(it.effective_sales)}</td>` +
+      `<td>${fmtInt(it.effective_order_count)}</td>` +
       `<td>${fmtPctOrDash(it.cancel_rate)}</td>` +
       `<td>${fmtPctOrDash(it.full_loss_rate)}</td>` +
       `<td${profitClass}>${fmtMoney(it.net_profit)}</td>` +

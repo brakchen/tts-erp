@@ -13,7 +13,8 @@
 
 - 同一个 deep module 同时负责 SPU 盈利明细与盈利大盘。
 - 明细针对单个 SPU；大盘针对盈利范围内的所有 SPU。
-- 两者使用完全相同的 v10 口径。
+- 两者使用完全相同的 v10 口径：`effective_sales`、`effective_order_count`、`refund_order_count/refund_rate`、`full_loss_order_count/full_loss_rate`、`domestic_cancelled_order_count/cancel_rate` 在单 SPU 范围必须逐项相等。
+- `refund_rate` / `full_loss_rate` / `cancel_rate` 均为订单维度且分母统一为全部订单；金额退款率与件数全损率只能通过显式解释字段 `refund_amount_rate` / `full_loss_qty_rate` 暴露。
 - 大盘的订单级事实必须在整体范围内去重，不能简单累加 SPU 行。
 - 盈利范围跟随店铺、日期窗口与“是否包含非在售 SPU”。
 - 文本搜索、排序与分页只改变明细展示，不改变盈利大盘。

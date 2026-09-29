@@ -9,6 +9,7 @@ import pytest
 from tts_erp_v2.analytics.spu_profitability._formula_v10 import (
     FormulaInput,
     calculate,
+    calculate_order_metrics,
 )
 
 pytestmark = [pytest.mark.domain_reporting, pytest.mark.layer_unit]
@@ -20,8 +21,10 @@ def _inputs(**overrides) -> FormulaInput:
         "ad_gmv_usd": Decimal("80"),
         "ad_orders": 5,
         "order_count": 1,
-        "units_sold": 5,
+        "cancelled_orders": 1,
         "domestic_cancelled_orders": 1,
+        "overseas_cancelled_orders": 0,
+        "units_sold": 5,
         "full_loss_cancelled_qty": 0,
         "full_loss_qty": 1,
         "refund_order_count": 1,
@@ -44,6 +47,24 @@ def _inputs(**overrides) -> FormulaInput:
     return FormulaInput(**values)
 
 
+def test_v10_order_metrics_use_one_shared_order_dimension_formula() -> None:
+    metrics = calculate_order_metrics(
+        order_count=8,
+        cancelled_orders=2,
+        domestic_cancelled_orders=1,
+        overseas_cancelled_orders=1,
+        refund_order_count=2,
+    )
+
+    assert metrics.total_orders == 10
+    assert metrics.effective_order_count == 6
+    assert metrics.refund_order_count == 2
+    assert metrics.full_loss_order_count == 3
+    assert metrics.refund_rate == Decimal("0.2")
+    assert metrics.full_loss_rate == Decimal("0.3")
+    assert metrics.cancel_rate == Decimal("0.1")
+
+
 def test_v10_formula_keeps_exact_domain_decimals() -> None:
     result = calculate(_inputs())
 
@@ -56,9 +77,16 @@ def test_v10_formula_keeps_exact_domain_decimals() -> None:
     assert result.net_profit_usd == Decimal("15.81200")
     assert result.roi_real == Decimal("4.94504")
     assert result.platform_fee_usd == Decimal("30.800")
-    assert result.refund_rate == Decimal("0.2")
-    assert result.full_loss_rate == Decimal("0.2")
+    assert result.effective_sales_usd == Decimal("80")
+    assert result.total_orders == 2
+    assert result.effective_order_count == 0
+    assert result.refund_order_count == 1
+    assert result.full_loss_order_count == 1
+    assert result.refund_rate == Decimal("0.5")
+    assert result.full_loss_rate == Decimal("0.5")
     assert result.cancel_rate == Decimal("0.5")
+    assert result.refund_amount_rate == Decimal("0.2")
+    assert result.full_loss_qty_rate == Decimal("0.2")
 
 
 def test_v10_formula_uses_settlement_as_actual_net_revenue() -> None:

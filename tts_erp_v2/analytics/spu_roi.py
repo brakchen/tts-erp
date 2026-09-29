@@ -73,9 +73,11 @@ _RATIO_FIELDS = {
     "cancel_rate",
     "refund_rate_qty",
     "refund_rate",
+    "refund_amount_rate",
     "roi_real",
     "roi_breakeven",
     "full_loss_rate",
+    "full_loss_qty_rate",
     "share_ratio",
     "ad_system_breakeven_roi",
 }
