@@ -49,7 +49,7 @@ def _db_lookup(key_hash: str) -> Credential | None:
         try:
             row.last_used_at = datetime.now(UTC)
             session.commit()
-        except Exception:
+        except Exception:  # noqa: BLE001 — last-used update is best-effort
             session.rollback()
         return Credential(key_hash=key_hash, role=role)
 
