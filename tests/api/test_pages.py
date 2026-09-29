@@ -108,6 +108,12 @@ def test_shops_page_returns_200_with_html(api_client, readonly_key):
     body = r.text
     assert "../../static/vendor/bootstrap.min.css" in body
     assert "../../static/js/shops.js" in body
+    assert 'id="f-service-id"' in body
+    assert 'id="f-app-key"' in body
+    assert 'id="f-app-secret"' in body
+    assert 'id="app-credentials-dialog"' in body
+    assert 'id="d-app-secret"' in body
+    assert body.count('type="password"') >= 2
     assert 'href="/static/' not in body
     assert 'src="/static/' not in body
 
