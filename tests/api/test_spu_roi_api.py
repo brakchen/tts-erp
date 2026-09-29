@@ -2532,6 +2532,30 @@ def test_spu_roi_mobile_sticky_product_cells_use_opaque_backgrounds() -> None:
     assert "text-overflow: ellipsis" in product_id
 
 
+def test_spu_roi_dashboard_metrics_are_never_truncated() -> None:
+    """大盘标签和数值必须完整显示，不能用 ellipsis 隐藏业务数据。"""
+    import re
+    from pathlib import Path
+
+    css = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "css"
+        / "spu-roi.css"
+    ).read_text(encoding="utf-8")
+
+    for selector in (".op-counter-label", ".op-counter-num"):
+        match = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", css)
+        assert match is not None, selector
+        declarations = match.group(1)
+        assert "overflow: hidden" not in declarations
+        assert "text-overflow: ellipsis" not in declarations
+        assert "white-space: nowrap" not in declarations
+        assert "white-space: normal" in declarations
+        assert "overflow-wrap: anywhere" in declarations
+
+
 def test_spu_roi_js_targets_dashboard_hooks():
     """spu-roi.js 必须存在且渲染表格与结余带。"""
     from pathlib import Path
