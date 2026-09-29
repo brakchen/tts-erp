@@ -1,6 +1,6 @@
 # 访问策略与部署路径适配深模块技术方案
 
-> 状态：**Candidate 02 运行时实现已完成，等待用户 review；不得合并到 `master`**。
+> 状态：**Candidate 02 运行时实现已完成并通过 review；用户已批准合并**。
 >
 > 架构方案已通过 `c3f9560` 合并；实现位于独立分支
 > `redesign/access-policy-implementation`。本轮不改变中间件顺序、数据库 schema 或生产配置。
