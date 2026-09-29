@@ -703,7 +703,9 @@ Success response (`code: 0`):
 `analytics.ad_sync_audit` 一行元数据审计（与主写同事务；30s today 常规刷新不写）。~~
 **（2026-09-11 起失效：v3 遗留对象已由 migration 0020 删除）**：v4 逐日协议不做取代审计 ——
 `ad_daily` 每日一行按自然键 upsert，允许 TikTok 延迟归因后的指标校准；
-`ad_today` 用 `ON CONFLICT DO UPDATE` 原地刷新，跨天由 `plugin.ad_merge_today2daily` job 固化后删除。
+`ad_today` 用 `ON CONFLICT DO UPDATE` 原地刷新；2026-09-19 起跨天固化
+job (`plugin.ad_merge_today2daily`) 已停用——ad_today 当前无清理路径，作为未来
+merge job 重新启用后的回填目标保留（v8.1 起 ROI 看板只读 `ad_daily`）。
 
 Errors:
 

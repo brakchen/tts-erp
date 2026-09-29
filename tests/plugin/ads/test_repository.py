@@ -1,7 +1,7 @@
 """Tests for ``tts_erp_v2/analytics/repository.py`` — v4 daily-sync-with-coverage.
 
 Tests v4 structured upsert functions (upsert_daily_rows, upsert_today_rows,
-upsert_monthly_rows), coverage queries, solidify, and plugin_logs.
+upsert_monthly_rows), coverage queries, and plugin_logs.
 """
 
 from __future__ import annotations
@@ -331,65 +331,6 @@ def test_get_coverage_monthly_returns_map(db_session):
     assert total == 1
     assert _CAMPAIGN in coverage
     assert "2026-08" in coverage[_CAMPAIGN]
-
-
-# ---------------------------------------------------------------------------
-# solidify
-# ---------------------------------------------------------------------------
-
-
-def test_merge_today_into_daily_moves_today_to_daily(db_session):
-    """solidify: ad_today 昨天 → ad_daily，然后清空 ad_today。"""
-    from tts_erp_v2.plugin.ads import repository
-
-    # Insert today row for yesterday
-    repository.upsert_today_rows(
-        db_session,
-        seller_id=_SELLER,
-        advertiser_id=_ADV,
-        endpoint=_ENDPOINT,
-        campaign_id=_CAMPAIGN,
-        day=date(2026, 9, 9),
-        rows=[_base_row()],
-        request_url="https://x/",
-        request_body={},
-        response_status=200,
-        response_body={},
-        created_at=datetime(2026, 9, 10, 1, 0, 0, tzinfo=UTC),
-        request_id="TEST_sol1",
-        source="t",
-    )
-
-    # Solidify
-    pairs = repository.list_merge_scope_pairs(
-        db_session, yesterday=date(2026, 9, 9)
-    )
-    assert (_SELLER, _ADV) in pairs
-
-    repository.merge_today_into_daily(
-        db_session,
-        seller_id=_SELLER,
-        advertiser_id=_ADV,
-        yesterday=date(2026, 9, 9),
-    )
-
-    # ad_today should be empty for that day
-    today_count = db_session.execute(
-        text(
-            "SELECT count(*) FROM plugin.ad_today WHERE seller_id = :s AND day = :d"
-        ),
-        {"s": _SELLER, "d": date(2026, 9, 9)},
-    ).scalar()
-    assert today_count == 0
-
-    # ad_daily should have the row
-    daily_count = db_session.execute(
-        text(
-            "SELECT count(*) FROM plugin.ad_daily WHERE seller_id = :s AND day = :d"
-        ),
-        {"s": _SELLER, "d": date(2026, 9, 9)},
-    ).scalar()
-    assert daily_count == 1
 
 
 # ---------------------------------------------------------------------------

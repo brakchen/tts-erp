@@ -297,11 +297,15 @@ cookie / 完整请求头。
 - **当前**：`protocolVersion: 2`（dump 单 object 形状）；1 仍接受（同形状）
 - **未来 breaking 触发条件**：改 dump 字段语义 / 改 idempotency key 算法 /
   恢复批量 / 改 scope 语义等
-- **保留策略**：
-  - `ad_raw`：forever（source-of-truth）
-  - `ad_records`：90 天（sync-worker `analytics.retention` job）
-  - `ad_audit_log`：30 天
-  - `ad_shop_timezones`：forever
+- **保留策略**（2026-09-19 起，按 plugin schema 当前形态）：
+  - `plugin.ad_raw_log`：forever（source-of-truth，每条 dump 原始 payload）
+  - `plugin.ad_today`：当前无跨天固化 job,数据由 dump 持续 ON CONFLICT 覆盖
+    （v8.1 起 ROI 只读 ad_daily）
+  - `plugin.ad_daily`：forever（每日累计主表,ROI 看板只读此表）
+  - `plugin.ad_monthly`：forever（按月聚合）
+  - `plugin.plugin_logs`：forever（插件运行时日志,排查用）
+  - 已 drop（0007/0024）: `analytics.ad_records` / `ad_audit_log` /
+    `ad_shop_timezones` / `ad_daily_completeness`
 
 ## 相关文档
 

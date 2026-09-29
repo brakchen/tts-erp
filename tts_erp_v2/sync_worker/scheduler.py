@@ -221,7 +221,9 @@ JOBS: dict[str, JobSpec] = {
     # reorg-plan.md 决策 #1-#4）摘除：ad_records / ad_audit_log / 等 4 张
     # 表已 drop,审计改文件日志,无对象可 purge。JOBS 数 13 → 12。
     # 2026-09-05 晚：spu.image_mirror 加入 → 12 → 13（见 coverage 测试）。
-    # 2026-09-08：analytics.solidify 加入 → 13 → 14（ad_today→ad_daily 固化）。
+    # 2026-09-19：plugin.ad_merge_today2daily 已停用（ad_today→ad_daily 跨天固化
+    # 同步逻辑删除；保留 plugin.ad_today 表作为未来重新启用后的回填目标；17 → 16）。
+    # 完整历史见 tests/sync_worker/test_scheduler_jobs_coverage.py:85。
 }
 
 
