@@ -57,6 +57,7 @@ sign = MD5(busData + companySecret).upper()
 - 请求体：`page`（从 1 开始）和 `pageSize`（10–100）；同步任务使用 100。
 - 响应：`data.goodsPurchaseOrderList`，行项目为
   `goodsPurchaseOrderSkuList`，并以 `data.total` 记录总条数。
+- 调度：`miaoshou.purchase_orders` 每小时执行一次。
 - Apifox 同时列出 `timerToken` 查询参数和 `Cookie` 头，但未标为必填；
   当前同步沿用 ERP HMAC 认证（`x-app-key` / `x-timestamp` / `x-sign`）。
 
