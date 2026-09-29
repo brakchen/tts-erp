@@ -94,6 +94,23 @@ def test_me_authenticated_after_login(api_client, readwrite_key):
     assert body["role"] == "readwrite"
 
 
+def test_me_reports_current_database_role(
+    api_client, readwrite_key, db_engine
+):
+    _login(api_client, readwrite_key)
+    table = Base.metadata.tables["security.api_keys"]
+    with db_engine.begin() as connection:
+        connection.execute(
+            update(table).where(table.c.name == "TEST_readwrite").values(role="admin")
+        )
+    clear_cache()
+
+    response = api_client.get("/v2/auth/me")
+
+    assert response.status_code == 200
+    assert response.json() == {"authenticated": True, "role": "admin"}
+
+
 # -------------------------------------------------- session cookie access
 
 
