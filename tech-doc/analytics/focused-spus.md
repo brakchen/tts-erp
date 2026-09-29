@@ -1,8 +1,8 @@
 # 重点关注 SPU 页面技术方案
 
-> 状态：Draft v2，等待产品确认后开发
+> 状态：Draft v3，等待产品确认后开发
 > 日期：2026-09-29
-> v2 修订：取消每店 100 个业务上限；增加公共盈利页面深模块与 selection adapter 设计
+> v3 修订：按深模块原则完成多方案比较，收敛 interface/seam，补齐无限关注范围的性能、错误和测试契约
 > 关联现有页面：`GET /v2/pages/spu-roi`
 > 口径真相源：`GET /v2/analytics/spu-roi`
 
@@ -74,7 +74,7 @@
    - 精确校验 SPU 必须属于当前店铺。
 3. 每店关注总数不设业务上限；关注列表使用服务端搜索和分页，不把所有关注项一次塞进 Tom Select 或 URL。
 4. 打开编辑器时加载当前关注列表；新增与移除先进入差量草稿，点击「取消」不写库。
-5. 点击「保存修改」时提交 `add_spu_ids` / `remove_spu_ids`；单次请求可以限制批量大小，但该限制不是店铺关注总数上限。
+5. 点击「保存修改」时提交 wire 字段 `addSpuIds` / `removeSpuIds`；单次请求可以限制批量大小，但该限制不是店铺关注总数上限。
 6. 保存成功后关闭编辑器、刷新关注计数，再以服务端 focused scope 请求 SPU ROI 数据。
 7. 保存失败时保留草稿，明确显示失败原因，不静默关闭。
 
@@ -86,6 +86,24 @@
 - 非 ACTIVE 且当前窗口无活动的 SPU 可能不进入 ROI 结果；编辑器仍显示其状态，页面给出未展示数量提示。
 
 ## 5. 核心设计决策
+
+### D0. 三种架构方案比较与结论
+
+本轮按 “Design It Twice” 并行比较了三种 interface：
+
+1. **最小 interface**：盈利模块保留 `read_overview()` / `explain_spu()`；浏览器只暴露一个 `mount()`；关注集合模块只暴露 `list()` / `apply_patch()`。深度最高，调用方最少需要知道内部细节。
+2. **可扩展 persisted-scope interface**：引入 provider registry、view-state adapter、projection registry，未来可承载标签、保存视图和其他持久范围。扩展性高，但当前只有 focused 一个持久范围，许多 seam 只有一个 adapter，属于假想 seam。
+3. **端到端领域切片**：把 HTTP adapter、盈利 selection、页面 shell、浏览器 controller 和关注持久化分别放在清晰 seam 上，强调 transport、DOM 和 SQL 不互相泄漏。locality 最强，但必须避免把每一层都再包装一遍。
+
+**结论：采用“最小 interface + 端到端 seam”的混合方案。**
+
+- 后端使用具体的 `ActivitySelection | ExactIdsSelection | FocusedSelection`，不提前引入通用 provider registry。
+- 浏览器只公开 `mountSpuProfitabilityPage()`；两种 selection adapter 是真实 seam，因为已有两个行为不同的 adapter。
+- 关注持久化独立为一个深模块，FastAPI 只做 wire adapter。
+- 页面 shell 是领域专用 module，不做通用 dashboard/table 框架。
+- 暂不引入 projection、saved-view、repository port；等第二个真实调用方出现再建立对应 seam。
+
+删除测试：如果删除公共盈利页面模块，汇总、表格、分页、钻取、错误生命周期会重新散落到两个页面；如果删除 selection adapter seam，两种互斥的编辑语义会重新混进公共文件。两者都能让复杂度明显重新出现，因此不是浅层转发。
 
 ### D1. 关注关系按 `(shop_pk, spu_id)` 存储
 
@@ -118,18 +136,30 @@ CREATE TABLE reporting.focused_spus (
 );
 ```
 
-另建活动行 partial index：`(shop_pk, spu_id) WHERE active IS TRUE`，供 focused scope、计数和分页读取使用；继续使用现有 `public.fn_touch_updated_at()` 维护 `updated_at`。
+索引分两种真实访问路径：
+
+```sql
+-- 盈利 scope membership / count
+CREATE INDEX ... ON reporting.focused_spus (shop_pk, spu_id)
+WHERE active IS TRUE;
+
+-- 关注管理列表的稳定排序
+CREATE INDEX ... ON reporting.focused_spus (shop_pk, updated_at DESC, spu_id)
+WHERE active IS TRUE;
+```
+
+继续使用现有 `public.fn_touch_updated_at()` 维护 `updated_at`。
 
 ### D2. 移除关注采用软删除
 
 编辑器中的“删除”在数据库中表现为 `active=false + removed_at`，不执行物理 `DELETE`：
 
-- 保留操作历史；
+- 保留当前状态和最近一次增删的审计元数据；
 - 重新关注时可原行恢复；
 - 避免为日常编辑引入生产破坏性操作；
 - 与仓库 destructive guard 规则兼容。
 
-v1 不提供历史查询 UI，但保留后续审计能力。
+单行软状态不是完整事件历史：反复移除/恢复会覆盖最近一次操作字段。v1 不宣称提供完整审计；如果未来需要逐次历史，再新增 append-only 事件表，不扩大当前 interface。
 
 ### D3. 用差量 PATCH，不用整表覆盖
 
@@ -137,8 +167,8 @@ API 接收新增集合和移除集合：
 
 ```json
 {
-  "add_spu_ids": ["1729...", "1730..."],
-  "remove_spu_ids": ["1601..."]
+  "addSpuIds": ["1729...", "1730..."],
+  "removeSpuIds": ["1601..."]
 }
 ```
 
@@ -146,12 +176,34 @@ API 接收新增集合和移除集合：
 
 约束：
 
-- `add_spu_ids` 与 `remove_spu_ids` 不得重叠；
-- 去空、trim、去重；
+- `addSpuIds` 与 `removeSpuIds` 在 trim、去空、去重后不得重叠；
 - 单个 ID 最长 128 字符；
 - 每店关注总数不设业务上限；
+- 单次 PATCH 最多处理 500 个 ID，这是请求/事务大小限制，不是店铺总数限制；
 - 任一新增 SPU 不属于当前店铺时，整次请求 422，不能部分成功；
-- 移除一个当前未关注的 SPU 视为幂等成功。
+- 移除一个当前未关注的 SPU 视为幂等成功；
+- 新 wire JSON/TypeScript 使用 camelCase；Python 和数据库内部继续 snake_case。
+
+关注持久化不是 FastAPI handler 内的一段 SQL，而是独立深模块：
+
+```python
+list_focused_spus(
+    session,
+    *,
+    shop_pk: int,
+    query: FocusedSpuQuery,
+) -> FocusedSpuPage
+
+apply_patch(
+    session,
+    *,
+    shop_pk: int,
+    patch: FocusedSpuPatch,
+    actor: str | None,
+) -> FocusedSpuPatchResult
+```
+
+interface 的不变量包括原子性、幂等性、店铺归属、分页顺序、批次上限和 typed errors。SQL、upsert、软移除、count 与事务 ordering 全部隐藏在 implementation 中；FastAPI route 只做 wire adapter。
 
 ### D4. 盈利计算只调用现有 SPU ROI 深模块
 
@@ -182,7 +234,7 @@ SpuSelection
 └─ FocusedSelection         # 新增，DB 内按 shop_pk 解析，无总数上限
 ```
 
-三种 selection 只决定基础 SPU 集合；金额公式、汇率、费率、退款/取消/全损口径、排序、分页、totals 和 evidence 全部继续走同一实现。由此自动继承：
+三种 selection 只决定基础 SPU 集合；金额公式、汇率、费率、退款/取消/全损口径、排序、分页、totals 和 evidence 全部继续走同一实现。排序在现有 metric + spend tie 之后显式追加 `spu_pk ASC` 最终 tie-breaker，避免相同指标行在 offset pagination 中漂移。由此自动继承：
 
 - SPU ROI 当前 v10 盈利模块；
 - `meta.currency` / `meta.fx`；
@@ -190,6 +242,24 @@ SpuSelection
 - 退款、国内取消、海外取消、全损、已结算/未结算口径；
 - `totals` 在完整关注 scope 内聚合且不受分页影响；
 - 订单、结算、售后、广告四类钻取端点。
+
+#### D4.1 selection 的性能契约
+
+当前盈利 implementation 会先计算完整 scope 的行与 totals，再进行公式排序和 response pagination。因此“页面每页 100 条”只限制响应大小，不会自动让计算成本与页大小成比例。
+
+FocusedSelection 的 implementation 必须：
+
+1. 先形成索引可用的 `selected_spus(spu_pk, shop_pk)` relation；
+2. 将该 relation 下推到广告、订单、退款、全损、成本和 distinct-order 等事实查询，不能先扫全店/全库再在 Python 丢弃；
+3. 在同一盈利快照中读取关注 membership 与业务事实，避免列表和 totals 跨快照；
+4. 保持 totals 对完整 focused scope 精确计算；不能为了性能偷偷加总数上限或只统计当前页；
+5. 在 `tts_erp_v3_test` 使用超过 100 个关注 SPU 的样本记录 `EXPLAIN (ANALYZE, BUFFERS)` 与计算耗时。
+
+公式排序和完整 totals 仍可能要求对全部选中 SPU 执行 v10 公式。若未来规模导致不可接受，应在同一 profitability interface 背后优化 SQL/物化事实，而不是新增 focused 专用公式。
+
+#### D4.2 `include_all` 兼容约束
+
+现有 `include_all` wire 语义与内部 `include_inactive` 命名并不完全直观：当前 `include_all=true` 表示把没有活动的 ACTIVE 目录 SPU 纳入结果，并不等于展示所有下架状态。本功能只复用现有运行时语义，不顺手重命名或扩大状态范围；相关清理另开任务。
 
 禁止在重点关注页前端重新计算金额、ROI、费率或汇总。
 
@@ -199,32 +269,50 @@ SpuSelection
 
 #### D5.1 公共 seam 与 interface
 
-新增公共文件 `static/js/spu-profitability-page.js`，只暴露一个挂载 interface：
+新增公共文件 `static/js/spu-profitability-page.js`。由于项目无构建步骤，使用单一 namespaced global，只暴露一个挂载 interface：
 
 ```js
-mountSpuProfitabilityPage({
+const page = window.ttsErp.spuProfitability.mount({
   root,
   pagePath,
   selectionAdapter,
-  defaults,
+  defaults: { includeAll, limit, sort, order },
 });
+
+page.reload();
+page.destroy();
 ```
 
-`selectionAdapter` 是真正会变化的 seam。目前恰好有两个 adapter，因此不是为假想未来过度设计：
+不公开 renderer、formatter、state、fetch helper、pager 或 drilldown helper。`selectionAdapter` 是真正会变化的 seam；目前恰好有两个 adapter：
+
+```text
+load(shopPk, signal)
+  -> Promise<{queryable, count, label, emptyReason}>
+
+analyticsParams(selectionState)
+  -> 只包含 selection query 的普通对象
+
+mountEditor({root, shopPk, role, selectionState, onCommitted})
+  -> cleanup function
+
+destroy()
+```
+
+两个 adapter 的语义：
 
 ```text
 AdHocSelectionAdapter
-  load(shopPk)             从 URL 恢复 spu_ids
-  analyticsParams(scope)   返回 {spu_ids: "..."}
-  mountEditor(context)     绑定现有 Tom Select / 查询 / 清空
+  load                  从 URL 恢复临时 spu_ids；空 IDs 仍 queryable（整店活动范围）
+  analyticsParams       返回 {} 或 {spu_ids: "..."}
+  mountEditor           绑定现有 Tom Select / 查询 / 清空 / URL 同步
 
 FocusedSelectionAdapter
-  load(shopPk)             从 focused-spus API 读取关注计数
-  analyticsParams(scope)   返回 {scope: "focused"}
-  mountEditor(context)     绑定关注列表、搜索、新增、移除、保存
+  load                  GET limit=1 读取关注总数；总数 0 时 queryable=false
+  analyticsParams       固定返回 {scope: "focused"}
+  mountEditor           绑定分页列表、搜索、新增、移除、草稿和 PATCH
 ```
 
-adapter interface 只负责“范围从哪里来、如何编辑、怎样翻译成 analytics query”。它不参与表格渲染和盈利计算。
+adapter 只能决定“范围从哪里来、如何编辑、怎样翻译成 selection query”。公共 module 始终自行加入 `shop_pk`、日期、费率、include-all、排序和分页，并拒绝 adapter 覆盖这些公共键。adapter 不能访问汇总卡、主表、分页和钻取 DOM，也不参与盈利计算。
 
 #### D5.2 必须抽到公共模块的内容
 
@@ -240,6 +328,24 @@ adapter interface 只负责“范围从哪里来、如何编辑、怎样翻译�
 8. 店铺切换、日期校验、临时费率、刷新、登录身份和退出。
 9. tooltip、主图 lightbox、无障碍与移动端行为。
 
+公共状态机：
+
+```text
+BOOTING → AWAITING_SHOP → RESOLVING_SELECTION
+        → EMPTY_SELECTION | LOADING → READY | ERROR
+```
+
+店铺切换的固定顺序：abort 旧 selection/overview/drilldown 请求 → 销毁旧 editor → 清分页与钻取缓存 → load 新 selection → selection 可查询时才 load overview。除了 `AbortController`，还使用单调 version，保证旧响应不能覆盖新店铺。
+
+错误契约：
+
+- selection 加载失败：显示可重试错误，绝不回退整店 scope；
+- focused 空集合：显示 CTA，零 analytics 请求；
+- 401：按配置的 `pagePath` 回到正确页面登录，不再硬编码 `/spu-roi`；
+- FX 失败：沿用公共整页错误；
+- drilldown 失败：只在面板内显示，不覆盖主表；
+- PATCH 失败：adapter 保留草稿和编辑器；成功后刷新关注计数、重置 analytics offset 并 reload。
+
 这些内容被抽走后，修复一处表格、钻取、分页或错误处理，两页同时生效。
 
 #### D5.3 保留在各自 adapter 的内容
@@ -252,7 +358,20 @@ adapter interface 只负责“范围从哪里来、如何编辑、怎样翻译�
 
 #### D5.4 HTML 与 CSS 的抽象
 
-服务端新增 `_render_spu_profitability_page(config)`，从同一 HTML shell 生成两页。公共 shell 包含汇总卡、筛选器、费率卡、主表、钻取模板和分页；config 只提供页面标题、mode、scope 编辑区和入口脚本，避免复制整段 HTML 或依赖脆弱的字符串替换。
+服务端新增 `_render_spu_profitability_page(config)`，从同一 HTML shell 生成两页。config 是内部 typed value，只允许仓库内的固定页面：
+
+```python
+@dataclass(frozen=True)
+class SpuProfitabilityPageConfig:
+    slug: Literal["spu-roi", "focused-spus"]
+    title: str
+    page_path: str
+    selection_slot: Literal["adhoc", "focused"]
+    entrypoint_js: str
+    include_all_default: bool
+```
+
+公共 shell 包含汇总卡、日期/费率控件、主表、钻取模板、分页、错误区和公共资产。renderer 不接受任意 HTML/JS URL，也不通过复制整段常量或脆弱的全页字符串替换派生页面。
 
 CSS 分两层：
 
@@ -262,6 +381,8 @@ CSS 分两层：
 #### D5.5 明确不做的抽象
 
 - 不做通用 dashboard/table/form 框架；列名和盈利语义继续是领域代码。
+- 不预建 projection registry、saved-view adapter 或通用 persisted-scope provider；当前没有第二个真实调用方。
+- 不新增 repository port 或内存假实现；PostgreSQL 是 local-substitutable，直接用专用测试库验证真实 SQL。
 - 不把每个 formatter 或 DOM helper 都变成公共导出；它们是公共模块的私有 implementation。
 - 不用一个巨大的 `if (mode === "focused")` 文件同时承载两套编辑逻辑；变化点必须留在 selection adapter。
 - 不复制 `spu-roi.js` 后再分别维护。
@@ -295,6 +416,20 @@ X-Requested-With: tts-erp
 
 readonly 用户可以查看页面和关注数据；编辑按钮禁用并提示需要 readwrite。服务端仍做角色校验，不能只依赖按钮状态。
 
+`/v2/reporting/` 当前整体会命中 readonly prefix，因此 access policy 必须在该规则之前增加“`PATCH` + focused-spus path → readwrite”的 method-specific 判定；不能把整个 focused prefix 提升到 readwrite，否则 GET 也会错误要求 readwrite。
+
+### D7. 依赖分类与 adapter 策略
+
+| 依赖 | 分类 | 设计 |
+| --- | --- | --- |
+| 浏览器 DOM、Tom Select、普通 JavaScript | in-process | 公共 module 与 selection adapter 直接使用；不为每个 DOM 调用造 wrapper |
+| `spu_profitability` | in-process module | 只通过 `read_overview()` / `explain_spu()` interface 调用，不 import 私有 implementation |
+| FastAPI route | owned local process | 作为 wire adapter 做参数、鉴权、序列化和 error mapping，不承载领域 implementation |
+| PostgreSQL | local-substitutable | `Session` 注入 module；在 `tts_erp_v3_test` 验证真实 SQL，不造行为不同的内存 repository |
+| TikTok/Miaoshou/MinIO | 本 slice 无依赖 | 不新增 mock、重试或远程 port |
+
+这里只有两个真实 adapter：AdHocSelectionAdapter 与 FocusedSelectionAdapter。HTTP 和 PostgreSQL 的层次分离是 transport/local persistence locality，不意味着要建立假想 remote port。
+
 ## 6. API 契约
 
 ### 6.1 获取某店关注集合
@@ -307,22 +442,25 @@ GET /v2/reporting/focused-spus/{shop_pk}?q=<可选>&limit=50&offset=0
 
 ```json
 {
-  "shop_pk": 314,
+  "shopPk": 314,
   "items": [
     {
-      "spu_pk": 9001,
-      "spu_id": "1729000000000000001",
+      "spuPk": 9001,
+      "spuId": "1729000000000000001",
       "title": "商品标题",
       "status": "ACTIVATE",
-      "created_at": "2026-09-29T08:00:00Z",
-      "updated_at": "2026-09-29T08:00:00Z"
+      "createdAt": "2026-09-29T08:00:00Z",
+      "updatedAt": "2026-09-29T08:00:00Z"
     }
   ],
   "total": 126,
+  "matchedTotal": 9,
   "limit": 50,
   "offset": 0
 }
 ```
+
+`total` 是该店全部 active 关注数；`matchedTotal` 是应用 `q` 后的数量；`items` 是当前搜索页。固定排序为 `updated_at DESC, spu_id ASC`。
 
 错误：
 
@@ -342,12 +480,23 @@ X-Requested-With: tts-erp
 
 ```json
 {
-  "add_spu_ids": ["1729000000000000002"],
-  "remove_spu_ids": ["1729000000000000001"]
+  "addSpuIds": ["1729000000000000002"],
+  "removeSpuIds": ["1729000000000000001"]
 }
 ```
 
-成功直接返回更新后的完整集合，便于前端以服务端结果覆盖本地草稿。
+成功返回有界 mutation receipt，不返回无限增长的完整集合：
+
+```json
+{
+  "shopPk": 314,
+  "total": 126,
+  "addedSpuIds": ["1729000000000000002"],
+  "removedSpuIds": ["1729000000000000001"]
+}
+```
+
+前端随后重新读取当前管理页与关注计数。
 
 错误：
 
@@ -356,7 +505,8 @@ X-Requested-With: tts-erp
 - 404：店铺不存在；
 - 422 `SPU_NOT_FOUND_IN_SHOP`：新增 SPU 不属于该店；
 - 422 `FOCUSED_SPU_PATCH_CONFLICT`：同一 ID 同时出现在新增和移除列表；
-- 422：单次 PATCH body 超出批处理大小或字段格式非法。
+- 422 `FOCUSED_SPU_PATCH_TOO_LARGE`：单次 PATCH 超过 500 个 ID；
+- 422：字段格式非法。
 
 ## 7. 数据流
 
@@ -380,7 +530,8 @@ X-Requested-With: tts-erp
    └─ PATCH /v2/reporting/focused-spus/{shop_pk}
           ├─ 校验店铺与 SPU 归属
           ├─ 同事务软移除 + 新增/恢复
-          └─ 返回最新集合，再刷新 ROI
+          ├─ 返回有界 mutation receipt
+          └─ 重读当前管理页/计数，再刷新 ROI
 ```
 
 ## 8. 代码改动面
@@ -389,11 +540,13 @@ X-Requested-With: tts-erp
 | --- | --- |
 | `alembic/versions/0043_focused_spus.py` | 新建关注表、索引、更新时间 trigger |
 | `schema_tts_erp.sql` | 迁移验证后重新生成 schema 快照 |
-| `tts_erp_v2/api/v2/focused_spus.py` | GET + PATCH API；校验、事务、软移除 |
+| `tts_erp_v2/reporting/focused_spus.py` | 关注集合深模块：`list_focused_spus()` / `apply_patch()`，隐藏 SQL、校验和事务 |
+| `tts_erp_v2/api/v2/focused_spus.py` | GET + PATCH wire adapter；camelCase 序列化和 domain error 映射 |
 | `tts_erp_v2/app.py` | 注册新 router |
 | `tts_erp_v2/access/_policy.py` | GET readonly、PATCH readwrite |
 | `tts_erp_v2/analytics/spu_profitability/_types.py` | 将范围建模为 Activity / ExactIds / Focused selection |
-| `tts_erp_v2/analytics/spu_profitability/_implementation.py` | 在基础 SPU scope 中实现 focused DB predicate，复用全部公式 |
+| `tts_erp_v2/analytics/spu_profitability/_selection.py` | 私有 selection relation；把 selected SPU 下推到事实查询 |
+| `tts_erp_v2/analytics/spu_profitability/_implementation.py` | 消费 selected relation，复用全部公式、totals、排序和分页 |
 | `tts_erp_v2/analytics/spu_roi.py` | 解析 `scope=focused` 并保持现有响应契约 |
 | `tts_erp_v2/api/v2/pages.py` | 新页面路由、侧边栏入口、`_render_spu_profitability_page(config)` 共享 shell |
 | `tts_erp_v2/static/js/spu-profitability-page.js` | 新公共深模块：状态、overview、汇总、表格、分页、钻取和公共交互 |
@@ -401,44 +554,74 @@ X-Requested-With: tts-erp
 | `tts_erp_v2/static/js/focused-spus.js` | Focused selection adapter + bootstrap |
 | `tts_erp_v2/static/css/spu-roi.css` | 保留公共盈利账页视觉 |
 | `tts_erp_v2/static/css/focused-spus.css` | 仅关注编辑器、关注计数和空状态 |
-| `tests/api/test_focused_spus.py` | API、权限、店铺隔离、原子性、软移除测试 |
-| `tests/api/test_spu_roi_api.py` | 新页面 shell 与共享前端模式回归测试 |
+| `tests/reporting/test_focused_spus.py` | 通过关注集合 module interface 测分页、搜索、原子 patch、软移除和恢复 |
+| `tests/analytics/test_spu_profitability_selection.py` | 通过盈利 module interface 验证 Focused 与 Exact 等价及 >100 范围 |
+| `tests/api/test_focused_spus.py` | wire、权限、camelCase、错误映射和 CSRF |
+| `tests/api/test_spu_roi_api.py` | 新页面 shell 与现有端点兼容回归 |
+| 浏览器 DOM harness（路径按现有测试基础设施确定） | 通过 mount interface 测竞态、错误、空态、分页与草稿保留 |
 | `tech-doc/external-api.md` | 页面和 API 契约登记 |
 
 注意：`pages.py`、`spu-roi.js`、`spu-roi.css`、`test_spu_roi_api.py` 当前由 `fix/spu-roi-pagination` lane 占用。该 lane 合并释放前不修改这些共享文件；实现时先 rebase 到分页改造后的 master。
 
 ## 9. 测试方案
 
-### 9.1 API 集成测试
+### 9.1 关注集合 module interface
 
-1. readonly 可 GET，anonymous 401。
-2. readwrite/admin 可 PATCH，readonly PATCH 403。
-3. A 店关注集合不会出现在 B 店。
-4. 相同 `spu_id` 可在两个店分别关注。
-5. 新增、移除、重新新增均幂等。
-6. 移除后数据库行仍存在且 `active=false`。
-7. 新增不存在或属于其他店的 SPU 返回 422，整次事务不产生部分写入。
-8. 新增/移除重叠返回 422。
-9. 单店关注数超过 100 后仍可分页读取，`scope=focused` 能覆盖完整集合。
-10. 空关注集合 GET 返回 `items=[]`，页面不得退化为整店 ROI。
+测试只调用 `list_focused_spus()` / `apply_patch()`，不直接断言私有 SQL：
 
-### 9.2 页面契约测试
+1. A 店关注集合不会出现在 B 店；相同 `spu_id` 可在两店分别关注。
+2. 新增、移除、重复操作、重新恢复均幂等。
+3. 移除后行仍存在且 `active=false`；只承诺最近状态元数据，不假装完整事件历史。
+4. 一批新增中任一 ID 不存在或属于其他店，整次事务零写入。
+5. trim/去重后的 add/remove 重叠整批拒绝。
+6. 单店超过 100 个关注仍可搜索和稳定分页。
+7. disjoint 的并发 delta 可组合；同一 membership 的相反操作允许 last-committer-wins。
+8. PATCH result 有界，不返回完整集合。
 
-1. `/v2/pages/focused-spus` 使用同一 ROI CSS/JS 资产。
-2. 页面有 `data-spu-page-mode="focused"`、店铺选择器、编辑按钮、汇总卡、主表、分页和钻取模板。
-3. Focused adapter 先拉关注计数，再拉 ROI；空集合不拉 ROI。
-4. 重点关注 ROI 请求始终同时带 `shop_pk` 与 `scope=focused`，不拼完整 ID 列表。
-5. 保存时发送差量 PATCH 和 CSRF header。
-6. 401 跳登录；403 显示只读提示；422 保留编辑草稿。
-7. 标准 SPU ROI 页面原有交互不变。
+### 9.2 盈利 module interface
 
-### 9.3 验证命令
+测试只调用 `read_overview()` / `explain_spu()`：
+
+1. 相同 SPU 集合下，`ExactIdsSelection` 与 `FocusedSelection` 的 items、totals、basis 和 evidence 完全一致。
+2. FocusedSelection 超过 100 个仍成功；ExactIdsSelection 继续保持现有 100 个限制。
+3. 空 focused set 返回空 overview，绝不回退整店 activity scope。
+4. focused membership 不可跨店。
+5. search/pagination 改变 items/total，但不改变 profitability totals。
+6. 相同排序值以 `spu_pk ASC` 最终稳定打破并列，offset pagination 不漂移。
+7. `include_all` 保持现有运行时语义，不因内部重构改变。
+8. 大范围 fixture 验证 selected relation 下推事实查询，并记录执行计划。
+
+### 9.3 HTTP wire adapter
+
+1. readonly 可 GET，anonymous 401；readwrite/admin 可 PATCH，readonly PATCH 403。
+2. cookie PATCH 缺 `X-Requested-With: tts-erp` 时拒绝。
+3. 新 focused management JSON 全部 camelCase。
+4. `scope=focused` 必须带 `shop_pk`，并与 `spu_ids` 互斥；未知 scope 422。
+5. domain error 映射到稳定 code；现有无 scope / exact-ID wire 契约不变。
+6. 空 focused analytics 返回空结果，不泄漏整店数据。
+
+### 9.4 页面与浏览器 mount interface
+
+1. 两页使用同一公共 shell、公共 JS module 和公共 CSS；只在 title、selection slot、entry script、focused CSS 与 defaults 上不同。
+2. Focused adapter 先拉关注计数；空集合产生零 analytics 请求。
+3. Focused analytics 只发送 `shop_pk + scope=focused`，不拼完整 ID 列表。
+4. 店铺切换 abort 旧 selection/overview/drilldown；旧响应不能渲染。
+5. 401 使用配置的 `pagePath`；FX、网络、畸形 payload 和重试生命周期两页一致。
+6. PATCH 发送 CSRF header；失败保留草稿，成功刷新管理页/计数/ROI。
+7. 相同 overview fixture 在两种 adapter 下产生相同汇总、表格、分页和钻取行为。
+8. 将现有依赖 source grep 的断言逐步替换为对 mount interface 的可执行 DOM 测试；不测试私有 formatter 或 renderer。
+
+### 9.5 验证命令
 
 实现阶段只在 `tts_erp_v3_test` 验证迁移。测试按仓库规定执行：
 
 ```bash
 flock -n /tmp/tts-erp-test.lock \
-  bash scripts/test.sh fast tests/api/test_focused_spus.py tests/api/test_spu_roi_api.py
+  bash scripts/test.sh fast \
+  tests/reporting/test_focused_spus.py \
+  tests/analytics/test_spu_profitability_selection.py \
+  tests/api/test_focused_spus.py \
+  tests/api/test_spu_roi_api.py
 
 flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast
 ```
@@ -470,15 +653,27 @@ flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast
 5. 空关注集合绝不展示整店数据。
 6. readonly 可查看但不可编辑；readwrite 可编辑。
 7. 标准 SPU ROI 页面无行为回归。
-8. 窄测试和 fast suite 无新增稳定失败。
+8. 超过 100 个关注 SPU 时管理分页、完整 totals 和 ROI 页面正常，且不把 ID 列表放进 URL。
+9. selected relation 已下推关键事实查询，并留存测试库执行计划/耗时证据。
+10. 窄测试和 fast suite 无新增稳定失败。
 
-## 12. 开发前待确认
+## 12. 主要风险与控制
+
+1. **公共 JS 抽取回归**：现有约 1800 行文件混合了选择、请求、渲染和钻取；必须先用当前标准页 fixture 固定 mount interface 的可观察行为，再替换旧实现，不能复制后渐进漂移。
+2. **无限关注不等于无限计算资源**：完整 totals 和公式排序仍需处理整个 focused scope；通过 selected relation 下推、执行计划和耗时观测控制，不能用隐式业务上限掩盖。
+3. **管理列表 offset 漂移**：并发增删可能让后续页位移；v1 接受该行为，使用确定性排序。真实需要稳定游标时再改 cursor，不提前扩大 interface。
+4. **最近状态不等于完整审计**：软状态表只记录当前状态和最近操作；完整审计如有需求另建事件表。
+5. **actor 标识**：优先记录认证 key hash/稳定主体标识，绝不接收浏览器自报 actor；若当前 grant 无稳定主体则允许空值并记录为待补能力。
+6. **`include_all` 命名误导**：本功能只保持兼容，不顺手修语义，避免把架构重构和业务口径改动混在一起。
+
+## 13. 开发前待确认
 
 以下为本方案的推荐默认值，等待确认后再开始开发：
 
 1. **每店关注总数不设业务上限**：管理列表服务端分页，ROI 使用 `scope=focused` 在数据库内解析范围；现有 `spu_ids` 的 100 个限制只保留给临时筛选。
-2. **公共盈利页面深模块 + 两个 selection adapter**：共享汇总、表格、分页、钻取和错误处理；各自保留不同的范围编辑语义。
-3. **readonly 可看、readwrite 可编辑**：与普通运营写操作一致。
-4. **软移除**：页面表现为删除，数据库保留 inactive 历史。
-5. **重点关注页默认勾选“含无活动”**：优先让被关注但当前窗口无活动的 ACTIVE SPU 仍可见。
-6. **不做关注备注/分组/告警**：v1 只交付店铺级关注集合和 ROI 展示。
+2. **采用最小 interface + 端到端 seam**：具体 Activity/Exact/Focused selection；一个公共浏览器 mount；独立关注集合 module；不预建 provider/projection/saved-view 框架。
+3. **PATCH 返回有界 mutation receipt**：不返回无限增长的完整关注集合，成功后重读当前分页。
+4. **readonly 可看、readwrite 可编辑**：与普通运营写操作一致。
+5. **软移除**：页面表现为删除，数据库保留 inactive 当前状态和最近操作元数据，但不宣称完整事件历史。
+6. **重点关注页默认勾选“含无活动”**：沿用现有语义，让无活动的 ACTIVE SPU 可见，不扩大为全部下架状态。
+7. **不做关注备注/分组/告警**：v1 只交付店铺级关注集合和 ROI 展示。
