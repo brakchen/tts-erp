@@ -6,6 +6,7 @@
 :root {
  --paper: #f4efe4;
  --paper-deep: #eae3d2;
+ --paper-danger: #eee3d9;
  --ink: #1b1814;
  --ink-soft: #4a4239;
  --rule: #c9bfa8;
@@ -427,7 +428,8 @@ table.op-table tbody tr:hover td:first-child {
  background: var(--paper-deep);
 }
 table.op-table tbody tr.row-bad td:first-child {
- background: rgba(140, 26, 26, 0.055);
+ /* Sticky cells overlap scrolled columns, so their background must be opaque. */
+ background: var(--paper-danger);
 }
 tbody.op-rows tr:hover {
  background: var(--paper-deep);
@@ -476,9 +478,14 @@ td.np-red {
  letter-spacing: 0.04em;
 }
 .td-spu {
+ display: block;
+ max-width: 100%;
+ overflow: hidden;
  font-family: var(--mono);
  font-size: 12px;
  color: var(--muted);
+ text-overflow: ellipsis;
+ white-space: nowrap;
 }
 .td-title {
  max-width: clamp(110px, 14vw, 220px);
@@ -492,6 +499,8 @@ td.np-red {
 .td-spu-cell {
  display: flex;
  align-items: center;
+ min-width: 0;
+ overflow: hidden;
  gap: 4px;
 }
 .spu-img {
@@ -525,6 +534,7 @@ td.np-red {
  flex-direction: column;
  gap: 2px;
  min-width: 0;
+ overflow: hidden;
 }
 .spu-status {
  font-family: var(--mono);
