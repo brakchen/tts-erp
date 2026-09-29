@@ -368,10 +368,10 @@ Response envelope:`{items: [...], total, totals, meta}`。`spu_ids` 属于盈利
 | `spend` | money-str (CNY) | M1: 广告消耗 = `Σ real_cost_total`（原生 USD，按 `meta.fx` 换算 CNY） | **主列** |
 | `gmv_ad` | money-str (CNY) | M3: 平台归因 GMV（原生 USD，按同一快照换算 CNY） | — |
 | `roi_l0` | ratio-str/null | M4: `gmv_ad / spend`；广告系统实际 ROI 的兼容别名 | — |
-| `ad_system_actual_roi` | ratio-str/null | 广告系统实际 ROI = 广告归因 GMV ÷ 广告实际消耗 | — |
+| `ad_system_actual_roi` | ratio-str/null | 广告系统实际 ROI = 广告归因 GMV ÷ 广告实际消耗 | **主列** |
 | `ad_system_max_ad_spend` | money-str (CNY) | 最大可承受广告费 = 预计净结算收入 − 同范围采购成本 − 结算外必要成本 | — |
 | `ad_system_remaining_ad_spend_capacity` | money-str (CNY) | 最大可承受广告费 − 当前广告实际消耗；可为负 | — |
-| `ad_system_breakeven_roi` | ratio-str/null | 广告归因 GMV ÷ 最大可承受广告费；分母≤0或无归因 GMV 时为 null | 结余带 |
+| `ad_system_breakeven_roi` | ratio-str/null | 广告归因 GMV ÷ 最大可承受广告费；分母≤0或无归因 GMV 时为 null | **主列**（`estimated_known_costs` 时前端标 `≈`） |
 | `ad_system_breakeven_roi_status` | enum | 当前为 `estimated_known_costs`：结算外必要成本尚未结构化，不能解释为最终保本线 | — |
 | `ad_first_day` / `ad_last_day` | date/null | 广告观测窗口 | — |
 | `order_count` | int | M5b: 有效销售订单数（白名单状态，含 COD 在途） | **主列** |
@@ -420,9 +420,9 @@ Response envelope:`{items: [...], total, totals, meta}`。`spu_ids` 属于盈利
 > - `cost_source` 从两值扩为四值
 > - `unit_cost_used` 来源从 manual+30 兜底切到 MANUAL→PURCHASE→SOURCE_PRICE→40 兜底链
 > - 新增 6 字段：`net_revenue / settled_sales / unsettled_sales / settled_order_count / full_loss_qty / full_loss_cancelled_qty / full_loss_rate`
-> - 主列（D8）从 13 列精简为 6 列：商品 + `spend` + `sales` + `order_count` + `cancel_rate` + `full_loss_rate` + `net_profit`；其余 26 字段继续在 JSON 返回，由下钻面板消费
+> - 主列（2026-09-29）为 8 个经营指标：商品 + `spend` + `ad_system_actual_roi` + `ad_system_breakeven_roi` + `effective_sales` + `effective_order_count` + `cancel_rate` + `full_loss_rate` + `net_profit`；其余字段继续在 JSON 返回，由下钻面板消费
 
-格式化约定(§5.1):**money = 4 位小数字符串（CNY）**、比率/ROI = 2 位小数字符串、件数/单量整数;`null` = 无解/除数为 0(页面显示 `—`);无投放 SPU `spend="0.0000"` + `ad_count=0`。广告原生 USD、销售/退款原生 VND 在公式入口按同一 fx 快照换算 CNY，采购成本保持 CNY；`meta.currency.display="CNY"`，`meta.fx` 同时标注 `usd_vnd/cny_usd/usd_cny/cny_vnd/vnd_cny`（键名均为 from→to；`cny_vnd` 是 1 CNY 对应 VND，`vnd_cny` 是 1 VND 对应 CNY）。`totals` = 跨分页、当前筛选的加总:`row_count`(SPU 数)、单量(`order_count` 有效单 / `cancelled_order_count` 取消单 / `total_orders` = 两者之和,跨可见 SPU 全局去重)、`gmv`(全部订单销售额 = 白名单有效 ∪ 取消订单的原始行金额;money-str)与 `spend, sales, refund_net_amount, return_loss, net_profit`(行级 CNY 服务端加总,4 位小数字符串)、`roi_real`(Σ(net_revenue−return_loss)/Σspend,Σspend=0 → null);`total` = 匹配行数。**口径注(2026-09-06 全链状态口径,COD 店)**:行级 `sales`/单量/`gmv` 全部按**订单状态**下单即算——白名单状态订单(含 COD 在途/待收款)计入 `sales` 与有效单量;取消订单只进 `gmv`/`cancelled_order_count`,不重复入 sales;净利润/退款率/ROI 等派生金额自动跟随状态口径 sales(回款前偏乐观)。窗口裁剪列 = `COALESCE(paid_at, order_time)`(已收款按收款日；COD 在途/取消未收款按下单日)。**主表行内列集(v8 D8 主表精简,v9 口径)**:**主列 = 商品 + 消耗CNY/有效GMV(`sales`)/有效出单量(`order_count`)/取消率(`cancel_rate`)/全损退款率%(`full_loss_rate`)/净利润**;其余 28 字段（ROI/保本/平台佣金/全损货损金额/已结未结 GMV/退款拆分/广告归因/订单结构）由行内 accordion 钻取面板五 tab 顶部汇总区展示（详见下节）。`meta` 携带 fx/fee/cost_assumption/window/**`rubric_version`(v8 新增,当前值 v9)**:/"unattributed_refund_lines/computed_at/currency;`meta.window` 为 ad 视图观测窗口(供参考),销售/退款是否裁剪见 `note`。
+格式化约定(§5.1):**money = 4 位小数字符串（CNY）**、比率/ROI = 2 位小数字符串、件数/单量整数;`null` = 无解/除数为 0(页面显示 `—`);无投放 SPU `spend="0.0000"` + `ad_count=0`。广告原生 USD、销售/退款原生 VND 在公式入口按同一 fx 快照换算 CNY，采购成本保持 CNY；`meta.currency.display="CNY"`，`meta.fx` 同时标注 `usd_vnd/cny_usd/usd_cny/cny_vnd/vnd_cny`（键名均为 from→to；`cny_vnd` 是 1 CNY 对应 VND，`vnd_cny` 是 1 VND 对应 CNY）。`totals` = 跨分页、当前筛选的加总:`row_count`(SPU 数)、单量(`order_count` 有效单 / `cancelled_order_count` 取消单 / `total_orders` = 两者之和,跨可见 SPU 全局去重)、`gmv`(全部订单销售额 = 白名单有效 ∪ 取消订单的原始行金额;money-str)与 `spend, sales, refund_net_amount, return_loss, net_profit`(行级 CNY 服务端加总,4 位小数字符串)、`roi_real`(Σ(net_revenue−return_loss)/Σspend,Σspend=0 → null);`total` = 匹配行数。**口径注(2026-09-06 全链状态口径,COD 店)**:行级 `sales`/单量/`gmv` 全部按**订单状态**下单即算——白名单状态订单(含 COD 在途/待收款)计入 `sales` 与有效单量;取消订单只进 `gmv`/`cancelled_order_count`,不重复入 sales;净利润/退款率/ROI 等派生金额自动跟随状态口径 sales(回款前偏乐观)。窗口裁剪列 = `COALESCE(paid_at, order_time)`(已收款按收款日；COD 在途/取消未收款按下单日)。**主表行内列集(2026-09-29)**:**主列 = 商品 + 广告消耗CNY(`spend`) + 广告系统实际ROI(`ad_system_actual_roi`) + 广告系统保本ROI(`ad_system_breakeven_roi`) + 有效销售(`effective_sales`) + 有效单量(`effective_order_count`) + 取消率(`cancel_rate`) + 全损率(`full_loss_rate`) + 净利润**；其中广告系统保本 ROI 的 `estimated_known_costs` 状态在前端以 `≈` 明示。其余字段（通用 ROI/保本、平台佣金、全损货损金额、已结未结 GMV、退款拆分、广告归因明细、订单结构）由行内 accordion 钻取面板五 tab 顶部汇总区展示（详见下节）。`meta` 携带 fx/fee/cost_assumption/window/**`rubric_version`(v8 新增,当前值 v9)**:/"unattributed_refund_lines/computed_at/currency;`meta.window` 为 ad 视图观测窗口(供参考),销售/退款是否裁剪见 `note`。
 
 **v9 默认值总览**：
 

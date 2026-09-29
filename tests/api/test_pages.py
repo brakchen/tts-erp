@@ -122,7 +122,7 @@ def test_shops_page_returns_200_with_html(api_client, readonly_key):
 def test_shops_page_js_manages_service_app_credentials() -> None:
     source = Path("tts_erp_v2/static/js/shops.js").read_text()
     assert 'app_secret: appSecret || null' in source
-    assert 'class="btn btn-sm btn-outline-dark btn-config-app"' in source
+    assert 'configBtn.className = "btn btn-sm btn-outline-dark btn-config-app"' in source
     assert 'app_credentials_configured' in source
     assert 'bindAppCredentialsDialog();' in source
     assert 'admin 会话' in source

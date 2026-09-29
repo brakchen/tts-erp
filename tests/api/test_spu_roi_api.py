@@ -35,7 +35,6 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.analytics.spu_profitability import _implementation as profitability_impl
 from tts_erp_v2.analytics.spu_profitability import (
     EvidenceKind,
     EvidenceRequest,
@@ -44,6 +43,7 @@ from tts_erp_v2.analytics.spu_profitability import (
     explain_spu,
     read_overview,
 )
+from tts_erp_v2.analytics.spu_profitability import _implementation as profitability_impl
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -2638,7 +2638,7 @@ def test_spu_roi_page_uses_bootstrap_responsive_layout(api_client, readonly_key)
         / "spu-roi.js"
     )
     src = js_path.read_text(encoding="utf-8")
-    assert "row-cols-2 row-cols-sm-3 row-cols-lg-3 row-cols-xxl-3" in src
+    assert "row-cols-2 row-cols-sm-3 row-cols-lg-4 row-cols-xxl-4" in src
     assert "content.classList.add(" in src
     for table_class in ("table-sm", "table-hover", "align-middle", "op-tab-table"):
         assert f'"{table_class}"' in src
@@ -2748,8 +2748,8 @@ def test_spu_roi_dashboard_metrics_are_never_truncated() -> None:
         assert "overflow-wrap: anywhere" in declarations
 
 
-def test_spu_roi_drill_summary_omits_removed_metrics() -> None:
-    """每个 SPU 明细大盘保留核心指标，并补充广告系统两个 ROI。"""
+def test_spu_roi_drill_summary_matches_actual_dashboard_metrics() -> None:
+    """每个 SPU 展开的明细大盘必须与页首实际大盘展示相同指标。"""
     from pathlib import Path
 
     src = (
@@ -2763,38 +2763,30 @@ def test_spu_roi_drill_summary_omits_removed_metrics() -> None:
         "function renderProfitTab", 1
     )[0]
 
-    for removed_label in (
-        "平台佣金",
-        "已结 GMV",
-        "未结 GMV",
-        "全损货损$",
-        "全损取消",
-    ):
-        assert removed_label not in summary
-    for removed_field in (
-        "it.platform_fee",
-        "it.settled_sales",
-        "it.unsettled_sales",
-        "it.return_loss",
-        "it.full_loss_cancelled_qty",
-    ):
-        assert removed_field not in summary
+    expected_metrics = {
+        "总单量": "it.total_orders",
+        "广告消耗": "it.spend",
+        "有效单量": "it.effective_order_count",
+        "有效销售": "it.effective_sales",
+        "退款数": "it.refund_order_count",
+        "退款率": "it.refund_rate",
+        "全损量": "it.full_loss_order_count",
+        "全损率": "it.full_loss_rate",
+        "国内取消量": "it.domestic_cancelled_order_count",
+        "国内取消率": "it.cancel_rate",
+        "净利润": "it.net_profit",
+        "实际ROI": "it.roi_real",
+        "实际保本ROI": "it.roi_breakeven",
+        "广告系统实际ROI": "it.ad_system_actual_roi",
+        "广告系统保本ROI": "it.ad_system_breakeven_roi",
+    }
+    for label, field in expected_metrics.items():
+        assert label in summary
+        assert field in summary
 
-    for retained_label in (
-        "ROI 实际",
-        "ROI 保本",
-        "广告系统实际 ROI",
-        "广告系统保本 ROI",
-        "CPA",
-        "单位成本",
-        "已结算单",
-        "全损件数",
-        "净收入",
-    ):
-        assert retained_label in summary
-    assert "row-cols-xxl-3" in summary
-    assert "it.ad_system_actual_roi" in summary
-    assert "it.ad_system_breakeven_roi" in summary
+    for legacy_label in ("CPA", "单位成本", "已结算单", "全损件数", "净收入"):
+        assert legacy_label not in summary
+    assert "row-cols-xxl-4" in summary
 
 
 def test_spu_roi_js_targets_dashboard_hooks():
@@ -2817,7 +2809,7 @@ def test_spu_roi_js_targets_dashboard_hooks():
     assert "roi_breakeven" in src  # 红绿判据字段
     assert "cost_source" in src
     assert "DEFAULT_K1" in src  # ⚠ 判断
-    assert '"¥" +' in src
+    assert '"¥"' not in src  # 2026-09-29 反馈：金额前缀去掉，纯数字
     assert "金额已由服务端统一换算 CNY" in src
     # Bootstrap 多选由 Tom Select 驱动，精确 scope 通过独立 spu_ids 参数提交。
     assert 'window["TomSelect"]' in src
@@ -2874,11 +2866,13 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert "广告系统实际ROI = 广告归因GMV ÷ 广告实际消耗" in body
     assert "广告系统保本ROI = 广告归因GMV ÷ 最大可承受广告费" in body
     assert "TODO: 广告系统保本ROI 公式待定" not in body
-    # 主表指标名与大盘 v10 口径一致
+    # 主表指标名与大盘 v10 口径一致，广告系统两个 ROI 紧随广告消耗展示。
     main_th_labels = re.findall(r'<th[^>]*scope="col"[^>]*>([^<]+)</th>', body)
     for col_label in (
         "商品",
         "广告消耗",
+        "广告系统实际ROI",
+        "广告系统保本ROI",
         "有效销售",
         "有效单量",
         "取消率%",
@@ -2933,6 +2927,8 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert "fmtMoney(netProfitValue)" in js_src
     assert "fmtMoney(it.effective_sales)" in js_src
     assert "fmtInt(it.effective_order_count)" in js_src
+    assert "fmtRatio(it.ad_system_actual_roi)" in js_src
+    assert "adSystemBreakevenRoi" in js_src
     assert '("#sum-roi-breakeven")' in js_src
     assert '("#sum-roi-ad-actual")' in js_src
     assert "totals.ad_system_actual_roi" in js_src
@@ -3232,7 +3228,7 @@ def test_spu_roi_page_drilldown_template_present(api_client, readonly_key):
 
 
 def test_spu_roi_page_no_old_columns(api_client, readonly_key):
-    """D8(2026-09-07)主表无隐藏列、无 ⚙ 开关、无 ROI 列;6 列标签齐全。"""
+    """主表无旧隐藏列或通用 ROI 列；保留广告系统两个 ROI 与 6 个经营指标。"""
     r = api_client.get(
         "/v2/pages/spu-roi",
         headers={"Authorization": f"Bearer {readonly_key}"},
@@ -3254,6 +3250,8 @@ def test_spu_roi_page_no_old_columns(api_client, readonly_key):
     for col in (
         "商品",
         "广告消耗",
+        "广告系统实际ROI",
+        "广告系统保本ROI",
         "有效销售",
         "有效单量",
         "取消率%",
