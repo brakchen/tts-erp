@@ -1,6 +1,6 @@
 # Candidate 02：访问策略深模块——实现审阅报告
 
-> 审阅状态：**reviewer PASS / Merge verdict OK，等待用户确认；不得合并 `master`**
+> 审阅状态：**reviewer PASS / Merge verdict OK；用户已确认并批准合并**
 >
 > 分支：`redesign/access-policy-implementation`
 >
@@ -271,14 +271,14 @@ bash scripts/test.sh fast \
 - 302 纳入 denied budget 是有意的安全变化，运营端高频未登录刷新可能看到 429；
 - compatibility exports 暂留在 `middleware/auth.py`，后续 caller 全部迁移后可独立清理。
 
-## 10. 用户 Review 清单
+## 10. 用户 Review 结论
 
-请确认：
+用户已确认并批准：
 
-1. 是否认可两个深 module 和薄 ASGI adapter 的落地形状；
-2. 是否认可七项有意行为修复；
-3. 是否认可 `AccessGrant` 同时服务 middleware 与 handler gate；
-4. 是否接受 302 纳入 denied budget 后可能返回 429；
-5. 是否批准后续合并到 `master`。
+1. 两个深 module 和薄 ASGI adapter 的落地形状；
+2. 七项有意行为修复；
+3. `AccessGrant` 同时服务 middleware 与 handler gate；
+4. 302 纳入 denied budget 后可能返回 429；
+5. 合并到 `master`。
 
-在用户明确批准前，本 implementation branch **不会合并到 `master`**。
+本报告记录的 implementation 已获合并批准。
