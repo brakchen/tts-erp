@@ -3000,12 +3000,16 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
         "广告系统实际ROI",
         "广告系统保本ROI",
         "有效销售",
+        "总单量",
         "有效单量",
         "取消率%",
         "全损率%",
         "净利润",
     ):
         assert col_label in main_th_labels, f"主表缺列 {col_label}"
+    assert main_th_labels.index("有效销售") < main_th_labels.index(
+        "总单量"
+    ) < main_th_labels.index("有效单量"), "总单量应位于有效销售和有效单量之间"
     # D8 删除:原 13 列里只在 th 表头出现过的标签
     for removed in (
         "销售$",
@@ -3052,6 +3056,7 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert "var netProfitValue = totals.net_profit" in js_src
     assert "fmtMoney(netProfitValue)" in js_src
     assert "fmtMoney(it.effective_sales)" in js_src
+    assert "fmtInt(it.total_orders)" in js_src
     assert "fmtInt(it.effective_order_count)" in js_src
     assert "fmtRatio(it.ad_system_actual_roi)" in js_src
     assert "adSystemBreakevenRoi" in js_src
@@ -3354,7 +3359,7 @@ def test_spu_roi_page_drilldown_template_present(api_client, readonly_key):
 
 
 def test_spu_roi_page_no_old_columns(api_client, readonly_key):
-    """主表无旧隐藏列或通用 ROI 列；保留广告系统两个 ROI 与 6 个经营指标。"""
+    """主表无旧隐藏列或通用 ROI 列；保留广告系统两个 ROI 与 7 个经营指标。"""
     r = api_client.get(
         "/v2/pages/spu-roi",
         headers={"Authorization": f"Bearer {readonly_key}"},
@@ -3379,6 +3384,7 @@ def test_spu_roi_page_no_old_columns(api_client, readonly_key):
         "广告系统实际ROI",
         "广告系统保本ROI",
         "有效销售",
+        "总单量",
         "有效单量",
         "取消率%",
         "全损率%",
