@@ -1,303 +1,357 @@
 # tts-erp
 
-> TikTok Shop 销售 + 妙手采购 数据整合分析系统 · 11-schema PostgreSQL + FastAPI/uvicorn (端口 9877) + APScheduler 同步
+面向 TikTok Shop 本地分析的 ERP 数据服务。系统把 TikTok Shop、妙手采购、Chrome
+扩展采集和汇率快照写入 PostgreSQL，通过 FastAPI 提供读侧 API、运营页面和 SPU 盈利分析，
+并由独立 APScheduler worker 持续同步数据。
 
-## 它是干什么的
+> 当前主线是 **v2**。v1 `public.*` 业务表、旧 oauth-receiver 和旧 HTTP 路由已经退役。
 
-把 [TikTok Shop Partner API](https://partner.tiktokglobalshop.com/docv2/page/order-api-overview)（销售端：订单/商品/物流/对账/售后）+ [妙手开放平台](https://apifox.com/apidoc) apifox fd54e57e-9b98-4c34-bada-306221c39e68（采购端：店铺/采集箱/搬家任务/采购单）整合到同一个 PostgreSQL 库里，提供：
+## 系统能力
 
-- **销售端 v2 API**：TikTok 订单/商品/物流/对账/售后的**结构化**读（不再穿透 raw jsonb；财务费用拆成 `finance.settlement_components` 行，只落非零组件）
-- **采购端数据**：妙手店铺/采集箱/搬家任务/采购单已迁移入库 `procurement.*`（**暂无** `/v2/procurement/*` 读端点，直接查库）
-- **联动 API**：`/v2/linkage/*` 读 product_links / link_evidence / link_overrides；DB 层另有 `linkage.effective_product_links` view（override 优先的并集）把"妙手采集箱的商品 ↔ TikTok 渠道上的 SPU"关联起来 → 利润 = 售价 − 妙手采购价（**不带 1688 采集标价**，1688 标价不等于实际采购价，故意不进成本口径）
-- **人工成本填写页** `/v2/pages/manual-costs`：无 1688 渠道价的在售 SPU 由运营手动补
-- **报表**：`/v2/reporting/cost-snapshots`、`profit-daily`、`coverage`、`missing-cost-products`
+- **本地分析库**：订单、商品、物流、售后、结算、采购、广告、汇率和联动关系落入多 schema PostgreSQL。
+- **定时同步**：TikTok Shop、妙手、汇率、成本快照和图片镜像由独立 sync-worker 调度。
+- **插件接入**：Chrome 扩展上传广告、订单域 dump 和拦截记录；服务端负责协议校验、幂等与健康记录。
+- **读侧 API**：销售、联动、报表、汇率、同步状态和分析结果以 `/v2/*` 暴露。
+- **运营页面**：dashboard、店铺注册台、人工成本、SPU ROI、拦截管理和枚举映射页面。
+- **SPU 盈利 v10**：在一致数据库快照中计算明细、大盘和证据；前端只展示结果，不重复计算。
+- **统一访问策略**：API key、浏览器 cookie、角色、反向代理前缀和拒绝限流集中在 access 深模块。
 
-业务代码 / 报表直接 `curl :9877/v2/...` 就行，**完全不用管** HMAC 签名 / access_token / shop_cipher / 翻页 — proxy 层全处理好。
+系统是**读侧分析系统**：允许向本地分析库写入同步数据、配置和人工成本，但不提供修改真实
+TikTok 店铺订单、退货、取消或发货状态的写端点。
 
-## 架构
+## 总体架构
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                tts-erp v2 (FastAPI :9877)                         │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────────┐  │
-│  │  v2 API 层       │  │  proxy 层        │  │  sync-worker     │  │
-│  │  /v2/commerce/*  │  │  (tiktok /        │  │  (APScheduler)   │  │
-│  │  /v2/linkage/*   │  │   miaoshou SDK)  │  │                  │  │
-│  │  /v2/reporting/* │  │                 │  │                  │  │
-│  │  /v2/pages/*     │  │  共享 in-process │  │  6 TikTok jobs   │  │
-│  └────────┬─────────┘  └─────────┬────────┘  │  + token.refresh │  │
-│           │                      │           │  + 3 妙手 jobs   │  │
-│           │                      │           │  + reporting.*   │  │
-│           │                      │           │  + analytics.    │  │
-│           │                      │           │    retention     │  │
-│           └──────────┬───────────┘                    │            │
-│                      ▼                                ▼            │
-│           ┌─────────────────────────────────────────────┐           │
-│           │      PostgreSQL tts_erp (11 schemas)        │           │
-│           │  integration / commerce / procurement       │
-│           │  fulfillment / after_sales / finance        │
-│           │  linkage / reporting / security             │
-│           │  analytics                                  │           │
-│           └─────────────────────────────────────────────┘           │
-└──────────────────────────────────────────────────────────────────┘
-                       │              │              │
-                       ▼              ▼              ▼
-              ┌──────────────┐ ┌──────────────┐
-              │ TikTok Shop   │ │ 妙手开放平台  │
-              │ Open API      │ │ openapi.     │
-              │ (202309)      │ │ wanshifu.com │
-              └──────────────┘ └──────────────┘
+```text
+TikTok Shop Open API ──> proxy/tts_shop ──> sync-worker jobs ──┐
+妙手开放平台 ──────────> proxy/miaoshou ──> procurement jobs ─┤
+ExchangeRate-API ──────> proxy/exchangerate ──> fx.sync ──────┤
+Chrome extensions ─────> analytics/order/intercept ingest ────┤
+                                                              ▼
+                                                    PostgreSQL 多域 schema
+                                                              │
+                          ┌───────────────────────────────────┼────────────────────┐
+                          ▼                                   ▼                    ▼
+                 commerce/linkage API              deep analytics modules   operator pages
+                                                     · SPU profitability
+                                                     · order dump intake
+                                                     · access policy
 ```
 
-> **凭证单源（`integration.credentials` + `tts_erp_v2/proxy/token_service.py`）**：
-> token 加解密 / 续期全 in-process 完成，无需任何独立 oauth-receiver 服务
-> （v1 oauth-receiver 库 + systemd unit 已于 2026-09-05 整体废弃并 DROP，
-> 备份 `backups/oauth_receiver_v1_legacy_*.sql.gz`）。
+运行时由三个 systemd user 单元组成：
 
-## 数据模型（11 schema / 54 表 + 1 view）
+| 单元 | 责任 |
+| --- | --- |
+| `tts-erp.service` | FastAPI/uvicorn API，监听地址由 `TTS_ERP_HOST` / `TTS_ERP_PORT` 配置（当前端口 9877） |
+| `tts-erp-sync.service` | APScheduler worker，运行 `scheduler.JOBS` 注册表 |
+| `tts-erp-watchdog.timer` | 周期巡检同步状态 |
 
-权威定义：[`tech-doc/data-model-target-v3.md`](tech-doc/data-model-target-v3.md)（2026-09-05
-按 ADR-0003 §2.6 同步，commerce 域列名已更新到 live DB）
+API 和 worker 共享代码与 PostgreSQL，但进程相互独立。修改 `jobs/` 或 `sync_worker/` 后必须单独
+重启 worker。
 
-| Schema | 域 | 代表表 |
+## 核心数据流
+
+### 1. 服务端同步
+
+`tts_erp_v2/sync_worker/scheduler.py::JOBS` 是调度单一真相源。当前注册：
+
+- TikTok：订单、订单详情、商品、物流、售后、财务；
+- 凭证：`token.refresh`；
+- 汇率：`fx.sync`，按上游 `next_update_at` 跳过无效请求；
+- 妙手：店铺、采集箱、搬家任务、公共采集箱、货源成本回填；
+- 报表：成本快照、旧版利润日报；
+- 媒体：SPU 图片镜像。
+
+TikTok job 按已授权店铺扇出；进入 job runner 的每店运行状态记录到
+`integration.sync_jobs`。如果在 runner 前构建 proxy 失败，只写 worker 日志。可归因的业务/数据问题
+由具体 job 另写 `integration.sync_issues`。单店失败会重试一次，不阻断其他店铺或后续 tick。
+
+### 2. Chrome 插件接入
+
+| 接口族 | 数据 | 存储/实现 |
 | --- | --- | --- |
-| `integration` | 集成 + 同步 | `credentials`, `raw_records`, `sync_jobs`, `sync_cursors`, `sync_issues` |
-| `commerce` | TikTok 销售（订单/商品） | `shops`, `sales_orders`, `sales_order_lines`, `products_spu`, `products_sku` |
-| `procurement` | 妙手采购 + 人工成本 + SPU 图 | `procurement_accounts`, `procurement_products`, `purchase_orders`, `manual_product_costs`, `spu_images` |
-| `fulfillment` | 物流 | `shipments`, `shipment_lines`, `tracking_events` |
-| `after_sales` | 退货/取消 | `cases`, `case_lines` |
-| `finance` | 对账/打款 | `payouts`, `settlement_statements`, `settlement_transactions`, `settlement_components` |
-| `linkage` | 销售↔采购关联 | `account_links`, `product_links`, `variant_links`, `link_evidence`, `link_overrides`, `link_issues` |
-| `reporting` | 利润/成本快照 | `product_cost_snapshots`, `product_profit_daily`, `shipment_tracking_summary` |
-| `security` | API key | `api_keys` |
+| `/v2/analytics/sync/*` | 广告 dump、coverage、plugin logs | `plugin.ad_*`，`tts_erp_v2/plugin/ads/` |
+| `/v2/order-sync/*` | 订单、详情、历史、物流、结算、售后 | `plugin.*`，`tts_erp_v2/plugin/orders/intake/` |
+| `/v2/intercept/*` | 拦截配置、请求记录、浏览器会话 | `plugin.intercept_*` |
 
-外加 1 张 analytics 表 `ad_raw`（source-of-truth）+ 2 个 view：
-`analytics.ad_product_links`（ad×SPU 关联）和 `linkage.effective_product_links`
-（product_links + link_overrides 的并集）。2026-09-05 analytics reorg 后
-`ad_records` / `ad_daily_completeness` / `ad_shop_timezones` / `ad_audit_log`
-4 张派生表已 drop（详见 `tech-doc/analytics/reorg-plan.md`）。
+订单 dump 的公开 seam 是 `intake_dump(session, *, request: DumpIntakeRequest) -> DumpIntakeOutcome`。module 内部拥有
+六域 dispatch、payload 解释、savepoint、业务落库、health 记录和 commit/rollback 顺序；HTTP
+adapter 只处理 wire schema 和响应 envelope。
 
-## 快速开始
+协议详情见 [`tech-doc/dumps-data-contract.md`](tech-doc/dumps-data-contract.md) 和
+[`tech-doc/order-dump-intake-module.md`](tech-doc/order-dump-intake-module.md)。
 
-### v2 端点（生产路径）
+### 3. SPU 盈利分析
 
-所有 v2 读端点查的是**本地 PG 新 schema**（不打上游 TikTok），过滤参数是**内部 id**
-（`shop_pk` / `spu_pk`），不是 `shop_id` —— 传了也会被 FastAPI 静默忽略。
-先用 `shop_id`（即 TikTok shop_id 19 位文本串）查出内部 id：
+`tts_erp_v2.analytics.spu_profitability` 是“SPU 盈利”的唯一权威 module：
 
-```bash
-# 0. 店铺 → 内部 shop_pk（当前生产：7494763368967603447 → 314）
-curl -H "Authorization: Bearer <key>" \
-  "http://127.0.0.1:9877/v2/commerce/channel-accounts?platform=tiktok" | jq
-
-# 销售端
-curl -H "Authorization: Bearer <key>" \
-  "http://127.0.0.1:9877/v2/commerce/sales-orders?shop_pk=314&limit=20" | jq
-
-curl -H "Authorization: Bearer <key>" \
-  "http://127.0.0.1:9877/v2/commerce/sales-orders/<内部订单 id>" | jq
-
-# 联动：哪个 TikTok SPU 对应哪个妙手采集箱
-curl -H "Authorization: Bearer <key>" \
-  "http://127.0.0.1:9877/v2/linkage/product-links?limit=20" | jq
-
-# 报表
-curl -H "Authorization: Bearer <key>" \
-  "http://127.0.0.1:9877/v2/reporting/profit-daily?limit=20" | jq
-
-curl -H "Authorization: Bearer <key>" \
-  "http://127.0.0.1:9877/v2/reporting/missing-cost-products" | jq  # 无采购价的在售 SPU 清单（去人工补填）
-
-# 人工成本填写页（浏览器打开；未登录会被 302 引导到 /v2/auth/login）
-open "http://127.0.0.1:9877/v2/pages/manual-costs"
-
-# Admin：查看 / 热重载限流（看 [限流与热重载](#限流与热重载) 详细）
-curl -H "Authorization: Bearer <admin_key>" \
-  "http://127.0.0.1:9877/v2/admin/rate-limit" | jq
-
-# Admin：重读 TTS_ERP_RATE_LIMIT_PER_MIN 环境变量（不传 new_limit 即可）
-curl -X POST -H "Authorization: Bearer <admin_key>" \
-  -H "Content-Type: application/json" -d '{}' \
-  "http://127.0.0.1:9877/v2/admin/reset-rate-limit" | jq
+```python
+read_overview(session, *, scope, view) -> ProfitabilityOverview
+explain_spu(session, *, scope, spu_pk, evidence) -> SpuProfitExplanation
 ```
 
-完整端点列表见 [`tech-doc/external-api.md`](tech-doc/external-api.md) 或 `GET /endpoints`。
+关键约束：
 
-> **legacy 端点 `/orders/*`, `/finance/*`, `/db/*`, `/sync/*`, `/miaoshou/*` 在 v2 已删除（404）**。
-> v1 业务表（`public.*` 19 张）已于 2026-09-05 提前归档并 DROP
-> （原计划保留 4 周观察期 ~09-26，本次提前收口）；备份
-> `/home/schan/backups/tts_erp_public_v1_legacy_*.sql.gz`。
+- 业务口径以 [`biz-doc/analytics/spu-roi-profit-calculation.md`](biz-doc/analytics/spu-roi-profit-calculation.md) v10 为准；
+- 同一请求的明细、大盘、证据和汇率使用同一个只读一致快照；
+- 汇率只读数据库快照，缺失时整页返回 `503 FX_RATE_UNAVAILABLE`；
+- 成本优先级为 **人工价 > 妙手货源价 > 40 CNY/件兜底**；
+- 前端不得重算净收入、COGS、净利润或 ROI；
+- `reporting.product_profit_daily` 是旧版粗略毛利快照，不是 SPU 盈利真相源。
 
-## 同步（sync-worker，APScheduler）
+详细决策见
+[`tech-doc/analytics/spu-profitability-module-decisions.md`](tech-doc/analytics/spu-profitability-module-decisions.md)。
 
-sync-worker 是独立 systemd 单元（`tts-erp-sync.service`），与 api 平级直连 PG。调度表以
-`tts_erp_v2/sync_worker/scheduler.py` 的 `JOBS` registry 为准，当前注册的 jobs：
+## 主要 module 与 interface
 
-| Job | 来源 | 频率 |
-| --- | --- | --- |
-| `tiktok.orders` | /orders/search | 每 10 min（按 update_time 增量） |
-| `tiktok.order_detail` | /order/202309/orders | 每 30 min（补单 gap-filler） |
-| `tiktok.products` | /products/search | 每 10 min（2026-09-05 由 6h 改 —— 逐 SPU Get Product 补主图后需更快同步） |
-| `tiktok.after_sales` | /returns/search + /cancellations/search | 每 15 min |
-| `tiktok.finance` | /finance/payouts + /finance/statements | 每 1h |
-| `tiktok.logistics` | /logistics/orders/{id}/tracking | 每 10 min（活跃运单） |
-| `token.refresh` | 按 `integration.credentials.expires_at` 提前续期 | 每 6h |
-| `miaoshou.shops` | /shop/list | 每 6h（妙手店铺列表） |
-| `miaoshou.collect_box` | /collectBox/list | 每 30 min（采集箱 = 联动证据源） |
-| `miaoshou.move_collect` | /moveCollect/list | 每 30 min（搬家任务） |
-| `reporting.cost_snapshots` | `tts_erp_v2/jobs/reporting.py` | 每 6h（成本输入变化慢） |
-| `reporting.profit_daily` | `tts_erp_v2/jobs/reporting.py` | 每 1h（重建当日+昨日 UTC） |
-| `analytics.retention` | ad_audit_log / ad_raw TTL | ~~每 1 d~~（2026-09-05 摘除：ad_raw append-only / ad_audit_log 已 drop；详见 `tech-doc/analytics/reorg-plan.md`） |
+| Module | Interface / 责任 |
+| --- | --- |
+| `tts_erp_v2/access/` | `canonicalize_path()`、`evaluate_access()`；部署路径、角色、凭证、模式与 typed decision |
+| `tts_erp_v2/plugin/orders/intake/` | `intake_dump()`；订单域 dump 解释、原子落库和 health outcome |
+| `tts_erp_v2/analytics/spu_profitability/` | `read_overview()`、`explain_spu()`；v10 盈利、证据和一致快照 |
+| `tts_erp_v2/proxy/token_service.py` | 凭证加解密、加载、写入和续期的唯一实现 |
+| `tts_erp_v2/proxy/tts_shop/` | TikTok HMAC 签名、分页、shop cipher、token refresh 与 read-through client |
+| `tts_erp_v2/sync_worker/` | job 注册、店铺扇出、执行记录和调度 |
 
-**未接入调度的 job**（代码在库、未注册进 `JOBS`）：
+架构设计见：
 
-- `miaoshou.purchase_orders`（`tts_erp_v2/jobs/miaoshou/purchase_orders.py`）：
-  scheduler.py 顶部 `NOTE(2026-09-01)` 标注 endpoint 路径 404（routeNotFound），
-  v2 实现从 apifox 文档写就但未做线上实拍验证，**有意不注册**直到正确路径从
-  apifox doc（fd54e57e…）确认后再加入。
-- link-compute（`tts_erp_v2/linkage/compute.py`）：只有库函数无触发方，
-  `/v2/linkage/*` 读端点读的是历史 link 表，刷新靠定期的人工 override 或
-  `product_links` upsert 路径。
+- [`tech-doc/access-policy-module.md`](tech-doc/access-policy-module.md)
+- [`tech-doc/access-policy-implementation-review.md`](tech-doc/access-policy-implementation-review.md)
+- [`tech-doc/order-dump-intake-module.md`](tech-doc/order-dump-intake-module.md)
+- [`tech-doc/architecture-overview.md`](tech-doc/architecture-overview.md)
 
-每次 run 写一行 `integration.sync_jobs`（rows_total/inserted/failed + status）。失败写 `integration.sync_issues`，**job 不会卡死**，下一个调度继续跑。
+## HTTP 接口
 
-## 成本口径（重要）
+所有稳定业务接口使用 `/v2`。完整活契约见
+[`tech-doc/external-api.md`](tech-doc/external-api.md)，运行实例可查询 `GET /endpoints`。
 
-利润 = 售价 − **MANUAL_ENTRY**（人工填写，**最高优先级**）> 妙手采购单 > 1688 采集标价**禁用**。
+| 前缀 | 用途 |
+| --- | --- |
+| `/v2/commerce/*` | 店铺、SPU/SKU、销售订单和履约读模型 |
+| `/v2/linkage/*` | 销售商品与妙手采购商品的关联、证据、问题和 override |
+| `/v2/reporting/*` | 成本快照、旧版利润日报、覆盖率、缺成本商品和人工成本 |
+| `/v2/analytics/spu-roi*` | v10 SPU 盈利主表与订单/结算/售后/广告证据 |
+| `/v2/fx/*` | 数据库汇率快照与本地换算 |
+| `/v2/sync/status` | 调度状态、延迟周期和严重级别 |
+| `/v2/pages/*` | 运营页面 |
+| `/v2/auth/*` | 浏览器登录、退出和当前会话 |
+| `/v2/oauth/tiktok/*` | 新店授权控制台与 OAuth；`onboard` 为 readonly、`authorize` 为 readwrite，`callback` 为公开回调并执行上游 token exchange |
+| `/v2/admin/*` | 本地管理操作；高风险操作同时受 destructive guard 保护 |
+| `/v2/tiktok-shop/*` | **例外：实时 read-through TikTok Partner API**，不走本地缓存 |
 
-为什么不用 1688 采集标价：1688 标价是妙手采集时看到的**初始报价**，实际采购价往往不同（量大价、议价）。把它当成本会污染利润口径。无 1688 价的在售 SPU → `/v2/reporting/missing-cost-products` → 运营手动补。
+除 `/v2/tiktok-shop/*` 明确标注的 read-through 接口外，业务读接口默认读取本地 PostgreSQL，
+不会在请求链路中临时访问上游。
 
-详细决策见 [`tech-doc/refactor-tech-plan-v2.md`](tech-doc/refactor-tech-plan-v2.md) §6 决策 10/12。
+### 内部主键
 
-## 鉴权
-
-除豁免路径外所有端点需要 `Authorization: Bearer <key>` 或 `X-API-Key: <key>`。
-豁免：`/healthz`、`/endpoints`、`/openapi.json`、`/docs`、`/redoc`、`/v2/auth/{login,logout,me}`。
-
-浏览器也可以拿 API key 在 `/v2/auth/login` 换 HMAC 签名会话 cookie（`tts_session`，HttpOnly，
-12h），之后页面导航和 fetch 自动带 cookie —— 人工成本页走的就是这条流（设计见
-[`tech-doc/browser-login-design.md`](tech-doc/browser-login-design.md)）。cookie 会话下的
-POST/DELETE 必须带 `X-Requested-With: tts-erp` 头（CSRF guard）。
-
-三级角色（`readonly < readwrite < admin`，分类逻辑在 `tts_erp_v2/middleware/auth.py::required_role`，
-部分写端点在 handler 内再校验）：
-
-- `readonly`：所有 v2 GET + `/static/*`
-- `readwrite`：+ `POST /v2/reporting/manual-costs`、`POST /v2/spu-images/upload-url`、`POST /v2/spu-images/{id}/confirm`、`DELETE /v2/spu-images/{id}`、`/v2/analytics/sync/*`
-- `admin`：`POST /v2/linkage/overrides`（覆盖 product_links，handler 内校验 admin）、`POST /v2/admin/reset-rate-limit`（热重载限流）；未匹配路径默认按 admin 拦截
-
-key 管理：`python3 api_keys.py create --role <role> --name <name>`（另有 `list` / `revoke --prefix` / `rotate --prefix`）。库里只存 SHA-256 哈希，完整 key 创建时打印一次。
-
-`/healthz` body 包含 `service: "tts-erp-v2"` + `auth_mode`（当前 enforce；v1 返回纯 `{"status":"ok"}`），smoke 测试用此判断 v2 是否真在跑。
-
-## 本地数据
-
-- **一个库**：`tts_erp`（docker 容器 `postgres`，5432）
-- **10 schema + 1 public**：`integration` / `commerce` / `procurement` / `fulfillment` / `after_sales` / `finance` / `linkage` / `reporting` / `security` / `analytics`；外加 `public` schema 仅存 `alembic_version`（v2 迁移基础设施）。
-- **37 张表 + 2 view + 1 alembic_version**：v2 业务表 37 张（跨 10 schema）+ `analytics.ad_raw` source-of-truth 表；view = `analytics.ad_product_links` + `linkage.effective_product_links`。2026-09-05 analytics reorg 后 4 张派生表已 drop（详见 `tech-doc/analytics/reorg-plan.md`）。见 [`tech-doc/data-model-target-v3.md`](tech-doc/data-model-target-v3.md)
-- **Alembic 迁移**：`alembic/versions/20260829_init_nine_schemas.py`（初始 10 schema；文件名仍含 `nine` 是历史命名，`upgrade head` 会按 mtimes 应用），`alembic upgrade head` 应用
-- **v1 业务表 `public.*`** 已于 2026-09-05 提前归档并 DROP（原计划保留 4 周观察期 ~09-26，本次提前收口；备份 `/home/schan/backups/tts_erp_public_v1_legacy_*.sql.gz`）
-
-## 安装 / 部署
+多数 v2 过滤器使用内部 `shop_pk` / `spu_pk`，不是外部 `shop_id`。先查内部主键：
 
 ```bash
-# 一次性
-cd /home/schan/tts-erp
-python3 -m venv .venv && .venv/bin/pip install -e .
-# .env 无模板文件 —— 参照生产 .env 手写（DB URL + TTS_ERP_FERNET_KEY 等，0600）
+export TTS_ERP_KEY='<readonly-or-higher-key>'
 
-# 应用 schema（幂等）
-.venv/bin/alembic upgrade head
+curl -sS -H "Authorization: Bearer $TTS_ERP_KEY" \
+  'http://127.0.0.1:9877/v2/commerce/channel-accounts?platform=tiktok' | jq
 
-# 启动（systemd --user 托管，开机自启；详见 prod-switch/）
-systemctl --user start tts-erp.service         # v2 API（监听 :9877）
-systemctl --user start tts-erp-sync.service    # v2 sync-worker
+curl -sS -H "Authorization: Bearer $TTS_ERP_KEY" \
+  'http://127.0.0.1:9877/v2/commerce/sales-orders?shop_pk=<shop_pk>&limit=20' | jq
+
+curl -sS -H "Authorization: Bearer $TTS_ERP_KEY" \
+  'http://127.0.0.1:9877/v2/analytics/spu-roi?shop_pk=<shop_pk>' | jq
 ```
 
-## 生产切换
+## 数据域
 
-v2 切流已于 **2026-08-29 完成**，并于 **2026-09-05 完成 v1 整体归档**（oauth_receiver 库 DROP + public.* 19 张 v1 业务表归档 DROP）。`prod-switch/` 目录仍保留作历史脚本与回滚 SOP（如需）：
+SQLAlchemy models 位于 `tts_erp_v2/db/models/`。不要依赖 README 中易漂移的表数量；当前主要
+schema 及责任如下：
 
-```bash
-bash prod-switch/postswitch-smoke.sh        # 7 项冒烟（healthz/auth/角色/CORS/manual-costs/v2 端点/PG 连接数）
-bash prod-switch/rollback.sh                # 历史脚本：紧急回到 v1 旧栈（v1 库已 DROP，不可回滚；脚本仅供查阅）
+| Schema | 责任 |
+| --- | --- |
+| `integration` | 凭证引用、同步游标、job 运行记录和问题 |
+| `commerce` | 店铺、渠道商品、订单和订单行 |
+| `procurement` | 妙手账号、采集箱、货源、人工成本和 SPU 图片 |
+| `fulfillment` | 运单、包裹和轨迹 |
+| `after_sales` | 退货、退款和取消 case |
+| `finance` | payout、statement、transaction 和费用组件 |
+| `linkage` | 销售与采购商品关联、证据、override 和问题 |
+| `reporting` | 成本快照、旧版利润日报和跟踪汇总 |
+| `plugin` | Chrome 广告/订单 dump、health log 和 intercept 数据 |
+| `fx` | 汇率快照和 rate rows |
+| `config` | 业务枚举翻译配置 |
+| `security` | API key 哈希、角色和状态 |
+
+时间统一存储为 aware UTC；报表日期按店铺本地时区解释。
+
+## 鉴权与访问路径
+
+生产使用 `TTS_ERP_AUTH_MODE=enforce`。非公开接口接受：
+
+```http
+Authorization: Bearer <key>
 ```
 
-## 开发方式：TDD
+或：
+
+```http
+X-API-Key: <key>
+```
+
+优先级固定为：**有效 cookie > Bearer > X-API-Key**。角色顺序：
+
+```text
+readonly < readwrite < admin
+```
+
+未匹配路径默认要求 `admin`。浏览器可在 `/v2/auth/login` 用 API key 换取 HttpOnly HMAC
+cookie；cookie role 不是授权真相，实际 role 每次通过数据库/cache 复查。cookie mutation 还必须
+携带 `X-Requested-With: tts-erp`。
+
+API-key 豁免路径为 `/healthz`、`/endpoints`、`/openapi.json`、`/docs`、`/redoc`、
+`/docs/oauth2-redirect`、`/v2/auth/login`、`/v2/auth/logout`、`/v2/auth/me`、
+`/v2/oauth/tiktok/callback` 和 `/static/*`。Docs 路径在配置
+`TTS_ERP_DOCS_USER` / `TTS_ERP_DOCS_PASSWORD` 后仍受独立 Basic Auth 保护。
+
+`TTS_ERP_EXTERNAL_PREFIX` 是外部部署前缀的单一真相源，当前生产值为 `/tts`。
+本机直连使用 `http://127.0.0.1:9877/v2/...`；当前公网使用
+`http://daqiang.nat100.top/tts/v2/...`，不带端口且不能省略 `/tts`。
+access module 同时兼容代理保留或剥离前缀的请求，并让 Auth 与 Docs Basic Auth
+使用相同 route-relative path。
+
+更多细节：
+
+- [`tech-doc/external-api.md`](tech-doc/external-api.md#authentication)
+- [`tech-doc/browser-login-design.md`](tech-doc/browser-login-design.md)
+- [`tech-doc/access-policy-module.md`](tech-doc/access-policy-module.md)
+
+## 本地环境与启动
+
+运行环境：Python 3.14（包声明支持 Python 3.13+）、PostgreSQL、MinIO 和 systemd user units。
 
 ```bash
 cd /home/schan/tts-erp
-scripts/test.sh fast                # 日常全量（排除 slow + requires_service）
-scripts/test.sh commerce            # 按业务域跑单切片（详见 tech-doc/test-domains.md）
-.venv/bin/pytest tests/ -p no:warnings   # 直接跑 v2 套件（addopts 默认排除 domain_migration）
+python3.14 -m venv .venv
+.venv/bin/pip install -e .
 ```
 
-约定（`tests/conftest.py`）：
+环境变量保存在本地 `.env`，权限必须为 `0600`。仓库不提供含凭证的模板；从运维人员处取得
+所需配置，不要提交数据库 URL、Fernet key、API key、cookie、token 或 MinIO 凭证。
 
-- **事务回滚隔离**：DB 测试每个用例跑在外层事务里，结束即 rollback，可安全对生产库跑
-- **`TEST_%` 哨兵**：落库提交的数据（如 `_seed_channel_product`），`shop_id`/`txn_id` 一律 `TEST_` 前缀
-- **Drift-tolerant 断言**：迁移测试直接对生产库跑，源表行数以 runtime 查询为准，不硬编码
-
-## 进程管理
+推荐通过 systemd 启动：
 
 ```bash
-# 状态
+systemctl --user start tts-erp.service
+systemctl --user start tts-erp-sync.service
+
+curl -sS http://127.0.0.1:9877/healthz | jq
+# {"status":"ok","service":"tts-erp-v2","auth_mode":"enforce"}
+```
+
+完整部署说明见 [`setup/tts-erp.md`](setup/tts-erp.md)。数据库 migration 的生产执行由人工运维
+完成；agent 只能在 `tts_erp_v3_test` 验证 migration。
+
+## 测试
+
+测试的唯一入口是 `scripts/test.sh`。运行前必须准备 gitignored 的 `.env.test`，
+其中 `TTS_ERP_DB_URL_TEST` 指向专用数据库 `tts_erp_v3_test`；脚本仅在该文件存在且
+未直接设置 `TTS_ERP_DB_URL_TEST` 时加载它。`tests/conftest.py` 会拒绝已识别的
+production-shaped 数据库。
+
+```bash
+# 日常快速套件
+flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast
+
+# 会访问共享测试库的单域套件也必须加锁
+flock -n /tmp/tts-erp-test.lock bash scripts/test.sh api
+flock -n /tmp/tts-erp-test.lock bash scripts/test.sh commerce
+flock -n /tmp/tts-erp-test.lock bash scripts/test.sh reporting
+
+# 纯 unit layer
+bash scripts/test.sh unit
+```
+
+安全规则：
+
+- 不直接运行 `pytest`；
+- 不让测试连接 `tts_erp`、`tts_erp_prod` 或其他 production-shaped 数据库；
+- 不设置 `TTS_ERP_TEST_OFF=1` 绕过隔离；
+- agent 不运行 `scripts/test.sh all`、`coverage` 或归档 migration suite；
+- 测试数据使用 `TEST_` 前缀；
+- 共享测试库运行通过 `/tmp/tts-erp-test.lock` 串行化。
+
+详见 [`tech-doc/agent-testing.md`](tech-doc/agent-testing.md)。
+
+## 运维
+
+```bash
+# API
+bash restart.sh
 systemctl --user status tts-erp.service
+journalctl --user -u tts-erp -n 50
+
+# sync-worker；修改 jobs/ 或 sync_worker/ 后单独重启
+systemctl --user restart tts-erp-sync.service
 systemctl --user status tts-erp-sync.service
 
-# 重启
-systemctl --user restart tts-erp.service
-systemctl --user restart tts-erp-sync.service
-
-# 日志
-journalctl --user -u tts-erp.service -n 50
-journalctl --user -u tts-erp-sync.service -n 50
+# 当前调度状态
+curl -sS -H "Authorization: Bearer $TTS_ERP_KEY" \
+  http://127.0.0.1:9877/v2/sync/status | jq
 ```
 
-## 调试
+API 日志由 access log middleware 记录最终状态、耗时、认证方式和代理信息。sync-worker 测试日志
+写入测试专用文件，不应污染生产 `logs/sync_worker.log`。
 
-```bash
-# 健康检查
-curl http://127.0.0.1:9877/healthz | jq
-# {"status":"ok","service":"tts-erp-v2","auth_mode":"enforce"}
+## 仓库结构
 
-# 看 sync-worker 最近一次运行的同步结果
-PGPASSWORD=... psql -U postgres -d tts_erp -c \
-  "SELECT job_name, status, rows_inserted, started_at FROM integration.sync_jobs ORDER BY id DESC LIMIT 20"
+```text
+tts_erp_v2/
+├── access/                  # deployment path + access policy 深模块
+├── analytics/
+│   └── spu_profitability/   # v10 盈利 module
+├── api/v2/                  # FastAPI adapters 和稳定 URL
+├── db/models/               # SQLAlchemy 多 schema models
+├── jobs/                    # TikTok / 妙手 / 汇率 / 报表 jobs
+├── middleware/              # ASGI auth/rate-limit/access-log adapters
+├── plugin/
+│   ├── ads/                 # Chrome 广告 dump persistence
+│   └── orders/intake/       # 订单域 dump 深模块
+├── proxy/                   # TikTok / 妙手 / 汇率 clients；token_service
+├── reporting/               # 成本和旧版报表实现
+├── static/                  # 运营页面 CSS/JS/vendor
+└── sync_worker/             # APScheduler registry 与 runner
 
-# 看同步 issue（某次跑失败的 row）
-PGPASSWORD=... psql -U postgres -d tts_erp -c \
-  "SELECT job_name, issue_type, external_id, detected_at FROM integration.sync_issues ORDER BY detected_at DESC LIMIT 20"
-
-# 妙手签名调试
-MIAOSHOU_DEBUG_SIGN=1 .venv/bin/python -c "from miaoshou.miaoshou_signing import build_sign; import json; print(build_sign({'shopId':'17060852'}, 'TEST_COMPANY_SECRET'))"
+tests/                       # 按业务域和 layer 标记的测试
+scripts/                     # 运维、探针、一次性和测试入口
+tech-doc/                    # 技术契约、ADR、架构和运维文档
+biz-doc/                     # 业务口径
+setup/                       # 人工部署文档
+handoff/ACTIVE.md            # 当前 lane 文件所有权
 ```
 
-## 已知问题 / 边界
+## 重要边界
 
-- **`/miaoshou/callback/*` 在 v2 已无路由（实测 404）**：回调派发代码仍在 `miaoshou/callbacks/`，
-  auth 中间件也仍把该前缀分类为公开路径，但 v2 app 从未挂载回调 router。妙手若仍在推送，
-  这些 webhook 实际已无人接收；要恢复需把 router 挂回 v2 app 并单独 review。
-- **`/returns/*` 和 `/cancellations/*` 不接 CREATE 写端点**：避免在真实店铺创建退货/取消单。详见 `AGENTS.md` §4。
-- **`/reverse/202309/*` 不存在**：TikTok 202309 spec 没开放 reverse logistics 模块（HTTP 404 at CDN）。
-- **oauth-receiver :9876 已 DROP**（2026-09-05）：凭证全部走 `integration.credentials` +
-  `tts_erp_v2/proxy/token_service.py`；不再有任何外部服务拿 token。如需回滚 v1 凭证源，
-  从备份 `backups/oauth_receiver_v1_legacy_*.sql.gz` 恢复 + 重跑
-  `tech-doc/_archive/migrate-v1-to-v2-2026-08-29/scripts/re_encrypt_credentials.py` 转回 v2 envelope。
+- 不存在 store-writing TikTok HTTP 接口；不要新增确认、取消、退货或发货写操作。
+- `/miaoshou/*` 没有 v2 HTTP surface；妙手是进程内 SDK + scheduled jobs。
+- `miaoshou.purchase_orders` 代码存在，但当前路径在生产妙手 ERP API 返回 `routeNotFound`；正确路径尚未确认，因此没有注册进 scheduler。
+- v1 `/orders/*`、`/finance/*`、`/db/*`、`/sync/*` 等路由已删除。
+- TikTok signing 必须保持 `shop_cipher` query、排序签名键和原始 JSON body 语义；见
+  [`tech-doc/tiktok-hmac-signing.md`](tech-doc/tiktok-hmac-signing.md)。
+- 凭证只能通过 `tts_erp_v2.proxy.token_service`，禁止直接解密 `integration.credentials`。
+- destructive HTTP/CLI/migration/job 必须使用 `tts_erp_v2.api.deps` 的对应共享 guard。
 
-## 相关
+## 文档导航
 
-- [`AGENTS.md`](AGENTS.md) — AI agent 操作指南（端点速查、签名规范、DO/DON'T）
-- [`CHANGELOG.md`](CHANGELOG.md) — 变更历史（按日期）
-- [`handoff.md`](handoff.md) — 跨 session 交接笔记
-- [`tech-doc/data-model-target-v3.md`](tech-doc/data-model-target-v3.md) — 10 schema V3 真理源
-- [`tech-doc/external-api.md`](tech-doc/external-api.md) — v2 端点契约
-- [`tech-doc/api-key-auth-design.md`](tech-doc/api-key-auth-design.md) — auth 设计
-- [`tech-doc/refactor-tech-plan-v2.md`](tech-doc/refactor-tech-plan-v2.md) — 重构技术方案 V2（已实施）
-- [`tech-doc/test-domains.md`](tech-doc/test-domains.md) — 测试按域切片 / scripts/test.sh 用法
-- [`tech-doc/_archive/`](tech-doc/_archive/) — V1 时代过期文档
-- [`miaoshou/README.md`](miaoshou/README.md) — 妙手集成
-- [`prod-switch/`](prod-switch/) — 生产切换 / 回滚 / 归档脚本
+| 文档 | 内容 |
+| --- | --- |
+| [`AGENTS.md`](AGENTS.md) | 仓库安全边界、命令和 agent 工作流 |
+| [`tech-doc/architecture-overview.md`](tech-doc/architecture-overview.md) | 系统、数据和凭证架构 |
+| [`tech-doc/process-architecture.md`](tech-doc/process-architecture.md) | 进程与目录地图 |
+| [`tech-doc/external-api.md`](tech-doc/external-api.md) | 外部 API 活契约与角色矩阵 |
+| [`tech-doc/dumps-data-contract.md`](tech-doc/dumps-data-contract.md) | Chrome dump wire/HTTP 契约 |
+| [`tech-doc/access-policy-module.md`](tech-doc/access-policy-module.md) | 访问策略深模块设计与实现 |
+| [`tech-doc/order-dump-intake-module.md`](tech-doc/order-dump-intake-module.md) | 订单 dump intake 设计 |
+| [`biz-doc/analytics/spu-roi-profit-calculation.md`](biz-doc/analytics/spu-roi-profit-calculation.md) | SPU 盈利 v10 业务公式 |
+| [`tech-doc/fx-exchange-rates.md`](tech-doc/fx-exchange-rates.md) | 汇率快照与同步 |
+| [`tech-doc/miaoshou-platform.md`](tech-doc/miaoshou-platform.md) | 妙手 SDK 与数据语义 |
+| [`tech-doc/agent-safety.md`](tech-doc/agent-safety.md) | 数据库、凭证、生产与 destructive guard |
+| [`CHANGELOG.md`](CHANGELOG.md) | 历史变更 |
 
 ## License
 
