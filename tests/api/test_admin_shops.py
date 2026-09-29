@@ -47,13 +47,11 @@ def _cleanup_registered_shops(db_engine):
     """
     yield
     with db_engine.begin() as conn:
+        conn.execute(delete(ChannelAccount).where(ChannelAccount.shop_id.in_(SHOP_IDS)))
         conn.execute(
-            delete(ChannelAccount).where(ChannelAccount.shop_id.in_(SHOP_IDS))
-        )
-        conn.execute(
-            text(
-                "DELETE FROM plugin.ad_daily WHERE seller_id IN (:a, :b)"
-            ).bindparams(a=SHOP_A, b=SHOP_B)
+            text("DELETE FROM plugin.ad_daily WHERE seller_id IN (:a, :b)").bindparams(
+                a=SHOP_A, b=SHOP_B
+            )
         )
         conn.execute(
             text(
@@ -99,12 +97,16 @@ def test_register_creates_plugin_only_shop(api_client, admin_key, db_engine):
     from sqlalchemy.orm import Session
 
     with db_engine.connect() as conn:
-        row = Session(bind=conn).execute(
-            select(ChannelAccount).where(
-                ChannelAccount.platform == "tiktok",
-                ChannelAccount.shop_id == SHOP_A,
+        row = (
+            Session(bind=conn)
+            .execute(
+                select(ChannelAccount).where(
+                    ChannelAccount.platform == "tiktok",
+                    ChannelAccount.shop_id == SHOP_A,
+                )
             )
-        ).scalar_one()
+            .scalar_one()
+        )
     assert row.credential_id is None
     assert row.status == "active"
     assert str(row.opened_date) == "2026-06-01"
@@ -126,9 +128,7 @@ def test_register_with_service_app_pair_is_atomic(api_client, admin_key):
     assert shop["credential_id"] is None
 
 
-def test_register_is_idempotent_and_backfills_null_fields(
-    api_client, admin_key
-):
+def test_register_is_idempotent_and_backfills_null_fields(api_client, admin_key):
     r1 = _register(api_client, admin_key, account_name="Shop A")
     assert r1.status_code == 200 and r1.json()["created"] is True
 
@@ -418,9 +418,7 @@ def test_update_shop_never_touches_credential_or_status(api_client, admin_key):
     assert shop["status"] == "active"
 
 
-def test_update_app_credentials_allow_readwrite(
-    api_client, admin_key, readwrite_key
-):
+def test_update_app_credentials_allow_readwrite(api_client, admin_key, readwrite_key):
     """PATCH 配置 App pair readwrite 即可（2026-09-29 用户拍板）。"""
     r = _register(api_client, admin_key, shop_id=SHOP_B)
     pk = r.json()["shop"]["id"]

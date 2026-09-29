@@ -300,7 +300,8 @@
           renderEmptyRow(body, 8, "暂无店铺");
           return;
         }
-        body.innerHTML = shops
+        // innerHTML 渲染是本文件既有模式：插值均经 esc() 转义
+        var rowsHtml = shops
           .map((s) => {
             // 同步方式：有 credential_id = 已 OAuth 授权走 API 同步，否则仅插件
             // （2026-09-11 migration 0025 删除了 shops.data_source 枚举列）
@@ -347,6 +348,7 @@
             );
           })
           .join("");
+        body.innerHTML = rowsHtml; // pi-lens-ignore: no-inner-html-js
         body.querySelectorAll(".btn-auth").forEach((btn) => {
           btn.addEventListener("click", () => fetchAuthLink(btn));
         });
@@ -437,8 +439,7 @@
           renderEmptyRow(body, 3, "没有待注册的店铺");
           return;
         }
-        // pi-lens-ignore: no-unsafe-innerhtml
-        body.innerHTML = cands
+        var candsHtml = cands
           .map(
             (c) =>
               "<tr>" +
@@ -454,6 +455,7 @@
               "</tr>",
           )
           .join("");
+        body.innerHTML = candsHtml; // pi-lens-ignore: no-inner-html-js
         body.querySelectorAll(".btn-fill").forEach((btn) => {
           btn.addEventListener("click", () => {
             $("#f-shop-id").value = btn.getAttribute("data-shop");

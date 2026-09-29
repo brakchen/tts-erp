@@ -225,8 +225,13 @@ _PLUGIN_ORDER_CHILD_TABLES = [
 )
 def purge_plugin_data(
     request: Request,
-    confirm: bool = Query(False, description="Must be true to actually delete. Dry-run by default."),
-    allow_prod: bool = Query(False, description="Override prod-shape guard (only honored when TTS_ERP_ENVIRONMENT=dev)."),
+    confirm: bool = Query(
+        False, description="Must be true to actually delete. Dry-run by default."
+    ),
+    allow_prod: bool = Query(
+        False,
+        description="Override prod-shape guard (only honored when TTS_ERP_ENVIRONMENT=dev).",
+    ),
 ) -> dict[str, Any]:
     """Delete all Chrome extension synced data from analytics and plugin schemas.
 
@@ -275,9 +280,7 @@ def purge_plugin_data(
 
     with engine.begin() as conn:
         # Count rows first (for the response — always, even on dry-run).
-        all_tables = (
-            _ANALYTICS_TABLES + _PLUGIN_ORDER_CHILD_TABLES
-        )
+        all_tables = _ANALYTICS_TABLES + _PLUGIN_ORDER_CHILD_TABLES
         for table in all_tables:
             try:
                 row = conn.execute(
@@ -291,7 +294,7 @@ def purge_plugin_data(
         if executed:
             # ad 域和 business tables 现在互相独立（raw_log FK 链 2026-09-17 drop），
             # 无 FK 依赖顺序要求，之间任意顺序 DELETE 都可以。
-            for table in (_ANALYTICS_TABLES + _PLUGIN_ORDER_CHILD_TABLES):
+            for table in _ANALYTICS_TABLES + _PLUGIN_ORDER_CHILD_TABLES:
                 if counts.get(table, 0) > 0:
                     conn.execute(
                         text(f"DELETE FROM {table}")
@@ -308,8 +311,9 @@ def purge_plugin_data(
         "purged_at": datetime.now(UTC).isoformat(),
         "prod_guarded": is_prod,
         "next_step": (
-            None if executed else
-            "Pass ?confirm=true (and ?allow_prod=true on dev env) to actually delete."
+            None
+            if executed
+            else "Pass ?confirm=true (and ?allow_prod=true on dev env) to actually delete."
         ),
     }
 
@@ -507,9 +511,7 @@ def _configure_or_validate_app_credentials(
     response_model=ShopRegisterResponse,
     summary="人工注册店铺（插件同步店铺补登记，readwrite+）",
 )
-def register_shop(
-    request: Request, body: ShopRegisterBody
-) -> ShopRegisterResponse:
+def register_shop(request: Request, body: ShopRegisterBody) -> ShopRegisterResponse:
     """Register a shop and optionally configure its service App pair.
 
     App Key/App Secret writes are readwrite and share the same transaction as
