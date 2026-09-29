@@ -20,8 +20,10 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import get_session
+from tts_erp_v2.api.query_params import parse_spu_ids
 from tts_erp_v2.api.schemas import (
     ChannelAccountOut,
+    ChannelProductOptionOut,
     ChannelProductOut,
     ChannelProductVariantOut,
     SalesOrderLineOut,
@@ -168,6 +170,19 @@ _SQL_LIST_CHANNEL_PRODUCTS = {
     key: text(SQL_LIST_CHANNEL_PRODUCTS + " " + tail + " " + _PAGE_SUFFIX)
     for key, tail in _SORT_TAILS_CHANNEL_PRODUCTS.items()
 }
+SQL_LIST_CHANNEL_PRODUCT_OPTIONS = (
+    "SELECT cp.spu_id, cp.title, cp.status "
+    "FROM commerce.products_spu cp "
+    "WHERE cp.shop_pk = CAST(:shop_pk AS bigint) "
+    "AND (CAST(:q AS text) IS NULL "
+    "     OR cp.spu_id ILIKE '%' || CAST(:q AS text) || '%' "
+    "     OR COALESCE(cp.title, '') ILIKE '%' || CAST(:q AS text) || '%') "
+    "AND (CAST(:spu_ids AS text[]) IS NULL "
+    "     OR cp.spu_id = ANY(CAST(:spu_ids AS text[]))) "
+    "ORDER BY CASE WHEN cp.status ILIKE 'activate' THEN 0 ELSE 1 END, "
+    "         cp.spu_id "
+    "LIMIT CAST(:limit AS integer)"
+)
 SQL_GET_CHANNEL_PRODUCT = (
     "SELECT cp.id, cp.shop_pk, cp.spu_id, cp.title, cp.status, "
     "       cp.source_created_at, cp.source_updated_at, "
@@ -246,6 +261,7 @@ _STMT_LIST_CHANNEL_ACCOUNTS = text(SQL_LIST_CHANNEL_ACCOUNTS)
 _STMT_GET_CHANNEL_ACCOUNT = text(SQL_GET_CHANNEL_ACCOUNT)
 _STMT_GET_CHANNEL_ACCOUNT_BY_EXTERNAL = text(SQL_GET_CHANNEL_ACCOUNT_BY_EXTERNAL)
 _STMT_COUNT_CHANNEL_PRODUCTS = text(SQL_COUNT_CHANNEL_PRODUCTS)
+_STMT_LIST_CHANNEL_PRODUCT_OPTIONS = text(SQL_LIST_CHANNEL_PRODUCT_OPTIONS)
 _STMT_GET_CHANNEL_PRODUCT = text(SQL_GET_CHANNEL_PRODUCT)
 _STMT_LIST_CHANNEL_VARIANTS = text(SQL_LIST_CHANNEL_VARIANTS)
 _STMT_LIST_SALES_ORDERS = text(SQL_LIST_SALES_ORDERS)
@@ -514,6 +530,45 @@ def list_products_spu(
         sess,
     ).all()
     return [_row_to_channel_product(r) for r in rows]
+
+
+@router.get(
+    "/channel-product-options",
+    response_model=list[ChannelProductOptionOut],
+)
+def list_channel_product_options(
+    sess: Session = Depends(get_session),  # noqa: B008
+    shop_pk: int = Query(ge=1),
+    q: str | None = Query(default=None, max_length=200),
+    spu_ids: str | None = Query(default=None, max_length=4096),
+    limit: int = Query(default=50, ge=1, le=100),
+) -> list[ChannelProductOptionOut]:
+    """Return bounded SPU labels for the ROI Bootstrap multi-select."""
+
+    try:
+        parsed_spu_ids = parse_spu_ids(spu_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    rows = _q(
+        _STMT_LIST_CHANNEL_PRODUCT_OPTIONS,
+        {
+            "shop_pk": shop_pk,
+            "q": q.strip() if q and q.strip() else None,
+            "spu_ids": (
+                list(parsed_spu_ids) if parsed_spu_ids is not None else None
+            ),
+            "limit": limit,
+        },
+        sess,
+    ).all()
+    return [
+        ChannelProductOptionOut(
+            spu_id=row.spu_id,
+            title=row.title,
+            status=row.status,
+        )
+        for row in rows
+    ]
 
 
 @router.get("/channel-products/{spu_pk}", response_model=ChannelProductOut)

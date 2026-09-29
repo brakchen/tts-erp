@@ -55,6 +55,15 @@ class ChannelProductOut(BaseModel):
     main_image_url: str | None = None
 
 
+class ChannelProductOptionOut(BaseModel):
+    """Lightweight SPU option for searchable multi-select controls."""
+
+    model_config = ConfigDict(from_attributes=True)
+    spu_id: str
+    title: str | None = None
+    status: str | None = None
+
+
 class ChannelProductVariantOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

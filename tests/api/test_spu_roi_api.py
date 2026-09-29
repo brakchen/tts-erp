@@ -1103,7 +1103,20 @@ def test_spu_roi_totals_cross_spu_dedup_and_gmv_split(
     - GMV 拆分:X/Y 各分摊有效 $10 + 取消原额 $5 → totals.gmv = 20+10
     """
     with Session(db_engine) as sess:
-        _seed(sess, _seed_cross_spu_orders)  # 返回 (X,Y) 主键,此处仅造数
+        x, _y = _seed(sess, _seed_cross_spu_orders)
+        shop_pk = sess.execute(
+            text("SELECT shop_pk FROM commerce.products_spu WHERE id = :spu_pk"),
+            {"spu_pk": x},
+        ).scalar_one()
+        _seed_spu(
+            sess,
+            shop_pk,
+            "TEST_ROI_SPU_X_EXTRA",
+            title="TEST selector title needle",
+        )
+        other_shop_pk = _seed_shop(sess, "TEST_SELLER_XY_OTHER")
+        _seed_spu(sess, other_shop_pk, "TEST_ROI_SPU_X", title="other shop")
+        sess.commit()
 
     h = {"Authorization": f"Bearer {readonly_key}"}
     r = api_client.get("/v2/analytics/spu-roi", headers=h, params={"q": Q})
@@ -1133,13 +1146,6 @@ def test_spu_roi_totals_cross_spu_dedup_and_gmv_split(
     assert {i["cancel_rate"] for i in body["items"]} == {"0.50"}
     assert t["cancel_rate"] == "0.5000"
 
-    with Session(db_engine) as sess:
-        shop_pk = sess.execute(
-            text(
-                "SELECT shop_pk FROM commerce.products_spu "
-                "WHERE spu_id = 'TEST_ROI_SPU_X'"
-            )
-        ).scalar_one()
     filtered = api_client.get(
         "/v2/analytics/spu-roi",
         headers=h,
@@ -1149,6 +1155,66 @@ def test_spu_roi_totals_cross_spu_dedup_and_gmv_split(
     assert filtered["items"][0]["spu_id"] == "TEST_ROI_SPU_X"
     assert filtered["totals"]["row_count"] == 2
     assert filtered["totals"]["order_count"] == 1
+
+    # 精确 SPU scope 必须同时约束 items 与大盘；中文/英文逗号、空格、重复值
+    # 等价，且跨 SPU 共享订单仍由大盘做 distinct。
+    selected = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=h,
+        params={
+            "shop_pk": shop_pk,
+            "spu_ids": " TEST_ROI_SPU_X，TEST_ROI_SPU_Y,TEST_ROI_SPU_X ",
+        },
+    )
+    assert selected.status_code == 200, selected.text
+    selected_body = selected.json()
+    assert {item["spu_id"] for item in selected_body["items"]} == {
+        "TEST_ROI_SPU_X",
+        "TEST_ROI_SPU_Y",
+    }
+    assert selected_body["total"] == 2
+    assert selected_body["totals"]["row_count"] == 2
+    assert selected_body["totals"]["order_count"] == 1
+    assert selected_body["totals"]["cancelled_order_count"] == 1
+
+    only_x = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=h,
+        params={"shop_pk": shop_pk, "spu_ids": "TEST_ROI_SPU_X"},
+    )
+    assert only_x.status_code == 200, only_x.text
+    only_x_body = only_x.json()
+    assert [item["spu_id"] for item in only_x_body["items"]] == [
+        "TEST_ROI_SPU_X"
+    ]
+    assert only_x_body["total"] == 1
+    assert only_x_body["totals"]["row_count"] == 1
+    assert only_x_body["totals"]["order_count"] == 1
+    assert only_x_body["totals"]["cancelled_order_count"] == 1
+    assert only_x_body["totals"]["gmv"] == "15.0000"
+
+    options = api_client.get(
+        "/v2/commerce/channel-product-options",
+        headers=h,
+        params={
+            "shop_pk": shop_pk,
+            "spu_ids": "TEST_ROI_SPU_X，TEST_ROI_SPU_Y",
+        },
+    )
+    assert options.status_code == 200, options.text
+    assert [option["spu_id"] for option in options.json()] == [
+        "TEST_ROI_SPU_X",
+        "TEST_ROI_SPU_Y",
+    ]
+    searched_options = api_client.get(
+        "/v2/commerce/channel-product-options",
+        headers=h,
+        params={"shop_pk": shop_pk, "q": "title needle"},
+    )
+    assert searched_options.status_code == 200, searched_options.text
+    assert [option["spu_id"] for option in searched_options.json()] == [
+        "TEST_ROI_SPU_X_EXTRA"
+    ]
 
 
 def _seed_refund_on_shared_order_y_line(sess) -> tuple[int, int]:
@@ -2202,6 +2268,28 @@ def test_spu_roi_rejects_bad_params(api_client, readonly_key):
         ).status_code
         == 422
     )
+    # 精确 SPU scope 必须有有效值、有界，且不能和展示层 q 混用。
+    bad_spu_params = [
+        {"spu_ids": ",，，"},
+        {"spu_ids": "TEST_ROI_SPU_A"},  # 精确 scope 必须绑定内部 shop_pk
+        {"spu_ids": "X" * 129},
+        {"spu_ids": ",".join(f"TEST_{index}" for index in range(101))},
+        {"q": "TEST", "spu_ids": "TEST_ROI_SPU_A"},
+    ]
+    for params in bad_spu_params:
+        response = api_client.get(
+            "/v2/analytics/spu-roi",
+            headers=h,
+            params=params,
+        )
+        assert response.status_code == 422, (params, response.text)
+
+    invalid_options = api_client.get(
+        "/v2/commerce/channel-product-options",
+        headers=h,
+        params={"shop_pk": 1, "spu_ids": "，，"},
+    )
+    assert invalid_options.status_code == 422
 
 
 def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
@@ -2330,6 +2418,17 @@ def test_spu_roi_page_toolbar_shop_and_date_filters(api_client, readonly_key):
     assert "请选择店铺" in body
     assert 'id="ops-toast"' not in body
     assert 'id="toast-countdown"' not in body
+    # Bootstrap 5 标签式 SPU 多选：真实 select multiple 由自托管 Tom Select
+    # Bootstrap 主题增强；查询/清空显式应用，避免每次选择都重算大盘。
+    assert 'id="filter-spu-ids"' in body
+    assert 'class="form-select"' in body
+    assert " multiple " in body
+    assert 'id="btn-spu-apply"' in body
+    assert 'id="btn-spu-clear"' in body
+    assert "支持搜索或批量粘贴" in body
+    assert "tom-select.bootstrap5.min.css" in body
+    assert "tom-select.complete.min.js" in body
+    assert 'id="filter-q"' not in body
     # 日期范围输入(空 = 不限 → w_start/w_end 不传 = 全历史)
     assert 'id="filter-w-start"' in body
     assert 'id="filter-w-end"' in body
@@ -2419,7 +2518,7 @@ def test_spu_roi_page_uses_bootstrap_responsive_layout(api_client, readonly_key)
         "container-fluid px-3 px-lg-4 py-3 op-main",
         "row-cols-1 row-cols-md-2 row-cols-xl-3 row-cols-xxl-4",
         "row g-2 g-lg-3 align-items-end",
-        "col-12 col-md-6 col-xl-3",
+        "col-12 col-xl",
         "table table-hover align-middle mb-0 op-table",
         "nav nav-tabs flex-nowrap overflow-x-auto op-drill-tabs",
         "d-flex flex-column flex-md-row",
@@ -2621,6 +2720,12 @@ def test_spu_roi_js_targets_dashboard_hooks():
     assert "roi_breakeven" in src  # 红绿判据字段
     assert "cost_source" in src
     assert "DEFAULT_K1" in src  # ⚠ 判断
+    # Bootstrap 多选由 Tom Select 驱动，精确 scope 通过独立 spu_ids 参数提交。
+    assert 'Reflect.get(window, "TomSelect")' in src
+    assert "/v2/commerce/channel-product-options" in src
+    assert "spu_ids" in src
+    assert "clipboardData" in src
+    assert 'replace(/，/g, ",")' in src
 
 
 def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):

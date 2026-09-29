@@ -78,6 +78,7 @@ def _read_overview_in_snapshot(
         session,
         q=view.search or None,
         shop_pk=scope.shop_pk,
+        spu_ids=scope.spu_ids,
         active_only=(
             legacy_include_all
             if legacy_include_all is not None

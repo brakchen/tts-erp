@@ -192,6 +192,7 @@ All list endpoints accept `limit` (1..500, default 100) + `offset` (≥0).
 | `GET /v2/commerce/channel-accounts/by-external/{shop_id}` | [`api/channel-accounts-by-external.md`](api/channel-accounts-by-external.md) | reverse-lookup by upstream shop_id; `?platform=tiktok` default; 404 if unknown |
 | `GET /v2/commerce/channel-accounts/{shop_pk}/order-stats` | — | `{order_count, payment_amount_sum}` aggregate (0/0 when empty) |
 | `GET /v2/commerce/channel-products` | `shop_pk`, `status` | SPU list: `{id, shop_pk, spu_id, title, status, source_created_at, source_updated_at}` |
+| `GET /v2/commerce/channel-product-options` | required `shop_pk`; optional `q`, `spu_ids`, `limit` (1..100, default 50) | Bootstrap multi-select 的轻量 SPU 选项：`[{spu_id,title,status}]`。`q` 对 `spu_id/title` 做 ILIKE；`spu_ids` 按中英文逗号拆分后精确匹配，最多 100 个。 |
 | `GET /v2/commerce/channel-products/{spu_pk}` | — | one SPU; 404 if unknown |
 | `GET /v2/commerce/channel-products/{spu_pk}/variants` | — | SKU list: `{id, spu_pk, sku_id, seller_sku, variant_name}` |
 | `GET /v2/commerce/sales-orders` | `shop_pk`, `status` | order list: `{id, shop_pk, order_id, status, currency, payment_amount, total_amount, order_time, order_modify_time, paid_at}` |
@@ -336,7 +337,8 @@ Query parameters:
 
 | name | type | default | notes |
 | --- | --- | --- | --- |
-| `q` | string | — | `spu_id` 子串搜索(ILIKE) |
+| `q` | string | — | 兼容的 `spu_id` 子串搜索；页面标准调用（带 `shop_pk`）中只改变 `items/total`、不改变大盘 `totals`；不能和 `spu_ids` 同传 |
+| `spu_ids` | comma-list | — | 当前店铺内按 `spu_id` 精确匹配的 scope，使用时 `shop_pk` 必填；同时约束 `items/total/totals`。支持 `,`/`，`、trim/去空/去重，最多 100 个且单项最多 128 字符；只有分隔符、缺 `shop_pk` 或与 `q` 同传 → 422 |
 | `sort` | enum | `roi_real` | `roi_real` \| `spend` \| `refund_rate` \| `refund_rate_qty` \| `cancel_rate` \| `net_profit` \| `sales` \| `gmv_sales` \| `ad_count` \| `gmv_ad` \| `order_count` \| `cancelled_order_count` \| `units_sold` \| `refund_net_amount` \| `return_loss` \| `roi_breakeven` \| **`full_loss_rate`**(v8 新增);同值次级键 spend DESC 保证可复现 |
 | `order` | enum | `asc` | `asc` \| `desc`;**默认 `sort="roi_real"` 升序保持不变**——避免改 API 契约;**页面 JS 显式传 `sort=net_profit&order=asc` 实现「最亏在前」视图** |
 | `limit` | int | 100 | 1..500(分页 v2 约定) |
@@ -347,7 +349,7 @@ Query parameters:
 | `w_start` | date | — | ISO `yyyy-mm-dd`;销售与退款均按关联订单 `COALESCE(paid_at, order_time)` 裁剪；退款跟随原订单归属（含当日） |
 | `w_end` | date | — | ISO `yyyy-mm-dd`;与 `w_start` 配对使用；例如 9 月 1 日订单在 9 月 10 日退款，仍归入 9 月 1 日；不提供窗口 = 销售/退款全历史累计 |
 
-Response envelope:`{items: [...], total, totals, meta}`。
+Response envelope:`{items: [...], total, totals, meta}`。`spu_ids` 属于盈利范围：金额从命中 SPU 行聚合，订单/取消/退款 totals 在命中 SPU 集合内跨 SPU 去重，且 totals 不受分页影响。页面使用 Bootstrap 5 + 自托管 Tom Select Bootstrap 5 主题的原生 `<select multiple>` 选择/搜索/粘贴 SPU，点击「查询」后才应用 scope。
 
 **v9 行字段契约（34 字段，**全量**——页面主列仅渲染 6 列 + 商品维度，其余由下钻面板消费）**：
 
