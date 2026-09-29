@@ -289,6 +289,17 @@ def test_browser_redirect_respects_external_prefix(prefixed_client):
     assert r.headers["location"] == "/tts/v2/auth/login?next=/v2/pages/manual-costs"
 
 
+def test_login_page_does_not_duplicate_external_prefix(prefixed_client):
+    """Page JS may pass an already-prefixed next path after a fetch 401."""
+    response = prefixed_client.get(
+        "/v2/auth/login",
+        params={"next": "/tts/v2/pages/spu-roi"},
+    )
+    assert response.status_code == 200, response.text
+    assert 'value="/tts/v2/pages/spu-roi"' in response.text
+    assert "/tts/tts/" not in response.text
+
+
 def test_api_accept_keeps_json_401(api_client):
     r = api_client.get(
         "/v2/pages/manual-costs",
