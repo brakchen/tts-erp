@@ -1427,7 +1427,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
             <div class="op-counter-group-label">保本</div>
             <div class="row g-0 row-cols-2">
               <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">实际保本ROI<span class="op-hint" data-tip="实际保本ROI = NC' ÷ (NC' − COGS_kept)，其中 NC' = 净收入 − 全损成本，COGS_kept = (售出件 − 退货件) × 单位成本。净利润 = 0 时的 ROI 临界值；实际ROI低于此值即亏">?</span></span><span class="op-counter-num" id="sum-roi-breakeven">—</span></span></div>
-              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">广告系统保本ROI<span class="op-hint" data-tip="TODO: 广告系统保本ROI 公式待定。当前暂不展示，后续对接广告系统数据后补充计算口径">?</span></span><span class="op-counter-num" id="sum-roi-ad">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">广告系统保本ROI<span class="op-hint" data-tip="广告系统保本ROI = 广告归因GMV ÷ 最大可承受广告费；最大可承受广告费 = 预计净结算收入 − 同范围采购成本 − 结算外必要成本。当前系统尚未结构化录入退货运费、提现费、汇兑损失、包装耗材等结算外成本，因此页面以 ≈ 标记已知成本下限估算；分母≤0或无归因GMV时显示 —">?</span></span><span class="op-counter-num" id="sum-roi-ad">—</span></span></div>
             </div>
           </div>
         </div>

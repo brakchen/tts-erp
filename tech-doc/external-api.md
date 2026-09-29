@@ -349,7 +349,7 @@ Query parameters:
 
 Response envelope:`{items: [...], total, totals, meta}`。
 
-**v9 行字段契约（34 字段，**全量**——页面主列仅渲染 6 列 + 商品维度，其余由下钻面板消费）**：
+**当前行字段契约（页面主列仅渲染 6 列 + 商品维度，其余由下钻面板或外部分析消费）**：
 
 | 字段 | 类型 | 公式 / 含义 | 主列? |
 | --- | --- | --- | --- |
@@ -361,7 +361,12 @@ Response envelope:`{items: [...], total, totals, meta}`。
 | `ad_orders` | int | M2b: 平台出单量 | — |
 | `spend` | money-str (USD) | M1: 广告消耗 = `Σ real_cost_total` | **主列** |
 | `gmv_ad` | money-str (USD) | M3: 平台归因 GMV | — |
-| `roi_l0` | ratio-str/null | M4: `gmv_ad / spend` | — |
+| `roi_l0` | ratio-str/null | M4: `gmv_ad / spend`；广告系统实际 ROI 的兼容别名 | — |
+| `ad_system_actual_roi` | ratio-str/null | 广告系统实际 ROI = 广告归因 GMV ÷ 广告实际消耗 | — |
+| `ad_system_max_ad_spend` | money-str (USD) | 最大可承受广告费 = 预计净结算收入 − 同范围采购成本 − 结算外必要成本 | — |
+| `ad_system_remaining_ad_spend_capacity` | money-str (USD) | 最大可承受广告费 − 当前广告实际消耗；可为负 | — |
+| `ad_system_breakeven_roi` | ratio-str/null | 广告归因 GMV ÷ 最大可承受广告费；分母≤0或无归因 GMV 时为 null | 结余带 |
+| `ad_system_breakeven_roi_status` | enum | 当前为 `estimated_known_costs`：结算外必要成本尚未结构化，不能解释为最终保本线 | — |
 | `ad_first_day` / `ad_last_day` | date/null | 广告观测窗口 | — |
 | `order_count` | int | M5b: 有效销售订单数（白名单状态，含 COD 在途） | **主列** |
 | `cancelled_order_count` | int | M5c: 取消订单数（**全部 CANCELLED，信息列口径不变**；取消率不再用它，见下两行拆分） | — |
@@ -392,6 +397,8 @@ Response envelope:`{items: [...], total, totals, meta}`。
 | `roi_real` | ratio-str/null | **M14 v8** = `(net_revenue − return_loss) / spend` | 下钻·利润构成 |
 | `roi_breakeven` | ratio-str/null | **M17 v8** = `NC′ ÷ (NC′ − COGS_kept)`（fee_est 项移除） | 下钻·利润构成 |
 | `cpa` | money-str/null | M15: `spend / ad_orders` | — |
+
+`totals` 同样返回上述 5 个 `ad_system_*` 字段，按完整 scope 聚合后重新计算（不是行级 ROI 平均值）。`meta.ad_system_roi` 给出实际 ROI、最大可承受广告费和保本 ROI 的公式与范围，并明确 `mixed_real_cost` 不混入广告赠金、赠金目前不可单独取得；`meta.warnings` 当前包含 `ad_system_other_necessary_costs_not_modeled`。净结算已扣除的平台费用不得再次扣除；结算外成本补齐前，前端以 `≈` 展示该估算。
 
 > **v9 语义变化（2026-09-13，merge `3c8ea96`）**：
 >

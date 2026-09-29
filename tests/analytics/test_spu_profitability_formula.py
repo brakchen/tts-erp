@@ -76,6 +76,10 @@ def test_v10_formula_keeps_exact_domain_decimals() -> None:
     assert result.return_loss_usd == Decimal("5.90960")
     assert result.net_profit_usd == Decimal("15.81200")
     assert result.roi_real == Decimal("4.94504")
+    assert result.ad_system_actual_roi == Decimal("8")
+    assert result.ad_system_max_ad_spend_usd == Decimal("25.81200")
+    assert result.ad_system_remaining_ad_spend_capacity_usd == Decimal("15.81200")
+    assert result.ad_system_breakeven_roi == Decimal("80") / Decimal("25.81200")
     assert result.platform_fee_usd == Decimal("30.800")
     assert result.effective_sales_usd == Decimal("80")
     assert result.total_orders == 2
@@ -136,3 +140,18 @@ def test_v10_formula_marks_undefined_roi_without_ad_spend() -> None:
     assert result.roi_breakeven is None
     assert result.cpa_usd is None
     assert result.roi_l0 is None
+    assert result.ad_system_actual_roi is None
+    assert result.ad_system_breakeven_roi == Decimal("80") / Decimal("25.81200")
+
+
+def test_v10_ad_system_breakeven_is_undefined_without_positive_capacity() -> None:
+    result = calculate(
+        _inputs(
+            units_sold=20,
+            ad_gmv_usd=Decimal("80"),
+        )
+    )
+
+    assert result.ad_system_max_ad_spend_usd < 0
+    assert result.ad_system_remaining_ad_spend_capacity_usd < 0
+    assert result.ad_system_breakeven_roi is None

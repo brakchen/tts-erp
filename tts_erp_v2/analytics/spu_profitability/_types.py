@@ -67,7 +67,7 @@ class EvidenceKind(StrEnum):
 
 class FormulaStatus(StrEnum):
     CALCULATED = "calculated"
-    FORMULA_PENDING = "formula_pending"
+    ESTIMATED_KNOWN_COSTS = "estimated_known_costs"
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,8 +203,11 @@ class SpuProfitability:
     full_loss_cancelled_qty: int
     full_loss_rate: Decimal | None
     full_loss_qty_rate: Decimal | None
-    ad_system_breakeven_roi: Decimal = Decimal(0)
-    ad_system_breakeven_roi_status: FormulaStatus = FormulaStatus.FORMULA_PENDING
+    ad_system_actual_roi: Decimal | None
+    ad_system_breakeven_roi: Decimal | None
+    ad_system_max_ad_spend: Decimal
+    ad_system_remaining_ad_spend_capacity: Decimal
+    ad_system_breakeven_roi_status: FormulaStatus
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,8 +235,11 @@ class ProfitabilityTotals:
     refund_rate: Decimal | None
     full_loss_rate: Decimal | None
     cancel_rate: Decimal | None
-    ad_system_breakeven_roi: Decimal = Decimal(0)
-    ad_system_breakeven_roi_status: FormulaStatus = FormulaStatus.FORMULA_PENDING
+    ad_system_actual_roi: Decimal | None
+    ad_system_breakeven_roi: Decimal | None
+    ad_system_max_ad_spend: Decimal
+    ad_system_remaining_ad_spend_capacity: Decimal
+    ad_system_breakeven_roi_status: FormulaStatus
 
 
 @dataclass(frozen=True, slots=True)

@@ -849,7 +849,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 | 净利润 | `totals.net_profit` | M18：净收入 − 货本（含全损）− 广告消耗，USD；负值标红 |
 | 实际 ROI | `totals.roi_real` | M14；Σspend=0 → `—` |
 | 实际保本 ROI | `totals.roi_breakeven` | 净利润为 0 时的 ROI 临界值；无解 → `—` |
-| 广告系统保本 ROI | `totals.ad_system_breakeven_roi` | 公式未定时状态为 `formula_pending`，页面显示 `—` |
+| 广告系统保本 ROI | `totals.ad_system_breakeven_roi` | 广告归因 GMV ÷ 最大可承受广告费；当前结算外必要成本未结构化，状态为 `estimated_known_costs` 并以 `≈` 展示；分母≤0或无归因 GMV 时显示 `—` |
 
 ### 7.2 标色与阈值（默认值，页面 ⚙ 可调，不锁死）
 

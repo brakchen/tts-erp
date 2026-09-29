@@ -68,6 +68,10 @@ class FormulaOutput:
     net_profit_usd: Decimal
     roi_real: Decimal | None
     roi_breakeven: Decimal | None
+    ad_system_actual_roi: Decimal | None
+    ad_system_breakeven_roi: Decimal | None
+    ad_system_max_ad_spend_usd: Decimal
+    ad_system_remaining_ad_spend_capacity_usd: Decimal
     cpa_usd: Decimal | None
     roi_l0: Decimal | None
     refund_rate: Decimal | None
@@ -188,9 +192,25 @@ def calculate(inputs: FormulaInput) -> FormulaOutput:
         roi_breakeven = (net_revenue_usd - return_loss_usd) / breakeven_denom
 
     cpa_usd = inputs.spend_usd / Decimal(inputs.ad_orders) if inputs.ad_orders else None
-    roi_l0 = (
+    ad_system_actual_roi = (
         inputs.ad_gmv_usd / inputs.spend_usd if inputs.spend_usd != 0 else None
     )
+
+    # 广告后台口径使用广告归因 GMV 作为分子。当前系统尚未结构化录入
+    # 退货运费、提现费、汇兑损失、包装耗材等结算外成本，因此这里给出的
+    # 是“已知成本下限”估算；调用层必须通过状态与 warning 明示该限制。
+    ad_system_max_ad_spend_usd = net_revenue_usd - cogs_all_usd
+    ad_system_remaining_ad_spend_capacity_usd = (
+        ad_system_max_ad_spend_usd - inputs.spend_usd
+    )
+    ad_system_breakeven_roi = None
+    if ad_system_max_ad_spend_usd > 0 and inputs.ad_gmv_usd > 0:
+        ad_system_breakeven_roi = (
+            inputs.ad_gmv_usd / ad_system_max_ad_spend_usd
+        )
+
+    # roi_l0 是历史字段；保留为广告后台实际 ROI 的兼容别名。
+    roi_l0 = ad_system_actual_roi
 
     # 保留金额/件数旧口径的显式字段，仅用于解释，不能再冒充大盘三率。
     refund_amount_rate = refund_net_usd / sales_usd if sales_usd > 0 else None
@@ -233,6 +253,12 @@ def calculate(inputs: FormulaInput) -> FormulaOutput:
         net_profit_usd=net_profit_usd,
         roi_real=roi_real,
         roi_breakeven=roi_breakeven,
+        ad_system_actual_roi=ad_system_actual_roi,
+        ad_system_breakeven_roi=ad_system_breakeven_roi,
+        ad_system_max_ad_spend_usd=ad_system_max_ad_spend_usd,
+        ad_system_remaining_ad_spend_capacity_usd=(
+            ad_system_remaining_ad_spend_capacity_usd
+        ),
         cpa_usd=cpa_usd,
         roi_l0=roi_l0,
         refund_rate=order_metrics.refund_rate,
