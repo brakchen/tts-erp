@@ -754,16 +754,13 @@ def _seed_unpaid_refund_spu(sess) -> int:
 
 
 def _seed_window_spu(sess) -> int:
-    """窗口裁剪场景 SPU(仅销售+退款,无广告):
+    """退款跟随原订单日期的窗口裁剪场景（仅销售+退款，无广告）。
 
-    - 窗内有效销售单 1(paid 2026-09-10)3 件×$20= $60
-    - 窗外有效销售单 2(paid 2026-08-10)2 件×$20= $40
-    - 窗内完结退货退款 1 件 $20(updated 2026-09-12)
-    - 窗外完结退货退款 1 件 $20(updated 2026-08-20)
+    - 订单 1：2026-09-01 下单，2026-09-10 完结退款 1 件 $20；归入 09-01。
+    - 订单 2：2026-08-01 下单，2026-09-12 完结退款 1 件 $20；归入 08-01。
 
-    默认(不传 w_start/w_end)= 全历史累计:units=5、sales=$100、
-    refund_return_qty=2;传 2026-09-01~09-30 → 只留窗内:units=3、
-    sales=$60、refund_return_qty=1。
+    默认全历史：units=5、sales=$100、refund_return_qty=2；查询 9 月只
+    保留订单 1 及其退款，不能因订单 2 的退款发生在 9 月而把它算进来。
     """
     seller = "TEST_SELLER_WIN"
     shop_pk = _seed_shop(sess, seller)
@@ -778,10 +775,10 @@ def _seed_window_spu(sess) -> int:
         qty="3",
         unit_price="526600",  # $20/件 → $60
         paid=True,
-        paid_iso="2026-09-10T08:00:00+00:00",
+        paid_iso="2026-09-01T08:00:00+00:00",
     )
     line1 = _fetch_spu_line_id(sess, "TEST_ORDER_W1")
-    _seed_order_line(
+    o2 = _seed_order_line(
         sess,
         shop_pk=shop_pk,
         spu_pk=spu_pk,
@@ -791,8 +788,9 @@ def _seed_window_spu(sess) -> int:
         qty="2",
         unit_price="526600",  # $20/件 → $40
         paid=True,
-        paid_iso="2026-08-10T08:00:00+00:00",
+        paid_iso="2026-08-01T08:00:00+00:00",
     )
+    line2 = _fetch_spu_line_id(sess, "TEST_ORDER_W2")
     _seed_case(
         sess,
         shop_pk=shop_pk,
@@ -801,17 +799,17 @@ def _seed_window_spu(sess) -> int:
         case_type="RETURN_AND_REFUND",
         status="RETURN_OR_REFUND_REQUEST_COMPLETE",
         lines=[(line1, "TEST_CLINE_W1", "1", "526600")],
-        updated_iso="2026-09-12T00:00:00+00:00",
+        updated_iso="2026-09-10T00:00:00+00:00",
     )
     _seed_case(
         sess,
         shop_pk=shop_pk,
-        order_pk=o1,
+        order_pk=o2,
         ext_case="TEST_CASE_W2",
         case_type="RETURN_AND_REFUND",
         status="RETURN_OR_REFUND_REQUEST_COMPLETE",
-        lines=[(line1, "TEST_CLINE_W2", "1", "526600")],
-        updated_iso="2026-08-20T00:00:00+00:00",
+        lines=[(line2, "TEST_CLINE_W2", "1", "526600")],
+        updated_iso="2026-09-12T00:00:00+00:00",
     )
     return spu_pk
 
@@ -1638,13 +1636,12 @@ def test_spu_roi_include_all_filters_non_active_status(
     assert "TEST_ROI_SPU_DEACTIVE_IDLE" not in by_id2
 
 
-def test_spu_roi_window_params_clip_sales_and_refunds(
+def test_spu_roi_window_params_clip_sales_and_refunds_by_order_time(
     api_client, readonly_key, db_engine
 ):
-    """w_start/w_end 裁剪销售(paid_at)与退款(updated_at_source);
-    不传 = 全历史累计(§4.5)。"""
+    """退款金额、件数、订单数和钻取明细统一跟随原订单时间归属。"""
     with Session(db_engine) as sess:
-        _seed(sess, _seed_window_spu)
+        spu_pk = _seed(sess, _seed_window_spu)
         win_shop_pk = sess.execute(
             text("SELECT id FROM commerce.shops WHERE shop_id = 'TEST_SELLER_WIN'")
         ).scalar_one()
@@ -1663,18 +1660,18 @@ def test_spu_roi_window_params_clip_sales_and_refunds(
     assert item["order_count"] == 2
     assert item["units_sold"] == 5
     assert item["sales"] == "100.0000"
+    assert item["refund_order_count"] == 2
     assert item["refund_return_qty"] == 2
     assert item["refund_return_amount"] == "40.0000"
-    # meta.window 如实注记(v8：销售/退款=全历史未裁剪；ad 不再“全窗累计”说明)
+    assert body["totals"]["refund_order_count"] == 2
     assert "ad=视图全窗口累计" not in body["meta"]["window"]["note"]
     assert "未裁剪" in body["meta"]["window"]["note"]
-    # 日期可裁剪数据(销售∪退款)的真实跨度:窗外 2026-08-10/2026-08-20 +
-    # 窗内 2026-09-10/2026-09-12 → min=08-10, max=09-12(页面回填日期框)
+    # 可裁剪数据覆盖范围也按订单时间，而不是售后发生时间。
     w = body["meta"]["window"]
-    assert w["coverage_first_day"] == "2026-08-10"
-    assert w["coverage_last_day"] == "2026-09-12"
+    assert w["coverage_first_day"] == "2026-08-01"
+    assert w["coverage_last_day"] == "2026-09-01"
 
-    # 传窗口:早于 2026-09-01 的销售单/退款 case 被排除(窗口边界含 w_end 当日)
+    # 9 月窗口只纳入 9 月订单 W1；W2 虽在 9 月退款，仍归属 8 月而被排除。
     r2 = api_client.get(
         "/v2/analytics/spu-roi",
         headers=h,
@@ -1687,18 +1684,56 @@ def test_spu_roi_window_params_clip_sales_and_refunds(
     body2 = r2.json()
     assert body2["total"] == 1
     item2 = body2["items"][0]
-    assert item2["order_count"] == 1, item2  # 窗外 TEST_ORDER_W2 被排除
+    assert item2["order_count"] == 1, item2
     assert item2["units_sold"] == 3
     assert item2["sales"] == "60.0000"
-    assert item2["refund_return_qty"] == 1  # 窗外 2026-08-20 case 被排除
+    assert item2["refund_order_count"] == 1
+    assert item2["refund_return_qty"] == 1
     assert item2["refund_return_amount"] == "20.0000"
-    assert "已裁剪" in body2["meta"]["window"]["note"]
-    # 结余带 totals 同窗口裁剪(2026-09-06):GMV/单量按 COALESCE(paid_at, order_time) 裁剪(全已付场景=paid_at)
+    assert item2["full_loss_qty"] == 1
+    assert body2["totals"]["refund_order_count"] == 1
+    assert body2["totals"]["full_loss_order_count"] == 1
+    assert "跟随原订单" in body2["meta"]["window"]["note"]
     assert body2["totals"]["sales"] == "60.0000"
-    assert body2["totals"]["gmv"] == "60.0000"  # 无取消单 → GMV = sales
+    assert body2["totals"]["gmv"] == "60.0000"
     assert body2["totals"]["order_count"] == 1
     assert body2["totals"]["cancelled_order_count"] == 0
     assert body2["totals"]["total_orders"] == 1
+
+    # 精确到 9 月 1 日：9 月 10 日才退款的 W1 仍完整归入订单日。
+    order_day = {"w_start": "2026-09-01", "w_end": "2026-09-01"}
+    r3 = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=h,
+        params={"q": "TEST_ROI_SPU_WIN", **order_day},
+    )
+    item3 = r3.json()["items"][0]
+    assert item3["refund_order_count"] == 1
+    assert item3["refund_return_qty"] == 1
+    assert item3["refund_return_amount"] == "20.0000"
+    assert item3["full_loss_qty"] == 1
+
+    cases = api_client.get(
+        f"/v2/analytics/spu-roi/{spu_pk}/cases",
+        headers=h,
+        params=order_day,
+    ).json()["cases"]
+    assert [case["case_id"] for case in cases] == ["TEST_CASE_W1"]
+    assert cases[0]["updated_at"].startswith("2026-09-10")
+
+    # 退款发生日 9 月 10 日没有订单，不能单独把退款计入该日。
+    refund_day = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=h,
+        params={
+            "q": "TEST_ROI_SPU_WIN",
+            "w_start": "2026-09-10",
+            "w_end": "2026-09-10",
+        },
+    ).json()
+    assert refund_day["total"] == 0
+    assert refund_day["totals"]["refund_order_count"] == 0
+
     # 不传窗口 = 全历史:两单都在(与上面 item 断言同源)
     assert body["totals"]["sales"] == "100.0000"
     assert body["totals"]["gmv"] == "100.0000"

@@ -150,8 +150,8 @@ def _meta_payload(result, scope: ProfitScope, fee_rate: Decimal | None) -> dict[
         )
     else:
         window_note = (
-            "销售/退款已裁剪至日期窗口；ad 同窗口裁剪；概览单量/GMV 按 "
-            "COALESCE(paid_at, order_time) 裁剪"
+            "销售/退款已裁剪至日期窗口；ad 同窗口裁剪；退款跟随原订单，统一按 "
+            "COALESCE(paid_at, order_time) 归属"
         )
     return {
         "fx": {

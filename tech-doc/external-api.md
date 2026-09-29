@@ -344,8 +344,8 @@ Query parameters:
 | `include_all` | bool | `false` | `false` 只含有广告∨有效销售∨退款的 SPU;`true` 拉全部 **ACTIVE**(status ILIKE 'activate')目录 SPU(DEACTIVATE/DELETED 等排除) |
 | `shop_pk` | int | — | 店铺过滤(内部主键) |
 | `fee_rate` | decimal-str | — | 平台佣金费率页面覆写;缺省固定基线 `0.308`(决策 D10,2026-09-06 实测重定);**v8 语义变化：仅作用于未结算订单 (r̂ × unsettled_sales)，已结算订单费用已含在 SETTLEMENT 不受此影响** |
-| `w_start` | date | — | ISO `yyyy-mm-dd`;提供时销售按 `paid_at`、退款按 `updated_at_source` 裁剪(含当日) |
-| `w_end` | date | — | ISO `yyyy-mm-dd`;与 `w_start` 配对使用;不提供 `w_start`/`w_end` = 销售/退款**全历史累计**(ad 无日期参数,恒整窗累计,§4.5) |
+| `w_start` | date | — | ISO `yyyy-mm-dd`;销售与退款均按关联订单 `COALESCE(paid_at, order_time)` 裁剪；退款跟随原订单归属（含当日） |
+| `w_end` | date | — | ISO `yyyy-mm-dd`;与 `w_start` 配对使用；例如 9 月 1 日订单在 9 月 10 日退款，仍归入 9 月 1 日；不提供窗口 = 销售/退款全历史累计 |
 
 Response envelope:`{items: [...], total, totals, meta}`。
 
@@ -439,7 +439,7 @@ Auth 分类细节:`/v2/analytics/spu-roi` 命中 `_READONLY_EXACT`(readonly),与
 
 | query | type | default | notes |
 | --- | --- | --- | --- |
-| `w_start` / `w_end` | date | — | 销售/退款裁剪窗口（同主表语义：销售按 `COALESCE(paid_at, order_time)`、退款按 `updated_at_source`，含 `w_end` 当日） |
+| `w_start` / `w_end` | date | — | 销售/退款裁剪窗口（同主表语义：均按关联订单 `COALESCE(paid_at, order_time)` 归属，含 `w_end` 当日；退款发生时间不改变所属窗口） |
 
 Response `{spu_pk, spu_id, window, orders[], meta}`。`orders[]` 字段：`order_id, status, qty, line_gmv(USD), paid_at, is_settled(已结 ✓/未结), settled_net_share(SETTLEMENT × 分摊比例，未结 → null), arrived_overseas(38301 命中), full_loss(**v9：完结退货(RETURN_AND_REFUND/REFUND_ONLY，不论物流) ∨ 海外取消(CANCELLED∧38301)**), shipment{status, tracking_number}, tracking[]`（按事件时间排序的 `tracking_events` 子集：`action_code, desc, event_at`）。
 
