@@ -80,7 +80,7 @@ async def evaluate_access(
     if cookie_info is not None:
         try:
             credential = await run_sync(authenticate_hash, cookie_info["kh"])
-        except Exception:
+        except Exception:  # noqa: BLE001 — map auth-store failure to outcome
             return _store_unavailable(mode, needed)
         if credential is not None:
             auth_state = "credential"
@@ -91,7 +91,7 @@ async def evaluate_access(
     if credential is None and attempted_key:
         try:
             credential = await run_sync(authenticate_key, attempted_key)
-        except Exception:
+        except Exception:  # noqa: BLE001 — map auth-store failure to outcome
             return _store_unavailable(mode, needed)
         if credential is not None:
             auth_state = "credential"
