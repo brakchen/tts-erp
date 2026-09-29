@@ -262,7 +262,7 @@ if not rows:
     print("       或窗口内没有带 FEE 分项的已结算交易。详情看 job 日志与")
     print("       integration.sync_jobs 里 job_name='analytics.shop_fee_rate' 那行的 extra。")
 else:
-    print(f"{'shop_id':>22}  {'费率':>9}  {'样本单':>7}  {'覆盖率':>8}  窗口  币种")
+    print(f"{'shop_id':>22}  {'费率':>9}  {'未退款单':>8}  {'占窗口GMV':>9}  窗口  币种")
     for r in rows:
         print(
             f"{r[0]:>22}  {float(r[3]) * 100:8.2f}%  {r[4]:>7}  "
@@ -276,7 +276,7 @@ echo "── 人工验收 ──"
 PORT="${TTS_ERP_PORT:-9877}"
 echo "1. 打开 http://127.0.0.1:${PORT}/v2/pages/spu-roi"
 echo "2. 选一个刚才有实测费率的店铺 → 应出现「店铺实测」徽章的费率状态卡，"
-echo "   并显示样本量 / 覆盖率 / 重算日期"
+echo "   并显示未退款订单数 / 占窗口GMV 比 / 重算日期"
 echo "3. 在「临时覆写费率 %」填数字 → 徽章应变「页面覆写」；清空 → 回到实测/基线"
 echo "4. 若某店显示「全局基线」+ 红色降级提示 → 该店在窗口内暂无已结算订单（或快照已过期），属预期行为"
 echo
