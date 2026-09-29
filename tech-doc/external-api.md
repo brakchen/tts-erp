@@ -330,7 +330,11 @@ separate work items — same proxy + router pattern.
 
 ### Analytics — SPU 实际 ROI (`/v2/analytics/spu-roi`)
 
-**Stability: stable · 只读(readonly)**。按 SPU 一行的「广告消耗 → 有效销售 → 退款 → 净收入 → 货本 → 净利润 → 实际 ROI/保本线」账页数据源;页面 `GET /v2/pages/spu-roi` 消费它。**口径唯一真相** = [`analytics/spu-real-roi-dashboard.md`](analytics/spu-real-roi-dashboard.md) §4/§5(公式 M1–M19) + [`handoff/spu-roi-full-loss-rubric.md`](../handoff/spu-roi-full-loss-rubric.md)(**v9 当前**) + [`biz-doc/analytics/spu-roi-profit-calculation.md`](../biz-doc/analytics/spu-roi-profit-calculation.md);本端点只读计算并序列化,不做任何写。
+**Stability: stable · 只读(readonly)**。按 SPU 一行的「广告消耗 → 有效销售 → 退款 → 净收入 → 货本 → 净利润 → 实际 ROI/保本线」账页数据源;页面 `GET /v2/pages/spu-roi` 消费它。
+
+> **2026-09-29 明确兼容例外（operator-requested breaking currency migration）**：用户要求把现有盈利计算从 USD 全量切换为 CNY，因此本端点在 `/v2` 原字段名不变的前提下，将所有 money 字段的语义原地改为 CNY。部署方确认当前页面是主要消费者并接受该 breaking 变更；其他消费者必须读取 `meta.currency.display`，不能继续假定 USD。ROI/比率字段无量纲，语义不变。
+
+**口径唯一真相** = [`analytics/spu-real-roi-dashboard.md`](analytics/spu-real-roi-dashboard.md) §4/§5(公式 M1–M19) + [`handoff/spu-roi-full-loss-rubric.md`](../handoff/spu-roi-full-loss-rubric.md)(**v9 当前**) + [`biz-doc/analytics/spu-roi-profit-calculation.md`](../biz-doc/analytics/spu-roi-profit-calculation.md);本端点只读计算并序列化,不做任何写。
 
 Query parameters:
 
@@ -359,12 +363,12 @@ Response envelope:`{items: [...], total, totals, meta}`。
 | `shop_id` / `shop_name` | str/int | 店铺维度 | 商品列 |
 | `ad_count` | int | M2: 投放广告数 | — |
 | `ad_orders` | int | M2b: 平台出单量 | — |
-| `spend` | money-str (USD) | M1: 广告消耗 = `Σ real_cost_total` | **主列** |
-| `gmv_ad` | money-str (USD) | M3: 平台归因 GMV | — |
+| `spend` | money-str (CNY) | M1: 广告消耗 = `Σ real_cost_total`（原生 USD，按 `meta.fx` 换算 CNY） | **主列** |
+| `gmv_ad` | money-str (CNY) | M3: 平台归因 GMV（原生 USD，按同一快照换算 CNY） | — |
 | `roi_l0` | ratio-str/null | M4: `gmv_ad / spend`；广告系统实际 ROI 的兼容别名 | — |
 | `ad_system_actual_roi` | ratio-str/null | 广告系统实际 ROI = 广告归因 GMV ÷ 广告实际消耗 | — |
-| `ad_system_max_ad_spend` | money-str (USD) | 最大可承受广告费 = 预计净结算收入 − 同范围采购成本 − 结算外必要成本 | — |
-| `ad_system_remaining_ad_spend_capacity` | money-str (USD) | 最大可承受广告费 − 当前广告实际消耗；可为负 | — |
+| `ad_system_max_ad_spend` | money-str (CNY) | 最大可承受广告费 = 预计净结算收入 − 同范围采购成本 − 结算外必要成本 | — |
+| `ad_system_remaining_ad_spend_capacity` | money-str (CNY) | 最大可承受广告费 − 当前广告实际消耗；可为负 | — |
 | `ad_system_breakeven_roi` | ratio-str/null | 广告归因 GMV ÷ 最大可承受广告费；分母≤0或无归因 GMV 时为 null | 结余带 |
 | `ad_system_breakeven_roi_status` | enum | 当前为 `estimated_known_costs`：结算外必要成本尚未结构化，不能解释为最终保本线 | — |
 | `ad_first_day` / `ad_last_day` | date/null | 广告观测窗口 | — |
@@ -373,8 +377,8 @@ Response envelope:`{items: [...], total, totals, meta}`。
 | **`domestic_cancelled_order_count`** | **int** | **v9 新增：国内取消单量 = CANCELLED ∧ 无 `tracking_events.action_code=38301`（物流未到海外）→ `cancel_rate` 分子** | — |
 | **`overseas_cancelled_order_count`** | **int** | **v9 新增：海外取消单量 = CANCELLED ∧ 38301 → 已入全损件数，不进取消率** | — |
 | `units_sold` | int | M5: 售出件数 | — |
-| `sales` | money-str (USD) | M6: 有效销售金额 = `Σ quantity×unit_price` | **主列**(标记为"有效GMV") |
-| `gmv_sales` | money-str (USD) | M6c: 全单 = sales + 取消原额 | — |
+| `sales` | money-str (CNY) | M6: 有效销售金额 = `Σ quantity×unit_price`（原生 VND，按 `meta.fx` 换算 CNY） | **主列**(标记为"有效GMV") |
+| `gmv_sales` | money-str (CNY) | M6c: 全单 = sales + 取消原额 | — |
 | `cancel_rate` | ratio-str/null | M12b **v9**: 国内取消 ÷(有效+国内取消)；海外取消已入全损不重复计（与 `full_loss_rate` 互斥） | **主列** |
 | `refund_only_qty` / `refund_only_amount` | int/money | M7: 仅退款 | — |
 | `refund_return_qty` / `refund_return_amount` | int/money | M8: 退货退款 | — |
@@ -382,18 +386,18 @@ Response envelope:`{items: [...], total, totals, meta}`。
 | `refund_rate` | ratio-str/null | M12: 净额 ÷ sales | — |
 | `refund_rate_qty` | ratio-str/null | M12c: 单量口径 | — |
 | `refund_cancelled_qty` / `refund_cancelled_amount` / `refund_cancelled_missing_lines` | int/money/int | M9: 已付被取消信息列 | — |
-| **`net_revenue`** | **money-str (USD)** | **v8 新增：DUAL-LAYER = `Σ SETTLEMENT 分摊` + `Σ 未结 line_gmv × (1−r̂) × (1−refund_rate_spu)`；是 `net_profit` 的输入** | 下钻·结算 tab |
-| **`settled_sales`** | **money-str (USD)** | **v8 新增：`SUM line_gmv WHERE settlement_vnd IS NOT NULL`** | 下钻·结算 tab |
-| **`unsettled_sales`** | **money-str (USD)** | **v8 新增：`SUM line_gmv WHERE settlement_vnd IS NULL`** | 下钻·结算 tab |
+| **`net_revenue`** | **money-str (CNY)** | **v8 新增：DUAL-LAYER = `Σ SETTLEMENT 分摊` + `Σ 未结 line_gmv × (1−r̂) × (1−refund_rate_spu)`；是 `net_profit` 的输入** | 下钻·结算 tab |
+| **`settled_sales`** | **money-str (CNY)** | **v8 新增：`SUM line_gmv WHERE settlement_vnd IS NOT NULL`** | 下钻·结算 tab |
+| **`unsettled_sales`** | **money-str (CNY)** | **v8 新增：`SUM line_gmv WHERE settlement_vnd IS NULL`** | 下钻·结算 tab |
 | **`settled_order_count`** | **int** | **v8 新增：已结算订单数** | 下钻·结算 tab |
 | **`full_loss_qty`** | **int** | **v9（2026-09-13 落地）：完结退货(RETURN_AND_REFUND/REFUND_ONLY，不论物流，限已付白名单订单) + 海外取消(CANCELLED∧38301) 件数** | 下钻·结算 tab |
 | **`full_loss_cancelled_qty`** | **int** | **v9：其中海外取消件数（COGS 补扣基数；退货件已含在 units_sold 里不重复补扣）** | 下钻·结算 tab |
 | **`full_loss_rate`** | **ratio-str/null** | **v9(D8 主列)：`full_loss_qty ÷ (units_sold + full_loss_cancelled_qty)`；分母 0 → null；不钳位（>100% 标识数据异常）** | **主列**(标记为"全损退款率%") |
-| `return_loss` | money-str (USD) | **M13b v9** = `full_loss_qty × unit_cost_used` | — |
-| `unit_cost_used` | money-str (USD) | 单位成本 = `unit_cost × fx_cny_usd` | — |
+| `return_loss` | money-str (CNY) | **M13b v9** = `full_loss_qty × unit_cost_used` | — |
+| `unit_cost_used` | money-str (CNY) | 单位成本直接使用采购成本链解析出的 CNY 值 | — |
 | `cost_source` | enum | **v8 扩为四值**：`MANUAL`(人工标注的采购成交价) \| `PURCHASE`(妙手采购单成交价) \| `SOURCE_PRICE`(1688 货源价) \| `DEFAULT_K1`(40 CNY/件) | — |
-| `net_profit` | money-str (USD) | **M18 v8** = `net_revenue − (units_sold + full_loss_cancelled_qty) × unit_cost − spend`（**不**扣 platform_fee：已结费用含 SETTLEMENT，未结按 (1−r̂) 折算） | **主列** |
-| `platform_fee` | money-str (USD) | **M19 v8** = `r̂ × unsettled_sales`（**信息列，不**进 M18） | — |
+| `net_profit` | money-str (CNY) | **M18 v8** = `net_revenue − (units_sold + full_loss_cancelled_qty) × unit_cost − spend`（**不**扣 platform_fee：已结费用含 SETTLEMENT，未结按 (1−r̂) 折算） | **主列** |
+| `platform_fee` | money-str (CNY) | **M19 v8** = `r̂ × unsettled_sales`（**信息列，不**进 M18） | — |
 | `roi_real` | ratio-str/null | **M14 v8** = `(net_revenue − return_loss) / spend` | 下钻·利润构成 |
 | `roi_breakeven` | ratio-str/null | **M17 v8** = `NC′ ÷ (NC′ − COGS_kept)`（fee_est 项移除） | 下钻·利润构成 |
 | `cpa` | money-str/null | M15: `spend / ad_orders` | — |
@@ -416,7 +420,7 @@ Response envelope:`{items: [...], total, totals, meta}`。
 > - 新增 6 字段：`net_revenue / settled_sales / unsettled_sales / settled_order_count / full_loss_qty / full_loss_cancelled_qty / full_loss_rate`
 > - 主列（D8）从 13 列精简为 6 列：商品 + `spend` + `sales` + `order_count` + `cancel_rate` + `full_loss_rate` + `net_profit`；其余 26 字段继续在 JSON 返回，由下钻面板消费
 
-格式化约定(§5.1):**money = 4 位小数字符串**、比率/ROI = 2 位小数字符串、件数/单量整数;`null` = 无解/除数为 0(页面显示 `—`);无投放 SPU `spend="0.0000"` + `ad_count=0`。全表金额统一 USD(原币 VND/CNY 服务端按 fx 快照一次换算,`meta.fx` 标注)。`totals` = 跨分页、当前筛选的加总:`row_count`(SPU 数)、单量(`order_count` 有效单 / `cancelled_order_count` 取消单 / `total_orders` = 两者之和,跨可见 SPU 全局去重)、`gmv`(全部订单销售额 = 白名单有效 ∪ 取消订单的原始行金额;money-str)与 `spend, sales, refund_net_amount, return_loss, net_profit`(行级 USD 服务端加总,4 位小数字符串)、`roi_real`(Σ(net_revenue−return_loss)/Σspend,Σspend=0 → null);`total` = 匹配行数。**口径注(2026-09-06 全链状态口径,COD 店)**:行级 `sales`/单量/`gmv` 全部按**订单状态**下单即算——白名单状态订单(含 COD 在途/待收款)计入 `sales` 与有效单量;取消订单只进 `gmv`/`cancelled_order_count`,不重复入 sales;净利润/退款率/ROI 等派生金额自动跟随状态口径 sales(回款前偏乐观)。窗口裁剪列 = `COALESCE(paid_at, order_time)`(已收款按收款日；COD 在途/取消未收款按下单日)。**主表行内列集(v8 D8 主表精简,v9 口径)**:**主列 = 商品 + 消耗USD/有效GMV(`sales`)/有效出单量(`order_count`)/取消率(`cancel_rate`)/全损退款率%(`full_loss_rate`)/净利润**;其余 28 字段（ROI/保本/平台佣金/全损货损金额/已结未结 GMV/退款拆分/广告归因/订单结构）由行内 accordion 钻取面板五 tab 顶部汇总区展示（详见下节）。`meta` 携带 fx/fee/cost_assumption/window/**`rubric_version`(v8 新增,当前值 v9)**:/"unattributed_refund_lines/computed_at/currency;`meta.window` 为 ad 视图观测窗口(供参考),销售/退款是否裁剪见 `note`。
+格式化约定(§5.1):**money = 4 位小数字符串（CNY）**、比率/ROI = 2 位小数字符串、件数/单量整数;`null` = 无解/除数为 0(页面显示 `—`);无投放 SPU `spend="0.0000"` + `ad_count=0`。广告原生 USD、销售/退款原生 VND 在公式入口按同一 fx 快照换算 CNY，采购成本保持 CNY；`meta.currency.display="CNY"`，`meta.fx` 同时标注 `usd_vnd/cny_usd/usd_cny/cny_vnd/vnd_cny`（键名均为 from→to；`cny_vnd` 是 1 CNY 对应 VND，`vnd_cny` 是 1 VND 对应 CNY）。`totals` = 跨分页、当前筛选的加总:`row_count`(SPU 数)、单量(`order_count` 有效单 / `cancelled_order_count` 取消单 / `total_orders` = 两者之和,跨可见 SPU 全局去重)、`gmv`(全部订单销售额 = 白名单有效 ∪ 取消订单的原始行金额;money-str)与 `spend, sales, refund_net_amount, return_loss, net_profit`(行级 CNY 服务端加总,4 位小数字符串)、`roi_real`(Σ(net_revenue−return_loss)/Σspend,Σspend=0 → null);`total` = 匹配行数。**口径注(2026-09-06 全链状态口径,COD 店)**:行级 `sales`/单量/`gmv` 全部按**订单状态**下单即算——白名单状态订单(含 COD 在途/待收款)计入 `sales` 与有效单量;取消订单只进 `gmv`/`cancelled_order_count`,不重复入 sales;净利润/退款率/ROI 等派生金额自动跟随状态口径 sales(回款前偏乐观)。窗口裁剪列 = `COALESCE(paid_at, order_time)`(已收款按收款日；COD 在途/取消未收款按下单日)。**主表行内列集(v8 D8 主表精简,v9 口径)**:**主列 = 商品 + 消耗CNY/有效GMV(`sales`)/有效出单量(`order_count`)/取消率(`cancel_rate`)/全损退款率%(`full_loss_rate`)/净利润**;其余 28 字段（ROI/保本/平台佣金/全损货损金额/已结未结 GMV/退款拆分/广告归因/订单结构）由行内 accordion 钻取面板五 tab 顶部汇总区展示（详见下节）。`meta` 携带 fx/fee/cost_assumption/window/**`rubric_version`(v8 新增,当前值 v9)**:/"unattributed_refund_lines/computed_at/currency;`meta.window` 为 ad 视图观测窗口(供参考),销售/退款是否裁剪见 `note`。
 
 **v9 默认值总览**：
 
@@ -448,9 +452,9 @@ Auth 分类细节:`/v2/analytics/spu-roi` 命中 `_READONLY_EXACT`(readonly),与
 | --- | --- | --- | --- |
 | `w_start` / `w_end` | date | — | 销售/退款裁剪窗口（同主表语义：均按关联订单 `COALESCE(paid_at, order_time)` 归属，含 `w_end` 当日；退款发生时间不改变所属窗口） |
 
-Response `{spu_pk, spu_id, window, orders[], meta}`。`orders[]` 字段：`order_id, status, qty, line_gmv(USD), paid_at, is_settled(已结 ✓/未结), settled_net_share(SETTLEMENT × 分摊比例，未结 → null), arrived_overseas(38301 命中), full_loss(**v9：完结退货(RETURN_AND_REFUND/REFUND_ONLY，不论物流) ∨ 海外取消(CANCELLED∧38301)**), shipment{status, tracking_number}, tracking[]`（按事件时间排序的 `tracking_events` 子集：`action_code, desc, event_at`）。
+Response `{spu_pk, spu_id, window, orders[], meta}`。`orders[]` 字段：`order_id, status, qty, line_gmv(CNY), paid_at, is_settled(已结 ✓/未结), settled_net_share(SETTLEMENT × 分摊比例，CNY；未结 → null), arrived_overseas(38301 命中), full_loss(**v9：完结退货(RETURN_AND_REFUND/REFUND_ONLY，不论物流) ∨ 海外取消(CANCELLED∧38301)**), shipment{status, tracking_number}, tracking[]`（按事件时间排序的 `tracking_events` 子集：`action_code, desc, event_at`）。
 
-防呆：`orders` 上限 500 条；超限返回 `{meta.orders_truncated: true}`。404：spu_pk 不存在。金额与主表同序列化（money 4 位、USD）。
+防呆：`orders` 上限 500 条；超限返回 `{meta.orders_truncated: true}`。404：spu_pk 不存在。金额与主表同序列化（money 4 位、CNY），`meta.currency.display="CNY"`。
 
 #### `GET /v2/analytics/spu-roi/{spu_pk}/settlements`
 
@@ -460,7 +464,7 @@ Response `{spu_pk, spu_id, window, orders[], meta}`。`orders[]` 字段：`order
 | --- | --- | --- | --- |
 | `w_start` / `w_end` | date | — | 同 orders |
 
-Response `{spu_pk, settlements[], meta}`。`settlements[]` 每条 = 一笔已结订单：`order_id, statement_time, share_ratio(该 SPU 行占整单 GMV 比例), components[]`。`components[]` = 完整 53 字段（v8 D2 零值落库后含 0 行），每条 `{code(如 SETTLEMENT/GROSS_SALES/PLATFORM_COMMISSION…), amount_vnd(VND 原值), amount(USD 换算)}`。
+Response `{spu_pk, settlements[], meta}`。`settlements[]` 每条 = 一笔已结订单：`order_id, statement_time, share_ratio(该 SPU 行占整单 GMV 比例), components[]`。`components[]` = 完整 53 字段（v8 D2 零值落库后含 0 行），每条 `{code(如 SETTLEMENT/GROSS_SALES/PLATFORM_COMMISSION…), amount_vnd(VND 原值), amount(CNY 换算)}`。
 
 未结算订单 **不**进 `settlements[]`（tab 底部由行字段 `settled_order_count / unsettled_sales` 计算一行汇总："未结算 N 单，估算净收入 $X（基线 r̂ × (1−退款率)）"）。
 
@@ -478,13 +482,13 @@ Response `{spu_pk, cases[], meta}`。`cases[]` 每条 = `case_id, order_id(可�
 
 广告 tab 数据源（**无窗口参数**——广告全窗口累计，与主表一致）。
 
-Response `{spu_pk, ads[], meta}`。`ads[]` 每条 = `campaign_id, spend(USD), orders, first_day, last_day`（`plugin.ad_daily` ∪ `plugin.ad_today` 聚合（`spu_roi.py::_SQL_ROI_AD` 直读））。**不含 `campaign_name`**——v8 拍板不追（同步数据无名称字段）。
+Response `{spu_pk, ads[], meta}`。`ads[]` 每条 = `campaign_id, spend(CNY；源数据 USD), orders, first_day, last_day`（`plugin.ad_daily` ∪ `plugin.ad_today` 聚合（`spu_roi.py::_SQL_ROI_AD` 直读））。**不含 `campaign_name`**——v8 拍板不追（同步数据无名称字段）。
 
 #### 4 端点共享约定
 
 - 鉴权：`_READONLY_EXACT`（readonly 角色矩阵沿用主表）
 - 404：`spu_pk` 不存在
-- 金额：money 4 位小数字符串（USD，原币字段同时给 VND）；比率 2 位
+- 金额：money 4 位小数字符串（CNY，结算组件同时保留 `amount_vnd` 原值）；比率 2 位
 - 窗口：`w_start/w_end` 与主表同语义；`tracking / settlement / cases` 随订单走，不单独裁剪；`ads` 无窗口
 - 缓存：前端按 `(spu_pk, tab, 窗口)` 缓存；主表筛选变化 → 清缓存
 - 错误：参数非法 → 422；未授权 → 401/403（沿用 auth middleware 矩阵）
@@ -959,6 +963,7 @@ The full key is shown ONCE on creation. Store it securely.
   response field is backwards-compatible; removing/renaming/changing the
   meaning of a field is a breaking change and requires a new version
   prefix.
+- **Documented exception:** `/v2/analytics/spu-roi` received an explicit operator-approved in-place currency migration on 2026-09-29: existing money fields changed from USD to CNY and now declare `meta.currency.display="CNY"`. This is the only current exception; new breaking changes still require a new version prefix.
 - `/v2/analytics/sync/*` keeps its own envelope for the deployed Chrome
   extension（success `{code, requestId, data}` / error
   `{code, message, requestId, retryable}`，与 `/v2` 其余端点的裸 JSON 不同）——

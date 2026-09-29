@@ -7,12 +7,13 @@ enums.  The legacy ``/v2/analytics/spu-roi`` adapter owns wire formatting.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Mapping, cast
+from typing import cast
 
 
 class ProfitabilityError(RuntimeError):
@@ -121,6 +122,7 @@ class EvidenceRequest:
 @dataclass(frozen=True, slots=True)
 class FxBasis:
     snapshot_id: int
+    usd_cny: Decimal
     cny_usd: Decimal
     usd_vnd: Decimal
     as_of: datetime
@@ -138,6 +140,7 @@ class ProfitabilityBasis:
     ad_first_day: date | None
     ad_last_day: date | None
     unattributed_refund_lines: int
+    display_currency: str = "CNY"
     warnings: tuple[str, ...] = ()
 
 

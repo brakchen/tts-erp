@@ -18,9 +18,7 @@
 ## 0. 通用规则
 - 在售 SPU = `commerce.products_spu.status='ACTIVATE'`；**剔除 spu_id LIKE 'TEST\_%'**（哨兵测试数据）。
 - 时间一律 aware UTC；统计日界按店铺当地时区（当前越南 = UTC+7，即 paid_at − 7h 取 date）。
-- 金额底层按原币算（订单 VND / 成本 CNY / 广告 USD），**输出统一 USD**：
-  CNY→USD = 0.1477（常量，实际以 _resolve_fx_rates 当期缓存 ~0.1485 为准，全程用同一个值）；
-  USD→VND = 26,330。
+- 金额原始输入分别为订单 VND / 成本 CNY / 广告 USD；必须从同一数据库 USD 基准汇率快照取得 `rates[VND]` 与精确 `rates[CNY]`，按 `USD × rates[CNY]`、`VND ÷ (rates[VND]/rates[CNY])` 在公式入口统一换算为 **CNY** 后计算和输出。禁止硬编码汇率或通过舍入倒数恢复 CNY rate；汇率不可用时失败关闭。
 - 件数/单数不混：`_订单数` 用 count(DISTINCT order)；`_件数` 用 Σ line quantity。
 - 样本 <10 单的 SPU，比率标注"样本小"不作强结论。
 
@@ -50,17 +48,17 @@
 
 ## 3. 成本输入
 - 采购成本 CNY/件：读 `procurement.manual_product_costs WHERE valid_to IS NULL`
-  （cost_source=人工标注价格）；未录入默认 30 CNY/件（默认兜底价格，行标 ⚠）。
-- 广告成本：以用户给定总广告花费为准（USD）；ERP 归因 spend 仅作对照。
+  （cost_source=人工标注价格）；未录入默认 40 CNY/件（默认兜底价格，行标 ⚠）。
+- 广告成本：原生 USD，以用户给定总广告花费为准；进入公式后按同一快照换算为 CNY。ERP 归因 spend 仅作对照。
 - 平台费基线 fee_rate = 30.8%（FEE_RATE_BASELINE，2026-09-06 实测重定，可覆写）。
 
-## 4. ROI / 保本（ERP 财务口径，全 USD，来自 /v2/analytics/spu-roi 同源公式）
+## 4. ROI / 保本（ERP 财务口径，全 CNY，来自 /v2/analytics/spu-roi 同源公式）
 - sales = Σ paid 订单行金额（毛额，含之后被退款的原额）；refund_net = Σ 已完结
   REFUND_ONLY + RETURN_AND_REFUND case 行退款（订单∈有效销售）。
 - net_cash = sales − refund_net                       # M13 内部量
-- return_loss = RAR 已完结件数 × unit_cost_USD       # M13b（只算 RAR，不含到海外取消）
-- NC′ = net_cash − return_loss
-- COGS_all = 有效销售件数 × unit_cost_USD（含退回件，勿重复扣）；COGS_kept = (件数−RAR件)×unit_cost
+- return_loss = RAR 已完结件数 × unit_cost_CNY       # M13b（只算 RAR，不含到海外取消）
+- NC′ = net_cash_CNY − return_loss
+- COGS_all = 有效销售件数 × unit_cost_CNY（含退回件，勿重复扣）；COGS_kept = (件数−RAR件)×unit_cost_CNY
 - fee_est = sales × fee_rate
 - 净利润 M18 = net_cash − COGS_all − 广告费 − fee_est
 - 实际 ROI M14 = NC′ ÷ 广告费
@@ -82,10 +80,10 @@
 - 当前 ERP 接口因结算外必要成本尚未结构化，返回 `estimated_known_costs` 和 warning；页面用 `≈` 标记“已知成本下限估算”，不得冒充最终保本线。
 
 ## 6. 输出主表（每 SPU 一行）
-SPU | 采购成本 CNY/件 | 广告实际消耗 USD | 广告归因GMV USD | 广告系统实际ROI |
-预计净结算收入 USD | 同范围采购成本 USD | 结算外必要成本 USD | 最大可承受广告费 USD |
-广告系统理论保本ROI | 建议最低安全ROI | 剩余广告费承受空间 USD |
-总订单数 | 取消率 | 退款率 | 全损率 | 当前净利润 USD | 口径/假设/风险
+SPU | 采购成本 CNY/件 | 广告实际消耗 CNY | 广告归因GMV CNY | 广告系统实际ROI |
+预计净结算收入 CNY | 同范围采购成本 CNY | 结算外必要成本 CNY | 最大可承受广告费 CNY |
+广告系统理论保本ROI | 建议最低安全ROI | 剩余广告费承受空间 CNY |
+总订单数 | 取消率 | 退款率 | 全损率 | 当前净利润 CNY | 口径/假设/风险
 附：广告分子、广告消耗、结算、订单与采购必须同窗或可对齐；赠金单列，不混入实际消耗。
 
 ## 7. 收尾校验清单
@@ -105,7 +103,7 @@ SPU | 采购成本 CNY/件 | 广告实际消耗 USD | 广告归因GMV USD | 广�
 
 - **spu-real-roi-dashboard.md**：M13/M13b/M14/M17/M18/M19 的完整定义与决策记录（本 prompt §4 是其摘要）；
 - **external-api.md**：`GET /v2/analytics/spu-roi` 的活契约与 sort 字段（roi_breakeven 等）；
-- 汇率/费率等可配置常量以 `.env` / `db/constants.py` / `_resolve_fx_rates` 当期值为准。
+- 汇率取数据库最新可用快照，以 `spu_profitability._resolve_fx_basis` 当期值为准；费率以领域配置/页面覆写为准。
 
 ## 已知坑（反复踩过）
 

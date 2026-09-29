@@ -160,6 +160,9 @@ def _meta_payload(result, scope: ProfitScope, fee_rate: Decimal | None) -> dict[
         "fx": {
             "usd_vnd": _fmt(basis.fx.usd_vnd, _MONEY_Q),
             "cny_usd": _fmt(basis.fx.cny_usd, _MONEY_Q),
+            "usd_cny": format(basis.fx.usd_cny, "f"),
+            "cny_vnd": format(basis.fx.usd_vnd / basis.fx.usd_cny, "f"),
+            "vnd_cny": format(basis.fx.usd_cny / basis.fx.usd_vnd, "f"),
             "as_of": basis.fx.as_of.date().isoformat(),
             "snapshot_id": basis.fx.snapshot_id,
             "source": "fx-cache",
@@ -191,7 +194,7 @@ def _meta_payload(result, scope: ProfitScope, fee_rate: Decimal | None) -> dict[
         "computed_at": basis.calculated_at.isoformat(),
         "rubric_version": basis.rubric_version,
         "currency": {
-            "display": "USD",
+            "display": basis.display_currency,
             "native": {"ad": "USD", "sales_refund": "VND", "cost": "CNY"},
         },
         "ad_system_roi": {
@@ -318,6 +321,10 @@ def _evidence_payload(explanation, kind: EvidenceKind, scope: ProfitScope) -> di
         "meta": {
             "rubric_version": explanation.basis.rubric_version,
             "computed_at": explanation.basis.calculated_at.isoformat(),
+            "currency": {
+                "display": explanation.basis.display_currency,
+                "native": {"ad": "USD", "sales_refund": "VND", "cost": "CNY"},
+            },
         },
     }
     if kind is EvidenceKind.ORDERS:

@@ -43,8 +43,12 @@
 - 当前数据库尚未结构化录入退货运费、采购退款失败、提现费、汇兑损失、包装耗材等结算外必要成本。接口返回 `estimated_known_costs` 状态和 `ad_system_other_necessary_costs_not_modeled` warning；前端用 `≈` 标记已知成本下限估算，不得冒充最终保本线。
 - HTTP 同时返回 `ad_system_actual_roi`、`ad_system_max_ad_spend`、`ad_system_remaining_ad_spend_capacity` 与 `ad_system_breakeven_roi`，并在 `meta.ad_system_roi` 说明公式、范围和缺失成本。
 
-## 5. 汇率缺失契约
+## 5. CNY 金额与汇率契约
 
+- v10 的所有金额领域值、HTTP `items/totals` 金额和盈利证据金额统一为人民币 CNY；`ProfitabilityBasis.display_currency` 与 `meta.currency.display` 固定为 `CNY`。
+- 广告消耗与广告归因 GMV 原生 USD，按 `USD × rates[CNY]` 换算 CNY；销售、退款、结算原生 VND，按 `VND ÷ (rates[VND] / rates[CNY])` 换算 CNY；采购成本原生 CNY，不再先换成 USD。`FxBasis` 必须保留快照的精确 `usd_cny`，不得通过已量化的倒数恢复。
+- 同一个结果中的所有换算必须使用同一个数据库汇率快照；前端只加 `¥` 和格式化，不得二次换汇。
+- ROI、退款率等无量纲比例不因展示币种改变；广告系统实际 ROI 可直接使用同源 USD 分子/分母计算以避免 Decimal 换算尾差。
 - v10 只能使用数据库中的汇率快照。
 - 禁止使用编译期固定汇率或无来源兜底汇率。
 - 数据库中没有可用汇率快照时，整个盈利结果不可计算，不返回部分 `items` 或 `totals`。

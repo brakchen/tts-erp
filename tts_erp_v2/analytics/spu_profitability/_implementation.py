@@ -652,6 +652,7 @@ def _resolve_fx_basis(sess: Session) -> FxBasis:
     )
     return FxBasis(
         snapshot_id=rm.snapshot_id,
+        usd_cny=cny_rate,
         cny_usd=cny_usd,
         usd_vnd=vnd_rate,
         as_of=rm.upstream_last_update,
@@ -659,8 +660,9 @@ def _resolve_fx_basis(sess: Session) -> FxBasis:
 
 
 def _resolve_conversion_rates(sess: Session) -> tuple[Decimal, Decimal]:
+    """Return exact USD→CNY and VND-per-CNY rates from one snapshot."""
     basis = _resolve_fx_basis(sess)
-    return basis.cny_usd, basis.usd_vnd
+    return basis.usd_cny, basis.usd_vnd / basis.usd_cny
 
 
 def _row_int(value: Any) -> int:
@@ -773,7 +775,7 @@ def _query_spu_roi(
 ) -> ProfitabilityOverview:
     rate = fee_rate if fee_rate is not None else FEE_RATE_BASELINE
     fx_basis = _resolve_fx_basis(sess)
-    fx_cny_usd = fx_basis.cny_usd
+    fx_usd_cny = fx_basis.usd_cny
     fx_usd_vnd = fx_basis.usd_vnd
     ws_dt, we_dt = _window_dates(w_start, w_end)
     paid_statuses = list(PAID_SALES_ORDER_STATUSES)
@@ -879,7 +881,7 @@ def _query_spu_roi(
 
     plain: list[dict] = []
     total_spend = Decimal(0)
-    total_net_revenue_usd = Decimal(0)
+    total_net_revenue_cny = Decimal(0)
     total_return_loss = Decimal(0)
 
     for cat in cats:
@@ -895,8 +897,8 @@ def _query_spu_roi(
         ):
             continue
 
-        spend = Decimal(ad["spend"]) if ad else Decimal(0)
-        gmv_ad = Decimal(ad["gmv_ad"]) if ad else Decimal(0)
+        spend_usd = Decimal(ad["spend"]) if ad else Decimal(0)
+        gmv_ad_usd = Decimal(ad["gmv_ad"]) if ad else Decimal(0)
         ad_orders = _row_int(ad["ad_orders"]) if ad else 0
         ad_count = _row_int(ad["ad_count"]) if ad else 0
         ad_first_day = ad["ad_first_day"] if ad else None
@@ -950,8 +952,8 @@ def _query_spu_roi(
         unit_cost_cny, cost_source = cost_map.get(pk, (K1_DEFAULT_CNY, "DEFAULT_K1"))
         formula = calculate(
             FormulaInput(
-                spend_usd=spend,
-                ad_gmv_usd=gmv_ad,
+                spend_usd=spend_usd,
+                ad_gmv_usd=gmv_ad_usd,
                 ad_orders=ad_orders,
                 order_count=order_count,
                 cancelled_orders=cancelled_orders,
@@ -972,42 +974,44 @@ def _query_spu_roi(
                 refund_cancelled_vnd=refund_cancelled_vnd,
                 cancelled_sales_vnd=cancelled_sales_vnd,
                 unit_cost_cny=unit_cost_cny,
-                cny_usd=fx_cny_usd,
+                usd_cny=fx_usd_cny,
                 usd_vnd=fx_usd_vnd,
                 unsettled_fee_rate=rate,
             )
         )
-        unit_cost_usd = formula.unit_cost_usd
-        sales_usd = formula.sales_usd
-        effective_sales_usd = formula.effective_sales_usd
-        settled_net_usd = formula.settled_net_usd
-        settled_sales_usd = formula.settled_sales_usd
-        unsettled_sales_usd = formula.unsettled_sales_usd
-        refund_only_usd = formula.refund_only_usd
-        refund_return_usd = formula.refund_return_usd
-        refund_net_usd = formula.refund_net_usd
-        refund_cancelled_usd = formula.refund_cancelled_usd
-        net_revenue_usd = formula.net_revenue_usd
-        platform_fee_usd = formula.platform_fee_usd
-        return_loss_usd = formula.return_loss_usd
-        net_profit_usd = formula.net_profit_usd
-        roi_real_usd = formula.roi_real
-        roi_breakeven_usd = formula.roi_breakeven
+        spend_cny = formula.spend_cny
+        gmv_ad_cny = formula.ad_gmv_cny
+        unit_cost_cny = formula.unit_cost_cny
+        sales_cny = formula.sales_cny
+        effective_sales_cny = formula.effective_sales_cny
+        settled_net_cny = formula.settled_net_cny
+        settled_sales_cny = formula.settled_sales_cny
+        unsettled_sales_cny = formula.unsettled_sales_cny
+        refund_only_cny = formula.refund_only_cny
+        refund_return_cny = formula.refund_return_cny
+        refund_net_cny = formula.refund_net_cny
+        refund_cancelled_cny = formula.refund_cancelled_cny
+        net_revenue_cny = formula.net_revenue_cny
+        platform_fee_cny = formula.platform_fee_cny
+        return_loss_cny = formula.return_loss_cny
+        net_profit_cny = formula.net_profit_cny
+        roi_real = formula.roi_real
+        roi_breakeven = formula.roi_breakeven
         ad_system_actual_roi = formula.ad_system_actual_roi
         ad_system_breakeven_roi = formula.ad_system_breakeven_roi
-        ad_system_max_ad_spend = formula.ad_system_max_ad_spend_usd
+        ad_system_max_ad_spend = formula.ad_system_max_ad_spend_cny
         ad_system_remaining_ad_spend_capacity = (
-            formula.ad_system_remaining_ad_spend_capacity_usd
+            formula.ad_system_remaining_ad_spend_capacity_cny
         )
-        cpa_usd = formula.cpa_usd
-        roi_l0_usd = formula.roi_l0
-        refund_rate_usd = formula.refund_rate
+        cpa_cny = formula.cpa_cny
+        roi_l0 = formula.roi_l0
+        refund_rate = formula.refund_rate
         refund_amount_rate = formula.refund_amount_rate
-        gmv_sales_usd = formula.gmv_sales_usd
+        gmv_sales_cny = formula.gmv_sales_cny
         full_loss_rate = formula.full_loss_rate
         full_loss_qty_rate = formula.full_loss_qty_rate
-        cancel_rate_usd = formula.cancel_rate
-        refund_rate_qty_usd = formula.refund_rate_qty
+        cancel_rate = formula.cancel_rate
+        refund_rate_qty = formula.refund_rate_qty
 
         plain.append(
             {
@@ -1020,9 +1024,9 @@ def _query_spu_roi(
                 "shop_name": cat["shop_name"],
                 "ad_count": ad_count,
                 "ad_orders": ad_orders,
-                "spend": spend,
-                "gmv_ad": gmv_ad,
-                "roi_l0": roi_l0_usd,
+                "spend": spend_cny,
+                "gmv_ad": gmv_ad_cny,
+                "roi_l0": roi_l0,
                 "ad_first_day": ad_first_day,
                 "ad_last_day": ad_last_day,
                 "order_count": order_count,
@@ -1034,39 +1038,39 @@ def _query_spu_roi(
                 "domestic_cancelled_order_count": domestic_cancelled_orders,
                 "overseas_cancelled_order_count": overseas_cancelled_orders,
                 "units_sold": units_sold,
-                "sales": sales_usd,
-                "effective_sales": effective_sales_usd,
-                "gmv_sales": gmv_sales_usd,
-                "cancel_rate": cancel_rate_usd,
-                "refund_rate_qty": refund_rate_qty_usd,
+                "sales": sales_cny,
+                "effective_sales": effective_sales_cny,
+                "gmv_sales": gmv_sales_cny,
+                "cancel_rate": cancel_rate,
+                "refund_rate_qty": refund_rate_qty,
                 "refund_only_qty": refund_only_qty,
-                "refund_only_amount": refund_only_usd,
+                "refund_only_amount": refund_only_cny,
                 "refund_return_qty": refund_return_qty,
-                "refund_return_amount": refund_return_usd,
+                "refund_return_amount": refund_return_cny,
                 "refund_net_qty": refund_only_qty + refund_return_qty,
-                "refund_net_amount": refund_net_usd,
-                "refund_rate": refund_rate_usd,
+                "refund_net_amount": refund_net_cny,
+                "refund_rate": refund_rate,
                 "refund_amount_rate": refund_amount_rate,
                 "refund_cancelled_qty": refund_cancelled_qty,
-                "refund_cancelled_amount": refund_cancelled_usd,
+                "refund_cancelled_amount": refund_cancelled_cny,
                 "refund_cancelled_missing_lines": refund_cancelled_missing,
-                "return_loss": return_loss_usd,
-                "net_profit": net_profit_usd,
-                "platform_fee": platform_fee_usd,
-                "roi_real": roi_real_usd,
-                "roi_breakeven": roi_breakeven_usd,
-                "cpa": cpa_usd,
-                "unit_cost_used": unit_cost_usd,
+                "return_loss": return_loss_cny,
+                "net_profit": net_profit_cny,
+                "platform_fee": platform_fee_cny,
+                "roi_real": roi_real,
+                "roi_breakeven": roi_breakeven,
+                "cpa": cpa_cny,
+                "unit_cost_used": unit_cost_cny,
                 "cost_source": cost_source,
                 # v7 新增字段（§4）
-                "net_revenue": net_revenue_usd,
-                "settled_net": settled_net_usd,
-                "unsettled_net": formula.unsettled_net_usd,
-                "settled_sales": settled_sales_usd,
-                "unsettled_sales": unsettled_sales_usd,
-                "cogs_sold": formula.cogs_sold_usd,
-                "cogs_full_loss_cancelled": formula.cogs_full_loss_cancelled_usd,
-                "cogs_total": formula.cogs_all_usd,
+                "net_revenue": net_revenue_cny,
+                "settled_net": settled_net_cny,
+                "unsettled_net": formula.unsettled_net_cny,
+                "settled_sales": settled_sales_cny,
+                "unsettled_sales": unsettled_sales_cny,
+                "cogs_sold": formula.cogs_sold_cny,
+                "cogs_full_loss_cancelled": formula.cogs_full_loss_cancelled_cny,
+                "cogs_total": formula.cogs_all_cny,
                 "settled_order_count": settled_order_count,
                 "full_loss_qty": full_loss_qty,
                 "full_loss_cancelled_qty": flc_qty,
@@ -1083,9 +1087,9 @@ def _query_spu_roi(
                 ),
             }
         )
-        total_spend += spend
-        total_net_revenue_usd += net_revenue_usd
-        total_return_loss += return_loss_usd
+        total_spend += spend_cny
+        total_net_revenue_cny += net_revenue_cny
+        total_return_loss += return_loss_cny
 
     # 盈利大盘按完整 scope 计算；搜索只改变明细行，不改变 totals。
     scope_plain = plain
@@ -1109,7 +1113,7 @@ def _query_spu_roi(
 
     plain.sort(key=_key)
 
-    # totals（§3.3：跨分页/当前筛选；行级 USD 服务端加总）
+    # totals（§3.3：跨分页/当前筛选；行级 CNY 服务端加总）
     money_total: dict[str, Decimal] = {
         "spend": sum((r["spend"] for r in scope_plain), Decimal(0)),
         "sales": sum((r["sales"] for r in scope_plain), Decimal(0)),
@@ -1125,10 +1129,10 @@ def _query_spu_roi(
         "net_revenue": sum((r["net_revenue"] for r in scope_plain), Decimal(0)),
         "cogs_total": sum((r["cogs_total"] for r in scope_plain), Decimal(0)),
     }
-    # 整体实际 ROI = ΣNC′ / Σspend（全 USD）。领域层保留 Decimal。
+    # 整体实际 ROI = ΣNC′ / Σspend（全 CNY）。领域层保留 Decimal。
     overall_roi: Decimal | None = None
     if total_spend != 0:
-        overall_nc_prime = total_net_revenue_usd - total_return_loss
+        overall_nc_prime = total_net_revenue_cny - total_return_loss
         overall_roi = overall_nc_prime / total_spend
 
     ad_system_actual_roi: Decimal | None = None
@@ -1174,7 +1178,8 @@ def _query_spu_roi(
     total_overseas_cancelled = (
         _row_int(scope_row["overseas_cancelled_order_count"]) if scope_row else 0
     )
-    gmv_total = Decimal(scope_row["gmv"]) / fx_usd_vnd if scope_row else Decimal(0)
+    vnd_per_cny = fx_usd_vnd / fx_usd_cny
+    gmv_total = Decimal(scope_row["gmv"]) / vnd_per_cny if scope_row else Decimal(0)
 
     # 全局退款订单数（distinct orders with refund cases；窗口跟随原订单）
     refund_scope_row = None
@@ -1229,7 +1234,7 @@ def _query_spu_roi(
     effective_sales_total = money_total["effective_sales"]
 
     # 整体保本 ROI = NC' / (NC' - COGS_kept)
-    overall_nc_prime = total_net_revenue_usd - total_return_loss
+    overall_nc_prime = total_net_revenue_cny - total_return_loss
     overall_breakeven: Decimal | None = None
     breakeven_denom = overall_nc_prime - total_cogs_kept
     if total_spend != 0 and breakeven_denom > 0:
@@ -1365,11 +1370,11 @@ def _detail_orders(
         .all()
     )
     truncated = len(rows) >= _ORDERS_MAX
-    _, fx_usd_vnd = _resolve_conversion_rates(sess)
+    _, vnd_per_cny = _resolve_conversion_rates(sess)
     orders: list[dict] = []
     for r in rows:
         order_pk = int(r["order_pk"])
-        line_gmv_usd = Decimal(r["line_gmv_vnd"]) / fx_usd_vnd
+        line_gmv_cny = Decimal(r["line_gmv_vnd"]) / vnd_per_cny
         settlement_vnd = (
             Decimal(r["settlement_vnd"]) if r["settlement_vnd"] is not None else None
         )
@@ -1389,7 +1394,7 @@ def _detail_orders(
         # settled_net_share = SETTLEMENT × share_ratio（未结算 → null）
         settled_net_share: Decimal | None = None
         if settlement_vnd is not None and share_ratio is not None:
-            settled_net_share = (settlement_vnd * share_ratio) / fx_usd_vnd
+            settled_net_share = (settlement_vnd * share_ratio) / vnd_per_cny
 
         arrived_overseas = bool(r["arrived_overseas"])
         has_completed_return_case = bool(r["has_completed_return_case"])
@@ -1421,7 +1426,7 @@ def _detail_orders(
                 "order_id": r["order_id"],
                 "status": r["status"],
                 "qty": _row_int(r["qty"]),
-                "line_gmv": line_gmv_usd,
+                "line_gmv": line_gmv_cny,
                 "paid_at": r["paid_at"],
                 "is_settled": settlement_vnd is not None,
                 "settled_net_share": settled_net_share,
@@ -1468,7 +1473,7 @@ def _detail_settlements(
         .mappings()
         .all()
     )
-    _, fx_usd_vnd = _resolve_conversion_rates(sess)
+    _, vnd_per_cny = _resolve_conversion_rates(sess)
     settlements: list[dict] = []
     for r in rows:
         order_pk = int(r["order_pk"])
@@ -1502,7 +1507,7 @@ def _detail_settlements(
             {
                 "code": c["component_code"],
                 "amount_vnd": Decimal(c["amount"]),
-                "amount": Decimal(c["amount"]) / fx_usd_vnd,
+                "amount": Decimal(c["amount"]) / vnd_per_cny,
             }
             for c in comps
         ]
@@ -1542,11 +1547,11 @@ def _detail_cases(
         .mappings()
         .all()
     )
-    _, fx_usd_vnd = _resolve_conversion_rates(sess)
+    _, vnd_per_cny = _resolve_conversion_rates(sess)
     cases: list[dict] = []
     for r in rows:
-        refund_amount_usd = (
-            Decimal(r["refund_amount"]) / fx_usd_vnd
+        refund_amount_cny = (
+            Decimal(r["refund_amount"]) / vnd_per_cny
             if r["refund_amount"] is not None
             else None
         )
@@ -1556,7 +1561,7 @@ def _detail_cases(
                 "order_id": r["order_id"],
                 "type": r["case_type"],
                 "status": r["status"],
-                "refund_amount": refund_amount_usd,
+                "refund_amount": refund_amount_cny,
                 "reason": (
                     f"{r['reason_code']}: {r['reason_text']}"
                     if r["reason_code"] or r["reason_text"]
@@ -1584,12 +1589,13 @@ def _detail_ads(
         .mappings()
         .all()
     )
+    fx_usd_cny, _ = _resolve_conversion_rates(sess)
     ads: list[dict] = []
     for r in rows:
         ads.append(
             {
                 "campaign_id": r["campaign_id"],
-                "spend": Decimal(r["spend"]),
+                "spend": Decimal(r["spend"]) * fx_usd_cny,
                 "orders": _row_int(r["ad_orders"]),
                 "first_day": r["first_day"],
                 "last_day": r["last_day"],

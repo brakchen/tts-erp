@@ -1,7 +1,7 @@
 /* tts-erp — SPU 实际 ROI 看板页 JS.
    No frameworks. Plain DOM + fetch. Wired from /v2/pages/spu-roi.
    数据全部来自只读端点 GET /v2/analytics/spu-roi(服务端已算好,§5.1-1),
-   本文件只做格式化与展示:金额 $2 位千分位、比率/百分比、红绿判据、分页、
+   本文件只做格式化与展示:金额 ¥2 位千分位、比率/百分比、红绿判据、分页、
    排序(asc ↔ desc 双向),401 → login。样式复用页面 warm-paper token,零外链。 */
 
 (() => {
@@ -117,8 +117,8 @@
     var n = parseFloat(v);
     if (!Number.isFinite(n)) return "—";
     return (
-      "$" +
-      n.toLocaleString("en-US", {
+      "¥" +
+      n.toLocaleString("zh-CN", {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       })
@@ -419,6 +419,9 @@
     } else {
       roiBreakevenEl.textContent = "—";
     }
+    // 广告系统实际ROI：广告归因GMV ÷ 广告实际消耗。
+    var roiAdActualEl = $("#sum-roi-ad-actual");
+    roiAdActualEl.textContent = fmtRatio(totals.ad_system_actual_roi);
     // 广告系统保本ROI：广告归因GMV ÷ 已知成本下最大可承受广告费。
     // estimated_known_costs 表示尚未纳入结算外必要成本，必须用 ≈ 明示估算。
     var roiAdEl = $("#sum-roi-ad");
@@ -438,7 +441,7 @@
       roiAdEl.textContent = "—";
     }
     $("#sum-stamp").textContent =
-      `全表 USD · 数据库汇率快照 ${meta.fx ? meta.fx.as_of : ""} · 盈利 v10`;
+      `全表 ${(meta.currency && meta.currency.display) || "CNY"} · 数据库汇率快照 ${meta.fx ? meta.fx.as_of : ""} · 盈利 v10`;
 
     // 表格
     if (items.length) {
@@ -477,7 +480,7 @@
     if (typeof meta.unattributed_refund_lines === "number") {
       notes.push(`未归属退款 ${meta.unattributed_refund_lines} 行`);
     }
-    notes.push("默认 30元/件成本(⚠) 行会标注 · 金额已由服务端换算 USD");
+    notes.push("默认 40元/件成本(⚠) 行会标注 · 金额已由服务端统一换算 CNY");
     $("#foot-meta").textContent = notes.join(" · ");
 
     // 起始/截止日真实呈现(2026-09-06):数据有可裁剪跨度(销售∪退款覆盖)且
@@ -619,10 +622,25 @@
       "div",
       {
         class:
-          "row row-cols-2 row-cols-sm-3 row-cols-lg-4 row-cols-xxl-4 g-2 op-drill-grid",
+          "row row-cols-2 row-cols-sm-3 row-cols-lg-3 row-cols-xxl-3 g-2 op-drill-grid",
       },
       cell("ROI 实际", fmtRatio(it.roi_real)),
       cell("ROI 保本", fmtRatio(it.roi_breakeven)),
+      cell(
+        "广告系统实际 ROI",
+        fmtRatio(it.ad_system_actual_roi),
+        "广告系统实际 ROI = 广告归因 GMV ÷ 广告实际消耗；无广告消耗时显示 —",
+      ),
+      cell(
+        "广告系统保本 ROI",
+        it.ad_system_breakeven_roi == null ||
+          it.ad_system_breakeven_roi === ""
+          ? "—"
+          : (it.ad_system_breakeven_roi_status === "estimated_known_costs"
+              ? "≈"
+              : "") + fmtRatio(it.ad_system_breakeven_roi),
+        "广告系统保本 ROI = 广告归因 GMV ÷ 最大可承受广告费；当前未结构化录入退货运费、提现费、汇兑损失、包装耗材等结算外成本，≈ 表示已知成本下限估算",
+      ),
       cell("CPA", m(it.cpa)),
       cell(
         "单位成本",
@@ -688,7 +706,7 @@
     var HINT_LAYER_COGS =
       "货本 = (售出件 + 全损取消件) × 单位成本;售出件=units_sold,全损取消件=full_loss_cancelled_qty=海外取消件数(v9 口径)";
     var HINT_LAYER_AD =
-      "广告消耗 = Σmixed_real_cost(plugin.ad_today,随日期窗口裁剪,USD);作为减项计入净利润(v8)";
+      "广告消耗 = Σmixed_real_cost(plugin.ad_today,随日期窗口裁剪,源数据USD);服务端换算CNY后作为减项计入净利润(v10)";
     var HINT_LAYER_NP =
       "净利润 = 净收入 − 货本 − 广告消耗(v7 公式);红绿仅按净利正负判(C3 拍板)";
     var HINT_SETTLED =
@@ -700,7 +718,7 @@
     var HINT_COGS_FLC =
       "全损取消件 = full_loss_cancelled_qty = 海外取消件数(CANCELLED + 物流已到海外 action_code=38301);v9 口径:货已出海拿不回来按全损计;国内取消(未到海外)不计货本、不计全损";
     var HINT_AD_SPEND =
-      "广告消耗 = Σ mixed_real_cost(plugin.ad_today,随日期窗口裁剪,USD);作为减项计入净利润(v8)";
+      "广告消耗 = Σ mixed_real_cost(plugin.ad_today,随日期窗口裁剪,源数据USD);服务端换算CNY后作为减项计入净利润(v10)";
 
     var layerRev = layer("净收入", HINT_LAYER_REV, [
       row("已结算", settledNet, "add", HINT_SETTLED),
@@ -839,7 +857,7 @@
             el("th", null, "订单", hintSpan("order_id = 关联订单 ID(after_sales.cases.order_pk → commerce.sales_orders.order_id)")),
             el("th", null, "类型", hintSpan("case_type = RETURN_AND_REFUND(退货退款) / REFUND_ONLY(仅退款) / CANCELLATION(取消)")),
             el("th", null, "状态", hintSpan("case 状态;RETURN_OR_REFUND_REQUEST_COMPLETE / CANCELLATION_REQUEST_COMPLETE 表示完结")),
-            el("th", null, "退款", hintSpan("refund_amount = 该 case 退款金额(USD,已从 GMV 减除)")),
+            el("th", null, "退款", hintSpan("refund_amount = 该 case 退款金额(CNY,服务端由VND换算,已从 GMV 减除)")),
           ),
         ),
         el("tbody", null, crows),
