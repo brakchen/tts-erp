@@ -69,6 +69,7 @@ EXPECTED_JOB_INTERVALS = {
     "reporting.profit_daily": 3600,
     "spu.image_mirror": 1800,
     "fx.sync": 3600,
+    "analytics.shop_fee_rate": 86400,
 }
 
 
@@ -83,10 +84,12 @@ def test_jobs_registry_has_expected_count() -> None:
     2026-09-06：fx.sync 加入（ExchangeRate-API 汇率缓存，horizon-gated
     ≈1 请求/天）→ 13 → 14。
     2026-09-19：plugin.ad_merge_today2daily 移除（同步逻辑删除，保留 ad_today 表）→ 17 → 16。
+    2026-09-29：analytics.shop_fee_rate 加入（店铺级平台抽成费率，
+    24h 重算 → config.shop_fee_rate，供 spu-roi 未结算估算）→ 16 → 17。
     """
-    # 6 tiktok + 10 system (token + 5 miaoshou + 2 reporting + image_mirror
-    # + fx.sync) — keep the number pinned so we don't drift silently.
-    assert len(JOBS) == 16
+    # 6 tiktok + 11 system (token + 5 miaoshou + 2 reporting + image_mirror
+    # + fx.sync + shop_fee_rate) — keep the number pinned so we don't drift silently.
+    assert len(JOBS) == 17
 
 
 @pytest.mark.parametrize(

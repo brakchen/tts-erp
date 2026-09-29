@@ -194,7 +194,7 @@
     wStart: "", // 日期范围 yyyy-mm-dd(""=不限)
     wEnd: "",
     datesTouched: false, // 用户手动改过日期? (自动回填只发生一次,随后交还用户)
-    feeRate: null, // 页面覆写费率(小数),null = 用服务端基线
+    feeRate: null, // 页面覆写费率(小数),null = 店铺实测/服务端基线
     // D7 行内 accordion: 一次只展开一行; D6 tab 懒加载缓存,主表筛选变化时清空
     openDrillRow: null,
     drillCache: new Map(),
@@ -512,6 +512,81 @@
     );
   }
 
+  // 费率来源中文标签（meta.fee.source）
+  var FEE_SOURCE_LABEL = {
+    user_override: "页面覆写",
+    shop_estimate: "店铺实测",
+    baseline: "全局基线",
+    mixed: "混合口径",
+  };
+
+  // 店铺费率状态卡（feature/shop-fee-rate）：把后端 meta.fee 的口径如实呈现
+  // —— 来源 / 实测样本量 / 覆盖率 / 快照日期 / 降级原因。
+  // 只用 textContent 写入，不引入 innerHTML 的 XSS 面。
+  function renderFeeCard(fee) {
+    var card = $("#fee-card");
+    if (!card) return;
+    if (!fee) {
+      card.hidden = true;
+      return;
+    }
+    var rateNum = parseFloat(fee.rate);
+    $("#fee-card-source").textContent =
+      FEE_SOURCE_LABEL[fee.source] || fee.source || "—";
+    $("#fee-card-rate").textContent = Number.isFinite(rateNum)
+      ? (rateNum * 100).toFixed(2) + "%"
+      : "—";
+
+    // 逐店铺明细：实测口径列样本量/覆盖率/窗口/快照日；基线口径说明降级原因。
+    var parts = [];
+    (fee.per_shop || []).forEach(function (s) {
+      var name = s.shop_name || String(s.shop_pk);
+      if (s.source === "shop_estimate" && s.estimate) {
+        var cov = (parseFloat(s.estimate.coverage_ratio) * 100).toFixed(1);
+        parts.push(
+          name +
+            " 实测 " +
+            (parseFloat(s.rate) * 100).toFixed(2) +
+            "%（样本 " +
+            s.estimate.eligible_order_count +
+            " 单 · 覆盖 " +
+            cov +
+            "% · 近 " +
+            s.estimate.lookback_days +
+            " 天 · " +
+            String(s.estimate.calculated_on) +
+            " 重算）",
+        );
+      } else if (s.source === "baseline") {
+        parts.push(
+          name +
+            " 回退基线（" +
+            (s.fallback_reason === "stale_estimate"
+              ? "快照已过期"
+              : "无可用实测样本") +
+            "）",
+        );
+      } else if (s.source === "user_override") {
+        parts.push(name + " 页面覆写");
+      }
+      // source === "mixed" 不会出现在 per_shop（那是聚合层标记）
+    });
+    var estEl = $("#fee-card-estimate");
+    estEl.textContent = parts.join(" · ");
+    estEl.hidden = parts.length === 0;
+
+    var degraded = (fee.per_shop || []).some(function (s) {
+      return s.source === "baseline";
+    });
+    var fbEl = $("#fee-card-fallback");
+    fbEl.textContent = degraded
+      ? "⚠ 未使用店铺实测费率：近窗口有效样本量或覆盖率未达标，按全局基线估算"
+      : "";
+    fbEl.hidden = !degraded;
+
+    card.hidden = false;
+  }
+
   function render(payload) {
     var summaries = $("#summaries");
     var pager = document.querySelector("main .op-pager");
@@ -648,9 +723,18 @@
       );
     }
     if (meta.fee) {
+      // 逐店铺样本/覆盖率细节在新费率状态卡里；页脚只留一行聚合口径。
+      renderFeeCard(meta.fee);
       notes.push(
-        `平台佣金费率 ${meta.fee.override === null ? "基线" : "页面覆写"} ${esc(meta.fee.rate)}${meta.fee.mode === "override" ? "(覆写)" : ""}`,
+        `平台佣金费率 ${esc(meta.fee.rate)}（${
+          FEE_SOURCE_LABEL[meta.fee.source] || meta.fee.source
+        }）`,
       );
+      // 费率输入框 placeholder 跟随当前口径(仅影响空输入时的灰字提示)
+      var feeInputEl = $("#filter-fee");
+      if (feeInputEl && meta.fee.source !== "user_override") {
+        feeInputEl.placeholder = (parseFloat(meta.fee.rate) * 100).toFixed(1);
+      }
     }
     if (typeof meta.unattributed_refund_lines === "number") {
       notes.push(`未归属退款 ${meta.unattributed_refund_lines} 行`);

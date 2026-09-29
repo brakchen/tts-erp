@@ -88,6 +88,7 @@ from tts_erp_v2.db.models.procurement import (
 from tts_erp_v2.db.models.reporting import (
     ProductCostSnapshot,
     ProductProfitDaily,
+    ShopFeeRateEstimate,
     ShipmentTrackingSummary,
 )
 from tts_erp_v2.db.models.security import ApiKey
@@ -115,6 +116,7 @@ __all__ = [
     "ChromeTrackingEvent",
     "Credentials",
     "EnumMap",
+    "ShopFeeRateEstimate",
     "ExchangeRate",
     "ExchangeRateSnapshot",
     "InterceptConfig",

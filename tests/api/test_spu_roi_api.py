@@ -2416,8 +2416,10 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
     assert meta["fx"]["as_of"] == "2099-09-06"
     assert meta["fx"]["source"] == "fx-cache"
     assert isinstance(meta["fx"]["snapshot_id"], int)
-    assert meta["fee"]["mode"] == "baseline"
-    assert meta["fee"]["rate"] == "0.308"
+    # feature/shop-fee-rate：``mode`` 更名为 ``source``（值也细化为
+    # user_override / shop_estimate / baseline / mixed），费率统一 4 位小数。
+    assert meta["fee"]["source"] == "baseline"
+    assert meta["fee"]["rate"] == "0.3080"
     assert meta["fee"]["override"] is None
     assert meta["cost_assumption"]
     assert "first_day" in meta["window"]
@@ -2455,9 +2457,9 @@ def test_spu_roi_fee_rate_override_meta(api_client, readonly_key, db_engine):
     body = r.json()
     assert body["total"] == 1
     meta = body["meta"]
-    assert meta["fee"]["mode"] == "override"
-    assert meta["fee"]["rate"] == "0.20"
-    assert meta["fee"]["override"] == "0.20"
+    assert meta["fee"]["source"] == "user_override"
+    assert meta["fee"]["rate"] == "0.2000"
+    assert meta["fee"]["override"] == "0.2000"
     # fee_rate=0.20 + 无结算 + refund_rate=0.20；金额统一输出 CNY。
     item = body["items"][0]
     assert item["platform_fee"] == cny4_from_usd("20")

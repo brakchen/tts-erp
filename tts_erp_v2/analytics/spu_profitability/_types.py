@@ -139,11 +139,51 @@ class FxBasis:
 
 
 @dataclass(frozen=True, slots=True)
+class ShopFeeRateEstimate:
+    """一次店铺费率实测快照（``reporting.shop_fee_rate_estimates`` 的一行）。
+
+    ``fee_rate = total_fee / gross_sales_covered``（GMV 加权，口径见
+    ``jobs/finance_fee_rate.py``）；``coverage_ratio`` 记录该快照覆盖了多少
+    窗口内已结算 GMV，偏低说明历史交易缺 ``FEE`` 分项，不应作为费率依据。
+    """
+
+    calculated_on: date
+    calculated_at: datetime
+    lookback_days: int
+    fee_rate: Decimal
+    eligible_order_count: int
+    gross_sales_covered: Decimal
+    gross_sales_total: Decimal
+    coverage_ratio: Decimal
+    total_fee: Decimal
+    currency: str
+
+
+@dataclass(frozen=True, slots=True)
+class ShopFeeRateEntry:
+    """一个店铺在本次计算中实际使用的平台抽成费率。
+
+    ``source`` ∈ {``user_override``（页面覆写）, ``shop_estimate``（店铺
+    实测快照）, ``baseline``（无可用或已过期的实测样本）}。
+
+    ``estimate`` 仅 ``shop_estimate`` 有值；``fallback_reason`` 仅
+    ``baseline`` 有值（``no_estimate`` / ``stale_estimate``）。
+    """
+
+    shop_pk: int
+    shop_name: str | None
+    fee_rate: Decimal
+    source: str
+    estimate: ShopFeeRateEstimate | None = None
+    fallback_reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ProfitabilityBasis:
     calculated_at: datetime
     fx: FxBasis
     fee_rate: Decimal
-    fee_mode: str
+    fee_source: str
     rubric_version: str
     coverage_first_day: date | None
     coverage_last_day: date | None
@@ -152,6 +192,7 @@ class ProfitabilityBasis:
     unattributed_refund_lines: int
     display_currency: str = "CNY"
     warnings: tuple[str, ...] = ()
+    fee_per_shop: tuple[ShopFeeRateEntry, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,6 +262,8 @@ class SpuProfitability:
     ad_system_max_ad_spend: Decimal
     ad_system_remaining_ad_spend_capacity: Decimal
     ad_system_breakeven_roi_status: FormulaStatus
+    fee_rate_used: Decimal
+    fee_source: str
 
 
 @dataclass(frozen=True, slots=True)

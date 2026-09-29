@@ -1504,9 +1504,9 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
             <option value="200">200</option>
           </select>
         </div>
-        <div class="col-6 col-md-3 col-xl-1" data-tip="平台佣金费率：默认参考基线 0.308（2026-09-06 实测重定，可覆写）">
-          <label class="form-label op-fld-label mb-1" for="filter-fee">费率 %</label>
-          <input id="filter-fee" type="text" class="form-control form-control-sm" placeholder="30.8" inputmode="decimal" autocomplete="off" aria-label="平台佣金费率（覆盖基线 0.308）">
+        <div class="col-6 col-md-3 col-xl-1" data-tip="平台佣金费率 r̂：默认用店铺实测（每24h按该店近180天已结算订单 Σ|FEE|/ΣGROSS_SALES 重算，需样本量与覆盖率达标），无可用实测的店铺回退基线 30.8%；在此填数可临时覆写（仅影响本页请求，不写回店铺）">
+          <label class="form-label op-fld-label mb-1" for="filter-fee">临时覆写费率 %</label>
+          <input id="filter-fee" type="text" class="form-control form-control-sm" placeholder="30.8" inputmode="decimal" autocomplete="off" aria-label="临时覆写平台佣金费率（留空则用店铺实测/全局基线）">
         </div>
         <div class="col-12 col-md-6 col-xl-auto">
           <div class="form-check d-flex align-items-center gap-2 mb-0 py-2" data-tip="默认只列出当前窗口内有广告或销售/退款活动的 SPU；勾选后，处于 ACTIVE 状态但没有任意活动（无投放 / 未出单）的 SPU 也会一并列出——这类行的 ROI / 金额显示 — 或「无投放」">
@@ -1524,6 +1524,18 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       </div>
     </section>
 
+    <!-- 店铺费率状态（feature/shop-fee-rate）：如实展示本次计算实际使用的 r̂ 口径
+         —— 来源（覆写/实测/基线）、实测样本量、覆盖率、快照日期与降级原因。 -->
+    <section class="alert alert-light border mx-3 mx-lg-4 my-2 px-3 py-2 d-flex flex-wrap align-items-center gap-3 small" id="fee-card" hidden aria-live="polite">
+      <span class="badge text-bg-secondary" id="fee-card-source">—</span>
+      <span class="text-nowrap">
+        <span class="text-muted">平台佣金费率 r̂</span>
+        <strong class="ms-1" id="fee-card-rate">—</strong>
+      </span>
+      <span class="text-muted" id="fee-card-estimate"></span>
+      <span class="text-danger" id="fee-card-fallback" hidden></span>
+    </section>
+
     <!-- 主表 6 指标与大盘 v10 同口径：广告消耗 / 有效销售 / 有效单量 / 取消率 / 全损率 / 净利润 -->
     <div class="op-table-wrap table-responsive" tabindex="0" aria-label="SPU ROI 明细，可横向滚动">
       <table class="table table-hover align-middle mb-0 op-table" aria-live="polite">
@@ -1535,7 +1547,7 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
             <th scope="col" class="op-th op-th-sort" data-sort="effective_order_count" data-tip="有效单量 = 有效销售订单数 − 退款订单数；与大盘 totals.effective_order_count 同口径">有效单量</th>
             <th scope="col" class="op-th op-th-sort" data-sort="cancel_rate" data-tip="取消率 = 国内取消订单数 ÷ 全部订单；全部订单 = 有效销售订单 + 国内取消 + 海外取消，海外取消只进入全损分子">取消率%</th>
             <th scope="col" class="op-th op-th-sort" data-sort="full_loss_rate" data-tip="全损率 = (退款订单数 + 海外取消订单数) ÷ 全部订单；订单维度按当前 SPU 去重，与大盘同口径">全损率%</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="net_profit" data-tip="净利润 v7(M18):已结算 SETTLEMENT + 未结算 ×(1−r̂)×(1−退款率) − 货本含全损取消 − 广告;负值红字。Red/green 仅按净利判(C3 拍板,删 ROI&lt;1 硬亏档)">净利润</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="net_profit" data-tip="净利润 v7(M18):已结算 SETTLEMENT + 未结算 ×(1−r̂)×(1−退款率) − 货本含全损取消 − 广告;r̂=店铺实测(近180天已结算单,每24h重算,需达标样本量与覆盖率)或基线30.8%;负值红字。Red/green 仅按净利判(C3 拍板,删 ROI&lt;1 硬亏档)">净利润</th>
           </tr>
         </thead>
         <tbody class="op-rows" id="rows">

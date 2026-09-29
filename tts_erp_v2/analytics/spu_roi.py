@@ -86,7 +86,8 @@ _RATIO_FIELDS = {
     "ad_system_breakeven_roi",
 }
 _TOTAL_RATE_FIELDS = {"refund_rate", "full_loss_rate", "cancel_rate"}
-_FOUR_DECIMAL_RATIO_FIELDS = {"share_ratio"}
+# fee_rate_used 与 DB 的 NUMERIC(8,6) 同量级，用 4 位小数与 meta.fee.rate 对齐。
+_FOUR_DECIMAL_RATIO_FIELDS = {"share_ratio", "fee_rate_used"}
 
 _COST_ASSUMPTION = (
     "按 SPU 解析：人工标注采购成交价(MANUAL)优先，其次 1688 货源价"
@@ -94,7 +95,9 @@ _COST_ASSUMPTION = (
 )
 _FEE_NOTE = (
     "平台佣金=平台从销售额直接扣除的全部费用；已结算=SETTLEMENT 实到账；"
-    "未结算=sales×r̂×(1−SPU退款率)；信息列不重复计入净利"
+    "未结算=sales×r̂×(1−SPU退款率)；信息列不重复计入净利。"
+    "r̂ 优先级：页面覆写 > 店铺实测（近180天已结算单 Σ|FEE|/ΣGROSS_SALES，"
+    "每24h重算且需达标样本量与覆盖率） > 全局基线 0.308"
 )
 
 
@@ -102,6 +105,12 @@ def _fmt(value: Decimal | None, quantum: Decimal) -> str | None:
     if value is None:
         return None
     return format(value.quantize(quantum, rounding=ROUND_HALF_UP), "f")
+
+
+def _fmt_rate(value: Decimal) -> str:
+    """费率统一 4 位小数（与行级 ``fee_rate_used`` 同精度，避免 DB
+    NUMERIC(8,6) 尾零直接外泄成 "0.359000" 这类前后端不一致的写法）。"""
+    return format(value.quantize(_RATE_Q, rounding=ROUND_HALF_UP), "f")
 
 
 def _wire_value(key: str, value: Any, *, totals: bool = False) -> Any:
@@ -145,6 +154,23 @@ def _totals_payload(totals) -> dict[str, Any]:
     }
 
 
+def _estimate_payload(estimate) -> dict[str, Any] | None:
+    """序列化一个店铺费率实测快照（无快照 → None）。"""
+    if estimate is None:
+        return None
+    return {
+        "calculated_on": estimate.calculated_on.isoformat(),
+        "calculated_at": estimate.calculated_at.isoformat(),
+        "lookback_days": estimate.lookback_days,
+        "eligible_order_count": estimate.eligible_order_count,
+        "gross_sales_covered": str(estimate.gross_sales_covered),
+        "gross_sales_total": str(estimate.gross_sales_total),
+        "coverage_ratio": _fmt_rate(estimate.coverage_ratio),
+        "total_fee": str(estimate.total_fee),
+        "currency": estimate.currency,
+    }
+
+
 def _meta_payload(result, scope: ProfitScope, fee_rate: Decimal | None) -> dict[str, Any]:
     basis = result.basis
     if scope.start_date is None and scope.end_date is None:
@@ -170,9 +196,20 @@ def _meta_payload(result, scope: ProfitScope, fee_rate: Decimal | None) -> dict[
         },
         "cost_assumption": _COST_ASSUMPTION,
         "fee": {
-            "mode": basis.fee_mode,
-            "rate": str(basis.fee_rate),
-            "override": str(fee_rate) if fee_rate is not None else None,
+            "source": basis.fee_source,
+            "rate": _fmt_rate(basis.fee_rate),
+            "override": _fmt_rate(fee_rate) if fee_rate is not None else None,
+            "per_shop": [
+                {
+                    "shop_pk": entry.shop_pk,
+                    "shop_name": entry.shop_name,
+                    "rate": _fmt_rate(entry.fee_rate),
+                    "source": entry.source,
+                    "fallback_reason": entry.fallback_reason,
+                    "estimate": _estimate_payload(entry.estimate),
+                }
+                for entry in basis.fee_per_shop
+            ],
             "note": _FEE_NOTE,
         },
         "window": {

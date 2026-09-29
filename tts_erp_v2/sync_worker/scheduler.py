@@ -224,6 +224,18 @@ JOBS: dict[str, JobSpec] = {
     # 2026-09-19：plugin.ad_merge_today2daily 已停用（ad_today→ad_daily 跨天固化
     # 同步逻辑删除；保留 plugin.ad_today 表作为未来重新启用后的回填目标；17 → 16）。
     # 完整历史见 tests/sync_worker/test_scheduler_jobs_coverage.py:85。
+    # ── 店铺级平台抽成费率（2026-09-29 feature/shop-fee-rate）─────────
+    # 近 180 天已结算订单 Σ|FEE|/ΣGROSS_SALES（含样本量/覆盖率门禁）→
+    # reporting.shop_fee_rate_estimates 日快照，供 spu-roi 未结算订单
+    # 净额估算（替代全局 0.308 基线）。
+    # 系统级：一条聚合 SQL 全店铺算完，无 per-shop fan-out。
+    "analytics.shop_fee_rate": JobSpec(
+        job_name="analytics.shop_fee_rate",
+        module_path="tts_erp_v2.jobs.finance_fee_rate",
+        interval_seconds=86400,  # 24 h — 费率变化慢
+        is_tiktok=False,
+        entrypoint="run_scheduled",
+    ),
 }
 
 
