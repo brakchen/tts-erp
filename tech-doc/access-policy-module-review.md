@@ -1,10 +1,8 @@
 # Candidate 02：访问策略与部署路径适配——架构审阅报告
 
-> 审阅状态：**等待用户确认；未实施，未合并到 `master`**
+> 审阅状态：**用户已确认并批准合并本审阅文档；运行时实现尚未开始**
 >
-> 分支：`redesign/access-policy-module`
->
-> 工作树：`.worktrees/access-policy-module`
+> 审阅分支：`redesign/access-policy-module`
 >
 > 详细技术方案：[`access-policy-module.md`](access-policy-module.md)
 
@@ -232,15 +230,16 @@ shadow redirect、browser denied-limit 与 header precedence 问题；主审查�
 - 当前 limiter/cache 仍是 per-process，不提供跨 worker 一致性；
 - role matrix 与 `external-api.md` 仍需文档同步测试，否则可能再次漂移。
 
-## 11. 用户 review 清单
+## 11. 用户 review 结论
 
-请确认：
+用户已确认并批准：
 
-1. 是否采用“deployment path module + access policy module + 单一 ASGI adapter”；
-2. 是否批准修复本文列出的 7 项契约偏差；
-3. 是否认可 route table 只作为私有 implementation，不开放 registry；
-4. 是否认可 PostgreSQL 继续作为 concrete local-substitutable dependency；
-5. 是否认可 handler-level role gate 纳入同一 `AccessGrant`，但 destructive/business guard 保持独立；
-6. 是否批准进入 Candidate 02 implementation 阶段。
+1. 采用“deployment path module + access policy module + 单一 ASGI adapter”；
+2. 在 implementation 阶段修复本文列出的 7 项契约偏差；
+3. route table 只作为私有 implementation，不开放 registry；
+4. PostgreSQL 继续作为 concrete local-substitutable dependency；
+5. handler-level role gate 纳入同一 `AccessGrant`，但 destructive/business guard 保持独立；
+6. 本审阅文档可以合并到 `master`。
 
-在用户明确批准前，本分支只包含文档，**不会实现或合并 Candidate 02**。
+本次合并只包含架构审阅文档和历史文档清理，不包含运行时代码。Candidate 02 implementation
+须在新的独立 lane 中完成，并在合并前提交实现 review 报告。
