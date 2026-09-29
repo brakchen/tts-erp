@@ -1,19 +1,22 @@
-# Order dump intake deep module — Review 报告
+# 订单转储接入深模块——审阅报告
 
-> Review 状态：**等待用户确认，未 merge master**
+> 审阅状态：**等待用户确认，尚未合并到 `master`**
 >
-> Branch：`redesign/order-dump-intake-module`
+> 分支：`redesign/order-dump-intake-module`
 >
-> Worktree：`.worktrees/order-dump-intake-module`
+> 工作树：`.worktrees/order-dump-intake-module`
 >
-> Commits：`b540a8b`（自动 grilling 技术方案）、`15c4ac2`（初版实现；本报告与
-> review 修复在后续 commit）
+> 主要提交：
+>
+> - `b540a8b`：记录自动追问决策技术方案
+> - `15c4ac2`：实现订单转储接入深模块
+> - `ff6b2d9`：添加本审阅报告
 
-## 1. Review 结论摘要
+## 1. 审阅结论摘要
 
-架构评审 Candidate 01「收拢订单 dump 解释与落库」已按自动 grilling 决策实现。
+架构评审候选问题 01「收拢订单转储解释与落库」已按自动追问决策完成实现。
 
-新的 deep module：
+新的深模块公开接口为：
 
 ```python
 intake_dump(
@@ -23,121 +26,121 @@ intake_dump(
 ) -> DumpIntakeOutcome
 ```
 
-HTTP adapter 不再拥有 parser dispatch、savepoint、health、commit 或业务写入顺序。
-稳定的 `/v2/order-sync/dumps` URL、wire schema、HTTP status 与 envelope 保持不变。
+HTTP 适配器不再拥有解析器分派、保存点、健康记录、事务提交或业务写入顺序。
+稳定的 `/v2/order-sync/dumps` URL、线上 JSON 结构、HTTP 状态码和响应信封保持不变。
 
-reviewer 最终结论：**PASS / Merge verdict OK**。
+审查代理最终结论：**通过，可以进入合并审批阶段**。
 
-## 2. Grilling 决策
+## 2. 自动追问决策
 
 完整问题、推荐答案、理由与默认同意结果见：
 
-- [`order-dump-intake-module.md`](order-dump-intake-module.md) §3
+- [`order-dump-intake-module.md`](order-dump-intake-module.md) 第 3 节
 
-共记录 20 个决策问题，主要结论：
+共记录 20 个决策问题，主要结论如下：
 
-- module 只负责 order-domain dumps intake，不吞并 `has-data` / `reconcile`；
-- ad v4 dumps 不合并；
-- Pydantic/JSON/body-size 留在 HTTP adapter；
-- typed outcome 不暴露 HTTP；
-- deep module 拥有 savepoint、health 与 commit；
-- parse failure 回滚业务写入但持久化 failure health；
-- SQLAlchemy/数据库失败 rollback 后传播，并映射为 `500 INTERNAL_ERROR`；
-- PostgreSQL `Session` 直接作为 local-substitutable dependency，不制造 repository port；
-- 六个 domain 使用内部静态 dispatch，不提供动态插件 registry；
-- 不改变 ADR-0001、ADR-0003、数据库 schema 或 Chrome 协议。
+- 模块只负责订单域转储接入，不吞并 `has-data` 和 `reconcile`；
+- 不合并广告 v4 转储协议；
+- Pydantic 校验、JSON 解码和请求体大小限制留在 HTTP 适配器；
+- 类型化处理结果不包含 HTTP 概念；
+- 深模块拥有保存点、健康记录和事务提交顺序；
+- 解析失败时回滚业务写入，但保留失败健康记录；
+- SQLAlchemy 或数据库失败必须回滚后继续向上传播，并映射为 `500 INTERNAL_ERROR`；
+- PostgreSQL `Session` 直接作为本地可替换依赖，不制造虚假的仓储接口；
+- 六个数据域使用内部静态分派，不提供动态插件注册表；
+- 不改变 ADR-0001、ADR-0003、数据库结构或 Chrome 插件协议。
 
 ## 3. 变更清单
 
-### 新 module
+### 3.1 新增深模块
 
 - `tts_erp_v2/plugin/orders/intake/__init__.py`
-  - 唯一 public seam 与导出类型。
+  - 唯一公开接缝及导出类型。
 - `tts_erp_v2/plugin/orders/intake/_types.py`
   - `DumpDomain`
   - `DumpIntakeRequest`
   - `DumpIntakeOutcome`
   - `IntakeFailure`
 - `tts_erp_v2/plugin/orders/intake/_service.py`
-  - 六 domain dispatch；
-  - statement list/detail shape 分流；
-  - domain prerequisite；
-  - savepoint 与 partial-write rollback；
-  - success/failure health；
-  - commit / rollback ownership；
-  - parse-error sanitizer。
+  - 六个数据域的分派；
+  - 结算列表与结算明细的结构分流；
+  - 数据域前置条件；
+  - 保存点和部分写入回滚；
+  - 成功与失败健康记录；
+  - 提交与回滚所有权；
+  - 解析错误信息清理。
 
-### HTTP adapter
+### 3.2 HTTP 适配器
 
 `tts_erp_v2/api/v2/order_sync.py`：
 
-- 保留 body size、JSON、Pydantic、requestId、audit 与 HTTP envelope；
+- 保留请求体大小、JSON、Pydantic、`requestId`、审计和 HTTP 响应信封；
 - 构造 `DumpIntakeRequest` 并调用 `intake_dump`；
-- typed rejected outcome → `422`；
-- SQLAlchemy failure → `500 INTERNAL_ERROR`；
-- 删除 parser、health、savepoint 与 commit 直接依赖。
+- 类型化拒绝结果映射为 `422`；
+- SQLAlchemy 故障映射为 `500 INTERNAL_ERROR`；
+- 删除对解析器、健康记录、保存点和事务提交的直接依赖。
 
-### Parser contract strengthening
+### 3.3 解析器契约加强
 
 `tts_erp_v2/plugin/orders/parser.py`：
 
-- `order_details.data.main_order` 缺失/非 list → parse error；
-- `order_history.data.order_history` 缺失/非 list → parse error；
-- 显式空 list 仍是合法 200；
-- detail record 缺 `main_order_id` 不再静默跳过。
+- `order_details.data.main_order` 缺失或不是列表时返回解析错误；
+- `order_history.data.order_history` 缺失或不是列表时返回解析错误；
+- 显式空列表仍是合法的 `200` 响应；
+- 订单详情记录缺少 `main_order_id` 时不再静默跳过。
 
-### 文档
+### 3.4 文档
 
-- `tech-doc/order-dump-intake-module.md`：自动 grilling 技术方案。
-- `tech-doc/dumps-data-contract.md`：更新为六 domain 与 deep module 现状契约。
-- `tts_erp_v2/plugin/orders/__init__.py`：声明 public intake seam。
+- `tech-doc/order-dump-intake-module.md`：自动追问技术方案；
+- `tech-doc/dumps-data-contract.md`：更新为六数据域和深模块现行契约；
+- `tts_erp_v2/plugin/orders/__init__.py`：声明公开接入接缝。
 
-## 4. Review/Fix 闭环
+## 4. 审查与修复闭环
 
-首轮 reviewer 提出：
+首轮审查提出以下问题：
 
-1. DB failure 未覆盖 dispatch/health/commit 全路径 rollback；
-2. order details/history 缺必需结构可误返 200；
-3. 六 domain dispatch 测试不足；
-4. 活契约仍写四 domain；
-5. parse error 未先做单行与 500 字符限制。
+1. 数据库故障没有覆盖分派、健康记录和提交三个路径的完整回滚；
+2. 订单详情和订单历史缺少必需结构时可能错误返回 `200`；
+3. 六数据域分派测试不足；
+4. 现行契约仍只记录四个数据域；
+5. 解析错误进入响应前没有折叠为单行并限制在 500 字符内。
 
-全部修复并补回归测试。复审结果：
+以上问题已全部修复，并补充回归测试。复审结果如下：
 
-- transaction rollback：通过；
-- six-domain dispatch 与两种 statement shape：通过；
-- order details/history HTTP compatibility：通过；
-- parse error sanitizer：通过；
-- adapter seam：通过；
-- **No issues found / Merge verdict OK**。
+- 事务回滚：通过；
+- 六数据域分派及两种结算数据结构：通过；
+- 订单详情和订单历史 HTTP 兼容性：通过；
+- 解析错误信息清理：通过；
+- HTTP 适配器接缝：通过；
+- **未发现剩余问题，可以进入合并审批阶段。**
 
-fix agent 完成文件修改，但其结果上报 extension 在收尾阶段报 JSON 错误；修改内容已由主 agent
-逐项检查、测试，并由 reviewer 复审通过。
+修复代理已完成文件修改，但其结果上报扩展在收尾阶段发生 JSON 解析错误。所有实际修改均已由
+主代理逐项检查并运行测试，随后由审查代理复审通过。
 
-## 5. Test evidence
+## 5. 测试证据
 
-### Unit layer
+### 5.1 单元层测试
 
 ```bash
 timeout 180 bash scripts/test.sh unit tests/plugin/orders/test_intake.py
 ```
 
-结果：**18 passed**。
+结果：**18 项通过**。
 
-覆盖：
+覆盖内容：
 
-- accepted + health + one commit；
-- parse rejection + failure health；
-- null body；
-- dispatch/health/commit 三种 DB failure rollback；
-- parse sanitizer；
-- caller-owned transaction 拒绝；
-- 六 domain dispatch；
-- statement list/detail 两种 shape；
-- logistics/order_history mainOrderId prerequisite；
-- HTTP adapter 不拥有 parser/transaction seam。
+- 接受结果、健康记录和单次提交；
+- 解析拒绝结果及失败健康记录；
+- 空响应体；
+- 分派、健康记录和提交三种数据库故障的回滚；
+- 解析错误信息清理；
+- 拒绝调用者已开启的事务；
+- 六数据域分派；
+- 结算列表和结算明细两种数据结构；
+- 物流及订单历史的 `mainOrderId` 前置条件；
+- HTTP 适配器不拥有解析器和事务接缝。
 
-### Narrow integration selection
+### 5.2 窄范围集成测试
 
 ```bash
 flock -n /tmp/tts-erp-test.lock \
@@ -148,7 +151,7 @@ flock -n /tmp/tts-erp-test.lock \
   tests/plugin/orders/test_parser_after_sales.py
 ```
 
-结果：没有新增失败；保留 5 个 master 既有稳定失败：
+结果：没有新增失败；仍存在以下 5 个 `master` 既有稳定失败：
 
 - `test_has_data_logistics_returns_true_after_dump`
 - `test_dumps_logistics_inserted`
@@ -156,57 +159,57 @@ flock -n /tmp/tts-erp-test.lock \
 - `TestParseLogisticsResponse::test_multi_package`
 - `test_parse_after_sales_missing_cancel_id_is_skipped`
 
-### Fast suite delta
+### 5.3 快速测试集差异
 
-同一共享测试库锁下分别运行当前 master 与 branch：
+在同一共享测试库锁下，分别运行当前 `master` 和本分支：
 
-- master：27 failures
-- branch：19 failures
-- **new failures：0**
-- removed baseline failures：8（OpenAPI 文档断言；不作为本 lane 的目标或承诺）
+- `master`：27 个失败；
+- 本分支：19 个失败；
+- **新增失败：0**；
+- 基线失败减少：8 个。这 8 个均为 OpenAPI 文档断言，不属于本开发分支的目标或承诺。
 
-### Static checks
+### 5.4 静态检查
 
-- 相关 Python LSP：0 diagnostics；
+- 相关 Python LSP：0 个诊断；
 - `py_compile`：通过；
 - `git diff --check`：通过。
 
-## 6. Compatibility
+## 6. 兼容性
 
-保持不变：
+以下契约保持不变：
 
 - `POST /v2/order-sync/dumps`
 - `protocolVersion: 1`
-- 2 MB gate
-- Pydantic schema 与 aliases
-- success 4-field envelope
-- `EMPTY_RESPONSE_BODY` / `PARSE_ERROR` 422
-- empty list 200
-- idempotent replay 200
-- `plugin.plugin_logs` health 行为
-- 业务表 schema 与自然键
+- 2 MB 请求体限制
+- Pydantic 结构及字段别名
+- 成功时的四字段响应信封
+- `EMPTY_RESPONSE_BODY` 和 `PARSE_ERROR` 使用 `422`
+- 空列表返回 `200`
+- 幂等重放返回 `200`
+- `plugin.plugin_logs` 健康记录行为
+- 业务表结构和自然键
 
-新增并明确：
+新增并明确的行为：
 
-- SQLAlchemy/数据库故障返回 `500 INTERNAL_ERROR`，不再伪装为不可重试的 422；
-- parse error message 在进入 health/outcome 前折叠为单行并限制 500 字符。
+- SQLAlchemy 或数据库故障返回 `500 INTERNAL_ERROR`，不再错误伪装为不可重试的 `422`；
+- 解析错误信息在进入健康记录和处理结果前折叠为单行，并限制在 500 字符内。
 
-## 7. Residual risks / Out of scope
+## 7. 剩余风险与范围外事项
 
-- 物流多包裹 parser 与 after-sales 缺 `cancel_id` 的既有失败未在本 lane 修复；
-- Chrome 插件采集、alarm、重试策略未修改；
-- 结算 0 行、物流空 body 上游 root cause 未处理；
-- parser/repository 物理文件仍保留，当前只收拢调用 seam；后续机械搬移必须独立 review；
-- 未新增 migration，未触碰生产数据。
+- 物流多包裹解析器和售后记录缺少 `cancel_id` 的既有失败未在本分支修复；
+- Chrome 插件采集、定时任务和重试策略未修改；
+- 结算零行、物流空响应体的上游根因未处理；
+- 解析器和仓储实现的物理文件仍然保留，本次只收拢调用接缝；后续机械搬移必须独立审阅；
+- 未新增数据库迁移，未触碰生产数据。
 
-## 8. 用户 Review 清单
+## 8. 用户审阅清单
 
 请重点确认：
 
-1. 是否认可 module 只负责 dumps intake，而 `has-data` / `reconcile` 保持独立；
-2. 是否认可 DB failure 从 422 改为正确的 `500 INTERNAL_ERROR`；
-3. 是否认可当前先收拢 public seam、暂不机械搬移 2,000+ 行 parser/repository；
-4. 是否认可六 domain 都属于服务端 wire contract；
-5. 是否批准后续 merge master。
+1. 是否认可模块只负责转储接入，而 `has-data` 和 `reconcile` 保持独立；
+2. 是否认可数据库故障从 `422` 改为正确的 `500 INTERNAL_ERROR`；
+3. 是否认可本次先收拢公开接缝，暂不机械搬移两千余行解析器和仓储代码；
+4. 是否认可六个数据域均属于服务端线上协议；
+5. 是否批准后续合并到 `master`。
 
-在用户明确批准前，本 branch **不会 merge master**。
+在用户明确批准前，本分支**不会合并到 `master`**。
