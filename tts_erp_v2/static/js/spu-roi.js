@@ -587,14 +587,25 @@
       var valChildren = warnEl ? [String(val), " ", warnEl] : [String(val)];
       return el(
         "div",
-        { class: "op-drill-cell" + (warn ? " op-drill-cell-fallback" : "") },
-        el("span", { class: "op-drill-lbl" }, label, hintEl),
-        el("span", { class: "op-drill-val" }, valChildren),
+        { class: "col" },
+        el(
+          "div",
+          {
+            class:
+              "op-drill-cell h-100" +
+              (warn ? " op-drill-cell-fallback" : ""),
+          },
+          el("span", { class: "op-drill-lbl" }, label, hintEl),
+          el("span", { class: "op-drill-val" }, valChildren),
+        ),
       );
     }
     return el(
       "div",
-      { class: "op-drill-grid" },
+      {
+        class:
+          "row row-cols-2 row-cols-sm-3 row-cols-lg-4 row-cols-xxl-6 g-2 op-drill-grid",
+      },
       cell("ROI 实际", fmtRatio(it.roi_real)),
       cell("ROI 保本", fmtRatio(it.roi_breakeven)),
       cell(
@@ -650,14 +661,18 @@
       // title 左对齐(人类阅读习惯);hint 为层口径说明
       return el(
         "div",
-        { class: "op-pnl-layer" },
+        { class: "col" },
         el(
-          "div",
-          { class: "op-pnl-layer-title" },
-          el("span", { class: "op-pnl-layer-titletext" }, title),
-          hintSpan(hint),
+          "section",
+          { class: "op-pnl-layer h-100" },
+          el(
+            "div",
+            { class: "op-pnl-layer-title" },
+            el("span", { class: "op-pnl-layer-titletext" }, title),
+            hintSpan(hint),
+          ),
+          el("div", { class: "op-pnl-rows" }, rows),
         ),
-        el("div", { class: "op-pnl-rows" }, rows),
       );
     }
 
@@ -694,18 +709,22 @@
     ]);
     var layerResult = el(
       "div",
-      { class: "op-pnl-layer op-pnl-layer-result" },
-      row(
-        "净利润",
-        np,
-        np < 0 ? "result op-pnl-row-neg" : "result op-pnl-row-pos",
-        HINT_LAYER_NP,
+      { class: "col" },
+      el(
+        "section",
+        { class: "op-pnl-layer op-pnl-layer-result h-100" },
+        row(
+          "净利润",
+          np,
+          np < 0 ? "result op-pnl-row-neg" : "result op-pnl-row-pos",
+          HINT_LAYER_NP,
+        ),
       ),
     );
 
     return el(
       "div",
-      { class: "op-pnl" },
+      { class: "row row-cols-1 row-cols-lg-2 row-cols-xxl-4 g-2 op-pnl" },
       layerRev,
       layerCogs,
       layerAd,
@@ -858,7 +877,13 @@
     body.textContent = "加载中…";
     fetchDrillTab(it.spu_pk, which)
       .then((data) => {
-        body.replaceChildren(renderDrillTabBody(which, data));
+        var content = renderDrillTabBody(which, data);
+        if (content && content.tagName === "TABLE") {
+          content.className =
+            "table table-sm table-hover align-middle mb-0 op-tab-table";
+          content = el("div", { class: "table-responsive" }, content);
+        }
+        body.replaceChildren(content);
         if (typeof wireTooltips === "function") wireTooltips();
       })
       .catch((e) => {
@@ -895,9 +920,11 @@
     Array.prototype.forEach.call(tabs, (tab) => {
       tab.addEventListener("click", () => {
         Array.prototype.forEach.call(tabs, (t) => {
-          t.classList.remove("is-active");
+          t.classList.remove("active", "is-active");
+          t.setAttribute("aria-selected", "false");
         });
-        tab.classList.add("is-active");
+        tab.classList.add("active", "is-active");
+        tab.setAttribute("aria-selected", "true");
         var which = tab.getAttribute("data-tab");
         if (which === "pnl") {
           drill
@@ -959,7 +986,7 @@
       var label = s.account_name || `#${s.id} (${s.region || "?"})`;
       var btn = el("button", {
         type: "button",
-        class: "op-shop-modal-item",
+        class: "btn btn-outline-secondary op-shop-modal-item",
         text: label,
       });
       btn.addEventListener("click", () => {
@@ -1050,7 +1077,7 @@
         if (list) {
           var retry = el("button", {
             type: "button",
-            class: "op-shop-modal-item",
+            class: "btn btn-outline-secondary op-shop-modal-item",
             text: "重试",
           });
           retry.addEventListener("click", () => {

@@ -787,9 +787,9 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 
 ```text
 ┌ [tts-erp]  SPU 实际 ROI ── 数据截至 2026-09-05（ad 窗口 08-28 ~ 09-05 全量）────┐
-│ 结余带:  总单量 · 有效单量/有效销售 · 退款数/率 · 全损量/率 · 取消量/率   │
-│          · 广告消耗 · 净利润/实际ROI · 实际保本ROI/广告系统保本ROI       │
-│          （同类量/额或量/率相邻；每格带 ? 口径气泡；金额统一 USD）        │
+│ 结余带:  总览(总单量/广告消耗) · 有效(单量/销售额) · 退款(数/率)          │
+│          · 全损(量/率) · 取消(量/率) · 利润(净利润/实际ROI) · 保本(双ROI) │
+│          （Bootstrap 分组卡自适应；每格带 ? 口径气泡；金额统一 USD）       │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ [🔍 搜索 spu_id…] [店铺▾] [日期▾] [列开关⚙] [保本线=动态] [及格线▾1.5(可关)]  默认排序: 实际ROI↑ │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -804,7 +804,16 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 [警告 chip] GMV Max 归因含自然单、数据滞后修正 —— 广告列仅供对照，实际 ROI 以 ERP 侧为准
 ```
 
-**结余带 14 格口径（2026-09-29 排列：同类量/额或量/率相邻；全部带 `?` 气泡，数值来自 `totals`）**：
+**结余带 14 格口径（2026-09-29 Bootstrap 重构：7 个两指标业务组，量/额或量/率始终同组；全部带 `?` 气泡，数值来自 `totals`）**：
+
+响应式只依赖 Bootstrap 5 断点与工具类：
+
+- 页头使用 `container-fluid + row + col-*`，手机纵向堆叠、桌面同行；
+- 结余带使用 `row-cols-1/2/3/4`，每个业务组内部固定 `row-cols-2`，不会把成对指标拆散；
+- 筛选栏使用 `col-12/6/3/...` 自适应，不再由自定义 media query 计算宽度；
+- 主表和钻取表统一放进 `table-responsive`，所有列保留，以横向滚动代替按 `nth-child` 隐藏；
+- 钻取指标、P&L 分层、分页、页脚和店铺弹窗均使用 Bootstrap 栅格/工具类。
+
 
 > 单一口径：**行级与 totals 都按下单订单状态计（COD 店下单即算，不看 paid_at）**。
 > 有效订单 = 白名单状态（含 COD 在途/待收款）；取消订单 = 全部 CANCELLED（含未收款取消）。
@@ -814,6 +823,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 | 格 | 数值来源 | 口径 |
 | --- | --- | --- |
 | 总单量 | `totals.total_orders` | 有效订单 + 取消订单；当前店铺和日期范围内按订单去重 |
+| 广告消耗 | `totals.spend` | M1：选中日期窗口内广告消耗累计，USD |
 | 有效单量 | `totals.effective_order_count` | 有效订单数减去退款订单数 |
 | 有效销售 | `totals.effective_sales` | 有效订单金额减去退款净额；已结算按实际到账，未结算按基线估算 |
 | 退款数 | `totals.refund_order_count` | 已完结退款 case 关联的有效订单数，按订单去重 |
@@ -822,7 +832,6 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 | 全损率 | `totals.full_loss_rate` | 全损量 ÷ 总单量 |
 | 取消量 | `totals.domestic_cancelled_order_count` | 国内取消订单数；海外取消已计入全损，不重复计入 |
 | 取消率 | `totals.cancel_rate` | 国内取消量 ÷ 总单量 |
-| 广告消耗 | `totals.spend` | M1：选中日期窗口内广告消耗累计，USD |
 | 净利润 | `totals.net_profit` | M18：净收入 − 货本（含全损）− 广告消耗，USD；负值标红 |
 | 实际 ROI | `totals.roi_real` | M14；Σspend=0 → `—` |
 | 实际保本 ROI | `totals.roi_breakeven` | 净利润为 0 时的 ROI 临界值；无解 → `—` |

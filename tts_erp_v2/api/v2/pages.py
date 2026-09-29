@@ -1298,14 +1298,12 @@ _PAGE_HTML = """<!doctype html>
 
 # SPU 实际 ROI 看板(账页式)HTML shell — 结构见 tech-doc/analytics/spu-real-roi-dashboard.md §7。
 # 只读:JS 消费 GET /v2/analytics/spu-roi;业务数字全在服务端算好(§5.1-1)。
-# 页面布局 2026-09-06 重构为 Bootstrap 5.3.8(自托管 static/vendor/bootstrap.min.css):
-#   - 结构全部用 bootstrap 工具/栅格类(row/col-*, flex-wrap, gap-*, py/px)驱动响应式;
-#   - 自定义 CSS 只留两件事:① warm-paper token 皮肤(:root 把 --bs-* 主题变量收编到同套 token,
-#     border-radius 归零工业直角);② JS 依赖的行为类(data-tip 气泡 / ⚙ 列开关 / lightbox /
-#     §7.2 标色 / 结余带数字),这些 JS 逐字渲染不可改名。
-#   - 移动端:结余带 xs 2 / sm 3 / md 4 / lg 5(两行);工具栏 flex-wrap 自然纵向堆叠;表格
-#     .table-responsive + max-height 双轴滚动框:表头在框内吸顶、首列横向溢出时吸左,
-#     小屏按 nth-child 裁次要列(广告数/取消率/退货率/保本ROI),避免手机上看 25 列大海。
+# 页面布局 2026-09-29 统一到 Bootstrap 5.3.8(自托管 static/vendor/bootstrap.min.css):
+#   - 页头、结余分组、工具栏、分页、页脚均由 container/row/col 与断点工具类驱动；
+#   - 主表和钻取表统一使用 table-responsive，保留全部业务列，用横向滚动代替手写断点隐藏；
+#   - 钻取 summary 与 P&L 用 row-cols-* 随断点切换列数，tab 用 nav-tabs + overflow-x-auto；
+#   - 自定义 CSS 只保留 warm-paper 视觉 token、业务标色、sticky 首列、tooltip/lightbox 等行为皮肤，
+#     不再包含 max-width/min-width media query 或 nth-child 响应式规则。
 _SPU_ROI_PAGE_HTML = """<!doctype html>
 <html lang="zh-Hans">
 <head>
@@ -1332,96 +1330,157 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     .op-home-link { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-decoration: none; padding: 4px 8px; border: 1px solid var(--rule); transition: border-color 120ms ease; display: inline-block; }
     .op-home-link:hover { border-color: var(--accent); color: var(--accent); }
   </style>
+</head>
 <body>
   <header class="op-header">
-    <div class="op-main px-2 px-md-4 py-3 d-flex flex-wrap justify-content-between align-items-end gap-2 gap-md-3">
-      <a href="../../v2/pages/dashboard" class="op-home-link">← 首页</a>
-      <div>
-        <div class="op-eyebrow mb-1">TikTok Shop · Analytics</div>
-        <h1 class="op-title mb-0">SPU 实际 ROI</h1>
-      </div>
-      <div class="op-header-meta">
-        <label class="op-shop" for="shop-switcher">
-          <span>店铺</span>
-          <select id="shop-switcher" name="shop_pk" class="op-shop-select" aria-label="当前店铺"></select>
-        </label>
-        <span class="op-identity" id="ops-identity"></span>
-        <span class="op-scope-note" id="sum-stamp">ROI · 账页</span>
+    <div class="container-fluid px-3 px-lg-4 py-3 op-main">
+      <div class="row g-3 align-items-center">
+        <div class="col-auto">
+          <a href="../../v2/pages/dashboard" class="op-home-link">← 首页</a>
+        </div>
+        <div class="col">
+          <div class="op-eyebrow mb-1">TikTok Shop · Analytics</div>
+          <h1 class="op-title mb-0">SPU 实际 ROI</h1>
+        </div>
+        <div class="col-12 col-lg-auto">
+          <div class="op-header-meta d-flex flex-column flex-sm-row align-items-stretch align-items-sm-center justify-content-sm-end gap-2 gap-sm-3">
+            <label class="op-shop mb-0" for="shop-switcher">
+              <span>店铺</span>
+              <select id="shop-switcher" name="shop_pk" class="form-select form-select-sm op-shop-select" aria-label="当前店铺"></select>
+            </label>
+            <span class="op-identity" id="ops-identity"></span>
+            <span class="op-scope-note" id="sum-stamp">ROI · 账页</span>
+          </div>
+        </div>
       </div>
     </div>
   </header>
 
-  <main class="op-main">
-    <!-- 结余带:同类指标相邻（有效量/额、退款量/率、全损量/率、取消量/率、利润/ROI）；JS 只写 #sum-* 文本 + is-err/is-ok -->
-    <section class="op-counter px-2 px-md-4 py-3 py-md-4" id="summaries" aria-live="polite">
-      <div class="row g-2 g-md-3 text-center row-cols-2 row-cols-sm-3 row-cols-md-4 row-cols-lg-5">
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">总单量<span class="op-hint" data-tip="总单量 = 有效订单 + 取消订单；在当前店铺和日期范围内按订单去重">?</span></span><span class="op-counter-num" id="sum-total-orders">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">有效单量<span class="op-hint" data-tip="有效单量：订单状态为待发货、部分发货、待揽收、运输中、已送达、已完成，再减去其中退款的单量">?</span></span><span class="op-counter-num" id="sum-orders">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">有效销售<span class="op-hint" data-tip="有效销售额：订单状态为待发货、部分发货、待揽收、运输中、已送达、已完成；已送达和已完成减去退款金额算作有效销售额。已结算按实际到账，未结算按 GMV ×(1−平台费率) ×(1−退款率) 估算">?</span></span><span class="op-counter-num" id="sum-sales">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">退款数<span class="op-hint" data-tip="订单状态为退款的单量（仅退款/退货退款已完结 case 关联的有效订单，按订单去重）">?</span></span><span class="op-counter-num" id="sum-refund-count">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">退款率<span class="op-hint" data-tip="退款率 = 订单状态为退款的单量 / 全部订单（有效订单 + 取消订单）">?</span></span><span class="op-counter-num" id="sum-refund-rate">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">全损量<span class="op-hint" data-tip="全损量 = 订单状态为退款的单量 + 取消订单中海外取消（物流已到目的国 action_code=38301 的 CANCELLED 订单）。M13b 口径：全损 = 退货（RETURN_AND_REFUND/REFUND_ONLY 已完结，不论物流是否到海外）+ 海外取消（CANCELLED∧38301）；国内取消不计全损。采购成本实亏，计入货本">?</span></span><span class="op-counter-num" id="sum-loss-qty">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">全损率<span class="op-hint" data-tip="全损率 = (订单状态为退款的单量 + 取消订单中海外取消) / 全部订单（有效订单 + 取消订单）">?</span></span><span class="op-counter-num" id="sum-loss-rate">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">取消量<span class="op-hint" data-tip="取消量 = 取消订单中国内取消（排除海外取消）。海外取消已计入全损，两率互斥不重叠">?</span></span><span class="op-counter-num" id="sum-cancel-count">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">取消率<span class="op-hint" data-tip="取消率 = 取消订单中国内取消（排除海外取消）/ 全部订单（有效订单 + 取消订单）">?</span></span><span class="op-counter-num" id="sum-cancel-rate">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">广告消耗<span class="op-hint" data-tip="单店铺所有广告消耗 = Σ mixed_real_cost（plugin.ad_daily；随选中日期窗口裁剪；作为减项计入净利润）">?</span></span><span class="op-counter-num" id="sum-spend">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">净利润<span class="op-hint" data-tip="净利润 = 净收入 − 货本（含全损）− 广告消耗；已结算订单按实际到账，未结算订单按平台费率估算；全表统一 USD">?</span></span><span class="op-counter-num" id="sum-net-profit">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">实际ROI<span class="op-hint" data-tip="实际ROI = (净收入 − 全损成本) ÷ 广告消耗。≥ 保本ROI = 赚，< 保本ROI = 亏（主判据）；无广告消耗 → —">?</span></span><span class="op-counter-num" id="sum-roi">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">实际保本ROI<span class="op-hint" data-tip="实际保本ROI = NC' ÷ (NC' − COGS_kept)，其中 NC' = 净收入 − 全损成本，COGS_kept = (售出件 − 退货件) × 单位成本。净利润 = 0 时的 ROI 临界值；实际ROI低于此值即亏">?</span></span><span class="op-counter-num" id="sum-roi-breakeven">—</span></span></div>
-        <div class="col"><span class="op-counter-item"><span class="op-counter-label">广告系统保本ROI<span class="op-hint" data-tip="TODO: 广告系统保本ROI 公式待定。当前暂不展示，后续对接广告系统数据后补充计算口径">?</span></span><span class="op-counter-num" id="sum-roi-ad">—</span></span></div>
+  <main class="container-fluid px-0 op-main">
+    <!-- 结余带:Bootstrap 外层断点 + 每组 row-cols-2；同类量/额或量/率始终成对 -->
+    <section class="op-counter px-3 px-lg-4 py-3 py-lg-4" id="summaries" aria-live="polite">
+      <div class="row g-2 g-xl-3 row-cols-1 row-cols-md-2 row-cols-xl-3 row-cols-xxl-4">
+        <div class="col">
+          <div class="op-counter-group h-100">
+            <div class="op-counter-group-label">总览</div>
+            <div class="row g-0 row-cols-2">
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">总单量<span class="op-hint" data-tip="总单量 = 有效订单 + 取消订单；在当前店铺和日期范围内按订单去重">?</span></span><span class="op-counter-num" id="sum-total-orders">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">广告消耗<span class="op-hint" data-tip="单店铺所有广告消耗 = Σ mixed_real_cost（plugin.ad_daily；随选中日期窗口裁剪；作为减项计入净利润）">?</span></span><span class="op-counter-num" id="sum-spend">—</span></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="op-counter-group h-100">
+            <div class="op-counter-group-label">有效</div>
+            <div class="row g-0 row-cols-2">
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">有效单量<span class="op-hint" data-tip="有效单量：订单状态为待发货、部分发货、待揽收、运输中、已送达、已完成，再减去其中退款的单量">?</span></span><span class="op-counter-num" id="sum-orders">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">有效销售<span class="op-hint" data-tip="有效销售额：订单状态为待发货、部分发货、待揽收、运输中、已送达、已完成；已送达和已完成减去退款金额算作有效销售额。已结算按实际到账，未结算按 GMV ×(1−平台费率) ×(1−退款率) 估算">?</span></span><span class="op-counter-num" id="sum-sales">—</span></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="op-counter-group h-100">
+            <div class="op-counter-group-label">退款</div>
+            <div class="row g-0 row-cols-2">
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">退款数<span class="op-hint" data-tip="订单状态为退款的单量（仅退款/退货退款已完结 case 关联的有效订单，按订单去重）">?</span></span><span class="op-counter-num" id="sum-refund-count">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">退款率<span class="op-hint" data-tip="退款率 = 订单状态为退款的单量 / 全部订单（有效订单 + 取消订单）">?</span></span><span class="op-counter-num" id="sum-refund-rate">—</span></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="op-counter-group h-100">
+            <div class="op-counter-group-label">全损</div>
+            <div class="row g-0 row-cols-2">
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">全损量<span class="op-hint" data-tip="全损量 = 订单状态为退款的单量 + 取消订单中海外取消（物流已到目的国 action_code=38301 的 CANCELLED 订单）。M13b 口径：全损 = 退货（RETURN_AND_REFUND/REFUND_ONLY 已完结，不论物流是否到海外）+ 海外取消（CANCELLED∧38301）；国内取消不计全损。采购成本实亏，计入货本">?</span></span><span class="op-counter-num" id="sum-loss-qty">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">全损率<span class="op-hint" data-tip="全损率 = (订单状态为退款的单量 + 取消订单中海外取消) / 全部订单（有效订单 + 取消订单）">?</span></span><span class="op-counter-num" id="sum-loss-rate">—</span></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="op-counter-group h-100">
+            <div class="op-counter-group-label">取消</div>
+            <div class="row g-0 row-cols-2">
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">取消量<span class="op-hint" data-tip="取消量 = 取消订单中国内取消（排除海外取消）。海外取消已计入全损，两率互斥不重叠">?</span></span><span class="op-counter-num" id="sum-cancel-count">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">取消率<span class="op-hint" data-tip="取消率 = 取消订单中国内取消（排除海外取消）/ 全部订单（有效订单 + 取消订单）">?</span></span><span class="op-counter-num" id="sum-cancel-rate">—</span></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="op-counter-group h-100">
+            <div class="op-counter-group-label">利润</div>
+            <div class="row g-0 row-cols-2">
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">净利润<span class="op-hint" data-tip="净利润 = 净收入 − 货本（含全损）− 广告消耗；已结算订单按实际到账，未结算订单按平台费率估算；全表统一 USD">?</span></span><span class="op-counter-num" id="sum-net-profit">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">实际ROI<span class="op-hint" data-tip="实际ROI = (净收入 − 全损成本) ÷ 广告消耗。≥ 保本ROI = 赚，< 保本ROI = 亏（主判据）；无广告消耗 → —">?</span></span><span class="op-counter-num" id="sum-roi">—</span></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="op-counter-group h-100">
+            <div class="op-counter-group-label">保本</div>
+            <div class="row g-0 row-cols-2">
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">实际保本ROI<span class="op-hint" data-tip="实际保本ROI = NC' ÷ (NC' − COGS_kept)，其中 NC' = 净收入 − 全损成本，COGS_kept = (售出件 − 退货件) × 单位成本。净利润 = 0 时的 ROI 临界值；实际ROI低于此值即亏">?</span></span><span class="op-counter-num" id="sum-roi-breakeven">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">广告系统保本ROI<span class="op-hint" data-tip="TODO: 广告系统保本ROI 公式待定。当前暂不展示，后续对接广告系统数据后补充计算口径">?</span></span><span class="op-counter-num" id="sum-roi-ad">—</span></span></div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
-    <!-- 工具栏:重写为统一行高 + 响应式(见 CSS .op-toolbar-row / .op-field--*) -->
-    <section class="op-toolbar px-2 px-md-4 py-3" id="toolbar">
-      <div class="op-toolbar-row">
-        <label class="op-field op-field--search" for="filter-q">
-          <span class="op-fld-label">搜索 spu_id</span>
-          <input id="filter-q" type="search" class="form-control" placeholder="spu_id 或标题" autocomplete="off" aria-label="按 spu_id 或标题搜索">
-        </label>
-
-        <label class="op-field op-field--date" for="filter-w-start" data-tip="日期范围（销售/退款/广告同口径裁剪；空 = 全历史）">
-          <span class="op-fld-label">起始日</span>
-          <input id="filter-w-start" type="date" class="form-control" aria-label="销售/退款起始日期（空 = 不限）">
-        </label>
-        <label class="op-field op-field--date" for="filter-w-end" data-tip="销售/退款日期范围（空 = 全历史；含当日）">
-          <span class="op-fld-label">截止日</span>
-          <input id="filter-w-end" type="date" class="form-control" aria-label="销售/退款截止日期（空 = 不限）">
-        </label>
-        <label class="op-field op-field--limit" for="filter-limit">
-          <span class="op-fld-label">每页</span>
-          <select id="filter-limit" class="form-select" aria-label="每页条数">
+    <!-- 工具栏:列宽与换行完全交给 Bootstrap grid 断点 -->
+    <section class="op-toolbar px-3 px-lg-4 py-3" id="toolbar">
+      <div class="row g-2 g-lg-3 align-items-end">
+        <div class="col-12 col-md-6 col-xl-3">
+          <label class="form-label op-fld-label mb-1" for="filter-q">搜索 spu_id</label>
+          <input id="filter-q" type="search" class="form-control form-control-sm" placeholder="spu_id 或标题" autocomplete="off" aria-label="按 spu_id 或标题搜索">
+        </div>
+        <div class="col-6 col-md-3 col-xl-2" data-tip="日期范围（销售/退款/广告同口径裁剪；空 = 全历史）">
+          <label class="form-label op-fld-label mb-1" for="filter-w-start">起始日</label>
+          <input id="filter-w-start" type="date" class="form-control form-control-sm" aria-label="销售/退款起始日期（空 = 不限）">
+        </div>
+        <div class="col-6 col-md-3 col-xl-2" data-tip="销售/退款日期范围（空 = 全历史；含当日）">
+          <label class="form-label op-fld-label mb-1" for="filter-w-end">截止日</label>
+          <input id="filter-w-end" type="date" class="form-control form-control-sm" aria-label="销售/退款截止日期（空 = 不限）">
+        </div>
+        <div class="col-6 col-md-3 col-xl-1">
+          <label class="form-label op-fld-label mb-1" for="filter-limit">每页</label>
+          <select id="filter-limit" class="form-select form-select-sm" aria-label="每页条数">
             <option value="50">50</option>
             <option value="100" selected>100</option>
             <option value="200">200</option>
           </select>
-        </label>
-        <label class="op-field op-field--fee" for="filter-fee" data-tip="平台佣金费率：默认参考基线 0.308（2026-09-06 实测重定，可覆写）">
-          <span class="op-fld-label">费率 %</span>
-          <input id="filter-fee" type="text" class="form-control" placeholder="30.8" inputmode="decimal" autocomplete="off" aria-label="平台佣金费率（覆盖基线 0.308）">
-        </label>
-        <label class="op-field op-field--checkbox" for="filter-include-all" data-tip="默认只列出当前窗口内有广告或销售/退款活动的 SPU；勾选后，处于 ACTIVE 状态但没有任意活动（无投放 / 未出单）的 SPU 也会一并列出——这类行的 ROI / 金额显示 — 或「无投放」">
-          <input id="filter-include-all" type="checkbox" aria-label="含无活动 SPU">
-          <span class="op-fld-label">含无活动</span>
-          <span class="op-hint" role="note" tabindex="0" aria-label="含无活动 SPU 的说明">?</span>
-        </label>
-        <button type="button" class="btn btn-sm op-btn op-btn-refresh" id="btn-refresh">刷新</button>
-        <span class="op-sortable-note" id="sort-note">默认排序：实际 ROI ↑（最亏在前）</span>
+        </div>
+        <div class="col-6 col-md-3 col-xl-1" data-tip="平台佣金费率：默认参考基线 0.308（2026-09-06 实测重定，可覆写）">
+          <label class="form-label op-fld-label mb-1" for="filter-fee">费率 %</label>
+          <input id="filter-fee" type="text" class="form-control form-control-sm" placeholder="30.8" inputmode="decimal" autocomplete="off" aria-label="平台佣金费率（覆盖基线 0.308）">
+        </div>
+        <div class="col-12 col-md-6 col-xl-auto">
+          <div class="form-check d-flex align-items-center gap-2 mb-0 py-2" data-tip="默认只列出当前窗口内有广告或销售/退款活动的 SPU；勾选后，处于 ACTIVE 状态但没有任意活动（无投放 / 未出单）的 SPU 也会一并列出——这类行的 ROI / 金额显示 — 或「无投放」">
+            <input id="filter-include-all" type="checkbox" class="form-check-input mt-0" aria-label="含无活动 SPU">
+            <label class="form-check-label op-fld-label mb-0" for="filter-include-all">含无活动</label>
+            <span class="op-hint" role="note" tabindex="0" aria-label="含无活动 SPU 的说明">?</span>
+          </div>
+        </div>
+        <div class="col-12 col-sm-auto d-grid">
+          <button type="button" class="btn btn-sm op-btn" id="btn-refresh">刷新</button>
+        </div>
+        <div class="col-12 col-xl text-xl-end ms-xl-auto">
+          <span class="op-sortable-note" id="sort-note">默认排序：实际 ROI ↑（最亏在前）</span>
+        </div>
       </div>
     </section>
 
     <!-- 主表 D8 精简为 7 列（商品 + 6 指标：广告消耗 / 有效GMV / 有效出单量 / 取消率% / 全损退款率% / 净利润） -->
-    <div class="op-table-wrap table-responsive">
-      <table class="op-table" aria-live="polite">
+    <div class="op-table-wrap table-responsive" tabindex="0" aria-label="SPU ROI 明细，可横向滚动">
+      <table class="table table-hover align-middle mb-0 op-table" aria-live="polite">
         <thead>
           <tr>
-            <th scope="col" class="op-th op-th-left" width="140">商品</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="spend" data-tip="广告消耗（USD，plugin.ad_today，随选中日期窗口裁剪；作为减项计入净利润）" width="200">广告消耗</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="sales" data-tip="有效GMV = 白名单状态订单行金额（USD；排除已取消订单，B1 拍板）" width="200">有效GMV</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="order_count" data-tip="有效出单量 = 白名单有效订单数（distinct）" width="160">有效出单量</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="cancel_rate" data-tip="取消率 = 国内取消单量 ÷ (有效单量 + 国内取消单量)；v9 口径：只计物流未到海外的取消单，海外取消(已到目的国 38301)已计入全损退款率，两处不重叠" width="180">取消率%</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="full_loss_rate" data-tip="全损退款率% = 全损件数 ÷ (售出件数+海外取消件数)；v9 口径：全损件数 = 完结退货(RETURN_AND_REFUND/REFUND_ONLY，不论物流) + 海外取消(CANCELLED∧38301)；国内取消不计全损；分母0 → —" width="200">全损退款率%</th>
-            <th scope="col" class="op-th op-th-sort" data-sort="net_profit" data-tip="净利润 v7(M18):已结算 SETTLEMENT + 未结算 ×(1−r̂)×(1−退款率) − 货本含全损取消 − 广告;负值红字。Red/green 仅按净利判(C3 拍板,删 ROI&lt;1 硬亏档)" width="200">净利润</th>
+            <th scope="col" class="op-th op-th-left">商品</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="spend" data-tip="广告消耗（USD，plugin.ad_today，随选中日期窗口裁剪；作为减项计入净利润）">广告消耗</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="sales" data-tip="有效GMV = 白名单状态订单行金额（USD；排除已取消订单，B1 拍板）">有效GMV</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="order_count" data-tip="有效出单量 = 白名单有效订单数（distinct）">有效出单量</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="cancel_rate" data-tip="取消率 = 国内取消单量 ÷ (有效单量 + 国内取消单量)；v9 口径：只计物流未到海外的取消单，海外取消(已到目的国 38301)已计入全损退款率，两处不重叠">取消率%</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="full_loss_rate" data-tip="全损退款率% = 全损件数 ÷ (售出件数+海外取消件数)；v9 口径：全损件数 = 完结退货(RETURN_AND_REFUND/REFUND_ONLY，不论物流) + 海外取消(CANCELLED∧38301)；国内取消不计全损；分母0 → —">全损退款率%</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="net_profit" data-tip="净利润 v7(M18):已结算 SETTLEMENT + 未结算 ×(1−r̂)×(1−退款率) − 货本含全损取消 − 广告;负值红字。Red/green 仅按净利判(C3 拍板,删 ROI&lt;1 硬亏档)">净利润</th>
           </tr>
         </thead>
         <tbody class="op-rows" id="rows">
@@ -1434,15 +1493,15 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
     <template id="tpl-drilldown-panel">
       <tr class="op-drill-row" aria-live="polite">
         <td colspan="7" class="op-drill-wrap">
-          <div class="op-drill" data-state="loading">
-            <nav class="op-drill-tabs" role="tablist">
-              <button type="button" class="op-drill-tab is-active" role="tab" data-tab="pnl">利润构成</button>
-              <button type="button" class="op-drill-tab" role="tab" data-tab="orders">订单·物流</button>
-              <button type="button" class="op-drill-tab" role="tab" data-tab="settlements">结算</button>
-              <button type="button" class="op-drill-tab" role="tab" data-tab="cases">售后</button>
-              <button type="button" class="op-drill-tab" role="tab" data-tab="ads">广告</button>
+          <div class="op-drill p-2 p-md-3" data-state="loading">
+            <nav class="nav nav-tabs flex-nowrap overflow-x-auto op-drill-tabs" role="tablist">
+              <button type="button" class="nav-link active op-drill-tab is-active" role="tab" aria-selected="true" data-tab="pnl">利润构成</button>
+              <button type="button" class="nav-link op-drill-tab" role="tab" aria-selected="false" data-tab="orders">订单·物流</button>
+              <button type="button" class="nav-link op-drill-tab" role="tab" aria-selected="false" data-tab="settlements">结算</button>
+              <button type="button" class="nav-link op-drill-tab" role="tab" aria-selected="false" data-tab="cases">售后</button>
+              <button type="button" class="nav-link op-drill-tab" role="tab" aria-selected="false" data-tab="ads">广告</button>
             </nav>
-            <div class="op-drill-banner" data-banner="warn" hidden></div>
+            <div class="alert alert-warning rounded-0 py-2 px-3 op-drill-banner" data-banner="warn" hidden></div>
             <div class="op-drill-summary" data-region="summary"></div>
             <div class="op-drill-body" data-region="body"><div class="op-drill-loading">加载中…</div></div>
           </div>
@@ -1450,13 +1509,21 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
       </tr>
     </template>
 
-    <section class="op-pager px-2 px-md-4 d-flex flex-wrap align-items-center gap-3 py-3 pb-4">
-      <button type="button" class="btn btn-sm op-btn" id="btn-prev">← 上一页</button>
-      <span class="op-pager-page" id="pager-label">—</span>
-      <button type="button" class="btn btn-sm op-btn" id="btn-next">下一页 →</button>
+    <section class="op-pager px-3 px-lg-4 py-3 pb-4">
+      <div class="row g-2 align-items-center">
+        <div class="col-6 col-md-auto order-2 order-md-1 d-grid">
+          <button type="button" class="btn btn-sm op-btn" id="btn-prev">← 上一页</button>
+        </div>
+        <div class="col-12 col-md text-center order-1 order-md-2">
+          <span class="op-pager-page" id="pager-label">—</span>
+        </div>
+        <div class="col-6 col-md-auto order-3 d-grid">
+          <button type="button" class="btn btn-sm op-btn" id="btn-next">下一页 →</button>
+        </div>
+      </div>
     </section>
 
-    <section class="op-footnotes px-2 px-md-4 py-3 mb-4" id="footnotes">
+    <section class="op-footnotes px-3 px-lg-4 py-3 mb-4 d-flex flex-column flex-md-row align-items-md-center gap-2 gap-md-3" id="footnotes">
       <span id="foot-meta">—</span>
       <span class="op-warn-chip">GMV Max 归因含自然单 · 广告数字仅供对照</span>
     </section>
@@ -1464,12 +1531,14 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
 
   <!-- shop_pk 缺失/无效时的店铺选择弹窗(2026-09-28 用户拍板:弹窗让用户选店铺,
        不再 toast + 60s 倒计时强跳首页) -->
-  <div id="ops-shop-modal" class="op-shop-modal" hidden>
-    <div class="op-shop-modal-box" role="dialog" aria-modal="true" aria-labelledby="shop-modal-title">
-      <div class="op-shop-modal-title" id="shop-modal-title">请选择店铺</div>
-      <div class="op-shop-modal-note" id="shop-modal-note"></div>
-      <div class="op-shop-modal-list" id="shop-modal-list"></div>
-      <div class="op-shop-modal-foot"><a href="../../v2/pages/dashboard">← 返回首页</a></div>
+  <div id="ops-shop-modal" class="op-shop-modal position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center p-3" hidden>
+    <div class="card rounded-0 op-shop-modal-box" role="dialog" aria-modal="true" aria-labelledby="shop-modal-title">
+      <div class="card-body p-3 p-md-4">
+        <div class="card-title op-shop-modal-title" id="shop-modal-title">请选择店铺</div>
+        <div class="op-shop-modal-note" id="shop-modal-note"></div>
+        <div class="d-grid gap-2 op-shop-modal-list" id="shop-modal-list"></div>
+        <div class="op-shop-modal-foot"><a href="../../v2/pages/dashboard">← 返回首页</a></div>
+      </div>
     </div>
   </div>
   <div id="ops-tip" role="tooltip" hidden></div>
