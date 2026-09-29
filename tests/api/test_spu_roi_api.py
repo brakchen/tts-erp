@@ -365,23 +365,28 @@ def _seed_order_line(
     unit_price: str,
     paid: bool,
     paid_iso: str | None = None,
+    order_iso: str | None = None,
 ) -> int:
     """插入一单(可带多行);返回 order id。
 
     paid_iso 自定义 paid_at(ISO,默认 2026-09-01),供窗口裁剪测试。
+    order_iso 自定义 order_time(默认跟随 paid_iso 或 2026-09-01)——归属口径为
+    下单时间优先 COALESCE(order_time, paid_at)，窗口测试用它钉死语义。
     """
     paid_at = None
     if paid:
         paid_at = paid_iso or "2026-09-01T08:00:00+00:00"
+    order_time = order_iso or paid_iso or "2026-09-01T08:00:00+00:00"
     # pi-lens-ignore: python-sql-injection
     order_pk = sess.execute(
         text(
             "INSERT INTO commerce.sales_orders "
-            "(shop_pk, order_id, status, currency, paid_at) "
-            "VALUES (:shop, :oid, :status, 'VND', CAST(:paid AS timestamptz)) "
+            "(shop_pk, order_id, status, currency, paid_at, order_time) "
+            "VALUES (:shop, :oid, :status, 'VND', CAST(:paid AS timestamptz), "
+            "CAST(:ot AS timestamptz)) "
             "RETURNING id"
         ),
-        {"shop": shop_pk, "oid": order_id, "status": status, "paid": paid_at},
+        {"shop": shop_pk, "oid": order_id, "status": status, "paid": paid_at, "ot": order_time},
     ).scalar_one()
     # pi-lens-ignore: python-sql-injection
     sess.execute(
@@ -772,13 +777,15 @@ def _seed_unpaid_refund_spu(sess) -> int:
 
 
 def _seed_window_spu(sess) -> int:
-    """退款跟随原订单日期的窗口裁剪场景（仅销售+退款，无广告）。
+    """退款跟随原订单下单日期的窗口裁剪场景（仅销售+退款，无广告）。
 
-    - 订单 1：2026-09-01 下单，2026-09-10 完结退款 1 件 $20；归入 09-01。
-    - 订单 2：2026-08-01 下单，2026-09-12 完结退款 1 件 $20；归入 08-01。
+    - 订单 1：2026-09-01 下单（paid_at 故意错开为 09-10，钉死按下单日归属），
+      2026-09-10 完结退款 1 件 $20；归入 09-01。
+    - 订单 2：2026-08-01 下单（paid_at 故意错开为 09-02——旧 COALESCE(paid_at,
+      order_time) 口径会把它误归 9 月），2026-09-12 完结退款 1 件 $20；归入 08-01。
 
     默认全历史：units=5、sales=$100、refund_return_qty=2；查询 9 月只
-    保留订单 1 及其退款，不能因订单 2 的退款发生在 9 月而把它算进来。
+    保留订单 1 及其退款，不能因订单 2 的退款/收款发生在 9 月而把它算进来。
     """
     seller = "TEST_SELLER_WIN"
     shop_pk = _seed_shop(sess, seller)
@@ -793,7 +800,8 @@ def _seed_window_spu(sess) -> int:
         qty="3",
         unit_price="526600",  # $20/件 → $60
         paid=True,
-        paid_iso="2026-09-01T08:00:00+00:00",
+        order_iso="2026-09-01T08:00:00+00:00",
+        paid_iso="2026-09-10T08:00:00+00:00",
     )
     line1 = _fetch_spu_line_id(sess, "TEST_ORDER_W1")
     o2 = _seed_order_line(
@@ -806,7 +814,8 @@ def _seed_window_spu(sess) -> int:
         qty="2",
         unit_price="526600",  # $20/件 → $40
         paid=True,
-        paid_iso="2026-08-01T08:00:00+00:00",
+        order_iso="2026-08-01T08:00:00+00:00",
+        paid_iso="2026-09-02T08:00:00+00:00",
     )
     line2 = _fetch_spu_line_id(sess, "TEST_ORDER_W2")
     _seed_case(
@@ -829,6 +838,39 @@ def _seed_window_spu(sess) -> int:
         lines=[(line2, "TEST_CLINE_W2", "1", "526600")],
         updated_iso="2026-09-12T00:00:00+00:00",
     )
+    statement_pk = sess.execute(
+        text(
+            "INSERT INTO finance.settlement_statements "
+            "(external_statement_id, statement_time, currency) "
+            "VALUES ('TEST_STATEMENT_WINDOW', '2026-09-15T00:00:00+00:00', 'VND') "
+            "RETURNING id"
+        )
+    ).scalar_one()
+    for suffix, order_pk, amount in (
+        ("W1", o1, "1579800"),
+        ("W2", o2, "1053200"),
+    ):
+        transaction_pk = sess.execute(
+            text(
+                "INSERT INTO finance.settlement_transactions "
+                "(settlement_statement_id, external_transaction_id, order_pk, "
+                "transaction_time) VALUES (:statement_pk, :external_id, :order_pk, "
+                "'2026-09-15T00:00:00+00:00') RETURNING id"
+            ),
+            {
+                "statement_pk": statement_pk,
+                "external_id": f"TEST_TXN_{suffix}",
+                "order_pk": order_pk,
+            },
+        ).scalar_one()
+        sess.execute(
+            text(
+                "INSERT INTO finance.settlement_components "
+                "(transaction_id, component_code, amount, currency) "
+                "VALUES (:transaction_pk, 'SETTLEMENT', :amount, 'VND')"
+            ),
+            {"transaction_pk": transaction_pk, "amount": amount},
+        )
     return spu_pk
 
 
@@ -1854,6 +1896,27 @@ def test_spu_roi_window_params_clip_sales_and_refunds_by_order_time(
     assert item3["refund_return_amount"] == cny4_from_usd("20")
     assert item3["full_loss_qty"] == 1
 
+    orders_response = api_client.get(
+        f"/v2/analytics/spu-roi/{spu_pk}/orders",
+        headers=h,
+        params=order_day,
+    )
+    assert orders_response.status_code == 200, orders_response.text
+    orders = orders_response.json()["orders"]
+    assert [order["order_id"] for order in orders] == ["TEST_ORDER_W1"]
+    assert orders[0]["paid_at"].startswith("2026-09-10")
+
+    settlements_response = api_client.get(
+        f"/v2/analytics/spu-roi/{spu_pk}/settlements",
+        headers=h,
+        params=order_day,
+    )
+    assert settlements_response.status_code == 200, settlements_response.text
+    settlements = settlements_response.json()["settlements"]
+    assert [settlement["order_id"] for settlement in settlements] == [
+        "TEST_ORDER_W1"
+    ]
+
     cases = api_client.get(
         f"/v2/analytics/spu-roi/{spu_pk}/cases",
         headers=h,
@@ -1928,6 +1991,7 @@ def test_spu_roi_date_window_clips_ad(api_client, readonly_key, db_engine):
             qty="1",
             unit_price="526600",  # $20
             paid=True,
+            order_iso="2026-09-10T08:00:00+00:00",
             paid_iso="2026-09-10T08:00:00+00:00",
         )
         _seed_order_line(
@@ -1940,6 +2004,7 @@ def test_spu_roi_date_window_clips_ad(api_client, readonly_key, db_engine):
             qty="1",
             unit_price="526600",
             paid=True,
+            order_iso="2026-08-10T08:00:00+00:00",
             paid_iso="2026-08-10T08:00:00+00:00",
         )
         sess.commit()  # handler 用独立连接读,必须真提交(SQLAlchemy 2 上下文不自动 commit)

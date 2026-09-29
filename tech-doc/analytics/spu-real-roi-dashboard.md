@@ -163,7 +163,7 @@
 | --- | --- | --- | --- |
 | A 商品 | ✓ `spu_id`、主图、标题、上架状态（ACTIVATE/已下架）、店铺名 | 维度列，主键 = `spu_pk` | — |
 | B 广告 | ✓ 投放广告数（挂该 SPU 的 campaign 数）、✓ 广告消耗合计、✓ 平台出单 GMV、✓ 平台 GMV ROI（L0）、○ 观测窗口（first_day~last_day） | 来自 `plugin.ad_daily` ∪ `plugin.ad_today`，窗口=已捕获全量（§4.5 时间口径） | CNY（原生 USD 换算） |
-| C 销售 | ✓ 售出件数、✓ 销售金额、○ 订单数 | 只统计**有效销售订单**（口径 B：白名单、排除 CANCELLED/UNPAID/ON_HOLD），按 `paid_at` 落入所选范围 | CNY（原币 VND 换算） |
+| C 销售 | ✓ 售出件数、✓ 销售金额、○ 订单数 | 只统计**有效销售订单**（口径 B：白名单、排除 CANCELLED/UNPAID/ON_HOLD），按下单时间 `order_time` 落入所选范围 | CNY（原币 VND 换算） |
 | D 退款 | ✓ 有效订单退款（仅退款+退货退款：单数/件数/金额，**计入净额**）、✓ 已付被取消订单退款（件数/金额，**信息列不计净额**）、✓ 退款率=有效订单退款÷销售金额 | case 状态完结才计入；件数取 `case_lines.quantity` | CNY（原币 VND 换算） |
 | E 实际 ROI | ✓ **净利润**（M18，毛利口径：净现金(内部) − 全部售出货本 − 广告消耗，每 SPU 真赚多少，**页面金额核心列**）；✓ **全损退货货损**（M13b = 全损退货件数 × CNY 单位成本解析值，人工优先/缺省 40 CNY/件）；✓ **实际 ROI** = (净现金(内部) − 退货货损) ÷ 广告消耗（M14）；✓ **保本实际 ROI**（M17，实际 ROI 低于它标红） | 净利润是“结余核心”（负值红字），实际 ROI 主指标，保本线是红绿判据；**净现金收入(M13) 仅内部中间量，不展示** | CNY / 比值 |
 
@@ -203,7 +203,7 @@ SPU 无广告投放 → 广告列显示 0 与“无投放”文案（不隐藏�
 > - 聚合键一律 `spu_pk`（内部主键）。
 > - money 在 API 序列化为 JSON 字符串（Decimal），前端再格式化。
 > - 原始输入币种：销售/退款 = VND；货损 = CNY；广告 = USD。进入 v10 公式时按同一 fx 快照统一为 CNY，再计算净收入、货本、利润和金额型指标；净现金收入(M13) 为内部中间量，不展示。
-> - 时间全部 aware UTC；销售与退款统一跟随原订单，按 `COALESCE(paid_at, order_time)` 归属。case `updated_at_source` 只用于判断售后是否已完成及明细展示。
+> - 时间全部 aware UTC；销售与退款统一跟随原订单，按下单时间 `COALESCE(order_time, paid_at)` 归属（2026-09-29 起；此前为 `COALESCE(paid_at, order_time)`，COD 单按收款日归属导致与卖家中心下单口径不一致）。case `updated_at_source` 只用于判断售后是否已完成及明细展示。
 > - 页面金额以**净利润（M18）**为结余核心（负值红字），净现金收入(M13) 仅作内部中间量；货损（M13b）单独成列并已并入实际 ROI（M14）与净利润（COGS_all 内含），无“L2 预留”的说法。
 
 ### 4.1 订单已支付白名单（复用既有常量，勿新造）
@@ -214,7 +214,7 @@ SPU 无广告投放 → 广告列显示 0 与“无投放”文案（不隐藏�
 
 ### 4.2 指标公式表
 
-记当前 SPU 为 `s`，日期范围 `W`（销售与退款均按订单 `COALESCE(paid_at, order_time)` 归属）。
+记当前 SPU 为 `s`，日期范围 `W`（销售与退款均按订单下单时间 `COALESCE(order_time, paid_at)` 归属）。
 
 **单位成本解析（每 SPU，人工优先 → 默认 40 元）**：
 
@@ -233,11 +233,11 @@ SPU 无广告投放 → 广告列显示 0 与“无投放”文案（不隐藏�
 | M2b | 平台出单量（SKU 口径，信息列） | `ad_orders(s)` | `Σ order_sku_total`（跨 campaign 求和；TikTok Orders(SKU)，含自然归因） | 广告窗口全量 | 视图 |
 | M3 | 平台出单 GMV | `gmv_ad(s)` | `Σ order_value_total`（归因口径，含自然单） | 同上 | 同上 |
 | M4 | 平台 GMV ROI | `roiL0(s)` | `gmv_ad(s) / spend(s)`；`spend=0 → NULL`（页面显示 `—`） | 同上 | M3/M1 |
-| M5 | 售出件数（有效销售） | `units(s)` | `Σ sales_order_lines.quantity`（join **有效销售订单**且 `coalesce(paid_at, order_time)∈W`，`spu_pk=s`；**状态口径 2026-09-06：白名单状态即算，含 COD 在途未收款**） | 按日可拆 | sales_order_lines + sales_orders |
+| M5 | 售出件数（有效销售） | `units(s)` | `Σ sales_order_lines.quantity`（join **有效销售订单**且 `coalesce(order_time, paid_at)∈W`，`spu_pk=s`；**状态口径 2026-09-06：白名单状态即算，含 COD 在途未收款**） | 按日可拆 | sales_order_lines + sales_orders |
 | M5b | 有效销售订单数 | `order_count(s)` | `COUNT(DISTINCT sales_orders.id)`（同一有效销售过滤；**状态口径：白名单状态全部订单，含 COD 在途**） | 按日可拆 | 同上 |
 | M6 | 销售金额(gross) | `sales(s)` | `Σ quantity × unit_price`（同上过滤条件；**状态口径：下单即算，含 COD 在途未收款**；CANCELLED 不计入） | 按日可拆 | 同上 |
 | | M5c | 取消订单数 | `cancelled_order_count(s)` | `COUNT(DISTINCT id)` status=CANCELLED（状态口径，含未收款取消；2026-09-06 行内新列，与结余带取消单量同口径） | 按日可拆 | sales_orders |
-| M5d | **全损件数（v9 口径）** | `full_loss_qty(s)` | `退货件数 + 海外取消件数`：退货 = `Σ case_lines.quantity WHERE case_type IN ('RETURN_AND_REFUND','REFUND_ONLY') AND status='RETURN_OR_REFUND_REQUEST_COMPLETE'`；海外取消 = `Σ sales_order_lines.quantity WHERE sales_orders.status='CANCELLED' AND EXISTS(tracking_events.action_code=38301)`；**国内取消(物流未到海外) ≠ 全损，不计入**；实测：退货 27 + 海外取消 133 = 全损 160 件，国内取消 182 件不计。**实现注记（2026-09-13 merge 3c8ea96 落地 v9）**：① 退货桶限定订单 ∈ 已付白名单状态（保住 §4.2 rule 0：UNPAID 等异常单退款进未归属、不进全损）；② 窗口裁剪：退货桶、退款桶和海外取消桶统一按订单 `COALESCE(paid_at, order_time)`；售后完结时间不改变归属日；③ 件数解释率为 `full_loss_qty_rate = full_loss_qty ÷ (units_sold + full_loss_cancelled_qty)`；主口径 `full_loss_rate` 改为全损订单数 ÷ 全部订单 | 范围求和 | case_lines + fulfillment.tracking_events + sales_orders |
+| M5d | **全损件数（v9 口径）** | `full_loss_qty(s)` | `退货件数 + 海外取消件数`：退货 = `Σ case_lines.quantity WHERE case_type IN ('RETURN_AND_REFUND','REFUND_ONLY') AND status='RETURN_OR_REFUND_REQUEST_COMPLETE'`；海外取消 = `Σ sales_order_lines.quantity WHERE sales_orders.status='CANCELLED' AND EXISTS(tracking_events.action_code=38301)`；**国内取消(物流未到海外) ≠ 全损，不计入**；实测：退货 27 + 海外取消 133 = 全损 160 件，国内取消 182 件不计。**实现注记（2026-09-13 merge 3c8ea96 落地 v9）**：① 退货桶限定订单 ∈ 已付白名单状态（保住 §4.2 rule 0：UNPAID 等异常单退款进未归属、不进全损）；② 窗口裁剪：退货桶、退款桶和海外取消桶统一按订单下单时间 `COALESCE(order_time, paid_at)`；售后完结时间不改变归属日；③ 件数解释率为 `full_loss_qty_rate = full_loss_qty ÷ (units_sold + full_loss_cancelled_qty)`；主口径 `full_loss_rate` 改为全损订单数 ÷ 全部订单 | 范围求和 | case_lines + fulfillment.tracking_events + sales_orders |
 | M6c | 行内销售(GMV 全单) | `gmv_sales(s)` | 有效销售 + 取消原额（= 结余带 GMV 的行级版；2026-09-06） | 按日可拆 | M6+M6b 行级 |
 | M12b | 取消率 | `cancel_rate(s)` | **v10**：国内取消订单数 ÷ 全部订单；全部订单 = 有效销售订单 + 国内取消 + 海外取消。海外取消不进入取消分子，但必须进入分母，并计入全损分子 | 范围 | M5b + 取消拆分 |
 | M12c | 退货率（单量口径） | `refund_rate_qty(s)` | 退货订单数 ÷ 有效单量（退款 case 去重订单数，非金额；2026-09-06 行内主列） | 范围 | case 去重订单 / M5b |
@@ -348,7 +348,7 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
 ### 4.5 时间口径（必须向用户说清的一处）
 
 - **默认（不传 `w_start` / `w_end`）= 全历史累计**：销售/退款全历史累计，不做日期裁剪。
-- 可选传 `w_start` / `w_end`（ISO 日期 `yyyy-mm-dd`）裁剪销售与退款：两者都按关联订单 `COALESCE(paid_at, order_time)`（`>= w_start` 且 `< w_end+1 天`，即**含 `w_end` 当日**）。退款售后跟随原订单归属；例如 9 月 1 日订单在 9 月 10 日退款，退款仍计入 9 月 1 日窗口。
+- 可选传 `w_start` / `w_end`（ISO 日期 `yyyy-mm-dd`）裁剪销售与退款：两者都按关联订单下单时间 `COALESCE(order_time, paid_at)`（`>= w_start` 且 `< w_end+1 天`，即**含 `w_end` 当日**）。退款售后跟随原订单归属；例如 9 月 1 日订单在 9 月 10 日退款，退款仍计入 9 月 1 日窗口。
 - **广告消耗**：`ad_product_links` 是**全窗口累计**视图（ad_raw 不 purge），**没有日期参数**——始终整窗累计；`meta.window.first_day/last_day` 只是 ad 视图的观测窗口（供参考），**不代表销售/退款已按该窗口裁剪**。
 - 页面/BI 需要同窗口口径时：显式传 `w_start` / `w_end`；口径标注以 `meta.window.note` 为准（默认注记“ad=视图全窗口累计；销售/退款=全历史（未裁剪，可传 w_start/w_end）”）。
 
@@ -374,7 +374,7 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
 3. **totals 同源**：页首合计由端点用**与行查询相同的 CTE** 再做聚合回传（跨分页加总），不做分页客户端求和。
 4. **序列化规则**：广告 USD、销售/退款 VND 在公式入口按同一 fx 快照换算，采购成本保持 CNY；**所有金额统一以 CNY 计算和输出** → money = 4 位小数 JSON 字符串；比率 = 2 位小数字符串；件数 = 整数。
 5. **NULL 语义统一**：无投放 → `spend="0.0000"` + `ad_count=0`（页面文案“无投放”）；除数为 0 的 ROI → `null`（页面显示 `—`）；无有效销售 → `sales=0`、`refund_rate/roi_real=null`；数据库 fx 快照缺失/异常 → 请求失败关闭并返回 `FX_RATE_UNAVAILABLE`，不使用固定兜底汇率。
-6. **时间窗口单一**：行与 totals 使用同一个筛选——默认不传参 = **销售/退款全历史累计**（可传 `w_start`/`w_end` 裁剪：销售与退款都按关联订单 `COALESCE(paid_at, order_time)`，含 `w_end` 当日；退款发生时间不改变归属日）；广告 = ad 视图全窗口累计（无日期参数）。`meta.window` 明示 ad 观测窗口**供参考**，销售/退款是否被裁剪见 `meta.window.note`（§4.5）。
+6. **时间窗口单一**：行与 totals 使用同一个筛选——默认不传参 = **销售/退款全历史累计**（可传 `w_start`/`w_end` 裁剪：销售与退款都按关联订单下单时间 `COALESCE(order_time, paid_at)`，含 `w_end` 当日；退款发生时间不改变归属日）；广告 = ad 视图全窗口累计（无日期参数）。`meta.window` 明示 ad 观测窗口**供参考**，销售/退款是否被裁剪见 `meta.window.note`（§4.5）。
 7. **行范围**：默认返回「有广告投放 ∨ 有有效销售 ∨ 有退款」的 SPU（不按目录状态裁剪）；可选参数 `include_all` 拉**全部 ACTIVE 目录 SPU**（目录查询按 `cp.status ILIKE 'activate'` 过滤，DEACTIVATE/DELETED 等不进 include_all；无任何活动的行金额全 0）。
 
 ### 5.2 行输出字段契约（主表 1 行 = 1 SPU）
@@ -520,7 +520,7 @@ WITH ad AS (                      -- 广告侧：campaign × SPU → SPU（窗�
     FROM analytics.ad_product_links
     WHERE spu_pk IS NOT NULL
     GROUP BY spu_pk
-), sales AS (                      -- 有效销售订单（口径 B）：paid_at ∈ W
+), sales AS (                      -- 有效销售订单（口径 B）：下单时间 order_time ∈ W
     SELECT sl.spu_pk,
            count(DISTINCT so.id)  AS order_count,
            sum(sl.quantity)       AS units_sold,
@@ -529,7 +529,8 @@ WITH ad AS (                      -- 广告侧：campaign × SPU → SPU（窗�
     JOIN commerce.sales_orders so ON so.id = sl.order_pk
     WHERE sl.spu_pk IS NOT NULL
       AND so.status IN (:PAID_STATUSES)
-      AND so.paid_at >= :w_start AND so.paid_at < :w_end
+      AND coalesce(so.order_time, so.paid_at) >= :w_start
+      AND coalesce(so.order_time, so.paid_at) < :w_end
     GROUP BY sl.spu_pk
 ), refunds AS (                    -- 退款侧：原订单时间 ∈ W；按订单有效性分桶
     SELECT sl.spu_pk,
@@ -552,8 +553,8 @@ WITH ad AS (                      -- 广告侧：campaign × SPU → SPU（窗�
     JOIN commerce.sales_order_lines sl ON sl.id = cl.sales_order_line_id
     JOIN commerce.sales_orders so ON so.id = c.order_pk
     WHERE c.status IN ('CANCELLATION_REQUEST_COMPLETE','RETURN_OR_REFUND_REQUEST_COMPLETE')
-      AND coalesce(so.paid_at, so.order_time) >= :w_start
-      AND coalesce(so.paid_at, so.order_time) < :w_end
+      AND coalesce(so.order_time, so.paid_at) >= :w_start
+      AND coalesce(so.order_time, so.paid_at) < :w_end
     GROUP BY sl.spu_pk
 )
 SELECT cp.id AS spu_pk, cp.spu_id, cp.title, cp.status,
@@ -635,7 +636,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 | `status` | text | 订单状态（`PAID_SALES_ORDER_STATUSES` 白名单外的都排除，见 §4.1） | **销售过滤** |
 | `payment_amount` / `total_amount` | numeric(20,4) | 实付金额 / 订单总额（含运费等，单头级，**不按 SPU 拆**） | 对账用（M6 的行级口径 ≠ 单头时给提示）；页面不用它直接算 SPU 金额 |
 | `currency` | text | 币种（生产全 VND） | 栏目标注 |
-| `order_time` / `paid_at` / `shipped_at` / `delivered_at` / `cancelled_at` | ts | 各生命周期时间 | **paid_at 归日**；shipped/delivered 供 P2 阶段分布（§3.3）；cancelled_at 给秒退预警 |
+| `order_time` / `paid_at` / `shipped_at` / `delivered_at` / `cancelled_at` | ts | 各生命周期时间 | **order_time 归日（下单时间）**；paid_at 供秒退预警；shipped/delivered 供 P2 阶段分布（§3.3）；cancelled_at 给秒退预警 |
 | `fulfillment_type` | text | 履约类型（平台履约/自履约） | 预留 |
 
 ### 6.4 `commerce.sales_order_lines` — 订单行（销售金额/件数按 SPU 的直接来源）
@@ -713,7 +714,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 | 字段 | 类型 | 含义 | 用途 |
 | --- | --- | --- | --- |
 | `spu_pk` / `profit_date` | bigint/date | 商品 / 归属日 | M5/M6 复用的行键 |
-| `units_sold` / `gross_revenue` | numeric | 售出件数 / 毛收入（= 本页 M5/M6 同口径，paid_at 归日 + 白名单） | 直接复用 |
+| `units_sold` / `gross_revenue` | numeric | 售出件数 / 毛收入（= 本页 M5/M6 同口径，order_time 归日 + 白名单） | 直接复用 |
 | `estimated_cogs` / `estimated_gross_profit` | numeric | 估货本 / 估毛利（当前因无成本快照**全 NULL**） | 不用（见 §9-2） |
 | `platform_fees` / `shipping_cost` / `refunds` | numeric | 平台费/运费/退款（当前**全 NULL**，未落地） | 不用（见 §9-3） |
 | `currency` / `cost_method` | text | 币种（VND）/ 成本法 | 标注 |
@@ -806,7 +807,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 | 退款率警戒线 | 30% | ⚠ + 红字 | §7.2 |
 | 广告回本线（实际 ROI < 1.0） | 1.0 | 更深红（红底浅字） | §7.2 |
 | 汇率（D11） | 数据库最新可用 USD 基准快照：`rates[CNY]` 与 `rates[VND]` | 广告 USD、销售/退款 VND 统一换算 CNY；同一结果只用一个快照 | §4.6 |
-| 日期窗口(端点参数,2026-09 review 补) | **默认不传 = 销售/退款全历史累计**；可选 `w_start`/`w_end`(ISO 日期)裁剪，销售与退款统一按关联订单 `COALESCE(paid_at, order_time)` 归属；ad 按自身日期窗口裁剪 | 行/合计同筛选 | §4.5/§5.1-6 |
+| 日期窗口(端点参数,2026-09 review 补) | **默认不传 = 销售/退款全历史累计**；可选 `w_start`/`w_end`(ISO 日期)裁剪，销售与退款统一按关联订单下单时间 `COALESCE(order_time, paid_at)` 归属；ad 按自身日期窗口裁剪 | 行/合计同筛选 | §4.5/§5.1-6 |
 | 行范围 | 有活动 SPU；可选 `include_all` | 空行金额全 0 | §5.1-7 |
 | 精确 SPU scope | `spu_ids` 缺省 = 当前店铺全部；最多 100 个 | 精确命中的 SPU 同时限定行、`total` 与所有 totals；订单 totals 在该集合内跨 SPU 去重 | §5.1 |
 | 平台佣金费率 r̂ | **参考基线 ≈30.8%（Σ\|fee_amount\|/Σgross，含抽佣/联盟/运费等全部直接扣除；页面可覆写 %；无结算样本 → 0 并标注）** | 保本 M17 / 净利润 M18 的 platform_fee（M19） | D10；解析上线后已结算部分自动用实际值 |

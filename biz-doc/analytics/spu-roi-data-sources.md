@@ -36,13 +36,13 @@
 | 订单 | `commerce.sales_orders` | `id` = 内部 PK（`order_pk`）；`order_id` = 平台订单号（text） |
 | 订单状态 | `sales_orders.status` | text 枚举，见 §1.2 |
 | 订单金额 | `sales_orders.payment_amount`（实付）/ `total_amount` | 店铺当地币种（VN = VND） |
-| 订单时间 | `sales_orders.paid_at`（付款）/ `order_time`（下单）/ `cancelled_at` | 窗口裁剪用 `COALESCE(paid_at, order_time)` |
+| 订单时间 | `sales_orders.paid_at`（付款）/ `order_time`（下单）/ `cancelled_at` | 窗口裁剪用 `COALESCE(order_time, paid_at)`（下单时间优先） |
 | 商品行 | `commerce.sales_order_lines` | `order_pk` FK；`spu_pk` 关联 SPU；`quantity` 件数 |
 | 行 GMV | `sales_order_lines.quantity × unit_price` | 无独立列，计算得出 |
 | 已结算判定 | `EXISTS (SELECT 1 FROM finance.settlement_transactions st WHERE st.order_pk = sales_orders.id)` | |
 | 实际到账（SETTLEMENT） | `finance.settlement_components.amount`，`component_code = 'SETTLEMENT'`，经 `transaction_id = settlement_transactions.id` 关联 | 按订单 SUM 后按行 GMV 占比分摊 |
 | 退货 / 退款售后单 | `after_sales.cases` + `after_sales.case_lines` | 枚举见 §1.3；`case_lines.quantity` = 退货件数，`refund_amount` = 退款额 |
-| 售后单完结时间 | `cases.updated_at_source` | 只用于判断售后是否已完成及明细展示；退款窗口跟随关联订单的 `COALESCE(paid_at, order_time)` |
+| 售后单完结时间 | `cases.updated_at_source` | 只用于判断售后是否已完成及明细展示；退款窗口跟随关联订单的 `COALESCE(order_time, paid_at)` |
 | 物流 | `fulfillment.shipments`（`order_pk`）→ `fulfillment.tracking_events`（`shipment_id`） | |
 | 已到目的国判定 | `tracking_events.action_code = 38301` | integer 列，见 §1.4 |
 
