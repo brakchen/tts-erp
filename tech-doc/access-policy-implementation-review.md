@@ -1,6 +1,6 @@
 # Candidate 02：访问策略深模块——实现审阅报告
 
-> 审阅状态：**实现及 reviewer 修复已完成，等待 reviewer 最终 verdict 与用户确认；不得合并 `master`**
+> 审阅状态：**reviewer PASS / Merge verdict OK，等待用户确认；不得合并 `master`**
 >
 > 分支：`redesign/access-policy-implementation`
 >
@@ -219,7 +219,7 @@ bash scripts/test.sh fast \
 2. runtime caller 必须通过 `tts_erp_v2.access` public interface，不应导入私有 implementation；
 3. 补齐 cookie/header、两种 header 顺序、Docs Basic success、shadow/403 budget 测试矩阵。
 
-三项均已修复并通过对应回归测试；最终 verdict 等待 reviewer 回传。
+三项均已修复并通过对应回归测试。复审结论：**P0–P3 无剩余问题，PASS / Merge verdict OK**。
 
 ### 静态验证
 
@@ -236,9 +236,9 @@ bash scripts/test.sh fast \
 - `595ebd0`：提取 access policy 深模块；
 - `84fde1d`：统一 access mode 与 handler role gate；
 - `54db50c`：类型与 lint 收尾；
-- `b6ccc08`：更新现行鉴权契约。
+- `b6ccc08`：更新现行鉴权契约；
+- `eb1c32d`：完成 reviewer 修复与本审阅报告。
 
-最终 review 修复与本报告将在后续提交中记录。
 
 ## 8. 兼容性与明确变化
 
