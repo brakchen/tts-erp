@@ -674,6 +674,40 @@ td.np-red {
 }
 
 /* ═══ 分页 / 提示行 ═══ */
+.op-pager {
+ border-top: 1px solid var(--rule);
+ background: var(--paper);
+}
+.op-pager-limit {
+ width: auto;
+ min-width: 5.25rem;
+ border-color: var(--rule);
+ border-radius: 0;
+ color: var(--ink);
+ background-color: var(--paper);
+}
+.op-pagination {
+ --bs-pagination-color: var(--ink);
+ --bs-pagination-bg: var(--paper);
+ --bs-pagination-border-color: var(--rule);
+ --bs-pagination-hover-color: var(--accent);
+ --bs-pagination-hover-bg: var(--paper-deep);
+ --bs-pagination-hover-border-color: var(--accent);
+ --bs-pagination-focus-color: var(--accent);
+ --bs-pagination-focus-bg: var(--paper);
+ --bs-pagination-focus-box-shadow: 0 0 0 0.15rem rgba(184, 57, 14, 0.16);
+ --bs-pagination-active-color: var(--paper);
+ --bs-pagination-active-bg: var(--accent);
+ --bs-pagination-active-border-color: var(--accent);
+ --bs-pagination-disabled-color: var(--muted);
+ --bs-pagination-disabled-bg: var(--paper);
+ --bs-pagination-disabled-border-color: var(--rule-soft);
+}
+.op-pagination .page-link {
+ min-width: 2.5rem;
+ text-align: center;
+ font-variant-numeric: tabular-nums;
+}
 .op-pager-page {
  color: var(--ink);
  font-variant-numeric: tabular-nums;
