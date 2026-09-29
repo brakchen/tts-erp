@@ -185,7 +185,7 @@ def _meta_payload(
     else:
         window_note = (
             "销售/退款已裁剪至日期窗口；ad 同窗口裁剪；退款跟随原订单，统一按 "
-            "COALESCE(paid_at, order_time) 归属"
+            "下单时间 order_time 归属（order_time 缺失时兜底 paid_at）"
         )
     return {
         "fx": {

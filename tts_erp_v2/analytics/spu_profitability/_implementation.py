@@ -133,7 +133,7 @@ _SQL_ROI_SALES = text(
                sl.quantity * sl.unit_price AS line_gmv_vnd,
                og.order_gmv_vnd,
                os.settlement_vnd,
-               (coalesce(so.paid_at, so.order_time)
+               (coalesce(so.order_time, so.paid_at)
                 AT TIME ZONE 'UTC')::date AS event_day
         FROM commerce.sales_order_lines sl
         JOIN commerce.sales_orders so ON so.id = sl.order_pk
@@ -141,11 +141,11 @@ _SQL_ROI_SALES = text(
         LEFT JOIN order_settlement os ON os.order_pk = sl.order_pk
         WHERE sl.spu_pk IS NOT NULL
           AND so.status = ANY(CAST(:paid_statuses AS text[]))
-          /* 窗口裁剪：COALESCE(paid_at, order_time) UTC 日 */
+          /* 窗口裁剪：下单时间 order_time 优先（COALESCE(order_time, paid_at)）UTC 日 */
           AND (CAST(:ws AS timestamptz) IS NULL
-               OR coalesce(so.paid_at, so.order_time) >= CAST(:ws AS timestamptz))
+               OR coalesce(so.order_time, so.paid_at) >= CAST(:ws AS timestamptz))
           AND (CAST(:we AS timestamptz) IS NULL
-               OR coalesce(so.paid_at, so.order_time) <  CAST(:we AS timestamptz))
+               OR coalesce(so.order_time, so.paid_at) <  CAST(:we AS timestamptz))
     )
     SELECT spu_pk,
            count(DISTINCT order_pk)                                       AS order_count,
@@ -167,10 +167,10 @@ _SQL_ROI_SALES = text(
 # 主表 SQL ── 全损件数（v9 口径：全损 = 退货 + 海外取消；国内取消 ≠ 全损）
 #   退货桶：RETURN_AND_REFUND / REFUND_ONLY 已完结（不论物流是否到海外，
 #     rubric v9「退货 = 直接全损」），件数取 case_lines.quantity；
-#     窗口跟随原订单 coalesce(paid_at, order_time)，跨日退款回归订单日；
+#     窗口跟随原订单下单时间 coalesce(order_time, paid_at)，跨日退款回归下单日；
 #     限定已付白名单订单 —— 异常单(UNPAID 等)退款仍按 §4.2 rule 0 进未归属
 #   海外取消桶：CANCELLED + tracking_events.action_code=38301（已到目的国），
-#     件数取行 quantity；窗口同样按订单 coalesce(paid_at, order_time)
+#     件数取行 quantity；窗口同样按订单下单时间 coalesce(order_time, paid_at)
 _SQL_ROI_FULL_LOSS = text(
     """
     WITH buckets AS (
@@ -186,9 +186,9 @@ _SQL_ROI_FULL_LOSS = text(
           AND sl.spu_pk IS NOT NULL
           AND so.status = ANY(CAST(:paid_statuses AS text[]))
           AND (CAST(:ws AS timestamptz) IS NULL
-               OR coalesce(so.paid_at, so.order_time) >= CAST(:ws AS timestamptz))
+               OR coalesce(so.order_time, so.paid_at) >= CAST(:ws AS timestamptz))
           AND (CAST(:we AS timestamptz) IS NULL
-               OR coalesce(so.paid_at, so.order_time) <  CAST(:we AS timestamptz))
+               OR coalesce(so.order_time, so.paid_at) <  CAST(:we AS timestamptz))
         UNION ALL
         SELECT sl.spu_pk AS spu_pk,
                sl.quantity AS qty,
@@ -202,9 +202,9 @@ _SQL_ROI_FULL_LOSS = text(
                         ON te.shipment_id = sh.id AND te.action_code = :ac
                       WHERE sh.order_pk = so.id)
           AND (CAST(:ws AS timestamptz) IS NULL
-               OR coalesce(so.paid_at, so.order_time) >= CAST(:ws AS timestamptz))
+               OR coalesce(so.order_time, so.paid_at) >= CAST(:ws AS timestamptz))
           AND (CAST(:we AS timestamptz) IS NULL
-               OR coalesce(so.paid_at, so.order_time) <  CAST(:we AS timestamptz))
+               OR coalesce(so.order_time, so.paid_at) <  CAST(:we AS timestamptz))
     )
     SELECT spu_pk,
            sum(qty)         AS full_loss_qty,
@@ -249,9 +249,9 @@ _SQL_ROI_ROW_STATUS = text(
       AND (so.status = ANY(CAST(:paid_statuses AS text[]))
            OR so.status = 'CANCELLED')
       AND (CAST(:ws AS timestamptz) IS NULL
-           OR coalesce(so.paid_at, so.order_time) >= CAST(:ws AS timestamptz))
+           OR coalesce(so.order_time, so.paid_at) >= CAST(:ws AS timestamptz))
       AND (CAST(:we AS timestamptz) IS NULL
-           OR coalesce(so.paid_at, so.order_time) <  CAST(:we AS timestamptz))
+           OR coalesce(so.order_time, so.paid_at) <  CAST(:we AS timestamptz))
     GROUP BY sl.spu_pk
     """
 )
@@ -290,9 +290,9 @@ _SQL_ROI_REFUNDS = text(
     WHERE c.status IN (:st0, :st1)
       AND sl.spu_pk IS NOT NULL
       AND (CAST(:ws AS timestamptz) IS NULL
-           OR coalesce(so.paid_at, so.order_time) >= CAST(:ws AS timestamptz))
+           OR coalesce(so.order_time, so.paid_at) >= CAST(:ws AS timestamptz))
       AND (CAST(:we AS timestamptz) IS NULL
-           OR coalesce(so.paid_at, so.order_time) <  CAST(:we AS timestamptz))
+           OR coalesce(so.order_time, so.paid_at) <  CAST(:we AS timestamptz))
     GROUP BY sl.spu_pk
     """
 )
@@ -311,9 +311,9 @@ _SQL_ROI_REFUND_SCOPE = text(
       AND c.case_type IN ('REFUND_ONLY', 'RETURN_AND_REFUND')
       /* 退款跟随原订单归属：跨日售后仍回到订单时间窗口。 */
       AND (CAST(:ws AS timestamptz) IS NULL
-           OR coalesce(so.paid_at, so.order_time) >= CAST(:ws AS timestamptz))
+           OR coalesce(so.order_time, so.paid_at) >= CAST(:ws AS timestamptz))
       AND (CAST(:we AS timestamptz) IS NULL
-           OR coalesce(so.paid_at, so.order_time) <  CAST(:we AS timestamptz))
+           OR coalesce(so.order_time, so.paid_at) <  CAST(:we AS timestamptz))
     """
 )
 
@@ -346,9 +346,9 @@ _SQL_ROI_ORDER_SCOPE = text(
       AND (so.status = ANY(CAST(:paid_statuses AS text[]))
            OR so.status = 'CANCELLED')
       AND (CAST(:ws AS timestamptz) IS NULL
-           OR coalesce(so.paid_at, so.order_time) >= CAST(:ws AS timestamptz))
+           OR coalesce(so.order_time, so.paid_at) >= CAST(:ws AS timestamptz))
       AND (CAST(:we AS timestamptz) IS NULL
-           OR coalesce(so.paid_at, so.order_time) <  CAST(:we AS timestamptz))
+           OR coalesce(so.order_time, so.paid_at) <  CAST(:we AS timestamptz))
     """
 )
 
@@ -404,13 +404,13 @@ MAX_ESTIMATE_AGE_DAYS = 7
 _SQL_ROI_DATA_WINDOW = text(
     """
     WITH croppable AS (
-        SELECT (coalesce(so.paid_at, so.order_time) AT TIME ZONE 'UTC')::date AS d
+        SELECT (coalesce(so.order_time, so.paid_at) AT TIME ZONE 'UTC')::date AS d
         FROM commerce.sales_orders so
         WHERE so.status = ANY(CAST(:paid_statuses AS text[]))
           AND (CAST(:shop_pk AS bigint) IS NULL
                OR so.shop_pk = CAST(:shop_pk AS bigint))
         UNION
-        SELECT (coalesce(so.paid_at, so.order_time) AT TIME ZONE 'UTC')::date AS d
+        SELECT (coalesce(so.order_time, so.paid_at) AT TIME ZONE 'UTC')::date AS d
         FROM after_sales.cases c
         JOIN commerce.sales_orders so ON so.id = c.order_pk
         WHERE c.status IN (:st0, :st1)
@@ -513,7 +513,7 @@ _SQL_DETAIL_ORDERS = text(
     SELECT so.id AS order_pk,
            so.order_id,
            so.status,
-           coalesce(so.paid_at, so.order_time) AS paid_at,
+           coalesce(so.order_time, so.paid_at) AS paid_at,
            sl.quantity AS qty,
            (sl.quantity * sl.unit_price) AS line_gmv_vnd,
            EXISTS (SELECT 1 FROM fulfillment.shipments sh
@@ -540,10 +540,10 @@ _SQL_DETAIL_ORDERS = text(
     LEFT JOIN fulfillment.shipments sh ON sh.order_pk = so.id
     WHERE sl.spu_pk = :spu_pk
       AND (CAST(:ws AS timestamptz) IS NULL
-           OR coalesce(so.paid_at, so.order_time) >= CAST(:ws AS timestamptz))
+           OR coalesce(so.order_time, so.paid_at) >= CAST(:ws AS timestamptz))
       AND (CAST(:we AS timestamptz) IS NULL
-           OR coalesce(so.paid_at, so.order_time) <  CAST(:we AS timestamptz))
-    ORDER BY coalesce(so.paid_at, so.order_time) DESC NULLS LAST, so.id DESC
+           OR coalesce(so.order_time, so.paid_at) <  CAST(:we AS timestamptz))
+    ORDER BY coalesce(so.order_time, so.paid_at) DESC NULLS LAST, so.id DESC
     LIMIT :lim
     """
 )
@@ -574,9 +574,9 @@ _SQL_DETAIL_SETTLEMENTS = text(
         WHERE spu_pk = :spu_pk
     )
       AND (CAST(:ws AS timestamptz) IS NULL
-           OR coalesce(so.paid_at, so.order_time) >= CAST(:ws AS timestamptz))
+           OR coalesce(so.order_time, so.paid_at) >= CAST(:ws AS timestamptz))
       AND (CAST(:we AS timestamptz) IS NULL
-           OR coalesce(so.paid_at, so.order_time) < CAST(:we AS timestamptz))
+           OR coalesce(so.order_time, so.paid_at) < CAST(:we AS timestamptz))
     ORDER BY st.transaction_time DESC NULLS LAST, st.id DESC
     """
 )
@@ -621,9 +621,9 @@ _SQL_DETAIL_CASES = text(
     LEFT JOIN commerce.sales_orders so ON so.id = c.order_pk
     WHERE sl.spu_pk = :spu_pk
       AND (CAST(:ws AS timestamptz) IS NULL
-           OR coalesce(so.paid_at, so.order_time) >= CAST(:ws AS timestamptz))
+           OR coalesce(so.order_time, so.paid_at) >= CAST(:ws AS timestamptz))
       AND (CAST(:we AS timestamptz) IS NULL
-           OR coalesce(so.paid_at, so.order_time) <  CAST(:we AS timestamptz))
+           OR coalesce(so.order_time, so.paid_at) <  CAST(:we AS timestamptz))
     ORDER BY c.updated_at_source DESC NULLS LAST, c.id DESC
     """
 )
