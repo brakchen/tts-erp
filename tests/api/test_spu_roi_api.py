@@ -2273,17 +2273,71 @@ def test_spu_roi_page_shell_contract(api_client, readonly_key):
     # 前缀安全(2026-08-31 回归):无根绝对路径资源引用
     assert 'href="/' not in body
     assert 'src="/' not in body
-    # warm-paper 工业操作台 token
-    assert "--paper:" in body
-    assert "--accent:" in body
-    assert "--mono:" in body
-    assert "border-radius: 0" in body
+    # warm-paper 工业操作台 token 已外置到页面专属 CSS
+    from pathlib import Path
+
+    css = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "css"
+        / "spu-roi.css"
+    ).read_text(encoding="utf-8")
+    assert "--paper:" in css
+    assert "--accent:" in css
+    assert "--mono:" in css
+    assert "--bs-border-radius: 0" in css
     # 无外链字体
     assert "fonts.googleapis.com" not in body
     assert "fonts.gstatic.com" not in body
     # 无内联事件处理器
     for forbidden in ("onclick=", "onsubmit=", "onchange="):
         assert forbidden not in body, f"inline handler found: {forbidden}"
+
+
+def test_spu_roi_page_uses_bootstrap_responsive_layout(api_client, readonly_key):
+    """整页响应式布局由 Bootstrap 栅格/工具类驱动，不再手写断点隐藏列。"""
+    from pathlib import Path
+
+    r = api_client.get(
+        "/v2/pages/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    body = r.text
+    for fragment in (
+        "container-fluid px-3 px-lg-4 py-3 op-main",
+        "row-cols-1 row-cols-md-2 row-cols-xl-3 row-cols-xxl-4",
+        "row g-2 g-lg-3 align-items-end",
+        "col-12 col-md-6 col-xl-3",
+        "table table-hover align-middle mb-0 op-table",
+        "nav nav-tabs flex-nowrap overflow-x-auto op-drill-tabs",
+        "d-flex flex-column flex-md-row",
+    ):
+        assert fragment in body, f"缺 Bootstrap 响应式结构: {fragment}"
+
+    css_path = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "css"
+        / "spu-roi.css"
+    )
+    css = css_path.read_text(encoding="utf-8")
+    assert "@media (max-width" not in css
+    assert "@media (min-width" not in css
+    assert "nth-child(" not in css
+
+    js_path = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "spu-roi.js"
+    )
+    src = js_path.read_text(encoding="utf-8")
+    assert "row-cols-2 row-cols-sm-3 row-cols-lg-4 row-cols-xxl-6" in src
+    assert "table table-sm table-hover align-middle mb-0 op-tab-table" in src
+    assert 'class: "table-responsive"' in src
 
 
 def test_spu_roi_js_targets_dashboard_hooks():
@@ -2319,6 +2373,7 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     body = r.text
     summary_ids = (
         "sum-total-orders",
+        "sum-spend",
         "sum-orders",
         "sum-sales",
         "sum-refund-count",
@@ -2327,7 +2382,6 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
         "sum-loss-rate",
         "sum-cancel-count",
         "sum-cancel-rate",
-        "sum-spend",
         "sum-net-profit",
         "sum-roi",
         "sum-roi-breakeven",
@@ -2477,8 +2531,7 @@ def test_spu_roi_js_review_fixes_present():
     assert "ROI_HARD_LOSS = 1.0" not in src
     assert "PASS_LINE = 1.5" not in src
     assert "REFUND_RATE_ALERT" in src
-    # 无投放文案(保留)
-    assert "无投放" in src
+    # 「无投放」说明属于页面筛选器 tooltip，由 shell contract 覆盖；JS 不复制文案。
     # D8 删除列开关 + 信息列字段
     assert "op-th col-hidden" not in src
     assert "td.col-hidden" not in src
