@@ -98,12 +98,14 @@ cred = load_credentials(session, provider="tiktok", external_account_id=shop_id)
 
 ## 7. Worktree, review, and completion rules
 
-- Every task starts in a dedicated branch/worktree; the master worktree is for registration, review, testing, and merge.
-- Register file ownership in `handoff/ACTIVE.md` before the first task edit.
-- Do not modify or stash another lane's work. If ownership is unclear, follow `tech-doc/agent-git-workflow.md`.
+- Every task starts in a dedicated branch/worktree created from current `origin/master`. Do not develop task code in the main master worktree; use it only for short registry updates, or use a clean temporary coordination worktree when foreign WIP is present.
+- Before the first task edit, register the lane in `handoff/ACTIVE.md` with the real Pi session UUID and explicit file ownership. `handoff/ACTIVE.md` is coordination metadata and must not be listed as a lane-owned file.
+- `draft`/`active` lanes own their declared files. A `ready` lane is immutable and may be integrated by any session; session identity never blocks merge or cleanup.
+- Ready lanes merge in `ready_at` order by default. Before entering `ready`, merge current `origin/master` into the lane, resolve conflicts, rerun required checks, commit, and push; record both lane HEAD and the synchronized master commit. If master later gains non-registry changes, repeat synchronization and validation. Commits changing only `handoff/ACTIVE.md` do not invalidate the lane.
+- Serialize the final master merge, post-merge validation, registry cleanup, and push with `/tmp/tts-erp-master-merge.lock`. Build the prospective master commit in a clean temporary integration worktree, merge with `--no-ff`, validate that exact commit, then push it to master without force.
+- Do not modify or stash another lane's work. For shared hotspots, keep one writer and exchange a patch or create an explicit successor lane instead of waiting for the original session to return.
 - Keep each writable worktree owned by one writer unless separate worktrees are used.
 - Commit and push the task branch before merge or before pausing for user input. If the network is unavailable, commit locally and report that push remains pending.
-- Merge into master with `--no-ff`, rerun the required checks on master, remove the worktree only after the branch is fully merged, then push master without force.
 - Commit messages use `feat/fix/chore/docs/style/merge` plus a concise Chinese description.
 - In a worktree, never use `git add -A`, `git add .`, or `-A`-style wildcards for staging. They sweep in the worktree's `.venv` symlink, `.env*`, and other gitignored-but-not-protected local files, and the resulting commit will silently wipe a teammate's real venv on merge checkout. Always stage with explicit file paths (e.g. `git add tts_erp_v2/.../spu-roi.js tests/...`). If you used `-A`, run `git status` before `git commit` and unstage anything that is not your own change.
 
@@ -162,7 +164,7 @@ Definition of done:
 3. The default requirement is zero failures. If master has an explicitly recorded stable baseline, the change must introduce zero new stable failures; isolate and rerun failures once to distinguish flakes.
 4. Update contracts and operational documentation affected by the change.
 5. Confirm no secrets, production data, unrelated WIP, or staged foreign files are included.
-6. Confirm the worktree and master are clean after merge and the required branch/master pushes succeeded.
+6. Confirm the lane was synchronized with the master revision it integrated, then confirm the worktree and master are clean and the required branch/master pushes succeeded.
 
 Detailed lifecycle, environment setup, conflict handling, and cleanup: `tech-doc/agent-git-workflow.md`.
 
