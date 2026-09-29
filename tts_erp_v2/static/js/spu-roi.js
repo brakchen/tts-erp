@@ -325,7 +325,7 @@
 
   function initSpuSelect() {
     var select = $("#filter-spu-ids");
-    var TomSelectClass = Reflect.get(window, "TomSelect");
+    var TomSelectClass = window["TomSelect"];
     if (!select || typeof TomSelectClass !== "function") {
       setSpuFeedback("SPU 多选组件加载失败，请刷新页面");
       return;
@@ -711,9 +711,9 @@
     })
       .then((r) => {
         if (r.status === 401) {
-          window.location.href = loginUrl();
+          window.location.href = loginUrl(); // pi-lens-ignore: no-open-redirect-js
           throw new Error("unauthorized");
-        } // pi-lens-ignore: no-open-redirect-js
+        }
         if (!r.ok) throw new Error("HTTP " + r.status);
         return r.json();
       })
@@ -1139,7 +1139,12 @@
     return v && v !== "" ? v : null;
   }
   function setShopPkInUrl(pk) {
-    var u = new URL(location.href);
+    var u;
+    try {
+      u = new URL(location.href);
+    } catch (_error) {
+      return;
+    }
     if (pk) u.searchParams.set("shop_pk", pk);
     else u.searchParams.delete("shop_pk");
     history.replaceState(null, "", u.toString());

@@ -35,6 +35,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from tts_erp_v2.analytics.spu_profitability import _implementation as profitability_impl
 from tts_erp_v2.analytics.spu_profitability import (
     EvidenceKind,
     EvidenceRequest,
@@ -43,7 +44,6 @@ from tts_erp_v2.analytics.spu_profitability import (
     explain_spu,
     read_overview,
 )
-from tts_erp_v2.analytics.spu_profitability import _implementation as profitability_impl
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -2721,7 +2721,7 @@ def test_spu_roi_js_targets_dashboard_hooks():
     assert "cost_source" in src
     assert "DEFAULT_K1" in src  # ⚠ 判断
     # Bootstrap 多选由 Tom Select 驱动，精确 scope 通过独立 spu_ids 参数提交。
-    assert 'Reflect.get(window, "TomSelect")' in src
+    assert 'window["TomSelect"]' in src
     assert "/v2/commerce/channel-product-options" in src
     assert "spu_ids" in src
     assert "clipboardData" in src
@@ -3239,7 +3239,7 @@ def test_spu_roi_cost_source_price_direct_layer(api_client, readonly_key, db_eng
         _seed_source_price_direct(
             sess, shop_pk=shop_pk, spu_id=spu_id, spu_pk=spu_pk, cost="35.0000"
         )
-        o1 = _seed_order_line(
+        _seed_order_line(
             sess,
             shop_pk=shop_pk,
             spu_pk=spu_pk,

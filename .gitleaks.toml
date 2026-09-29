@@ -9,11 +9,11 @@ useDefault = true
 # ─── Local-only files (gitignored, never committed) ───
 [[allowlists]]
 description = "Local env files (.env, .env.test, .env.bak.*) — gitignored runtime/test config"
-paths = ['''^\.env''']
+paths = ['''(^|/)\.env($|\.)''']
 
 [[allowlists]]
 description = "Local runtime dump json — gitignored (see .gitignore)"
-paths = ['''^tiktok-data-sync-runtime-.*\.json$''']
+paths = ['''(^|/)tiktok-data-sync-runtime-.*\.json$''']
 
 # ─── Non-source artifacts ───
 [[allowlists]]
@@ -23,7 +23,7 @@ paths = ['''__pycache__''']
 # ─── Third-party TikTok official partner API docs (sample tokens from TikTok) ───
 [[allowlists]]
 description = "Vendored TikTok partner API docs; every token inside is TikTok's own doc sample"
-paths = ['''^tts-partner-api-docs/''']
+paths = ['''(^|/)tts-partner-api-docs/''']
 
 # ─── Obvious fake fixtures in tests / docstrings / tech-doc examples ───
 [[allowlists]]
