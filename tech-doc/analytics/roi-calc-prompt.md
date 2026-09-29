@@ -50,7 +50,37 @@
 - 采购成本 CNY/件：读 `procurement.manual_product_costs WHERE valid_to IS NULL`
   （cost_source=人工标注价格）；未录入默认 40 CNY/件（默认兜底价格，行标 ⚠）。
 - 广告成本：原生 USD，以用户给定总广告花费为准；进入公式后按同一快照换算为 CNY。ERP 归因 spend 仅作对照。
-- 平台费基线 fee_rate = 30.8%（FEE_RATE_BASELINE，2026-09-06 实测重定，可覆写）。
+- 平台费基线 fee_rate = 30.8%（`FEE_RATE_BASELINE`，2026-09-06 实测重定，可覆写）。
+
+### 3.1 平台佣金费率 r̂ 的完整口径（务必按此，勿凭直觉）
+
+公式：`unsettled_net = unsettled_sales × (1 − r̂) × (1 − 退款率)`
+
+四件事必须同时对：
+
+1. **分子 = `FEE`**（交易级 `fee_amount`，平台总扣除：抽佣 + 联盟 + 运费类）。
+   **不是** `PLATFORM_COMMISSION`（那只是抽佣分项，约占一半）。
+   → 等价地：`FEE` 已含运费类，**不可再叠加** `shipping_fee` / `actual_shipping_fee`
+   / `shipping_cost`（会重复扣）。
+2. **分母 = 行GMV**（`sales_order_lines.quantity × unit_price`）= **客户实付（折扣后）**。
+   **不是** `gross_sales_amount` —— 那是**折扣前挂牌价**，实测是行GMV 的 **169%**
+   （= `AFTER_SELLER_DISCOUNTS_SUBTOTAL` + `|SELLER_DISCOUNT|`）。
+   验证：Σ行GMV 与结算单 `CUSTOMER_PAYMENT` 只差 0.24%。
+3. **样本 = 只统计未退款(kept)订单**（`CUSTOMER_REFUND = 0`）。
+   因为本公式已另有 `(1 − 退款率)` 扣过一次退款；若 r̂ 的样本里再混入全额退款
+   订单（其费率仅 ~3% of 行GMV），退款效应被**算两遍**。
+4. **作用域** = 单店铺 + 近 180 天（由 `analytics.shop_fee_rate` 任务每 24h 快照）。
+
+生产反证（把已结算订单当作未结算来预测，与真实 ΣSETTLEMENT 比）：
+kept 口径误差 **±1%**；混合口径（含退款单）高估 **~16%**。
+
+逐单恒等式（中位残差 0.000%）：`SETTLEMENT ≈ line_gmv + FEE + CUSTOMER_REFUND`
+
+参考量级：kept 口径实测 **32.10%**（两店合计）/ 32.30% / 31.48% —— 与文档长期
+记载的基线 **30.8% 一致**。若你算出的值明显偏离 ~30%（例如 ~21% 或 ~12%），
+先怀疑自己搞错了上述四点其中之一，**不要先怀疑 30.8% 是错的**。
+
+口径定位全过程与反证数据：`shop-fee-rate-definition-gap.md`。
 
 ## 4. ROI / 保本（ERP 财务口径，全 CNY，来自 /v2/analytics/spu-roi 同源公式）
 - sales = Σ paid 订单行金额（毛额，含之后被退款的原额）；refund_net = Σ 已完结

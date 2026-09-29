@@ -913,7 +913,7 @@ def _query_spu_roi(
     # meta 共用同一份结果，避免两处各自推导出不一致口径。
     shop_fee: dict[int, ShopFeeRateEntry] = {}
     for cat in cats:
-        spk = int(cat["shop_pk"])
+        spk = cat["shop_pk"]
         if spk in shop_fee:
             continue
         shop_fee[spk] = _resolve_shop_fee(
