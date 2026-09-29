@@ -189,9 +189,11 @@
             // 同步方式：有 credential_id = 已 OAuth 授权走 API 同步，否则仅插件
             // （2026-09-11 migration 0025 删除了 shops.data_source 枚举列）
             var isApi = s.credential_id != null;
+            // 类名必须跟 pages.py shops 页 CSS 对齐（badge-api / badge-plugin；
+            // 曾误用 badge-sync-* 导致徽标无底色，2026-09-29 修复）
             var badge = isApi
-              ? '<span class="badge badge-sync-api">API 同步</span>'
-              : '<span class="badge badge-sync-plugin">仅插件</span>';
+              ? '<span class="badge badge-api">API 同步</span>'
+              : '<span class="badge badge-plugin">仅插件</span>';
             var pk = s.shop_pk || s.id;
             var dateVal = s.opened_date || "";
             var svcId = s.service_id || "";
