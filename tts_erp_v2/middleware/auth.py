@@ -18,15 +18,13 @@ from tts_erp_v2.access import (
     AuthMode,
     DeploymentPathInput,
     Role,
-    canonicalize_path,
-)
-from tts_erp_v2.access._access import evaluate_access
-from tts_erp_v2.access._credentials import (
     authenticate_hash,
     authenticate_key,
+    canonicalize_path,
     clear_credential_cache,
+    evaluate_access,
 )
-from tts_erp_v2.access._policy import required_role as _required_role
+from tts_erp_v2.access import required_role as _required_role
 
 # Compatibility exports for existing handler helpers and test fixtures.
 ROLE_LEVEL = {role.value: role.level for role in Role}

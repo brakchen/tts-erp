@@ -13,9 +13,9 @@ from tts_erp_v2.access import (
     AccessRequest,
     AuthMode,
     Role,
+    clear_credential_cache,
+    evaluate_access,
 )
-from tts_erp_v2.access._access import evaluate_access
-from tts_erp_v2.access._credentials import clear_credential_cache
 from tts_erp_v2.db.models.security import ApiKey
 from tts_erp_v2.middleware.rate_limit import reset_shared
 
