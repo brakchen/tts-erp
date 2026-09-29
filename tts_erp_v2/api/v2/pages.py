@@ -1470,22 +1470,24 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
 
     <!-- 工具栏:原生 select multiple 由 Tom Select Bootstrap 5 主题增强；不自研多选组件。 -->
     <section class="op-toolbar px-3 px-lg-4 py-3" id="toolbar">
-      <div class="row g-2 g-lg-3 align-items-end mb-2">
-        <div class="col-12 col-xl">
-          <label class="form-label op-fld-label mb-1" for="filter-spu-ids">SPU 筛选</label>
-          <select id="filter-spu-ids" class="form-select" multiple aria-label="批量选择 SPU" disabled></select>
-          <div class="form-text op-spu-help">
-            支持搜索或批量粘贴中英文逗号分隔的 SPU；最多 100 个。
-            <span id="spu-selection-count">已选择 0 个</span>
+      <div class="op-spu-filter border p-2 p-lg-3 mb-3">
+        <div class="op-spu-filter__header d-flex flex-wrap align-items-center justify-content-between gap-1 mb-2">
+          <label class="form-label op-fld-label mb-0" for="filter-spu-ids">SPU 筛选</label>
+          <span class="op-spu-selection-count" id="spu-selection-count">已选择 0 个</span>
+        </div>
+        <div class="row g-2 align-items-center">
+          <div class="col-12 col-xl">
+            <select id="filter-spu-ids" class="form-select" multiple aria-label="批量选择 SPU" disabled></select>
           </div>
-          <div class="invalid-feedback" id="spu-filter-feedback"></div>
+          <div class="col-6 col-sm-auto d-grid">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-spu-clear" disabled>清空</button>
+          </div>
+          <div class="col-6 col-sm-auto d-grid">
+            <button type="button" class="btn btn-sm btn-primary" id="btn-spu-apply" disabled>查询</button>
+          </div>
         </div>
-        <div class="col-6 col-sm-auto d-grid">
-          <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-spu-clear" disabled>清空</button>
-        </div>
-        <div class="col-6 col-sm-auto d-grid">
-          <button type="button" class="btn btn-sm btn-primary" id="btn-spu-apply" disabled>查询</button>
-        </div>
+        <div class="form-text op-spu-help mt-2">支持搜索或批量粘贴中英文逗号分隔的 SPU；最多 100 个。</div>
+        <div class="invalid-feedback" id="spu-filter-feedback"></div>
       </div>
       <div class="row g-2 g-lg-3 align-items-end">
         <div class="col-6 col-md-3 col-xl-2" data-tip="日期范围（销售/退款/广告同口径裁剪；空 = 全历史）">

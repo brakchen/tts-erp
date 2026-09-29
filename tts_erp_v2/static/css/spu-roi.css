@@ -341,11 +341,25 @@ a:hover {
  text-overflow: ellipsis;
  white-space: nowrap;
 }
+/* SPU 筛选是一个完整的操作单元：标签、输入、动作与辅助文本共享边界，
+   不再把输入和按钮散落在同一工具栏行的不同列里。 */
+.op-spu-filter {
+ border-color: var(--rule) !important;
+ background: rgba(255, 255, 255, 0.12);
+}
+.op-spu-filter__header {
+ min-height: 18px;
+}
+.op-spu-selection-count {
+ color: var(--muted);
+ font-size: 12px;
+ font-variant-numeric: tabular-nums;
+ white-space: nowrap;
+}
+.op-spu-filter .ts-wrapper {
+ width: 100%;
+}
 .op-spu-help {
- display: flex;
- flex-wrap: wrap;
- justify-content: space-between;
- gap: 4px 12px;
  color: var(--muted);
 }
 .op-toolbar .btn-primary {
