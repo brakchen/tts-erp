@@ -1,8 +1,8 @@
 # Candidate 02：访问策略与部署路径适配——架构审阅报告
 
-> 审阅状态：**用户已确认并批准合并本审阅文档；运行时实现尚未开始**
+> 审阅状态：**已确认并合并到 `master`**（合并提交 `c3f9560`）；运行时实现尚未开始
 >
-> 审阅分支：`redesign/access-policy-module`
+> 历史审阅分支：`redesign/access-policy-module`
 >
 > 详细技术方案：[`access-policy-module.md`](access-policy-module.md)
 
