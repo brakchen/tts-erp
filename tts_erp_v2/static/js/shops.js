@@ -4,7 +4,7 @@
  *   GET  /v2/commerce/channel-accounts   已注册店铺（readonly）
  *   GET  /v2/admin/shops/unregistered    插件数据里出现但未注册的 shop_id（admin）
  *   POST /v2/admin/shops/register        人工注册（admin，cookie 会话带 CSRF 头）
- *   PATCH /v2/admin/shops/{shop_pk}      元信息编辑（名称/区域/开店日期/service_id，readwrite+）
+ *   PATCH /v2/admin/shops/{shop_pk}      元信息编辑（readwrite+）/ App 凭证（admin）
  *   GET  /v2/oauth/tiktok/authorize      获取授权链接（readwrite+，format=json）
  *
  * 权限降级：非 admin 会话时 unregistered/register 会 403 —— 页面仍可
@@ -95,8 +95,8 @@
   }
 
   function renderAuthLink(btn, url, expiresAt) {
-    var td = btn.closest("td");
-    td.textContent = "";
+    var container = btn.closest(".auth-actions");
+    container.textContent = "";
     var a = document.createElement("a");
     a.href = url;
     a.target = "_blank";
@@ -114,9 +114,9 @@
       : "";
     var expText = exp ? " · 有效至 " + exp + " UTC" : "";
     hint.textContent = "state 单次使用" + expText;
-    td.appendChild(a);
-    td.appendChild(copy);
-    td.appendChild(hint);
+    container.appendChild(a);
+    container.appendChild(copy);
+    container.appendChild(hint);
     // 一键化（2026-09-29）：生成成功后立即自动复制，用户无需再点第二次。
     // 注意 transient user activation：fetch 几秒内返回时 clipboard API 仍
     // 视为用户手势；超时/被拒时按钮会显示「复制失败」，用户可手动再点。
@@ -165,12 +165,91 @@
       });
   }
 
+  function errorDetail(body, fallback) {
+    var detail = body && body.detail;
+    if (Array.isArray(detail)) {
+      return detail.map((d) => d.msg).join("; ");
+    }
+    return detail || (body && body.error) || fallback;
+  }
+
+  // ---------- App 凭证（按 service_id） ----------
+  var appDialogRow = null;
+
+  function openAppCredentialsDialog(btn) {
+    clearErr();
+    var row = btn.closest("tr");
+    var svcCell = row.querySelector('[data-field="service_id"]');
+    var currentServiceId = svcCell ? svcCell.textContent.trim() : "";
+    if (currentServiceId === "—") currentServiceId = "";
+    appDialogRow = row;
+    $("#d-shop-pk").value = row.getAttribute("data-shop-pk") || "";
+    $("#d-service-id").value = currentServiceId;
+    $("#d-app-key").value = "";
+    $("#d-app-secret").value = "";
+    var dialog = $("#app-credentials-dialog");
+    if (dialog.showModal) dialog.showModal();
+    else dialog.setAttribute("open", "");
+    $("#d-service-id").focus();
+  }
+
+  function closeAppCredentialsDialog() {
+    var dialog = $("#app-credentials-dialog");
+    $("#d-app-secret").value = "";
+    appDialogRow = null;
+    if (dialog.close) dialog.close();
+    else dialog.removeAttribute("open");
+  }
+
+  function bindAppCredentialsDialog() {
+    $("#d-cancel").addEventListener("click", closeAppCredentialsDialog);
+    $("#app-credentials-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      clearErr();
+      var shopPk = $("#d-shop-pk").value;
+      var payload = {
+        service_id: $("#d-service-id").value.trim(),
+        app_key: $("#d-app-key").value.trim(),
+        app_secret: $("#d-app-secret").value,
+      };
+      var submit = e.currentTarget.querySelector('button[type="submit"]');
+      submit.disabled = true;
+      api("/v2/admin/shops/" + shopPk, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      })
+        .then((r) => r.json().then((body) => ({ httpOk: r.ok, status: r.status, body })))
+        .then((res) => {
+          if (!res.httpOk) {
+            if (res.status === 403) {
+              throw new Error("保存 App Key/App Secret 需要 admin 会话。");
+            }
+            throw new Error(errorDetail(res.body, "HTTP " + res.status));
+          }
+          var shop = res.body && res.body.shop;
+          if (shop && appDialogRow) {
+            var svcCell = appDialogRow.querySelector('[data-field="service_id"]');
+            var statusCell = appDialogRow.querySelector(".app-credentials-status");
+            if (svcCell) svcCell.textContent = shop.service_id || "—";
+            if (statusCell) {
+              statusCell.className = "app-credentials-status badge badge-api";
+              statusCell.textContent = "已配置";
+            }
+          }
+          closeAppCredentialsDialog();
+        })
+        .catch((err) => showErr("保存 App 凭证失败：" + (err.message || String(err))))
+        .then(() => { submit.disabled = false; });
+    });
+  }
+
   // ---------- 已注册店铺 ----------
   function loadShops() {
     return api("/v2/commerce/channel-accounts?platform=tiktok&limit=500")
       .then((r) => {
         if (r.status === 401) {
-          window.location.href = loginUrl(); // pi-lens-ignore: no-open-redirect-js
+          // pi-lens-ignore: no-open-redirect-js — loginUrl() is fixed same-origin path
+          window.location.href = loginUrl();
           return null;
         }
         if (!r.ok) throw new Error("shops HTTP " + r.status);
@@ -180,8 +259,9 @@
         if (!shops) return;
         var body = $("#shop-body");
         if (!shops.length) {
+          // pi-lens-ignore: no-inner-html-js — static empty-state markup
           body.innerHTML =
-            '<tr><td colspan="7" class="text-muted">暂无店铺</td></tr>';
+            '<tr><td colspan="8" class="text-muted">暂无店铺</td></tr>';
           return;
         }
         body.innerHTML = shops
@@ -197,6 +277,9 @@
             var pk = s.shop_pk || s.id;
             var dateVal = s.opened_date || "";
             var svcId = s.service_id || "";
+            var appBadge = s.app_credentials_configured
+              ? '<span class="app-credentials-status badge badge-api">已配置</span>'
+              : '<span class="app-credentials-status badge badge-plugin">未配置</span>';
             return (
               "<tr data-shop-pk=" +
               pk +
@@ -213,6 +296,7 @@
               '<td class="editable" data-field="service_id" title="点击修改">' +
               esc(svcId || "—") +
               "</td>" +
+              "<td>" + appBadge + "</td>" +
               '<td class="editable" data-field="opened_date" title="点击修改">' +
               esc(dateVal || "—") +
               "</td>" +
@@ -221,13 +305,17 @@
               ' <span class="text-muted small">' +
               esc(s.status || "") +
               "</span></td>" +
-              '<td><button type="button" class="btn btn-sm btn-outline-dark btn-auth">获取授权链接</button></td>' +
+              '<td><button type="button" class="btn btn-sm btn-outline-dark btn-config-app">配置 App</button> ' +
+              '<span class="auth-actions"><button type="button" class="btn btn-sm btn-outline-dark btn-auth">获取授权链接</button></span></td>' +
               "</tr>"
             );
           })
           .join("");
         body.querySelectorAll(".btn-auth").forEach((btn) => {
           btn.addEventListener("click", () => fetchAuthLink(btn));
+        });
+        body.querySelectorAll(".btn-config-app").forEach((btn) => {
+          btn.addEventListener("click", () => openAppCredentialsDialog(btn));
         });
         // 点击 .editable 列进入编辑模式
         body.querySelectorAll(".editable").forEach((td) => {
@@ -310,6 +398,7 @@
           : "";
         var body = $("#cand-body");
         if (!cands.length) {
+          // pi-lens-ignore: no-inner-html-js — static empty-state markup
           body.innerHTML =
             '<tr><td colspan="3" class="text-muted">没有待注册的店铺</td></tr>';
           return;
@@ -345,12 +434,21 @@
     $("#register-form").addEventListener("submit", (e) => {
       e.preventDefault();
       clearErr();
+      var appKey = $("#f-app-key").value.trim();
+      var appSecret = $("#f-app-secret").value;
+      if ((appKey && !appSecret) || (!appKey && appSecret)) {
+        showErr("App Key 与 App Secret 必须成对填写。");
+        return;
+      }
       var payload = {
         platform: "tiktok",
         shop_id: $("#f-shop-id").value.trim(),
         account_name: $("#f-name").value.trim() || null,
         region: $("#f-region").value.trim() || null,
         opened_date: $("#f-opened").value || null,
+        service_id: $("#f-service-id").value.trim() || null,
+        app_key: appKey || null,
+        app_secret: appSecret || null,
       };
       api("/v2/admin/shops/register", {
         method: "POST",
@@ -359,17 +457,17 @@
         .then((r) => {
           if (r.status === 403) {
             showErr(
-              "需要 readwrite 及以上会话才能注册店铺（当前会话角色不足）。",
+              appKey
+                ? "保存 App Key/App Secret 需要 admin 会话。"
+                : "需要 readwrite 及以上会话才能注册店铺（当前会话角色不足）。",
             );
             return null;
           }
           return r.json().then((body) => {
             if (!r.ok) {
-              var detail = body && body.detail;
-              if (Array.isArray(detail)) {
-                detail = detail.map((d) => d.msg).join("; ");
-              }
-              throw new Error("注册失败：" + (detail || "HTTP " + r.status));
+              throw new Error(
+                "注册失败：" + errorDetail(body, "HTTP " + r.status),
+              );
             }
             return body;
           });
@@ -377,6 +475,9 @@
         .then((body) => {
           if (!body) return;
           $("#f-shop-id").value = "";
+          $("#f-service-id").value = "";
+          $("#f-app-key").value = "";
+          $("#f-app-secret").value = "";
           return loadShops().then(loadCandidates);
         })
         .catch((err) => {
@@ -393,7 +494,7 @@
         if (me && me.role === "readonly") {
           var note = $("#auth-note");
           note.textContent =
-            "当前会话角色为 readonly — 可以查看已注册列表，注册/编辑/候选列表/获取授权链接需要 readwrite 及以上会话。";
+            "当前会话角色为 readonly — 注册/编辑/候选列表/获取授权链接需要 readwrite；保存 App Key/App Secret 需要 admin。";
           note.classList.remove("d-none");
           note.classList.remove("op-hidden");
         }
@@ -403,6 +504,7 @@
 
   document.addEventListener("DOMContentLoaded", () => {
     bindForm();
+    bindAppCredentialsDialog();
     probeAuth()
       .then(loadShops)
       .then(loadCandidates)
