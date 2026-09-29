@@ -98,8 +98,10 @@ AuthMiddleware：优先验会话 cookie（key_hash → DB 复查仍有效）→ 
      app 的 `root_path`（`app.py` 构建时从 `TTS_ERP_EXTERNAL_PREFIX` 读一次）。
      应用侧的 302 `Location` **自己带前缀**（从 `scope["root_path"]` 派生）；
      nginx `/tts/` 透传完整前缀（`proxy_pass` 无尾斜线），其 `proxy_redirect`
-     规则含 `(?!tts/)` 负向前瞻，不会双前缀；`next` 查询值保持 route-relative
-     （不带前缀），登录页渲染表单隐藏字段时再拼上 `root_path`。
+     规则含 `(?!tts/)` 负向前瞻，不会双前缀；`next` 查询值应保持 route-relative
+     （不带前缀），登录页渲染表单隐藏字段时再拼上 `root_path`。为兼容旧页面 JS
+     已经传入 `/tts/...` 的情况，登录页对已带 `root_path` 的 `next` 做幂等归一化，
+     绝不再拼成 `/tts/tts/...`（未知双前缀路由会回落默认 admin，导致 RW 403 假象）。
 
 ## 6. 页面改动
 

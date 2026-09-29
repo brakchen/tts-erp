@@ -2583,6 +2583,10 @@ def test_spu_roi_page_toolbar_shop_and_date_filters(api_client, readonly_key):
     assert " multiple " in body
     assert 'id="btn-spu-apply"' in body
     assert 'id="btn-spu-clear"' in body
+    # SPU 输入、已选计数与操作按钮是同一个视觉/操作容器，不能散落在工具栏。
+    assert 'class="op-spu-filter border p-2 p-lg-3 mb-3"' in body
+    assert 'class="op-spu-filter__header' in body
+    assert 'class="row g-2 align-items-center"' in body
     assert "支持搜索或批量粘贴" in body
     assert "tom-select.bootstrap5.min.css" in body
     assert "tom-select.complete.min.js" in body
@@ -2913,6 +2917,8 @@ def test_spu_roi_filter_actions_keep_a_stable_mobile_layout():
     )
     css = css_path.read_text(encoding="utf-8")
     assert ".op-toolbar .ts-wrapper" in css
+    assert ".op-spu-filter" in css
+    assert ".op-spu-selection-count" in css
     assert "width: 100%;" in css
     assert "#btn-spu-clear" in css
     assert "#btn-spu-apply" in css
