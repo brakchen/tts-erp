@@ -438,10 +438,10 @@ def shops_page() -> HTMLResponse:
   本页让运营人工注册这类店铺（credential_id=NULL, status='registered'）。
   注册只影响查询关联，数据同步不依赖注册状态。
 
-  三段式：注册表单 / 待注册候选（GET /v2/admin/shops/unregistered）/
-  已注册列表（GET /v2/commerce/channel-accounts）。行为在
-  static/js/shops.js；写入端点 POST /v2/admin/shops/register 要 readwrite
-  会话（readonly 会话降级只读展示）。
+  两段式：注册表单 / 已注册列表（GET /v2/commerce/channel-accounts）。
+  行为在 static/js/shops.js；写入端点 POST /v2/admin/shops/register 要 readwrite
+  会话（readonly 会话降级只读展示）。注：「待注册候选」section 已于
+  2026-09-29 用户拍板下线；后端 GET /v2/admin/shops/unregistered 端点保留。
   """
   return _page(_SHOPS_PAGE_HTML, current_page="shops")
 
@@ -594,17 +594,6 @@ _SHOPS_PAGE_HTML = """<!doctype html>
         </div>
       </form>
       <div class="form-hint">重复注册幂等：只补填仍为空的字段，不会覆盖已有 credential / 状态。App Key 与 App Secret 必须成对填写，保存应用凭证需要 admin。</div>
-    </section>
-
-    <section class="op-section">
-      <div class="op-section-header">
-        <h2 class="op-section-title">待注册候选</h2>
-        <span class="op-section-meta" id="cand-count">0 条</span>
-      </div>
-      <table class="op-table">
-        <thead><tr><th class="op-th">shop_id</th><th class="op-th">数据来源</th><th class="op-th" style="width: 120px;"></th></tr></thead>
-        <tbody id="cand-body"><tr><td colspan="3" class="op-empty">加载中…</td></tr></tbody>
-      </table>
     </section>
 
     <section class="op-section">
