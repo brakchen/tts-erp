@@ -1,11 +1,9 @@
 # 访问策略与部署路径适配深模块技术方案
 
-> 状态：**Candidate 02 架构审阅已通过并合并到 `master`**（合并提交 `c3f9560`）；运行时实现尚未开始。
+> 状态：**Candidate 02 运行时实现已完成，等待用户 review；不得合并到 `master`**。
 >
-> 本方案对应架构评审 Candidate 02「分离访问决策与部署路径适配」。用户已确认本轮自动追问
-> 决策及推荐架构。后续运行时实现须建立新的 implementation lane，并在合并前重新 review。
->
-> 本轮只修改技术文档，不修改运行时代码、中间件顺序、数据库或生产配置。
+> 架构方案已通过 `c3f9560` 合并；实现位于独立分支
+> `redesign/access-policy-implementation`。本轮不改变中间件顺序、数据库 schema 或生产配置。
 
 ## 1. 问题定义
 
@@ -471,3 +469,20 @@ module import/test 时验证：
 
 因此该 module 不是 pass-through；它通过小 interface 隐藏高风险访问语义，能为 caller 提供
 leverage，并将事故修复集中到一个 locality 清晰的 implementation。
+
+## 13. Implementation 落地结果
+
+实际实现与本方案一致：
+
+- `tts_erp_v2/access/_deployment.py`：纯 `canonicalize_path()`；
+- `tts_erp_v2/access/_policy.py`：私有 route role table 与 fail-closed fallback；
+- `tts_erp_v2/access/_credentials.py`：SQLAlchemy credential lookup 与 60s/20s cache；
+- `tts_erp_v2/access/_access.py`：typed `evaluate_access()` 与完整 decision ordering；
+- `tts_erp_v2/middleware/auth.py`：缩减为 ASGI translation/rendering adapter；
+- `tts_erp_v2/api/deps.py`：handler gate 委托 `AccessGrant`；
+- `tts_erp_v2/api/v2/auth.py`：login/me 复用 credential implementation，`/me` 返回 DB 当前 role。
+
+已落地本文批准的契约修复：shadow 真正 pass-through、off/shadow handler gate 一致、
+browser denial 纳入限流、Bearer 固定优先、invalid mode fail closed、prefixed Docs Basic Auth、
+`/me` 使用数据库当前 role。最终测试和 reviewer 结论记录在
+[`access-policy-implementation-review.md`](access-policy-implementation-review.md)。

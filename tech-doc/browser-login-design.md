@@ -135,10 +135,11 @@ AuthMiddleware：优先验会话 cookie（key_hash → DB 复查仍有效）→ 
 ## 8. 边界情况
 
 - **本地 `:9877`（http）**：`Secure` cookie 不发 → 需 `TTS_ERP_SESSION_SECURE=0`
-- **`TTS_ERP_AUTH_MODE=off`**：中间件直接放行，登录页照常可用（不强制）
-- **shadow 模式**：cookie 校验照跑，deny 只记日志（保持现有语义）
+- **`TTS_ERP_AUTH_MODE=off`**：middleware 与 handler role gate 都直接放行；登录页照常可用（不强制）
+- **shadow 模式**：cookie 校验照跑，would-deny 只记日志；不返回 302/401/403，也不消耗 denied budget
 - **会话过期中途操作**：fetch 得 JSON 401 → 页面 JS 跳登录页并保留 `next`
-- **cookie 与 header 并存**：cookie 优先（同一 key 时无差别；不同 key 时以 cookie 为准，文档注明）
+- **cookie 与 header 并存**：有效 cookie 优先；cookie 无效/撤销时回退 header；Bearer 固定优先于 `X-API-Key`
+- **role 更新**：cookie payload 中 role 不参与授权；middleware 和 `/v2/auth/me` 都使用数据库当前 role
 
 ## 9. 测试计划（TDD，先写测试）
 
