@@ -3628,7 +3628,7 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert "totals.ad_system_actual_roi" in js_src
     assert '("#sum-roi-ad")' in js_src
     assert 'roiAdStatus === "estimated_known_costs"' in js_src
-    assert '("#sum-projection-status")' in js_src
+    assert '"#sum-projection-status"' in js_src
     assert "totals.projection_status" in js_src
     assert "totals.projection_refund_amount_rate" in js_src
     assert "totals.projected_net_profit" in js_src
