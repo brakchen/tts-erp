@@ -212,6 +212,12 @@ def _projection_inputs(**overrides) -> ProjectionInput:
         "confirmed_unsettled_full_loss_order_count": 0,
         "confirmed_unsettled_full_loss_qty": Decimal(0),
         "unresolved_unsettled_order_count": 5,
+        "full_loss_exposure_unsettled_order_count": 5,
+        "confirmed_full_loss_exposure_order_count": 0,
+        "confirmed_full_loss_exposure_qty": Decimal(0),
+        "unresolved_full_loss_exposure_order_count": 5,
+        "unresolved_full_loss_exposure_qty": Decimal(20),
+        "unresolved_full_loss_exposure_cogs_cny": Decimal(200),
         "unsettled_sales_after_fee_cny": Decimal(400),
         "confirmed_unsettled_refund_after_fee_cny": Decimal(16),
         "unresolved_unsettled_qty": Decimal(20),
@@ -269,6 +275,12 @@ def test_projection_subtracts_confirmed_outcomes_from_whole_cohort_quota() -> No
             confirmed_unsettled_full_loss_order_count=8,
             confirmed_unsettled_full_loss_qty=Decimal(8),
             unresolved_unsettled_order_count=292,
+            full_loss_exposure_unsettled_order_count=300,
+            confirmed_full_loss_exposure_order_count=8,
+            confirmed_full_loss_exposure_qty=Decimal(8),
+            unresolved_full_loss_exposure_order_count=292,
+            unresolved_full_loss_exposure_qty=Decimal(292),
+            unresolved_full_loss_exposure_cogs_cny=Decimal(2920),
             unresolved_unsettled_qty=Decimal(292),
         )
     )
@@ -276,6 +288,26 @@ def test_projection_subtracts_confirmed_outcomes_from_whole_cohort_quota() -> No
     assert result.settled_full_loss_rate == Decimal("0.10")
     assert result.projected_future_full_loss_order_count == Decimal(22)
     assert result.projected_future_full_loss_qty == Decimal(22)
+
+
+def test_projection_excludes_delivery_terminal_orders_from_full_loss_exposure() -> None:
+    result = calculate_projection(
+        _projection_inputs(
+            unsettled_order_count=20,
+            full_loss_exposure_unsettled_order_count=5,
+            confirmed_full_loss_exposure_order_count=1,
+            confirmed_full_loss_exposure_qty=Decimal(1),
+            unresolved_full_loss_exposure_order_count=4,
+            unresolved_full_loss_exposure_qty=Decimal(16),
+            unresolved_full_loss_exposure_cogs_cny=Decimal(160),
+        )
+    )
+
+    # Refund projection still covers all 20 unsettled orders' sales, while the
+    # full-loss quota uses only the five orders that have not reached delivery.
+    assert result.projected_terminal_refund_amount_cny == Decimal(40)
+    assert result.projected_future_full_loss_order_count == Decimal(0)
+    assert result.projected_future_full_loss_qty == Decimal(0)
 
 
 def test_projection_does_not_double_count_confirmed_unsettled_refund() -> None:
