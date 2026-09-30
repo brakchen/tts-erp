@@ -93,7 +93,7 @@ _FOUR_DECIMAL_RATIO_FIELDS = {"share_ratio", "fee_rate_used"}
 _COST_ASSUMPTION = (
     "按 SPU 解析：使用当前有效的人工标注采购成交价(MANUAL)；"
     "未命中 → 默认 40 CNY/件；妙手/1688 同步货源价不参与计算；"
-    "DEFAULT_K1 行页面 ⚠ 可补录"
+    "DEFAULT_K1 行页面显示‘缺成本’标识，可补录"
 )
 _FEE_NOTE = (
     "平台佣金=平台从销售额直接扣除的全部费用；已结算=SETTLEMENT 实到账；"
