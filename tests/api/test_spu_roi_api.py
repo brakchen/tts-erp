@@ -714,7 +714,7 @@ def _seed_projection_scenario(sess) -> int:
         shop_pk=shop_pk,
         spu_pk=spu_pk,
         order_id="TEST_ORDER_PROJECTION_UNRESOLVED",
-        status=PAID_ORDER_STATUS,
+        status="IN_TRANSIT",
         line_ext="TEST_LINE_PROJECTION_UNRESOLVED",
         qty="4",
         unit_price="100000",
@@ -725,7 +725,7 @@ def _seed_projection_scenario(sess) -> int:
         shop_pk=shop_pk,
         spu_pk=spu_pk,
         order_id="TEST_ORDER_PROJECTION_PARTIAL",
-        status=PAID_ORDER_STATUS,
+        status="IN_TRANSIT",
         line_ext="TEST_LINE_PROJECTION_PARTIAL",
         qty="2",
         unit_price="100000",
@@ -740,6 +740,45 @@ def _seed_projection_scenario(sess) -> int:
         case_type="REFUND_ONLY",
         status="RETURN_OR_REFUND_REQUEST_COMPLETE",
         lines=[(partial_line, "TEST_CLINE_PROJECTION_PARTIAL", "1", "100000")],
+    )
+    return spu_pk
+
+
+def _seed_delivery_aware_projection_scenario(sess) -> int:
+    """Add two unsettled orders that have already reached delivery."""
+
+    spu_pk = _seed_projection_scenario(sess)
+    shop_pk = sess.execute(
+        text(
+            "SELECT shop_pk FROM commerce.sales_orders "
+            "WHERE order_id = 'TEST_ORDER_PROJECTION_UNRESOLVED'"
+        )
+    ).scalar_one()
+    unresolved_order = sess.execute(
+        text(
+            "SELECT id FROM commerce.sales_orders "
+            "WHERE order_id = 'TEST_ORDER_PROJECTION_UNRESOLVED'"
+        )
+    ).scalar_one()
+    sess.execute(
+        text(
+            "INSERT INTO fulfillment.shipments ("
+            " order_pk, external_package_id, status, delivered_at"
+            ") VALUES (:order_pk, 'TEST_PKG_PROJECTION_DELIVERED',"
+            " 'DELIVERED', now())"
+        ),
+        {"order_pk": unresolved_order},
+    )
+    _seed_order_line(
+        sess,
+        shop_pk=shop_pk,
+        spu_pk=spu_pk,
+        order_id="TEST_ORDER_PROJECTION_STATUS_DELIVERED",
+        status="DELIVERED",
+        line_ext="TEST_LINE_PROJECTION_STATUS_DELIVERED",
+        qty="4",
+        unit_price="100000",
+        paid=True,
     )
     return spu_pk
 
@@ -1279,8 +1318,13 @@ def test_spu_roi_projects_only_unsettled_orders_from_settled_sample(
     assert item["projection_refund_amount_rate"] == "0.2000"
     assert item["settled_full_loss_rate"] == "1.0000"
     assert item["projection_full_loss_qty_rate"] == "1.0000"
+    assert item["full_loss_exposure_unsettled_order_count"] == 2
+    assert item["confirmed_full_loss_exposure_order_count"] == 1
+    assert item["confirmed_full_loss_exposure_qty"] == 1
     assert item["unresolved_unsettled_order_count"] == 2
+    assert item["unresolved_full_loss_exposure_order_count"] == 2
     assert Decimal(item["unresolved_unsettled_qty"]) == Decimal(5)
+    assert Decimal(item["unresolved_full_loss_exposure_qty"]) == Decimal(5)
     assert item["unresolved_unsettled_sales"] == m4(Decimal(500_000) * vnd_cny)
     assert item["confirmed_unsettled_refund_amount"] == m4(
         Decimal(100_000) * vnd_cny
@@ -1347,8 +1391,13 @@ def test_spu_roi_projects_only_unsettled_orders_from_settled_sample(
         "projection_refund_amount_rate",
         "settled_full_loss_rate",
         "projection_full_loss_qty_rate",
+        "full_loss_exposure_unsettled_order_count",
+        "confirmed_full_loss_exposure_order_count",
+        "confirmed_full_loss_exposure_qty",
         "unresolved_unsettled_order_count",
+        "unresolved_full_loss_exposure_order_count",
         "unresolved_unsettled_qty",
+        "unresolved_full_loss_exposure_qty",
         "unresolved_unsettled_sales",
         "confirmed_unsettled_full_loss_order_count",
         "projected_future_refund_amount",
@@ -1370,6 +1419,31 @@ def test_spu_roi_projects_only_unsettled_orders_from_settled_sample(
         "projected_ad_system_breakeven_roi",
     ):
         assert body["totals"][field] == item[field], field
+
+
+def test_spu_roi_excludes_delivered_unsettled_orders_from_full_loss_exposure(
+    api_client, readonly_key, db_engine
+):
+    with Session(db_engine) as sess:
+        _seed(sess, _seed_delivery_aware_projection_scenario)
+
+    response = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+        params={"q": "TEST_ROI_SPU_PROJECTION"},
+    )
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+
+    # Three orders await settlement, but only the partly refunded IN_TRANSIT
+    # order remains exposed. The other two are delivery-terminal by independent
+    # evidence: one by sales_orders.status and one by shipment facts.
+    assert item["unsettled_order_count"] == 3
+    assert item["full_loss_exposure_unsettled_order_count"] == 1
+    assert item["unresolved_unsettled_order_count"] == 3
+    assert Decimal(item["projected_future_full_loss_order_count"]) == Decimal(0)
+    assert Decimal(item["projected_future_full_loss_qty"]) == Decimal(1)
+    assert "已送达" in response.json()["meta"]["projection"]["full_loss_target"]
 
 
 def test_spu_roi_projection_with_no_unsettled_orders_matches_current_result(
@@ -2960,8 +3034,13 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
         "settled_full_loss_rate": None,
         "projection_full_loss_qty_rate": None,
         "unsettled_order_count": 0,
+        "full_loss_exposure_unsettled_order_count": 0,
+        "confirmed_full_loss_exposure_order_count": 0,
+        "confirmed_full_loss_exposure_qty": 0,
         "unresolved_unsettled_order_count": 0,
+        "unresolved_full_loss_exposure_order_count": 0,
         "unresolved_unsettled_qty": 0,
+        "unresolved_full_loss_exposure_qty": 0,
         "unresolved_unsettled_sales": "0.0000",
         "confirmed_unsettled_refund_amount": "0.0000",
         "confirmed_unsettled_full_loss_order_count": 0,
