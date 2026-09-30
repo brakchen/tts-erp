@@ -7,11 +7,11 @@ This document contains detailed safety procedures referenced by the root `AGENTS
 | Environment | Database | Agent policy |
 | --- | --- | --- |
 | Production | `tts_erp`, `tts_erp_prod`, `tts_erp_prod_*` | Read-only unless a documented guarded operation is explicitly authorized by the user |
-| Tests | `tts_erp_v3_test` | The only database agents may use for tests and migration validation |
+| Tests | `tts_erp_test_template`, ephemeral `tts_erp_test_*`, shared fallback `tts_erp_v3_test` | The only databases agents may use for tests and migration validation |
 
 - `is_prod_shaped_db()` in `tts_erp_v2.api.deps` is the single source of truth for production-shaped database detection.
 - An unset `TTS_ERP_DB_URL` is treated as production-shaped (fail closed).
-- Tests must enter through `scripts/test.sh`, which loads `.env.test` and sets `TTS_ERP_DB_URL_TEST`.
+- Tests should enter through `scripts/test_isolated.sh`, which clones a per-run test DB and delegates to `scripts/test.sh` with `TTS_ERP_DB_URL_TEST` set. Direct `scripts/test.sh` runs are the shared-DB fallback and must be serialized.
 - `tests/conftest.py` hard-exits with status 2 when pytest would target a production-shaped database. This is not a warning-only check.
 - `TTS_ERP_TEST_OFF=1` bypasses the test guard and risks live data. Agents must not set it.
 
@@ -69,7 +69,7 @@ Agents must not enable these production override variables.
 
 ## 3. Migration policy
 
-- Agents may create and validate migrations against `tts_erp_v3_test`.
+- Agents may create and validate migrations only against test-shaped databases: `tts_erp_test_template`, ephemeral `tts_erp_test_*`, or the shared fallback `tts_erp_v3_test`.
 - Agents never run production `alembic upgrade head`.
 - Production schema renames and data-moving migrations are manually coordinated with service restart.
 - Do not restore or execute migration suites under `tech-doc/_archive/migrate-v1-to-v2-2026-08-29/`.

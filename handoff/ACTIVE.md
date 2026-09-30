@@ -16,5 +16,4 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| isolated-test-template | 模板库隔离测试脚本 | 01a0f3bd-328d-729f-8747-2a8dddf4961f | `chore/isolated-test-template` / `.worktrees/isolated-test-template` | `scripts/test_isolated.sh`; `AGENTS.md`; `tech-doc/agent-testing.md`; `tech-doc/commands-reference.md`; `tech-doc/agent-safety.md`; `tests/api/test_spu_roi_api.py`; `tests/db/test_miaoshou_schema.py` | ready | 386e0025a2cb1b960a7baaafc1aaeb745886ce85 | 253fbbe7e51134fa0d2aeda69ce76ed520c83032 | 2026-09-30 20:07:30 |
 | sync-job-page-fixes | 修复定时任务管理页面逻辑 | 01a0f39a-7180-760e-b7c9-6b0a00a152c2 | `fix/sync-job-page-fixes` / `.worktrees/sync-job-page-fixes` | `tts_erp_v2/api/v2/pages.py`; `tts_erp_v2/api/v2/sync_status.py`; `tts_erp_v2/static/js/sync-jobs.js`; `tests/api/test_pages.py`; `tests/api/test_sync_job_management.py`; `tech-doc/external-api.md` | draft | — | — | 2026-09-30 19:52:33 |

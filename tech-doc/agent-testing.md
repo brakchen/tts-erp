@@ -4,24 +4,28 @@ This document defines the only supported test workflow for coding agents in `tts
 
 ## 1. Database isolation
 
-- Test database: `tts_erp_v3_test`.
+- Default agent test entry point: `scripts/test_isolated.sh`.
+- Template database: `tts_erp_test_template` (schema-only, maintained by `scripts/test_isolated.sh --refresh-template`).
+- Per-run database: an ephemeral `tts_erp_test_*` clone created from the template and dropped after the command.
+- Shared fallback database: `tts_erp_v3_test`, used only when running `scripts/test.sh` directly.
 - Production database: `tts_erp` or another production-shaped name recognized by `tts_erp_v2.api.deps.is_prod_shaped_db()`.
-- `.env.test` supplies `TTS_ERP_DB_URL_TEST`.
-- `scripts/test.sh` loads `.env.test` before invoking pytest.
-- `tests/conftest.py` prefers `TTS_ERP_DB_URL_TEST` and hard-exits with status 2 if a direct pytest invocation would target a production-shaped database.
+- `.env.test` supplies the base `TTS_ERP_DB_URL_TEST`; `scripts/test_isolated.sh` rewrites only the database name for template/ephemeral clones.
+- `scripts/test.sh` still loads `.env.test` before invoking pytest, and `tests/conftest.py` still prefers `TTS_ERP_DB_URL_TEST`.
+- `tests/conftest.py` hard-exits with status 2 if a direct pytest invocation would target a production-shaped database.
 - Agents must never set `TTS_ERP_TEST_OFF=1`.
 
-The hard exit is the final safety net, not the normal workflow. Always use the wrapper.
+The hard exit is the final safety net, not the normal workflow. Always use `scripts/test_isolated.sh` unless you intentionally need the shared DB fallback.
 
 ## 2. Supported commands
 
 | Scope | Command |
 | --- | --- |
-| Fast suite | `bash scripts/test.sh fast` |
-| Unit-layer tests | `bash scripts/test.sh unit` |
-| Business domain | `bash scripts/test.sh <domain>` |
-| Specific file within fast selection | `bash scripts/test.sh fast tests/path/test_file.py` |
-| Specific test within a domain | `bash scripts/test.sh <domain> tests/path/test_file.py::test_name` |
+| Fast suite | `bash scripts/test_isolated.sh fast` |
+| Unit-layer tests | `bash scripts/test_isolated.sh unit` |
+| Business domain | `bash scripts/test_isolated.sh <domain>` |
+| Specific file within fast selection | `bash scripts/test_isolated.sh fast tests/path/test_file.py` |
+| Specific test within a domain | `bash scripts/test_isolated.sh <domain> tests/path/test_file.py::test_name` |
+| Refresh template then run fast suite | `bash scripts/test_isolated.sh --refresh-template fast` |
 
 Domain names may be passed with or without the `domain_` prefix.
 
@@ -61,26 +65,32 @@ Rules:
 
 `scripts/test.sh` falls back to `/home/schan/tts-erp/.venv/bin/pytest` if the worktree virtual-environment link is missing, but creating the link is still required for pi-lens and other tooling discovery.
 
-## 4. Shared database serialization
+## 4. Template and shared database usage
 
-Tests share one development test database. Concurrent suites can delete each other's `TEST_` rows and produce false 401 or missing-row failures.
+`bash scripts/test_isolated.sh ...` is parallel-safe for ordinary agent work: it clones `tts_erp_test_template` to a unique `tts_erp_test_*` database, runs `scripts/test.sh` with `TTS_ERP_DB_URL_TEST` pointing at that clone, and drops the clone on exit. Concurrent isolated runs do not delete each other's `TEST_` rows.
 
-Preferred command:
+Refresh the template when schema/migration state changes or if a run reports missing tables:
+
+```bash
+bash scripts/test_isolated.sh --refresh-template fast
+```
+
+The refresh path rebuilds only the test-shaped template DB. It imports production schema read-only through `scripts/import_prod_to_test.sh --schema-only`, stamps the production alembic revision, then upgrades the template to the current worktree's alembic head. If the production alembic revision is not present in the worktree, the script leaves the imported schema in place and prints a warning instead of guessing. It must not be pointed at a production-shaped target DB.
+
+Direct `scripts/test.sh` runs still use the shared development test database (`tts_erp_v3_test`). Concurrent shared-DB suites can delete each other's `TEST_` rows and produce false 401 or missing-row failures. If a shared-DB run is explicitly needed, serialize it:
 
 ```bash
 flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast
 ```
 
-If the lock is already held, do not run a competing suite. Either wait for the existing run or use a separately provisioned ephemeral test database.
-
-Do not poll with an unbounded loop. If waiting is necessary, use a bounded timeout and report when the lock cannot be acquired.
+If the lock is already held, do not run a competing shared-DB suite. Either wait with a bounded timeout or use `scripts/test_isolated.sh`.
 
 ## 5. Selecting validation scope
 
 - Documentation-only change: validate links, referenced paths, and Markdown structure; application tests are not normally required.
 - Single-domain code change: run that domain first, then the fast suite before merge.
 - Shared fixture, middleware, database model, schema, scheduler, or cross-domain change: run the narrow tests first and then the fast suite.
-- Migration change: validate only against `tts_erp_v3_test`; never run the production migration.
+- Migration change: validate with `scripts/test_isolated.sh --refresh-template ...` or another test-shaped ephemeral DB; never run the production migration.
 - Service-dependent tests must use the documented service setup and remain bounded by a timeout.
 
 ## 6. Failure classification
@@ -126,8 +136,8 @@ A documentation/config-only lane may compare validation appropriate to its chang
 Record:
 
 - exact commands run;
-- whether the shared DB lock was acquired;
-- test database identity when relevant;
+- whether the isolated runner was used, or whether the shared DB lock was acquired;
+- test database identity when relevant (template/ephemeral/shared);
 - pass/fail count or the before/after failure diff;
 - isolated rerun results for failures;
 - tests intentionally not run and why.
