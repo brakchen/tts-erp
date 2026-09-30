@@ -16,4 +16,3 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| fix/focused-spus-inline-select | 重点关注改为页面内多选实时保存，并保持空集合时完整盈利大盘 | 01a0edf5-a325-77b2-ade9-ac88e25bdd89 | `fix/focused-spus-inline-select` / `.worktrees/focused-spus-inline-select` | `tts_erp_v2/static/js/focused-spus.js`; `tts_erp_v2/static/js/spu-profitability-page.js`; `tts_erp_v2/static/css/focused-spus.css`; `tests/api/test_focused_spus.py`; `tech-doc/analytics/focused-spus.md` | ready | `bc070b86239acd6c58872afdccf815d58ccdc79c` | `0f3edc2dce8b3065a20d0eff4677256ed5d0045a` | 2026-09-30T01:23Z |
