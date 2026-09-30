@@ -43,8 +43,9 @@
   `status='RETURN_OR_REFUND_REQUEST_COMPLETE'`、订单 ∈ 有效销售（妥投后退 = 货收不回）；
   到海外取消件 = 上述 CANCELLED 单里 tracking 有越南节点的该 SPU 行件数。
   未完结 RAR（如 BUYER_SHIPPED_ITEM）单列"在途潜在全损"，不计入。
-- 取消率(校正) = 取消订单数(未到海外) ÷ 总订单数。
-- 全损率 = 全损件数 ÷ (有效销售件数 + 到海外取消件数)。
+- 取消率(校正) = 国内取消订单数 ÷ 全部订单数。
+- 主表全损率（订单维度）= (退款订单数 + 海外取消订单数) ÷ 全部订单数。
+- `full_loss_qty_rate` 仅是件数解释口径 = 全损件数 ÷ (有效销售件数 + 到海外取消件数)，不得直接用于收入金额；预计终局另用已结算样本件数率。
 
 ## 3. 成本输入
 - 采购成本 CNY/件：读 `procurement.manual_product_costs WHERE valid_to IS NULL`
@@ -97,6 +98,65 @@ kept 口径误差 **±1%**；混合口径（含退款单）高估 **~16%**。
 - 若按用户运营口径（把到海外取消件也算货损）调整：净利润再减 `到海外取消件 × unit_cost`，
   保本线分子不变、分母再减该值。
 
+### 4.1 未结算订单预计终局（两个页面共用）
+
+订单只分已结算与未结算：已结算订单使用实际 SETTLEMENT，不再预测；只预测未结算
+订单。样本和目标都跟随页面现有订单时间窗口，以
+`COALESCE(order_time, paid_at)` 归属，不按结算日或售后完成日切窗。
+
+```text
+projection_refund_amount_rate
+= 已结算样本已完结退款金额 / 已结算样本销售额
+
+projection_full_loss_qty_rate
+= 已结算样本已完结全损件数 / 已结算样本总件数
+```
+
+金额率只预测收入，件数率只预测全损件数。不得使用订单维度 `full_loss_rate` 推算货本。
+未结算订单中已完结 `REFUND_ONLY` / `RETURN_AND_REFUND` 的退款金额按已知事实扣一次，
+其确认件数从 `unresolved_unsettled_qty` 排除，不得再次应用预测比例。
+
+```text
+projected_future_full_loss_qty
+= unresolved_unsettled_qty × projection_full_loss_qty_rate
+
+projected_terminal_full_loss_qty
+= observed_full_loss_qty + projected_future_full_loss_qty
+
+projected_unsettled_net
+= [unsettled_sales
+   - confirmed_unsettled_refund_amount
+   - unresolved_unsettled_sales × projection_refund_amount_rate]
+  × (1 - fee_rate)
+
+projected_net_revenue
+= settled_net + projected_unsettled_net
+
+projected_net_profit
+= projected_net_revenue - 当前 cogs_total - ad_spend
+```
+
+`projected_future_full_loss_qty` 不得再次加入 COGS：paid 商品货本已经在当前
+`cogs_total`，否则会重复扣采购成本。预计全损成本只用于预计财务 ROI：
+
+```text
+projected_full_loss_cost = 已观察全损成本 + 预计新增全损对应成本
+projected_nc_prime = projected_net_revenue - projected_full_loss_cost
+projected_roi_real = projected_nc_prime / ad_spend
+projected_cogs_kept = 当前已确认保留货本 - 预计新增全损对应货本
+projected_roi_breakeven
+= projected_nc_prime / (projected_nc_prime - projected_cogs_kept)
+```
+
+广告消耗为 0，或保本分母小于等于 0时，相应 ROI 输出空值。存在未结算订单但没有
+已结算样本订单、样本销售额或样本件数时，状态为 `insufficient_sample`，所有预测率和
+预计终局结果为空，禁止按 0% 处理。没有未结算订单时状态为
+`no_unsettled_orders`，预计终局收入、利润和 ROI 与当前值一致。
+
+多 SPU 大盘的样本订单数、未结算订单数、待确认订单数必须按订单全局去重；金额和件数
+按唯一商品行聚合。大盘比例使用整体分子/分母重新计算，不能平均或简单累加 SPU 比率。
+`spu-roi` 与 `focused-spus` 使用同一 API 和公式，仅 SPU 选择范围不同。
+
 ## 5. 广告系统 ROI（TikTok 后台口径，单独一套）
 - 广告系统实际 ROI = 广告归因 GMV ÷ 广告实际消耗。
 - 最大可承受广告费 = 预计净结算收入 − 同范围采购成本 − 净结算中尚未包含的其他必要成本。
@@ -125,7 +185,9 @@ SPU | 采购成本 CNY/件 | 广告实际消耗 CNY | 广告归因GMV CNY | 广�
 - [ ] 已结算、未结算、订单、采购与广告数据的日期范围相同或可对齐
 - [ ] 待发货/在途预计收入都有对应采购成本；国内取消可追回货不计货损，海外取消按出境证据判全损
 - [ ] 结算外必要成本和广告赠金单独列示；缺失数据只列假设/风险，不自行补数
-- [ ] 未成熟订单分别给出当前已实现、全部正常完成、考虑取消/退货率后的保守预测
+- [ ] 同时保留当前已实现结果与预计终局结果；只预测未结算订单，预测字段不得标记为“实际”
+- [ ] 预计终局样本和目标都沿用订单 `COALESCE(order_time, paid_at)` 时间归属
+- [ ] 已确认未结算退款/全损不重复预测；预计新增全损不重复加入当前 COGS
 - [ ] 同时列出广告后台实际 ROI、理论保本 ROI、安全线、利润、距保本差额和剩余广告费承受空间
 ````
 
