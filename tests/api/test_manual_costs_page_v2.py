@@ -396,6 +396,23 @@ def test_page_has_no_pending_tab(api_client, readonly_key):
     assert 'data-tab="recent"' in body, "recent tab must still be present"
 
 
+def test_console_js_labels_product_identifier_as_spu():
+    """The workbench renders ``spu_id`` values, so runtime labels say SPU."""
+    from pathlib import Path
+
+    js = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "console.js"
+    )
+    src = js.read_text(encoding="utf-8")
+    assert "SKU" not in src, "workbench must not label spu_id values as SKU"
+    assert 'data-label="SPU"' in src
+    assert 'search.placeholder = "SPU 或标题"' in src
+
+
 def test_page_has_editable_catalogue_hooks(api_client, readonly_key):
     """全部 SPU rows are editable: cost input + dirty markers.
 
