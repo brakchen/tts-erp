@@ -191,6 +191,15 @@ JOBS: dict[str, JobSpec] = {
         is_tiktok=False,
         entrypoint="sync_purchase_orders",
     ),
+    # 妙手包裹列表按 gmtModified watermark 增量拉取，归一化到
+    # fulfillment.shipments / shipment_lines；包裹详情 endpoint 作为单包修复入口。
+    "miaoshou.packages": JobSpec(
+        job_name="miaoshou.packages",
+        module_path="tts_erp_v2.jobs.miaoshou.packages",
+        interval_seconds=1800,  # 30 min — tracks shipment/status changes
+        is_tiktok=False,
+        entrypoint="sync_packages",
+    ),
     # ── Reporting recompute jobs (library functions since cutover; never
     # scheduled — reporting.* tables stayed empty in prod) ──────────────
     "reporting.cost_snapshots": JobSpec(

@@ -65,6 +65,7 @@ EXPECTED_JOB_INTERVALS = {
     "miaoshou.move_collect": 1800,
     "miaoshou.common_collect_box": 21600,
     "miaoshou.sync_source_cost_to_master": 21600,
+    "miaoshou.packages": 1800,
     "reporting.cost_snapshots": 21600,
     "reporting.profit_daily": 3600,
     "spu.image_mirror": 1800,
@@ -74,7 +75,7 @@ EXPECTED_JOB_INTERVALS = {
 
 
 def test_jobs_registry_has_expected_count() -> None:
-    """16 jobs total — keeps us honest if a new one slips in unannounced.
+    """19 jobs total — keeps us honest if a new one slips in unannounced.
 
     2026-09-05 reorg: ``analytics.retention`` 已从 JOBS 摘除（见
     tech-doc/analytics/reorg-plan.md 决策 #1-#4）—— ad_records /
@@ -87,10 +88,11 @@ def test_jobs_registry_has_expected_count() -> None:
     2026-09-29：analytics.shop_fee_rate 加入（店铺级平台抽成费率，
     24h 重算 → reporting.shop_fee_rate_estimates，供 spu-roi 未结算估算）→ 16 → 17。
     2026-09-29：miaoshou.purchase_orders 改用已发布 EWM 接口并加入调度 → 17 → 18。
+    2026-09-30：miaoshou.packages 增量同步妙手包裹与商品行 → 18 → 19。
     """
-    # 6 tiktok + 12 system (token + 6 miaoshou + 2 reporting + image_mirror
+    # 6 tiktok + 13 system (token + 7 miaoshou + 2 reporting + image_mirror
     # + fx.sync + shop_fee_rate) — keep the number pinned so we don't drift silently.
-    assert len(JOBS) == 18
+    assert len(JOBS) == 19
 
 
 @pytest.mark.parametrize(
@@ -119,6 +121,14 @@ def test_jobs_registry_includes_miaoshou_purchase_orders() -> None:
     assert spec.module_path == "tts_erp_v2.jobs.miaoshou.purchase_orders"
     assert spec.entrypoint == "sync_purchase_orders"
     assert spec.interval_seconds == 3600
+    assert spec.is_tiktok is False
+
+
+def test_jobs_registry_includes_miaoshou_packages() -> None:
+    spec = JOBS["miaoshou.packages"]
+    assert spec.module_path == "tts_erp_v2.jobs.miaoshou.packages"
+    assert spec.entrypoint == "sync_packages"
+    assert spec.interval_seconds == 1800
     assert spec.is_tiktok is False
 
 
