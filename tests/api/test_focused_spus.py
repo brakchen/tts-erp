@@ -39,17 +39,23 @@ def _seed_shop_and_products(db_engine):
     return int(shop_a), int(shop_b)
 
 
-def test_focused_spus_profile_guards_empty_scope_and_uses_delta_patch() -> None:
+def test_focused_spus_profile_uses_realtime_inline_multi_select() -> None:
     root = Path(__file__).resolve().parents[2]
-    kernel = (root / "tts_erp_v2/static/js/spu-profitability-page.js").read_text()
     focused = (root / "tts_erp_v2/static/js/focused-spus.js").read_text()
-    assert "if (!state.selectionQueryable)" in kernel
-    assert "renderEmptySelection();" in kernel
+    assert 'label.htmlFor = "focused-spu-select"' in focused
+    assert "new TomSelectClass(selectElement" in focused
+    assert "maxItems: null" in focused
+    assert "onItemAdd:" in focused
+    assert "onItemRemove:" in focused
+    assert "resolvePastedIds" in focused
     assert 'analyticsParams: () => ({ scope: "focused" })' in focused
     assert "addSpuIds: addIds" in focused
     assert "removeSpuIds: removeIds" in focused
     assert '"X-Requested-With": "tts-erp"' in focused
-    assert "context.setSelectionQueryable(total > 0)" in focused
+    assert "context.setSelectionQueryable(true)" in focused
+    assert "return { queryable: true, count: total }" in focused
+    assert "编辑关注 SPU" not in focused
+    assert "保存修改" not in focused
 
 
 def test_focused_spus_page_uses_shared_profitability_kernel(
@@ -72,6 +78,37 @@ def test_focused_spus_page_uses_shared_profitability_kernel(
     assert 'id="selection-slot"' in response.text
     assert "__PROFILE_" not in response.text
     assert "__JSV_" not in response.text
+
+
+def test_focused_spus_page_keeps_the_full_roi_dashboard(
+    api_client,
+    readonly_key,
+):
+    headers = {"Authorization": f"Bearer {readonly_key}"}
+    standard = api_client.get("/v2/pages/spu-roi", headers=headers)
+    focused = api_client.get("/v2/pages/focused-spus", headers=headers)
+    assert standard.status_code == focused.status_code == 200
+    shared_hooks = (
+        "summaries",
+        "sum-total-orders",
+        "sum-spend",
+        "sum-orders",
+        "sum-sales",
+        "sum-refund-count",
+        "sum-loss-qty",
+        "sum-cancel-count",
+        "sum-net-profit",
+        "sum-roi",
+        "fee-card",
+        "rows",
+        "tpl-drilldown-panel",
+        "filter-limit",
+        "pager-pages",
+    )
+    for hook in shared_hooks:
+        marker = f'id="{hook}"'
+        assert marker in standard.text
+        assert marker in focused.text
 
 
 def test_focused_spus_auth_and_camel_case_contract(

@@ -1,36 +1,56 @@
-/* Focused SPUs PageProfile and persistent selection adapter. */
+/* Focused SPUs PageProfile and realtime persistent selection adapter. */
 
 (() => {
+  const MAX_PATCH_IDS = 500;
+  const OPTION_CHUNK_SIZE = 25;
+
   function node(tag, className, text) {
-    var element = document.createElement(tag);
+    const element = document.createElement(tag);
     if (className) element.className = className;
     if (text != null) element.textContent = text;
     return element;
   }
 
   function parseIds(raw) {
-    var seen = new Set();
-    return String(raw || "")
+    const values = [];
+    const seen = new Set();
+    String(raw || "")
       .replace(/，/g, ",")
       .split(/[\s,]+/)
-      .map((value) => value.trim())
-      .filter((value) => value && !seen.has(value) && seen.add(value));
+      .forEach((part) => {
+        const value = part.trim();
+        if (value && !seen.has(value)) {
+          seen.add(value);
+          values.push(value);
+        }
+      });
+    return values;
+  }
+
+  function chunks(values, size) {
+    const result = [];
+    for (let index = 0; index < values.length; index += size) {
+      result.push(values.slice(index, index + size));
+    }
+    return result;
   }
 
   function createFocusedSelectionAdapter() {
-    var context = null;
-    var shopPk = null;
-    var total = 0;
-    var query = "";
-    var offset = 0;
-    var limit = 50;
-    var pendingRemovals = new Set();
-    var controller = null;
-    var elements = {};
-    var canEdit = false;
+    let context = null;
+    let shopPk = null;
+    let total = 0;
+    let canEdit = false;
+    let select = null;
+    let suppressEvents = false;
+    let selectionVersion = 0;
+    let listController = null;
+    let mutationQueue = Promise.resolve();
+    let pendingMutations = 0;
+    const currentIds = new Set();
+    const elements = {};
 
     function api(path, options) {
-      var opts = options || {};
+      const opts = options || {};
       opts.credentials = "include";
       opts.headers = Object.assign(
         { Accept: "application/json" },
@@ -44,8 +64,8 @@
         }
         return response.json().then((payload) => {
           if (!response.ok) {
-            var detail = payload && payload.detail;
-            var message =
+            const detail = payload && payload.detail;
+            const message =
               (detail && detail.message) ||
               (typeof detail === "string" ? detail : null) ||
               `HTTP ${response.status}`;
@@ -56,287 +76,381 @@
       });
     }
 
-    function setFeedback(message, error) {
+    function setFeedback(message, kind) {
       if (!elements.feedback) return;
       elements.feedback.textContent = message || "";
-      elements.feedback.classList.toggle("text-danger", Boolean(error));
+      elements.feedback.classList.toggle("text-danger", kind === "error");
+      elements.feedback.classList.toggle("text-success", kind === "success");
     }
 
     function updateCount() {
-      if (elements.count) elements.count.textContent = `已关注 ${total} 个 SPU`;
-      if (elements.edit) {
-        elements.edit.disabled = !shopPk || !canEdit;
-        elements.edit.title = canEdit ? "编辑关注集合" : "需要 readwrite 权限";
+      if (elements.count) {
+        elements.count.textContent = `已关注 ${total} 个 SPU · 修改会实时保存`;
+      }
+      if (select) {
+        if (shopPk && canEdit) select.enable();
+        else select.disable();
       }
     }
 
-    function renderList(page) {
-      elements.list.replaceChildren();
-      page.items.forEach((item) => {
-        var row = node("div", "focused-spu-item");
-        var meta = node("div", "focused-spu-item-meta");
-        meta.appendChild(node("strong", "focused-spu-id", item.spuId));
-        meta.appendChild(node("span", "focused-spu-title", item.title || "无标题"));
-        meta.appendChild(node("span", "badge text-bg-light", item.status || "未知"));
-        var remove = node(
-          "button",
-          "btn btn-sm btn-outline-danger",
-          pendingRemovals.has(item.spuId) ? "撤销移除" : "移除",
-        );
-        remove.type = "button";
-        remove.addEventListener("click", () => {
-          if (pendingRemovals.has(item.spuId)) pendingRemovals.delete(item.spuId);
-          else pendingRemovals.add(item.spuId);
-          renderList(page);
-          setFeedback(
-            pendingRemovals.size ? `待移除 ${pendingRemovals.size} 个 SPU` : "",
-            false,
-          );
-        });
-        row.appendChild(meta);
-        row.appendChild(remove);
-        elements.list.appendChild(row);
-      });
-      if (!page.items.length) {
-        elements.list.appendChild(
-          node("div", "focused-spu-list-empty", "没有匹配的关注 SPU"),
-        );
-      }
-      elements.page.textContent = `${page.offset + 1}–${Math.min(
-        page.offset + page.items.length,
-        page.matchedTotal,
-      )} / ${page.matchedTotal}`;
-      elements.previous.disabled = page.offset <= 0;
-      elements.next.disabled = page.offset + page.limit >= page.matchedTotal;
+    function queueMutation(task) {
+      pendingMutations += 1;
+      setFeedback(
+        pendingMutations > 1 ? `正在保存 ${pendingMutations} 项修改…` : "正在保存…",
+      );
+      const result = mutationQueue.catch(() => {}).then(task);
+      mutationQueue = result.then(
+        () => {
+          pendingMutations -= 1;
+          if (pendingMutations === 0) setFeedback("已实时保存", "success");
+          else setFeedback(`正在保存 ${pendingMutations} 项修改…`);
+        },
+        () => {
+          pendingMutations -= 1;
+          if (pendingMutations > 0) {
+            setFeedback(`正在保存 ${pendingMutations} 项修改…`);
+          }
+        },
+      );
+      return result;
     }
 
-    function loadPage() {
-      if (!shopPk) return Promise.resolve();
-      if (controller) controller.abort();
-      controller = new AbortController();
-      var params = new URLSearchParams({
-        limit: String(limit),
-        offset: String(offset),
-      });
-      if (query) params.set("q", query);
-      return api(
-        `/v2/reporting/focused-spus/${shopPk}?${params.toString()}`,
-        { signal: controller.signal },
-      )
-        .then((page) => {
-          total = page.total;
-          updateCount();
-          renderList(page);
-          return page;
-        })
-        .catch((error) => {
-          if (error && error.name === "AbortError") return null;
-          setFeedback(`关注列表加载失败：${error.message}`, true);
-          return null;
-        });
-    }
-
-    function suggestProducts() {
-      var value = elements.add.value.trim();
-      elements.suggestions.replaceChildren();
-      if (!shopPk || !value || /[,，\s]/.test(value)) return;
-      var params = new URLSearchParams({
-        shop_pk: String(shopPk),
-        q: value,
-        limit: "8",
-      });
-      api(`/v2/commerce/channel-product-options?${params.toString()}`)
-        .then((items) => {
-          items.forEach((item) => {
-            var button = node(
-              "button",
-              "focused-spu-suggestion",
-              `${item.spu_id} · ${item.title || "无标题"}`,
-            );
-            button.type = "button";
-            button.addEventListener("click", () => {
-              var ids = parseIds(elements.add.value);
-              if (!ids.includes(item.spu_id)) ids.push(item.spu_id);
-              elements.add.value = ids.join(", ");
-              elements.suggestions.replaceChildren();
-            });
-            elements.suggestions.appendChild(button);
-          });
-        })
-        .catch(() => {});
-    }
-
-    function closeEditor() {
-      pendingRemovals.clear();
-      elements.add.value = "";
-      setFeedback("", false);
-      if (elements.dialog.open) elements.dialog.close();
-      else elements.dialog.hidden = true;
-    }
-
-    function save() {
-      var addIds = parseIds(elements.add.value);
-      var removeIds = Array.from(pendingRemovals);
-      if (!addIds.length && !removeIds.length) {
-        setFeedback("没有待保存的修改", false);
-        return;
-      }
-      elements.save.disabled = true;
-      api(`/v2/reporting/focused-spus/${shopPk}`, {
+    function patchDelta(targetShop, addIds, removeIds) {
+      return api(`/v2/reporting/focused-spus/${targetShop}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
           "X-Requested-With": "tts-erp",
         },
-        body: JSON.stringify({ addSpuIds: addIds, removeSpuIds: removeIds }),
-      })
-        .then((receipt) => {
-          total = receipt.total;
-          context.setSelectionQueryable(total > 0);
-          updateCount();
-          closeEditor();
-          context.reload();
+        body: JSON.stringify({
+          addSpuIds: addIds,
+          removeSpuIds: removeIds,
+        }),
+      });
+    }
+
+    function rollbackAdded(ids, targetShop) {
+      if (!select || shopPk !== targetShop) return;
+      suppressEvents = true;
+      ids.forEach((spuId) => {
+        currentIds.delete(spuId);
+        select.removeItem(spuId, true);
+      });
+      suppressEvents = false;
+      total = currentIds.size;
+      updateCount();
+    }
+
+    function rollbackRemoved(options, targetShop) {
+      if (!select || shopPk !== targetShop) return;
+      suppressEvents = true;
+      options.forEach((option) => {
+        currentIds.add(option.spu_id);
+        select.addOption(option);
+        select.addItem(option.spu_id, true);
+      });
+      suppressEvents = false;
+      total = currentIds.size;
+      updateCount();
+    }
+
+    function saveAdded(ids) {
+      if (!ids.length || !shopPk) return;
+      const targetShop = shopPk;
+      ids.forEach((spuId) => currentIds.add(spuId));
+      total = currentIds.size;
+      updateCount();
+      queueMutation(() =>
+        patchDelta(targetShop, ids, []).then(
+          (receipt) => {
+            if (shopPk === targetShop) {
+              total = receipt.total;
+              context.setSelectionQueryable(true);
+              updateCount();
+              context.reload();
+            }
+          },
+          (error) => {
+            rollbackAdded(ids, targetShop);
+            setFeedback(`保存失败：${error.message}`, "error");
+            throw error;
+          },
+        ),
+      );
+    }
+
+    function saveRemoved(options) {
+      if (!options.length || !shopPk) return;
+      const targetShop = shopPk;
+      const ids = options.map((option) => option.spu_id);
+      ids.forEach((spuId) => currentIds.delete(spuId));
+      total = currentIds.size;
+      updateCount();
+      queueMutation(() =>
+        patchDelta(targetShop, [], ids).then(
+          (receipt) => {
+            if (shopPk === targetShop) {
+              total = receipt.total;
+              context.setSelectionQueryable(true);
+              updateCount();
+              context.reload();
+            }
+          },
+          (error) => {
+            rollbackRemoved(options, targetShop);
+            setFeedback(`保存失败：${error.message}`, "error");
+            throw error;
+          },
+        ),
+      );
+    }
+
+    function fetchOptions(params, signal) {
+      if (!shopPk) return Promise.resolve([]);
+      const query = new URLSearchParams({
+        shop_pk: String(shopPk),
+        limit: String(params.limit || 50),
+      });
+      if (params.q) query.set("q", params.q);
+      if (params.spuIds && params.spuIds.length) {
+        query.set("spu_ids", params.spuIds.join(","));
+      }
+      return api(`/v2/commerce/channel-product-options?${query.toString()}`, {
+        signal: signal,
+      });
+    }
+
+    function resolvePastedIds(raw) {
+      const pasted = parseIds(raw).filter((spuId) => !currentIds.has(spuId));
+      if (!pasted.length) {
+        setFeedback("粘贴的 SPU 已全部关注", "success");
+        return;
+      }
+      if (pasted.length > MAX_PATCH_IDS) {
+        setFeedback(`单次最多添加 ${MAX_PATCH_IDS} 个 SPU`, "error");
+        return;
+      }
+      const requestedShop = shopPk;
+      const version = selectionVersion;
+      const controller = new AbortController();
+      setFeedback(`正在解析 ${pasted.length} 个 SPU…`);
+      Promise.all(
+        chunks(pasted, OPTION_CHUNK_SIZE).map((ids) =>
+          fetchOptions({ spuIds: ids, limit: ids.length }, controller.signal),
+        ),
+      )
+        .then((pages) => {
+          if (!select || shopPk !== requestedShop || selectionVersion !== version) {
+            return;
+          }
+          const options = pages.flat();
+          const byId = new Map(options.map((option) => [option.spu_id, option]));
+          const matched = pasted.filter((spuId) => byId.has(spuId));
+          suppressEvents = true;
+          matched.forEach((spuId) => {
+            select.addOption(byId.get(spuId));
+            select.addItem(spuId, true);
+          });
+          suppressEvents = false;
+          const missing = pasted.filter((spuId) => !byId.has(spuId));
+          if (missing.length) {
+            setFeedback(
+              `当前店铺未找到 ${missing.length} 个 SPU：${missing.join("、")}`,
+              "error",
+            );
+          }
+          saveAdded(matched);
         })
         .catch((error) => {
-          setFeedback(`保存失败：${error.message}`, true);
-        })
-        .finally(() => {
-          elements.save.disabled = false;
+          if (error && error.name === "AbortError") return;
+          setFeedback(`批量解析失败：${error.message}`, "error");
         });
     }
 
-    function buildEditor(slot) {
-      var bar = node("div", "focused-spu-bar");
-      elements.count = node("strong", "focused-spu-count", "已关注 0 个 SPU");
-      elements.edit = node(
-        "button",
-        "btn btn-sm btn-outline-dark",
-        "编辑关注 SPU",
+    function clearSelection() {
+      if (!select) return;
+      suppressEvents = true;
+      select.clear(true);
+      select.clearOptions();
+      suppressEvents = false;
+      currentIds.clear();
+      total = 0;
+      updateCount();
+    }
+
+    function addHydratedItems(items) {
+      if (!select) return;
+      suppressEvents = true;
+      items.forEach((item) => {
+        const option = {
+          spu_id: item.spuId,
+          title: item.title,
+          status: item.status,
+        };
+        currentIds.add(item.spuId);
+        select.addOption(option);
+        select.addItem(item.spuId, true);
+      });
+      suppressEvents = false;
+    }
+
+    function loadAllFocused(targetShop, version) {
+      const items = [];
+      const pageSize = 500;
+      function readPage(offset) {
+        return api(
+          `/v2/reporting/focused-spus/${targetShop}?limit=${pageSize}&offset=${offset}`,
+          { signal: listController.signal },
+        ).then((page) => {
+          if (shopPk !== targetShop || selectionVersion !== version) return null;
+          items.push(...page.items);
+          total = page.total;
+          if (offset + page.items.length < page.matchedTotal) {
+            return readPage(offset + pageSize);
+          }
+          return items;
+        });
+      }
+      return readPage(0);
+    }
+
+    function initSelect(selectElement) {
+      const TomSelectClass = window["TomSelect"];
+      if (typeof TomSelectClass !== "function") {
+        setFeedback("SPU 多选组件加载失败，请刷新页面", "error");
+        return;
+      }
+      select = new TomSelectClass(selectElement, {
+        plugins: { remove_button: { title: "取消关注" } },
+        valueField: "spu_id",
+        labelField: "spu_id",
+        searchField: ["spu_id", "title"],
+        maxItems: null,
+        create: false,
+        closeAfterSelect: false,
+        hideSelected: true,
+        preload: "focus",
+        loadThrottle: 250,
+        placeholder: "搜索或粘贴 SPU，选择后实时保存",
+        shouldLoad: () => Boolean(shopPk && canEdit),
+        load: (query, callback) => {
+          const requestedShop = shopPk;
+          fetchOptions({ q: query, limit: 50 })
+            .then((options) => callback(shopPk === requestedShop ? options : []))
+            .catch(() => callback());
+        },
+        render: {
+          option: (data, escapeHtml) =>
+            `<div><div class="d-flex justify-content-between gap-2"><span class="op-spu-option-id">${escapeHtml(data.spu_id)}</span><span class="badge text-bg-light">${escapeHtml(data.status || "未知")}</span></div><div class="op-spu-option-title">${escapeHtml(data.title || "无标题")}</div></div>`,
+          item: (data, escapeHtml) =>
+            `<div title="${escapeHtml(data.title || data.spu_id)}">${escapeHtml(data.spu_id)}</div>`,
+          no_results: () => '<div class="no-results">没有匹配的 SPU</div>',
+        },
+        onItemAdd: (value) => {
+          if (suppressEvents || currentIds.has(value)) return;
+          saveAdded([value]);
+        },
+        onItemRemove: (value) => {
+          if (suppressEvents || !currentIds.has(value)) return;
+          const stored = select.options[value] || { spu_id: value };
+          saveRemoved([
+            {
+              spu_id: value,
+              title: stored.title || "",
+              status: stored.status || "",
+            },
+          ]);
+        },
+      });
+      select.disable();
+      select.control_input.addEventListener("paste", (event) => {
+        const text = event.clipboardData
+          ? event.clipboardData.getData("text")
+          : "";
+        if (!text || !/[,，\s]/.test(text)) return;
+        event.preventDefault();
+        resolvePastedIds(text);
+      });
+    }
+
+    function buildInlineSelector(slot) {
+      const header = node("div", "focused-spu-inline-header");
+      const label = node("label", "form-label op-fld-label mb-0", "重点关注 SPU");
+      label.htmlFor = "focused-spu-select";
+      elements.count = node(
+        "span",
+        "focused-spu-count",
+        "已关注 0 个 SPU · 修改会实时保存",
       );
-      elements.edit.type = "button";
-      bar.appendChild(elements.count);
-      bar.appendChild(elements.edit);
-
-      elements.dialog = node("dialog", "focused-spu-dialog");
-      var header = node("div", "focused-spu-dialog-header");
-      header.appendChild(node("h2", "h5 mb-0", "编辑重点关注 SPU"));
-      elements.close = node("button", "btn-close", "");
-      elements.close.type = "button";
-      elements.close.setAttribute("aria-label", "关闭");
-      header.appendChild(elements.close);
-
-      var addLabel = node("label", "form-label", "新增 SPU（精确 ID、标题搜索或批量粘贴）");
-      elements.add = node("textarea", "form-control focused-spu-add");
-      elements.add.rows = 2;
-      elements.add.placeholder = "输入 SPU ID；多个 ID 用逗号或空格分隔";
-      elements.suggestions = node("div", "focused-spu-suggestions");
-
-      var searchRow = node("div", "focused-spu-search");
-      elements.search = node("input", "form-control form-control-sm");
-      elements.search.type = "search";
-      elements.search.placeholder = "搜索当前关注的 SPU ID / 标题";
-      elements.searchButton = node("button", "btn btn-sm btn-outline-secondary", "搜索");
-      elements.searchButton.type = "button";
-      searchRow.appendChild(elements.search);
-      searchRow.appendChild(elements.searchButton);
-
-      elements.list = node("div", "focused-spu-list");
-      var pager = node("div", "focused-spu-list-pager");
-      elements.previous = node("button", "btn btn-sm btn-outline-secondary", "上一页");
-      elements.previous.type = "button";
-      elements.page = node("span", "small text-secondary", "0 / 0");
-      elements.next = node("button", "btn btn-sm btn-outline-secondary", "下一页");
-      elements.next.type = "button";
-      pager.append(elements.previous, elements.page, elements.next);
-
+      header.append(label, elements.count);
+      const selectElement = node("select", "form-select");
+      selectElement.id = "focused-spu-select";
+      selectElement.multiple = true;
+      selectElement.disabled = true;
+      selectElement.setAttribute("aria-label", "重点关注 SPU 多选");
+      const help = node(
+        "div",
+        "form-text focused-spu-help",
+        "支持按 SPU ID / 标题搜索，或批量粘贴中英文逗号、空格分隔的 SPU；新增和移除会实时保存。",
+      );
       elements.feedback = node("div", "focused-spu-feedback small");
-      var actions = node("div", "focused-spu-dialog-actions");
-      elements.cancel = node("button", "btn btn-sm btn-outline-secondary", "取消");
-      elements.cancel.type = "button";
-      elements.save = node("button", "btn btn-sm btn-dark", "保存修改");
-      elements.save.type = "button";
-      actions.append(elements.cancel, elements.save);
-
-      elements.dialog.append(
-        header,
-        addLabel,
-        elements.add,
-        elements.suggestions,
-        searchRow,
-        elements.list,
-        pager,
-        elements.feedback,
-        actions,
-      );
-      slot.replaceChildren(bar, elements.dialog);
-
-      var suggestTimer = null;
-      elements.add.addEventListener("input", () => {
-        clearTimeout(suggestTimer);
-        suggestTimer = setTimeout(suggestProducts, 250);
-      });
-      elements.edit.addEventListener("click", () => {
-        offset = 0;
-        query = "";
-        elements.search.value = "";
-        loadPage();
-        if (elements.dialog.showModal) elements.dialog.showModal();
-        else elements.dialog.hidden = false;
-      });
-      elements.close.addEventListener("click", closeEditor);
-      elements.cancel.addEventListener("click", closeEditor);
-      elements.save.addEventListener("click", save);
-      elements.searchButton.addEventListener("click", () => {
-        query = elements.search.value.trim();
-        offset = 0;
-        loadPage();
-      });
-      elements.previous.addEventListener("click", () => {
-        offset = Math.max(0, offset - limit);
-        loadPage();
-      });
-      elements.next.addEventListener("click", () => {
-        offset += limit;
-        loadPage();
-      });
+      slot.replaceChildren(header, selectElement, help, elements.feedback);
+      slot.classList.add("focused-spu-inline");
+      initSelect(selectElement);
     }
 
     return {
       mount: (ctx) => {
         context = ctx;
-        var slot = document.querySelector("#selection-slot");
-        if (slot) buildEditor(slot);
+        const slot = document.querySelector("#selection-slot");
+        if (slot) buildInlineSelector(slot);
         api("/v2/auth/me")
           .then((me) => {
-            canEdit = me && ["readwrite", "admin"].includes(me.role);
+            canEdit = Boolean(me && ["readwrite", "admin"].includes(me.role));
             updateCount();
+            if (!canEdit) {
+              setFeedback("当前账号为只读权限，不能修改重点关注", "error");
+            }
           })
           .catch(() => {});
         return () => {
-          if (controller) controller.abort();
+          if (listController) listController.abort();
         };
       },
       onShopChanged: (nextShopPk) => {
         shopPk = nextShopPk;
-        query = "";
-        offset = 0;
-        pendingRemovals.clear();
-        if (!shopPk) {
-          total = 0;
-          updateCount();
-          return Promise.resolve({ queryable: false, count: 0 });
-        }
-        return api(`/v2/reporting/focused-spus/${shopPk}?limit=1&offset=0`).then(
-          (page) => {
-            total = page.total;
+        selectionVersion += 1;
+        const version = selectionVersion;
+        if (listController) listController.abort();
+        listController = new AbortController();
+        clearSelection();
+        if (!shopPk) return Promise.resolve({ queryable: false, count: 0 });
+        if (select) select.disable();
+        setFeedback("正在加载已关注 SPU…");
+        return loadAllFocused(shopPk, version).then(
+          (items) => {
+            if (!items || shopPk !== nextShopPk || selectionVersion !== version) {
+              return { queryable: false, count: 0 };
+            }
+            addHydratedItems(items);
+            context.setSelectionQueryable(true);
             updateCount();
-            return { queryable: total > 0, count: total };
+            setFeedback("", null);
+            return { queryable: true, count: total };
+          },
+          (error) => {
+            if (error && error.name === "AbortError") {
+              return { queryable: false, count: 0 };
+            }
+            setFeedback(`关注列表加载失败：${error.message}`, "error");
+            return { queryable: false, count: 0 };
           },
         );
       },
       analyticsParams: () => ({ scope: "focused" }),
       destroy: () => {
-        if (controller) controller.abort();
+        if (listController) listController.abort();
+        if (select) select.destroy();
       },
     };
   }
@@ -350,8 +464,7 @@
       sort: "roi_real",
       order: "asc",
     },
-    emptyMessage: "当前窗口没有重点关注 SPU 数据",
-    emptySelectionMessage: "尚未关注 SPU，请先点击“编辑关注 SPU”添加",
+    emptyMessage: "尚未关注 SPU，请在上方多选框搜索并添加",
     selectionAdapter: createFocusedSelectionAdapter(),
     view: {
       summaryIds: [
