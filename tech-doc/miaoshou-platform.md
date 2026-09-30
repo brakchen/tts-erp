@@ -88,6 +88,18 @@ sign = MD5(busData + companySecret).upper()
   详情接口不单独定时全量调用，避免 N+1 请求。
 - Apifox 同样展示可选 `timerToken` 和 `Cookie`，当前 HMAC ERP 客户端不依赖二者。
 
+### 6.1 生产迁移一键命令
+
+生产迁移由人工执行；脚本会先停 sync worker、备份所有受影响行、应用 0045、验证搬迁和定向清理、
+立即补跑 package sync，再恢复 worker：
+
+```bash
+ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0045_miaoshou_package_schema.sh --confirm
+```
+
+备份默认写入 `$HOME/backups/tts_erp_manual/miaoshou_package_0045_*.jsonl.gz`，并生成带行数和 ID
+清单的 `.meta.json`。脚本自身不会设置生产 destructive override；缺少环境变量或 `--confirm` 会拒绝执行。
+
 ## 7. 测试
 
 ```bash
