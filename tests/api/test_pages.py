@@ -25,6 +25,7 @@ from tts_erp_v2.api.v2.pages import (
     dashboard_page,
     enum_map_page,
     runtime_configs_page,
+    sync_jobs_page,
 )
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
@@ -60,6 +61,7 @@ def test_sidebar_marks_ad_daily_entry_active():
     assert 'title="广告日明细" aria-current="page"' in body
     assert body.index("采购工作台") < body.index("店铺注册")
     assert body.index("店铺注册") < body.index("枚举映射")
+    assert body.index("运行配置") < body.index("定时任务")
     assert body.index("数据工具</div>") < body.index("拦截配置")
 
 
@@ -136,6 +138,23 @@ def test_runtime_config_page_returns_html_to_readonly_operator(api_client, reado
     assert response.status_code == 200, response.text
     assert response.headers["content-type"].startswith("text/html")
     assert "运行配置" in response.text
+
+
+def test_sync_jobs_page_is_in_pages_shell_and_sidebar(api_client, readonly_key):
+    body = bytes(sync_jobs_page().body).decode()
+
+    assert "定时任务管理" in body
+    assert "../../static/css/sync-jobs.css?v=" in body
+    assert "../../static/js/sync-jobs.js?v=" in body
+    assert 'href="../../v2/pages/sync-jobs"' in body
+    assert 'title="定时任务" aria-current="page"' in body
+
+    response = api_client.get(
+        "/v2/pages/sync-jobs",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("text/html")
 
 
 def test_manual_costs_page_returns_200_with_html(api_client, readonly_key):

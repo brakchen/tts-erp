@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from sqlalchemy import delete
@@ -138,7 +139,7 @@ def test_trigger_rejects_shop_for_system_job(api_client, admin_key) -> None:
     assert r.status_code == 422, r.text
 
 
-def test_sync_jobs_page_html(api_client, readonly_key) -> None:
+def test_legacy_sync_jobs_page_html(api_client, readonly_key) -> None:
     r = api_client.get(
         "/v2/sync/jobs/page",
         headers={"Authorization": f"Bearer {readonly_key}"},
@@ -146,6 +147,23 @@ def test_sync_jobs_page_html(api_client, readonly_key) -> None:
     assert r.status_code == 200, r.text
     assert "定时任务管理" in r.text
     assert "sync-jobs.js" in r.text
+
+
+def test_sync_jobs_js_uses_prefix_aware_api_paths() -> None:
+    src = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "sync-jobs.js"
+    ).read_text(encoding="utf-8")
+
+    assert "const API = `${rootPrefix}/v2`;" in src
+    assert "api('/sync/jobs')" in src
+    assert "api('/auth/me')" in src
+    assert "CSS.escape" not in src
+    assert "state.canAdmin" in src
+    assert "disabled" in src
 
 
 def test_sync_jobs_includes_latest_status(api_client, readonly_key, db_engine) -> None:
