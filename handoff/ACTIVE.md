@@ -16,4 +16,3 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| backend-owned-ui-computation | 前端只渲染、业务计算收敛到后端 | 01a0f006-c8e7-77b2-ade9-aca42c580c53 | fix/backend-owned-ui-computation / .worktrees/backend-owned-ui-computation | tts_erp_v2/api/v2/{commerce.py,intercept.py,reporting.py}; tts_erp_v2/analytics/{spu_roi.py,spu_profitability/}; tts_erp_v2/static/js/{dashboard.js,console.js,intercept-stats.js,spu-profitability-page.js}; tests/api/; biz-doc/analytics/spu-roi-profit-calculation.md; tech-doc/{external-api.md,analytics/spu-profitability-module-decisions.md} | ready | 1447225a1b416fb848d2cc6b890ae719c245dc4a | 03e3acb45a265e673dd80e2edae4c894cf881dc2 | 2026-09-30T03:20:01Z |
