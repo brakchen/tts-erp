@@ -16,4 +16,4 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| miaoshou-manual-cost-import | 妙手采购价映射与人工成本导入 | 01a0efbb-1bcc-77b2-ade9-ac9dfdf3d0a0 | `chore/miaoshou-manual-cost-import` / `/home/schan/tts-erp/.worktrees/miaoshou-manual-cost-import` | `tech-doc/miaoshou-purchase-price-import.md` | active | — | — | 2026-09-30 00:57:15 |
+| miaoshou-manual-cost-import | 妙手采购价映射与人工成本导入 | 01a0efbb-1bcc-77b2-ade9-ac9dfdf3d0a0 | `chore/miaoshou-manual-cost-import` / `/home/schan/tts-erp/.worktrees/miaoshou-manual-cost-import` | `tech-doc/miaoshou-purchase-price-import.md` | ready | `77ee79d9bb14ddc8dd557c4b02206e1de9d5804a` | `aeb2e133dc0f0785b02837ada10a3ceefc363188` | 2026-09-30 00:58:01 |
