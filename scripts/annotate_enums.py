@@ -28,65 +28,93 @@ ENUM_DIR = Path(__file__).resolve().parent.parent / "tech-doc" / "enums"
 PER_FILE_STATUS: dict[str, list[tuple[str, str]]] = {
     # ─── 完全固化（✅ 全部）───
     "order-status.md": [
-        ("`UNPAID`", "✅"), ("`ON_HOLD`", "✅"), ("`AWAITING_SHIPMENT`", "✅"),
-        ("`PARTIAL_SHIPPING`", "✅"), ("`AWAITING_COLLECTION`", "✅"),
-        ("`IN_TRANSIT`", "✅"), ("`DELIVERED`", "✅"),
-        ("`COMPLETED`", "✅"), ("`CANCELLED`", "✅"),
+        ("`UNPAID`", "✅"),
+        ("`ON_HOLD`", "✅"),
+        ("`AWAITING_SHIPMENT`", "✅"),
+        ("`PARTIAL_SHIPPING`", "✅"),
+        ("`AWAITING_COLLECTION`", "✅"),
+        ("`IN_TRANSIT`", "✅"),
+        ("`DELIVERED`", "✅"),
+        ("`COMPLETED`", "✅"),
+        ("`CANCELLED`", "✅"),
     ],
     "product-status.md": [
-        ("`ACTIVATE`", "✅"), ("`DEACTIVATE`", "✅"), ("`DELETED`", "✅"),
-        ("`SUSPENDED`", "✅"), ("`ARCHIVED`", "✅"),
+        ("`ACTIVATE`", "✅"),
+        ("`DEACTIVATE`", "✅"),
+        ("`DELETED`", "✅"),
+        ("`SUSPENDED`", "✅"),
+        ("`ARCHIVED`", "✅"),
     ],
     "case-type.md": [
-        ("`CANCELLATION`", "✅"), ("`REFUND_ONLY`", "✅"),
+        ("`CANCELLATION`", "✅"),
+        ("`REFUND_ONLY`", "✅"),
         ("`RETURN_AND_REFUND`", "✅"),
     ],
     "cost-method.md": [
-        ("`MANUAL_ENTRY`", "✅"), ("`LATEST_PURCHASE_COST`", "✅"),
-        ("`PERIOD_AVERAGE_COST`", "✅"), ("`WEIGHTED_AVERAGE_COST`", "✅"),
+        ("`MANUAL_ENTRY`", "✅"),
         ("`SOURCE_PRICE`", "✅"),
     ],
     "procurement-product-type.md": [
-        ("`COLLECTED_PRODUCT`", "✅"), ("`PROCUREMENT_PRODUCT`", "✅"),
+        ("`COLLECTED_PRODUCT`", "✅"),
+        ("`PROCUREMENT_PRODUCT`", "✅"),
         ("`SPU`", "✅"),
     ],
     "intercept-mode.md": [
-        ("`whitelist`", "✅"), ("`blacklist`", "✅"),
+        ("`whitelist`", "✅"),
+        ("`blacklist`", "✅"),
     ],
     "ad-raw-log-kind.md": [
-        ("`daily`", "✅"), ("`today`", "✅"), ("`monthly`", "✅"),
+        ("`daily`", "✅"),
+        ("`today`", "✅"),
+        ("`monthly`", "✅"),
     ],
     "plugin-log-level.md": [
-        ("`info`", "✅"), ("`warn`", "✅"), ("`error`", "✅"),
+        ("`info`", "✅"),
+        ("`warn`", "✅"),
+        ("`error`", "✅"),
     ],
     "sync-job-status.md": [
-        ("`running`", "✅"), ("`succeeded`", "✅"), ("`failed`", "✅"),
+        ("`running`", "✅"),
+        ("`succeeded`", "✅"),
+        ("`failed`", "✅"),
     ],
     "api-key-role.md": [
-        ("`readonly`", "✅"), ("`readwrite`", "✅"), ("`admin`", "✅"),
+        ("`readonly`", "✅"),
+        ("`readwrite`", "✅"),
+        ("`admin`", "✅"),
     ],
     "provider.md": [
-        ("`tiktok`", "✅"), ("`miaoshou`", "✅"),
+        ("`tiktok`", "✅"),
+        ("`miaoshou`", "✅"),
     ],
     "platform.md": [
         ("`tiktok`", "✅"),
     ],
     "logistics-terminal-codes.md": [
-        ("`50101`", "✅"), ("`80101`", "✅"), ("`110101`", "✅"),
+        ("`50101`", "✅"),
+        ("`80101`", "✅"),
+        ("`110101`", "✅"),
     ],
     "cancel-type.md": [
-        ("`BUYER_CANCEL`", "✅"), ("`CANCEL`", "✅"),
+        ("`BUYER_CANCEL`", "✅"),
+        ("`CANCEL`", "✅"),
     ],
-
     # ─── 部分未固化：seller_center int (🟡 全部)───
     "main-order-status.md": [
-        ("`100`", "🟡"), ("`101`", "🟡"), ("`102`", "🟡"),
-        ("`103`", "🟡"), ("`104`", "🟡"),
+        ("`100`", "🟡"),
+        ("`101`", "🟡"),
+        ("`102`", "🟡"),
+        ("`103`", "🟡"),
+        ("`104`", "🟡"),
     ],
     "sku-display-status.md": [
-        ("`100`", "🟡"), ("`111`", "🟡"), ("`112`", "🟡"),
-        ("`121`", "🟡"), ("`122`", "🟡"),
-        ("`130`", "🟡"), ("`140`", "🟡"),
+        ("`100`", "🟡"),
+        ("`111`", "🟡"),
+        ("`112`", "🟡"),
+        ("`121`", "🟡"),
+        ("`122`", "🟡"),
+        ("`130`", "🟡"),
+        ("`140`", "🟡"),
     ],
     "fulfillment-type.md": [
         ("`FULFILLMENT_BY_SELLER`", "✅"),
@@ -94,29 +122,47 @@ PER_FILE_STATUS: dict[str, list[tuple[str, str]]] = {
         ("`0`", "🟡"),
     ],
     "reverse-type.md": [
-        ("`1`", "🟡"), ("`3`", "🟡"), ("`4`", "🟡"),
-        ("`2`", "🔴"), ("`0`", "🔴"), ("`5+`", "🔴"),
+        ("`1`", "🟡"),
+        ("`3`", "🟡"),
+        ("`4`", "🟡"),
+        ("`2`", "🔴"),
+        ("`0`", "🔴"),
+        ("`5+`", "🔴"),
     ],
     "reverse-status.md": [
-        ("`4`", "🟡"), ("`100`", "🟡"),
-        ("`0`", "🔴"), ("`1`", "🔴"),
-        ("`2`", "🔴"), ("`3`", "🔴"), ("`5+`", "🔴"),
+        ("`4`", "🟡"),
+        ("`100`", "🟡"),
+        ("`0`", "🔴"),
+        ("`1`", "🔴"),
+        ("`2`", "🔴"),
+        ("`3`", "🔴"),
+        ("`5+`", "🔴"),
     ],
-
     # ─── 部分未固化：观察 + 推断混合───
     "action-code.md": [
-        ("`10101`", "🟡"), ("`20101`", "🟡"),
-        ("`30201`", "🟡"), ("`30301`", "🟡"), ("`30401`", "🟡"),
-        ("`30501`", "🟡"), ("`31701`", "🟡"), ("`38701`", "🟡"),
+        ("`10101`", "🟡"),
+        ("`20101`", "🟡"),
+        ("`30201`", "🟡"),
+        ("`30301`", "🟡"),
+        ("`30401`", "🟡"),
+        ("`30501`", "🟡"),
+        ("`31701`", "🟡"),
+        ("`38701`", "🟡"),
         ("`34301`", "🟡"),
         ("`38301`", "🟡"),
-        ("`34701`", "🟡"), ("`30801`", "🟡"),
-        ("`31201`", "🟡"), ("`31301`", "🟡"), ("`31401`", "🟡"),
-        ("`32401`", "🟡"), ("`32601`", "🟡"),
-        ("`40101`", "🟡"), ("`40501`", "🟡"),
+        ("`34701`", "🟡"),
+        ("`30801`", "🟡"),
+        ("`31201`", "🟡"),
+        ("`31301`", "🟡"),
+        ("`31401`", "🟡"),
+        ("`32401`", "🟡"),
+        ("`32601`", "🟡"),
+        ("`40101`", "🟡"),
+        ("`40501`", "🟡"),
         ("`40601`", "🟡"),
         ("`70201`", "🟡"),
-        ("`80101`", "🟡"), ("`110101`", "🟡"),
+        ("`80101`", "🟡"),
+        ("`110101`", "🟡"),
         ("`50101`", "🟡"),
     ],
     "cancel-status.md": [
@@ -144,42 +190,52 @@ PER_FILE_STATUS: dict[str, list[tuple[str, str]]] = {
     ],
     "api-key-status.md": [
         ("`active`", "🟡"),
-        ("`revoked`", "🔴"), ("`suspended`", "🔴"), ("`expired`", "🔴"),
+        ("`revoked`", "🔴"),
+        ("`suspended`", "🔴"),
+        ("`expired`", "🔴"),
     ],
     "pay-method.md": [
-        ("`\"Cash on delivery\"`", "🟡"),
-        ("`\"Zalopay\"`", "🟡"),
+        ('`"Cash on delivery"`', "🟡"),
+        ('`"Zalopay"`', "🟡"),
     ],
     "procurement-products-status.md": [
-        ("`success`", "🟡"), ("`fail`", "🟡"), ("`skip`", "🟡"),
+        ("`success`", "🟡"),
+        ("`fail`", "🟡"),
+        ("`skip`", "🟡"),
         ("`active`", "🟡"),
         ("`normal`", "🟡"),
         ("`NULL`", "🟡"),
     ],
     "sale-region.md": [
         ("`VN`", "✅"),
-        ("`TH`", "🔴"), ("`PH`", "🔴"), ("`MY`", "🔴"),
-        ("`SG`", "🔴"), ("`ID`", "🔴"),
+        ("`TH`", "🔴"),
+        ("`PH`", "🔴"),
+        ("`MY`", "🔴"),
+        ("`SG`", "🔴"),
+        ("`ID`", "🔴"),
     ],
     "region.md": [
         ("`VN`", "🟡"),
     ],
     "currency.md": [
-        ("`VND`", "🟡"), ("`USD`", "🟡"),
-        ("`THB`", "🟡"), ("`PHP`", "🟡"), ("`MYR`", "🟡"),
-        ("`SGD`", "🟡"), ("`IDR`", "🟡"),
-        ("`CNY`", "🔴"), ("`EUR`", "🔴"),
+        ("`VND`", "🟡"),
+        ("`USD`", "🟡"),
+        ("`THB`", "🟡"),
+        ("`PHP`", "🟡"),
+        ("`MYR`", "🟡"),
+        ("`SGD`", "🟡"),
+        ("`IDR`", "🟡"),
+        ("`CNY`", "🔴"),
+        ("`EUR`", "🔴"),
     ],
     "track-status.md": [
         ("`Package picked up`", "🟡"),
         ("`Delivered`", "🟡"),
     ],
-
     # ─── 完全未观测（🔴 全部）───
     "statement-type.md": [],
     "payment-pending-reason.md": [],
     "line-status.md": [],
-
     # ─── 53 EAV 全部固化───
     "settlement-component-code.md": [
         ("`ACTUAL_RETURN_SHIPPING_FEE`", "✅"),
@@ -252,12 +308,14 @@ def is_placeholder(value: str) -> bool:
         return True
     if value.startswith("`") or value.startswith('"'):
         return False
-    if 0 < len(value) <= 6 and any('\u4e00' <= c <= '\u9fff' for c in value):
+    if 0 < len(value) <= 6 and any("\u4e00" <= c <= "\u9fff" for c in value):
         return True
     return False
 
 
-def process_file(path: Path, status_pairs: list[tuple[str, str]]) -> tuple[str, list[str]]:
+def process_file(
+    path: Path, status_pairs: list[tuple[str, str]]
+) -> tuple[str, list[str]]:
     """返回 (新内容, 警告列表)。失败抛 ValueError 让作者手填。
 
     逻辑：扫描全文，对所有 "##/### 取值/实测样本/已知值/实测" 段下的子表都加上
@@ -364,7 +422,7 @@ def main() -> int:
     only = []
     if "--files" in sys.argv:
         idx = sys.argv.index("--files")
-        only = sys.argv[idx + 1:]
+        only = sys.argv[idx + 1 :]
     files_processed = 0
     files_with_warnings = 0
     total_warnings = 0

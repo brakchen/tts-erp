@@ -79,7 +79,9 @@ def test_purge_plugin_data_dry_run_does_not_delete(api_client, admin_key, db_eng
 
     # 清理
     with db_engine.begin() as conn:
-        conn.execute(text("DELETE FROM plugin.ad_daily WHERE seller_id = 'TEST_SELLER'"))
+        conn.execute(
+            text("DELETE FROM plugin.ad_daily WHERE seller_id = 'TEST_SELLER'")
+        )
 
 
 def test_purge_plugin_data_clears_ad_tables(api_client, admin_key, db_engine):
@@ -133,7 +135,6 @@ def test_purge_plugin_data_clears_ad_tables(api_client, admin_key, db_engine):
         for table in [
             "plugin.ad_daily",
             "plugin.ad_today",
-            "plugin.ad_monthly",
             "plugin.ad_raw_log",
             "plugin.plugin_logs",
         ]:

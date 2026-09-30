@@ -6,7 +6,7 @@
 >
 > 上游：Chrome 扩展 (tk-adv-cost-monitor) 推 `productAnalyses` / `sessionAnalyses` / `campaignChangeLogs` 三类分析 dump
 > 下游：（无，纯存储 + has-data 预检服务）
-> 存储：PostgreSQL `tts_erp` 数据库 · `plugin` schema · **5 张表**（`ad_today` / `ad_daily` / `ad_monthly` / `ad_raw_log` / `plugin_logs`）—— 2026-09-11 migration 0020 已删除 v3 遗留的 `ad_raw` / `ad_sync_audit` 表与 `ad_product_links` 视图—— 2026-09-05 reorg 后由 5 张收为 1 张（详见 `tech-doc/analytics/reorg-plan.md`），2026-09-07 v3 区间聚合再加审计表（见 `tech-doc/analytics/range-aggregate-history-sync.md`）
+> 存储：PostgreSQL `tts_erp` 数据库 · `plugin` schema · `ad_today` / `ad_daily` / `ad_raw_log` / `plugin_logs`；monthly dump 不再建结构化表，只写 `ad_raw_log`。
 >
 > **变更背景**：
 >
@@ -16,7 +16,7 @@
 
 > **⚠ 本文的存储层描述以 v3 为主，已部分过期（2026-09-11）。**
 > v3 的 `analytics.ad_raw` 单表 + `ad_product_links` 视图已由 **migration 0020** 删除；
-> 现行存储是 v4 逐日协议（`ad_today` / `ad_daily` / `ad_monthly` / `ad_raw_log`），
+> 现行存储是 v4 协议（daily/today 写结构化表；monthly 只写 `ad_raw_log`），
 > 见 `tech-doc/analytics/daily-sync-with-coverage.md`。下文出现的 `ad_raw` 应读作
 > `ad_raw_log`，"视图"部分请以新文档为准。**本文件待整体重写。**
 >
@@ -302,7 +302,7 @@ cookie / 完整请求头。
   - `plugin.ad_today`：当前无跨天固化 job,数据由 dump 持续 ON CONFLICT 覆盖
     （v8.1 起 ROI 只读 ad_daily）
   - `plugin.ad_daily`：forever（每日累计主表,ROI 看板只读此表）
-  - `plugin.ad_monthly`：forever（按月聚合）
+  - monthly 数据：`plugin.ad_raw_log(kind='monthly')`；保留期待数据库维护策略决定
   - `plugin.plugin_logs`：forever（插件运行时日志,排查用）
   - 已 drop（0007/0024）: `analytics.ad_records` / `ad_audit_log` /
     `ad_shop_timezones` / `ad_daily_completeness`

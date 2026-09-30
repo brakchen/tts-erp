@@ -43,7 +43,12 @@ Python 3.14 · FastAPI + uvicorn（`:9877`）· SQLAlchemy 2 + psycopg3 · Postg
 - **数据导入**：`bash scripts/import_prod_to_test.sh --yes` 可按需把 prod 数据搬进 test db（multi-pass FK 处理，默认含 credentials 让 FK 走得通，prod Fernet key 不变所以仍可解密）
 - **安全护栏**：tests/conftest.py 检测到 `TTS_ERP_DB_URL` 指向 prod-shape dbname（`tts_erp` / `tts_erp_prod`）会往 stderr 打 WARNING；scripts/test.sh 会在 .env.test 缺失时直接退出
 
-## 4. 凭证管理
+## 4. 数据库维护待办
+
+大表 retention 与生产 dump 归档策略尚待用户拍板，详见
+[`database-maintenance-todos.md`](database-maintenance-todos.md)。
+
+## 5. 凭证管理
 
 ### 4.1 凭证单源：`integration.credentials` + `proxy/token_service.py`
 

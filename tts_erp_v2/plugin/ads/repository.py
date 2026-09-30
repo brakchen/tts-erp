@@ -1,6 +1,6 @@
 """Analytics 存储层（v4 daily-sync-with-coverage, raw SQL）。
 
-SQL 以模块级 text() 常量书写。表全部 schema 限定为 analytics.ad_*。
+SQL 以模块级 text() 常量书写，表全部限定在 ``plugin`` schema。
 """
 
 from __future__ import annotations
@@ -54,25 +54,6 @@ FROM plugin.ad_raw_log
 WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
   AND endpoint = :endpoint AND kind = 'daily'
   AND day BETWEEN :start_day AND :end_day
-"""
-
-SQL_COVERAGE_MONTHLY = """
-SELECT campaign_id, array_agg(DISTINCT year_month ORDER BY year_month) AS months
-FROM plugin.ad_monthly
-WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
-  AND endpoint = :endpoint
-  AND year_month BETWEEN :start_month AND :end_month
-GROUP BY campaign_id
-ORDER BY campaign_id
-LIMIT :page_size OFFSET :offset
-"""
-
-SQL_COVERAGE_MONTHLY_COUNT = """
-SELECT count(DISTINCT campaign_id) AS total
-FROM plugin.ad_monthly
-WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
-  AND endpoint = :endpoint
-  AND year_month BETWEEN :start_month AND :end_month
 """
 
 SQL_COVERAGE_MONTHLY_RAW = """
@@ -133,26 +114,6 @@ ON CONFLICT ON CONSTRAINT uq_ad_today DO UPDATE SET
     updated_at = now()
 """
 
-SQL_UPSERT_MONTHLY_ROW = """
-INSERT INTO plugin.ad_monthly (
-    seller_id, advertiser_id, campaign_id, product_id, endpoint, year_month,
-    mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value,
-    onsite_mixed_real_roi2_shopping, metrics_extra, created_at
-) VALUES (
-    :seller_id, :advertiser_id, :campaign_id, :product_id, :endpoint, :year_month,
-    :mixed_real_cost, :onsite_roi2_shopping_sku, :onsite_roi2_shopping_value,
-    :onsite_mixed_real_roi2_shopping, CAST(:metrics_extra AS JSONB), :created_at
-)
-ON CONFLICT ON CONSTRAINT uq_ad_monthly DO UPDATE SET
-    mixed_real_cost = EXCLUDED.mixed_real_cost,
-    onsite_roi2_shopping_sku = EXCLUDED.onsite_roi2_shopping_sku,
-    onsite_roi2_shopping_value = EXCLUDED.onsite_roi2_shopping_value,
-    onsite_mixed_real_roi2_shopping = EXCLUDED.onsite_mixed_real_roi2_shopping,
-    metrics_extra = EXCLUDED.metrics_extra,
-    updated_at = now()
-RETURNING id
-"""
-
 SQL_INSERT_RAW_LOG = """
 INSERT INTO plugin.ad_raw_log (
     seller_id, advertiser_id, endpoint, campaign_id, product_id,
@@ -188,7 +149,7 @@ _CORE_METRIC_KEYS: frozenset[str] = frozenset(
 )
 
 # ─── Endpoint 分层白名单（2026-09-11 fix/analytics-v4-campaign-rows）──────────────
-# v4 dump 协议假设每行都有 product_id（ad_daily/ad_today/ad_monthly 的主键之一）。
+# v4 daily/today dump 协议假设每行都有 product_id（结构化表主键之一）。
 # 但部分 TikTok endpoint 是 campaign-level 粒度，rows 永远是 campaign 变更事件
 # （如 change_id / change_type），压根没有 product_id —— 硬走结构化表会 KeyError。
 #
@@ -236,15 +197,13 @@ def _archive_raw_log_only(
     day: date | None,
     year_month: str | None,
 ) -> int:
-    """campaign-level endpoint 专用：rows 原样保留在 ad_raw_log.response_body，
-    不写 ad_daily / ad_today / ad_monthly。返回 inserted=0。
+    """Archive a raw-only dump and return zero structured inserts.
 
-    为什么不让 caller 自己去写 ad_raw_log：保留单事务、参数验证、未来字段扩展
-    （如 dump_kind-specific 字段）的统一入口。
+    Used by campaign-level endpoints and every monthly dump. Keeping this in the
+    repository preserves one transaction and one raw-log representation.
     """
-    # ad_raw_log.product_id 对 campaign-level 没有意义 → 存 NULL（不是 ''、不是
-    # sentinel），下游 spu_roi JOIN 时 NULL 不会污染 ad_daily 聚合（ad_daily
-    # 才是 spu_roi 的真数据源）。
+    # Raw-only records represent one request, not one product row. Keep
+    # product_id NULL so downstream SPU joins cannot treat them as daily facts.
     # pi-lens-ignore: python-sql-injection
     sess.execute(
         text(SQL_INSERT_RAW_LOG),
@@ -296,7 +255,9 @@ def get_coverage_daily(
     # pi-lens-ignore: python-sql-injection — LIMIT/OFFSET 走 :page_size/:offset 参数化
     product_level = is_product_level_endpoint(endpoint)
     coverage_sql = SQL_COVERAGE_DAILY if product_level else SQL_COVERAGE_DAILY_RAW
-    count_sql = SQL_COVERAGE_DAILY_COUNT if product_level else SQL_COVERAGE_DAILY_RAW_COUNT
+    count_sql = (
+        SQL_COVERAGE_DAILY_COUNT if product_level else SQL_COVERAGE_DAILY_RAW_COUNT
+    )
     params = {
         "seller_id": seller_id,
         "advertiser_id": advertiser_id,
@@ -306,9 +267,11 @@ def get_coverage_daily(
         "page_size": page_size,
         "offset": offset,
     }
-    requested = None if requested_campaign_ids is None else sorted(set(requested_campaign_ids))
+    requested = (
+        None if requested_campaign_ids is None else sorted(set(requested_campaign_ids))
+    )
     if requested is not None:
-        page_ids = requested[offset:offset + page_size]
+        page_ids = requested[offset : offset + page_size]
         if not page_ids:
             return {}, len(requested)
         requested_sql = coverage_sql.replace(
@@ -320,7 +283,9 @@ def get_coverage_daily(
             {**params, "offset": 0, "campaign_ids": page_ids},
         ).all()
         coverage = {row[0]: [d.isoformat() for d in row[1]] for row in rows}
-        return {campaign_id: coverage.get(campaign_id, []) for campaign_id in page_ids}, len(requested)
+        return {
+            campaign_id: coverage.get(campaign_id, []) for campaign_id in page_ids
+        }, len(requested)
 
     rows = sess.execute(
         text(coverage_sql),
@@ -360,9 +325,8 @@ def get_coverage_monthly(
     """返回 ({campaign_id: ['2026-01', ...]}, totalCampaigns) 的元组。"""
     offset = (page - 1) * page_size
     # pi-lens-ignore: python-sql-injection
-    product_level = is_product_level_endpoint(endpoint)
-    coverage_sql = SQL_COVERAGE_MONTHLY if product_level else SQL_COVERAGE_MONTHLY_RAW
-    count_sql = SQL_COVERAGE_MONTHLY_COUNT if product_level else SQL_COVERAGE_MONTHLY_RAW_COUNT
+    coverage_sql = SQL_COVERAGE_MONTHLY_RAW
+    count_sql = SQL_COVERAGE_MONTHLY_RAW_COUNT
     params = {
         "seller_id": seller_id,
         "advertiser_id": advertiser_id,
@@ -372,9 +336,11 @@ def get_coverage_monthly(
         "page_size": page_size,
         "offset": offset,
     }
-    requested = None if requested_campaign_ids is None else sorted(set(requested_campaign_ids))
+    requested = (
+        None if requested_campaign_ids is None else sorted(set(requested_campaign_ids))
+    )
     if requested is not None:
-        page_ids = requested[offset:offset + page_size]
+        page_ids = requested[offset : offset + page_size]
         if not page_ids:
             return {}, len(requested)
         requested_sql = coverage_sql.replace(
@@ -386,7 +352,9 @@ def get_coverage_monthly(
             {**params, "offset": 0, "campaign_ids": page_ids},
         ).all()
         coverage = {row[0]: list(row[1]) for row in rows}
-        return {campaign_id: coverage.get(campaign_id, []) for campaign_id in page_ids}, len(requested)
+        return {
+            campaign_id: coverage.get(campaign_id, []) for campaign_id in page_ids
+        }, len(requested)
 
     rows = sess.execute(
         text(coverage_sql),
@@ -635,89 +603,25 @@ def upsert_monthly_rows(
     request_id: str | None,
     source: str | None,
 ) -> int:
-    """解析 rows → INSERT ad_monthly + ad_raw_log，单事务。返回 inserted 计数。
-
-    campaign-level endpoint：只写 ad_raw_log，不写 ad_monthly。返回 0。
-    """
-    if not is_product_level_endpoint(endpoint):
-        return _archive_raw_log_only(
-            sess,
-            seller_id=seller_id,
-            advertiser_id=advertiser_id,
-            endpoint=endpoint,
-            campaign_id=campaign_id,
-            rows=rows,
-            request_url=request_url,
-            request_body=request_body,
-            response_status=response_status,
-            response_body=response_body,
-            created_at=created_at,
-            request_id=request_id,
-            source=source,
-            kind="monthly",
-            day=None,
-            year_month=year_month,
-        )
-
-    first_product_id = rows[0]["product_id"] if rows else None
-    inserted = 0
-
-    for row in rows:
-        product_id = row["product_id"]
-        mixed_real_cost = row.get("mixed_real_cost")
-        onsite_roi2_shopping_sku = row.get("onsite_roi2_shopping_sku")
-        onsite_roi2_shopping_value = row.get("onsite_roi2_shopping_value")
-        onsite_mixed_real_roi2_shopping = row.get("onsite_mixed_real_roi2_shopping")
-
-        metrics_extra = {k: v for k, v in row.items() if k not in _CORE_METRIC_KEYS}
-
-        # pi-lens-ignore: python-sql-injection
-        result = sess.execute(
-            text(SQL_UPSERT_MONTHLY_ROW),
-            {
-                "seller_id": seller_id,
-                "advertiser_id": advertiser_id,
-                "campaign_id": campaign_id,
-                "product_id": product_id,
-                "endpoint": endpoint,
-                "year_month": year_month,
-                "mixed_real_cost": mixed_real_cost,
-                "onsite_roi2_shopping_sku": onsite_roi2_shopping_sku,
-                "onsite_roi2_shopping_value": onsite_roi2_shopping_value,
-                "onsite_mixed_real_roi2_shopping": onsite_mixed_real_roi2_shopping,
-                "metrics_extra": json.dumps(metrics_extra, ensure_ascii=False),
-                "created_at": created_at,
-            },
-        )
-        if result.rowcount > 0:
-            inserted += 1
-
-    # INSERT ad_raw_log
-    # pi-lens-ignore: python-sql-injection
-    sess.execute(
-        text(SQL_INSERT_RAW_LOG),
-        {
-            "seller_id": seller_id,
-            "advertiser_id": advertiser_id,
-            "endpoint": endpoint,
-            "campaign_id": campaign_id,
-            "product_id": first_product_id,
-            "kind": "monthly",
-            "day": None,
-            "year_month": year_month,
-            "request_url": request_url,
-            "request_method": "POST",
-            "request_body": json.dumps(request_body, ensure_ascii=False),
-            "response_status": response_status,
-            "response_body": json.dumps(response_body, ensure_ascii=False),
-            "created_at": created_at,
-            "request_id": request_id,
-            "source": source,
-        },
+    """Archive a monthly dump in ``ad_raw_log`` and return zero inserts."""
+    return _archive_raw_log_only(
+        sess,
+        seller_id=seller_id,
+        advertiser_id=advertiser_id,
+        endpoint=endpoint,
+        campaign_id=campaign_id,
+        rows=rows,
+        request_url=request_url,
+        request_body=request_body,
+        response_status=response_status,
+        response_body=response_body,
+        created_at=created_at,
+        request_id=request_id,
+        source=source,
+        kind="monthly",
+        day=None,
+        year_month=year_month,
     )
-
-    sess.commit()
-    return inserted
 
 
 # ─── Plugin logs ─────────────────────────────────────────────────────
@@ -821,17 +725,19 @@ def upsert_campaign_opt_logs(
         inserted += 1
     sess.commit()
     if skipped:
-        log.warning("campaign_opt_logs: %d inserted, %d skipped (bad opt_time)", inserted, skipped)
+        log.warning(
+            "campaign_opt_logs: %d inserted, %d skipped (bad opt_time)",
+            inserted,
+            skipped,
+        )
     return inserted
 
 
 __all__ = [
     "SQL_COVERAGE_DAILY",
-    "SQL_COVERAGE_MONTHLY",
     "SQL_INSERT_PLUGIN_LOG",
     "SQL_INSERT_RAW_LOG",
     "SQL_UPSERT_DAILY_ROW",
-    "SQL_UPSERT_MONTHLY_ROW",
     "SQL_UPSERT_TODAY_ROW",
     "get_coverage_daily",
     "get_coverage_monthly",

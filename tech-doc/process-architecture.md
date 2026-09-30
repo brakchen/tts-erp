@@ -29,7 +29,7 @@ tts_erp_v2/
 │                        #   plugin.py 为插件 dump 的结构化表：订单/物流/结算 7 张
 │                        #   （orders/order_lines/shipments/tracking_events/settlements/
 │                        #   settlement_details/raw_log，原 chrome_sync.py）+ 广告 5 张（ad_today/ad_daily/
-│                        #   ad_monthly/ad_raw_log/plugin_logs，原 analytics.py）
+│                        #   ad_raw_log/plugin_logs；monthly dump 仅写 raw log）
 ├── plugin/orders/       # 插件 dump 数据访问层：解析 TikTok 响应 + upsert 到 plugin.*
 │                        #   （订单/物流/结算；原 tts_erp_v2/chrome_sync/）
 ├── plugin/ads/          # 插件广告 dump 数据访问层：coverage 查询 / upsert ad_* / plugin_logs
@@ -71,7 +71,7 @@ APScheduler 调度器，JOBS 注册表在文件顶部 `NOTE`，以它为准，�
 - `miaoshou.py`：妙手 source-owned 包裹域 6 张表（raw、包裹、商品、赠品、cursor、issue）；
 - `plugin.py`：插件 dump 的订单、物流、结算和广告表；
 - 订单/物流/结算 7 张：orders、order_lines、shipments、tracking_events、settlements、settlement_details、raw_log
-- 广告 5 张：ad_today、ad_daily、ad_monthly、ad_raw_log、plugin_logs
+- 广告：ad_today、ad_daily、ad_raw_log、plugin_logs；monthly dump 仅写 raw log
 
 ### 3.4 proxy/tts_shop/
 

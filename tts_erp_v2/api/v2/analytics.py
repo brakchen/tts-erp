@@ -3,13 +3,13 @@
 ⚠ 命名历史：本模块及 URL 前缀 ``/v2/analytics/sync/*`` 保留 ``analytics``
 名称，原因是 Chrome 扩展侧已将此路径作为 stable 契约依赖，改 URL 需要
 扩展同步发版（AGENTS.md §9.1）。实际数据全部写入 ``plugin`` schema
-（``plugin.ad_today`` / ``ad_daily`` / ``ad_monthly`` / ``ad_raw_log`` /
-``plugin_logs``），仓储层在 ``tts_erp_v2/plugin/ads/repository.py``。
+（``plugin.ad_today`` / ``ad_daily`` / ``ad_raw_log`` / ``plugin_logs``），
+仓储层在 ``tts_erp_v2/plugin/ads/repository.py``。
 ``analytics`` 仅是路由文件名和 URL 前缀层面的历史残留，不代表独立 schema。
 
 v4 protocol（tech-doc/analytics/daily-sync-with-coverage.md）：
-- POST /dumps: 结构化 rows 写入 plugin.ad_today / plugin.ad_daily / plugin.ad_monthly
-- GET /coverage: 批量查询已同步的 coverage 数据
+- POST /dumps: daily/today 写结构化表；monthly 只归档 plugin.ad_raw_log
+- GET /coverage: daily 查结构化表，monthly 从 ad_raw_log 查询
 - POST /plugin-logs: 插件运行时日志上传
 
 Handler 结构说明：
@@ -302,12 +302,14 @@ def get_coverage_endpoint(
             path=audit_path,
         )
 
-    requested_campaign_ids = sorted({
-        campaign_id.strip()
-        for value in campaignId
-        for campaign_id in value.split(",")
-        if campaign_id.strip()
-    })
+    requested_campaign_ids = sorted(
+        {
+            campaign_id.strip()
+            for value in campaignId
+            for campaign_id in value.split(",")
+            if campaign_id.strip()
+        }
+    )
     if len(requested_campaign_ids) > 5000:
         return _audit_and_error(
             request_id=request_id,
@@ -727,7 +729,9 @@ def post_dumps(
     stored_response_body = payload.dump.response
     if is_product_level_endpoint(payload.dump.endpoint) and rows:
         response_data = stored_response_body.get("body")
-        if isinstance(response_data, dict) and isinstance(response_data.get("data"), dict):
+        if isinstance(response_data, dict) and isinstance(
+            response_data.get("data"), dict
+        ):
             data = response_data["data"]
             if "table" not in data:
                 stored_response_body = {
@@ -830,20 +834,20 @@ def post_dumps(
         "kind": dump_kind,
         "rowCount": len(rows),
         "inserted": inserted,
-        "duplicates": len(rows) - inserted,
+        "duplicates": 0 if dump_kind == "monthly" else len(rows) - inserted,
     }
     if opt_logs_inserted > 0:
         resp_data["optLogsInserted"] = opt_logs_inserted
-    # campaign-level endpoint（如 campaign_opt_log_list）的 rows 没有 product_id，
-    # 不会进 ad_daily/ad_today/ad_monthly，只 ad_raw_log 存档；告诉插件这是
-    # expected outcome、不要把"inserted=0"误读成失败。插件侧
-    # analytics-sync-v2.ts 也可不依此字段（不依赖为优）。
-    if not is_product_level_endpoint(payload.dump.endpoint):
-        resp_data["status"] = "campaign_level"
+    # Monthly payloads and campaign-level payloads are accepted into the raw
+    # audit table without structured inserts. Make that explicit so clients do
+    # not misread inserted=0 as a failed or duplicate upload.
     if dump_kind == "monthly":
+        resp_data["status"] = "raw_only"
         resp_data["yearMonth"] = payload.dump.yearMonth
     else:
         resp_data["day"] = payload.dump.day.isoformat()  # type: ignore[union-attr]
+        if not is_product_level_endpoint(payload.dump.endpoint):
+            resp_data["status"] = "campaign_level"
 
     return JSONResponse(
         status_code=200,

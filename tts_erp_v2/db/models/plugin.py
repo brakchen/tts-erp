@@ -7,8 +7,8 @@
 售后（2 张，2026-09-13 feat/after-sales-table 建）：
   after_sales + after_sale_items
 
-广告消耗 + 插件日志（4 张，2026-09-11 由 analytics schema 并入）：
-  ad_today + ad_daily + ad_monthly + ad_raw_log + plugin_logs
+广告消耗 + 插件日志（2026-09-11 由 analytics schema 并入）：
+  ad_today + ad_daily + ad_raw_log + plugin_logs
 
 数据来源：Chrome 扩展从 TikTok Seller Center 抓取的 HTTP 响应，
 通过 /v2/order-sync/dumps 端点写入并直接解析为结构化数据落库
@@ -285,9 +285,7 @@ class ChromeSettlementDetail(Base):
 class ChromeAfterSale(Base):
     __tablename__ = "after_sales"
     __table_args__ = (
-        UniqueConstraint(
-            "shop_id", "cancel_id", name="uq_after_sales_shop_cancel"
-        ),
+        UniqueConstraint("shop_id", "cancel_id", name="uq_after_sales_shop_cancel"),
         Index("ix_after_sales_shop_order", "shop_id", "main_order_id"),
         {"schema": "plugin"},
     )
@@ -389,7 +387,9 @@ class ChromeOrderDetail(Base):
     origin_sale_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
     shipping_origin_fee: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
     shipping_fee_discount_seller: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
-    shipping_fee_discount_platform: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    shipping_fee_discount_platform: Mapped[Decimal | None] = mapped_column(
+        Numeric(20, 4)
+    )
     currency: Mapped[str | None] = mapped_column(Text)
     promotion_infos: Mapped[dict | None] = mapped_column(JSONB)
     # buyer_info_module
@@ -438,7 +438,9 @@ class ChromeOrderTimeline(Base):
     __tablename__ = "order_timeline"
     __table_args__ = (
         UniqueConstraint(
-            "shop_id", "order_id", "event_index",
+            "shop_id",
+            "order_id",
+            "event_index",
             name="uq_order_timeline_shop_order_idx",
         ),
         Index("ix_order_timeline_shop_order", "shop_id", "order_id"),
@@ -466,7 +468,7 @@ class ChromeOrderTimeline(Base):
 
 
 # ── 广告消耗 dump（原 tts_erp_v2/db/models/analytics.py，2026-09-11 并入）───
-# 表已在 plugin schema：ad_today / ad_daily / ad_monthly / ad_raw_log / plugin_logs
+# 表已在 plugin schema：ad_today / ad_daily / ad_raw_log / plugin_logs
 
 
 # ad_today ────────────────────────────────────────────────────────────
@@ -562,59 +564,6 @@ class AdDaily(Base):
     product_id: Mapped[str] = mapped_column(Text, nullable=False)
     endpoint: Mapped[str] = mapped_column(Text, nullable=False)
     day: Mapped[date] = mapped_column(Date, nullable=False)
-    mixed_real_cost: Mapped[float | None] = mapped_column(Numeric(20, 4))
-    onsite_roi2_shopping_sku: Mapped[int | None] = mapped_column(BigInteger)
-    onsite_roi2_shopping_value: Mapped[float | None] = mapped_column(Numeric(20, 4))
-    onsite_mixed_real_roi2_shopping: Mapped[float | None] = mapped_column(
-        Numeric(20, 4)
-    )
-    metrics_extra: Mapped[dict | None] = mapped_column(JSONB)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()")
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()")
-    )
-
-
-# ad_monthly ──────────────────────────────────────────────────────────
-# 月级结构化表（独立同步，不依赖 daily；TikTok API 传月初/月末返回月级聚合）。
-# tech-doc/analytics/daily-sync-with-coverage.md §1.3
-class AdMonthly(Base):
-    __tablename__ = "ad_monthly"
-    __table_args__ = (
-        Index(
-            "uq_ad_monthly",
-            "seller_id",
-            "advertiser_id",
-            "endpoint",
-            "campaign_id",
-            "product_id",
-            "year_month",
-            unique=True,
-        ),
-        Index(
-            "idx_ad_monthly_coverage",
-            "seller_id",
-            "advertiser_id",
-            "endpoint",
-            "campaign_id",
-            "year_month",
-        ),
-        {"schema": "plugin"},
-    )
-
-    id: Mapped[int] = mapped_column(
-        BigInteger,
-        primary_key=True,
-        server_default=text("generate_always_as_identity()"),
-    )
-    seller_id: Mapped[str] = mapped_column(Text, nullable=False)
-    advertiser_id: Mapped[str] = mapped_column(Text, nullable=False)
-    campaign_id: Mapped[str] = mapped_column(Text, nullable=False)
-    product_id: Mapped[str] = mapped_column(Text, nullable=False)
-    endpoint: Mapped[str] = mapped_column(Text, nullable=False)
-    year_month: Mapped[str] = mapped_column(Text, nullable=False)
     mixed_real_cost: Mapped[float | None] = mapped_column(Numeric(20, 4))
     onsite_roi2_shopping_sku: Mapped[int | None] = mapped_column(BigInteger)
     onsite_roi2_shopping_value: Mapped[float | None] = mapped_column(Numeric(20, 4))
@@ -770,7 +719,6 @@ __all__ = [
     # 广告消耗 + 插件日志
     "AdToday",
     "AdDaily",
-    "AdMonthly",
     "AdRawLog",
     "PluginLog",
     # 广告操作日志

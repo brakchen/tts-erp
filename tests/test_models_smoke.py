@@ -22,11 +22,8 @@ from tts_erp_v2.db.models import (
     Payout,
     ProcurementAccount,
     ProcurementProduct,
-    ProcurementProductVariant,
     ProductCostSnapshot,
     ProductProfitDaily,
-    PurchaseOrder,
-    PurchaseOrderLine,
     RawRecord,
     SalesOrder,
     SalesOrderLine,
@@ -34,7 +31,6 @@ from tts_erp_v2.db.models import (
     SettlementStatement,
     SettlementTransaction,
     Shipment,
-    ShipmentLine,
     SyncCursor,
     SyncIssue,
     SyncJob,
@@ -326,46 +322,6 @@ def test_procurement_products(
     assert p.product_type == "SPU"
 
 
-def test_procurement_variants_empty_in_practice(
-    db_session: Session, procurement_product_row: ProcurementProduct
-) -> None:
-    """Miaoshou SKU rows stay empty unless explicitly populated."""
-    v = ProcurementProductVariant(
-        procurement_product_id=procurement_product_row.id,
-        external_variant_id="TEST_pvar_1",
-    )
-    db_session.add(v)
-    db_session.flush()
-    assert v.id is not None
-
-
-def test_purchase_orders_and_lines(
-    db_session: Session,
-    procurement_account_row: ProcurementAccount,
-    procurement_product_row: ProcurementProduct,
-) -> None:
-    po = PurchaseOrder(
-        procurement_account_id=procurement_account_row.id,
-        external_purchase_order_id="TEST_po_1",
-        currency="CNY",
-        total_amount=500.0,
-    )
-    db_session.add(po)
-    db_session.flush()
-
-    pol = PurchaseOrderLine(
-        purchase_order_id=po.id,
-        external_line_id="TEST_pol_1",
-        procurement_product_id=procurement_product_row.id,
-        quantity=10,
-        unit_cost=50.0,
-        currency="CNY",
-    )
-    db_session.add(pol)
-    db_session.flush()
-    assert pol.unit_cost == 50.0
-
-
 def test_manual_product_costs(
     db_session: Session, channel_product_row: ChannelProduct
 ) -> None:
@@ -384,24 +340,15 @@ def test_manual_product_costs(
     assert isinstance(m.valid_from, datetime)
 
 
-def test_shipment_and_lines_and_tracking(
+def test_shipment_and_tracking(
     db_session: Session,
     channel_account_row: ChannelAccount,
-    channel_product_row: ChannelProduct,
 ) -> None:
     so = SalesOrder(
         shop_pk=channel_account_row.id,
         order_id="TEST_ord_ship",
     )
     db_session.add(so)
-    db_session.flush()
-
-    sol = SalesOrderLine(
-        order_pk=so.id,
-        external_line_id="TEST_sol_ship",
-        spu_pk=channel_product_row.id,
-    )
-    db_session.add(sol)
     db_session.flush()
 
     sh = Shipment(
@@ -411,14 +358,6 @@ def test_shipment_and_lines_and_tracking(
         status="shipped",
     )
     db_session.add(sh)
-    db_session.flush()
-
-    sl = ShipmentLine(
-        shipment_id=sh.id,
-        sales_order_line_id=sol.id,
-        quantity=1,
-    )
-    db_session.add(sl)
     db_session.flush()
 
     te = TrackingEvent(

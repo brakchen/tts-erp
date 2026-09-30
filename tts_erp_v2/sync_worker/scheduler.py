@@ -184,13 +184,6 @@ JOBS: dict[str, JobSpec] = {
         is_tiktok=False,
         entrypoint="sync_source_cost_to_master",
     ),
-    "miaoshou.purchase_orders": JobSpec(
-        job_name="miaoshou.purchase_orders",
-        module_path="tts_erp_v2.jobs.miaoshou.purchase_orders",
-        interval_seconds=3600,  # 1 h — procurement costs change slowly
-        is_tiktok=False,
-        entrypoint="sync_purchase_orders",
-    ),
     # 妙手包裹列表按 gmtModified watermark 增量拉取，source-owned 数据只写
     # miaoshou.*；包裹详情 endpoint 作为单包修复入口。
     "miaoshou.packages": JobSpec(
@@ -385,8 +378,7 @@ def _run_system_job(
     """Run a system-wide job once (no per-shop fan-out, no proxy_call).
 
     Covers ``token.refresh`` (real TikTok refresher registry wired in),
-    the four ``miaoshou.*`` jobs and the two ``reporting.*`` recompute
-    jobs.
+    the six ``miaoshou.*`` jobs and the two ``reporting.*`` recompute jobs.
 
     Commit contract: the sync_jobs row written inside the job's
     ``run_job`` context manager is NOT committed by the job itself —
