@@ -82,6 +82,28 @@ UNPAID_SALES_ORDER_STATUSES = {"UNPAID", "ON_HOLD", "CANCELLED"}
 `SETTLEMENT`（卖家实际到账，v9 净收入用）、`PLATFORM_COMMISSION`、`AFFILIATE_COMMISSION`、
 `SHIPPING_FEE`、`CUSTOMER_REFUND`。
 
+### 1.6 预计终局预测事实
+
+预测没有新增表或持久化快照，`GET /v2/analytics/spu-roi` 在同一个一致性读快照内，
+按当前 SPU/店铺和日期范围实时聚合：
+
+| 预测概念 | 物理来源 | 聚合规则 |
+| --- | --- | --- |
+| 已结算样本订单 | `finance.settlement_transactions` + `finance.settlement_components` | 存在 `component_code='SETTLEMENT'` 才有可用实际到账；订单数按 `order_pk` 去重 |
+| 样本销售额/件数 | `commerce.sales_order_lines.quantity × unit_price` / `quantity` | 只取上述已结算 paid 订单商品行 |
+| 样本退款金额/全损件数 | 已完结 `after_sales.cases` + `case_lines.refund_amount/quantity` | 仅 `REFUND_ONLY` / `RETURN_AND_REFUND`；先按 `sales_order_line_id` 合并，确认件数封顶到原行件数 |
+| 未结算订单 | paid 订单行不存在可用 `SETTLEMENT` component | 只对这类订单计算预计终局；已结算到账不再折减 |
+| 已确认未结算退款/全损 | 未结算订单关联的上述已完结售后商品行 | 退款金额按已知值扣一次；确认件数从待预测件数排除 |
+| 待确认未结算件数 | `sales_order_lines.quantity − confirmed_case_qty` | 每行下限为 0；跨 SPU 大盘的订单数另做 `count(DISTINCT order_pk)` |
+| 待确认未结算销售额 | `unresolved_qty × sales_order_lines.unit_price` | 部分退款行按剩余件数比例保留销售额 |
+| 已观察海外取消全损 | `sales_orders.status='CANCELLED'` + `tracking_events.action_code=38301` | 沿用 v9 当前事实，进入终局已观察全损和现有取消全损 COGS；不进入 paid 已结算预测样本 |
+| 单位成本 | `procurement.manual_product_costs`，缺失回退 40 CNY | 预计全损成本和预计保留货本逐 SPU 使用各自单位成本，大盘不能用一个混合单价 |
+| 平台费率 | 页面覆写 / `reporting.shop_fee_rate_estimates` fee-v2 / 0.308 | 只作用于未结算收入；大盘逐店/逐 SPU 折算后聚合 |
+
+样本、预测对象、退款和全损都继续按订单
+`COALESCE(order_time, paid_at)` 归属页面 `w_start`/`w_end` 窗口，不按结算时间或售后完成
+时间切窗。因此改变两个页面的日期选择会改变预测样本、预测对象和预测结果。
+
 ---
 
 ## 2. plugin 数据源（Chrome 扩展拦截 Seller Center）

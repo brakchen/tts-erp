@@ -22,8 +22,10 @@ from sqlalchemy.orm import Session
 
 from tts_erp_v2.analytics.spu_profitability._formula_v10 import (
     FormulaInput,
+    ProjectionInput,
     calculate,
     calculate_order_metrics,
+    calculate_projection,
 )
 from tts_erp_v2.analytics.spu_profitability._selection import resolve_selected_spus
 from tts_erp_v2.analytics.spu_profitability._types import (
@@ -33,6 +35,7 @@ from tts_erp_v2.analytics.spu_profitability._types import (
     ProfitabilityBasis,
     ProfitabilityOverview,
     ProfitabilityTotals,
+    ProjectionStatus,
     ShopFeeRateEntry,
     ShopFeeRateEstimate,
     SpuProfitability,
@@ -173,6 +176,133 @@ _SQL_ROI_SALES = text(
                FILTER (WHERE settlement_vnd IS NOT NULL)                 AS settled_order_count
     FROM lines
     GROUP BY spu_pk
+    """
+)
+
+# 终局预测事实：只预测未结算 paid 订单；预测比例来自同一日期窗口内
+# 已结算 paid 订单。退款/全损 case 先按商品行聚合并封顶到行件数，避免
+# 已确认结果与未来预测重复。结算判定与 _SQL_ROI_SALES 保持一致：存在
+# SETTLEMENT component 才有可用实际到账。
+_SQL_ROI_PROJECTION = text(
+    """
+    WITH selected_orders AS (
+        SELECT DISTINCT order_pk
+        FROM commerce.sales_order_lines
+        WHERE spu_pk = ANY(CAST(:selected_pks AS bigint[]))
+    ),
+    settled_orders AS (
+        SELECT DISTINCT st.order_pk
+        FROM selected_orders selected
+        JOIN finance.settlement_transactions st ON st.order_pk = selected.order_pk
+        JOIN finance.settlement_components sc
+          ON sc.transaction_id = st.id AND sc.component_code = 'SETTLEMENT'
+    ),
+    completed_cases AS (
+        SELECT cl.sales_order_line_id,
+               coalesce(sum(cl.quantity), 0) AS confirmed_qty,
+               coalesce(sum(cl.refund_amount), 0) AS confirmed_refund_amount
+        FROM after_sales.cases c
+        JOIN after_sales.case_lines cl ON cl.case_id = c.id
+        WHERE c.status = :st_return
+          AND c.case_type IN ('REFUND_ONLY', 'RETURN_AND_REFUND')
+        GROUP BY cl.sales_order_line_id
+    ),
+    line_facts AS (
+        SELECT sl.spu_pk,
+               sl.order_pk,
+               sl.quantity,
+               sl.unit_price,
+               sl.quantity * sl.unit_price AS line_sales_vnd,
+               (settled.order_pk IS NOT NULL) AS is_settled,
+               least(sl.quantity, coalesce(cc.confirmed_qty, 0)) AS confirmed_qty,
+               coalesce(cc.confirmed_refund_amount, 0) AS confirmed_refund_amount,
+               greatest(
+                   sl.quantity - least(sl.quantity, coalesce(cc.confirmed_qty, 0)),
+                   0
+               ) AS unresolved_qty
+        FROM commerce.sales_order_lines sl
+        JOIN commerce.sales_orders so ON so.id = sl.order_pk
+        LEFT JOIN settled_orders settled ON settled.order_pk = sl.order_pk
+        LEFT JOIN completed_cases cc ON cc.sales_order_line_id = sl.id
+        WHERE sl.spu_pk = ANY(CAST(:selected_pks AS bigint[]))
+          AND so.status = ANY(CAST(:paid_statuses AS text[]))
+          AND (CAST(:ws AS timestamptz) IS NULL
+               OR coalesce(so.order_time, so.paid_at) >= CAST(:ws AS timestamptz))
+          AND (CAST(:we AS timestamptz) IS NULL
+               OR coalesce(so.order_time, so.paid_at) < CAST(:we AS timestamptz))
+    )
+    SELECT spu_pk,
+           count(DISTINCT order_pk) FILTER (WHERE is_settled)
+               AS projection_basis_order_count,
+           coalesce(sum(quantity) FILTER (WHERE is_settled), 0)
+               AS projection_basis_qty,
+           coalesce(sum(line_sales_vnd) FILTER (WHERE is_settled), 0)
+               AS projection_basis_sales_vnd,
+           coalesce(sum(confirmed_refund_amount) FILTER (WHERE is_settled), 0)
+               AS projection_basis_refund_amount_vnd,
+           coalesce(sum(confirmed_qty) FILTER (WHERE is_settled), 0)
+               AS projection_basis_full_loss_qty,
+           count(DISTINCT order_pk) FILTER (WHERE NOT is_settled)
+               AS unsettled_order_count,
+           count(DISTINCT order_pk) FILTER (
+               WHERE NOT is_settled AND unresolved_qty > 0)
+               AS unresolved_unsettled_order_count,
+           coalesce(sum(confirmed_refund_amount) FILTER (WHERE NOT is_settled), 0)
+               AS confirmed_unsettled_refund_amount_vnd,
+           coalesce(sum(confirmed_qty) FILTER (WHERE NOT is_settled), 0)
+               AS confirmed_unsettled_full_loss_qty,
+           coalesce(sum(unresolved_qty) FILTER (WHERE NOT is_settled), 0)
+               AS unresolved_unsettled_qty,
+           coalesce(sum(unresolved_qty * unit_price) FILTER (WHERE NOT is_settled), 0)
+               AS unresolved_unsettled_sales_vnd
+    FROM line_facts
+    GROUP BY spu_pk
+    """
+)
+
+_SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
+    """
+    WITH settled_orders AS (
+        SELECT DISTINCT st.order_pk
+        FROM finance.settlement_transactions st
+        JOIN finance.settlement_components sc
+          ON sc.transaction_id = st.id AND sc.component_code = 'SETTLEMENT'
+    ),
+    completed_cases AS (
+        SELECT cl.sales_order_line_id,
+               coalesce(sum(cl.quantity), 0) AS confirmed_qty
+        FROM after_sales.cases c
+        JOIN after_sales.case_lines cl ON cl.case_id = c.id
+        WHERE c.status = :st_return
+          AND c.case_type IN ('REFUND_ONLY', 'RETURN_AND_REFUND')
+        GROUP BY cl.sales_order_line_id
+    ),
+    line_facts AS (
+        SELECT sl.order_pk,
+               (settled.order_pk IS NOT NULL) AS is_settled,
+               greatest(
+                   sl.quantity - least(sl.quantity, coalesce(cc.confirmed_qty, 0)),
+                   0
+               ) AS unresolved_qty
+        FROM commerce.sales_order_lines sl
+        JOIN commerce.sales_orders so ON so.id = sl.order_pk
+        LEFT JOIN settled_orders settled ON settled.order_pk = sl.order_pk
+        LEFT JOIN completed_cases cc ON cc.sales_order_line_id = sl.id
+        WHERE sl.spu_pk = ANY(CAST(:selected_pks AS bigint[]))
+          AND so.status = ANY(CAST(:paid_statuses AS text[]))
+          AND (CAST(:ws AS timestamptz) IS NULL
+               OR coalesce(so.order_time, so.paid_at) >= CAST(:ws AS timestamptz))
+          AND (CAST(:we AS timestamptz) IS NULL
+               OR coalesce(so.order_time, so.paid_at) < CAST(:we AS timestamptz))
+    )
+    SELECT count(DISTINCT order_pk) FILTER (WHERE is_settled)
+               AS projection_basis_order_count,
+           count(DISTINCT order_pk) FILTER (WHERE NOT is_settled)
+               AS unsettled_order_count,
+           count(DISTINCT order_pk) FILTER (
+               WHERE NOT is_settled AND unresolved_qty > 0)
+               AS unresolved_unsettled_order_count
+    FROM line_facts
     """
 )
 
@@ -814,6 +944,7 @@ def _query_spu_roi(
     fx_basis = _resolve_fx_basis(sess)
     fx_usd_cny = fx_basis.usd_cny
     fx_usd_vnd = fx_basis.usd_vnd
+    vnd_per_cny = fx_usd_vnd / fx_usd_cny
     ws_dt, we_dt = _window_dates(w_start, w_end)
     paid_statuses = list(PAID_SALES_ORDER_STATUSES)
     st0, st1 = _CASE_COMPLETED_STATUSES
@@ -939,6 +1070,24 @@ def _query_spu_roi(
         int(r["spu_pk"]): r for r in refund_rows if r["spu_pk"] is not None
     }  # pi-lens-ignore: no-try-except
 
+    projection_rows = (
+        sess.execute(
+            _SQL_ROI_PROJECTION,
+            {
+                **common_fact_params,
+                "paid_statuses": paid_statuses,
+                "st_return": _CASE_COMPLETED_STATUSES[1],
+            },
+        )
+        .mappings()
+        .all()
+        if selected_pks
+        else []
+    )
+    projection_map = {
+        int(r["spu_pk"]): r for r in projection_rows if r["spu_pk"] is not None
+    }  # pi-lens-ignore: no-try-except
+
     # 成本链批量解析（D1）
     cost_map = _resolve_costs_batch(sess, selected_pks)
 
@@ -1011,6 +1160,67 @@ def _query_spu_roi(
         refund_cancelled_vnd = (
             Decimal(refund["refund_cancelled_amount"]) if refund else Decimal(0)
         )
+
+        projection_facts = projection_map.get(pk)
+        projection_basis_order_count = (
+            _row_int(projection_facts["projection_basis_order_count"])
+            if projection_facts
+            else 0
+        )
+        projection_basis_qty = (
+            _row_int(projection_facts["projection_basis_qty"])
+            if projection_facts
+            else 0
+        )
+        projection_basis_sales_cny = (
+            Decimal(projection_facts["projection_basis_sales_vnd"] or 0)
+            / vnd_per_cny
+            if projection_facts
+            else Decimal(0)
+        )
+        projection_basis_refund_amount_cny = (
+            Decimal(projection_facts["projection_basis_refund_amount_vnd"] or 0)
+            / vnd_per_cny
+            if projection_facts
+            else Decimal(0)
+        )
+        projection_basis_full_loss_qty = (
+            _row_int(projection_facts["projection_basis_full_loss_qty"])
+            if projection_facts
+            else 0
+        )
+        unsettled_order_count = (
+            _row_int(projection_facts["unsettled_order_count"])
+            if projection_facts
+            else 0
+        )
+        unresolved_unsettled_order_count = (
+            _row_int(projection_facts["unresolved_unsettled_order_count"])
+            if projection_facts
+            else 0
+        )
+        confirmed_unsettled_refund_amount_cny = (
+            Decimal(projection_facts["confirmed_unsettled_refund_amount_vnd"] or 0)
+            / vnd_per_cny
+            if projection_facts
+            else Decimal(0)
+        )
+        confirmed_unsettled_full_loss_qty = (
+            _row_int(projection_facts["confirmed_unsettled_full_loss_qty"])
+            if projection_facts
+            else 0
+        )
+        unresolved_unsettled_qty = (
+            _row_int(projection_facts["unresolved_unsettled_qty"])
+            if projection_facts
+            else 0
+        )
+        unresolved_unsettled_sales_cny = (
+            Decimal(projection_facts["unresolved_unsettled_sales_vnd"] or 0)
+            / vnd_per_cny
+            if projection_facts
+            else Decimal(0)
+        )
         # 成本解析（D1 全链）与纯 v10 公式。
         unit_cost_cny, cost_source = cost_map.get(pk, (K1_DEFAULT_CNY, "DEFAULT_K1"))
         fee_entry = shop_fee[int(cat["shop_pk"])]
@@ -1077,6 +1287,46 @@ def _query_spu_roi(
         full_loss_qty_rate = formula.full_loss_qty_rate
         cancel_rate = formula.cancel_rate
         refund_rate_qty = formula.refund_rate_qty
+
+        one_minus_fee = Decimal(1) - row_rate
+        projection = calculate_projection(
+            ProjectionInput(
+                projection_basis_order_count=projection_basis_order_count,
+                projection_basis_qty=Decimal(projection_basis_qty),
+                projection_basis_sales_cny=projection_basis_sales_cny,
+                projection_basis_refund_amount_cny=(
+                    projection_basis_refund_amount_cny
+                ),
+                projection_basis_full_loss_qty=Decimal(
+                    projection_basis_full_loss_qty
+                ),
+                unsettled_order_count=unsettled_order_count,
+                unresolved_unsettled_order_count=(
+                    unresolved_unsettled_order_count
+                ),
+                unsettled_sales_after_fee_cny=(
+                    unsettled_sales_cny * one_minus_fee
+                ),
+                confirmed_unsettled_refund_after_fee_cny=(
+                    confirmed_unsettled_refund_amount_cny * one_minus_fee
+                ),
+                unresolved_unsettled_qty=Decimal(unresolved_unsettled_qty),
+                unresolved_unsettled_sales_after_fee_cny=(
+                    unresolved_unsettled_sales_cny * one_minus_fee
+                ),
+                unresolved_unsettled_cogs_cny=(
+                    Decimal(unresolved_unsettled_qty) * unit_cost_cny
+                ),
+                settled_net_cny=settled_net_cny,
+                observed_full_loss_qty=Decimal(full_loss_qty),
+                observed_full_loss_cost_cny=return_loss_cny,
+                current_cogs_kept_cny=formula.cogs_kept_cny,
+                cogs_total_cny=formula.cogs_all_cny,
+                spend_cny=spend_cny,
+                current_net_revenue_cny=net_revenue_cny,
+                current_net_profit_cny=net_profit_cny,
+            )
+        )
 
         plain.append(
             {
@@ -1150,6 +1400,48 @@ def _query_spu_roi(
                 "ad_system_breakeven_roi_status": (FormulaStatus.ESTIMATED_KNOWN_COSTS),
                 "fee_rate_used": row_rate,
                 "fee_source": row_fee_source,
+                "projection_status": projection.status,
+                "projection_basis_order_count": projection_basis_order_count,
+                "projection_basis_qty": projection_basis_qty,
+                "projection_basis_sales": projection_basis_sales_cny,
+                "projection_basis_refund_amount": (
+                    projection_basis_refund_amount_cny
+                ),
+                "projection_basis_full_loss_qty": (
+                    projection_basis_full_loss_qty
+                ),
+                "projection_refund_amount_rate": projection.refund_amount_rate,
+                "projection_full_loss_qty_rate": projection.full_loss_qty_rate,
+                "unsettled_order_count": unsettled_order_count,
+                "unresolved_unsettled_order_count": (
+                    unresolved_unsettled_order_count
+                ),
+                "unresolved_unsettled_qty": unresolved_unsettled_qty,
+                "unresolved_unsettled_sales": unresolved_unsettled_sales_cny,
+                "confirmed_unsettled_refund_amount": (
+                    confirmed_unsettled_refund_amount_cny
+                ),
+                "confirmed_unsettled_full_loss_qty": (
+                    confirmed_unsettled_full_loss_qty
+                ),
+                "projected_future_full_loss_qty": (
+                    projection.projected_future_full_loss_qty
+                ),
+                "projected_terminal_full_loss_qty": (
+                    projection.projected_terminal_full_loss_qty
+                ),
+                "projected_full_loss_cost": (
+                    projection.projected_full_loss_cost_cny
+                ),
+                "projected_unsettled_net": projection.projected_unsettled_net_cny,
+                "projected_net_revenue": projection.projected_net_revenue_cny,
+                "projected_net_profit": projection.projected_net_profit_cny,
+                "projected_roi_real": projection.projected_roi_real,
+                "projected_roi_breakeven": (
+                    projection.projected_roi_breakeven
+                ),
+                "projected_nc_prime": projection.projected_nc_prime_cny,
+                "projected_cogs_kept": projection.projected_cogs_kept_cny,
             }
         )
         total_spend += spend_cny
@@ -1237,7 +1529,6 @@ def _query_spu_roi(
     total_overseas_cancelled = (
         _row_int(scope_row["overseas_cancelled_order_count"]) if scope_row else 0
     )
-    vnd_per_cny = fx_usd_vnd / fx_usd_cny
     gmv_total = Decimal(scope_row["gmv"]) / vnd_per_cny if scope_row else Decimal(0)
 
     # 全局退款订单数（distinct orders with refund cases；窗口跟随原订单）
@@ -1262,6 +1553,38 @@ def _query_spu_roi(
         _row_int(refund_scope_row["refund_order_count"]) if refund_scope_row else 0
     )
 
+    projection_counts_row = None
+    if spu_pks_in_scope:
+        projection_counts_row = (
+            sess.execute(
+                _SQL_ROI_PROJECTION_SCOPE_COUNTS,
+                {
+                    "selected_pks": spu_pks_in_scope,
+                    "paid_statuses": paid_statuses,
+                    "st_return": _CASE_COMPLETED_STATUSES[1],
+                    "ws": ws_dt,
+                    "we": we_dt,
+                },
+            )
+            .mappings()
+            .first()
+        )
+    total_projection_basis_order_count = (
+        _row_int(projection_counts_row["projection_basis_order_count"])
+        if projection_counts_row
+        else 0
+    )
+    total_unsettled_order_count = (
+        _row_int(projection_counts_row["unsettled_order_count"])
+        if projection_counts_row
+        else 0
+    )
+    total_unresolved_unsettled_order_count = (
+        _row_int(projection_counts_row["unresolved_unsettled_order_count"])
+        if projection_counts_row
+        else 0
+    )
+
     # 从行级数据聚合：全损件数、COGS_kept（件数口径，用于 return_loss/roi）
     total_full_loss_qty = sum((r["full_loss_qty"] for r in scope_plain), 0)
     total_full_loss_cancelled_qty = sum(
@@ -1279,6 +1602,98 @@ def _query_spu_roi(
             )
             * unit_cost,
         )
+
+    total_projection_basis_qty = sum(
+        (r["projection_basis_qty"] for r in scope_plain), 0
+    )
+    total_projection_basis_sales = sum(
+        (r["projection_basis_sales"] for r in scope_plain), Decimal(0)
+    )
+    total_projection_basis_refund_amount = sum(
+        (r["projection_basis_refund_amount"] for r in scope_plain), Decimal(0)
+    )
+    total_projection_basis_full_loss_qty = sum(
+        (r["projection_basis_full_loss_qty"] for r in scope_plain), 0
+    )
+    total_unresolved_unsettled_qty = sum(
+        (r["unresolved_unsettled_qty"] for r in scope_plain), 0
+    )
+    total_unresolved_unsettled_sales = sum(
+        (r["unresolved_unsettled_sales"] for r in scope_plain), Decimal(0)
+    )
+    total_confirmed_unsettled_refund_amount = sum(
+        (r["confirmed_unsettled_refund_amount"] for r in scope_plain),
+        Decimal(0),
+    )
+    total_confirmed_unsettled_full_loss_qty = sum(
+        (r["confirmed_unsettled_full_loss_qty"] for r in scope_plain), 0
+    )
+    total_unsettled_sales_after_fee = sum(
+        (
+            r["unsettled_sales"] * (Decimal(1) - r["fee_rate_used"])
+            for r in scope_plain
+        ),
+        Decimal(0),
+    )
+    total_confirmed_refund_after_fee = sum(
+        (
+            r["confirmed_unsettled_refund_amount"]
+            * (Decimal(1) - r["fee_rate_used"])
+            for r in scope_plain
+        ),
+        Decimal(0),
+    )
+    total_unresolved_sales_after_fee = sum(
+        (
+            r["unresolved_unsettled_sales"]
+            * (Decimal(1) - r["fee_rate_used"])
+            for r in scope_plain
+        ),
+        Decimal(0),
+    )
+    total_unresolved_cogs = sum(
+        (
+            Decimal(r["unresolved_unsettled_qty"]) * r["unit_cost_used"]
+            for r in scope_plain
+        ),
+        Decimal(0),
+    )
+    dashboard_projection = calculate_projection(
+        ProjectionInput(
+            projection_basis_order_count=total_projection_basis_order_count,
+            projection_basis_qty=Decimal(total_projection_basis_qty),
+            projection_basis_sales_cny=total_projection_basis_sales,
+            projection_basis_refund_amount_cny=(
+                total_projection_basis_refund_amount
+            ),
+            projection_basis_full_loss_qty=Decimal(
+                total_projection_basis_full_loss_qty
+            ),
+            unsettled_order_count=total_unsettled_order_count,
+            unresolved_unsettled_order_count=(
+                total_unresolved_unsettled_order_count
+            ),
+            unsettled_sales_after_fee_cny=total_unsettled_sales_after_fee,
+            confirmed_unsettled_refund_after_fee_cny=(
+                total_confirmed_refund_after_fee
+            ),
+            unresolved_unsettled_qty=Decimal(total_unresolved_unsettled_qty),
+            unresolved_unsettled_sales_after_fee_cny=(
+                total_unresolved_sales_after_fee
+            ),
+            unresolved_unsettled_cogs_cny=total_unresolved_cogs,
+            settled_net_cny=sum(
+                (r["settled_net"] for r in scope_plain), Decimal(0)
+            ),
+            observed_full_loss_qty=Decimal(total_full_loss_qty),
+            observed_full_loss_cost_cny=money_total["return_loss"],
+            current_cogs_kept_cny=total_cogs_kept,
+            cogs_total_cny=money_total["cogs_total"],
+            spend_cny=money_total["spend"],
+            current_net_revenue_cny=money_total["net_revenue"],
+            current_net_profit_cny=money_total["net_profit"],
+        )
+    )
 
     # 行级和大盘共用同一个 v10 订单漏斗公式；大盘只替换为全局去重事实。
     dashboard_orders = calculate_order_metrics(
@@ -1328,6 +1743,46 @@ def _query_spu_roi(
         ad_system_max_ad_spend=ad_system_max_ad_spend,
         ad_system_remaining_ad_spend_capacity=(ad_system_remaining_ad_spend_capacity),
         ad_system_breakeven_roi_status=(FormulaStatus.ESTIMATED_KNOWN_COSTS),
+        projection_status=dashboard_projection.status,
+        projection_basis_order_count=total_projection_basis_order_count,
+        projection_basis_qty=total_projection_basis_qty,
+        projection_basis_sales=total_projection_basis_sales,
+        projection_basis_refund_amount=total_projection_basis_refund_amount,
+        projection_basis_full_loss_qty=total_projection_basis_full_loss_qty,
+        projection_refund_amount_rate=dashboard_projection.refund_amount_rate,
+        projection_full_loss_qty_rate=dashboard_projection.full_loss_qty_rate,
+        unsettled_order_count=total_unsettled_order_count,
+        unresolved_unsettled_order_count=(
+            total_unresolved_unsettled_order_count
+        ),
+        unresolved_unsettled_qty=total_unresolved_unsettled_qty,
+        unresolved_unsettled_sales=total_unresolved_unsettled_sales,
+        confirmed_unsettled_refund_amount=(
+            total_confirmed_unsettled_refund_amount
+        ),
+        confirmed_unsettled_full_loss_qty=(
+            total_confirmed_unsettled_full_loss_qty
+        ),
+        projected_future_full_loss_qty=(
+            dashboard_projection.projected_future_full_loss_qty
+        ),
+        projected_terminal_full_loss_qty=(
+            dashboard_projection.projected_terminal_full_loss_qty
+        ),
+        projected_full_loss_cost=(
+            dashboard_projection.projected_full_loss_cost_cny
+        ),
+        projected_unsettled_net=(
+            dashboard_projection.projected_unsettled_net_cny
+        ),
+        projected_net_revenue=dashboard_projection.projected_net_revenue_cny,
+        projected_net_profit=dashboard_projection.projected_net_profit_cny,
+        projected_roi_real=dashboard_projection.projected_roi_real,
+        projected_roi_breakeven=(
+            dashboard_projection.projected_roi_breakeven
+        ),
+        projected_nc_prime=dashboard_projection.projected_nc_prime_cny,
+        projected_cogs_kept=dashboard_projection.projected_cogs_kept_cny,
     )
 
     # meta（§4 v7）
@@ -1364,6 +1819,13 @@ def _query_spu_roi(
         warnings.append("default_unit_cost_used")
     if any(row["settled_order_count"] < row["order_count"] for row in scope_plain):
         warnings.append("unsettled_orders_estimated")
+    if any(
+        row["projection_status"] is ProjectionStatus.INSUFFICIENT_SAMPLE
+        for row in scope_plain
+    ):
+        warnings.append("projection_insufficient_sample")
+    if any(row["unsettled_order_count"] > 0 for row in scope_plain):
+        warnings.append("projection_uses_settled_order_sample")
     warnings.append("ad_system_other_necessary_costs_not_modeled")
 
     # 费率 meta：标量 source/rate 在 scope 内口径唯一时可信；多口径混合时
