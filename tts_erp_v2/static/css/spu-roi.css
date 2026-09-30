@@ -271,6 +271,53 @@ a:hover {
 .op-toolbar input[type="date"] {
  color-scheme: light;
 }
+/* 日期范围沿用浏览器原生 date picker，并用 Bootstrap input-group / btn-group
+   组成一个紧凑的账期控件；不引入第三方日期库。 */
+.op-date-range-col {
+ flex: 1 1 34rem;
+ max-width: 42rem;
+ min-width: min(100%, 24rem);
+}
+.op-date-range {
+ border: 1px solid var(--rule);
+ background: rgba(255, 255, 255, 0.14);
+}
+.op-date-range__heading {
+ min-height: 31px;
+}
+.op-date-input-groups {
+ --bs-gutter-x: 0.5rem;
+}
+.op-date-input-group .input-group-text {
+ color: var(--muted);
+ background: var(--paper-deep);
+ border-color: var(--rule);
+ border-radius: 0;
+ font-family: var(--mono);
+ font-size: 11px;
+ letter-spacing: 0.08em;
+}
+.op-date-input-group .form-control {
+ min-width: 0;
+ font-variant-numeric: tabular-nums;
+}
+.op-date-range__help {
+ color: var(--muted);
+ font-size: 11px;
+ line-height: 1.45;
+}
+.op-date-presets .btn {
+ --bs-btn-color: var(--muted);
+ --bs-btn-border-color: var(--rule);
+ --bs-btn-hover-color: var(--ink);
+ --bs-btn-hover-bg: var(--paper-deep);
+ --bs-btn-hover-border-color: var(--accent);
+ --bs-btn-active-color: var(--bs-white);
+ --bs-btn-active-bg: var(--accent);
+ --bs-btn-active-border-color: var(--accent);
+ border-radius: 0;
+ white-space: nowrap;
+}
 .op-toolbar .form-check-input {
  border-color: var(--rule);
  border-radius: 0;
