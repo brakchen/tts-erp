@@ -16,4 +16,3 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| isolated-test-hardening | 加固隔离测试脚本与文档 | 01a0f3bd-328d-729f-8747-2a8dddf4961f | `chore/isolated-test-hardening` / `.worktrees/isolated-test-hardening` | `scripts/test_isolated.sh`; `AGENTS.md`; `tech-doc/agent-testing.md`; `tech-doc/agent-safety.md`; `tests/conftest.py` | ready | badadfd9c1f5134f454772e38324fde74f892de9 | db38b8a2d7ffdd6a080648f54fa91a7c245bde7e | 2026-09-30 20:53:00 |
