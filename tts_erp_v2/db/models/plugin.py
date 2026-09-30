@@ -580,14 +580,14 @@ class AdDaily(Base):
 
 
 # ad_raw_log ──────────────────────────────────────────────────────────
-# 原始请求日志（kind CHECK: daily/today/monthly）。纯日志表，不参与业务查询。
+# 原始请求日志（kind CHECK: daily/today）。纯日志表，不参与业务查询。
 # 保留原始 request/response 用于调试、审计、数据恢复；建议 retention 90 天自动清理。
 # tech-doc/analytics/daily-sync-with-coverage.md §1.4
 class AdRawLog(Base):
     __tablename__ = "ad_raw_log"
     __table_args__ = (
         CheckConstraint(
-            "kind IN ('daily', 'today', 'monthly')",
+            "kind IN ('daily', 'today')",
             name="ck_ad_raw_log_kind",
         ),
         Index("idx_ad_raw_log_day", "day"),
@@ -607,7 +607,6 @@ class AdRawLog(Base):
     product_id: Mapped[str | None] = mapped_column(Text)
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     day: Mapped[date | None] = mapped_column(Date)
-    year_month: Mapped[str | None] = mapped_column(Text)
     request_url: Mapped[str] = mapped_column(Text, nullable=False)
     request_method: Mapped[str] = mapped_column(Text, nullable=False)
     request_body: Mapped[dict | None] = mapped_column(JSONB)

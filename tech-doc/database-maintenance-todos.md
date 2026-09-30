@@ -17,7 +17,6 @@
 
 待确定：热数据保留期、是否冷存储、按时间分区与否、删除前 FK/可重建性审计、定时任务和回滚方式。
 
-约束：monthly analytics coverage 由 `plugin.ad_raw_log(kind='monthly')` 提供；任何 retention 不得早于产品要求的 coverage 窗口删除它。
 
 ## TODO 2：生产 dump 归档策略
 

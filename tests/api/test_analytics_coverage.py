@@ -3,7 +3,7 @@
 覆盖（tech-doc/analytics/daily-sync-with-coverage.md §8.1）：
 - 空库 → coveredPeriods=[], totalCovered=0
 - 插入 ad_daily 行 → 对应日期在 coveredPeriods 中
-- 插入 monthly ad_raw_log 行 → 对应月份在 coveredPeriods 中
+- monthly coverage 被拒绝
 - 范围外的日期/月份不返回
 - 不同 campaign 数据互不影响
 - 无权限 → 403
@@ -72,36 +72,6 @@ def _insert_ad_daily(
                 "product": product_id,
                 "ep": ENDPOINT,
                 "day": day,
-            },
-        )
-
-
-def _insert_monthly_raw(
-    db_engine,
-    *,
-    year_month: str,
-    campaign_id: str = CAMPAIGN_1,
-) -> None:
-    """Insert one monthly raw-log request for coverage testing."""
-    with db_engine.begin() as conn:
-        conn.execute(
-            text(
-                """
-                INSERT INTO plugin.ad_raw_log (
-                    seller_id, advertiser_id, endpoint, campaign_id, kind,
-                    year_month, request_url, request_method, created_at
-                ) VALUES (
-                    :seller, :adv, :ep, :campaign, 'monthly', :ym,
-                    'https://example.test/monthly', 'POST', now()
-                )
-                """
-            ),
-            {
-                "seller": SELLER,
-                "adv": ADVERTISER,
-                "campaign": campaign_id,
-                "ep": ENDPOINT,
-                "ym": year_month,
             },
         )
 
@@ -198,39 +168,9 @@ def test_coverage_daily_with_data(api_client, readwrite_key, db_engine):
     assert cov["coveredPeriods"] == ["2026-09-03", "2026-09-05", "2026-09-07"]
 
 
-def test_coverage_monthly_with_data(api_client, readwrite_key, db_engine):
-    """Monthly raw logs produce the covered month list."""
-    _insert_monthly_raw(db_engine, year_month="2026-06")
-    _insert_monthly_raw(db_engine, year_month="2026-07")
-    _insert_monthly_raw(db_engine, year_month="2026-08")
-
-    r = _coverage_get(
-        api_client,
-        readwrite_key,
-        sellerId=SELLER,
-        advertiserId=ADVERTISER,
-        endpoint=ENDPOINT,
-        kind="monthly",
-        startMonth="2026-01",
-        endMonth="2026-09",
-    )
-    assert r.status_code == 200, r.text
-    data = r.json()["data"]
-    assert data["kind"] == "monthly"
-    assert data["startMonth"] == "2026-01"
-    assert data["endMonth"] == "2026-09"
-    assert data["totalRequested"] == 9
-    campaigns = data["campaigns"]
-    assert CAMPAIGN_1 in campaigns
-    cov = campaigns[CAMPAIGN_1]
-    assert cov["totalCovered"] == 3
-    assert cov["coveredPeriods"] == ["2026-06", "2026-07", "2026-08"]
-
-
 def test_coverage_out_of_range(api_client, readwrite_key, db_engine):
-    """范围外的日期/月份不返回。"""
+    """范围外的日期不返回。"""
     _insert_ad_daily(db_engine, day="2026-09-05")
-    _insert_monthly_raw(db_engine, year_month="2026-08")
 
     # daily: 查询 2026-08-01~2026-08-31，不包含 09-05
     r_daily = _coverage_get(
@@ -245,20 +185,6 @@ def test_coverage_out_of_range(api_client, readwrite_key, db_engine):
     )
     assert r_daily.status_code == 200
     assert r_daily.json()["data"]["campaigns"] == {}
-
-    # monthly: 查询 2026-01~2026-06，不包含 2026-08
-    r_monthly = _coverage_get(
-        api_client,
-        readwrite_key,
-        sellerId=SELLER,
-        advertiserId=ADVERTISER,
-        endpoint=ENDPOINT,
-        kind="monthly",
-        startMonth="2026-01",
-        endMonth="2026-06",
-    )
-    assert r_monthly.status_code == 200
-    assert r_monthly.json()["data"]["campaigns"] == {}
 
 
 def test_coverage_campaign_isolation(api_client, readwrite_key, db_engine):
@@ -333,30 +259,7 @@ def test_coverage_start_after_end(api_client, readwrite_key, db_engine):
     assert "startDay" in r.json()["message"]
 
 
-def test_coverage_monthly_start_after_end(api_client, readwrite_key, db_engine):
-    """startMonth > endMonth → 400 SCHEMA_INVALID。"""
-    r = _coverage_get(
-        api_client,
-        readwrite_key,
-        sellerId=SELLER,
-        advertiserId=ADVERTISER,
-        endpoint=ENDPOINT,
-        kind="monthly",
-        startMonth="2026-09",
-        endMonth="2026-01",
-    )
-    assert r.status_code == 400
-    assert r.json()["code"] == "SCHEMA_INVALID"
-    assert "startMonth" in r.json()["message"]
-
-
-# ─── §8.2 分页（2026-09-11 加）─────────────────────────────────────
-# 修 /coverage 无分页/上限隐患 #3：服务端加 page/pageSize + pagination 元数据；
-# 客户端 fetchBatchCoverage 自动迭代合并。
-
-# PAGER_SELLER 跟前面 SELLER 隔离，避免 fixture 串扰
-
-# PAGER_SELLER 跟前面 SELLER 隔离，避免 fixture 串扰
+# Pagination fixture scope is isolated from the basic coverage fixture.
 PAGER_SELLER = "TEST_seller-cov-pager"
 PAGER_ADVERTISER = "TEST_adv-cov-pager"
 PAGER_ENDPOINT = "/oec_ads/shopping/v1/oec/stat/post_product_list"
