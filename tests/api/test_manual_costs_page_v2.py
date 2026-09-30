@@ -629,6 +629,9 @@ def test_page_has_backend_missing_manual_cost_toggle(api_client, readonly_key):
     assert "catalogueMissingManualCost" in src
     assert "missing_manual_cost=true" in src
     assert "filter-missing-manual-cost" in src
+    assert "catalogueMissingManualCost || it.source_unit_cost == null" in src, (
+        "unregistered-only rows must not prefill the source price"
+    )
 
 
 def test_page_does_not_render_source_price_badge(api_client, readonly_key):
