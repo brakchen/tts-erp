@@ -1241,7 +1241,12 @@ def test_spu_roi_projects_only_unsettled_orders_from_settled_sample(
     projected_net_profit = (
         projected_net_revenue - Decimal(640) - Decimal(10) * USD_CNY
     )
-    projected_nc_prime = projected_net_revenue - Decimal(160)
+    observed_full_loss_rate = Decimal(2) / Decimal(3)
+    projected_future_full_loss_qty = Decimal(5) * observed_full_loss_rate
+    projected_terminal_full_loss_qty = Decimal(3) + projected_future_full_loss_qty
+    projected_full_loss_cost = Decimal(120) + Decimal(200) * observed_full_loss_rate
+    projected_nc_prime = projected_net_revenue - projected_full_loss_cost
+    projected_cogs_kept = Decimal(520) - Decimal(200) * observed_full_loss_rate
     projected_roi = projected_nc_prime / (Decimal(10) * USD_CNY)
 
     assert item["projection_status"] == "available"
@@ -1253,24 +1258,47 @@ def test_spu_roi_projects_only_unsettled_orders_from_settled_sample(
     )
     assert item["projection_basis_full_loss_qty"] == 2
     assert item["projection_refund_amount_rate"] == "0.2000"
-    assert item["projection_full_loss_qty_rate"] == "0.2000"
+    # 全损预测使用页面同口径的订单全损率，不再因“已结算样本无全损”归零。
+    assert item["full_loss_rate"] == "0.67"
+    assert item["projection_full_loss_qty_rate"] == "0.6667"
     assert item["unresolved_unsettled_order_count"] == 2
     assert Decimal(item["unresolved_unsettled_qty"]) == Decimal(5)
     assert item["unresolved_unsettled_sales"] == m4(Decimal(500_000) * vnd_cny)
-    assert Decimal(item["projected_future_full_loss_qty"]) == Decimal(1)
-    assert Decimal(item["projected_terminal_full_loss_qty"]) == Decimal(4)
-    assert item["projected_full_loss_cost"] == "160.0000"
+    assert item["confirmed_unsettled_refund_amount"] == m4(
+        Decimal(100_000) * vnd_cny
+    )
+    assert Decimal(item["projected_future_full_loss_qty"]) == (
+        projected_future_full_loss_qty
+    )
+    assert Decimal(item["projected_terminal_full_loss_qty"]) == (
+        projected_terminal_full_loss_qty
+    )
+    assert item["projected_full_loss_cost"] == m4(projected_full_loss_cost)
     assert item["projected_unsettled_net"] == m4(projected_unsettled_net)
     assert item["projected_net_revenue"] == m4(projected_net_revenue)
     assert item["projected_net_profit"] == m4(projected_net_profit)
     assert item["projected_nc_prime"] == m4(projected_nc_prime)
-    assert item["projected_cogs_kept"] == "480.0000"
+    assert item["projected_cogs_kept"] == m4(projected_cogs_kept)
     assert item["projected_roi_real"] == m2(projected_roi)
     assert item["projected_roi_breakeven"] is None
     assert body["meta"]["projection"]["date_attribution"] == (
         "COALESCE(order_time, paid_at)"
     )
     assert "未结算订单" in body["meta"]["projection"]["target"]
+    assert body["meta"]["projection"]["full_loss_rate_source"].endswith(
+        "full_loss_rate"
+    )
+    # 未结算总销售 600,000 VND 中，已确认退款 100,000 只扣一次；预测退款率
+    # 只作用于剩余待确认销售 500,000，不会对已退款件再次折减。
+    assert item["projected_unsettled_net"] == m4(
+        (
+            Decimal(600_000)
+            - Decimal(100_000)
+            - Decimal(500_000) * Decimal("0.20")
+        )
+        * (Decimal(1) - FEE_BASELINE)
+        * vnd_cny
+    )
     # Existing COGS already contains all 16 paid units. Predicted loss is not
     # subtracted again from terminal profit.
     assert Decimal(item["projected_net_profit"]) == (
@@ -3631,6 +3659,8 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert '"#sum-projection-status"' in js_src
     assert "totals.projection_status" in js_src
     assert "totals.projection_refund_amount_rate" in js_src
+    assert 'label.firstChild.nodeValue = "预测全损率"' in js_src
+    assert "使用当前订单维度全损率预测待确认订单" in js_src
     assert "totals.projected_net_profit" in js_src
     assert "totals.projected_roi_real" in js_src
     assert "formula_pending" not in js_src
@@ -3674,6 +3704,8 @@ def test_spu_roi_drill_summary_displays_terminal_projection_separately() -> None
         assert field in summary
     assert "预计终局净利润" in summary
     assert "预计终局ROI" in summary
+    assert "预测全损率（订单）" in summary
+    assert "预测全损件数率" not in summary
     assert "预计终局实际ROI" not in summary
 
 

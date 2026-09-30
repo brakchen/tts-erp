@@ -14,7 +14,7 @@
 
 | 版本 | 日期 | 变更内容 |
 | --- | --- | --- |
-| v10 projection | 2026-09-30 | 在不改变 v10 当前值语义的前提下，新增“预计终局”层：用同一订单时间窗口内的已结算订单计算退款金额率和全损件数率，只预测未结算订单；已确认退款/全损不重复预测，预测全损不重复扣采购成本；`spu-roi` 与 `focused-spus` 共用该口径 |
+| v10 projection | 2026-09-30 | 在不改变 v10 当前值语义的前提下，新增“预计终局”层：已结算样本计算退款金额率；同窗口订单全损率作为待确认订单全损概率并按平均件数换算；只预测未结算订单，已确认退款/全损不重复预测，预测全损不重复扣采购成本；`spu-roi` 与 `focused-spus` 共用该口径 |
 | v10 | 2026-10-07 | **大盘与 SPU 明细指标口径统一**：(1) 有效单量 = 有效订单 − 退款订单；(2) 退款数/退款率改为订单维度（退款订单数 / 全部订单）；(3) 全损量/全损率改为订单维度（退款订单 + 海外取消订单）；(4) 取消量/取消率 = 国内取消订单（排除海外取消）；(5) 新增实际保本ROI、广告系统实际ROI和广告系统保本ROI，结算外成本未结构化时标记 `estimated_known_costs`；(6) 每个 SPU 行与大盘使用同一公式；多 SPU 大盘的订单级事实独立全局去重，不能简单累加 SPU 行；(7) 前端只格式化后端结果；(8) 广告 USD、销售/退款 VND 在公式入口按同一汇率快照换算，所有金额统一以 CNY 计算和输出，比例不因换币改变 |
 | v9 | 2026-09-15 | 全损 = 完结退货(不论物流) + 海外取消(38301)；国内取消 ≠ 全损 |
 | v8 | 2026-09-15 | 广告消耗按日期窗口裁剪（与销售/退款同语义） |
@@ -195,7 +195,7 @@ $$
 订单只按结算状态分为两类：
 
 1. **已结算订单**：继续使用 SETTLEMENT 实际到账，不做预测；同一日期范围内的
-   已结算订单同时作为预测样本，包括已经发生已完结退款/退货的已结算订单。
+   已结算订单作为退款金额率样本，包括已经发生已完结退款/退货的已结算订单。
 2. **未结算订单**：唯一预测对象。已经确认退款、退货或全损的商品部分按已知事实
    处理；只有尚未确认结果的商品部分应用预测比例。
 
@@ -203,9 +203,9 @@ $$
 `COALESCE(order_time, paid_at)` 落入 `w_start`/`w_end` 窗口，结算日和售后完成日
 不改变订单归属。时间选择因此会同时改变样本、预测对象和预计终局结果。
 
-> 限制：以“有 SETTLEMENT 实际到账”作为可解释且可测试的样本边界，不代表后续
-> 绝对不会再发生迟到售后；严格的已结算 paid 样本也不会把通常无正常结算的海外取消
-> 纳入预测比例。海外取消一旦由 38301 轨迹确认，仍立即进入已观察全损，不会重复预测。
+> 限制：以“有 SETTLEMENT 实际到账”作为退款金额率样本边界，不代表后续绝对不会
+> 再发生迟到售后。全损预测不再使用该样本的全损件数率，避免海外取消和已退款未结算
+> 订单因缺少正常结算而被错误当成 0；确认结果仍先进入已观察全损，不会重复预测。
 
 #### 2.6.2 两个预测比例必须分开
 
@@ -215,13 +215,14 @@ $$
 $$
 
 $$
-\text{projection\_full\_loss\_qty\_rate}
-= \frac{\text{已结算样本已完结全损件数}}{\text{已结算样本总件数}}
+\text{projection\_full\_loss\_rate}
+= \text{full\_loss\_order\_count} \div \text{total\_orders}
 $$
 
-前者是金额口径，只预测收入损失；后者是件数口径，只预测货损件数。订单维度的
-`full_loss_rate` 不得用于金额或采购货损预测。售后商品行先合并并把确认件数封顶到
-原订单行件数，避免多个 case 重复消耗同一件商品。
+前者是金额口径，只预测收入损失。后者沿用页面订单维度全损率，先预测待确认订单中
+可能全损的订单数，再按待确认订单平均件数换算预计全损件数；兼容 wire 字段
+`projection_full_loss_qty_rate` 返回这个概率代理值。售后商品行先合并并把确认件数封顶到
+原订单行件数，已经确认的退款/退货件先从待确认集合排除，避免重复预测。
 
 #### 2.6.3 未结算收入和全损预测
 
@@ -229,8 +230,15 @@ $$
 unresolved_unsettled_qty
 = 未结算商品件数 − 已确认退款/退货/全损件数
 
+projected_future_full_loss_order_count
+= unresolved_unsettled_order_count × projection_full_loss_rate
+
+unresolved_average_qty_per_order
+= unresolved_unsettled_qty ÷ unresolved_unsettled_order_count
+
 projected_future_full_loss_qty
-= unresolved_unsettled_qty × projection_full_loss_qty_rate
+= projected_future_full_loss_order_count × unresolved_average_qty_per_order
+= unresolved_unsettled_qty × projection_full_loss_rate
 
 projected_terminal_full_loss_qty
 = observed_full_loss_qty + projected_future_full_loss_qty
@@ -289,7 +297,7 @@ SPU 比例平均值。
 
 | 状态 | 条件 | 结果 |
 | --- | --- | --- |
-| `available` | 有未结算订单，且已结算样本订单数、样本销售额、样本件数均大于 0 | 返回预测比例和预计终局结果 |
+| `available` | 有未结算订单、已结算退款样本订单数和销售额均大于 0，且订单全损率可计算 | 返回预测比例和预计终局结果 |
 | `no_unsettled_orders` | 当前范围没有未结算订单 | 预计未结算净收入为 0，预计终局收入/利润/ROI 与当前值一致 |
 | `insufficient_sample` | 有未结算订单，但缺少可靠已结算样本或任一必要分母为 0 | 预测比例和预计终局结果返回空值，不得静默解释为 0% |
 

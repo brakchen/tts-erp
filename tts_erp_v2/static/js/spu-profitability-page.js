@@ -180,6 +180,19 @@
     var target = $(selector);
     if (target) target.textContent = value;
   }
+  function updateProjectionFullLossCopy() {
+    var value = $("#sum-projection-full-loss-rate");
+    var item = value && value.closest(".op-counter-item");
+    var label = item && item.querySelector(".op-counter-label");
+    if (label && label.firstChild) label.firstChild.nodeValue = "预测全损率";
+    var hint = label && label.querySelector(".op-hint");
+    if (hint) {
+      hint.setAttribute(
+        "data-tip",
+        "使用当前订单维度全损率预测待确认订单，再按待确认订单平均件数换算预计全损件数；已确认退款或全损不重复预测",
+      );
+    }
+  }
   function loginUrl() {
     var pagePath = profile && profile.pagePath ? profile.pagePath : "/v2/pages/spu-roi";
     return `${PREFIX}/v2/auth/login?next=${PREFIX}${pagePath}`;
@@ -986,6 +999,7 @@
           fmtRatio(roiAdValue);
 
     // 终局预测由后端基于同一日期窗口计算；当前实际卡片保持不变。
+    updateProjectionFullLossCopy();
     // StaticFiles 会即时读取新 JS，而 HTML 模板要等 API 进程重启才更新；
     // 部署窗口内新 hook 可能暂时不存在，不能让整页渲染因此中断。
     setTextIfPresent(
@@ -1261,7 +1275,7 @@
       cell("预测样本退款", money(it.projection_basis_refund_amount)),
       cell("预测样本全损件", fmtQty(it.projection_basis_full_loss_qty)),
       cell("预测退款金额率", fmtPct(it.projection_refund_amount_rate)),
-      cell("预测全损件数率", fmtPct(it.projection_full_loss_qty_rate)),
+      cell("预测全损率（订单）", fmtPct(it.projection_full_loss_qty_rate)),
       cell("未结算订单", fmtInt(it.unsettled_order_count)),
       cell("待确认未结算订单", fmtInt(it.unresolved_unsettled_order_count)),
       cell("待确认未结算件", fmtQty(it.unresolved_unsettled_qty)),

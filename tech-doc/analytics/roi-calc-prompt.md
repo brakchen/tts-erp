@@ -45,7 +45,7 @@
   未完结 RAR（如 BUYER_SHIPPED_ITEM）单列"在途潜在全损"，不计入。
 - 取消率(校正) = 国内取消订单数 ÷ 全部订单数。
 - 主表全损率（订单维度）= (退款订单数 + 海外取消订单数) ÷ 全部订单数。
-- `full_loss_qty_rate` 仅是件数解释口径 = 全损件数 ÷ (有效销售件数 + 到海外取消件数)，不得直接用于收入金额；预计终局另用已结算样本件数率。
+- `full_loss_qty_rate` 仅是历史件数解释字段。预计终局使用主表订单维度 `full_loss_rate` 预测待确认全损订单，再按待确认订单平均件数换算预计全损件数；该概率不用于收入退款金额。
 
 ## 3. 成本输入
 - 采购成本 CNY/件：读 `procurement.manual_product_costs WHERE valid_to IS NULL`
@@ -108,17 +108,24 @@ kept 口径误差 **±1%**；混合口径（含退款单）高估 **~16%**。
 projection_refund_amount_rate
 = 已结算样本已完结退款金额 / 已结算样本销售额
 
-projection_full_loss_qty_rate
-= 已结算样本已完结全损件数 / 已结算样本总件数
+projection_full_loss_rate
+= full_loss_order_count / total_orders
 ```
 
-金额率只预测收入，件数率只预测全损件数。不得使用订单维度 `full_loss_rate` 推算货本。
-未结算订单中已完结 `REFUND_ONLY` / `RETURN_AND_REFUND` 的退款金额按已知事实扣一次，
-其确认件数从 `unresolved_unsettled_qty` 排除，不得再次应用预测比例。
+金额率只预测收入；订单全损率只作为待确认订单的全损概率。先得到预计新增全损订单数，
+再用待确认订单平均件数换算预计全损件数。兼容字段
+`projection_full_loss_qty_rate` 返回同一个订单概率代理值。未结算订单中已完结
+`REFUND_ONLY` / `RETURN_AND_REFUND` 的退款金额按已知事实扣一次，其确认件数从
+`unresolved_unsettled_qty` 排除，不得再次应用预测比例。
 
 ```text
+projected_future_full_loss_order_count
+= unresolved_unsettled_order_count × projection_full_loss_rate
+
 projected_future_full_loss_qty
-= unresolved_unsettled_qty × projection_full_loss_qty_rate
+= projected_future_full_loss_order_count
+  × (unresolved_unsettled_qty / unresolved_unsettled_order_count)
+= unresolved_unsettled_qty × projection_full_loss_rate
 
 projected_terminal_full_loss_qty
 = observed_full_loss_qty + projected_future_full_loss_qty
