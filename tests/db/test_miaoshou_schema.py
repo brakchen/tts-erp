@@ -18,7 +18,7 @@ from tts_erp_v2.db.models.miaoshou import (
     MiaoshouPackageItem,
     MiaoshouPackageRawRecord,
     MiaoshouPurchaseOrderRawRecord,
-    MiaoshouPurchasePriceCandidate,
+    MiaoshouPurchasePrice,
     MiaoshouSyncCursor,
     MiaoshouSyncIssue,
 )
@@ -37,7 +37,7 @@ def test_miaoshou_schema_contains_package_domain_tables(db_engine) -> None:
         "sync_cursors",
         "sync_issues",
         "purchase_order_raw_records",
-        "purchase_price_candidates",
+        "purchase_prices",
     }.issubset(set(inspector.get_table_names(schema="miaoshou")))
 
 
@@ -47,9 +47,31 @@ def test_miaoshou_models_are_schema_owned() -> None:
     assert MiaoshouPackageItem.__table__.schema == "miaoshou"
     assert MiaoshouPackageGiftItem.__table__.schema == "miaoshou"
     assert MiaoshouPurchaseOrderRawRecord.__table__.schema == "miaoshou"
-    assert MiaoshouPurchasePriceCandidate.__table__.schema == "miaoshou"
+    assert MiaoshouPurchasePrice.__table__.schema == "miaoshou"
     assert MiaoshouSyncCursor.__table__.schema == "miaoshou"
     assert MiaoshouSyncIssue.__table__.schema == "miaoshou"
+
+
+def test_purchase_price_is_store_keyed_and_has_no_product_or_manual_cost_fk(
+    db_engine,
+) -> None:
+    inspector = inspect(db_engine)
+    columns = {
+        column["name"]
+        for column in inspector.get_columns("purchase_prices", schema="miaoshou")
+    }
+    assert {"miaoshou_shop_id", "shop_name", "shop_pk", "spu_id", "unit_cost"}.issubset(
+        columns
+    )
+    assert "spu_pk" not in columns
+    assert "manual_cost_id" not in columns
+    shop_fk = next(
+        fk
+        for fk in inspector.get_foreign_keys("purchase_prices", schema="miaoshou")
+        if fk["constrained_columns"] == ["shop_pk"]
+    )
+    assert shop_fk["referred_schema"] == "commerce"
+    assert shop_fk["referred_table"] == "shops"
 
 
 def test_package_fk_stays_inside_miaoshou_schema(db_engine) -> None:

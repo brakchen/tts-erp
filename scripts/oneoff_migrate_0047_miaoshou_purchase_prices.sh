@@ -74,9 +74,9 @@ with create_engine(os.environ['TTS_ERP_DB_URL']).connect() as conn:
     revision=conn.execute(text('select version_num from alembic_version')).scalar_one()
     if revision!='0047_miaoshou_purchase_price': raise SystemExit(f'bad revision {revision}')
     tables={r[0] for r in conn.execute(text("select table_name from information_schema.tables where table_schema='miaoshou'"))}
-    missing={'purchase_order_raw_records','purchase_price_candidates'}-tables
+    missing={'purchase_order_raw_records','purchase_prices'}-tables
     if missing: raise SystemExit(f'missing tables {sorted(missing)}')
-print('migration 0046 verified')
+print('migration 0047 verified')
 PY
 
 timeout 900 "$PYTHON" -m tts_erp_v2.sync_worker.main run miaoshou.purchase_price_clean
@@ -85,10 +85,10 @@ from sqlalchemy import create_engine,text
 import os
 with create_engine(os.environ['TTS_ERP_DB_URL']).connect() as conn:
     job=conn.execute(text("select status,rows_total,rows_inserted,rows_failed,extra from integration.sync_jobs where job_name='miaoshou.purchase_price_clean' order by id desc limit 1")).mappings().one()
-    candidates=conn.execute(text('select count(*) from miaoshou.purchase_price_candidates')).scalar_one()
-    missing=conn.execute(text("select count(*) from miaoshou.purchase_price_candidates where resolution_status='missing_product'" )).scalar_one()
+    prices=conn.execute(text('select count(*) from miaoshou.purchase_prices')).scalar_one()
+    unmatched=conn.execute(text("select count(*) from miaoshou.purchase_prices where resolution_status != 'matched_shop'" )).scalar_one()
 print(dict(job))
-print({'candidate_spus':candidates,'missing_products':missing})
+print({'purchase_prices':prices,'unmatched_shops':unmatched})
 if job['status']!='succeeded': raise SystemExit('purchase price job failed')
 PY
 
@@ -98,4 +98,4 @@ if [[ "$WAS_ACTIVE" -eq 1 ]]; then
 fi
 trap - EXIT
 restore_worker
-echo "migration 0046 and initial purchase-price sync complete"
+echo "migration 0047 and initial purchase-price sync complete"
