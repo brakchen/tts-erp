@@ -231,22 +231,38 @@ PY
 echo
 echo "── 重启 API 服务 ──"
 timeout 30 systemctl --user restart tts-erp.service
-sleep 3
-timeout 20 systemctl --user is-active --quiet tts-erp.service
 PORT="${TTS_ERP_PORT:-9877}"
-curl -fsS -m 10 "http://127.0.0.1:${PORT}/healthz" >/dev/null
+HEALTH_OK=0
+# 冷启动耗时受 Python import / DB pool 初始化影响，不能用固定 sleep 3 秒判断失败。
+# 最多等待 30 秒；每次 HTTP 探测自身最多 1 秒，整个等待严格有界。
+for attempt in $(seq 1 30); do
+  if curl -fsS -m 1 "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1; then
+    HEALTH_OK=1
+    echo "✅ healthz 在第 ${attempt} 秒就绪"
+    break
+  fi
+  sleep 1
+done
+if [[ "$HEALTH_OK" -ne 1 ]]; then
+  echo "❌ API 在 30 秒内未通过 healthz" >&2
+  timeout 10 systemctl --user --no-pager --full status tts-erp.service >&2 || true
+  exit 1
+fi
+timeout 20 systemctl --user is-active --quiet tts-erp.service
 
 echo "── 验证路由注册与静态资产 ──"
-curl -fsS -m 15 "http://127.0.0.1:${PORT}/openapi.json" |
+# /openapi.json 受 DocsAuth Basic Auth 保护；部署脚本改读公开的 /endpoints，
+# 避免把“未带文档 Basic Auth 的 401”误判为路由缺失。
+curl -fsS -m 15 "http://127.0.0.1:${PORT}/endpoints" |
   "$PYTHON" -c '
 import json, sys
-paths = json.load(sys.stdin).get("paths", {})
+paths = {item["path"] for item in json.load(sys.stdin).get("endpoints", [])}
 required = {
     "/v2/reporting/focused-spus/{shop_pk}",
     "/v2/pages/focused-spus",
     "/v2/analytics/spu-roi",
 }
-missing = required - paths.keys()
+missing = required - paths
 if missing:
     raise SystemExit(f"❌ 缺路由: {sorted(missing)}")
 print("✅ focused management / page / analytics 路由已注册")
