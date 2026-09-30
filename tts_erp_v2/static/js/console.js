@@ -258,6 +258,10 @@
   // carries has_orders=true and the backend restricts to SPUs that appear
   // on at least one sales order line.
   var catalogueHasOrders = false;
+  // Only-show-unregistered-SPUs toggle: filtering belongs to the backend,
+  // which checks the current effective manual_product_costs row. The UI
+  // never filters the paged response locally.
+  var catalogueMissingManualCost = false;
 
   function setActiveTab(name) {
     currentTab = name;
@@ -702,6 +706,7 @@
       url += "&status=" + encodeURIComponent(catalogueStatus);
     if (searchQuery) url += "&q=" + encodeURIComponent(searchQuery);
     if (catalogueHasOrders) url += "&has_orders=true";
+    if (catalogueMissingManualCost) url += "&missing_manual_cost=true";
     if (acct) url += "&shop_pk=" + acct;
     api(url)
       .then((r) => {
@@ -779,8 +784,7 @@
             esc(String(it.source_unit_cost)) +
             '" aria-label="单位成本">' +
             '<span class="op-currency-fixed" aria-label="货币">CNY</span>' +
-            "</span>" +
-            '<span class="op-source-badge" title="来源：妙手货源价">货源价</span>';
+            "</span>";
         }
       } else {
         // Existing cost: pre-filled input + its currency badge. Editing
@@ -953,6 +957,13 @@
     if (hasOrdersBox)
       hasOrdersBox.addEventListener("change", () => {
         catalogueHasOrders = hasOrdersBox.checked;
+        pageOffset = 0;
+        if (currentTab === TAB_ALL) loadAll();
+      });
+    var missingManualCostBox = $("#filter-missing-manual-cost");
+    if (missingManualCostBox)
+      missingManualCostBox.addEventListener("change", () => {
+        catalogueMissingManualCost = missingManualCostBox.checked;
         pageOffset = 0;
         if (currentTab === TAB_ALL) loadAll();
       });

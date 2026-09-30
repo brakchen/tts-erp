@@ -196,7 +196,7 @@ All list endpoints accept `limit` (1..500, default 100) + `offset` (≥0).
 | `GET /v2/commerce/channel-accounts/{shop_pk}` | — | one account; 404 if unknown |
 | `GET /v2/commerce/channel-accounts/by-external/{shop_id}` | [`api/channel-accounts-by-external.md`](api/channel-accounts-by-external.md) | reverse-lookup by upstream shop_id; `?platform=tiktok` default; 404 if unknown |
 | `GET /v2/commerce/channel-accounts/{shop_pk}/order-stats` | — | `{order_count, payment_amount_sum}` aggregate (0/0 when empty) |
-| `GET /v2/commerce/channel-products` | `shop_pk`, `status`, `q`, `has_orders` | SPU list: `{id, shop_pk, spu_id, title, status, source_created_at, source_updated_at}`；`q` 在服务端对 `spu_id/title` 做大小写不敏感子串过滤，`X-Total-Count` 返回过滤后、分页前总数 |
+| `GET /v2/commerce/channel-products` | `shop_pk`, `status`, `q`, `has_orders`, `missing_manual_cost` | SPU list: `{id, shop_pk, spu_id, title, status, source_created_at, source_updated_at}`；`q` 在服务端对 `spu_id/title` 做大小写不敏感子串过滤；`missing_manual_cost=true` 由服务端仅返回 `procurement.manual_product_costs` 中没有当前有效行的 SPU；`X-Total-Count` 返回全部服务端过滤后、分页前总数 |
 | `GET /v2/commerce/channel-product-options` | required `shop_pk`; optional `q`, `spu_ids`, `limit` (1..100, default 50) | Bootstrap multi-select 的轻量 SPU 选项：`[{spu_id,title,status}]`。`q` 对 `spu_id/title` 做 ILIKE；`spu_ids` 按中英文逗号拆分后精确匹配，最多 100 个。 |
 | `GET /v2/commerce/channel-products/{spu_pk}` | — | one SPU; 404 if unknown |
 | `GET /v2/commerce/channel-products/{spu_pk}/variants` | — | SKU list: `{id, spu_pk, sku_id, seller_sku, variant_name}` |
@@ -290,7 +290,7 @@ curl -sS -H "X-API-Key: $TTS_ERP_RO_KEY" \
 
 | Endpoint | Role | Notes |
 | --- | --- | --- |
-| `GET /v2/pages/manual-costs` | readonly | Server-rendered operator console (shop switcher + needs-cost / needs-photo / recently-filed tabs). Browser without a session → 302 to `/v2/auth/login`. Static assets under `/static/*` are readonly-classified too. |
+| `GET /v2/pages/manual-costs` | readonly | Server-rendered operator console（店铺切换、全部 SPU / 最近提交、仅展示未登记 SPU 的后端筛选、人工采购价录入）。Browser without a session → 302 to `/v2/auth/login`. Static assets under `/static/*` are readonly-classified too. |
 | `GET /v2/pages/spu-roi` | readonly | SPU 实际 ROI 看板。与重点关注页共享 `/static/js/spu-profitability-page.js` kernel；`/static/js/spu-roi.js` 只定义标准 PageProfile。 |
 | `GET /v2/pages/focused-spus` | readonly | 重点关注 SPU。使用相同盈利汇总、表格、分页和钻取；`/static/js/focused-spus.js` 提供持久 selection adapter 与编辑器。 |
 | `GET /v2/pages/shops` | readonly | 店铺注册台。人工注册插件同步店铺（`commerce.shops` 补登记）；写入走 `POST /v2/admin/shops/register`（含 App Key/Secret 均 readwrite）；行内元信息编辑走 `PATCH /v2/admin/shops/{shop_pk}`；App pair 按 service_id 加密保存；「获取授权链接」按钮走 `GET /v2/oauth/tiktok/authorize?format=json`（readwrite）。 |

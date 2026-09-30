@@ -1100,17 +1100,6 @@ _PAGE_HTML = """<!doctype html>
       color: var(--ink);
       pointer-events: none;
     }
-    .op-source-badge {
-      font-family: var(--mono);
-      font-size: 10px;
-      letter-spacing: 0.06em;
-      padding: 2px 6px;
-      margin-left: 6px;
-      border: 1px solid var(--rule-soft);
-      background: var(--paper-deep);
-      color: var(--muted);
-      vertical-align: middle;
-    }
     .op-input-note {
       width: 100%;
       font-family: var(--sans);
@@ -1332,6 +1321,10 @@ _PAGE_HTML = """<!doctype html>
       <label class="op-pp op-has-orders" title="只看出现在销售订单行里的 SPU">
         <input type="checkbox" id="filter-has-orders" aria-label="仅看有单的 SPU">
         <span>仅看有单</span>
+      </label>
+      <label class="op-pp op-missing-manual-cost" title="由后端仅返回人工采购价表中没有当前有效记录的 SPU">
+        <input type="checkbox" id="filter-missing-manual-cost" aria-label="仅展示未登记人工采购价的 SPU">
+        <span>仅展示未登记 SPU</span>
       </label>
       <span class="op-toolbar-spacer" aria-hidden="true"></span>
       <button type="button" class="op-btn-primary" data-act="submit-all" aria-label="一次性提交所有已编辑成本的行">
