@@ -1,8 +1,6 @@
 """procurement.* — miaoshou procurement domain.
 
-6 tables: procurement_accounts / procurement_products /
-procurement_product_variants / purchase_orders / purchase_order_lines /
-manual_product_costs.
+3 tables: procurement_accounts / procurement_products / manual_product_costs.
 """
 
 from __future__ import annotations
@@ -19,7 +17,6 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from tts_erp_v2.db.base import Base
@@ -98,8 +95,7 @@ class ProcurementProduct(Base):
     source_item_url: Mapped[str | None] = mapped_column(Text)
     # 货源价（采集层挂牌口径）：由 miaoshou.common_collect_box job 从妙手公共采集箱
     # 列表写入（`price` / `minSkuPrice` / `maxSkuPrice`）。这是 1688 货源标价，
-    # 不是采购单成交成本——成本口径见 purchase_order_lines.unit_cost /
-    # reporting.product_cost_snapshots（SOURCE_PRICE 只作兜底估算，见 tech-doc）。
+    # 成本快照将它作为人工价之后的 SOURCE_PRICE 估算口径。
     source_unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
     source_min_unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
     source_max_unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
@@ -119,154 +115,11 @@ class ProcurementProduct(Base):
     )
 
 
-class ProcurementProductVariant(Base):
-    """Miaoshou SKU. Empty in practice — only populated when miaoshou actually
-    returns variant-level data."""
-
-    __tablename__ = "procurement_product_variants"
-    __table_args__ = (
-        UniqueConstraint(
-            "procurement_product_id",
-            "external_variant_id",
-            name="uq_procurement_variants_product_ext",
-        ),
-        Index("ix_procurement_variants_supplier_sku", "supplier_sku"),
-        {"schema": "procurement"},
-    )
-
-    id: Mapped[int] = mapped_column(
-        BigInteger,
-        primary_key=True,
-        server_default=text("generate_always_as_identity()"),
-    )
-    procurement_product_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("procurement.procurement_products.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    external_variant_id: Mapped[str] = mapped_column(Text, nullable=False)
-    variant_name: Mapped[str | None] = mapped_column(Text)
-    attributes: Mapped[dict | None] = mapped_column(JSONB)
-    supplier_sku: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str | None] = mapped_column(Text)
-    raw_record_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("integration.raw_records.id", ondelete="SET NULL")
-    )
-    synced_at: Mapped[datetime] = mapped_column(
-        nullable=False, server_default=text("now()")
-    )
-
-    updated_at: Mapped[datetime] = mapped_column(
-        nullable=False,
-        server_default=text("now()"),
-        onupdate=text("now()"),
-    )
-
-
-class PurchaseOrder(Base):
-    """Miaoshou purchase order header."""
-
-    __tablename__ = "purchase_orders"
-    __table_args__ = (
-        UniqueConstraint(
-            "procurement_account_id",
-            "external_purchase_order_id",
-            name="uq_purchase_orders_account_ext",
-        ),
-        Index("ix_purchase_orders_status", "status"),
-        {"schema": "procurement"},
-    )
-
-    id: Mapped[int] = mapped_column(
-        BigInteger,
-        primary_key=True,
-        server_default=text("generate_always_as_identity()"),
-    )
-    procurement_account_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("procurement.procurement_accounts.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    external_purchase_order_id: Mapped[str] = mapped_column(Text, nullable=False)
-    supplier_id: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str | None] = mapped_column(Text)
-    currency: Mapped[str | None] = mapped_column(Text)
-    total_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
-    source_created_at: Mapped[datetime | None]
-    source_updated_at: Mapped[datetime | None]
-    paid_at: Mapped[datetime | None]
-    completed_at: Mapped[datetime | None]
-    raw_record_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("integration.raw_records.id", ondelete="SET NULL")
-    )
-    synced_at: Mapped[datetime] = mapped_column(
-        nullable=False, server_default=text("now()")
-    )
-
-    updated_at: Mapped[datetime] = mapped_column(
-        nullable=False,
-        server_default=text("now()"),
-        onupdate=text("now()"),
-    )
-
-
-class PurchaseOrderLine(Base):
-    """Miaoshou purchase order line."""
-
-    __tablename__ = "purchase_order_lines"
-    __table_args__ = (
-        UniqueConstraint(
-            "purchase_order_id",
-            "external_line_id",
-            name="uq_purchase_order_lines_order_ext",
-        ),
-        Index("ix_purchase_order_lines_product", "procurement_product_id"),
-        {"schema": "procurement"},
-    )
-
-    id: Mapped[int] = mapped_column(
-        BigInteger,
-        primary_key=True,
-        server_default=text("generate_always_as_identity()"),
-    )
-    purchase_order_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("procurement.purchase_orders.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    external_line_id: Mapped[str] = mapped_column(Text, nullable=False)
-    procurement_product_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("procurement.procurement_products.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    procurement_product_variant_id: Mapped[int | None] = mapped_column(
-        BigInteger,
-        ForeignKey("procurement.procurement_product_variants.id", ondelete="SET NULL"),
-    )
-    quantity: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
-    unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
-    currency: Mapped[str | None] = mapped_column(Text)
-    line_status: Mapped[str | None] = mapped_column(Text)
-    raw_record_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("integration.raw_records.id", ondelete="SET NULL")
-    )
-    synced_at: Mapped[datetime] = mapped_column(
-        nullable=False, server_default=text("now()")
-    )
-
-    updated_at: Mapped[datetime] = mapped_column(
-        nullable=False,
-        server_default=text("now()"),
-        onupdate=text("now()"),
-    )
-
-
 class ManualProductCost(Base):
     """Operator-entered cost for a TikTok product. Historical rows are kept;
     the effective row per SPU is `valid_to IS NULL` (or the row with the most
     recent valid_from). Source of truth for cost_snapshots; priority over
-    miaoshou purchase prices.
+    synchronized source-price estimates.
     """
 
     __tablename__ = "manual_product_costs"

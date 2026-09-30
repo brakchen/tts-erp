@@ -345,71 +345,7 @@ PROCUREMENT_PRODUCT
 SPU
 ```
 
-## 6.3 `procurement.procurement_product_variants`
-
-仅当妙手采购数据确实存在规格级对象时建立。
-
-```text
-id bigint PK
-procurement_product_id bigint FK
-external_variant_id text
-variant_name text
-attributes jsonb
-supplier_sku text
-status text
-raw_record_id bigint
-synced_at timestamptz
-```
-
-不要因为 TikTok 存在 SKU，就假设妙手也一定能提供一一对应的采购规格。
-
-## 6.4 `procurement.purchase_orders`
-
-```text
-id bigint PK
-procurement_account_id bigint FK
-external_purchase_order_id text
-supplier_id text
-status text
-currency text
-total_amount numeric(20,4)
-source_created_at timestamptz
-source_updated_at timestamptz
-paid_at timestamptz
-completed_at timestamptz
-raw_record_id bigint
-synced_at timestamptz
-```
-
-约束：
-
-```text
-UNIQUE (procurement_account_id, external_purchase_order_id)
-```
-
-## 6.5 `procurement.purchase_order_lines`
-
-```text
-id bigint PK
-purchase_order_id bigint FK
-external_line_id text
-procurement_product_id bigint FK
-procurement_product_variant_id bigint FK NULL
-quantity numeric(20,4)
-unit_cost numeric(20,4)
-currency text
-line_status text
-raw_record_id bigint
-synced_at timestamptz
-```
-
-约束：
-
-```text
-UNIQUE (purchase_order_id, external_line_id)
-```
-
-采购行必须关联妙手采购商品；只有妙手明确提供规格关系时才关联采购规格。
+采购域只保留妙手账号、商品主档和人工成本；规格级和采购单投影因上游未提供可用数据，在 migration 0046 删除。
 
 ---
 
@@ -425,8 +361,8 @@ commerce.products_spu.spu_id
 = procurement.procurement_products.external_product_id
 ```
 
-该等值关系用于查询最近采购单价和货源价。若没有直接身份匹配，则使用人工成本；
-系统不再维护自动猜测、人工 override 或 SKU 级映射。
+该等值关系用于查询货源价。若没有直接身份匹配，则使用人工成本；
+系统不再维护自动猜测、人工 override、SKU 级映射或采购单投影。
 
 ---
 
@@ -450,16 +386,7 @@ raw_record_id bigint
 synced_at timestamptz
 ```
 
-## 8.2 `fulfillment.shipment_lines`
-
-```text
-shipment_id bigint FK
-sales_order_line_id bigint FK
-quantity numeric(20,4)
-PRIMARY KEY (shipment_id, sales_order_line_id)
-```
-
-## 8.3 `fulfillment.tracking_events`
+## 8.2 `fulfillment.tracking_events`
 
 ```text
 id bigint PK
@@ -472,11 +399,7 @@ location text
 synced_at timestamptz
 ```
 
-现有 `logistics_tracking` 应改成视图或可重建投影：
-
-```text
-reporting.shipment_tracking_summary
-```
+运单行和跟踪汇总投影均未接通，已由 migration 0046 删除；读取侧直接使用 shipments 与 tracking_events。
 
 ---
 
@@ -634,9 +557,6 @@ unit_cost numeric(20,4)
 currency text
 valid_from timestamptz
 valid_to timestamptz
-source_purchase_quantity numeric(20,4)
-source_purchase_amount numeric(20,4)
-source_line_count integer
 calculation_version integer
 calculated_at timestamptz
 ```
@@ -644,17 +564,14 @@ calculated_at timestamptz
 `cost_method`：
 
 ```text
-MANUAL_ENTRY              -- 人工填写（本系统事实源，优先级最高）
-LATEST_PURCHASE_COST      -- 妙手采购单
-PERIOD_AVERAGE_COST       -- 妙手采购单
-WEIGHTED_AVERAGE_COST     -- 妙手采购单
-SOURCE_PRICE             -- 货源价兜底（2026-09-06 决策：货源价=采购价口径）
+MANUAL_ENTRY  -- 人工填写（本系统事实源，优先级最高）
+SOURCE_PRICE  -- 货源价兜底估算
 ```
 
 > 2026-09-06 决策（配合 `miaoshou.common_collect_box` job）：用户在拍板
 > “货源价就是我们的采购价格”后，公共采集箱挂牌价（`procurement_products.source_unit_cost`）
-> 作为 **SOURCE_PRICE 估算兜底** 落账（优先级低于采购单/人工），method 区分开，
-> 报表只能叫“估算成本”，待真实采购单出现后对账修正。
+> 作为 **SOURCE_PRICE 估算兜底** 落账（优先级低于人工），method 区分开，
+> 报表只能叫“估算成本”。
 >
 > 2026-09-07 补充（`miaoshou.sync_source_cost_to_master` 6h job）：
 > TK 侧 `procurement_products` 行（`external_product_id` 是 spu_id）原本
@@ -665,8 +582,8 @@ SOURCE_PRICE             -- 货源价兜底（2026-09-06 决策：货源价=采�
 > `_source_cost_lookup` 首步直接命中；bridge 仍保留作为 fallback。
 
 注意：1688 采集标价严格说**不是**成交成本（标价 ≠ 实际采购价，TK 采集箱
-originPrice 曾被实测差 7×）；SOURCE_PRICE 只作估算兜底。无人工、无采购单、
-无货源价的 SPU 不生成成本快照，进入异常/待填队列。
+originPrice 曾被实测差 7×）；SOURCE_PRICE 只作估算兜底。无人工、无
+货源价的 SPU 不生成成本快照，进入异常/待填队列。
 
 ## 11.4 利润口径
 
@@ -692,14 +609,13 @@ estimated_gross_profit
 
 ```text
 MANUAL_ENTRY
-→ 直接 SPU ID 匹配的最新采购单价
 → SOURCE_PRICE
 → reporting.product_cost_snapshots
 → reporting.product_profit_daily
 ```
 
 生产数据已验证 `procurement_products.external_product_id` 当前无重复；若未来出现重复，
-成本查询仍按最新采购行确定一条结果，并应在同步问题队列中单独告警。
+同步问题队列应单独告警，而不是猜测成本来源。
 
 ---
 
@@ -722,15 +638,8 @@ erDiagram
     commerce_products_sku ||--o{ commerce_sales_order_lines : optionally_sold_as
 
     procurement_accounts ||--o{ procurement_products : owns
-    procurement_products ||--o{ procurement_product_variants : contains
-    procurement_accounts ||--o{ purchase_orders : receives
-    purchase_orders ||--o{ purchase_order_lines : contains
-    procurement_products ||--o{ purchase_order_lines : purchased_as
-    procurement_product_variants ||--o{ purchase_order_lines : optionally_purchased_as
 
     commerce_sales_orders ||--o{ shipments : fulfilled_by
-    shipments ||--o{ shipment_lines : contains
-    commerce_sales_order_lines ||--o{ shipment_lines : ships
     shipments ||--o{ tracking_events : produces
 
     commerce_sales_orders ||--o{ cases : has
@@ -753,7 +662,7 @@ erDiagram
 | 缺失的 TikTok SKU 数据 | `commerce.products_sku` |
 | `order_shippings` | `fulfillment.shipments` |
 | `logistics_tracking_events` | `fulfillment.tracking_events` |
-| `logistics_tracking` | `reporting.shipment_tracking_summary` |
+| `logistics_tracking` | retired; read tracking facts from `fulfillment.tracking_events` |
 | `logistics_sync_targets` | `integration.sync_cursors/targets` |
 | `returns` | `after_sales.cases/case_lines` |
 | `cancellations` | `after_sales.cases/case_lines` |
@@ -763,8 +672,7 @@ erDiagram
 | `miaoshou_shops` | `procurement.procurement_accounts` |
 | `miaoshou_collect_box_details` | `procurement.procurement_products` 或原始采集表 |
 | `miaoshou_move_collect_tasks` | `integration.raw_records` 原始审计 |
-| 妙手采购订单 | `procurement.purchase_orders` |
-| 妙手采购订单行 | `procurement.purchase_order_lines` |
+| 妙手采购订单 / 行 | retired; upstream payload is not projected into a purchase-order model |
 | `analytics_*` | `integration` 接入状态 + 独立广告分析模型 |
 | `oauth_tokens` | `integration.credentials` |
 | `sync_log` | `integration.sync_jobs` |
@@ -810,9 +718,8 @@ erDiagram
 ## 阶段二：建立妙手采购模型
 
 1. 导入妙手账户。
-2. 导入妙手采购商品和规格。
-3. 导入采购订单和采购行。
-4. 校验采购行商品关联。
+2. 导入妙手采购商品主档与货源价。
+3. 校验采购主档中 TikTok SPU 外部 ID 的完整性。
 
 ## 阶段三：校验商品身份
 
@@ -921,5 +828,5 @@ TikTok订单行
    SPU 参考图（MinIO 对象键 + 状态机 `awaiting_upload/ready/failed` + 软删 `deleted_at`），
    配合 `/v2/spu-images/*` 端点与人工成本填写页使用。
 
-另：§8.3 的 `reporting.shipment_tracking_summary` 按「可重建投影」选项落地为**表**（不是视图），
-与 refactor plan V2 §3.2「reporting.* 用可重建表」一致。
+另：未接通的 shipment tracking 汇总投影已在 migration 0046 删除；读取侧直接使用
+`fulfillment.tracking_events`。

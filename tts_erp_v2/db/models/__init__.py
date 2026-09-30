@@ -29,7 +29,6 @@ from tts_erp_v2.db.models.finance import (
 )
 from tts_erp_v2.db.models.fulfillment import (
     Shipment,
-    ShipmentLine,
     TrackingEvent,
 )
 from tts_erp_v2.db.models.fx import (
@@ -64,7 +63,6 @@ from tts_erp_v2.db.models.miaoshou import (
 )
 from tts_erp_v2.db.models.plugin import (
     AdDaily,
-    AdMonthly,
     AdRawLog,
     AdToday,
     ChromeAfterSale,
@@ -81,22 +79,17 @@ from tts_erp_v2.db.models.procurement import (
     ManualProductCost,
     ProcurementAccount,
     ProcurementProduct,
-    ProcurementProductVariant,
-    PurchaseOrder,
-    PurchaseOrderLine,
 )
 from tts_erp_v2.db.models.reporting import (
     FocusedSpu,
     ProductCostSnapshot,
     ProductProfitDaily,
-    ShipmentTrackingSummary,
     ShopFeeRateEstimate,
 )
 from tts_erp_v2.db.models.security import ApiKey
 
 __all__ = [
     "AdDaily",
-    "AdMonthly",
     "AdRawLog",
     "AdToday",
     "ApiKey",
@@ -134,11 +127,8 @@ __all__ = [
     "PluginLog",
     "ProcurementAccount",
     "ProcurementProduct",
-    "ProcurementProductVariant",
     "ProductCostSnapshot",
     "ProductProfitDaily",
-    "PurchaseOrder",
-    "PurchaseOrderLine",
     "RawRecord",
     "SalesOrder",
     "SalesOrderLine",
@@ -146,8 +136,6 @@ __all__ = [
     "SettlementStatement",
     "SettlementTransaction",
     "Shipment",
-    "ShipmentLine",
-    "ShipmentTrackingSummary",
     "ShopFeeRateEstimate",
     "SyncCursor",
     "SyncIssue",

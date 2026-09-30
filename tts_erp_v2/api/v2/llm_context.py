@@ -110,10 +110,10 @@ SHA-256 hashes only; the plaintext is shown ONCE on creation via
 | integration  | 集成 / 同步运行时                          | credentials, shops, raw_records, sync_jobs |
 | commerce     | TikTok 销售（订单 / 商品）                 | sales_orders, sales_order_lines, products_spu     |
 | procurement  | 妙手采购 + 人工成本                        | procurement_accounts, procurement_products, manual_product_costs |
-| fulfillment  | 物流                                       | shipments, shipment_lines, tracking_events            |
+| fulfillment  | 物流                                       | shipments, tracking_events                            |
 | after_sales  | 退货 / 取消                                | cases, case_lines                                     |
 | finance      | 对账 / 打款                                | payouts, settlement_statements, settlement_transactions, settlement_components |
-| reporting    | 利润 / 成本快照                            | product_cost_snapshots, product_profit_daily, shipment_tracking_summary |
+| reporting    | 利润 / 成本快照                            | product_cost_snapshots, product_profit_daily          |
 | security     | API key                                    | api_keys                                              |
 
 > **DO NOT** read ``public.*`` tables. They are legacy V1 data kept only
@@ -125,12 +125,11 @@ The cost used to compute profit is the **first available** in this order:
 
 1. **MANUAL_ENTRY** — operator-entered cost in
    ``procurement.manual_product_costs`` (highest priority).
-2. **Miaoshou purchase order** line price (in ``procurement.purchase_order_lines``).
-3. *(1688 采集标价 is **explicitly excluded** — it is a stale initial quote
-   that does not reflect the actual negotiated procurement price. Using
-   it would systematically over-state costs and under-state profit.)*
+2. **SOURCE_PRICE** — synchronized public-collect-box source price in
+   ``procurement.procurement_products.source_unit_cost``; explicitly an
+   estimated fallback rather than a negotiated purchase-order price.
 
-If a TikTok active SPU has **no cost from sources 1 or 2**, it shows up in
+If a TikTok active SPU has **no cost from either source**, it shows up in
 ``GET /v2/reporting/missing-cost-products`` — operators fill those via
 ``POST /v2/reporting/manual-costs`` (or the HTML form at
 ``GET /v2/pages/manual-costs``).
@@ -199,9 +198,9 @@ _SCHEMAS: list[tuple[str, str]] = [
     ),
     (
         "procurement",
-        "Miaoshou procurement + manual costs: procurement_accounts/products/variants, purchase_orders/lines, manual_product_costs",
+        "Miaoshou product source prices + manual costs: procurement_accounts/products, manual_product_costs",
     ),
-    ("fulfillment", "Logistics: shipments, shipment_lines, tracking_events"),
+    ("fulfillment", "Logistics: shipments, tracking_events"),
     ("after_sales", "Returns/cancellations: cases, case_lines"),
     (
         "finance",
@@ -209,7 +208,7 @@ _SCHEMAS: list[tuple[str, str]] = [
     ),
     (
         "reporting",
-        "Profit/cost: product_cost_snapshots, product_profit_daily, shipment_tracking_summary",
+        "Profit/cost: product_cost_snapshots, product_profit_daily",
     ),
     (
         "fx",
@@ -378,11 +377,10 @@ def _introspect_business_rules() -> str:
    ``next_cursor``; pass it back as ``?cursor=...`` to get the next
    page. When ``next_cursor`` is null, you are at the last page.
 5. **Limit** cap: 1 ≤ limit ≤ 500, default 50.
-6. **No 1688 采集标价 as cost.** This is the one rule the LLM
-   absolutely cannot break. See §5.
+6. **SOURCE_PRICE is estimated cost.** Never present the synchronized source
+   price as a negotiated or exact purchase-order cost.
 7. **Operator's manual entry wins over every other cost source.**
-   If the operator has set a manual cost, it is final — even if a new
-   Miaoshou purchase order lands later.
+   If the operator has set a manual cost, later source-price syncs do not override it.
 8. **Channel account status**: ``active`` / ``inactive`` / ``banned``.
    The TikTok sync only runs for ``active`` accounts.
 9. **Channel product status**: ``active`` / ``inactive`` / ``deleted``.

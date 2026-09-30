@@ -1,5 +1,9 @@
 # 技术方案：逐日/逐月同步 + 结构化存储 + Coverage 断点续传
 
+> **Current storage note (migration 0046):** `plugin.ad_monthly` 已删除；v4 monthly
+> wire contract 保留，但 monthly dump 与 coverage 均使用
+> `plugin.ad_raw_log(kind='monthly')`。下方结构化 monthly 表设计为历史方案。
+>
 > 状态：**待评审**
 > 影响仓库：`tts-erp`（服务端）+ `chrome-plugins/ads-data-sync`（插件）
 > 替代方案：`range-aggregate-history-sync.md`（v3 区间聚合，已搁置——区间覆盖缩窄风险无法结构性解决）

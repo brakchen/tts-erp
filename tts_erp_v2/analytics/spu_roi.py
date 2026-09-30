@@ -138,8 +138,9 @@ _FEE_FALLBACK_MESSAGE = (
 )
 _PROJECTION_NOTE = (
     "只预测同一订单时间窗口内的未结算订单；已结算订单使用 SETTLEMENT 实际到账。"
-    "预测退款金额率=已结算样本退款金额/样本销售额；预测全损件数率="
-    "已结算样本全损件数/样本件数。未结算中已确认退款或全损的部分不会重复预测。"
+    "预测退款金额率=已结算样本退款金额/样本销售额；全损预测使用页面同口径的"
+    "订单全损率，并按待确认订单平均件数换算预计全损件数。未结算中已确认退款或"
+    "全损的金额和件数先按已知事实处理，不会重复应用预测比例。"
 )
 
 
@@ -315,8 +316,9 @@ def _meta_payload(
         "projection": {
             "note": _PROJECTION_NOTE,
             "date_attribution": "COALESCE(order_time, paid_at)",
-            "sample": "同一日期范围内有 SETTLEMENT 实际到账的已结算订单",
-            "target": "同一日期范围内的未结算订单",
+            "refund_sample": "同一日期范围内有 SETTLEMENT 实际到账的已结算订单",
+            "full_loss_rate_source": "同一日期范围内的订单维度 full_loss_rate",
+            "target": "同一日期范围内的未结算订单中尚未确认结果的部分",
             "status_labels": {
                 "available": "可预测",
                 "no_unsettled_orders": "无未结算订单",

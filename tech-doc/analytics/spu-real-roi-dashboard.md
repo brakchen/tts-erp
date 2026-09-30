@@ -734,10 +734,9 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
-| `spu_pk` / `cost_method` | bigint/text | 商品 / 成本法（MANUAL_ENTRY / LATEST_PURCHASE_COST / …） |
+| `spu_pk` / `cost_method` | bigint/text | 商品 / 成本法（MANUAL_ENTRY / SOURCE_PRICE） |
 | `unit_cost` / `currency` | numeric(20,4)/text | 单位成本 / 币种 |
 | `valid_from` / `valid_to` | ts | 生效区间 |
-| `source_purchase_quantity` / `source_purchase_amount` / `source_line_count` | numeric/int | 来源采购量/额/单数（可追溯） |
 | `calculation_version` | int | 重算版本 |
 
 **采购商品身份**：`procurement.procurement_products.external_product_id` 保存 TikTok
@@ -745,8 +744,8 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 产出有效关系的独立 linkage 投影。
 
 > 采购链现状：`procurement.procurement_products` 216 行（商品目录已同步），但
-> `purchase_orders / purchase_order_lines` **0 行**（妙手采购单未同步/未跑），故“最新采购价”成本源不可用；
-> coverage 端点 `GET /v2/reporting/missing-cost-products` 即“无成本 SPU”清单（页面可链过去）。
+> 采购单成本链已在 migration 0046 退役；coverage 端点
+> `GET /v2/reporting/missing-cost-products` 即“无成本 SPU”清单（页面可链过去）。
 
 > **本期口径（决策 4/6 + 2026-09-05 成本解析确认）**：单位成本**按 SPU 解析**——① 命中 `procurement.manual_product_costs` 有效行（`valid_to IS NULL`，每 SPU 一条）→ 用录入值（**人工表保证人民币 CNY**，直接用于 CNY 公式，`cost_source=MANUAL`）；② 未命中 → **默认 K1 = 40 CNY/件**（`cost_source=DEFAULT_K1`）→ 页面该行显示“缺成本”并可跳 manual-costs 补录。货损 M13b / 保本 COGS_kept 共用同一解析值；同一公式只换“unit_cost 来源”。现网人工成本仅 2 行 → 绝大多数 SPU 本期显示“缺成本”（默认 40 元），属预期。
 

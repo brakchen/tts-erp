@@ -172,7 +172,7 @@ tracking 侧无 action_code 索引但全表数千行，不加索引。
                         对外名称 = 「人工标注的采购成交价」（2026-09-07 用户拍板
                         改术语；原「人工成本」作废——它语义上就是采购成交价，
                         只是人工标注而非妙手采购单同步）
-2. LATEST_PURCHASE_COST products_spu.spu_id = procurement_products.external_product_id → purchase_order_lines
+2. SOURCE_PRICE procurement_products.source_unit_cost（人工价缺失时的估算兜底）
                         最新一条 unit_cost（妙手采购单成交价，updated_at 倒序）
 3. SOURCE_PRICE         procurement_products.source_unit_cost（1688 挂牌价；
                         先 TK-side 行 external_product_id=spu_id 直取，
@@ -237,7 +237,7 @@ spu_pk→(cost, currency, source) map），口径与 jobs 版 1:1（同一 SQL �
 | 结算 `finance.settlement_components` | `amount` | **VND** | 31,477/31,477 行全 VND |
 | 结算单/打款 `finance.settlement_statements` / `payouts` | — | **VND** | 37 + 32 行全 VND |
 | 人工标注的采购成交价 `procurement.manual_product_costs` | `unit_cost` | **CNY** | 7/7 行全 CNY |
-| 采购成交价 `procurement.purchase_order_lines` | `unit_cost` | CNY（设计） | ⚠ **表空（0 行）**——成本链第 2 层当前空转，保留待妙手采购单流入 |
+| 采购单成交价 | — | — | migration 0046 已退役；系统不再维护采购单成本链 |
 | 1688 货源价 `procurement.procurement_products` | `source_unit_cost` | **CNY**（无 currency 列，1688 ¥ 定义） | 812 行 |
 
 换算路径：VND → USD 用 `÷ fx rates["VND"]`；CNY → USD 用

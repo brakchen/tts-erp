@@ -484,14 +484,13 @@ SQLAlchemy/数据库异常向上抛出，由 adapter 映射为 `500 INTERNAL_ERR
 
 > **独立于订单/物流/结算/售后 dumps 链路**，走另一套 `analytics-sync-v2` 协议 + `POST /v2/analytics/sync/dumps` 端点。**两者协议不同，不要合并**（合并会让 Pydantic schema 复杂度爆炸）。
 
-### 6.1 ad 域 5 张表（2026-09-11 由 analytics schema 并入 plugin）
+### 6.1 ad 域表（2026-09-11 由 analytics schema 并入 plugin）
 
 | 表 | 用途 | 字段命名 | 协议 |
 | --- | --- | --- | --- |
 | `plugin.ad_today` | 今天实时（30s 滚动）| TikTok API 原名（`mixed_real_cost` / `onsite_roi2_shopping_sku` 等）| v4 dump |
-| `plugin.ad_daily` | 历史天级可校准 | 同上 | v4 dump |
-| `plugin.ad_monthly` | 月级聚合 | 同上 | v4 dump |
-| `plugin.ad_raw_log` | 原始 dump（ad 域）| 完整 request+response | dump 协议 |
+| `plugin.ad_daily` | 历史天级可校准 | 同上 | v4 daily dump |
+| `plugin.ad_raw_log` | 原始 dump（含 monthly）| 完整 request+response | dump 协议 |
 | `plugin.plugin_logs` | 扩展运行日志 | — | 内部 |
 
 **ads-data-sync 抓的 3 个 ad 端点**（见 `tech-doc/tiktok-seller-center-api-catalog.md` §1.7）：

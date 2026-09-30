@@ -3,11 +3,7 @@
 Goal: lift ``reporting.py`` from 72.7% → ≥90%.
 
 Branches covered:
-* ``_purchase_order_lookup`` no-result branch (line 65) — when no row
-  matches the SQL query, the lookup returns ``(None, None)``.
-* ``_purchase_order_lookup`` happy path — when a row matches, returns
-  ``(unit_cost, currency)``.
-* ``run_profit_daily`` body (lines 98-108) — both dates are walked, the
+* ``run_profit_daily`` body — both dates are walked, the
   SyncJob row's extra JSON carries ``dates`` + ``rows``, the result
   dict has ``dates`` + ``rows_written``.
 * ``run_cost_snapshots`` SyncJob row extras (line 92-95) — covers
@@ -38,7 +34,6 @@ from tts_erp_v2.db.models import (
 from tts_erp_v2.jobs.reporting import (
     JOB_COST_SNAPSHOTS,
     JOB_PROFIT_DAILY,
-    _purchase_order_lookup,
     run_cost_snapshots,
     run_profit_daily,
 )
@@ -75,76 +70,6 @@ def _seed_account_and_product(
     db_session.add(cp)
     db_session.flush()
     return acct, cp
-
-
-# ───────────────────── _purchase_order_lookup branches (line 65) ─────────────────────
-
-
-def test_purchase_order_lookup_returns_none_pair_when_no_row(db_session) -> None:
-    """The lookup function returns ``(None, None)`` when no row matches
-    the SQL — exercising line 65's `if row is None: return None, None`
-    branch."""
-    lookup = _purchase_order_lookup(db_session)
-    # No procurement-side rows inserted → SQL returns no row → (None, None).
-    unit_cost, currency = lookup(999_999_999)
-    assert unit_cost is None
-    assert currency is None
-
-
-def test_purchase_order_lookup_returns_unit_cost_and_currency_pair(db_session) -> None:
-    """When the SQL returns a row, the lookup returns ``(unit_cost,
-    currency)`` (the second branch of the if/else)."""
-    # Seed a channel product plus a procurement product with the same external
-    # product id. Reporting uses this direct identity instead of a linkage view.
-    from tts_erp_v2.db.models.procurement import (
-        ProcurementAccount,
-        ProcurementProduct,
-        PurchaseOrder,
-        PurchaseOrderLine,
-    )
-
-    _, chan_product = _seed_account_and_product(
-        db_session,
-        account_external_id="TEST_lookup_chan_acct",
-        product_external_id="TEST_lookup_chan_prod",
-    )
-    acct = ProcurementAccount(
-        provider="miaoshou",
-        external_account_id="TEST_lookup_acct",
-        account_name="TEST lookup",
-    )
-    db_session.add(acct)
-    db_session.flush()
-
-    product = ProcurementProduct(
-        procurement_account_id=acct.id,
-        external_product_id=chan_product.spu_id,
-        title="TEST lookup product",
-    )
-    db_session.add(product)
-    db_session.flush()
-
-    # A purchase order with one line carrying a unit_cost.
-    order = PurchaseOrder(
-        procurement_account_id=acct.id,
-        external_purchase_order_id="TEST_lookup_po",
-    )
-    db_session.add(order)
-    db_session.flush()
-    line = PurchaseOrderLine(
-        purchase_order_id=order.id,
-        external_line_id="TEST_lookup_line",
-        procurement_product_id=product.id,
-        unit_cost=Decimal("12.50"),
-        currency="VND",
-    )
-    db_session.add(line)
-    db_session.flush()
-
-    lookup = _purchase_order_lookup(db_session)
-    unit_cost, currency = lookup(chan_product.id)
-    assert unit_cost == Decimal("12.5000")
-    assert currency == "VND"
 
 
 # ───────────────────── run_profit_daily body (lines 98-108) ─────────────────────

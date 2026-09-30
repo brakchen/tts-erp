@@ -203,7 +203,6 @@ def reset_rate_limit(
 _ANALYTICS_TABLES = [
     "plugin.ad_today",
     "plugin.ad_daily",
-    "plugin.ad_monthly",
     "plugin.ad_raw_log",
     "plugin.plugin_logs",
 ]
@@ -232,12 +231,12 @@ def purge_plugin_data(
         description="Override prod-shape guard (only honored when TTS_ERP_ENVIRONMENT=dev).",
     ),
 ) -> dict[str, Any]:
-    """Delete all Chrome extension synced data from analytics and plugin schemas.
+    """Delete all Chrome extension synced data from the plugin schema.
 
-    **Admin role required.** Clears 12 tables in a single transaction:
-    - analytics: ad_today, ad_daily, ad_monthly, raw_log, plugin_logs
-    - plugin: orders, order_lines, shipments, tracking_events,
-      settlements, settlement_details, raw_log
+    **Admin role required.** Clears 10 tables in a single transaction:
+    - ads/logs: ad_today, ad_daily, ad_raw_log, plugin_logs
+    - orders: orders, order_lines, shipments, tracking_events,
+      settlements, settlement_details
 
     Two safety gates (2026-09-13 hardening):
     1. ``confirm=true`` query param required to actually delete; without it

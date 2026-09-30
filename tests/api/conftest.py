@@ -176,9 +176,7 @@ def _wipe_test_rows(db_engine) -> None:
             )
         )
         conn.execute(
-            delete(manual_costs_tbl).where(
-                manual_costs_tbl.c.spu_pk.in_(test_spu_ids)
-            )
+            delete(manual_costs_tbl).where(manual_costs_tbl.c.spu_pk.in_(test_spu_ids))
         )
         conn.execute(
             delete(focused_spus_tbl).where(focused_spus_tbl.c.spu_id.like("TEST_%"))
@@ -194,9 +192,7 @@ def _wipe_test_rows(db_engine) -> None:
         # Wipe TEST_ credentials to prevent leakage into prod.
         creds_tbl = Base.metadata.tables["integration.credentials"]
         conn.execute(
-            delete(creds_tbl).where(
-                creds_tbl.c.external_account_id.like("TEST_%")
-            )
+            delete(creds_tbl).where(creds_tbl.c.external_account_id.like("TEST_%"))
         )
         # sync_issues can accumulate TEST_-prefixed rows (e.g.
         # token.refresh TEST_ issues from test_scheduler_token_refresh).
@@ -211,15 +207,8 @@ def _wipe_test_rows(db_engine) -> None:
         # INSERTs TEST_SELLER into ad_daily/ad_raw_log outside the session
         # savepoint, so the test session rollback doesn't catch them).
         # Without this, the next test run hits duplicate-key on uq_ad_daily.
-        conn.execute(
-            _text("DELETE FROM plugin.ad_daily WHERE seller_id LIKE 'TEST_%'")
-        )
-        conn.execute(
-            _text("DELETE FROM plugin.ad_today WHERE seller_id LIKE 'TEST_%'")
-        )
-        conn.execute(
-            _text("DELETE FROM plugin.ad_monthly WHERE seller_id LIKE 'TEST_%'")
-        )
+        conn.execute(_text("DELETE FROM plugin.ad_daily WHERE seller_id LIKE 'TEST_%'"))
+        conn.execute(_text("DELETE FROM plugin.ad_today WHERE seller_id LIKE 'TEST_%'"))
         conn.execute(
             _text("DELETE FROM plugin.ad_raw_log WHERE seller_id LIKE 'TEST_%'")
         )
