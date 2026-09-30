@@ -251,6 +251,7 @@ def _sidebar_html(current_page: str) -> str:
     ("shops", "店", "店铺注册", "基础设置"),
     ("enum-map", "映", "枚举映射", "基础设置"),
     ("runtime-configs", "运", "运行配置", "基础设置"),
+    ("sync-jobs", "时", "定时任务", "基础设置"),
     ("intercept-configs", "配", "拦截配置", "数据工具"),
     ("intercept-requests", "录", "拦截记录", "数据工具"),
     ("intercept-stats", "计", "拦截统计", "数据工具"),
@@ -420,6 +421,8 @@ def _page(html: str, *, current_page: str = "") -> HTMLResponse:
     .replace("__JSV_INTERCEPT_STATS__", _js_version("intercept-stats.js"))
     .replace("__JSV_RUNTIME_CONFIGS__", _js_version("runtime-configs.js"))
     .replace("__CSSV_RUNTIME_CONFIGS__", _css_version("runtime-configs.css"))
+    .replace("__JSV_SYNC_JOBS__", _js_version("sync-jobs.js"))
+    .replace("__CSSV_SYNC_JOBS__", _css_version("sync-jobs.css"))
   )
   if current_page:
     sidebar_html = _sidebar_html(current_page)
@@ -2988,6 +2991,56 @@ def enum_map_page() -> HTMLResponse:
 def runtime_configs_page() -> HTMLResponse:
   """Versioned runtime configuration and encrypted secret-reference console."""
   return _page(_RUNTIME_CONFIGS_PAGE_HTML, current_page="runtime-configs")
+
+
+@router.get("/sync-jobs", response_class=HTMLResponse)
+def sync_jobs_page() -> HTMLResponse:
+  """定时任务管理页：启停周期调度，或手动触发系统/店铺级任务。"""
+  return _page(_SYNC_JOBS_PAGE_HTML, current_page="sync-jobs")
+
+
+_SYNC_JOBS_PAGE_HTML = """<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>定时任务管理 · tts-erp</title>
+  <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
+  <link rel="stylesheet" href="../../static/css/sync-jobs.css?v=__CSSV_SYNC_JOBS__">
+</head>
+<body>
+  <header class="job-header">
+    <div>
+      <a class="op-home-link" href="../../v2/pages/dashboard">← 首页</a>
+      <div class="eyebrow">Scheduler · Operations</div>
+      <h1>定时任务管理</h1>
+      <p>开启 / 关闭周期调度，或立即触发一次任务。TikTok 类任务可选择单店铺执行。</p>
+    </div>
+    <div class="identity" id="ops-identity">加载中…</div>
+  </header>
+  <main class="job-main">
+    <div id="notice" class="notice" role="status"></div>
+    <section class="panel">
+      <div class="panel-title">
+        <h2>任务清单</h2>
+        <button type="button" class="secondary" id="refresh-btn">刷新</button>
+      </div>
+      <div class="table-wrap">
+        <table class="jobs-table">
+          <thead>
+            <tr>
+              <th>任务</th><th>周期</th><th>范围</th><th>状态</th><th>上次运行</th><th>启用</th><th>立即执行</th>
+            </tr>
+          </thead>
+          <tbody id="jobs-body"><tr><td colspan="7" class="empty">加载中…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script src="../../static/js/sync-jobs.js?v=__JSV_SYNC_JOBS__" defer></script>
+</body>
+</html>
+"""
 
 
 _RUNTIME_CONFIGS_PAGE_HTML = """<!doctype html>
