@@ -77,7 +77,6 @@
         header.setAttribute("data-sort-label", header.textContent.trim());
       }
       header.setAttribute("tabindex", "0");
-      header.setAttribute("role", "button");
       header.setAttribute("aria-sort", "none");
     });
   }
