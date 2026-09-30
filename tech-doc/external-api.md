@@ -613,7 +613,7 @@ legacy has-data 响应仍为 `{day, endpoint, storageKey, hasData[, campaignId]}
 
 #### `GET /v2/analytics/sync/coverage`
 
-批量 coverage 查询（方案 B）：一次返回所有 campaign 的覆盖数据。支持天级（`kind=daily`）和月级（`kind=monthly`）两种粒度。设计文档：`analytics/daily-sync-with-coverage.md` §5.1。
+批量 coverage 查询（方案 B）：一次返回所有 campaign 的日级覆盖数据。
 
 Auth：**readwrite** + per-seller scope grant（同 `/cursor` 和 `/dumps`）。
 
@@ -624,9 +624,8 @@ Query parameters:
 | `sellerId` | string | required, ≤ 128 chars |
 | `advertiserId` | string | required, ≤ 128 chars |
 | `endpoint` | string | required；必须在 dump 白名单（同 `/cursor`） |
-| `kind` | string | required；`daily` 或 `monthly` |
+| `kind` | string | required；仅 `daily` |
 | `startDay` / `endDay` | date | `kind=daily` 时必带，`YYYY-MM-DD`；`startDay` ≤ `endDay` |
-| `startMonth` / `endMonth` | string | `kind=monthly` 时必带，`YYYY-MM` 格式；`startMonth` ≤ `endMonth` |
 | `campaignId` | string[] | optional；可重复传入本轮完整计划集合。服务端会为没有任何覆盖的计划返回空 `coveredPeriods`，避免冷启动计划被误判为响应缺失 |
 
 `endpoint` 白名单（同 `/cursor` 和 `/dumps`）：
@@ -662,43 +661,6 @@ Query parameters:
 }
 ```
 
-响应示例（`kind=monthly`）：
-
-```json
-{
-  "code": 0,
-  "requestId": "req-…",
-  "data": {
-    "kind": "monthly",
-    "endpoint": "/oec_ads/…/post_product_list",
-    "storageKey": "productAnalyses",
-    "startMonth": "2026-01",
-    "endMonth": "2026-09",
-    "totalRequested": 9,
-    "campaigns": {
-      "campaign-1": {
-        "coveredPeriods": ["2026-01", "2026-02", "..."],
-        "totalCovered": 8
-      }
-    }
-  }
-}
-```
-
-`totalRequested` = 请求区间内的总天数/月数；`coveredPeriods` = 该 campaign 已有数据的天/月列表（已排序）；`totalCovered` = 已覆盖的天/月数。
-
-当请求带有 `campaignId` 时，`campaigns` 以请求集合为准，缺少历史数据的计划也会返回
-`{ "coveredPeriods": [], "totalCovered": 0 }`。客户端因此可以安全地按零覆盖补齐；缺少
-计划不再被当作“跳过”。对于 campaign-level endpoint，coverage 从对应的
-`plugin.ad_raw_log` 计算；product-level endpoint 仍从结构化表计算。
-
-Errors:
-
-| code | meaning |
-| --- | --- |
-| 400 `SCHEMA_INVALID` | endpoint 不在白名单 / kind 非法 / 必填日期参数缺失 / 日期格式错误 / startDay > endDay |
-| 403 `SCOPE_DENIED` | scope mismatch |
-| 401 | missing or invalid Bearer token |
 
 #### `POST /v2/analytics/sync/dumps`
 

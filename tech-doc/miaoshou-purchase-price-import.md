@@ -71,21 +71,21 @@ spu_purchase_cost =
 
 ### 2.4 数据库落点
 
-`platformItemId` 先按 `commerce.products_spu.spu_id` 解析为内部 `spu_pk`，再写：
+采购价格是独立表，不依赖商品主档或人工采购价维表：
 
 ```text
-procurement.manual_product_costs
-  spu_pk      <- commerce.products_spu.id
-  unit_cost   <- 上述 SPU 级采购价
-  currency    <- CNY
-  valid_from  <- 写入时间
-  valid_to    <- NULL（当前生效行）
-  note        <- 采购单号、1688 offer ID、采购时间、计算口径
+miaoshou.purchase_prices
+  miaoshou_shop_id  <- opOrderPackageList[].shopId
+  shop_pk           <- 妙手店铺唯一映射到 commerce.shops.id（可为空）
+  spu_id            <- platformItemId
+  unit_cost         <- 上述 SPU 级采购价
+  currency          <- CNY
+  source_*          <- 采购单号、1688 offer、采购时间、状态和计算证据
 ```
 
-同一 `spu_pk` 只允许一条 `valid_to IS NULL`。更新时先将旧生效行的 `valid_to` 设为当前时间，
-再插入新行；旧值保留为历史。生产写入使用已有的
-`POST /v2/reporting/manual-costs`（`readwrite` 权限），不直接改表。
+唯一键是 `(credential_id, miaoshou_shop_id, spu_id)`。店铺匹配成功即写入，不要求
+`commerce.products_spu` 存在；店铺未匹配/歧义只记录 `miaoshou.sync_issues`，不写采购价格表。人工采购价
+`procurement.manual_product_costs` 是另一张人工覆盖表，定时清洗不会写入或覆盖它。
 
 ## 3. 示例采购单 `5127802669510007219`
 
@@ -116,7 +116,7 @@ procurement.manual_product_costs
 5. 排除 `purchaseOrderStatus IN ('cancel', 'wait_pay')`；
 6. 对每个 `platformItemId` 选择 `gmtPurchaseOrderStart` 最新的采购事实；
 7. 最新时间并列但价格不同则跳过并报警；价格相同可确定性去重；
-8. 仅更新能解析到 `commerce.products_spu` 的 SPU；不存在的 SPU 留在异常清单。
+8. 仅对可唯一匹配 `commerce.shops` 的妙手店铺标注 `shop_pk`；商品主档不存在不阻断写入。
 
 ## 5. 2026-09-30 全量数据质量结果
 
@@ -162,7 +162,8 @@ procurement.manual_product_costs
 1736171896698734324
 ```
 
-这些 ID 需要先由 TikTok 商品同步写入 `commerce.products_spu`，之后才能补录人工成本；本次没有创建伪造商品主数据。
+这是一次性导入历史结论。定时清洗改为以店铺匹配为前提：只要对应妙手店铺能映射数据库店铺，
+即使商品主档不存在也会写入独立采购价格表；店铺未匹配只保留为异常，不写入表。
 
 ## 6. 定时化（2026-09-30）
 
@@ -172,9 +173,9 @@ procurement.manual_product_costs
 2. 完整分页并校验累计数等于 `total`；
 3. 变化后的原始采购单去重写 `miaoshou.purchase_order_raw_records`；
 4. 复用本文 §4 的组序配对、数量加权、状态排除和最新事实规则；
-5. 候选写 `miaoshou.purchase_price_candidates`；
-6. 对可唯一解析的商品，同价保持现有人工成本行，价格变化才历史化旧行并插入新行；
-7. 缺商品、商品歧义、组数不一致、最新价冲突写 `miaoshou.sync_issues`，不猜测。
+5. 清洗结果写独立表 `miaoshou.purchase_prices`，以 `(miaoshou_shop_id, spu_id)` 区分；
+6. 妙手店铺可唯一映射数据库店铺时写入 `shop_pk`；商品主档不存在不阻断；
+7. 店铺未匹配/歧义、组数不一致、最新价冲突写 `miaoshou.sync_issues`，不猜测，也不触碰人工采购价表。
 
 首次配置和 migration 命令见 `tech-doc/miaoshou-platform.md` §7。
 

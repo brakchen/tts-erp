@@ -3,8 +3,8 @@
 纯领域层 —— 无 I/O、无框架、无 DB。定义流经本服务的全部值对象形状。
 
 2026-09-10 daily-sync-with-coverage（tech-doc/analytics/daily-sync-with-coverage.md）：
-- v4 协议：插件按 coverage diff 决策后，按 day/monthly/today 粒度上传 rows。
-- daily/today 写结构化表；monthly 只写 ad_raw_log 并从 raw log 计算 coverage。
+- v4 协议仅支持 daily/today 粒度。
+- daily/today 写结构化表并提供 coverage。
 """
 
 from __future__ import annotations

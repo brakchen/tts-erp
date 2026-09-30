@@ -56,25 +56,6 @@ WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
   AND day BETWEEN :start_day AND :end_day
 """
 
-SQL_COVERAGE_MONTHLY_RAW = """
-SELECT campaign_id, array_agg(DISTINCT year_month ORDER BY year_month) AS months
-FROM plugin.ad_raw_log
-WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
-  AND endpoint = :endpoint AND kind = 'monthly'
-  AND year_month BETWEEN :start_month AND :end_month
-GROUP BY campaign_id
-ORDER BY campaign_id
-LIMIT :page_size OFFSET :offset
-"""
-
-SQL_COVERAGE_MONTHLY_RAW_COUNT = """
-SELECT count(DISTINCT campaign_id) AS total
-FROM plugin.ad_raw_log
-WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
-  AND endpoint = :endpoint AND kind = 'monthly'
-  AND year_month BETWEEN :start_month AND :end_month
-"""
-
 SQL_UPSERT_DAILY_ROW = """
 INSERT INTO plugin.ad_daily (
     seller_id, advertiser_id, campaign_id, product_id, endpoint, day,
@@ -117,12 +98,12 @@ ON CONFLICT ON CONSTRAINT uq_ad_today DO UPDATE SET
 SQL_INSERT_RAW_LOG = """
 INSERT INTO plugin.ad_raw_log (
     seller_id, advertiser_id, endpoint, campaign_id, product_id,
-    kind, day, year_month,
+    kind, day,
     request_url, request_method, request_body, response_status, response_body,
     created_at, request_id, source
 ) VALUES (
     :seller_id, :advertiser_id, :endpoint, :campaign_id, :product_id,
-    :kind, :day, :year_month,
+    :kind, :day,
     :request_url, :request_method, CAST(:request_body AS JSONB), :response_status, CAST(:response_body AS JSONB),
     :created_at, :request_id, :source
 )
@@ -195,12 +176,11 @@ def _archive_raw_log_only(
     source: str | None,
     kind: str,
     day: date | None,
-    year_month: str | None,
 ) -> int:
     """Archive a raw-only dump and return zero structured inserts.
 
-    Used by campaign-level endpoints and every monthly dump. Keeping this in the
-    repository preserves one transaction and one raw-log representation.
+    Used by campaign-level endpoints. Keeping this in the repository preserves
+    one transaction and one raw-log representation.
     """
     # Raw-only records represent one request, not one product row. Keep
     # product_id NULL so downstream SPU joins cannot treat them as daily facts.
@@ -215,7 +195,6 @@ def _archive_raw_log_only(
             "product_id": None,
             "kind": kind,
             "day": day,
-            "year_month": year_month,
             "request_url": request_url,
             "request_method": "POST",
             "request_body": json.dumps(request_body, ensure_ascii=False),
@@ -310,78 +289,6 @@ def get_coverage_daily(
     return {row[0]: [d.isoformat() for d in row[1]] for row in rows}, total
 
 
-def get_coverage_monthly(
-    sess: Session,
-    *,
-    seller_id: str,
-    advertiser_id: str,
-    endpoint: str,
-    start_month: str,
-    end_month: str,
-    page: int = 1,
-    page_size: int = 500,
-    requested_campaign_ids: list[str] | None = None,
-) -> tuple[dict[str, list[str]], int]:
-    """返回 ({campaign_id: ['2026-01', ...]}, totalCampaigns) 的元组。"""
-    offset = (page - 1) * page_size
-    # pi-lens-ignore: python-sql-injection
-    coverage_sql = SQL_COVERAGE_MONTHLY_RAW
-    count_sql = SQL_COVERAGE_MONTHLY_RAW_COUNT
-    params = {
-        "seller_id": seller_id,
-        "advertiser_id": advertiser_id,
-        "endpoint": endpoint,
-        "start_month": start_month,
-        "end_month": end_month,
-        "page_size": page_size,
-        "offset": offset,
-    }
-    requested = (
-        None if requested_campaign_ids is None else sorted(set(requested_campaign_ids))
-    )
-    if requested is not None:
-        page_ids = requested[offset : offset + page_size]
-        if not page_ids:
-            return {}, len(requested)
-        requested_sql = coverage_sql.replace(
-            "GROUP BY campaign_id",
-            "AND campaign_id IN :campaign_ids\nGROUP BY campaign_id",
-        )
-        rows = sess.execute(
-            text(requested_sql).bindparams(bindparam("campaign_ids", expanding=True)),
-            {**params, "offset": 0, "campaign_ids": page_ids},
-        ).all()
-        coverage = {row[0]: list(row[1]) for row in rows}
-        return {
-            campaign_id: coverage.get(campaign_id, []) for campaign_id in page_ids
-        }, len(requested)
-
-    rows = sess.execute(
-        text(coverage_sql),
-        params,
-    ).all()
-    # pi-lens-ignore: python-sql-injection — COUNT() 参数化
-    total_row = sess.execute(
-        text(count_sql),
-        {
-            "seller_id": seller_id,
-            "advertiser_id": advertiser_id,
-            "endpoint": endpoint,
-            "start_month": start_month,
-            "end_month": end_month,
-        },
-    ).first()
-    try:
-        total = int(total_row[0]) if total_row is not None else 0
-    except (TypeError, ValueError):
-        total = 0
-    return {row[0]: list(row[1]) for row in rows}, total
-
-
-# ─── 结构化写入函数 ──────────────────────────────────────────────────
-# tech-doc/analytics/daily-sync-with-coverage.md §5.3
-
-
 def upsert_daily_rows(
     sess: Session,
     *,
@@ -421,7 +328,6 @@ def upsert_daily_rows(
             source=source,
             kind="daily",
             day=day,
-            year_month=None,
         )
 
     first_product_id = rows[0]["product_id"] if rows else None
@@ -469,7 +375,6 @@ def upsert_daily_rows(
             "product_id": first_product_id,
             "kind": "daily",
             "day": day,
-            "year_month": None,
             "request_url": request_url,
             "request_method": "POST",
             "request_body": json.dumps(request_body, ensure_ascii=False),
@@ -523,7 +428,6 @@ def upsert_today_rows(
             source=source,
             kind="today",
             day=day,
-            year_month=None,
         )
 
     first_product_id = rows[0]["product_id"] if rows else None
@@ -570,7 +474,6 @@ def upsert_today_rows(
             "product_id": first_product_id,
             "kind": "today",
             "day": day,
-            "year_month": None,
             "request_url": request_url,
             "request_method": "POST",
             "request_body": json.dumps(request_body, ensure_ascii=False),
@@ -584,47 +487,6 @@ def upsert_today_rows(
 
     sess.commit()
     return inserted
-
-
-def upsert_monthly_rows(
-    sess: Session,
-    *,
-    seller_id: str,
-    advertiser_id: str,
-    endpoint: str,
-    campaign_id: str,
-    year_month: str,
-    rows: list[dict[str, Any]],
-    request_url: str,
-    request_body: dict[str, Any] | None,
-    response_status: int | None,
-    response_body: dict[str, Any] | None,
-    created_at: datetime,
-    request_id: str | None,
-    source: str | None,
-) -> int:
-    """Archive a monthly dump in ``ad_raw_log`` and return zero inserts."""
-    return _archive_raw_log_only(
-        sess,
-        seller_id=seller_id,
-        advertiser_id=advertiser_id,
-        endpoint=endpoint,
-        campaign_id=campaign_id,
-        rows=rows,
-        request_url=request_url,
-        request_body=request_body,
-        response_status=response_status,
-        response_body=response_body,
-        created_at=created_at,
-        request_id=request_id,
-        source=source,
-        kind="monthly",
-        day=None,
-        year_month=year_month,
-    )
-
-
-# ─── Plugin logs ─────────────────────────────────────────────────────
 
 
 def insert_plugin_logs(sess: Session, *, logs: list[dict[str, Any]]) -> int:
@@ -740,10 +602,8 @@ __all__ = [
     "SQL_UPSERT_DAILY_ROW",
     "SQL_UPSERT_TODAY_ROW",
     "get_coverage_daily",
-    "get_coverage_monthly",
     "insert_plugin_logs",
     "is_product_level_endpoint",
     "upsert_daily_rows",
-    "upsert_monthly_rows",
     "upsert_today_rows",
 ]

@@ -23,21 +23,20 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import inspect, select, update
+from sqlalchemy import func, inspect, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.db.models.commerce import ChannelProduct
+from tts_erp_v2.db.models.commerce import ChannelAccount
 from tts_erp_v2.db.models.integration import Credentials
 from tts_erp_v2.db.models.miaoshou import (
     MiaoshouPurchaseOrderRawRecord,
-    MiaoshouPurchasePriceCandidate,
+    MiaoshouPurchasePrice,
     MiaoshouSyncIssue,
 )
-from tts_erp_v2.db.models.procurement import ManualProductCost
+from tts_erp_v2.db.models.procurement import ProcurementAccount
 from tts_erp_v2.jobs.runner import finish_job, run_job
 from tts_erp_v2.proxy.token_service import CredentialsView, load_credentials
-from tts_erp_v2.reporting.manual_cost_lock import lock_manual_cost_spu
 
 log = logging.getLogger("tts_erp_v2.jobs.miaoshou.purchase_price_clean")
 
@@ -62,6 +61,8 @@ class PurchaseWebClient(Protocol):
 
 @dataclass(frozen=True)
 class PriceObservation:
+    miaoshou_shop_id: str
+    shop_name: str | None
     spu_id: str
     source_item_id: str
     unit_cost: Decimal
@@ -159,9 +160,7 @@ class MiaoshouPurchaseWebClient:
 
 
 def _schema_ready(session: Session) -> bool:
-    return inspect(session.get_bind()).has_table(
-        "purchase_price_candidates", schema="miaoshou"
-    )
+    return inspect(session.get_bind()).has_table("purchase_prices", schema="miaoshou")
 
 
 def _resolve_credentials(
@@ -328,13 +327,23 @@ def _observations_from_order(
     source_order, source_groups = _ordered_groups(
         order.get("purchaseItems") or [], "sourceItemId"
     )
-    platform_items = [
-        item
-        for package in order.get("opOrderPackageList") or []
-        if isinstance(package, dict)
-        for item in package.get("purchaseItems") or []
-    ]
-    platform_order, _platform_groups = _ordered_groups(platform_items, "platformItemId")
+    platform_order: list[str] = []
+    platform_groups: dict[str, list[tuple[dict[str, Any], str, str | None]]] = {}
+    for package in order.get("opOrderPackageList") or []:
+        if not isinstance(package, dict):
+            continue
+        shop_id = str(package.get("shopId") or "")
+        shop_name = str(package.get("shopName")) if package.get("shopName") else None
+        for item in package.get("purchaseItems") or []:
+            if not isinstance(item, dict):
+                continue
+            spu_id = str(item.get("platformItemId") or "")
+            if not spu_id:
+                continue
+            if spu_id not in platform_groups:
+                platform_groups[spu_id] = []
+                platform_order.append(spu_id)
+            platform_groups[spu_id].append((item, shop_id, shop_name))
     order_sn = str(order.get("purchaseOrderSn") or "")
     if len(source_order) != len(platform_order):
         return [], [
@@ -349,6 +358,23 @@ def _observations_from_order(
     issues: list[dict[str, Any]] = []
     purchase_at_raw = str(order.get("gmtPurchaseOrderStart") or "")
     for source_item_id, spu_id in zip(source_order, platform_order, strict=True):
+        shops = {
+            (shop_id, shop_name)
+            for _item, shop_id, shop_name in platform_groups[spu_id]
+            if shop_id
+        }
+        if len(shops) != 1:
+            issues.append(
+                {
+                    "issue_type": "SHOP_UNRESOLVED_IN_PURCHASE_ORDER",
+                    "purchase_order_sn": order_sn,
+                    "source_item_id": source_item_id,
+                    "spu_id": spu_id,
+                    "shop_count": len(shops),
+                }
+            )
+            continue
+        miaoshou_shop_id, shop_name = next(iter(shops))
         numerator = Decimal(0)
         denominator = Decimal(0)
         evidence: list[dict[str, str]] = []
@@ -402,6 +428,8 @@ def _observations_from_order(
             continue
         observations.append(
             PriceObservation(
+                miaoshou_shop_id=miaoshou_shop_id,
+                shop_name=shop_name,
                 spu_id=spu_id,
                 source_item_id=source_item_id,
                 unit_cost=(numerator / denominator).quantize(Decimal("0.0001")),
@@ -418,8 +446,8 @@ def _observations_from_order(
 
 def clean_latest_prices(
     orders: list[dict[str, Any]],
-) -> tuple[dict[str, PriceObservation], list[dict[str, Any]]]:
-    unique: dict[tuple[str, str, str], PriceObservation] = {}
+) -> tuple[dict[tuple[str, str], PriceObservation], list[dict[str, Any]]]:
+    unique: dict[tuple[str, str, str, str], PriceObservation] = {}
     issues: list[dict[str, Any]] = []
     for order in orders:
         observations, order_issues = _observations_from_order(order)
@@ -428,20 +456,23 @@ def clean_latest_prices(
             key = (
                 observation.purchase_order_sn,
                 observation.source_item_id,
+                observation.miaoshou_shop_id,
                 observation.spu_id,
             )
             previous = unique.get(key)
             if previous is None or observation.filter_id > previous.filter_id:
                 unique[key] = observation
 
-    by_spu: dict[str, list[PriceObservation]] = {}
+    by_shop_spu: dict[tuple[str, str], list[PriceObservation]] = {}
     for observation in unique.values():
         if observation.status in _EXCLUDED_STATUSES:
             continue
-        by_spu.setdefault(observation.spu_id, []).append(observation)
+        by_shop_spu.setdefault(
+            (observation.miaoshou_shop_id, observation.spu_id), []
+        ).append(observation)
 
-    latest: dict[str, PriceObservation] = {}
-    for spu_id, observations in by_spu.items():
+    latest: dict[tuple[str, str], PriceObservation] = {}
+    for shop_spu, observations in by_shop_spu.items():
         newest = max(
             observation.purchase_at or datetime.min.replace(tzinfo=UTC)
             for observation in observations
@@ -456,7 +487,8 @@ def clean_latest_prices(
             issues.append(
                 {
                     "issue_type": "LATEST_PRICE_AMBIGUOUS",
-                    "spu_id": spu_id,
+                    "miaoshou_shop_id": shop_spu[0],
+                    "spu_id": shop_spu[1],
                     "prices": sorted(str(price) for price in prices),
                     "purchase_order_sns": sorted(
                         {observation.purchase_order_sn for observation in candidates}
@@ -464,7 +496,7 @@ def clean_latest_prices(
                 }
             )
             continue
-        latest[spu_id] = max(
+        latest[shop_spu] = max(
             candidates,
             key=lambda observation: (
                 observation.purchase_order_sn,
@@ -574,12 +606,19 @@ def _record_issue(
     )
 
 
-def _resolve_spu_issues(session: Session, *, credential_id: int, spu_id: str) -> None:
+def _resolve_shop_issues(
+    session: Session,
+    *,
+    credential_id: int,
+    miaoshou_shop_id: str,
+    spu_id: str,
+) -> None:
+    external_id = f"{miaoshou_shop_id}:{spu_id}"
     rows = session.execute(
         select(MiaoshouSyncIssue)
         .where(MiaoshouSyncIssue.credential_id == credential_id)
         .where(MiaoshouSyncIssue.resource == RESOURCE)
-        .where(MiaoshouSyncIssue.external_id == spu_id)
+        .where(MiaoshouSyncIssue.external_id == external_id)
         .where(MiaoshouSyncIssue.resolved_at.is_(None))
     ).scalars()
     resolved_at = datetime.now(UTC)
@@ -587,86 +626,41 @@ def _resolve_spu_issues(session: Session, *, credential_id: int, spu_id: str) ->
         row.resolved_at = resolved_at
 
 
-def _resolve_candidate_product(session: Session, spu_id: str) -> tuple[int | None, str]:
-    rows = (
+def _resolve_database_shop(
+    session: Session,
+    observation: PriceObservation,
+) -> tuple[int | None, str]:
+    account = session.execute(
+        select(ProcurementAccount)
+        .where(ProcurementAccount.provider == "miaoshou")
+        .where(ProcurementAccount.external_account_id == observation.miaoshou_shop_id)
+    ).scalar_one_or_none()
+    if account is None:
+        return None, "unmatched_miaoshou_shop"
+    if not account.account_name:
+        return None, "miaoshou_shop_missing_name"
+    shops = (
         session.execute(
-            select(ChannelProduct.id).where(ChannelProduct.spu_id == spu_id)
+            select(ChannelAccount.id).where(
+                func.lower(ChannelAccount.account_name) == account.account_name.lower()
+            )
         )
         .scalars()
         .all()
     )
-    if not rows:
-        return None, "missing_product"
-    if len(rows) > 1:
-        return None, "ambiguous_product"
-    return rows[0], "ready"
+    if not shops:
+        return None, "unmatched_database_shop"
+    if len(shops) > 1:
+        return None, "ambiguous_database_shop"
+    return shops[0], "matched_shop"
 
 
-def _sync_manual_cost(
-    session: Session,
-    *,
-    spu_pk: int,
-    observation: PriceObservation,
-) -> tuple[int, bool, bool]:
-    lock_manual_cost_spu(session, spu_pk=spu_pk)
-    current = session.execute(
-        select(ManualProductCost)
-        .where(ManualProductCost.spu_pk == spu_pk)
-        .where(ManualProductCost.valid_to.is_(None))
-    ).scalar_one_or_none()
-    if (
-        current is not None
-        and current.unit_cost == observation.unit_cost
-        and current.currency == "CNY"
-    ):
-        return current.id, False, False
-    if current is not None and not _is_automated_cost(current):
-        return current.id, False, True
-
-    now = datetime.now(UTC)
-    session.execute(
-        update(ManualProductCost)
-        .where(ManualProductCost.spu_pk == spu_pk)
-        .where(ManualProductCost.valid_to.is_(None))
-        .values(valid_to=now, updated_at=now)
-    )
-    session.flush()
-    row = ManualProductCost(
-        spu_pk=spu_pk,
-        unit_cost=observation.unit_cost,
-        currency="CNY",
-        valid_from=now,
-        valid_to=None,
-        note=(
-            f"Miaoshou purchase order {observation.purchase_order_sn}; "
-            f"1688 offer {observation.source_item_id}; "
-            f"purchase time {observation.purchase_at_raw}; "
-            "qty-weighted sourceUnitPrice; scheduled sync"
-        ),
-        created_by="job:miaoshou.purchase_price_clean",
-    )
-    session.add(row)
-    session.flush()
-    return row.id, True, False
-
-
-def _is_automated_cost(row: ManualProductCost) -> bool:
-    if row.created_by == f"job:{JOB_NAME}":
-        return True
-    note = row.note or ""
-    return "qty-weighted sourceUnitPrice" in note and any(
-        marker in note
-        for marker in ("full import", "refresh 2026-09-30", "scheduled sync")
-    )
-
-
-def _upsert_candidate(
+def _upsert_purchase_price(
     session: Session,
     *,
     credential_id: int,
     observation: PriceObservation,
-    spu_pk: int | None,
-    manual_cost_id: int | None,
+    shop_pk: int | None,
     resolution_status: str,
 ) -> None:
     now = datetime.now(UTC)
@@ -674,12 +668,14 @@ def _upsert_candidate(
         "source_lines": list(observation.source_lines),
         "purchase_at_raw": observation.purchase_at_raw,
         "filter_id": observation.filter_id,
+        "miaoshou_shop_id": observation.miaoshou_shop_id,
     }
     values = {
         "credential_id": credential_id,
+        "miaoshou_shop_id": observation.miaoshou_shop_id,
+        "shop_name": observation.shop_name,
+        "shop_pk": shop_pk,
         "spu_id": observation.spu_id,
-        "spu_pk": spu_pk,
-        "manual_cost_id": manual_cost_id,
         "unit_cost": observation.unit_cost,
         "currency": "CNY",
         "source_purchase_order_sn": observation.purchase_order_sn,
@@ -693,14 +689,14 @@ def _upsert_candidate(
         "last_seen_at": now,
         "synced_at": now,
     }
-    stmt = pg_insert(MiaoshouPurchasePriceCandidate).values(**values)
+    stmt = pg_insert(MiaoshouPurchasePrice).values(**values)
     session.execute(
         stmt.on_conflict_do_update(
-            index_elements=["credential_id", "spu_id"],
+            index_elements=["credential_id", "miaoshou_shop_id", "spu_id"],
             set_={
                 key: value
                 for key, value in values.items()
-                if key not in ("credential_id", "spu_id")
+                if key not in ("credential_id", "miaoshou_shop_id", "spu_id")
             },
         )
     )
@@ -712,11 +708,9 @@ def _skipped_result(reason: str) -> dict[str, Any]:
         "reason": reason,
         "pages_walked": 0,
         "orders_seen": 0,
-        "candidate_spus": 0,
-        "manual_costs_written": 0,
-        "manual_costs_unchanged": 0,
-        "manual_overrides": 0,
-        "missing_products": 0,
+        "purchase_prices": 0,
+        "matched_shops": 0,
+        "unmatched_shops": 0,
         "issues": 0,
     }
 
@@ -731,7 +725,7 @@ def sync_purchase_prices(
     """Run one complete purchase-price fetch/clean/publish cycle."""
     with run_job(session, job_name=JOB_NAME) as job:
         if not _schema_ready(session):
-            result = _skipped_result("migration 0046 not applied")
+            result = _skipped_result("migration 0047 not applied")
             finish_job(
                 session, job, status="skipped", extra={"reason": result["reason"]}
             )
@@ -770,72 +764,58 @@ def sync_purchase_prices(
                 details=issue,
             )
 
-        written = 0
-        unchanged = 0
-        manual_overrides = 0
-        missing = 0
-        product_issues = 0
+        matched_shops = 0
+        unmatched_shops = 0
+        shop_issues = 0
         for observation in latest.values():
-            spu_pk, resolution_status = _resolve_candidate_product(
-                session, observation.spu_id
-            )
-            manual_cost_id: int | None = None
-            if spu_pk is not None:
-                manual_cost_id, changed, overridden = _sync_manual_cost(
-                    session,
-                    spu_pk=spu_pk,
-                    observation=observation,
-                )
-                if overridden:
-                    resolution_status = "manual_override"
-                    manual_overrides += 1
-                elif changed:
-                    written += 1
-                else:
-                    unchanged += 1
-                _resolve_spu_issues(
+            shop_pk, resolution_status = _resolve_database_shop(session, observation)
+            if shop_pk is not None:
+                matched_shops += 1
+                _resolve_shop_issues(
                     session,
                     credential_id=credential_id,
+                    miaoshou_shop_id=observation.miaoshou_shop_id,
                     spu_id=observation.spu_id,
                 )
             else:
-                if resolution_status == "missing_product":
-                    missing += 1
-                product_issues += 1
+                unmatched_shops += 1
+                shop_issues += 1
                 _record_issue(
                     session,
                     credential_id=credential_id,
                     issue_type=resolution_status.upper(),
-                    external_id=observation.spu_id,
+                    external_id=(
+                        f"{observation.miaoshou_shop_id}:{observation.spu_id}"
+                    ),
                     details={
+                        "miaoshou_shop_id": observation.miaoshou_shop_id,
+                        "shop_name": observation.shop_name,
                         "spu_id": observation.spu_id,
                         "unit_cost": str(observation.unit_cost),
                         "purchase_order_sn": observation.purchase_order_sn,
                     },
                 )
-            _upsert_candidate(
-                session,
-                credential_id=credential_id,
-                observation=observation,
-                spu_pk=spu_pk,
-                manual_cost_id=manual_cost_id,
-                resolution_status=resolution_status,
-            )
+            if shop_pk is not None:
+                _upsert_purchase_price(
+                    session,
+                    credential_id=credential_id,
+                    observation=observation,
+                    shop_pk=shop_pk,
+                    resolution_status=resolution_status,
+                )
 
-        issues = len(cleaning_issues) + product_issues
+        issues = len(cleaning_issues) + shop_issues
         job.rows_total = len(orders)
-        job.rows_inserted = raw_inserted + len(latest) + written
-        job.rows_updated = unchanged
+        job.rows_inserted = raw_inserted + matched_shops
+        job.rows_updated = 0
         job.rows_failed = issues
         job.extra = {
             "pages_walked": pages_walked,
             "advertised_total": advertised_total,
-            "candidate_spus": len(latest),
+            "purchase_prices": matched_shops,
             "raw_inserted": raw_inserted,
-            "manual_costs_written": written,
-            "manual_costs_unchanged": unchanged,
-            "manual_overrides": manual_overrides,
-            "missing_products": missing,
+            "matched_shops": matched_shops,
+            "unmatched_shops": unmatched_shops,
             "calculation_version": _CALCULATION_VERSION,
             "finished_at_iso": datetime.now(UTC).isoformat(),
         }
@@ -844,11 +824,9 @@ def sync_purchase_prices(
             "reason": None,
             "pages_walked": pages_walked,
             "orders_seen": len(orders),
-            "candidate_spus": len(latest),
-            "manual_costs_written": written,
-            "manual_costs_unchanged": unchanged,
-            "manual_overrides": manual_overrides,
-            "missing_products": missing,
+            "purchase_prices": matched_shops,
+            "matched_shops": matched_shops,
+            "unmatched_shops": unmatched_shops,
             "issues": issues,
         }
 
