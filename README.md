@@ -164,10 +164,11 @@ schema 及责任如下：
 
 | Schema | 责任 |
 | --- | --- |
-| `integration` | 凭证引用、同步游标、job 运行记录和问题 |
+| `integration` | 跨数据源凭证和统一 job 运行记录；业务 payload/cursor/issue 由来源 schema 自持 |
 | `commerce` | 店铺、渠道商品、订单和订单行 |
-| `procurement` | 妙手账号、采集箱、货源、人工成本和 SPU 图片 |
-| `fulfillment` | 运单、包裹和轨迹 |
+| `miaoshou` | 妙手 source-owned 包裹原文、包裹、商品、赠品、cursor 和 issue |
+| `procurement` | 跨来源采购主档、人工成本和 SPU 图片 |
+| `fulfillment` | TikTok/履约域运单、包裹和轨迹（不接收妙手源表投影） |
 | `after_sales` | 退货、退款和取消 case |
 | `finance` | payout、statement、transaction 和费用组件 |
 | `reporting` | 成本快照、旧版利润日报和跟踪汇总 |

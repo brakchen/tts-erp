@@ -54,6 +54,14 @@ from tts_erp_v2.db.models.intercept import (
     InterceptSession,
     InterceptSyncCursor,
 )
+from tts_erp_v2.db.models.miaoshou import (
+    MiaoshouPackage,
+    MiaoshouPackageGiftItem,
+    MiaoshouPackageItem,
+    MiaoshouPackageRawRecord,
+    MiaoshouSyncCursor,
+    MiaoshouSyncIssue,
+)
 from tts_erp_v2.db.models.plugin import (
     AdDaily,
     AdMonthly,
@@ -116,6 +124,12 @@ __all__ = [
     "InterceptSyncCursor",
     "InterceptedRequest",
     "ManualProductCost",
+    "MiaoshouPackage",
+    "MiaoshouPackageGiftItem",
+    "MiaoshouPackageItem",
+    "MiaoshouPackageRawRecord",
+    "MiaoshouSyncCursor",
+    "MiaoshouSyncIssue",
     "Payout",
     "PluginLog",
     "ProcurementAccount",

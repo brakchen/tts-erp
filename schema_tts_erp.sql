@@ -65,6 +65,11 @@ CREATE SCHEMA fx;
 CREATE SCHEMA integration;
 
 
+-- Name: miaoshou; Type: SCHEMA; Schema: -; Owner: -
+
+CREATE SCHEMA miaoshou;
+
+
 -- Name: plugin; Type: SCHEMA; Schema: -; Owner: -
 
 CREATE SCHEMA plugin;
@@ -620,6 +625,177 @@ CREATE TABLE IF NOT EXISTS integration.tiktok_app_credentials (
     app_secret_ciphertext bytea NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: package_gift_items; Type: TABLE; Schema: miaoshou; Owner: -
+
+CREATE TABLE IF NOT EXISTS miaoshou.package_gift_items (
+    id bigint NOT NULL,
+    package_id bigint NOT NULL,
+    external_gift_item_id text NOT NULL,
+    goods_id text,
+    goods_sku_id text,
+    goods_name text,
+    item_num text,
+    sku_name text,
+    goods_sku_outer_id text,
+    quantity numeric(20,4),
+    original_price numeric(20,4),
+    discounted_price numeric(20,4),
+    image_url text,
+    raw_payload jsonb NOT NULL,
+    active boolean DEFAULT true NOT NULL,
+    removed_at timestamp with time zone,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE miaoshou.package_gift_items ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME miaoshou.package_gift_items_id_seq
+);
+
+
+-- Name: package_items; Type: TABLE; Schema: miaoshou; Owner: -
+
+CREATE TABLE IF NOT EXISTS miaoshou.package_items (
+    id bigint NOT NULL,
+    package_id bigint NOT NULL,
+    external_package_item_id text NOT NULL,
+    external_order_item_id text,
+    platform_order_item_index text,
+    platform_product_id text,
+    platform_sku_id text,
+    platform_item_num text,
+    platform_outer_sku_id text,
+    title text,
+    sku_name text,
+    quantity numeric(20,4),
+    original_price numeric(20,4),
+    discounted_price numeric(20,4),
+    image_url text,
+    original_image_url text,
+    raw_payload jsonb NOT NULL,
+    active boolean DEFAULT true NOT NULL,
+    removed_at timestamp with time zone,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE miaoshou.package_items ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME miaoshou.package_items_id_seq
+);
+
+
+-- Name: package_raw_records; Type: TABLE; Schema: miaoshou; Owner: -
+
+CREATE TABLE IF NOT EXISTS miaoshou.package_raw_records (
+    id bigint NOT NULL,
+    credential_id bigint,
+    external_package_id text,
+    endpoint text NOT NULL,
+    payload jsonb NOT NULL,
+    payload_hash text NOT NULL,
+    captured_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE miaoshou.package_raw_records ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME miaoshou.package_raw_records_id_seq
+);
+
+
+-- Name: packages; Type: TABLE; Schema: miaoshou; Owner: -
+
+CREATE TABLE IF NOT EXISTS miaoshou.packages (
+    id bigint NOT NULL,
+    credential_id bigint NOT NULL,
+    external_package_id text NOT NULL,
+    raw_record_id bigint NOT NULL,
+    source_endpoint text NOT NULL,
+    platform text,
+    site text,
+    shop_id text,
+    shop_name text,
+    shop_nick text,
+    app_package_no text,
+    app_package_status text,
+    app_package_status_text text,
+    platform_package_status text,
+    fulfillment_type text,
+    platform_order_sn text,
+    platform_order_status text,
+    currency text,
+    logistics_no text,
+    logistics_company text,
+    logistics_product_id text,
+    logistics_product_name text,
+    source_created_at timestamp with time zone,
+    source_updated_at timestamp with time zone,
+    shipped_at timestamp with time zone,
+    order_info jsonb,
+    consignee_info jsonb,
+    logistics_info jsonb,
+    last_mile_info jsonb,
+    raw_payload jsonb NOT NULL,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE miaoshou.packages ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME miaoshou.packages_id_seq
+);
+
+
+-- Name: sync_cursors; Type: TABLE; Schema: miaoshou; Owner: -
+
+CREATE TABLE IF NOT EXISTS miaoshou.sync_cursors (
+    id bigint NOT NULL,
+    credential_id bigint NOT NULL,
+    resource text NOT NULL,
+    cursor_value text,
+    cursor_epoch_ms bigint,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE miaoshou.sync_cursors ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME miaoshou.sync_cursors_id_seq
+);
+
+
+-- Name: sync_issues; Type: TABLE; Schema: miaoshou; Owner: -
+
+CREATE TABLE IF NOT EXISTS miaoshou.sync_issues (
+    id bigint NOT NULL,
+    credential_id bigint NOT NULL,
+    resource text NOT NULL,
+    issue_type text NOT NULL,
+    external_id text,
+    details jsonb,
+    detected_at timestamp with time zone DEFAULT now() NOT NULL,
+    resolved_at timestamp with time zone,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE miaoshou.sync_issues ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME miaoshou.sync_issues_id_seq
 );
 
 
@@ -1770,6 +1946,66 @@ ALTER TABLE ONLY integration.sync_cursors
     ADD CONSTRAINT uq_sync_cursors_job_scope UNIQUE (job_name, scope);
 
 
+-- Name: package_gift_items package_gift_items_pkey; Type: CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.package_gift_items
+    ADD CONSTRAINT package_gift_items_pkey PRIMARY KEY (id);
+
+
+-- Name: package_items package_items_pkey; Type: CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.package_items
+    ADD CONSTRAINT package_items_pkey PRIMARY KEY (id);
+
+
+-- Name: package_raw_records package_raw_records_pkey; Type: CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.package_raw_records
+    ADD CONSTRAINT package_raw_records_pkey PRIMARY KEY (id);
+
+
+-- Name: packages packages_pkey; Type: CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.packages
+    ADD CONSTRAINT packages_pkey PRIMARY KEY (id);
+
+
+-- Name: sync_cursors sync_cursors_pkey; Type: CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.sync_cursors
+    ADD CONSTRAINT sync_cursors_pkey PRIMARY KEY (id);
+
+
+-- Name: sync_issues sync_issues_pkey; Type: CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.sync_issues
+    ADD CONSTRAINT sync_issues_pkey PRIMARY KEY (id);
+
+
+-- Name: package_gift_items uq_miaoshou_package_gifts_package_external; Type: CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.package_gift_items
+    ADD CONSTRAINT uq_miaoshou_package_gifts_package_external UNIQUE (package_id, external_gift_item_id);
+
+
+-- Name: package_items uq_miaoshou_package_items_package_external; Type: CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.package_items
+    ADD CONSTRAINT uq_miaoshou_package_items_package_external UNIQUE (package_id, external_package_item_id);
+
+
+-- Name: packages uq_miaoshou_packages_credential_external; Type: CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.packages
+    ADD CONSTRAINT uq_miaoshou_packages_credential_external UNIQUE (credential_id, external_package_id);
+
+
+-- Name: sync_cursors uq_miaoshou_sync_cursors_credential_resource; Type: CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.sync_cursors
+    ADD CONSTRAINT uq_miaoshou_sync_cursors_credential_resource UNIQUE (credential_id, resource);
+
+
 -- Name: ad_daily ad_daily_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
 
 ALTER TABLE ONLY plugin.ad_daily
@@ -2298,6 +2534,46 @@ CREATE INDEX IF NOT EXISTS ix_sync_issues_job_resolved ON integration.sync_issue
 CREATE INDEX IF NOT EXISTS ix_sync_jobs_name_started ON integration.sync_jobs USING btree (job_name, started_at);
 
 
+-- Name: ix_miaoshou_package_items_product; Type: INDEX; Schema: miaoshou; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_miaoshou_package_items_product ON miaoshou.package_items USING btree (platform_product_id);
+
+
+-- Name: ix_miaoshou_package_items_sku; Type: INDEX; Schema: miaoshou; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_miaoshou_package_items_sku ON miaoshou.package_items USING btree (platform_sku_id);
+
+
+-- Name: ix_miaoshou_package_raw_captured; Type: INDEX; Schema: miaoshou; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_miaoshou_package_raw_captured ON miaoshou.package_raw_records USING btree (captured_at);
+
+
+-- Name: ix_miaoshou_package_raw_external; Type: INDEX; Schema: miaoshou; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_miaoshou_package_raw_external ON miaoshou.package_raw_records USING btree (credential_id, external_package_id);
+
+
+-- Name: ix_miaoshou_packages_order; Type: INDEX; Schema: miaoshou; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_miaoshou_packages_order ON miaoshou.packages USING btree (platform_order_sn);
+
+
+-- Name: ix_miaoshou_packages_source_updated; Type: INDEX; Schema: miaoshou; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_miaoshou_packages_source_updated ON miaoshou.packages USING btree (source_updated_at);
+
+
+-- Name: ix_miaoshou_packages_status; Type: INDEX; Schema: miaoshou; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_miaoshou_packages_status ON miaoshou.packages USING btree (app_package_status);
+
+
+-- Name: ix_miaoshou_sync_issues_resource_resolved; Type: INDEX; Schema: miaoshou; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_miaoshou_sync_issues_resource_resolved ON miaoshou.sync_issues USING btree (resource, resolved_at);
+
+
 -- Name: idx_ad_daily_coverage; Type: INDEX; Schema: plugin; Owner: -
 
 CREATE INDEX IF NOT EXISTS idx_ad_daily_coverage ON plugin.ad_daily USING btree (seller_id, advertiser_id, endpoint, campaign_id, day);
@@ -2653,6 +2929,31 @@ CREATE OR REPLACE TRIGGER trg_integration_sync_jobs_touch BEFORE UPDATE ON integ
 CREATE OR REPLACE TRIGGER trg_integration_tiktok_app_credentials_touch BEFORE UPDATE ON integration.tiktok_app_credentials FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
+-- Name: package_gift_items trg_miaoshou_package_gift_items_touch; Type: TRIGGER; Schema: miaoshou; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_miaoshou_package_gift_items_touch BEFORE UPDATE ON miaoshou.package_gift_items FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: package_items trg_miaoshou_package_items_touch; Type: TRIGGER; Schema: miaoshou; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_miaoshou_package_items_touch BEFORE UPDATE ON miaoshou.package_items FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: packages trg_miaoshou_packages_touch; Type: TRIGGER; Schema: miaoshou; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_miaoshou_packages_touch BEFORE UPDATE ON miaoshou.packages FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: sync_cursors trg_miaoshou_sync_cursors_touch; Type: TRIGGER; Schema: miaoshou; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_miaoshou_sync_cursors_touch BEFORE UPDATE ON miaoshou.sync_cursors FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: sync_issues trg_miaoshou_sync_issues_touch; Type: TRIGGER; Schema: miaoshou; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_miaoshou_sync_issues_touch BEFORE UPDATE ON miaoshou.sync_issues FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
 -- Name: ad_daily trg_analytics_ad_daily_touch; Type: TRIGGER; Schema: plugin; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_analytics_ad_daily_touch BEFORE UPDATE ON plugin.ad_daily FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
@@ -2945,6 +3246,48 @@ ALTER TABLE ONLY integration.raw_records
 
 ALTER TABLE ONLY integration.sync_jobs
     ADD CONSTRAINT sync_jobs_credential_id_fkey FOREIGN KEY (credential_id) REFERENCES integration.credentials(id) ON DELETE SET NULL;
+
+
+-- Name: package_gift_items package_gift_items_package_id_fkey; Type: FK CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.package_gift_items
+    ADD CONSTRAINT package_gift_items_package_id_fkey FOREIGN KEY (package_id) REFERENCES miaoshou.packages(id) ON DELETE CASCADE;
+
+
+-- Name: package_items package_items_package_id_fkey; Type: FK CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.package_items
+    ADD CONSTRAINT package_items_package_id_fkey FOREIGN KEY (package_id) REFERENCES miaoshou.packages(id) ON DELETE CASCADE;
+
+
+-- Name: package_raw_records package_raw_records_credential_id_fkey; Type: FK CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.package_raw_records
+    ADD CONSTRAINT package_raw_records_credential_id_fkey FOREIGN KEY (credential_id) REFERENCES integration.credentials(id) ON DELETE SET NULL;
+
+
+-- Name: packages packages_credential_id_fkey; Type: FK CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.packages
+    ADD CONSTRAINT packages_credential_id_fkey FOREIGN KEY (credential_id) REFERENCES integration.credentials(id) ON DELETE RESTRICT;
+
+
+-- Name: packages packages_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.packages
+    ADD CONSTRAINT packages_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES miaoshou.package_raw_records(id) ON DELETE RESTRICT;
+
+
+-- Name: sync_cursors sync_cursors_credential_id_fkey; Type: FK CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.sync_cursors
+    ADD CONSTRAINT sync_cursors_credential_id_fkey FOREIGN KEY (credential_id) REFERENCES integration.credentials(id) ON DELETE CASCADE;
+
+
+-- Name: sync_issues sync_issues_credential_id_fkey; Type: FK CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.sync_issues
+    ADD CONSTRAINT sync_issues_credential_id_fkey FOREIGN KEY (credential_id) REFERENCES integration.credentials(id) ON DELETE CASCADE;
 
 
 -- Name: manual_product_costs manual_product_costs_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -

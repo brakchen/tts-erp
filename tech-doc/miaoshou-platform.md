@@ -71,18 +71,34 @@ sign = MD5(busData + companySecret).upper()
   `opOrderPackageId`。
 - 响应：列表为 `data.orderPackageList`，带 `total` / `page` / `pageSize`；详情为
   `data.orderPackageInfo`。两者共用订单、商品、赠品、物流和尾程物流字段结构。
-- 持久化：原始包裹（含商品/赠品）写 `integration.raw_records`；能按 `platformOrderSn`
-  唯一解析本地销售单的包裹 upsert 到 `fulfillment.shipments`。实测
-  `platformOrderItemIndex` 是平台 SKU ID，不是 TikTok `line_id`，因此商品与包裹的精确隶属关系只保留
-  在 raw JSON，不猜测写入 `fulfillment.shipment_lines`。未知/歧义订单记录
-  `integration.sync_issues`。
-- 增量：`miaoshou.packages` 每 30 分钟运行，按 Miaoshou credential 独立使用
-  `integration.sync_cursors` 保存最新 `gmtOrderModified`，下次请求回退 5 分钟重叠以避免边界漏数。
-  未解析包裹保留为未解决 issue，并在后续 tick 通过详情接口重试，所以 watermark 前进不会丢失待关联包裹；
-  分页未达到上游 `total` 时整次事务失败且不推进 cursor。
+- Schema 边界：妙手包裹域数据全部属于 `miaoshou` schema，不投影到
+  `commerce` / `fulfillment` / 通用 `integration.raw_records`。迁移
+  `0045_miaoshou_package_schema` 建立并维护：
+  - `miaoshou.package_raw_records`：每次列表/详情原始 payload（不可变审计历史）；
+  - `miaoshou.packages`：包裹最新归一化状态；
+  - `miaoshou.package_items` / `miaoshou.package_gift_items`：普通商品与赠品；
+  - `miaoshou.sync_cursors` / `miaoshou.sync_issues`：妙手自己的增量水位和数据问题。
+- 商品数组是权威快照：明确返回空数组时，旧子项软标记为 `active=false` 并保留历史；字段或数组未返回时，
+  不用 NULL/空值覆盖已知状态。
+- 增量：`miaoshou.packages` 每 30 分钟运行，按 Miaoshou credential 独立保存最新
+  `gmtOrderModified`，下次请求回退 5 分钟重叠以避免边界漏数；分页未达到上游 `total`
+  时整次事务失败且不推进 cursor。
+- `integration.sync_jobs` 只保留跨数据源统一的任务执行状态，不承载妙手业务 payload、cursor 或 issue。
 - 单包修复：`sync_package_detail(session, op_order_package_id=...)` 调详情接口并复用相同的归一化逻辑；
   详情接口不单独定时全量调用，避免 N+1 请求。
 - Apifox 同样展示可选 `timerToken` 和 `Cookie`，当前 HMAC ERP 客户端不依赖二者。
+
+### 6.1 生产迁移一键命令
+
+生产迁移由人工执行；脚本会先停 sync worker、备份所有受影响行、应用 0045、验证搬迁和定向清理、
+立即补跑 package sync，再恢复 worker：
+
+```bash
+ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0045_miaoshou_package_schema.sh --confirm
+```
+
+备份默认写入 `$HOME/backups/tts_erp_manual/miaoshou_package_0045_*.jsonl.gz`，并生成带行数和 ID
+清单的 `.meta.json`。脚本自身不会设置生产 destructive override；缺少环境变量或 `--confirm` 会拒绝执行。
 
 ## 7. 测试
 
