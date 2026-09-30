@@ -116,6 +116,18 @@ def test_dashboard_installs_ad_daily_navigation_card():
     assert "广告日明细" in source
 
 
+def test_ad_daily_frontend_resets_filters_and_stale_results():
+    source = Path("tts_erp_v2/static/js/ad-daily.js").read_text()
+
+    assert "elements.seller.value = state.seller_id;" in source
+    assert "elements.advertiser.value = state.advertiser_id;" in source
+    assert "elements.endpoint.value = state.endpoint;" in source
+    assert "function clearResults()" in source
+    assert source.count("clearResults();") >= 2
+    assert "elements.sumSpend.textContent = '—';" in source
+    assert "elements.prev.disabled = true;" in source
+
+
 def test_ad_daily_list_filters_pages_and_summarizes_full_scope(
     api_client,
     readonly_key,

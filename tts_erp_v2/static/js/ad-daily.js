@@ -113,6 +113,9 @@
   }
 
   function applyStateToControls() {
+    elements.seller.value = state.seller_id;
+    elements.advertiser.value = state.advertiser_id;
+    elements.endpoint.value = state.endpoint;
     elements.dayFrom.value = state.day_from;
     elements.dayTo.value = state.day_to;
     elements.query.value = state.q;
@@ -168,7 +171,7 @@
   }
 
   function populateAdvertisers(preferred) {
-    const sellerId = elements.seller.value || state.seller_id;
+    const sellerId = elements.seller.value;
     const candidates = (filterOptions.advertisers || []).filter(function (item) {
       return !sellerId || item.seller_id === sellerId;
     });
@@ -197,6 +200,7 @@
 
   async function loadRows() {
     if (state.day_from && state.day_to && state.day_from > state.day_to) {
+      clearResults();
       setStatus('开始日期不能晚于结束日期', 'error');
       return;
     }
@@ -229,7 +233,8 @@
       const payload = await response.json();
       if (state.offset > 0 && payload.total > 0 && state.offset >= payload.total) {
         state.offset = Math.floor((payload.total - 1) / state.limit) * state.limit;
-        return loadRows();
+        await loadRows();
+        return;
       }
       renderSummary(payload.summary);
       renderRows(payload.items);
@@ -237,8 +242,7 @@
       setStatus(`已读取 ${numberFormat.format(payload.items.length)} 行`, 'ok');
     } catch (error) {
       if (error.name === 'AbortError') return;
-      elements.body.replaceChildren();
-      elements.empty.hidden = false;
+      clearResults();
       elements.pageRange.textContent = '读取失败';
       setStatus(error.message || '广告明细读取失败', 'error');
     } finally {
@@ -252,6 +256,19 @@
     elements.sumGmv.textContent = formatMoney(summary.attributed_gmv);
     elements.sumOrders.textContent = numberFormat.format(summary.attributed_orders || 0);
     elements.sumRoi.textContent = summary.weighted_roi == null ? '—' : `${roiFormat.format(Number(summary.weighted_roi))}×`;
+  }
+
+  function clearResults() {
+    elements.body.replaceChildren();
+    elements.empty.hidden = false;
+    elements.sumRows.textContent = '—';
+    elements.sumSpend.textContent = '—';
+    elements.sumGmv.textContent = '—';
+    elements.sumOrders.textContent = '—';
+    elements.sumRoi.textContent = '—';
+    elements.pageRange.textContent = '—';
+    elements.prev.disabled = true;
+    elements.next.disabled = true;
   }
 
   function renderRows(items) {
