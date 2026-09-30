@@ -2728,6 +2728,12 @@ def test_spu_roi_page_remembers_filters_and_enhances_date_range():
     assert 'class: "input-group input-group-sm op-date-input-group"' in kernel_js
     assert 'class: "btn-group btn-group-sm op-date-presets"' in kernel_js
     assert 'data-date-preset' in kernel_js
+    # 月初至今天与某个滚动天数完全相同时只保留“本月”，避免两个按钮
+    # 同时激活（例如 9 月 30 日的本月与近 30 天都是 9/1—9/30）。
+    assert "preferredDatePresetButtons" in kernel_js
+    assert 'priority: preset === "month" ? 2 : 1' in kernel_js
+    assert "button.hidden = duplicate" in kernel_js
+    assert "!duplicate &&" in kernel_js
     assert "截止日包含当天" in kernel_js
     assert '"aria-describedby": "date-range-help"' in kernel_js
     assert ".op-date-range" in css
