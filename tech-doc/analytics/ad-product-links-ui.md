@@ -40,8 +40,8 @@
 - **新页面** `GET /v2/pages/ad-products` 返回 HTML shell + 新 `static/js/ad-products.js`
   （原生 DOM + fetch，无框架，延续 console.js 家族模式）；未登录浏览器 GET 由
   auth middleware 自动 **302 → login**（`Accept: text/html` 分支，无需页面自处理）。
-- **外网**：页面/API 落在既有 `/tts/` 反代下（nginx `proxy_pass` → `:9877`），
-  URL = `http://daqiang.nat100.top/tts/v2/pages/ad-products`，**无需新增 nginx
+- **外网**：页面/API 通过 HTTPS 落在既有 `/tts/` 反代下（nginx `proxy_pass` → `:9877`），
+  URL = `https://daqiang.nat100.top/tts/v2/pages/ad-products`，**无需新增 nginx
   location**；nginx 只新增 plannotator 评审端口代理（见 §8）。
 
 ### 2.1 为什么是新页面而不是塞进 manual-costs
@@ -201,8 +201,8 @@ dashboard（大渐变卡片）刻意拉开距离；全页只有表格 + 合计�
 - 现状（已确认）：`nginx-gw` 容器 host 网络，listen `:9899`；公网
   `daqiang.nat100.top`（natapp 隧道）→ `:9899`；`location /tts/`
   `proxy_pass http://127.0.0.1:9877/`（含 `X-Forwarded-Prefix /tts/`）。
-- **UI/API 外网访问零配置**：新页面与端点都在 `/tts/` 下自动可访问：
-  `http://daqiang.nat100.top/tts/v2/pages/ad-products`
+- **UI/API 外网访问零配置**：新页面与端点都在 `/tts/` 下通过 HTTPS 自动可访问：
+  `https://daqiang.nat100.top/tts/v2/pages/ad-products`
   （浏览器未登录自动 302 到 `/tts/v2/auth/login?next=…`，登录页回跳）。
 - nginx 配置文件：`/home/schan/setup/nginx/conf.d/services.conf`；
   改后 `docker exec nginx-gw nginx -s reload`；冒烟 `curl -sI` 各路径。
@@ -234,11 +234,11 @@ location /plannotator/ {
 PLANNOTATOR_PORT=19432 plannotator annotate tech-doc/analytics/ad-product-links-ui.md --json
 ```
 
-- 外网评审 URL：`http://daqiang.nat100.top/plannotator/`。
+- 外网评审 URL：`https://daqiang.nat100.top/plannotator/`。
 
 ## 9. 冒烟清单
 
-- [ ] `curl http://daqiang.nat100.top/tts/healthz` → 200 ok
+- [ ] `curl https://daqiang.nat100.top/tts/healthz` → 200 ok
 - [ ] 无 key `GET /tts/v2/analytics/ad-products` → 401
 - [ ] readonly key `GET /tts/v2/analytics/ad-products?group=spu&q=…&limit=5` → 200 且 totals 正确
 - [ ] 浏览器 `/tts/v2/pages/ad-products` 未登录 → 302 login → 登录回跳页面
