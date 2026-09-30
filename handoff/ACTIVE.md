@@ -16,4 +16,5 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| isolated-test-hardening | 加固隔离测试脚本与文档 | 01a0f3bd-328d-729f-8747-2a8dddf4961f | `chore/isolated-test-hardening` / `.worktrees/isolated-test-hardening` | `scripts/test_isolated.sh`; `AGENTS.md`; `tech-doc/agent-testing.md`; `tech-doc/agent-safety.md`; `tests/conftest.py` | active |  |  | 2026-09-30 20:28:00 |
 | sync-job-page-fixes | 修复定时任务管理页面逻辑 | 01a0f39a-7180-760e-b7c9-6b0a00a152c2 | `fix/sync-job-page-fixes` / `.worktrees/sync-job-page-fixes` | `tts_erp_v2/api/v2/pages.py`; `tts_erp_v2/static/js/sync-jobs.js`; `tests/api/test_pages.py`; `tests/api/test_sync_job_management.py`; `tech-doc/external-api.md` | ready | b2f91701193b4787a087a01ba3ef55fff264cfbb | 7af69b59de0f4c8df7eb9777e4ad5825a2f04e12 | 2026-09-30 19:59:47 |
