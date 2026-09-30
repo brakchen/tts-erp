@@ -51,7 +51,6 @@ from tts_erp_v2.api.v2 import (
     focused_spus,
     fx,
     intercept,
-    linkage,
     llm_context,
     oauth,
     order_sync,
@@ -83,7 +82,6 @@ DEFAULT_CORS_ALLOW_HEADERS = [
 
 def _build_routes(app: FastAPI) -> None:
     app.include_router(commerce.router)
-    app.include_router(linkage.router)
     app.include_router(reporting.router)
     app.include_router(focused_spus.router)
     app.include_router(
@@ -143,8 +141,6 @@ def _build_routes(app: FastAPI) -> None:
     )
 
 
-
-
 def _downgrade_nullable(obj: Any) -> None:
     """Recursively rewrite OpenAPI 3.1 anyOf+null to 3.0 nullable:true.
 
@@ -155,7 +151,11 @@ def _downgrade_nullable(obj: Any) -> None:
         any_of = obj.get("anyOf")
         if isinstance(any_of, list) and len(any_of) == 2:
             null_idx = next(
-                (i for i, m in enumerate(any_of) if isinstance(m, dict) and m.get("type") == "null"),
+                (
+                    i
+                    for i, m in enumerate(any_of)
+                    if isinstance(m, dict) and m.get("type") == "null"
+                ),
                 None,
             )
             if null_idx is not None:
@@ -339,7 +339,7 @@ def _register_public_routes(app: FastAPI) -> None:
         (hard switch — see tech-doc/refactor-tech-plan-v2 §6).
 
         Walks ``app.routes`` recursively so routers mounted via
-        ``include_router`` (commerce / linkage / reporting / pages /
+        ``include_router`` (commerce / reporting / pages /
         llm_context / auth / analytics_sync) all surface. FastAPI 0.141
         wraps every ``include_router`` child in a lazy ``_IncludedRouter``
         proxy that has no ``path`` attribute — a flat walk would
@@ -361,8 +361,8 @@ def _walk_v2_routes(routes, prefix=""):
     """Yield ``{path, methods, name}`` for every routable entry under v2.
 
     Recurses into ``_IncludedRouter.original_router.routes`` so business
-    routers mounted via ``include_router`` (``commerce``, ``linkage``,
-    ``reporting``, ``pages``, ``llm_context``, ``auth``,
+    routers mounted via ``include_router`` (``commerce``, ``reporting``,
+    ``pages``, ``llm_context``, ``auth``,
     ``analytics_sync``) all surface in the operator-facing /endpoints
     index. FastAPI 0.141 wraps every include_router child in a lazy
     ``_IncludedRouter`` proxy that has no ``path`` attribute — a flat

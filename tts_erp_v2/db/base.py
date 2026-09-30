@@ -24,7 +24,6 @@ SCHEMAS: tuple[str, ...] = (
     "fulfillment",
     "after_sales",
     "finance",
-    "linkage",
     "reporting",
     "security",
     "plugin",

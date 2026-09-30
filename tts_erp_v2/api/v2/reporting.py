@@ -76,17 +76,16 @@ SQL_COVERAGE_REPORT = (
     "(SELECT COUNT(*) FROM commerce.products_spu "
     "WHERE status ILIKE 'activate') AS active_spus, "
     "(SELECT COUNT(DISTINCT spu_pk) "
-    "FROM linkage.effective_product_links "
-    "WHERE effective_relation_type IS NOT NULL) AS linked_spus, "
+    "FROM reporting.product_cost_snapshots "
+    "WHERE valid_to IS NULL) AS costed_spus, "
     "(SELECT COUNT(*) FROM commerce.products_spu cp "
     "WHERE cp.status ILIKE 'activate' "
     "AND NOT EXISTS ("
     "  SELECT 1 FROM procurement.manual_product_costs m "
     "  WHERE m.spu_pk = cp.id AND m.valid_to IS NULL"
     ") AND NOT EXISTS ("
-    "  SELECT 1 FROM linkage.effective_product_links epl "
-    "  WHERE epl.spu_pk = cp.id "
-    "  AND epl.effective_relation_type IS NOT NULL"
+    "  SELECT 1 FROM reporting.product_cost_snapshots pcs "
+    "  WHERE pcs.spu_pk = cp.id AND pcs.valid_to IS NULL"
     ")) AS missing_cost_spus, "
     "(SELECT COALESCE(MAX(calculation_version), 1) "
     "FROM reporting.product_cost_snapshots) AS calculation_version"
@@ -163,15 +162,9 @@ SQL_LIST_MISSING_COST_PRODUCTS = (
     "         WHERE si.spu_pk = cp.id "
     "         AND si.status = 'ready' AND si.deleted_at IS NULL"
     "       )) AS missing_photo "
-    # (2026-09-01) cp.status stored as 'ACTIVATE' by TikTok sync; use
-    # ILIKE so the filter also matches the lowercase 'active' that
-    # earlier docs / tests assume.
-    # Also: linkage.effective_product_links is a LEFT-JOIN view that
-    # emits one row per channel_product even when no real link exists.
-    # The presence of a row is therefore meaningless — only the
-    # presence of effective_relation_type (non-null) means an actual
-    # link. The pre-fix NOT EXISTS evaluated FALSE for every product
-    # and the "Needs cost" tab was always empty.
+    # A current cost snapshot means the scheduled resolver found a usable
+    # manual, purchase-order, or source-price cost. Manual rows are checked
+    # separately so a new submission disappears before the next rebuild.
     "FROM commerce.products_spu cp "
     "WHERE cp.status ILIKE 'activate' "
     "AND (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
@@ -179,9 +172,8 @@ SQL_LIST_MISSING_COST_PRODUCTS = (
     "  SELECT 1 FROM procurement.manual_product_costs m "
     "  WHERE m.spu_pk = cp.id AND m.valid_to IS NULL"
     ") AND NOT EXISTS ("
-    "  SELECT 1 FROM linkage.effective_product_links epl "
-    "  WHERE epl.spu_pk = cp.id "
-    "  AND epl.effective_relation_type IS NOT NULL"
+    "  SELECT 1 FROM reporting.product_cost_snapshots pcs "
+    "  WHERE pcs.spu_pk = cp.id AND pcs.valid_to IS NULL"
     ") ORDER BY cp.id LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
 )
 SQL_TOTAL_MISSING_PHOTO = (
@@ -194,9 +186,8 @@ SQL_TOTAL_MISSING_PHOTO = (
     "    SELECT 1 FROM procurement.manual_product_costs m "
     "    WHERE m.spu_pk = cp.id AND m.valid_to IS NULL"
     "  ) AND NOT EXISTS ("
-    "    SELECT 1 FROM linkage.effective_product_links epl "
-    "    WHERE epl.spu_pk = cp.id "
-    "    AND epl.effective_relation_type IS NOT NULL"
+    "    SELECT 1 FROM reporting.product_cost_snapshots pcs "
+    "    WHERE pcs.spu_pk = cp.id AND pcs.valid_to IS NULL"
     "  ) AND NOT EXISTS ("
     "    SELECT 1 FROM procurement.spu_images si "
     "    WHERE si.spu_pk = cp.id "
@@ -343,7 +334,7 @@ def coverage_report(sess: Session = Depends(get_session)) -> CoverageReport:
     return CoverageReport(
         total_spus=_safe_int(row.total_spus),
         active_spus=_safe_int(row.active_spus),
-        linked_spus=_safe_int(row.linked_spus),
+        costed_spus=_safe_int(row.costed_spus),
         missing_cost_spus=_safe_int(row.missing_cost_spus),
         calculation_version=_safe_int(row.calculation_version, default=1),
     )
@@ -452,7 +443,7 @@ def list_manual_costs(
                 "created_at": r.created_at.isoformat() if r.created_at else None,
             }
             for r in rows
-        ]
+        ],
     }
 
 

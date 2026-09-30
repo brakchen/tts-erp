@@ -172,7 +172,7 @@ tracking 侧无 action_code 索引但全表数千行，不加索引。
                         对外名称 = 「人工标注的采购成交价」（2026-09-07 用户拍板
                         改术语；原「人工成本」作废——它语义上就是采购成交价，
                         只是人工标注而非妙手采购单同步）
-2. LATEST_PURCHASE_COST linkage.effective_product_links → purchase_order_lines
+2. LATEST_PURCHASE_COST products_spu.spu_id = procurement_products.external_product_id → purchase_order_lines
                         最新一条 unit_cost（妙手采购单成交价，updated_at 倒序）
 3. SOURCE_PRICE         procurement_products.source_unit_cost（1688 挂牌价；
                         先 TK-side 行 external_product_id=spu_id 直取，

@@ -41,6 +41,7 @@ def _load_env() -> None:
 
 _load_env()
 
+
 # Append +psycopg driver if .env gave plain postgresql:// (legacy URL
 # format). psycopg2 is not installed in this environment.
 def _coerce_psycopg(url: str) -> str:
@@ -87,7 +88,7 @@ _db_url_prod = os.environ.get("TTS_ERP_DB_URL")
 if _db_url_test:
     _db_url = _coerce_psycopg(_db_url_test)
     os.environ["TTS_ERP_DB_URL"] = _db_url  # propagate so SQLAlchemy
-                                           # picks up the override too
+    # picks up the override too
 elif _db_url_prod:
     _db_url = _coerce_psycopg(_db_url_prod)
     # Defensive: warn if we're about to run tests against what looks
@@ -96,7 +97,9 @@ elif _db_url_prod:
     # ``scripts/test.sh`` when a developer has only ``.env`` on disk.
     try:
         _dbname = (_urlparse(_db_url).path or "").lstrip("/")
-        if _dbname in {"tts_erp", "tts_erp_prod"} or _dbname.startswith("tts_erp_prod_"):
+        if _dbname in {"tts_erp", "tts_erp_prod"} or _dbname.startswith(
+            "tts_erp_prod_"
+        ):
             # 2026-09-13 incident: warning was not loud enough. The
             # ``tests/api/test_admin_purge.py::test_purge_plugin_data_clears_ad_tables``
             # ran against prod ``tts_erp`` from a worktree whose ``.env``
@@ -115,6 +118,7 @@ elif _db_url_prod:
                 # SystemExit which propagates through pytest's collect
                 # phase as a collection error — session aborts immediately.
                 import sys as _sys2
+
                 _sys2.stderr.write(
                     "\n[conftest] REFUSED: prod-shaped DB ``"
                     f"{_dbname}``\n"
@@ -181,7 +185,7 @@ def db_session(db_engine) -> Iterator[Session]:
 def _check_schema_prereq(db_engine) -> None:
     """Skip tests when alembic hasn't been applied yet.
 
-    Smoke tests assume all 35 tables exist. The session-end cleanup
+    Smoke tests assume all current business tables exist. The session-end cleanup
     fixture (below) wipes any TEST_-prefixed data after the suite runs.
     """
     expected = {
@@ -212,12 +216,6 @@ def _check_schema_prereq(db_engine) -> None:
         "finance.settlement_components",
         "fx.exchange_rate_snapshots",
         "fx.exchange_rates",
-        "linkage.account_links",
-        "linkage.product_links",
-        "linkage.variant_links",
-        "linkage.link_evidence",
-        "linkage.link_overrides",
-        "linkage.link_issues",
         "reporting.focused_spus",
         "reporting.product_cost_snapshots",
         "reporting.product_profit_daily",
@@ -236,7 +234,7 @@ def _check_schema_prereq(db_engine) -> None:
             text(
                 "SELECT table_schema || '.' || table_name FROM information_schema.tables "
                 "WHERE table_schema IN ('integration','commerce','procurement','fulfillment',"
-                "'after_sales','finance','linkage','reporting','security','fx','plugin')"
+                "'after_sales','finance','reporting','security','fx','plugin')"
             )
         ).fetchall()
     actual = {r[0] for r in rows}

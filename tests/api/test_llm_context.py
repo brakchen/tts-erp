@@ -11,6 +11,7 @@ business rules. It must be:
 - Helpful: must mention the 9 schemas, the cost priority chain, the
   known pitfalls, and the v2 API surface.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -26,10 +27,15 @@ REQUIRED_PHRASES = [
     "tts-erp",
     "v2",  # matches both "tts-erp v2" and "tts-erp (v2)"
     # Schemas — all 9
-    "integration", "commerce", "procurement", "fulfillment",
-    "after_sales", "finance", "linkage", "reporting", "security",
-    # The view
-    "effective_product_links",
+    "integration",
+    "commerce",
+    "procurement",
+    "fulfillment",
+    "after_sales",
+    "finance",
+    "reporting",
+    "security",
+    "fx",
     # Cost rules — the core business invariant
     "MANUAL_ENTRY",
     "1688",
@@ -40,12 +46,13 @@ REQUIRED_PHRASES = [
     "APScheduler",
     "FastAPI",
     # Auth
-    "readonly", "readwrite", "admin",
+    "readonly",
+    "readwrite",
+    "admin",
     "api_key" if False else "Authorization",  # noqa: just for readability
     # Endpoints — at least the v2 canonical ones
     "/v2/commerce/sales-orders",
     "/v2/commerce/channel-products",
-    "/v2/linkage/product-links",
     "/v2/reporting/profit-daily",
     "/v2/reporting/coverage",
     "/v2/reporting/missing-cost-products",
@@ -148,9 +155,7 @@ def test_llm_context_markdown_contains_no_secrets(api_client, readonly_key):
     assert not leaked, f"LEAKED SECRETS in LLM context: {leaked}"
 
 
-def test_llm_context_json_format_returns_structured_envelope(
-    api_client, readonly_key
-):
+def test_llm_context_json_format_returns_structured_envelope(api_client, readonly_key):
     """?format=json returns the same content wrapped in a JSON envelope."""
     r = api_client.get(
         "/v2/llm-context?format=json",
@@ -169,9 +174,7 @@ def test_llm_context_json_format_returns_structured_envelope(
     assert "tables_live" in section_ids
 
 
-def test_llm_context_includes_live_table_introspection(
-    api_client, readonly_key
-):
+def test_llm_context_includes_live_table_introspection(api_client, readonly_key):
     """The dynamic §9 section must show real table names from PG.
 
     This proves the endpoint actually queries information_schema
@@ -182,16 +185,14 @@ def test_llm_context_includes_live_table_introspection(
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     payload = r.json()
-    tables_section = next(
-        s for s in payload["sections"] if s["id"] == "tables_live"
-    )
+    tables_section = next(s for s in payload["sections"] if s["id"] == "tables_live")
     body = tables_section["body"]
     # These tables MUST be present in the live introspection
     # (they're created by the V3 alembic init migration).
     for required in [
         "commerce.sales_orders",
         "procurement.manual_product_costs",
-        "linkage.product_links",
+        "fx.exchange_rates",
         "finance.settlement_components",
     ]:
         assert required in body, f"missing live table: {required}"
@@ -217,9 +218,7 @@ def test_llm_context_invalid_format_rejected(api_client, readonly_key):
     assert r.status_code == 422, r.text
 
 
-def test_llm_context_json_envelope_no_secrets_either(
-    api_client, readonly_key
-):
+def test_llm_context_json_envelope_no_secrets_either(api_client, readonly_key):
     """The JSON envelope (not just markdown) must also be secrets-free."""
     r = api_client.get(
         "/v2/llm-context?format=json",
@@ -230,9 +229,7 @@ def test_llm_context_json_envelope_no_secrets_either(
     assert not leaked, f"LEAKED SECRETS in JSON envelope: {leaked}"
 
 
-def test_llm_context_section_count_at_least_eight(
-    api_client, readonly_key
-):
+def test_llm_context_section_count_at_least_eight(api_client, readonly_key):
     """We have 10 hand-curated sections; require >= 8 to catch silent
     section-deletion bugs."""
     r = api_client.get(

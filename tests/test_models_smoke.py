@@ -9,26 +9,21 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import inspect, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models import (
-    AccountLink,
     ApiKey,
     ChannelAccount,
     ChannelProduct,
     ChannelProductVariant,
     Credentials,
-    LinkEvidence,
-    LinkIssue,
-    LinkOverride,
     ManualProductCost,
     Payout,
     ProcurementAccount,
     ProcurementProduct,
     ProcurementProductVariant,
     ProductCostSnapshot,
-    ProductLink,
     ProductProfitDaily,
     PurchaseOrder,
     PurchaseOrderLine,
@@ -552,99 +547,6 @@ def test_finance_chain(
         db_session.flush()
 
 
-def test_linkage_chain(
-    db_session: Session,
-    procurement_account_row: ProcurementAccount,
-    channel_account_row: ChannelAccount,
-    procurement_product_row: ProcurementProduct,
-    channel_product_row: ChannelProduct,
-) -> None:
-    al = AccountLink(
-        procurement_account_id=procurement_account_row.id,
-        shop_pk=channel_account_row.id,
-    )
-    db_session.add(al)
-    db_session.flush()
-
-    pl = ProductLink(
-        procurement_product_id=procurement_product_row.id,
-        spu_pk=channel_product_row.id,
-        relation_type="MIAOSHOU_PUBLISHED_TO_TIKTOK",
-        is_primary=True,
-    )
-    db_session.add(pl)
-    db_session.flush()
-    assert pl.is_primary is True
-
-    le = LinkEvidence(
-        product_link_id=pl.id,
-        evidence_type="MOVE_COLLECT_TASK",
-        evidence_payload={"task_id": "TEST_t_1"},
-    )
-    db_session.add(le)
-    db_session.flush()
-
-    lo = LinkOverride(
-        procurement_product_id=procurement_product_row.id,
-        spu_pk=channel_product_row.id,
-        decision="PRIMARY",
-        created_by="op1",
-    )
-    db_session.add(lo)
-    db_session.flush()
-    assert lo.decision == "PRIMARY"
-
-
-def test_product_links_unique_with_valid_from(
-    db_session: Session,
-    procurement_product_row: ProcurementProduct,
-    channel_product_row: ChannelProduct,
-) -> None:
-    """Per refactor-tech-plan-v2 §3.2: UNIQUE(procurement, channel, valid_from)
-    so historical versions don't collide.
-    """
-
-    pl1 = ProductLink(
-        procurement_product_id=procurement_product_row.id,
-        spu_pk=channel_product_row.id,
-        relation_type="MIAOSHOU_PUBLISHED_TO_TIKTOK",
-        valid_from=datetime(2024, 1, 1, tzinfo=UTC),
-    )
-    pl2 = ProductLink(
-        procurement_product_id=procurement_product_row.id,
-        spu_pk=channel_product_row.id,
-        relation_type="MIAOSHOU_PUBLISHED_TO_TIKTOK",
-        valid_from=datetime(2024, 2, 1, tzinfo=UTC),
-    )
-    db_session.add_all([pl1, pl2])
-    db_session.flush()
-    assert pl1.id != pl2.id
-    assert pl1.valid_from != pl2.valid_from
-
-
-def test_variant_links(db_session: Session) -> None:
-    """variant_links table structure exists; rows are typically empty."""
-    # Empty placeholder — variant_links row requires both Miaoshou + TikTok
-    # variants; we don't insert here, just verify the table exists.
-    insp = inspect(db_session.get_bind())
-    cols = {c["name"] for c in insp.get_columns("variant_links", schema="linkage")}
-    assert "procurement_product_variant_id" in cols
-    assert "sku_pk" in cols
-
-
-def test_link_issues_record(
-    db_session: Session, channel_product_row: ChannelProduct
-) -> None:
-    li = LinkIssue(
-        issue_type="AMBIGUOUS_SOURCE",
-        spu_pk=channel_product_row.id,
-        candidate_count=3,
-    )
-    db_session.add(li)
-    db_session.flush()
-    assert li.candidate_count == 3
-
-
 def test_reporting_cost_snapshot(
     db_session: Session, channel_product_row: ChannelProduct
 ) -> None:
@@ -696,23 +598,3 @@ def test_api_keys_hashed(db_session: Session) -> None:
     db_session.flush()
     assert k.key_hash != plaintext
     assert len(k.key_hash) == 64  # sha256 hex
-
-
-def test_effective_product_links_view_consultable(db_engine) -> None:
-    """The hand-written VIEW must be present and queryable.
-
-    Empty data is fine — we just confirm the view exists and parses.
-    """
-    from sqlalchemy import text
-
-    with db_engine.connect() as conn:
-        rows = conn.execute(
-            text(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_schema='linkage' AND table_name='effective_product_links'"
-            )
-        ).fetchall()
-    cols = {r[0] for r in rows}
-    assert "spu_pk" in cols
-    assert "procurement_product_id" in cols
-    assert "effective_relation_type" in cols

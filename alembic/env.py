@@ -3,8 +3,9 @@
 Reads TTS_ERP_DB_URL from .env (loaded explicitly; we don't trust
 configparser interpolation because the password may contain '%').
 Loads every tts_erp_v2 model via load_all_metadata() so autogenerate sees
-all 35 tables. Public schema and legacy tables are explicitly ignored.
+all current business tables. Public schema and legacy tables are explicitly ignored.
 """
+
 from __future__ import annotations
 
 import configparser
@@ -42,12 +43,14 @@ _load_env()
 # needs it.
 from tts_erp_v2.db.models import load_all_metadata  # noqa: E402
 
+
 # ── alembic config ───────────────────────────────────────────────────
 # configparser's default interpolation chokes on passwords containing '%'.
 # Install a no-op interpolation handler before we set sqlalchemy.url from env.
 class _NoOpInterpolation(configparser.BasicInterpolation):
     def before_set(self, parser, section, option, value):  # type: ignore[override]
         return value
+
     def before_get(self, parser, section, option, value, defaults):  # type: ignore[override]
         return value
 
@@ -69,7 +72,7 @@ if not _db_url:
         "load .env or export it before running."
     )
 if _db_url.startswith("postgresql://") and "+psycopg" not in _db_url:
-    _db_url = "postgresql+psycopg://" + _db_url[len("postgresql://"):]
+    _db_url = "postgresql+psycopg://" + _db_url[len("postgresql://") :]
 
 # ── Prod-shape destructive guard (2026-09-13) ──────────────────────
 # ``alembic upgrade head`` is intrinsically destructive (it applies
@@ -112,14 +115,13 @@ OWNED_SCHEMAS = (
     "fulfillment",
     "after_sales",
     "finance",
-    "linkage",
     "reporting",
     "security",
 )
 
 
 def include_object(object_, name, type_, reflected, compare_to):
-    """Only manage objects in the nine tts_erp_v2 schemas."""
+    """Only manage objects in the current tts_erp_v2 business schemas."""
     if type_ == "table":
         schema = getattr(object_, "schema", None)
         if schema is None or schema in OWNED_SCHEMAS:

@@ -7,11 +7,11 @@ for the full ~10k LOC run.
 ## Why split?
 
 - **Speed.** A typical `pytest` over everything takes minutes because
-  the suite touches 37 business tables + the FastAPI app + SDKs. A
+  the suite touches the business schemas + the FastAPI app + SDKs. A
   single domain (`domain_commerce`, `domain_api`, …) usually runs in
   single-digit seconds.
 - **Signal-to-noise.** A failure in `domain_finance` shouldn't block
-  iteration on `domain_linkage`.
+  iteration on an unrelated domain.
 - **Selective CI.** CI / pre-push hooks can run only the slice that
   the changed file belongs to (see "Mapping files to domains" below).
 
@@ -30,7 +30,6 @@ to think about it per-test.
 | `domain_finance`        | 财务/对账 (`finance_job`) + 利润/成本报表 (`profit_daily`, `cost_snapshots`)    |
 | `domain_logistics`      | 物流追踪 (`logistics_job`)                                                       |
 | `domain_after_sales`    | 退货/取消 (`after_sales_job` + `migrate_after_sales`)                            |
-| `domain_linkage`        | 关联分析 (`linkage/*`)                                                            |
 | `domain_reporting`      | 报表 (`profit` / `coverage` / `cost`)                                            |
 | `domain_api`            | FastAPI 路由 / auth / middleware (`api/*`)                                       |
 | `domain_proxy`          | 出站代理层 (`signing`, `token_service`)                                          |
@@ -68,7 +67,6 @@ scripts/test.sh unit
 scripts/test.sh commerce
 scripts/test.sh domain_miaoshou
 scripts/test.sh finance
-scripts/test.sh linkage
 
 # Everything, including slow / e2e
 scripts/test.sh all
@@ -158,7 +156,6 @@ Quick lookup for "which slice do I run after editing X":
 | `tts_erp_v2/api/**/*.py`                    | `scripts/test.sh api`                |
 | `tts_erp_v2/middleware/*.py`                | `scripts/test.sh middleware`         |
 | `tts_erp_v2/reporting/*.py`                 | `scripts/test.sh reporting finance`   |
-| `tts_erp_v2/linkage/*.py`                   | `scripts/test.sh linkage`            |
 | `tts_erp_v2/proxy/*.py`                     | `scripts/test.sh proxy`              |
 | `scripts/migrate_v1_to_v2/*.py`             | `scripts/test.sh migration`          |
 | `miaoshou/miaoshou_signing.py`              | `scripts/test.sh miaoshou unit`      |

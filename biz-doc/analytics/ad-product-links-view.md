@@ -1,8 +1,8 @@
 # ad_product_links 视图 — 广告(计划) × 商品(SPU) 关联 + 出单量/消耗
 
 > `analytics.ad_product_links`（alembic migration `0006_ad_product_links_view`，
-> DB 层视图，无 HTTP 端点——与 `linkage.effective_product_links` 同款模式）
-> 从 `analytics.ad_raw` 的 `post_product_list` 原始 dump 派生。
+> DB 层视图，无 HTTP 端点）从 `analytics.ad_raw` 的 `post_product_list`
+> 原始 dump 派生。该视图自身也已在后续 analytics 重组中删除，本文保留为历史设计记录。
 
 ## 1. 解决的问题
 

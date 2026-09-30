@@ -30,11 +30,6 @@ cookie (see [Browser session login](#browser-session-login)).
 | List / get orders (+ lines) | `GET /v2/commerce/sales-orders[/{id}[/lines]]` | readonly |
 | TikTok Shop product detail (read-through) | `GET /v2/tiktok-shop/products/{product_id}` | readonly — see [`tech-doc/api/tiktok-shop-get-product.md`](api/tiktok-shop-get-product.md) |
 | Per-shop order aggregate | `GET /v2/commerce/channel-accounts/{id}/order-stats` | readonly |
-| 妙手↔TikTok product links | `GET /v2/linkage/product-links` | readonly |
-| Link evidence (raw) | `GET /v2/linkage/evidence` | readonly |
-| Link issues queue | `GET /v2/linkage/issues` | readonly |
-| Resolve a link issue | `POST /v2/linkage/issues/{id}/resolve` | readwrite (handler-enforced) |
-| List / create manual link overrides | `GET` / `POST /v2/linkage/overrides` | readonly / **admin** (handler-enforced) |
 | Cost snapshots | `GET /v2/reporting/cost-snapshots` | readonly |
 | Daily profit | `GET /v2/reporting/profit-daily` | readonly |
 | Coverage / health snapshot | `GET /v2/reporting/coverage` | readonly |
@@ -104,10 +99,9 @@ X-API-Key: <your-api-key>
 role (`ttserp_ro_…` readonly, `ttserp_rw_…` readwrite, `ttserp_admin_…`
 admin). Roles are linearly ordered `readonly < readwrite < admin`; the
 path classification lives in `tts_erp_v2.access` — unmatched paths default
-to **admin** (fail-closed). Handler-level gates such as
-`POST /v2/linkage/overrides` and `POST /v2/linkage/issues/{id}/resolve`
-consume the same typed `AccessGrant`, so `off` and `shadow` semantics remain
-consistent through the handler.
+to **admin** (fail-closed). Handler-level mutation gates consume the same typed
+`AccessGrant`, so `off` and `shadow` semantics remain consistent through the
+handler.
 
 Public (API-key auth-exempt) paths: `/healthz`, `/endpoints`, `/openapi.json`,
 `/docs`, `/redoc`, `/docs/oauth2-redirect`, `/v2/auth/login`,
@@ -204,28 +198,13 @@ All list endpoints accept `limit` (1..500, default 100) + `offset` (≥0).
 | `GET /v2/commerce/sales-orders/{order_pk}` | — | one order (internal id, **not** the TikTok `order_id`); 404 if unknown |
 | `GET /v2/commerce/sales-orders/{order_pk}/lines` | — | order lines: `{id, order_pk, external_line_id, spu_pk, sku_pk, quantity, unit_price}` |
 
-### Linkage (`/v2/linkage/*`)
-
-| Endpoint | Role | Query params / body |
-| --- | --- | --- |
-| `GET /v2/linkage/product-links` | readonly | `spu_pk`, `procurement_product_id`, `limit`, `offset` |
-| `GET /v2/linkage/evidence` | readonly | `product_link_id`, `limit`, `offset` |
-| `GET /v2/linkage/issues` | readonly | `unresolved_only` (default true), `limit`, `offset` |
-| `POST /v2/linkage/issues/{issue_id}/resolve` | readwrite (handler-enforced) | — ; 200 `{id, status:"resolved"}`, 404 if missing/already resolved |
-| `GET /v2/linkage/overrides` | readonly | `spu_pk`, `active_only` (default true), `limit`, `offset` |
-| `POST /v2/linkage/overrides` | **admin** (handler-enforced) | body `{"spu_pk": int, "procurement_product_id": int \| null, "decision": "ALLOW"\|"DENY"\|"PRIMARY", "reason"?: str, "valid_from"?: datetime}` → 201 |
-
-Note: the merged "effective links" view exists only at the DB layer
-(`linkage.effective_product_links`); there is **no** HTTP endpoint for it —
-`GET /v2/linkage/product-links` + `/overrides` are the HTTP surface.
-
 ### Reporting (`/v2/reporting/*`)
 
 | Endpoint | Role | Query params / body |
 | --- | --- | --- |
 | `GET /v2/reporting/cost-snapshots` | readonly | `spu_pk`, `cost_method`, `limit`, `offset` |
 | `GET /v2/reporting/profit-daily` | readonly | `spu_pk`, `on_date`, `limit`, `offset` |
-| `GET /v2/reporting/coverage` | readonly | — → `{total_spus, active_spus, linked_spus, missing_cost_spus, calculation_version}` |
+| `GET /v2/reporting/coverage` | readonly | — → `{total_spus, active_spus, costed_spus, missing_cost_spus, calculation_version}` |
 | `GET /v2/reporting/missing-cost-products` | readonly | `shop_pk`, `limit` (default 200), `offset` → `{items: [{spu_pk, spu_id, title, shop_pk, missing_photo}], total_missing_photo}` |
 | `GET /v2/reporting/manual-costs` | readonly | `shop_pk`, `q`, `limit`, `offset` → `{total, items}`；`q` 在服务端过滤 `spu_id/title`，`total` 是过滤后、分页前的提交记录数 |
 | `POST /v2/reporting/manual-costs` | readwrite | body `{"spu_id": str, "unit_cost": decimal>0, "currency": "VND", "valid_from"?: datetime, "note"?: str}` → 201 `ManualCostOut`; auto-closes the previous effective row for the SPU |
@@ -1051,9 +1030,6 @@ Stable external endpoints (safe to build dashboards / agents on):
 | `GET /endpoints` | public | stable |
 | `GET /openapi.json`, `/docs`, `/redoc` | public | stable (consider proxy-restricting in prod) |
 | `GET /v2/commerce/*` | readonly | v2 |
-| `GET /v2/linkage/*` (GETs) | readonly | v2 |
-| `POST /v2/linkage/issues/{id}/resolve` | readwrite | v2 |
-| `POST /v2/linkage/overrides` | admin | v2 |
 | `GET /v2/reporting/*` | readonly | v2 |
 | `POST /v2/reporting/manual-costs` | readwrite | v2 |
 | `GET /v2/fx/latest`, `/v2/fx/convert` | readonly | v2 — cached (fx.sync ≈1 上游请求/天，API 路径零上游) |
@@ -1066,10 +1042,10 @@ Stable external endpoints (safe to build dashboards / agents on):
 | `GET\|POST /v2/auth/*` | public | v2 |
 | `GET /v2/analytics/sync/cursor`, `POST /v2/analytics/sync/dumps`, `GET /v2/analytics/sync/coverage` | readwrite + scope | analytics（自有 envelope，frozen） |
 
-Retired (404 since the 2026-08-29 hard switch — do NOT build on these;
-they exist only in git history):
+Retired endpoints (404; do NOT build on these):
 
-`GET /db/*` (24 read endpoints), `POST /orders/*` (search + write
+- Since 2026-09-30 / migration 0044: every `/v2/linkage/*` endpoint.
+- Since the 2026-08-29 hard switch: `GET /db/*` (24 read endpoints), `POST /orders/*` (search + write
 proxies), `GET /orders/{id}/*`, `GET /finance/*`, `POST /sync/*`,
 `GET /token/{shop_id}`, `GET /shops*`, `POST /returns/search`,
 `POST /cancellations/search`, `GET /miaoshou/{domain}/{method}`,

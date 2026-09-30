@@ -30,7 +30,6 @@ markers = [
     "domain_finance: 财务/对账 + 利润/成本报表",
     "domain_logistics: 物流追踪 (logistics_job)",
     "domain_after_sales: 退货/取消 (after_sales_job + migrate_after_sales)",
-    "domain_linkage: 关联分析 (linkage/*)",
     "domain_reporting: 报表 (profit / coverage / cost)",
     "domain_api: FastAPI 路由 / auth / middleware",
     "domain_proxy: 出站代理层 (signing, token_service)",

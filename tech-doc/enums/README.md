@@ -85,14 +85,11 @@
 | `plugin.settlements.payment_pending_reason` | int | [`payment-pending-reason.md`](payment-pending-reason.md) |
 | `finance.settlement_components.component_code` | text (EAV 58 字段) | [`settlement-component-code.md`](settlement-component-code.md) |
 
-### 商品 / 链接
+### 商品
 
 | 字段 | 类型 | 文件 |
 | --- | --- | --- |
 | `commerce.products_spu.status` | text (TikTok) | [`product-status.md`](product-status.md) |
-| `linkage.product_links.relation_type` | text (内部) | [`product-link-relation-type.md`](product-link-relation-type.md) |
-| `linkage.link_overrides.decision` | text (内部) | [`link-override-decision.md`](link-override-decision.md) |
-| `linkage.link_issues.issue_type` | text (内部) | [`link-issue-type.md`](link-issue-type.md) |
 
 ### 成本 / 采购
 

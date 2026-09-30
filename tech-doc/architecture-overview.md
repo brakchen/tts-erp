@@ -6,7 +6,7 @@
 ## 1. 技术栈
 
 Python 3.14 · FastAPI + uvicorn（`:9877`）· SQLAlchemy 2 + psycopg3 · PostgreSQL 容器（`:5432`，
-11 schema / 54 表 + 1 view（v1 `public.*` 业务表 2026-09-05 归档删除；analytics 4 张僵尸表 migration 0007 drop；2026-09-11 `chrome_sync`→`plugin`、`analytics` 并入 `plugin`）· APScheduler（独立 sync-worker 进程）· MinIO · Fernet 加密 · systemd user units。
+11 个业务 schema / 57 张业务表（v1 `public.*` 业务表 2026-09-05 归档删除；analytics 4 张僵尸表 migration 0007 drop；2026-09-11 `chrome_sync`→`plugin`、`analytics` 并入 `plugin`；2026-09-30 migration 0044 删除未接通的 `linkage` schema）· APScheduler（独立 sync-worker 进程）· MinIO · Fernet 加密 · systemd user units。
 
 ## 2. 业务架构
 
@@ -73,8 +73,8 @@ shop_cipher = cred.shop_cipher
   `/v2/auth/{login,logout,me}`）外，所有端点要 `Authorization: Bearer <key>` 或 `X-API-Key: <key>`；
   无 key 401、角色不够 403。完整角色矩阵见 `tech-doc/external-api.md`；实现集中在
   `tts_erp_v2/access/`，`middleware/auth.py` 仅为 ASGI adapter
-- 三级角色 `readonly` < `readwrite` < `admin`；handler gate 读取同一 typed `AccessGrant`：
-  linkage overrides=admin、issues/{id}/resolve=readwrite、admin/reset-rate-limit=admin
+- 三级角色 `readonly` < `readwrite` < `admin`；handler gate 读取同一 typed `AccessGrant`；
+  例如 admin/reset-rate-limit=admin
 - 浏览器会话：`POST /v2/auth/login` 用 API key 换 `tts_session` cookie（见 `tech-doc/browser-login-design.md`）；
   cookie 会话做 mutation 必须带 `X-Requested-With: tts-erp`（CSRF 闸）
 - key 入库只存 SHA-256 哈希（`security.api_keys`）；模式开关 `.env TTS_ERP_AUTH_MODE=off|shadow|enforce`
@@ -93,7 +93,6 @@ shop_cipher = cred.shop_cipher
 - 分页 `limit`(1..500, 默认100)/`offset`
 - 时间 ISO-8601 UTC
 - money 列序列化为 JSON 字符串（用 Decimal 解析）
-- `POST /v2/linkage/overrides`=admin
 
 **过滤用内部主键**（`shop_pk` / `spu_pk`），不是 `shop_id`——传 `?shop_id=` 不报错但被 FastAPI **静默忽略**（返回全量不过滤）。先查再过滤：
 
@@ -107,7 +106,7 @@ curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" \
 ### 6.1 不稳定端点（可随时 break，外部 client 勿依赖）
 
 `GET /v2/analytics/sync/*`（Chrome 扩展 ingest 契约，随扩展发布节奏演进）、`GET /v2/llm-context`
-（experimental）、`POST /v2/linkage/overrides` 等 mutation body 字段。Miaoshou 已无任何 HTTP 面，不要等它回来。
+（experimental）等端点。Miaoshou 已无任何 HTTP 面，不要等它回来。
 
 ### 6.2 改 app.py / middleware 后验证
 
@@ -116,7 +115,7 @@ curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" \
 ### 6.3 已拆除、不要再找
 
 - 没有 `POST /v2/sync/*` —— 同步全部由 `tts-erp-sync.service` 调度（`sync_worker/scheduler.py` 的 `JOBS`）
-- 没有 `/v2/linkage/effective-product-links` —— DB 层 view，无 HTTP 端点
+- 没有任何 `/v2/linkage/*` —— 未接通的映射层与 DB schema 已由 migration 0044 删除
 - 没有任何 `/miaoshou/*` 路由（出站代理和回调端点未挂 v2，实测 404）
 - 没有 `/v1/analytics/sync/*` —— 2026-09-02 硬切 `/v2/analytics/sync/*`（无别名）；`/batches` 已换
   `/dumps`（单 dump object）；cursor 降级 has-data 预检（协议见 `tech-doc/analytics/dump-architecture.md`）

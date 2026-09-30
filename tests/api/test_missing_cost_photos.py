@@ -6,24 +6,13 @@ Spec (tech-doc/procurement-ui-redesign.md §3.5):
 - New: each row has ``missing_photo`` (bool) and the response carries a
   top-level ``total_missing_photo`` summary field for the tab badge.
 
-Note on data state: the existing SQL uses ``NOT EXISTS (SELECT 1 FROM
-linkage.effective_product_links ...)``, and that view LEFT-JOINs over
-every channel_product (so every product appears as a row in the view).
-The legacy endpoint therefore typically returns 0 items unless the
-operator has cleaned up `link_overrides` / `product_links` for a
-product. We test the *contract* changes here (response shape + filter
-plumbing + photo column presence) rather than asserting specific item
-counts, so the tests stay valid regardless of the legacy view's
-data-state quirks.
+Missing-cost membership is based on actual cost availability: active products
+with neither a current manual cost nor a current cost snapshot. This keeps the
+operator queue aligned with the scheduled cost resolver instead of an indirect
+cross-system mapping state.
 
-Regression coverage added 2026-09-01 — both bugs reproduced the
-"Needs cost tab empty" symptom in production:
-- ``cp.status = 'active'`` missed TikTok's actual ``'ACTIVATE'``
-  (uppercase) — fixed by switching to ILIKE.
-- ``NOT EXISTS (... effective_product_links ...)`` was tautologically
-  false because the view is a LEFT JOIN that emits one row per
-  channel_product regardless of link presence — fixed by adding
-  ``AND epl.effective_relation_type IS NOT NULL``.
+Regression coverage keeps the production ``status='ACTIVATE'`` shape because
+a case-sensitive ``status = 'active'`` filter previously emptied the queue.
 """
 
 from __future__ import annotations
@@ -39,10 +28,7 @@ def seed_unmatched_active_product(db_engine):
     missing-cost-products list.
 
     Reproduces the production data shape: ``status='ACTIVATE'`` (TikTok's
-    actual value) plus NO manual cost and NO ``effective_relation_type``
-    link. The seeded product must be returned by the endpoint, proving
-    both the case-insensitive status filter and the
-    ``effective_relation_type IS NOT NULL`` filter work.
+    actual value) plus no manual cost and no current cost snapshot.
     """
     ext_acct = "TEST_acct_for_missing_cost"
     ext_prod = "TEST_prod_for_missing_cost"
@@ -93,55 +79,49 @@ def test_status_activate_is_included(
     assert seed_unmatched_active_product["spu_id"] in ext_ids
 
 
-def test_unlinked_product_survives_left_join_view(
-    api_client, readonly_key, seed_unmatched_active_product
-):
-    """Regression: the LEFT-JOIN view emits one row per channel_product
-    regardless of whether a real link exists. Without filtering on
-    ``effective_relation_type IS NOT NULL``, ``NOT EXISTS (... epl ...)``
-    was tautologically false and the product was wrongly treated as
-    already linked (so excluded from the missing-cost list).
-
-    The fixture creates a product with NO manual cost and NO link at all,
-    so it must appear. The fix filters out the LEFT-JOIN phantom rows.
-    """
-    r = api_client.get(
-        "/v2/reporting/missing-cost-products"
-        f"?shop_pk={seed_unmatched_active_product['shop_pk']}"
-        "&limit=200",
+def test_coverage_reports_actual_cost_availability(api_client, readonly_key):
+    response = api_client.get(
+        "/v2/reporting/coverage",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
-    assert r.status_code == 200, r.text
-    items = r.json()["items"]
-    cp_id = None
-    for row in items:
-        if row["spu_id"] == seed_unmatched_active_product["spu_id"]:
-            cp_id = row["spu_pk"]
-            break
-    assert cp_id is not None, "seeded product should appear in items"
-    # Sanity-check the view really does emit a phantom row for this
-    # product (proving the test setup actually exercises the LEFT JOIN).
-    # Without that phantom row, this regression test would pass even on
-    # the unfixed code.
-    from sqlalchemy import create_engine as _ce
 
-    # Use a fresh connection so we don't depend on the handler's session.
-    with _ce(__import__("os").environ["TTS_ERP_DB_URL"]).connect() as conn:
-        phantom = conn.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert "costed_spus" in body
+    assert "linked_spus" not in body
+
+
+def test_product_with_current_cost_snapshot_is_excluded(
+    api_client, readonly_key, db_engine, seed_unmatched_active_product
+):
+    """A current resolved cost removes the product from the operator queue."""
+    with db_engine.begin() as conn:
+        spu_pk = conn.execute(
             text(
-                "SELECT effective_relation_type FROM linkage.effective_product_links "
-                "WHERE spu_pk = :cp"
+                "SELECT id FROM commerce.products_spu "
+                "WHERE shop_pk = :shop_pk AND spu_id = :spu_id"
             ),
-            {"cp": cp_id},
-        ).first()
-    assert phantom is not None, (
-        "expected the LEFT-JOIN view to emit at least one phantom row "
-        "for the seeded product — otherwise the regression test cannot "
-        "distinguish fixed from broken code"
+            seed_unmatched_active_product,
+        ).scalar_one()
+        conn.execute(
+            text(
+                "INSERT INTO reporting.product_cost_snapshots "
+                "(spu_pk, cost_method, unit_cost, currency, valid_from, "
+                " calculation_version, calculated_at) "
+                "VALUES (:spu_pk, 'SOURCE_PRICE', 10, 'CNY', now(), 1, now())"
+            ),
+            {"spu_pk": spu_pk},
+        )
+
+    response = api_client.get(
+        "/v2/reporting/missing-cost-products",
+        params={"shop_pk": seed_unmatched_active_product["shop_pk"], "limit": 200},
+        headers={"Authorization": f"Bearer {readonly_key}"},
     )
-    assert phantom[0] is None, (
-        f"expected NULL effective_relation_type on phantom row, got {phantom[0]!r}"
-    )
+    assert response.status_code == 200, response.text
+    assert seed_unmatched_active_product["spu_id"] not in {
+        row["spu_id"] for row in response.json()["items"]
+    }
 
 
 def test_response_shape_no_filter(api_client, readonly_key):
@@ -171,9 +151,7 @@ def test_response_shape_no_filter(api_client, readonly_key):
 def test_shop_pk_filter_runs_without_error(api_client, readonly_key):
     """shop_pk=… is accepted; SQL executes successfully.
 
-    We can't assert which rows come back without knowing the view's
-    data state (see module docstring), so we just confirm the query
-    path is wired up.
+    The query path must remain valid for arbitrary shop ids.
     """
     r = api_client.get(
         "/v2/reporting/missing-cost-products?shop_pk=1&limit=10",

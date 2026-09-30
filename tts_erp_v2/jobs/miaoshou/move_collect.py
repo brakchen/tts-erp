@@ -1,38 +1,17 @@
 """Miaoshou sync job: move_collect (1h cadence).
 
-Syncs the **publish / move-collect task list** from
-``search_move_collect_list`` into ``integration.raw_records``
-(original JSON) + ``linkage.link_evidence`` (parsed per-task evidence
-rows for Lane D's link-compute job).
+Syncs the publish / move-collect task list from
+``search_move_collect_list`` into ``integration.raw_records``. The raw audit
+trail is retained even though the unused linkage projection was retired.
 
-★ This is the job that fixed the silent-truncation bug (237 records
-→ 20 saved) per ``miaoshou/README.md`` §1. We MUST delegate
-pagination to :func:`tts_erp_v2.proxy.miaoshou.retry.paginate_with_retry`
-so rate-limit empty pages are retried rather than treated as end-of-data.
+This job carries the silent-truncation regression fix (237 records → 20 saved)
+from ``miaoshou/README.md``: pagination must go through
+:func:`tts_erp_v2.proxy.miaoshou.retry.paginate_with_retry` so rate-limit empty
+pages are retried instead of being mistaken for end-of-data.
 
-Endpoint
---------
-``POST /open/v1/product/collect_box/tiktok/move_collect/search_move_collect_list``
-(apifox api-482189163). Body: ``{"pageNo", "pageSize", "filter": {...}}``.
-Page-size cap = 20.
-
-Output
-------
-* Raw payloads → ``integration.raw_records`` (one per page).
-* Per-task evidence → ``linkage.link_evidence`` with
-  ``evidence_type='MOVE_COLLECT_TASK'``. We do NOT insert into
-  ``linkage.product_links`` here — that's Lane D's link-compute job.
-* Fail tasks (no ``platformItemId`` / missing fields) → still recorded
-  as evidence so Lane D's fail-only-evidence policy picks them up.
-* Parse failures → ``integration.sync_issues`` with
-  ``issue_type='MOVE_COLLECT_PARSE_FAILED'``; job continues.
-
-Failure mode contract
----------------------
-Upstream rate-limit responses are caught + retried by
-``paginate_with_retry`` (Lane A's bug fix). Non-rate-limit network
-errors propagate up; ``run_job`` marks the SyncJob row ``failed``
-and re-raises so the caller (APScheduler / CLI) decides retry policy.
+Non-dict rows and raw-record failures are recorded in
+``integration.sync_issues`` while other tasks continue. Non-rate-limit network
+errors propagate; ``run_job`` marks the SyncJob failed and re-raises.
 """
 
 from __future__ import annotations
@@ -41,10 +20,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.db.models.linkage import LinkEvidence
 from tts_erp_v2.jobs.miaoshou._common import (
     resolve_miaoshou_context,
 )
@@ -87,34 +64,6 @@ def _fetch_page(
     )
 
 
-def _parse_evidence_row(task: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
-    """Map a single move-collect task into ``link_evidence``-shaped data.
-
-    Returns:
-        ``(evidence_payload, external_id_or_None)``. The evidence payload
-        is the raw task (minus giant transient fields), the external_id
-        is the task detail id (string) for issue tracking.
-    """
-    task_id = task.get("moveCollectTaskDetailId")
-    return (
-        {
-            "move_collect_task_detail_id": task_id,
-            "collect_box_detail_id": task.get("collectBoxDetailId"),
-            "platform": "tiktok",
-            "platform_item_id": task.get("platformItemId"),
-            "shop_id": task.get("shopId"),
-            "source_item_id": task.get("sourceItemId"),
-            "source_item_url": task.get("sourceItemUrl"),
-            "status": task.get("status"),
-            "reason": task.get("reason"),
-            "gmt_create": task.get("gmtCreate"),
-            "gmt_modified": task.get("gmtModified"),
-            "is_renew_item": task.get("isRenewItem"),
-        },
-        str(task_id) if task_id is not None else None,
-    )
-
-
 def sync_move_collect(
     session: Session,
     *,
@@ -133,7 +82,7 @@ def sync_move_collect(
         license_id: explicit license id; falls back to env.
 
     Returns:
-        Dict with ``pages`` / ``tasks_seen`` / ``evidence_inserted`` /
+        Dict with ``pages_walked`` / ``tasks_seen`` / ``tasks_recorded`` /
         ``rate_limit_retries`` / ``issues``.
     """
     # Imported here to keep the imports light (and to make the rate-limit
@@ -144,9 +93,8 @@ def sync_move_collect(
     )
 
     with run_job(session, job_name=JOB_NAME) as job:
-        # Always resolve ctx so we can attribute evidence to the right
-        # procurement_account row, even when the caller passed an
-        # injected client (e.g. tests).
+        # Always resolve context so raw records carry the source credential,
+        # even when the caller injects a fake client in tests.
         ctx = resolve_miaoshou_context(session, license_id=license_id)
         if ctx is None:
             raise RuntimeError("no miaoshou credentials row; cannot construct context")
@@ -211,13 +159,10 @@ def sync_move_collect(
             on_retry=_on_retry,
         )
 
-        # Persist a raw-record snapshot per page we touched. We don't
-        # have raw per-page payloads here (paginate_with_retry abstracts
-        # over them), so we re-fetch the last page + emit a single
-        # summary raw-record if there is no per-page hook. To keep the
-        # raw audit trail complete, we *also* persist each item as its
-        # own raw-record row — the integration.evidence_id links them.
-        evidence_inserted = 0
+        # Persist each task as its own raw record. The paginator intentionally
+        # abstracts away per-page payloads, so item-level records are the durable
+        # audit trail.
+        tasks_recorded = 0
         issues = 0
 
         for task in items:
@@ -230,21 +175,8 @@ def sync_move_collect(
                 )
                 issues += 1
                 continue
-            try:
-                evidence_payload, task_id_str = _parse_evidence_row(task)
-            except Exception as e:  # noqa: BLE001
-                record_sync_issue(
-                    session,
-                    job_name=JOB_NAME,
-                    issue_type="MOVE_COLLECT_PARSE_FAILED",
-                    external_id=str(task.get("moveCollectTaskDetailId")),
-                    details={"error": f"{type(e).__name__}: {e}"},
-                )
-                issues += 1
-                continue
-
-            # Raw record (one per task — keeps the audit trail at the
-            # item granularity, which is what Lane D will join on).
+            task_id = task.get("moveCollectTaskDetailId")
+            task_id_str = str(task_id) if task_id is not None else None
             try:
                 record_raw_payload(
                     session,
@@ -264,28 +196,10 @@ def sync_move_collect(
                 issues += 1
                 continue
 
-            # Link-evidence row (idempotent: we don't have a unique
-            # constraint on (source_table, source_external_id), so we
-            # dedup by SELECT before INSERT).
-            existing = session.execute(
-                select(LinkEvidence)
-                .where(LinkEvidence.source_table == "miaoshou.move_collect")
-                .where(LinkEvidence.source_external_id == task_id_str)
-            ).scalar_one_or_none()
-            if existing is None:
-                le = LinkEvidence(
-                    evidence_type="MOVE_COLLECT_TASK",
-                    source_table="miaoshou.move_collect",
-                    source_external_id=task_id_str,
-                    evidence_payload=evidence_payload,
-                    observed_at=datetime.now(timezone.utc),
-                )
-                session.add(le)
-                session.flush()
-            evidence_inserted += 1
+            tasks_recorded += 1
 
         job.rows_total = len(items)
-        job.rows_inserted = evidence_inserted
+        job.rows_inserted = tasks_recorded
         job.rows_failed = issues
         job.extra = {
             "pages_walked": last_page,
@@ -296,7 +210,7 @@ def sync_move_collect(
         return {
             "pages_walked": last_page,
             "tasks_seen": len(items),
-            "evidence_inserted": evidence_inserted,
+            "tasks_recorded": tasks_recorded,
             "rate_limit_retries": rate_limit_retries,
             "issues": issues,
         }

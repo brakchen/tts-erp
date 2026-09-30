@@ -326,7 +326,10 @@ def test_auth_mode_off_lets_requests_through(api_client_off):
 
 
 def test_auth_mode_off_bypasses_handler_role_gate(api_client_off):
-    response = api_client_off.post("/v2/linkage/issues/999999999/resolve")
+    response = api_client_off.patch(
+        "/v2/reporting/focused-spus/999999999",
+        json={"addSpuIds": ["TEST_AUTH_OFF"]},
+    )
 
     assert response.status_code == 404
 
@@ -376,7 +379,10 @@ def test_shadow_mode_bypasses_handler_role_gate(db_engine, monkeypatch):
 
     monkeypatch.setenv("TTS_ERP_AUTH_MODE", "shadow")
     with TestClient(build_app()) as client:
-        response = client.post("/v2/linkage/issues/999999999/resolve")
+        response = client.patch(
+            "/v2/reporting/focused-spus/999999999",
+            json={"addSpuIds": ["TEST_AUTH_SHADOW"]},
+        )
 
     assert response.status_code == 404
 
@@ -397,9 +403,7 @@ def test_prefixed_docs_path_requires_docs_basic_auth(db_engine, monkeypatch):
 
     with TestClient(build_app()) as client:
         denied = client.get("/tts/docs")
-        allowed = client.get(
-            "/tts/docs", headers={"Authorization": f"Basic {basic}"}
-        )
+        allowed = client.get("/tts/docs", headers={"Authorization": f"Basic {basic}"})
 
     assert denied.status_code == 401
     assert denied.headers["www-authenticate"] == 'Basic realm="tts-erp docs"'
