@@ -388,12 +388,7 @@ def _run_system_job(
     """Run a system-wide job once (no per-shop fan-out, no proxy_call).
 
     Covers ``token.refresh`` (real TikTok refresher registry wired in),
-<<<<<<< HEAD
-    the six ``miaoshou.*`` jobs and the two ``reporting.*`` recompute jobs.
-=======
-    the ``miaoshou.*`` jobs and the two ``reporting.*`` recompute
-    jobs.
->>>>>>> eaad226 (feat: 定时清洗妙手采购价)
+    the seven ``miaoshou.*`` jobs and the two ``reporting.*`` recompute jobs.
 
     Commit contract: the sync_jobs row written inside the job's
     ``run_job`` context manager is NOT committed by the job itself —

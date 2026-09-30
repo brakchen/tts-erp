@@ -3224,5 +3224,3 @@ ALTER TABLE ONLY reporting.shop_fee_rate_estimates
 
 
 -- PostgreSQL database dump complete
-
-
