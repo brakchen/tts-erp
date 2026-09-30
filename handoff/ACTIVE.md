@@ -16,3 +16,4 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| miaoshou-package-schema | 妙手包裹数据归位 miaoshou schema | 01a0efbb-1bcc-77b2-ade9-ac9dfdf3d0a0 | `fix/miaoshou-package-schema` / `/home/schan/tts-erp/.worktrees/miaoshou-package-schema` | `alembic/versions/0045_miaoshou_package_schema.py`; `tts_erp_v2/db/models/miaoshou.py`; `tts_erp_v2/db/models/__init__.py`; `tts_erp_v2/jobs/miaoshou/packages.py`; `tests/jobs_miaoshou/test_packages.py`; `tests/db/test_miaoshou_schema.py`; `tech-doc/miaoshou-platform.md`; `schema_tts_erp.sql`; `scripts/import_prod_to_test.sh` | draft | — | — | 2026-09-30 05:49:12 |
