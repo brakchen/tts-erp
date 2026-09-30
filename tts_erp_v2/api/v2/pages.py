@@ -1567,10 +1567,10 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
           <tr>
             <th scope="col" class="op-th op-th-left" data-column-id="product">商品</th>
             <th scope="col" class="op-th op-th-sort" data-sort="spend" data-column-id="spend" data-tip="广告消耗（源数据 USD，服务端按汇率快照换算为 CNY；随选中日期窗口裁剪；作为减项计入净利润）">广告消耗</th>
-            <th scope="col" class="op-th" data-column-id="ad-actual-roi" data-tip="广告系统实际ROI = 广告归因GMV ÷ 广告实际消耗；无广告消耗时显示 —">广告系统实际ROI</th>
-            <th scope="col" class="op-th" data-column-id="ad-breakeven-roi" data-tip="广告系统保本ROI = 广告归因GMV ÷ 最大可承受广告费；当前以 ≈ 标记已知成本下限估算，分母≤0或无归因GMV时显示 —">广告系统保本ROI</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="ad_system_actual_roi" data-column-id="ad-actual-roi" data-tip="广告系统实际ROI = 广告归因GMV ÷ 广告实际消耗；无广告消耗时显示 —">广告系统实际ROI</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="ad_system_breakeven_roi" data-column-id="ad-breakeven-roi" data-tip="广告系统保本ROI = 广告归因GMV ÷ 最大可承受广告费；当前以 ≈ 标记已知成本下限估算，分母≤0或无归因GMV时显示 —">广告系统保本ROI</th>
             <th scope="col" class="op-th op-th-sort" data-sort="effective_sales" data-column-id="effective-sales" data-tip="有效销售 = 有效销售订单 GMV − 退款金额（CNY）；与大盘 totals.effective_sales 同口径">有效销售</th>
-            <th scope="col" class="op-th" data-column-id="total-orders" data-tip="总单量 = 有效销售订单 + 国内取消订单 + 海外取消订单；在当前店铺和日期范围内按订单去重">总单量</th>
+            <th scope="col" class="op-th op-th-sort" data-sort="total_orders" data-column-id="total-orders" data-tip="总单量 = 有效销售订单 + 国内取消订单 + 海外取消订单；在当前店铺和日期范围内按订单去重">总单量</th>
             <th scope="col" class="op-th op-th-sort" data-sort="effective_order_count" data-column-id="effective-orders" data-tip="有效单量 = 有效销售订单数 − 退款订单数；与大盘 totals.effective_order_count 同口径">有效单量</th>
             <th scope="col" class="op-th op-th-sort" data-sort="cancel_rate" data-column-id="cancel-rate" data-tip="取消率 = 国内取消订单数 ÷ 全部订单；全部订单 = 有效销售订单 + 国内取消 + 海外取消，海外取消只进入全损分子">取消率%</th>
             <th scope="col" class="op-th op-th-sort" data-sort="full_loss_rate" data-column-id="full-loss-rate" data-tip="全损率 = (退款订单数 + 海外取消订单数) ÷ 全部订单；订单维度按当前 SPU 去重，与大盘同口径">全损率%</th>
