@@ -18,9 +18,10 @@ import os
 from datetime import UTC, date, datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from pydantic import BaseModel, Field, SecretStr, field_validator
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import (
@@ -43,6 +44,11 @@ from tts_erp_v2.proxy.errors import SigningError
 from tts_erp_v2.proxy.token_service import (
     resolve_tiktok_app_credentials,
     upsert_tiktok_app_credentials,
+)
+from tts_erp_v2.sync_worker.scheduler import (
+    JOBS,
+    run_scheduled_job_once,
+    set_job_enabled,
 )
 
 router = APIRouter()
@@ -195,6 +201,138 @@ def reset_rate_limit(
     )
 
 
+# ─── Scheduler job controls ────────────────────────────────────────────
+
+
+class SyncJobEnabledBody(BaseModel):
+    enabled: bool = Field(description="True = allow scheduled ticks; false = skip ticks.")
+
+
+class SyncJobEnabledResponse(BaseModel):
+    job_name: str
+    enabled: bool
+    updated_at: datetime
+
+
+class SyncJobTriggerBody(BaseModel):
+    shop_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description="TikTok shop_id for one-store manual runs. Omit for all stores.",
+    )
+
+    @field_validator("shop_id")
+    @classmethod
+    def _strip_shop_id(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        stripped = v.strip()
+        return stripped or None
+
+
+class SyncJobTriggerResponse(BaseModel):
+    accepted: bool
+    job_name: str
+    shop_id: str | None
+    accepted_at: datetime
+    message: str
+
+
+def _require_registered_job(job_name: str):
+    try:
+        return JOBS[job_name]
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"unknown job: {job_name}") from exc
+
+
+def _validate_manual_shop_scope(job_name: str, shop_id: str | None) -> None:
+    spec = _require_registered_job(job_name)
+    if not spec.is_tiktok:
+        if shop_id is not None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"job {job_name} is system-wide and does not accept shop_id",
+            )
+        return
+    if shop_id is None:
+        return
+
+    from tts_erp_v2.db.base import get_engine
+
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT 1 FROM commerce.shops s "
+                "WHERE s.platform = 'tiktok' AND s.shop_id = :shop_id "
+                "AND EXISTS ("
+                "  SELECT 1 FROM integration.credentials c "
+                "  WHERE c.provider = 'tiktok' "
+                "    AND c.external_account_id = s.shop_id"
+                ")"
+            ),
+            {"shop_id": shop_id},
+        ).first()
+    if row is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"shop_id {shop_id!r} is not an authorised TikTok shop",
+        )
+
+
+@router.patch(
+    "/sync-jobs/{job_name}/enabled",
+    response_model=SyncJobEnabledResponse,
+    summary="启用或停用周期任务调度（admin only）",
+)
+def set_sync_job_enabled(
+    request: Request, job_name: str, body: SyncJobEnabledBody
+) -> SyncJobEnabledResponse:
+    """Persistently enable/disable scheduled ticks for a registered job.
+
+    Manual triggers are still allowed while disabled; the flag only affects
+    APScheduler's periodic tick path in the sync-worker process.
+    """
+    require_role_at_least(request, "admin")
+    _require_registered_job(job_name)
+
+    from tts_erp_v2.db.base import get_engine
+
+    engine = get_engine()
+    with Session(engine) as session, session.begin():
+        set_job_enabled(session, job_name, body.enabled)
+    return SyncJobEnabledResponse(
+        job_name=job_name,
+        enabled=body.enabled,
+        updated_at=datetime.now(UTC),
+    )
+
+
+@router.post(
+    "/sync-jobs/{job_name}/trigger",
+    response_model=SyncJobTriggerResponse,
+    summary="立即触发一次周期任务（admin only）",
+)
+def trigger_sync_job(
+    request: Request,
+    job_name: str,
+    body: SyncJobTriggerBody,
+    background_tasks: BackgroundTasks,
+) -> SyncJobTriggerResponse:
+    """Queue one immediate run in the API process background task runner."""
+    require_role_at_least(request, "admin")
+    _validate_manual_shop_scope(job_name, body.shop_id)
+    background_tasks.add_task(run_scheduled_job_once, job_name, shop_id=body.shop_id)
+    return SyncJobTriggerResponse(
+        accepted=True,
+        job_name=job_name,
+        shop_id=body.shop_id,
+        accepted_at=datetime.now(UTC),
+        message="任务已提交后台执行；运行结果写入 integration.sync_jobs。",
+    )
+
+
 # ─── Plugin sync data purge ────────────────────────────────────────────
 
 # Tables that store Chrome extension synced data (ad 域 + business tables)。
@@ -285,7 +423,7 @@ def purge_plugin_data(
                     text(f"SELECT COUNT(*) FROM {table}")
                 )  # pi-lens-ignore: python-sql-injection — hardcoded table names
                 counts[table] = int(row.scalar() or 0)
-            except Exception:
+            except SQLAlchemyError:
                 counts[table] = -1  # table doesn't exist
 
         # Only delete if not dry-run.

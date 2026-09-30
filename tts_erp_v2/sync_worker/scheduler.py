@@ -29,15 +29,15 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from sqlalchemy import exists, select
+from sqlalchemy import exists, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from tts_erp_v2.db.models import ChannelAccount
-from tts_erp_v2.db.models.integration import Credentials
+from tts_erp_v2.db.models.integration import Credentials, SyncCursor
 from tts_erp_v2.sync_worker.job_runner import (
     run_with_sync_job,
 )
@@ -272,6 +272,75 @@ JOBS: dict[str, JobSpec] = {
 # shop-less credentials (``orders._ensure_channel_account`` raises).
 NON_PRODUCTION_SHOP_PREFIXES = ("MOCK_", "TEST_")
 
+# Reserved row namespace in integration.sync_cursors for operator controls.
+# No job uses this as a real cursor name; scope = controlled JOBS key and
+# cursor_value = enabled|disabled.  This keeps the control plane persistent
+# without introducing a new production table during a scheduler-only feature.
+SCHEDULER_CONTROL_JOB = "scheduler.job_controls"
+CONTROL_ENABLED = "enabled"
+CONTROL_DISABLED = "disabled"
+
+
+def is_job_enabled(session: Session, job_name: str) -> bool:
+    """Return whether scheduled ticks should run for *job_name*.
+
+    Missing rows default to enabled. Unknown cursor values fail open rather
+    than silently stopping sync jobs because of a typo/manual edit.
+    """
+    value = session.execute(
+        select(SyncCursor.cursor_value).where(
+            SyncCursor.job_name == SCHEDULER_CONTROL_JOB,
+            SyncCursor.scope == job_name,
+        )
+    ).scalar_one_or_none()
+    return value != CONTROL_DISABLED
+
+
+def set_job_enabled(session: Session, job_name: str, enabled: bool) -> None:
+    """Persist an operator enable/disable decision for a registered job."""
+    if job_name not in JOBS:
+        supported = ", ".join(sorted(JOBS.keys()))
+        raise KeyError(f"unknown job {job_name!r}; available: {supported}")
+    session.execute(
+        text(
+            "INSERT INTO integration.sync_cursors (job_name, scope, cursor_value) "
+            "VALUES (:control_job, :job_name, :value) "
+            "ON CONFLICT (job_name, scope) DO UPDATE SET "
+            "  cursor_value = EXCLUDED.cursor_value, "
+            "  cursor_epoch_ms = NULL, "
+            "  updated_at = now()"
+        ),
+        {
+            "control_job": SCHEDULER_CONTROL_JOB,
+            "job_name": job_name,
+            "value": CONTROL_ENABLED if enabled else CONTROL_DISABLED,
+        },
+    )
+
+
+def get_job_control_values(session: Session) -> dict[str, str]:
+    """Return raw persisted controls for registered jobs."""
+    rows = session.execute(
+        select(SyncCursor.scope, SyncCursor.cursor_value).where(
+            SyncCursor.job_name == SCHEDULER_CONTROL_JOB,
+            SyncCursor.scope.in_(JOBS.keys()),
+        )
+    ).all()
+    return {str(scope): str(value) for scope, value in rows}
+
+
+def _is_job_enabled_in_factory(
+    session_factory: sessionmaker[Session], job_name: str
+) -> bool:
+    session = session_factory()
+    try:
+        return is_job_enabled(session, job_name)
+    except Exception:
+        log.exception("[%s] could not read scheduler control; failing open", job_name)
+        return True
+    finally:
+        session.close()
+
 
 def _enumerate_tiktok_shops(session: Session) -> list[str]:
     """Return every ``provider='tiktok'`` credential that owns a shop row.
@@ -310,7 +379,7 @@ def _enumerate_tiktok_shops(session: Session) -> list[str]:
             )
             .order_by(Credentials.external_account_id)
         ).all()
-    except Exception:  # noqa: BLE001 — boundary between SQLAlchemy and our worker
+    except Exception:
         log.exception("_enumerate_tiktok_shops failed; returning empty list")
         return []
     return [
@@ -340,45 +409,61 @@ def _run_tiktok_job(
         return
 
     for shop_id in shop_ids:
-        for attempt in range(2):
-            session = session_factory()
-            try:
-                proxy_call = build_proxy_call(session, shop_id=shop_id)
-                _row, result = run_with_sync_job(
-                    session,
-                    job_name=spec.job_name,
-                    inner=mod.run,
-                    inner_kwargs={
-                        "proxy_call": proxy_call,
-                        "shop_id": shop_id,
-                    },
-                )
-                log.info(
-                    "[%s] shop=%s ok total=%d inserted=%d failed=%d",
+        _run_tiktok_job_for_shop(spec, session_factory, shop_id=shop_id, mod=mod)
+
+
+def _run_tiktok_job_for_shop(
+    spec: JobSpec,
+    session_factory: sessionmaker[Session],
+    *,
+    shop_id: str,
+    mod=None,
+) -> None:
+    """Run one TikTok job for one explicit shop.
+
+    Used by the normal fan-out path and by the operator "run now" API.
+    """
+    if mod is None:
+        mod = importlib.import_module(spec.module_path)
+    for attempt in range(2):
+        session = session_factory()
+        try:
+            proxy_call = build_proxy_call(session, shop_id=shop_id)
+            _row, result = run_with_sync_job(
+                session,
+                job_name=spec.job_name,
+                inner=mod.run,
+                inner_kwargs={
+                    "proxy_call": proxy_call,
+                    "shop_id": shop_id,
+                },
+            )
+            log.info(
+                "[%s] shop=%s ok total=%d inserted=%d failed=%d",
+                spec.job_name,
+                shop_id,
+                result.rows_total,
+                result.rows_inserted,
+                result.rows_failed,
+            )
+            break  # success → exit retry loop
+        except Exception:
+            if attempt == 0:
+                log.warning(
+                    "[%s] shop=%s first attempt failed; retrying in 5s",
                     spec.job_name,
                     shop_id,
-                    result.rows_total,
-                    result.rows_inserted,
-                    result.rows_failed,
+                    exc_info=True,
                 )
-                break  # success → exit retry loop
-            except Exception:  # noqa: BLE001 — boundary
-                if attempt == 0:
-                    log.warning(
-                        "[%s] shop=%s first attempt failed; retrying in 5s",
-                        spec.job_name,
-                        shop_id,
-                        exc_info=True,
-                    )
-                    time.sleep(5)
-                else:
-                    log.exception(
-                        "[%s] shop=%s giving up after 2 attempts",
-                        spec.job_name,
-                        shop_id,
-                    )
-            finally:
-                session.close()
+                time.sleep(5)
+            else:
+                log.exception(
+                    "[%s] shop=%s giving up after 2 attempts",
+                    spec.job_name,
+                    shop_id,
+                )
+        finally:
+            session.close()
 
 
 def _run_system_job(
@@ -412,18 +497,18 @@ def _run_system_job(
         result = entrypoint(session, **kwargs)
         try:
             session.commit()
-        except Exception:  # noqa: BLE001 — boundary
+        except Exception:
             log.exception("[%s] commit() failed after successful run", spec.job_name)
             session.rollback()
         log.info("[%s] ok result=%s", spec.job_name, result)
-    except Exception as exc:  # noqa: BLE001 — boundary
+    except Exception as exc:
         # The exception fired BEFORE the sync_jobs row was committed
         # (or DURING the commit). Roll back the inner transaction
         # first, then write a sentinel 'failed' sync_jobs row in a
         # NEW transaction so operators still see the tick happened.
         try:
             session.rollback()
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("[%s] rollback during error path failed", spec.job_name)
         _record_failed_tick(
             session_factory,
@@ -467,13 +552,13 @@ def _record_failed_tick(
         row = SyncJob(
             job_name=spec.job_name,
             status="failed",
-            started_at=datetime.now(timezone.utc),
-            finished_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
+            finished_at=datetime.now(UTC),
             error_message=reason[:2000],
         )
         session.add(row)
         session.commit()
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.exception(
             "[%s] could not write sentinel failed sync_jobs row",
             spec.job_name,
@@ -492,11 +577,17 @@ def _make_executor(
     if spec.is_tiktok:
 
         def run_tiktok() -> None:
+            if not _is_job_enabled_in_factory(session_factory, spec.job_name):
+                log.info("[%s] disabled by operator — skipping tick", spec.job_name)
+                return
             _run_tiktok_job(spec, session_factory)
 
         return run_tiktok
 
     def run_system() -> None:
+        if not _is_job_enabled_in_factory(session_factory, spec.job_name):
+            log.info("[%s] disabled by operator — skipping tick", spec.job_name)
+            return
         _run_system_job(spec, session_factory)
 
     return run_system
@@ -549,4 +640,42 @@ def build_scheduler(
     return sched
 
 
-__all__ = ["JOBS", "JobSpec", "build_scheduler", "_enumerate_tiktok_shops"]
+def run_scheduled_job_once(job_name: str, *, shop_id: str | None = None) -> None:
+    """Run one registered job immediately for the operator API.
+
+    Disabled scheduled ticks can still be run manually.  For TikTok jobs,
+    ``shop_id=None`` keeps the normal all-authorised-shops fan-out; passing a
+    shop id runs only that store.
+    """
+    if job_name not in JOBS:
+        supported = ", ".join(sorted(JOBS.keys()))
+        raise KeyError(f"unknown job {job_name!r}; available: {supported}")
+
+    from tts_erp_v2.db.base import get_session_factory
+
+    session_factory = get_session_factory()
+    spec = JOBS[job_name]
+    if spec.is_tiktok:
+        if shop_id:
+            _run_tiktok_job_for_shop(spec, session_factory, shop_id=shop_id)
+        else:
+            _run_tiktok_job(spec, session_factory)
+        return
+    if shop_id:
+        raise ValueError(f"job {job_name!r} is not shop-scoped")
+    _run_system_job(spec, session_factory)
+
+
+__all__ = [
+    "CONTROL_DISABLED",
+    "CONTROL_ENABLED",
+    "JOBS",
+    "SCHEDULER_CONTROL_JOB",
+    "JobSpec",
+    "_enumerate_tiktok_shops",
+    "build_scheduler",
+    "get_job_control_values",
+    "is_job_enabled",
+    "run_scheduled_job_once",
+    "set_job_enabled",
+]

@@ -23,13 +23,21 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.dialects.postgresql import distinct_on
+from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import SessionDep
-from tts_erp_v2.db.models.integration import SyncJob
-from tts_erp_v2.sync_worker.scheduler import JOBS
+from tts_erp_v2.db.models import ChannelAccount
+from tts_erp_v2.db.models.integration import Credentials, SyncJob
+from tts_erp_v2.sync_worker.scheduler import (
+    CONTROL_DISABLED,
+    JOBS,
+    NON_PRODUCTION_SHOP_PREFIXES,
+    get_job_control_values,
+)
 
 router = APIRouter(prefix="/v2/sync", tags=["sync"])
 
@@ -63,12 +71,81 @@ class SyncStatusOut(BaseModel):
     jobs: list[SyncJobStatusOut]
 
 
+class SyncJobDefinitionOut(BaseModel):
+    """Registered scheduler job plus operator control state."""
+
+    job_name: str
+    module_path: str
+    entrypoint: str
+    interval_seconds: int
+    is_tiktok: bool
+    enabled: bool
+    scope_type: str
+    last_status: SyncJobStatusOut
+
+
+class SyncJobShopOut(BaseModel):
+    """TikTok shop that can be selected for a per-shop manual run."""
+
+    shop_pk: int
+    shop_id: str
+    account_name: str | None = None
+    status: str | None = None
+
+
+class SyncJobsOut(BaseModel):
+    server_time: datetime
+    jobs: list[SyncJobDefinitionOut]
+    tiktok_shops: list[SyncJobShopOut]
+
+
 def _as_utc(ts: datetime) -> datetime:
     """sync_jobs 时间列是 TIMESTAMP WITHOUT TIME ZONE（UTC 语义）；
     读出来可能是 naive——统一按 UTC 解释再参与比较。"""
     if ts.tzinfo is None:
         return ts.replace(tzinfo=UTC)
     return ts
+
+
+def _latest_sync_jobs(session: Session) -> dict[str, SyncJob]:
+    """Return latest sync_jobs row per job_name."""
+    latest_rows = session.execute(
+        select(SyncJob)
+        .ext(distinct_on(SyncJob.job_name))
+        .order_by(SyncJob.job_name, SyncJob.started_at.desc())
+    ).scalars()
+    return {row.job_name: row for row in latest_rows}
+
+
+def _list_tiktok_shops(session: Session) -> list[SyncJobShopOut]:
+    rows = session.execute(
+        select(
+            ChannelAccount.id,
+            ChannelAccount.shop_id,
+            ChannelAccount.account_name,
+            ChannelAccount.status,
+        )
+        .where(
+            ChannelAccount.platform == "tiktok",
+            exists(
+                select(Credentials.id).where(
+                    Credentials.provider == "tiktok",
+                    Credentials.external_account_id == ChannelAccount.shop_id,
+                )
+            ),
+        )
+        .order_by(ChannelAccount.shop_id)
+    ).all()
+    return [
+        SyncJobShopOut(
+            shop_pk=row.id,
+            shop_id=row.shop_id,
+            account_name=row.account_name,
+            status=row.status,
+        )
+        for row in rows
+        if row.shop_id and not row.shop_id.startswith(NON_PRODUCTION_SHOP_PREFIXES)
+    ]
 
 
 def _build_status(
@@ -118,14 +195,7 @@ def _build_status(
 @router.get("/status", response_model=SyncStatusOut)
 def sync_status(session: SessionDep) -> SyncStatusOut:
     """返回每个注册周期作业的最近同步时间 / 预计下次同步 / 红灯判定。"""
-    # 每个 job_name 取最新一行（按 started_at）。
-    # tiktok 类作业按 shop 扇出写多行，DISTINCT ON 取全店最新一次 tick。
-    latest_rows = session.execute(
-        select(SyncJob)
-        .ext(distinct_on(SyncJob.job_name))
-        .order_by(SyncJob.job_name, SyncJob.started_at.desc())
-    ).scalars()
-    latest_by_name = {row.job_name: row for row in latest_rows}
+    latest_by_name = _latest_sync_jobs(session)
 
     now = datetime.now(UTC)
     out: list[SyncJobStatusOut] = []
@@ -139,6 +209,84 @@ def sync_status(session: SessionDep) -> SyncStatusOut:
         out.append(_build_status(name, None, latest_by_name[name], now))
 
     return SyncStatusOut(server_time=now, jobs=out)
+
+
+@router.get("/jobs", response_model=SyncJobsOut)
+def sync_jobs(session: SessionDep) -> SyncJobsOut:
+    """返回周期任务定义、启停状态、最近运行状态和可选店铺。"""
+    latest_by_name = _latest_sync_jobs(session)
+    controls = get_job_control_values(session)
+    now = datetime.now(UTC)
+    jobs = [
+        SyncJobDefinitionOut(
+            job_name=name,
+            module_path=spec.module_path,
+            entrypoint=spec.entrypoint,
+            interval_seconds=spec.interval_seconds,
+            is_tiktok=spec.is_tiktok,
+            enabled=controls.get(name) != CONTROL_DISABLED,
+            scope_type="tiktok_shop" if spec.is_tiktok else "system",
+            last_status=_build_status(
+                name, spec.interval_seconds, latest_by_name.get(name), now
+            ),
+        )
+        for name, spec in sorted(JOBS.items())
+    ]
+    return SyncJobsOut(
+        server_time=now,
+        jobs=jobs,
+        tiktok_shops=_list_tiktok_shops(session),
+    )
+
+
+_SYNC_JOBS_PAGE_HTML = """<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>定时任务管理 · tts-erp</title>
+  <link rel="stylesheet" href="../../../static/vendor/bootstrap.min.css">
+  <link rel="stylesheet" href="../../../static/css/sync-jobs.css?v=1">
+</head>
+<body>
+  <header class="job-header">
+    <div>
+      <a class="home-link" href="../../../v2/pages/dashboard">← 控制台</a>
+      <div class="eyebrow">Scheduler · Operations</div>
+      <h1>定时任务管理</h1>
+      <p>开启 / 关闭周期调度，或立即触发一次任务。TikTok 类任务可选择单店铺执行。</p>
+    </div>
+    <div class="identity" id="ops-identity">加载中…</div>
+  </header>
+  <main class="job-main">
+    <div id="notice" class="notice" role="status"></div>
+    <section class="panel">
+      <div class="panel-title">
+        <h2>任务清单</h2>
+        <button type="button" class="secondary" id="refresh-btn">刷新</button>
+      </div>
+      <div class="table-wrap">
+        <table class="jobs-table">
+          <thead>
+            <tr>
+              <th>任务</th><th>周期</th><th>范围</th><th>状态</th><th>上次运行</th><th>启用</th><th>立即执行</th>
+            </tr>
+          </thead>
+          <tbody id="jobs-body"><tr><td colspan="7" class="empty">加载中…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script src="../../../static/js/sync-jobs.js?v=1" defer></script>
+</body>
+</html>
+"""
+
+
+@router.get("/jobs/page", response_class=HTMLResponse)
+def sync_jobs_page() -> HTMLResponse:
+    """定时任务管理页（HTML shell；数据走 /v2/sync/jobs）。"""
+    return HTMLResponse(_SYNC_JOBS_PAGE_HTML)
 
 
 __all__ = ["router"]
