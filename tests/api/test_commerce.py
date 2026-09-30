@@ -935,6 +935,26 @@ def test_channel_products_exposes_total_count_header(
     assert r2.headers["X-Total-Count"] == "3"
 
 
+def test_channel_products_filter_missing_manual_cost_on_server(
+    api_client, readonly_key, seed_spus_with_times
+):
+    """missing_manual_cost=true is applied before count and pagination.
+
+    The fixture has current manual-cost rows for A/B and no row for C. The
+    response therefore proves the workbench filter is database-backed rather
+    than a client-side pass over one page of results.
+    """
+    acct = seed_spus_with_times["acct_id"]
+    r = api_client.get(
+        f"/v2/commerce/channel-products?limit=1&shop_pk={acct}"
+        "&missing_manual_cost=true",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    assert [row["spu_id"] for row in r.json()] == ["TEST_MCSORT_c"]
+    assert r.headers["X-Total-Count"] == "1"
+
+
 # ---------------------------------------------------------------------------
 # has_orders filter (2026-09-06 "仅看有单" catalogue toggle)
 # ---------------------------------------------------------------------------

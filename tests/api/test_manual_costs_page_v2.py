@@ -603,3 +603,50 @@ def test_page_has_has_orders_toggle(api_client, readonly_key):
     assert 'id="filter-has-orders"' in src or "filter-has-orders" in src, (
         "checkbox binding missing"
     )
+
+
+def test_page_has_backend_missing_manual_cost_toggle(api_client, readonly_key):
+    """The unregistered-only checkbox delegates filtering to the API."""
+    r = api_client.get(
+        "/v2/pages/manual-costs",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.text
+    assert 'id="filter-missing-manual-cost"' in body
+    assert "仅展示未登记 SPU" in body
+
+    from pathlib import Path
+
+    js = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "console.js"
+    )
+    src = js.read_text(encoding="utf-8")
+    assert "catalogueMissingManualCost" in src
+    assert "missing_manual_cost=true" in src
+    assert "filter-missing-manual-cost" in src
+
+
+def test_page_does_not_render_source_price_badge(api_client, readonly_key):
+    """Source-price values may prefill the input, but the badge is removed."""
+    r = api_client.get(
+        "/v2/pages/manual-costs",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    assert "op-source-badge" not in r.text
+
+    from pathlib import Path
+
+    js = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "console.js"
+    )
+    assert "op-source-badge" not in js.read_text(encoding="utf-8")
