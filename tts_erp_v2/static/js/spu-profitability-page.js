@@ -176,6 +176,10 @@
     if (status === "insufficient_sample") return "样本不足";
     return "—";
   }
+  function setTextIfPresent(selector, value) {
+    var target = $(selector);
+    if (target) target.textContent = value;
+  }
   function loginUrl() {
     var pagePath = profile && profile.pagePath ? profile.pagePath : "/v2/pages/spu-roi";
     return `${PREFIX}/v2/auth/login?next=${PREFIX}${pagePath}`;
@@ -982,41 +986,55 @@
           fmtRatio(roiAdValue);
 
     // 终局预测由后端基于同一日期窗口计算；当前实际卡片保持不变。
-    $("#sum-projection-status").textContent = projectionStatusLabel(
-      totals.projection_status,
+    // StaticFiles 会即时读取新 JS，而 HTML 模板要等 API 进程重启才更新；
+    // 部署窗口内新 hook 可能暂时不存在，不能让整页渲染因此中断。
+    setTextIfPresent(
+      "#sum-projection-status",
+      projectionStatusLabel(totals.projection_status),
     );
-    $("#sum-projection-basis-orders").textContent = fmtInt(
-      totals.projection_basis_order_count,
+    setTextIfPresent(
+      "#sum-projection-basis-orders",
+      fmtInt(totals.projection_basis_order_count),
     );
-    $("#sum-projection-refund-rate").textContent = fmtPct(
-      totals.projection_refund_amount_rate,
+    setTextIfPresent(
+      "#sum-projection-refund-rate",
+      fmtPct(totals.projection_refund_amount_rate),
     );
-    $("#sum-projection-full-loss-rate").textContent = fmtPct(
-      totals.projection_full_loss_qty_rate,
+    setTextIfPresent(
+      "#sum-projection-full-loss-rate",
+      fmtPct(totals.projection_full_loss_qty_rate),
     );
-    $("#sum-unresolved-orders").textContent = fmtInt(
-      totals.unresolved_unsettled_order_count,
+    setTextIfPresent(
+      "#sum-unresolved-orders",
+      fmtInt(totals.unresolved_unsettled_order_count),
     );
-    $("#sum-unresolved-qty").textContent = fmtQty(
-      totals.unresolved_unsettled_qty,
+    setTextIfPresent(
+      "#sum-unresolved-qty",
+      fmtQty(totals.unresolved_unsettled_qty),
     );
-    $("#sum-projected-future-loss-qty").textContent = fmtQty(
-      totals.projected_future_full_loss_qty,
+    setTextIfPresent(
+      "#sum-projected-future-loss-qty",
+      fmtQty(totals.projected_future_full_loss_qty),
     );
-    $("#sum-projected-terminal-loss-qty").textContent = fmtQty(
-      totals.projected_terminal_full_loss_qty,
+    setTextIfPresent(
+      "#sum-projected-terminal-loss-qty",
+      fmtQty(totals.projected_terminal_full_loss_qty),
     );
-    $("#sum-projected-net-revenue").textContent = fmtMoney(
-      totals.projected_net_revenue,
+    setTextIfPresent(
+      "#sum-projected-net-revenue",
+      fmtMoney(totals.projected_net_revenue),
     );
-    $("#sum-projected-net-profit").textContent = fmtMoney(
-      totals.projected_net_profit,
+    setTextIfPresent(
+      "#sum-projected-net-profit",
+      fmtMoney(totals.projected_net_profit),
     );
-    $("#sum-projected-roi").textContent = fmtRatio(
-      totals.projected_roi_real,
+    setTextIfPresent(
+      "#sum-projected-roi",
+      fmtRatio(totals.projected_roi_real),
     );
-    $("#sum-projected-breakeven-roi").textContent = fmtRatio(
-      totals.projected_roi_breakeven,
+    setTextIfPresent(
+      "#sum-projected-breakeven-roi",
+      fmtRatio(totals.projected_roi_breakeven),
     );
     var rubricLabel =
       (meta.presentation && meta.presentation.rubric_label) ||
