@@ -59,7 +59,7 @@ from tts_erp_v2.db.models.miaoshou import (
     MiaoshouPackageItem,
     MiaoshouPackageRawRecord,
     MiaoshouPurchaseOrderRawRecord,
-    MiaoshouPurchasePriceCandidate,
+    MiaoshouPurchasePrice,
     MiaoshouSyncCursor,
     MiaoshouSyncIssue,
 )
@@ -124,7 +124,7 @@ __all__ = [
     "MiaoshouPackageItem",
     "MiaoshouPackageRawRecord",
     "MiaoshouPurchaseOrderRawRecord",
-    "MiaoshouPurchasePriceCandidate",
+    "MiaoshouPurchasePrice",
     "MiaoshouSyncCursor",
     "MiaoshouSyncIssue",
     "Payout",
