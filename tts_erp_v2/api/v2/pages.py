@@ -246,7 +246,7 @@ def _sidebar_html(current_page: str) -> str:
     ("dashboard", "台", "控制台", "__group__"),
     ("manual-costs", "采", "采购工作台", "运营"),
     ("spu-roi", "益", "SPU ROI", "运营"),
-    ("focused-spus", "关", "重点关注", "运营"),
+    ("focused-spus", "关", "重点关注 SPU", "运营"),
     ("shops", "店", "店铺注册", "店铺"),
     ("enum-map", "映", "枚举映射", "数据"),
     ("intercept-configs", "配", "拦截配置", "拦截"),

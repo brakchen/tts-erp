@@ -62,6 +62,8 @@ def test_focused_spus_page_uses_shared_profitability_kernel(
     )
     assert response.status_code == 200
     assert "重点关注 SPU" in response.text
+    assert 'href="../../v2/pages/focused-spus"' in response.text
+    assert 'title="重点关注 SPU"' in response.text
     assert 'data-page-profile="focused-spus"' in response.text
     assert "static/css/spu-roi.css?v=" in response.text
     assert "static/css/focused-spus.css?v=" in response.text
