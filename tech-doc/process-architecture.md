@@ -24,7 +24,8 @@ tts_erp_v2/
 ├── proxy/               # 出站层：tts_shop/（TikTok 签名+客户端）、miaoshou/、token_service.py
 ├── jobs/                # 同步 job 实现：tiktok/*、miaoshou/*、
 │                        #   reporting（cost_snapshots 6h / profit_daily 1h）、token_refresh（6h）、runner
-├── sync_worker/         # APScheduler；JOBS 注册表 + 调度状态（顶部 NOTE，以它为准）
+├── sync_worker/         # APScheduler；JOBS 注册表 + 调度状态（顶部 NOTE，以它为准）；
+│                        #   operator controls use /v2/sync/jobs/page + /v2/admin/sync-jobs/*
 ├── db/models/           # 12 schema SQLAlchemy 模型 — miaoshou.py 为妙手 source-owned 包裹/采购价域 8 张表；
 │                        #   plugin.py 为插件 dump 的结构化表：订单/物流/结算 7 张
 │                        #   （orders/order_lines/shipments/tracking_events/settlements/
