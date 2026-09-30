@@ -16,3 +16,4 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| sync-job-page-fixes | 修复定时任务管理页面逻辑 | 01a0f39a-7180-760e-b7c9-6b0a00a152c2 | `fix/sync-job-page-fixes` / `.worktrees/sync-job-page-fixes` | `tts_erp_v2/api/v2/pages.py`; `tts_erp_v2/api/v2/sync_status.py`; `tts_erp_v2/static/js/sync-jobs.js`; `tests/api/test_pages.py`; `tests/api/test_sync_job_management.py`; `tech-doc/external-api.md` | draft | — | — | 2026-09-30 19:52:33 |
