@@ -3424,6 +3424,43 @@ def test_spu_roi_js_targets_dashboard_hooks():
     assert "restoreSpuScopeFromUrl" in src
 
 
+def test_spu_roi_projection_render_tolerates_stale_html_shell() -> None:
+    """New static JS must not crash while an old API process still serves HTML.
+
+    StaticFiles reads the new bundle immediately, while the HTML template in
+    ``pages.py`` remains in process memory until the API restarts. During that
+    deployment window projection hooks can be absent, but existing dashboard
+    data must continue rendering.
+    """
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "spu-profitability-page.js"
+    ).read_text(encoding="utf-8")
+    helper = src.split("function setTextIfPresent", 1)[1].split(
+        "function loginUrl", 1
+    )[0]
+    projection_render = src.split("// 终局预测由后端", 1)[1].split(
+        "var rubricLabel", 1
+    )[0]
+
+    assert "if (target) target.textContent = value" in helper
+    for hook in (
+        "#sum-projection-status",
+        "#sum-projection-basis-orders",
+        "#sum-projected-net-profit",
+        "#sum-projected-roi",
+    ):
+        assert re.search(
+            rf'setTextIfPresent\(\s*"{re.escape(hook)}"', projection_render
+        )
+        assert f'$("{hook}").textContent' not in projection_render
+
+
 def test_spu_roi_filter_actions_keep_a_stable_mobile_layout():
     """SPU 选择器宽度与两个操作按钮的触控高度不能随断点退化。"""
     from pathlib import Path
@@ -3591,7 +3628,7 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert "totals.ad_system_actual_roi" in js_src
     assert '("#sum-roi-ad")' in js_src
     assert 'roiAdStatus === "estimated_known_costs"' in js_src
-    assert '("#sum-projection-status")' in js_src
+    assert '"#sum-projection-status"' in js_src
     assert "totals.projection_status" in js_src
     assert "totals.projection_refund_amount_rate" in js_src
     assert "totals.projected_net_profit" in js_src
