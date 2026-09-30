@@ -1,7 +1,7 @@
 """Tests for ``tts_erp_v2/analytics/repository.py`` — v4 daily-sync-with-coverage.
 
-Tests v4 structured upsert functions (upsert_daily_rows, upsert_today_rows,
-upsert_monthly_rows), coverage queries, and plugin_logs.
+Tests daily/today structured upserts, monthly raw-only archival, coverage,
+and plugin logs.
 """
 
 from __future__ import annotations
@@ -30,15 +30,8 @@ def _wipe_analytics_rows(db_engine):
 def _wipe(db_engine) -> None:
     with db_engine.begin() as conn:
         # pi-lens-ignore: python-sql-injection — literal SQL
-        conn.execute(
-            text("DELETE FROM plugin.ad_daily WHERE seller_id LIKE 'TEST_%'")
-        )
-        conn.execute(
-            text("DELETE FROM plugin.ad_today WHERE seller_id LIKE 'TEST_%'")
-        )
-        conn.execute(
-            text("DELETE FROM plugin.ad_monthly WHERE seller_id LIKE 'TEST_%'")
-        )
+        conn.execute(text("DELETE FROM plugin.ad_daily WHERE seller_id LIKE 'TEST_%'"))
+        conn.execute(text("DELETE FROM plugin.ad_today WHERE seller_id LIKE 'TEST_%'"))
         conn.execute(
             text("DELETE FROM plugin.ad_raw_log WHERE seller_id LIKE 'TEST_%'")
         )
@@ -213,8 +206,8 @@ def test_upsert_today_rows_upserts(db_session):
 # ---------------------------------------------------------------------------
 
 
-def test_upsert_monthly_rows_inserts(db_session):
-    """v4 monthly rows 写入 ad_monthly。"""
+def test_upsert_monthly_rows_archives_raw_only(db_session):
+    """v4 monthly rows are accepted into ad_raw_log only."""
     from tts_erp_v2.plugin.ads import repository
 
     rows = [_base_row()]
@@ -234,10 +227,13 @@ def test_upsert_monthly_rows_inserts(db_session):
         request_id="TEST_monthly1",
         source="t",
     )
-    assert inserted == 1
+    assert inserted == 0
 
     count = db_session.execute(
-        text("SELECT count(*) FROM plugin.ad_monthly WHERE seller_id = :s"),
+        text(
+            "SELECT count(*) FROM plugin.ad_raw_log "
+            "WHERE seller_id = :s AND kind = 'monthly' AND year_month = '2026-09'"
+        ),
         {"s": _SELLER},
     ).scalar()
     assert count == 1
@@ -338,7 +334,7 @@ def test_get_coverage_monthly_returns_map(db_session):
 # ---------------------------------------------------------------------------
 # TikTok campaign_opt_log_list 返回 campaign-level 变更事件，rows 没有
 # product_id，服务端 upsert_*_rows 入口走 archive-only 路径：只入 ad_raw_log，
-# 不入 ad_daily / ad_today / ad_monthly。下游 spu_roi 读 ad_daily + ad_today
+# 不入 ad_daily / ad_today。下游 spu_roi 读 ad_daily + ad_today
 # 不会被污染。
 
 
@@ -415,6 +411,7 @@ def test_upsert_daily_rows_campaign_level_only_archives(db_session):
     assert raw_row[3] == _CAMPAIGN
     # response_body 完整保留原始 rows
     import json
+
     archived = json.loads(raw_row[4])
     assert archived["body"]["data"]["table"][0]["change_id"] == "evt-001"
 
@@ -434,7 +431,10 @@ def test_upsert_today_rows_campaign_level_only_archives(db_session):
         request_url="https://x/",
         request_body={},
         response_status=200,
-        response_body={"status": 200, "body": {"data": {"table": _change_event_rows()}}},
+        response_body={
+            "status": 200,
+            "body": {"data": {"table": _change_event_rows()}},
+        },
         created_at=datetime(2026, 9, 9, 1, 0, 0, tzinfo=UTC),
         request_id="TEST_req_camp_lvl_today",
         source="t",
@@ -458,7 +458,7 @@ def test_upsert_today_rows_campaign_level_only_archives(db_session):
 
 
 def test_upsert_monthly_rows_campaign_level_only_archives(db_session):
-    """campaign-level + kind=monthly:ad_monthly 不写,ad_raw_log 写 1 行。"""
+    """campaign-level monthly payloads also write one raw-log row."""
     from tts_erp_v2.plugin.ads import repository
 
     inserted = repository.upsert_monthly_rows(
@@ -472,18 +472,15 @@ def test_upsert_monthly_rows_campaign_level_only_archives(db_session):
         request_url="https://x/",
         request_body={},
         response_status=200,
-        response_body={"status": 200, "body": {"data": {"table": _change_event_rows()}}},
+        response_body={
+            "status": 200,
+            "body": {"data": {"table": _change_event_rows()}},
+        },
         created_at=datetime(2026, 9, 1, 1, 0, 0, tzinfo=UTC),
         request_id="TEST_req_camp_lvl_monthly",
         source="t",
     )
     assert inserted == 0
-
-    monthly_count = db_session.execute(
-        text("SELECT count(*) FROM plugin.ad_monthly WHERE seller_id = :s"),
-        {"s": _SELLER},
-    ).scalar()
-    assert monthly_count == 0
 
     raw_count = db_session.execute(
         text(
@@ -514,7 +511,9 @@ def test_upsert_campaign_opt_logs_skips_bad_opt_time(db_session):
     )
     assert inserted == 1
     rows = db_session.execute(
-        text("SELECT log_id, opt_time FROM plugin.campaign_opt_logs WHERE seller_id = :s"),
+        text(
+            "SELECT log_id, opt_time FROM plugin.campaign_opt_logs WHERE seller_id = :s"
+        ),
         {"s": _SELLER},
     ).all()
     assert [r[0] for r in rows] == ["TEST_opt_ok"]

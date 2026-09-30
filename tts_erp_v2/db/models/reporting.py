@@ -33,11 +33,9 @@ from tts_erp_v2.db.constants import SHOP_FEE_RATE_CALCULATION_VERSION
 class ProductCostSnapshot(Base):
     """Resolved unit cost for a TikTok product at a point in time.
 
-    cost_method ∈ {MANUAL_ENTRY, LATEST_PURCHASE_COST, PERIOD_AVERAGE_COST,
-                   WEIGHTED_AVERAGE_COST, SOURCE_PRICE}。SOURCE_PRICE = 货源价
-    （procurement_products.source_unit_cost，公共采集箱挂牌价）兜底估算口径，
-    报表须标注“估算成本”，成交后与采购单口径对账。SPU 无任何可用口径
-    ⇒ 不写行，经 monitoring / active_spus_without_cost 暴露。
+    cost_method ∈ {MANUAL_ENTRY, SOURCE_PRICE}。SOURCE_PRICE = 货源价
+    （procurement_products.source_unit_cost，公共采集箱挂牌价）兜底估算口径。
+    SPU 无任何可用口径则不写行，经 monitoring 暴露。
     """
 
     __tablename__ = "product_cost_snapshots"
@@ -69,9 +67,6 @@ class ProductCostSnapshot(Base):
         nullable=False, server_default=text("now()")
     )
     valid_to: Mapped[datetime | None]
-    source_purchase_quantity: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
-    source_purchase_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
-    source_line_count: Mapped[int | None] = mapped_column(Integer)
     calculation_version: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("1")
     )
@@ -141,54 +136,6 @@ class ProductProfitDaily(Base):
         nullable=False,
         server_default=text("now()"),
         onupdate=text("now()"),
-    )
-
-
-class ShipmentTrackingSummary(Base):
-    """Denormalized tracking roll-up rebuilt from tracking_events per shipment.
-
-    Replaces the legacy `logistics_tracking` wide-row table.
-    """
-
-    __tablename__ = "shipment_tracking_summary"
-    __table_args__ = (
-        UniqueConstraint(
-            "shipment_id",
-            "calculation_version",
-            name="uq_tracking_summary_shipment_version",
-        ),
-        {"schema": "reporting"},
-    )
-
-    id: Mapped[int] = mapped_column(
-        BigInteger,
-        primary_key=True,
-        server_default=text("generate_always_as_identity()"),
-    )
-    shipment_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("fulfillment.shipments.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    tracking_number: Mapped[str | None] = mapped_column(Text)
-    first_event_at: Mapped[datetime | None]
-    last_event_at: Mapped[datetime | None]
-    last_event_description: Mapped[str | None] = mapped_column(Text)
-    last_location: Mapped[str | None] = mapped_column(Text)
-    event_count: Mapped[int | None] = mapped_column(Integer)
-    calculation_version: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("1")
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        nullable=False, server_default=text("now()")
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        nullable=False,
-        server_default=text("now()"),
-        onupdate=text("now()"),
-    )
-    calculated_at: Mapped[datetime] = mapped_column(
-        nullable=False, server_default=text("now()")
     )
 
 

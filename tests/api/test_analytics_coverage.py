@@ -3,7 +3,7 @@
 覆盖（tech-doc/analytics/daily-sync-with-coverage.md §8.1）：
 - 空库 → coveredPeriods=[], totalCovered=0
 - 插入 ad_daily 行 → 对应日期在 coveredPeriods 中
-- 插入 ad_monthly 行 → 对应月份在 coveredPeriods 中
+- 插入 monthly ad_raw_log 行 → 对应月份在 coveredPeriods 中
 - 范围外的日期/月份不返回
 - 不同 campaign 数据互不影响
 - 无权限 → 403
@@ -28,33 +28,18 @@ ENDPOINT = "/oec_ads/shopping/v1/oec/stat/post_product_list"
 @pytest.fixture(autouse=True)
 def _cleanup(db_engine):
     """Wipe TEST_ data from all analytics tables this test touches."""
+    statements = (
+        "DELETE FROM plugin.ad_daily WHERE seller_id = :s",
+        "DELETE FROM plugin.ad_today WHERE seller_id = :s",
+        "DELETE FROM plugin.ad_raw_log WHERE seller_id = :s",
+    )
     with db_engine.begin() as conn:
-        conn.execute(
-            text("DELETE FROM plugin.ad_daily WHERE seller_id = :s"), {"s": SELLER}
-        )
-        conn.execute(
-            text("DELETE FROM plugin.ad_monthly WHERE seller_id = :s"), {"s": SELLER}
-        )
-        conn.execute(
-            text("DELETE FROM plugin.ad_today WHERE seller_id = :s"), {"s": SELLER}
-        )
-        conn.execute(
-            text("DELETE FROM plugin.ad_raw_log WHERE seller_id = :s"), {"s": SELLER}
-        )
+        for statement in statements:
+            conn.execute(text(statement), {"s": SELLER})
     yield
     with db_engine.begin() as conn:
-        conn.execute(
-            text("DELETE FROM plugin.ad_daily WHERE seller_id = :s"), {"s": SELLER}
-        )
-        conn.execute(
-            text("DELETE FROM plugin.ad_monthly WHERE seller_id = :s"), {"s": SELLER}
-        )
-        conn.execute(
-            text("DELETE FROM plugin.ad_today WHERE seller_id = :s"), {"s": SELLER}
-        )
-        conn.execute(
-            text("DELETE FROM plugin.ad_raw_log WHERE seller_id = :s"), {"s": SELLER}
-        )
+        for statement in statements:
+            conn.execute(text(statement), {"s": SELLER})
 
 
 def _insert_ad_daily(
@@ -91,34 +76,30 @@ def _insert_ad_daily(
         )
 
 
-def _insert_ad_monthly(
+def _insert_monthly_raw(
     db_engine,
     *,
     year_month: str,
     campaign_id: str = CAMPAIGN_1,
-    product_id: str = "TEST_PROD_1",
 ) -> None:
-    """Insert one row into plugin.ad_monthly for testing."""
+    """Insert one monthly raw-log request for coverage testing."""
     with db_engine.begin() as conn:
         conn.execute(
             text(
                 """
-                INSERT INTO plugin.ad_monthly (
-                    seller_id, advertiser_id, campaign_id, product_id, endpoint, year_month,
-                    mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value,
-                    onsite_mixed_real_roi2_shopping, metrics_extra, created_at
+                INSERT INTO plugin.ad_raw_log (
+                    seller_id, advertiser_id, endpoint, campaign_id, kind,
+                    year_month, request_url, request_method, created_at
                 ) VALUES (
-                    :seller, :adv, :campaign, :product, :ep, :ym,
-                    3000.00, 300, 60000.00, 20.00, '{}', now()
+                    :seller, :adv, :ep, :campaign, 'monthly', :ym,
+                    'https://example.test/monthly', 'POST', now()
                 )
-                ON CONFLICT ON CONSTRAINT uq_ad_monthly DO NOTHING
                 """
             ),
             {
                 "seller": SELLER,
                 "adv": ADVERTISER,
                 "campaign": campaign_id,
-                "product": product_id,
                 "ep": ENDPOINT,
                 "ym": year_month,
             },
@@ -218,10 +199,10 @@ def test_coverage_daily_with_data(api_client, readwrite_key, db_engine):
 
 
 def test_coverage_monthly_with_data(api_client, readwrite_key, db_engine):
-    """插入 ad_monthly 行后，对应月份在 coveredPeriods 中。"""
-    _insert_ad_monthly(db_engine, year_month="2026-06")
-    _insert_ad_monthly(db_engine, year_month="2026-07")
-    _insert_ad_monthly(db_engine, year_month="2026-08")
+    """Monthly raw logs produce the covered month list."""
+    _insert_monthly_raw(db_engine, year_month="2026-06")
+    _insert_monthly_raw(db_engine, year_month="2026-07")
+    _insert_monthly_raw(db_engine, year_month="2026-08")
 
     r = _coverage_get(
         api_client,
@@ -249,7 +230,7 @@ def test_coverage_monthly_with_data(api_client, readwrite_key, db_engine):
 def test_coverage_out_of_range(api_client, readwrite_key, db_engine):
     """范围外的日期/月份不返回。"""
     _insert_ad_daily(db_engine, day="2026-09-05")
-    _insert_ad_monthly(db_engine, year_month="2026-08")
+    _insert_monthly_raw(db_engine, year_month="2026-08")
 
     # daily: 查询 2026-08-01~2026-08-31，不包含 09-05
     r_daily = _coverage_get(
@@ -415,41 +396,18 @@ def _seed_many_campaigns(db_engine, *, n_campaigns: int, days: list[str]) -> Non
 
 @pytest.fixture(autouse=True)
 def _cleanup_pager(db_engine):
+    statements = (
+        "DELETE FROM plugin.ad_daily WHERE seller_id = :s",
+        "DELETE FROM plugin.ad_today WHERE seller_id = :s",
+        "DELETE FROM plugin.ad_raw_log WHERE seller_id = :s",
+    )
     with db_engine.begin() as conn:
-        conn.execute(
-            text("DELETE FROM plugin.ad_daily WHERE seller_id = :s"),
-            {"s": PAGER_SELLER},
-        )
-        conn.execute(
-            text("DELETE FROM plugin.ad_monthly WHERE seller_id = :s"),
-            {"s": PAGER_SELLER},
-        )
-        conn.execute(
-            text("DELETE FROM plugin.ad_today WHERE seller_id = :s"),
-            {"s": PAGER_SELLER},
-        )
-        conn.execute(
-            text("DELETE FROM plugin.ad_raw_log WHERE seller_id = :s"),
-            {"s": PAGER_SELLER},
-        )
+        for statement in statements:
+            conn.execute(text(statement), {"s": PAGER_SELLER})
     yield
     with db_engine.begin() as conn:
-        conn.execute(
-            text("DELETE FROM plugin.ad_daily WHERE seller_id = :s"),
-            {"s": PAGER_SELLER},
-        )
-        conn.execute(
-            text("DELETE FROM plugin.ad_monthly WHERE seller_id = :s"),
-            {"s": PAGER_SELLER},
-        )
-        conn.execute(
-            text("DELETE FROM plugin.ad_today WHERE seller_id = :s"),
-            {"s": PAGER_SELLER},
-        )
-        conn.execute(
-            text("DELETE FROM plugin.ad_raw_log WHERE seller_id = :s"),
-            {"s": PAGER_SELLER},
-        )
+        for statement in statements:
+            conn.execute(text(statement), {"s": PAGER_SELLER})
 
 
 def _params(page=None, pageSize=None, **extra):
@@ -492,7 +450,11 @@ def test_coverage_requested_campaign_ids_page_two_keeps_empty_entries(
     api_client, readwrite_key, db_engine
 ):
     """expected campaign 分页在第二页仍返回零覆盖计划，不被 SQL offset 二次跳过。"""
-    requested = ["TEST_requested-campaign-1", "TEST_requested-campaign-2", "TEST_requested-campaign-3"]
+    requested = [
+        "TEST_requested-campaign-1",
+        "TEST_requested-campaign-2",
+        "TEST_requested-campaign-3",
+    ]
     r = _coverage_get(
         api_client,
         readwrite_key,

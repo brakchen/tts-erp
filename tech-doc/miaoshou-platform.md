@@ -50,16 +50,10 @@ sign = MD5(busData + companySecret).upper()
 
 **锁定向量**：`tests/miaoshou/test_signing.py::test_build_sign_doc_824327_vector`
 
-## 5. EWM 采购单列表
+## 5. EWM 采购单同步（已退役）
 
-- Apifox：api-479599781（发布状态）。
-- 请求：`POST /open/v1/ewm/goods_purchase_order/goods_purchase_order/fetch/search_goods_purchase_order_page`。
-- 请求体：`page`（从 1 开始）和 `pageSize`（10–100）；同步任务使用 100。
-- 响应：`data.goodsPurchaseOrderList`，行项目为
-  `goodsPurchaseOrderSkuList`，并以 `data.total` 记录总条数。
-- 调度：`miaoshou.purchase_orders` 每小时执行一次。
-- Apifox 同时列出 `timerToken` 查询参数和 `Cookie` 头，但未标为必填；
-  当前同步沿用 ERP HMAC 认证（`x-app-key` / `x-timestamp` / `x-sign`）。
+`miaoshou.purchase_orders` 与 `procurement.purchase_orders` / `purchase_order_lines`
+在 migration 0046 删除：上游没有提供可用的采购单数据，因此不再维护采购单成本链。
 
 ## 6. 包裹列表与详情
 

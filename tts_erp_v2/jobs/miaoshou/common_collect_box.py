@@ -13,11 +13,10 @@ TK 平台采集箱（``miaoshou.collect_box``）SKU 上的 ``originPrice`` 标�
 **公共采集箱列表的 ``price`` / ``minSkuPrice`` / ``maxSkuPrice``**
 （采集时从 1688 抓的挂牌价）。本 job 把这份可信货源价落库，供
 ``reporting.product_cost_snapshots`` 的 ``SOURCE_PRICE`` 口径（兜底估算，
-优先级低于采购单成交价 / 人工填写，见 tech-doc/data-model-target-v3.md §11）。
+优先级低于人工填写，见 tech-doc/data-model-target-v3.md §11）。
 
-⚠ 口径提醒：``source_unit_cost`` 是 1688 挂牌标价，不是采购单成交价
-（成交价在 ``purchase_order_lines.unit_cost``）。标价≠成本（§11.3），
-只在无采购单无人工时作估算兜底，报表须以“估算成本”命名。
+⚠ 口径提醒：``source_unit_cost`` 是 1688 挂牌标价。人工价缺失时才作估算
+兜底，报表须以“估算成本”命名。
 
 Endpoint
 --------

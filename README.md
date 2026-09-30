@@ -328,7 +328,7 @@ handoff/ACTIVE.md            # 当前 lane 文件所有权
 
 - 不存在 store-writing TikTok HTTP 接口；不要新增确认、取消、退货或发货写操作。
 - `/miaoshou/*` 没有 v2 HTTP surface；妙手是进程内 SDK + scheduled jobs。
-- `miaoshou.purchase_orders` 代码存在，但当前路径在生产妙手 ERP API 返回 `routeNotFound`；正确路径尚未确认，因此没有注册进 scheduler。
+- 妙手采购单同步与相关表已由 migration 0046 退役；成本只使用人工价和 SOURCE_PRICE 估算。
 - v1 `/orders/*`、`/finance/*`、`/db/*`、`/sync/*` 等路由已删除。
 - TikTok signing 必须保持 `shop_cipher` query、排序签名键和原始 JSON body 语义；见
   [`tech-doc/tiktok-hmac-signing.md`](tech-doc/tiktok-hmac-signing.md)。

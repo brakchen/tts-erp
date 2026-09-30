@@ -21,34 +21,23 @@ SELLER = "TEST_cross-seller"
 
 @pytest.fixture(autouse=True)
 def _cleanup(db_engine):
+    statements = (
+        "DELETE FROM plugin.order_lines WHERE shop_id = :s",
+        "DELETE FROM plugin.settlement_details WHERE shop_id = :s",
+        "DELETE FROM plugin.settlements WHERE shop_id = :s",
+        "DELETE FROM plugin.tracking_events WHERE shop_id = :s",
+        "DELETE FROM plugin.shipments WHERE shop_id = :s",
+        "DELETE FROM plugin.orders WHERE shop_id = :s",
+        "DELETE FROM plugin.ad_daily WHERE seller_id = :s",
+        "DELETE FROM plugin.ad_today WHERE seller_id = :s",
+        "DELETE FROM plugin.ad_raw_log WHERE seller_id = :s",
+    )
     with db_engine.begin() as conn:
-        for statement in (
-            "DELETE FROM plugin.order_lines WHERE shop_id = :s",
-            "DELETE FROM plugin.settlement_details WHERE shop_id = :s",
-            "DELETE FROM plugin.settlements WHERE shop_id = :s",
-            "DELETE FROM plugin.tracking_events WHERE shop_id = :s",
-            "DELETE FROM plugin.shipments WHERE shop_id = :s",
-            "DELETE FROM plugin.orders WHERE shop_id = :s",
-            "DELETE FROM plugin.ad_daily WHERE seller_id = :s",
-            "DELETE FROM plugin.ad_today WHERE seller_id = :s",
-            "DELETE FROM plugin.ad_monthly WHERE seller_id = :s",
-            "DELETE FROM plugin.ad_raw_log WHERE seller_id = :s",
-                    ):
+        for statement in statements:
             conn.execute(text(statement), {"s": SELLER})
     yield
     with db_engine.begin() as conn:
-        for statement in (
-            "DELETE FROM plugin.order_lines WHERE shop_id = :s",
-            "DELETE FROM plugin.settlement_details WHERE shop_id = :s",
-            "DELETE FROM plugin.settlements WHERE shop_id = :s",
-            "DELETE FROM plugin.tracking_events WHERE shop_id = :s",
-            "DELETE FROM plugin.shipments WHERE shop_id = :s",
-            "DELETE FROM plugin.orders WHERE shop_id = :s",
-            "DELETE FROM plugin.ad_daily WHERE seller_id = :s",
-            "DELETE FROM plugin.ad_today WHERE seller_id = :s",
-            "DELETE FROM plugin.ad_monthly WHERE seller_id = :s",
-            "DELETE FROM plugin.ad_raw_log WHERE seller_id = :s",
-                    ):
+        for statement in statements:
             conn.execute(text(statement), {"s": SELLER})
 
 
@@ -89,7 +78,10 @@ def test_plugin_dump_writes_business_rows_and_is_visible_next_round(
             {"s": SELLER},
         ).scalar()
     assert str(ad_row) == "123.45"
-    assert json.loads(raw_body)["body"]["data"]["table"][0]["product_id"] == "TEST_cross-product"
+    assert (
+        json.loads(raw_body)["body"]["data"]["table"][0]["product_id"]
+        == "TEST_cross-product"
+    )
 
     coverage_response = api_client.get(
         "/v2/analytics/sync/coverage",

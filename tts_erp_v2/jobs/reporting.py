@@ -7,8 +7,8 @@ cutover (``tts_erp_v2.reporting.cost_snapshots.rebuild_snapshots`` /
 thin job wrapper that registers them into ``sync_worker.scheduler.JOBS``.
 
 Cadence (see scheduler.JOBS):
-* ``reporting.cost_snapshots`` — every 6 h (cost inputs change slowly:
-  manual entries + miaoshou purchase orders + 货源价 SOURCE_PRICE 兜底).
+* ``reporting.cost_snapshots`` — every 6 h (manual entries + 货源价
+  SOURCE_PRICE 兜底).
 * ``reporting.profit_daily`` — every 1 h, rebuilding today + yesterday
   (UTC) so late order updates / after-sales changes land.
 
@@ -36,37 +36,6 @@ log = logging.getLogger("tts_erp_v2.jobs.reporting")
 
 JOB_COST_SNAPSHOTS = "reporting.cost_snapshots"
 JOB_PROFIT_DAILY = "reporting.profit_daily"
-
-# Latest purchase price for a channel product. The Miaoshou product sync stores
-# TikTok ``spu_id`` in procurement_products.external_product_id, so purchase
-# history can use the same direct identity rule as source-price lookup below.
-# Returns no row when the SPU has no purchase history.
-_SQL_LATEST_PURCHASE_COST = text(
-    "SELECT pol.unit_cost, pol.currency "
-    "FROM commerce.products_spu cp "
-    "JOIN procurement.procurement_products pp "
-    "  ON pp.external_product_id = cp.spu_id "
-    "JOIN procurement.purchase_order_lines pol "
-    "  ON pol.procurement_product_id = pp.id "
-    "JOIN procurement.purchase_orders po ON po.id = pol.purchase_order_id "
-    "WHERE cp.id = :cp_id "
-    "  AND pol.unit_cost IS NOT NULL "
-    "ORDER BY pol.updated_at DESC NULLS LAST, pol.id DESC "
-    "LIMIT 1"
-)
-
-
-def _purchase_order_lookup(session: Session):
-    """Return a lookup fn: spu_pk → (unit_cost, currency) | (None, None)."""
-
-    def lookup(cp_id: int) -> tuple[Decimal | None, str | None]:
-        row = session.execute(_SQL_LATEST_PURCHASE_COST, {"cp_id": cp_id}).first()
-        if row is None:
-            return None, None
-        return row[0], row[1]
-
-    return lookup
-
 
 # 货源价（SOURCE_PRICE 兜底）lookup。两跳：
 # 1) SPU 主档行本身（procurement_products.external_product_id == spu_id）
@@ -132,7 +101,6 @@ def run_cost_snapshots(session: Session) -> dict[str, Any]:
             session,
             calculation_version=calculation_version,
             valid_from=valid_from,
-            purchase_order_lookup=_purchase_order_lookup(session),
             source_cost_lookup=_source_cost_lookup(session),
         )
         job.rows_total = written

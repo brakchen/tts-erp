@@ -16,7 +16,7 @@
 
 ```text
 1. MANUAL_ENTRY        — procurement.manual_product_costs (人工)
-2. LATEST_PURCHASE_COST— procurement.purchase_order_lines.unit_cost (妙手采购单)
+2. SOURCE_PRICE         — procurement.procurement_products.source_unit_cost
 3. SOURCE_PRICE        — procurement_products.source_unit_cost (本次回填的 1688 货源价)
 4. (无)                — 不写快照, 进入 active_spus_without_cost 待人工补
 ```
@@ -157,7 +157,7 @@ curl -sL -A 'Mozilla/5.0' "http://detail.1688.com/offer/<offer_id>.html" \
 
 ## 九、口径与陷阱
 
-- **source_unit_cost 是 1688 挂牌价, 不是成交价**。即使有妙手采购单(`purchase_order_lines.unit_cost`), 也优先用采购单成交价, 次才用 source_unit_cost。
+- **source_unit_cost 是 1688 挂牌价, 不是成交价**。它仅在缺少人工成本时作为 SOURCE_PRICE 估算值。
 - **source_unit_cost 不等于 originPrice**。originPrice 在 TK collect_box 平台采集中被人工/模板改坏(实测差 7×); source_unit_cost 来自公共采集箱 / 1688 listing, 可信。
 - **source_item_id 是全局的 (1688 offer id)**, 不按 procurement_account 隔离。本次 bridge 已特意去掉 account_id 约束。
 - **多计算版本**: cost_snapshots 每次跑累加 calculation_version; 取最新口径用 `ORDER BY calculation_version DESC, valid_from DESC LIMIT 1`。

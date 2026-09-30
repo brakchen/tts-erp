@@ -38,7 +38,6 @@ DAY = "2026-08-23"
 _CLEANUP_SQL = (
     "DELETE FROM plugin.ad_daily WHERE seller_id = :s",
     "DELETE FROM plugin.ad_today WHERE seller_id = :s",
-    "DELETE FROM plugin.ad_monthly WHERE seller_id = :s",
     "DELETE FROM plugin.ad_raw_log WHERE seller_id = :s",
 )
 
@@ -173,7 +172,13 @@ def test_dumps_v4_response_is_json_serializable_envelope(api_client, readwrite_k
     body = r.json()
     # dump 协议 envelope 字段固定
     assert set(body.keys()) == {"code", "requestId", "data"}
-    assert set(body["data"].keys()) == {"kind", "rowCount", "inserted", "duplicates", "day"}
+    assert set(body["data"].keys()) == {
+        "kind",
+        "rowCount",
+        "inserted",
+        "duplicates",
+        "day",
+    }
     json.dumps(body)
 
 

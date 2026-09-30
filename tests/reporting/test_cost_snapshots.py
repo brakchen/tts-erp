@@ -1,8 +1,7 @@
 """TDD tests for reporting.cost_snapshots.
 
-Verifies the priority chain: MANUAL_ENTRY > LATEST_PURCHASE_COST >
-SOURCE_PRICE (货源价估算兜底，2026-09-06 决策：货源价=采购价口径，method
-区分便于后续与采购单对账)。三种都无 → 不写快照，SPU 出现在无成本清单。
+Verifies the priority chain: MANUAL_ENTRY > SOURCE_PRICE. Both missing means
+no snapshot and the SPU appears in the no-cost inventory.
 """
 
 from __future__ import annotations
@@ -61,13 +60,12 @@ def _make_channel_product(session, account, external_id, status=ACTIVE_PRODUCT_S
 # ─── 1. priority: MANUAL_ENTRY wins ───────────────────────────────────
 
 
-def test_manual_entry_wins_over_purchase_order(db_session):
-    """When both manual_product_costs AND purchase_order_lines exist for
-    a SPU, the snapshot uses MANUAL_ENTRY (highest priority)."""
+def test_manual_entry_wins_over_source_price(db_session):
+    """Manual cost wins over the synchronized source-price estimate."""
     ca = _make_channel_account(db_session)
     cp = _make_channel_product(db_session, ca, "TEST_SPU_MANUAL")
 
-    # Inject a manual cost (cheaper than the purchase-order-derived cost)
+    # Inject a manual cost and a different source-price estimate.
     manual = ManualProductCost(
         spu_pk=cp.id,
         unit_cost=Decimal("5.50"),
@@ -79,13 +77,10 @@ def test_manual_entry_wins_over_purchase_order(db_session):
     db_session.add(manual)
     db_session.flush()
 
-    # Inject a fake purchase order line — the snapshot engine must NOT
-    # use it when manual exists. We use a sentinel raw value via
-    # compute_unit_cost_from_purchase_orders returning a different cost.
     actual = cost_snapshots.resolve_unit_cost(
         db_session,
         spu_pk=cp.id,
-        purchase_order_unit_cost=Decimal("99.99"),
+        source_unit_cost=Decimal("99.99"),
     )
     assert actual is not None
     assert actual.method == "MANUAL_ENTRY"
@@ -93,39 +88,15 @@ def test_manual_entry_wins_over_purchase_order(db_session):
     assert actual.currency == "USD"
 
 
-# ─── 2. fallback to LATEST_PURCHASE_COST ──────────────────────────────
-
-
-def test_fallback_to_latest_purchase_cost_when_no_manual(db_session):
-    """No manual cost ⇒ use purchase-order-derived LATEST_PURCHASE_COST."""
-    ca = _make_channel_account(db_session)
-    cp = _make_channel_product(db_session, ca, "TEST_SPU_PURCHASE")
-
-    actual = cost_snapshots.resolve_unit_cost(
-        db_session,
-        spu_pk=cp.id,
-        purchase_order_unit_cost=Decimal("12.34"),
-    )
-    assert actual is not None
-    assert actual.method == "LATEST_PURCHASE_COST"
-    assert actual.unit_cost == Decimal("12.34")
-
-
-# ─── 3. no source ⇒ NO snapshot ──────────────────────────────────────
+# ─── 2. no source ⇒ NO snapshot ──────────────────────────────────────
 
 
 def test_no_source_produces_no_snapshot(db_session):
-    """When both manual AND purchase-order inputs are missing, return
-    None. Cost-snapshot job will then skip this SPU; it will appear in
-    the no-cost inventory (a separate query)."""
+    """No manual or source-price input means no snapshot."""
     ca = _make_channel_account(db_session)
     cp = _make_channel_product(db_session, ca, "TEST_SPU_NOSRC")
 
-    actual = cost_snapshots.resolve_unit_cost(
-        db_session,
-        spu_pk=cp.id,
-        purchase_order_unit_cost=None,
-    )
+    actual = cost_snapshots.resolve_unit_cost(db_session, spu_pk=cp.id)
     assert actual is None
 
     # No snapshot row should have been written by the resolver itself
@@ -139,42 +110,23 @@ def test_no_source_produces_no_snapshot(db_session):
     assert len(snaps) == 0
 
 
-# ─── 4. SOURCE_PRICE (货源价) fallback ───────────────────────────────
+# ─── 3. SOURCE_PRICE (货源价) fallback ───────────────────────────────
 
 
 def test_source_price_fallback_when_no_other_source(db_session):
-    """No manual, no purchase-order cost, but a 货源价 is supplied →
-    SOURCE_PRICE snapshot (估算兜底), currency default CNY."""
+    """No manual cost but a 货源价 means SOURCE_PRICE with CNY default."""
     ca = _make_channel_account(db_session)
     cp = _make_channel_product(db_session, ca, "TEST_SPU_SOURCE")
 
     actual = cost_snapshots.resolve_unit_cost(
         db_session,
         spu_pk=cp.id,
-        purchase_order_unit_cost=None,
         source_unit_cost=Decimal("7.77"),
     )
     assert actual is not None
     assert actual.method == "SOURCE_PRICE"
     assert actual.unit_cost == Decimal("7.77")
     assert actual.currency == "CNY"
-
-
-def test_source_price_loses_to_purchase_order_cost(db_session):
-    """When both a purchase-order cost and a 货源价 exist (no manual),
-    LATEST_PURCHASE_COST wins — 成交口径优先于挂牌标价。"""
-    ca = _make_channel_account(db_session)
-    cp = _make_channel_product(db_session, ca, "TEST_SPU_SRC_LOSES")
-
-    actual = cost_snapshots.resolve_unit_cost(
-        db_session,
-        spu_pk=cp.id,
-        purchase_order_unit_cost=Decimal("12.34"),
-        source_unit_cost=Decimal("7.77"),
-    )
-    assert actual is not None
-    assert actual.method == "LATEST_PURCHASE_COST"
-    assert actual.unit_cost == Decimal("12.34")
 
 
 def test_source_price_loses_to_manual_cost(db_session):
@@ -196,7 +148,6 @@ def test_source_price_loses_to_manual_cost(db_session):
     actual = cost_snapshots.resolve_unit_cost(
         db_session,
         spu_pk=cp.id,
-        purchase_order_unit_cost=None,
         source_unit_cost=Decimal("7.77"),
     )
     assert actual is not None
@@ -231,12 +182,11 @@ def test_rebuild_snapshots_writes_source_price_with_lookup(db_session):
     assert snap.currency == "CNY"
 
 
-# ─── 5. no-cost inventory query ───────────────────────────────────────
+# ─── 4. no-cost inventory query ───────────────────────────────────────
 
 
 def test_no_cost_inventory_lists_active_spus_without_snapshot(db_session):
-    """active_spus_without_cost() returns active products_spu with no
-    effective cost (no manual, no purchase_order unit cost)."""
+    """active_spus_without_cost() returns active SPUs with no manual cost."""
     ca = _make_channel_account(db_session)
     cp_active_no_cost = _make_channel_product(db_session, ca, "TEST_SPU_ACTIVE_NC")
     cp_active_with_cost = _make_channel_product(db_session, ca, "TEST_SPU_ACTIVE_OK")
@@ -265,7 +215,7 @@ def test_no_cost_inventory_lists_active_spus_without_snapshot(db_session):
     assert "TEST_SPU_DELISTED" not in external_ids  # inactive = excluded
 
 
-# ─── 6. historical manual cost (valid_to set) is not picked up ────────
+# ─── 5. historical manual cost (valid_to set) is not picked up ────────
 
 
 def test_historical_manual_cost_not_picked_up(db_session):
@@ -286,9 +236,5 @@ def test_historical_manual_cost_not_picked_up(db_session):
     )
     db_session.flush()
 
-    actual = cost_snapshots.resolve_unit_cost(
-        db_session,
-        spu_pk=cp.id,
-        purchase_order_unit_cost=None,
-    )
+    actual = cost_snapshots.resolve_unit_cost(db_session, spu_pk=cp.id)
     assert actual is None  # only old (closed) manual entry exists

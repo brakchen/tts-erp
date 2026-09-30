@@ -282,8 +282,7 @@ def _insert_ad_daily(db_engine, seller_id: str) -> None:
 
 def test_unregistered_lists_analytics_source_only(api_client, admin_key, db_engine):
     """Phase 3 之后 (2026-09-17)：raw_log 表已 drop，plugin 域 source 移除。
-    /v2/admin/shops/unregistered 现在只从 analytics 域 (ad_today / ad_daily /
-    ad_monthly / plugin_logs) 枚举未注册店铺。
+    /v2/admin/shops/unregistered 现在只从广告结构化表和 plugin_logs 枚举未注册店铺。
     """
     _insert_ad_daily(db_engine, SHOP_B)
 

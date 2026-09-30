@@ -391,17 +391,6 @@ ALTER TABLE finance.settlement_transactions ALTER COLUMN id ADD GENERATED ALWAYS
 );
 
 
--- Name: shipment_lines; Type: TABLE; Schema: fulfillment; Owner: -
-
-CREATE TABLE IF NOT EXISTS fulfillment.shipment_lines (
-    shipment_id bigint NOT NULL,
-    sales_order_line_id bigint NOT NULL,
-    quantity numeric(20,4),
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
 -- Name: shipments; Type: TABLE; Schema: fulfillment; Owner: -
 
 CREATE TABLE IF NOT EXISTS fulfillment.shipments (
@@ -758,6 +747,58 @@ ALTER TABLE miaoshou.packages ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 );
 
 
+-- Name: purchase_order_raw_records; Type: TABLE; Schema: miaoshou; Owner: -
+
+CREATE TABLE IF NOT EXISTS miaoshou.purchase_order_raw_records (
+    id bigint NOT NULL,
+    credential_id bigint,
+    external_purchase_order_id text NOT NULL,
+    endpoint text NOT NULL,
+    payload jsonb NOT NULL,
+    payload_hash text NOT NULL,
+    captured_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE miaoshou.purchase_order_raw_records ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME miaoshou.purchase_order_raw_records_id_seq
+);
+
+
+-- Name: purchase_price_candidates; Type: TABLE; Schema: miaoshou; Owner: -
+
+CREATE TABLE IF NOT EXISTS miaoshou.purchase_price_candidates (
+    id bigint NOT NULL,
+    credential_id bigint NOT NULL,
+    spu_id text NOT NULL,
+    spu_pk bigint,
+    manual_cost_id bigint,
+    unit_cost numeric(20,4) NOT NULL,
+    currency text DEFAULT 'CNY'::text NOT NULL,
+    source_purchase_order_sn text NOT NULL,
+    source_item_id text NOT NULL,
+    source_purchase_at timestamp with time zone,
+    source_status text,
+    calculation_method text DEFAULT 'quantity_weighted_mean'::text NOT NULL,
+    calculation_version text DEFAULT 'purchase-price-v1'::text NOT NULL,
+    resolution_status text NOT NULL,
+    evidence jsonb NOT NULL,
+    last_seen_at timestamp with time zone DEFAULT now() NOT NULL,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_miaoshou_purchase_price_positive CHECK ((unit_cost > (0)::numeric))
+);
+
+
+
+ALTER TABLE miaoshou.purchase_price_candidates ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME miaoshou.purchase_price_candidates_id_seq
+);
+
+
 -- Name: sync_cursors; Type: TABLE; Schema: miaoshou; Owner: -
 
 CREATE TABLE IF NOT EXISTS miaoshou.sync_cursors (
@@ -822,32 +863,6 @@ CREATE TABLE IF NOT EXISTS plugin.ad_daily (
 
 ALTER TABLE plugin.ad_daily ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME plugin.ad_daily_id_seq
-);
-
-
--- Name: ad_monthly; Type: TABLE; Schema: plugin; Owner: -
-
-CREATE TABLE IF NOT EXISTS plugin.ad_monthly (
-    id bigint NOT NULL,
-    seller_id text NOT NULL,
-    advertiser_id text NOT NULL,
-    campaign_id text NOT NULL,
-    product_id text NOT NULL,
-    endpoint text NOT NULL,
-    year_month text NOT NULL,
-    mixed_real_cost numeric(20,4),
-    onsite_roi2_shopping_sku bigint,
-    onsite_roi2_shopping_value numeric(20,4),
-    onsite_mixed_real_roi2_shopping numeric(20,4),
-    metrics_extra jsonb,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
-
-ALTER TABLE plugin.ad_monthly ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME plugin.ad_monthly_id_seq
 );
 
 
@@ -1409,28 +1424,6 @@ ALTER TABLE procurement.procurement_accounts ALTER COLUMN id ADD GENERATED ALWAY
 );
 
 
--- Name: procurement_product_variants; Type: TABLE; Schema: procurement; Owner: -
-
-CREATE TABLE IF NOT EXISTS procurement.procurement_product_variants (
-    id bigint NOT NULL,
-    procurement_product_id bigint NOT NULL,
-    external_variant_id text NOT NULL,
-    variant_name text,
-    attributes jsonb,
-    supplier_sku text,
-    status text,
-    raw_record_id bigint,
-    synced_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
-
-ALTER TABLE procurement.procurement_product_variants ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME procurement.procurement_product_variants_id_seq
-);
-
-
 -- Name: procurement_products; Type: TABLE; Schema: procurement; Owner: -
 
 CREATE TABLE IF NOT EXISTS procurement.procurement_products (
@@ -1456,56 +1449,6 @@ CREATE TABLE IF NOT EXISTS procurement.procurement_products (
 
 ALTER TABLE procurement.procurement_products ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME procurement.procurement_products_id_seq
-);
-
-
--- Name: purchase_order_lines; Type: TABLE; Schema: procurement; Owner: -
-
-CREATE TABLE IF NOT EXISTS procurement.purchase_order_lines (
-    id bigint NOT NULL,
-    purchase_order_id bigint NOT NULL,
-    external_line_id text NOT NULL,
-    procurement_product_id bigint NOT NULL,
-    procurement_product_variant_id bigint,
-    quantity numeric(20,4),
-    unit_cost numeric(20,4),
-    currency text,
-    line_status text,
-    raw_record_id bigint,
-    synced_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
-
-ALTER TABLE procurement.purchase_order_lines ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME procurement.purchase_order_lines_id_seq
-);
-
-
--- Name: purchase_orders; Type: TABLE; Schema: procurement; Owner: -
-
-CREATE TABLE IF NOT EXISTS procurement.purchase_orders (
-    id bigint NOT NULL,
-    procurement_account_id bigint NOT NULL,
-    external_purchase_order_id text NOT NULL,
-    supplier_id text,
-    status text,
-    currency text,
-    total_amount numeric(20,4),
-    source_created_at timestamp with time zone,
-    source_updated_at timestamp with time zone,
-    paid_at timestamp with time zone,
-    completed_at timestamp with time zone,
-    raw_record_id bigint,
-    synced_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
-
-ALTER TABLE procurement.purchase_orders ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME procurement.purchase_orders_id_seq
 );
 
 
@@ -1571,9 +1514,6 @@ CREATE TABLE IF NOT EXISTS reporting.product_cost_snapshots (
     currency text NOT NULL,
     valid_from timestamp with time zone DEFAULT now() NOT NULL,
     valid_to timestamp with time zone,
-    source_purchase_quantity numeric(20,4),
-    source_purchase_amount numeric(20,4),
-    source_line_count integer,
     calculation_version integer DEFAULT 1 NOT NULL,
     calculated_at timestamp with time zone DEFAULT now() NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -1612,30 +1552,6 @@ CREATE TABLE IF NOT EXISTS reporting.product_profit_daily (
 
 ALTER TABLE reporting.product_profit_daily ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME reporting.product_profit_daily_id_seq
-);
-
-
--- Name: shipment_tracking_summary; Type: TABLE; Schema: reporting; Owner: -
-
-CREATE TABLE IF NOT EXISTS reporting.shipment_tracking_summary (
-    id bigint NOT NULL,
-    shipment_id bigint NOT NULL,
-    tracking_number text,
-    first_event_at timestamp with time zone,
-    last_event_at timestamp with time zone,
-    last_event_description text,
-    last_location text,
-    event_count integer,
-    calculation_version integer DEFAULT 1 NOT NULL,
-    calculated_at timestamp with time zone DEFAULT now() NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
-
-ALTER TABLE reporting.shipment_tracking_summary ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME reporting.shipment_tracking_summary_id_seq
 );
 
 
@@ -1832,12 +1748,6 @@ ALTER TABLE ONLY finance.settlement_transactions
     ADD CONSTRAINT uq_settlement_txn_stmt_ext UNIQUE (settlement_statement_id, external_transaction_id);
 
 
--- Name: shipment_lines shipment_lines_pkey; Type: CONSTRAINT; Schema: fulfillment; Owner: -
-
-ALTER TABLE ONLY fulfillment.shipment_lines
-    ADD CONSTRAINT shipment_lines_pkey PRIMARY KEY (shipment_id, sales_order_line_id);
-
-
 -- Name: shipments shipments_pkey; Type: CONSTRAINT; Schema: fulfillment; Owner: -
 
 ALTER TABLE ONLY fulfillment.shipments
@@ -1970,6 +1880,18 @@ ALTER TABLE ONLY miaoshou.packages
     ADD CONSTRAINT packages_pkey PRIMARY KEY (id);
 
 
+-- Name: purchase_order_raw_records purchase_order_raw_records_pkey; Type: CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.purchase_order_raw_records
+    ADD CONSTRAINT purchase_order_raw_records_pkey PRIMARY KEY (id);
+
+
+-- Name: purchase_price_candidates purchase_price_candidates_pkey; Type: CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.purchase_price_candidates
+    ADD CONSTRAINT purchase_price_candidates_pkey PRIMARY KEY (id);
+
+
 -- Name: sync_cursors sync_cursors_pkey; Type: CONSTRAINT; Schema: miaoshou; Owner: -
 
 ALTER TABLE ONLY miaoshou.sync_cursors
@@ -2000,6 +1922,18 @@ ALTER TABLE ONLY miaoshou.packages
     ADD CONSTRAINT uq_miaoshou_packages_credential_external UNIQUE (credential_id, external_package_id);
 
 
+-- Name: purchase_price_candidates uq_miaoshou_purchase_price_credential_spu; Type: CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.purchase_price_candidates
+    ADD CONSTRAINT uq_miaoshou_purchase_price_credential_spu UNIQUE (credential_id, spu_id);
+
+
+-- Name: purchase_order_raw_records uq_miaoshou_purchase_raw_credential_order_hash; Type: CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.purchase_order_raw_records
+    ADD CONSTRAINT uq_miaoshou_purchase_raw_credential_order_hash UNIQUE (credential_id, external_purchase_order_id, payload_hash);
+
+
 -- Name: sync_cursors uq_miaoshou_sync_cursors_credential_resource; Type: CONSTRAINT; Schema: miaoshou; Owner: -
 
 ALTER TABLE ONLY miaoshou.sync_cursors
@@ -2010,12 +1944,6 @@ ALTER TABLE ONLY miaoshou.sync_cursors
 
 ALTER TABLE ONLY plugin.ad_daily
     ADD CONSTRAINT ad_daily_pkey PRIMARY KEY (id);
-
-
--- Name: ad_monthly ad_monthly_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
-
-ALTER TABLE ONLY plugin.ad_monthly
-    ADD CONSTRAINT ad_monthly_pkey PRIMARY KEY (id);
 
 
 -- Name: ad_raw_log ad_raw_log_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
@@ -2162,12 +2090,6 @@ ALTER TABLE ONLY plugin.ad_daily
     ADD CONSTRAINT uq_ad_daily UNIQUE (seller_id, advertiser_id, endpoint, campaign_id, product_id, day);
 
 
--- Name: ad_monthly uq_ad_monthly; Type: CONSTRAINT; Schema: plugin; Owner: -
-
-ALTER TABLE ONLY plugin.ad_monthly
-    ADD CONSTRAINT uq_ad_monthly UNIQUE (seller_id, advertiser_id, endpoint, campaign_id, product_id, year_month);
-
-
 -- Name: ad_today uq_ad_today; Type: CONSTRAINT; Schema: plugin; Owner: -
 
 ALTER TABLE ONLY plugin.ad_today
@@ -2246,28 +2168,10 @@ ALTER TABLE ONLY procurement.procurement_accounts
     ADD CONSTRAINT procurement_accounts_pkey PRIMARY KEY (id);
 
 
--- Name: procurement_product_variants procurement_product_variants_pkey; Type: CONSTRAINT; Schema: procurement; Owner: -
-
-ALTER TABLE ONLY procurement.procurement_product_variants
-    ADD CONSTRAINT procurement_product_variants_pkey PRIMARY KEY (id);
-
-
 -- Name: procurement_products procurement_products_pkey; Type: CONSTRAINT; Schema: procurement; Owner: -
 
 ALTER TABLE ONLY procurement.procurement_products
     ADD CONSTRAINT procurement_products_pkey PRIMARY KEY (id);
-
-
--- Name: purchase_order_lines purchase_order_lines_pkey; Type: CONSTRAINT; Schema: procurement; Owner: -
-
-ALTER TABLE ONLY procurement.purchase_order_lines
-    ADD CONSTRAINT purchase_order_lines_pkey PRIMARY KEY (id);
-
-
--- Name: purchase_orders purchase_orders_pkey; Type: CONSTRAINT; Schema: procurement; Owner: -
-
-ALTER TABLE ONLY procurement.purchase_orders
-    ADD CONSTRAINT purchase_orders_pkey PRIMARY KEY (id);
 
 
 -- Name: spu_images spu_images_object_key_key; Type: CONSTRAINT; Schema: procurement; Owner: -
@@ -2294,24 +2198,6 @@ ALTER TABLE ONLY procurement.procurement_products
     ADD CONSTRAINT uq_procurement_products_account_ext UNIQUE (procurement_account_id, external_product_id);
 
 
--- Name: procurement_product_variants uq_procurement_variants_product_ext; Type: CONSTRAINT; Schema: procurement; Owner: -
-
-ALTER TABLE ONLY procurement.procurement_product_variants
-    ADD CONSTRAINT uq_procurement_variants_product_ext UNIQUE (procurement_product_id, external_variant_id);
-
-
--- Name: purchase_order_lines uq_purchase_order_lines_order_ext; Type: CONSTRAINT; Schema: procurement; Owner: -
-
-ALTER TABLE ONLY procurement.purchase_order_lines
-    ADD CONSTRAINT uq_purchase_order_lines_order_ext UNIQUE (purchase_order_id, external_line_id);
-
-
--- Name: purchase_orders uq_purchase_orders_account_ext; Type: CONSTRAINT; Schema: procurement; Owner: -
-
-ALTER TABLE ONLY procurement.purchase_orders
-    ADD CONSTRAINT uq_purchase_orders_account_ext UNIQUE (procurement_account_id, external_purchase_order_id);
-
-
 -- Name: alembic_version alembic_version_pkc; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY public.alembic_version
@@ -2336,12 +2222,6 @@ ALTER TABLE ONLY reporting.product_profit_daily
     ADD CONSTRAINT product_profit_daily_pkey PRIMARY KEY (id);
 
 
--- Name: shipment_tracking_summary shipment_tracking_summary_pkey; Type: CONSTRAINT; Schema: reporting; Owner: -
-
-ALTER TABLE ONLY reporting.shipment_tracking_summary
-    ADD CONSTRAINT shipment_tracking_summary_pkey PRIMARY KEY (id);
-
-
 -- Name: shop_fee_rate_estimates shop_fee_rate_estimates_pkey; Type: CONSTRAINT; Schema: reporting; Owner: -
 
 ALTER TABLE ONLY reporting.shop_fee_rate_estimates
@@ -2364,12 +2244,6 @@ ALTER TABLE ONLY reporting.product_profit_daily
 
 ALTER TABLE ONLY reporting.shop_fee_rate_estimates
     ADD CONSTRAINT uq_shop_fee_rate_est_shop_day UNIQUE (shop_pk, calculated_on);
-
-
--- Name: shipment_tracking_summary uq_tracking_summary_shipment_version; Type: CONSTRAINT; Schema: reporting; Owner: -
-
-ALTER TABLE ONLY reporting.shipment_tracking_summary
-    ADD CONSTRAINT uq_tracking_summary_shipment_version UNIQUE (shipment_id, calculation_version);
 
 
 -- Name: api_keys api_keys_pkey; Type: CONSTRAINT; Schema: security; Owner: -
@@ -2569,6 +2443,26 @@ CREATE INDEX IF NOT EXISTS ix_miaoshou_packages_source_updated ON miaoshou.packa
 CREATE INDEX IF NOT EXISTS ix_miaoshou_packages_status ON miaoshou.packages USING btree (app_package_status);
 
 
+-- Name: ix_miaoshou_purchase_price_source_at; Type: INDEX; Schema: miaoshou; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_miaoshou_purchase_price_source_at ON miaoshou.purchase_price_candidates USING btree (source_purchase_at);
+
+
+-- Name: ix_miaoshou_purchase_price_status; Type: INDEX; Schema: miaoshou; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_miaoshou_purchase_price_status ON miaoshou.purchase_price_candidates USING btree (resolution_status);
+
+
+-- Name: ix_miaoshou_purchase_raw_captured; Type: INDEX; Schema: miaoshou; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_miaoshou_purchase_raw_captured ON miaoshou.purchase_order_raw_records USING btree (captured_at);
+
+
+-- Name: ix_miaoshou_purchase_raw_order; Type: INDEX; Schema: miaoshou; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_miaoshou_purchase_raw_order ON miaoshou.purchase_order_raw_records USING btree (credential_id, external_purchase_order_id);
+
+
 -- Name: ix_miaoshou_sync_issues_resource_resolved; Type: INDEX; Schema: miaoshou; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_miaoshou_sync_issues_resource_resolved ON miaoshou.sync_issues USING btree (resource, resolved_at);
@@ -2582,11 +2476,6 @@ CREATE INDEX IF NOT EXISTS idx_ad_daily_coverage ON plugin.ad_daily USING btree 
 -- Name: idx_ad_daily_product_day; Type: INDEX; Schema: plugin; Owner: -
 
 CREATE INDEX IF NOT EXISTS idx_ad_daily_product_day ON plugin.ad_daily USING btree (product_id, day);
-
-
--- Name: idx_ad_monthly_coverage; Type: INDEX; Schema: plugin; Owner: -
-
-CREATE INDEX IF NOT EXISTS idx_ad_monthly_coverage ON plugin.ad_monthly USING btree (seller_id, advertiser_id, endpoint, campaign_id, year_month);
 
 
 -- Name: idx_ad_raw_log_day; Type: INDEX; Schema: plugin; Owner: -
@@ -2749,21 +2638,6 @@ CREATE INDEX IF NOT EXISTS ix_procurement_products_product_type ON procurement.p
 CREATE INDEX IF NOT EXISTS ix_procurement_products_status ON procurement.procurement_products USING btree (status);
 
 
--- Name: ix_procurement_variants_supplier_sku; Type: INDEX; Schema: procurement; Owner: -
-
-CREATE INDEX IF NOT EXISTS ix_procurement_variants_supplier_sku ON procurement.procurement_product_variants USING btree (supplier_sku);
-
-
--- Name: ix_purchase_order_lines_product; Type: INDEX; Schema: procurement; Owner: -
-
-CREATE INDEX IF NOT EXISTS ix_purchase_order_lines_product ON procurement.purchase_order_lines USING btree (procurement_product_id);
-
-
--- Name: ix_purchase_orders_status; Type: INDEX; Schema: procurement; Owner: -
-
-CREATE INDEX IF NOT EXISTS ix_purchase_orders_status ON procurement.purchase_orders USING btree (status);
-
-
 -- Name: ix_spu_images_account_uploaded; Type: INDEX; Schema: procurement; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_spu_images_account_uploaded ON procurement.spu_images USING btree (shop_pk, uploaded_at DESC) WHERE (deleted_at IS NULL);
@@ -2869,11 +2743,6 @@ CREATE OR REPLACE TRIGGER trg_finance_settlement_statements_touch BEFORE UPDATE 
 CREATE OR REPLACE TRIGGER trg_finance_settlement_transactions_touch BEFORE UPDATE ON finance.settlement_transactions FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
--- Name: shipment_lines trg_fulfillment_shipment_lines_touch; Type: TRIGGER; Schema: fulfillment; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_fulfillment_shipment_lines_touch BEFORE UPDATE ON fulfillment.shipment_lines FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
 -- Name: shipments trg_fulfillment_shipments_touch; Type: TRIGGER; Schema: fulfillment; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_fulfillment_shipments_touch BEFORE UPDATE ON fulfillment.shipments FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
@@ -2944,6 +2813,11 @@ CREATE OR REPLACE TRIGGER trg_miaoshou_package_items_touch BEFORE UPDATE ON miao
 CREATE OR REPLACE TRIGGER trg_miaoshou_packages_touch BEFORE UPDATE ON miaoshou.packages FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
+-- Name: purchase_price_candidates trg_miaoshou_purchase_price_candidates_touch; Type: TRIGGER; Schema: miaoshou; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_miaoshou_purchase_price_candidates_touch BEFORE UPDATE ON miaoshou.purchase_price_candidates FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
 -- Name: sync_cursors trg_miaoshou_sync_cursors_touch; Type: TRIGGER; Schema: miaoshou; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_miaoshou_sync_cursors_touch BEFORE UPDATE ON miaoshou.sync_cursors FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
@@ -2957,11 +2831,6 @@ CREATE OR REPLACE TRIGGER trg_miaoshou_sync_issues_touch BEFORE UPDATE ON miaosh
 -- Name: ad_daily trg_analytics_ad_daily_touch; Type: TRIGGER; Schema: plugin; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_analytics_ad_daily_touch BEFORE UPDATE ON plugin.ad_daily FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
--- Name: ad_monthly trg_analytics_ad_monthly_touch; Type: TRIGGER; Schema: plugin; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_analytics_ad_monthly_touch BEFORE UPDATE ON plugin.ad_monthly FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
 -- Name: ad_raw_log trg_analytics_ad_raw_log_touch; Type: TRIGGER; Schema: plugin; Owner: -
@@ -2989,24 +2858,9 @@ CREATE OR REPLACE TRIGGER trg_procurement_manual_product_costs_touch BEFORE UPDA
 CREATE OR REPLACE TRIGGER trg_procurement_procurement_accounts_touch BEFORE UPDATE ON procurement.procurement_accounts FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
--- Name: procurement_product_variants trg_procurement_procurement_product_variants_touch; Type: TRIGGER; Schema: procurement; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_procurement_procurement_product_variants_touch BEFORE UPDATE ON procurement.procurement_product_variants FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
 -- Name: procurement_products trg_procurement_procurement_products_touch; Type: TRIGGER; Schema: procurement; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_procurement_procurement_products_touch BEFORE UPDATE ON procurement.procurement_products FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
--- Name: purchase_order_lines trg_procurement_purchase_order_lines_touch; Type: TRIGGER; Schema: procurement; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_procurement_purchase_order_lines_touch BEFORE UPDATE ON procurement.purchase_order_lines FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
--- Name: purchase_orders trg_procurement_purchase_orders_touch; Type: TRIGGER; Schema: procurement; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_procurement_purchase_orders_touch BEFORE UPDATE ON procurement.purchase_orders FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
 -- Name: spu_images trg_procurement_spu_images_touch; Type: TRIGGER; Schema: procurement; Owner: -
@@ -3027,11 +2881,6 @@ CREATE OR REPLACE TRIGGER trg_reporting_product_cost_snapshots_touch BEFORE UPDA
 -- Name: product_profit_daily trg_reporting_product_profit_daily_touch; Type: TRIGGER; Schema: reporting; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_reporting_product_profit_daily_touch BEFORE UPDATE ON reporting.product_profit_daily FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
--- Name: shipment_tracking_summary trg_reporting_shipment_tracking_summary_touch; Type: TRIGGER; Schema: reporting; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_reporting_shipment_tracking_summary_touch BEFORE UPDATE ON reporting.shipment_tracking_summary FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
 -- Name: shop_fee_rate_estimates trg_reporting_shop_fee_rate_estimates_touch; Type: TRIGGER; Schema: reporting; Owner: -
@@ -3200,18 +3049,6 @@ ALTER TABLE ONLY finance.settlement_transactions
     ADD CONSTRAINT settlement_transactions_settlement_statement_id_fkey FOREIGN KEY (settlement_statement_id) REFERENCES finance.settlement_statements(id) ON DELETE RESTRICT;
 
 
--- Name: shipment_lines shipment_lines_sales_order_line_id_fkey; Type: FK CONSTRAINT; Schema: fulfillment; Owner: -
-
-ALTER TABLE ONLY fulfillment.shipment_lines
-    ADD CONSTRAINT shipment_lines_sales_order_line_id_fkey FOREIGN KEY (sales_order_line_id) REFERENCES commerce.sales_order_lines(id) ON DELETE RESTRICT;
-
-
--- Name: shipment_lines shipment_lines_shipment_id_fkey; Type: FK CONSTRAINT; Schema: fulfillment; Owner: -
-
-ALTER TABLE ONLY fulfillment.shipment_lines
-    ADD CONSTRAINT shipment_lines_shipment_id_fkey FOREIGN KEY (shipment_id) REFERENCES fulfillment.shipments(id) ON DELETE CASCADE;
-
-
 -- Name: shipments shipments_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: fulfillment; Owner: -
 
 ALTER TABLE ONLY fulfillment.shipments
@@ -3278,6 +3115,30 @@ ALTER TABLE ONLY miaoshou.packages
     ADD CONSTRAINT packages_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES miaoshou.package_raw_records(id) ON DELETE RESTRICT;
 
 
+-- Name: purchase_order_raw_records purchase_order_raw_records_credential_id_fkey; Type: FK CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.purchase_order_raw_records
+    ADD CONSTRAINT purchase_order_raw_records_credential_id_fkey FOREIGN KEY (credential_id) REFERENCES integration.credentials(id) ON DELETE SET NULL;
+
+
+-- Name: purchase_price_candidates purchase_price_candidates_credential_id_fkey; Type: FK CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.purchase_price_candidates
+    ADD CONSTRAINT purchase_price_candidates_credential_id_fkey FOREIGN KEY (credential_id) REFERENCES integration.credentials(id) ON DELETE CASCADE;
+
+
+-- Name: purchase_price_candidates purchase_price_candidates_manual_cost_id_fkey; Type: FK CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.purchase_price_candidates
+    ADD CONSTRAINT purchase_price_candidates_manual_cost_id_fkey FOREIGN KEY (manual_cost_id) REFERENCES procurement.manual_product_costs(id) ON DELETE SET NULL;
+
+
+-- Name: purchase_price_candidates purchase_price_candidates_spu_pk_fkey; Type: FK CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.purchase_price_candidates
+    ADD CONSTRAINT purchase_price_candidates_spu_pk_fkey FOREIGN KEY (spu_pk) REFERENCES commerce.products_spu(id) ON DELETE SET NULL;
+
+
 -- Name: sync_cursors sync_cursors_credential_id_fkey; Type: FK CONSTRAINT; Schema: miaoshou; Owner: -
 
 ALTER TABLE ONLY miaoshou.sync_cursors
@@ -3302,18 +3163,6 @@ ALTER TABLE ONLY procurement.procurement_accounts
     ADD CONSTRAINT procurement_accounts_credential_id_fkey FOREIGN KEY (credential_id) REFERENCES integration.credentials(id) ON DELETE SET NULL;
 
 
--- Name: procurement_product_variants procurement_product_variants_procurement_product_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
-
-ALTER TABLE ONLY procurement.procurement_product_variants
-    ADD CONSTRAINT procurement_product_variants_procurement_product_id_fkey FOREIGN KEY (procurement_product_id) REFERENCES procurement.procurement_products(id) ON DELETE RESTRICT;
-
-
--- Name: procurement_product_variants procurement_product_variants_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
-
-ALTER TABLE ONLY procurement.procurement_product_variants
-    ADD CONSTRAINT procurement_product_variants_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
-
-
 -- Name: procurement_products procurement_products_procurement_account_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
 
 ALTER TABLE ONLY procurement.procurement_products
@@ -3324,42 +3173,6 @@ ALTER TABLE ONLY procurement.procurement_products
 
 ALTER TABLE ONLY procurement.procurement_products
     ADD CONSTRAINT procurement_products_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
-
-
--- Name: purchase_order_lines purchase_order_lines_procurement_product_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
-
-ALTER TABLE ONLY procurement.purchase_order_lines
-    ADD CONSTRAINT purchase_order_lines_procurement_product_id_fkey FOREIGN KEY (procurement_product_id) REFERENCES procurement.procurement_products(id) ON DELETE RESTRICT;
-
-
--- Name: purchase_order_lines purchase_order_lines_procurement_product_variant_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
-
-ALTER TABLE ONLY procurement.purchase_order_lines
-    ADD CONSTRAINT purchase_order_lines_procurement_product_variant_id_fkey FOREIGN KEY (procurement_product_variant_id) REFERENCES procurement.procurement_product_variants(id) ON DELETE SET NULL;
-
-
--- Name: purchase_order_lines purchase_order_lines_purchase_order_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
-
-ALTER TABLE ONLY procurement.purchase_order_lines
-    ADD CONSTRAINT purchase_order_lines_purchase_order_id_fkey FOREIGN KEY (purchase_order_id) REFERENCES procurement.purchase_orders(id) ON DELETE RESTRICT;
-
-
--- Name: purchase_order_lines purchase_order_lines_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
-
-ALTER TABLE ONLY procurement.purchase_order_lines
-    ADD CONSTRAINT purchase_order_lines_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
-
-
--- Name: purchase_orders purchase_orders_procurement_account_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
-
-ALTER TABLE ONLY procurement.purchase_orders
-    ADD CONSTRAINT purchase_orders_procurement_account_id_fkey FOREIGN KEY (procurement_account_id) REFERENCES procurement.procurement_accounts(id) ON DELETE RESTRICT;
-
-
--- Name: purchase_orders purchase_orders_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
-
-ALTER TABLE ONLY procurement.purchase_orders
-    ADD CONSTRAINT purchase_orders_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
 
 
 -- Name: spu_images spu_images_channel_account_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
@@ -3402,12 +3215,6 @@ ALTER TABLE ONLY reporting.product_cost_snapshots
 
 ALTER TABLE ONLY reporting.product_profit_daily
     ADD CONSTRAINT product_profit_daily_channel_product_id_fkey FOREIGN KEY (spu_pk) REFERENCES commerce.products_spu(id) ON DELETE RESTRICT;
-
-
--- Name: shipment_tracking_summary shipment_tracking_summary_shipment_id_fkey; Type: FK CONSTRAINT; Schema: reporting; Owner: -
-
-ALTER TABLE ONLY reporting.shipment_tracking_summary
-    ADD CONSTRAINT shipment_tracking_summary_shipment_id_fkey FOREIGN KEY (shipment_id) REFERENCES fulfillment.shipments(id) ON DELETE CASCADE;
 
 
 -- Name: shop_fee_rate_estimates shop_fee_rate_estimates_shop_pk_fkey; Type: FK CONSTRAINT; Schema: reporting; Owner: -
