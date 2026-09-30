@@ -1,6 +1,6 @@
 """Tests for ``tts_erp_v2/analytics/repository.py`` — v4 daily-sync-with-coverage.
 
-Tests daily/today structured upserts, monthly raw-only archival, coverage,
+Tests daily/today structured upserts, coverage,
 and plugin logs.
 """
 
@@ -206,44 +206,6 @@ def test_upsert_today_rows_upserts(db_session):
 # ---------------------------------------------------------------------------
 
 
-def test_upsert_monthly_rows_archives_raw_only(db_session):
-    """v4 monthly rows are accepted into ad_raw_log only."""
-    from tts_erp_v2.plugin.ads import repository
-
-    rows = [_base_row()]
-    inserted = repository.upsert_monthly_rows(
-        db_session,
-        seller_id=_SELLER,
-        advertiser_id=_ADV,
-        endpoint=_ENDPOINT,
-        campaign_id=_CAMPAIGN,
-        year_month="2026-09",
-        rows=rows,
-        request_url="https://x/",
-        request_body={},
-        response_status=200,
-        response_body={},
-        created_at=datetime(2026, 10, 1, tzinfo=UTC),
-        request_id="TEST_monthly1",
-        source="t",
-    )
-    assert inserted == 0
-
-    count = db_session.execute(
-        text(
-            "SELECT count(*) FROM plugin.ad_raw_log "
-            "WHERE seller_id = :s AND kind = 'monthly' AND year_month = '2026-09'"
-        ),
-        {"s": _SELLER},
-    ).scalar()
-    assert count == 1
-
-
-# ---------------------------------------------------------------------------
-# coverage queries
-# ---------------------------------------------------------------------------
-
-
 def test_get_coverage_daily_returns_map(db_session):
     """coverage daily 查询返回 {campaign_id: [days]}。"""
     from tts_erp_v2.plugin.ads import repository
@@ -295,47 +257,11 @@ def test_get_coverage_daily_returns_map(db_session):
     assert "2026-09-02" in coverage[_CAMPAIGN]
 
 
-def test_get_coverage_monthly_returns_map(db_session):
-    """coverage monthly 查询返回 {campaign_id: [months]}。"""
-    from tts_erp_v2.plugin.ads import repository
-
-    repository.upsert_monthly_rows(
-        db_session,
-        seller_id=_SELLER,
-        advertiser_id=_ADV,
-        endpoint=_ENDPOINT,
-        campaign_id=_CAMPAIGN,
-        year_month="2026-08",
-        rows=[_base_row()],
-        request_url="https://x/",
-        request_body={},
-        response_status=200,
-        response_body={},
-        created_at=datetime(2026, 9, 1, tzinfo=UTC),
-        request_id="TEST_covm1",
-        source="t",
-    )
-
-    coverage, total = repository.get_coverage_monthly(
-        db_session,
-        seller_id=_SELLER,
-        advertiser_id=_ADV,
-        endpoint=_ENDPOINT,
-        start_month="2026-07",
-        end_month="2026-12",
-    )
-    assert total == 1
-    assert _CAMPAIGN in coverage
-    assert "2026-08" in coverage[_CAMPAIGN]
-
-
-# ---------------------------------------------------------------------------
-# campaign-level endpoint 分流（fix/analytics-v4-campaign-rows）
-# ---------------------------------------------------------------------------
-# TikTok campaign_opt_log_list 返回 campaign-level 变更事件，rows 没有
-# product_id，服务端 upsert_*_rows 入口走 archive-only 路径：只入 ad_raw_log，
-# 不入 ad_daily / ad_today。下游 spu_roi 读 ad_daily + ad_today
-# 不会被污染。
+def _change_event_rows() -> list[dict]:
+    return [
+        {"change_id": "evt-001", "change_type": "BUDGET", "new_value": "150.00"},
+        {"change_id": "evt-002", "change_type": "ROI", "new_value": "1.8"},
+    ]
 
 
 _CAMPAIGN_LEVEL_ENDPOINT = "/oec_ads/shopping/v1/oec/stat/campaign_opt_log_list"
@@ -455,46 +381,6 @@ def test_upsert_today_rows_campaign_level_only_archives(db_session):
         {"s": _SELLER},
     ).scalar()
     assert raw_count == 1
-
-
-def test_upsert_monthly_rows_campaign_level_only_archives(db_session):
-    """campaign-level monthly payloads also write one raw-log row."""
-    from tts_erp_v2.plugin.ads import repository
-
-    inserted = repository.upsert_monthly_rows(
-        db_session,
-        seller_id=_SELLER,
-        advertiser_id=_ADV,
-        endpoint=_CAMPAIGN_LEVEL_ENDPOINT,
-        campaign_id=_CAMPAIGN,
-        year_month="2026-08",
-        rows=_change_event_rows(),
-        request_url="https://x/",
-        request_body={},
-        response_status=200,
-        response_body={
-            "status": 200,
-            "body": {"data": {"table": _change_event_rows()}},
-        },
-        created_at=datetime(2026, 9, 1, 1, 0, 0, tzinfo=UTC),
-        request_id="TEST_req_camp_lvl_monthly",
-        source="t",
-    )
-    assert inserted == 0
-
-    raw_count = db_session.execute(
-        text(
-            "SELECT count(*) FROM plugin.ad_raw_log "
-            "WHERE seller_id = :s AND kind = 'monthly' AND year_month = :ym"
-        ),
-        {"s": _SELLER, "ym": "2026-08"},
-    ).scalar()
-    assert raw_count == 1
-
-
-# ---------------------------------------------------------------------------
-# upsert_campaign_opt_logs（2026-09-14：bad opt_time 不再用 now() 顶替，跳过该行）
-# ---------------------------------------------------------------------------
 
 
 def test_upsert_campaign_opt_logs_skips_bad_opt_time(db_session):

@@ -3,12 +3,12 @@
 覆盖（tech-doc/analytics/daily-sync-with-coverage.md §8.1）：
 - v4 daily 写入 ad_daily + ad_raw_log
 - v4 today 写入 ad_today（覆盖）
-- v4 monthly 仅写入 ad_raw_log，并明确返回 raw_only
+- monthly dump 被拒绝
 - 重复写入 daily → ON CONFLICT DO NOTHING（inserted=0）
 - 重复写入 today → ON CONFLICT DO UPDATE（值更新）
 - 缺 rows → 400
 - kind=daily 缺 day → 400
-- kind=monthly 缺 yearMonth → 400
+- kind=monthly → 400
 """
 
 from __future__ import annotations
@@ -50,7 +50,6 @@ def _dump_body_v4(
     *,
     kind: str = "daily",
     day: str = "2026-09-08",
-    year_month: str | None = None,
     campaign: str = CAMPAIGN,
     rows: list[dict] | None = None,
     endpoint: str = ENDPOINT,
@@ -76,10 +75,7 @@ def _dump_body_v4(
         "response": {"status": 200, "body": {"data": {"table": rows}}},
         "createdAt": "2026-09-09T02:00:00.000Z",
     }
-    if kind == "monthly":
-        dump["yearMonth"] = year_month or "2026-08"
-    else:
-        dump["day"] = day
+    dump["day"] = day
     return {
         "protocolVersion": 4,
         "requestId": str(uuid.uuid4()),
@@ -151,22 +147,6 @@ def test_dumps_v4_today(api_client, readwrite_key, db_engine):
     assert data["rowCount"] == 1
     assert data["inserted"] == 1
     assert _ad_today_count(db_engine) == 1
-    assert _ad_raw_log_count(db_engine) == 1
-
-
-def test_dumps_v4_monthly(api_client, readwrite_key, db_engine):
-    """Monthly dumps are accepted as raw-only audit rows."""
-    r = _post(
-        api_client, readwrite_key, _dump_body_v4(kind="monthly", year_month="2026-08")
-    )
-    assert r.status_code == 200, r.text
-    data = r.json()["data"]
-    assert data["kind"] == "monthly"
-    assert data["yearMonth"] == "2026-08"
-    assert data["rowCount"] == 1
-    assert data["inserted"] == 0
-    assert data["duplicates"] == 0
-    assert data["status"] == "raw_only"
     assert _ad_raw_log_count(db_engine) == 1
 
 
@@ -293,10 +273,9 @@ def test_dumps_v4_missing_day(api_client, readwrite_key, db_engine):
     assert r.json()["code"] == "SCHEMA_INVALID"
 
 
-def test_dumps_v4_missing_year_month(api_client, readwrite_key, db_engine):
-    """kind=monthly 缺 yearMonth → 400 SCHEMA_INVALID。"""
-    body = _dump_body_v4(kind="monthly", year_month="2026-08")
-    del body["dump"]["yearMonth"]
+def test_dumps_v4_rejects_monthly(api_client, readwrite_key):
+    """Monthly dump is retired and rejected at the wire boundary."""
+    body = _dump_body_v4(kind="monthly")
     r = _post(api_client, readwrite_key, body)
     assert r.status_code == 400
     assert r.json()["code"] == "SCHEMA_INVALID"
@@ -376,25 +355,6 @@ def test_dumps_v4_campaign_change_log_only_archives(
     assert archived["body"]["data"]["table"][0]["change_id"] == "evt-001"
     assert archived["body"]["data"]["table"][1]["change_type"] == "ROI"
     assert archived["status"] == 200
-
-
-def test_dumps_v4_monthly_campaign_change_log_only_archives(
-    api_client, readwrite_key, db_engine
-):
-    """Campaign-level monthly rows are also accepted as raw-only."""
-    body = _dump_body_v4(
-        kind="monthly",
-        year_month="2026-08",
-        endpoint=CAMPAIGN_CHANGE_LOG_ENDPOINT,
-        rows=_campaign_change_log_rows(),
-    )
-    r = _post(api_client, readwrite_key, body)
-    assert r.status_code == 200, r.text
-    data = r.json()["data"]
-    assert data["status"] == "raw_only", data
-    assert data["inserted"] == 0
-    assert data["duplicates"] == 0
-    assert _ad_raw_log_count(db_engine) == 1
 
 
 def test_dumps_v4_today_campaign_change_log_only_archives(

@@ -8,8 +8,8 @@
 ``analytics`` 仅是路由文件名和 URL 前缀层面的历史残留，不代表独立 schema。
 
 v4 protocol（tech-doc/analytics/daily-sync-with-coverage.md）：
-- POST /dumps: daily/today 写结构化表；monthly 只归档 plugin.ad_raw_log
-- GET /coverage: daily 查结构化表，monthly 从 ad_raw_log 查询
+- POST /dumps: daily/today 写结构化表
+- GET /coverage: 查询 daily 覆盖数据
 - POST /plugin-logs: 插件运行时日志上传
 
 Handler 结构说明：
@@ -150,7 +150,6 @@ class DumpBodyIn(BaseModel):
     kind: str | None = Field(default=None, max_length=16)
     campaignId: str = Field(min_length=1, max_length=128)
     rows: list[dict[str, Any]] | None = None
-    yearMonth: str | None = Field(default=None, max_length=7)
     request: dict[str, Any]
     response: dict[str, Any]
     # 统一命名 createdAt（2026-09-10 用户拍板）。capturedAt 仅作旧插件兼容别名，
@@ -200,8 +199,6 @@ def get_coverage_endpoint(
     kind: str = Query(..., max_length=16),
     startDay: date | None = Query(default=None),
     endDay: date | None = Query(default=None),
-    startMonth: str | None = Query(default=None, max_length=7),
-    endMonth: str | None = Query(default=None, max_length=7),
     # 插件传入本轮已发现的完整计划集合；重复 query 参数对应多个 campaign。
     campaignId: list[str] = Query(default=[]),
     # 2026-09-11 加分页（隐患 #3）：默认 page=1, pageSize=500。客户端 fetchBatchCoverage
@@ -215,7 +212,7 @@ def get_coverage_endpoint(
     """Coverage 批量查询（方案 B）：分页返回 campaign 的覆盖数据。
 
     tech-doc/analytics/daily-sync-with-coverage.md §5.1。
-    支持 kind=daily 和 kind=monthly 两种粒度。
+    仅支持 kind=daily。
     响应新增 pagination 字段：{page, pageSize, totalCampaigns, totalPages, hasMore}。
     """
     request_id = _request_id_from_headers(request)
@@ -224,7 +221,6 @@ def get_coverage_endpoint(
         f"{_PATH_COVERAGE}?sellerId={sellerId}&advertiserId={advertiserId}"
         f"&endpoint={endpoint}&kind={kind}"
         f"&startDay={startDay or ''}&endDay={endDay or ''}"
-        f"&startMonth={startMonth or ''}&endMonth={endMonth or ''}"
     )
 
     if not scope_grants(
@@ -263,12 +259,12 @@ def get_coverage_endpoint(
             path=audit_path,
         )
 
-    if kind not in ("daily", "monthly"):
+    if kind != "daily":
         return _audit_and_error(
             request_id=request_id,
             status=400,
             code="SCHEMA_INVALID",
-            message="kind must be 'daily' or 'monthly'",
+            message="kind must be 'daily'",
             retryable=False,
             key_prefix=key_prefix,
             error_code="SCHEMA_INVALID",
@@ -323,119 +319,48 @@ def get_coverage_endpoint(
             path=audit_path,
         )
 
-    if kind == "daily":
-        if startDay is None or endDay is None:
-            return _audit_and_error(
-                request_id=request_id,
-                status=400,
-                code="SCHEMA_INVALID",
-                message="startDay and endDay are required for kind=daily",
-                retryable=False,
-                key_prefix=key_prefix,
-                error_code="SCHEMA_INVALID",
-                method="GET",
-                path=audit_path,
-            )
-        if startDay > endDay:
-            return _audit_and_error(
-                request_id=request_id,
-                status=400,
-                code="SCHEMA_INVALID",
-                message="startDay must be <= endDay",
-                retryable=False,
-                key_prefix=key_prefix,
-                error_code="SCHEMA_INVALID",
-                method="GET",
-                path=audit_path,
-            )
-    else:  # kind == "monthly"
-        if startMonth is None or endMonth is None:
-            return _audit_and_error(
-                request_id=request_id,
-                status=400,
-                code="SCHEMA_INVALID",
-                message="startMonth and endMonth are required for kind=monthly",
-                retryable=False,
-                key_prefix=key_prefix,
-                error_code="SCHEMA_INVALID",
-                method="GET",
-                path=audit_path,
-            )
-        if not re.match(r"^\d{4}-\d{2}$", startMonth) or not re.match(
-            r"^\d{4}-\d{2}$", endMonth
-        ):
-            return _audit_and_error(
-                request_id=request_id,
-                status=400,
-                code="SCHEMA_INVALID",
-                message="startMonth/endMonth must be YYYY-MM format",
-                retryable=False,
-                key_prefix=key_prefix,
-                error_code="SCHEMA_INVALID",
-                method="GET",
-                path=audit_path,
-            )
-        if startMonth > endMonth:
-            return _audit_and_error(
-                request_id=request_id,
-                status=400,
-                code="SCHEMA_INVALID",
-                message="startMonth must be <= endMonth",
-                retryable=False,
-                key_prefix=key_prefix,
-                error_code="SCHEMA_INVALID",
-                method="GET",
-                path=audit_path,
-            )
+    if startDay is None or endDay is None:
+        return _audit_and_error(
+            request_id=request_id,
+            status=400,
+            code="SCHEMA_INVALID",
+            message="startDay and endDay are required for kind=daily",
+            retryable=False,
+            key_prefix=key_prefix,
+            error_code="SCHEMA_INVALID",
+            method="GET",
+            path=audit_path,
+        )
+    if startDay > endDay:
+        return _audit_and_error(
+            request_id=request_id,
+            status=400,
+            code="SCHEMA_INVALID",
+            message="startDay must be <= endDay",
+            retryable=False,
+            key_prefix=key_prefix,
+            error_code="SCHEMA_INVALID",
+            method="GET",
+            path=audit_path,
+        )
 
     from tts_erp_v2.plugin.ads.repository import (
         get_coverage_daily,
-        get_coverage_monthly,
     )
 
     # 2026-09-11：分页实现。get_coverage_* 现在返回 (campaigns_page, totalCampaigns)
-    if kind == "daily":
-        campaigns, total_campaigns = get_coverage_daily(
-            sess,
-            seller_id=sellerId,
-            advertiser_id=advertiserId,
-            endpoint=endpoint,
-            start_day=startDay,  # type: ignore[arg-type]
-            end_day=endDay,  # type: ignore[arg-type]
-            page=page,
-            page_size=pageSize,
-            requested_campaign_ids=requested_campaign_ids if campaignId else None,
-        )
-        total_requested = (endDay - startDay).days + 1  # type: ignore[operator]
-    else:
-        campaigns, total_campaigns = get_coverage_monthly(
-            sess,
-            seller_id=sellerId,
-            advertiser_id=advertiserId,
-            endpoint=endpoint,
-            start_month=startMonth,  # type: ignore[arg-type]
-            end_month=endMonth,  # type: ignore[arg-type]
-            page=page,
-            page_size=pageSize,
-            requested_campaign_ids=requested_campaign_ids if campaignId else None,
-        )
-        # 防御型 parse：上方的 re.match 锁了 YYYY-MM 格式，但万一未来加了手调用。
-        try:
-            sy, sm = int(startMonth[:4]), int(startMonth[5:])  # type: ignore[index]
-            ey, em = int(endMonth[:4]), int(endMonth[5:])  # type: ignore[index]
-        except (TypeError, ValueError) as exc:
-            return _audit_and_error(
-                request_id=request_id,
-                status=400,
-                code="SCHEMA_INVALID",
-                message=f"startMonth/endMonth must be YYYY-MM format: {exc}",
-                retryable=False,
-                key_prefix=key_prefix,
-                error_code="SCHEMA_INVALID",
-                method="GET",
-                path=audit_path,
-            )
-        total_requested = (ey - sy) * 12 + (em - sm + 1)
+    campaigns, total_campaigns = get_coverage_daily(
+        sess,
+        seller_id=sellerId,
+        advertiser_id=advertiserId,
+        endpoint=endpoint,
+        start_day=startDay,  # type: ignore[arg-type]
+        end_day=endDay,  # type: ignore[arg-type]
+        page=page,
+        page_size=pageSize,
+        requested_campaign_ids=requested_campaign_ids if campaignId else None,
+    )
+    total_requested = (endDay - startDay).days + 1  # type: ignore[operator]
 
     # Empty results intentionally have zero pages; callers can distinguish an
     # empty scope from a non-empty single-page response.
@@ -462,12 +387,8 @@ def get_coverage_endpoint(
             "hasMore": has_more,
         },
     }
-    if kind == "daily":
-        coverage_data["startDay"] = startDay.isoformat()  # type: ignore[union-attr]
-        coverage_data["endDay"] = endDay.isoformat()  # type: ignore[union-attr]
-    else:
-        coverage_data["startMonth"] = startMonth
-        coverage_data["endMonth"] = endMonth
+    coverage_data["startDay"] = startDay.isoformat()  # type: ignore[union-attr]
+    coverage_data["endDay"] = endDay.isoformat()  # type: ignore[union-attr]
 
     _log_ingest_event(
         level=logging.INFO,
@@ -503,7 +424,7 @@ def post_dumps(
 
     协议契约（tech-doc/analytics/daily-sync-with-coverage.md §5）：
     - protocolVersion = 4
-    - dump.kind ∈ {daily, today, monthly}
+    - dump.kind ∈ {daily, today}
     - dump.rows = 结构化行数组
     - 2 MB body 上限
     """
@@ -643,12 +564,12 @@ def post_dumps(
             method=method,
             path=_PATH_DUMPS,
         )
-    if dump_kind not in ("daily", "today", "monthly"):
+    if dump_kind not in ("daily", "today"):
         return _audit_and_error(
             request_id=request_id,
             status=400,
             code="SCHEMA_INVALID",
-            message=f"dump.kind must be daily/today/monthly for v4, got {dump_kind!r}",
+            message=f"dump.kind must be daily/today for v4, got {dump_kind!r}",
             retryable=False,
             key_prefix=key_prefix,
             error_code="SCHEMA_INVALID",
@@ -670,58 +591,27 @@ def post_dumps(
             path=_PATH_DUMPS,
         )
 
-    if dump_kind in ("daily", "today"):
-        if payload.dump.day is None:
-            return _audit_and_error(
-                request_id=request_id,
-                status=400,
-                code="SCHEMA_INVALID",
-                message=f"dump.day is required for kind={dump_kind}",
-                retryable=False,
-                key_prefix=key_prefix,
-                error_code="SCHEMA_INVALID",
-                method=method,
-                path=_PATH_DUMPS,
-            )
-    elif dump_kind == "monthly":
-        if payload.dump.yearMonth is None:
-            return _audit_and_error(
-                request_id=request_id,
-                status=400,
-                code="SCHEMA_INVALID",
-                message="dump.yearMonth is required for kind=monthly",
-                retryable=False,
-                key_prefix=key_prefix,
-                error_code="SCHEMA_INVALID",
-                method=method,
-                path=_PATH_DUMPS,
-            )
-        if not re.match(r"^\d{4}-\d{2}$", payload.dump.yearMonth):
-            return _audit_and_error(
-                request_id=request_id,
-                status=400,
-                code="SCHEMA_INVALID",
-                message="dump.yearMonth must be YYYY-MM format",
-                retryable=False,
-                key_prefix=key_prefix,
-                error_code="SCHEMA_INVALID",
-                method=method,
-                path=_PATH_DUMPS,
-            )
+    if payload.dump.day is None:
+        return _audit_and_error(
+            request_id=request_id,
+            status=400,
+            code="SCHEMA_INVALID",
+            message=f"dump.day is required for kind={dump_kind}",
+            retryable=False,
+            key_prefix=key_prefix,
+            error_code="SCHEMA_INVALID",
+            method=method,
+            path=_PATH_DUMPS,
+        )
 
     from tts_erp_v2.plugin.ads.repository import (
         is_product_level_endpoint,
         upsert_campaign_opt_logs,
         upsert_daily_rows,
-        upsert_monthly_rows,
         upsert_today_rows,
     )
 
-    repo_fn = {
-        "daily": upsert_daily_rows,
-        "today": upsert_today_rows,
-        "monthly": upsert_monthly_rows,
-    }[dump_kind]
+    repo_fn = {"daily": upsert_daily_rows, "today": upsert_today_rows}[dump_kind]
 
     # v4 product dumps carry the canonical row set in dump.rows. Newer plugins
     # omit the duplicate response.data.table to stay below the 2 MB wire limit;
@@ -766,10 +656,7 @@ def post_dumps(
             "request_id": payload.requestId or request_id,
             "source": payload.dump.source,
         }
-        if dump_kind == "monthly":
-            common_kwargs["year_month"] = payload.dump.yearMonth
-        else:
-            common_kwargs["day"] = payload.dump.day
+        common_kwargs["day"] = payload.dump.day
         inserted = repo_fn(**common_kwargs)
     # pi-lens-ignore: no-boolean-in-except
     except Exception as exc:  # noqa: BLE001 — 落库失败统一转 500，细节进 stderr/ingest log
@@ -834,20 +721,13 @@ def post_dumps(
         "kind": dump_kind,
         "rowCount": len(rows),
         "inserted": inserted,
-        "duplicates": 0 if dump_kind == "monthly" else len(rows) - inserted,
+        "duplicates": len(rows) - inserted,
     }
     if opt_logs_inserted > 0:
         resp_data["optLogsInserted"] = opt_logs_inserted
-    # Monthly payloads and campaign-level payloads are accepted into the raw
-    # audit table without structured inserts. Make that explicit so clients do
-    # not misread inserted=0 as a failed or duplicate upload.
-    if dump_kind == "monthly":
-        resp_data["status"] = "raw_only"
-        resp_data["yearMonth"] = payload.dump.yearMonth
-    else:
-        resp_data["day"] = payload.dump.day.isoformat()  # type: ignore[union-attr]
-        if not is_product_level_endpoint(payload.dump.endpoint):
-            resp_data["status"] = "campaign_level"
+    resp_data["day"] = payload.dump.day.isoformat()  # type: ignore[union-attr]
+    if not is_product_level_endpoint(payload.dump.endpoint):
+        resp_data["status"] = "campaign_level"
 
     return JSONResponse(
         status_code=200,

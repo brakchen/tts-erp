@@ -4,8 +4,8 @@
 广告统计响应，经 ``POST /v2/analytics/sync/dumps`` 写入 ``plugin.*`` schema。
 
 - ``domain.py``     —— 纯类型 + 幂等键推导（协议契约代码）
-- ``repository.py`` —— 存储层（daily/today coverage + upsert；monthly raw
-                        coverage；写 ad_raw_log·plugin_logs）
+- ``repository.py`` —— 存储层（daily/today coverage + upsert；写
+                        ad_raw_log·plugin_logs）
 
 HTTP handler 在 ``tts_erp_v2/api/v2/analytics.py``（``/v2/analytics/sync/*``；
 URL 前缀保持不变 —— 它是插件侧 stable 契约，见 AGENTS.md §9.1）。
