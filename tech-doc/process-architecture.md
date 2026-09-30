@@ -25,7 +25,7 @@ tts_erp_v2/
 ├── jobs/                # 同步 job 实现：tiktok/*、miaoshou/*、
 │                        #   reporting（cost_snapshots 6h / profit_daily 1h）、token_refresh（6h）、runner
 ├── sync_worker/         # APScheduler；JOBS 注册表 + 调度状态（顶部 NOTE，以它为准）
-├── db/models/           # 12 schema SQLAlchemy 模型 — miaoshou.py 为妙手 source-owned 包裹域 6 张表；
+├── db/models/           # 12 schema SQLAlchemy 模型 — miaoshou.py 为妙手 source-owned 包裹/采购价域 8 张表；
 │                        #   plugin.py 为插件 dump 的结构化表：订单/物流/结算 7 张
 │                        #   （orders/order_lines/shipments/tracking_events/settlements/
 │                        #   settlement_details/raw_log，原 chrome_sync.py）+ 广告 5 张（ad_today/ad_daily/
@@ -68,7 +68,7 @@ APScheduler 调度器，JOBS 注册表在文件顶部 `NOTE`，以它为准，�
 
 12 schema SQLAlchemy 模型：
 
-- `miaoshou.py`：妙手 source-owned 包裹域 6 张表（raw、包裹、商品、赠品、cursor、issue）；
+- `miaoshou.py`：妙手 source-owned 包裹/采购价域 8 张表（package raw/header/item/gift、purchase raw/candidate、cursor、issue）；
 - `plugin.py`：插件 dump 的订单、物流、结算和广告表；
 - 订单/物流/结算 7 张：orders、order_lines、shipments、tracking_events、settlements、settlement_details、raw_log
 - 广告：ad_today、ad_daily、ad_raw_log、plugin_logs；monthly dump 仅写 raw log

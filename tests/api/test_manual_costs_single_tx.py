@@ -31,7 +31,10 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
+
+from tts_erp_v2.reporting.manual_cost_lock import lock_manual_cost_spu
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -56,10 +59,7 @@ def _seed_channel_product(db_engine, external_id: str) -> int:
         )
         acct_id = sess.execute(
             # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
-            text(
-                "SELECT id FROM commerce.shops "
-                "WHERE shop_id = 'TEST_acct_mc_tx'"
-            )
+            text("SELECT id FROM commerce.shops WHERE shop_id = 'TEST_acct_mc_tx'")
         ).scalar()
         sess.execute(
             # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
@@ -73,12 +73,10 @@ def _seed_channel_product(db_engine, external_id: str) -> int:
         sess.commit()
         cp_id = sess.execute(
             # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
-            text(
-                "SELECT id FROM commerce.products_spu "
-                "WHERE spu_id = :ext"
-            ),
+            text("SELECT id FROM commerce.products_spu WHERE spu_id = :ext"),
             {"ext": external_id},
         ).scalar()
+    assert isinstance(cp_id, int)
     return cp_id
 
 
@@ -98,6 +96,24 @@ def _count_open_manual_costs(db_engine, spu_pk: int) -> int:
             {"cp": spu_pk},
         ).scalar()
     return int(n or 0)
+
+
+def test_shared_advisory_lock_serializes_manual_cost_writers(db_engine) -> None:
+    """API and scheduled writers share one transaction-scoped SPU lock."""
+    first = Session(db_engine)
+    second = Session(db_engine)
+    try:
+        lock_manual_cost_spu(first, spu_pk=987654321)
+        second.execute(text("SET LOCAL lock_timeout = '100ms'"))
+        with pytest.raises(OperationalError):
+            lock_manual_cost_spu(second, spu_pk=987654321)
+        second.rollback()
+        first.rollback()
+        lock_manual_cost_spu(second, spu_pk=987654321)
+        second.rollback()
+    finally:
+        first.close()
+        second.close()
 
 
 # ─── 1. happy path: second submission closes the first, no duplicates ──

@@ -246,6 +246,7 @@ def _sidebar_html(current_page: str) -> str:
     ("dashboard", "台", "控制台", "总览"),
     ("focused-spus", "关", "重点关注 SPU", "经营分析"),
     ("spu-roi", "益", "SPU ROI", "经营分析"),
+    ("ad-daily", "广", "广告日明细", "经营分析"),
     ("manual-costs", "采", "采购工作台", "基础设置"),
     ("shops", "店", "店铺注册", "基础设置"),
     ("enum-map", "映", "枚举映射", "基础设置"),

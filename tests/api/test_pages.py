@@ -48,7 +48,15 @@ def test_sidebar_groups_match_operator_workflow():
     assert body.index("控制台") < body.index("经营分析</div>")
     assert body.index("经营分析</div>") < body.index("重点关注 SPU")
     assert body.index("重点关注 SPU") < body.index("SPU ROI")
+    assert body.index("SPU ROI") < body.index("广告日明细")
     assert body.index("基础设置</div>") < body.index("采购工作台")
+
+
+def test_sidebar_marks_ad_daily_entry_active():
+    body = _sidebar_html("ad-daily")
+
+    assert 'href="../../v2/pages/ad-daily"' in body
+    assert 'title="广告日明细" aria-current="page"' in body
     assert body.index("采购工作台") < body.index("店铺注册")
     assert body.index("店铺注册") < body.index("枚举映射")
     assert body.index("数据工具</div>") < body.index("拦截配置")
