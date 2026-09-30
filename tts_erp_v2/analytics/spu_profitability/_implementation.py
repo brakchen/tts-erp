@@ -1300,6 +1300,7 @@ def _query_spu_roi(
                 projection_basis_full_loss_qty=Decimal(
                     projection_basis_full_loss_qty
                 ),
+                observed_full_loss_rate=formula.full_loss_rate,
                 unsettled_order_count=unsettled_order_count,
                 unresolved_unsettled_order_count=(
                     unresolved_unsettled_order_count
@@ -1658,6 +1659,13 @@ def _query_spu_roi(
         ),
         Decimal(0),
     )
+    projection_total_orders = eff_orders + cancelled_orders_total
+    projection_full_loss_rate = (
+        Decimal(refund_order_count_total + total_overseas_cancelled)
+        / Decimal(projection_total_orders)
+        if projection_total_orders > 0
+        else None
+    )
     dashboard_projection = calculate_projection(
         ProjectionInput(
             projection_basis_order_count=total_projection_basis_order_count,
@@ -1669,6 +1677,7 @@ def _query_spu_roi(
             projection_basis_full_loss_qty=Decimal(
                 total_projection_basis_full_loss_qty
             ),
+            observed_full_loss_rate=projection_full_loss_rate,
             unsettled_order_count=total_unsettled_order_count,
             unresolved_unsettled_order_count=(
                 total_unresolved_unsettled_order_count
