@@ -62,6 +62,11 @@ def test_jobs_registry_includes_miaoshou_and_reporting():
             "sync_source_cost_to_master",
             21600,
         ),
+        "miaoshou.purchase_price_clean": (
+            "tts_erp_v2.jobs.miaoshou.purchase_price_clean",
+            "sync_purchase_prices",
+            3600,
+        ),
         "miaoshou.packages": (
             "tts_erp_v2.jobs.miaoshou.packages",
             "sync_packages",

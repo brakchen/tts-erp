@@ -73,6 +73,11 @@ python3 scripts/regen_schema.py
 # 0045 妙手 package 数据归位：人工生产操作，一条命令完成
 # guard + scoped backup + worker stop/start + migration + verification + immediate sync
 ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0045_miaoshou_package_schema.sh --confirm
+
+# 0046 妙手采购价清洗定时任务：先交互保存加密 browser session，再迁移并首跑
+python3 scripts/configure_miaoshou_web_session.py \
+  --account-id 12629145 --front-version 1790677442555 --confirm
+ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0047_miaoshou_purchase_prices.sh --confirm
 ```
 
 ## 7. API key 管理

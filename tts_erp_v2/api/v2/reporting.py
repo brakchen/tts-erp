@@ -23,6 +23,7 @@ from tts_erp_v2.api.schemas import (
     ManualCostOut,
     ProfitDailyOut,
 )
+from tts_erp_v2.reporting.manual_cost_lock import lock_manual_cost_spu
 from tts_erp_v2.storage.minio_client import MinioClient
 
 router = APIRouter(prefix="/v2/reporting", tags=["reporting"])
@@ -489,6 +490,7 @@ def submit_manual_cost(
             f"channel product not found: {body.spu_id}",
         )
     cp_id = cp_row.id
+    lock_manual_cost_spu(sess, spu_pk=cp_id)
     role = request.scope.get("api_key_role") or "unknown"
     created_by = f"api_key:{role}"
     valid_from = body.valid_from or datetime.now()

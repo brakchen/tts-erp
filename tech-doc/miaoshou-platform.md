@@ -94,14 +94,42 @@ ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0045_miaoshou_package_schem
 备份默认写入 `$HOME/backups/tts_erp_manual/miaoshou_package_0045_*.jsonl.gz`，并生成带行数和 ID
 清单的 `.meta.json`。脚本自身不会设置生产 destructive override；缺少环境变量或 `--confirm` 会拒绝执行。
 
-## 7. 测试
+## 7. 采购价清洗与人工成本同步
+
+- Job：`miaoshou.purchase_price_clean`，每小时执行一次。
+- 数据源：浏览器 ERP `POST /api/order/purchase/purchase_order/searchList`；该接口同时返回
+  1688 `purchaseItems[].sourceUnitPrice` 与 TikTok `platformItemId` 关联，是当前唯一验证过的 SPU 成交采购价来源。
+- 凭证：`integration.credentials(provider='miaoshou_web')`，Cookie 和 `x-app-zebra` 均由
+  `token_service` Fernet 加密；日志、任务结果和 `miaoshou` payload 表不保存明文凭证。浏览器会话过期时 job
+  会失败并保留上一版有效成本，不会清空或覆盖；重新运行配置脚本轮换凭证即可。
+- 原文：变化后的采购单 payload 去重写入 `miaoshou.purchase_order_raw_records`。
+- 清洗：按采购单内唯一 `sourceItemId` 与唯一 `platformItemId` 的首次出现顺序配对；组数不一致不猜测；
+  同一货源商品多 SKU 按 `Σ(sourceUnitPrice×sourceQuantity)/Σ(sourceQuantity)` 计算 CNY 单价；
+  排除 `cancel` / `wait_pay`，每个 SPU 取最新采购事实，并拒绝最新时间同价冲突。
+- 结果：最新候选写 `miaoshou.purchase_price_candidates`。唯一解析到
+  `commerce.products_spu` 时，仅在金额/币种变化时关闭旧 `manual_product_costs` 行并插入新行；同价不制造历史噪音。
+  缺商品主档或 SPU 歧义只记录 candidate/issue，不伪造店铺或产品。
+- 首次配置（交互输入，secret 不进 shell history）：
+
+```bash
+python3 scripts/configure_miaoshou_web_session.py \
+  --account-id 12629145 --front-version 1790677442555 --confirm
+```
+
+- 生产 migration 0046 + 首次同步：
+
+```bash
+ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0047_miaoshou_purchase_prices.sh --confirm
+```
+
+## 8. 测试
 
 ```bash
 # 妙手 jobs（测试包装器会强制使用 tts_erp_v3_test）
 bash scripts/test.sh miaoshou
 ```
 
-## 8. 注意事项
+## 9. 注意事项
 
 - **Miaoshou 已无任何 HTTP 面**：不要等它回来
 - **出站代理和回调端点未挂 v2**：实测 404

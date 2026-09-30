@@ -108,13 +108,15 @@ procurement.manual_product_costs
 
 每个 SPU 的生效候选按以下顺序产生：
 
-1. 仅处理唯一货源组数等于唯一 SPU 组数的采购单；
-2. 对每个货源组计算数量加权采购价；
-3. 以 `(purchaseOrderSn, sourceItemId, platformItemId)` 去重；
-4. 排除 `purchaseOrderStatus IN ('cancel', 'wait_pay')`；
-5. 对每个 `platformItemId` 选择 `gmtPurchaseOrderStart` 最新的采购事实；
-6. 最新时间并列但价格不同则跳过并报警；价格相同可确定性去重；
-7. 仅更新能解析到 `commerce.products_spu` 的 SPU；不存在的 SPU 留在异常清单。
+1. 要求每页 `list` / `total` / `page` / `pageSize` 完整且跨页恒定；累计原始行数必须等于 `total`；
+   `purchaseOrderFilterId` 的完全相同行可去重，冲突重复 ID 直接失败；
+2. 仅处理唯一货源组数等于唯一 SPU 组数的采购单；
+3. 对每个货源组计算数量加权采购价，价格和数量必须为有限正数；
+4. 以 `(purchaseOrderSn, sourceItemId, platformItemId)` 去重；
+5. 排除 `purchaseOrderStatus IN ('cancel', 'wait_pay')`；
+6. 对每个 `platformItemId` 选择 `gmtPurchaseOrderStart` 最新的采购事实；
+7. 最新时间并列但价格不同则跳过并报警；价格相同可确定性去重；
+8. 仅更新能解析到 `commerce.products_spu` 的 SPU；不存在的 SPU 留在异常清单。
 
 ## 5. 2026-09-30 全量数据质量结果
 
@@ -162,7 +164,21 @@ procurement.manual_product_costs
 
 这些 ID 需要先由 TikTok 商品同步写入 `commerce.products_spu`，之后才能补录人工成本；本次没有创建伪造商品主数据。
 
-## 6. 安全与复核要求
+## 6. 定时化（2026-09-30）
+
+一次性导入已固化为 `miaoshou.purchase_price_clean`（每小时）：
+
+1. 用 `token_service` 解密 `miaoshou_web` browser session；
+2. 完整分页并校验累计数等于 `total`；
+3. 变化后的原始采购单去重写 `miaoshou.purchase_order_raw_records`；
+4. 复用本文 §4 的组序配对、数量加权、状态排除和最新事实规则；
+5. 候选写 `miaoshou.purchase_price_candidates`；
+6. 对可唯一解析的商品，同价保持现有人工成本行，价格变化才历史化旧行并插入新行；
+7. 缺商品、商品歧义、组数不一致、最新价冲突写 `miaoshou.sync_issues`，不猜测。
+
+首次配置和 migration 命令见 `tech-doc/miaoshou-platform.md` §7。
+
+## 7. 安全与复核要求
 
 - 浏览器 Cookie、`autoLoginToken`、API key 和完整生产响应不得写入仓库或日志。
 - 每次全量导入前必须重新校验 `total`、分页累计数、唯一组数量以及并列价格冲突。
