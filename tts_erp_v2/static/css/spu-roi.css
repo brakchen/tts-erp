@@ -471,15 +471,20 @@ a:hover {
  cursor: pointer;
 }
 
-/* ═══ 列头排序 ═══ */
-.op-th-sort {
+/* ═══ 列头排序：data-sort 是唯一能力声明，新增列无需追加 CSS/JS 白名单 ═══ */
+table.op-table thead th[data-sort] {
  cursor: pointer;
  user-select: none;
 }
-.op-th-sort:hover {
+table.op-table thead th[data-sort]:hover,
+table.op-table thead th[data-sort]:focus-visible {
  color: var(--accent);
 }
-.op-th-sort .arrow {
+table.op-table thead th[data-sort]:focus-visible {
+ outline: 2px solid var(--accent);
+ outline-offset: -3px;
+}
+table.op-table thead th[data-sort] .arrow {
  color: var(--accent);
 }
 
@@ -540,7 +545,7 @@ table.op-table thead th:first-child {
  z-index: 4;
  box-shadow: inset 1px 0 0 var(--rule);
 }
-table.op-table thead .op-th-sort[data-tip] {
+table.op-table thead th[data-sort][data-tip] {
  cursor: pointer;
 }
 tbody.op-rows td {

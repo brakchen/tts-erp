@@ -38,26 +38,6 @@
     return_loss: "全损退款",
     roi_breakeven: "保本ROI",
   };
-  var SORTABLE = new Set([
-    "roi_real",
-    "spend",
-    "refund_rate",
-    "refund_rate_qty",
-    "cancel_rate",
-    "net_profit",
-    "sales",
-    "effective_sales",
-    "gmv_sales",
-    "order_count",
-    "effective_order_count",
-    "cancelled_order_count",
-    "units_sold",
-    "return_loss",
-    "roi_breakeven",
-    "refund_net_amount",
-    "full_loss_rate",
-  ]);
-
   // Public path prefix: "/tts" behind NGINX, "" on :9877 directly.
   var PREFIX = location.pathname.replace(/\/v2\/pages\/.*$/, "");
   if (!/^\/[a-z0-9/_-]*$/i.test(PREFIX)) PREFIX = "";
@@ -66,6 +46,41 @@
   function $(sel, root) {
     return (root || document).querySelector(sel);
   }
+
+  function sortableHeaders() {
+    return document.querySelectorAll(".op-table thead th[data-sort]");
+  }
+
+  function supportsSortField(field) {
+    if (!field) return false;
+    if (field === DEFAULT_SORT) return true;
+    return Array.prototype.some.call(
+      sortableHeaders(),
+      (header) => header.getAttribute("data-sort") === field,
+    );
+  }
+
+  function sortLabel(field) {
+    var matched = Array.prototype.find.call(
+      sortableHeaders(),
+      (header) => header.getAttribute("data-sort") === field,
+    );
+    return matched
+      ? matched.getAttribute("data-sort-label") || matched.textContent.trim()
+      : SORT_LABEL[field] || field;
+  }
+
+  function prepareSortableHeaders() {
+    Array.prototype.forEach.call(sortableHeaders(), (header) => {
+      header.classList.add("op-th-sort");
+      if (!header.getAttribute("data-sort-label")) {
+        header.setAttribute("data-sort-label", header.textContent.trim());
+      }
+      header.setAttribute("tabindex", "0");
+      header.setAttribute("aria-sort", "none");
+    });
+  }
+
   function esc(s) {
     return String(s == null ? "" : s).replace(
       /[&<>"']/g,
@@ -191,7 +206,7 @@
     }
     if (typeof saved.includeAll === "boolean") state.includeAll = saved.includeAll;
     if (PAGE_LIMITS.has(saved.limit)) state.limit = saved.limit;
-    if (SORTABLE.has(saved.sort)) state.sort = saved.sort;
+    if (supportsSortField(saved.sort)) state.sort = saved.sort;
     if (saved.order === "asc" || saved.order === "desc") state.order = saved.order;
   }
 
@@ -1025,22 +1040,25 @@
   }
 
   function updateSortMarkers() {
-    Array.prototype.forEach.call(
-      document.querySelectorAll(".op-th-sort"),
-      (th) => {
-        var field = th.getAttribute("data-sort");
-        var mark = th.querySelector(".arrow");
-        if (mark) mark.remove();
-        if (field === state.sort) {
-          var span = document.createElement("span");
-          span.className = "arrow";
-          span.textContent = state.order === "asc" ? " ▲" : " ▼";
-          th.appendChild(span);
-        }
-      },
-    );
+    Array.prototype.forEach.call(sortableHeaders(), (header) => {
+      var field = header.getAttribute("data-sort");
+      var mark = header.querySelector(".arrow");
+      if (mark) mark.remove();
+      header.setAttribute("aria-sort", "none");
+      if (field === state.sort) {
+        var span = document.createElement("span");
+        span.className = "arrow";
+        span.setAttribute("aria-hidden", "true");
+        span.textContent = state.order === "asc" ? " ▲" : " ▼";
+        header.appendChild(span);
+        header.setAttribute(
+          "aria-sort",
+          state.order === "asc" ? "ascending" : "descending",
+        );
+      }
+    });
     $("#sort-note").textContent =
-      `当前排序：${SORT_LABEL[state.sort] || state.sort}${state.order === "asc" ? " ↑" : " ↓"}`;
+      `当前排序：${sortLabel(state.sort)}${state.order === "asc" ? " ↑" : " ↓"}`;
   }
 
   // ---------- 钻取面板 (D7 行内 accordion + D6 tab 懒加载) ----------
@@ -2254,25 +2272,35 @@
       load();
     });
 
-    // 列头排序:同列 asc ↔ desc 双向切换;新列首方向 asc
-    Array.prototype.forEach.call(
-      document.querySelectorAll(".op-th-sort[data-sort]"),
-      (th) => {
-        th.addEventListener("click", () => {
-          var field = th.getAttribute("data-sort");
-          if (!SORTABLE.has(field)) return;
-          if (field === state.sort) {
-            state.order = state.order === "asc" ? "desc" : "asc";
-          } else {
-            state.sort = field;
-            state.order = "asc";
-          }
-          state.offset = 0;
-          persistPagePreferences();
-          load();
-        });
-      },
-    );
+    // 列头排序由 data-sort 元数据驱动；新指标列无需再改 JS 白名单。
+    prepareSortableHeaders();
+    var tableHead = $(".op-table thead");
+    function activateSortHeader(header) {
+      var field = header.getAttribute("data-sort");
+      if (!supportsSortField(field)) return;
+      if (field === state.sort) {
+        state.order = state.order === "asc" ? "desc" : "asc";
+      } else {
+        state.sort = field;
+        state.order = "asc";
+      }
+      state.offset = 0;
+      persistPagePreferences();
+      load();
+    }
+    if (tableHead) {
+      tableHead.addEventListener("click", (event) => {
+        var header = event.target.closest("th[data-sort]");
+        if (header && tableHead.contains(header)) activateSortHeader(header);
+      });
+      tableHead.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        var header = event.target.closest("th[data-sort]");
+        if (!header || !tableHead.contains(header)) return;
+        event.preventDefault();
+        activateSortHeader(header);
+      });
+    }
 
     wireTooltips(); // 悬停说明气泡(data-tip 委托,含重渲染后的新行)
     wireZoom(); // 主图点击放大(委托)

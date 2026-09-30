@@ -2197,11 +2197,8 @@ def test_spu_roi_ad_window_single_side_only(api_client, readonly_key, db_engine)
     assert item_both["spend"] == cny4_from_usd("50")
 
 
-def test_spu_roi_sort_whitelist_covers_page_sortable_columns(
-    api_client, readonly_key, db_engine
-):
-    """共享盈利 kernel 的可排序列名必须落在端点白名单内。"""
-    import re
+def test_spu_roi_sort_binding_is_declarative_and_delegated() -> None:
+    """公共 kernel 从 data-sort 自动绑定，不再维护易漏列的前端白名单。"""
     from pathlib import Path
 
     js_path = (
@@ -2212,28 +2209,11 @@ def test_spu_roi_sort_whitelist_covers_page_sortable_columns(
         / "spu-profitability-page.js"
     )
     src = js_path.read_text(encoding="utf-8")
-    m = re.search(r"(?s)var SORTABLE = new Set\(\[(.*?)\]\);", src)
-    assert m, "spu-roi.js 找不到 SORTABLE 集合"
-    fields = re.findall(r'"([a-z0-9_]+)"', m.group(1))
-    assert fields, "SORTABLE 集合为空"
-
-    with Session(db_engine) as sess:
-        _seed(sess, _seed_scenario_a)
-    h = {"Authorization": f"Bearer {readonly_key}"}
-    for field in fields:
-        r = api_client.get(
-            "/v2/analytics/spu-roi",
-            headers=h,
-            params={"q": Q, "sort": field},
-        )
-        assert r.status_code == 200, f"sort={field} 应 200,得 {r.status_code}"
-    # 未知 sort 值仍 422(白名单收紧语义)
-    assert (
-        api_client.get(
-            "/v2/analytics/spu-roi", headers=h, params={"sort": "nope"}
-        ).status_code
-        == 422
-    )
+    assert "var SORTABLE" not in src
+    assert 'document.querySelectorAll(".op-table thead th[data-sort]")' in src
+    assert 'event.target.closest("th[data-sort]")' in src
+    assert 'tableHead.addEventListener("click"' in src
+    assert 'tableHead.addEventListener("keydown"' in src
 
 
 def test_spu_roi_totals_roi_real_native_reconciliation(
@@ -3247,12 +3227,13 @@ def test_spu_roi_page_d8_no_column_toggles(api_client, readonly_key):
     assert "col-toggle-" not in body
     assert "data-colgroup=" not in body
     assert "data-cg=" not in body
-    sortable = re.findall(
-        r'class="op-th[^"]*op-th-sort[^"]*" data-sort="([a-z0-9_]+)"', body
-    )
+    sortable = re.findall(r'<th[^>]+data-sort="([a-z0-9_]+)"', body)
     assert set(sortable) == {
         "spend",
+        "ad_system_actual_roi",
+        "ad_system_breakeven_roi",
         "effective_sales",
+        "total_orders",
         "effective_order_count",
         "cancel_rate",
         "full_loss_rate",
@@ -3271,20 +3252,37 @@ def test_spu_roi_page_sortable_headers_within_endpoint_whitelist(
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     body = r.text
-    fields = re.findall(
-        r'class="op-th[^"]*op-th-sort[^"]*" data-sort="([a-z0-9_]+)"', body
-    )
+    fields = re.findall(r'<th[^>]+data-sort="([a-z0-9_]+)"', body)
     assert fields
     with Session(db_engine) as sess:
         _seed(sess, _seed_scenario_a)
+        _seed(sess, _seed_spu_b)
+        _seed(sess, _seed_spu_c)
     h = {"Authorization": f"Bearer {readonly_key}"}
     for field in fields:
-        r2 = api_client.get(
-            "/v2/analytics/spu-roi",
-            headers=h,
-            params={"q": Q, "sort": field},
-        )
-        assert r2.status_code == 200, f"sort={field} 应 200,得 {r2.status_code}"
+        for order in ("asc", "desc"):
+            response = api_client.get(
+                "/v2/analytics/spu-roi",
+                headers=h,
+                params={"q": Q, "sort": field, "order": order},
+            )
+            assert response.status_code == 200, (
+                f"sort={field}&order={order} 应 200,得 {response.status_code}"
+            )
+            values = [item[field] for item in response.json()["items"]]
+            non_null = [Decimal(str(value)) for value in values if value is not None]
+            assert non_null == sorted(non_null, reverse=order == "desc"), (
+                field,
+                order,
+                values,
+            )
+            if None in values:
+                first_null = values.index(None)
+                assert all(value is None for value in values[first_null:]), (
+                    field,
+                    order,
+                    values,
+                )
 
 
 def test_spu_roi_js_review_fixes_present():
@@ -3317,9 +3315,10 @@ def test_spu_roi_js_review_fixes_present():
     assert "bindRowAccordion" in src
     assert "fetchDrillTab" in src
     assert "tpl-drilldown-panel" in src
-    # A2:页面 JS 显式传 sort=net_profit&order=asc
+    # 排序字段来自表头 data-sort，公共 kernel 不复制具体字段白名单。
     assert "DEFAULT_SORT" in src
-    assert '"net_profit"' in src
+    assert "supportsSortField" in src
+    assert 'header.getAttribute("data-sort")' in src
     assert '"asc"' in src
     # finding 2:结余带直接消费 totals.roi_real,页面不反推 ROI
     assert "totals.roi_real" in src
