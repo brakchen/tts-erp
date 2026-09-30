@@ -16,4 +16,3 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| spu-roi-warning-markers | SPU ROI 成本/退款告警分标（successor of spu-roi-manual-cost-only@208e0eb） | 01a0f005-d20a-77b2-ade9-aca210fcc1ee | `fix/spu-roi-warning-markers` / `.worktrees/spu-roi-warning-markers` | `tts_erp_v2/analytics/spu_roi.py`; `tts_erp_v2/static/js/spu-profitability-page.js`; `tts_erp_v2/static/css/spu-roi.css`; `tests/api/test_spu_roi_api.py`; `biz-doc/analytics/spu-roi-profit-calculation.md`; `tech-doc/analytics/spu-real-roi-dashboard.md` | ready | `5bbb184293cec87b5ab4ff2ca5917b0232e3bbb6` | `7e0930b9e05fd349762ad73ce286b8f9503e6677` | 2026-09-30T02:31:10Z |
