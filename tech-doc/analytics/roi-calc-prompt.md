@@ -100,8 +100,10 @@ kept 口径误差 **±1%**；混合口径（含退款单）高估 **~16%**。
 
 ### 4.1 未结算订单预计终局（两个页面共用）
 
-订单只分已结算与未结算：已结算订单使用实际 SETTLEMENT，不再预测；只预测未结算
-订单。样本和目标都跟随页面现有订单时间窗口，以
+订单先分已结算与未结算：已结算订单使用实际 SETTLEMENT，不再预测；退款金额只预测
+未结算订单。全损预测再从未结算订单中排除已经送达的订单。送达证据取并集：订单状态
+`DELIVERED`/`COMPLETED`，或 shipment 状态 `DELIVERED`、`delivered_at` 非空、物流
+事件 `50101` 任一成立。样本和目标都跟随页面现有订单时间窗口，以
 `COALESCE(order_time, paid_at)` 归属，不按结算日或售后完成日切窗。
 
 ```text
@@ -117,20 +119,24 @@ settled_full_loss_rate
 
 ```text
 expected_terminal_full_loss_orders
-= unsettled_order_count × settled_full_loss_rate
+= full_loss_exposure_unsettled_order_count × settled_full_loss_rate
 
 projected_future_full_loss_order_count
 = max(expected_terminal_full_loss_orders
-      - confirmed_unsettled_full_loss_order_count, 0)
+      - confirmed_full_loss_exposure_order_count, 0)
 
 expected_terminal_full_loss_qty
-= unsettled_order_count
+= full_loss_exposure_unsettled_order_count
   × (settled_full_loss_qty / settled_order_count)
 
 projected_future_full_loss_qty
 = max(expected_terminal_full_loss_qty
-      - confirmed_unsettled_full_loss_qty, 0)
+      - confirmed_full_loss_exposure_qty, 0)
 ```
+
+`full_loss_exposure_unsettled_order_count` 是尚未送达的未结算订单数。预计新增订单数和件数
+还分别以该暴露中尚未确认结果的订单数、件数封顶。全部未结算订单仍用于退款金额和净
+收入预测，避免把“已送达但结算滞后”误解释成全损风险，同时不改变财务结算范围。
 
 页面只展示预计未来新增全损，不展示预计终局全损。退款金额也先估算整批终局额度，
 再扣除已确认退款：
@@ -181,8 +187,8 @@ projected_ad_system_breakeven_roi
 已结算样本订单或样本销售额时，状态为 `insufficient_sample`；没有未结算订单时状态为
 `no_unsettled_orders`，预计利润和四个 ROI 指标与当前值一致。
 
-多 SPU 大盘的已结算样本订单数、已结算全损订单数、未结算订单数和已确认未结算全损
-订单数必须按订单全局去重；金额和件数按唯一商品行聚合。
+多 SPU 大盘的已结算样本订单数、已结算全损订单数、未结算订单数、未来全损风险暴露
+订单数和已确认风险暴露全损订单数必须按订单全局去重；金额和件数按唯一商品行聚合。
 `spu-roi` 与 `focused-spus` 使用同一 API 和公式，仅 SPU 选择范围不同。
 
 ## 5. 广告系统 ROI（TikTok 后台口径，单独一套）

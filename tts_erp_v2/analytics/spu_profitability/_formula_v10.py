@@ -101,6 +101,12 @@ class ProjectionInput:
     confirmed_unsettled_full_loss_order_count: int
     confirmed_unsettled_full_loss_qty: Decimal
     unresolved_unsettled_order_count: int
+    full_loss_exposure_unsettled_order_count: int
+    confirmed_full_loss_exposure_order_count: int
+    confirmed_full_loss_exposure_qty: Decimal
+    unresolved_full_loss_exposure_order_count: int
+    unresolved_full_loss_exposure_qty: Decimal
+    unresolved_full_loss_exposure_cogs_cny: Decimal
     unsettled_sales_after_fee_cny: Decimal
     confirmed_unsettled_refund_after_fee_cny: Decimal
     unresolved_unsettled_qty: Decimal
@@ -190,10 +196,12 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
     """Project future changes without counting confirmed outcomes twice.
 
     Settled orders provide two independent bases: refund amount severity and
-    order-level full-loss probability.  Each is applied to the whole unsettled
-    cohort, then confirmed unsettled outcomes are subtracted to obtain only the
-    future increment.  Existing COGS and ad spend stay in current profit and are
-    never deducted a second time.
+    order-level full-loss probability. Refund severity applies to the whole
+    unsettled cohort. Full-loss probability applies only to unsettled orders
+    that have not reached delivery terminal status; confirmed outcomes inside
+    that risk cohort are then subtracted to obtain only the future increment.
+    Existing COGS and ad spend stay in current profit and are never deducted a
+    second time.
     """
 
     has_reliable_sample = (
@@ -312,34 +320,38 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
     )
 
     expected_terminal_full_loss_orders = (
-        Decimal(inputs.unsettled_order_count) * settled_full_loss_rate
+        Decimal(inputs.full_loss_exposure_unsettled_order_count)
+        * settled_full_loss_rate
     )
     projected_future_full_loss_orders = min(
-        Decimal(inputs.unresolved_unsettled_order_count),
+        Decimal(inputs.unresolved_full_loss_exposure_order_count),
         max(
             Decimal(0),
             expected_terminal_full_loss_orders
-            - Decimal(inputs.confirmed_unsettled_full_loss_order_count),
+            - Decimal(inputs.confirmed_full_loss_exposure_order_count),
         ),
     )
-    expected_terminal_full_loss_qty = Decimal(inputs.unsettled_order_count) * (
+    expected_terminal_full_loss_qty = Decimal(
+        inputs.full_loss_exposure_unsettled_order_count
+    ) * (
         inputs.projection_basis_full_loss_qty
         / Decimal(inputs.projection_basis_order_count)
     )
     projected_future_full_loss_qty = min(
-        inputs.unresolved_unsettled_qty,
+        inputs.unresolved_full_loss_exposure_qty,
         max(
             Decimal(0),
             expected_terminal_full_loss_qty
-            - inputs.confirmed_unsettled_full_loss_qty,
+            - inputs.confirmed_full_loss_exposure_qty,
         ),
     )
     projected_terminal_full_loss_qty = (
         inputs.observed_full_loss_qty + projected_future_full_loss_qty
     )
     average_unresolved_unit_cost = (
-        inputs.unresolved_unsettled_cogs_cny / inputs.unresolved_unsettled_qty
-        if inputs.unresolved_unsettled_qty > 0
+        inputs.unresolved_full_loss_exposure_cogs_cny
+        / inputs.unresolved_full_loss_exposure_qty
+        if inputs.unresolved_full_loss_exposure_qty > 0
         else Decimal(0)
     )
     projected_future_full_loss_cost = (

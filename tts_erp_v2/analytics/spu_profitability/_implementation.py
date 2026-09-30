@@ -70,6 +70,9 @@ _CASE_COMPLETED_STATUSES = (
 )
 
 _TRACK_ACTION_CODE_OVERSEAS = 38301  # "Arrived in destination country/region"
+_TRACK_ACTION_CODE_DELIVERED = 50101  # "Your package was delivered!"
+_DELIVERY_TERMINAL_ORDER_STATUSES = ("DELIVERED", "COMPLETED")
+_DELIVERY_TERMINAL_SHIPMENT_STATUSES = ("DELIVERED",)
 
 # 钻取面板 orders 上限（D6 拍板）
 _ORDERS_MAX = 500
@@ -179,7 +182,8 @@ _SQL_ROI_SALES = text(
     """
 )
 
-# 终局预测事实：只预测未结算 paid 订单；预测比例来自同一日期窗口内
+# 终局预测事实：退款金额预测覆盖未结算 paid 订单；全损预测进一步排除
+# 已送达/已完成订单和有送达物流证据的订单。预测比例来自同一日期窗口内
 # 已结算 paid 订单。退款/全损 case 先按商品行聚合并封顶到行件数，避免
 # 已确认结果与未来预测重复。结算判定与 _SQL_ROI_SALES 保持一致：存在
 # SETTLEMENT component 才有可用实际到账。
@@ -225,6 +229,26 @@ _SQL_ROI_PROJECTION = text(
                sl.unit_price,
                sl.quantity * sl.unit_price AS line_sales_vnd,
                (settled.order_pk IS NOT NULL) AS is_settled,
+               (
+                   so.status = ANY(CAST(:delivery_terminal_order_statuses AS text[]))
+                   OR EXISTS (
+                       SELECT 1
+                       FROM fulfillment.shipments sh
+                       WHERE sh.order_pk = so.id
+                         AND (
+                             sh.status = ANY(CAST(
+                                 :delivery_terminal_shipment_statuses AS text[]
+                             ))
+                             OR sh.delivered_at IS NOT NULL
+                             OR EXISTS (
+                                 SELECT 1
+                                 FROM fulfillment.tracking_events te
+                                 WHERE te.shipment_id = sh.id
+                                   AND te.action_code = :delivered_action_code
+                             )
+                         )
+                   )
+               ) AS is_delivery_terminal,
                (
                    coalesce(settled.customer_refund_vnd, 0) <> 0
                    OR coalesce(cc.confirmed_qty, 0) > 0
@@ -280,17 +304,36 @@ _SQL_ROI_PROJECTION = text(
            count(DISTINCT order_pk) FILTER (WHERE NOT is_settled)
                AS unsettled_order_count,
            count(DISTINCT order_pk) FILTER (
+               WHERE NOT is_settled AND NOT is_delivery_terminal)
+               AS full_loss_exposure_unsettled_order_count,
+           count(DISTINCT order_pk) FILTER (
                WHERE NOT is_settled AND unresolved_qty > 0)
                AS unresolved_unsettled_order_count,
+           count(DISTINCT order_pk) FILTER (
+               WHERE NOT is_settled
+                 AND NOT is_delivery_terminal
+                 AND unresolved_qty > 0)
+               AS unresolved_full_loss_exposure_order_count,
            coalesce(sum(confirmed_refund_amount) FILTER (WHERE NOT is_settled), 0)
                AS confirmed_unsettled_refund_amount_vnd,
            count(DISTINCT order_pk) FILTER (
                WHERE NOT is_settled AND confirmed_qty > 0)
                AS confirmed_unsettled_full_loss_order_count,
+           count(DISTINCT order_pk) FILTER (
+               WHERE NOT is_settled
+                 AND NOT is_delivery_terminal
+                 AND confirmed_qty > 0)
+               AS confirmed_full_loss_exposure_order_count,
            coalesce(sum(confirmed_qty) FILTER (WHERE NOT is_settled), 0)
                AS confirmed_unsettled_full_loss_qty,
+           coalesce(sum(confirmed_qty) FILTER (
+               WHERE NOT is_settled AND NOT is_delivery_terminal), 0)
+               AS confirmed_full_loss_exposure_qty,
            coalesce(sum(unresolved_qty) FILTER (WHERE NOT is_settled), 0)
                AS unresolved_unsettled_qty,
+           coalesce(sum(unresolved_qty) FILTER (
+               WHERE NOT is_settled AND NOT is_delivery_terminal), 0)
+               AS unresolved_full_loss_exposure_qty,
            coalesce(sum(unresolved_qty * unit_price) FILTER (WHERE NOT is_settled), 0)
                AS unresolved_unsettled_sales_vnd
     FROM line_facts
@@ -323,6 +366,26 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
         SELECT sl.order_pk,
                (settled.order_pk IS NOT NULL) AS is_settled,
                (
+                   so.status = ANY(CAST(:delivery_terminal_order_statuses AS text[]))
+                   OR EXISTS (
+                       SELECT 1
+                       FROM fulfillment.shipments sh
+                       WHERE sh.order_pk = so.id
+                         AND (
+                             sh.status = ANY(CAST(
+                                 :delivery_terminal_shipment_statuses AS text[]
+                             ))
+                             OR sh.delivered_at IS NOT NULL
+                             OR EXISTS (
+                                 SELECT 1
+                                 FROM fulfillment.tracking_events te
+                                 WHERE te.shipment_id = sh.id
+                                   AND te.action_code = :delivered_action_code
+                             )
+                         )
+                   )
+               ) AS is_delivery_terminal,
+               (
                    coalesce(settled.customer_refund_vnd, 0) <> 0
                    OR coalesce(cc.confirmed_qty, 0) > 0
                ) AS is_settled_full_loss,
@@ -350,11 +413,24 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
            count(DISTINCT order_pk) FILTER (WHERE NOT is_settled)
                AS unsettled_order_count,
            count(DISTINCT order_pk) FILTER (
+               WHERE NOT is_settled AND NOT is_delivery_terminal)
+               AS full_loss_exposure_unsettled_order_count,
+           count(DISTINCT order_pk) FILTER (
                WHERE NOT is_settled AND confirmed_qty > 0)
                AS confirmed_unsettled_full_loss_order_count,
            count(DISTINCT order_pk) FILTER (
+               WHERE NOT is_settled
+                 AND NOT is_delivery_terminal
+                 AND confirmed_qty > 0)
+               AS confirmed_full_loss_exposure_order_count,
+           count(DISTINCT order_pk) FILTER (
                WHERE NOT is_settled AND unresolved_qty > 0)
-               AS unresolved_unsettled_order_count
+               AS unresolved_unsettled_order_count,
+           count(DISTINCT order_pk) FILTER (
+               WHERE NOT is_settled
+                 AND NOT is_delivery_terminal
+                 AND unresolved_qty > 0)
+               AS unresolved_full_loss_exposure_order_count
     FROM line_facts
     """
 )
@@ -1130,6 +1206,13 @@ def _query_spu_roi(
                 **common_fact_params,
                 "paid_statuses": paid_statuses,
                 "st_return": _CASE_COMPLETED_STATUSES[1],
+                "delivery_terminal_order_statuses": list(
+                    _DELIVERY_TERMINAL_ORDER_STATUSES
+                ),
+                "delivery_terminal_shipment_statuses": list(
+                    _DELIVERY_TERMINAL_SHIPMENT_STATUSES
+                ),
+                "delivered_action_code": _TRACK_ACTION_CODE_DELIVERED,
             },
         )
         .mappings()
@@ -1252,8 +1335,22 @@ def _query_spu_roi(
             if projection_facts
             else 0
         )
+        full_loss_exposure_unsettled_order_count = (
+            _row_int(
+                projection_facts["full_loss_exposure_unsettled_order_count"]
+            )
+            if projection_facts
+            else 0
+        )
         unresolved_unsettled_order_count = (
             _row_int(projection_facts["unresolved_unsettled_order_count"])
+            if projection_facts
+            else 0
+        )
+        unresolved_full_loss_exposure_order_count = (
+            _row_int(
+                projection_facts["unresolved_full_loss_exposure_order_count"]
+            )
             if projection_facts
             else 0
         )
@@ -1270,13 +1367,30 @@ def _query_spu_roi(
             if projection_facts
             else 0
         )
+        confirmed_full_loss_exposure_order_count = (
+            _row_int(
+                projection_facts["confirmed_full_loss_exposure_order_count"]
+            )
+            if projection_facts
+            else 0
+        )
         confirmed_unsettled_full_loss_qty = (
             _row_int(projection_facts["confirmed_unsettled_full_loss_qty"])
             if projection_facts
             else 0
         )
+        confirmed_full_loss_exposure_qty = (
+            _row_int(projection_facts["confirmed_full_loss_exposure_qty"])
+            if projection_facts
+            else 0
+        )
         unresolved_unsettled_qty = (
             _row_int(projection_facts["unresolved_unsettled_qty"])
+            if projection_facts
+            else 0
+        )
+        unresolved_full_loss_exposure_qty = (
+            _row_int(projection_facts["unresolved_full_loss_exposure_qty"])
             if projection_facts
             else 0
         )
@@ -1377,6 +1491,24 @@ def _query_spu_roi(
                 ),
                 unresolved_unsettled_order_count=(
                     unresolved_unsettled_order_count
+                ),
+                full_loss_exposure_unsettled_order_count=(
+                    full_loss_exposure_unsettled_order_count
+                ),
+                confirmed_full_loss_exposure_order_count=(
+                    confirmed_full_loss_exposure_order_count
+                ),
+                confirmed_full_loss_exposure_qty=Decimal(
+                    confirmed_full_loss_exposure_qty
+                ),
+                unresolved_full_loss_exposure_order_count=(
+                    unresolved_full_loss_exposure_order_count
+                ),
+                unresolved_full_loss_exposure_qty=Decimal(
+                    unresolved_full_loss_exposure_qty
+                ),
+                unresolved_full_loss_exposure_cogs_cny=(
+                    Decimal(unresolved_full_loss_exposure_qty) * unit_cost_cny
                 ),
                 unsettled_sales_after_fee_cny=(
                     unsettled_sales_cny * one_minus_fee
@@ -1493,10 +1625,25 @@ def _query_spu_roi(
                 "settled_full_loss_rate": projection.settled_full_loss_rate,
                 "projection_full_loss_qty_rate": projection.full_loss_qty_rate,
                 "unsettled_order_count": unsettled_order_count,
+                "full_loss_exposure_unsettled_order_count": (
+                    full_loss_exposure_unsettled_order_count
+                ),
+                "confirmed_full_loss_exposure_order_count": (
+                    confirmed_full_loss_exposure_order_count
+                ),
+                "confirmed_full_loss_exposure_qty": (
+                    confirmed_full_loss_exposure_qty
+                ),
                 "unresolved_unsettled_order_count": (
                     unresolved_unsettled_order_count
                 ),
+                "unresolved_full_loss_exposure_order_count": (
+                    unresolved_full_loss_exposure_order_count
+                ),
                 "unresolved_unsettled_qty": unresolved_unsettled_qty,
+                "unresolved_full_loss_exposure_qty": (
+                    unresolved_full_loss_exposure_qty
+                ),
                 "unresolved_unsettled_sales": unresolved_unsettled_sales_cny,
                 "confirmed_unsettled_refund_amount": (
                     confirmed_unsettled_refund_amount_cny
@@ -1664,6 +1811,13 @@ def _query_spu_roi(
                     "selected_pks": spu_pks_in_scope,
                     "paid_statuses": paid_statuses,
                     "st_return": _CASE_COMPLETED_STATUSES[1],
+                    "delivery_terminal_order_statuses": list(
+                        _DELIVERY_TERMINAL_ORDER_STATUSES
+                    ),
+                    "delivery_terminal_shipment_statuses": list(
+                        _DELIVERY_TERMINAL_SHIPMENT_STATUSES
+                    ),
+                    "delivered_action_code": _TRACK_ACTION_CODE_DELIVERED,
                     "ws": ws_dt,
                     "we": we_dt,
                 },
@@ -1686,6 +1840,13 @@ def _query_spu_roi(
         if projection_counts_row
         else 0
     )
+    total_full_loss_exposure_unsettled_order_count = (
+        _row_int(
+            projection_counts_row["full_loss_exposure_unsettled_order_count"]
+        )
+        if projection_counts_row
+        else 0
+    )
     total_confirmed_unsettled_full_loss_order_count = (
         _row_int(
             projection_counts_row["confirmed_unsettled_full_loss_order_count"]
@@ -1693,8 +1854,22 @@ def _query_spu_roi(
         if projection_counts_row
         else 0
     )
+    total_confirmed_full_loss_exposure_order_count = (
+        _row_int(
+            projection_counts_row["confirmed_full_loss_exposure_order_count"]
+        )
+        if projection_counts_row
+        else 0
+    )
     total_unresolved_unsettled_order_count = (
         _row_int(projection_counts_row["unresolved_unsettled_order_count"])
+        if projection_counts_row
+        else 0
+    )
+    total_unresolved_full_loss_exposure_order_count = (
+        _row_int(
+            projection_counts_row["unresolved_full_loss_exposure_order_count"]
+        )
         if projection_counts_row
         else 0
     )
@@ -1732,6 +1907,9 @@ def _query_spu_roi(
     total_unresolved_unsettled_qty = sum(
         (r["unresolved_unsettled_qty"] for r in scope_plain), 0
     )
+    total_unresolved_full_loss_exposure_qty = sum(
+        (r["unresolved_full_loss_exposure_qty"] for r in scope_plain), 0
+    )
     total_unresolved_unsettled_sales = sum(
         (r["unresolved_unsettled_sales"] for r in scope_plain), Decimal(0)
     )
@@ -1741,6 +1919,9 @@ def _query_spu_roi(
     )
     total_confirmed_unsettled_full_loss_qty = sum(
         (r["confirmed_unsettled_full_loss_qty"] for r in scope_plain), 0
+    )
+    total_confirmed_full_loss_exposure_qty = sum(
+        (r["confirmed_full_loss_exposure_qty"] for r in scope_plain), 0
     )
     total_unsettled_sales_after_fee = sum(
         (
@@ -1772,6 +1953,14 @@ def _query_spu_roi(
         ),
         Decimal(0),
     )
+    total_unresolved_full_loss_exposure_cogs = sum(
+        (
+            Decimal(r["unresolved_full_loss_exposure_qty"])
+            * r["unit_cost_used"]
+            for r in scope_plain
+        ),
+        Decimal(0),
+    )
     dashboard_projection = calculate_projection(
         ProjectionInput(
             projection_basis_order_count=total_projection_basis_order_count,
@@ -1795,6 +1984,24 @@ def _query_spu_roi(
             ),
             unresolved_unsettled_order_count=(
                 total_unresolved_unsettled_order_count
+            ),
+            full_loss_exposure_unsettled_order_count=(
+                total_full_loss_exposure_unsettled_order_count
+            ),
+            confirmed_full_loss_exposure_order_count=(
+                total_confirmed_full_loss_exposure_order_count
+            ),
+            confirmed_full_loss_exposure_qty=Decimal(
+                total_confirmed_full_loss_exposure_qty
+            ),
+            unresolved_full_loss_exposure_order_count=(
+                total_unresolved_full_loss_exposure_order_count
+            ),
+            unresolved_full_loss_exposure_qty=Decimal(
+                total_unresolved_full_loss_exposure_qty
+            ),
+            unresolved_full_loss_exposure_cogs_cny=(
+                total_unresolved_full_loss_exposure_cogs
             ),
             unsettled_sales_after_fee_cny=total_unsettled_sales_after_fee,
             confirmed_unsettled_refund_after_fee_cny=(
@@ -1883,10 +2090,25 @@ def _query_spu_roi(
         settled_full_loss_rate=dashboard_projection.settled_full_loss_rate,
         projection_full_loss_qty_rate=dashboard_projection.full_loss_qty_rate,
         unsettled_order_count=total_unsettled_order_count,
+        full_loss_exposure_unsettled_order_count=(
+            total_full_loss_exposure_unsettled_order_count
+        ),
+        confirmed_full_loss_exposure_order_count=(
+            total_confirmed_full_loss_exposure_order_count
+        ),
+        confirmed_full_loss_exposure_qty=(
+            total_confirmed_full_loss_exposure_qty
+        ),
         unresolved_unsettled_order_count=(
             total_unresolved_unsettled_order_count
         ),
+        unresolved_full_loss_exposure_order_count=(
+            total_unresolved_full_loss_exposure_order_count
+        ),
         unresolved_unsettled_qty=total_unresolved_unsettled_qty,
+        unresolved_full_loss_exposure_qty=(
+            total_unresolved_full_loss_exposure_qty
+        ),
         unresolved_unsettled_sales=total_unresolved_unsettled_sales,
         confirmed_unsettled_refund_amount=(
             total_confirmed_unsettled_refund_amount
