@@ -44,6 +44,7 @@ from starlette.responses import Response
 
 from tts_erp_v2.access import DeploymentPathInput, canonicalize_path
 from tts_erp_v2.api.v2 import (
+    ad_daily,
     admin,
     analytics,
     auth,
@@ -83,6 +84,8 @@ DEFAULT_CORS_ALLOW_HEADERS = [
 def _build_routes(app: FastAPI) -> None:
     app.include_router(commerce.router)
     app.include_router(reporting.router)
+    # Read-only source-shaped browser for plugin.ad_daily advertising facts.
+    app.include_router(ad_daily.router)
     app.include_router(focused_spus.router)
     app.include_router(
         fx.router

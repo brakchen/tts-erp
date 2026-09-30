@@ -8,6 +8,22 @@ importable as ``tts_erp_v2.api.v2.commerce`` etc.
 
 from __future__ import annotations
 
-from tts_erp_v2.api.v2 import commerce, fx, intercept, pages, reporting, tiktok_shop
+from tts_erp_v2.api.v2 import (
+    ad_daily,
+    commerce,
+    fx,
+    intercept,
+    pages,
+    reporting,
+    tiktok_shop,
+)
 
-__all__ = ["commerce", "fx", "intercept", "pages", "reporting", "tiktok_shop"]
+__all__ = [
+    "ad_daily",
+    "commerce",
+    "fx",
+    "intercept",
+    "pages",
+    "reporting",
+    "tiktok_shop",
+]
