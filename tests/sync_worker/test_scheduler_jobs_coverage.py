@@ -65,6 +65,7 @@ EXPECTED_JOB_INTERVALS = {
     "miaoshou.move_collect": 1800,
     "miaoshou.common_collect_box": 21600,
     "miaoshou.sync_source_cost_to_master": 21600,
+    "miaoshou.purchase_price_clean": 3600,
     "miaoshou.packages": 1800,
     "reporting.cost_snapshots": 21600,
     "reporting.profit_daily": 3600,
@@ -75,23 +76,10 @@ EXPECTED_JOB_INTERVALS = {
 
 
 def test_jobs_registry_has_expected_count() -> None:
-    """18 jobs total — keeps us honest if a new one slips in unannounced.
-
-    2026-09-05 reorg: ``analytics.retention`` 已从 JOBS 摘除（见
-    tech-doc/analytics/reorg-plan.md 决策 #1-#4）—— ad_records /
-    ad_audit_log / 等 4 张表 drop 后无对象可 purge。原 13 → 12。
-    2026-09-05 晚：spu.image_mirror 加入（镜像 products_spu.main_image_url
-    到本地 MinIO，页面渲染不再直连 TikTok CDN）→ 12 → 13。
-    2026-09-06：fx.sync 加入（ExchangeRate-API 汇率缓存，horizon-gated
-    ≈1 请求/天）→ 13 → 14。
-    2026-09-19：plugin.ad_merge_today2daily 移除（同步逻辑删除，保留 ad_today 表）→ 17 → 16。
-    2026-09-29：analytics.shop_fee_rate 加入（店铺级平台抽成费率，
-    24h 重算 → reporting.shop_fee_rate_estimates，供 spu-roi 未结算估算）→ 16 → 17。
-    2026-09-30：miaoshou.packages 加入；未接通的采购单同步同日退役，维持 18。
-    """
-    # 6 tiktok + 12 system (token + 6 miaoshou + 2 reporting + image_mirror
-    # + fx.sync + shop_fee_rate) — keep the number pinned so we don't drift silently.
-    assert len(JOBS) == 18
+    """19 jobs total — keeps us honest if a new one slips in unannounced."""
+    # 6 TikTok + 13 system jobs, including the source-owned purchase-price
+    # cleaner and excluding the retired EWM purchase-order sync.
+    assert len(JOBS) == 19
 
 
 @pytest.mark.parametrize(

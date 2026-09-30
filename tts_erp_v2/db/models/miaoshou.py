@@ -12,6 +12,7 @@ from decimal import Decimal
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -244,6 +245,118 @@ class MiaoshouPackageGiftItem(Base):
     )
 
 
+class MiaoshouPurchaseOrderRawRecord(Base):
+    """Immutable private-ERP purchase-order payload used for price cleaning."""
+
+    __tablename__ = "purchase_order_raw_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "credential_id",
+            "external_purchase_order_id",
+            "payload_hash",
+            name="uq_miaoshou_purchase_raw_credential_order_hash",
+        ),
+        Index(
+            "ix_miaoshou_purchase_raw_order",
+            "credential_id",
+            "external_purchase_order_id",
+        ),
+        Index("ix_miaoshou_purchase_raw_captured", "captured_at"),
+        {"schema": "miaoshou"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    credential_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("integration.credentials.id", ondelete="SET NULL"),
+    )
+    external_purchase_order_id: Mapped[str] = mapped_column(Text, nullable=False)
+    endpoint: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    payload_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class MiaoshouPurchasePriceCandidate(Base):
+    """Latest cleaned quantity-weighted CNY purchase price per platform SPU."""
+
+    __tablename__ = "purchase_price_candidates"
+    __table_args__ = (
+        UniqueConstraint(
+            "credential_id",
+            "spu_id",
+            name="uq_miaoshou_purchase_price_credential_spu",
+        ),
+        Index("ix_miaoshou_purchase_price_status", "resolution_status"),
+        Index("ix_miaoshou_purchase_price_source_at", "source_purchase_at"),
+        CheckConstraint(
+            "unit_cost > 0",
+            name="ck_miaoshou_purchase_price_positive",
+        ),
+        {"schema": "miaoshou"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    credential_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("integration.credentials.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    spu_id: Mapped[str] = mapped_column(Text, nullable=False)
+    spu_pk: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("commerce.products_spu.id", ondelete="SET NULL"),
+    )
+    manual_cost_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("procurement.manual_product_costs.id", ondelete="SET NULL"),
+    )
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
+    currency: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'CNY'")
+    )
+    source_purchase_order_sn: Mapped[str] = mapped_column(Text, nullable=False)
+    source_item_id: Mapped[str] = mapped_column(Text, nullable=False)
+    source_purchase_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    source_status: Mapped[str | None] = mapped_column(Text)
+    calculation_method: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'quantity_weighted_mean'")
+    )
+    calculation_version: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'purchase-price-v1'")
+    )
+    resolution_status: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+        onupdate=text("now()"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
 class MiaoshouSyncCursor(Base):
     """Incremental watermark owned by one Miaoshou credential/resource."""
 
@@ -328,6 +441,8 @@ __all__ = [
     "MiaoshouPackageGiftItem",
     "MiaoshouPackageItem",
     "MiaoshouPackageRawRecord",
+    "MiaoshouPurchaseOrderRawRecord",
+    "MiaoshouPurchasePriceCandidate",
     "MiaoshouSyncCursor",
     "MiaoshouSyncIssue",
 ]
