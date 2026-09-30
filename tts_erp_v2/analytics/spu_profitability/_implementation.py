@@ -240,7 +240,11 @@ _SQL_ROI_PROJECTION = text(
                coalesce(cc.confirmed_refund_amount, 0) AS confirmed_refund_amount,
                CASE
                    WHEN coalesce(settled.customer_refund_vnd, 0) <> 0
-                   THEN sl.quantity
+                   THEN least(
+                       sl.quantity,
+                       abs(settled.customer_refund_vnd)
+                       * sl.quantity / nullif(og.order_gmv_vnd, 0)
+                   )
                    ELSE least(sl.quantity, coalesce(cc.confirmed_qty, 0))
                END AS settled_full_loss_qty,
                greatest(

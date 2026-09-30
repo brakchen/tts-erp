@@ -3525,7 +3525,7 @@ def test_spu_roi_projection_render_tolerates_stale_html_shell() -> None:
     helper = src.split("function setTextIfPresent", 1)[1].split(
         "function loginUrl", 1
     )[0]
-    projection_render = src.split("// 终局预测由后端", 1)[1].split(
+    projection_render = src.split("// 预测由后端", 1)[1].split(
         "var rubricLabel", 1
     )[0]
 
