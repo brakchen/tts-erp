@@ -396,8 +396,20 @@ def test_page_has_no_pending_tab(api_client, readonly_key):
     assert 'data-tab="recent"' in body, "recent tab must still be present"
 
 
-def test_console_js_labels_product_identifier_as_spu():
-    """The workbench renders ``spu_id`` values, so runtime labels say SPU."""
+def test_manual_costs_page_labels_product_identifier_as_spu(
+    api_client, readonly_key
+):
+    """The workbench renders ``spu_id`` values, so every label says SPU."""
+    r = api_client.get(
+        "/v2/pages/manual-costs",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    assert ">SKU<" not in r.text
+    assert 'placeholder="SKU 或标题"' not in r.text
+    assert ">SPU<" in r.text
+    assert 'placeholder="SPU 或标题"' in r.text
+
     from pathlib import Path
 
     js = (
