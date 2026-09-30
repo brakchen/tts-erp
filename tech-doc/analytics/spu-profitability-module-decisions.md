@@ -21,6 +21,7 @@
 - 同一个 deep module 负责盈利结果与盈利证据；盈利证据包括订单、结算、售后与广告事实，用于解释结果但不等同于结果。
 - deep module 返回精确领域值（Decimal、数量、分类、盈利依据与状态），不返回为 HTTP 准备的字符串。
 - HTTP adapter 负责 JSON 字段、金额/比例序列化与错误 envelope；前端只展示，不重新计算或修正精度。
+- 盈亏、ROI 正负、未结算估算、默认成本、高退款警戒均由领域结果/HTTP adapter 返回结构化状态；警戒阈值与 P&L 公式说明通过 `meta.presentation` 暴露。前端不得保存阈值、从金额/计数反推状态或复制业务公式。
 - deep module 自己拥有 PostgreSQL 事实查询与归一化；调用者只提供盈利范围和数据库会话，不传递巨大 facts 对象。
 - PostgreSQL 属于 local-substitutable 依赖，使用专用 test DB 验证；当前只有一个真实数据库 adapter，不建立假想 repository interface。
 - 纯公式计算可以作为 implementation 内部 seam，但不暴露给调用者。

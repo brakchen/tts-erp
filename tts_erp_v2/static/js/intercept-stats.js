@@ -101,45 +101,30 @@
     set($errorRequests, stats.error_requests);
   }
 
-  function renderDistribution($container, data, label) {
-    if (!$container || !data) return;
-
-    const entries = normalizeDistribution(data).sort((a, b) => b[1] - a[1]);
-    const total = entries.reduce((sum, [, v]) => sum + v, 0);
+  function renderDistribution($container, entries, label) {
+    if (!$container || !Array.isArray(entries)) return;
 
     if (entries.length === 0) {
       $container.innerHTML = `<div class="dist-empty">暂无${label}数据</div>`;
       return;
     }
 
-    const maxVal = entries[0][1];
-    const rows = entries.map(([key, value]) => {
-      const pct = total > 0 ? (value / total * 100).toFixed(1) : '0';
+    const maxVal = Number(entries[0].count) || 0;
+    const rows = entries.map(item => {
+      const value = Number(item.count) || 0;
       const barWidth = maxVal > 0 ? (value / maxVal * 100) : 0;
       return `
         <div class="dist-row">
-          <span class="dist-label">${esc(key)}</span>
+          <span class="dist-label">${esc(item.label || '未知')}</span>
           <div class="dist-bar-wrap">
             <div class="dist-bar" style="width: ${barWidth}%"></div>
           </div>
-          <span class="dist-value">${formatNumber(value)} (${pct}%)</span>
+          <span class="dist-value">${formatNumber(value)} (${esc(item.percentage)}%)</span>
         </div>`;
     }).join('');
 
     // pi-lens-ignore: no-unsafe-innerhtml — trusted backend data, esc()-sanitized
     $container.innerHTML = rows;
-  }
-
-  // API returns [{host|method|status, count}], while older deployments may
-  // still return an object map. Keep the page compatible with both shapes.
-  function normalizeDistribution(data) {
-    if (Array.isArray(data)) {
-      return data.map(item => {
-        const key = item.host ?? item.method ?? item.status ?? '未知';
-        return [String(key), Number(item.count) || 0];
-      });
-    }
-    return Object.entries(data).map(([key, value]) => [key, Number(value) || 0]);
   }
 
   function renderDailyChart() {

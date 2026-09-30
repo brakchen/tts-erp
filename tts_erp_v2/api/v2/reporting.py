@@ -141,8 +141,19 @@ SQL_LIST_MANUAL_COSTS = (
     "FROM ranked r "
     "JOIN commerce.products_spu cp ON cp.id = r.spu_pk "
     "WHERE (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
+    "AND (CAST(:q AS text) IS NULL "
+    "     OR cp.spu_id ILIKE '%' || CAST(:q AS text) || '%' "
+    "     OR COALESCE(cp.title, '') ILIKE '%' || CAST(:q AS text) || '%') "
     "ORDER BY r.created_at DESC, r.id DESC "
     "LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
+)
+SQL_COUNT_MANUAL_COSTS = (
+    "SELECT COUNT(*) AS n FROM procurement.manual_product_costs m "
+    "JOIN commerce.products_spu cp ON cp.id = m.spu_pk "
+    "WHERE (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
+    "AND (CAST(:q AS text) IS NULL "
+    "     OR cp.spu_id ILIKE '%' || CAST(:q AS text) || '%' "
+    "     OR COALESCE(cp.title, '') ILIKE '%' || CAST(:q AS text) || '%')"
 )
 SQL_LIST_MISSING_COST_PRODUCTS = (
     "SELECT cp.id, cp.spu_id, cp.title, cp.shop_pk, "
@@ -206,6 +217,7 @@ _STMT_CLOSE_OLD_MANUAL_COSTS_BEFORE_INSERT = text(
 _STMT_LIST_MISSING_COST_PRODUCTS = text(SQL_LIST_MISSING_COST_PRODUCTS)
 _STMT_TOTAL_MISSING_PHOTO = text(SQL_TOTAL_MISSING_PHOTO)
 _STMT_LIST_MANUAL_COSTS = text(SQL_LIST_MANUAL_COSTS)
+_STMT_COUNT_MANUAL_COSTS = text(SQL_COUNT_MANUAL_COSTS)
 
 
 # --- mirror URL resolution (2026-09-05 page-rework lane) -----------------
@@ -393,6 +405,7 @@ def list_missing_cost_products(
 def list_manual_costs(
     sess: Session = Depends(get_session),
     shop_pk: int | None = Query(default=None, ge=1),
+    q: str | None = Query(default=None, max_length=200),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> dict:
@@ -406,11 +419,20 @@ def list_manual_costs(
 
     ``shop_pk`` scopes to one shop; omit for all shops.
     """
+    params = {
+        "acct_id": shop_pk,
+        "q": q.strip() if q and q.strip() else None,
+    }
     rows = sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: module-level text() + bound params
         _STMT_LIST_MANUAL_COSTS,
-        {"acct_id": shop_pk, "limit": limit, "offset": offset},
+        {**params, "limit": limit, "offset": offset},
     ).all()
+    total = sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: module-level text() + bound params
+        _STMT_COUNT_MANUAL_COSTS,
+        params,
+    ).scalar()
     return {
+        "total": _safe_int(total),
         "items": [
             {
                 "id": r.id,

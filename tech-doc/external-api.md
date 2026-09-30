@@ -39,6 +39,7 @@ cookie (see [Browser session login](#browser-session-login)).
 | Daily profit | `GET /v2/reporting/profit-daily` | readonly |
 | Coverage / health snapshot | `GET /v2/reporting/coverage` | readonly |
 | Active SPUs missing a cost | `GET /v2/reporting/missing-cost-products` | readonly |
+| Search recent manual costs | `GET /v2/reporting/manual-costs` | readonly |
 | Submit a manual cost | `POST /v2/reporting/manual-costs` | readwrite |
 | List focused SPUs for one shop | `GET /v2/reporting/focused-spus/{shop_pk}` | readonly |
 | Add/remove focused SPUs | `PATCH /v2/reporting/focused-spus/{shop_pk}` | readwrite |
@@ -50,6 +51,7 @@ cookie (see [Browser session login](#browser-session-login)).
 | 重点关注 SPU 页面 (HTML) | `GET /v2/pages/focused-spus` | readonly (browser → 302 login) |
 | SPU image list / upload / delete | `GET /v2/spu-images`, `POST /v2/spu-images/upload-url`, `POST /v2/spu-images/{id}/confirm`, `DELETE /v2/spu-images/{id}` | readonly / readwrite |
 | Browser login / logout / whoami | `GET\|POST /v2/auth/login`, `POST /v2/auth/logout`, `GET /v2/auth/me` | public |
+| Intercept request statistics | `GET /v2/intercept/requests/stats` | readonly |
 | Analytics cursor has-data / dump ingest (Chrome ext) | `GET /v2/analytics/sync/cursor`, `POST /v2/analytics/sync/dumps` | readwrite + scope |
 | Order / logistics reconcile and dump ingest (Chrome ext) | `POST /v2/order-sync/{reconcile,has-data,dumps}` | readwrite + scope |
 | Start TikTok seller authorization | `GET /v2/oauth/tiktok/authorize` | **readwrite** or above (handler-enforced) |
@@ -190,11 +192,11 @@ All list endpoints accept `limit` (1..500, default 100) + `offset` (≥0).
 
 | Endpoint | Extra query params | Returns |
 | --- | --- | --- |
-| `GET /v2/commerce/channel-accounts` | `platform` (e.g. `tiktok`) | list of `{id, platform, shop_id, account_name, region, seller_type, status, opened_date, credential_id, service_id, app_credentials_configured, synced_at}` — `credential_id` 非空 = 已 OAuth 授权走 API 同步；`app_credentials_configured` 只表示 service_id 有可解析 App pair，不泄露 Secret |
+| `GET /v2/commerce/channel-accounts` | `platform` (e.g. `tiktok`) | list of `{id, platform, shop_id, account_name, region, seller_type, status, opened_date, credential_id, service_id, app_credentials_configured, synced_at}`；响应头 `X-Total-Count` 是同一过滤条件下、分页前的店铺总数。`credential_id` 非空 = 已 OAuth 授权走 API 同步；`app_credentials_configured` 只表示 service_id 有可解析 App pair，不泄露 Secret |
 | `GET /v2/commerce/channel-accounts/{shop_pk}` | — | one account; 404 if unknown |
 | `GET /v2/commerce/channel-accounts/by-external/{shop_id}` | [`api/channel-accounts-by-external.md`](api/channel-accounts-by-external.md) | reverse-lookup by upstream shop_id; `?platform=tiktok` default; 404 if unknown |
 | `GET /v2/commerce/channel-accounts/{shop_pk}/order-stats` | — | `{order_count, payment_amount_sum}` aggregate (0/0 when empty) |
-| `GET /v2/commerce/channel-products` | `shop_pk`, `status` | SPU list: `{id, shop_pk, spu_id, title, status, source_created_at, source_updated_at}` |
+| `GET /v2/commerce/channel-products` | `shop_pk`, `status`, `q`, `has_orders` | SPU list: `{id, shop_pk, spu_id, title, status, source_created_at, source_updated_at}`；`q` 在服务端对 `spu_id/title` 做大小写不敏感子串过滤，`X-Total-Count` 返回过滤后、分页前总数 |
 | `GET /v2/commerce/channel-product-options` | required `shop_pk`; optional `q`, `spu_ids`, `limit` (1..100, default 50) | Bootstrap multi-select 的轻量 SPU 选项：`[{spu_id,title,status}]`。`q` 对 `spu_id/title` 做 ILIKE；`spu_ids` 按中英文逗号拆分后精确匹配，最多 100 个。 |
 | `GET /v2/commerce/channel-products/{spu_pk}` | — | one SPU; 404 if unknown |
 | `GET /v2/commerce/channel-products/{spu_pk}/variants` | — | SKU list: `{id, spu_pk, sku_id, seller_sku, variant_name}` |
@@ -225,11 +227,16 @@ Note: the merged "effective links" view exists only at the DB layer
 | `GET /v2/reporting/profit-daily` | readonly | `spu_pk`, `on_date`, `limit`, `offset` |
 | `GET /v2/reporting/coverage` | readonly | — → `{total_spus, active_spus, linked_spus, missing_cost_spus, calculation_version}` |
 | `GET /v2/reporting/missing-cost-products` | readonly | `shop_pk`, `limit` (default 200), `offset` → `{items: [{spu_pk, spu_id, title, shop_pk, missing_photo}], total_missing_photo}` |
+| `GET /v2/reporting/manual-costs` | readonly | `shop_pk`, `q`, `limit`, `offset` → `{total, items}`；`q` 在服务端过滤 `spu_id/title`，`total` 是过滤后、分页前的提交记录数 |
 | `POST /v2/reporting/manual-costs` | readwrite | body `{"spu_id": str, "unit_cost": decimal>0, "currency": "VND", "valid_from"?: datetime, "note"?: str}` → 201 `ManualCostOut`; auto-closes the previous effective row for the SPU |
 | `GET /v2/reporting/focused-spus/{shop_pk}` | readonly | `q`, `limit` (default 50), `offset` → `{shopPk, items:[{spuPk,spuId,title,status,createdAt,updatedAt}], total, matchedTotal, limit, offset}`；按 `updated_at DESC, spu_id ASC` 稳定排序 |
 | `PATCH /v2/reporting/focused-spus/{shop_pk}` | readwrite | body `{"addSpuIds": [...], "removeSpuIds": [...]}`；单次最多 500 个 ID、整批原子校验、移除为软删除；返回有界 `{shopPk,total,addedSpuIds,removedSpuIds}`。Cookie mutation 必须带 `X-Requested-With: tts-erp` |
 
 Focused membership 按 `(shop_pk, spu_id)` 隔离；每店 active 关注总数没有业务上限。新增 ID 必须属于路径店铺；add/remove trim/去空/去重后重叠返回 422。详见 [`analytics/focused-spus.md`](analytics/focused-spus.md)。
+
+### Intercept statistics (`/v2/intercept/requests/stats`)
+
+`GET /v2/intercept/requests/stats` 返回 `total_requests`、白名单/今日/错误计数，以及 `by_host`、`by_method`、`by_status`、`daily`。每个分布项由后端返回 `{label, count, percentage, host|method|status}`；`percentage` 是一位小数字符串，分母始终为完整时间范围内的 `total_requests`，即使 `by_host`/`by_status` 仅返回 Top 10 也不能改用可见 bucket 之和。
 
 Cost semantics: `MANUAL_ENTRY` (this endpoint) > 妙手采购单 > (1688 采集标价
 **禁用**). See `tech-doc/refactor-tech-plan-v2.md` §6 decisions 10/12.
@@ -370,6 +377,7 @@ Response envelope:`{items: [...], total, totals, meta}`。`spu_ids` 属于盈利
 - `mode`: **deprecated 兼容字段**，仅为旧客户端保留，值仍是 `override | baseline`；`shop_estimate`/`mixed` 映射为 `baseline`，新客户端必须读取 `source`；
 - `rate`: 本次范围展示费率（4 位小数字符串；多店不同费率时 `source=mixed`，逐店真实值见 `per_shop`）；
 - `override`: 页面覆写值，否则 `null`；
+- `degraded` / `fallback_message`: 是否有店铺回退基线，以及由后端给出的降级说明；
 - `per_shop[]`: `shop_pk/shop_name/rate/source/fallback_reason/estimate`；实测 `estimate` 包含 `calculated_on/calculated_at/lookback_days/kept_order_count/kept_line_gmv/window_line_gmv/kept_share/total_fee/currency`；
 - 解析优先级：页面覆写 > 7 天内 `fee-v2` 店铺实测 > `0.308` 基线。
 
@@ -420,11 +428,14 @@ Response envelope:`{items: [...], total, totals, meta}`。`spu_ids` 属于盈利
 | `platform_fee` | money-str (CNY) | **M19 v8** = `r̂ × unsettled_sales`（**信息列，不**进 M18） | — |
 | `fee_rate_used` | ratio-str | 本行实际使用的 r̂（4 位小数字符串） | — |
 | `fee_source` | enum | `user_override | shop_estimate | baseline`；逐行来源，不出现聚合层 `mixed` | — |
+| `profit_status` / `roi_status` | enum | 后端判定的盈利状态 `loss|profit|break_even` 与 ROI 状态 `negative|non_negative|unavailable`；前端不得从金额重新推导 | 标色 |
+| `has_unsettled_orders` | bool | `settled_order_count < order_count`；包括结算数为 0 的全估算场景 | 估算标记 |
+| `uses_default_unit_cost` / `refund_rate_alert` | bool | 后端判定的默认成本与高退款警戒状态；阈值见 `meta.presentation.refund_rate_alert_threshold` | 告警标记 |
 | `roi_real` | ratio-str/null | **M14 v8** = `(net_revenue − return_loss) / spend` | 下钻·利润构成 |
 | `roi_breakeven` | ratio-str/null | **M17 v8** = `NC′ ÷ (NC′ − COGS_kept)`（fee_est 项移除） | 下钻·利润构成 |
 | `cpa` | money-str/null | M15: `spend / ad_orders` | — |
 
-`totals` 同样返回上述 5 个 `ad_system_*` 字段，按完整 scope 聚合后重新计算（不是行级 ROI 平均值）。`meta.ad_system_roi` 给出实际 ROI、最大可承受广告费和保本 ROI 的公式与范围，并明确 `mixed_real_cost` 不混入广告赠金、赠金目前不可单独取得；`meta.warnings` 当前包含 `ad_system_other_necessary_costs_not_modeled`。净结算已扣除的平台费用不得再次扣除；结算外成本补齐前，前端以 `≈` 展示该估算。
+`totals` 同样返回上述 5 个 `ad_system_*` 字段及 `profit_status/roi_status`，按完整 scope 聚合后重新计算（不是行级 ROI 平均值）。`meta.ad_system_roi` 给出实际 ROI、最大可承受广告费和保本 ROI 的公式与范围，并明确 `mixed_real_cost` 不混入广告赠金、赠金目前不可单独取得；`meta.presentation` 返回 `rubric_label`、退款警戒阈值/文案、估算/默认成本文案和 `pnl_hints`；`meta.warnings` 当前包含 `ad_system_other_necessary_costs_not_modeled`。前端只格式化和渲染这些状态/说明，不保存业务阈值、不重算分类。净结算已扣除的平台费用不得再次扣除；结算外成本补齐前，前端以 `≈` 展示该估算。
 
 > **2026-09-30 成本来源语义变化**：
 >

@@ -236,7 +236,8 @@
 
   // ---------- tabs ----------
   var currentTab = TAB_ALL;
-  var costFilter = "";
+  var searchQuery = "";
+  var searchTimer = null;
   // Catalogue paging (2026-09-06): the backend returns pages via
   // limit/offset and reports the filtered total in X-Total-Count.
   // pageLimit follows the 每页 dropdown (25/50/100); pageOffset is the
@@ -614,6 +615,7 @@
     var tbody = $("#grid-rows");
     html(tbody, loadingRow());
     var url = "/v2/reporting/manual-costs?limit=" + DEFAULT_LIMIT;
+    if (searchQuery) url += "&q=" + encodeURIComponent(searchQuery);
     if (acct) url += "&shop_pk=" + acct;
     api(url)
       .then((r) => {
@@ -622,9 +624,12 @@
       })
       .then((payload) => {
         var items = unwrap(payload);
+        var total = Number.isFinite(Number(payload.total))
+          ? Number(payload.total)
+          : items.length;
         renderRecentRows(items);
-        setBadge("badge-recent", items.length);
-        setCounterNum(items.length);
+        setBadge("badge-recent", total);
+        setCounterNum(total);
         setCounterReady();
       })
       .catch((e) => {
@@ -673,7 +678,6 @@
       );
       tbody.appendChild(tr);
     });
-    applyFilter();
   }
 
   // ---------- tab: 全部 SPU (editable catalogue) ----------
@@ -696,6 +700,7 @@
       encodeURIComponent(catalogueSort.order);
     if (catalogueStatus)
       url += "&status=" + encodeURIComponent(catalogueStatus);
+    if (searchQuery) url += "&q=" + encodeURIComponent(searchQuery);
     if (catalogueHasOrders) url += "&has_orders=true";
     if (acct) url += "&shop_pk=" + acct;
     api(url)
@@ -848,7 +853,6 @@
       }
       tbody.appendChild(tr);
     });
-    applyFilter();
   }
 
   // ---------- shared row state ----------
@@ -857,19 +861,6 @@
     if (!s) return;
     s.textContent = text;
     s.className = "row-status " + (STATUS_CLASSES[cls] || "");
-  }
-
-  // Client-side row filter for the search box (matches SKU / title text).
-  function applyFilter() {
-    var q = costFilter;
-    $$("#grid-rows tr").forEach((tr) => {
-      if (!q) {
-        tr.style.display = "";
-        return;
-      }
-      var text = (tr.textContent || "").toLowerCase();
-      tr.style.display = text.indexOf(q) === -1 ? "none" : "";
-    });
   }
 
   function setBadge(id, n) {
@@ -935,8 +926,10 @@
     var search = $("#filter-search");
     if (search)
       search.addEventListener("input", () => {
-        costFilter = search.value.trim().toLowerCase();
-        applyFilter();
+        searchQuery = search.value.trim();
+        pageOffset = 0;
+        if (searchTimer) window.clearTimeout(searchTimer);
+        searchTimer = window.setTimeout(refreshActiveTab, 250);
       });
     var submitAll = $('[data-act="submit-all"]');
     if (submitAll)

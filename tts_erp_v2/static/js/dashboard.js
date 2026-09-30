@@ -23,6 +23,8 @@
   // ---------- STATE ----------
   let currentUser = null;
   let shops = [];
+  let shopTotal = null;
+  let summaryState = { missingCost: null, totalSpu: null };
 
   // ---------- DOM REFS ----------
   const $identity = document.getElementById('ops-identity');
@@ -71,13 +73,17 @@
   // ---------- SHOPS ----------
   async function loadShops() {
     try {
-      const res = await fetch(`${API}/v2/commerce/channel-accounts`, {
+      const res = await fetch(`${API}/v2/commerce/channel-accounts?limit=500`, {
         credentials: 'same-origin',
         headers: HEADERS,
       });
       if (!res.ok) return;
+      const totalHeader = res.headers.get('X-Total-Count');
+      shopTotal = totalHeader === null ? null : Number(totalHeader);
+      if (!Number.isFinite(shopTotal)) shopTotal = null;
       shops = await res.json();
       renderShopList();
+      renderSummary(summaryState);
     } catch (e) {
       console.error('Failed to load shops:', e);
     }
@@ -121,37 +127,21 @@
   // ---------- SUMMARY ----------
   async function loadSummary() {
     try {
-      // 并行请求多个摘要数据
-      const [costRes, roiRes] = await Promise.allSettled([
-        fetch(`${API}/v2/reporting/missing-cost-products`, {
-          credentials: 'same-origin',
-          headers: HEADERS,
-        }),
-        fetch(`${API}/v2/analytics/spu-roi?limit=1`, {
-          credentials: 'same-origin',
-          headers: HEADERS,
-        }),
-      ]);
-
-      const summary = {
-        missingCost: null,
-        totalSpu: null,
+      const res = await fetch(`${API}/v2/reporting/coverage`, {
+        credentials: 'same-origin',
+        headers: HEADERS,
+      });
+      if (!res.ok) throw new Error(`coverage HTTP ${res.status}`);
+      const data = await res.json();
+      summaryState = {
+        missingCost: data.missing_cost_spus,
+        totalSpu: data.total_spus,
       };
-
-      if (costRes.status === 'fulfilled' && costRes.value.ok) {
-        const data = await costRes.value.json();
-        summary.missingCost = Array.isArray(data) ? data.length : (data.count || 0);
-      }
-
-      if (roiRes.status === 'fulfilled' && roiRes.value.ok) {
-        const data = await roiRes.value.json();
-        summary.totalSpu = data.total || data.count || null;
-      }
-
-      renderSummary(summary);
+      renderSummary(summaryState);
     } catch (e) {
       console.error('Failed to load summary:', e);
-      renderSummary({});
+      summaryState = { missingCost: null, totalSpu: null };
+      renderSummary(summaryState);
     }
   }
 
@@ -160,14 +150,16 @@
 
     // 更新店铺范围标识
     if ($summaryScope) {
-      if (shops.length === 0) {
+      if (shopTotal === 0) {
         $summaryScope.textContent = '无店铺';
-      } else if (shops.length === 1) {
+      } else if (shopTotal === 1 && shops.length === 1) {
         const s = shops[0];
         const name = s.account_name || s.name || '(未命名)';
         $summaryScope.textContent = `${name} · ${s.region || '?'}`;
+      } else if (shopTotal !== null) {
+        $summaryScope.textContent = `全店铺 (${shopTotal})`;
       } else {
-        $summaryScope.textContent = `全店铺 (${shops.length})`;
+        $summaryScope.textContent = '全店铺';
       }
     }
 
@@ -190,7 +182,7 @@
       },
       {
         label: '已注册店铺',
-        value: shops.length,
+        value: shopTotal !== null ? shopTotal : '—',
         icon: '🏪',
         hint: '已登记的店铺数量',
         link: '../../v2/pages/shops',

@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.analytics.spu_profitability import (
+    REFUND_RATE_ALERT_THRESHOLD,
     EvidenceKind,
     EvidenceRequest,
     FocusedSelection,
@@ -97,9 +98,26 @@ _COST_ASSUMPTION = (
 )
 _FEE_NOTE = (
     "平台佣金=平台从销售额直接扣除的全部费用；已结算=SETTLEMENT 实到账；"
-    "未结算=sales×r̂×(1−SPU退款率)；信息列不重复计入净利。"
+    "未结算=sales×(1−r̂)×(1−SPU退款率)；信息列不重复计入净利。"
     "r̂ 优先级：页面覆写 > 店铺实测（近180天已结算单 Σ|FEE|/Σ行GMV，行GMV=客户实付；"
     "每24h重算，窗口内有一单已结算即产出） > 全局基线 0.308"
+)
+_PNL_HINTS = {
+    "net_revenue": "净收入 = 已结算 SETTLEMENT 分摊 + 未结算净额估算",
+    "cogs": "货本 = (售出件 + 海外取消全损件) × 单位成本",
+    "ad_spend": "广告消耗 = mixed_real_cost；服务端按汇率快照换算为 CNY",
+    "net_profit": "净利润 = 净收入 − 货本 − 广告消耗",
+    "settled": "已结算部分使用 SETTLEMENT 实际到账净额",
+    "unsettled": "未结算部分使用行级 fee_rate_used 与 SPU 退款率估算",
+    "cogs_sold": "售出件使用已付款白名单订单的实际售出件数",
+    "cogs_full_loss": "海外取消且物流已到目的国的件数按全损货本计入",
+}
+_DEFAULT_COST_ALERT_MESSAGE = "无当前有效人工采购成本，使用后端默认成本估算"
+_REFUND_RATE_ALERT_MESSAGE = "退款率超过后端配置的警戒线"
+_UNSETTLED_ALERT_MESSAGE = "含未结算订单，净收入和净利润包含估算"
+_FEE_FALLBACK_MESSAGE = (
+    "未使用店铺实测费率：窗口内无可用已结算样本或费率快照已过期，"
+    "由后端按全局基线估算"
 )
 
 
@@ -145,17 +163,34 @@ def _wire_value(key: str, value: Any, *, totals: bool = False) -> Any:
 
 
 def _row_payload(row) -> dict[str, Any]:
-    return {
+    payload = {
         field.name: _wire_value(field.name, getattr(row, field.name))
         for field in fields(row)
     }
+    payload.update(
+        {
+            "profit_status": row.profit_status,
+            "roi_status": row.roi_status,
+            "has_unsettled_orders": row.has_unsettled_orders,
+            "uses_default_unit_cost": row.uses_default_unit_cost,
+            "refund_rate_alert": row.refund_rate_alert,
+        }
+    )
+    return payload
 
 
 def _totals_payload(totals) -> dict[str, Any]:
-    return {
+    payload = {
         field.name: _wire_value(field.name, getattr(totals, field.name), totals=True)
         for field in fields(totals)
     }
+    payload.update(
+        {
+            "profit_status": totals.profit_status,
+            "roi_status": totals.roi_status,
+        }
+    )
+    return payload
 
 
 def _estimate_payload(estimate) -> dict[str, Any] | None:
@@ -209,6 +244,8 @@ def _meta_payload(
             "source": basis.fee_source,
             "rate": _fmt_rate(basis.fee_rate),
             "override": _fmt_rate(fee_rate) if fee_rate is not None else None,
+            "degraded": any(entry.source == "baseline" for entry in basis.fee_per_shop),
+            "fallback_message": _FEE_FALLBACK_MESSAGE,
             "per_shop": [
                 {
                     "shop_pk": entry.shop_pk,
@@ -239,6 +276,16 @@ def _meta_payload(
         "warnings": list(basis.warnings),
         "computed_at": basis.calculated_at.isoformat(),
         "rubric_version": basis.rubric_version,
+        "presentation": {
+            "rubric_label": f"盈利 {basis.rubric_version}",
+            "refund_rate_alert_threshold": _fmt_rate(
+                REFUND_RATE_ALERT_THRESHOLD
+            ),
+            "refund_rate_alert_message": _REFUND_RATE_ALERT_MESSAGE,
+            "default_cost_alert_message": _DEFAULT_COST_ALERT_MESSAGE,
+            "unsettled_alert_message": _UNSETTLED_ALERT_MESSAGE,
+            "pnl_hints": _PNL_HINTS,
+        },
         "currency": {
             "display": basis.display_currency,
             "native": {"ad": "USD", "sales_refund": "VND", "cost": "CNY"},

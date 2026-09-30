@@ -244,6 +244,40 @@ def test_get_manual_costs_lists_recent_submissions(
     )
 
 
+def test_get_manual_costs_searches_before_pagination(
+    api_client, readwrite_key, readonly_key, db_engine
+):
+    """Recent-cost search is backend-owned and reports the filtered total."""
+    _seed_channel_product(db_engine, "TEST_mc_search_target")
+    response = api_client.post(
+        "/v2/reporting/manual-costs",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        json={
+            "spu_id": "TEST_mc_search_target",
+            "unit_cost": "18.25",
+            "currency": "CNY",
+        },
+    )
+    assert response.status_code == 201, response.text
+
+    found = api_client.get(
+        "/v2/reporting/manual-costs?q=search_target&limit=1",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert found.status_code == 200, found.text
+    assert found.json()["total"] == 1
+    assert [item["spu_id"] for item in found.json()["items"]] == [
+        "TEST_mc_search_target"
+    ]
+
+    missing = api_client.get(
+        "/v2/reporting/manual-costs?q=TEST_no_such_cost",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert missing.status_code == 200, missing.text
+    assert missing.json() == {"total": 0, "items": []}
+
+
 def test_get_manual_costs_reports_prev_price_on_change(
     api_client, readwrite_key, readonly_key, db_engine
 ):
@@ -254,7 +288,7 @@ def test_get_manual_costs_reports_prev_price_on_change(
     must surface the NEWEST row's previous price (the value it replaced)
     so the UI can render "10 → 11" instead of two independent rows.
     """
-    cp_id = _seed_channel_product(db_engine, "TEST_mc_prevprice")
+    _seed_channel_product(db_engine, "TEST_mc_prevprice")
     for cost in ("10.00", "11.00", "12.50"):
         r = api_client.post(
             "/v2/reporting/manual-costs",

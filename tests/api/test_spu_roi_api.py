@@ -1001,6 +1001,11 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
 
     # v7 分层字段（场景无 SETTLEMENT → settled=0, unsettled=100）
     assert item["settled_order_count"] == 0
+    assert item["has_unsettled_orders"] is True
+    assert item["uses_default_unit_cost"] is True
+    assert item["refund_rate_alert"] is True
+    assert item["profit_status"] == "profit"
+    assert item["roi_status"] == "non_negative"
     assert item["net_revenue"] == cny4_from_usd("55.3600")
     assert item["settled_sales"] == "0.0000"
     assert item["unsettled_sales"] == cny4_from_usd("100")
@@ -1045,8 +1050,15 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert item["roi_breakeven"] == "1.92"
     assert item["cpa"] == cny4_from_usd("2")
 
-    # meta v7
+    # meta v10：阈值与公式说明也由后端返回，前端只渲染。
     assert body["meta"]["rubric_version"] == RUBRIC_VERSION
+    presentation = body["meta"]["presentation"]
+    assert presentation["rubric_label"] == f"盈利 {RUBRIC_VERSION}"
+    assert presentation["refund_rate_alert_threshold"] == "0.3000"
+    assert "fee_rate_used" in presentation["pnl_hints"]["unsettled"]
+    assert "0.308" not in presentation["pnl_hints"]["unsettled"]
+    assert body["totals"]["profit_status"] in {"loss", "profit", "break_even"}
+    assert body["totals"]["roi_status"] in {"negative", "non_negative", "unavailable"}
     assert body["meta"]["currency"]["display"] == "CNY"
     assert Decimal(body["meta"]["fx"]["usd_cny"]) == USD_CNY
     assert body["meta"]["fx"]["cny_vnd"] == format(USD_VND / USD_CNY, "f")
@@ -2551,6 +2563,8 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
         "ad_system_max_ad_spend": "0.0000",
         "ad_system_remaining_ad_spend_capacity": "0.0000",
         "ad_system_breakeven_roi_status": "estimated_known_costs",
+        "profit_status": "break_even",
+        "roi_status": "unavailable",
     }
     meta = body["meta"]
     assert meta["fx"]["usd_vnd"] == "26330.0000"
@@ -2989,11 +3003,11 @@ def test_spu_roi_js_targets_dashboard_hooks():
     assert "PREFIX" in src
     assert "unwrap" in src
     assert "401" in src  # 401 → login 跳转
-    assert "roi_breakeven" in src  # 红绿判据字段
-    assert "cost_source" in src
-    assert "DEFAULT_K1" in src  # “缺成本”标识判断
+    assert "roi_breakeven" in src
+    assert "uses_default_unit_cost" in src  # 后端业务状态驱动“缺成本”标识
+    assert "DEFAULT_K1" not in src
     assert '"¥"' not in src  # 2026-09-29 反馈：金额前缀去掉，纯数字
-    assert "金额已由服务端统一换算 CNY" in src
+    assert "meta.cost_assumption" in src
     # Bootstrap 多选由 Tom Select 驱动，精确 scope 通过独立 spu_ids 参数提交。
     assert 'window["TomSelect"]' in src
     assert "/v2/commerce/channel-product-options" in src
@@ -3161,8 +3175,8 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert '("#sum-refund-count")' in js_src
     assert '("#sum-cancel-count")' in js_src
     assert '("#sum-net-profit")' in js_src
-    assert "var netProfitValue = totals.net_profit" in js_src
-    assert "fmtMoney(netProfitValue)" in js_src
+    assert "fmtMoney(totals.net_profit)" in js_src
+    assert 'totals.profit_status === "loss"' in js_src
     assert "fmtMoney(it.effective_sales)" in js_src
     assert "fmtInt(it.total_orders)" in js_src
     assert "fmtInt(it.effective_order_count)" in js_src
@@ -3240,10 +3254,13 @@ def test_spu_roi_js_review_fixes_present():
     src = js_path.read_text(encoding="utf-8")
     # finding 6:loadMe 用 authenticated===true 守卫(而非不存在的 key_prefix)
     assert "authenticated === true" in src
-    # D8 删除 §7.2 标色阈值常量(C3:仅按净利判)
+    # 标色业务状态由后端返回，页面不得保存阈值或重算状态。
     assert "ROI_HARD_LOSS = 1.0" not in src
     assert "PASS_LINE = 1.5" not in src
-    assert "REFUND_RATE_ALERT" in src
+    assert "REFUND_RATE_ALERT" not in src
+    assert 'it.refund_rate_alert === true' in src
+    assert 'it.has_unsettled_orders === true' in src
+    assert 'it.profit_status === "loss"' in src
     # 「无投放」说明属于页面筛选器 tooltip，由 shell contract 覆盖；JS 不复制文案。
     # D8 删除列开关 + 信息列字段
     assert "op-th col-hidden" not in src
@@ -3288,6 +3305,10 @@ def test_spu_roi_frontend_only_displays_backend_profitability() -> None:
     assert "ad_system_max_ad_spend" not in src  # 前端不重算，只展示后端 ROI
     assert 'meta.currency.display) || "CNY"' in src
     assert "全表 USD" not in src
+    assert "0.308" not in src
+    assert "盈利 v10" not in src
+    assert "settledCount > 0" not in src
+    assert "state.meta.presentation" in src
 
 
 def test_spu_roi_js_shop_switch_listener_before_early_return():

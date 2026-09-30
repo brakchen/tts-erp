@@ -69,6 +69,10 @@ SQL_LIST_CHANNEL_ACCOUNTS = (
     "WHERE (CAST(:platform AS text) IS NULL OR platform = CAST(:platform AS text)) "
     "ORDER BY id LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
 )
+SQL_COUNT_CHANNEL_ACCOUNTS = (
+    "SELECT COUNT(*) AS n FROM commerce.shops "
+    "WHERE (CAST(:platform AS text) IS NULL OR platform = CAST(:platform AS text))"
+)
 SQL_GET_CHANNEL_ACCOUNT = (
     "SELECT id, platform, shop_id, account_name, region, "
     "seller_type, status, synced_at, opened_date, credential_id, service_id, "
@@ -104,6 +108,9 @@ SQL_LIST_CHANNEL_PRODUCTS = (
     "  ON m.spu_pk = cp.id AND m.valid_to IS NULL "
     "WHERE (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
     "AND (CAST(:status AS text) IS NULL OR cp.status = CAST(:status AS text)) "
+    "AND (CAST(:q AS text) IS NULL "
+    "     OR cp.spu_id ILIKE '%' || CAST(:q AS text) || '%' "
+    "     OR COALESCE(cp.title, '') ILIKE '%' || CAST(:q AS text) || '%') "
     "AND (NOT CAST(:has_orders AS boolean) OR EXISTS ("
     "  SELECT 1 FROM commerce.sales_order_lines sol "
     "  WHERE sol.spu_pk = cp.id AND sol.spu_pk IS NOT NULL"
@@ -121,6 +128,9 @@ SQL_COUNT_CHANNEL_PRODUCTS = (
     "  ON m.spu_pk = cp.id AND m.valid_to IS NULL "
     "WHERE (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
     "AND (CAST(:status AS text) IS NULL OR cp.status = CAST(:status AS text)) "
+    "AND (CAST(:q AS text) IS NULL "
+    "     OR cp.spu_id ILIKE '%' || CAST(:q AS text) || '%' "
+    "     OR COALESCE(cp.title, '') ILIKE '%' || CAST(:q AS text) || '%') "
     "AND (NOT CAST(:has_orders AS boolean) OR EXISTS ("
     "  SELECT 1 FROM commerce.sales_order_lines sol "
     "  WHERE sol.spu_pk = cp.id AND sol.spu_pk IS NOT NULL"
@@ -268,6 +278,7 @@ def _safe_int(value: Any, default: int = 0) -> int:
 
 
 _STMT_LIST_CHANNEL_ACCOUNTS = text(SQL_LIST_CHANNEL_ACCOUNTS)
+_STMT_COUNT_CHANNEL_ACCOUNTS = text(SQL_COUNT_CHANNEL_ACCOUNTS)
 _STMT_GET_CHANNEL_ACCOUNT = text(SQL_GET_CHANNEL_ACCOUNT)
 _STMT_GET_CHANNEL_ACCOUNT_BY_EXTERNAL = text(SQL_GET_CHANNEL_ACCOUNT_BY_EXTERNAL)
 _STMT_COUNT_CHANNEL_PRODUCTS = text(SQL_COUNT_CHANNEL_PRODUCTS)
@@ -378,10 +389,15 @@ def list_shops(
     platform: str | None = Query(default=None, max_length=32),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    response: Response = None,  # type: ignore[assignment]  # injected by FastAPI
 ) -> list[ChannelAccountOut]:
+    params = {"platform": platform}
+    if response is not None:
+        total = _q(_STMT_COUNT_CHANNEL_ACCOUNTS, params, sess).scalar()
+        response.headers["X-Total-Count"] = str(_safe_int(total))
     rows = _q(
         _STMT_LIST_CHANNEL_ACCOUNTS,
-        {"platform": platform, "limit": limit, "offset": offset},
+        {**params, "limit": limit, "offset": offset},
         sess,
     ).all()
     return [_row_to_channel_account(r) for r in rows]
@@ -500,6 +516,11 @@ def list_products_spu(
     sess: Session = Depends(get_session),
     shop_pk: int | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
+    q: str | None = Query(
+        default=None,
+        max_length=200,
+        description="Case-insensitive substring search over SPU id and title.",
+    ),
     has_orders: bool = Query(
         default=False,
         description=(
@@ -528,6 +549,7 @@ def list_products_spu(
     params = {
         "acct_id": shop_pk,
         "status": status_filter,
+        "q": q.strip() if q and q.strip() else None,
         "has_orders": has_orders,
     }
     # Total matching rows (same filter, ignoring page bounds) — exposed as
