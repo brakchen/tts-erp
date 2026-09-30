@@ -16,3 +16,4 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| chore/focused-spus-deploy-script | 为重点关注 SPU 提供人工生产 migration、API 重启与只读验证脚本 | 01a0edf5-a325-77b2-ade9-ac88e25bdd89 | `chore/focused-spus-deploy-script` / `.worktrees/focused-spus-deploy-script` | `scripts/oneoff_deploy_focused_spus.sh`; `tech-doc/analytics/focused-spus.md` | active | — | — | 2026-09-30T00:16Z |
