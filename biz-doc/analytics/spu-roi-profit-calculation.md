@@ -250,7 +250,13 @@ projected_future_full_loss_qty
 
 其中 `full_loss_exposure_unsettled_order_count` 只包括尚未送达的未结算订单。预计新增
 订单数和件数还分别以该风险暴露中尚未确认结果的订单数、件数为上限。已送达未结算
-订单只因平台结算周期滞后而留在未结算池，不得放大全损预测。
+订单只因平台结算周期滞后而留在未结算池，不得放大全损预测。大盘在“未结算订单”后
+单独展示“未结算已送达”订单量：
+
+```text
+delivered_unsettled_order_count
+= unsettled_order_count − full_loss_exposure_unsettled_order_count
+```
 
 页面只展示“预计未来新增全损”，不展示预计终局全损。退款金额同样按整批额度减已发生
 金额处理：

@@ -143,6 +143,9 @@ def test_focused_spus_page_keeps_the_full_roi_dashboard(
     assert '"sum-projected-terminal-loss-qty"' not in focused_profile
     assert 'id="sum-projected-terminal-loss-qty"' not in standard.text
     assert 'id="sum-projected-terminal-loss-qty"' not in focused.text
+    # 新指标由共享 kernel 动态插入，两个页面 profile 都必须启用。
+    assert '"sum-delivered-unsettled-orders"' in standard_profile
+    assert '"sum-delivered-unsettled-orders"' in focused_profile
 
 
 def test_focused_spus_auth_and_camel_case_contract(

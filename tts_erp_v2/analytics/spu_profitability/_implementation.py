@@ -1625,6 +1625,11 @@ def _query_spu_roi(
                 "settled_full_loss_rate": projection.settled_full_loss_rate,
                 "projection_full_loss_qty_rate": projection.full_loss_qty_rate,
                 "unsettled_order_count": unsettled_order_count,
+                "delivered_unsettled_order_count": max(
+                    0,
+                    unsettled_order_count
+                    - full_loss_exposure_unsettled_order_count,
+                ),
                 "full_loss_exposure_unsettled_order_count": (
                     full_loss_exposure_unsettled_order_count
                 ),
@@ -2090,6 +2095,11 @@ def _query_spu_roi(
         settled_full_loss_rate=dashboard_projection.settled_full_loss_rate,
         projection_full_loss_qty_rate=dashboard_projection.full_loss_qty_rate,
         unsettled_order_count=total_unsettled_order_count,
+        delivered_unsettled_order_count=max(
+            0,
+            total_unsettled_order_count
+            - total_full_loss_exposure_unsettled_order_count,
+        ),
         full_loss_exposure_unsettled_order_count=(
             total_full_loss_exposure_unsettled_order_count
         ),
