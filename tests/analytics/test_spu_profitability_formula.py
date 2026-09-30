@@ -206,10 +206,12 @@ def _projection_inputs(**overrides) -> ProjectionInput:
         "projection_basis_qty": Decimal(100),
         "projection_basis_sales_cny": Decimal(1000),
         "projection_basis_refund_amount_cny": Decimal(100),
-        "projection_basis_full_loss_qty": Decimal(5),
-        "observed_full_loss_rate": Decimal("0.093"),
+        "projection_basis_full_loss_order_count": 1,
+        "projection_basis_full_loss_qty": Decimal(2),
         "unsettled_order_count": 5,
-        "unresolved_unsettled_order_count": 4,
+        "confirmed_unsettled_full_loss_order_count": 0,
+        "confirmed_unsettled_full_loss_qty": Decimal(0),
+        "unresolved_unsettled_order_count": 5,
         "unsettled_sales_after_fee_cny": Decimal(400),
         "confirmed_unsettled_refund_after_fee_cny": Decimal(16),
         "unresolved_unsettled_qty": Decimal(20),
@@ -218,9 +220,11 @@ def _projection_inputs(**overrides) -> ProjectionInput:
         "settled_net_cny": Decimal(600),
         "observed_full_loss_qty": Decimal(3),
         "observed_full_loss_cost_cny": Decimal(30),
+        "current_unsettled_net_cny": Decimal(300),
         "current_cogs_kept_cny": Decimal(800),
         "cogs_total_cny": Decimal(1000),
         "spend_cny": Decimal(100),
+        "ad_gmv_cny": Decimal(800),
         "current_net_revenue_cny": Decimal(900),
         "current_net_profit_cny": Decimal(-200),
     }
@@ -228,40 +232,75 @@ def _projection_inputs(**overrides) -> ProjectionInput:
     return ProjectionInput(**values)
 
 
-def test_projection_uses_settled_refunds_and_observed_full_loss_rate() -> None:
+def test_projection_uses_settled_full_loss_rate_and_current_profit_delta() -> None:
     result = calculate_projection(_projection_inputs())
 
     assert result.status is ProjectionStatus.AVAILABLE
     assert result.refund_amount_rate == Decimal("0.10")
-    assert result.full_loss_qty_rate == Decimal("0.093")
-    assert result.projected_future_full_loss_qty == Decimal("1.860")
-    assert result.projected_terminal_full_loss_qty == Decimal("4.860")
-    assert result.projected_full_loss_cost_cny == Decimal("48.600")
-    assert result.projected_unsettled_net_cny == Decimal(352)
-    assert result.projected_net_revenue_cny == Decimal(952)
-    # Existing COGS already includes the unresolved units. The future loss must not
-    # be deducted from projected profit a second time.
-    assert result.projected_net_profit_cny == Decimal(-148)
-    assert result.projected_nc_prime_cny == Decimal("903.400")
-    assert result.projected_cogs_kept_cny == Decimal("781.400")
-    assert result.projected_roi_real == Decimal("9.034")
-    assert result.projected_roi_breakeven == Decimal("903.400") / Decimal(122)
+    assert result.settled_full_loss_rate == Decimal("0.10")
+    assert result.projected_future_full_loss_order_count == Decimal("0.5")
+    assert result.projected_future_full_loss_qty == Decimal(1)
+    assert result.projected_terminal_full_loss_qty == Decimal(4)
+    assert result.projected_full_loss_cost_cny == Decimal(40)
+    assert result.projected_terminal_refund_amount_cny == Decimal(40)
+    assert result.projected_future_refund_amount_cny == Decimal(24)
+    assert result.projected_unsettled_net_cny == Decimal(360)
+    assert result.projected_net_revenue_cny == Decimal(960)
+    # Current profit already contains 300 of unsettled net. Only the +60 delta
+    # is added; COGS and ad spend are not deducted a second time.
+    assert result.projected_net_profit_cny == Decimal(-140)
+    assert result.projected_nc_prime_cny == Decimal(920)
+    assert result.projected_cogs_kept_cny == Decimal(790)
+    assert result.projected_roi_real == Decimal("9.2")
+    assert result.projected_roi_breakeven == Decimal(920) / Decimal(130)
+    assert result.projected_ad_gmv_cny == Decimal(720)
+    assert result.projected_ad_system_actual_roi == Decimal("7.2")
+    assert result.projected_ad_system_max_ad_spend_cny == Decimal(-40)
+    assert result.projected_ad_system_breakeven_roi is None
+
+
+def test_projection_subtracts_confirmed_outcomes_from_whole_cohort_quota() -> None:
+    result = calculate_projection(
+        _projection_inputs(
+            projection_basis_order_count=100,
+            projection_basis_full_loss_order_count=10,
+            projection_basis_full_loss_qty=Decimal(10),
+            unsettled_order_count=300,
+            confirmed_unsettled_full_loss_order_count=8,
+            confirmed_unsettled_full_loss_qty=Decimal(8),
+            unresolved_unsettled_order_count=292,
+            unresolved_unsettled_qty=Decimal(292),
+        )
+    )
+
+    assert result.settled_full_loss_rate == Decimal("0.10")
+    assert result.projected_future_full_loss_order_count == Decimal(22)
+    assert result.projected_future_full_loss_qty == Decimal(22)
 
 
 def test_projection_does_not_double_count_confirmed_unsettled_refund() -> None:
     result = calculate_projection(
         _projection_inputs(
-            # 500 gross at 20% fee = 400 after fee. Of that, 20 confirmed
-            # refund = 16 after fee. The 10% future rate applies only to the
-            # unresolved 400 gross = 320 after fee.
+            # The whole unsettled cohort expects 40 after-fee refund. Once 50
+            # is already confirmed, no additional refund is forecast.
             unsettled_sales_after_fee_cny=Decimal(400),
-            confirmed_unsettled_refund_after_fee_cny=Decimal(16),
-            unresolved_unsettled_sales_after_fee_cny=Decimal(320),
+            confirmed_unsettled_refund_after_fee_cny=Decimal(50),
         )
     )
 
     assert result.refund_amount_rate == Decimal("0.10")
-    assert result.projected_unsettled_net_cny == Decimal(400 - 16 - 32)
+    assert result.projected_terminal_refund_amount_cny == Decimal(50)
+    assert result.projected_future_refund_amount_cny == Decimal(0)
+    assert result.projected_unsettled_net_cny == Decimal(350)
+
+
+def test_projection_calculates_projected_ad_system_breakeven_roi() -> None:
+    result = calculate_projection(_projection_inputs(cogs_total_cny=Decimal(500)))
+
+    assert result.projected_ad_gmv_cny == Decimal(720)
+    assert result.projected_ad_system_max_ad_spend_cny == Decimal(460)
+    assert result.projected_ad_system_actual_roi == Decimal("7.2")
+    assert result.projected_ad_system_breakeven_roi == Decimal(720) / Decimal(460)
 
 
 def test_projection_is_unavailable_without_a_reliable_settled_sample() -> None:
@@ -271,26 +310,28 @@ def test_projection_is_unavailable_without_a_reliable_settled_sample() -> None:
             projection_basis_qty=Decimal(0),
             projection_basis_sales_cny=Decimal(0),
             projection_basis_refund_amount_cny=Decimal(0),
+            projection_basis_full_loss_order_count=0,
             projection_basis_full_loss_qty=Decimal(0),
         )
     )
 
     assert result.status is ProjectionStatus.INSUFFICIENT_SAMPLE
     assert result.refund_amount_rate is None
-    assert result.full_loss_qty_rate is None
+    assert result.settled_full_loss_rate is None
     assert result.projected_future_full_loss_qty is None
-    assert result.projected_terminal_full_loss_qty is None
     assert result.projected_unsettled_net_cny is None
-    assert result.projected_net_revenue_cny is None
     assert result.projected_net_profit_cny is None
     assert result.projected_roi_real is None
-    assert result.projected_roi_breakeven is None
+    assert result.projected_ad_system_actual_roi is None
+    assert result.projected_ad_system_breakeven_roi is None
 
 
 def test_projection_without_unsettled_orders_matches_current_actual_result() -> None:
     result = calculate_projection(
         _projection_inputs(
             unsettled_order_count=0,
+            confirmed_unsettled_full_loss_order_count=0,
+            confirmed_unsettled_full_loss_qty=Decimal(0),
             unresolved_unsettled_order_count=0,
             unsettled_sales_after_fee_cny=Decimal(0),
             confirmed_unsettled_refund_after_fee_cny=Decimal(0),
@@ -298,6 +339,7 @@ def test_projection_without_unsettled_orders_matches_current_actual_result() -> 
             unresolved_unsettled_sales_after_fee_cny=Decimal(0),
             unresolved_unsettled_cogs_cny=Decimal(0),
             settled_net_cny=Decimal(600),
+            current_unsettled_net_cny=Decimal(0),
             current_net_revenue_cny=Decimal(600),
             current_net_profit_cny=Decimal(-500),
         )
@@ -305,14 +347,12 @@ def test_projection_without_unsettled_orders_matches_current_actual_result() -> 
 
     assert result.status is ProjectionStatus.NO_UNSETTLED_ORDERS
     assert result.projected_future_full_loss_qty == 0
-    assert result.projected_terminal_full_loss_qty == Decimal(3)
     assert result.projected_unsettled_net_cny == 0
     assert result.projected_net_revenue_cny == Decimal(600)
     assert result.projected_net_profit_cny == Decimal(-500)
-    assert result.projected_nc_prime_cny == Decimal(570)
-    assert result.projected_cogs_kept_cny == Decimal(800)
     assert result.projected_roi_real == Decimal("5.7")
-    assert result.projected_roi_breakeven is None
+    assert result.projected_ad_system_actual_roi == Decimal(8)
+    assert result.projected_ad_system_breakeven_roi is None
 
 
 def test_projection_roi_is_undefined_without_ad_spend() -> None:
@@ -321,3 +361,4 @@ def test_projection_roi_is_undefined_without_ad_spend() -> None:
     assert result.status is ProjectionStatus.AVAILABLE
     assert result.projected_roi_real is None
     assert result.projected_roi_breakeven is None
+    assert result.projected_ad_system_actual_roi is None

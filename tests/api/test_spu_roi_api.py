@@ -450,7 +450,12 @@ def _seed_case(
 
 
 def _seed_settlement(
-    sess, *, order_pk: int, external_id: str, amount_vnd: str
+    sess,
+    *,
+    order_pk: int,
+    external_id: str,
+    amount_vnd: str,
+    customer_refund_vnd: str | None = None,
 ) -> None:
     statement_pk = sess.execute(
         text(
@@ -482,6 +487,15 @@ def _seed_settlement(
         ),
         {"transaction_pk": transaction_pk, "amount": amount_vnd},
     )
+    if customer_refund_vnd is not None:
+        sess.execute(
+            text(
+                "INSERT INTO finance.settlement_components "
+                "(transaction_id, component_code, amount, currency) "
+                "VALUES (:transaction_pk, 'CUSTOMER_REFUND', :amount, 'VND')"
+            ),
+            {"transaction_pk": transaction_pk, "amount": customer_refund_vnd},
+        )
 
 
 def _fetch_spu_line_id(sess, order_id: str) -> int:
@@ -692,6 +706,7 @@ def _seed_projection_scenario(sess) -> int:
         order_pk=settled_order,
         external_id="TEST_TXN_PROJECTION_SETTLED",
         amount_vnd="600000",
+        customer_refund_vnd="-200000",
     )
 
     _seed_order_line(
@@ -1236,18 +1251,21 @@ def test_spu_roi_projects_only_unsettled_orders_from_settled_sample(
     item = body["items"][0]
 
     vnd_cny = USD_CNY / USD_VND
-    projected_unsettled_net = Decimal(400_000) * (Decimal(1) - FEE_BASELINE) * vnd_cny
+    one_minus_fee = Decimal(1) - FEE_BASELINE
+    projected_terminal_refund = Decimal(120_000) * one_minus_fee * vnd_cny
+    confirmed_unsettled_refund = Decimal(100_000) * one_minus_fee * vnd_cny
+    projected_unsettled_net = Decimal(480_000) * one_minus_fee * vnd_cny
     projected_net_revenue = Decimal(600_000) * vnd_cny + projected_unsettled_net
     projected_net_profit = (
         projected_net_revenue - Decimal(640) - Decimal(10) * USD_CNY
     )
-    observed_full_loss_rate = Decimal(2) / Decimal(3)
-    projected_future_full_loss_qty = Decimal(5) * observed_full_loss_rate
-    projected_terminal_full_loss_qty = Decimal(3) + projected_future_full_loss_qty
-    projected_full_loss_cost = Decimal(120) + Decimal(200) * observed_full_loss_rate
+    projected_future_full_loss_qty = Decimal(3)
+    projected_terminal_full_loss_qty = Decimal(6)
+    projected_full_loss_cost = Decimal(240)
     projected_nc_prime = projected_net_revenue - projected_full_loss_cost
-    projected_cogs_kept = Decimal(520) - Decimal(200) * observed_full_loss_rate
+    projected_cogs_kept = Decimal(400)
     projected_roi = projected_nc_prime / (Decimal(10) * USD_CNY)
+    projected_ad_gmv = Decimal(80) * USD_CNY
 
     assert item["projection_status"] == "available"
     assert item["projection_basis_order_count"] == 1
@@ -1256,17 +1274,25 @@ def test_spu_roi_projects_only_unsettled_orders_from_settled_sample(
     assert item["projection_basis_refund_amount"] == m4(
         Decimal(200_000) * vnd_cny
     )
+    assert item["projection_basis_full_loss_order_count"] == 1
     assert item["projection_basis_full_loss_qty"] == 2
     assert item["projection_refund_amount_rate"] == "0.2000"
-    # 全损预测使用页面同口径的订单全损率，不再因“已结算样本无全损”归零。
-    assert item["full_loss_rate"] == "0.67"
-    assert item["projection_full_loss_qty_rate"] == "0.6667"
+    assert item["settled_full_loss_rate"] == "1.0000"
+    assert item["projection_full_loss_qty_rate"] == "1.0000"
     assert item["unresolved_unsettled_order_count"] == 2
     assert Decimal(item["unresolved_unsettled_qty"]) == Decimal(5)
     assert item["unresolved_unsettled_sales"] == m4(Decimal(500_000) * vnd_cny)
     assert item["confirmed_unsettled_refund_amount"] == m4(
         Decimal(100_000) * vnd_cny
     )
+    assert item["confirmed_unsettled_full_loss_order_count"] == 1
+    assert Decimal(item["projected_future_refund_amount"]) == (
+        projected_terminal_refund - confirmed_unsettled_refund
+    ).quantize(_Q4, rounding=ROUND_HALF_UP)
+    assert item["projected_terminal_refund_amount"] == m4(
+        projected_terminal_refund
+    )
+    assert Decimal(item["projected_future_full_loss_order_count"]) == Decimal(1)
     assert Decimal(item["projected_future_full_loss_qty"]) == (
         projected_future_full_loss_qty
     )
@@ -1281,24 +1307,27 @@ def test_spu_roi_projects_only_unsettled_orders_from_settled_sample(
     assert item["projected_cogs_kept"] == m4(projected_cogs_kept)
     assert item["projected_roi_real"] == m2(projected_roi)
     assert item["projected_roi_breakeven"] is None
+    assert item["projected_ad_gmv"] == m4(projected_ad_gmv)
+    assert item["projected_ad_system_actual_roi"] == "8.00"
+    assert item["projected_ad_system_breakeven_roi"] is None
     assert body["meta"]["projection"]["date_attribution"] == (
         "COALESCE(order_time, paid_at)"
     )
     assert "未结算订单" in body["meta"]["projection"]["target"]
-    assert body["meta"]["projection"]["full_loss_rate_source"].endswith(
-        "full_loss_rate"
-    )
-    # 未结算总销售 600,000 VND 中，已确认退款 100,000 只扣一次；预测退款率
-    # 只作用于剩余待确认销售 500,000，不会对已退款件再次折减。
+    assert "已结算退款全损订单数" in body["meta"]["projection"][
+        "full_loss_rate_source"
+    ]
+    # 整批未结算销售预计退款 120,000 VND；其中 100,000 已确认，未来只新增
+    # 20,000，不再对剩余销售额重复套完整退款率。
     assert item["projected_unsettled_net"] == m4(
-        (
-            Decimal(600_000)
-            - Decimal(100_000)
-            - Decimal(500_000) * Decimal("0.20")
-        )
-        * (Decimal(1) - FEE_BASELINE)
-        * vnd_cny
+        (Decimal(600_000) - Decimal(120_000)) * one_minus_fee * vnd_cny
     )
+    # 预计净利润 = 当前净利润 + 未结算净收入调整。
+    assert Decimal(item["projected_net_profit"]) == (
+        Decimal(item["net_profit"])
+        + Decimal(item["projected_unsettled_net"])
+        - Decimal(item["unsettled_net"])
+    ).quantize(_Q4, rounding=ROUND_HALF_UP)
     # Existing COGS already contains all 16 paid units. Predicted loss is not
     # subtracted again from terminal profit.
     assert Decimal(item["projected_net_profit"]) == (
@@ -1313,12 +1342,18 @@ def test_spu_roi_projects_only_unsettled_orders_from_settled_sample(
         "projection_basis_qty",
         "projection_basis_sales",
         "projection_basis_refund_amount",
+        "projection_basis_full_loss_order_count",
         "projection_basis_full_loss_qty",
         "projection_refund_amount_rate",
+        "settled_full_loss_rate",
         "projection_full_loss_qty_rate",
         "unresolved_unsettled_order_count",
         "unresolved_unsettled_qty",
         "unresolved_unsettled_sales",
+        "confirmed_unsettled_full_loss_order_count",
+        "projected_future_refund_amount",
+        "projected_terminal_refund_amount",
+        "projected_future_full_loss_order_count",
         "projected_future_full_loss_qty",
         "projected_terminal_full_loss_qty",
         "projected_full_loss_cost",
@@ -1329,6 +1364,10 @@ def test_spu_roi_projects_only_unsettled_orders_from_settled_sample(
         "projected_roi_breakeven",
         "projected_nc_prime",
         "projected_cogs_kept",
+        "projected_ad_gmv",
+        "projected_ad_system_actual_roi",
+        "projected_ad_system_max_ad_spend",
+        "projected_ad_system_breakeven_roi",
     ):
         assert body["totals"][field] == item[field], field
 
@@ -1381,6 +1420,10 @@ def test_spu_roi_projection_with_no_unsettled_orders_matches_current_result(
     assert item["projected_net_profit"] == item["net_profit"]
     assert item["projected_roi_real"] == item["roi_real"]
     assert item["projected_roi_breakeven"] == item["roi_breakeven"]
+    assert item["projected_ad_system_actual_roi"] == item["ad_system_actual_roi"]
+    assert item["projected_ad_system_breakeven_roi"] == (
+        item["ad_system_breakeven_roi"]
+    )
     assert body["totals"]["projection_status"] == "no_unsettled_orders"
     assert body["totals"]["projected_net_profit"] == body["totals"]["net_profit"]
 
@@ -2911,15 +2954,21 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
         "projection_basis_qty": 0,
         "projection_basis_sales": "0.0000",
         "projection_basis_refund_amount": "0.0000",
+        "projection_basis_full_loss_order_count": 0,
         "projection_basis_full_loss_qty": 0,
         "projection_refund_amount_rate": None,
+        "settled_full_loss_rate": None,
         "projection_full_loss_qty_rate": None,
         "unsettled_order_count": 0,
         "unresolved_unsettled_order_count": 0,
         "unresolved_unsettled_qty": 0,
         "unresolved_unsettled_sales": "0.0000",
         "confirmed_unsettled_refund_amount": "0.0000",
+        "confirmed_unsettled_full_loss_order_count": 0,
         "confirmed_unsettled_full_loss_qty": 0,
+        "projected_future_refund_amount": "0.0000",
+        "projected_terminal_refund_amount": "0.0000",
+        "projected_future_full_loss_order_count": "0",
         "projected_future_full_loss_qty": "0",
         "projected_terminal_full_loss_qty": "0",
         "projected_full_loss_cost": "0.0000",
@@ -2930,6 +2979,10 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
         "projected_roi_breakeven": None,
         "projected_nc_prime": "0.0000",
         "projected_cogs_kept": "0.0000",
+        "projected_ad_gmv": "0.0000",
+        "projected_ad_system_actual_roi": None,
+        "projected_ad_system_max_ad_spend": "0.0000",
+        "projected_ad_system_breakeven_roi": None,
         "profit_status": "break_even",
         "roi_status": "unavailable",
     }
@@ -3560,13 +3613,13 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
         "sum-projection-refund-rate",
         "sum-projection-full-loss-rate",
         "sum-unresolved-orders",
-        "sum-unresolved-qty",
         "sum-projected-future-loss-qty",
-        "sum-projected-terminal-loss-qty",
         "sum-projected-net-revenue",
         "sum-projected-net-profit",
         "sum-projected-roi",
         "sum-projected-breakeven-roi",
+        "sum-projected-ad-roi",
+        "sum-projected-ad-breakeven-roi",
     )
     summary_positions = []
     for cell_id in summary_ids:
@@ -3580,6 +3633,14 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert "净利润" in body
     assert "全损量" in body
     assert "退款数" in body
+    assert "已结算订单全损率" in body
+    assert "预计未来新增全损件" in body
+    assert "预计终局全损件" not in body
+    assert "预计ROI" in body
+    assert "预计保本ROI" in body
+    assert "预计广告系统ROI" in body
+    assert "预计广告系统保本ROI" in body
+    assert "预计财务ROI" not in body
     assert "广告系统实际ROI = 广告归因GMV ÷ 广告实际消耗" in body
     assert "广告系统保本ROI = 广告归因GMV ÷ 最大可承受广告费" in body
     assert "TODO: 广告系统保本ROI 公式待定" not in body
@@ -3659,14 +3720,15 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert '"#sum-projection-status"' in js_src
     assert "totals.projection_status" in js_src
     assert "totals.projection_refund_amount_rate" in js_src
-    assert 'label.firstChild.nodeValue = "预测全损率"' in js_src
-    assert "使用当前订单维度全损率预测待确认订单" in js_src
+    assert "totals.settled_full_loss_rate" in js_src
     assert "totals.projected_net_profit" in js_src
     assert "totals.projected_roi_real" in js_src
+    assert "totals.projected_ad_system_actual_roi" in js_src
+    assert "totals.projected_ad_system_breakeven_roi" in js_src
     assert "formula_pending" not in js_src
 
 
-def test_spu_roi_drill_summary_displays_terminal_projection_separately() -> None:
+def test_spu_roi_drill_summary_displays_projection_separately() -> None:
     from pathlib import Path
 
     src = (
@@ -3686,27 +3748,35 @@ def test_spu_roi_drill_summary_displays_terminal_projection_separately() -> None
         "it.projection_basis_qty",
         "it.projection_basis_sales",
         "it.projection_basis_refund_amount",
+        "it.projection_basis_full_loss_order_count",
         "it.projection_basis_full_loss_qty",
         "it.projection_refund_amount_rate",
-        "it.projection_full_loss_qty_rate",
+        "it.settled_full_loss_rate",
         "it.unresolved_unsettled_order_count",
         "it.unresolved_unsettled_qty",
         "it.unresolved_unsettled_sales",
+        "it.confirmed_unsettled_full_loss_order_count",
+        "it.projected_future_refund_amount",
+        "it.projected_future_full_loss_order_count",
         "it.projected_future_full_loss_qty",
-        "it.projected_terminal_full_loss_qty",
         "it.projected_full_loss_cost",
         "it.projected_unsettled_net",
         "it.projected_net_revenue",
         "it.projected_net_profit",
         "it.projected_roi_real",
         "it.projected_roi_breakeven",
+        "it.projected_ad_system_actual_roi",
+        "it.projected_ad_system_breakeven_roi",
     ):
         assert field in summary
-    assert "预计终局净利润" in summary
-    assert "预计终局ROI" in summary
-    assert "预测全损率（订单）" in summary
-    assert "预测全损件数率" not in summary
-    assert "预计终局实际ROI" not in summary
+    assert "预计净利润" in summary
+    assert "预计ROI" in summary
+    assert "预计保本ROI" in summary
+    assert "预计广告系统ROI" in summary
+    assert "预计广告系统保本ROI" in summary
+    assert "已结算订单全损率" in summary
+    assert "预计终局全损件" not in summary
+    assert "预计财务ROI" not in summary
 
 
 def test_spu_roi_page_d8_no_column_toggles(api_client, readonly_key):

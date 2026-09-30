@@ -95,9 +95,11 @@ class ProjectionInput:
     projection_basis_qty: Decimal
     projection_basis_sales_cny: Decimal
     projection_basis_refund_amount_cny: Decimal
+    projection_basis_full_loss_order_count: int
     projection_basis_full_loss_qty: Decimal
-    observed_full_loss_rate: Decimal | None
     unsettled_order_count: int
+    confirmed_unsettled_full_loss_order_count: int
+    confirmed_unsettled_full_loss_qty: Decimal
     unresolved_unsettled_order_count: int
     unsettled_sales_after_fee_cny: Decimal
     confirmed_unsettled_refund_after_fee_cny: Decimal
@@ -107,9 +109,11 @@ class ProjectionInput:
     settled_net_cny: Decimal
     observed_full_loss_qty: Decimal
     observed_full_loss_cost_cny: Decimal
+    current_unsettled_net_cny: Decimal
     current_cogs_kept_cny: Decimal
     cogs_total_cny: Decimal
     spend_cny: Decimal
+    ad_gmv_cny: Decimal
     current_net_revenue_cny: Decimal
     current_net_profit_cny: Decimal
 
@@ -118,7 +122,11 @@ class ProjectionInput:
 class ProjectionOutput:
     status: ProjectionStatus
     refund_amount_rate: Decimal | None
+    settled_full_loss_rate: Decimal | None
     full_loss_qty_rate: Decimal | None
+    projected_future_refund_amount_cny: Decimal | None
+    projected_terminal_refund_amount_cny: Decimal | None
+    projected_future_full_loss_order_count: Decimal | None
     projected_future_full_loss_qty: Decimal | None
     projected_terminal_full_loss_qty: Decimal | None
     projected_full_loss_cost_cny: Decimal | None
@@ -129,6 +137,10 @@ class ProjectionOutput:
     projected_roi_breakeven: Decimal | None
     projected_nc_prime_cny: Decimal | None
     projected_cogs_kept_cny: Decimal | None
+    projected_ad_gmv_cny: Decimal | None
+    projected_ad_system_actual_roi: Decimal | None
+    projected_ad_system_max_ad_spend_cny: Decimal | None
+    projected_ad_system_breakeven_roi: Decimal | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,22 +187,22 @@ def calculate_order_metrics(
 
 
 def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
-    """Project the terminal outcome of the unresolved unsettled cohort.
+    """Project future changes without counting confirmed outcomes twice.
 
-    Confirmed unsettled refunds are removed once.  The observed order-dimension
-    full-loss rate is treated as each unresolved item's loss probability; this is
-    equivalent to predicting unresolved full-loss orders first and converting by
-    the unresolved cohort's average items per order.  Future loss changes expected
-    revenue and financial ROI, but never adds COGS: every paid unit is already in
-    ``cogs_total_cny``.
+    Settled orders provide two independent bases: refund amount severity and
+    order-level full-loss probability.  Each is applied to the whole unsettled
+    cohort, then confirmed unsettled outcomes are subtracted to obtain only the
+    future increment.  Existing COGS and ad spend stay in current profit and are
+    never deducted a second time.
     """
 
-    has_refund_sample = (
+    has_reliable_sample = (
         inputs.projection_basis_order_count > 0
         and inputs.projection_basis_sales_cny > 0
     )
     refund_amount_rate: Decimal | None = None
-    if has_refund_sample:
+    settled_full_loss_rate: Decimal | None = None
+    if has_reliable_sample:
         refund_amount_rate = min(
             Decimal(1),
             max(
@@ -199,30 +211,46 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
                 / inputs.projection_basis_sales_cny,
             ),
         )
-    full_loss_qty_rate = (
-        min(Decimal(1), max(Decimal(0), inputs.observed_full_loss_rate))
-        if inputs.observed_full_loss_rate is not None
-        else None
+        settled_full_loss_rate = min(
+            Decimal(1),
+            max(
+                Decimal(0),
+                Decimal(inputs.projection_basis_full_loss_order_count)
+                / Decimal(inputs.projection_basis_order_count),
+            ),
+        )
+
+    current_nc_prime = (
+        inputs.current_net_revenue_cny - inputs.observed_full_loss_cost_cny
     )
-    has_reliable_sample = has_refund_sample and full_loss_qty_rate is not None
+    current_ad_max_spend = inputs.current_net_revenue_cny - inputs.cogs_total_cny
 
     if inputs.unsettled_order_count <= 0:
-        projected_nc_prime = (
-            inputs.current_net_revenue_cny - inputs.observed_full_loss_cost_cny
-        )
         projected_roi_real = (
-            projected_nc_prime / inputs.spend_cny
+            current_nc_prime / inputs.spend_cny if inputs.spend_cny != 0 else None
+        )
+        breakeven_denom = current_nc_prime - inputs.current_cogs_kept_cny
+        projected_roi_breakeven = None
+        if inputs.spend_cny != 0 and breakeven_denom > 0:
+            projected_roi_breakeven = current_nc_prime / breakeven_denom
+        projected_ad_system_actual_roi = (
+            inputs.ad_gmv_cny / inputs.spend_cny
             if inputs.spend_cny != 0
             else None
         )
-        breakeven_denom = projected_nc_prime - inputs.current_cogs_kept_cny
-        projected_roi_breakeven = None
-        if inputs.spend_cny != 0 and breakeven_denom > 0:
-            projected_roi_breakeven = projected_nc_prime / breakeven_denom
+        projected_ad_system_breakeven_roi = None
+        if current_ad_max_spend > 0 and inputs.ad_gmv_cny > 0:
+            projected_ad_system_breakeven_roi = (
+                inputs.ad_gmv_cny / current_ad_max_spend
+            )
         return ProjectionOutput(
             status=ProjectionStatus.NO_UNSETTLED_ORDERS,
             refund_amount_rate=refund_amount_rate,
-            full_loss_qty_rate=full_loss_qty_rate,
+            settled_full_loss_rate=settled_full_loss_rate,
+            full_loss_qty_rate=settled_full_loss_rate,
+            projected_future_refund_amount_cny=Decimal(0),
+            projected_terminal_refund_amount_cny=Decimal(0),
+            projected_future_full_loss_order_count=Decimal(0),
             projected_future_full_loss_qty=Decimal(0),
             projected_terminal_full_loss_qty=inputs.observed_full_loss_qty,
             projected_full_loss_cost_cny=inputs.observed_full_loss_cost_cny,
@@ -231,15 +259,25 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
             projected_net_profit_cny=inputs.current_net_profit_cny,
             projected_roi_real=projected_roi_real,
             projected_roi_breakeven=projected_roi_breakeven,
-            projected_nc_prime_cny=projected_nc_prime,
+            projected_nc_prime_cny=current_nc_prime,
             projected_cogs_kept_cny=inputs.current_cogs_kept_cny,
+            projected_ad_gmv_cny=inputs.ad_gmv_cny,
+            projected_ad_system_actual_roi=projected_ad_system_actual_roi,
+            projected_ad_system_max_ad_spend_cny=current_ad_max_spend,
+            projected_ad_system_breakeven_roi=(
+                projected_ad_system_breakeven_roi
+            ),
         )
 
     if not has_reliable_sample:
         return ProjectionOutput(
             status=ProjectionStatus.INSUFFICIENT_SAMPLE,
             refund_amount_rate=None,
+            settled_full_loss_rate=None,
             full_loss_qty_rate=None,
+            projected_future_refund_amount_cny=None,
+            projected_terminal_refund_amount_cny=None,
+            projected_future_full_loss_order_count=None,
             projected_future_full_loss_qty=None,
             projected_terminal_full_loss_qty=None,
             projected_full_loss_cost_cny=None,
@@ -250,35 +288,72 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
             projected_roi_breakeven=None,
             projected_nc_prime_cny=None,
             projected_cogs_kept_cny=None,
+            projected_ad_gmv_cny=None,
+            projected_ad_system_actual_roi=None,
+            projected_ad_system_max_ad_spend_cny=None,
+            projected_ad_system_breakeven_roi=None,
         )
 
     assert refund_amount_rate is not None
-    assert full_loss_qty_rate is not None
-    projected_future_full_loss_qty = (
-        inputs.unresolved_unsettled_qty * full_loss_qty_rate
+    assert settled_full_loss_rate is not None
+    expected_terminal_refund = inputs.unsettled_sales_after_fee_cny * (
+        refund_amount_rate
+    )
+    projected_terminal_refund = min(
+        inputs.unsettled_sales_after_fee_cny,
+        max(expected_terminal_refund, inputs.confirmed_unsettled_refund_after_fee_cny),
+    )
+    projected_future_refund = max(
+        Decimal(0),
+        projected_terminal_refund - inputs.confirmed_unsettled_refund_after_fee_cny,
+    )
+    projected_unsettled_net = (
+        inputs.unsettled_sales_after_fee_cny - projected_terminal_refund
+    )
+
+    expected_terminal_full_loss_orders = (
+        Decimal(inputs.unsettled_order_count) * settled_full_loss_rate
+    )
+    projected_future_full_loss_orders = min(
+        Decimal(inputs.unresolved_unsettled_order_count),
+        max(
+            Decimal(0),
+            expected_terminal_full_loss_orders
+            - Decimal(inputs.confirmed_unsettled_full_loss_order_count),
+        ),
+    )
+    expected_terminal_full_loss_qty = Decimal(inputs.unsettled_order_count) * (
+        inputs.projection_basis_full_loss_qty
+        / Decimal(inputs.projection_basis_order_count)
+    )
+    projected_future_full_loss_qty = min(
+        inputs.unresolved_unsettled_qty,
+        max(
+            Decimal(0),
+            expected_terminal_full_loss_qty
+            - inputs.confirmed_unsettled_full_loss_qty,
+        ),
     )
     projected_terminal_full_loss_qty = (
         inputs.observed_full_loss_qty + projected_future_full_loss_qty
     )
+    average_unresolved_unit_cost = (
+        inputs.unresolved_unsettled_cogs_cny / inputs.unresolved_unsettled_qty
+        if inputs.unresolved_unsettled_qty > 0
+        else Decimal(0)
+    )
     projected_future_full_loss_cost = (
-        inputs.unresolved_unsettled_cogs_cny * full_loss_qty_rate
+        projected_future_full_loss_qty * average_unresolved_unit_cost
     )
     projected_full_loss_cost = (
         inputs.observed_full_loss_cost_cny + projected_future_full_loss_cost
     )
-    future_refund_after_fee = (
-        inputs.unresolved_unsettled_sales_after_fee_cny * refund_amount_rate
+
+    unsettled_net_delta = (
+        projected_unsettled_net - inputs.current_unsettled_net_cny
     )
-    projected_unsettled_net = max(
-        Decimal(0),
-        inputs.unsettled_sales_after_fee_cny
-        - inputs.confirmed_unsettled_refund_after_fee_cny
-        - future_refund_after_fee,
-    )
-    projected_net_revenue = inputs.settled_net_cny + projected_unsettled_net
-    projected_net_profit = (
-        projected_net_revenue - inputs.cogs_total_cny - inputs.spend_cny
-    )
+    projected_net_revenue = inputs.current_net_revenue_cny + unsettled_net_delta
+    projected_net_profit = inputs.current_net_profit_cny + unsettled_net_delta
     projected_nc_prime = projected_net_revenue - projected_full_loss_cost
     projected_cogs_kept = max(
         Decimal(0),
@@ -292,10 +367,29 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
     if inputs.spend_cny != 0 and breakeven_denom > 0:
         projected_roi_breakeven = projected_nc_prime / breakeven_denom
 
+    projected_ad_gmv = inputs.ad_gmv_cny * (Decimal(1) - refund_amount_rate)
+    projected_ad_system_actual_roi = (
+        projected_ad_gmv / inputs.spend_cny if inputs.spend_cny != 0 else None
+    )
+    projected_ad_system_max_ad_spend = (
+        projected_net_revenue - inputs.cogs_total_cny
+    )
+    projected_ad_system_breakeven_roi = None
+    if projected_ad_system_max_ad_spend > 0 and projected_ad_gmv > 0:
+        projected_ad_system_breakeven_roi = (
+            projected_ad_gmv / projected_ad_system_max_ad_spend
+        )
+
     return ProjectionOutput(
         status=ProjectionStatus.AVAILABLE,
         refund_amount_rate=refund_amount_rate,
-        full_loss_qty_rate=full_loss_qty_rate,
+        settled_full_loss_rate=settled_full_loss_rate,
+        full_loss_qty_rate=settled_full_loss_rate,
+        projected_future_refund_amount_cny=projected_future_refund,
+        projected_terminal_refund_amount_cny=projected_terminal_refund,
+        projected_future_full_loss_order_count=(
+            projected_future_full_loss_orders
+        ),
         projected_future_full_loss_qty=projected_future_full_loss_qty,
         projected_terminal_full_loss_qty=projected_terminal_full_loss_qty,
         projected_full_loss_cost_cny=projected_full_loss_cost,
@@ -306,6 +400,14 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
         projected_roi_breakeven=projected_roi_breakeven,
         projected_nc_prime_cny=projected_nc_prime,
         projected_cogs_kept_cny=projected_cogs_kept,
+        projected_ad_gmv_cny=projected_ad_gmv,
+        projected_ad_system_actual_roi=projected_ad_system_actual_roi,
+        projected_ad_system_max_ad_spend_cny=(
+            projected_ad_system_max_ad_spend
+        ),
+        projected_ad_system_breakeven_roi=(
+            projected_ad_system_breakeven_roi
+        ),
     )
 
 

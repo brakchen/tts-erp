@@ -191,11 +191,22 @@ _SQL_ROI_PROJECTION = text(
         WHERE spu_pk = ANY(CAST(:selected_pks AS bigint[]))
     ),
     settled_orders AS (
-        SELECT DISTINCT st.order_pk
+        SELECT st.order_pk,
+               coalesce(sum(sc.amount) FILTER (
+                   WHERE sc.component_code = 'CUSTOMER_REFUND'), 0)
+                   AS customer_refund_vnd
         FROM selected_orders selected
         JOIN finance.settlement_transactions st ON st.order_pk = selected.order_pk
-        JOIN finance.settlement_components sc
-          ON sc.transaction_id = st.id AND sc.component_code = 'SETTLEMENT'
+        JOIN finance.settlement_components sc ON sc.transaction_id = st.id
+        GROUP BY st.order_pk
+        HAVING count(*) FILTER (WHERE sc.component_code = 'SETTLEMENT') > 0
+    ),
+    order_gmv AS (
+        SELECT sl.order_pk,
+               coalesce(sum(sl.quantity * sl.unit_price), 0) AS order_gmv_vnd
+        FROM selected_orders selected
+        JOIN commerce.sales_order_lines sl ON sl.order_pk = selected.order_pk
+        GROUP BY sl.order_pk
     ),
     completed_cases AS (
         SELECT cl.sales_order_line_id,
@@ -214,8 +225,24 @@ _SQL_ROI_PROJECTION = text(
                sl.unit_price,
                sl.quantity * sl.unit_price AS line_sales_vnd,
                (settled.order_pk IS NOT NULL) AS is_settled,
+               (
+                   coalesce(settled.customer_refund_vnd, 0) <> 0
+                   OR coalesce(cc.confirmed_qty, 0) > 0
+               ) AS is_settled_full_loss,
                least(sl.quantity, coalesce(cc.confirmed_qty, 0)) AS confirmed_qty,
+               CASE
+                   WHEN coalesce(settled.customer_refund_vnd, 0) <> 0
+                   THEN abs(settled.customer_refund_vnd)
+                        * (sl.quantity * sl.unit_price)
+                        / nullif(og.order_gmv_vnd, 0)
+                   ELSE coalesce(cc.confirmed_refund_amount, 0)
+               END AS basis_refund_amount,
                coalesce(cc.confirmed_refund_amount, 0) AS confirmed_refund_amount,
+               CASE
+                   WHEN coalesce(settled.customer_refund_vnd, 0) <> 0
+                   THEN sl.quantity
+                   ELSE least(sl.quantity, coalesce(cc.confirmed_qty, 0))
+               END AS settled_full_loss_qty,
                greatest(
                    sl.quantity - least(sl.quantity, coalesce(cc.confirmed_qty, 0)),
                    0
@@ -223,6 +250,7 @@ _SQL_ROI_PROJECTION = text(
         FROM commerce.sales_order_lines sl
         JOIN commerce.sales_orders so ON so.id = sl.order_pk
         LEFT JOIN settled_orders settled ON settled.order_pk = sl.order_pk
+        JOIN order_gmv og ON og.order_pk = sl.order_pk
         LEFT JOIN completed_cases cc ON cc.sales_order_line_id = sl.id
         WHERE sl.spu_pk = ANY(CAST(:selected_pks AS bigint[]))
           AND so.status = ANY(CAST(:paid_statuses AS text[]))
@@ -238,9 +266,12 @@ _SQL_ROI_PROJECTION = text(
                AS projection_basis_qty,
            coalesce(sum(line_sales_vnd) FILTER (WHERE is_settled), 0)
                AS projection_basis_sales_vnd,
-           coalesce(sum(confirmed_refund_amount) FILTER (WHERE is_settled), 0)
+           coalesce(sum(basis_refund_amount) FILTER (WHERE is_settled), 0)
                AS projection_basis_refund_amount_vnd,
-           coalesce(sum(confirmed_qty) FILTER (WHERE is_settled), 0)
+           count(DISTINCT order_pk) FILTER (
+               WHERE is_settled AND is_settled_full_loss)
+               AS projection_basis_full_loss_order_count,
+           coalesce(sum(settled_full_loss_qty) FILTER (WHERE is_settled), 0)
                AS projection_basis_full_loss_qty,
            count(DISTINCT order_pk) FILTER (WHERE NOT is_settled)
                AS unsettled_order_count,
@@ -249,6 +280,9 @@ _SQL_ROI_PROJECTION = text(
                AS unresolved_unsettled_order_count,
            coalesce(sum(confirmed_refund_amount) FILTER (WHERE NOT is_settled), 0)
                AS confirmed_unsettled_refund_amount_vnd,
+           count(DISTINCT order_pk) FILTER (
+               WHERE NOT is_settled AND confirmed_qty > 0)
+               AS confirmed_unsettled_full_loss_order_count,
            coalesce(sum(confirmed_qty) FILTER (WHERE NOT is_settled), 0)
                AS confirmed_unsettled_full_loss_qty,
            coalesce(sum(unresolved_qty) FILTER (WHERE NOT is_settled), 0)
@@ -263,10 +297,14 @@ _SQL_ROI_PROJECTION = text(
 _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
     """
     WITH settled_orders AS (
-        SELECT DISTINCT st.order_pk
+        SELECT st.order_pk,
+               coalesce(sum(sc.amount) FILTER (
+                   WHERE sc.component_code = 'CUSTOMER_REFUND'), 0)
+                   AS customer_refund_vnd
         FROM finance.settlement_transactions st
-        JOIN finance.settlement_components sc
-          ON sc.transaction_id = st.id AND sc.component_code = 'SETTLEMENT'
+        JOIN finance.settlement_components sc ON sc.transaction_id = st.id
+        GROUP BY st.order_pk
+        HAVING count(*) FILTER (WHERE sc.component_code = 'SETTLEMENT') > 0
     ),
     completed_cases AS (
         SELECT cl.sales_order_line_id,
@@ -280,6 +318,11 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
     line_facts AS (
         SELECT sl.order_pk,
                (settled.order_pk IS NOT NULL) AS is_settled,
+               (
+                   coalesce(settled.customer_refund_vnd, 0) <> 0
+                   OR coalesce(cc.confirmed_qty, 0) > 0
+               ) AS is_settled_full_loss,
+               least(sl.quantity, coalesce(cc.confirmed_qty, 0)) AS confirmed_qty,
                greatest(
                    sl.quantity - least(sl.quantity, coalesce(cc.confirmed_qty, 0)),
                    0
@@ -297,8 +340,14 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
     )
     SELECT count(DISTINCT order_pk) FILTER (WHERE is_settled)
                AS projection_basis_order_count,
+           count(DISTINCT order_pk) FILTER (
+               WHERE is_settled AND is_settled_full_loss)
+               AS projection_basis_full_loss_order_count,
            count(DISTINCT order_pk) FILTER (WHERE NOT is_settled)
                AS unsettled_order_count,
+           count(DISTINCT order_pk) FILTER (
+               WHERE NOT is_settled AND confirmed_qty > 0)
+               AS confirmed_unsettled_full_loss_order_count,
            count(DISTINCT order_pk) FILTER (
                WHERE NOT is_settled AND unresolved_qty > 0)
                AS unresolved_unsettled_order_count
@@ -1184,6 +1233,11 @@ def _query_spu_roi(
             if projection_facts
             else Decimal(0)
         )
+        projection_basis_full_loss_order_count = (
+            _row_int(projection_facts["projection_basis_full_loss_order_count"])
+            if projection_facts
+            else 0
+        )
         projection_basis_full_loss_qty = (
             _row_int(projection_facts["projection_basis_full_loss_qty"])
             if projection_facts
@@ -1204,6 +1258,13 @@ def _query_spu_roi(
             / vnd_per_cny
             if projection_facts
             else Decimal(0)
+        )
+        confirmed_unsettled_full_loss_order_count = (
+            _row_int(
+                projection_facts["confirmed_unsettled_full_loss_order_count"]
+            )
+            if projection_facts
+            else 0
         )
         confirmed_unsettled_full_loss_qty = (
             _row_int(projection_facts["confirmed_unsettled_full_loss_qty"])
@@ -1297,11 +1358,19 @@ def _query_spu_roi(
                 projection_basis_refund_amount_cny=(
                     projection_basis_refund_amount_cny
                 ),
+                projection_basis_full_loss_order_count=(
+                    projection_basis_full_loss_order_count
+                ),
                 projection_basis_full_loss_qty=Decimal(
                     projection_basis_full_loss_qty
                 ),
-                observed_full_loss_rate=formula.full_loss_rate,
                 unsettled_order_count=unsettled_order_count,
+                confirmed_unsettled_full_loss_order_count=(
+                    confirmed_unsettled_full_loss_order_count
+                ),
+                confirmed_unsettled_full_loss_qty=Decimal(
+                    confirmed_unsettled_full_loss_qty
+                ),
                 unresolved_unsettled_order_count=(
                     unresolved_unsettled_order_count
                 ),
@@ -1321,9 +1390,11 @@ def _query_spu_roi(
                 settled_net_cny=settled_net_cny,
                 observed_full_loss_qty=Decimal(full_loss_qty),
                 observed_full_loss_cost_cny=return_loss_cny,
+                current_unsettled_net_cny=formula.unsettled_net_cny,
                 current_cogs_kept_cny=formula.cogs_kept_cny,
                 cogs_total_cny=formula.cogs_all_cny,
                 spend_cny=spend_cny,
+                ad_gmv_cny=gmv_ad_cny,
                 current_net_revenue_cny=net_revenue_cny,
                 current_net_profit_cny=net_profit_cny,
             )
@@ -1408,10 +1479,14 @@ def _query_spu_roi(
                 "projection_basis_refund_amount": (
                     projection_basis_refund_amount_cny
                 ),
+                "projection_basis_full_loss_order_count": (
+                    projection_basis_full_loss_order_count
+                ),
                 "projection_basis_full_loss_qty": (
                     projection_basis_full_loss_qty
                 ),
                 "projection_refund_amount_rate": projection.refund_amount_rate,
+                "settled_full_loss_rate": projection.settled_full_loss_rate,
                 "projection_full_loss_qty_rate": projection.full_loss_qty_rate,
                 "unsettled_order_count": unsettled_order_count,
                 "unresolved_unsettled_order_count": (
@@ -1422,8 +1497,20 @@ def _query_spu_roi(
                 "confirmed_unsettled_refund_amount": (
                     confirmed_unsettled_refund_amount_cny
                 ),
+                "confirmed_unsettled_full_loss_order_count": (
+                    confirmed_unsettled_full_loss_order_count
+                ),
                 "confirmed_unsettled_full_loss_qty": (
                     confirmed_unsettled_full_loss_qty
+                ),
+                "projected_future_refund_amount": (
+                    projection.projected_future_refund_amount_cny
+                ),
+                "projected_terminal_refund_amount": (
+                    projection.projected_terminal_refund_amount_cny
+                ),
+                "projected_future_full_loss_order_count": (
+                    projection.projected_future_full_loss_order_count
                 ),
                 "projected_future_full_loss_qty": (
                     projection.projected_future_full_loss_qty
@@ -1443,6 +1530,16 @@ def _query_spu_roi(
                 ),
                 "projected_nc_prime": projection.projected_nc_prime_cny,
                 "projected_cogs_kept": projection.projected_cogs_kept_cny,
+                "projected_ad_gmv": projection.projected_ad_gmv_cny,
+                "projected_ad_system_actual_roi": (
+                    projection.projected_ad_system_actual_roi
+                ),
+                "projected_ad_system_max_ad_spend": (
+                    projection.projected_ad_system_max_ad_spend_cny
+                ),
+                "projected_ad_system_breakeven_roi": (
+                    projection.projected_ad_system_breakeven_roi
+                ),
             }
         )
         total_spend += spend_cny
@@ -1575,8 +1672,20 @@ def _query_spu_roi(
         if projection_counts_row
         else 0
     )
+    total_projection_basis_full_loss_order_count = (
+        _row_int(projection_counts_row["projection_basis_full_loss_order_count"])
+        if projection_counts_row
+        else 0
+    )
     total_unsettled_order_count = (
         _row_int(projection_counts_row["unsettled_order_count"])
+        if projection_counts_row
+        else 0
+    )
+    total_confirmed_unsettled_full_loss_order_count = (
+        _row_int(
+            projection_counts_row["confirmed_unsettled_full_loss_order_count"]
+        )
         if projection_counts_row
         else 0
     )
@@ -1659,13 +1768,6 @@ def _query_spu_roi(
         ),
         Decimal(0),
     )
-    projection_total_orders = eff_orders + cancelled_orders_total
-    projection_full_loss_rate = (
-        Decimal(refund_order_count_total + total_overseas_cancelled)
-        / Decimal(projection_total_orders)
-        if projection_total_orders > 0
-        else None
-    )
     dashboard_projection = calculate_projection(
         ProjectionInput(
             projection_basis_order_count=total_projection_basis_order_count,
@@ -1674,11 +1776,19 @@ def _query_spu_roi(
             projection_basis_refund_amount_cny=(
                 total_projection_basis_refund_amount
             ),
+            projection_basis_full_loss_order_count=(
+                total_projection_basis_full_loss_order_count
+            ),
             projection_basis_full_loss_qty=Decimal(
                 total_projection_basis_full_loss_qty
             ),
-            observed_full_loss_rate=projection_full_loss_rate,
             unsettled_order_count=total_unsettled_order_count,
+            confirmed_unsettled_full_loss_order_count=(
+                total_confirmed_unsettled_full_loss_order_count
+            ),
+            confirmed_unsettled_full_loss_qty=Decimal(
+                total_confirmed_unsettled_full_loss_qty
+            ),
             unresolved_unsettled_order_count=(
                 total_unresolved_unsettled_order_count
             ),
@@ -1696,9 +1806,13 @@ def _query_spu_roi(
             ),
             observed_full_loss_qty=Decimal(total_full_loss_qty),
             observed_full_loss_cost_cny=money_total["return_loss"],
+            current_unsettled_net_cny=sum(
+                (r["unsettled_net"] for r in scope_plain), Decimal(0)
+            ),
             current_cogs_kept_cny=total_cogs_kept,
             cogs_total_cny=money_total["cogs_total"],
             spend_cny=money_total["spend"],
+            ad_gmv_cny=money_total["gmv_ad"],
             current_net_revenue_cny=money_total["net_revenue"],
             current_net_profit_cny=money_total["net_profit"],
         )
@@ -1757,8 +1871,12 @@ def _query_spu_roi(
         projection_basis_qty=total_projection_basis_qty,
         projection_basis_sales=total_projection_basis_sales,
         projection_basis_refund_amount=total_projection_basis_refund_amount,
+        projection_basis_full_loss_order_count=(
+            total_projection_basis_full_loss_order_count
+        ),
         projection_basis_full_loss_qty=total_projection_basis_full_loss_qty,
         projection_refund_amount_rate=dashboard_projection.refund_amount_rate,
+        settled_full_loss_rate=dashboard_projection.settled_full_loss_rate,
         projection_full_loss_qty_rate=dashboard_projection.full_loss_qty_rate,
         unsettled_order_count=total_unsettled_order_count,
         unresolved_unsettled_order_count=(
@@ -1769,8 +1887,20 @@ def _query_spu_roi(
         confirmed_unsettled_refund_amount=(
             total_confirmed_unsettled_refund_amount
         ),
+        confirmed_unsettled_full_loss_order_count=(
+            total_confirmed_unsettled_full_loss_order_count
+        ),
         confirmed_unsettled_full_loss_qty=(
             total_confirmed_unsettled_full_loss_qty
+        ),
+        projected_future_refund_amount=(
+            dashboard_projection.projected_future_refund_amount_cny
+        ),
+        projected_terminal_refund_amount=(
+            dashboard_projection.projected_terminal_refund_amount_cny
+        ),
+        projected_future_full_loss_order_count=(
+            dashboard_projection.projected_future_full_loss_order_count
         ),
         projected_future_full_loss_qty=(
             dashboard_projection.projected_future_full_loss_qty
@@ -1792,6 +1922,16 @@ def _query_spu_roi(
         ),
         projected_nc_prime=dashboard_projection.projected_nc_prime_cny,
         projected_cogs_kept=dashboard_projection.projected_cogs_kept_cny,
+        projected_ad_gmv=dashboard_projection.projected_ad_gmv_cny,
+        projected_ad_system_actual_roi=(
+            dashboard_projection.projected_ad_system_actual_roi
+        ),
+        projected_ad_system_max_ad_spend=(
+            dashboard_projection.projected_ad_system_max_ad_spend_cny
+        ),
+        projected_ad_system_breakeven_roi=(
+            dashboard_projection.projected_ad_system_breakeven_roi
+        ),
     )
 
     # meta（§4 v7）

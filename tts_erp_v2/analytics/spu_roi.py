@@ -76,12 +76,16 @@ _MONEY_FIELDS = {
     "projection_basis_refund_amount",
     "unresolved_unsettled_sales",
     "confirmed_unsettled_refund_amount",
+    "projected_future_refund_amount",
+    "projected_terminal_refund_amount",
     "projected_full_loss_cost",
     "projected_unsettled_net",
     "projected_net_revenue",
     "projected_net_profit",
     "projected_nc_prime",
     "projected_cogs_kept",
+    "projected_ad_gmv",
+    "projected_ad_system_max_ad_spend",
 }
 _RATIO_FIELDS = {
     "roi_l0",
@@ -98,6 +102,8 @@ _RATIO_FIELDS = {
     "ad_system_breakeven_roi",
     "projected_roi_real",
     "projected_roi_breakeven",
+    "projected_ad_system_actual_roi",
+    "projected_ad_system_breakeven_roi",
 }
 _TOTAL_RATE_FIELDS = {"refund_rate", "full_loss_rate", "cancel_rate"}
 # fee_rate_used 与 DB 的 NUMERIC(8,6) 同量级，用 4 位小数与 meta.fee.rate 对齐。
@@ -105,6 +111,7 @@ _FOUR_DECIMAL_RATIO_FIELDS = {
     "share_ratio",
     "fee_rate_used",
     "projection_refund_amount_rate",
+    "settled_full_loss_rate",
     "projection_full_loss_qty_rate",
 }
 
@@ -138,9 +145,9 @@ _FEE_FALLBACK_MESSAGE = (
 )
 _PROJECTION_NOTE = (
     "只预测同一订单时间窗口内的未结算订单；已结算订单使用 SETTLEMENT 实际到账。"
-    "预测退款金额率=已结算样本退款金额/样本销售额；全损预测使用页面同口径的"
-    "订单全损率，并按待确认订单平均件数换算预计全损件数。未结算中已确认退款或"
-    "全损的金额和件数先按已知事实处理，不会重复应用预测比例。"
+    "退款金额率和已结算订单全损率都来自已结算样本；先估算整批未结算订单的终局"
+    "退款/全损额度，再扣除已确认结果，只把差额作为未来新增。预计净利润等于当前"
+    "净利润加未结算净收入调整，货本和广告费不重复扣除。"
 )
 
 
@@ -317,8 +324,8 @@ def _meta_payload(
             "note": _PROJECTION_NOTE,
             "date_attribution": "COALESCE(order_time, paid_at)",
             "refund_sample": "同一日期范围内有 SETTLEMENT 实际到账的已结算订单",
-            "full_loss_rate_source": "同一日期范围内的订单维度 full_loss_rate",
-            "target": "同一日期范围内的未结算订单中尚未确认结果的部分",
+            "full_loss_rate_source": "已结算退款全损订单数 ÷ 全部已结算订单数",
+            "target": "同一日期范围内的全部未结算订单，已确认结果从终局额度中扣除",
             "status_labels": {
                 "available": "可预测",
                 "no_unsettled_orders": "无未结算订单",
