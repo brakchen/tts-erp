@@ -173,6 +173,12 @@ EXCLUDE_API_KEYS=0
 ALL_TABLES=(
   "integration.credentials"
   "security.api_keys"
+  "miaoshou.package_raw_records"
+  "miaoshou.packages"
+  "miaoshou.package_items"
+  "miaoshou.package_gift_items"
+  "miaoshou.sync_cursors"
+  "miaoshou.sync_issues"
   "commerce.shops"
   "commerce.products_spu"
   "commerce.products_sku"
