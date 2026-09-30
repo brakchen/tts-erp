@@ -23,7 +23,9 @@ REFRESH_TEMPLATE=0
 TEMPLATE_DB="${TTS_ERP_TEST_TEMPLATE_DB:-tts_erp_test_template}"
 RUN_DB="${TTS_ERP_TEST_DB_NAME:-}"
 PG_DOCKER_DEFAULT="postgres"
-PG_DOCKER_VALUE="${PG_DOCKER:-$PG_DOCKER_DEFAULT}"
+PG_DOCKER_VALUE="${PG_DOCKER-$PG_DOCKER_DEFAULT}"
+TEMPLATE_LOCK_PATH="${TTS_ERP_TEST_TEMPLATE_LOCK:-/tmp/tts-erp-test-template.lock}"
+TEMPLATE_LOCK_TIMEOUT_S="${TTS_ERP_TEST_TEMPLATE_LOCK_TIMEOUT_S:-600}"
 
 usage() {
   cat <<'EOF'
@@ -49,6 +51,10 @@ Environment:
   TTS_ERP_TEST_DB_NAME         Default ephemeral DB name override.
   TTS_ERP_DB_URL_PROD_SOURCE   Optional schema source URL for template refresh;
                               defaults to .env, then ../../.env.
+  TTS_ERP_TEST_TEMPLATE_LOCK  Template refresh/clone lock path; default
+                              /tmp/tts-erp-test-template.lock.
+  TTS_ERP_TEST_TEMPLATE_LOCK_TIMEOUT_S
+                              Seconds to wait for the template lock; default 600.
   PG_DOCKER                   Docker container for postgres commands; set to
                               empty to use host psql/createdb/dropdb.
 EOF
@@ -296,12 +302,28 @@ refresh_template() {
   TEMPLATE_CREATED_OR_REFRESHED=1
 }
 
-if [[ "$REFRESH_TEMPLATE" -eq 1 ]]; then
-  refresh_template
-elif ! db_exists "$TEMPLATE_DB"; then
-  echo "[isolated-test] template DB missing; bootstrapping: $TEMPLATE_DB"
-  refresh_template
-fi
+prepare_template_and_clone() {
+  exec 9>"$TEMPLATE_LOCK_PATH"
+  if ! flock -w "$TEMPLATE_LOCK_TIMEOUT_S" 9; then
+    fail "could not acquire template lock within ${TEMPLATE_LOCK_TIMEOUT_S}s: $TEMPLATE_LOCK_PATH"
+  fi
+
+  if [[ "$REFRESH_TEMPLATE" -eq 1 ]]; then
+    refresh_template
+  elif ! db_exists "$TEMPLATE_DB"; then
+    echo "[isolated-test] template DB missing; bootstrapping: $TEMPLATE_DB"
+    refresh_template
+  fi
+
+  echo "[isolated-test] cloning $TEMPLATE_DB -> $RUN_DB"
+  drop_db "$RUN_DB"
+  pg_exec createdb -U postgres -T "$TEMPLATE_DB" "$RUN_DB"
+
+  # Release the template lock before running tests. The clone is now independent,
+  # so other sessions may clone/refresh the template while this suite runs.
+  flock -u 9
+  exec 9>&-
+}
 
 cleanup() {
   local rc=$?
@@ -315,9 +337,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-echo "[isolated-test] cloning $TEMPLATE_DB -> $RUN_DB"
-drop_db "$RUN_DB"
-pg_exec createdb -U postgres -T "$TEMPLATE_DB" "$RUN_DB"
+prepare_template_and_clone
 
 if [[ "$TEMPLATE_CREATED_OR_REFRESHED" -eq 0 ]]; then
   echo "[isolated-test] using existing template DB: $TEMPLATE_DB"

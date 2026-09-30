@@ -140,7 +140,7 @@ systemctl --user restart tts-erp-sync.service
 
 Before completing a production-adjacent change, verify:
 
-- The test command used `.env.test` and `tts_erp_v3_test`.
+- The test command used `scripts/test_isolated.sh` with a test-shaped ephemeral DB, or a serialized shared `tts_erp_v3_test` fallback.
 - No production override variable was set.
 - Every destructive path calls the correct shared guard before issuing SQL.
 - Dry run and real execution are distinguishable.
