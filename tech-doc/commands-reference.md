@@ -20,7 +20,7 @@ TTS_ERP_TEST_OFF=1 bash scripts/test.sh fast
 ## 2. 数据导入
 
 ```bash
-# 看 import plan（37 张表 + credentials + api_keys）
+# 看 import plan（以脚本内 ALL_TABLES 为准，含 credentials + api_keys）
 bash scripts/import_prod_to_test.sh --dry-run
 
 # 实际把 prod 数据导入 tts_erp_v3_test（multi-pass FK）
@@ -69,6 +69,10 @@ journalctl --user -u tts-erp -n 50
 # 流程：改 tts_erp_v2/db/models/ → 重新生成 → 应用
 python3 scripts/regen_schema.py
 # 生成 schema_tts_erp.sql（IF NOT EXISTS 幂等兼容老库）
+
+# 0045 妙手 package 数据归位：人工生产操作，一条命令完成
+# guard + scoped backup + worker stop/start + migration + verification + immediate sync
+ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0045_miaoshou_package_schema.sh --confirm
 ```
 
 ## 7. API key 管理
