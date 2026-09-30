@@ -114,7 +114,8 @@ SQL_LIST_CHANNEL_PRODUCTS = (
     "AND (NOT CAST(:has_orders AS boolean) OR EXISTS ("
     "  SELECT 1 FROM commerce.sales_order_lines sol "
     "  WHERE sol.spu_pk = cp.id AND sol.spu_pk IS NOT NULL"
-    "))"
+    ")) "
+    "AND (NOT CAST(:missing_manual_cost AS boolean) OR m.id IS NULL)"
 )
 # Total row count for the SAME filter (no sort / page suffix) — surfaced as
 # the X-Total-Count header so the page can render 共 N 行 / paging without
@@ -134,7 +135,8 @@ SQL_COUNT_CHANNEL_PRODUCTS = (
     "AND (NOT CAST(:has_orders AS boolean) OR EXISTS ("
     "  SELECT 1 FROM commerce.sales_order_lines sol "
     "  WHERE sol.spu_pk = cp.id AND sol.spu_pk IS NOT NULL"
-    "))"
+    ")) "
+    "AND (NOT CAST(:missing_manual_cost AS boolean) OR m.id IS NULL)"
 )
 # All-SPU catalogue sorters (2026-09-06): the tail of SQL_LIST_CHANNEL_PRODUCTS.
 # Values come from the allowlist below — no request input ever reaches the
@@ -529,6 +531,13 @@ def list_products_spu(
             "catalogue."
         ),
     ),
+    missing_manual_cost: bool = Query(
+        default=False,
+        description=(
+            "Only return SPUs without a current effective row in "
+            "procurement.manual_product_costs."
+        ),
+    ),
     sort: str = Query(
         default="id",
         pattern="^(id|created_at|updated_at|unit_cost|status)$",
@@ -551,6 +560,7 @@ def list_products_spu(
         "status": status_filter,
         "q": q.strip() if q and q.strip() else None,
         "has_orders": has_orders,
+        "missing_manual_cost": missing_manual_cost,
     }
     # Total matching rows (same filter, ignoring page bounds) — exposed as
     # X-Total-Count so the UI can render 共 N 行 without switching the
