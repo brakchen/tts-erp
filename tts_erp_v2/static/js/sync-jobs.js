@@ -1,5 +1,9 @@
 (() => {
-  const state = { jobs: [], shops: [] };
+  const marker = '/v2/';
+  const markerAt = location.pathname.indexOf(marker);
+  const rootPrefix = markerAt >= 0 ? location.pathname.slice(0, markerAt) : '';
+  const API = `${rootPrefix}/v2`;
+  const state = { jobs: [], shops: [], canAdmin: false };
   const els = {
     body: document.getElementById('jobs-body'),
     notice: document.getElementById('notice'),
@@ -16,7 +20,7 @@
     const headers = Object.assign({ Accept: 'application/json' }, options.headers || {});
     if (options.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
     if (options.method && options.method !== 'GET') headers['X-Requested-With'] = 'tts-erp';
-    const res = await fetch(path, Object.assign({}, options, { headers }));
+    const res = await fetch(`${API}${path}`, Object.assign({}, options, { headers }));
     if (!res.ok) {
       let detail = `${res.status} ${res.statusText}`;
       try {
@@ -65,16 +69,17 @@
       const status = job.last_status || {};
       const severity = status.severity || 'unknown';
       const scope = job.is_tiktok ? 'TikTok 店铺' : '系统级';
+      const disabled = state.canAdmin ? '' : ' disabled';
       const triggerControl = job.is_tiktok
-        ? `<select class="scope-select" data-shop-for="${escapeHtml(job.job_name)}">${shopOptions('')}</select><button class="primary" data-trigger="${escapeHtml(job.job_name)}">执行</button>`
-        : `<button class="primary" data-trigger="${escapeHtml(job.job_name)}">执行</button>`;
+        ? `<select class="scope-select" data-shop-for="${escapeHtml(job.job_name)}"${disabled}>${shopOptions('')}</select><button class="primary" data-trigger="${escapeHtml(job.job_name)}"${disabled}>执行</button>`
+        : `<button class="primary" data-trigger="${escapeHtml(job.job_name)}"${disabled}>执行</button>`;
       return `<tr>
         <td><span class="job-name">${escapeHtml(job.job_name)}</span><span class="module">${escapeHtml(job.module_path)} · ${escapeHtml(job.entrypoint)}</span></td>
         <td>${fmtDuration(job.interval_seconds)}</td>
         <td>${scope}</td>
         <td><span class="badge ${severity}">${escapeHtml(severity)}</span><span class="module">${escapeHtml(status.last_status || 'no run')}</span></td>
         <td>${escapeHtml(fmtTime(status.last_run_at))}</td>
-        <td><label class="switch"><input type="checkbox" data-enable="${escapeHtml(job.job_name)}" ${job.enabled ? 'checked' : ''}>${job.enabled ? '启用' : '停用'}</label></td>
+        <td><label class="switch"><input type="checkbox" data-enable="${escapeHtml(job.job_name)}" ${job.enabled ? 'checked' : ''}${disabled}>${job.enabled ? '启用' : '停用'}</label></td>
         <td>${triggerControl}</td>
       </tr>`;
     }).join('');
@@ -82,8 +87,12 @@
 
   async function loadIdentity() {
     try {
-      const me = await api('../../../v2/auth/me');
+      const me = await api('/auth/me');
+      state.canAdmin = me.authenticated && me.role === 'admin';
       els.identity.textContent = me.authenticated ? `role=${me.role}` : '未登录';
+      if (me.authenticated && !state.canAdmin) {
+        setNotice('当前账号不是 admin：只能查看任务状态，不能启停或立即执行。');
+      }
     } catch (_) {
       els.identity.textContent = '身份未知';
     }
@@ -91,18 +100,23 @@
 
   async function loadJobs() {
     setNotice('加载任务状态…');
-    const data = await api('../../../v2/sync/jobs');
+    const data = await api('/sync/jobs');
     state.jobs = data.jobs || [];
     state.shops = data.tiktok_shops || [];
     render();
-    setNotice(`已刷新 · ${new Date(data.server_time).toLocaleString('zh-CN', { hour12: false })}`, 'ok');
+    const refreshedAt = new Date(data.server_time).toLocaleString('zh-CN', { hour12: false });
+    if (state.canAdmin) {
+      setNotice(`已刷新 · ${refreshedAt}`, 'ok');
+    } else {
+      setNotice(`只读模式（需要 admin 才能操作）· 已刷新 ${refreshedAt}`);
+    }
   }
 
   async function toggleJob(jobName, enabled, input) {
     input.disabled = true;
     setNotice(`${enabled ? '启用' : '停用'} ${jobName}…`);
     try {
-      await api(`../../../v2/admin/sync-jobs/${encodeURIComponent(jobName)}/enabled`, {
+      await api(`/admin/sync-jobs/${encodeURIComponent(jobName)}/enabled`, {
         method: 'PATCH',
         body: JSON.stringify({ enabled }),
       });
@@ -116,13 +130,15 @@
   }
 
   async function triggerJob(jobName, button) {
-    const selector = document.querySelector(`[data-shop-for="${CSS.escape(jobName)}"]`);
+    const selector = Array.from(document.querySelectorAll('[data-shop-for]')).find(
+      el => el.getAttribute('data-shop-for') === jobName
+    );
     const shopId = selector ? selector.value || null : null;
     button.disabled = true;
     setNotice(`提交 ${jobName}${shopId ? ` / ${shopId}` : ''}…`);
     try {
       const body = shopId ? { shop_id: shopId } : {};
-      const res = await api(`../../../v2/admin/sync-jobs/${encodeURIComponent(jobName)}/trigger`, {
+      const res = await api(`/admin/sync-jobs/${encodeURIComponent(jobName)}/trigger`, {
         method: 'POST',
         body: JSON.stringify(body),
       });
@@ -147,6 +163,8 @@
     triggerJob(button.getAttribute('data-trigger'), button);
   });
 
-  loadIdentity();
-  loadJobs().catch(err => setNotice(`加载失败：${err.message}`, 'error'));
+  (async () => {
+    await loadIdentity();
+    await loadJobs();
+  })().catch(err => setNotice(`加载失败：${err.message}`, 'error'));
 })();
