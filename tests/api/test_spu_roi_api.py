@@ -2708,6 +2708,53 @@ def test_spu_roi_page_toolbar_shop_and_date_filters(api_client, readonly_key):
         assert forbidden not in body, f"inline handler found: {forbidden}"
 
 
+def test_spu_roi_page_remembers_filters_and_enhances_date_range():
+    """标准 ROI 页记住常用筛选，并用 Bootstrap 组合控件增强原生日期输入。"""
+    from pathlib import Path
+
+    static_dir = Path(__file__).resolve().parents[2] / "tts_erp_v2" / "static"
+    profile_js = (static_dir / "js" / "spu-roi.js").read_text(encoding="utf-8")
+    kernel_js = (static_dir / "js" / "spu-profitability-page.js").read_text(
+        encoding="utf-8"
+    )
+    css = (static_dir / "css" / "spu-roi.css").read_text(encoding="utf-8")
+
+    # 仅标准 ROI profile 启用本地偏好与日期增强；共享内核不会污染其他页面。
+    assert 'storageKey: "tts-erp:spu-roi:preferences:v1"' in profile_js
+    assert "dateRangeControl" in profile_js
+    assert "window.localStorage.getItem" in kernel_js
+    assert "window.localStorage.setItem" in kernel_js
+    assert "restorePagePreferences();" in kernel_js
+    assert "persistPagePreferences();" in kernel_js
+    assert "var preferredPk = urlPk || state.shopPk;" in kernel_js
+    assert "var datesValid =" in kernel_js
+    assert "savedStart <= savedEnd" in kernel_js
+    for field in (
+        "shopPk: state.shopPk || null",
+        "wStart: state.wStart",
+        "wEnd: state.wEnd",
+        "datesTouched: state.datesTouched",
+        "includeAll: state.includeAll",
+        "limit: state.limit",
+        "sort: state.sort",
+        "order: state.order",
+    ):
+        assert field in kernel_js
+
+    # Bootstrap 5 本身不附带 datepicker；保留原生 type=date，并在运行时组合
+    # 官方 input-group / btn-group / btn 组件，避免引入新的第三方日期库。
+    assert 'reportingTimeZone: "Asia/Ho_Chi_Minh"' in profile_js
+    assert 'new Intl.DateTimeFormat("en-CA"' in kernel_js
+    assert 'class: "input-group input-group-sm op-date-input-group"' in kernel_js
+    assert 'class: "btn-group btn-group-sm op-date-presets"' in kernel_js
+    assert 'data-date-preset' in kernel_js
+    assert "截止日包含当天" in kernel_js
+    assert '"aria-describedby": "date-range-help"' in kernel_js
+    assert ".op-date-range" in css
+    assert "flatpickr" not in profile_js + kernel_js
+    assert "bootstrap-datepicker" not in profile_js + kernel_js
+
+
 def test_spu_roi_page_shell_contract(api_client, readonly_key):
     """页面 HTML shell:标题、静态资源相对路径、warm-paper token。"""
     r = api_client.get(
