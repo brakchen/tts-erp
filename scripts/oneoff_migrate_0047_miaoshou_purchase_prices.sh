@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Human-operated migration + first run for scheduled Miaoshou purchase prices.
 #
-#   ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0046_miaoshou_purchase_prices.sh --confirm
+#   ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0047_miaoshou_purchase_prices.sh --confirm
 set -euo pipefail
 SCRIPT_PATH=$(realpath "$0")
 cd "$(dirname "$SCRIPT_PATH")/.."
-TARGET="0046_miaoshou_purchase_price"
+TARGET="0047_miaoshou_purchase_price"
 CONFIRMED=0
 for arg in "$@"; do
     case "$arg" in
@@ -28,12 +28,12 @@ set +a
 PYTHON=.venv/bin/python
 ALEMBIC=.venv/bin/alembic
 [[ -x "$PYTHON" && -x "$ALEMBIC" ]] || { echo ".venv incomplete" >&2; exit 1; }
-[[ -f alembic/versions/0046_miaoshou_purchase_price_clean.py ]] || { echo "migration 0046 missing" >&2; exit 1; }
+[[ -f alembic/versions/0047_miaoshou_purchase_price_clean.py ]] || { echo "migration 0047 missing" >&2; exit 1; }
 
 "$PYTHON" - <<'PY'
 from tts_erp_v2.api.deps import require_destructive_script_guard
 require_destructive_script_guard(
-    script_name="oneoff_migrate_0046_miaoshou_purchase_prices",
+    script_name="oneoff_migrate_0047_miaoshou_purchase_prices",
     confirmation=True,
     dangerous=True,
     allow_env="ALLOW_PROD_DESTRUCTIVE",
@@ -72,7 +72,7 @@ from sqlalchemy import create_engine,text
 import os
 with create_engine(os.environ['TTS_ERP_DB_URL']).connect() as conn:
     revision=conn.execute(text('select version_num from alembic_version')).scalar_one()
-    if revision!='0046_miaoshou_purchase_price': raise SystemExit(f'bad revision {revision}')
+    if revision!='0047_miaoshou_purchase_price': raise SystemExit(f'bad revision {revision}')
     tables={r[0] for r in conn.execute(text("select table_name from information_schema.tables where table_schema='miaoshou'"))}
     missing={'purchase_order_raw_records','purchase_price_candidates'}-tables
     if missing: raise SystemExit(f'missing tables {sorted(missing)}')

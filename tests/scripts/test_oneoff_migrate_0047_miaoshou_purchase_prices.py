@@ -10,7 +10,7 @@ import pytest
 pytestmark = [pytest.mark.layer_unit]
 SCRIPT = (
     Path(__file__).parents[2]
-    / "scripts/oneoff_migrate_0046_miaoshou_purchase_prices.sh"
+    / "scripts/oneoff_migrate_0047_miaoshou_purchase_prices.sh"
 )
 
 
@@ -28,7 +28,7 @@ def test_refuses_without_confirmation() -> None:
 
 def test_script_is_guarded_and_runs_initial_job() -> None:
     source = SCRIPT.read_text()
-    assert 'TARGET="0046_miaoshou_purchase_price"' in source
+    assert 'TARGET="0047_miaoshou_purchase_price"' in source
     assert "require_destructive_script_guard" in source
     assert 'allow_env="ALLOW_PROD_DESTRUCTIVE"' in source
     assert "configure_miaoshou_web_session.py" in source

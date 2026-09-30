@@ -119,7 +119,7 @@ python3 scripts/configure_miaoshou_web_session.py \
 - 生产 migration 0046 + 首次同步：
 
 ```bash
-ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0046_miaoshou_purchase_prices.sh --confirm
+ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0047_miaoshou_purchase_prices.sh --confirm
 ```
 
 ## 8. 测试
