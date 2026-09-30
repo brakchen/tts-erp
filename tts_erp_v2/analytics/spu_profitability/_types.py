@@ -341,6 +341,7 @@ class SpuProfitability:
     settled_full_loss_rate: Decimal | None
     projection_full_loss_qty_rate: Decimal | None
     unsettled_order_count: int
+    delivered_unsettled_order_count: int
     full_loss_exposure_unsettled_order_count: int
     confirmed_full_loss_exposure_order_count: int
     confirmed_full_loss_exposure_qty: int
@@ -435,6 +436,7 @@ class ProfitabilityTotals:
     settled_full_loss_rate: Decimal | None
     projection_full_loss_qty_rate: Decimal | None
     unsettled_order_count: int
+    delivered_unsettled_order_count: int
     full_loss_exposure_unsettled_order_count: int
     confirmed_full_loss_exposure_order_count: int
     confirmed_full_loss_exposure_qty: int
