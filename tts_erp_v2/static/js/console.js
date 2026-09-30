@@ -766,11 +766,11 @@
       tr.dataset.origCurrency = it.currency || "CNY";
       var currency = it.currency || "CNY";
       var costCell;
-      // New row (no cost yet): if a 货源价 (source_unit_cost) exists,
-      // pre-fill the input so the operator can see and submit it.
-      // Otherwise show empty with "缺" placeholder.
+      // New row (no cost yet): the unregistered-only view must stay blank,
+      // even when a source price exists, so it never looks like a filed
+      // manual cost. Outside that view the source price remains a prefill.
       if (it.unit_cost == null) {
-        if (it.source_unit_cost == null) {
+        if (catalogueMissingManualCost || it.source_unit_cost == null) {
           costCell =
             '<span class="op-cost-input" title="输入成本后点提交全部">' +
             '<input type="number" class="op-input-cost" step="0.0001" min="0.0001" data-k="unit_cost" placeholder="缺" aria-label="单位成本">' +
