@@ -250,6 +250,7 @@ def _sidebar_html(current_page: str) -> str:
     ("manual-costs", "采", "采购工作台", "基础设置"),
     ("shops", "店", "店铺注册", "基础设置"),
     ("enum-map", "映", "枚举映射", "基础设置"),
+    ("runtime-configs", "运", "运行配置", "基础设置"),
     ("intercept-configs", "配", "拦截配置", "数据工具"),
     ("intercept-requests", "录", "拦截记录", "数据工具"),
     ("intercept-stats", "计", "拦截统计", "数据工具"),
@@ -417,6 +418,8 @@ def _page(html: str, *, current_page: str = "") -> HTMLResponse:
     .replace("__JSV_INTERCEPT_CONFIGS__", _js_version("intercept-configs.js"))
     .replace("__JSV_INTERCEPT_REQUESTS__", _js_version("intercept-requests.js"))
     .replace("__JSV_INTERCEPT_STATS__", _js_version("intercept-stats.js"))
+    .replace("__JSV_RUNTIME_CONFIGS__", _js_version("runtime-configs.js"))
+    .replace("__CSSV_RUNTIME_CONFIGS__", _css_version("runtime-configs.css"))
   )
   if current_page:
     sidebar_html = _sidebar_html(current_page)
@@ -2172,13 +2175,11 @@ _DASHBOARD_PAGE_HTML = """<!doctype html>
             <span class="nav-card-title">请求拦截</span>
             <span class="nav-card-desc">管理 HTTP 请求拦截配置，查看拦截记录</span>
           </a>
-          <div class="nav-card nav-card--coming-soon" role="group"
-            aria-label="运行配置，即将上线">
+          <a href="../../v2/pages/runtime-configs" class="nav-card">
             <span class="nav-card-icon">⚙</span>
             <span class="nav-card-title">运行配置</span>
             <span class="nav-card-desc">配置下发、灰度控制与凭证管理</span>
-            <span class="nav-card-status">即将上线</span>
-          </div>
+          </a>
         </div>
       </section>
 
@@ -2981,3 +2982,74 @@ _ENUM_MAP_PAGE_HTML = """<!doctype html>
 def enum_map_page() -> HTMLResponse:
   """枚举映射管理页面。CRUD 管理 config.enum_map 枚举翻译。"""
   return _page(_ENUM_MAP_PAGE_HTML, current_page="enum-map")
+
+
+@router.get("/runtime-configs", response_class=HTMLResponse)
+def runtime_configs_page() -> HTMLResponse:
+  """Versioned runtime configuration and encrypted secret-reference console."""
+  return _page(_RUNTIME_CONFIGS_PAGE_HTML, current_page="runtime-configs")
+
+
+_RUNTIME_CONFIGS_PAGE_HTML = """<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>运行配置 · tts-erp</title>
+  <link rel="stylesheet" href="../../static/css/runtime-configs.css?v=__CSSV_RUNTIME_CONFIGS__">
+</head>
+<body>
+  <main class="runtime-config-page">
+    <header class="rc-hero">
+      <div>
+        <div class="rc-eyebrow">CONTROL PLANE / VERSIONED JSON</div>
+        <h1>运行配置</h1>
+        <p>先保存草稿，再发布不可变版本；灰度规则按稳定桶位生效。凭证只以 <code>secret://</code> 引用出现。</p>
+      </div>
+      <span class="rc-status" id="rc-version">选择一项配置</span>
+    </header>
+    <p class="rc-notice" id="rc-readonly" hidden>当前会话为只读；可查看已发布版本，编辑、发布与凭证管理需要 readwrite 权限。</p>
+    <div class="rc-layout">
+      <aside class="rc-list" aria-label="运行配置列表">
+        <div class="rc-section-head"><h2>配置项</h2></div>
+        <div class="rc-items" id="rc-items"></div>
+      </aside>
+      <div class="rc-workspace">
+        <section class="rc-editor" id="rc-empty"><div class="rc-empty">从左侧选择配置项，或创建一个新的运行配置。</div></section>
+        <section class="rc-editor" id="rc-editor" hidden>
+          <div class="rc-grid">
+            <div class="rc-field"><label for="rc-key">配置键</label><input id="rc-key"></div>
+            <div class="rc-field"><label for="rc-name">名称</label><input id="rc-name"></div>
+            <div class="rc-field wide"><label for="rc-schema">Schema（发布后不可修改）</label><textarea id="rc-schema"></textarea></div>
+            <div class="rc-field wide"><label for="rc-payload">草稿配置</label><textarea id="rc-payload"></textarea></div>
+            <div class="rc-field wide"><label for="rc-rollout">灰度规则</label><textarea id="rc-rollout">[]</textarea><p class="rc-help">规则按顺序命中：<code>{"basisPoints": 500, "payload": {...}}</code> 表示稳定桶位前 5%。</p></div>
+            <div class="rc-field wide"><label for="rc-comment">发布说明</label><input id="rc-comment" maxlength="2000"></div>
+          </div>
+          <div class="rc-actions"><button class="rc-button secondary" type="button" id="rc-save">保存草稿</button><button class="rc-button" type="button" id="rc-publish">发布新版本</button></div>
+        </section>
+        <section class="rc-editor" id="rc-create">
+          <div class="rc-section-head"><h2>创建配置项</h2></div>
+          <form id="rc-create-form" class="rc-grid">
+            <div class="rc-field"><label for="rc-new-key">配置键</label><input id="rc-new-key" required pattern="[a-z][a-z0-9_.-]*" placeholder="feature.checkout"></div>
+            <div class="rc-field"><label for="rc-new-name">名称</label><input id="rc-new-name" required placeholder="结账实验"></div>
+            <div class="rc-field wide"><label for="rc-new-schema">Schema</label><textarea id="rc-new-schema" required>{"type":"object","properties":{},"additionalProperties":false}</textarea></div>
+            <div class="rc-field wide"><label for="rc-new-payload">初始草稿</label><textarea id="rc-new-payload" required>{}</textarea></div>
+            <div class="rc-actions wide"><button class="rc-button" type="submit">创建草稿</button></div>
+          </form>
+        </section>
+        <section class="rc-secrets" id="rc-secrets">
+          <div class="rc-section-head"><h2>凭证引用</h2><span class="rc-meta">明文永不回读</span></div>
+          <form id="rc-secret-form"><input id="rc-secret-name" required pattern="[a-z0-9_.-]+" placeholder="tiktok.app-secret"><input id="rc-secret-value" required type="password" autocomplete="new-password" placeholder="粘贴新的凭证值"><button class="rc-button" type="submit">加密保存</button></form>
+          <ul class="rc-secret-list" id="rc-secret-list"></ul>
+        </section>
+        <section class="rc-history" id="rc-history">
+          <div class="rc-section-head"><h2>发布历史</h2><span class="rc-meta">恢复会创建更高的新版本</span></div>
+          <ul class="rc-history-list" id="rc-history-list"></ul>
+        </section>
+      </div>
+    </div>
+    <p class="rc-notice" id="rc-notice" hidden role="status"></p>
+  </main>
+  <script src="../../static/js/runtime-configs.js?v=__JSV_RUNTIME_CONFIGS__" defer></script>
+</body>
+</html>"""
