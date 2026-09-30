@@ -1,7 +1,7 @@
 """Tests for the 2026-09-01 scheduler extension: miaoshou + reporting jobs.
 
 Covers:
-* JOBS registry contains the 6 new entries with correct wiring
+* JOBS registry contains the Miaoshou/reporting entries with correct wiring
   (entrypoint / interval / is_tiktok=False).
 * ``_run_system_job`` dispatch: entrypoint resolution, commit on
   success, sentinel failed row on exception (mocked session — no DB).
@@ -66,6 +66,11 @@ def test_jobs_registry_includes_miaoshou_and_reporting():
             "tts_erp_v2.jobs.miaoshou.purchase_orders",
             "sync_purchase_orders",
             3600,
+        ),
+        "miaoshou.packages": (
+            "tts_erp_v2.jobs.miaoshou.packages",
+            "sync_packages",
+            1800,
         ),
         "reporting.cost_snapshots": (
             "tts_erp_v2.jobs.reporting",

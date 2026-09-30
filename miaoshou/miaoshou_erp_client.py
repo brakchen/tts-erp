@@ -81,12 +81,14 @@ class MiaoshouErpClient:
 
         # 延迟导入 endpoint 类
         from .endpoints.collection_box import CollectionBoxEndpoint
+        from .endpoints.package import PackageEndpoint
         from .endpoints.shop import ShopEndpoint
         from .endpoints.tk_collect_box import TkCollectBoxEndpoint
 
         self.shops: ShopEndpoint = ShopEndpoint(self)
         self.collection_box: CollectionBoxEndpoint = CollectionBoxEndpoint(self)
         self.tk_collect_box: TkCollectBoxEndpoint = TkCollectBoxEndpoint(self)
+        self.packages: PackageEndpoint = PackageEndpoint(self)
 
     # ---- 上下文管理 ----
 
