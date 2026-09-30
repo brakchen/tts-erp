@@ -16,4 +16,5 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| fix/focused-spus-nav-label | 将左侧导航入口明确显示为“重点关注 SPU” | 01a0edf5-a325-77b2-ade9-ac88e25bdd89 | `fix/focused-spus-nav-label` / `.worktrees/focused-spus-nav-label` | `tts_erp_v2/api/v2/pages.py`; `tests/api/test_focused_spus.py` | active | — | — | 2026-09-30T00:53Z |
 | miaoshou-manual-cost-import | 妙手采购价映射与人工成本导入 | 01a0efbb-1bcc-77b2-ade9-ac9dfdf3d0a0 | `chore/miaoshou-manual-cost-import` / `/home/schan/tts-erp/.worktrees/miaoshou-manual-cost-import` | `tech-doc/miaoshou-purchase-price-import.md` | active | — | — | 2026-09-30 00:46:23 |
