@@ -106,7 +106,6 @@ def test_focused_spus_page_keeps_the_full_roi_dashboard(
         "sum-projection-refund-rate",
         "sum-projection-full-loss-rate",
         "sum-unresolved-orders",
-        "sum-unresolved-qty",
         "sum-projected-future-loss-qty",
         "sum-projected-terminal-loss-qty",
         "sum-projected-net-revenue",
@@ -135,6 +134,10 @@ def test_focused_spus_page_keeps_the_full_roi_dashboard(
         marker = f'"{hook}"'
         assert marker in standard_profile
         assert marker in focused_profile
+
+    # 运营不需要在页首重复展示待确认件数；后端字段和 SPU 诊断明细保留。
+    assert '"sum-unresolved-qty"' not in standard_profile
+    assert '"sum-unresolved-qty"' not in focused_profile
 
 
 def test_focused_spus_auth_and_camel_case_contract(
