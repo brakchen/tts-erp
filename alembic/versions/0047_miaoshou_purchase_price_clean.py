@@ -15,7 +15,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op  # pyright: ignore[reportAttributeAccessIssue]
 
 revision: str = "0046_miaoshou_purchase_price"
-down_revision: str | None = "0045_miaoshou_package_schema"
+down_revision: str | None = "0046_drop_unused_tables"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
