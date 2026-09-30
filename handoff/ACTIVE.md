@@ -16,4 +16,3 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| isolated-test-template | 模板库隔离测试脚本 | 01a0f3bd-328d-729f-8747-2a8dddf4961f | `chore/isolated-test-template` / `.worktrees/isolated-test-template` | `scripts/test_isolated.sh`; `AGENTS.md`; `tech-doc/agent-testing.md`; `tech-doc/commands-reference.md`; `tech-doc/agent-safety.md`; `tests/api/test_spu_roi_api.py`; `tests/db/test_miaoshou_schema.py` | ready | 386e0025a2cb1b960a7baaafc1aaeb745886ce85 | 253fbbe7e51134fa0d2aeda69ce76ed520c83032 | 2026-09-30 20:07:30 |
