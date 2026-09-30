@@ -2023,9 +2023,9 @@
     ].join("-");
   }
 
-  function dateRangeForPreset(preset) {
+  function dateRangeForPreset(preset, now) {
     if (preset === "all") return { start: "", end: "" };
-    var end = reportingDateValue(new Date());
+    var end = reportingDateValue(now || new Date());
     if (!end) return null;
     if (preset === "month") return { start: `${end.slice(0, 8)}01`, end: end };
     var days = parseInt(preset, 10);
@@ -2033,18 +2033,48 @@
     return { start: shiftDateValue(end, -days + 1), end: end };
   }
 
+  function datePresetRangeKey(range) {
+    return range ? `${range.start}|${range.end}` : null;
+  }
+
+  function preferredDatePresetButtons(buttons, now) {
+    var winners = new Map();
+    Array.prototype.forEach.call(buttons, (button) => {
+      var preset = button.getAttribute("data-date-preset");
+      var key = datePresetRangeKey(dateRangeForPreset(preset, now));
+      if (!key) return;
+      var candidate = {
+        button: button,
+        priority: preset === "month" ? 2 : 1,
+      };
+      var winner = winners.get(key);
+      if (!winner || candidate.priority > winner.priority) {
+        winners.set(key, candidate);
+      }
+    });
+    return winners;
+  }
+
   function updateDatePresetUi() {
-    Array.prototype.forEach.call(
-      document.querySelectorAll("[data-date-preset]"),
-      (button) => {
-        var range = dateRangeForPreset(button.getAttribute("data-date-preset"));
-        var active = Boolean(
-          range && range.start === state.wStart && range.end === state.wEnd,
-        );
-        button.classList.toggle("active", active);
-        button.setAttribute("aria-pressed", active ? "true" : "false");
-      },
-    );
+    var buttons = document.querySelectorAll("[data-date-preset]");
+    var now = new Date();
+    var winners = preferredDatePresetButtons(buttons, now);
+    Array.prototype.forEach.call(buttons, (button) => {
+      var preset = button.getAttribute("data-date-preset");
+      var range = dateRangeForPreset(preset, now);
+      var winner = winners.get(datePresetRangeKey(range));
+      var duplicate = Boolean(winner && winner.button !== button);
+      button.hidden = duplicate;
+      button.setAttribute("aria-hidden", duplicate ? "true" : "false");
+      var active = Boolean(
+        !duplicate &&
+          range &&
+          range.start === state.wStart &&
+          range.end === state.wEnd,
+      );
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", active ? "true" : "false");
+    });
   }
 
   function applyDatePreset(preset) {
