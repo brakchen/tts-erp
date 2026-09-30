@@ -64,12 +64,6 @@ FEE_NOTE_V7 = (
     "v7 已结算=实到账(SETTLEMENT，已含扣费)；未结算=sales×r̂×(1−spu退款率)(D5)；"
     "M19 纯信息列，不进净利"
 )
-COST_ASSUMPTION_V7 = (
-    "按 SPU 解析：人工标注采购成交价(MANUAL)优先，其次采购单成交价(PURCHASE)、"
-    "1688 货源价(SOURCE_PRICE)；均未命中 → 默认 40 CNY/件；"
-    "DEFAULT_K1 行页面 ⚠ 可跳 manual-costs 补录"
-)
-
 Q = "TEST_ROI_SPU"  # 搜索范围:只命中本模块 TEST SPU
 PAID_ORDER_STATUS = "DELIVERED"
 DAY = "2026-09-01"
@@ -1064,7 +1058,8 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert item["spend"] == m4(reconstructed_spend)
     assert item["sales"] == m4(reconstructed_sales)
     assert "SETTLEMENT" in body["meta"]["fee"]["note"]
-    assert "1688" in body["meta"]["cost_assumption"]
+    assert "人工标注" in body["meta"]["cost_assumption"]
+    assert "同步货源价不参与计算" in body["meta"]["cost_assumption"]
     assert "40 CNY" in body["meta"]["cost_assumption"]
 
     # totals
@@ -3491,10 +3486,8 @@ def test_spu_roi_page_no_old_columns(api_client, readonly_key):
 # ═════════════════════════════════════════════════════════════════════
 
 
-def _seed_source_price_direct(
-    sess, *, shop_pk: int, spu_id: str, spu_pk: int, cost: str
-) -> None:
-    """在 procurement_products 插入一条 1688 货源价（TK-side 直取路径 L3a）。"""
+def _seed_synced_source_price(sess, *, spu_id: str, cost: str) -> None:
+    """插入一条应被 SPU ROI 忽略的妙手/1688 同步货源价。"""
     # 借一个现有账户（“North Nook”= id 2288,对应测试 shop TEST_SELLER_A）
     sess.execute(
         text(
@@ -3505,22 +3498,6 @@ def _seed_source_price_direct(
             " CAST(:cost AS numeric), now())"
         ),
         {"ext": spu_id, "cost": cost},
-    )
-
-
-def _seed_source_price_via_offer(
-    sess, *, spu_id: str, offer_item_id: str, cost: str
-) -> None:
-    """L3b：仅插入公共采集箱行（external_product_id ≠ spu_id），让 SOURCE_PRICE 走 source_item_id 桥路径。"""
-    sess.execute(
-        text(
-            "INSERT INTO procurement.procurement_products ("
-            " procurement_account_id, external_product_id, product_type, title,"
-            " source_platform, source_item_id, source_unit_cost, synced_at"
-            ") VALUES (2288, :ext, 'OFFER', 'TEST 采集箱行',"
-            " '1688', :item_id, CAST(:cost AS numeric), now())"
-        ),
-        {"ext": "OFFER_" + offer_item_id, "item_id": offer_item_id, "cost": cost},
     )
 
 
@@ -3555,12 +3532,11 @@ def _seed_tracking_event_overseas(
     return ship_pk
 
 
-def test_spu_roi_cost_source_price_direct_layer(api_client, readonly_key, db_engine):
-    """D1 L3a：1688 货源价直取（procurement_products.external_product_id = spu_id）。
+def test_spu_roi_ignores_synced_source_price(api_client, readonly_key, db_engine):
+    """妙手/1688 同步货源价不参与 SPU ROI 成本解析。
 
-    验证 reviewer 修的 latent bug（`=` 被 sed 吃掉导致 L3a 实际 no-op）
-    被彻底修复：SOURCE_PRICE 路径要能正确返回 cost_source='SOURCE_PRICE' 和
-    对应 source_unit_cost。
+    即使 procurement_products 有 source_unit_cost，只要没有人工成本，页面也必须
+    使用 DEFAULT_K1，避免同步报价被当成实际采购成本。
     """
     # 清理前次运行残留（unique constraint 防重复）
     with Session(db_engine) as sess:
@@ -3577,9 +3553,7 @@ def test_spu_roi_cost_source_price_direct_layer(api_client, readonly_key, db_eng
         spu_id = "TEST_ROI_SPU_PRICE_DIRECT"
         shop_pk = _seed_shop(sess, "TEST_SELLER_PRICE")
         spu_pk = _seed_spu(sess, shop_pk, spu_id)
-        _seed_source_price_direct(
-            sess, shop_pk=shop_pk, spu_id=spu_id, spu_pk=spu_pk, cost="35.0000"
-        )
+        _seed_synced_source_price(sess, spu_id=spu_id, cost="35.0000")
         _seed_order_line(
             sess,
             shop_pk=shop_pk,
@@ -3599,8 +3573,8 @@ def test_spu_roi_cost_source_price_direct_layer(api_client, readonly_key, db_eng
     body = r.json()
     assert body["total"] == 1
     item = body["items"][0]
-    assert item["cost_source"] == "SOURCE_PRICE", item
-    assert Decimal(item["unit_cost_used"]) == Decimal(35)
+    assert item["cost_source"] == "DEFAULT_K1", item
+    assert Decimal(item["unit_cost_used"]) == K1_CNY
 
 
 def test_spu_roi_drilldown_requires_auth(api_client):

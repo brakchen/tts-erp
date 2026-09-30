@@ -413,8 +413,8 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
 | **E 实际 ROI** | 全损订单数 | **`full_loss_order_count`** | **int** | **v10：`refund_order_count + overseas_cancelled_order_count`；当前 SPU 内按订单去重** |
 | **E 实际 ROI** | 全损率%（主列） | **`full_loss_rate`** | **ratio-str/null** | **v10：`full_loss_order_count ÷ total_orders`；订单维度且与大盘同公式** |
 | **E 实际 ROI** | 全损率（件数解释口径） | **`full_loss_qty_rate`** | **ratio-str/null** | **`full_loss_qty ÷ (units_sold + full_loss_cancelled_qty)`；仅解释全损件数，不作为主表全损率** |
-| E 实际 ROI | 退货货损（全损，CNY） | `return_loss` | money-str | **M13b v9：全损件数(M5d v9) × CNY 单位成本解析值（人工标注价格 > 货源价 > 40 CNY 兜底，§4.2）= `full_loss_qty × unit_cost_used`** |
-| E 实际 ROI | 单件货本来源（成本链解析结果） | `unit_cost_used, cost_source` | money/enum | **`unit_cost_used` 为 CNY；`cost_source ∈ 人工标注价格 / 货源价 / 默认兜底价格(40 CNY/件)`，价格优先链 人工标注价格→货源价→默认兜底价格；**默认兜底价格 → 页面该行 ⚠ + tooltip，可跳 manual-costs 页补录** |
+| E 实际 ROI | 退货货损（全损，CNY） | `return_loss` | money-str | **M13b v9：全损件数(M5d v9) × CNY 单位成本解析值（当前有效人工标注价格，未标注则 40 CNY 兜底，§4.2）= `full_loss_qty × unit_cost_used`** |
+| E 实际 ROI | 单件货本来源（成本解析结果） | `unit_cost_used, cost_source` | money/enum | **`unit_cost_used` 为 CNY；`cost_source ∈ MANUAL / DEFAULT_K1`。仅当前有效人工标注价格参与计算；未标注则使用 40 CNY/件，页面该行显示 ⚠ + tooltip，可跳 manual-costs 页补录。妙手/1688 同步货源价不参与计算。** |
 | E 实际 ROI | **净利润（毛利口径，页面金额核心列）** | `net_profit` | money-str | **M18 v8：`net_revenue − (units_sold + full_loss_cancelled_qty) × unit_cost_used − spend`（**不**二次扣 fee：已结算订单费用已含在 SETTLEMENT 里，未结算订单费用由 `× (1−r̂)` 部分折算）；**负值红字**（与 roi<保本同号，§5.4-6）；M13 net_cash 已退役为内部中间量** |
 | E 实际 ROI | 平台佣金（渠道费用，信息列） | `platform_fee` | money-str | **M19 v8：`r̂ × unsettled_sales`（仅未结算部分，**不**再是 M18 输入）；已结算订单费用已内含在 SETTLEMENT 不再单计；页面可覆写 `fee_rate`** |
 | E 实际 ROI | **实际 ROI（主指标）** | `roi_real` | ratio-str/null | **M14 v10：`(net_revenue − return_loss) / spend`（全 CNY 口径）；`spend=0 → null`，fx 快照缺失/异常时请求失败关闭** |
@@ -473,7 +473,7 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
     "fx": {"usd_vnd": "26001.8860", "cny_usd": "0.1488",
           "usd_cny": "6.7204", "cny_vnd": "3869.0806", "vnd_cny": "0.00025846",
           "as_of": "2026-09-07", "source": "fx-cache"},
-    "cost_assumption": "成本链：MANUAL(人工标注的采购成交价) → PURCHASE(妙手采购单成交价) → SOURCE_PRICE(1688 货源价) → DEFAULT_K1(40 CNY/件)；DEFAULT_K1 行页面 ⚠",
+    "cost_assumption": "成本：MANUAL(当前有效人工标注采购成交价) → DEFAULT_K1(40 CNY/件)；妙手/1688 同步货源价不参与计算；DEFAULT_K1 行页面 ⚠",
     "fee": {"mode": "baseline", "rate": "0.308", "override": null, "note": "v8: 仅作用于未结算订单 (r̂ × unsettled_sales)；已结算订单费用已内含在 SETTLEMENT 不再单计"},
     "window": {"first_day": "…", "last_day": "…", "note": "ad=视图全窗口累计(供参考)；销售/退款=全历史(可传 w_start/w_end)"},
     "rubric_version": "v10",

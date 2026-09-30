@@ -583,7 +583,7 @@
       ? `<img class="spu-img" alt="" src="${esc(it.main_image_url)}" data-zoom="${esc(it.main_image_url)}">`
       : '<span class="spu-img-missing" aria-hidden="true">无主图</span>';
     var warn =
-      '<span class="warn-default" data-tip="无成本记录（人工标注/采购单/货源价均未命中），按默认 40 元/件">⚠</span> ';
+      '<span class="warn-default" data-tip="无当前有效的人工标注采购成本，按默认 40 元/件；妙手/1688 同步货源价不参与计算">⚠</span> ';
     var warnRr = rrHigh
       ? '<span class="warn-rr" data-tip="退款率超过 30% 警戒线">⚠</span> '
       : "";
