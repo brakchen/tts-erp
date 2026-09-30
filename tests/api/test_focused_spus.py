@@ -107,11 +107,12 @@ def test_focused_spus_page_keeps_the_full_roi_dashboard(
         "sum-projection-full-loss-rate",
         "sum-unresolved-orders",
         "sum-projected-future-loss-qty",
-        "sum-projected-terminal-loss-qty",
         "sum-projected-net-revenue",
         "sum-projected-net-profit",
         "sum-projected-roi",
         "sum-projected-breakeven-roi",
+        "sum-projected-ad-roi",
+        "sum-projected-ad-breakeven-roi",
         "fee-card",
         "rows",
         "tpl-drilldown-panel",
@@ -138,6 +139,10 @@ def test_focused_spus_page_keeps_the_full_roi_dashboard(
     # 运营不需要在页首重复展示待确认件数；后端字段和 SPU 诊断明细保留。
     assert '"sum-unresolved-qty"' not in standard_profile
     assert '"sum-unresolved-qty"' not in focused_profile
+    assert '"sum-projected-terminal-loss-qty"' not in standard_profile
+    assert '"sum-projected-terminal-loss-qty"' not in focused_profile
+    assert 'id="sum-projected-terminal-loss-qty"' not in standard.text
+    assert 'id="sum-projected-terminal-loss-qty"' not in focused.text
 
 
 def test_focused_spus_auth_and_camel_case_contract(

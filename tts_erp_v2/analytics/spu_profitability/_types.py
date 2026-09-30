@@ -335,15 +335,21 @@ class SpuProfitability:
     projection_basis_qty: int
     projection_basis_sales: Decimal
     projection_basis_refund_amount: Decimal
+    projection_basis_full_loss_order_count: int
     projection_basis_full_loss_qty: int
     projection_refund_amount_rate: Decimal | None
+    settled_full_loss_rate: Decimal | None
     projection_full_loss_qty_rate: Decimal | None
     unsettled_order_count: int
     unresolved_unsettled_order_count: int
     unresolved_unsettled_qty: int
     unresolved_unsettled_sales: Decimal
     confirmed_unsettled_refund_amount: Decimal
+    confirmed_unsettled_full_loss_order_count: int
     confirmed_unsettled_full_loss_qty: int
+    projected_future_refund_amount: Decimal | None
+    projected_terminal_refund_amount: Decimal | None
+    projected_future_full_loss_order_count: Decimal | None
     projected_future_full_loss_qty: Decimal | None
     projected_terminal_full_loss_qty: Decimal | None
     projected_full_loss_cost: Decimal | None
@@ -354,6 +360,10 @@ class SpuProfitability:
     projected_roi_breakeven: Decimal | None
     projected_nc_prime: Decimal | None
     projected_cogs_kept: Decimal | None
+    projected_ad_gmv: Decimal | None
+    projected_ad_system_actual_roi: Decimal | None
+    projected_ad_system_max_ad_spend: Decimal | None
+    projected_ad_system_breakeven_roi: Decimal | None
 
     @property
     def profit_status(self) -> str:
@@ -414,15 +424,21 @@ class ProfitabilityTotals:
     projection_basis_qty: int
     projection_basis_sales: Decimal
     projection_basis_refund_amount: Decimal
+    projection_basis_full_loss_order_count: int
     projection_basis_full_loss_qty: int
     projection_refund_amount_rate: Decimal | None
+    settled_full_loss_rate: Decimal | None
     projection_full_loss_qty_rate: Decimal | None
     unsettled_order_count: int
     unresolved_unsettled_order_count: int
     unresolved_unsettled_qty: int
     unresolved_unsettled_sales: Decimal
     confirmed_unsettled_refund_amount: Decimal
+    confirmed_unsettled_full_loss_order_count: int
     confirmed_unsettled_full_loss_qty: int
+    projected_future_refund_amount: Decimal | None
+    projected_terminal_refund_amount: Decimal | None
+    projected_future_full_loss_order_count: Decimal | None
     projected_future_full_loss_qty: Decimal | None
     projected_terminal_full_loss_qty: Decimal | None
     projected_full_loss_cost: Decimal | None
@@ -433,6 +449,10 @@ class ProfitabilityTotals:
     projected_roi_breakeven: Decimal | None
     projected_nc_prime: Decimal | None
     projected_cogs_kept: Decimal | None
+    projected_ad_gmv: Decimal | None
+    projected_ad_system_actual_roi: Decimal | None
+    projected_ad_system_max_ad_spend: Decimal | None
+    projected_ad_system_breakeven_roi: Decimal | None
 
     @property
     def profit_status(self) -> str:

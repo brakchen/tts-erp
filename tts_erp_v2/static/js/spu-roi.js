@@ -42,11 +42,12 @@
         "sum-projection-full-loss-rate",
         "sum-unresolved-orders",
         "sum-projected-future-loss-qty",
-        "sum-projected-terminal-loss-qty",
         "sum-projected-net-revenue",
         "sum-projected-net-profit",
         "sum-projected-roi",
         "sum-projected-breakeven-roi",
+        "sum-projected-ad-roi",
+        "sum-projected-ad-breakeven-roi",
       ],
       columnIds: [
         "product",
