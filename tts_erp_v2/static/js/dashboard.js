@@ -40,6 +40,7 @@
   document.addEventListener('DOMContentLoaded', init);
 
   async function init() {
+    installAdDailyNav();
     await checkAuth();
     await Promise.all([
       loadShops(),
@@ -50,6 +51,31 @@
     // 同步状态是运维监控面：周期作业可能随时间变红，60s 轮询一次。
     setInterval(loadSyncStatus, 60000);
   }
+
+  // ---------- QUICK NAVIGATION ----------
+  function installAdDailyNav() {
+    const nav = document.querySelector('.quick-nav .nav-cards');
+    if (!nav || nav.querySelector('[data-page="ad-daily"]')) return;
+
+    const link = document.createElement('a');
+    link.href = '../../v2/pages/ad-daily';
+    link.className = 'nav-card';
+    link.dataset.page = 'ad-daily';
+
+    const icon = document.createElement('span');
+    icon.className = 'nav-card-icon';
+    icon.textContent = '▥';
+    const title = document.createElement('span');
+    title.className = 'nav-card-title';
+    title.textContent = '广告日明细';
+    const description = document.createElement('span');
+    description.className = 'nav-card-desc';
+    description.textContent = '按日期、计划和商品核查插件采集的广告事实';
+
+    link.append(icon, title, description);
+    nav.append(link);
+  }
+
 
   // ---------- AUTH ----------
   async function checkAuth() {
