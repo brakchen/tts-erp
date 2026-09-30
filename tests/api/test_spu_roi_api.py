@@ -1391,6 +1391,7 @@ def test_spu_roi_projects_only_unsettled_orders_from_settled_sample(
         "projection_refund_amount_rate",
         "settled_full_loss_rate",
         "projection_full_loss_qty_rate",
+        "delivered_unsettled_order_count",
         "full_loss_exposure_unsettled_order_count",
         "confirmed_full_loss_exposure_order_count",
         "confirmed_full_loss_exposure_qty",
@@ -1439,6 +1440,7 @@ def test_spu_roi_excludes_delivered_unsettled_orders_from_full_loss_exposure(
     # order remains exposed. The other two are delivery-terminal by independent
     # evidence: one by sales_orders.status and one by shipment facts.
     assert item["unsettled_order_count"] == 3
+    assert item["delivered_unsettled_order_count"] == 2
     assert item["full_loss_exposure_unsettled_order_count"] == 1
     assert item["unresolved_unsettled_order_count"] == 3
     assert Decimal(item["projected_future_full_loss_order_count"]) == Decimal(0)
@@ -3034,6 +3036,7 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
         "settled_full_loss_rate": None,
         "projection_full_loss_qty_rate": None,
         "unsettled_order_count": 0,
+        "delivered_unsettled_order_count": 0,
         "full_loss_exposure_unsettled_order_count": 0,
         "confirmed_full_loss_exposure_order_count": 0,
         "confirmed_full_loss_exposure_qty": 0,
@@ -3582,6 +3585,10 @@ def test_spu_roi_js_targets_dashboard_hooks():
     assert "loadController" in src
     assert "setSpuIdsInUrl(state.spuIds)" in src
     assert "restoreSpuScopeFromUrl" in src
+    # 页首在未结算订单后动态插入已送达子集，避免与运行配置 lane 争写 HTML 模板。
+    assert "ensureDeliveredUnsettledSummary" in src
+    assert 'id: "sum-delivered-unsettled-orders"' in src
+    assert "totals.delivered_unsettled_order_count" in src
 
 
 def test_spu_roi_projection_render_tolerates_stale_html_shell() -> None:

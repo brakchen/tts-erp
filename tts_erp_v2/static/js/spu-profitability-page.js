@@ -180,6 +180,45 @@
     var target = $(selector);
     if (target) target.textContent = value;
   }
+
+  function ensureDeliveredUnsettledSummary() {
+    if ($("#sum-delivered-unsettled-orders")) return;
+    var unresolved = $("#sum-unresolved-orders");
+    var unresolvedCell = unresolved && unresolved.closest(".col");
+    if (!unresolvedCell || !unresolvedCell.parentNode) return;
+    var deliveredCell = el(
+      "div",
+      { class: unresolvedCell.className },
+      el(
+        "span",
+        { class: "op-counter-item h-100 p-2 p-lg-3" },
+        el(
+          "span",
+          { class: "op-counter-label" },
+          "未结算已送达订单",
+          el(
+            "span",
+            {
+              class: "op-hint",
+              "data-tip":
+                "尚未 SETTLEMENT，但订单状态或物流已确认送达的订单数；不进入未来全损预测",
+            },
+            "?",
+          ),
+        ),
+        el("span", {
+          class: "op-counter-num",
+          id: "sum-delivered-unsettled-orders",
+          text: "—",
+        }),
+      ),
+    );
+    unresolvedCell.parentNode.insertBefore(
+      deliveredCell,
+      unresolvedCell.nextSibling,
+    );
+  }
+
   function loginUrl() {
     var pagePath = profile && profile.pagePath ? profile.pagePath : "/v2/pages/spu-roi";
     return `${PREFIX}/v2/auth/login?next=${PREFIX}${pagePath}`;
@@ -335,6 +374,7 @@
     "sum-projection-refund-rate",
     "sum-projection-full-loss-rate",
     "sum-unresolved-orders",
+    "sum-delivered-unsettled-orders",
     "sum-projected-future-loss-qty",
     "sum-projected-net-revenue",
     "sum-projected-net-profit",
@@ -1007,6 +1047,10 @@
     setTextIfPresent(
       "#sum-unresolved-orders",
       fmtInt(totals.unsettled_order_count),
+    );
+    setTextIfPresent(
+      "#sum-delivered-unsettled-orders",
+      fmtInt(totals.delivered_unsettled_order_count),
     );
     setTextIfPresent(
       "#sum-projected-future-loss-qty",
@@ -2467,6 +2511,7 @@
     profile = (options && options.profile) || {};
     selectionAdapter = profile.selectionAdapter || null;
     var defaults = profile.defaults || {};
+    ensureDeliveredUnsettledSummary();
     applyViewProfile();
     state.limit = parseInt(defaults.limit, 10) || 100;
     state.includeAll = Boolean(defaults.includeAll);
