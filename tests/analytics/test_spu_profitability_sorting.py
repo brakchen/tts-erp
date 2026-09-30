@@ -15,13 +15,17 @@ def _profitability_headers() -> list[dict[str, str]]:
         / "v2"
         / "pages.py"
     ).read_text(encoding="utf-8")
-    table = re.search(
+    tables = re.findall(
         r'(?s)<table class="[^"]*op-table[^"]*".*?</table>',
         source,
     )
+    table = next(
+        (candidate for candidate in tables if 'data-column-id="product"' in candidate),
+        None,
+    )
     assert table, "找不到 SPU 盈利主表"
     headers: list[dict[str, str]] = []
-    for attrs, label in re.findall(r"(?s)<th\b([^>]*)>(.*?)</th>", table.group()):
+    for attrs, label in re.findall(r"(?s)<th\b([^>]*)>(.*?)</th>", table):
         parsed = dict(re.findall(r'([\w-]+)="([^"]*)"', attrs))
         parsed["label"] = re.sub(r"<[^>]+>", "", label).strip()
         headers.append(parsed)
