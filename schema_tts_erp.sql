@@ -758,6 +758,58 @@ ALTER TABLE miaoshou.packages ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 );
 
 
+-- Name: purchase_order_raw_records; Type: TABLE; Schema: miaoshou; Owner: -
+
+CREATE TABLE IF NOT EXISTS miaoshou.purchase_order_raw_records (
+    id bigint NOT NULL,
+    credential_id bigint,
+    external_purchase_order_id text NOT NULL,
+    endpoint text NOT NULL,
+    payload jsonb NOT NULL,
+    payload_hash text NOT NULL,
+    captured_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE miaoshou.purchase_order_raw_records ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME miaoshou.purchase_order_raw_records_id_seq
+);
+
+
+-- Name: purchase_price_candidates; Type: TABLE; Schema: miaoshou; Owner: -
+
+CREATE TABLE IF NOT EXISTS miaoshou.purchase_price_candidates (
+    id bigint NOT NULL,
+    credential_id bigint NOT NULL,
+    spu_id text NOT NULL,
+    spu_pk bigint,
+    manual_cost_id bigint,
+    unit_cost numeric(20,4) NOT NULL,
+    currency text DEFAULT 'CNY'::text NOT NULL,
+    source_purchase_order_sn text NOT NULL,
+    source_item_id text NOT NULL,
+    source_purchase_at timestamp with time zone,
+    source_status text,
+    calculation_method text DEFAULT 'quantity_weighted_mean'::text NOT NULL,
+    calculation_version text DEFAULT 'purchase-price-v1'::text NOT NULL,
+    resolution_status text NOT NULL,
+    evidence jsonb NOT NULL,
+    last_seen_at timestamp with time zone DEFAULT now() NOT NULL,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_miaoshou_purchase_price_positive CHECK ((unit_cost > (0)::numeric))
+);
+
+
+
+ALTER TABLE miaoshou.purchase_price_candidates ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME miaoshou.purchase_price_candidates_id_seq
+);
+
+
 -- Name: sync_cursors; Type: TABLE; Schema: miaoshou; Owner: -
 
 CREATE TABLE IF NOT EXISTS miaoshou.sync_cursors (
@@ -1970,6 +2022,18 @@ ALTER TABLE ONLY miaoshou.packages
     ADD CONSTRAINT packages_pkey PRIMARY KEY (id);
 
 
+-- Name: purchase_order_raw_records purchase_order_raw_records_pkey; Type: CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.purchase_order_raw_records
+    ADD CONSTRAINT purchase_order_raw_records_pkey PRIMARY KEY (id);
+
+
+-- Name: purchase_price_candidates purchase_price_candidates_pkey; Type: CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.purchase_price_candidates
+    ADD CONSTRAINT purchase_price_candidates_pkey PRIMARY KEY (id);
+
+
 -- Name: sync_cursors sync_cursors_pkey; Type: CONSTRAINT; Schema: miaoshou; Owner: -
 
 ALTER TABLE ONLY miaoshou.sync_cursors
@@ -1998,6 +2062,18 @@ ALTER TABLE ONLY miaoshou.package_items
 
 ALTER TABLE ONLY miaoshou.packages
     ADD CONSTRAINT uq_miaoshou_packages_credential_external UNIQUE (credential_id, external_package_id);
+
+
+-- Name: purchase_price_candidates uq_miaoshou_purchase_price_credential_spu; Type: CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.purchase_price_candidates
+    ADD CONSTRAINT uq_miaoshou_purchase_price_credential_spu UNIQUE (credential_id, spu_id);
+
+
+-- Name: purchase_order_raw_records uq_miaoshou_purchase_raw_credential_order_hash; Type: CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.purchase_order_raw_records
+    ADD CONSTRAINT uq_miaoshou_purchase_raw_credential_order_hash UNIQUE (credential_id, external_purchase_order_id, payload_hash);
 
 
 -- Name: sync_cursors uq_miaoshou_sync_cursors_credential_resource; Type: CONSTRAINT; Schema: miaoshou; Owner: -
@@ -2569,6 +2645,26 @@ CREATE INDEX IF NOT EXISTS ix_miaoshou_packages_source_updated ON miaoshou.packa
 CREATE INDEX IF NOT EXISTS ix_miaoshou_packages_status ON miaoshou.packages USING btree (app_package_status);
 
 
+-- Name: ix_miaoshou_purchase_price_source_at; Type: INDEX; Schema: miaoshou; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_miaoshou_purchase_price_source_at ON miaoshou.purchase_price_candidates USING btree (source_purchase_at);
+
+
+-- Name: ix_miaoshou_purchase_price_status; Type: INDEX; Schema: miaoshou; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_miaoshou_purchase_price_status ON miaoshou.purchase_price_candidates USING btree (resolution_status);
+
+
+-- Name: ix_miaoshou_purchase_raw_captured; Type: INDEX; Schema: miaoshou; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_miaoshou_purchase_raw_captured ON miaoshou.purchase_order_raw_records USING btree (captured_at);
+
+
+-- Name: ix_miaoshou_purchase_raw_order; Type: INDEX; Schema: miaoshou; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_miaoshou_purchase_raw_order ON miaoshou.purchase_order_raw_records USING btree (credential_id, external_purchase_order_id);
+
+
 -- Name: ix_miaoshou_sync_issues_resource_resolved; Type: INDEX; Schema: miaoshou; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_miaoshou_sync_issues_resource_resolved ON miaoshou.sync_issues USING btree (resource, resolved_at);
@@ -2944,6 +3040,11 @@ CREATE OR REPLACE TRIGGER trg_miaoshou_package_items_touch BEFORE UPDATE ON miao
 CREATE OR REPLACE TRIGGER trg_miaoshou_packages_touch BEFORE UPDATE ON miaoshou.packages FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
+-- Name: purchase_price_candidates trg_miaoshou_purchase_price_candidates_touch; Type: TRIGGER; Schema: miaoshou; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_miaoshou_purchase_price_candidates_touch BEFORE UPDATE ON miaoshou.purchase_price_candidates FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
 -- Name: sync_cursors trg_miaoshou_sync_cursors_touch; Type: TRIGGER; Schema: miaoshou; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_miaoshou_sync_cursors_touch BEFORE UPDATE ON miaoshou.sync_cursors FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
@@ -3276,6 +3377,30 @@ ALTER TABLE ONLY miaoshou.packages
 
 ALTER TABLE ONLY miaoshou.packages
     ADD CONSTRAINT packages_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES miaoshou.package_raw_records(id) ON DELETE RESTRICT;
+
+
+-- Name: purchase_order_raw_records purchase_order_raw_records_credential_id_fkey; Type: FK CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.purchase_order_raw_records
+    ADD CONSTRAINT purchase_order_raw_records_credential_id_fkey FOREIGN KEY (credential_id) REFERENCES integration.credentials(id) ON DELETE SET NULL;
+
+
+-- Name: purchase_price_candidates purchase_price_candidates_credential_id_fkey; Type: FK CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.purchase_price_candidates
+    ADD CONSTRAINT purchase_price_candidates_credential_id_fkey FOREIGN KEY (credential_id) REFERENCES integration.credentials(id) ON DELETE CASCADE;
+
+
+-- Name: purchase_price_candidates purchase_price_candidates_manual_cost_id_fkey; Type: FK CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.purchase_price_candidates
+    ADD CONSTRAINT purchase_price_candidates_manual_cost_id_fkey FOREIGN KEY (manual_cost_id) REFERENCES procurement.manual_product_costs(id) ON DELETE SET NULL;
+
+
+-- Name: purchase_price_candidates purchase_price_candidates_spu_pk_fkey; Type: FK CONSTRAINT; Schema: miaoshou; Owner: -
+
+ALTER TABLE ONLY miaoshou.purchase_price_candidates
+    ADD CONSTRAINT purchase_price_candidates_spu_pk_fkey FOREIGN KEY (spu_pk) REFERENCES commerce.products_spu(id) ON DELETE SET NULL;
 
 
 -- Name: sync_cursors sync_cursors_credential_id_fkey; Type: FK CONSTRAINT; Schema: miaoshou; Owner: -
