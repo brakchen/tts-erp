@@ -96,6 +96,7 @@ class ProjectionInput:
     projection_basis_sales_cny: Decimal
     projection_basis_refund_amount_cny: Decimal
     projection_basis_full_loss_qty: Decimal
+    observed_full_loss_rate: Decimal | None
     unsettled_order_count: int
     unresolved_unsettled_order_count: int
     unsettled_sales_after_fee_cny: Decimal
@@ -174,21 +175,22 @@ def calculate_order_metrics(
 
 
 def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
-    """Project the terminal outcome of unsettled orders from settled samples.
+    """Project the terminal outcome of the unresolved unsettled cohort.
 
-    Confirmed unsettled refunds are removed once.  Future loss changes expected
+    Confirmed unsettled refunds are removed once.  The observed order-dimension
+    full-loss rate is treated as each unresolved item's loss probability; this is
+    equivalent to predicting unresolved full-loss orders first and converting by
+    the unresolved cohort's average items per order.  Future loss changes expected
     revenue and financial ROI, but never adds COGS: every paid unit is already in
     ``cogs_total_cny``.
     """
 
-    has_reliable_sample = (
+    has_refund_sample = (
         inputs.projection_basis_order_count > 0
-        and inputs.projection_basis_qty > 0
         and inputs.projection_basis_sales_cny > 0
     )
     refund_amount_rate: Decimal | None = None
-    full_loss_qty_rate: Decimal | None = None
-    if has_reliable_sample:
+    if has_refund_sample:
         refund_amount_rate = min(
             Decimal(1),
             max(
@@ -197,13 +199,12 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
                 / inputs.projection_basis_sales_cny,
             ),
         )
-        full_loss_qty_rate = min(
-            Decimal(1),
-            max(
-                Decimal(0),
-                inputs.projection_basis_full_loss_qty / inputs.projection_basis_qty,
-            ),
-        )
+    full_loss_qty_rate = (
+        min(Decimal(1), max(Decimal(0), inputs.observed_full_loss_rate))
+        if inputs.observed_full_loss_rate is not None
+        else None
+    )
+    has_reliable_sample = has_refund_sample and full_loss_qty_rate is not None
 
     if inputs.unsettled_order_count <= 0:
         projected_nc_prime = (
