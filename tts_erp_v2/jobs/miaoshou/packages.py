@@ -233,9 +233,13 @@ def _parse_package(
         else None,
         "raw_payload": package,
         "provided_fields": provided_fields,
-        "items_present": "items" in package,
+        "items_present": isinstance(package.get("items"), list),
+        "items_invalid": "items" in package
+        and not isinstance(package.get("items"), list),
         "items": package.get("items") if isinstance(package.get("items"), list) else [],
-        "gifts_present": "giftItems" in package,
+        "gifts_present": isinstance(package.get("giftItems"), list),
+        "gifts_invalid": "giftItems" in package
+        and not isinstance(package.get("giftItems"), list),
         "gifts": package.get("giftItems")
         if isinstance(package.get("giftItems"), list)
         else [],
@@ -364,8 +368,10 @@ def _upsert_package(
     excluded = {
         "provided_fields",
         "items_present",
+        "items_invalid",
         "items",
         "gifts_present",
+        "gifts_invalid",
         "gifts",
     }
     values = {
@@ -401,6 +407,7 @@ def _upsert_items(
     session: Session,
     *,
     package_id: int,
+    external_package_id: str,
     items: list[Any],
     credential_id: int,
 ) -> tuple[int, int]:
@@ -414,7 +421,7 @@ def _upsert_items(
                 session,
                 credential_id=credential_id,
                 issue_type="PACKAGE_ITEM_PARSE_FAILED",
-                external_id=str(package_id),
+                external_id=external_package_id,
                 details={"item": repr(item)[:300]},
             )
             continue
@@ -425,7 +432,7 @@ def _upsert_items(
                 session,
                 credential_id=credential_id,
                 issue_type="PACKAGE_ITEM_MISSING_ID",
-                external_id=str(package_id),
+                external_id=external_package_id,
                 details={"item_keys": list(item.keys())[:30]},
             )
             continue
@@ -479,6 +486,7 @@ def _upsert_gifts(
     session: Session,
     *,
     package_id: int,
+    external_package_id: str,
     gifts: list[Any],
     credential_id: int,
 ) -> tuple[int, int]:
@@ -496,7 +504,7 @@ def _upsert_gifts(
                 session,
                 credential_id=credential_id,
                 issue_type="PACKAGE_GIFT_MISSING_ID",
-                external_id=str(package_id),
+                external_id=external_package_id,
                 details={"gift_keys": list(gift.keys())[:30]},
             )
             continue
@@ -575,27 +583,48 @@ def _persist_package(
     items_written = 0
     gifts_written = 0
     issues = 0
-    if parsed["items_present"]:
+    if parsed["items_invalid"]:
+        _record_issue(
+            session,
+            credential_id=credential_id,
+            issue_type="PACKAGE_ITEMS_INVALID",
+            external_id=parsed["external_package_id"],
+            details={"value_type": type(package.get("items")).__name__},
+        )
+        issues += 1
+    elif parsed["items_present"]:
         items_written, item_issues = _upsert_items(
             session,
             package_id=row.id,
+            external_package_id=parsed["external_package_id"],
             items=parsed["items"],
             credential_id=credential_id,
         )
         issues += item_issues
-    if parsed["gifts_present"]:
+    if parsed["gifts_invalid"]:
+        _record_issue(
+            session,
+            credential_id=credential_id,
+            issue_type="PACKAGE_GIFTS_INVALID",
+            external_id=parsed["external_package_id"],
+            details={"value_type": type(package.get("giftItems")).__name__},
+        )
+        issues += 1
+    elif parsed["gifts_present"]:
         gifts_written, gift_issues = _upsert_gifts(
             session,
             package_id=row.id,
+            external_package_id=parsed["external_package_id"],
             gifts=parsed["gifts"],
             credential_id=credential_id,
         )
         issues += gift_issues
-    _resolve_issues(
-        session,
-        credential_id=credential_id,
-        external_id=parsed["external_package_id"],
-    )
+    if issues == 0:
+        _resolve_issues(
+            session,
+            credential_id=credential_id,
+            external_id=parsed["external_package_id"],
+        )
     return 1, items_written, gifts_written, issues
 
 

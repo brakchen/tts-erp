@@ -56,7 +56,7 @@ def upgrade() -> None:
     op.create_table(
         "package_raw_records",
         sa.Column("id", sa.BigInteger, sa.Identity(always=True), nullable=False),
-        sa.Column("credential_id", sa.BigInteger, nullable=False),
+        sa.Column("credential_id", sa.BigInteger),
         sa.Column("external_package_id", sa.Text),
         sa.Column("endpoint", sa.Text, nullable=False),
         sa.Column("payload", postgresql.JSONB, nullable=False),
@@ -75,7 +75,7 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.ForeignKeyConstraint(
-            ["credential_id"], ["integration.credentials.id"], ondelete="CASCADE"
+            ["credential_id"], ["integration.credentials.id"], ondelete="SET NULL"
         ),
         schema="miaoshou",
     )
@@ -336,18 +336,87 @@ def upgrade() -> None:
             'miaoshou.package.search_package_list',
             'miaoshou.package.get_package_info'
         )
-          AND credential_id IS NOT NULL
         """
     )
     op.execute(
         """
-        WITH latest AS (
-            SELECT DISTINCT ON (credential_id, external_package_id)
-                id, credential_id, external_package_id,
-                endpoint, payload, captured_at
+        WITH captures AS (
+            SELECT *
             FROM miaoshou.package_raw_records
-            WHERE external_package_id IS NOT NULL
-            ORDER BY credential_id, external_package_id, captured_at DESC, id DESC
+            WHERE credential_id IS NOT NULL
+              AND external_package_id IS NOT NULL
+        ), merged AS (
+            SELECT
+                credential_id,
+                external_package_id,
+                (array_agg(id ORDER BY captured_at DESC, id DESC))[1] AS raw_record_id,
+                (array_agg(endpoint ORDER BY captured_at DESC, id DESC))[1] AS source_endpoint,
+                (array_agg(payload ORDER BY captured_at DESC, id DESC))[1] AS raw_payload,
+                max(captured_at) AS captured_at,
+                (array_agg(payload->>'platform' ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload ? 'platform'))[1] AS platform,
+                (array_agg(payload->>'site' ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload ? 'site'))[1] AS site,
+                (array_agg(payload->>'shopId' ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload ? 'shopId'))[1] AS shop_id,
+                (array_agg(payload->>'shopName' ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload ? 'shopName'))[1] AS shop_name,
+                (array_agg(payload->>'shopNick' ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload ? 'shopNick'))[1] AS shop_nick,
+                (array_agg(payload->>'appPackageNo' ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload ? 'appPackageNo'))[1] AS app_package_no,
+                (array_agg(payload->>'appPackageStatus' ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload ? 'appPackageStatus'))[1] AS app_package_status,
+                (array_agg(payload->>'appPackageStatusText' ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload ? 'appPackageStatusText'))[1] AS app_package_status_text,
+                (array_agg(payload->>'platformPackageStatus' ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload ? 'platformPackageStatus'))[1] AS platform_package_status,
+                (array_agg(payload->>'fulfillmentType' ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload ? 'fulfillmentType'))[1] AS fulfillment_type,
+                (array_agg(payload#>>'{orderInfo,platformOrderSn}' ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload->'orderInfo' ? 'platformOrderSn'))[1] AS platform_order_sn,
+                (array_agg(payload#>>'{orderInfo,platformOrderStatus}' ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload->'orderInfo' ? 'platformOrderStatus'))[1] AS platform_order_status,
+                (array_agg(payload#>>'{orderInfo,currency}' ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload->'orderInfo' ? 'currency'))[1] AS currency,
+                (array_agg(payload#>>'{orderInfo,gmtOrderStart}' ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload->'orderInfo' ? 'gmtOrderStart'))[1] AS gmt_order_start,
+                (array_agg(payload#>>'{orderInfo,gmtOrderModified}' ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload->'orderInfo' ? 'gmtOrderModified'))[1] AS gmt_order_modified,
+                (array_agg(payload#>>'{orderInfo,gmtDelivery}' ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload->'orderInfo' ? 'gmtDelivery'))[1] AS gmt_delivery,
+                (array_agg(COALESCE(NULLIF(payload->>'logisticsNo', ''),
+                                    NULLIF(payload#>>'{logisticsAgentProductInfo,logisticsNo}', ''),
+                                    NULLIF(payload#>>'{opOrderPackageToPlatformLastMile,logisticsNo}', ''))
+                    ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload ? 'logisticsNo'
+                         OR payload->'logisticsAgentProductInfo' ? 'logisticsNo'
+                         OR payload->'opOrderPackageToPlatformLastMile' ? 'logisticsNo'))[1] AS logistics_no,
+                (array_agg(COALESCE(NULLIF(payload#>>'{logisticsAgentProductInfo,logisticsCompany}', ''),
+                                    NULLIF(payload#>>'{opOrderPackageToPlatformLastMile,logisticsCompany}', ''))
+                    ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload->'logisticsAgentProductInfo' ? 'logisticsCompany'
+                         OR payload->'opOrderPackageToPlatformLastMile' ? 'logisticsCompany'))[1] AS logistics_company,
+                (array_agg(COALESCE(NULLIF(payload#>>'{logisticsAgentProductInfo,logisticsAgentProductId}', ''),
+                                    NULLIF(payload#>>'{opOrderPackageToPlatformLastMile,logisticsAgentProductId}', ''))
+                    ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload->'logisticsAgentProductInfo' ? 'logisticsAgentProductId'
+                         OR payload->'opOrderPackageToPlatformLastMile' ? 'logisticsAgentProductId'))[1] AS logistics_product_id,
+                (array_agg(COALESCE(NULLIF(payload#>>'{logisticsAgentProductInfo,productName}', ''),
+                                    NULLIF(payload#>>'{opOrderPackageToPlatformLastMile,productName}', ''))
+                    ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload->'logisticsAgentProductInfo' ? 'productName'
+                         OR payload->'opOrderPackageToPlatformLastMile' ? 'productName'))[1] AS logistics_product_name,
+                (array_agg(payload->'orderInfo' ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload ? 'orderInfo'))[1] AS order_info,
+                (array_agg(payload->'consigneeInfo' ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload ? 'consigneeInfo'))[1] AS consignee_info,
+                (array_agg(payload->'logisticsAgentProductInfo' ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload ? 'logisticsAgentProductInfo'))[1] AS logistics_info,
+                (array_agg(payload->'opOrderPackageToPlatformLastMile' ORDER BY captured_at DESC, id DESC)
+                    FILTER (WHERE payload ? 'opOrderPackageToPlatformLastMile'))[1] AS last_mile_info
+            FROM captures
+            GROUP BY credential_id, external_package_id
         )
         INSERT INTO miaoshou.packages (
             credential_id, external_package_id, raw_record_id, source_endpoint,
@@ -356,54 +425,27 @@ def upgrade() -> None:
             platform_package_status, fulfillment_type,
             platform_order_sn, platform_order_status, currency,
             logistics_no, logistics_company, logistics_product_id,
-            logistics_product_name, order_info, consignee_info,
-            logistics_info, last_mile_info, raw_payload,
-            synced_at, created_at, updated_at
+            logistics_product_name, source_created_at, source_updated_at,
+            shipped_at, order_info, consignee_info, logistics_info,
+            last_mile_info, raw_payload, synced_at, created_at, updated_at
         )
         SELECT
-            credential_id,
-            external_package_id,
-            id,
-            endpoint,
-            payload->>'platform',
-            payload->>'site',
-            payload->>'shopId',
-            payload->>'shopName',
-            payload->>'shopNick',
-            payload->>'appPackageNo',
-            payload->>'appPackageStatus',
-            payload->>'appPackageStatusText',
-            payload->>'platformPackageStatus',
-            payload->>'fulfillmentType',
-            payload#>>'{orderInfo,platformOrderSn}',
-            payload#>>'{orderInfo,platformOrderStatus}',
-            payload#>>'{orderInfo,currency}',
-            COALESCE(
-                NULLIF(payload->>'logisticsNo', ''),
-                NULLIF(payload#>>'{logisticsAgentProductInfo,logisticsNo}', ''),
-                NULLIF(payload#>>'{opOrderPackageToPlatformLastMile,logisticsNo}', '')
-            ),
-            COALESCE(
-                NULLIF(payload#>>'{logisticsAgentProductInfo,logisticsCompany}', ''),
-                NULLIF(payload#>>'{opOrderPackageToPlatformLastMile,logisticsCompany}', '')
-            ),
-            COALESCE(
-                NULLIF(payload#>>'{logisticsAgentProductInfo,logisticsAgentProductId}', ''),
-                NULLIF(payload#>>'{opOrderPackageToPlatformLastMile,logisticsAgentProductId}', '')
-            ),
-            COALESCE(
-                NULLIF(payload#>>'{logisticsAgentProductInfo,productName}', ''),
-                NULLIF(payload#>>'{opOrderPackageToPlatformLastMile,productName}', '')
-            ),
-            payload->'orderInfo',
-            payload->'consigneeInfo',
-            payload->'logisticsAgentProductInfo',
-            payload->'opOrderPackageToPlatformLastMile',
-            payload,
-            captured_at,
-            captured_at,
-            captured_at
-        FROM latest
+            credential_id, external_package_id, raw_record_id, source_endpoint,
+            platform, site, shop_id, shop_name, shop_nick,
+            app_package_no, app_package_status, app_package_status_text,
+            platform_package_status, fulfillment_type,
+            platform_order_sn, platform_order_status, currency,
+            logistics_no, logistics_company, logistics_product_id,
+            logistics_product_name,
+            CASE WHEN gmt_order_start ~ '^\\d{4}-\\d{2}-\\d{2}( \\d{2}:\\d{2}:\\d{2})?$'
+                 THEN gmt_order_start::timestamp AT TIME ZONE 'Asia/Shanghai' END,
+            CASE WHEN gmt_order_modified ~ '^\\d{4}-\\d{2}-\\d{2}( \\d{2}:\\d{2}:\\d{2})?$'
+                 THEN gmt_order_modified::timestamp AT TIME ZONE 'Asia/Shanghai' END,
+            CASE WHEN gmt_delivery ~ '^\\d{4}-\\d{2}-\\d{2}( \\d{2}:\\d{2}:\\d{2})?$'
+                 THEN gmt_delivery::timestamp AT TIME ZONE 'Asia/Shanghai' END,
+            order_info, consignee_info, logistics_info, last_mile_info,
+            raw_payload, captured_at, captured_at, captured_at
+        FROM merged
         ON CONFLICT (credential_id, external_package_id) DO NOTHING
         """
     )
@@ -414,6 +456,7 @@ def upgrade() -> None:
                 credential_id, external_package_id, payload
             FROM miaoshou.package_raw_records
             WHERE external_package_id IS NOT NULL
+              AND jsonb_typeof(payload->'items') = 'array'
             ORDER BY credential_id, external_package_id, captured_at DESC, id DESC
         )
         INSERT INTO miaoshou.package_items (
@@ -462,6 +505,7 @@ def upgrade() -> None:
                 credential_id, external_package_id, payload
             FROM miaoshou.package_raw_records
             WHERE external_package_id IS NOT NULL
+              AND jsonb_typeof(payload->'giftItems') = 'array'
             ORDER BY credential_id, external_package_id, captured_at DESC, id DESC
         )
         INSERT INTO miaoshou.package_gift_items (
@@ -556,11 +600,20 @@ def upgrade() -> None:
     )
     op.execute(
         """
-        DELETE FROM integration.raw_records
-        WHERE endpoint IN (
+        DELETE FROM integration.raw_records old
+        WHERE old.endpoint IN (
             'miaoshou.package.search_package_list',
             'miaoshou.package.get_package_info'
         )
+          AND EXISTS (
+              SELECT 1
+              FROM miaoshou.package_raw_records copied
+              WHERE copied.credential_id IS NOT DISTINCT FROM old.credential_id
+                AND copied.external_package_id IS NOT DISTINCT FROM old.external_id
+                AND copied.endpoint = old.endpoint
+                AND copied.payload_hash = old.payload_hash
+                AND copied.captured_at = old.captured_at
+          )
         """
     )
 

@@ -259,6 +259,69 @@ def test_partial_payload_preserves_fields_and_absent_children(
     )
 
 
+def test_malformed_children_do_not_clear_snapshot_and_record_external_id(
+    db_session, fake_client, miaoshou_credentials_row
+) -> None:
+    state = {"package": _package_payload()}
+    fake_client.install(lambda **_: _list_response(state["package"]))
+    sync_packages(
+        db_session, client=fake_client, gmt_modified_from="2026-09-28 20:00:00"
+    )
+    state["package"] = {
+        "opOrderPackageId": "TEST_PACKAGE_1",
+        "orderInfo": {
+            "platformOrderSn": "TEST_PACKAGE_ORDER",
+            "gmtOrderModified": "2026-09-28 20:10:00",
+        },
+        "items": None,
+        "giftItems": {"bad": "shape"},
+    }
+    result = sync_packages(
+        db_session, client=fake_client, gmt_modified_from="2026-09-28 20:00:00"
+    )
+    db_session.commit()
+
+    assert result["issues"] == 2
+    package_row = db_session.execute(
+        select(MiaoshouPackage).where(
+            MiaoshouPackage.external_package_id == "TEST_PACKAGE_1"
+        )
+    ).scalar_one()
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(MiaoshouPackageItem)
+            .where(MiaoshouPackageItem.package_id == package_row.id)
+            .where(MiaoshouPackageItem.active.is_(True))
+        )
+        == 1
+    )
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(MiaoshouPackageGiftItem)
+            .where(MiaoshouPackageGiftItem.package_id == package_row.id)
+            .where(MiaoshouPackageGiftItem.active.is_(True))
+        )
+        == 1
+    )
+    issues = (
+        db_session.execute(
+            select(MiaoshouSyncIssue).where(
+                MiaoshouSyncIssue.credential_id == miaoshou_credentials_row.id,
+                MiaoshouSyncIssue.resolved_at.is_(None),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert {issue.issue_type for issue in issues} == {
+        "PACKAGE_ITEMS_INVALID",
+        "PACKAGE_GIFTS_INVALID",
+    }
+    assert {issue.external_id for issue in issues} == {"TEST_PACKAGE_1"}
+
+
 def test_explicit_empty_children_soft_remove_previous_rows(
     db_session, fake_client, miaoshou_credentials_row
 ) -> None:

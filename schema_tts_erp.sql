@@ -697,7 +697,7 @@ ALTER TABLE miaoshou.package_items ALTER COLUMN id ADD GENERATED ALWAYS AS IDENT
 
 CREATE TABLE IF NOT EXISTS miaoshou.package_raw_records (
     id bigint NOT NULL,
-    credential_id bigint NOT NULL,
+    credential_id bigint,
     external_package_id text,
     endpoint text NOT NULL,
     payload jsonb NOT NULL,
@@ -3263,7 +3263,7 @@ ALTER TABLE ONLY miaoshou.package_items
 -- Name: package_raw_records package_raw_records_credential_id_fkey; Type: FK CONSTRAINT; Schema: miaoshou; Owner: -
 
 ALTER TABLE ONLY miaoshou.package_raw_records
-    ADD CONSTRAINT package_raw_records_credential_id_fkey FOREIGN KEY (credential_id) REFERENCES integration.credentials(id) ON DELETE CASCADE;
+    ADD CONSTRAINT package_raw_records_credential_id_fkey FOREIGN KEY (credential_id) REFERENCES integration.credentials(id) ON DELETE SET NULL;
 
 
 -- Name: packages packages_credential_id_fkey; Type: FK CONSTRAINT; Schema: miaoshou; Owner: -
@@ -3414,5 +3414,6 @@ ALTER TABLE ONLY reporting.shipment_tracking_summary
 
 ALTER TABLE ONLY reporting.shop_fee_rate_estimates
     ADD CONSTRAINT shop_fee_rate_estimates_shop_pk_fkey FOREIGN KEY (shop_pk) REFERENCES commerce.shops(id) ON DELETE CASCADE;
+
 
 -- PostgreSQL database dump complete

@@ -191,8 +191,8 @@ JOBS: dict[str, JobSpec] = {
         is_tiktok=False,
         entrypoint="sync_purchase_orders",
     ),
-    # 妙手包裹列表按 gmtModified watermark 增量拉取，归一化到
-    # fulfillment.shipments / shipment_lines；包裹详情 endpoint 作为单包修复入口。
+    # 妙手包裹列表按 gmtModified watermark 增量拉取，source-owned 数据只写
+    # miaoshou.*；包裹详情 endpoint 作为单包修复入口。
     "miaoshou.packages": JobSpec(
         job_name="miaoshou.packages",
         module_path="tts_erp_v2.jobs.miaoshou.packages",

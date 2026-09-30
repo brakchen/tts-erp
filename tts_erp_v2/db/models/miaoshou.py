@@ -45,10 +45,9 @@ class MiaoshouPackageRawRecord(Base):
         primary_key=True,
         server_default=text("generate_always_as_identity()"),
     )
-    credential_id: Mapped[int] = mapped_column(
+    credential_id: Mapped[int | None] = mapped_column(
         BigInteger,
-        ForeignKey("integration.credentials.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("integration.credentials.id", ondelete="SET NULL"),
     )
     external_package_id: Mapped[str | None] = mapped_column(Text)
     endpoint: Mapped[str] = mapped_column(Text, nullable=False)
