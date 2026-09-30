@@ -73,16 +73,18 @@ cred = load_credentials(session, provider="tiktok", external_account_id=shop_id)
 
 | Task | Command |
 | --- | --- |
-| Fast test suite | `bash scripts/test.sh fast` |
-| One test domain | `bash scripts/test.sh <domain>` |
-| Unit layer | `bash scripts/test.sh unit` |
+| Fast test suite (isolated DB) | `bash scripts/test_isolated.sh fast` |
+| One test domain (isolated DB) | `bash scripts/test_isolated.sh <domain>` |
+| Unit layer (isolated DB) | `bash scripts/test_isolated.sh unit` |
+| Refresh isolated test template | `bash scripts/test_isolated.sh --refresh-template fast` |
 | API restart | `bash restart.sh` |
 | Sync-worker restart after `tts_erp_v2/jobs/` or `tts_erp_v2/sync_worker/` changes | `systemctl --user restart tts-erp-sync.service` |
 | Service status | `systemctl --user status tts-erp{,-sync}.service` |
 | API logs | `journalctl --user -u tts-erp -n 50` |
 
-- `scripts/test.sh` sources `.env.test` and targets the dedicated `tts_erp_v3_test` database.
-- Serialize shared-DB test runs with `flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast`.
+- `scripts/test_isolated.sh` is the default agent entry point: it clones `tts_erp_test_template` into a per-session ephemeral DB, sets `TTS_ERP_DB_URL_TEST`, delegates to `scripts/test.sh`, then drops the clone.
+- Refresh the template with `bash scripts/test_isolated.sh --refresh-template fast` when migrations/schema change or the template is missing/stale.
+- `scripts/test.sh` still sources `.env.test` and targets shared `tts_erp_v3_test`; use it only for explicitly shared-DB runs, serialized with `flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast`.
 - Full command reference: `tech-doc/commands-reference.md`.
 
 ## 6. Code conventions

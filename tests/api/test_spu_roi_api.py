@@ -4226,16 +4226,26 @@ def test_spu_roi_page_no_old_columns(api_client, readonly_key):
 
 def _seed_synced_source_price(sess, *, spu_id: str, cost: str) -> None:
     """插入一条应被 SPU ROI 忽略的妙手/1688 同步货源价。"""
-    # 借一个现有账户（“North Nook”= id 2288,对应测试 shop TEST_SELLER_A）
+    account_id = sess.execute(
+        text(
+            "INSERT INTO procurement.procurement_accounts ("
+            " provider, external_account_id, account_name, status"
+            ") VALUES ('miaoshou', 'TEST_ROI_SOURCE_PRICE',"
+            " 'TEST ROI source price', 'active') "
+            "ON CONFLICT (provider, external_account_id) DO UPDATE SET "
+            " account_name = EXCLUDED.account_name "
+            "RETURNING id"
+        )
+    ).scalar_one()
     sess.execute(
         text(
             "INSERT INTO procurement.procurement_products ("
             " procurement_account_id, external_product_id, product_type, title,"
             " source_platform, source_unit_cost, synced_at"
-            ") VALUES (2288, :ext, 'SPU', 'TEST 货源价', '1688',"
+            ") VALUES (:account_id, :ext, 'SPU', 'TEST 货源价', '1688',"
             " CAST(:cost AS numeric), now())"
         ),
-        {"ext": spu_id, "cost": cost},
+        {"account_id": account_id, "ext": spu_id, "cost": cost},
     )
 
 

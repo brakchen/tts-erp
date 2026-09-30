@@ -6,15 +6,20 @@
 ## 1. 测试命令
 
 ```bash
-# 日常全量测试（唯一入口；自动 source .env.test 切到 tts_erp_v3_test；migration 域已归档勿跑）
-bash scripts/test.sh fast
+# 日常全量测试（默认入口；每个 session 克隆独立临时测试库，避免并发互删 TEST_ 行）
+bash scripts/test_isolated.sh fast
 
-# 跳过 .env.test source（仅迁移/手动调试用；默认禁走）
+# 单域/单文件/单测试仍走 isolated wrapper，参数透传给 scripts/test.sh
+bash scripts/test_isolated.sh api tests/api/test_auth_login.py::test_login_sets_cookie
+
+# schema/migration 改动后刷新模板库，再跑验证
+bash scripts/test_isolated.sh --refresh-template fast
+
+# 共享库兜底：只在明确需要 tts_erp_v3_test 时使用，必须串行化
+flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast
+
+# 跳过 .env.test source（仅人工迁移/手动调试用；agent 默认禁走）
 TTS_ERP_TEST_OFF=1 bash scripts/test.sh fast
-
-# 单域测试（如 tests/miaoshou/、tests/jobs_tiktok/）
-# worktree 内无 .venv，改用 /home/schan/tts-erp/.venv/bin/pytest（见 §11）
-.venv/bin/pytest tests/<domain>/ -q
 ```
 
 ## 2. 数据导入
@@ -103,10 +108,12 @@ MIAOSHOU_DEBUG_SIGN=1
 
 - **TDD**：先写测试再实现
 - **共享 fixtures**：在 `tests/conftest.py`（事务回滚隔离、`TEST_%` 哨兵数据）
-- **测试环境隔离（2026-09-07）**：所有测试默认连 `tts_erp_v3_test`（专用 test db，已 schema 一致）
-  - `bash scripts/test.sh` 自动 source `.env.test`（gitignored）切到 test db
+- **测试环境隔离（2026-09-30）**：agent 默认跑 `bash scripts/test_isolated.sh ...`
+  - 模板库：`tts_erp_test_template`；临时库：每次克隆一个 `tts_erp_test_*`，命令结束自动 drop
+  - `bash scripts/test_isolated.sh --refresh-template fast` 会重建模板：prod schema 只读导入 → stamp prod alembic revision → upgrade 到当前 worktree head；如果 prod revision 不在当前 worktree，会警告并保留导入 schema
+  - `bash scripts/test.sh` 仍自动 source `.env.test`，但它直连共享 `tts_erp_v3_test`，并发时必须用 `flock -n /tmp/tts-erp-test.lock ...`
   - prod API service / `uvicorn` 本地启动仍读 `.env` 连 prod `tts_erp`，**零变更**
-  - 安全护栏：tests/conftest.py 检测到 `TTS_ERP_DB_URL` 指向 prod-shape dbname（`tts_erp` / `tts_erp_prod`）会往 stderr 打 WARNING
+  - 安全护栏：tests/conftest.py 检测到 pytest 将指向 prod-shape dbname（`tts_erp` / `tts_erp_prod`）会 hard exit
   - scripts/test.sh 会在 .env.test 缺失时直接退出
-  - 需要 prod-shaped 数据时运行 `bash scripts/import_prod_to_test.sh --yes`
+  - 需要 prod-shaped 数据时只导入到测试库：`bash scripts/import_prod_to_test.sh --yes`
 - **收尾标准**：跑不过 0 fail 不收尾
