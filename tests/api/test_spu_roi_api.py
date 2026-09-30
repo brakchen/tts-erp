@@ -3315,9 +3315,10 @@ def test_spu_roi_js_review_fixes_present():
     assert "bindRowAccordion" in src
     assert "fetchDrillTab" in src
     assert "tpl-drilldown-panel" in src
-    # A2:页面 JS 显式传 sort=net_profit&order=asc
+    # 排序字段来自表头 data-sort，公共 kernel 不复制具体字段白名单。
     assert "DEFAULT_SORT" in src
-    assert '"net_profit"' in src
+    assert "supportsSortField" in src
+    assert 'header.getAttribute("data-sort")' in src
     assert '"asc"' in src
     # finding 2:结余带直接消费 totals.roi_real,页面不反推 ROI
     assert "totals.roi_real" in src
