@@ -265,6 +265,24 @@ curl -sS -H "X-API-Key: $TTS_ERP_RO_KEY" \
   "http://127.0.0.1:9877/v2/sync/status"
 ```
 
+### Runtime configuration (`/v2/config/runtime/*`)
+
+Versioned JSON configuration with draft/publish/rollback and encrypted
+`secret://` references. Full lifecycle and resolver contract:
+[`runtime-config-management.md`](runtime-config-management.md).
+
+| Endpoint | Role | Notes |
+| --- | --- | --- |
+| `GET /v2/config/runtime/items` | readonly | Published-state list only; never returns drafts or secret values. |
+| `POST /v2/config/runtime/items` | readwrite | Creates a key, immutable JSON Schema and optional initial draft. |
+| `GET /v2/config/runtime/items/{config_key}` | readwrite | Editor detail including draft and published reference payloads. |
+| `PUT /v2/config/runtime/items/{config_key}/draft` | readwrite | Optimistic draft save; body contains `expectedDraftVersion`, `payload`, `rollout`. |
+| `POST /v2/config/runtime/items/{config_key}/publish` | readwrite | Publishes the current draft as a higher immutable version. |
+| `GET /v2/config/runtime/items/{config_key}/revisions` | readwrite | Revision history. |
+| `POST /v2/config/runtime/items/{config_key}/rollback` | readwrite | Republishes a historical revision as a higher version. |
+| `GET /v2/config/runtime/snapshot` | readonly | Published, rollout-selected values with ETag; secret references stay redacted. |
+| `GET /v2/config/runtime/secrets`, `PUT /v2/config/runtime/secrets/{name}` | readwrite | Fingerprint/reference metadata and encrypted write only; no secret plaintext read endpoint. |
+
 ### Pages
 
 | Endpoint | Role | Notes |
@@ -273,6 +291,7 @@ curl -sS -H "X-API-Key: $TTS_ERP_RO_KEY" \
 | `GET /v2/pages/spu-roi` | readonly | SPU 实际 ROI 看板。与重点关注页共享 `/static/js/spu-profitability-page.js` kernel；`/static/js/spu-roi.js` 只定义标准 PageProfile。 |
 | `GET /v2/pages/focused-spus` | readonly | 重点关注 SPU。使用相同盈利汇总、表格、分页和钻取；`/static/js/focused-spus.js` 提供持久 selection adapter 与编辑器。 |
 | `GET /v2/pages/shops` | readonly | 店铺注册台。人工注册插件同步店铺（`commerce.shops` 补登记）；写入走 `POST /v2/admin/shops/register`（含 App Key/Secret 均 readwrite）；行内元信息编辑走 `PATCH /v2/admin/shops/{shop_pk}`；App pair 按 service_id 加密保存；「获取授权链接」按钮走 `GET /v2/oauth/tiktok/authorize?format=json`（readwrite）。 |
+| `GET /v2/pages/runtime-configs` | readonly | 运行配置台：readwrite 会话可创建草稿、发布/恢复版本、管理灰度规则及加密 secret 引用。 |
 
 ### Admin (`/v2/admin/*`, handler-enforced roles)
 

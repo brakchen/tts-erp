@@ -6,7 +6,20 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Index, String, UniqueConstraint
+from datetime import datetime
+
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from tts_erp_v2.db.base import Base
@@ -31,3 +44,66 @@ class EnumMap(Base):
     enum_value: Mapped[str] = mapped_column(String(128), nullable=False)
     label_zh: Mapped[str] = mapped_column(String(256), nullable=False)
     sort_order: Mapped[int] = mapped_column(default=0, server_default="0")
+
+
+class RuntimeConfigItem(Base):
+    """One versioned runtime configuration key and its mutable draft."""
+
+    __tablename__ = "runtime_config_items"
+    __table_args__ = ({"schema": "config"},)
+
+    config_key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    display_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    json_schema: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    draft_payload: Mapped[dict | None] = mapped_column(JSONB)
+    draft_rollout: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    draft_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    published_version: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class RuntimeConfigRevision(Base):
+    """Immutable published payload for a runtime configuration key."""
+
+    __tablename__ = "runtime_config_revisions"
+    __table_args__ = (
+        UniqueConstraint("config_key", "version", name="uq_runtime_config_revision"),
+        Index("ix_runtime_config_revisions_key_version", "config_key", "version"),
+        {"schema": "config"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    config_key: Mapped[str] = mapped_column(
+        ForeignKey("config.runtime_config_items.config_key", ondelete="CASCADE"),
+        nullable=False,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    rollout: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    comment: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class RuntimeConfigSecret(Base):
+    """Encrypted generic secret referenced by ``secret://<name>`` values."""
+
+    __tablename__ = "runtime_config_secrets"
+    __table_args__ = ({"schema": "config"},)
+
+    name: Mapped[str] = mapped_column(String(128), primary_key=True)
+    encrypted_value: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
