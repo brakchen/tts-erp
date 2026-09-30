@@ -24,6 +24,7 @@ from tts_erp_v2.api.v2.pages import (
     _sidebar_html,
     dashboard_page,
     enum_map_page,
+    runtime_configs_page,
 )
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
@@ -109,15 +110,32 @@ def test_dashboard_consumes_backend_owned_summary_fields():
     assert "value: shopTotal" in src
 
 
-def test_dashboard_marks_runtime_config_entry_as_coming_soon():
-    """Do not link to runtime config until its page exists."""
+def test_dashboard_links_to_runtime_config_console():
     body = bytes(dashboard_page().body).decode()
 
-    assert 'class="nav-card nav-card--coming-soon"' in body
-    assert 'aria-label="运行配置，即将上线"' in body
+    assert 'href="../../v2/pages/runtime-configs"' in body
     assert "配置下发、灰度控制与凭证管理" in body
-    assert "即将上线" in body
-    assert 'href="../../v2/pages/runtime-configs"' not in body
+    assert "即将上线" not in body
+
+
+def test_runtime_config_page_links_its_owned_assets():
+    body = bytes(runtime_configs_page().body).decode()
+
+    assert "运行配置" in body
+    assert "../../static/css/runtime-configs.css?v=" in body
+    assert "../../static/js/runtime-configs.js?v=" in body
+    assert 'href="../../v2/pages/runtime-configs"' in body
+
+
+def test_runtime_config_page_returns_html_to_readonly_operator(api_client, readonly_key):
+    response = api_client.get(
+        "/v2/pages/runtime-configs",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("text/html")
+    assert "运行配置" in response.text
 
 
 def test_manual_costs_page_returns_200_with_html(api_client, readonly_key):

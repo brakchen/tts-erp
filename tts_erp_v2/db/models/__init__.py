@@ -20,7 +20,12 @@ from tts_erp_v2.db.models.commerce import (
     SalesOrder,
     SalesOrderLine,
 )
-from tts_erp_v2.db.models.config import EnumMap
+from tts_erp_v2.db.models.config import (
+    EnumMap,
+    RuntimeConfigItem,
+    RuntimeConfigRevision,
+    RuntimeConfigSecret,
+)
 from tts_erp_v2.db.models.finance import (
     Payout,
     SettlementComponent,
@@ -134,6 +139,9 @@ __all__ = [
     "ProductCostSnapshot",
     "ProductProfitDaily",
     "RawRecord",
+    "RuntimeConfigItem",
+    "RuntimeConfigRevision",
+    "RuntimeConfigSecret",
     "SalesOrder",
     "SalesOrderLine",
     "SettlementComponent",
