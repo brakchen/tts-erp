@@ -126,9 +126,10 @@ def test_migration_relocates_history_and_preserves_partial_snapshots(db_engine) 
     with db_engine.connect() as conn:
         transaction = conn.begin()
         try:
-            assert (
-                conn.execute(text("select current_database()")).scalar_one()
-                == "tts_erp_v3_test"
+            current_db = conn.execute(text("select current_database()")).scalar_one()
+            assert current_db == "tts_erp_v3_test" or (
+                current_db.startswith("tts_erp_test_")
+                and current_db != "tts_erp_test_template"
             )
             conn.execute(text("DROP SCHEMA miaoshou CASCADE"))
             credential_id = conn.execute(
