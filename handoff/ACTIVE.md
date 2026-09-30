@@ -16,5 +16,4 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| dashboard-runtime-config-entry | Dashboard 运行配置入口 | 01a0f13c-c315-760e-b7c9-6ac80761f9dc | `feature/dashboard-runtime-config-entry` / `.worktrees/dashboard-runtime-config-entry` | `tts_erp_v2/api/v2/pages.py`; `tests/api/test_pages.py` | ready | `07712908c927c693ae5b7b903bcdb648a0d5fae2` | `11c8a13cb8e302c0d9dc2c3f40df5f57502a0ebc` | 2026-09-30 18:17:53 |
 | spu-roi-delivered-exposure | 排除已送达未结算订单的全损预测暴露 | 01a0f0c0-2b88-760e-b7c9-6ac0585d1cdb | `fix/spu-roi-delivered-exposure` / `.worktrees/spu-roi-delivered-exposure` | `tts_erp_v2/analytics/spu_profitability/_formula_v10.py`; `tts_erp_v2/analytics/spu_profitability/_implementation.py`; `tts_erp_v2/analytics/spu_profitability/_types.py`; `tts_erp_v2/analytics/spu_roi.py`; `tests/analytics/test_spu_profitability_formula.py`; `tests/api/test_spu_roi_api.py`; `biz-doc/analytics/spu-roi-profit-calculation.md`; `tech-doc/analytics/roi-calc-prompt.md` | active | — | — | 2026-09-30 17:53:12 |
