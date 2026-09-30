@@ -34,7 +34,7 @@
 ### 4.1 页面入口
 
 - 页面：`GET /v2/pages/focused-spus`
-- 侧边栏：运营分组下新增「重点关注」
+- 侧边栏：运营分组下新增「重点关注 SPU」
 - 页面标题：`重点关注 SPU`
 - 页面整体继续使用现有 SPU ROI 的 warm-paper 账页视觉、Bootstrap 布局和相同数据表，不创建另一套视觉语言。
 
@@ -46,41 +46,31 @@
 ├─────────────────────────────────────────────────────────────┤
 │ 同 SPU ROI 页的汇总卡：总单量 / 广告 / 销售 / 退款 / 利润… │
 ├─────────────────────────────────────────────────────────────┤
-│ 已关注 12 个 SPU                       [编辑关注 SPU]        │
+│ 重点关注 SPU [多选：搜索 ID/标题或批量粘贴]                 │
+│ 已关注 12 个 · 修改会实时保存                               │
 │ 日期范围 / 临时费率 / 含无活动 / 刷新 / 排序状态            │
 ├─────────────────────────────────────────────────────────────┤
 │ 同 SPU ROI 页主表与行内钻取面板                             │
 ├─────────────────────────────────────────────────────────────┤
 │ 同 SPU ROI 页分页                                           │
 └─────────────────────────────────────────────────────────────┘
-
-点击“编辑关注 SPU”：
-┌─────────────────────────────────────────────────────────────┐
-│ 编辑 Bridge nook 的重点关注 SPU                             │
-│ [输入精确 ID / 搜索标题 / 批量粘贴]              [加入草稿] │
-│ 当前关注（可搜索、分页）                                    │
-│ 1729…  商品 A  ACTIVATE                              [移除] │
-│ 1730…  商品 B  ACTIVATE                              [移除] │
-│ 待新增 2 个 · 待移除 1 个                 [取消] [保存修改] │
-└─────────────────────────────────────────────────────────────┘
 ```
 
 ### 4.3 编辑行为
 
-1. 必须先选择店铺；未选店铺时禁用编辑按钮。
-2. 新增区复用现有 `channel-product-options` 搜索能力：
+1. 必须先选择店铺；未选店铺时禁用多选框。
+2. 页面内直接展示 Tom Select 多选框，复用 `channel-product-options`：
    - 输入 SPU ID 或标题搜索；
-   - 支持中英文逗号批量粘贴；
-   - 精确校验 SPU 必须属于当前店铺。
-3. 每店关注总数不设业务上限；关注列表使用服务端搜索和分页，不把所有关注项一次塞进 Tom Select 或 URL。
-4. 打开编辑器时加载当前关注列表；新增与移除先进入差量草稿，点击「取消」不写库。
-5. 点击「保存修改」时提交 wire 字段 `addSpuIds` / `removeSpuIds`；单次请求可以限制批量大小，但该限制不是店铺关注总数上限。
-6. 保存成功后关闭编辑器、刷新关注计数，再以服务端 focused scope 请求 SPU ROI 数据。
-7. 保存失败时保留草稿，明确显示失败原因，不静默关闭。
+   - 支持中英文逗号、空格和换行批量粘贴；
+   - 前端解析后精确校验 SPU 必须属于当前店铺。
+3. 切换店铺时按 500 条一页读取完整关注集合并恢复多选值；关注总数不设业务上限，也不写入 URL。
+4. 用户选择一个 SPU 后立即发送 `PATCH {addSpuIds:[...]}`；移除 tag 后立即发送 `PATCH {removeSpuIds:[...]}`，不再经过“编辑 → 草稿 → 保存”二步交互。
+5. 快速连续增删通过前端 mutation queue 串行提交；批量粘贴最多每批 500 个 ID，与服务端单次 PATCH 上限一致。
+6. 每次保存成功后更新关注计数并刷新 focused ROI；失败时回滚对应 tag，并保留明确错误提示。
 
 ### 4.4 空状态与过滤状态
 
-- 当前店铺没有关注 SPU：不请求无范围的 ROI API，避免误展示整店数据；页面显示「尚未关注 SPU」和「添加关注 SPU」按钮。
+- 当前店铺没有关注 SPU：仍请求安全的 `scope=focused`（后端返回空 overview），因此汇总大盘、筛选器、主表、分页和钻取 shell 与普通 SPU ROI 页保持一致；汇总显示 0/—，表格提示在上方多选框添加 SPU，绝不回退整店范围。
 - 已关注但当前日期窗口没有活动：保留现有「含无活动」控制；重点关注页默认勾选，尽量让已关注的 ACTIVE SPU 可见。
 - 已关注数量与当前表格命中数量分开展示，例如：`已关注 12 个 · 当前窗口展示 9 个`。
 - 非 ACTIVE 且当前窗口无活动的 SPU 可能不进入 ROI 结果；编辑器仍显示其状态，页面给出未展示数量提示。
@@ -326,9 +316,9 @@ AdHocSelectionAdapter
   mountEditor           绑定现有 Tom Select / 查询 / 清空 / URL 同步
 
 FocusedSelectionAdapter
-  load                  GET limit=1 读取关注总数；总数 0 时 queryable=false
+  load                  分页读取完整关注集合并恢复 Tom Select；空集合仍 queryable=true
   analyticsParams       固定返回 {scope: "focused"}
-  mountEditor           绑定分页列表、搜索、新增、移除、草稿和 PATCH
+  mountEditor           绑定页面内多选、批量粘贴和增删实时 PATCH mutation queue
 ```
 
 adapter 只能决定“范围从哪里来、如何编辑、怎样翻译成 selection query”。公共 module 始终自行加入 `shop_pk`、日期、费率、include-all、排序和分页，并拒绝 adapter 覆盖这些公共键。adapter 不能访问汇总卡、主表、分页和钻取 DOM，也不参与盈利计算。
@@ -386,11 +376,11 @@ BOOTING → AWAITING_SHOP → RESOLVING_SELECTION
 错误契约：
 
 - selection 加载失败：显示可重试错误，绝不回退整店 scope；
-- focused 空集合：显示 CTA，零 analytics 请求；
+- focused 空集合：仍请求 `scope=focused` 空 overview，以保留和普通 ROI 页一致的汇总大盘与页面结构；
 - 401：按配置的 `pagePath` 回到正确页面登录，不再硬编码 `/spu-roi`；
 - FX 失败：沿用公共整页错误；
 - drilldown 失败：只在面板内显示，不覆盖主表；
-- PATCH 失败：adapter 保留草稿和编辑器；成功后刷新关注计数、重置 analytics offset 并 reload。
+- 实时 PATCH 失败：adapter 回滚对应多选 tag 并显示错误；成功后刷新关注计数、重置 analytics offset 并 reload。
 
 这些内容被抽走后，修复一处表格、钻取、分页或错误处理，两页同时生效。
 
@@ -421,7 +411,7 @@ class SpuProfitabilityPageConfig:
 CSS 分两层：
 
 - `spu-roi.css`（后续可更名为 `spu-profitability.css`）：公共账页 token、汇总卡、工具栏、主表、钻取、分页、tooltip、lightbox、响应式。
-- `focused-spus.css`：仅关注编辑器、关注计数和重点关注空状态。
+- `focused-spus.css`：仅页面内实时多选、关注计数和保存状态。
 
 页面专属规则统一挂在 `[data-page-profile="focused-spus"]` 下，不能通过高 specificity 覆盖公共表格/钻取基础规则。若某页确实需要不同表格表现，应先形成 view/profile 差异，再增加受控 modifier，避免 CSS 漂移成两份隐式实现。
 
@@ -563,22 +553,21 @@ X-Requested-With: tts-erp
    ├─ GET /v2/reporting/focused-spus/{shop_pk}
    │       └─ reporting.focused_spus JOIN commerce.products_spu
    │
-   ├─ 空集合 ──> 渲染空状态，不调用 ROI API
-   │
-   └─ 非空集合
+   └─ 无论集合是否为空
            └─ GET /v2/analytics/spu-roi?shop_pk=...&scope=focused
+                  ├─ 空集合返回 totals=0/items=[]，完整大盘 shell 保留
                   ├─ FocusedSelection 在 DB 内解析完整关注范围
                   ├─ 现有 spu_profitability 计算模块
                   ├─ totals / meta / items
                   └─ 公共 spu-profitability-page.js 渲染
 
-编辑并保存
+页面内多选实时增删
    │
-   └─ PATCH /v2/reporting/focused-spus/{shop_pk}
+   └─ mutation queue 串行 PATCH /v2/reporting/focused-spus/{shop_pk}
           ├─ 校验店铺与 SPU 归属
           ├─ 同事务软移除 + 新增/恢复
-          ├─ 返回有界 mutation receipt
-          └─ 重读当前管理页/计数，再刷新 ROI
+          ├─ 返回有界 mutation receipt，前端更新计数
+          └─ 成功刷新 ROI；失败回滚对应 tag
 ```
 
 ## 8. 代码改动面
@@ -600,7 +589,7 @@ X-Requested-With: tts-erp
 | `tts_erp_v2/static/js/spu-roi.js` | 收敛为 AdHoc selection adapter + bootstrap |
 | `tts_erp_v2/static/js/focused-spus.js` | Focused selection adapter + bootstrap |
 | `tts_erp_v2/static/css/spu-roi.css` | 保留公共盈利账页视觉 |
-| `tts_erp_v2/static/css/focused-spus.css` | 仅关注编辑器、关注计数和空状态 |
+| `tts_erp_v2/static/css/focused-spus.css` | 仅页面内实时多选、关注计数和保存状态 |
 | `tests/reporting/test_focused_spus.py` | 通过关注集合 module interface 测分页、搜索、原子 patch、软移除和恢复 |
 | `tests/api/test_spu_roi_api.py` | 通过盈利 module interface 验证 Focused/Exact 等价与空集合；同时覆盖新页面 shell 和现有端点兼容回归 |
 | `tests/api/test_focused_spus.py` | wire、权限、camelCase、错误映射、CSRF 与 profile/kernel 契约 |
@@ -649,7 +638,7 @@ X-Requested-With: tts-erp
 ### 9.4 页面与浏览器 mount interface
 
 1. 两页使用同一公共 shell、公共 JS module 和公共 CSS；只在 title、selection slot、entry script、focused CSS 与 defaults 上不同。
-2. Focused adapter 先拉关注计数；空集合产生零 analytics 请求。
+2. Focused adapter 分页恢复完整关注多选值；空集合仍发送安全的 focused analytics 请求并渲染完整大盘。
 3. Focused analytics 只发送 `shop_pk + scope=focused`，不拼完整 ID 列表。
 4. 店铺切换 abort 旧 selection/overview/drilldown；旧响应不能渲染。
 5. 401 使用配置的 `pagePath`；FX、网络、畸形 payload 和重试生命周期两页一致。
