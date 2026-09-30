@@ -71,6 +71,23 @@ class FormulaStatus(StrEnum):
     ESTIMATED_KNOWN_COSTS = "estimated_known_costs"
 
 
+REFUND_RATE_ALERT_THRESHOLD = Decimal("0.30")
+
+
+def _profit_status(net_profit: Decimal) -> str:
+    if net_profit < 0:
+        return "loss"
+    if net_profit > 0:
+        return "profit"
+    return "break_even"
+
+
+def _roi_status(roi_real: Decimal | None) -> str:
+    if roi_real is None:
+        return "unavailable"
+    return "negative" if roi_real < 0 else "non_negative"
+
+
 @dataclass(frozen=True, slots=True)
 class ActivitySelection:
     """The ordinary catalog/activity scope."""
@@ -305,6 +322,29 @@ class SpuProfitability:
     fee_rate_used: Decimal
     fee_source: str
 
+    @property
+    def profit_status(self) -> str:
+        return _profit_status(self.net_profit)
+
+    @property
+    def roi_status(self) -> str:
+        return _roi_status(self.roi_real)
+
+    @property
+    def has_unsettled_orders(self) -> bool:
+        return self.settled_order_count < self.order_count
+
+    @property
+    def uses_default_unit_cost(self) -> bool:
+        return self.cost_source == "DEFAULT_K1"
+
+    @property
+    def refund_rate_alert(self) -> bool:
+        return (
+            self.refund_rate is not None
+            and self.refund_rate > REFUND_RATE_ALERT_THRESHOLD
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class ProfitabilityTotals:
@@ -336,6 +376,14 @@ class ProfitabilityTotals:
     ad_system_max_ad_spend: Decimal
     ad_system_remaining_ad_spend_capacity: Decimal
     ad_system_breakeven_roi_status: FormulaStatus
+
+    @property
+    def profit_status(self) -> str:
+        return _profit_status(self.net_profit)
+
+    @property
+    def roi_status(self) -> str:
+        return _roi_status(self.roi_real)
 
 
 @dataclass(frozen=True, slots=True)

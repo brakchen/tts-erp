@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from tts_erp_v2.analytics.spu_profitability import _implementation
 from tts_erp_v2.analytics.spu_profitability._snapshot import consistent_read_snapshot
 from tts_erp_v2.analytics.spu_profitability._types import (
+    REFUND_RATE_ALERT_THRESHOLD,
     ActivitySelection,
     EvidenceKind,
     EvidenceRequest,
@@ -55,6 +56,7 @@ __all__ = [
     "FxRateUnavailable",
     "ProfitScope",
     "ProfitabilityBasis",
+    "REFUND_RATE_ALERT_THRESHOLD",
     "ProfitabilityError",
     "ProfitabilityEvidence",
     "ProfitabilityOverview",

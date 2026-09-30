@@ -262,6 +262,24 @@ def test_manual_costs_page_v2_self_hosted_font_hint(api_client, readonly_key):
     assert "fonts.gstatic.com" not in body, "Google Fonts CDN leak"
 
 
+def test_console_search_is_server_side():
+    """Search must be part of API scope before pagination, never a DOM filter."""
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "console.js"
+    ).read_text(encoding="utf-8")
+
+    assert '"&q=" + encodeURIComponent(searchQuery)' in src
+    assert "setTimeout(refreshActiveTab, 250)" in src
+    assert "function applyFilter()" not in src
+    assert "tr.style.display" not in src
+
+
 def test_console_js_unwraps_api_envelope():
     """Regression guard for the '(items || []).filter is not a function' crash.
 

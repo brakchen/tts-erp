@@ -159,6 +159,8 @@ $$
 
 同一套公式同时适用于 `GET /v2/analytics/spu-roi` 的每个 `items[]` SPU 明细和 `totals` 盈利大盘。前端只做格式化展示：
 
+- `profit_status`、`roi_status`、`has_unsettled_orders`、`uses_default_unit_cost`、`refund_rate_alert` 由后端按当前口径和阈值直接返回；前端不得从金额、单量或比率重新推导；
+- 退款警戒阈值、盈利版本和 P&L 说明由 `meta.presentation` 返回，禁止在页面脚本复制 `0.308`、版本号或公式文本；
 - 单 SPU 范围内，行级的有效销售、有效单量、退款数/率、全损量/率、取消量/率必须与大盘相等；
 - 多 SPU 范围内，金额可以按行加总；订单可能包含多个 SPU，因此大盘订单数与三个率必须在整体范围内按订单全局去重，不能简单累加 SPU 行；
 - 旧金额退款率与件数全损率只作为解释字段 `refund_amount_rate` / `full_loss_qty_rate` 保留，不得用于主表或冒充大盘三率。

@@ -15,6 +15,8 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy import text
 
+from tts_erp_v2.api.v2.intercept import _distribution_payload
+
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
 SELLER = "TEST_seller-sync"
@@ -491,6 +493,35 @@ def test_get_requests_stats(api_client, readwrite_key):
     assert "whitelisted" in data
     assert "byHost" in data
     assert "byMethod" in data
+    assert data["by_host"][0]["label"]
+    assert data["by_host"][0]["percentage"] == "100.0"
+
+
+def test_distribution_percentage_uses_full_backend_denominator():
+    """Top-N buckets must use the full request count, not the visible sum."""
+    payload = _distribution_payload(
+        [("top.example", 40), ("second.example", 10)],
+        key="host",
+        denominator=100,
+    )
+    assert [item["percentage"] for item in payload] == ["40.0", "10.0"]
+
+
+def test_intercept_stats_frontend_only_renders_backend_percentages():
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "intercept-stats.js"
+    ).read_text(encoding="utf-8")
+
+    assert "item.percentage" in src
+    assert "normalizeDistribution" not in src
+    assert ".reduce(" not in src
+    assert ".sort(" not in src
 
 
 def test_get_requests_stats_empty(api_client, readwrite_key):

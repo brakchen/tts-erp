@@ -56,9 +56,6 @@
     "full_loss_rate",
   ]);
 
-  // §7.2 标色默认阈值(常量,页面 ⚙ 可调预留,不锁死)
-  var REFUND_RATE_ALERT = 0.3; // 退款率警戒线:> 30% → “高退款”标识 + 红字
-
   // Public path prefix: "/tts" behind NGINX, "" on :9877 directly.
   var PREFIX = location.pathname.replace(/\/v2\/pages\/.*$/, "");
   if (!/^\/[a-z0-9/_-]*$/i.test(PREFIX)) PREFIX = "";
@@ -216,6 +213,7 @@
     loadVersion: 0, // 仅最新主表请求可写入页面
     loadController: null,
     selectionQueryable: true,
+    meta: {}, // 后端拥有业务状态、阈值与公式说明；前端只渲染
     enumMap: {}, // 枚举中文化映射,page load 时从 /v2/config/enum-map 获取
   };
   var lastTotal = 0;
@@ -570,31 +568,33 @@
 
   // ---------- 渲染 ----------
   function rowMarkup(it) {
-    var np = parseFloat(it.net_profit);
-    var npNeg = Number.isFinite(np) && np < 0;
-    var isBad = npNeg; // C3: 仅按净利判
-    var warnDefault = it.cost_source === "DEFAULT_K1";
-    var rr = parseFloat(it.refund_rate);
-    var rrHigh = Number.isFinite(rr) && rr > REFUND_RATE_ALERT;
-    var settledCount = Number(it.settled_order_count || 0);
-    var orderCount = Number(it.order_count || 0);
-    var hasUnsettled = settledCount > 0 && settledCount < orderCount;
+    var presentation = state.meta.presentation || {};
+    var isBad = it.profit_status === "loss";
+    var warnDefault = it.uses_default_unit_cost === true;
+    var rrHigh = it.refund_rate_alert === true;
+    var hasUnsettled = it.has_unsettled_orders === true;
     var img = it.main_image_url
       ? `<img class="spu-img" alt="" src="${esc(it.main_image_url)}" data-zoom="${esc(it.main_image_url)}">`
       : '<span class="spu-img-missing" aria-hidden="true">无主图</span>';
     var warnCost =
-      '<span class="warn-default" data-tip="无当前有效的人工标注采购成本，按默认 40 元/件；妙手/1688 同步货源价不参与计算">缺成本</span> ';
+      '<span class="warn-default" data-tip="' +
+      esc(presentation.default_cost_alert_message || "") +
+      '">缺成本</span> ';
     var warnRr = rrHigh
-      ? '<span class="warn-rr" data-tip="退款率超过 30% 警戒线">高退款</span> '
+      ? '<span class="warn-rr" data-tip="' +
+        esc(presentation.refund_rate_alert_message || "") +
+        '">高退款</span> '
       : "";
     var warnUnsettled = hasUnsettled
-      ? '<span class="warn-unsettled" data-tip="含未结算订单，净利为估算">≈</span> '
+      ? '<span class="warn-unsettled" data-tip="' +
+        esc(presentation.unsettled_alert_message || "") +
+        '">≈</span> '
       : "";
     var status =
       it.status === "ACTIVATE" || !it.status
         ? ""
         : `<span class="spu-status is-down">${esc(it.status)}</span>`;
-    var profitClass = npNeg ? ' class="np-red"' : "";
+    var profitClass = isBad ? ' class="np-red"' : "";
     var fmtPctOrDash = (v) =>
       v === null || v === undefined || v === "" ? "—" : fmtPct(v);
     var adSystemBreakevenRoi =
@@ -736,12 +736,9 @@
     estEl.textContent = parts.join(" · ");
     estEl.hidden = parts.length === 0;
 
-    var degraded = (fee.per_shop || []).some((s) => s.source === "baseline");
     var fbEl = $("#fee-card-fallback");
-    fbEl.textContent = degraded
-      ? "⚠ 未使用店铺实测费率：该店在窗口内暂无已结算订单（或快照已过期），按全局基线估算"
-      : "";
-    fbEl.hidden = !degraded;
+    fbEl.textContent = fee.degraded ? fee.fallback_message || "" : "";
+    fbEl.hidden = !fee.degraded;
 
     card.hidden = false;
   }
@@ -827,6 +824,7 @@
     var items = unwrap(payload);
     var totals = payload.totals || {};
     var meta = payload.meta || {};
+    state.meta = meta;
     lastTotal = payload.total || 0;
 
     // 结余带(全部由后端 totals 提供，前端只做格式化，禁止前端计算)
@@ -852,53 +850,19 @@
     $("#sum-cancel-rate").textContent = fmtPct(totals.cancel_rate);
     // 广告消耗(后端)
     $("#sum-spend").textContent = fmtMoney(totals.spend);
-    // 净利润(后端)：金额与 ROI 相邻，负值沿用大盘红色语义
+    // 净利润状态由后端返回，前端只应用视觉 class。
     var netProfitEl = $("#sum-net-profit");
-    var netProfitValue = totals.net_profit;
-    var netProfitNum = parseFloat(netProfitValue);
-    netProfitEl.textContent = fmtMoney(netProfitValue);
-    netProfitEl.classList.toggle(
-      "is-err",
-      netProfitValue !== null &&
-        netProfitValue !== undefined &&
-        netProfitValue !== "" &&
-        Number.isFinite(netProfitNum) &&
-        netProfitNum < 0,
-    );
-    netProfitEl.classList.toggle(
-      "is-ok",
-      Number.isFinite(netProfitNum) && netProfitNum > 0,
-    );
+    netProfitEl.textContent = fmtMoney(totals.net_profit);
+    netProfitEl.classList.toggle("is-err", totals.profit_status === "loss");
+    netProfitEl.classList.toggle("is-ok", totals.profit_status === "profit");
     // 实际ROI(后端计算)
     var roiEl = $("#sum-roi");
     var roiOverall = totals.roi_real;
-    var roiNum = parseFloat(roiOverall);
-    if (
-      roiOverall !== null &&
-      roiOverall !== undefined &&
-      roiOverall !== "" &&
-      Number.isFinite(roiNum)
-    ) {
-      roiEl.textContent = fmtRatio(roiOverall);
-      roiEl.classList.toggle("is-err", roiNum < 0);
-    } else {
-      roiEl.textContent = "—";
-      roiEl.classList.remove("is-err");
-    }
+    roiEl.textContent = fmtRatio(roiOverall);
+    roiEl.classList.toggle("is-err", totals.roi_status === "negative");
     // 实际保本ROI(后端计算)
     var roiBreakevenEl = $("#sum-roi-breakeven");
-    var roiBreakevenVal = totals.roi_breakeven;
-    var roiBreakevenNum = parseFloat(roiBreakevenVal);
-    if (
-      roiBreakevenVal !== null &&
-      roiBreakevenVal !== undefined &&
-      roiBreakevenVal !== "" &&
-      Number.isFinite(roiBreakevenNum)
-    ) {
-      roiBreakevenEl.textContent = fmtRatio(roiBreakevenVal);
-    } else {
-      roiBreakevenEl.textContent = "—";
-    }
+    roiBreakevenEl.textContent = fmtRatio(totals.roi_breakeven);
     // 广告系统实际ROI：广告归因GMV ÷ 广告实际消耗。
     var roiAdActualEl = $("#sum-roi-ad-actual");
     roiAdActualEl.textContent = fmtRatio(totals.ad_system_actual_roi);
@@ -907,21 +871,17 @@
     var roiAdEl = $("#sum-roi-ad");
     var roiAdStatus = totals.ad_system_breakeven_roi_status;
     var roiAdValue = totals.ad_system_breakeven_roi;
-    var roiAdNum = parseFloat(roiAdValue);
-    if (
-      roiAdValue !== null &&
-      roiAdValue !== undefined &&
-      roiAdValue !== "" &&
-      Number.isFinite(roiAdNum)
-    ) {
-      roiAdEl.textContent =
-        (roiAdStatus === "estimated_known_costs" ? "≈" : "") +
-        fmtRatio(roiAdValue);
-    } else {
-      roiAdEl.textContent = "—";
-    }
+    roiAdEl.textContent =
+      roiAdValue === null || roiAdValue === undefined || roiAdValue === ""
+        ? "—"
+        : (roiAdStatus === "estimated_known_costs" ? "≈" : "") +
+          fmtRatio(roiAdValue);
+    var rubricLabel =
+      (meta.presentation && meta.presentation.rubric_label) ||
+      meta.rubric_version ||
+      "";
     $("#sum-stamp").textContent =
-      `全表 ${(meta.currency && meta.currency.display) || "CNY"} · 数据库汇率快照 ${meta.fx ? meta.fx.as_of : ""} · 盈利 v10`;
+      `全表 ${(meta.currency && meta.currency.display) || "CNY"} · 数据库汇率快照 ${meta.fx ? meta.fx.as_of : ""} · ${rubricLabel}`;
 
     // 表格
     if (items.length) {
@@ -966,7 +926,7 @@
     if (typeof meta.unattributed_refund_lines === "number") {
       notes.push(`未归属退款 ${meta.unattributed_refund_lines} 行`);
     }
-    notes.push("默认 40元/件成本(⚠) 行会标注 · 金额已由服务端统一换算 CNY");
+    if (meta.cost_assumption) notes.push(meta.cost_assumption);
     $("#foot-meta").textContent = notes.join(" · ");
 
     // 起始/截止日真实呈现(2026-09-06):数据有可裁剪跨度(销售∪退款覆盖)且
@@ -1092,6 +1052,7 @@
         ),
       );
     }
+    var adSystemMeta = state.meta.ad_system_roi || {};
     var adSystemBreakeven =
       it.ad_system_breakeven_roi == null || it.ad_system_breakeven_roi === ""
         ? "—"
@@ -1120,12 +1081,14 @@
       cell(
         "广告系统实际ROI",
         fmtRatio(it.ad_system_actual_roi),
-        "广告系统实际 ROI = 广告归因 GMV ÷ 广告实际消耗；无广告消耗时显示 —",
+        adSystemMeta.actual_formula,
       ),
       cell(
         "广告系统保本ROI",
         adSystemBreakeven,
-        "广告系统保本 ROI = 广告归因 GMV ÷ 最大可承受广告费；当前未结构化录入退货运费、提现费、汇兑损失、包装耗材等结算外成本，≈ 表示已知成本下限估算",
+        [adSystemMeta.breakeven_formula, adSystemMeta.warning]
+          .filter(Boolean)
+          .join("；"),
       ),
     );
   }
@@ -1176,36 +1139,18 @@
       );
     }
 
-    // 层提示文案集中维护,不改行的话可以复用
-    var HINT_LAYER_REV =
-      "净收入 = 已结算 SETTLEMENT 分摊 + 未结算 ×(1-r̂)×(1-SPU 退款率);v7 D5 口径";
-    var HINT_LAYER_COGS =
-      "货本 = (售出件 + 全损取消件) × 单位成本;售出件=units_sold,全损取消件=full_loss_cancelled_qty=海外取消件数(v9 口径)";
-    var HINT_LAYER_AD =
-      "广告消耗 = Σmixed_real_cost(plugin.ad_today,随日期窗口裁剪,源数据USD);服务端换算CNY后作为减项计入净利润(v10)";
-    var HINT_LAYER_NP =
-      "净利润 = 净收入 − 货本 − 广告消耗(v7 公式);红绿仅按净利正负判(C3 拍板)";
-    var HINT_SETTLED =
-      "已结算部分 = 已有 SETTLEMENT 组件行的订单的 SETTLEMENT 净额(已扣完全部平台费+联盟+运费+退款调整);v7 D2 零值落库,amount=0 即已结算到手 0";
-    var HINT_UNSETTLED =
-      "未结算部分 = 订单无 SETTLEMENT 组件行,按 line_gmv × (1-0.308) × (1-SPU 退款率) 估算;v7 D5 口径";
-    var HINT_COGS_SOLD =
-      "售出件 = 实际售出件数 units_sold(已付白名单状态);v7 单位成本 × 件数";
-    var HINT_COGS_FLC =
-      "全损取消件 = full_loss_cancelled_qty = 海外取消件数(CANCELLED + 物流已到海外 action_code=38301);v9 口径:货已出海拿不回来按全损计;国内取消(未到海外)不计货本、不计全损";
-    var HINT_AD_SPEND =
-      "广告消耗 = Σ mixed_real_cost(plugin.ad_today,随日期窗口裁剪,源数据USD);服务端换算CNY后作为减项计入净利润(v10)";
-
-    var layerRev = layer("净收入", HINT_LAYER_REV, [
-      row("已结算", settledNet, "add", HINT_SETTLED),
-      row("未结算", unsettledNet, "add", HINT_UNSETTLED),
+    var pnlHints =
+      (state.meta.presentation && state.meta.presentation.pnl_hints) || {};
+    var layerRev = layer("净收入", pnlHints.net_revenue, [
+      row("已结算", settledNet, "add", pnlHints.settled),
+      row("未结算", unsettledNet, "add", pnlHints.unsettled),
     ]);
-    var layerCogs = layer("货本", HINT_LAYER_COGS, [
-      row("售出件", -cogsSold, "sub", HINT_COGS_SOLD),
-      row("全损取消件", -cogsFlc, "sub", HINT_COGS_FLC),
+    var layerCogs = layer("货本", pnlHints.cogs, [
+      row("售出件", cogsSold, "sub", pnlHints.cogs_sold),
+      row("全损取消件", cogsFlc, "sub", pnlHints.cogs_full_loss),
     ]);
-    var layerAd = layer("广告消耗", HINT_LAYER_AD, [
-      row("消耗", -spend, "sub", HINT_AD_SPEND),
+    var layerAd = layer("广告消耗", pnlHints.ad_spend, [
+      row("消耗", spend, "sub", pnlHints.ad_spend),
     ]);
     var layerResult = el(
       "div",
@@ -1216,8 +1161,10 @@
         row(
           "净利润",
           np,
-          np < 0 ? "result op-pnl-row-neg" : "result op-pnl-row-pos",
-          HINT_LAYER_NP,
+          it.profit_status === "loss"
+            ? "result op-pnl-row-neg"
+            : "result op-pnl-row-pos",
+          pnlHints.net_profit,
         ),
       ),
     );
@@ -1451,12 +1398,12 @@
     var drillRow = frag.querySelector(".op-drill-row");
     var drill = drillRow.querySelector(".op-drill");
     var banner = drill.querySelector('[data-banner="warn"]');
-    var settledCount = Number(it.settled_order_count || 0);
-    var orderCount = Number(it.order_count || 0);
-    if (settledCount > 0 && settledCount < orderCount) {
+    if (it.has_unsettled_orders === true) {
       banner.hidden = false;
       banner.textContent =
-        "含未结算订单，净收入为估算（基线 ×(1−r̂)×(1−退货率)）。";
+        (state.meta.presentation &&
+          state.meta.presentation.unsettled_alert_message) ||
+        "";
     }
     drill
       .querySelector('[data-region="summary"]')

@@ -69,6 +69,24 @@ def test_sidebar_tokens_fall_back_on_pages_with_a_different_theme_vocabulary():
     assert "font-family: var(--mono);" not in _SIDEBAR_CSS
 
 
+def test_dashboard_consumes_backend_owned_summary_fields():
+    """Dashboard cards must not count list rows in browser JavaScript."""
+    src = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "dashboard.js"
+    ).read_text(encoding="utf-8")
+
+    assert "/v2/reporting/coverage" in src
+    assert "/v2/reporting/missing-cost-products" not in src
+    assert "data.missing_cost_spus" in src
+    assert "data.total_spus" in src
+    assert "X-Total-Count" in src
+    assert "value: shopTotal" in src
+
+
 def test_manual_costs_page_returns_200_with_html(api_client, readonly_key):
     """GET the page → 200 text/html shell linking the static assets."""
     r = api_client.get(

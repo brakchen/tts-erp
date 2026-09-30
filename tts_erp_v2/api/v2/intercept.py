@@ -16,15 +16,15 @@ import json
 import logging
 import re
 import sys
-import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import func, text
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import get_session, require_destructive_guard
@@ -380,7 +380,10 @@ def create_config(
     )
     db.commit()
 
-    config = dict(result.first()._mapping)
+    config_row = result.first()
+    if config_row is None:
+        raise HTTPException(status_code=500, detail="Config insert returned no row")
+    config = dict(config_row._mapping)
     if config.get("tags") and isinstance(config["tags"], str):
         try:
             config["tags"] = json.loads(config["tags"])
@@ -446,7 +449,10 @@ def update_config(
     )
     db.commit()
 
-    config = dict(result.first()._mapping)
+    config_row = result.first()
+    if config_row is None:
+        raise HTTPException(status_code=500, detail="Config update returned no row")
+    config = dict(config_row._mapping)
     if config.get("tags") and isinstance(config["tags"], str):
         try:
             config["tags"] = json.loads(config["tags"])
@@ -686,6 +692,7 @@ def sync_intercepted_requests(
                             :seller_id, :advertiser_id, :business_context, :pagination, :captured_at
                         )
                         ON CONFLICT (request_id) DO NOTHING
+                        RETURNING request_id
                         """
                     ),
                     {
@@ -716,7 +723,7 @@ def sync_intercepted_requests(
                     },
                 )
             accepted += 1
-            inserted += int(insert_result.rowcount or 0)
+            inserted += 1 if insert_result.first() is not None else 0
         except Exception as e:
             rejected += 1
             errors.append({"index": i, "error": str(e)})
@@ -788,6 +795,33 @@ def sync_intercepted_requests(
 
 
 # ─── Data Query (readonly) ───────────────────────────────────────────
+
+
+def _distribution_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _distribution_payload(
+    rows: Sequence[Any], *, key: str, denominator: int | None
+) -> list[dict[str, Any]]:
+    """Serialize ordered distribution rows with a backend-owned percentage."""
+    total = _distribution_int(denominator)
+    payload: list[dict[str, Any]] = []
+    for raw_label, raw_count in rows:
+        count = _distribution_int(raw_count)
+        percentage = f"{(count * 100 / total) if total else 0:.1f}"
+        payload.append(
+            {
+                key: raw_label,
+                "label": str(raw_label) if raw_label is not None else "未知",
+                "count": count,
+                "percentage": percentage,
+            }
+        )
+    return payload
 
 
 @router.get("/requests/stats")
@@ -895,6 +929,15 @@ def get_requests_stats(
         {"from_date": from_date, "to_date": to_date},
     ).fetchall()
 
+    host_distribution = _distribution_payload(
+        list(by_host), key="host", denominator=total
+    )
+    method_distribution = _distribution_payload(
+        list(by_method), key="method", denominator=total
+    )
+    status_distribution = _distribution_payload(
+        list(by_status), key="status", denominator=total
+    )
     return JSONResponse(
         content={
             "total": total,
@@ -905,12 +948,12 @@ def get_requests_stats(
             "today_requests": today_count,
             "errors": errors,
             "error_requests": errors,
-            "by_host": [{"host": row[0], "count": row[1]} for row in by_host],
-            "byHost": [{"host": row[0], "count": row[1]} for row in by_host],
-            "by_method": [{"method": row[0], "count": row[1]} for row in by_method],
-            "byMethod": [{"method": row[0], "count": row[1]} for row in by_method],
-            "by_status": [{"status": row[0], "count": row[1]} for row in by_status],
-            "byStatus": [{"status": row[0], "count": row[1]} for row in by_status],
+            "by_host": host_distribution,
+            "byHost": host_distribution,
+            "by_method": method_distribution,
+            "byMethod": method_distribution,
+            "by_status": status_distribution,
+            "byStatus": status_distribution,
             "daily": [{"date": str(row[0]), "count": row[1]} for row in daily],
         }
     )

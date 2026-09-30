@@ -214,6 +214,23 @@ def test_list_shops_filter_by_platform(api_client, readonly_key, seed_commerce_r
     assert seed_commerce_rows["account_id"] in ids
 
 
+def test_list_shops_reports_backend_total(
+    api_client, readonly_key, seed_commerce_rows, db_engine
+):
+    """The dashboard count comes from X-Total-Count, not the current page length."""
+    r = api_client.get(
+        "/v2/commerce/channel-accounts?platform=tiktok&limit=1",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    with db_engine.connect() as conn:
+        expected = conn.execute(
+            text("SELECT COUNT(*) FROM commerce.shops WHERE platform = 'tiktok'")
+        ).scalar_one()
+    assert int(r.headers["X-Total-Count"]) == expected
+    assert len(r.json()) == min(expected, 1)
+
+
 def test_get_channel_account_404(api_client, readonly_key):
     """Line 163: 404 for an unknown id (the .first() returns None branch)."""
     r = api_client.get(
@@ -294,6 +311,29 @@ def test_list_products_spu_with_data(api_client, readonly_key, seed_commerce_row
     assert row["spu_id"] == seeded["ext_prod"]
     assert row["title"] == "TEST title"
     assert row["status"] == "active"
+
+
+def test_list_products_spu_search_is_backend_scoped(
+    api_client, readonly_key, seed_commerce_rows
+):
+    """q filters the full result set before total counting and pagination."""
+    base = (
+        "/v2/commerce/channel-products"
+        f"?shop_pk={seed_commerce_rows['account_id']}&limit=1"
+    )
+    headers = {"Authorization": f"Bearer {readonly_key}"}
+
+    by_title = api_client.get(f"{base}&q=title", headers=headers)
+    assert by_title.status_code == 200, by_title.text
+    assert int(by_title.headers["X-Total-Count"]) == 1
+    assert [row["spu_id"] for row in by_title.json()] == [
+        seed_commerce_rows["ext_prod"]
+    ]
+
+    missing = api_client.get(f"{base}&q=TEST_no_such_product", headers=headers)
+    assert missing.status_code == 200, missing.text
+    assert missing.headers["X-Total-Count"] == "0"
+    assert missing.json() == []
 
 
 def test_list_products_spu_filter_by_account(
