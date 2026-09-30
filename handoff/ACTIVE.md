@@ -16,4 +16,4 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| manual-cost-unregistered-filter | 采购价工作台仅看未登记 SPU | 01a0f062-2785-760e-b7c9-6aa719abe2d4 | `feature/manual-cost-unregistered-filter` / `.worktrees/manual-cost-unregistered-filter` | `tts_erp_v2/api/v2/commerce.py`; `tts_erp_v2/api/v2/pages.py`; `tts_erp_v2/static/js/console.js`; `tests/api/test_commerce.py`; `tests/api/test_manual_costs_page_v2.py`; `tech-doc/external-api.md` | draft | — | — | 2026-09-30 03:37:51 |
+| manual-cost-unregistered-filter | 采购价工作台仅看未登记 SPU | 01a0f062-2785-760e-b7c9-6aa719abe2d4 | `feature/manual-cost-unregistered-filter` / `.worktrees/manual-cost-unregistered-filter` | `tts_erp_v2/api/v2/commerce.py`; `tts_erp_v2/api/v2/pages.py`; `tts_erp_v2/static/js/console.js`; `tests/api/test_commerce.py`; `tests/api/test_manual_costs_page_v2.py`; `tech-doc/external-api.md` | active | — | — | 2026-09-30 03:38:22 |
