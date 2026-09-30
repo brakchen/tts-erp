@@ -108,13 +108,15 @@ procurement.manual_product_costs
 
 每个 SPU 的生效候选按以下顺序产生：
 
-1. 仅处理唯一货源组数等于唯一 SPU 组数的采购单；
-2. 对每个货源组计算数量加权采购价；
-3. 以 `(purchaseOrderSn, sourceItemId, platformItemId)` 去重；
-4. 排除 `purchaseOrderStatus IN ('cancel', 'wait_pay')`；
-5. 对每个 `platformItemId` 选择 `gmtPurchaseOrderStart` 最新的采购事实；
-6. 最新时间并列但价格不同则跳过并报警；价格相同可确定性去重；
-7. 仅更新能解析到 `commerce.products_spu` 的 SPU；不存在的 SPU 留在异常清单。
+1. 要求每页 `list` / `total` / `page` / `pageSize` 完整且跨页恒定；累计原始行数必须等于 `total`；
+   `purchaseOrderFilterId` 的完全相同行可去重，冲突重复 ID 直接失败；
+2. 仅处理唯一货源组数等于唯一 SPU 组数的采购单；
+3. 对每个货源组计算数量加权采购价，价格和数量必须为有限正数；
+4. 以 `(purchaseOrderSn, sourceItemId, platformItemId)` 去重；
+5. 排除 `purchaseOrderStatus IN ('cancel', 'wait_pay')`；
+6. 对每个 `platformItemId` 选择 `gmtPurchaseOrderStart` 最新的采购事实；
+7. 最新时间并列但价格不同则跳过并报警；价格相同可确定性去重；
+8. 仅更新能解析到 `commerce.products_spu` 的 SPU；不存在的 SPU 留在异常清单。
 
 ## 5. 2026-09-30 全量数据质量结果
 
