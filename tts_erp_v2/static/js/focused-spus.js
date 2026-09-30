@@ -497,7 +497,6 @@
         "sum-projection-refund-rate",
         "sum-projection-full-loss-rate",
         "sum-unresolved-orders",
-        "sum-unresolved-qty",
         "sum-projected-future-loss-qty",
         "sum-projected-terminal-loss-qty",
         "sum-projected-net-revenue",
