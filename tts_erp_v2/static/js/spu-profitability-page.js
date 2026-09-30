@@ -57,7 +57,7 @@
   ]);
 
   // §7.2 标色默认阈值(常量,页面 ⚙ 可调预留,不锁死)
-  var REFUND_RATE_ALERT = 0.3; // 退款率警戒线:> 30% → 标题⚠ + 红字
+  var REFUND_RATE_ALERT = 0.3; // 退款率警戒线:> 30% → “高退款”标识 + 红字
 
   // Public path prefix: "/tts" behind NGINX, "" on :9877 directly.
   var PREFIX = location.pathname.replace(/\/v2\/pages\/.*$/, "");
@@ -582,10 +582,10 @@
     var img = it.main_image_url
       ? `<img class="spu-img" alt="" src="${esc(it.main_image_url)}" data-zoom="${esc(it.main_image_url)}">`
       : '<span class="spu-img-missing" aria-hidden="true">无主图</span>';
-    var warn =
-      '<span class="warn-default" data-tip="无当前有效的人工标注采购成本，按默认 40 元/件；妙手/1688 同步货源价不参与计算">⚠</span> ';
+    var warnCost =
+      '<span class="warn-default" data-tip="无当前有效的人工标注采购成本，按默认 40 元/件；妙手/1688 同步货源价不参与计算">缺成本</span> ';
     var warnRr = rrHigh
-      ? '<span class="warn-rr" data-tip="退款率超过 30% 警戒线">⚠</span> '
+      ? '<span class="warn-rr" data-tip="退款率超过 30% 警戒线">高退款</span> '
       : "";
     var warnUnsettled = hasUnsettled
       ? '<span class="warn-unsettled" data-tip="含未结算订单，净利为估算">≈</span> '
@@ -610,7 +610,7 @@
       `<tr class="${isBad ? "row-bad" : ""}" data-spupk="${esc(it.spu_pk)}">` +
       `<td class="td-left" data-column-id="product"><span class="td-spu-cell">${img}<span class="td-spu-meta">` +
       `<span class="td-spu">${esc(it.spu_id)}</span>` +
-      `<span class="td-title" data-tip="${esc(it.title || "")}">${warnUnsettled}${warnDefault ? warn : ""}${warnRr}${esc(it.title || "")}${status}</span></span></span></td>` +
+      `<span class="td-title" data-tip="${esc(it.title || "")}">${warnUnsettled}${warnDefault ? warnCost : ""}${warnRr}${esc(it.title || "")}${status}</span></span></span></td>` +
       `<td data-column-id="spend">${fmtMoney(it.spend)}</td>` +
       `<td data-column-id="ad-actual-roi">${fmtRatio(it.ad_system_actual_roi)}</td>` +
       `<td data-column-id="ad-breakeven-roi">${adSystemBreakevenRoi}</td>` +

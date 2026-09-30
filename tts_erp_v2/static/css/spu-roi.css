@@ -560,9 +560,21 @@ td.np-red {
 }
 .warn-rr,
 .warn-default {
- color: var(--warn);
+ display: inline-block;
+ border: 1px solid currentColor;
+ border-radius: 999px;
+ padding: 0 4px;
  cursor: help;
- font-size: 13px;
+ font-size: 11px;
+ font-weight: 700;
+ line-height: 1.4;
+ white-space: nowrap;
+}
+.warn-default {
+ color: var(--warn);
+}
+.warn-rr {
+ color: var(--danger);
 }
 .no-ad {
  color: var(--muted);

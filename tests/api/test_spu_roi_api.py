@@ -1061,6 +1061,7 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert "人工标注" in body["meta"]["cost_assumption"]
     assert "同步货源价不参与计算" in body["meta"]["cost_assumption"]
     assert "40 CNY" in body["meta"]["cost_assumption"]
+    assert "缺成本" in body["meta"]["cost_assumption"]
 
     # totals
     assert body["totals"]["row_count"] == 1
@@ -2949,6 +2950,28 @@ def test_spu_roi_drill_summary_matches_actual_dashboard_metrics() -> None:
     assert "row-cols-xxl-4" in summary
 
 
+def test_spu_roi_cost_and_refund_warnings_use_distinct_badges() -> None:
+    """缺成本与高退款必须用可直接辨认的不同标识，不能共用 ⚠。"""
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "spu-profitability-page.js"
+    ).read_text(encoding="utf-8")
+    row_markup = src.split("function rowMarkup", 1)[1].split(
+        "function renderError", 1
+    )[0]
+
+    assert 'class="warn-default"' in row_markup
+    assert ">缺成本</span>" in row_markup
+    assert 'class="warn-rr"' in row_markup
+    assert ">高退款</span>" in row_markup
+    assert ">⚠</span>" not in row_markup
+
+
 def test_spu_roi_js_targets_dashboard_hooks():
     """共享盈利 kernel 必须渲染表格与结余带。"""
     from pathlib import Path
@@ -2968,7 +2991,7 @@ def test_spu_roi_js_targets_dashboard_hooks():
     assert "401" in src  # 401 → login 跳转
     assert "roi_breakeven" in src  # 红绿判据字段
     assert "cost_source" in src
-    assert "DEFAULT_K1" in src  # ⚠ 判断
+    assert "DEFAULT_K1" in src  # “缺成本”标识判断
     assert '"¥"' not in src  # 2026-09-29 反馈：金额前缀去掉，纯数字
     assert "金额已由服务端统一换算 CNY" in src
     # Bootstrap 多选由 Tom Select 驱动，精确 scope 通过独立 spu_ids 参数提交。
