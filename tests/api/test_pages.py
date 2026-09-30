@@ -109,6 +109,17 @@ def test_dashboard_consumes_backend_owned_summary_fields():
     assert "value: shopTotal" in src
 
 
+def test_dashboard_marks_runtime_config_entry_as_coming_soon():
+    """Do not link to runtime config until its page exists."""
+    body = bytes(dashboard_page().body).decode()
+
+    assert 'class="nav-card nav-card--coming-soon"' in body
+    assert 'aria-label="运行配置，即将上线"' in body
+    assert "配置下发、灰度控制与凭证管理" in body
+    assert "即将上线" in body
+    assert 'href="../../v2/pages/runtime-configs"' not in body
+
+
 def test_manual_costs_page_returns_200_with_html(api_client, readonly_key):
     """GET the page → 200 text/html shell linking the static assets."""
     r = api_client.get(
