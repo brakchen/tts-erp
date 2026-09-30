@@ -35,6 +35,8 @@ class SnapshotIsolationUnavailable(ProfitabilityError):
 class SortField(StrEnum):
     ROI_REAL = "roi_real"
     SPEND = "spend"
+    AD_SYSTEM_ACTUAL_ROI = "ad_system_actual_roi"
+    AD_SYSTEM_BREAKEVEN_ROI = "ad_system_breakeven_roi"
     REFUND_RATE = "refund_rate"
     REFUND_RATE_QTY = "refund_rate_qty"
     CANCEL_RATE = "cancel_rate"
@@ -45,6 +47,7 @@ class SortField(StrEnum):
     AD_COUNT = "ad_count"
     GMV_AD = "gmv_ad"
     ORDER_COUNT = "order_count"
+    TOTAL_ORDERS = "total_orders"
     EFFECTIVE_ORDER_COUNT = "effective_order_count"
     CANCELLED_ORDER_COUNT = "cancelled_order_count"
     UNITS_SOLD = "units_sold"

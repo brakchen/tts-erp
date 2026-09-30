@@ -358,7 +358,7 @@ mount({region, commands}) -> {onSnapshot(readonlySnapshot), destroy()}
 2. overview 请求生命周期：参数组装、取消旧请求、401 跳登录、FX 错误、竞态保护、空态处理。
 3. 汇总卡渲染：`totals` / `meta` / 店铺费率状态卡。
 4. 主表渲染：商品、广告、销售、取消、全损、净利润列及红绿/警告状态。
-5. 排序和分页：列头状态、页码、每页数量、上一页/下一页。
+5. 排序和分页：列头状态、页码、每页数量、上一页/下一页。所有指标列都在 shell 上声明 `data-sort=<SpuProfitability 字段>`；公共 kernel 对 `th[data-sort]` 做事件委托和方向切换，不维护另一份前端排序白名单。因此后续新增指标列只要后端字段进入 `SortField`、表头声明 `data-sort`，标准页和重点关注页就自动获得同一排序交互。
 6. 钻取交互：accordion、四类 evidence 懒加载、缓存 key、筛选变化清缓存。
 7. 公共格式化：money、ratio、percent、整数、枚举翻译。
 8. 店铺切换、日期校验、临时费率、刷新、登录身份和退出。

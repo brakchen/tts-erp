@@ -6,6 +6,13 @@
   window.ttsErpPageProfile = {
     id: "standard-roi",
     pagePath: "/v2/pages/spu-roi",
+    preferences: {
+      storageKey: "tts-erp:spu-roi:preferences:v1",
+    },
+    dateRangeControl: {
+      enabled: true,
+      reportingTimeZone: "Asia/Ho_Chi_Minh",
+    },
     defaults: {
       includeAll: false,
       limit: 100,

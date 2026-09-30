@@ -2197,11 +2197,8 @@ def test_spu_roi_ad_window_single_side_only(api_client, readonly_key, db_engine)
     assert item_both["spend"] == cny4_from_usd("50")
 
 
-def test_spu_roi_sort_whitelist_covers_page_sortable_columns(
-    api_client, readonly_key, db_engine
-):
-    """共享盈利 kernel 的可排序列名必须落在端点白名单内。"""
-    import re
+def test_spu_roi_sort_binding_is_declarative_and_delegated() -> None:
+    """公共 kernel 从 data-sort 自动绑定，不再维护易漏列的前端白名单。"""
     from pathlib import Path
 
     js_path = (
@@ -2212,28 +2209,11 @@ def test_spu_roi_sort_whitelist_covers_page_sortable_columns(
         / "spu-profitability-page.js"
     )
     src = js_path.read_text(encoding="utf-8")
-    m = re.search(r"(?s)var SORTABLE = new Set\(\[(.*?)\]\);", src)
-    assert m, "spu-roi.js 找不到 SORTABLE 集合"
-    fields = re.findall(r'"([a-z0-9_]+)"', m.group(1))
-    assert fields, "SORTABLE 集合为空"
-
-    with Session(db_engine) as sess:
-        _seed(sess, _seed_scenario_a)
-    h = {"Authorization": f"Bearer {readonly_key}"}
-    for field in fields:
-        r = api_client.get(
-            "/v2/analytics/spu-roi",
-            headers=h,
-            params={"q": Q, "sort": field},
-        )
-        assert r.status_code == 200, f"sort={field} 应 200,得 {r.status_code}"
-    # 未知 sort 值仍 422(白名单收紧语义)
-    assert (
-        api_client.get(
-            "/v2/analytics/spu-roi", headers=h, params={"sort": "nope"}
-        ).status_code
-        == 422
-    )
+    assert "var SORTABLE" not in src
+    assert 'document.querySelectorAll(".op-table thead th[data-sort]")' in src
+    assert 'event.target.closest("th[data-sort]")' in src
+    assert 'tableHead.addEventListener("click"' in src
+    assert 'tableHead.addEventListener("keydown"' in src
 
 
 def test_spu_roi_totals_roi_real_native_reconciliation(
@@ -2706,6 +2686,53 @@ def test_spu_roi_page_toolbar_shop_and_date_filters(api_client, readonly_key):
     # 无内联事件处理器(既有 shell 约束)
     for forbidden in ("onchange=", "onclick="):
         assert forbidden not in body, f"inline handler found: {forbidden}"
+
+
+def test_spu_roi_page_remembers_filters_and_enhances_date_range():
+    """标准 ROI 页记住常用筛选，并用 Bootstrap 组合控件增强原生日期输入。"""
+    from pathlib import Path
+
+    static_dir = Path(__file__).resolve().parents[2] / "tts_erp_v2" / "static"
+    profile_js = (static_dir / "js" / "spu-roi.js").read_text(encoding="utf-8")
+    kernel_js = (static_dir / "js" / "spu-profitability-page.js").read_text(
+        encoding="utf-8"
+    )
+    css = (static_dir / "css" / "spu-roi.css").read_text(encoding="utf-8")
+
+    # 仅标准 ROI profile 启用本地偏好与日期增强；共享内核不会污染其他页面。
+    assert 'storageKey: "tts-erp:spu-roi:preferences:v1"' in profile_js
+    assert "dateRangeControl" in profile_js
+    assert "window.localStorage.getItem" in kernel_js
+    assert "window.localStorage.setItem" in kernel_js
+    assert "restorePagePreferences();" in kernel_js
+    assert "persistPagePreferences();" in kernel_js
+    assert "var preferredPk = urlPk || state.shopPk;" in kernel_js
+    assert "var datesValid =" in kernel_js
+    assert "savedStart <= savedEnd" in kernel_js
+    for field in (
+        "shopPk: state.shopPk || null",
+        "wStart: state.wStart",
+        "wEnd: state.wEnd",
+        "datesTouched: state.datesTouched",
+        "includeAll: state.includeAll",
+        "limit: state.limit",
+        "sort: state.sort",
+        "order: state.order",
+    ):
+        assert field in kernel_js
+
+    # Bootstrap 5 本身不附带 datepicker；保留原生 type=date，并在运行时组合
+    # 官方 input-group / btn-group / btn 组件，避免引入新的第三方日期库。
+    assert 'reportingTimeZone: "Asia/Ho_Chi_Minh"' in profile_js
+    assert 'new Intl.DateTimeFormat("en-CA"' in kernel_js
+    assert 'class: "input-group input-group-sm op-date-input-group"' in kernel_js
+    assert 'class: "btn-group btn-group-sm op-date-presets"' in kernel_js
+    assert 'data-date-preset' in kernel_js
+    assert "截止日包含当天" in kernel_js
+    assert '"aria-describedby": "date-range-help"' in kernel_js
+    assert ".op-date-range" in css
+    assert "flatpickr" not in profile_js + kernel_js
+    assert "bootstrap-datepicker" not in profile_js + kernel_js
 
 
 def test_spu_roi_page_shell_contract(api_client, readonly_key):
@@ -3200,12 +3227,13 @@ def test_spu_roi_page_d8_no_column_toggles(api_client, readonly_key):
     assert "col-toggle-" not in body
     assert "data-colgroup=" not in body
     assert "data-cg=" not in body
-    sortable = re.findall(
-        r'class="op-th[^"]*op-th-sort[^"]*" data-sort="([a-z0-9_]+)"', body
-    )
+    sortable = re.findall(r'<th[^>]+data-sort="([a-z0-9_]+)"', body)
     assert set(sortable) == {
         "spend",
+        "ad_system_actual_roi",
+        "ad_system_breakeven_roi",
         "effective_sales",
+        "total_orders",
         "effective_order_count",
         "cancel_rate",
         "full_loss_rate",
@@ -3224,20 +3252,37 @@ def test_spu_roi_page_sortable_headers_within_endpoint_whitelist(
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     body = r.text
-    fields = re.findall(
-        r'class="op-th[^"]*op-th-sort[^"]*" data-sort="([a-z0-9_]+)"', body
-    )
+    fields = re.findall(r'<th[^>]+data-sort="([a-z0-9_]+)"', body)
     assert fields
     with Session(db_engine) as sess:
         _seed(sess, _seed_scenario_a)
+        _seed(sess, _seed_spu_b)
+        _seed(sess, _seed_spu_c)
     h = {"Authorization": f"Bearer {readonly_key}"}
     for field in fields:
-        r2 = api_client.get(
-            "/v2/analytics/spu-roi",
-            headers=h,
-            params={"q": Q, "sort": field},
-        )
-        assert r2.status_code == 200, f"sort={field} 应 200,得 {r2.status_code}"
+        for order in ("asc", "desc"):
+            response = api_client.get(
+                "/v2/analytics/spu-roi",
+                headers=h,
+                params={"q": Q, "sort": field, "order": order},
+            )
+            assert response.status_code == 200, (
+                f"sort={field}&order={order} 应 200,得 {response.status_code}"
+            )
+            values = [item[field] for item in response.json()["items"]]
+            non_null = [Decimal(str(value)) for value in values if value is not None]
+            assert non_null == sorted(non_null, reverse=order == "desc"), (
+                field,
+                order,
+                values,
+            )
+            if None in values:
+                first_null = values.index(None)
+                assert all(value is None for value in values[first_null:]), (
+                    field,
+                    order,
+                    values,
+                )
 
 
 def test_spu_roi_js_review_fixes_present():
@@ -3270,9 +3315,10 @@ def test_spu_roi_js_review_fixes_present():
     assert "bindRowAccordion" in src
     assert "fetchDrillTab" in src
     assert "tpl-drilldown-panel" in src
-    # A2:页面 JS 显式传 sort=net_profit&order=asc
+    # 排序字段来自表头 data-sort，公共 kernel 不复制具体字段白名单。
     assert "DEFAULT_SORT" in src
-    assert '"net_profit"' in src
+    assert "supportsSortField" in src
+    assert 'header.getAttribute("data-sort")' in src
     assert '"asc"' in src
     # finding 2:结余带直接消费 totals.roi_real,页面不反推 ROI
     assert "totals.roi_real" in src
