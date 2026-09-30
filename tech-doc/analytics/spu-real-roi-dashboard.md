@@ -152,7 +152,7 @@
 
 - 只读 operator 页，与 `manual-costs` / 规划中的 `ad-products` 同家族（`GET /v2/pages/<name>` HTML shell + `static/js/<name>.js`，原生 fetch，登录走 browser session，未登录 302 → login）。
 - 数据走**新增只读 JSON 端点**（role **readonly**），不直连 DB。
-- 外网 URL 形态（沿用 `/tts/` 反代约定）：`http://daqiang.nat100.top/tts/v2/pages/spu-roi`。
+- 外网 URL 形态（沿用 `/tts/` 反代约定）：`https://daqiang.nat100.top/tts/v2/pages/spu-roi`。
 - 目录：`tech-doc/analytics/`（本文）+ 页面/端点方案按 `ad-product-links-ui.md` 的评审流程走。
 
 ### 3.1 P0 主表（页面核心：每 SPU 一行）

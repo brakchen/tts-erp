@@ -12,7 +12,7 @@ this document explains semantics, auth, and conventions.
 ## TL;DR — quick reference for agents
 
 All endpoints are served at `http://127.0.0.1:9877` (or
-`http://daqiang.nat100.top` from outside — the NAT layer strips the port;
+`https://daqiang.nat100.top` from outside — TLS terminates at the public gateway and the NAT layer strips the port;
 browser traffic may additionally sit under a `/tts` prefix handled by nginx).
 Every endpoint other than the explicitly-public ones requires
 `Authorization: Bearer <key>` or `X-API-Key: <key>` — or a browser session
