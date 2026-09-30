@@ -449,6 +449,41 @@ def _seed_case(
         )
 
 
+def _seed_settlement(
+    sess, *, order_pk: int, external_id: str, amount_vnd: str
+) -> None:
+    statement_pk = sess.execute(
+        text(
+            "INSERT INTO finance.settlement_statements "
+            "(external_statement_id, statement_time, currency) "
+            "VALUES (:statement_id, '2026-09-15T00:00:00+00:00', 'VND') "
+            "RETURNING id"
+        ),
+        {"statement_id": f"TEST_STATEMENT_{external_id}"},
+    ).scalar_one()
+    transaction_pk = sess.execute(
+        text(
+            "INSERT INTO finance.settlement_transactions "
+            "(settlement_statement_id, external_transaction_id, order_pk, "
+            "transaction_time) VALUES (:statement_pk, :external_id, :order_pk, "
+            "'2026-09-15T00:00:00+00:00') RETURNING id"
+        ),
+        {
+            "statement_pk": statement_pk,
+            "external_id": external_id,
+            "order_pk": order_pk,
+        },
+    ).scalar_one()
+    sess.execute(
+        text(
+            "INSERT INTO finance.settlement_components "
+            "(transaction_id, component_code, amount, currency) "
+            "VALUES (:transaction_pk, 'SETTLEMENT', :amount, 'VND')"
+        ),
+        {"transaction_pk": transaction_pk, "amount": amount_vnd},
+    )
+
+
 def _fetch_spu_line_id(sess, order_id: str) -> int:
     return sess.execute(
         text(
@@ -613,6 +648,85 @@ def _seed_cross_spu_orders(sess) -> tuple[int, int]:
         unit_price="131650",  # $5
     )
     return x, y
+
+
+def _seed_projection_scenario(sess) -> int:
+    """One settled sample plus unresolved and partly resolved unsettled orders."""
+
+    seller = "TEST_SELLER_PROJECTION"
+    shop_pk = _seed_shop(sess, seller)
+    spu_pk = _seed_spu(sess, shop_pk, "TEST_ROI_SPU_PROJECTION")
+    _seed_ad_dump(
+        sess,
+        seller=seller,
+        product_id="TEST_ROI_SPU_PROJECTION",
+        campaign_id="TEST_CAMP_PROJECTION",
+        spend="10",
+        orders="3",
+        gmv="100",
+    )
+
+    settled_order = _seed_order_line(
+        sess,
+        shop_pk=shop_pk,
+        spu_pk=spu_pk,
+        order_id="TEST_ORDER_PROJECTION_SETTLED",
+        status=PAID_ORDER_STATUS,
+        line_ext="TEST_LINE_PROJECTION_SETTLED",
+        qty="10",
+        unit_price="100000",
+        paid=True,
+    )
+    settled_line = _fetch_spu_line_id(sess, "TEST_ORDER_PROJECTION_SETTLED")
+    _seed_case(
+        sess,
+        shop_pk=shop_pk,
+        order_pk=settled_order,
+        ext_case="TEST_CASE_PROJECTION_SETTLED",
+        case_type="RETURN_AND_REFUND",
+        status="RETURN_OR_REFUND_REQUEST_COMPLETE",
+        lines=[(settled_line, "TEST_CLINE_PROJECTION_SETTLED", "2", "200000")],
+    )
+    _seed_settlement(
+        sess,
+        order_pk=settled_order,
+        external_id="TEST_TXN_PROJECTION_SETTLED",
+        amount_vnd="600000",
+    )
+
+    _seed_order_line(
+        sess,
+        shop_pk=shop_pk,
+        spu_pk=spu_pk,
+        order_id="TEST_ORDER_PROJECTION_UNRESOLVED",
+        status=PAID_ORDER_STATUS,
+        line_ext="TEST_LINE_PROJECTION_UNRESOLVED",
+        qty="4",
+        unit_price="100000",
+        paid=True,
+    )
+    partial_order = _seed_order_line(
+        sess,
+        shop_pk=shop_pk,
+        spu_pk=spu_pk,
+        order_id="TEST_ORDER_PROJECTION_PARTIAL",
+        status=PAID_ORDER_STATUS,
+        line_ext="TEST_LINE_PROJECTION_PARTIAL",
+        qty="2",
+        unit_price="100000",
+        paid=True,
+    )
+    partial_line = _fetch_spu_line_id(sess, "TEST_ORDER_PROJECTION_PARTIAL")
+    _seed_case(
+        sess,
+        shop_pk=shop_pk,
+        order_pk=partial_order,
+        ext_case="TEST_CASE_PROJECTION_PARTIAL",
+        case_type="REFUND_ONLY",
+        status="RETURN_OR_REFUND_REQUEST_COMPLETE",
+        lines=[(partial_line, "TEST_CLINE_PROJECTION_PARTIAL", "1", "100000")],
+    )
+    return spu_pk
 
 
 def _seed_spu_b(sess) -> int:
@@ -1050,6 +1164,15 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert item["roi_breakeven"] == "1.92"
     assert item["cpa"] == cny4_from_usd("2")
 
+    # 有未结算订单但没有任何已结算样本时必须失败关闭，不能静默假设
+    # 退款率/全损率为 0。
+    assert item["projection_status"] == "insufficient_sample"
+    assert item["projection_refund_amount_rate"] is None
+    assert item["projection_full_loss_qty_rate"] is None
+    assert item["projected_future_full_loss_qty"] is None
+    assert item["projected_net_profit"] is None
+    assert item["projected_roi_real"] is None
+
     # meta v10：阈值与公式说明也由后端返回，前端只渲染。
     assert body["meta"]["rubric_version"] == RUBRIC_VERSION
     presentation = body["meta"]["presentation"]
@@ -1094,6 +1217,182 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
         scenario_a_net_profit_cny()
     )
     assert body["totals"]["ad_system_breakeven_roi_status"] == "estimated_known_costs"
+
+
+def test_spu_roi_projects_only_unsettled_orders_from_settled_sample(
+    api_client, readonly_key, db_engine
+):
+    with Session(db_engine) as sess:
+        _seed(sess, _seed_projection_scenario)
+
+    response = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+        params={"q": "TEST_ROI_SPU_PROJECTION"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["total"] == 1
+    item = body["items"][0]
+
+    vnd_cny = USD_CNY / USD_VND
+    projected_unsettled_net = Decimal(400_000) * (Decimal(1) - FEE_BASELINE) * vnd_cny
+    projected_net_revenue = Decimal(600_000) * vnd_cny + projected_unsettled_net
+    projected_net_profit = (
+        projected_net_revenue - Decimal(640) - Decimal(10) * USD_CNY
+    )
+    projected_nc_prime = projected_net_revenue - Decimal(160)
+    projected_roi = projected_nc_prime / (Decimal(10) * USD_CNY)
+
+    assert item["projection_status"] == "available"
+    assert item["projection_basis_order_count"] == 1
+    assert item["projection_basis_qty"] == 10
+    assert item["projection_basis_sales"] == m4(Decimal(1_000_000) * vnd_cny)
+    assert item["projection_basis_refund_amount"] == m4(
+        Decimal(200_000) * vnd_cny
+    )
+    assert item["projection_basis_full_loss_qty"] == 2
+    assert item["projection_refund_amount_rate"] == "0.2000"
+    assert item["projection_full_loss_qty_rate"] == "0.2000"
+    assert item["unresolved_unsettled_order_count"] == 2
+    assert Decimal(item["unresolved_unsettled_qty"]) == Decimal(5)
+    assert item["unresolved_unsettled_sales"] == m4(Decimal(500_000) * vnd_cny)
+    assert Decimal(item["projected_future_full_loss_qty"]) == Decimal(1)
+    assert Decimal(item["projected_terminal_full_loss_qty"]) == Decimal(4)
+    assert item["projected_full_loss_cost"] == "160.0000"
+    assert item["projected_unsettled_net"] == m4(projected_unsettled_net)
+    assert item["projected_net_revenue"] == m4(projected_net_revenue)
+    assert item["projected_net_profit"] == m4(projected_net_profit)
+    assert item["projected_nc_prime"] == m4(projected_nc_prime)
+    assert item["projected_cogs_kept"] == "480.0000"
+    assert item["projected_roi_real"] == m2(projected_roi)
+    assert item["projected_roi_breakeven"] is None
+    assert body["meta"]["projection"]["date_attribution"] == (
+        "COALESCE(order_time, paid_at)"
+    )
+    assert "未结算订单" in body["meta"]["projection"]["target"]
+    # Existing COGS already contains all 16 paid units. Predicted loss is not
+    # subtracted again from terminal profit.
+    assert Decimal(item["projected_net_profit"]) == (
+        Decimal(item["projected_net_revenue"])
+        - Decimal(item["cogs_total"])
+        - Decimal(item["spend"])
+    ).quantize(_Q4, rounding=ROUND_HALF_UP)
+
+    for field in (
+        "projection_status",
+        "projection_basis_order_count",
+        "projection_basis_qty",
+        "projection_basis_sales",
+        "projection_basis_refund_amount",
+        "projection_basis_full_loss_qty",
+        "projection_refund_amount_rate",
+        "projection_full_loss_qty_rate",
+        "unresolved_unsettled_order_count",
+        "unresolved_unsettled_qty",
+        "unresolved_unsettled_sales",
+        "projected_future_full_loss_qty",
+        "projected_terminal_full_loss_qty",
+        "projected_full_loss_cost",
+        "projected_unsettled_net",
+        "projected_net_revenue",
+        "projected_net_profit",
+        "projected_roi_real",
+        "projected_roi_breakeven",
+        "projected_nc_prime",
+        "projected_cogs_kept",
+    ):
+        assert body["totals"][field] == item[field], field
+
+
+def test_spu_roi_projection_with_no_unsettled_orders_matches_current_result(
+    api_client, readonly_key, db_engine
+):
+    with Session(db_engine) as sess:
+        _seed_projection_scenario(sess)
+        unresolved_pk = sess.execute(
+            text(
+                "SELECT id FROM commerce.sales_orders "
+                "WHERE order_id = 'TEST_ORDER_PROJECTION_UNRESOLVED'"
+            )
+        ).scalar_one()
+        partial_pk = sess.execute(
+            text(
+                "SELECT id FROM commerce.sales_orders "
+                "WHERE order_id = 'TEST_ORDER_PROJECTION_PARTIAL'"
+            )
+        ).scalar_one()
+        _seed_settlement(
+            sess,
+            order_pk=unresolved_pk,
+            external_id="TEST_TXN_PROJECTION_UNRESOLVED",
+            amount_vnd="400000",
+        )
+        _seed_settlement(
+            sess,
+            order_pk=partial_pk,
+            external_id="TEST_TXN_PROJECTION_PARTIAL",
+            amount_vnd="100000",
+        )
+        sess.commit()
+
+    response = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+        params={"q": "TEST_ROI_SPU_PROJECTION"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    item = body["items"][0]
+
+    assert item["projection_status"] == "no_unsettled_orders"
+    assert item["unsettled_order_count"] == 0
+    assert item["projected_future_full_loss_qty"] == "0"
+    assert item["projected_unsettled_net"] == "0.0000"
+    assert item["projected_net_revenue"] == item["net_revenue"]
+    assert item["projected_net_profit"] == item["net_profit"]
+    assert item["projected_roi_real"] == item["roi_real"]
+    assert item["projected_roi_breakeven"] == item["roi_breakeven"]
+    assert body["totals"]["projection_status"] == "no_unsettled_orders"
+    assert body["totals"]["projected_net_profit"] == body["totals"]["net_profit"]
+
+
+def test_spu_roi_projection_basis_and_target_follow_order_time_window(
+    api_client, readonly_key, db_engine
+):
+    with Session(db_engine) as sess:
+        _seed_projection_scenario(sess)
+        sess.execute(
+            text(
+                "UPDATE commerce.sales_orders SET order_time = "
+                "'2026-08-01T08:00:00+00:00' "
+                "WHERE order_id = 'TEST_ORDER_PROJECTION_SETTLED'"
+            )
+        )
+        sess.commit()
+
+    headers = {"Authorization": f"Bearer {readonly_key}"}
+    all_time = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=headers,
+        params={"q": "TEST_ROI_SPU_PROJECTION"},
+    ).json()["items"][0]
+    september = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=headers,
+        params={
+            "q": "TEST_ROI_SPU_PROJECTION",
+            "w_start": "2026-09-01",
+            "w_end": "2026-09-30",
+        },
+    ).json()["items"][0]
+
+    assert all_time["projection_status"] == "available"
+    assert all_time["projection_basis_order_count"] == 1
+    assert september["projection_status"] == "insufficient_sample"
+    assert september["projection_basis_order_count"] == 0
+    assert september["unsettled_order_count"] == 2
+    assert september["unresolved_unsettled_order_count"] == 2
 
 
 def test_profitability_public_interface_returns_typed_consistent_result(
@@ -1332,6 +1631,12 @@ def test_spu_roi_totals_cross_spu_dedup_and_gmv_split(
     assert t["effective_order_count"] == 1
     assert {i["cancel_rate"] for i in body["items"]} == {"0.50"}
     assert t["cancel_rate"] == "0.5000"
+    # Projection order counts are also order-dimension facts: the same shared
+    # unsettled order appears in both SPU rows but once in dashboard totals.
+    assert sum(i["unsettled_order_count"] for i in body["items"]) == 2
+    assert t["unsettled_order_count"] == 1
+    assert sum(i["unresolved_unsettled_order_count"] for i in body["items"]) == 2
+    assert t["unresolved_unsettled_order_count"] == 1
 
     filtered = api_client.get(
         "/v2/analytics/spu-roi",
@@ -1402,6 +1707,36 @@ def test_spu_roi_totals_cross_spu_dedup_and_gmv_split(
     assert [option["spu_id"] for option in searched_options.json()] == [
         "TEST_ROI_SPU_X_EXTRA"
     ]
+
+    # The same cross-SPU order also counts once when it becomes a settled
+    # projection sample, even though each SPU row reports one sample order.
+    with Session(db_engine) as sess:
+        shared_order_pk = sess.execute(
+            text(
+                "SELECT id FROM commerce.sales_orders "
+                "WHERE order_id = 'TEST_ORDER_XY1'"
+            )
+        ).scalar_one()
+        _seed_settlement(
+            sess,
+            order_pk=shared_order_pk,
+            external_id="TEST_TXN_XY1",
+            amount_vnd="526600",
+        )
+        sess.commit()
+    settled_scope = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=h,
+        params={
+            "shop_pk": shop_pk,
+            "spu_ids": "TEST_ROI_SPU_X,TEST_ROI_SPU_Y",
+        },
+    ).json()
+    assert sum(
+        item["projection_basis_order_count"] for item in settled_scope["items"]
+    ) == 2
+    assert settled_scope["totals"]["projection_basis_order_count"] == 1
+    assert settled_scope["totals"]["unsettled_order_count"] == 0
 
 
 def _seed_refund_on_shared_order_y_line(sess) -> tuple[int, int]:
@@ -2543,6 +2878,30 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
         "ad_system_max_ad_spend": "0.0000",
         "ad_system_remaining_ad_spend_capacity": "0.0000",
         "ad_system_breakeven_roi_status": "estimated_known_costs",
+        "projection_status": "no_unsettled_orders",
+        "projection_basis_order_count": 0,
+        "projection_basis_qty": 0,
+        "projection_basis_sales": "0.0000",
+        "projection_basis_refund_amount": "0.0000",
+        "projection_basis_full_loss_qty": 0,
+        "projection_refund_amount_rate": None,
+        "projection_full_loss_qty_rate": None,
+        "unsettled_order_count": 0,
+        "unresolved_unsettled_order_count": 0,
+        "unresolved_unsettled_qty": 0,
+        "unresolved_unsettled_sales": "0.0000",
+        "confirmed_unsettled_refund_amount": "0.0000",
+        "confirmed_unsettled_full_loss_qty": 0,
+        "projected_future_full_loss_qty": "0",
+        "projected_terminal_full_loss_qty": "0",
+        "projected_full_loss_cost": "0.0000",
+        "projected_unsettled_net": "0.0000",
+        "projected_net_revenue": "0.0000",
+        "projected_net_profit": "0.0000",
+        "projected_roi_real": None,
+        "projected_roi_breakeven": None,
+        "projected_nc_prime": "0.0000",
+        "projected_cogs_kept": "0.0000",
         "profit_status": "break_even",
         "roi_status": "unavailable",
     }
@@ -2993,7 +3352,7 @@ def test_spu_roi_drill_summary_matches_actual_dashboard_metrics() -> None:
         assert field in summary
 
     for legacy_label in ("CPA", "单位成本", "已结算单", "全损件数", "净收入"):
-        assert legacy_label not in summary
+        assert f'cell("{legacy_label}"' not in summary
     assert "row-cols-xxl-4" in summary
 
 
@@ -3131,6 +3490,18 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
         "sum-roi-breakeven",
         "sum-roi-ad-actual",
         "sum-roi-ad",
+        "sum-projection-status",
+        "sum-projection-basis-orders",
+        "sum-projection-refund-rate",
+        "sum-projection-full-loss-rate",
+        "sum-unresolved-orders",
+        "sum-unresolved-qty",
+        "sum-projected-future-loss-qty",
+        "sum-projected-terminal-loss-qty",
+        "sum-projected-net-revenue",
+        "sum-projected-net-profit",
+        "sum-projected-roi",
+        "sum-projected-breakeven-roi",
     )
     summary_positions = []
     for cell_id in summary_ids:
@@ -3220,7 +3591,53 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert "totals.ad_system_actual_roi" in js_src
     assert '("#sum-roi-ad")' in js_src
     assert 'roiAdStatus === "estimated_known_costs"' in js_src
+    assert '("#sum-projection-status")' in js_src
+    assert "totals.projection_status" in js_src
+    assert "totals.projection_refund_amount_rate" in js_src
+    assert "totals.projected_net_profit" in js_src
+    assert "totals.projected_roi_real" in js_src
     assert "formula_pending" not in js_src
+
+
+def test_spu_roi_drill_summary_displays_terminal_projection_separately() -> None:
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "spu-profitability-page.js"
+    ).read_text(encoding="utf-8")
+    summary = src.split("function renderProfitSummary", 1)[1].split(
+        "function renderProfitTab", 1
+    )[0]
+
+    for field in (
+        "it.projection_status",
+        "it.projection_basis_order_count",
+        "it.projection_basis_qty",
+        "it.projection_basis_sales",
+        "it.projection_basis_refund_amount",
+        "it.projection_basis_full_loss_qty",
+        "it.projection_refund_amount_rate",
+        "it.projection_full_loss_qty_rate",
+        "it.unresolved_unsettled_order_count",
+        "it.unresolved_unsettled_qty",
+        "it.unresolved_unsettled_sales",
+        "it.projected_future_full_loss_qty",
+        "it.projected_terminal_full_loss_qty",
+        "it.projected_full_loss_cost",
+        "it.projected_unsettled_net",
+        "it.projected_net_revenue",
+        "it.projected_net_profit",
+        "it.projected_roi_real",
+        "it.projected_roi_breakeven",
+    ):
+        assert field in summary
+    assert "预计终局净利润" in summary
+    assert "预计终局ROI" in summary
+    assert "预计终局实际ROI" not in summary
 
 
 def test_spu_roi_page_d8_no_column_toggles(api_client, readonly_key):
