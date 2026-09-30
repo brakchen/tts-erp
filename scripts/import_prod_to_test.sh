@@ -164,7 +164,10 @@ SENSITIVE=(
 EXCLUDE_CREDENTIALS=0
 EXCLUDE_API_KEYS=0
 
-# All v2 tables — used for the full-import default.
+# All non-Miaoshou-source tables — used for the full-import default.
+# ``miaoshou.*`` raw/session-derived tables are intentionally excluded: their
+# credential-bound private ERP payloads are not needed by tests, and importing
+# them would make generic test credential cleanup conflict with source records.
 # Ordering matters: tables with FK to others must come AFTER their
 # parent. We list ``integration.credentials`` and ``security.api_keys``
 # first because they're referenced by ``commerce.shops``,
@@ -173,13 +176,6 @@ EXCLUDE_API_KEYS=0
 ALL_TABLES=(
   "integration.credentials"
   "security.api_keys"
-  "miaoshou.package_raw_records"
-  "miaoshou.purchase_order_raw_records"
-  "miaoshou.packages"
-  "miaoshou.package_items"
-  "miaoshou.package_gift_items"
-  "miaoshou.sync_cursors"
-  "miaoshou.sync_issues"
   "commerce.shops"
   "commerce.products_spu"
   "commerce.products_sku"
@@ -188,7 +184,7 @@ ALL_TABLES=(
   "procurement.procurement_accounts"
   "procurement.procurement_products"
   "procurement.manual_product_costs"
-  "miaoshou.purchase_price_candidates"
+  "miaoshou.purchase_prices"
   "fulfillment.shipments"
   "fulfillment.tracking_events"
   "after_sales.cases"
@@ -203,7 +199,6 @@ ALL_TABLES=(
   "reporting.product_profit_daily"
   "integration.sync_jobs"
   "integration.sync_cursors"
-  "integration.sync_issues"
   "integration.raw_records"
   "analytics.ad_raw"
   "analytics.ad_product_links"
@@ -243,9 +238,29 @@ for t in "${ALL_TABLES[@]}"; do
 done
 ALL_TABLES=("${pruned[@]}")
 
+# A migration may add a target-only table before production has applied it.
+# Skip it here rather than making the safe prod→test refresh fail at pg_dump.
+declare -A SOURCE_TABLES
+while IFS=. read -r schema table; do
+  [[ -n "$schema" && -n "$table" ]] && SOURCE_TABLES["$schema.$table"]=1
+done < <(
+  psql --no-psqlrc --tuples-only --no-align --quiet \
+    --command "SELECT table_schema || '.' || table_name FROM information_schema.tables WHERE table_type='BASE TABLE'" \
+    "$src_plain"
+)
+existing=()
+for t in "${ALL_TABLES[@]}"; do
+  if [[ -n "${SOURCE_TABLES[$t]:-}" ]]; then
+    existing+=("$t")
+  else
+    echo "[import] source table absent; skip target-only table: $t"
+  fi
+done
+ALL_TABLES=("${existing[@]}")
+
 # ── Plan & confirm ──────────────────────────────────────────
-echo "[import] source: $SRC_DB  ($src_plain)"
-echo "[import] target: $DST_DB  ($dst_plain)"
+echo "[import] source: $SRC_DB"
+echo "[import] target: $DST_DB"
 echo "[import] mode:   $([[ $SCHEMA_ONLY -eq 1 ]] && echo "schema-only" || echo "schema + data")"
 echo "[import] tables: ${#ALL_TABLES[@]}"
 [[ -n "$ROW_LIMIT" ]] && echo "[import] row-limit per table: $ROW_LIMIT"
@@ -285,6 +300,23 @@ fi
 # the pipeline fails with rc=141. Dumping to a temp file then
 # restoring avoids that entirely.
 echo "[import] (1/2) dropping + recreating schema in target from prod..."
+# If the target had an unmerged Miaoshou migration, its foreign keys can block
+# pg_dump --clean from dropping production tables. The source has no Miaoshou
+# schema until the corresponding production migration is applied, so drop this
+# target-only schema before restoring the authoritative source snapshot.
+if [[ -z "${SOURCE_TABLES[miaoshou.packages]:-}" ]]; then
+  psql --no-psqlrc --set ON_ERROR_STOP=1 --quiet \
+    --command "DROP SCHEMA IF EXISTS miaoshou CASCADE" "$dst_plain"
+else
+  # Drop only target-only Miaoshou tables before pg_dump --clean reaches
+  # referenced production constraints such as integration.credentials.
+  for table in purchase_order_raw_records purchase_price_candidates purchase_prices; do
+    if [[ -z "${SOURCE_TABLES[miaoshou.$table]:-}" ]]; then
+      psql --no-psqlrc --set ON_ERROR_STOP=1 --quiet \
+        --command "DROP TABLE IF EXISTS miaoshou.$table CASCADE" "$dst_plain"
+    fi
+  done
+fi
 SCHEMA_DUMP="$(mktemp --suffix=.sql)"
 trap 'rm -f "$SCHEMA_DUMP"' EXIT
 

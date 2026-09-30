@@ -106,9 +106,11 @@ ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0045_miaoshou_package_schem
 - 清洗：按采购单内唯一 `sourceItemId` 与唯一 `platformItemId` 的首次出现顺序配对；组数不一致不猜测；
   同一货源商品多 SKU 按 `Σ(sourceUnitPrice×sourceQuantity)/Σ(sourceQuantity)` 计算 CNY 单价；
   排除 `cancel` / `wait_pay`，每个 SPU 取最新采购事实，并拒绝最新时间同价冲突。
-- 结果：最新候选写 `miaoshou.purchase_price_candidates`。唯一解析到
-  `commerce.products_spu` 时，仅在金额/币种变化时关闭旧 `manual_product_costs` 行并插入新行；同价不制造历史噪音。
-  缺商品主档或 SPU 歧义只记录 candidate/issue，不伪造店铺或产品。
+- 结果：清洗价格写独立表 `miaoshou.purchase_prices`，唯一键为
+  `(credential_id, miaoshou_shop_id, spu_id)`。只要妙手 `shopId` 能经
+  `procurement.procurement_accounts` 唯一映射到 `commerce.shops`，就写入价格并保存 `shop_pk`；
+  **不要求 `products_spu` 存在，也不写入/覆盖 `manual_product_costs`**。
+  未匹配或歧义店铺只记录 `miaoshou.sync_issues`，不写采购价格表，也不伪造店铺。
 - 首次配置（交互输入，secret 不进 shell history）：
 
 ```bash
@@ -116,7 +118,7 @@ python3 scripts/configure_miaoshou_web_session.py \
   --account-id 12629145 --front-version 1790677442555 --confirm
 ```
 
-- 生产 migration 0046 + 首次同步：
+- 生产 migration 0047 + 首次同步：
 
 ```bash
 ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0047_miaoshou_purchase_prices.sh --confirm

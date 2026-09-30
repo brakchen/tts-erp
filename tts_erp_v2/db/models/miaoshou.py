@@ -286,16 +286,18 @@ class MiaoshouPurchaseOrderRawRecord(Base):
     )
 
 
-class MiaoshouPurchasePriceCandidate(Base):
-    """Latest cleaned quantity-weighted CNY purchase price per platform SPU."""
+class MiaoshouPurchasePrice(Base):
+    """Latest cleaned CNY purchase price, independently keyed by matched store/SPU."""
 
-    __tablename__ = "purchase_price_candidates"
+    __tablename__ = "purchase_prices"
     __table_args__ = (
         UniqueConstraint(
             "credential_id",
+            "miaoshou_shop_id",
             "spu_id",
-            name="uq_miaoshou_purchase_price_credential_spu",
+            name="uq_miaoshou_purchase_price_credential_shop_spu",
         ),
+        Index("ix_miaoshou_purchase_price_shop", "shop_pk"),
         Index("ix_miaoshou_purchase_price_status", "resolution_status"),
         Index("ix_miaoshou_purchase_price_source_at", "source_purchase_at"),
         CheckConstraint(
@@ -315,15 +317,13 @@ class MiaoshouPurchasePriceCandidate(Base):
         ForeignKey("integration.credentials.id", ondelete="CASCADE"),
         nullable=False,
     )
+    miaoshou_shop_id: Mapped[str] = mapped_column(Text, nullable=False)
+    shop_name: Mapped[str | None] = mapped_column(Text)
+    shop_pk: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("commerce.shops.id", ondelete="SET NULL"),
+    )
     spu_id: Mapped[str] = mapped_column(Text, nullable=False)
-    spu_pk: Mapped[int | None] = mapped_column(
-        BigInteger,
-        ForeignKey("commerce.products_spu.id", ondelete="SET NULL"),
-    )
-    manual_cost_id: Mapped[int | None] = mapped_column(
-        BigInteger,
-        ForeignKey("procurement.manual_product_costs.id", ondelete="SET NULL"),
-    )
     unit_cost: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
     currency: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'CNY'")
@@ -442,7 +442,7 @@ __all__ = [
     "MiaoshouPackageItem",
     "MiaoshouPackageRawRecord",
     "MiaoshouPurchaseOrderRawRecord",
-    "MiaoshouPurchasePriceCandidate",
+    "MiaoshouPurchasePrice",
     "MiaoshouSyncCursor",
     "MiaoshouSyncIssue",
 ]

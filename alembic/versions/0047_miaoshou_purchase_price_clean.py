@@ -67,12 +67,13 @@ def upgrade() -> None:
     )
 
     op.create_table(
-        "purchase_price_candidates",
+        "purchase_prices",
         sa.Column("id", sa.BigInteger, sa.Identity(always=True), nullable=False),
         sa.Column("credential_id", sa.BigInteger, nullable=False),
+        sa.Column("miaoshou_shop_id", sa.Text, nullable=False),
+        sa.Column("shop_name", sa.Text),
+        sa.Column("shop_pk", sa.BigInteger),
         sa.Column("spu_id", sa.Text, nullable=False),
-        sa.Column("spu_pk", sa.BigInteger),
-        sa.Column("manual_cost_id", sa.BigInteger),
         sa.Column("unit_cost", sa.Numeric(20, 4), nullable=False),
         sa.Column("currency", sa.Text, server_default=sa.text("'CNY'"), nullable=False),
         sa.Column("source_purchase_order_sn", sa.Text, nullable=False),
@@ -122,17 +123,13 @@ def upgrade() -> None:
             ["credential_id"], ["integration.credentials.id"], ondelete="CASCADE"
         ),
         sa.ForeignKeyConstraint(
-            ["spu_pk"], ["commerce.products_spu.id"], ondelete="SET NULL"
-        ),
-        sa.ForeignKeyConstraint(
-            ["manual_cost_id"],
-            ["procurement.manual_product_costs.id"],
-            ondelete="SET NULL",
+            ["shop_pk"], ["commerce.shops.id"], ondelete="SET NULL"
         ),
         sa.UniqueConstraint(
             "credential_id",
+            "miaoshou_shop_id",
             "spu_id",
-            name="uq_miaoshou_purchase_price_credential_spu",
+            name="uq_miaoshou_purchase_price_credential_shop_spu",
         ),
         sa.CheckConstraint(
             "unit_cost > 0",
@@ -141,40 +138,51 @@ def upgrade() -> None:
         schema="miaoshou",
     )
     op.create_index(
+        "ix_miaoshou_purchase_price_shop",
+        "purchase_prices",
+        ["shop_pk"],
+        schema="miaoshou",
+    )
+    op.create_index(
         "ix_miaoshou_purchase_price_status",
-        "purchase_price_candidates",
+        "purchase_prices",
         ["resolution_status"],
         schema="miaoshou",
     )
     op.create_index(
         "ix_miaoshou_purchase_price_source_at",
-        "purchase_price_candidates",
+        "purchase_prices",
         ["source_purchase_at"],
         schema="miaoshou",
     )
     op.execute(
-        "CREATE OR REPLACE TRIGGER trg_miaoshou_purchase_price_candidates_touch "
-        "BEFORE UPDATE ON miaoshou.purchase_price_candidates FOR EACH ROW "
+        "CREATE OR REPLACE TRIGGER trg_miaoshou_purchase_prices_touch "
+        "BEFORE UPDATE ON miaoshou.purchase_prices FOR EACH ROW "
         "EXECUTE FUNCTION public.fn_touch_updated_at()"
     )
 
 
 def downgrade() -> None:
     op.execute(
-        "DROP TRIGGER IF EXISTS trg_miaoshou_purchase_price_candidates_touch "
-        "ON miaoshou.purchase_price_candidates"
+        "DROP TRIGGER IF EXISTS trg_miaoshou_purchase_prices_touch "
+        "ON miaoshou.purchase_prices"
     )
     op.drop_index(
         "ix_miaoshou_purchase_price_source_at",
-        table_name="purchase_price_candidates",
+        table_name="purchase_prices",
         schema="miaoshou",
     )
     op.drop_index(
         "ix_miaoshou_purchase_price_status",
-        table_name="purchase_price_candidates",
+        table_name="purchase_prices",
         schema="miaoshou",
     )
-    op.drop_table("purchase_price_candidates", schema="miaoshou")
+    op.drop_index(
+        "ix_miaoshou_purchase_price_shop",
+        table_name="purchase_prices",
+        schema="miaoshou",
+    )
+    op.drop_table("purchase_prices", schema="miaoshou")
     op.drop_index(
         "ix_miaoshou_purchase_raw_captured",
         table_name="purchase_order_raw_records",

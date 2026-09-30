@@ -106,41 +106,53 @@ kept 口径误差 **±1%**；混合口径（含退款单）高估 **~16%**。
 
 ```text
 projection_refund_amount_rate
-= 已结算样本已完结退款金额 / 已结算样本销售额
+= 已结算样本退款金额 / 已结算样本销售额
 
-projection_full_loss_rate
-= full_loss_order_count / total_orders
+settled_full_loss_rate
+= 已结算退款/退货全损订单数 / 全部已结算订单数
 ```
 
-金额率只预测收入；订单全损率只作为待确认订单的全损概率。先得到预计新增全损订单数，
-再用待确认订单平均件数换算预计全损件数。兼容字段
-`projection_full_loss_qty_rate` 返回同一个订单概率代理值。未结算订单中已完结
-`REFUND_ONLY` / `RETURN_AND_REFUND` 的退款金额按已知事实扣一次，其确认件数从
-`unresolved_unsettled_qty` 排除，不得再次应用预测比例。
+结算退款优先使用 `CUSTOMER_REFUND`，case 作为补充。页面同时展示“当前全损率”和
+“已结算订单全损率”，前者是当前事实，后者才用于预测。
 
 ```text
+expected_terminal_full_loss_orders
+= unsettled_order_count × settled_full_loss_rate
+
 projected_future_full_loss_order_count
-= unresolved_unsettled_order_count × projection_full_loss_rate
+= max(expected_terminal_full_loss_orders
+      - confirmed_unsettled_full_loss_order_count, 0)
+
+expected_terminal_full_loss_qty
+= unsettled_order_count
+  × (settled_full_loss_qty / settled_order_count)
 
 projected_future_full_loss_qty
-= projected_future_full_loss_order_count
-  × (unresolved_unsettled_qty / unresolved_unsettled_order_count)
-= unresolved_unsettled_qty × projection_full_loss_rate
+= max(expected_terminal_full_loss_qty
+      - confirmed_unsettled_full_loss_qty, 0)
+```
 
-projected_terminal_full_loss_qty
-= observed_full_loss_qty + projected_future_full_loss_qty
+页面只展示预计未来新增全损，不展示预计终局全损。退款金额也先估算整批终局额度，
+再扣除已确认退款：
+
+```text
+expected_terminal_refund
+= unsettled_sales_after_fee × projection_refund_amount_rate
+
+projected_terminal_refund
+= max(expected_terminal_refund, confirmed_unsettled_refund_after_fee)
+
+projected_future_refund
+= projected_terminal_refund - confirmed_unsettled_refund_after_fee
 
 projected_unsettled_net
-= [unsettled_sales
-   - confirmed_unsettled_refund_amount
-   - unresolved_unsettled_sales × projection_refund_amount_rate]
-  × (1 - fee_rate)
+= unsettled_sales_after_fee - projected_terminal_refund
 
-projected_net_revenue
-= settled_net + projected_unsettled_net
+unsettled_net_delta
+= projected_unsettled_net - current_unsettled_net
 
-projected_net_profit
-= projected_net_revenue - 当前 cogs_total - ad_spend
+projected_net_revenue = current_net_revenue + unsettled_net_delta
+projected_net_profit = current_net_profit + unsettled_net_delta
 ```
 
 `projected_future_full_loss_qty` 不得再次加入 COGS：paid 商品货本已经在当前
@@ -155,13 +167,22 @@ projected_roi_breakeven
 = projected_nc_prime / (projected_nc_prime - projected_cogs_kept)
 ```
 
-广告消耗为 0，或保本分母小于等于 0时，相应 ROI 输出空值。存在未结算订单但没有
-已结算样本订单、样本销售额或样本件数时，状态为 `insufficient_sample`，所有预测率和
-预计终局结果为空，禁止按 0% 处理。没有未结算订单时状态为
-`no_unsettled_orders`，预计终局收入、利润和 ROI 与当前值一致。
+预计广告系统指标继续使用广告归因 GMV，不能与净收入混用：
 
-多 SPU 大盘的样本订单数、未结算订单数、待确认订单数必须按订单全局去重；金额和件数
-按唯一商品行聚合。大盘比例使用整体分子/分母重新计算，不能平均或简单累加 SPU 比率。
+```text
+projected_ad_gmv = ad_gmv × (1 - projection_refund_amount_rate)
+projected_ad_system_roi = projected_ad_gmv / ad_spend
+projected_ad_system_max_ad_spend = projected_net_revenue - cogs_total
+projected_ad_system_breakeven_roi
+= projected_ad_gmv / projected_ad_system_max_ad_spend
+```
+
+广告消耗为 0，或保本分母小于等于 0时，相应 ROI 输出空值。存在未结算订单但没有
+已结算样本订单或样本销售额时，状态为 `insufficient_sample`；没有未结算订单时状态为
+`no_unsettled_orders`，预计利润和四个 ROI 指标与当前值一致。
+
+多 SPU 大盘的已结算样本订单数、已结算全损订单数、未结算订单数和已确认未结算全损
+订单数必须按订单全局去重；金额和件数按唯一商品行聚合。
 `spu-roi` 与 `focused-spus` 使用同一 API 和公式，仅 SPU 选择范围不同。
 
 ## 5. 广告系统 ROI（TikTok 后台口径，单独一套）
