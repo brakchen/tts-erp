@@ -680,12 +680,18 @@ flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast
 
 ### 上线顺序
 
-1. 在测试库执行 migration 0043。
-2. 跑 focused-spus 窄测试与 fast suite。
-3. 人工在生产执行 migration 0043。
-4. 部署并重启 API 服务。
-5. 用 readwrite 会话选择店铺、添加 1 个 SPU、刷新确认持久化。
-6. 用关注集合中的同一批 SPU，对比 `scope=focused` 与标准页精确 SPU scope 在相同日期范围下的响应，确认金额和 totals 完全一致。
+测试库 migration、focused-spus 窄测试与 fast suite 已完成。生产由人工执行受保护脚本：
+
+```bash
+git pull --ff-only origin master
+bash scripts/oneoff_deploy_focused_spus.sh --check
+ALLOW_PROD_DESTRUCTIVE=1 \
+  bash scripts/oneoff_deploy_focused_spus.sh --confirm
+```
+
+脚本固定执行：确认数据库当前 revision 只能是 0042/0043 → shared destructive guard → upgrade 0043 → schema catalog 验证 → 仅重启 API 服务 → healthz/OpenAPI/静态资产验证。它不会执行 `git pull`，也不会重启未受本功能影响的 sync worker。
+
+执行后人工用 readwrite 会话选择店铺、添加 1 个 SPU、刷新确认持久化；再用同一批 SPU 对比 `scope=focused` 与标准页精确 scope 在相同日期范围下的金额和 totals。
 
 ### 回滚
 
