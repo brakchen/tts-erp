@@ -16,6 +16,8 @@
   var MAX_SELECTED_SPUS = 100;
   var DEFAULT_SORT = "roi_real";
   var DEFAULT_ORDER = "asc";
+  var DATE_VALUE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  var PAGE_LIMITS = new Set([50, 100, 200]);
   var SORT_LABEL = {
     roi_real: "实际ROI",
     spend: "消耗",
@@ -36,26 +38,6 @@
     return_loss: "全损退款",
     roi_breakeven: "保本ROI",
   };
-  var SORTABLE = new Set([
-    "roi_real",
-    "spend",
-    "refund_rate",
-    "refund_rate_qty",
-    "cancel_rate",
-    "net_profit",
-    "sales",
-    "effective_sales",
-    "gmv_sales",
-    "order_count",
-    "effective_order_count",
-    "cancelled_order_count",
-    "units_sold",
-    "return_loss",
-    "roi_breakeven",
-    "refund_net_amount",
-    "full_loss_rate",
-  ]);
-
   // Public path prefix: "/tts" behind NGINX, "" on :9877 directly.
   var PREFIX = location.pathname.replace(/\/v2\/pages\/.*$/, "");
   if (!/^\/[a-z0-9/_-]*$/i.test(PREFIX)) PREFIX = "";
@@ -64,6 +46,41 @@
   function $(sel, root) {
     return (root || document).querySelector(sel);
   }
+
+  function sortableHeaders() {
+    return document.querySelectorAll(".op-table thead th[data-sort]");
+  }
+
+  function supportsSortField(field) {
+    if (!field) return false;
+    if (field === DEFAULT_SORT) return true;
+    return Array.prototype.some.call(
+      sortableHeaders(),
+      (header) => header.getAttribute("data-sort") === field,
+    );
+  }
+
+  function sortLabel(field) {
+    var matched = Array.prototype.find.call(
+      sortableHeaders(),
+      (header) => header.getAttribute("data-sort") === field,
+    );
+    return matched
+      ? matched.getAttribute("data-sort-label") || matched.textContent.trim()
+      : SORT_LABEL[field] || field;
+  }
+
+  function prepareSortableHeaders() {
+    Array.prototype.forEach.call(sortableHeaders(), (header) => {
+      header.classList.add("op-th-sort");
+      if (!header.getAttribute("data-sort-label")) {
+        header.setAttribute("data-sort-label", header.textContent.trim());
+      }
+      header.setAttribute("tabindex", "0");
+      header.setAttribute("aria-sort", "none");
+    });
+  }
+
   function esc(s) {
     return String(s == null ? "" : s).replace(
       /[&<>"']/g,
@@ -150,6 +167,69 @@
   function loginUrl() {
     var pagePath = profile && profile.pagePath ? profile.pagePath : "/v2/pages/spu-roi";
     return `${PREFIX}/v2/auth/login?next=${PREFIX}${pagePath}`;
+  }
+
+  function preferenceStorageKey() {
+    var preferences = profile && profile.preferences;
+    return preferences && preferences.storageKey ? preferences.storageKey : "";
+  }
+
+  function readPagePreferences() {
+    var key = preferenceStorageKey();
+    if (!key) return null;
+    try {
+      var saved = JSON.parse(window.localStorage.getItem(key) || "null");
+      return saved && typeof saved === "object" ? saved : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function restorePagePreferences() {
+    var saved = readPagePreferences();
+    if (!saved) return;
+    if (typeof saved.shopPk === "string" && /^\d+$/.test(saved.shopPk)) {
+      state.shopPk = saved.shopPk;
+    }
+    if (saved.datesTouched === true) {
+      var savedStart = typeof saved.wStart === "string" ? saved.wStart : "";
+      var savedEnd = typeof saved.wEnd === "string" ? saved.wEnd : "";
+      var datesValid =
+        (!savedStart || DATE_VALUE_RE.test(savedStart)) &&
+        (!savedEnd || DATE_VALUE_RE.test(savedEnd)) &&
+        (!savedStart || !savedEnd || savedStart <= savedEnd);
+      if (datesValid) {
+        state.datesTouched = true;
+        state.wStart = savedStart;
+        state.wEnd = savedEnd;
+      }
+    }
+    if (typeof saved.includeAll === "boolean") state.includeAll = saved.includeAll;
+    if (PAGE_LIMITS.has(saved.limit)) state.limit = saved.limit;
+    if (supportsSortField(saved.sort)) state.sort = saved.sort;
+    if (saved.order === "asc" || saved.order === "desc") state.order = saved.order;
+  }
+
+  function persistPagePreferences() {
+    var key = preferenceStorageKey();
+    if (!key) return;
+    try {
+      window.localStorage.setItem(
+        key,
+        JSON.stringify({
+          shopPk: state.shopPk || null,
+          wStart: state.wStart,
+          wEnd: state.wEnd,
+          datesTouched: state.datesTouched,
+          includeAll: state.includeAll,
+          limit: state.limit,
+          sort: state.sort,
+          order: state.order,
+        }),
+      );
+    } catch {
+      // 隐私模式、存储配额或浏览器策略禁用 localStorage 时保持页面可用。
+    }
   }
 
   // ---------- api ----------
@@ -946,6 +1026,7 @@
       // api() 用 state.wStart || null 发请求,导致 w_start/w_end 参数不传、过滤不生效)
       state.wStart = cw.coverage_first_day;
       state.wEnd = cw.coverage_last_day;
+      updateDatePresetUi();
       // 首次 load() 是在 state 同步前发的(无日期参数,全历史);
       // 现在 state 有了,重发一次让过滤生效(不重发用户点刷新才能看到过滤结果)
       load();
@@ -959,22 +1040,25 @@
   }
 
   function updateSortMarkers() {
-    Array.prototype.forEach.call(
-      document.querySelectorAll(".op-th-sort"),
-      (th) => {
-        var field = th.getAttribute("data-sort");
-        var mark = th.querySelector(".arrow");
-        if (mark) mark.remove();
-        if (field === state.sort) {
-          var span = document.createElement("span");
-          span.className = "arrow";
-          span.textContent = state.order === "asc" ? " ▲" : " ▼";
-          th.appendChild(span);
-        }
-      },
-    );
+    Array.prototype.forEach.call(sortableHeaders(), (header) => {
+      var field = header.getAttribute("data-sort");
+      var mark = header.querySelector(".arrow");
+      if (mark) mark.remove();
+      header.setAttribute("aria-sort", "none");
+      if (field === state.sort) {
+        var span = document.createElement("span");
+        span.className = "arrow";
+        span.setAttribute("aria-hidden", "true");
+        span.textContent = state.order === "asc" ? " ▲" : " ▼";
+        header.appendChild(span);
+        header.setAttribute(
+          "aria-sort",
+          state.order === "asc" ? "ascending" : "descending",
+        );
+      }
+    });
     $("#sort-note").textContent =
-      `当前排序：${SORT_LABEL[state.sort] || state.sort}${state.order === "asc" ? " ↑" : " ↓"}`;
+      `当前排序：${sortLabel(state.sort)}${state.order === "asc" ? " ↑" : " ↓"}`;
   }
 
   // ---------- 钻取面板 (D7 行内 accordion + D6 tab 懒加载) ----------
@@ -1593,6 +1677,7 @@
     closeDrillPanel();
     state.shopPk = pk;
     setShopPkInUrl(pk);
+    persistPagePreferences();
     state.offset = 0;
     if (!selectionAdapter) {
       resetSpuSelectForShop();
@@ -1643,21 +1728,30 @@
           opt.textContent = s.account_name || `#${s.id} (${s.region || "?"})`;
           sel.appendChild(opt);
         });
-        // 从 URL 读 shop_pk
+        // URL 优先；没有 URL 参数时恢复这个页面上次选择的店铺。
         var urlPk = getShopPkFromUrl();
-        if (urlPk) {
-          // 验证 URL 中的 shop_pk 是否在列表中
-          var found = shops.some((s) => String(s.id) === urlPk);
+        var preferredPk = urlPk || state.shopPk;
+        if (preferredPk) {
+          var found = shops.some((s) => String(s.id) === preferredPk);
           if (!found) {
-            sel.value = ""; // 复位下拉,避免视觉上默认显示第一个店铺造成误导(2026-09-28 review P2)
-            showShopModal(shops, `URL 中的店铺 ${urlPk} 不存在，请重新选择`);
+            sel.value = ""; // 避免视觉上默认显示第一个店铺造成误导
+            state.shopPk = null;
+            persistPagePreferences();
+            showShopModal(
+              shops,
+              urlPk
+                ? `URL 中的店铺 ${urlPk} 不存在，请重新选择`
+                : "上次选择的店铺已不可用，请重新选择",
+            );
             return null;
           }
-          sel.value = urlPk;
+          sel.value = preferredPk;
           state.shopPk = sel.value;
+          setShopPkInUrl(sel.value);
+          persistPagePreferences();
           if (!selectionAdapter) resetSpuSelectForShop();
         } else {
-          // URL 无 shop_pk → 弹窗让用户选店铺(不倒计时、不强跳首页)
+          // URL 与页面偏好均无 shop_pk → 弹窗让用户选店铺。
           showShopModal(shops, "");
           return null;
         }
@@ -1901,6 +1995,160 @@
     });
   }
 
+  function reportingDateValue(value) {
+    var dateConfig = profile.dateRangeControl || {};
+    var timeZone = dateConfig.reportingTimeZone || "UTC";
+    var parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(value);
+    var values = {};
+    parts.forEach((part) => {
+      if (part.type !== "literal") values[part.type] = part.value;
+    });
+    if (!values.year || !values.month || !values.day) return null;
+    return `${values.year}-${values.month}-${values.day}`;
+  }
+
+  function shiftDateValue(value, days) {
+    if (!DATE_VALUE_RE.test(value)) return null;
+    var parts = value.split("-").map((part) => parseInt(part, 10));
+    var shifted = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2] + days));
+    return [
+      shifted.getUTCFullYear(),
+      String(shifted.getUTCMonth() + 1).padStart(2, "0"),
+      String(shifted.getUTCDate()).padStart(2, "0"),
+    ].join("-");
+  }
+
+  function dateRangeForPreset(preset) {
+    if (preset === "all") return { start: "", end: "" };
+    var end = reportingDateValue(new Date());
+    if (!end) return null;
+    if (preset === "month") return { start: `${end.slice(0, 8)}01`, end: end };
+    var days = parseInt(preset, 10);
+    if (!Number.isFinite(days)) return null;
+    return { start: shiftDateValue(end, -days + 1), end: end };
+  }
+
+  function updateDatePresetUi() {
+    Array.prototype.forEach.call(
+      document.querySelectorAll("[data-date-preset]"),
+      (button) => {
+        var range = dateRangeForPreset(button.getAttribute("data-date-preset"));
+        var active = Boolean(
+          range && range.start === state.wStart && range.end === state.wEnd,
+        );
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+      },
+    );
+  }
+
+  function applyDatePreset(preset) {
+    var range = dateRangeForPreset(preset);
+    if (!range) return;
+    state.wStart = range.start;
+    state.wEnd = range.end;
+    state.datesTouched = true;
+    $("#filter-w-start").value = range.start;
+    $("#filter-w-end").value = range.end;
+    state.offset = 0;
+    persistPagePreferences();
+    updateDatePresetUi();
+    load();
+  }
+
+  function enhanceDateRangeControl() {
+    if (
+      !profile.dateRangeControl ||
+      profile.dateRangeControl.enabled !== true
+    )
+      return;
+    var start = $("#filter-w-start");
+    var end = $("#filter-w-end");
+    if (!start || !end || !start.parentElement || !end.parentElement) return;
+    var startCol = start.parentElement;
+    var endCol = end.parentElement;
+    if (startCol.parentElement !== endCol.parentElement) return;
+
+    var wrapper = el("div", { class: "col-12 col-lg-auto op-date-range-col" });
+    var control = el("div", {
+      class: "op-date-range p-2",
+      "aria-labelledby": "date-range-label",
+      "aria-describedby": "date-range-help",
+    });
+    var heading = el("div", {
+      class: "op-date-range__heading d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2",
+    });
+    heading.appendChild(
+      el("span", {
+        id: "date-range-label",
+        class: "form-label op-fld-label mb-0",
+        text: "日期范围",
+      }),
+    );
+    var presets = el("div", {
+      class: "btn-group btn-group-sm op-date-presets",
+      role: "group",
+      "aria-label": "快捷日期范围",
+    });
+    [
+      ["7", "近 7 天"],
+      ["30", "近 30 天"],
+      ["month", "本月"],
+      ["all", "不限"],
+    ].forEach((item) => {
+      var button = el("button", {
+        type: "button",
+        class: "btn btn-outline-secondary",
+        "data-date-preset": item[0],
+        "aria-pressed": "false",
+        text: item[1],
+      });
+      button.addEventListener("click", () => applyDatePreset(item[0]));
+      presets.appendChild(button);
+    });
+    heading.appendChild(presets);
+
+    var inputRow = el("div", { class: "row g-2 op-date-input-groups" });
+    [
+      ["起始", start],
+      ["截止", end],
+    ].forEach((item) => {
+      var column = el("div", { class: "col-12 col-sm-6" });
+      var inputGroup = el("div", {
+        class: "input-group input-group-sm op-date-input-group",
+        role: "group",
+        "aria-label": `${item[0]}日期`,
+      });
+      inputGroup.appendChild(
+        el("span", { class: "input-group-text", text: item[0] }),
+      );
+      inputGroup.appendChild(item[1]);
+      column.appendChild(inputGroup);
+      inputRow.appendChild(column);
+    });
+    start.setAttribute("aria-describedby", "date-range-help");
+    end.setAttribute("aria-describedby", "date-range-help");
+    control.appendChild(heading);
+    control.appendChild(inputRow);
+    control.appendChild(
+      el("div", {
+        id: "date-range-help",
+        class: "form-text op-date-range__help mt-2",
+        text: "截止日包含当天；留空表示全历史，销售、退款与广告按同一范围统计。",
+      }),
+    );
+    wrapper.appendChild(control);
+    startCol.parentElement.insertBefore(wrapper, startCol);
+    startCol.remove();
+    endCol.remove();
+    updateDatePresetUi();
+  }
+
   // ---------- 交互绑定 ----------
   function bindControls() {
     if (selectionAdapter) {
@@ -1942,6 +2190,7 @@
     $("#filter-limit").addEventListener("change", (e) => {
       state.limit = parseInt(e.target.value, 10) || 100;
       state.offset = 0;
+      persistPagePreferences();
       load();
     });
 
@@ -1964,6 +2213,7 @@
     $("#filter-include-all").addEventListener("change", (e) => {
       state.includeAll = e.target.checked;
       state.offset = 0;
+      persistPagePreferences();
       load();
     });
 
@@ -1975,7 +2225,7 @@
       var v = e.target.value || "";
       if (which === "start") state.wStart = v;
       else state.wEnd = v;
-      if (v) state.datesTouched = true;
+      state.datesTouched = true;
       // 起始 > 截止 → 拒绝这次查询、重置该输入、提示错误
       if (state.wStart && state.wEnd && state.wStart > state.wEnd) {
         renderError(
@@ -1988,9 +2238,13 @@
         e.target.value = "";
         if (which === "start") state.wStart = "";
         else state.wEnd = "";
+        persistPagePreferences();
+        updateDatePresetUi();
         return;
       }
       state.offset = 0;
+      persistPagePreferences();
+      updateDatePresetUi();
       load();
     }
     $("#filter-w-start").addEventListener("change", (e) =>
@@ -2018,24 +2272,35 @@
       load();
     });
 
-    // 列头排序:同列 asc ↔ desc 双向切换;新列首方向 asc
-    Array.prototype.forEach.call(
-      document.querySelectorAll(".op-th-sort[data-sort]"),
-      (th) => {
-        th.addEventListener("click", () => {
-          var field = th.getAttribute("data-sort");
-          if (!SORTABLE.has(field)) return;
-          if (field === state.sort) {
-            state.order = state.order === "asc" ? "desc" : "asc";
-          } else {
-            state.sort = field;
-            state.order = "asc";
-          }
-          state.offset = 0;
-          load();
-        });
-      },
-    );
+    // 列头排序由 data-sort 元数据驱动；新指标列无需再改 JS 白名单。
+    prepareSortableHeaders();
+    var tableHead = $(".op-table thead");
+    function activateSortHeader(header) {
+      var field = header.getAttribute("data-sort");
+      if (!supportsSortField(field)) return;
+      if (field === state.sort) {
+        state.order = state.order === "asc" ? "desc" : "asc";
+      } else {
+        state.sort = field;
+        state.order = "asc";
+      }
+      state.offset = 0;
+      persistPagePreferences();
+      load();
+    }
+    if (tableHead) {
+      tableHead.addEventListener("click", (event) => {
+        var header = event.target.closest("th[data-sort]");
+        if (header && tableHead.contains(header)) activateSortHeader(header);
+      });
+      tableHead.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        var header = event.target.closest("th[data-sort]");
+        if (!header || !tableHead.contains(header)) return;
+        event.preventDefault();
+        activateSortHeader(header);
+      });
+    }
 
     wireTooltips(); // 悬停说明气泡(data-tip 委托,含重渲染后的新行)
     wireZoom(); // 主图点击放大(委托)
@@ -2056,10 +2321,16 @@
     state.includeAll = Boolean(defaults.includeAll);
     state.sort = defaults.sort || DEFAULT_SORT;
     state.order = defaults.order || DEFAULT_ORDER;
+    restorePagePreferences();
     var limitInput = $("#filter-limit");
     if (limitInput) limitInput.value = String(state.limit);
     var includeInput = $("#filter-include-all");
     if (includeInput) includeInput.checked = state.includeAll;
+    var startInput = $("#filter-w-start");
+    if (startInput) startInput.value = state.wStart;
+    var endInput = $("#filter-w-end");
+    if (endInput) endInput.value = state.wEnd;
+    enhanceDateRangeControl();
     mounted = true;
     bindControls();
     return {
