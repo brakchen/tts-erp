@@ -302,12 +302,12 @@
   // Each tab renders a different column set; swap the <thead> so the
   // header labels always match the rows below.
   var THEAD_BY_TAB = {
-    // All-SPU catalogue (2026-09-06): SKU / title / status / editable
+    // All-SPU catalogue (2026-09-06): SPU / title / status / editable
     // cost / created / updated / image. Sort arrows live on the
     // sortable columns; the active one is marked is-sorted-* by
     // renderAllRows' caller.
     all:
-      '<tr><th scope="col" class="op-th op-th-sku">SKU</th>' +
+      '<tr><th scope="col" class="op-th op-th-sku">SPU</th>' +
       '<th scope="col" class="op-th op-th-title">标题</th>' +
       '<th scope="col" class="op-th op-th-sku op-th-sortable" data-sort="status" title="按状态排序">状态<span class="op-sort-arrow"></span></th>' +
       '<th scope="col" class="op-th op-th-cost op-th-sortable" data-sort="unit_cost" title="按成本价排序">成本<span class="op-sort-arrow"></span></th>' +
@@ -319,7 +319,7 @@
     // predecessor (prev —).
     recent:
       '<tr><th scope="col" class="op-th op-th-sku">变更时间</th>' +
-      '<th scope="col" class="op-th op-th-sku">SKU</th>' +
+      '<th scope="col" class="op-th op-th-sku">SPU</th>' +
       '<th scope="col" class="op-th op-th-title">标题</th>' +
       '<th scope="col" class="op-th op-th-cost">变更前</th>' +
       '<th scope="col" class="op-th op-th-cost">变更后</th>' +
@@ -659,7 +659,7 @@
           '">' +
           esc(fmtDate(it.created_at)) +
           "</td>" +
-          '<td class="op-td-sku" data-label="SKU" title="' +
+          '<td class="op-td-sku" data-label="SPU" title="' +
           esc(it.spu_id || "") +
           '">' +
           esc(it.spu_id || "—") +
@@ -803,7 +803,7 @@
       }
       html(
         tr,
-        '<td class="op-td-sku" data-label="SKU" title="' +
+        '<td class="op-td-sku" data-label="SPU" title="' +
           esc(it.spu_id || "") +
           '">' +
           esc(it.spu_id || "—") +
@@ -928,13 +928,16 @@
       });
     });
     var search = $("#filter-search");
-    if (search)
+    if (search) {
+      search.placeholder = "SPU 或标题";
+      search.setAttribute("aria-label", "按 SPU 或标题过滤");
       search.addEventListener("input", () => {
         searchQuery = search.value.trim();
         pageOffset = 0;
         if (searchTimer) window.clearTimeout(searchTimer);
         searchTimer = window.setTimeout(refreshActiveTab, 250);
       });
+    }
     var submitAll = $('[data-act="submit-all"]');
     if (submitAll)
       submitAll.addEventListener("click", () => {
