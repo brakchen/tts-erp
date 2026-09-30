@@ -414,8 +414,8 @@ Response envelope:`{items: [...], total, totals, meta}`。`spu_ids` 属于盈利
 | **`full_loss_cancelled_qty`** | **int** | **v9：其中海外取消件数（COGS 补扣基数；退货件已含在 units_sold 里不重复补扣）** | 下钻·结算 tab |
 | **`full_loss_rate`** | **ratio-str/null** | **v9(D8 主列)：`full_loss_qty ÷ (units_sold + full_loss_cancelled_qty)`；分母 0 → null；不钳位（>100% 标识数据异常）** | **主列**(标记为"全损退款率%") |
 | `return_loss` | money-str (CNY) | **M13b v9** = `full_loss_qty × unit_cost_used` | — |
-| `unit_cost_used` | money-str (CNY) | 单位成本直接使用采购成本链解析出的 CNY 值 | — |
-| `cost_source` | enum | **v8 扩为四值**：`MANUAL`(人工标注的采购成交价) \| `PURCHASE`(妙手采购单成交价) \| `SOURCE_PRICE`(1688 货源价) \| `DEFAULT_K1`(40 CNY/件) | — |
+| `unit_cost_used` | money-str (CNY) | 当前有效人工标注采购成本；未标注时使用 40 CNY/件。妙手/1688 同步货源价不参与计算 | — |
+| `cost_source` | enum | `MANUAL`(当前有效人工标注采购成交价) \| `DEFAULT_K1`(40 CNY/件) | — |
 | `net_profit` | money-str (CNY) | **M18 v8** = `net_revenue − (units_sold + full_loss_cancelled_qty) × unit_cost − spend`（**不**扣 platform_fee：已结费用含 SETTLEMENT，未结按 (1−r̂) 折算） | **主列** |
 | `platform_fee` | money-str (CNY) | **M19 v8** = `r̂ × unsettled_sales`（**信息列，不**进 M18） | — |
 | `fee_rate_used` | ratio-str | 本行实际使用的 r̂（4 位小数字符串） | — |
@@ -426,6 +426,12 @@ Response envelope:`{items: [...], total, totals, meta}`。`spu_ids` 属于盈利
 
 `totals` 同样返回上述 5 个 `ad_system_*` 字段，按完整 scope 聚合后重新计算（不是行级 ROI 平均值）。`meta.ad_system_roi` 给出实际 ROI、最大可承受广告费和保本 ROI 的公式与范围，并明确 `mixed_real_cost` 不混入广告赠金、赠金目前不可单独取得；`meta.warnings` 当前包含 `ad_system_other_necessary_costs_not_modeled`。净结算已扣除的平台费用不得再次扣除；结算外成本补齐前，前端以 `≈` 展示该估算。
 
+> **2026-09-30 成本来源语义变化**：
+>
+> - `unit_cost_used` 只读取当前有效的 `manual_product_costs.unit_cost`；未命中时直接使用 40 CNY/件
+> - 妙手/1688 同步的 `procurement_products.source_unit_cost` 不再参与 SPU ROI 计算
+> - `cost_source` 当前只会返回 `MANUAL` 或 `DEFAULT_K1`；该规则覆盖下方 v8 历史成本链说明
+>
 > **v9 语义变化（2026-09-13，merge `3c8ea96`）**：
 >
 > - `cancel_rate` 只计**国内取消**（CANCELLED ∧ 无 38301）；海外取消改由全损口径承载——修复 v8 及之前两率重叠（海外取消同单重复计入取消率与全损退款率）

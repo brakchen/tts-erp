@@ -91,8 +91,9 @@ _TOTAL_RATE_FIELDS = {"refund_rate", "full_loss_rate", "cancel_rate"}
 _FOUR_DECIMAL_RATIO_FIELDS = {"share_ratio", "fee_rate_used"}
 
 _COST_ASSUMPTION = (
-    "按 SPU 解析：人工标注采购成交价(MANUAL)优先，其次 1688 货源价"
-    "(SOURCE_PRICE)；均未命中 → 默认 40 CNY/件；DEFAULT_K1 行页面 ⚠ 可补录"
+    "按 SPU 解析：使用当前有效的人工标注采购成交价(MANUAL)；"
+    "未命中 → 默认 40 CNY/件；妙手/1688 同步货源价不参与计算；"
+    "DEFAULT_K1 行页面 ⚠ 可补录"
 )
 _FEE_NOTE = (
     "平台佣金=平台从销售额直接扣除的全部费用；已结算=SETTLEMENT 实到账；"

@@ -181,8 +181,9 @@ raw 响应**只有 int 码，无文本枚举**。以下为 2026-09-14 prod 494 �
 | --- | --- | --- |
 | 汇率快照 | `fx.exchange_rate_snapshots` + `fx.exchange_rates` | 在线快照，禁用过期硬编码常量；详见 `tech-doc/fx-exchange-rates.md` |
 | 人工标注成本（优先级 1） | `procurement.manual_product_costs.unit_cost`，`valid_to IS NULL` = 当前有效 | 按 `spu_pk` |
-| 货源价（优先级 2） | `procurement.procurement_products.source_unit_cost` | 按 `synced_at DESC` 取最新 |
-| 兜底（优先级 3） | 硬编码 40 CNY/件 | |
+| 兜底（优先级 2） | 硬编码 40 CNY/件 | 未命中人工标注时使用 |
+
+`procurement.procurement_products.source_unit_cost` 保存的妙手/1688 同步货源价不参与 SPU ROI 采购成本计算。
 
 ## 5. 锚点
 

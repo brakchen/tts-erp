@@ -445,56 +445,15 @@ _SQL_ROI_UNATTRIBUTED = text(
 )
 
 # ═════════════════════════════════════════════════════════════════════
-# §3.4 成本链 SQL（批量 set-based，与 jobs/reporting.py 口径 1:1）
+# §3.4 成本 SQL（仅使用人工标注的当前有效采购成交价）
 # ═════════════════════════════════════════════════════════════════════
 
-# L1: 人工标注的采购成交价（manual_product_costs）
 _SQL_COST_MANUAL = text(
     """
     SELECT spu_pk, unit_cost
     FROM procurement.manual_product_costs
     WHERE valid_to IS NULL
       AND spu_pk = ANY(CAST(:pks AS bigint[]))
-    """
-)
-
-# L3a: 1688 货源价 — TK-side 直取（external_product_id = spu_id）
-_SQL_COST_SOURCE_DIRECT = text(
-    """
-    SELECT DISTINCT ON (cp.id)
-           cp.id AS spu_pk,
-           pp.source_unit_cost AS unit_cost
-    FROM commerce.products_spu cp
-    JOIN procurement.procurement_products pp
-      ON pp.external_product_id = cp.spu_id
-    WHERE cp.id = ANY(CAST(:pks AS bigint[]))
-      AND pp.source_unit_cost IS NOT NULL
-    ORDER BY cp.id, pp.synced_at DESC NULLS LAST, pp.id DESC
-    """
-)
-
-# L3b: 1688 货源价 — 通过 source_item_id 桥公共采集箱行
-_SQL_COST_SOURCE_VIA_OFFER = text(
-    """
-    WITH offer AS (
-        SELECT DISTINCT ON (cp.id)
-               cp.id AS spu_pk,
-               pp.source_item_id
-        FROM commerce.products_spu cp
-        JOIN procurement.procurement_products pp
-          ON pp.external_product_id = cp.spu_id
-        WHERE cp.id = ANY(CAST(:pks AS bigint[]))
-          AND pp.source_item_id IS NOT NULL
-        ORDER BY cp.id, pp.synced_at DESC NULLS LAST, pp.id DESC
-    )
-    SELECT DISTINCT ON (o.spu_pk)
-           o.spu_pk AS spu_pk,
-           pp.source_unit_cost AS unit_cost
-    FROM offer o
-    JOIN procurement.procurement_products pp
-      ON pp.source_item_id = o.source_item_id
-    WHERE pp.source_unit_cost IS NOT NULL
-    ORDER BY o.spu_pk, pp.synced_at DESC NULLS LAST, pp.id DESC
     """
 )
 
@@ -792,29 +751,22 @@ def _resolve_shop_fee(
 
 
 # ═════════════════════════════════════════════════════════════════════
-# 成本链批量解析
+# 成本批量解析
 # ═════════════════════════════════════════════════════════════════════
-
-# cost_source 枚举（按命中优先级排序）
-# 2026-09-08 业务调整: 去 PURCHASE（妙手采购单）这一档，3 档链
-# MANUAL（人工标注）> SOURCE_PRICE（1688 货源价）> DEFAULT_K1（40 CNY 兜底）
-COST_SOURCE_PRIORITY = ("MANUAL", "SOURCE_PRICE", "DEFAULT_K1")
 
 
 def _resolve_costs_batch(
     sess: Session, spu_pks: list[int]
 ) -> dict[int, tuple[Decimal, str]]:
-    """批量解析每个 SPU 的单位成本 CNY + 来源枚举（§3.4 全链）。
+    """批量解析每个 SPU 的单位成本 CNY + 来源枚举。
 
-    优先级：MANUAL > SOURCE_PRICE > DEFAULT(40 CNY)。
-    返回：{spu_pk: (unit_cost_cny, cost_source)}。DEFAULT_K1 行仅当两层
-    全部 miss 时兜底，UI 上需标 ⚠ 提示。
+    仅使用 ``manual_product_costs`` 的当前有效人工成本；未命中时统一回退
+    40 CNY/件。妙手/1688 同步的 ``source_unit_cost`` 不参与盈利计算。
     """
     if not spu_pks:
         return {}
     out: dict[int, tuple[Decimal, str]] = {}
 
-    # L1: manual_product_costs（人工标注的采购成交价）
     rows = sess.execute(_SQL_COST_MANUAL, {"pks": spu_pks}).mappings().all()
     for r in rows:
         out[int(r["spu_pk"])] = (
@@ -822,29 +774,6 @@ def _resolve_costs_batch(
             "MANUAL",
         )  # pi-lens-ignore: no-try-except
 
-    # L2: SOURCE_PRICE（1688 货源价，direct + via offer 两条路径）
-    missing = [pk for pk in spu_pks if pk not in out]
-    if missing:
-        rows = sess.execute(_SQL_COST_SOURCE_DIRECT, {"pks": missing}).mappings().all()
-        for r in rows:
-            out[int(r["spu_pk"])] = (
-                Decimal(r["unit_cost"]),
-                "SOURCE_PRICE",
-            )  # pi-lens-ignore: no-try-except
-        still_missing = [pk for pk in missing if pk not in out]
-        if still_missing:
-            rows = (
-                sess.execute(_SQL_COST_SOURCE_VIA_OFFER, {"pks": still_missing})
-                .mappings()
-                .all()
-            )
-            for r in rows:
-                out[int(r["spu_pk"])] = (
-                    Decimal(r["unit_cost"]),
-                    "SOURCE_PRICE",
-                )  # pi-lens-ignore: no-try-except
-
-    # L3: DEFAULT_K1（40 CNY/件 兜底，UI 上需 ⚠ 标注）
     for pk in spu_pks:
         if pk not in out:
             out[pk] = (K1_DEFAULT_CNY, "DEFAULT_K1")
