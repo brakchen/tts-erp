@@ -394,8 +394,17 @@
         "支持按 SPU ID / 标题搜索，或批量粘贴中英文逗号、空格分隔的 SPU；新增和移除会实时保存。",
       );
       elements.feedback = node("div", "focused-spu-feedback small");
+      const summaries = document.querySelector("#summaries");
+      if (summaries && summaries.parentNode) {
+        summaries.parentNode.insertBefore(slot, summaries);
+      }
       slot.replaceChildren(header, selectElement, help, elements.feedback);
-      slot.classList.add("focused-spu-inline");
+      slot.classList.add(
+        "focused-spu-inline",
+        "mx-3",
+        "mx-lg-4",
+        "mt-3",
+      );
       initSelect(selectElement);
     }
 

@@ -44,6 +44,8 @@ def test_focused_spus_profile_uses_realtime_inline_multi_select() -> None:
     focused = (root / "tts_erp_v2/static/js/focused-spus.js").read_text()
     assert 'label.htmlFor = "focused-spu-select"' in focused
     assert "new TomSelectClass(selectElement" in focused
+    assert "summaries.parentNode.insertBefore(slot, summaries)" in focused
+    assert '"mx-lg-4"' in focused
     assert "maxItems: null" in focused
     assert "onItemAdd:" in focused
     assert "onItemRemove:" in focused
