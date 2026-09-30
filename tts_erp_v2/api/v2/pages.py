@@ -1875,6 +1875,23 @@ _DASHBOARD_PAGE_HTML = """<!doctype html>
       background: var(--paper-deep);
       color: var(--ink);
     }
+    .nav-card--coming-soon,
+    .nav-card--coming-soon:hover {
+      border-style: dashed;
+      border-color: var(--rule-soft);
+      background: var(--paper-deep);
+      cursor: default;
+    }
+    .nav-card--coming-soon { opacity: 0.72; }
+    .nav-card-status {
+      margin-top: auto;
+      padding-top: 12px;
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
     .nav-card-icon {
       font-size: 28px;
       margin-bottom: 12px;
@@ -2155,6 +2172,13 @@ _DASHBOARD_PAGE_HTML = """<!doctype html>
             <span class="nav-card-title">请求拦截</span>
             <span class="nav-card-desc">管理 HTTP 请求拦截配置，查看拦截记录</span>
           </a>
+          <div class="nav-card nav-card--coming-soon" role="group"
+            aria-label="运行配置，即将上线">
+            <span class="nav-card-icon">⚙</span>
+            <span class="nav-card-title">运行配置</span>
+            <span class="nav-card-desc">配置下发、灰度控制与凭证管理</span>
+            <span class="nav-card-status">即将上线</span>
+          </div>
         </div>
       </section>
 
