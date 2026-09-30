@@ -16,7 +16,7 @@
 ```text
 tts_erp_v2/
 ├── app.py               # FastAPI build_app() 工厂（中间件顺序见 §6）
-├── api/v2/              # 路由：commerce / linkage / reporting / pages / spu_images / auth /
+├── api/v2/              # 路由：commerce / reporting / pages / spu_images / auth /
 │                        #   llm_context / admin（rate-limit / purge-plugin-data / shops 注册：插件店铺人工登记进
 │                        #   commerce.shops，data_source='plugin'（枚举 api|plugin），仅服务查询关联，readwrite 角色） /
 │                        #   analytics（插件广告 dump ingest：/v2/analytics/sync/* → 落 plugin.* schema）
@@ -25,7 +25,7 @@ tts_erp_v2/
 ├── jobs/                # 同步 job 实现：tiktok/*、miaoshou/*、
 │                        #   reporting（cost_snapshots 6h / profit_daily 1h）、token_refresh（6h）、runner
 ├── sync_worker/         # APScheduler；JOBS 注册表 + 调度状态（顶部 NOTE，以它为准）
-├── db/models/           # 11 schema SQLAlchemy 模型 — plugin.py 为插件 dump 的全部 12 张表：
+├── db/models/           # 11 schema SQLAlchemy 模型 — plugin.py 为插件 dump 的结构化表：
 │                        #   订单/物流/结算 7 张（orders/order_lines/shipments/tracking_events/settlements/
 │                        #   settlement_details/raw_log，原 chrome_sync.py）+ 广告 5 张（ad_today/ad_daily/
 │                        #   ad_monthly/ad_raw_log/plugin_logs，原 analytics.py）
@@ -33,13 +33,13 @@ tts_erp_v2/
 │                        #   （订单/物流/结算；原 tts_erp_v2/chrome_sync/）
 ├── plugin/ads/          # 插件广告 dump 数据访问层：coverage 查询 / upsert ad_* / plugin_logs
 │                        #   （原 tts_erp_v2/analytics/{domain,repository}.py）
-├── analytics/ linkage/ reporting/ storage/
+├── analytics/ reporting/ storage/
 │                        # analytics/ 只留读侧（spu_roi.py ROI 看板，读 plugin.ad_*）
 └── static/
 
 miaoshou/                # 妙手 SDK 包（独立包：client + miaoshou_signing.py；无 HTTP 路由，进程内用）
 api_keys.py              # key 管理 CLI     schema_tts_erp.sql   restart.sh
-tests/                   # v2 测试（api/jobs_*/linkage/middleware/proxy/reporting/storage/sync_worker）
+tests/                   # v2 测试（api/jobs_*/middleware/proxy/reporting/storage/sync_worker）
 tech-doc/                # 设计文档（external-api.md 端点活契约；analytics/；test-domains.md）
 setup/                   # 用户向 setup 文档（tts-erp.md / analytics-sync.md）
 
@@ -65,7 +65,7 @@ APScheduler 调度器，JOBS 注册表在文件顶部 `NOTE`，以它为准，�
 
 ### 3.3 db/models/
 
-11 schema SQLAlchemy 模型，plugin.py 包含插件 dump 的全部 12 张表：
+11 schema SQLAlchemy 模型，plugin.py 包含插件 dump 的订单、物流、结算和广告表：
 
 - 订单/物流/结算 7 张：orders、order_lines、shipments、tracking_events、settlements、settlement_details、raw_log
 - 广告 5 张：ad_today、ad_daily、ad_monthly、ad_raw_log、plugin_logs

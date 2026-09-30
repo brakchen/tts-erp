@@ -81,7 +81,7 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS \
 
 step "6/8 — v2 endpoints return JSON"
 for ep in /v2/commerce/sales-orders /v2/commerce/channel-accounts \
-  /v2/linkage/product-links /v2/reporting/coverage; do
+  /v2/reporting/coverage; do
   code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $RO_KEY" \
     "$BASE$ep?shop_id=7494763368967603447&limit=1")
   [ "$code" = "200" ] && ok "$ep → 200" || bad "$ep → $code"

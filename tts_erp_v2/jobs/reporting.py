@@ -37,18 +37,19 @@ log = logging.getLogger("tts_erp_v2.jobs.reporting")
 JOB_COST_SNAPSHOTS = "reporting.cost_snapshots"
 JOB_PROFIT_DAILY = "reporting.profit_daily"
 
-# Latest purchase price for a channel product, resolved through the
-# effective link (override-aware) to the miaoshou procurement product and
-# its most recently synced purchase-order line. Returns NULL rows when the
-# SPU has no link or no purchase history — the caller treats that as
-# "no purchase-order cost source".
+# Latest purchase price for a channel product. The Miaoshou product sync stores
+# TikTok ``spu_id`` in procurement_products.external_product_id, so purchase
+# history can use the same direct identity rule as source-price lookup below.
+# Returns no row when the SPU has no purchase history.
 _SQL_LATEST_PURCHASE_COST = text(
     "SELECT pol.unit_cost, pol.currency "
-    "FROM linkage.effective_product_links epl "
+    "FROM commerce.products_spu cp "
+    "JOIN procurement.procurement_products pp "
+    "  ON pp.external_product_id = cp.spu_id "
     "JOIN procurement.purchase_order_lines pol "
-    "  ON pol.procurement_product_id = epl.procurement_product_id "
+    "  ON pol.procurement_product_id = pp.id "
     "JOIN procurement.purchase_orders po ON po.id = pol.purchase_order_id "
-    "WHERE epl.spu_pk = :cp_id "
+    "WHERE cp.id = :cp_id "
     "  AND pol.unit_cost IS NOT NULL "
     "ORDER BY pol.updated_at DESC NULLS LAST, pol.id DESC "
     "LIMIT 1"

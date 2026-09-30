@@ -94,8 +94,8 @@ def test_purchase_order_lookup_returns_none_pair_when_no_row(db_session) -> None
 def test_purchase_order_lookup_returns_unit_cost_and_currency_pair(db_session) -> None:
     """When the SQL returns a row, the lookup returns ``(unit_cost,
     currency)`` (the second branch of the if/else)."""
-    # Seed a procurement_product + purchase_order + purchase_order_line
-    # so the SQL has a row to find.
+    # Seed a channel product plus a procurement product with the same external
+    # product id. Reporting uses this direct identity instead of a linkage view.
     from tts_erp_v2.db.models.procurement import (
         ProcurementAccount,
         ProcurementProduct,
@@ -103,6 +103,11 @@ def test_purchase_order_lookup_returns_unit_cost_and_currency_pair(db_session) -
         PurchaseOrderLine,
     )
 
+    _, chan_product = _seed_account_and_product(
+        db_session,
+        account_external_id="TEST_lookup_chan_acct",
+        product_external_id="TEST_lookup_chan_prod",
+    )
     acct = ProcurementAccount(
         provider="miaoshou",
         external_account_id="TEST_lookup_acct",
@@ -113,34 +118,10 @@ def test_purchase_order_lookup_returns_unit_cost_and_currency_pair(db_session) -
 
     product = ProcurementProduct(
         procurement_account_id=acct.id,
-        external_product_id="TEST_lookup_prod",
+        external_product_id=chan_product.spu_id,
         title="TEST lookup product",
     )
     db_session.add(product)
-    db_session.flush()
-
-    # Link a ChannelProduct to the ProcurementProduct via effective link.
-    from tts_erp_v2.db.models.linkage import (
-        AccountLink,
-        ProductLink,
-    )
-    chan_acct, chan_product = _seed_account_and_product(
-        db_session,
-        account_external_id="TEST_lookup_chan_acct",
-        product_external_id="TEST_lookup_chan_prod",
-    )
-    account_link = AccountLink(
-        procurement_account_id=acct.id,
-        shop_pk=chan_acct.id,
-    )
-    db_session.add(account_link)
-    db_session.flush()
-    product_link = ProductLink(
-        procurement_product_id=product.id,
-        spu_pk=chan_product.id,
-        relation_type="MIAOSHOU_PUBLISHED_TO_TIKTOK",
-    )
-    db_session.add(product_link)
     db_session.flush()
 
     # A purchase order with one line carrying a unit_cost.
@@ -187,7 +168,10 @@ def test_run_profit_daily_walks_today_and_yesterday(db_session) -> None:
         .limit(1)
     ).scalar_one_or_none()
     assert job_row is not None
-    assert job_row.extra["dates"] == [(today - timedelta(days=1)).isoformat(), today.isoformat()]
+    assert job_row.extra["dates"] == [
+        (today - timedelta(days=1)).isoformat(),
+        today.isoformat(),
+    ]
     # ``extra["rows"]`` matches the result dict's ``rows_written``.
     # We don't assert absolute == 0 because prod rows may exist (today
     # / yesterday windows). Instead, check the match between extra and
@@ -240,9 +224,7 @@ def test_run_profit_daily_writes_row_for_paid_order_in_window(db_session) -> Non
     # The TEST order's row exists with our TEST spu_pk.
     rows = (
         db_session.execute(
-            select(ProductProfitDaily).where(
-                ProductProfitDaily.spu_pk == cp.id
-            )
+            select(ProductProfitDaily).where(ProductProfitDaily.spu_pk == cp.id)
         )
         .scalars()
         .all()
@@ -302,9 +284,12 @@ def test_run_cost_snapshots_records_calculation_version_and_valid_from_in_extra(
     )
     db_session.flush()
     # Capture prod's max calculation_version BEFORE running.
-    prev_max = db_session.execute(
-        select(func.max(ProductCostSnapshot.calculation_version))
-    ).scalar() or 0
+    prev_max = (
+        db_session.execute(
+            select(func.max(ProductCostSnapshot.calculation_version))
+        ).scalar()
+        or 0
+    )
 
     out = run_cost_snapshots(db_session)
     assert out["calculation_version"] == prev_max + 1
@@ -373,9 +358,14 @@ def test_run_cost_snapshots_uses_purchase_order_lookup(db_session) -> None:
     assert out["snapshots_written"] >= 1
     # The TEST row's snapshot is MANUAL_ENTRY (since the purchase-order
     # lookup returns None for a TEST_ spu_pk with no link).
-    snap = db_session.execute(
-        select(ProductCostSnapshot).where(
-            ProductCostSnapshot.spu_pk == cp.id
+    snap = (
+        db_session.execute(
+            select(ProductCostSnapshot).where(ProductCostSnapshot.spu_pk == cp.id)
         )
-    ).scalars().all()
-    assert any(s.cost_method == "MANUAL_ENTRY" and s.unit_cost == Decimal("9.9900") for s in snap)
+        .scalars()
+        .all()
+    )
+    assert any(
+        s.cost_method == "MANUAL_ENTRY" and s.unit_cost == Decimal("9.9900")
+        for s in snap
+    )

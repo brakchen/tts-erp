@@ -29,7 +29,6 @@ from tts_erp_v2.db.base import get_engine
 V2_SCHEMAS = (
     "commerce",
     "integration",
-    "linkage",
     "procurement",
     "after_sales",
     "finance",

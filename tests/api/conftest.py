@@ -114,6 +114,7 @@ def _wipe_test_rows(db_engine) -> None:
 
     api_keys_tbl = Base.metadata.tables["security.api_keys"]
     manual_costs_tbl = Base.metadata.tables["procurement.manual_product_costs"]
+    cost_snapshots_tbl = Base.metadata.tables["reporting.product_cost_snapshots"]
     focused_spus_tbl = Base.metadata.tables["reporting.focused_spus"]
     products_spu_tbl = Base.metadata.tables["commerce.products_spu"]
     shops_tbl = Base.metadata.tables["commerce.shops"]
@@ -166,13 +167,17 @@ def _wipe_test_rows(db_engine) -> None:
                 "OR id NOT IN (SELECT DISTINCT snapshot_id FROM fx.exchange_rates)"
             )
         )
+        test_spu_ids = select_func(products_spu_tbl.c.id).where(
+            products_spu_tbl.c.spu_id.like("TEST_%")
+        )
+        conn.execute(
+            delete(cost_snapshots_tbl).where(
+                cost_snapshots_tbl.c.spu_pk.in_(test_spu_ids)
+            )
+        )
         conn.execute(
             delete(manual_costs_tbl).where(
-                manual_costs_tbl.c.spu_pk.in_(
-                    select_func(products_spu_tbl.c.id).where(
-                        products_spu_tbl.c.spu_id.like("TEST_%")
-                    )
-                )
+                manual_costs_tbl.c.spu_pk.in_(test_spu_ids)
             )
         )
         conn.execute(

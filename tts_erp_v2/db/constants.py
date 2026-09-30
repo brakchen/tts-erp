@@ -6,7 +6,7 @@ sync writes 'ACTIVATE', older docs / tests assumed 'active') can
 reference the same source of truth.
 
 Why a module and not class-level attributes on each model:
-    Multiple unrelated domains (reporting, linkage, sync jobs) all need
+    Multiple unrelated domains (reporting, commerce, sync jobs) all need
     the same string. Importing this module keeps the constant visible
     in one place without creating cross-schema ORM import cycles.
 

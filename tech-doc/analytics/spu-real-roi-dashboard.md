@@ -44,7 +44,7 @@
 
 > **注（2026-09-11）**：原规划经 `analytics.ad_product_links` VIEW 读广告数据，该视图连同 `ad_raw` / `ad_sync_audit` 已由 **migration 0020** 删除（视图零生产消费者 —— `spu_roi.py::_SQL_ROI_AD` 一直是直读结构化表）。上表已按现状修正。 M1/M2/M2b/M3/M4（广告列） | §6.8 |
 | `reporting.product_profit_daily` | (spu,day) units/gross_revenue 中间表 | M5/M6 复用源（可选） | §6.9 |
-| 成本链表（`procurement.manual_product_costs` / `reporting.product_cost_snapshots` / `linkage.effective_product_links`） | 单位成本解析（人工优先，未命中默认 K1） | M13b 货损 / M18 净利润 / M17 保本的 unit_cost 来源 | §6.10 |
+| 成本链表（`procurement.manual_product_costs` / `procurement.procurement_products` / `reporting.product_cost_snapshots`） | 单位成本解析（人工优先，采购商品按 SPU 外部 ID 直连） | M13b 货损 / M18 净利润 / M17 保本的 unit_cost 来源 | §6.10 |
 | `integration.raw_records`（`…/statement_transactions` 59 列） | **结算归属 + 退货运费承担判定的数据源** | M16（未来）、退货运费扣项（未来） | §6.11/§9-3 |
 | `fx.exchange_rate_snapshots` + `fx.exchange_rates` | 数据库汇率快照（USD→VND、USD→CNY） | 公式入口统一换算 CNY（§4.6） | §4.6 |
 | `sync_jobs` / `sync_issues` / `sync_cursors` | 同步状态 / 问题哨兵 / 游标 | 口径健壮性（汇率失败、缺数告警） | AGENTS |
@@ -740,9 +740,9 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 | `source_purchase_quantity` / `source_purchase_amount` / `source_line_count` | numeric/int | 来源采购量/额/单数（可追溯） |
 | `calculation_version` | int | 重算版本 |
 
-**`linkage.effective_product_links`（VIEW）**：`spu_pk → procurement_product_id` 的覆盖关系视图
-（列：`spu_pk / procurement_product_id / effective_relation_type / source_link_id / source_kind / effective_from / procurement_account_id / shop_pk`；
-**注意 LEFT JOIN 视图对无关联 SPU 也发一行，只有 `effective_relation_type` 非空才算真有关联**）。
+**采购商品身份**：`procurement.procurement_products.external_product_id` 保存 TikTok
+`spu_id` 时，直接与 `commerce.products_spu.spu_id` 等值匹配。migration 0044 已删除从未
+产出有效关系的独立 linkage 投影。
 
 > 采购链现状：`procurement.procurement_products` 216 行（商品目录已同步），但
 > `purchase_orders / purchase_order_lines` **0 行**（妙手采购单未同步/未跑），故“最新采购价”成本源不可用；

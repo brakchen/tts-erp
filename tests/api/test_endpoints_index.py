@@ -9,8 +9,8 @@ Historical bug (2026-08-30): FastAPI 0.141 introduces
 ``app.include_router`` registers. ``_IncludedRouter`` has no ``path``
 attribute, so the original ``for r in app.routes: if not path: continue``
 loop silently drops every route registered via ``include_router``. The
-v2 app uses ``include_router`` for **every** router (commerce, linkage,
-reporting, pages, llm_context, auth, analytics_sync), so /endpoints
+v2 app uses ``include_router`` for **every** router (commerce, reporting,
+pages, llm_context, auth, analytics_sync), so /endpoints
 returned only the FastAPI meta-routes (/docs, /openapi.json, /healthz,
 /endpoints itself) and reported ``count: 6``.
 
@@ -40,16 +40,14 @@ def test_endpoints_returns_200(api_client):
 
 
 def test_endpoints_lists_v2_business_routes(api_client):
-    """The v2 routers (commerce / linkage / reporting / pages / llm / auth) must appear."""
+    """The active v2 business routers must appear and retired ones stay absent."""
     r = api_client.get("/endpoints")
     payload = r.json()
     paths = _path_set(payload)
     # commerce
     assert "/v2/commerce/sales-orders" in paths
     assert "/v2/commerce/channel-accounts" in paths
-    # linkage
-    assert "/v2/linkage/product-links" in paths
-    assert "/v2/linkage/overrides" in paths
+    assert not any(path.startswith("/v2/linkage/") for path in paths)
     # reporting
     assert "/v2/reporting/cost-snapshots" in paths
     assert "/v2/reporting/profit-daily" in paths
@@ -92,7 +90,6 @@ def test_endpoints_lists_path_param_routes(api_client):
     payload = r.json()
     paths = _path_set(payload)
     assert "/v2/commerce/sales-orders/{order_pk}" in paths
-    assert "/v2/linkage/issues/{issue_id}/resolve" in paths
 
 
 def test_endpoints_count_matches_recursive_total(api_client):

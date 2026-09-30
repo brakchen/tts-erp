@@ -95,7 +95,7 @@ Three roles, hierarchical (readonly < readwrite < admin):
 | ---------- | -------------------------------------------------------- |
 | readonly   | all ``GET /v2/*`` endpoints                              |
 | readwrite  | readonly + ``POST /v2/reporting/manual-costs``           |
-| admin      | readwrite + ``POST /v2/linkage/overrides`` + other admin  |
+| admin      | readwrite + operational admin endpoints                   |
 
 All endpoints (except ``/healthz``, ``/endpoints``, ``/openapi.json``)
 require ``Authorization: Bearer <key>`` (or ``X-API-Key: <key>``). The
@@ -113,12 +113,8 @@ SHA-256 hashes only; the plaintext is shown ONCE on creation via
 | fulfillment  | 物流                                       | shipments, shipment_lines, tracking_events            |
 | after_sales  | 退货 / 取消                                | cases, case_lines                                     |
 | finance      | 对账 / 打款                                | payouts, settlement_statements, settlement_transactions, settlement_components |
-| linkage      | 销售 ↔ 采购关联                            | product_links, link_evidence, link_overrides, link_issues |
 | reporting    | 利润 / 成本快照                            | product_cost_snapshots, product_profit_daily, shipment_tracking_summary |
 | security     | API key                                    | api_keys                                              |
-
-Plus 1 view: ``linkage.effective_product_links`` (product_links UNION
-link_overrides with conflict resolution).
 
 > **DO NOT** read ``public.*`` tables. They are legacy V1 data kept only
 > for 4-week rollback safety. The v2 service code never queries them.
@@ -151,13 +147,10 @@ tables already encode this — **prefer reading those over recomputing**.
   ``commerce.sales_orders`` and ``commerce.products_spu``.
 - **Profit per SKU per day** → ``reporting.product_profit_daily``
   (pre-aggregated, currency-normalized within the row's ``currency``).
-- **Miaoshou product ↔ TikTok SPU** → ``linkage.effective_product_links``
-  (the view; use this, not ``linkage.product_links`` directly, because
-  overrides change the answer).
+- **Miaoshou product ↔ TikTok SPU** → direct identity via
+  ``procurement.procurement_products.external_product_id = commerce.products_spu.spu_id``.
 - **Active SPU without cost** → ``GET /v2/reporting/missing-cost-products``
-  (or the ``commerce.products_spu`` rows that have no
-  ``procurement.manual_product_costs`` row with ``valid_to IS NULL``
-  AND no effective link).
+  (active products with neither a current manual cost nor a current cost snapshot).
 - **Time semantics**: TikTok ``update_time`` / ``create_time`` are
   **epoch seconds**; ``tracking_events.event_time_millis`` are
   **epoch milliseconds**; Miaoshou ``gmt_create`` / ``gmt_modified`` are
@@ -167,8 +160,6 @@ tables already encode this — **prefer reading those over recomputing**.
 
 - DO NOT compute profit using 1688 采集标价. See §5.
 - DO NOT read ``public.*`` tables. They are V1 rollback safety only.
-- DO NOT use ``linkage.product_links`` directly — use
-  ``linkage.effective_product_links`` (overrides change the answer).
 - DO NOT assume a single ``currency`` per query. TikTok has VND/USD
   orders; Miaoshou is mostly CNY. Use the row's ``currency`` column.
 - DO NOT join ``sales_order_lines`` to ``products_spu`` via
@@ -217,10 +208,6 @@ _SCHEMAS: list[tuple[str, str]] = [
         "Statements/transactions: payouts, settlement_statements, settlement_transactions, settlement_components",
     ),
     (
-        "linkage",
-        "Sales↔procurement mapping: account_links, product_links, variant_links, link_evidence, link_overrides, link_issues + effective_product_links view",
-    ),
-    (
         "reporting",
         "Profit/cost: product_cost_snapshots, product_profit_daily, shipment_tracking_summary",
     ),
@@ -252,8 +239,7 @@ def _introspect_schemas(session: Session) -> str:
                 "FROM information_schema.tables "
                 "WHERE table_schema IN ("
                 "  'integration','commerce','procurement','fulfillment',"
-                "  'after_sales','finance','linkage','reporting','security',"
-                "  'fx'"
+                "  'after_sales','finance','reporting','security','fx'"
                 ") AND table_type = 'BASE TABLE' "
                 "ORDER BY table_schema, table_name"
             )
@@ -265,8 +251,7 @@ def _introspect_schemas(session: Session) -> str:
                 "FROM pg_stat_user_tables "
                 "WHERE schemaname IN ("
                 "  'integration','commerce','procurement','fulfillment',"
-                "  'after_sales','finance','linkage','reporting','security',"
-                "  'fx'"
+                "  'after_sales','finance','reporting','security','fx'"
                 ")"
             )
         ).all()
@@ -336,18 +321,7 @@ opaque `next_cursor` where applicable.
 | GET | `/v2/commerce/sales-orders/{order_pk}/lines` | order lines only (lightweight) |
 | GET | `/v2/commerce/sales-orders/{order_pk}/raw` | the original TikTok JSON envelope (for debugging) |
 
-### 10.2 Linkage (sales ↔ procurement) — readonly + admin override
-
-| method | path | role | purpose |
-| --- | --- | --- | --- |
-| GET | `/v2/linkage/product-links?shop_id=X` | readonly | current links, with overrides applied via view `effective_product_links` |
-| GET | `/v2/linkage/evidence?shop_id=X` | readonly | raw evidence rows (e.g. miaoshou move-collect tasks) |
-| GET | `/v2/linkage/issues?shop_id=X&status=unresolved` | readonly | auto-detected link-quality issues |
-| GET | `/v2/linkage/overrides?shop_id=X&active_only=true` | readonly | operator-set link overrides |
-| POST | `/v2/linkage/overrides` | **admin** | create / close link overrides |
-| POST | `/v2/linkage/issues/{id}/resolve` | readwrite | mark an issue resolved |
-
-### 10.3 Reporting (cost + profit) — readonly + readwrite for manual entry
+### 10.2 Reporting (cost + profit) — readonly + readwrite for manual entry
 
 | method | path | role | purpose |
 | --- | --- | --- | --- |
@@ -414,11 +388,6 @@ def _introspect_business_rules() -> str:
 9. **Channel product status**: ``active`` / ``inactive`` / ``deleted``.
    ``GET /v2/reporting/missing-cost-products`` returns only
    ``status='active'`` SKUs.
-10. **Linkage evidence lifecycle**: a link is born from a
-    ``link_evidence`` row (typically a Miaoshou ``move_collect_task``).
-    The link can be **overridden** via ``link_overrides`` (operator
-    judgment beats auto-link). Open issues live in ``link_issues``
-    with ``status='unresolved'``.
 """
 
 
@@ -489,9 +458,6 @@ def get_llm_context(
                 ]
                 + [f"| `{s}` | {dom} |" for s, dom in _SCHEMAS]
                 + [
-                    "",
-                    "Plus 1 view: `linkage.effective_product_links` (product_links "
-                    "UNION link_overrides with conflict resolution).",
                     "",
                     "**Table list per schema with row counts and comments**: see §9 below.",
                     "",

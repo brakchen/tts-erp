@@ -31,7 +31,7 @@ Chrome extensions ─────> analytics/order/intercept ingest ────
                                                               │
                           ┌───────────────────────────────────┼────────────────────┐
                           ▼                                   ▼                    ▼
-                 commerce/linkage API              deep analytics modules   operator pages
+                    commerce API                   deep analytics modules   operator pages
                                                      · SPU profitability
                                                      · order dump intake
                                                      · access policy
@@ -127,7 +127,6 @@ explain_spu(session, *, scope, spu_pk, evidence) -> SpuProfitExplanation
 | 前缀 | 用途 |
 | --- | --- |
 | `/v2/commerce/*` | 店铺、SPU/SKU、销售订单和履约读模型 |
-| `/v2/linkage/*` | 销售商品与妙手采购商品的关联、证据、问题和 override |
 | `/v2/reporting/*` | 成本快照、旧版利润日报、覆盖率、缺成本商品和人工成本 |
 | `/v2/analytics/spu-roi*` | v10 SPU 盈利主表与订单/结算/售后/广告证据 |
 | `/v2/fx/*` | 数据库汇率快照与本地换算 |
@@ -171,7 +170,6 @@ schema 及责任如下：
 | `fulfillment` | 运单、包裹和轨迹 |
 | `after_sales` | 退货、退款和取消 case |
 | `finance` | payout、statement、transaction 和费用组件 |
-| `linkage` | 销售与采购商品关联、证据、override 和问题 |
 | `reporting` | 成本快照、旧版利润日报和跟踪汇总 |
 | `plugin` | Chrome 广告/订单 dump、health log 和 intercept 数据 |
 | `fx` | 汇率快照和 rate rows |

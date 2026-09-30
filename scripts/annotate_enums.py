@@ -41,22 +41,6 @@ PER_FILE_STATUS: dict[str, list[tuple[str, str]]] = {
         ("`CANCELLATION`", "✅"), ("`REFUND_ONLY`", "✅"),
         ("`RETURN_AND_REFUND`", "✅"),
     ],
-    "product-link-relation-type.md": [
-        ("`MIAOSHOU_PUBLISHED_TO_TIKTOK`", "✅"),
-        ("`MIAOSHOU_BOUND_TO_TIKTOK`", "✅"),
-        ("`MIAOSHOU_PROCUREMENT_SOURCE`", "✅"),
-    ],
-    "link-override-decision.md": [
-        ("`ALLOW`", "✅"), ("`DENY`", "✅"), ("`PRIMARY`", "✅"),
-    ],
-    "link-issue-type.md": [
-        ("`PRODUCT_LINK_MISSING`", "✅"),
-        ("`MULTIPLE_PRIMARY_LINKS`", "✅"),
-        ("`SOURCE_LINK_CONFLICT`", "✅"),
-        ("`ACCOUNT_LINK_MISSING`", "✅"),
-        ("`VARIANT_LINK_MISSING`", "✅"),
-        ("`AMBIGUOUS_SOURCE`", "✅"),
-    ],
     "cost-method.md": [
         ("`MANUAL_ENTRY`", "✅"), ("`LATEST_PURCHASE_COST`", "✅"),
         ("`PERIOD_AVERAGE_COST`", "✅"), ("`WEIGHTED_AVERAGE_COST`", "✅"),

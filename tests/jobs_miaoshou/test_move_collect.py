@@ -13,7 +13,7 @@ The test simulates the production scenario from
 * 12 pages × 20 items = 237+ records.
 * Pages 2, 5, 9 alternate between ``accountApiQpsRateLimit`` empty
   and a real (full) page on the retry.
-* The job must still write 12 × 20 = 240 evidence rows.
+* The job must still write 12 × 20 = 240 raw audit rows.
 
 We keep the test pure: the fake client is injected via the
 ``client=`` parameter; no network, no real SDK, no real DB writes
@@ -21,8 +21,6 @@ outside the test-owned transaction (rolled back at teardown).
 """
 
 from __future__ import annotations
-
-from datetime import datetime
 
 import pytest
 from sqlalchemy import func, select
@@ -32,7 +30,6 @@ from tts_erp_v2.db.models.integration import (
     SyncIssue,
     SyncJob,
 )
-from tts_erp_v2.db.models.linkage import LinkEvidence
 from tts_erp_v2.jobs.miaoshou.move_collect import sync_move_collect
 
 pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
@@ -109,7 +106,7 @@ def test_move_collect_walks_all_pages_through_rate_limit_retrys(
 ) -> None:
     """★ Acceptance criterion: ``accountApiQpsRateLimit`` alternating
     responses must NOT cause silent truncation. The job must walk
-    through all 12 pages and persist every item as evidence.
+    through all 12 pages and persist every item as a raw record.
     """
     side_effect, call_log = _build_paginated_side_effect(
         items_per_page=20,
@@ -130,7 +127,7 @@ def test_move_collect_walks_all_pages_through_rate_limit_retrys(
     assert result["pages_walked"] == 12
     # 12 pages × 20 items = 240 records.
     assert result["tasks_seen"] == 240
-    assert result["evidence_inserted"] == 240
+    assert result["tasks_recorded"] == 240
     # 3 pages were rate-limited once each → 3 retries observed.
     assert result["rate_limit_retries"] >= 3
     assert result["issues"] == 0
@@ -189,85 +186,6 @@ def test_move_collect_writes_raw_records_per_task(
     assert sample.payload_hash is not None
 
 
-def test_move_collect_writes_link_evidence(
-    db_session, fake_client, miaoshou_credentials_row
-) -> None:
-    """Per-task ``linkage.link_evidence`` rows get inserted with the
-    right shape."""
-    side_effect, _ = _build_paginated_side_effect(
-        items_per_page=3, total_pages=1, rate_limit_pages=()
-    )
-    fake_client.install(side_effect)
-
-    sync_move_collect(db_session, client=fake_client, max_retries=2)
-    db_session.commit()
-
-    evidence = (
-        db_session.execute(
-            select(LinkEvidence).where(
-                LinkEvidence.evidence_type == "MOVE_COLLECT_TASK",
-                LinkEvidence.source_external_id.like("t_%"),
-            )
-        )
-        .scalars()
-        .all()
-    )
-    assert len(evidence) == 3
-    sample = evidence[0]
-    assert sample.source_table == "miaoshou.move_collect"
-    assert sample.source_external_id is not None
-    # Evidence payload preserves platformItemId (SPU, not SKU).
-    assert sample.evidence_payload["platform_item_id"] is not None
-    assert sample.evidence_payload["platform"] == "tiktok"
-    # The raw-record link isn't enforced by FK but the evidence should
-    # be self-sufficient for Lane D's link-compute job to use.
-    assert isinstance(sample.observed_at, datetime)
-
-
-def test_move_collect_idempotent(
-    db_session, fake_client, miaoshou_credentials_row
-) -> None:
-    """Re-running with the same fake client must NOT create duplicate
-    ``link_evidence`` rows. The job's idempotency guarantee is the
-    (source_table, source_external_id) dedup.
-    """
-    side_effect, _ = _build_paginated_side_effect(
-        items_per_page=3, total_pages=1, rate_limit_pages=()
-    )
-    fake_client.install(side_effect)
-
-    sync_move_collect(db_session, client=fake_client, max_retries=2)
-    db_session.commit()
-    first_count = len(
-        db_session.execute(
-            select(LinkEvidence).where(
-                LinkEvidence.evidence_type == "MOVE_COLLECT_TASK",
-                LinkEvidence.source_external_id.like("t_%"),
-            )
-        )
-        .scalars()
-        .all()
-    )
-    assert first_count == 3
-
-    # Second run: same tasks → should not duplicate.
-    sync_move_collect(db_session, client=fake_client, max_retries=2)
-    db_session.commit()
-    second_count = len(
-        db_session.execute(
-            select(LinkEvidence).where(
-                LinkEvidence.evidence_type == "MOVE_COLLECT_TASK",
-                LinkEvidence.source_external_id.like("t_%"),
-            )
-        )
-        .scalars()
-        .all()
-    )
-    assert second_count == 3, (
-        f"idempotency broken: re-run added {second_count - first_count} extra evidence rows"
-    )
-
-
 def test_move_collect_handles_empty_response(
     db_session, fake_client, miaoshou_credentials_row
 ) -> None:
@@ -285,7 +203,7 @@ def test_move_collect_handles_empty_response(
     db_session.commit()
 
     assert result["tasks_seen"] == 0
-    assert result["evidence_inserted"] == 0
+    assert result["tasks_recorded"] == 0
     assert result["issues"] == 0
     # SyncJob row still marked succeeded with 0 counters.
     job = db_session.execute(
@@ -322,7 +240,7 @@ def test_move_collect_skips_non_dict_items(
     db_session.commit()
 
     assert result["tasks_seen"] == 3
-    assert result["evidence_inserted"] == 2
+    assert result["tasks_recorded"] == 2
     assert result["issues"] == 1
     issue = db_session.execute(
         select(SyncIssue)

@@ -1,7 +1,7 @@
 # TikTok Shop 销售与妙手采购数据模型重构方案
 
 版本：V3  
-状态：领域模型方案（**已落地**，2026-08-29 切流；as-built 补记见文末附录 A）  
+状态：领域模型方案（**已落地并持续收敛**；2026-09-30 migration 0044 删除未接通的 linkage 层）
 系统定位：TikTok Shop 销售数据与妙手采购数据的整合分析系统
 
 ## 1. 系统定位
@@ -12,9 +12,8 @@
 
 - 同步 TikTok Shop 的商品、订单、物流、售后和财务数据；
 - 同步妙手的采购商品、采购订单和采购成本数据；
-- 保存妙手提供的“采购商品与 TikTok 商品/SPU”关联；
+- 通过双方已同步主档中的同一 TikTok SPU 外部 ID 连接销售与采购商品；
 - 以 TikTok 商品为连接点分析销售、采购、成本和利润；
-- 管理关联缺失、冲突和人工修正；
 - 为经营报表提供稳定、可解释的数据口径。
 
 ## 2. 数据所有权
@@ -27,8 +26,7 @@
 | TikTok 物流、退货、取消、结算 | TikTok Shop |
 | 妙手采购商品与规格 | 妙手 |
 | 妙手采购订单与采购行 | 妙手 |
-| 采购商品与 TikTok 商品的关系 | 妙手 |
-| 人工纠错与覆盖规则 | 本系统 |
+| 采购商品与 TikTok 商品的关系 | 同步主档中的 TikTok SPU 外部 ID |
 | 成本、利润和经营指标 | 本系统派生 |
 
 核心原则：
@@ -44,21 +42,20 @@
 ```text
 妙手采购订单
   └─ 妙手采购行
-      └─ 妙手采购商品/SPU
-          └─ 妙手提供的商品关联
-              └─ TikTok 商品/SPU
-                  ├─ TikTok SKU
-                  └─ TikTok 订单行
-                      ├─ 物流
-                      ├─ 售后
-                      └─ 财务结算
+      └─ 妙手采购商品（external_product_id = TikTok spu_id）
+          └─ TikTok 商品/SPU
+              ├─ TikTok SKU
+              └─ TikTok 订单行
+                  ├─ 物流
+                  ├─ 售后
+                  └─ 财务结算
 ```
 
 注意：
 
 - TikTok 订单行和 TikTok 商品的关系来自 TikTok Shop。
 - 妙手采购行和妙手采购商品的关系来自妙手。
-- 妙手采购商品和 TikTok 商品的关系来自妙手。
+- 妙手采购商品和 TikTok 商品通过已同步的 TikTok SPU 外部 ID 直接匹配。
 - 采购订单与销售订单之间不存在直接事实关系。
 - 销售成本只能根据商品关系和成本方法推导，不能表述为精确采购批次归因。
 
@@ -108,20 +105,11 @@ finance
 - 核心关系使用数据库外键；
 - 来源原始状态和标准状态同时保留。
 
-### 4.3 商品关联层
+### 4.3 商品关联规则
 
-Schema：
-
-```text
-linkage
-```
-
-职责：
-
-- 保存妙手提供的商品关系；
-- 保存关联证据和历史版本；
-- 管理人工覆盖、冲突和未解析关系；
-- 不保存采购订单到销售订单的伪关联。
+不再维护独立 schema。采购侧 `procurement_products.external_product_id` 保存 TikTok
+`spu_id` 时，直接与 `commerce.products_spu.spu_id` 匹配。妙手搬家任务只作为
+`integration.raw_records` 原始审计，不再生成第二套关联状态。
 
 ### 4.4 分析层
 
@@ -425,167 +413,20 @@ UNIQUE (purchase_order_id, external_line_id)
 
 ---
 
-# 7. 商品关联模型
+# 7. 商品关联模型（已收敛）
 
-## 7.1 `linkage.account_links`
+原设计的 `linkage` schema（账号、商品、SKU、证据、人工覆盖和异常队列）从未形成
+生产有效关联，只有 `link_evidence` 被写入。migration 0044 已将其整体删除。
 
-保存妙手账户与 TikTok 店铺的关系。
-
-```text
-id bigint PK
-procurement_account_id bigint FK
-shop_pk bigint FK
-external_relation_id text NULL
-status text
-valid_from timestamptz
-valid_to timestamptz NULL
-source_updated_at timestamptz
-raw_record_id bigint
-```
-
-该关系不能依赖店铺名称猜测。
-
-## 7.2 `linkage.product_links`
-
-这是系统最关键的桥梁表。
+当前规则只有一条：
 
 ```text
-id bigint PK
-procurement_product_id bigint FK
-spu_pk bigint FK
-external_relation_id text
-relation_type text
-status text
-is_primary boolean
-valid_from timestamptz
-valid_to timestamptz NULL
-source_updated_at timestamptz
-raw_record_id bigint
-created_at timestamptz
-updated_at timestamptz
+commerce.products_spu.spu_id
+= procurement.procurement_products.external_product_id
 ```
 
-`relation_type` 示例：
-
-```text
-MIAOSHOU_PUBLISHED_TO_TIKTOK
-MIAOSHOU_BOUND_TO_TIKTOK
-MIAOSHOU_PROCUREMENT_SOURCE
-```
-
-这张表表达：
-
-> 妙手中的某个采购商品对应 TikTok Shop 中的某个商品/SPU。
-
-允许的基数是 N:M：
-
-- 一个妙手采购商品可能发布到多个 TikTok 店铺；
-- 一个 TikTok 商品可能更换或绑定多个采购来源。
-
-不能强制一对一。
-
-## 7.3 `linkage.variant_links`
-
-仅在妙手明确提供规格级关系时启用。
-
-```text
-id bigint PK
-procurement_product_variant_id bigint FK
-sku_pk bigint FK
-external_relation_id text
-status text
-valid_from timestamptz
-valid_to timestamptz NULL
-raw_record_id bigint
-```
-
-如果妙手只提供 SPU 级关系，则这张表可以为空。
-
-系统不得通过颜色、尺码名称自行生成正式 SKU 关系。
-
-## 7.4 `linkage.link_evidence`
-
-保存关联的来源证据。
-
-```text
-id bigint PK
-product_link_id bigint FK NULL
-variant_link_id bigint FK NULL
-evidence_type text
-source_table text
-source_external_id text
-evidence_payload jsonb
-observed_at timestamptz
-```
-
-证据可能来自：
-
-- 妙手搬家或刊登任务；
-- 妙手商品绑定记录；
-- 妙手返回的 TikTok product ID；
-- 妙手返回的规格映射。
-
-## 7.5 `linkage.link_overrides`
-
-保存人工修正，不覆盖妙手原始关系。
-
-```text
-id bigint PK
-procurement_product_id bigint FK
-spu_pk bigint FK
-decision text
-reason text
-valid_from timestamptz
-valid_to timestamptz NULL
-created_by text
-created_at timestamptz
-```
-
-`decision`：
-
-```text
-ALLOW
-DENY
-PRIMARY
-```
-
-有效关系由视图计算：
-
-```text
-linkage.effective_product_links
-```
-
-优先级：
-
-```text
-有效人工覆盖
-→ 有效妙手关系
-→ 无结果并进入异常队列
-```
-
-## 7.6 `linkage.link_issues`
-
-```text
-id bigint PK
-issue_type text
-procurement_product_id bigint NULL
-spu_pk bigint NULL
-candidate_count integer
-status text
-details jsonb
-created_at timestamptz
-resolved_at timestamptz NULL
-```
-
-问题类型：
-
-```text
-PRODUCT_LINK_MISSING
-MULTIPLE_PRIMARY_LINKS
-SOURCE_LINK_CONFLICT
-ACCOUNT_LINK_MISSING
-VARIANT_LINK_MISSING
-```
+该等值关系用于查询最近采购单价和货源价。若没有直接身份匹配，则使用人工成本；
+系统不再维护自动猜测、人工 override 或 SKU 级映射。
 
 ---
 
@@ -763,11 +604,11 @@ purchase_order_line
 
 ## 11.2 可以计算的关系
 
-通过商品关系，可以计算：
+通过双方主档中相同的 TikTok SPU 外部 ID，可以计算：
 
 ```text
 TikTok 商品销量
-↔ 对应妙手采购商品
+↔ procurement_products.external_product_id
 ↔ 采购数量和采购金额
 ```
 
@@ -847,21 +688,18 @@ estimated_gross_profit
 
 ## 11.5 防止重复计算
 
-一个 TikTok 商品可能存在多个采购商品关系。分析时不能直接多表 JOIN，否则会放大销量和金额。
-
-必须先生成唯一的有效成本结果：
+成本解析按单个 SPU 独立执行，并只输出一条当前成本快照：
 
 ```text
-linkage.effective_product_links
+MANUAL_ENTRY
+→ 直接 SPU ID 匹配的最新采购单价
+→ SOURCE_PRICE
 → reporting.product_cost_snapshots
 → reporting.product_profit_daily
 ```
 
-存在多个有效采购来源且无法确定口径时：
-
-- 不生成成本；
-- 标记为 `AMBIGUOUS_SOURCE`；
-- 进入 `linkage.link_issues`。
+生产数据已验证 `procurement_products.external_product_id` 当前无重复；若未来出现重复，
+成本查询仍按最新采购行确定一条结果，并应在同步问题队列中单独告警。
 
 ---
 
@@ -889,16 +727,6 @@ erDiagram
     purchase_orders ||--o{ purchase_order_lines : contains
     procurement_products ||--o{ purchase_order_lines : purchased_as
     procurement_product_variants ||--o{ purchase_order_lines : optionally_purchased_as
-
-    procurement_accounts ||--o{ account_links : participates
-    commerce_shops ||--o{ account_links : participates
-
-    procurement_products ||--o{ product_links : source
-    commerce_products_spu ||--o{ product_links : target
-    product_links ||--o{ link_evidence : supported_by
-
-    procurement_product_variants ||--o{ variant_links : source
-    commerce_products_sku ||--o{ variant_links : target
 
     commerce_sales_orders ||--o{ shipments : fulfilled_by
     shipments ||--o{ shipment_lines : contains
@@ -934,7 +762,7 @@ erDiagram
 | `statement_transactions` | 原始镜像 + `finance.settlement_transactions/components` |
 | `miaoshou_shops` | `procurement.procurement_accounts` |
 | `miaoshou_collect_box_details` | `procurement.procurement_products` 或原始采集表 |
-| `miaoshou_move_collect_tasks` | `linkage.link_evidence`，并生成 `product_links` |
+| `miaoshou_move_collect_tasks` | `integration.raw_records` 原始审计 |
 | 妙手采购订单 | `procurement.purchase_orders` |
 | 妙手采购订单行 | `procurement.purchase_order_lines` |
 | `analytics_*` | `integration` 接入状态 + 独立广告分析模型 |
@@ -956,8 +784,7 @@ erDiagram
 - 所有外部对象设置账户范围内的唯一约束。
 - 订单行保留名称、价格和图片历史快照。
 - 业务数据默认禁止级联删除。
-- 关联表必须保存来源、状态、生效时间和证据。
-- 不允许使用标题、图片 URL 或店铺名称作为正式关系。
+- 跨系统商品身份只使用明确的外部 SPU ID，不允许使用标题、图片 URL 或店铺名称猜测。
 - 派生数据必须保存计算方法和版本。
 
 ---
@@ -987,13 +814,11 @@ erDiagram
 3. 导入采购订单和采购行。
 4. 校验采购行商品关联。
 
-## 阶段三：建立商品桥梁
+## 阶段三：校验商品身份
 
-1. 导入妙手提供的 TikTok 商品关系。
-2. 使用搬家、刊登或绑定记录作为证据。
-3. 建立商品级有效关系视图。
-4. 仅在有明确证据时建立 SKU 级关系。
-5. 建立关联缺失和冲突队列。
+1. 确认 TikTok SPU 已同步到 `commerce.products_spu`。
+2. 确认采购主档的 `external_product_id` 保存同一 TikTok `spu_id`。
+3. 监控缺失或重复外部 ID，不建立第二套关联状态。
 
 ## 阶段四：规范化物流、售后和财务
 
@@ -1083,7 +908,8 @@ TikTok订单行
 
 ## 附录 A：As-built 补记（落地后与正文的差异）
 
-正文 §5-§11 的表结构已按本文落地（九 schema + `linkage.effective_product_links` VIEW）。
+正文 §5-§11 的核心表结构已按本文落地。2026-09-30 进一步收敛：migration 0044
+删除未接通的 `linkage` schema 及其 view，采购成本改为按 TikTok SPU 外部 ID 直接匹配。
 实施过程中新增了两张正文未含的表：
 
 1. **`procurement.manual_product_costs`**（2026-08-29，refactor plan V2 §3.2 / 决策 12）：

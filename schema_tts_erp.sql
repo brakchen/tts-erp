@@ -65,11 +65,6 @@ CREATE SCHEMA fx;
 CREATE SCHEMA integration;
 
 
--- Name: linkage; Type: SCHEMA; Schema: -; Owner: -
-
-CREATE SCHEMA linkage;
-
-
 -- Name: plugin; Type: SCHEMA; Schema: -; Owner: -
 
 CREATE SCHEMA plugin;
@@ -625,185 +620,6 @@ CREATE TABLE IF NOT EXISTS integration.tiktok_app_credentials (
     app_secret_ciphertext bytea NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
--- Name: account_links; Type: TABLE; Schema: linkage; Owner: -
-
-CREATE TABLE IF NOT EXISTS linkage.account_links (
-    id bigint NOT NULL,
-    procurement_account_id bigint NOT NULL,
-    shop_pk bigint CONSTRAINT account_links_channel_account_id_not_null NOT NULL,
-    external_relation_id text,
-    status text,
-    valid_from timestamp with time zone DEFAULT now() NOT NULL,
-    valid_to timestamp with time zone,
-    source_updated_at timestamp with time zone,
-    raw_record_id bigint,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
-
-ALTER TABLE linkage.account_links ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME linkage.account_links_id_seq
-);
-
-
--- Name: link_overrides; Type: TABLE; Schema: linkage; Owner: -
-
-CREATE TABLE IF NOT EXISTS linkage.link_overrides (
-    id bigint NOT NULL,
-    procurement_product_id bigint NOT NULL,
-    spu_pk bigint CONSTRAINT link_overrides_channel_product_id_not_null NOT NULL,
-    decision text NOT NULL,
-    reason text,
-    valid_from timestamp with time zone DEFAULT now() NOT NULL,
-    valid_to timestamp with time zone,
-    created_by text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
--- Name: product_links; Type: TABLE; Schema: linkage; Owner: -
-
-CREATE TABLE IF NOT EXISTS linkage.product_links (
-    id bigint NOT NULL,
-    procurement_product_id bigint NOT NULL,
-    spu_pk bigint CONSTRAINT product_links_channel_product_id_not_null NOT NULL,
-    external_relation_id text,
-    relation_type text NOT NULL,
-    status text,
-    is_primary boolean,
-    valid_from timestamp with time zone DEFAULT now() NOT NULL,
-    valid_to timestamp with time zone,
-    source_updated_at timestamp with time zone,
-    raw_record_id bigint,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
--- Name: procurement_products; Type: TABLE; Schema: procurement; Owner: -
-
-CREATE TABLE IF NOT EXISTS procurement.procurement_products (
-    id bigint NOT NULL,
-    procurement_account_id bigint NOT NULL,
-    external_product_id text NOT NULL,
-    product_type text,
-    title text,
-    source_platform text,
-    source_item_id text,
-    source_item_url text,
-    status text,
-    raw_record_id bigint,
-    source_updated_at timestamp with time zone,
-    synced_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    source_unit_cost numeric(20,4),
-    source_min_unit_cost numeric(20,4),
-    source_max_unit_cost numeric(20,4)
-);
-
-
--- Name: effective_product_links; Type: VIEW; Schema: linkage; Owner: -
-
-CREATE VIEW linkage.effective_product_links AS
- SELECT cp.id AS spu_pk,
-    COALESCE(lo.procurement_product_id, pl.procurement_product_id) AS procurement_product_id,
-    COALESCE(lo.decision, pl.relation_type) AS effective_relation_type,
-    COALESCE(lo.id, pl.id) AS source_link_id,
-        CASE
-            WHEN (lo.id IS NOT NULL) THEN 'OPERATOR_OVERRIDE'::text
-            ELSE 'MIAOSHOU_PUBLISHED_TO_TIKTOK'::text
-        END AS source_kind,
-    COALESCE(lo.valid_from, pl.valid_from) AS effective_from,
-    pp.procurement_account_id,
-    cp.shop_pk
-   FROM (((commerce.products_spu cp
-     LEFT JOIN linkage.link_overrides lo ON (((lo.spu_pk = cp.id) AND (lo.valid_to IS NULL))))
-     LEFT JOIN linkage.product_links pl ON (((pl.spu_pk = cp.id) AND (pl.valid_to IS NULL) AND ((lo.id IS NULL) OR (lo.decision <> 'DENY'::text)))))
-     LEFT JOIN procurement.procurement_products pp ON ((pp.id = COALESCE(lo.procurement_product_id, pl.procurement_product_id))))
-  WHERE (COALESCE(lo.decision, 'ALLOW'::text) <> 'DENY'::text);
-
-
--- Name: link_evidence; Type: TABLE; Schema: linkage; Owner: -
-
-CREATE TABLE IF NOT EXISTS linkage.link_evidence (
-    id bigint NOT NULL,
-    product_link_id bigint,
-    variant_link_id bigint,
-    evidence_type text NOT NULL,
-    source_table text,
-    source_external_id text,
-    evidence_payload jsonb,
-    observed_at timestamp with time zone DEFAULT now() NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
-
-ALTER TABLE linkage.link_evidence ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME linkage.link_evidence_id_seq
-);
-
-
--- Name: link_issues; Type: TABLE; Schema: linkage; Owner: -
-
-CREATE TABLE IF NOT EXISTS linkage.link_issues (
-    id bigint NOT NULL,
-    issue_type text NOT NULL,
-    procurement_product_id bigint,
-    spu_pk bigint,
-    candidate_count integer,
-    status text,
-    details jsonb,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    resolved_at timestamp with time zone,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
-
-ALTER TABLE linkage.link_issues ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME linkage.link_issues_id_seq
-);
-
-
-
-ALTER TABLE linkage.link_overrides ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME linkage.link_overrides_id_seq
-);
-
-
-
-ALTER TABLE linkage.product_links ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME linkage.product_links_id_seq
-);
-
-
--- Name: variant_links; Type: TABLE; Schema: linkage; Owner: -
-
-CREATE TABLE IF NOT EXISTS linkage.variant_links (
-    id bigint NOT NULL,
-    procurement_product_variant_id bigint NOT NULL,
-    sku_pk bigint CONSTRAINT variant_links_channel_product_variant_id_not_null NOT NULL,
-    external_relation_id text,
-    status text,
-    valid_from timestamp with time zone DEFAULT now() NOT NULL,
-    valid_to timestamp with time zone,
-    raw_record_id bigint,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
-
-ALTER TABLE linkage.variant_links ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME linkage.variant_links_id_seq
 );
 
 
@@ -1439,6 +1255,28 @@ ALTER TABLE procurement.procurement_product_variants ALTER COLUMN id ADD GENERAT
 );
 
 
+-- Name: procurement_products; Type: TABLE; Schema: procurement; Owner: -
+
+CREATE TABLE IF NOT EXISTS procurement.procurement_products (
+    id bigint NOT NULL,
+    procurement_account_id bigint NOT NULL,
+    external_product_id text NOT NULL,
+    product_type text,
+    title text,
+    source_platform text,
+    source_item_id text,
+    source_item_url text,
+    status text,
+    raw_record_id bigint,
+    source_updated_at timestamp with time zone,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    source_unit_cost numeric(20,4),
+    source_min_unit_cost numeric(20,4),
+    source_max_unit_cost numeric(20,4)
+);
+
+
 
 ALTER TABLE procurement.procurement_products ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME procurement.procurement_products_id_seq
@@ -1930,66 +1768,6 @@ ALTER TABLE ONLY integration.oauth_states
 
 ALTER TABLE ONLY integration.sync_cursors
     ADD CONSTRAINT uq_sync_cursors_job_scope UNIQUE (job_name, scope);
-
-
--- Name: account_links account_links_pkey; Type: CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.account_links
-    ADD CONSTRAINT account_links_pkey PRIMARY KEY (id);
-
-
--- Name: link_evidence link_evidence_pkey; Type: CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.link_evidence
-    ADD CONSTRAINT link_evidence_pkey PRIMARY KEY (id);
-
-
--- Name: link_issues link_issues_pkey; Type: CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.link_issues
-    ADD CONSTRAINT link_issues_pkey PRIMARY KEY (id);
-
-
--- Name: link_overrides link_overrides_pkey; Type: CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.link_overrides
-    ADD CONSTRAINT link_overrides_pkey PRIMARY KEY (id);
-
-
--- Name: product_links product_links_pkey; Type: CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.product_links
-    ADD CONSTRAINT product_links_pkey PRIMARY KEY (id);
-
-
--- Name: account_links uq_account_links_triplet; Type: CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.account_links
-    ADD CONSTRAINT uq_account_links_triplet UNIQUE (procurement_account_id, shop_pk, external_relation_id);
-
-
--- Name: link_overrides uq_link_overrides_pivot_validfrom; Type: CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.link_overrides
-    ADD CONSTRAINT uq_link_overrides_pivot_validfrom UNIQUE (procurement_product_id, spu_pk, valid_from);
-
-
--- Name: product_links uq_product_links_pivot_validfrom; Type: CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.product_links
-    ADD CONSTRAINT uq_product_links_pivot_validfrom UNIQUE (procurement_product_id, spu_pk, valid_from);
-
-
--- Name: variant_links uq_variant_links_pivot_validfrom; Type: CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.variant_links
-    ADD CONSTRAINT uq_variant_links_pivot_validfrom UNIQUE (procurement_product_variant_id, sku_pk, valid_from);
-
-
--- Name: variant_links variant_links_pkey; Type: CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.variant_links
-    ADD CONSTRAINT variant_links_pkey PRIMARY KEY (id);
 
 
 -- Name: ad_daily ad_daily_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
@@ -2520,46 +2298,6 @@ CREATE INDEX IF NOT EXISTS ix_sync_issues_job_resolved ON integration.sync_issue
 CREATE INDEX IF NOT EXISTS ix_sync_jobs_name_started ON integration.sync_jobs USING btree (job_name, started_at);
 
 
--- Name: ix_account_links_validity; Type: INDEX; Schema: linkage; Owner: -
-
-CREATE INDEX IF NOT EXISTS ix_account_links_validity ON linkage.account_links USING btree (valid_from, valid_to);
-
-
--- Name: ix_link_evidence_product_link; Type: INDEX; Schema: linkage; Owner: -
-
-CREATE INDEX IF NOT EXISTS ix_link_evidence_product_link ON linkage.link_evidence USING btree (product_link_id);
-
-
--- Name: ix_link_evidence_variant_link; Type: INDEX; Schema: linkage; Owner: -
-
-CREATE INDEX IF NOT EXISTS ix_link_evidence_variant_link ON linkage.link_evidence USING btree (variant_link_id);
-
-
--- Name: ix_link_issues_type_resolved; Type: INDEX; Schema: linkage; Owner: -
-
-CREATE INDEX IF NOT EXISTS ix_link_issues_type_resolved ON linkage.link_issues USING btree (issue_type, resolved_at);
-
-
--- Name: ix_link_overrides_decision; Type: INDEX; Schema: linkage; Owner: -
-
-CREATE INDEX IF NOT EXISTS ix_link_overrides_decision ON linkage.link_overrides USING btree (decision);
-
-
--- Name: ix_product_links_channel_product; Type: INDEX; Schema: linkage; Owner: -
-
-CREATE INDEX IF NOT EXISTS ix_product_links_channel_product ON linkage.product_links USING btree (spu_pk);
-
-
--- Name: ix_product_links_status; Type: INDEX; Schema: linkage; Owner: -
-
-CREATE INDEX IF NOT EXISTS ix_product_links_status ON linkage.product_links USING btree (status);
-
-
--- Name: ix_variant_links_validity; Type: INDEX; Schema: linkage; Owner: -
-
-CREATE INDEX IF NOT EXISTS ix_variant_links_validity ON linkage.variant_links USING btree (valid_from, valid_to);
-
-
 -- Name: idx_ad_daily_coverage; Type: INDEX; Schema: plugin; Owner: -
 
 CREATE INDEX IF NOT EXISTS idx_ad_daily_coverage ON plugin.ad_daily USING btree (seller_id, advertiser_id, endpoint, campaign_id, day);
@@ -2915,36 +2653,6 @@ CREATE OR REPLACE TRIGGER trg_integration_sync_jobs_touch BEFORE UPDATE ON integ
 CREATE OR REPLACE TRIGGER trg_integration_tiktok_app_credentials_touch BEFORE UPDATE ON integration.tiktok_app_credentials FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
--- Name: account_links trg_linkage_account_links_touch; Type: TRIGGER; Schema: linkage; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_linkage_account_links_touch BEFORE UPDATE ON linkage.account_links FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
--- Name: link_evidence trg_linkage_link_evidence_touch; Type: TRIGGER; Schema: linkage; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_linkage_link_evidence_touch BEFORE UPDATE ON linkage.link_evidence FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
--- Name: link_issues trg_linkage_link_issues_touch; Type: TRIGGER; Schema: linkage; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_linkage_link_issues_touch BEFORE UPDATE ON linkage.link_issues FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
--- Name: link_overrides trg_linkage_link_overrides_touch; Type: TRIGGER; Schema: linkage; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_linkage_link_overrides_touch BEFORE UPDATE ON linkage.link_overrides FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
--- Name: product_links trg_linkage_product_links_touch; Type: TRIGGER; Schema: linkage; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_linkage_product_links_touch BEFORE UPDATE ON linkage.product_links FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
--- Name: variant_links trg_linkage_variant_links_touch; Type: TRIGGER; Schema: linkage; Owner: -
-
-CREATE OR REPLACE TRIGGER trg_linkage_variant_links_touch BEFORE UPDATE ON linkage.variant_links FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
-
-
 -- Name: ad_daily trg_analytics_ad_daily_touch; Type: TRIGGER; Schema: plugin; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_analytics_ad_daily_touch BEFORE UPDATE ON plugin.ad_daily FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
@@ -3237,96 +2945,6 @@ ALTER TABLE ONLY integration.raw_records
 
 ALTER TABLE ONLY integration.sync_jobs
     ADD CONSTRAINT sync_jobs_credential_id_fkey FOREIGN KEY (credential_id) REFERENCES integration.credentials(id) ON DELETE SET NULL;
-
-
--- Name: account_links account_links_channel_account_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.account_links
-    ADD CONSTRAINT account_links_channel_account_id_fkey FOREIGN KEY (shop_pk) REFERENCES commerce.shops(id) ON DELETE RESTRICT;
-
-
--- Name: account_links account_links_procurement_account_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.account_links
-    ADD CONSTRAINT account_links_procurement_account_id_fkey FOREIGN KEY (procurement_account_id) REFERENCES procurement.procurement_accounts(id) ON DELETE RESTRICT;
-
-
--- Name: account_links account_links_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.account_links
-    ADD CONSTRAINT account_links_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
-
-
--- Name: link_evidence link_evidence_product_link_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.link_evidence
-    ADD CONSTRAINT link_evidence_product_link_id_fkey FOREIGN KEY (product_link_id) REFERENCES linkage.product_links(id) ON DELETE SET NULL;
-
-
--- Name: link_evidence link_evidence_variant_link_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.link_evidence
-    ADD CONSTRAINT link_evidence_variant_link_id_fkey FOREIGN KEY (variant_link_id) REFERENCES linkage.variant_links(id) ON DELETE SET NULL;
-
-
--- Name: link_issues link_issues_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.link_issues
-    ADD CONSTRAINT link_issues_channel_product_id_fkey FOREIGN KEY (spu_pk) REFERENCES commerce.products_spu(id) ON DELETE SET NULL;
-
-
--- Name: link_issues link_issues_procurement_product_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.link_issues
-    ADD CONSTRAINT link_issues_procurement_product_id_fkey FOREIGN KEY (procurement_product_id) REFERENCES procurement.procurement_products(id) ON DELETE SET NULL;
-
-
--- Name: link_overrides link_overrides_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.link_overrides
-    ADD CONSTRAINT link_overrides_channel_product_id_fkey FOREIGN KEY (spu_pk) REFERENCES commerce.products_spu(id) ON DELETE RESTRICT;
-
-
--- Name: link_overrides link_overrides_procurement_product_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.link_overrides
-    ADD CONSTRAINT link_overrides_procurement_product_id_fkey FOREIGN KEY (procurement_product_id) REFERENCES procurement.procurement_products(id) ON DELETE RESTRICT;
-
-
--- Name: product_links product_links_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.product_links
-    ADD CONSTRAINT product_links_channel_product_id_fkey FOREIGN KEY (spu_pk) REFERENCES commerce.products_spu(id) ON DELETE RESTRICT;
-
-
--- Name: product_links product_links_procurement_product_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.product_links
-    ADD CONSTRAINT product_links_procurement_product_id_fkey FOREIGN KEY (procurement_product_id) REFERENCES procurement.procurement_products(id) ON DELETE RESTRICT;
-
-
--- Name: product_links product_links_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.product_links
-    ADD CONSTRAINT product_links_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
-
-
--- Name: variant_links variant_links_channel_product_variant_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.variant_links
-    ADD CONSTRAINT variant_links_channel_product_variant_id_fkey FOREIGN KEY (sku_pk) REFERENCES commerce.products_sku(id) ON DELETE RESTRICT;
-
-
--- Name: variant_links variant_links_procurement_product_variant_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.variant_links
-    ADD CONSTRAINT variant_links_procurement_product_variant_id_fkey FOREIGN KEY (procurement_product_variant_id) REFERENCES procurement.procurement_product_variants(id) ON DELETE RESTRICT;
-
-
--- Name: variant_links variant_links_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: linkage; Owner: -
-
-ALTER TABLE ONLY linkage.variant_links
-    ADD CONSTRAINT variant_links_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
 
 
 -- Name: manual_product_costs manual_product_costs_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -

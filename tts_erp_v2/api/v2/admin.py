@@ -9,8 +9,7 @@ here.
 All endpoints in this module are gated to ``admin`` role both at the
 middleware (see ``tts_erp_v2/middleware/auth.py::required_role()`` —
 unknown ``/v2/admin/...`` paths default to admin-required) and via
-``require_role_at_least(request, "admin")`` for defense-in-depth, same
-pattern as ``tts_erp_v2/api/v2/linkage.py::overrides``.
+``require_role_at_least(request, "admin")`` for defense-in-depth.
 """
 
 from __future__ import annotations

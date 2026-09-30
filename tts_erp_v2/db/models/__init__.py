@@ -54,14 +54,6 @@ from tts_erp_v2.db.models.intercept import (
     InterceptSession,
     InterceptSyncCursor,
 )
-from tts_erp_v2.db.models.linkage import (
-    AccountLink,
-    LinkEvidence,
-    LinkIssue,
-    LinkOverride,
-    ProductLink,
-    VariantLink,
-)
 from tts_erp_v2.db.models.plugin import (
     AdDaily,
     AdMonthly,
@@ -95,7 +87,6 @@ from tts_erp_v2.db.models.reporting import (
 from tts_erp_v2.db.models.security import ApiKey
 
 __all__ = [
-    "AccountLink",
     "AdDaily",
     "AdMonthly",
     "AdRawLog",
@@ -124,9 +115,6 @@ __all__ = [
     "InterceptSession",
     "InterceptSyncCursor",
     "InterceptedRequest",
-    "LinkEvidence",
-    "LinkIssue",
-    "LinkOverride",
     "ManualProductCost",
     "Payout",
     "PluginLog",
@@ -134,7 +122,6 @@ __all__ = [
     "ProcurementProduct",
     "ProcurementProductVariant",
     "ProductCostSnapshot",
-    "ProductLink",
     "ProductProfitDaily",
     "PurchaseOrder",
     "PurchaseOrderLine",
@@ -153,7 +140,6 @@ __all__ = [
     "SyncJob",
     "TikTokAppCredential",
     "TrackingEvent",
-    "VariantLink",
 ]
 
 

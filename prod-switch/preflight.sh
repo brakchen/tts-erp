@@ -34,8 +34,8 @@ if [ "$alembic_head" = "$db_head" ]; then
   ok "alembic head = db version = $alembic_head"
 else bad "alembic=$alembic_head db=$db_head — run alembic upgrade head first"; fi
 
-step "3/6 — All 9 schemas + 35 tables exist"
-expected_schemas=(integration commerce procurement fulfillment after_sales finance linkage reporting security)
+step "3/6 — Core business schemas exist"
+expected_schemas=(integration commerce procurement fulfillment after_sales finance reporting security)
 for s in "${expected_schemas[@]}"; do
   n=$(docker exec postgres psql -U postgres -d tts_erp -tAc \
     "SELECT count(*) FROM information_schema.tables WHERE table_schema='$s'")
@@ -47,7 +47,7 @@ done
 step "4/6 — v2 data actually present"
 for tbl in commerce.sales_orders commerce.sales_order_lines finance.settlement_components \
   procurement.procurement_accounts procurement.procurement_products \
-  integration.credentials linkage.link_evidence; do
+  integration.credentials integration.raw_records; do
   n=$(docker exec postgres psql -U postgres -d tts_erp -tAc "SELECT count(*) FROM $tbl")
   if [ "$n" -gt 0 ]; then
     ok "$tbl = $n rows"

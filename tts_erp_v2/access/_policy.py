@@ -20,7 +20,6 @@ _EXEMPT_PATHS = {
 
 _READONLY_PREFIXES = (
     "/v2/commerce/",
-    "/v2/linkage/",
     "/v2/reporting/",
     "/v2/fx/",
     "/v2/sync/",
@@ -64,9 +63,7 @@ def required_role(method: str, route_path: str) -> Role | None:
         return Role.READWRITE
     if path.startswith("/v2/admin/shops/"):
         return Role.READWRITE
-    if normalized_method == "PATCH" and path.startswith(
-        "/v2/reporting/focused-spus/"
-    ):
+    if normalized_method == "PATCH" and path.startswith("/v2/reporting/focused-spus/"):
         return Role.READWRITE
     if path.startswith("/miaoshou/callback"):
         return None

@@ -9,7 +9,9 @@
 > - sync-worker 实际注册的 job 及频率以 `tts_erp_v2/sync_worker/scheduler.py` 的
 >   `JOBS` 为准（6 个 tiktok job + token.refresh；妙手 4 个 job 与 link-compute /
 >   cost-snapshots 重算**未接入调度**，与 §4.1 的计划表不同）；
-> - `/miaoshou/callback/*` 未挂进 v2 app（代码保留在 `miaoshou/callbacks/`，实测 404）。
+> - `/miaoshou/callback/*` 未挂进 v2 app（代码保留在 `miaoshou/callbacks/`，实测 404）；
+> - 2026-09-30 migration 0044 删除从未接通的 `linkage` schema；本文中的 linkage
+>   设计保留为历史方案，当前实现按 TikTok SPU 外部 ID 直接连接采购商品。
 >
 > 上游输入：架构决策（§1）+ 数据模型 V3（`tech-doc/data-model-target-v3.md`）
 > 现状基线：`tech-doc/_archive/data-model-survey-v1.md`（全表 DDL + demo + 关联分析；2026-08-30 归档改名）

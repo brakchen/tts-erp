@@ -25,8 +25,7 @@
   `cancel-reason.md`、`reverse-type.md`(🟡)、`reverse-status.md`(🟡)
 - **结算** 5: `settlement-status.md`、`payment-status.md`、`statement-type.md`(🔴)、
   `payment-pending-reason.md`(🔴)、`settlement-component-code.md`(58 字段 EAV)
-- **商品/链接** 4: `product-status.md`、`product-link-relation-type.md`、
-  `link-override-decision.md`、`link-issue-type.md`
+- **商品** 1: `product-status.md`
 - **成本/采购** 3: `cost-method.md`、`procurement-product-type.md`、
   `procurement-products-status.md`(妙手 free-text)
 - **集成/同步/安全** 8: `provider.md`、`platform.md`、`sync-job-status.md`、

@@ -1,5 +1,15 @@
 # tts-erp CHANGELOG
 
+## 2026-09-30 — 删除未接通的 linkage schema
+
+- migration `0044_drop_linkage_schema` 删除 6 张 linkage 表和
+  `effective_product_links` view；生产归档与人工执行顺序见
+  `tech-doc/linkage-retirement.md`。
+- 下线全部 `/v2/linkage/*` API、ORM、计算代码和关联枚举。
+- 妙手 move-collect 保留 `integration.raw_records` 原始审计；不再写死端 evidence。
+- 报表采购成本改用 `products_spu.spu_id = procurement_products.external_product_id`
+  直接匹配；coverage 由 `linked_spus` 改为实际 `costed_spus`。
+
 ## 2026-09-29 — SPU ROI Bootstrap 批量多选筛选
 
 - 页面将旧的单值模糊搜索框替换为 Bootstrap 5 风格的标签式多选：原生

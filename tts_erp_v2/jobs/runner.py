@@ -16,6 +16,7 @@ Why a shared runner instead of inline writes
 * Idempotency helpers (raw-record dedup-by-hash, sync-issue dedup-by
   (job_name, issue_type, external_id)) live in one place.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -195,8 +196,8 @@ def record_sync_issue(
 ) -> SyncIssue:
     """Insert a row into ``integration.sync_issues``.
 
-    Issues never block the main job — they are advisory, surfaced to
-    ops via the linkage.coverage dashboard. We dedup on
+    Issues never block the main job — they are advisory and surface through
+    sync-status/operator diagnostics. We dedup on
     ``(job_name, issue_type, external_id, detected_at::date)`` so a
     re-run doesn't accumulate duplicate rows for the same upstream
     failure. The dedup is best-effort (a SELECT first); the job does

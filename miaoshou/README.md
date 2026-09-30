@@ -7,15 +7,15 @@
 
 ## 核心接口：`search_move_collect_list`（商品发布/搬家记录）
 
-这是妙手侧**商品关联的桥梁接口**：每条记录是一次"采集箱商品 → 搬家/刊登到 TikTok Shop"
-的任务明细，同时携带关联两端的外部 id。它是 V3 数据模型中
-`linkage.link_evidence` / `linkage.product_links`（`relation_type=MIAOSHOU_PUBLISHED_TO_TIKTOK`）
-的事实来源。
+每条记录是一次“采集箱商品 → 搬家/刊登到 TikTok Shop”的任务明细，同时携带
+TikTok SPU、妙手采集箱和源头商品的外部 id。同步任务将原始记录保存到
+`integration.raw_records` 作为审计数据；成本关联使用同步后的正式商品主档，不再维护
+单独的 linkage 投影。
 
 - apifox：`api-482189163`
 - path：`POST /open/v1/product/collect_box/tiktok/move_collect/search_move_collect_list`
 - SDK：`MiaoshouErpClient.tk_collect_box.search_move_collect_list(page_no, page_size, status?, item_id?, source_item_id?)`（`miaoshou/endpoints/tk_collect_box.py`，`page_size` 上限 20）
-- 同步入口（v2）：sync-worker 的 `miaoshou.move_collect` job（`tts_erp_v2/jobs/miaoshou/move_collect.py::sync_move_collect`）每 30 分钟由 APScheduler 触发，进程内调 SDK 落库 `procurement.miaoshou_move_collect_tasks`。v2 无 `/miaoshou/*` HTTP 路由（见 AGENTS.md §10.2）
+- 同步入口（v2）：sync-worker 的 `miaoshou.move_collect` job（`tts_erp_v2/jobs/miaoshou/move_collect.py::sync_move_collect`）每 30 分钟由 APScheduler 触发，进程内调 SDK 落库 `integration.raw_records`。v2 无 `/miaoshou/*` HTTP 路由。
 
 ### 实测结论（2026-08-29，生产库）
 
@@ -26,7 +26,7 @@
 | 妙手已发布 SPU 182 个，其中 59 个有销售 | 123 个 SPU 已上架但在当前已同步订单（719 单）中零销售 |
 | 发布任务 237 条 = 182 success + 55 fail | fail 任务没有 `platformItemId`；success 与 `platformItemId` 1:1 |
 | 199 个 distinct `collectBoxDetailId` | 存在同一采集商品被多次搬家 |
-| 单店铺：`shopId=17060852 / VN / Bridge nook` | 其发布的商品落在 TikTok shop `7494763368967603447` 的销售数据中——`linkage.account_links` 的事实证据 |
+| 单店铺：`shopId=17060852 / VN / Bridge nook` | 其发布商品与 TikTok shop `7494763368967603447` 的销售数据存在实测对应关系；当前不持久化独立账号映射表 |
 
 ⚠️ 覆盖率 100% 是**当前订单同步窗口内**的结论；窗口扩大后可能下降，应以持续监控指标为准。
 
@@ -60,9 +60,9 @@
 
 | API 字段 (camelCase) | SDK model 属性 | DB 列（`miaoshou_move_collect_tasks`） | 语义 | V3 目标模型 |
 | --- | --- | --- | --- | --- |
-| `moveCollectTaskDetailId` | `moveCollectTaskDetailId: str` | `move_collect_task_detail_id` (PK 之一) | 搬家任务明细 id | `linkage.link_evidence.source_external_id` |
+| `moveCollectTaskDetailId` | `moveCollectTaskDetailId: str` | `move_collect_task_detail_id` (PK 之一) | 搬家任务明细 id | `integration.raw_records.external_id` |
 | `collectBoxDetailId` | `collectBoxDetailId: str` | `collect_box_detail_id` | 采集箱商品 id（妙手侧商品） | `procurement.procurement_products.external_product_id` |
-| `shopId` | `shopId: str` | `shop_id` (text) | 妙手店铺 id（非 TikTok shop id） | `linkage.account_links` / `procurement.procurement_accounts` |
+| `shopId` | `shopId: str` | `shop_id` (text) | 妙手店铺 id（非 TikTok shop id） | `procurement.procurement_accounts.external_account_id` |
 | `platformItemId` | `platformItemId: str` | `platform_item_id` | **TikTok 商品 SPU id**（= `order_items.product_id`） | `commerce.products_spu.external_product_id` |
 | `source` | `source: str` | `source` | 采购源头平台（1688 等） | `procurement.procurement_products.source_platform` |
 | `sourceItemId` | `sourceItemId: str` | `source_item_id` | 源头平台商品 id（1688 offer id） | `procurement.procurement_products.source_item_id` |
@@ -73,9 +73,9 @@
 | `title` | `title: str` | `title` | 商品标题（快照） | 仅证据，不作正式关联依据 |
 | `thumbnail` | `thumbnail: str` | `thumbnail` | 主图 URL（1688 源图） | 仅证据 |
 | `isTiming` | `isTiming: str` | `is_timing` | 是否定时发布（"0"/"1"） | — |
-| `status` | `status: str` | `status` | 任务状态（success / fail） | `linkage.product_links.status` |
-| `reason` | `reason: str` | `reason` | 失败原因 | `linkage.link_issues.details` |
-| `gmtCreate` | `gmtCreate: str` | `gmt_create` (text) | 任务创建时间（UTC+8 字符串，无时区） | `linkage.product_links.valid_from`（需转 timestamptz） |
+| `status` | `status: str` | `status` | 任务状态（success / fail） | `integration.raw_records.payload` |
+| `reason` | `reason: str` | `reason` | 失败原因 | `integration.raw_records.payload` / `integration.sync_issues` |
+| `gmtCreate` | `gmtCreate: str` | `gmt_create` (text) | 任务创建时间（UTC+8 字符串，无时区） | 原始审计字段 |
 | `gmtModified` | `gmtModified: str` | `gmt_modified` (text) | 最后修改时间（同上） | `source_updated_at`（需转 timestamptz） |
 | `isRenewItem` | `isRenewItem: bool` | `is_renew_item` | 是否重新刊登 | — |
 | `shopName` | `shopName: str` | `shop_name` | 妙手店铺名（快照） | 仅证据（不可作关联依据） |
