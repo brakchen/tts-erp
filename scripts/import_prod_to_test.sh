@@ -188,7 +188,7 @@ ALL_TABLES=(
   "procurement.procurement_accounts"
   "procurement.procurement_products"
   "procurement.manual_product_costs"
-  "miaoshou.purchase_price_candidates"
+  "miaoshou.purchase_prices"
   "fulfillment.shipments"
   "fulfillment.tracking_events"
   "after_sales.cases"

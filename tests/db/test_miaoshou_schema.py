@@ -18,7 +18,7 @@ from tts_erp_v2.db.models.miaoshou import (
     MiaoshouPackageItem,
     MiaoshouPackageRawRecord,
     MiaoshouPurchaseOrderRawRecord,
-    MiaoshouPurchasePriceCandidate,
+    MiaoshouPurchasePrice,
     MiaoshouSyncCursor,
     MiaoshouSyncIssue,
 )
@@ -37,7 +37,7 @@ def test_miaoshou_schema_contains_package_domain_tables(db_engine) -> None:
         "sync_cursors",
         "sync_issues",
         "purchase_order_raw_records",
-        "purchase_price_candidates",
+        "purchase_prices",
     }.issubset(set(inspector.get_table_names(schema="miaoshou")))
 
 
@@ -47,7 +47,7 @@ def test_miaoshou_models_are_schema_owned() -> None:
     assert MiaoshouPackageItem.__table__.schema == "miaoshou"
     assert MiaoshouPackageGiftItem.__table__.schema == "miaoshou"
     assert MiaoshouPurchaseOrderRawRecord.__table__.schema == "miaoshou"
-    assert MiaoshouPurchasePriceCandidate.__table__.schema == "miaoshou"
+    assert MiaoshouPurchasePrice.__table__.schema == "miaoshou"
     assert MiaoshouSyncCursor.__table__.schema == "miaoshou"
     assert MiaoshouSyncIssue.__table__.schema == "miaoshou"
 
