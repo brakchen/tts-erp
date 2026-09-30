@@ -243,15 +243,15 @@ _SIDEBAR_CSS = """
 def _sidebar_html(current_page: str) -> str:
   """Return the shared sidebar with the current page marked as active."""
   pages = [
-    ("dashboard", "台", "控制台", "__group__"),
-    ("manual-costs", "采", "采购工作台", "运营"),
-    ("spu-roi", "益", "SPU ROI", "运营"),
-    ("focused-spus", "关", "重点关注 SPU", "运营"),
-    ("shops", "店", "店铺注册", "店铺"),
-    ("enum-map", "映", "枚举映射", "数据"),
-    ("intercept-configs", "配", "拦截配置", "拦截"),
-    ("intercept-requests", "录", "拦截记录", "拦截"),
-    ("intercept-stats", "计", "拦截统计", "拦截"),
+    ("dashboard", "台", "控制台", "总览"),
+    ("focused-spus", "关", "重点关注 SPU", "经营分析"),
+    ("spu-roi", "益", "SPU ROI", "经营分析"),
+    ("manual-costs", "采", "采购工作台", "基础设置"),
+    ("shops", "店", "店铺注册", "基础设置"),
+    ("enum-map", "映", "枚举映射", "基础设置"),
+    ("intercept-configs", "配", "拦截配置", "数据工具"),
+    ("intercept-requests", "录", "拦截记录", "数据工具"),
+    ("intercept-stats", "计", "拦截统计", "数据工具"),
   ]
   links = []
   current_group = None
