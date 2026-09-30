@@ -140,7 +140,7 @@ ALLOW_PROD_DESTRUCTIVE=1 \
 2. **Redirect URL** 填公网可达的 callback —— **必须带外部前缀 `/tts`**（nginx
    只把 `/tts/*` 转给 :9877 API，无前缀的 `daqiang.nat100.top/v2/...` 会落在
    ProfitLens 前端 404 页）：
-   `http://daqiang.nat100.top/tts/v2/oauth/tiktok/callback`（前缀取
+   `https://daqiang.nat100.top/tts/v2/oauth/tiktok/callback`（前缀取
    `TTS_ERP_EXTERNAL_PREFIX` 实际值，当前 `/tts`；app 以它为 `root_path`，
    middleware 按 `scope["root_path"]` 派生 route-relative 路径做豁免匹配）。
 3. 确认 scope（`seller.*` 读类）已勾选；勾太多影响审核与授权率。

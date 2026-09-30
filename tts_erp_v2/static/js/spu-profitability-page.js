@@ -164,6 +164,22 @@
     if (!Number.isFinite(n)) return "—";
     return String(n);
   }
+  function fmtQty(v) {
+    if (v == null || v === "") return "—";
+    var n = parseFloat(v);
+    if (!Number.isFinite(n)) return "—";
+    return n.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+  }
+  function projectionStatusLabel(status) {
+    if (status === "available") return "可预测";
+    if (status === "no_unsettled_orders") return "无未结算订单";
+    if (status === "insufficient_sample") return "样本不足";
+    return "—";
+  }
+  function setTextIfPresent(selector, value) {
+    var target = $(selector);
+    if (target) target.textContent = value;
+  }
   function loginUrl() {
     var pagePath = profile && profile.pagePath ? profile.pagePath : "/v2/pages/spu-roi";
     return `${PREFIX}/v2/auth/login?next=${PREFIX}${pagePath}`;
@@ -314,6 +330,18 @@
     "sum-roi-breakeven",
     "sum-roi-ad-actual",
     "sum-roi-ad",
+    "sum-projection-status",
+    "sum-projection-basis-orders",
+    "sum-projection-refund-rate",
+    "sum-projection-full-loss-rate",
+    "sum-unresolved-orders",
+    "sum-unresolved-qty",
+    "sum-projected-future-loss-qty",
+    "sum-projected-terminal-loss-qty",
+    "sum-projected-net-revenue",
+    "sum-projected-net-profit",
+    "sum-projected-roi",
+    "sum-projected-breakeven-roi",
   ]);
   var ALLOWED_COLUMNS = new Set([
     "product",
@@ -956,6 +984,58 @@
         ? "—"
         : (roiAdStatus === "estimated_known_costs" ? "≈" : "") +
           fmtRatio(roiAdValue);
+
+    // 终局预测由后端基于同一日期窗口计算；当前实际卡片保持不变。
+    // StaticFiles 会即时读取新 JS，而 HTML 模板要等 API 进程重启才更新；
+    // 部署窗口内新 hook 可能暂时不存在，不能让整页渲染因此中断。
+    setTextIfPresent(
+      "#sum-projection-status",
+      projectionStatusLabel(totals.projection_status),
+    );
+    setTextIfPresent(
+      "#sum-projection-basis-orders",
+      fmtInt(totals.projection_basis_order_count),
+    );
+    setTextIfPresent(
+      "#sum-projection-refund-rate",
+      fmtPct(totals.projection_refund_amount_rate),
+    );
+    setTextIfPresent(
+      "#sum-projection-full-loss-rate",
+      fmtPct(totals.projection_full_loss_qty_rate),
+    );
+    setTextIfPresent(
+      "#sum-unresolved-orders",
+      fmtInt(totals.unresolved_unsettled_order_count),
+    );
+    setTextIfPresent(
+      "#sum-unresolved-qty",
+      fmtQty(totals.unresolved_unsettled_qty),
+    );
+    setTextIfPresent(
+      "#sum-projected-future-loss-qty",
+      fmtQty(totals.projected_future_full_loss_qty),
+    );
+    setTextIfPresent(
+      "#sum-projected-terminal-loss-qty",
+      fmtQty(totals.projected_terminal_full_loss_qty),
+    );
+    setTextIfPresent(
+      "#sum-projected-net-revenue",
+      fmtMoney(totals.projected_net_revenue),
+    );
+    setTextIfPresent(
+      "#sum-projected-net-profit",
+      fmtMoney(totals.projected_net_profit),
+    );
+    setTextIfPresent(
+      "#sum-projected-roi",
+      fmtRatio(totals.projected_roi_real),
+    );
+    setTextIfPresent(
+      "#sum-projected-breakeven-roi",
+      fmtRatio(totals.projected_roi_breakeven),
+    );
     var rubricLabel =
       (meta.presentation && meta.presentation.rubric_label) ||
       meta.rubric_version ||
@@ -1174,6 +1254,30 @@
           .filter(Boolean)
           .join("；"),
       ),
+      cell("预测状态", projectionStatusLabel(it.projection_status)),
+      cell("预测样本订单", fmtInt(it.projection_basis_order_count)),
+      cell("预测样本件数", fmtQty(it.projection_basis_qty)),
+      cell("预测样本销售", money(it.projection_basis_sales)),
+      cell("预测样本退款", money(it.projection_basis_refund_amount)),
+      cell("预测样本全损件", fmtQty(it.projection_basis_full_loss_qty)),
+      cell("预测退款金额率", fmtPct(it.projection_refund_amount_rate)),
+      cell("预测全损件数率", fmtPct(it.projection_full_loss_qty_rate)),
+      cell("未结算订单", fmtInt(it.unsettled_order_count)),
+      cell("待确认未结算订单", fmtInt(it.unresolved_unsettled_order_count)),
+      cell("待确认未结算件", fmtQty(it.unresolved_unsettled_qty)),
+      cell("待确认未结算销售", money(it.unresolved_unsettled_sales)),
+      cell("已确认未结算退款", money(it.confirmed_unsettled_refund_amount)),
+      cell("已确认未结算全损件", fmtQty(it.confirmed_unsettled_full_loss_qty)),
+      cell("预计未来新增全损件", fmtQty(it.projected_future_full_loss_qty)),
+      cell("预计终局全损件", fmtQty(it.projected_terminal_full_loss_qty)),
+      cell("预计终局全损成本", money(it.projected_full_loss_cost)),
+      cell("预计未结算净收入", money(it.projected_unsettled_net)),
+      cell("预计终局净收入", money(it.projected_net_revenue)),
+      cell("预计终局净利润", money(it.projected_net_profit)),
+      cell("预计终局ROI", fmtRatio(it.projected_roi_real)),
+      cell("预计终局保本ROI", fmtRatio(it.projected_roi_breakeven)),
+      cell("预计终局NC′", money(it.projected_nc_prime)),
+      cell("预计终局保留货本", money(it.projected_cogs_kept)),
     );
   }
   function renderProfitTab(it) {

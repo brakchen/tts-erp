@@ -19,7 +19,7 @@ Authorization: Bearer <API Key>      # 或 X-API-Key: <API Key>
 
 | 组件 | 位置 | 必填 | 类型 | 说明 |
 | --- | --- | --- | --- | --- |
-| `{base}` | — | 是 | URL | 公网网关基址 = `http://daqiang.nat100.top/tts`（**带 `/tts` 前缀**）。直连调试可用 `http://127.0.0.1:9877`（无 `/tts`） |
+| `{base}` | — | 是 | URL | 公网网关基址 = `https://daqiang.nat100.top/tts`（**带 `/tts` 前缀**）。直连调试可用 `http://127.0.0.1:9877`（无 `/tts`） |
 | `shop_id` | path | 是 | string | **上游店铺 ID**（TikTok shop_id），如 `7494763368967603447`。即旧契约中的 `external_account_id`，值不变 |
 | `platform` | query | 否 | string, ≤32 | 默认 `"tiktok"`。店铺 ID 仅在平台内唯一，**调用时必须显式传 `platform=tiktok`** |
 | 鉴权头 | header | 是 | — | `Authorization: Bearer <key>` 或 `X-API-Key: <key>`；所需角色 = `readonly` 及以上 |
@@ -31,7 +31,7 @@ Authorization: Bearer <API Key>      # 或 X-API-Key: <API Key>
 
 ```bash
 curl -sS -H "Authorization: Bearer <API Key>" \
-  "http://daqiang.nat100.top/tts/v2/commerce/channel-accounts/by-external/7494763368967603447?platform=tiktok"
+  "https://daqiang.nat100.top/tts/v2/commerce/channel-accounts/by-external/7494763368967603447?platform=tiktok"
 ```
 
 ---

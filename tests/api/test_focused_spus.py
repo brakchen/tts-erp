@@ -101,6 +101,17 @@ def test_focused_spus_page_keeps_the_full_roi_dashboard(
         "sum-cancel-count",
         "sum-net-profit",
         "sum-roi",
+        "sum-projection-status",
+        "sum-projection-basis-orders",
+        "sum-projection-refund-rate",
+        "sum-projection-full-loss-rate",
+        "sum-unresolved-orders",
+        "sum-projected-future-loss-qty",
+        "sum-projected-terminal-loss-qty",
+        "sum-projected-net-revenue",
+        "sum-projected-net-profit",
+        "sum-projected-roi",
+        "sum-projected-breakeven-roi",
         "fee-card",
         "rows",
         "tpl-drilldown-panel",
@@ -111,6 +122,22 @@ def test_focused_spus_page_keeps_the_full_roi_dashboard(
         marker = f'id="{hook}"'
         assert marker in standard.text
         assert marker in focused.text
+
+    root = Path(__file__).resolve().parents[2]
+    standard_profile = (root / "tts_erp_v2/static/js/spu-roi.js").read_text()
+    focused_profile = (root / "tts_erp_v2/static/js/focused-spus.js").read_text()
+    for hook in shared_hooks:
+        if not hook.startswith("sum-projection") and not hook.startswith(
+            "sum-unresolved"
+        ) and not hook.startswith("sum-projected"):
+            continue
+        marker = f'"{hook}"'
+        assert marker in standard_profile
+        assert marker in focused_profile
+
+    # 运营不需要在页首重复展示待确认件数；后端字段和 SPU 诊断明细保留。
+    assert '"sum-unresolved-qty"' not in standard_profile
+    assert '"sum-unresolved-qty"' not in focused_profile
 
 
 def test_focused_spus_auth_and_camel_case_contract(

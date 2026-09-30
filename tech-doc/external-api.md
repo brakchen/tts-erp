@@ -12,7 +12,7 @@ this document explains semantics, auth, and conventions.
 ## TL;DR — quick reference for agents
 
 All endpoints are served at `http://127.0.0.1:9877` (or
-`http://daqiang.nat100.top` from outside — the NAT layer strips the port;
+`https://daqiang.nat100.top` from outside — TLS terminates at the public gateway and the NAT layer strips the port;
 browser traffic may additionally sit under a `/tts` prefix handled by nginx).
 Every endpoint other than the explicitly-public ones requires
 `Authorization: Bearer <key>` or `X-API-Key: <key>` — or a browser session
@@ -325,7 +325,7 @@ separate work items — same proxy + router pattern.
 
 ### Analytics — SPU 实际 ROI (`/v2/analytics/spu-roi`)
 
-**Stability: stable · 只读(readonly)**。按 SPU 一行的「广告消耗 → 有效销售 → 退款 → 净收入 → 货本 → 净利润 → 实际 ROI/保本线」账页数据源;页面 `GET /v2/pages/spu-roi` 消费它。
+**Stability: stable · 只读(readonly)**。按 SPU 一行的「广告消耗 → 有效销售 → 退款 → 净收入 → 货本 → 净利润 → 实际 ROI/保本线」账页数据源；页面 `GET /v2/pages/spu-roi` 与 `GET /v2/pages/focused-spus` 共用该端点和预计终局字段。
 
 > **2026-09-29 明确兼容例外（operator-requested breaking currency migration）**：用户要求把现有盈利计算从 USD 全量切换为 CNY，因此本端点在 `/v2` 原字段名不变的前提下，将所有 money 字段的语义原地改为 CNY。部署方确认当前页面是主要消费者并接受该 breaking 变更；其他消费者必须读取 `meta.currency.display`，不能继续假定 USD。ROI/比率字段无量纲，语义不变。
 
@@ -346,7 +346,7 @@ Query parameters:
 | `shop_pk` | int | — | 店铺过滤(内部主键) |
 | `fee_rate` | decimal-str | — | 临时页面覆写（仅本次请求，不持久化）；缺省按店铺取当前 `fee-v2` 实测快照，缺失/超过 7 天才回退基线 `0.308`。只作用于未结算订单 `r̂ × unsettled_sales`，已结算费用已含在 SETTLEMENT |
 | `w_start` | date | — | ISO `yyyy-mm-dd`;销售与退款均按关联订单 `COALESCE(order_time, paid_at)` 裁剪；退款跟随原订单归属（含当日） |
-| `w_end` | date | — | ISO `yyyy-mm-dd`;与 `w_start` 配对使用；例如 9 月 1 日订单在 9 月 10 日退款，仍归入 9 月 1 日；不提供窗口 = 销售/退款全历史累计 |
+| `w_end` | date | — | ISO `yyyy-mm-dd`;与 `w_start` 配对使用；例如 9 月 1 日订单在 9 月 10 日退款，仍归入 9 月 1 日；不提供窗口 = 销售/退款全历史累计。预计终局的已结算样本和未结算预测对象也使用同一订单时间窗口，因此时间选择会改变预测字段 |
 
 Response envelope:`{items: [...], total, totals, meta}`。`spu_ids` 属于盈利范围：金额从命中 SPU 行聚合，订单/取消/退款 totals 在命中 SPU 集合内跨 SPU 去重，且 totals 不受分页影响。页面使用 Bootstrap 5 + 自托管 Tom Select Bootstrap 5 主题的原生 `<select multiple>` 选择/搜索/粘贴 SPU，点击「查询」后才应用 scope；已应用的 scope 会同步到页面 URL，刷新或分享链接后恢复。批量粘贴校验期间可点「清空」取消，最多选择 100 个 SPU。
 
@@ -414,7 +414,38 @@ Response envelope:`{items: [...], total, totals, meta}`。`spu_ids` 属于盈利
 | `roi_breakeven` | ratio-str/null | **M17 v8** = `NC′ ÷ (NC′ − COGS_kept)`（fee_est 项移除） | 下钻·利润构成 |
 | `cpa` | money-str/null | M15: `spend / ad_orders` | — |
 
-`totals` 同样返回上述 5 个 `ad_system_*` 字段及 `profit_status/roi_status`，按完整 scope 聚合后重新计算（不是行级 ROI 平均值）。`meta.ad_system_roi` 给出实际 ROI、最大可承受广告费和保本 ROI 的公式与范围，并明确 `mixed_real_cost` 不混入广告赠金、赠金目前不可单独取得；`meta.presentation` 返回 `rubric_label`、退款警戒阈值/文案、估算/默认成本文案和 `pnl_hints`；`meta.warnings` 当前包含 `ad_system_other_necessary_costs_not_modeled`。前端只格式化和渲染这些状态/说明，不保存业务阈值、不重算分类。净结算已扣除的平台费用不得再次扣除；结算外成本补齐前，前端以 `≈` 展示该估算。
+**预计终局增量字段**（不改变或覆盖上述当前字段）：
+
+| 字段 | 类型 | 公式 / 含义 |
+| --- | --- | --- |
+| `projection_status` | enum | `available \| no_unsettled_orders \| insufficient_sample` |
+| `projection_basis_order_count` | int | 同一订单时间窗口内有 SETTLEMENT 实际到账的样本订单数；大盘全局去重 |
+| `projection_basis_qty` | int | 已结算样本商品件数 |
+| `projection_basis_sales` | money-str | 已结算样本商品行销售额 CNY |
+| `projection_basis_refund_amount` | money-str | 已结算样本已完结退款金额 CNY |
+| `projection_basis_full_loss_qty` | int | 已结算样本已完结 `REFUND_ONLY/RETURN_AND_REFUND` 全损件数 |
+| `projection_refund_amount_rate` | rate-str/null | 样本退款金额 ÷ 样本销售额；4 位小数字符串 |
+| `projection_full_loss_qty_rate` | rate-str/null | 样本全损件数 ÷ 样本件数；4 位小数字符串，不是订单维度 `full_loss_rate` |
+| `unsettled_order_count` | int | 当前范围内无 SETTLEMENT 实际到账的 paid 订单数；大盘全局去重 |
+| `unresolved_unsettled_order_count` | int | 未结算且仍有未确认商品件的订单数；大盘全局去重 |
+| `unresolved_unsettled_qty` | int | 未结算件数减去已确认退款/退货/全损件数 |
+| `unresolved_unsettled_sales` | money-str | 待确认件数按订单行单价计算的销售额 CNY |
+| `confirmed_unsettled_refund_amount` | money-str | 未结算订单中已经确认的退款金额 CNY，只扣一次 |
+| `confirmed_unsettled_full_loss_qty` | int | 未结算订单中已经确认的退款/退货全损件数 |
+| `projected_future_full_loss_qty` | decimal-str/null | 待确认件数 × 样本全损件数率；不为显示提前取整 |
+| `projected_terminal_full_loss_qty` | decimal-str/null | 当前已观察全损件数 + 预计未来新增全损件数 |
+| `projected_full_loss_cost` | money-str/null | 预计终局全损对应成本，用于预计财务 ROI，不重复加入 COGS |
+| `projected_unsettled_net` | money-str/null | 未结算销售扣已知退款、预测退款和平台费后的预计净收入 |
+| `projected_net_revenue` | money-str/null | 已结算实际到账 + `projected_unsettled_net` |
+| `projected_net_profit` | money-str/null | `projected_net_revenue − 当前 cogs_total − spend`；预测全损不重复扣货本 |
+| `projected_nc_prime` | money-str/null | `projected_net_revenue − projected_full_loss_cost` |
+| `projected_cogs_kept` | money-str/null | 当前已确认保留货本减去预计新增全损对应货本 |
+| `projected_roi_real` | ratio-str/null | `projected_nc_prime ÷ spend`；广告消耗为 0 时 null |
+| `projected_roi_breakeven` | ratio-str/null | `projected_nc_prime ÷ (projected_nc_prime − projected_cogs_kept)`；分母≤0或样本不足时 null |
+
+`totals` 同样返回上述预计终局字段。金额/件数商品行事实按 scope 聚合；样本订单数、未结算订单数、待确认订单数独立按订单全局去重；比例和预计终局值按完整 scope 重新计算，不是行级比例平均值。单 SPU scope 下 `totals` 与该 SPU 的预测字段一致。
+
+`meta.projection` 返回预测说明、日期归属、样本/目标定义和状态中文标签；`meta.warnings` 在适用时增加 `projection_insufficient_sample` / `projection_uses_settled_order_sample`。`meta.ad_system_roi` 给出实际 ROI、最大可承受广告费和保本 ROI 的公式与范围，并明确 `mixed_real_cost` 不混入广告赠金、赠金目前不可单独取得；`meta.presentation` 返回 `rubric_label`、退款警戒阈值/文案、估算/默认成本文案和 `pnl_hints`。前端只格式化和渲染这些状态/说明，不保存业务阈值、不重算分类。净结算已扣除的平台费用不得再次扣除；结算外成本补齐前，前端以 `≈` 展示该估算。
 
 > **2026-09-30 成本来源语义变化**：
 >

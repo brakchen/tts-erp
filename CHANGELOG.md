@@ -1,5 +1,15 @@
 # tts-erp CHANGELOG
 
+## 2026-09-30 — SPU ROI 未结算订单预计终局
+
+- `GET /v2/analytics/spu-roi` 在保留全部当前字段语义的基础上，新增已结算样本、
+  未结算待确认对象、预计全损件数、预计终局收入/利润/财务 ROI 字段及
+  `available / no_unsettled_orders / insufficient_sample` 状态。
+- 预测样本和目标沿用订单 `COALESCE(order_time, paid_at)` 日期归属；已确认未结算
+  退款/全损不重复预测，预计新增全损不重复加入当前采购成本。
+- `spu-roi` 与 `focused-spus` 共用的大盘及 SPU 明细大盘新增明确标注的预计终局展示，
+  不覆盖或冒充当前实际指标。
+
 ## 2026-09-30 — 删除未接通的 linkage schema
 
 - migration `0044_drop_linkage_schema` 删除 6 张 linkage 表和
