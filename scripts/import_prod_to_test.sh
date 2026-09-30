@@ -244,8 +244,8 @@ done
 ALL_TABLES=("${pruned[@]}")
 
 # ── Plan & confirm ──────────────────────────────────────────
-echo "[import] source: $SRC_DB  ($src_plain)"
-echo "[import] target: $DST_DB  ($dst_plain)"
+echo "[import] source: $SRC_DB"
+echo "[import] target: $DST_DB"
 echo "[import] mode:   $([[ $SCHEMA_ONLY -eq 1 ]] && echo "schema-only" || echo "schema + data")"
 echo "[import] tables: ${#ALL_TABLES[@]}"
 [[ -n "$ROW_LIMIT" ]] && echo "[import] row-limit per table: $ROW_LIMIT"

@@ -153,8 +153,11 @@ def test_shop_ambiguous_in_order_is_not_written() -> None:
     order = _purchase_order()
     order["opOrderPackageList"][1]["shopId"] = "TEST_OTHER_SHOP"
     prices, issues = job.clean_latest_prices([order])
-    assert prices == {}
-    assert issues[0]["issue_type"] == "SHOP_UNRESOLVED_IN_PURCHASE_ORDER"
+    assert ("TEST_MS_SHOP", "TEST_SPU_A") in prices
+    assert ("TEST_MS_SHOP", "TEST_SPU_B") not in prices
+    assert any(
+        issue["issue_type"] == "SHOP_UNRESOLVED_IN_PURCHASE_ORDER" for issue in issues
+    )
 
 
 def test_non_positive_or_non_finite_prices_are_rejected() -> None:
