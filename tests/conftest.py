@@ -65,9 +65,10 @@ def _coerce_psycopg(url: str) -> str:
 # ``integration.credentials`` row with ``TEST_`` prefixes sitting in
 # the live ``tts_erp`` DB). The fix is env-driven:
 #
-#   1. ``scripts/test.sh fast`` sources ``.env.test`` (gitignored) which
-#      sets ``TTS_ERP_DB_URL_TEST`` to the dedicated ``tts_erp_v3_test``
-#      database.
+#   1. ``scripts/test_isolated.sh fast`` clones a per-run ``tts_erp_test_*``
+#      database from ``tts_erp_test_template`` and sets ``TTS_ERP_DB_URL_TEST``
+#      to that isolated database. Direct ``scripts/test.sh`` remains the
+#      serialized shared-DB fallback for ``tts_erp_v3_test``.
 #   2. ``tests/conftest.py`` (here) prefers ``TTS_ERP_DB_URL_TEST``
 #      over the prod ``TTS_ERP_DB_URL``; tests run against the test DB.
 #   3. The prod API service (``tts-erp.service``) still reads ``.env``
@@ -78,8 +79,8 @@ def _coerce_psycopg(url: str) -> str:
 # keeps direct ``pytest`` invocations (e.g. ``pytest tests/db/`` for
 # a one-off introspection) working. Instead we print a one-line
 # warning the first time we resolve to a prod-shaped dbname so the
-# developer notices. The hard guard for the full suite lives in
-# ``scripts/test.sh`` (refuses to run without ``.env.test``).
+# developer notices. The normal agent entry point is ``scripts/test_isolated.sh``;
+# direct ``scripts/test.sh`` is only the serialized shared-DB fallback.
 from urllib.parse import urlparse as _urlparse
 
 _db_url_test = os.environ.get("TTS_ERP_DB_URL_TEST")
@@ -122,10 +123,10 @@ elif _db_url_prod:
                 _sys2.stderr.write(
                     "\n[conftest] REFUSED: prod-shaped DB ``"
                     f"{_dbname}``\n"
-                    "             Use ``bash scripts/test.sh fast`` (sources "
-                    "``.env.test``),\n"
-                    "             or set TTS_ERP_DB_URL_TEST to point at the\n"
-                    "             dedicated test DB. TTS_ERP_TEST_OFF=1 bypasses\n"
+                    "             Use ``bash scripts/test_isolated.sh fast`` "
+                    "(preferred),\n"
+                    "             or set TTS_ERP_DB_URL_TEST to point at a\n"
+                    "             test-shaped DB. TTS_ERP_TEST_OFF=1 bypasses\n"
                     "             this guard (NOT recommended; you will run\n"
                     "             tests against prod and may damage live data).\n\n"
                 )

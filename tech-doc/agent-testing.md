@@ -67,7 +67,7 @@ Rules:
 
 ## 4. Template and shared database usage
 
-`bash scripts/test_isolated.sh ...` is parallel-safe for ordinary agent work: it clones `tts_erp_test_template` to a unique `tts_erp_test_*` database, runs `scripts/test.sh` with `TTS_ERP_DB_URL_TEST` pointing at that clone, and drops the clone on exit. Concurrent isolated runs do not delete each other's `TEST_` rows.
+`bash scripts/test_isolated.sh ...` is parallel-safe for ordinary agent work: it serializes template refresh/clone through `/tmp/tts-erp-test-template.lock`, clones `tts_erp_test_template` to a unique `tts_erp_test_*` database, runs `scripts/test.sh` with `TTS_ERP_DB_URL_TEST` pointing at that clone, and drops the clone on exit. Concurrent isolated runs do not delete each other's `TEST_` rows.
 
 Refresh the template when schema/migration state changes or if a run reports missing tables:
 
@@ -107,15 +107,15 @@ When master has an explicitly recorded stable failure baseline:
 Suggested capture:
 
 ```bash
-bash scripts/test.sh fast 2>&1 | grep '^FAILED' | sort > /tmp/fail-before.txt
+bash scripts/test_isolated.sh fast 2>&1 | grep '^FAILED' | sort > /tmp/fail-before.txt
 # merge the lane
-bash scripts/test.sh fast 2>&1 | grep '^FAILED' | sort > /tmp/fail-after.txt
+bash scripts/test_isolated.sh fast 2>&1 | grep '^FAILED' | sort > /tmp/fail-after.txt
 diff -u /tmp/fail-before.txt /tmp/fail-after.txt
 ```
 
 For every failure:
 
-1. Rerun the smallest failing test selection once through `scripts/test.sh`.
+1. Rerun the smallest failing test selection once through `scripts/test_isolated.sh`.
 2. If the isolated rerun passes, record it as a likely flake.
 3. If it fails consistently, treat it as a real failure and fix it before completion.
 4. Do not classify an unrerun failure as pre-existing or flaky.

@@ -24,10 +24,10 @@
 ## 3. Non-negotiable safety boundaries
 
 - Never run tests against `tts_erp`, `tts_erp_prod`, or any prod-shaped database name.
-- Run tests only through `bash scripts/test.sh ...`; do not invoke pytest directly.
+- Run tests only through `bash scripts/test_isolated.sh ...` (preferred) or serialized shared-DB `bash scripts/test.sh ...`; do not invoke pytest directly.
 - Agents must not run `bash scripts/test.sh all`, `bash scripts/test.sh coverage`, or migration suites archived under `tech-doc/_archive/migrate-v1-to-v2-2026-08-29/`. These paths include or restore production-touching migration behavior.
 - Never execute `DELETE`, `TRUNCATE`, `DROP`, or irreversible `UPDATE` against production data without the documented guard and explicit human authorization.
-- Never run `alembic upgrade` against production. Agents may validate migrations only against `tts_erp_v3_test`; production migration and restart are human-operated.
+- Never run `alembic upgrade` against production. Agents may validate migrations only against test-shaped databases (`tts_erp_test_template`, ephemeral `tts_erp_test_*`, or shared fallback `tts_erp_v3_test`); production migration and restart are human-operated.
 - Do not add a destructive HTTP, CLI, migration, or job path without the shared guard from `tts_erp_v2.api.deps`.
 - Credentials must go through `tts_erp_v2.proxy.token_service`; never query legacy `oauth_tokens` or decrypt `integration.credentials` directly.
 - Do not reintroduce v1 `public.*` business tables or remove `public.fn_touch_updated_at()`.
@@ -162,7 +162,7 @@ conn.execute(text("..."))
 Definition of done:
 
 1. Run the narrowest relevant test command.
-2. For code/test changes, run `bash scripts/test.sh fast` under the shared test lock.
+2. For code/test changes, run `bash scripts/test_isolated.sh fast`; use the shared test lock only when intentionally running direct `scripts/test.sh`.
 3. The default requirement is zero failures. If master has an explicitly recorded stable baseline, the change must introduce zero new stable failures; isolate and rerun failures once to distinguish flakes.
 4. Update contracts and operational documentation affected by the change.
 5. Confirm no secrets, production data, unrelated WIP, or staged foreign files are included.
