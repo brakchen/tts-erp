@@ -16,4 +16,5 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| fix/focused-spus-deploy-health | 修复重点关注上线脚本启动等待与路由验证误报 | 01a0edf5-a325-77b2-ade9-ac88e25bdd89 | `fix/focused-spus-deploy-health` / `.worktrees/focused-spus-deploy-health` | `scripts/oneoff_deploy_focused_spus.sh` | active | — | — | 2026-09-30T00:48Z |
 | miaoshou-manual-cost-import | 妙手采购价映射与人工成本导入 | 01a0efbb-1bcc-77b2-ade9-ac9dfdf3d0a0 | `chore/miaoshou-manual-cost-import` / `/home/schan/tts-erp/.worktrees/miaoshou-manual-cost-import` | `tech-doc/miaoshou-purchase-price-import.md` | active | — | — | 2026-09-30 00:46:23 |
