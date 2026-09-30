@@ -1304,7 +1304,7 @@ _PAGE_HTML = """<!doctype html>
     <div class="op-toolbar">
       <label class="op-search">
         <span>搜索</span>
-        <input id="filter-search" type="search" class="op-input op-input-search" placeholder="SKU 或标题" aria-label="过滤行">
+        <input id="filter-search" type="search" class="op-input op-input-search" placeholder="SPU 或标题" aria-label="按 SPU 或标题过滤">
       </label>
       <label class="op-pp">
         <span>每页</span>
@@ -1337,7 +1337,7 @@ _PAGE_HTML = """<!doctype html>
       <table class="op-table" aria-live="polite">
         <thead>
           <tr>
-            <th scope="col" class="op-th op-th-sku">SKU</th>
+            <th scope="col" class="op-th op-th-sku">SPU</th>
             <th scope="col" class="op-th op-th-title">标题</th>
             <th scope="col" class="op-th op-th-sku">状态</th>
             <th scope="col" class="op-th op-th-cost op-th-sortable" data-sort="unit_cost" title="按成本价排序">成本<span class="op-sort-arrow" aria-hidden="true"></span></th>
