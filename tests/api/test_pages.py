@@ -159,7 +159,7 @@ def test_runtime_config_page_requires_readwrite_operator(
     assert "运行配置" in response.text
 
 
-def test_sync_jobs_page_is_in_pages_shell_and_sidebar(api_client, readonly_key):
+def test_sync_jobs_page_is_in_pages_shell_and_sidebar(api_client, readonly_key, readwrite_key):
     body = bytes(sync_jobs_page().body).decode()
 
     assert "定时任务管理" in body
@@ -168,9 +168,15 @@ def test_sync_jobs_page_is_in_pages_shell_and_sidebar(api_client, readonly_key):
     assert 'href="../../v2/pages/sync-jobs"' in body
     assert 'title="定时任务" aria-current="page"' in body
 
-    response = api_client.get(
+    readonly_response = api_client.get(
         "/v2/pages/sync-jobs",
         headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert readonly_response.status_code == 403, readonly_response.text
+
+    response = api_client.get(
+        "/v2/pages/sync-jobs",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
     )
     assert response.status_code == 200, response.text
     assert response.headers["content-type"].startswith("text/html")

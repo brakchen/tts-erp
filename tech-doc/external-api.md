@@ -259,8 +259,8 @@ sync-worker 周期作业健康展示（dashboard「数据同步状态」卡片�
 | Endpoint | Role | Notes |
 | --- | --- | --- |
 | `GET /v2/sync/status` | readonly | → `{server_time, jobs: [{job_name, interval_seconds, last_run_at, last_finished_at, last_status, last_error, next_expected_at, lag_seconds, cycles_late, severity}]}`。周期取自 `sync_worker.scheduler.JOBS` 注册表（单一真相源），运行记录取自 `integration.sync_jobs`（tiktok 作业按 shop 扇出多行，按 job_name 聚合取最新一行）。红灯规则：`now - last_run_at >= 2 × interval_seconds` → `severity="crit"`；≥1 周期 `"warn"`；周期内 `"ok"`；从未运行或注册表外 job `"unknown"`。只读、零上游外呼。 |
-| `GET /v2/sync/jobs` | readonly | 周期任务管理页的数据源：返回 `JOBS` 定义、`enabled` 启停状态、最近运行状态，以及可手动选择的 TikTok 店铺列表。启停状态持久化在 `integration.sync_cursors` 的保留命名空间 `scheduler.job_controls`。 |
-| `GET /v2/pages/sync-jobs` | readonly | 定时任务管理 HTML 页面（侧边栏入口）。页面可查看任务；admin 会话可切换启停、立即执行；非 admin 会话自动降级只读。 |
+| `GET /v2/sync/jobs` | readwrite | 周期任务管理页的数据源：返回 `JOBS` 定义、`enabled` 启停状态、最近运行状态，以及可手动选择的 TikTok 店铺列表。启停状态持久化在 `integration.sync_cursors` 的保留命名空间 `scheduler.job_controls`。 |
+| `GET /v2/pages/sync-jobs` | readwrite | 定时任务管理 HTML 页面（侧边栏入口）。页面可查看任务；admin 会话可切换启停、立即执行；readwrite 会话可访问页面但非 admin 操作按钮禁用。 |
 | `PATCH /v2/admin/sync-jobs/{job_name}/enabled` | admin | body `{"enabled": false}`：启用/停用周期 tick。只影响 APScheduler 自动触发；手动触发仍可执行。Cookie mutation 必须带 `X-Requested-With: tts-erp`。 |
 | `POST /v2/admin/sync-jobs/{job_name}/trigger` | admin | body 可选 `{"shop_id": "..."}`。TikTok 店铺级任务传 `shop_id` 时只跑该店，省略则按当前授权店铺 fan-out；系统级任务不接受 `shop_id`。返回 200 accepted，实际运行在 API 后台任务中，结果写 `integration.sync_jobs`。 |
 
@@ -297,7 +297,7 @@ Versioned JSON configuration with draft/publish/rollback and encrypted
 | `GET /v2/pages/spu-roi` | readonly | SPU 实际 ROI 看板。与重点关注页共享 `/static/js/spu-profitability-page.js` kernel；`/static/js/spu-roi.js` 只定义标准 PageProfile。 |
 | `GET /v2/pages/focused-spus` | readonly | 重点关注 SPU。使用相同盈利汇总、表格、分页和钻取；`/static/js/focused-spus.js` 提供持久 selection adapter 与编辑器。 |
 | `GET /v2/pages/shops` | readonly | 店铺注册台。人工注册插件同步店铺（`commerce.shops` 补登记）；写入走 `POST /v2/admin/shops/register`（含 App Key/Secret 均 readwrite）；行内元信息编辑走 `PATCH /v2/admin/shops/{shop_pk}`；App pair 按 service_id 加密保存；「获取授权链接」按钮走 `GET /v2/oauth/tiktok/authorize?format=json`（readwrite）。 |
-| `GET /v2/pages/sync-jobs` | readonly | 定时任务管理页。读取 `/v2/sync/jobs`；admin 会话可调用 `/v2/admin/sync-jobs/*` 启停周期 tick 或立即执行任务；非 admin 会话按钮禁用，只读展示。 |
+| `GET /v2/pages/sync-jobs` | readwrite | 定时任务管理页。读取 `/v2/sync/jobs`；admin 会话可调用 `/v2/admin/sync-jobs/*` 启停周期 tick 或立即执行任务；readwrite 会话可访问页面但按钮禁用，只读展示。 |
 | `GET /v2/pages/runtime-configs` | readwrite | 运行配置台：创建草稿、发布/恢复版本、管理灰度规则及加密 secret 引用。 |
 
 ### Admin (`/v2/admin/*`, handler-enforced roles)

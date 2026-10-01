@@ -49,10 +49,18 @@ def test_sync_jobs_requires_auth(api_client) -> None:
     assert r.status_code == 401, r.text
 
 
-def test_sync_jobs_readonly_returns_definitions(api_client, readonly_key) -> None:
+def test_sync_jobs_requires_readwrite(api_client, readonly_key) -> None:
     r = api_client.get(
         "/v2/sync/jobs",
         headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 403, r.text
+
+
+def test_sync_jobs_readwrite_returns_definitions(api_client, readwrite_key) -> None:
+    r = api_client.get(
+        "/v2/sync/jobs",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
     )
     assert r.status_code == 200, r.text
     body = r.json()
@@ -64,7 +72,7 @@ def test_sync_jobs_readonly_returns_definitions(api_client, readonly_key) -> Non
 
 
 def test_sync_jobs_reflects_disabled_control(
-    api_client, readonly_key, db_engine, clean_job_control
+    api_client, readwrite_key, db_engine, clean_job_control
 ) -> None:
     with Session(db_engine) as sess:
         sess.add(
@@ -78,7 +86,7 @@ def test_sync_jobs_reflects_disabled_control(
 
     r = api_client.get(
         "/v2/sync/jobs",
-        headers={"Authorization": f"Bearer {readonly_key}"},
+        headers={"Authorization": f"Bearer {readwrite_key}"},
     )
     assert r.status_code == 200, r.text
     by_name = {j["job_name"]: j for j in r.json()["jobs"]}
