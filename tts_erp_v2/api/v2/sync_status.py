@@ -22,8 +22,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import exists, select
 from sqlalchemy.dialects.postgresql import distinct_on
@@ -284,9 +284,10 @@ _SYNC_JOBS_PAGE_HTML = """<!doctype html>
 
 
 @router.get("/jobs/page", response_class=HTMLResponse)
-def sync_jobs_page() -> HTMLResponse:
-    """定时任务管理页（HTML shell；数据走 /v2/sync/jobs）。"""
-    return HTMLResponse(_SYNC_JOBS_PAGE_HTML)
+def sync_jobs_page(request: Request) -> RedirectResponse:
+    """Legacy entrypoint: redirect to the shared /v2/pages shell."""
+    root_path = request.scope.get("root_path", "")
+    return RedirectResponse(f"{root_path}/v2/pages/sync-jobs", status_code=307)
 
 
 __all__ = ["router"]
