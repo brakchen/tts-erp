@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>店铺注册 · tts-erp</title>
+  <!-- Relative path: resolves to /static/... locally and /tts/static/...
+       behind the NGINX prefix. Do not make this absolute. -->
+  <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
+  <style>
+    :root {
+      --paper: #F4EFE4;
+      --paper-deep: #EAE3D2;
+      --ink: #1B1814;
+      --ink-soft: #4A4239;
+      --rule: #C9BFA8;
+      --rule-soft: #DDD4BF;
+      --accent: #B8390E;
+      --accent-deep: #8F2C09;
+      --muted: #6E6657;
+      --danger: #8C1A1A;
+      --ok: #2F6B3E;
+      --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', Consolas, ui-monospace, monospace;
+      --sans: 'Inter', 'Noto Sans SC', 'Source Han Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+      --serif: 'Noto Serif SC', 'Source Han Serif SC', Georgia, ui-serif, serif;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 16px;
+      line-height: 1.6;
+      margin: 0;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-deep); }
+    .op-header { border-bottom: 1px solid var(--rule); padding: 18px 28px 14px; background: var(--paper); }
+    .op-header-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+    .op-header-titles { display: flex; flex-direction: column; gap: 2px; }
+    .op-eyebrow { font-family: var(--mono); font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+    .op-title { font-family: var(--serif); font-weight: 600; font-size: 26px; margin: 0; letter-spacing: -0.01em; }
+    .op-identity { font-family: var(--mono); font-size: 14px; color: var(--muted); }
+    .page-main { max-width: 1280px; margin: 0 auto; padding: 24px 28px 64px; }
+    .op-section { background: var(--paper); border: 1px solid var(--rule); border-radius: 0; padding: 20px 24px; margin-bottom: 24px; }
+    .op-section-header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--rule-soft); flex-wrap: wrap; }
+    .op-section-title { font-family: var(--serif); font-weight: 600; font-size: 18px; margin: 0; color: var(--ink); }
+    .op-section-meta { font-family: var(--mono); font-size: 13px; color: var(--muted); }
+    .form-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; align-items: end; }
+    .form-actions { display: flex; justify-content: flex-end; align-items: end; }
+    .form-field label { display: block; font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+    .form-field input { width: 100%; font-family: var(--sans); font-size: 14px; background: transparent; border: 0; border-bottom: 1px solid var(--rule); padding: 7px 2px; color: var(--ink); border-radius: 0; }
+    .form-field input:focus { outline: 0; border-bottom-color: var(--accent); }
+    .form-field input::placeholder { color: var(--rule); }
+    .form-field.mono input { font-family: var(--mono); }
+    .form-hint { margin-top: 8px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+    .btn-primary { font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; padding: 8px 18px; background: var(--ink); color: var(--paper); border: 0; cursor: pointer; border-radius: 0; transition: background 120ms ease; }
+    .btn-primary:hover { background: var(--accent); }
+    .btn-primary:disabled { background: var(--rule); color: var(--paper); cursor: not-allowed; }
+    .btn-secondary { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; padding: 7px 14px; background: transparent; color: var(--ink); border: 1px solid var(--rule); cursor: pointer; border-radius: 0; transition: border-color 120ms ease; }
+    .btn-secondary:hover { border-color: var(--accent); }
+    .op-table { width: 100%; border-collapse: collapse; font-family: var(--sans); font-size: 14px; background: var(--paper); }
+    .op-th { text-align: left; font-family: var(--mono); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); font-weight: 500; padding: 12px 12px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+    .op-table td { padding: 14px 12px; border-bottom: 1px solid var(--rule-soft); vertical-align: middle; }
+    .op-table tbody tr:hover { background: var(--paper-deep); }
+    .op-table tbody tr:last-child td { border-bottom: 0; }
+    .mono { font-family: var(--mono); font-size: 13px; }
+    .badge { display: inline-block; font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: 0.06em; padding: 3px 8px; border-radius: 0; }
+    .badge-api { background: var(--ok); color: #fff; }
+    .badge-plugin { background: #8a6d1a; color: #fff; }
+    .op-empty, .op-error { text-align: center; padding: 48px 20px; color: var(--muted); font-family: var(--mono); font-size: 13px; letter-spacing: 0.08em; }
+    .op-error { color: var(--danger); }
+    .op-note { padding: 12px 16px; border: 1px solid var(--rule); background: var(--paper-deep); color: var(--ink-soft); font-size: 13px; }
+    .op-error-note { padding: 12px 16px; border: 1px solid var(--danger); background: var(--paper); color: var(--danger); font-size: 13px; }
+    .op-hidden { display: none !important; }
+    .op-dialog { width: min(520px, calc(100vw - 32px)); border: 1px solid var(--rule); border-radius: 0; background: var(--paper); color: var(--ink); padding: 22px 24px; }
+    .op-dialog::backdrop { background: rgba(27, 24, 20, 0.48); }
+    .op-dialog h2 { margin: 0 0 6px; font-family: var(--serif); font-size: 20px; }
+    .op-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+    .op-dialog .form-field { margin-top: 14px; }
+    @media (max-width: 720px) {
+      .form-grid { grid-template-columns: 1fr; }
+      .op-header { padding: 14px 16px 10px; }
+      .page-main { padding: 16px 16px 48px; }
+      .op-section { padding: 16px; }
+    }
+    .op-home-link { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-decoration: none; padding: 4px 8px; border: 1px solid var(--rule); transition: border-color 120ms ease; display: inline-block; }
+    .op-home-link:hover { border-color: var(--accent); color: var(--accent); }
+      {{ sidebar_css(current_page) }}
+  </style>
+</head>
+<body>
+  {{ sidebar(current_page) }}
+  <header class="op-header">
+    <div class="op-header-row">
+      <div class="op-header-titles">
+        <span class="op-eyebrow">TikTok Shop · Operations</span>
+        <h1 class="op-title">店铺注册</h1>
+      </div>
+      <div class="op-identity" id="ops-identity"></div>
+    </div>
+  </header>
+
+  <main class="page-main">
+    <div id="auth-note" class="op-note op-hidden"></div>
+    <div id="err" class="op-error-note op-hidden"></div>
+
+    <section class="op-section">
+      <div class="op-section-header">
+        <h2 class="op-section-title">注册店铺</h2>
+        <span class="op-section-meta">插件同步店铺人工登记 — 仅影响查询关联，不影响数据同步</span>
+      </div>
+      <form id="register-form" class="form-grid">
+        <div class="form-field mono">
+          <label for="f-shop-id">shop_id *</label>
+          <input id="f-shop-id" type="text" required pattern="[0-9]+" placeholder="19 位数字" autocomplete="off">
+        </div>
+        <div class="form-field">
+          <label for="f-name">店铺名称</label>
+          <input id="f-name" type="text" placeholder="选填，留空时回填为"未命名"" autocomplete="off">
+        </div>
+        <div class="form-field">
+          <label for="f-region">区域</label>
+          <input id="f-region" type="text" placeholder="VN" autocomplete="off">
+        </div>
+        <div class="form-field">
+          <label for="f-opened">开店日期</label>
+          <input id="f-opened" type="date" autocomplete="off">
+        </div>
+        <div class="form-field mono">
+          <label for="f-service-id">service_id</label>
+          <input id="f-service-id" type="text" placeholder="Partner Center Service ID" autocomplete="off">
+        </div>
+        <div class="form-field mono">
+          <label for="f-app-key">App Key</label>
+          <input id="f-app-key" type="text" placeholder="与 service_id 配套" autocomplete="off">
+        </div>
+        <div class="form-field mono">
+          <label for="f-app-secret">App Secret</label>
+          <input id="f-app-secret" type="password" placeholder="仅加密存储，不回显" autocomplete="new-password">
+        </div>
+        <div class="form-field form-actions">
+          <button type="submit" class="btn-primary">注册</button>
+        </div>
+      </form>
+      <div class="form-hint">重复注册幂等：只补填仍为空的字段，不会覆盖已有 credential / 状态。App Key 与 App Secret 必须成对填写，保存应用凭证需要 admin。</div>
+    </section>
+
+    <section class="op-section">
+      <div class="op-section-header">
+        <h2 class="op-section-title">已注册店铺</h2>
+        <span class="op-section-meta" id="shop-count">0 条</span>
+      </div>
+      <table class="op-table">
+        <thead><tr>
+          <th class="op-th">shop_id</th>
+          <th class="op-th">名称</th>
+          <th class="op-th">区域</th>
+          <th class="op-th">service_id</th>
+          <th class="op-th">App 凭证</th>
+          <th class="op-th">开店日期</th>
+          <th class="op-th">同步方式</th>
+          <th class="op-th" style="width:120px;">操作</th>
+        </tr></thead>
+        <tbody id="shop-body"><tr><td colspan="8" class="op-empty">加载中…</td></tr></tbody>
+      </table>
+    </section>
+  </main>
+
+  <dialog id="app-credentials-dialog" class="op-dialog">
+    <h2>配置 TikTok App 凭证</h2>
+    <p class="form-hint">按 service_id 共享。App Secret 只加密存储，不会回显；保存需要 admin。</p>
+    <form id="app-credentials-form">
+      <input id="d-shop-pk" type="hidden">
+      <div class="form-field mono">
+        <label for="d-service-id">service_id *</label>
+        <input id="d-service-id" type="text" required autocomplete="off">
+      </div>
+      <div class="form-field mono">
+        <label for="d-app-key">App Key *</label>
+        <input id="d-app-key" type="text" required autocomplete="off">
+      </div>
+      <div class="form-field mono">
+        <label for="d-app-secret">App Secret *</label>
+        <input id="d-app-secret" type="password" required autocomplete="new-password">
+      </div>
+      <div class="op-dialog-actions">
+        <button id="d-cancel" type="button" class="btn-secondary">取消</button>
+        <button type="submit" class="btn-primary">保存凭证</button>
+      </div>
+    </form>
+  </dialog>
+<script src="../../static/js/shops.js?v={{ js_version('shops.js') }}" defer></script>
+</body>
+</html>

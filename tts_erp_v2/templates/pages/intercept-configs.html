@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>拦截配置 · tts-erp</title>
+  <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
+  <style>
+    :root {
+      --paper: #F4EFE4;
+      --paper-deep: #EAE3D2;
+      --ink: #1B1814;
+      --ink-soft: #4A4239;
+      --rule: #C9BFA8;
+      --rule-soft: #DDD4BF;
+      --accent: #B8390E;
+      --accent-deep: #8F2C09;
+      --muted: #6E6657;
+      --danger: #8C1A1A;
+      --ok: #2F6B3E;
+      --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', Consolas, ui-monospace, monospace;
+      --sans: 'Inter', 'Noto Sans SC', 'Source Han Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+      --serif: 'Noto Serif SC', 'Source Han Serif SC', Georgia, ui-serif, serif;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 16px;
+      line-height: 1.6;
+      margin: 0;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-deep); }
+    .op-header { border-bottom: 1px solid var(--rule); padding: 18px 28px 14px; background: var(--paper); }
+    .op-header-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+    .op-header-titles { display: flex; flex-direction: column; gap: 2px; }
+    .op-eyebrow { font-family: var(--mono); font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+    .op-title { font-family: var(--serif); font-weight: 600; font-size: 26px; margin: 0; letter-spacing: -0.01em; }
+    .op-identity { font-family: var(--mono); font-size: 14px; color: var(--muted); }
+    .page-main { max-width: 1280px; margin: 0 auto; padding: 24px 28px 64px; }
+    .toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--rule-soft); }
+    .toolbar-field { display: flex; align-items: center; gap: 8px; }
+    .toolbar-field label { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+    .toolbar-field input, .toolbar-field select { font-family: var(--sans); font-size: 14px; background: transparent; border: 1px solid var(--rule); padding: 7px 10px; color: var(--ink); border-radius: 0; min-width: 120px; }
+    .toolbar-field input:focus, .toolbar-field select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .toolbar-spacer { flex: 0 1 12px; }
+    .btn-primary { font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; padding: 8px 16px; background: var(--ink); color: var(--paper); border: 0; cursor: pointer; border-radius: 0; transition: background 120ms ease; }
+    .btn-primary:hover { background: var(--accent); }
+    .btn-primary:disabled { background: var(--rule); color: var(--paper); cursor: not-allowed; }
+    .btn-secondary { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; padding: 8px 16px; background: transparent; color: var(--ink); border: 1px solid var(--rule); cursor: pointer; border-radius: 0; transition: border-color 120ms ease; }
+    .btn-secondary:hover { border-color: var(--accent); }
+    .btn-secondary:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-icon { background: transparent; border: 0; cursor: pointer; font-size: 16px; padding: 4px; }
+    .btn-icon:hover { opacity: 0.7; }
+    .table-wrap { overflow-x: auto; }
+    .op-table { width: 100%; border-collapse: collapse; font-family: var(--sans); font-size: 14px; background: var(--paper); }
+    .op-th { text-align: left; font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); font-weight: 500; padding: 12px 12px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+    .op-table td { padding: 14px 12px; border-bottom: 1px solid var(--rule-soft); vertical-align: middle; }
+    .op-table tbody tr:hover { background: var(--paper-deep); }
+    .mono { font-family: var(--mono); font-size: 13px; }
+    .badge { display: inline-block; font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: 0.06em; padding: 3px 8px; border-radius: 0; }
+    .badge-ok { background: var(--ok); color: #fff; }
+    .badge-disabled { background: var(--rule); color: var(--ink); }
+    .badge-blacklist { background: var(--danger); color: #fff; }
+    .tag { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 2px 7px; border: 1px solid var(--rule); margin-right: 4px; }
+    .actions { white-space: nowrap; }
+    .pager { display: flex; align-items: center; gap: 18px; padding-top: 16px; border-top: 1px solid var(--rule-soft); font-family: var(--sans); font-size: 14px; }
+    .pager .btn-secondary:disabled { opacity: 0.45; cursor: not-allowed; }
+    .op-empty, .op-error { text-align: center; padding: 48px 20px; color: var(--muted); font-family: var(--mono); font-size: 13px; letter-spacing: 0.08em; }
+    .op-error { color: var(--danger); }
+    .modal-overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(20, 16, 10, 0.86); z-index: 1000; }
+    .modal-overlay.is-open { display: flex; }
+    .modal-box { background: var(--paper); border: 1px solid var(--rule); width: 560px; max-width: 95vw; max-height: 90vh; overflow-y: auto; }
+    .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--rule); }
+    .modal-header h2 { font-family: var(--serif); font-size: 20px; font-weight: 600; margin: 0; }
+    .modal-close { background: transparent; border: 0; font-size: 24px; cursor: pointer; color: var(--muted); line-height: 1; }
+    .modal-close:hover { color: var(--accent); }
+    .modal-body { padding: 20px; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+    .form-group input[type="text"], .form-group textarea { width: 100%; font-family: var(--sans); font-size: 14px; background: transparent; border: 1px solid var(--rule); padding: 8px 12px; color: var(--ink); border-radius: 0; }
+    .form-group input[type="text"]:focus, .form-group textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .form-group textarea { resize: vertical; min-height: 60px; }
+    .form-group .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .form-group-checkbox { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .form-group-checkbox label { font-family: var(--sans); font-size: 14px; color: var(--ink); margin: 0; text-transform: none; letter-spacing: 0; }
+    .form-group-checkbox input[type="checkbox"] { width: 16px; height: 16px; }
+    .form-radio { display: flex; gap: 16px; }
+    .form-radio label { display: flex; align-items: center; gap: 6px; font-family: var(--sans); font-size: 14px; color: var(--ink); text-transform: none; letter-spacing: 0; cursor: pointer; }
+    .form-error { color: var(--danger); font-size: 13px; margin-bottom: 12px; }
+    .modal-footer { display: flex; justify-content: flex-end; gap: 12px; padding: 16px 20px; border-top: 1px solid var(--rule); }
+    @media (max-width: 720px) { .toolbar { flex-direction: column; align-items: stretch; } .toolbar-field { flex-direction: column; align-items: stretch; } .toolbar-field input, .toolbar-field select { min-width: auto; } }
+    .op-home-link { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-decoration: none; padding: 4px 8px; border: 1px solid var(--rule); transition: border-color 120ms ease; display: inline-block; }
+    .op-home-link:hover { border-color: var(--accent); color: var(--accent); }
+      {{ sidebar_css(current_page) }}
+  </style>
+</head>
+<body>
+  {{ sidebar(current_page) }}
+  <header class="op-header">
+    <div class="op-header-row">
+      <div class="op-header-titles">
+        <span class="op-eyebrow">TikTok Shop · Interceptor</span>
+        <h1 class="op-title">拦截配置</h1>
+      </div>
+      <div class="op-identity" id="ops-identity"></div>
+    </div>
+  </header>
+
+  <main class="page-main">
+    <div class="toolbar">
+      <div class="toolbar-field">
+        <label for="filter-domain">域名</label>
+        <input id="filter-domain" type="text" placeholder="seller.tiktokglobalshop.com">
+      </div>
+      <div class="toolbar-field">
+        <label for="filter-enabled">状态</label>
+        <select id="filter-enabled">
+          <option value="">全部</option>
+          <option value="true">启用</option>
+          <option value="false">禁用</option>
+        </select>
+      </div>
+      <div class="toolbar-field">
+        <label for="filter-search">搜索</label>
+        <input id="filter-search" type="text" placeholder="域名或 endpoint">
+      </div>
+      <button class="btn-primary" id="btn-query">查询</button>
+      <span class="toolbar-spacer"></span>
+      <button class="btn-secondary" id="btn-import">导入</button>
+      <button class="btn-secondary" id="btn-export">导出</button>
+      <button class="btn-primary" id="btn-add">+ 新增配置</button>
+    </div>
+
+    <div class="toolbar" style="border-bottom: 0; padding-bottom: 0;">
+      <button class="btn-secondary" id="btn-batch-enable">批量启用</button>
+      <button class="btn-secondary" id="btn-batch-disable">批量禁用</button>
+      <button class="btn-secondary" id="btn-batch-delete" style="color: var(--danger);">批量删除</button>
+      <span class="toolbar-spacer"></span>
+      <span style="font-family: var(--mono); font-size: 11px; color: var(--muted);">共 <span id="config-total">0</span> 条</span>
+    </div>
+
+    <div class="table-wrap">
+      <table class="op-table">
+        <thead>
+          <tr>
+            <th class="op-th" width="40"><input type="checkbox" id="select-all"></th>
+            <th class="op-th" width="60">ID</th>
+            <th class="op-th">域名</th>
+            <th class="op-th">Endpoint</th>
+            <th class="op-th" width="80">模式</th>
+            <th class="op-th" width="80">状态</th>
+            <th class="op-th" width="160">标签</th>
+            <th class="op-th" width="80">操作</th>
+          </tr>
+        </thead>
+        <tbody id="config-tbody">
+          <tr><td colspan="8" class="op-empty">加载中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="pager">
+      <button class="btn-secondary" id="btn-prev" disabled>← 上一页</button>
+      <span id="pager-label">—</span>
+      <button class="btn-secondary" id="btn-next" disabled>下一页 →</button>
+    </div>
+  </main>
+
+  <!-- Config Modal -->
+  <div class="modal-overlay" id="config-modal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2 id="modal-title">新增拦截配置</h2>
+        <button class="modal-close" id="btn-modal-close">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="form-error" class="form-error"></div>
+        <form id="config-form">
+          <div class="form-group">
+            <label for="form-domain">域名 *</label>
+            <input id="form-domain" type="text" placeholder="seller.tiktokglobalshop.com">
+            <div class="hint">输入完整域名</div>
+          </div>
+          <div class="form-group">
+            <label for="form-endpoint">Endpoint *</label>
+            <input id="form-endpoint" type="text" placeholder="/api/v1/orders/*">
+            <div class="hint">支持 * 通配符，如 /api/* 匹配 /api/ 下所有路径</div>
+          </div>
+          <div class="form-group">
+            <label>模式 *</label>
+            <div class="form-radio">
+              <label><input type="radio" name="mode" id="form-mode-whitelist" value="whitelist" checked> 白名单（记录匹配请求）</label>
+              <label><input type="radio" name="mode" id="form-mode-blacklist" value="blacklist"> 黑名单（完全跳过）</label>
+            </div>
+            <div class="hint">白名单 = 记录 headers/body；黑名单 = 域名命中后完全不上传</div>
+          </div>
+          <div class="form-group">
+            <label for="form-description">描述</label>
+            <textarea id="form-description" placeholder="可选描述"></textarea>
+          </div>
+          <div class="form-group">
+            <label for="form-tags">标签</label>
+            <input id="form-tags" type="text" placeholder="订单, 物流 (逗号分隔)">
+            <div class="hint">多个标签用逗号分隔</div>
+          </div>
+          <div class="form-group-checkbox">
+            <input id="form-capture-headers" type="checkbox" checked>
+            <label for="form-capture-headers">记录请求/响应头</label>
+          </div>
+          <div class="form-group-checkbox">
+            <input id="form-capture-body" type="checkbox" checked>
+            <label for="form-capture-body">记录请求/响应体</label>
+          </div>
+          <div class="form-group">
+            <label>状态</label>
+            <div class="form-radio">
+              <label><input type="radio" name="enabled" id="form-enabled" value="true" checked> 启用</label>
+              <label><input type="radio" name="enabled" value="false"> 禁用</label>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="btn-cancel">取消</button>
+        <button class="btn-primary" id="btn-save">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../../static/js/intercept-configs.js?v={{ js_version('intercept-configs.js') }}" defer></script>
+</body>
+</html>

@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>拦截统计 · tts-erp</title>
+  <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
+  <link rel="stylesheet" href="../../static/vendor/uplot.min.css">
+  <style>
+    :root {
+      --paper: #F4EFE4;
+      --paper-deep: #EAE3D2;
+      --ink: #1B1814;
+      --ink-soft: #4A4239;
+      --rule: #C9BFA8;
+      --rule-soft: #DDD4BF;
+      --accent: #B8390E;
+      --accent-deep: #8F2C09;
+      --muted: #6E6657;
+      --danger: #8C1A1A;
+      --ok: #2F6B3E;
+      --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', Consolas, ui-monospace, monospace;
+      --sans: 'Inter', 'Noto Sans SC', 'Source Han Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+      --serif: 'Noto Serif SC', 'Source Han Serif SC', Georgia, ui-serif, serif;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 16px;
+      line-height: 1.6;
+      margin: 0;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-deep); }
+    .op-header { border-bottom: 1px solid var(--rule); padding: 18px 28px 14px; background: var(--paper); }
+    .op-header-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+    .op-header-titles { display: flex; flex-direction: column; gap: 2px; }
+    .op-eyebrow { font-family: var(--mono); font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+    .op-title { font-family: var(--serif); font-weight: 600; font-size: 26px; margin: 0; letter-spacing: -0.01em; }
+    .op-identity { font-family: var(--mono); font-size: 14px; color: var(--muted); }
+    .page-main { max-width: 1280px; margin: 0 auto; padding: 24px 28px 64px; }
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 32px; }
+    @media (max-width: 768px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
+    .stat-card { background: var(--paper); border: 1px solid var(--rule); padding: 20px; text-align: center; }
+    .stat-icon { font-size: 28px; margin-bottom: 8px; }
+    .stat-value { font-family: var(--mono); font-weight: 700; font-size: 32px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+    .stat-value-warn { color: var(--accent); }
+    .stat-value-ok { color: var(--ok); }
+    .stat-label { font-size: 13px; color: var(--ink-soft); margin-top: 4px; }
+    .stat-hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
+    .section { margin-bottom: 32px; }
+    .section-title { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); font-weight: 500; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--rule-soft); }
+    .dist-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--rule-soft); }
+    .dist-row:last-child { border-bottom: 0; }
+    .dist-label { font-family: var(--mono); font-size: 12px; min-width: 200px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dist-bar-wrap { flex: 1; height: 20px; background: var(--paper-deep); border: 1px solid var(--rule-soft); }
+    .dist-bar { height: 100%; background: var(--accent); transition: width 300ms ease; }
+    .dist-value { font-family: var(--mono); font-size: 12px; min-width: 120px; text-align: right; color: var(--ink-soft); }
+    .dist-empty { text-align: center; padding: 24px; color: var(--muted); font-size: 13px; }
+    .daily-chart { height: 260px; padding: 8px 0; }
+    .daily-chart .u-over { border-color: var(--rule); }
+    .daily-chart .u-axis { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+    .loading { text-align: center; padding: 48px; color: var(--muted); font-family: var(--mono); font-size: 12px; }
+    .error-msg { text-align: center; padding: 24px; color: var(--danger); font-size: 13px; display: none; }
+    .op-home-link { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-decoration: none; padding: 4px 8px; border: 1px solid var(--rule); transition: border-color 120ms ease; display: inline-block; }
+    .op-home-link:hover { border-color: var(--accent); color: var(--accent); }
+      {{ sidebar_css(current_page) }}
+  </style>
+</head>
+<body>
+  {{ sidebar(current_page) }}
+  <header class="op-header">
+    <div class="op-header-row">
+      <div class="op-header-titles">
+        <span class="op-eyebrow">TikTok Shop · Interceptor</span>
+        <h1 class="op-title">拦截统计</h1>
+      </div>
+      <div class="op-identity" id="ops-identity"></div>
+    </div>
+  </header>
+
+  <main class="page-main">
+    <div id="loading" class="loading">加载中…</div>
+    <div id="error-msg" class="error-msg"></div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon">📊</div>
+        <div class="stat-value" id="stat-total-requests">—</div>
+        <div class="stat-label">总请求数</div>
+        <div class="stat-hint">最近 7 天</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">✅</div>
+        <div class="stat-value stat-value-ok" id="stat-whitelisted">—</div>
+        <div class="stat-label">白名单命中</div>
+        <div class="stat-hint">完整记录的请求</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">📈</div>
+        <div class="stat-value" id="stat-today-requests">—</div>
+        <div class="stat-label">今日请求</div>
+        <div class="stat-hint">今天的拦截数</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">⚠️</div>
+        <div class="stat-value stat-value-warn" id="stat-error-requests">—</div>
+        <div class="stat-label">错误请求</div>
+        <div class="stat-hint">最近 7 天</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">最近 7 天每日趋势</div>
+      <div class="daily-chart" id="daily-chart"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">按域名分布</div>
+      <div id="dist-by-host">
+        <div class="dist-empty">加载中…</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">按方法分布</div>
+      <div id="dist-by-method">
+        <div class="dist-empty">加载中…</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">按状态码分布</div>
+      <div id="dist-by-status">
+        <div class="dist-empty">加载中…</div>
+      </div>
+    </div>
+  </main>
+
+  <script src="../../static/vendor/uplot.iife.min.js"></script>
+  <script src="../../static/js/intercept-stats.js?v={{ js_version('intercept-stats.js') }}" defer></script>
+</body>
+</html>
