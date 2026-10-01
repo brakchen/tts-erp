@@ -11,6 +11,8 @@
 | `jsoneditor.LICENSE` | JSONEditor | 10.4.3 | Apache-2.0 | package `LICENSE` |
 | `uplot.iife.min.js` | uPlot | 1.6.32 | MIT | <https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.iife.min.js> (source: <https://github.com/leeoniya/uPlot>) |
 | `uplot.min.css` | uPlot | 1.6.32 | MIT | <https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.min.css> |
+| `tabulator.min.js` | Tabulator | 6.3.1 | MIT | <https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.1/dist/js/tabulator.min.js> (source: <https://github.com/olifolkerd/tabulator>) |
+| `tabulator.min.css` | Tabulator | 6.3.1 | MIT | <https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.1/dist/css/tabulator.min.css> |
 
 Self-hosted deliberately: operators reach this service over a private NAT
 tunnel; third-party CDN links would leak operator IPs and break offline.

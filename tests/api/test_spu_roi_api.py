@@ -2857,7 +2857,8 @@ def test_spu_roi_ad_window_single_side_only(api_client, readonly_key, db_engine)
 
 
 def test_spu_roi_sort_binding_is_declarative_and_delegated() -> None:
-    """公共 kernel 从 data-sort 自动绑定，不再维护易漏列的前端白名单。"""
+    """公共 kernel 从 COLUMN_DEFS.sortField 自动绑定（Tabulator 表头 → 服务端排序），
+    不再维护易漏列的前端白名单。"""
     from pathlib import Path
 
     js_path = (
@@ -2869,10 +2870,10 @@ def test_spu_roi_sort_binding_is_declarative_and_delegated() -> None:
     )
     src = js_path.read_text(encoding="utf-8")
     assert "var SORTABLE" not in src
-    assert 'document.querySelectorAll(".op-table thead th[data-sort]")' in src
-    assert 'event.target.closest("th[data-sort]")' in src
-    assert 'tableHead.addEventListener("click"' in src
-    assert 'tableHead.addEventListener("keydown"' in src
+    assert "var COLUMN_DEFS = [" in src
+    assert "headerSort: Boolean(def.sortField)" in src
+    assert 'state.table.on("dataSorting"' in src
+    assert "supportsSortField" in src
 
 
 def test_spu_roi_totals_roi_real_native_reconciliation(
@@ -3558,7 +3559,7 @@ def test_spu_roi_page_uses_bootstrap_responsive_layout(api_client, readonly_key)
         "row-cols-1 row-cols-md-2 row-cols-xl-3 row-cols-xxl-4",
         "row g-2 g-lg-3 align-items-end",
         "col-12 col-xl",
-        "table table-hover align-middle mb-0 op-table",
+        "op-tabulator",
         "nav nav-tabs flex-nowrap overflow-x-auto op-drill-tabs",
         "d-flex flex-column flex-md-row",
     ):
@@ -3656,8 +3657,10 @@ def test_spu_roi_mobile_sticky_product_cells_use_opaque_backgrounds() -> None:
         assert match is not None, selector
         return match.group(1)
 
-    base_sticky = rule("table.op-table tbody td:first-child")
-    loss_sticky = rule("table.op-table tbody tr.row-bad td:first-child")
+    base_sticky = rule(".op-tabulator .tabulator-row .tabulator-cell.tabulator-frozen")
+    loss_sticky = rule(
+        ".op-tabulator .tabulator-row.row-bad .tabulator-cell.tabulator-frozen"
+    )
     assert "background: var(--paper)" in base_sticky
     assert "background: var(--paper-danger)" in loss_sticky
     assert "rgba(" not in loss_sticky
@@ -3746,8 +3749,8 @@ def test_spu_roi_cost_and_refund_warnings_use_distinct_badges() -> None:
         / "js"
         / "spu-profitability-page.js"
     ).read_text(encoding="utf-8")
-    row_markup = src.split("function rowMarkup", 1)[1].split(
-        "function renderError", 1
+    row_markup = src.split("function productCellFormatter", 1)[1].split(
+        "function moneyCell", 1
     )[0]
 
     assert 'class="warn-default"' in row_markup
@@ -3947,11 +3950,20 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert "预计广告系统ROI" in body
     assert "预计广告系统保本ROI" in body
     assert "预计财务ROI" not in body
-    assert "广告系统实际ROI = 广告归因GMV ÷ 广告实际消耗" in body
-    assert "广告系统保本ROI = 广告归因GMV ÷ 最大可承受广告费" in body
+    # 表头 tooltip 文案随列定义迁入 JS kernel（Tabulator 迁移）。
+    kernel_js = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "spu-profitability-page.js"
+    ).read_text(encoding="utf-8")
+    assert "广告系统实际ROI = 广告归因GMV ÷ 广告实际消耗" in kernel_js
+    assert "广告系统保本ROI = 广告归因GMV ÷ 最大可承受广告费" in kernel_js
     assert "TODO: 广告系统保本ROI 公式待定" not in body
     # 主表指标名与大盘 v10 口径一致，广告系统两个 ROI 紧随广告消耗展示。
-    main_th_labels = re.findall(r'<th[^>]*scope="col"[^>]*>([^<]+)</th>', body)
+    column_block = kernel_js.split("var COLUMN_DEFS = [", 1)[1].split("];", 1)[0]
+    main_th_labels = re.findall(r'title: "([^"]+)"', column_block)
     for col_label in (
         "商品",
         "广告消耗",
@@ -4013,11 +4025,14 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert '("#sum-net-profit")' in js_src
     assert "fmtMoney(totals.net_profit)" in js_src
     assert 'totals.profit_status === "loss"' in js_src
-    assert "fmtMoney(it.effective_sales)" in js_src
-    assert "fmtInt(it.total_orders)" in js_src
-    assert "fmtInt(it.effective_order_count)" in js_src
-    assert "fmtRatio(it.ad_system_actual_roi)" in js_src
-    assert "adSystemBreakevenRoi" in js_src
+    # 行级格式化由 CELL_FORMATTERS 映射驱动（Tabulator 迁移）：
+    # 列字段 → fmt* 函数的对应关系是唯一事实源。
+    assert "effective_sales: moneyCell" in js_src
+    assert "total_orders: intCell" in js_src
+    assert "effective_order_count: intCell" in js_src
+    assert "ad_system_actual_roi: ratioCell" in js_src
+    assert "function breakevenRoiCell" in js_src
+    assert 'it.ad_system_breakeven_roi_status === "estimated_known_costs"' in js_src
     assert '("#sum-roi-breakeven")' in js_src
     assert '("#sum-roi-ad-actual")' in js_src
     assert "totals.ad_system_actual_roi" in js_src
@@ -4099,7 +4114,17 @@ def test_spu_roi_page_d8_no_column_toggles(api_client, readonly_key):
     assert "col-toggle-" not in body
     assert "data-colgroup=" not in body
     assert "data-cg=" not in body
-    sortable = re.findall(r'<th[^>]+data-sort="([a-z0-9_]+)"', body)
+    # 表头已迁入 JS COLUMN_DEFS（Tabulator），sortField 是唯一声明。
+    from pathlib import Path
+
+    js = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "spu-profitability-page.js"
+    ).read_text(encoding="utf-8")
+    sortable = re.findall(r'sortField: "([a-z0-9_]+)"', js)
     assert set(sortable) == {
         "spend",
         "ad_system_actual_roi",
@@ -4123,8 +4148,18 @@ def test_spu_roi_page_sortable_headers_within_endpoint_whitelist(
         "/v2/pages/spu-roi",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
-    body = r.text
-    fields = re.findall(r'<th[^>]+data-sort="([a-z0-9_]+)"', body)
+    assert r.status_code == 200
+    # 可点列头已迁入 JS COLUMN_DEFS（Tabulator）；sortField ⊆ 端点 sort 白名单。
+    from pathlib import Path
+
+    js = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "spu-profitability-page.js"
+    ).read_text(encoding="utf-8")
+    fields = re.findall(r'sortField: "([a-z0-9_]+)"', js)
     assert fields
     with Session(db_engine) as sess:
         _seed(sess, _seed_scenario_a)
@@ -4182,15 +4217,15 @@ def test_spu_roi_js_review_fixes_present():
     # D8 删除列开关 + 信息列字段
     assert "op-th col-hidden" not in src
     assert "td.col-hidden" not in src
-    # D7/D6 钻取面板:accordion + tab 懒加载
+    # D7/D6 钻取面板:accordion + tab 懒加载（Tabulator rowClick 驱动）
     assert "openDrillPanel" in src
-    assert "bindRowAccordion" in src
+    assert "rowClick" in src
     assert "fetchDrillTab" in src
     assert "tpl-drilldown-panel" in src
-    # 排序字段来自表头 data-sort，公共 kernel 不复制具体字段白名单。
+    # 排序字段来自 COLUMN_DEFS.sortField，公共 kernel 不复制具体字段白名单。
     assert "DEFAULT_SORT" in src
     assert "supportsSortField" in src
-    assert 'header.getAttribute("data-sort")' in src
+    assert "sortField" in src
     assert '"asc"' in src
     # finding 2:结余带直接消费 totals.roi_real,页面不反推 ROI
     assert "totals.roi_real" in src
@@ -4412,7 +4447,18 @@ def test_spu_roi_page_no_old_columns(api_client, readonly_key):
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     body = r.text
-    main_th_labels = re.findall(r'<th[^>]*scope="col"[^>]*>([^<]+)</th>', body)
+    # 表头已迁入 JS COLUMN_DEFS（Tabulator）；从 kernel 解析列名。
+    from pathlib import Path
+
+    kernel_js = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "spu-profitability-page.js"
+    ).read_text(encoding="utf-8")
+    column_block = kernel_js.split("var COLUMN_DEFS = [", 1)[1].split("];", 1)[0]
+    main_th_labels = re.findall(r'title: "([^"]+)"', column_block)
     for forbidden in (
         "实际ROI",
         "保本ROI",
