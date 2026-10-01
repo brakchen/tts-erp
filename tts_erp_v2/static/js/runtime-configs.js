@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const state = { item: null, writable: false };
+  const state = { item: null, writable: false, jsonEditors: new Map() };
   const $ = (selector) => document.querySelector(selector);
   const api = async (path, options = {}) => {
     const response = await fetch(`../../v2/config/runtime${path}`, {
@@ -40,52 +40,59 @@
     }
   }
 
-  function installJsonTools() {
-    const editors = [
-      ["rc-schema", "Schema"],
-      ["rc-payload", "草稿配置"],
-      ["rc-rollout", "灰度规则"],
-      ["rc-new-schema", "Schema"],
-      ["rc-new-payload", "初始草稿"],
-    ];
-    for (const [id, label] of editors) {
+  function loadJsonEditor() {
+    if (window.JSONEditor) return Promise.resolve(window.JSONEditor);
+    if (window.__runtimeConfigJsonEditor) return window.__runtimeConfigJsonEditor;
+    window.__runtimeConfigJsonEditor = new Promise((resolve, reject) => {
+      const stylesheet = document.createElement("link");
+      stylesheet.rel = "stylesheet";
+      stylesheet.href = "../../static/vendor/jsoneditor.min.css";
+      document.head.append(stylesheet);
+      const script = document.createElement("script");
+      script.src = "../../static/vendor/jsoneditor.min.js";
+      script.onload = () => resolve(window.JSONEditor);
+      script.onerror = () => reject(new Error("JSONEditor 资源加载失败"));
+      document.head.append(script);
+    });
+    return window.__runtimeConfigJsonEditor;
+  }
+
+  async function installJsonEditors() {
+    const JSONEditor = await loadJsonEditor();
+    const editors = ["rc-schema", "rc-payload", "rc-rollout", "rc-new-schema", "rc-new-payload"];
+    for (const id of editors) {
       const textarea = document.getElementById(id);
-      if (!textarea || textarea.dataset.jsonToolsInstalled) continue;
-      textarea.dataset.jsonToolsInstalled = "true";
-      const toolbar = document.createElement("div");
-      toolbar.className = "rc-json-tools";
-      toolbar.setAttribute("aria-label", `${label}编辑工具`);
-      toolbar.innerHTML = [
-        '<button type="button" data-action="format">格式化</button>',
-        '<button type="button" data-action="compact">压缩</button>',
-        '<button type="button" data-action="validate">校验 JSON</button>',
-      ].join("");
-      toolbar.addEventListener("click", (event) => {
-        const button = event.target.closest("button[data-action]");
-        if (!button) return;
-        if (textarea.readOnly) {
-          notice(`${label}为只读字段，不能修改`, true);
-          return;
-        }
-        try {
-          const value = JSON.parse(textarea.value);
-          if (button.dataset.action === "format") {
-            textarea.value = JSON.stringify(value, null, 2);
-            textarea.dispatchEvent(new Event("input", { bubbles: true }));
-            notice(`${label}已格式化`);
-          } else if (button.dataset.action === "compact") {
-            textarea.value = JSON.stringify(value);
-            textarea.dispatchEvent(new Event("input", { bubbles: true }));
-            notice(`${label}已压缩`);
-          } else {
-            notice(`${label}是有效 JSON`);
-          }
-        } catch {
-          notice(`${label}不是有效 JSON；请修正引号、逗号或括号`, true);
-        }
+      if (!textarea || state.jsonEditors.has(id)) continue;
+      const container = document.createElement("div");
+      container.className = "rc-jsoneditor";
+      textarea.after(container);
+      textarea.classList.add("rc-jsoneditor-source");
+      const editor = new JSONEditor(container, {
+        mode: "code",
+        modes: ["code", "tree", "view"],
+        mainMenuBar: true,
+        navigationBar: false,
+        statusBar: true,
+        onChangeText(text) {
+          textarea.value = text;
+        },
       });
-      textarea.before(toolbar);
+      editor.setText(textarea.value);
+      state.jsonEditors.set(id, editor);
     }
+  }
+
+  function setJsonEditorText(id, text) {
+    const textarea = document.getElementById(id);
+    if (!textarea) return;
+    textarea.value = text;
+    state.jsonEditors.get(id)?.setText(text);
+  }
+
+  function setJsonEditorReadOnly(id, readOnly) {
+    const textarea = document.getElementById(id);
+    if (textarea) textarea.readOnly = readOnly;
+    state.jsonEditors.get(id)?.setMode(readOnly ? "view" : "code");
   }
 
   async function loadItems(selectKey) {
@@ -119,13 +126,12 @@
       $("#rc-editor").hidden = false;
       $("#rc-key").value = item.configKey;
       $("#rc-name").value = item.displayName;
-      $("#rc-schema").value = "只读会话不显示 Schema";
-      $("#rc-payload").value = pretty(published.payload);
-      $("#rc-rollout").value = "只读会话不显示灰度规则";
+      setJsonEditorText("rc-schema", "只读会话不显示 Schema");
+      setJsonEditorText("rc-payload", pretty(published.payload));
+      setJsonEditorText("rc-rollout", "只读会话不显示灰度规则");
       $("#rc-version").textContent = `已发布 v${published.version}`;
-      ["#rc-key", "#rc-name", "#rc-schema", "#rc-payload", "#rc-rollout"].forEach((selector) => {
-        $(selector).readOnly = true;
-      });
+      ["#rc-key", "#rc-name"].forEach((selector) => { $(selector).readOnly = true; });
+      ["rc-schema", "rc-payload", "rc-rollout"].forEach((id) => setJsonEditorReadOnly(id, true));
       [...document.querySelectorAll("#rc-editor button")].forEach((button) => { button.disabled = true; });
       document.querySelectorAll(".rc-item").forEach((button) => {
         button.classList.toggle("active", button.textContent.includes(item.configKey));
@@ -144,13 +150,15 @@
       $("#rc-editor").hidden = false;
       $("#rc-key").value = item.configKey;
       $("#rc-name").value = item.displayName;
-      $("#rc-schema").value = pretty(item.jsonSchema);
-      $("#rc-payload").value = pretty(item.draftPayload ?? item.publishedPayload ?? {});
-      $("#rc-rollout").value = pretty(item.draftPayload ? item.draftRollout : item.publishedRollout);
+      setJsonEditorText("rc-schema", pretty(item.jsonSchema));
+      setJsonEditorText("rc-payload", pretty(item.draftPayload ?? item.publishedPayload ?? {}));
+      setJsonEditorText("rc-rollout", pretty(item.draftPayload ? item.draftRollout : item.publishedRollout));
       $("#rc-version").textContent = item.publishedVersion ? `已发布 v${item.publishedVersion}` : "尚未发布";
       $("#rc-key").readOnly = true;
       $("#rc-name").readOnly = true;
-      $("#rc-schema").readOnly = true;
+      setJsonEditorReadOnly("rc-schema", true);
+      setJsonEditorReadOnly("rc-payload", false);
+      setJsonEditorReadOnly("rc-rollout", false);
       [...document.querySelectorAll("#rc-editor button")].forEach((button) => { button.disabled = !state.writable; });
       await loadHistory();
       document.querySelectorAll(".rc-item").forEach((button) => {
@@ -238,6 +246,8 @@
         }),
       });
       event.target.reset();
+      setJsonEditorText("rc-new-schema", $("#rc-new-schema").value);
+      setJsonEditorText("rc-new-payload", $("#rc-new-payload").value);
       notice("已创建草稿；检查后发布即可生效");
       await loadItems(item.configKey);
     } catch (error) {
@@ -285,8 +295,8 @@
   }
 
   async function init() {
-    installJsonTools();
     try {
+      await installJsonEditors();
       const me = await fetch("../../v2/auth/me", { credentials: "same-origin" }).then((r) => r.json());
       state.writable = me.role === "readwrite" || me.role === "admin";
       $("#rc-readonly").hidden = state.writable;
