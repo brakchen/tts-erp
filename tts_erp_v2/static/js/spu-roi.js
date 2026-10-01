@@ -12,6 +12,7 @@
     dateRangeControl: {
       enabled: true,
       reportingTimeZone: "Asia/Ho_Chi_Minh",
+      defaultRange: "t-1",
     },
     defaults: {
       includeAll: false,
