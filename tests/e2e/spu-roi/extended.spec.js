@@ -16,13 +16,20 @@ async function ensureAuthenticatedContext(page) {
   if (cachedAuthCookies) {
     await page.context().addCookies(cachedAuthCookies);
   } else {
-    await page.goto(`/v2/pages/spu-roi?shop_pk=${SHOP_PK}`, {
+    // Navigate to login page directly
+    await page.goto(`/v2/auth/login`, {
       waitUntil: "domcontentloaded",
     });
-    await page.waitForURL(/\/v2\/auth\/login/, { timeout: 10_000 });
+
+    // Submit login form (browser handles Set-Cookie natively)
     await page.fill("#key", API_KEY);
     await page.click('button[type="submit"]');
-    await page.waitForURL(/\/v2\/pages\/spu-roi/, { timeout: 10_000 });
+    // Wait for the post-login redirect to settle
+    await page.waitForURL(/\/v2\/pages\//, { timeout: 10_000 });
+    // Ensure the navigation is fully settled before returning
+    await page.waitForLoadState("domcontentloaded");
+
+    // Cache cookies from the browser context
     cachedAuthCookies = await page.context().cookies();
   }
 }
