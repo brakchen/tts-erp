@@ -13,10 +13,12 @@ Asset paths are RELATIVE (``../../static/…``) so the page works both on
 ``127.0.0.1:9877`` directly and behind the NGINX ``/tts`` prefix
 (2026-08-31: absolute ``/static/…`` links 404'd behind the prefix).
 
-Auth classification: the page is ``readonly``-equivalent for the GET
-(handler does no DB writes). The page JS calls the write endpoint
-``/v2/reporting/manual-costs`` — which requires a readwrite or admin
-session via the ``/v2/auth/login`` cookie flow. (2026-09-05 page-rework
+Auth classification: most pages are ``readonly``-equivalent for the GET
+(handler does no DB writes), while operational consoles such as
+``/v2/pages/sync-jobs`` can add handler-level ``readwrite`` gates. The page JS
+calls write endpoints such as ``/v2/reporting/manual-costs`` — which require a
+readwrite or admin session via the ``/v2/auth/login`` cookie flow.
+(2026-09-05 page-rework
 lane: the page no longer calls the ``/v2/spu-images/*`` upload/confirm
 endpoints — the image column renders the MinIO mirror instead.)
 
@@ -40,10 +42,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
+from tts_erp_v2.api.deps import require_role_at_least
+
 router = APIRouter(prefix="/v2/pages", tags=["pages"])
+
+
+def _require_readwrite(request: Request) -> None:
+  """Operational consoles with manual job controls require readwrite+."""
+  require_role_at_least(request, "readwrite")
 
 
 # Cache-busting: /static has no explicit Cache-Control, so every mutable asset
@@ -3001,7 +3010,9 @@ def runtime_configs_page() -> HTMLResponse:
   return _page(_RUNTIME_CONFIGS_PAGE_HTML, current_page="runtime-configs")
 
 
-@router.get("/sync-jobs", response_class=HTMLResponse)
+@router.get(
+  "/sync-jobs", response_class=HTMLResponse, dependencies=[Depends(_require_readwrite)]
+)
 def sync_jobs_page() -> HTMLResponse:
   """定时任务管理页：启停周期调度，或手动触发系统/店铺级任务。"""
   return _page(_SYNC_JOBS_PAGE_HTML, current_page="sync-jobs")

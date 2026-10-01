@@ -1,4 +1,4 @@
-"""/v2/sync/* — sync-worker 作业同步状态（readonly）。
+"""/v2/sync/* — sync-worker 作业同步状态与调度管理。
 
 供 dashboard「数据同步状态」卡片消费：对每个已注册的周期作业
 （``tts_erp_v2.sync_worker.scheduler.JOBS``）返回最近一次运行时间、
@@ -22,13 +22,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy import exists, select
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.api.deps import SessionDep
+from tts_erp_v2.api.deps import SessionDep, require_role_at_least
 from tts_erp_v2.db.models import ChannelAccount
 from tts_erp_v2.db.models.integration import Credentials, SyncJob
 from tts_erp_v2.sync_worker.scheduler import (
@@ -39,6 +39,11 @@ from tts_erp_v2.sync_worker.scheduler import (
 )
 
 router = APIRouter(prefix="/v2/sync", tags=["sync"])
+
+
+def _require_readwrite(request: Request) -> None:
+    """Scheduler management data is visible only to readwrite+ operators."""
+    require_role_at_least(request, "readwrite")
 
 
 class SyncJobStatusOut(BaseModel):
@@ -210,7 +215,9 @@ def sync_status(session: SessionDep) -> SyncStatusOut:
     return SyncStatusOut(server_time=now, jobs=out)
 
 
-@router.get("/jobs", response_model=SyncJobsOut)
+@router.get(
+    "/jobs", response_model=SyncJobsOut, dependencies=[Depends(_require_readwrite)]
+)
 def sync_jobs(session: SessionDep) -> SyncJobsOut:
     """返回周期任务定义、启停状态、最近运行状态和可选店铺。"""
     latest_by_name = _latest_sync_jobs(session)
