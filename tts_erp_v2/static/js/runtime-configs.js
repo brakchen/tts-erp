@@ -57,6 +57,40 @@
     return window.__runtimeConfigJsonEditor;
   }
 
+  function installJsonEditorToolbar(container, editor, textarea, label) {
+    const toolbar = document.createElement("div");
+    toolbar.className = "rc-jsoneditor-toolbar";
+    toolbar.setAttribute("aria-label", `${label}转换工具`);
+    toolbar.innerHTML = [
+      '<button type="button" data-action="format">格式化</button>',
+      '<button type="button" data-action="compact">压缩</button>',
+      '<button type="button" data-action="tree">转为树形</button>',
+      '<button type="button" data-action="code">转为代码</button>',
+    ].join("");
+    toolbar.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-action]");
+      if (!button || textarea.readOnly || !state.writable) return;
+      try {
+        const action = button.dataset.action;
+        if (action === "tree" || action === "code") {
+          editor.setMode(action);
+          notice(`${label}已切换为${action === "tree" ? "树形" : "代码"}视图`);
+          return;
+        }
+        const value = editor.get();
+        const text = action === "format"
+          ? JSON.stringify(value, null, 2)
+          : JSON.stringify(value);
+        editor.setText(text);
+        textarea.value = text;
+        notice(`${label}已${action === "format" ? "格式化" : "压缩"}`);
+      } catch {
+        notice(`${label}不是有效 JSON；请先修正内容后再转换`, true);
+      }
+    });
+    container.before(toolbar);
+  }
+
   async function installJsonEditors() {
     const JSONEditor = await loadJsonEditor();
     const editors = ["rc-schema", "rc-payload", "rc-rollout", "rc-new-schema", "rc-new-payload"];
@@ -76,8 +110,12 @@
         onChangeText(text) {
           textarea.value = text;
         },
+        onChangeJSON(json) {
+          textarea.value = JSON.stringify(json);
+        },
       });
       editor.setText(textarea.value);
+      installJsonEditorToolbar(container, editor, textarea, textarea.previousElementSibling?.textContent || "JSON");
       state.jsonEditors.set(id, editor);
     }
   }
