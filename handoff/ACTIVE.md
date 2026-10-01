@@ -16,4 +16,3 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| runtime-config-crud-safety | 修复运行配置并发与归档 | 01a0f13c-c315-760e-b7c9-6ac80761f9dc | `fix/runtime-config-crud-safety` / `.worktrees/runtime-config-crud-safety` | `alembic/versions/0050_runtime_config_lifecycle.py`; `tts_erp_v2/{api/v2/config.py,access/_policy.py,db/models/config.py,runtime_config/,static/js/runtime-configs.js}`; `tests/api/test_runtime_config.py`; `tech-doc/{runtime-config-management.md,external-api.md}` | ready | `b5f74a0a4ad6069aaa92865c8201a23600807725` | `9c369c60541038ce6435f1be76202afe362ab713` | 2026-10-01 02:41:26 |
