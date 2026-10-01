@@ -15,7 +15,7 @@
 - Shared hotspot ownership does not require waiting for the original session: exchange a focused patch, hand off ownership explicitly, or create a successor lane from the predecessor's ready commit.
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
-| runtime-config-mobile-blank | 修复运行配置移动端白屏 | 01a0f13c-c315-760e-b7c9-6ac80761f9dc | `fix/runtime-config-mobile-blank` / `.worktrees/runtime-config-mobile-blank` | `tts_erp_v2/api/v2/pages.py`; `tests/api/test_pages.py` | active | — | — | 2026-10-01 04:57:39 |
+| runtime-config-mobile-blank | 修复运行配置移动端白屏 | 01a0f13c-c315-760e-b7c9-6ac80761f9dc | `fix/runtime-config-mobile-blank` / `.worktrees/runtime-config-mobile-blank` | `tts_erp_v2/api/v2/pages.py`; `tests/api/test_pages.py` | ready | `d3e8c828a2a9bfaee04cf9d28812dad541471917` | `557556392ee8e3ca26c68873489450decb2d18ca` | 2026-10-01 05:08:42 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | fix/spu-roi-shop-timezone | SPU ROI 按当前店铺地区解析报表时区，不再固定越南 | 01a0edf5-a325-77b2-ade9-ac88e25bdd89 | `fix/spu-roi-shop-timezone` / `.worktrees/spu-roi-shop-timezone` | `tts_erp_v2/static/js/spu-roi.js`; `tts_erp_v2/static/js/spu-profitability-page.js`; `tests/api/test_spu_roi_api.py` | ready | `3c4dea23e13f2ebec3d9ad435a45974e9d478f1f` | `74d8e3b8dc4600f48ea639dccecf147e552e19c1` | 2026-10-01T05:06Z |
 | sync-job-trigger-feedback | 修复定时任务执行按钮反馈 | 01a0f39a-7180-760e-b7c9-6b0a00a152c2 | `fix/sync-job-trigger-feedback` / `.worktrees/sync-job-trigger-feedback` | `tts_erp_v2/api/v2/admin.py`; `tts_erp_v2/static/js/sync-jobs.js`; `tests/api/test_sync_job_management.py`; `tech-doc/external-api.md` | draft | — | — | 2026-10-01 04:58:42 |
