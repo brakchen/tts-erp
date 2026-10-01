@@ -247,6 +247,11 @@ def test_runtime_config_readonly_client_uses_redacted_snapshot() -> None:
     assert "async function loadPublished(item)" in source
     assert 'api("/snapshot")' in source
     assert "if (state.writable)" in source
+    assert "function installJsonTools()" in source
+    assert 'data-action="format"' in source
+    assert 'data-action="compact"' in source
+    assert 'data-action="validate"' in source
+    assert "JSON.stringify(value, null, 2)" in source
 
 
 def test_runtime_config_rejects_empty_secret_reference(api_client, db_engine, readwrite_key):

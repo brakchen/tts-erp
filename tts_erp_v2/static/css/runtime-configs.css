@@ -58,6 +58,9 @@
   width: 100%; border: 1px solid var(--rc-rule); border-radius: 3px; background: #fff; color: var(--rc-ink); padding: 10px 11px; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .rc-field textarea { min-height: 156px; resize: vertical; }
+.rc-json-tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.rc-json-tools button { border: 1px solid var(--rc-rule); border-radius: 999px; background: var(--rc-paper); color: var(--rc-ink); padding: 4px 9px; font: 700 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; cursor: pointer; }
+.rc-json-tools button:hover, .rc-json-tools button:focus-visible { border-color: var(--rc-accent); color: var(--rc-accent); outline: none; }
 .rc-field input:focus, .rc-field textarea:focus { border-color: var(--rc-accent); outline: 2px solid color-mix(in srgb, var(--rc-accent) 18%, transparent); }
 .rc-help { margin: 0; color: var(--rc-muted); font-size: 12px; }
 .rc-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
