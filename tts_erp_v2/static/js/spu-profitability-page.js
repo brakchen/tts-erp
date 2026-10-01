@@ -18,6 +18,19 @@
   var DEFAULT_ORDER = "asc";
   var DATE_VALUE_RE = /^\d{4}-\d{2}-\d{2}$/;
   var PAGE_LIMITS = new Set([50, 100, 200]);
+  // commerce.shops.region 是 ISO 3166-1 国家码；仅映射确定的单时区市场。
+  // 多时区或未知地区必须暂停，不能猜测默认时区。
+  var REGION_TIME_ZONES = Object.freeze({
+    VN: "Asia/Ho_Chi_Minh",
+    TH: "Asia/Bangkok",
+    SG: "Asia/Singapore",
+    MY: "Asia/Kuala_Lumpur",
+    PH: "Asia/Manila",
+    CN: "Asia/Shanghai",
+    JP: "Asia/Tokyo",
+    KR: "Asia/Seoul",
+    GB: "Europe/London",
+  });
   var SORT_LABEL = {
     roi_real: "实际ROI",
     spend: "消耗",
@@ -334,6 +347,10 @@
     limit: 100,
     includeAll: false,
     shopPk: null, // 店铺筛选(null/""=全部店铺)
+    shops: [],
+    shopsByPk: new Map(),
+    shopRegion: null,
+    reportingTimeZone: null,
     wStart: "", // 日期范围 yyyy-mm-dd(""=不限)
     wEnd: "",
     datesTouched: false, // 仅用户主动选过日期时为 true；自动 T-1 不算用户选择
@@ -1851,6 +1868,15 @@
     closeDrillPanel();
     state.shopPk = pk;
     setShopPkInUrl(pk);
+    if (
+      requiresShopReportingTimeZone() &&
+      !applyShopReportingContext(pk)
+    ) {
+      persistPagePreferences();
+      renderError(shopTimeZoneError(pk), true);
+      showShopModal(state.shops, shopTimeZoneError(pk));
+      return;
+    }
     persistPagePreferences();
     state.offset = 0;
     if (!selectionAdapter) {
@@ -1895,6 +1921,10 @@
           showShopModal([], "当前没有可用店铺，请先在「店铺注册」页完成注册");
           return null;
         }
+        state.shops = shops;
+        state.shopsByPk = new Map(
+          shops.map((shop) => [String(shop.id), shop]),
+        );
         // 填充下拉选项
         shops.forEach((s) => {
           var opt = document.createElement("option");
@@ -1922,6 +1952,15 @@
           sel.value = preferredPk;
           state.shopPk = sel.value;
           setShopPkInUrl(sel.value);
+          if (
+            requiresShopReportingTimeZone() &&
+            !applyShopReportingContext(sel.value)
+          ) {
+            persistPagePreferences();
+            renderError(shopTimeZoneError(sel.value), true);
+            showShopModal(shops, shopTimeZoneError(sel.value));
+            return null;
+          }
           persistPagePreferences();
           if (!selectionAdapter) resetSpuSelectForShop();
         } else {
@@ -1960,6 +1999,12 @@
   function load() {
     // 控件变化后最新条件必须立刻生效：取消旧请求并仅允许最新请求渲染。
     if (state.loadController) state.loadController.abort();
+    if (requiresShopReportingTimeZone() && !state.reportingTimeZone) {
+      state.loading = false;
+      state.loadController = null;
+      renderError(shopTimeZoneError(state.shopPk), true);
+      return;
+    }
     if (!state.selectionQueryable) {
       state.loading = false;
       state.loadController = null;
@@ -2170,10 +2215,9 @@
   }
 
   function reportingDateValue(value) {
-    var dateConfig = profile.dateRangeControl || {};
-    var timeZone = dateConfig.reportingTimeZone || "UTC";
+    if (!state.reportingTimeZone) return null;
     var parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone: timeZone,
+      timeZone: state.reportingTimeZone,
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -2200,6 +2244,59 @@
   function reportingEndDate(now) {
     var today = reportingDateValue(now || new Date());
     return today ? shiftDateValue(today, -1) : null;
+  }
+
+  function dateRangeHelpText() {
+    var shopContext =
+      state.shopRegion && state.reportingTimeZone
+        ? `（按店铺地区 ${state.shopRegion} · ${state.reportingTimeZone} 计算）`
+        : "";
+    return `截止日包含当天；快捷范围均截止 T-1${shopContext}，“不限”只取消起始日；手动清空日期表示不限制该端。销售、退款与广告按同一范围统计。`;
+  }
+
+  function syncDateInputsFromState() {
+    var start = $("#filter-w-start");
+    var end = $("#filter-w-end");
+    var help = $("#date-range-help");
+    if (start) start.value = state.wStart;
+    if (end) end.value = state.wEnd;
+    if (help) help.textContent = dateRangeHelpText();
+    updateDatePresetUi();
+  }
+
+  function shopReportingTimeZone(shop) {
+    var region =
+      shop && typeof shop.region === "string"
+        ? shop.region.trim().toUpperCase()
+        : "";
+    return region ? REGION_TIME_ZONES[region] || null : null;
+  }
+
+  function requiresShopReportingTimeZone() {
+    var dateConfig = profile.dateRangeControl || {};
+    return dateConfig.enabled === true;
+  }
+
+  function applyShopReportingContext(pk) {
+    var shop = state.shopsByPk.get(String(pk));
+    state.shopRegion =
+      shop && typeof shop.region === "string"
+        ? shop.region.trim().toUpperCase() || null
+        : null;
+    state.reportingTimeZone = shopReportingTimeZone(shop);
+    if (!state.reportingTimeZone) return false;
+    applyDefaultDateRange();
+    syncDateInputsFromState();
+    return true;
+  }
+
+  function shopTimeZoneError(pk) {
+    var shop = state.shopsByPk.get(String(pk));
+    var region =
+      shop && typeof shop.region === "string" && shop.region.trim()
+        ? shop.region.trim().toUpperCase()
+        : "未填写";
+    return `店铺 ${pk} 的地区 ${region} 无法确定报表时区，请先补充受支持的店铺地区`;
   }
 
   function applyDefaultDateRange() {
@@ -2357,7 +2454,7 @@
       el("div", {
         id: "date-range-help",
         class: "form-text op-date-range__help mt-2",
-        text: "截止日包含当天；快捷范围均截止 T-1，“不限”只取消起始日；手动清空日期表示不限制该端。销售、退款与广告按同一范围统计。",
+        text: dateRangeHelpText(),
       }),
     );
     wrapper.appendChild(control);
@@ -2541,15 +2638,11 @@
     state.sort = defaults.sort || DEFAULT_SORT;
     state.order = defaults.order || DEFAULT_ORDER;
     restorePagePreferences();
-    applyDefaultDateRange();
     var limitInput = $("#filter-limit");
     if (limitInput) limitInput.value = String(state.limit);
     var includeInput = $("#filter-include-all");
     if (includeInput) includeInput.checked = state.includeAll;
-    var startInput = $("#filter-w-start");
-    if (startInput) startInput.value = state.wStart;
-    var endInput = $("#filter-w-end");
-    if (endInput) endInput.value = state.wEnd;
+    syncDateInputsFromState();
     enhanceDateRangeControl();
     mounted = true;
     bindControls();
