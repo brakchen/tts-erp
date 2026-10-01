@@ -427,6 +427,7 @@ async function deepFlow(page, state) {
   const beforeLimit = state.analyticsRequests.length;
   await page.selectOption("#filter-limit", "50");
   const limitUrl = await waitForAnalytics(state, beforeLimit + 1);
+  await sleep(200);
   assert(limitUrl.searchParams.get("limit") === "50", "limit=50 not requested");
   assert(limitUrl.searchParams.get("offset") === "0", "limit change should reset offset");
   const nextUrl = await clickAndWait(page, state, page.locator('button[data-page="next"]'));
