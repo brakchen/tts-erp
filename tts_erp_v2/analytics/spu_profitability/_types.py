@@ -335,9 +335,11 @@ class SpuProfitability:
     projection_basis_qty: int
     projection_basis_sales: Decimal
     projection_basis_refund_amount: Decimal
+    projection_full_loss_basis_order_count: int
     projection_basis_full_loss_order_count: int
     projection_basis_full_loss_qty: int
     projection_refund_amount_rate: Decimal | None
+    delivered_full_loss_rate: Decimal | None
     settled_full_loss_rate: Decimal | None
     projection_full_loss_qty_rate: Decimal | None
     unsettled_order_count: int
@@ -430,9 +432,11 @@ class ProfitabilityTotals:
     projection_basis_qty: int
     projection_basis_sales: Decimal
     projection_basis_refund_amount: Decimal
+    projection_full_loss_basis_order_count: int
     projection_basis_full_loss_order_count: int
     projection_basis_full_loss_qty: int
     projection_refund_amount_rate: Decimal | None
+    delivered_full_loss_rate: Decimal | None
     settled_full_loss_rate: Decimal | None
     projection_full_loss_qty_rate: Decimal | None
     unsettled_order_count: int

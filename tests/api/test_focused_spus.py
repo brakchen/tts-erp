@@ -103,6 +103,7 @@ def test_focused_spus_page_keeps_the_full_roi_dashboard(
         "sum-roi",
         "sum-projection-status",
         "sum-projection-basis-orders",
+        "sum-projection-full-loss-basis-orders",
         "sum-projection-refund-rate",
         "sum-projection-full-loss-rate",
         "sum-unresolved-orders",

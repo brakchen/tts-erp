@@ -494,6 +494,7 @@
         "sum-roi-ad",
         "sum-projection-status",
         "sum-projection-basis-orders",
+        "sum-projection-full-loss-basis-orders",
         "sum-projection-refund-rate",
         "sum-projection-full-loss-rate",
         "sum-unresolved-orders",

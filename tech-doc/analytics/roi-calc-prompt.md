@@ -110,16 +110,17 @@ kept 口径误差 **±1%**；混合口径（含退款单）高估 **~16%**。
 projection_refund_amount_rate
 = 已结算样本退款金额 / 已结算样本销售额
 
-settled_full_loss_rate
-= 已结算退款/退货全损订单数 / 全部已结算订单数
+delivered_full_loss_rate
+= 已送达且有已完成退款/退货退款的订单数 / 全部已送达订单数
 ```
 
-结算退款优先使用 `CUSTOMER_REFUND`，case 作为补充。页面同时展示“当前全损率”和
-“已结算订单全损率”，前者是当前事实，后者才用于预测。
+退款金额率仍优先使用结算 `CUSTOMER_REFUND`，case 作为补充。全损率样本则只看送达
+证据和已完成退款/退货退款 case，与结算状态无关。页面同时展示“当前全损率”和
+“已送达订单全损率”，前者是当前事实，后者才用于预测。
 
 ```text
 expected_terminal_full_loss_orders
-= full_loss_exposure_unsettled_order_count × settled_full_loss_rate
+= full_loss_exposure_unsettled_order_count × delivered_full_loss_rate
 
 projected_future_full_loss_order_count
 = max(expected_terminal_full_loss_orders
@@ -127,7 +128,7 @@ projected_future_full_loss_order_count
 
 expected_terminal_full_loss_qty
 = full_loss_exposure_unsettled_order_count
-  × (settled_full_loss_qty / settled_order_count)
+  × (delivered_refund_qty / delivered_order_count)
 
 projected_future_full_loss_qty
 = max(expected_terminal_full_loss_qty
@@ -183,12 +184,14 @@ projected_ad_system_breakeven_roi
 = projected_ad_gmv / projected_ad_system_max_ad_spend
 ```
 
-广告消耗为 0，或保本分母小于等于 0时，相应 ROI 输出空值。存在未结算订单但没有
-已结算样本订单或样本销售额时，状态为 `insufficient_sample`；没有未结算订单时状态为
-`no_unsettled_orders`，预计利润和四个 ROI 指标与当前值一致。
+广告消耗为 0，或保本分母小于等于 0时，相应 ROI 输出空值。存在未结算订单但缺少
+退款金额结算样本或已送达全损样本时，状态为 `insufficient_sample`；已有样本对应的比例
+可独立返回，但完整预计结果保持空值。没有未结算订单时状态为 `no_unsettled_orders`，
+预计利润和四个 ROI 指标与当前值一致。
 
-多 SPU 大盘的已结算样本订单数、已结算全损订单数、未结算订单数、未来全损风险暴露
-订单数和已确认风险暴露全损订单数必须按订单全局去重；金额和件数按唯一商品行聚合。
+多 SPU 大盘的退款金额结算样本订单数、已送达样本订单数、已送达退款订单数、未结算
+订单数、未来全损风险暴露订单数和已确认风险暴露全损订单数必须按订单全局去重；金额和
+件数按唯一商品行聚合。
 `spu-roi` 与 `focused-spus` 使用同一 API 和公式，仅 SPU 选择范围不同。
 
 ## 5. 广告系统 ROI（TikTok 后台口径，单独一套）

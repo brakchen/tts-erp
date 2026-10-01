@@ -371,6 +371,7 @@
     "sum-roi-ad",
     "sum-projection-status",
     "sum-projection-basis-orders",
+    "sum-projection-full-loss-basis-orders",
     "sum-projection-refund-rate",
     "sum-projection-full-loss-rate",
     "sum-unresolved-orders",
@@ -1037,12 +1038,16 @@
       fmtInt(totals.projection_basis_order_count),
     );
     setTextIfPresent(
+      "#sum-projection-full-loss-basis-orders",
+      fmtInt(totals.projection_full_loss_basis_order_count),
+    );
+    setTextIfPresent(
       "#sum-projection-refund-rate",
       fmtPct(totals.projection_refund_amount_rate),
     );
     setTextIfPresent(
       "#sum-projection-full-loss-rate",
-      fmtPct(totals.settled_full_loss_rate),
+      fmtPct(totals.delivered_full_loss_rate),
     );
     setTextIfPresent(
       "#sum-unresolved-orders",
@@ -1299,17 +1304,21 @@
           .join("；"),
       ),
       cell("预测状态", projectionStatusLabel(it.projection_status)),
-      cell("预测样本订单", fmtInt(it.projection_basis_order_count)),
-      cell("预测样本件数", fmtQty(it.projection_basis_qty)),
-      cell("预测样本销售", money(it.projection_basis_sales)),
-      cell("预测样本退款", money(it.projection_basis_refund_amount)),
+      cell("退款金额样本订单", fmtInt(it.projection_basis_order_count)),
+      cell("退款金额样本件数", fmtQty(it.projection_basis_qty)),
+      cell("退款金额样本销售", money(it.projection_basis_sales)),
+      cell("退款金额样本退款", money(it.projection_basis_refund_amount)),
       cell(
-        "已结算全损单",
+        "已送达样本订单",
+        fmtInt(it.projection_full_loss_basis_order_count),
+      ),
+      cell(
+        "已送达退款单",
         fmtInt(it.projection_basis_full_loss_order_count),
       ),
-      cell("已结算样本全损件", fmtQty(it.projection_basis_full_loss_qty)),
+      cell("已送达退款件", fmtQty(it.projection_basis_full_loss_qty)),
       cell("预测退款金额率", fmtPct(it.projection_refund_amount_rate)),
-      cell("已结算订单全损率", fmtPct(it.settled_full_loss_rate)),
+      cell("已送达订单全损率", fmtPct(it.delivered_full_loss_rate)),
       cell("未结算订单", fmtInt(it.unsettled_order_count)),
       cell("待确认未结算订单", fmtInt(it.unresolved_unsettled_order_count)),
       cell("待确认未结算件", fmtQty(it.unresolved_unsettled_qty)),
