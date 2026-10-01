@@ -76,13 +76,15 @@ case "$SUITE" in
     fi
     info "Affected suites:"
     echo "$SUITES" | sed 's/^/  /'
-    # Run all affected suites
-    for suite_line in $SUITES; do
+    # Run all affected suites (read line-by-line so "spu-roi core" stays one entry)
+    while IFS= read -r suite_line; do
+      # skip blank lines
+      [[ -z "${suite_line// }" ]] && continue
       SUITE_NAME=$(echo "$suite_line" | awk '{print $1}')
       SUITE_TIER=$(echo "$suite_line" | awk '{print $2}')
       info "Running suite: $SUITE_NAME (tier=$SUITE_TIER)"
       bash "$0" "$SUITE_NAME" "$SUITE_TIER"
-    done
+    done <<< "$SUITES"
     exit 0
     ;;
   all)
@@ -155,7 +157,5 @@ info ""
 # 3. Temporary uvicorn with TTS_ERP_AUTH_MODE=enforce
 # 4. Playwright execution
 # 5. Cleanup
-exec bash scripts/test_isolated.sh e2e \
-  python3 -m pytest tests/e2e_browser/ \
-    -x -q --tb=short \
-    -o "e2e_playwright_args=${PW_ARGS[*]}"
+export E2E_PLAYWRIGHT_ARGS="${PW_ARGS[*]}"
+exec bash scripts/test_isolated.sh e2e tests/e2e_browser/ -x -q --tb=short

@@ -58,12 +58,17 @@ test.describe("N-SPUROI-04 @page:spu-roi @tier:extended", () => {
     await loginAndNavigate(page);
     await page.waitForSelector("#rows .tabulator-row", { timeout: 20000 });
 
-    // Mock analytics to return FX error
+    // Mock analytics to return FX error (matches real backend error_response format)
     await page.route("**/v2/analytics/spu-roi?**", async (route) => {
       await route.fulfill({
         status: 503,
         contentType: "application/json",
-        body: JSON.stringify({ detail: "FX_RATE_UNAVAILABLE" }),
+        body: JSON.stringify({
+          code: "FX_RATE_UNAVAILABLE",
+          message: "汇率数据缺失，无法计算结果",
+          requestId: "req-e2e-mock-fx",
+          retryable: true,
+        }),
       });
     });
 

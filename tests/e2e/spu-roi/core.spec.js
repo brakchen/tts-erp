@@ -5,6 +5,7 @@ const { test, expect } = require("@playwright/test");
 const BASE_URL = process.env.E2E_BASE_URL || "http://127.0.0.1:9987";
 const API_KEY = process.env.E2E_API_KEY || "ttserp_ro_TEST_E2E_KEY";
 const SHOP_PK = process.env.E2E_SHOP_PK || "1";
+const SHOP2_PK = process.env.E2E_SHOP2_PK || "2";
 
 // Helper: login via real /v2/auth/login, return session cookie context
 async function loginAndNavigate(page, shopPk = SHOP_PK) {
@@ -350,31 +351,25 @@ test.describe("C-SPUROI-08 @page:spu-roi @tier:core", () => {
     const initialUrl = new URL(page.url());
     const initialShop = initialUrl.searchParams.get("shop_pk");
 
-    // Get the available shops from the dropdown
-    const options = await page.locator("#shop-switcher option").all();
-    const shopValues = [];
-    for (const opt of options) {
-      const val = await opt.getAttribute("value");
-      if (val) shopValues.push(val);
-    }
+    // Switch to shop2 (seeded separately with its own SPU data)
+    const [request] = await Promise.all([
+      page.waitForRequest("**/v2/analytics/spu-roi?**"),
+      page.selectOption("#shop-switcher", SHOP2_PK),
+    ]);
 
-    // If there's another shop, switch to it
-    if (shopValues.length > 1) {
-      const newShop = shopValues.find((v) => v !== initialShop);
-      if (newShop) {
-        const [request] = await Promise.all([
-          page.waitForRequest("**/v2/analytics/spu-roi?**"),
-          page.selectOption("#shop-switcher", newShop),
-        ]);
+    // Request should target the new shop
+    const url = new URL(request.url());
+    expect(url.searchParams.get("shop_pk")).toBe(SHOP2_PK);
 
-        const url = new URL(request.url());
-        expect(url.searchParams.get("shop_pk")).toBe(newShop);
+    // URL should be updated
+    const currentUrl = new URL(page.url());
+    expect(currentUrl.searchParams.get("shop_pk")).toBe(SHOP2_PK);
+    expect(url.searchParams.get("shop_pk")).not.toBe(initialShop);
 
-        // URL should be updated
-        const currentUrl = new URL(page.url());
-        expect(currentUrl.searchParams.get("shop_pk")).toBe(newShop);
-      }
-    }
+    // Table should load with shop2 data
+    await page.waitForSelector("#rows .tabulator-row", { timeout: 15000 });
+    const count = await page.locator("#rows .tabulator-row").count();
+    expect(count).toBeGreaterThan(0);
   });
 });
 

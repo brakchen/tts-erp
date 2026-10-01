@@ -13,22 +13,20 @@
 """
 from __future__ import annotations
 
-import json
 import os
-import signal
 import socket
 import subprocess
 import sys
 import time
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "tests" / "support"))
 
-from spu_roi_e2e_seed import cleanup, seed_all
+from spu_roi_e2e_seed import cleanup, seed_all  # noqa: E402
 
 
 def _find_free_port() -> int:
@@ -39,12 +37,14 @@ def _find_free_port() -> int:
 
 def _wait_for_server(port: int, timeout: float = 30.0) -> bool:
     """Wait until the server responds to /healthz."""
+    import urllib.request
+
     deadline = time.monotonic() + timeout
+    url = f"http://127.0.0.1:{port}/healthz"
     while time.monotonic() < deadline:
         try:
-            import urllib.request
-            req = urllib.request.Request(f"http://127.0.0.1:{port}/healthz")
-            with urllib.request.urlopen(req, timeout=2) as r:
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=2) as r:  # noqa: S310 — localhost only
                 if r.status == 200:
                     return True
         except Exception:
@@ -62,16 +62,17 @@ def db_url() -> str:
 
 
 @pytest.fixture(scope="session")
-def db_engine(db_url: str):
+def db_engine(db_url: str) -> Generator:
     """Create SQLAlchemy engine for the test DB."""
     from sqlalchemy import create_engine
+
     engine = create_engine(db_url, pool_pre_ping=True)
     yield engine
     engine.dispose()
 
 
 @pytest.fixture(scope="session")
-def seed_info(db_engine) -> dict:
+def seed_info(db_engine) -> Generator:
     """Seed test data and return seed info."""
     info = seed_all(db_engine)
     yield info
@@ -122,6 +123,8 @@ def uvicorn_server(db_url: str, seed_info: dict):
         "key": seed_info["key_plaintext"],
         "shop_pk": seed_info["shop_pk"],
         "shop_id": seed_info["shop_id"],
+        "shop2_pk": seed_info["shop2_pk"],
+        "shop2_id": seed_info["shop2_id"],
         "spu_count": seed_info["spu_count"],
     }
 
@@ -135,18 +138,17 @@ def uvicorn_server(db_url: str, seed_info: dict):
 
 @pytest.fixture(scope="session")
 def playwright_args() -> list[str]:
-    """Get Playwright CLI args from pytest config override."""
-    raw = pytest.StashKey[str]()
-    # Read from -o e2e_playwright_args="..."
+    """Get Playwright CLI args from environment (set by test_e2e.sh)."""
     return os.environ.get("E2E_PLAYWRIGHT_ARGS", "").split()
 
 
+@pytest.mark.domain_e2e  # excluded from `fast` by marker filter
 class TestSpuRoiPlaywright:
     """Run Playwright E2E tests against a live temporary server."""
 
     def test_spu_roi_e2e(self, uvicorn_server: dict, monkeypatch):
         """Execute Playwright test suite for SPU ROI page."""
-        # Build Playwright args
+        # Build Playwright args from E2E_PLAYWRIGHT_ARGS env var (set by test_e2e.sh)
         pw_args = os.environ.get("E2E_PLAYWRIGHT_ARGS", "")
         if not pw_args:
             # Default to spu-roi core
@@ -158,6 +160,8 @@ class TestSpuRoiPlaywright:
         env["E2E_API_KEY"] = uvicorn_server["key"]
         env["E2E_SHOP_PK"] = str(uvicorn_server["shop_pk"])
         env["E2E_SHOP_ID"] = uvicorn_server["shop_id"]
+        env["E2E_SHOP2_PK"] = str(uvicorn_server["shop2_pk"])
+        env["E2E_SHOP2_ID"] = uvicorn_server["shop2_id"]
 
         cmd = [
             "npx", "playwright", "test",

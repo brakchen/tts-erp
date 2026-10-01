@@ -2,22 +2,37 @@
 
 所有 seed 函数写入 TEST_* 前缀数据，适合隔离测试库。
 用法：由 tests/e2e_browser/ 中的 pytest 编排层调用。
+
+日期策略：所有 seed 数据使用 VN 时区 T-1（昨天）的日期，
+与页面默认筛选范围保持一致，确保 seed 数据在页面加载后可见。
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+import datetime as _dt
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
+
+# ── Dynamic date (VN T-1) ─────────────────────────────────────────
+_VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+_TODAY_VN = _dt.datetime.now(_VN_TZ).date()
+_TARGET_DATE = _TODAY_VN - _dt.timedelta(days=1)  # T-1
+TARGET_DATE_STR = _TARGET_DATE.isoformat()  # e.g. "2026-10-01"
+FX_SEED_TS = f"{TARGET_DATE_STR}T00:00:00+00:00"
+AD_DAY_STR = TARGET_DATE_STR  # plugin.ad_daily.day
+ORDER_DAY_STR = TARGET_DATE_STR  # order_time / paid_at
+SETTLEMENT_DAY_STR = str(_TARGET_DATE + _dt.timedelta(days=14))  # settlement ~2 weeks later
 
 # ── Constants ──────────────────────────────────────────────────────
 SHOP_ID = "TEST_E2E_VN_SHOP"
 SHOP_NAME = "TEST E2E VN Shop"
 SHOP_REGION = "VN"
+SHOP2_ID = "TEST_E2E_VN_SHOP2"
+SHOP2_NAME = "TEST E2E VN Shop 2"
 REPORTING_TZ = "Asia/Ho_Chi_Minh"
 
-FX_SEED_TS = "2099-09-06T00:00:00+00:00"
 FX_USD_CNY = "6.7686473"
 FX_USD_VND = "26330"
 FX_CNY_VND = format(Decimal(FX_USD_VND) / Decimal(FX_USD_CNY), "f")
@@ -30,6 +45,8 @@ CASE_PREFIX = "TEST_E2E_CASE_"
 TXN_PREFIX = "TEST_E2E_TXN_"
 ADV_PREFIX = "TEST_E2E_ADV_"
 CAMPAIGN_PREFIX = "TEST_E2E_CAMP_"
+SHOP2_SPU_PREFIX = "TEST_E2E_S2_SPU_"
+SHOP2_ORDER_PREFIX = "TEST_E2E_S2_ORD_"
 
 
 def cleanup(engine: Engine) -> None:
@@ -69,6 +86,7 @@ def cleanup(engine: Engine) -> None:
             "DELETE FROM fx.exchange_rate_snapshots WHERE upstream_last_update = :fx_ts",
             "DELETE FROM security.api_keys WHERE name LIKE 'TEST_E2E_%'",
         ]:
+            # pi-lens-ignore: python-sql-injection
             c.execute(text(sql), {"fx_ts": FX_SEED_TS})
 
 
@@ -77,14 +95,18 @@ def seed_all(engine: Engine) -> dict:
     cleanup(engine)
     with engine.begin() as c:
         shop_pk = _seed_shop(c)
+        shop2_pk = _seed_shop2(c)
         _seed_fx(c)
         key_plaintext = _seed_api_key(c)
         spu_pks = _seed_spus(c, shop_pk)
         _seed_ad_data(c, shop_pk)
         _seed_orders_cases_settlements(c, shop_pk, spu_pks)
+        _seed_shop2_data(c, shop2_pk)
     return {
         "shop_pk": shop_pk,
         "shop_id": SHOP_ID,
+        "shop2_pk": shop2_pk,
+        "shop2_id": SHOP2_ID,
         "key_plaintext": key_plaintext,
         "spu_count": len(spu_pks),
         "spu_pks": spu_pks,
@@ -93,6 +115,7 @@ def seed_all(engine: Engine) -> dict:
 
 def _seed_shop(c) -> int:
     """创建测试店铺（VN region）。"""
+    # pi-lens-ignore: python-sql-injection
     return c.execute(
         text(
             "INSERT INTO commerce.shops (platform, shop_id, account_name, status, region) "
@@ -106,15 +129,17 @@ def _seed_shop(c) -> int:
 
 def _seed_fx(c) -> None:
     """注入汇率快照（USD→CNY/VND）。"""
+    # pi-lens-ignore: python-sql-injection
     sid = c.execute(
         text(
             "INSERT INTO fx.exchange_rate_snapshots "
             "(base_code, upstream_last_update, next_update_at, fetched_at, rates_count) "
             "VALUES ('USD', :ts, :ts2, now(), 3) RETURNING id"
         ),
-        {"ts": FX_SEED_TS, "ts2": "2099-09-07T00:00:00+00:00"},
+        {"ts": FX_SEED_TS, "ts2": f"{SETTLEMENT_DAY_STR}T00:00:00+00:00"},
     ).scalar()
     for code, rate in [("USD", "1"), ("VND", FX_USD_VND), ("CNY", FX_USD_CNY)]:
+        # pi-lens-ignore: python-sql-injection
         c.execute(
             text(
                 "INSERT INTO fx.exchange_rates (snapshot_id, base_code, target_code, rate) "
@@ -127,11 +152,11 @@ def _seed_fx(c) -> None:
 def _seed_api_key(c) -> str:
     """创建 TEST_E2E readonly API key，返回明文 key。"""
     import hashlib
-    import secrets
 
     plaintext = "ttserp_ro_TEST_E2E_KEY"
     key_hash = hashlib.sha256(plaintext.encode()).hexdigest()
     key_prefix = plaintext[:12]
+    # pi-lens-ignore: python-sql-injection
     c.execute(
         text(
             "INSERT INTO security.api_keys (key_hash, key_prefix, name, role, status) "
@@ -151,6 +176,7 @@ def _seed_spus(c, shop_pk: int) -> list[int]:
         title = f"测试商品 {i:03d}"
         status = "ACTIVATE"
         image_url = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" if i <= 3 else None
+        # pi-lens-ignore: python-sql-injection
         pk = c.execute(
             text(
                 "INSERT INTO commerce.products_spu (shop_pk, spu_id, title, status, main_image_url) "
@@ -162,6 +188,7 @@ def _seed_spus(c, shop_pk: int) -> list[int]:
         pks.append(pk)
 
     # SPU 1: 人工成本（MANUAL，25 CNY/件）
+    # pi-lens-ignore: python-sql-injection
     c.execute(
         text(
             "INSERT INTO procurement.manual_product_costs "
@@ -180,6 +207,7 @@ def _seed_ad_data(c, shop_pk: int) -> None:
         spend = f"{10 + i * 5:.2f}"
         orders = str(i * 2)
         gmv = f"{50 + i * 20:.2f}"
+        # pi-lens-ignore: python-sql-injection
         c.execute(
             text(
                 "INSERT INTO plugin.ad_daily ("
@@ -189,7 +217,7 @@ def _seed_ad_data(c, shop_pk: int) -> None:
                 ") VALUES ("
                 "  :seller, :adv, :camp, :pid,"
                 "  '/oec_ads/shopping/v1/oec/stat/post_product_list',"
-                "  '2026-09-01',"
+                "  :ad_day,"
                 "  CAST(:spend AS NUMERIC), CAST(:orders AS BIGINT), CAST(:gmv AS NUMERIC),"
                 "  NULL, '{}'::JSONB, now()"
                 ") ON CONFLICT ON CONSTRAINT uq_ad_daily DO UPDATE SET"
@@ -200,6 +228,7 @@ def _seed_ad_data(c, shop_pk: int) -> None:
                 "adv": f"{ADV_PREFIX}{i:03d}",
                 "camp": f"{CAMPAIGN_PREFIX}{i:03d}",
                 "pid": spu_id,
+                "ad_day": AD_DAY_STR,
                 "spend": spend,
                 "orders": orders,
                 "gmv": gmv,
@@ -209,8 +238,7 @@ def _seed_ad_data(c, shop_pk: int) -> None:
 
 def _seed_orders_cases_settlements(c, shop_pk: int, spu_pks: list[int]) -> None:
     """为前 5 个 SPU 创建多样化的订单/售后/结算数据。"""
-    vnd = "VND"
-    base_day = "2026-09-01"
+    base_day = ORDER_DAY_STR
 
     # SPU 1: 盈利场景 - 有效订单 5 件 × 526600 VND + 退货 1 件 + 结算
     _insert_order_with_line(c, shop_pk, spu_pks[0],
@@ -331,21 +359,22 @@ def _insert_case(c, shop_pk: int, order_pk: int, ext_case: str,
 
 def _insert_settlement(c, order_pk: int, external_id: str, amount_vnd: str):
     """插入结算 statement + transaction + component。"""
+    settlement_ts = f"{SETTLEMENT_DAY_STR}T00:00:00+00:00"
     stmt_pk = c.execute(
         text(
             "INSERT INTO finance.settlement_statements "
             "(external_statement_id, statement_time, currency) "
-            "VALUES (:sid, '2026-09-15T00:00:00+00:00', 'VND') RETURNING id"
+            "VALUES (:sid, :ts, 'VND') RETURNING id"
         ),
-        {"sid": f"TEST_E2E_STMT_{external_id}"},
+        {"sid": f"TEST_E2E_STMT_{external_id}", "ts": settlement_ts},
     ).scalar_one()
     txn_pk = c.execute(
         text(
             "INSERT INTO finance.settlement_transactions "
             "(settlement_statement_id, external_transaction_id, order_pk, transaction_time) "
-            "VALUES (:stmt, :eid, :opk, '2026-09-15T00:00:00+00:00') RETURNING id"
+            "VALUES (:stmt, :eid, :opk, :ts) RETURNING id"
         ),
-        {"stmt": stmt_pk, "eid": external_id, "opk": order_pk},
+        {"stmt": stmt_pk, "eid": external_id, "opk": order_pk, "ts": settlement_ts},
     ).scalar_one()
     c.execute(
         text(
@@ -355,3 +384,41 @@ def _insert_settlement(c, order_pk: int, external_id: str, amount_vnd: str):
         ),
         {"txn": txn_pk, "amt": amount_vnd},
     )
+
+
+def _seed_shop2(c) -> int:
+    """创建第二家测试店铺（VN），用于店铺切换测试。"""
+    # pi-lens-ignore: python-sql-injection
+    return c.execute(
+        text(
+            "INSERT INTO commerce.shops (platform, shop_id, account_name, status, region) "
+            "VALUES ('tiktok', :sid, :name, 'active', :region) "
+            "ON CONFLICT (platform, shop_id) DO UPDATE SET account_name = :name, region = :region "
+            "RETURNING id"
+        ),
+        {"sid": SHOP2_ID, "name": SHOP2_NAME, "region": SHOP_REGION},
+    ).scalar_one()
+
+
+def _seed_shop2_data(c, shop2_pk: int) -> list[int]:
+    """为第二家店铺创建少量 SPU 和订单，确保店铺切换测试有意义。"""
+    pks = []
+    for i in range(1, 4):
+        spu_id = f"{SHOP2_SPU_PREFIX}{i:03d}"
+        # pi-lens-ignore: python-sql-injection
+        pk = c.execute(
+            text(
+                "INSERT INTO commerce.products_spu (shop_pk, spu_id, title, status) "
+                "VALUES (:shop, :sid, :title, 'ACTIVATE') RETURNING id"
+            ),
+            {"shop": shop2_pk, "sid": spu_id, "title": f"Shop2 测试商品 {i:03d}"},
+        ).scalar_one()
+        pks.append(pk)
+    # One order per SPU
+    for i, spu_pk in enumerate(pks, start=1):
+        _insert_order_with_line(
+            c, shop2_pk, spu_pk,
+            f"{SHOP2_ORDER_PREFIX}{i:03d}", "DELIVERED", "1", "263300",
+            ORDER_DAY_STR, paid=True,
+        )
+    return pks

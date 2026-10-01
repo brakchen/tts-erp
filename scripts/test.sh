@@ -51,7 +51,7 @@ fi
 # on lock waits. CLI -m overrides addopts, so the run_all/run_coverage
 # tautology below is what makes `all` / `coverage` truly include them.
 run_unit() { "$PYTEST" -q -m "layer_unit and not slow" "$@"; }
-run_fast() { "$PYTEST" -q -m "not slow and not requires_service" "$@"; }
+run_fast() { "$PYTEST" -q -m "not slow and not requires_service and not domain_e2e" "$@"; }
 run_all() { "$PYTEST" -q -m "domain_migration or not domain_migration" "$@"; }
 run_coverage() { "$PYTEST" -q -m "domain_migration or not domain_migration" --cov=tts_erp_v2 --cov=miaoshou --cov-report=term-missing "$@"; }
 run_domain() {
