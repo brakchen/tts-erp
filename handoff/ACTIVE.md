@@ -15,6 +15,5 @@
 - Shared hotspot ownership does not require waiting for the original session: exchange a focused patch, hand off ownership explicitly, or create a successor lane from the predecessor's ready commit.
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
-| runtime-config-mobile-blank | 修复运行配置移动端白屏 | 01a0f13c-c315-760e-b7c9-6ac80761f9dc | `fix/runtime-config-mobile-blank` / `.worktrees/runtime-config-mobile-blank` | `tts_erp_v2/api/v2/pages.py`; `tests/api/test_pages.py` | ready | `8424294be62def62f63251f49d9b87a6bfa7c7b5` | `39ae4ee4395ca520446e9201f7f5081f3408c228` | 2026-10-01 05:36:57 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | spu-roi-undelivered-terminal-risk | 未送达订单终局拒收全损预测 | 01a0f0c0-2b88-760e-b7c9-6ac0585d1cdb | `fix/spu-roi-undelivered-terminal-risk` / `.worktrees/spu-roi-undelivered-terminal-risk` | `tts_erp_v2/analytics/spu_profitability/{_formula_v10.py,_implementation.py,_types.py}`; `tts_erp_v2/analytics/spu_roi.py`; `tests/analytics/test_spu_profitability_formula.py`; `biz-doc/analytics/spu-roi-profit-calculation.md`; `tech-doc/analytics/roi-calc-prompt.md` | active | — | — | 2026-10-01 05:05:00 |
