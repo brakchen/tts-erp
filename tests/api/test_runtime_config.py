@@ -247,11 +247,19 @@ def test_runtime_config_readonly_client_uses_redacted_snapshot() -> None:
     assert "async function loadPublished(item)" in source
     assert 'api("/snapshot")' in source
     assert "if (state.writable)" in source
-    assert "function installJsonTools()" in source
-    assert 'data-action="format"' in source
-    assert 'data-action="compact"' in source
-    assert 'data-action="validate"' in source
-    assert "JSON.stringify(value, null, 2)" in source
+    assert "async function installJsonEditors()" in source
+    assert "new JSONEditor(container" in source
+    assert "../../static/vendor/jsoneditor.min.js" in source
+    assert "../../static/vendor/jsoneditor.min.css" in source
+    assert "installJsonTools" not in source
+    license_text = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "vendor"
+        / "jsoneditor.LICENSE"
+    ).read_text(encoding="utf-8")
+    assert "Apache License" in license_text
 
 
 def test_runtime_config_rejects_empty_secret_reference(api_client, db_engine, readwrite_key):
