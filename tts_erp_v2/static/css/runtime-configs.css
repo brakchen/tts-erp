@@ -56,6 +56,8 @@
 .rc-schema-toggle { grid-column: 1 / -1; justify-self: start; border: 0; border-bottom: 1px dashed var(--rc-muted); padding: 0 0 2px; background: transparent; color: var(--rc-muted); font-size: 12px; cursor: pointer; }
 .rc-schema-toggle:hover, .rc-schema-toggle:focus-visible { color: var(--rc-accent); border-bottom-color: var(--rc-accent); outline: none; }
 .rc-schema-preview-status { grid-column: 1 / -1; color: var(--rc-muted); font-size: 12px; }
+.rc-schema-restore { grid-column: 1 / -1; justify-self: start; border: 1px solid var(--rc-accent); border-radius: 3px; background: transparent; color: var(--rc-accent); padding: 4px 8px; font-size: 12px; cursor: pointer; }
+.rc-schema-restore:hover, .rc-schema-restore:focus-visible { background: var(--rc-accent-soft); outline: none; }
 .rc-field label { font-weight: 700; font-size: 13px; }
 .rc-field input, .rc-field textarea {
   width: 100%; border: 1px solid var(--rc-rule); border-radius: 3px; background: #fff; color: var(--rc-ink); padding: 10px 11px; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;

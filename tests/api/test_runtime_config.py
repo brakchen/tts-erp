@@ -335,6 +335,10 @@ def test_runtime_config_readonly_client_uses_redacted_snapshot() -> None:
     assert "scheduleSchemaPreview" in source
     assert 'api("/schema/preview"' in source
     assert "rc-schema-preview-status" in source
+    assert "setSchemaOverride" in source
+    assert "rc-schema-restore" in source
+    assert "正在使用手动编辑的 Schema" in source
+    assert "恢复自动推断" in source
     assert "installJsonTools" not in source
     license_text = (
         Path(__file__).resolve().parents[2]
