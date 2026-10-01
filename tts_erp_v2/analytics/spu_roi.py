@@ -111,6 +111,7 @@ _FOUR_DECIMAL_RATIO_FIELDS = {
     "share_ratio",
     "fee_rate_used",
     "projection_refund_amount_rate",
+    "delivered_full_loss_rate",
     "settled_full_loss_rate",
     "projection_full_loss_qty_rate",
 }
@@ -145,10 +146,10 @@ _FEE_FALLBACK_MESSAGE = (
 )
 _PROJECTION_NOTE = (
     "只预测同一订单时间窗口内的未结算订单；已结算订单使用 SETTLEMENT 实际到账。"
-    "退款金额率和已结算订单全损率都来自已结算样本；退款金额预测覆盖全部未结算"
-    "销售，全损预测只覆盖尚未送达的未结算订单。已确认结果从对应终局额度中扣除，"
-    "只把差额作为未来新增。预计净利润等于当前净利润加未结算净收入调整，货本和"
-    "广告费不重复扣除。"
+    "退款金额率来自已结算财务样本；全损率来自已送达订单中已完成退款/退货退款的"
+    "订单，与结算状态无关。退款金额预测覆盖全部未结算销售，全损预测只覆盖尚未"
+    "送达的未结算订单。已确认结果从对应终局额度中扣除，只把差额作为未来新增。"
+    "预计净利润等于当前净利润加未结算净收入调整，货本和广告费不重复扣除。"
 )
 
 
@@ -325,7 +326,14 @@ def _meta_payload(
             "note": _PROJECTION_NOTE,
             "date_attribution": "COALESCE(order_time, paid_at)",
             "refund_sample": "同一日期范围内有 SETTLEMENT 实际到账的已结算订单",
-            "full_loss_rate_source": "已结算退款全损订单数 ÷ 全部已结算订单数",
+            "full_loss_sample": (
+                "同一日期范围内已确认送达的付款订单；订单状态、物流状态、"
+                "delivered_at 或 50101 事件任一确认即纳入"
+            ),
+            "full_loss_rate_source": (
+                "已送达且有已完成退款/退货退款的订单数 ÷ 全部已送达订单数；"
+                "与结算状态无关"
+            ),
             "target": "同一日期范围内的未结算订单，已确认结果从终局额度中扣除",
             "refund_target": "全部未结算订单销售额",
             "full_loss_target": (

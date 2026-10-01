@@ -206,6 +206,7 @@ def _projection_inputs(**overrides) -> ProjectionInput:
         "projection_basis_qty": Decimal(100),
         "projection_basis_sales_cny": Decimal(1000),
         "projection_basis_refund_amount_cny": Decimal(100),
+        "projection_full_loss_basis_order_count": 10,
         "projection_basis_full_loss_order_count": 1,
         "projection_basis_full_loss_qty": Decimal(2),
         "unsettled_order_count": 5,
@@ -238,11 +239,12 @@ def _projection_inputs(**overrides) -> ProjectionInput:
     return ProjectionInput(**values)
 
 
-def test_projection_uses_settled_full_loss_rate_and_current_profit_delta() -> None:
+def test_projection_uses_delivered_full_loss_rate_and_current_profit_delta() -> None:
     result = calculate_projection(_projection_inputs())
 
     assert result.status is ProjectionStatus.AVAILABLE
     assert result.refund_amount_rate == Decimal("0.10")
+    assert result.delivered_full_loss_rate == Decimal("0.10")
     assert result.settled_full_loss_rate == Decimal("0.10")
     assert result.projected_future_full_loss_order_count == Decimal("0.5")
     assert result.projected_future_full_loss_qty == Decimal(1)
@@ -269,6 +271,7 @@ def test_projection_subtracts_confirmed_outcomes_from_whole_cohort_quota() -> No
     result = calculate_projection(
         _projection_inputs(
             projection_basis_order_count=100,
+            projection_full_loss_basis_order_count=100,
             projection_basis_full_loss_order_count=10,
             projection_basis_full_loss_qty=Decimal(10),
             unsettled_order_count=300,
@@ -335,7 +338,7 @@ def test_projection_calculates_projected_ad_system_breakeven_roi() -> None:
     assert result.projected_ad_system_breakeven_roi == Decimal(720) / Decimal(460)
 
 
-def test_projection_is_unavailable_without_a_reliable_settled_sample() -> None:
+def test_projection_keeps_delivered_rate_without_a_settlement_sample() -> None:
     result = calculate_projection(
         _projection_inputs(
             projection_basis_order_count=0,
@@ -349,7 +352,8 @@ def test_projection_is_unavailable_without_a_reliable_settled_sample() -> None:
 
     assert result.status is ProjectionStatus.INSUFFICIENT_SAMPLE
     assert result.refund_amount_rate is None
-    assert result.settled_full_loss_rate is None
+    assert result.delivered_full_loss_rate == Decimal(0)
+    assert result.settled_full_loss_rate == Decimal(0)
     assert result.projected_future_full_loss_qty is None
     assert result.projected_unsettled_net_cny is None
     assert result.projected_net_profit_cny is None

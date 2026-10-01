@@ -95,6 +95,7 @@ class ProjectionInput:
     projection_basis_qty: Decimal
     projection_basis_sales_cny: Decimal
     projection_basis_refund_amount_cny: Decimal
+    projection_full_loss_basis_order_count: int
     projection_basis_full_loss_order_count: int
     projection_basis_full_loss_qty: Decimal
     unsettled_order_count: int
@@ -128,6 +129,7 @@ class ProjectionInput:
 class ProjectionOutput:
     status: ProjectionStatus
     refund_amount_rate: Decimal | None
+    delivered_full_loss_rate: Decimal | None
     settled_full_loss_rate: Decimal | None
     full_loss_qty_rate: Decimal | None
     projected_future_refund_amount_cny: Decimal | None
@@ -195,8 +197,9 @@ def calculate_order_metrics(
 def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
     """Project future changes without counting confirmed outcomes twice.
 
-    Settled orders provide two independent bases: refund amount severity and
-    order-level full-loss probability. Refund severity applies to the whole
+    Settled orders provide the refund-amount severity sample. Delivered paid
+    orders independently provide the order-level full-loss probability sample,
+    regardless of settlement state. Refund severity applies to the whole
     unsettled cohort. Full-loss probability applies only to unsettled orders
     that have not reached delivery terminal status; confirmed outcomes inside
     that risk cohort are then subtracted to obtain only the future increment.
@@ -204,13 +207,15 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
     second time.
     """
 
-    has_reliable_sample = (
+    has_refund_sample = (
         inputs.projection_basis_order_count > 0
         and inputs.projection_basis_sales_cny > 0
     )
+    has_full_loss_sample = inputs.projection_full_loss_basis_order_count > 0
+    has_reliable_sample = has_refund_sample and has_full_loss_sample
     refund_amount_rate: Decimal | None = None
-    settled_full_loss_rate: Decimal | None = None
-    if has_reliable_sample:
+    delivered_full_loss_rate: Decimal | None = None
+    if has_refund_sample:
         refund_amount_rate = min(
             Decimal(1),
             max(
@@ -219,12 +224,13 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
                 / inputs.projection_basis_sales_cny,
             ),
         )
-        settled_full_loss_rate = min(
+    if has_full_loss_sample:
+        delivered_full_loss_rate = min(
             Decimal(1),
             max(
                 Decimal(0),
                 Decimal(inputs.projection_basis_full_loss_order_count)
-                / Decimal(inputs.projection_basis_order_count),
+                / Decimal(inputs.projection_full_loss_basis_order_count),
             ),
         )
 
@@ -254,8 +260,9 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
         return ProjectionOutput(
             status=ProjectionStatus.NO_UNSETTLED_ORDERS,
             refund_amount_rate=refund_amount_rate,
-            settled_full_loss_rate=settled_full_loss_rate,
-            full_loss_qty_rate=settled_full_loss_rate,
+            delivered_full_loss_rate=delivered_full_loss_rate,
+            settled_full_loss_rate=delivered_full_loss_rate,
+            full_loss_qty_rate=delivered_full_loss_rate,
             projected_future_refund_amount_cny=Decimal(0),
             projected_terminal_refund_amount_cny=Decimal(0),
             projected_future_full_loss_order_count=Decimal(0),
@@ -280,9 +287,10 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
     if not has_reliable_sample:
         return ProjectionOutput(
             status=ProjectionStatus.INSUFFICIENT_SAMPLE,
-            refund_amount_rate=None,
-            settled_full_loss_rate=None,
-            full_loss_qty_rate=None,
+            refund_amount_rate=refund_amount_rate,
+            delivered_full_loss_rate=delivered_full_loss_rate,
+            settled_full_loss_rate=delivered_full_loss_rate,
+            full_loss_qty_rate=delivered_full_loss_rate,
             projected_future_refund_amount_cny=None,
             projected_terminal_refund_amount_cny=None,
             projected_future_full_loss_order_count=None,
@@ -303,7 +311,7 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
         )
 
     assert refund_amount_rate is not None
-    assert settled_full_loss_rate is not None
+    assert delivered_full_loss_rate is not None
     expected_terminal_refund = inputs.unsettled_sales_after_fee_cny * (
         refund_amount_rate
     )
@@ -321,7 +329,7 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
 
     expected_terminal_full_loss_orders = (
         Decimal(inputs.full_loss_exposure_unsettled_order_count)
-        * settled_full_loss_rate
+        * delivered_full_loss_rate
     )
     projected_future_full_loss_orders = min(
         Decimal(inputs.unresolved_full_loss_exposure_order_count),
@@ -335,7 +343,7 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
         inputs.full_loss_exposure_unsettled_order_count
     ) * (
         inputs.projection_basis_full_loss_qty
-        / Decimal(inputs.projection_basis_order_count)
+        / Decimal(inputs.projection_full_loss_basis_order_count)
     )
     projected_future_full_loss_qty = min(
         inputs.unresolved_full_loss_exposure_qty,
@@ -395,8 +403,9 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
     return ProjectionOutput(
         status=ProjectionStatus.AVAILABLE,
         refund_amount_rate=refund_amount_rate,
-        settled_full_loss_rate=settled_full_loss_rate,
-        full_loss_qty_rate=settled_full_loss_rate,
+        delivered_full_loss_rate=delivered_full_loss_rate,
+        settled_full_loss_rate=delivered_full_loss_rate,
+        full_loss_qty_rate=delivered_full_loss_rate,
         projected_future_refund_amount_cny=projected_future_refund,
         projected_terminal_refund_amount_cny=projected_terminal_refund,
         projected_future_full_loss_order_count=(
