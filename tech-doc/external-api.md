@@ -261,7 +261,6 @@ sync-worker 周期作业健康展示（dashboard「数据同步状态」卡片�
 | `GET /v2/sync/status` | readonly | → `{server_time, jobs: [{job_name, interval_seconds, last_run_at, last_finished_at, last_status, last_error, next_expected_at, lag_seconds, cycles_late, severity}]}`。周期取自 `sync_worker.scheduler.JOBS` 注册表（单一真相源），运行记录取自 `integration.sync_jobs`（tiktok 作业按 shop 扇出多行，按 job_name 聚合取最新一行）。红灯规则：`now - last_run_at >= 2 × interval_seconds` → `severity="crit"`；≥1 周期 `"warn"`；周期内 `"ok"`；从未运行或注册表外 job `"unknown"`。只读、零上游外呼。 |
 | `GET /v2/sync/jobs` | readonly | 周期任务管理页的数据源：返回 `JOBS` 定义、`enabled` 启停状态、最近运行状态，以及可手动选择的 TikTok 店铺列表。启停状态持久化在 `integration.sync_cursors` 的保留命名空间 `scheduler.job_controls`。 |
 | `GET /v2/pages/sync-jobs` | readonly | 定时任务管理 HTML 页面（侧边栏入口）。页面可查看任务；admin 会话可切换启停、立即执行；非 admin 会话自动降级只读。 |
-| `GET /v2/sync/jobs/page` | readonly | 兼容旧入口；新入口使用 `/v2/pages/sync-jobs`。 |
 | `PATCH /v2/admin/sync-jobs/{job_name}/enabled` | admin | body `{"enabled": false}`：启用/停用周期 tick。只影响 APScheduler 自动触发；手动触发仍可执行。Cookie mutation 必须带 `X-Requested-With: tts-erp`。 |
 | `POST /v2/admin/sync-jobs/{job_name}/trigger` | admin | body 可选 `{"shop_id": "..."}`。TikTok 店铺级任务传 `shop_id` 时只跑该店，省略则按当前授权店铺 fan-out；系统级任务不接受 `shop_id`。返回 200 accepted，实际运行在 API 后台任务中，结果写 `integration.sync_jobs`。 |
 
