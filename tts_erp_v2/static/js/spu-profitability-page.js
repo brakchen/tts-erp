@@ -336,7 +336,7 @@
     shopPk: null, // 店铺筛选(null/""=全部店铺)
     wStart: "", // 日期范围 yyyy-mm-dd(""=不限)
     wEnd: "",
-    datesTouched: false, // 用户手动改过日期? (自动回填只发生一次,随后交还用户)
+    datesTouched: false, // 仅用户主动选过日期时为 true；自动 T-1 不算用户选择
     feeRate: null, // 页面覆写费率(小数),null = 店铺实测/服务端基线
     // D7 行内 accordion: 一次只展开一行; D6 tab 懒加载缓存,主表筛选变化时清空
     openDrillRow: null,
@@ -2197,10 +2197,24 @@
     ].join("-");
   }
 
+  function reportingEndDate(now) {
+    var today = reportingDateValue(now || new Date());
+    return today ? shiftDateValue(today, -1) : null;
+  }
+
+  function applyDefaultDateRange() {
+    var dateConfig = profile.dateRangeControl || {};
+    if (state.datesTouched || dateConfig.defaultRange !== "t-1") return;
+    var yesterday = reportingEndDate(new Date());
+    if (!yesterday) return;
+    state.wStart = yesterday;
+    state.wEnd = yesterday;
+  }
+
   function dateRangeForPreset(preset, now) {
-    if (preset === "all") return { start: "", end: "" };
-    var end = reportingDateValue(now || new Date());
+    var end = reportingEndDate(now);
     if (!end) return null;
+    if (preset === "all") return { start: "", end: end };
     if (preset === "month") return { start: `${end.slice(0, 8)}01`, end: end };
     var days = parseInt(preset, 10);
     if (!Number.isFinite(days)) return null;
@@ -2343,7 +2357,7 @@
       el("div", {
         id: "date-range-help",
         class: "form-text op-date-range__help mt-2",
-        text: "截止日包含当天；留空表示全历史，销售、退款与广告按同一范围统计。",
+        text: "截止日包含当天；快捷范围均截止 T-1，“不限”只取消起始日；手动清空日期表示不限制该端。销售、退款与广告按同一范围统计。",
       }),
     );
     wrapper.appendChild(control);
@@ -2527,6 +2541,7 @@
     state.sort = defaults.sort || DEFAULT_SORT;
     state.order = defaults.order || DEFAULT_ORDER;
     restorePagePreferences();
+    applyDefaultDateRange();
     var limitInput = $("#filter-limit");
     if (limitInput) limitInput.value = String(state.limit);
     var includeInput = $("#filter-include-all");
