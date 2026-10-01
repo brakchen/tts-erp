@@ -41,9 +41,8 @@
 
 ## 权限与页面
 
-- `GET /v2/config/runtime/items`、`GET /v2/config/runtime/snapshot`：`readonly`。
-- 草稿、发布、回滚、revision 详情和 secret 元数据/写入：`readwrite`。
-- `GET /v2/pages/runtime-configs`：`readonly`；只读会话可查看已发布 payload（secret 仍是引用），`readwrite` 才可编辑、发布、查看灰度细节和管理 secret。
+- 所有 `/v2/config/runtime/*` endpoint：`readwrite`。
+- `GET /v2/pages/runtime-configs`：`readwrite`；未满足角色时由浏览器会话跳转至登录页。
 
 页面入口为 Dashboard「运行配置」卡片及侧边栏「基础设置 → 运行配置」。
 
