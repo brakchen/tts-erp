@@ -15,5 +15,6 @@
 - Shared hotspot ownership does not require waiting for the original session: exchange a focused patch, hand off ownership explicitly, or create a successor lane from the predecessor's ready commit.
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
+| runtime-config-rw-access | 运行配置统一读写权限 | 01a0f13c-c315-760e-b7c9-6ac80761f9dc | `fix/runtime-config-rw-access` / `.worktrees/runtime-config-rw-access` | `tts_erp_v2/access/_policy.py`; `tests/api/test_runtime_config.py`; `tech-doc/{external-api.md,runtime-config-management.md}` | draft | — | — | 2026-10-01 04:04:29 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | sync-jobs-readwrite-access | 定时任务管理访问权限改 readwrite | 01a0f39a-7180-760e-b7c9-6b0a00a152c2 | `fix/sync-jobs-readwrite-access` / `.worktrees/sync-jobs-readwrite-access` | `tts_erp_v2/api/v2/{sync_status.py,pages.py}`; `tests/api/{test_sync_job_management.py,test_pages.py}`; `tech-doc/{external-api.md,process-architecture.md}` | draft | — | — | 2026-10-01 04:04:05 |
