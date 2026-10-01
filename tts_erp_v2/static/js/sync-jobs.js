@@ -3,7 +3,7 @@
   const markerAt = location.pathname.indexOf(marker);
   const rootPrefix = markerAt >= 0 ? location.pathname.slice(0, markerAt) : '';
   const API = `${rootPrefix}/v2`;
-  const state = { jobs: [], shops: [], canAdmin: false };
+  const state = { jobs: [], shops: [], canAdmin: false, pendingJob: null };
   const els = {
     body: document.getElementById('jobs-body'),
     notice: document.getElementById('notice'),
@@ -60,6 +60,13 @@
     }[ch]));
   }
 
+  function labelForStatus(status) {
+    if (status.last_status === 'running') return '运行中';
+    if (status.last_status === 'failed') return '失败';
+    if (status.last_status === 'succeeded') return '成功';
+    return status.last_status || 'no run';
+  }
+
   function render() {
     if (!state.jobs.length) {
       els.body.innerHTML = '<tr><td colspan="7" class="empty">暂无注册任务</td></tr>';
@@ -71,16 +78,17 @@
       const scope = job.is_tiktok ? 'TikTok 店铺' : '系统级';
       const disabled = state.canAdmin ? '' : ' disabled';
       const triggerControl = job.is_tiktok
-        ? `<select class="scope-select" data-shop-for="${escapeHtml(job.job_name)}"${disabled}>${shopOptions('')}</select><button class="primary" data-trigger="${escapeHtml(job.job_name)}"${disabled}>执行</button>`
-        : `<button class="primary" data-trigger="${escapeHtml(job.job_name)}"${disabled}>执行</button>`;
+        ? `<div class="trigger-controls"><select class="scope-select" data-shop-for="${escapeHtml(job.job_name)}"${disabled}>${shopOptions('')}</select><button class="primary" data-trigger="${escapeHtml(job.job_name)}"${disabled}>执行</button></div>`
+        : `<div class="trigger-controls"><button class="primary" data-trigger="${escapeHtml(job.job_name)}"${disabled}>执行</button></div>`;
+      const pending = state.pendingJob === job.job_name ? '<span class="pending-dot">已提交</span>' : '';
       return `<tr>
-        <td><span class="job-name">${escapeHtml(job.job_name)}</span><span class="module">${escapeHtml(job.module_path)} · ${escapeHtml(job.entrypoint)}</span></td>
-        <td>${fmtDuration(job.interval_seconds)}</td>
-        <td>${scope}</td>
-        <td><span class="badge ${severity}">${escapeHtml(severity)}</span><span class="module">${escapeHtml(status.last_status || 'no run')}</span></td>
-        <td>${escapeHtml(fmtTime(status.last_run_at))}</td>
-        <td><label class="switch"><input type="checkbox" data-enable="${escapeHtml(job.job_name)}" ${job.enabled ? 'checked' : ''}${disabled}>${job.enabled ? '启用' : '停用'}</label></td>
-        <td>${triggerControl}</td>
+        <td data-label="任务"><span class="job-name">${escapeHtml(job.job_name)}</span><span class="module">${escapeHtml(job.module_path)} · ${escapeHtml(job.entrypoint)}</span>${pending}</td>
+        <td data-label="周期">${fmtDuration(job.interval_seconds)}</td>
+        <td data-label="范围">${scope}</td>
+        <td data-label="状态"><span class="badge ${severity}">${escapeHtml(severity)}</span><span class="module">${escapeHtml(labelForStatus(status))}</span></td>
+        <td data-label="上次运行">${escapeHtml(fmtTime(status.last_run_at))}</td>
+        <td data-label="启用"><label class="switch"><input type="checkbox" data-enable="${escapeHtml(job.job_name)}" ${job.enabled ? 'checked' : ''}${disabled}>${job.enabled ? '启用' : '停用'}</label></td>
+        <td data-label="立即执行">${triggerControl}</td>
       </tr>`;
     }).join('');
   }
@@ -114,6 +122,7 @@
 
   async function toggleJob(jobName, enabled, input) {
     input.disabled = true;
+    input.classList.add('is-busy');
     setNotice(`${enabled ? '启用' : '停用'} ${jobName}…`);
     try {
       await api(`/admin/sync-jobs/${encodeURIComponent(jobName)}/enabled`, {
@@ -125,7 +134,8 @@
       input.checked = !enabled;
       setNotice(`操作失败：${err.message}`, 'error');
     } finally {
-      input.disabled = false;
+      input.classList.remove('is-busy');
+      input.disabled = !state.canAdmin;
     }
   }
 
@@ -134,20 +144,35 @@
       el => el.getAttribute('data-shop-for') === jobName
     );
     const shopId = selector ? selector.value || null : null;
+    if (selector && !shopId) {
+      const ok = window.confirm(`将立即执行 ${jobName} 的全部授权店铺。这个操作可能触发多店铺上游同步，确定继续吗？`);
+      if (!ok) {
+        setNotice('已取消全店铺执行。');
+        return;
+      }
+    }
     button.disabled = true;
-    setNotice(`提交 ${jobName}${shopId ? ` / ${shopId}` : ''}…`);
+    button.classList.add('is-busy');
+    setNotice(`提交 ${jobName}${shopId ? ` / ${shopId}` : ' / 全部店铺'}…`);
     try {
       const body = shopId ? { shop_id: shopId } : {};
       const res = await api(`/admin/sync-jobs/${encodeURIComponent(jobName)}/trigger`, {
         method: 'POST',
         body: JSON.stringify(body),
       });
-      setNotice(res.message || '任务已提交', 'ok');
-      window.setTimeout(loadJobs, 1200);
+      state.pendingJob = jobName;
+      render();
+      setNotice(`${res.message || '任务已提交'} 可稍后刷新查看 running / succeeded / failed。`, 'ok');
+      window.setTimeout(async () => {
+        await loadJobs();
+        if (state.pendingJob === jobName) state.pendingJob = null;
+        render();
+      }, 1500);
     } catch (err) {
       setNotice(`触发失败：${err.message}`, 'error');
     } finally {
-      button.disabled = false;
+      button.classList.remove('is-busy');
+      button.disabled = !state.canAdmin;
     }
   }
 

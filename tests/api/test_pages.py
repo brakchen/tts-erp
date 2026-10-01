@@ -84,6 +84,18 @@ def test_sidebar_css_is_injected_after_page_styles():
     assert "margin-left: var(--sidebar-width);" in _SIDEBAR_CSS
 
 
+def test_sidebar_css_is_injected_for_external_stylesheet_pages():
+    """Pages with only linked CSS still need the shared responsive sidebar CSS."""
+    for rendered in (runtime_configs_page(), sync_jobs_page()):
+        body = bytes(rendered.body).decode()
+        sidebar_css_at = body.index(_SIDEBAR_CSS.strip())
+
+        assert "<style>" in body
+        assert "margin-left: var(--sidebar-width);" in body
+        assert "@media (max-width: 991.98px)" in body
+        assert body.index("</head>") > sidebar_css_at
+
+
 def test_sidebar_tokens_fall_back_on_pages_with_a_different_theme_vocabulary():
     """The enum-map page uses ``--bg``/``--text`` instead of paper tokens."""
     body = bytes(enum_map_page().body).decode()

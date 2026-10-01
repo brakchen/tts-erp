@@ -427,7 +427,14 @@ def _page(html: str, *, current_page: str = "") -> HTMLResponse:
   if current_page:
     sidebar_html = _sidebar_html(current_page)
     # Append shared CSS so page-level ``margin`` shorthands cannot erase the shell offset.
-    html = html.replace("</style>", _SIDEBAR_CSS + "\n  </style>", 1)
+    if "</style>" in html:
+      html = html.replace("</style>", _SIDEBAR_CSS + "\n  </style>", 1)
+    else:
+      html = html.replace(
+        "</head>",
+        "  <style>\n" + _SIDEBAR_CSS + "\n  </style>\n</head>",
+        1,
+      )
     # Inject sidebar HTML + toggle JS after <body>
     html = html.replace(
       "<body>",
