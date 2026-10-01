@@ -115,14 +115,22 @@ def test_runtime_config_draft_publish_snapshot_and_secret_redaction(
         assert publish.status_code == 200, publish.text
         assert publish.json()["publishedVersion"] == 1
 
-        listed = api_client.get("/v2/config/runtime/items", headers=_headers(readonly_key))
+        assert api_client.get(
+            "/v2/config/runtime/items", headers=_headers(readonly_key)
+        ).status_code == 403
+        assert api_client.get(
+            "/v2/config/runtime/snapshot?subject=TEST_subject",
+            headers=_headers(readonly_key),
+        ).status_code == 403
+
+        listed = api_client.get("/v2/config/runtime/items", headers=_headers(readwrite_key))
         assert listed.status_code == 200, listed.text
         assert listed.json()["items"][0]["publishedVersion"] == 1
         assert "draftPayload" not in listed.text
 
         snapshot = api_client.get(
             "/v2/config/runtime/snapshot?subject=TEST_subject",
-            headers=_headers(readonly_key),
+            headers=_headers(readwrite_key),
         )
         assert snapshot.status_code == 200, snapshot.text
         assert snapshot.json()["items"]["test_runtime.api"]["payload"] == {
@@ -133,11 +141,11 @@ def test_runtime_config_draft_publish_snapshot_and_secret_redaction(
         etag = snapshot.headers["etag"]
         assert api_client.get(
             "/v2/config/runtime/snapshot?subject=TEST_subject",
-            headers={**_headers(readonly_key), "If-None-Match": etag},
+            headers={**_headers(readwrite_key), "If-None-Match": etag},
         ).status_code == 304
         assert api_client.get(
             "/v2/config/runtime/snapshot?subject=TEST_other_subject",
-            headers={**_headers(readonly_key), "If-None-Match": etag},
+            headers={**_headers(readwrite_key), "If-None-Match": etag},
         ).status_code == 200
 
         blocked_secret_retire = api_client.post(
@@ -260,7 +268,7 @@ def test_runtime_config_rejects_empty_secret_reference(api_client, db_engine, re
         _clear_runtime_config(db_engine)
 
 
-def test_runtime_config_retirement_lifecycle(api_client, db_engine, readonly_key, readwrite_key):
+def test_runtime_config_retirement_lifecycle(api_client, db_engine, readwrite_key):
     _clear_runtime_config(db_engine)
     try:
         created = api_client.post(
@@ -293,7 +301,7 @@ def test_runtime_config_retirement_lifecycle(api_client, db_engine, readonly_key
             },
         ).status_code == 409
         assert "test_runtime.retire" not in api_client.get(
-            "/v2/config/runtime/snapshot", headers=_headers(readonly_key)
+            "/v2/config/runtime/snapshot", headers=_headers(readwrite_key)
         ).json()["items"]
         listed = api_client.get(
             "/v2/config/runtime/items?includeRetired=true",

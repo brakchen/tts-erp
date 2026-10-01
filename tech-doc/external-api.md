@@ -277,7 +277,7 @@ Versioned JSON configuration with draft/publish/rollback and encrypted
 
 | Endpoint | Role | Notes |
 | --- | --- | --- |
-| `GET /v2/config/runtime/items` | readonly | Active published-state list only; never returns drafts or secret values. `?includeRetired=true` requires readwrite. |
+| `GET /v2/config/runtime/items` | readwrite | Active published-state list only; never returns drafts or secret values. `?includeRetired=true` includes archived metadata. |
 | `POST /v2/config/runtime/items` | readwrite | Creates a key, immutable JSON Schema and optional initial draft. |
 | `GET /v2/config/runtime/items/{config_key}` | readwrite | Editor detail including draft and published reference payloads. |
 | `PUT /v2/config/runtime/items/{config_key}/draft` | readwrite | Optimistic draft save; body contains `expectedDraftVersion`, `payload`, `rollout`. |
@@ -285,7 +285,7 @@ Versioned JSON configuration with draft/publish/rollback and encrypted
 | `GET /v2/config/runtime/items/{config_key}/revisions` | readwrite | Revision history. |
 | `POST /v2/config/runtime/items/{config_key}/rollback` | readwrite | Republishes a historical revision as a higher version. |
 | `POST /v2/config/runtime/items/{config_key}/{retire,restore}` | readwrite | Soft-retire or restore a key. Retired keys are absent from snapshots and cannot be edited/published. |
-| `GET /v2/config/runtime/snapshot` | readonly | Published, rollout-selected values with ETag; secret references stay redacted. |
+| `GET /v2/config/runtime/snapshot` | readwrite | Published, rollout-selected values with ETag; secret references stay redacted. |
 | `GET /v2/config/runtime/secrets`, `PUT /v2/config/runtime/secrets/{name}` | readwrite | Fingerprint/reference metadata and encrypted write only; no secret plaintext read endpoint. `?includeRetired=true` includes archived metadata. |
 | `POST /v2/config/runtime/secrets/{name}/{retire,restore}` | readwrite | Soft-retire or restore a secret. Retirement is refused while an active config or draft references it. |
 
@@ -298,7 +298,7 @@ Versioned JSON configuration with draft/publish/rollback and encrypted
 | `GET /v2/pages/focused-spus` | readonly | 重点关注 SPU。使用相同盈利汇总、表格、分页和钻取；`/static/js/focused-spus.js` 提供持久 selection adapter 与编辑器。 |
 | `GET /v2/pages/shops` | readonly | 店铺注册台。人工注册插件同步店铺（`commerce.shops` 补登记）；写入走 `POST /v2/admin/shops/register`（含 App Key/Secret 均 readwrite）；行内元信息编辑走 `PATCH /v2/admin/shops/{shop_pk}`；App pair 按 service_id 加密保存；「获取授权链接」按钮走 `GET /v2/oauth/tiktok/authorize?format=json`（readwrite）。 |
 | `GET /v2/pages/sync-jobs` | readwrite | 定时任务管理页。读取 `/v2/sync/jobs`；admin 会话可调用 `/v2/admin/sync-jobs/*` 启停周期 tick 或立即执行任务；readwrite 会话可访问页面但按钮禁用，只读展示。 |
-| `GET /v2/pages/runtime-configs` | readonly | 运行配置台：readwrite 会话可创建草稿、发布/恢复版本、管理灰度规则及加密 secret 引用。 |
+| `GET /v2/pages/runtime-configs` | readwrite | 运行配置台：创建草稿、发布/恢复版本、管理灰度规则及加密 secret 引用。 |
 
 ### Admin (`/v2/admin/*`, handler-enforced roles)
 

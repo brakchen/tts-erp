@@ -61,9 +61,9 @@ def required_role(method: str, route_path: str) -> Role | None:
         return None
     if path.startswith(("/v2/analytics/sync", "/v2/order-sync")):
         return Role.READWRITE
-    if path.startswith("/v2/config/runtime/secrets"):
+    if path == "/v2/pages/runtime-configs":
         return Role.READWRITE
-    if path.startswith("/v2/config/runtime/") and normalized_method not in {"GET", "HEAD"}:
+    if path == "/v2/config/runtime" or path.startswith("/v2/config/runtime/"):
         return Role.READWRITE
     if path.startswith("/v2/admin/shops/"):
         return Role.READWRITE

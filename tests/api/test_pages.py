@@ -141,12 +141,19 @@ def test_runtime_config_page_links_its_owned_assets():
     assert 'href="../../v2/pages/runtime-configs"' in body
 
 
-def test_runtime_config_page_returns_html_to_readonly_operator(api_client, readonly_key):
-    response = api_client.get(
+def test_runtime_config_page_requires_readwrite_operator(
+    api_client, readonly_key, readwrite_key
+):
+    readonly_response = api_client.get(
         "/v2/pages/runtime-configs",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
+    assert readonly_response.status_code == 403, readonly_response.text
 
+    response = api_client.get(
+        "/v2/pages/runtime-configs",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+    )
     assert response.status_code == 200, response.text
     assert response.headers["content-type"].startswith("text/html")
     assert "运行配置" in response.text
