@@ -6,6 +6,7 @@
     writable: false,
     jsonEditors: new Map(),
     customSchema: false,
+    schemaPreviewApplying: false,
     schemaPreviewTimer: null,
     schemaPreviewRequest: 0,
   };
@@ -117,10 +118,16 @@
         onChangeText(text) {
           textarea.value = text;
           if (id === "rc-new-payload") scheduleSchemaPreview(text);
+          if (id === "rc-new-schema" && !state.schemaPreviewApplying && !textarea.readOnly) {
+            setSchemaOverride(true);
+          }
         },
         onChangeJSON(json) {
           textarea.value = JSON.stringify(json);
           if (id === "rc-new-payload") scheduleSchemaPreview(textarea.value);
+          if (id === "rc-new-schema" && !state.schemaPreviewApplying && !textarea.readOnly) {
+            setSchemaOverride(true);
+          }
         },
       });
       editor.setText(textarea.value);
@@ -133,7 +140,9 @@
     const textarea = document.getElementById(id);
     if (!textarea) return;
     textarea.value = text;
+    if (id === "rc-new-schema") state.schemaPreviewApplying = true;
     state.jsonEditors.get(id)?.setText(text);
+    if (id === "rc-new-schema") state.schemaPreviewApplying = false;
   }
 
   function setJsonEditorReadOnly(id, readOnly) {
@@ -277,6 +286,18 @@
     }
   }
 
+  function setSchemaOverride(customSchema) {
+    state.customSchema = customSchema;
+    const status = $("#rc-schema-preview-status");
+    const restore = $("#rc-schema-restore");
+    if (status) {
+      status.textContent = customSchema
+        ? "正在使用手动编辑的 Schema"
+        : "已根据初始草稿自动推断";
+    }
+    if (restore) restore.hidden = !customSchema;
+  }
+
   function scheduleSchemaPreview(text) {
     if (state.customSchema) return;
     if (state.schemaPreviewTimer) clearTimeout(state.schemaPreviewTimer);
@@ -313,20 +334,25 @@
     const status = document.createElement("span");
     status.id = "rc-schema-preview-status";
     status.className = "rc-schema-preview-status";
+    const restore = document.createElement("button");
+    restore.type = "button";
+    restore.id = "rc-schema-restore";
+    restore.className = "rc-schema-restore";
+    restore.textContent = "恢复自动推断";
+    restore.hidden = true;
     field.before(toggle);
-    toggle.after(status);
+    toggle.after(status, restore);
     field.hidden = true;
     textarea.required = false;
     toggle.addEventListener("click", () => {
       const expanded = field.hidden;
-      state.customSchema = expanded;
       field.hidden = !expanded;
-      toggle.textContent = expanded ? "收起并恢复自动推断" : "高级：自定义 Schema";
-      if (expanded) {
-        state.jsonEditors.get("rc-new-schema")?.refresh();
-      } else {
-        scheduleSchemaPreview($("#rc-new-payload").value);
-      }
+      toggle.textContent = expanded ? "收起 Schema 预览" : "高级：自定义 Schema";
+      if (expanded) state.jsonEditors.get("rc-new-schema")?.refresh();
+    });
+    restore.addEventListener("click", () => {
+      setSchemaOverride(false);
+      scheduleSchemaPreview($("#rc-new-payload").value);
     });
   }
 
@@ -336,7 +362,7 @@
     try {
       const payload = parseJson("#rc-new-payload", "初始草稿");
       const schemaField = $("#rc-new-schema").closest(".rc-field");
-      const schema = schemaField?.hidden ? null : parseJson("#rc-new-schema", "Schema");
+      const schema = state.customSchema ? parseJson("#rc-new-schema", "Schema") : null;
       const item = await api("/items", {
         method: "POST",
         body: JSON.stringify({
@@ -347,7 +373,7 @@
         }),
       });
       event.target.reset();
-      state.customSchema = false;
+      setSchemaOverride(false);
       if (schemaField) schemaField.hidden = true;
       $(".rc-schema-toggle").textContent = "高级：自定义 Schema";
       setJsonEditorText("rc-new-schema", $("#rc-new-schema").value);
