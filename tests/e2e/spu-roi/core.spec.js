@@ -2,23 +2,57 @@
 const { test, expect } = require("@playwright/test");
 
 // ── Environment ───────────────────────────────────────────────────
-const BASE_URL = process.env.E2E_BASE_URL || "http://127.0.0.1:9987";
 const API_KEY = process.env.E2E_API_KEY || "ttserp_ro_TEST_E2E_KEY";
 const SHOP_PK = process.env.E2E_SHOP_PK || "1";
 const SHOP2_PK = process.env.E2E_SHOP2_PK || "2";
 
-// Helper: login via real /v2/auth/login, return session cookie context
-async function loginAndNavigate(page, shopPk = SHOP_PK) {
-  // 1. POST login
-  const loginResp = await page.request.post(`${BASE_URL}/v2/auth/login`, {
-    data: { key: API_KEY },
-  });
-  expect(loginResp.status()).toBe(200);
-  const body = await loginResp.json();
-  expect(body.ok).toBe(true);
-  expect(body.role).toBe("readonly");
+// ── Cached login cookie ──────────────────────────────────────────
+// Each test gets its own fresh browser context (no cookies).  The
+// first normal-authenticated test logs in via the real browser form
+// (POST /v2/auth/login → Set-Cookie), caches the resulting session
+// cookie, and every subsequent test restores it via addCookies().
+// This keeps real auth semantics while only hitting the login
+// endpoint once, avoiding the server's 10/min rate-limit (429).
+//
+// NOTE: We use the browser form flow (not page.request.post)
+// because page.request uses a separate API request context whose
+// response cookies do NOT flow back to the browser context's
+// cookie jar.  The form submission goes through the browser's
+// native cookie handling, so context.cookies() captures them.
+let cachedAuthCookies = null;
 
-  // 2. Navigate to page (cookies are shared in the context)
+/**
+ * Ensure `page`'s browser context carries a valid session cookie.
+ * First call navigates to the login page, submits the form, and
+ * caches the session cookie.  Later calls restore from cache.
+ *
+ * Does NOT navigate to the ROI page — callers handle final nav.
+ */
+async function ensureAuthenticatedContext(page) {
+  if (cachedAuthCookies) {
+    await page.context().addCookies(cachedAuthCookies);
+  } else {
+    // Navigate to login page directly
+    await page.goto(`/v2/auth/login`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    // Submit login form (browser handles Set-Cookie natively)
+    await page.fill("#key", API_KEY);
+    await page.click('button[type="submit"]');
+    // Wait for the post-login redirect to settle
+    await page.waitForURL(/\/v2\/pages\//, { timeout: 10_000 });
+    // Ensure the navigation is fully settled before returning
+    await page.waitForLoadState("domcontentloaded");
+
+    // Cache cookies from the browser context
+    cachedAuthCookies = await page.context().cookies();
+  }
+}
+
+/** Navigate to SPU ROI page (calls ensureAuthenticatedContext first). */
+async function navigateToSpuRoi(page, shopPk = SHOP_PK) {
+  await ensureAuthenticatedContext(page);
   await page.goto(`/v2/pages/spu-roi?shop_pk=${shopPk}`, {
     waitUntil: "domcontentloaded",
   });
@@ -26,9 +60,11 @@ async function loginAndNavigate(page, shopPk = SHOP_PK) {
 
 // ── C-SPUROI-01: 未登录 → 302 → 登录 → 回到原 URL ─────────────────
 test.describe("C-SPUROI-01 @page:spu-roi @tier:core", () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+
   test("未登录访问 ROI 页面被重定向到登录页；登录后回到原 URL", async ({ page }) => {
     // 不登录，直接访问
-    const resp = await page.goto(`/v2/pages/spu-roi?shop_pk=${SHOP_PK}`, {
+    await page.goto(`/v2/pages/spu-roi?shop_pk=${SHOP_PK}`, {
       waitUntil: "domcontentloaded",
     });
 
@@ -46,7 +82,7 @@ test.describe("C-SPUROI-01 @page:spu-roi @tier:core", () => {
 
     // Should redirect back to spu-roi page
     await page.waitForURL(/\/v2\/pages\/spu-roi/, { timeout: 10000 });
-    expect(page.url()).toContain("shop_pk=" + SHOP_PK);
+    expect(page.url()).toContain(`shop_pk=${SHOP_PK}`);
 
     // Page should load successfully
     await expect(page.locator("#shop-switcher")).toBeVisible({ timeout: 15000 });
@@ -56,7 +92,7 @@ test.describe("C-SPUROI-01 @page:spu-roi @tier:core", () => {
 // ── C-SPUROI-02: 已登录加载 ROI 页；店铺/汇总/表格/格式/状态 ────────
 test.describe("C-SPUROI-02 @page:spu-roi @tier:core", () => {
   test.beforeEach(async ({ page }) => {
-    await loginAndNavigate(page);
+    await navigateToSpuRoi(page);
     // Wait for table rows to appear (real API response)
     await page.waitForSelector("#rows .tabulator-row", { timeout: 20000 });
   });
@@ -137,7 +173,7 @@ test.describe("C-SPUROI-02 @page:spu-roi @tier:core", () => {
 // ── C-SPUROI-03: 默认日期范围按 VN 时区 T-1 ─────────────────────
 test.describe("C-SPUROI-03 @page:spu-roi @tier:core", () => {
   test("默认日期范围按店铺 VN 时区计算 T-1", async ({ page }) => {
-    await loginAndNavigate(page);
+    await navigateToSpuRoi(page);
     await page.waitForSelector("#rows .tabulator-row", { timeout: 20000 });
 
     // Date inputs should be filled (default range = T-1 in VN timezone)
@@ -150,7 +186,7 @@ test.describe("C-SPUROI-03 @page:spu-roi @tier:core", () => {
 
     // In VN timezone, T-1 should be yesterday (or today if before VN midnight)
     // Just verify the end date is a valid recent date
-    const end = new Date(endDate + "T00:00:00Z");
+    const end = new Date(`${endDate}T00:00:00Z`);
     const now = new Date();
     const diffDays = (now - end) / (1000 * 60 * 60 * 24);
     expect(diffDays).toBeLessThan(3); // Should be within 2 days of now
@@ -160,7 +196,7 @@ test.describe("C-SPUROI-03 @page:spu-roi @tier:core", () => {
 // ── C-SPUROI-04: 筛选控件（费率、include_all、刷新）────────────────
 test.describe("C-SPUROI-04 @page:spu-roi @tier:core", () => {
   test.beforeEach(async ({ page }) => {
-    await loginAndNavigate(page);
+    await navigateToSpuRoi(page);
     await page.waitForSelector("#rows .tabulator-row", { timeout: 20000 });
   });
 
@@ -206,7 +242,7 @@ test.describe("C-SPUROI-04 @page:spu-roi @tier:core", () => {
 // ── C-SPUROI-05: SPU 多选 → spu_ids → URL 恢复 ───────────────────
 test.describe("C-SPUROI-05 @page:spu-roi @tier:core", () => {
   test("SPU 多选应用后 URL 包含 spu_ids；刷新后恢复", async ({ page }) => {
-    await loginAndNavigate(page);
+    await navigateToSpuRoi(page);
     await page.waitForSelector("#rows .tabulator-row", { timeout: 20000 });
 
     // Use JavaScript to directly set SPU selection via TomSelect
@@ -250,7 +286,7 @@ test.describe("C-SPUROI-05 @page:spu-roi @tier:core", () => {
 // ── C-SPUROI-06: 排序 + 分页 ─────────────────────────────────────
 test.describe("C-SPUROI-06 @page:spu-roi @tier:core", () => {
   test.beforeEach(async ({ page }) => {
-    await loginAndNavigate(page);
+    await navigateToSpuRoi(page);
     await page.waitForSelector("#rows .tabulator-row", { timeout: 20000 });
   });
 
@@ -302,7 +338,7 @@ test.describe("C-SPUROI-06 @page:spu-roi @tier:core", () => {
 // ── C-SPUROI-07: 钻取面板 ───────────────────────────────────────
 test.describe("C-SPUROI-07 @page:spu-roi @tier:core", () => {
   test("点击行打开钻取面板，展示 P&L 和 tab 切换", async ({ page }) => {
-    await loginAndNavigate(page);
+    await navigateToSpuRoi(page);
     await page.waitForSelector("#rows .tabulator-row", { timeout: 20000 });
 
     // Click first row
@@ -344,7 +380,7 @@ test.describe("C-SPUROI-07 @page:spu-roi @tier:core", () => {
 // ── C-SPUROI-08: 店铺切换 ───────────────────────────────────────
 test.describe("C-SPUROI-08 @page:spu-roi @tier:core", () => {
   test("店铺切换后 URL 和页面状态更新", async ({ page }) => {
-    await loginAndNavigate(page);
+    await navigateToSpuRoi(page);
     await page.waitForSelector("#rows .tabulator-row", { timeout: 20000 });
 
     // Get current shop from URL
@@ -375,8 +411,19 @@ test.describe("C-SPUROI-08 @page:spu-roi @tier:core", () => {
 
 // ── C-SPUROI-09: 退出登录 → session 失效 ────────────────────────
 test.describe("C-SPUROI-09 @page:spu-roi @tier:core", () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+
   test("退出登录后 session 失效，访问页面回到登录页", async ({ page }) => {
-    await loginAndNavigate(page);
+    // Login via the form (own session, does not share cached cookies)
+    await page.goto(`/v2/pages/spu-roi?shop_pk=${SHOP_PK}`, {
+      waitUntil: "domcontentloaded",
+    });
+    await page.waitForURL(/\/v2\/auth\/login/);
+    await page.fill("#key", API_KEY);
+    await page.click('button[type="submit"]');
+    await page.waitForURL(/\/v2\/pages\/spu-roi/, { timeout: 10000 });
+
+    // Page should be loaded
     await page.waitForSelector("#rows .tabulator-row", { timeout: 20000 });
 
     // Click logout

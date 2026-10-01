@@ -1,15 +1,34 @@
 // @ts-check
 const { test, expect } = require("@playwright/test");
 
-const BASE_URL = process.env.E2E_BASE_URL || "http://127.0.0.1:9987";
+// ── Environment ───────────────────────────────────────────────────
 const API_KEY = process.env.E2E_API_KEY || "ttserp_ro_TEST_E2E_KEY";
 const SHOP_PK = process.env.E2E_SHOP_PK || "1";
 
-async function loginAndNavigate(page, shopPk = SHOP_PK) {
-  const loginResp = await page.request.post(`${BASE_URL}/v2/auth/login`, {
-    data: { key: API_KEY },
-  });
-  expect(loginResp.status()).toBe(200);
+// ── Cached login cookie ──────────────────────────────────────────
+// Same pattern as core.spec.js: first call navigates to login form,
+// submits it (browser handles Set-Cookie natively), caches the
+// session cookie, and subsequent calls restore via addCookies().
+// Avoids the 10/min login rate-limit (429).
+let cachedAuthCookies = null;
+
+async function ensureAuthenticatedContext(page) {
+  if (cachedAuthCookies) {
+    await page.context().addCookies(cachedAuthCookies);
+  } else {
+    await page.goto(`/v2/pages/spu-roi?shop_pk=${SHOP_PK}`, {
+      waitUntil: "domcontentloaded",
+    });
+    await page.waitForURL(/\/v2\/auth\/login/, { timeout: 10_000 });
+    await page.fill("#key", API_KEY);
+    await page.click('button[type="submit"]');
+    await page.waitForURL(/\/v2\/pages\/spu-roi/, { timeout: 10_000 });
+    cachedAuthCookies = await page.context().cookies();
+  }
+}
+
+async function navigateToSpuRoi(page, shopPk = SHOP_PK) {
+  await ensureAuthenticatedContext(page);
   await page.goto(`/v2/pages/spu-roi?shop_pk=${shopPk}`, {
     waitUntil: "domcontentloaded",
   });
@@ -18,7 +37,7 @@ async function loginAndNavigate(page, shopPk = SHOP_PK) {
 // ── N-SPUROI-04: API 500 和重试恢复 ─────────────────────────────
 test.describe("N-SPUROI-04 @page:spu-roi @tier:extended", () => {
   test("API 返回 500 后显示错误和重试链接；点击重试恢复", async ({ page }) => {
-    await loginAndNavigate(page);
+    await navigateToSpuRoi(page);
     await page.waitForSelector("#rows .tabulator-row", { timeout: 20000 });
 
     // Make the next analytics request fail
@@ -55,7 +74,7 @@ test.describe("N-SPUROI-04 @page:spu-roi @tier:extended", () => {
   });
 
   test("FX_RATE_UNAVAILABLE 错误显示汇率缺失提示", async ({ page }) => {
-    await loginAndNavigate(page);
+    await navigateToSpuRoi(page);
     await page.waitForSelector("#rows .tabulator-row", { timeout: 20000 });
 
     // Mock analytics to return FX error (matches real backend error_response format)
@@ -88,7 +107,7 @@ test.describe("N-SPUROI-04 @page:spu-roi @tier:extended", () => {
 // ── N-SPUROI-07: Tabulator DOM 重用后 row-bad 不残留 ─────────────
 test.describe("N-SPUROI-07 @page:spu-roi @tier:extended", () => {
   test("分页后第一行不再亏损时 row-bad 样式被清除", async ({ page }) => {
-    await loginAndNavigate(page);
+    await navigateToSpuRoi(page);
     await page.waitForSelector("#rows .tabulator-row", { timeout: 20000 });
 
     // Switch to 50 per page for pagination test
@@ -124,7 +143,7 @@ test.describe("N-SPUROI-07 @page:spu-roi @tier:extended", () => {
 // ── N-SPUROI-09: 图片 lightbox ─────────────────────────────────
 test.describe("N-SPUROI-09 @page:spu-roi @tier:extended", () => {
   test("商品图片点击打开 lightbox，关闭按钮/Esc 可关闭", async ({ page }) => {
-    await loginAndNavigate(page);
+    await navigateToSpuRoi(page);
     await page.waitForSelector("#rows .tabulator-row", { timeout: 20000 });
 
     // Look for a zoom button (data-zoom attribute)
@@ -156,7 +175,7 @@ test.describe("N-SPUROI-11 @page:spu-roi @tier:extended", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
   test("移动端 viewport 页面可加载和滚动", async ({ page }) => {
-    await loginAndNavigate(page);
+    await navigateToSpuRoi(page);
     await page.waitForSelector("#rows .tabulator-row", { timeout: 20000 });
 
     // Key elements should still be visible
