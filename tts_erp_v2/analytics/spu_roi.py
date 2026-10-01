@@ -26,6 +26,7 @@ from tts_erp_v2.analytics.spu_profitability import (
     FocusedSelection,
     FxRateUnavailable,
     ProfitScope,
+    ReportingTimezoneUnavailable,
     RowView,
     SortDirection,
     SortField,
@@ -500,6 +501,8 @@ def list_spu_roi(
         )
     except FxRateUnavailable:
         return _fx_error(request)
+    except ReportingTimezoneUnavailable as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _overview_payload(result, profit_scope, fee_value)
 
 
@@ -556,6 +559,8 @@ def _read_evidence(
         )
     except FxRateUnavailable:
         return _fx_error(request)
+    except ReportingTimezoneUnavailable as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except SpuNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return _evidence_payload(explanation, kind, scope)

@@ -346,10 +346,10 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
 
 ### 4.5 时间口径（必须向用户说清的一处）
 
-- **默认（不传 `w_start` / `w_end`）= 全历史累计**：销售/退款全历史累计，不做日期裁剪。
-- 可选传 `w_start` / `w_end`（ISO 日期 `yyyy-mm-dd`）裁剪销售与退款：两者都按关联订单下单时间 `COALESCE(order_time, paid_at)`（`>= w_start` 且 `< w_end+1 天`，即**含 `w_end` 当日**）。退款售后跟随原订单归属；例如 9 月 1 日订单在 9 月 10 日退款，退款仍计入 9 月 1 日窗口。
-- **广告消耗**：`ad_product_links` 是**全窗口累计**视图（ad_raw 不 purge），**没有日期参数**——始终整窗累计；`meta.window.first_day/last_day` 只是 ad 视图的观测窗口（供参考），**不代表销售/退款已按该窗口裁剪**。
-- 页面/BI 需要同窗口口径时：显式传 `w_start` / `w_end`；口径标注以 `meta.window.note` 为准（默认注记“ad=视图全窗口累计；销售/退款=全历史（未裁剪，可传 w_start/w_end）”）。
+- API 默认（不传 `w_start` / `w_end`）= 全历史累计；页面 profile 会主动发送默认 T-1 日期范围。
+- 单店请求提供 `shop_pk` 时，`w_start` / `w_end`（ISO `yyyy-mm-dd`）解释为该店报表时区的本地日。服务端以本地 `00:00` 至结束日次日 `00:00` 构造半开区间，再转换为 UTC；夏令时切换日可为 23/25 小时。订单和退款按关联订单 `COALESCE(order_time, paid_at)` 裁剪，退款跟随原订单归属。广告日表直接用同一组本地日期边界裁剪，钻取端点从 `spu_pk` 解析同一店铺时区。
+- 报表时区来自 `commerce.shops.region` 的单时区国家码映射（VN/TH/SG/MY/PH/CN/JP/KR/GB）；缺失或不能唯一确定时区时，带日期范围的单店查询失败关闭，不猜测 UTC。无 `shop_pk` 的兼容性跨店查询没有唯一店铺时区，日期仍按 UTC 解释。
+- `meta.window.first_day/last_day` 是广告观测覆盖范围，不代表销售/退款已按该窗口裁剪；日期参数的实际口径见 `meta.window.note`。
 
 ### 4.6 汇率换算（D11：同一数据库快照统一换算 CNY）
 
