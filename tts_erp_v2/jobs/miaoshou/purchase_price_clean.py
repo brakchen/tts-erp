@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, inspect, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
+from tenacity import Retrying, stop_after_attempt, wait_incrementing
 
 from tts_erp_v2.db.models.commerce import ChannelAccount
 from tts_erp_v2.db.models.integration import Credentials
@@ -208,17 +209,14 @@ def _fetch_all_pages(
     max_retries: int,
 ) -> tuple[list[dict[str, Any]], int, int]:
     def fetch(page: int) -> dict[str, Any]:
-        last_error: Exception | None = None
-        for attempt in range(max_retries + 1):
-            try:
-                return client.search_page(page=page, page_size=PAGE_SIZE)
-            except Exception as exc:
-                last_error = exc
-                if attempt >= max_retries:
-                    raise
-                time.sleep(attempt + 1)
-        assert last_error is not None
-        raise last_error
+        # tenacity drives the retry loop; linear backoff 1s, 2s, 3s …
+        # matches the previous hand-rolled `time.sleep(attempt + 1)`.
+        retrying: Retrying = Retrying(
+            stop=stop_after_attempt(max_retries + 1),
+            wait=wait_incrementing(start=1, increment=1),
+            reraise=True,
+        )
+        return retrying(client.search_page, page=page, page_size=PAGE_SIZE)
 
     def validate_page(
         payload: dict[str, Any],

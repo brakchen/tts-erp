@@ -21,11 +21,17 @@ from __future__ import annotations
 
 import http.client
 import json
-import random
 import time
 import urllib.parse
 from dataclasses import dataclass
 from typing import Any
+
+from tenacity import (
+    Retrying,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_random_exponential,
+)
 
 from tts_erp_v2.proxy.errors import (
     AuthenticationError,
@@ -72,6 +78,25 @@ class TiktokCallResult:
 
     payload: dict[str, Any]
     http_status: int
+
+
+# ---- Retry plumbing --------------------------------------------------
+
+
+class _RetryableAttempt(Exception):
+    """Internal marker: one attempt failed with a retryable condition.
+
+    Carries the final :class:`TransientProxyError` message so the retry
+    exhaustion path can re-raise with the historical wording.
+    """
+
+    def __init__(
+        self, final_message: str, *, cause: BaseException | None = None
+    ) -> None:
+        super().__init__(final_message)
+        self.final_message = final_message
+        if cause is not None:
+            self.__cause__ = cause
 
 
 # ---- Client ----------------------------------------------------------
@@ -221,75 +246,104 @@ class TiktokShopClient:
         data = body_str.encode("utf-8") if body_str else b""
 
         attempts = self.max_retries + 1
-        last_network_err: BaseException | None = None
-        for attempt in range(attempts):
-            try:
-                if parsed.scheme == "https":
-                    conn = http.client.HTTPSConnection(
-                        host, parsed.port, timeout=self.timeout
+        # tenacity drives the retry loop (full-jitter exponential backoff,
+        # ~0-0.75s, ~0-1.5s, ~0-3s …). Only _RetryableAttempt is retried;
+        # auth/429/business errors raise straight through.
+        retrying: Retrying = Retrying(
+            stop=stop_after_attempt(attempts),
+            wait=wait_random_exponential(multiplier=0.75, max=30),
+            retry=retry_if_exception_type(_RetryableAttempt),
+            reraise=True,
+        )
+        try:
+            for attempt in retrying:
+                with attempt:
+                    return self._attempt_once(
+                        method,
+                        target_path,
+                        parsed.scheme,
+                        host,
+                        parsed.port,
+                        headers,
+                        data,
+                        attempts,
                     )
-                else:
-                    conn = http.client.HTTPConnection(
-                        host, parsed.port, timeout=self.timeout
-                    )
-                try:
-                    conn.request(
-                        method, target_path, body=data, headers=headers
-                    )
-                    resp = conn.getresponse()
-                    raw = resp.read().decode("utf-8", errors="replace")
-                    status = resp.status
-                finally:
-                    conn.close()
-            except (http.client.HTTPException, OSError) as e:
-                last_network_err = e
-                if attempt >= self.max_retries:
-                    raise TransientProxyError(
-                        f"network error after {attempts} attempts: {e!r}"
-                    ) from e
-            else:
-                if 200 <= status < 300:
-                    try:
-                        return TiktokCallResult(
-                            payload=json.loads(raw), http_status=status
-                        )
-                    except json.JSONDecodeError as e:
-                        raise ProxyError(
-                            f"failed to decode upstream response JSON: "
-                            f"{e} (body={raw[:200]!r})"
-                        ) from e
-                parsed_body = _classify_response(status, raw)
-                if status in (401, 403):
-                    raise AuthenticationError(
-                        f"upstream auth rejected ({status}): "
-                        f"{parsed_body.get('message', '?')}"
-                    )
-                if status == 429:
-                    raise RateLimitedError(
-                        f"upstream 429 after retries: "
-                        f"{parsed_body.get('message', '?')}",
-                        body_preview=raw[:300],
-                    )
-                if not _is_retryable_status(status):
-                    raise UpstreamHttpError(
-                        status,
-                        parsed_body.get("message", f"HTTP {status}"),
-                        body_preview=str(parsed_body)[:300],
-                        upstream_code=parsed_body.get("code"),
-                    )
-                # Retryable 5xx: record and fall through to backoff.
-                last_network_err = RuntimeError(f"upstream HTTP {status}: {raw[:120]}")
-                if attempt >= self.max_retries:
-                    raise TransientProxyError(
-                        f"upstream {status} after {attempts} attempts: "
-                        f"{parsed_body.get('message', '?')}"
-                    )
-            if attempt < self.max_retries:
-                # Exponential backoff with jitter: ~0.5-1s, ~1-2s, ...
-                time.sleep(random.uniform(0.5, 1.0) * (2 ** attempt))
+        except _RetryableAttempt as exhausted:
+            cause = exhausted.__cause__
+            error = TransientProxyError(exhausted.final_message)
+            if cause is not None:
+                raise error from cause
+            raise error
         # Unreachable, but make mypy happy.
-        raise TransientProxyError(
-            f"retry loop exited unexpectedly (last_err={last_network_err!r})"
+        raise TransientProxyError("retry loop exited unexpectedly")
+
+    def _attempt_once(
+        self,
+        method: str,
+        target_path: str,
+        scheme: str,
+        host: str,
+        port: int | None,
+        headers: dict[str, str],
+        data: bytes,
+        attempts: int,
+    ) -> TiktokCallResult:
+        """A single HTTP attempt; raises _RetryableAttempt when retryable."""
+        try:
+            if scheme == "https":
+                conn = http.client.HTTPSConnection(
+                    host, port, timeout=self.timeout
+                )
+            else:
+                conn = http.client.HTTPConnection(
+                    host, port, timeout=self.timeout
+                )
+            try:
+                conn.request(method, target_path, body=data, headers=headers)
+                resp = conn.getresponse()
+                raw = resp.read().decode("utf-8", errors="replace")
+                status = resp.status
+            finally:
+                conn.close()
+        except (http.client.HTTPException, OSError) as e:
+            raise _RetryableAttempt(
+                f"network error after {attempts} attempts: {e!r}", cause=e
+            ) from e
+
+        if 200 <= status < 300:
+            try:
+                return TiktokCallResult(
+                    payload=json.loads(raw), http_status=status
+                )
+            except json.JSONDecodeError as e:
+                raise ProxyError(
+                    f"failed to decode upstream response JSON: "
+                    f"{e} (body={raw[:200]!r})"
+                ) from e
+        parsed_body = _classify_response(status, raw)
+        if status in (401, 403):
+            raise AuthenticationError(
+                f"upstream auth rejected ({status}): "
+                f"{parsed_body.get('message', '?')}"
+            )
+        if status == 429:
+            raise RateLimitedError(
+                f"upstream 429 after retries: "
+                f"{parsed_body.get('message', '?')}",
+                body_preview=raw[:300],
+            )
+        if not _is_retryable_status(status):
+            raise UpstreamHttpError(
+                status,
+                parsed_body.get("message", f"HTTP {status}"),
+                body_preview=str(parsed_body)[:300],
+                upstream_code=parsed_body.get("code"),
+            )
+        # Retryable 5xx: let tenacity back off and re-attempt.
+        raise _RetryableAttempt(
+            f"upstream {status} after {attempts} attempts: "
+            f"{parsed_body.get('message', '?')}",
+            cause=RuntimeError(f"upstream HTTP {status}: {raw[:120]}"),
         )
 
 
