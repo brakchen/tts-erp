@@ -139,14 +139,12 @@ def test_trigger_rejects_shop_for_system_job(api_client, admin_key) -> None:
     assert r.status_code == 422, r.text
 
 
-def test_legacy_sync_jobs_page_redirects_to_pages_shell(api_client, readonly_key) -> None:
+def test_legacy_sync_jobs_page_is_removed(api_client, readonly_key) -> None:
     r = api_client.get(
         "/v2/sync/jobs/page",
         headers={"Authorization": f"Bearer {readonly_key}"},
-        follow_redirects=False,
     )
-    assert r.status_code == 307, r.text
-    assert r.headers["location"] == "/v2/pages/sync-jobs"
+    assert r.status_code == 404, r.text
 
 
 def test_sync_jobs_js_uses_prefix_aware_api_paths() -> None:
