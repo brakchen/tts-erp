@@ -60,38 +60,32 @@
     return (root || document).querySelector(sel);
   }
 
-  function sortableHeaders() {
-    return document.querySelectorAll(".op-table thead th[data-sort]");
-  }
+  // ---------- 表格列定义（唯一事实源） ----------
+  // Tabulator 6.3.1 (MIT) — vendored at static/vendor/tabulator.min.* 。
+  // columnId 供视图配置显隐；sortField 非空即可点表头触发服务端排序。
+  // 新增指标列只需在此加一行；测试会校验 sortField ∈ SortField 且是盈利行字段。
+  var COLUMN_DEFS = [
+    { columnId: "product", field: "spu_id", title: "商品", sortField: null, tip: "" },
+    { columnId: "spend", field: "spend", title: "广告消耗", sortField: "spend", tip: "广告消耗（源数据 USD，服务端按汇率快照换算为 CNY；随选中日期窗口裁剪；作为减项计入净利润）" },
+    { columnId: "ad-actual-roi", field: "ad_system_actual_roi", title: "广告系统实际ROI", sortField: "ad_system_actual_roi", tip: "广告系统实际ROI = 广告归因GMV ÷ 广告实际消耗；无广告消耗时显示 —" },
+    { columnId: "ad-breakeven-roi", field: "ad_system_breakeven_roi", title: "广告系统保本ROI", sortField: "ad_system_breakeven_roi", tip: "广告系统保本ROI = 广告归因GMV ÷ 最大可承受广告费；当前以 ≈ 标记已知成本下限估算，分母≤0或无归因GMV时显示 —" },
+    { columnId: "effective-sales", field: "effective_sales", title: "有效销售", sortField: "effective_sales", tip: "有效销售 = 有效销售订单 GMV − 退款金额（CNY）；与大盘 totals.effective_sales 同口径" },
+    { columnId: "total-orders", field: "total_orders", title: "总单量", sortField: "total_orders", tip: "总单量 = 有效销售订单 + 国内取消订单 + 海外取消订单；在当前店铺和日期范围内按订单去重" },
+    { columnId: "effective-orders", field: "effective_order_count", title: "有效单量", sortField: "effective_order_count", tip: "有效单量 = 有效销售订单数 − 退款订单数；与大盘 totals.effective_order_count 同口径" },
+    { columnId: "cancel-rate", field: "cancel_rate", title: "取消率%", sortField: "cancel_rate", tip: "取消率 = 国内取消订单数 ÷ 全部订单；全部订单 = 有效销售订单 + 国内取消 + 海外取消，海外取消只进入全损分子" },
+    { columnId: "full-loss-rate", field: "full_loss_rate", title: "全损率%", sortField: "full_loss_rate", tip: "全损率 = (退款订单数 + 海外取消订单数) ÷ 全部订单；订单维度按当前 SPU 去重，与大盘同口径" },
+    { columnId: "net-profit", field: "net_profit", title: "净利润", sortField: "net_profit", tip: "净利润 v7(M18):已结算 SETTLEMENT + 未结算 ×(1−r̂)×(1−退款率) − 货本含全损取消 − 广告;r̂=店铺实测(近180天已结算单 Σ|FEE|/Σ行GMV,每24h重算,有一单已结算即产出)或基线30.8%;负值红字。Red/green 仅按净利判(C3 拍板,删 ROI<1 硬亏档)" },
+  ];
 
   function supportsSortField(field) {
     if (!field) return false;
     if (field === DEFAULT_SORT) return true;
-    return Array.prototype.some.call(
-      sortableHeaders(),
-      (header) => header.getAttribute("data-sort") === field,
-    );
+    return COLUMN_DEFS.some((def) => def.sortField === field);
   }
 
   function sortLabel(field) {
-    var matched = Array.prototype.find.call(
-      sortableHeaders(),
-      (header) => header.getAttribute("data-sort") === field,
-    );
-    return matched
-      ? matched.getAttribute("data-sort-label") || matched.textContent.trim()
-      : SORT_LABEL[field] || field;
-  }
-
-  function prepareSortableHeaders() {
-    Array.prototype.forEach.call(sortableHeaders(), (header) => {
-      header.classList.add("op-th-sort");
-      if (!header.getAttribute("data-sort-label")) {
-        header.setAttribute("data-sort-label", header.textContent.trim());
-      }
-      header.setAttribute("tabindex", "0");
-      header.setAttribute("aria-sort", "none");
-    });
+    var matched = COLUMN_DEFS.find((def) => def.sortField === field);
+    return matched ? matched.title : SORT_LABEL[field] || field;
   }
 
   function esc(s) {
@@ -365,6 +359,7 @@
     // D7 行内 accordion: 一次只展开一行; D6 tab 懒加载缓存,主表筛选变化时清空
     openDrillRow: null,
     drillCache: new Map(),
+    table: null, // Tabulator 实例（buildTable 建立）
     sort: DEFAULT_SORT,
     order: DEFAULT_ORDER,
     offset: 0,
@@ -445,9 +440,14 @@
       if (cell) cell.hidden = !summaries.has(id);
     });
     var columns = selectedViewIds("columnIds", ALLOWED_COLUMNS);
-    document.querySelectorAll("[data-column-id]").forEach((cell) => {
-      cell.hidden = !columns.has(cell.getAttribute("data-column-id"));
-    });
+    if (state.table) {
+      COLUMN_DEFS.forEach((def) => {
+        var col = state.table.getColumn(def.field);
+        if (!col) return;
+        if (columns.has(def.columnId)) col.show();
+        else col.hide();
+      });
+    }
     var tabs = selectedViewIds("drillTabIds", ALLOWED_DRILL_TABS);
     document.querySelectorAll(".op-drill-tab[data-tab]").forEach((tab) => {
       tab.hidden = !tabs.has(tab.getAttribute("data-tab"));
@@ -740,9 +740,14 @@
   }
 
   // ---------- 渲染 ----------
-  function rowMarkup(it) {
+  // ---------- Tabulator 表格 ----------
+  function fmtPctOrDash(v) {
+    return v === null || v === undefined || v === "" ? "—" : fmtPct(v);
+  }
+
+  function productCellFormatter(cell) {
+    var it = cell.getData();
     var presentation = state.meta.presentation || {};
-    var isBad = it.profit_status === "loss";
     var warnDefault = it.uses_default_unit_cost === true;
     var rrHigh = it.refund_rate_alert === true;
     var hasUnsettled = it.has_unsettled_orders === true;
@@ -767,34 +772,149 @@
       it.status === "ACTIVATE" || !it.status
         ? ""
         : `<span class="spu-status is-down">${esc(it.status)}</span>`;
-    var profitClass = isBad ? ' class="np-red"' : "";
-    var fmtPctOrDash = (v) =>
-      v === null || v === undefined || v === "" ? "—" : fmtPct(v);
-    var adSystemBreakevenRoi =
-      it.ad_system_breakeven_roi === null ||
-      it.ad_system_breakeven_roi === undefined ||
-      it.ad_system_breakeven_roi === ""
-        ? "—"
-        : (it.ad_system_breakeven_roi_status === "estimated_known_costs"
-            ? "≈"
-            : "") + fmtRatio(it.ad_system_breakeven_roi);
-    // 行级与大盘同口径:广告消耗 / 广告系统 ROI / 有效销售 / 总单量 / 有效单量 / 取消率 / 全损率 / 净利润
     return (
-      `<tr class="${isBad ? "row-bad" : ""}" data-spupk="${esc(it.spu_pk)}">` +
-      `<td class="td-left" data-column-id="product"><span class="td-spu-cell">${img}<span class="td-spu-meta">` +
+      `<span class="td-spu-cell">${img}<span class="td-spu-meta">` +
       `<span class="td-spu">${esc(it.spu_id)}</span>` +
-      `<span class="td-title" data-tip="${esc(it.title || "")}">${warnUnsettled}${warnDefault ? warnCost : ""}${warnRr}${esc(it.title || "")}${status}</span></span></span></td>` +
-      `<td data-column-id="spend">${fmtMoney(it.spend)}</td>` +
-      `<td data-column-id="ad-actual-roi">${fmtRatio(it.ad_system_actual_roi)}</td>` +
-      `<td data-column-id="ad-breakeven-roi">${adSystemBreakevenRoi}</td>` +
-      `<td data-column-id="effective-sales">${fmtMoney(it.effective_sales)}</td>` +
-      `<td data-column-id="total-orders">${fmtInt(it.total_orders)}</td>` +
-      `<td data-column-id="effective-orders">${fmtInt(it.effective_order_count)}</td>` +
-      `<td data-column-id="cancel-rate">${fmtPctOrDash(it.cancel_rate)}</td>` +
-      `<td data-column-id="full-loss-rate">${fmtPctOrDash(it.full_loss_rate)}</td>` +
-      `<td data-column-id="net-profit"${profitClass}>${fmtMoney(it.net_profit)}</td>` +
-      "</tr>"
+      `<span class="td-title" data-tip="${esc(it.title || "")}">${warnUnsettled}${warnDefault ? warnCost : ""}${warnRr}${esc(it.title || "")}${status}</span></span></span>`
     );
+  }
+
+  function moneyCell(cell) {
+    return fmtMoney(cell.getValue());
+  }
+  function ratioCell(cell) {
+    return fmtRatio(cell.getValue());
+  }
+  function intCell(cell) {
+    return fmtInt(cell.getValue());
+  }
+  function pctCell(cell) {
+    return fmtPctOrDash(cell.getValue());
+  }
+  function breakevenRoiCell(cell) {
+    var it = cell.getData();
+    var v = it.ad_system_breakeven_roi;
+    if (v === null || v === undefined || v === "") return "—";
+    return (
+      (it.ad_system_breakeven_roi_status === "estimated_known_costs"
+        ? "≈"
+        : "") + fmtRatio(v)
+    );
+  }
+  function netProfitCell(cell) {
+    var it = cell.getData();
+    var text = fmtMoney(it.net_profit);
+    return it.profit_status === "loss"
+      ? `<span class="np-red">${text}</span>`
+      : text;
+  }
+
+  var CELL_FORMATTERS = {
+    spu_id: productCellFormatter,
+    spend: moneyCell,
+    ad_system_actual_roi: ratioCell,
+    ad_system_breakeven_roi: breakevenRoiCell,
+    effective_sales: moneyCell,
+    total_orders: intCell,
+    effective_order_count: intCell,
+    cancel_rate: pctCell,
+    full_loss_rate: pctCell,
+    net_profit: netProfitCell,
+  };
+
+  // true while we mirror state.sort/order into Tabulator — its dataSorting
+  // event must not retrigger a server fetch in that window.
+  var _applyingServerSort = false;
+  function _withSortSuppressed(fn) {
+    _applyingServerSort = true;
+    try {
+      fn();
+    } finally {
+      _applyingServerSort = false;
+    }
+  }
+
+  function buildTable() {
+    var host = document.getElementById("rows");
+    if (!host || state.table) return;
+    var columns = COLUMN_DEFS.map((def) => ({
+      title: def.title,
+      field: def.field,
+      headerSort: Boolean(def.sortField),
+      headerTooltip: def.tip || undefined,
+      headerHozAlign: def.columnId === "product" ? "left" : "right",
+      hozAlign: def.columnId === "product" ? "left" : "right",
+      frozen: def.columnId === "product",
+      minWidth: def.columnId === "product" ? 170 : 120,
+      formatter: CELL_FORMATTERS[def.field],
+    }));
+    // 默认排序可能是不对应任何列的字段（如 roi_real）：无列可标时跳过 initialSort。
+    var initialDef = COLUMN_DEFS.find((d) => d.sortField === state.sort);
+    state.table = new Tabulator(host, {
+      columns: columns,
+      data: [],
+      placeholder: "加载中…",
+      // 行内下钻直接往行 DOM 后插 div，禁用虚拟滚动防止行被重排回收。
+      renderVertical: "basic",
+      maxHeight: "min(72vh, 880px)",
+      initialSort: initialDef
+        ? [{ column: initialDef.field, dir: state.order }]
+        : [],
+      rowFormatter: (row) => {
+        if (row.getData().profit_status === "loss") {
+          row.getElement().classList.add("row-bad");
+        }
+      },
+    });
+    // 用 table.on 订阅（与 dataSorting 同一机制）；6.3 对 options 回调的订阅不可靠。
+    state.table.on("rowClick", (e, row) => {
+      var it = row.getData();
+      if (!it || !it.spu_pk) return;
+      openDrillPanel(row.getElement(), it);
+    });
+    // 表头点击只改状态并触发服务端重取（本地排序对同字段幂等）。
+    state.table.on("dataSorting", (sorters) => {
+      if (_applyingServerSort) return;
+      var s = sorters && sorters[0];
+      if (!s) return;
+      var def = COLUMN_DEFS.find((d) => d.field === s.field);
+      if (!def || !def.sortField) return;
+      var dir = s.dir === "asc" ? "asc" : "desc";
+      // 内部 clearData/replaceData 在排序列激活时会重派发本事件；幂等跳过。
+      if (def.sortField === state.sort && dir === state.order) return;
+      state.sort = def.sortField;
+      state.order = dir;
+      state.offset = 0;
+      persistPagePreferences();
+      // 推迟到事件派发结束后重取：同步 clearData/replaceData 会环 Tabulator
+      // 进行中的本地排序重渲染（styleRow 报 undefined.add）。
+      setTimeout(() => load(), 0);
+    });
+    // 错误占位里的「重试」链接（placeholder 是 innerHTML 注入，走委托）。
+    host.addEventListener("click", (e) => {
+      var link = e.target.closest && e.target.closest("#retry-link");
+      if (link) {
+        e.preventDefault();
+        load();
+      }
+    });
+    // Esc 关闭下钻（原 bindRowAccordion 里的全局监听）。
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeDrillPanel();
+    });
+  }
+
+  function tableShowPlaceholder(message) {
+    if (!state.table) return;
+    closeDrillPanel();
+    state.table.options.placeholder = message;
+    // 排序列激活时 clearData 会同步重派发 dataSorting；置抑制位防递归。
+    _withSortSuppressed(() => state.table.clearData());
+  }
+
+  function updateSortNote() {
+    $("#sort-note").textContent =
+      `当前排序：${sortLabel(state.sort)}${state.order === "asc" ? " ↑" : " ↓"}`;
   }
 
   function renderError(msg, wholePage) {
@@ -808,17 +928,9 @@
       if (footnotes) footnotes.hidden = true;
       $("#sum-stamp").textContent = "";
     }
-    html(
-      $("#rows"),
-      `<tr><td colspan="10" class="op-error">${esc(msg)} · <a href="#" id="retry-link">重试</a></td></tr>`,
+    tableShowPlaceholder(
+      `${esc(msg)} · <a href="#" id="retry-link">重试</a>`,
     );
-    var link = $("#retry-link");
-    if (link) {
-      link.addEventListener("click", (e) => {
-        e.preventDefault();
-        load();
-      });
-    }
   }
 
   function renderEmpty(message) {
@@ -826,10 +938,7 @@
       message ||
       (profile && profile.emptyMessage) ||
       "没有匹配所选 SPU 和当前条件的数据";
-    html(
-      $("#rows"),
-      `<tr><td colspan="10" class="op-empty">${esc(text)}</td></tr>`,
-    );
+    tableShowPlaceholder(esc(text));
   }
 
   function renderEmptySelection() {
@@ -1116,11 +1225,23 @@
     $("#sum-stamp").textContent =
       `全表 ${(meta.currency && meta.currency.display) || "CNY"} · 数据库汇率快照 ${meta.fx ? meta.fx.as_of : ""} · ${rubricLabel}`;
 
-    // 表格
-    if (items.length) {
-      html($("#rows"), items.map(rowMarkup).join(""));
-    } else {
-      renderEmpty();
+    // 表格（Tabulator）
+    closeDrillPanel();
+    state.openDrillRow = null;
+    if (state.table) {
+      state.table.options.placeholder = items.length
+        ? "没有匹配所选 SPU 和当前条件的数据"
+        : esc(
+            (profile && profile.emptyMessage) ||
+              "没有匹配所选 SPU 和当前条件的数据",
+          );
+      _withSortSuppressed(() => {
+        // 只有存在对应列时才镜像表头箭头（roi_real 等服务端字段无列）。
+        var sortDef = COLUMN_DEFS.find((d) => d.sortField === state.sort);
+        if (sortDef) state.table.setSort(sortDef.field, state.order);
+        else state.table.setSort([]);
+        state.table.replaceData(items);
+      });
     }
 
     // 分页：服务端仍使用 offset + limit；前端仅把它呈现为可跳转的 Bootstrap 页码。
@@ -1188,30 +1309,7 @@
     // D8(2026-09-07):⚙ 列开关组全删,applyColToggles 不再调用
     // (94afd70 删定义/绑定/state.cols 时漏删了这处调用,跑起来 ReferenceError)
     applyViewProfile();
-    updateSortMarkers();
-    bindRowAccordion(items);
-  }
-
-  function updateSortMarkers() {
-    Array.prototype.forEach.call(sortableHeaders(), (header) => {
-      var field = header.getAttribute("data-sort");
-      var mark = header.querySelector(".arrow");
-      if (mark) mark.remove();
-      header.setAttribute("aria-sort", "none");
-      if (field === state.sort) {
-        var span = document.createElement("span");
-        span.className = "arrow";
-        span.setAttribute("aria-hidden", "true");
-        span.textContent = state.order === "asc" ? " ▲" : " ▼";
-        header.appendChild(span);
-        header.setAttribute(
-          "aria-sort",
-          state.order === "asc" ? "ascending" : "descending",
-        );
-      }
-    });
-    $("#sort-note").textContent =
-      `当前排序：${sortLabel(state.sort)}${state.order === "asc" ? " ↑" : " ↓"}`;
+    updateSortNote();
   }
 
   // ---------- 钻取面板 (D7 行内 accordion + D6 tab 懒加载) ----------
@@ -1725,28 +1823,6 @@
     row.insertAdjacentElement("afterend", drillRow);
     state.openDrillRow = row;
   }
-  var _rowAccordionBound = false;
-  function bindRowAccordion(items) {
-    window.__lastPayloadItems = items || [];
-    if (_rowAccordionBound) return;
-    var tbody = document.getElementById("rows");
-    if (!tbody) return;
-    _rowAccordionBound = true;
-    tbody.addEventListener("click", (e) => {
-      var tr = e.target;
-      while (tr && tr.tagName !== "TR") tr = tr.parentElement;
-      if (!tr || !tr.dataset || !tr.dataset.spupk) return;
-      if (tr.classList && tr.classList.contains("op-drill-row")) return;
-      var spuPk = tr.dataset.spupk;
-      var it = (window.__lastPayloadItems || []).filter(
-        (i) => String(i.spu_pk) === String(spuPk),
-      )[0];
-      if (it) openDrillPanel(tr, it);
-    });
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") closeDrillPanel();
-    });
-  }
 
   // ---------- shop_pk URL param (必选) ----------
   function getShopPkFromUrl() {
@@ -2030,10 +2106,7 @@
     state.loadController = controller;
     hideTip(); // 重拉前收起可能悬浮的说明气泡
     state.loading = true;
-    html(
-      $("#rows"),
-      '<tr><td colspan="10" class="op-loading">加载中…</td></tr>',
-    );
+    tableShowPlaceholder("加载中…");
     var feeParam = null;
     if (state.feeRate !== null && state.feeRate !== "") {
       var f = parseFloat(state.feeRate);
@@ -2600,35 +2673,7 @@
       load();
     });
 
-    // 列头排序由 data-sort 元数据驱动；新指标列无需再改 JS 白名单。
-    prepareSortableHeaders();
-    var tableHead = $(".op-table thead");
-    function activateSortHeader(header) {
-      var field = header.getAttribute("data-sort");
-      if (!supportsSortField(field)) return;
-      if (field === state.sort) {
-        state.order = state.order === "asc" ? "desc" : "asc";
-      } else {
-        state.sort = field;
-        state.order = "asc";
-      }
-      state.offset = 0;
-      persistPagePreferences();
-      load();
-    }
-    if (tableHead) {
-      tableHead.addEventListener("click", (event) => {
-        var header = event.target.closest("th[data-sort]");
-        if (header && tableHead.contains(header)) activateSortHeader(header);
-      });
-      tableHead.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        var header = event.target.closest("th[data-sort]");
-        if (!header || !tableHead.contains(header)) return;
-        event.preventDefault();
-        activateSortHeader(header);
-      });
-    }
+    // 列头排序由 Tabulator 驱动（COLUMN_DEFS.sortField → 服务端重取，见 buildTable）。
 
     wireTooltips(); // 悬停说明气泡(data-tip 委托,含重渲染后的新行)
     wireZoom(); // 主图点击放大(委托)
@@ -2658,6 +2703,7 @@
     syncDateInputsFromState();
     enhanceDateRangeControl();
     mounted = true;
+    buildTable();
     bindControls();
     return {
       reload: load,
