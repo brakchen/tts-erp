@@ -340,11 +340,14 @@ class SpuProfitability:
     projection_terminal_full_loss_sales: Decimal
     projection_terminal_full_loss_order_count: int
     projection_terminal_full_loss_qty: int
+    projection_completed_basis_order_count: int
+    projection_completed_full_loss_order_count: int
     projection_full_loss_basis_order_count: int
     projection_basis_full_loss_order_count: int
     projection_basis_full_loss_qty: int
     projection_refund_amount_rate: Decimal | None
     pre_delivery_full_loss_rate: Decimal | None
+    completed_full_loss_rate: Decimal | None
     delivered_full_loss_rate: Decimal | None
     settled_full_loss_rate: Decimal | None
     projection_full_loss_qty_rate: Decimal | None
@@ -445,11 +448,14 @@ class ProfitabilityTotals:
     projection_terminal_full_loss_sales: Decimal
     projection_terminal_full_loss_order_count: int
     projection_terminal_full_loss_qty: int
+    projection_completed_basis_order_count: int
+    projection_completed_full_loss_order_count: int
     projection_full_loss_basis_order_count: int
     projection_basis_full_loss_order_count: int
     projection_basis_full_loss_qty: int
     projection_refund_amount_rate: Decimal | None
     pre_delivery_full_loss_rate: Decimal | None
+    completed_full_loss_rate: Decimal | None
     delivered_full_loss_rate: Decimal | None
     settled_full_loss_rate: Decimal | None
     projection_full_loss_qty_rate: Decimal | None

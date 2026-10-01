@@ -100,6 +100,8 @@ class ProjectionInput:
     projection_terminal_full_loss_sales_cny: Decimal
     projection_terminal_full_loss_order_count: int
     projection_terminal_full_loss_qty: Decimal
+    projection_completed_basis_order_count: int
+    projection_completed_full_loss_order_count: int
     projection_full_loss_basis_order_count: int
     projection_basis_full_loss_order_count: int
     projection_basis_full_loss_qty: Decimal
@@ -137,6 +139,7 @@ class ProjectionOutput:
     status: ProjectionStatus
     refund_amount_rate: Decimal | None
     pre_delivery_full_loss_rate: Decimal | None
+    completed_full_loss_rate: Decimal | None
     delivered_full_loss_rate: Decimal | None
     settled_full_loss_rate: Decimal | None
     full_loss_qty_rate: Decimal | None
@@ -203,26 +206,23 @@ def calculate_order_metrics(
 
 
 def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
-    """Project future changes without counting confirmed outcomes twice.
+    """Project the unsettled, undelivered cohort from completed-order outcomes.
 
-    Historical terminal logistics outcomes provide both the pre-delivery
-    full-loss probability and amount severity: successful delivery versus a
-    shipment returned to seller after a failed delivery. These rates apply only
-    to unsettled orders that have not reached a delivery terminal outcome;
-    confirmed outcomes inside that risk cohort are subtracted so only the future
-    increment remains. Delivered-but-unsettled orders stay outside this risk.
-    Existing COGS and ad spend stay in current profit and are never deducted a
-    second time.
+    A completed order is settled, delivered, or a final domestic cancellation.
+    Full loss means a terminal logistics loss or a full refund after the goods
+    reached overseas/delivery. Domestic cancellations remain in the denominator
+    but outside the numerator. The resulting order rate drives both the expected
+    lost orders and risk-cohort revenue; confirmed outcomes are subtracted so
+    only the future increment remains. Existing COGS and ad spend stay in current
+    profit and are never deducted a second time.
     """
 
-    has_reliable_sample = (
-        inputs.projection_terminal_basis_order_count > 0
-        and inputs.projection_terminal_basis_sales_cny > 0
-    )
+    has_reliable_sample = inputs.projection_completed_basis_order_count > 0
     refund_amount_rate: Decimal | None = None
     pre_delivery_full_loss_rate: Decimal | None = None
+    completed_full_loss_rate: Decimal | None = None
     delivered_full_loss_rate: Decimal | None = None
-    if has_reliable_sample:
+    if inputs.projection_terminal_basis_sales_cny > 0:
         refund_amount_rate = min(
             Decimal(1),
             max(
@@ -231,12 +231,22 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
                 / inputs.projection_terminal_basis_sales_cny,
             ),
         )
+    if inputs.projection_terminal_basis_order_count > 0:
         pre_delivery_full_loss_rate = min(
             Decimal(1),
             max(
                 Decimal(0),
                 Decimal(inputs.projection_terminal_full_loss_order_count)
                 / Decimal(inputs.projection_terminal_basis_order_count),
+            ),
+        )
+    if has_reliable_sample:
+        completed_full_loss_rate = min(
+            Decimal(1),
+            max(
+                Decimal(0),
+                Decimal(inputs.projection_completed_full_loss_order_count)
+                / Decimal(inputs.projection_completed_basis_order_count),
             ),
         )
     if inputs.projection_full_loss_basis_order_count > 0:
@@ -276,6 +286,7 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
             status=ProjectionStatus.NO_UNSETTLED_ORDERS,
             refund_amount_rate=refund_amount_rate,
             pre_delivery_full_loss_rate=pre_delivery_full_loss_rate,
+            completed_full_loss_rate=completed_full_loss_rate,
             delivered_full_loss_rate=delivered_full_loss_rate,
             settled_full_loss_rate=delivered_full_loss_rate,
             full_loss_qty_rate=delivered_full_loss_rate,
@@ -305,6 +316,7 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
             status=ProjectionStatus.INSUFFICIENT_SAMPLE,
             refund_amount_rate=refund_amount_rate,
             pre_delivery_full_loss_rate=pre_delivery_full_loss_rate,
+            completed_full_loss_rate=completed_full_loss_rate,
             delivered_full_loss_rate=delivered_full_loss_rate,
             settled_full_loss_rate=delivered_full_loss_rate,
             full_loss_qty_rate=delivered_full_loss_rate,
@@ -327,11 +339,10 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
             projected_ad_system_breakeven_roi=None,
         )
 
-    assert refund_amount_rate is not None
-    assert pre_delivery_full_loss_rate is not None
+    assert completed_full_loss_rate is not None
     expected_exposure_refund = (
         inputs.full_loss_exposure_unsettled_sales_after_fee_cny
-        * refund_amount_rate
+        * completed_full_loss_rate
     )
     projected_exposure_refund = min(
         inputs.full_loss_exposure_unsettled_sales_after_fee_cny,
@@ -356,7 +367,7 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
 
     expected_terminal_full_loss_orders = (
         Decimal(inputs.full_loss_exposure_unsettled_order_count)
-        * pre_delivery_full_loss_rate
+        * completed_full_loss_rate
     )
     projected_future_full_loss_orders = min(
         Decimal(inputs.unresolved_full_loss_exposure_order_count),
@@ -366,12 +377,10 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
             - Decimal(inputs.confirmed_full_loss_exposure_order_count),
         ),
     )
-    expected_terminal_full_loss_qty = Decimal(
-        inputs.full_loss_exposure_unsettled_order_count
-    ) * (
-        inputs.projection_terminal_full_loss_qty
-        / Decimal(inputs.projection_terminal_basis_order_count)
-    )
+    expected_terminal_full_loss_qty = (
+        inputs.confirmed_full_loss_exposure_qty
+        + inputs.unresolved_full_loss_exposure_qty
+    ) * completed_full_loss_rate
     projected_future_full_loss_qty = min(
         inputs.unresolved_full_loss_exposure_qty,
         max(
@@ -435,6 +444,7 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
         status=ProjectionStatus.AVAILABLE,
         refund_amount_rate=refund_amount_rate,
         pre_delivery_full_loss_rate=pre_delivery_full_loss_rate,
+        completed_full_loss_rate=completed_full_loss_rate,
         delivered_full_loss_rate=delivered_full_loss_rate,
         settled_full_loss_rate=delivered_full_loss_rate,
         full_loss_qty_rate=delivered_full_loss_rate,

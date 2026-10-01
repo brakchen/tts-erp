@@ -452,27 +452,33 @@ Response envelope:`{items: [...], total, totals, meta}`。`spu_ids` 属于盈利
 | `projection_terminal_basis_order_count` | int | 物流终态样本订单数：成功送达 paid 订单 + `CANCELLED` 且有 80101 退回卖家事件的订单；大盘全局去重 |
 | `projection_terminal_basis_sales` | money-str | 物流终态样本商品行销售额 CNY |
 | `projection_terminal_full_loss_sales` | money-str | 80101 退回卖家全损终态订单商品行销售额 CNY |
-| `projection_terminal_full_loss_order_count` | int | 物流终态样本中 80101 退回卖家全损订单数；大盘全局去重 |
-| `projection_terminal_full_loss_qty` | int | 80101 退回卖家全损终态订单商品件数 |
+| `projection_terminal_full_loss_order_count` | int | 兼容诊断：80101 退回卖家全损订单数；大盘全局去重 |
+| `projection_terminal_full_loss_qty` | int | 兼容诊断：80101 退回卖家全损订单商品件数 |
+| `projection_completed_basis_order_count` | int | 权威预测分母：已结算、已送达或结果已确定的 `CANCELLED` 订单数；大盘全局去重 |
+| `projection_completed_full_loss_order_count` | int | 权威预测分子：终局物流全损，或到达海外/已送达后最终全额退款的订单数；国内取消不计全损；大盘全局去重 |
 | `projection_full_loss_basis_order_count` | int | 兼容字段：已送达 paid 样本订单数；保留原字段语义，不作为新预测输入 |
 | `projection_basis_full_loss_order_count` | int | 兼容字段：已送达样本中存在已完成退款/退货退款 case 的订单数 |
 | `projection_basis_full_loss_qty` | int | 兼容字段：已送达退款订单按 case 数量/金额折算的全损件数 |
-| `projection_refund_amount_rate` | rate-str/null | 退回卖家全损销售额 ÷ 全部物流终态样本销售额；仅作用于尚未送达风险池，4 位小数字符串 |
-| `pre_delivery_full_loss_rate` | rate-str/null | 退回卖家全损订单数 ÷ 全部物流终态样本订单数；4 位小数字符串 |
+| `projection_refund_amount_rate` | rate-str/null | 兼容诊断：退回卖家全损销售额 ÷ 全部物流终态样本销售额；不再驱动预测 |
+| `pre_delivery_full_loss_rate` | rate-str/null | 兼容诊断：退回卖家全损订单数 ÷ 全部物流终态样本订单数；不再驱动预测 |
+| `completed_full_loss_rate` | rate-str/null | 权威预测比例：`projection_completed_full_loss_order_count ÷ projection_completed_basis_order_count`；同时用于风险订单数、件数和收入折损，4 位小数字符串 |
 | `delivered_full_loss_rate` | rate-str/null | 兼容字段：继续返回已送达退款订单数 ÷ 全部已送达 paid 样本订单数；不作为新预测输入 |
 | `settled_full_loss_rate` | rate-str/null | 兼容别名：继续与 `delivered_full_loss_rate` 相同 |
 | `projection_full_loss_qty_rate` | rate-str/null | 兼容别名：继续与 `delivered_full_loss_rate` 相同 |
 | `unsettled_order_count` | int | 当前范围内无 SETTLEMENT 实际到账的 paid 订单数；大盘全局去重 |
+| `delivered_unsettled_order_count` | int | 未结算但已送达的订单数；不进入未来全损风险池 |
+| `full_loss_exposure_unsettled_order_count` | int | 未结算且尚未送达的待完结风险订单数；大盘全局去重 |
 | `unresolved_unsettled_order_count` | int | 未结算且仍有未确认商品件的订单数；大盘全局去重 |
 | `unresolved_unsettled_qty` | int | 未结算件数减去已确认退款/退货/全损件数 |
 | `unresolved_unsettled_sales` | money-str | 待确认件数按订单行单价计算的销售额 CNY |
-| `full_loss_exposure_unsettled_sales` | money-str | 尚未送达未结算风险池的商品行销售额 CNY；金额全损率只作用于此范围 |
+| `full_loss_exposure_unsettled_sales` | money-str | 尚未送达未结算风险池的商品行销售额 CNY；`completed_full_loss_rate` 只作用于此范围 |
 | `confirmed_unsettled_refund_amount` | money-str | 未结算订单中已经确认的退款金额 CNY，只扣一次 |
 | `confirmed_full_loss_exposure_refund_amount` | money-str | 尚未送达风险池中已经确认的退款金额 CNY；从风险池预计额度中扣除 |
-| `confirmed_unsettled_full_loss_qty` | int | 未结算订单中已经确认的退款/退货全损件数 |
-| `projected_future_full_loss_qty` | decimal-str/null | `尚未送达风险订单数 × (终态全损件数 / 终态样本订单数)`；已确认件先排除，不为显示提前取整 |
+| `confirmed_unsettled_full_loss_qty` | int | 未结算订单中按当前严格口径已经确认的全损件数；部分退款不计入 |
+| `projected_future_full_loss_order_count` | decimal-str/null | `待完结风险订单数 × completed_full_loss_rate − 已确认风险池全损订单数`，以未确认风险订单数封顶 |
+| `projected_future_full_loss_qty` | decimal-str/null | `待完结风险件数 × completed_full_loss_rate − 已确认风险池全损件数`，以未确认风险件数封顶，不为显示提前取整 |
 | `projected_terminal_full_loss_qty` | decimal-str/null | 当前已观察全损件数 + 预计未来新增全损件数 |
-| `projected_full_loss_cost` | money-str/null | 预计终局全损对应成本，用于预计财务 ROI，不重复加入 COGS |
+| `projected_full_loss_cost` | money-str/null | 预计终局全损对应成本，用于预计 ROI/保本 ROI，不重复加入 COGS |
 | `projected_unsettled_net` | money-str/null | 未结算销售扣已知退款、预测退款和平台费后的预计净收入 |
 | `projected_net_revenue` | money-str/null | 已结算实际到账 + `projected_unsettled_net` |
 | `projected_net_profit` | money-str/null | `projected_net_revenue − 当前 cogs_total − spend`；预测全损不重复扣货本 |
@@ -483,7 +489,7 @@ Response envelope:`{items: [...], total, totals, meta}`。`spu_ids` 属于盈利
 
 `totals` 同样返回上述预计终局字段。金额/件数商品行事实按 scope 聚合；样本订单数、未结算订单数、待确认订单数独立按订单全局去重；比例和预计终局值按完整 scope 重新计算，不是行级比例平均值。单 SPU scope 下 `totals` 与该 SPU 的预测字段一致。
 
-`meta.projection` 返回预测说明、日期归属、物流终态样本、`refund_amount_rate_source`、`full_loss_rate_source`、目标定义和状态中文标签；`meta.warnings` 在适用时增加 `projection_insufficient_sample` 和 `projection_uses_terminal_delivery_sample`。未结算中已经确认的退款金额只扣一次，对应确认件数先从待确认集合排除，退款金额率和全损概率只作用于剩余部分。`meta.ad_system_roi` 给出实际 ROI、最大可承受广告费和保本 ROI 的公式与范围，并明确 `mixed_real_cost` 不混入广告赠金、赠金目前不可单独取得；`meta.presentation` 返回 `rubric_label`、退款警戒阈值/文案、估算/默认成本文案和 `pnl_hints`。前端只格式化和渲染这些状态/说明，不保存业务阈值、不重算分类。净结算已扣除的平台费用不得再次扣除；结算外成本补齐前，前端以 `≈` 展示该估算。
+`meta.projection` 返回预测说明、日期归属、已完结样本、`refund_amount_rate_source`、`full_loss_rate_source`、目标定义和状态中文标签；`meta.warnings` 在适用时增加 `projection_insufficient_sample` 和 `projection_uses_completed_order_full_loss_rate`。未结算中已经确认的退款金额只扣一次，对应确认件数先从待确认集合排除，已完结订单全损率只作用于待完结风险池。`meta.ad_system_roi` 给出实际 ROI、最大可承受广告费和保本 ROI 的公式与范围，并明确 `mixed_real_cost` 不混入广告赠金、赠金目前不可单独取得；`meta.presentation` 返回 `rubric_label`、退款警戒阈值/文案、估算/默认成本文案和 `pnl_hints`。前端只格式化和渲染这些状态/说明，不保存业务阈值、不重算分类。净结算已扣除的平台费用不得再次扣除；结算外成本补齐前，前端以 `≈` 展示该估算。
 
 > **2026-09-30 成本来源语义变化**：
 >

@@ -100,51 +100,54 @@ kept 口径误差 **±1%**；混合口径（含退款单）高估 **~16%**。
 
 ### 4.1 未结算订单预计终局（两个页面共用）
 
-预测样本不按结算状态分组，而按物流终态分成成功送达和未送达全损。成功送达证据取
-并集：订单状态 `DELIVERED`/`COMPLETED`，或 shipment 状态 `DELIVERED`、
-`delivered_at` 非空、物流事件 `50101` 任一成立。未送达全损必须是 `CANCELLED` 且有
-物流事件 `80101`（运输商因配送失败将包裹退回卖家）；发货前取消、`110101` 待揽收取消、
-仍在途订单和送达后普通售后均排除。样本和目标都跟随页面现有订单时间窗口，以
-`COALESCE(order_time, paid_at)` 归属，不按结算日或售后完成日切窗。
+预测使用已完结订单样本。分母包含已结算、已送达和结果已确定的 `CANCELLED` 订单；
+国内取消因此进入分母。全损分子包含两类互不重复的订单：
+
+1. `CANCELLED` 且存在 `80101` 的终局物流全损；
+2. 已到达海外或已送达，且最终退款金额达到订单 GMV 的订单。海外暴露证据为订单/
+   shipment 送达、`delivered_at`、`50101` 或到达目的国事件 `38301`。跨境无海外仓，
+   全额退款后的商品无法二次销售，因此 `REFUND_ONLY` 与 `RETURN_AND_REFUND` 都算全损。
+
+国内取消即使全额退款也不进入全损分子；部分退款不按整单全损。最终退款金额取已结算
+`CUSTOMER_REFUND` 与已完成售后退款金额的较大值，避免重复累计。样本和目标都以
+`COALESCE(order_time, paid_at)` 归属页面时间窗口。
 
 ```text
-projection_refund_amount_rate
-= 未送达全损终态订单销售额 / 全部物流终态样本销售额
-
-pre_delivery_full_loss_rate
-= 未送达全损终态订单数 / (成功送达订单数 + 未送达全损终态订单数)
+completed_full_loss_rate
+= projection_completed_full_loss_order_count
+  / projection_completed_basis_order_count
 ```
 
-两个预测比例都来自同一物流终态样本，与结算状态无关。页面同时展示“当前全损率”和
-“未送达终局全损率”，前者是当前事实，后者才用于预测当前尚未送达订单。
+`completed_full_loss_rate` 是唯一预测比例，同时作用于待完结风险订单数、件数和费后收入。
+`projection_refund_amount_rate`、`pre_delivery_full_loss_rate`、
+`delivered_full_loss_rate`、`settled_full_loss_rate` 与
+`projection_full_loss_qty_rate` 仅保留作兼容诊断，不得再驱动预计结果。
 
 ```text
 expected_terminal_full_loss_orders
-= full_loss_exposure_unsettled_order_count × pre_delivery_full_loss_rate
+= full_loss_exposure_unsettled_order_count × completed_full_loss_rate
 
 projected_future_full_loss_order_count
 = max(expected_terminal_full_loss_orders
       - confirmed_full_loss_exposure_order_count, 0)
 
 expected_terminal_full_loss_qty
-= full_loss_exposure_unsettled_order_count
-  × (terminal_full_loss_qty / terminal_delivery_order_count)
+= (confirmed_full_loss_exposure_qty
+   + unresolved_full_loss_exposure_qty)
+  × completed_full_loss_rate
 
 projected_future_full_loss_qty
 = max(expected_terminal_full_loss_qty
       - confirmed_full_loss_exposure_qty, 0)
 ```
 
-`full_loss_exposure_unsettled_order_count` 是尚未送达的未结算订单数。预计新增订单数和件数
-还分别以该暴露中尚未确认结果的订单数、件数封顶。只有该风险池的销售额应用金额损失率；
-已送达但结算滞后的订单不再预测拒收风险。
-
-页面只展示预计未来新增全损，不展示预计终局全损。退款金额也先估算整批终局额度，
-再扣除已确认退款：
+预计新增订单数和件数分别以上述风险暴露中尚未确认结果的订单数、件数封顶。已送达但
+结算滞后的订单不进入风险池。页面展示未结算订单、未结算已送达订单、待完结风险订单
+和预计未来新增全损件，不展示预计终局全损件。
 
 ```text
 expected_exposure_refund
-= full_loss_exposure_unsettled_sales_after_fee × projection_refund_amount_rate
+= full_loss_exposure_unsettled_sales_after_fee × completed_full_loss_rate
 
 projected_future_refund
 = max(expected_exposure_refund
@@ -164,7 +167,7 @@ projected_net_profit = current_net_profit + unsettled_net_delta
 ```
 
 `projected_future_full_loss_qty` 不得再次加入 COGS：paid 商品货本已经在当前
-`cogs_total`，否则会重复扣采购成本。预计全损成本只用于预计财务 ROI：
+`cogs_total`，否则会重复扣采购成本。预计全损成本只参与预计 ROI/保本 ROI：
 
 ```text
 projected_full_loss_cost = 已观察全损成本 + 预计新增全损对应成本
@@ -175,7 +178,7 @@ projected_roi_breakeven
 = projected_nc_prime / (projected_nc_prime - projected_cogs_kept)
 ```
 
-预计广告系统指标继续使用广告归因 GMV，不能与净收入混用：
+预计广告系统指标保持广告归因 GMV，不把全损率乘到全部广告 GMV：
 
 ```text
 projected_ad_gmv = ad_gmv
@@ -185,16 +188,9 @@ projected_ad_system_breakeven_roi
 = projected_ad_gmv / projected_ad_system_max_ad_spend
 ```
 
-未送达拒收风险尚无订单级广告归因映射，不得把风险率套到全部广告 GMV；预计广告
-GMV 保持当前值，只通过预计净收入改变广告系统保本分母。广告消耗为 0，或保本分母
-小于等于 0时，相应 ROI 输出空值。存在未结算订单但缺少
-同时包含成功送达和未送达全损结果的物流终态样本时，状态为 `insufficient_sample`。
-没有未结算订单时状态为 `no_unsettled_orders`，
-预计利润和四个 ROI 指标与当前值一致。
-
-多 SPU 大盘的物流终态样本订单数、未送达全损终态订单数、未结算订单数、未来全损
-风险暴露订单数和已确认风险暴露全损订单数必须按订单全局去重；金额和
-件数按唯一商品行聚合。
+有未结算订单但没有已完结样本订单时状态为 `insufficient_sample`；没有未结算订单时为
+`no_unsettled_orders`，预计利润和四个 ROI 与当前值一致。多 SPU 大盘的已完结样本数、
+已完结全损数、未结算数和风险池订单数必须按订单全局去重；金额和件数按唯一商品行聚合。
 `spu-roi` 与 `focused-spus` 使用同一 API 和公式，仅 SPU 选择范围不同。
 
 ## 5. 广告系统 ROI（TikTok 后台口径，单独一套）
