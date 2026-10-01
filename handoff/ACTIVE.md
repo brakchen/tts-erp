@@ -17,4 +17,4 @@
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | runtime-config-jsoneditor | 官方JSONEditor集成 | 01a0f13c-c315-760e-b7c9-6ac80761f9dc | `feat/runtime-config-jsoneditor` / `.worktrees/runtime-config-jsoneditor` | `tts_erp_v2/static/{vendor/jsoneditor.*,vendor/jsoneditor.LICENSE,vendor/NOTICE.md,js/runtime-configs.js,css/runtime-configs.css}`; `tests/api/test_runtime_config.py` | active | — | — | 2026-10-01 06:26:57 |
-| reuse-first-policy | 引入复用优先策略 | 01a0f628-3176-729f-8747-2aac7e599eab | `chore/reuse-first-policy` / `.worktrees/reuse-first-policy` | `AGENTS.md` | draft | — | — | 2026-10-01 06:33:28 |
+| reuse-first-policy | 引入复用优先策略 | 01a0f628-3176-729f-8747-2aac7e599eab | `chore/reuse-first-policy` / `.worktrees/reuse-first-policy` | `AGENTS.md` | active | — | — | 2026-10-01 06:33:28 |
