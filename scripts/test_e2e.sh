@@ -47,19 +47,24 @@ EOF
   exit 0
 fi
 
-# ── Install deps if needed ──────────────────────────
-if [[ ! -d node_modules ]]; then
-  info "Installing npm dependencies..."
-  npm ci --ignore-scripts 2>/dev/null || npm install --ignore-scripts
+# ── Install npm deps if @playwright/test is missing ──────────────
+# node_modules may exist from prior runs but lack @playwright/test.
+# Prefer npm ci when package-lock.json exists, fallback to npm install.
+if [[ ! -f node_modules/@playwright/test/package.json ]]; then
+  info "Installing npm dependencies (@playwright/test not found)..."
+  if [[ -f package-lock.json ]]; then
+    npm ci --include=dev --ignore-scripts
+  else
+    npm install --include=dev --ignore-scripts
+  fi
 fi
 
-# Check Playwright browsers
-if [[ ! -d "node_modules/.cache/playwright" ]] && \
-   [[ -z "${PLAYWRIGHT_BROWSERS_PATH:-}" ]] && \
-   ! npx playwright install --dry-run 2>/dev/null; then
-  info "Installing Playwright Chromium browser..."
-  npx playwright install chromium 2>&1 | tail -5
-fi
+# ── Install Playwright browsers (idempotent) ────────────────────
+# "npx playwright install chromium" is idempotent and fast when already
+# present.  We detect a missing Chromium executable via the Playwright
+# CLI so the check is reliable across platforms and PLAYWRIGHT_BROWSERS_PATH.
+info "Ensuring Playwright Chromium is installed..."
+npx playwright install chromium 2>&1 | tail -5
 
 # ── Build Playwright args ───────────────────────────
 PW_ARGS=()

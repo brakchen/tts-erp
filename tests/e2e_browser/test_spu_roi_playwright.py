@@ -110,11 +110,22 @@ def uvicorn_server(db_url: str, seed_info: dict):
 
     try:
         if not _wait_for_server(port, timeout=30):
-            stderr = proc.stderr.read().decode() if proc.stderr else ""
             proc.terminate()
+            try:
+                _stdout, stderr_bytes = proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                _stdout, stderr_bytes = proc.communicate(timeout=5)
+            stderr = stderr_bytes.decode(errors="replace") if stderr_bytes else ""
             raise RuntimeError(f"uvicorn failed to start on port {port}:\n{stderr[:2000]}")
     except Exception:
+        # Re-raise after cleanup (RuntimeError from above, or any other error)
         proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
         raise
 
     yield {
@@ -142,7 +153,9 @@ def playwright_args() -> list[str]:
     return os.environ.get("E2E_PLAYWRIGHT_ARGS", "").split()
 
 
-@pytest.mark.domain_e2e  # excluded from `fast` by marker filter
+@pytest.mark.domain_e2e       # excluded from `fast` by marker filter
+@pytest.mark.requires_service   # needs live uvicorn
+@pytest.mark.slow               # browser startup + network
 class TestSpuRoiPlaywright:
     """Run Playwright E2E tests against a live temporary server."""
 
