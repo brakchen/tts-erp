@@ -312,7 +312,7 @@ def set_sync_job_enabled(
 @router.post(
     "/sync-jobs/{job_name}/trigger",
     response_model=SyncJobTriggerResponse,
-    summary="立即触发一次周期任务（admin only）",
+    summary="立即触发一次周期任务（readwrite+）",
 )
 def trigger_sync_job(
     request: Request,
@@ -321,7 +321,7 @@ def trigger_sync_job(
     background_tasks: BackgroundTasks,
 ) -> SyncJobTriggerResponse:
     """Queue one immediate run in the API process background task runner."""
-    require_role_at_least(request, "admin")
+    require_role_at_least(request, "readwrite")
     _validate_manual_shop_scope(job_name, body.shop_id)
     background_tasks.add_task(run_scheduled_job_once, job_name, shop_id=body.shop_id)
     return SyncJobTriggerResponse(

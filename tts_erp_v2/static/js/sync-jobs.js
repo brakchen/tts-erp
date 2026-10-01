@@ -3,7 +3,7 @@
   const markerAt = location.pathname.indexOf(marker);
   const rootPrefix = markerAt >= 0 ? location.pathname.slice(0, markerAt) : '';
   const API = `${rootPrefix}/v2`;
-  const state = { jobs: [], shops: [], canAdmin: false, pendingJob: null };
+  const state = { jobs: [], shops: [], canAdmin: false, canTrigger: false, pendingJob: null };
   const els = {
     body: document.getElementById('jobs-body'),
     notice: document.getElementById('notice'),
@@ -76,10 +76,11 @@
       const status = job.last_status || {};
       const severity = status.severity || 'unknown';
       const scope = job.is_tiktok ? 'TikTok 店铺' : '系统级';
-      const disabled = state.canAdmin ? '' : ' disabled';
+      const toggleDisabled = state.canAdmin ? '' : ' disabled';
+      const triggerDisabled = state.canTrigger ? '' : ' disabled';
       const triggerControl = job.is_tiktok
-        ? `<div class="trigger-controls"><select class="scope-select" data-shop-for="${escapeHtml(job.job_name)}"${disabled}>${shopOptions('')}</select><button class="primary" data-trigger="${escapeHtml(job.job_name)}"${disabled}>执行</button></div>`
-        : `<div class="trigger-controls"><button class="primary" data-trigger="${escapeHtml(job.job_name)}"${disabled}>执行</button></div>`;
+        ? `<div class="trigger-controls"><select class="scope-select" data-shop-for="${escapeHtml(job.job_name)}"${triggerDisabled}>${shopOptions('')}</select><button class="primary" data-trigger="${escapeHtml(job.job_name)}"${triggerDisabled}>执行</button></div>`
+        : `<div class="trigger-controls"><button class="primary" data-trigger="${escapeHtml(job.job_name)}"${triggerDisabled}>执行</button></div>`;
       const pending = state.pendingJob === job.job_name ? '<span class="pending-dot">已提交</span>' : '';
       return `<tr>
         <td data-label="任务"><span class="job-name">${escapeHtml(job.job_name)}</span><span class="module">${escapeHtml(job.module_path)} · ${escapeHtml(job.entrypoint)}</span>${pending}</td>
@@ -87,7 +88,7 @@
         <td data-label="范围">${scope}</td>
         <td data-label="状态"><span class="badge ${severity}">${escapeHtml(severity)}</span><span class="module">${escapeHtml(labelForStatus(status))}</span></td>
         <td data-label="上次运行">${escapeHtml(fmtTime(status.last_run_at))}</td>
-        <td data-label="启用"><label class="switch"><input type="checkbox" data-enable="${escapeHtml(job.job_name)}" ${job.enabled ? 'checked' : ''}${disabled}>${job.enabled ? '启用' : '停用'}</label></td>
+        <td data-label="启用"><label class="switch"><input type="checkbox" data-enable="${escapeHtml(job.job_name)}" ${job.enabled ? 'checked' : ''}${toggleDisabled}>${job.enabled ? '启用' : '停用'}</label></td>
         <td data-label="立即执行">${triggerControl}</td>
       </tr>`;
     }).join('');
@@ -97,9 +98,12 @@
     try {
       const me = await api('/auth/me');
       state.canAdmin = me.authenticated && me.role === 'admin';
+      state.canTrigger = me.authenticated && (me.role === 'readwrite' || me.role === 'admin');
       els.identity.textContent = me.authenticated ? `role=${me.role}` : '未登录';
-      if (me.authenticated && !state.canAdmin) {
-        setNotice('当前账号不是 admin：只能查看任务状态，不能启停或立即执行。');
+      if (me.authenticated && !state.canAdmin && state.canTrigger) {
+        setNotice('当前账号可立即执行任务；启停周期调度需要 admin。');
+      } else if (me.authenticated && !state.canTrigger) {
+        setNotice('当前账号需要 readwrite 或 admin 才能访问定时任务执行。');
       }
     } catch (_) {
       els.identity.textContent = '身份未知';
@@ -115,8 +119,10 @@
     const refreshedAt = new Date(data.server_time).toLocaleString('zh-CN', { hour12: false });
     if (state.canAdmin) {
       setNotice(`已刷新 · ${refreshedAt}`, 'ok');
+    } else if (state.canTrigger) {
+      setNotice(`可立即执行；启停需要 admin · 已刷新 ${refreshedAt}`, 'ok');
     } else {
-      setNotice(`只读模式（需要 admin 才能操作）· 已刷新 ${refreshedAt}`);
+      setNotice(`需要 readwrite 才能执行任务 · 已刷新 ${refreshedAt}`);
     }
   }
 
@@ -162,17 +168,21 @@
       });
       state.pendingJob = jobName;
       render();
-      setNotice(`${res.message || '任务已提交'} 可稍后刷新查看 running / succeeded / failed。`, 'ok');
+      const msg = `${res.message || '任务已提交后台执行。'}\n\n提交执行成功；后台会异步执行，最终运行结果请稍后刷新查看 running / succeeded / failed。`;
+      setNotice(msg.replace(/\n+/g, ' '), 'ok');
+      window.alert(msg);
       window.setTimeout(async () => {
         await loadJobs();
         if (state.pendingJob === jobName) state.pendingJob = null;
         render();
       }, 1500);
     } catch (err) {
-      setNotice(`触发失败：${err.message}`, 'error');
+      const msg = `提交执行失败：${err.message}`;
+      setNotice(msg, 'error');
+      window.alert(msg);
     } finally {
       button.classList.remove('is-busy');
-      button.disabled = !state.canAdmin;
+      button.disabled = !state.canTrigger;
     }
   }
 

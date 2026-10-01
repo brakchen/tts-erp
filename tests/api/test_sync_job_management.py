@@ -119,8 +119,17 @@ def test_readwrite_cannot_toggle_job(api_client, readwrite_key) -> None:
     assert r.status_code == 403, r.text
 
 
-def test_trigger_queues_background_task(
-    api_client, admin_key, monkeypatch: pytest.MonkeyPatch
+def test_readonly_cannot_trigger_job(api_client, readonly_key) -> None:
+    r = api_client.post(
+        "/v2/admin/sync-jobs/reporting.profit_daily/trigger",
+        headers={"Authorization": f"Bearer {readonly_key}", "X-Requested-With": "tts-erp"},
+        json={},
+    )
+    assert r.status_code == 403, r.text
+
+
+def test_readwrite_can_trigger_queues_background_task(
+    api_client, readwrite_key, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[tuple[str, str | None]] = []
 
@@ -130,7 +139,7 @@ def test_trigger_queues_background_task(
     monkeypatch.setattr(admin_module, "run_scheduled_job_once", fake_run)
     r = api_client.post(
         "/v2/admin/sync-jobs/reporting.profit_daily/trigger",
-        headers={"Authorization": f"Bearer {admin_key}", "X-Requested-With": "tts-erp"},
+        headers={"Authorization": f"Bearer {readwrite_key}", "X-Requested-With": "tts-erp"},
         json={},
     )
     assert r.status_code == 200, r.text
@@ -169,8 +178,10 @@ def test_sync_jobs_js_uses_prefix_aware_api_paths() -> None:
     assert "api('/auth/me')" in src
     assert "CSS.escape" not in src
     assert "state.canAdmin" in src
+    assert "state.canTrigger" in src
     assert "disabled" in src
     assert "window.confirm" in src
+    assert "window.alert" in src
     assert "data-label=\"任务\"" in src
     assert "is-busy" in src
 

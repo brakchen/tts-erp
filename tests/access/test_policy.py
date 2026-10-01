@@ -52,6 +52,11 @@ def test_focused_spus_roles_are_method_specific() -> None:
     assert required_role("PATCH", "/v2/reporting/other/42") is Role.READONLY
 
 
+def test_sync_job_trigger_is_readwrite_but_enable_remains_admin() -> None:
+    assert required_role("POST", "/v2/admin/sync-jobs/tiktok.orders/trigger") is Role.READWRITE
+    assert required_role("PATCH", "/v2/admin/sync-jobs/tiktok.orders/enabled") is Role.ADMIN
+
+
 def test_unknown_route_fails_closed_for_anonymous_request() -> None:
     reset_shared(limit=100)
     try:
