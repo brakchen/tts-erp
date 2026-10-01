@@ -321,6 +321,10 @@ def test_runtime_config_readonly_client_uses_redacted_snapshot() -> None:
     assert "new JSONEditor(container" in source
     assert "../../static/vendor/jsoneditor.min.js" in source
     assert "../../static/vendor/jsoneditor.min.css" in source
+    assert "onChange: syncEditorText" in source
+    assert "onChangeJSON" not in source
+    assert 'await loadItems(item.configKey);\n      notice("草稿已保存");' in source
+    assert 'await loadItems(state.item.configKey);\n      notice(`已发布 v${result.publishedVersion}`);' in source
     assert "installJsonEditorToolbar" in source
     assert 'data-action="format"' in source
     assert 'data-action="compact"' in source
@@ -348,6 +352,24 @@ def test_runtime_config_readonly_client_uses_redacted_snapshot() -> None:
         / "jsoneditor.LICENSE"
     ).read_text(encoding="utf-8")
     assert "Apache License" in license_text
+    icons = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "vendor"
+        / "img"
+        / "jsoneditor-icons.svg"
+    ).read_text(encoding="utf-8")
+    assert "svg" in icons
+    template = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "templates"
+        / "pages"
+        / "runtime-configs.html"
+    ).read_text(encoding="utf-8")
+    assert 'pattern="[a-z][a-z0-9_.\\-]*"' in template
+    assert 'pattern="[a-z0-9_.\\-]+"' in template
 
 
 def test_runtime_config_rejects_empty_secret_reference(api_client, db_engine, readwrite_key):

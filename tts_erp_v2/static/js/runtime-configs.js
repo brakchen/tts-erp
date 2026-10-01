@@ -109,26 +109,26 @@
       container.className = "rc-jsoneditor";
       textarea.after(container);
       textarea.classList.add("rc-jsoneditor-source");
-      const editor = new JSONEditor(container, {
+      let editor;
+      const syncEditorText = () => {
+        try {
+          textarea.value = editor.getText();
+        } catch {
+          return;
+        }
+        if (id === "rc-new-payload") scheduleSchemaPreview(textarea.value);
+        if (id === "rc-new-schema" && !state.schemaPreviewApplying && !textarea.readOnly) {
+          setSchemaOverride(true);
+        }
+      };
+      editor = new JSONEditor(container, {
         mode: "code",
         modes: ["code", "tree", "view"],
         mainMenuBar: true,
         navigationBar: false,
         statusBar: true,
-        onChangeText(text) {
-          textarea.value = text;
-          if (id === "rc-new-payload") scheduleSchemaPreview(text);
-          if (id === "rc-new-schema" && !state.schemaPreviewApplying && !textarea.readOnly) {
-            setSchemaOverride(true);
-          }
-        },
-        onChangeJSON(json) {
-          textarea.value = JSON.stringify(json);
-          if (id === "rc-new-payload") scheduleSchemaPreview(textarea.value);
-          if (id === "rc-new-schema" && !state.schemaPreviewApplying && !textarea.readOnly) {
-            setSchemaOverride(true);
-          }
-        },
+        onChange: syncEditorText,
+        onChangeText: syncEditorText,
       });
       editor.setText(textarea.value);
       installJsonEditorToolbar(container, editor, textarea, textarea.previousElementSibling?.textContent || "JSON");
@@ -250,8 +250,8 @@
         body: JSON.stringify({ expectedDraftVersion: state.item.draftVersion, payload, rollout }),
       });
       state.item = item;
-      notice("草稿已保存");
       await loadItems(item.configKey);
+      notice("草稿已保存");
     } catch (error) {
       notice(error.message, true);
     }
@@ -265,8 +265,8 @@
         method: "POST",
         body: JSON.stringify({ expectedDraftVersion: state.item.draftVersion, comment: $("#rc-comment").value || null }),
       });
-      notice(`已发布 v${result.publishedVersion}`);
       await loadItems(state.item.configKey);
+      notice(`已发布 v${result.publishedVersion}`);
     } catch (error) {
       notice(error.message, true);
     }
@@ -279,8 +279,8 @@
         method: "POST",
         body: JSON.stringify({ expectedDraftVersion: state.item.draftVersion, targetVersion: version }),
       });
-      notice(`已从 v${result.rolledBackFrom} 恢复并发布 v${result.publishedVersion}`);
       await loadItems(state.item.configKey);
+      notice(`已从 v${result.rolledBackFrom} 恢复并发布 v${result.publishedVersion}`);
     } catch (error) {
       notice(error.message, true);
     }
@@ -379,8 +379,8 @@
       setJsonEditorText("rc-new-schema", $("#rc-new-schema").value);
       setJsonEditorText("rc-new-payload", $("#rc-new-payload").value);
       scheduleSchemaPreview($("#rc-new-payload").value);
-      notice("已创建草稿；检查后发布即可生效");
       await loadItems(item.configKey);
+      notice("已创建草稿；检查后发布即可生效");
     } catch (error) {
       notice(error.message, true);
     }
