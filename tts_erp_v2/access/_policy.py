@@ -67,6 +67,12 @@ def required_role(method: str, route_path: str) -> Role | None:
         return Role.READWRITE
     if path.startswith("/v2/admin/shops/"):
         return Role.READWRITE
+    if (
+        normalized_method == "POST"
+        and path.startswith("/v2/admin/sync-jobs/")
+        and path.endswith("/trigger")
+    ):
+        return Role.READWRITE
     if normalized_method == "PATCH" and path.startswith("/v2/reporting/focused-spus/"):
         return Role.READWRITE
     if path.startswith("/miaoshou/callback"):
