@@ -9,6 +9,7 @@
 | `jsoneditor.min.js` | JSONEditor | 10.4.3 | Apache-2.0 | <https://cdn.jsdelivr.net/npm/jsoneditor@10.4.3/dist/jsoneditor.min.js> (source: <https://github.com/josdejong/jsoneditor>) |
 | `jsoneditor.min.css` | JSONEditor | 10.4.3 | Apache-2.0 | <https://cdn.jsdelivr.net/npm/jsoneditor@10.4.3/dist/jsoneditor.min.css> |
 | `jsoneditor.LICENSE` | JSONEditor | 10.4.3 | Apache-2.0 | package `LICENSE` |
+| `img/jsoneditor-icons.svg` | JSONEditor | 10.4.3 | Apache-2.0 | <https://cdn.jsdelivr.net/npm/jsoneditor@10.4.3/dist/img/jsoneditor-icons.svg> |
 | `uplot.iife.min.js` | uPlot | 1.6.32 | MIT | <https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.iife.min.js> (source: <https://github.com/leeoniya/uPlot>) |
 | `uplot.min.css` | uPlot | 1.6.32 | MIT | <https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.min.css> |
 | `tabulator.min.js` | Tabulator | 6.3.1 | MIT | <https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.1/dist/js/tabulator.min.js> (source: <https://github.com/olifolkerd/tabulator>) |
