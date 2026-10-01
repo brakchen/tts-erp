@@ -136,6 +136,8 @@ def test_runtime_config_page_links_its_owned_assets():
     body = bytes(runtime_configs_page().body).decode()
 
     assert "运行配置" in body
+    # The shared mobile sidebar uses Bootstrap display/position utilities.
+    assert "../../static/vendor/bootstrap.min.css" in body
     assert "../../static/css/runtime-configs.css?v=" in body
     assert "../../static/js/runtime-configs.js?v=" in body
     assert 'href="../../v2/pages/runtime-configs"' in body
