@@ -15,5 +15,5 @@
 - Shared hotspot ownership does not require waiting for the original session: exchange a focused patch, hand off ownership explicitly, or create a successor lane from the predecessor's ready commit.
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
-| runtime-config-jsoneditor-toolbar | JSONEditor中文工具栏 | 01a0f13c-c315-760e-b7c9-6ac80761f9dc | `feat/runtime-config-jsoneditor-toolbar` / `.worktrees/runtime-config-jsoneditor-toolbar` | `tts_erp_v2/static/{js/runtime-configs.js,css/runtime-configs.css}`; `tests/api/test_runtime_config.py` | draft | — | — | 2026-10-01 08:04:47 |
+| runtime-config-jsoneditor-toolbar | JSONEditor中文工具栏 | 01a0f13c-c315-760e-b7c9-6ac80761f9dc | `feat/runtime-config-jsoneditor-toolbar` / `.worktrees/runtime-config-jsoneditor-toolbar` | `tts_erp_v2/static/{js/runtime-configs.js,css/runtime-configs.css}`; `tests/api/test_runtime_config.py` | active | — | — | 2026-10-01 08:05:38 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
