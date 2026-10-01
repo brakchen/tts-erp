@@ -251,6 +251,12 @@ def test_runtime_config_readonly_client_uses_redacted_snapshot() -> None:
     assert "new JSONEditor(container" in source
     assert "../../static/vendor/jsoneditor.min.js" in source
     assert "../../static/vendor/jsoneditor.min.css" in source
+    assert "installJsonEditorToolbar" in source
+    assert 'data-action="format"' in source
+    assert 'data-action="compact"' in source
+    assert 'data-action="tree"' in source
+    assert 'data-action="code"' in source
+    assert "editor.setMode(action)" in source
     assert "installJsonTools" not in source
     license_text = (
         Path(__file__).resolve().parents[2]

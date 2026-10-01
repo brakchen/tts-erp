@@ -59,6 +59,10 @@
 }
 .rc-field textarea { min-height: 156px; resize: vertical; }
 .rc-jsoneditor-source { display: none; }
+.rc-jsoneditor-toolbar { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px; border: 1px solid var(--rc-rule); border-bottom: 0; background: var(--rc-paper); }
+.rc-jsoneditor-toolbar button { border: 1px solid var(--rc-rule); border-radius: 3px; background: #fff; color: var(--rc-ink); padding: 5px 9px; font: 700 12px/1.2 var(--sans, system-ui, sans-serif); cursor: pointer; }
+.rc-jsoneditor-toolbar button:hover, .rc-jsoneditor-toolbar button:focus-visible { border-color: var(--rc-accent); color: var(--rc-accent); outline: none; }
+.rc-jsoneditor-toolbar button:disabled { opacity: .45; cursor: not-allowed; }
 .rc-jsoneditor { min-height: 260px; border: 1px solid var(--rc-rule); background: #fff; }
 .rc-jsoneditor .jsoneditor { border: 0; }
 .rc-jsoneditor .jsoneditor-menu { background-color: var(--rc-accent); border-bottom-color: var(--rc-accent); }
