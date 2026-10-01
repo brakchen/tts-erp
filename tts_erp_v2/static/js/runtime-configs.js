@@ -40,6 +40,54 @@
     }
   }
 
+  function installJsonTools() {
+    const editors = [
+      ["rc-schema", "Schema"],
+      ["rc-payload", "草稿配置"],
+      ["rc-rollout", "灰度规则"],
+      ["rc-new-schema", "Schema"],
+      ["rc-new-payload", "初始草稿"],
+    ];
+    for (const [id, label] of editors) {
+      const textarea = document.getElementById(id);
+      if (!textarea || textarea.dataset.jsonToolsInstalled) continue;
+      textarea.dataset.jsonToolsInstalled = "true";
+      const toolbar = document.createElement("div");
+      toolbar.className = "rc-json-tools";
+      toolbar.setAttribute("aria-label", `${label}编辑工具`);
+      toolbar.innerHTML = [
+        '<button type="button" data-action="format">格式化</button>',
+        '<button type="button" data-action="compact">压缩</button>',
+        '<button type="button" data-action="validate">校验 JSON</button>',
+      ].join("");
+      toolbar.addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-action]");
+        if (!button) return;
+        if (textarea.readOnly) {
+          notice(`${label}为只读字段，不能修改`, true);
+          return;
+        }
+        try {
+          const value = JSON.parse(textarea.value);
+          if (button.dataset.action === "format") {
+            textarea.value = JSON.stringify(value, null, 2);
+            textarea.dispatchEvent(new Event("input", { bubbles: true }));
+            notice(`${label}已格式化`);
+          } else if (button.dataset.action === "compact") {
+            textarea.value = JSON.stringify(value);
+            textarea.dispatchEvent(new Event("input", { bubbles: true }));
+            notice(`${label}已压缩`);
+          } else {
+            notice(`${label}是有效 JSON`);
+          }
+        } catch {
+          notice(`${label}不是有效 JSON；请修正引号、逗号或括号`, true);
+        }
+      });
+      textarea.before(toolbar);
+    }
+  }
+
   async function loadItems(selectKey) {
     const data = await api("/items");
     const list = $("#rc-items");
@@ -237,6 +285,7 @@
   }
 
   async function init() {
+    installJsonTools();
     try {
       const me = await fetch("../../v2/auth/me", { credentials: "same-origin" }).then((r) => r.json());
       state.writable = me.role === "readwrite" || me.role === "admin";
