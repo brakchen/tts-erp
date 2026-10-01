@@ -49,10 +49,43 @@
       button.className = "rc-item";
       button.type = "button";
       button.innerHTML = `<strong>${escapeHtml(item.displayName)}</strong><span>${escapeHtml(item.configKey)} · ${item.publishedVersion ? `v${item.publishedVersion}` : "未发布"}</span>`;
-      button.addEventListener("click", () => loadDetail(item.configKey));
+      button.addEventListener("click", () => {
+        if (state.writable) {
+          loadDetail(item.configKey);
+        } else {
+          loadPublished(item);
+        }
+      });
       list.append(button);
     }
-    if (selectKey) await loadDetail(selectKey);
+    if (selectKey && state.writable) await loadDetail(selectKey);
+  }
+
+  async function loadPublished(item) {
+    try {
+      const snapshot = await api("/snapshot");
+      const published = snapshot.items[item.configKey];
+      if (!published) throw new Error("该配置尚未发布或已归档");
+      state.item = null;
+      $("#rc-empty").hidden = true;
+      $("#rc-editor").hidden = false;
+      $("#rc-key").value = item.configKey;
+      $("#rc-name").value = item.displayName;
+      $("#rc-schema").value = "只读会话不显示 Schema";
+      $("#rc-payload").value = pretty(published.payload);
+      $("#rc-rollout").value = "只读会话不显示灰度规则";
+      $("#rc-version").textContent = `已发布 v${published.version}`;
+      ["#rc-key", "#rc-name", "#rc-schema", "#rc-payload", "#rc-rollout"].forEach((selector) => {
+        $(selector).readOnly = true;
+      });
+      [...document.querySelectorAll("#rc-editor button")].forEach((button) => { button.disabled = true; });
+      document.querySelectorAll(".rc-item").forEach((button) => {
+        button.classList.toggle("active", button.textContent.includes(item.configKey));
+      });
+      notice("");
+    } catch (error) {
+      notice(error.message, true);
+    }
   }
 
   async function loadDetail(key) {

@@ -277,15 +277,17 @@ Versioned JSON configuration with draft/publish/rollback and encrypted
 
 | Endpoint | Role | Notes |
 | --- | --- | --- |
-| `GET /v2/config/runtime/items` | readonly | Published-state list only; never returns drafts or secret values. |
+| `GET /v2/config/runtime/items` | readonly | Active published-state list only; never returns drafts or secret values. `?includeRetired=true` requires readwrite. |
 | `POST /v2/config/runtime/items` | readwrite | Creates a key, immutable JSON Schema and optional initial draft. |
 | `GET /v2/config/runtime/items/{config_key}` | readwrite | Editor detail including draft and published reference payloads. |
 | `PUT /v2/config/runtime/items/{config_key}/draft` | readwrite | Optimistic draft save; body contains `expectedDraftVersion`, `payload`, `rollout`. |
 | `POST /v2/config/runtime/items/{config_key}/publish` | readwrite | Publishes the current draft as a higher immutable version. |
 | `GET /v2/config/runtime/items/{config_key}/revisions` | readwrite | Revision history. |
 | `POST /v2/config/runtime/items/{config_key}/rollback` | readwrite | Republishes a historical revision as a higher version. |
+| `POST /v2/config/runtime/items/{config_key}/{retire,restore}` | readwrite | Soft-retire or restore a key. Retired keys are absent from snapshots and cannot be edited/published. |
 | `GET /v2/config/runtime/snapshot` | readonly | Published, rollout-selected values with ETag; secret references stay redacted. |
-| `GET /v2/config/runtime/secrets`, `PUT /v2/config/runtime/secrets/{name}` | readwrite | Fingerprint/reference metadata and encrypted write only; no secret plaintext read endpoint. |
+| `GET /v2/config/runtime/secrets`, `PUT /v2/config/runtime/secrets/{name}` | readwrite | Fingerprint/reference metadata and encrypted write only; no secret plaintext read endpoint. `?includeRetired=true` includes archived metadata. |
+| `POST /v2/config/runtime/secrets/{name}/{retire,restore}` | readwrite | Soft-retire or restore a secret. Retirement is refused while an active config or draft references it. |
 
 ### Pages
 

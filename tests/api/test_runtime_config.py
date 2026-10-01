@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -138,6 +140,12 @@ def test_runtime_config_draft_publish_snapshot_and_secret_redaction(
             headers={**_headers(readonly_key), "If-None-Match": etag},
         ).status_code == 200
 
+        blocked_secret_retire = api_client.post(
+            "/v2/config/runtime/secrets/test_runtime_token/retire",
+            headers=_headers(readwrite_key),
+        )
+        assert blocked_secret_retire.status_code == 409, blocked_secret_retire.text
+
         with Session(db_engine) as sess:
             resolved = resolve_runtime_config(
                 sess,
@@ -215,5 +223,106 @@ def test_runtime_config_optimistic_lock_and_rollback(api_client, db_engine, read
             "publishedVersion": 3,
             "rolledBackFrom": 1,
         }
+    finally:
+        _clear_runtime_config(db_engine)
+
+
+def test_runtime_config_readonly_client_uses_redacted_snapshot() -> None:
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "runtime-configs.js"
+    ).read_text(encoding="utf-8")
+
+    assert "async function loadPublished(item)" in source
+    assert 'api("/snapshot")' in source
+    assert "if (state.writable)" in source
+
+
+def test_runtime_config_rejects_empty_secret_reference(api_client, db_engine, readwrite_key):
+    _clear_runtime_config(db_engine)
+    try:
+        response = api_client.post(
+            "/v2/config/runtime/items",
+            headers=_headers(readwrite_key),
+            json={
+                "configKey": "test_runtime.invalid_secret",
+                "displayName": "TEST invalid secret",
+                "jsonSchema": _schema(secret_reference=True),
+                "draftPayload": {"endpoint": "https://example.test", "token": "secret://"},
+            },
+        )
+        assert response.status_code == 422, response.text
+        assert "non-empty secret:// reference" in response.text
+    finally:
+        _clear_runtime_config(db_engine)
+
+
+def test_runtime_config_retirement_lifecycle(api_client, db_engine, readonly_key, readwrite_key):
+    _clear_runtime_config(db_engine)
+    try:
+        created = api_client.post(
+            "/v2/config/runtime/items",
+            headers=_headers(readwrite_key),
+            json={
+                "configKey": "test_runtime.retire",
+                "displayName": "TEST retirement",
+                "jsonSchema": _schema(),
+                "draftPayload": {"endpoint": "https://v1.example", "value": "v1"},
+            },
+        )
+        assert created.status_code == 201, created.text
+        assert api_client.post(
+            "/v2/config/runtime/items/test_runtime.retire/publish",
+            headers=_headers(readwrite_key),
+            json={"expectedDraftVersion": created.json()["draftVersion"]},
+        ).status_code == 200
+        retired = api_client.post(
+            "/v2/config/runtime/items/test_runtime.retire/retire",
+            headers=_headers(readwrite_key),
+        )
+        assert retired.json()["status"] == "retired"
+        assert api_client.put(
+            "/v2/config/runtime/items/test_runtime.retire/draft",
+            headers=_headers(readwrite_key),
+            json={
+                "expectedDraftVersion": 2,
+                "payload": {"endpoint": "https://v2.example", "value": "v2"},
+            },
+        ).status_code == 409
+        assert "test_runtime.retire" not in api_client.get(
+            "/v2/config/runtime/snapshot", headers=_headers(readonly_key)
+        ).json()["items"]
+        listed = api_client.get(
+            "/v2/config/runtime/items?includeRetired=true",
+            headers=_headers(readwrite_key),
+        )
+        assert listed.json()["items"][0]["retiredAt"] is not None
+        assert api_client.post(
+            "/v2/config/runtime/items/test_runtime.retire/restore",
+            headers=_headers(readwrite_key),
+        ).json()["status"] == "active"
+
+        secret = api_client.put(
+            "/v2/config/runtime/secrets/test_runtime_unused",
+            headers=_headers(readwrite_key),
+            json={"value": "TEST_unused"},
+        )
+        assert secret.status_code == 200, secret.text
+        assert api_client.post(
+            "/v2/config/runtime/secrets/test_runtime_unused/retire",
+            headers=_headers(readwrite_key),
+        ).json()["status"] == "retired"
+        assert api_client.put(
+            "/v2/config/runtime/secrets/test_runtime_unused",
+            headers=_headers(readwrite_key),
+            json={"value": "TEST_replacement"},
+        ).status_code == 409
+        assert api_client.post(
+            "/v2/config/runtime/secrets/test_runtime_unused/restore",
+            headers=_headers(readwrite_key),
+        ).json()["status"] == "active"
     finally:
         _clear_runtime_config(db_engine)

@@ -85,8 +85,8 @@ def _resolve_secrets(session: Session, value: Any) -> Any:
     if isinstance(value, str) and value.startswith("secret://"):
         name = value.removeprefix("secret://")
         secret = session.get(RuntimeConfigSecret, name)
-        if secret is None:
-            raise KeyError(f"runtime config secret not found: {name}")
+        if secret is None or secret.retired_at is not None:
+            raise KeyError(f"active runtime config secret not found: {name}")
         return decrypt(secret.encrypted_value)
     if isinstance(value, dict):
         return {key: _resolve_secrets(session, child) for key, child in value.items()}

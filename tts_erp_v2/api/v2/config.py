@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any
 
@@ -18,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import get_session, require_role_at_least
@@ -28,8 +30,11 @@ from tts_erp_v2.db.models.config import (
     RuntimeConfigSecret,
 )
 from tts_erp_v2.runtime_config.repository import (
+    RetiredSecretError,
+    locked_item,
     publish,
     published_revision,
+    secret_is_referenced_by_active_config,
     upsert_secret,
 )
 from tts_erp_v2.runtime_config.resolver import select_payload
@@ -229,6 +234,25 @@ def _runtime_item_or_404(sess: Session, config_key: str) -> RuntimeConfigItem:
     return item
 
 
+def _active_runtime_item_or_409(sess: Session, config_key: str) -> RuntimeConfigItem:
+    item = locked_item(sess, config_key)
+    if item is None:
+        raise HTTPException(status_code=404, detail="runtime config not found")
+    if item.retired_at is not None:
+        raise HTTPException(status_code=409, detail="runtime config is retired; restore it first")
+    return item
+
+
+def _validate_secret_name(name: str) -> None:
+    if not name or len(name) > 128 or any(
+        char not in "abcdefghijklmnopqrstuvwxyz0123456789_.-" for char in name
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="secret name must use lowercase letters, digits, dot, dash, or underscore",
+        )
+
+
 def _published_out(sess: Session, item: RuntimeConfigItem) -> dict[str, Any]:
     revision = published_revision(sess, item)
     return {
@@ -238,6 +262,7 @@ def _published_out(sess: Session, item: RuntimeConfigItem) -> dict[str, Any]:
         "hasDraft": item.draft_payload is not None,
         "updatedAt": item.updated_at.isoformat(),
         "publishedAt": revision.created_at.isoformat() if revision else None,
+        "retiredAt": item.retired_at.isoformat() if item.retired_at else None,
     }
 
 
@@ -259,9 +284,18 @@ def _validation_error(exc: ConfigValidationError | KeyError) -> HTTPException:
 
 
 @router.get("/runtime/items")
-def list_runtime_config_items(sess: Session = Depends(get_session)) -> dict[str, list[dict[str, Any]]]:
-    """List runtime keys and published state; draft content stays operator-only."""
-    items = sess.execute(select(RuntimeConfigItem).order_by(RuntimeConfigItem.config_key)).scalars()
+def list_runtime_config_items(
+    request: Request,
+    include_retired: bool = Query(default=False, alias="includeRetired"),
+    sess: Session = Depends(get_session),
+) -> dict[str, list[dict[str, Any]]]:
+    """List runtime keys; retired records are operator-only and opt-in."""
+    if include_retired:
+        require_role_at_least(request, "readwrite")
+    statement = select(RuntimeConfigItem).order_by(RuntimeConfigItem.config_key)
+    if not include_retired:
+        statement = statement.where(RuntimeConfigItem.retired_at.is_(None))
+    items = sess.execute(statement).scalars()
     return {"items": [_published_out(sess, item) for item in items]}
 
 
@@ -272,8 +306,14 @@ def create_runtime_config_item(
     sess: Session = Depends(get_session),
 ) -> dict[str, Any]:
     require_role_at_least(request, "readwrite")
-    if sess.get(RuntimeConfigItem, body.config_key) is not None:
-        raise HTTPException(status_code=409, detail="runtime config key already exists")
+    existing = sess.get(RuntimeConfigItem, body.config_key)
+    if existing is not None:
+        detail = (
+            "runtime config is retired; restore it instead"
+            if existing.retired_at is not None
+            else "runtime config key already exists"
+        )
+        raise HTTPException(status_code=409, detail=detail)
     try:
         validate_schema(body.json_schema)
         if body.draft_payload is not None:
@@ -292,7 +332,11 @@ def create_runtime_config_item(
         draft_version=1 if body.draft_payload is not None else 0,
     )
     sess.add(item)
-    sess.commit()
+    try:
+        sess.commit()
+    except IntegrityError as exc:
+        sess.rollback()
+        raise HTTPException(status_code=409, detail="runtime config key already exists") from exc
     return _detail_out(sess, item)
 
 
@@ -314,7 +358,7 @@ def save_runtime_config_draft(
     sess: Session = Depends(get_session),
 ) -> dict[str, Any]:
     require_role_at_least(request, "readwrite")
-    item = _runtime_item_or_404(sess, config_key)
+    item = _active_runtime_item_or_409(sess, config_key)
     if body.expected_draft_version != item.draft_version:
         raise HTTPException(status_code=409, detail="draft version conflict; reload before saving")
     try:
@@ -337,7 +381,7 @@ def publish_runtime_config_item(
     sess: Session = Depends(get_session),
 ) -> dict[str, Any]:
     require_role_at_least(request, "readwrite")
-    item = _runtime_item_or_404(sess, config_key)
+    item = _active_runtime_item_or_409(sess, config_key)
     if body.expected_draft_version != item.draft_version:
         raise HTTPException(status_code=409, detail="draft version conflict; reload before publishing")
     if item.draft_payload is None:
@@ -351,7 +395,7 @@ def publish_runtime_config_item(
             comment=body.comment,
             actor=_runtime_actor(request),
         )
-    except KeyError as exc:
+    except (ConfigValidationError, KeyError) as exc:
         raise _validation_error(exc) from exc
     sess.commit()
     return {"configKey": config_key, "publishedVersion": revision.version}
@@ -394,7 +438,7 @@ def rollback_runtime_config_item(
 ) -> dict[str, Any]:
     """Republish a historical revision as a higher immutable version."""
     require_role_at_least(request, "readwrite")
-    item = _runtime_item_or_404(sess, config_key)
+    item = _active_runtime_item_or_409(sess, config_key)
     if body.expected_draft_version != item.draft_version:
         raise HTTPException(status_code=409, detail="draft version conflict; reload before rolling back")
     target = sess.execute(
@@ -405,16 +449,53 @@ def rollback_runtime_config_item(
     ).scalar_one_or_none()
     if target is None:
         raise HTTPException(status_code=404, detail="runtime config revision not found")
-    revision = publish(
-        sess,
-        item=item,
-        payload=target.payload,
-        rollout=target.rollout,
-        comment=body.comment or f"rollback to version {target.version}",
-        actor=_runtime_actor(request),
-    )
+    try:
+        revision = publish(
+            sess,
+            item=item,
+            payload=target.payload,
+            rollout=target.rollout,
+            comment=body.comment or f"rollback to version {target.version}",
+            actor=_runtime_actor(request),
+        )
+    except (ConfigValidationError, KeyError) as exc:
+        raise _validation_error(exc) from exc
     sess.commit()
     return {"configKey": config_key, "publishedVersion": revision.version, "rolledBackFrom": target.version}
+
+
+@router.post("/runtime/items/{config_key}/retire")
+def retire_runtime_config_item(
+    config_key: str,
+    request: Request,
+    sess: Session = Depends(get_session),
+) -> dict[str, str]:
+    """Retire a key without deleting its immutable audit history."""
+    require_role_at_least(request, "readwrite")
+    item = locked_item(sess, config_key)
+    if item is None:
+        raise HTTPException(status_code=404, detail="runtime config not found")
+    if item.retired_at is None:
+        item.retired_at = datetime.now(UTC)
+        item.retired_by = _runtime_actor(request)
+        sess.commit()
+    return {"configKey": item.config_key, "status": "retired"}
+
+
+@router.post("/runtime/items/{config_key}/restore")
+def restore_runtime_config_item(
+    config_key: str,
+    request: Request,
+    sess: Session = Depends(get_session),
+) -> dict[str, str]:
+    require_role_at_least(request, "readwrite")
+    item = locked_item(sess, config_key)
+    if item is None:
+        raise HTTPException(status_code=404, detail="runtime config not found")
+    item.retired_at = None
+    item.retired_by = None
+    sess.commit()
+    return {"configKey": item.config_key, "status": "active"}
 
 
 @router.get("/runtime/snapshot")
@@ -431,7 +512,10 @@ def runtime_config_snapshot(
     salt = os.environ.get("TTS_ERP_RUNTIME_CONFIG_SALT", "tts-erp-runtime-config-v1")
     items = sess.execute(
         select(RuntimeConfigItem)
-        .where(RuntimeConfigItem.published_version.is_not(None))
+        .where(
+            RuntimeConfigItem.published_version.is_not(None),
+            RuntimeConfigItem.retired_at.is_(None),
+        )
         .order_by(RuntimeConfigItem.config_key)
     ).scalars()
     values: dict[str, dict[str, Any]] = {}
@@ -461,14 +545,24 @@ def runtime_config_snapshot(
 @router.get("/runtime/secrets")
 def list_runtime_config_secrets(
     request: Request,
+    include_retired: bool = Query(default=False, alias="includeRetired"),
     sess: Session = Depends(get_session),
 ) -> dict[str, list[dict[str, Any]]]:
-    """List secret reference metadata; encrypted values are never returned."""
+    """List secret metadata; encrypted values are never returned."""
     require_role_at_least(request, "readwrite")
-    rows = sess.execute(select(RuntimeConfigSecret).order_by(RuntimeConfigSecret.name)).scalars()
+    statement = select(RuntimeConfigSecret).order_by(RuntimeConfigSecret.name)
+    if not include_retired:
+        statement = statement.where(RuntimeConfigSecret.retired_at.is_(None))
+    rows = sess.execute(statement).scalars()
     return {
         "items": [
-            {"name": row.name, "ref": f"secret://{row.name}", "fingerprint": row.fingerprint, "updatedAt": row.updated_at.isoformat()}
+            {
+                "name": row.name,
+                "ref": f"secret://{row.name}",
+                "fingerprint": row.fingerprint,
+                "updatedAt": row.updated_at.isoformat(),
+                "retiredAt": row.retired_at.isoformat() if row.retired_at else None,
+            }
             for row in rows
         ]
     }
@@ -482,8 +576,56 @@ def save_runtime_config_secret(
     sess: Session = Depends(get_session),
 ) -> dict[str, str]:
     require_role_at_least(request, "readwrite")
-    if not name or len(name) > 128 or any(char not in "abcdefghijklmnopqrstuvwxyz0123456789_.-" for char in name):
-        raise HTTPException(status_code=422, detail="secret name must use lowercase letters, digits, dot, dash, or underscore")
-    row = upsert_secret(sess, name=name, value=body.value)
+    _validate_secret_name(name)
+    try:
+        row = upsert_secret(sess, name=name, value=body.value)
+    except RetiredSecretError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     sess.commit()
     return {"name": row.name, "ref": f"secret://{row.name}", "fingerprint": row.fingerprint}
+
+
+@router.post("/runtime/secrets/{name}/retire")
+def retire_runtime_config_secret(
+    name: str,
+    request: Request,
+    sess: Session = Depends(get_session),
+) -> dict[str, str]:
+    """Retire an unreferenced secret; history remains encrypted and intact."""
+    require_role_at_least(request, "readwrite")
+    _validate_secret_name(name)
+    row = sess.execute(
+        select(RuntimeConfigSecret)
+        .where(RuntimeConfigSecret.name == name)
+        .with_for_update()
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="runtime config secret not found")
+    if row.retired_at is None and secret_is_referenced_by_active_config(sess, name):
+        raise HTTPException(status_code=409, detail="secret is referenced by an active config or draft")
+    if row.retired_at is None:
+        row.retired_at = datetime.now(UTC)
+        row.retired_by = _runtime_actor(request)
+        sess.commit()
+    return {"name": row.name, "status": "retired"}
+
+
+@router.post("/runtime/secrets/{name}/restore")
+def restore_runtime_config_secret(
+    name: str,
+    request: Request,
+    sess: Session = Depends(get_session),
+) -> dict[str, str]:
+    require_role_at_least(request, "readwrite")
+    _validate_secret_name(name)
+    row = sess.execute(
+        select(RuntimeConfigSecret)
+        .where(RuntimeConfigSecret.name == name)
+        .with_for_update()
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="runtime config secret not found")
+    row.retired_at = None
+    row.retired_by = None
+    sess.commit()
+    return {"name": row.name, "status": "active"}

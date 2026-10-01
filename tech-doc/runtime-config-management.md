@@ -12,7 +12,8 @@
 - 保存草稿和发布都必须携带 `expectedDraftVersion`，冲突返回 `409`，客户端必须重载。
 - 发布会创建递增版本号；历史版本绝不修改或删除。
 - 恢复不是倒退版本号：`rollback` 把目标 revision 的内容复制后发布为更高的新版本。
-- `GET /v2/config/runtime/snapshot` 只返回已发布配置，并以版本映射生成 ETag；支持 `If-None-Match`。
+- `GET /v2/config/runtime/snapshot` 只返回未归档的已发布配置，并以版本映射生成 ETag；支持 `If-None-Match`。
+- 配置项和 secret 均为软归档：`POST .../retire` 停止使用但保留审计历史，`POST .../restore` 恢复。归档 secret 前服务会拒绝仍被活动配置或草稿引用的操作。
 
 ## Schema 与灰度
 
@@ -36,13 +37,13 @@
 
 页面/API 只接受和展示 `secret://<name>`，不会回读明文。保存 secret 时使用 `token_service.encrypt()` 加密；列表仅返回引用、截短 fingerprint 和更新时间。HTTP snapshot 同样保持引用；只有服务进程内的 `resolve_runtime_config()` 能通过 `token_service.decrypt()` 解出值，且不得将结果写入日志、响应、revision 或浏览器 DOM。
 
-先保存 secret，再在配置草稿或灰度 payload 中引用它。发布时服务验证所有引用均存在。
+先保存 secret，再在配置草稿或灰度 payload 中引用它。发布时服务验证所有引用均存在且未归档；`secret://` 后必须是非空的小写名称（字母、数字、点、下划线或短横线）。
 
 ## 权限与页面
 
 - `GET /v2/config/runtime/items`、`GET /v2/config/runtime/snapshot`：`readonly`。
 - 草稿、发布、回滚、revision 详情和 secret 元数据/写入：`readwrite`。
-- `GET /v2/pages/runtime-configs`：`readonly`；只读会话可见发布状态，`readwrite` 才可编辑、发布和管理 secret。
+- `GET /v2/pages/runtime-configs`：`readonly`；只读会话可查看已发布 payload（secret 仍是引用），`readwrite` 才可编辑、发布、查看灰度细节和管理 secret。
 
 页面入口为 Dashboard「运行配置」卡片及侧边栏「基础设置 → 运行配置」。
 
