@@ -22,8 +22,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import exists, select
 from sqlalchemy.dialects.postgresql import distinct_on
@@ -237,57 +236,6 @@ def sync_jobs(session: SessionDep) -> SyncJobsOut:
         jobs=jobs,
         tiktok_shops=_list_tiktok_shops(session),
     )
-
-
-_SYNC_JOBS_PAGE_HTML = """<!doctype html>
-<html lang="zh-Hans">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>定时任务管理 · tts-erp</title>
-  <link rel="stylesheet" href="../../../static/vendor/bootstrap.min.css">
-  <link rel="stylesheet" href="../../../static/css/sync-jobs.css?v=1">
-</head>
-<body>
-  <header class="job-header">
-    <div>
-      <a class="home-link" href="../../../v2/pages/dashboard">← 控制台</a>
-      <div class="eyebrow">Scheduler · Operations</div>
-      <h1>定时任务管理</h1>
-      <p>开启 / 关闭周期调度，或立即触发一次任务。TikTok 类任务可选择单店铺执行。</p>
-    </div>
-    <div class="identity" id="ops-identity">加载中…</div>
-  </header>
-  <main class="job-main">
-    <div id="notice" class="notice" role="status"></div>
-    <section class="panel">
-      <div class="panel-title">
-        <h2>任务清单</h2>
-        <button type="button" class="secondary" id="refresh-btn">刷新</button>
-      </div>
-      <div class="table-wrap">
-        <table class="jobs-table">
-          <thead>
-            <tr>
-              <th>任务</th><th>周期</th><th>范围</th><th>状态</th><th>上次运行</th><th>启用</th><th>立即执行</th>
-            </tr>
-          </thead>
-          <tbody id="jobs-body"><tr><td colspan="7" class="empty">加载中…</td></tr></tbody>
-        </table>
-      </div>
-    </section>
-  </main>
-  <script src="../../../static/js/sync-jobs.js?v=1" defer></script>
-</body>
-</html>
-"""
-
-
-@router.get("/jobs/page", response_class=HTMLResponse)
-def sync_jobs_page(request: Request) -> RedirectResponse:
-    """Legacy entrypoint: redirect to the shared /v2/pages shell."""
-    root_path = request.scope.get("root_path", "")
-    return RedirectResponse(f"{root_path}/v2/pages/sync-jobs", status_code=307)
 
 
 __all__ = ["router"]
