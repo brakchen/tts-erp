@@ -861,9 +861,9 @@
         ? [{ column: initialDef.field, dir: state.order }]
         : [],
       rowFormatter: (row) => {
-        if (row.getData().profit_status === "loss") {
-          row.getElement().classList.add("row-bad");
-        }
+        row
+          .getElement()
+          .classList.toggle("row-bad", row.getData().profit_status === "loss");
       },
     });
     // 用 table.on 订阅（与 dataSorting 同一机制）；6.3 对 options 回调的订阅不可靠。
@@ -2082,6 +2082,14 @@
   }
 
   // ---------- load ----------
+  function cancelCurrentLoad() {
+    if (state.loadController) state.loadController.abort();
+    state.loadController = null;
+    state.loadVersion += 1;
+    state.loading = false;
+    updateSpuSelectionUi();
+  }
+
   function load() {
     // 控件变化后最新条件必须立刻生效：取消旧请求并仅允许最新请求渲染。
     if (state.loadController) state.loadController.abort();
@@ -2394,7 +2402,7 @@
   function dateRangeForPreset(preset, now) {
     var end = reportingEndDate(now);
     if (!end) return null;
-    if (preset === "all") return { start: "", end: end };
+    if (preset === "all") return { start: "", end: "" };
     if (preset === "month") return { start: `${end.slice(0, 8)}01`, end: end };
     var days = parseInt(preset, 10);
     if (!Number.isFinite(days)) return null;
@@ -2626,6 +2634,8 @@
       state.datesTouched = true;
       // 起始 > 截止 → 拒绝这次查询、重置该输入、提示错误
       if (state.wStart && state.wEnd && state.wStart > state.wEnd) {
+        // 先废弃在途请求，避免旧响应随后 render() 覆盖本次校验错误。
+        cancelCurrentLoad();
         renderError(
           "起始日期不能晚于截止日期（当前：" +
             state.wStart +

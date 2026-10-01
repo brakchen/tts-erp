@@ -3569,7 +3569,7 @@ def test_spu_roi_page_remembers_filters_and_enhances_date_range():
     assert "applyDefaultDateRange();" in kernel_js
     assert "无法确定报表时区" in kernel_js
     assert "requiresShopReportingTimeZone() && !state.reportingTimeZone" in kernel_js
-    assert 'if (preset === "all") return { start: "", end: end }' in kernel_js
+    assert 'if (preset === "all") return { start: "", end: "" }' in kernel_js
     assert 'class: "input-group input-group-sm op-date-input-group"' in kernel_js
     assert 'class: "btn-group btn-group-sm op-date-presets"' in kernel_js
     assert 'data-date-preset' in kernel_js
@@ -4937,3 +4937,33 @@ def test_spu_roi_v9_drill_orders_full_loss_flag(api_client, readonly_key, db_eng
     assert by_id["TEST_ORDER_V9_3"]["full_loss"] is False  # 国内取消 ≠ 全损
     assert by_id["TEST_ORDER_V9_2"]["arrived_overseas"] is True
     assert by_id["TEST_ORDER_V9_3"]["arrived_overseas"] is False
+
+
+def test_spu_roi_all_date_preset_clears_both_bounds() -> None:
+    """「不限」日期预设必须真正不传 w_start/w_end,而不是留下截止日。"""
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "spu-profitability-page.js"
+    ).read_text(encoding="utf-8")
+    assert 'if (preset === "all") return { start: "", end: "" };' in src
+
+
+def test_spu_roi_tabulator_row_bad_class_is_toggled_not_only_added() -> None:
+    """Tabulator may reuse row DOM; healthy rows must remove stale loss styling."""
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "spu-profitability-page.js"
+    ).read_text(encoding="utf-8")
+    row_formatter = src.split("rowFormatter: (row) =>", 1)[1].split("},", 1)[0]
+    assert '.classList.toggle("row-bad",' in row_formatter
+    assert '.classList.add("row-bad")' not in row_formatter
