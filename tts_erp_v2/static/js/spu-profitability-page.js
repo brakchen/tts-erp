@@ -846,12 +846,17 @@
       hozAlign: def.columnId === "product" ? "left" : "right",
       frozen: def.columnId === "product",
       minWidth: def.columnId === "product" ? 170 : 120,
+      // fitColumns 把余量按 widthGrow 分给各列：商品列标题长，多吃 3 份。
+      widthGrow: def.columnId === "product" ? 3 : 1,
       formatter: CELL_FORMATTERS[def.field],
     }));
     // 默认排序可能是不对应任何列的字段（如 roi_real）：无列可标时跳过 initialSort。
     var initialDef = COLUMN_DEFS.find((d) => d.sortField === state.sort);
     state.table = new Tabulator(host, {
       columns: columns,
+      // 默认 fitData 只按内容定宽，宽屏下表体右侧留大片空白（表头/行背景
+      // 都是全宽，唯独单元格列不铺满）。fitColumns 使列宽铺满容器。
+      layout: "fitColumns",
       data: [],
       placeholder: "加载中…",
       // 行内下钻直接往行 DOM 后插 div，禁用虚拟滚动防止行被重排回收。
