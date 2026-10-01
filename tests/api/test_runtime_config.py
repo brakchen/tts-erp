@@ -282,6 +282,29 @@ def test_runtime_config_infers_a_permissive_schema_from_initial_draft(
         _clear_runtime_config(db_engine)
 
 
+def test_runtime_config_schema_preview_matches_creation_inference(
+    api_client, readwrite_key
+):
+    response = api_client.post(
+        "/v2/config/runtime/schema/preview",
+        headers=_headers(readwrite_key),
+        json={"payload": {"enabled": True, "items": [1], "extra": None}},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "jsonSchema": {
+            "type": "object",
+            "properties": {
+                "enabled": {"type": "boolean"},
+                "items": {"type": "array", "items": {"type": "integer"}},
+                "extra": {"type": "null"},
+            },
+            "additionalProperties": True,
+        }
+    }
+
+
 def test_runtime_config_readonly_client_uses_redacted_snapshot() -> None:
     source = (
         Path(__file__).resolve().parents[2]
@@ -309,6 +332,9 @@ def test_runtime_config_readonly_client_uses_redacted_snapshot() -> None:
     assert "...(schema ? { jsonSchema: schema } : {})" in source
     assert "textarea.required = false" in source
     assert "field.hidden = true" in source
+    assert "scheduleSchemaPreview" in source
+    assert 'api("/schema/preview"' in source
+    assert "rc-schema-preview-status" in source
     assert "installJsonTools" not in source
     license_text = (
         Path(__file__).resolve().parents[2]

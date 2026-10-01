@@ -1,7 +1,14 @@
 (() => {
   "use strict";
 
-  const state = { item: null, writable: false, jsonEditors: new Map() };
+  const state = {
+    item: null,
+    writable: false,
+    jsonEditors: new Map(),
+    customSchema: false,
+    schemaPreviewTimer: null,
+    schemaPreviewRequest: 0,
+  };
   const $ = (selector) => document.querySelector(selector);
   const api = async (path, options = {}) => {
     const response = await fetch(`../../v2/config/runtime${path}`, {
@@ -109,9 +116,11 @@
         statusBar: true,
         onChangeText(text) {
           textarea.value = text;
+          if (id === "rc-new-payload") scheduleSchemaPreview(text);
         },
         onChangeJSON(json) {
           textarea.value = JSON.stringify(json);
+          if (id === "rc-new-payload") scheduleSchemaPreview(textarea.value);
         },
       });
       editor.setText(textarea.value);
@@ -268,6 +277,29 @@
     }
   }
 
+  function scheduleSchemaPreview(text) {
+    if (state.customSchema) return;
+    if (state.schemaPreviewTimer) clearTimeout(state.schemaPreviewTimer);
+    state.schemaPreviewTimer = setTimeout(async () => {
+      try {
+        const payload = JSON.parse(text);
+        const requestId = ++state.schemaPreviewRequest;
+        const status = $("#rc-schema-preview-status");
+        if (status) status.textContent = "正在推断 Schema…";
+        const result = await api("/schema/preview", {
+          method: "POST",
+          body: JSON.stringify({ payload }),
+        });
+        if (state.customSchema || requestId !== state.schemaPreviewRequest) return;
+        setJsonEditorText("rc-new-schema", pretty(result.jsonSchema));
+        if (status) status.textContent = "已根据初始草稿自动推断";
+      } catch {
+        const status = $("#rc-schema-preview-status");
+        if (status) status.textContent = "初始草稿不是有效 JSON，暂不能推断";
+      }
+    }, 350);
+  }
+
   function setupAdvancedSchema() {
     const textarea = $("#rc-new-schema");
     if (!textarea || textarea.dataset.advancedSchemaInstalled) return;
@@ -278,15 +310,23 @@
     toggle.type = "button";
     toggle.className = "rc-schema-toggle";
     toggle.textContent = "高级：自定义 Schema";
+    const status = document.createElement("span");
+    status.id = "rc-schema-preview-status";
+    status.className = "rc-schema-preview-status";
     field.before(toggle);
+    toggle.after(status);
     field.hidden = true;
     textarea.required = false;
     toggle.addEventListener("click", () => {
       const expanded = field.hidden;
+      state.customSchema = expanded;
       field.hidden = !expanded;
-      textarea.required = expanded;
-      toggle.textContent = expanded ? "收起自定义 Schema" : "高级：自定义 Schema";
-      if (expanded) state.jsonEditors.get("rc-new-schema")?.refresh();
+      toggle.textContent = expanded ? "收起并恢复自动推断" : "高级：自定义 Schema";
+      if (expanded) {
+        state.jsonEditors.get("rc-new-schema")?.refresh();
+      } else {
+        scheduleSchemaPreview($("#rc-new-payload").value);
+      }
     });
   }
 
@@ -307,8 +347,12 @@
         }),
       });
       event.target.reset();
+      state.customSchema = false;
+      if (schemaField) schemaField.hidden = true;
+      $(".rc-schema-toggle").textContent = "高级：自定义 Schema";
       setJsonEditorText("rc-new-schema", $("#rc-new-schema").value);
       setJsonEditorText("rc-new-payload", $("#rc-new-payload").value);
+      scheduleSchemaPreview($("#rc-new-payload").value);
       notice("已创建草稿；检查后发布即可生效");
       await loadItems(item.configKey);
     } catch (error) {
@@ -365,6 +409,7 @@
       $("#rc-create").hidden = !state.writable;
       $("#rc-secrets").hidden = !state.writable;
       $("#rc-history").hidden = !state.writable;
+      if (state.writable) scheduleSchemaPreview($("#rc-new-payload").value);
       await loadItems();
       await loadSecrets();
     } catch (error) {

@@ -200,6 +200,10 @@ class RuntimeConfigCreate(_RuntimeWireModel):
     draft_rollout: list[dict[str, Any]] = Field(default_factory=list, alias="draftRollout")
 
 
+class RuntimeSchemaPreview(_RuntimeWireModel):
+    payload: dict[str, Any]
+
+
 class RuntimeDraftUpdate(_RuntimeWireModel):
     expected_draft_version: int = Field(alias="expectedDraftVersion", ge=0)
     payload: dict[str, Any]
@@ -298,6 +302,16 @@ def list_runtime_config_items(
         statement = statement.where(RuntimeConfigItem.retired_at.is_(None))
     items = sess.execute(statement).scalars()
     return {"items": [_published_out(sess, item) for item in items]}
+
+
+@router.post("/runtime/schema/preview")
+def preview_runtime_config_schema(
+    body: RuntimeSchemaPreview,
+    request: Request,
+) -> dict[str, dict[str, Any]]:
+    """Infer the same permissive schema used when an item is created without one."""
+    require_role_at_least(request, "readwrite")
+    return {"jsonSchema": infer_schema(body.payload)}
 
 
 @router.post("/runtime/items", status_code=201)
