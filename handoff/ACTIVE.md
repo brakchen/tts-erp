@@ -15,5 +15,6 @@
 - Shared hotspot ownership does not require waiting for the original session: exchange a focused patch, hand off ownership explicitly, or create a successor lane from the predecessor's ready commit.
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
+| runtime-config-mobile-blank | 修复运行配置移动端白屏 | 01a0f13c-c315-760e-b7c9-6ac80761f9dc | `fix/runtime-config-mobile-blank` / `.worktrees/runtime-config-mobile-blank` | `tts_erp_v2/api/v2/pages.py`; `tests/api/test_pages.py` | draft | — | — | 2026-10-01 04:56:51 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | fix/spu-roi-shop-timezone | SPU ROI 按当前店铺地区解析报表时区，不再固定越南 | 01a0edf5-a325-77b2-ade9-ac88e25bdd89 | `fix/spu-roi-shop-timezone` / `.worktrees/spu-roi-shop-timezone` | `tts_erp_v2/static/js/spu-roi.js`; `tts_erp_v2/static/js/spu-profitability-page.js`; `tests/api/test_spu_roi_api.py` | active | — | — | 2026-10-01T04:55Z |
