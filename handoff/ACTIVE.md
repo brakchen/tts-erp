@@ -16,5 +16,4 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | runtime-config-auto-schema | 运行配置自动推断Schema | 01a0f13c-c315-760e-b7c9-6ac80761f9dc | `feat/runtime-config-auto-schema` / `.worktrees/runtime-config-auto-schema` | `tts_erp_v2/{api/v2/config.py,runtime_config/validation.py,static/js/runtime-configs.js,static/css/runtime-configs.css}`; `tests/api/test_runtime_config.py`; `tech-doc/runtime-config-management.md` | active | — | — | 2026-10-01 10:49:01 |
-| reuse-evaluation-doc | 复用改造评估总结文档 | 01a0f628-3176-729f-8747-2aac7e599eab | `docs/reuse-evaluation-doc` / `.worktrees/reuse-evaluation-doc` | `tech-doc/reuse-evaluation-2026-10.md` | active | — | — | 2026-10-01 10:55:16 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
