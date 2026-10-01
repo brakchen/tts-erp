@@ -335,18 +335,24 @@ class SpuProfitability:
     projection_basis_qty: int
     projection_basis_sales: Decimal
     projection_basis_refund_amount: Decimal
+    projection_terminal_basis_order_count: int
+    projection_terminal_basis_sales: Decimal
+    projection_terminal_full_loss_sales: Decimal
     projection_full_loss_basis_order_count: int
     projection_basis_full_loss_order_count: int
     projection_basis_full_loss_qty: int
     projection_refund_amount_rate: Decimal | None
+    pre_delivery_full_loss_rate: Decimal | None
     delivered_full_loss_rate: Decimal | None
     settled_full_loss_rate: Decimal | None
     projection_full_loss_qty_rate: Decimal | None
     unsettled_order_count: int
     delivered_unsettled_order_count: int
     full_loss_exposure_unsettled_order_count: int
+    full_loss_exposure_unsettled_sales: Decimal
     confirmed_full_loss_exposure_order_count: int
     confirmed_full_loss_exposure_qty: int
+    confirmed_full_loss_exposure_refund_amount: Decimal
     unresolved_unsettled_order_count: int
     unresolved_full_loss_exposure_order_count: int
     unresolved_unsettled_qty: int
@@ -432,18 +438,24 @@ class ProfitabilityTotals:
     projection_basis_qty: int
     projection_basis_sales: Decimal
     projection_basis_refund_amount: Decimal
+    projection_terminal_basis_order_count: int
+    projection_terminal_basis_sales: Decimal
+    projection_terminal_full_loss_sales: Decimal
     projection_full_loss_basis_order_count: int
     projection_basis_full_loss_order_count: int
     projection_basis_full_loss_qty: int
     projection_refund_amount_rate: Decimal | None
+    pre_delivery_full_loss_rate: Decimal | None
     delivered_full_loss_rate: Decimal | None
     settled_full_loss_rate: Decimal | None
     projection_full_loss_qty_rate: Decimal | None
     unsettled_order_count: int
     delivered_unsettled_order_count: int
     full_loss_exposure_unsettled_order_count: int
+    full_loss_exposure_unsettled_sales: Decimal
     confirmed_full_loss_exposure_order_count: int
     confirmed_full_loss_exposure_qty: int
+    confirmed_full_loss_exposure_refund_amount: Decimal
     unresolved_unsettled_order_count: int
     unresolved_full_loss_exposure_order_count: int
     unresolved_unsettled_qty: int

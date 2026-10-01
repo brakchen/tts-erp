@@ -100,27 +100,27 @@ kept 口径误差 **±1%**；混合口径（含退款单）高估 **~16%**。
 
 ### 4.1 未结算订单预计终局（两个页面共用）
 
-订单先分已结算与未结算：已结算订单使用实际 SETTLEMENT，不再预测；退款金额只预测
-未结算订单。全损预测再从未结算订单中排除已经送达的订单。送达证据取并集：订单状态
-`DELIVERED`/`COMPLETED`，或 shipment 状态 `DELIVERED`、`delivered_at` 非空、物流
-事件 `50101` 任一成立。样本和目标都跟随页面现有订单时间窗口，以
+预测样本不按结算状态分组，而按物流终态分成成功送达和未送达全损。成功送达证据取
+并集：订单状态 `DELIVERED`/`COMPLETED`，或 shipment 状态 `DELIVERED`、
+`delivered_at` 非空、物流事件 `50101` 任一成立。未送达全损必须是 `CANCELLED` 且有
+物流事件 `80101`（运输商因配送失败将包裹退回卖家）；发货前取消、`110101` 待揽收取消、
+仍在途订单和送达后普通售后均排除。样本和目标都跟随页面现有订单时间窗口，以
 `COALESCE(order_time, paid_at)` 归属，不按结算日或售后完成日切窗。
 
 ```text
 projection_refund_amount_rate
-= 已结算样本退款金额 / 已结算样本销售额
+= 未送达全损终态订单销售额 / 全部物流终态样本销售额
 
-delivered_full_loss_rate
-= 已送达且有已完成退款/退货退款的订单数 / 全部已送达订单数
+pre_delivery_full_loss_rate
+= 未送达全损终态订单数 / (成功送达订单数 + 未送达全损终态订单数)
 ```
 
-退款金额率仍优先使用结算 `CUSTOMER_REFUND`，case 作为补充。全损率样本则只看送达
-证据和已完成退款/退货退款 case，与结算状态无关。页面同时展示“当前全损率”和
-“已送达订单全损率”，前者是当前事实，后者才用于预测。
+两个预测比例都来自同一物流终态样本，与结算状态无关。页面同时展示“当前全损率”和
+“未送达终局全损率”，前者是当前事实，后者才用于预测当前尚未送达订单。
 
 ```text
 expected_terminal_full_loss_orders
-= full_loss_exposure_unsettled_order_count × delivered_full_loss_rate
+= full_loss_exposure_unsettled_order_count × pre_delivery_full_loss_rate
 
 projected_future_full_loss_order_count
 = max(expected_terminal_full_loss_orders
@@ -128,7 +128,7 @@ projected_future_full_loss_order_count
 
 expected_terminal_full_loss_qty
 = full_loss_exposure_unsettled_order_count
-  × (delivered_refund_qty / delivered_order_count)
+  × (terminal_full_loss_qty / terminal_delivery_order_count)
 
 projected_future_full_loss_qty
 = max(expected_terminal_full_loss_qty
@@ -136,21 +136,22 @@ projected_future_full_loss_qty
 ```
 
 `full_loss_exposure_unsettled_order_count` 是尚未送达的未结算订单数。预计新增订单数和件数
-还分别以该暴露中尚未确认结果的订单数、件数封顶。全部未结算订单仍用于退款金额和净
-收入预测，避免把“已送达但结算滞后”误解释成全损风险，同时不改变财务结算范围。
+还分别以该暴露中尚未确认结果的订单数、件数封顶。只有该风险池的销售额应用金额损失率；
+已送达但结算滞后的订单不再预测拒收风险。
 
 页面只展示预计未来新增全损，不展示预计终局全损。退款金额也先估算整批终局额度，
 再扣除已确认退款：
 
 ```text
-expected_terminal_refund
-= unsettled_sales_after_fee × projection_refund_amount_rate
-
-projected_terminal_refund
-= max(expected_terminal_refund, confirmed_unsettled_refund_after_fee)
+expected_exposure_refund
+= full_loss_exposure_unsettled_sales_after_fee × projection_refund_amount_rate
 
 projected_future_refund
-= projected_terminal_refund - confirmed_unsettled_refund_after_fee
+= max(expected_exposure_refund
+      - confirmed_full_loss_exposure_refund_after_fee, 0)
+
+projected_terminal_refund
+= confirmed_unsettled_refund_after_fee + projected_future_refund
 
 projected_unsettled_net
 = unsettled_sales_after_fee - projected_terminal_refund
@@ -185,12 +186,12 @@ projected_ad_system_breakeven_roi
 ```
 
 广告消耗为 0，或保本分母小于等于 0时，相应 ROI 输出空值。存在未结算订单但缺少
-退款金额结算样本或已送达全损样本时，状态为 `insufficient_sample`；已有样本对应的比例
-可独立返回，但完整预计结果保持空值。没有未结算订单时状态为 `no_unsettled_orders`，
+同时包含成功送达和未送达全损结果的物流终态样本时，状态为 `insufficient_sample`。
+没有未结算订单时状态为 `no_unsettled_orders`，
 预计利润和四个 ROI 指标与当前值一致。
 
-多 SPU 大盘的退款金额结算样本订单数、已送达样本订单数、已送达退款订单数、未结算
-订单数、未来全损风险暴露订单数和已确认风险暴露全损订单数必须按订单全局去重；金额和
+多 SPU 大盘的物流终态样本订单数、未送达全损终态订单数、未结算订单数、未来全损
+风险暴露订单数和已确认风险暴露全损订单数必须按订单全局去重；金额和
 件数按唯一商品行聚合。
 `spu-roi` 与 `focused-spus` 使用同一 API 和公式，仅 SPU 选择范围不同。
 
