@@ -87,6 +87,24 @@ cred = load_credentials(session, provider="tiktok", external_account_id=shop_id)
 - `scripts/test.sh` still sources `.env.test` and targets shared `tts_erp_v3_test`; use it only for explicitly shared-DB runs, serialized with `flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast`.
 - Full command reference: `tech-doc/commands-reference.md`.
 
+### 5.1 Reuse-first implementation policy
+
+Before implementing non-trivial functionality, agents must first search for a maintained existing solution:
+
+1. Search this repository for an existing equivalent.
+2. Search official documentation, GitHub, and the relevant package ecosystem:
+   - Python: PyPI
+   - JavaScript/TypeScript: npm
+3. Prefer, in order:
+   - existing project code;
+   - official SDKs and maintained libraries;
+   - small, auditable adaptations of a proven upstream implementation;
+   - a new in-house implementation only when no suitable reusable solution exists.
+
+When a suitable library, SDK, or upstream implementation satisfies the request, adopt it directly without requesting human confirmation. Before adoption, verify compatibility with this repository, licence, maintenance status, security posture, and dependency footprint. Pin or constrain dependency versions appropriately. Record the upstream URL, package version or commit, and licence in relevant code comments or technical documentation.
+
+Do not reimplement functionality that a suitable maintained dependency already provides. Do not add a dependency or copy upstream code for trivial logic where a small local implementation is clearer and safer.
+
 ## 6. Code conventions
 
 - Use `from __future__ import annotations` and type hints in Python modules.
