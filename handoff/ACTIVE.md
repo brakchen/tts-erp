@@ -16,3 +16,4 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| spu-roi-delivered-full-loss-rate | 预计全损率改用已送达退款样本 | 01a0f0c0-2b88-760e-b7c9-6ac0585d1cdb | `fix/spu-roi-delivered-full-loss-rate` / `.worktrees/spu-roi-delivered-full-loss-rate` | `tts_erp_v2/analytics/spu_profitability/{_formula_v10.py,_implementation.py,_types.py}`; `tts_erp_v2/analytics/spu_roi.py`; `tts_erp_v2/static/js/{spu-profitability-page.js,spu-roi.js,focused-spus.js}`; `tests/analytics/test_spu_profitability_formula.py`; `tests/api/{test_spu_roi_api.py,test_focused_spus.py}`; `biz-doc/analytics/spu-roi-profit-calculation.md`; `tech-doc/{analytics/roi-calc-prompt.md,external-api.md}` | active | — | — | 2026-10-01 00:10:00 |
