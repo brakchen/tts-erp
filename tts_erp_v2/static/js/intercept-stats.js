@@ -127,35 +127,79 @@
     $container.innerHTML = rows;
   }
 
+  // uPlot 1.6.32 (MIT) — vendored at static/vendor/uplot.iife.min.js,
+  // see static/vendor/NOTICE.md. Replaces the hand-rolled div-bar chart.
+  let dailyPlot = null;
+
   function renderDailyChart() {
     if (!$dailyChart || !stats || !stats.daily) return;
 
     const days = stats.daily;
     if (days.length === 0) {
+      if (dailyPlot) { dailyPlot.destroy(); dailyPlot = null; }
       $dailyChart.innerHTML = '<div class="dist-empty">暂无每日数据</div>';
       return;
     }
+    if (typeof uPlot === 'undefined') {
+      showError('图表库 uPlot 未加载');
+      return;
+    }
 
-    const maxVal = Math.max(...days.map(d => d.count), 1);
-    const rows = days.map(d => {
-      const date = d.date || '—';
-      const count = d.count || 0;
-      const barHeight = (count / maxVal * 100);
-      return `
-        <div class="daily-col">
-          <div class="daily-bar-wrap">
-            <div class="daily-bar" style="height: ${barHeight}%"></div>
-          </div>
-          <span class="daily-count">${formatNumber(count)}</span>
-          <span class="daily-date">${esc(date)}</span>
-        </div>`;
-    }).join('');
+    const xs = days.map(d => {
+      const t = Date.parse(`${d.date}T00:00:00`);
+      return Number.isFinite(t) ? Math.floor(t / 1000) : 0;
+    });
+    const ys = days.map(d => Number(d.count) || 0);
 
-    // pi-lens-ignore: no-unsafe-innerhtml — trusted backend data, esc()-sanitized
-    $dailyChart.innerHTML = rows;
+    const accent = getComputedStyle(document.documentElement)
+      .getPropertyValue('--accent').trim() || '#B8390E';
+
+    const opts = {
+      width: $dailyChart.clientWidth || 640,
+      height: 244,
+      padding: [8, 8, 0, 0],
+      legend: { show: true },
+      cursor: { drag: { x: false, y: false } },
+      scales: { x: { time: true } },
+      axes: [
+        {
+          values: (u, splits) => splits.map(v => {
+            const d = new Date(v * 1000);
+            return `${d.getMonth() + 1}-${d.getDate()}`;
+          }),
+        },
+        { size: 44 },
+      ],
+      series: [
+        {},
+        {
+          label: '请求数',
+          fill: accent,
+          paths: uPlot.paths.bars({ size: [0.55, 48] }),
+          points: { show: false },
+          value: (u, v) => (v == null ? '—' : formatNumber(v)),
+        },
+      ],
+    };
+
+    if (dailyPlot) {
+      dailyPlot.setData([xs, ys]);
+      dailyPlot.setSize({ width: $dailyChart.clientWidth || 640, height: 244 });
+      return;
+    }
+    $dailyChart.innerHTML = '';
+    dailyPlot = new uPlot(opts, [xs, ys], $dailyChart);
   }
 
+  window.addEventListener('resize', () => {
+    if (dailyPlot && $dailyChart) {
+      dailyPlot.setSize({ width: $dailyChart.clientWidth || 640, height: 244 });
+    }
+  });
+
   // ---------- HELPERS ----------
+  const FMT_NUM = new Intl.NumberFormat('zh-CN');
+
   function showLoading(show) {
     if ($loading) $loading.style.display = show ? 'block' : 'none';
   }
@@ -169,7 +213,7 @@
 
   function formatNumber(n) {
     if (n == null) return '—';
-    return n.toLocaleString('zh-CN');
+    return FMT_NUM.format(n);
   }
 
   function esc(s) {

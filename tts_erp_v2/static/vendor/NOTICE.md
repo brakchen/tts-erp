@@ -9,6 +9,8 @@
 | `jsoneditor.min.js` | JSONEditor | 10.4.3 | Apache-2.0 | <https://cdn.jsdelivr.net/npm/jsoneditor@10.4.3/dist/jsoneditor.min.js> (source: <https://github.com/josdejong/jsoneditor>) |
 | `jsoneditor.min.css` | JSONEditor | 10.4.3 | Apache-2.0 | <https://cdn.jsdelivr.net/npm/jsoneditor@10.4.3/dist/jsoneditor.min.css> |
 | `jsoneditor.LICENSE` | JSONEditor | 10.4.3 | Apache-2.0 | package `LICENSE` |
+| `uplot.iife.min.js` | uPlot | 1.6.32 | MIT | <https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.iife.min.js> (source: <https://github.com/leeoniya/uPlot>) |
+| `uplot.min.css` | uPlot | 1.6.32 | MIT | <https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.min.css> |
 
 Self-hosted deliberately: operators reach this service over a private NAT
 tunnel; third-party CDN links would leak operator IPs and break offline.
@@ -20,3 +22,8 @@ Bootstrap MIT license text: <https://github.com/twbs/bootstrap/blob/main/LICENSE
 (copyright 2011-2025 The Bootstrap Authors). Tom Select's Apache-2.0 license is
 vendored verbatim as `tom-select.LICENSE`; JSONEditor's Apache-2.0 license is
 vendored verbatim as `jsoneditor.LICENSE`.
+
+uPlot MIT license text: <https://github.com/leeoniya/uPlot/blob/master/LICENSE>
+(copyright Leon Sorokin). Used by the intercept-stats daily bar chart
+(`js/intercept-stats.js`); vendor files are immutable per pinned version and
+therefore referenced without `?v=` cache-bust tokens, same as Bootstrap.
