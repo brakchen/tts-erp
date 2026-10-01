@@ -102,11 +102,12 @@ def test_focused_spus_page_keeps_the_full_roi_dashboard(
         "sum-net-profit",
         "sum-roi",
         "sum-projection-status",
-        "sum-projection-terminal-basis-orders",
-        "sum-projection-terminal-loss-orders",
-        "sum-projection-refund-rate",
+        "sum-projection-completed-basis-orders",
+        "sum-projection-completed-loss-orders",
         "sum-projection-full-loss-rate",
         "sum-unresolved-orders",
+        "sum-delivered-unsettled-orders",
+        "sum-full-loss-exposure-unsettled-orders",
         "sum-projected-future-loss-qty",
         "sum-projected-net-revenue",
         "sum-projected-net-profit",
@@ -129,9 +130,15 @@ def test_focused_spus_page_keeps_the_full_roi_dashboard(
     standard_profile = (root / "tts_erp_v2/static/js/spu-roi.js").read_text()
     focused_profile = (root / "tts_erp_v2/static/js/focused-spus.js").read_text()
     for hook in shared_hooks:
-        if not hook.startswith("sum-projection") and not hook.startswith(
-            "sum-unresolved"
-        ) and not hook.startswith("sum-projected"):
+        if not hook.startswith(
+            (
+                "sum-projection",
+                "sum-unresolved",
+                "sum-delivered",
+                "sum-full-loss-exposure",
+                "sum-projected",
+            )
+        ):
             continue
         marker = f'"{hook}"'
         assert marker in standard_profile
@@ -144,7 +151,7 @@ def test_focused_spus_page_keeps_the_full_roi_dashboard(
     assert '"sum-projected-terminal-loss-qty"' not in focused_profile
     assert 'id="sum-projected-terminal-loss-qty"' not in standard.text
     assert 'id="sum-projected-terminal-loss-qty"' not in focused.text
-    # 新指标由共享 kernel 动态插入，两个页面 profile 都必须启用。
+    # 未结算已送达指标在模板和两个页面 profile 中都必须启用。
     assert '"sum-delivered-unsettled-orders"' in standard_profile
     assert '"sum-delivered-unsettled-orders"' in focused_profile
 

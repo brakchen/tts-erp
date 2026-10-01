@@ -211,6 +211,8 @@ def _projection_inputs(**overrides) -> ProjectionInput:
         "projection_terminal_full_loss_sales_cny": Decimal(100),
         "projection_terminal_full_loss_order_count": 1,
         "projection_terminal_full_loss_qty": Decimal(2),
+        "projection_completed_basis_order_count": 10,
+        "projection_completed_full_loss_order_count": 1,
         "projection_full_loss_basis_order_count": 10,
         "projection_basis_full_loss_order_count": 1,
         "projection_basis_full_loss_qty": Decimal(2),
@@ -246,18 +248,20 @@ def _projection_inputs(**overrides) -> ProjectionInput:
     return ProjectionInput(**values)
 
 
-def test_projection_uses_terminal_delivery_risk_and_current_profit_delta() -> None:
+def test_projection_uses_completed_order_full_loss_rate_and_current_profit_delta() -> None:
     result = calculate_projection(_projection_inputs())
 
     assert result.status is ProjectionStatus.AVAILABLE
+    assert result.completed_full_loss_rate == Decimal("0.10")
+    # Legacy diagnostics remain visible, but they no longer drive projection.
     assert result.refund_amount_rate == Decimal("0.10")
     assert result.pre_delivery_full_loss_rate == Decimal("0.10")
     assert result.delivered_full_loss_rate == Decimal("0.10")
     assert result.settled_full_loss_rate == Decimal("0.10")
     assert result.projected_future_full_loss_order_count == Decimal("0.5")
-    assert result.projected_future_full_loss_qty == Decimal(1)
-    assert result.projected_terminal_full_loss_qty == Decimal(4)
-    assert result.projected_full_loss_cost_cny == Decimal(40)
+    assert result.projected_future_full_loss_qty == Decimal(2)
+    assert result.projected_terminal_full_loss_qty == Decimal(5)
+    assert result.projected_full_loss_cost_cny == Decimal(50)
     assert result.projected_terminal_refund_amount_cny == Decimal(40)
     assert result.projected_future_refund_amount_cny == Decimal(24)
     assert result.projected_unsettled_net_cny == Decimal(360)
@@ -265,11 +269,11 @@ def test_projection_uses_terminal_delivery_risk_and_current_profit_delta() -> No
     # Current profit already contains 300 of unsettled net. Only the +60 delta
     # is added; COGS and ad spend are not deducted a second time.
     assert result.projected_net_profit_cny == Decimal(-140)
-    assert result.projected_nc_prime_cny == Decimal(920)
-    assert result.projected_cogs_kept_cny == Decimal(790)
-    assert result.projected_roi_real == Decimal("9.2")
-    assert result.projected_roi_breakeven == Decimal(920) / Decimal(130)
-    # Rejection risk is scoped to undelivered sales; without order-level ad
+    assert result.projected_nc_prime_cny == Decimal(910)
+    assert result.projected_cogs_kept_cny == Decimal(780)
+    assert result.projected_roi_real == Decimal("9.1")
+    assert result.projected_roi_breakeven == Decimal(910) / Decimal(130)
+    # Full-loss risk is scoped to undelivered sales; without order-level ad
     # attribution it must not be applied to the entire advertising GMV.
     assert result.projected_ad_gmv_cny == Decimal(800)
     assert result.projected_ad_system_actual_roi == Decimal(8)
@@ -299,7 +303,7 @@ def test_projection_refunds_only_undelivered_terminal_risk_cohort() -> None:
         )
     )
 
-    assert result.pre_delivery_full_loss_rate == Decimal("0.10")
+    assert result.completed_full_loss_rate == Decimal("0.10")
     assert result.projected_future_full_loss_order_count == Decimal(10)
     assert result.projected_future_refund_amount_cny == Decimal(50)
     assert result.projected_terminal_refund_amount_cny == Decimal(70)
@@ -330,7 +334,7 @@ def test_projection_subtracts_confirmed_outcomes_from_whole_cohort_quota() -> No
         )
     )
 
-    assert result.settled_full_loss_rate == Decimal("0.10")
+    assert result.completed_full_loss_rate == Decimal("0.10")
     assert result.projected_future_full_loss_order_count == Decimal(22)
     assert result.projected_future_full_loss_qty == Decimal(22)
 
@@ -352,7 +356,7 @@ def test_projection_excludes_delivery_terminal_orders_from_full_loss_exposure() 
     # full-loss quota uses only the five orders that have not reached delivery.
     assert result.projected_terminal_refund_amount_cny == Decimal(40)
     assert result.projected_future_full_loss_order_count == Decimal(0)
-    assert result.projected_future_full_loss_qty == Decimal(0)
+    assert result.projected_future_full_loss_qty == Decimal("0.7")
 
 
 def test_projection_does_not_double_count_confirmed_unsettled_refund() -> None:
@@ -381,28 +385,69 @@ def test_projection_calculates_projected_ad_system_breakeven_roi() -> None:
     assert result.projected_ad_system_breakeven_roi == Decimal(800) / Decimal(460)
 
 
-def test_projection_terminal_risk_is_independent_of_settlement_sample() -> None:
+def test_projection_completed_rate_is_independent_of_legacy_samples() -> None:
     result = calculate_projection(
         _projection_inputs(
             projection_basis_order_count=0,
             projection_basis_qty=Decimal(0),
             projection_basis_sales_cny=Decimal(0),
             projection_basis_refund_amount_cny=Decimal(0),
+            projection_terminal_basis_order_count=0,
+            projection_terminal_basis_sales_cny=Decimal(0),
+            projection_terminal_full_loss_sales_cny=Decimal(0),
             projection_terminal_full_loss_order_count=0,
             projection_terminal_full_loss_qty=Decimal(0),
+            projection_full_loss_basis_order_count=0,
             projection_basis_full_loss_order_count=0,
             projection_basis_full_loss_qty=Decimal(0),
         )
     )
 
     assert result.status is ProjectionStatus.AVAILABLE
-    assert result.refund_amount_rate == Decimal("0.10")
-    assert result.pre_delivery_full_loss_rate == Decimal(0)
-    assert result.delivered_full_loss_rate == Decimal(0)
-    assert result.settled_full_loss_rate == Decimal(0)
-    assert result.projected_future_full_loss_qty == Decimal(0)
+    assert result.completed_full_loss_rate == Decimal("0.10")
+    assert result.refund_amount_rate is None
+    assert result.pre_delivery_full_loss_rate is None
+    assert result.delivered_full_loss_rate is None
+    assert result.settled_full_loss_rate is None
+    assert result.projected_future_full_loss_qty == Decimal(2)
     assert result.projected_unsettled_net_cny is not None
     assert result.projected_net_profit_cny is not None
+
+
+def test_projection_uses_current_cross_border_completed_order_ratio() -> None:
+    result = calculate_projection(
+        _projection_inputs(
+            projection_completed_basis_order_count=759,
+            projection_completed_full_loss_order_count=80,
+            full_loss_exposure_unsettled_order_count=115,
+            confirmed_full_loss_exposure_order_count=0,
+            unresolved_full_loss_exposure_order_count=115,
+            confirmed_full_loss_exposure_qty=Decimal(0),
+            unresolved_full_loss_exposure_qty=Decimal(117),
+            unresolved_full_loss_exposure_cogs_cny=Decimal("5265.40"),
+            full_loss_exposure_unsettled_sales_after_fee_cny=Decimal("13568.22"),
+            confirmed_full_loss_exposure_refund_after_fee_cny=Decimal(0),
+        )
+    )
+
+    rate = Decimal(80) / Decimal(759)
+    assert result.completed_full_loss_rate == rate
+    assert result.projected_future_full_loss_order_count == Decimal(115) * rate
+    assert result.projected_future_full_loss_qty == Decimal(117) * rate
+    assert result.projected_future_refund_amount_cny == Decimal("13568.22") * rate
+
+
+def test_projection_requires_a_completed_order_sample() -> None:
+    result = calculate_projection(
+        _projection_inputs(
+            projection_completed_basis_order_count=0,
+            projection_completed_full_loss_order_count=0,
+        )
+    )
+
+    assert result.status is ProjectionStatus.INSUFFICIENT_SAMPLE
+    assert result.completed_full_loss_rate is None
+    assert result.projected_net_profit_cny is None
 
 
 def test_projection_without_unsettled_orders_matches_current_actual_result() -> None:

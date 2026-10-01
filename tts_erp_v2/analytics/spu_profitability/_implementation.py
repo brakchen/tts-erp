@@ -183,11 +183,10 @@ _SQL_ROI_SALES = text(
     """
 )
 
-# 终局预测事实：历史物流终态样本只包含成功送达 paid 订单和配送失败后
-# 退回卖家的 CANCELLED 订单（80101）。前者是成功终态，后者是未送达全损
-# 终态；发货前取消和当前仍在途订单都不进入样本。订单/金额全损率只应用于
-# 尚未送达的未结算订单，已送达但结算滞后的订单不再预测拒收风险。
-# 结算字段继续作为兼容解释事实，不再决定预测比例。
+# 预计事实：已完结样本包含已结算、已送达和结果已确定的国内取消订单。
+# 全损分子包含 80101 终局物流全损，以及到达海外/送达后最终全额退款的订单；
+# 国内取消进入分母但不进入分子。该订单全损率应用于尚未送达的未结算风险池，
+# 同时预测订单数、件数和费后收入折损。旧物流终态与售后字段保留作兼容解释。
 _SQL_ROI_PROJECTION = text(
     """
     WITH selected_orders AS (
@@ -224,14 +223,29 @@ _SQL_ROI_PROJECTION = text(
           AND c.case_type IN ('REFUND_ONLY', 'RETURN_AND_REFUND')
         GROUP BY cl.sales_order_line_id
     ),
-    line_facts AS (
-        SELECT sl.spu_pk,
-               sl.order_pk,
-               sl.quantity,
-               sl.unit_price,
-               sl.quantity * sl.unit_price AS line_sales_vnd,
+    completed_case_orders AS (
+        SELECT c.order_pk,
+               coalesce(sum(cl.refund_amount), 0) AS confirmed_refund_amount
+        FROM selected_orders selected
+        JOIN after_sales.cases c ON c.order_pk = selected.order_pk
+        JOIN after_sales.case_lines cl ON cl.case_id = c.id
+        WHERE c.status IN (:st0, :st1)
+          AND c.case_type IN (
+              'REFUND_ONLY', 'RETURN_AND_REFUND', 'CANCELLATION', 'CANCEL'
+          )
+        GROUP BY c.order_pk
+    ),
+    order_facts AS (
+        SELECT so.id AS order_pk,
+               so.status,
                so.status = ANY(CAST(:paid_statuses AS text[])) AS is_paid,
-               (settled.order_pk IS NOT NULL) AS is_settled,
+               settled.order_pk IS NOT NULL AS is_settled,
+               coalesce(settled.customer_refund_vnd, 0) AS customer_refund_vnd,
+               og.order_gmv_vnd,
+               greatest(
+                   abs(coalesce(settled.customer_refund_vnd, 0)),
+                   coalesce(case_orders.confirmed_refund_amount, 0)
+               ) AS final_refund_vnd,
                (
                    so.status = ANY(CAST(:delivery_terminal_order_statuses AS text[]))
                    OR EXISTS (
@@ -262,29 +276,86 @@ _SQL_ROI_PROJECTION = text(
                        WHERE sh.order_pk = so.id
                          AND te.action_code = :returned_to_seller_action_code
                    )
-               ) AS is_terminal_full_loss,
+               ) AS is_terminal_full_loss
+        FROM selected_orders selected
+        JOIN commerce.sales_orders so ON so.id = selected.order_pk
+        JOIN order_gmv og ON og.order_pk = so.id
+        LEFT JOIN settled_orders settled ON settled.order_pk = so.id
+        LEFT JOIN completed_case_orders case_orders ON case_orders.order_pk = so.id
+        WHERE (
+              so.status = ANY(CAST(:paid_statuses AS text[]))
+              OR so.status = 'CANCELLED'
+          )
+          AND (CAST(:ws AS timestamptz) IS NULL
+               OR coalesce(so.order_time, so.paid_at) >= CAST(:ws AS timestamptz))
+          AND (CAST(:we AS timestamptz) IS NULL
+               OR coalesce(so.order_time, so.paid_at) < CAST(:we AS timestamptz))
+    ),
+    exposed_orders AS (
+        SELECT order_facts.*,
+               (
+                   is_delivery_terminal
+                   OR EXISTS (
+                       SELECT 1
+                       FROM fulfillment.shipments sh
+                       JOIN fulfillment.tracking_events te
+                         ON te.shipment_id = sh.id
+                       WHERE sh.order_pk = order_facts.order_pk
+                         AND te.action_code = :overseas_action_code
+                   )
+               ) AS is_overseas_exposed
+        FROM order_facts
+    ),
+    completed_orders AS (
+        SELECT exposed_orders.*,
+               (is_settled OR is_delivery_terminal OR status = 'CANCELLED')
+                   AS is_completed
+        FROM exposed_orders
+    ),
+    classified_orders AS (
+        SELECT completed_orders.*,
+               (
+                   is_completed
+                   AND (
+                       is_terminal_full_loss
+                       OR (
+                           is_overseas_exposed
+                           AND order_gmv_vnd > 0
+                           AND final_refund_vnd >= order_gmv_vnd
+                       )
+                   )
+               ) AS is_completed_full_loss
+        FROM completed_orders
+    ),
+    line_facts AS (
+        SELECT sl.spu_pk,
+               sl.order_pk,
+               sl.quantity,
+               sl.unit_price,
+               sl.quantity * sl.unit_price AS line_sales_vnd,
+               orders.is_paid,
+               orders.is_settled,
+               orders.is_delivery_terminal,
+               orders.is_terminal_full_loss,
+               orders.is_completed,
+               orders.is_completed_full_loss,
                coalesce(cc.completed_case_line_count, 0) > 0
                    AS is_delivered_full_loss,
                least(sl.quantity, coalesce(cc.confirmed_qty, 0)) AS confirmed_qty,
                CASE
-                   WHEN coalesce(settled.customer_refund_vnd, 0) <> 0
-                   THEN abs(settled.customer_refund_vnd)
+                   WHEN orders.is_completed_full_loss THEN sl.quantity
+                   ELSE 0
+               END AS confirmed_full_loss_qty,
+               CASE
+                   WHEN orders.customer_refund_vnd <> 0
+                   THEN abs(orders.customer_refund_vnd)
                         * (sl.quantity * sl.unit_price)
-                        / nullif(og.order_gmv_vnd, 0)
+                        / nullif(orders.order_gmv_vnd, 0)
                    ELSE coalesce(cc.confirmed_refund_amount, 0)
                END AS basis_refund_amount,
                coalesce(cc.confirmed_refund_amount, 0) AS confirmed_refund_amount,
                CASE
-                   WHEN so.status = 'CANCELLED'
-                    AND EXISTS (
-                        SELECT 1
-                        FROM fulfillment.shipments sh
-                        JOIN fulfillment.tracking_events te
-                          ON te.shipment_id = sh.id
-                        WHERE sh.order_pk = so.id
-                          AND te.action_code = :returned_to_seller_action_code
-                    )
-                   THEN sl.quantity
+                   WHEN orders.is_terminal_full_loss THEN sl.quantity
                    ELSE 0
                END AS terminal_full_loss_qty,
                CASE
@@ -302,21 +373,15 @@ _SQL_ROI_PROJECTION = text(
                greatest(
                    sl.quantity - least(sl.quantity, coalesce(cc.confirmed_qty, 0)),
                    0
-               ) AS unresolved_qty
+               ) AS unresolved_qty,
+               CASE
+                   WHEN orders.is_completed_full_loss THEN 0
+                   ELSE sl.quantity
+               END AS unresolved_full_loss_qty
         FROM commerce.sales_order_lines sl
-        JOIN commerce.sales_orders so ON so.id = sl.order_pk
-        LEFT JOIN settled_orders settled ON settled.order_pk = sl.order_pk
-        JOIN order_gmv og ON og.order_pk = sl.order_pk
+        JOIN classified_orders orders ON orders.order_pk = sl.order_pk
         LEFT JOIN completed_cases cc ON cc.sales_order_line_id = sl.id
         WHERE sl.spu_pk = ANY(CAST(:selected_pks AS bigint[]))
-          AND (
-              so.status = ANY(CAST(:paid_statuses AS text[]))
-              OR so.status = 'CANCELLED'
-          )
-          AND (CAST(:ws AS timestamptz) IS NULL
-               OR coalesce(so.order_time, so.paid_at) >= CAST(:ws AS timestamptz))
-          AND (CAST(:we AS timestamptz) IS NULL
-               OR coalesce(so.order_time, so.paid_at) < CAST(:we AS timestamptz))
     )
     SELECT spu_pk,
            count(DISTINCT order_pk) FILTER (WHERE is_paid AND is_settled)
@@ -348,6 +413,10 @@ _SQL_ROI_PROJECTION = text(
            coalesce(sum(terminal_full_loss_qty) FILTER (
                WHERE is_terminal_full_loss), 0)
                AS projection_terminal_full_loss_qty,
+           count(DISTINCT order_pk) FILTER (WHERE is_completed)
+               AS projection_completed_basis_order_count,
+           count(DISTINCT order_pk) FILTER (WHERE is_completed_full_loss)
+               AS projection_completed_full_loss_order_count,
            count(DISTINCT order_pk) FILTER (
                WHERE is_paid
                  AND is_delivery_terminal
@@ -368,7 +437,7 @@ _SQL_ROI_PROJECTION = text(
                WHERE is_paid
                  AND NOT is_settled
                  AND NOT is_delivery_terminal
-                 AND unresolved_qty > 0)
+                 AND unresolved_full_loss_qty > 0)
                AS unresolved_full_loss_exposure_order_count,
            coalesce(sum(confirmed_refund_amount) FILTER (
                WHERE is_paid AND NOT is_settled), 0)
@@ -377,24 +446,24 @@ _SQL_ROI_PROJECTION = text(
                WHERE is_paid AND NOT is_settled AND NOT is_delivery_terminal), 0)
                AS confirmed_full_loss_exposure_refund_amount_vnd,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid AND NOT is_settled AND confirmed_qty > 0)
+               WHERE is_paid AND NOT is_settled AND confirmed_full_loss_qty > 0)
                AS confirmed_unsettled_full_loss_order_count,
            count(DISTINCT order_pk) FILTER (
                WHERE is_paid
                  AND NOT is_settled
                  AND NOT is_delivery_terminal
-                 AND confirmed_qty > 0)
+                 AND confirmed_full_loss_qty > 0)
                AS confirmed_full_loss_exposure_order_count,
-           coalesce(sum(confirmed_qty) FILTER (
+           coalesce(sum(confirmed_full_loss_qty) FILTER (
                WHERE is_paid AND NOT is_settled), 0)
                AS confirmed_unsettled_full_loss_qty,
-           coalesce(sum(confirmed_qty) FILTER (
+           coalesce(sum(confirmed_full_loss_qty) FILTER (
                WHERE is_paid AND NOT is_settled AND NOT is_delivery_terminal), 0)
                AS confirmed_full_loss_exposure_qty,
            coalesce(sum(unresolved_qty) FILTER (
                WHERE is_paid AND NOT is_settled), 0)
                AS unresolved_unsettled_qty,
-           coalesce(sum(unresolved_qty) FILTER (
+           coalesce(sum(unresolved_full_loss_qty) FILTER (
                WHERE is_paid AND NOT is_settled AND NOT is_delivery_terminal), 0)
                AS unresolved_full_loss_exposure_qty,
            coalesce(sum(line_sales_vnd) FILTER (
@@ -410,15 +479,28 @@ _SQL_ROI_PROJECTION = text(
 
 _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
     """
-    WITH settled_orders AS (
+    WITH selected_orders AS (
+        SELECT DISTINCT order_pk
+        FROM commerce.sales_order_lines
+        WHERE spu_pk = ANY(CAST(:selected_pks AS bigint[]))
+    ),
+    settled_orders AS (
         SELECT st.order_pk,
                coalesce(sum(sc.amount) FILTER (
                    WHERE sc.component_code = 'CUSTOMER_REFUND'), 0)
                    AS customer_refund_vnd
-        FROM finance.settlement_transactions st
+        FROM selected_orders selected
+        JOIN finance.settlement_transactions st ON st.order_pk = selected.order_pk
         JOIN finance.settlement_components sc ON sc.transaction_id = st.id
         GROUP BY st.order_pk
         HAVING count(*) FILTER (WHERE sc.component_code = 'SETTLEMENT') > 0
+    ),
+    order_gmv AS (
+        SELECT sl.order_pk,
+               coalesce(sum(sl.quantity * sl.unit_price), 0) AS order_gmv_vnd
+        FROM selected_orders selected
+        JOIN commerce.sales_order_lines sl ON sl.order_pk = selected.order_pk
+        GROUP BY sl.order_pk
     ),
     completed_cases AS (
         SELECT cl.sales_order_line_id,
@@ -430,10 +512,28 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
           AND c.case_type IN ('REFUND_ONLY', 'RETURN_AND_REFUND')
         GROUP BY cl.sales_order_line_id
     ),
-    line_facts AS (
-        SELECT sl.order_pk,
+    completed_case_orders AS (
+        SELECT c.order_pk,
+               coalesce(sum(cl.refund_amount), 0) AS confirmed_refund_amount
+        FROM selected_orders selected
+        JOIN after_sales.cases c ON c.order_pk = selected.order_pk
+        JOIN after_sales.case_lines cl ON cl.case_id = c.id
+        WHERE c.status IN (:st0, :st1)
+          AND c.case_type IN (
+              'REFUND_ONLY', 'RETURN_AND_REFUND', 'CANCELLATION', 'CANCEL'
+          )
+        GROUP BY c.order_pk
+    ),
+    order_facts AS (
+        SELECT so.id AS order_pk,
+               so.status,
                so.status = ANY(CAST(:paid_statuses AS text[])) AS is_paid,
-               (settled.order_pk IS NOT NULL) AS is_settled,
+               settled.order_pk IS NOT NULL AS is_settled,
+               og.order_gmv_vnd,
+               greatest(
+                   abs(coalesce(settled.customer_refund_vnd, 0)),
+                   coalesce(case_orders.confirmed_refund_amount, 0)
+               ) AS final_refund_vnd,
                (
                    so.status = ANY(CAST(:delivery_terminal_order_statuses AS text[]))
                    OR EXISTS (
@@ -464,20 +564,13 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
                        WHERE sh.order_pk = so.id
                          AND te.action_code = :returned_to_seller_action_code
                    )
-               ) AS is_terminal_full_loss,
-               coalesce(cc.completed_case_line_count, 0) > 0
-                   AS is_delivered_full_loss,
-               least(sl.quantity, coalesce(cc.confirmed_qty, 0)) AS confirmed_qty,
-               greatest(
-                   sl.quantity - least(sl.quantity, coalesce(cc.confirmed_qty, 0)),
-                   0
-               ) AS unresolved_qty
-        FROM commerce.sales_order_lines sl
-        JOIN commerce.sales_orders so ON so.id = sl.order_pk
-        LEFT JOIN settled_orders settled ON settled.order_pk = sl.order_pk
-        LEFT JOIN completed_cases cc ON cc.sales_order_line_id = sl.id
-        WHERE sl.spu_pk = ANY(CAST(:selected_pks AS bigint[]))
-          AND (
+               ) AS is_terminal_full_loss
+        FROM selected_orders selected
+        JOIN commerce.sales_orders so ON so.id = selected.order_pk
+        JOIN order_gmv og ON og.order_pk = so.id
+        LEFT JOIN settled_orders settled ON settled.order_pk = so.id
+        LEFT JOIN completed_case_orders case_orders ON case_orders.order_pk = so.id
+        WHERE (
               so.status = ANY(CAST(:paid_statuses AS text[]))
               OR so.status = 'CANCELLED'
           )
@@ -485,6 +578,70 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
                OR coalesce(so.order_time, so.paid_at) >= CAST(:ws AS timestamptz))
           AND (CAST(:we AS timestamptz) IS NULL
                OR coalesce(so.order_time, so.paid_at) < CAST(:we AS timestamptz))
+    ),
+    exposed_orders AS (
+        SELECT order_facts.*,
+               (
+                   is_delivery_terminal
+                   OR EXISTS (
+                       SELECT 1
+                       FROM fulfillment.shipments sh
+                       JOIN fulfillment.tracking_events te
+                         ON te.shipment_id = sh.id
+                       WHERE sh.order_pk = order_facts.order_pk
+                         AND te.action_code = :overseas_action_code
+                   )
+               ) AS is_overseas_exposed
+        FROM order_facts
+    ),
+    completed_orders AS (
+        SELECT exposed_orders.*,
+               (is_settled OR is_delivery_terminal OR status = 'CANCELLED')
+                   AS is_completed
+        FROM exposed_orders
+    ),
+    classified_orders AS (
+        SELECT completed_orders.*,
+               (
+                   is_completed
+                   AND (
+                       is_terminal_full_loss
+                       OR (
+                           is_overseas_exposed
+                           AND order_gmv_vnd > 0
+                           AND final_refund_vnd >= order_gmv_vnd
+                       )
+                   )
+               ) AS is_completed_full_loss
+        FROM completed_orders
+    ),
+    line_facts AS (
+        SELECT sl.order_pk,
+               orders.is_paid,
+               orders.is_settled,
+               orders.is_delivery_terminal,
+               orders.is_terminal_full_loss,
+               orders.is_completed,
+               orders.is_completed_full_loss,
+               coalesce(cc.completed_case_line_count, 0) > 0
+                   AS is_delivered_full_loss,
+               least(sl.quantity, coalesce(cc.confirmed_qty, 0)) AS confirmed_qty,
+               CASE
+                   WHEN orders.is_completed_full_loss THEN sl.quantity
+                   ELSE 0
+               END AS confirmed_full_loss_qty,
+               greatest(
+                   sl.quantity - least(sl.quantity, coalesce(cc.confirmed_qty, 0)),
+                   0
+               ) AS unresolved_qty,
+               CASE
+                   WHEN orders.is_completed_full_loss THEN 0
+                   ELSE sl.quantity
+               END AS unresolved_full_loss_qty
+        FROM commerce.sales_order_lines sl
+        JOIN classified_orders orders ON orders.order_pk = sl.order_pk
+        LEFT JOIN completed_cases cc ON cc.sales_order_line_id = sl.id
+        WHERE sl.spu_pk = ANY(CAST(:selected_pks AS bigint[]))
     )
     SELECT count(DISTINCT order_pk) FILTER (WHERE is_paid AND is_settled)
                AS projection_basis_order_count,
@@ -497,6 +654,10 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
                AS projection_full_loss_basis_order_count,
            count(DISTINCT order_pk) FILTER (WHERE is_terminal_full_loss)
                AS projection_terminal_full_loss_order_count,
+           count(DISTINCT order_pk) FILTER (WHERE is_completed)
+               AS projection_completed_basis_order_count,
+           count(DISTINCT order_pk) FILTER (WHERE is_completed_full_loss)
+               AS projection_completed_full_loss_order_count,
            count(DISTINCT order_pk) FILTER (
                WHERE is_paid
                  AND is_delivery_terminal
@@ -508,13 +669,13 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
                WHERE is_paid AND NOT is_settled AND NOT is_delivery_terminal)
                AS full_loss_exposure_unsettled_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid AND NOT is_settled AND confirmed_qty > 0)
+               WHERE is_paid AND NOT is_settled AND confirmed_full_loss_qty > 0)
                AS confirmed_unsettled_full_loss_order_count,
            count(DISTINCT order_pk) FILTER (
                WHERE is_paid
                  AND NOT is_settled
                  AND NOT is_delivery_terminal
-                 AND confirmed_qty > 0)
+                 AND confirmed_full_loss_qty > 0)
                AS confirmed_full_loss_exposure_order_count,
            count(DISTINCT order_pk) FILTER (
                WHERE is_paid AND NOT is_settled AND unresolved_qty > 0)
@@ -523,7 +684,7 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
                WHERE is_paid
                  AND NOT is_settled
                  AND NOT is_delivery_terminal
-                 AND unresolved_qty > 0)
+                 AND unresolved_full_loss_qty > 0)
                AS unresolved_full_loss_exposure_order_count
     FROM line_facts
     """
@@ -1308,6 +1469,7 @@ def _query_spu_roi(
                     _DELIVERY_TERMINAL_SHIPMENT_STATUSES
                 ),
                 "delivered_action_code": _TRACK_ACTION_CODE_DELIVERED,
+                "overseas_action_code": _TRACK_ACTION_CODE_OVERSEAS,
                 "returned_to_seller_action_code": (
                     _TRACK_ACTION_CODE_RETURNED_TO_SELLER
                 ),
@@ -1446,6 +1608,18 @@ def _query_spu_roi(
         )
         projection_terminal_full_loss_qty = (
             _row_int(projection_facts["projection_terminal_full_loss_qty"])
+            if projection_facts
+            else 0
+        )
+        projection_completed_basis_order_count = (
+            _row_int(projection_facts["projection_completed_basis_order_count"])
+            if projection_facts
+            else 0
+        )
+        projection_completed_full_loss_order_count = (
+            _row_int(
+                projection_facts["projection_completed_full_loss_order_count"]
+            )
             if projection_facts
             else 0
         )
@@ -1644,6 +1818,12 @@ def _query_spu_roi(
                 projection_terminal_full_loss_qty=Decimal(
                     projection_terminal_full_loss_qty
                 ),
+                projection_completed_basis_order_count=(
+                    projection_completed_basis_order_count
+                ),
+                projection_completed_full_loss_order_count=(
+                    projection_completed_full_loss_order_count
+                ),
                 projection_full_loss_basis_order_count=(
                     projection_full_loss_basis_order_count
                 ),
@@ -1808,6 +1988,12 @@ def _query_spu_roi(
                 "projection_terminal_full_loss_qty": (
                     projection_terminal_full_loss_qty
                 ),
+                "projection_completed_basis_order_count": (
+                    projection_completed_basis_order_count
+                ),
+                "projection_completed_full_loss_order_count": (
+                    projection_completed_full_loss_order_count
+                ),
                 "projection_full_loss_basis_order_count": (
                     projection_full_loss_basis_order_count
                 ),
@@ -1821,6 +2007,7 @@ def _query_spu_roi(
                 "pre_delivery_full_loss_rate": (
                     projection.pre_delivery_full_loss_rate
                 ),
+                "completed_full_loss_rate": projection.completed_full_loss_rate,
                 "delivered_full_loss_rate": projection.delivered_full_loss_rate,
                 "settled_full_loss_rate": projection.settled_full_loss_rate,
                 "projection_full_loss_qty_rate": projection.full_loss_qty_rate,
@@ -2030,6 +2217,7 @@ def _query_spu_roi(
                         _DELIVERY_TERMINAL_SHIPMENT_STATUSES
                     ),
                     "delivered_action_code": _TRACK_ACTION_CODE_DELIVERED,
+                    "overseas_action_code": _TRACK_ACTION_CODE_OVERSEAS,
                     "returned_to_seller_action_code": (
                         _TRACK_ACTION_CODE_RETURNED_TO_SELLER
                     ),
@@ -2053,6 +2241,18 @@ def _query_spu_roi(
     total_projection_terminal_full_loss_order_count = (
         _row_int(
             projection_counts_row["projection_terminal_full_loss_order_count"]
+        )
+        if projection_counts_row
+        else 0
+    )
+    total_projection_completed_basis_order_count = (
+        _row_int(projection_counts_row["projection_completed_basis_order_count"])
+        if projection_counts_row
+        else 0
+    )
+    total_projection_completed_full_loss_order_count = (
+        _row_int(
+            projection_counts_row["projection_completed_full_loss_order_count"]
         )
         if projection_counts_row
         else 0
@@ -2250,6 +2450,12 @@ def _query_spu_roi(
             projection_terminal_full_loss_qty=Decimal(
                 total_projection_terminal_full_loss_qty
             ),
+            projection_completed_basis_order_count=(
+                total_projection_completed_basis_order_count
+            ),
+            projection_completed_full_loss_order_count=(
+                total_projection_completed_full_loss_order_count
+            ),
             projection_full_loss_basis_order_count=(
                 total_projection_full_loss_basis_order_count
             ),
@@ -2385,6 +2591,12 @@ def _query_spu_roi(
         projection_terminal_full_loss_qty=(
             total_projection_terminal_full_loss_qty
         ),
+        projection_completed_basis_order_count=(
+            total_projection_completed_basis_order_count
+        ),
+        projection_completed_full_loss_order_count=(
+            total_projection_completed_full_loss_order_count
+        ),
         projection_full_loss_basis_order_count=(
             total_projection_full_loss_basis_order_count
         ),
@@ -2396,6 +2608,7 @@ def _query_spu_roi(
         pre_delivery_full_loss_rate=(
             dashboard_projection.pre_delivery_full_loss_rate
         ),
+        completed_full_loss_rate=dashboard_projection.completed_full_loss_rate,
         delivered_full_loss_rate=dashboard_projection.delivered_full_loss_rate,
         settled_full_loss_rate=dashboard_projection.settled_full_loss_rate,
         projection_full_loss_qty_rate=dashboard_projection.full_loss_qty_rate,
@@ -2521,7 +2734,7 @@ def _query_spu_roi(
     ):
         warnings.append("projection_insufficient_sample")
     if any(row["unsettled_order_count"] > 0 for row in scope_plain):
-        warnings.append("projection_uses_terminal_delivery_sample")
+        warnings.append("projection_uses_completed_order_full_loss_rate")
     warnings.append("ad_system_other_necessary_costs_not_modeled")
 
     # 费率 meta：标量 source/rate 在 scope 内口径唯一时可信；多口径混合时

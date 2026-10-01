@@ -126,11 +126,10 @@
           <div class="op-counter-group h-100">
             <div class="op-counter-group-label">预测依据</div>
             <div class="row g-0 row-cols-2">
-              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预测状态<span class="op-hint" data-tip="只预测所选日期范围内的未结算订单；可预测、无未结算订单或样本不足由后端判定">?</span></span><span class="op-counter-num" id="sum-projection-status">—</span></span></div>
-              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">物流终态样本单<span class="op-hint" data-tip="历史成功送达订单 + 配送失败后退回卖家订单；发货前取消和仍在途订单不进入样本，大盘按订单全局去重">?</span></span><span class="op-counter-num" id="sum-projection-terminal-basis-orders">—</span></span></div>
-              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">拒收全损样本单<span class="op-hint" data-tip="物流终态样本中 CANCELLED 且有 80101 退回卖家事件的订单数">?</span></span><span class="op-counter-num" id="sum-projection-terminal-loss-orders">—</span></span></div>
-              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预计拒收金额率<span class="op-hint" data-tip="拒收全损终态订单销售额 ÷ 全部物流终态样本销售额；只作用于尚未送达订单销售额">?</span></span><span class="op-counter-num" id="sum-projection-refund-rate">—</span></span></div>
-              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">未送达终局全损率<span class="op-hint" data-tip="拒收全损样本单 ÷ 物流终态样本单；用于估算当前尚未送达订单未来拒收/配送失败全损">?</span></span><span class="op-counter-num" id="sum-projection-full-loss-rate">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预测状态<span class="op-hint" data-tip="只预测所选日期范围内尚未送达的未结算风险订单；可预测、无未结算订单或样本不足由后端判定">?</span></span><span class="op-counter-num" id="sum-projection-status">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">已完结样本单<span class="op-hint" data-tip="已结算、已送达或结果已确定的国内取消订单；大盘按订单全局去重">?</span></span><span class="op-counter-num" id="sum-projection-completed-basis-orders">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">已完结全损单<span class="op-hint" data-tip="终局物流全损，或商品已到达海外/已送达后最终全额退款；国内取消不计全损">?</span></span><span class="op-counter-num" id="sum-projection-completed-loss-orders">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">已完结订单全损率<span class="op-hint" data-tip="已完结全损单 ÷ 全部已完结样本单；用于预测待完结风险订单数、件数和收入折损">?</span></span><span class="op-counter-num" id="sum-projection-full-loss-rate">—</span></span></div>
             </div>
           </div>
         </div>
@@ -139,7 +138,9 @@
             <div class="op-counter-group-label">未结算预测对象</div>
             <div class="row g-0 row-cols-2">
               <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">未结算订单<span class="op-hint" data-tip="当前范围内尚未 SETTLEMENT 的订单数；大盘按订单全局去重">?</span></span><span class="op-counter-num" id="sum-unresolved-orders">—</span></span></div>
-              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预计未来新增全损件<span class="op-hint" data-tip="按已结算订单样本估算整批未结算订单终局全损件数，再减去未结算订单中已经确认的全损件数">?</span></span><span class="op-counter-num" id="sum-projected-future-loss-qty">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">未结算已送达订单<span class="op-hint" data-tip="未结算但已送达或已完成的订单；不再预测未来拒收或配送失败">?</span></span><span class="op-counter-num" id="sum-delivered-unsettled-orders">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">待完结风险订单<span class="op-hint" data-tip="未结算且尚未送达的订单；已完结订单全损率只作用于该风险池">?</span></span><span class="op-counter-num" id="sum-full-loss-exposure-unsettled-orders">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预计未来新增全损件<span class="op-hint" data-tip="待完结风险件数 × 已完结订单全损率，再减去风险池中已确认的全损件数；已计货本不重复扣除">?</span></span><span class="op-counter-num" id="sum-projected-future-loss-qty">—</span></span></div>
             </div>
           </div>
         </div>
@@ -147,11 +148,11 @@
           <div class="op-counter-group h-100">
             <div class="op-counter-group-label">预计</div>
             <div class="row g-0 row-cols-2">
-              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预计净收入<span class="op-hint" data-tip="已结算实际到账 + 未结算订单按平台费率、已确认退款和预测退款金额率折算后的净收入">?</span></span><span class="op-counter-num" id="sum-projected-net-revenue">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预计净收入<span class="op-hint" data-tip="已结算实际到账 + 已送达未结算预计到账 + 待完结风险收入 ×（1−已完结订单全损率）− 已确认但尚未反映的退款">?</span></span><span class="op-counter-num" id="sum-projected-net-revenue">—</span></span></div>
               <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预计净利润<span class="op-hint" data-tip="当前净利润 +（新的未结算净收入预测 − 当前未结算净收入估算）；货本和广告费不重复扣除">?</span></span><span class="op-counter-num" id="sum-projected-net-profit">—</span></span></div>
               <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预计ROI<span class="op-hint" data-tip="预计 NC′ ÷ 广告消耗；无广告消耗显示 —">?</span></span><span class="op-counter-num" id="sum-projected-roi">—</span></span></div>
               <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预计保本ROI<span class="op-hint" data-tip="预计 NC′ ÷ (预计 NC′ − 预计保留货本)；分母小于等于 0 或样本不足时显示 —">?</span></span><span class="op-counter-num" id="sum-projected-breakeven-roi">—</span></span></div>
-              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预计广告系统ROI<span class="op-hint" data-tip="预计广告归因GMV ÷ 广告消耗；预计广告归因GMV按已结算样本退款金额率折减">?</span></span><span class="op-counter-num" id="sum-projected-ad-roi">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预计广告系统ROI<span class="op-hint" data-tip="预计广告归因GMV ÷ 广告消耗；没有订单级广告归因映射时，广告归因GMV保持当前值，不乘全损率">?</span></span><span class="op-counter-num" id="sum-projected-ad-roi">—</span></span></div>
               <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预计广告系统保本ROI<span class="op-hint" data-tip="预计广告归因GMV ÷ 预计最大可承受广告费；分母小于等于 0 时显示 —">?</span></span><span class="op-counter-num" id="sum-projected-ad-breakeven-roi">—</span></span></div>
             </div>
           </div>

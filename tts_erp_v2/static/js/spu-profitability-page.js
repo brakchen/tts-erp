@@ -389,12 +389,12 @@
     "sum-roi-ad-actual",
     "sum-roi-ad",
     "sum-projection-status",
-    "sum-projection-terminal-basis-orders",
-    "sum-projection-terminal-loss-orders",
-    "sum-projection-refund-rate",
+    "sum-projection-completed-basis-orders",
+    "sum-projection-completed-loss-orders",
     "sum-projection-full-loss-rate",
     "sum-unresolved-orders",
     "sum-delivered-unsettled-orders",
+    "sum-full-loss-exposure-unsettled-orders",
     "sum-projected-future-loss-qty",
     "sum-projected-net-revenue",
     "sum-projected-net-profit",
@@ -1167,20 +1167,16 @@
       projectionStatusLabel(totals.projection_status),
     );
     setTextIfPresent(
-      "#sum-projection-terminal-basis-orders",
-      fmtInt(totals.projection_terminal_basis_order_count),
+      "#sum-projection-completed-basis-orders",
+      fmtInt(totals.projection_completed_basis_order_count),
     );
     setTextIfPresent(
-      "#sum-projection-terminal-loss-orders",
-      fmtInt(totals.projection_terminal_full_loss_order_count),
-    );
-    setTextIfPresent(
-      "#sum-projection-refund-rate",
-      fmtPct(totals.projection_refund_amount_rate),
+      "#sum-projection-completed-loss-orders",
+      fmtInt(totals.projection_completed_full_loss_order_count),
     );
     setTextIfPresent(
       "#sum-projection-full-loss-rate",
-      fmtPct(totals.pre_delivery_full_loss_rate),
+      fmtPct(totals.completed_full_loss_rate),
     );
     setTextIfPresent(
       "#sum-unresolved-orders",
@@ -1189,6 +1185,10 @@
     setTextIfPresent(
       "#sum-delivered-unsettled-orders",
       fmtInt(totals.delivered_unsettled_order_count),
+    );
+    setTextIfPresent(
+      "#sum-full-loss-exposure-unsettled-orders",
+      fmtInt(totals.full_loss_exposure_unsettled_order_count),
     );
     setTextIfPresent(
       "#sum-projected-future-loss-qty",
@@ -1427,21 +1427,18 @@
       ),
       cell("预测状态", projectionStatusLabel(it.projection_status)),
       cell(
-        "物流终态样本订单",
-        fmtInt(it.projection_terminal_basis_order_count),
+        "已完结样本订单",
+        fmtInt(it.projection_completed_basis_order_count),
       ),
-      cell("物流终态样本销售", money(it.projection_terminal_basis_sales)),
       cell(
-        "拒收全损样本订单",
+        "已完结全损订单",
+        fmtInt(it.projection_completed_full_loss_order_count),
+      ),
+      cell(
+        "其中终局物流全损订单",
         fmtInt(it.projection_terminal_full_loss_order_count),
       ),
-      cell(
-        "拒收全损样本销售",
-        money(it.projection_terminal_full_loss_sales),
-      ),
-      cell("拒收全损样本件", fmtQty(it.projection_terminal_full_loss_qty)),
-      cell("预计拒收金额率", fmtPct(it.projection_refund_amount_rate)),
-      cell("未送达终局全损率", fmtPct(it.pre_delivery_full_loss_rate)),
+      cell("已完结订单全损率", fmtPct(it.completed_full_loss_rate)),
       cell("未结算订单", fmtInt(it.unsettled_order_count)),
       cell("待确认未结算订单", fmtInt(it.unresolved_unsettled_order_count)),
       cell("待确认未结算件", fmtQty(it.unresolved_unsettled_qty)),
