@@ -131,7 +131,7 @@
     }
 
     const rows = requests.map(r => {
-      const time = r.captured_at ? new Date(r.captured_at).toLocaleString('zh-CN', { hour12: false }) : '—';
+      const time = r.captured_at ? FMT_TIME.format(new Date(r.captured_at)) : '—';
       const method = esc(r.method || '—');
       const host = esc(r.endpoint_host || '—');
       const path = esc(r.endpoint_path || '—');
@@ -238,7 +238,7 @@
   function renderDetail(r) {
     if (!$detailContent) return;
 
-    const time = r.captured_at ? new Date(r.captured_at).toLocaleString('zh-CN', { hour12: false }) : '—';
+    const time = r.captured_at ? FMT_TIME.format(new Date(r.captured_at)) : '—';
     const whitelistText = r.is_whitelisted ? `是 (配置 #${r.matched_config_id || '-'})` : '否';
     const reqHeaders = r.request_headers ? JSON.stringify(r.request_headers, null, 2) : '—';
     const reqBody = r.request_body ? JSON.stringify(r.request_body, null, 2) : '—';

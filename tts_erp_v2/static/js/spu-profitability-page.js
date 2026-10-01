@@ -147,29 +147,36 @@
     if (payload && Array.isArray(payload.items)) return payload.items;
     return [];
   }
+  // Cached Intl formatters — Intl.NumberFormat instances are reusable and
+  // safe to share; per-call toLocaleString would rebuild one per cell.
+  var FMT_MONEY = new Intl.NumberFormat("zh-CN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  var FMT_RATIO = new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  var FMT_PCT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
+  var FMT_QTY = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 });
+
   function fmtMoney(v) {
     if (v == null || v === "") return "—";
     var n = parseFloat(v);
     if (!Number.isFinite(n)) return "—";
-    return n.toLocaleString("zh-CN", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
+    return FMT_MONEY.format(n);
   }
   function fmtRatio(v) {
     if (v == null || v === "") return "—";
     var n = parseFloat(v);
     if (!Number.isFinite(n)) return "—";
-    return n.toLocaleString("en-US", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
+    return FMT_RATIO.format(n);
   }
   function fmtPct(v) {
     if (v == null || v === "") return "—";
     var n = parseFloat(v) * 100;
     if (!Number.isFinite(n)) return "—";
-    return n.toLocaleString("en-US", { maximumFractionDigits: 1 }) + "%";
+    return FMT_PCT.format(n) + "%";
   }
   function fmtInt(v) {
     if (v == null || v === "") return "—";
@@ -181,7 +188,7 @@
     if (v == null || v === "") return "—";
     var n = parseFloat(v);
     if (!Number.isFinite(n)) return "—";
-    return n.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+    return FMT_QTY.format(n);
   }
   function projectionStatusLabel(status) {
     if (status === "available") return "可预测";

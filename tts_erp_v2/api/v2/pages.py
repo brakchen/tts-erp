@@ -2783,6 +2783,7 @@ _INTERCEPT_STATS_PAGE_HTML = """<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>拦截统计 · tts-erp</title>
   <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
+  <link rel="stylesheet" href="../../static/vendor/uplot.min.css">
   <style>
     :root {
       --paper: #F4EFE4;
@@ -2839,12 +2840,9 @@ _INTERCEPT_STATS_PAGE_HTML = """<!doctype html>
     .dist-bar { height: 100%; background: var(--accent); transition: width 300ms ease; }
     .dist-value { font-family: var(--mono); font-size: 12px; min-width: 120px; text-align: right; color: var(--ink-soft); }
     .dist-empty { text-align: center; padding: 24px; color: var(--muted); font-size: 13px; }
-    .daily-chart { display: flex; align-items: flex-end; gap: 8px; height: 200px; padding: 16px 0; }
-    .daily-col { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; }
-    .daily-bar-wrap { flex: 1; width: 100%; display: flex; align-items: flex-end; }
-    .daily-bar { width: 100%; background: var(--accent); transition: height 300ms ease; min-height: 2px; }
-    .daily-count { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); margin-top: 4px; }
-    .daily-date { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-top: 2px; }
+    .daily-chart { height: 260px; padding: 8px 0; }
+    .daily-chart .u-over { border-color: var(--rule); }
+    .daily-chart .u-axis { font-family: var(--mono); font-size: 11px; color: var(--muted); }
     .loading { text-align: center; padding: 48px; color: var(--muted); font-family: var(--mono); font-size: 12px; }
     .error-msg { text-align: center; padding: 24px; color: var(--danger); font-size: 13px; display: none; }
     .op-home-link { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-decoration: none; padding: 4px 8px; border: 1px solid var(--rule); transition: border-color 120ms ease; display: inline-block; }
@@ -2896,9 +2894,7 @@ _INTERCEPT_STATS_PAGE_HTML = """<!doctype html>
 
     <div class="section">
       <div class="section-title">最近 7 天每日趋势</div>
-      <div class="daily-chart" id="daily-chart">
-        <div class="dist-empty">加载中…</div>
-      </div>
+      <div class="daily-chart" id="daily-chart"></div>
     </div>
 
     <div class="section">
@@ -2923,6 +2919,7 @@ _INTERCEPT_STATS_PAGE_HTML = """<!doctype html>
     </div>
   </main>
 
+  <script src="../../static/vendor/uplot.iife.min.js"></script>
   <script src="../../static/js/intercept-stats.js?v=__JSV_INTERCEPT_STATS__" defer></script>
 </body>
 </html>
