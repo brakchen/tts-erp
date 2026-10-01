@@ -144,6 +144,42 @@ def validate_rollout(rollout: Any, schema: dict[str, Any]) -> list[dict[str, Any
     return normalized
 
 
+def infer_schema(value: Any) -> dict[str, Any]:
+    """Infer a deliberately permissive schema from an initial JSON payload.
+
+    Object properties preserve observed JSON types, but objects accept future
+    keys and omit ``required`` so an initial draft does not freeze a product
+    team's configuration vocabulary. Homogeneous arrays infer ``items``;
+    heterogeneous or empty arrays stay unconstrained.
+    """
+    if value is None:
+        return {"type": "null"}
+    if isinstance(value, bool):
+        return {"type": "boolean"}
+    if isinstance(value, int):
+        return {"type": "integer"}
+    if isinstance(value, float):
+        return {"type": "number"}
+    if isinstance(value, str):
+        schema: dict[str, Any] = {"type": "string"}
+        if is_secret_reference(value):
+            schema["format"] = "secret-reference"
+        return schema
+    if isinstance(value, list):
+        schema = {"type": "array"}
+        inferred_items = [infer_schema(item) for item in value]
+        if inferred_items and all(item == inferred_items[0] for item in inferred_items[1:]):
+            schema["items"] = inferred_items[0]
+        return schema
+    if isinstance(value, dict):
+        return {
+            "type": "object",
+            "properties": {key: infer_schema(child) for key, child in value.items()},
+            "additionalProperties": True,
+        }
+    raise ConfigValidationError(f"cannot infer schema for {type(value).__name__}")
+
+
 def is_secret_reference(value: Any) -> bool:
     """Return whether a value is a well-formed ``secret://<name>`` reference."""
     if not isinstance(value, str) or not value.startswith("secret://"):

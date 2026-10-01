@@ -17,7 +17,7 @@
 
 ## Schema 与灰度
 
-每个配置键创建时携带一个固定的 JSON Schema 子集。支持 `type`、`properties`、`required`、`additionalProperties`、`items`、`enum`、`format: "secret-reference"` 和基础长度/数值约束。创建、保存草稿、发布前都会校验 payload；标记为 `secret-reference` 的字段只能接收 `secret://<name>`，Schema 不可修改，以保证历史版本可解释。
+创建配置键时可选择携带固定的 JSON Schema 子集，或省略它并由初始草稿自动推断。推断保留对象字段的已观测类型、同构数组的元素类型及 `secret://` 的 `secret-reference` 格式；对象默认不设 `required` 且允许新增字段，避免首次草稿冻结未来配置。支持 `type`、`properties`、`required`、`additionalProperties`、`items`、`enum`、`format: "secret-reference"` 和基础长度/数值约束。创建、保存草稿、发布前都会校验 payload；标记为 `secret-reference` 的字段只能接收 `secret://<name>`，Schema 创建后不可修改，以保证历史版本可解释。
 
 灰度规则是有序数组：
 
