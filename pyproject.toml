@@ -16,6 +16,7 @@ dependencies = [
     "structlog>=24.1",
     "minio>=7.2",  # SPU image storage (tech-doc/procurement-ui-redesign.md §5)
     "cryptography>=50.0",  # oauth-receiver merged (Fernet decryption)
+    "jinja2>=3.1",  # /v2/pages/* templates (BSD-3-Clause, https://palletsprojects.com/p/jinja/)
     "tenacity>=9.1,<10",  # retry/backoff (Apache-2.0, https://github.com/jd/tenacity)
 ]
 

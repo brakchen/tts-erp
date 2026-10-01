@@ -11,9 +11,9 @@ def _profitability_headers() -> list[dict[str, str]]:
     source = (
         Path(__file__).resolve().parents[2]
         / "tts_erp_v2"
-        / "api"
-        / "v2"
-        / "pages.py"
+        / "templates"
+        / "pages"
+        / "spu-profitability.html"
     ).read_text(encoding="utf-8")
     tables = re.findall(
         r'(?s)<table class="[^"]*op-table[^"]*".*?</table>',
