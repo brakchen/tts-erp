@@ -16,3 +16,4 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| fix/spu-roi-index-pushdown | SPU ROI 店铺下推与索引优化 | 01a0edf5-a325-77b2-ade9-ac88e25bdd89 | `fix/spu-roi-index-pushdown` / `.worktrees/spu-roi-index-pushdown` | `tts_erp_v2/analytics/spu_profitability/_implementation.py`; `alembic/versions/0044_spu_roi_indexes.py`; `tests/api/test_spu_roi_api.py`; `tech-doc/analytics/focused-spus.md` | active | — | — | 2026-10-01T17:10Z |
