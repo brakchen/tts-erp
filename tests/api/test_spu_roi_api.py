@@ -5076,3 +5076,20 @@ def test_spu_roi_tabulator_row_bad_class_is_toggled_not_only_added() -> None:
     row_formatter = src.split("rowFormatter: (row) =>", 1)[1].split("},", 1)[0]
     assert '.classList.toggle("row-bad",' in row_formatter
     assert '.classList.add("row-bad")' not in row_formatter
+
+
+def test_spu_roi_tabulator_fills_container_width() -> None:
+    """fitData 只按内容定宽，宽屏下表体右侧留大片空白；必须用 fitColumns 铺满。"""
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "spu-profitability-page.js"
+    ).read_text(encoding="utf-8")
+    table_options = src.split("new Tabulator(host, {", 1)[1].split("});", 1)[0]
+    assert 'layout: "fitColumns"' in table_options
+    # 商品列标题长，铺满时多分余量；其余列保持默认 widthGrow。
+    assert 'widthGrow: def.columnId === "product" ? 3 : 1' in src

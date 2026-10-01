@@ -1,5 +1,11 @@
 # tts-erp CHANGELOG
 
+## 2026-10-02 — SPU ROI 主表铺满容器宽度
+
+- SPU ROI / 重点关注 SPU 主表 Tabulator 布局由默认 `fitData` 改为 `fitColumns`：
+  宽屏下表体不再只占内容宽度、右侧留大片空白；商品列 `widthGrow: 3`
+  承接主要余量，数字列保持紧凑。修复“表格嵌入容器不对”的视觉问题。
+
 ## 2026-09-30 — SPU ROI 未结算订单预计终局
 
 - `GET /v2/analytics/spu-roi` 在保留全部当前字段语义的基础上，新增已结算样本、
