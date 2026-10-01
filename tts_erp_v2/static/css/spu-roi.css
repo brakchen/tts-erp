@@ -471,124 +471,96 @@ a:hover {
  cursor: pointer;
 }
 
-/* ═══ 列头排序：data-sort 是唯一能力声明，新增列无需追加 CSS/JS 白名单 ═══ */
-table.op-table thead th[data-sort] {
- cursor: pointer;
- user-select: none;
-}
-table.op-table thead th[data-sort]:hover,
-table.op-table thead th[data-sort]:focus-visible {
- color: var(--accent);
-}
-table.op-table thead th[data-sort]:focus-visible {
- outline: 2px solid var(--accent);
- outline-offset: -3px;
-}
-table.op-table thead th[data-sort] .arrow {
- color: var(--accent);
-}
-
-/* ═══ 主表 ═══ */
+/* ═══ 主表（Tabulator 6.3.1，自托管 vendor/tabulator.min.*，MIT）═══
+   列头排序/列显隐/冻结首列由 Tabulator 接管；此处只保留暖纸皮肤适配。 */
 .op-main {
  max-width: 1920px;
  margin: 0 auto;
 }
 .op-table-wrap {
- max-height: min(72vh, 880px);
- overflow-y: auto;
  border-bottom: 1px solid var(--rule);
- overscroll-behavior: contain;
 }
 .op-table-wrap:focus-visible {
  outline-offset: -2px;
 }
-table.op-table {
- min-width: 960px;
- margin-bottom: 0;
- --bs-table-bg: transparent;
- --bs-table-color: var(--ink);
- --bs-table-hover-bg: var(--paper-deep);
- --bs-table-hover-color: var(--ink);
+.op-tabulator {
+ background: var(--paper);
+ border: 0;
+ font-size: 14px;
+ font-variant-numeric: tabular-nums;
 }
-table.op-table th:first-child,
-table.op-table td:first-child {
- width: 18%;
- min-width: 170px;
+.op-tabulator .tabulator-header {
+ background: var(--paper);
+ border-bottom: 1px solid var(--rule);
 }
-table.op-table th:not(:first-child),
-table.op-table td:not(:first-child) {
- min-width: 120px;
-}
-.op-th {
- text-align: right;
+.op-tabulator .tabulator-header .tabulator-col {
+ background: var(--paper);
+ color: var(--muted);
  font-size: 13px;
  letter-spacing: 0.04em;
- color: var(--muted);
  font-weight: 600;
- padding: 10px 8px;
- border-bottom: 1px solid var(--rule);
  white-space: nowrap;
- background: var(--paper);
- vertical-align: bottom;
+ border-right: 0;
 }
-.op-th-left {
- text-align: left;
+.op-tabulator .tabulator-header .tabulator-col.tabulator-sortable:hover {
+ color: var(--accent);
 }
-table.op-table thead th {
- position: sticky;
- top: 0;
- z-index: 3;
- background: var(--paper);
+.op-tabulator .tabulator-header .tabulator-col.tabulator-sortable:focus-visible {
+ outline: 2px solid var(--accent);
+ outline-offset: -3px;
 }
-table.op-table thead th:first-child {
- left: 0;
- z-index: 4;
- box-shadow: inset 1px 0 0 var(--rule);
-}
-table.op-table thead th[data-sort][data-tip] {
- cursor: pointer;
-}
-tbody.op-rows td {
- padding: 8px 4px;
- border-bottom: 1px solid var(--rule-soft);
- text-align: right;
+.op-tabulator .tabulator-header .tabulator-col .tabulator-col-title {
  white-space: nowrap;
- font-variant-numeric: tabular-nums;
- font-size: 14px;
+}
+.op-tabulator .tabulator-tableHolder .tabulator-table {
  background: transparent;
 }
-tbody.op-rows td.td-left {
- text-align: left;
+.op-tabulator .tabulator-row {
+ background: transparent;
+ border-bottom: 1px solid var(--rule-soft);
 }
-table.op-table tbody td:first-child {
- position: sticky;
- left: 0;
- z-index: 2;
+.op-tabulator .tabulator-row:hover {
+ background: var(--paper-deep);
+}
+.op-tabulator .tabulator-row .tabulator-cell {
+ border-right: 0;
+}
+/* 冻结首列（Tabulator frozen）：背景必须不透明，滚动时盖住下层列 */
+.op-tabulator .tabulator-row .tabulator-cell.tabulator-frozen {
  background: var(--paper);
  box-shadow: inset 1px 0 0 var(--rule-soft);
 }
-table.op-table tbody tr:hover td:first-child {
+.op-tabulator .tabulator-header .tabulator-col.tabulator-frozen {
+ background: var(--paper);
+ box-shadow: inset 1px 0 0 var(--rule-soft);
+}
+.op-tabulator .tabulator-row:hover .tabulator-cell.tabulator-frozen {
  background: var(--paper-deep);
 }
-table.op-table tbody tr.row-bad td:first-child {
- /* Sticky cells overlap scrolled columns, so their background must be opaque. */
- background: var(--paper-danger);
-}
-tbody.op-rows tr:hover {
- background: var(--paper-deep);
-}
-tr.row-bad {
+.op-tabulator .tabulator-row.row-bad {
  box-shadow: inset 2px 0 0 var(--danger);
 }
-tr.row-bad td {
+.op-tabulator .tabulator-row.row-bad .tabulator-cell {
  background: rgba(140, 26, 26, 0.045);
 }
-tr.row-bad .roi-red,
-tr.row-bad .np-red {
+.op-tabulator .tabulator-row.row-bad .tabulator-cell.tabulator-frozen {
+ background: var(--paper-danger);
+}
+.op-tabulator .tabulator-row.row-bad .roi-red,
+.op-tabulator .tabulator-row.row-bad .np-red {
  color: var(--danger);
  font-weight: 700;
 }
-td.np-red {
+.op-tabulator .tabulator-placeholder {
+ font-family: var(--mono);
+ font-size: 13px;
+ color: var(--muted);
+}
+.op-tabulator .tabulator-placeholder a {
+ color: var(--accent);
+}
+td.np-red,
+.np-red {
  color: var(--danger);
  font-weight: 700;
 }
@@ -836,11 +808,11 @@ textarea[data-tip] {
 
 /* ═══ 钻取面板(D7 行内 accordion + 5 tab) ═══ */
 .op-drill-row {
- display: table-row !important;
+ /* Tabulator 行（div）后插入的独立容器行 */
+ display: block;
 }
-.op-drill-row > td {
- display: table-cell !important;
- padding: 0 !important;
+.op-drill-wrap {
+ padding: 0;
  background: var(--paper-soft, var(--paper));
 }
 .op-drill {
