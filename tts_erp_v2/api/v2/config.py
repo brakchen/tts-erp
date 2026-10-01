@@ -40,6 +40,7 @@ from tts_erp_v2.runtime_config.repository import (
 from tts_erp_v2.runtime_config.resolver import select_payload
 from tts_erp_v2.runtime_config.validation import (
     ConfigValidationError,
+    infer_schema,
     validate_payload,
     validate_rollout,
     validate_schema,
@@ -194,7 +195,7 @@ class _RuntimeWireModel(BaseModel):
 class RuntimeConfigCreate(_RuntimeWireModel):
     config_key: str = Field(alias="configKey", min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_.-]*$")
     display_name: str = Field(alias="displayName", min_length=1, max_length=256)
-    json_schema: dict[str, Any] = Field(alias="jsonSchema")
+    json_schema: dict[str, Any] | None = Field(default=None, alias="jsonSchema")
     draft_payload: dict[str, Any] | None = Field(default=None, alias="draftPayload")
     draft_rollout: list[dict[str, Any]] = Field(default_factory=list, alias="draftRollout")
 
@@ -315,10 +316,16 @@ def create_runtime_config_item(
         )
         raise HTTPException(status_code=409, detail=detail)
     try:
-        validate_schema(body.json_schema)
+        if body.json_schema is None:
+            if body.draft_payload is None:
+                raise ConfigValidationError("draftPayload is required when jsonSchema is omitted")
+            json_schema = infer_schema(body.draft_payload)
+        else:
+            json_schema = body.json_schema
+        validate_schema(json_schema)
         if body.draft_payload is not None:
-            validate_payload(body.draft_payload, body.json_schema)
-            body.draft_rollout = validate_rollout(body.draft_rollout, body.json_schema)
+            validate_payload(body.draft_payload, json_schema)
+            body.draft_rollout = validate_rollout(body.draft_rollout, json_schema)
         elif body.draft_rollout:
             raise ConfigValidationError("draftRollout requires draftPayload")
     except ConfigValidationError as exc:
@@ -326,7 +333,7 @@ def create_runtime_config_item(
     item = RuntimeConfigItem(
         config_key=body.config_key,
         display_name=body.display_name,
-        json_schema=body.json_schema,
+        json_schema=json_schema,
         draft_payload=body.draft_payload,
         draft_rollout=body.draft_rollout,
         draft_version=1 if body.draft_payload is not None else 0,

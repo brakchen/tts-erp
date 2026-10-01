@@ -268,18 +268,41 @@
     }
   }
 
+  function setupAdvancedSchema() {
+    const textarea = $("#rc-new-schema");
+    if (!textarea || textarea.dataset.advancedSchemaInstalled) return;
+    textarea.dataset.advancedSchemaInstalled = "true";
+    const field = textarea.closest(".rc-field");
+    if (!field) return;
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "rc-schema-toggle";
+    toggle.textContent = "高级：自定义 Schema";
+    field.before(toggle);
+    field.hidden = true;
+    textarea.required = false;
+    toggle.addEventListener("click", () => {
+      const expanded = field.hidden;
+      field.hidden = !expanded;
+      textarea.required = expanded;
+      toggle.textContent = expanded ? "收起自定义 Schema" : "高级：自定义 Schema";
+      if (expanded) state.jsonEditors.get("rc-new-schema")?.refresh();
+    });
+  }
+
   async function createItem(event) {
     event.preventDefault();
     if (!state.writable) return;
     try {
-      const schema = parseJson("#rc-new-schema", "Schema");
       const payload = parseJson("#rc-new-payload", "初始草稿");
+      const schemaField = $("#rc-new-schema").closest(".rc-field");
+      const schema = schemaField?.hidden ? null : parseJson("#rc-new-schema", "Schema");
       const item = await api("/items", {
         method: "POST",
         body: JSON.stringify({
           configKey: $("#rc-new-key").value.trim(),
           displayName: $("#rc-new-name").value.trim(),
-          jsonSchema: schema,
+          ...(schema ? { jsonSchema: schema } : {}),
           draftPayload: payload,
         }),
       });
@@ -335,6 +358,7 @@
   async function init() {
     try {
       await installJsonEditors();
+      setupAdvancedSchema();
       const me = await fetch("../../v2/auth/me", { credentials: "same-origin" }).then((r) => r.json());
       state.writable = me.role === "readwrite" || me.role === "admin";
       $("#rc-readonly").hidden = state.writable;

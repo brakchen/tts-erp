@@ -235,6 +235,53 @@ def test_runtime_config_optimistic_lock_and_rollback(api_client, db_engine, read
         _clear_runtime_config(db_engine)
 
 
+def test_runtime_config_infers_a_permissive_schema_from_initial_draft(
+    api_client, db_engine, readwrite_key
+):
+    _clear_runtime_config(db_engine)
+    try:
+        created = api_client.post(
+            "/v2/config/runtime/items",
+            headers=_headers(readwrite_key),
+            json={
+                "configKey": "test_runtime.inferred",
+                "displayName": "TEST inferred schema",
+                "draftPayload": {
+                    "enabled": True,
+                    "retries": 3,
+                    "tags": ["canary"],
+                    "token": "secret://test_runtime_token",
+                },
+            },
+        )
+        assert created.status_code == 201, created.text
+        schema = created.json()["jsonSchema"]
+        assert schema["type"] == "object"
+        assert schema["additionalProperties"] is True
+        assert "required" not in schema
+        assert schema["properties"]["enabled"] == {"type": "boolean"}
+        assert schema["properties"]["retries"] == {"type": "integer"}
+        assert schema["properties"]["tags"] == {
+            "type": "array",
+            "items": {"type": "string"},
+        }
+        assert schema["properties"]["token"] == {
+            "type": "string",
+            "format": "secret-reference",
+        }
+        invalid_type = api_client.put(
+            "/v2/config/runtime/items/test_runtime.inferred/draft",
+            headers=_headers(readwrite_key),
+            json={
+                "expectedDraftVersion": created.json()["draftVersion"],
+                "payload": {"enabled": "yes"},
+            },
+        )
+        assert invalid_type.status_code == 422, invalid_type.text
+    finally:
+        _clear_runtime_config(db_engine)
+
+
 def test_runtime_config_readonly_client_uses_redacted_snapshot() -> None:
     source = (
         Path(__file__).resolve().parents[2]
@@ -257,6 +304,11 @@ def test_runtime_config_readonly_client_uses_redacted_snapshot() -> None:
     assert 'data-action="tree"' in source
     assert 'data-action="code"' in source
     assert "editor.setMode(action)" in source
+    assert "setupAdvancedSchema" in source
+    assert "高级：自定义 Schema" in source
+    assert "...(schema ? { jsonSchema: schema } : {})" in source
+    assert "textarea.required = false" in source
+    assert "field.hidden = true" in source
     assert "installJsonTools" not in source
     license_text = (
         Path(__file__).resolve().parents[2]
