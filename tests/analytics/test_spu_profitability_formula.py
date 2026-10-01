@@ -209,6 +209,8 @@ def _projection_inputs(**overrides) -> ProjectionInput:
         "projection_terminal_basis_order_count": 10,
         "projection_terminal_basis_sales_cny": Decimal(1000),
         "projection_terminal_full_loss_sales_cny": Decimal(100),
+        "projection_terminal_full_loss_order_count": 1,
+        "projection_terminal_full_loss_qty": Decimal(2),
         "projection_full_loss_basis_order_count": 10,
         "projection_basis_full_loss_order_count": 1,
         "projection_basis_full_loss_qty": Decimal(2),
@@ -267,8 +269,10 @@ def test_projection_uses_terminal_delivery_risk_and_current_profit_delta() -> No
     assert result.projected_cogs_kept_cny == Decimal(790)
     assert result.projected_roi_real == Decimal("9.2")
     assert result.projected_roi_breakeven == Decimal(920) / Decimal(130)
-    assert result.projected_ad_gmv_cny == Decimal(720)
-    assert result.projected_ad_system_actual_roi == Decimal("7.2")
+    # Rejection risk is scoped to undelivered sales; without order-level ad
+    # attribution it must not be applied to the entire advertising GMV.
+    assert result.projected_ad_gmv_cny == Decimal(800)
+    assert result.projected_ad_system_actual_roi == Decimal(8)
     assert result.projected_ad_system_max_ad_spend_cny == Decimal(-40)
     assert result.projected_ad_system_breakeven_roi is None
 
@@ -279,6 +283,8 @@ def test_projection_refunds_only_undelivered_terminal_risk_cohort() -> None:
             projection_terminal_basis_order_count=100,
             projection_terminal_basis_sales_cny=Decimal(1000),
             projection_terminal_full_loss_sales_cny=Decimal(100),
+            projection_terminal_full_loss_order_count=10,
+            projection_terminal_full_loss_qty=Decimal(10),
             projection_full_loss_basis_order_count=100,
             projection_basis_full_loss_order_count=10,
             projection_basis_full_loss_qty=Decimal(10),
@@ -305,6 +311,8 @@ def test_projection_subtracts_confirmed_outcomes_from_whole_cohort_quota() -> No
         _projection_inputs(
             projection_basis_order_count=100,
             projection_terminal_basis_order_count=100,
+            projection_terminal_full_loss_order_count=10,
+            projection_terminal_full_loss_qty=Decimal(10),
             projection_full_loss_basis_order_count=100,
             projection_basis_full_loss_order_count=10,
             projection_basis_full_loss_qty=Decimal(10),
@@ -367,10 +375,10 @@ def test_projection_does_not_double_count_confirmed_unsettled_refund() -> None:
 def test_projection_calculates_projected_ad_system_breakeven_roi() -> None:
     result = calculate_projection(_projection_inputs(cogs_total_cny=Decimal(500)))
 
-    assert result.projected_ad_gmv_cny == Decimal(720)
+    assert result.projected_ad_gmv_cny == Decimal(800)
     assert result.projected_ad_system_max_ad_spend_cny == Decimal(460)
-    assert result.projected_ad_system_actual_roi == Decimal("7.2")
-    assert result.projected_ad_system_breakeven_roi == Decimal(720) / Decimal(460)
+    assert result.projected_ad_system_actual_roi == Decimal(8)
+    assert result.projected_ad_system_breakeven_roi == Decimal(800) / Decimal(460)
 
 
 def test_projection_terminal_risk_is_independent_of_settlement_sample() -> None:
@@ -380,6 +388,8 @@ def test_projection_terminal_risk_is_independent_of_settlement_sample() -> None:
             projection_basis_qty=Decimal(0),
             projection_basis_sales_cny=Decimal(0),
             projection_basis_refund_amount_cny=Decimal(0),
+            projection_terminal_full_loss_order_count=0,
+            projection_terminal_full_loss_qty=Decimal(0),
             projection_basis_full_loss_order_count=0,
             projection_basis_full_loss_qty=Decimal(0),
         )

@@ -178,14 +178,16 @@ projected_roi_breakeven
 预计广告系统指标继续使用广告归因 GMV，不能与净收入混用：
 
 ```text
-projected_ad_gmv = ad_gmv × (1 - projection_refund_amount_rate)
+projected_ad_gmv = ad_gmv
 projected_ad_system_roi = projected_ad_gmv / ad_spend
 projected_ad_system_max_ad_spend = projected_net_revenue - cogs_total
 projected_ad_system_breakeven_roi
 = projected_ad_gmv / projected_ad_system_max_ad_spend
 ```
 
-广告消耗为 0，或保本分母小于等于 0时，相应 ROI 输出空值。存在未结算订单但缺少
+未送达拒收风险尚无订单级广告归因映射，不得把风险率套到全部广告 GMV；预计广告
+GMV 保持当前值，只通过预计净收入改变广告系统保本分母。广告消耗为 0，或保本分母
+小于等于 0时，相应 ROI 输出空值。存在未结算订单但缺少
 同时包含成功送达和未送达全损结果的物流终态样本时，状态为 `insufficient_sample`。
 没有未结算订单时状态为 `no_unsettled_orders`，
 预计利润和四个 ROI 指标与当前值一致。

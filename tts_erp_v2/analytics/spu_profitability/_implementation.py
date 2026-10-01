@@ -263,6 +263,8 @@ _SQL_ROI_PROJECTION = text(
                          AND te.action_code = :returned_to_seller_action_code
                    )
                ) AS is_terminal_full_loss,
+               coalesce(cc.completed_case_line_count, 0) > 0
+                   AS is_delivered_full_loss,
                least(sl.quantity, coalesce(cc.confirmed_qty, 0)) AS confirmed_qty,
                CASE
                    WHEN coalesce(settled.customer_refund_vnd, 0) <> 0
@@ -285,6 +287,18 @@ _SQL_ROI_PROJECTION = text(
                    THEN sl.quantity
                    ELSE 0
                END AS terminal_full_loss_qty,
+               CASE
+                   WHEN coalesce(cc.completed_case_line_count, 0) > 0
+                   THEN least(
+                       sl.quantity,
+                       greatest(
+                           coalesce(cc.confirmed_qty, 0),
+                           coalesce(cc.confirmed_refund_amount, 0)
+                           / nullif(sl.unit_price, 0)
+                       )
+                   )
+                   ELSE 0
+               END AS delivered_full_loss_qty,
                greatest(
                    sl.quantity - least(sl.quantity, coalesce(cc.confirmed_qty, 0)),
                    0
@@ -316,21 +330,31 @@ _SQL_ROI_PROJECTION = text(
                WHERE is_paid AND is_settled), 0)
                AS projection_basis_refund_amount_vnd,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_delivery_terminal OR is_terminal_full_loss)
+               WHERE (is_paid AND is_delivery_terminal)
+                  OR is_terminal_full_loss)
                AS projection_terminal_basis_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_delivery_terminal OR is_terminal_full_loss)
+               WHERE is_paid AND is_delivery_terminal)
                AS projection_full_loss_basis_order_count,
            coalesce(sum(line_sales_vnd) FILTER (
-               WHERE is_delivery_terminal OR is_terminal_full_loss), 0)
+               WHERE (is_paid AND is_delivery_terminal)
+                  OR is_terminal_full_loss), 0)
                AS projection_terminal_basis_sales_vnd,
            coalesce(sum(line_sales_vnd) FILTER (
                WHERE is_terminal_full_loss), 0)
                AS projection_terminal_full_loss_sales_vnd,
            count(DISTINCT order_pk) FILTER (WHERE is_terminal_full_loss)
-               AS projection_basis_full_loss_order_count,
+               AS projection_terminal_full_loss_order_count,
            coalesce(sum(terminal_full_loss_qty) FILTER (
                WHERE is_terminal_full_loss), 0)
+               AS projection_terminal_full_loss_qty,
+           count(DISTINCT order_pk) FILTER (
+               WHERE is_paid
+                 AND is_delivery_terminal
+                 AND is_delivered_full_loss)
+               AS projection_basis_full_loss_order_count,
+           coalesce(sum(delivered_full_loss_qty) FILTER (
+               WHERE is_paid AND is_delivery_terminal), 0)
                AS projection_basis_full_loss_qty,
            count(DISTINCT order_pk) FILTER (WHERE is_paid AND NOT is_settled)
                AS unsettled_order_count,
@@ -441,6 +465,8 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
                          AND te.action_code = :returned_to_seller_action_code
                    )
                ) AS is_terminal_full_loss,
+               coalesce(cc.completed_case_line_count, 0) > 0
+                   AS is_delivered_full_loss,
                least(sl.quantity, coalesce(cc.confirmed_qty, 0)) AS confirmed_qty,
                greatest(
                    sl.quantity - least(sl.quantity, coalesce(cc.confirmed_qty, 0)),
@@ -463,12 +489,18 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
     SELECT count(DISTINCT order_pk) FILTER (WHERE is_paid AND is_settled)
                AS projection_basis_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_delivery_terminal OR is_terminal_full_loss)
+               WHERE (is_paid AND is_delivery_terminal)
+                  OR is_terminal_full_loss)
                AS projection_terminal_basis_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_delivery_terminal OR is_terminal_full_loss)
+               WHERE is_paid AND is_delivery_terminal)
                AS projection_full_loss_basis_order_count,
            count(DISTINCT order_pk) FILTER (WHERE is_terminal_full_loss)
+               AS projection_terminal_full_loss_order_count,
+           count(DISTINCT order_pk) FILTER (
+               WHERE is_paid
+                 AND is_delivery_terminal
+                 AND is_delivered_full_loss)
                AS projection_basis_full_loss_order_count,
            count(DISTINCT order_pk) FILTER (WHERE is_paid AND NOT is_settled)
                AS unsettled_order_count,
@@ -1405,6 +1437,18 @@ def _query_spu_roi(
             if projection_facts
             else Decimal(0)
         )
+        projection_terminal_full_loss_order_count = (
+            _row_int(
+                projection_facts["projection_terminal_full_loss_order_count"]
+            )
+            if projection_facts
+            else 0
+        )
+        projection_terminal_full_loss_qty = (
+            _row_int(projection_facts["projection_terminal_full_loss_qty"])
+            if projection_facts
+            else 0
+        )
         projection_full_loss_basis_order_count = (
             _row_int(projection_facts["projection_full_loss_basis_order_count"])
             if projection_facts
@@ -1594,6 +1638,12 @@ def _query_spu_roi(
                 projection_terminal_full_loss_sales_cny=(
                     projection_terminal_full_loss_sales_cny
                 ),
+                projection_terminal_full_loss_order_count=(
+                    projection_terminal_full_loss_order_count
+                ),
+                projection_terminal_full_loss_qty=Decimal(
+                    projection_terminal_full_loss_qty
+                ),
                 projection_full_loss_basis_order_count=(
                     projection_full_loss_basis_order_count
                 ),
@@ -1751,6 +1801,12 @@ def _query_spu_roi(
                 ),
                 "projection_terminal_full_loss_sales": (
                     projection_terminal_full_loss_sales_cny
+                ),
+                "projection_terminal_full_loss_order_count": (
+                    projection_terminal_full_loss_order_count
+                ),
+                "projection_terminal_full_loss_qty": (
+                    projection_terminal_full_loss_qty
                 ),
                 "projection_full_loss_basis_order_count": (
                     projection_full_loss_basis_order_count
@@ -1994,6 +2050,13 @@ def _query_spu_roi(
         if projection_counts_row
         else 0
     )
+    total_projection_terminal_full_loss_order_count = (
+        _row_int(
+            projection_counts_row["projection_terminal_full_loss_order_count"]
+        )
+        if projection_counts_row
+        else 0
+    )
     total_projection_full_loss_basis_order_count = (
         _row_int(projection_counts_row["projection_full_loss_basis_order_count"])
         if projection_counts_row
@@ -2076,6 +2139,9 @@ def _query_spu_roi(
     total_projection_terminal_full_loss_sales = sum(
         (r["projection_terminal_full_loss_sales"] for r in scope_plain),
         Decimal(0),
+    )
+    total_projection_terminal_full_loss_qty = sum(
+        (r["projection_terminal_full_loss_qty"] for r in scope_plain), 0
     )
     total_projection_basis_full_loss_qty = sum(
         (r["projection_basis_full_loss_qty"] for r in scope_plain), 0
@@ -2177,6 +2243,12 @@ def _query_spu_roi(
             ),
             projection_terminal_full_loss_sales_cny=(
                 total_projection_terminal_full_loss_sales
+            ),
+            projection_terminal_full_loss_order_count=(
+                total_projection_terminal_full_loss_order_count
+            ),
+            projection_terminal_full_loss_qty=Decimal(
+                total_projection_terminal_full_loss_qty
             ),
             projection_full_loss_basis_order_count=(
                 total_projection_full_loss_basis_order_count
@@ -2306,6 +2378,12 @@ def _query_spu_roi(
         projection_terminal_basis_sales=total_projection_terminal_basis_sales,
         projection_terminal_full_loss_sales=(
             total_projection_terminal_full_loss_sales
+        ),
+        projection_terminal_full_loss_order_count=(
+            total_projection_terminal_full_loss_order_count
+        ),
+        projection_terminal_full_loss_qty=(
+            total_projection_terminal_full_loss_qty
         ),
         projection_full_loss_basis_order_count=(
             total_projection_full_loss_basis_order_count

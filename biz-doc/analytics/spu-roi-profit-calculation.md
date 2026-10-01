@@ -228,10 +228,10 @@ $$
 $$
 
 两个比例都只作用于尚未送达的未结算风险池：订单率预测未来新增全损单/件，金额率
-预测这些风险订单未来退回的净收入。wire 字段 `pre_delivery_full_loss_rate` 是权威字段；
+预测这些风险订单未来退回的净收入。wire 字段 `pre_delivery_full_loss_rate` 是权威字段。
 兼容字段 `delivered_full_loss_rate`、`projection_full_loss_qty_rate` 与
-`settled_full_loss_rate` 暂时返回同一订单率。当前 `full_loss_rate` 继续展示全部当前事实，
-不作为预测输入。
+`settled_full_loss_rate` 保留原有“已送达订单发生退款”比率，不作为新预测输入。当前
+`full_loss_rate` 继续展示全部当前事实，也不作为预测输入。
 
 #### 2.6.3 未结算收入和全损预测
 
@@ -320,13 +320,15 @@ projected_roi_breakeven
 广告系统预测继续使用广告归因 GMV 分子，不与净收入混用：
 
 ```text
-projected_ad_gmv = ad_gmv × (1 − projection_refund_amount_rate)
+projected_ad_gmv = ad_gmv
 projected_ad_system_roi = projected_ad_gmv ÷ ad_spend
 projected_ad_system_max_ad_spend = projected_net_revenue − cogs_total
 projected_ad_system_breakeven_roi
 = projected_ad_gmv ÷ projected_ad_system_max_ad_spend
 ```
 
+未送达拒收风险没有订单级广告归因映射，不能把风险率套到全部广告归因 GMV；因此
+`projected_ad_gmv` 暂时保持当前 `ad_gmv`，只通过预计净收入改变广告系统保本分母。
 广告消耗为 0 时预计 ROI 返回空值；保本分母小于等于 0 时相应保本 ROI 返回空值。
 大盘金额和件数按唯一商品行聚合，物流终态样本订单数、未送达全损终态订单数、未结算
 订单数、未来全损风险暴露订单数和已确认风险暴露全损订单数按整体范围全局去重，不能

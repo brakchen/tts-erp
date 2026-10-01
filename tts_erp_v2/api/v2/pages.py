@@ -1523,10 +1523,10 @@ _SPU_ROI_PAGE_HTML = """<!doctype html>
             <div class="op-counter-group-label">预测依据</div>
             <div class="row g-0 row-cols-2">
               <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预测状态<span class="op-hint" data-tip="只预测所选日期范围内的未结算订单；可预测、无未结算订单或样本不足由后端判定">?</span></span><span class="op-counter-num" id="sum-projection-status">—</span></span></div>
-              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">退款金额样本单<span class="op-hint" data-tip="同一日期范围内有 SETTLEMENT 实际到账的订单数；只用于预测退款金额，大盘按订单全局去重">?</span></span><span class="op-counter-num" id="sum-projection-basis-orders">—</span></span></div>
-              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">已送达样本单<span class="op-hint" data-tip="同一日期范围内已确认送达的付款订单数；订单状态、物流状态、delivered_at 或 50101 事件任一确认即纳入，大盘按订单全局去重">?</span></span><span class="op-counter-num" id="sum-projection-full-loss-basis-orders">—</span></span></div>
-              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预测退款金额率<span class="op-hint" data-tip="已结算样本中的已完结退款金额 ÷ 已结算样本销售额；仅用于未结算退款金额预测">?</span></span><span class="op-counter-num" id="sum-projection-refund-rate">—</span></span></div>
-              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">已送达订单全损率<span class="op-hint" data-tip="已送达订单中存在已完成退款/退货退款的订单数 ÷ 全部已送达订单数；与结算状态无关，用于估算尚未送达订单未来新增全损">?</span></span><span class="op-counter-num" id="sum-projection-full-loss-rate">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">物流终态样本单<span class="op-hint" data-tip="历史成功送达订单 + 配送失败后退回卖家订单；发货前取消和仍在途订单不进入样本，大盘按订单全局去重">?</span></span><span class="op-counter-num" id="sum-projection-terminal-basis-orders">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">拒收全损样本单<span class="op-hint" data-tip="物流终态样本中 CANCELLED 且有 80101 退回卖家事件的订单数">?</span></span><span class="op-counter-num" id="sum-projection-terminal-loss-orders">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预计拒收金额率<span class="op-hint" data-tip="拒收全损终态订单销售额 ÷ 全部物流终态样本销售额；只作用于尚未送达订单销售额">?</span></span><span class="op-counter-num" id="sum-projection-refund-rate">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">未送达终局全损率<span class="op-hint" data-tip="拒收全损样本单 ÷ 物流终态样本单；用于估算当前尚未送达订单未来拒收/配送失败全损">?</span></span><span class="op-counter-num" id="sum-projection-full-loss-rate">—</span></span></div>
             </div>
           </div>
         </div>

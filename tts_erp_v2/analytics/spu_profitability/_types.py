@@ -338,6 +338,8 @@ class SpuProfitability:
     projection_terminal_basis_order_count: int
     projection_terminal_basis_sales: Decimal
     projection_terminal_full_loss_sales: Decimal
+    projection_terminal_full_loss_order_count: int
+    projection_terminal_full_loss_qty: int
     projection_full_loss_basis_order_count: int
     projection_basis_full_loss_order_count: int
     projection_basis_full_loss_qty: int
@@ -441,6 +443,8 @@ class ProfitabilityTotals:
     projection_terminal_basis_order_count: int
     projection_terminal_basis_sales: Decimal
     projection_terminal_full_loss_sales: Decimal
+    projection_terminal_full_loss_order_count: int
+    projection_terminal_full_loss_qty: int
     projection_full_loss_basis_order_count: int
     projection_basis_full_loss_order_count: int
     projection_basis_full_loss_qty: int

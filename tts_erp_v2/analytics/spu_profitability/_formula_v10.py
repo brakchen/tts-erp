@@ -98,6 +98,8 @@ class ProjectionInput:
     projection_terminal_basis_order_count: int
     projection_terminal_basis_sales_cny: Decimal
     projection_terminal_full_loss_sales_cny: Decimal
+    projection_terminal_full_loss_order_count: int
+    projection_terminal_full_loss_qty: Decimal
     projection_full_loss_basis_order_count: int
     projection_basis_full_loss_order_count: int
     projection_basis_full_loss_qty: Decimal
@@ -219,6 +221,7 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
     )
     refund_amount_rate: Decimal | None = None
     pre_delivery_full_loss_rate: Decimal | None = None
+    delivered_full_loss_rate: Decimal | None = None
     if has_reliable_sample:
         refund_amount_rate = min(
             Decimal(1),
@@ -232,8 +235,17 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
             Decimal(1),
             max(
                 Decimal(0),
-                Decimal(inputs.projection_basis_full_loss_order_count)
+                Decimal(inputs.projection_terminal_full_loss_order_count)
                 / Decimal(inputs.projection_terminal_basis_order_count),
+            ),
+        )
+    if inputs.projection_full_loss_basis_order_count > 0:
+        delivered_full_loss_rate = min(
+            Decimal(1),
+            max(
+                Decimal(0),
+                Decimal(inputs.projection_basis_full_loss_order_count)
+                / Decimal(inputs.projection_full_loss_basis_order_count),
             ),
         )
 
@@ -264,9 +276,9 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
             status=ProjectionStatus.NO_UNSETTLED_ORDERS,
             refund_amount_rate=refund_amount_rate,
             pre_delivery_full_loss_rate=pre_delivery_full_loss_rate,
-            delivered_full_loss_rate=pre_delivery_full_loss_rate,
-            settled_full_loss_rate=pre_delivery_full_loss_rate,
-            full_loss_qty_rate=pre_delivery_full_loss_rate,
+            delivered_full_loss_rate=delivered_full_loss_rate,
+            settled_full_loss_rate=delivered_full_loss_rate,
+            full_loss_qty_rate=delivered_full_loss_rate,
             projected_future_refund_amount_cny=Decimal(0),
             projected_terminal_refund_amount_cny=Decimal(0),
             projected_future_full_loss_order_count=Decimal(0),
@@ -293,9 +305,9 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
             status=ProjectionStatus.INSUFFICIENT_SAMPLE,
             refund_amount_rate=refund_amount_rate,
             pre_delivery_full_loss_rate=pre_delivery_full_loss_rate,
-            delivered_full_loss_rate=pre_delivery_full_loss_rate,
-            settled_full_loss_rate=pre_delivery_full_loss_rate,
-            full_loss_qty_rate=pre_delivery_full_loss_rate,
+            delivered_full_loss_rate=delivered_full_loss_rate,
+            settled_full_loss_rate=delivered_full_loss_rate,
+            full_loss_qty_rate=delivered_full_loss_rate,
             projected_future_refund_amount_cny=None,
             projected_terminal_refund_amount_cny=None,
             projected_future_full_loss_order_count=None,
@@ -357,7 +369,7 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
     expected_terminal_full_loss_qty = Decimal(
         inputs.full_loss_exposure_unsettled_order_count
     ) * (
-        inputs.projection_basis_full_loss_qty
+        inputs.projection_terminal_full_loss_qty
         / Decimal(inputs.projection_terminal_basis_order_count)
     )
     projected_future_full_loss_qty = min(
@@ -402,7 +414,11 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
     if inputs.spend_cny != 0 and breakeven_denom > 0:
         projected_roi_breakeven = projected_nc_prime / breakeven_denom
 
-    projected_ad_gmv = inputs.ad_gmv_cny * (Decimal(1) - refund_amount_rate)
+    # Terminal rejection risk is scoped to undelivered order sales. Ad-attributed
+    # GMV is not mapped to that cohort, so applying the rate to all ad GMV would
+    # understate the advertising numerator. Keep it unchanged until attribution
+    # can be joined at order level.
+    projected_ad_gmv = inputs.ad_gmv_cny
     projected_ad_system_actual_roi = (
         projected_ad_gmv / inputs.spend_cny if inputs.spend_cny != 0 else None
     )
@@ -419,9 +435,9 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
         status=ProjectionStatus.AVAILABLE,
         refund_amount_rate=refund_amount_rate,
         pre_delivery_full_loss_rate=pre_delivery_full_loss_rate,
-        delivered_full_loss_rate=pre_delivery_full_loss_rate,
-        settled_full_loss_rate=pre_delivery_full_loss_rate,
-        full_loss_qty_rate=pre_delivery_full_loss_rate,
+        delivered_full_loss_rate=delivered_full_loss_rate,
+        settled_full_loss_rate=delivered_full_loss_rate,
+        full_loss_qty_rate=delivered_full_loss_rate,
         projected_future_refund_amount_cny=projected_future_refund,
         projected_terminal_refund_amount_cny=projected_terminal_refund,
         projected_future_full_loss_order_count=(
