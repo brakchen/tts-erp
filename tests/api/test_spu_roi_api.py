@@ -744,6 +744,67 @@ def _seed_projection_scenario(sess) -> int:
     return spu_pk
 
 
+def _seed_delivered_full_loss_rate_scenario(sess) -> int:
+    """Delivered refunds drive full-loss risk independently of settlement."""
+
+    seller = "TEST_SELLER_DELIVERED_FULL_LOSS_RATE"
+    shop_pk = _seed_shop(sess, seller)
+    spu_pk = _seed_spu(sess, shop_pk, "TEST_ROI_SPU_DELIVERED_FULL_LOSS_RATE")
+
+    refunded_order = _seed_order_line(
+        sess,
+        shop_pk=shop_pk,
+        spu_pk=spu_pk,
+        order_id="TEST_ORDER_DELIVERED_REFUNDED",
+        status="DELIVERED",
+        line_ext="TEST_LINE_DELIVERED_REFUNDED",
+        qty="1",
+        unit_price="100000",
+        paid=True,
+    )
+    refunded_line = _fetch_spu_line_id(sess, "TEST_ORDER_DELIVERED_REFUNDED")
+    _seed_case(
+        sess,
+        shop_pk=shop_pk,
+        order_pk=refunded_order,
+        ext_case="TEST_CASE_DELIVERED_REFUNDED",
+        case_type="RETURN_AND_REFUND",
+        status="RETURN_OR_REFUND_REQUEST_COMPLETE",
+        lines=[(refunded_line, "TEST_CLINE_DELIVERED_REFUNDED", "1", "100000")],
+    )
+
+    kept_order = _seed_order_line(
+        sess,
+        shop_pk=shop_pk,
+        spu_pk=spu_pk,
+        order_id="TEST_ORDER_DELIVERED_KEPT",
+        status="COMPLETED",
+        line_ext="TEST_LINE_DELIVERED_KEPT",
+        qty="1",
+        unit_price="100000",
+        paid=True,
+    )
+    _seed_settlement(
+        sess,
+        order_pk=kept_order,
+        external_id="TEST_TXN_DELIVERED_KEPT",
+        amount_vnd="100000",
+    )
+
+    _seed_order_line(
+        sess,
+        shop_pk=shop_pk,
+        spu_pk=spu_pk,
+        order_id="TEST_ORDER_DELIVERED_RATE_TARGET",
+        status="IN_TRANSIT",
+        line_ext="TEST_LINE_DELIVERED_RATE_TARGET",
+        qty="2",
+        unit_price="100000",
+        paid=True,
+    )
+    return spu_pk
+
+
 def _seed_delivery_aware_projection_scenario(sess) -> int:
     """Add two unsettled orders that have already reached delivery."""
 
@@ -1218,11 +1279,12 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert item["roi_breakeven"] == "1.92"
     assert item["cpa"] == cny4_from_usd("2")
 
-    # 有未结算订单但没有任何已结算样本时必须失败关闭，不能静默假设
-    # 退款率/全损率为 0。
+    # 没有结算样本时退款金额预测失败关闭；已送达退款样本率独立可用。
     assert item["projection_status"] == "insufficient_sample"
     assert item["projection_refund_amount_rate"] is None
-    assert item["projection_full_loss_qty_rate"] is None
+    assert item["projection_full_loss_basis_order_count"] == 1
+    assert item["delivered_full_loss_rate"] == "1.0000"
+    assert item["projection_full_loss_qty_rate"] == "1.0000"
     assert item["projected_future_full_loss_qty"] is None
     assert item["projected_net_profit"] is None
     assert item["projected_roi_real"] is None
@@ -1273,7 +1335,30 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert body["totals"]["ad_system_breakeven_roi_status"] == "estimated_known_costs"
 
 
-def test_spu_roi_projects_only_unsettled_orders_from_settled_sample(
+def test_spu_roi_projects_full_loss_from_delivered_refund_orders(
+    api_client, readonly_key, db_engine
+):
+    with Session(db_engine) as sess:
+        _seed(sess, _seed_delivered_full_loss_rate_scenario)
+
+    response = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+        params={"q": "TEST_ROI_SPU_DELIVERED_FULL_LOSS_RATE"},
+    )
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+
+    assert item["projection_basis_order_count"] == 1
+    assert item["projection_full_loss_basis_order_count"] == 2
+    assert item["projection_basis_full_loss_order_count"] == 1
+    assert item["delivered_full_loss_rate"] == "0.5000"
+    assert item["settled_full_loss_rate"] == "0.5000"
+    assert Decimal(item["projected_future_full_loss_order_count"]) == Decimal("0.5")
+    assert Decimal(item["projected_future_full_loss_qty"]) == Decimal("0.5")
+
+
+def test_spu_roi_projects_unsettled_orders_from_independent_samples(
     api_client, readonly_key, db_engine
 ):
     with Session(db_engine) as sess:
@@ -1313,9 +1398,11 @@ def test_spu_roi_projects_only_unsettled_orders_from_settled_sample(
     assert item["projection_basis_refund_amount"] == m4(
         Decimal(200_000) * vnd_cny
     )
+    assert item["projection_full_loss_basis_order_count"] == 1
     assert item["projection_basis_full_loss_order_count"] == 1
     assert item["projection_basis_full_loss_qty"] == 2
     assert item["projection_refund_amount_rate"] == "0.2000"
+    assert item["delivered_full_loss_rate"] == "1.0000"
     assert item["settled_full_loss_rate"] == "1.0000"
     assert item["projection_full_loss_qty_rate"] == "1.0000"
     assert item["full_loss_exposure_unsettled_order_count"] == 2
@@ -1358,7 +1445,9 @@ def test_spu_roi_projects_only_unsettled_orders_from_settled_sample(
         "COALESCE(order_time, paid_at)"
     )
     assert "未结算订单" in body["meta"]["projection"]["target"]
-    assert "已结算退款全损订单数" in body["meta"]["projection"][
+    assert "已确认送达" in body["meta"]["projection"]["full_loss_sample"]
+    assert "已送达" in body["meta"]["projection"]["full_loss_rate_source"]
+    assert "与结算状态无关" in body["meta"]["projection"][
         "full_loss_rate_source"
     ]
     # 整批未结算销售预计退款 120,000 VND；其中 100,000 已确认，未来只新增
@@ -1386,9 +1475,11 @@ def test_spu_roi_projects_only_unsettled_orders_from_settled_sample(
         "projection_basis_qty",
         "projection_basis_sales",
         "projection_basis_refund_amount",
+        "projection_full_loss_basis_order_count",
         "projection_basis_full_loss_order_count",
         "projection_basis_full_loss_qty",
         "projection_refund_amount_rate",
+        "delivered_full_loss_rate",
         "settled_full_loss_rate",
         "projection_full_loss_qty_rate",
         "delivered_unsettled_order_count",
@@ -1444,7 +1535,10 @@ def test_spu_roi_excludes_delivered_unsettled_orders_from_full_loss_exposure(
     assert item["full_loss_exposure_unsettled_order_count"] == 1
     assert item["unresolved_unsettled_order_count"] == 3
     assert Decimal(item["projected_future_full_loss_order_count"]) == Decimal(0)
-    assert Decimal(item["projected_future_full_loss_qty"]) == Decimal(1)
+    # Delivered sample: one two-piece refund among three delivered orders.
+    # The exposed order already has one confirmed lost piece, so no future
+    # quantity remains after subtracting the confirmed result.
+    assert Decimal(item["projected_future_full_loss_qty"]) == Decimal(0)
     assert "已送达" in response.json()["meta"]["projection"]["full_loss_target"]
 
 
@@ -3030,9 +3124,11 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
         "projection_basis_qty": 0,
         "projection_basis_sales": "0.0000",
         "projection_basis_refund_amount": "0.0000",
+        "projection_full_loss_basis_order_count": 0,
         "projection_basis_full_loss_order_count": 0,
         "projection_basis_full_loss_qty": 0,
         "projection_refund_amount_rate": None,
+        "delivered_full_loss_rate": None,
         "settled_full_loss_rate": None,
         "projection_full_loss_qty_rate": None,
         "unsettled_order_count": 0,
@@ -3696,6 +3792,7 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
         "sum-roi-ad",
         "sum-projection-status",
         "sum-projection-basis-orders",
+        "sum-projection-full-loss-basis-orders",
         "sum-projection-refund-rate",
         "sum-projection-full-loss-rate",
         "sum-unresolved-orders",
@@ -3719,7 +3816,10 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert "净利润" in body
     assert "全损量" in body
     assert "退款数" in body
-    assert "已结算订单全损率" in body
+    assert "已送达订单全损率" in body
+    assert "已结算订单全损率" not in body
+    assert "退款金额样本单" in body
+    assert "已送达样本单" in body
     assert "预计未来新增全损件" in body
     assert "预计终局全损件" not in body
     assert "预计ROI" in body
@@ -3806,7 +3906,8 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert '"#sum-projection-status"' in js_src
     assert "totals.projection_status" in js_src
     assert "totals.projection_refund_amount_rate" in js_src
-    assert "totals.settled_full_loss_rate" in js_src
+    assert "totals.projection_full_loss_basis_order_count" in js_src
+    assert "totals.delivered_full_loss_rate" in js_src
     assert "totals.projected_net_profit" in js_src
     assert "totals.projected_roi_real" in js_src
     assert "totals.projected_ad_system_actual_roi" in js_src
@@ -3834,10 +3935,11 @@ def test_spu_roi_drill_summary_displays_projection_separately() -> None:
         "it.projection_basis_qty",
         "it.projection_basis_sales",
         "it.projection_basis_refund_amount",
+        "it.projection_full_loss_basis_order_count",
         "it.projection_basis_full_loss_order_count",
         "it.projection_basis_full_loss_qty",
         "it.projection_refund_amount_rate",
-        "it.settled_full_loss_rate",
+        "it.delivered_full_loss_rate",
         "it.unresolved_unsettled_order_count",
         "it.unresolved_unsettled_qty",
         "it.unresolved_unsettled_sales",
@@ -3860,7 +3962,8 @@ def test_spu_roi_drill_summary_displays_projection_separately() -> None:
     assert "预计保本ROI" in summary
     assert "预计广告系统ROI" in summary
     assert "预计广告系统保本ROI" in summary
-    assert "已结算订单全损率" in summary
+    assert "已送达订单全损率" in summary
+    assert "已结算订单全损率" not in summary
     assert "预计终局全损件" not in summary
     assert "预计财务ROI" not in summary
 

@@ -447,9 +447,13 @@ Response envelope:`{items: [...], total, totals, meta}`。`spu_ids` 属于盈利
 | `projection_basis_qty` | int | 已结算样本商品件数 |
 | `projection_basis_sales` | money-str | 已结算样本商品行销售额 CNY |
 | `projection_basis_refund_amount` | money-str | 已结算样本已完结退款金额 CNY |
-| `projection_basis_full_loss_qty` | int | 已结算样本已完结 `REFUND_ONLY/RETURN_AND_REFUND` 全损件数；兼容解释字段，不再作为终局全损预测率分子 |
+| `projection_full_loss_basis_order_count` | int | 同一订单时间窗口内有送达终态证据的 paid 样本订单数；与结算状态无关，大盘全局去重 |
+| `projection_basis_full_loss_order_count` | int | 已送达样本中存在已完成 `REFUND_ONLY/RETURN_AND_REFUND` case 的订单数；大盘全局去重 |
+| `projection_basis_full_loss_qty` | int | 上述已送达退款订单按 case 数量或退款金额折算并封顶到订单行数量的全损件数 |
 | `projection_refund_amount_rate` | rate-str/null | 已结算样本退款金额 ÷ 样本销售额；4 位小数字符串 |
-| `projection_full_loss_qty_rate` | rate-str/null | 兼容字段：当前返回与主表 `full_loss_rate` 同口径的订单全损概率，供待确认订单预测并按平均件数换算；4 位小数字符串 |
+| `delivered_full_loss_rate` | rate-str/null | 已送达退款订单数 ÷ 全部已送达样本订单数；与结算状态无关，4 位小数字符串 |
+| `settled_full_loss_rate` | rate-str/null | 兼容字段；暂时返回与 `delivered_full_loss_rate` 相同的值，不再表示结算样本率 |
+| `projection_full_loss_qty_rate` | rate-str/null | 兼容字段；暂时返回与 `delivered_full_loss_rate` 相同的值 |
 | `unsettled_order_count` | int | 当前范围内无 SETTLEMENT 实际到账的 paid 订单数；大盘全局去重 |
 | `unresolved_unsettled_order_count` | int | 未结算且仍有未确认商品件的订单数；大盘全局去重 |
 | `unresolved_unsettled_qty` | int | 未结算件数减去已确认退款/退货/全损件数 |
@@ -469,7 +473,7 @@ Response envelope:`{items: [...], total, totals, meta}`。`spu_ids` 属于盈利
 
 `totals` 同样返回上述预计终局字段。金额/件数商品行事实按 scope 聚合；样本订单数、未结算订单数、待确认订单数独立按订单全局去重；比例和预计终局值按完整 scope 重新计算，不是行级比例平均值。单 SPU scope 下 `totals` 与该 SPU 的预测字段一致。
 
-`meta.projection` 返回预测说明、日期归属、退款样本定义、`full_loss_rate_source`、目标定义和状态中文标签；`meta.warnings` 在适用时增加 `projection_insufficient_sample` / `projection_uses_settled_order_sample`。未结算中已经确认的退款金额只扣一次，对应确认件数先从待确认集合排除，退款金额率和全损概率只作用于剩余部分。`meta.ad_system_roi` 给出实际 ROI、最大可承受广告费和保本 ROI 的公式与范围，并明确 `mixed_real_cost` 不混入广告赠金、赠金目前不可单独取得；`meta.presentation` 返回 `rubric_label`、退款警戒阈值/文案、估算/默认成本文案和 `pnl_hints`。前端只格式化和渲染这些状态/说明，不保存业务阈值、不重算分类。净结算已扣除的平台费用不得再次扣除；结算外成本补齐前，前端以 `≈` 展示该估算。
+`meta.projection` 返回预测说明、日期归属、退款金额样本、已送达全损样本、`full_loss_rate_source`、目标定义和状态中文标签；`meta.warnings` 在适用时增加 `projection_insufficient_sample`、`projection_uses_settled_refund_sample` 和 `projection_uses_delivered_full_loss_sample`。未结算中已经确认的退款金额只扣一次，对应确认件数先从待确认集合排除，退款金额率和全损概率只作用于剩余部分。`meta.ad_system_roi` 给出实际 ROI、最大可承受广告费和保本 ROI 的公式与范围，并明确 `mixed_real_cost` 不混入广告赠金、赠金目前不可单独取得；`meta.presentation` 返回 `rubric_label`、退款警戒阈值/文案、估算/默认成本文案和 `pnl_hints`。前端只格式化和渲染这些状态/说明，不保存业务阈值、不重算分类。净结算已扣除的平台费用不得再次扣除；结算外成本补齐前，前端以 `≈` 展示该估算。
 
 > **2026-09-30 成本来源语义变化**：
 >
