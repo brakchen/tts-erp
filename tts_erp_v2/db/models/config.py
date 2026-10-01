@@ -59,6 +59,8 @@ class RuntimeConfigItem(Base):
     draft_rollout: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     draft_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     published_version: Mapped[int | None] = mapped_column(Integer)
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retired_by: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -101,6 +103,8 @@ class RuntimeConfigSecret(Base):
     name: Mapped[str] = mapped_column(String(128), primary_key=True)
     encrypted_value: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     fingerprint: Mapped[str] = mapped_column(String(32), nullable=False)
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retired_by: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

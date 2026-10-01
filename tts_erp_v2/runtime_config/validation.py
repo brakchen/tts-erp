@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from typing import Any
+
+_SECRET_NAME = re.compile(r"^[a-z0-9_.-]+$")
 
 
 class ConfigValidationError(ValueError):
@@ -81,10 +84,8 @@ def validate_payload(payload: Any, schema: dict[str, Any], *, path: str = "$") -
         raise ConfigValidationError(f"{path}: expected {schema_type}")
     if "enum" in schema and payload not in schema["enum"]:
         raise ConfigValidationError(f"{path}: value is not one of the allowed enum values")
-    if schema.get("format") == "secret-reference" and (
-        not isinstance(payload, str) or not payload.startswith("secret://")
-    ):
-        raise ConfigValidationError(f"{path}: must be a secret:// reference")
+    if schema.get("format") == "secret-reference" and not is_secret_reference(payload):
+        raise ConfigValidationError(f"{path}: must be a non-empty secret:// reference")
     if isinstance(payload, dict):
         properties = schema.get("properties", {})
         required = schema.get("required", [])
@@ -143,12 +144,20 @@ def validate_rollout(rollout: Any, schema: dict[str, Any]) -> list[dict[str, Any
     return normalized
 
 
+def is_secret_reference(value: Any) -> bool:
+    """Return whether a value is a well-formed ``secret://<name>`` reference."""
+    if not isinstance(value, str) or not value.startswith("secret://"):
+        return False
+    return _SECRET_NAME.fullmatch(value.removeprefix("secret://")) is not None
+
+
 def iter_secret_references(value: Any) -> Iterable[str]:
-    """Yield secret names from nested JSON values without resolving them."""
+    """Yield valid secret names from nested JSON values without resolving them."""
     if isinstance(value, str) and value.startswith("secret://"):
         name = value.removeprefix("secret://")
-        if name:
-            yield name
+        if not _SECRET_NAME.fullmatch(name):
+            raise ConfigValidationError("invalid secret:// reference")
+        yield name
     elif isinstance(value, dict):
         for child in value.values():
             yield from iter_secret_references(child)
