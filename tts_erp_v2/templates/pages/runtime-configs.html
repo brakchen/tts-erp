@@ -44,7 +44,7 @@
         <section class="rc-editor" id="rc-create">
           <div class="rc-section-head"><h2>创建配置项</h2></div>
           <form id="rc-create-form" class="rc-grid">
-            <div class="rc-field"><label for="rc-new-key">配置键</label><input id="rc-new-key" required pattern="[a-z][a-z0-9_.-]*" placeholder="feature.checkout"></div>
+            <div class="rc-field"><label for="rc-new-key">配置键</label><input id="rc-new-key" required pattern="[a-z][a-z0-9_.\-]*" placeholder="feature.checkout"></div>
             <div class="rc-field"><label for="rc-new-name">名称</label><input id="rc-new-name" required placeholder="结账实验"></div>
             <div class="rc-field wide"><label for="rc-new-schema">Schema</label><textarea id="rc-new-schema" required>{"type":"object","properties":{},"additionalProperties":false}</textarea></div>
             <div class="rc-field wide"><label for="rc-new-payload">初始草稿</label><textarea id="rc-new-payload" required>{}</textarea></div>
@@ -53,7 +53,7 @@
         </section>
         <section class="rc-secrets" id="rc-secrets">
           <div class="rc-section-head"><h2>凭证引用</h2><span class="rc-meta">明文永不回读</span></div>
-          <form id="rc-secret-form"><input id="rc-secret-name" required pattern="[a-z0-9_.-]+" placeholder="tiktok.app-secret"><input id="rc-secret-value" required type="password" autocomplete="new-password" placeholder="粘贴新的凭证值"><button class="rc-button" type="submit">加密保存</button></form>
+          <form id="rc-secret-form"><input id="rc-secret-name" required pattern="[a-z0-9_.\-]+" placeholder="tiktok.app-secret"><input id="rc-secret-value" required type="password" autocomplete="new-password" placeholder="粘贴新的凭证值"><button class="rc-button" type="submit">加密保存</button></form>
           <ul class="rc-secret-list" id="rc-secret-list"></ul>
         </section>
         <section class="rc-history" id="rc-history">
