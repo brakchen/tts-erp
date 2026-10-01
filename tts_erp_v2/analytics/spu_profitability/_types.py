@@ -24,6 +24,10 @@ class FxRateUnavailable(ProfitabilityError):
     """Raised when the database has no complete USD/CNY/VND FX snapshot."""
 
 
+class ReportingTimezoneUnavailable(ProfitabilityError):
+    """Raised when a shop region cannot determine one reporting timezone."""
+
+
 class SpuNotFound(ProfitabilityError):
     """Raised when an explanation is requested for an unknown SPU."""
 

@@ -13,9 +13,10 @@ is an existing client contract.  The canonical business rubric is
 from __future__ import annotations
 
 import logging
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -36,6 +37,7 @@ from tts_erp_v2.analytics.spu_profitability._types import (
     ProfitabilityOverview,
     ProfitabilityTotals,
     ProjectionStatus,
+    ReportingTimezoneUnavailable,
     ShopFeeRateEntry,
     ShopFeeRateEstimate,
     SpuProfitability,
@@ -78,6 +80,20 @@ _DELIVERY_TERMINAL_SHIPMENT_STATUSES = ("DELIVERED",)
 # 钻取面板 orders 上限（D6 拍板）
 _ORDERS_MAX = 500
 
+# Keep aligned with the single-timezone region whitelist documented in
+# tech-doc/api/upstream-contract-shop-region-by-external.md §4 and the ROI UI.
+_REGION_TIME_ZONES = {
+    "VN": "Asia/Ho_Chi_Minh",
+    "TH": "Asia/Bangkok",
+    "SG": "Asia/Singapore",
+    "MY": "Asia/Kuala_Lumpur",
+    "PH": "Asia/Manila",
+    "CN": "Asia/Shanghai",
+    "JP": "Asia/Tokyo",
+    "KR": "Asia/Seoul",
+    "GB": "Europe/London",
+}
+
 
 # ═════════════════════════════════════════════════════════════════════
 # §3.2 SQL 常量集
@@ -114,10 +130,10 @@ _SQL_ROI_AD = text(
         WHERE d.endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'
           AND d.seller_id = ANY(CAST(:selected_seller_ids AS text[]))
           AND cp.id = ANY(CAST(:selected_pks AS bigint[]))
-          AND (CAST(:ws AS timestamptz) IS NULL
-               OR d.day >= CAST(:ws AS timestamptz)::date)
-          AND (CAST(:we AS timestamptz) IS NULL
-               OR d.day <  CAST(:we AS timestamptz)::date)
+          AND (CAST(:ad_start AS date) IS NULL
+               OR d.day >= CAST(:ad_start AS date))
+          AND (CAST(:ad_end AS date) IS NULL
+               OR d.day < CAST(:ad_end AS date))
     ) combined
     WHERE spu_pk IS NOT NULL
     GROUP BY spu_pk
@@ -914,13 +930,15 @@ MAX_ESTIMATE_AGE_DAYS = 7
 _SQL_ROI_DATA_WINDOW = text(
     """
     WITH croppable AS (
-        SELECT (coalesce(so.order_time, so.paid_at) AT TIME ZONE 'UTC')::date AS d
+        SELECT (coalesce(so.order_time, so.paid_at)
+                AT TIME ZONE :reporting_timezone)::date AS d
         FROM commerce.sales_orders so
         WHERE so.status = ANY(CAST(:paid_statuses AS text[]))
           AND (CAST(:shop_pk AS bigint) IS NULL
                OR so.shop_pk = CAST(:shop_pk AS bigint))
         UNION
-        SELECT (coalesce(so.order_time, so.paid_at) AT TIME ZONE 'UTC')::date AS d
+        SELECT (coalesce(so.order_time, so.paid_at)
+                AT TIME ZONE :reporting_timezone)::date AS d
         FROM after_sales.cases c
         JOIN commerce.sales_orders so ON so.id = c.order_pk
         WHERE c.status IN (:st0, :st1)
@@ -1098,7 +1116,7 @@ _SQL_DETAIL_CASES = text(
 )
 
 # /ads — campaign × SPU（v8：随日期切片 + 单源 ad_today）
-# 主表 _SQL_ROI_AD 同语义；空窗口时按 NULL 短路；不传 :ws/:we 仍走全历史。
+# 主表 _SQL_ROI_AD 同语义；每日事实按本地日期边界裁剪。
 _SQL_DETAIL_ADS = text(
     """
     SELECT campaign_id,
@@ -1111,10 +1129,10 @@ _SQL_DETAIL_ADS = text(
                mixed_real_cost, onsite_roi2_shopping_sku
         FROM plugin.ad_daily
         WHERE endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'
-          AND (CAST(:ws AS timestamptz) IS NULL
-               OR day >= CAST(:ws AS timestamptz)::date)
-          AND (CAST(:we AS timestamptz) IS NULL
-               OR day <  CAST(:we AS timestamptz)::date)
+          AND (CAST(:ad_start AS date) IS NULL
+               OR day >= CAST(:ad_start AS date))
+          AND (CAST(:ad_end AS date) IS NULL
+               OR day < CAST(:ad_end AS date))
     ) combined
     WHERE product_id IN (
         SELECT cp.spu_id FROM commerce.products_spu cp WHERE cp.id = :spu_pk
@@ -1171,14 +1189,86 @@ def _row_int(value: Any) -> int:
         return 0
 
 
-def _window_dates(w_start: date | None, w_end: date | None) -> tuple[Any, Any]:
-    ws_dt = datetime.combine(w_start, time.min, tzinfo=UTC) if w_start else None
+def _shop_reporting_timezone(
+    sess: Session,
+    *,
+    shop_pk: int | None,
+    only_spu_pk: int | None = None,
+) -> tzinfo:
+    """Resolve a store's report timezone; cross-shop legacy reads use UTC.
+
+    Date-only filters are interpreted in the shop's local calendar. When no
+    single shop can be identified (legacy cross-shop read), UTC remains the
+    explicit compatibility timezone rather than guessing one shop's region.
+    """
+    if shop_pk is None and only_spu_pk is None:
+        return UTC
+
+    if shop_pk is not None:
+        row = sess.execute(
+            text("SELECT region FROM commerce.shops WHERE id = :shop_pk"),
+            {"shop_pk": shop_pk},
+        ).first()
+    else:
+        row = sess.execute(
+            text(
+                "SELECT s.region FROM commerce.products_spu p "
+                "JOIN commerce.shops s ON s.id = p.shop_pk WHERE p.id = :spu_pk"
+            ),
+            {"spu_pk": only_spu_pk},
+        ).first()
+
+    if row is None and shop_pk is None and only_spu_pk is not None:
+        # Preserve the normal 404 path for a nonexistent SPU; the caller will
+        # raise SpuNotFound after the profitability selection resolves empty.
+        return UTC
+
+    region = (
+        row.region.strip().upper()
+        if row is not None and isinstance(row.region, str) and row.region.strip()
+        else None
+    )
+    zone_name = _REGION_TIME_ZONES.get(region) if region else None
+    if zone_name is None:
+        shop_label = f"shop_pk={shop_pk}" if shop_pk is not None else f"spu_pk={only_spu_pk}"
+        region_label = region or "missing"
+        raise ReportingTimezoneUnavailable(
+            f"cannot determine reporting timezone for {shop_label} (region={region_label})"
+        )
+    try:
+        return ZoneInfo(zone_name)
+    except ZoneInfoNotFoundError as exc:
+        raise ReportingTimezoneUnavailable(
+            f"IANA timezone {zone_name} for region {region} is unavailable"
+        ) from exc
+
+
+def _window_dates(
+    w_start: date | None,
+    w_end: date | None,
+    reporting_timezone: tzinfo = UTC,
+) -> tuple[datetime | None, datetime | None]:
+    """Convert inclusive local dates to half-open UTC timestamp bounds."""
+    ws_dt = (
+        datetime.combine(w_start, time.min, tzinfo=reporting_timezone).astimezone(UTC)
+        if w_start
+        else None
+    )
     we_dt = (
-        datetime.combine(w_end + timedelta(days=1), time.min, tzinfo=UTC)
+        datetime.combine(
+            w_end + timedelta(days=1), time.min, tzinfo=reporting_timezone
+        ).astimezone(UTC)
         if w_end
         else None
     )
     return ws_dt, we_dt
+
+
+def _ad_window_dates(
+    w_start: date | None, w_end: date | None
+) -> tuple[date | None, date | None]:
+    """Return inclusive UI dates as half-open DATE bounds for daily ad facts."""
+    return w_start, w_end + timedelta(days=1) if w_end else None
 
 
 def _spu_pk_exists(sess: Session, spu_pk: int) -> bool:
@@ -1330,7 +1420,19 @@ def _query_spu_roi(
     fx_usd_cny = fx_basis.usd_cny
     fx_usd_vnd = fx_basis.usd_vnd
     vnd_per_cny = fx_usd_vnd / fx_usd_cny
-    ws_dt, we_dt = _window_dates(w_start, w_end)
+    has_date_window = w_start is not None or w_end is not None
+    try:
+        reporting_timezone = _shop_reporting_timezone(
+            sess, shop_pk=shop_pk, only_spu_pk=only_spu_pk
+        )
+    except ReportingTimezoneUnavailable:
+        if has_date_window:
+            raise
+        # An unrestricted legacy read needs no date boundary. Keep it available
+        # when old shop rows lack region metadata; windowed reads fail closed.
+        reporting_timezone = UTC
+    ws_dt, we_dt = _window_dates(w_start, w_end, reporting_timezone)
+    ad_start, ad_end = _ad_window_dates(w_start, w_end)
     paid_statuses = list(PAID_SALES_ORDER_STATUSES)
     st0, st1 = _CASE_COMPLETED_STATUSES
 
@@ -1379,7 +1481,16 @@ def _query_spu_roi(
     }
 
     ad_rows = (
-        sess.execute(_SQL_ROI_AD, common_fact_params).mappings().all()
+        sess.execute(
+            _SQL_ROI_AD,
+            {
+                **common_fact_params,
+                "ad_start": ad_start,
+                "ad_end": ad_end,
+            },
+        )
+        .mappings()
+        .all()
         if selected_pks
         else []
     )
@@ -2709,6 +2820,7 @@ def _query_spu_roi(
                 "st0": st0,
                 "st1": st1,
                 "shop_pk": shop_pk,
+                "reporting_timezone": getattr(reporting_timezone, "key", "UTC"),
             },
         )
         .mappings()
@@ -2798,7 +2910,12 @@ def _query_spu_roi(
 def _detail_orders(
     sess: Session, spu_pk: int, w_start: date | None, w_end: date | None
 ) -> dict:
-    ws_dt, we_dt = _window_dates(w_start, w_end)
+    timezone = (
+        _shop_reporting_timezone(sess, shop_pk=None, only_spu_pk=spu_pk)
+        if w_start is not None or w_end is not None
+        else UTC
+    )
+    ws_dt, we_dt = _window_dates(w_start, w_end, timezone)
     rows = (
         sess.execute(
             _SQL_DETAIL_ORDERS,
@@ -2909,7 +3026,12 @@ def _detail_orders(
 def _detail_settlements(
     sess: Session, spu_pk: int, w_start: date | None, w_end: date | None
 ) -> dict:
-    ws_dt, we_dt = _window_dates(w_start, w_end)
+    timezone = (
+        _shop_reporting_timezone(sess, shop_pk=None, only_spu_pk=spu_pk)
+        if w_start is not None or w_end is not None
+        else UTC
+    )
+    ws_dt, we_dt = _window_dates(w_start, w_end, timezone)
     rows = (
         sess.execute(
             _SQL_DETAIL_SETTLEMENTS,
@@ -2977,7 +3099,12 @@ def _detail_settlements(
 def _detail_cases(
     sess: Session, spu_pk: int, w_start: date | None, w_end: date | None
 ) -> dict:
-    ws_dt, we_dt = _window_dates(w_start, w_end)
+    timezone = (
+        _shop_reporting_timezone(sess, shop_pk=None, only_spu_pk=spu_pk)
+        if w_start is not None or w_end is not None
+        else UTC
+    )
+    ws_dt, we_dt = _window_dates(w_start, w_end, timezone)
     rows = (
         sess.execute(
             _SQL_DETAIL_CASES,
@@ -3028,9 +3155,12 @@ def _detail_cases(
 def _detail_ads(
     sess: Session, spu_pk: int, w_start: date | None, w_end: date | None
 ) -> dict:
-    ws_dt, we_dt = _window_dates(w_start, w_end)
+    ad_start, ad_end = _ad_window_dates(w_start, w_end)
     rows = (
-        sess.execute(_SQL_DETAIL_ADS, {"spu_pk": spu_pk, "ws": ws_dt, "we": we_dt})
+        sess.execute(
+            _SQL_DETAIL_ADS,
+            {"spu_pk": spu_pk, "ad_start": ad_start, "ad_end": ad_end},
+        )
         .mappings()
         .all()
     )

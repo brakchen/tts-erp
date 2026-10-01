@@ -371,10 +371,10 @@ Query parameters:
 | `include_all` | bool | `false` | `false` 只含有广告∨有效销售∨退款的 SPU;`true` 拉全部 **ACTIVE**(status ILIKE 'activate')目录 SPU(DEACTIVATE/DELETED 等排除) |
 | `shop_pk` | int | — | 店铺过滤(内部主键) |
 | `fee_rate` | decimal-str | — | 临时页面覆写（仅本次请求，不持久化）；缺省按店铺取当前 `fee-v2` 实测快照，缺失/超过 7 天才回退基线 `0.308`。只作用于未结算订单 `r̂ × unsettled_sales`，已结算费用已含在 SETTLEMENT |
-| `w_start` | date | — | ISO `yyyy-mm-dd`;销售与退款均按关联订单 `COALESCE(order_time, paid_at)` 裁剪；退款跟随原订单归属（含当日） |
-| `w_end` | date | — | ISO `yyyy-mm-dd`;与 `w_start` 配对使用；例如 9 月 1 日订单在 9 月 10 日退款，仍归入 9 月 1 日；不提供窗口 = 销售/退款全历史累计。预计终局的已结算样本和未结算预测对象也使用同一订单时间窗口，因此时间选择会改变预测字段 |
+| `w_start` | date | — | ISO `yyyy-mm-dd`;提供 `shop_pk` 时按该店 `commerce.shops.region` 对应的 IANA 报表时区解释本地日，销售与退款按关联订单 `COALESCE(order_time, paid_at)` 的本地日期裁剪；退款跟随原订单归属（含当日） |
+| `w_end` | date | — | ISO `yyyy-mm-dd`;与 `w_start` 配对使用并包含结束日；店铺地区缺失或不能唯一确定时区返回 422。未提供 `shop_pk` 的兼容性跨店查询继续按 UTC 解释日期；不提供窗口 = 销售/退款全历史累计。预计终局的已结算样本和未结算预测对象也使用同一订单时间窗口，因此时间选择会改变预测字段 |
 
-Response envelope:`{items: [...], total, totals, meta}`。`spu_ids` 属于盈利范围：金额从命中 SPU 行聚合，订单/取消/退款 totals 在命中 SPU 集合内跨 SPU 去重，且 totals 不受分页影响。页面使用 Bootstrap 5 + 自托管 Tom Select Bootstrap 5 主题的原生 `<select multiple>` 选择/搜索/粘贴 SPU，点击「查询」后才应用 scope；已应用的 scope 会同步到页面 URL，刷新或分享链接后恢复。批量粘贴校验期间可点「清空」取消，最多选择 100 个 SPU。
+Response envelope:`{items: [...], total, totals, meta}`。店铺报表时区仅对单时区地区码映射：VN/TH/SG/MY/PH/CN/JP/KR/GB；时区边界使用 IANA `ZoneInfo` 规则转换为 UTC 半开区间，因此支持夏令时日的 23/25 小时长度。详情端点从 `spu_pk` 反查所属店铺并使用相同边界。`spu_ids` 属于盈利范围：金额从命中 SPU 行聚合，订单/取消/退款 totals 在命中 SPU 集合内跨 SPU 去重，且 totals 不受分页影响。页面使用 Bootstrap 5 + 自托管 Tom Select Bootstrap 5 主题的原生 `<select multiple>` 选择/搜索/粘贴 SPU，点击「查询」后才应用 scope；已应用的 scope 会同步到页面 URL，刷新或分享链接后恢复。批量粘贴校验期间可点「清空」取消，最多选择 100 个 SPU。
 
 `meta.fee` 契约：
 

@@ -27,9 +27,10 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Mapping
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import TypeVar
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import text
@@ -260,14 +261,15 @@ def _wipe(db_engine) -> None:
 # ─── 造数 helpers(handler 用独立 session,必须真 commit)────────────────
 
 
-def _seed_shop(sess, seller: str) -> int:
+def _seed_shop(sess, seller: str, *, region: str | None = "VN") -> int:
     # pi-lens-ignore: python-sql-injection
     return sess.execute(
         text(
-            "INSERT INTO commerce.shops (platform, shop_id, account_name, status) "
-            "VALUES ('tiktok', :sid, :name, 'active') RETURNING id"
+            "INSERT INTO commerce.shops "
+            "(platform, shop_id, account_name, status, region) "
+            "VALUES ('tiktok', :sid, :name, 'active', :region) RETURNING id"
         ),
-        {"sid": seller, "name": f"{seller} 店铺"},
+        {"sid": seller, "name": f"{seller} 店铺", "region": region},
     ).scalar_one()
 
 
@@ -2828,15 +2830,99 @@ def test_spu_roi_ad_query_pushes_shop_scope_and_index_contract():
     assert "CONCURRENTLY IF NOT EXISTS" in migration
 
 
+def test_spu_roi_date_window_uses_shop_local_midnights(api_client, readonly_key, db_engine):
+    """VN shop date filters include complete Ho Chi Minh calendar days."""
+    local_day = date(2026, 9, 1)
+    start, end = profitability_impl._window_dates(
+        local_day, local_day, ZoneInfo("Asia/Ho_Chi_Minh")
+    )
+    assert start == datetime(2026, 8, 31, 17, tzinfo=UTC)
+    assert end == datetime(2026, 9, 1, 17, tzinfo=UTC)
+
+    spring_forward = date(2026, 3, 29)
+    gb_start, gb_end = profitability_impl._window_dates(
+        spring_forward, spring_forward, ZoneInfo("Europe/London")
+    )
+    assert gb_end - gb_start == timedelta(hours=23)
+
+    with Session(db_engine) as sess:
+        shop_pk = _seed_shop(sess, "TEST_SELLER_LOCAL_DAY")
+        spu_pk = _seed_spu(sess, shop_pk, "TEST_ROI_SPU_LOCAL_DAY")
+        for order_id, order_iso in (
+            ("BEFORE", "2026-08-31T16:59:59+00:00"),
+            ("AT_START", "2026-08-31T17:00:00+00:00"),
+            ("BEFORE_END", "2026-09-01T16:59:59+00:00"),
+            ("AT_END", "2026-09-01T17:00:00+00:00"),
+        ):
+            _seed_order_line(
+                sess,
+                shop_pk=shop_pk,
+                spu_pk=spu_pk,
+                order_id=f"TEST_ORDER_LOCAL_DAY_{order_id}",
+                status=PAID_ORDER_STATUS,
+                line_ext=f"TEST_LINE_LOCAL_DAY_{order_id}",
+                qty="1",
+                unit_price="100000",
+                paid=True,
+                order_iso=order_iso,
+            )
+        sess.commit()
+
+    response = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+        params={
+            "shop_pk": shop_pk,
+            "q": "TEST_ROI_SPU_LOCAL_DAY",
+            "w_start": local_day.isoformat(),
+            "w_end": local_day.isoformat(),
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["totals"]["total_orders"] == 2
+
+    detail = api_client.get(
+        f"/v2/analytics/spu-roi/{spu_pk}/orders",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+        params={"w_start": local_day.isoformat(), "w_end": local_day.isoformat()},
+    )
+    assert detail.status_code == 200, detail.text
+    assert {row["order_id"] for row in detail.json()["orders"]} == {
+        "TEST_ORDER_LOCAL_DAY_AT_START",
+        "TEST_ORDER_LOCAL_DAY_BEFORE_END",
+    }
+
+
+def test_spu_roi_rejects_date_window_for_ambiguous_shop_region(
+    api_client, readonly_key, db_engine
+):
+    with Session(db_engine) as sess:
+        shop_pk = _seed_shop(sess, "TEST_SELLER_UNKNOWN_REGION", region="US")
+        _seed_spu(sess, shop_pk, "TEST_ROI_SPU_UNKNOWN_REGION")
+        sess.commit()
+
+    response = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+        params={
+            "shop_pk": shop_pk,
+            "w_start": "2026-09-01",
+            "w_end": "2026-09-01",
+        },
+    )
+    assert response.status_code == 422
+    assert "region=US" in response.json()["detail"]
+
+
 def test_spu_roi_date_window_clips_ad(api_client, readonly_key, db_engine):
     """v8 (2026-09-15 fix/spu-roi-ad-window-clip)：起始/截止日同时裁剪广告。
 
     v8 主动从 _SQL_ROI_AD / _SQL_DETAIL_ADS 删 ad_daily ∪ ad_today 的“全窗
-    累计”逻辑，改成 ad_today.day BETWEEN :ws AND :we — 选日期范围时
+    累计”逻辑，改成 ad_daily.day 按请求日期范围裁剪 — 选日期范围时
     spend / gmv_ad / ad_count 全部随窗口变化，与销售/退款同语义。
 
-    场景：窗内 ad (09-10 spend=15) + 窗外 ad (06-01 spend=25)；裁剪后只
-    留窗内 spend。
+    场景：VN 本地窗口 09-01~09-30；窗外 ad (08-31 spend=25) + 窗内 ad
+    (09-10 spend=15)。若把本地午夜错当 UTC，08-31 会被误纳入。
     """
     with Session(db_engine) as sess:
         shop_pk = _seed_shop(sess, "TEST_SELLER_WAD")
@@ -2850,7 +2936,7 @@ def test_spu_roi_date_window_clips_ad(api_client, readonly_key, db_engine):
             spend="25",
             orders="0",
             gmv="30",
-            day="2026-06-01",
+            day="2026-08-31",
         )
         # 窗内 ad：保留 spend=15、orders=2
         _seed_ad_dump(
@@ -2907,6 +2993,7 @@ def test_spu_roi_date_window_clips_ad(api_client, readonly_key, db_engine):
         headers=h,
         params={
             "q": "TEST_ROI_SPU_WAD",
+            "shop_pk": shop_pk,
             "w_start": "2026-09-01",
             "w_end": "2026-09-30",
         },
