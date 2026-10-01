@@ -139,14 +139,14 @@ def test_trigger_rejects_shop_for_system_job(api_client, admin_key) -> None:
     assert r.status_code == 422, r.text
 
 
-def test_legacy_sync_jobs_page_html(api_client, readonly_key) -> None:
+def test_legacy_sync_jobs_page_redirects_to_pages_shell(api_client, readonly_key) -> None:
     r = api_client.get(
         "/v2/sync/jobs/page",
         headers={"Authorization": f"Bearer {readonly_key}"},
+        follow_redirects=False,
     )
-    assert r.status_code == 200, r.text
-    assert "定时任务管理" in r.text
-    assert "sync-jobs.js" in r.text
+    assert r.status_code == 307, r.text
+    assert r.headers["location"] == "/v2/pages/sync-jobs"
 
 
 def test_sync_jobs_js_uses_prefix_aware_api_paths() -> None:
@@ -164,6 +164,26 @@ def test_sync_jobs_js_uses_prefix_aware_api_paths() -> None:
     assert "CSS.escape" not in src
     assert "state.canAdmin" in src
     assert "disabled" in src
+    assert "window.confirm" in src
+    assert "data-label=\"任务\"" in src
+    assert "is-busy" in src
+
+
+def test_sync_jobs_css_has_mobile_card_layout_and_disabled_cursor() -> None:
+    src = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "css"
+        / "sync-jobs.css"
+    ).read_text(encoding="utf-8")
+
+    assert "button:disabled" in src
+    assert "cursor: not-allowed" in src
+    assert "button.is-busy:disabled" in src
+    assert ".jobs-table thead { display: none; }" in src
+    assert "content: attr(data-label)" in src
+    assert ".scope-select { width: 100%;" in src
 
 
 def test_sync_jobs_includes_latest_status(api_client, readonly_key, db_engine) -> None:
