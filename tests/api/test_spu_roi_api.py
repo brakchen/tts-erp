@@ -3342,7 +3342,17 @@ def test_spu_roi_page_remembers_filters_and_enhances_date_range():
     # Bootstrap 5 本身不附带 datepicker；保留原生 type=date，并在运行时组合
     # 官方 input-group / btn-group / btn 组件，避免引入新的第三方日期库。
     assert 'reportingTimeZone: "Asia/Ho_Chi_Minh"' in profile_js
+    assert 'defaultRange: "t-1"' in profile_js
     assert 'new Intl.DateTimeFormat("en-CA"' in kernel_js
+    assert "function reportingEndDate(now)" in kernel_js
+    assert "shiftDateValue(today, -1)" in kernel_js
+    assert 'dateConfig.defaultRange !== "t-1"' in kernel_js
+    assert "state.wStart = yesterday" in kernel_js
+    assert "state.wEnd = yesterday" in kernel_js
+    assert kernel_js.index("restorePagePreferences();") < kernel_js.index(
+        "applyDefaultDateRange();"
+    )
+    assert 'if (preset === "all") return { start: "", end: end }' in kernel_js
     assert 'class: "input-group input-group-sm op-date-input-group"' in kernel_js
     assert 'class: "btn-group btn-group-sm op-date-presets"' in kernel_js
     assert 'data-date-preset' in kernel_js
@@ -3353,6 +3363,8 @@ def test_spu_roi_page_remembers_filters_and_enhances_date_range():
     assert "button.hidden = duplicate" in kernel_js
     assert "!duplicate &&" in kernel_js
     assert "截止日包含当天" in kernel_js
+    assert "快捷范围均截止 T-1" in kernel_js
+    assert "“不限”只取消起始日" in kernel_js
     assert '"aria-describedby": "date-range-help"' in kernel_js
     assert ".op-date-range" in css
     assert "flatpickr" not in profile_js + kernel_js
