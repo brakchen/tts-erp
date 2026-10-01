@@ -387,8 +387,8 @@
     "sum-roi-ad-actual",
     "sum-roi-ad",
     "sum-projection-status",
-    "sum-projection-basis-orders",
-    "sum-projection-full-loss-basis-orders",
+    "sum-projection-terminal-basis-orders",
+    "sum-projection-terminal-loss-orders",
     "sum-projection-refund-rate",
     "sum-projection-full-loss-rate",
     "sum-unresolved-orders",
@@ -1051,12 +1051,12 @@
       projectionStatusLabel(totals.projection_status),
     );
     setTextIfPresent(
-      "#sum-projection-basis-orders",
-      fmtInt(totals.projection_basis_order_count),
+      "#sum-projection-terminal-basis-orders",
+      fmtInt(totals.projection_terminal_basis_order_count),
     );
     setTextIfPresent(
-      "#sum-projection-full-loss-basis-orders",
-      fmtInt(totals.projection_full_loss_basis_order_count),
+      "#sum-projection-terminal-loss-orders",
+      fmtInt(totals.projection_terminal_full_loss_order_count),
     );
     setTextIfPresent(
       "#sum-projection-refund-rate",
@@ -1064,7 +1064,7 @@
     );
     setTextIfPresent(
       "#sum-projection-full-loss-rate",
-      fmtPct(totals.delivered_full_loss_rate),
+      fmtPct(totals.pre_delivery_full_loss_rate),
     );
     setTextIfPresent(
       "#sum-unresolved-orders",
@@ -1321,26 +1321,32 @@
           .join("；"),
       ),
       cell("预测状态", projectionStatusLabel(it.projection_status)),
-      cell("退款金额样本订单", fmtInt(it.projection_basis_order_count)),
-      cell("退款金额样本件数", fmtQty(it.projection_basis_qty)),
-      cell("退款金额样本销售", money(it.projection_basis_sales)),
-      cell("退款金额样本退款", money(it.projection_basis_refund_amount)),
       cell(
-        "已送达样本订单",
-        fmtInt(it.projection_full_loss_basis_order_count),
+        "物流终态样本订单",
+        fmtInt(it.projection_terminal_basis_order_count),
+      ),
+      cell("物流终态样本销售", money(it.projection_terminal_basis_sales)),
+      cell(
+        "拒收全损样本订单",
+        fmtInt(it.projection_terminal_full_loss_order_count),
       ),
       cell(
-        "已送达退款单",
-        fmtInt(it.projection_basis_full_loss_order_count),
+        "拒收全损样本销售",
+        money(it.projection_terminal_full_loss_sales),
       ),
-      cell("已送达退款件", fmtQty(it.projection_basis_full_loss_qty)),
-      cell("预测退款金额率", fmtPct(it.projection_refund_amount_rate)),
-      cell("已送达订单全损率", fmtPct(it.delivered_full_loss_rate)),
+      cell("拒收全损样本件", fmtQty(it.projection_terminal_full_loss_qty)),
+      cell("预计拒收金额率", fmtPct(it.projection_refund_amount_rate)),
+      cell("未送达终局全损率", fmtPct(it.pre_delivery_full_loss_rate)),
       cell("未结算订单", fmtInt(it.unsettled_order_count)),
       cell("待确认未结算订单", fmtInt(it.unresolved_unsettled_order_count)),
       cell("待确认未结算件", fmtQty(it.unresolved_unsettled_qty)),
       cell("待确认未结算销售", money(it.unresolved_unsettled_sales)),
+      cell("未送达风险销售", money(it.full_loss_exposure_unsettled_sales)),
       cell("已确认未结算退款", money(it.confirmed_unsettled_refund_amount)),
+      cell(
+        "已确认风险池退款",
+        money(it.confirmed_full_loss_exposure_refund_amount),
+      ),
       cell(
         "已确认未结算全损单",
         fmtInt(it.confirmed_unsettled_full_loss_order_count),
