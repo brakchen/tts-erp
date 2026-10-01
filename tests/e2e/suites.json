@@ -1,0 +1,36 @@
+{
+  "spu-roi": {
+    "label": "SPU 实际 ROI 页面",
+    "specDir": "tests/e2e/spu-roi",
+    "watchPaths": [
+      "tts_erp_v2/static/js/spu-roi.js",
+      "tts_erp_v2/api/v2/analytics.py",
+      "tts_erp_v2/analytics/spu_roi.py",
+      "tts_erp_v2/analytics/spu_profitability/",
+      "tts_erp_v2/api/v2/pages.py",
+      "tests/e2e/spu-roi/",
+      "tests/support/spu_roi_e2e_seed.py"
+    ]
+  },
+  "spu-profitability-shared": {
+    "label": "共享盈利页面基础设施",
+    "affectedSuites": ["spu-roi"],
+    "watchPaths": [
+      "tts_erp_v2/static/js/spu-profitability-page.js",
+      "tts_erp_v2/static/css/spu-roi.css",
+      "tts_erp_v2/templates/pages/spu-profitability.html"
+    ],
+    "note": "focused-spus suite 待后续加入；首期仅影响 spu-roi"
+  },
+  "auth-shared": {
+    "label": "登录/鉴权基础设施",
+    "affectedSuites": ["spu-roi"],
+    "watchPaths": [
+      "tts_erp_v2/api/v2/auth.py",
+      "tts_erp_v2/middleware/auth.py",
+      "tts_erp_v2/middleware/session_auth.py",
+      "tts_erp_v2/app.py"
+    ],
+    "note": "所有页面共享登录链路；改动时所有页面 core 都应跑"
+  }
+}

@@ -59,6 +59,8 @@ run_domain() {
   "$PYTEST" -q -m "domain_${name} and not slow" "${@:2}"
 }
 
+run_e2e() { "$PYTEST" -q "$@"; }
+
 case "${1:-default}" in
 unit)
   shift
@@ -75,6 +77,12 @@ all)
 coverage)
   shift
   run_coverage "$@"
+  ;;
+e2e)
+  # Browser E2E tests: run the Python orchestrator which manages
+  # uvicorn lifecycle, DB seeding, and Playwright execution.
+  shift
+  run_e2e "$@"
   ;;
 default | "") run_fast ;;
 -h | --help | help)

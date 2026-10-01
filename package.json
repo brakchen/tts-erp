@@ -1,0 +1,19 @@
+{
+  "private": true,
+  "name": "tts-erp-e2e",
+  "version": "0.1.0",
+  "description": "Playwright E2E tests for tts-erp operator pages",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:spu-roi": "playwright test --project=spu-roi",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.53.2"
+  }
+}

@@ -55,6 +55,36 @@ python3 test_e2e.py / test_e2e_finance.py
 bash prod-switch/postswitch-smoke.sh
 ```
 
+## 4.1 Playwright 页面级 E2E
+
+```bash
+# SPU ROI 核心链路（页面改动默认执行）
+bash scripts/test_e2e.sh spu-roi core
+
+# SPU ROI 全部（core + extended）
+bash scripts/test_e2e.sh spu-roi all
+
+# 指定 case
+bash scripts/test_e2e.sh spu-roi case C-SPUROI-07
+
+# 按 git diff 自动选择受影响页面
+bash scripts/test_e2e.sh changed origin/master
+
+# 所有页面核心链路
+bash scripts/test_e2e.sh all core
+
+# 全部页面全部测试
+bash scripts/test_e2e.sh all all
+
+# 安装浏览器（首次）
+npx playwright install chromium
+
+# 查看报告
+npx playwright show-report
+```
+
+详细文档：`tech-doc/browser-e2e-testing.md`。
+
 ## 5. 监控和日志
 
 ```bash

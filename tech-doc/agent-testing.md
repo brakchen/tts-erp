@@ -141,3 +141,33 @@ Record:
 - pass/fail count or the before/after failure diff;
 - isolated rerun results for failures;
 - tests intentionally not run and why.
+
+## 9. Browser E2E tests
+
+Browser E2E tests use Playwright Test and follow a different execution path from Python API tests.
+
+### 9.1 Commands
+
+| Scope | Command |
+| --- | --- |
+| SPU ROI core | `bash scripts/test_e2e.sh spu-roi core` |
+| SPU ROI all | `bash scripts/test_e2e.sh spu-roi all` |
+| Specific case | `bash scripts/test_e2e.sh spu-roi case C-SPUROI-07` |
+| Changed pages | `bash scripts/test_e2e.sh changed origin/master` |
+| All pages core | `bash scripts/test_e2e.sh all core` |
+| All pages all | `bash scripts/test_e2e.sh all all` |
+
+### 9.2 Safety boundaries
+
+- Browser E2E tests must **never** target the production `:9877` service.
+- The `scripts/test_e2e.sh` entry point manages a temporary uvicorn process with `TTS_ERP_AUTH_MODE=enforce`.
+- All test data uses `TEST_E2E_*` prefixes and is cleaned up after each run.
+- Tests run against isolated ephemeral databases created by `scripts/test_isolated.sh`.
+- Playwright browser binaries are installed to the npm cache (`node_modules/.cache/playwright`); never to uncontrolled system paths.
+
+### 9.3 Test tiers
+
+- **core** (`@tier:core`): Full-chain tests using real DB + real API + real page rendering. Must pass for any page-specific change.
+- **extended** (`@tier:extended`): Boundary, error, visual, and concurrency tests using route mocks. Run on larger changes or pre-release.
+
+Detailed documentation: `tech-doc/browser-e2e-testing.md`.
