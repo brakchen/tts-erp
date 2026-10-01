@@ -15,4 +15,5 @@
 - Shared hotspot ownership does not require waiting for the original session: exchange a focused patch, hand off ownership explicitly, or create a successor lane from the predecessor's ready commit.
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
+| frontend-intl-uplot | Intl.NumberFormat 缓存 + uPlot 日图表 | 01a0f628-3176-729f-8747-2aac7e599eab | `chore/frontend-intl-uplot` / `.worktrees/frontend-intl-uplot` | `tts_erp_v2/static/js/spu-profitability-page.js`; `tts_erp_v2/static/js/intercept-stats.js`; `tts_erp_v2/static/vendor/uplot.iife.min.js`; `tts_erp_v2/static/vendor/uplot.min.css`; `tts_erp_v2/static/vendor/NOTICE.md`; `tts_erp_v2/api/v2/pages.py` | active | — | — | 2026-10-01 10:14:15 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
