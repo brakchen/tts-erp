@@ -2806,6 +2806,28 @@ def test_spu_roi_window_params_clip_sales_and_refunds_by_order_time(
     assert body["totals"]["total_orders"] == 2
 
 
+def test_spu_roi_ad_query_pushes_shop_scope_and_index_contract():
+    """SPU ROI 广告事实查询显式按店铺 seller_id 下推，并有配套索引。"""
+    from pathlib import Path
+
+    migration = (
+        Path(__file__).resolve().parents[2]
+        / "alembic"
+        / "versions"
+        / "0051_spu_roi_query_indexes.py"
+    ).read_text(encoding="utf-8")
+
+    ad_sql = profitability_impl._SQL_ROI_AD.text
+    assert "d.seller_id = ANY(CAST(:selected_seller_ids AS text[]))" in ad_sql
+    assert "cp.id = ANY(CAST(:selected_pks AS bigint[]))" in ad_sql
+    assert "ix_ad_daily_roi_seller_product_day" in migration
+    assert "ON plugin.ad_daily (seller_id, product_id, day)" in migration
+    assert "WHERE endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'" in migration
+    assert "ix_sales_order_lines_spu_order" in migration
+    assert "ix_tracking_events_shipment_action" in migration
+    assert "CONCURRENTLY IF NOT EXISTS" in migration
+
+
 def test_spu_roi_date_window_clips_ad(api_client, readonly_key, db_engine):
     """v8 (2026-09-15 fix/spu-roi-ad-window-clip)：起始/截止日同时裁剪广告。
 

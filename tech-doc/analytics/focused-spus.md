@@ -240,7 +240,7 @@ SpuSelection
 FocusedSelection 的 implementation 必须：
 
 1. 先形成索引可用的 `selected_spus(spu_pk, shop_pk)` relation；
-2. 将该 relation 下推到广告、订单、退款、全损、成本和 distinct-order 等事实查询，不能先扫全店/全库再在 Python 丢弃；
+2. 将该 relation 下推到广告、订单、退款、全损、成本和 distinct-order 等事实查询，不能先扫全店/全库再在 Python 丢弃；广告事实还必须把店铺 `seller_id` 下推到 `plugin.ad_daily`，以命中 `ix_ad_daily_roi_seller_product_day` 的 `(seller_id, product_id, day)` 访问路径；
 3. 在同一盈利快照中读取关注 membership 与业务事实，避免列表和 totals 跨快照；
 4. 保持 totals 对完整 focused scope 精确计算；不能为了性能偷偷加总数上限或只统计当前页；
 5. 在 `tts_erp_v3_test` 使用超过 100 个关注 SPU 的样本记录 `EXPLAIN (ANALYZE, BUFFERS)` 与计算耗时。

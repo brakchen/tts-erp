@@ -112,6 +112,7 @@ _SQL_ROI_AD = text(
         LEFT JOIN commerce.shops ca ON ca.platform = 'tiktok' AND ca.shop_id = d.seller_id
         LEFT JOIN commerce.products_spu cp ON cp.shop_pk = ca.id AND cp.spu_id = d.product_id
         WHERE d.endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'
+          AND d.seller_id = ANY(CAST(:selected_seller_ids AS text[]))
           AND cp.id = ANY(CAST(:selected_pks AS bigint[]))
           AND (CAST(:ws AS timestamptz) IS NULL
                OR d.day >= CAST(:ws AS timestamptz)::date)
@@ -1367,8 +1368,12 @@ def _query_spu_roi(
     selected_pks = [
         int(cat["spu_pk"]) for cat in cats
     ]  # pi-lens-ignore: no-try-except
+    selected_seller_ids = sorted(
+        {str(cat["shop_id"]) for cat in cats if cat.get("shop_id")}
+    )
     common_fact_params = {
         "selected_pks": selected_pks,
+        "selected_seller_ids": selected_seller_ids,
         "ws": ws_dt,
         "we": we_dt,
     }
