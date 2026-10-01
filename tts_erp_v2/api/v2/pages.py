@@ -3068,6 +3068,8 @@ _RUNTIME_CONFIGS_PAGE_HTML = """<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>运行配置 · tts-erp</title>
+  <!-- The shared sidebar relies on Bootstrap's responsive utility classes. -->
+  <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
   <link rel="stylesheet" href="../../static/css/runtime-configs.css?v=__CSSV_RUNTIME_CONFIGS__">
 </head>
 <body>
