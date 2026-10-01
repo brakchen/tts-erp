@@ -15,5 +15,5 @@
 - Shared hotspot ownership does not require waiting for the original session: exchange a focused patch, hand off ownership explicitly, or create a successor lane from the predecessor's ready commit.
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
-| pages-jinja2 | pages.py 迁移 Jinja2 模板 | 01a0f628-3176-729f-8747-2aac7e599eab | `chore/pages-jinja2` / `.worktrees/pages-jinja2` | `tts_erp_v2/api/v2/pages.py`; `tts_erp_v2/templates/**`; `pyproject.toml`; `tests/api/test_pages.py`; `tests/api/test_manual_costs_page_v2.py` | active | — | — | 2026-10-01 10:33:30 |
+| pages-jinja2 | pages.py 迁移 Jinja2 模板 | 01a0f628-3176-729f-8747-2aac7e599eab | `chore/pages-jinja2` / `.worktrees/pages-jinja2` | `tts_erp_v2/api/v2/pages.py`; `tts_erp_v2/templates/**`; `pyproject.toml`; `tests/api/test_pages.py`; `tests/api/test_manual_costs_page_v2.py`; `tests/analytics/test_spu_profitability_sorting.py` | active | — | — | 2026-10-01 10:33:30 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
