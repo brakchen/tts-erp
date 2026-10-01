@@ -37,6 +37,7 @@ two entry points independent.
 
 from __future__ import annotations
 
+import argparse
 import logging
 import logging.handlers
 import os
@@ -250,13 +251,33 @@ def _run_daemon() -> int:
 # ─── Entrypoint ────────────────────────────────────────────────────
 
 
+def _build_parser() -> argparse.ArgumentParser:
+    """argparse CLI; subcommand set documented in the module docstring."""
+    parser = argparse.ArgumentParser(
+        prog="sync_worker",
+        description="tts-erp v2 sync worker (no subcommand → daemon mode)",
+    )
+    sub = parser.add_subparsers(dest="subcommand")
+    sub.add_parser(
+        "daemon", help="start the BlockingScheduler and block (default)"
+    )
+    sub.add_parser("list", help="print the JOBS registry and exit")
+    run_parser = sub.add_parser("run", help="one-shot run of the named job")
+    run_parser.add_argument("job_name")
+    return parser
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI dispatcher. See module docstring for the subcommand set."""
     _configure_logging()
-    args = list(sys.argv[1:] if argv is None else argv)
-    subcommand = args[0] if args else "daemon"
+    try:
+        args = _build_parser().parse_args(argv)
+    except SystemExit as exc:
+        # argparse already printed usage/help; translate its exit into the
+        # historical return-code contract (0 for help, 2 for usage error).
+        return exc.code if isinstance(exc.code, int) else 2
 
-    if subcommand == "list":
+    if args.subcommand == "list":
         # ``list`` doesn't open a DB session, but the scheduler factory
         # still needs an env var to construct. So we DO require env here
         # — better than silently passing a throwaway factory through.
@@ -264,25 +285,13 @@ def main(argv: list[str] | None = None) -> int:
         _print_jobs()
         return 0
 
-    if subcommand == "run":
-        if len(args) < 2:
-            sys.stderr.write("usage: sync_worker run <job_name>\n")
-            return 2
+    if args.subcommand == "run":
         _require_env()
-        return _run_one_job(args[1])
+        return _run_one_job(args.job_name)
 
-    if subcommand in ("daemon", "-h", "--help"):
-        if subcommand != "daemon":
-            print(
-                "usage: sync_worker [list | run <job_name>]\n"
-                "       (no args → daemon mode)\n"
-            )
-            return 0
-        _require_env()
-        return _run_daemon()
-
-    sys.stderr.write(f"unknown subcommand: {subcommand!r}\n")
-    return 2
+    # None (no args) or explicit ``daemon`` → daemon mode.
+    _require_env()
+    return _run_daemon()
 
 
 if __name__ == "__main__":
