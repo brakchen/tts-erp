@@ -13,6 +13,7 @@
 | v2 端点传 `?shop_id=` 没过滤 | v2 只认内部 id，静默忽略 | 先查 `shop_pk`（§5） |
 | 物流数据多日不更新 | `tiktok.logistics` job 没在跑 | `systemctl --user status tts-erp-sync.service`；取 tracking 首尾必须按 `update_time_millis` 排序（列表最新在前） |
 | `psycopg.OperationalError` | PG 容器 down | `docker exec postgres pg_isready` |
+| `import_prod_to_test.sh` 跑完后磁盘持续膨胀、容器 `/tmp` 堆 `tmp.*.sql` | `mktemp` 在宿主机建文件，`docker exec pg_dump --file` 却写进容器 | 已修（2026-10-02）：dump 走 stdout 落宿主机、psql 走 stdin；存量垃圾 `docker exec postgres sh -c 'rm -f /tmp/tmp.*.sql'` |
 
 ## 2. 详细说明
 
@@ -77,3 +78,21 @@
 1. 检查 PostgreSQL 容器状态：`docker exec postgres pg_isready`
 2. 如果容器 down，重启容器
 3. 检查 `.env` 中的 `TTS_ERP_DB_URL` 配置
+
+### 2.7 import 后磁盘膨胀（容器 /tmp 堆 tmp.*.sql）
+
+**原因**：`scripts/import_prod_to_test.sh` 用宿主机 `mktemp --suffix=.sql` 生成临时路径，但
+`pg_dump`/`psql` 被包装为 `docker exec postgres ...`，`--file=<host-path>` 实际写进**容器内**
+`/tmp`；收尾的 `rm -f` 只删了宿主机空壳文件，容器里的明文 dump 永久残留（单次全量 import
+可泄漏数 GB——曾累积 295 个文件共 15G，含 `integration.raw_records` 全量 COPY dump）。
+写入者和读取者都在容器里，所以 import 功能正常、无报错，只有清理跨错了命名空间。
+
+**修复**（2026-10-02）：dump 经 stdout 落到宿主机临时文件、psql 经 stdin 读回
+（docker 分支的 psql 使用 `docker exec -i`），`mktemp`/`rm` 同侧闭环。约束注释见
+`scripts/import_prod_to_test.sh` 的 "File-transport invariant" 段。
+
+**存量垃圾清理**：
+
+```bash
+docker exec postgres sh -c 'rm -f /tmp/tmp.*.sql'
+```
