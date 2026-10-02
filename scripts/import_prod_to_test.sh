@@ -115,13 +115,21 @@ dst_plain="${DST_URL/postgresql+psycopg:\/\//postgresql://}"
 # ``docker exec postgres``. Override with ``PG_DOCKER=`` to bypass
 # (e.g. if the binaries are installed on the host, or you're pointing
 # at a remote DB).
+#
+# File-transport invariant: dump files are created by ``mktemp`` and
+# removed by ``rm`` on the HOST, so they must be written and read on the
+# host too. ``pg_dump --file=<host-path>`` running inside ``docker exec``
+# creates that path in the CONTAINER's /tmp instead, where the host-side
+# ``rm`` can never reach it (it leaked ~15G of plain-text dumps that way).
+# Therefore dumps stream through stdout into the host file and restores
+# are fed over stdin (``docker exec -i`` keeps stdin attached).
 PG_DOCKER="${PG_DOCKER:-postgres}"
 if command -v pg_dump >/dev/null 2>&1 && command -v psql >/dev/null 2>&1; then
   pg_dump() { command pg_dump "$@"; }
   psql()   { command psql   "$@"; }
 else
   pg_dump() { docker exec "$PG_DOCKER" pg_dump "$@"; }
-  psql()   { docker exec "$PG_DOCKER" psql   "$@"; }
+  psql()   { docker exec -i "$PG_DOCKER" psql "$@"; }
 fi
 
 # ── Safety: target must look like a test DB ──────────────────
@@ -326,8 +334,7 @@ if ! pg_dump \
     --no-privileges \
     --clean \
     --if-exists \
-    --file="$SCHEMA_DUMP" \
-    "$src_plain" > /tmp/import_schema.log 2>&1; then
+    "$src_plain" > "$SCHEMA_DUMP" 2> /tmp/import_schema.log; then
   echo "[import] pg_dump --schema-only FAILED; see /tmp/import_schema.log tail:" >&2
   tail -20 /tmp/import_schema.log >&2
   exit 4
@@ -337,8 +344,7 @@ if ! psql \
     --no-psqlrc \
     --set ON_ERROR_STOP=1 \
     --quiet \
-    --file="$SCHEMA_DUMP" \
-    "$dst_plain" > /tmp/import_schema.log 2>&1; then
+    "$dst_plain" < "$SCHEMA_DUMP" > /tmp/import_schema.log 2>&1; then
   echo "[import] psql schema restore FAILED; see /tmp/import_schema.log tail:" >&2
   tail -20 /tmp/import_schema.log >&2
   exit 4
@@ -370,8 +376,7 @@ for pass in 1 2 3 4; do
         --no-owner \
         --no-privileges \
         --table="$t" \
-        --file="$DATA_DUMP" \
-        "$src_plain" > "/tmp/import_${t//./_}.log" 2>&1; then
+        "$src_plain" > "$DATA_DUMP" 2> "/tmp/import_${t//./_}.log"; then
       rm -f "$DATA_DUMP"
       continue
     fi
@@ -384,8 +389,7 @@ for pass in 1 2 3 4; do
       --no-psqlrc \
       --set ON_ERROR_STOP=0 \
       --quiet \
-      --file="$DATA_DUMP" \
-      "$dst_plain" >> "/tmp/import_${t//./_}.log" 2>&1 || true
+      "$dst_plain" < "$DATA_DUMP" >> "/tmp/import_${t//./_}.log" 2>&1 || true
     after=$(psql --no-psqlrc --tuples-only --no-align --quiet \
               --command "SELECT count(*) FROM ${schema}.${table};" \
               "$dst_plain" 2>/dev/null | tr -d '[:space:]') || after=0
