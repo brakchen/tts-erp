@@ -102,6 +102,8 @@ _CREATE_SQL: tuple[str, ...] = (
         code TEXT PRIMARY KEY,
         kind TEXT NOT NULL DEFAULT 'page',
         name TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         CONSTRAINT permissions_kind_check CHECK (kind = 'page')
     )
     """,
@@ -111,6 +113,8 @@ _CREATE_SQL: tuple[str, ...] = (
             REFERENCES security.roles (code) ON DELETE CASCADE,
         permission_code TEXT NOT NULL
             REFERENCES security.permissions (code) ON DELETE CASCADE,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
         PRIMARY KEY (role_code, permission_code)
     )
     """,
@@ -118,6 +122,8 @@ _CREATE_SQL: tuple[str, ...] = (
     CREATE TABLE security.user_roles (
         user_id   BIGINT NOT NULL REFERENCES security.users (id) ON DELETE CASCADE,
         role_code TEXT NOT NULL REFERENCES security.roles (code) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         PRIMARY KEY (user_id, role_code)
     )
     """,
@@ -128,6 +134,7 @@ _CREATE_SQL: tuple[str, ...] = (
         user_id      BIGINT NOT NULL
             REFERENCES security.users (id) ON DELETE CASCADE,
         created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
         expires_at   TIMESTAMPTZ NOT NULL,
         last_seen_at TIMESTAMPTZ,
         revoked_at   TIMESTAMPTZ,
@@ -148,6 +155,22 @@ _CREATE_SQL: tuple[str, ...] = (
     """,
     """
     CREATE OR REPLACE TRIGGER trg_roles_touch BEFORE UPDATE ON security.roles
+    FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at()
+    """,
+    """
+    CREATE OR REPLACE TRIGGER trg_permissions_touch BEFORE UPDATE ON security.permissions
+    FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at()
+    """,
+    """
+    CREATE OR REPLACE TRIGGER trg_role_permissions_touch BEFORE UPDATE ON security.role_permissions
+    FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at()
+    """,
+    """
+    CREATE OR REPLACE TRIGGER trg_user_roles_touch BEFORE UPDATE ON security.user_roles
+    FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at()
+    """,
+    """
+    CREATE OR REPLACE TRIGGER trg_user_sessions_touch BEFORE UPDATE ON security.user_sessions
     FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at()
     """,
 )

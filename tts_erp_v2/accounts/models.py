@@ -90,6 +90,12 @@ class Permission(Base):
         Text, nullable=False, server_default=text("'page'")
     )  # v1 只有 page
     name: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        nullable=False, server_default=text("now()"), onupdate=text("now()")
+    )
 
 
 class RolePermission(Base):
@@ -105,6 +111,12 @@ class RolePermission(Base):
     permission_code: Mapped[str] = mapped_column(
         Text, nullable=False
     )  # FK → security.permissions(code) ON DELETE CASCADE
+    created_at: Mapped[datetime] = mapped_column(
+        nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        nullable=False, server_default=text("now()"), onupdate=text("now()")
+    )
 
 
 class UserRole(Base):
@@ -116,6 +128,12 @@ class UserRole(Base):
 
     user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     role_code: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        nullable=False, server_default=text("now()"), onupdate=text("now()")
+    )
 
 
 class UserSession(Base):
@@ -136,6 +154,9 @@ class UserSession(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        nullable=False, server_default=text("now()"), onupdate=text("now()")
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

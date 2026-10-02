@@ -10,6 +10,7 @@ import logging
 import sys
 
 from fastapi import APIRouter, Request, Response, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -79,6 +80,11 @@ def _error(exc: Exception, code: int = status.HTTP_400_BAD_REQUEST) -> JSONRespo
     return JSONResponse(status_code=code, content={"detail": str(exc)})
 
 
+def _json(payload: dict, status_code: int = status.HTTP_200_OK) -> JSONResponse:
+    """JSON 响应统一走 jsonable_encoder（datetime 等安全序列化）."""
+    return JSONResponse(status_code=status_code, content=jsonable_encoder(payload))
+
+
 # ── users ───────────────────────────────────────────────────────────
 
 
@@ -101,16 +107,13 @@ def create_user(body: UserCreate, request: Request, session: SessionDep) -> Resp
     except (service.AccountError, PasswordPolicyError) as exc:
         return _error(exc)
     _audit(request, "user.create", user.username, roles=",".join(body.roles))
-    return JSONResponse(
-        status_code=status.HTTP_201_CREATED,
-        content={"id": user.id, "username": user.username},
-    )
+    return _json({"id": user.id, "username": user.username}, status.HTTP_201_CREATED)
 
 
 @router.get("/v2/users/{user_id}")
 def show_user(user_id: int, session: SessionDep) -> Response:
     try:
-        return JSONResponse(content=service.get_user_detail(session, user_id))
+        return _json(service.get_user_detail(session, user_id))
     except service.NotFoundError as exc:
         return _error(exc, status.HTTP_404_NOT_FOUND)
 
@@ -166,9 +169,7 @@ def reset_password(
 @router.get("/v2/users/{user_id}/sessions")
 def list_sessions(user_id: int, session: SessionDep) -> Response:
     try:
-        return JSONResponse(
-            content={"sessions": service.list_user_sessions(session, user_id)}
-        )
+        return _json({"sessions": service.list_user_sessions(session, user_id)})
     except service.NotFoundError as exc:
         return _error(exc, status.HTTP_404_NOT_FOUND)
 
