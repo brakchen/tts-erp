@@ -356,6 +356,7 @@
     wEnd: "",
     datesTouched: false, // 仅用户主动选过日期时为 true；自动 T-1 不算用户选择
     feeRate: null, // 页面覆写费率(小数),null = 店铺实测/服务端基线
+    feeCardDismissed: false, // 用户点 ✕ 关闭置顶费率横幅后为 true：本次页面生命周期内不再自动弹出
     // D7 行内 accordion: 一次只展开一行; D6 tab 懒加载缓存,主表筛选变化时清空
     openDrillRow: null,
     drillCache: new Map(),
@@ -1027,7 +1028,8 @@
     fbEl.textContent = fee.degraded ? fee.fallback_message || "" : "";
     fbEl.hidden = !fee.degraded;
 
-    card.hidden = false;
+    // 用户已点 ✕ 关闭 → 内容照常更新但不重新弹出
+    card.hidden = state.feeCardDismissed;
   }
 
   function pagerSequence(current, total) {
@@ -2507,6 +2509,7 @@
       "aria-label": "快捷日期范围",
     });
     [
+      ["1", "昨天"],
       ["7", "近 7 天"],
       ["30", "近 30 天"],
       ["month", "本月"],
@@ -2620,6 +2623,16 @@
         load();
       }, 400),
     );
+
+    // ✕ 关闭置顶费率横幅（关闭后查询/刷新不再自动弹出）
+    var feeCardCloseBtn = $("#fee-card-close");
+    if (feeCardCloseBtn) {
+      feeCardCloseBtn.addEventListener("click", () => {
+        state.feeCardDismissed = true;
+        var card = $("#fee-card");
+        if (card) card.hidden = true;
+      });
+    }
 
     $("#filter-include-all").addEventListener("change", (e) => {
       state.includeAll = e.target.checked;
