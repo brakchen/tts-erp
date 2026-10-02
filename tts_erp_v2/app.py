@@ -60,6 +60,7 @@ from tts_erp_v2.api.v2 import (
     spu_images,
     sync_status,
     tiktok_shop,
+    users,
 )
 from tts_erp_v2.api.v2 import config as config_router
 from tts_erp_v2.middleware.access_log import AccessLogMiddleware
@@ -100,6 +101,7 @@ def _build_routes(app: FastAPI) -> None:
         oauth.router
     )  # TikTok seller OAuth onboarding (authorize + public callback)
     app.include_router(auth.router)  # browser login + session cookie
+    app.include_router(users.router)  # 用户/角色管理 API（需 page:users）
     # Admin-only operational endpoints (rate-limit hot-reload, etc.).
     # All paths under /v2/admin are gated to admin role both by the
     # auth middleware (default deny for unknown paths) and by an

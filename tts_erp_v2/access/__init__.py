@@ -19,6 +19,7 @@ from tts_erp_v2.access._types import (
     Credential,
     DeploymentPathInput,
     Role,
+    UserCredential,
 )
 
 __all__ = [
@@ -31,6 +32,7 @@ __all__ = [
     "Credential",
     "DeploymentPathInput",
     "Role",
+    "UserCredential",
     "authenticate_hash",
     "authenticate_key",
     "canonicalize_path",

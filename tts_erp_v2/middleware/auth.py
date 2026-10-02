@@ -25,6 +25,7 @@ from tts_erp_v2.access import (
     evaluate_access,
 )
 from tts_erp_v2.access import required_role as _required_role
+from tts_erp_v2.access._context import user_pages_var
 
 # Compatibility exports for existing handler helpers and test fixtures.
 ROLE_LEVEL = {role.value: role.level for role in Role}
@@ -95,13 +96,59 @@ def _prefix_of(key: str | None) -> str:
 
 
 def _deny_response(
-    status: int, message: str
+    status: int, message: str, *, accepts_html: bool = False
 ) -> tuple[int, list[tuple[bytes, bytes]], bytes]:
+    if accepts_html and status == 403:
+        # 浏览器页面请求的 403：返回友好 HTML（API 调用仍收 JSON）。
+        body = _FORBIDDEN_HTML.format(
+            message=_escape_html(message),
+        ).encode()
+        headers: list[tuple[bytes, bytes]] = [
+            (b"content-type", b"text/html; charset=utf-8")
+        ]
+        return status, headers, body
     body = json.dumps({"detail": message}).encode()
-    headers: list[tuple[bytes, bytes]] = [(b"content-type", b"application/json")]
+    headers = [(b"content-type", b"application/json")]
     if status == 401:
         headers.append((b"www-authenticate", b"Bearer"))
     return status, headers, body
+
+
+def _escape_html(value: str) -> str:
+    return (
+        value.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+_FORBIDDEN_HTML = """<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>403 · 无权访问</title>
+<style>
+  body {{ margin: 0; font-family: ui-monospace, monospace; background: #F4EFE4; color: #1B1814; }}
+  .box {{ max-width: 520px; margin: 12vh auto; padding: 2.5rem; background: #EAE3D2;
+         border: 1px solid #C9BFA8; box-shadow: 4px 4px 0 #C9BFA8; }}
+  h1 {{ font-size: 2.2rem; margin: 0 0 0.5rem; }}
+  .code {{ color: #B8390E; font-size: 0.85rem; letter-spacing: 0.12em; text-transform: uppercase; }}
+  p {{ line-height: 1.7; margin: 0.6rem 0 1.4rem; }}
+  a {{ color: #B8390E; text-decoration: none; border-bottom: 1px solid #B8390E; }}
+</style>
+</head>
+<body>
+  <div class="box">
+    <div class="code">HTTP 403</div>
+    <h1>无权访问该页面</h1>
+    <p>{message}</p>
+    <p><a href="./login">返回登录页</a></p>
+  </div>
+</body>
+</html>
+"""
 
 
 def _auth_mode() -> AuthMode:
@@ -162,6 +209,18 @@ class AuthMiddleware:
         scope["api_key_role"] = grant.role.value if grant.role else None
         scope["api_key_scopes"] = grant.scopes
         scope["auth_method"] = grant.auth_method
+        # 会话用户上下文（设计 §5.2）：user_id / username / pages 供 handler、
+        # 侧边栏渲染（ContextVar）与审计使用。
+        if grant.user is not None:
+            scope["user_id"] = grant.user.user_id
+            scope["username"] = grant.user.username
+            scope["user_pages"] = grant.user.pages
+            user_pages_var.set(grant.user.pages)
+        else:
+            scope["user_id"] = None
+            scope["username"] = None
+            scope["user_pages"] = None
+            user_pages_var.set(None)
 
         attempted_key = bearer_key or api_key
         if decision.effect in {AccessEffect.ALLOW, AccessEffect.SHADOW_ALLOW}:
@@ -213,7 +272,9 @@ class AuthMiddleware:
             f"[auth] denied {status} {scope['method']} {scope['path']} "
             f"from {client} key_prefix={_prefix_of(attempted_key)}\n"
         )
-        response_status, headers, body = _deny_response(status, detail)
+        response_status, headers, body = _deny_response(
+            status, detail, accepts_html=_accept_text_html(scope)
+        )
         await send(
             {
                 "type": "http.response.start",

@@ -49,6 +49,9 @@ _READONLY_EXACT = {
     "/v2/intercept/requests/stats",
     "/v2/oauth/tiktok/onboard",
     "/v2/oauth/tiktok/authorize",
+    # 改自己的密码：任何登录用户可调（handler 自校验会话 cookie，
+    # API key 凭据无会话 → 401）；不落入默认 ADMIN。
+    "/v2/auth/change-password",
 }
 
 
