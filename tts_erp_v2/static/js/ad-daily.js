@@ -276,7 +276,7 @@
     for (const item of items) {
       const row = document.createElement('tr');
       row.append(
-        cell(item.day || '—', 'ad-day'),
+        cell(item.day || '—', 'mld-day'),
         identityCell(item.shop_name || item.seller_id, item.seller_id, item.advertiser_id),
         copyCell(item.campaign_id),
         productCell(item),
@@ -284,14 +284,14 @@
         numberCell(item.onsite_roi2_shopping_sku == null ? '—' : numberFormat.format(item.onsite_roi2_shopping_sku)),
         numberCell(formatMoney(item.onsite_roi2_shopping_value)),
         numberCell(item.onsite_mixed_real_roi2_shopping == null ? '—' : `${roiFormat.format(Number(item.onsite_mixed_real_roi2_shopping))}×`),
-        cell(formatTimestamp(item.updated_at), 'ad-updated')
+        cell(formatTimestamp(item.updated_at), 'mld-updated')
       );
 
       const detailCell = document.createElement('td');
       const detailButton = document.createElement('button');
-      const detailId = `ad-detail-${item.id}`;
+      const detailId = `mld-detail-${item.id}`;
       detailButton.type = 'button';
-      detailButton.className = 'ad-metric-button';
+      detailButton.className = 'mld-metric-button';
       detailButton.textContent = '更多';
       detailButton.setAttribute('aria-expanded', 'false');
       detailButton.setAttribute('aria-controls', detailId);
@@ -314,20 +314,20 @@
   function buildDetailRow(item, id) {
     const row = document.createElement('tr');
     row.id = id;
-    row.className = 'ad-detail-row';
+    row.className = 'mld-detail-row';
     row.hidden = true;
     const td = document.createElement('td');
     td.colSpan = 10;
 
     const panel = document.createElement('div');
-    panel.className = 'ad-detail-panel';
+    panel.className = 'mld-detail-panel';
     const list = document.createElement('dl');
     addDefinition(list, '数据接口', item.endpoint);
     addDefinition(list, '首次写入', formatTimestamp(item.created_at));
     addDefinition(list, '最近更新', formatTimestamp(item.updated_at));
     addDefinition(list, '记录 ID', String(item.id));
     const pre = document.createElement('pre');
-    pre.className = 'ad-json';
+    pre.className = 'mld-json';
     pre.textContent = JSON.stringify(item.metrics_extra || {}, null, 2);
     panel.append(list, pre);
     td.append(panel);
@@ -346,7 +346,7 @@
   function identityCell(name, sellerId, advertiserId) {
     const td = document.createElement('td');
     const block = document.createElement('div');
-    block.className = 'ad-id-block';
+    block.className = 'mld-id-block';
     const strong = document.createElement('strong');
     strong.textContent = name || sellerId;
     strong.title = name || sellerId;
@@ -362,7 +362,7 @@
   function productCell(item) {
     const td = document.createElement('td');
     const block = document.createElement('div');
-    block.className = 'ad-id-block';
+    block.className = 'mld-id-block';
     if (item.product_title) {
       const strong = document.createElement('strong');
       strong.textContent = item.product_title;
@@ -383,7 +383,7 @@
   function copyButton(value) {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'ad-copy';
+    button.className = 'mld-copy';
     button.textContent = value || '—';
     button.title = value ? '复制 ID' : '';
     if (value) {
@@ -409,7 +409,7 @@
   }
 
   function numberCell(value) {
-    return cell(value, 'ad-num');
+    return cell(value, 'mld-num');
   }
 
   function renderPagination(total, visibleCount) {
