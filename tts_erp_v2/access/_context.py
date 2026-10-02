@@ -12,3 +12,9 @@ from contextvars import ContextVar
 user_pages_var: ContextVar[frozenset[str] | None] = ContextVar(
     "tts_erp_user_pages", default=None
 )
+
+# None = 无用户会话（API key / auth off）→ 侧边栏不显示登出；
+# str = 会话用户的显示名 → 侧边栏 footer 显示身份 + 登出按钮。
+user_label_var: ContextVar[str | None] = ContextVar(
+    "tts_erp_user_label", default=None
+)

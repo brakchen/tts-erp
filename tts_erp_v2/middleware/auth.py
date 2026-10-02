@@ -25,7 +25,7 @@ from tts_erp_v2.access import (
     evaluate_access,
 )
 from tts_erp_v2.access import required_role as _required_role
-from tts_erp_v2.access._context import user_pages_var
+from tts_erp_v2.access._context import user_label_var, user_pages_var
 
 # Compatibility exports for existing handler helpers and test fixtures.
 ROLE_LEVEL = {role.value: role.level for role in Role}
@@ -216,11 +216,15 @@ class AuthMiddleware:
             scope["username"] = grant.user.username
             scope["user_pages"] = grant.user.pages
             user_pages_var.set(grant.user.pages)
+            user_label_var.set(
+                grant.user.display_name or grant.user.username
+            )
         else:
             scope["user_id"] = None
             scope["username"] = None
             scope["user_pages"] = None
             user_pages_var.set(None)
+            user_label_var.set(None)
 
         attempted_key = bearer_key or api_key
         if decision.effect in {AccessEffect.ALLOW, AccessEffect.SHADOW_ALLOW}:

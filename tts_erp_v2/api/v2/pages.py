@@ -57,9 +57,9 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from markupsafe import Markup
+from markupsafe import Markup, escape
 
-from tts_erp_v2.access._context import user_pages_var
+from tts_erp_v2.access._context import user_label_var, user_pages_var
 from tts_erp_v2.accounts.pages import PAGES
 from tts_erp_v2.api.deps import require_role_at_least
 
@@ -296,6 +296,16 @@ def _sidebar_html(current_page: str) -> str:
       f'<span class="sidebar-label">{label}</span></a>'
     )
   nav_html = "\n      ".join(links)
+  user_label = user_label_var.get()
+  user_html = ""
+  if user_label:
+    label = escape(user_label)
+    user_html = (
+      '<div class="d-flex align-items-center justify-content-between gap-2 pb-2 mb-2 border-bottom">'
+      f'<span class="small text-truncate" title="{label}">{label}</span>'
+      '<button type="button" id="sidebar-logout" class="btn btn-sm flex-shrink-0">登出</button>'
+      "</div>"
+    )
   return f"""<button type="button"
     class="sidebar-mobile-toggle btn btn-sm d-lg-none position-fixed top-0 start-0 mt-2 ms-2"
     id="sidebar-toggle" aria-label="打开主导航" aria-controls="sidebar" aria-expanded="false">☰</button>
@@ -315,6 +325,7 @@ def _sidebar_html(current_page: str) -> str:
     </div>
 
     <div class="sidebar-footer px-3 py-2 border-top">
+      {user_html}
       <button type="button" class="sidebar-collapse-btn"
         id="sidebar-collapse" aria-label="折叠侧边栏" aria-controls="sidebar" aria-expanded="true">
         <span class="sidebar-collapse-icon" aria-hidden="true">«</span>
@@ -400,6 +411,18 @@ _SIDEBAR_TOGGLE_JS = """
   sb.querySelectorAll('a[href]').forEach(function(a) {
     a.addEventListener('click', function() { setMobileOpen(false, false); });
   });
+
+  // 会话登出（仅登录用户渲染；cookie 会话清吊销后跳登录页）。
+  var logoutBtn = document.getElementById('sidebar-logout');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', function() {
+      logoutBtn.disabled = true;
+      fetch('../../v2/auth/logout', {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'tts-erp' }
+      }).finally(function() { location.href = '../../v2/auth/login'; });
+    });
+  }
 })();
 """
 
