@@ -1,5 +1,12 @@
 # Browser 登录页设计（v2 · 2026 版）
 
+> **⚠️ 本方案已被取代**：现行认证体系以
+> [`tech-doc/user-account-authz-design.md`](user-account-authz-design.md) 为准
+> （用户名 + 密码账号 + 服务端会话 cookie `tts_erp_session` + 页面权限点）。
+> 本文描述的 **API-key 浏览器登录与 HMAC 会话 cookie `tts_session` 已整体移除**
+> （不做过渡兼容，旧 cookie 一律视为未登录）；正文仅作历史设计参考，
+> 不要按本文实现或对接。
+>
 > 状态：**已实施**（2026-08-31 前上线）。实现：`tts_erp_v2/api/v2/auth.py`（login/logout/me +
 > 登录页 HTML）+ `tts_erp_v2/middleware/session_auth.py`（HMAC 会话 cookie `tts_session`）+
 > `tts_erp_v2/middleware/auth.py`（cookie 优先鉴权 + 浏览器 302 重定向）。

@@ -1,7 +1,14 @@
 # 用户账号与页面权限体系设计（v1 · 2026-10）
 
-> 状态：**设计待评审**。评审通过后开始开发。
-> 相关文档：`tech-doc/browser-login-design.md`（现状，将被本设计取代浏览器登录部分）、
+> 状态：**已实现**（feature/user-account-authz）。实现落地：迁移
+> `alembic/versions/0052_user_accounts.py`（新增 `security` 六表：users / roles /
+> permissions / role_permissions / user_roles / user_sessions，含内置角色与
+> 页面权限点种子），核心代码 `tts_erp_v2/accounts/`（models / passwords / sessions /
+> service / cli / pages）+ `tts_erp_v2/api/v2/auth.py` `users.py` +
+> `tts_erp_v2/middleware/session_auth.py` + `tts_erp_v2/access/` 会话分支。
+> 依赖：`argon2-cffi`（argon2id 密码哈希，MIT，`pyproject.toml` 锁定
+> `>=25.1,<26`）。浏览器 API-key 登录（旧 HMAC cookie `tts_session`）已随本方案移除。
+> 相关文档：`tech-doc/browser-login-design.md`（历史方案，已被本设计取代）、
 > `tech-doc/api-key-auth-design.md`（API key 部分保持不变）、`tech-doc/access-policy-module.md`。
 
 ## 1. 背景与目标
@@ -313,11 +320,12 @@ page:intercept-stats  page:users(用户管理, 见 §9.1)
 | PATCH | `/v2/users/{id}` | 改显示名/状态/角色（禁用/启用也走这里） |
 | POST | `/v2/users/{id}/password` | 重置密码（body: newPassword） |
 | GET | `/v2/users/{id}/sessions` | 该用户的活跃会话列表 |
-| DELETE | `/v2/users/{id}/sessions/{sid}` | 吊销单个会话；`?all=1` 吊销全部 |
+| DELETE | `/v2/users/{id}/sessions/{sid}` | 吊销单个会话 |
+| DELETE | `/v2/users/{id}/sessions` | 吊销该用户全部会话 |
 | GET | `/v2/roles` | 角色及权限点清单（创建/编辑表单用） |
 | POST | `/v2/roles` | 新建自定义角色（名称、`api_tier`、页面权限点） |
 | PATCH | `/v2/roles/{code}` | 编辑角色（名称/`api_tier`/页面权限点） |
-| DELETE | `/v2/roles/{code}` | 删除自定义角色（被用户引用则 409） |
+| DELETE | `/v2/roles/{code}` | 删除自定义角色（被用户引用则 400） |
 
 - 护栏：禁止禁用/降权**自己**（避免管理员自锁）；禁止删除/禁用**最后一个 admin**；
   内置 `admin` 角色不可编辑/删除（固定全部权限 + admin 档）；内置角色不可删除；
@@ -414,7 +422,7 @@ sync-permissions                            # 将代码权限点清单 upsert �
 6. **用户管理页**：创建账号后新账号可登录、密码策略拒绝、禁用/会话吊销生效、
    非 admin 403 + 侧边栏无入口、自禁用/最后一个 admin 护栏；
    **角色权限配置**：改角色可进页面 → 对应用户可见页面变化、内置 admin 角色不可
-   编辑、删除被引用角色 409；
+   编辑、删除被引用角色 400；
 7. **兼容回归**:API key 两 header 形态、`TTS_ERP_AUTH_MODE` 三态、扩展端点
    `/v2/analytics/sync/*` 现有契约用例不回归。
 

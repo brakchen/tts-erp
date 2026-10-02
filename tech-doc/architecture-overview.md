@@ -70,20 +70,45 @@ shop_cipher = cred.shop_cipher
 
 **token 续期**：由 sync-worker 的 `token.refresh` job 每 6h 进程内完成，不需要也不要有 HTTP 续期端点。
 
-## 5. API key 鉴权（enforce 模式）
+## 5. 认证与鉴权（enforce 模式）
 
-**设计文档**：`tech-doc/api-key-auth-design.md`
+**设计文档**：API key 部分 `tech-doc/api-key-auth-design.md`；用户账号 / 会话 /
+页面权限部分 `tech-doc/user-account-authz-design.md`（已实现，迁移
+`alembic/versions/0052_user_accounts.py`）。两套凭证共用同一授权层
+（`tts_erp_v2/access/` 路由 → 最低角色矩阵 `required_role()`）：
 
-- 除豁免路径（`/healthz`、`/endpoints`、`/openapi.json`、`/docs`、`/redoc`、`/docs/oauth2-redirect`、
-  `/v2/auth/{login,logout,me}`）外，所有端点要 `Authorization: Bearer <key>` 或 `X-API-Key: <key>`；
-  无 key 401、角色不够 403。完整角色矩阵见 `tech-doc/external-api.md`；实现集中在
-  `tts_erp_v2/access/`，`middleware/auth.py` 仅为 ASGI adapter
+- **人类操作者（浏览器）**：用户名 + 密码登录（`POST /v2/auth/login`）→
+  服务端会话 cookie **`tts_erp_session`**（不透明 token，`security.user_sessions`
+  只存 `sha256(token)` + 过期/吊销状态；`HttpOnly; Secure; SameSite=Lax;
+  Path=<root_path>`）；登出/禁用/改密走 `revoked_at` 即时失效。旧的 API-key
+  浏览器登录与 HMAC cookie `tts_session` 已移除（`tech-doc/browser-login-design.md`
+  仅历史参考）。密码哈希 = **argon2id**（`argon2-cffi`，MIT），不存明文。
+- **程序化访问（不变）**：除豁免路径（`/healthz`、`/endpoints`、`/openapi.json`、
+  `/docs`、`/redoc`、`/docs/oauth2-redirect`、`/v2/auth/{login,logout,me}`）外，
+  脚本/扩展继续用 `Authorization: Bearer <key>` 或 `X-API-Key: <key>`；
+  无 key 401、角色不够 403。完整角色矩阵见 `tech-doc/external-api.md`；
+  实现集中在 `tts_erp_v2/access/`，`middleware/auth.py` 仅为 ASGI adapter
+- **账号数据模型**（`security` schema，migration 0052 新增六表，与既有
+  `security.api_keys` 并列）：`users`（用户名/argon2id 哈希/状态）、`roles`
+  （含 `api_tier`）、`permissions`（页面权限点 `page:<id>`）、
+  `role_permissions`、`user_roles`、`user_sessions`（服务端会话）
+- **页面级权限**：权限点 `page:<page_id>` 与侧边栏页面一一对应，单一清单在
+  `tts_erp_v2/accounts/pages.py`（13 个页面，含 `page:users` 用户管理）；
+  `GET /v2/pages/<id>` 要求会话权限集含 `page:<id>`，缺失 → 403 页面
+  （已登录但无权限 ≠ 未登录）；`/v2/users*` / `/v2/roles*` 归属 `page:users`
+- **侧边栏按权限过滤**：服务端渲染时按会话 `pages` 过滤入口，无权限页面不出现在
+  菜单（API key / auth off 时全量显示）；页面内全部操作不设权限点
+- **api_tier 复用既有角色矩阵**：会话用户取其角色的 `api_tier`
+  （`readonly|readwrite|admin`，取最高档）代入同一张 `required_role()` 比较；
+  `/v2/users` `/v2/roles` 等未列路径默认 admin 档（fail-closed）
 - 三级角色 `readonly` < `readwrite` < `admin`；handler gate 读取同一 typed `AccessGrant`；
   例如 admin/reset-rate-limit=admin
-- 浏览器会话：`POST /v2/auth/login` 用 API key 换 `tts_session` cookie（见 `tech-doc/browser-login-design.md`）；
-  cookie 会话做 mutation 必须带 `X-Requested-With: tts-erp`（CSRF 闸）
 - key 入库只存 SHA-256 哈希（`security.api_keys`）；模式开关 `.env TTS_ERP_AUTH_MODE=off|shadow|enforce`
   （生产 = enforce；非法值记录错误并 fail closed）；cron/脚本用 `.env TTS_ERP_SERVICE_KEY`
+- 浏览器会话的 mutation 仍带 `X-Requested-With: tts-erp`（CSRF 闸，叠加
+  `SameSite=Lax` + 写 API 只收 JSON）；登录限流独立 IP 滑动窗口
+  （`TTS_ERP_LOGIN_RATE_LIMIT`，默认 10 次/分）；账号管理入口 = 用户管理页
+  （`/v2/pages/users`）+ CLI（`python -m tts_erp_v2.accounts.cli`），无自助注册
 - deployment path 由 `tts_erp_v2.access.canonicalize_path()` 统一解释，Auth 与 DocsAuth
   共用 route-relative 结果；不得在其他 middleware 重新读取 external-prefix env
 

@@ -14,9 +14,16 @@ this document explains semantics, auth, and conventions.
 All endpoints are served at `http://127.0.0.1:9877` (or
 `https://daqiang.nat100.top` from outside — TLS terminates at the public gateway and the NAT layer strips the port;
 browser traffic may additionally sit under a `/tts` prefix handled by nginx).
-Every endpoint other than the explicitly-public ones requires
-`Authorization: Bearer <key>` or `X-API-Key: <key>` — or a browser session
-cookie (see [Browser session login](#browser-session-login)).
+Every endpoint other than the explicitly-public ones requires one of two
+credential kinds:
+
+- **Programmatic access (unchanged)** — an API key via
+  `Authorization: Bearer <key>` or `X-API-Key: <key>` (Chrome extension,
+  scripts, integrations).
+- **Human / browser access** — username + password login that mints a
+  server-side session cookie `tts_erp_session` (see
+  [Browser session login](#browser-session-login)). The old browser API-key
+  login (`POST /v2/auth/login` with `{"key": ...}`) has been **removed**.
 
 | What you want | Endpoint | Role |
 | --- | --- | --- |
@@ -46,6 +53,8 @@ cookie (see [Browser session login](#browser-session-login)).
 | 重点关注 SPU 页面 (HTML) | `GET /v2/pages/focused-spus` | readonly (browser → 302 login) |
 | SPU image list / upload / delete | `GET /v2/spu-images`, `POST /v2/spu-images/upload-url`, `POST /v2/spu-images/{id}/confirm`, `DELETE /v2/spu-images/{id}` | readonly / readwrite |
 | Browser login / logout / whoami | `GET\|POST /v2/auth/login`, `POST /v2/auth/logout`, `GET /v2/auth/me` | public |
+| Change own password | `POST /v2/auth/change-password` | session user (cookie) |
+| User & role administration | `GET\|POST /v2/users`, `GET\|PATCH /v2/users/{id}`, `POST /v2/users/{id}/password`, `GET\|DELETE /v2/users/{id}/sessions[/{sessionId}]`, `GET\|POST /v2/roles`, `PATCH\|DELETE /v2/roles/{code}` | **admin** + `page:users` 权限点 |
 | Intercept request statistics | `GET /v2/intercept/requests/stats` | readonly |
 | Analytics cursor has-data / dump ingest (Chrome ext) | `GET /v2/analytics/sync/cursor`, `POST /v2/analytics/sync/dumps` | readwrite + scope |
 | Order / logistics reconcile and dump ingest (Chrome ext) | `POST /v2/order-sync/{reconcile,has-data,dumps}` | readwrite + scope |
@@ -84,8 +93,16 @@ curl -sS -H "X-API-Key: $KEY" \
 
 ## Authentication
 
-Every request to a non-public endpoint must carry an API key. Two header
-forms are accepted:
+Two credential families share one authorization layer
+(`tts_erp_v2/access/`, route → minimum role matrix `required_role()`):
+
+1. **用户名 + 密码 → 服务端会话 cookie `tts_erp_session`**（人类操作者 / 浏览器）。
+   登录、登出、会话管理见 [Browser session login](#browser-session-login)；
+   设计基准 [`user-account-authz-design.md`](user-account-authz-design.md)。
+   会话用户的授权档位取其角色的 `api_tier`（`readonly|readwrite|admin`），
+   走**同一张路由角色矩阵**；页面路由还要求对应的 `page:<id>` 权限点。
+2. **API key（程序化访问，不变）** — `Authorization: Bearer <key>` 或
+   `X-API-Key: <key>`，两 header 形态：
 
 ```http
 Authorization: Bearer <your-api-key>
@@ -114,6 +131,9 @@ route-relative path and therefore also covers `/tts/docs` deployments.
 - `401 missing bearer token` — no credential sent
 - `401 invalid, disabled or expired api key` — credential not recognised
 - `403 requires <role>` — key recognised but lacks the role for this path
+- `403 requires page:<id>` — session user lacks the page permission point
+  (page routes and the `/v2/users*` / `/v2/roles*` APIs, which map to
+  `page:users`); API-key credentials are not subject to page permission points
 
 The mode is set by env `TTS_ERP_AUTH_MODE=off|shadow|enforce`. In
 `enforce` (production default since 2026-08-20) the service returns the
@@ -125,24 +145,63 @@ denied-request rate-limit budget before response presentation is selected.
 
 ## Browser session login
 
-For human operators there is a thin cookie layer on top of the API-key
-system (design: [`browser-login-design.md`](browser-login-design.md)):
+（用户名 + 密码 → 服务端会话 cookie `tts_erp_session`）
 
-- `GET /v2/auth/login` — public HTML form.
-- `POST /v2/auth/login` — body `{"key": "...", "next": "/v2/pages/manual-costs"}`;
-  validates the key against `security.api_keys`, sets an HMAC-signed
-  `HttpOnly` session cookie `tts_session` (12 h fixed TTL; the cookie
-  stores only the key hash, re-validated against the DB per request —
-  revoking the key kills the session within the cache TTL).
-- `POST /v2/auth/logout` — clears the cookie.
-- `GET /v2/auth/me` — `{authenticated, role}` for the current cookie; `role`
-  is read from the current database credential, not the role embedded when the
-  cookie was minted.
+For human operators the browser login is **username + password** backed by
+server-side session records (`security.users` / `security.user_sessions`,
+design: [`user-account-authz-design.md`](user-account-authz-design.md)).
+There is **no self-registration** — accounts are created by an admin via the
+user management API/CLI. The old API-key browser login
+(`POST /v2/auth/login` with `{"key": ...}`, HMAC cookie `tts_session`,
+[`browser-login-design.md`](browser-login-design.md)) has been **removed**;
+old-format cookies are treated as unauthenticated (no transition compatibility).
+
+Programmatic access is unaffected: API keys (`Bearer` / `X-API-Key`) keep
+working exactly as before. If a request carries both a session cookie and an
+API key, the **cookie wins**; the API key is the fallback (curl / extension
+scenarios).
+
+### Auth endpoints (`/v2/auth/*`)
+
+Request and response bodies are camelCase JSON; errors use the standard
+`{"detail": "..."}` body (see [Error responses](#error-responses)). Successful
+login/logout complete parsing + persistence (`2xx` per repo semantics).
+
+| Method | Path | Auth | Request body | Response |
+| --- | --- | --- | --- | --- |
+| `GET` | `/v2/auth/login` | public | — (query `?next=`) | 200 login form (HTML). `next` is open-redirect-guarded (same-origin absolute path only), default `/v2/pages/dashboard` |
+| `POST` | `/v2/auth/login` | public (IP rate-limited) | `{username, password, next?}` | 200 `{ok: true, username, displayName, role, pages}` + `Set-Cookie: tts_erp_session=...`；`role` = api_tier 文本，`pages` = 有效页面权限点 id 列表 |
+| `POST` | `/v2/auth/logout` | public (idempotent) | — | 204；吊销服务端会话 + 清 cookie（同 Path） |
+| `GET` | `/v2/auth/me` | public (handler self-checks cookie) | — | `{authenticated: false}` 或 `{authenticated: true, username, displayName, role, roles, pages}`（`role` = api_tier；吊销/禁用即时反映） |
+| `POST` | `/v2/auth/change-password` | session user (cookie) | `{oldPassword, newPassword}` | `{ok: true}`；成功后吊销该用户**其他**会话 |
+
+Login errors: `401 {"detail":"用户名或密码错误"}` (uniform message, no user
+enumeration); `429 {"detail":"too many login attempts","retry_after_s":N}`
+(IP sliding window, `TTS_ERP_LOGIN_RATE_LIMIT`, default 10/min);
+`503 {"detail":"auth store unavailable: ..."}` (fail closed).
+`change-password`: 401 `{"detail":"未登录"}` without a valid session;
+400 `{"detail":...}` on wrong old password / password-policy violation.
+
+### Session cookie `tts_erp_session`
+
+- Opaque random token (`v2.`-prefixed); the DB stores only `sha256(token)`
+  (`security.user_sessions`) — a DB leak does not leak usable sessions.
+- Attributes: `HttpOnly; Secure; SameSite=Lax; Path=<root_path>` (production
+  `/tts`, derived from `TTS_ERP_EXTERNAL_PREFIX`; never `Path=/`), host-only
+  (no `Domain`). Logout deletes the cookie with the identical Path.
+- TTL: `TTS_ERP_SESSION_TTL` (default 43200 s = 12 h, fixed expiry, no
+  sliding renewal). `TTS_ERP_SESSION_SECURE=0` for local http dev.
+- Lifecycle: logout revokes the current session; disabling a user revokes all
+  of their sessions; password reset/change revokes the others; expiry is
+  enforced per request (`revoked_at IS NULL AND expires_at > now()` plus
+  `users.status = 'active'`).
 
 Browser navigations (`Accept: text/html`) that fail auth get a **302** to
 `/v2/auth/login?next=...` instead of a JSON 401. Cookie-authed
 POST/DELETE requests must carry `X-Requested-With: tts-erp` (CSRF guard;
-double-checked with `SameSite=Lax` + default-deny CORS).
+double-checked with `SameSite=Lax` + JSON-only write APIs + default-deny
+CORS). HTML page routes additionally return a friendly **403 page** (not a
+302) when the user is logged in but lacks the `page:<id>` permission point.
 
 ## Rate Limiting
 
@@ -299,6 +358,39 @@ Versioned JSON configuration with draft/publish/rollback and encrypted
 | `GET /v2/pages/shops` | readonly | 店铺注册台。人工注册插件同步店铺（`commerce.shops` 补登记）；写入走 `POST /v2/admin/shops/register`（含 App Key/Secret 均 readwrite）；行内元信息编辑走 `PATCH /v2/admin/shops/{shop_pk}`；App pair 按 service_id 加密保存；「获取授权链接」按钮走 `GET /v2/oauth/tiktok/authorize?format=json`（readwrite）。 |
 | `GET /v2/pages/sync-jobs` | readwrite | 定时任务管理页。读取 `/v2/sync/jobs`；readwrite 会话可调用 `/v2/admin/sync-jobs/{job_name}/trigger` 立即提交后台执行；admin 会话还可调用 `/v2/admin/sync-jobs/{job_name}/enabled` 启停周期 tick。 |
 | `GET /v2/pages/runtime-configs` | readwrite | 运行配置台：创建草稿、发布/恢复版本、管理灰度规则及加密 secret 引用。 |
+| `GET /v2/pages/users` | admin + `page:users` | 用户管理页（用户 / 角色权限两页签），仅 `page:users` 权限点持有者可见可用；侧边栏入口同样按权限过滤。无权限 → 403 页面。 |
+
+### User & role management (`/v2/users/*`, `/v2/roles/*`)
+
+用户与角色管理 API（设计 `user-account-authz-design.md` §9.1）。**访问要求：**
+路由矩阵未列路径默认 **admin** 档（fail-closed）；会话用户还必须持有
+`page:users` 权限点（预置角色中仅 `admin` 拥有），否则 `403 {"detail":"requires
+page:users"}`。API key 凭证（admin 档）也可调用，不受页面权限点约束。护栏：
+禁止禁用自己、禁止禁用/降权最后一个 admin、内置 `admin` 角色不可编辑/删除、
+内置角色不可删除、写操作仅接受 `Content-Type: application/json`。
+
+请求/响应均为 camelCase JSON；错误体 `{"detail": "..."}`；`2xx` = 解析与持久化
+均成功（无副作用的裸 JSON 不套 envelope）。时间字段 ISO-8601 UTC。
+
+| Method | Path | Request body / notes | Response |
+| --- | --- | --- | --- |
+| `GET` | `/v2/users` | — | `{users: [{id, username, displayName, status, roles, lastLoginAt, activeSessions}]}`（`status` ∈ `active\|disabled`，`roles` 为角色 code 数组） |
+| `POST` | `/v2/users` | `{username, displayName, password, roles?}`；用户名规则 `^[a-z0-9][a-z0-9_.-]{1,31}$`（创建时小写归一化），密码需过密码策略（≥6 位且含大小写与数字） | 201 `{id, username}`；400 `{detail}`（重名/密码策略/角色不存在） |
+| `GET` | `/v2/users/{id}` | — | `{id, username, displayName, status, roles, pages, apiTier, lastLoginAt}`（`pages` = 有效页面权限点并集）；404 `{detail}` |
+| `PATCH` | `/v2/users/{id}` | `{displayName?, status?, roles?}` 任一（启用/禁用、换角色都走这里；禁用即吊销全部会话） | `{ok: true}`；400/404 `{detail}`（自禁用/最后一个 admin 护栏） |
+| `POST` | `/v2/users/{id}/password` | `{newPassword}`；重置后吊销该用户全部会话 | `{ok: true}`；400/404 `{detail}` |
+| `GET` | `/v2/users/{id}/sessions` | — | `{sessions: [{id, createdAt, expiresAt, lastSeenAt, revokedAt, ip, userAgent, active}]}`；404 `{detail}` |
+| `DELETE` | `/v2/users/{id}/sessions/{sessionId}` | 吊销单个会话 | `{ok: true, revoked: 1}`；404 `{detail}` |
+| `DELETE` | `/v2/users/{id}/sessions` | 吊销该用户**全部**会话 | `{ok: true, revoked: N}`；404 `{detail}` |
+| `GET` | `/v2/roles` | — | `{roles: [{code, name, description, apiTier, isBuiltin, permissions, userCount}], allPermissions: [{code, label, group}]}`（`allPermissions` = 页面权限点目录，创建/编辑表单勾选清单） |
+| `POST` | `/v2/roles` | `{code, name, apiTier, permissions?}`；`code` 规则 `^[a-z0-9][a-z0-9_-]{1,31}$`，`permissions` 为 `page:<id>` 数组；勾选写类页面时按 `PAGE_MIN_WRITE_TIER` 校验 `api_tier`（配置类页面至少 readwrite，`page:users` 要求 admin 档） | 201 `{code}`；400 `{detail}`（重名/未知权限点/tier 不足） |
+| `PATCH` | `/v2/roles/{code}` | `{name?, apiTier?, permissions?}` 任一 | `{ok: true}`；400/404 `{detail}`（内置 admin 不可编辑） |
+| `DELETE` | `/v2/roles/{code}` | 删除自定义角色 | `{ok: true}`；被用户引用/内置角色 → 400 `{detail}`；404 `{detail}` |
+
+页面级权限点 `page:<id>` 与侧边栏页面一一对应（单一清单：
+`tts_erp_v2/accounts/pages.py`）；`/v2/users*` 与 `/v2/roles*` 归属 `page:users`。
+账号创建/密码重置的无 UI 入口见 CLI：`python -m tts_erp_v2.accounts.cli --help`
+（`create-user` / `reset-password` / `create-role` 等，首次部署建首个 admin 用）。
 
 ### Admin (`/v2/admin/*`, handler-enforced roles)
 
@@ -1076,7 +1168,8 @@ Stable external endpoints (safe to build dashboards / agents on):
 | `GET /v2/analytics/spu-roi` | readonly | stable 只读（口径见 `analytics/spu-real-roi-dashboard.md`） |
 | `GET /v2/spu-images`, upload/confirm/delete | readonly / readwrite | v2 |
 | `GET /v2/llm-context` | readonly | v2 (content evolves with the schema) |
-| `GET\|POST /v2/auth/*` | public | v2 |
+| `GET\|POST /v2/auth/*` | public / session user | v2 — 用户名+密码 + 会话 cookie `tts_erp_session`（浏览器 API key 登录已移除） |
+| `GET\|POST /v2/users`, `GET\|PATCH /v2/users/{id}`, `POST /v2/users/{id}/password`, `GET\|DELETE /v2/users/{id}/sessions[/{sessionId}]`, `GET\|POST /v2/roles`, `PATCH\|DELETE /v2/roles/{code}` | admin + `page:users` | v2 |
 | `GET /v2/analytics/sync/cursor`, `POST /v2/analytics/sync/dumps`, `GET /v2/analytics/sync/coverage` | readwrite + scope | analytics（自有 envelope，frozen） |
 
 Retired endpoints (404; do NOT build on these):
