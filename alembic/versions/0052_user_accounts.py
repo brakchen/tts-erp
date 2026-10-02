@@ -172,8 +172,7 @@ def upgrade() -> None:
                 "INSERT INTO security.permissions (code, kind, name) "
                 "VALUES (:code, 'page', :name) "
                 "ON CONFLICT (code) DO NOTHING"
-            ),
-            {"code": code, "name": code},
+            ).params(code=code, name=code)
         )
     # 种子：内置角色 + role_permissions（幂等）
     for role_code, name, api_tier, perms in _BUILTIN_ROLES:
@@ -182,8 +181,7 @@ def upgrade() -> None:
                 "INSERT INTO security.roles (code, name, api_tier, is_builtin) "
                 "VALUES (:code, :name, :tier, true) "
                 "ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name"
-            ),
-            {"code": role_code, "name": name, "tier": api_tier},
+            ).params(code=role_code, name=name, tier=api_tier)
         )
         for perm in perms:
             op.execute(
@@ -191,8 +189,7 @@ def upgrade() -> None:
                     "INSERT INTO security.role_permissions (role_code, permission_code) "
                     "VALUES (:role, :perm) "
                     "ON CONFLICT (role_code, permission_code) DO NOTHING"
-                ),
-                {"role": role_code, "perm": perm},
+                ).params(role=role_code, perm=perm)
             )
     # 首个 admin 账号不入迁移：部署者用 CLI 创建（避免默认口令入库）。
 
