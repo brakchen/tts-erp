@@ -1,5 +1,13 @@
 # tts-erp CHANGELOG
 
+## 2026-10-02 — 广告日明细页避开广告拦截隐藏
+
+- 广告日明细页的 CSS 类名前缀由 `ad-` 全量改为 `mld-`（路由、静态文件名与
+  `plugin.ad_daily` 不变）。EasyList / AdGuard Base 的 `##.ad-masthead`、
+  `##.ad-summary`、`##.ad-table` 等 cosmetic 规则会把类名以 `ad-` 开头的
+  标题栏、汇总条和整个表格直接隐藏，导致“查询明细后无数据显示”但接口
+  与分页状态正常。新前缀在两个规则库中均无命中。
+
 ## 2026-10-02 — SPU ROI 主表铺满容器宽度
 
 - SPU ROI / 重点关注 SPU 主表 Tabulator 布局由默认 `fitData` 改为 `fitColumns`：
