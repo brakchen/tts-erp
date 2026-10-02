@@ -3779,7 +3779,6 @@ def test_spu_roi_page_uses_bootstrap_responsive_layout(api_client, readonly_key)
         "col-12 col-xl",
         "op-tabulator",
         "nav nav-tabs flex-nowrap overflow-x-auto op-drill-tabs",
-        "d-flex flex-column flex-md-row",
     ):
         assert fragment in body, f"缺 Bootstrap 响应式结构: {fragment}"
 
@@ -3813,7 +3812,7 @@ def test_spu_roi_page_uses_bootstrap_responsive_layout(api_client, readonly_key)
 def test_spu_roi_hidden_state_overrides_bootstrap_display_utilities(
     api_client, readonly_key
 ):
-    """hidden 必须稳定隐藏弹窗/页脚，不能被 Bootstrap d-flex !important 覆盖。"""
+    """hidden 必须稳定隐藏弹窗，不能被 Bootstrap d-flex !important 覆盖。"""
     import re
     from pathlib import Path
 
@@ -3999,7 +3998,8 @@ def test_spu_roi_js_targets_dashboard_hooks():
     assert "uses_default_unit_cost" in src  # 后端业务状态驱动“缺成本”标识
     assert "DEFAULT_K1" not in src
     assert '"¥"' not in src  # 2026-09-29 反馈：金额前缀去掉，纯数字
-    assert "meta.cost_assumption" in src
+    # 2026-10-02 用户反馈页脚口径文字无用：整块删除，cost_assumption 不再上屏（meta 契约不变）
+    assert "meta.cost_assumption" not in src
     # Bootstrap 多选由 Tom Select 驱动，精确 scope 通过独立 spu_ids 参数提交。
     assert 'window["TomSelect"]' in src
     assert "/v2/commerce/channel-product-options" in src
@@ -4471,7 +4471,7 @@ def test_spu_roi_frontend_only_displays_backend_profitability() -> None:
     assert 'renderError("汇率数据缺失，无法计算结果", true)' in src
     assert "summaries.hidden = true" in src
     assert "pager.hidden = true" in src
-    assert "footnotes.hidden = true" in src
+    assert "footnotes" not in src  # 页脚区块已删（2026-10-02）
     assert 'roiAdStatus === "estimated_known_costs"' in src
     assert "ad_system_max_ad_spend" not in src  # 前端不重算，只展示后端 ROI
     assert 'meta.currency.display) || "CNY"' in src

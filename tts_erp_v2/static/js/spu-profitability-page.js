@@ -928,10 +928,8 @@
     if (wholePage) {
       var summaries = $("#summaries");
       var pager = document.querySelector("main .op-pager");
-      var footnotes = $("#footnotes");
       if (summaries) summaries.hidden = true;
       if (pager) pager.hidden = true;
-      if (footnotes) footnotes.hidden = true;
       $("#sum-stamp").textContent = "";
     }
     tableShowPlaceholder(
@@ -951,11 +949,9 @@
     closeDrillPanel();
     var summaries = $("#summaries");
     var pager = document.querySelector("main .op-pager");
-    var footnotes = $("#footnotes");
     var feeCard = $("#fee-card");
     if (summaries) summaries.hidden = true;
     if (pager) pager.hidden = true;
-    if (footnotes) footnotes.hidden = true;
     if (feeCard) feeCard.hidden = true;
     $("#sum-stamp").textContent = "";
     renderEmpty(profile && profile.emptySelectionMessage);
@@ -1106,10 +1102,8 @@
   function render(payload) {
     var summaries = $("#summaries");
     var pager = document.querySelector("main .op-pager");
-    var footnotes = $("#footnotes");
     if (summaries) summaries.hidden = false;
     if (pager) pager.hidden = false;
-    if (footnotes) footnotes.hidden = false;
     var items = unwrap(payload);
     var totals = payload.totals || {};
     var meta = payload.meta || {};
@@ -1258,37 +1252,15 @@
       `第 ${page} / ${pages} 页 · 共 ${lastTotal} 个 SPU`;
     renderPager(page, pages);
 
-    // 页脚口径行
-    var notes = [];
-    if (meta.computed_at) {
-      notes.push(
-        `数据截至 ${esc(String(meta.computed_at).replace("T", " ").slice(0, 19))}`,
-      );
-    }
-    if (meta.window && meta.window.first_day) {
-      notes.push(
-        `ad 窗口 ${esc(meta.window.first_day)} ~ ${esc(meta.window.last_day)}`,
-      );
-    }
+    // 费率状态卡与费率输入框 placeholder 仍随 meta 更新（页脚口径行已删）
     if (meta.fee) {
-      // 逐店铺样本/覆盖率细节在新费率状态卡里；页脚只留一行聚合口径。
       renderFeeCard(meta.fee);
-      notes.push(
-        `平台佣金费率 ${esc(meta.fee.rate)}（${
-          FEE_SOURCE_LABEL[meta.fee.source] || meta.fee.source
-        }）`,
-      );
       // 费率输入框 placeholder 跟随当前口径(仅影响空输入时的灰字提示)
       var feeInputEl = $("#filter-fee");
       if (feeInputEl && meta.fee.source !== "user_override") {
         feeInputEl.placeholder = (parseFloat(meta.fee.rate) * 100).toFixed(1);
       }
     }
-    if (typeof meta.unattributed_refund_lines === "number") {
-      notes.push(`未归属退款 ${meta.unattributed_refund_lines} 行`);
-    }
-    if (meta.cost_assumption) notes.push(meta.cost_assumption);
-    $("#foot-meta").textContent = notes.join(" · ");
 
     // 起始/截止日真实呈现(2026-09-06):数据有可裁剪跨度(销售∪退款覆盖)且
     // 用户未手动改过日期 → 把输入框回填成当前数据的真实时间范围。全跨度 ≡

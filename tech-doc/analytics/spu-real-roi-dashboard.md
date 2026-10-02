@@ -65,7 +65,7 @@
 | C10 | 主指标 | **实际 ROI（M14）** = (净现金 − 全损货损) ÷ 广告 | NC′/spend（全 CNY；比值无量纲） | 主列 + 合计带 | 退款已含在净现金 |
 | C11 | 保本线 | **M17 动态** = NC′ ÷ (NC′ − 正常卖出件货本 − 平台费用 fee) | roi_real≥roi_be ⇔ 净利润≥0 | 红绿判据（默认） | 结构性亏→无解 |
 | C12 | 退款金额缺失 | 净额桶 27/27 齐全直取；取消桶缺 219/246 → **报 unknown 行数，不造数** | — | 双字段上报 | §5.6 |
-| C13 | 未归属退款 | 66 行无法到 SPU | — | meta + 页脚提示 | 不静默丢 |
+| C13 | 未归属退款 | 66 行无法到 SPU | — | meta（页面已不展示） | 不静默丢 |
 | C14 | 明细 / 交互 | 行内展开三 tab；方案 A 账页；默认排序 实际ROI↑（D5） | — | §7 | 及格线/退款率可调 |
 | C15 | 结算/保本精度路径 | **解析归属 job + view 已排期（D7，2026-09-05）**；过渡期平台佣金用**费率基线**扣（D10） | M16→落地后自动含平台费/退货运费 | 落地前按费率估扣 | §6.11/§9-3 |
 | C16 | 平台佣金（渠道费用）扣法 | **定义 = 平台从销售额直接扣除的全部费用**（抽佣+联盟佣金+运费类+其它扣款；单笔总扣 = 交易级 fee_amount）。**已结算订单 → 实际扣费（固定）；未结算订单 → sales × 参考基线 r̂**（Σ\|fee_amount\|/Σgross，实测 ≈30.8%（2026-09-06 重定，旧 30.8% 重定；页面可覆写 %） | fee = 实际 + 估算（M19） | 默认用基线 r̂；解析上线后自动分层 | D10 |
@@ -191,7 +191,7 @@ SPU 无广告投放 → 广告列显示 0 与“无投放”文案（不隐藏�
 ### 3.4 口径切换与展示规则
 
 - **全表统一 CNY、不再分栏**：广告原生 USD、销售/退款原生 VND 在服务端公式入口按同一数据库 fx 快照换算为 CNY，货本保持 CNY；页面只格式化千分位、不加货币符号（2026-09-29 反馈），不二次换汇。快照缺失/异常时整个盈利请求失败关闭并提示重试。
-- **口径警告 chip**：广告列旁常驻提示「GMV Max 归因含自然单 + 数据有滞后修正，广告数字≠纯广告增量、≠最终回款」。
+- **口径警告 chip（2026-10-02 已删）**：原页面底部「GMV Max 归因含自然单…」chip 与口径行已按用户要求整块移除；归因口径警示只保留在本档与 §11，数据口径仍以 `meta` 为准。
 - 时间默认 = 全历史累计（销售/退款不裁剪，ad 恒为视图全窗口）；如需同窗口口径，端点显式传 `w_start`/`w_end`，B 组口径说明以 meta.window 为准（§4.5）。
 
 ---
@@ -315,7 +315,7 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
 
 1. case 只有单 SPU（该 order 所有 line 都属于 s）→ 用 case 级金额直接记给 s（`cases.refund_amount` 或 case_lines 求和一致）。
 2. 多 SPU 订单（一个 order 含多个 spu 的 line）→ 按该 case 下 **case_lines.refund_amount**（按 line 挂到对应 spu）；某 line 无 refund_amount 时按该 line 的 `quantity×unit_price ÷ 订单行总金额` 分摊 case 级金额，并在行内标「分摊」。
-3. 归属不上（case_lines 无 `sales_order_line_id` 或 line 无 spu）→ 计入「未归属退款」合计行（**实测完结状态 66 行**，页面页脚/合计带提示，不静默丢），明细可到 `integration.raw_records` 反查原始 payload。
+3. 归属不上（case_lines 无 `sales_order_line_id` 或 line 无 spu）→ 计入「未归属退款」合计行（**实测完结状态 66 行**，仅在 meta 上报，不静默丢），明细可到 `integration.raw_records` 反查原始 payload。
 
 **L2 说明**：全损货损已并入主指标（M13b→M14），不再单设 L2 净利；剩余可选损失 = 商家有责退货运费（数据源待定，§9），本期无输出。
 
@@ -503,7 +503,7 @@ roi_breakeven = NC′ ÷ (NC′ − COGS_kept − fee_est)   # COGS_kept + fee_e
 2. **行合计 = 全量聚合**：对同一 `W`，Σ行(spend / sales / refund_net_amount / refund_cancelled_amount) == 去掉 products_spu 维后的独立全量聚合（SQL 同 CTE 两写一处校验）。
 3. **spend 对账视图**：Σ行(spend) == `analytics.ad_product_links` 全表 `Σ real_cost_total`（2026-09-05 实测 1414.77，随每日 dump 增长）。
 4. **roi 服务端自校验**：`roi_real == (net_cash_cny − return_loss_cny) / spend_cny`（全 CNY 同币）；`roi_l0 == gmv_ad/spend`（无量纲，Decimal，无 float）；数据库 fx 快照缺失/异常 → 整个请求 `503 FX_RATE_UNAVAILABLE`，绝不输出部分或近似值。
-5. **金额缺失不静默**：净额桶 `refund_net_amount` 与 `refund_cancelled_missing_lines` 分开上报；未归属行数出现在 meta，页面页脚提示。
+5. **金额缺失不静默**：净额桶 `refund_net_amount` 与 `refund_cancelled_missing_lines` 分开上报；未归属行数出现在 meta。
 6. **保本一致性**：`roi_real ≥ roi_breakeven ⇔ 毛利口径利润 ≥ 0 ⇔ net_profit ≥ 0`（M18 净利润含 fee_est，同源推导，§4.2 M17/M18/M19）——测试断言页面红/绿与净利润正负同号，杜绝“标红却赚钱 / 绿字却亏损”。
 
 ### 5.5 SQL 模板（字段名与 §5.2 一一对应；行与 totals 共用同一组 CTE）
@@ -589,7 +589,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 | 历史 USD 样例 SPU 1736929955366339831（D11 后仅作版本史，不代表当前输出币种） | 广告(1 计划, spend 157.40 USD, GMV 472.91, L0=3.00) × 有效销售(55 单/27 件/557.21 USD) × 退款(净额 109.09 USD；取消已知 19.29+缺失 36 行) → **净现金(内部) 448.12 − 货本 119.67 − 广告 157.40 − 平台费用 64.40 → 净利润 106.65 USD → 实际 ROI 2.73 / 保本 1.63** | 输出列全部能按 §5.2 计算，金额统一 USD；净利润含平台费用（基线 ≈30.8%） |
 | 净额桶金额覆盖 | 完结状态 27 case/27 line，金额 **27/27（100%）** | M7/M8 行级金额直取即可，无需分摊造数 |
 | 取消桶金额覆盖 | 完结状态可归行 236 case/246 line，仅 27 行有金额（缺 219；另 14 个取消 case 无行可归 → 计入未归属） | M9 必须“已知金额+缺失行数”双字段（§5.2） |
-| 未归属规模 | 完结状态 66 条 case line 无法落到 spu（无 line 键或行无 spu） | meta `unattributed_refund_lines` + 页脚提示必需 |
+| 未归属规模 | 完结状态 66 条 case line 无法落到 spu（无 line 键或行无 spu） | meta `unattributed_refund_lines`（页面已不展示） |
 | 合计一致性 | Σ行(spend) = 1414.77 == 视图全表总额（=1207.17 为 09-04 前旧快照） | 行/合计同 CTE 可对账；窗口随 dump 增长 |
 
 ---
@@ -836,8 +836,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ ← 上一页  p/M  下一页 →   每页 100 条                                        │
 └─────────────────────────────────────────────────────────────────────────────┘
-[提示行] “全表 CNY（广告 USD、销售/退款 VND 服务端统一换算）· N 个 SPU 使用默认 40 元/件成本(⚠) · 已付被取消退款 N 行金额未知 · 未归属退款 N 行”
-[警告 chip] GMV Max 归因含自然单、数据滞后修正 —— 广告列仅供对照，实际 ROI 以 ERP 侧为准
+（原页脚口径行与 GMV Max 警告 chip 已于 2026-10-02 删除；口径信息仅在 `meta` 与本档）
 ```
 
 **结余带 15 格口径（2026-09-29 Bootstrap 重构：全部带 `?` 气泡，数值来自 `totals`）**：
@@ -848,7 +847,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 - 结余带使用 `row-cols-1/2/3/4`，每个业务组内部固定 `row-cols-2`，不会把成对指标拆散；
 - 筛选栏使用 `col-12/6/3/...` 自适应，不再由自定义 media query 计算宽度；SPU 控件是真实 `<select multiple>`，只由 Tom Select 官方 Bootstrap 5 主题增强，不自研 chips/下拉/键盘行为；
 - 主表和钻取表统一放进 `table-responsive`，所有列保留，以横向滚动代替按 `nth-child` 隐藏；
-- 钻取指标、P&L 分层、分页、页脚和店铺弹窗均使用 Bootstrap 栅格/工具类。
+- 钻取指标、P&L 分层、分页和店铺弹窗均使用 Bootstrap 栅格/工具类。
 
 > 单一口径：**行级与 totals 都按下单订单状态计（COD 店下单即算，不看 paid_at）**。
 > 有效订单 = 白名单状态（含 COD 在途/待收款）；取消订单 = 全部 CANCELLED（含未收款取消）。
@@ -914,7 +913,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 | ⚙ 广告归因对照(cg-adref)：平台GMV(归因) / ROI₀ | 折叠 | 广告侧对照列(2026-09-06 从主列移入隐藏组) |
 | ⚙ 订单结构(cg-structure)：有效单 / 件数 | 折叠 | 2026-09-06 新增隐藏组 |
 | ⚙ 仅退/退货拆分(cg-refundsplit)：仅退件/$、退货件/$ | 折叠 | 钻取信息 |
-| ⚙ 取消明细(cg-cancel)：取消件 / 取消退款$ / 金额未知行 | 折叠 | “另有 N 行金额未知”提示行保留在页脚 |
+| ⚙ 取消明细(cg-cancel)：取消件 / 取消退款$ / 金额未知行 | 折叠 | 金额未知行数仅在 meta 上报（原页脚提示已删） |
 | ⚙ 平台佣金(cg-fee) | 折叠 | 渠道费用 |
 
 > 折叠列仍参与排序与合计，只是不占横向空间。
@@ -957,7 +956,7 @@ WHERE (ad.spu_pk IS NOT NULL OR sales.spu_pk IS NOT NULL OR refunds.spu_pk IS NO
 1. ~~**币种不统一（主指标换算阻塞）**~~ → **已解决（2026-09-05 拍板）**：广告账户币种 = USD，销售/退款 = VND；跨币换算走**在线最新汇率**（机制见 §4.6）。唯一残留 = 汇率是**外部在线依赖**，需 job + 落库 + 失败/过期降级（机制已定，属实施项，不再是口径阻塞）。
 2. **货物成本：按 SPU 解析——人工成本优先，未命中才默认 40 CNY/件（已解，不再阻塞）**：现网人工成本仅 2 行（快照/采购单近空）。2026-09-05 确认解析顺序：① `manual_product_costs` 有效行（valid_to IS NULL）→ 用录入值（MANUAL）；② 未命中 → 默认 K1=40 CNY/件（DEFAULT_K1）并**在页面显示“缺成本”（可跳 manual-costs 补录）**。命中率低 → 多数 SPU 显示“缺成本”属预期；成本页铺开后自动切真实值。成本币种 CNY → USD 走在线汇率（§4.6 已含 CNY/USD 币对）。
 3. **每笔订单结算金额（M16）→ 解析 job 已排期（D7，2026-09-05）**：数据源已定位（`integration.raw_records` 的 `/finance/…/statement_transactions` 59 列 + 自带 order_id，交易级 `fee_amount` = 平台总扣除，与分项自洽）。交付 = finance 归属解析 job + 只读 view（§6.11 规格）。**落地前**：净利润/保本以 M13 + 平台费用基线（M19 ≈30.8%）预估并标注口径；**落地后**：已结算订单用实际 fee、未结算用基线 r̂，M16 净额基础启用后已结算部分不再单扣，均自动变准。
-4. **取消退款金额大面积缺失（M9 信息列精度受限）**：完结状态取消桶 246 行仅 27 行有金额（缺 219）；净额桶 27/27 齐全不受影响。处理：M9 输出「已知金额小计 + 缺失行数」如实上报，**不造数**；如需要精确取消退款额，走 `integration.raw_records` 反查 cancellation payload 的 refund_amount blob（P2）。另有完结状态 66 条 case line 无法归属 SPU（无 line 键/行无 spu）→ meta `unattributed_refund_lines` 页脚提示。
+4. **取消退款金额大面积缺失（M9 信息列精度受限）**：完结状态取消桶 246 行仅 27 行有金额（缺 219）；净额桶 27/27 齐全不受影响。处理：M9 输出「已知金额小计 + 缺失行数」如实上报，**不造数**；如需要精确取消退款额，走 `integration.raw_records` 反查 cancellation payload 的 refund_amount blob（P2）。另有完结状态 66 条 case line 无法归属 SPU（无 line 键/行无 spu）→ meta `unattributed_refund_lines`（2026-10-02 起页面不再展示，仅 meta/接口可见）。
 5. **广告归因非纯广告增量**：GMV Max 归因含自然单，且 TikTok 数据有滞后/回滚修正（已退订单在广告侧可能隔天才剔除）。页面只标警告，不做修正。
 6. **广告消耗无“截止某日”精确口径**：ad_product_links 全窗口累计（§4.5），自定义日期范围会口径错位——默认窗口方案规避。
 7. **case_type 历史双拼写 + 状态枚举漂移**：SQL 按实测集合（§4.3）并留防御性未知分支。
