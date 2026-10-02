@@ -31,7 +31,7 @@ button, select, input { border-radius: 0; }
   color: #edf6f7;
   background: #17272f;
   border-bottom: 5px solid var(--signal-bright);
-  padding: 0 max(24px, calc((100vw - 1540px) / 2));
+  padding: 0 max(24px, calc((100% - 1540px) / 2));
   position: relative;
   overflow: hidden;
 }
