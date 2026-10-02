@@ -178,7 +178,7 @@ CREATE INDEX ix_user_sessions_active ON security.user_sessions(expires_at)
 
 ### 5.2 会话校验（每请求）
 
-1. 取 `tts_session` cookie → `sha256(token)` 查 `user_sessions`
+1. 取 `tts_erp_session` cookie → `sha256(token)` 查 `user_sessions`
    （`revoked_at IS NULL AND expires_at > now()`）；
 2. 查用户 `status = 'active'`（禁用 → 会话无效）；
 3. 载入用户角色与权限点（短 TTL 缓存，沿用现有 auth cache 模式，权限变更最多延迟一个
@@ -188,8 +188,20 @@ CREATE INDEX ix_user_sessions_active ON security.user_sessions(expires_at)
 
 会话 cookie 规格：
 
-- 名称沿用 `tts_session`（前缀版本 `v2.` 区分旧格式，旧 cookie 视为无效 → 引导重新登录）；
-- 属性：`HttpOnly; Secure; SameSite=Lax; Path=<root_path>`，TTL 沿用
+- 名称改为 **`tts_erp_session`**（带服务前缀的专属名；同域下其他路径还挂了别的
+  服务，通用名如 `session`/`token` 极易撞名——同名不同 Path 的 cookie 浏览器会
+  一起发送，解析顺序不可控，故必须专属命名）；值为 `v2.` 前缀的不透明 token，
+  旧格式视为无效 → 引导重新登录；
+- **Path 严格限定 `Path=<root_path>`（生产 = `/tts`），绝不设 `Path=/`**：
+  同域其他路径的服务收不到、也不应收到本 cookie；root_path 从
+  `TTS_ERP_EXTERNAL_PREFIX` 单源派生（与 nginx `/tts/` 契约一致，见
+  `tech-doc/architecture-overview.md`）；登出删 cookie 时必须用完全相同的
+  Path，否则删不掉；
+- **host-only cookie（不设 `Domain` 属性）**：不随请求发给同域的兄弟子域服务；
+  也不使用 `__Host-` 前缀（该前缀强制 `Path=/`，与路径隔离需求冲突）；
+- **撞名防御**：中间件只按专属名 `tts_erp_session` 取值，同请求里出现的其他服务的
+  cookie 一律忽略；值格式不符（含其他服务误设的同名值）直接当未登录 fail-closed；
+- 属性：`HttpOnly; Secure; SameSite=Lax`；TTL 沿用
   `TTS_ERP_SESSION_TTL`（默认 12h，固定到期，不滑动续期——内部工具够用且行为可预期）；
 - 旧的 API-key-hmac 会话 cookie 一律失效（需求方确认：**不做过渡兼容**）。
 
@@ -333,8 +345,10 @@ sync-permissions                            # 将代码权限点清单 upsert �
   可平滑升级。
 - **审计**：登录成功/失败、登出、禁用、改密、重置密码写入 `login_logger` 结构化日志
   （用户名、结果、IP、会话 id 前缀）；不记录密码与 token 明文。
-- **cookie**：HttpOnly + Secure（`TTS_ERP_SESSION_SECURE`，本地 http 开发可置 0）+
-  SameSite=Lax + Path=root_path（沿用现状）。
+- **cookie**（同域多服务部署，见 §5.2）：专属名 `tts_erp_session`（防与同域其他
+  服务的 cookie 撞名）；`Path=<root_path>`（= `/tts`，隔离其他路径的服务）；
+  host-only（不设 `Domain`）；`HttpOnly` + `Secure`（`TTS_ERP_SESSION_SECURE`，
+  本地 http 开发可置 0）+ `SameSite=Lax`。
 - **传输**：生产经 nginx TLS 终结（现状）。
 - **会话表只存哈希**；`last_seen_at` 用于观测，低频更新（≥5 分钟才写一次）。
 
@@ -373,7 +387,9 @@ sync-permissions                            # 将代码权限点清单 upsert �
 
 1. **accounts 单测**：密码策略（各规则边界）、argon2 哈希/校验、token 生成与哈希、
    会话吊销语义；
-2. **登录 API**：成功/失败/用户不存在/禁用用户/限流 429/`next` 校验/cookie 属性；
+2. **登录 API**：成功/失败/用户不存在/禁用用户/限流 429/`next` 校验/cookie 属性
+   （Path=root_path、无 Domain、HttpOnly、Secure、专属名）；
+   同域其他服务的 cookie（含误设的同名值）不干扰会话解析；
 3. **登出与失效**：登出后旧 cookie 401、禁用即失效、改密吊销他会话、过期失效；
 4. **页面权限**：有权限 200 + 侧边栏含入口；无权限 403 + 侧边栏不含入口；
    权限并集（多角色）；自定义角色；
