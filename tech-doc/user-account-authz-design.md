@@ -82,7 +82,10 @@ API key 是机器凭据，与"人"没有对应关系，无法做人员级的页�
 
 ## 4. 数据模型
 
-新增 `security` schema 6 张表（与现有 `security.api_keys` 并列）：
+**变更范围**：只**新增** `security` schema 6 张表（与现有 `security.api_keys` 并列）；
+**不修改任何现有表/字段**（`api_keys`、业务表、`plugin.*` 等零改动），可回滚（drop 新表即可）。
+建表走 alembic 迁移 `0052_user_accounts.py`（见 §12），含种子数据。
+
 
 ```sql
 -- 用户
@@ -156,7 +159,20 @@ CREATE INDEX ix_user_sessions_active ON security.user_sessions(expires_at)
   abi3 wheel）。不存明文、不存可逆加密。
 - 会话 token：`secrets.token_urlsafe(32)`，cookie 中放明文 token，库里只存
   `sha256(token)`；库泄露也无法直接冒用会话。
-- `updated_at` 触发器沿用 `public.fn_touch_updated_at()`（AGENTS.md 不变量）。
+- `updated_at` 触发器沿用 `public.fn_touch_updated_at()`（AGENTS.md 不变量），
+  `users`/`roles` 两表挂载。
+
+### 4.1 迁移与种子数据（alembic 0052）
+
+1. 建 6 张表 + 3 个索引（`users.username` 唯一、`user_sessions.user_id`、
+   `user_sessions` 活跃部分索引）；
+2. 种子行（幂等 upsert）：
+   - `permissions`：13 个 `page:*` 权限点（清单见 §7.3）；
+   - `roles`：`admin`/`operator`/`viewer` 3 内置角色（`is_builtin=true`，
+     api_tier 与页面集见 §2.1）；
+   - `role_permissions`：3 内置角色的权限点映射。
+3. 不含任何对现有表的 ALTER/UPDATE；升级/回滚不影响存量数据。
+4. 首个 admin 账号不入迁移，由部署者 CLI 创建（§14），避免默认口令入库。
 
 ## 5. 认证流程
 
