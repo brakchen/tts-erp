@@ -428,6 +428,9 @@ sync-permissions                            # 将代码权限点清单 upsert �
 
 ## 14. 上线步骤
 
+**一键执行**：`bash scripts/oneoff_user_account_rollout.sh`（人工执行，含库名
+逐字确认、`--dry-run` 预演、冒烟与首个 admin 引导；内部按下述 1-5 编排）。
+
 1. 代码合并后 `alembic upgrade`（**生产迁移人工执行**，agent 只在测试形态库验证，
    AGENTS.md §3）；
 2. `python -m tts_erp_v2.accounts.cli sync-permissions`（或 migration 自带种子）；
