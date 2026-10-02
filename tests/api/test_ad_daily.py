@@ -99,6 +99,10 @@ def test_ad_daily_page_returns_authenticated_shell(api_client, readonly_key):
     assert "../../static/css/ad-daily.css?v=" in response.text
     assert "../../static/js/ad-daily.js?v=" in response.text
     assert "plugin.ad_daily" in response.text
+    assert 'id="sidebar"' in response.text
+    assert 'aria-label="主导航"' in response.text
+    assert 'href="../../v2/pages/ad-daily" class="nav-link active"' in response.text
+    assert "margin-left: var(--sidebar-width);" in response.text
     assert 'href="/static/' not in response.text
     assert 'src="/static/' not in response.text
 

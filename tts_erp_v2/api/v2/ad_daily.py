@@ -19,6 +19,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import get_session
+from tts_erp_v2.api.v2.pages import _sidebar as _shared_sidebar
+from tts_erp_v2.api.v2.pages import _sidebar_css as _shared_sidebar_css
 
 router = APIRouter(tags=["ad-daily"])
 
@@ -300,8 +302,10 @@ _PAGE_HTML = """<!doctype html>
   <title>广告日明细 · tts-erp</title>
   <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
   <link rel="stylesheet" href="../../static/css/ad-daily.css?v=__CSS_VERSION__">
+  <style>__SIDEBAR_CSS__</style>
 </head>
 <body>
+  __SIDEBAR_NAV__
   <header class="mld-masthead">
     <div class="mld-masthead__bar">
       <a class="mld-back" href="../../v2/pages/dashboard">← 控制台</a>
@@ -395,7 +399,10 @@ _PAGE_HTML = """<!doctype html>
 @router.get("/v2/pages/ad-daily", response_class=HTMLResponse)
 def ad_daily_page() -> HTMLResponse:
     """Render the authenticated advertising-detail browser shell."""
-    html = _PAGE_HTML.replace(
-        "__CSS_VERSION__", _asset_version("css/ad-daily.css")
-    ).replace("__JS_VERSION__", _asset_version("js/ad-daily.js"))
+    html = (
+        _PAGE_HTML.replace("__CSS_VERSION__", _asset_version("css/ad-daily.css"))
+        .replace("__JS_VERSION__", _asset_version("js/ad-daily.js"))
+        .replace("__SIDEBAR_CSS__", str(_shared_sidebar_css("ad-daily")))
+        .replace("__SIDEBAR_NAV__", str(_shared_sidebar("ad-daily")))
+    )
     return HTMLResponse(html)
