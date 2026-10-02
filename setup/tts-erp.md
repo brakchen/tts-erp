@@ -35,6 +35,40 @@ journalctl --user -u tts-erp -n 50             # systemd 日志
 journalctl --user -u tts-erp-sync -n 50
 ```
 
+## 一键安装（setup/install.sh）
+
+`setup/install.sh` 把下面「一键启动 / 部署」的手工步骤固化成一个幂等脚本，可反复执行：
+
+```bash
+# 预览将要执行的命令（不改动系统）
+bash setup/install.sh --dry-run
+
+# 交互式安装（生产库迁移会逐次确认）
+bash setup/install.sh
+
+# 免交互 + 显式执行数据库迁移（生产库迁移必须显式 --migrate）
+bash setup/install.sh -y --migrate
+```
+
+10 个步骤：preflight（`.env` 存在 / 0600 / 必需变量 / Python ≥ 3.13 / `systemd --user`）→
+`logs/` `tests/` → `.venv` + `pip install -e .` → `restart.sh` 可执行 → 安装 systemd user 单元
+（`tts-erp.service` / `tts-erp-sync.service` / `tts-erp-watchdog.timer` / `tts-erp-pgbackup.timer`，
+已存在的单元默认保留，`--force-units` 才覆盖并备份）→ PG `pg_isready` → `alembic upgrade head`
+→ `enable` + `start/restart` 服务 → 轮询 `/healthz` 直到返回 `service:"tts-erp-v2"` → 运维摘要。
+
+常用选项：`--skip-deps` / `--skip-migrate` / `--migrate` / `--skip-units` / `--skip-services` /
+`--force-units` / `--dry-run` / `-h`。
+
+安全约束（AGENTS.md §3）：
+
+- 生产形态库（`tts_erp` / `tts_erp_prod` / `tts_erp_prod_*`）上的 `alembic upgrade head`
+  属人工操作：非交互模式必须显式 `--migrate`；执行时只对本次 alembic 子进程设置
+  `ALLOW_PROD_DESTRUCTIVE=1`（绕过 `alembic/env.py` 的 prod-shape guard）。
+- 脚本不创建、不改写任何密钥，`.env` 只校验存在性和 0600 权限；不触碰测试库，
+  不执行 `DELETE` / `TRUNCATE` / `DROP`。
+- 健康检查失败（30s 无响应或返回非 v2）时脚本以非 0 退出，并打印
+  `journalctl --user -u tts-erp -n 50` 与 `logs/stderr.log` 的排查入口。
+
 ## 一键启动 / 部署
 
 ```bash
