@@ -1,47 +1,32 @@
 """Browser-session cookie helpers + login throttle (tts-erp v2).
 
-Converts an API key into a stateless HMAC-signed session cookie so a
-browser can navigate the operator pages. Only the key's SHA-256 hash is
-stored in the cookie — never the plaintext key. ``AuthMiddleware``
-re-validates the hash against ``security.api_keys`` on every request
-(shared TTL cache), so disabling/expiring a key kills its sessions
-within one cache TTL.
+会话 cookie = 不透明随机 token（``v2.<token>``），权威状态在
+``security.user_sessions``（只存 sha256(token)）。``AuthMiddleware``
+每请求回库复查会话与用户状态，所以登出/禁用/改密即时生效。
+
+同域多服务部署（设计 §5.2）：cookie 专属名 + Path=root_path 严格隔离。
 
 Env:
-- ``TTS_ERP_SESSION_SECRET``   required — generate once with
-  ``openssl rand -hex 32`` and store 0600 in .env
 - ``TTS_ERP_SESSION_TTL``      seconds; default 43200 (12 h, fixed)
 - ``TTS_ERP_SESSION_SECURE``   ``1`` default; set ``0`` for local http dev
 - ``TTS_ERP_LOGIN_RATE_LIMIT`` login attempts/min per client; default 10
 
-Design: tech-doc/browser-login-design.md
+Design: tech-doc/user-account-authz-design.md
 """
 
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
-import json
 import os
-import time
 
 from tts_erp_v2.middleware.rate_limit import SlidingWindow
 
-SESSION_COOKIE_NAME = "tts_session"
+# 专属命名（防同域其他服务的 cookie 撞名）；旧名 tts_session 的
+# api-key-hmac 会话一律视为未登录（不做过渡兼容）。
+SESSION_COOKIE_NAME = "tts_erp_session"
 SESSION_TTL_DEFAULT_S = 12 * 3600
 LOGIN_RATE_LIMIT_DEFAULT = 10
 
 _login_limiter: SlidingWindow | None = None
-
-
-def _env_session_secret() -> str | None:
-    return os.environ.get("TTS_ERP_SESSION_SECRET") or None
-
-
-def session_secret_configured() -> bool:
-    """True when a signing secret is configured (login can mint cookies)."""
-    return _env_session_secret() is not None
 
 
 def session_ttl_seconds() -> int:
@@ -58,70 +43,12 @@ def session_secure_flag() -> bool:
     return raw.strip().lower() not in {"0", "false", "no", "off"}
 
 
-def _encode_payload(payload: dict) -> str:
-    return (
-        base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode())
-        .decode()
-        .rstrip("=")
-    )
+def cookie_path(root_path: str | None) -> str:
+    """Cookie Path = 外部挂载前缀（生产 /tts）；绝不放宽到 /。
 
-
-def _sign(raw: str) -> str:
-    secret = _env_session_secret()
-    if not secret:
-        raise RuntimeError("TTS_ERP_SESSION_SECRET not configured")
-    return hmac.new(secret.encode(), raw.encode(), hashlib.sha256).hexdigest()
-
-
-def mint_session_cookie(key: str, role: str, now: float | None = None) -> str:
-    """Return the signed session-cookie value for an API key."""
-    payload = {
-        "kh": hashlib.sha256(key.encode()).hexdigest(),
-        "role": role,
-        "exp": int(now if now is not None else time.time()) + session_ttl_seconds(),
-    }
-    raw = _encode_payload(payload)
-    return f"{raw}.{_sign(raw)}"
-
-
-def verify_session_cookie(value: str) -> dict | None:
-    """Verify HMAC signature + expiry. Returns ``{kh, role, exp}`` or None."""
-    secret = _env_session_secret()
-    if not secret:
-        return None
-    raw, dot, sig = value.partition(".")
-    if not dot or not raw or not sig:
-        return None
-    expected = hmac.new(secret.encode(), raw.encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(expected, sig):
-        return None
-    try:
-        payload = json.loads(
-            base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)).decode()
-        )
-    except Exception:  # noqa: BLE001 — malformed cookie bytes; treat as invalid
-        return None
-    if not isinstance(payload, dict):
-        return None
-    kh = payload.get("kh")
-    role = payload.get("role")
-    if not isinstance(kh, str) or len(kh) != 64:
-        return None
-    from tts_erp_v2.access import Role
-
-    if not isinstance(role, str):
-        return None
-    try:
-        Role(role)
-    except ValueError:
-        return None
-    try:
-        exp = int(payload.get("exp", 0))
-    except (TypeError, ValueError):
-        return None
-    if exp <= time.time():
-        return None
-    return {"kh": kh, "role": role, "exp": exp}
+    登出删 cookie 必须用完全相同的 Path，否则删不掉。
+    """
+    return root_path or "/"
 
 
 # ------------------------------------------------------------- login throttle

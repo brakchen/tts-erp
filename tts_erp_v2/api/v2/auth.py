@@ -1,28 +1,22 @@
-"""/v2/auth/* — browser login flow.
+"""/v2/auth/* — browser login flow（用户名 + 密码 + 服务端会话）.
 
-The operator console pages (``/v2/pages/*``) are behind bearer auth; a
-browser cannot attach a Bearer header on a plain navigation, so this
-router provides the front door: it exchanges an API key for a stateless
-HMAC-signed session cookie (``tts_session``) which ``AuthMiddleware``
-honors on every subsequent request.
-
-Design: tech-doc/browser-login-design.md
+设计：tech-doc/user-account-authz-design.md
 
 Routes:
-- ``GET  /v2/auth/login``  — login page (HTML, public)
-- ``POST /v2/auth/login``  — validate key → set cookie (public, throttled)
-- ``POST /v2/auth/logout`` — clear cookie (public)
-- ``GET  /v2/auth/me``     — session state for page JS (public; self-validates)
+- ``GET  /v2/auth/login``           — login page (HTML, public)
+- ``POST /v2/auth/login``           — username+password → session cookie（公开，限流）
+- ``POST /v2/auth/logout``          — 吊销服务端会话 + 清 cookie（公开，幂等）
+- ``GET  /v2/auth/me``              — 会话状态（公开；自校验 cookie）
+- ``POST /v2/auth/change-password`` — 改密（登录用户；吊销其他会话）
 
 Security notes:
-- The API key itself is never stored client-side — only its SHA-256 hash
-  inside the signed cookie; the middleware re-checks the hash against
-  ``security.api_keys`` per request, so revoking a key kills its sessions.
-- Login attempts are IP-throttled (``TTS_ERP_LOGIN_RATE_LIMIT``, default
-  10/min) because the endpoint is exempt from auth and the shared rate
-  limiter skips anonymous requests.
-- ``next`` is validated (internal absolute path only) to prevent open
-  redirects.
+- 会话凭证 = 不透明随机 token，库 ``security.user_sessions`` 只存 sha256；
+  登出/禁用/改密走 ``revoked_at`` 即时生效。
+- 登录失败信息统一（防用户枚举）；用户不存在也跑一次 argon2 校验。
+- 登录限流（IP 滑动窗口，``TTS_ERP_LOGIN_RATE_LIMIT``，默认 10 次/分）；
+  端点免 auth，共享限流跳过匿名请求，不设防就是免费暴力破解入口。
+- ``next`` 校验（仅同源绝对路径）防 open redirect。
+- 同域多服务部署：cookie 专属名 tts_erp_session + Path=root_path 严格隔离（§5.2）。
 """
 
 from __future__ import annotations
@@ -35,7 +29,8 @@ from fastapi import APIRouter, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from tts_erp_v2.access import authenticate_hash, authenticate_key
+from tts_erp_v2.accounts import service
+from tts_erp_v2.accounts.passwords import PasswordPolicyError
 from tts_erp_v2.middleware import session_auth
 from tts_erp_v2.middleware.access_log import _key_prefix
 
@@ -70,8 +65,14 @@ DEFAULT_NEXT = "/v2/pages/dashboard"
 
 
 class LoginBody(BaseModel):
-  key: str = Field(min_length=1, max_length=512)
+  username: str = Field(min_length=1, max_length=64)
+  password: str = Field(min_length=1, max_length=128)
   next: str | None = None
+
+
+class ChangePasswordBody(BaseModel):
+  oldPassword: str = Field(min_length=1, max_length=128)
+  newPassword: str = Field(min_length=1, max_length=128)
 
 
 def _valid_next(raw: str | None) -> str:
@@ -116,13 +117,13 @@ def login_page(request: Request) -> HTMLResponse:
 
 @router.post("/login")
 def login(body: LoginBody, request: Request) -> Response:
-  """Validate an API key and mint a session cookie."""
-  key_prefix = _key_prefix(body.key)
+  """用户名+密码认证并签发服务端会话 cookie。"""
+  username = body.username.strip().lower()
   retry_after = session_auth.login_throttle_hit(_client_bucket(request))
   if retry_after is not None:
     login_logger.info(
-      "result=throttled key=%s retry_after=%d",
-      key_prefix,
+      "result=throttled user=%s retry_after=%d",
+      _key_prefix(username),
       retry_after,
     )
     return JSONResponse(
@@ -132,84 +133,149 @@ def login(body: LoginBody, request: Request) -> Response:
         "retry_after_s": retry_after,
       },
     )
-  if not session_auth.session_secret_configured():
-    login_logger.warning("result=secret_not_configured")
-    return JSONResponse(
-      status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-      content={"detail": "TTS_ERP_SESSION_SECRET not configured"},
-    )
+  from tts_erp_v2.db.base import get_session_factory
+
   try:
-    credential = authenticate_key(body.key)
+    with get_session_factory()() as db:
+      user = service.authenticate(db, username, body.password)
+      if user is None:
+        # 统一错误文案（防用户枚举）；用户名前缀仅供运维日志排查。
+        login_logger.info("result=invalid user=%s", _key_prefix(username))
+        return JSONResponse(
+          status_code=status.HTTP_401_UNAUTHORIZED,
+          content={"detail": "用户名或密码错误"},
+        )
+      token = service.sessions.create_session(
+        db,
+        user_id=user.id,
+        ttl_seconds=session_auth.session_ttl_seconds(),
+        ip=request.client.host if request.client else None,
+        user_agent=(request.headers.get("user-agent") or "")[:256] or None,
+      )
+      service.touch_login(db, user)
+      context = service.load_user_context(db, user.id)
   except Exception as exc:  # noqa: BLE001 — auth store unreachable → fail closed
-    # Auth store unreachable — mirror the middleware's fail-closed 503.
     login_logger.warning(
-      "result=store_unavailable key=%s error=%s",
-      key_prefix,
+      "result=store_unavailable user=%s error=%s",
+      _key_prefix(username),
       type(exc).__name__,
     )
     return JSONResponse(
       status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
       content={"detail": f"auth store unavailable: {type(exc).__name__}"},
     )
-  if credential is None:
-    # The most common failure mode in production: user pastes a
-    # stale or revoked key. The access log has the real client IP
-    # + status; this event is the only place the ATTEMPTED key
-    # shows up. Pair these two for a complete picture.
-    login_logger.info("result=invalid key=%s", key_prefix)
-    return JSONResponse(
-      status_code=status.HTTP_401_UNAUTHORIZED,
-      content={"detail": "invalid, disabled or expired api key"},
-    )
-  role = credential.role.value
-  cookie = session_auth.mint_session_cookie(body.key, role)
-  resp = JSONResponse(content={"ok": True, "role": role})
-  # Scope the cookie to the external mount prefix (e.g. /tts) so it is
-  # never sent to other paths on the same domain (e.g. /spu-roi).
-  cookie_path = request.scope.get("root_path", "") or "/"
+
+  login_logger.info(
+    "result=ok user=%s uid=%d", _key_prefix(username), user.id
+  )
+  resp = JSONResponse(
+    content={
+      "ok": True,
+      "username": user.username,
+      "displayName": user.display_name,
+      "role": context.api_tier if context else "readonly",
+      "pages": sorted(context.pages) if context else [],
+    }
+  )
+  # Path=root_path（生产 /tts）：同域其他路径的服务收不到本 cookie。
   resp.set_cookie(
     key=session_auth.SESSION_COOKIE_NAME,
-    value=cookie,
+    value=token,
     max_age=session_auth.session_ttl_seconds(),
     httponly=True,
     secure=session_auth.session_secure_flag(),
     samesite="lax",
-    path=cookie_path,
+    path=session_auth.cookie_path(request.scope.get("root_path", "")),
   )
   return resp
 
 
 @router.post("/logout")
 def logout(request: Request) -> Response:
-  """Clear the session cookie (idempotent, public)."""
+  """吊销当前会话并清 cookie（幂等，公开）。"""
+  raw = request.cookies.get(session_auth.SESSION_COOKIE_NAME)
+  if raw:
+    try:
+      from tts_erp_v2.db.base import get_session_factory
+
+      with get_session_factory()() as db:
+        service.sessions.revoke_session(db, raw)
+    except Exception:  # noqa: BLE001 — 登出尽力而为：cookie 仍会清除
+      login_logger.warning("result=revoke_failed")
   resp = Response(status_code=status.HTTP_204_NO_CONTENT)
   resp.delete_cookie(
     session_auth.SESSION_COOKIE_NAME,
-    path=request.scope.get("root_path", "") or "/",
+    path=session_auth.cookie_path(request.scope.get("root_path", "")),
   )
   return resp
 
 
 @router.get("/me")
 def me(request: Request) -> dict:
-  """Return session state for page JS (public; self-validates the cookie).
-
-  The DB is re-checked so a revoked key reports ``authenticated: false``
-  (within the auth cache TTL, same as every other request).
-  """
+  """会话状态（公开；自校验 cookie + 回库复查，吊销/禁用即时反映）."""
   raw = request.cookies.get(session_auth.SESSION_COOKIE_NAME)
   if not raw:
     return {"authenticated": False}
-  info = session_auth.verify_session_cookie(raw)
-  if info is None:
-    return {"authenticated": False}
   try:
-    credential = authenticate_hash(info["kh"])
+    from tts_erp_v2.db.base import get_session_factory
+
+    with get_session_factory()() as db:
+      credential = service.authenticate_session_token(db, raw)
   except Exception:  # noqa: BLE001 — auth store unreachable; report unauthenticated
     credential = None
   if credential is None:
     return {"authenticated": False}
-  return {"authenticated": True, "role": credential.role.value}
+  return {
+    "authenticated": True,
+    "username": credential.username,
+    "displayName": credential.display_name,
+    # role 字段保留 = api_tier 文本（页面 JS 现用字段，兼容不破）。
+    "role": credential.role.value,
+    "roles": [],  # 页面暂不消费；需要时用 /v2/users/{id} 查
+    "pages": sorted(credential.pages),
+  }
+
+
+@router.post("/change-password")
+def change_password(body: ChangePasswordBody, request: Request) -> Response:
+  """登录用户改自己的密码；成功后吊销其他会话。"""
+  raw = request.cookies.get(session_auth.SESSION_COOKIE_NAME)
+  credential = None
+  if raw:
+    try:
+      from tts_erp_v2.db.base import get_session_factory
+
+      with get_session_factory()() as db:
+        credential = service.authenticate_session_token(db, raw)
+        if credential is None:
+          return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"detail": "未登录"},
+          )
+        try:
+          service.change_password(
+            db,
+            user_id=credential.user_id,
+            old_password=body.oldPassword,
+            new_password=body.newPassword,
+            keep_session_id=credential.session_id,
+          )
+        except (service.AccountError, PasswordPolicyError) as exc:
+          return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST, content={"detail": str(exc)}
+          )
+    except Exception as exc:  # noqa: BLE001 — fail closed
+      login_logger.warning("result=pw_change_store_error error=%s", type(exc).__name__)
+      return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": f"auth store unavailable: {type(exc).__name__}"},
+      )
+  else:
+    return JSONResponse(
+      status_code=status.HTTP_401_UNAUTHORIZED, content={"detail": "未登录"}
+    )
+  login_logger.info("result=pw_changed uid=%d", credential.user_id)
+  return JSONResponse(content={"ok": True})
 
 
 _LOGIN_HTML = """<!doctype html>
@@ -374,13 +440,17 @@ _LOGIN_HTML = """<!doctype html>
     <div class="login-header">
       <div class="login-eyebrow">TikTok Shop · Operations</div>
       <h1 class="login-title">运营控制台</h1>
-      <p class="login-hint">输入 API Key 登录以访问系统</p>
+      <p class="login-hint">使用账号登录以访问系统</p>
     </div>
 
     <form id="login-form">
       <div class="form-group">
-        <label class="form-label" for="key">API Key</label>
-        <input type="password" id="key" class="form-input" placeholder="输入您的 API Key" autocomplete="current-password" required>
+        <label class="form-label" for="username">用户名</label>
+        <input type="text" id="username" class="form-input" placeholder="输入用户名" autocomplete="username" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="password">密码</label>
+        <input type="password" id="password" class="form-input" placeholder="输入密码" autocomplete="current-password" required>
       </div>
       <input type="hidden" id="next" value="__NEXT__">
       <button type="submit" class="btn-login" id="btn-login">登录</button>
@@ -414,7 +484,8 @@ _LOGIN_HTML = """<!doctype html>
 
     document.getElementById("login-form").addEventListener("submit", async (e) => {
       e.preventDefault();
-      const key = document.getElementById("key").value.trim();
+      const username = document.getElementById("username").value.trim();
+      const password = document.getElementById("password").value;
       const next = document.getElementById("next").value || "/v2/pages/dashboard";
       const err = document.getElementById("err");
       const btn = document.getElementById("btn-login");
@@ -427,14 +498,14 @@ _LOGIN_HTML = """<!doctype html>
         const r = await fetch(API + "/auth/login", {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-Requested-With": "tts-erp" },
-          body: JSON.stringify({ key: key, next: next }),
+          body: JSON.stringify({ username: username, password: password, next: next }),
         });
         if (r.ok) {
           location.href = next;
           return;
         }
         if (r.status === 401) {
-          err.textContent = "API Key 无效或已禁用";
+          err.textContent = "用户名或密码错误";
           return;
         }
         if (r.status === 429) {

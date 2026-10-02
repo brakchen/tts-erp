@@ -57,8 +57,10 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from markupsafe import Markup
+from markupsafe import Markup, escape
 
+from tts_erp_v2.access._context import user_label_var, user_pages_var
+from tts_erp_v2.accounts.pages import PAGES
 from tts_erp_v2.api.deps import require_role_at_least
 
 router = APIRouter(prefix="/v2/pages", tags=["pages"])
@@ -264,20 +266,17 @@ _SIDEBAR_CSS = """
 
 
 def _sidebar_html(current_page: str) -> str:
-  """Return the shared sidebar with the current page marked as active."""
+  """Return the shared sidebar with the current page marked as active.
+
+  侧边栏按会话用户的页面权限过滤（设计 §7.1）：``user_pages_var`` 为
+  None（API key / auth off）时全量显示；否则只列出有权限点的页面。
+  权限点清单与渲染共用 ``accounts.pages.PAGES`` 注册表（唯一来源）。
+  """
+  allowed = user_pages_var.get()
   pages = [
-    ("dashboard", "台", "控制台", "总览"),
-    ("focused-spus", "关", "重点关注 SPU", "经营分析"),
-    ("spu-roi", "益", "SPU ROI", "经营分析"),
-    ("ad-daily", "广", "广告日明细", "经营分析"),
-    ("manual-costs", "采", "采购工作台", "基础设置"),
-    ("shops", "店", "店铺注册", "基础设置"),
-    ("enum-map", "映", "枚举映射", "基础设置"),
-    ("runtime-configs", "运", "运行配置", "基础设置"),
-    ("sync-jobs", "时", "定时任务", "基础设置"),
-    ("intercept-configs", "配", "拦截配置", "数据工具"),
-    ("intercept-requests", "录", "拦截记录", "数据工具"),
-    ("intercept-stats", "计", "拦截统计", "数据工具"),
+    (p.page_id, p.icon, p.label, p.group)
+    for p in PAGES
+    if allowed is None or p.permission_code in allowed
   ]
   links = []
   current_group = None
@@ -297,6 +296,16 @@ def _sidebar_html(current_page: str) -> str:
       f'<span class="sidebar-label">{label}</span></a>'
     )
   nav_html = "\n      ".join(links)
+  user_label = user_label_var.get()
+  user_html = ""
+  if user_label:
+    label = escape(user_label)
+    user_html = (
+      '<div class="d-flex align-items-center justify-content-between gap-2 pb-2 mb-2 border-bottom">'
+      f'<span class="small text-truncate" title="{label}">{label}</span>'
+      '<button type="button" id="sidebar-logout" class="btn btn-sm flex-shrink-0">登出</button>'
+      "</div>"
+    )
   return f"""<button type="button"
     class="sidebar-mobile-toggle btn btn-sm d-lg-none position-fixed top-0 start-0 mt-2 ms-2"
     id="sidebar-toggle" aria-label="打开主导航" aria-controls="sidebar" aria-expanded="false">☰</button>
@@ -316,6 +325,7 @@ def _sidebar_html(current_page: str) -> str:
     </div>
 
     <div class="sidebar-footer px-3 py-2 border-top">
+      {user_html}
       <button type="button" class="sidebar-collapse-btn"
         id="sidebar-collapse" aria-label="折叠侧边栏" aria-controls="sidebar" aria-expanded="true">
         <span class="sidebar-collapse-icon" aria-hidden="true">«</span>
@@ -401,6 +411,18 @@ _SIDEBAR_TOGGLE_JS = """
   sb.querySelectorAll('a[href]').forEach(function(a) {
     a.addEventListener('click', function() { setMobileOpen(false, false); });
   });
+
+  // 会话登出（仅登录用户渲染；cookie 会话清吊销后跳登录页）。
+  var logoutBtn = document.getElementById('sidebar-logout');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', function() {
+      logoutBtn.disabled = true;
+      fetch('../../v2/auth/logout', {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'tts-erp' }
+      }).finally(function() { location.href = '../../v2/auth/login'; });
+    });
+  }
 })();
 """
 
@@ -658,6 +680,16 @@ def runtime_configs_page() -> HTMLResponse:
 def sync_jobs_page() -> HTMLResponse:
   """定时任务管理页：启停周期调度，或手动触发系统/店铺级任务。"""
   return _render_page("sync-jobs.html", current_page="sync-jobs")
+
+
+@router.get("/users", response_class=HTMLResponse)
+def users_page() -> HTMLResponse:
+  """用户管理（设计 §9）：用户 + 角色权限两页签。
+
+  入口受 ``page:users`` 权限点控制（access 层按路由判定）；页面行为在
+  static/js/users.js，数据 API 为 /v2/users* 与 /v2/roles*。
+  """
+  return _render_page("users.html", current_page="users")
 
 
 

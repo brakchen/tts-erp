@@ -74,6 +74,23 @@ class Credential:
 
 
 @dataclass(frozen=True, slots=True)
+class UserCredential:
+    """会话用户凭证（设计 §7.2）：api_tier 代入路由角色矩阵，pages 控页面入口."""
+
+    user_id: int
+    username: str
+    display_name: str
+    role: Role  # api_tier 映射（readonly/readwrite/admin）
+    pages: frozenset[str]  # 有效页面权限点 {"page:dashboard", …}
+    session_id: int | None = None
+
+    @property
+    def key_hash(self) -> str:
+        # 限流/日志桶键复用同一 shape（非 API key 语义）。
+        return f"user:{self.user_id}"
+
+
+@dataclass(frozen=True, slots=True)
 class AccessGrant:
     mode: AuthMode
     role: Role | None = None
@@ -81,6 +98,7 @@ class AccessGrant:
     scopes: tuple[str, ...] = ()
     auth_method: Literal["cookie", "bearer"] | None = None
     bypass: bool = False
+    user: UserCredential | None = None  # 会话用户凭证（cookie 登录）；API key 为 None
 
     def allows(self, required: Role) -> bool:
         if self.bypass:

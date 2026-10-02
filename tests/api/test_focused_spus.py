@@ -262,11 +262,15 @@ def test_focused_spus_patch_is_atomic_and_shop_scoped(
 
 def test_focused_spus_cookie_patch_requires_csrf_header(
     api_client,
-    readwrite_key,
+    ua_user_factory,
     db_engine,
 ):
     shop_a, _ = _seed_shop_and_products(db_engine)
-    login = api_client.post("/v2/auth/login", json={"key": readwrite_key})
+    user = ua_user_factory("test_ua_focused_csrf", roles=("operator",))
+    login = api_client.post(
+        "/v2/auth/login",
+        json={"username": user.username, "password": user.password},
+    )
     assert login.status_code == 200
     path = f"/v2/reporting/focused-spus/{shop_a}"
 

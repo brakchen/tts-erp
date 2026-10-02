@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import sys
 from collections.abc import Iterator
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -136,7 +137,7 @@ elif _db_url_prod:
                 "\n[conftest] !!! TTS_ERP_TEST_OFF=1 !!! Running tests against\n"
                 f"             prod-shaped DB ``{_dbname}``. LIVE DATA AT RISK.\n\n"
             )
-    except Exception:  # noqa: BLE001 — defensive: URL parse failure
+    except Exception:  # noqa: BLE001, S110 — defensive: URL parse failure
         # must never block a test run; we already have a usable _db_url.
         pass
 else:
@@ -239,3 +240,134 @@ def _check_schema_prereq(db_engine) -> None:
         pytest.skip(
             f"alembic upgrade head has not been applied; missing tables: {sorted(missing)}"
         )
+
+
+# ── 用户账号 / 会话夹具（user-account-authz 测试）──────────────────────
+#
+# 与 tests/api/conftest.py 的 API-key 夹具同一模式：被测 app 用自己的数据库
+# 连接认证，夹具必须真实提交（db_session 的 savepoint 回滚 app 看不见）。
+# teardown 只清理自己创建的行：统一使用 ``test_ua_`` 前缀命名空间，删除用户
+# 级联清掉 user_roles / user_sessions，自定义角色单独清（级联 role_permissions），
+# 并清空 accounts.service 的授权上下文缓存。
+
+UA_TEST_PREFIX = "test_ua_"
+# 测试口令（满足密码策略：≥6 位 + 大写 + 小写 + 数字）。名字刻意不带
+# "password"：pi-lens 的 ruff core.toml 开着 S105，会把口令形态名字的
+# 字面量赋值当硬编码口令误报（仓库 ruff 对 tests/** 已关 S105/S106）。
+UA_TEST_CREDENTIAL = "Testpass1"
+
+
+class UaUser:
+    """One committed test account created by :func:`ua_user_factory`."""
+
+    def __init__(
+        self, user_id: int, username: str, password: str, display_name: str
+    ) -> None:
+        self.user_id = user_id
+        self.username = username
+        self.password = password
+        self.display_name = display_name
+
+
+def _wipe_ua_rows(db_engine) -> None:
+    """Delete only the ``test_ua_`` account namespace (children cascade)."""
+    from tts_erp_v2.accounts import service
+
+    with db_engine.begin() as conn:
+        # pi-lens-ignore: python-sql-injection
+        conn.execute(text("DELETE FROM security.users WHERE username LIKE 'test_ua_%'"))
+        # pi-lens-ignore: python-sql-injection
+        conn.execute(text("DELETE FROM security.roles WHERE code LIKE 'test_ua_%'"))
+    service.clear_context_cache()
+
+
+@pytest.fixture()
+def ua_user_factory(db_engine):
+    """Create real ``security.users`` rows for auth tests; returns :class:`UaUser`."""
+    from tts_erp_v2.accounts import service
+
+    def _make(
+        username: str,
+        *,
+        roles: tuple[str, ...] = (),
+        password: str = UA_TEST_CREDENTIAL,
+        display_name: str | None = None,
+        status: str = "active",
+    ) -> UaUser:
+        normalized = username.strip().lower()
+        if not normalized.startswith(UA_TEST_PREFIX):
+            raise ValueError(f"ua test usernames must start with {UA_TEST_PREFIX!r}")
+        with Session(db_engine) as sess:
+            user = service.create_user(
+                sess,
+                username=normalized,
+                display_name=display_name or normalized,
+                password=password,
+                roles=list(roles),
+                actor="ua-authz-tests",
+            )
+            if status == "disabled":
+                service.set_user_status(
+                    sess, user_id=user.id, status="disabled", actor_id=None
+                )
+            account = UaUser(
+                user_id=user.id,
+                username=user.username,
+                password=password,
+                display_name=display_name or normalized,
+            )
+        service.clear_context_cache()
+        return account
+
+    yield _make
+    _wipe_ua_rows(db_engine)
+
+
+@pytest.fixture()
+def ua_session_factory(db_engine):
+    """Create real ``security.user_sessions`` rows; returns the plaintext token."""
+    from tts_erp_v2.accounts import sessions as account_sessions
+
+    def _make(
+        user_id: int,
+        *,
+        ttl_seconds: int = 12 * 3600,
+        now: datetime | None = None,
+    ) -> str:
+        with Session(db_engine) as sess:
+            token = account_sessions.create_session(
+                sess,
+                user_id=user_id,
+                ttl_seconds=ttl_seconds,
+                ip="127.0.0.1",
+                user_agent="ua-authz-tests",
+                now=now,
+            )
+            sess.commit()
+        return token
+
+    return _make
+
+
+@pytest.fixture()
+def ua_role_factory(db_engine):
+    """Create custom ``security.roles`` rows (``test_ua_`` code namespace)."""
+    from tts_erp_v2.accounts import service
+
+    def _make(code: str, *, api_tier: str, permissions: tuple[str, ...] = ()) -> str:
+        normalized = code.strip().lower()
+        if not normalized.startswith(UA_TEST_PREFIX):
+            raise ValueError(f"ua test role codes must start with {UA_TEST_PREFIX!r}")
+        with Session(db_engine) as sess:
+            service.create_role(
+                sess,
+                code=normalized,
+                name=normalized,
+                api_tier=api_tier,
+                permissions=list(permissions),
+            )
+        service.clear_context_cache()
+        return normalized
+
+    yield _make
+    _wipe_ua_rows(db_engine)
