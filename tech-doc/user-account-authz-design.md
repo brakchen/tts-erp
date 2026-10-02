@@ -15,15 +15,17 @@ API key 是机器凭据，与"人"没有对应关系，无法做人员级的页�
 1. **账号体系**：用户名 + 密码登录；登录、登出、会话管理。
 2. **页面级权限**：按 **角色 → 权限点** 控制"这个用户能进什么页面"。
    **权限粒度只到页面**——能进页面即可操作页面内全部功能，不做页面内动作级权限。
-3. **不开放自助注册**：账号由管理员通过后台 CLI 脚本创建、禁用、重置密码。
-4. **API 访问不变**：程序化访问（Chrome 扩展、脚本、集成）继续使用 API key +
+3. **不开放自助注册**：登录页不提供任何注册入口；账号只能由管理员在**用户管理页面**
+   （§9）或 CLI 创建、禁用、重置密码。
+4. **管理界面**：v1 实现 Web 用户管理页（`/v2/pages/users`）：用户列表、创建账号、
+   重置密码、启用/禁用、分配角色、会话管理；仅 `admin` 可见可用。
+5. **API 访问不变**：程序化访问（Chrome 扩展、脚本、集成）继续使用 API key +
    `Authorization: Bearer` / `X-API-Key`，现有 `security.api_keys` 与角色矩阵完全不动。
 
 ### 1.1 明确不做（v1 范围外）
 
-- 自助注册、找回密码（邮箱/短信）。
+- 自助注册、找回密码（邮箱/短信）——注册动作收敛在管理页面/CLI，只对管理员开放。
 - 页面内操作级权限（按钮/字段级）。
-- Web 端用户管理界面（v1 用 CLI；见 §9.3 说明与后续演进）。
 - 第三方登录（OAuth/SSO/LDAP）。
 - 多因素认证（MFA）。
 
@@ -47,7 +49,7 @@ API key 是机器凭据，与"人"没有对应关系，无法做人员级的页�
 
 | 角色 | 页面权限 | api_tier | 说明 |
 | --- | --- | --- | --- |
-| `admin` | 全部页面 | `admin` | 账号管理员、系统管理员 |
+| `admin` | 全部页面（含 `page:users` 用户管理） | `admin` | 账号管理员、系统管理员 |
 | `operator` | 全部业务页面（不含用户管理） | `readwrite` | 日常运营，进页面即可全部操作 |
 | `viewer` | 经营分析类页面（dashboard / focused-spus / spu-roi / ad-daily / intercept-stats） | `readonly` | 只看数据，不进配置类页面 |
 
@@ -237,7 +239,7 @@ CREATE INDEX ix_user_sessions_active ON security.user_sessions(expires_at)
 page:dashboard  page:focused-spus  page:spu-roi  page:ad-daily
 page:manual-costs  page:shops  page:enum-map  page:runtime-configs
 page:sync-jobs  page:intercept-configs  page:intercept-requests
-page:intercept-stats  page:users(用户管理, 预留, 见 §9.3)
+page:intercept-stats  page:users(用户管理, 见 §9.1)
 ```
 
 新增页面时：`pages.py` 加页面 + 权限点清单加一行 + migration/CLI 补权限点行 + 给
@@ -252,14 +254,45 @@ page:intercept-stats  page:users(用户管理, 预留, 见 §9.3)
   返回具体不满足的规则；
 - 不做定期强制改密、不强制记住历史密码（v1 简化）。
 
-## 9. 用户管理（CLI，无自助注册）
+## 9. 用户管理（管理页面 + CLI，无自助注册）
 
-### 9.1 形态
+注册/建号入口**只开给管理员**，两条路：Web 管理页面（日常）与 CLI（首次建号、
+脚本批量、应急）；两者共用同一套 `tts_erp_v2/accounts/service.py` 服务层与密码策略。
+登录页不提供任何注册/找回入口。
 
-`python -m tts_erp_v2.accounts.cli <command>`（模块 CLI，便于测试与复用；不是
-`scripts/` 下的一次性脚本——这是长期运维入口）。
+### 9.1 Web 用户管理页（`/v2/pages/users`）
 
-### 9.2 命令
+- 权限点 `page:users`；预置角色中仅 `admin` 拥有；页面只出现在管理员的侧边栏
+  （分组“基础设置”末尾，“用户管理”）。
+- 页面功能（v1，表格 + 弹窗表单，风格沿用现有页面）：
+  - 用户列表：用户名、显示名、角色、状态、最后登录、活跃会话数；按状态/关键字筛选；
+  - **创建账号**（即管理员代注册）：用户名、显示名、初始密码、勾选角色；
+    密码策略校验失败时前端逐条提示（与 §8 同源校验）；
+  - 重置密码（新密码由管理员输入并线下告知用户；不走邮件）；
+  - 启用/禁用（禁用即吊销全部会话）；
+  - 调整角色（勾选/取消角色）；
+  - 会话管理：查看活跃会话（创建时间、IP、UA、最后活跃），一键吊销单个/全部。
+- 配套 API（均需 `page:users`，默认拒绝走 admin 档）：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/v2/users` | 用户列表（含角色、状态、活跃会话数） |
+| POST | `/v2/users` | 创建账号（body: username, displayName, password, roles[]） |
+| PATCH | `/v2/users/{id}` | 改显示名/状态/角色（禁用/启用也走这里） |
+| POST | `/v2/users/{id}/password` | 重置密码（body: newPassword） |
+| GET | `/v2/users/{id}/sessions` | 该用户的活跃会话列表 |
+| DELETE | `/v2/users/{id}/sessions/{sid}` | 吊销单个会话；`?all=1` 吊销全部 |
+| GET | `/v2/roles` | 角色及权限点清单（创建/编辑表单用） |
+
+- 护栏：禁止禁用/降权**自己**（避免管理员自锁）；禁止删除/禁用**最后一个 admin**；
+  用户名规则 `^[a-z0-9][a-z0-9_.-]{1,31}$`（创建时小写归一化，重名校验）。
+- 审计：创建/重置/禁用/角色变更/会话吊销均写 `login_logger` 结构化日志
+  （操作者、目标用户、动作、IP），不记录密码。
+
+### 9.2 CLI（`python -m tts_erp_v2.accounts.cli <command>`）
+
+模块 CLI，便于测试与复用；不是 `scripts/` 下的一次性脚本——这是长期运维入口。
+场景：首次部署建第一个 admin、脚本批量建号、管理页不可用时应急。
 
 ```
 create-user   <username> --name <显示名> --role operator [--role viewer ...]
@@ -277,11 +310,9 @@ list-roles / show-role <code>
 sync-permissions                            # 将代码权限点清单 upsert 进 permissions 表
 ```
 
-### 9.3 关于"管理界面"的说明
-
-上一轮提到的"管理界面"指 **Web 端的用户/角色管理页面**（在网页上点按钮建账号、
-勾权限）。v1 **不做**，全部走 CLI（本节命令）；页面权限点里预留 `page:users`，
-后续需要时再加一个"用户管理"页面挂上即可，不影响本设计其他部分。
+- CLI 与管理页同守 §8 密码策略与用户名规则；同守“最后一个 admin”护栏。
+- 角色管理（create-role/edit-role）v1 只在 CLI；管理页只做用户维度（选已有角色）。
+  角色权限点配置需要管理员时可后续在页面上补，不影响本设计。
 
 ## 10. 安全考量
 
@@ -319,7 +350,9 @@ sync-permissions                            # 将代码权限点清单 upsert �
 | `tts_erp_v2/middleware/session_auth.py` | cookie 改为不透明 token v2 格式；校验改查 `user_sessions` |
 | `tts_erp_v2/access/` | `_types.py` 增 `UserContext`；`_access.py` 会话分支接入用户凭证；`_policy.py` 不动 |
 | `tts_erp_v2/api/v2/auth.py` | 登录页表单（用户名+密码）、login/logout/me/change-password |
-| `tts_erp_v2/api/v2/pages.py` | 侧边栏按权限过滤 + 403 页面；`page:users` 预留 |
+| `tts_erp_v2/api/v2/users.py`（新） | §9.1 用户管理 API（/v2/users、/v2/roles） |
+| `tts_erp_v2/api/v2/pages.py` | 侧边栏按权限过滤 + 403 页面 + `users` 页面路由 |
+| `tts_erp_v2/templates/pages/users.html`、`static/js/users.js`（新） | 用户管理页 |
 | `tests/api/test_user_auth.py`、`tests/accounts/`（新） | 见 §13 |
 | `tech-doc/external-api.md`、`architecture-overview.md` | 契约同步 |
 
@@ -338,7 +371,9 @@ sync-permissions                            # 将代码权限点清单 upsert �
    权限并集（多角色）；自定义角色；
 5. **API 档位**：会话用户调写接口（readwrite 路由）按 `api_tier` 放行/403；
    API key 行为回归（现有用例全绿）；
-6. **兼容回归**：API key 两 header 形态、`TTS_ERP_AUTH_MODE` 三态、扩展端点
+6. **用户管理页**：创建账号后新账号可登录、密码策略拒绝、禁用/会话吊销生效、
+   非 admin 403 + 侧边栏无入口、自禁用/最后一个 admin 护栏；
+7. **兼容回归**:API key 两 header 形态、`TTS_ERP_AUTH_MODE` 三态、扩展端点
    `/v2/analytics/sync/*` 现有契约用例不回归。
 
 ## 14. 上线步骤
@@ -353,7 +388,7 @@ sync-permissions                            # 将代码权限点清单 upsert �
 
 ## 15. 未来演进（非 v1）
 
-- Web 用户管理页（`page:users` 已预留）：列表/建号/改角色/踢下线。
+- 管理页补充角色维度管理（建角色/勾权限点，替代 CLI create-role/edit-role）。
 - 账号级登录锁定、登录审计查询页。
 - 页面内动作级权限（若出现"能看不能改"的需求）：权限点扩 `action:*` 类型即可，
   模型无需重构。
