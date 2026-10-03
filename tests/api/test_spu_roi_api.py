@@ -3711,20 +3711,19 @@ def test_spu_roi_page_shell_contract(api_client, readonly_key):
     # 前缀安全(2026-08-31 回归):无根绝对路径资源引用
     assert 'href="/' not in body
     assert 'src="/' not in body
-    # warm-paper 工业操作台 token 已外置到页面专属 CSS
+    # warm-paper 令牌已统一到共享 tokens.css；spu-roi.css 只保留 --bs-* 桥接
     from pathlib import Path
 
-    css = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "css"
-        / "spu-roi.css"
-    ).read_text(encoding="utf-8")
-    assert "--paper:" in css
-    assert "--accent:" in css
-    assert "--mono:" in css
+    css_dir = Path(__file__).resolve().parents[2] / "tts_erp_v2" / "static" / "css"
+    tokens = (css_dir / "tokens.css").read_text(encoding="utf-8")
+    css = (css_dir / "spu-roi.css").read_text(encoding="utf-8")
+    # 设计令牌的唯一来源是 tokens.css
+    assert "--paper:" in tokens
+    assert "--accent:" in tokens
+    assert "--mono:" in tokens
+    # spu-roi.css 不得重建令牌，只消费它们 + 保留 Bootstrap 桥接
     assert "--bs-border-radius: 0" in css
+    assert "--paper:" not in css, "spu-roi.css must consume tokens.css, not redefine --paper"
     # 无外链字体
     assert "fonts.googleapis.com" not in body
     assert "fonts.gstatic.com" not in body
