@@ -1,5 +1,31 @@
 # tts-erp CHANGELOG
 
+## 2026-10-03 — 环境准备/安装脚本归置到 `scripts/envsetup/`
+
+- 新建 `scripts/envsetup/` 作为**环境准备 / 安装类脚本**的统一归置目录，
+  与 `scripts/oneoff_*`（一次性数据脚本）、`setup/*.md`（部署文档）划清边界；
+  约定写入 `AGENTS.md` §6。
+- `setup/install.sh` → `scripts/envsetup/install.sh`（一键安装/部署）；
+  `setup/install-test-deps.sh` → `scripts/envsetup/install-test-deps.sh`
+  （测试前置依赖体检/安装：PostgreSQL 客户端、pytest、`.env.test`）。
+  均用 `git mv` 保留历史。`setup/` 现只保留部署文档。
+- 修复移动带来的隐性破坏：两脚本的 `REPO` 路径解析原为 `dirname/..`，
+  目录层级变深后会指向错误位置，已改为 `/../..`；全仓 7 个文件的旧路径
+  引用同步更新，`setup/install*.sh` 残留为 0。
+
+### 测试入口与环境坑（同一工作流）
+
+- **`scripts/test_isolated.sh` 定为唯一标准测试入口**；直接调 `scripts/test.sh`
+  的 shared-DB 回退路径**已弃用**（不克隆临时库、直写常驻 `tts_erp_v3_test`，
+  并发时互删 `TEST_` 行）。`AGENTS.md` / `tech-doc/agent-testing.md` /
+  `tech-doc/commands-reference.md` 已同步。
+- **新建 worktree 必须补 `.env` 只读副本**（`cp ../../.env .env && chmod u-w .env`）。
+  `tests/conftest.py::_load_env()` 读的是 worktree 根目录的 `.env`；缺失时
+  `TTS_ERP_FERNET_KEY` / `TIKTOK_SERVICE_ID` 等配置不会加载，会表现为
+  `test_oauth_api` / `test_spu_images` 六个用例失败，看起来像代码回归实则不是。
+- 令牌外置到 `tokens.css` 后，3 处测试契约同步改写（断言从渲染 HTML 改为
+  断言 `tokens.css` 内容 + 页面链接顺序）。
+
 ## 2026-10-03 — UI 设计体系统一（暖纸编辑体）
 
 - 重构前 11 个页面各自维护一份 `:root`，衍生出 4 套令牌命名体系
