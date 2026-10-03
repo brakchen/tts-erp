@@ -4042,29 +4042,31 @@ def test_spu_roi_settlements_tab_uses_chinese_headers_and_status() -> None:
     assert "无入账" in tab
 
 
-def test_spu_roi_zero_amount_settlement_counts_as_unsettled(
+def test_spu_roi_zero_net_settlement_with_refund_stays_settled(
     api_client, readonly_key, db_engine
 ):
-    """0 元 SETTLEMENT 行的有效单不得判为已结算（finding f-71e76e93-71b）。
+    """0 元结算 + 退款组件 = 已结算且全额退款，必须留在已结算桶（口径钉死）。
 
-    取消单/冲销对账流水的 SETTLEMENT 组件金额为 0；若这类流水落在有效单上，
-    不得把整单收入归入已结算且 settled_net=0（低估净收入）。必须仍进未结算估算桶。
+    2026-10-03 只读核查：生产 0 元 SETTLEMENT 流水全部落在取消单上（不进白名单），
+    有效单流水 SETTLEMENT 均非 0；「SETTLEMENT=0 + CUSTOMER_REFUND≠0」是已结算
+    全额退款单的正常形态（_seed_terminal_delivery_risk_scenario 有意钉死）。若把
+    这类单改判为未结算，会把已退款订单重新估成未结算收入、虚增净收入
+    （finding f-71e76e93-71b 复核结论：维持现状）。
     """
     from decimal import Decimal
 
-    from sqlalchemy import text
     from sqlalchemy.orm import Session
 
     def scenario(sess) -> int:
-        shop_pk = _seed_shop(sess, "TEST_ZERO_SETTLE")
-        spu_pk = _seed_spu(sess, shop_pk, "TEST_SPU_ZERO_SETTLE")
+        shop_pk = _seed_shop(sess, "TEST_ZERO_NET_SETTLE")
+        spu_pk = _seed_spu(sess, shop_pk, "TEST_SPU_ZERO_NET_SETTLE")
         order_pk = _seed_order_line(
             sess,
             shop_pk=shop_pk,
             spu_pk=spu_pk,
-            order_id="TEST_ORDER_ZERO_SETTLE",
-            status="AWAITING_SHIPMENT",
-            line_ext="TEST_LINE_ZERO_SETTLE",
+            order_id="TEST_ORDER_ZERO_NET_SETTLE",
+            status="DELIVERED",
+            line_ext="TEST_LINE_ZERO_NET_SETTLE",
             qty="1",
             unit_price="100000",
             paid=True,
@@ -4072,8 +4074,9 @@ def test_spu_roi_zero_amount_settlement_counts_as_unsettled(
         _seed_settlement(
             sess,
             order_pk=order_pk,
-            external_id="TEST_TXN_ZERO_SETTLE",
+            external_id="TEST_TXN_ZERO_NET_SETTLE",
             amount_vnd="0",
+            customer_refund_vnd="-100000",
         )
         return spu_pk
 
@@ -4082,24 +4085,26 @@ def test_spu_roi_zero_amount_settlement_counts_as_unsettled(
 
     h = {"Authorization": f"Bearer {readonly_key}"}
     r = api_client.get(
-        "/v2/analytics/spu-roi", headers=h, params={"q": "TEST_SPU_ZERO_SETTLE"}
+        "/v2/analytics/spu-roi", headers=h, params={"q": "TEST_SPU_ZERO_NET_SETTLE"}
     )
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["total"] == 1, body["items"]
     item = body["items"][0]
 
-    # 0 元结算行不算已结算：整单收入进未结算估算桶，而不是被 settled_net=0 吞掉
+    # 已结算全额退款：结算净额 0，且不得再进未结算估算（否则虚增收入）
     assert Decimal(item["settled_net"]) == 0
-    assert Decimal(item["unsettled_net"]) > 0
-    assert item["settled_order_count"] == 0
+    assert Decimal(item["unsettled_net"]) == 0
+    assert item["settled_order_count"] == 1
+    # 已结算样本必须包含它（projection_basis 口径）
+    assert item["projection_basis_order_count"] == 1
 
-    # 钻取 /orders 同口径：is_settled 必须为假
+    # 钻取 /orders 同口径：该单显示已结算
     r2 = api_client.get(f"/v2/analytics/spu-roi/{spu_pk}/orders", headers=h)
     assert r2.status_code == 200, r2.text
     rows = r2.json()["orders"]
     assert len(rows) == 1
-    assert rows[0]["is_settled"] is False
+    assert rows[0]["is_settled"] is True
 
 
 def test_spu_roi_cost_and_refund_warnings_use_distinct_badges() -> None:

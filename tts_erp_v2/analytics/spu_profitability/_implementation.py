@@ -149,7 +149,7 @@ _SQL_ROI_SALES = text(
         WHERE spu_pk = ANY(CAST(:selected_pks AS bigint[]))
     ),
     order_settlement AS (
-        SELECT st.order_pk, NULLIF(SUM(sc.amount), 0) AS settlement_vnd
+        SELECT st.order_pk, SUM(sc.amount) AS settlement_vnd
         FROM selected_orders selected
         JOIN finance.settlement_transactions st ON st.order_pk = selected.order_pk
         JOIN finance.settlement_components sc
@@ -220,9 +220,7 @@ _SQL_ROI_PROJECTION = text(
         JOIN finance.settlement_transactions st ON st.order_pk = selected.order_pk
         JOIN finance.settlement_components sc ON sc.transaction_id = st.id
         GROUP BY st.order_pk
-        HAVING coalesce(
-            sum(sc.amount) FILTER (WHERE sc.component_code = 'SETTLEMENT'), 0
-        ) <> 0
+        HAVING count(*) FILTER (WHERE sc.component_code = 'SETTLEMENT') > 0
     ),
     order_gmv AS (
         SELECT sl.order_pk,
@@ -512,9 +510,7 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
         JOIN finance.settlement_transactions st ON st.order_pk = selected.order_pk
         JOIN finance.settlement_components sc ON sc.transaction_id = st.id
         GROUP BY st.order_pk
-        HAVING coalesce(
-            sum(sc.amount) FILTER (WHERE sc.component_code = 'SETTLEMENT'), 0
-        ) <> 0
+        HAVING count(*) FILTER (WHERE sc.component_code = 'SETTLEMENT') > 0
     ),
     order_gmv AS (
         SELECT sl.order_pk,
@@ -1019,7 +1015,7 @@ _SQL_DETAIL_ORDERS = text(
                      AND c.case_type IN ('RETURN_AND_REFUND', 'REFUND_ONLY')
                   ) AS has_completed_return_case,
            so.status = 'CANCELLED' AS is_cancelled,
-           (SELECT NULLIF(SUM(sc.amount), 0) FROM finance.settlement_transactions st
+           (SELECT SUM(sc.amount) FROM finance.settlement_transactions st
             JOIN finance.settlement_components sc
               ON sc.transaction_id = st.id AND sc.component_code = 'SETTLEMENT'
             WHERE st.order_pk = so.id) AS settlement_vnd,

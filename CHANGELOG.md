@@ -9,10 +9,12 @@
   结算额；整单只有本 SPU 时为 1.0000」，不再用 line_gmv/order_gmv 原始公式直出。
 - **结算表加订单状态列**（enum-map 中文翻译），0 元流水标注「已取消/冲销」（取消单）
   或「无入账」（其余），消除「取消单对账流水显示 0.00」的误导。
-- **已结算判定改按结算金额非零**（finding f-71e76e93-71b）：`order_settlement` CTE
-  用 `NULLIF(SUM(SETTLEMENT), 0)`，projection/detail 的 `settled_orders` 改为
-  `SUM(SETTLEMENT) <> 0`；0 元结算行的有效单不再被判为已结算（否则整单收入被
-  settled_net=0 吞掉、低估净收入）。补回归测试锁死两个口径。
+- **已结算判定口径复核（finding f-71e76e93-71b，结论：维持现状）**：只读核查生产数据发现
+  0 元 SETTLEMENT 流水 209 条全部落在取消单上（不进白名单），有效单流水 SETTLEMENT
+  均非 0；「SETTLEMENT=0 + CUSTOMER_REFUND≠0」是已结算全额退款单的正常形态（fixture
+  有意钉死）。若改为按金额判定，会把这类已退款单重新估成未结算收入、虚增净收入，
+  故维持「有结算流水即已结算」口径；新增 `test_spu_roi_zero_net_settlement_with_refund_
+  stays_settled` 钉死该语义防回归。
 
 ## 2026-10-03 — 利润构成货本行改为「件数 × 单价 = 金额」表达
 
