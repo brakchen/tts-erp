@@ -5092,3 +5092,32 @@ def test_spu_roi_tabulator_fills_container_width() -> None:
     assert 'layout: "fitColumns"' in table_options
     # 商品列标题长，铺满时多分余量；其余列保持默认 widthGrow。
     assert 'widthGrow: def.columnId === "product" ? 3 : 1' in src
+
+
+def test_spu_roi_table_wrap_content_insets_match_toolbar() -> None:
+    """主表列必须与上方筛选面板/大盘/分页同一条左右边界。
+
+    #toolbar、#summaries、.op-pager 的内容都由 `px-3 px-lg-4` 内缩（lg 断点
+    22.5px），而 `.op-table-wrap` 曾经没有内缩：主表列比筛选面板左右外凸，
+    用户反馈「表格没对齐」。内缩必须由 Bootstrap 工具类提供（spu-roi.css 禁止
+    手写断点，见 test_spu_roi_page_uses_bootstrap_responsive_layout）。
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    template = (
+        root / "tts_erp_v2" / "templates" / "pages" / "spu-profitability.html"
+    ).read_text(encoding="utf-8")
+    assert 'class="op-table-wrap px-3 px-lg-4"' in template
+
+    css = (root / "tts_erp_v2" / "static" / "css" / "spu-roi.css").read_text(
+        encoding="utf-8"
+    )
+    match = re.search(r"\.op-table-wrap\s*\{([^}]*)\}", css)
+    assert match is not None, "缺 .op-table-wrap 规则"
+    declarations = match.group(1)
+    # 通栏白底与 .op-toolbar/.op-counter 一致；否则内缩后两侧露出台账底色。
+    assert "background: var(--paper)" in declarations
+    assert "border-bottom: 1px solid var(--rule)" in declarations
+    assert "@media" not in declarations

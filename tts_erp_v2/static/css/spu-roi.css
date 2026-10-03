@@ -467,6 +467,10 @@ a:hover {
  margin: 0 auto;
 }
 .op-table-wrap {
+ /* 通栏白底 + 底部横线与 .op-toolbar/.op-counter 一致；内容内缩靠模板上的
+    Bootstrap `px-3 px-lg-4`（本文件禁止手写断点），否则主表列比上方筛选
+    面板/大盘卡片左右外凸 22.5px，看起来表格没对齐。 */
+ background: var(--paper);
  border-bottom: 1px solid var(--rule);
 }
 .op-table-wrap:focus-visible {

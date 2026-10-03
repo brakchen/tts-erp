@@ -1,5 +1,15 @@
 # tts-erp CHANGELOG
 
+## 2026-10-03 — SPU ROI 主表与筛选面板左右对齐
+
+- `.op-table-wrap` 补上与 `#toolbar` / `#summaries` / `.op-pager` 一致的水平内缩
+  （Bootstrap 工具类 `px-3 px-lg-4`），容器同时补通栏 `background: var(--paper)`：
+  修复主表列比上方筛选面板、大盘卡片、底部分页左右外凸 22.5px（lg 断点）的
+  「表格没对齐」问题。内缩只用工具类、不在 `spu-roi.css` 里手写断点（该文件禁止
+  `@media`，见响应式布局回归测试）。
+- 新增回归测试 `test_spu_roi_table_wrap_content_insets_match_toolbar`，并附只读探针
+  `scripts/probe_spu_table_alignment.js`（渲染页 + mock 接口，度量表头/表体与各分区间距）。
+
 ## 2026-10-03 — 文档统一收敛到 `docs/`，口径文档唯一化
 
 - **顶层 `tech-doc/`、`biz-doc/`、`setup/`、`handoff/` 四个目录全部撤销**，存量文档
