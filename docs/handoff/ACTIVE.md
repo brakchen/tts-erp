@@ -16,4 +16,4 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| spu-cogs-expression | 钻取利润构成货本行改为「件数 × 单价 = 金额」表达 | 01a10240-43f4-753a-aac7-9c15b7056ef8 | `fix/spu-roi-cogs-expression` / `.worktrees/spu-roi-cogs-expression` | `tts_erp_v2/static/js/spu-profitability-page.js`；`tests/api/test_spu_roi_api.py`；`CHANGELOG.md` | draft | — | — | 2026-10-03T16:25Z |
+| spu-cogs-expression | 钻取利润构成货本行改为「件数 × 单价 = 金额」表达 | 01a10240-43f4-753a-aac7-9c15b7056ef8 | `fix/spu-roi-cogs-expression` / `.worktrees/spu-roi-cogs-expression` | `tts_erp_v2/static/js/spu-profitability-page.js`；`tests/api/test_spu_roi_api.py`；`CHANGELOG.md` | ready | 40f847f | 99390d5 | 2026-10-03T16:31Z |
