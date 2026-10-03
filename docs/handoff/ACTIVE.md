@@ -16,3 +16,4 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| e2e-marker | tests/e2e pytestmark 标记修复 | session-01a10273-89cbba48 | fix/e2e-marker-fix / .worktrees/e2e-marker-fix | tests/e2e/ | draft | - | - | 2026-10-03T16:06:45Z |
