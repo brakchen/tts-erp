@@ -39,7 +39,7 @@
 [data-page-profile="focused-spus"] .focused-spu-inline .ts-control > .item {
   background: color-mix(in srgb, var(--accent, #87612d) 11%, white);
   border: 1px solid color-mix(in srgb, var(--accent, #87612d) 32%, white);
-  border-radius: 0.2rem;
+  border-radius: var(--radius);
   color: var(--ink, #29251f);
 }
 

@@ -1,18 +1,4 @@
-:root {
-  --paper: #f4efe4;
-  --paper-deep: #eae3d2;
-  --ink: #1b1814;
-  --muted: #6e6657;
-  --rule: #c9bfa8;
-  --rule-soft: #ddd4bf;
-  --accent: #b8390e;
-  --ok: #2f6b3e;
-  --warn: #8a6d1a;
-  --danger: #8c1a1a;
-  --mono: ui-monospace, 'SF Mono', Consolas, monospace;
-  --sans: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --serif: ui-serif, Georgia, 'Noto Serif SC', serif;
-}
+
 * { box-sizing: border-box; }
 body {
   margin: 0;
