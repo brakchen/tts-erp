@@ -1,5 +1,21 @@
 # tts-erp CHANGELOG
 
+## 2026-10-03 — SPU 明细大盘与整体大盘对齐：同组同指标、去预测内容
+
+- pages/spu-roi（含重点关注 SPU 共用 kernel）行内钻取的**明细大盘**改为与页首
+  **整体大盘**完全同组同口径：总览 / 有效 / 退款 / 全损 / 国内取消 / 利润 / ROI
+  七组共 15 个指标逐格对应，分组卡片复用整体大盘的 `op-counter-*` 样式；
+  口径提示（data-tip）经 `summaryHint` 复用页首同一份文案（HTML 是唯一事实源），
+  两处口径不再漂移。
+- **预测内容不再在明细大盘展示**（2026-10-03 用户拍板）：原明细大盘里的预测依据 /
+  未结算预测对象 / 预计 三组（预测状态、已完结样本、已完结订单全损率、未结算与
+  风险池、预计收入/利润/ROI 等）整体移除；页首整体大盘的预测区保持不变。
+- 测试契约同步：`test_spu_roi_drill_summary_matches_actual_dashboard_metrics`
+  改为断言同组同指标 + 口径提示逐格对齐；`..._displays_projection_separately` 改写为
+  `test_spu_roi_drill_summary_excludes_projection_metrics`（断言预测字段/标签不再出现）；
+  `test_spu_roi_page_uses_bootstrap_responsive_layout` 的钻取网格断言同步为整体大盘
+  同一栅格类。
+
 ## 2026-10-03 — SPU ROI 主表与筛选面板左右对齐
 
 - `.op-table-wrap` 补上与 `#toolbar` / `#summaries` / `.op-pager` 一致的水平内缩
