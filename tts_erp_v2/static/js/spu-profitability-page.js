@@ -1576,11 +1576,24 @@
         var comp = (s.components || []).filter(
           (c) => c.code === "SETTLEMENT",
         )[0];
+        var isZero = comp != null && Number(comp.amount) === 0;
+        var zeroTag = isZero
+          ? el(
+              "span",
+              {
+                class: "badge text-bg-light ms-1",
+                "data-tip":
+                  "该结算流水的 SETTLEMENT 组件金额为 0：订单取消/整单冲销时平台不产生实际结算入账",
+              },
+              s.status === "CANCELLED" ? "已取消/冲销" : "无入账",
+            )
+          : null;
         return el(
           "tr",
           null,
           el("td", null, s.order_id),
-          el("td", null, comp ? fmtMoney(comp.amount) : "—"),
+          el("td", null, tr("order_status", s.status)),
+          el("td", null, comp ? fmtMoney(comp.amount) : "—", zeroTag),
           el("td", null, s.share_ratio || "—"),
           el("td", null, s.statement_time || "—"),
         );
@@ -1595,16 +1608,29 @@
             "tr",
             null,
             el("th", null, "订单号"),
-            el("th", null, "SETTLEMENT"), // 表头用 column_header 翻译
+            el("th", null, "订单状态"),
+            el(
+              "th",
+              null,
+              "结算金额(CNY)",
+              hintSpan(
+                "TikTok 对账单 SETTLEMENT 组件：平台实际结算给卖家的入账金额，已由 VND 换算 CNY；订单取消/整单冲销时为 0",
+              ),
+            ),
             el(
               "th",
               null,
               "分摊比",
               hintSpan(
-                "分摊比 = line_gmv / order_gmv;SETTLEMENT 按这个比例分到各行",
+                "分摊比 = 本 SPU 行金额 ÷ 整单金额（按金额把整单结算额分到各 SPU 行）；结算金额 × 分摊比 = 本 SPU 应得结算额。整单只有本 SPU 时为 1.0000",
               ),
             ),
-            el("th", null, "statement"), // 表头用 column_header 翻译
+            el(
+              "th",
+              null,
+              "对账单时间",
+              hintSpan("平台结算流水的出账时间（UTC）"),
+            ),
           ),
         ),
         el("tbody", null, srows),
