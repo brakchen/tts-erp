@@ -62,14 +62,34 @@ def service_key() -> str | None:
     return None
 
 
-def request_json(method: str, path: str, body: dict[str, Any] | None = None) -> tuple[int, Any]:
-    """请求 live 服务并解析 JSON；返回 (http_status, parsed_or_error_text)。"""
+def request_json(
+    method: str,
+    path: str,
+    body: dict[str, Any] | None = None,
+    *,
+    require_key: bool = True,
+    send_key: bool = True,
+    headers: dict[str, str] | None = None,
+) -> tuple[int, Any]:
+    """请求 live 服务并解析 JSON；返回 (http_status, parsed_or_error_text)。
+
+    - ``require_key=True``（默认）：缺 ``TTS_ERP_SERVICE_KEY`` 时直接
+      ``pytest.skip``，兑现模块 docstring 的「缺 key 时相关用例跳过」；
+      公开端点 / 负向鉴权用例传 ``require_key=False``。
+    - ``send_key=False``：不携带任何凭据（匿名请求）。
+    - ``headers``：覆盖/追加请求头（如伪造 ``Authorization``、改用
+      ``X-API-Key`` 形态）。
+    """
+    if require_key and not service_key():
+        pytest.skip("TTS_ERP_SERVICE_KEY 未配置（.env 缺失），跳过需鉴权的 live 用例")
     data = json.dumps(body).encode("utf-8") if body is not None else None
-    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    req_headers = {"Accept": "application/json", "Content-Type": "application/json"}
     key = service_key()
-    if key:
-        headers["Authorization"] = f"Bearer {key}"
-    req = urllib.request.Request(base_url() + path, method=method, data=data, headers=headers)
+    if send_key and key:
+        req_headers["Authorization"] = f"Bearer {key}"
+    if headers:
+        req_headers.update(headers)
+    req = urllib.request.Request(base_url() + path, method=method, data=data, headers=req_headers)
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             text = resp.read().decode("utf-8")
@@ -83,3 +103,81 @@ def request_json(method: str, path: str, body: dict[str, Any] | None = None) -> 
             return exc.code, json.loads(body_text)
         except json.JSONDecodeError:
             return exc.code, body_text
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """禁用自动跟随重定向：3xx 以 HTTPError 抛出（可读 status/headers）。"""
+
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+def request_no_redirect(
+    method: str,
+    path: str,
+    *,
+    require_key: bool = False,
+    send_key: bool = False,
+    headers: dict[str, str] | None = None,
+) -> tuple[int, dict[str, str], str]:
+    """不跟随重定向的裸请求；返回 ``(status, headers[全小写键], text)``。
+
+    用于断言 302 登录跳转（``urllib`` 默认会跟随重定向，拿不到 302 与
+    ``Location``）。默认不带凭据——模拟匿名浏览器。
+    """
+    if require_key and not service_key():
+        pytest.skip("TTS_ERP_SERVICE_KEY 未配置（.env 缺失），跳过需鉴权的 live 用例")
+    req_headers: dict[str, str] = {}
+    key = service_key()
+    if send_key and key:
+        req_headers["Authorization"] = f"Bearer {key}"
+    if headers:
+        req_headers.update(headers)
+    req = urllib.request.Request(base_url() + path, method=method, headers=req_headers)
+    opener = urllib.request.build_opener(_NoRedirectHandler)
+    try:
+        with opener.open(req, timeout=30) as resp:
+            return (
+                resp.status,
+                {k.lower(): v for k, v in resp.headers.items()},
+                resp.read().decode("utf-8", errors="replace"),
+            )
+    except urllib.error.HTTPError as exc:
+        return (
+            exc.code,
+            {k.lower(): v for k, v in (exc.headers or {}).items()},
+            exc.read().decode("utf-8", errors="replace"),
+        )
+
+
+@pytest.fixture()
+def first_channel_account() -> dict[str, Any]:
+    """live 库第一个 channel-account；链式用例（详情/order-stats/focused-spus）的数据锚点。"""
+    status, body = request_json("GET", "/v2/commerce/channel-accounts")
+    assert status == 200, body
+    assert isinstance(body, list), body
+    if not body:
+        pytest.skip("live 库暂无 channel-account 数据，跳过链式用例")
+    return body[0]
+
+
+@pytest.fixture()
+def first_sales_order() -> dict[str, Any]:
+    """live 库第一个 sales-order（订单行链式用例的数据锚点）。"""
+    status, body = request_json("GET", "/v2/commerce/sales-orders?limit=1")
+    assert status == 200, body
+    assert isinstance(body, list), body
+    if not body:
+        pytest.skip("live 库暂无 sales-order 数据，跳过链式用例")
+    return body[0]
+
+
+@pytest.fixture()
+def first_spu_roi_item() -> dict[str, Any]:
+    """live 库第一个 SPU-ROI 行（钻取链式用例的数据锚点）。"""
+    status, body = request_json("GET", "/v2/analytics/spu-roi?limit=1")
+    assert status == 200, body
+    items = body.get("items") if isinstance(body, dict) else None
+    if not items:
+        pytest.skip("live 库暂无 SPU-ROI 数据，跳过钻取链式用例")
+    return items[0]
