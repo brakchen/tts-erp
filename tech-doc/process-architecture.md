@@ -10,6 +10,10 @@
 - **`tts-erp.service`**：uvicorn API，cwd=仓库根，`EnvironmentFile=.env`
 - **`tts-erp-sync.service`**：APScheduler worker，安装脚本 `prod-switch/install-sync-worker.sh`
 - **`tts-erp-watchdog.timer`**：每 10min 巡检 → `logs/watchdog.log`
+- **`tts-erp-logrotate.timer`**：每 6h 检查 `logs/{stdout,stderr,watchdog}.log`，
+  > 20MB 则滚动（`scripts/logrotate/tts-erp.conf`，copytruncate 适配 systemd
+  `append:` 长开 FD，无需 root；`scripts/systemd/tts-erp-logrotate.*`）。`sync_worker.log`
+  由 RotatingFileHandler 自转，不在此列
 
 ## 2. 目录结构
 
