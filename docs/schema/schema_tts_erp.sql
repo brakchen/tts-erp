@@ -3,10 +3,10 @@
 -- =============================================================================
 --
 -- DO NOT EDIT BY HAND. Run `python3 scripts/regen_schema.py` after any
--- schema change; it rewrites schema_tts_erp.sql.
+-- schema change (every merged migration); it rewrites docs/schema/schema_tts_erp.sql.
 --
 -- To apply:
---     docker exec -i postgres psql -U postgres -d tts_erp < schema_tts_erp.sql
+--     docker exec -i postgres psql -U postgres -d tts_erp < docs/schema/schema_tts_erp.sql
 --
 -- FK policy (2026-08-27): sync-mirror tables carry NO foreign keys.
 -- Writes are idempotent upserts keyed by natural primary keys; parents
@@ -88,6 +88,10 @@ CREATE SCHEMA reporting;
 -- Name: security; Type: SCHEMA; Schema: -; Owner: -
 
 CREATE SCHEMA security;
+
+
+-- Name: pg_stat_statements; Type: EXTENSION; Schema: -; Owner: -
+
 
 
 -- Name: fn_touch_intercept_configs_updated_at(); Type: FUNCTION; Schema: public; Owner: -
@@ -326,6 +330,59 @@ CREATE TABLE IF NOT EXISTS config.enum_map (
 
 
 
+
+
+-- Name: runtime_config_items; Type: TABLE; Schema: config; Owner: -
+
+CREATE TABLE IF NOT EXISTS config.runtime_config_items (
+    config_key character varying(128) NOT NULL,
+    display_name character varying(256) NOT NULL,
+    json_schema jsonb NOT NULL,
+    draft_payload jsonb,
+    draft_rollout jsonb DEFAULT '[]'::jsonb NOT NULL,
+    draft_version integer DEFAULT 0 NOT NULL,
+    published_version integer,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    retired_at timestamp with time zone,
+    retired_by character varying(128),
+    CONSTRAINT ck_runtime_config_draft_version_nonnegative CHECK ((draft_version >= 0)),
+    CONSTRAINT ck_runtime_config_published_version_positive CHECK (((published_version IS NULL) OR (published_version > 0)))
+);
+
+
+-- Name: runtime_config_revisions; Type: TABLE; Schema: config; Owner: -
+
+CREATE TABLE IF NOT EXISTS config.runtime_config_revisions (
+    id bigint NOT NULL,
+    config_key character varying(128) NOT NULL,
+    version integer NOT NULL,
+    payload jsonb NOT NULL,
+    rollout jsonb DEFAULT '[]'::jsonb NOT NULL,
+    comment text,
+    created_by character varying(128) NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_runtime_config_revision_positive CHECK ((version > 0))
+);
+
+
+
+
+
+
+
+
+-- Name: runtime_config_secrets; Type: TABLE; Schema: config; Owner: -
+
+CREATE TABLE IF NOT EXISTS config.runtime_config_secrets (
+    name character varying(128) NOT NULL,
+    encrypted_value bytea NOT NULL,
+    fingerprint character varying(32) NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    retired_at timestamp with time zone,
+    retired_by character varying(128)
+);
 
 
 -- Name: payouts; Type: TABLE; Schema: finance; Owner: -
@@ -902,7 +959,6 @@ CREATE TABLE IF NOT EXISTS plugin.ad_raw_log (
     product_id text,
     kind text NOT NULL,
     day date,
-    year_month text,
     request_url text NOT NULL,
     request_method text NOT NULL,
     request_body jsonb,
@@ -912,7 +968,8 @@ CREATE TABLE IF NOT EXISTS plugin.ad_raw_log (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     request_id text,
     source text DEFAULT 'tiktok-shop-data-sync'::text,
-    CONSTRAINT ad_raw_log_kind_check CHECK ((kind = ANY (ARRAY['daily'::text, 'today'::text, 'monthly'::text])))
+    CONSTRAINT ad_raw_log_kind_check CHECK ((kind = ANY (ARRAY['daily'::text, 'today'::text, 'monthly'::text]))),
+    CONSTRAINT ck_ad_raw_log_kind CHECK ((kind = ANY (ARRAY['daily'::text, 'today'::text])))
 );
 
 
@@ -1631,7 +1688,101 @@ ALTER TABLE security.api_keys ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 );
 
 
+-- Name: permissions; Type: TABLE; Schema: security; Owner: -
+
+CREATE TABLE IF NOT EXISTS security.permissions (
+    code text NOT NULL,
+    kind text DEFAULT 'page'::text NOT NULL,
+    name text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT permissions_kind_check CHECK ((kind = 'page'::text))
+);
+
+
+-- Name: role_permissions; Type: TABLE; Schema: security; Owner: -
+
+CREATE TABLE IF NOT EXISTS security.role_permissions (
+    role_code text NOT NULL,
+    permission_code text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: roles; Type: TABLE; Schema: security; Owner: -
+
+CREATE TABLE IF NOT EXISTS security.roles (
+    code text NOT NULL,
+    name text NOT NULL,
+    description text,
+    api_tier text DEFAULT 'readwrite'::text NOT NULL,
+    is_builtin boolean DEFAULT false NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT roles_api_tier_check CHECK ((api_tier = ANY (ARRAY['readonly'::text, 'readwrite'::text, 'admin'::text])))
+);
+
+
+-- Name: user_roles; Type: TABLE; Schema: security; Owner: -
+
+CREATE TABLE IF NOT EXISTS security.user_roles (
+    user_id bigint NOT NULL,
+    role_code text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: user_sessions; Type: TABLE; Schema: security; Owner: -
+
+CREATE TABLE IF NOT EXISTS security.user_sessions (
+    id bigint NOT NULL,
+    token_hash bytea NOT NULL,
+    user_id bigint NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    last_seen_at timestamp with time zone,
+    revoked_at timestamp with time zone,
+    ip text,
+    user_agent text
+);
+
+
+
+ALTER TABLE security.user_sessions ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME security.user_sessions_id_seq
+);
+
+
+-- Name: users; Type: TABLE; Schema: security; Owner: -
+
+CREATE TABLE IF NOT EXISTS security.users (
+    id bigint NOT NULL,
+    username text NOT NULL,
+    display_name text NOT NULL,
+    password_hash text NOT NULL,
+    status text DEFAULT 'active'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_login_at timestamp with time zone,
+    password_changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT users_status_check CHECK ((status = ANY (ARRAY['active'::text, 'disabled'::text])))
+);
+
+
+
+ALTER TABLE security.users ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME security.users_id_seq
+);
+
+
 -- Name: enum_map id; Type: DEFAULT; Schema: config; Owner: -
+
+
+
+-- Name: runtime_config_revisions id; Type: DEFAULT; Schema: config; Owner: -
 
 
 
@@ -1725,10 +1876,34 @@ ALTER TABLE ONLY config.enum_map
     ADD CONSTRAINT enum_map_pkey PRIMARY KEY (id);
 
 
+-- Name: runtime_config_items runtime_config_items_pkey; Type: CONSTRAINT; Schema: config; Owner: -
+
+ALTER TABLE ONLY config.runtime_config_items
+    ADD CONSTRAINT runtime_config_items_pkey PRIMARY KEY (config_key);
+
+
+-- Name: runtime_config_revisions runtime_config_revisions_pkey; Type: CONSTRAINT; Schema: config; Owner: -
+
+ALTER TABLE ONLY config.runtime_config_revisions
+    ADD CONSTRAINT runtime_config_revisions_pkey PRIMARY KEY (id);
+
+
+-- Name: runtime_config_secrets runtime_config_secrets_pkey; Type: CONSTRAINT; Schema: config; Owner: -
+
+ALTER TABLE ONLY config.runtime_config_secrets
+    ADD CONSTRAINT runtime_config_secrets_pkey PRIMARY KEY (name);
+
+
 -- Name: enum_map uq_enum_map_type_value; Type: CONSTRAINT; Schema: config; Owner: -
 
 ALTER TABLE ONLY config.enum_map
     ADD CONSTRAINT uq_enum_map_type_value UNIQUE (enum_type, enum_value);
+
+
+-- Name: runtime_config_revisions uq_runtime_config_revision; Type: CONSTRAINT; Schema: config; Owner: -
+
+ALTER TABLE ONLY config.runtime_config_revisions
+    ADD CONSTRAINT uq_runtime_config_revision UNIQUE (config_key, version);
 
 
 -- Name: payouts payouts_pkey; Type: CONSTRAINT; Schema: finance; Owner: -
@@ -2283,6 +2458,54 @@ ALTER TABLE ONLY security.api_keys
     ADD CONSTRAINT ix_api_keys_key_hash UNIQUE (key_hash);
 
 
+-- Name: permissions permissions_pkey; Type: CONSTRAINT; Schema: security; Owner: -
+
+ALTER TABLE ONLY security.permissions
+    ADD CONSTRAINT permissions_pkey PRIMARY KEY (code);
+
+
+-- Name: role_permissions role_permissions_pkey; Type: CONSTRAINT; Schema: security; Owner: -
+
+ALTER TABLE ONLY security.role_permissions
+    ADD CONSTRAINT role_permissions_pkey PRIMARY KEY (role_code, permission_code);
+
+
+-- Name: roles roles_pkey; Type: CONSTRAINT; Schema: security; Owner: -
+
+ALTER TABLE ONLY security.roles
+    ADD CONSTRAINT roles_pkey PRIMARY KEY (code);
+
+
+-- Name: user_roles user_roles_pkey; Type: CONSTRAINT; Schema: security; Owner: -
+
+ALTER TABLE ONLY security.user_roles
+    ADD CONSTRAINT user_roles_pkey PRIMARY KEY (user_id, role_code);
+
+
+-- Name: user_sessions user_sessions_pkey; Type: CONSTRAINT; Schema: security; Owner: -
+
+ALTER TABLE ONLY security.user_sessions
+    ADD CONSTRAINT user_sessions_pkey PRIMARY KEY (id);
+
+
+-- Name: user_sessions user_sessions_token_key; Type: CONSTRAINT; Schema: security; Owner: -
+
+ALTER TABLE ONLY security.user_sessions
+    ADD CONSTRAINT user_sessions_token_key UNIQUE (token_hash);
+
+
+-- Name: users users_pkey; Type: CONSTRAINT; Schema: security; Owner: -
+
+ALTER TABLE ONLY security.users
+    ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+
+
+-- Name: users users_username_key; Type: CONSTRAINT; Schema: security; Owner: -
+
+ALTER TABLE ONLY security.users
+    ADD CONSTRAINT users_username_key UNIQUE (username);
+
+
 -- Name: ix_case_lines_sales_order_line; Type: INDEX; Schema: after_sales; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_case_lines_sales_order_line ON after_sales.case_lines USING btree (sales_order_line_id);
@@ -2323,6 +2546,11 @@ CREATE INDEX IF NOT EXISTS ix_sales_order_lines_channel_product ON commerce.sale
 CREATE INDEX IF NOT EXISTS ix_sales_order_lines_channel_variant ON commerce.sales_order_lines USING btree (sku_pk);
 
 
+-- Name: ix_sales_order_lines_spu_order; Type: INDEX; Schema: commerce; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_sales_order_lines_spu_order ON commerce.sales_order_lines USING btree (spu_pk, order_pk) INCLUDE (id, quantity, unit_price);
+
+
 -- Name: ix_sales_orders_paid_at; Type: INDEX; Schema: commerce; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_sales_orders_paid_at ON commerce.sales_orders USING btree (paid_at);
@@ -2336,6 +2564,21 @@ CREATE INDEX IF NOT EXISTS ix_sales_orders_status ON commerce.sales_orders USING
 -- Name: ix_enum_map_type; Type: INDEX; Schema: config; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_enum_map_type ON config.enum_map USING btree (enum_type);
+
+
+-- Name: ix_runtime_config_items_active; Type: INDEX; Schema: config; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_runtime_config_items_active ON config.runtime_config_items USING btree (config_key) WHERE (retired_at IS NULL);
+
+
+-- Name: ix_runtime_config_revisions_key_version; Type: INDEX; Schema: config; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_runtime_config_revisions_key_version ON config.runtime_config_revisions USING btree (config_key, version DESC);
+
+
+-- Name: ix_runtime_config_secrets_active; Type: INDEX; Schema: config; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_runtime_config_secrets_active ON config.runtime_config_secrets USING btree (name) WHERE (retired_at IS NULL);
 
 
 -- Name: ix_payouts_status; Type: INDEX; Schema: finance; Owner: -
@@ -2386,6 +2629,11 @@ CREATE INDEX IF NOT EXISTS ix_shipments_tracking_number ON fulfillment.shipments
 -- Name: ix_tracking_events_event_at; Type: INDEX; Schema: fulfillment; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_tracking_events_event_at ON fulfillment.tracking_events USING btree (event_at);
+
+
+-- Name: ix_tracking_events_shipment_action; Type: INDEX; Schema: fulfillment; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_tracking_events_shipment_action ON fulfillment.tracking_events USING btree (shipment_id, action_code);
 
 
 -- Name: ix_fx_snapshots_base_id; Type: INDEX; Schema: fx; Owner: -
@@ -2598,6 +2846,11 @@ CREATE INDEX IF NOT EXISTS idx_plugin_logs_plugin_name ON plugin.plugin_logs USI
 CREATE INDEX IF NOT EXISTS idx_plugin_logs_seller_time ON plugin.plugin_logs USING btree (seller_id, occurred_at DESC);
 
 
+-- Name: ix_ad_daily_roi_seller_product_day; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_ad_daily_roi_seller_product_day ON plugin.ad_daily USING btree (seller_id, product_id, day) INCLUDE (campaign_id, mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value) WHERE (endpoint = '/oec_ads/shopping/v1/oec/stat/post_product_list'::text);
+
+
 -- Name: ix_after_sale_items_shop_cancel; Type: INDEX; Schema: plugin; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_after_sale_items_shop_cancel ON plugin.after_sale_items USING btree (shop_id, cancel_id);
@@ -2713,6 +2966,21 @@ CREATE INDEX IF NOT EXISTS ix_shop_fee_rate_est_shop_calc_at ON reporting.shop_f
 CREATE INDEX IF NOT EXISTS ix_api_keys_role ON security.api_keys USING btree (role);
 
 
+-- Name: ix_user_sessions_active; Type: INDEX; Schema: security; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_user_sessions_active ON security.user_sessions USING btree (user_id, expires_at);
+
+
+-- Name: ix_user_sessions_user; Type: INDEX; Schema: security; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_user_sessions_user ON security.user_sessions USING btree (user_id);
+
+
+-- Name: ix_users_username; Type: INDEX; Schema: security; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_users_username ON security.users USING btree (username);
+
+
 -- Name: case_lines trg_after_sales_case_lines_touch; Type: TRIGGER; Schema: after_sales; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_after_sales_case_lines_touch BEFORE UPDATE ON after_sales.case_lines FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
@@ -2751,6 +3019,16 @@ CREATE OR REPLACE TRIGGER trg_commerce_sales_orders_touch BEFORE UPDATE ON comme
 -- Name: enum_map trg_enum_map_updated_at; Type: TRIGGER; Schema: config; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_enum_map_updated_at BEFORE UPDATE ON config.enum_map FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: runtime_config_items trg_runtime_config_items_updated_at; Type: TRIGGER; Schema: config; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_runtime_config_items_updated_at BEFORE UPDATE ON config.runtime_config_items FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: runtime_config_secrets trg_runtime_config_secrets_updated_at; Type: TRIGGER; Schema: config; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_runtime_config_secrets_updated_at BEFORE UPDATE ON config.runtime_config_secrets FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
 -- Name: payouts trg_finance_payouts_touch; Type: TRIGGER; Schema: finance; Owner: -
@@ -2928,9 +3206,39 @@ CREATE OR REPLACE TRIGGER trg_reporting_product_profit_daily_touch BEFORE UPDATE
 CREATE OR REPLACE TRIGGER trg_reporting_shop_fee_rate_estimates_touch BEFORE UPDATE ON reporting.shop_fee_rate_estimates FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
+-- Name: permissions trg_permissions_touch; Type: TRIGGER; Schema: security; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_permissions_touch BEFORE UPDATE ON security.permissions FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: role_permissions trg_role_permissions_touch; Type: TRIGGER; Schema: security; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_role_permissions_touch BEFORE UPDATE ON security.role_permissions FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: roles trg_roles_touch; Type: TRIGGER; Schema: security; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_roles_touch BEFORE UPDATE ON security.roles FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
 -- Name: api_keys trg_security_api_keys_touch; Type: TRIGGER; Schema: security; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_security_api_keys_touch BEFORE UPDATE ON security.api_keys FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: user_roles trg_user_roles_touch; Type: TRIGGER; Schema: security; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_user_roles_touch BEFORE UPDATE ON security.user_roles FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: user_sessions trg_user_sessions_touch; Type: TRIGGER; Schema: security; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_user_sessions_touch BEFORE UPDATE ON security.user_sessions FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: users trg_users_touch; Type: TRIGGER; Schema: security; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_users_touch BEFORE UPDATE ON security.users FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
 -- Name: case_lines case_lines_case_id_fkey; Type: FK CONSTRAINT; Schema: after_sales; Owner: -
@@ -3027,6 +3335,12 @@ ALTER TABLE ONLY commerce.sales_orders
 
 ALTER TABLE ONLY commerce.sales_orders
     ADD CONSTRAINT sales_orders_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
+
+
+-- Name: runtime_config_revisions runtime_config_revisions_config_key_fkey; Type: FK CONSTRAINT; Schema: config; Owner: -
+
+ALTER TABLE ONLY config.runtime_config_revisions
+    ADD CONSTRAINT runtime_config_revisions_config_key_fkey FOREIGN KEY (config_key) REFERENCES config.runtime_config_items(config_key) ON DELETE CASCADE;
 
 
 -- Name: payouts payouts_channel_account_id_fkey; Type: FK CONSTRAINT; Schema: finance; Owner: -
@@ -3257,4 +3571,36 @@ ALTER TABLE ONLY reporting.shop_fee_rate_estimates
     ADD CONSTRAINT shop_fee_rate_estimates_shop_pk_fkey FOREIGN KEY (shop_pk) REFERENCES commerce.shops(id) ON DELETE CASCADE;
 
 
+-- Name: role_permissions role_permissions_permission_code_fkey; Type: FK CONSTRAINT; Schema: security; Owner: -
+
+ALTER TABLE ONLY security.role_permissions
+    ADD CONSTRAINT role_permissions_permission_code_fkey FOREIGN KEY (permission_code) REFERENCES security.permissions(code) ON DELETE CASCADE;
+
+
+-- Name: role_permissions role_permissions_role_code_fkey; Type: FK CONSTRAINT; Schema: security; Owner: -
+
+ALTER TABLE ONLY security.role_permissions
+    ADD CONSTRAINT role_permissions_role_code_fkey FOREIGN KEY (role_code) REFERENCES security.roles(code) ON DELETE CASCADE;
+
+
+-- Name: user_roles user_roles_role_code_fkey; Type: FK CONSTRAINT; Schema: security; Owner: -
+
+ALTER TABLE ONLY security.user_roles
+    ADD CONSTRAINT user_roles_role_code_fkey FOREIGN KEY (role_code) REFERENCES security.roles(code) ON DELETE CASCADE;
+
+
+-- Name: user_roles user_roles_user_id_fkey; Type: FK CONSTRAINT; Schema: security; Owner: -
+
+ALTER TABLE ONLY security.user_roles
+    ADD CONSTRAINT user_roles_user_id_fkey FOREIGN KEY (user_id) REFERENCES security.users(id) ON DELETE CASCADE;
+
+
+-- Name: user_sessions user_sessions_user_id_fkey; Type: FK CONSTRAINT; Schema: security; Owner: -
+
+ALTER TABLE ONLY security.user_sessions
+    ADD CONSTRAINT user_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES security.users(id) ON DELETE CASCADE;
+
+
 -- PostgreSQL database dump complete
+
+

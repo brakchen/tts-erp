@@ -153,7 +153,7 @@ fulfillment.shipment_lines / finance.settlement_transactions 的 `sales_order_li
   `tests/db/test_time_fields_convention.py` 锁定）。oauth_receiver（独立 DB）未动。
 - **变体/SKU 唯一性实测**：`external_variant_id` 跨商品**零重复**，
   `(channel_product_id, external_variant_id)` 已足以唯一（§5.3 依据）。
-- **`spu_images` 无 ORM 类**：DDL 与索引定义在 `tts_erp_v2/storage/schema_storage.sql`
+- **`spu_images` 无 ORM 类**：DDL 与索引定义在 `docs/schema/schema_storage.sql`
   （procurement schema），实施改名时需单独核对引用处。
 
 ## 5. 实施前待决项（open questions；✅ = 已拍板见 §2.6，剩余 open）
@@ -194,7 +194,7 @@ fulfillment.shipment_lines / finance.settlement_transactions 的 `sales_order_li
 - `tts_erp_v2/db/models/commerce.py` — 5 张表模型（改名主战场）
 - `tts_erp_v2/db/models/{after_sales,finance,fulfillment,linkage,procurement,reporting}.py`
   — §2.6 `_pk` 清单跨域涉及文件
-- `tts_erp_v2/storage/schema_storage.sql` — `procurement.spu_images`（无 ORM 类）
+- `docs/schema/schema_storage.sql` — `procurement.spu_images`（无 ORM 类）
 - `docs/architecture/data-model-target-v3.md` §5 — 销售域模型设计原文
 - `docs/api/external-api.md` — `/v2/commerce/*` 活契约（路径参数/字段改名影响）
 - `tts_erp_v2/api/v2/commerce.py` — `/v2/commerce/*` 路由（`{account_id}`/`{product_id}`/`{order_id}` 参数）

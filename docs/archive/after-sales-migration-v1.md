@@ -155,7 +155,7 @@ WHERE COALESCE((a.raw->'refund_amount'->>'refund_total')::numeric, -1)
 DROP TABLE returns, cancellations;
 ```
 
-同步更新：`schema_tts_erp.sql`（`scripts/regen_schema.py`）、`AGENTS.md`
+同步更新：`docs/schema/schema_tts_erp.sql`（`scripts/regen_schema.py`）、`AGENTS.md`
 端点表、`docs/data-model.md` §2.1/§3/§4、CHANGELOG。
 
 ## 5. 回滚预案

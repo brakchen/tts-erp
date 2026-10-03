@@ -94,5 +94,5 @@ FROM analytics.ad_product_links GROUP BY campaign_id;
 ## 6. 变更方式
 
 改视图语义 = 新 alembic migration 里 `CREATE OR REPLACE VIEW` + 重跑
-`scripts/regen_schema.py` 同步 `schema_tts_erp.sql`；测试在
+`scripts/regen_schema.py` 同步 `docs/schema/schema_tts_erp.sql`；测试在
 `tests/analytics/test_ad_product_links_view.py`（TEST_ 前缀数据）。

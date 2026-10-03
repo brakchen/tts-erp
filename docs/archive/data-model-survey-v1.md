@@ -1,6 +1,6 @@
 # tts-erp 数据模型调研（2026-08-29）
 
-> 数据来源：schema_tts_erp.sql / schema_oauth.sql（scripts/regen_schema.py 生成）+ 生产库实抽 demo 行。
+> 数据来源：docs/schema/schema_tts_erp.sql / schema_oauth.sql（scripts/regen_schema.py 生成）+ 生产库实抽 demo 行。
 > 敏感字段（token 密文 / key 哈希 / email / phone / address / recipient）已脱敏为 `<masked>`；超长字符串截断。
 
 ## 表清单总览
@@ -1712,7 +1712,7 @@ CREATE INDEX idx_analytics_audit_request ON public.analytics_audit_log USING btr
 
 ## 7.1 声明级约束（schema 中真实存在的）
 
-**外键：0 个。** 这是显式设计决策（schema_tts_erp.sql 头注释 FK policy 2026-08-27）：sync-mirror 表不带 FK，写入是自然键幂等 upsert，父先子后由 sync 层保证。历史上唯一的例外 `logistics_events → orders` 已在 Wave 2 随该死表一起删除。
+**外键：0 个。** 这是显式设计决策（docs/schema/schema_tts_erp.sql 头注释 FK policy 2026-08-27）：sync-mirror 表不带 FK，写入是自然键幂等 upsert，父先子后由 sync 层保证。历史上唯一的例外 `logistics_events → orders` 已在 Wave 2 随该死表一起删除。
 
 **主键（全部）与唯一键：**
 

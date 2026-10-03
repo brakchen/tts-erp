@@ -339,7 +339,7 @@ Response 200:
 - ⏳ `tts_erp_v2/api/v2/analytics.py` — 改 /cursor handler + 加 /dumps handler + 删 /batches
 - ⏳ `tts_erp_v2/analytics/repository.py` — 删 _recompute_cursors / fetch_cursor_page / SQL_LOCK_COMPLETENESS;加 has_data() + upsert_dump()
 - ⏳ `tts_erp_v2/analytics/domain.py` — Record.expected_page_count / Record.page 字段删除;加 DumpRecord dataclass
-- ⏳ `schema_tts_erp.sql` — regen 同步
+- ⏳ `docs/schema/schema_tts_erp.sql` — regen 同步
 - ⏳ `tests/api/test_analytics_v2_contract.py` — 重写 cursor/dumps 测试
 - ⏳ `docs/api/external-api.md` — 删 /batches,加 /dumps + has-data
 - ⏳ `docs/ops/analytics-sync.md` — 更新

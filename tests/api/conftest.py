@@ -120,7 +120,7 @@ def _wipe_test_rows(db_engine) -> None:
     shops_tbl = Base.metadata.tables["commerce.shops"]
     # 2026-08-31 procurement.spu_images — RESTRICT FK from products_spu
     # requires this wipe first. See docs/archive/procurement-ui-redesign.md §9.
-    # Table is created by schema_storage.sql and not registered as an ORM
+    # Table is created by docs/schema/schema_storage.sql and not registered as an ORM
     # model, so we wipe via raw text() with the same TEST_-prefixed scope.
     spu_images_wipe = _text(
         "DELETE FROM procurement.spu_images "

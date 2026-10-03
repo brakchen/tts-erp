@@ -45,7 +45,7 @@ tts_erp_v2/
 └── static/
 
 miaoshou/                # 妙手 SDK 包（独立包：client + miaoshou_signing.py；无 HTTP 路由，进程内用）
-api_keys.py              # key 管理 CLI     schema_tts_erp.sql   restart.sh
+api_keys.py              # key 管理 CLI     docs/schema/schema_tts_erp.sql   restart.sh
 tests/                   # v2 测试（api/jobs_*/middleware/proxy/reporting/storage/sync_worker）
 docs/                       # 全部专题文档（目录说明见 docs/README.md；端点活契约 docs/api/external-api.md）
 │   └── ops/                # 部署/运维文档（tts-erp.md / analytics-sync.md / pg-backup-design.md）

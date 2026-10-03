@@ -59,8 +59,10 @@ systemctl --user restart tts-erp-sync.service
 ## 4. 端到端测试
 
 ```bash
-# 端到端冒烟（需 :9877 在跑）
-python3 test_e2e.py / test_e2e_finance.py
+# live 端到端冒烟（需 :9877 在跑；用例在 tests/e2e/，默认被 fast 排除）
+bash scripts/test_isolated.sh e2e        # = pytest -m "domain_e2e and not slow" tests/
+# 只读：/healthz、/endpoints、/v2/fx/latest、/v2/reporting/*；
+# 基址/密钥可用 TTS_ERP_E2E_BASE、TTS_ERP_SERVICE_KEY 覆盖
 
 # 7 步生产冒烟（healthz/auth/v2 读端点/page/sync_jobs）
 bash prod-switch/postswitch-smoke.sh
@@ -82,9 +84,11 @@ journalctl --user -u tts-erp -n 50
 ## 6. Schema 变更
 
 ```bash
-# 流程：改 tts_erp_v2/db/models/ → 重新生成 → 应用
-python3 scripts/regen_schema.py
-# 生成 schema_tts_erp.sql（IF NOT EXISTS 幂等兼容老库）
+# 流程：改 tts_erp_v2/db/models/ → 重新生成 → 应用；每个 migration 合入后都要重新生成快照
+python3 scripts/regen_schema.py --db-url "postgresql://postgres@localhost/tts_erp_test_template"
+# 只读 pg_dump，生成 docs/schema/schema_tts_erp.sql（IF NOT EXISTS 幂等兼容老库）；
+# 生成源必须在当前 alembic head（用 psql 查 alembic_version 确认）；
+# 新表/新列的含义同步写进 docs/schema/README.md 的数据结构索引
 
 # 0045 妙手 package 数据归位：人工生产操作，一条命令完成
 # guard + scoped backup + worker stop/start + migration + verification + immediate sync

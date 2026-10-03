@@ -25,7 +25,7 @@ Create Date: 2026-09-11
 - `/home/schan/backups/analytics_ad_sync_audit_*.sql.gz`
 
 引用清理配套：`tests/analytics/test_ad_product_links_view.py`（9 用例）随视图一并删除；
-`schema_tts_erp.sql` 由 `scripts/regen_schema.py` 重生成。
+`docs/schema/schema_tts_erp.sql` 由 `scripts/regen_schema.py` 重生成。
 """
 
 from __future__ import annotations

@@ -10,8 +10,8 @@
 > - 中间件现位于 `tts_erp_v2/middleware/auth.py`（本文 §5.4 的 `tdd/auth.py` 是 v1 位置，已退役）；
 >   v2 另有 `tts_erp_v2/middleware/session_auth.py` 提供浏览器会话 cookie（见 browser-login-design.md）。
 > - `api_keys` 表已迁入 **`security.api_keys`**（九 schema 之一）；本文 §5.2 的 `schema.sql`
->   已于 2026-08-27 拆分为 `schema_tts_erp.sql` / `schema_oauth.sql`，并于 2026-09-05
->   oauth_receiver 库 DROP 时移除后者、简化为单文件 `schema_tts_erp.sql`。
+>   已于 2026-08-27 拆分为 `docs/schema/schema_tts_erp.sql` / `schema_oauth.sql`，并于 2026-09-05
+>   oauth_receiver 库 DROP 时移除后者、简化为单文件 `docs/schema/schema_tts_erp.sql`。
 > - 豁免清单现为 `/healthz`、`/endpoints`、`/openapi.json`、`/docs`、`/redoc`、
 >   `/docs/oauth2-redirect`、`/v2/auth/{login,logout,me}`（见 v2 中间件 `EXEMPT_PATHS`）。
 > - §5.3 / §6 的端点矩阵基于 v1 路由（`/db/*`、`/orders/*` 等），这些路由已随 v2 硬切换删除；
