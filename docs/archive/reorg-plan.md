@@ -15,7 +15,7 @@
 >   `_audit_and_error` stderr 诊断保留。
 > - `analytics_retention.py` 删除 + `JOBS` 摘除 `analytics.retention`（commit `d750600`）；
 >   ad_raw append-only / 覆盖审计改造 = P5 另案。
-> - schema_tts_erp.sql regen 后 -4 表 + 41 → 37 张业务表（commit `364d352`，AGENTS.md 同步）。
+> - docs/schema/schema_tts_erp.sql regen 后 -4 表 + 41 → 37 张业务表（commit `364d352`，AGENTS.md 同步）。
 > - **保留项**：`ad_product_links` VIEW 不变（仍只读 ad_raw）；
 >   typed 事实表 = `docs/archive/typed-facts-plan.md`（后续实施）。
 >
@@ -83,7 +83,7 @@ analytics schema（重排后）
   `analytics.ad_audit_log` → `analytics.ad_shop_timezones` →
   `plugin.ad_daily_completeness` → `analytics.ad_records`（先 drop 无 FK 依赖的表；
   本组表无跨表 FK，顺序不敏感，仍按依赖直觉排）。索引随表 drop 自动消失。
-- downgrade：重建 4 张表（列定义照抄现 models/`schema_tts_erp.sql` 里的旧定义），
+- downgrade：重建 4 张表（列定义照抄现 models/`docs/schema/schema_tts_erp.sql` 里的旧定义），
   **注释声明：ad_raw 仍可重建 ad_records/ad_daily_completeness；ad_audit_log 历史
   数据不可恢复（已接受，见 §7 风险）**。down 只保证 schema 可回滚，不保证数据。
 - 文件头 docstring：写清动机 + 关联决策 #1-4 + 关联文档。
@@ -153,7 +153,7 @@ analytics schema（重排后）
 
 ### 5.8 schema 与 regen
 
-- `schema_tts_erp.sql`（单文件，2026-09-05 oauth_receiver 库 DROP 后移除 schema_oauth.sql）
+- `docs/schema/schema_tts_erp.sql`（单文件，2026-09-05 oauth_receiver 库 DROP 后移除 schema_oauth.sql）
   由 `scripts/regen_schema.py` 从已 apply migration 的真库重新生成——**regen 属部署步骤**
   （DB 未 apply 前 regen 会带回旧表）。
   本 lane 不改 schema SQL 文件；部署清单（§9）负责 apply 后 regen + commit。
@@ -233,7 +233,7 @@ fetch_timezone|purge_expired|analytics.retention|analytics_retention`（tests/ �
 - [ ] `bash scripts/test.sh fast` 0 fail（master 上再跑一次）
 - [ ] 部署窗口：`.venv/bin/alembic upgrade head`（apply 0007，drop 4 表；先确认无
       running job 正在写）
-- [ ] `python3 scripts/regen_schema.py` 重新生成 schema SQL 并 commit（schema_tts_erp.sql）
+- [ ] `python3 scripts/regen_schema.py` 重新生成 schema SQL 并 commit（docs/schema/schema_tts_erp.sql）
 - [ ] `systemctl --user restart tts-erp.service` + `systemctl --user restart tts-erp-sync.service`
 - [ ] 冒烟：healthz；`GET /v2/analytics/sync/cursor` has-data 行为不变；`POST /v2/analytics/sync/dumps`
       一次 → ad_raw +1 行、无旧表写报错、日志出现 ingest 行（stderr/stdout 文件）

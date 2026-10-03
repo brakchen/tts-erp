@@ -20,7 +20,7 @@
 
 - **AGENTS.md** 说："11 schema / 51 表 + 1 view"
 - **README.md** 说："10 schema / 37 表 + 2 view"
-- **实际代码**（schema_tts_erp.sql）：11 schemas, 54 tables, 1 view
+- **实际代码**（docs/schema/schema_tts_erp.sql）：11 schemas, 54 tables, 1 view
 
 **修复方案**：
 

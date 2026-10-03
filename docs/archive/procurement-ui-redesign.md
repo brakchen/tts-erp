@@ -261,7 +261,7 @@ these endpoints; we don't add a dedicated `/counts` endpoint.
 New table in schema `procurement`:
 
 ```sql
--- schema_storage.sql (tts_erp_v2/storage/schema_storage.sql)
+-- docs/schema/schema_storage.sql (docs/schema/schema_storage.sql)
 CREATE SCHEMA IF NOT EXISTS procurement;
 
 CREATE TABLE IF NOT EXISTS procurement.spu_images (

@@ -9,6 +9,28 @@
   `@media`，见响应式布局回归测试）。
 - 新增回归测试 `test_spu_roi_table_wrap_content_insets_match_toolbar`，并附只读探针
   `scripts/probe_spu_table_alignment.js`（渲染页 + mock 接口，度量表头/表体与各分区间距）。
+## 2026-10-03 — e2e 测试归位 tests/e2e/；schema 快照迁入 docs/schema/ 并对准当前结构
+
+- **散落的 e2e 脚本归位**：根目录 `test_e2e.py` / `test_e2e_finance.py` 迁入 `tests/e2e/`，
+  改造为 pytest 用例（`requires_service` + `domain_e2e` 标记，被 fast 默认排除，
+  `bash scripts/test_isolated.sh e2e` 显式跑），保留手动冒烟价值。两者原打的 v1 路由
+  （`/shops` `/token/*` `/db/*` `/finance/*` `/sync/*`）已随 v1 退役，改为校验现存只读端点：
+  `/healthz`、`/endpoints`（含"清单里不得出现 v1 路径"断言）、`/v2/fx/latest`、
+  `/v2/reporting/{coverage,profit-daily,cost-snapshots}`。基址/密钥可用
+  `TTS_ERP_E2E_BASE`、`TTS_ERP_SERVICE_KEY` 覆盖，默认读仓库根 `.env`。
+  注：`miaoshou/endpoints/test_tools.py` 不是测试（SDK 的 TestEndpoint 辅助类，`__test__ = False`），保持原位。
+- **schema 快照迁入 `docs/schema/`**：`schema_tts_erp.sql` → `docs/schema/schema_tts_erp.sql`，
+  `tts_erp_v2/storage/schema_storage.sql` → `docs/schema/schema_storage.sql`；
+  `scripts/regen_schema.py` 输出路径同步，且不再把实例级扩展（`pg_stat_statements`）写进快照。
+- **按当前数据结构重新生成快照**（生成源 `tts_erp_test_template` @ alembic head `0052_user_accounts`，
+  只读 pg_dump）：旧快照确实漂移——补上了 `security.*` 六表（用户/角色/权限/会话）、
+  `config.runtime_config_*` 三表、0051 索引等（+351 行），并更新了 `ad_raw_log` 的 kind 约束（含 monthly）。
+- **新增 `docs/schema/README.md`**：维护规则（每个 migration 合入后必须 regen、生成源必须在
+  alembic head、结构变化同步人读索引）+ 13 个 schema / 69 张表的数据结构索引（逐表业务含义），
+  并链接领域模型、口径映射、枚举参考。
+- 文档同步：`docs/guides/commands-reference.md`（e2e 与 regen 命令）、`docs/guides/test-domains.md`
+  （tests/e2e 映射）、`README.md` 结构图、全仓 `schema_tts_erp.sql` 路径引用改写。
+  `scripts/test_isolated.sh fast` 全绿。
 
 ## 2026-10-03 — 文档统一收敛到 `docs/`，口径文档唯一化
 
@@ -278,7 +300,7 @@ POST dumps；但 `api-managed` 守卫（commit `ae843a1`）把 `data_source='api
 - **job 改名**：`analytics.solidify` → **`plugin.ad_merge_today2daily`**
   （模块 `jobs/ad_merge_today2daily.py`；`solidify_yesterday` → `merge_today_into_daily`）。
 - **工具**：`scripts/regen_schema.py` 新增 `--db-url`/`TTS_ERP_DB_URL` 覆盖（原硬编码读
-  `.env`=prod），使 `schema_tts_erp.sql` 可在不碰 prod 的前提下从 test 库再生成；
+  `.env`=prod），使 `docs/schema/schema_tts_erp.sql` 可在不碰 prod 的前提下从 test 库再生成；
   同时修掉 `\unrestrict` 随机 token（修后 regen 幂等）。
 - 端点路径**不变**（`/v2/analytics/sync/*` 仍是插件侧 stable 契约）。
 
@@ -290,7 +312,7 @@ POST dumps；但 `api-managed` 守卫（commit `ae843a1`）把 `data_source='api
   直接读 `ad_daily ∪ ad_today` 并自行 JOIN `commerce`。`ad_raw` 自 v4 上线即冻结
   （只写 `ad_raw_log`），最后真实写入 2026-09-09。
 - 配套：删 `tests/analytics/test_ad_product_links_view.py`（9 用例）；
-  `schema_tts_erp.sql` 重生成；`models/analytics.py` 注释更新；
+  `docs/schema/schema_tts_erp.sql` 重生成；`models/analytics.py` 注释更新；
   一批现行文档同步（`external-api.md` / `docs/ops/analytics-sync.md` /
   `spu-real-roi-dashboard.md` 等），历史设计记录加废弃标注。
 - 备份：`/home/schan/backups/analytics_ad_raw_20260911_0118.sql.gz`（1467 行）、
@@ -404,7 +426,7 @@ miaoshou/ak_... 均已就位且 scope 齐全），v1 oauth_receiver 库失去回
   git history」策略保留。
 - **`.env`**：删 `OAUTH_DB_URL` / `OAUTH_DB_ENCRYPTION_KEY` 两行（v2 canonical
   `TTS_ERP_FERNET_KEY` 是同一 Fernet key，保留不动；备份 `.env.bak.<ts>` 留存）。
-- **`scripts/regen_schema.py`**：去掉 oauth 段，单库化为只生成 `schema_tts_erp.sql`。
+- **`scripts/regen_schema.py`**：去掉 oauth 段，单库化为只生成 `docs/schema/schema_tts_erp.sql`。
   删除 `schema_oauth.sql`。
 - **`DROP DATABASE`**：`DROP DATABASE IF EXISTS oauth_receiver WITH (FORCE)` 成功；
   验证 tts_erp 库 40 张表（含 alembic_version + 2 view）完好。
@@ -455,7 +477,7 @@ Authorization overview 字段表在此准确），原假设「token/get 直给�
 
 Lane E 的 `/v2/oauth/tiktok/*`（v1 oauth-receiver `/authorize`+`/callback` 职责迁入 v2）收尾合入并部署
 （承接 2026-09-05 已落地的 out-of-band migration：live `integration.oauth_states` 表当日已建，本次以
-alembic **0011_oauth_states** 重编号接入 0007→0009→0010 链并 stamp，schema_tts_erp.sql 重新 regen）。
+alembic **0011_oauth_states** 重编号接入 0007→0009→0010 链并 stamp，docs/schema/schema_tts_erp.sql 重新 regen）。
 
 - **端点**：`GET /v2/oauth/tiktok/authorize`（admin；注册一次性 CSRF state + 返回授权链接）、
   `GET /v2/oauth/tiktok/callback`（**public** 豁免；校验 state → `token/get` 换 token → 落库）
@@ -513,7 +535,7 @@ v2 切流的 v1 数据回查窗口提前收口：按 `docs/archive/refactor-tech
   触发器函数，41 个 v2 表触发器依赖（`tests/db/test_time_fields_convention.py` 锁定）。
 - 归档：`/home/schan/backups/tts_erp_public_v1_legacy_20260905T110814Z.sql.gz`（schema+data 1.2MB，可完整恢复）。
   oauth_receiver（独立 DB）未动。
-- `scripts/regen_schema.py` 重生成 `schema_tts_erp.sql`（-839 行，public 遗留段落移除）。
+- `scripts/regen_schema.py` 重生成 `docs/schema/schema_tts_erp.sql`（-839 行，public 遗留段落移除）。
 - 验证：DROP 后 public 业务表 0 残留、`fn_touch_updated_at` 在、41 触发器完好、相关测试 0 fail。
 
 ## 2026-09-05 (refactor) — analytics schema reorg（migration 0007，删 4 张僵尸表 + 审计改文件日志）
@@ -727,7 +749,7 @@ v2 切流的 v1 数据回查窗口提前收口：按 `docs/archive/refactor-tech
   - `GET /v2/spu-images[?spu_pk=]`（readonly）— ready 列表 + presigned GET URL
   - `DELETE /v2/spu-images/{id}`（readwrite）— 软删
   - Cookie 会话下的 mutation 带 CSRF guard（与 manual-costs POST 同款）
-- 新 `tts_erp_v2/storage/schema_storage.sql`：`procurement.spu_images` 表。
+- 新 `docs/schema/schema_storage.sql`：`procurement.spu_images` 表。
 - **fix**: `GET /v2/spu-images` 不带 filter 时 `CAST(:cp_id AS bigint)` 修
   `AmbiguousParameter` 500（回归测试 `test_list_without_spu_pk_returns_all_ready`）。
 - `pyproject.toml`：补 `[project]` 依赖清单（含 `minio>=7.2`），uv/pip 可解析。
@@ -924,7 +946,7 @@ FastAPI 0.141 把每个 `include_router` 子包成一个 lazy `_IncludedRouter`�
 - 清理两库互灌：tts_erp 库的空 `oauth_tokens` + oauth_receiver 库的 23 张空业务表。
 - `sync_log` retention 单一入口（trigger 委托 `cleanup_sync_log(60)`）。
 - crontab 挂上 analytics_records(90d) / analytics_audit_log(30d) 每日清理。
-- `regen_schema.py` 拆成 `schema_oauth.sql` + `schema_tts_erp.sql`（不再一文件灌两库）。
+- `regen_schema.py` 拆成 `schema_oauth.sql` + `docs/schema/schema_tts_erp.sql`（不再一文件灌两库）。
 - `order_shippings.raw` 只存物流子集（不再复制整单 JSON）。
 
 ### Wave 3 — 结构性（commits `0566571`, `8af34f9`, `ed81fc5`）

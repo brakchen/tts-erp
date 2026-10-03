@@ -168,7 +168,7 @@ ALTER TABLE analytics.ad_raw DROP CONSTRAINT IF EXISTS uq_analytics_raw_unit_day
 ```
 
 `down_revision = "0011_oauth_states"`（当前 head）。同步 `scripts/regen_schema.py` →
-`schema_tts_erp.sql`。
+`docs/schema/schema_tts_erp.sql`。
 
 ### 4.3 `analytics.ad_sync_audit`（元数据审计，D-4）
 
@@ -359,7 +359,7 @@ rolloverDay: string | null;         // 最近一次已处理的店铺当地日�
 | `tts_erp_v2/analytics/has_data_cache.py` | 桶 value 与写穿透改 live 行（§5.2）；红线注释更新（live 只 upsert 不删） |
 | 视图 `0006_ad_product_links_view` → 新 migration | CTE 改读 live product 行；**未转换 campaign 回退读 legacy daily 行**（保持口径连续，见 §8）；`observed_days/first_day/last_day` 由区间推导 |
 | `tts_erp_v2/api/v2/analytics.py`（ROI SQL） | `_SQL_ROI_AD`/`_SQL_ROI_WINDOW` 改读 live（含 today 计入条件 day_end > history.day_end） |
-| `schema_tts_erp.sql` / `scripts/regen_schema.py` | regen |
+| `docs/schema/schema_tts_erp.sql` / `scripts/regen_schema.py` | regen |
 | `docs/api/external-api.md` / `docs/ops/analytics-sync.md` / `AGENTS.md` / `CHANGELOG.md` | 同步 |
 
 upsert+fold+audit 单事务伪码：

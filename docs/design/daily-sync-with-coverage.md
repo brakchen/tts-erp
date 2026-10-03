@@ -271,7 +271,7 @@ CREATE INDEX idx_ad_raw_log_request_id ON plugin.ad_raw_log (request_id);
 | `analytics.py` | `POST /dumps` 解析 v2/v3 协议 | 改为解析 rows 数组，提取结构化字段写新表 |
 | `analytics.py` | `GET /cursor` has-data/coverage 模式 | 新增 `GET /coverage` 端点（方案 B 批量） |
 | `spu_roi.py` | 读 `ad_product_links` VIEW | 直接读 `ad_daily` + `ad_today`（UNION） |
-| `schema_tts_erp.sql` | `ad_product_links` VIEW 从 `ad_raw` JSONB 解析 | 改为从 `ad_daily` + `ad_today` 结构化列读取 |
+| `docs/schema/schema_tts_erp.sql` | `ad_product_links` VIEW 从 `ad_raw` JSONB 解析 | 改为从 `ad_daily` + `ad_today` 结构化列读取 |
 | `has_data_cache.py` | 缓存 `ad_raw` live 行 | 不再需要（coverage 直接查新表） |
 
 ---

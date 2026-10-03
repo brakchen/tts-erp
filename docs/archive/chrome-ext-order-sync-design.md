@@ -157,7 +157,7 @@ CREATE INDEX ix_raw_log_endpoint ON plugin.raw_log(endpoint);
 
 > **⚠ 历史设计**：以下 CREATE TABLE 语句为 2026-09-08 设计稿中的原始 schema。
 > 实际实现中 `log_id` 列已于 2026-09-17 Phase 3 删除（raw_log 下线后，业务表不再需要 log_id FK）。
-> 当前实际 schema 请参考 `schema_tts_erp.sql` 或 `docs/api/dumps-data-contract.md` §4 字段映射。
+> 当前实际 schema 请参考 `docs/schema/schema_tts_erp.sql` 或 `docs/api/dumps-data-contract.md` §4 字段映射。
 
 #### `plugin.orders` — 订单
 
@@ -748,7 +748,7 @@ Content-Type: application/json
 | --- | --- |
 | `alembic/versions/XXXX_plugin_schema.py` | 创建 `plugin` schema + 7 张表 |
 | `tts_erp_v2/db/models/plugin.py` | SQLAlchemy 模型（7 个 class） |
-| `schema_tts_erp.sql` | `python3 scripts/regen_schema.py` 重新生成 |
+| `docs/schema/schema_tts_erp.sql` | `python3 scripts/regen_schema.py` 重新生成 |
 
 ### 6.2 API + 解析层
 

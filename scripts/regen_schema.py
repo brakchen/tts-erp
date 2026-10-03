@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
-"""Regenerate schema_tts_erp.sql from a live tts_erp-shaped PG database.
+"""Regenerate docs/schema/schema_tts_erp.sql from a live tts_erp-shaped PG database.
 
 Run:
-    python3 scripts/regen_schema.py                  # 默认读 .env 的 TTS_ERP_DB_URL（prod）
-    python3 scripts/regen_schema.py --db-url URL     # 指定库（如 test 库）
+    python3 scripts/regen_schema.py --db-url postgresql://postgres@localhost/tts_erp_test_template
     TTS_ERP_DB_URL=URL python3 scripts/regen_schema.py   # 环境变量覆盖
 
 库 URL 解析优先级：`--db-url` > 环境变量 `TTS_ERP_DB_URL` > `.env` 文件。
 
-**本脚本只读库（pg_dump），不写任何数据库** —— 产物是仓库里的
-``schema_tts_erp.sql`` 文本快照。需要在不触碰 prod 的前提下更新该快照时，
-对已跑完迁移的 test 库执行：
-
-    bash -c 'set -a; . ./.env.test; set +a; \
-      python3 scripts/regen_schema.py --db-url "$TTS_ERP_DB_URL"'
+**本脚本只读库（pg_dump），不写任何数据库** —— 产物是
+``docs/schema/schema_tts_erp.sql`` 文本快照。**只对跑完全部迁移的库执行**
+（推荐 ``tts_erp_test_template``，先确认它在当前 alembic head；或临时 clone
+后跑完迁移的 test 库）。不要从落后于 head 的库（如旧的 ``tts_erp_v3_test``）
+生成快照，那会把旧结构写进文档。
 
 What it does:
   1. Runs `pg_dump --schema-only --no-owner --no-privileges
@@ -22,12 +20,12 @@ What it does:
        - Strips `\\restrict ...` security token (NOT for source control)
        - Drops CREATE SEQUENCE / ALTER SEQUENCE / sequence SETVAL
          (SERIAL/BIGSERIAL columns own these implicitly — keeping the
-         SEQUENCE creates a race when re-running schema_tts_erp.sql
+         SEQUENCE creates a race when re-running docs/schema/schema_tts_erp.sql
          against a fresh DB)
        - Adds IF NOT EXISTS to CREATE TABLE / CREATE FUNCTION for
-         idempotency (schema_tts_erp.sql is meant to be re-runnable)
+         idempotency (docs/schema/schema_tts_erp.sql is meant to be re-runnable)
        - Strips `pg_catalog.set_config` lines (session-only noise)
-  3. Writes the cleaned dump to schema_tts_erp.sql with a header banner.
+  3. Writes the cleaned dump to docs/schema/schema_tts_erp.sql with a header banner.
 
 Why a script, not a manual edit:
   - As of 2026-08-25 the schema.sql had drifted from reality (missing 7 new
@@ -111,6 +109,10 @@ def _clean(dump: str) -> str:
     lines = dump.splitlines()
     out: list[str] = []
     for line in lines:
+        # Instance-level extensions (e.g. pg_stat_statements) are container
+        # config, not app schema — keep the snapshot about data structures.
+        if line.startswith("CREATE EXTENSION "):
+            continue
         # Security token — NEVER commit (pg_dump ≥17 pairs \restrict with a
         # matching \unrestrict carrying a fresh random token on EVERY run; both
         # must be dropped or every regen emits a spurious one-line diff).
@@ -206,10 +208,10 @@ TTS_HEADER = """-- =============================================================
 -- =============================================================================
 --
 -- DO NOT EDIT BY HAND. Run `python3 scripts/regen_schema.py` after any
--- schema change; it rewrites schema_tts_erp.sql.
+-- schema change (every merged migration); it rewrites docs/schema/schema_tts_erp.sql.
 --
 -- To apply:
---     docker exec -i postgres psql -U postgres -d tts_erp < schema_tts_erp.sql
+--     docker exec -i postgres psql -U postgres -d tts_erp < docs/schema/schema_tts_erp.sql
 --
 -- FK policy (2026-08-27): sync-mirror tables carry NO foreign keys.
 -- Writes are idempotent upserts keyed by natural primary keys; parents
@@ -256,8 +258,9 @@ def main(argv: list[str] | None = None) -> int:
     out_dir = Path(__file__).resolve().parent.parent
 
     tts_dump = _pg_dump(tts_url)
-    (out_dir / "schema_tts_erp.sql").write_text(TTS_HEADER + tts_dump, encoding="utf-8")
-    sys.stderr.write("# wrote schema_tts_erp.sql\n")
+    out_path = out_dir / "docs" / "schema" / "schema_tts_erp.sql"
+    out_path.write_text(TTS_HEADER + tts_dump, encoding="utf-8")
+    sys.stderr.write("# wrote docs/schema/schema_tts_erp.sql\n")
     return 0
 
 

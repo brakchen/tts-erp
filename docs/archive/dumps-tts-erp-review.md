@@ -258,7 +258,7 @@ elif domain == "logistics":
 | **F4** | `if parse_error is None and rows_written == 0` hack | `order_sync.py:415-416` | A5 拍板删除 |
 | **F5** | `parse_after_sales_response` 247 行孤儿函数 | `parser.py:478` + 4 个 test | routes 未接（D1）；接入后是活函数，不删 |
 | **F6** | `plugin.raw_log` 表 | 已 DROP（Phase 3） | 已删 |
-| **F7** | `plugin.raw_log` 残留引用 | alembic 0030 注释 `log_id BIGINT NOT NULL REFERENCES plugin.raw_log(id)`；`schema_tts_erp.sql` 残留注释；canonical 文档 §2.4 / §2.5；`scripts/oneoff_backfill_plugin_order_times.py` | Phase 3 后清理不彻底 |
+| **F7** | `plugin.raw_log` 残留引用 | alembic 0030 注释 `log_id BIGINT NOT NULL REFERENCES plugin.raw_log(id)`；`docs/schema/schema_tts_erp.sql` 残留注释；canonical 文档 §2.4 / §2.5；`scripts/oneoff_backfill_plugin_order_times.py` | Phase 3 后清理不彻底 |
 | ~~**F8**~~ | ~~`intercept-plugin-canonical.md`~~ | ~~`docs/api/dumps-data-contract.md`（21KB）~~ | ~~用户原话"看着不太对"；与 `dumps-data-contract.md` 职责重叠（A6）；建议加 banner（B5）~~ — **已合并并删除**（lane `docs/merge-canonical-into-contract`） |
 | **F9** | `chrome-ext-order-sync-design.md` raw_log 设计章节 | §3.x 整段 | raw_log 已 drop，设计稿章节过时 |
 | **F10** | `test_dumps_empty_response_returns_clean_status` 等 4 个 case | `tests/api/test_order_sync_contract.py:493` 等 | 断言反转后改名（如 `_returns_422`）；删所有 rowsWritten 断言 |
@@ -321,7 +321,7 @@ Pydantic validator 校验对齐：
 - ~~`intercept-plugin-canonical.md` 加顶部 banner（B5 待定）~~ — **已通过 lane `docs/merge-canonical-into-contract` 解决**
 - `chrome-ext-order-sync-design.md` §3.x 加 raw_log 已 drop banner
 - `dumps-data-contract.md` §0 加交叉链接
-- `schema_tts_erp.sql` + `alembic/0030` 注释清理（F11）
+- `docs/schema/schema_tts_erp.sql` + `alembic/0030` 注释清理（F11）
 - `tts_erp_v2/api/v2/admin.py` + `tts_erp_v2/db/models/plugin.py` raw_log 残留清理（F12 + F13）
 
 ### G7. ~~【P2，方案 Lane D（条件性）】~~ — **A13 已取消**

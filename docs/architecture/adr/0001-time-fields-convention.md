@@ -144,7 +144,7 @@ $$ LANGUAGE plpgsql;
    - `public.fn_touch_updated_at()` 函数
    - 40+ 张表加列 + BEFORE UPDATE trigger
    - 200+ 列 `COMMENT ON COLUMN`(语义清晰无歧义)
-5. **Phase 5**: `python3 scripts/regen_schema.py` 同步 `schema_tts_erp.sql`
+5. **Phase 5**: `python3 scripts/regen_schema.py` 同步 `docs/schema/schema_tts_erp.sql`
 6. **Phase 6**: 跑 `bash scripts/test.sh fast` 全量测试
 7. **Phase 7**: 直接应用 migration 到生产(用户授权)
 

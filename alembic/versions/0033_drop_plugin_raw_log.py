@@ -32,7 +32,7 @@
 - ``tts_erp_v2/api/v2/order_sync.py``：清 Phase 1 历史注释（3 行）
 - ``tts_erp_v2/api/v2/admin.py``：删 ``_PLUGIN_ORDER_RAW_LOG`` + purge 列表项 +
   ``list_known_shops`` 的 raw_log SELECT
-- ``schema_tts_erp.sql``：删 8 张业务表 log_id 列 + plugin.raw_log 表 + 索引 +
+- ``docs/schema/schema_tts_erp.sql``：删 8 张业务表 log_id 列 + plugin.raw_log 表 + 索引 +
   序列 + 8 条 FK 约束
 - ``tests/conftest.py``：cleanup 列表删 ``plugin.raw_log``
 - ``tests/db/test_time_fields_convention.py``：删 ``plugin.raw_log 无 updated_at``
