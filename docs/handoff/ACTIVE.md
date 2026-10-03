@@ -16,4 +16,3 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| spu-settle-clarity | 结算钻取表头中文化/订单状态列/0 元标注 + 已结算判定口径复核（维持现状） | 01a10240-43f4-753a-aac7-9c15b7056ef8 | `fix/spu-settle-clarity` / `.worktrees/spu-settle-clarity` | `tts_erp_v2/static/js/spu-profitability-page.js`；`tts_erp_v2/analytics/spu_profitability/_implementation.py`；`tests/api/test_spu_roi_api.py`；`CHANGELOG.md` | ready | ff169b7 | 15bf772 | 2026-10-03T17:12Z |
