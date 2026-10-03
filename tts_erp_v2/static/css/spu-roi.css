@@ -7,6 +7,9 @@
 /* 页面局部 surface 色：tokens.css 只收语义令牌，这里从规范令牌派生，
  * 不另养并行色板。 */
 :root {
+  /* 亏损行（.row-bad）冻结列的底色 —— 需比 --paper-deep 更偏红，
+   * tokens.css 无对应项，故保留为页面局部 surface 色。 */
+  --paper-danger: #eee3d9;
 /* Bootstrap 变量桥接：把 Bootstrap 的语义变量指到暖纸令牌上。 */
  --bs-body-bg: var(--paper);
  --bs-body-color: var(--ink);

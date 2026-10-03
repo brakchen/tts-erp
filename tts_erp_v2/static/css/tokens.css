@@ -7,7 +7,7 @@
  *   1. 暖纸编辑体  --paper/--ink/--rule/--accent(陶土橙)   6 页
  *   2. 灰蓝体系    --bg/--card/--border/--accent(靛蓝)     2 页 (enum-map, users)
  *   3. rc 命名空间 --rc-*                                  1 页 (runtime-configs)
- *   4. signal 体系 --signal*/--warning                     1 页 (ad-daily)
+ *   4. signal 体系 --signal* / --warning                   1 页 (ad-daily)
  * 2026-10-03 (feature/ui-style-unification lane) 统一到本文件的暖纸编辑体。
  *
  * 取值来源：多数投票 + 暖纸编辑体旗舰页 dashboard.html。字体栈取最完备的一支，
