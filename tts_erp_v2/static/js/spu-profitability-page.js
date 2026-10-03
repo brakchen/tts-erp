@@ -1342,31 +1342,55 @@
       ? el("span", { class: "op-hint", "data-tip": hint }, "?")
       : null;
   }
+  // summaryHint: 明细大盘的口径说明与页首整体大盘共用同一份 data-tip
+  //（HTML 是唯一事实源），两处口径文案不会漂移。
+  function summaryHint(sumId) {
+    var num = document.getElementById(sumId);
+    var label = num && num.closest(".op-counter-label");
+    var hint = label && label.querySelector(".op-hint[data-tip]");
+    return hint ? hint.getAttribute("data-tip") : "";
+  }
   function renderProfitSummary(it) {
-    // 明细大盘与页首实际大盘完全同组同口径；值均由后端行字段给出，前端只格式化。
+    // 明细大盘 = 页首整体大盘的同组同口径镜像：总览/有效/退款/全损/国内取消/
+    // 利润/ROI 七组逐格对应，分组与样式同页首（op-counter-*）；预测内容
+    //（预测依据/未结算预测对象/预计）不在明细大盘展示。值均由后端行字段给出，
+    // 前端只格式化。
     function money(value) {
       return value == null || value === "" ? "—" : fmtMoney(value);
     }
-    function cell(label, value, hint) {
-      var hintEl = hint
-        ? el("span", { class: "op-hint", "data-tip": hint }, "?")
-        : null;
+    function cell(label, value, hint, numClass) {
       return el(
         "div",
         { class: "col" },
         el(
-          "div",
-          { class: "op-drill-cell h-100" },
-          el("span", { class: "op-drill-lbl" }, label, hintEl),
+          "span",
+          { class: "op-counter-item h-100 p-2 p-lg-3" },
           el(
             "span",
-            { class: "op-drill-val" },
+            { class: "op-counter-label" },
+            label,
+            hintSpan(hint),
+          ),
+          el(
+            "span",
+            { class: "op-counter-num" + (numClass ? " " + numClass : "") },
             String(value == null ? "—" : value),
           ),
         ),
       );
     }
-    var adSystemMeta = state.meta.ad_system_roi || {};
+    function group(label, cells) {
+      return el(
+        "div",
+        { class: "col" },
+        el(
+          "div",
+          { class: "op-counter-group h-100" },
+          el("div", { class: "op-counter-group-label" }, label),
+          el("div", { class: "row g-0 row-cols-2" }, cells),
+        ),
+      );
+    }
     var adSystemBreakeven =
       it.ad_system_breakeven_roi == null || it.ad_system_breakeven_roi === ""
         ? "—"
@@ -1377,81 +1401,59 @@
       "div",
       {
         class:
-          "row row-cols-2 row-cols-sm-3 row-cols-lg-4 row-cols-xxl-4 g-2 op-drill-grid",
+          "row g-2 g-xl-3 row-cols-1 row-cols-md-2 row-cols-xl-3 row-cols-xxl-4 op-drill-grid",
       },
-      cell("总单量", String(it.total_orders || 0)),
-      cell("广告消耗", money(it.spend)),
-      cell("有效单量", String(it.effective_order_count || 0)),
-      cell("有效销售", money(it.effective_sales)),
-      cell("退款数", String(it.refund_order_count || 0)),
-      cell("退款率", fmtPct(it.refund_rate)),
-      cell("全损量", String(it.full_loss_order_count || 0)),
-      cell("全损率", fmtPct(it.full_loss_rate)),
-      cell("国内取消量", String(it.domestic_cancelled_order_count || 0)),
-      cell("国内取消率", fmtPct(it.cancel_rate)),
-      cell("净利润", money(it.net_profit)),
-      cell("实际ROI", fmtRatio(it.roi_real)),
-      cell("实际保本ROI", fmtRatio(it.roi_breakeven)),
-      cell(
-        "广告系统实际ROI",
-        fmtRatio(it.ad_system_actual_roi),
-        adSystemMeta.actual_formula,
-      ),
-      cell(
-        "广告系统保本ROI",
-        adSystemBreakeven,
-        [adSystemMeta.breakeven_formula, adSystemMeta.warning]
-          .filter(Boolean)
-          .join("；"),
-      ),
-      cell("预测状态", projectionStatusLabel(it.projection_status)),
-      cell(
-        "已完结样本订单",
-        fmtInt(it.projection_completed_basis_order_count),
-      ),
-      cell(
-        "已完结全损订单",
-        fmtInt(it.projection_completed_full_loss_order_count),
-      ),
-      cell(
-        "其中终局物流全损订单",
-        fmtInt(it.projection_terminal_full_loss_order_count),
-      ),
-      cell("已完结订单全损率", fmtPct(it.completed_full_loss_rate)),
-      cell("未结算订单", fmtInt(it.unsettled_order_count)),
-      cell("待确认未结算订单", fmtInt(it.unresolved_unsettled_order_count)),
-      cell("待确认未结算件", fmtQty(it.unresolved_unsettled_qty)),
-      cell("待确认未结算销售", money(it.unresolved_unsettled_sales)),
-      cell("未送达风险销售", money(it.full_loss_exposure_unsettled_sales)),
-      cell("已确认未结算退款", money(it.confirmed_unsettled_refund_amount)),
-      cell(
-        "已确认风险池退款",
-        money(it.confirmed_full_loss_exposure_refund_amount),
-      ),
-      cell(
-        "已确认未结算全损单",
-        fmtInt(it.confirmed_unsettled_full_loss_order_count),
-      ),
-      cell("已确认未结算全损件", fmtQty(it.confirmed_unsettled_full_loss_qty)),
-      cell("预计未来新增退款", money(it.projected_future_refund_amount)),
-      cell(
-        "预计未来新增全损单",
-        fmtQty(it.projected_future_full_loss_order_count),
-      ),
-      cell("预计未来新增全损件", fmtQty(it.projected_future_full_loss_qty)),
-      cell("预计全损成本", money(it.projected_full_loss_cost)),
-      cell("预计未结算净收入", money(it.projected_unsettled_net)),
-      cell("预计净收入", money(it.projected_net_revenue)),
-      cell("预计净利润", money(it.projected_net_profit)),
-      cell("预计ROI", fmtRatio(it.projected_roi_real)),
-      cell("预计保本ROI", fmtRatio(it.projected_roi_breakeven)),
-      cell("预计广告系统ROI", fmtRatio(it.projected_ad_system_actual_roi)),
-      cell(
-        "预计广告系统保本ROI",
-        fmtRatio(it.projected_ad_system_breakeven_roi),
-      ),
-      cell("预计NC′", money(it.projected_nc_prime)),
-      cell("预计保留货本", money(it.projected_cogs_kept)),
+      group("总览", [
+        cell("总单量", fmtInt(it.total_orders || 0), summaryHint("sum-total-orders")),
+        cell("广告消耗", money(it.spend), summaryHint("sum-spend")),
+      ]),
+      group("有效", [
+        cell("有效单量", fmtInt(it.effective_order_count || 0), summaryHint("sum-orders")),
+        cell("有效销售", money(it.effective_sales), summaryHint("sum-sales")),
+      ]),
+      group("退款", [
+        cell("退款数", fmtInt(it.refund_order_count || 0), summaryHint("sum-refund-count")),
+        cell("退款率", fmtPct(it.refund_rate), summaryHint("sum-refund-rate")),
+      ]),
+      group("全损", [
+        cell("全损量", fmtInt(it.full_loss_order_count || 0), summaryHint("sum-loss-qty")),
+        cell("全损率", fmtPct(it.full_loss_rate), summaryHint("sum-loss-rate")),
+      ]),
+      group("国内取消", [
+        cell(
+          "国内取消量",
+          fmtInt(it.domestic_cancelled_order_count || 0),
+          summaryHint("sum-cancel-count"),
+        ),
+        cell("国内取消率", fmtPct(it.cancel_rate), summaryHint("sum-cancel-rate")),
+      ]),
+      group("利润", [
+        cell(
+          "净利润",
+          money(it.net_profit),
+          summaryHint("sum-net-profit"),
+          it.profit_status === "loss"
+            ? "is-err"
+            : it.profit_status === "profit"
+              ? "is-ok"
+              : "",
+        ),
+        cell(
+          "实际ROI",
+          fmtRatio(it.roi_real),
+          summaryHint("sum-roi"),
+          it.roi_status === "negative" ? "is-err" : "",
+        ),
+      ]),
+      group("ROI", [
+        cell("实际保本ROI", fmtRatio(it.roi_breakeven), summaryHint("sum-roi-breakeven")),
+        cell(
+          "广告系统实际ROI",
+          fmtRatio(it.ad_system_actual_roi),
+          summaryHint("sum-roi-ad-actual"),
+        ),
+        cell("广告系统保本ROI", adSystemBreakeven, summaryHint("sum-roi-ad")),
+      ]),
     );
   }
   function renderProfitTab(it) {
