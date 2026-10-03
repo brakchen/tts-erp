@@ -1468,8 +1468,9 @@
 
     // 瀑布分层结构(<div>,不用 <table>):加项 / 减项 / 结果三段式,
     // 与设计稿 §6.2 「P&L 分解瀑布」对齐;其余 4 tab 是行级列表保留 <table>。
-    function row(label, val, sign, hint) {
+    function row(label, val, sign, hint, valText) {
       // sign = "add" | "sub" | "result" —— 控制前缀 +/-/= 颜色。
+      // valText: 可选的预格式化值（货本行用「件数 × 单价 = 金额」表达）。
       var signChar = sign === "sub" ? "−" : sign === "result" ? "=" : "+";
       var klass = "op-pnl-row op-pnl-" + sign;
       return el(
@@ -1480,9 +1481,17 @@
           "span",
           { class: "op-pnl-row-val" },
           el("span", { class: "op-pnl-sign" }, signChar + " "),
-          fmtMoney(val),
+          valText == null ? fmtMoney(val) : valText,
         ),
       );
+    }
+    // 货本行显示「N 件 × 单价 = 金额」（2026-10-03 用户拍板），不再只给裸金额；
+    // 件数与单价均来自后端行字段，前端只格式化，不重算。
+    function costExpr(qty, amount) {
+      var unitCost = it.unit_cost_used;
+      if (qty == null || qty === "") return null;
+      if (unitCost == null || unitCost === "") return null;
+      return fmtQty(qty) + " 件 × " + fmtMoney(unitCost) + " = " + fmtMoney(amount);
     }
     function layer(title, hint, rows) {
       // title 左对齐(人类阅读习惯);hint 为层口径说明
@@ -1510,8 +1519,20 @@
       row("未结算", unsettledNet, "add", pnlHints.unsettled),
     ]);
     var layerCogs = layer("货本", pnlHints.cogs, [
-      row("售出件", cogsSold, "sub", pnlHints.cogs_sold),
-      row("全损取消件", cogsFlc, "sub", pnlHints.cogs_full_loss),
+      row(
+        "售出件",
+        cogsSold,
+        "sub",
+        pnlHints.cogs_sold,
+        costExpr(it.units_sold, cogsSold),
+      ),
+      row(
+        "全损取消件",
+        cogsFlc,
+        "sub",
+        pnlHints.cogs_full_loss,
+        costExpr(it.full_loss_cancelled_qty, cogsFlc),
+      ),
     ]);
     var layerAd = layer("广告消耗", pnlHints.ad_spend, [
       row("消耗", spend, "sub", pnlHints.ad_spend),
