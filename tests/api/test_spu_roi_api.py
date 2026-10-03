@@ -3985,6 +3985,34 @@ def test_spu_roi_drill_summary_matches_actual_dashboard_metrics() -> None:
         assert f'summaryHint("{sum_id}")' in summary
 
 
+def test_spu_roi_pnl_cogs_rows_show_qty_times_unit_cost() -> None:
+    """货本行必须显示「件数 × 单价 = 金额」，不能只给裸金额（2026-10-03 用户拍板）。"""
+    from pathlib import Path
+
+    js = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "spu-profitability-page.js"
+    ).read_text(encoding="utf-8")
+    pnl = js.split("function renderProfitTab", 1)[1].split(
+        "function renderDrillTabBody", 1
+    )[0]
+
+    # 表达式样式：N 件 × 单价 = 金额
+    assert '" 件 × "' in pnl
+    # 件数与单价均取后端行字段，前端只格式化不重算
+    assert "it.units_sold" in pnl
+    assert "it.unit_cost_used" in pnl
+    assert "it.full_loss_cancelled_qty" in pnl
+    # 货本两行都套用表达式
+    assert "costExpr(it.units_sold, cogsSold)" in pnl
+    assert "costExpr(it.full_loss_cancelled_qty, cogsFlc)" in pnl
+    # 缺件数/单价时回退裸金额，不显示 undefined
+    assert "fmtMoney(val)" in pnl
+
+
 def test_spu_roi_cost_and_refund_warnings_use_distinct_badges() -> None:
     """缺成本与高退款必须用可直接辨认的不同标识，不能共用 ⚠。"""
     from pathlib import Path
