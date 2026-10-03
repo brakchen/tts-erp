@@ -353,7 +353,7 @@ def list_missing_cost_products(
     Returns the table backing the manual-costs page form. The page
     polls this endpoint with the operator's bearer token.
 
-    Extended per tech-doc/procurement-ui-redesign.md §3.5: the body is
+    Extended per docs/archive/procurement-ui-redesign.md §3.5: the body is
     now an object ``{items: [...], total_missing_photo: int}``. Each
     item carries ``missing_photo`` (bool). Back-compat: existing
     consumers that ignore the wrapper and read row fields keep working

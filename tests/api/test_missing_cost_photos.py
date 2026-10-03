@@ -1,6 +1,6 @@
 """Tests for the extended ``GET /v2/reporting/missing-cost-products``.
 
-Spec (tech-doc/procurement-ui-redesign.md §3.5):
+Spec (docs/archive/procurement-ui-redesign.md §3.5):
 - Back-compat: no ``?shop_pk=`` → global view, same as today.
 - New: ``?shop_pk=X`` → scope to one shop.
 - New: each row has ``missing_photo`` (bool) and the response carries a

@@ -1,7 +1,7 @@
 """Tests for POST /v2/admin/purge-plugin-data.
 
 Verifies (2026-09-13 hardening, see
-``tech-doc/incident-reports/2026-09-13-ad-daily-purge.md``):
+``docs/ops/incident-reports/2026-09-13-ad-daily-purge.md``):
 - 401 without auth
 - 403 with readonly key (admin role required)
 - 403 against prod-shape dbnames unless ALLOW_PROD_PURGE=1

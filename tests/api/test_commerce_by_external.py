@@ -13,7 +13,7 @@ client-side, and pray there's exactly one match. This endpoint
 collapses that round-trip into one query and returns 404 cleanly when
 the row doesn't exist.
 
-Contract (mirrors :mod:`tech-doc/api/channel-accounts-by-external.md`):
+Contract (mirrors :mod:`docs/api/channel-accounts-by-external.md`):
 
 * Path: ``{shop_id}`` — upstream shop_id (string).
 * Query: ``platform`` (string, default ``"tiktok"``).
@@ -228,7 +228,7 @@ def test_openapi_description_references_spec_doc(api_client):
     op = _get_openapi_path(api_client)
     desc = op.get("description", "")
     assert desc, "description is empty"
-    assert "tech-doc/api/channel-accounts-by-external.md" in desc, (
+    assert "docs/api/channel-accounts-by-external.md" in desc, (
         "description must name the canonical spec doc so the two "
         "don't drift"
     )

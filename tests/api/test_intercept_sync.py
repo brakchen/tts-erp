@@ -546,7 +546,7 @@ def test_sync_extracts_seller_id_from_oec_seller_id_query_param(
 
     背景：Manifest V3 扩展的 webRequest.onBeforeSendHeaders 拿不到 cookie/authorization，
     但 TikTok OEC SDK (aid=6556) 在所有 JSON API URL 的 query string 里都带
-    oec_seller_id 作为客户端身份标识（见 tech-doc/tiktok-seller-center-api-catalog.md §7.3）。
+    oec_seller_id 作为客户端身份标识（见 docs/reference/tiktok-seller-center-api-catalog.md §7.3）。
     """
     body = _sync_body(
         request_id=f"TEST_req-{uuid.uuid4().hex[:8]}",

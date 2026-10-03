@@ -7,7 +7,7 @@
 仓储层在 ``tts_erp_v2/plugin/ads/repository.py``。
 ``analytics`` 仅是路由文件名和 URL 前缀层面的历史残留，不代表独立 schema。
 
-v4 protocol（tech-doc/analytics/daily-sync-with-coverage.md）：
+v4 protocol（docs/design/daily-sync-with-coverage.md）：
 - POST /dumps: daily/today 写结构化表
 - GET /coverage: 查询 daily 覆盖数据
 - POST /plugin-logs: 插件运行时日志上传
@@ -211,7 +211,7 @@ def get_coverage_endpoint(
 ) -> JSONResponse:
     """Coverage 批量查询（方案 B）：分页返回 campaign 的覆盖数据。
 
-    tech-doc/analytics/daily-sync-with-coverage.md §5.1。
+    docs/design/daily-sync-with-coverage.md §5.1。
     仅支持 kind=daily。
     响应新增 pagination 字段：{page, pageSize, totalCampaigns, totalPages, hasMore}。
     """
@@ -422,7 +422,7 @@ def post_dumps(
 ) -> JSONResponse:
     """v4 结构化 rows 写入协议。
 
-    协议契约（tech-doc/analytics/daily-sync-with-coverage.md §5）：
+    协议契约（docs/design/daily-sync-with-coverage.md §5）：
     - protocolVersion = 4
     - dump.kind ∈ {daily, today}
     - dump.rows = 结构化行数组

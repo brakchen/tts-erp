@@ -13,7 +13,7 @@
   Arbitrary currency pairs are derived locally through the snapshot's
   base as a bridge; the read API never dials the upstream.
 
-Design constraints (see tech-doc/fx-exchange-rates.md):
+Design constraints (see docs/design/fx-exchange-rates.md):
 * Upstream key lives in env (``EXCHANGERATE_API_KEY``) and is only ever
   used by the sync worker — there is NO HTTP surface for it.
 * A snapshot is unique per (base_code, upstream_last_update): a re-fetch

@@ -1,6 +1,6 @@
-"""给 tech-doc/enums/ 下含 🟡/🔴 等级值的文件，在每个"取值/实测"段末尾加 "## ⚠️ 未固化值速查" 段。
+"""给 docs/reference/enums/ 下含 🟡/🔴 等级值的文件，在每个"取值/实测"段末尾加 "## ⚠️ 未固化值速查" 段。
 
-约定见 tech-doc/enums/conventions.md §3.3。
+约定见 docs/reference/enums/conventions.md §3.3。
 """
 
 from __future__ import annotations

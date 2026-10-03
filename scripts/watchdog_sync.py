@@ -61,7 +61,7 @@ Add to the operator's crontab::
     # Watchdog: every 10 minutes, log to logs/watchdog.log
     */10 * * * * cd /home/schan/tts-erp && .venv/bin/python scripts/watchdog_sync.py >> logs/watchdog.log 2>&1
 
-Or as a systemd timer (see tech-doc/watchdog-deploy.md when written).
+Or as a systemd timer (see docs/watchdog-deploy.md when written).
 The webhook URL is configured via env::
 
     TTS_ERP_ALERT_WEBHOOK_URL=https://hooks.slack.com/services/T.../B.../...

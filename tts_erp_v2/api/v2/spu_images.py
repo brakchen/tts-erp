@@ -1,6 +1,6 @@
 """/v2/spu-images/* — SPU image upload, confirm, list, delete.
 
-Spec: tech-doc/procurement-ui-redesign.md §3.
+Spec: docs/archive/procurement-ui-redesign.md §3.
 
 Flow:
 1. Browser POSTs to ``/v2/spu-images/upload-url`` and gets a presigned

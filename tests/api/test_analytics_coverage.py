@@ -1,6 +1,6 @@
 """HTTP 契约测试：GET /v2/analytics/sync/coverage 批量覆盖查询。
 
-覆盖（tech-doc/analytics/daily-sync-with-coverage.md §8.1）：
+覆盖（docs/design/daily-sync-with-coverage.md §8.1）：
 - 空库 → coveredPeriods=[], totalCovered=0
 - 插入 ad_daily 行 → 对应日期在 coveredPeriods 中
 - monthly coverage 被拒绝

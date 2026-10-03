@@ -1,6 +1,6 @@
 """用户名+密码登录与用户会话 API 测试（/v2/auth/* + /v2/users 权限方向）。
 
-覆盖（设计 tech-doc/user-account-authz-design.md §5/§6/§7/§10）：
+覆盖（设计 docs/design/user-account-authz-design.md §5/§6/§7/§10）：
 - 登录成功/失败：统一错误文案、防用户枚举、禁用用户、登录限流 429；
 - 会话 cookie 属性：专属名 tts_erp_session、v2.* token、HttpOnly/Path/SameSite；
 - GET /v2/auth/me 会话状态；POST /v2/auth/logout 后服务端会话即时失效；

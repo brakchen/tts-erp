@@ -1,4 +1,4 @@
-"""服务端会话（设计：tech-doc/user-account-authz-design.md §5）。
+"""服务端会话（设计：docs/design/user-account-authz-design.md §5）。
 
 会话凭证 = 不透明随机 token（cookie 明文携带，``v2.<token>`` 格式），
 库里 ``security.user_sessions`` 只存 ``sha256(token)``——库泄露无法冒用会话。

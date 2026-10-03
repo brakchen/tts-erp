@@ -8,7 +8,7 @@
   intercept_sessions — 浏览器会话
   intercept_sync_cursors — 同步游标
 
-详见 tech-doc/intercept-design.md。
+详见 docs/intercept-design.md。
 """
 
 from __future__ import annotations

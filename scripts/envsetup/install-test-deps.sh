@@ -4,8 +4,8 @@
 # 目标：让 `bash scripts/test_isolated.sh ...` 在一台干净机器上能直接跑起来。
 #
 # 依据：
-#   tech-doc/agent-testing.md    测试入口与隔离机制
-#   tech-doc/commands-reference.md 命令速查
+#   docs/guides/agent-testing.md    测试入口与隔离机制
+#   docs/guides/commands-reference.md 命令速查
 #   scripts/test_isolated.sh     唯一标准测试入口（克隆 tts_erp_test_template 跑临时库）
 #
 # 用法：
@@ -22,7 +22,7 @@
 #   3 .env.test  缺失时按 .env 的连接串生成，库名固定 tts_erp_v3_test
 #   4 体检       测试库存在性（tts_erp_test_template / tts_erp_v3_test）
 #
-# 安全约束（AGENTS.md §3、tech-doc/agent-safety.md）：
+# 安全约束（AGENTS.md §3、docs/guides/agent-safety.md）：
 #   * 只装工具与测试依赖，**绝不**对任何数据库执行 DELETE/TRUNCATE/DROP/alembic。
 #   * .env.test 只会指向测试形库名（含 "test"），绝不写 tts_erp / tts_erp_prod。
 #   * 不创建、不修改任何密钥；.env 由运维提供，只读取连接串以派生测试连接串。

@@ -4,7 +4,7 @@ All SDK calls in the project go through this module — no other module
 imports ``minio`` directly. That keeps the surface narrow and makes
 unit tests trivial (patch ``tts_erp_v2.storage.minio_client.Minio``).
 
-Spec: tech-doc/procurement-ui-redesign.md §5.
+Spec: docs/archive/procurement-ui-redesign.md §5.
 
 NGINX requirement (verified 2026-09-01): the reverse proxy that
 forwards presigned URLs to MinIO must rewrite the upstream
@@ -95,7 +95,7 @@ class _Config:
     # ``endpoint`` host for this public scheme+host[:port][/path] prefix
     # — so the browser can reach MinIO via an NGINX ingress instead of
     # the LAN-only endpoint the SDK uses for server-side calls.
-    # See tech-doc/procurement-ui-redesign.md §5.
+    # See docs/archive/procurement-ui-redesign.md §5.
     public_host: str | None
 
 
@@ -152,7 +152,7 @@ def _read_config() -> _Config:
         raise MinioConfigError(
             "MinIO not configured: missing env vars "
             + ", ".join(missing)
-            + ". See tech-doc/procurement-ui-redesign.md §5."
+            + ". See docs/archive/procurement-ui-redesign.md §5."
         )
     if required["MINIO_SECURE"] not in {"true", "false"}:
         raise MinioConfigError(

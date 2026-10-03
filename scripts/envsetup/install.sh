@@ -2,8 +2,8 @@
 # scripts/envscripts/envsetup/install.sh — tts-erp v2 一键安装 / 部署脚本（幂等，可重复执行）
 #
 # 依据：
-#   setup/tts-erp.md         部署流程、systemd 托管、端口、健康检查、故障排查
-#   setup/analytics-sync.md  进程管理、token 签发、错误契约
+#   docs/ops/tts-erp.md         部署流程、systemd 托管、端口、健康检查、故障排查
+#   docs/ops/analytics-sync.md  进程管理、token 签发、错误契约
 #   README.md                本地环境与启动（venv + pip install -e .）
 #
 # 用法：
@@ -25,7 +25,7 @@
 #   9 健康检查   GET /healthz 必须返回 service=tts-erp-v2
 #  10 摘要       端口 / URL / 日志 / 常用命令
 #
-# 安全约束（AGENTS.md §3、tech-doc/agent-safety.md）：
+# 安全约束（AGENTS.md §3、docs/guides/agent-safety.md）：
 #   * 生产形态库（tts_erp / tts_erp_prod / tts_erp_prod_*）上的
 #     `alembic upgrade head` 属人工操作：非交互模式下必须显式传
 #     --migrate 才会执行；执行时仅对本次 alembic 子进程设置
@@ -87,7 +87,7 @@ usage() {
 说明:
   脚本幂等，可反复执行；已满足的步骤会跳过。完成后应看到
   /healthz 返回 {"status":"ok","service":"tts-erp-v2",...}。
-  详细部署文档: setup/tts-erp.md
+  详细部署文档: docs/ops/tts-erp.md
 EOF
 }
 
@@ -366,7 +366,7 @@ run_migration() {
   fi
   if (( PROD_DB )); then
     ALLOW_PROD_DESTRUCTIVE=1 "$REPO/.venv/bin/alembic" upgrade head \
-      || die "alembic upgrade head 失败（查看上方 alembic 输出；回滚/排查见 tech-doc/agent-safety.md）"
+      || die "alembic upgrade head 失败（查看上方 alembic 输出；回滚/排查见 docs/guides/agent-safety.md）"
   else
     "$REPO/.venv/bin/alembic" upgrade head || die "alembic upgrade head 失败"
   fi
@@ -456,7 +456,7 @@ else
   fi
   if ! printf '%s' "$HEALTHZ_BODY" | grep -Eq '"service"[[:space:]]*:[[:space:]]*"tts-erp-v2"'; then
     err "健康检查返回的不是 v2 服务：$HEALTHZ_BODY"
-    err "若只有 {\"status\":\"ok\"}，说明跑的是 v1 旧 tts_erp.py —— 见 setup/tts-erp.md"
+    err "若只有 {\"status\":\"ok\"}，说明跑的是 v1 旧 tts_erp.py —— 见 docs/ops/tts-erp.md"
     exit 1
   fi
   ok "healthz: $HEALTHZ_BODY"
@@ -491,5 +491,5 @@ info "analytics ingest（Chrome 扩展）签发 token："
 info "  $REPO/.venv/bin/python $REPO/api_keys.py create --role readwrite --name chrome-ext-prod --expires-days 365"
 info "  （plaintext 只打印一次；多店铺用 --scopes \"seller:<shop-id>\"）"
 echo
-info "故障排查速查表：setup/tts-erp.md ｜ 部署契约：tech-doc/external-api.md"
+info "故障排查速查表：docs/ops/tts-erp.md ｜ 部署契约：docs/api/external-api.md"
 ok "安装完成"

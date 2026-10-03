@@ -1,6 +1,6 @@
 """HTTP 契约测试：POST /v2/analytics/sync/dumps protocol v4。
 
-覆盖（tech-doc/analytics/daily-sync-with-coverage.md §8.1）：
+覆盖（docs/design/daily-sync-with-coverage.md §8.1）：
 - v4 daily 写入 ad_daily + ad_raw_log
 - v4 today 写入 ad_today（覆盖）
 - monthly dump 被拒绝

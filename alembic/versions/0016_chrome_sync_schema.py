@@ -13,7 +13,7 @@ Chrome 扩展从 TikTok Seller Center 抓取订单/物流/结算 HTTP 响应，
 - shipments / tracking_events：物流包裹 + 轨迹事件
 - settlements / settlement_details：结算单头 + SKU 级结算明细
 
-详见 tech-doc/chrome-ext-order-sync-design.md。
+详见 docs/archive/chrome-ext-order-sync-design.md。
 """
 
 from __future__ import annotations

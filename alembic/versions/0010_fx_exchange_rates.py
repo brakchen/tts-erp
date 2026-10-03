@@ -17,7 +17,7 @@ Create Date: 2026-09-06
   ``rate`` = 1 单位 base_code 兑 target_code（Numeric(20,8)）。任意币对
   换算走本地（以快照 base 为桥做除法），不调 pair endpoint。
 
-设计/配额预算/运维见 tech-doc/fx-exchange-rates.md。API key 只在
+设计/配额预算/运维见 docs/design/fx-exchange-rates.md。API key 只在
 sync-worker 环境（.env ``EXCHANGERATE_API_KEY``），无任何 HTTP 面。
 
 updated_at 触发器命名沿用 ``trg_<schema>_<table>_touch`` 约定

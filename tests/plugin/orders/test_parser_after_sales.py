@@ -1,7 +1,7 @@
 """plugin.after_sales + after_sale_items 解析器测试。
 
 lane feat/after-sales-table (2026-09-13)：response 结构基于
-tech-doc/order-domain-business-rules.md §3 描述（无 chrome 端真实样本，
+docs/business/order-domain-business-rules.md §3 描述（无 chrome 端真实样本，
 0 hit 数据），用 mock response 跑 upsert 路径覆盖。
 """
 

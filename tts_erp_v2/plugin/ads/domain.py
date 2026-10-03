@@ -2,7 +2,7 @@
 
 纯领域层 —— 无 I/O、无框架、无 DB。定义流经本服务的全部值对象形状。
 
-2026-09-10 daily-sync-with-coverage（tech-doc/analytics/daily-sync-with-coverage.md）：
+2026-09-10 daily-sync-with-coverage（docs/design/daily-sync-with-coverage.md）：
 - v4 协议仅支持 daily/today 粒度。
 - daily/today 写结构化表并提供 coverage。
 """

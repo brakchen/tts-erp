@@ -4,7 +4,7 @@ Revision ID: 0014_ad_product_links_range
 Revises: 0013_ad_sync_audit
 Create Date: 2026-09-07
 
-语义（tech-doc/analytics/range-aggregate-history-sync.md §7/§8，Design A D-7）：
+语义（docs/archive/range-aggregate-history-sync.md §7/§8，Design A D-7）：
 
 - 每个 (scope, endpoint, campaign) 的 live 行（kind history/today）是权威累计快照：
   history [S..T-1] 整段聚合 + today [T..T] 30s 快照（today 仅当

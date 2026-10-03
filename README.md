@@ -77,8 +77,8 @@ TikTok job 按已授权店铺扇出；进入 job runner 的每店运行状态记
 六域 dispatch、payload 解释、savepoint、业务落库、health 记录和 commit/rollback 顺序；HTTP
 adapter 只处理 wire schema 和响应 envelope。
 
-协议详情见 [`tech-doc/dumps-data-contract.md`](tech-doc/dumps-data-contract.md) 和
-[`tech-doc/order-dump-intake-module.md`](tech-doc/order-dump-intake-module.md)。
+协议详情见 [`docs/api/dumps-data-contract.md`](docs/api/dumps-data-contract.md) 和
+[`docs/design/order-dump-intake-module.md`](docs/design/order-dump-intake-module.md)。
 
 ### 3. SPU 盈利分析
 
@@ -91,7 +91,7 @@ explain_spu(session, *, scope, spu_pk, evidence) -> SpuProfitExplanation
 
 关键约束：
 
-- 业务口径以 [`biz-doc/analytics/spu-roi-profit-calculation.md`](biz-doc/analytics/spu-roi-profit-calculation.md) v10 为准；
+- 业务口径以 [`docs/business/spu-profitability.md`](docs/business/spu-profitability.md) v10 为准；
 - 同一请求的明细、大盘、证据和汇率使用同一个只读一致快照；
 - 汇率只读数据库快照，缺失时整页返回 `503 FX_RATE_UNAVAILABLE`；
 - 成本优先级为 **人工价 > 妙手货源价 > 40 CNY/件兜底**；
@@ -99,7 +99,7 @@ explain_spu(session, *, scope, spu_pk, evidence) -> SpuProfitExplanation
 - `reporting.product_profit_daily` 是旧版粗略毛利快照，不是 SPU 盈利真相源。
 
 详细决策见
-[`tech-doc/analytics/spu-profitability-module-decisions.md`](tech-doc/analytics/spu-profitability-module-decisions.md)。
+[`docs/design/spu-profitability-module.md`](docs/design/spu-profitability-module.md)。
 
 ## 主要 module 与 interface
 
@@ -114,15 +114,15 @@ explain_spu(session, *, scope, spu_pk, evidence) -> SpuProfitExplanation
 
 架构设计见：
 
-- [`tech-doc/access-policy-module.md`](tech-doc/access-policy-module.md)
-- [`tech-doc/access-policy-implementation-review.md`](tech-doc/access-policy-implementation-review.md)
-- [`tech-doc/order-dump-intake-module.md`](tech-doc/order-dump-intake-module.md)
-- [`tech-doc/architecture-overview.md`](tech-doc/architecture-overview.md)
+- [`docs/design/access-policy-module.md`](docs/design/access-policy-module.md)
+- [`docs/archive/access-policy-implementation-review.md`](docs/archive/access-policy-implementation-review.md)
+- [`docs/design/order-dump-intake-module.md`](docs/design/order-dump-intake-module.md)
+- [`docs/architecture/architecture-overview.md`](docs/architecture/architecture-overview.md)
 
 ## HTTP 接口
 
 所有稳定业务接口使用 `/v2`。完整活契约见
-[`tech-doc/external-api.md`](tech-doc/external-api.md)，运行实例可查询 `GET /endpoints`。
+[`docs/api/external-api.md`](docs/api/external-api.md)，运行实例可查询 `GET /endpoints`。
 
 | 前缀 | 用途 |
 | --- | --- |
@@ -216,9 +216,9 @@ access module 同时兼容代理保留或剥离前缀的请求，并让 Auth 与
 
 更多细节：
 
-- [`tech-doc/external-api.md`](tech-doc/external-api.md#authentication)
-- [`tech-doc/browser-login-design.md`](tech-doc/browser-login-design.md)
-- [`tech-doc/access-policy-module.md`](tech-doc/access-policy-module.md)
+- [`docs/api/external-api.md`](docs/api/external-api.md#authentication)
+- [`docs/archive/browser-login-design.md`](docs/archive/browser-login-design.md)
+- [`docs/design/access-policy-module.md`](docs/design/access-policy-module.md)
 
 ## 本地环境与启动
 
@@ -243,7 +243,7 @@ curl -sS http://127.0.0.1:9877/healthz | jq
 # {"status":"ok","service":"tts-erp-v2","auth_mode":"enforce"}
 ```
 
-完整部署说明见 [`setup/tts-erp.md`](setup/tts-erp.md)。数据库 migration 的生产执行由人工运维
+完整部署说明见 [`docs/ops/tts-erp.md`](docs/ops/tts-erp.md)。数据库 migration 的生产执行由人工运维
 完成；agent 只能在 `tts_erp_v3_test` 验证 migration。
 
 ## 测试
@@ -275,7 +275,7 @@ bash scripts/test.sh unit
 - 测试数据使用 `TEST_` 前缀；
 - 共享测试库运行通过 `/tmp/tts-erp-test.lock` 串行化。
 
-详见 [`tech-doc/agent-testing.md`](tech-doc/agent-testing.md)。
+详见 [`docs/guides/agent-testing.md`](docs/guides/agent-testing.md)。
 
 ## 运维
 
@@ -318,10 +318,8 @@ tts_erp_v2/
 
 tests/                       # 按业务域和 layer 标记的测试
 scripts/                     # 运维、探针、一次性和测试入口
-tech-doc/                    # 技术契约、ADR、架构和运维文档
-biz-doc/                     # 业务口径
-setup/                       # 人工部署文档
-handoff/ACTIVE.md            # 当前 lane 文件所有权
+docs/                       # 全部专题文档（business/api/reference/architecture/design/plans/guides/ops/handoff/archive）
+└── docs/handoff/ACTIVE.md  # 当前 lane 文件所有权
 ```
 
 ## 重要边界
@@ -331,7 +329,7 @@ handoff/ACTIVE.md            # 当前 lane 文件所有权
 - 妙手采购单同步与相关表已由 migration 0046 退役；成本只使用人工价和 SOURCE_PRICE 估算。
 - v1 `/orders/*`、`/finance/*`、`/db/*`、`/sync/*` 等路由已删除。
 - TikTok signing 必须保持 `shop_cipher` query、排序签名键和原始 JSON body 语义；见
-  [`tech-doc/tiktok-hmac-signing.md`](tech-doc/tiktok-hmac-signing.md)。
+  [`docs/reference/tiktok-hmac-signing.md`](docs/reference/tiktok-hmac-signing.md)。
 - 凭证只能通过 `tts_erp_v2.proxy.token_service`，禁止直接解密 `integration.credentials`。
 - destructive HTTP/CLI/migration/job 必须使用 `tts_erp_v2.api.deps` 的对应共享 guard。
 
@@ -340,16 +338,16 @@ handoff/ACTIVE.md            # 当前 lane 文件所有权
 | 文档 | 内容 |
 | --- | --- |
 | [`AGENTS.md`](AGENTS.md) | 仓库安全边界、命令和 agent 工作流 |
-| [`tech-doc/architecture-overview.md`](tech-doc/architecture-overview.md) | 系统、数据和凭证架构 |
-| [`tech-doc/process-architecture.md`](tech-doc/process-architecture.md) | 进程与目录地图 |
-| [`tech-doc/external-api.md`](tech-doc/external-api.md) | 外部 API 活契约与角色矩阵 |
-| [`tech-doc/dumps-data-contract.md`](tech-doc/dumps-data-contract.md) | Chrome dump wire/HTTP 契约 |
-| [`tech-doc/access-policy-module.md`](tech-doc/access-policy-module.md) | 访问策略深模块设计与实现 |
-| [`tech-doc/order-dump-intake-module.md`](tech-doc/order-dump-intake-module.md) | 订单 dump intake 设计 |
-| [`biz-doc/analytics/spu-roi-profit-calculation.md`](biz-doc/analytics/spu-roi-profit-calculation.md) | SPU 盈利 v10 业务公式 |
-| [`tech-doc/fx-exchange-rates.md`](tech-doc/fx-exchange-rates.md) | 汇率快照与同步 |
-| [`tech-doc/miaoshou-platform.md`](tech-doc/miaoshou-platform.md) | 妙手 SDK 与数据语义 |
-| [`tech-doc/agent-safety.md`](tech-doc/agent-safety.md) | 数据库、凭证、生产与 destructive guard |
+| [`docs/architecture/architecture-overview.md`](docs/architecture/architecture-overview.md) | 系统、数据和凭证架构 |
+| [`docs/architecture/process-architecture.md`](docs/architecture/process-architecture.md) | 进程与目录地图 |
+| [`docs/api/external-api.md`](docs/api/external-api.md) | 外部 API 活契约与角色矩阵 |
+| [`docs/api/dumps-data-contract.md`](docs/api/dumps-data-contract.md) | Chrome dump wire/HTTP 契约 |
+| [`docs/design/access-policy-module.md`](docs/design/access-policy-module.md) | 访问策略深模块设计与实现 |
+| [`docs/design/order-dump-intake-module.md`](docs/design/order-dump-intake-module.md) | 订单 dump intake 设计 |
+| [`docs/business/spu-profitability.md`](docs/business/spu-profitability.md) | SPU 盈利 v10 业务公式 |
+| [`docs/design/fx-exchange-rates.md`](docs/design/fx-exchange-rates.md) | 汇率快照与同步 |
+| [`docs/reference/miaoshou-platform.md`](docs/reference/miaoshou-platform.md) | 妙手 SDK 与数据语义 |
+| [`docs/guides/agent-safety.md`](docs/guides/agent-safety.md) | 数据库、凭证、生产与 destructive guard |
 | [`CHANGELOG.md`](./CHANGELOG.md) | 历史变更 |
 
 ## License

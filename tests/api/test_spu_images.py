@@ -1,6 +1,6 @@
 """Integration tests for ``tts_erp_v2/api/v2/spu_images.py``.
 
-The router has 4 endpoints (per tech-doc/procurement-ui-redesign.md §3):
+The router has 4 endpoints (per docs/archive/procurement-ui-redesign.md §3):
 
 - ``POST /v2/spu-images/upload-url``   → readwrite  → 201 + presigned PUT URL
 - ``POST /v2/spu-images/{id}/confirm``  → readwrite  → 200 + presigned GET URL

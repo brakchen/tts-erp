@@ -5,7 +5,7 @@
 - POST /dumps: wire adapter → order dump intake deep module
 - POST /reconcile: 统一返回订单锚点与物流增量候选
 
-详见 tech-doc/chrome-ext-order-sync-design.md。
+详见 docs/archive/chrome-ext-order-sync-design.md。
 """
 
 from __future__ import annotations

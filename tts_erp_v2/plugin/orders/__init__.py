@@ -2,5 +2,5 @@
 
 Public intake seam: :mod:`tts_erp_v2.plugin.orders.intake`.
 Payload parsers and PostgreSQL upserts are hidden implementation dependencies.
-See ``tech-doc/order-dump-intake-module.md``.
+See ``docs/design/order-dump-intake-module.md``.
 """

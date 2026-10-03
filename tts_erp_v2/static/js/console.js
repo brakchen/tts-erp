@@ -2,7 +2,7 @@
    No frameworks. Plain DOM + fetch. Wired from /v2/pages/manual-costs.
    Styling: Bootstrap 5 classes only — no custom stylesheet (2026-08-31).
    Strings: 中文界面 (2026-08-31).
-   See tech-doc/procurement-ui-redesign.md §6 for the contract. */
+   See docs/archive/procurement-ui-redesign.md §6 for the contract. */
 
 (() => {
   // ---------- constants ----------

@@ -234,7 +234,7 @@ def test_products_parse_failure_writes_sync_issue(db_session) -> None:
 # detail endpoint (/product/202309/products/{product_id}) does, via
 # `main_images[].urls[]` (SPU) and `skus[].sales_attributes[].sku_img.urls[]`
 # (per-SKU). sync job has to call Get Product per SPU to populate
-# main_image_url / image_url. See tech-doc/adr/… for the full decision.
+# main_image_url / image_url. See docs/architecture/adr/… for the full decision.
 
 
 def test_parse_product_extracts_main_image_url_from_main_images() -> None:

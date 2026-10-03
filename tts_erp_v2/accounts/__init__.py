@@ -1,4 +1,4 @@
-"""用户账号与页面权限体系（设计：tech-doc/user-account-authz-design.md）。
+"""用户账号与页面权限体系（设计：docs/design/user-account-authz-design.md）。
 
 - ``models``    security.* 六表 ORM
 - ``pages``     页面权限点注册表（侧边栏/种子/角色表单同源）

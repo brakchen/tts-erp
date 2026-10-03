@@ -2,7 +2,7 @@
 
 移植自 tests/api/test_analytics_sync_errors.py（/v1 路径 +
 analytics_sync 孤岛包），2026-09-02 随 v2 化改写
-（tech-doc/analytics-v2-migration-plan.md Phase 3）：
+（docs/analytics-v2-migration-plan.md Phase 3）：
 
 - 路径 /v1/analytics/sync/* → /v2/analytics/sync/*
 - monkeypatch 目标 analytics_sync.app → tts_erp_v2.api.v2.analytics
@@ -18,7 +18,7 @@ analytics_sync 孤岛包），2026-09-02 随 v2 化改写
 4. 审计（迁移后=文件日志）：拒绝路径也走 ``tts_erp_v2.analytics.ingest``
    logger 单行 key=value，message 与 stderr 同一份 ≤500 字符消毒载荷。
 
-2026-09-05 reorg（tech-doc/analytics/reorg-plan.md 决策 #4）：
+2026-09-05 reorg（docs/archive/reorg-plan.md 决策 #4）：
 - 删 ``analytics.ad_audit_log``（DB 表）,审计职责迁出,改 logger
   ``tts_erp_v2.analytics.ingest`` 单行日志。
 - 原 ``_cleanup_audit_rows`` fixture（DELETE FROM ad_audit_log）已删:

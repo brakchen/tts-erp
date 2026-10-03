@@ -517,7 +517,7 @@ class _SpuProfitabilityPageConfig:
 
 @router.get("/spu-roi", response_class=HTMLResponse)
 def spu_roi_page() -> HTMLResponse:
-  """SPU 实际 ROI 看板(账页式,§7 of tech-doc/analytics/spu-real-roi-dashboard.md)。
+  """SPU 实际 ROI 看板(账页式,§7 of docs/archive/spu-real-roi-dashboard.md)。
 
   HTML shell 只做骨架:标题/结余带/工具栏/表格容器/分页;数据与业务计算
   全部消费 GET /v2/analytics/spu-roi(只读,§5.1-1 页面不计算业务数字)。
@@ -570,14 +570,14 @@ def manual_costs_page() -> HTMLResponse:
 
 # Marker for the legacy token-paste UI — kept as a comment so future
 # agents know NOT to reintroduce it. The page now relies on session-cookie
-# auth (see tech-doc/browser-login-design.md).
+# auth (see docs/archive/browser-login-design.md).
 #
 # NOT TO ADD BACK: <details>API token (paste once; stored in localStorage)</details>
 
 
 
 
-# SPU 实际 ROI 看板(账页式)HTML shell — 结构见 tech-doc/analytics/spu-real-roi-dashboard.md §7。
+# SPU 实际 ROI 看板(账页式)HTML shell — 结构见 docs/archive/spu-real-roi-dashboard.md §7。
 # 只读:JS 消费 GET /v2/analytics/spu-roi;业务数字全在服务端算好(§5.1-1)。
 # 页面布局 2026-09-29 统一到 Bootstrap 5.3.8(自托管 static/vendor/bootstrap.min.css):
 #   - 页头、结余分组、工具栏、分页、页脚均由 container/row/col 与断点工具类驱动；

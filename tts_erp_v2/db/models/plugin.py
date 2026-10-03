@@ -15,7 +15,7 @@
 （不再写原始 dump body，2026-09-17 chore/deprecate-plugin-raw-log
 Phase 3 移除 plugin.raw_log 表）。
 
-详见 tech-doc/chrome-ext-order-sync-design.md。
+详见 docs/archive/chrome-ext-order-sync-design.md。
 """
 
 from __future__ import annotations
@@ -281,7 +281,7 @@ class ChromeSettlementDetail(Base):
 
 # ── after_sales ─────────────────────────────────────────────────────
 # 售后/退款结构化数据，来自 /return_refund/202309/cancellations/search。
-# tech-doc/order-domain-business-rules.md §3 + tech-doc/dumps-data-contract.md §1 / §3
+# docs/business/order-domain-business-rules.md §3 + docs/api/dumps-data-contract.md §1 / §3
 class ChromeAfterSale(Base):
     __tablename__ = "after_sales"
     __table_args__ = (
@@ -474,7 +474,7 @@ class ChromeOrderTimeline(Base):
 # ad_today ────────────────────────────────────────────────────────────
 # 今天实时表（30s ON CONFLICT DO UPDATE 刷新，跨天固化到 ad_daily 后清空）。
 # 结构和 ad_daily 完全一致，唯一区别是用途（实时 vs 历史可校准）。
-# tech-doc/analytics/daily-sync-with-coverage.md §1.1
+# docs/design/daily-sync-with-coverage.md §1.1
 class AdToday(Base):
     __tablename__ = "ad_today"
     __table_args__ = (
@@ -527,7 +527,7 @@ class AdToday(Base):
 
 # ad_daily ────────────────────────────────────────────────────────────
 # 天级结构化表（历史数据按自然键 upsert，允许 TikTok 延迟归因后的校准）。
-# tech-doc/analytics/daily-sync-with-coverage.md §1.2
+# docs/design/daily-sync-with-coverage.md §1.2
 class AdDaily(Base):
     __tablename__ = "ad_daily"
     __table_args__ = (
@@ -582,7 +582,7 @@ class AdDaily(Base):
 # ad_raw_log ──────────────────────────────────────────────────────────
 # 原始请求日志（kind CHECK: daily/today）。纯日志表，不参与业务查询。
 # 保留原始 request/response 用于调试、审计、数据恢复；建议 retention 90 天自动清理。
-# tech-doc/analytics/daily-sync-with-coverage.md §1.4
+# docs/design/daily-sync-with-coverage.md §1.4
 class AdRawLog(Base):
     __tablename__ = "ad_raw_log"
     __table_args__ = (

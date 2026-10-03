@@ -77,7 +77,7 @@ if _db_url.startswith("postgresql://") and "+psycopg" not in _db_url:
 # ── Prod-shape destructive guard (2026-09-13) ──────────────────────
 # ``alembic upgrade head`` is intrinsically destructive (it applies
 # schema migrations that may include ``op.drop_table`` / ``DROP COLUMN``
-# etc. — see audit in tech-doc/incident-reports/2026-09-13-ad-daily-purge.md).
+# etc. — see audit in docs/ops/incident-reports/2026-09-13-ad-daily-purge.md).
 # Refuse to run on prod-shape dbnames unless the operator sets
 # ``ALLOW_PROD_DESTRUCTIVE=1`` explicitly. ``alembic upgrade --sql``
 # is exempt (it only emits SQL, never executes it) so we detect it

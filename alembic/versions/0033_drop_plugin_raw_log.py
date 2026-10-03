@@ -39,7 +39,7 @@
   豁免注释
 - ``scripts/oneoff_backfill_plugin_order_times.py``：**整文件删除**（Phase 1
   之前 9d8ad11 已跑完回填，Phase 3 后历史 raw_log 数据也没了，脚本无意义）
-- ``tech-doc/intercept-plugin-canonical.md``：§5 Phase 3 状态标 done
+- ``docs/api/dumps-data-contract.md``：§5 Phase 3 状态标 done
 
 downgrade：**不可逆**——``raise NotImplementedError``。理由：
 - DROP COLUMN 永久丢失 log_id 历史数据（prod 现存 1,456 orders + 1,493

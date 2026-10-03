@@ -1,6 +1,6 @@
 """analytics: 新建 ad_today / ad_daily / ad_monthly / ad_raw_log 四表
 
-技术方案：tech-doc/analytics/daily-sync-with-coverage.md §1
+技术方案：docs/design/daily-sync-with-coverage.md §1
 - ad_today：今天实时表（30s ON CONFLICT DO UPDATE 刷新）
 - ad_daily：天级结构化表（历史数据 ON CONFLICT DO NOTHING，不可变）
 - ad_monthly：月级结构化表（独立同步，不依赖 daily）

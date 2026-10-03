@@ -28,7 +28,7 @@ Create Date: 2026-09-05
   缺失/脏值按 NULL 处理（SUM 忽略），修复前 schema（仅 product_id）的旧行
   仍保留关联但业绩为 0
 
-语义/口径详见 biz-doc/analytics/ad-product-links-view.md。
+语义/口径详见 docs/archive/ad-product-links-view.md。
 """
 
 from __future__ import annotations

@@ -1,8 +1,8 @@
 """HTTP 契约测试：/v2/analytics/sync/* — analytics ingest 的 v4 契约。
 
-背景：dump architecture 重构（tech-doc/analytics/dump-architecture.md）→
+背景：dump architecture 重构（docs/archive/dump-architecture.md）→
 2026-09-05 reorg → v4 结构化 rows 协议
-（tech-doc/analytics/daily-sync-with-coverage.md）。
+（docs/design/daily-sync-with-coverage.md）。
 
 本文件只锁**传输层/路由层**契约（持久化语义见 ``test_analytics_dumps_v4.py``，
 coverage 语义见 ``test_analytics_coverage.py``）：

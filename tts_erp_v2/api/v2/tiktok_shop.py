@@ -112,7 +112,7 @@ def _map_proxy_error(exc: ProxyError) -> HTTPException:
     "/products/{product_id}",
     summary="Get one product's full details from TikTok Shop",
     description=(
-        "**Single-source spec:** `tech-doc/api/tiktok-shop-get-product.md`. "
+        "**Single-source spec:** `docs/api/tiktok-shop-get-product.md`. "
         "If this string disagrees with that file, the file wins.\n\n"
         "Live read-through to TikTok Shop Partner API's\n"
         "`GET /product/202309/products/{product_id}` — no DB caching. "
@@ -203,7 +203,7 @@ def get_product(
 ) -> dict[str, Any]:
     """Fetch one product's full details from TikTok Shop.
 
-    Full contract: see `tech-doc/api/tiktok-shop-get-product.md`.
+    Full contract: see `docs/api/tiktok-shop-get-product.md`.
     """
     try:
         return products_api.get_product(

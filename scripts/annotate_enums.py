@@ -1,4 +1,4 @@
-"""给 tech-doc/enums/ 下每个枚举文件的"取值"表加"等级"列。
+"""给 docs/reference/enums/ 下每个枚举文件的"取值"表加"等级"列。
 
 知识库：本文件顶部的 PER_FILE_STATUS dict 定义每个文件的每个值的等级。
 运行：python scripts/annotate_enums.py [--dry-run]  [--files <globs>]

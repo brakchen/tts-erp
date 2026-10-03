@@ -4,7 +4,7 @@ Revision ID: 0004_analytics_ad_schema
 Revises: 0003_manual_costs_one_open
 Create Date: 2026-09-02
 
-analytics_sync v2 化（tech-doc/analytics-v2-migration-plan.md）：
+analytics_sync v2 化（docs/analytics-v2-migration-plan.md）：
 
 - 老库路径：public.analytics_* 6 表已存在（v1 时代由 analytics_sync/schema.sql
   双轨维护）→ ``ALTER TABLE ... SET SCHEMA analytics`` + ``RENAME TO ad_*``。

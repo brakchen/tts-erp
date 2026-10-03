@@ -1,6 +1,6 @@
 """密码策略与 argon2id 校验（tts_erp_v2/accounts/passwords.py）。
 
-策略契约（tech-doc/user-account-authz-design.md §8）：
+策略契约（docs/design/user-account-authz-design.md §8）：
 长度 ≥ 6 且 ≤ 128，必须同时含大写字母、小写字母、数字；不强制特殊字符。
 哈希：argon2id PHC 串；verify 失败一律 fail closed。
 """

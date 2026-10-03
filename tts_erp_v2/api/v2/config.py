@@ -4,7 +4,7 @@ GET    /v2/config/enum-map     — 一次性返回全量映射（readonly）
 PUT    /v2/config/enum-map     — 新增/更新单条映射（admin）
 DELETE /v2/config/enum-map/{id} — 删除单条映射（admin）
 
-详见 tech-doc/spu-roi-enum-translation-plan.md。
+详见 docs/design/spu-roi-enum-translation-plan.md。
 """
 
 from __future__ import annotations

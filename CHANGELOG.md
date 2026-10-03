@@ -1,5 +1,30 @@
 # tts-erp CHANGELOG
 
+## 2026-10-03 — 文档统一收敛到 `docs/`，口径文档唯一化
+
+- **顶层 `tech-doc/`、`biz-doc/`、`setup/`、`handoff/` 四个目录全部撤销**，存量文档
+  `git mv` 进 `docs/` 子目录（保留历史）：`business/`（口径与业务语义）、`api/`（端点/协议契约）、
+  `reference/`（枚举/目录手册）、`architecture/`（架构/数据模型/ADR）、`design/`（已落地方案）、
+  `plans/`（待实施提案）、`guides/`（流程/排障）、`ops/`（部署/运维/事故）、`handoff/`（lane 登记）、
+  `archive/`（归档）。目录职责与旧→新映射见 `docs/README.md`。
+- **口径计算类文档唯一化**：盈利/ROI/费率口径合并为唯一事实文档
+  `docs/business/spu-profitability.md`（v10）。`biz-doc/analytics/spu-roi-data-sources.md`
+  并入附录 A；`tech-doc/analytics/shop-fee-rate-definition-gap.md` 的定案结论与反证并入附录 B；
+  `roi-calc-prompt.md` 的避坑/复核清单并入附录 C；旧 M1–M19 码对照（含 M17 含 fee_est 的
+  废弃公式）并入附录 D。其余口径旧文档（含 `spu-real-roi-dashboard.md`、v7/v8 方案、
+  `spu-roi-full-loss-rubric.md`）移入 `docs/archive/`，并在 `docs/archive/README.md` 逐条记录归档原因。
+  `tech-doc/analytics/spu-profitability-module-decisions.md` 裁掉口径复述后保留为
+  `docs/design/spu-profitability-module.md`（只含接口与实现决策）。
+- **过时/错误引导内容归档**：v3 区间聚合系列、已实施完成的方案、评审过程记录、被取代的设计稿
+  等 20+ 篇进 `docs/archive/`（含原 `tech-doc/_archive/` 平铺迁入）；归档区 README 明确
+  “归档 ≠ 删除，不得作为当前依据”，冻结代码（migrate-v1-to-v2、sync-cron-legacy）禁止执行。
+- **全仓引用同步改写**：`AGENTS.md`（§9 指向表）、`README.md`、`tests/`、`alembic/`、`scripts/`、
+  `tts_erp_v2/` 中的旧路径字符串与 Markdown 链接全部改写到新位置（断链复查通过）；已删除的
+  `intercept-plugin-canonical.md` 引用统一指向 `docs/api/dumps-data-contract.md`。
+  `CONTEXT.md` → `docs/business/domain-language.md`；`handoff.md` / `SYNC_CRON_LEGACY.md` /
+  `scripts/MIGRATE_V1_TO_V2_ARCHIVED.md` 进 `docs/archive/`。
+- 纯文档/路径字符串改动，不改任何运行时行为；测试入口不变（`bash scripts/test_isolated.sh fast`）。
+
 ## 2026-10-03 — 环境准备/安装脚本归置到 `scripts/envsetup/`
 
 - 新建 `scripts/envsetup/` 作为**环境准备 / 安装类脚本**的统一归置目录，
@@ -17,8 +42,8 @@
 
 - **`scripts/test_isolated.sh` 定为唯一标准测试入口**；直接调 `scripts/test.sh`
   的 shared-DB 回退路径**已弃用**（不克隆临时库、直写常驻 `tts_erp_v3_test`，
-  并发时互删 `TEST_` 行）。`AGENTS.md` / `tech-doc/agent-testing.md` /
-  `tech-doc/commands-reference.md` 已同步。
+  并发时互删 `TEST_` 行）。`AGENTS.md` / `docs/guides/agent-testing.md` /
+  `docs/guides/commands-reference.md` 已同步。
 - **新建 worktree 必须补 `.env` 只读副本**（`cp ../../.env .env && chmod u-w .env`）。
   `tests/conftest.py::_load_env()` 读的是 worktree 根目录的 `.env`；缺失时
   `TTS_ERP_FERNET_KEY` / `TIKTOK_SERVICE_ID` 等配置不会加载，会表现为
@@ -40,7 +65,7 @@
   `runtime-configs.css` 的 `--rc-*` 命名空间、`sync-jobs.css` 的重复 `:root` 一并去掉；
   `spu-roi.css` 的 `--bs-*` Bootstrap 桥接保留（功能性）。
 - surface 色用 `color-mix()` 从规范令牌派生，不再新增并行色板。
-- 详见 `tech-doc/ui-style-system.md`（令牌表、组件规范值取舍、页面接入 checklist）。
+- 详见 `docs/design/ui-style-system.md`（令牌表、组件规范值取舍、页面接入 checklist）。
 ## 2026-10-02 — 广告日明细页接入全局侧边栏
 
 - 广告日明细页此前用独立 HTML 壳渲染，是全站唯一没有共享侧边栏（主导航）
@@ -76,7 +101,7 @@
 
 - migration `0044_drop_linkage_schema` 删除 6 张 linkage 表和
   `effective_product_links` view；生产归档与人工执行顺序见
-  `tech-doc/linkage-retirement.md`。
+  `docs/architecture/linkage-retirement.md`。
 - 下线全部 `/v2/linkage/*` API、ORM、计算代码和关联枚举。
 - 妙手 move-collect 保留 `integration.raw_records` 原始审计；不再写死端 evidence。
 - 报表采购成本改用 `products_spu.spu_id = procurement_products.external_product_id`
@@ -103,7 +128,7 @@ rubric 头部本就以 biz-doc 为基准文档，方向不变——权威指向�
 
 `spu-roi-profit-calculation.md`：删除 §六版本历史表 + §七实测验证点——旧版规则/数字与
 时点快照（655 件、−$1,230.45 等）和当前口径并排出现，其他 agent 取数时可能抓错行。
-内容无丢失：版本历史与实测数字本就在 `handoff/spu-roi-full-loss-rubric.md` 有副本；
+内容无丢失：版本历史与实测数字本就在 `docs/archive/spu-roi-full-loss-rubric.md` 有副本；
 唯二缺口的 95.4% 已结算比例 / 35.9% 实测扣费已补进 rubric 参数表（标注时点快照）。
 原文档 §六改为文档关系节，新增指针说明。
 
@@ -126,13 +151,13 @@ v9 口径整体，不存在子口径」；去掉节级「（v9 口径）」「�
 
 ## 2026-09-15 — biz-doc 术语改名：单位成本 → 采购成本（单价）
 
-`biz-doc/analytics/spu-roi-profit-calculation.md`：「单位成本」改名「采购成本（单价）」；
+`docs/business/spu-profitability.md`：「单位成本」改名「采购成本（单价）」；
 原指合计金额的「采购成本」改名「采购成本合计」消歧（净利润公式减项同步更新）。
 纯术语改动，口径与公式数值不变。
 
 ## 2026-09-15 — biz-doc 拆分：利润口径（纯概念）与数据源映射分离
 
-**问题**：`biz-doc/analytics/spu-roi-profit-calculation.md` 混杂了两层内容——
+**问题**：`docs/business/spu-profitability.md` 混杂了两层内容——
 业务概念/公式定义（理论上与数据源无关）和物理表/字段/SQL（数据源绑定）。
 且随 v8.1 实现切换与 migration 0020 删视图，文中 `ad_product_links.real_cost_total`
 等取数引用已过时。
@@ -140,13 +165,13 @@ v9 口径整体，不存在子口径」；去掉节级「（v9 口径）」「�
 **改动**（docs-only，无代码变动）：
 - `spu-roi-profit-calculation.md` 重写为纯口径文档：只含名词定义（§一）+ 公式（§二）+
   分类矩阵 / 参数 / Prompt / 版本历史，不再出现任何表名、字段名、SQL。
-- 新增 `biz-doc/analytics/spu-roi-data-sources.md`：概念 → 物理表/字段/枚举映射，
+- 新增 `docs/business/spu-profitability.md`：概念 → 物理表/字段/枚举映射，
   分 **API 数据源**（commerce/finance/fulfillment/after_sales，含状态枚举、
   action_code 速查、case_type 完结枚举）与 **plugin 数据源**（plugin.*，含
   main_order_status 100–104 码值表、cancel_type 枚举、settlement_details.trade_order_id
   关联键、tracking_events 无 action_code 列等已知缺口）两部分；广告/汇率/采购
   两路共用部分单列。
-- `biz-doc/README.md` 目录清单更新；`ad-product-links-view.md` 标注为历史档案
+- `docs/README.md` 目录清单更新；`ad-product-links-view.md` 标注为历史档案
   （视图已被 migration 0020 删除）。
 
 ## 2026-09-15 — SPU ROI 广告消耗按日期切片 v8.1（v8 选错源修正）
@@ -170,7 +195,7 @@ ad_daily 的数据”，v8.1 回切到 ad_daily。
   - 既有 v8 行为测试（`test_spu_roi_date_window_clips_ad` /
     `test_spu_roi_ad_window_single_side_only`）不变——SQL 语义同 v8，只是
     数据源调换，裁剪逻辑仍有效。
-- **设计文档**（`tech-doc/analytics/spu-roi-v8-ad-window.md`）：§1.4 重写
+- **设计文档**（`docs/archive/spu-roi-v8-ad-window.md`）：§1.4 重写
   为“ad_daily / ad_today 现状（v8.1 修正）”，明写 v8 选错源原因与 v8.1
   选 ad_daily 依据。
 
@@ -182,7 +207,7 @@ ad_daily 的数据”，v8.1 回切到 ad_daily。
 | `plugin.ad_today` | 1,142 | 2026-09-13 ~ 09-15 | 重复写入临时表 |
 
 **遗留**：ad_today 9-13~9-15 1,142 行未回填 ad_daily（Chrome 扩展
-kind=today 仍在写）。见 `tech-doc/analytics/spu-roi-v8-ad-window.md`
+kind=today 仍在写）。见 `docs/archive/spu-roi-v8-ad-window.md`
 §10.1。
 
 ## 2026-09-15 — SPU ROI 广告消耗按日期切片（v8）
@@ -210,7 +235,7 @@ kind=today 仍在写）。见 `tech-doc/analytics/spu-roi-v8-ad-window.md`
   - 删除 v7 `test_spu_roi_date_window_does_not_clip_ad`（v7“全窗口累计”护栏与 v8 行为反向，留存只会误导）。
   - 新增 `test_spu_roi_date_window_clips_ad`（v8 行为护栏：窗外 ad 被裁，窗内 ad 留下）。
   - `_seed_ad_dump` 夹具改为写 `plugin.ad_today`（v8 后 ad_daily 不在取数路径）。
-- **文档**（`tech-doc/analytics/spu-roi-v7-refactor.md`）：
+- **文档**（`docs/archive/spu-roi-v7-refactor.md`）：
   - §6.2 / §6.3 / §6.4 / §8.13 同步 v8 口径；`ad_today` 是 ROI 主源说明。
 
 **数据库**：`plugin.ad_today` 仍是主源；`plugin.ad_daily` 仍在表上但不再被读。
@@ -256,14 +281,14 @@ POST dumps；但 `api-managed` 守卫（commit `ae843a1`）把 `data_source='api
   （只写 `ad_raw_log`），最后真实写入 2026-09-09。
 - 配套：删 `tests/analytics/test_ad_product_links_view.py`（9 用例）；
   `schema_tts_erp.sql` 重生成；`models/analytics.py` 注释更新；
-  一批现行文档同步（`external-api.md` / `setup/analytics-sync.md` /
+  一批现行文档同步（`external-api.md` / `docs/ops/analytics-sync.md` /
   `spu-real-roi-dashboard.md` 等），历史设计记录加废弃标注。
 - 备份：`/home/schan/backups/analytics_ad_raw_20260911_0118.sql.gz`（1467 行）、
   `analytics_ad_sync_audit_20260911_0120.sql.gz`（2287 行）。
 
 ## 2026-09-07 (refactor) — pages/spu-roi v7 重构（rubric v8 / D1-D8 全拍板）
 
-设计稿 `tech-doc/analytics/spu-roi-v7-refactor.md` 落地。生产库实测 v8 新基线：
+设计稿 `docs/archive/spu-roi-v7-refactor.md` 落地。生产库实测 v8 新基线：
 净利 −$911.23 / 盈利 14 SPU / 全损 127 件（rubric v7 旧 -$2,266.87 / 盈利 25 SPU 失效）。
 
 - **D3 后端模块抽取**：`tts_erp_v2/analytics/spu_roi.py` 新建（1,464 行），含常量、9 条
@@ -292,7 +317,7 @@ POST dumps；但 `api-managed` 守卫（commit `ae843a1`）把 `data_source='api
 
 ## 2026-09-07 (feature) — analytics 区间聚合同步（protocol v3, Design A）
 
-服务端落地 `tech-doc/analytics/range-aggregate-history-sync.md`（与 Chrome 扩展
+服务端落地 `docs/archive/range-aggregate-history-sync.md`（与 Chrome 扩展
 v3 同窗口发布）：
 
 - **schema**（migration 0012/0013/0014）：`analytics.ad_raw` 从「一行=一天」升级
@@ -315,7 +340,7 @@ v3 同窗口发布）：
 
 ## 2026-09-06 (fix) — SPU 实际 ROI 看板终审（3 项低级别）
 
-review 终审回修（低级别），口径仍以 `tech-doc/analytics/spu-real-roi-dashboard.md` §4/§5/§7 为准：
+review 终审回修（低级别），口径仍以 `docs/archive/spu-real-roi-dashboard.md` §4/§5/§7 为准：
 
 - **fee_rate 非有限值 → 422**：`GET /v2/analytics/spu-roi` 传 `NaN`/`Infinity` 时与 0 比较不报错，会穿透到 `_fmt_money` quantize 造成 500 → 在 `list_spu_roi` 入口统一按 422 拒掉（`fee_rate must be a finite decimal`）。
 - **异常状态退款进未归属**：白名单外且非 CANCELLED 的异常订单状态（UNPAID/ON_HOLD 等）的已完结退款行不进任何 refund_* 金额桶，按 §4.2 rule 0 防御性计入 `meta.unattributed_refund_lines` 显式上报（不静默丢，页脚提示）。
@@ -324,7 +349,7 @@ review 终审回修（低级别），口径仍以 `tech-doc/analytics/spu-real-r
 
 ## 2026-09-05 (fix) — SPU 实际 ROI 看板 code review 第 2 轮（2 项低级别）
 
-review 回修（第 2 轮，低级别），口径仍以 `tech-doc/analytics/spu-real-roi-dashboard.md` §4/§5/§7 为准：
+review 回修（第 2 轮，低级别），口径仍以 `docs/archive/spu-real-roi-dashboard.md` §4/§5/§7 为准：
 
 - **页面工具条新增店铺/日期筛选**（§7.1 `[店铺▾][日期▾]`）：`#filter-shop` 下拉默认“全部店铺”，选项由 JS 从 `GET /v2/commerce/channel-accounts`（readonly，cookie 会话，401→login）拉取，显示 account_name、值为内部 shop_pk；`#filter-w-start` / `#filter-w-end` 为 `type=date` 输入（空 = 不限）；变化时仅把非空 shop_pk / w_start / w_end（yyyy-mm-dd）并入请求 query，保持“不传 = 全历史”语义；加载失败只留占位项不阻塞主表。
 - **去重注释**：`analytics.py` 排序注释重复两行 → 保留带 §7.6 引用的一行。
@@ -332,7 +357,7 @@ review 回修（第 2 轮，低级别），口径仍以 `tech-doc/analytics/spu-
 
 ## 2026-09-05 (fix) — SPU 实际 ROI 看板 code review 修复（6 findings）
 
-review 回修，口径仍以 `tech-doc/analytics/spu-real-roi-dashboard.md` §4/§5/§7 为准：
+review 回修，口径仍以 `docs/archive/spu-real-roi-dashboard.md` §4/§5/§7 为准：
 
 - **排序白名单扩全**：`GET /v2/analytics/spu-roi` 的 `sort` 从 5 列扩到页面可排序的全部纯数值列（+`ad_count/gmv_ad/order_count/units_sold/refund_net_amount/return_loss/roi_breakeven`），列头点击不再 422；同值次级键 spend DESC 保持可复现。商品/ROI₀ 表头改为不可点。
 - **totals.roi_real（服务端单点真相）**：结余带整体 ROI 改为消费端点 `totals.roi_real`（服务端 Σ(net_cash−return_loss)/Σspend，原生 VND 合计后一次换算 USD，2 位小数串；Σspend=0 → null），页面删除客户端除法；新增原生值对账测试。
@@ -344,7 +369,7 @@ review 回修，口径仍以 `tech-doc/analytics/spu-real-roi-dashboard.md` §4/
 
 ## 2026-09-05 (feat) — SPU 实际 ROI 看板（只读端点 + 账页式页面）
 
-按 `tech-doc/analytics/spu-real-roi-dashboard.md`（§4/§5/§7 口径）实施：
+按 `docs/archive/spu-real-roi-dashboard.md`（§4/§5/§7 口径）实施：
 
 - **端点 `GET /v2/analytics/spu-roi`**（role=readonly，`_READONLY_EXACT`）：每 SPU 一行的广告消耗 / 有效销售 / 退款分桶 / 净利润 / 实际 ROI / 保本线主表。查询 `q`(spu_id 子串)、`sort`(roi_real|spend|refund_rate|net_profit|sales)、`order`、`limit/offset`、`include_all`、`shop_pk`、`fee_rate`(费率覆写)；返回 `{items,total,totals,meta}`（money 4 位小数串 / 比率 2 位串 / null 语义）。
 - **固定常量口径**：USD→VND=26,330、CNY→USD=0.14774、K1=30 CNY/件（DEFAULT_K1 / MANUAL 两分支）、平台佣金基线 0.1156（D9/D4/D10）；退款按 case 完结状态分桶（净额桶进净利润，已付被取消桶 = 信息列 + 缺失行数上报）。
@@ -375,10 +400,10 @@ miaoshou/ak_... 均已就位且 scope 齐全），v1 oauth_receiver 库失去回
   验证 tts_erp 库 40 张表（含 alembic_version + 2 view）完好。
 - **文档**：`AGENTS.md` §1/§2/§4.1/§6/§8 移除 oauth-receiver 引用，保留 §4.1/§6 的
   「直连 oauth_tokens 表 / 自己解密 integration.credentials」踩坑教训并指向备份路径；
-  `setup/tts-erp.md` 进程托管段移除；`tech-doc/analytics/reorg-plan.md` §5.8
-  标注 schema_oauth.sql 已删；`tech-doc/api-key-auth-design.md` §10 移除
+  `docs/ops/tts-erp.md` 进程托管段移除；`docs/archive/reorg-plan.md` §5.8
+  标注 schema_oauth.sql 已删；`docs/design/api-key-auth-design.md` §10 移除
   oauth-receiver 鉴权前瞻项。
-- **CHANGELOG 老条目 / `tech-doc/_archive/` / `tech-doc/adr/`** 历史记录**不动**——
+- **CHANGELOG 老条目 / `docs/archive/` / `docs/architecture/adr/`** 历史记录**不动**——
   按惯例历史日志只追加不修改，归档区只读不恢复。
 
 ### 风险披露
@@ -386,7 +411,7 @@ miaoshou/ak_... 均已就位且 scope 齐全），v1 oauth_receiver 库失去回
 - AGENTS.md §1/§8 此前明确「4 周观察期（~2026-09-26）保留」，本次提前 21 天收口。
 - 若 v2 凭证单源（integration.credentials + token_service）出问题要回滚 v1，需：
   1. `gunzip backups/oauth_receiver_v1_legacy_20260905T134439Z.sql.gz | docker exec -i postgres psql -U postgres -d postgres`（先 CREATE DATABASE oauth_receiver）
-  2. 跑 `tech-doc/_archive/migrate-v1-to-v2-2026-08-29/scripts/re_encrypt_credentials.py` 把 legacy 格式转回 v2 envelope
+  2. 跑 `docs/archive/migrate-v1-to-v2-2026-08-29/scripts/re_encrypt_credentials.py` 把 legacy 格式转回 v2 envelope
   3. 恢复 oauth-receiver.service unit + .env 的 OAUTH_* 两行
 
 ## 2026-09-06 (feat) — 新店授权控制台页 `GET /v2/oauth/tiktok/onboard`（浏览器 UI）
@@ -413,7 +438,7 @@ Authorization overview 字段表在此准确），原假设「token/get 直给�
   missing_shop_cipher 显式失败不落半残行（错误附 raw keys）
 - 成功结果改 `{"shops":[...]}`（HTML 逐店渲染 / JSON 数组）
 - 单测：fetch_authorized_shops HTTP 5 例 + flow 多店/空店列表/条目缺字段 + api 契约适配
-- spec：`tech-doc/api/tiktok-shop-oauth.md`「上游契约确认」节按实测定稿
+- spec：`docs/api/tiktok-shop-oauth.md`「上游契约确认」节按实测定稿
 - 附带：oauth 回调全路径结构化日志（kind/upstream_code/成功逐店），真实授权失败可当场定位
 
 ## 2026-09-06 (feat) — 新店 TikTok seller 授权流程上线（Lane E 收尾合入部署）
@@ -434,7 +459,7 @@ alembic **0011_oauth_states** 重编号接入 0007→0009→0010 链并 stamp，
 - **env**：`TIKTOK_SERVICE_ID`（Partner Center App & Service 页，人类填）+ 可选 `TIKTOK_AUTHORIZE_HOST`
 - **公网回调**：Redirect URL 必须带外部前缀 `/tts`（nginx 仅把 `/tts/*` 转给 API；无前缀落在
   ProfitLens 前端 404）→ `http://daqiang.nat100.top/tts/v2/oauth/tiktok/callback`
-- 契约/文档：`tech-doc/api/tiktok-shop-oauth.md`（single-source spec；shop_id/shop_cipher 已由 v1
+- 契约/文档：`docs/api/tiktok-shop-oauth.md`（single-source spec；shop_id/shop_cipher 已由 v1
   生产同款 token/get 读取验证，见 spec「上游契约确认」节）+ external-api.md TL;DR
 - 测试：proxy HTTP 单测 + DB 编排集成 + API 契约共 31 个新用例
 - 已知边界：授权到期/取消的 webhook 接收未做（见 spec 生命周期备注），续期=重走本流程（幂等）
@@ -466,7 +491,7 @@ alembic **0011_oauth_states** 重编号接入 0007→0009→0010 链并 stamp，
 
 ## 2026-09-05 (ops) — v1 legacy `public.*` 归档删除（19 张业务表 DROP）
 
-v2 切流的 v1 数据回查窗口提前收口：按 `tech-doc/refactor-tech-plan-v2.md` §7.1 step 5 流程
+v2 切流的 v1 数据回查窗口提前收口：按 `docs/archive/refactor-tech-plan-v2.md` §7.1 step 5 流程
 （先 dump 归档 → 再 DROP）删除 v1 遗留层。**只删 legacy 数据表，不动 v2 基础设施**。
 
 - DROP 19 张 `public` v1 业务表：orders / order_items / order_shippings / payments / shops /
@@ -483,7 +508,7 @@ v2 切流的 v1 数据回查窗口提前收口：按 `tech-doc/refactor-tech-pla
 
 ## 2026-09-05 (refactor) — analytics schema reorg（migration 0007，删 4 张僵尸表 + 审计改文件日志）
 
-依据 `tech-doc/analytics/reorg-plan.md`（2026-09-05），analytics schema 从「5 表 + 1 view」收成「1 表 + 1 view」：
+依据 `docs/archive/reorg-plan.md`（2026-09-05），analytics schema 从「5 表 + 1 view」收成「1 表 + 1 view」：
 
 ### Schema / migration
 
@@ -543,11 +568,11 @@ v2 切流的 v1 数据回查窗口提前收口：按 `tech-doc/refactor-tech-pla
 
 ### 文档
 
-- `tech-doc/analytics/dump-architecture.md`:新增 D5「schema 3 → 1」决策;
+- `docs/archive/dump-architecture.md`:新增 D5「schema 3 → 1」决策;
   §3.1 数据流图（写 3 表 → 1 表）;§10 上线清单（监控项调整）
-- `tech-doc/analytics/reorg-plan.md`:实施依据
+- `docs/archive/reorg-plan.md`:实施依据
 - `AGENTS.md` §8 目录地图:analytics schema 标注「仅 ad_raw 1 表」
-- `setup/analytics-sync.md`:表清单/retention 段落同步;文件树注释更新
+- `docs/ops/analytics-sync.md`:表清单/retention 段落同步;文件树注释更新
 
 ### 范围外（明确未做,另记未决）
 
@@ -571,7 +596,7 @@ v2 切流的 v1 数据回查窗口提前收口：按 `tech-doc/refactor-tech-pla
   （external_product_id=SPU）带出内部 shop_pk / spu_pk（目录外为 NULL）。
 - 健壮性：JSON 数值字符串先正则校验再 cast（脏值→NULL→0）；修复前无业绩字段的旧 dump
   保留关联行、业绩为 0。
-- 语义/口径/查询示例：`biz-doc/analytics/ad-product-links-view.md`；测试
+- 语义/口径/查询示例：`docs/archive/ad-product-links-view.md`；测试
   `tests/analytics/test_ad_product_links_view.py`（5 tests）。验证：视图合计 vs ad_raw 直接
   求和 1207.17 / 139 完全一致；当前 337 对（228 广告计划 / 111 SPU）。
 
@@ -579,7 +604,7 @@ v2 切流的 v1 数据回查窗口提前收口：按 `tech-doc/refactor-tech-pla
 
 ## 2026-09-02 (feature) — Analytics ingest dump architecture（migration 0005）
 
-设计文档：`tech-doc/analytics/dump-architecture.md`（4 个 lock-in 决策）。配套 Chrome
+设计文档：`docs/archive/dump-architecture.md`（4 个 lock-in 决策）。配套 Chrome
 扩展端（`tk-adv-cost-monitor`）同步 release（插件 repo commits 3d7ddb7 → 8975e4e）。
 
 ### 协议（breaking，随扩展同窗口发布）
@@ -623,16 +648,16 @@ v2 切流的 v1 数据回查窗口提前收口：按 `tech-doc/refactor-tech-pla
 
 ### Docs
 
-- `tech-doc/analytics/dump-architecture.md` 新增（★ 事实源）；旧 5 文档（analytics-sync.md /
+- `docs/archive/dump-architecture.md` 新增（★ 事实源）；旧 5 文档（analytics-sync.md /
   architecture.md / compatibility.md / plugin-integration.md / openapi.yaml）加 superseded banner。
-- `tech-doc/external-api.md`：analytics 节重写（/cursor has-data + /dumps 协议/示例/错误表/矩阵）。
-- `setup/analytics-sync.md` v0.5.0 → v0.6.0 全量重写 dump 版。
+- `docs/api/external-api.md`：analytics 节重写（/cursor has-data + /dumps 协议/示例/错误表/矩阵）。
+- `docs/ops/analytics-sync.md` v0.5.0 → v0.6.0 全量重写 dump 版。
 - `AGENTS.md` §3 端点表 `/batches` → `/dumps` + 「已拆除」加 /batches 404 + ad_daily_pages/ad_cursors drop。
 
 ## 2026-09-02 (feature) — Analytics ingest v2 化 + /v2 路径硬切
 
-设计文档：`tech-doc/analytics-v2-migration-plan.md`（4 个决策）。迁移实战见
-`tech-doc/analytics/`（原 `analytics_sync/tech-doc/` 整包迁入）。
+设计文档：`docs/analytics-v2-migration-plan.md`（4 个决策）。迁移实战见
+`docs/analytics/`（原 `analytics_sync/docs/` 整包迁入）。
 
 ### Storage / schema
 
@@ -667,20 +692,20 @@ v2 切流的 v1 数据回查窗口提前收口：按 `tech-doc/refactor-tech-pla
 ### 拆除
 
 - 删 `analytics_sync/` 包（README / app.py / domain.py / pg_repositories.py / schema.sql / migration_v2.sql / retention.sql）。
-- `scripts/demo_analytics_sync_client.py` 路径引用：`analytics_sync/tech-doc/...` → `tech-doc/analytics/...`。
+- `scripts/demo_analytics_sync_client.py` 路径引用：`analytics_sync/docs/...` → `docs/analytics/...`。
 - `api_keys.py --scopes` help 文本：「analytics_sync per-seller restriction」 → 「analytics ingest per-seller restriction」。
 
 ### Docs
 
-- `AGENTS.md` §3 端点表加 `/v2/analytics/sync/{cursor,batches}` 行 + §3「已拆除」加 /v1 404 条 + §9.5 更新 + §6 文件表加 `tts_erp_v2/analytics/` 行 + `tech-doc/analytics/` 引用。
-- `tech-doc/external-api.md` §3 analytics 节全段 /v2 化（mount/路径/env var/curl/稳定性矩阵）。
-- `setup/analytics-sync.md` v0.4.0 → v0.5.0 重写头部 + 状态表 + 文件布局 + 表清单 + 端点列表。
-- `tech-doc/analytics/`（原 `analytics_sync/tech-doc/`）5 文件 `/v1` → `/v2`、表名 `analytics_*` → `analytics.ad_*`、
+- `AGENTS.md` §3 端点表加 `/v2/analytics/sync/{cursor,batches}` 行 + §3「已拆除」加 /v1 404 条 + §9.5 更新 + §6 文件表加 `tts_erp_v2/analytics/` 行 + `docs/analytics/` 引用。
+- `docs/api/external-api.md` §3 analytics 节全段 /v2 化（mount/路径/env var/curl/稳定性矩阵）。
+- `docs/ops/analytics-sync.md` v0.4.0 → v0.5.0 重写头部 + 状态表 + 文件布局 + 表清单 + 端点列表。
+- `docs/analytics/`（原 `analytics_sync/docs/`）5 文件 `/v1` → `/v2`、表名 `analytics_*` → `analytics.ad_*`、
 `层架构引用更新、`cron` retention → `sync-worker job`。
 
 ## 2026-08-31 (feature) — Procurement console redesign + SPU image storage（branch `feature/procurement-ui`）
 
-设计文档：`tech-doc/procurement-ui-redesign.md`（design tokens + API contracts）。
+设计文档：`docs/archive/procurement-ui-redesign.md`（design tokens + API contracts）。
 
 ### Backend — MinIO + `/v2/spu-images/*`
 
@@ -802,9 +827,9 @@ sellerId/advertiserId，服务端 items 只含
   —— 测试对象是已死的 standalone app + 中间件。新 `tests_v2/api/test_analytics_sync_mount.py`
   （7/7 passed）覆盖挂载 + 鉴权契约，handler 业务逻辑靠真实 Chrome 扩展流量验证。
 - **孤儿**：`pytest.ini`、`conftest.py`（无 tests/ 后无引用）、`.pytest_cache/`、`.ruff_cache/` 删除。
-- **文档**：`setup/analytics-sync.md` 顶部 + "当前状态" + "文件布局" 重写；
+- **文档**：`docs/ops/analytics-sync.md` 顶部 + "当前状态" + "文件布局" 重写；
   `analytics_sync/README.md` 全量重写；
-  `analytics_sync/tech-doc/analytics-sync.md` "## 7. Curl examples" + "## 10. Deployment" 重写。
+  `analytics_sync/docs/analytics-sync.md` "## 7. Curl examples" + "## 10. Deployment" 重写。
 - **DB schema 不动**：5 张 `analytics_*` 表（`analytics_records` /
   `analytics_cursors` / `analytics_shop_timezones` / `api_keys` /
   `analytics_audit_log`）继续被路由使用。
@@ -947,7 +972,7 @@ v1 协议下，客户端某天只传了第 1 页（共 3 页）时，服务端�
   （修复仓库层 rejected 被静默丢弃的 bug）
 - `analytics_sync/tests/test_protocol_v2.py` (new) — 19 个 v2 验收测试（含并发）
 - `analytics_sync/tests/test_batches.py` / `test_concurrency.py` — 适配新签名与连续前缀语义
-- `analytics_sync/tech-doc/openapi.yaml` / `analytics-sync.md` / `plugin-integration.md`
+- `analytics_sync/docs/openapi.yaml` / `analytics-sync.md` / `plugin-integration.md`
   / `compatibility.md` — v2 契约与 v1↔v2 兼容策略文档
 - `tdd/test_analytics_sync_integration.py` — unsupported-version 测试改用 99
 
@@ -1063,7 +1088,7 @@ Wave 3 Slice 2 (2026-08-18 批次) 删除了 `GET /shops`、`/shops/<id>`、`/to
 
 ### Fixed
 
-- **plugin-integration.md 和 setup/analytics-sync.md 的 idempotencyKey 参考向量从 `ce1ba2e1...` 改为 `73b716cc...`**（原是手抄错误，算法从未产出过 `ce1ba2...`）
+- **plugin-integration.md 和 docs/ops/analytics-sync.md 的 idempotencyKey 参考向量从 `ce1ba2e1...` 改为 `73b716cc...`**（原是手抄错误，算法从未产出过 `ce1ba2...`）
 - **domain.py**: `canonical_json_for_key` 和 `compute_idempotency_key` 接受 `page: int | str`（`1` 和 `"1"` 同等），更贴近插件端实际行为
 - **domain.py**: `import hashlib` / `import json` 移到文件顶部
 - **tests/test_idempotency.py**: 新增 6 条锁住正确算法的回归测试（reference vector、page int/str 等价、单字段变化、trim 幂等）
@@ -1122,8 +1147,8 @@ Wave 3 Slice 2 (2026-08-18 批次) 删除了 `GET /shops`、`/shops/<id>`、`/to
   - `rate_limit.py`：每 token prefix 滑窗 60s 限流（默认 100/min），429 带 `Retry-After`
 - **CLI `analytics_sync_tokens.py`**：create / list / revoke / rotate（仿 `api_keys.py`）
 - **错误契约**：400/401/403/413/429/5xx 全部带 `{code, message, requestId, retryable}`，永不回显 token / cookie / header
-- **OpenAPI 3.1 正式规范**：`analytics_sync/tech-doc/openapi.yaml`
-- **设计文档**：`analytics_sync/tech-doc/architecture.md`（架构 + 14 个协议歧义解决）/ `plugin-integration.md`（插件对接说明）/ `compatibility.md`（版本演进 + 保留策略）/ `analytics-sync.md`（API 契约 + curl 示例）
+- **OpenAPI 3.1 正式规范**：`analytics_sync/docs/openapi.yaml`
+- **设计文档**：`analytics_sync/docs/architecture.md`（架构 + 14 个协议歧义解决）/ `plugin-integration.md`（插件对接说明）/ `compatibility.md`（版本演进 + 保留策略）/ `analytics-sync.md`（API 契约 + curl 示例）
 - **保留策略**：`analytics_sync/retention.sql`（90 天 records / 30 天 audit log）
 - **测试 63 个全过**：canonical key 推导（10）+ auth（7）+ batches（12）+ cursor（6）+ 并发去重（2）+ 跨店隔离（3）+ 错误路径（6：413 / 5xx / audit / 信息泄露防护）+ 限流（5）+ scope 校验（12）
 
@@ -1132,7 +1157,7 @@ Wave 3 Slice 2 (2026-08-18 批次) 删除了 `GET /shops`、`/shops/<id>`、`/to
 - 端口 9878（区别于 tts-erp 的 9877 和 oauth-receiver 的 9876）
 - PG 数据库沿用 `tts_erp`，表名前缀 `analytics_*` 隔离
 - 启动命令：`uvicorn analytics_sync.app:app --host 0.0.0.0 --port 9878`
-- 协议文档（任务输入）位于 conversation 记录；正式 OpenAPI 在 `tech-doc/openapi.yaml`
+- 协议文档（任务输入）位于 conversation 记录；正式 OpenAPI 在 `docs/openapi.yaml`
 
 ## 2026-08-18 — 财务明细切换接口数据源，Excel 数据全量删除
 
@@ -1179,7 +1204,7 @@ Wave 3 Slice 2 (2026-08-18 批次) 删除了 `GET /shops`、`/shops/<id>`、`/to
 
 ## 2026-08-17（晚）— API key 鉴权系统上线（shadow 阶段）
 
-按 `tech-doc/api-key-auth-design.md` 实施（TDD：先 test_auth.py 15 个用例，后 auth.py）。
+按 `docs/design/api-key-auth-design.md` 实施（TDD：先 test_auth.py 15 个用例，后 auth.py）。
 
 ### Added
 

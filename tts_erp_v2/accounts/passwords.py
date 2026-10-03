@@ -1,4 +1,4 @@
-"""密码哈希与密码策略（设计：tech-doc/user-account-authz-design.md §8）。
+"""密码哈希与密码策略（设计：docs/design/user-account-authz-design.md §8）。
 
 哈希：argon2id（argon2-cffi，MIT，https://github.com/hynek/argon2-cffi）。
 策略：长度 ≥ 6，必须同时含大写字母、小写字母、数字；不强制特殊字符；上限 128。

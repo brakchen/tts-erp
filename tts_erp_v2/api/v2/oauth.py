@@ -20,7 +20,7 @@ form of ``/callback`` with the external prefix, no port — e.g.
 proxies ``/tts/*`` to :9877; the prefix comes from
 ``TTS_ERP_EXTERNAL_PREFIX``, currently ``/tts``).
 
-Contract + setup: ``tech-doc/api/tiktok-shop-oauth.md``. Orchestration
+Contract + setup: ``docs/api/tiktok-shop-oauth.md``. Orchestration
 logic lives in :mod:`tts_erp_v2.proxy.tiktok_oauth` (kept router-free
 so it is unit-testable without HTTP); outbound token calls live in
 :mod:`tts_erp_v2.proxy.tiktok_auth`.

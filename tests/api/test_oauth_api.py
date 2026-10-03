@@ -1,7 +1,7 @@
 """API contract tests for /v2/oauth/tiktok/{authorize,callback} — the
 TikTok seller authorization flow (new-shop onboarding).
 
-Full contract: tech-doc/api/tiktok-shop-oauth.md. Key facts tested here:
+Full contract: docs/api/tiktok-shop-oauth.md. Key facts tested here:
 
 * ``authorize`` requires readwrite-or-above and returns a TikTok link
   carrying the registered single-use state. (Generation is harmless —

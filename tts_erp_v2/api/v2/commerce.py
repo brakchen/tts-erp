@@ -410,7 +410,7 @@ def list_shops(
     response_model=ChannelAccountOut,
     summary="Look up a channel account by its upstream (external) account id",
     description=(
-        "**Single-source spec:** `tech-doc/api/channel-accounts-by-external.md`.\n\n"
+        "**Single-source spec:** `docs/api/channel-accounts-by-external.md`.\n\n"
         "Reverse-lookup endpoint: given the upstream shop_id "
         "(`shop_id`) and a `platform` filter, return the internal "
         "`commerce.shops` row. Replaces the list-and-filter "
@@ -479,7 +479,7 @@ def get_channel_account_by_external(
 ) -> ChannelAccountOut:
     """Look up a channel account by its upstream (external) account id.
 
-    Full contract: see `tech-doc/api/channel-accounts-by-external.md`.
+    Full contract: see `docs/api/channel-accounts-by-external.md`.
     """
     row = _q(
         _STMT_GET_CHANNEL_ACCOUNT_BY_EXTERNAL,
