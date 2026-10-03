@@ -16,3 +16,4 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| e2e-expand | 补充 live e2e 冒烟用例 | session-01a10273-89cbba48 | fix/e2e-expand / .worktrees/e2e-expand | tests/e2e/ | draft | - | - | 2026-10-03T19:24:34Z |
