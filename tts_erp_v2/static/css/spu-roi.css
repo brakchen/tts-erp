@@ -10,6 +10,10 @@
   /* 亏损行（.row-bad）冻结列的底色 —— 需比 --paper-deep 更偏红，
    * tokens.css 无对应项，故保留为页面局部 surface 色。 */
   --paper-danger: #eee3d9;
+  /* 弱面（.op-drill-wrap 底色、表格行 hover）—— 比 --paper 略深、比
+   * --paper-deep 轻，用于需要区分但不抢眼的层次。历史遗留：此令牌此前
+   * 只在 var() 里被引用、从未声明，一直在靠 fallback 降级。 */
+  --paper-soft: color-mix(in srgb, var(--paper) 55%, var(--paper-deep));
 /* Bootstrap 变量桥接：把 Bootstrap 的语义变量指到暖纸令牌上。 */
  --bs-body-bg: var(--paper);
  --bs-body-color: var(--ink);

@@ -18,7 +18,7 @@
 # 会做什么：
 #   1 系统包     postgresql-client（psql / createdb / dropdb —— test_isolated.sh
 #                建临时测试库 clone 必需）
-#   2 venv 依赖  pytest / pytest-asyncio / pytest-cov（pyproject 未声明为运行时依赖）
+#   2 venv 依赖  pytest / pytest-asyncio / pytest-cov + pyproject 的 dev 依赖（tinycss2）
 #   3 .env.test  缺失时按 .env 的连接串生成，库名固定 tts_erp_v3_test
 #   4 体检       测试库存在性（tts_erp_test_template / tts_erp_v3_test）
 #
@@ -99,19 +99,20 @@ fi
 echo
 
 # ---------- 2. venv 测试依赖 ----------
-echo "-- 2/4 venv 测试依赖（pytest 等不在 pyproject 运行时依赖里）"
+echo "-- 2/4 venv 测试依赖（pytest、tinycss2 等不在 pyproject 运行时依赖里）"
 VENV_PY="$REPO/.venv/bin/python"
 if [[ ! -x "$VENV_PY" ]]; then
   err ".venv 不存在或不可执行: $VENV_PY"
-  note "先跑 bash scripts/envscripts/envsetup/install.sh（或 python3 -m venv .venv && .venv/bin/pip install -e .）"
+  note "先跑 bash scripts/envsetup/install.sh（或 python3 -m venv .venv && .venv/bin/pip install -e .）"
 else
-  if "$VENV_PY" -c "import pytest, pytest_asyncio" 2>/dev/null; then
+  if "$VENV_PY" -c "import pytest, pytest_asyncio, tinycss2" 2>/dev/null; then
     ok "pytest 已就绪 ($("$VENV_PY" -m pytest --version 2>/dev/null | head -1))"
   elif [[ $CHECK_ONLY -eq 1 ]]; then
-    err "pytest / pytest-asyncio 未安装"
+    err "pytest / pytest-asyncio / tinycss2 未安装"
   else
     run "$VENV_PY -m pip install -q pytest pytest-asyncio pytest-cov"
-    ok "pytest 已装入 venv"
+    run "$VENV_PY -m pip install -q '.[dev]'"
+    ok "pytest + dev 依赖已装入 venv"
   fi
 fi
 echo
