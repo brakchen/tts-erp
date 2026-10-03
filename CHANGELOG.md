@@ -1,5 +1,20 @@
 # tts-erp CHANGELOG
 
+## 2026-10-03 — UI 设计体系统一（暖纸编辑体）
+
+- 重构前 11 个页面各自维护一份 `:root`，衍生出 4 套令牌命名体系
+  （暖纸编辑体 / 灰蓝 `--bg`-`--card`-`--border`-`--text` / `--rc-*` / `--signal*`）、
+  3 种圆角规范、2 套字体栈、2 套强调色。现收敛为一套。
+- 新增 `tts_erp_v2/static/css/tokens.css` 作为**唯一** `:root` 令牌来源
+  （纸面/墨/界线/语义色/字体/形状，含 `--radius: 0` 直角基准）。
+- 新增 `tts_erp_v2/static/css/common.css` 抽出公共基础层与 `op-*` 组件族
+  （页头、表格、工具条、徽标、按钮），11 个模板净减 363 行重复样式。
+- `enum-map` / `users` 的靛蓝 `#5b6abf` → 陶土橙 `#B8390E`，圆角 3/4px → 0；
+  `ad-daily.css` 的 `--signal*`（青蓝）→ `--accent`（陶土橙），硬编码色 22 种 → 4 种；
+  `runtime-configs.css` 的 `--rc-*` 命名空间、`sync-jobs.css` 的重复 `:root` 一并去掉；
+  `spu-roi.css` 的 `--bs-*` Bootstrap 桥接保留（功能性）。
+- surface 色用 `color-mix()` 从规范令牌派生，不再新增并行色板。
+- 详见 `tech-doc/ui-style-system.md`（令牌表、组件规范值取舍、页面接入 checklist）。
 ## 2026-10-02 — 广告日明细页接入全局侧边栏
 
 - 广告日明细页此前用独立 HTML 壳渲染，是全站唯一没有共享侧边栏（主导航）

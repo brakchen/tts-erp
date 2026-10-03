@@ -76,12 +76,43 @@ def test_sidebar_script_synchronizes_persisted_and_responsive_state():
 
 
 def test_sidebar_css_is_injected_after_page_styles():
-    """Page-level ``margin`` declarations must not override the sidebar offset."""
+    """Sidebar CSS must win over page styles at equal specificity.
+
+    Page styles now live in linked stylesheets (``tokens.css`` →
+    ``common.css`` → page CSS) rather than inline ``<style>`` rules, so the
+    ordering guarantee is document order: the injected sidebar ``<style>``
+    has to come after every ``<link rel="stylesheet">``. A page-level
+    ``margin`` must not override the sidebar offset.
+    """
     body = bytes(dashboard_page().body).decode()
     sidebar_css_at = body.index(_SIDEBAR_CSS.strip())
 
-    assert body.index("html, body {") < sidebar_css_at < body.index("</style>")
+    stylesheet_links = [m.start() for m in re.finditer(r'<link rel="stylesheet"', body)]
+    assert stylesheet_links, "dashboard must link its stylesheets"
+    assert max(stylesheet_links) < sidebar_css_at < body.index("</style>")
     assert "margin-left: var(--sidebar-width);" in _SIDEBAR_CSS
+
+
+def test_pages_share_the_design_token_stylesheet():
+    """Every page consumes the shared token layer instead of defining its own.
+
+    ``tokens.css`` is the single :root source and ``common.css`` the shared
+    component layer; both must load before any page-specific stylesheet.
+    """
+    for rendered in (
+        dashboard_page(),
+        enum_map_page(),
+        runtime_configs_page(),
+        sync_jobs_page(),
+    ):
+        body = bytes(rendered.body).decode()
+        tokens_at = body.index("static/css/tokens.css")
+        common_at = body.index("static/css/common.css")
+
+        assert tokens_at < common_at, "tokens.css must load before common.css"
+        assert ":root {" not in body.split("<style", 1)[0], (
+            "pages must not define :root tokens before the shared layer"
+        )
 
 
 def test_sidebar_css_is_injected_for_external_stylesheet_pages():
@@ -97,7 +128,13 @@ def test_sidebar_css_is_injected_for_external_stylesheet_pages():
 
 
 def test_sidebar_tokens_fall_back_on_pages_with_a_different_theme_vocabulary():
-    """The enum-map page uses ``--bg``/``--text`` instead of paper tokens."""
+    """The sidebar token bridge stays defensive after the vocabulary unification.
+
+    Historically the enum-map page used ``--bg``/``--text`` instead of paper
+    tokens. Those pages now share the warm-paper vocabulary from
+    ``tokens.css``, but the sidebar keeps its ``var(--paper, var(--bg, …))``
+    fallback chain so a page that opts out of the shared layer still renders.
+    """
     body = bytes(enum_map_page().body).decode()
 
     assert "--sidebar-paper-deep: var(--paper-deep, var(--card, #EAE3D2));" in body
