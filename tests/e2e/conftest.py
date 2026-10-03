@@ -6,6 +6,11 @@
 
     bash scripts/test_isolated.sh e2e        # 或 bash scripts/test.sh e2e
 
+标记由本 conftest 的 `pytest_collection_modifyitems` 统一打给
+`tests/e2e/` 下所有用例。注意：`pytestmark` 只作用于它所在的模块，
+写在 conftest.py 里**不会**传递给测试文件，会导致 `-m domain_e2e`
+零收集、`fast` 反而误含这些 live 用例，因此不用 `pytestmark`。
+
 约定：
 
 - 只读：只打 GET 端点（/healthz、/endpoints、/v2/* 只读接口），不做任何写操作；
@@ -25,9 +30,19 @@ from typing import Any
 
 import pytest
 
-pytestmark = [pytest.mark.requires_service, pytest.mark.domain_e2e]
-
 DEFAULT_BASE = "http://127.0.0.1:9877"
+
+E2E_MARKS = [pytest.mark.requires_service, pytest.mark.domain_e2e]
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """给本目录下的用例补上 e2e 标记（conftest 的 pytestmark 不传递）."""
+    here = Path(__file__).resolve().parent
+    for item in items:
+        item_path = getattr(item, "path", None)
+        if item_path is not None and here in Path(item_path).parents:
+            for mark in E2E_MARKS:
+                item.add_marker(mark)
 
 
 def base_url() -> str:
