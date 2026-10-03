@@ -35,19 +35,19 @@ journalctl --user -u tts-erp -n 50             # systemd 日志
 journalctl --user -u tts-erp-sync -n 50
 ```
 
-## 一键安装（setup/install.sh）
+## 一键安装（scripts/envsetup/install.sh）
 
-`setup/install.sh` 把下面「一键启动 / 部署」的手工步骤固化成一个幂等脚本，可反复执行：
+`scripts/envsetup/install.sh` 把下面「一键启动 / 部署」的手工步骤固化成一个幂等脚本，可反复执行：
 
 ```bash
 # 预览将要执行的命令（不改动系统）
-bash setup/install.sh --dry-run
+bash scripts/envsetup/install.sh --dry-run
 
 # 交互式安装（生产库迁移会逐次确认）
-bash setup/install.sh
+bash scripts/envsetup/install.sh
 
 # 免交互 + 显式执行数据库迁移（生产库迁移必须显式 --migrate）
-bash setup/install.sh -y --migrate
+bash scripts/envsetup/install.sh -y --migrate
 ```
 
 10 个步骤：preflight（`.env` 存在 / 0600 / 必需变量 / Python ≥ 3.13 / `systemd --user`）→

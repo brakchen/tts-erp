@@ -301,6 +301,8 @@ _PAGE_HTML = """<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>广告日明细 · tts-erp</title>
   <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
+  <link rel="stylesheet" href="../../static/css/tokens.css?v=__TOKENS_VERSION__">
+  <link rel="stylesheet" href="../../static/css/common.css?v=__COMMON_VERSION__">
   <link rel="stylesheet" href="../../static/css/ad-daily.css?v=__CSS_VERSION__">
   <style>__SIDEBAR_CSS__</style>
 </head>
@@ -401,6 +403,8 @@ def ad_daily_page() -> HTMLResponse:
     """Render the authenticated advertising-detail browser shell."""
     html = (
         _PAGE_HTML.replace("__CSS_VERSION__", _asset_version("css/ad-daily.css"))
+        .replace("__TOKENS_VERSION__", _asset_version("css/tokens.css"))
+        .replace("__COMMON_VERSION__", _asset_version("css/common.css"))
         .replace("__JS_VERSION__", _asset_version("js/ad-daily.js"))
         .replace("__SIDEBAR_CSS__", str(_shared_sidebar_css("ad-daily")))
         .replace("__SIDEBAR_NAV__", str(_shared_sidebar("ad-daily")))

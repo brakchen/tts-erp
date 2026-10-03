@@ -88,7 +88,6 @@ def _page(title: str, body_html: str, *, status_line: str = "") -> str:
   table {{ border-collapse: collapse; font-size: 13px; width: 100%; margin: 8px 0; }}
   td, th {{ border: 1px solid #d0d7de; padding: 5px 8px; text-align: left; }}
   th {{ background: #f6f8fa; font-weight: 600; }}
-  a {{ color: #0969da; }}
 </style>
 </head>
 <body>
@@ -487,20 +486,11 @@ _ONBOARD_PAGE_HTML = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>新店授权 · tts-erp</title>
+<link rel="stylesheet" href="../../static/css/tokens.css">
+<link rel="stylesheet" href="../../static/css/common.css">
 <style>
-  :root {
-    --paper: #F4EFE4; --paper-deep: #EAE3D2; --ink: #1B1814; --ink-soft: #4A4239;
-    --rule: #C9BFA8; --rule-soft: #DDD4BF; --accent: #B8390E; --accent-deep: #8F2C09;
-    --muted: #6E6657; --danger: #8C1A1A; --ok: #2F6B3E;
-    --mono: ui-monospace, 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', Consolas, monospace;
-    --sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'PingFang SC',
-            'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; background: var(--paper); color: var(--ink);
-    font-family: var(--sans); font-size: 14px; line-height: 1.5; }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { color: var(--accent-deep); }
+  /* 密度覆盖：基础文档流规则见 common.css */
+  html, body { font-size: 14px; line-height: 1.5; }
   .wrap { max-width: 860px; margin: 0 auto; padding: 28px 24px 48px; }
   header.ops { border-bottom: 1px solid var(--rule); padding-bottom: 14px;
     margin-bottom: 22px; display: flex; justify-content: space-between;
@@ -522,8 +512,7 @@ _ONBOARD_PAGE_HTML = """<!doctype html>
   .btn-ghost { background: transparent; color: var(--accent);
     border: 1px solid var(--accent); }
   .btn-ghost:hover { background: rgba(184,57,14,.06); }
-  .meta { color: var(--muted); font-size: 12px; }
-  .ok { color: var(--ok); } .err { color: var(--danger); }
+  .met  .ok { color: var(--ok); } .err { color: var(--danger); }
   .status { font-size: 13px; min-height: 20px; }
   ol.steps { padding-left: 20px; margin: 8px 0 0; }
   ol.steps li { margin: 6px 0; }

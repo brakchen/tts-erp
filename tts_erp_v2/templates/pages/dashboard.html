@@ -5,72 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>控制台 · tts-erp</title>
   <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
+  <link rel="stylesheet" href="../../static/css/tokens.css?v={{ css_version('tokens.css') }}">
+  <link rel="stylesheet" href="../../static/css/common.css?v={{ css_version('common.css') }}">
   <style>
     /* ---------- tokens (shared with other pages) ---------- */
-    :root {
-      --paper: #F4EFE4;
-      --paper-deep: #EAE3D2;
-      --ink: #1B1814;
-      --ink-soft: #4A4239;
-      --rule: #C9BFA8;
-      --rule-soft: #DDD4BF;
-      --accent: #B8390E;
-      --accent-deep: #8F2C09;
-      --muted: #6E6657;
-      --danger: #8C1A1A;
-      --ok: #2F6B3E;
-      --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', 'Fira Code', Consolas, 'Liberation Mono', ui-monospace, monospace;
-      --sans: 'Inter', 'Noto Sans SC', 'Source Han Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', sans-serif;
-      --serif: 'Noto Serif SC', 'Source Han Serif SC', 'Iowan Old Style', 'Apple Garamond', Georgia, ui-serif, serif;
-    }
     * { box-sizing: border-box; }
-    html, body {
-      background: var(--paper);
-      color: var(--ink);
-      font-family: var(--sans);
-      font-size: 15px;
-      line-height: 1.6;
-      margin: 0;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-      text-rendering: optimizeLegibility;
-      font-feature-settings: 'kern' 1, 'liga' 1;
-    }
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { color: var(--accent-deep); }
 
     /* ---------- HEADER ---------- */
     .op-header {
       border-bottom: 1px solid var(--rule);
       padding: 18px 28px 14px;
       background: var(--paper);
-    }
-    .op-header-row {
-      display: flex;
-      align-items: flex-end;
-      justify-content: space-between;
-      gap: 24px;
-      flex-wrap: wrap;
-    }
-    .op-header-titles { display: flex; flex-direction: column; gap: 2px; }
-    .op-eyebrow {
-      font-family: var(--mono);
-      font-size: 12px;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--muted);
-    }
-    .op-title {
-      font-family: var(--serif);
-      font-weight: 600;
-      font-size: 24px;
-      margin: 0;
-      letter-spacing: -0.01em;
-    }
-    .op-identity {
-      font-family: var(--mono);
-      font-size: 13px;
-      color: var(--muted);
     }
 
     /* ---------- MAIN LAYOUT ---------- */
@@ -104,14 +49,6 @@
       margin-bottom: 16px;
       padding-bottom: 12px;
       border-bottom: 1px solid var(--rule-soft);
-    }
-    .section-title {
-      font-family: var(--mono);
-      font-size: 12px;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--muted);
-      font-weight: 500;
     }
     .section-link {
       font-family: var(--mono);
@@ -282,8 +219,6 @@
       padding: 2px 8px;
       border-radius: 0;
     }
-    .badge-api { background: var(--ok); color: #fff; }
-    .badge-plugin { background: #8a6d1a; color: #fff; }
 
     .op-empty-state {
       display: flex;

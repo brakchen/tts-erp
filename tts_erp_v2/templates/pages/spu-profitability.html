@@ -6,26 +6,13 @@
   <title>{{ title }} · tts-erp</title>
   <!-- Relative path: resolves to /static/... locally and /tts/static/... behind NGINX. Do not make absolute. -->
   <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
+  <link rel="stylesheet" href="../../static/css/tokens.css?v={{ css_version('tokens.css') }}">
+  <link rel="stylesheet" href="../../static/css/common.css?v={{ css_version('common.css') }}">
   <link rel="stylesheet" href="../../static/vendor/tom-select.bootstrap5.min.css">
   <link rel="stylesheet" href="../../static/vendor/tabulator.min.css">
   <link rel="stylesheet" href="../../static/css/spu-roi.css?v={{ css_version('spu-roi.css') }}">
   {% if profile_id == "focused-spus" %}<link rel="stylesheet" href="../../static/css/focused-spus.css?v={{ css_version('focused-spus.css') }}">{% endif %}
   <style data-page-profile="{{ profile_id }}">
-    :root {
-      --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', Consolas, monospace;
-      --sans: 'Inter', 'Noto Sans SC', 'Source Han Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
-      --serif: 'Noto Serif SC', 'Source Han Serif SC', Georgia, ui-serif, serif;
-    }
-    html, body {
-      font-family: var(--sans);
-      font-size: 15px;
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-      text-rendering: optimizeLegibility;
-    }
-    .op-home-link { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-decoration: none; padding: 4px 8px; border: 1px solid var(--rule); transition: border-color 120ms ease; display: inline-block; }
-    .op-home-link:hover { border-color: var(--accent); color: var(--accent); }
       {{ sidebar_css(current_page) }}
   </style>
 </head>

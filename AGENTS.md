@@ -25,7 +25,7 @@
 ## 3. Non-negotiable safety boundaries
 
 - Never run tests against `tts_erp`, `tts_erp_prod`, or any prod-shaped database name.
-- Run tests only through `bash scripts/test_isolated.sh ...` (preferred) or serialized shared-DB `bash scripts/test.sh ...`; do not invoke pytest directly.
+- Run tests only through `bash scripts/test_isolated.sh ...`; do not invoke pytest directly and do not call `scripts/test.sh` directly. The direct shared-DB path is deprecated — see `tech-doc/agent-testing.md`.
 - Agents must not run `bash scripts/test.sh all`, `bash scripts/test.sh coverage`, or migration suites archived under `tech-doc/_archive/migrate-v1-to-v2-2026-08-29/`. These paths include or restore production-touching migration behavior.
 - Never execute `DELETE`, `TRUNCATE`, `DROP`, or irreversible `UPDATE` against production data without the documented guard and explicit human authorization.
 - Never run `alembic upgrade` against production. Agents may validate migrations only against test-shaped databases (`tts_erp_test_template`, ephemeral `tts_erp_test_*`, or shared fallback `tts_erp_v3_test`); production migration and restart are human-operated.
@@ -78,6 +78,7 @@ cred = load_credentials(session, provider="tiktok", external_account_id=shop_id)
 | One test domain (isolated DB) | `bash scripts/test_isolated.sh <domain>` |
 | Unit layer (isolated DB) | `bash scripts/test_isolated.sh unit` |
 | Refresh isolated test template | `bash scripts/test_isolated.sh --refresh-template fast` |
+| 测试前置依赖体检 / 安装 | `bash scripts/envsetup/install-test-deps.sh --check` / `sudo bash scripts/envsetup/install-test-deps.sh` |
 | API restart | `bash restart.sh` |
 | Sync-worker restart after `tts_erp_v2/jobs/` or `tts_erp_v2/sync_worker/` changes | `systemctl --user restart tts-erp-sync.service` |
 | Service status | `systemctl --user status tts-erp{,-sync}.service` |
@@ -85,7 +86,7 @@ cred = load_credentials(session, provider="tiktok", external_account_id=shop_id)
 
 - `scripts/test_isolated.sh` is the default agent entry point: it clones `tts_erp_test_template` into a per-session ephemeral DB, sets `TTS_ERP_DB_URL_TEST`, delegates to `scripts/test.sh`, then drops the clone.
 - Refresh the template with `bash scripts/test_isolated.sh --refresh-template fast` when migrations/schema change or the template is missing/stale.
-- `scripts/test.sh` still sources `.env.test` and targets shared `tts_erp_v3_test`; use it only for explicitly shared-DB runs, serialized with `flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast`.
+- `scripts/test.sh` is only the low-level pytest wrapper that `test_isolated.sh` delegates to. **Calling it directly is deprecated**: it reuses the long-lived shared `tts_erp_v3_test` with no ephemeral clone, so concurrent runs delete each other's `TEST_` rows. Use `scripts/test_isolated.sh`. Falling back to it requires a deliberate decision (e.g. `createdb` unavailable) plus `flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast`, and the reason must be recorded.
 - Full command reference: `tech-doc/commands-reference.md`.
 
 ### 5.1 Reuse-first implementation policy
@@ -113,6 +114,7 @@ Do not reimplement functionality that a suitable maintained dependency already p
 - Never run synchronous psycopg/database work inside an async handler.
 - Prefix test data with `TEST_`.
 - Put one-off scripts under `scripts/` with a descriptive `oneoff_`, `probe_`, `smoke_`, or `dump_` prefix.
+- Put environment-preparation and installation scripts under `scripts/envsetup/` (e.g. `scripts/envsetup/install.sh`, `scripts/envsetup/install-test-deps.sh`). These are idempotent, safe to re-run, and support `--dry-run` / `--check`. Do not mix them with one-off data scripts (`scripts/oneoff_*`) or with deployment docs (`setup/*.md`).
 - Use internal primary keys such as `shop_pk` and `spu_pk` for API filters; do not assume `shop_id` is accepted.
 - Keep naming conventional by layer: JSON/TypeScript camelCase, Python/SQL snake_case, HTTP headers lowercase-with-hyphens.
 - Do not restate formatter, linter, or type-checker rules here; follow the configured tools.
@@ -182,7 +184,7 @@ conn.execute(text("..."))
 Definition of done:
 
 1. Run the narrowest relevant test command.
-2. For code/test changes, run `bash scripts/test_isolated.sh fast`; use the shared test lock only when intentionally running direct `scripts/test.sh`.
+2. For code/test changes, run `bash scripts/test_isolated.sh fast`.
 3. The default requirement is zero failures. If master has an explicitly recorded stable baseline, the change must introduce zero new stable failures; isolate and rerun failures once to distinguish flakes.
 4. Update contracts and operational documentation affected by the change.
 5. Confirm no secrets, production data, unrelated WIP, or staged foreign files are included.

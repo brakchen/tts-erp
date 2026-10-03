@@ -21,6 +21,14 @@ dependencies = [
     "tenacity>=9.1,<10",  # retry/backoff (Apache-2.0, https://github.com/jd/tenacity)
 ]
 
+# 显式声明包发现：仓库是 flat-layout 且含多个非包目录（logs/setup/alembic/
+# handoff/tests），不声明的话 setuptools 会报 "Multiple top-level packages
+# discovered in a flat-layout" 并拒绝构建，`pip install -e .` 直接失败。
+[tool.setuptools.packages.find]
+include = ["tts_erp_v2*", "miaoshou*"]
+exclude = ["logs*", "setup*", "alembic*", "handoff*", "tests*"]
+
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]

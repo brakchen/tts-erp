@@ -4,17 +4,21 @@ This document defines the only supported test workflow for coding agents in `tts
 
 ## 1. Database isolation
 
-- Default agent test entry point: `scripts/test_isolated.sh`.
+- Default agent test entry point: `scripts/test_isolated.sh`. **It is the only supported entry point.**
 - Template database: `tts_erp_test_template` (schema-only, maintained by `scripts/test_isolated.sh --refresh-template`).
 - Per-run database: an ephemeral `tts_erp_test_*` clone created from the template and dropped after the command.
-- Shared fallback database: `tts_erp_v3_test`, used only when running `scripts/test.sh` directly.
+- Deprecated: shared fallback database `tts_erp_v3_test`, reached by calling `scripts/test.sh` directly. See §4.
 - Production database: `tts_erp` or another production-shaped name recognized by `tts_erp_v2.api.deps.is_prod_shaped_db()`.
 - `.env.test` supplies the base `TTS_ERP_DB_URL_TEST`; `scripts/test_isolated.sh` rewrites only the database name for template/ephemeral clones.
 - `scripts/test.sh` still loads `.env.test` before invoking pytest, and `tests/conftest.py` still prefers `TTS_ERP_DB_URL_TEST`.
 - `tests/conftest.py` hard-exits with status 2 if a direct pytest invocation would target a production-shaped database.
 - Agents must never set `TTS_ERP_TEST_OFF=1`.
 
-The hard exit is the final safety net, not the normal workflow. Always use `scripts/test_isolated.sh` unless you intentionally need the shared DB fallback.
+The hard exit is the final safety net, not the normal workflow. Always use `scripts/test_isolated.sh`.
+
+Test prerequisites (PostgreSQL client tools, pytest, `.env.test`) are checked and
+installed by `bash scripts/envsetup/install-test-deps.sh` — run `--check` first, then
+`sudo bash scripts/envsetup/install-test-deps.sh` for the root-owned part.
 
 ## 2. Supported commands
 
@@ -26,6 +30,7 @@ The hard exit is the final safety net, not the normal workflow. Always use `scri
 | Specific file within fast selection | `bash scripts/test_isolated.sh fast tests/path/test_file.py` |
 | Specific test within a domain | `bash scripts/test_isolated.sh <domain> tests/path/test_file.py::test_name` |
 | Refresh template then run fast suite | `bash scripts/test_isolated.sh --refresh-template fast` |
+| Check / install test prerequisites | `bash scripts/envsetup/install-test-deps.sh --check` · `sudo bash scripts/envsetup/install-test-deps.sh` |
 
 Domain names may be passed with or without the `domain_` prefix.
 
@@ -77,13 +82,25 @@ bash scripts/test_isolated.sh --refresh-template fast
 
 The refresh path rebuilds only the test-shaped template DB. It imports production schema read-only through `scripts/import_prod_to_test.sh --schema-only`, stamps the production alembic revision, then upgrades the template to the current worktree's alembic head. If the production alembic revision is not present in the worktree, the script leaves the imported schema in place and prints a warning instead of guessing. It must not be pointed at a production-shaped target DB.
 
-Direct `scripts/test.sh` runs still use the shared development test database (`tts_erp_v3_test`). Concurrent shared-DB suites can delete each other's `TEST_` rows and produce false 401 or missing-row failures. If a shared-DB run is explicitly needed, serialize it:
+### Deprecated: direct `scripts/test.sh` (shared-DB fallback)
+
+Calling `scripts/test.sh` directly is **deprecated**. It bypasses the ephemeral
+clone and reuses the long-lived shared `tts_erp_v3_test`, so concurrent suites
+delete each other's `TEST_` rows and produce false 401 / missing-row failures.
+`scripts/test.sh` is retained only as the low-level pytest wrapper that
+`scripts/test_isolated.sh` delegates to.
+
+Reach for it only when `test_isolated.sh` genuinely cannot run (for example
+`createdb`/`dropdb` are unavailable and cannot be installed). In that case you
+must serialize the run **and** record why:
 
 ```bash
 flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast
 ```
 
-If the lock is already held, do not run a competing shared-DB suite. Either wait with a bounded timeout or use `scripts/test_isolated.sh`.
+If the lock is already held, do not run a competing shared-DB suite. Install the
+PostgreSQL client tools with `sudo bash scripts/envsetup/install-test-deps.sh` and use
+`scripts/test_isolated.sh` instead.
 
 ## 5. Selecting validation scope
 

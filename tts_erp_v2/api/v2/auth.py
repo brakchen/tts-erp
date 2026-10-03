@@ -285,25 +285,9 @@ _LOGIN_HTML = """<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>登录 · tts-erp</title>
   <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
+  <link rel="stylesheet" href="../../static/css/tokens.css">
+  <link rel="stylesheet" href="../../static/css/common.css">
   <style>
-    /* ---------- tokens (shared with dashboard) ---------- */
-    :root {
-      --paper: #F4EFE4;
-      --paper-deep: #EAE3D2;
-      --ink: #1B1814;
-      --ink-soft: #4A4239;
-      --rule: #C9BFA8;
-      --rule-soft: #DDD4BF;
-      --accent: #B8390E;
-      --accent-deep: #8F2C09;
-      --muted: #6E6657;
-      --danger: #8C1A1A;
-      --ok: #2F6B3E;
-      --mono: ui-monospace, 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', Consolas, 'Liberation Mono', monospace;
-      --sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
-      --serif: ui-serif, 'Iowan Old Style', 'Apple Garamond', 'Source Han Serif SC', 'Noto Serif CJK SC', serif;
-    }
-    * { box-sizing: border-box; }
     html, body {
       background: var(--paper);
       color: var(--ink);
@@ -317,8 +301,6 @@ _LOGIN_HTML = """<!doctype html>
       justify-content: center;
       -webkit-font-smoothing: antialiased;
     }
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { color: var(--accent-deep); }
 
     /* ---------- LOGIN CARD ---------- */
     .login-card {

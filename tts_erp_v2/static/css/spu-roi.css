@@ -3,30 +3,11 @@
    依赖：static/vendor/bootstrap.min.css（先加载） */
 
 /* ═══ tokens ═══ */
+
+/* 页面局部 surface 色：tokens.css 只收语义令牌，这里从规范令牌派生，
+ * 不另养并行色板。 */
 :root {
- --paper: #f4efe4;
- --paper-deep: #eae3d2;
- --paper-danger: #eee3d9;
- --ink: #1b1814;
- --ink-soft: #4a4239;
- --rule: #c9bfa8;
- --rule-soft: #ddd4bf;
- --accent: #b8390e;
- --accent-deep: #8f2c09;
- --muted: #6e6657;
- --danger: #8c1a1a;
- --ok: #2f6b3e;
- --warn: #a16207;
- --mono:
-  ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Mono", Consolas,
-  "Liberation Mono", monospace;
- --sans:
-  ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC",
-  "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
- --serif:
-  ui-serif, "Iowan Old Style", "Apple Garamond", "Source Han Serif SC",
-  "Noto Serif CJK SC", serif;
- /* Bootstrap 主题变量 → warm-paper */
+/* Bootstrap 变量桥接：把 Bootstrap 的语义变量指到暖纸令牌上。 */
  --bs-body-bg: var(--paper);
  --bs-body-color: var(--ink);
  --bs-body-font-family: var(--sans);
@@ -36,6 +17,7 @@
  --bs-link-hover-color: var(--accent-deep);
  --bs-focus-ring-color: rgba(184, 57, 14, 0.22);
 }
+
 * {
  box-sizing: border-box;
 }

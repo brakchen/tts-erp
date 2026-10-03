@@ -1,0 +1,241 @@
+/* common.css — 公共基础层 + op-* 组件族（canonical）
+ *
+ * 页面模板 **不得再内联这些规则**；页面只保留真正页面特有的样式。
+ * 配套令牌见 tokens.css（本文件只消费令牌，不定义令牌）。
+ *
+ * 抽取来源（2026-10-03 feature/ui-style-unification lane）：重构前这些规则在
+ * 6~9 个页面里各存一份，且存在 1~3px 的漂移。此处统一为「暖纸编辑体」规范值，
+ * 漂移项的取舍如下（多数投票 → 暖纸编辑体旗舰页 dashboard 校正）：
+ *   .op-eyebrow   11/12/13px → 13px   （6 页中 4 页）
+ *   .op-title     22/24/26px → 26px   （6 页中 4 页）
+ *   .op-identity  13/14px    → 14px   （6 页中 5 页）
+ *   .op-table     13/14px    → 14px   （4 页中 2 页，与 .op-th 12px 搭配）
+ *   .op-th        10/11/12px → 12px
+ *   .op-table td  10/14px    → 14px
+ *   .badge        10/11px    → 11px
+ *   .btn-primary  矢量 2 种 → 取暖纸编辑体的 ink 底/纸字（enum-map 的 accent 底已废弃）
+ *   html, body    14/15/16px → 16px ；密集页面可在自己的样式里覆盖 font-size，
+ *                 但不要再复制一份 html, body 规则
+ *
+ * 有意 **不** 抽取的同名规则（语义不同，合并会改行为）：
+ *   .status-ok / .status-err   dashboard 是填充色块（background），intercept-requests 是文字色（color）
+ *   .wrap / .header            enum-map 与 users 的布局容器，尺寸与用途都不同
+ *   .actions                   intercept-configs 是 nowrap 表格单元格，其余是 flex 容器
+ */
+
+/* ── 基础层 ───────────────────────────────────────────── */
+
+* { box-sizing: border-box; }
+
+html, body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.6;
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: 'kern' 1, 'liga' 1;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-deep); }
+
+.mono { font-family: var(--mono); font-size: 13px; }
+
+/* ── 页头 op-header ───────────────────────────────────── */
+
+.op-header {
+  border-bottom: 1px solid var(--rule);
+  padding: 18px 28px 14px;
+  background: var(--paper);
+}
+.op-header-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.op-header-titles { display: flex; flex-direction: column; gap: 2px; }
+.op-eyebrow {
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.op-title {
+  font-family: var(--serif);
+  font-weight: 600;
+  font-size: 26px;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+.op-identity { font-family: var(--mono); font-size: 14px; color: var(--muted); }
+
+.op-home-link {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-decoration: none;
+  padding: 4px 8px;
+  border: 1px solid var(--rule);
+  transition: border-color 120ms ease;
+  display: inline-block;
+}
+.op-home-link:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── 主体容器 ─────────────────────────────────────────── */
+
+.page-main { max-width: 1280px; margin: 0 auto; padding: 24px 28px 64px; }
+
+.section-title {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+/* ── 表格 op-table ────────────────────────────────────── */
+
+.op-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--sans);
+  font-size: 14px;
+  background: var(--paper);
+}
+.op-th {
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  padding: 12px 12px;
+  border-bottom: 1px solid var(--rule);
+  white-space: nowrap;
+}
+.op-table td {
+  padding: 14px 12px;
+  border-bottom: 1px solid var(--rule-soft);
+  vertical-align: middle;
+}
+.op-table tbody tr:hover { background: var(--paper-deep); }
+
+.op-empty, .op-error {
+  text-align: center;
+  padding: 48px 20px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+}
+.op-error { color: var(--danger); }
+
+/* ── 工具条 ───────────────────────────────────────────── */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.toolbar-field { display: flex; align-items: center; gap: 6px; }
+.toolbar-field input, .toolbar-field select {
+  font-family: var(--sans);
+  font-size: 14px;
+  background: transparent;
+  border: 1px solid var(--rule);
+  padding: 7px 10px;
+  color: var(--ink);
+  border-radius: var(--radius);
+  min-width: 120px;
+}
+.toolbar-field input:focus, .toolbar-field select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.toolbar-spacer { flex: 0 1 12px; }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ── 徽标 ─────────────────────────────────────────────── */
+
+.badge {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: var(--radius);
+}
+.badge-ok { background: var(--ok); color: #fff; }
+.badge-api { background: var(--ok); color: #fff; }
+.badge-plugin { background: var(--warn); color: #fff; }
+
+/* ── 按钮 ─────────────────────────────────────────────── */
+/* 暖纸编辑体按钮：主按钮墨底纸字（hover 转陶土橙），次按钮描边透明底。 */
+
+.btn-primary {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 8px 16px;
+  background: var(--ink);
+  color: var(--paper);
+  border: 0;
+  cursor: pointer;
+  border-radius: var(--radius);
+  transition: background 120ms ease;
+}
+.btn-primary:hover { background: var(--accent); }
+.btn-primary:disabled { background: var(--rule); color: var(--paper); cursor: not-allowed; }
+
+.btn-secondary {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 8px 16px;
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  cursor: pointer;
+  border-radius: var(--radius);
+  transition: border-color 120ms ease;
+}
+.btn-secondary:hover { border-color: var(--accent); }
+.btn-secondary:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn-icon {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px;
+}
+.btn-icon:hover { opacity: 0.7; }
+
+/* ── 响应式 ───────────────────────────────────────────── */
+
+@media (max-width: 720px) {
+  .toolbar { flex-direction: column; align-items: stretch; }
+  .toolbar-field { flex-direction: column; align-items: stretch; }
+  .toolbar-field input, .toolbar-field select { min-width: auto; }
+  .op-header { padding: 14px 16px 10px; }
+  .page-main { padding: 16px 16px 48px; }
+}

@@ -7,43 +7,11 @@
   <!-- Relative path: resolves to /static/... locally and /tts/static/...
        behind the NGINX prefix. Do not make this absolute. -->
   <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
+  <link rel="stylesheet" href="../../static/css/tokens.css?v={{ css_version('tokens.css') }}">
+  <link rel="stylesheet" href="../../static/css/common.css?v={{ css_version('common.css') }}">
   <style>
-    :root {
-      --paper: #F4EFE4;
-      --paper-deep: #EAE3D2;
-      --ink: #1B1814;
-      --ink-soft: #4A4239;
-      --rule: #C9BFA8;
-      --rule-soft: #DDD4BF;
-      --accent: #B8390E;
-      --accent-deep: #8F2C09;
-      --muted: #6E6657;
-      --danger: #8C1A1A;
-      --ok: #2F6B3E;
-      --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', Consolas, ui-monospace, monospace;
-      --sans: 'Inter', 'Noto Sans SC', 'Source Han Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
-      --serif: 'Noto Serif SC', 'Source Han Serif SC', Georgia, ui-serif, serif;
-    }
     * { box-sizing: border-box; }
-    html, body {
-      background: var(--paper);
-      color: var(--ink);
-      font-family: var(--sans);
-      font-size: 16px;
-      line-height: 1.6;
-      margin: 0;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-      text-rendering: optimizeLegibility;
-    }
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { color: var(--accent-deep); }
     .op-header { border-bottom: 1px solid var(--rule); padding: 18px 28px 14px; background: var(--paper); }
-    .op-header-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
-    .op-header-titles { display: flex; flex-direction: column; gap: 2px; }
-    .op-eyebrow { font-family: var(--mono); font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
-    .op-title { font-family: var(--serif); font-weight: 600; font-size: 26px; margin: 0; letter-spacing: -0.01em; }
-    .op-identity { font-family: var(--mono); font-size: 14px; color: var(--muted); }
     .page-main { max-width: 1280px; margin: 0 auto; padding: 24px 28px 64px; }
     .op-section { background: var(--paper); border: 1px solid var(--rule); border-radius: 0; padding: 20px 24px; margin-bottom: 24px; }
     .op-section-header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--rule-soft); flex-wrap: wrap; }
@@ -58,21 +26,9 @@
     .form-field.mono input { font-family: var(--mono); }
     .form-hint { margin-top: 8px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
     .btn-primary { font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; padding: 8px 18px; background: var(--ink); color: var(--paper); border: 0; cursor: pointer; border-radius: 0; transition: background 120ms ease; }
-    .btn-primary:hover { background: var(--accent); }
-    .btn-primary:disabled { background: var(--rule); color: var(--paper); cursor: not-allowed; }
-    .btn-secondary { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; padding: 7px 14px; background: transparent; color: var(--ink); border: 1px solid var(--rule); cursor: pointer; border-radius: 0; transition: border-color 120ms ease; }
-    .btn-secondary:hover { border-color: var(--accent); }
     .op-table { width: 100%; border-collapse: collapse; font-family: var(--sans); font-size: 14px; background: var(--paper); }
-    .op-th { text-align: left; font-family: var(--mono); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); font-weight: 500; padding: 12px 12px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
-    .op-table td { padding: 14px 12px; border-bottom: 1px solid var(--rule-soft); vertical-align: middle; }
-    .op-table tbody tr:hover { background: var(--paper-deep); }
     .op-table tbody tr:last-child td { border-bottom: 0; }
-    .mono { font-family: var(--mono); font-size: 13px; }
     .badge { display: inline-block; font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: 0.06em; padding: 3px 8px; border-radius: 0; }
-    .badge-api { background: var(--ok); color: #fff; }
-    .badge-plugin { background: #8a6d1a; color: #fff; }
-    .op-empty, .op-error { text-align: center; padding: 48px 20px; color: var(--muted); font-family: var(--mono); font-size: 13px; letter-spacing: 0.08em; }
-    .op-error { color: var(--danger); }
     .op-note { padding: 12px 16px; border: 1px solid var(--rule); background: var(--paper-deep); color: var(--ink-soft); font-size: 13px; }
     .op-error-note { padding: 12px 16px; border: 1px solid var(--danger); background: var(--paper); color: var(--danger); font-size: 13px; }
     .op-hidden { display: none !important; }
@@ -87,8 +43,6 @@
       .page-main { padding: 16px 16px 48px; }
       .op-section { padding: 16px; }
     }
-    .op-home-link { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-decoration: none; padding: 4px 8px; border: 1px solid var(--rule); transition: border-color 120ms ease; display: inline-block; }
-    .op-home-link:hover { border-color: var(--accent); color: var(--accent); }
       {{ sidebar_css(current_page) }}
   </style>
 </head>

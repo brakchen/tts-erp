@@ -167,12 +167,24 @@ def test_manual_costs_page_v2_signature_counter_present(api_client, readonly_key
     assert 'id="op-counter-num"' in body, "signature counter num span missing"
     assert "op-counter-label" in body, "counter label class missing"
     assert "全部 SPU" in body, "counter label text missing"
-    # Industrial-console fingerprints in the inline <style>
-    assert "--paper:" in body, "paper token not declared"
-    assert "--accent:" in body, "accent token not declared"
-    assert "--mono:" in body, "monospace font stack not declared"
+    # 工业控制台视觉指纹：令牌已外置到共享 tokens.css（由页面 <link> 引入）
+    from pathlib import Path
+
+    tokens = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "css"
+        / "tokens.css"
+    ).read_text(encoding="utf-8")
+    assert "--paper:" in tokens, "paper token not declared in tokens.css"
+    assert "--accent:" in tokens, "accent token not declared in tokens.css"
+    assert "--mono:" in tokens, "monospace font stack not declared in tokens.css"
+    # 页面必须消费共享令牌层，不得自己重建 :root
+    assert "css/tokens.css" in body, "page must link the shared token layer"
+    assert ":root" not in body, "page must not redefine :root tokens inline"
     # Border-radius zero is part of the aesthetic (no rounded corners)
-    assert "border-radius: 0" in body, "expected flat (zero radius) design"
+    assert "--radius:" in tokens, "radius token missing"
 
 
 def test_console_js_uses_redesign_class_names():
