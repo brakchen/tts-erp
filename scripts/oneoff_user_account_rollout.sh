@@ -8,7 +8,7 @@
 #   tech-doc/user-account-authz-design.md §14 上线步骤
 #   tech-doc/agent-safety.md §2/§3  迁移护栏（ALLOW_PROD_DESTRUCTIVE=1 仅限
 #                                   本脚本的 alembic 子进程，见下）
-#   setup/install.sh                同仓部署脚本的确认/输出约定（本脚本沿用）
+#   scripts/envsetup/install.sh                同仓部署脚本的确认/输出约定（本脚本沿用）
 #
 # 前置条件：
 #   在部署目录 /home/schan/tts-erp（services 的 WorkingDirectory）先同步代码：
@@ -24,7 +24,7 @@
 # 步骤：
 #   0 预检   部署目录 / .env / venv / origin 同步 / argon2-cffi 依赖
 #   1 迁移   alembic upgrade head（输入库名确认；ALLOW_PROD_DESTRUCTIVE=1
-#            仅注入本步子进程，与 setup/install.sh 的迁移步骤同模式）
+#            仅注入本步子进程，与 scripts/envsetup/install.sh 的迁移步骤同模式）
 #   2 种子   accounts.cli sync-permissions（幂等，兜底校准种子数据）
 #   3 重启   restart.sh（API）+ tts-erp-sync.service
 #   4 冒烟   /healthz、/v2/auth/login、/v2/auth/me
@@ -42,7 +42,7 @@ ADMIN_USER=""
 SKIP_ADMIN=0
 DRY_RUN=0
 
-# ---------- 输出（与 setup/install.sh 同风格） ----------
+# ---------- 输出（与 scripts/envsetup/install.sh 同风格） ----------
 if [[ -t 1 ]]; then
   C_OK=$'\033[1;32m'; C_WARN=$'\033[1;33m'; C_ERR=$'\033[1;31m'; C_DIM=$'\033[2m'; C_OFF=$'\033[0m'
 else
@@ -89,7 +89,7 @@ step "0 preflight"
 ok "部署目录 $DEPLOY_DIR"
 
 [[ -f "$DEPLOY_DIR/.env" ]] || fail_pre "缺 .env（运维提供，本脚本不代管）"
-[[ -x "$DEPLOY_DIR/.venv/bin/alembic" ]] || fail_pre "缺 .venv/bin/alembic（先 bash setup/install.sh 装依赖）"
+[[ -x "$DEPLOY_DIR/.venv/bin/alembic" ]] || fail_pre "缺 .venv/bin/alembic（先 bash scripts/envsetup/install.sh 装依赖）"
 
 # .env 只解析两项；不 source 整个文件（避免特殊字符被 shell 解释），不回显。
 env_get() {
@@ -128,7 +128,7 @@ fi
 step "1 database migration (alembic upgrade head)"
 info "0052 为纯增量迁移（仅新增 security.* 六表 + 种子，不改现有表）。"
 info "alembic/env.py 对生产形态库默认拒绝执行；本步在你逐字确认库名后，"
-info "仅为本步的 alembic 子进程注入 ALLOW_PROD_DESTRUCTIVE=1（同 setup/install.sh）。"
+info "仅为本步的 alembic 子进程注入 ALLOW_PROD_DESTRUCTIVE=1（同 scripts/envsetup/install.sh）。"
 if (( DRY_RUN )); then
   info "（dry-run 跳过确认）"
 else

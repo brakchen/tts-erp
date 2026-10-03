@@ -78,7 +78,7 @@ cred = load_credentials(session, provider="tiktok", external_account_id=shop_id)
 | One test domain (isolated DB) | `bash scripts/test_isolated.sh <domain>` |
 | Unit layer (isolated DB) | `bash scripts/test_isolated.sh unit` |
 | Refresh isolated test template | `bash scripts/test_isolated.sh --refresh-template fast` |
-| 测试前置依赖体检 / 安装 | `bash setup/install-test-deps.sh --check` / `sudo bash setup/install-test-deps.sh` |
+| 测试前置依赖体检 / 安装 | `bash scripts/envsetup/install-test-deps.sh --check` / `sudo bash scripts/envsetup/install-test-deps.sh` |
 | API restart | `bash restart.sh` |
 | Sync-worker restart after `tts_erp_v2/jobs/` or `tts_erp_v2/sync_worker/` changes | `systemctl --user restart tts-erp-sync.service` |
 | Service status | `systemctl --user status tts-erp{,-sync}.service` |
@@ -114,6 +114,7 @@ Do not reimplement functionality that a suitable maintained dependency already p
 - Never run synchronous psycopg/database work inside an async handler.
 - Prefix test data with `TEST_`.
 - Put one-off scripts under `scripts/` with a descriptive `oneoff_`, `probe_`, `smoke_`, or `dump_` prefix.
+- Put environment-preparation and installation scripts under `scripts/envsetup/` (e.g. `scripts/envsetup/install.sh`, `scripts/envsetup/install-test-deps.sh`). These are idempotent, safe to re-run, and support `--dry-run` / `--check`. Do not mix them with one-off data scripts (`scripts/oneoff_*`) or with deployment docs (`setup/*.md`).
 - Use internal primary keys such as `shop_pk` and `spu_pk` for API filters; do not assume `shop_id` is accepted.
 - Keep naming conventional by layer: JSON/TypeScript camelCase, Python/SQL snake_case, HTTP headers lowercase-with-hyphens.
 - Do not restate formatter, linter, or type-checker rules here; follow the configured tools.

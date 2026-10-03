@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# setup/install.sh — tts-erp v2 一键安装 / 部署脚本（幂等，可重复执行）
+# scripts/envscripts/envsetup/install.sh — tts-erp v2 一键安装 / 部署脚本（幂等，可重复执行）
 #
 # 依据：
 #   setup/tts-erp.md         部署流程、systemd 托管、端口、健康检查、故障排查
@@ -7,11 +7,11 @@
 #   README.md                本地环境与启动（venv + pip install -e .）
 #
 # 用法：
-#   bash setup/install.sh              # 交互式（生产库迁移需逐次确认）
-#   bash setup/install.sh -y           # 免交互（生产库迁移仍需显式 --migrate）
-#   bash setup/install.sh --migrate    # 显式执行数据库迁移
-#   bash setup/install.sh --dry-run    # 只打印将要执行的命令，不改动系统
-#   bash setup/install.sh -h           # 全部选项
+#   bash scripts/envscripts/envsetup/install.sh              # 交互式（生产库迁移需逐次确认）
+#   bash scripts/envscripts/envsetup/install.sh -y           # 免交互（生产库迁移仍需显式 --migrate）
+#   bash scripts/envscripts/envsetup/install.sh --migrate    # 显式执行数据库迁移
+#   bash scripts/envscripts/envsetup/install.sh --dry-run    # 只打印将要执行的命令，不改动系统
+#   bash scripts/envscripts/envsetup/install.sh -h           # 全部选项
 #
 # 步骤：
 #   1 preflight  .env 存在 / 0600 / 必需变量 / Python>=3.13 / systemd --user
@@ -34,7 +34,7 @@
 #   * 不触碰测试库，不执行 DELETE/TRUNCATE/DROP。
 set -euo pipefail
 
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 PG_DOCKER="${PG_DOCKER:-postgres}"
@@ -71,7 +71,7 @@ run() {
 
 usage() {
   cat <<'EOF'
-用法: bash setup/install.sh [选项]
+用法: bash scripts/envscripts/envsetup/install.sh [选项]
 
 选项:
   -y, --yes          免交互执行（生产库迁移仍需显式 --migrate）
@@ -387,7 +387,7 @@ case "$MIGRATE_MODE" in
       (( DRY_RUN )) && info "  (dry-run：以上是回答 yes 后会执行的命令；非交互且未传 --migrate 时会跳过)"
       run_migration
     else
-      warn "已跳过迁移。首次安装 / schema 有变更时需执行：bash setup/install.sh --migrate"
+      warn "已跳过迁移。首次安装 / schema 有变更时需执行：bash scripts/envscripts/envsetup/install.sh --migrate"
     fi
     ;;
 esac

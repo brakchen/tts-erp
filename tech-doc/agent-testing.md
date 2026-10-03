@@ -17,8 +17,8 @@ This document defines the only supported test workflow for coding agents in `tts
 The hard exit is the final safety net, not the normal workflow. Always use `scripts/test_isolated.sh`.
 
 Test prerequisites (PostgreSQL client tools, pytest, `.env.test`) are checked and
-installed by `bash setup/install-test-deps.sh` — run `--check` first, then
-`sudo bash setup/install-test-deps.sh` for the root-owned part.
+installed by `bash scripts/envsetup/install-test-deps.sh` — run `--check` first, then
+`sudo bash scripts/envsetup/install-test-deps.sh` for the root-owned part.
 
 ## 2. Supported commands
 
@@ -30,7 +30,7 @@ installed by `bash setup/install-test-deps.sh` — run `--check` first, then
 | Specific file within fast selection | `bash scripts/test_isolated.sh fast tests/path/test_file.py` |
 | Specific test within a domain | `bash scripts/test_isolated.sh <domain> tests/path/test_file.py::test_name` |
 | Refresh template then run fast suite | `bash scripts/test_isolated.sh --refresh-template fast` |
-| Check / install test prerequisites | `bash setup/install-test-deps.sh --check` · `sudo bash setup/install-test-deps.sh` |
+| Check / install test prerequisites | `bash scripts/envsetup/install-test-deps.sh --check` · `sudo bash scripts/envsetup/install-test-deps.sh` |
 
 Domain names may be passed with or without the `domain_` prefix.
 
@@ -99,7 +99,7 @@ flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast
 ```
 
 If the lock is already held, do not run a competing shared-DB suite. Install the
-PostgreSQL client tools with `sudo bash setup/install-test-deps.sh` and use
+PostgreSQL client tools with `sudo bash scripts/envsetup/install-test-deps.sh` and use
 `scripts/test_isolated.sh` instead.
 
 ## 5. Selecting validation scope

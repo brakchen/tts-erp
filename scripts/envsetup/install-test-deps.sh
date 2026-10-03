@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# setup/install-test-deps.sh — tts-erp 测试前置依赖一键安装（幂等，可重复执行）
+# scripts/envscripts/envsetup/install-test-deps.sh — tts-erp 测试前置依赖一键安装（幂等，可重复执行）
 #
 # 目标：让 `bash scripts/test_isolated.sh ...` 在一台干净机器上能直接跑起来。
 #
@@ -9,11 +9,11 @@
 #   scripts/test_isolated.sh     唯一标准测试入口（克隆 tts_erp_test_template 跑临时库）
 #
 # 用法：
-#   bash setup/install-test-deps.sh              # 交互式
-#   sudo bash setup/install-test-deps.sh         # 一次性装完系统包 + venv 依赖
-#   bash setup/install-test-deps.sh --dry-run    # 只打印将要执行的命令，不改动系统
-#   bash setup/install-test-deps.sh --check      # 只做体检，不装任何东西
-#   bash setup/install-test-deps.sh -h           # 全部选项
+#   bash scripts/envscripts/envsetup/install-test-deps.sh              # 交互式
+#   sudo bash scripts/envscripts/envsetup/install-test-deps.sh         # 一次性装完系统包 + venv 依赖
+#   bash scripts/envscripts/envsetup/install-test-deps.sh --dry-run    # 只打印将要执行的命令，不改动系统
+#   bash scripts/envscripts/envsetup/install-test-deps.sh --check      # 只做体检，不装任何东西
+#   bash scripts/envscripts/envsetup/install-test-deps.sh -h           # 全部选项
 #
 # 会做什么：
 #   1 系统包     postgresql-client（psql / createdb / dropdb —— test_isolated.sh
@@ -30,7 +30,7 @@
 #     由人工执行，脚本不自行提权。
 set -euo pipefail
 
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO"
 
 DRY_RUN=0
@@ -103,7 +103,7 @@ echo "-- 2/4 venv 测试依赖（pytest 等不在 pyproject 运行时依赖里�
 VENV_PY="$REPO/.venv/bin/python"
 if [[ ! -x "$VENV_PY" ]]; then
   err ".venv 不存在或不可执行: $VENV_PY"
-  note "先跑 bash setup/install.sh（或 python3 -m venv .venv && .venv/bin/pip install -e .）"
+  note "先跑 bash scripts/envscripts/envsetup/install.sh（或 python3 -m venv .venv && .venv/bin/pip install -e .）"
 else
   if "$VENV_PY" -c "import pytest, pytest_asyncio" 2>/dev/null; then
     ok "pytest 已就绪 ($("$VENV_PY" -m pytest --version 2>/dev/null | head -1))"

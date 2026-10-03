@@ -16,8 +16,8 @@ bash scripts/test_isolated.sh api tests/api/test_auth_login.py::test_login_sets_
 bash scripts/test_isolated.sh --refresh-template fast
 
 # 测试前置依赖体检 / 安装（PostgreSQL 客户端、pytest、.env.test）
-bash setup/install-test-deps.sh --check
-sudo bash setup/install-test-deps.sh
+bash scripts/envsetup/install-test-deps.sh --check
+sudo bash scripts/envsetup/install-test-deps.sh
 ```
 
 > `scripts/test_isolated.sh` 是**唯一标准测试入口**。
@@ -125,6 +125,6 @@ MIAOSHOU_DEBUG_SIGN=1
   - `bash scripts/test_isolated.sh` 是唯一标准入口；直接调 `scripts/test.sh` 的 shared-DB 回退路径已弃用（不克隆临时库、直写常驻 `tts_erp_v3_test`，并发互删 `TEST_` 行），确实需要时必须 `flock -n /tmp/tts-erp-test.lock ...` 并记录原因
   - prod API service / `uvicorn` 本地启动仍读 `.env` 连 prod `tts_erp`，**零变更**
   - 安全护栏：tests/conftest.py 检测到 pytest 将指向 prod-shape dbname（`tts_erp` / `tts_erp_prod`）会 hard exit
-  - scripts/test.sh 会在 .env.test 缺失时直接退出；`.env.test` 由 `bash setup/install-test-deps.sh` 生成
+  - scripts/test.sh 会在 .env.test 缺失时直接退出；`.env.test` 由 `bash scripts/envsetup/install-test-deps.sh` 生成
   - 需要 prod-shaped 数据时只导入到测试库：`bash scripts/import_prod_to_test.sh --yes`
 - **收尾标准**：跑不过 0 fail 不收尾
