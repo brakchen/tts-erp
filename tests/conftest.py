@@ -43,6 +43,40 @@ def _load_env() -> None:
 _load_env()
 
 
+# Test-safe defaults for keys the suite reads from the environment (2026-10-04).
+#
+# ``.env`` is gitignored and deliberately NOT linked into worktrees by
+# default (docs/guides/agent-testing.md §worktree), so a clean checkout
+# has none of these — yet several tests depend on them being present:
+#
+# - ``TTS_ERP_AUTH_MODE``: tests that build the app directly (e.g.
+#   ``api_client_focused``, the onboard-page redirect test) rely on the
+#   production ``enforce`` posture; without it auth silently falls back
+#   to ``off`` and every role-guard assertion (401/403/302) fails.
+# - ``TTS_ERP_FERNET_KEY``: oauth state/credential encryption. Note
+#   ``tests/jobs_*`` / ``tests/proxy`` conftests set the same default,
+#   but only when those directories are *collected* — running a
+#   selection such as ``pytest tests/api/...`` leaves the key unset,
+#   which is why the failure set drifted with the selection.
+# - ``TIKTOK_SERVICE_ID``: oauth authorize needs it to build the link,
+#   and the env-fallback app pair below only applies to that exact id.
+# - ``TIKTOK_APP_KEY`` / ``TIKTOK_APP_SECRET``: the authorize 200 path
+#   resolves an App pair for the env service_id (DB pair wins otherwise).
+#
+# ``setdefault`` keeps real values winning: ``.env`` (loaded above) or
+# an explicitly exported variable still overrides these, so the main
+# checkout's behaviour is unchanged.
+_TEST_ENV_DEFAULTS = {
+    "TTS_ERP_AUTH_MODE": "enforce",
+    "TTS_ERP_FERNET_KEY": "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=",
+    "TIKTOK_SERVICE_ID": "test_service_api_1",
+    "TIKTOK_APP_KEY": "test_app_key_api",
+    "TIKTOK_APP_SECRET": "test_app_secret_api",
+}
+for _k, _v in _TEST_ENV_DEFAULTS.items():
+    os.environ.setdefault(_k, _v)
+
+
 # Append +psycopg driver if .env gave plain postgresql:// (legacy URL
 # format). psycopg2 is not installed in this environment.
 def _coerce_psycopg(url: str) -> str:

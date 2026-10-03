@@ -26,6 +26,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+# 与其他 tests/api 用例一致：归入 domain_api，否则 `scripts/test.sh api <file>`
+# 的 `-m domain_api` 过滤会把本文件整体静默反选（exit 5），造成
+# "选择集不同、失败集合漂移"的错觉（f-ea6e48a5-f64）。
+pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
+
+
 # ---------------------------------------------------------------------------
 # Test app + dependency overrides
 # ---------------------------------------------------------------------------
