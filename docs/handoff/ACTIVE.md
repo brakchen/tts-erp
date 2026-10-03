@@ -16,3 +16,4 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| tests-schema-tidy | 散落测试归入 tests/（e2e 子目录）+ schema 快照迁入 docs/schema/ 并按当前结构重生成 | 01a101e0-0c40-753a-aac7-9c0d9eb9f82e | `tests-schema-tidy` / `.worktrees/tests-schema-tidy` | `test_e2e.py`；`test_e2e_finance.py`；`tests/`；`schema_tts_erp.sql`；`tts_erp_v2/storage/schema_storage.sql`；`docs/schema/`；`scripts/regen_schema.py`；`scripts/test.sh`；`pyproject.toml`；`docs/guides/commands-reference.md`；`docs/guides/test-domains.md`；`docs/architecture/process-architecture.md`；`README.md`；`CHANGELOG.md`；其余文件仅改路径字符串 | active | — | — | 2026-10-03T23:20Z |
