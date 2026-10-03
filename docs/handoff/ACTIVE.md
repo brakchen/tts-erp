@@ -16,4 +16,3 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| spu-roi-drill-summary | SPU 明细大盘与整体大盘同组同指标（去预测内容）并分组展示 | 01a10240-43f4-753a-aac7-9c15b7056ef8 | `feature/spu-roi-drill-summary` / `.worktrees/spu-roi-drill-summary` | `tts_erp_v2/static/js/spu-profitability-page.js`；`tests/api/test_spu_roi_api.py`；`CHANGELOG.md` | ready | 035eea6 | c4a3f28 | 2026-10-03T15:55Z |
