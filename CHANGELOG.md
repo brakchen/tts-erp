@@ -1,5 +1,14 @@
 # tts-erp CHANGELOG
 
+## 2026-10-03 — SPU ROI 主表与筛选面板左右对齐
+
+- `.op-table-wrap` 补上与 `#toolbar` / `#summaries` / `.op-pager` 一致的水平内缩
+  （Bootstrap 工具类 `px-3 px-lg-4`），容器同时补通栏 `background: var(--paper)`：
+  修复主表列比上方筛选面板、大盘卡片、底部分页左右外凸 22.5px（lg 断点）的
+  「表格没对齐」问题。内缩只用工具类、不在 `spu-roi.css` 里手写断点（该文件禁止
+  `@media`，见响应式布局回归测试）。
+- 新增回归测试 `test_spu_roi_table_wrap_content_insets_match_toolbar`，并附只读探针
+  `scripts/probe_spu_table_alignment.js`（渲染页 + mock 接口，度量表头/表体与各分区间距）。
 ## 2026-10-03 — e2e 测试归位 tests/e2e/；schema 快照迁入 docs/schema/ 并对准当前结构
 
 - **散落的 e2e 脚本归位**：根目录 `test_e2e.py` / `test_e2e_finance.py` 迁入 `tests/e2e/`，
