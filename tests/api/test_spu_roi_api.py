@@ -4032,6 +4032,10 @@ def test_spu_roi_settlements_tab_uses_chinese_headers_and_status() -> None:
     assert "结算金额(CNY)" in tab
     assert "对账单时间" in tab
     assert "订单状态" in tab
+    # 「分摊比」易被误读成“分摊多少钱给平台”（2026-10-03 用户拍板），改名后旧名不得回归
+    assert "本 SPU 占单比" in tab
+    assert "分摊比" not in tab
+    assert "与「给平台分摊多少钱」无关" in tab
     assert "本 SPU 行金额 ÷ 整单金额" in tab
     # 原始枚举/字段名不得再作为表头直出
     assert 'el("th", null, "SETTLEMENT")' not in tab
