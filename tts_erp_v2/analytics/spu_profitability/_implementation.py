@@ -1052,6 +1052,7 @@ _SQL_DETAIL_SETTLEMENTS = text(
     """
     SELECT so.id AS order_pk,
            so.order_id,
+           so.status AS order_status,
            st.id AS txn_pk,
            st.transaction_time AS statement_time
     FROM commerce.sales_orders so
@@ -3081,6 +3082,7 @@ def _detail_settlements(
         settlements.append(
             {
                 "order_id": r["order_id"],
+                "status": r["order_status"],
                 "statement_time": r["statement_time"],
                 "share_ratio": share_ratio,
                 "components": components,

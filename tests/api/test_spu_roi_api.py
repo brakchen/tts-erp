@@ -4013,6 +4013,100 @@ def test_spu_roi_pnl_cogs_rows_show_qty_times_unit_cost() -> None:
     assert "fmtMoney(val)" in pnl
 
 
+def test_spu_roi_settlements_tab_uses_chinese_headers_and_status() -> None:
+    """结算钻取表头必须中文化（SETTLEMENT/statement 不得直出）并带订单状态列。"""
+    from pathlib import Path
+
+    js = (
+        Path(__file__).resolve().parents[2]
+        / "tts_erp_v2"
+        / "static"
+        / "js"
+        / "spu-profitability-page.js"
+    ).read_text(encoding="utf-8")
+    tab = js.split('if (tab === "settlements")', 1)[1].split(
+        'if (tab === "orders")', 1
+    )[0]
+
+    # 中文表头 + 口径提示
+    assert "结算金额(CNY)" in tab
+    assert "对账单时间" in tab
+    assert "订单状态" in tab
+    assert "本 SPU 行金额 ÷ 整单金额" in tab
+    # 原始枚举/字段名不得再作为表头直出
+    assert 'el("th", null, "SETTLEMENT")' not in tab
+    assert 'el("th", null, "statement")' not in tab
+    # 订单状态列走 enum-map 翻译；0 元流水必须标注
+    assert 'tr("order_status", s.status)' in tab
+    assert "已取消/冲销" in tab
+    assert "无入账" in tab
+
+
+def test_spu_roi_zero_net_settlement_with_refund_stays_settled(
+    api_client, readonly_key, db_engine
+):
+    """0 元结算 + 退款组件 = 已结算且全额退款，必须留在已结算桶（口径钉死）。
+
+    2026-10-03 只读核查：生产 0 元 SETTLEMENT 流水全部落在取消单上（不进白名单），
+    有效单流水 SETTLEMENT 均非 0；「SETTLEMENT=0 + CUSTOMER_REFUND≠0」是已结算
+    全额退款单的正常形态（_seed_terminal_delivery_risk_scenario 有意钉死）。若把
+    这类单改判为未结算，会把已退款订单重新估成未结算收入、虚增净收入
+    （finding f-71e76e93-71b 复核结论：维持现状）。
+    """
+    from decimal import Decimal
+
+    from sqlalchemy.orm import Session
+
+    def scenario(sess) -> int:
+        shop_pk = _seed_shop(sess, "TEST_ZERO_NET_SETTLE")
+        spu_pk = _seed_spu(sess, shop_pk, "TEST_SPU_ZERO_NET_SETTLE")
+        order_pk = _seed_order_line(
+            sess,
+            shop_pk=shop_pk,
+            spu_pk=spu_pk,
+            order_id="TEST_ORDER_ZERO_NET_SETTLE",
+            status="DELIVERED",
+            line_ext="TEST_LINE_ZERO_NET_SETTLE",
+            qty="1",
+            unit_price="100000",
+            paid=True,
+        )
+        _seed_settlement(
+            sess,
+            order_pk=order_pk,
+            external_id="TEST_TXN_ZERO_NET_SETTLE",
+            amount_vnd="0",
+            customer_refund_vnd="-100000",
+        )
+        return spu_pk
+
+    with Session(db_engine) as sess:
+        spu_pk = _seed(sess, scenario)
+
+    h = {"Authorization": f"Bearer {readonly_key}"}
+    r = api_client.get(
+        "/v2/analytics/spu-roi", headers=h, params={"q": "TEST_SPU_ZERO_NET_SETTLE"}
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["total"] == 1, body["items"]
+    item = body["items"][0]
+
+    # 已结算全额退款：结算净额 0，且不得再进未结算估算（否则虚增收入）
+    assert Decimal(item["settled_net"]) == 0
+    assert Decimal(item["unsettled_net"]) == 0
+    assert item["settled_order_count"] == 1
+    # 已结算样本必须包含它（projection_basis 口径）
+    assert item["projection_basis_order_count"] == 1
+
+    # 钻取 /orders 同口径：该单显示已结算
+    r2 = api_client.get(f"/v2/analytics/spu-roi/{spu_pk}/orders", headers=h)
+    assert r2.status_code == 200, r2.text
+    rows = r2.json()["orders"]
+    assert len(rows) == 1
+    assert rows[0]["is_settled"] is True
+
+
 def test_spu_roi_cost_and_refund_warnings_use_distinct_badges() -> None:
     """缺成本与高退款必须用可直接辨认的不同标识，不能共用 ⚠。"""
     from pathlib import Path
