@@ -5,38 +5,31 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>枚举映射管理 · tts-erp</title>
   <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
+  <link rel="stylesheet" href="../../static/css/tokens.css?v={{ css_version('tokens.css') }}">
+  <link rel="stylesheet" href="../../static/css/common.css?v={{ css_version('common.css') }}">
   <style>
-    :root {
-      --mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
-      --sans: 'Inter', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
-      --bg: #f8f6f3; --card: #fff; --border: #e2ddd5; --accent: #5b6abf;
-      --text: #2c2c2c; --muted: #888; --danger: #c0392b;
-    }
-    html, body { font-family: var(--sans); font-size: 14px; background: var(--bg); color: var(--text); margin: 0; }
     .wrap { max-width: 960px; margin: 0 auto; padding: 24px 20px 64px; }
     .header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
     .header h1 { font-size: 20px; margin: 0; }
-    .header a { font-family: var(--mono); font-size: 12px; color: var(--muted); text-decoration: none; border: 1px solid var(--border); padding: 3px 8px; }
+    .header a { font-family: var(--mono); font-size: 12px; color: var(--muted); text-decoration: none; border: 1px solid var(--rule-soft); padding: 3px 8px; }
     .header a:hover { border-color: var(--accent); color: var(--accent); }
     .tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 16px; }
-    .tabs button { font-family: var(--sans); font-size: 13px; padding: 6px 14px; border: 1px solid var(--border); background: var(--card); cursor: pointer; border-radius: 4px; }
+    .tabs button { font-family: var(--sans); font-size: 13px; padding: 6px 14px; border: 1px solid var(--rule-soft); background: var(--paper); cursor: pointer; border-radius: var(--radius); }
     .tabs button.is-active { background: var(--accent); color: #fff; border-color: var(--accent); }
     .tabs button:hover:not(.is-active) { border-color: var(--accent); }
-    table { width: 100%; border-collapse: collapse; background: var(--card); }
-    th, td { padding: 8px 12px; border: 1px solid var(--border); text-align: left; font-size: 13px; }
-    th { background: #f0ede8; font-weight: 600; }
-    td input { width: 100%; border: 1px solid var(--border); padding: 4px 6px; font-size: 13px; font-family: var(--sans); box-sizing: border-box; }
+    table { width: 100%; border-collapse: collapse; background: var(--paper); }
+    th, td { padding: 8px 12px; border: 1px solid var(--rule-soft); text-align: left; font-size: 13px; }
+    th { background: var(--paper-deep); font-weight: 600; }
+    td input { width: 100%; border: 1px solid var(--rule-soft); padding: 4px 6px; font-size: 13px; font-family: var(--sans); box-sizing: border-box; }
     td input:focus { outline: none; border-color: var(--accent); }
-    .actions { display: flex; gap: 6px; }
-    .btn { font-family: var(--sans); font-size: 12px; padding: 4px 10px; border: 1px solid var(--border); background: var(--card); cursor: pointer; border-radius: 3px; }
+    .btn { font-family: var(--sans); font-size: 12px; padding: 4px 10px; border: 1px solid var(--rule-soft); background: var(--paper); cursor: pointer; border-radius: var(--radius); }
     .btn:hover { border-color: var(--accent); }
     .btn-danger { color: var(--danger); border-color: var(--danger); }
     .btn-danger:hover { background: var(--danger); color: #fff; }
     .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-    .btn-primary:hover { opacity: 0.85; }
-    .add-row { display: flex; gap: 8px; align-items: center; margin-top: 12px; padding: 10px 12px; background: var(--card); border: 1px solid var(--border); }
-    .add-row input { flex: 1; min-width: 120px; border: 1px solid var(--border); padding: 5px 8px; font-size: 13px; }
-    .toast { position: fixed; bottom: 20px; right: 20px; padding: 10px 18px; background: #27ae60; color: #fff; border-radius: 4px; font-size: 13px; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+    .add-row { display: flex; gap: 8px; align-items: center; margin-top: 12px; padding: 10px 12px; background: var(--paper); border: 1px solid var(--rule-soft); }
+    .add-row input { flex: 1; min-width: 120px; border: 1px solid var(--rule-soft); padding: 5px 8px; font-size: 13px; }
+    .toast { position: fixed; bottom: 20px; right: 20px; padding: 10px 18px; background: var(--ok); color: #fff; border-radius: var(--radius); font-size: 13px; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
     .toast.show { opacity: 1; }
     .empty { padding: 40px; text-align: center; color: var(--muted); }
       {{ sidebar_css(current_page) }}
