@@ -3801,7 +3801,10 @@ def test_spu_roi_page_uses_bootstrap_responsive_layout(api_client, readonly_key)
         / "spu-profitability-page.js"
     )
     src = js_path.read_text(encoding="utf-8")
-    assert "row-cols-2 row-cols-sm-3 row-cols-lg-4 row-cols-xxl-4" in src
+    # 明细大盘指标网格与页首整体大盘同栅格（op-counter-* 分组卡片），
+    # 不再自定义 row-cols 断点列数。
+    assert "row-cols-1 row-cols-md-2 row-cols-xl-3 row-cols-xxl-4" in src
+    assert "op-counter-group-label" in src
     assert "content.classList.add(" in src
     for table_class in ("table-sm", "table-hover", "align-middle", "op-tab-table"):
         assert f'"{table_class}"' in src
@@ -3914,7 +3917,7 @@ def test_spu_roi_dashboard_metrics_are_never_truncated() -> None:
 
 
 def test_spu_roi_drill_summary_matches_actual_dashboard_metrics() -> None:
-    """每个 SPU 展开的明细大盘必须与页首实际大盘展示相同指标。"""
+    """每个 SPU 展开的明细大盘必须与页首整体大盘同组同指标（预测内容除外）。"""
     from pathlib import Path
 
     src = (
@@ -3952,6 +3955,34 @@ def test_spu_roi_drill_summary_matches_actual_dashboard_metrics() -> None:
     for legacy_label in ("CPA", "单位成本", "已结算单", "全损件数", "净收入"):
         assert f'cell("{legacy_label}"' not in summary
     assert "row-cols-xxl-4" in summary
+
+    # 与页首整体大盘同样的分组：总览/有效/退款/全损/国内取消/利润/ROI（无预测组）。
+    for group_label in ("总览", "有效", "退款", "全损", "国内取消", "利润", "ROI"):
+        assert f'group("{group_label}"' in summary
+    # 分组卡片样式与页首一致（op-counter-*）。
+    assert "op-counter-group-label" in summary
+    assert "op-counter-item" in summary
+    assert "op-counter-num" in summary
+    # 口径提示复用页首同一份 data-tip（summaryHint ← #sum-*），两处口径不漂移。
+    assert "function summaryHint" in src
+    for sum_id in (
+        "sum-total-orders",
+        "sum-spend",
+        "sum-orders",
+        "sum-sales",
+        "sum-refund-count",
+        "sum-refund-rate",
+        "sum-loss-qty",
+        "sum-loss-rate",
+        "sum-cancel-count",
+        "sum-cancel-rate",
+        "sum-net-profit",
+        "sum-roi",
+        "sum-roi-breakeven",
+        "sum-roi-ad-actual",
+        "sum-roi-ad",
+    ):
+        assert f'summaryHint("{sum_id}")' in summary
 
 
 def test_spu_roi_cost_and_refund_warnings_use_distinct_badges() -> None:
@@ -4271,15 +4302,13 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert "formula_pending" not in js_src
 
 
-def test_spu_roi_drill_summary_displays_projection_separately() -> None:
+def test_spu_roi_drill_summary_excludes_projection_metrics() -> None:
+    """2026-10-03 拍板：明细大盘与整体大盘保持一致，但预测内容不展示。"""
     from pathlib import Path
 
+    repo = Path(__file__).resolve().parents[2]
     src = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "spu-profitability-page.js"
+        repo / "tts_erp_v2" / "static" / "js" / "spu-profitability-page.js"
     ).read_text(encoding="utf-8")
     summary = src.split("function renderProfitSummary", 1)[1].split(
         "function renderProfitTab", 1
@@ -4291,12 +4320,15 @@ def test_spu_roi_drill_summary_displays_projection_separately() -> None:
         "it.projection_completed_full_loss_order_count",
         "it.projection_terminal_full_loss_order_count",
         "it.completed_full_loss_rate",
+        "it.unsettled_order_count",
         "it.unresolved_unsettled_order_count",
         "it.unresolved_unsettled_qty",
         "it.unresolved_unsettled_sales",
         "it.full_loss_exposure_unsettled_sales",
+        "it.confirmed_unsettled_refund_amount",
         "it.confirmed_full_loss_exposure_refund_amount",
         "it.confirmed_unsettled_full_loss_order_count",
+        "it.confirmed_unsettled_full_loss_qty",
         "it.projected_future_refund_amount",
         "it.projected_future_full_loss_order_count",
         "it.projected_future_full_loss_qty",
@@ -4308,17 +4340,52 @@ def test_spu_roi_drill_summary_displays_projection_separately() -> None:
         "it.projected_roi_breakeven",
         "it.projected_ad_system_actual_roi",
         "it.projected_ad_system_breakeven_roi",
+        "it.projected_nc_prime",
+        "it.projected_cogs_kept",
     ):
-        assert field in summary
-    assert "预计净利润" in summary
-    assert "预计ROI" in summary
-    assert "预计保本ROI" in summary
-    assert "预计广告系统ROI" in summary
-    assert "预计广告系统保本ROI" in summary
-    assert "已完结订单全损率" in summary
-    assert "预计拒收金额率" not in summary
-    assert "预计终局全损件" not in summary
-    assert "预计财务ROI" not in summary
+        assert field not in summary
+    for label in (
+        "预测状态",
+        "已完结样本订单",
+        "已完结全损订单",
+        "其中终局物流全损订单",
+        "已完结订单全损率",
+        "未结算订单",
+        "待确认未结算订单",
+        "待确认未结算件",
+        "待确认未结算销售",
+        "未送达风险销售",
+        "已确认未结算退款",
+        "已确认风险池退款",
+        "已确认未结算全损单",
+        "已确认未结算全损件",
+        "预计未来新增退款",
+        "预计未来新增全损单",
+        "预计未来新增全损件",
+        "预计全损成本",
+        "预计未结算净收入",
+        "预计净收入",
+        "预计净利润",
+        "预计ROI",
+        "预计保本ROI",
+        "预计广告系统ROI",
+        "预计广告系统保本ROI",
+        "预计NC′",
+        "预计保留货本",
+        "预计拒收金额率",
+        "预计终局全损件",
+        "预计财务ROI",
+    ):
+        assert f'cell("{label}"' not in summary
+    for group_label in ("预测依据", "未结算预测对象", "预计"):
+        assert f'group("{group_label}"' not in summary
+
+    # 页首整体大盘保留预测内容（本次只收窄明细大盘，整体大盘不变）。
+    page_html = (
+        repo / "tts_erp_v2" / "templates" / "pages" / "spu-profitability.html"
+    ).read_text(encoding="utf-8")
+    assert 'id="sum-projection-status"' in page_html
+    assert 'id="sum-projected-net-profit"' in page_html
 
 
 def test_spu_roi_page_d8_no_column_toggles(api_client, readonly_key):
