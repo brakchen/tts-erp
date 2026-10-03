@@ -1,0 +1,48 @@
+/* tokens.css — 暖纸编辑体设计令牌（canonical）
+ *
+ * 全站唯一的 :root 令牌来源。页面模板与页面级 CSS **不得再定义 :root 令牌**；
+ * 需要不同密度/语义时，覆盖使用令牌的具体规则，而不是另起一套令牌名。
+ *
+ * 历史背景：重构前 11 个页面各自维护 :root，衍生出 4 套命名体系
+ *   1. 暖纸编辑体  --paper/--ink/--rule/--accent(陶土橙)   6 页
+ *   2. 灰蓝体系    --bg/--card/--border/--accent(靛蓝)     2 页 (enum-map, users)
+ *   3. rc 命名空间 --rc-*                                  1 页 (runtime-configs)
+ *   4. signal 体系 --signal*/--warning                     1 页 (ad-daily)
+ * 2026-10-03 (feature/ui-style-unification lane) 统一到本文件的暖纸编辑体。
+ *
+ * 取值来源：多数投票 + 暖纸编辑体旗舰页 dashboard.html。字体栈取最完备的一支，
+ * 保证 JetBrains Mono / Noto Sans SC / Noto Serif SC 缺失时仍能平滑回退。
+ */
+
+:root {
+  /* ── 纸面（背景层次） ─────────────────────────────── */
+  --paper: #F4EFE4;
+  --paper-deep: #EAE3D2;
+
+  /* ── 墨（文字层次） ───────────────────────────────── */
+  --ink: #1B1814;
+  --ink-soft: #4A4239;
+  --muted: #6E6657;
+
+  /* ── 界线（分割线/描边） ──────────────────────────── */
+  --rule: #C9BFA8;
+  --rule-soft: #DDD4BF;
+
+  /* ── 语义色 ───────────────────────────────────────── */
+  /* --accent 陶土橙是暖纸编辑体的识别色；--accent-deep 用于 hover/pressed */
+  --accent: #B8390E;
+  --accent-deep: #8F2C09;
+  --ok: #2F6B3E;
+  --warn: #8A6D1A;
+  --danger: #8C1A1A;
+
+  /* ── 字体 ─────────────────────────────────────────── */
+  --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', 'Fira Code', Consolas, 'Liberation Mono', ui-monospace, monospace;
+  --sans: 'Inter', 'Noto Sans SC', 'Source Han Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --serif: 'Noto Serif SC', 'Source Han Serif SC', 'Iowan Old Style', 'Apple Garamond', Georgia, ui-serif, serif;
+
+  /* ── 形状 ─────────────────────────────────────────── */
+  /* 暖纸编辑体是直角体系：全站圆角为 0。个别控件（如 toast 的 4px）需在
+   * 自己的规则里显式覆盖，不要改这个基准值。 */
+  --radius: 0;
+}
