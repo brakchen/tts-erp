@@ -5,7 +5,7 @@
 2. 调用 repository 写入业务表
 3. 返回写入行数
 
-解析规则严格按 tech-doc/chrome-ext-order-sync-design.md §10。
+解析规则严格按 docs/archive/chrome-ext-order-sync-design.md §10。
 """
 
 from __future__ import annotations

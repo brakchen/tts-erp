@@ -89,7 +89,7 @@ def require_role_at_least(request: Request, min_role: str) -> None:
 # no prod-shape guard and ``require_role_at_least("readwrite")`` was
 # satisfied by any non-prod test key — the wipe blanked 14,719 rows
 # of ``plugin.ad_daily`` (246 campaigns × 65 days). See
-# ``tech-doc/incident-reports/2026-09-13-ad-daily-purge.md``.
+# ``docs/ops/incident-reports/2026-09-13-ad-daily-purge.md``.
 #
 # This module provides a SINGLE source of truth for "is this code path
 # about to mutate prod data, and if so, who authorised it?". Every

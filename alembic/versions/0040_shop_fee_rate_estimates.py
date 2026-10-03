@@ -43,8 +43,8 @@ spu-roi 估算未结算订单抽成用的费率 r̂ 此前是全局硬编码基�
 解释某周净利润波动；读取侧取每店最新一行，超过
 ``MAX_ESTIMATE_AGE_DAYS`` 视为过期并回退全局基线。无快照 = 回退基线。
 
-详见 ``tech-doc/analytics/spu-real-roi-dashboard.md``（费率段）与
-``tech-doc/external-api.md``（``meta.fee`` 契约）。
+详见 ``docs/archive/spu-real-roi-dashboard.md``（费率段）与
+``docs/api/external-api.md``（``meta.fee`` 契约）。
 """
 
 from __future__ import annotations

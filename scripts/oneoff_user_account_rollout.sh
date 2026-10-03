@@ -5,8 +5,8 @@
 # 测试形态库验证。本脚本把该人工流程编排为一步，含显式确认护栏。
 #
 # 依据：
-#   tech-doc/user-account-authz-design.md §14 上线步骤
-#   tech-doc/agent-safety.md §2/§3  迁移护栏（ALLOW_PROD_DESTRUCTIVE=1 仅限
+#   docs/design/user-account-authz-design.md §14 上线步骤
+#   docs/guides/agent-safety.md §2/§3  迁移护栏（ALLOW_PROD_DESTRUCTIVE=1 仅限
 #                                   本脚本的 alembic 子进程，见下）
 #   scripts/envsetup/install.sh                同仓部署脚本的确认/输出约定（本脚本沿用）
 #

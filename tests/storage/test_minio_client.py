@@ -5,7 +5,7 @@ the module boundary inside ``tts_erp_v2.storage.minio_client``. That
 matches the design-doc promise that all SDK calls go through
 ``MinioClient`` and is what makes the unit tests fast + offline.
 
-Covers (per tech-doc/procurement-ui-redesign.md §5):
+Covers (per docs/archive/procurement-ui-redesign.md §5):
 - ``MinioClient.__init__`` reads env, fails fast on missing config
 - ``MinioClient.ensure_bucket`` idempotent (skip when exists)
 - ``MinioClient.presign_put`` / ``presign_get`` shape + content-type

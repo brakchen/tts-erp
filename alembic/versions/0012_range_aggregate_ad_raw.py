@@ -4,7 +4,7 @@ Revision ID: 0012_range_aggregate_ad_raw
 Revises: 0011_oauth_states
 Create Date: 2026-09-07
 
-执行依据: tech-doc/analytics/range-aggregate-history-sync.md §4（Design A，字段级
+执行依据: docs/archive/range-aggregate-history-sync.md §4（Design A，字段级
 模型已确认）。决策记录（context-mode `analytics-range-aggregate-decisions`）：
 
 1. `day` 单字段不再表达区间语义 → 拆为区间 `[day_start .. day_end]`：

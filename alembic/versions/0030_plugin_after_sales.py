@@ -23,8 +23,8 @@
 - tts_erp_v2/plugin/orders/repository.py: 加 upsert_after_sale + upsert_after_sale_item
 - tts_erp_v2/plugin/orders/parser.py: 加 parse_after_sales_response (stub, 0 hit 数据)
 - schema_tts_erp.sql: 同步加 2 张表 CREATE TABLE
-- tech-doc/intercept-plugin-canonical.md: §1 加表清单 + §3 加 4 域 ID 映射
-- tech-doc/tiktok-seller-center-api-catalog.md: §7.4.4 reverse_module 加跨表 cross-ref
+- docs/api/dumps-data-contract.md: §1 加表清单 + §3 加 4 域 ID 映射
+- docs/reference/tiktok-seller-center-api-catalog.md: §7.4.4 reverse_module 加跨表 cross-ref
 - tests/plugin/orders/test_parser_after_sales.py: 加 parser 测试
 
 downgrade DROP 两张表（无数据回填，因为扩展尚未抓到该 endpoint）。

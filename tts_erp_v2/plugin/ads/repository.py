@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 log = logging.getLogger("tts_erp_v2.plugin.ads.repository")
 
 # ─── daily-sync-with-coverage 结构化写入 SQL ─────────────────────────
-# tech-doc/analytics/daily-sync-with-coverage.md §5.1 / §5.3
+# docs/design/daily-sync-with-coverage.md §5.1 / §5.3
 
 SQL_COVERAGE_DAILY = """
 SELECT campaign_id, array_agg(DISTINCT day ORDER BY day) AS days

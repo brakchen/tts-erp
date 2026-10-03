@@ -1,4 +1,4 @@
-"""security.* — 用户账号体系 ORM（设计：tech-doc/user-account-authz-design.md §4）。
+"""security.* — 用户账号体系 ORM（设计：docs/design/user-account-authz-design.md §4）。
 
 6 张表，与现有 ``security.api_keys`` 并列，全部独立于 API key 数据：
 - users            账号（用户名 + argon2id 密码哈希 + 状态）

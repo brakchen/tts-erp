@@ -130,7 +130,7 @@ JOBS: dict[str, JobSpec] = {
     # (stored as fx.exchange_rate_snapshots.next_update_at) passes, so a
     # healthy install makes ~1 request/day. The API process never dials
     # upstream — all reads serve the cached fx.* tables
-    # (tech-doc/fx-exchange-rates.md).
+    # (docs/design/fx-exchange-rates.md).
     "fx.sync": JobSpec(
         job_name="fx.sync",
         module_path="tts_erp_v2.jobs.exchangerate.sync",
@@ -233,7 +233,7 @@ JOBS: dict[str, JobSpec] = {
         is_tiktok=False,
         entrypoint="run_scheduled",
     ),
-    # ── Analytics retention 已于 2026-09-05 reorg（tech-doc/analytics/
+    # ── Analytics retention 已于 2026-09-05 reorg（docs/archive/
     # reorg-plan.md 决策 #1-#4）摘除：ad_records / ad_audit_log / 等 4 张
     # 表已 drop,审计改文件日志,无对象可 purge。JOBS 数 13 → 12。
     # 2026-09-05 晚：spu.image_mirror 加入 → 12 → 13（见 coverage 测试）。

@@ -11,7 +11,7 @@ Env:
 - ``TTS_ERP_SESSION_SECURE``   ``1`` default; set ``0`` for local http dev
 - ``TTS_ERP_LOGIN_RATE_LIMIT`` login attempts/min per client; default 10
 
-Design: tech-doc/user-account-authz-design.md
+Design: docs/design/user-account-authz-design.md
 """
 
 from __future__ import annotations

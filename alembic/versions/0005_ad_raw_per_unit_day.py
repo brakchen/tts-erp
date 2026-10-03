@@ -4,7 +4,7 @@ Revision ID: 0005_ad_raw_per_unit_day
 Revises: 0004_analytics_ad_schema
 Create Date: 2026-09-02
 
-tech-doc/analytics-v2-migration-plan.md (4 决策已敲定):
+docs/analytics-v2-migration-plan.md (4 决策已敲定):
 
 D2 (schema) — dump 架构落地：
 - 新增 analytics.ad_raw 表（immutable source-of-truth，每条 raw dump 一行）

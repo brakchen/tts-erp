@@ -1,4 +1,4 @@
-"""页面权限点注册表（设计：tech-doc/user-account-authz-design.md §7.3）。
+"""页面权限点注册表（设计：docs/design/user-account-authz-design.md §7.3）。
 
 权限点与侧边栏页面一一对应（``page:<page_id>``），是权限体系的唯一页面清单
 来源：侧边栏渲染、alembic 种子、角色编辑表单共用本清单。

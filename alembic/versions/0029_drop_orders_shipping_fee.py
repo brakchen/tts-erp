@@ -12,7 +12,7 @@ Create Date: 2026-09-14
   业务侧无人使用（搜索整个 tts-erp 仓库也找不到读这条列的代码或文档），属
   「加进来但从未被消费」的列
 - 同语义信息已隐含在 ``total_amount / payment_amount``（grand_total = sum(sku)+shipping_fee），
-  无需单独保留；详情见 tech-doc/tiktok-seller-center-api-catalog.md §4.5
+  无需单独保留；详情见 docs/reference/tiktok-seller-center-api-catalog.md §4.5
 
 变更（destructive, prod-shape dbname 需 ``ALLOW_PROD_DESTRUCTIVE=1``，
 由 ``alembic/env.py`` 中央 guard 拦截；agent 不自动跑 alembic upgrade）：
@@ -25,7 +25,7 @@ Create Date: 2026-09-14
 - tts_erp_v2/plugin/orders/repository.py::upsert_order: 删参数 + INSERT/UPDATE
 - tts_erp_v2/db/models/plugin.py::ChromeOrder: 删字段
 - schema_tts_erp.sql: 同步删列定义
-- tech-doc/chrome-ext-order-sync-design.md §3.3 + tech-doc/tiktok-seller-center-api-catalog.md
+- docs/archive/chrome-ext-order-sync-design.md §3.3 + docs/reference/tiktok-seller-center-api-catalog.md
   §4.5: 同步删/改文档
 - chrome-plugins/ads-data-sync 端协议 **未变** —— plugin 端未发 shipping_fee，
   协议契约未破坏

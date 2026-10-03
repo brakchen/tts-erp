@@ -1,7 +1,7 @@
 # AGENTS.md — tts-erp
 
 > Repository-wide instructions for coding agents. Read this file before changing anything.
-> Detailed procedures live in `tech-doc/`; this file keeps only rules that apply to most tasks.
+> Detailed procedures live in `docs/`; this file keeps only rules that apply to most tasks.
 
 ## 1. Instruction scope and precedence
 
@@ -18,15 +18,15 @@
 - Main code: `tts_erp_v2/`.
 - Tests: `tests/`.
 - Operational scripts: `scripts/`.
-- Architecture and active contracts: `tech-doc/`.
-- Work ownership registry: `handoff/ACTIVE.md`.
+- Architecture and active contracts: `docs/`.
+- Work ownership registry: `docs/handoff/ACTIVE.md`.
 - Live multi-agent coordination board: tower-do (`tower_do`, `tower_do_talk`, `tower_do_status`; see §8).
 
 ## 3. Non-negotiable safety boundaries
 
 - Never run tests against `tts_erp`, `tts_erp_prod`, or any prod-shaped database name.
-- Run tests only through `bash scripts/test_isolated.sh ...`; do not invoke pytest directly and do not call `scripts/test.sh` directly. The direct shared-DB path is deprecated — see `tech-doc/agent-testing.md`.
-- Agents must not run `bash scripts/test.sh all`, `bash scripts/test.sh coverage`, or migration suites archived under `tech-doc/_archive/migrate-v1-to-v2-2026-08-29/`. These paths include or restore production-touching migration behavior.
+- Run tests only through `bash scripts/test_isolated.sh ...`; do not invoke pytest directly and do not call `scripts/test.sh` directly. The direct shared-DB path is deprecated — see `docs/guides/agent-testing.md`.
+- Agents must not run `bash scripts/test.sh all`, `bash scripts/test.sh coverage`, or migration suites archived under `docs/archive/migrate-v1-to-v2-2026-08-29/`. These paths include or restore production-touching migration behavior.
 - Never execute `DELETE`, `TRUNCATE`, `DROP`, or irreversible `UPDATE` against production data without the documented guard and explicit human authorization.
 - Never run `alembic upgrade` against production. Agents may validate migrations only against test-shaped databases (`tts_erp_test_template`, ephemeral `tts_erp_test_*`, or shared fallback `tts_erp_v3_test`); production migration and restart are human-operated.
 - Do not add a destructive HTTP, CLI, migration, or job path without the shared guard from `tts_erp_v2.api.deps`.
@@ -36,7 +36,7 @@
 - Do not change middleware registration order in `tts_erp_v2/app.py`.
 - Never use repository-wide destructive Git commands such as `git reset --hard`, `git checkout -- .`, or `git clean -f`.
 
-Read `tech-doc/agent-safety.md` before any database, credential, migration, destructive, authentication, or production-adjacent change.
+Read `docs/guides/agent-safety.md` before any database, credential, migration, destructive, authentication, or production-adjacent change.
 
 ## 4. Domain invariants
 
@@ -54,7 +54,7 @@ cred = load_credentials(session, provider="tiktok", external_account_id=shop_id)
 - `shop_cipher` stays in the query string.
 - Sort signing keys alphabetically.
 - Sign the raw `json.dumps(..., ensure_ascii=False)` body; never URL-encode the body.
-- Read `tech-doc/tiktok-hmac-signing.md` before changing signing code.
+- Read `docs/reference/tiktok-hmac-signing.md` before changing signing code.
 
 ### HTTP success semantics
 
@@ -62,7 +62,7 @@ cred = load_credentials(session, provider="tiktok", external_account_id=shop_id)
 - Null response bodies, parser failures, and missing required response structures must not return `200`.
 - HTTP status is the success/failure signal; do not restore `rowsWritten`, `logId`, or `data.status` as parallel status channels.
 - Wire JSON/TypeScript uses `requestId`; Python and database code use `request_id`; headers use `x-request-id`.
-- Read `tech-doc/dumps-data-contract.md` before changing dumps endpoints or response envelopes.
+- Read `docs/api/dumps-data-contract.md` before changing dumps endpoints or response envelopes.
 
 ### Authentication and time
 
@@ -87,7 +87,7 @@ cred = load_credentials(session, provider="tiktok", external_account_id=shop_id)
 - `scripts/test_isolated.sh` is the default agent entry point: it clones `tts_erp_test_template` into a per-session ephemeral DB, sets `TTS_ERP_DB_URL_TEST`, delegates to `scripts/test.sh`, then drops the clone.
 - Refresh the template with `bash scripts/test_isolated.sh --refresh-template fast` when migrations/schema change or the template is missing/stale.
 - `scripts/test.sh` is only the low-level pytest wrapper that `test_isolated.sh` delegates to. **Calling it directly is deprecated**: it reuses the long-lived shared `tts_erp_v3_test` with no ephemeral clone, so concurrent runs delete each other's `TEST_` rows. Use `scripts/test_isolated.sh`. Falling back to it requires a deliberate decision (e.g. `createdb` unavailable) plus `flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast`, and the reason must be recorded.
-- Full command reference: `tech-doc/commands-reference.md`.
+- Full command reference: `docs/guides/commands-reference.md`.
 
 ### 5.1 Reuse-first implementation policy
 
@@ -114,7 +114,7 @@ Do not reimplement functionality that a suitable maintained dependency already p
 - Never run synchronous psycopg/database work inside an async handler.
 - Prefix test data with `TEST_`.
 - Put one-off scripts under `scripts/` with a descriptive `oneoff_`, `probe_`, `smoke_`, or `dump_` prefix.
-- Put environment-preparation and installation scripts under `scripts/envsetup/` (e.g. `scripts/envsetup/install.sh`, `scripts/envsetup/install-test-deps.sh`). These are idempotent, safe to re-run, and support `--dry-run` / `--check`. Do not mix them with one-off data scripts (`scripts/oneoff_*`) or with deployment docs (`setup/*.md`).
+- Put environment-preparation and installation scripts under `scripts/envsetup/` (e.g. `scripts/envsetup/install.sh`, `scripts/envsetup/install-test-deps.sh`). These are idempotent, safe to re-run, and support `--dry-run` / `--check`. Do not mix them with one-off data scripts (`scripts/oneoff_*`) or with deployment docs (`docs/ops/*.md`).
 - Use internal primary keys such as `shop_pk` and `spu_pk` for API filters; do not assume `shop_id` is accepted.
 - Keep naming conventional by layer: JSON/TypeScript camelCase, Python/SQL snake_case, HTTP headers lowercase-with-hyphens.
 - Do not restate formatter, linter, or type-checker rules here; follow the configured tools.
@@ -122,10 +122,10 @@ Do not reimplement functionality that a suitable maintained dependency already p
 ## 7. Worktree, review, and completion rules
 
 - Every task starts in a dedicated branch/worktree created from current `origin/master`. Do not develop task code in the main master worktree; use it only for short registry updates, or use a clean temporary coordination worktree when foreign WIP is present.
-- Before the first task edit, register the lane in `handoff/ACTIVE.md` with the real Pi session UUID and explicit file ownership. `handoff/ACTIVE.md` is coordination metadata and must not be listed as a lane-owned file.
+- Before the first task edit, register the lane in `docs/handoff/ACTIVE.md` with the real Pi session UUID and explicit file ownership. `docs/handoff/ACTIVE.md` is coordination metadata and must not be listed as a lane-owned file.
 - Track task decomposition, ownership, dependencies, and cross-session progress on tower-do (§8). The board complements but never replaces the lane registry.
 - `draft`/`active` lanes own their declared files. A `ready` lane is immutable and may be integrated by any session; session identity never blocks merge or cleanup.
-- Ready lanes merge in `ready_at` order by default. Before entering `ready`, merge current `origin/master` into the lane, resolve conflicts, rerun required checks, commit, and push; record both lane HEAD and the synchronized master commit. If master later gains non-registry changes, repeat synchronization and validation. Commits changing only `handoff/ACTIVE.md` do not invalidate the lane.
+- Ready lanes merge in `ready_at` order by default. Before entering `ready`, merge current `origin/master` into the lane, resolve conflicts, rerun required checks, commit, and push; record both lane HEAD and the synchronized master commit. If master later gains non-registry changes, repeat synchronization and validation. Commits changing only `docs/handoff/ACTIVE.md` do not invalidate the lane.
 - Serialize the final master merge, post-merge validation, registry cleanup, and push with `/tmp/tts-erp-master-merge.lock`. Build the prospective master commit in a clean temporary integration worktree, merge with `--no-ff`, validate that exact commit, then push it to master without force.
 - Do not modify or stash another lane's work. For shared hotspots, keep one writer and exchange a patch or create an explicit successor lane instead of waiting for the original session to return.
 - Keep each writable worktree owned by one writer unless separate worktrees are used.
@@ -191,7 +191,7 @@ Definition of done:
 6. Confirm the lane was synchronized with the master revision it integrated, then confirm the worktree and master are clean and the required branch/master pushes succeeded.
 7. Reconcile tower-do: complete delivered tasks with `changedFiles`, leave honest blocker state, and reply to relevant messages/findings.
 
-Detailed lifecycle, environment setup, conflict handling, and cleanup: `tech-doc/agent-git-workflow.md`.
+Detailed lifecycle, environment setup, conflict handling, and cleanup: `docs/guides/agent-git-workflow.md`.
 
 ## 8. 多会话 / 多 agent 协调（tower-do）
 
@@ -202,7 +202,7 @@ Detailed lifecycle, environment setup, conflict handling, and cleanup: `tech-doc
 | 层 | 工具 / 文件 | 职责 |
 | --- | --- | --- |
 | 实时任务协调 | `tower_do` / `tower_do_talk` / `tower_do_status` | 任务拆解、认领、依赖、留言、findings、完成回执 |
-| Git lane 登记 | `handoff/ACTIVE.md` | branch/worktree、文件归属、ready 队列、合并顺序（§7） |
+| Git lane 登记 | `docs/handoff/ACTIVE.md` | branch/worktree、文件归属、ready 队列、合并顺序（§7） |
 
 ### 8.1 三个工具
 
@@ -229,7 +229,7 @@ Detailed lifecycle, environment setup, conflict handling, and cleanup: `tech-doc
 
 ### 8.4 多 agent 并行与交接
 
-- 每个可写 worktree 只安排一个 writer；tower-do 的 task `scope` 应与 `handoff/ACTIVE.md` 的 lane 文件归属一致。板负责实时协作，§7 的 worktree、测试、提交、推送和合并规则仍是最终约束。
+- 每个可写 worktree 只安排一个 writer；tower-do 的 task `scope` 应与 `docs/handoff/ACTIVE.md` 的 lane 文件归属一致。板负责实时协作，§7 的 worktree、测试、提交、推送和合并规则仍是最终约束。
 - 把 `tower_do_status` 返回的 board 文件路径交给参与任务的子 agent，作为共享的 file-as-state；替子 agent 记账时使用其真实 id 作为 `as`。
 - agent 完成子任务后必须回写状态与 `changedFiles`，父会话再汇总依赖、运行整体验证并收尾。不要只在聊天里说“完成”而让板保持过期状态。
 - 发现不属于当前 scope 的问题时，优先创建 finding 并通知 owner；不要顺手修改别人的 lane。认领 finding 后要走 `accepted` → `done` / `rejected` / `snoozed` 生命周期，并在关闭或延期时写明原因。
@@ -238,15 +238,15 @@ Detailed lifecycle, environment setup, conflict handling, and cleanup: `tech-doc
 
 | When touching | Read first |
 | --- | --- |
-| Architecture, credentials, database layout | `tech-doc/architecture-overview.md` |
-| Destructive operations, migrations, production, auth | `tech-doc/agent-safety.md` |
-| Tests, fixtures, test database, baseline failures | `tech-doc/agent-testing.md` |
-| Worktrees, handoff, merge, push, conflict handling | `tech-doc/agent-git-workflow.md` |
-| Dumps endpoints and HTTP envelopes | `tech-doc/dumps-data-contract.md` |
-| TikTok signing | `tech-doc/tiktok-hmac-signing.md` |
-| External endpoints, roles, pagination, schemas | `tech-doc/external-api.md` |
-| Process/service architecture | `tech-doc/process-architecture.md` |
-| Miaoshou integration | `tech-doc/miaoshou-platform.md` |
-| Known recurring failures | `tech-doc/common-bugs.md` |
+| Architecture, credentials, database layout | `docs/architecture/architecture-overview.md` |
+| Destructive operations, migrations, production, auth | `docs/guides/agent-safety.md` |
+| Tests, fixtures, test database, baseline failures | `docs/guides/agent-testing.md` |
+| Worktrees, handoff, merge, push, conflict handling | `docs/guides/agent-git-workflow.md` |
+| Dumps endpoints and HTTP envelopes | `docs/api/dumps-data-contract.md` |
+| TikTok signing | `docs/reference/tiktok-hmac-signing.md` |
+| External endpoints, roles, pagination, schemas | `docs/api/external-api.md` |
+| Process/service architecture | `docs/architecture/process-architecture.md` |
+| Miaoshou integration | `docs/reference/miaoshou-platform.md` |
+| Known recurring failures | `docs/guides/common-bugs.md` |
 
-`tech-doc/_archive/` is historical reference only. Do not restore or execute archived code.
+`docs/archive/` is historical reference only. Do not restore or execute archived code.

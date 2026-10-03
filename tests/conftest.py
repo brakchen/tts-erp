@@ -111,7 +111,7 @@ elif _db_url_prod:
             # FAIL FAST on prod-shaped dbnames by default — only an
             # explicit env opt-in (TTS_ERP_TEST_OFF=1) can override, and
             # even then stderr still gets a loud banner. See
-            # ``tech-doc/incident-reports/2026-09-13-ad-daily-purge.md``.
+            # ``docs/ops/incident-reports/2026-09-13-ad-daily-purge.md``.
             test_off = os.environ.get("TTS_ERP_TEST_OFF", "0") == "1"
             if not test_off:
                 # NOTE: We use ``sys.exit(2)`` instead of ``pytest.exit()``

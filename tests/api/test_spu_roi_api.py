@@ -1,6 +1,6 @@
 """TDD 契约测试:GET /v2/analytics/spu-roi(SPU 实际 ROI 看板只读端点)+ /v2/pages/spu-roi。
 
-口径唯一真相 = biz-doc/analytics/spu-roi-profit-calculation.md v10（汇率必须来自
+口径唯一真相 = docs/business/spu-profitability.md v10（汇率必须来自
 数据库快照、K1=40 CNY/件、平台佣金基线 0.308）。
 本文件锁定:
 1. auth:无 key 401 / readonly 200 / admin 200(端点挂 _READONLY_EXACT)

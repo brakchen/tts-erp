@@ -1,6 +1,6 @@
 """用户账号与页面权限体系（6 表 + 种子）。
 
-设计：tech-doc/user-account-authz-design.md §4/§4.1
+设计：docs/design/user-account-authz-design.md §4/§4.1
 变更范围：只新增 security.users / roles / permissions / role_permissions /
 user_roles / user_sessions；零 ALTER 现有表，可回滚（drop 新表即可）。
 

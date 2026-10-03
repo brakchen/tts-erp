@@ -1,6 +1,6 @@
 """/v2/auth/* — browser login flow（用户名 + 密码 + 服务端会话）.
 
-设计：tech-doc/user-account-authz-design.md
+设计：docs/design/user-account-authz-design.md
 
 Routes:
 - ``GET  /v2/auth/login``           — login page (HTML, public)

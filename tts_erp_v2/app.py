@@ -118,13 +118,13 @@ def _build_routes(app: FastAPI) -> None:
     # `request.scope["api_key_hash"]` / `request.scope["api_key_scopes"]`。
     app.include_router(analytics.router)
     # HTTP 请求拦截配置管理和数据接收
-    # 详见 tech-doc/intercept-design.md
+    # 详见 docs/intercept-design.md
     app.include_router(intercept.router)
     # Chrome 扩展订单/物流/结算数据同步（readwrite；与 analytics 同级）。
-    # 详见 tech-doc/chrome-ext-order-sync-design.md。
+    # 详见 docs/archive/chrome-ext-order-sync-design.md。
     app.include_router(order_sync.router)
     # config schema 枚举映射 CRUD（GET readonly；PUT/DELETE admin）。
-    # 详见 tech-doc/spu-roi-enum-translation-plan.md。
+    # 详见 docs/design/spu-roi-enum-translation-plan.md。
     app.include_router(config_router.router)
     # SPU 实际 ROI 看板主表(GET /v2/analytics/spu-roi, readonly)——
     # 读 plugin.ad_* 表；URL 保持 /v2/analytics/ 前缀与 sync 端点同域。
@@ -241,7 +241,7 @@ def build_app() -> FastAPI:
     app = FastAPI(
         title="tts-erp v2",
         version="2.0.0",
-        description="Refactored tts-erp API — see tech-doc/refactor-tech-plan-v2.md",
+        description="Refactored tts-erp API — see docs/archive/refactor-tech-plan-v2.md",
         root_path=root_path,
     )
     # --- OpenAPI 3.1 → 3.0.3 down-conversion ---
@@ -341,7 +341,7 @@ def _register_public_routes(app: FastAPI) -> None:
 
         The legacy public ``/db/*``, ``/orders/*``, ``/sync/*``, and
         ``/token/*`` endpoints are intentionally NOT exposed in v2
-        (hard switch — see tech-doc/refactor-tech-plan-v2 §6).
+        (hard switch — see docs/refactor-tech-plan-v2 §6).
 
         Walks ``app.routes`` recursively so routers mounted via
         ``include_router`` (commerce / reporting / pages /

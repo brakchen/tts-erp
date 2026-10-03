@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Manage tts-erp API keys (design: tech-doc/api-key-auth-design.md).
+"""Manage tts-erp API keys (design: docs/design/api-key-auth-design.md).
 
 The full key is printed ONCE at creation/rotation; the DB stores only its
 SHA-256 hash plus a 16-char prefix for identification.

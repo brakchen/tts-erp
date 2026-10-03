@@ -368,7 +368,7 @@ def test_openapi_description_references_spec_doc(api_client):
     op = _get_openapi_path(api_client, PATH_KEY)
     desc = op.get("description", "")
     assert desc, "description is empty — Swagger UI detail view will be blank"
-    assert "tech-doc/api/tiktok-shop-get-product.md" in desc, (
+    assert "docs/api/tiktok-shop-get-product.md" in desc, (
         "description must name the canonical spec doc so the two "
         "don't drift"
     )

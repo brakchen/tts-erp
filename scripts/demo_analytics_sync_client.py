@@ -11,7 +11,7 @@ How to read this script
 -----------------------
 
 The module is split into three numbered steps that match the daily-job
-flow in ``tech-doc/analytics/plugin-integration.md`` §4:
+flow in ``docs/archive/plugin-integration.md`` §4:
 
   Step 1.  GET /v2/analytics/sync/cursor          — discover what to sync
   Step 2.  POST /v2/analytics/sync/batches        — upload one record (happy)
@@ -82,7 +82,7 @@ The audit table (``analytics_audit_log``) gained an ``error_message``
 column at the same time.  The same 500-char sanitized Pydantic/JSON
 detail that goes to stderr is now persisted there, so ops can run
 ``SELECT ... WHERE error_message LIKE '%capturedAt%'`` after the stderr
-log rotates.  See ``analytics_sync/tech-doc/plugin-integration.md`` §6
+log rotates.  See ``analytics_sync/docs/plugin-integration.md`` §6
 for the HTTP error table.
 """
 
@@ -200,7 +200,7 @@ def compute_idempotency_key(
     Must match ``tts_erp_v2.plugin.ads.domain.compute_idempotency_key`` byte-for-
     byte; the server recomputes this on every received record and rejects
     any client-sent ``idempotencyKey`` that doesn't match.  See
-    ``tech-doc/analytics/plugin-integration.md`` §3 for the rules.
+    ``docs/archive/plugin-integration.md`` §3 for the rules.
 
     Locked reference vector (computed against the production server):
 
@@ -648,12 +648,12 @@ def main(argv: list[str] | None = None) -> int:
         "where to go next",
         textwrap.dedent(
             """\
-• tech-doc/analytics/plugin-integration.md — full protocol spec
-            • tech-doc/analytics/analytics-sync.md   — endpoint reference + curl examples
-            • analytics_sync/tech-doc/compatibility.md      — v1 ↔ v2 policy + rollout checklist
-            • analytics_sync/tech-doc/openapi.yaml         — machine-readable schema
+• docs/api/dumps-data-contract.md  — full protocol spec
+            • docs/ops/analytics-sync.md        — endpoint reference + curl examples
+            • analytics_sync/docs/compatibility.md      — v1 ↔ v2 policy + rollout checklist
+            • analytics_sync/docs/openapi.yaml         — machine-readable schema
             • chrome-plugins/ads-data-sync/src/core/analytics-sync-v2.ts  — the production TS client
-            • tech-doc/external-api.md  (in this repo)      — v2 stable API contract for dashboards / BI
+            • docs/api/external-api.md  (in this repo)      — v2 stable API contract for dashboards / BI
 
             Re-run with ``--live`` against a real server, or ``--only key cursor``
             to read a specific subsection.

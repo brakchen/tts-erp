@@ -4,7 +4,7 @@ Revision ID: 0007_analytics_reorg_drop_dead_tables
 Revises: 0006_ad_product_links_view
 Create Date: 2026-09-05
 
-执行依据: tech-doc/analytics/reorg-plan.md（2026-09-05 决策落地）。
+执行依据: docs/archive/reorg-plan.md（2026-09-05 决策落地）。
 决策记录（context-mode `analytics-reorg-decisions`）：
 
 1. DROP analytics.ad_daily_completeness

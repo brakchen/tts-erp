@@ -1,6 +1,6 @@
 """账号服务层护栏与授权装载（tts_erp_v2/accounts/service.py）。
 
-契约（tech-doc/user-account-authz-design.md §5/§6/§7.2/§9.1）：
+契约（docs/design/user-account-authz-design.md §5/§6/§7.2/§9.1）：
 - 用户名唯一（小写归一化后判重）与格式校验；角色必须存在；
 - reset_password 吊销该用户全部会话；change_password 保留当前会话；
 - set_user_status：不能禁用自己、不能禁用最后一个 admin，禁用即吊销会话；

@@ -2,7 +2,7 @@
 
 背景
 ----
-2026-09-07 拍板（tech-doc/analytics/spu-roi-v7-refactor.md §3.5，D2）：
+2026-09-07 拍板（docs/archive/spu-roi-v7-refactor.md §3.5，D2）：
 上游 202309 statement_transactions payload 的 53 个 ``*_amount`` 字段全部
 **显式传输**（0 = ``"0"`` 字符串，实测确认），显式零与字段缺失语义不同——
 「SETTLEMENT=0」= 已结算但到手 0（全额退款/取消冲正单），必须落库；

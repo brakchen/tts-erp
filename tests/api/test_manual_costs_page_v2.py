@@ -5,7 +5,7 @@ references external static assets, and removes the legacy token-paste block.
 We only test the HTML shell — runtime JS behaviour (fetch/upload) lives in
 the browser and is covered by manual smoke tests, not FastAPI TestClient.
 
-See ``tech-doc/procurement-ui-redesign.md`` §2 (design tokens) and §6
+See ``docs/archive/procurement-ui-redesign.md`` §2 (design tokens) and §6
 (frontend contracts) for the full design rationale.
 """
 

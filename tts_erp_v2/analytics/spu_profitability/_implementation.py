@@ -7,7 +7,7 @@ HTTP routes and wire formatting are intentionally absent.
 
 The stable ``/v2/analytics/spu-roi`` name remains only in the adapter because it
 is an existing client contract.  The canonical business rubric is
-``biz-doc/analytics/spu-roi-profit-calculation.md`` v10.
+``docs/business/spu-profitability.md`` v10.
 """
 
 from __future__ import annotations
@@ -81,7 +81,7 @@ _DELIVERY_TERMINAL_SHIPMENT_STATUSES = ("DELIVERED",)
 _ORDERS_MAX = 500
 
 # Keep aligned with the single-timezone region whitelist documented in
-# tech-doc/api/upstream-contract-shop-region-by-external.md §4 and the ROI UI.
+# docs/api/upstream-contract-shop-region-by-external.md §4 and the ROI UI.
 _REGION_TIME_ZONES = {
     "VN": "Asia/Ho_Chi_Minh",
     "TH": "Asia/Bangkok",

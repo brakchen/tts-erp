@@ -7,7 +7,7 @@ Create Date: 2026-09-28
 新建 config schema，存放可配置的枚举映射/元数据。
 当前仅 config.enum_map：SPU ROI 钻取面板枚举值中文化映射。
 
-详见 tech-doc/spu-roi-enum-translation-plan.md。
+详见 docs/design/spu-roi-enum-translation-plan.md。
 """
 
 from __future__ import annotations
