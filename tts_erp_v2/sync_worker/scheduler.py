@@ -25,19 +25,20 @@ from __future__ import annotations
 
 import importlib
 import logging
+import random
 import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from sqlalchemy import exists, select, text
+from sqlalchemy import exists, func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from tts_erp_v2.db.models import ChannelAccount
-from tts_erp_v2.db.models.integration import Credentials, SyncCursor
+from tts_erp_v2.db.models.integration import Credentials, SyncCursor, SyncJob
 from tts_erp_v2.sync_worker.job_runner import (
     run_with_sync_job,
 )
@@ -545,11 +546,11 @@ def _record_failed_tick(
     silent loss of bookkeeping is exactly the bug this whole
     Lane-1 fix is meant to eliminate.
     """
-    from tts_erp_v2.db.models.integration import SyncJob
+    from tts_erp_v2.db.models.integration import SyncJob as _SyncJob
 
     session = session_factory()
     try:
-        row = SyncJob(
+        row = _SyncJob(
             job_name=spec.job_name,
             status="failed",
             started_at=datetime.now(UTC),
@@ -593,7 +594,69 @@ def _make_executor(
     return run_system
 
 
-# ─── Scheduler factory ────────────────────────────────────────────
+# ─── Scheduler factory ──────────────────────────────────────────
+
+#: Catch-up fires are staggered over at most this many seconds after
+#: startup so a restart after a long outage doesn't launch every overdue
+#: job in the same instant.
+_MAX_CATCHUP_SPREAD = 300
+
+
+def _overdue_first_runs(
+    session_factory: sessionmaker[Session],
+    *,
+    now: datetime,
+    jitter_seconds: int,
+) -> dict[str, datetime]:
+    """First-fire overrides for jobs overdue since their last success.
+
+    ``IntervalTrigger``'s first fire is ``start + interval`` — every
+    worker restart resets that timer. A 24 h job under a worker that
+    restarts several times a day (``analytics.shop_fee_rate``, observed
+    starving 2026-10-03) therefore never fires: the watchdog flags it
+    stale while the trigger keeps re-arming 24 h into a future that
+    never arrives. Anchoring the first fire to ``sync_jobs`` success
+    history fixes the whole class: overdue jobs fire within
+    ``min(interval, _MAX_CATCHUP_SPREAD)`` seconds of startup instead of
+    a full interval later, while jobs that are still within cadence keep
+    the default ``start + interval`` behaviour.
+
+    Returns an empty mapping when history is unavailable (``list``
+    mode's raising factory, test doubles, DB errors) — callers then fall
+    back to plain interval scheduling.
+    """
+    try:
+        session = session_factory()
+    except Exception:
+        return {}
+    try:
+        rows = session.execute(
+            select(SyncJob.job_name, func.max(SyncJob.finished_at))
+            .where(
+                SyncJob.status == "succeeded",
+                SyncJob.job_name.in_(list(JOBS)),
+            )
+            .group_by(SyncJob.job_name)
+        ).all()
+    except Exception:
+        log.debug("catch-up scheduling: sync_jobs history unavailable", exc_info=True)
+        return {}
+    finally:
+        with suppress(Exception):
+            session.close()
+
+    overdue: dict[str, datetime] = {}
+    for name, last in rows:
+        spec = JOBS.get(name)
+        if spec is None or last is None:
+            continue
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=UTC)
+        due = last + timedelta(seconds=spec.interval_seconds)
+        if due <= now:
+            spread = min(spec.interval_seconds, _MAX_CATCHUP_SPREAD)
+            overdue[name] = now + timedelta(seconds=random.uniform(0, spread))
+    return overdue
 
 
 def build_scheduler(
@@ -625,7 +688,18 @@ def build_scheduler(
         session_factory = get_session_factory()
 
     sched = BlockingScheduler(timezone="UTC")
+    now = datetime.now(UTC)
+    overdue_runs = _overdue_first_runs(
+        session_factory, now=now, jitter_seconds=jitter_seconds
+    )
     for name, spec in JOBS.items():
+        extra: dict = {}
+        first_fire = overdue_runs.get(name)
+        if first_fire is not None:
+            # Catch-up: this job is past due since its last success —
+            # fire it (staggered) instead of re-arming the full interval
+            # from process start, which is what starved the 24 h job.
+            extra["next_run_time"] = first_fire
         sched.add_job(
             _make_executor(spec, session_factory),
             trigger=IntervalTrigger(
@@ -636,6 +710,7 @@ def build_scheduler(
             max_instances=1,  # no overlapping runs of the same job
             coalesce=True,  # if we miss fires, run only once on resume
             replace_existing=True,
+            **extra,
         )
     return sched
 

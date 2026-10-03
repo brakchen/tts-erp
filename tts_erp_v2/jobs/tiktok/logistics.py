@@ -65,6 +65,11 @@ TARGET_LIMIT = 300
 
 ProxyCall = Callable[..., dict]
 
+#: Fetch this many raw rows before deduplicating by order id — the
+#: orders job re-captures the same orders every tick, so the newest
+#: ``limit`` rows contain many copies of the same payload.
+_DEDUPE_OVERFETCH = 4
+
 
 class UpstreamJobError(RuntimeError):
     pass
@@ -153,45 +158,86 @@ def _upsert_event(session: Session, *, shipment_id: int, fields: dict) -> None:
     )
 
 
-def _select_tracking_targets(session: Session, *, limit: int = TARGET_LIMIT) -> list[dict]:
-    """Select orders that need a tracking refresh.
+def _select_tracking_targets(
+    session: Session, *, account_id: int, limit: int = TARGET_LIMIT
+) -> list[dict]:
+    """Select this shop's orders that need a tracking refresh.
 
     Sources from ``integration.raw_records`` (the raw orders-search
     payloads) — the payload carries ``tracking_number`` /
     ``shipping_provider_id`` / ``packages``. Orders already in a
     terminal logistics state are excluded (their tracking never changes).
+
+    Two filters keep the target list honest (2026-10-03 fix):
+
+    * **Cross-shop pollution** — ``raw_records`` has NO shop/credential
+      column (``_store_raw`` never sets it), so both shops' order
+      payloads share the ``ORDERS_ENDPOINT`` key. Without filtering,
+      every run resolved the OTHER shop's orders to ``None`` and
+      recorded bogus ``UNKNOWN_ORDER`` issues (23 500 in 48 h — 100 %
+      of them belong to a real shop). Orders that exist under a
+      *different* ``shop_pk`` are now excluded up front; genuinely
+      unknown orders (orders job lag) are kept so the signal survives.
+    * **Duplicate suppression** — the orders job re-captures the same
+      recent orders every tick, so the newest N raw rows contain many
+      copies of one order. We over-fetch, keep the latest record per
+      order id, and cap at ``limit`` distinct orders.
     """
     terminal_orders = (
         select(SalesOrder.order_id)
         .join(Shipment, Shipment.order_pk == SalesOrder.id)
         .where(Shipment.status.in_(FINAL_STATUSES))
     )
+    own_order = (
+        select(SalesOrder.id)
+        .where(SalesOrder.order_id == RawRecord.payload["id"].astext)
+        .where(SalesOrder.shop_pk == account_id)
+        .exists()
+    )
+    foreign_order = (
+        select(SalesOrder.id)
+        .where(SalesOrder.order_id == RawRecord.payload["id"].astext)
+        .where(SalesOrder.shop_pk != account_id)
+        .exists()
+    )
+    overfetch = max(limit, limit * _DEDUPE_OVERFETCH)
     rows = session.execute(
         select(RawRecord)
         .where(RawRecord.endpoint == ORDERS_ENDPOINT)
         .where(RawRecord.payload["id"].astext.not_in(terminal_orders))
-        .order_by(RawRecord.captured_at.desc())
-        .limit(limit)
+        # Keep the order if it is ours or known to nobody yet (genuine
+        # "orders job hasn't synced it" signal); drop it only when it
+        # belongs exclusively to a different shop.
+        .where((~foreign_order) | own_order)
+        .order_by(RawRecord.captured_at.desc(), RawRecord.id.desc())
+        .limit(overfetch)
     ).scalars().all()
 
     targets: list[dict] = []
+    seen: set[str] = set()
     for row in rows:
         payload = row.payload if isinstance(row.payload, dict) else {}
         oid = payload.get("id") or payload.get("order_id")
         tracking = payload.get("tracking_number") or ""
         if not oid or not tracking:
             continue
+        oid = str(oid)
+        if oid in seen:
+            continue
+        seen.add(oid)
         packages = payload.get("packages") or []
         pkg_id = packages[0].get("id") if packages and isinstance(packages[0], dict) else None
         targets.append(
             {
-                "order_id": str(oid),
+                "order_id": oid,
                 "tracking_number": tracking,
                 "external_package_id": str(pkg_id) if pkg_id else str(oid),
                 "provider_id": payload.get("shipping_provider_id"),
                 "provider_name": payload.get("shipping_provider_name"),
             }
         )
+        if len(targets) >= limit:
+            break
     return targets
 
 
@@ -266,7 +312,7 @@ def run(
         session, job_name=JOB_NAME, scope=cursor_scope
     )
     limit = page_size if page_size and page_size > 0 else TARGET_LIMIT
-    targets = _select_tracking_targets(session, limit=limit)
+    targets = _select_tracking_targets(session, account_id=account.id, limit=limit)
 
     total = 0
     inserted = 0
@@ -274,6 +320,14 @@ def run(
     events_written = 0
     max_update_ms: int | None = None
 
+    # Phase 1 — resolve orders and fetch tracking payloads WITHOUT any
+    # business-table writes. The whole run shares one transaction
+    # (run_with_sync_job commits at the end), so doing the slow upstream
+    # HTTP calls before the first shipment upsert keeps the transaction
+    # free of sales_orders/fulfillment row locks for minutes at a time —
+    # that long lock window was the amplifier behind the production
+    # DeadlockDetected errors (2026-10-02/03).
+    plan: list[tuple[int, dict, list[dict]]] = []
     for target in targets:
         total += 1
         oid = target["order_id"]
@@ -290,8 +344,6 @@ def run(
             failed += 1
             continue
 
-        event_times_ms: list[int] = []
-        action_codes: list[int | None] = []
         raw_tracking: list[dict] = []
         if fetch_events:
             try:
@@ -326,6 +378,18 @@ def run(
                 )
                 failed += 1
                 continue
+        plan.append((so_id, target, raw_tracking))
+
+    # Phase 2 — write burst in deterministic order: ascending
+    # sales_orders.id means any two concurrent runs (scheduler tick vs
+    # operator "run now", or two shops' fan-out) acquire FK/row locks in
+    # the SAME order, which removes the AB-BA cycle behind the deadlock.
+    plan.sort(key=lambda item: item[0])
+
+    for so_id, target, raw_tracking in plan:
+        oid = target["order_id"]
+        event_times_ms: list[int] = []
+        action_codes: list[int | None] = []
 
         raw_row = RawRecord(
             endpoint=TRACKING_ENDPOINT_TEMPLATE.format(order_id=oid),
@@ -394,6 +458,7 @@ def run(
         for ms in event_times_ms:
             if max_update_ms is None or ms > max_update_ms:
                 max_update_ms = ms
+
 
     new_cursor_ms: int | None = None
     if max_update_ms is not None and (

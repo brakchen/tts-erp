@@ -14,7 +14,12 @@ whose counters are written to the sync_jobs row.
 If the inner callable raises, :func:`run_job`:
 
 * Marks the sync_jobs row status='failed' with the exception message.
-* Re-raises so the caller (scheduler / CLI) can react.
+* If the transaction is already aborted (e.g. the job was chosen as a
+  PostgreSQL deadlock victim), rolls back first and records the failure
+  in a fresh transaction — otherwise the bookkeeping UPDATE itself
+  fails with ``InFailedSqlTransaction`` and the run vanishes.
+* Re-raises the ORIGINAL exception so the caller (scheduler / CLI)
+  can react.
 
 Note: ``session.commit()`` is called inside the helper. Callers should
 NOT commit again (the helper manages transaction boundaries).
@@ -27,9 +32,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+import logging
+
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models import SyncJob
+
+log = logging.getLogger("tts_erp_v2.sync_worker.job_runner")
 
 
 @dataclass(frozen=True)
@@ -106,14 +115,49 @@ def run_with_sync_job(
     try:
         result = inner(session, **(inner_kwargs or {}))
     except Exception as exc:
-        finish_sync_job(
-            session,
-            sync_row,
-            result=JobResult(),
-            status="failed",
-            error_message=f"{type(exc).__name__}: {exc}",
-        )
-        session.commit()
+        error_message = f"{type(exc).__name__}: {exc}"
+        try:
+            finish_sync_job(
+                session,
+                sync_row,
+                result=JobResult(),
+                status="failed",
+                error_message=error_message,
+            )
+            session.commit()
+        except Exception:
+            # The transaction is aborted — the classic case is a
+            # psycopg deadlock victim (40P01): every statement, including
+            # this bookkeeping UPDATE, fails with InFailedSqlTransaction.
+            # Without this fallback the run leaves NO sync_jobs row at all
+            # (the 'running' insert rolls back with the dead transaction)
+            # and the original error is masked by the bookkeeping error.
+            # Roll back to a clean transaction and record the failure
+            # fresh so operators still see the run.
+            log.warning(
+                "[%s] failure bookkeeping hit an aborted transaction; "
+                "re-recording in a fresh one",
+                job_name,
+                exc_info=True,
+            )
+            session.rollback()
+            try:
+                session.add(
+                    SyncJob(
+                        job_name=job_name,
+                        credential_id=credential_id,
+                        status="failed",
+                        error_message=error_message,
+                        finished_at=datetime.now(UTC),
+                    )
+                )
+                session.commit()
+            except Exception:
+                log.exception(
+                    "[%s] could not record failed sync_jobs row after rollback",
+                    job_name,
+                )
+                session.rollback()
         raise
     finish_sync_job(session, sync_row, result=result, status="succeeded")
     session.commit()

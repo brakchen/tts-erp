@@ -40,6 +40,7 @@ from tts_erp_v2.sync_worker.scheduler import (
     JobSpec,
     _enumerate_tiktok_shops,
     _make_executor,
+    _overdue_first_runs,
     _record_failed_tick,
     _run_system_job,
     _run_tiktok_job,
@@ -148,6 +149,78 @@ def test_build_scheduler_interval_trigger_uses_spec_seconds(
         trigger = by_id[name].trigger
         assert trigger.interval.total_seconds() == spec.interval_seconds
         assert trigger.jitter == 42
+
+
+# ─── catch-up scheduling (_overdue_first_runs) ───────────────────
+
+
+def _make_history_factory(rows):
+    """sessionmaker stand-in returning canned (job_name, finished_at) rows."""
+    session = MagicMock(name="session")
+    session.execute.return_value.all.return_value = rows
+    factory = MagicMock(name="session_factory", return_value=session)
+    return factory
+
+
+def test_overdue_first_runs_fires_soon_after_long_outage() -> None:
+    """A 24h job whose last success is days old must fire within the
+    catch-up spread of startup — this is the analytics.shop_fee_rate
+    starvation fix (restarts kept re-arming the 24h trigger)."""
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    stale = now - timedelta(days=4)  # last success long past due
+    factory = _make_history_factory([("analytics.shop_fee_rate", stale)])
+
+    overdue = _overdue_first_runs(factory, now=now, jitter_seconds=30)
+
+    assert "analytics.shop_fee_rate" in overdue
+    first_fire = overdue["analytics.shop_fee_rate"]
+    assert now <= first_fire <= now + timedelta(seconds=300)
+
+
+def test_overdue_first_runs_skips_jobs_still_within_cadence() -> None:
+    """A job that succeeded recently keeps the plain start+interval
+    schedule — no next_run_time override."""
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    fresh = now - timedelta(seconds=30)  # interval 600s → due in 5.5min
+    factory = _make_history_factory([("tiktok.orders", fresh)])
+
+    overdue = _overdue_first_runs(factory, now=now, jitter_seconds=30)
+
+    assert overdue == {}
+
+
+def test_overdue_first_runs_tolerates_unavailable_history() -> None:
+    """History unavailable (list-mode raising factory, DB errors) →
+    empty mapping → build_scheduler falls back to plain scheduling."""
+    from datetime import UTC, datetime
+
+    def _raise():
+        raise RuntimeError("list mode does not open DB sessions")
+
+    assert _overdue_first_runs(_raise, now=datetime.now(UTC), jitter_seconds=30) == {}
+
+
+def test_build_scheduler_passes_catchup_next_run_time(monkeypatch) -> None:
+    """Overdue jobs get an explicit next_run_time on the APScheduler job."""
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    stale = now - timedelta(days=4)
+    factory = _make_history_factory([("analytics.shop_fee_rate", stale)])
+    sched = build_scheduler(session_factory=factory, jitter_seconds=30)
+
+    by_id = {job.id: job for job in sched.get_jobs()}
+    fee_rate = by_id["analytics.shop_fee_rate"]
+    nft = getattr(fee_rate, "next_run_time", None)
+    assert nft is not None
+    assert now <= nft <= now + timedelta(seconds=300)
+    # Non-overdue jobs keep the default (no explicit next_run_time).
+    orders = by_id["tiktok.orders"]
+    assert getattr(orders, "next_run_time", None) is None
 
 
 def test_build_scheduler_marks_jobs_singleton_and_coalesce(
