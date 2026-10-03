@@ -150,16 +150,25 @@ echo
 
 # ---------- 4. 测试库体检 ----------
 echo "-- 4/4 测试库存在性（缺失时只提示，不自动建）"
-if command -v psql >/dev/null 2>&1 || [[ $DRY_RUN -eq 1 ]]; then
-  run "python3 - <<'PY'
+# 用 venv 解释器跑：psycopg 装在 .venv 里，系统 python3 没有
+if [[ -x "$VENV_PY" ]] || [[ $DRY_RUN -eq 1 ]]; then
+  run "\"$VENV_PY\" - <<'PY'
 import pathlib, re, sys
-try:
-    import psycopg
-except ImportError:
-    sys.path.insert(0, '$REPO/.venv/lib')
-    import psycopg
-env = pathlib.Path('$REPO/.env').read_text()
-url = re.search(r'^TTS_ERP_DB_URL=(.*)\$', env, re.M).group(1).strip().strip('\"').strip(\"'\")
+import psycopg
+# 优先 .env.test（worktree 里只有它）；回退到 .env
+for cand in ('$REPO/.env.test', '$REPO/.env'):
+    p = pathlib.Path(cand)
+    if p.is_file():
+        env = p.read_text()
+        break
+else:
+    print('        [MISS] .env.test / .env 均不存在，无法体检')
+    sys.exit(0)
+m = re.search(r'^TTS_ERP_DB_URL_TEST=(.*)\$', env, re.M) or re.search(r'^TTS_ERP_DB_URL=(.*)\$', env, re.M)
+url = m.group(1).strip().strip('\"').strip(\"'\") if m else ''
+if not url:
+    print('        [MISS] 连接串为空，无法体检')
+    sys.exit(0)
 admin = url.rsplit('/', 1)[0] + '/postgres'
 admin = admin.replace('postgresql+psycopg://', 'postgresql://')
 need = ['tts_erp_test_template', 'tts_erp_v3_test']
@@ -169,7 +178,7 @@ for db in need:
     print(('        [OK]   ' if db in have else '        [MISS] ') + db)
 PY"
 else
-  warn "psql 不可用，跳过库体检"
+  warn "venv 解释器不可用（$VENV_PY），跳过库体检"
 fi
 echo
 
