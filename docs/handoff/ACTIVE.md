@@ -16,4 +16,4 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| flaky-auth-env | oauth/spu_images 鉴权用例环境依赖修复 | session-01a10273-89cbba48 | fix/flaky-auth-env / .worktrees/flaky-auth-env | tests/conftest.py, tests/api/conftest.py, tests/e2e/conftest.py | draft | - | - | 2026-10-03T18:12:47Z |
+| flaky-auth-env | oauth/spu_images 鉴权用例环境依赖修复 | session-01a10273-89cbba48 | fix/flaky-auth-env / .worktrees/flaky-auth-env | tests/conftest.py, tests/api/conftest.py, tests/api/test_spu_images.py, tests/e2e/conftest.py | draft | - | - | 2026-10-03T18:12:47Z |
