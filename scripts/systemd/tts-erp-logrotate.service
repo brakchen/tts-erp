@@ -1,0 +1,8 @@
+[Unit]
+Description=tts-erp application log rotation (unprivileged logrotate)
+
+[Service]
+Type=oneshot
+# -s keeps the state file user-writable (the system default
+# /var/lib/logrotate/status needs root).
+ExecStart=/usr/sbin/logrotate -s /home/schan/.local/state/tts-erp-logrotate.status /home/schan/tts-erp/scripts/logrotate/tts-erp.conf

@@ -17,7 +17,7 @@ What we verify here:
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from tts_erp_v2.db.models import Credentials, SyncJob
 from tts_erp_v2.sync_worker.job_runner import (
@@ -182,6 +182,30 @@ def test_run_with_sync_job_records_zero_counters_on_failure(
     assert rows[0].rows_total == 0
     assert rows[0].rows_inserted == 0
     assert rows[0].rows_failed == 0  # bookkeeping is per-inner; we don't blame failed on inner errors
+
+
+def test_run_with_sync_job_records_failure_when_txn_aborted(db_session) -> None:
+    """Deadlock-style failure: the inner call aborts the PG transaction
+    (invalid SQL), so the bookkeeping UPDATE itself fails with
+    InFailedSqlTransaction. The helper must roll back and re-record the
+    failure in a FRESH transaction instead of losing the run record —
+    this is what hid the production tiktok.logistics deadlocks.
+    """
+
+    def _boom(session):
+        # Aborts the current transaction, exactly like a deadlock victim.
+        session.execute(text("SELECT * FROM integration.no_such_relation"))
+
+    with pytest.raises(Exception):
+        run_with_sync_job(db_session, job_name="TEST_ABORTED_TXN", inner=_boom)
+
+    rows = db_session.execute(
+        select(SyncJob).where(SyncJob.job_name == "TEST_ABORTED_TXN")
+    ).scalars().all()
+    assert len(rows) == 1, "failed row must survive an aborted transaction"
+    assert rows[0].status == "failed"
+    assert "no_such_relation" in (rows[0].error_message or "")
+    assert rows[0].finished_at is not None
 
 
 def test_job_result_default_counters_are_zero() -> None:

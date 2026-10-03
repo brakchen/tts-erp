@@ -1,0 +1,12 @@
+[Unit]
+Description=Check tts-erp application logs for rotation every 6 hours
+
+[Timer]
+# The config gates on `size 20M`, so a frequent cheap check is fine:
+# stdout.log (~10 MB/day) is rotated within hours of crossing the cap.
+OnCalendar=*-*-* 00/6:15:00
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

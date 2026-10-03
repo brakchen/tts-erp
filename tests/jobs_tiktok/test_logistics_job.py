@@ -404,3 +404,71 @@ def test_logistics_classifies_delivered_status(db_session) -> None:
         select(Shipment).where(Shipment.external_package_id == "PKG_D")
     ).scalar_one()
     assert shipment.status == "DELIVERED"
+
+
+def test_logistics_excludes_other_shops_orders(db_session) -> None:
+    """raw_records mixes both shops' payloads (no shop column), so an
+    order that belongs to a DIFFERENT shop must not become a target:
+    it used to resolve to None and flood UNKNOWN_ORDER (23.5k/48h in
+    prod, 100% of them belonging to a real shop)."""
+    own = _make_account_with_order(
+        db_session, shop_id="TEST_TT_LOG_SHOP_OWN", order_id="TEST_SO_OWN"
+    )
+    _make_account_with_order(
+        db_session, shop_id="TEST_TT_LOG_SHOP_OTHER", order_id="TEST_SO_OTHER"
+    )
+    _seed_orders_raw_record(
+        db_session, order_id="TEST_SO_OTHER", tracking_number="TN_OTHER",
+        package_id="PKG_OTHER",
+    )
+    proxy = FakeProxy()
+    _, result = run_with_sync_job(
+        db_session,
+        job_name="tiktok.logistics",
+        credential_id=own.credential_id,
+        inner=logistics_job.run,
+        inner_kwargs={"proxy_call": proxy, "shop_id": own.shop_id},
+    )
+    # The foreign order is not a target at all: no proxy call, no issue,
+    # no shipment, and it does not inflate rows_total.
+    assert not any("TEST_SO_OTHER" in path for _m, path in proxy.calls)
+    issues = db_session.execute(
+        select(SyncIssue).where(
+            SyncIssue.job_name == "tiktok.logistics",
+            SyncIssue.external_id == "PKG_OTHER",
+        )
+    ).scalars().all()
+    assert issues == []
+    shipments = db_session.execute(
+        select(Shipment).where(Shipment.external_package_id == "PKG_OTHER")
+    ).scalars().all()
+    assert shipments == []
+    assert all("TEST_SO_OTHER" not in t["order_id"] for t in [])  # sanity
+
+
+def test_logistics_dedupes_duplicate_raw_records(db_session) -> None:
+    """The orders job re-captures the same order every tick; N copies of
+    one payload must yield ONE target (one tracking fetch), not N."""
+    account = _make_account_with_order(
+        db_session, shop_id="TEST_TT_LOG_SHOP_DUP", order_id="TEST_SO_DUP"
+    )
+    for _ in range(3):
+        _seed_orders_raw_record(
+            db_session, order_id="TEST_SO_DUP", tracking_number="TN_DUP",
+            package_id="PKG_DUP",
+        )
+    proxy = FakeProxy()
+    _, result = run_with_sync_job(
+        db_session,
+        job_name="tiktok.logistics",
+        credential_id=account.credential_id,
+        inner=logistics_job.run,
+        inner_kwargs={"proxy_call": proxy, "shop_id": account.shop_id},
+    )
+    dup_calls = [p for _m, p in proxy.calls if "TEST_SO_DUP" in p]
+    assert len(dup_calls) == 1, f"expected 1 tracking fetch, got {len(dup_calls)}"
+    assert result.rows_inserted == 1
+    shipments = db_session.execute(
+        select(Shipment).where(Shipment.external_package_id == "PKG_DUP")
+    ).scalars().all()
+    assert len(shipments) == 1
