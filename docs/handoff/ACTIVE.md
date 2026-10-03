@@ -16,4 +16,3 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| settle-share-ratio-rename | 结算表「分摊比」改名「本 SPU 占单比」 | 01a10240-43f4-753a-aac7-9c15b7056ef8 | `fix/settle-share-ratio-rename` / `.worktrees/settle-share-ratio-rename` | `tts_erp_v2/static/js/spu-profitability-page.js`；`tests/api/test_spu_roi_api.py`；`CHANGELOG.md` | ready | fe5d548 | 928e40d | 2026-10-03T17:26Z |
