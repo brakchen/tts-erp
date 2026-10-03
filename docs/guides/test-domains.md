@@ -159,6 +159,7 @@ Quick lookup for "which slice do I run after editing X":
 | `tts_erp_v2/proxy/*.py`                     | `scripts/test.sh proxy`              |
 | `scripts/migrate_v1_to_v2/*.py`             | `scripts/test.sh migration`          |
 | `miaoshou/miaoshou_signing.py`              | `scripts/test.sh miaoshou unit`      |
+| `tests/e2e/**`（live 冒烟）                 | `scripts/test.sh e2e`（需 :9877 在跑） |
 
 ## Adding new tests
 

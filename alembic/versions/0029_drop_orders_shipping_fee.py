@@ -24,7 +24,7 @@ Create Date: 2026-09-14
 - tts_erp_v2/plugin/orders/parser.py: 删 ``shipping_fee = ...`` 提取 + 调用参数
 - tts_erp_v2/plugin/orders/repository.py::upsert_order: 删参数 + INSERT/UPDATE
 - tts_erp_v2/db/models/plugin.py::ChromeOrder: 删字段
-- schema_tts_erp.sql: 同步删列定义
+- docs/schema/schema_tts_erp.sql: 同步删列定义
 - docs/archive/chrome-ext-order-sync-design.md §3.3 + docs/reference/tiktok-seller-center-api-catalog.md
   §4.5: 同步删/改文档
 - chrome-plugins/ads-data-sync 端协议 **未变** —— plugin 端未发 shipping_fee，

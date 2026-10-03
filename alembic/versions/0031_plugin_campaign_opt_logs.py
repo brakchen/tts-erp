@@ -1,6 +1,6 @@
 """plugin.campaign_opt_logs 补建（2026-09-14 lane feature/plugin-shop-analytics）
 
-背景：该表只存在于 schema_tts_erp.sql + prod 手工建表，从未有过 migration，
+背景：该表只存在于 docs/schema/schema_tts_erp.sql + prod 手工建表，从未有过 migration，
 导致 test 库（tts_erp_v3_test）缺表，tests/plugin/ads 全部 ERROR
 （UndefinedTable）。本 migration 用 CREATE TABLE IF NOT EXISTS 幂等补建，
 prod 已有表则 no-op。

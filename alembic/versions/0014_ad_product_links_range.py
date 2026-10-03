@@ -20,7 +20,7 @@ Create Date: 2026-09-07
 注意：视图 JOIN 的 commerce 列名 = 当前生产（naming-refactor 后）命名
 （commerce.shops.shop_id / products_spu.spu_id / products_spu.shop_pk）。若在
 一个未做 naming-refactor 的裸 alembic 库上直接跑本迁移会缺列 —— 生产/测试库均按
-“先 alembic 后 naming-refactor” 或 schema_tts_erp.sql + stamp 的方式保证列名一致。
+“先 alembic 后 naming-refactor” 或 docs/schema/schema_tts_erp.sql + stamp 的方式保证列名一致。
 """
 
 from __future__ import annotations
@@ -157,5 +157,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # 还原到 0006 语义（逐日 daily 行聚合）。downgrade 仅作参考——
-    # 生产回滚以 schema_tts_erp.sql / 旧 migration 为准。
+    # 生产回滚以 docs/schema/schema_tts_erp.sql / 旧 migration 为准。
     op.execute(text("DROP VIEW IF EXISTS analytics.ad_product_links"))

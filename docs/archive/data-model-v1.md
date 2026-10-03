@@ -1,6 +1,6 @@
 # tts-erp 数据模型分析（重构基线）
 
-> 2026-08-27 生成。来源：`schema_tts_erp.sql` / `schema_oauth.sql` + 线上库实测
+> 2026-08-27 生成。来源：`docs/schema/schema_tts_erp.sql` / `schema_oauth.sql` + 线上库实测
 > （行数、孤儿检查）。**schema 中没有任何 FOREIGN KEY 约束**，所有关联关系都靠
 > 应用层（`tts_erp.py` 的 `persist_*` 函数）维护 —— 实测当前数据 0 孤儿行，
 > 说明应用层目前是可靠的，但重构时应考虑把不变量下沉到 DB 层。
@@ -265,7 +265,7 @@ CREATE INDEX IF NOT EXISTS idx_after_sales_shop_ct ON public.after_sales USING b
 
 ## 附录 A：完整建表语句（DDL）
 
-> 逐字提取自 `schema_tts_erp.sql` / `schema_oauth.sql`（pg_dump 风格，
+> 逐字提取自 `docs/schema/schema_tts_erp.sql` / `schema_oauth.sql`（pg_dump 风格，
 > PK/UNIQUE 约束以独立 ALTER TABLE 呈现）。索引未在此列出，见 §2 各表说明
 > 与 schema 文件 L819+ 的 CREATE INDEX 段。
 >

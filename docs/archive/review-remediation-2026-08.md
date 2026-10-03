@@ -123,7 +123,7 @@ Review 发现的核心问题分三类：
 
 ### 2.4 `regen_schema.py` 拆双文件
 
-- `scripts/regen_schema.py` 输出拆为 `schema_oauth.sql` / `schema_tts_erp.sql`，各自只灌自己的库；清理两库中互灌产生的对方空表（tts_erp 库里的空 `oauth_tokens` 等）
+- `scripts/regen_schema.py` 输出拆为 `schema_oauth.sql` / `docs/schema/schema_tts_erp.sql`，各自只灌自己的库；清理两库中互灌产生的对方空表（tts_erp 库里的空 `oauth_tokens` 等）
 - 顺带修：`ADD CONSTRAINT` 非幂等问题用 `DO $$ ... EXCEPTION WHEN duplicate_object THEN NULL; END $$;` 包裹，让重灌真正幂等
 
 ### 2.5 `order_shippings.raw` 停存整单 JSON

@@ -1,6 +1,6 @@
 # 汇率缓存（fx）接入设计 — ExchangeRate-API
 
-> 2026-09-06 落地。Truth source：本文件 + `schema_tts_erp.sql`（fx schema 段）。
+> 2026-09-06 落地。Truth source：本文件 + `docs/schema/schema_tts_erp.sql`（fx schema 段）。
 > 端点契约：`docs/api/external-api.md` 的 **FX rates (`/v2/fx/*`)** 章节。
 
 ## 1. 上游与配额预算

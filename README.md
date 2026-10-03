@@ -316,9 +316,10 @@ tts_erp_v2/
 ├── static/                  # 运营页面 CSS/JS/vendor
 └── sync_worker/             # APScheduler registry 与 runner
 
-tests/                       # 按业务域和 layer 标记的测试
+tests/                       # 按业务域和 layer 标记的测试（tests/e2e/ 为需 live 服务的冒烟，默认跳过）
 scripts/                     # 运维、探针、一次性和测试入口
-docs/                       # 全部专题文档（business/api/reference/architecture/design/plans/guides/ops/handoff/archive）
+docs/                       # 全部专题文档（business/api/reference/architecture/design/plans/guides/ops/schema/handoff/archive）
+docs/schema/                # 数据库 DDL 快照与数据结构索引（维护规则见其 README）
 └── docs/handoff/ACTIVE.md  # 当前 lane 文件所有权
 ```
 

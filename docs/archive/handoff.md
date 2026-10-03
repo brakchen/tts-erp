@@ -269,7 +269,7 @@ product_id → KeyError → dumps 500 → plugin 持续重试失败 → 14512 �
 **v1 `public.*` 遗留层已按官方流程归档删除**（观察期提前收口，原定 ~09-26）：
 
 1. 归档：`/home/schan/backups/tts_erp_public_v1_legacy_20260905T110814Z.sql.gz`（19 表 schema+data，可完整恢复）。
-2. DROP 19 张 v1 业务表 + 3 个孤儿函数；`schema_tts_erp.sql` 重生成（-839 行）。
+2. DROP 19 张 v1 业务表 + 3 个孤儿函数；`docs/schema/schema_tts_erp.sql` 重生成（-839 行）。
 3. **不要动 `public` schema 和 `public.fn_touch_updated_at()`** —— 41 个 v2 updated_at 触发器依赖它
    （migration 0001；`tests/db/test_time_fields_convention.py` 锁定）。
 4. ~~oauth_receiver（独立库 :5432/oauth_receiver）未动，仍按原观察期 ~09-26 保留。~~
@@ -279,7 +279,7 @@ product_id → KeyError → dumps 500 → plugin 持续重试失败 → 14512 �
 
 procurement UI 重做 + MinIO SPU 图片存储全部落地并提交到 `feature/procurement-ui`：
 
-1. **Backend**：`tts_erp_v2/storage/minio_client.py` + `/v2/spu-images/*`（presigned upload/confirm/list/delete）+ `procurement.spu_images` 表（`schema_storage.sql`，**生产库还没 apply**）。
+1. **Backend**：`tts_erp_v2/storage/minio_client.py` + `/v2/spu-images/*`（presigned upload/confirm/list/delete）+ `procurement.spu_images` 表（`docs/schema/schema_storage.sql`，**生产库还没 apply**）。
 2. **Frontend**：`/v2/pages/manual-costs` 壳页面 + `/static/console.{css,js}`（shop switcher + 三 tab 工作台）。
 3. **修了两个集成 bug**：`/endpoints` 在 FastAPI ≥0.141 lazy router 下丢路由（`_iter_resolved_routes`）；`GET /v2/spu-images` 无 filter 时 `AmbiguousParameter` 500（`CAST(:cp_id AS bigint)`）。
 
@@ -289,7 +289,7 @@ procurement UI 重做 + MinIO SPU 图片存储全部落地并提交到 `feature/
 - `tests_v2/migration` 跑到 ~59% hang 住（怀疑等 DB 锁）。
 - `tests_v2/jobs_tiktok` 5 个失败。
 
-**已收尾（2026-08-31）**：已 merge 回 master（`aca4389`，/endpoints 冲突取 master 的 `_walk_v2_routes`）；`schema_storage.sql` 已 apply（幂等）；MINIO_* 配置已入主 `.env`；生产 :9877 已重启并冒烟通过（/endpoints count=38，spu-images 路由在线）。worktree `~/tts-erp.procurement` 已删。主 worktree 仍有另一 session 的 analytics_sync WIP 未提交（`analytics_sync/app.py`、`middleware/auth.py`、`tests_v2/api/test_auth_login.py` 等）。
+**已收尾（2026-08-31）**：已 merge 回 master（`aca4389`，/endpoints 冲突取 master 的 `_walk_v2_routes`）；`docs/schema/schema_storage.sql` 已 apply（幂等）；MINIO_* 配置已入主 `.env`；生产 :9877 已重启并冒烟通过（/endpoints count=38，spu-images 路由在线）。worktree `~/tts-erp.procurement` 已删。主 worktree 仍有另一 session 的 analytics_sync WIP 未提交（`analytics_sync/app.py`、`middleware/auth.py`、`tests_v2/api/test_auth_login.py` 等）。
 
 ## TL;DR (2026-08-25)
 

@@ -578,7 +578,7 @@ X-Requested-With: tts-erp
 | 文件 | 计划改动 |
 | --- | --- |
 | `alembic/versions/0043_focused_spus.py` | 新建关注表、索引、更新时间 trigger |
-| `schema_tts_erp.sql` | 迁移验证后重新生成 schema 快照 |
+| `docs/schema/schema_tts_erp.sql` | 迁移验证后重新生成 schema 快照 |
 | `tts_erp_v2/reporting/focused_spus.py` | 关注集合深模块：`list_focused_spus()` / `apply_patch()`，隐藏 SQL、校验和事务 |
 | `tts_erp_v2/api/v2/focused_spus.py` | GET + PATCH wire adapter；camelCase 序列化和 domain error 映射 |
 | `tts_erp_v2/app.py` | 注册新 router |

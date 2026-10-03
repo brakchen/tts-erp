@@ -96,7 +96,7 @@ ALTER SCHEMA chrome_sync RENAME TO plugin;
 - `tts_erp_v2/api/deps.py`
 - `scripts/regen_schema.py`（加 `--db-url`，见 D16）
 - `tests/chrome_sync/*`、`tests/api/test_order_sync_contract.py`、`tests/api/test_admin_shops.py`、`tests/conftest.py`
-- `schema_tts_erp.sql`（regen）
+- `docs/schema/schema_tts_erp.sql`（regen）
 - 文档：`docs/api/external-api.md`、`docs/archive/chrome-ext-order-sync-design.md`、`AGENTS.md` §1/§8
 
 **测试**：`flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast`
@@ -132,7 +132,7 @@ DROP SCHEMA analytics;
 - `tts_erp_v2/api/v2/analytics.py`（import 路径）
 - `schemas/repository` 函数改名（D14）
 - `tests/api/test_analytics_coverage.py`、`test_analytics_dumps_v4.py`、`test_analytics_v2_contract.py`、`test_admin_purge.py`、`test_spu_roi_api.py`、`test_admin_shops.py`、`tests/analytics/test_repository.py`
-- `schema_tts_erp.sql`（regen）
+- `docs/schema/schema_tts_erp.sql`（regen）
 - 文档：原 `tech-doc/analytics/*.md`（8 个，现分布于 `docs/design/` 与 `docs/archive/`）、`docs/ops/analytics-sync.md`、`AGENTS.md`
 
 ### Lane 4 — `chore/drop-shops-data-source`（migration **0025**）
@@ -155,7 +155,7 @@ ALTER TABLE commerce.shops DROP COLUMN data_source;
 - `tts_erp_v2/api/schemas.py::ChannelAccountOut`（删字段）
 - `tts_erp_v2/proxy/tiktok_oauth.py`（upsert 不写该列）
 - `tests/api/`：`test_analytics_dumps_v4.py`、`test_order_sync_contract.py`、`test_admin_shops.py`、`test_reporting_profit_daily.py`、`test_manual_costs_single_tx.py`、`test_commerce_by_external.py`
-- `schema_tts_erp.sql`、`docs/api/external-api.md`、`docs/archive/chrome-ext-order-sync-design.md`
+- `docs/schema/schema_tts_erp.sql`、`docs/api/external-api.md`、`docs/archive/chrome-ext-order-sync-design.md`
 
 **⚠️ 部署提示**：这一 lane 拆掉守卫后，Bridge nook 的插件数据**才开始真写库** —— 是真正改变线上行为的 lane，部署时机最需注意。删列前建议先 `pg_dump` 备份 `commerce.shops`。
 
@@ -248,7 +248,7 @@ systemctl --user restart tts-erp.service tts-erp-sync.service
 
 1. **lane 3 必须与 0024 同一变更**（见 §3 lane 3 的说明）
 2. **历史 migration 不可改**（D9）—— 0023 依赖 0016 建的 `chrome_sync`
-3. **`regen_schema.py` 只能 dump prod** → 必须先做 D16 的工具改造，否则 `schema_tts_erp.sql` 无法在不动 prod 的前提下更新
+3. **`regen_schema.py` 只能 dump prod** → 必须先做 D16 的工具改造，否则 `docs/schema/schema_tts_erp.sql` 无法在不动 prod 的前提下更新
 4. **旧污染**：prod `fx.exchange_rates` 有 **48 行 09-08 的 `TEST_*` 遗留行**（与本任务无关，`fix/fx-test-isolation` lane 在跟）
 5. **master HEAD 有 pre-existing fail**（历史 commit 提到 19 个）→ 每个 lane merge 后按 AGENTS.md §11「代码/test lane 必须 0 新 fail」判定，先取 baseline
 

@@ -30,7 +30,7 @@
 
 6 张表全在 `public` schema：`analytics_records`(75) / `analytics_daily_pages`(75) /
 `analytics_daily_completeness`(59) / `analytics_cursors`(33) / `analytics_shop_timezones`(43) /
-`analytics_audit_log`(55k)。`schema_tts_erp.sql` 含这些表（regen 自生产库）。
+`analytics_audit_log`(55k)。`docs/schema/schema_tts_erp.sql` 含这些表（regen 自生产库）。
 
 ### 外部依赖方（不可破坏清单的来源）
 
@@ -169,7 +169,7 @@ ALTER TABLE public.analytics_audit_log          SET SCHEMA analytics;  -- RENAME
   （仍为 internal / not external-stable）
 - `docs/api/external-api.md`：路径条目更新
 - `docs/ops/analytics-sync.md`：重写（无独立 schema.sql 步骤，改 alembic）
-- `schema_tts_erp.sql`：`python3 scripts/regen_schema.py` 重生成
+- `docs/schema/schema_tts_erp.sql`：`python3 scripts/regen_schema.py` 重生成
 - `CHANGELOG.md`、`handoff.md`
 - nginx 块更新（`~/setup/nginx/conf.d/services.conf`，不在本仓库，部署时改）
 
