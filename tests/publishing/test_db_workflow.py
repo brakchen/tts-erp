@@ -562,6 +562,7 @@ def test_api_key_owner_can_list_detail_and_replay(
         request,
         db_session,
         cast(VideoObjectStore, UploadStore()),
+        Response(),
     )
     assert replayed["idempotentReplay"] is True
     assert replayed["taskId"] == str(task.public_id)
@@ -640,6 +641,7 @@ def test_api_key_b_cannot_list_detail_or_replay_key_a_task(
             request,
             db_session,
             cast(VideoObjectStore, store),
+            Response(),
         )
     assert replay_error.value.status_code == 404
     assert replay_error.value.detail == "TASK_NOT_FOUND"
@@ -744,6 +746,7 @@ def test_api_upload_replay_hides_cross_user_task(
             _request(role="readwrite", user_id=2),
             db_session,
             cast(VideoObjectStore, UploadStore()),
+            Response(),
         )
     assert exc_info.value.status_code == 404
     assert exc_info.value.detail == "TASK_NOT_FOUND"

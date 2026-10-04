@@ -152,6 +152,7 @@
           caption,
         }),
       });
+      upload.taskId = ticket.taskId;
       if (ticket.upload?.url) {
         const xhr = new XMLHttpRequest();
         upload.xhr = xhr;
@@ -183,11 +184,22 @@
       await refresh();
     } catch (error) {
       if (upload.cancelled) {
-        notice("上传已取消，可继续上传");
         try {
+          if (upload.cancelPromise) await upload.cancelPromise;
+          if (upload.serverCancelled) {
+            clearForm();
+            notice("上传已取消，任务已终止");
+          } else {
+            notice("取消上传失败，任务仍可继续上传", true);
+          }
           await refresh();
-        } catch (refreshError) {
-          notice(refreshError.message, true);
+        } catch (cancelError) {
+          notice(`取消上传失败：${cancelError.message}`, true);
+          try {
+            await refresh();
+          } catch (refreshError) {
+            notice(refreshError.message, true);
+          }
         }
       } else {
         notice(error.message, true);
@@ -200,12 +212,22 @@
     }
   }
 
-  function cancelUpload() {
+  async function cancelUpload() {
     const upload = state.upload;
     const xhr = upload?.xhr;
-    if (!upload || !xhr) return;
+    if (!upload || !xhr || upload.cancelled) return;
     upload.cancelled = true;
-    xhr.abort();
+    upload.cancelPromise = (async () => {
+      xhr.abort();
+      upload.xhr = null;
+      renderForm();
+      if (!upload.taskId) throw Error("上传任务尚未创建");
+      await request(`/tasks/${upload.taskId}/cancel`, { method: "POST", body: "{}" });
+      upload.serverCancelled = true;
+    })();
+    return upload.cancelPromise.catch((error) => {
+      notice(`取消上传失败：${error.message}`, true);
+    });
   }
 
   function clearForm() {
@@ -246,6 +268,10 @@
   const CONFIRM_ACTIONS = new Set(["cancel", "retry", "verify", "retry_cleanup"]);
 
   function resumeUpload(task) {
+    if (task.status === "cancelled" || !(task.allowedActions || []).includes("continue_upload")) {
+      notice("任务已取消，不能继续上传", true);
+      return;
+    }
     state.resumeTask = task;
     state.clientRequestId = task.clientRequestId;
     $("publish-caption").value = task.caption || task.captionPreview || "";

@@ -277,6 +277,7 @@ def create_task(
     request: Request,
     session: Annotated[Session, Depends(get_session)],
     store: Annotated[VideoObjectStore, Depends(get_store)],
+    response: Response,
 ) -> dict:
     require_role_at_least(request, "readwrite")
     _csrf(request)
@@ -304,6 +305,7 @@ def create_task(
             else status.HTTP_409_CONFLICT,
             {"code": code, "message": code},
         ) from exc
+    response.status_code = status.HTTP_200_OK if replay else status.HTTP_201_CREATED
     data = _snapshot(task, expose_client_request_id=True)
     data.update(
         {

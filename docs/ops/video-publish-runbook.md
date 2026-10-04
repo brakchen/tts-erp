@@ -6,7 +6,7 @@
 
 ## 部署顺序
 
-1. 使用测试形数据库验证 video-publish migrations `0053`–`0056`，再由运维执行生产迁移。
+1. 使用测试形数据库验证 video-publish migrations `0053`–`0057`，再由运维执行生产迁移。
 2. 创建私有 `tiktok-video` bucket，并限制 `video-publish/*` 的 Get/Put/Delete/Head 权限；配置来源站点 PUT/HEAD CORS。
 3. 创建 `TTS_ERP_PUBLISH_SPOOL_DIR`（0700），设置 `ARTEMIS_BASE_URL`、`ARTEMIS_DEVICE_SERIAL`、`ARTEMIS_APP_PACKAGE`、`TIKTOK_PUBLISH_MINIO_BUCKET=tiktok-video` 和 MinIO 凭据。`MINIO_BUCKET` 必须与专用 bucket 相同；未配置设备序列号或 bucket 不匹配时 API 拒绝创建任务。
 4. 安装 `scripts/systemd/tts-erp-publish.service`。生产环境如需执行对象删除，须由运维在服务环境显式设置 `ALLOW_PROD_DESTRUCTIVE=1`；缺少该授权时对象保留并标记 cleanup failed，不会静默删除。启动后确认 `publishing.worker_heartbeats` 在 15 秒内为 ready。
