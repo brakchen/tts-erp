@@ -197,7 +197,11 @@ def test_frontend_keeps_idempotency_and_double_click_guards() -> None:
     assert 'headers["If-None-Match"]' in source
     assert "new AbortController()" in source
     assert "document.hidden" in source
-    assert "state.refreshFailures" in source
+    assert "state.currentChannel.failures" in source
+    assert "state.listChannel.failures" in source
+    assert "state.detailChannel.failures" in source
     assert "scheduleCurrent(mode)" in source
     assert "scheduleList(mode)" in source
+    assert "scheduleDetail(mode)" in source
+    assert "? (state.currentTask ? 5 : hasQueued ? 8 : 30)" in source
     assert "localStorage.setItem(REFRESH_KEY, mode)" in source

@@ -124,12 +124,25 @@ def _lease_task(
     return task
 
 
+def has_failed_device_cleanup(session: Session) -> bool:
+    return (
+        session.scalar(
+            select(VideoPublishTask.id).where(
+                VideoPublishTask.device_cleanup_status == "failed"
+            )
+        )
+        is not None
+    )
+
+
 def claim_one(
     session: Session,
     instance_id: str,
     lease_seconds: int = 30,
     max_attempts: int = 3,
 ) -> VideoPublishTask | None:
+    if has_failed_device_cleanup(session):
+        return None
     if (
         session.scalar(
             select(VideoPublishTask.id)

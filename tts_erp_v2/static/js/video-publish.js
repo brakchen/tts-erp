@@ -10,17 +10,18 @@
     file: null,
     url: null,
     filter: "",
-    timer: null,
     currentTimer: null,
     listTimer: null,
-    generation: 0,
+    detailTimer: null,
+    currentChannel: { controller: null, generation: 0, failures: 0 },
+    listChannel: { controller: null, generation: 0, failures: 0, items: [] },
+    detailChannel: { controller: null, generation: 0, failures: 0 },
     upload: null,
     creating: false,
     clientRequestId: null,
     detail: null,
+    detailTaskId: null,
     etags: new Map(),
-    refreshController: null,
-    refreshFailures: 0,
     currentTask: null,
   };
 
@@ -111,9 +112,10 @@
       state.config = await request("/config");
       $("publish-size-hint").textContent = `MP4 · 最大 ${Math.round(state.config.maxVideoBytes / 1024 / 1024)} MB`;
       $("publish-target-device").textContent = state.config.target.deviceSerialMasked || "未配置";
+      $("publish-target-album").textContent = state.config.target.album || "未配置";
       $("publish-device-status").textContent = `设备 ${state.config.target.deviceSerialMasked || "—"} · ${state.config.device.message}`;
       const saved = localStorage.getItem(REFRESH_KEY);
-      if (saved && ["off", "smart", "5", "15", "30"].includes(saved)) {
+      if (saved && ["off", "smart", "2", "5", "10", "30"].includes(saved)) {
         $("publish-refresh-mode").value = saved;
       }
       renderForm();
@@ -199,6 +201,7 @@
   }
 
   function renderTasks(payload) {
+    state.listChannel.items = payload.items || [];
     const body = $("publish-task-list");
     body.replaceChildren();
     if (!payload.items.length) {
@@ -238,68 +241,119 @@
     });
   }
 
-  async function refresh(options = {}) {
-    const wantCurrent = options.current !== false;
-    const wantList = options.list !== false;
-    const generation = ++state.generation;
-    if (state.refreshController) state.refreshController.abort();
-    state.refreshController = new AbortController();
-    const signal = state.refreshController.signal;
+  async function refreshCurrent() {
+    const channel = state.currentChannel;
+    const generation = ++channel.generation;
+    if (channel.controller) channel.controller.abort();
+    channel.controller = new AbortController();
     try {
-      const query = state.filter ? `?status=${encodeURIComponent(state.filter)}` : "";
-      const detailPath = state.detail?.taskId ? `/tasks/${state.detail.taskId}` : null;
-      const [current, list, detail] = await Promise.all([
-        wantCurrent ? request("/tasks/current", { signal }) : Promise.resolve(null),
-        wantList ? request(`/tasks${query}`, { signal }) : Promise.resolve(null),
-        detailPath && (wantCurrent || wantList) ? request(detailPath, { signal }) : Promise.resolve(null),
-      ]);
-      if (generation !== state.generation) return;
-      state.refreshFailures = 0;
-      if (current && !current.notModified) {
+      const current = await request("/tasks/current", { signal: channel.controller.signal });
+      if (generation !== channel.generation) return;
+      channel.failures = 0;
+      if (!current.notModified) {
         state.currentTask = current.task;
         renderRail(current.task);
       }
-      if (list && !list.notModified) renderTasks(list);
-      if (detail && !detail.notModified) {
+      $("publish-last-refreshed").textContent = `上次刷新 ${new Date().toLocaleTimeString()}`;
+    } catch (error) {
+      if (error.name === "AbortError" || generation !== channel.generation) return;
+      channel.failures += 1;
+      notice("当前任务刷新失败，正在退避重试", true);
+    }
+  }
+
+  async function refreshList() {
+    const channel = state.listChannel;
+    const generation = ++channel.generation;
+    if (channel.controller) channel.controller.abort();
+    channel.controller = new AbortController();
+    try {
+      const query = state.filter ? `?status=${encodeURIComponent(state.filter)}` : "";
+      const list = await request(`/tasks${query}`, { signal: channel.controller.signal });
+      if (generation !== channel.generation) return;
+      channel.failures = 0;
+      if (!list.notModified) renderTasks(list);
+      $("publish-last-refreshed").textContent = `上次刷新 ${new Date().toLocaleTimeString()}`;
+    } catch (error) {
+      if (error.name === "AbortError" || generation !== channel.generation) return;
+      channel.failures += 1;
+      notice("任务列表刷新失败，正在退避重试", true);
+    }
+  }
+
+  async function refreshDetail() {
+    const taskId = state.detailTaskId;
+    if (!taskId) return;
+    const channel = state.detailChannel;
+    const generation = ++channel.generation;
+    if (channel.controller) channel.controller.abort();
+    channel.controller = new AbortController();
+    try {
+      const detail = await request(`/tasks/${taskId}`, { signal: channel.controller.signal });
+      if (generation !== channel.generation || taskId !== state.detailTaskId) return;
+      channel.failures = 0;
+      if (!detail.notModified) {
         state.detail = detail;
         renderDetail(detail);
       }
-      $("publish-last-refreshed").textContent = `上次刷新 ${new Date().toLocaleTimeString()}`;
     } catch (error) {
-      if (error.name === "AbortError") return;
-      if (generation !== state.generation) return;
-      state.refreshFailures += 1;
-      notice("状态刷新失败，正在退避重试", true);
+      if (error.name === "AbortError" || generation !== channel.generation) return;
+      channel.failures += 1;
+      notice("任务详情刷新失败，正在退避重试", true);
     }
+  }
+
+  async function refresh(options = {}) {
+    const jobs = [];
+    if (options.current !== false) jobs.push(refreshCurrent());
+    if (options.list !== false) jobs.push(refreshList());
+    if (options.detail !== false) jobs.push(refreshDetail());
+    await Promise.all(jobs);
+  }
+
+  function backoffSeconds(seconds, failures) {
+    if (document.hidden) seconds *= 4;
+    return Math.min(120, seconds * Math.pow(2, Math.min(failures, 3)));
   }
 
   function schedule() {
     clearTimeout(state.currentTimer);
     clearTimeout(state.listTimer);
+    clearTimeout(state.detailTimer);
     const mode = $("publish-refresh-mode").value;
     localStorage.setItem(REFRESH_KEY, mode);
     if (mode === "off") return;
     scheduleCurrent(mode);
     scheduleList(mode);
+    scheduleDetail(mode);
   }
 
   function scheduleCurrent(mode) {
-    let seconds = mode === "smart" ? (state.currentTask ? 2 : 15) : Number(mode);
-    if (document.hidden) seconds *= 4;
-    seconds = Math.min(120, seconds * Math.pow(2, Math.min(state.refreshFailures, 3)));
+    const base = mode === "smart" ? (state.currentTask ? 2 : 15) : Number(mode);
+    const seconds = backoffSeconds(base, state.currentChannel.failures);
     state.currentTimer = setTimeout(async () => {
-      await refresh({ list: false });
+      await refreshCurrent();
       scheduleCurrent(mode);
     }, seconds * 1000);
   }
 
   function scheduleList(mode) {
-    let seconds = mode === "smart" ? 15 : Number(mode);
-    if (document.hidden) seconds *= 4;
-    seconds = Math.min(120, seconds * Math.pow(2, Math.min(state.refreshFailures, 3)));
+    const hasQueued = state.listChannel.items.some((task) => task.status === "pending");
+    const base = mode === "smart" ? (state.currentTask ? 5 : hasQueued ? 8 : 30) : Number(mode);
+    const seconds = backoffSeconds(base, state.listChannel.failures);
     state.listTimer = setTimeout(async () => {
-      await refresh({ current: false });
+      await refreshList();
       scheduleList(mode);
+    }, seconds * 1000);
+  }
+
+  function scheduleDetail(mode) {
+    if (!state.detailTaskId) return;
+    const base = mode === "smart" ? (state.currentTask ? 5 : 30) : Number(mode);
+    const seconds = backoffSeconds(base, state.detailChannel.failures);
+    state.detailTimer = setTimeout(async () => {
+      await refreshDetail();
+      scheduleDetail(mode);
     }, seconds * 1000);
   }
 
@@ -321,12 +375,13 @@
   }
 
   async function openDetail(id) {
+    state.detailTaskId = id;
     try {
-      const detail = await request(`/tasks/${id}`);
-      if (detail.notModified) return;
-      state.detail = detail;
-      renderDetail(detail);
-      $("publish-task-drawer").showModal();
+      await refreshDetail();
+      if (state.detail?.taskId === id) {
+        $("publish-task-drawer").showModal();
+        schedule();
+      }
     } catch (error) { notice(error.message, true); }
   }
 
@@ -340,7 +395,12 @@
   $("publish-submit").addEventListener("click", create);
   $("publish-refresh-now").addEventListener("click", async () => { await refresh(); schedule(); });
   $("publish-refresh-mode").addEventListener("change", schedule);
-  $("publish-drawer-close").addEventListener("click", () => $("publish-task-drawer").close());
+  $("publish-drawer-close").addEventListener("click", () => {
+    $("publish-task-drawer").close();
+    state.detailTaskId = null;
+    state.detail = null;
+    clearTimeout(state.detailTimer);
+  });
   document.querySelectorAll("[data-task-filter]").forEach((button) => button.addEventListener("click", () => {
     state.filter = button.dataset.taskFilter;
     document.querySelectorAll("[data-task-filter]").forEach((node) => node.classList.toggle("is-active", node === button));

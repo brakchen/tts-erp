@@ -34,6 +34,7 @@ from tts_erp_v2.publishing.repository import (
     _lease_task,
     claim_one,
     create_attempt,
+    has_failed_device_cleanup,
     release_lease,
     touch_task,
 )
@@ -109,6 +110,10 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
             if task.stage == TaskStage.CLEANING.value:
                 session.commit()
                 await _cleanup_success(task_id, deps)
+                return
+            if has_failed_device_cleanup(session):
+                _defer_for_device_cleanup(task)
+                session.commit()
                 return
             object_key = task.object_key
             size_bytes = task.size_bytes
@@ -508,6 +513,18 @@ def _get(session: Session, task_id: UUID) -> VideoPublishTask:
     if task is None:
         raise LookupError(task_id)
     return task
+
+
+def _defer_for_device_cleanup(task: VideoPublishTask) -> None:
+    task.status = TaskStatus.PENDING.value
+    task.stage = TaskStage.WAITING_DEVICE.value
+    task.next_attempt_at = datetime.now(UTC) + timedelta(seconds=30)
+    task.lease_owner = None
+    task.lease_expires_at = None
+    task.heartbeat_at = None
+    task.last_error_code = "DEVICE_CLEANUP_BLOCKED"
+    task.last_error_message = "A prior task has failed device cleanup"
+    task.row_version += 1
 
 
 async def _safe_retry(

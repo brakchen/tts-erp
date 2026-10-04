@@ -1,12 +1,28 @@
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from typing import cast
 from uuid import uuid4
 
+import pytest
+from sqlalchemy.orm import Session
+
+from tts_erp_v2.api.v2.video_publish import config
 from tts_erp_v2.db.models.publishing import VideoPublishTask
+from tts_erp_v2.publishing.dispatcher import (
+    PublishDependencies,
+    _defer_for_device_cleanup,
+    _safe_retry,
+)
 from tts_erp_v2.publishing.domain import TaskStage, TaskStatus
 from tts_erp_v2.publishing.repository import _lease_task, claim_one
 
 
-def _task() -> VideoPublishTask:
+def _task(
+    *,
+    device_cleanup_status: str = "not_started",
+    status: str = TaskStatus.PENDING.value,
+    stage: str = TaskStage.QUEUED.value,
+) -> VideoPublishTask:
     return VideoPublishTask(
         public_id=uuid4(),
         client_request_id=uuid4(),
@@ -16,15 +32,25 @@ def _task() -> VideoPublishTask:
         size_bytes=4,
         object_bucket="tiktok-video",
         object_key=f"TEST/{uuid4()}.mp4",
-        status=TaskStatus.PENDING.value,
-        stage=TaskStage.QUEUED.value,
+        status=status,
+        stage=stage,
         target_device_serial="TEST_device",
         target_app_package="com.tiktok",
+        device_cleanup_status=device_cleanup_status,
         queued_at=datetime.now(UTC),
     )
 
 
-def test_global_claim_and_expired_lease_takeover(db_session) -> None:
+def _factory(db_session: Session):
+    def factory():
+        return Session(
+            bind=db_session.get_bind(), join_transaction_mode="create_savepoint"
+        )
+
+    return factory
+
+
+def test_global_claim_and_expired_lease_takeover(db_session: Session) -> None:
     first = _task()
     second = _task()
     db_session.add_all([first, second])
@@ -44,3 +70,84 @@ def test_global_claim_and_expired_lease_takeover(db_session) -> None:
     assert takeover.public_id == first.public_id
     assert takeover.lease_owner == "worker-b"
     db_session.rollback()
+
+
+def test_device_gate_defers_staging_without_changing_business_result() -> None:
+    task = _task(status=TaskStatus.RUNNING.value, stage=TaskStage.DOWNLOADING.value)
+    task.row_version = 1
+    _defer_for_device_cleanup(task)
+    assert task.status == TaskStatus.PENDING.value
+    assert task.stage == TaskStage.WAITING_DEVICE.value
+    assert task.last_error_code == "DEVICE_CLEANUP_BLOCKED"
+    assert task.lease_owner is None
+
+
+def test_failed_device_cleanup_blocks_later_claim(db_session: Session) -> None:
+    residue = _task(device_cleanup_status="failed")
+    queued = _task()
+    cleanup = _task(status=TaskStatus.RUNNING.value, stage=TaskStage.CLEANING.value)
+    db_session.add_all([residue, queued, cleanup])
+    db_session.flush()
+    assert claim_one(db_session, "worker") is None
+    reclaimed = _lease_task(db_session, "worker", 30)
+    assert reclaimed is not None
+    assert reclaimed.public_id == cleanup.public_id
+    db_session.commit()
+
+    residue = db_session.get(VideoPublishTask, residue.id)
+    cleanup = db_session.get(VideoPublishTask, cleanup.id)
+    assert residue is not None and cleanup is not None
+    residue.device_cleanup_status = "succeeded"
+    cleanup.status = TaskStatus.SUCCEEDED.value
+    cleanup.stage = TaskStage.DONE.value
+    cleanup.lease_owner = None
+    cleanup.lease_expires_at = None
+    cleanup.heartbeat_at = None
+    db_session.commit()
+    assert claim_one(db_session, "worker") is not None
+    db_session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_safe_retry_requeues_and_fences_stale_worker(db_session: Session) -> None:
+    task = _task()
+    db_session.add(task)
+    db_session.flush()
+    assert claim_one(db_session, "worker-a") is not None
+    db_session.commit()
+
+    deps = cast(
+        PublishDependencies,
+        SimpleNamespace(
+            session_factory=_factory(db_session),
+            instance_id="worker-a",
+            max_attempts=3,
+        ),
+    )
+    await _safe_retry(task.public_id, "DOWNLOAD_TEMPORARY", deps)
+    db_session.expire_all()
+    assert task.status == TaskStatus.PENDING.value
+    assert task.stage == TaskStage.QUEUED.value
+    assert task.lease_owner is None
+    assert task.next_attempt_at is not None
+
+    task = _task()
+    db_session.add(task)
+    db_session.flush()
+    assert claim_one(db_session, "worker-a") is not None
+    db_session.commit()
+    task.lease_owner = "worker-b"
+    task.row_version += 1
+    db_session.commit()
+    await _safe_retry(task.public_id, "STALE", deps)
+    db_session.expire_all()
+    assert task.status == TaskStatus.RUNNING.value
+    assert task.lease_owner == "worker-b"
+
+
+def test_config_exposes_configured_album(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TIKTOK_PUBLISH_ALBUM", "TEST_CAMPAIGN")
+    payload = config(db_session)
+    assert payload["target"]["album"] == "TEST_CAMPAIGN"
