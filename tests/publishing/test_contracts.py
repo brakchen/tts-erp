@@ -198,4 +198,6 @@ def test_frontend_keeps_idempotency_and_double_click_guards() -> None:
     assert "new AbortController()" in source
     assert "document.hidden" in source
     assert "state.refreshFailures" in source
+    assert "scheduleCurrent(mode)" in source
+    assert "scheduleList(mode)" in source
     assert "localStorage.setItem(REFRESH_KEY, mode)" in source

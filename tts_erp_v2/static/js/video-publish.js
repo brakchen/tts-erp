@@ -11,6 +11,8 @@
     url: null,
     filter: "",
     timer: null,
+    currentTimer: null,
+    listTimer: null,
     generation: 0,
     upload: null,
     creating: false,
@@ -51,7 +53,7 @@
       let detail = {};
       try {
         detail = await response.json();
-      } catch (_) {
+      } catch {
         // Keep the HTTP status as the useful error when no JSON exists.
       }
       throw Error(detail.detail?.message || detail.detail?.code || detail.detail || "请求失败");
@@ -236,7 +238,9 @@
     });
   }
 
-  async function refresh() {
+  async function refresh(options = {}) {
+    const wantCurrent = options.current !== false;
+    const wantList = options.list !== false;
     const generation = ++state.generation;
     if (state.refreshController) state.refreshController.abort();
     state.refreshController = new AbortController();
@@ -245,17 +249,17 @@
       const query = state.filter ? `?status=${encodeURIComponent(state.filter)}` : "";
       const detailPath = state.detail?.taskId ? `/tasks/${state.detail.taskId}` : null;
       const [current, list, detail] = await Promise.all([
-        request("/tasks/current", { signal }),
-        request(`/tasks${query}`, { signal }),
-        detailPath ? request(detailPath, { signal }) : Promise.resolve(null),
+        wantCurrent ? request("/tasks/current", { signal }) : Promise.resolve(null),
+        wantList ? request(`/tasks${query}`, { signal }) : Promise.resolve(null),
+        detailPath && (wantCurrent || wantList) ? request(detailPath, { signal }) : Promise.resolve(null),
       ]);
       if (generation !== state.generation) return;
       state.refreshFailures = 0;
-      if (!current.notModified) {
+      if (current && !current.notModified) {
         state.currentTask = current.task;
         renderRail(current.task);
       }
-      if (!list.notModified) renderTasks(list);
+      if (list && !list.notModified) renderTasks(list);
       if (detail && !detail.notModified) {
         state.detail = detail;
         renderDetail(detail);
@@ -270,14 +274,33 @@
   }
 
   function schedule() {
-    clearTimeout(state.timer);
+    clearTimeout(state.currentTimer);
+    clearTimeout(state.listTimer);
     const mode = $("publish-refresh-mode").value;
     localStorage.setItem(REFRESH_KEY, mode);
     if (mode === "off") return;
+    scheduleCurrent(mode);
+    scheduleList(mode);
+  }
+
+  function scheduleCurrent(mode) {
     let seconds = mode === "smart" ? (state.currentTask ? 2 : 15) : Number(mode);
     if (document.hidden) seconds *= 4;
     seconds = Math.min(120, seconds * Math.pow(2, Math.min(state.refreshFailures, 3)));
-    state.timer = setTimeout(async () => { await refresh(); schedule(); }, seconds * 1000);
+    state.currentTimer = setTimeout(async () => {
+      await refresh({ list: false });
+      scheduleCurrent(mode);
+    }, seconds * 1000);
+  }
+
+  function scheduleList(mode) {
+    let seconds = mode === "smart" ? 15 : Number(mode);
+    if (document.hidden) seconds *= 4;
+    seconds = Math.min(120, seconds * Math.pow(2, Math.min(state.refreshFailures, 3)));
+    state.listTimer = setTimeout(async () => {
+      await refresh({ current: false });
+      scheduleList(mode);
+    }, seconds * 1000);
   }
 
   function renderDetail(detail) {
@@ -321,7 +344,7 @@
   document.querySelectorAll("[data-task-filter]").forEach((button) => button.addEventListener("click", () => {
     state.filter = button.dataset.taskFilter;
     document.querySelectorAll("[data-task-filter]").forEach((node) => node.classList.toggle("is-active", node === button));
-    refresh();
+    refresh({ current: false });
   }));
   document.querySelector("[data-copy-artemis-id]").addEventListener("click", (event) => {
     const id = event.currentTarget.dataset.copyArtemisId;
