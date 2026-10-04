@@ -1,17 +1,32 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.api import deps
 from tts_erp_v2.api.v2 import video_publish
+from tts_erp_v2.db.models.publishing import VideoPublishTask
 
 
 class _UploadStore:
     bucket = "tiktok-video"
 
+    def __init__(self, session: Session | None = None) -> None:
+        self.session = session
+        self.persisted_before_presign = False
+
     def presign_put(self, key: str, content_type: str) -> str:
+        if self.session is not None:
+            self.persisted_before_presign = (
+                self.session.scalar(
+                    select(VideoPublishTask).where(VideoPublishTask.object_key == key)
+                )
+                is not None
+            )
         return f"https://upload.test/{key}"
 
 
@@ -20,6 +35,7 @@ def test_upload_ticket_http_statuses_and_foreign_replay_denial(
 ) -> None:
     monkeypatch.setenv("ARTEMIS_DEVICE_SERIAL", "TEST_device")
     monkeypatch.setenv("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video")
+    monkeypatch.setenv("TIKTOK_PUBLISH_UPLOAD_TTL_SECONDS", "120")
     app = FastAPI()
     app.include_router(video_publish.router)
 
@@ -35,7 +51,7 @@ def test_upload_ticket_http_statuses_and_foreign_replay_denial(
             request.scope["api_key_hash"] = request.headers.get("X-Test-Key", "key-a")
         return await call_next(request)
 
-    store = _UploadStore()
+    store = _UploadStore(db_session)
     app.dependency_overrides[deps.get_session] = lambda: db_session
     app.dependency_overrides[video_publish.get_session] = lambda: db_session
     app.dependency_overrides[video_publish.get_store] = lambda: store
@@ -50,6 +66,10 @@ def test_upload_ticket_http_statuses_and_foreign_replay_denial(
         first = client.post("/v2/video-publish/tasks", json=payload)
         assert first.status_code == 201
         assert first.json()["idempotentReplay"] is False
+        assert store.persisted_before_presign is True
+        expires_at = datetime.fromisoformat(first.json()["upload"]["expiresAt"])
+        now = datetime.now(UTC)
+        assert now <= expires_at <= now + timedelta(seconds=121)
 
         replay = client.post("/v2/video-publish/tasks", json=payload)
         assert replay.status_code == 200

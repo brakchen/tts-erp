@@ -7,6 +7,10 @@
   <link rel="stylesheet" href="../../static/css/tokens.css?v={{ css_version('tokens.css') }}">
   <link rel="stylesheet" href="../../static/css/common.css?v={{ css_version('common.css') }}">
   <link rel="stylesheet" href="../../static/css/video-publish.css?v={{ css_version('video-publish.css') }}">
+  <style>
+    <!-- pi-lens-ignore: css:css-ruleorselectorexpected,css:css-lcurlyexpected -->
+    {{ sidebar_css(current_page) }}
+  </style>
 </head>
 <body>
 {{ sidebar(current_page) }}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -316,6 +317,15 @@ async def _run_attempt(
             )
         except ArtemisTransportError:
             return
+
+    if result.terminal and result.status != "success" and result.steps_count is None:
+        try:
+            steps_count = await _run_external(
+                task_id, deps, lambda: deps.artemis.get_steps_count(session_id)
+            )
+            result = dataclasses.replace(result, steps_count=steps_count)
+        except ArtemisTransportError:
+            pass
 
     with deps.session_factory() as session:
         attempt = _require_attempt(session, attempt_id)

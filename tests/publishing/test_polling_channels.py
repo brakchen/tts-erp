@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import subprocess
 import textwrap
 
@@ -59,8 +61,8 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
             ? { maxVideoBytes: 100, maxCaptionCharacters: 4000, target: { album: "TEST" }, device: {}, worker: {} }
             : url.includes("/tasks/current") ? { task: { taskId: "running-1", filename: "TEST-running.mp4", stage: "downloading", status: "running" }, pollState: { running: true, queued: true } }
             : url.includes("/tasks/task-1")
-              ? { taskId: "task-1", filename: "TEST.mp4", status: "succeeded", caption: "TEST", attempts: [] }
-              : { items: [{ taskId: "task-1", status: "pending", filename: "TEST.mp4", latestArtemisSessionId: "artemis-1", createdAt: "2026-10-04T00:00:00Z", clientRequestId: "client-1", caption: "TEST caption", allowedActions: ["view", "continue_upload", "cancel", "retry", "verify", "retry_cleanup", "copy_artemis_id"] }], pollState: { running: true, queued: true } };
+              ? { taskId: "task-1", filename: "TEST.mp4", status: "succeeded", caption: "TEST", attempts: [{ sequenceNo: 1, kind: "publish", status: "success", artemisSessionId: "full-artemis-session-id" }], cleanup: { device: { status: "succeeded" }, spool: { status: "succeeded" }, object: { status: "failed" } } }
+              : { items: [{ taskId: "task-1", status: "pending", filename: "TEST.mp4", latestArtemisSessionId: "artemis-1", rowVersion: 3, createdAt: "2026-10-04T00:00:00Z", clientRequestId: "client-1", caption: "TEST caption", allowedActions: ["view", "continue_upload", "cancel", "retry", "verify", "retry_cleanup", "copy_artemis_id"] }], pollState: { running: true, queued: true } };
           return { status: 200, ok: true, headers: { get: () => null }, json: async () => payload };
         };
         vm.runInThisContext(source);
@@ -94,6 +96,8 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
         const view = created.find((node) => node.textContent === "查看");
         if (!view) throw new Error("detail trigger was not rendered");
         await view.onclick();
+        if (!created.some((node) => node.textContent === "full-artemis-session-id")) throw new Error("detail hid the full Artemis session ID");
+        if (!created.some((node) => node.textContent.includes("清理：设备 succeeded"))) throw new Error("detail omitted cleanup sections");
         const latestList = requests.filter((request) => request.url.endsWith("/tasks")).at(-1);
         const latestCurrentAfterActions = requests.filter((request) => request.url.includes("/tasks/current")).at(-1);
         const latestDetail = requests.filter((request) => request.url.includes("/tasks/task-1")).at(-1);

@@ -13,6 +13,10 @@ class ArtemisTransportError(RuntimeError):
     pass
 
 
+class ArtemisSessionNotFound(ArtemisTransportError):
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class ArtemisResult:
     session_id: UUID
@@ -51,6 +55,10 @@ class ArtemisClient:
                 response.raise_for_status()
                 payload = response.json()
                 return payload if isinstance(payload, dict) else {}
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                raise ArtemisSessionNotFound(str(exc)[:500]) from exc
+            raise ArtemisTransportError(str(exc)[:500]) from exc
         except (httpx.HTTPError, ValueError) as exc:
             raise ArtemisTransportError(str(exc)[:500]) from exc
 
@@ -80,7 +88,17 @@ class ArtemisClient:
         return self._result(session_id, payload)
 
     async def get_task(self, session_id: UUID) -> ArtemisResult:
-        payload = await self._request("GET", f"/api/sessions/{session_id}")
+        try:
+            payload = await self._request("GET", f"/api/sessions/{session_id}")
+        except ArtemisSessionNotFound:
+            status = await self._request("GET", "/api/status")
+            active = status.get("active_task") or status.get("activeTask")
+            if isinstance(active, dict) and str(
+                active.get("session_id") or active.get("sessionId")
+            ) == str(session_id):
+                payload = active
+            else:
+                return ArtemisResult(session_id, "not_found")
         return self._result(session_id, payload)
 
     async def get_steps_count(self, session_id: UUID) -> int | None:
@@ -98,10 +116,20 @@ class ArtemisClient:
             "canceled": "cancelled",
         }
         status = mapping.get(raw, raw)
+        output = (
+            payload.get("output") if isinstance(payload.get("output"), dict) else None
+        )
+        final_observed = bool(
+            payload.get("final_publish_observed")
+            or payload.get("finalPublishObserved")
+            or (output or {}).get("final_publish_observed")
+            or (output or {}).get("finalPublishObserved")
+        )
         return ArtemisResult(
             session_id,
             status,
-            payload.get("output") if isinstance(payload.get("output"), dict) else None,
+            output,
             str(payload.get("error"))[:500] if payload.get("error") else None,
-            payload.get("steps_count"),
+            payload.get("steps_count", payload.get("stepsCount")),
+            final_observed,
         )

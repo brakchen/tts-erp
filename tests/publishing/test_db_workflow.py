@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,15 +12,17 @@ from sqlalchemy.orm import Session
 
 from tts_erp_v2.access import AccessGrant, AuthMode, Role
 from tts_erp_v2.api.v2.video_publish import (
+    ActionIn,
     CreateIn,
     config,
+    confirm,
     create_task,
     detail,
     list_tasks,
     retry,
     retry_cleanup,
 )
-from tts_erp_v2.db.models.publishing import VideoPublishTask
+from tts_erp_v2.db.models.publishing import VideoPublishAttempt, VideoPublishTask
 from tts_erp_v2.publishing.dispatcher import (
     LeaseLost,
     PublishDependencies,
@@ -31,7 +35,11 @@ from tts_erp_v2.publishing.dispatcher import (
 from tts_erp_v2.publishing.domain import TaskStage, TaskStatus
 from tts_erp_v2.publishing.object_store import VideoObjectStore
 from tts_erp_v2.publishing.repository import _lease_task, claim_one
-from tts_erp_v2.publishing.submission import CreateCommand, create_upload_ticket
+from tts_erp_v2.publishing.submission import (
+    CreateCommand,
+    create_upload_ticket,
+    retry_task,
+)
 
 
 def _task(
@@ -336,7 +344,12 @@ async def test_cancelled_object_cleanup_supports_auto_and_manual_retry(
     assert task.object_cleanup_status == "failed"
     assert task.object_cleanup_attempts == 1
     store.fail = False
-    result = retry_cleanup(task.public_id, _request(), db_session)
+    result = retry_cleanup(
+        task.public_id,
+        ActionIn(rowVersion=task.row_version),
+        _request(),
+        db_session,
+    )
     assert result["status"] == TaskStatus.CANCELLED.value
     assert result["stage"] == TaskStage.CLEANING.value
     assert result["cleanup"]["object"]["status"] == "pending"
@@ -507,6 +520,36 @@ def test_continue_upload_reuses_awaiting_upload_ticket(
     assert url.endswith(task.object_key)
 
 
+def test_confirm_rejects_stale_row_version(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ARTEMIS_DEVICE_SERIAL", "TEST_device")
+    monkeypatch.setenv("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video")
+
+    class UploadStore:
+        bucket = "tiktok-video"
+
+        def stat(self, key: str) -> dict:
+            raise AssertionError("stale version must not inspect MinIO")
+
+    task = _task(stage=TaskStage.AWAITING_UPLOAD.value, created_by_user_id=1)
+    db_session.add(task)
+    db_session.flush()
+    task.row_version = 2
+    request = _request(role="readwrite", user_id=1)
+    with pytest.raises(HTTPException) as exc_info:
+        confirm(
+            task.public_id,
+            ActionIn(rowVersion=1),
+            request,
+            db_session,
+            cast(VideoObjectStore, UploadStore()),
+        )
+    assert exc_info.value.status_code == 409
+    assert cast(dict, exc_info.value.detail)["code"] == "ROW_VERSION_CONFLICT"
+    db_session.rollback()
+
+
 def test_api_key_owner_can_list_detail_and_replay(
     db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -665,6 +708,18 @@ def test_admin_or_bypass_can_view_and_operate_cross_owner_task(
         created_by_key_hash="a" * 64,
     )
     task.attempt_count = 1
+    task.object_uploaded_at = datetime.now(UTC)
+    task.attempts.append(
+        VideoPublishAttempt(
+            sequence_no=1,
+            kind="publish",
+            artemis_session_id=uuid4(),
+            prompt_version="TEST",
+            prompt_snapshot="TEST",
+            device_serial="TEST_device",
+            retry_safe=True,
+        )
+    )
     db_session.add(task)
     db_session.flush()
     request = _request(
@@ -683,10 +738,50 @@ def test_admin_or_bypass_can_view_and_operate_cross_owner_task(
         ),
     )
     assert viewed["taskId"] == str(task.public_id)
-    operated = retry(task.public_id, request, db_session)
+
+    class RetryStore:
+        def stat(self, _key: str) -> dict:
+            return {"size": task.size_bytes, "content_type": task.content_type}
+
+    operated = retry(
+        task.public_id,
+        ActionIn(rowVersion=task.row_version),
+        request,
+        db_session,
+        cast(VideoObjectStore, RetryStore()),
+    )
     assert operated["taskId"] == str(task.public_id)
     assert operated["status"] == TaskStatus.PENDING.value
     assert operated["stage"] == TaskStage.QUEUED.value
+
+
+def test_retry_rejects_missing_object_even_when_attempt_is_safe(
+    db_session: Session,
+) -> None:
+    task = _task(status=TaskStatus.FAILED.value)
+    task.attempt_count = 1
+    task.object_uploaded_at = datetime.now(UTC)
+    task.attempts.append(
+        VideoPublishAttempt(
+            sequence_no=1,
+            kind="publish",
+            artemis_session_id=uuid4(),
+            prompt_version="TEST",
+            prompt_snapshot="TEST",
+            device_serial="TEST_device",
+            retry_safe=True,
+        )
+    )
+    db_session.add(task)
+    db_session.flush()
+
+    class MissingStore:
+        def stat(self, _key: str) -> dict:
+            raise FileNotFoundError("TEST_missing")
+
+    with pytest.raises(ValueError, match="UPLOAD_REPLACEMENT_REQUIRED"):
+        retry_task(db_session, task.public_id, cast(VideoObjectStore, MissingStore()))
+    db_session.rollback()
 
 
 def test_upload_ticket_replay_rejects_cross_user_owner(
@@ -863,7 +958,12 @@ def test_cleanup_retry_rejects_live_lease_and_requeues_expired_lease(
     db_session.flush()
     db_session.commit()
     with pytest.raises(HTTPException) as exc_info:
-        retry_cleanup(task.public_id, _request(), db_session)
+        retry_cleanup(
+            task.public_id,
+            ActionIn(rowVersion=task.row_version),
+            _request(),
+            db_session,
+        )
     assert exc_info.value.detail == "CLEANUP_LEASE_BUSY"
     db_session.rollback()
 
@@ -871,7 +971,12 @@ def test_cleanup_retry_rejects_live_lease_and_requeues_expired_lease(
     assert task is not None
     task.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
     db_session.commit()
-    result = retry_cleanup(task.public_id, _request(), db_session)
+    result = retry_cleanup(
+        task.public_id,
+        ActionIn(rowVersion=task.row_version),
+        _request(),
+        db_session,
+    )
     assert result["status"] == TaskStatus.RUNNING.value
     assert result["stage"] == TaskStage.CLEANING.value
     assert result["cleanup"]["device"]["status"] == "pending"

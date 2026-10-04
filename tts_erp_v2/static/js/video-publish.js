@@ -62,7 +62,10 @@
       } catch {
         // Keep the HTTP status as the useful error when no JSON exists.
       }
-      throw Error(detail.detail?.message || detail.detail?.code || detail.detail || "请求失败");
+      const error = Error(detail.detail?.message || detail.detail?.code || detail.detail || "请求失败");
+      error.status = response.status;
+      error.code = detail.detail?.code;
+      throw error;
     }
     if (method === "GET") {
       const etag = response.headers.get("ETag");
@@ -137,12 +140,13 @@
 
   async function create() {
     if (!valid() || state.creating) return;
+    const caption = $("publish-caption").value;
+    const file = state.file;
+    if (!window.confirm(`确认将 ${file.name} 发布到 TikTok？\n\n${caption}\n\n设备空闲时可能立即开始。`)) return;
     state.creating=true;
     const upload = { xhr: null, cancelled: false };
     state.upload = upload;
     renderForm();
-    const caption = $("publish-caption").value;
-    const file = state.file;
     state.clientRequestId = state.clientRequestId || crypto.randomUUID();
     try {
       const ticket = await request("/tasks", {
@@ -156,6 +160,7 @@
         }),
       });
       upload.taskId = ticket.taskId;
+      upload.rowVersion = ticket.rowVersion;
       if (ticket.upload?.url) {
         const xhr = new XMLHttpRequest();
         upload.xhr = xhr;
@@ -180,7 +185,10 @@
         if (upload.cancelled || state.upload !== upload) return;
       }
       if (upload.cancelled || state.upload !== upload) return;
-      await request(`/tasks/${ticket.taskId}/confirm-upload`, { method: "POST", body: "{}" });
+      await request(`/tasks/${ticket.taskId}/confirm-upload`, {
+        method: "POST",
+        body: JSON.stringify({ rowVersion: upload.rowVersion }),
+      });
       if (upload.cancelled || state.upload !== upload) return;
       notice("已加入发布队列");
       clearForm();
@@ -225,7 +233,10 @@
       upload.xhr = null;
       renderForm();
       if (!upload.taskId) throw Error("上传任务尚未创建");
-      await request(`/tasks/${upload.taskId}/cancel`, { method: "POST", body: "{}" });
+      await request(`/tasks/${upload.taskId}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({ rowVersion: upload.rowVersion }),
+      });
       upload.serverCancelled = true;
     })();
     return upload.cancelPromise.catch((error) => {
@@ -245,14 +256,17 @@
     renderForm();
   }
 
-  function short(id) { return id ? `${id.slice(0, 8)}…${id.slice(-5)}` : "尚未创建"; }
-
   function renderRail(task) {
     const rail = $("publish-rail");
-    rail.querySelectorAll("[data-stage]").forEach((node) => node.classList.toggle("is-current", !!task && node.dataset.stage === task.stage));
+    rail.querySelectorAll("[data-stage]").forEach((node) => {
+      const current = Boolean(task && node.dataset.stage === task.stage);
+      node.classList.toggle("is-current", current);
+      if (current) node.setAttribute("aria-current", "step");
+      else node.removeAttribute("aria-current");
+    });
     $("publish-rail-summary").textContent = task ? `${task.filename || ""} · ${task.stage}` : "当前无运行任务";
     const id = task?.currentAttempt?.artemisSessionId || task?.latestArtemisSessionId || "";
-    $("active-artemis-id").textContent = short(id);
+    $("active-artemis-id").textContent = id || "尚未创建";
     $("active-artemis-id").title = id;
     const button = document.querySelector("[data-copy-artemis-id]");
     button.dataset.copyArtemisId = id;
@@ -298,10 +312,18 @@
       const endpoint = actionName === "retry_cleanup"
         ? `/tasks/${task.taskId}/cleanup/retry`
         : `/tasks/${task.taskId}/${actionName.replaceAll("_", "-")}`;
-      await request(endpoint, { method: "POST", body: "{}" });
+      await request(endpoint, {
+        method: "POST",
+        body: JSON.stringify({ rowVersion: task.rowVersion }),
+      });
       await refresh();
     } catch (error) {
-      notice(error.message, true);
+      if (error.status === 409 && error.code === "ROW_VERSION_CONFLICT") {
+        notice("任务已更新，已刷新最新状态", true);
+        await refresh();
+      } else {
+        notice(error.message, true);
+      }
     }
   }
 
@@ -321,7 +343,7 @@
     }
     payload.items.forEach((task) => {
       const row = document.createElement("tr");
-      [task.status, task.filename, short(task.latestArtemisSessionId), new Date(task.createdAt).toLocaleString()].forEach((value, index) => {
+      [task.status, task.filename, task.latestArtemisSessionId || "—", new Date(task.createdAt).toLocaleString()].forEach((value, index) => {
         const cell = document.createElement("td");
         cell.textContent = value;
         cell.dataset.label = ["状态", "视频", "Artemis ID", "时间"][index] || "";
@@ -490,9 +512,23 @@
       (detail.attempts || []).forEach((attempt) => {
         const section = document.createElement("section");
         section.className = "drawer-attempt";
-        section.textContent = `第 ${attempt.sequenceNo} 次 ${attempt.kind} · ${attempt.status} · Artemis ID ${attempt.artemisSessionId}`;
+        const summary = document.createElement("div");
+        summary.textContent = `第 ${attempt.sequenceNo} 次 ${attempt.kind} · ${attempt.status}`;
+        const id = document.createElement("code");
+        id.textContent = attempt.artemisSessionId;
+        const copy = document.createElement("button");
+        copy.className = "btn-secondary drawer-action";
+        copy.textContent = "复制 Artemis ID";
+        copy.onclick = () => navigator.clipboard.writeText(attempt.artemisSessionId).then(() => notice("Artemis ID 已复制"));
+        section.append(summary, id, copy);
         drawer.append(section);
       });
+      if (detail.cleanup) {
+        const cleanup = document.createElement("section");
+        cleanup.className = "drawer-cleanup";
+        cleanup.textContent = `清理：设备 ${detail.cleanup.device.status} · spool ${detail.cleanup.spool.status} · 对象 ${detail.cleanup.object.status}`;
+        drawer.append(cleanup);
+      }
   }
 
   async function openDetail(id) {

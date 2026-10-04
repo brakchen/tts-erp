@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from datetime import timedelta
 from pathlib import Path
 from typing import Protocol
 
@@ -15,6 +16,9 @@ from tts_erp_v2.storage.minio_client import MinioClient, ObjectNotFound
 class VideoObjectStore(Protocol):
     @property
     def bucket(self) -> str: ...
+
+    @property
+    def default_expiry(self) -> timedelta: ...
     def presign_put(self, key: str, content_type: str) -> str: ...
     def stat(self, key: str) -> dict: ...
     def download(self, key: str, destination: Path) -> str: ...
@@ -38,6 +42,10 @@ class MinioVideoStore:
     @property
     def bucket(self) -> str:
         return self._client.bucket
+
+    @property
+    def default_expiry(self) -> timedelta:
+        return self._client.default_expiry
 
     def presign_put(self, key: str, content_type: str) -> str:
         return self._client.presign_put(key, content_type)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -168,12 +169,19 @@ def allowed_actions(task: Any) -> tuple[AllowedAction, ...]:
         TaskStage.WAITING_DEVICE,
     }:
         actions.append(AllowedAction.CANCEL)
-    elif (
-        task.status == TaskStatus.FAILED
-        and getattr(task, "retry_safe", False)
-        and task.attempt_count < 3
+    elif task.status == TaskStatus.FAILED and task.attempt_count < int(
+        os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3")
     ):
-        actions.append(AllowedAction.RETRY)
+        attempts = getattr(task, "attempts", ()) or ()
+        latest = max(attempts, key=lambda attempt: attempt.sequence_no, default=None)
+        if (
+            latest is not None
+            and latest.kind == "publish"
+            and latest.retry_safe is True
+            and task.object_uploaded_at is not None
+            and task.object_deleted_at is None
+        ):
+            actions.append(AllowedAction.RETRY)
     elif task.status == TaskStatus.NEEDS_REVIEW:
         actions.append(AllowedAction.VERIFY)
     if any(

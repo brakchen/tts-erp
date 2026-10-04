@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from types import SimpleNamespace
 
 from tts_erp_v2.publishing.domain import (
@@ -14,6 +16,29 @@ def test_ambiguous_publish_requires_verification() -> None:
     assert result.code == "publish_action_observed"
     assert result.requires_verification is True
     assert result.retry_safe is False
+
+
+def test_retry_action_requires_safe_latest_publish_and_existing_object() -> None:
+    safe = SimpleNamespace(
+        status=TaskStatus.FAILED,
+        stage=TaskStage.DONE,
+        attempt_count=1,
+        object_uploaded_at=object(),
+        object_deleted_at=None,
+        attempts=[SimpleNamespace(sequence_no=1, kind="publish", retry_safe=True)],
+    )
+    unsafe = SimpleNamespace(
+        **{
+            **safe.__dict__,
+            "attempts": [
+                SimpleNamespace(sequence_no=1, kind="publish", retry_safe=None)
+            ],
+        }
+    )
+    deleted = SimpleNamespace(**{**safe.__dict__, "object_deleted_at": object()})
+    assert "retry" in [item.value for item in allowed_actions(safe)]
+    assert "retry" not in [item.value for item in allowed_actions(unsafe)]
+    assert "retry" not in [item.value for item in allowed_actions(deleted)]
 
 
 def test_queue_actions_do_not_expose_retry() -> None:

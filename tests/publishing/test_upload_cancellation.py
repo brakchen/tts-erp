@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import subprocess
 import textwrap
 
@@ -17,6 +19,7 @@ def test_upload_cancellation_aborts_xhr_and_handles_terminal_and_failed_cancel()
         const timers = [];
         const posts = [];
         let confirms = 0;
+        let uploadConfirmations = 0;
         let draftRequestId = "generated-id";
         let serverCancelled = false;
         let cancelFailure = false;
@@ -61,7 +64,7 @@ def test_upload_cancellation_aborts_xhr_and_handles_terminal_and_failed_cancel()
         global.crypto = { randomUUID: () => "generated-id" };
         global.URL = { createObjectURL: () => "blob:test", revokeObjectURL() {} };
         global.localStorage = { getItem: () => null, setItem() {} };
-        global.confirm = () => true;
+        global.confirm = () => { uploadConfirmations += 1; return true; };
         global.navigator = { clipboard: { writeText: async () => {} } };
         global.setTimeout = (callback, delay) => { timers.push(callback); return timers.length; };
         global.clearTimeout = () => {};
@@ -81,7 +84,7 @@ def test_upload_cancellation_aborts_xhr_and_handles_terminal_and_failed_cancel()
             payload = { items: [{ taskId: "draft-1", status: serverCancelled ? "cancelled" : "pending", stage: serverCancelled ? "done" : "awaiting_upload", filename: "TEST.mp4", caption: "TEST caption", captionPreview: "TEST caption", clientRequestId: draftRequestId, createdAt: "2026-10-04T00:00:00Z", allowedActions: serverCancelled ? ["view"] : ["view", "continue_upload"] }], pollState: { running: false, queued: false } };
           } else if (url.endsWith("/tasks") && method === "POST") {
             draftRequestId = posts.at(-1).body.clientRequestId;
-            payload = { taskId: "draft-1", upload: { url: "https://upload.test/draft-1", headers: {} } };
+            payload = { taskId: "draft-1", rowVersion: 1, upload: { url: "https://upload.test/draft-1", headers: {} } };
           } else if (url.endsWith("/cancel")) {
             if (cancelFailure) payload = { detail: "CANCEL_FAILED" };
             else {
@@ -108,6 +111,7 @@ def test_upload_cancellation_aborts_xhr_and_handles_terminal_and_failed_cancel()
         caption.value = "TEST caption";
         caption.oninput();
         const firstRun = submit.onclick();
+        if (uploadConfirmations !== 1) throw new Error("upload did not require pre-upload confirmation");
         await new Promise((resolve) => setImmediate(resolve));
         if (!FakeXHR.latest || cancel.hidden || cancel.disabled) throw new Error("cancel control was not shown for active upload");
         const firstXhr = FakeXHR.latest;

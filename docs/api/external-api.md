@@ -52,6 +52,7 @@ credential kinds:
 | SPU 实际 ROI 页面 (HTML) | `GET /v2/pages/spu-roi` | readonly (browser → 302 login) |
 | 重点关注 SPU 页面 (HTML) | `GET /v2/pages/focused-spus` | readonly (browser → 302 login) |
 | SPU image list / upload / delete | `GET /v2/spu-images`, `POST /v2/spu-images/upload-url`, `POST /v2/spu-images/{id}/confirm`, `DELETE /v2/spu-images/{id}` | readonly / readwrite |
+| TikTok video publish workflow | `GET /v2/video-publish/config`, `GET /v2/video-publish/tasks[/{id}]`, `POST /v2/video-publish/tasks`, upload-url, confirm, cancel, retry, verify, `/cleanup/retry` | readonly / readwrite; owner-scoped |
 | Browser login / logout / whoami | `GET\|POST /v2/auth/login`, `POST /v2/auth/logout`, `GET /v2/auth/me` | public |
 | Change own password | `POST /v2/auth/change-password` | session user (cookie) |
 | User & role administration | `GET\|POST /v2/users`, `GET\|PATCH /v2/users/{id}`, `POST /v2/users/{id}/password`, `GET\|DELETE /v2/users/{id}/sessions[/{sessionId}]`, `GET\|POST /v2/roles`, `PATCH\|DELETE /v2/roles/{code}` | **admin** + `page:users` 权限点 |
@@ -399,6 +400,30 @@ page:users"}`。API key 凭证（admin 档）也可调用，不受页面权限�
 | `POST /v2/admin/shops/register` | **readwrite** | 人工注册店铺。body 可含 `service_id/app_key/app_secret`；App Key/Secret 必须成对且 service_id 必填，同一事务写入 `integration.tiktok_app_credentials`，Secret 只加密存储、不返回。注册幂等。 |
 | `GET /v2/admin/shops/unregistered` | **readwrite** | 列出在 `plugin.*` 插件数据里出现、但 `commerce.shops` 无行的 shop_id → `{candidates: [{shop_id, sources}]}`；注册页的候选清单。 |
 | `PATCH /v2/admin/shops/{shop_pk}` | **readwrite** | 更新店铺元信息或原子配置 `service_id/app_key/app_secret`。App pair 按 service_id 共享并加密；App Key/Secret 必须成对。只改 service_id 时目标 App pair 必须已存在（否则 409），防止生成必然失败的授权链接。`credential_id`/`status` 不可修改。 |
+
+### TikTok video publishing (`/v2/video-publish/*`)
+
+The browser-only publishing workflow stores tasks in the `publishing` schema and
+keeps Artemis/ADB server-side. `POST /tasks` returns `201` for a new upload
+票据 and `200` for an owned idempotent replay with the same payload; payload
+mismatches return `409`, and another owner receives `404 TASK_NOT_FOUND` without
+metadata. Task list/detail and state-changing operations are owner-scoped;
+explicit admin access is the documented operational exception. Cookie-authored
+mutations must send `X-Requested-With: tts-erp`; API-key clients are exempt.
+
+| Endpoint | Role | Notes |
+| --- | --- | --- |
+| `GET /v2/video-publish/config` | readonly | Limits and masked device/worker readiness; no credentials or signed URLs. |
+| `GET /v2/video-publish/tasks/current` | readonly | Current owner-visible task plus filter-independent polling summary. |
+| `GET /v2/video-publish/tasks` | readonly | Owner-scoped history; `status`, `limit`, and `cursor` filters. |
+| `GET /v2/video-publish/tasks/{task_id}` | readonly | Owner-scoped detail; `includeDiagnostics=true` requires admin. |
+| `POST /v2/video-publish/tasks` | readwrite | Creates an awaiting-upload task and short-lived presigned PUT ticket. |
+| `POST /v2/video-publish/tasks/{task_id}/upload-url` | readwrite | Refreshes an awaiting-upload ticket for the owner. |
+| `POST /v2/video-publish/tasks/{task_id}/confirm-upload` | readwrite | HEAD-verifies the object and queues the task. |
+| `POST /v2/video-publish/tasks/{task_id}/cancel` | readwrite | Cancels an unstarted task and schedules independent object cleanup. |
+| `POST /v2/video-publish/tasks/{task_id}/retry` | readwrite | Retries only a failed, retry-safe task within its attempt budget. |
+| `POST /v2/video-publish/tasks/{task_id}/verify` | readwrite | Requests verification for an ambiguous result. |
+| `POST /v2/video-publish/tasks/{task_id}/cleanup-retry` | readwrite | Retries eligible device, spool, or object cleanup without changing business status. |
 
 ### SPU images (`/v2/spu-images/*`)
 

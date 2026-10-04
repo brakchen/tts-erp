@@ -34,6 +34,15 @@ def configured_bucket() -> str:
     return os.environ.get("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video").strip()
 
 
+def upload_expires_at(store: VideoObjectStore) -> datetime:
+    expiry = getattr(store, "default_expiry", None)
+    if not isinstance(expiry, timedelta):
+        expiry = timedelta(
+            seconds=int(os.environ.get("TIKTOK_PUBLISH_UPLOAD_TTL_SECONDS", "900"))
+        )
+    return datetime.now(UTC) + expiry
+
+
 @dataclass(frozen=True, slots=True)
 class CreateCommand:
     client_request_id: UUID
@@ -130,9 +139,8 @@ def create_upload_ticket(
         target_app_package=_PACKAGE,
     )
     session.add(task)
-    session.flush()
-    upload_url = cast(str, store.presign_put(key, command.content_type))
     session.commit()
+    upload_url = cast(str, store.presign_put(key, command.content_type))
     return task, upload_url, False
 
 
@@ -179,6 +187,7 @@ def cancel_task(
     task.status = TaskStatus.CANCELLED.value
     task.stage = TaskStage.DONE.value
     task.completed_at = datetime.now(UTC)
+    task.row_version += 1
     release_lease(task)
     task.object_cleanup_status = "pending"
     session.commit()
@@ -198,14 +207,28 @@ def cancel_task(
     return task
 
 
-def retry_task(session: Session, task_id: UUID) -> VideoPublishTask:
+def retry_task(
+    session: Session, task_id: UUID, store: VideoObjectStore | None = None
+) -> VideoPublishTask:
     task = get_task(session, task_id, lock=True)
     if task is None:
         raise LookupError("TASK_NOT_FOUND")
     if task.status != TaskStatus.FAILED.value:
         raise ValueError("TASK_ACTION_NOT_ALLOWED")
+    attempts = task.attempts or []
+    latest = max(attempts, key=lambda attempt: attempt.sequence_no, default=None)
+    if latest is None or latest.kind != "publish" or latest.retry_safe is not True:
+        raise ValueError("TASK_RETRY_NOT_SAFE")
+    if task.object_uploaded_at is None or task.object_deleted_at is not None:
+        raise ValueError("UPLOAD_REPLACEMENT_REQUIRED")
+    if store is not None:
+        try:
+            store.stat(task.object_key)
+        except Exception as exc:
+            raise ValueError("UPLOAD_REPLACEMENT_REQUIRED") from exc
     if task.attempt_count >= int(os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3")):
         raise ValueError("RETRY_BUDGET_EXHAUSTED")
     queue_task(task)
+    task.row_version += 1
     session.commit()
     return task

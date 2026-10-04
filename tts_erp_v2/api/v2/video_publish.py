@@ -34,6 +34,7 @@ from tts_erp_v2.publishing.submission import (
     confirm_upload,
     create_upload_ticket,
     retry_task,
+    upload_expires_at,
 )
 from tts_erp_v2.storage.minio_client import MinioClient
 
@@ -209,6 +210,19 @@ def _task_for_actor(
     return task
 
 
+def _require_row_version(task: VideoPublishTask, expected: int | None) -> None:
+    if expected is None or expected != task.row_version:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            {
+                "code": "ROW_VERSION_CONFLICT",
+                "message": "任务已更新，请刷新后重试。",
+                "rowVersion": task.row_version,
+                "allowedActions": [a.value for a in allowed_actions(task)],
+            },
+        )
+
+
 def _etag(payload: object) -> str:
     # serverTime is response metadata, not resource state.
     if isinstance(payload, dict):
@@ -315,7 +329,7 @@ def create_task(
                 "method": "PUT",
                 "url": url,
                 "headers": {"Content-Type": body.content_type},
-                "expiresAt": datetime.now(UTC),
+                "expiresAt": upload_expires_at(store),
             },
         }
     )
@@ -340,7 +354,7 @@ def refresh_upload_url(
             "method": "PUT",
             "url": store.presign_put(task.object_key, task.content_type),
             "headers": {"Content-Type": task.content_type},
-            "expiresAt": datetime.now(UTC),
+            "expiresAt": upload_expires_at(store),
         },
     }
 
@@ -355,7 +369,8 @@ def confirm(
 ) -> dict:
     require_role_at_least(request, "readwrite")
     _csrf(request)
-    _task_for_actor(session, task_id, request)
+    task_snapshot = _task_for_actor(session, task_id, request, lock=True)
+    _require_row_version(task_snapshot, body.row_version)
     try:
         task = confirm_upload(session, task_id, store)
     except LookupError as exc:
@@ -489,6 +504,7 @@ def detail(
 @router.post("/tasks/{task_id}/cancel")
 def cancel(
     task_id: UUID,
+    body: ActionIn,
     request: Request,
     session: Annotated[Session, Depends(get_session)],
     store: Annotated[VideoObjectStore, Depends(get_store)],
@@ -496,7 +512,8 @@ def cancel(
     require_role_at_least(request, "readwrite")
     _csrf(request)
     require_destructive_guard(request, op_name="video_publish.cancel_object")
-    _task_for_actor(session, task_id, request)
+    task_snapshot = _task_for_actor(session, task_id, request, lock=True)
+    _require_row_version(task_snapshot, body.row_version)
     try:
         return _snapshot(
             cancel_task(session, task_id, store),
@@ -513,13 +530,20 @@ def cancel(
 
 @router.post("/tasks/{task_id}/retry")
 def retry(
-    task_id: UUID, request: Request, session: Annotated[Session, Depends(get_session)]
+    task_id: UUID,
+    body: ActionIn,
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+    store: Annotated[VideoObjectStore, Depends(get_store)],
 ) -> dict:
     require_role_at_least(request, "readwrite")
     _csrf(request)
-    _task_for_actor(session, task_id, request)
+    task_snapshot = _task_for_actor(session, task_id, request, lock=True)
+    _require_row_version(task_snapshot, body.row_version)
     try:
-        return _snapshot(retry_task(session, task_id), expose_client_request_id=True)
+        return _snapshot(
+            retry_task(session, task_id, store), expose_client_request_id=True
+        )
     except LookupError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     except ValueError as exc:
@@ -530,11 +554,15 @@ def retry(
 
 @router.post("/tasks/{task_id}/verify")
 def verify(
-    task_id: UUID, request: Request, session: Annotated[Session, Depends(get_session)]
+    task_id: UUID,
+    body: ActionIn,
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
 ) -> dict:
     require_role_at_least(request, "readwrite")
     _csrf(request)
-    _task_for_actor(session, task_id, request)
+    task_snapshot = _task_for_actor(session, task_id, request, lock=True)
+    _require_row_version(task_snapshot, body.row_version)
     try:
         task = request_verification(session, task_id)
         session.commit()
@@ -549,12 +577,16 @@ def verify(
 
 @router.post("/tasks/{task_id}/cleanup/retry")
 def retry_cleanup(
-    task_id: UUID, request: Request, session: Annotated[Session, Depends(get_session)]
+    task_id: UUID,
+    body: ActionIn,
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
 ) -> dict:
     require_role_at_least(request, "readwrite")
     _csrf(request)
     _lock_publish_slot(session)
     task = _task_for_actor(session, task_id, request, lock=True)
+    _require_row_version(task, body.row_version)
     now = datetime.now(UTC)
     if task.status not in {"succeeded", "cancelled"} and task.stage != "cleaning":
         raise HTTPException(status.HTTP_409_CONFLICT, "CLEANUP_RETRY_NOT_AVAILABLE")
