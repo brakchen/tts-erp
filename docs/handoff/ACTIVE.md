@@ -16,3 +16,4 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ui-font-unify | 全站字体统一 + 广告日明细字号/表头排序 | 01a10506-4459-7668-b8bc-2c9c6958e703 | feature/ui-font-unify | tts_erp_v2/static/css/tokens.css, tts_erp_v2/static/css/common.css, tts_erp_v2/static/css/ad-daily.css, tts_erp_v2/templates/pages/*.html, tts_erp_v2/api/v2/ad_daily.py, tts_erp_v2/static/js/ad-daily.js, scripts/probe_ui_font_audit.*, docs/design/ui-style-system.md, tests/api/test_ad_daily*.py, tests/**/test_*font*.py | draft | — | — | 2026-10-04 03:51 |
