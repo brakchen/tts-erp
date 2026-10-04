@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from datetime import UTC, datetime
 from typing import Annotated
@@ -11,6 +12,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from tts_erp_v2.api.deps import (
@@ -158,7 +160,11 @@ def _mask(value: str) -> str:
 
 
 def _etag(payload: object) -> str:
-    return '"' + hashlib.sha256(repr(payload).encode()).hexdigest()[:16] + '"'
+    # serverTime is response metadata, not resource state.
+    if isinstance(payload, dict):
+        payload = {key: value for key, value in payload.items() if key != "serverTime"}
+    encoded = json.dumps(payload, default=str, sort_keys=True, separators=(",", ":"))
+    return '"' + hashlib.sha256(encoded.encode()).hexdigest()[:16] + '"'
 
 
 def _conditional(
@@ -454,6 +460,11 @@ def retry_cleanup(
             retried = True
     if not retried:
         raise HTTPException(status.HTTP_409_CONFLICT, "CLEANUP_RETRY_NOT_AVAILABLE")
+    active_publish = session.scalar(
+        select(VideoPublishTask.id).where(VideoPublishTask.status == "running").limit(1)
+    )
+    if active_publish is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "PUBLISH_SLOT_BUSY")
     # Re-enter the worker queue without changing the recorded business result;
     # the worker restores succeeded after the independent cleanup pass.
     task.status = "running"
@@ -462,5 +473,9 @@ def retry_cleanup(
     task.lease_expires_at = None
     task.heartbeat_at = None
     task.row_version += 1
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "PUBLISH_SLOT_BUSY") from exc
     return _snapshot(task, detail=True)

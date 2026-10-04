@@ -5,8 +5,11 @@ from typing import cast
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.orm import Session
 
 from tts_erp_v2.accounts.pages import required_page_permission
+from tts_erp_v2.api.v2.video_publish import _etag
+from tts_erp_v2.db.models.publishing import VideoPublishTask
 from tts_erp_v2.publishing.artemis_client import ArtemisResult
 from tts_erp_v2.publishing.dispatcher import (
     PublishDependencies,
@@ -14,6 +17,7 @@ from tts_erp_v2.publishing.dispatcher import (
 )
 from tts_erp_v2.publishing.domain import classify_failure
 from tts_erp_v2.publishing.object_store import MinioVideoStore
+from tts_erp_v2.publishing.repository import touch_task
 from tts_erp_v2.storage.minio_client import MinioClient
 
 ROOT = Path(__file__).parents[2]
@@ -30,6 +34,12 @@ def test_missing_artemis_session_is_terminal_for_classification() -> None:
     assert result.terminal is True
     classification = classify_failure(artemis_status="missing")
     assert classification.requires_verification is True
+
+
+def test_etag_ignores_fresh_server_time_metadata() -> None:
+    first = _etag({"items": [], "serverTime": "2026-10-04T00:00:00Z"})
+    second = _etag({"items": [], "serverTime": "2026-10-04T00:00:05Z"})
+    assert first == second
 
 
 def test_video_publish_api_requires_page_permission_for_session_users() -> None:
@@ -95,11 +105,43 @@ async def test_transport_recovery_queries_before_same_session_resubmit() -> None
     assert artemis.calls == [f"get:{session_id}", f"submit:{session_id}"]
 
 
+def test_cleanup_guard_precedes_adb_and_object_deletion() -> None:
+    source = (ROOT / "tts_erp_v2/publishing/dispatcher.py").read_text()
+    guard = source.index('script_name="video_publish.cleanup_resources"')
+    assert guard < source.index("remove_staged_video", guard)
+    assert guard < source.index("deps.store.remove", guard)
+
+
+def test_destructive_guard_refuses_prod_shape_without_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tts_erp_v2.api.deps import require_destructive_script_guard
+
+    monkeypatch.setenv("TTS_ERP_DB_URL", "postgresql://example/tts_erp")
+    monkeypatch.delenv("ALLOW_PROD_DESTRUCTIVE", raising=False)
+    with pytest.raises(SystemExit):
+        require_destructive_script_guard(
+            script_name="video_publish.cleanup_object",
+            confirmation=True,
+            dangerous=True,
+        )
+
+
+def test_lease_renewal_extends_owner_heartbeat() -> None:
+    task = SimpleNamespace(heartbeat_at=None, lease_expires_at=None, row_version=4)
+    touch_task(cast(Session, None), cast(VideoPublishTask, task), lease_seconds=45)
+    assert task.heartbeat_at is not None
+    assert task.lease_expires_at > task.heartbeat_at
+    assert task.row_version == 5
+
+
 def test_concurrency_and_migration_contracts_include_active_protection() -> None:
     repository = (ROOT / "tts_erp_v2/publishing/repository.py").read_text()
     migration = (ROOT / "alembic/versions/0053_video_publish.py").read_text()
     assert "with_for_update(skip_locked=True)" in repository
     assert "with_for_update=True" in repository
+    dispatcher = (ROOT / "tts_erp_v2/publishing/dispatcher.py").read_text()
+    assert "VideoPublishTask.row_version == version" in dispatcher
     assert (
         "status IN ('created','submitting','queued','running','unknown')" in migration
     )
@@ -108,5 +150,12 @@ def test_concurrency_and_migration_contracts_include_active_protection() -> None
 def test_frontend_keeps_idempotency_and_double_click_guards() -> None:
     source = (ROOT / "tts_erp_v2/static/js/video-publish.js").read_text()
     assert "state.creating=true" in source
-    assert "state.clientRequestId=state.clientRequestId||crypto.randomUUID()" in source
-    assert "!!state.upload||state.creating" in source
+    assert (
+        "state.clientRequestId = state.clientRequestId || crypto.randomUUID()" in source
+    )
+    assert "!!state.upload || state.creating" in source
+    assert 'headers["If-None-Match"]' in source
+    assert "new AbortController()" in source
+    assert "document.hidden" in source
+    assert "state.refreshFailures" in source
+    assert "localStorage.setItem(REFRESH_KEY, mode)" in source

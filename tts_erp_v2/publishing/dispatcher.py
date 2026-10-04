@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from tts_erp_v2.api.deps import require_destructive_script_guard
@@ -117,7 +120,11 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
                 lease_seconds=deps.lease_seconds,
             )
             session.commit()
-        digest = deps.store.download(object_key, local)
+        digest = await _run_external(
+            task_id,
+            deps,
+            lambda: asyncio.to_thread(deps.store.download, object_key, local),
+        )
         if local.stat().st_size != size_bytes:
             raise RuntimeError("DOWNLOAD_SIZE_MISMATCH")
         with deps.session_factory() as session:
@@ -131,11 +138,21 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
                 lease_seconds=deps.lease_seconds,
             )
             session.commit()
-        await deps.adb.check_device(device_serial)
-        await deps.adb.check_package(device_serial, app_package)
+
+        async def stage_device() -> None:
+            await deps.adb.check_device(device_serial)
+            await deps.adb.check_package(device_serial, app_package)
+            await deps.adb.stage_video(
+                device_serial,
+                local,
+                f"/sdcard/Movies/TTSERP/tts_erp_{task_id}.mp4",
+            )
+            await deps.adb.verify_media_visible(
+                device_serial, f"/sdcard/Movies/TTSERP/tts_erp_{task_id}.mp4"
+            )
+
+        await _run_external(task_id, deps, stage_device)
         device_path = f"/sdcard/Movies/TTSERP/tts_erp_{task_id}.mp4"
-        await deps.adb.stage_video(device_serial, local, device_path)
-        await deps.adb.verify_media_visible(device_serial, device_path)
         with deps.session_factory() as session:
             task = _get(session, task_id)
             _assert_lease(task, deps.instance_id)
@@ -192,16 +209,24 @@ async def _run_attempt(
     result: ArtemisResult
     if should_submit:
         try:
-            result = await deps.artemis.submit(
-                goal=goal,
-                session_id=session_id,
-                device_serial=device_serial,
-                app_package=app_package,
+            result = await _run_external(
+                task_id,
+                deps,
+                lambda: deps.artemis.submit(
+                    goal=goal,
+                    session_id=session_id,
+                    device_serial=device_serial,
+                    app_package=app_package,
+                ),
             )
         except ArtemisTransportError:
             try:
-                result = await _query_after_submit_transport_error(
-                    deps, session_id, goal, device_serial, app_package
+                result = await _run_external(
+                    task_id,
+                    deps,
+                    lambda: _query_after_submit_transport_error(
+                        deps, session_id, goal, device_serial, app_package
+                    ),
                 )
             except ArtemisTransportError:
                 # Admission is still ambiguous; keep this session active and
@@ -209,19 +234,27 @@ async def _run_attempt(
                 return
     elif admission_probe:
         try:
-            result = await deps.artemis.get_task(session_id)
+            result = await _run_external(
+                task_id, deps, lambda: deps.artemis.get_task(session_id)
+            )
         except ArtemisTransportError:
             return
         if result.status in {"missing", "not_found"}:
-            result = await deps.artemis.submit(
-                goal=goal,
-                session_id=session_id,
-                device_serial=device_serial,
-                app_package=app_package,
+            result = await _run_external(
+                task_id,
+                deps,
+                lambda: deps.artemis.submit(
+                    goal=goal,
+                    session_id=session_id,
+                    device_serial=device_serial,
+                    app_package=app_package,
+                ),
             )
     else:
         try:
-            result = await deps.artemis.get_task(session_id)
+            result = await _run_external(
+                task_id, deps, lambda: deps.artemis.get_task(session_id)
+            )
         except ArtemisTransportError:
             return
 
@@ -316,6 +349,71 @@ async def _query_after_submit_transport_error(
             app_package=app_package,
         )
     return result
+
+
+async def _run_external(
+    task_id: UUID,
+    deps: PublishDependencies,
+    operation: Callable[[], Awaitable[Any]],
+) -> Any:
+    lost = asyncio.Event()
+    heartbeat = asyncio.create_task(
+        _lease_heartbeat(task_id, deps, lost), name="publish-lease-heartbeat"
+    )
+    try:
+        result = await operation()
+    finally:
+        heartbeat.cancel()
+        await asyncio.gather(heartbeat, return_exceptions=True)
+    if lost.is_set():
+        raise LeaseLost(task_id)
+    with deps.session_factory() as session:
+        _assert_lease(_get(session, task_id), deps.instance_id)
+    return result
+
+
+async def _lease_heartbeat(
+    task_id: UUID, deps: PublishDependencies, lost: asyncio.Event
+) -> None:
+    try:
+        while True:
+            await asyncio.sleep(max(1, min(5, deps.lease_seconds / 3)))
+            with deps.session_factory() as session:
+                version = session.scalar(
+                    select(VideoPublishTask.row_version).where(
+                        VideoPublishTask.public_id == task_id,
+                        VideoPublishTask.lease_owner == deps.instance_id,
+                        VideoPublishTask.lease_expires_at > func.now(),
+                    )
+                )
+                if version is None:
+                    lost.set()
+                    return
+                statement = (
+                    update(VideoPublishTask)
+                    .where(
+                        VideoPublishTask.public_id == task_id,
+                        VideoPublishTask.lease_owner == deps.instance_id,
+                        VideoPublishTask.lease_expires_at > func.now(),
+                        VideoPublishTask.row_version == version,
+                    )
+                    .values(
+                        heartbeat_at=func.now(),
+                        lease_expires_at=func.now()
+                        + timedelta(seconds=deps.lease_seconds),
+                        row_version=VideoPublishTask.row_version + 1,
+                    )
+                )
+                result = session.execute(statement)
+                if getattr(result, "rowcount", None) != 1:
+                    session.rollback()
+                    lost.set()
+                    return
+                session.commit()
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 - owner loss is checked by caller
+        lost.set()
 
 
 def _assert_lease(task: VideoPublishTask, instance_id: str) -> None:
@@ -416,23 +514,37 @@ async def _cleanup_success(task_id: UUID, deps: PublishDependencies) -> None:
         device_needed = task.device_cleanup_status != "succeeded"
         object_needed = task.object_cleanup_status != "succeeded"
         session.commit()
-    device_error = None
-    if device_needed and device_path:
+    guard_error = None
+    try:
+        # One guard covers the entire destructive cleanup routine. It must run
+        # before either ADB unlink or MinIO deletion.
+        require_destructive_script_guard(
+            script_name="video_publish.cleanup_resources",
+            confirmation=True,
+            dangerous=True,
+        )
+    except SystemExit:
+        guard_error = "DESTRUCTIVE_GUARD_BLOCKED"
+    device_error = guard_error
+    if guard_error is None and device_needed and device_path:
         try:
-            await deps.adb.remove_staged_video(serial, device_path)
+            await _run_external(
+                task_id,
+                deps,
+                lambda: deps.adb.remove_staged_video(serial, device_path),
+            )
+            device_error = None
         except Exception as exc:  # noqa: BLE001 - persisted as cleanup status
             device_error = str(exc)[:500]
-    object_error = None
-    if object_needed:
+    object_error = guard_error
+    if guard_error is None and object_needed:
         try:
-            require_destructive_script_guard(
-                script_name="video_publish.cleanup_object",
-                confirmation=True,
-                dangerous=True,
+            await _run_external(
+                task_id,
+                deps,
+                lambda: asyncio.to_thread(deps.store.remove, object_key),
             )
-            deps.store.remove(object_key)
-        except SystemExit:
-            object_error = "DESTRUCTIVE_GUARD_BLOCKED"
+            object_error = None
         except Exception as exc:  # noqa: BLE001 - persisted as cleanup status
             object_error = str(exc)[:500]
     with deps.session_factory() as session:
