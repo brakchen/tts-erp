@@ -341,7 +341,10 @@ def _poll_state(session: Session) -> dict[str, bool]:
         is not None,
         "queued": session.scalar(
             select(VideoPublishTask.id)
-            .where(VideoPublishTask.status == "pending")
+            .where(
+                VideoPublishTask.status == "pending",
+                VideoPublishTask.stage.in_(["queued", "waiting_device"]),
+            )
             .limit(1)
         )
         is not None,

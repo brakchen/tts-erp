@@ -516,6 +516,26 @@ def test_filtered_task_list_exposes_unfiltered_poll_state(db_session: Session) -
     assert payload["pollState"] == {"running": True, "queued": True}
 
 
+def test_awaiting_upload_is_not_reported_as_queued_poll_work(
+    db_session: Session,
+) -> None:
+    draft = _task(stage=TaskStage.AWAITING_UPLOAD.value)
+    db_session.add(draft)
+    db_session.flush()
+    payload = cast(
+        dict,
+        list_tasks(
+            _request(),
+            db_session,
+            Response(),
+            status_filter=TaskStatus.PENDING.value,
+            limit=30,
+            cursor=None,
+        ),
+    )
+    assert payload["pollState"] == {"running": False, "queued": False}
+
+
 def _request() -> Request:
     return Request(
         {

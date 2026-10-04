@@ -78,7 +78,11 @@
 
   function renderForm() {
     const file = state.file;
+    const activeUpload = Boolean(state.upload?.xhr);
     $("publish-submit").disabled = !valid() || !!state.upload || state.creating;
+    const cancel = $("publish-upload-cancel");
+    cancel.hidden = !activeUpload;
+    cancel.disabled = !activeUpload;
     $("publish-caption-count").textContent = `${$("publish-caption").value.length} / ${state.config?.maxCaptionCharacters || 4000}`;
     $("publish-summary-file").textContent = file ? `${file.name} · ${Math.ceil(file.size / 1024 / 1024 * 10) / 10} MB` : "—";
     $("publish-summary-caption").textContent = `${$("publish-caption").value.length} 字`;
@@ -131,7 +135,8 @@
   async function create() {
     if (!valid() || state.creating) return;
     state.creating=true;
-    state.upload = { xhr: null };
+    const upload = { xhr: null, cancelled: false };
+    state.upload = upload;
     renderForm();
     const caption = $("publish-caption").value;
     const file = state.file;
@@ -149,32 +154,58 @@
       });
       if (ticket.upload?.url) {
         const xhr = new XMLHttpRequest();
-        state.upload.xhr = xhr;
+        upload.xhr = xhr;
         $("publish-submit").textContent = "上传中 0%";
+        renderForm();
         xhr.open("PUT", ticket.upload.url);
         Object.entries(ticket.upload.headers || {}).forEach(([key, value]) => xhr.setRequestHeader(key, value));
         xhr.upload.onprogress = (event) => {
           if (event.lengthComputable) $("publish-submit").textContent = `上传中 ${Math.round(event.loaded / event.total * 100)}%`;
         };
         await new Promise((resolve, reject) => {
-          xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(Error("视频上传失败"));
+          xhr.onload = () => {
+            if (upload.cancelled) return reject(Error("上传已取消"));
+            return xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(Error("视频上传失败"));
+          };
           xhr.onerror = () => reject(Error("视频上传中断，可以重试上传"));
           xhr.onabort = () => reject(Error("上传已取消"));
           xhr.send(file);
         });
+        upload.xhr = null;
+        renderForm();
+        if (upload.cancelled || state.upload !== upload) return;
       }
+      if (upload.cancelled || state.upload !== upload) return;
       await request(`/tasks/${ticket.taskId}/confirm-upload`, { method: "POST", body: "{}" });
+      if (upload.cancelled || state.upload !== upload) return;
       notice("已加入发布队列");
       clearForm();
       await refresh();
     } catch (error) {
-      notice(error.message, true);
+      if (upload.cancelled) {
+        notice("上传已取消，可继续上传");
+        try {
+          await refresh();
+        } catch (refreshError) {
+          notice(refreshError.message, true);
+        }
+      } else {
+        notice(error.message, true);
+      }
     } finally {
-      state.upload = null;
+      if (state.upload === upload) state.upload = null;
       state.creating = false;
       $("publish-submit").textContent = "上传并加入发布队列";
       renderForm();
     }
+  }
+
+  function cancelUpload() {
+    const upload = state.upload;
+    const xhr = upload?.xhr;
+    if (!upload || !xhr) return;
+    upload.cancelled = true;
+    xhr.abort();
   }
 
   function clearForm() {
@@ -449,6 +480,7 @@
   $("publish-video-file").addEventListener("change", (event) => pick(event.target.files[0]));
   $("publish-caption").addEventListener("input", renderForm);
   $("publish-submit").addEventListener("click", create);
+  $("publish-upload-cancel").addEventListener("click", cancelUpload);
   $("publish-refresh-now").addEventListener("click", async () => { await refresh(); schedule(); });
   $("publish-refresh-mode").addEventListener("change", schedule);
   $("publish-drawer-close").addEventListener("click", () => {
