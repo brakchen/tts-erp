@@ -37,9 +37,14 @@
   --danger: #8C1A1A;
 
   /* ── 字体 ─────────────────────────────────────────── */
-  --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', 'Fira Code', Consolas, 'Liberation Mono', ui-monospace, monospace;
-  --sans: 'Inter', 'Noto Sans SC', 'Source Han Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --serif: 'Noto Serif SC', 'Source Han Serif SC', 'Iowan Old Style', 'Apple Garamond', Georgia, ui-serif, serif;
+  /* 三套栈 = 全站唯一的字体族来源；页面/组件只允许写 var(--mono|sans|serif)。
+   * 中文族名同时收 Google 命名（'Noto Sans SC'）与发行版命名（'Noto Sans CJK SC'）：
+   * Debian/Ubuntu 只装后者，缺了它中文只能靠浏览器系统回退，可能掉到 Droid Sans
+   * Fallback 这类异族字体，出现「同一页中英文字体不配」的观感（2026-10-04
+   * feature/ui-font-unify lane 用 CDP getPlatformFontsForNode 实测各页命中字体后补齐）。 */
+  --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', 'Fira Code', Consolas, 'Liberation Mono', ui-monospace, 'Noto Sans Mono CJK SC', monospace;
+  --sans: 'Inter', 'Noto Sans SC', 'Noto Sans CJK SC', 'Source Han Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --serif: 'Noto Serif SC', 'Noto Serif CJK SC', 'Source Han Serif SC', 'Iowan Old Style', 'Apple Garamond', Georgia, ui-serif, serif;
 
   /* ── 形状 ─────────────────────────────────────────── */
   /* 暖纸编辑体是直角体系：全站圆角为 0。个别控件（如 toast 的 4px）需在

@@ -58,9 +58,21 @@
 
 | 令牌 | 栈 |
 | --- | --- |
-| `--mono` | `'JetBrains Mono', 'SF Mono', 'Cascadia Mono', 'Fira Code', Consolas, 'Liberation Mono', ui-monospace, monospace` |
-| `--sans` | `'Inter', 'Noto Sans SC', 'Source Han Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', sans-serif` |
-| `--serif` | `'Noto Serif SC', 'Source Han Serif SC', 'Iowan Old Style', 'Apple Garamond', Georgia, ui-serif, serif` |
+| `--mono` | `'JetBrains Mono', 'SF Mono', 'Cascadia Mono', 'Fira Code', Consolas, 'Liberation Mono', ui-monospace, 'Noto Sans Mono CJK SC', monospace` |
+| `--sans` | `'Inter', 'Noto Sans SC', 'Noto Sans CJK SC', 'Source Han Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', sans-serif` |
+| `--serif` | `'Noto Serif SC', 'Noto Serif CJK SC', 'Source Han Serif SC', 'Iowan Old Style', 'Apple Garamond', Georgia, ui-serif, serif` |
+
+> **中英双族名是必需的**：同一款字体有两个家族名——Google 命名（`Noto Sans SC`）
+> 与发行版命名（`Noto Sans CJK SC`）。Debian/Ubuntu 只装后者，缺了它中文只能靠
+> 浏览器系统回退，可能掉到 `Droid Sans Fallback` 这类异族字体，出现「同一页中英文
+> 不是一套字」的观感。
+>
+> 全站只允许 `var(--mono|sans|serif)` 三种字体来源；页面级 CSS、内联 `<style>`、
+> JS 注入样式、vendor 组件（jsoneditor / Ace）一律不得自写 `font-family`。校验方式：
+> `scripts/probe_ui_font_audit.js` 用 CDP `getPlatformFontsForNode` 实测各页真正命中
+> 的字体族（2026-10-04 `feature/ui-font-unify` lane 首次巡检：12 页此前命中 7 套栈，
+> `runtime-configs` 的 vendor 编辑器掉到 `DejaVu Sans Mono` / `Liberation Sans`，
+> 修后 12 页收敛为同一套）。
 
 ### 形状
 

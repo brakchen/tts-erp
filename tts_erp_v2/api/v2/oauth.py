@@ -69,25 +69,29 @@ _CALLBACK_PATH = "/v2/oauth/tiktok/callback"  # must match middleware EXEMPT_PAT
 
 
 def _page(title: str, body_html: str, *, status_line: str = "") -> str:
+    # 暖纸编辑体：接入 tokens.css / common.css，不再自养灰蓝 GitHub 配色与
+    # -apple-system 字体栈（全站字体只允许 var(--mono|sans|serif)）。
     return f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{_html.escape(title)}</title>
+<link rel="stylesheet" href="../../static/css/tokens.css">
+<link rel="stylesheet" href="../../static/css/common.css">
 <style>
-  body {{ font-family: -apple-system, system-ui, sans-serif; background: #f6f8fa; margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; color: #1f2328; }}
-  .card {{ background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 24px 28px; width: 480px; box-shadow: 0 1px 3px rgba(27,31,36,.12); }}
-  h1 {{ font-size: 18px; margin: 0 0 6px; }}
-  .status {{ font-size: 13px; font-weight: 600; margin: 0 0 14px; }}
-  .ok .status {{ color: #1a7f37; }}
-  .err .status {{ color: #cf222e; }}
-  p {{ font-size: 13px; line-height: 1.5; margin: 6px 0; }}
-  code {{ background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 4px; padding: 1px 5px; font-size: 12px; }}
-  pre {{ background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 10px; font-size: 12px; overflow: auto; }}
+  body {{ display: flex; align-items: center; justify-content: center; min-height: 100vh; }}
+  .card {{ background: var(--paper); border: 1px solid var(--rule); border-radius: var(--radius); padding: 24px 28px; width: 480px; max-width: 92vw; }}
+  h1 {{ font-family: var(--serif); font-size: 20px; font-weight: 600; margin: 0 0 6px; }}
+  .status {{ font-family: var(--mono); font-size: 13px; font-weight: 600; margin: 0 0 14px; }}
+  .ok .status {{ color: var(--ok); }}
+  .err .status {{ color: var(--danger); }}
+  p {{ font-size: 14px; line-height: 1.5; margin: 6px 0; }}
+  code {{ font-family: var(--mono); background: var(--paper-deep); border: 1px solid var(--rule-soft); border-radius: var(--radius); padding: 1px 5px; font-size: 12px; }}
+  pre {{ font-family: var(--mono); background: var(--paper-deep); border: 1px solid var(--rule-soft); border-radius: var(--radius); padding: 10px; font-size: 12px; overflow: auto; }}
   table {{ border-collapse: collapse; font-size: 13px; width: 100%; margin: 8px 0; }}
-  td, th {{ border: 1px solid #d0d7de; padding: 5px 8px; text-align: left; }}
-  th {{ background: #f6f8fa; font-weight: 600; }}
+  td, th {{ border: 1px solid var(--rule-soft); padding: 5px 8px; text-align: left; }}
+  th {{ background: var(--paper-deep); font-weight: 600; }}
 </style>
 </head>
 <body>

@@ -24,7 +24,7 @@
   border-bottom: 2px solid var(--ink);
 }
 .rc-eyebrow, .rc-label, .rc-meta, .rc-status {
-  font: 700 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 700 11px/1.2 var(--mono);
   letter-spacing: .08em;
   text-transform: uppercase;
 }
@@ -57,18 +57,44 @@
 .rc-schema-restore:hover, .rc-schema-restore:focus-visible { background: var(--rc-accent-soft); outline: none; }
 .rc-field label { font-weight: 700; font-size: 13px; }
 .rc-field input, .rc-field textarea {
-  width: 100%; border: 1px solid var(--rule); border-radius: var(--radius); background: #fff; color: var(--ink); padding: 10px 11px; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  width: 100%; border: 1px solid var(--rule); border-radius: var(--radius); background: #fff; color: var(--ink); padding: 10px 11px; font: 13px/1.45 var(--mono);
 }
 .rc-field textarea { min-height: 156px; resize: vertical; }
 .rc-jsoneditor-source { display: none; }
 .rc-jsoneditor-toolbar { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px; border: 1px solid var(--rule); border-bottom: 0; background: var(--paper); }
-.rc-jsoneditor-toolbar button { border: 1px solid var(--rule); border-radius: var(--radius); background: #fff; color: var(--ink); padding: 5px 9px; font: 700 12px/1.2 var(--sans, system-ui, sans-serif); cursor: pointer; }
+.rc-jsoneditor-toolbar button { border: 1px solid var(--rule); border-radius: var(--radius); background: #fff; color: var(--ink); padding: 5px 9px; font: 700 12px/1.2 var(--sans); cursor: pointer; }
 .rc-jsoneditor-toolbar button:hover, .rc-jsoneditor-toolbar button:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
 .rc-jsoneditor-toolbar button:disabled { opacity: .45; cursor: not-allowed; }
 .rc-jsoneditor { min-height: 260px; border: 1px solid var(--rule); background: #fff; }
 .rc-jsoneditor .jsoneditor { border: 0; }
 .rc-jsoneditor .jsoneditor-menu { background-color: var(--accent); border-bottom-color: var(--accent); }
 .rc-jsoneditor .ace_editor { min-height: 220px; }
+/* vendor jsoneditor.min.css 自带 arial / consolas 字体栈（会命中 Liberation Sans /
+   DejaVu Sans Mono，与其他页面的 Liberation Mono 不是一套字）——统一回暖纸令牌：
+   只有 var(--mono|sans|serif) 是合法字体来源（2026-10-04 feature/ui-font-unify lane）。 */
+.rc-jsoneditor .jsoneditor-menu > button,
+.rc-jsoneditor .jsoneditor-menu > .jsoneditor-modes > button,
+.rc-jsoneditor .jsoneditor-menu a,
+.rc-jsoneditor .jsoneditor-navigation-bar,
+.rc-jsoneditor .jsoneditor-search,
+.rc-jsoneditor .jsoneditor-search input,
+.rc-jsoneditor .jsoneditor-results,
+.rc-jsoneditor .jsoneditor-treepath .jsoneditor-treepath-element,
+.rc-jsoneditor .jsoneditor-treepath .jsoneditor-treepath-seperator,
+.rc-jsoneditor div.jsoneditor-tree div.jsoneditor-show-more,
+.rc-jsoneditor div.jsoneditor-tree div.jsoneditor-date,
+.rc-jsoneditor .jsoneditor-contextmenu .jsoneditor-menu button { font-family: var(--sans); }
+.rc-jsoneditor div.jsoneditor-field,
+.rc-jsoneditor div.jsoneditor-value,
+.rc-jsoneditor div.jsoneditor td,
+.rc-jsoneditor div.jsoneditor th,
+.rc-jsoneditor div.jsoneditor textarea,
+.rc-jsoneditor textarea.jsoneditor-text.ace_editor,
+.rc-jsoneditor .ace-jsoneditor.ace_editor,
+.rc-jsoneditor .jsoneditor-popover,
+.rc-jsoneditor .jsoneditor-schema-error,
+.rc-jsoneditor pre.jsoneditor-preview,
+.rc-jsoneditor .jsoneditor .autocomplete.dropdown { font-family: var(--mono); }
 .rc-field input:focus, .rc-field textarea:focus { border-color: var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 18%, transparent); }
 .rc-help { margin: 0; color: var(--muted); font-size: 12px; }
 .rc-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
