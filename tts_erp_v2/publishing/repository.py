@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from sqlalchemy import Select, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from tts_erp_v2.db.models.publishing import VideoPublishAttempt, VideoPublishTask
@@ -129,6 +130,15 @@ def claim_one(
     lease_seconds: int = 30,
     max_attempts: int = 3,
 ) -> VideoPublishTask | None:
+    if (
+        session.scalar(
+            select(VideoPublishTask.id)
+            .where(VideoPublishTask.status == TaskStatus.RUNNING.value)
+            .limit(1)
+        )
+        is not None
+    ):
+        return None
     query = (
         select(VideoPublishTask)
         .where(
@@ -155,7 +165,12 @@ def claim_one(
     task.heartbeat_at = now
     task.started_at = task.started_at or now
     task.row_version += 1
-    session.flush()
+    try:
+        session.flush()
+    except IntegrityError:
+        # Another worker won the global running-task race.
+        session.rollback()
+        return None
     return task
 
 
