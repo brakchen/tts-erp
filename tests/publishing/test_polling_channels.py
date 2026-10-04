@@ -22,7 +22,7 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
             textContent: "", value: "", disabled: false, hidden: false,
             style: {}, dataset: {}, classList: { toggle() {} },
             querySelectorAll() { return []; }, replaceChildren() {}, append() {},
-            addEventListener() {}, removeAttribute() {}, showModal() {}, close() {}, click() { if (this.id === "publish-video-file") filePickerClicks += 1; },
+            addEventListener(type, handler) { this[`on${type}`] = handler; }, removeAttribute() {}, showModal() {}, close() {}, click() { if (this.id === "publish-video-file") filePickerClicks += 1; },
           };
           created.push(node);
           return node;
@@ -57,16 +57,16 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
           requests.push({ url, signal: options.signal });
           const payload = url.endsWith("/config")
             ? { maxVideoBytes: 100, maxCaptionCharacters: 4000, target: { album: "TEST" }, device: {}, worker: {} }
-            : url.includes("/tasks/current") ? { task: null }
+            : url.includes("/tasks/current") ? { task: { taskId: "running-1", filename: "TEST-running.mp4", stage: "downloading", status: "running" }, pollState: { running: true, queued: true } }
             : url.includes("/tasks/task-1")
               ? { taskId: "task-1", filename: "TEST.mp4", status: "succeeded", caption: "TEST", attempts: [] }
-              : { items: [{ taskId: "task-1", status: "pending", filename: "TEST.mp4", latestArtemisSessionId: "artemis-1", createdAt: "2026-10-04T00:00:00Z", clientRequestId: "client-1", caption: "TEST caption", allowedActions: ["view", "continue_upload", "cancel", "retry", "verify", "retry_cleanup", "copy_artemis_id"] }] };
+              : { items: [{ taskId: "task-1", status: "pending", filename: "TEST.mp4", latestArtemisSessionId: "artemis-1", createdAt: "2026-10-04T00:00:00Z", clientRequestId: "client-1", caption: "TEST caption", allowedActions: ["view", "continue_upload", "cancel", "retry", "verify", "retry_cleanup", "copy_artemis_id"] }], pollState: { running: true, queued: true } };
           return { status: 200, ok: true, headers: { get: () => null }, json: async () => payload };
         };
         vm.runInThisContext(source);
         await new Promise((resolve) => setImmediate(resolve));
         if (timers.length < 2) throw new Error("current/list timers were not scheduled");
-        if (delays[0] !== 8000 || delays[1] !== 8000) throw new Error("queued cadence is not shared at 8 seconds");
+        if (delays[0] !== 2000 || delays[1] !== 5000) throw new Error("running cadence did not take precedence over queued work");
         const listRequest = requests.find((request) => request.url.includes("/tasks?") || request.url.endsWith("/tasks"));
         const currentRequest = requests.find((request) => request.url.includes("/tasks/current"));
         if (!listRequest || !currentRequest || listRequest.signal === currentRequest.signal) {
@@ -97,6 +97,16 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
         await detailTimer();
         if (latestList.signal.aborted || latestCurrentAfterActions.signal.aborted) throw new Error("detail refresh aborted another channel");
         if (!latestDetail.signal.aborted) throw new Error("detail refresh did not replace its own request");
+        const mode = elements.get("publish-refresh-mode");
+        const timerCount = timers.length;
+        mode.value = "off";
+        await mode.onchange();
+        if (timers.length !== timerCount) throw new Error("refresh-off scheduled another timer");
+        const refreshStatus = elements.get("publish-refresh-status");
+        if (!refreshStatus || refreshStatus.textContent !== "自动刷新已暂停" || refreshStatus.hidden) throw new Error("refresh-off indicator is missing");
+        mode.value = "smart";
+        await mode.onchange();
+        if (timers.length <= timerCount || !refreshStatus.hidden) throw new Error("refresh-on did not restore polling state");
         """
         )
         + "\n})();"

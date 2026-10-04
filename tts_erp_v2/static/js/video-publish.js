@@ -15,6 +15,7 @@
     detailTimer: null,
     currentChannel: { controller: null, generation: 0, failures: 0 },
     listChannel: { controller: null, generation: 0, failures: 0, items: [] },
+    pollState: { running: false, queued: false },
     detailChannel: { controller: null, generation: 0, failures: 0 },
     upload: null,
     creating: false,
@@ -291,6 +292,7 @@
       channel.failures = 0;
       if (!current.notModified) {
         state.currentTask = current.task;
+        state.pollState = current.pollState || { running: Boolean(current.task), queued: false };
         renderRail(current.task);
       }
       $("publish-last-refreshed").textContent = `上次刷新 ${new Date().toLocaleTimeString()}`;
@@ -311,7 +313,10 @@
       const list = await request(`/tasks${query}`, { signal: channel.controller.signal });
       if (generation !== channel.generation) return;
       channel.failures = 0;
-      if (!list.notModified) renderTasks(list);
+      if (!list.notModified) {
+        state.pollState = list.pollState || { running: false, queued: false };
+        renderTasks(list);
+      }
       $("publish-last-refreshed").textContent = `上次刷新 ${new Date().toLocaleTimeString()}`;
     } catch (error) {
       if (error.name === "AbortError" || generation !== channel.generation) return;
@@ -355,12 +360,20 @@
     return Math.min(120, seconds * Math.pow(2, Math.min(failures, 3)));
   }
 
+  function renderRefreshState(mode) {
+    const indicator = $("publish-refresh-status");
+    const paused = mode === "off";
+    indicator.textContent = paused ? "自动刷新已暂停" : "自动刷新已启用";
+    indicator.hidden = !paused;
+  }
+
   function schedule() {
     clearTimeout(state.currentTimer);
     clearTimeout(state.listTimer);
     clearTimeout(state.detailTimer);
     const mode = $("publish-refresh-mode").value;
     localStorage.setItem(REFRESH_KEY, mode);
+    renderRefreshState(mode);
     if (mode === "off") return;
     scheduleCurrent(mode);
     scheduleList(mode);
@@ -368,16 +381,13 @@
   }
 
   function sharedPollState() {
-    return {
-      running: Boolean(state.currentTask),
-      queued: state.listChannel.items.some((task) => task.status === "pending"),
-    };
+    return state.pollState;
   }
 
   function scheduleCurrent(mode) {
     const shared = sharedPollState();
     const base = mode === "smart"
-      ? shared.queued ? 8 : shared.running ? 2 : 30
+      ? shared.running ? 2 : shared.queued ? 8 : 30
       : Number(mode);
     const seconds = backoffSeconds(base, state.currentChannel.failures);
     state.currentTimer = setTimeout(async () => {
@@ -389,7 +399,7 @@
   function scheduleList(mode) {
     const shared = sharedPollState();
     const base = mode === "smart"
-      ? shared.queued ? 8 : shared.running ? 5 : 30
+      ? shared.running ? 5 : shared.queued ? 8 : 30
       : Number(mode);
     const seconds = backoffSeconds(base, state.listChannel.failures);
     state.listTimer = setTimeout(async () => {

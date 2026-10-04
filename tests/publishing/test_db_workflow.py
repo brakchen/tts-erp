@@ -5,10 +5,10 @@ from typing import cast
 from uuid import uuid4
 
 import pytest
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.api.v2.video_publish import config, retry_cleanup
+from tts_erp_v2.api.v2.video_publish import config, list_tasks, retry_cleanup
 from tts_erp_v2.db.models.publishing import VideoPublishTask
 from tts_erp_v2.publishing.dispatcher import (
     LeaseLost,
@@ -358,6 +358,28 @@ def test_continue_upload_reuses_awaiting_upload_ticket(
     assert replayed.public_id == task.public_id
     assert replay is True
     assert url.endswith(task.object_key)
+
+
+def test_filtered_task_list_exposes_unfiltered_poll_state(db_session: Session) -> None:
+    running = _task(status=TaskStatus.RUNNING.value, stage=TaskStage.DOWNLOADING.value)
+    queued = _task(status=TaskStatus.PENDING.value, stage=TaskStage.QUEUED.value)
+    succeeded = _task(status=TaskStatus.SUCCEEDED.value, stage=TaskStage.DONE.value)
+    db_session.add_all([running, queued, succeeded])
+    db_session.flush()
+    payload = cast(
+        dict,
+        list_tasks(
+            _request(),
+            db_session,
+            Response(),
+            status_filter=TaskStatus.SUCCEEDED.value,
+            limit=30,
+            cursor=None,
+        ),
+    )
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["status"] == TaskStatus.SUCCEEDED.value
+    assert payload["pollState"] == {"running": True, "queued": True}
 
 
 def _request() -> Request:

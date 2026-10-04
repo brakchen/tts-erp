@@ -331,6 +331,23 @@ def _task(session: Session, task_id: UUID, *, lock: bool = False) -> VideoPublis
     return task
 
 
+def _poll_state(session: Session) -> dict[str, bool]:
+    return {
+        "running": session.scalar(
+            select(VideoPublishTask.id)
+            .where(VideoPublishTask.status == "running")
+            .limit(1)
+        )
+        is not None,
+        "queued": session.scalar(
+            select(VideoPublishTask.id)
+            .where(VideoPublishTask.status == "pending")
+            .limit(1)
+        )
+        is not None,
+    }
+
+
 @router.get("/tasks/current", response_model=None)
 def current(
     request: Request,
@@ -344,8 +361,10 @@ def current(
         .order_by(VideoPublishTask.id)
         .limit(1)
     )
+    poll_state = _poll_state(session)
     payload = {
         "task": _snapshot(task) if task else None,
+        "pollState": poll_state,
         "suggestedPollSeconds": 2 if task else 30,
         "serverTime": datetime.now(UTC),
     }
@@ -375,6 +394,7 @@ def list_tasks(
     rows = list(session.scalars(query))
     payload = {
         "items": [_snapshot(t) for t in rows],
+        "pollState": _poll_state(session),
         "nextCursor": rows[-1].id if len(rows) == limit else None,
         "totalApprox": len(rows),
         "serverTime": datetime.now(UTC),
