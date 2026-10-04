@@ -36,9 +36,9 @@ def test_upload_cancellation_aborts_xhr_and_handles_terminal_and_failed_cancel()
         }
         class FakeXHR {
           static latest = null;
-          constructor() { this.upload = {}; this.abortCalls = 0; FakeXHR.latest = this; }
+          constructor() { this.upload = {}; this.headers = {}; this.abortCalls = 0; FakeXHR.latest = this; }
           open(method, url) { this.method = method; this.url = url; }
-          setRequestHeader() {}
+          setRequestHeader(name, value) { this.headers[name] = value; }
           send(file) { this.file = file; }
           abort() { this.abortCalls += 1; events.push("xhr.abort"); if (this.onabort) this.onabort(); }
           finish() { this.status = 200; if (this.onload) this.onload(); }
@@ -69,7 +69,7 @@ def test_upload_cancellation_aborts_xhr_and_handles_terminal_and_failed_cancel()
         global.fetch = async (url, options = {}) => {
           const method = (options.method || "GET").toUpperCase();
           if (method === "POST") {
-            posts.push({ url, body: JSON.parse(options.body || "{}") });
+            posts.push({ url, body: JSON.parse(options.body || "{}"), headers: options.headers || {} });
             events.push(`post:${url}`);
           }
           let payload;
@@ -116,6 +116,8 @@ def test_upload_cancellation_aborts_xhr_and_handles_terminal_and_failed_cancel()
         firstXhr.finish();
         firstXhr.fail();
         if (firstXhr.abortCalls !== 1) throw new Error("cancel did not abort the active XHR");
+        if (firstXhr.headers["X-Requested-With"]) throw new Error("presigned PUT received ttsERP CSRF header");
+        if (posts.some((post) => post.headers["X-Requested-With"] !== "tts-erp")) throw new Error("publishing API POST omitted CSRF header");
         const abortIndex = events.indexOf("xhr.abort");
         const cancelIndex = events.findIndex((event) => event.endsWith("/tasks/draft-1/cancel"));
         if (abortIndex < 0 || cancelIndex < 0 || abortIndex >= cancelIndex) throw new Error("cancel API did not follow XHR abort");
@@ -141,6 +143,18 @@ def test_upload_cancellation_aborts_xhr_and_handles_terminal_and_failed_cancel()
         if (confirms !== 0) throw new Error("failed cancellation reached confirm endpoint");
         if (!elements.get("publish-notice").textContent.includes("取消上传失败")) throw new Error("cancel API failure was not visible");
         if (!cancel.hidden || submit.disabled) throw new Error("cancel API failure did not preserve resumability");
+        cancelFailure = false;
+        fileInput.onchange({ target: { files: [file] } });
+        caption.value = "TEST caption";
+        caption.oninput();
+        const successfulRun = submit.onclick();
+        await new Promise((resolve) => setImmediate(resolve));
+        const successfulXhr = FakeXHR.latest;
+        successfulXhr.finish();
+        await successfulRun;
+        const confirmPost = posts.find((post) => post.url.endsWith("/confirm-upload"));
+        if (!confirmPost || confirmPost.headers["X-Requested-With"] !== "tts-erp") throw new Error("confirm API omitted CSRF header");
+        if (successfulXhr.headers["X-Requested-With"]) throw new Error("successful presigned PUT received ttsERP CSRF header");
         """
         )
         + "\n})();"

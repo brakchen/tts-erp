@@ -54,7 +54,7 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
         global.setTimeout = (callback, delay) => { timers.push(callback); delays.push(delay); return timers.length; };
         global.clearTimeout = () => {};
         global.fetch = async (url, options) => {
-          requests.push({ url, signal: options.signal });
+          requests.push({ url, method: (options.method || "GET").toUpperCase(), signal: options.signal, headers: options.headers || {} });
           const payload = url.endsWith("/config")
             ? { maxVideoBytes: 100, maxCaptionCharacters: 4000, target: { album: "TEST" }, device: {}, worker: {} }
             : url.includes("/tasks/current") ? { task: { taskId: "running-1", filename: "TEST-running.mp4", stage: "downloading", status: "running" }, pollState: { running: true, queued: true } }
@@ -87,6 +87,10 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
         for (const button of initialActions) await button.onclick();
         if (confirmCalls !== 4) throw new Error(`unexpected confirmation count ${confirmCalls}`);
         if (filePickerClicks !== 1) throw new Error("continue upload did not reopen file picker");
+        const mutationRequests = requests.filter((request) => request.method === "POST");
+        for (const request of mutationRequests) {
+          if (request.headers["X-Requested-With"] !== "tts-erp") throw new Error(`mutation omitted CSRF header: ${request.url}`);
+        }
         const view = created.find((node) => node.textContent === "查看");
         if (!view) throw new Error("detail trigger was not rendered");
         await view.onclick();

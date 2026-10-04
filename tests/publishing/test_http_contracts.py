@@ -25,8 +25,14 @@ def test_upload_ticket_http_statuses_and_foreign_replay_denial(
 
     @app.middleware("http")
     async def test_auth(request: Request, call_next):
-        request.scope["api_key_role"] = "readwrite"
-        request.scope["api_key_hash"] = request.headers.get("X-Test-Key", "key-a")
+        if request.headers.get("X-Test-Cookie"):
+            request.scope["auth_method"] = "cookie"
+            request.scope["api_key_role"] = "readwrite"
+            request.scope["user_id"] = 1
+        else:
+            request.scope["auth_method"] = "bearer"
+            request.scope["api_key_role"] = "readwrite"
+            request.scope["api_key_hash"] = request.headers.get("X-Test-Key", "key-a")
         return await call_next(request)
 
     store = _UploadStore()
@@ -62,5 +68,23 @@ def test_upload_ticket_http_statuses_and_foreign_replay_denial(
         )
         assert foreign.status_code == 404
         assert foreign.json() == {"detail": "TASK_NOT_FOUND"}
+
+        cookie_payload = {
+            **payload,
+            "clientRequestId": "00000000-0000-0000-0000-000000000002",
+        }
+        cookie_denied = client.post(
+            "/v2/video-publish/tasks",
+            json=cookie_payload,
+            headers={"X-Test-Cookie": "1"},
+        )
+        assert cookie_denied.status_code == 403
+        assert "X-Requested-With" in cookie_denied.json()["detail"]
+        cookie_allowed = client.post(
+            "/v2/video-publish/tasks",
+            json=cookie_payload,
+            headers={"X-Test-Cookie": "1", "X-Requested-With": "tts-erp"},
+        )
+        assert cookie_allowed.status_code == 201
 
     app.dependency_overrides.clear()

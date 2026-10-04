@@ -36,7 +36,10 @@
   async function request(path, options = {}) {
     const method = (options.method || "GET").toUpperCase();
     const headers = {
-      ...(method !== "GET" ? { "Content-Type": "application/json" } : {}),
+      ...(method !== "GET" ? {
+        "Content-Type": "application/json",
+        "X-Requested-With": "tts-erp",
+      } : {}),
       ...(options.headers || {}),
     };
     if (method === "GET" && state.etags.has(path)) {
