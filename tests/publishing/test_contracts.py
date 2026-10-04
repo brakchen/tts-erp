@@ -203,5 +203,6 @@ def test_frontend_keeps_idempotency_and_double_click_guards() -> None:
     assert "scheduleCurrent(mode)" in source
     assert "scheduleList(mode)" in source
     assert "scheduleDetail(mode)" in source
-    assert "? (state.currentTask ? 5 : hasQueued ? 8 : 30)" in source
+    assert "shared.queued ? 8" in source
+    assert "function sharedPollState()" in source
     assert "localStorage.setItem(REFRESH_KEY, mode)" in source

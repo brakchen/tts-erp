@@ -124,15 +124,59 @@ def _lease_task(
     return task
 
 
-def has_failed_device_cleanup(session: Session) -> bool:
+def _lock_publish_slot(session: Session) -> None:
+    session.execute(select(func.pg_advisory_xact_lock(738041)))
+
+
+def has_pending_device_cleanup(session: Session) -> bool:
     return (
         session.scalar(
             select(VideoPublishTask.id).where(
-                VideoPublishTask.device_cleanup_status == "failed"
+                VideoPublishTask.status == TaskStatus.SUCCEEDED.value,
+                VideoPublishTask.device_cleanup_status.in_(["pending", "failed"]),
             )
         )
         is not None
     )
+
+
+def _lease_cleanup_task(
+    session: Session, instance_id: str, lease_seconds: int
+) -> VideoPublishTask | None:
+    _lock_publish_slot(session)
+    if (
+        session.scalar(
+            select(VideoPublishTask.id)
+            .where(VideoPublishTask.status == TaskStatus.RUNNING.value)
+            .limit(1)
+        )
+        is not None
+    ):
+        return None
+    now = datetime.now(UTC)
+    task = session.scalars(
+        select(VideoPublishTask)
+        .where(
+            VideoPublishTask.status == TaskStatus.SUCCEEDED.value,
+            VideoPublishTask.device_cleanup_status.in_(["pending", "failed"]),
+            (VideoPublishTask.device_cleanup_next_attempt_at.is_(None))
+            | (VideoPublishTask.device_cleanup_next_attempt_at <= func.now()),
+            (VideoPublishTask.lease_owner.is_(None))
+            | (VideoPublishTask.lease_expires_at.is_(None))
+            | (VideoPublishTask.lease_expires_at < func.now()),
+        )
+        .order_by(VideoPublishTask.device_cleanup_next_attempt_at, VideoPublishTask.id)
+        .with_for_update(skip_locked=True)
+        .limit(1)
+    ).first()
+    if task is None:
+        return None
+    task.lease_owner = instance_id
+    task.lease_expires_at = now + timedelta(seconds=lease_seconds)
+    task.heartbeat_at = now
+    task.row_version += 1
+    session.flush()
+    return task
 
 
 def claim_one(
@@ -141,7 +185,8 @@ def claim_one(
     lease_seconds: int = 30,
     max_attempts: int = 3,
 ) -> VideoPublishTask | None:
-    if has_failed_device_cleanup(session):
+    _lock_publish_slot(session)
+    if has_pending_device_cleanup(session):
         return None
     if (
         session.scalar(

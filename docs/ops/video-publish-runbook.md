@@ -18,7 +18,7 @@
 - Artemis 请求超时：Worker 查询并复用原 `artemis_session_id`，不要手工新建 session。
 - 结果不确定：必须先 verify；`needs_review` 禁止普通 retry。
 - 设备文件、spool、MinIO 是独立清理状态。成功任务的清理失败只执行“重试清理”，不能改写业务成功。
-- 若设备清理失败，Worker 会阻止后续任务领取/进入 staging；通过任务详情的“重试清理”恢复该任务，确认 device cleanup succeeded 后队列才会继续。
+- 若设备清理失败，Worker 会阻止后续任务领取/进入 staging，并按退避自动领取到期的成功任务重试清理；确认 device cleanup succeeded 后队列才会继续。任务详情的“重试清理”仅用于立即提前触发重试。
 - Worker 重启会从 running task 继续读取原 session；不要删除数据库行或对象。
 - 回滚时先移除页面权限、停止领取新任务；保留 running/needs_review 的对象和审计历史。只有三张表为空并经人工确认才允许 downgrade。
 

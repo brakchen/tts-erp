@@ -31,10 +31,11 @@ from tts_erp_v2.publishing.domain import (
 )
 from tts_erp_v2.publishing.object_store import VideoObjectStore
 from tts_erp_v2.publishing.repository import (
+    _lease_cleanup_task,
     _lease_task,
     claim_one,
     create_attempt,
-    has_failed_device_cleanup,
+    has_pending_device_cleanup,
     release_lease,
     touch_task,
 )
@@ -59,6 +60,8 @@ class PublishDependencies:
 async def dispatch_one(deps: PublishDependencies) -> str:
     with deps.session_factory() as session:
         task = _lease_task(session, deps.instance_id, deps.lease_seconds)
+        if task is None:
+            task = _lease_cleanup_task(session, deps.instance_id, deps.lease_seconds)
         if task is None:
             task = claim_one(
                 session,
@@ -107,11 +110,14 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
                     session.commit()
                     await _run_attempt(task_id, attempt_id, deps)
                     return
-            if task.stage == TaskStage.CLEANING.value:
+            if task.stage == TaskStage.CLEANING.value or (
+                task.status == TaskStatus.SUCCEEDED.value
+                and task.device_cleanup_status in {"pending", "failed"}
+            ):
                 session.commit()
                 await _cleanup_success(task_id, deps)
                 return
-            if has_failed_device_cleanup(session):
+            if has_pending_device_cleanup(session):
                 _defer_for_device_cleanup(task)
                 session.commit()
                 return
@@ -515,6 +521,10 @@ def _get(session: Session, task_id: UUID) -> VideoPublishTask:
     return task
 
 
+def _cleanup_retry_delay(attempts: int) -> int:
+    return min(300, 5 * (2 ** min(attempts, 5)))
+
+
 def _defer_for_device_cleanup(task: VideoPublishTask) -> None:
     task.status = TaskStatus.PENDING.value
     task.stage = TaskStage.WAITING_DEVICE.value
@@ -730,6 +740,15 @@ async def _cleanup_success(task_id: UUID, deps: PublishDependencies) -> None:
         if device_needed:
             values["device_cleanup_status"] = "failed" if device_error else "succeeded"
             values["device_cleanup_error"] = device_error
+            values["device_cleanup_attempts"] = task.device_cleanup_attempts + (
+                1 if device_error else 0
+            )
+            values["device_cleanup_next_attempt_at"] = (
+                datetime.now(UTC)
+                + timedelta(seconds=_cleanup_retry_delay(task.device_cleanup_attempts))
+                if device_error
+                else None
+            )
         if object_needed:
             values["object_cleanup_status"] = "failed" if object_error else "succeeded"
             values["object_cleanup_error"] = object_error

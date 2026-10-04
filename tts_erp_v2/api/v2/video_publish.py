@@ -460,6 +460,8 @@ def retry_cleanup(
     for name in ("device", "spool", "object"):
         if getattr(task, f"{name}_cleanup_status") == "failed":
             setattr(task, f"{name}_cleanup_status", "pending")
+            if name == "device":
+                task.device_cleanup_next_attempt_at = datetime.now(UTC)
             retried = True
     if not retried:
         raise HTTPException(status.HTTP_409_CONFLICT, "CLEANUP_RETRY_NOT_AVAILABLE")

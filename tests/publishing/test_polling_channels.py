@@ -11,9 +11,11 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
         const vm = require("vm");
         const source = fs.readFileSync("tts_erp_v2/static/js/video-publish.js", "utf8");
         const timers = [];
+        const delays = [];
         const requests = [];
         const elements = new Map();
         const created = [];
+        let confirmCalls = 0;
         function element() {
           const node = {
             textContent: "", value: "", disabled: false, hidden: false,
@@ -30,7 +32,11 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
         global.document = {
           hidden: false,
           getElementById(id) {
-            if (!elements.has(id)) elements.set(id, element());
+            if (!elements.has(id)) {
+              const node = element();
+              if (id === "publish-refresh-mode") node.value = "smart";
+              elements.set(id, node);
+            }
             return elements.get(id);
           },
           querySelectorAll() { return []; },
@@ -41,7 +47,9 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
         global.crypto = { randomUUID: () => "00000000-0000-0000-0000-000000000000" };
         global.URL = { createObjectURL: () => "blob:test", revokeObjectURL() {} };
         global.localStorage = { getItem: () => null, setItem() {} };
-        global.setTimeout = (callback) => { timers.push(callback); return timers.length; };
+        global.confirm = () => { confirmCalls += 1; return true; };
+        global.navigator.clipboard = { writeText: async () => {} };
+        global.setTimeout = (callback, delay) => { timers.push(callback); delays.push(delay); return timers.length; };
         global.clearTimeout = () => {};
         global.fetch = async (url, options) => {
           requests.push({ url, signal: options.signal });
@@ -50,30 +58,41 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
             : url.includes("/tasks/current") ? { task: null }
             : url.includes("/tasks/task-1")
               ? { taskId: "task-1", filename: "TEST.mp4", status: "succeeded", caption: "TEST", attempts: [] }
-              : { items: [{ taskId: "task-1", status: "succeeded", filename: "TEST.mp4", latestArtemisSessionId: "", createdAt: "2026-10-04T00:00:00Z", allowedActions: [] }] };
+              : { items: [{ taskId: "task-1", status: "pending", filename: "TEST.mp4", latestArtemisSessionId: "artemis-1", createdAt: "2026-10-04T00:00:00Z", allowedActions: ["view", "continue_upload", "cancel", "retry", "verify", "retry_cleanup", "copy_artemis_id"] }] };
           return { status: 200, ok: true, headers: { get: () => null }, json: async () => payload };
         };
         vm.runInThisContext(source);
         await new Promise((resolve) => setImmediate(resolve));
         if (timers.length < 2) throw new Error("current/list timers were not scheduled");
+        if (delays[0] !== 8000 || delays[1] !== 8000) throw new Error("queued cadence is not shared at 8 seconds");
         const listRequest = requests.find((request) => request.url.includes("/tasks?") || request.url.endsWith("/tasks"));
         const currentRequest = requests.find((request) => request.url.includes("/tasks/current"));
         if (!listRequest || !currentRequest || listRequest.signal === currentRequest.signal) {
           throw new Error("current and list did not receive distinct signals");
         }
+        document.hidden = true;
         await timers[0]();
+        if (delays.at(-1) < 30000) throw new Error("hidden polling is too frequent");
         if (listRequest.signal.aborted) throw new Error("current refresh aborted list channel");
         const latestCurrent = requests.filter((request) => request.url.includes("/tasks/current")).at(-1);
         await timers[1]();
         if (latestCurrent.signal.aborted) throw new Error("list refresh aborted current channel");
+        const expectedLabels = ["查看", "继续上传", "取消", "重试", "核验", "重试清理", "复制 Artemis ID"];
+        for (const label of expectedLabels) {
+          if (!created.some((node) => node.textContent === label)) throw new Error(`missing action ${label}`);
+        }
+        const initialActions = expectedLabels.map((label) => created.find((node) => node.textContent === label));
+        for (const button of initialActions) await button.onclick();
+        if (confirmCalls !== 4) throw new Error(`unexpected confirmation count ${confirmCalls}`);
         const view = created.find((node) => node.textContent === "查看");
         if (!view) throw new Error("detail trigger was not rendered");
         await view.onclick();
         const latestList = requests.filter((request) => request.url.endsWith("/tasks")).at(-1);
+        const latestCurrentAfterActions = requests.filter((request) => request.url.includes("/tasks/current")).at(-1);
         const latestDetail = requests.filter((request) => request.url.includes("/tasks/task-1")).at(-1);
         const detailTimer = timers.at(-1);
         await detailTimer();
-        if (latestList.signal.aborted || latestCurrent.signal.aborted) throw new Error("detail refresh aborted another channel");
+        if (latestList.signal.aborted || latestCurrentAfterActions.signal.aborted) throw new Error("detail refresh aborted another channel");
         if (!latestDetail.signal.aborted) throw new Error("detail refresh did not replace its own request");
         """
         )

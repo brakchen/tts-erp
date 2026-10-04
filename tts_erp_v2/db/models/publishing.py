@@ -95,6 +95,12 @@ class VideoPublishTask(Base):
         Text, nullable=False, server_default=text("'not_started'")
     )
     device_cleanup_error: Mapped[str | None] = mapped_column(Text)
+    device_cleanup_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    device_cleanup_next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     spool_cleanup_status: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'not_started'")
     )

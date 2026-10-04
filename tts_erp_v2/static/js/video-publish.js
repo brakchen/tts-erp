@@ -200,6 +200,40 @@
     button.disabled = !id;
   }
 
+  const ACTION_LABELS = {
+    view: "查看",
+    continue_upload: "继续上传",
+    cancel: "取消",
+    retry: "重试",
+    verify: "核验",
+    retry_cleanup: "重试清理",
+    copy_artemis_id: "复制 Artemis ID",
+  };
+  const CONFIRM_ACTIONS = new Set(["cancel", "retry", "verify", "retry_cleanup"]);
+
+  async function runTaskAction(task, actionName) {
+    if (CONFIRM_ACTIONS.has(actionName) && !window.confirm(`确认${ACTION_LABELS[actionName] || actionName}？`)) return;
+    try {
+      if (actionName === "view") return openDetail(task.taskId);
+      if (actionName === "copy_artemis_id") {
+        const id = task.latestArtemisSessionId;
+        if (id) await navigator.clipboard.writeText(id);
+        return;
+      }
+      if (actionName === "continue_upload") {
+        notice("请重新选择原视频以继续上传");
+        return openDetail(task.taskId);
+      }
+      const endpoint = actionName === "retry_cleanup"
+        ? `/tasks/${task.taskId}/cleanup/retry`
+        : `/tasks/${task.taskId}/${actionName.replaceAll("_", "-")}`;
+      await request(endpoint, { method: "POST", body: "{}" });
+      await refresh();
+    } catch (error) {
+      notice(error.message, true);
+    }
+  }
+
   function renderTasks(payload) {
     state.listChannel.items = payload.items || [];
     const body = $("publish-task-list");
@@ -224,18 +258,13 @@
         row.append(cell);
       });
       const actions = document.createElement("td");
-      const view = document.createElement("button");
-      view.className = "btn-secondary";
-      view.textContent = "查看";
-      view.onclick = () => openDetail(task.taskId);
-      actions.append(view);
-      if (task.allowedActions.includes("retry")) {
-        const retry = document.createElement("button");
-        retry.className = "btn-secondary";
-        retry.textContent = "重试";
-        retry.onclick = () => action(task.taskId, "retry");
-        actions.append(retry);
-      }
+      (task.allowedActions || []).forEach((actionName) => {
+        const button = document.createElement("button");
+        button.className = "btn-secondary";
+        button.textContent = ACTION_LABELS[actionName] || actionName;
+        button.onclick = () => runTaskAction(task, actionName);
+        actions.append(button);
+      });
       row.append(actions);
       body.append(row);
     });
@@ -312,7 +341,7 @@
   }
 
   function backoffSeconds(seconds, failures) {
-    if (document.hidden) seconds *= 4;
+    if (document.hidden) seconds = Math.max(30, seconds * 4);
     return Math.min(120, seconds * Math.pow(2, Math.min(failures, 3)));
   }
 
@@ -328,8 +357,18 @@
     scheduleDetail(mode);
   }
 
+  function sharedPollState() {
+    return {
+      running: Boolean(state.currentTask),
+      queued: state.listChannel.items.some((task) => task.status === "pending"),
+    };
+  }
+
   function scheduleCurrent(mode) {
-    const base = mode === "smart" ? (state.currentTask ? 2 : 15) : Number(mode);
+    const shared = sharedPollState();
+    const base = mode === "smart"
+      ? shared.queued ? 8 : shared.running ? 2 : 30
+      : Number(mode);
     const seconds = backoffSeconds(base, state.currentChannel.failures);
     state.currentTimer = setTimeout(async () => {
       await refreshCurrent();
@@ -338,8 +377,10 @@
   }
 
   function scheduleList(mode) {
-    const hasQueued = state.listChannel.items.some((task) => task.status === "pending");
-    const base = mode === "smart" ? (state.currentTask ? 5 : hasQueued ? 8 : 30) : Number(mode);
+    const shared = sharedPollState();
+    const base = mode === "smart"
+      ? shared.queued ? 8 : shared.running ? 5 : 30
+      : Number(mode);
     const seconds = backoffSeconds(base, state.listChannel.failures);
     state.listTimer = setTimeout(async () => {
       await refreshList();
@@ -383,11 +424,6 @@
         schedule();
       }
     } catch (error) { notice(error.message, true); }
-  }
-
-  async function action(id, verb) {
-    try { await request(`/tasks/${id}/${verb}`, { method: "POST", body: "{}" }); await refresh(); }
-    catch (error) { notice(error.message, true); }
   }
 
   $("publish-video-file").addEventListener("change", (event) => pick(event.target.files[0]));
