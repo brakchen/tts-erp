@@ -56,9 +56,14 @@ bash restart.sh
 systemctl --user restart tts-erp-sync.service
 ```
 
-## 4. 端到端测试
+## 4. 浏览器渲染回归与端到端测试
 
 ```bash
+# 浏览器渲染回归（无需服务；fast 默认就跑，单独跑用这条）
+#  = pytest -m "domain_browser and not slow" tests/
+#  断言：13 页 @1440 横向溢出、ad-daily 多视口、computed 字体栈 ⊆ tokens 三套栈
+bash scripts/test_isolated.sh browser
+
 # live 端到端冒烟（需 :9877 在跑；用例在 tests/e2e/，默认被 fast 排除）
 bash scripts/test_isolated.sh e2e        # = pytest -m "domain_e2e and not slow" tests/
 # 只读：/healthz、/endpoints、/v2/fx/latest、/v2/reporting/*；

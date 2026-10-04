@@ -25,55 +25,8 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from conftest import (
-    PAGE_SLUGS,
-    normalize_stack,
-    page_path,
-    request_json,
-)
-
-# 裁剪感知的越界扫描（与 scripts/probe_ui_layout_audit.js 同口径）：
-# 被 overflow 祖先裁掉的不计（表格横滚是设计行为），只抓真正顶出视口的元素。
-_OVERFLOW_JS = """() => {
-  const de = document.documentElement;
-  const offenders = [];
-  for (const el of document.querySelectorAll('body *')) {
-    const r = el.getBoundingClientRect();
-    if (r.width === 0 || r.height === 0) continue;
-    if (r.right <= de.clientWidth + 2 || r.left >= de.clientWidth) continue;
-    if (getComputedStyle(el).position === 'fixed') continue;
-    let p = el.parentElement, clipped = false, nested = false;
-    while (p && p !== document.body) {
-      const cs = getComputedStyle(p);
-      if (/(hidden|auto|scroll|clip)/.test(cs.overflowX)) { clipped = true; break; }
-      if (p.getBoundingClientRect().right > de.clientWidth + 2) { nested = true; break; }
-      p = p.parentElement;
-    }
-    if (clipped || nested) continue;
-    offenders.push(
-      el.tagName.toLowerCase() + '.' + String(el.className).split(' ').slice(0, 2).join('.')
-      + '(right=' + Math.round(r.right) + ')'
-    );
-  }
-  return { scrollWidth: de.scrollWidth, clientWidth: de.clientWidth, offenders };
-}"""
-
-_FONT_STACKS_JS = """() => {
-  const out = new Set();
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
-  let node = walker.currentNode;
-  while (node) {
-    const hasText = Array.from(node.childNodes)
-      .some((c) => c.nodeType === 3 && c.textContent.trim());
-    if (hasText) {
-      const cs = getComputedStyle(node);
-      if (cs.display !== 'none' && cs.visibility !== 'hidden') out.add(cs.fontFamily);
-    }
-    node = walker.nextNode();
-  }
-  return [...out];
-}"""
-
+from conftest import PAGE_SLUGS, normalize_stack, page_path, request_json
+from render_support import font_stacks, overflow_report
 
 @pytest.fixture(scope="module")
 def shop_pk() -> int | None:
@@ -85,7 +38,7 @@ def shop_pk() -> int | None:
 
 
 def _assert_no_overflow(page: Any, label: str) -> None:
-    report = page.evaluate(_OVERFLOW_JS)
+    report = overflow_report(page)
     assert report["scrollWidth"] <= report["clientWidth"] + 1, (
         f"{label} 出现横向滚动条：scrollWidth={report['scrollWidth']} > "
         f"clientWidth={report['clientWidth']}"
@@ -113,7 +66,7 @@ def test_ad_daily_has_no_horizontal_overflow_at_any_viewport(renderer, width):
 def test_page_font_stacks_come_only_from_tokens(renderer, token_font_stacks, slug):
     """页面上每一段文字的 computed font-family 必须是 tokens 的三套栈之一。"""
     page = renderer.open(page_path(slug))
-    stacks = page.evaluate(_FONT_STACKS_JS)
+    stacks = font_stacks(page)
     stray = sorted({s for s in stacks if normalize_stack(s) not in token_font_stacks})
     assert not stray, (
         f"{slug} 出现 tokens 之外的字体栈（vendor / 内联旁路，需 var(--sans|mono|serif)）: "

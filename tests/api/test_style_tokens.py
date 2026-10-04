@@ -195,3 +195,56 @@ def test_css_files_have_no_parse_errors():
             )
             problems.append(f"{path.name}: {len(errors)} 处 — {detail}")
     assert not problems, "CSS 解析错误:\n  " + "\n  ".join(problems)
+
+
+def test_font_declarations_only_reference_token_stacks():
+    """全站字体声明只能引用 tokens 的三套栈（静态 lint，无浏览器也能拦）。
+
+    浏览器层（tests/browser/）与 live e2e 能抓「渲染态」字体旁路，但它们要
+    chromium + 才能跑；这条是零成本兜底：自研 css/html/py/js 里出现
+    ``font-family: arial`` / ``font: 12px SFMono…`` 这类字面量就直接红，
+    逼新代码回到 ``var(--mono|sans|serif)``。``static/vendor/`` 不扫（上游原样）。
+
+    历史：2026-10-04 runtime-configs 的 ui-monospace、oauth 页的
+    ``-apple-system``、vendor jsoneditor 的 arial 都是这么漏出去的。
+    """
+    import re
+
+    targets = sorted(CSS_DIR.glob("*.css"))
+    targets += sorted(TEMPLATES_DIR.glob("*.html"))
+    targets += sorted(REPO.glob("tts_erp_v2/static/js/*.js"))
+    targets += [API_DIR / "auth.py", API_DIR / "oauth.py", API_DIR / "ad_daily.py"]
+
+    token_vars = {"var(--mono)", "var(--sans)", "var(--serif)"}
+    inert = {"inherit", "initial", "unset", "revert", "revert-layer"}
+    problems: list[str] = []
+
+    for path in targets:
+        if not path.exists():
+            continue
+        text = _load(path)
+        # 去注释：注释里必须能写反例（如「uplot 自带 system-ui/Arial」）来解释历史
+        text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+        text = re.sub(r"<!--.*?-->", "", text, flags=re.S)
+        text = re.sub(r"^\s*//.*$", "", text, flags=re.M)
+        for match in re.finditer(r"(?<![-\w])(font-family|font)\s*:\s*([^;}\n]+)", text):
+            prop, value = match.group(1), match.group(2).strip()
+            value = re.sub(r"\s*!important\s*$", "", value).strip()
+            if value in inert:
+                continue
+            if prop == "font-family":
+                # 允许 var(--x) 或带回退的 var(--x, ...)
+                if re.fullmatch(r"var\(\s*--(mono|sans|serif)(\s*,[^)]+)?\)", value):
+                    continue
+            else:
+                # font 简写：家族必须落在末尾的令牌上
+                if any(value.endswith(v) for v in token_vars):
+                    continue
+                if value in inert:
+                    continue
+            problems.append(f"{path.relative_to(REPO)}: {prop}: {value[:70]}")
+
+    assert not problems, (
+        "以下字体声明绕过了 tokens 三套栈（改用 var(--mono|sans|serif)）:\n  "
+        + "\n  ".join(problems)
+    )

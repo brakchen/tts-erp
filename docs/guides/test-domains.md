@@ -40,6 +40,7 @@ to think about it per-test.
 | `domain_token_refresh`  | token 续期 (`jobs_token_refresh/*`)                                              |
 | `domain_sdk`            | SDK 自身测试 (`miaoshou/endpoints/test_tools.py`)                                |
 | `domain_e2e`            | 端到端 smoke，需要 live `:9877` 服务                                             |
+| `domain_browser`        | 浏览器渲染回归（多视口溢出 / 字体栈）：本分支渲染 + 本地静态服务，**不需要** `:9877`，随 `fast` 跑 |
 
 ### Layers (orthogonal)
 
@@ -50,6 +51,7 @@ to think about it per-test.
 | `slow`              | ≥ 1 s per test (migration tests, e2e)                                  |
 | `requires_db`       | needs `TTS_ERP_DB_URL` env var (most `tests/` tests)                |
 | `requires_service`  | needs live `:9877` service (`domain_e2e`)                              |
+| `requires_browser`  | needs playwright + chromium（缺失时用例 skip；`-m 'not requires_browser'` 可排除） |
 
 ## Common invocations
 
@@ -115,14 +117,22 @@ If you want to call `pytest` directly:
   TTS_ERP_DB_URL=... scripts/test.sh migration   # PG must be reachable
   ```
 
-- **e2e 里有一层浏览器渲染冒烟**（`tests/e2e/test_ui_render_smoke.py`、
-  `test_ad_daily_sort_smoke.py`，lane `e2e-ui-render`）：headless Chromium
-  打开 live 页面，断言**渲染态**——多视口横向溢出、computed font-family
-  只能是 tokens 的三套栈、广告日明细表头点击后 URL/`aria-sort`/行序一致。
-  HTTP 形状冒烟看不见这两类回归（2026-10-04 筛选条 1440 溢出、
-  Bootstrap `--bs-font-monospace` 旁路在既有 e2e 下全绿）。
-  需要 `.venv` 里有 `playwright` + chromium；缺浏览器时用例 skip 不硬失败。
-  用例只发 GET：`conftest.Renderer` 会记录非 GET 请求并在收尾断言为空。
+- **渲染回归有三层闸（lane `render-gates`，2026-10-04）**。HTTP 形状冒烟看不见
+  渲染态：当天的「筛选条 1440 把查询按钮顶出页面」与「Bootstrap `--bs-font-monospace`
+  旁路出第 4 套字体」，在当时 `fast` 与 e2e 下都是**绿的**。分工：
+
+  | 层 | 位置 | 命令 | 拦什么 |
+  | --- | --- | --- | --- |
+  | 静态 lint | `tests/api/test_style_tokens.py` | `fast`（已含） | 源码里出现 tokens 之外的 `font-family` 字面量（无浏览器也能拦） |
+  | 浏览器层 | `tests/browser/`（`domain_browser`） | `fast`（已含）/ `test_isolated.sh browser` | 13 页 @1440 横向溢出、广告日明细多视口、computed 字体栈 ⊆ tokens 三套栈 |
+  | live e2e | `tests/e2e/`（`domain_e2e`） | `test_isolated.sh e2e`（需 `:9877`） | 必须真数据/真契约：排序闭环、日期列契约、只读约束 |
+
+  两层浏览器断言共用 `tests/render_support.py`（JS 片段 + Renderer 单一来源，
+  避免两份实现漂移）；浏览器层渲染本分支 Jinja + 本地静态服务 + mock，
+  因此**任何人跑 `fast` 都会跑到**，不必记得开服务。
+  需要 `.venv` 里有 `playwright`（已入 `dev` extra）+ `playwright install chromium`，
+  缺失时用例 skip 不硬失败。用例只发 GET（页面加载期的语义只读 POST 在
+  `render_support.READ_ONLY_POST_SUFFIXES` 白名单里），收尾断言写请求数为 0。
 
 - **Worktrees.** `chore/*` worktrees don't carry their own `.venv` — the
   script falls back to `/home/schan/tts-erp/.venv/bin/pytest` when
@@ -169,7 +179,8 @@ Quick lookup for "which slice do I run after editing X":
 | `scripts/migrate_v1_to_v2/*.py`             | `scripts/test.sh migration`          |
 | `miaoshou/miaoshou_signing.py`              | `scripts/test.sh miaoshou unit`      |
 | `tests/e2e/**`（live 冒烟）                 | `scripts/test.sh e2e`（需 :9877 在跑） |
-| `tts_erp_v2/static/css/**`、页面模板         | `scripts/test.sh e2e`（渲染冒烟：溢出/字体栈）+ `scripts/test.sh api`（令牌回归） |
+| `tests/browser/**`（渲染冒烟）               | `scripts/test.sh browser`（无服务；`fast` 已含） |
+| `tts_erp_v2/static/css/**`、页面模板         | `scripts/test.sh fast`（浏览器层：溢出/字体栈 + 静态 lint）+ `scripts/test.sh e2e`（真数据复核） |
 | `scripts/probe_ui_*.js`                      | `scripts/test.sh api tests/api/test_ad_daily.py`（mock 契约静态锁） |
 
 ## Adding new tests
