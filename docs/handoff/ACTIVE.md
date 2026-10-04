@@ -16,4 +16,4 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| e2e-ui-render | e2e 补强：多视口溢出 / 全站字体栈 / 广告日明细排序 | 01a10506-4459-7668-b8bc-2c9c6958e703 | feature/e2e-ui-render | tests/e2e/*.py, tests/e2e/conftest.py, scripts/probe_ui_layout_audit.js, scripts/probe_ui_font_audit.js, scripts/ui_audit_mocks.js, tests/api/test_ad_daily.py, docs/guides/test-domains.md, docs/guides/browser-ui-layout-audit.md | draft | — | — | 2026-10-04 05:07 |
+| e2e-ui-render | e2e 补强：多视口溢出 / 全站字体栈 / 广告日明细排序 | 01a10506-4459-7668-b8bc-2c9c6958e703 | feature/e2e-ui-render | tests/e2e/*.py, tests/e2e/conftest.py, scripts/probe_ui_layout_audit.js, scripts/probe_ui_font_audit.js, scripts/ui_audit_mocks.js, tests/api/test_ad_daily.py, tts_erp_v2/static/css/tokens.css, tts_erp_v2/static/css/common.css, docs/guides/test-domains.md, docs/guides/browser-ui-layout-audit.md | active | — | — | 2026-10-04 05:08 |
