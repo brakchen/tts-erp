@@ -136,6 +136,7 @@ CREATE TABLE publishing.video_publish_tasks (
     object_bucket         text NOT NULL,
     object_key            text NOT NULL UNIQUE,
     object_etag           text,
+    object_sha256         text,
     object_uploaded_at    timestamptz,
     object_deleted_at     timestamptz,
 
@@ -143,6 +144,11 @@ CREATE TABLE publishing.video_publish_tasks (
     stage                 text NOT NULL,
     attempt_count         integer NOT NULL DEFAULT 0,
     next_attempt_at       timestamptz,
+
+    lease_owner           text,
+    lease_expires_at      timestamptz,
+    heartbeat_at          timestamptz,
+    row_version           integer NOT NULL DEFAULT 1,
 
     target_device_serial  text NOT NULL,
     target_app_package    text NOT NULL,
@@ -229,7 +235,10 @@ CREATE TABLE publishing.video_publish_attempts (
     artemis_output        jsonb,
     artemis_error         text,
     steps_count           integer,
+    submit_retry_count    integer NOT NULL DEFAULT 0,
+    last_polled_at        timestamptz,
     retry_classification  text,
+    retry_safe            boolean,
 
     submitted_at          timestamptz,
     started_at            timestamptz,
@@ -261,6 +270,25 @@ WHERE status IN ('submitting', 'queued', 'running');
 ```
 
 主任务最终为 `succeeded`，三条 Artemis 历史全部保留。
+
+### 4.3 `publishing.worker_heartbeats`
+
+API 与页面需要知道独立 Worker 是否存活；空闲时没有 task lease，不能只看任务表。增加轻量心跳表：
+
+```sql
+CREATE TABLE publishing.worker_heartbeats (
+    instance_id   text PRIMARY KEY,
+    hostname      text NOT NULL,
+    pid           integer NOT NULL,
+    status        text NOT NULL, -- starting | ready | stopping
+    version       text,
+    started_at    timestamptz NOT NULL,
+    heartbeat_at  timestamptz NOT NULL,
+    updated_at    timestamptz NOT NULL DEFAULT now()
+);
+```
+
+Worker 每 5 秒 upsert 自己的行；API 以 `heartbeat_at >= now() - interval '15 seconds'` 判定 ready。超过 5 分钟的终止实例可由 Worker 自身或运维清理。心跳表只表达进程存活，不替代设备、Artemis 和 MinIO 的独立 readiness。
 
 ## 5. 上传与对象生命周期
 
@@ -964,11 +992,20 @@ tts_erp_v2/publishing/
 └── worker.py                # 独立进程入口
 
 tts_erp_v2/db/models/publishing.py
+tts_erp_v2/db/models/__init__.py                  # 导出模型，确保 Alembic metadata 可见
 tts_erp_v2/api/v2/video_publish.py
+tts_erp_v2/api/v2/pages.py                       # /v2/pages/video-publish
+tts_erp_v2/app.py                                # include_router
+tts_erp_v2/access/_policy.py                     # GET readonly / 写操作 readwrite
+tts_erp_v2/accounts/pages.py                     # page:video-publish 与角色授权
 tts_erp_v2/templates/pages/video-publish.html
 tts_erp_v2/static/js/video-publish.js
 tts_erp_v2/static/css/video-publish.css
-alembic/versions/0053_video_publish.py
+alembic/versions/0053_video_publish.py            # 实现时以实际 Alembic head 为准
+scripts/systemd/tts-erp-publish.service
+tests/publishing/
+tests/api/test_video_publish.py
+tests/browser/test_video_publish_page.py
 ```
 
 公共业务入口保持窄：
@@ -1114,3 +1151,1531 @@ bash scripts/test_isolated.sh ...
 10. 前端的“单线发布轨道”直接表达全局串行约束；状态与允许操作全部由服务端真相驱动。
 11. 页面提供智能或固定间隔定时刷新，任务、attempt 和 Artemis ID 的变化无需手工刷新即可出现。
 12. 每条 Artemis attempt 的完整 session ID 都在详情中保留并可复制；列表展示当前或最近一次 ID。
+
+## 18. 实现级数据字典
+
+本节是开发时的字段真相源。数据库使用 `snake_case`；HTTP JSON 使用 `camelCase`。时间统一为 PostgreSQL `timestamptz`，API 输出 UTC ISO-8601，例如 `2026-10-04T10:42:15Z`。客户端不得提交服务端状态、计数、设备路径或 Artemis ID。
+
+### 18.1 `video_publish_tasks` 字段
+
+| 字段 | 类型/可空 | 写入方 | 含义与约束 |
+| --- | --- | --- | --- |
+| `id` | bigint, 非空 | DB | 内部主键，不暴露给普通前端。 |
+| `public_id` | uuid, 非空唯一 | DB | ttsERP 任务 ID，出现在 URL、日志和 UI；不可与 Artemis ID 混用。 |
+| `client_request_id` | uuid, 非空唯一 | 浏览器→API | 创建幂等键；同一用户重放相同请求返回原任务。全局唯一即可，响应需标记是否 replay。 |
+| `created_by_user_id` | bigint, 可空 | API | 创建人 FK；API key 或历史导入可为空。 |
+| `caption` | text, 非空 | 用户 | 原样发布文案；规范化 CRLF→LF、拒绝 NUL，不自动删运营备注。 |
+| `original_filename` | text, 非空 | 用户 | 浏览器文件名，仅展示；不得直接拼接本地或设备路径。 |
+| `content_type` | text, 非空 | 用户+confirm | v1 固定 `video/mp4`；confirm 重新核对对象元数据。 |
+| `size_bytes` | bigint, 非空 | 用户+confirm | 创建时声明，confirm 必须与 MinIO 实际大小相同。 |
+| `object_bucket` | text, 非空 | API | 创建时从服务端配置快照，v1 为 `tiktok-video`。 |
+| `object_key` | text, 非空唯一 | API | 服务端生成的永久对象引用；用户不能指定。 |
+| `object_etag` | text, 可空 | confirm | MinIO HEAD 返回值；上传完成前为空。 |
+| `object_sha256` | text, 可空 | Worker | 下载后计算的内容摘要；用于诊断与后续重复视频识别，不作为 UI 操作 ID。 |
+| `object_uploaded_at` | timestamptz, 可空 | confirm | HEAD 校验成功时间。 |
+| `object_deleted_at` | timestamptz, 可空 | cleanup | MinIO 删除成功时间；删除幂等，404 也视为成功。 |
+| `status` | enum text, 非空 | Domain service | 业务状态，含义见 §18.4。 |
+| `stage` | enum text, 非空 | Domain service | 当前细分阶段，含义见 §18.5。 |
+| `attempt_count` | int, 非空 | Domain service | 已创建的 `kind=publish` 数量；verify 不计入正式发布重试额度。 |
+| `next_attempt_at` | timestamptz, 可空 | Dispatcher | 退避截止时间；为空表示可立即领取。 |
+| `lease_owner` | text, 可空 | Worker | 当前领取实例 ID；业务终态和 pending 时必须为空。 |
+| `lease_expires_at` | timestamptz, 可空 | Worker | 崩溃恢复租约；运行时每次 heartbeat 向后延长。 |
+| `heartbeat_at` | timestamptz, 可空 | Worker | 当前任务最近一次执行心跳，便于识别卡死阶段。 |
+| `row_version` | int, 非空 | Repository | 乐观并发版本；每次状态转换 `+1`，写入使用 compare-and-swap。 |
+| `target_device_serial` | text, 非空 | API config | 创建时固定的 ADB serial 快照；普通用户不可修改。 |
+| `target_app_package` | text, 非空 | API config | 创建时固定的 package 快照。 |
+| `device_path` | text, 可空 | Worker | 实际 staging 路径；下载前为空。 |
+| `last_error_code` | text, 可空 | Domain service | 面向机器的稳定错误码；成功重试后保留历史在 attempt，主表清空。 |
+| `last_error_message` | text, 可空 | Domain service | 已清洗的运营可读错误；不得含密钥、预签名 URL 或堆栈。 |
+| `*_cleanup_status` | enum text, 非空 | Cleanup service | 分别描述设备、spool、对象清理。 |
+| `*_cleanup_error` | text, 可空 | Cleanup service | 对应位置最近一次清理错误；成功后清空。 |
+| `queued_at` | timestamptz, 可空 | confirm/retry | 最近一次进入发布队列时间，队列排序真相源。 |
+| `started_at` | timestamptz, 可空 | Worker | 第一次进入 running 的时间，不因后续 verify 覆盖。 |
+| `completed_at` | timestamptz, 可空 | Domain service | 进入 succeeded/failed/cancelled/needs_review 终止等待态的时间；重新排队时清空。 |
+| `created_at` | timestamptz, 非空 | DB | 创建时间。 |
+| `updated_at` | timestamptz, 非空 | DB trigger | 任意持久化变更时间，也用于 ETag。 |
+
+### 18.2 `video_publish_attempts` 字段
+
+| 字段 | 类型/可空 | 含义与约束 |
+| --- | --- | --- |
+| `id` | bigint, 非空 | 内部主键。 |
+| `task_id` | bigint, 非空 | 父任务 FK，禁止级联删除历史。 |
+| `sequence_no` | int, 非空 | 父任务内所有 Artemis 调用的递增序号；publish/verify 共用序列。 |
+| `kind` | enum text, 非空 | `publish` 正式发布；`verify` 只读核验。 |
+| `related_attempt_id` | bigint, 可空 | verify 必须指向被核验的 publish；publish 为空。 |
+| `artemis_session_id` | uuid, 非空唯一 | Artemis 任务 ID；在调用前由 ttsERP 生成并持久化。 |
+| `status` | enum text, 非空 | attempt 生命周期，见 §18.6。 |
+| `prompt_version` | text, 非空 | 固定模板版本，便于回溯行为变化。 |
+| `prompt_snapshot` | text, 非空 | 本次实际提交文本；仅 admin/诊断权限可查看。 |
+| `device_serial` | text, 非空 | 本次调用的精确设备 serial。 |
+| `device_path` | text, 可空 | publish 对应设备文件；verify 通常为空。 |
+| `artemis_output` | jsonb, 可空 | 有界、已清洗的 session 结果摘要；禁止无限保存全部 trace。 |
+| `artemis_error` | text, 可空 | Artemis 返回的已清洗错误。 |
+| `steps_count` | int, 可空 | 从 `/steps` 得到的数量；用于安全重试分类。 |
+| `submit_retry_count` | int, 非空 | 相同 session ID 的传输重提次数，不增加业务 attempt。 |
+| `last_polled_at` | timestamptz, 可空 | 最近查询 Artemis 状态时间。 |
+| `retry_classification` | enum text, 可空 | 自动决策结果，见 §18.7。 |
+| `retry_safe` | boolean, 可空 | `true` 明确未产生发布副作用；`false` 明确不可直接重试；`null` 尚未分类。 |
+| `submitted_at` | timestamptz, 可空 | Artemis admission 成功或幂等确认时间。 |
+| `started_at` | timestamptz, 可空 | Artemis 进入 running 的时间。 |
+| `finished_at` | timestamptz, 可空 | attempt 进入终态时间。 |
+| `created_at/updated_at` | timestamptz | 审计字段。 |
+
+### 18.3 `worker_heartbeats` 字段
+
+| 字段 | 含义 |
+| --- | --- |
+| `instance_id` | 启动时生成的 UUID，不复用 PID。 |
+| `hostname` | 运行主机，排障时定位 systemd 实例。 |
+| `pid` | 当前进程 PID，仅诊断。 |
+| `status` | `starting/ready/stopping`。 |
+| `version` | 部署版本或 git SHA。 |
+| `started_at` | 本实例启动时间。 |
+| `heartbeat_at` | 最近心跳；超过 15 秒视为 unavailable。 |
+| `updated_at` | DB 更新时间。 |
+
+### 18.4 `TaskStatus`
+
+| 值 | 中文标签 | 终态 | 含义 |
+| --- | --- | --- | --- |
+| `pending` | 待处理 | 否 | 尚未占用全局执行槽；包含等待上传、排队和等待设备。 |
+| `running` | 执行中 | 否 | 已领取全局执行槽，正在下载、staging、调用或核验。 |
+| `succeeded` | 已发布 | 是 | 已确认 TikTok 发布成功；资源清理可仍在重试。 |
+| `failed` | 失败 | 是/可重开 | 明确未成功且当前不再自动执行；是否可重试由 `allowedActions` 决定。 |
+| `needs_review` | 需确认 | 是/可核验 | 自动核验仍无法判断；禁止直接普通重试。 |
+| `cancelled` | 已取消 | 是 | 用户在产生发布副作用前取消。 |
+
+### 18.5 `TaskStage`
+
+| 值 | 适用 status | 含义 |
+| --- | --- | --- |
+| `awaiting_upload` | pending | 任务行已创建，MinIO 对象尚未 confirm。 |
+| `queued` | pending | 对象已确认，等待领取。 |
+| `waiting_device` | pending | 设备离线、锁屏、忙或 App 未就绪，稍后重试。 |
+| `downloading` | running | 从 MinIO 下载并计算摘要。 |
+| `staging_device` | running | ADB push、文件校验和 MediaStore 扫描。 |
+| `dispatching_artemis` | running | attempt 已落库，正在幂等提交 `/api/run`。 |
+| `waiting_artemis` | running | Artemis 已接收，持续轮询 session。 |
+| `verifying` | running | verify attempt 检查作品页/草稿箱。 |
+| `cleaning` | running | 已确认业务结果，正在释放设备文件与执行槽。 |
+| `done` | succeeded/failed/needs_review/cancelled | 本轮业务流程结束。 |
+
+### 18.6 `AttemptStatus`
+
+| 值 | 含义 |
+| --- | --- |
+| `created` | attempt 与 session ID 已持久化，尚未调用 Artemis。 |
+| `submitting` | 正在提交；网络失败可用同一 ID 重提。 |
+| `queued` | Artemis 已接收并排队。 |
+| `running` | Artemis 正在控制设备。 |
+| `success` | Artemis 报告 completed/success，或 verify 明确确认。 |
+| `failed` | Artemis 明确失败。 |
+| `rejected` | admission 被拒绝，例如设备不可用。 |
+| `cancelled` | 明确由系统/管理员停止；不代表安全可重试。 |
+| `unknown` | session 去向或发布副作用无法确定，必须分类/核验。 |
+
+### 18.7 `RetryClassification`
+
+| 值 | `retry_safe` | 后续动作 |
+| --- | --- | --- |
+| `pre_artemis_failure` | true | 原任务退避后重新排队，不创建无效 Artemis attempt。 |
+| `admission_rejected` | true | 等设备恢复；若 session 未执行，可新建 publish attempt。 |
+| `planner_zero_steps` | true | 在预算内自动创建新 publish attempt。 |
+| `failed_before_publish_ui` | true | 在预算内自动重试。 |
+| `publish_action_observed` | false | 不得直接重试，创建 verify attempt。 |
+| `session_missing` | null | 继续查询 `/api/status`，超时后 verify。 |
+| `verification_published` | false | 主任务成功。 |
+| `verification_not_published` | true | 在预算内自动重试 publish。 |
+| `verification_inconclusive` | null | 主任务 `needs_review`。 |
+| `retry_budget_exhausted` | false | 主任务 `failed`，不再自动重试。 |
+
+### 18.8 `CleanupStatus`
+
+| 值 | 含义 |
+| --- | --- |
+| `not_started` | 尚无对应资源或尚未进入清理。 |
+| `pending` | 已计划或正在清理。 |
+| `succeeded` | 删除成功；目标本来不存在也算成功。 |
+| `failed` | 最近一次删除失败，可通过后台或页面重试。 |
+
+### 18.9 `AllowedAction`
+
+API 返回以下稳定字符串，前端只按返回值显示按钮：
+
+| 值 | 按钮文案 | 允许场景 |
+| --- | --- | --- |
+| `view` | 查看详情 | 所有任务。 |
+| `continue_upload` | 继续上传 | awaiting_upload。 |
+| `cancel` | 取消任务 | awaiting_upload/queued/waiting_device。 |
+| `retry` | 重试原任务 | failed 且对象仍存在、分类安全、预算允许。 |
+| `verify` | 再次自动核验 | needs_review。 |
+| `retry_cleanup` | 重试清理 | 任一 cleanup status=failed。 |
+| `copy_artemis_id` | 复制 Artemis ID | 至少存在一个 attempt。 |
+
+## 19. 合法状态转换
+
+所有状态修改必须通过 domain transition 函数，禁止 handler/adapter 直接赋字符串。
+
+| 当前 | 事件 | 下一状态 | 事务内副作用 |
+| --- | --- | --- | --- |
+| pending/awaiting_upload | `UPLOAD_CONFIRMED` | pending/queued | 保存 ETag、uploaded_at、queued_at。 |
+| pending/awaiting_upload | `USER_CANCEL` | cancelled/done | 标记对象清理 pending。 |
+| pending/queued | `CLAIM` | running/downloading | 写 lease、heartbeat、started_at。 |
+| pending/queued | `DEVICE_NOT_READY` | pending/waiting_device | 写错误、next_attempt_at，不占运行槽。 |
+| pending/waiting_device | `DEVICE_READY` | pending/queued | 清错误并重新排队。 |
+| running/downloading | `DOWNLOAD_OK` | running/staging_device | 写 SHA-256。 |
+| running/staging_device | `MEDIA_VISIBLE` | running/dispatching_artemis | 写 device_path、device cleanup pending。 |
+| running/dispatching_artemis | `ATTEMPT_CREATED` | running/dispatching_artemis | insert attempt，生成 session ID。 |
+| running/dispatching_artemis | `ARTEMIS_ADMITTED` | running/waiting_artemis | attempt queued/running。 |
+| running/waiting_artemis | `ARTEMIS_SUCCESS` | running/cleaning | attempt success，开始清理。 |
+| running/waiting_artemis | `SAFE_FAILURE_RETRY` | pending/queued | attempt failed，释放 lease，设置退避。 |
+| running/waiting_artemis | `AMBIGUOUS_FAILURE` | running/verifying | attempt unknown，创建 verify。 |
+| running/verifying | `FOUND_PUBLISHED` | running/cleaning | verify success，业务成功。 |
+| running/verifying | `CONFIRMED_ABSENT` | pending/queued | verify success，释放 lease并重试 publish。 |
+| running/verifying | `INCONCLUSIVE` | needs_review/done | 释放 lease，保留对象。 |
+| running/cleaning | `BUSINESS_SUCCESS_FINALIZED` | succeeded/done | completed_at，释放 lease；后台继续非设备清理。 |
+| 任意 pending | `USER_CANCEL` | cancelled/done | 清理对象；运行态不允许普通取消。 |
+| failed | `USER_RETRY` | pending/queued | 校验对象/预算，清主表错误和 completed_at。 |
+| needs_review | `USER_VERIFY` | running/verifying | 获取全局槽并创建 verify attempt。 |
+
+额外不变量：
+
+- `status=running` 必须有 `lease_owner/lease_expires_at`；非 running 必须清空 lease；
+- `stage=waiting_artemis/verifying` 必须能解析出一条活跃 attempt；
+- `kind=verify` 必须有 `related_attempt_id`；
+- `status=succeeded` 后禁止创建新的 publish attempt；
+- `row_version` 不匹配时返回并发冲突，调用方重新读取，不覆盖较新的状态；
+- 状态转换、attempt insert、计数和审计字段在同一 DB 事务中提交。
+
+## 20. 后端核心逻辑
+
+### 20.1 Public service interface
+
+```python
+@dataclass(frozen=True, slots=True)
+class CreatePublishTaskCommand:
+    actor_user_id: int | None
+    client_request_id: UUID
+    filename: str
+    content_type: str
+    size_bytes: int
+    caption: str
+
+@dataclass(frozen=True, slots=True)
+class TaskSnapshot:
+    public_id: UUID
+    status: TaskStatus
+    stage: TaskStage
+    allowed_actions: tuple[AllowedAction, ...]
+    latest_artemis_session_id: UUID | None
+    row_version: int
+
+create_upload_ticket(session, command) -> UploadTicketOutcome
+refresh_upload_ticket(session, task_id, actor) -> UploadTicketOutcome
+confirm_upload(session, task_id, actor) -> TaskSnapshot
+cancel_task(session, task_id, actor) -> TaskSnapshot
+retry_task(session, task_id, actor) -> TaskSnapshot
+request_verification(session, task_id, actor) -> TaskSnapshot
+read_task(session, task_id, actor) -> TaskDetail
+list_tasks(session, query, actor) -> TaskPage
+dispatch_one(session_factory, dependencies) -> DispatchOutcome
+recover_active(session_factory, dependencies) -> RecoveryOutcome
+```
+
+FastAPI 只做 Pydantic wire 校验、鉴权和错误映射。MinIO、ADB、Artemis adapter 不得自行修改数据库状态。
+
+### 20.2 创建上传任务
+
+```python
+def create_upload_ticket(session, cmd):
+    validate_filename_caption_size(cmd)
+    existing = select_by_client_request_id(cmd.client_request_id)
+    if existing:
+        require_same_actor(existing, cmd.actor_user_id)
+        assert_same_create_payload(existing, cmd)
+        return ticket_for_existing_or_refresh(existing, replay=True)
+
+    task_id = uuid4()
+    key = build_server_owned_object_key(task_id, cmd.filename)
+    row = VideoPublishTask(
+        public_id=task_id,
+        client_request_id=cmd.client_request_id,
+        caption=normalize_caption(cmd.caption),
+        object_bucket=config.video_bucket,
+        object_key=key,
+        status="pending",
+        stage="awaiting_upload",
+        target_device_serial=config.device_serial,
+        target_app_package=config.app_package,
+        ...
+    )
+    session.add(row)
+    session.commit()
+    return presign_after_commit(row)
+```
+
+若 presign 在 commit 后失败，任务保留为 awaiting_upload，客户端可调用 refresh upload URL；不得回滚已经返回/可能重试的幂等键。
+
+### 20.3 确认上传
+
+```python
+def confirm_upload(session, task_id, actor):
+    row = select_for_update(task_id)
+    require_actor_access(row, actor)
+    require_stage(row, "awaiting_upload")
+    stat = object_store.stat(row.object_bucket, row.object_key)  # 锁外调用更优：先读快照，再 CAS
+    validate_stat(stat, expected_size=row.size_bytes, expected_type=row.content_type)
+    update_where_version(
+        task_id, row.row_version,
+        object_etag=stat.etag,
+        object_uploaded_at=db_now(),
+        status="pending", stage="queued", queued_at=db_now(),
+    )
+    commit()
+```
+
+远程 HEAD 不应在持有长事务时执行。推荐“两段式”：短事务读取快照 → HEAD → 短事务 `SELECT FOR UPDATE`/version 检查并落状态；如果期间任务已取消则删除对象并返回 409。
+
+### 20.4 Worker 主循环
+
+```python
+async def run_forever():
+    heartbeat.start(interval=5)
+    await recover_active()
+    while not stopping:
+        await cleanup_due_resources(limit=10)
+        outcome = await dispatch_one()
+        if outcome.kind == "no_task":
+            await wake_event.wait(timeout=2)
+        else:
+            await asyncio.sleep(0)
+```
+
+SIGTERM：停止领取新任务、写 heartbeat=stopping、取消本地等待但不调用 Artemis stop；已经提交的 Artemis session 由下一实例按 ID 恢复查询。
+
+### 20.5 原子领取
+
+```python
+def claim_one(session, instance_id):
+    row = session.execute(
+        select(VideoPublishTask)
+        .where(status == "pending", stage.in_(["queued", "waiting_device"]))
+        .where(next_attempt_at.is_(None) | (next_attempt_at <= func.now()))
+        .order_by(queued_at, id)
+        .with_for_update(skip_locked=True)
+        .limit(1)
+    ).scalar_one_or_none()
+    if not row:
+        return None
+
+    # waiting_device 先做便宜 readiness；不可用则保持 pending 并退避。
+    transition(row, event="CLAIM", owner=instance_id, lease_seconds=30)
+    session.commit()  # 此后不持有事务
+    return immutable_snapshot(row)
+```
+
+部分唯一索引冲突表示另一个 Worker 已获得全局槽；捕获 `IntegrityError`、rollback，并返回 no_task，不把它记成业务失败。
+
+### 20.6 执行管线
+
+```python
+async def execute_claimed(task):
+    try:
+        await heartbeat_task(task)
+        local_path = await object_store.download_atomic(task.object_ref, spool_dir)
+        verify_size_and_sha256(local_path)
+        transition_short_tx(task, "DOWNLOAD_OK", sha256=...)
+
+        await adb.check_device(task.device_serial)
+        await adb.check_package(task.device_serial, task.app_package)
+        await adb.stage_video(local_path, task.device_path)
+        await adb.verify_media_visible(task.device_serial, task.device_path)
+        transition_short_tx(task, "MEDIA_VISIBLE")
+
+        attempt = create_publish_attempt_short_tx(task)
+        await submit_idempotently(attempt)
+        result = await poll_artemis(attempt)
+        await apply_artemis_result(task, attempt, result)
+    except SafePreArtemisFailure as exc:
+        await schedule_retry_or_fail(task, exc)
+    except BaseException as exc:
+        await persist_unexpected_failure_without_losing_session(task, exc)
+    finally:
+        await remove_local_spool_best_effort(task)
+```
+
+每个外部调用前后都以短事务写 stage/heartbeat。网络和 ADB 调用期间不得占用数据库连接。
+
+### 20.7 创建并提交 Artemis attempt
+
+```python
+def create_attempt(session, task, kind, related=None):
+    lock_task_for_update(task.id)
+    assert_no_active_attempt(task.id)
+    seq = max_sequence(task.id) + 1
+    session_id = uuid4()
+    prompt = render_versioned_prompt(task, kind, session_id)
+    attempt = Attempt(
+        task_id=task.id,
+        sequence_no=seq,
+        kind=kind,
+        related_attempt_id=related,
+        artemis_session_id=session_id,
+        status="created",
+        prompt_version=current_prompt_version(kind),
+        prompt_snapshot=prompt,
+        device_serial=task.target_device_serial,
+    )
+    session.add(attempt)
+    if kind == "publish":
+        task.attempt_count += 1
+    transition(task, "ATTEMPT_CREATED")
+    session.commit()
+    return attempt
+```
+
+提交：
+
+```python
+async def submit_idempotently(attempt):
+    mark_attempt(attempt, "submitting")
+    try:
+        handle = await artemis.submit(
+            goal=attempt.prompt_snapshot,
+            task_id=str(attempt.artemis_session_id),
+            device_serial=attempt.device_serial,
+            profile=config.profile,
+            locked_app_package=config.app_package,
+            verification_level=config.verification_level,
+        )
+    except TransportError:
+        # 先 GET 同一 ID；仍未知时才用相同 ID 重提。
+        handle = await query_then_resubmit_same_id(attempt)
+    mark_admitted(attempt, handle.status)
+```
+
+绝对禁止在 transport timeout 后生成新 session ID。
+
+### 20.8 Artemis 轮询
+
+```python
+async def poll_artemis(attempt):
+    deadline = monotonic() + config.poll_window_seconds
+    while monotonic() < deadline:
+        result = await artemis.get_task(attempt.session_id)
+        persist_poll_snapshot(attempt, result)
+        if result.done:
+            return result
+        await sleep(config.poll_interval_seconds)
+    return PollWindowElapsed()  # 非 terminal，Worker 下一轮继续同一 attempt
+```
+
+`PollWindowElapsed` 不把 task 改成 failed。Worker 释放本轮协程后，任务仍 running/waiting_artemis，由 recovery/下一轮继续查询。
+
+### 20.9 失败分类与核验
+
+分类器输入只能是稳定事实：Artemis status、steps 数量、最后步骤类型、是否观察到最终发布动作、设备/网络阶段。不要只匹配自由文本错误。
+
+```python
+classification = classify_failure(attempt, session, steps)
+if classification.retry_safe is True:
+    schedule_publish_retry()
+elif classification.code in {"publish_action_observed", "session_missing"}:
+    create_verify_attempt(related_attempt=attempt.id)
+else:
+    transition_to_needs_review()
+```
+
+verify 结果必须解析为受控枚举，不接收任意自然语言作为状态：
+
+```json
+{
+  "verdict": "published | not_published | inconclusive",
+  "evidence": "bounded plain text",
+  "observedCaption": "optional",
+  "observedAt": "optional ISO timestamp"
+}
+```
+
+### 20.10 清理逻辑
+
+清理操作逐项幂等：
+
+```python
+async def cleanup_task(task):
+    await cleanup_one("device", lambda: adb.remove(task.device_path))
+    await cleanup_one("spool", lambda: unlink_if_exists(task.spool_path))
+    if task.status == "succeeded" or task.status == "cancelled":
+        await cleanup_one("object", lambda: object_store.remove(task.object_key))
+```
+
+失败/needs_review 的 MinIO 对象默认保留。awaiting_upload 超过 24 小时自动取消并删除；failed 对象按 `TIKTOK_PUBLISH_FAILED_RETENTION_DAYS` 保留，过期删除前仍保留任务和 attempt 审计记录。
+
+### 20.11 Repository 与事务规则
+
+- PostgreSQL 使用既有 SQLAlchemy 2 sync session；异步 Worker 用线程边界或短同步函数，不跨 `await` 持有 Session；
+- repository 方法不自行吞异常；domain service 决定 rollback、错误码和状态；
+- 所有时间判断使用数据库 `now()`，避免多主机时钟漂移；
+- 列表查询使用 lateral/subquery 取最新 attempt，避免 N+1；
+- caption、Prompt、output 不进入普通应用日志；
+- attempt/history 永不物理覆盖；只追加新执行记录并更新当前状态字段。
+
+## 21. 完整 HTTP 契约示例
+
+### 21.1 通用响应和错误
+
+成功响应直接返回业务对象，不再包多层 `data`。错误使用：
+
+```json
+{
+  "detail": {
+    "code": "UPLOAD_SIZE_MISMATCH",
+    "message": "视频实际大小与创建任务时不一致，请重新上传。",
+    "retryable": true,
+    "allowedActions": ["continue_upload", "cancel"],
+    "requestId": "req_01J..."
+  }
+}
+```
+
+| HTTP | 使用场景 |
+| --- | --- |
+| 400 | JSON/参数组合非法。 |
+| 401 | 未登录。 |
+| 403 | 角色或页面权限不足。 |
+| 404 | task 不存在或用户不可见；不泄漏其他用户任务。 |
+| 409 | 状态冲突、版本冲突、动作当前不允许。 |
+| 413 | 视频声明大小超过上限。 |
+| 422 | 文件/文案业务校验失败。 |
+| 503 | MinIO、Worker、Artemis 或目标设备当前不可用。 |
+
+### 21.2 配置
+
+```http
+GET /v2/video-publish/config
+```
+
+```json
+{
+  "acceptedContentTypes": ["video/mp4"],
+  "acceptedExtensions": [".mp4"],
+  "maxVideoBytes": 524288000,
+  "maxCaptionCharacters": 4000,
+  "uploadUrlTtlSeconds": 900,
+  "target": {
+    "appName": "TikTok",
+    "appPackage": "com.zhiliaoapp.musically",
+    "deviceSerialMasked": "D123…00AC",
+    "album": "TTSERP"
+  },
+  "worker": {
+    "status": "ready",
+    "lastHeartbeatAt": "2026-10-04T10:42:14Z"
+  },
+  "device": {
+    "status": "ready",
+    "message": "设备在线、已解锁且当前空闲"
+  },
+  "canWrite": true,
+  "serverTime": "2026-10-04T10:42:15Z"
+}
+```
+
+### 21.3 创建任务
+
+```http
+POST /v2/video-publish/tasks
+Content-Type: application/json
+X-Requested-With: tts-erp
+```
+
+```json
+{
+  "clientRequestId": "f87e2d3b-b746-42a8-a45e-33e8d63ef126",
+  "filename": "launch-video.mp4",
+  "contentType": "video/mp4",
+  "sizeBytes": 15393429,
+  "caption": "新品已经上线 🎉\n#new #tiktok"
+}
+```
+
+首次创建返回 201；相同幂等键和相同 payload 返回 200：
+
+```json
+{
+  "taskId": "38f1b046-9c20-47ee-a576-51431811d345",
+  "idempotentReplay": false,
+  "status": "pending",
+  "stage": "awaiting_upload",
+  "rowVersion": 1,
+  "upload": {
+    "method": "PUT",
+    "url": "https://minio.example/...signed...",
+    "headers": {"Content-Type": "video/mp4"},
+    "expiresAt": "2026-10-04T10:57:15Z"
+  },
+  "allowedActions": ["continue_upload", "cancel"]
+}
+```
+
+相同 `clientRequestId` 但 payload 不同返回 409 `IDEMPOTENCY_PAYLOAD_MISMATCH`。
+
+### 21.4 浏览器 PUT MinIO
+
+```http
+PUT <upload.url>
+Content-Type: video/mp4
+Content-Length: 15393429
+
+<binary>
+```
+
+成功为 200/204。浏览器不解析响应 XML，只记录 HTTP status 和 ETag header（若 CORS 暴露）；最终以 confirm 的服务端 HEAD 为准。
+
+### 21.5 刷新上传 URL
+
+```http
+POST /v2/video-publish/tasks/38f1.../upload-url
+X-Requested-With: tts-erp
+```
+
+请求 body 为空。返回新的 `upload` 对象和原 task snapshot。只有 awaiting_upload 可调用。
+
+### 21.6 Confirm
+
+```http
+POST /v2/video-publish/tasks/38f1.../confirm-upload
+Content-Type: application/json
+X-Requested-With: tts-erp
+
+{"rowVersion": 1}
+```
+
+```json
+{
+  "taskId": "38f1b046-9c20-47ee-a576-51431811d345",
+  "status": "pending",
+  "stage": "queued",
+  "queuePosition": 3,
+  "queuedAt": "2026-10-04T10:45:00Z",
+  "rowVersion": 2,
+  "latestArtemisSessionId": null,
+  "allowedActions": ["view", "cancel"]
+}
+```
+
+### 21.7 当前任务
+
+```http
+GET /v2/video-publish/tasks/current
+If-None-Match: "publish-current-a81f"
+```
+
+```json
+{
+  "task": {
+    "taskId": "38f1b046-9c20-47ee-a576-51431811d345",
+    "filename": "launch-video.mp4",
+    "status": "running",
+    "statusLabel": "执行中",
+    "stage": "waiting_artemis",
+    "stageLabel": "Artemis 正在操作 TikTok",
+    "currentAttempt": {
+      "sequenceNo": 1,
+      "kind": "publish",
+      "kindLabel": "正式发布",
+      "artemisSessionId": "c8af5a6c-4158-49c3-9141-13bc69b391d2",
+      "status": "running",
+      "startedAt": "2026-10-04T10:46:10Z"
+    },
+    "stageStartedAt": "2026-10-04T10:46:10Z",
+    "updatedAt": "2026-10-04T10:46:14Z"
+  },
+  "suggestedPollSeconds": 2,
+  "serverTime": "2026-10-04T10:46:15Z"
+}
+```
+
+无当前任务返回 200 `{ "task": null, "suggestedPollSeconds": 30, ... }`，不是 404。
+
+### 21.8 列表
+
+```http
+GET /v2/video-publish/tasks?status=failed&limit=30&cursor=eyJpZCI6MTAwNX0
+```
+
+```json
+{
+  "items": [
+    {
+      "taskId": "38f1b046-9c20-47ee-a576-51431811d345",
+      "filename": "launch-video.mp4",
+      "sizeBytes": 15393429,
+      "captionPreview": "新品已经上线 🎉",
+      "status": "failed",
+      "statusLabel": "失败",
+      "stage": "done",
+      "stageLabel": "执行结束",
+      "publishAttemptCount": 2,
+      "verifyAttemptCount": 1,
+      "latestArtemisSessionId": "c8af5a6c-4158-49c3-9141-13bc69b391d2",
+      "lastErrorCode": "PLANNER_ZERO_STEPS",
+      "lastErrorMessage": "Artemis Planner 未执行设备步骤。",
+      "createdByLabel": "运营 A",
+      "createdAt": "2026-10-04T10:40:00Z",
+      "updatedAt": "2026-10-04T10:50:00Z",
+      "allowedActions": ["view", "retry", "copy_artemis_id"]
+    }
+  ],
+  "nextCursor": null,
+  "totalApprox": 1,
+  "serverTime": "2026-10-04T10:51:00Z"
+}
+```
+
+排序固定为 `created_at DESC, id DESC`；cursor 编码排序键，不使用大 offset。
+
+### 21.9 详情
+
+```http
+GET /v2/video-publish/tasks/38f1b046-9c20-47ee-a576-51431811d345
+```
+
+```json
+{
+  "taskId": "38f1b046-9c20-47ee-a576-51431811d345",
+  "filename": "launch-video.mp4",
+  "contentType": "video/mp4",
+  "sizeBytes": 15393429,
+  "caption": "新品已经上线 🎉\n#new #tiktok",
+  "status": "failed",
+  "stage": "done",
+  "target": {
+    "appName": "TikTok",
+    "appPackage": "com.zhiliaoapp.musically",
+    "deviceSerialMasked": "D123…00AC",
+    "album": "TTSERP"
+  },
+  "object": {
+    "bucket": "tiktok-video",
+    "key": "video-publish/2026/10/38f1.../launch-video.mp4",
+    "etag": "8d0315ee953709c05cf91e8866b41440",
+    "deletedAt": null
+  },
+  "attempts": [
+    {
+      "sequenceNo": 1,
+      "kind": "publish",
+      "kindLabel": "正式发布",
+      "artemisSessionId": "c8af5a6c-4158-49c3-9141-13bc69b391d2",
+      "status": "failed",
+      "stepsCount": 0,
+      "retryClassification": "planner_zero_steps",
+      "retrySafe": true,
+      "error": "Planner timed out before device execution.",
+      "startedAt": "2026-10-04T10:46:10Z",
+      "finishedAt": "2026-10-04T10:52:10Z"
+    }
+  ],
+  "cleanup": {
+    "device": {"status": "succeeded", "error": null},
+    "spool": {"status": "succeeded", "error": null},
+    "object": {"status": "not_started", "error": null}
+  },
+  "allowedActions": ["view", "retry", "copy_artemis_id"],
+  "rowVersion": 9,
+  "updatedAt": "2026-10-04T10:52:11Z"
+}
+```
+
+非 admin 不返回 `promptSnapshot` 和未裁剪 `artemisOutput`；admin 可用显式 `?includeDiagnostics=true` 获取。
+
+### 21.10 Cancel
+
+```http
+POST /v2/video-publish/tasks/{taskId}/cancel
+Content-Type: application/json
+X-Requested-With: tts-erp
+
+{"rowVersion": 2}
+```
+
+成功返回最新 snapshot。运行中的任务返回 409 `TASK_ALREADY_RUNNING`。
+
+### 21.11 Retry
+
+```http
+POST /v2/video-publish/tasks/{taskId}/retry
+Content-Type: application/json
+X-Requested-With: tts-erp
+
+{"rowVersion": 9}
+```
+
+```json
+{
+  "taskId": "38f1...",
+  "status": "pending",
+  "stage": "queued",
+  "queuePosition": 2,
+  "publishAttemptCount": 2,
+  "latestArtemisSessionId": "c8af5a6c-4158-49c3-9141-13bc69b391d2",
+  "allowedActions": ["view", "cancel"],
+  "rowVersion": 10
+}
+```
+
+重试入队时尚未生成下一条 Artemis session，因此 latest 仍是上一条；新 attempt 创建后定时刷新会显示新 ID。
+
+### 21.12 Verify
+
+```http
+POST /v2/video-publish/tasks/{taskId}/verify
+Content-Type: application/json
+X-Requested-With: tts-erp
+
+{"rowVersion": 12}
+```
+
+只允许 needs_review。返回 `running/verifying` 和新建 verify attempt 的 Artemis ID；前端立即显示该 ID。
+
+### 21.13 Retry cleanup
+
+```http
+POST /v2/video-publish/tasks/{taskId}/cleanup/retry
+Content-Type: application/json
+X-Requested-With: tts-erp
+
+{"resources": ["device", "spool", "object"], "rowVersion": 14}
+```
+
+只重试当前为 failed 的资源；请求 succeeded/not_started 资源不会再次产生破坏性动作。
+
+### 21.14 稳定错误码
+
+| code | HTTP | 可重试 | 前端动作 |
+| --- | --- | --- | --- |
+| `INVALID_VIDEO_TYPE` | 422 | 是 | 重新选择 MP4。 |
+| `VIDEO_TOO_LARGE` | 413 | 是 | 重新选择较小文件。 |
+| `CAPTION_REQUIRED` | 422 | 是 | 聚焦文案框。 |
+| `CAPTION_TOO_LONG` | 422 | 是 | 展示上限并聚焦文案框。 |
+| `IDEMPOTENCY_PAYLOAD_MISMATCH` | 409 | 否 | 生成新的 clientRequestId 后重新创建。 |
+| `UPLOAD_NOT_FOUND` | 422 | 是 | 重试上传。 |
+| `UPLOAD_SIZE_MISMATCH` | 422 | 是 | 重试上传。 |
+| `UPLOAD_URL_EXPIRED` | 409 | 是 | 请求新 upload URL。 |
+| `TASK_ACTION_NOT_ALLOWED` | 409 | 取决于状态 | 按 allowedActions 重绘。 |
+| `TASK_VERSION_CONFLICT` | 409 | 是 | 重新 GET，再让用户确认动作。 |
+| `PUBLISH_WORKER_UNAVAILABLE` | 503 | 是 | 保留任务，提示等待恢复。 |
+| `DEVICE_OFFLINE` | 503 | 是 | 自动 waiting_device。 |
+| `DEVICE_LOCKED` | 503 | 是 | 自动 waiting_device，提示解锁。 |
+| `APP_NOT_INSTALLED` | 503 | 否 | 运维安装 TikTok。 |
+| `MEDIA_SCAN_FAILED` | 503 | 是 | 自动退避，保留 MinIO。 |
+| `ARTEMIS_REJECTED` | 503 | 取决于原因 | 展示拒绝原因。 |
+| `ARTEMIS_UNREACHABLE` | 503 | 是 | 同 session 重查/重提。 |
+| `ARTEMIS_UNKNOWN_OUTCOME` | 409 | 否 | 自动 verify，不显示直接重试。 |
+| `VERIFY_INCONCLUSIVE` | 409 | 否 | needs_review，可再次自动核验。 |
+| `RETRY_BUDGET_EXHAUSTED` | 409 | 否 | 查看历史，不再自动重试。 |
+| `CLEANUP_FAILED` | 503 | 是 | 显示重试清理。 |
+
+## 22. 前端实现规格
+
+### 22.1 页面组件树
+
+```text
+VideoPublishPage
+├── PageHeader
+│   ├── TitleAndDescription
+│   ├── DeviceReadiness
+│   └── RefreshControls
+├── ActivePublishRail
+│   ├── StageTrack
+│   ├── ActiveTaskSummary
+│   └── ActiveArtemisIdCopy
+├── SubmissionWorkbench
+│   ├── VideoPickerAndPreview
+│   ├── CaptionEditor
+│   ├── DispatchSummary
+│   └── SubmitFooter
+├── TaskHistory
+│   ├── StatusFilters
+│   ├── RefreshStatus
+│   ├── TaskTableOrMobileCards
+│   └── CursorPagination
+├── TaskDetailDrawer
+│   ├── ContentSection
+│   ├── ProgressSection
+│   ├── AttemptTimeline
+│   ├── CleanupSection
+│   └── StickyActionFooter
+└── Dialogs
+    ├── SubmitConfirmDialog
+    ├── CancelConfirmDialog
+    ├── RetryConfirmDialog
+    └── VerifyConfirmDialog
+```
+
+不引入 React/Vue。沿用项目的服务端模板 + 页面级原生 JavaScript。复杂度收拢到一个页面 controller，不把每个按钮拆成浅层 module。
+
+### 22.2 HTML 元素和稳定选择器
+
+| 元素 | ID/data 属性 | 用途 |
+| --- | --- | --- |
+| 页面 notice | `#publish-notice` | 全局非阻塞提示，`aria-live=polite`。 |
+| 设备状态 | `#publish-device-status` | ready/busy/offline/locked/unknown。 |
+| 刷新模式 | `#publish-refresh-mode` | select：smart/2/5/10/30/off。 |
+| 上次刷新 | `#publish-last-refreshed` | 服务端时间和本地展示。 |
+| 立即刷新 | `#publish-refresh-now` | 手动执行 current/list/detail refresh。 |
+| 轨道 | `#publish-rail` | 当前任务阶段。 |
+| 当前任务 ID | `#active-task-id` | ttsERP UUID。 |
+| 当前 Artemis ID | `#active-artemis-id` | 完整 UUID。 |
+| 复制当前 ID | `[data-copy-artemis-id]` | 复制对应完整 UUID。 |
+| 文件 input | `#publish-video-file` | `accept=video/mp4,.mp4`。 |
+| drop zone | `#publish-video-drop` | 点击转发到 input；支持 drag/drop。 |
+| 本地预览 | `#publish-video-preview` | muted、controls、playsinline。 |
+| 文案 | `#publish-caption` | textarea；不富文本。 |
+| 字符计数 | `#publish-caption-count` | `aria-live=polite`，不要每个字符都朗读，可 debounce。 |
+| 提交按钮 | `#publish-submit` | 上传并加入发布队列。 |
+| 上传进度 | `#publish-upload-progress` | progressbar。 |
+| 取消上传 | `#publish-upload-cancel` | 只在 XHR active 时出现。 |
+| 状态 tabs | `[data-task-filter]` | 全部/排队/执行中/失败/需核验/成功/取消。 |
+| 列表 body | `#publish-task-list` | desktop table/mobile cards 的共同数据源。 |
+| drawer | `#publish-task-drawer` | 详情容器。 |
+| drawer 关闭 | `#publish-drawer-close` | 恢复原行焦点。 |
+| drawer actions | `#publish-drawer-actions` | sticky footer，按 allowedActions 渲染。 |
+| dialog | `#publish-confirm-*` | 四类确认框。 |
+
+自动化测试可以依赖这些 ID/data 属性；CSS 不应依赖测试专用类名。
+
+### 22.3 尺寸与布局
+
+Desktop ≥ 1200px：
+
+- `.page-main` 最大宽度 1440px；
+- SubmissionWorkbench 使用 `grid-template-columns: minmax(0, 7fr) minmax(300px, 3fr)`；
+- 文件预览和文案在左栏上下排列，投递摘要和主按钮在右栏；
+- TaskHistory 占满整行；
+- drawer 宽度 `min(560px, 42vw)`，从右侧覆盖，不改变表格列宽。
+
+Tablet 720–1199px：
+
+- workbench 改为 `6fr/4fr`；
+- 列表隐藏创建人列，时间显示相对时间并保留 title 完整时间；
+- Artemis ID 列可视觉显示前 8 + 后 5 位，但复制完整 UUID。
+
+Mobile < 720px：
+
+- 全部单列；
+- 主按钮固定在表单内容底部，不做遮挡内容的 viewport fixed；
+- table 转 cards；
+- drawer 为全屏；
+- refresh controls 分两行；
+- 按钮点击区域至少 44×44px。
+
+### 22.4 页头按钮位置
+
+页头左侧：eyebrow、标题、说明。页头右侧从上到下：
+
+1. 设备状态：`设备 D123…00AC · 在线/忙碌/离线`；
+2. Worker 状态：`发布服务正常` 或 `发布服务心跳已中断`；
+3. 刷新控制：模式 select + `立即刷新` 按钮；
+4. 小字：`上次刷新 10:42:15`。
+
+`立即刷新` 使用 `.btn-secondary`，刷新中 disabled 并显示 `刷新中…`。它只读，不需要二次确认。
+
+### 22.5 新建任务区域按钮位置
+
+文件区：
+
+- drop zone 中央主文案 `选择 MP4 视频`；
+- 次文案显示大小上限；
+- 选中后，预览右上角放 `重新选择` 次按钮；
+- 不提供“删除本地文件”含混文案，使用 `清除选择`。
+
+文案区：
+
+- label 左侧 `发布文案`；右侧字符计数；
+- textarea 下方仅显示校验/保留规则，不放提交按钮。
+
+投递摘要右栏：
+
+- 只读显示 App、设备、相册、文件、文案字符数、预计队列位置；
+- 底部 footer 右对齐主按钮 `上传并加入发布队列`；
+- 主按钮下方小字：`加入队列后不能修改视频和文案`；
+- 上传时 footer 变为进度条 + 左侧 `取消上传` + 右侧 `上传中 42%`，不再显示第二个可点击提交按钮。
+
+主按钮启用条件：
+
+```text
+config loaded
+AND canWrite
+AND file valid
+AND caption valid
+AND no upload in progress
+AND clientRequestId flow not active
+```
+
+设备离线不禁用创建按钮：任务可以排队等待设备；Worker unavailable 时禁用并说明原因，避免创建永远无人处理的任务。
+
+### 22.6 列表按钮位置
+
+桌面表格最后一列固定为“操作”：
+
+- 每行最多显示一个 primary/secondary action + `查看`；
+- failed 可重试：`重试` + `查看`；
+- needs_review：`自动核验` + `查看`；
+- queued：`取消` + `查看`；
+- running/succeeded：只显示 `查看`；
+- cleanup failed：`重试清理` + `查看`。
+
+Artemis ID 位于独立列，不放在操作列：
+
+```text
+c8af5a6c…391d2  [复制]
+```
+
+`复制` 是图标+可见文字的小按钮，成功后原位变为 `已复制` 1.5 秒，失败则 notice 显示“复制失败，请手动选择完整 ID”。使用 `navigator.clipboard.writeText(fullId)`，无权限时回退到临时 textarea + `document.execCommand('copy')`。
+
+移动卡片顺序：状态 → 文件 → Artemis ID/复制 → 时间 → 主操作。不得把 Artemis ID 藏到详情里才可见。
+
+### 22.7 Drawer 按钮位置
+
+Drawer header：
+
+- 左：`任务 #<短 UUID>` + 状态 badge；
+- 右：`复制任务 ID`、关闭按钮。
+
+Attempt timeline 每一项右上：`复制 Artemis ID`；ID 正文完整换行显示，使用 `overflow-wrap:anywhere`。
+
+Drawer sticky footer：
+
+- 左侧危险/次操作：`取消任务` 或空；
+- 右侧主操作：`重试原任务`、`再次自动核验` 或 `重试清理`；
+- `查看` 本身不出现在 drawer footer；
+- footer 按 allowedActions 重绘，动作提交中全部按钮 disabled，避免重复点击。
+
+### 22.8 Dialog 逐项规格
+
+**提交确认**：
+
+- title：`确认加入发布队列`；
+- body：视频名/大小、本地静音缩略预览、完整文案、App、设备、相册；
+- warning：`设备空闲时任务可能立即开始，入队后不能修改视频和文案。`；
+- 左下 `返回修改`，右下 primary `确认并上传`。
+
+**取消确认**：
+
+- title：`取消这个发布任务？`；
+- body 说明是否会删除已上传 MinIO 视频；
+- 左 `保留任务`，右 danger `取消任务`；
+- running 时不渲染此 dialog 入口。
+
+**重试确认**：
+
+- title：`重试原任务`；
+- 展示上一 attempt 的完整 Artemis ID、失败阶段、错误、当前正式发布次数/上限；
+- warning：`系统已确认上一次没有完成发布。重试会创建新的 Artemis ID。`；
+- 左 `暂不重试`，右 primary `加入重试队列`。
+
+**自动核验确认**：
+
+- title：`再次自动核验`；
+- 展示待核验 publish attempt 的 Artemis ID；
+- body：`只查看作品页和草稿箱，不会发布内容。`；
+- 左 `取消`，右 primary `开始核验`。
+
+所有 dialog 关闭后恢复触发按钮焦点；Escape 等同取消，不触发写请求。
+
+### 22.9 前端状态对象
+
+```javascript
+const state = {
+  config: null,
+  form: {
+    file: null,
+    objectUrl: null,
+    caption: '',
+    clientRequestId: null,
+    taskId: null,
+    phase: 'empty',
+    uploadProgress: 0,
+  },
+  current: null,
+  tasks: [],
+  nextCursor: null,
+  filter: 'all',
+  selectedTaskId: null,
+  selectedTask: null,
+  refresh: {
+    mode: 'smart',
+    timer: null,
+    generation: 0,
+    currentEtag: null,
+    listEtag: null,
+    detailEtag: null,
+    failureCount: 0,
+    lastSuccessAt: null,
+  },
+};
+```
+
+所有状态写入集中到 controller 函数；事件 handler 不直接散改多个 DOM 节点。推荐函数：
+
+```text
+loadConfig
+validateForm
+openSubmitDialog
+createAndUpload
+confirmUpload
+refreshCurrent
+refreshList
+refreshDetail
+scheduleNextRefresh
+renderRail
+renderTaskList
+renderDrawer
+performTaskAction
+copyArtemisId
+```
+
+### 22.10 状态 badge 文案
+
+| API 值 | UI 文案 | 颜色 |
+| --- | --- | --- |
+| pending/awaiting_upload | 等待上传 | muted |
+| pending/queued | 排队中 | warn |
+| pending/waiting_device | 等待设备 | warn |
+| running/downloading | 下载视频 | accent |
+| running/staging_device | 写入手机 | accent |
+| running/dispatching_artemis | 提交 Artemis | accent |
+| running/waiting_artemis | 手机执行中 | accent |
+| running/verifying | 自动核验中 | accent |
+| running/cleaning | 清理中 | accent |
+| succeeded/done | 已发布 | ok |
+| failed/done | 失败 | danger |
+| needs_review/done | 需确认 | warn |
+| cancelled/done | 已取消 | muted |
+
+颜色只是辅助，badge 必须含文字。
+
+### 22.11 日期、时长与 UUID 格式
+
+- 绝对时间：`YYYY-MM-DD HH:mm:ss`，浏览器本地时区；title 放 UTC 原值；
+- 5 分钟内可附加相对时间，但不能只显示“刚刚”；
+- 时长：`4m 19s` 或中文 `4分19秒`，全页统一；
+- ttsERP task ID 与 Artemis ID 标签必须明确，不能都写“任务 ID”；
+- UUID copy 使用完整原始值；视觉缩写固定为前 8、后 5：`c8af5a6c…391d2`。
+
+## 23. 基本部署方案
+
+### 23.1 拓扑
+
+```text
+Browser
+  ├─ HTTPS /tts/* ─────────────→ NGINX → tts-erp API :9877
+  └─ HTTPS /minio/* signed PUT → MinIO :9000
+
+tts-erp API / publish worker
+  ├─ PostgreSQL
+  ├─ MinIO internal endpoint
+  ├─ Artemis http://127.0.0.1:8001
+  └─ adb server → D123084100AC
+```
+
+Artemis 和 ADB 不直接暴露给浏览器或公网。若 Artemis 不在同机，使用受限内网、token 和防火墙 allowlist。
+
+### 23.2 PostgreSQL migration
+
+migration 必须：
+
+1. `CREATE SCHEMA IF NOT EXISTS publishing`；
+2. 创建三张表和所有 CHECK/FK/unique/index；
+3. 安装 `updated_at` trigger，复用项目现有 trigger helper；
+4. 创建部分唯一索引；
+5. 不读取或修改生产业务数据；
+6. downgrade 只允许在确认没有任务数据时执行，否则拒绝或由运维先导出。
+
+关键索引：
+
+```sql
+CREATE INDEX ix_video_publish_queue
+ON publishing.video_publish_tasks (next_attempt_at, queued_at, id)
+WHERE status = 'pending' AND stage IN ('queued', 'waiting_device');
+
+CREATE INDEX ix_video_publish_history
+ON publishing.video_publish_tasks (created_at DESC, id DESC);
+
+CREATE INDEX ix_video_publish_attempt_task_seq
+ON publishing.video_publish_attempts (task_id, sequence_no DESC);
+
+CREATE INDEX ix_video_publish_attempt_status
+ON publishing.video_publish_attempts (status, updated_at)
+WHERE status IN ('created', 'submitting', 'queued', 'running', 'unknown');
+```
+
+### 23.3 MinIO bucket
+
+创建私有 bucket `tiktok-video`。禁止 anonymous read/write。服务端账号至少需要：
+
+```text
+s3:GetObject
+s3:PutObject
+s3:DeleteObject
+s3:HeadObject
+```
+
+限制到 bucket/prefix `video-publish/*`。浏览器通过预签名 URL 上传，不获得 access key。
+
+CORS 示例（origin 按实际域名替换）：
+
+```xml
+<CORSConfiguration>
+  <CORSRule>
+    <AllowedOrigin>https://erp.example.com</AllowedOrigin>
+    <AllowedMethod>PUT</AllowedMethod>
+    <AllowedMethod>HEAD</AllowedMethod>
+    <AllowedHeader>content-type</AllowedHeader>
+    <AllowedHeader>content-length</AllowedHeader>
+    <ExposeHeader>etag</ExposeHeader>
+    <MaxAgeSeconds>3600</MaxAgeSeconds>
+  </CORSRule>
+</CORSConfiguration>
+```
+
+生产不要设置 bucket lifecycle 自动删除成功前对象；清理由业务 Worker 控制。可以另外设置临时 multipart 残片清理策略。
+
+### 23.4 本地 spool
+
+默认：
+
+```text
+~/.local/share/tts-erp/video-publish/
+```
+
+要求：
+
+- 目录 owner 为 publish service 用户，权限 `0700`；
+- 文件 `0600`；
+- 每任务目录 `<task_public_id>/video.mp4.part|video.mp4`；
+- 先写 `.part`，fsync 后原子 rename；
+- spool 所在磁盘预留至少 `2 × maxVideoBytes + safety margin`；
+- 日志不打印完整本地路径中的原始用户文件名。
+
+启动时扫描 orphan spool：只删除能在 DB 中证明已终态且超过保留窗的任务目录，禁止 `rm -rf` 整个根目录。
+
+### 23.5 ADB 与手机
+
+- systemd 用户必须能调用固定 `adb` binary；
+- 设备通过 USB debugging 或受控 ADB TCP 接入；
+- 明确配置 `ARTEMIS_DEVICE_SERIAL`，禁止依赖“第一台设备”；
+- 手机保持解锁、TikTok 已登录、系统相册权限已授权；
+- `/sdcard/Movies/TTSERP/` 只放系统管理的 `tts_erp_<uuid>.mp4`；
+- 不授予 Worker 任意删除其他相册目录的能力；
+- udev/USB 权限由运维配置，不以 root 运行整个 ttsERP。
+
+### 23.6 Artemis
+
+建议安装并固定兼容版本的 `artemis-client`。配置：
+
+```env
+ARTEMIS_BASE_URL=http://127.0.0.1:8001
+ARTEMIS_TOKEN=<secret-if-enabled>
+ARTEMIS_DEVICE_SERIAL=D123084100AC
+ARTEMIS_APP_PACKAGE=com.zhiliaoapp.musically
+ARTEMIS_PROFILE=pro
+ARTEMIS_VERIFICATION_LEVEL=strict
+```
+
+部署前 smoke check：
+
+```text
+GET /healthz 或 SDK health()
+GET /api/devices 包含精确 serial
+GET /api/system/readiness 无 fatal
+```
+
+不得用真实发布 Prompt 做健康检查。
+
+### 23.7 systemd unit
+
+示例路径按实际部署修改：
+
+```ini
+[Unit]
+Description=ttsERP TikTok publish worker
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tts-erp
+Group=tts-erp
+WorkingDirectory=/opt/tts-erp
+EnvironmentFile=/etc/tts-erp/tts-erp.env
+ExecStart=/opt/tts-erp/.venv/bin/python -m tts_erp_v2.publishing.worker
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
+```
+
+如果 ADB 依赖宿主用户 USB/session 环境，使用项目既有 user service 模式，并确保 `PrivateDevices` 等 hardening 不阻断 USB/ADB。先在 staging 主机验证再收紧 sandbox。
+
+常用命令：
+
+```bash
+systemctl daemon-reload
+systemctl enable --now tts-erp-publish.service
+systemctl status tts-erp-publish.service
+journalctl -u tts-erp-publish.service -f
+```
+
+### 23.8 NGINX 与路径前缀
+
+新 API 和页面随既有 `/tts/` 反代，无需暴露 Worker 端口。必须验证：
+
+- `/tts/v2/pages/video-publish` 可打开；
+- 相对静态资源 `/tts/static/...` 正常；
+- JS 从 pathname 推导 `/tts/v2`；
+- MinIO signed URL 使用浏览器可达的 `MINIO_PUBLIC_HOST`；
+- NGINX/API 不代理大视频 body，因为浏览器直传 MinIO。
+
+### 23.9 环境变量字典
+
+| 变量 | 必填 | 默认 | 含义 |
+| --- | --- | --- | --- |
+| `TIKTOK_PUBLISH_MINIO_BUCKET` | 是 | 无 | 私有视频 bucket。 |
+| `TIKTOK_PUBLISH_MAX_VIDEO_BYTES` | 否 | 524288000 | 视频上限。 |
+| `TIKTOK_PUBLISH_MAX_CAPTION_CHARS` | 否 | 4000 | 文案字符上限。 |
+| `TIKTOK_PUBLISH_UPLOAD_TTL_SECONDS` | 否 | 900 | 预签名 PUT 有效期。 |
+| `TIKTOK_PUBLISH_FAILED_RETENTION_DAYS` | 否 | 30 | 失败媒资保留期。 |
+| `TIKTOK_PUBLISH_MAX_ATTEMPTS` | 否 | 3 | 正式发布 attempt 上限。 |
+| `TIKTOK_PUBLISH_ALBUM` | 否 | TTSERP | 设备相册/目录名。 |
+| `TTS_ERP_PUBLISH_SPOOL_DIR` | 是 | 无 | 本地 spool 根目录。 |
+| `ARTEMIS_BASE_URL` | 是 | 无 | Artemis daemon URL。 |
+| `ARTEMIS_TOKEN` | 视部署 | 无 | Artemis 鉴权 token。 |
+| `ARTEMIS_DEVICE_SERIAL` | 是 | 无 | 唯一目标设备。 |
+| `ARTEMIS_APP_PACKAGE` | 否 | com.zhiliaoapp.musically | TikTok package。 |
+| `ARTEMIS_PROFILE` | 否 | pro | 执行 profile。 |
+| `ARTEMIS_VERIFICATION_LEVEL` | 否 | strict | Pro checker 强度。 |
+| `PUBLISH_POLL_INTERVAL_SECONDS` | 否 | 2 | 后端查 Artemis 间隔。 |
+| `PUBLISH_TASK_LEASE_SECONDS` | 否 | 30 | DB task lease。 |
+| `PUBLISH_WORKER_HEARTBEAT_SECONDS` | 否 | 5 | Worker 心跳周期。 |
+
+配置启动时校验；缺少 bucket/device/base URL/spool 时 Worker fail fast，API config 返回 worker unavailable，不静默使用危险默认值。
+
+### 23.10 部署顺序
+
+1. 发布代码但不启用页面权限和 Worker；
+2. 执行 migration；
+3. 创建 MinIO bucket/policy/CORS；
+4. 创建 spool 并校验权限/磁盘；
+5. 安装/验证 Artemis client 和 ADB；
+6. 启动 publish worker，确认 heartbeat ready；
+7. API smoke：config/create/cancel，使用小型测试 MP4，不调用真实发布；
+8. 模拟器 dry-run；
+9. 真机 staging-only；
+10. 用户显式确认后真实发布一条；
+11. 授权 `page:video-publish` 给 operator。
+
+### 23.11 回滚
+
+应用回滚优先级：
+
+1. 从角色移除页面权限或 feature flag，阻止新任务；
+2. 停止 Worker 领取新任务；
+3. 对 running Artemis session 继续只读查询并保存结果，不盲目 stop；
+4. 保留数据库表、MinIO 对象和 attempt 历史；
+5. 回滚 API/页面代码；
+6. 数据 migration 只有在表为空并经人工确认时 downgrade。
+
+不得以“回滚”为理由删除 needs_review 或 running 任务的媒资。
+
+## 24. 日志、监控与运维
+
+### 24.1 结构化日志
+
+每条 Worker 日志至少包含：
+
+```json
+{
+  "event": "artemis_poll",
+  "task_id": "38f1...",
+  "attempt_id": 12,
+  "artemis_session_id": "c8af...",
+  "attempt_kind": "publish",
+  "stage": "waiting_artemis",
+  "device_serial_masked": "D123…00AC",
+  "duration_ms": 215,
+  "outcome": "running"
+}
+```
+
+禁止记录：完整 caption、Prompt、预签名 URL、MinIO secret、Artemis token。异常堆栈只进服务端日志；API 返回清洗 message 与 request ID。
+
+关键 event 名：
+
+```text
+publish_task_created
+upload_confirmed
+publish_task_claimed
+device_stage_started
+device_stage_succeeded
+artemis_attempt_created
+artemis_submit_retried
+artemis_status_changed
+verification_started
+verification_finished
+publish_task_terminal
+cleanup_resource_finished
+worker_recovered_task
+```
+
+### 24.2 指标
+
+若项目尚无 Prometheus，先通过结构化日志和只读状态 API提供；不要为本功能单独引入重型依赖。指标语义：
+
+- `video_publish_queue_depth` gauge；
+- `video_publish_running` gauge（0/1）；
+- `video_publish_tasks_total{status}` counter；
+- `video_publish_stage_duration_seconds{stage}` histogram；
+- `video_publish_artemis_attempts_total{kind,status}` counter；
+- `video_publish_needs_review` gauge；
+- `video_publish_cleanup_failed{resource}` gauge；
+- `video_publish_worker_heartbeat_age_seconds` gauge。
+
+### 24.3 告警建议
+
+| 条件 | 等级 | 动作 |
+| --- | --- | --- |
+| Worker heartbeat > 30s | high | systemd/日志检查。 |
+| running lease 过期 > 2 分钟 | high | recovery 是否工作。 |
+| needs_review > 0 且持续 30 分钟 | medium | 页面提醒运营。 |
+| cleanup failed > 10 或持续 1 小时 | medium | 检查 ADB/MinIO。 |
+| waiting_device 持续 10 分钟 | medium | 解锁/连接手机。 |
+| queue depth > 20 | low/容量 | 检查单任务耗时。 |
+
+### 24.4 运维只读状态
+
+建议 config 或 admin status 返回：
+
+```json
+{
+  "worker": {"status": "ready", "heartbeatAgeSeconds": 2},
+  "queueDepth": 3,
+  "runningTaskId": "38f1...",
+  "runningArtemisSessionId": "c8af...",
+  "needsReviewCount": 0,
+  "cleanupFailedCount": 0
+}
+```
+
+普通用户看到业务友好状态；admin 可看实例/hostname/PID，但仍不暴露 token。
+
+## 25. 安全与数据保留
+
+- 上传接口必须校验登录、page permission、readwrite role 和 CSRF-style `X-Requested-With`；
+- object key 由服务端生成并限制 prefix，防止路径穿越/覆盖他人对象；
+- 文件名只作为展示数据，HTML escape；
+- MinIO bucket 私有，GET 预览 URL仅在需要时短期生成；
+- Artemis 只绑定固定 base URL，不能从请求 body 接收任意 URL；
+- ADB adapter 不接受任意 shell；
+- 设备 serial/package/profile 由服务端配置，用户不能篡改；
+- Prompt 里的 caption 用 JSON 编码并标记为数据，locked package 形成第二道限制；
+- 数据库任务/attempt 审计默认保留 180 天；真实保留期需与合规策略确认；
+- succeeded/cancelled 对象立即删除；failed/needs_review 对象按保留策略；
+- 删除 API v1 不提供，避免误删审计历史。
+
+## 26. Definition of Done
+
+### 26.1 后端
+
+- [ ] migration 在隔离测试库 upgrade/downgrade（空表）通过；
+- [ ] create 幂等键在并发双请求下只生成一行；
+- [ ] confirm 对不存在、大小错、状态冲突有稳定错误；
+- [ ] 两个 Worker 并发领取时全局最多一个 running；
+- [ ] attempt 在调用 Artemis 前已持久化 session ID；
+- [ ] 相同 session ID 的 transport retry 不重复执行；
+- [ ] Worker 重启后继续查询原 session；
+- [ ] 安全失败自动重试，模糊失败自动 verify；
+- [ ] success 与 cleanup failure 独立；
+- [ ] API 列表/详情返回完整 Artemis ID 和 allowedActions；
+- [ ] 日志不泄露 caption/Prompt/secret/signed URL。
+
+### 26.2 前端
+
+- [ ] 文件选择、预览、清除和 object URL 回收正确；
+- [ ] 文案原样保留并准确计数；
+- [ ] 上传进度、取消、失败重试与 confirm 闭环；
+- [ ] 双击提交只创建一个任务；
+- [ ] 轨道阶段、状态 badge、队列位置与服务端一致；
+- [ ] 智能/固定/关闭刷新模式和 localStorage 偏好正确；
+- [ ] 轮询不重叠、隐藏降频、失败退避、旧响应不覆盖；
+- [ ] 列表和 drawer 展示/复制完整 Artemis ID；
+- [ ] 每条 attempt 都保留自己的 ID；
+- [ ] needs_review 不显示直接重试；
+- [ ] 390/768/1440px 可用；
+- [ ] 键盘、焦点、aria-live、reduced-motion 通过。
+
+### 26.3 部署
+
+- [ ] bucket 私有且 CORS 仅允许生产 origin；
+- [ ] spool 权限、磁盘和 orphan 清理验证；
+- [ ] systemd 重启和 SIGTERM recovery 验证；
+- [ ] API/Worker/Artemis/ADB readiness 可诊断；
+- [ ] 模拟器完成全流程但不真实发布；
+- [ ] 真机 staging-only 通过；
+- [ ] 用户显式确认的一条真实任务成功且三处清理完成。
+
+## 27. GPT Luna 开发交接清单
+
+Luna 开始开发前必须按顺序阅读：
+
+1. 根目录 `AGENTS.md`；
+2. `docs/guides/agent-safety.md`；
+3. `docs/architecture/architecture-overview.md`；
+4. `docs/architecture/process-architecture.md`；
+5. `docs/design/ui-style-system.md`；
+6. 本方案全文；
+7. 现有 `tts_erp_v2/storage/minio_client.py` 与 `api/v2/spu_images.py`；
+8. Artemis client 的 `submit/get_task/wait_for_task` 契约。
+
+开发约束：
+
+- 在独立 lane/worktree 开发并登记所有 owned files；
+- 测试只用 `bash scripts/test_isolated.sh ...`；
+- 先测试后实现，每个 Phase 可独立验收；
+- 不把之前外部 PoC 的自定义 SigV4 客户端搬入 ttsERP；
+- 不在 FastAPI handler 内执行 ADB、下载大文件或长轮询；
+- 不在浏览器直接访问 Artemis；
+- 不跳过 DB 状态机直接更新字段；
+- 不运行真实发布，除非当前用户再次明确授权；
+- 不擅自改变本方案枚举/错误码/按钮语义；如实现发现冲突，先更新方案并说明迁移影响。
+
+建议提交拆分：
+
+```text
+1. feat(publishing): add schema and domain state machine
+2. feat(publishing): add upload and task APIs
+3. feat(publishing): add object, adb, and Artemis adapters
+4. feat(publishing): add resilient publish worker
+5. feat(ui): add video publish console
+6. test(publishing): cover retries, recovery, and UI contracts
+7. docs: add deployment and operator runbook
+```
+
+Luna 每个 Phase 的输出必须包含：
+
+- 改动文件；
+- 新增/修改的 public interface；
+- migration head；
+- 执行过的隔离测试及结果；
+- 未验证的真实设备风险；
+- 是否改变本方案中的 API、字段或枚举；
+- 当前分支/commit，且未经 review 不合并 master。
