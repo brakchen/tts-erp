@@ -184,101 +184,32 @@ def first_spu_roi_item() -> dict[str, Any]:
     return items[0]
 
 
-# ── 浏览器渲染冒烟（lane e2e-ui-render，2026-10-04）──────────────────
+# ── 浏览器渲染冒烟（live 层）────────────────────────────────────────
 #
-# HTTP 形状冒烟看不见渲染结果：广告日明细筛选条在 1440 视口把查询按钮顶出
-# 页面、runtime-configs 的裸 <code> 命中 Bootstrap 的 SFMono 栈 —— 这两类
-# 回归既有 e2e 与 `fast` 全绿。渲染态断言只能在真实浏览器里做。
+# 断言片段与 Renderer 的单一来源是 tests/render_support.py（browser 层共用）；
+# 本层只负责「打真服务 + 真 key」：base_url() + service_key()。
 
-PAGE_SLUGS = [
-    "dashboard",
-    "focused-spus",
-    "spu-roi",
-    "ad-daily",
-    "manual-costs",
-    "shops",
-    "enum-map",
-    "runtime-configs",
-    "sync-jobs",
-    "users",
-    "intercept-configs",
-    "intercept-requests",
-    "intercept-stats",
+from render_support import (  # noqa: E402
+    PAGE_SLUGS,
+    Renderer,
+    normalize_stack,
+    page_path,
+)
+
+__all__ = [
+    "PAGE_SLUGS",
+    "request_json",
+    "request_no_redirect",
+    "base_url",
+    "service_key",
+    "normalize_stack",
+    "page_path",
 ]
-
-# 主表要带 shop_pk 才渲染数据行（空态不构成有效布局巡检）
-_DATA_DRIVEN_SLUGS = frozenset({"spu-roi", "focused-spus"})
-
-
-def page_path(slug: str, shop_pk: int | None = None) -> str:
-    """页面路径；只有数据驱动页会拼 ``?shop_pk=``。"""
-    if slug in _DATA_DRIVEN_SLUGS and shop_pk:
-        return f"/v2/pages/{slug}?shop_pk={shop_pk}"
-    return f"/v2/pages/{slug}"
-
-
-def normalize_stack(value: str) -> str:
-    """去掉引号与空白，让 CSS 源文本与 computed font-family 可直接比较。"""
-    return re.sub(r"[\s'\"]+", "", value)
-
-
-class Renderer:
-    """headless chromium 页面渲染器。
-
-    - 带 ``Authorization: Bearer <service key>`` 打开受保护页面；
-    - 记录所有非 GET/HEAD/OPTIONS 请求，用例收尾断言 e2e **只读**；
-    - 打开下一页前先自检上一页没发写请求，越界越早暴露越好定位。
-    """
-
-    def __init__(self, browser: Any, key: str) -> None:
-        self._browser = browser
-        self._key = key
-        self._contexts: list[Any] = []
-        self.write_requests: list[str] = []
-
-    def open(self, path: str, *, width: int = 1440, height: int = 1200) -> Any:
-        self.assert_read_only()
-        context = self._browser.new_context(
-            viewport={"width": width, "height": height},
-            extra_http_headers={"Authorization": f"Bearer {self._key}"},
-        )
-        page = context.new_page()
-        page.on("request", self._record)
-        response = page.goto(
-            base_url() + path, wait_until="domcontentloaded", timeout=30_000
-        )
-        try:
-            # 有轮询的页面（sync-jobs）不会 idle，等不到就算了，不因此失败
-            page.wait_for_load_state("networkidle", timeout=8_000)
-        except Exception:  # noqa: BLE001 - 等待超时不是用例失败
-            pass
-        status = response.status if response is not None else 0
-        assert status == 200, f"{path} 未渲染成功：HTTP {status}（key 失效或路由不存在）"
-        self._contexts.append(context)
-        return page
-
-    def _record(self, request: Any) -> None:
-        if request.method not in {"GET", "HEAD", "OPTIONS"}:
-            self.write_requests.append(f"{request.method} {request.url}")
-
-    def assert_read_only(self) -> None:
-        assert not self.write_requests, (
-            f"e2e 必须只读，却发出了写请求: {self.write_requests}"
-        )
-
-    def close(self) -> None:
-        for context in self._contexts:
-            try:
-                context.close()
-            except Exception:  # noqa: BLE001 - 收尾尽力而为
-                pass
-        self._contexts.clear()
-        self.assert_read_only()
 
 
 @pytest.fixture(scope="session")
-def renderer() -> Any:
-    """headless chromium 渲染器；缺 key / 缺浏览器时 skip，不硬失败。"""
+def renderer():
+    """live 服务的 headless chromium 渲染器；缺 key / 缺浏览器时 skip。"""
     if not service_key():
         pytest.skip("TTS_ERP_SERVICE_KEY 未配置，跳过浏览器渲染冒烟")
     try:
@@ -291,7 +222,7 @@ def renderer() -> Any:
     except Exception as exc:  # pragma: no cover - 环境相关
         pw.stop()
         pytest.skip(f"chromium 启动失败: {exc}")
-    instance = Renderer(browser, service_key())
+    instance = Renderer(browser, base_url(), key=service_key())
     yield instance
     instance.close()
     browser.close()
@@ -302,11 +233,6 @@ def renderer() -> Any:
 def token_font_stacks() -> set[str]:
     """tokens.css 的 --sans/--mono/--serif 三套栈（归一化）= 字体断言白名单。"""
     css_path = Path(__file__).resolve().parents[2] / "tts_erp_v2" / "static" / "css" / "tokens.css"
-    css = css_path.read_text(encoding="utf-8")
-    stacks: set[str] = set()
-    for name in ("sans", "mono", "serif"):
-        match = re.search(rf"--{name}:\s*([^;]+);", css)
-        assert match is not None, f"tokens.css 未声明 --{name}"
-        stacks.add(normalize_stack(match.group(1)))
-    assert len(stacks) == 3, f"三套栈必须互不相同: {stacks}"
-    return stacks
+    from render_support import token_font_stacks as parse_stacks
+
+    return parse_stacks(css_path.read_text(encoding="utf-8"))
