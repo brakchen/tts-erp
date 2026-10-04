@@ -29,7 +29,9 @@
 6. Artemis 支持按 `session_id` 查询状态，并支持通过 `device_serial` 指定设备。
 7. Artemis 明确失败后可在同一个原任务下重试，所有执行历史必须保留。
 8. 尽量自动完成状态确认；只有自动核验仍无法判定时才进入人工处理。
-9. 发布成功后由后台清理手机、本地临时文件和 MinIO 视频。
+9. 前端任务状态必须定时刷新，并允许用户选择智能、固定间隔或关闭自动刷新。
+10. 前端必须展示每次执行对应的完整 Artemis session ID，并提供一键复制，方便进入 Artemis 排障。
+11. 发布成功后由后台清理手机、本地临时文件和 MinIO 视频。
 
 ### 1.2 非目标
 
@@ -568,14 +570,35 @@ POST /v2/video-publish/tasks/{task_id}/confirm-upload
 status=pending, stage=queued, queued_at=now()
 ```
 
-### 9.5 列表与详情
+### 9.5 当前任务、列表与详情
 
 ```http
+GET /v2/video-publish/tasks/current
 GET /v2/video-publish/tasks?status=&limit=30&cursor=
 GET /v2/video-publish/tasks/{task_id}
 ```
 
-详情返回任务、清理状态和全部 attempts；列表只返回摘要，不携带完整 Prompt 或大段 Artemis output。
+`/current` 是定时刷新使用的轻量端点，返回当前运行任务、最新 attempt、服务端时间和下一建议刷新间隔；无运行任务时返回 `task: null`。列表只返回摘要，不携带完整 Prompt 或大段 Artemis output；详情返回任务、清理状态和全部 attempts。
+
+当前任务和列表摘要都必须返回可直接检索的 Artemis ID：
+
+```json
+{
+  "taskId": "<ttsERP task UUID>",
+  "status": "running",
+  "stage": "waiting_artemis",
+  "currentAttempt": {
+    "kind": "publish",
+    "sequenceNo": 2,
+    "artemisSessionId": "c8af5a6c-4158-49c3-9141-13bc69b391d2",
+    "status": "running"
+  },
+  "latestArtemisSessionId": "c8af5a6c-4158-49c3-9141-13bc69b391d2",
+  "updatedAt": "2026-10-04T10:42:15Z"
+}
+```
+
+尚未创建 Artemis attempt 的排队任务返回 `latestArtemisSessionId: null`，前端显示“尚未创建”，不得把 ttsERP task ID 冒充为 Artemis ID。三个 GET 端点支持 `ETag` / `If-None-Match`；无变化时返回 304，降低定时刷新负载。
 
 ### 9.6 操作
 
@@ -650,10 +673,11 @@ MINIO ●━━━━ 手机相册 ●━━━━ Artemis ◉━━━━ TikTo
 │ └──────────────────────────────┘ │ [上传并加入发布队列]                  │
 │ 227 / 4000                       │                                       │
 ├──────────────────────────────────┴───────────────────────────────────────┤
-│ 任务记录    [全部][排队][执行中][失败][需核验][成功]          [刷新]    │
-│ #1006  queued     video-a.mp4   文案摘要…   队列第 2   10:42  [查看]    │
-│ #1005  failed     video-b.mp4   文案摘要…   第 2 次    10:31  [重试]    │
-│ #1004  running    video-c.mp4   文案摘要…   Artemis    10:20  [查看]    │
+│ 任务记录 [全部][排队][执行中][失败][需核验][成功]                       │
+│ 自动刷新 [智能 ▼] · 上次 10:42:15                         [立即刷新]    │
+│ #1006 queued  video-a.mp4  Artemis 尚未创建             10:42 [查看]    │
+│ #1005 failed  video-b.mp4  c8af5a6c…391d2 [复制]        10:31 [重试]    │
+│ #1004 running video-c.mp4  41d9d326…8a104 [复制]        10:20 [查看]    │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -739,7 +763,7 @@ MINIO ●━━━━ 手机相册 ●━━━━ Artemis ◉━━━━ TikTo
 
 - 任务编号与视频文件名；
 - 当前 attempt 类型及次数；
-- Artemis session ID 的缩写，可复制完整 ID；
+- 当前 Artemis session ID；桌面端显示完整 UUID，窄屏可视觉省略中段，但 `title`、无障碍名称和“复制”操作必须保留完整值；
 - 当前阶段开始时间与已耗时；
 - “查看详情”，不提供运行中普通重试。
 
@@ -758,6 +782,7 @@ MINIO ●━━━━ 手机相册 ●━━━━ Artemis ◉━━━━ TikTo
 - 文案首行摘要；
 - 业务状态与当前 stage；
 - 发布/核验执行次数；
+- 当前或最近一次 Artemis session ID，使用等宽字体并提供一键复制；尚未创建 attempt 时明确显示“尚未创建”；
 - 创建人和创建时间；
 - 服务端返回的主要动作。
 
@@ -799,10 +824,12 @@ attempt 行展示：
 
 ```text
 第 3 次执行 · 正式发布
-success · session c8af…91d2 · D123…00AC
+success · Artemis ID c8af5a6c-4158-49c3-9141-13bc69b391d2 · D123…00AC
 开始 10:42:12 · 完成 10:46:31 · 4m19s
-[查看错误/输出] [复制 session ID]
+[查看错误/输出] [复制 Artemis ID]
 ```
+
+Artemis ID 不是敏感凭据，应在详情中完整展示，复制内容不得带前后缀或省略号，方便直接粘贴到 Artemis 查询。一个原任务存在多次 publish/verify attempt 时，每一条都展示自己的 ID，不能只保留最后一个。
 
 Prompt 快照和 Artemis 原始 output 默认折叠，仅 admin 或诊断权限可查看；文案与错误文本按纯文本渲染，禁止 `innerHTML` 注入。
 
@@ -828,18 +855,39 @@ Prompt 快照和 Artemis 原始 output 默认折叠，仅 admin 或诊断权限�
 - verify attempt 运行时任务回到 `running/verifying`；
 - 已发布 → 成功；明确未发布 → 服务端按重试预算自动排队；仍无法判断 → 回到 `needs_review` 并展示原因。
 
-### 10.11 刷新、轮询与竞态
+### 10.11 定时刷新、轮询与竞态
 
-页面只轮询 ttsERP。`video-publish.js` 与现有页面一致，从 `location.pathname` 推导 `/tts` 等部署前缀；API 和静态资产不得使用破坏子路径部署的绝对根路径。
+页面只轮询 ttsERP，不直接查询 Artemis。`video-publish.js` 与现有页面一致，从 `location.pathname` 推导 `/tts` 等部署前缀；API 和静态资产不得使用破坏子路径部署的绝对根路径。
 
-- 存在运行任务：当前任务每 2 秒刷新；列表每 5 秒刷新；
-- 无运行任务但有排队任务：每 8 秒刷新；
-- 页面隐藏：降为 30 秒；恢复可见时立即刷新；
-- 所有请求使用 `AbortController` 与单调 generation，旧响应不得覆盖新筛选或新详情；
-- 页面销毁时取消 timer 与请求；
-- 后续可升级 SSE，但 v1 不为单页状态建立新的实时基础设施。
+任务工具栏提供可见的定时刷新控制：
 
-前端可以对“已提交/已取消”做临时 busy 状态，但任务业务状态始终以服务端响应为准。
+```text
+自动刷新 [智能 | 2 秒 | 5 秒 | 10 秒 | 30 秒 | 关闭]
+上次刷新 10:42:15 · 下次约 2 秒后              [立即刷新]
+```
+
+默认选择“智能”，规则为：
+
+- 存在运行中的 publish/verify attempt：`/current` 每 2 秒；当前列表每 5 秒；
+- 无运行任务但存在排队任务：当前任务/列表每 8 秒；
+- 只有终态历史任务：列表每 30 秒；
+- 页面隐藏：暂停高频轮询，最多每 30 秒一次；恢复可见时立即刷新；
+- 用户选择固定间隔后，当前任务、当前列表页和已打开详情都使用该间隔；
+- 用户选择“关闭”后只保留“立即刷新”，运行中轨道显示“自动刷新已暂停”，避免用户误以为状态仍实时；
+- 用户选择保存在 `localStorage`，只保存刷新偏好，不保存任务、文案或凭据。
+
+轮询实现约束：
+
+1. 定时器必须在上一次请求结束后再安排下一次，禁止 `setInterval` 造成慢请求重叠；
+2. 使用 `AbortController` 与单调 generation，旧响应不得覆盖新筛选、新详情或更新后的 attempt；
+3. 使用 `If-None-Match`，304 时只更新时间提示，不重建 DOM；
+4. 打开任务详情时同步刷新该任务详情，保证新增 attempt 和 Artemis ID 在页面出现；
+5. 每次任务状态、stage、current attempt 或 Artemis ID 变化时，更新轨道、列表行和 drawer，但不得抢走当前键盘焦点；
+6. 连续刷新失败时采用 5/10/30/60 秒退避，顶部显示“状态刷新失败，正在重试”，手动刷新成功后恢复用户选择的频率；
+7. 页面销毁时取消 timer 和所有未完成请求；
+8. 后续可升级 SSE，但 v1 不为单页状态建立新的实时基础设施。
+
+列表顶部始终显示上次成功刷新时间。前端可以对“已提交/已取消”做临时 busy 状态，但任务业务状态和 Artemis ID 始终以服务端响应为准。
 
 ### 10.12 空状态、错误和文案
 
@@ -1012,8 +1060,9 @@ bash scripts/test_isolated.sh ...
 - 创建双击只生成一个任务；
 - 状态轨道节点与服务端 stage 映射；
 - needs_review 不显示直接重试；
-- drawer 执行历史和清理状态；
-- 轮询降频、页面可见恢复和 stale response 防护；
+- drawer 执行历史、每条 attempt 的完整 Artemis ID 和清理状态；
+- Artemis ID 一键复制，复制值为完整 UUID，排队未建 attempt 时显示“尚未创建”；
+- 智能/固定/关闭三类定时刷新、手动刷新、页面可见恢复、失败退避和 stale response 防护；
 - 401 登录跳转、403 只读模式；
 - 键盘、dialog 焦点、aria-live、reduced motion；
 - 390px、768px、1440px 三档视觉冒烟。
@@ -1063,3 +1112,5 @@ bash scripts/test_isolated.sh ...
 8. 全局唯一 running task 由数据库部分唯一索引保证。
 9. 成功与清理分开建模；清理失败不会改写业务成功。
 10. 前端的“单线发布轨道”直接表达全局串行约束；状态与允许操作全部由服务端真相驱动。
+11. 页面提供智能或固定间隔定时刷新，任务、attempt 和 Artemis ID 的变化无需手工刷新即可出现。
+12. 每条 Artemis attempt 的完整 session ID 都在详情中保留并可复制；列表展示当前或最近一次 ID。
