@@ -496,6 +496,8 @@ async def _mark_unexpected(
 async def _mark_spool_cleanup(task_id: UUID, deps: PublishDependencies) -> None:
     with deps.session_factory() as session:
         task = _get(session, task_id)
+        if task.lease_owner not in {None, deps.instance_id}:
+            return
         if task.spool_cleanup_status in {"pending", "not_started"}:
             task.spool_cleanup_status = "succeeded"
             task.spool_cleanup_error = None
