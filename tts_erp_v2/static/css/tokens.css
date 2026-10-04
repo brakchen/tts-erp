@@ -50,4 +50,13 @@
   /* 暖纸编辑体是直角体系：全站圆角为 0。个别控件（如 toast 的 4px）需在
    * 自己的规则里显式覆盖，不要改这个基准值。 */
   --radius: 0;
+
+  /* ── Bootstrap 字体变量桥接 ──────────────────────── */
+  /* vendor reboot 的 `code / kbd / pre` 吃 --bs-font-monospace，不桥接就会命中
+   * Bootstrap 自带的 SFMono-Regular 栈 —— 全站的第 4 套字体（2026-10-04
+   * runtime-configs 的裸 <code> 实测命中）。tokens.css 晚于 bootstrap.min.css
+   * 加载，同名 :root 变量后写覆盖前写。 */
+  --bs-body-font-family: var(--sans);
+  --bs-font-sans-serif: var(--sans);
+  --bs-font-monospace: var(--mono);
 }

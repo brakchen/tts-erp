@@ -27,6 +27,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { chromium } = require("playwright");
+const { adDailyMock } = require("./ui_audit_mocks");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 const PAGES_DIR = process.env.PAGES_DIR || "/tmp/ui-audit/pages";
@@ -90,6 +91,9 @@ const NOW = "2026-10-02T12:00:00+00:00";
 
 function mockJson(url) {
   const u = url.replace(/\?.*$/, "");
+  // ad-daily 两个端点走共享契约 mock（scripts/ui_audit_mocks.js，改一处两边生效）
+  const shared = adDailyMock(url);
+  if (shared) return shared;
   const ok = (obj) => JSON.stringify(obj);
 
   if (u.endsWith("/v2/auth/me"))
@@ -327,45 +331,6 @@ function mockJson(url) {
         status: "registered",
         region: "VN",
       },
-    });
-
-  if (u.endsWith("/v2/reporting/ad-daily"))
-    return ok({
-      total: 2,
-      summary: { spend: "1234.56", gmv: "9876.54", orders: 88 },
-      items: [
-        {
-          stat_date: "2026-10-01",
-          shop_id: 7,
-          shop_name: "QA 店 7",
-          campaign_id: "C1",
-          campaign_name: "Campaign One",
-          spend: "100.00",
-          gmv: "800.00",
-          orders: 10,
-          ctr: "0.031",
-          cvr: "0.102",
-          cpc: "0.55",
-        },
-        {
-          stat_date: "2026-09-30",
-          shop_id: 8,
-          shop_name: "QA 店 8",
-          campaign_id: "C2",
-          campaign_name: "C2 " + "很长的活动名称".repeat(4),
-          spend: "222.22",
-          gmv: "1999.99",
-          orders: 22,
-          ctr: "0.012",
-          cvr: "0.088",
-          cpc: "0.77",
-        },
-      ],
-    });
-  if (u.endsWith("/v2/reporting/ad-daily/options"))
-    return ok({
-      shops: [{ id: 7, account_name: "QA 店 7" }],
-      campaigns: [{ id: "C1", name: "Campaign One" }],
     });
 
   if (u.includes("/v2/reporting/focused-spus"))

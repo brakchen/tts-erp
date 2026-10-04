@@ -67,6 +67,19 @@ NODE_PATH=/home/schan/pi-web/node_modules \
 判定标准：12 个页面命中**同一套**字体族（sans / mono / serif 各一支），出现只在
 个别页面的族名即为不一致（如 vendor jsoneditor 的 `arial` → `Liberation Sans`）。
 
+## 已进 e2e 的部分（lane `e2e-ui-render`，2026-10-04）
+
+探针是 mock 驱动、不进 CI；下面两类回归已改由 live e2e 把守，
+跑法 `bash scripts/test_isolated.sh e2e`：
+
+- **多视口横向溢出**：`tests/e2e/test_ui_render_smoke.py`，13 页在 1440、
+  广告日明细另在 1280/1366/1536/1920/2560 断言 `scrollWidth` 不超视口；
+- **字体栈一致性**：同文件，断言每页含文字元素的 computed `font-family`
+  只能来自 `tokens.css` 的 `--sans/--mono/--serif`。
+
+本探针继续承担**截图复核**与 mock 数据下的 DOM 度量；两支探针的 ad-daily
+载荷共用 `scripts/ui_audit_mocks.js`（契约见 `docs/api/ad-daily.md`）。
+
 ## 读图复核
 
 度量是定量防线；字体截断、间距、配色类问题仍需人工过截图
