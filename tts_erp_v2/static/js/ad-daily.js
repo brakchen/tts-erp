@@ -7,6 +7,16 @@
   const LIST_URL = `${PREFIX}/v2/reporting/ad-daily`;
   const OPTIONS_URL = `${LIST_URL}/options`;
   const ALLOWED_LIMITS = new Set([25, 50, 100, 200]);
+  // 表头排序：键必须与后端 _SORT_COLUMNS 白名单一致；首击用每列的自然顺序，
+  // 再点同一列翻转方向（后端不认识的键会回 422，不要在这里发明键名）。
+  const SORT_KEYS = ['day', 'shop', 'campaign', 'product', 'spend', 'orders', 'gmv', 'roi', 'updated_at'];
+  const SORT_DEFAULT_ORDER = {
+    day: 'desc', updated_at: 'desc',
+    spend: 'desc', orders: 'desc', gmv: 'desc', roi: 'desc',
+    shop: 'asc', campaign: 'asc', product: 'asc',
+  };
+  const DEFAULT_SORT = 'day';
+  const DEFAULT_ORDER = 'desc';
   const numberFormat = new Intl.NumberFormat('en-US');
   const moneyFormat = new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 2,
@@ -43,6 +53,7 @@
     elements.limit = document.getElementById('page-size');
     elements.reset = document.getElementById('reset-filters');
     elements.body = document.getElementById('ledger-body');
+    elements.head = document.querySelector('.mld-table thead');
     elements.empty = document.getElementById('empty-state');
     elements.status = document.getElementById('load-status');
     elements.range = document.getElementById('observed-range');
@@ -64,9 +75,26 @@
       void loadRows();
     });
     elements.reset.addEventListener('click', function () {
-      state = { seller_id: '', advertiser_id: '', endpoint: '', day_from: '', day_to: '', q: '', limit: 50, offset: 0 };
+      state = {
+        seller_id: '', advertiser_id: '', endpoint: '', day_from: '', day_to: '', q: '',
+        limit: 50, offset: 0, sort: state.sort, order: state.order,
+      };
       applyStateToControls();
       populateAdvertisers();
+      void loadRows();
+    });
+    elements.head.addEventListener('click', function (event) {
+      const button = event.target.closest('button[data-sort]');
+      if (!button) return;
+      const key = button.dataset.sort;
+      if (!SORT_KEYS.includes(key)) return;
+      if (state.sort === key) {
+        state.order = state.order === 'asc' ? 'desc' : 'asc';
+      } else {
+        state.sort = key;
+        state.order = SORT_DEFAULT_ORDER[key] || DEFAULT_ORDER;
+      }
+      state.offset = 0;
       void loadRows();
     });
     elements.seller.addEventListener('change', function () {
@@ -94,6 +122,8 @@
       day_from: params.get('day_from') || '',
       day_to: params.get('day_to') || '',
       q: params.get('q') || '',
+      sort: SORT_KEYS.includes(params.get('sort')) ? params.get('sort') : DEFAULT_SORT,
+      order: params.get('order') === 'asc' || params.get('order') === 'desc' ? params.get('order') : DEFAULT_ORDER,
       limit: ALLOWED_LIMITS.has(limit) ? limit : 50,
       offset: Number.isInteger(offset) && offset >= 0 ? offset : 0,
     };
@@ -107,6 +137,8 @@
       day_from: elements.dayFrom.value,
       day_to: elements.dayTo.value,
       q: elements.query.value.trim(),
+      sort: state.sort,
+      order: state.order,
       limit: Number(elements.limit.value),
       offset: state.offset,
     };
@@ -129,6 +161,11 @@
     }
     if (state.limit !== 50) params.set('limit', String(state.limit));
     if (state.offset > 0) params.set('offset', String(state.offset));
+    // 两个一起发：只发 order 会让服务端回退到默认排序列，语义就反了。
+    if (state.sort !== DEFAULT_SORT || state.order !== DEFAULT_ORDER) {
+      params.set('sort', state.sort);
+      params.set('order', state.order);
+    }
     const query = params.toString();
     history.replaceState(null, '', `${location.pathname}${query ? `?${query}` : ''}`);
   }
@@ -207,6 +244,7 @@
     if (requestController) requestController.abort();
     requestController = new AbortController();
     syncUrl();
+    updateSortIndicators();
     setLoading(true);
 
     const params = new URLSearchParams();
@@ -215,6 +253,10 @@
     }
     params.set('limit', String(state.limit));
     params.set('offset', String(state.offset));
+    if (state.sort !== DEFAULT_SORT || state.order !== DEFAULT_ORDER) {
+      params.set('sort', state.sort);
+      params.set('order', state.order);
+    }
 
     try {
       const response = await fetch(`${LIST_URL}?${params}`, {
@@ -248,6 +290,20 @@
     } finally {
       setLoading(false);
     }
+  }
+
+  function updateSortIndicators() {
+    const headers = elements.head.querySelectorAll('th[data-sort]');
+    headers.forEach(function (th) {
+      const active = th.dataset.sort === state.sort;
+      th.classList.toggle('is-sorted-asc', active && state.order === 'asc');
+      th.classList.toggle('is-sorted-desc', active && state.order === 'desc');
+      if (active) {
+        th.setAttribute('aria-sort', state.order === 'asc' ? 'ascending' : 'descending');
+      } else {
+        th.setAttribute('aria-sort', 'none');
+      }
+    });
   }
 
   function renderSummary(summary) {

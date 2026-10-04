@@ -37,8 +37,7 @@ WHERE (CAST(:seller_id AS text) IS NULL OR d.seller_id = :seller_id)
   )
 """
 
-_STMT_LIST = text(
-    """
+_STMT_LIST_SQL = """
 SELECT
   d.id,
   d.seller_id,
@@ -63,12 +62,57 @@ LEFT JOIN commerce.shops AS s
 LEFT JOIN commerce.products_spu AS p
   ON p.shop_pk = s.id AND p.spu_id = d.product_id
 """
-    + _FILTER_SQL
-    + """
-ORDER BY d.day DESC, d.updated_at DESC, d.id DESC
-LIMIT :limit OFFSET :offset
-"""
-)
+
+# 表头排序白名单：key -> 固定 SQL 表达式。用户输入只用来查这张表，
+# 拼进 ORDER BY 的永远是字面量表达式，不接受自由 SQL 片段。
+_SORT_COLUMNS: dict[str, str] = {
+    "day": "d.day",
+    "shop": "COALESCE(s.account_name, d.seller_id)",
+    "campaign": "d.campaign_id",
+    "product": "COALESCE(p.title, d.product_id)",
+    "spend": "d.mixed_real_cost",
+    "orders": "d.onsite_roi2_shopping_sku",
+    "gmv": "d.onsite_roi2_shopping_value",
+    "roi": "d.onsite_mixed_real_roi2_shopping",
+    "updated_at": "d.updated_at",
+}
+_DEFAULT_SORT = "day"
+_DEFAULT_ORDER = "desc"
+
+
+def _order_clause(sort: str, order: str) -> str:
+    """Build a whitelisted ``ORDER BY`` clause for the detail listing.
+
+    Sortable keys are fixed; anything else is a 422 instead of a silent
+    fallback, so a typo'd column can't quietly return unsorted rows.
+    ``NULLS LAST`` keeps rows missing a metric at the bottom in both
+    directions, and the ``updated_at`` / ``id`` tiebreakers keep pagination
+    stable for equal values.
+    """
+    expression = _SORT_COLUMNS.get(sort)
+    if expression is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"sort must be one of: {', '.join(sorted(_SORT_COLUMNS))}",
+        )
+    direction = order.strip().lower()
+    if direction not in {"asc", "desc"}:
+        raise HTTPException(status_code=422, detail="order must be asc or desc")
+    arrow = direction.upper()
+    return (
+        f"ORDER BY {expression} {arrow} NULLS LAST, "
+        f"d.updated_at {arrow}, d.id {arrow}"
+    )
+
+
+def _list_statement(sort: str, order: str):
+    return text(
+        _STMT_LIST_SQL
+        + _FILTER_SQL
+        + "\n"
+        + _order_clause(sort, order)
+        + "\nLIMIT :limit OFFSET :offset\n"
+    )
 
 _STMT_SUMMARY = text(
     """
@@ -253,13 +297,18 @@ def list_ad_daily(
     day_from: date | None = None,
     day_to: date | None = None,
     q: Annotated[str | None, Query(max_length=200)] = None,
+    sort: Annotated[str, Query(max_length=32)] = _DEFAULT_SORT,
+    order: Annotated[str, Query(max_length=8)] = _DEFAULT_ORDER,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> dict[str, Any]:
-    """List source-shaped daily ad rows, newest day first.
+    """List source-shaped daily ad rows, sortable by any table header.
 
     ``q`` is a literal substring search across campaign and product IDs.  Summary
     values cover the full filtered set, not only the current page.
+
+    ``sort`` must be one of :data:`_SORT_COLUMNS` and ``order`` must be ``asc``
+    or ``desc``; anything else is a 422 (see :func:`_order_clause`).
     """
     if day_from is not None and day_to is not None and day_from > day_to:
         raise HTTPException(status_code=422, detail="day_from must be <= day_to")
@@ -274,7 +323,7 @@ def list_ad_daily(
     )
     summary = sess.execute(_STMT_SUMMARY, params).one()
     rows = sess.execute(
-        _STMT_LIST,
+        _list_statement(sort, order),
         {**params, "limit": limit, "offset": offset},
     ).all()
     total = _safe_int(summary.row_count)
@@ -374,10 +423,16 @@ _PAGE_HTML = """<!doctype html>
       <div class="mld-table-wrap">
         <table class="mld-table">
           <thead><tr>
-            <th>日期</th><th>店铺 / 广告账户</th><th>计划 ID</th><th>商品</th>
-            <th class="mld-num">消耗 USD</th><th class="mld-num">归因订单</th>
-            <th class="mld-num">归因 GMV</th><th class="mld-num">实际 ROI</th>
-            <th>更新时间</th><th><span class="visually-hidden">更多指标</span></th>
+            <th data-sort="day"><button type="button" class="mld-sort-button" data-sort="day">日期<span class="mld-sort-arrow" aria-hidden="true"></span></button></th>
+            <th data-sort="shop"><button type="button" class="mld-sort-button" data-sort="shop">店铺 / 广告账户<span class="mld-sort-arrow" aria-hidden="true"></span></button></th>
+            <th data-sort="campaign"><button type="button" class="mld-sort-button" data-sort="campaign">计划 ID<span class="mld-sort-arrow" aria-hidden="true"></span></button></th>
+            <th data-sort="product"><button type="button" class="mld-sort-button" data-sort="product">商品<span class="mld-sort-arrow" aria-hidden="true"></span></button></th>
+            <th class="mld-num" data-sort="spend"><button type="button" class="mld-sort-button" data-sort="spend">消耗 USD<span class="mld-sort-arrow" aria-hidden="true"></span></button></th>
+            <th class="mld-num" data-sort="orders"><button type="button" class="mld-sort-button" data-sort="orders">归因订单<span class="mld-sort-arrow" aria-hidden="true"></span></button></th>
+            <th class="mld-num" data-sort="gmv"><button type="button" class="mld-sort-button" data-sort="gmv">归因 GMV<span class="mld-sort-arrow" aria-hidden="true"></span></button></th>
+            <th class="mld-num" data-sort="roi"><button type="button" class="mld-sort-button" data-sort="roi">实际 ROI<span class="mld-sort-arrow" aria-hidden="true"></span></button></th>
+            <th data-sort="updated_at"><button type="button" class="mld-sort-button" data-sort="updated_at">更新时间<span class="mld-sort-arrow" aria-hidden="true"></span></button></th>
+            <th><span class="visually-hidden">更多指标</span></th>
           </tr></thead>
           <tbody id="ledger-body"></tbody>
         </table>

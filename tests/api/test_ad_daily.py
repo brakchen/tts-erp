@@ -99,6 +99,9 @@ def test_ad_daily_page_returns_authenticated_shell(api_client, readonly_key):
     assert "../../static/css/ad-daily.css?v=" in response.text
     assert "../../static/js/ad-daily.js?v=" in response.text
     assert "plugin.ad_daily" in response.text
+    assert 'data-sort="day"' in response.text
+    assert 'class="mld-sort-button"' in response.text
+    assert response.text.count("class=\"mld-sort-button\"") == 9
     assert 'id="sidebar"' in response.text
     assert 'aria-label="主导航"' in response.text
     assert 'href="../../v2/pages/ad-daily" class="nav-link active"' in response.text
@@ -232,3 +235,87 @@ def test_ad_daily_rejects_reversed_date_range(api_client, readonly_key):
 
     assert response.status_code == 422
     assert response.json()["detail"] == "day_from must be <= day_to"
+
+
+def test_ad_daily_list_sorts_by_whitelisted_header(
+    api_client,
+    readonly_key,
+    db_engine,
+):
+    """表头排序走白名单：可升可降，缺指标的行固定垫底。"""
+    _seed_rows(db_engine)
+    headers = _auth(readonly_key)
+    base = {"seller_id": _SELLER}
+
+    default = api_client.get("/v2/reporting/ad-daily", headers=headers, params=base)
+    spend_asc = api_client.get(
+        "/v2/reporting/ad-daily",
+        headers=headers,
+        params={**base, "sort": "spend", "order": "asc"},
+    )
+    day_asc = api_client.get(
+        "/v2/reporting/ad-daily",
+        headers=headers,
+        params={**base, "sort": "day", "order": "asc"},
+    )
+    product_desc = api_client.get(
+        "/v2/reporting/ad-daily",
+        headers=headers,
+        params={**base, "sort": "product", "order": "desc"},
+    )
+
+    assert default.status_code == 200, default.text
+    assert [i["campaign_id"] for i in default.json()["items"]] == [
+        "TEST_CAMP_300",
+        "TEST_CAMP_200",
+        "TEST_CAMP_100",
+    ]
+    # mixed_real_cost 为 NULL 的 TEST_CAMP_300 必须排在最后（NULLS LAST）
+    assert [i["campaign_id"] for i in spend_asc.json()["items"]] == [
+        "TEST_CAMP_200",
+        "TEST_CAMP_100",
+        "TEST_CAMP_300",
+    ]
+    assert [i["campaign_id"] for i in day_asc.json()["items"]] == [
+        "TEST_CAMP_100",
+        "TEST_CAMP_200",
+        "TEST_CAMP_300",
+    ]
+    assert [i["product_id"] for i in product_desc.json()["items"]] == [
+        "TEST_PRODUCT_3",
+        "TEST_PRODUCT_2",
+        "TEST_PRODUCT_1",
+    ]
+
+
+def test_ad_daily_rejects_unknown_sort_and_order(api_client, readonly_key):
+    """排序键/方向不在白名单 → 422，而不是静默回退成未排序。"""
+    headers = _auth(readonly_key)
+
+    unknown_key = api_client.get(
+        "/v2/reporting/ad-daily",
+        headers=headers,
+        params={"sort": "seller_id"},
+    )
+    unknown_order = api_client.get(
+        "/v2/reporting/ad-daily",
+        headers=headers,
+        params={"order": "sideways"},
+    )
+
+    assert unknown_key.status_code == 422
+    assert unknown_key.json()["detail"].startswith("sort must be one of:")
+    assert "campaign" in unknown_key.json()["detail"]
+    assert unknown_order.status_code == 422
+    assert unknown_order.json()["detail"] == "order must be asc or desc"
+
+
+def test_ad_daily_frontend_wires_header_sorting():
+    """前端把点击翻成 sort/order 参数，并保持 URL 可分享。"""
+    source = Path("tts_erp_v2/static/js/ad-daily.js").read_text()
+
+    assert "const SORT_KEYS = ['day', 'shop', 'campaign', 'product'" in source
+    assert "function updateSortIndicators()" in source
+    assert "params.set('sort', state.sort)" in source
+    assert "params.set('order', state.order)" in source
+    assert "state.offset = 0;" in source
