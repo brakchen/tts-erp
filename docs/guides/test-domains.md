@@ -115,6 +115,15 @@ If you want to call `pytest` directly:
   TTS_ERP_DB_URL=... scripts/test.sh migration   # PG must be reachable
   ```
 
+- **e2e 里有一层浏览器渲染冒烟**（`tests/e2e/test_ui_render_smoke.py`、
+  `test_ad_daily_sort_smoke.py`，lane `e2e-ui-render`）：headless Chromium
+  打开 live 页面，断言**渲染态**——多视口横向溢出、computed font-family
+  只能是 tokens 的三套栈、广告日明细表头点击后 URL/`aria-sort`/行序一致。
+  HTTP 形状冒烟看不见这两类回归（2026-10-04 筛选条 1440 溢出、
+  Bootstrap `--bs-font-monospace` 旁路在既有 e2e 下全绿）。
+  需要 `.venv` 里有 `playwright` + chromium；缺浏览器时用例 skip 不硬失败。
+  用例只发 GET：`conftest.Renderer` 会记录非 GET 请求并在收尾断言为空。
+
 - **Worktrees.** `chore/*` worktrees don't carry their own `.venv` — the
   script falls back to `/home/schan/tts-erp/.venv/bin/pytest` when
   `./.venv/bin/pytest` is missing.
@@ -160,6 +169,8 @@ Quick lookup for "which slice do I run after editing X":
 | `scripts/migrate_v1_to_v2/*.py`             | `scripts/test.sh migration`          |
 | `miaoshou/miaoshou_signing.py`              | `scripts/test.sh miaoshou unit`      |
 | `tests/e2e/**`（live 冒烟）                 | `scripts/test.sh e2e`（需 :9877 在跑） |
+| `tts_erp_v2/static/css/**`、页面模板         | `scripts/test.sh e2e`（渲染冒烟：溢出/字体栈）+ `scripts/test.sh api`（令牌回归） |
+| `scripts/probe_ui_*.js`                      | `scripts/test.sh api tests/api/test_ad_daily.py`（mock 契约静态锁） |
 
 ## Adding new tests
 

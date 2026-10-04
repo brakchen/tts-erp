@@ -23,6 +23,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { chromium } = require("playwright");
+const { adDailyMock } = require("./ui_audit_mocks");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 const PAGES_DIR = process.env.PAGES_DIR || "/tmp/ui-audit/pages";
@@ -75,68 +76,6 @@ const server = http.createServer((req, res) => {
 
 const NOW = "2026-10-02T12:00:00+00:00";
 
-/** ad-daily 是本次巡检重点：按真实契约返回，让明细表真正渲染出文字。 */
-function adDailyMock(url) {
-  const u = url.replace(/\?.*$/, "");
-  const sellers = [
-    { seller_id: "749486486860415", shop_name: "North Nook", row_count: 4038 },
-    { seller_id: "749486486860914", shop_name: "QA 店 8（很长的店铺名称测试截断行为）", row_count: 4038 },
-  ];
-  if (u.endsWith("/v2/reporting/ad-daily/options"))
-    return JSON.stringify({
-      sellers,
-      advertisers: sellers.map((s, i) => ({
-        seller_id: s.seller_id,
-        advertiser_id: `76793575728722247${i}6`,
-        row_count: s.row_count,
-      })),
-      endpoints: [
-        { endpoint: "/open_api/ads/manager/report/integrated", row_count: 5000 },
-        { endpoint: "/open_api/ads/manager/report/daily", row_count: 3076 },
-      ],
-      min_day: "2026-07-01",
-      max_day: "2026-10-03",
-    });
-  if (u.endsWith("/v2/reporting/ad-daily")) {
-    const items = Array.from({ length: 12 }, (_, i) => ({
-      id: 9000 + i,
-      seller_id: sellers[i % 2].seller_id,
-      shop_pk: 7,
-      shop_name: sellers[i % 2].shop_name,
-      advertiser_id: `767935757287222470${i % 2}6`,
-      campaign_id: "1877052518779186",
-      product_id: `1737532${String(867998766722 + i)}`.slice(0, 19),
-      product_title:
-        i % 2
-          ? "Áo sơ mi nam ngắn tay màu xám, họa tiết nhỏ thanh lịch"
-          : "Áo polo nam ngắn tay màu đỏ rượu vang cao cấp",
-      endpoint: "/open_api/ads/manager/report/integrated",
-      day: `2026-10-0${(i % 3) + 1}`,
-      mixed_real_cost: (0.01 + i * 0.03).toFixed(2),
-      onsite_roi2_shopping_sku: i % 4,
-      onsite_roi2_shopping_value: (i * 12.5).toFixed(2),
-      onsite_mixed_real_roi2_shopping: i % 5 === 0 ? null : (i * 0.42).toFixed(2),
-      metrics_extra: { clicks: 12 + i, impressions: 900 + i },
-      created_at: NOW,
-      updated_at: "2026-10-04T01:29:00+00:00",
-    }));
-    return JSON.stringify({
-      items,
-      total: 8076,
-      limit: 50,
-      offset: 0,
-      summary: {
-        row_count: 8076,
-        spend: "6674.41",
-        attributed_orders: 881,
-        attributed_gmv: "21444.63",
-        weighted_roi: "3.213",
-        currency: "USD",
-      },
-    });
-  }
-  return null;
-}
 
 /** 其余接口给最小可用载荷：页面结构是字体采样的主体，表格由 ad-daily 专门覆盖。 */
 function mockJson(url) {
