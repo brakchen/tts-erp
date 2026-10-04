@@ -16,9 +16,4 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-<<<<<<< HEAD
-| ui-font-unify | 全站字体统一 + 广告日明细字号/表头排序 | 01a10506-4459-7668-b8bc-2c9c6958e703 | feature/ui-font-unify | tts_erp_v2/static/css/tokens.css, tts_erp_v2/static/css/common.css, tts_erp_v2/static/css/ad-daily.css, tts_erp_v2/templates/pages/*.html, tts_erp_v2/api/v2/ad_daily.py, tts_erp_v2/static/js/ad-daily.js, scripts/probe_ui_font_audit.*, docs/design/ui-style-system.md, tests/api/test_ad_daily*.py, tests/**/test_*font*.py | ready | 6807f83 | 7f2ae4c | 2026-10-04 04:26 |
-=======
 | ui-font-unify | 全站字体统一 + 广告日明细字号/表头排序 | 01a10506-4459-7668-b8bc-2c9c6958e703 | feature/ui-font-unify | tts_erp_v2/static/css/tokens.css, tts_erp_v2/static/css/common.css, tts_erp_v2/static/css/ad-daily.css, tts_erp_v2/templates/pages/*.html, tts_erp_v2/api/v2/ad_daily.py, tts_erp_v2/static/js/ad-daily.js, scripts/probe_ui_font_audit.*, docs/design/ui-style-system.md, tests/api/test_ad_daily*.py, tests/**/test_*font*.py | active | — | — | 2026-10-04 04:26 |
-| miaoshou-doc-cleanup | 移除 miaoshou.purchase_orders 不存在表的退役段 | 01a10505-18c8e3c2 | docs/drop-miaoshou-purchase-orders-section / .worktrees/docs-miaoshou-purchase-orders | docs/reference/miaoshou-platform.md | ready | 0ae97c4 | 0c67df3 | 2026-10-04 03:56 |
->>>>>>> 0fc17b3 (chore: ui-font-unify 同步 master 前回到 active)
