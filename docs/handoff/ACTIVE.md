@@ -16,3 +16,4 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| render-gates | 渲染回归下沉 fast：浏览器层 + 静态字体 lint | 01a10506-4459-7668-b8bc-2c9c6958e703 | feature/render-gates | tests/render_support.py, tests/browser/*.py, tests/e2e/conftest.py, tests/e2e/test_ui_render_smoke.py, tests/api/test_style_tokens.py, pyproject.toml, docs/guides/test-domains.md, docs/guides/commands-reference.md | draft | — | — | 2026-10-04 06:49 |
