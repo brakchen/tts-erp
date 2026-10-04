@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from tts_erp_v2.api.deps import require_destructive_script_guard
 from tts_erp_v2.db.models.publishing import VideoPublishAttempt, VideoPublishTask
-from tts_erp_v2.publishing.adb_device import AdbDevice
+from tts_erp_v2.publishing.adb_device import AdbDevice, DeviceUnavailable
 from tts_erp_v2.publishing.artemis_client import (
     ArtemisClient,
     ArtemisResult,
@@ -76,6 +76,7 @@ async def dispatch_one(deps: PublishDependencies) -> str:
 
 async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
     local = deps.spool_dir / str(task_id) / "video.mp4"
+    pre_artemis = True
     try:
         with deps.session_factory() as session:
             task = _get(session, task_id)
@@ -139,25 +140,36 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
             )
             session.commit()
 
+        device_path = deps.adb.device_path(task_id)
+        with deps.session_factory() as session:
+            task = _get(session, task_id)
+            _assert_lease(task, deps.instance_id)
+            task.device_path = device_path
+            task.device_cleanup_status = "pending"
+            touch_task(
+                session,
+                task,
+                stage=TaskStage.STAGING_DEVICE.value,
+                lease_seconds=deps.lease_seconds,
+            )
+            session.commit()
+
         async def stage_device() -> None:
             await deps.adb.check_device(device_serial)
             await deps.adb.check_package(device_serial, app_package)
             await deps.adb.stage_video(
                 device_serial,
                 local,
-                f"/sdcard/Movies/TTSERP/tts_erp_{task_id}.mp4",
+                deps.adb.device_path(task_id),
             )
             await deps.adb.verify_media_visible(
-                device_serial, f"/sdcard/Movies/TTSERP/tts_erp_{task_id}.mp4"
+                device_serial, deps.adb.device_path(task_id)
             )
 
         await _run_external(task_id, deps, stage_device)
-        device_path = f"/sdcard/Movies/TTSERP/tts_erp_{task_id}.mp4"
         with deps.session_factory() as session:
             task = _get(session, task_id)
             _assert_lease(task, deps.instance_id)
-            task.device_path = device_path
-            task.device_cleanup_status = "pending"
             touch_task(
                 session,
                 task,
@@ -167,11 +179,22 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
             attempt = create_attempt(session, task, kind=AttemptKind.PUBLISH)
             session.commit()
             attempt_id = attempt.id
+        pre_artemis = False
         await _run_attempt(task_id, attempt_id, deps)
     except LeaseLost:
         return
-    except Exception as exc:  # noqa: BLE001 - persist unexpected worker failures
-        await _mark_unexpected(task_id, str(exc), deps)
+    except DeviceUnavailable as exc:
+        await _safe_retry(
+            task_id,
+            f"DEVICE_UNAVAILABLE:{exc}",
+            deps,
+            stage=TaskStage.WAITING_DEVICE.value,
+        )
+    except Exception as exc:  # noqa: BLE001 - persist worker failures
+        if pre_artemis:
+            await _safe_retry(task_id, str(exc), deps, stage=TaskStage.QUEUED.value)
+        else:
+            await _mark_unexpected(task_id, str(exc), deps)
     finally:
         local.unlink(missing_ok=True)
         with suppress(OSError):
@@ -357,19 +380,53 @@ async def _run_external(
     operation: Callable[[], Awaitable[Any]],
 ) -> Any:
     lost = asyncio.Event()
+    _renew_lease_now(task_id, deps)
     heartbeat = asyncio.create_task(
         _lease_heartbeat(task_id, deps, lost), name="publish-lease-heartbeat"
     )
+    operation_error: BaseException | None = None
+    result: Any = None
     try:
         result = await operation()
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - re-raise after fencing check
+        operation_error = exc
     finally:
         heartbeat.cancel()
         await asyncio.gather(heartbeat, return_exceptions=True)
     if lost.is_set():
         raise LeaseLost(task_id)
+    if operation_error is not None:
+        raise operation_error
     with deps.session_factory() as session:
         _assert_lease(_get(session, task_id), deps.instance_id)
     return result
+
+
+def _renew_lease_now(task_id: UUID, deps: PublishDependencies) -> None:
+    with deps.session_factory() as session:
+        task = _get(session, task_id)
+        _assert_lease(task, deps.instance_id)
+        expected_version = task.row_version
+        result = session.execute(
+            update(VideoPublishTask)
+            .where(
+                VideoPublishTask.public_id == task_id,
+                VideoPublishTask.lease_owner == deps.instance_id,
+                VideoPublishTask.lease_expires_at > func.now(),
+                VideoPublishTask.row_version == expected_version,
+            )
+            .values(
+                heartbeat_at=func.now(),
+                lease_expires_at=func.now() + timedelta(seconds=deps.lease_seconds),
+                row_version=expected_version + 1,
+            )
+        )
+        if getattr(result, "rowcount", None) != 1:
+            session.rollback()
+            raise LeaseLost(task_id)
+        session.commit()
 
 
 async def _lease_heartbeat(
@@ -453,30 +510,76 @@ def _get(session: Session, task_id: UUID) -> VideoPublishTask:
     return task
 
 
-async def _safe_retry(task_id: UUID, error: str, deps: PublishDependencies) -> None:
+async def _safe_retry(
+    task_id: UUID,
+    error: str,
+    deps: PublishDependencies,
+    *,
+    stage: str = TaskStage.QUEUED.value,
+) -> None:
     with deps.session_factory() as session:
         task = _get(session, task_id)
-        task.last_error_code = error[:100]
-        task.last_error_message = error[:500]
-        if task.attempt_count >= deps.max_attempts:
-            task.status = TaskStatus.FAILED.value
-            task.stage = TaskStage.DONE.value
-        else:
-            task.status = TaskStatus.PENDING.value
-            task.stage = TaskStage.QUEUED.value
-            task.queued_at = datetime.now(UTC)
-        release_lease(task)
-        task.row_version += 1
+        if task.lease_owner != deps.instance_id:
+            session.rollback()
+            return
+        expected_version = task.row_version
+        terminal = task.attempt_count >= deps.max_attempts
+        now = datetime.now(UTC)
+        delay = min(300, 5 * (2 ** min(task.attempt_count, 5)))
+        values = {
+            "status": TaskStatus.FAILED.value if terminal else TaskStatus.PENDING.value,
+            "stage": TaskStage.DONE.value if terminal else stage,
+            "last_error_code": error[:100],
+            "last_error_message": error[:500],
+            "queued_at": None if terminal else now,
+            "next_attempt_at": None if terminal else now + timedelta(seconds=delay),
+            "lease_owner": None,
+            "lease_expires_at": None,
+            "heartbeat_at": None,
+            "row_version": expected_version + 1,
+        }
+        result = session.execute(
+            update(VideoPublishTask)
+            .where(
+                VideoPublishTask.public_id == task_id,
+                VideoPublishTask.lease_owner == deps.instance_id,
+                VideoPublishTask.row_version == expected_version,
+            )
+            .values(**values)
+        )
+        if getattr(result, "rowcount", None) != 1:
+            session.rollback()
+            return
         session.commit()
 
 
 async def _mark_failed(task_id: UUID, code: str, deps: PublishDependencies) -> None:
     with deps.session_factory() as session:
         task = _get(session, task_id)
-        task.status = TaskStatus.FAILED.value
-        task.stage = TaskStage.DONE.value
-        task.last_error_code = code
-        release_lease(task)
+        if task.lease_owner != deps.instance_id:
+            session.rollback()
+            return
+        expected_version = task.row_version
+        result = session.execute(
+            update(VideoPublishTask)
+            .where(
+                VideoPublishTask.public_id == task_id,
+                VideoPublishTask.lease_owner == deps.instance_id,
+                VideoPublishTask.row_version == expected_version,
+            )
+            .values(
+                status=TaskStatus.FAILED.value,
+                stage=TaskStage.DONE.value,
+                last_error_code=code,
+                lease_owner=None,
+                lease_expires_at=None,
+                heartbeat_at=None,
+                row_version=expected_version + 1,
+            )
+        )
+        if getattr(result, "rowcount", None) != 1:
+            session.rollback()
+            return
         session.commit()
 
 
@@ -485,11 +588,31 @@ async def _mark_unexpected(
 ) -> None:
     with deps.session_factory() as session:
         task = _get(session, task_id)
-        task.status = TaskStatus.NEEDS_REVIEW.value
-        task.stage = TaskStage.DONE.value
-        task.last_error_code = "UNEXPECTED_WORKER_FAILURE"
-        task.last_error_message = error[:500]
-        release_lease(task)
+        if task.lease_owner != deps.instance_id:
+            session.rollback()
+            return
+        expected_version = task.row_version
+        result = session.execute(
+            update(VideoPublishTask)
+            .where(
+                VideoPublishTask.public_id == task_id,
+                VideoPublishTask.lease_owner == deps.instance_id,
+                VideoPublishTask.row_version == expected_version,
+            )
+            .values(
+                status=TaskStatus.NEEDS_REVIEW.value,
+                stage=TaskStage.DONE.value,
+                last_error_code="UNEXPECTED_WORKER_FAILURE",
+                last_error_message=error[:500],
+                lease_owner=None,
+                lease_expires_at=None,
+                heartbeat_at=None,
+                row_version=expected_version + 1,
+            )
+        )
+        if getattr(result, "rowcount", None) != 1:
+            session.rollback()
+            return
         session.commit()
 
 
@@ -497,11 +620,30 @@ async def _mark_spool_cleanup(task_id: UUID, deps: PublishDependencies) -> None:
     with deps.session_factory() as session:
         task = _get(session, task_id)
         if task.lease_owner not in {None, deps.instance_id}:
+            session.rollback()
             return
-        if task.spool_cleanup_status in {"pending", "not_started"}:
-            task.spool_cleanup_status = "succeeded"
-            task.spool_cleanup_error = None
-            session.commit()
+        if task.spool_cleanup_status not in {"pending", "not_started"}:
+            session.rollback()
+            return
+        expected_version = task.row_version
+        result = session.execute(
+            update(VideoPublishTask)
+            .where(
+                VideoPublishTask.public_id == task_id,
+                VideoPublishTask.row_version == expected_version,
+                (VideoPublishTask.lease_owner == deps.instance_id)
+                | (VideoPublishTask.lease_owner.is_(None)),
+            )
+            .values(
+                spool_cleanup_status="succeeded",
+                spool_cleanup_error=None,
+                row_version=expected_version + 1,
+            )
+        )
+        if getattr(result, "rowcount", None) != 1:
+            session.rollback()
+            return
+        session.commit()
 
 
 async def _cleanup_success(task_id: UUID, deps: PublishDependencies) -> None:
@@ -536,6 +678,8 @@ async def _cleanup_success(task_id: UUID, deps: PublishDependencies) -> None:
                 lambda: deps.adb.remove_staged_video(serial, device_path),
             )
             device_error = None
+        except LeaseLost:
+            raise
         except Exception as exc:  # noqa: BLE001 - persisted as cleanup status
             device_error = str(exc)[:500]
     object_error = guard_error
@@ -547,22 +691,45 @@ async def _cleanup_success(task_id: UUID, deps: PublishDependencies) -> None:
                 lambda: asyncio.to_thread(deps.store.remove, object_key),
             )
             object_error = None
+        except LeaseLost:
+            raise
         except Exception as exc:  # noqa: BLE001 - persisted as cleanup status
             object_error = str(exc)[:500]
     with deps.session_factory() as session:
         task = _get(session, task_id)
+        if task.lease_owner != deps.instance_id:
+            session.rollback()
+            return
+        expected_version = task.row_version
+        values: dict[str, Any] = {
+            "status": TaskStatus.SUCCEEDED.value,
+            "stage": TaskStage.DONE.value,
+            "completed_at": datetime.now(UTC),
+            "lease_owner": None,
+            "lease_expires_at": None,
+            "heartbeat_at": None,
+            "row_version": expected_version + 1,
+        }
         if device_needed:
-            task.device_cleanup_status = "failed" if device_error else "succeeded"
-            task.device_cleanup_error = device_error
+            values["device_cleanup_status"] = "failed" if device_error else "succeeded"
+            values["device_cleanup_error"] = device_error
         if object_needed:
-            task.object_cleanup_status = "failed" if object_error else "succeeded"
-            task.object_cleanup_error = object_error
+            values["object_cleanup_status"] = "failed" if object_error else "succeeded"
+            values["object_cleanup_error"] = object_error
             if not object_error:
-                task.object_deleted_at = datetime.now(UTC)
-        task.status = TaskStatus.SUCCEEDED.value
-        task.stage = TaskStage.DONE.value
-        task.completed_at = datetime.now(UTC)
-        release_lease(task)
+                values["object_deleted_at"] = datetime.now(UTC)
+        result = session.execute(
+            update(VideoPublishTask)
+            .where(
+                VideoPublishTask.public_id == task_id,
+                VideoPublishTask.lease_owner == deps.instance_id,
+                VideoPublishTask.row_version == expected_version,
+            )
+            .values(**values)
+        )
+        if getattr(result, "rowcount", None) != 1:
+            session.rollback()
+            return
         session.commit()
 
 

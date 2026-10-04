@@ -17,6 +17,12 @@ async def test_adb_adapter_rejects_unmanaged_delete_path() -> None:
         await AdbDevice().remove_staged_video("device", "/sdcard/DCIM/other.mp4")
 
 
+def test_adb_adapter_uses_configured_album_path() -> None:
+    device = AdbDevice(album="Campaign")
+    assert device.album_directory == "/sdcard/Movies/Campaign"
+    assert device.device_path("task") == "/sdcard/Movies/Campaign/tts_erp_task.mp4"
+
+
 def test_artemis_terminal_statuses_are_bounded() -> None:
     assert ArtemisResult(
         session_id=__import__("uuid").uuid4(), status="success"

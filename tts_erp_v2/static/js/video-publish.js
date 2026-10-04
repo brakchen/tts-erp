@@ -243,9 +243,11 @@
     const signal = state.refreshController.signal;
     try {
       const query = state.filter ? `?status=${encodeURIComponent(state.filter)}` : "";
-      const [current, list] = await Promise.all([
+      const detailPath = state.detail?.taskId ? `/tasks/${state.detail.taskId}` : null;
+      const [current, list, detail] = await Promise.all([
         request("/tasks/current", { signal }),
         request(`/tasks${query}`, { signal }),
+        detailPath ? request(detailPath, { signal }) : Promise.resolve(null),
       ]);
       if (generation !== state.generation) return;
       state.refreshFailures = 0;
@@ -254,6 +256,10 @@
         renderRail(current.task);
       }
       if (!list.notModified) renderTasks(list);
+      if (detail && !detail.notModified) {
+        state.detail = detail;
+        renderDetail(detail);
+      }
       $("publish-last-refreshed").textContent = `上次刷新 ${new Date().toLocaleTimeString()}`;
     } catch (error) {
       if (error.name === "AbortError") return;
@@ -274,23 +280,29 @@
     state.timer = setTimeout(async () => { await refresh(); schedule(); }, seconds * 1000);
   }
 
-  async function openDetail(id) {
-    try {
-      state.detail = await request(`/tasks/${id}`);
+  function renderDetail(detail) {
       const drawer = $("publish-drawer-content");
       drawer.replaceChildren();
       const heading = document.createElement("h2");
-      heading.textContent = `${state.detail.filename} · ${state.detail.status}`;
+      heading.textContent = `${detail.filename} · ${detail.status}`;
       drawer.append(heading);
       const caption = document.createElement("p");
-      caption.textContent = state.detail.caption;
+      caption.textContent = detail.caption;
       drawer.append(caption);
-      (state.detail.attempts || []).forEach((attempt) => {
+      (detail.attempts || []).forEach((attempt) => {
         const section = document.createElement("section");
         section.className = "drawer-attempt";
         section.textContent = `第 ${attempt.sequenceNo} 次 ${attempt.kind} · ${attempt.status} · Artemis ID ${attempt.artemisSessionId}`;
         drawer.append(section);
       });
+  }
+
+  async function openDetail(id) {
+    try {
+      const detail = await request(`/tasks/${id}`);
+      if (detail.notModified) return;
+      state.detail = detail;
+      renderDetail(detail);
       $("publish-task-drawer").showModal();
     } catch (error) { notice(error.message, true); }
   }

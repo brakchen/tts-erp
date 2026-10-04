@@ -5,10 +5,11 @@ from typing import cast
 from uuid import uuid4
 
 import pytest
+from fastapi import Request, Response
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.accounts.pages import required_page_permission
-from tts_erp_v2.api.v2.video_publish import _etag
+from tts_erp_v2.api.v2.video_publish import _conditional, _etag
 from tts_erp_v2.db.models.publishing import VideoPublishTask
 from tts_erp_v2.publishing.artemis_client import ArtemisResult
 from tts_erp_v2.publishing.dispatcher import (
@@ -34,6 +35,22 @@ def test_missing_artemis_session_is_terminal_for_classification() -> None:
     assert result.terminal is True
     classification = classify_failure(artemis_status="missing")
     assert classification.requires_verification is True
+
+
+def test_detail_conditional_response_returns_304() -> None:
+    payload = {"taskId": "task", "status": "running"}
+    tag = _etag(payload)
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/v2/video-publish/tasks/task",
+            "headers": [(b"if-none-match", tag.encode())],
+        }
+    )
+    cached = _conditional(request, Response(), payload)
+    assert cached is not None
+    assert cached.status_code == 304
 
 
 def test_etag_ignores_fresh_server_time_metadata() -> None:

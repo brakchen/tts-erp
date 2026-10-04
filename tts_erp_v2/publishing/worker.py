@@ -31,7 +31,10 @@ async def run() -> None:
     deps = PublishDependencies(
         session_factory=session_factory,
         store=store,
-        adb=AdbDevice(os.environ.get("ADB_BINARY", "adb")),
+        adb=AdbDevice(
+            os.environ.get("ADB_BINARY", "adb"),
+            album=os.environ.get("TIKTOK_PUBLISH_ALBUM", "TTSERP"),
+        ),
         artemis=ArtemisClient(
             os.environ["ARTEMIS_BASE_URL"], token=os.environ.get("ARTEMIS_TOKEN")
         ),

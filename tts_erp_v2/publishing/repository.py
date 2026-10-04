@@ -43,7 +43,7 @@ def create_attempt(
     *,
     kind: AttemptKind,
     related: VideoPublishAttempt | None = None,
-    album: str = "TTSERP",
+    album: str | None = None,
 ) -> VideoPublishAttempt:
     locked_task = session.get(VideoPublishTask, task.id, with_for_update=True)
     if locked_task is None:
@@ -64,6 +64,7 @@ def create_attempt(
     session_id = uuid4()
     if kind == AttemptKind.PUBLISH:
         prompt_version = PUBLISH_PROMPT_VERSION
+        album = album or os.environ.get("TIKTOK_PUBLISH_ALBUM", "TTSERP")
         prompt = build_publish_prompt(
             caption=task.caption,
             app_package=task.target_app_package,

@@ -377,18 +377,21 @@ def list_tasks(
     return cached if cached is not None else payload
 
 
-@router.get("/tasks/{task_id}")
+@router.get("/tasks/{task_id}", response_model=None)
 def detail(
     task_id: UUID,
     request: Request,
     session: Annotated[Session, Depends(get_session)],
+    response: Response,
     include_diagnostics: bool = Query(default=False, alias="includeDiagnostics"),
-) -> dict:
+) -> dict | Response:
     if include_diagnostics:
         require_role_at_least(request, "admin")
-    return _snapshot(
+    payload = _snapshot(
         _task(session, task_id), detail=True, diagnostics=include_diagnostics
     )
+    cached = _conditional(request, response, payload)
+    return cached if cached is not None else payload
 
 
 @router.post("/tasks/{task_id}/cancel")
