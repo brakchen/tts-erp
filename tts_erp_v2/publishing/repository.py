@@ -157,22 +157,45 @@ def _lease_cleanup_task(
     task = session.scalars(
         select(VideoPublishTask)
         .where(
-            VideoPublishTask.status == TaskStatus.SUCCEEDED.value,
             or_(
                 and_(
-                    VideoPublishTask.device_cleanup_status.in_(["pending", "failed"]),
-                    (VideoPublishTask.device_cleanup_next_attempt_at.is_(None))
-                    | (VideoPublishTask.device_cleanup_next_attempt_at <= func.now()),
+                    VideoPublishTask.status.in_(
+                        [TaskStatus.SUCCEEDED.value, TaskStatus.CANCELLED.value]
+                    ),
+                    or_(
+                        and_(
+                            VideoPublishTask.device_cleanup_status.in_(
+                                ["pending", "failed"]
+                            ),
+                            (VideoPublishTask.device_cleanup_next_attempt_at.is_(None))
+                            | (VideoPublishTask.device_cleanup_next_attempt_at <= now),
+                        ),
+                        and_(
+                            VideoPublishTask.object_cleanup_status.in_(
+                                ["pending", "failed"]
+                            ),
+                            (VideoPublishTask.object_cleanup_next_attempt_at.is_(None))
+                            | (VideoPublishTask.object_cleanup_next_attempt_at <= now),
+                        ),
+                    ),
                 ),
                 and_(
-                    VideoPublishTask.object_cleanup_status.in_(["pending", "failed"]),
-                    (VideoPublishTask.object_cleanup_next_attempt_at.is_(None))
-                    | (VideoPublishTask.object_cleanup_next_attempt_at <= func.now()),
+                    VideoPublishTask.status.in_(
+                        [
+                            TaskStatus.SUCCEEDED.value,
+                            TaskStatus.CANCELLED.value,
+                            TaskStatus.FAILED.value,
+                            TaskStatus.NEEDS_REVIEW.value,
+                        ]
+                    ),
+                    VideoPublishTask.spool_cleanup_status.in_(["pending", "failed"]),
+                    (VideoPublishTask.spool_cleanup_next_attempt_at.is_(None))
+                    | (VideoPublishTask.spool_cleanup_next_attempt_at <= now),
                 ),
             ),
             (VideoPublishTask.lease_owner.is_(None))
             | (VideoPublishTask.lease_expires_at.is_(None))
-            | (VideoPublishTask.lease_expires_at < func.now()),
+            | (VideoPublishTask.lease_expires_at < now),
         )
         .order_by(VideoPublishTask.device_cleanup_next_attempt_at, VideoPublishTask.id)
         .with_for_update(skip_locked=True)

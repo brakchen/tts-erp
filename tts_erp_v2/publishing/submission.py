@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 from typing import cast
 from uuid import UUID, uuid4
@@ -179,6 +179,10 @@ def cancel_task(
     except Exception as exc:  # noqa: BLE001 - cleanup is independent of business result
         task.object_cleanup_status = "failed"
         task.object_cleanup_error = str(exc)[:500]
+        task.object_cleanup_attempts += 1
+        task.object_cleanup_next_attempt_at = datetime.now(UTC) + timedelta(
+            seconds=min(300, 5 * (2 ** min(task.object_cleanup_attempts - 1, 5)))
+        )
         session.commit()
     return task
 

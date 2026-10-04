@@ -483,7 +483,7 @@ def retry_cleanup(
     _lock_publish_slot(session)
     task = _task(session, task_id, lock=True)
     now = datetime.now(UTC)
-    if task.status != "succeeded" and task.stage != "cleaning":
+    if task.status not in {"succeeded", "cancelled"} and task.stage != "cleaning":
         raise HTTPException(status.HTTP_409_CONFLICT, "CLEANUP_RETRY_NOT_AVAILABLE")
     if (
         task.lease_owner
@@ -510,7 +510,7 @@ def retry_cleanup(
         raise HTTPException(status.HTTP_409_CONFLICT, "PUBLISH_SLOT_BUSY")
     expected_version = task.row_version
     values: dict[str, object] = {
-        "status": "running",
+        "status": "cancelled" if task.status == "cancelled" else "running",
         "stage": "cleaning",
         "lease_owner": None,
         "lease_expires_at": None,
@@ -519,7 +519,7 @@ def retry_cleanup(
     }
     for name in failed_names:
         values[f"{name}_cleanup_status"] = "pending"
-        if name in {"device", "object"}:
+        if name in {"device", "spool", "object"}:
             values[f"{name}_cleanup_next_attempt_at"] = now
     result = session.execute(
         update(VideoPublishTask)

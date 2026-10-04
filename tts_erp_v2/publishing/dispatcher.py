@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -110,11 +109,25 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
                     session.commit()
                     await _run_attempt(task_id, attempt_id, deps)
                     return
-            if task.stage == TaskStage.CLEANING.value or (
-                task.status == TaskStatus.SUCCEEDED.value
-                and (
-                    task.device_cleanup_status in {"pending", "failed"}
-                    or task.object_cleanup_status in {"pending", "failed"}
+            if (
+                task.stage == TaskStage.CLEANING.value
+                or (
+                    task.status
+                    in {TaskStatus.SUCCEEDED.value, TaskStatus.CANCELLED.value}
+                    and (
+                        task.device_cleanup_status in {"pending", "failed"}
+                        or task.object_cleanup_status in {"pending", "failed"}
+                    )
+                )
+                or (
+                    task.status
+                    in {
+                        TaskStatus.SUCCEEDED.value,
+                        TaskStatus.CANCELLED.value,
+                        TaskStatus.FAILED.value,
+                        TaskStatus.NEEDS_REVIEW.value,
+                    }
+                    and task.spool_cleanup_status in {"pending", "failed"}
                 )
             ):
                 session.commit()
@@ -210,10 +223,19 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
         else:
             await _mark_unexpected(task_id, str(exc), deps)
     finally:
-        local.unlink(missing_ok=True)
-        with suppress(OSError):
-            local.parent.rmdir()
-        await _mark_spool_cleanup(task_id, deps)
+        spool_error: str | None = None
+        try:
+            local.unlink(missing_ok=True)
+        except OSError as exc:
+            spool_error = str(exc)[:500]
+        if spool_error is None:
+            try:
+                local.parent.rmdir()
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                spool_error = str(exc)[:500]
+        await _mark_spool_cleanup(task_id, deps, error=spool_error)
 
 
 async def _run_attempt(
@@ -646,13 +668,15 @@ async def _mark_unexpected(
         session.commit()
 
 
-async def _mark_spool_cleanup(task_id: UUID, deps: PublishDependencies) -> None:
+async def _mark_spool_cleanup(
+    task_id: UUID, deps: PublishDependencies, *, error: str | None = None
+) -> None:
     with deps.session_factory() as session:
         task = _get(session, task_id)
         if task.lease_owner not in {None, deps.instance_id}:
             session.rollback()
             return
-        if task.spool_cleanup_status not in {"pending", "not_started"}:
+        if task.spool_cleanup_status not in {"pending", "not_started", "failed"}:
             session.rollback()
             return
         expected_version = task.row_version
@@ -665,8 +689,18 @@ async def _mark_spool_cleanup(task_id: UUID, deps: PublishDependencies) -> None:
                 | (VideoPublishTask.lease_owner.is_(None)),
             )
             .values(
-                spool_cleanup_status="succeeded",
-                spool_cleanup_error=None,
+                spool_cleanup_status="failed" if error else "succeeded",
+                spool_cleanup_error=error,
+                spool_cleanup_attempts=task.spool_cleanup_attempts
+                + (1 if error else 0),
+                spool_cleanup_next_attempt_at=(
+                    datetime.now(UTC)
+                    + timedelta(
+                        seconds=_cleanup_retry_delay(task.spool_cleanup_attempts)
+                    )
+                    if error
+                    else None
+                ),
                 row_version=expected_version + 1,
             )
         )
@@ -685,8 +719,24 @@ async def _cleanup_success(task_id: UUID, deps: PublishDependencies) -> None:
             task.device_path,
             task.object_key,
         )
-        device_needed = task.device_cleanup_status != "succeeded"
-        object_needed = task.object_cleanup_status != "succeeded"
+        cleanup_business = (
+            task.status
+            in {
+                TaskStatus.SUCCEEDED.value,
+                TaskStatus.CANCELLED.value,
+            }
+            or task.stage == TaskStage.CLEANING.value
+        )
+        device_needed = cleanup_business and task.device_cleanup_status != "succeeded"
+        object_needed = cleanup_business and task.object_cleanup_status != "succeeded"
+        business_status = (
+            TaskStatus.CANCELLED.value
+            if task.status == TaskStatus.CANCELLED.value
+            else task.status
+            if task.status in {TaskStatus.FAILED.value, TaskStatus.NEEDS_REVIEW.value}
+            else TaskStatus.SUCCEEDED.value
+        )
+        completed_at = task.completed_at or datetime.now(UTC)
         session.commit()
     guard_error = None
     try:
@@ -732,9 +782,9 @@ async def _cleanup_success(task_id: UUID, deps: PublishDependencies) -> None:
             return
         expected_version = task.row_version
         values: dict[str, Any] = {
-            "status": TaskStatus.SUCCEEDED.value,
+            "status": business_status,
             "stage": TaskStage.DONE.value,
-            "completed_at": datetime.now(UTC),
+            "completed_at": completed_at,
             "lease_owner": None,
             "lease_expires_at": None,
             "heartbeat_at": None,

@@ -15,6 +15,7 @@ from tts_erp_v2.publishing.dispatcher import (
     PublishDependencies,
     _cleanup_success,
     _defer_for_device_cleanup,
+    _mark_spool_cleanup,
     _safe_retry,
     dispatch_one,
 )
@@ -28,6 +29,7 @@ def _task(
     *,
     device_cleanup_status: str = "not_started",
     object_cleanup_status: str = "not_started",
+    spool_cleanup_status: str = "not_started",
     status: str = TaskStatus.PENDING.value,
     stage: str = TaskStage.QUEUED.value,
     device_path: str | None = "/sdcard/Movies/TEST/video.mp4",
@@ -48,6 +50,7 @@ def _task(
         device_path=device_path,
         device_cleanup_status=device_cleanup_status,
         object_cleanup_status=object_cleanup_status,
+        spool_cleanup_status=spool_cleanup_status,
         queued_at=datetime.now(UTC),
     )
 
@@ -278,6 +281,137 @@ async def test_worker_automatically_retries_object_cleanup_with_backoff(
     db_session.expire_all()
     assert task.object_cleanup_status == "succeeded"
     assert task.object_cleanup_next_attempt_at is None
+
+
+@pytest.mark.asyncio
+async def test_cancelled_object_cleanup_supports_auto_and_manual_retry(
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "tts_erp_v2.publishing.dispatcher.require_destructive_script_guard",
+        lambda **_kwargs: None,
+    )
+    task = _task(
+        status=TaskStatus.CANCELLED.value,
+        stage=TaskStage.DONE.value,
+        device_cleanup_status="succeeded",
+        object_cleanup_status="failed",
+        spool_cleanup_status="succeeded",
+    )
+    task.object_cleanup_next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
+    db_session.add(task)
+    db_session.flush()
+    db_session.commit()
+    store = _CleanupStore(fail=True)
+    deps = cast(
+        PublishDependencies,
+        SimpleNamespace(
+            session_factory=_factory(db_session),
+            instance_id="cleanup-worker",
+            lease_seconds=30,
+            max_attempts=3,
+            adb=_CleanupAdb(),
+            store=store,
+            spool_dir=tmp_path,
+        ),
+    )
+    await dispatch_one(deps)
+    db_session.expire_all()
+    assert task.status == TaskStatus.CANCELLED.value
+    assert task.object_cleanup_status == "failed"
+    assert task.object_cleanup_attempts == 1
+    store.fail = False
+    result = retry_cleanup(task.public_id, _request(), db_session)
+    assert result["status"] == TaskStatus.CANCELLED.value
+    assert result["stage"] == TaskStage.CLEANING.value
+    assert result["cleanup"]["object"]["status"] == "pending"
+    db_session.expire_all()
+    assert task.status == TaskStatus.CANCELLED.value
+    assert task.stage == TaskStage.CLEANING.value
+    assert task.lease_owner is None
+    assert task.object_cleanup_status == "pending"
+    next_attempt = task.object_cleanup_next_attempt_at
+    assert next_attempt is not None
+    assert next_attempt <= datetime.now(UTC)
+    dispatch_result = await dispatch_one(deps)
+    db_session.expire_all()
+    assert dispatch_result == "processed"
+    assert task.status == TaskStatus.CANCELLED.value
+    assert task.object_cleanup_status == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_spool_unlink_failure_persists_and_retries_with_fencing(
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "tts_erp_v2.publishing.dispatcher.require_destructive_script_guard",
+        lambda **_kwargs: None,
+    )
+    task = _task(
+        status=TaskStatus.SUCCEEDED.value,
+        stage=TaskStage.DONE.value,
+        device_cleanup_status="succeeded",
+        object_cleanup_status="succeeded",
+        spool_cleanup_status="pending",
+    )
+    task.spool_cleanup_next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
+    db_session.add(task)
+    db_session.flush()
+    db_session.commit()
+    deps = cast(
+        PublishDependencies,
+        SimpleNamespace(
+            session_factory=_factory(db_session),
+            instance_id="cleanup-worker",
+            lease_seconds=30,
+            max_attempts=3,
+            adb=_CleanupAdb(),
+            store=_CleanupStore(),
+            spool_dir=tmp_path,
+        ),
+    )
+    original_unlink = Path.unlink
+
+    def fail_video_unlink(path: Path, *, missing_ok: bool = False) -> None:
+        if path.name == "video.mp4":
+            raise OSError("TEST_SPOOL_BUSY")
+        original_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", fail_video_unlink)
+    await dispatch_one(deps)
+    db_session.expire_all()
+    assert task.status == TaskStatus.SUCCEEDED.value
+    assert task.spool_cleanup_status == "failed"
+    assert task.spool_cleanup_error == "TEST_SPOOL_BUSY"
+    assert task.spool_cleanup_attempts == 1
+    task.spool_cleanup_next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
+    db_session.commit()
+    monkeypatch.setattr(Path, "unlink", original_unlink)
+    await dispatch_one(deps)
+    db_session.expire_all()
+    assert task.spool_cleanup_status == "succeeded"
+    assert task.spool_cleanup_next_attempt_at is None
+
+    stale = _task(
+        status=TaskStatus.SUCCEEDED.value,
+        stage=TaskStage.DONE.value,
+        device_cleanup_status="succeeded",
+        object_cleanup_status="succeeded",
+        spool_cleanup_status="failed",
+    )
+    stale.lease_owner = "worker-b"
+    db_session.add(stale)
+    db_session.flush()
+    db_session.commit()
+    await _mark_spool_cleanup(stale.public_id, deps)
+    db_session.expire_all()
+    assert stale.spool_cleanup_status == "failed"
+    assert stale.lease_owner == "worker-b"
 
 
 @pytest.mark.asyncio
