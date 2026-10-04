@@ -37,6 +37,7 @@ PAGES: tuple[PageDef, ...] = (
     PageDef("intercept-configs", "配", "拦截配置", "数据工具"),
     PageDef("intercept-requests", "录", "拦截记录", "数据工具"),
     PageDef("intercept-stats", "计", "拦截统计", "数据工具"),
+    PageDef("video-publish", "发", "视频发布", "数据工具"),
 )
 
 PAGE_BY_ID: dict[str, PageDef] = {p.page_id: p for p in PAGES}

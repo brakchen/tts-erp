@@ -87,6 +87,11 @@ from tts_erp_v2.db.models.procurement import (
     ProcurementAccount,
     ProcurementProduct,
 )
+from tts_erp_v2.db.models.publishing import (
+    PublishWorkerHeartbeat,
+    VideoPublishAttempt,
+    VideoPublishTask,
+)
 from tts_erp_v2.db.models.reporting import (
     FocusedSpu,
     ProductCostSnapshot,
@@ -138,6 +143,7 @@ __all__ = [
     "ProcurementProduct",
     "ProductCostSnapshot",
     "ProductProfitDaily",
+    "PublishWorkerHeartbeat",
     "RawRecord",
     "RuntimeConfigItem",
     "RuntimeConfigRevision",
@@ -154,6 +160,8 @@ __all__ = [
     "SyncJob",
     "TikTokAppCredential",
     "TrackingEvent",
+    "VideoPublishAttempt",
+    "VideoPublishTask",
 ]
 
 
