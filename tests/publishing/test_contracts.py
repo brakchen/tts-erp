@@ -49,6 +49,7 @@ def test_detail_api_returns_304_for_matching_etag(
             "method": "GET",
             "path": "/v2/video-publish/tasks/task",
             "headers": [(b"if-none-match", tag.encode())],
+            "api_key_role": "admin",
         }
     )
     monkeypatch.setattr(video_publish, "_task", lambda session, task_id: object())

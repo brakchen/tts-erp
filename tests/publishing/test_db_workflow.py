@@ -8,7 +8,14 @@ import pytest
 from fastapi import HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.api.v2.video_publish import config, list_tasks, retry_cleanup
+from tts_erp_v2.api.v2.video_publish import (
+    CreateIn,
+    config,
+    create_task,
+    detail,
+    list_tasks,
+    retry_cleanup,
+)
 from tts_erp_v2.db.models.publishing import VideoPublishTask
 from tts_erp_v2.publishing.dispatcher import (
     LeaseLost,
@@ -33,10 +40,14 @@ def _task(
     status: str = TaskStatus.PENDING.value,
     stage: str = TaskStage.QUEUED.value,
     device_path: str | None = "/sdcard/Movies/TEST/video.mp4",
+    created_by_user_id: int | None = None,
+    created_by_key_hash: str | None = None,
 ) -> VideoPublishTask:
     return VideoPublishTask(
         public_id=uuid4(),
         client_request_id=uuid4(),
+        created_by_user_id=created_by_user_id,
+        created_by_key_hash=created_by_key_hash,
         caption="TEST_caption",
         original_filename="TEST_video.mp4",
         content_type="video/mp4",
@@ -494,6 +505,68 @@ def test_continue_upload_reuses_awaiting_upload_ticket(
     assert url.endswith(task.object_key)
 
 
+def test_upload_ticket_replay_rejects_cross_user_owner(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ARTEMIS_DEVICE_SERIAL", "TEST_device")
+    monkeypatch.setenv("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video")
+
+    class UploadStore:
+        bucket = "tiktok-video"
+
+        def presign_put(self, key: str, content_type: str) -> str:
+            return f"https://upload.test/{key}"
+
+    task = _task(stage=TaskStage.AWAITING_UPLOAD.value, created_by_user_id=1)
+    db_session.add(task)
+    db_session.flush()
+    with pytest.raises(PermissionError, match="TASK_NOT_FOUND"):
+        create_upload_ticket(
+            db_session,
+            CreateCommand(
+                client_request_id=task.client_request_id,
+                filename=task.original_filename,
+                content_type=task.content_type,
+                size_bytes=task.size_bytes,
+                caption=task.caption,
+                actor_user_id=2,
+            ),
+            cast(VideoObjectStore, UploadStore()),
+        )
+
+
+def test_api_upload_replay_hides_cross_user_task(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ARTEMIS_DEVICE_SERIAL", "TEST_device")
+    monkeypatch.setenv("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video")
+
+    class UploadStore:
+        bucket = "tiktok-video"
+
+        def presign_put(self, key: str, content_type: str) -> str:
+            return f"https://upload.test/{key}"
+
+    task = _task(stage=TaskStage.AWAITING_UPLOAD.value, created_by_user_id=1)
+    db_session.add(task)
+    db_session.flush()
+    with pytest.raises(HTTPException) as exc_info:
+        create_task(
+            CreateIn(
+                clientRequestId=task.client_request_id,
+                filename=task.original_filename,
+                contentType=task.content_type,
+                sizeBytes=task.size_bytes,
+                caption=task.caption,
+            ),
+            _request(role="readwrite", user_id=2),
+            db_session,
+            cast(VideoObjectStore, UploadStore()),
+        )
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "TASK_NOT_FOUND"
+
+
 def test_filtered_task_list_exposes_unfiltered_poll_state(db_session: Session) -> None:
     running = _task(status=TaskStatus.RUNNING.value, stage=TaskStage.DOWNLOADING.value)
     queued = _task(status=TaskStatus.PENDING.value, stage=TaskStage.QUEUED.value)
@@ -516,6 +589,38 @@ def test_filtered_task_list_exposes_unfiltered_poll_state(db_session: Session) -
     assert payload["pollState"] == {"running": True, "queued": True}
 
 
+def test_task_list_and_detail_are_owner_scoped(
+    db_session: Session,
+) -> None:
+    owned = _task(created_by_user_id=1)
+    other = _task(created_by_user_id=2)
+    db_session.add_all([owned, other])
+    db_session.flush()
+    payload = cast(
+        dict,
+        list_tasks(
+            _request(role="readwrite", user_id=1),
+            db_session,
+            Response(),
+            status_filter=None,
+            limit=30,
+            cursor=None,
+        ),
+    )
+    assert [item["taskId"] for item in payload["items"]] == [str(owned.public_id)]
+    assert payload["items"][0]["clientRequestId"] == str(owned.client_request_id)
+    with pytest.raises(HTTPException) as exc_info:
+        detail(
+            other.public_id,
+            _request(role="readwrite", user_id=1),
+            db_session,
+            Response(),
+            include_diagnostics=False,
+        )
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "TASK_NOT_FOUND"
+
+
 def test_awaiting_upload_is_not_reported_as_queued_poll_work(
     db_session: Session,
 ) -> None:
@@ -536,16 +641,17 @@ def test_awaiting_upload_is_not_reported_as_queued_poll_work(
     assert payload["pollState"] == {"running": False, "queued": False}
 
 
-def _request() -> Request:
-    return Request(
-        {
-            "type": "http",
-            "method": "POST",
-            "path": "/v2/video-publish/tasks/cleanup/retry",
-            "headers": [],
-            "api_key_role": "readwrite",
-        }
-    )
+def _request(*, role: str = "admin", user_id: int | None = None) -> Request:
+    scope: dict[str, object] = {
+        "type": "http",
+        "method": "POST",
+        "path": "/v2/video-publish/tasks/cleanup/retry",
+        "headers": [],
+        "api_key_role": role,
+    }
+    if user_id is not None:
+        scope["user_id"] = user_id
+    return Request(scope)
 
 
 def test_cleanup_retry_rejects_live_lease_and_requeues_expired_lease(

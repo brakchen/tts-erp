@@ -11,10 +11,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select, text, update
+from sqlalchemy import false, or_, select, text, update
 from sqlalchemy.orm import Session, selectinload
 
 from tts_erp_v2.api.deps import (
+    caller_key_hash,
     get_session,
     require_destructive_guard,
     require_role_at_least,
@@ -94,14 +95,17 @@ def _attempt(a: VideoPublishAttempt, *, diagnostics: bool = False) -> dict:
 
 
 def _snapshot(
-    task: VideoPublishTask, *, detail: bool = False, diagnostics: bool = False
+    task: VideoPublishTask,
+    *,
+    detail: bool = False,
+    diagnostics: bool = False,
+    expose_client_request_id: bool = False,
 ) -> dict:
     attempts = sorted(task.attempts, key=lambda a: a.sequence_no, reverse=True)
     latest = attempts[0] if attempts else None
     actions = allowed_actions(task)
     data = {
         "taskId": str(task.public_id),
-        "clientRequestId": str(task.client_request_id),
         "filename": task.original_filename,
         "sizeBytes": task.size_bytes,
         "captionPreview": task.caption.splitlines()[0][:160] if task.caption else "",
@@ -116,6 +120,8 @@ def _snapshot(
         "updatedAt": task.updated_at,
         "allowedActions": [a.value for a in actions],
     }
+    if expose_client_request_id:
+        data["clientRequestId"] = str(task.client_request_id)
     if "continue_upload" in data["allowedActions"]:
         data["caption"] = task.caption
     if latest:
@@ -160,6 +166,47 @@ def _snapshot(
 
 def _mask(value: str) -> str:
     return value if len(value) <= 8 else f"{value[:4]}…{value[-4:]}"
+
+
+def _is_privileged(request: Request) -> bool:
+    grant = request.scope.get("access_grant")
+    role = getattr(getattr(grant, "role", None), "value", None)
+    return bool(
+        getattr(grant, "bypass", False)
+        or role == "admin"
+        or request.scope.get("api_key_role") == "admin"
+    )
+
+
+def _owner_clause(request: Request):
+    if _is_privileged(request):
+        return None
+    user_id = request.scope.get("user_id")
+    if user_id is not None:
+        return VideoPublishTask.created_by_user_id == user_id
+    key_hash = caller_key_hash(request)
+    if key_hash:
+        return VideoPublishTask.created_by_key_hash == key_hash
+    return false()
+
+
+def _owns_task(task: VideoPublishTask, request: Request) -> bool:
+    if _is_privileged(request):
+        return True
+    user_id = request.scope.get("user_id")
+    if user_id is not None:
+        return task.created_by_user_id == user_id
+    key_hash = caller_key_hash(request)
+    return bool(key_hash and task.created_by_key_hash == key_hash)
+
+
+def _task_for_actor(
+    session: Session, task_id: UUID, request: Request, *, lock: bool = False
+) -> VideoPublishTask:
+    task = _task(session, task_id, lock=True) if lock else _task(session, task_id)
+    if not _owns_task(task, request):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "TASK_NOT_FOUND")
+    return task
 
 
 def _etag(payload: object) -> str:
@@ -243,9 +290,12 @@ def create_task(
                 size_bytes=body.size_bytes,
                 caption=body.caption,
                 actor_user_id=request.scope.get("user_id"),
+                actor_key_hash=caller_key_hash(request),
             ),
             store,
         )
+    except PermissionError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "TASK_NOT_FOUND") from exc
     except ValueError as exc:
         code = str(exc)
         raise HTTPException(
@@ -254,7 +304,7 @@ def create_task(
             else status.HTTP_409_CONFLICT,
             {"code": code, "message": code},
         ) from exc
-    data = _snapshot(task)
+    data = _snapshot(task, expose_client_request_id=True)
     data.update(
         {
             "idempotentReplay": replay,
@@ -279,11 +329,11 @@ def refresh_upload_url(
 ) -> dict:
     require_role_at_least(request, "readwrite")
     _csrf(request)
-    task = _task(session, task_id)
+    task = _task_for_actor(session, task_id, request)
     if task.stage != "awaiting_upload":
         raise HTTPException(status.HTTP_409_CONFLICT, "TASK_ACTION_NOT_ALLOWED")
     return {
-        **_snapshot(task),
+        **_snapshot(task, expose_client_request_id=True),
         "upload": {
             "method": "PUT",
             "url": store.presign_put(task.object_key, task.content_type),
@@ -303,6 +353,7 @@ def confirm(
 ) -> dict:
     require_role_at_least(request, "readwrite")
     _csrf(request)
+    _task_for_actor(session, task_id, request)
     try:
         task = confirm_upload(session, task_id, store)
     except LookupError as exc:
@@ -312,7 +363,7 @@ def confirm(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             {"code": str(exc), "message": str(exc)},
         ) from exc
-    return _snapshot(task)
+    return _snapshot(task, expose_client_request_id=True)
 
 
 def _task(session: Session, task_id: UUID, *, lock: bool = False) -> VideoPublishTask:
@@ -357,16 +408,20 @@ def current(
     session: Annotated[Session, Depends(get_session)],
     response: Response,
 ) -> dict | Response:
-    task = session.scalar(
+    current_query = (
         select(VideoPublishTask)
         .where(VideoPublishTask.status == "running")
         .options(selectinload(VideoPublishTask.attempts))
         .order_by(VideoPublishTask.id)
         .limit(1)
     )
+    owner_clause = _owner_clause(request)
+    if owner_clause is not None:
+        current_query = current_query.where(owner_clause)
+    task = session.scalar(current_query)
     poll_state = _poll_state(session)
     payload = {
-        "task": _snapshot(task) if task else None,
+        "task": _snapshot(task, expose_client_request_id=True) if task else None,
         "pollState": poll_state,
         "suggestedPollSeconds": 2 if task else 30,
         "serverTime": datetime.now(UTC),
@@ -390,13 +445,16 @@ def list_tasks(
         .order_by(VideoPublishTask.created_at.desc(), VideoPublishTask.id.desc())
         .limit(limit)
     )
+    owner_clause = _owner_clause(request)
+    if owner_clause is not None:
+        query = query.where(owner_clause)
     if status_filter:
         query = query.where(VideoPublishTask.status == status_filter)
     if cursor:
         query = query.where(VideoPublishTask.id < cursor)
     rows = list(session.scalars(query))
     payload = {
-        "items": [_snapshot(t) for t in rows],
+        "items": [_snapshot(t, expose_client_request_id=True) for t in rows],
         "pollState": _poll_state(session),
         "nextCursor": rows[-1].id if len(rows) == limit else None,
         "totalApprox": len(rows),
@@ -417,7 +475,10 @@ def detail(
     if include_diagnostics:
         require_role_at_least(request, "admin")
     payload = _snapshot(
-        _task(session, task_id), detail=True, diagnostics=include_diagnostics
+        _task_for_actor(session, task_id, request),
+        detail=True,
+        diagnostics=include_diagnostics,
+        expose_client_request_id=True,
     )
     cached = _conditional(request, response, payload)
     return cached if cached is not None else payload
@@ -433,8 +494,13 @@ def cancel(
     require_role_at_least(request, "readwrite")
     _csrf(request)
     require_destructive_guard(request, op_name="video_publish.cancel_object")
+    _task_for_actor(session, task_id, request)
     try:
-        return _snapshot(cancel_task(session, task_id, store), detail=True)
+        return _snapshot(
+            cancel_task(session, task_id, store),
+            detail=True,
+            expose_client_request_id=True,
+        )
     except LookupError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     except ValueError as exc:
@@ -449,8 +515,9 @@ def retry(
 ) -> dict:
     require_role_at_least(request, "readwrite")
     _csrf(request)
+    _task_for_actor(session, task_id, request)
     try:
-        return _snapshot(retry_task(session, task_id))
+        return _snapshot(retry_task(session, task_id), expose_client_request_id=True)
     except LookupError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     except ValueError as exc:
@@ -465,10 +532,11 @@ def verify(
 ) -> dict:
     require_role_at_least(request, "readwrite")
     _csrf(request)
+    _task_for_actor(session, task_id, request)
     try:
         task = request_verification(session, task_id)
         session.commit()
-        return _snapshot(task, detail=True)
+        return _snapshot(task, detail=True, expose_client_request_id=True)
     except LookupError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     except ValueError as exc:
@@ -484,7 +552,7 @@ def retry_cleanup(
     require_role_at_least(request, "readwrite")
     _csrf(request)
     _lock_publish_slot(session)
-    task = _task(session, task_id, lock=True)
+    task = _task_for_actor(session, task_id, request, lock=True)
     now = datetime.now(UTC)
     if task.status not in {"succeeded", "cancelled"} and task.stage != "cleaning":
         raise HTTPException(status.HTTP_409_CONFLICT, "CLEANUP_RETRY_NOT_AVAILABLE")
@@ -540,4 +608,8 @@ def retry_cleanup(
         session.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "CLEANUP_LEASE_BUSY")
     session.commit()
-    return _snapshot(_task(session, task_id), detail=True)
+    return _snapshot(
+        _task_for_actor(session, task_id, request),
+        detail=True,
+        expose_client_request_id=True,
+    )

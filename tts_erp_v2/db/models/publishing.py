@@ -60,6 +60,7 @@ class VideoPublishTask(Base):
         PGUUID(as_uuid=True), unique=True, nullable=False
     )
     created_by_user_id: Mapped[int | None] = mapped_column(BigInteger)
+    created_by_key_hash: Mapped[str | None] = mapped_column(Text)
     caption: Mapped[str] = mapped_column(Text, nullable=False)
     original_filename: Mapped[str] = mapped_column(Text, nullable=False)
     content_type: Mapped[str] = mapped_column(Text, nullable=False)

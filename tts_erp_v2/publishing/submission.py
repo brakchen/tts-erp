@@ -42,6 +42,7 @@ class CreateCommand:
     size_bytes: int
     caption: str
     actor_user_id: int | None = None
+    actor_key_hash: str | None = None
 
 
 def normalize_caption(value: str) -> str:
@@ -82,6 +83,15 @@ def create_upload_ticket(
         )
     )
     if existing:
+        owner_matches = (
+            existing.created_by_user_id == command.actor_user_id
+            and existing.created_by_key_hash == command.actor_key_hash
+            if command.actor_user_id is not None or command.actor_key_hash is not None
+            else existing.created_by_user_id is None
+            and existing.created_by_key_hash is None
+        )
+        if not owner_matches:
+            raise PermissionError("TASK_NOT_FOUND")
         if (
             existing.original_filename,
             existing.content_type,
@@ -107,6 +117,7 @@ def create_upload_ticket(
         public_id=task_id,
         client_request_id=command.client_request_id,
         created_by_user_id=command.actor_user_id,
+        created_by_key_hash=command.actor_key_hash,
         caption=caption,
         original_filename=filename,
         content_type=command.content_type,
