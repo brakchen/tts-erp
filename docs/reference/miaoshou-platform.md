@@ -50,12 +50,7 @@ sign = MD5(busData + companySecret).upper()
 
 **锁定向量**：`tests/miaoshou/test_signing.py::test_build_sign_doc_824327_vector`
 
-## 5. EWM 采购单同步（已退役）
-
-`miaoshou.purchase_orders` 与 `procurement.purchase_orders` / `purchase_order_lines`
-在 migration 0046 删除：上游没有提供可用的采购单数据，因此不再维护采购单成本链。
-
-## 6. 包裹列表与详情
+## 5. 包裹列表与详情
 
 - Apifox：获取包裹详情 `api-457111980`；批量获取包裹列表 `api-457209915`。
 - SDK：`MiaoshouErpClient.packages.get_info()` / `.search()`。
