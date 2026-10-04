@@ -11,8 +11,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import or_, select, text, update
 from sqlalchemy.orm import Session, selectinload
 
 from tts_erp_v2.api.deps import (
@@ -27,7 +26,7 @@ from tts_erp_v2.db.models.publishing import (
 )
 from tts_erp_v2.publishing.domain import allowed_actions
 from tts_erp_v2.publishing.object_store import MinioVideoStore, VideoObjectStore
-from tts_erp_v2.publishing.repository import request_verification
+from tts_erp_v2.publishing.repository import _lock_publish_slot, request_verification
 from tts_erp_v2.publishing.submission import (
     CreateCommand,
     cancel_task,
@@ -99,8 +98,10 @@ def _snapshot(
 ) -> dict:
     attempts = sorted(task.attempts, key=lambda a: a.sequence_no, reverse=True)
     latest = attempts[0] if attempts else None
+    actions = allowed_actions(task)
     data = {
         "taskId": str(task.public_id),
+        "clientRequestId": str(task.client_request_id),
         "filename": task.original_filename,
         "sizeBytes": task.size_bytes,
         "captionPreview": task.caption.splitlines()[0][:160] if task.caption else "",
@@ -113,8 +114,10 @@ def _snapshot(
         "lastErrorMessage": task.last_error_message,
         "createdAt": task.created_at,
         "updatedAt": task.updated_at,
-        "allowedActions": [a.value for a in allowed_actions(task)],
+        "allowedActions": [a.value for a in actions],
     }
+    if "continue_upload" in data["allowedActions"]:
+        data["caption"] = task.caption
     if latest:
         data["currentAttempt"] = _attempt(latest)
     if detail:
@@ -312,12 +315,15 @@ def confirm(
     return _snapshot(task)
 
 
-def _task(session: Session, task_id: UUID) -> VideoPublishTask:
-    task = session.scalar(
+def _task(session: Session, task_id: UUID, *, lock: bool = False) -> VideoPublishTask:
+    query = (
         select(VideoPublishTask)
         .where(VideoPublishTask.public_id == task_id)
         .options(selectinload(VideoPublishTask.attempts))
     )
+    if lock:
+        query = query.with_for_update()
+    task = session.scalar(query)
     if task is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "TASK_NOT_FOUND")
     # Access the relationship before the session closes.
@@ -454,33 +460,61 @@ def retry_cleanup(
 ) -> dict:
     require_role_at_least(request, "readwrite")
     _csrf(request)
-    task = _task(session, task_id)
-    # Worker owns destructive resource operations; this endpoint only requeues cleanup.
-    retried = False
-    for name in ("device", "spool", "object"):
-        if getattr(task, f"{name}_cleanup_status") == "failed":
-            setattr(task, f"{name}_cleanup_status", "pending")
-            if name == "device":
-                task.device_cleanup_next_attempt_at = datetime.now(UTC)
-            retried = True
-    if not retried:
+    _lock_publish_slot(session)
+    task = _task(session, task_id, lock=True)
+    now = datetime.now(UTC)
+    if task.status != "succeeded" and task.stage != "cleaning":
+        raise HTTPException(status.HTTP_409_CONFLICT, "CLEANUP_RETRY_NOT_AVAILABLE")
+    if (
+        task.lease_owner
+        and task.lease_expires_at is not None
+        and task.lease_expires_at > now
+    ):
+        raise HTTPException(status.HTTP_409_CONFLICT, "CLEANUP_LEASE_BUSY")
+    failed_names = [
+        name
+        for name in ("device", "spool", "object")
+        if getattr(task, f"{name}_cleanup_status") == "failed"
+    ]
+    if not failed_names:
         raise HTTPException(status.HTTP_409_CONFLICT, "CLEANUP_RETRY_NOT_AVAILABLE")
     active_publish = session.scalar(
-        select(VideoPublishTask.id).where(VideoPublishTask.status == "running").limit(1)
+        select(VideoPublishTask.id)
+        .where(
+            VideoPublishTask.status == "running",
+            VideoPublishTask.id != task.id,
+        )
+        .limit(1)
     )
     if active_publish is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "PUBLISH_SLOT_BUSY")
-    # Re-enter the worker queue without changing the recorded business result;
-    # the worker restores succeeded after the independent cleanup pass.
-    task.status = "running"
-    task.stage = "cleaning"
-    task.lease_owner = None
-    task.lease_expires_at = None
-    task.heartbeat_at = None
-    task.row_version += 1
-    try:
-        session.commit()
-    except IntegrityError as exc:
+    expected_version = task.row_version
+    values: dict[str, object] = {
+        "status": "running",
+        "stage": "cleaning",
+        "lease_owner": None,
+        "lease_expires_at": None,
+        "heartbeat_at": None,
+        "row_version": expected_version + 1,
+    }
+    for name in failed_names:
+        values[f"{name}_cleanup_status"] = "pending"
+        if name in {"device", "object"}:
+            values[f"{name}_cleanup_next_attempt_at"] = now
+    result = session.execute(
+        update(VideoPublishTask)
+        .where(
+            VideoPublishTask.public_id == task_id,
+            VideoPublishTask.row_version == expected_version,
+            or_(
+                VideoPublishTask.lease_owner.is_(None),
+                VideoPublishTask.lease_expires_at <= now,
+            ),
+        )
+        .values(**values)
+    )
+    if getattr(result, "rowcount", None) != 1:
         session.rollback()
-        raise HTTPException(status.HTTP_409_CONFLICT, "PUBLISH_SLOT_BUSY") from exc
-    return _snapshot(task, detail=True)
+        raise HTTPException(status.HTTP_409_CONFLICT, "CLEANUP_LEASE_BUSY")
+    session.commit()
+    return _snapshot(_task(session, task_id), detail=True)

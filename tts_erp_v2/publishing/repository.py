@@ -6,7 +6,7 @@ import os
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -158,9 +158,18 @@ def _lease_cleanup_task(
         select(VideoPublishTask)
         .where(
             VideoPublishTask.status == TaskStatus.SUCCEEDED.value,
-            VideoPublishTask.device_cleanup_status.in_(["pending", "failed"]),
-            (VideoPublishTask.device_cleanup_next_attempt_at.is_(None))
-            | (VideoPublishTask.device_cleanup_next_attempt_at <= func.now()),
+            or_(
+                and_(
+                    VideoPublishTask.device_cleanup_status.in_(["pending", "failed"]),
+                    (VideoPublishTask.device_cleanup_next_attempt_at.is_(None))
+                    | (VideoPublishTask.device_cleanup_next_attempt_at <= func.now()),
+                ),
+                and_(
+                    VideoPublishTask.object_cleanup_status.in_(["pending", "failed"]),
+                    (VideoPublishTask.object_cleanup_next_attempt_at.is_(None))
+                    | (VideoPublishTask.object_cleanup_next_attempt_at <= func.now()),
+                ),
+            ),
             (VideoPublishTask.lease_owner.is_(None))
             | (VideoPublishTask.lease_expires_at.is_(None))
             | (VideoPublishTask.lease_expires_at < func.now()),

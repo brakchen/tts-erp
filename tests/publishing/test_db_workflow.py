@@ -5,9 +5,10 @@ from typing import cast
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.api.v2.video_publish import config
+from tts_erp_v2.api.v2.video_publish import config, retry_cleanup
 from tts_erp_v2.db.models.publishing import VideoPublishTask
 from tts_erp_v2.publishing.dispatcher import (
     LeaseLost,
@@ -18,12 +19,15 @@ from tts_erp_v2.publishing.dispatcher import (
     dispatch_one,
 )
 from tts_erp_v2.publishing.domain import TaskStage, TaskStatus
+from tts_erp_v2.publishing.object_store import VideoObjectStore
 from tts_erp_v2.publishing.repository import _lease_task, claim_one
+from tts_erp_v2.publishing.submission import CreateCommand, create_upload_ticket
 
 
 def _task(
     *,
     device_cleanup_status: str = "not_started",
+    object_cleanup_status: str = "not_started",
     status: str = TaskStatus.PENDING.value,
     stage: str = TaskStage.QUEUED.value,
     device_path: str | None = "/sdcard/Movies/TEST/video.mp4",
@@ -43,6 +47,7 @@ def _task(
         target_app_package="com.tiktok",
         device_path=device_path,
         device_cleanup_status=device_cleanup_status,
+        object_cleanup_status=object_cleanup_status,
         queued_at=datetime.now(UTC),
     )
 
@@ -163,11 +168,14 @@ class _CleanupAdb:
 
 
 class _CleanupStore:
-    def __init__(self) -> None:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
         self.calls = 0
 
     def remove(self, _key: str) -> None:
         self.calls += 1
+        if self.fail:
+            raise RuntimeError("TEST_OBJECT_BUSY")
 
 
 @pytest.mark.asyncio
@@ -223,6 +231,56 @@ async def test_worker_automatically_retries_due_cleanup_with_backoff(
 
 
 @pytest.mark.asyncio
+async def test_worker_automatically_retries_object_cleanup_with_backoff(
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "tts_erp_v2.publishing.dispatcher.require_destructive_script_guard",
+        lambda **_kwargs: None,
+    )
+    task = _task(
+        status=TaskStatus.SUCCEEDED.value,
+        stage=TaskStage.DONE.value,
+        device_cleanup_status="succeeded",
+        object_cleanup_status="failed",
+    )
+    task.object_cleanup_next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
+    db_session.add(task)
+    db_session.flush()
+    db_session.commit()
+    adb = _CleanupAdb()
+    store = _CleanupStore(fail=True)
+    deps = cast(
+        PublishDependencies,
+        SimpleNamespace(
+            session_factory=_factory(db_session),
+            instance_id="cleanup-worker",
+            lease_seconds=30,
+            max_attempts=3,
+            adb=adb,
+            store=store,
+            spool_dir=tmp_path,
+        ),
+    )
+    await dispatch_one(deps)
+    db_session.expire_all()
+    assert store.calls == 1
+    assert task.object_cleanup_attempts == 1
+    assert task.object_cleanup_status == "failed"
+    next_attempt = task.object_cleanup_next_attempt_at
+    assert next_attempt is not None and next_attempt > datetime.now(UTC)
+    store.fail = False
+    task.object_cleanup_next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
+    db_session.commit()
+    await dispatch_one(deps)
+    db_session.expire_all()
+    assert task.object_cleanup_status == "succeeded"
+    assert task.object_cleanup_next_attempt_at is None
+
+
+@pytest.mark.asyncio
 async def test_cleanup_lease_fences_stale_worker(
     db_session: Session,
     tmp_path: Path,
@@ -266,6 +324,81 @@ async def test_cleanup_lease_fences_stale_worker(
     db_session.expire_all()
     assert task.lease_owner == "worker-b"
     assert task.device_cleanup_status == "failed"
+
+
+def test_continue_upload_reuses_awaiting_upload_ticket(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ARTEMIS_DEVICE_SERIAL", "TEST_device")
+    monkeypatch.setenv("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video")
+
+    class UploadStore:
+        bucket = "tiktok-video"
+
+        def presign_put(self, key: str, content_type: str) -> str:
+            return f"https://upload.test/{key}"
+
+    request_id = uuid4()
+    task = _task(stage=TaskStage.AWAITING_UPLOAD.value)
+    task.client_request_id = request_id
+    db_session.add(task)
+    db_session.flush()
+    replayed, url, replay = create_upload_ticket(
+        db_session,
+        CreateCommand(
+            client_request_id=request_id,
+            filename=task.original_filename,
+            content_type="video/mp4",
+            size_bytes=task.size_bytes,
+            caption=task.caption,
+            actor_user_id=None,
+        ),
+        cast(VideoObjectStore, UploadStore()),
+    )
+    assert replayed.public_id == task.public_id
+    assert replay is True
+    assert url.endswith(task.object_key)
+
+
+def _request() -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/v2/video-publish/tasks/cleanup/retry",
+            "headers": [],
+            "api_key_role": "readwrite",
+        }
+    )
+
+
+def test_cleanup_retry_rejects_live_lease_and_requeues_expired_lease(
+    db_session: Session,
+) -> None:
+    task = _task(
+        status=TaskStatus.SUCCEEDED.value,
+        stage=TaskStage.DONE.value,
+        device_cleanup_status="failed",
+    )
+    task.lease_owner = "auto-worker"
+    task.lease_expires_at = datetime.now(UTC) + timedelta(minutes=1)
+    db_session.add(task)
+    db_session.flush()
+    db_session.commit()
+    with pytest.raises(HTTPException) as exc_info:
+        retry_cleanup(task.public_id, _request(), db_session)
+    assert exc_info.value.detail == "CLEANUP_LEASE_BUSY"
+    db_session.rollback()
+
+    task = db_session.get(VideoPublishTask, task.id)
+    assert task is not None
+    task.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    db_session.commit()
+    result = retry_cleanup(task.public_id, _request(), db_session)
+    assert result["status"] == TaskStatus.RUNNING.value
+    assert result["stage"] == TaskStage.CLEANING.value
+    assert result["cleanup"]["device"]["status"] == "pending"
+    assert task.lease_owner is None
 
 
 def test_config_exposes_configured_album(

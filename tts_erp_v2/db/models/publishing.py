@@ -109,6 +109,12 @@ class VideoPublishTask(Base):
         Text, nullable=False, server_default=text("'not_started'")
     )
     object_cleanup_error: Mapped[str | None] = mapped_column(Text)
+    object_cleanup_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    object_cleanup_next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     queued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -16,12 +16,13 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
         const elements = new Map();
         const created = [];
         let confirmCalls = 0;
+        let filePickerClicks = 0;
         function element() {
           const node = {
             textContent: "", value: "", disabled: false, hidden: false,
             style: {}, dataset: {}, classList: { toggle() {} },
             querySelectorAll() { return []; }, replaceChildren() {}, append() {},
-            addEventListener() {}, removeAttribute() {}, showModal() {}, close() {},
+            addEventListener() {}, removeAttribute() {}, showModal() {}, close() {}, click() { if (this.id === "publish-video-file") filePickerClicks += 1; },
           };
           created.push(node);
           return node;
@@ -34,6 +35,7 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
           getElementById(id) {
             if (!elements.has(id)) {
               const node = element();
+              node.id = id;
               if (id === "publish-refresh-mode") node.value = "smart";
               elements.set(id, node);
             }
@@ -58,7 +60,7 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
             : url.includes("/tasks/current") ? { task: null }
             : url.includes("/tasks/task-1")
               ? { taskId: "task-1", filename: "TEST.mp4", status: "succeeded", caption: "TEST", attempts: [] }
-              : { items: [{ taskId: "task-1", status: "pending", filename: "TEST.mp4", latestArtemisSessionId: "artemis-1", createdAt: "2026-10-04T00:00:00Z", allowedActions: ["view", "continue_upload", "cancel", "retry", "verify", "retry_cleanup", "copy_artemis_id"] }] };
+              : { items: [{ taskId: "task-1", status: "pending", filename: "TEST.mp4", latestArtemisSessionId: "artemis-1", createdAt: "2026-10-04T00:00:00Z", clientRequestId: "client-1", caption: "TEST caption", allowedActions: ["view", "continue_upload", "cancel", "retry", "verify", "retry_cleanup", "copy_artemis_id"] }] };
           return { status: 200, ok: true, headers: { get: () => null }, json: async () => payload };
         };
         vm.runInThisContext(source);
@@ -84,6 +86,7 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
         const initialActions = expectedLabels.map((label) => created.find((node) => node.textContent === label));
         for (const button of initialActions) await button.onclick();
         if (confirmCalls !== 4) throw new Error(`unexpected confirmation count ${confirmCalls}`);
+        if (filePickerClicks !== 1) throw new Error("continue upload did not reopen file picker");
         const view = created.find((node) => node.textContent === "查看");
         if (!view) throw new Error("detail trigger was not rendered");
         await view.onclick();

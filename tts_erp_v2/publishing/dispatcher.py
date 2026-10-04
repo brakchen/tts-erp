@@ -112,7 +112,10 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
                     return
             if task.stage == TaskStage.CLEANING.value or (
                 task.status == TaskStatus.SUCCEEDED.value
-                and task.device_cleanup_status in {"pending", "failed"}
+                and (
+                    task.device_cleanup_status in {"pending", "failed"}
+                    or task.object_cleanup_status in {"pending", "failed"}
+                )
             ):
                 session.commit()
                 await _cleanup_success(task_id, deps)
@@ -752,6 +755,15 @@ async def _cleanup_success(task_id: UUID, deps: PublishDependencies) -> None:
         if object_needed:
             values["object_cleanup_status"] = "failed" if object_error else "succeeded"
             values["object_cleanup_error"] = object_error
+            values["object_cleanup_attempts"] = task.object_cleanup_attempts + (
+                1 if object_error else 0
+            )
+            values["object_cleanup_next_attempt_at"] = (
+                datetime.now(UTC)
+                + timedelta(seconds=_cleanup_retry_delay(task.object_cleanup_attempts))
+                if object_error
+                else None
+            )
             if not object_error:
                 values["object_deleted_at"] = datetime.now(UTC)
         result = session.execute(

@@ -19,6 +19,7 @@
     upload: null,
     creating: false,
     clientRequestId: null,
+    resumeTask: null,
     detail: null,
     detailTaskId: null,
     etags: new Map(),
@@ -86,7 +87,7 @@
   function pick(file) {
     if (!file) return;
     state.file = file;
-    state.clientRequestId = crypto.randomUUID();
+    if (!state.resumeTask) state.clientRequestId = crypto.randomUUID();
     if (file.type !== "video/mp4" || !file.name.toLowerCase().endsWith(".mp4")) {
       notice("只接受 MP4 视频", true);
       state.file = null;
@@ -180,6 +181,7 @@
     state.file = null;
     state.url = null;
     state.clientRequestId = null;
+    state.resumeTask = null;
     $("publish-video-preview").hidden = true;
     $("publish-video-preview").removeAttribute("src");
     $("publish-caption").value = "";
@@ -211,6 +213,15 @@
   };
   const CONFIRM_ACTIONS = new Set(["cancel", "retry", "verify", "retry_cleanup"]);
 
+  function resumeUpload(task) {
+    state.resumeTask = task;
+    state.clientRequestId = task.clientRequestId;
+    $("publish-caption").value = task.caption || task.captionPreview || "";
+    renderForm();
+    notice("请选择原视频以继续上传");
+    $("publish-video-file").click();
+  }
+
   async function runTaskAction(task, actionName) {
     if (CONFIRM_ACTIONS.has(actionName) && !window.confirm(`确认${ACTION_LABELS[actionName] || actionName}？`)) return;
     try {
@@ -221,8 +232,7 @@
         return;
       }
       if (actionName === "continue_upload") {
-        notice("请重新选择原视频以继续上传");
-        return openDetail(task.taskId);
+        return resumeUpload(task);
       }
       const endpoint = actionName === "retry_cleanup"
         ? `/tasks/${task.taskId}/cleanup/retry`
