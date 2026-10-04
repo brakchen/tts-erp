@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, selectinload
 
 from tts_erp_v2.db.models.publishing import VideoPublishAttempt, VideoPublishTask
 from tts_erp_v2.publishing.domain import (
@@ -31,7 +31,7 @@ def get_task(
     query: Select[VideoPublishTask] = (
         select(VideoPublishTask)
         .where(VideoPublishTask.public_id == public_id)
-        .options(joinedload(VideoPublishTask.attempts))
+        .options(selectinload(VideoPublishTask.attempts))
     )
     if lock:
         query = query.with_for_update()

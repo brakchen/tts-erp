@@ -8,12 +8,14 @@ import pytest
 from fastapi import HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
+from tts_erp_v2.access import AccessGrant, AuthMode, Role
 from tts_erp_v2.api.v2.video_publish import (
     CreateIn,
     config,
     create_task,
     detail,
     list_tasks,
+    retry,
     retry_cleanup,
 )
 from tts_erp_v2.db.models.publishing import VideoPublishTask
@@ -505,6 +507,186 @@ def test_continue_upload_reuses_awaiting_upload_ticket(
     assert url.endswith(task.object_key)
 
 
+def test_api_key_owner_can_list_detail_and_replay(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ARTEMIS_DEVICE_SERIAL", "TEST_device")
+    monkeypatch.setenv("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video")
+    key_a = "a" * 64
+
+    class UploadStore:
+        bucket = "tiktok-video"
+
+        def presign_put(self, key: str, content_type: str) -> str:
+            return f"https://upload.test/{key}"
+
+    task = _task(
+        stage=TaskStage.AWAITING_UPLOAD.value,
+        created_by_key_hash=key_a,
+    )
+    db_session.add(task)
+    db_session.flush()
+    request = _request(role="readwrite", key_hash=key_a)
+    listed = cast(
+        dict,
+        list_tasks(
+            request,
+            db_session,
+            Response(),
+            status_filter=None,
+            limit=30,
+            cursor=None,
+        ),
+    )
+    assert [item["taskId"] for item in listed["items"]] == [str(task.public_id)]
+    assert listed["items"][0]["clientRequestId"] == str(task.client_request_id)
+    viewed = cast(
+        dict,
+        detail(
+            task.public_id,
+            request,
+            db_session,
+            Response(),
+            include_diagnostics=False,
+        ),
+    )
+    assert viewed["taskId"] == str(task.public_id)
+    replayed = create_task(
+        CreateIn(
+            clientRequestId=task.client_request_id,
+            filename=task.original_filename,
+            contentType=task.content_type,
+            sizeBytes=task.size_bytes,
+            caption=task.caption,
+        ),
+        request,
+        db_session,
+        cast(VideoObjectStore, UploadStore()),
+    )
+    assert replayed["idempotentReplay"] is True
+    assert replayed["taskId"] == str(task.public_id)
+
+
+def test_api_key_b_cannot_list_detail_or_replay_key_a_task(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ARTEMIS_DEVICE_SERIAL", "TEST_device")
+    monkeypatch.setenv("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video")
+    key_a = "a" * 64
+    key_b = "b" * 64
+
+    class UploadStore:
+        bucket = "tiktok-video"
+        presign_calls = 0
+
+        def presign_put(self, key: str, content_type: str) -> str:
+            self.presign_calls += 1
+            return f"https://upload.test/{key}"
+
+    task = _task(
+        stage=TaskStage.AWAITING_UPLOAD.value,
+        created_by_key_hash=key_a,
+    )
+    db_session.add(task)
+    db_session.flush()
+    request = _request(role="readwrite", key_hash=key_b)
+    listed = cast(
+        dict,
+        list_tasks(
+            request,
+            db_session,
+            Response(),
+            status_filter=None,
+            limit=30,
+            cursor=None,
+        ),
+    )
+    assert listed["items"] == []
+    with pytest.raises(HTTPException) as detail_error:
+        detail(
+            task.public_id,
+            request,
+            db_session,
+            Response(),
+            include_diagnostics=False,
+        )
+    assert detail_error.value.status_code == 404
+    assert detail_error.value.detail == "TASK_NOT_FOUND"
+    session_request = _request(
+        role="readwrite",
+        user_id=2,
+        grant=AccessGrant(mode=AuthMode.ENFORCE, role=Role.READWRITE),
+    )
+    with pytest.raises(HTTPException) as session_error:
+        detail(
+            task.public_id,
+            session_request,
+            db_session,
+            Response(),
+            include_diagnostics=False,
+        )
+    assert session_error.value.status_code == 404
+    assert session_error.value.detail == "TASK_NOT_FOUND"
+    store = UploadStore()
+    with pytest.raises(HTTPException) as replay_error:
+        create_task(
+            CreateIn(
+                clientRequestId=task.client_request_id,
+                filename=task.original_filename,
+                contentType=task.content_type,
+                sizeBytes=task.size_bytes,
+                caption=task.caption,
+            ),
+            request,
+            db_session,
+            cast(VideoObjectStore, store),
+        )
+    assert replay_error.value.status_code == 404
+    assert replay_error.value.detail == "TASK_NOT_FOUND"
+    assert store.presign_calls == 0
+
+
+@pytest.mark.parametrize(
+    "privileged_grant",
+    [
+        AccessGrant(mode=AuthMode.ENFORCE, role=Role.ADMIN, key_hash="admin"),
+        AccessGrant(mode=AuthMode.OFF, bypass=True),
+    ],
+    ids=["admin-role", "explicit-bypass"],
+)
+def test_admin_or_bypass_can_view_and_operate_cross_owner_task(
+    db_session: Session,
+    privileged_grant: AccessGrant,
+) -> None:
+    task = _task(
+        status=TaskStatus.FAILED.value,
+        created_by_key_hash="a" * 64,
+    )
+    task.attempt_count = 1
+    db_session.add(task)
+    db_session.flush()
+    request = _request(
+        role="readwrite",
+        key_hash="admin" * 16,
+        grant=privileged_grant,
+    )
+    viewed = cast(
+        dict,
+        detail(
+            task.public_id,
+            request,
+            db_session,
+            Response(),
+            include_diagnostics=False,
+        ),
+    )
+    assert viewed["taskId"] == str(task.public_id)
+    operated = retry(task.public_id, request, db_session)
+    assert operated["taskId"] == str(task.public_id)
+    assert operated["status"] == TaskStatus.PENDING.value
+    assert operated["stage"] == TaskStage.QUEUED.value
+
+
 def test_upload_ticket_replay_rejects_cross_user_owner(
     db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -641,7 +823,13 @@ def test_awaiting_upload_is_not_reported_as_queued_poll_work(
     assert payload["pollState"] == {"running": False, "queued": False}
 
 
-def _request(*, role: str = "admin", user_id: int | None = None) -> Request:
+def _request(
+    *,
+    role: str = "admin",
+    user_id: int | None = None,
+    key_hash: str | None = None,
+    grant: AccessGrant | None = None,
+) -> Request:
     scope: dict[str, object] = {
         "type": "http",
         "method": "POST",
@@ -651,6 +839,10 @@ def _request(*, role: str = "admin", user_id: int | None = None) -> Request:
     }
     if user_id is not None:
         scope["user_id"] = user_id
+    if key_hash is not None:
+        scope["api_key_hash"] = key_hash
+    if grant is not None:
+        scope["access_grant"] = grant
     return Request(scope)
 
 
