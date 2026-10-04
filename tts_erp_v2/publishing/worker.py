@@ -38,29 +38,44 @@ async def run() -> None:
         spool_dir=Path(os.environ["TTS_ERP_PUBLISH_SPOOL_DIR"]).expanduser(),
         instance_id=instance_id,
         max_attempts=int(os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3")),
+        lease_seconds=int(os.environ.get("PUBLISH_TASK_LEASE_SECONDS", "30")),
     )
     deps.spool_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    _write_heartbeat(session_factory, instance_id, "ready")
-    await recover_active(deps)
+    heartbeat_task = asyncio.create_task(
+        _heartbeat_loop(session_factory, instance_id), name="publish-heartbeat"
+    )
+    try:
+        await recover_active(deps)
+        while True:
+            outcome = await dispatch_one(deps)
+            if outcome == "no_task":
+                await asyncio.sleep(2)
+    finally:
+        heartbeat_task.cancel()
+        await asyncio.gather(heartbeat_task, return_exceptions=True)
+        _write_heartbeat(session_factory, instance_id, "stopping")
+
+
+async def _heartbeat_loop(session_factory, instance_id: str) -> None:
     while True:
         _write_heartbeat(session_factory, instance_id, "ready")
-        outcome = await dispatch_one(deps)
-        if outcome == "no_task":
-            await asyncio.sleep(2)
+        await asyncio.sleep(5)
 
 
 def _write_heartbeat(session_factory, instance_id: str, state: str) -> None:
     now = datetime.now(UTC)
     with session_factory() as session:
         session.execute(
-            text("""
+            text(
+                """
             INSERT INTO publishing.worker_heartbeats
               (instance_id, hostname, pid, status, started_at, heartbeat_at)
             VALUES (:id, :host, :pid, :status, :now, :now)
             ON CONFLICT (instance_id) DO UPDATE SET
               status = EXCLUDED.status, heartbeat_at = EXCLUDED.heartbeat_at,
               updated_at = now()
-        """),
+        """
+            ),
             {
                 "id": instance_id,
                 "host": socket.gethostname(),

@@ -87,7 +87,7 @@ def upgrade() -> None:
     # pi-lens-ignore: python-sql-injection
     op.execute(
         text(
-            "CREATE UNIQUE INDEX uq_video_publish_task_active_attempt ON publishing.video_publish_attempts (task_id) WHERE status IN ('submitting','queued','running')"
+            "CREATE UNIQUE INDEX uq_video_publish_task_active_attempt ON publishing.video_publish_attempts (task_id) WHERE status IN ('created','submitting','queued','running','unknown')"
         )
     )
     # pi-lens-ignore: python-sql-injection

@@ -151,7 +151,10 @@ def classify_failure(
     if status in {"rejected", "cancelled", "canceled"}:
         return FailureClassification("admission_rejected", True)
     if status in {"failed", "error"}:
-        return FailureClassification("failed_before_publish_ui", True)
+        # A failed transport/execution report does not prove that the final
+        # publish action was not observed. Only an explicit zero-step result
+        # is safe to retry without a read-only verification session.
+        return FailureClassification("ambiguous_artemis_failure", None, True)
     return FailureClassification("session_missing", None, True)
 
 

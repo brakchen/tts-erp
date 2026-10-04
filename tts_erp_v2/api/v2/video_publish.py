@@ -10,10 +10,14 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session, selectinload
 
-from tts_erp_v2.api.deps import get_session, require_role_at_least
+from tts_erp_v2.api.deps import (
+    get_session,
+    require_destructive_guard,
+    require_role_at_least,
+)
 from tts_erp_v2.db.models.publishing import (
     PublishWorkerHeartbeat,
     VideoPublishAttempt,
@@ -171,7 +175,11 @@ def _conditional(
 def config(session: Annotated[Session, Depends(get_session)]) -> dict:
     heartbeat_row = session.scalar(
         select(PublishWorkerHeartbeat)
-        .where(PublishWorkerHeartbeat.status == "ready")
+        .where(
+            PublishWorkerHeartbeat.status == "ready",
+            PublishWorkerHeartbeat.heartbeat_at
+            >= text("now() - interval '15 seconds'"),
+        )
         .order_by(PublishWorkerHeartbeat.heartbeat_at.desc())
         .limit(1)
     )
@@ -386,6 +394,7 @@ def cancel(
 ) -> dict:
     require_role_at_least(request, "readwrite")
     _csrf(request)
+    require_destructive_guard(request, op_name="video_publish.cancel_object")
     try:
         return _snapshot(cancel_task(session, task_id, store), detail=True)
     except LookupError as exc:
@@ -438,9 +447,20 @@ def retry_cleanup(
     _csrf(request)
     task = _task(session, task_id)
     # Worker owns destructive resource operations; this endpoint only requeues cleanup.
+    retried = False
     for name in ("device", "spool", "object"):
         if getattr(task, f"{name}_cleanup_status") == "failed":
             setattr(task, f"{name}_cleanup_status", "pending")
+            retried = True
+    if not retried:
+        raise HTTPException(status.HTTP_409_CONFLICT, "CLEANUP_RETRY_NOT_AVAILABLE")
+    # Re-enter the worker queue without changing the recorded business result;
+    # the worker restores succeeded after the independent cleanup pass.
+    task.status = "running"
+    task.stage = "cleaning"
+    task.lease_owner = None
+    task.lease_expires_at = None
+    task.heartbeat_at = None
     task.row_version += 1
     session.commit()
     return _snapshot(task, detail=True)

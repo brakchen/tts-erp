@@ -24,7 +24,14 @@ class ArtemisResult:
 
     @property
     def terminal(self) -> bool:
-        return self.status in {"success", "failed", "cancelled", "rejected"}
+        return self.status in {
+            "success",
+            "failed",
+            "cancelled",
+            "rejected",
+            "missing",
+            "not_found",
+        }
 
 
 class ArtemisClient:

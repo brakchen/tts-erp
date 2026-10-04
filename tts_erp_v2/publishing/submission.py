@@ -23,8 +23,15 @@ MAX_VIDEO_BYTES = int(
 )
 MAX_CAPTION_CHARS = int(os.environ.get("TIKTOK_PUBLISH_MAX_CAPTION_CHARS", "4000"))
 _BUCKET = os.environ.get("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video")
-_DEVICE = os.environ.get("ARTEMIS_DEVICE_SERIAL", "")
 _PACKAGE = os.environ.get("ARTEMIS_APP_PACKAGE", "com.zhiliaoapp.musically")
+
+
+def configured_device_serial() -> str:
+    return os.environ.get("ARTEMIS_DEVICE_SERIAL", "").strip()
+
+
+def configured_bucket() -> str:
+    return os.environ.get("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video").strip()
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +69,11 @@ def create_upload_ticket(
         raise ValueError("VIDEO_TOO_LARGE")
     if not caption.strip():
         raise ValueError("CAPTION_REQUIRED")
+    device_serial = configured_device_serial()
+    if not device_serial:
+        raise ValueError("DEVICE_NOT_CONFIGURED")
+    if getattr(store, "bucket", configured_bucket()) != configured_bucket():
+        raise ValueError("PUBLISH_BUCKET_MISMATCH")
     if len(caption) > MAX_CAPTION_CHARS:
         raise ValueError("CAPTION_TOO_LONG")
     existing = session.scalar(
@@ -103,7 +115,7 @@ def create_upload_ticket(
         object_key=key,
         status=TaskStatus.PENDING.value,
         stage=TaskStage.AWAITING_UPLOAD.value,
-        target_device_serial=_DEVICE,
+        target_device_serial=device_serial,
         target_app_package=_PACKAGE,
     )
     session.add(task)

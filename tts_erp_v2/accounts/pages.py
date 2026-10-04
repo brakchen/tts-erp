@@ -48,9 +48,9 @@ ALL_PERMISSION_CODES: tuple[str, ...] = tuple(p.permission_code for p in PAGES)
 def permission_catalog() -> list[dict]:
     """全部页面权限点目录（角色编辑表单的勾选清单，同源于侧边栏注册表）."""
     return [
-        {"code": p.permission_code, "label": p.label, "group": p.group}
-        for p in PAGES
+        {"code": p.permission_code, "label": p.label, "group": p.group} for p in PAGES
     ]
+
 
 # 预置角色（§2.1）：code → (api_tier, 页面 id 集合)。`users` 页面仅 admin。
 BUILTIN_ROLES: dict[str, tuple[str, tuple[str, ...]]] = {
@@ -100,4 +100,6 @@ def required_page_permission(route_path: str) -> str | None:
         return f"page:{page_id}"
     if path.startswith(("/v2/users", "/v2/roles")):
         return "page:users"
+    if path.startswith("/v2/video-publish"):
+        return "page:video-publish"
     return None

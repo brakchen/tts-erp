@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -44,6 +45,14 @@ def create_attempt(
     related: VideoPublishAttempt | None = None,
     album: str = "TTSERP",
 ) -> VideoPublishAttempt:
+    locked_task = session.get(VideoPublishTask, task.id, with_for_update=True)
+    if locked_task is None:
+        raise LookupError(task.id)
+    task = locked_task
+    if kind == AttemptKind.PUBLISH and task.attempt_count >= int(
+        os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3")
+    ):
+        raise ValueError("RETRY_BUDGET_EXHAUSTED")
     latest = (
         session.scalar(
             select(func.max(VideoPublishAttempt.sequence_no)).where(
@@ -73,6 +82,8 @@ def create_attempt(
         kind=kind.value,
         related_attempt_id=related.id if related else None,
         artemis_session_id=session_id,
+        # Created attempts are covered by the active-attempt partial index;
+        # admission is advanced to submitting in the worker transaction.
         status=AttemptStatus.CREATED.value,
         prompt_version=prompt_version,
         prompt_snapshot=prompt,
@@ -85,22 +96,38 @@ def create_attempt(
     return attempt
 
 
-def claim_one(
-    session: Session, instance_id: str, lease_seconds: int = 30
+def _lease_task(
+    session: Session, instance_id: str, lease_seconds: int
 ) -> VideoPublishTask | None:
-    # A leftover managed device file is a readiness gate for the next task.
-    if (
-        session.scalar(
-            select(VideoPublishTask.id)
-            .where(
-                VideoPublishTask.status == TaskStatus.SUCCEEDED.value,
-                VideoPublishTask.device_cleanup_status == "failed",
-            )
-            .limit(1)
+    now = datetime.now(UTC)
+    task = session.scalars(
+        select(VideoPublishTask)
+        .where(
+            VideoPublishTask.status == TaskStatus.RUNNING.value,
+            (VideoPublishTask.lease_owner == instance_id)
+            | (VideoPublishTask.lease_expires_at.is_(None))
+            | (VideoPublishTask.lease_expires_at < func.now()),
         )
-        is not None
-    ):
+        .order_by(VideoPublishTask.id)
+        .with_for_update(skip_locked=True)
+        .limit(1)
+    ).first()
+    if task is None:
         return None
+    task.lease_owner = instance_id
+    task.lease_expires_at = now + timedelta(seconds=lease_seconds)
+    task.heartbeat_at = now
+    task.row_version += 1
+    session.flush()
+    return task
+
+
+def claim_one(
+    session: Session,
+    instance_id: str,
+    lease_seconds: int = 30,
+    max_attempts: int = 3,
+) -> VideoPublishTask | None:
     query = (
         select(VideoPublishTask)
         .where(
@@ -110,6 +137,7 @@ def claim_one(
             ),
             (VideoPublishTask.next_attempt_at.is_(None))
             | (VideoPublishTask.next_attempt_at <= func.now()),
+            VideoPublishTask.attempt_count < max_attempts,
         )
         .order_by(VideoPublishTask.queued_at, VideoPublishTask.id)
         .with_for_update(skip_locked=True)
@@ -131,10 +159,14 @@ def claim_one(
 
 
 def touch_task(
-    session: Session, task: VideoPublishTask, *, stage: str | None = None
+    session: Session,
+    task: VideoPublishTask,
+    *,
+    stage: str | None = None,
+    lease_seconds: int = 30,
 ) -> None:
     task.heartbeat_at = datetime.now(UTC)
-    task.lease_expires_at = datetime.now(UTC) + timedelta(seconds=30)
+    task.lease_expires_at = datetime.now(UTC) + timedelta(seconds=lease_seconds)
     if stage:
         task.stage = stage
     task.row_version += 1

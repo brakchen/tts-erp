@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-import asyncio
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from tts_erp_v2.api.deps import require_destructive_script_guard
 from tts_erp_v2.db.models.publishing import VideoPublishAttempt, VideoPublishTask
-from tts_erp_v2.publishing.adb_device import AdbDevice, DeviceUnavailable
+from tts_erp_v2.publishing.adb_device import AdbDevice
 from tts_erp_v2.publishing.artemis_client import (
     ArtemisClient,
     ArtemisResult,
@@ -27,11 +28,16 @@ from tts_erp_v2.publishing.domain import (
 )
 from tts_erp_v2.publishing.object_store import VideoObjectStore
 from tts_erp_v2.publishing.repository import (
+    _lease_task,
     claim_one,
     create_attempt,
     release_lease,
     touch_task,
 )
+
+
+class LeaseLost(RuntimeError):
+    """The worker no longer owns the task lease."""
 
 
 @dataclass(slots=True)
@@ -43,26 +49,24 @@ class PublishDependencies:
     spool_dir: Path
     instance_id: str
     max_attempts: int = 3
+    lease_seconds: int = 30
 
 
 async def dispatch_one(deps: PublishDependencies) -> str:
     with deps.session_factory() as session:
-        active = session.scalar(
-            select(VideoPublishTask)
-            .where(VideoPublishTask.status == TaskStatus.RUNNING.value)
-            .order_by(VideoPublishTask.id)
-            .limit(1)
-        )
-        if active is not None:
-            task_id = active.public_id
+        task = _lease_task(session, deps.instance_id, deps.lease_seconds)
+        if task is None:
+            task = claim_one(
+                session,
+                deps.instance_id,
+                lease_seconds=deps.lease_seconds,
+                max_attempts=deps.max_attempts,
+            )
+        if task is None:
             session.commit()
-        else:
-            task = claim_one(session, deps.instance_id)
-            if task is None:
-                session.commit()
-                return "no_task"
-            task_id = task.public_id
-            session.commit()
+            return "no_task"
+        task_id = task.public_id
+        session.commit()
     await _execute(task_id, deps)
     return "processed"
 
@@ -72,6 +76,7 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
     try:
         with deps.session_factory() as session:
             task = _get(session, task_id)
+            _assert_lease(task, deps.instance_id)
             if task.stage in {
                 TaskStage.VERIFYING.value,
                 TaskStage.WAITING_ARTEMIS.value,
@@ -87,6 +92,7 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
                             AttemptStatus.SUBMITTING.value,
                             AttemptStatus.QUEUED.value,
                             AttemptStatus.RUNNING.value,
+                            AttemptStatus.UNKNOWN.value,
                         }
                     ),
                     None,
@@ -96,36 +102,64 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
                     session.commit()
                     await _run_attempt(task_id, attempt_id, deps)
                     return
-            touch_task(session, task, stage=TaskStage.DOWNLOADING.value)
+            if task.stage == TaskStage.CLEANING.value:
+                session.commit()
+                await _cleanup_success(task_id, deps)
+                return
+            object_key = task.object_key
+            size_bytes = task.size_bytes
+            device_serial = task.target_device_serial
+            app_package = task.target_app_package
+            touch_task(
+                session,
+                task,
+                stage=TaskStage.DOWNLOADING.value,
+                lease_seconds=deps.lease_seconds,
+            )
             session.commit()
-        digest = deps.store.download(task.object_key, local)
-        if local.stat().st_size != task.size_bytes:
+        digest = deps.store.download(object_key, local)
+        if local.stat().st_size != size_bytes:
             raise RuntimeError("DOWNLOAD_SIZE_MISMATCH")
         with deps.session_factory() as session:
             task = _get(session, task_id)
+            _assert_lease(task, deps.instance_id)
             task.object_sha256 = digest
-            touch_task(session, task, stage=TaskStage.STAGING_DEVICE.value)
+            touch_task(
+                session,
+                task,
+                stage=TaskStage.STAGING_DEVICE.value,
+                lease_seconds=deps.lease_seconds,
+            )
             session.commit()
-        await deps.adb.check_device(task.target_device_serial)
-        await deps.adb.check_package(task.target_device_serial, task.target_app_package)
+        await deps.adb.check_device(device_serial)
+        await deps.adb.check_package(device_serial, app_package)
         device_path = f"/sdcard/Movies/TTSERP/tts_erp_{task_id}.mp4"
-        await deps.adb.stage_video(task.target_device_serial, local, device_path)
-        await deps.adb.verify_media_visible(task.target_device_serial, device_path)
+        await deps.adb.stage_video(device_serial, local, device_path)
+        await deps.adb.verify_media_visible(device_serial, device_path)
         with deps.session_factory() as session:
             task = _get(session, task_id)
+            _assert_lease(task, deps.instance_id)
             task.device_path = device_path
             task.device_cleanup_status = "pending"
-            touch_task(session, task, stage=TaskStage.DISPATCHING_ARTEMIS.value)
+            touch_task(
+                session,
+                task,
+                stage=TaskStage.DISPATCHING_ARTEMIS.value,
+                lease_seconds=deps.lease_seconds,
+            )
             attempt = create_attempt(session, task, kind=AttemptKind.PUBLISH)
             session.commit()
             attempt_id = attempt.id
         await _run_attempt(task_id, attempt_id, deps)
-    except (DeviceUnavailable, RuntimeError) as exc:
-        await _safe_retry(task_id, str(exc), deps)
+    except LeaseLost:
+        return
+    except Exception as exc:  # noqa: BLE001 - persist unexpected worker failures
+        await _mark_unexpected(task_id, str(exc), deps)
     finally:
         local.unlink(missing_ok=True)
         with suppress(OSError):
             local.parent.rmdir()
+        await _mark_spool_cleanup(task_id, deps)
 
 
 async def _run_attempt(
@@ -133,82 +167,110 @@ async def _run_attempt(
 ) -> None:
     with deps.session_factory() as session:
         task = _get(session, task_id)
+        _assert_lease(task, deps.instance_id)
         attempt = _require_attempt(session, attempt_id)
-        attempt.status = AttemptStatus.SUBMITTING.value
-        task.stage = TaskStage.DISPATCHING_ARTEMIS.value
-        session.commit()
-    try:
-        result = await deps.artemis.submit(
-            goal=attempt.prompt_snapshot,
-            session_id=attempt.artemis_session_id,
-            device_serial=attempt.device_serial,
-            app_package=task.target_app_package,
+        should_submit = attempt.status == AttemptStatus.CREATED.value
+        admission_probe = (
+            attempt.status == AttemptStatus.SUBMITTING.value
+            and attempt.submitted_at is None
         )
-        with deps.session_factory() as session:
-            attempt = _require_attempt(session, attempt_id)
-            task = _get(session, task_id)
-            attempt.status = (
-                result.status
-                if result.status in {"queued", "running"}
-                else AttemptStatus.SUBMITTING.value
+        goal = attempt.prompt_snapshot
+        session_id = attempt.artemis_session_id
+        device_serial = attempt.device_serial
+        app_package = task.target_app_package
+        attempt.status = (
+            AttemptStatus.SUBMITTING.value if should_submit else attempt.status
+        )
+        task.stage = (
+            TaskStage.VERIFYING.value
+            if attempt.kind == AttemptKind.VERIFY.value
+            else TaskStage.DISPATCHING_ARTEMIS.value
+        )
+        touch_task(session, task, lease_seconds=deps.lease_seconds)
+        session.commit()
+
+    result: ArtemisResult
+    if should_submit:
+        try:
+            result = await deps.artemis.submit(
+                goal=goal,
+                session_id=session_id,
+                device_serial=device_serial,
+                app_package=app_package,
             )
-            attempt.submitted_at = __import__("datetime").datetime.now(
-                __import__("datetime").UTC
-            )
-            task.stage = TaskStage.WAITING_ARTEMIS.value
-            session.commit()
-    except ArtemisTransportError:
-        # Query admission first; any resubmission uses the persisted ID.
-        with deps.session_factory() as session:
-            attempt = _require_attempt(session, attempt_id)
-            task = _get(session, task_id)
-            session_id = attempt.artemis_session_id
-            prompt = attempt.prompt_snapshot
-            device_serial = attempt.device_serial
-            app_package = task.target_app_package
-            attempt.submit_retry_count += 1
-            session.commit()
+        except ArtemisTransportError:
+            try:
+                result = await _query_after_submit_transport_error(
+                    deps, session_id, goal, device_serial, app_package
+                )
+            except ArtemisTransportError:
+                # Admission is still ambiguous; keep this session active and
+                # let the next dispatch cycle poll the same ID.
+                return
+    elif admission_probe:
         try:
             result = await deps.artemis.get_task(session_id)
         except ArtemisTransportError:
-            result = await deps.artemis.submit(
-                goal=prompt,
-                session_id=session_id,
-                device_serial=device_serial,
-                app_package=app_package,
-            )
+            return
         if result.status in {"missing", "not_found"}:
             result = await deps.artemis.submit(
-                goal=prompt,
+                goal=goal,
                 session_id=session_id,
                 device_serial=device_serial,
                 app_package=app_package,
             )
-    if not result.terminal:
-        await asyncio.sleep(0)
-        return
+    else:
+        try:
+            result = await deps.artemis.get_task(session_id)
+        except ArtemisTransportError:
+            return
+
     with deps.session_factory() as session:
         attempt = _require_attempt(session, attempt_id)
         task = _get(session, task_id)
-        if attempt.kind == AttemptKind.VERIFY.value:
-            verdict = (
-                (result.output or {}).get("verdict")
-                if result.output
-                else "inconclusive"
+        _assert_lease(task, deps.instance_id)
+        attempt.last_polled_at = datetime.now(UTC)
+        if should_submit or admission_probe:
+            attempt.submitted_at = attempt.submitted_at or datetime.now(UTC)
+        if not result.terminal:
+            attempt.status = (
+                result.status
+                if result.status in {"queued", "running"}
+                else AttemptStatus.RUNNING.value
             )
+            attempt.submitted_at = attempt.submitted_at or datetime.now(UTC)
+            task.stage = (
+                TaskStage.VERIFYING.value
+                if attempt.kind == AttemptKind.VERIFY.value
+                else TaskStage.WAITING_ARTEMIS.value
+            )
+            touch_task(session, task, lease_seconds=deps.lease_seconds)
+            session.commit()
+            return
+
+        if attempt.kind == AttemptKind.VERIFY.value:
+            verdict = (result.output or {}).get("verdict", "inconclusive")
             _save_result(attempt, result)
             if verdict == "published":
-                task.status = TaskStatus.SUCCEEDED.value
-                task.stage = TaskStage.DONE.value
+                task.stage = TaskStage.CLEANING.value
+                task.device_cleanup_status = "pending"
+                task.spool_cleanup_status = "pending"
+                task.object_cleanup_status = "pending"
+                session.commit()
+                await _cleanup_success(task_id, deps)
             elif verdict == "not_published":
                 task.status = TaskStatus.PENDING.value
                 task.stage = TaskStage.QUEUED.value
+                release_lease(task)
+                session.commit()
             else:
                 task.status = TaskStatus.NEEDS_REVIEW.value
                 task.stage = TaskStage.DONE.value
-            release_lease(task)
-            session.commit()
-        elif result.status == "success":
+                release_lease(task)
+                session.commit()
+            return
+
+        if result.status == "success":
             _save_result(attempt, result)
             task.stage = TaskStage.CLEANING.value
             task.device_cleanup_status = "pending"
@@ -216,22 +278,53 @@ async def _run_attempt(
             task.object_cleanup_status = "pending"
             session.commit()
             await _cleanup_success(task_id, deps)
-        else:
-            classification = classify_failure(
-                artemis_status=result.status,
-                steps_count=result.steps_count,
-                final_publish_observed=result.final_publish_observed,
-            )
-            attempt.retry_classification = classification.code
-            attempt.retry_safe = classification.retry_safe
-            _save_result(attempt, result)
-            session.commit()
-            if classification.requires_verification:
-                await _start_verify(task_id, attempt_id, deps)
-            elif classification.retry_safe:
-                await _safe_retry(task_id, classification.code, deps)
-            else:
-                await _mark_failed(task_id, classification.code, deps)
+            return
+
+        classification = classify_failure(
+            artemis_status=result.status,
+            steps_count=result.steps_count,
+            final_publish_observed=result.final_publish_observed,
+            session_missing=result.status in {"missing", "not_found"},
+        )
+        attempt.retry_classification = classification.code
+        attempt.retry_safe = classification.retry_safe
+        _save_result(attempt, result)
+        session.commit()
+
+    if classification.requires_verification:
+        await _start_verify(task_id, attempt_id, deps)
+    elif classification.retry_safe:
+        await _safe_retry(task_id, classification.code, deps)
+    else:
+        await _mark_failed(task_id, classification.code, deps)
+
+
+async def _query_after_submit_transport_error(
+    deps: PublishDependencies,
+    session_id: UUID,
+    goal: str,
+    device_serial: str,
+    app_package: str,
+) -> ArtemisResult:
+    """Probe admission before retrying POST, always reusing the same ID."""
+    result = await deps.artemis.get_task(session_id)
+    if result.status in {"missing", "not_found"}:
+        return await deps.artemis.submit(
+            goal=goal,
+            session_id=session_id,
+            device_serial=device_serial,
+            app_package=app_package,
+        )
+    return result
+
+
+def _assert_lease(task: VideoPublishTask, instance_id: str) -> None:
+    if (
+        task.lease_owner != instance_id
+        or task.lease_expires_at is None
+        or task.lease_expires_at <= datetime.now(UTC)
+    ):
+        raise LeaseLost(task.public_id)
 
 
 def _require_attempt(session: Session, attempt_id: int) -> VideoPublishAttempt:
@@ -250,6 +343,7 @@ def _save_result(attempt: VideoPublishAttempt, result: ArtemisResult) -> None:
     attempt.artemis_output = result.output
     attempt.artemis_error = result.error
     attempt.steps_count = result.steps_count
+    attempt.finished_at = datetime.now(UTC)
 
 
 def _get(session: Session, task_id: UUID) -> VideoPublishTask:
@@ -264,55 +358,17 @@ def _get(session: Session, task_id: UUID) -> VideoPublishTask:
 async def _safe_retry(task_id: UUID, error: str, deps: PublishDependencies) -> None:
     with deps.session_factory() as session:
         task = _get(session, task_id)
-        task.last_error_code = "PRE_ARTEMIS_FAILURE"
+        task.last_error_code = error[:100]
         task.last_error_message = error[:500]
-        task.status = TaskStatus.PENDING.value
-        task.stage = TaskStage.QUEUED.value
-        task.queued_at = __import__("datetime").datetime.now(__import__("datetime").UTC)
+        if task.attempt_count >= deps.max_attempts:
+            task.status = TaskStatus.FAILED.value
+            task.stage = TaskStage.DONE.value
+        else:
+            task.status = TaskStatus.PENDING.value
+            task.stage = TaskStage.QUEUED.value
+            task.queued_at = datetime.now(UTC)
         release_lease(task)
         task.row_version += 1
-        session.commit()
-
-
-async def _cleanup_success(task_id: UUID, deps: PublishDependencies) -> None:
-    """Clean each resource independently; cleanup never changes business outcome."""
-    with deps.session_factory() as session:
-        task = _get(session, task_id)
-        serial, device_path, object_key = (
-            task.target_device_serial,
-            task.device_path,
-            task.object_key,
-        )
-        session.commit()
-    device_error = None
-    if device_path:
-        try:
-            await deps.adb.remove_staged_video(serial, device_path)
-        except Exception as exc:  # noqa: BLE001 - persisted as cleanup status
-            device_error = str(exc)[:500]
-    try:
-        deps.store.remove(object_key)
-        object_error = None
-    except Exception as exc:  # noqa: BLE001 - persisted as cleanup status
-        object_error = str(exc)[:500]
-    with deps.session_factory() as session:
-        task = _get(session, task_id)
-        task.device_cleanup_status = "failed" if device_error else "succeeded"
-        task.device_cleanup_error = device_error
-        task.spool_cleanup_status = "succeeded"
-        task.spool_cleanup_error = None
-        task.object_cleanup_status = "failed" if object_error else "succeeded"
-        task.object_cleanup_error = object_error
-        if not object_error:
-            task.object_deleted_at = __import__("datetime").datetime.now(
-                __import__("datetime").UTC
-            )
-        task.status = TaskStatus.SUCCEEDED.value
-        task.stage = TaskStage.DONE.value
-        task.completed_at = __import__("datetime").datetime.now(
-            __import__("datetime").UTC
-        )
-        release_lease(task)
         session.commit()
 
 
@@ -326,57 +382,97 @@ async def _mark_failed(task_id: UUID, code: str, deps: PublishDependencies) -> N
         session.commit()
 
 
+async def _mark_unexpected(
+    task_id: UUID, error: str, deps: PublishDependencies
+) -> None:
+    with deps.session_factory() as session:
+        task = _get(session, task_id)
+        task.status = TaskStatus.NEEDS_REVIEW.value
+        task.stage = TaskStage.DONE.value
+        task.last_error_code = "UNEXPECTED_WORKER_FAILURE"
+        task.last_error_message = error[:500]
+        release_lease(task)
+        session.commit()
+
+
+async def _mark_spool_cleanup(task_id: UUID, deps: PublishDependencies) -> None:
+    with deps.session_factory() as session:
+        task = _get(session, task_id)
+        if task.spool_cleanup_status in {"pending", "not_started"}:
+            task.spool_cleanup_status = "succeeded"
+            task.spool_cleanup_error = None
+            session.commit()
+
+
+async def _cleanup_success(task_id: UUID, deps: PublishDependencies) -> None:
+    """Clean each resource independently; cleanup never changes business outcome."""
+    with deps.session_factory() as session:
+        task = _get(session, task_id)
+        serial, device_path, object_key = (
+            task.target_device_serial,
+            task.device_path,
+            task.object_key,
+        )
+        device_needed = task.device_cleanup_status != "succeeded"
+        object_needed = task.object_cleanup_status != "succeeded"
+        session.commit()
+    device_error = None
+    if device_needed and device_path:
+        try:
+            await deps.adb.remove_staged_video(serial, device_path)
+        except Exception as exc:  # noqa: BLE001 - persisted as cleanup status
+            device_error = str(exc)[:500]
+    object_error = None
+    if object_needed:
+        try:
+            require_destructive_script_guard(
+                script_name="video_publish.cleanup_object",
+                confirmation=True,
+                dangerous=True,
+            )
+            deps.store.remove(object_key)
+        except SystemExit:
+            object_error = "DESTRUCTIVE_GUARD_BLOCKED"
+        except Exception as exc:  # noqa: BLE001 - persisted as cleanup status
+            object_error = str(exc)[:500]
+    with deps.session_factory() as session:
+        task = _get(session, task_id)
+        if device_needed:
+            task.device_cleanup_status = "failed" if device_error else "succeeded"
+            task.device_cleanup_error = device_error
+        if object_needed:
+            task.object_cleanup_status = "failed" if object_error else "succeeded"
+            task.object_cleanup_error = object_error
+            if not object_error:
+                task.object_deleted_at = datetime.now(UTC)
+        task.status = TaskStatus.SUCCEEDED.value
+        task.stage = TaskStage.DONE.value
+        task.completed_at = datetime.now(UTC)
+        release_lease(task)
+        session.commit()
+
+
 async def _start_verify(
     task_id: UUID, related_id: int, deps: PublishDependencies
 ) -> None:
     with deps.session_factory() as session:
         task = _get(session, task_id)
+        _assert_lease(task, deps.instance_id)
         task.stage = TaskStage.VERIFYING.value
         attempt = _require_attempt(session, related_id)
         verify = create_attempt(session, task, kind=AttemptKind.VERIFY, related=attempt)
+        verify_id = verify.id
         session.commit()
-    try:
-        result = await deps.artemis.submit(
-            goal=verify.prompt_snapshot,
-            session_id=verify.artemis_session_id,
-            device_serial=verify.device_serial,
-            app_package=task.target_app_package,
-        )
-    except ArtemisTransportError:
-        return
-    with deps.session_factory() as session:
-        task = _get(session, task_id)
-        verify = _require_attempt(session, verify.id)
-        verdict = (
-            (result.output or {}).get("verdict") if result.output else "inconclusive"
-        )
-        verify.status = (
-            AttemptStatus.SUCCESS.value
-            if verdict in {"published", "not_published"}
-            else AttemptStatus.UNKNOWN.value
-        )
-        if verdict == "published":
-            task.status = TaskStatus.SUCCEEDED.value
-            task.stage = TaskStage.DONE.value
-        elif verdict == "not_published":
-            task.status = TaskStatus.PENDING.value
-            task.stage = TaskStage.QUEUED.value
-        else:
-            task.status = TaskStatus.NEEDS_REVIEW.value
-            task.stage = TaskStage.DONE.value
-        release_lease(task)
-        session.commit()
+    await _run_attempt(task_id, verify_id, deps)
 
 
 async def recover_active(deps: PublishDependencies) -> str:
     with deps.session_factory() as session:
-        task = session.scalar(
-            select(VideoPublishTask)
-            .where(VideoPublishTask.status == TaskStatus.RUNNING.value)
-            .limit(1)
-        )
+        task = _lease_task(session, deps.instance_id, deps.lease_seconds)
         if task is None:
+            session.commit()
             return "no_active_task"
         task_id = task.public_id
+        session.commit()
     await _execute(task_id, deps)
     return "recovered"

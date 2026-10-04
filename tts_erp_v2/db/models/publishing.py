@@ -141,7 +141,9 @@ class VideoPublishAttempt(Base):
             "uq_video_publish_task_active_attempt",
             "task_id",
             unique=True,
-            postgresql_where=text("status IN ('submitting','queued','running')"),
+            postgresql_where=text(
+                "status IN ('created','submitting','queued','running','unknown')"
+            ),
         ),
         {"schema": "publishing"},
     )

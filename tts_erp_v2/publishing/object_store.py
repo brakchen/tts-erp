@@ -24,7 +24,15 @@ class VideoObjectStore(Protocol):
 class MinioVideoStore:
     """Only exposes operations needed by the publishing workflow."""
 
-    def __init__(self, client: MinioClient) -> None:
+    def __init__(
+        self, client: MinioClient, *, expected_bucket: str | None = None
+    ) -> None:
+        expected = (
+            expected_bucket
+            or os.environ.get("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video").strip()
+        )
+        if not expected or client.bucket != expected:
+            raise ValueError("PUBLISH_BUCKET_MISMATCH")
         self._client = client
 
     @property
