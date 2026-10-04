@@ -35,6 +35,7 @@ def test_upload_cancellation_aborts_xhr_and_preserves_resumable_request() -> Non
           send(file) { this.file = file; }
           abort() { this.abortCalls += 1; if (this.onabort) this.onabort(); }
           finish() { this.status = 200; if (this.onload) this.onload(); }
+          fail() { if (this.onerror) this.onerror(); }
         }
         global.location = { pathname: "/v2/pages/video-publish/" };
         global.window = global;
@@ -98,6 +99,7 @@ def test_upload_cancellation_aborts_xhr_and_preserves_resumable_request() -> Non
         await cancel.onclick();
         await firstRun;
         firstXhr.finish();
+        firstXhr.fail();
         if (firstXhr.abortCalls !== 1) throw new Error("cancel did not abort the active XHR");
         if (confirms !== 0) throw new Error("cancelled upload reached confirm endpoint");
         if (!cancel.hidden || submit.disabled) throw new Error("cancel did not restore form state");
