@@ -17,8 +17,9 @@
 ## 页面行为
 
 页面支持按店铺（`seller_id`）、广告账户、采集接口、日期区间，以及计划/商品 ID
-子串筛选。筛选条件同步到 URL，刷新和分享链接后可以恢复。表格固定按
-`day DESC, updated_at DESC, id DESC` 排序，并使用 `limit` / `offset` 分页。
+子串筛选。筛选条件同步到 URL，刷新和分享链接后可以恢复。表格列头可点击排序
+（`sort` / `order` 同步到 URL），默认按 `day DESC, updated_at DESC, id DESC`，
+并使用 `limit` / `offset` 分页。
 
 主表展示源表的一等字段：
 
@@ -47,8 +48,28 @@ Query parameters：
 | `day_from` | date | — | 起始日，含当天 |
 | `day_to` | date | — | 截止日，含当天；早于 `day_from` 返回 422 |
 | `q` | string | — | campaign_id / product_id 字面子串，`%` 与 `_` 不作通配符 |
+| `sort` | string | `day` | 排序列，见下表；不在白名单返回 422 |
+| `order` | string | `desc` | `asc` / `desc`，其余值返回 422 |
 | `limit` | int | 50 | 1..500 |
 | `offset` | int | 0 | ≥0 |
+
+`sort` 白名单（与页面列头 `data-sort` 一一对应）：
+
+| sort | 排序对象 |
+| --- | --- |
+| `day` | `d.day` |
+| `shop` | `COALESCE(s.account_name, d.seller_id)` |
+| `campaign` | `d.campaign_id` |
+| `product` | `COALESCE(p.title, d.product_id)` |
+| `spend` | `mixed_real_cost` |
+| `orders` | `onsite_roi2_shopping_sku` |
+| `gmv` | `onsite_roi2_shopping_value` |
+| `roi` | `onsite_mixed_real_roi2_shopping` |
+| `updated_at` | `d.updated_at` |
+
+实际 `ORDER BY <白名单表达式> <dir> NULLS LAST, d.updated_at <dir>, d.id <dir>`：
+缺指标的行两个方向都垫底，`updated_at` / `id` 兜底保证分页稳定。白名单是固定
+表达式映射，`sort` 取值不进 SQL 文本。
 
 响应：
 

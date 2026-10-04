@@ -49,6 +49,24 @@ NODE_PATH=/home/schan/pi-web/node_modules \
 `spu-roi`、`focused-spus`（后两者自动带 `?shop_pk=7` 以触发主表数据渲染，
 否则空态不构成有效巡检）。
 
+## 字体巡检（probe_ui_font_audit.js）
+
+布局之外，字体是否全站一致靠另一个探针度量：它不看声明，而是用 CDP
+`CSS.getPlatformFontsForNode` 读**浏览器实际命中**的字体族（含 fontconfig 替换结果），
+再叠加每页 computed `font-size` / `font-family` 分布与样式表声明清单。
+
+```bash
+# 1) 渲染全部页面（同上，只读）
+.venv/bin/python scripts/probe_ui_layout_pages.py --out /tmp/ui-audit/pages
+
+# 2) 字体/字号巡检（报告：/tmp/ui-audit/font-report.json）
+NODE_PATH=/home/schan/pi-web/node_modules \
+  node scripts/probe_ui_font_audit.js
+```
+
+判定标准：12 个页面命中**同一套**字体族（sans / mono / serif 各一支），出现只在
+个别页面的族名即为不一致（如 vendor jsoneditor 的 `arial` → `Liberation Sans`）。
+
 ## 读图复核
 
 度量是定量防线；字体截断、间距、配色类问题仍需人工过截图
@@ -61,3 +79,6 @@ NODE_PATH=/home/schan/pi-web/node_modules \
   `ui-audit-deep-dive`）的一次性 harness。巡检结论：除 SPU ROI 主表
   `fitData` 空白（已由 `fix/spu-roi-table-layout` 修复为 `fitColumns`）外
   无新增布局缺陷。
+- 2026-10-04：新增 `probe_ui_font_audit.js`（lane `feature/ui-font-unify`）。
+  基线：12 页命中 7 套计算字族，`runtime-configs` 因 vendor 编辑器掉到
+  `DejaVu Sans Mono` / `Liberation Sans`；修后收敛为同一套。
