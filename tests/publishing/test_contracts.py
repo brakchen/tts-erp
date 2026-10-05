@@ -133,19 +133,32 @@ async def test_transport_recovery_queries_before_same_session_resubmit() -> None
             return ArtemisResult(value, "missing")
 
         async def submit(self, **kwargs):
-            self.calls.append(f"submit:{kwargs['session_id']}")
+            self.calls.append(
+                f"submit:{kwargs['session_id']}:{kwargs['profile']}:"
+                f"{kwargs['verification_level']}"
+            )
             return ArtemisResult(kwargs["session_id"], "queued")
 
     artemis = Artemis()
     result = await _query_after_submit_transport_error(
-        cast(PublishDependencies, SimpleNamespace(artemis=artemis)),
+        cast(
+            PublishDependencies,
+            SimpleNamespace(
+                artemis=artemis,
+                artemis_profile="TEST_profile",
+                artemis_verification_level="TEST_verification",
+            ),
+        ),
         session_id,
         "goal",
         "device",
         "com.tiktok",
     )
     assert result.status == "queued"
-    assert artemis.calls == [f"get:{session_id}", f"submit:{session_id}"]
+    assert artemis.calls == [
+        f"get:{session_id}",
+        f"submit:{session_id}:TEST_profile:TEST_verification",
+    ]
 
 
 def test_cleanup_guard_precedes_adb_and_object_deletion() -> None:
@@ -188,6 +201,22 @@ def test_concurrency_and_migration_contracts_include_active_protection() -> None
     assert (
         "status IN ('created','submitting','queued','running','unknown')" in migration
     )
+
+
+def test_worker_wires_documented_artemis_and_timing_knobs() -> None:
+    source = (ROOT / "tts_erp_v2/publishing/worker.py").read_text()
+    assert 'os.environ.get("ARTEMIS_PROFILE", "pro")' in source
+    assert '"ARTEMIS_VERIFICATION_LEVEL", "strict"' in source
+    assert 'os.environ.get("PUBLISH_POLL_INTERVAL_SECONDS", "2")' in source
+    assert "PUBLISH_WORKER_POLL_SECONDS" not in source
+    assert 'os.environ.get("PUBLISH_TASK_LEASE_SECONDS", "30")' in source
+    assert 'os.environ.get("PUBLISH_WORKER_HEARTBEAT_SECONDS", "5")' in source
+
+
+def test_queued_content_warning_is_immutable_and_immediate() -> None:
+    source = (ROOT / "tts_erp_v2/templates/pages/video-publish.html").read_text()
+    assert "设备空闲时任务可能立即开始" in source
+    assert "入队后不能修改视频和文案" in source
 
 
 def test_frontend_keeps_idempotency_and_double_click_guards() -> None:

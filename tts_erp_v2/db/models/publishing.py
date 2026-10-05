@@ -80,6 +80,9 @@ class VideoPublishTask(Base):
     stage: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'awaiting_upload'")
     )
+    stage_started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
     attempt_count: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("0")
     )

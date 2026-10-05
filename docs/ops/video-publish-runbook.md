@@ -6,9 +6,13 @@
 
 ## 部署顺序
 
-1. 使用测试形数据库验证 video-publish migrations `0053`–`0057`，再由运维执行生产迁移。
+1. 使用测试形数据库验证 video-publish migrations `0053`–`0059`，再由运维执行生产迁移。
+   `0058` 会在加约束前把旧的 pending/queued、pending/waiting_device 清理状态
+   回填为显式 cleanup intent；含对象残留的歧义任务转为
+   `needs_review/done + preserve_state` 并取消对象删除。`0059` 回填当前阶段起始时间。
+   生产执行前停止领取新任务、确认 worker 心跳停止，并按迁移顺序协调 API/worker 重启。
 2. 创建私有 `tiktok-video` bucket，并限制 `video-publish/*` 的 Get/Put/Delete/Head 权限；配置来源站点 PUT/HEAD CORS。
-3. 创建 `TTS_ERP_PUBLISH_SPOOL_DIR`（0700），设置 `ARTEMIS_BASE_URL`、`ARTEMIS_DEVICE_SERIAL`、`ARTEMIS_APP_PACKAGE`、`TIKTOK_PUBLISH_MINIO_BUCKET=tiktok-video` 和 MinIO 凭据。`MINIO_BUCKET` 必须与专用 bucket 相同；未配置设备序列号或 bucket 不匹配时 API 拒绝创建任务。
+3. 创建 `TTS_ERP_PUBLISH_SPOOL_DIR`（0700），设置 `ARTEMIS_BASE_URL`、`ARTEMIS_DEVICE_SERIAL`、`ARTEMIS_APP_PACKAGE`、`TIKTOK_PUBLISH_MINIO_BUCKET=tiktok-video` 和 MinIO 凭据。`MINIO_BUCKET` 必须与专用 bucket 相同；未配置设备序列号或 bucket 不匹配时 API 拒绝创建任务。按需覆盖 `ARTEMIS_PROFILE=pro`、`ARTEMIS_VERIFICATION_LEVEL=strict`、`PUBLISH_POLL_INTERVAL_SECONDS=2`、`PUBLISH_TASK_LEASE_SECONDS=30` 与 `PUBLISH_WORKER_HEARTBEAT_SECONDS=5`；API config 返回生效的非敏感 Artemis/轮询配置供运维核对。
 4. 安装 `scripts/systemd/tts-erp-publish.service`。生产环境如需执行对象删除，须由运维在服务环境显式设置 `ALLOW_PROD_DESTRUCTIVE=1`；缺少该授权时对象保留并标记 cleanup failed，不会静默删除。启动后确认 `publishing.worker_heartbeats` 在 15 秒内为 ready。
 5. 仅用模拟器/fake adapter 做 staging dry-run；真机先只做 MediaStore dry-run。
 6. 给 operator/admin 授权 `page:video-publish`。首次真实发布必须由用户显式确认。
@@ -23,7 +27,9 @@
 - 上传中的“取消上传”只 abort 当前 XHR，不确认任务；草稿保留原 clientRequestId，可通过“继续上传”恢复。
 - 视频任务按创建者隔离：会话用户按 user_id、API key 按 key hash 读取和重放自己的任务；普通 readwrite 请求不能枚举或重放他人任务。admin 是明确的全局运维例外，可查看和管理所有任务。
 - Worker 重启会从 running task 继续读取原 session；不要删除数据库行或对象。
-- 回滚时先移除页面权限、停止领取新任务；保留 running/needs_review 的对象和审计历史。只有三张表为空并经人工确认才允许 downgrade。
+- 回滚时先移除页面权限、停止领取新任务；保留 running/needs_review 的对象和审计历史。`0058` downgrade 在
+  `publishing.video_publish_tasks` 非空时会拒绝执行；只有清空三张 publishing 表并经人工确认才允许
+  `0058`/`0059` downgrade。不得绕过该保护直接删除 cleanup intent 或 lease 列。
 
 ## 只读检查
 

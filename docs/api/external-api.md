@@ -101,7 +101,8 @@ Two credential families share one authorization layer
    登录、登出、会话管理见 [Browser session login](#browser-session-login)；
    设计基准 [`user-account-authz-design.md`](../design/user-account-authz-design.md)。
    会话用户的授权档位取其角色的 `api_tier`（`readonly|readwrite|admin`），
-   走**同一张路由角色矩阵**；页面路由还要求对应的 `page:<id>` 权限点。
+   走**同一张路由角色矩阵**；页面路由以及视频发布 API 还要求对应的
+   `page:<id>` 权限点（视频发布为 `page:video-publish`）。
 2. **API key（程序化访问，不变）** — `Authorization: Bearer <key>` 或
    `X-API-Key: <key>`，两 header 形态：
 
@@ -133,8 +134,9 @@ route-relative path and therefore also covers `/tts/docs` deployments.
 - `401 invalid, disabled or expired api key` — credential not recognised
 - `403 requires <role>` — key recognised but lacks the role for this path
 - `403 requires page:<id>` — session user lacks the page permission point
-  (page routes and the `/v2/users*` / `/v2/roles*` APIs, which map to
-  `page:users`); API-key credentials are not subject to page permission points
+  (page routes, `/v2/video-publish*` → `page:video-publish`, and the
+  `/v2/users*` / `/v2/roles*` APIs, which map to `page:users`); API-key
+  credentials are not subject to page permission points
 
 The mode is set by env `TTS_ERP_AUTH_MODE=off|shadow|enforce`. In
 `enforce` (production default since 2026-08-20) the service returns the
@@ -414,18 +416,18 @@ mutations must send `X-Requested-With: tts-erp`; API-key clients are exempt.
 | Endpoint | Role | Notes |
 | --- | --- | --- |
 | `GET /v2/pages/video-publish` | page:video-publish | Browser publishing workbench; page access follows the authenticated page permission. |
-| `GET /v2/video-publish/config` | readonly | Limits and masked device/worker readiness; no credentials or signed URLs. |
-| `GET /v2/video-publish/tasks/current` | readonly | Current owner-visible task plus filter-independent polling summary. |
-| `GET /v2/video-publish/tasks` | readonly | Owner-scoped history; `status`, `limit`, and `cursor` filters. |
-| `GET /v2/video-publish/tasks/{task_id}` | readonly | Owner-scoped detail; `includeDiagnostics=true` requires admin. |
-| `POST /v2/video-publish/tasks` | readwrite | Creates an awaiting-upload task and short-lived presigned PUT ticket. |
-| `POST /v2/video-publish/tasks/{task_id}/upload-url` | readwrite | Refreshes an awaiting-upload ticket for the owner. |
-| `POST /v2/video-publish/tasks/{task_id}/replace-upload` | readwrite | Reopens a failed task whose object is confirmed absent so the owner can upload a replacement. |
-| `POST /v2/video-publish/tasks/{task_id}/confirm-upload` | readwrite | HEAD-verifies the object and queues the task. |
-| `POST /v2/video-publish/tasks/{task_id}/cancel` | readwrite | Cancels an unstarted task and schedules independent object cleanup. |
-| `POST /v2/video-publish/tasks/{task_id}/retry` | readwrite | Retries only a failed, retry-safe task within its attempt budget. |
-| `POST /v2/video-publish/tasks/{task_id}/verify` | readwrite | Requests verification for an ambiguous result. |
-| `POST /v2/video-publish/tasks/{task_id}/cleanup/retry` | readwrite | Retries eligible device, spool, or object cleanup without changing business status. |
+| `GET /v2/video-publish/config` | readonly + page:video-publish | Limits and masked device/worker readiness; no credentials or signed URLs. API keys are exempt from page permission points. |
+| `GET /v2/video-publish/tasks/current` | readonly + page:video-publish | Current owner-visible task plus filter-independent polling summary. API keys are exempt from page permission points. |
+| `GET /v2/video-publish/tasks` | readonly + page:video-publish | Owner-scoped history; `status`, `limit`, and `cursor` filters. API keys are exempt from page permission points. |
+| `GET /v2/video-publish/tasks/{task_id}` | readonly + page:video-publish | Owner-scoped detail; `includeDiagnostics=true` requires admin. API keys are exempt from page permission points. |
+| `POST /v2/video-publish/tasks` | readwrite + page:video-publish | Creates an awaiting-upload task and short-lived presigned PUT ticket. API keys are exempt from page permission points. |
+| `POST /v2/video-publish/tasks/{task_id}/upload-url` | readwrite + page:video-publish | Refreshes an awaiting-upload ticket for the owner. API keys are exempt from page permission points. |
+| `POST /v2/video-publish/tasks/{task_id}/replace-upload` | readwrite + page:video-publish | Reopens a failed task whose object is confirmed absent so the owner can upload a replacement. API keys are exempt from page permission points. |
+| `POST /v2/video-publish/tasks/{task_id}/confirm-upload` | readwrite + page:video-publish | HEAD-verifies the object and queues the task. API keys are exempt from page permission points. |
+| `POST /v2/video-publish/tasks/{task_id}/cancel` | readwrite + page:video-publish | Cancels an unstarted task and schedules independent object cleanup. API keys are exempt from page permission points. |
+| `POST /v2/video-publish/tasks/{task_id}/retry` | readwrite + page:video-publish | Retries only a failed, retry-safe task within its attempt budget. API keys are exempt from page permission points. |
+| `POST /v2/video-publish/tasks/{task_id}/verify` | readwrite + page:video-publish | Requests verification for an ambiguous result. API keys are exempt from page permission points. |
+| `POST /v2/video-publish/tasks/{task_id}/cleanup/retry` | readwrite + page:video-publish | Retries eligible device, spool, or object cleanup without changing business status. API keys are exempt from page permission points. |
 
 ### SPU images (`/v2/spu-images/*`)
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -116,23 +117,33 @@ def plan_cleanup(
     return CleanupPlan(intent, device=device, spool=spool, object=object)
 
 
+def set_task_stage(
+    task: Any, stage: TaskStage | str, *, now: datetime | None = None
+) -> None:
+    """Persist the start of every real task-stage transition."""
+    value = stage.value if isinstance(stage, TaskStage) else stage
+    if task.stage != value or getattr(task, "stage_started_at", None) is None:
+        task.stage = value
+        task.stage_started_at = now or datetime.now(UTC)
+
+
 def apply_cleanup_result(task: Any, *, device_failed: bool = False) -> None:
     """Apply the sole post-cleanup business transition."""
     intent = CleanupIntent(getattr(task, "cleanup_intent", CleanupIntent.NONE.value))
     if intent is CleanupIntent.REQUEUE_PUBLISH:
         if device_failed:
             task.status = TaskStatus.PENDING.value
-            task.stage = TaskStage.WAITING_DEVICE.value
+            set_task_stage(task, TaskStage.WAITING_DEVICE)
         else:
             task.status = TaskStatus.PENDING.value
-            task.stage = TaskStage.QUEUED.value
+            set_task_stage(task, TaskStage.QUEUED)
         return
     if intent is CleanupIntent.FINALIZE_SUCCESS:
         task.status = TaskStatus.SUCCEEDED.value
-        task.stage = TaskStage.DONE.value
+        set_task_stage(task, TaskStage.DONE)
         return
     if intent is CleanupIntent.PRESERVE_STATE:
-        task.stage = TaskStage.DONE.value
+        set_task_stage(task, TaskStage.DONE)
         return
 
 
@@ -232,7 +243,8 @@ def transition_task(task: Any, event: str) -> None:
     result = transitions.get((current, event))
     if result is None:
         raise DomainTransitionError(f"{event} is not allowed from {current}")
-    task.status, task.stage = result
+    task.status = result[0]
+    set_task_stage(task, result[1])
     if event in {"ARTEMIS_SUCCESS", "VERIFY_PUBLISHED", "BUSINESS_SUCCESS_FINALIZED"}:
         plan_cleanup(
             task,
@@ -272,6 +284,14 @@ def classify_failure(
     return FailureClassification("session_missing", None, True)
 
 
+def replace_upload_allowed(task: Any) -> bool:
+    return (
+        task.status == TaskStatus.FAILED.value
+        and task.object_deleted_at is not None
+        and task.attempt_count < int(os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3"))
+    )
+
+
 def cleanup_retryable_resources(task: Any) -> tuple[str, ...]:
     """Single policy used by list snapshots and cleanup retry commands."""
     if getattr(task, "status", None) == TaskStatus.RUNNING:
@@ -298,7 +318,7 @@ def allowed_actions(task: Any) -> tuple[AllowedAction, ...]:
     ):
         attempts = getattr(task, "attempts", ()) or ()
         latest = max(attempts, key=lambda attempt: attempt.sequence_no, default=None)
-        if task.object_deleted_at is not None:
+        if replace_upload_allowed(task):
             actions.append(AllowedAction.REPLACE_UPLOAD)
         elif (
             latest is not None

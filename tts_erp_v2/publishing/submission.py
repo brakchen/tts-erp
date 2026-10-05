@@ -20,6 +20,8 @@ from tts_erp_v2.publishing.domain import (
     TaskStage,
     TaskStatus,
     plan_cleanup,
+    replace_upload_allowed,
+    set_task_stage,
 )
 from tts_erp_v2.publishing.object_store import VideoObjectStore
 from tts_erp_v2.publishing.repository import get_task, queue_task, release_lease
@@ -142,6 +144,7 @@ def create_upload_ticket(
         object_key=key,
         status=TaskStatus.PENDING.value,
         stage=TaskStage.AWAITING_UPLOAD.value,
+        stage_started_at=datetime.now(UTC),
         target_device_serial=device_serial,
         target_app_package=_PACKAGE,
     )
@@ -205,7 +208,7 @@ def confirm_upload(
     task.object_etag = metadata.get("etag")
     task.object_uploaded_at = datetime.now(UTC)
     task.status = TaskStatus.PENDING.value
-    task.stage = TaskStage.QUEUED.value
+    set_task_stage(task, TaskStage.QUEUED)
     task.queued_at = datetime.now(UTC)
     task.row_version += 1
     session.commit()
@@ -218,12 +221,23 @@ def replace_upload(session: Session, task_id: UUID) -> VideoPublishTask:
         raise LookupError("TASK_NOT_FOUND")
     if task.status != TaskStatus.FAILED.value or task.object_deleted_at is None:
         raise ValueError("UPLOAD_REPLACEMENT_REQUIRED")
+    if not replace_upload_allowed(task):
+        raise ValueError("RETRY_BUDGET_EXHAUSTED")
     task.status = TaskStatus.PENDING.value
-    task.stage = TaskStage.AWAITING_UPLOAD.value
+    set_task_stage(task, TaskStage.AWAITING_UPLOAD)
     task.object_uploaded_at = None
     task.object_deleted_at = None
     task.object_etag = None
     task.object_sha256 = None
+    task.object_cleanup_status = "not_started"
+    task.object_cleanup_error = None
+    task.object_cleanup_attempts = 0
+    task.object_cleanup_next_attempt_at = None
+    task.cleanup_intent = CleanupIntent.NONE.value
+    task.cleanup_lease_owner = None
+    task.cleanup_lease_expires_at = None
+    task.cleanup_heartbeat_at = None
+    release_lease(task)
     task.last_error_code = None
     task.last_error_message = None
     task.row_version += 1
@@ -244,7 +258,7 @@ def cancel_task(
     }:
         raise ValueError("TASK_ACTION_NOT_ALLOWED")
     task.status = TaskStatus.CANCELLED.value
-    task.stage = TaskStage.DONE.value
+    set_task_stage(task, TaskStage.DONE)
     plan_cleanup(task, CleanupIntent.PRESERVE_STATE, object=True)
     task.completed_at = datetime.now(UTC)
     task.row_version += 1

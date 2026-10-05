@@ -15,7 +15,7 @@
     detailTimer: null,
     currentChannel: { controller: null, generation: 0, failures: 0 },
     listChannel: { controller: null, generation: 0, failures: 0, items: [] },
-    pollState: { running: false, queued: false },
+    pollState: { running: false, cleaning: false, queued: false },
     detailChannel: { controller: null, generation: 0, failures: 0 },
     upload: null,
     creating: false,
@@ -294,19 +294,20 @@
   function renderRail(task) {
     const rail = $("publish-rail");
     rail.querySelectorAll("[data-stage]").forEach((node) => {
-      const current = Boolean(task && node.dataset.stage === task.stage);
+      const current = Boolean(task && node.dataset.stage === (task.operationalStage || task.stage));
       node.classList.toggle("is-current", current);
       if (current) node.setAttribute("aria-current", "step");
       else node.removeAttribute("aria-current");
     });
-    $("publish-rail-summary").textContent = task ? `${task.filename || ""} · ${task.stage}` : "当前无运行任务";
+    $("publish-rail-summary").textContent = task ? `${task.filename || ""} · ${task.operationalStage || task.stage}` : "当前无运行任务";
     const meta = $("publish-rail-meta");
     const detailButton = $("publish-rail-detail");
     if (task) {
       const attempt = task.currentAttempt;
-      const startedAt = task.startedAt || attempt?.startedAt;
+      const startedAt = task.stageStartedAt || attempt?.startedAt || task.startedAt;
+      const attemptCount = attempt?.kind === "verify" ? task.verifyAttemptCount : task.publishAttemptCount;
       const elapsed = startedAt ? `${Math.max(0, Math.floor((Date.now() - Date.parse(startedAt)) / 1000))} 秒` : "—";
-      meta.textContent = `任务 ${task.taskId} · ${attempt?.kind || "—"} #${task.publishAttemptCount || 0} · 开始 ${startedAt || "—"} · 已耗时 ${elapsed}`;
+      meta.textContent = `任务 ${task.taskId} · ${task.operationalStage || task.stage} · ${attempt?.kind || "—"} #${attemptCount || 0} · 开始 ${startedAt || "—"} · 已耗时 ${elapsed}`;
       detailButton.hidden = false;
       detailButton.onclick = () => {
         state.detailOpener = detailButton;
@@ -335,6 +336,13 @@
     copy_artemis_id: "复制 Artemis ID",
   };
   const CONFIRM_ACTIONS = new Set(["cancel", "retry", "verify", "retry_cleanup", "replace_upload"]);
+  const CONFIRM_MESSAGES = {
+    cancel: "取消会保留任务审计记录，并清理已生成的对象；确认取消？",
+    retry: "重试会复用已上传对象，并重新执行一次发布；不会自动确认模糊结果。确认重试？",
+    verify: "核验是只读检查，不会再次点击发布；确认开始核验？",
+    retry_cleanup: "仅重试已失败的清理资源，不会改变业务发布结果；确认重试清理？",
+    replace_upload: "原对象已删除，重新上传会创建新的发布输入；确认重新上传？",
+  };
 
   function resumeUpload(task) {
     if (task.status === "cancelled" || !(task.allowedActions || []).includes("continue_upload")) {
@@ -350,7 +358,7 @@
   }
 
   async function runTaskAction(task, actionName) {
-    if (CONFIRM_ACTIONS.has(actionName) && !window.confirm(`确认${ACTION_LABELS[actionName] || actionName}？`)) return;
+    if (CONFIRM_ACTIONS.has(actionName) && !window.confirm(CONFIRM_MESSAGES[actionName] || `确认${ACTION_LABELS[actionName] || actionName}？`)) return;
     try {
       if (actionName === "view") return openDetail(task.taskId);
       if (actionName === "copy_artemis_id") {
@@ -373,9 +381,15 @@
         });
         return resumeUpload(replaced);
       }
+      const body = { rowVersion: task.rowVersion };
+      if (actionName === "retry_cleanup") {
+        body.resources = task.cleanupRetryableResources || Object.entries(task.cleanup || {})
+          .filter(([, resource]) => resource.status === "failed")
+          .map(([name]) => name);
+      }
       await request(endpoint, {
         method: "POST",
-        body: JSON.stringify({ rowVersion: task.rowVersion }),
+        body: JSON.stringify(body),
       });
       await refresh();
     } catch (error) {
@@ -438,7 +452,7 @@
       channel.failures = 0;
       if (!current.notModified) {
         state.currentTask = current.task;
-        state.pollState = current.pollState || { running: Boolean(current.task), queued: false };
+        state.pollState = current.pollState || { running: Boolean(current.task), cleaning: false, queued: false };
         renderRail(current.task);
       }
       $("publish-last-refreshed").textContent = `上次刷新 ${new Date().toLocaleTimeString()}`;
@@ -460,7 +474,7 @@
       if (generation !== channel.generation) return;
       channel.failures = 0;
       if (!list.notModified) {
-        state.pollState = list.pollState || { running: false, queued: false };
+        state.pollState = list.pollState || { running: false, cleaning: false, queued: false };
         renderTasks(list);
       }
       $("publish-last-refreshed").textContent = `上次刷新 ${new Date().toLocaleTimeString()}`;
@@ -539,7 +553,7 @@
   function scheduleCurrent(mode) {
     const shared = sharedPollState();
     const base = mode === "smart"
-      ? shared.running ? 2 : shared.queued ? 8 : 30
+      ? shared.running || shared.cleaning ? 2 : shared.queued ? 8 : 30
       : Number(mode);
     const seconds = backoffSeconds(base, state.currentChannel.failures);
     state.currentTimer = setTimeout(async () => {
@@ -551,7 +565,7 @@
   function scheduleList(mode) {
     const shared = sharedPollState();
     const base = mode === "smart"
-      ? shared.running ? 5 : shared.queued ? 8 : 30
+      ? shared.running || shared.cleaning ? 5 : shared.queued ? 8 : 30
       : Number(mode);
     const seconds = backoffSeconds(base, state.listChannel.failures);
     state.listTimer = setTimeout(async () => {
@@ -605,6 +619,15 @@
       copy.textContent = "复制 Artemis ID";
       copy.onclick = () => navigator.clipboard.writeText(attempt.artemisSessionId).then(() => notice("Artemis ID 已复制"));
       section.append(summary, diagnostic, id, copy);
+      if (attempt.promptSnapshot || attempt.artemisOutput) {
+        const diagnostics = document.createElement("details");
+        const summary = document.createElement("summary");
+        summary.textContent = "管理员诊断";
+        const pre = document.createElement("pre");
+        pre.textContent = JSON.stringify({ promptSnapshot: attempt.promptSnapshot, artemisOutput: attempt.artemisOutput }, null, 2);
+        diagnostics.append(summary, pre);
+        section.append(diagnostics);
+      }
       drawer.append(section);
     });
     if (detail.cleanup) {

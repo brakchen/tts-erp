@@ -18,6 +18,7 @@ from tts_erp_v2.publishing.domain import (
     TaskStage,
     TaskStatus,
     cleanup_retryable_resources,
+    set_task_stage,
 )
 from tts_erp_v2.publishing.prompt import (
     PUBLISH_PROMPT_VERSION,
@@ -245,7 +246,7 @@ def claim_one(
         return None
     now = datetime.now(UTC)
     task.status = TaskStatus.RUNNING.value
-    task.stage = TaskStage.DOWNLOADING.value
+    set_task_stage(task, TaskStage.DOWNLOADING, now=now)
     task.lease_owner = instance_id
     task.lease_expires_at = now + timedelta(seconds=lease_seconds)
     task.heartbeat_at = now
@@ -270,7 +271,7 @@ def touch_task(
     task.heartbeat_at = datetime.now(UTC)
     task.lease_expires_at = datetime.now(UTC) + timedelta(seconds=lease_seconds)
     if stage:
-        task.stage = stage
+        set_task_stage(task, stage)
     task.row_version += 1
 
 
@@ -316,7 +317,7 @@ def request_verification(session: Session, task_id: UUID) -> VideoPublishTask:
     if related is None:
         raise ValueError("VERIFY_NOT_AVAILABLE")
     task.status = TaskStatus.RUNNING.value
-    task.stage = TaskStage.VERIFYING.value
+    set_task_stage(task, TaskStage.VERIFYING)
     task.lease_owner = "api-verification"
     task.lease_expires_at = datetime.now(UTC) + timedelta(seconds=30)
     create_attempt(session, task, kind=AttemptKind.VERIFY, related=related)
@@ -325,11 +326,22 @@ def request_verification(session: Session, task_id: UUID) -> VideoPublishTask:
 
 
 def retry_cleanup_resources(
-    session: Session, task: VideoPublishTask, *, now: datetime | None = None
+    session: Session,
+    task: VideoPublishTask,
+    *,
+    resources: list[str] | None = None,
+    now: datetime | None = None,
 ) -> tuple[str, ...]:
     """Reset only failed resources while preserving business status/stage."""
     now = now or datetime.now(UTC)
     failed = cleanup_retryable_resources(task)
+    if resources is not None:
+        requested = tuple(dict.fromkeys(resources))
+        if any(name not in {"device", "spool", "object"} for name in requested):
+            raise ValueError("CLEANUP_RESOURCE_NOT_RETRYABLE")
+        if any(name not in failed for name in requested):
+            raise ValueError("CLEANUP_RESOURCE_NOT_RETRYABLE")
+        failed = tuple(name for name in failed if name in requested)
     if not failed:
         raise ValueError("CLEANUP_RETRY_NOT_AVAILABLE")
     if (
@@ -356,7 +368,7 @@ def queue_task(task: VideoPublishTask, *, delay_seconds: int = 0) -> None:
     task.cleanup_lease_owner = None
     task.cleanup_lease_expires_at = None
     task.cleanup_heartbeat_at = None
-    task.stage = TaskStage.QUEUED.value
+    set_task_stage(task, TaskStage.QUEUED)
     task.queued_at = datetime.now(UTC)
     task.next_attempt_at = (
         datetime.now(UTC) + timedelta(seconds=delay_seconds) if delay_seconds else None

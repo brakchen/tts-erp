@@ -41,6 +41,8 @@ def test_retry_action_requires_safe_latest_publish_and_existing_object() -> None
     deleted_actions = [item.value for item in allowed_actions(deleted)]
     assert "retry" not in deleted_actions
     assert "replace_upload" in deleted_actions
+    exhausted = SimpleNamespace(**{**deleted.__dict__, "attempt_count": 3})
+    assert "replace_upload" not in [item.value for item in allowed_actions(exhausted)]
 
 
 def test_queue_actions_do_not_expose_retry() -> None:

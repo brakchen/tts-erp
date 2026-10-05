@@ -90,8 +90,8 @@ def required_page_permission(route_path: str) -> str | None:
 
     - ``/v2/pages/<id>``   → ``page:<id>``
     - ``/v2/users*`` ``/v2/roles*`` → ``page:users``（用户管理页的配套 API）
-    - 其余（数据 API）→ None：页面内全部操作不设权限点（设计 §7.1），
-      由会话的 api_tier 走既有路由角色矩阵兜底。
+    - ``/v2/video-publish*`` → ``page:video-publish``（会话用户的发布 API）
+    - 其余数据 API → None：由会话的 api_tier 走既有路由角色矩阵兜底。
     """
     path = route_path.split("?", 1)[0]
     if path.startswith("/v2/pages/"):

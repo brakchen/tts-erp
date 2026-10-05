@@ -27,7 +27,7 @@ from tts_erp_v2.db.models.publishing import (
     VideoPublishAttempt,
     VideoPublishTask,
 )
-from tts_erp_v2.publishing.domain import allowed_actions
+from tts_erp_v2.publishing.domain import allowed_actions, cleanup_retryable_resources
 from tts_erp_v2.publishing.object_store import MinioVideoStore, VideoObjectStore
 from tts_erp_v2.publishing.repository import (
     _lock_publish_slot,
@@ -80,6 +80,7 @@ class CreateIn(BaseModel):
 
 class ActionIn(BaseModel):
     row_version: int | None = Field(default=None, alias="rowVersion")
+    resources: list[str] | None = None
     model_config = {"populate_by_name": True}
 
 
@@ -112,6 +113,12 @@ def _snapshot(
     attempts = sorted(task.attempts, key=lambda a: a.sequence_no, reverse=True)
     latest = attempts[0] if attempts else None
     actions = allowed_actions(task)
+    operational_stage = (
+        "cleaning"
+        if task.device_cleanup_status in {"pending", "failed"}
+        and task.cleanup_intent != "none"
+        else task.stage
+    )
     data = {
         "taskId": str(task.public_id),
         "rowVersion": task.row_version,
@@ -120,6 +127,8 @@ def _snapshot(
         "captionPreview": task.caption.splitlines()[0][:160] if task.caption else "",
         "status": task.status,
         "stage": task.stage,
+        "operationalStage": operational_stage,
+        "stageStartedAt": task.stage_started_at,
         "latestArtemisSessionId": str(latest.artemis_session_id) if latest else None,
         "publishAttemptCount": sum(a.kind == "publish" for a in attempts),
         "verifyAttemptCount": sum(a.kind == "verify" for a in attempts),
@@ -129,6 +138,7 @@ def _snapshot(
         "updatedAt": task.updated_at,
         "startedAt": task.started_at,
         "allowedActions": [a.value for a in actions],
+        "cleanupRetryableResources": list(cleanup_retryable_resources(task)),
     }
     if expose_client_request_id:
         data["clientRequestId"] = str(task.client_request_id)
@@ -302,7 +312,33 @@ def config(request: Request, session: Annotated[Session, Depends(get_session)]) 
             "status": "ready" if heartbeat else "unavailable",
             "lastHeartbeatAt": heartbeat,
         },
-        "device": {"status": "unknown", "message": "发布服务将在任务执行前检查设备"},
+        "device": {
+            "status": (
+                "ready"
+                if heartbeat and os.environ.get("ARTEMIS_DEVICE_SERIAL")
+                else "unconfigured"
+                if not os.environ.get("ARTEMIS_DEVICE_SERIAL")
+                else "unavailable"
+            ),
+            "message": (
+                "Worker 心跳正常，设备将在领取任务时再次检查"
+                if heartbeat and os.environ.get("ARTEMIS_DEVICE_SERIAL")
+                else "未配置设备序列号"
+                if not os.environ.get("ARTEMIS_DEVICE_SERIAL")
+                else "Worker 不可用"
+            ),
+        },
+        "artemis": {
+            "profile": os.environ.get("ARTEMIS_PROFILE", "pro"),
+            "verificationLevel": os.environ.get("ARTEMIS_VERIFICATION_LEVEL", "strict"),
+        },
+        "workerTiming": {
+            "pollSeconds": float(os.environ.get("PUBLISH_POLL_INTERVAL_SECONDS", "2")),
+            "leaseSeconds": int(os.environ.get("PUBLISH_TASK_LEASE_SECONDS", "30")),
+            "heartbeatSeconds": float(
+                os.environ.get("PUBLISH_WORKER_HEARTBEAT_SECONDS", "5")
+            ),
+        },
         "canWrite": can_write,
         "writeBlockReason": None
         if can_write
@@ -435,6 +471,15 @@ def _poll_state(session: Session) -> dict[str, bool]:
             .limit(1)
         )
         is not None,
+        "cleaning": session.scalar(
+            select(VideoPublishTask.id)
+            .where(
+                VideoPublishTask.cleanup_intent != "none",
+                VideoPublishTask.device_cleanup_status.in_(["pending", "failed"]),
+            )
+            .limit(1)
+        )
+        is not None,
         "queued": session.scalar(
             select(VideoPublishTask.id)
             .where(
@@ -455,7 +500,13 @@ def current(
 ) -> dict | Response:
     current_query = (
         select(VideoPublishTask)
-        .where(VideoPublishTask.status == "running")
+        .where(
+            (VideoPublishTask.status == "running")
+            | (
+                (VideoPublishTask.cleanup_intent != "none")
+                & VideoPublishTask.device_cleanup_status.in_(["pending", "failed"])
+            )
+        )
         .options(selectinload(VideoPublishTask.attempts))
         .order_by(VideoPublishTask.id)
         .limit(1)
@@ -552,7 +603,8 @@ def cancel(
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(
-            status.HTTP_409_CONFLICT, {"code": str(exc), "message": str(exc)}
+            status.HTTP_409_CONFLICT,
+            _action_conflict(task_snapshot, str(exc), str(exc)),
         ) from exc
 
 
@@ -603,7 +655,8 @@ def replace_upload_task(
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(
-            status.HTTP_409_CONFLICT, {"code": str(exc), "message": str(exc)}
+            status.HTTP_409_CONFLICT,
+            _action_conflict(task_snapshot, str(exc), str(exc)),
         ) from exc
 
 
@@ -654,7 +707,7 @@ def retry_cleanup(
     task = _task_for_actor(session, task_id, request, lock=True)
     _require_row_version(task, body.row_version)
     try:
-        retry_cleanup_resources(session, task)
+        retry_cleanup_resources(session, task, resources=body.resources)
     except ValueError as exc:
         raise HTTPException(
             status.HTTP_409_CONFLICT,

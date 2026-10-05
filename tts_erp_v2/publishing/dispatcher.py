@@ -30,6 +30,7 @@ from tts_erp_v2.publishing.domain import (
     TaskStatus,
     apply_cleanup_result,
     classify_failure,
+    set_task_stage,
     transition_task,
 )
 from tts_erp_v2.publishing.object_store import VideoObjectStore
@@ -59,6 +60,9 @@ class PublishDependencies:
     instance_id: str
     max_attempts: int = 3
     lease_seconds: int = 30
+    poll_seconds: float = 2.0
+    artemis_profile: str = "pro"
+    artemis_verification_level: str = "strict"
 
 
 async def dispatch_one(deps: PublishDependencies) -> str:
@@ -128,7 +132,7 @@ def _recover_terminal_publish_attempt(
     task.last_error_code = attempt.retry_classification or "PUBLISH_ATTEMPT_TERMINAL"
     if attempt.retry_safe is True:
         return "safe_retry"
-    task.stage = TaskStage.VERIFYING.value
+    set_task_stage(task, TaskStage.VERIFYING)
     task.row_version = (task.row_version or 0) + 1
     return ("verify", attempt.id)
 
@@ -300,10 +304,11 @@ async def _run_attempt(
             AttemptStatus.SUBMITTING.value if should_submit else attempt.status
         )
         attempt.started_at = attempt.started_at or datetime.now(UTC)
-        task.stage = (
-            TaskStage.VERIFYING.value
+        set_task_stage(
+            task,
+            TaskStage.VERIFYING
             if attempt.kind == AttemptKind.VERIFY.value
-            else TaskStage.DISPATCHING_ARTEMIS.value
+            else TaskStage.DISPATCHING_ARTEMIS,
         )
         touch_task(session, task, lease_seconds=deps.lease_seconds)
         session.commit()
@@ -319,6 +324,10 @@ async def _run_attempt(
                     session_id=session_id,
                     device_serial=device_serial,
                     app_package=app_package,
+                    profile=getattr(deps, "artemis_profile", "pro"),
+                    verification_level=getattr(
+                        deps, "artemis_verification_level", "strict"
+                    ),
                 ),
             )
         except ArtemisTransportError:
@@ -350,6 +359,10 @@ async def _run_attempt(
                     session_id=session_id,
                     device_serial=device_serial,
                     app_package=app_package,
+                    profile=getattr(deps, "artemis_profile", "pro"),
+                    verification_level=getattr(
+                        deps, "artemis_verification_level", "strict"
+                    ),
                 ),
             )
     else:
@@ -383,10 +396,11 @@ async def _run_attempt(
                 else AttemptStatus.RUNNING.value
             )
             attempt.submitted_at = attempt.submitted_at or datetime.now(UTC)
-            task.stage = (
-                TaskStage.VERIFYING.value
+            set_task_stage(
+                task,
+                TaskStage.VERIFYING
                 if attempt.kind == AttemptKind.VERIFY.value
-                else TaskStage.WAITING_ARTEMIS.value
+                else TaskStage.WAITING_ARTEMIS,
             )
             touch_task(session, task, lease_seconds=deps.lease_seconds)
             session.commit()
@@ -409,7 +423,7 @@ async def _run_attempt(
                     task.device_cleanup_next_attempt_at = datetime.now(UTC)
                 else:
                     task.status = TaskStatus.PENDING.value
-                    task.stage = TaskStage.QUEUED.value
+                    set_task_stage(task, TaskStage.QUEUED)
                     task.cleanup_intent = "none"
                 release_lease(task)
                 task.row_version += 1
@@ -420,7 +434,7 @@ async def _run_attempt(
                     task.device_cleanup_status = "pending"
                 else:
                     task.status = TaskStatus.NEEDS_REVIEW.value
-                    task.stage = TaskStage.DONE.value
+                    set_task_stage(task, TaskStage.DONE)
                     task.cleanup_intent = "none"
                 if task.device_path:
                     task.device_cleanup_next_attempt_at = datetime.now(UTC)
@@ -473,6 +487,8 @@ async def _query_after_submit_transport_error(
             session_id=session_id,
             device_serial=device_serial,
             app_package=app_package,
+            profile=getattr(deps, "artemis_profile", "pro"),
+            verification_level=getattr(deps, "artemis_verification_level", "strict"),
         )
     return result
 
@@ -619,7 +635,7 @@ def _cleanup_retry_delay(attempts: int) -> int:
 
 def _defer_for_device_cleanup(task: VideoPublishTask) -> None:
     task.status = TaskStatus.PENDING.value
-    task.stage = TaskStage.WAITING_DEVICE.value
+    set_task_stage(task, TaskStage.WAITING_DEVICE)
     task.next_attempt_at = datetime.now(UTC) + timedelta(seconds=30)
     task.lease_owner = None
     task.lease_expires_at = None
@@ -661,11 +677,12 @@ async def _safe_retry(
             task.status = (
                 TaskStatus.FAILED.value if terminal else TaskStatus.PENDING.value
             )
-            task.stage = TaskStage.DONE.value if terminal else stage
+            set_task_stage(task, TaskStage.DONE if terminal else stage)
             task.cleanup_intent = "none"
         values = {
             "status": task.status,
             "stage": task.stage,
+            "stage_started_at": task.stage_started_at,
             "cleanup_intent": task.cleanup_intent,
             "last_error_code": error[:100],
             "last_error_message": error[:500],
@@ -714,6 +731,7 @@ async def _mark_failed(task_id: UUID, code: str, deps: PublishDependencies) -> N
             .values(
                 status=TaskStatus.FAILED.value,
                 stage=TaskStage.DONE.value,
+                stage_started_at=func.now(),
                 cleanup_intent="preserve_state" if task.device_path else "none",
                 device_cleanup_status="pending"
                 if task.device_path
@@ -750,6 +768,7 @@ async def _mark_unexpected(
             .values(
                 status=TaskStatus.NEEDS_REVIEW.value,
                 stage=TaskStage.DONE.value,
+                stage_started_at=func.now(),
                 cleanup_intent="preserve_state" if task.device_path else "none",
                 device_cleanup_status="pending"
                 if task.device_path
@@ -806,6 +825,7 @@ async def _mark_spool_cleanup(
                 values.update(
                     status=TaskStatus.NEEDS_REVIEW.value,
                     stage=TaskStage.DONE.value,
+                    stage_started_at=func.now(),
                     cleanup_intent="preserve_state",
                     lease_owner=None,
                     lease_expires_at=None,
@@ -929,6 +949,7 @@ async def _execute_cleanup(
             values["cleanup_intent"] = "none"
         values["status"] = task.status
         values["stage"] = task.stage
+        values["stage_started_at"] = task.stage_started_at
         if intent in {"finalize_success", "preserve_state"}:
             values["completed_at"] = task.completed_at or now
         result = session.execute(
@@ -1005,7 +1026,7 @@ async def _start_verify(
     with deps.session_factory() as session:
         task = _get(session, task_id)
         _assert_lease(task, deps.instance_id)
-        task.stage = TaskStage.VERIFYING.value
+        set_task_stage(task, TaskStage.VERIFYING)
         attempt = _require_attempt(session, related_id)
         verify = create_attempt(session, task, kind=AttemptKind.VERIFY, related=attempt)
         verify_id = verify.id

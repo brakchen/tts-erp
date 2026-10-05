@@ -185,6 +185,21 @@ def upgrade() -> None:
           AND object_cleanup_status NOT IN ('pending','failed')
     """)
     )
+    # Ambiguous running rows must retain their MinIO object. Device/spool
+    # residue may still be retried, but object deletion is cancelled.
+    # pi-lens-ignore: python-sql-injection
+    op.execute(
+        text("""
+        UPDATE publishing.video_publish_tasks
+        SET object_cleanup_status = 'not_started',
+            object_cleanup_error = 'OBJECT_CLEANUP_CANCELLED_MIGRATION',
+            object_cleanup_next_attempt_at = NULL,
+            object_deleted_at = NULL
+        WHERE status = 'needs_review' AND stage = 'done'
+          AND cleanup_intent = 'preserve_state'
+          AND object_cleanup_status IN ('pending','failed')
+    """)
+    )
     # pi-lens-ignore: python-sql-injection
     op.execute(
         text("""
@@ -259,6 +274,19 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Cleanup ownership is state-bearing audit data. Never discard it while
+    # tasks exist; operators must drain/retain the table before rollback.
+    # pi-lens-ignore: python-sql-injection
+    op.execute(
+        text("""
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM publishing.video_publish_tasks LIMIT 1) THEN
+                RAISE EXCEPTION '0058 downgrade refused: publishing.video_publish_tasks is not empty';
+            END IF;
+        END $$
+    """)
+    )
     # pi-lens-ignore: python-sql-injection
     op.execute(text("DROP INDEX IF EXISTS publishing.ix_video_publish_cleanup_queue"))
     # pi-lens-ignore: python-sql-injection

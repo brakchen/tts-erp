@@ -42,27 +42,38 @@ async def run() -> None:
         instance_id=instance_id,
         max_attempts=int(os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3")),
         lease_seconds=int(os.environ.get("PUBLISH_TASK_LEASE_SECONDS", "30")),
+        poll_seconds=float(os.environ.get("PUBLISH_POLL_INTERVAL_SECONDS", "2")),
+        artemis_profile=os.environ.get("ARTEMIS_PROFILE", "pro"),
+        artemis_verification_level=os.environ.get(
+            "ARTEMIS_VERIFICATION_LEVEL", "strict"
+        ),
     )
     deps.spool_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     heartbeat_task = asyncio.create_task(
-        _heartbeat_loop(session_factory, instance_id), name="publish-heartbeat"
+        _heartbeat_loop(
+            session_factory,
+            instance_id,
+            float(os.environ.get("PUBLISH_WORKER_HEARTBEAT_SECONDS", "5")),
+        ),
+        name="publish-heartbeat",
     )
     try:
         await recover_active(deps)
         while True:
-            outcome = await dispatch_one(deps)
-            if outcome == "no_task":
-                await asyncio.sleep(2)
+            await dispatch_one(deps)
+            await asyncio.sleep(deps.poll_seconds)
     finally:
         heartbeat_task.cancel()
         await asyncio.gather(heartbeat_task, return_exceptions=True)
         _write_heartbeat(session_factory, instance_id, "stopping")
 
 
-async def _heartbeat_loop(session_factory, instance_id: str) -> None:
+async def _heartbeat_loop(
+    session_factory, instance_id: str, interval_seconds: float
+) -> None:
     while True:
         _write_heartbeat(session_factory, instance_id, "ready")
-        await asyncio.sleep(5)
+        await asyncio.sleep(interval_seconds)
 
 
 def _write_heartbeat(session_factory, instance_id: str, state: str) -> None:

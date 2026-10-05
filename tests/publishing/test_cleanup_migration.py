@@ -4,6 +4,7 @@ import importlib.util
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from sqlalchemy import text
@@ -116,6 +117,83 @@ def test_0058_backfills_legacy_pending_cleanup_states(db_engine) -> None:
             transaction.rollback()
 
 
+@pytest.mark.parametrize("legacy_stage", ["done", "cleaning"])
+def test_0058_ambiguous_running_rows_retain_minio(db_engine, legacy_stage: str) -> None:
+    migration = _load_migration()
+    with db_engine.connect() as conn:
+        transaction = conn.begin()
+        try:
+            migration.__dict__["op"] = Operations(MigrationContext.configure(conn))
+            migration.downgrade()
+            # pi-lens-ignore: python-sql-injection
+            task_id = conn.execute(
+                text(
+                    """
+                    INSERT INTO publishing.video_publish_tasks (
+                        client_request_id, caption, original_filename, content_type,
+                        size_bytes, object_bucket, object_key, status, stage,
+                        target_device_serial, target_app_package, device_path,
+                        device_cleanup_status, spool_cleanup_status,
+                        object_cleanup_status
+                    ) VALUES (
+                        :client_request_id, 'TEST_caption', 'TEST_video.mp4',
+                        'video/mp4', 4, 'tiktok-video', :object_key, 'running',
+                        :stage, 'TEST_device', 'com.tiktok', '/sdcard/TEST/video.mp4',
+                        'pending', 'failed', 'pending'
+                    ) RETURNING id
+                    """
+                ),
+                {
+                    "client_request_id": uuid4(),
+                    "object_key": f"TEST/ambiguous-{uuid4()}.mp4",
+                    "stage": legacy_stage,
+                },
+            ).scalar_one()
+            migration.upgrade()
+            # pi-lens-ignore: python-sql-injection
+            row = conn.execute(
+                text(
+                    """
+                    SELECT status, stage, cleanup_intent, device_cleanup_status,
+                           spool_cleanup_status, object_cleanup_status,
+                           object_deleted_at
+                    FROM publishing.video_publish_tasks WHERE id = :id
+                    """
+                ),
+                {"id": task_id},
+            ).one()
+            assert row == (
+                "needs_review",
+                "done",
+                "preserve_state",
+                "pending",
+                "failed",
+                "not_started",
+                None,
+            )
+        finally:
+            transaction.rollback()
+
+
+def test_0058_downgrade_refuses_populated_table(db_engine) -> None:
+    migration = _load_migration()
+    with db_engine.connect() as conn:
+        transaction = conn.begin()
+        try:
+            migration.__dict__["op"] = Operations(MigrationContext.configure(conn))
+            _insert_legacy_task(
+                conn,
+                stage="queued",
+                device="not_started",
+                spool="not_started",
+                obj="not_started",
+            )
+            with pytest.raises(Exception, match="downgrade refused"):
+                migration.downgrade()
+        finally:
+            transaction.rollback()
+
+
 def test_0058_roundtrip_preserves_backfilled_business_state(db_engine) -> None:
     migration = _load_migration()
     with db_engine.connect() as conn:
@@ -139,15 +217,16 @@ def test_0058_roundtrip_preserves_backfilled_business_state(db_engine) -> None:
                 {"id": task_id},
             ).one()
             assert migrated == ("pending", "waiting_device", "requeue_publish")
+            # pi-lens-ignore: python-sql-injection
+            conn.execute(
+                text("DELETE FROM publishing.video_publish_tasks WHERE id = :id"),
+                {"id": task_id},
+            )
             migration.downgrade()
             migration.upgrade()
-            # pi-lens-ignore: python-sql-injection
-            roundtripped = conn.execute(
-                text(
-                    "SELECT status, stage, cleanup_intent FROM publishing.video_publish_tasks WHERE id = :id"
-                ),
-                {"id": task_id},
-            ).one()
-            assert roundtripped == migrated
+            count = conn.scalar(
+                text("SELECT count(*) FROM publishing.video_publish_tasks")
+            )
+            assert count == 0
         finally:
             transaction.rollback()

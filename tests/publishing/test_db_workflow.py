@@ -19,12 +19,18 @@ from tts_erp_v2.api.v2.video_publish import (
     config,
     confirm,
     create_task,
+    current,
     detail,
     list_tasks,
+    replace_upload_task,
     retry,
     retry_cleanup,
 )
-from tts_erp_v2.db.models.publishing import VideoPublishAttempt, VideoPublishTask
+from tts_erp_v2.db.models.publishing import (
+    PublishWorkerHeartbeat,
+    VideoPublishAttempt,
+    VideoPublishTask,
+)
 from tts_erp_v2.publishing.artemis_client import ArtemisResult
 from tts_erp_v2.publishing.dispatcher import (
     LeaseLost,
@@ -48,6 +54,7 @@ from tts_erp_v2.publishing.repository import _lease_task, claim_one
 from tts_erp_v2.publishing.submission import (
     CreateCommand,
     create_upload_ticket,
+    replace_upload,
     retry_task,
 )
 from tts_erp_v2.storage.minio_client import ObjectNotFound
@@ -297,6 +304,155 @@ async def test_success_cleanup_releases_device_gate_before_background_cleanup(
     db_session.rollback()
 
 
+def test_replace_upload_resets_object_cleanup_and_rejects_exhausted_budget(
+    db_session: Session,
+) -> None:
+    task = _task(
+        status=TaskStatus.FAILED.value,
+        stage=TaskStage.DONE.value,
+        object_cleanup_status="failed",
+    )
+    task.object_deleted_at = datetime.now(UTC)
+    task.object_cleanup_error = "TEST_OBJECT_BUSY"
+    task.object_cleanup_attempts = 4
+    task.object_cleanup_next_attempt_at = datetime.now(UTC)
+    task.cleanup_intent = "preserve_state"
+    task.attempt_count = 3
+    db_session.add(task)
+    db_session.flush()
+    with pytest.raises(ValueError, match="RETRY_BUDGET_EXHAUSTED"):
+        replace_upload(db_session, task.public_id)
+    db_session.rollback()
+
+    task = _task(
+        status=TaskStatus.FAILED.value,
+        stage=TaskStage.DONE.value,
+        object_cleanup_status="failed",
+    )
+    task.object_deleted_at = datetime.now(UTC)
+    task.object_cleanup_error = "TEST_OBJECT_BUSY"
+    task.object_cleanup_attempts = 4
+    task.object_cleanup_next_attempt_at = datetime.now(UTC)
+    task.cleanup_intent = "preserve_state"
+    task.attempt_count = 1
+    db_session.add(task)
+    db_session.flush()
+    replaced = replace_upload(db_session, task.public_id)
+    assert replaced.stage == TaskStage.AWAITING_UPLOAD.value
+    assert replaced.cleanup_intent == "none"
+    assert replaced.object_cleanup_status == "not_started"
+    assert replaced.object_cleanup_error is None
+    assert replaced.object_cleanup_attempts == 0
+    assert replaced.object_cleanup_next_attempt_at is None
+    assert replaced.object_deleted_at is None
+    db_session.rollback()
+
+
+def test_replace_upload_api_confirm_and_claim_round_trip(
+    db_session: Session,
+) -> None:
+    task = _task(
+        status=TaskStatus.FAILED.value,
+        stage=TaskStage.DONE.value,
+        object_cleanup_status="failed",
+    )
+    task.object_deleted_at = datetime.now(UTC)
+    task.cleanup_intent = "preserve_state"
+    task.attempt_count = 1
+    task.stage_started_at = datetime(2026, 10, 5, tzinfo=UTC)
+    db_session.add(task)
+    db_session.flush()
+    replaced = replace_upload_task(
+        task.public_id,
+        ActionIn(rowVersion=task.row_version),
+        _request(),
+        db_session,
+    )
+    assert replaced["stage"] == TaskStage.AWAITING_UPLOAD.value
+    assert replaced["stageStartedAt"] > datetime(2026, 10, 5, tzinfo=UTC)
+    assert set(replaced["allowedActions"]) >= {"continue_upload", "cancel"}
+
+    class UploadedStore:
+        def stat(self, _key: str) -> dict:
+            return {"size": task.size_bytes, "content_type": task.content_type}
+
+    queued = confirm(
+        task.public_id,
+        ActionIn(rowVersion=replaced["rowVersion"]),
+        _request(),
+        db_session,
+        cast(VideoObjectStore, UploadedStore()),
+    )
+    assert queued["stage"] == TaskStage.QUEUED.value
+    assert queued["stageStartedAt"] >= replaced["stageStartedAt"]
+    claimed = claim_one(db_session, "replacement-worker", max_attempts=3)
+    assert claimed is not None
+    assert claimed.public_id == task.public_id
+    assert claimed.stage == TaskStage.DOWNLOADING.value
+    assert claimed.stage_started_at >= queued["stageStartedAt"]
+    db_session.rollback()
+
+
+def test_replace_upload_conflict_is_structured_when_budget_is_exhausted(
+    db_session: Session,
+) -> None:
+    task = _task(status=TaskStatus.FAILED.value, stage=TaskStage.DONE.value)
+    task.object_deleted_at = datetime.now(UTC)
+    task.attempt_count = 3
+    db_session.add(task)
+    db_session.flush()
+    with pytest.raises(HTTPException) as exc_info:
+        replace_upload_task(
+            task.public_id,
+            ActionIn(rowVersion=task.row_version),
+            _request(),
+            db_session,
+        )
+    assert exc_info.value.status_code == 409
+    assert cast(dict, exc_info.value.detail) == {
+        "code": "RETRY_BUDGET_EXHAUSTED",
+        "message": "RETRY_BUDGET_EXHAUSTED",
+        "rowVersion": task.row_version,
+        "allowedActions": ["view"],
+    }
+    db_session.rollback()
+
+
+def test_cleanup_retry_resources_resets_only_requested_failed_rows(
+    db_session: Session,
+) -> None:
+    task = _task(
+        status=TaskStatus.SUCCEEDED.value,
+        stage=TaskStage.DONE.value,
+        device_cleanup_status="failed",
+        object_cleanup_status="failed",
+    )
+    task.spool_cleanup_status = "succeeded"
+    db_session.add(task)
+    db_session.flush()
+    result = retry_cleanup(
+        task.public_id,
+        ActionIn(rowVersion=task.row_version, resources=["device"]),
+        _request(),
+        db_session,
+    )
+    assert result["cleanup"]["device"]["status"] == "pending"
+    assert result["cleanup"]["object"]["status"] == "failed"
+    assert result["cleanupRetryableResources"] == ["object"]
+    with pytest.raises(HTTPException) as exc_info:
+        retry_cleanup(
+            task.public_id,
+            ActionIn(rowVersion=result["rowVersion"], resources=["spool"]),
+            _request(),
+            db_session,
+        )
+    assert cast(dict, exc_info.value.detail)["code"] == (
+        "CLEANUP_RESOURCE_NOT_RETRYABLE"
+    )
+    db_session.rollback()
+
+
+@pytest.mark.asyncio
 async def test_worker_automatically_retries_due_cleanup_with_backoff(
     db_session: Session,
     tmp_path: Path,
@@ -1033,7 +1189,39 @@ def test_filtered_task_list_exposes_unfiltered_poll_state(db_session: Session) -
     )
     assert len(payload["items"]) == 1
     assert payload["items"][0]["status"] == TaskStatus.SUCCEEDED.value
-    assert payload["pollState"] == {"running": True, "queued": True}
+    assert payload["pollState"] == {
+        "running": True,
+        "cleaning": False,
+        "queued": True,
+    }
+
+
+def test_current_exposes_device_cleaning_but_not_background_cleanup(
+    db_session: Session,
+) -> None:
+    device_cleanup = _task(
+        status=TaskStatus.SUCCEEDED.value,
+        stage=TaskStage.DONE.value,
+        device_cleanup_status="pending",
+    )
+    device_cleanup.stage_started_at = datetime.now(UTC)
+    background_cleanup = _task(
+        status=TaskStatus.SUCCEEDED.value,
+        stage=TaskStage.DONE.value,
+        device_cleanup_status="succeeded",
+        object_cleanup_status="failed",
+    )
+    db_session.add_all([device_cleanup, background_cleanup])
+    db_session.flush()
+    payload = cast(dict, current(_request(), db_session, Response()))
+    assert payload["task"]["taskId"] == str(device_cleanup.public_id)
+    assert payload["task"]["operationalStage"] == "cleaning"
+    assert payload["pollState"] == {
+        "running": False,
+        "cleaning": True,
+        "queued": False,
+    }
+    db_session.rollback()
 
 
 def test_task_list_and_detail_are_owner_scoped(
@@ -1085,7 +1273,11 @@ def test_awaiting_upload_is_not_reported_as_queued_poll_work(
             cursor=None,
         ),
     )
-    assert payload["pollState"] == {"running": False, "queued": False}
+    assert payload["pollState"] == {
+        "running": False,
+        "cleaning": False,
+        "queued": False,
+    }
 
 
 def _request(
@@ -1687,11 +1879,24 @@ def test_diagnostics_are_admin_only_and_redacted_by_default(
         VideoPublishAttempt(
             sequence_no=1,
             kind="publish",
+            status=AttemptStatus.SUCCESS.value,
             artemis_session_id=uuid4(),
             prompt_version="TEST",
             prompt_snapshot="SECRET_PROMPT",
             device_serial="TEST_device",
             artemis_output={"secret": "SECRET_OUTPUT"},
+        )
+    )
+    task.attempts.append(
+        VideoPublishAttempt(
+            sequence_no=2,
+            kind="verify",
+            status=AttemptStatus.SUCCESS.value,
+            artemis_session_id=uuid4(),
+            prompt_version="TEST_VERIFY",
+            prompt_snapshot="SECRET_VERIFY_PROMPT",
+            device_serial="TEST_device",
+            artemis_output={"verdict": "published"},
         )
     )
     db_session.add(task)
@@ -1716,6 +1921,9 @@ def test_diagnostics_are_admin_only_and_redacted_by_default(
         ),
     )
     assert "promptSnapshot" not in normal["attempts"][0]
+    assert normal["publishAttemptCount"] == 1
+    assert normal["verifyAttemptCount"] == 1
+    assert normal["currentAttempt"]["kind"] == "verify"
     diagnostics = cast(
         dict,
         detail(
@@ -1726,12 +1934,45 @@ def test_diagnostics_are_admin_only_and_redacted_by_default(
             include_diagnostics=True,
         ),
     )
-    assert diagnostics["attempts"][0]["promptSnapshot"] == "SECRET_PROMPT"
+    assert diagnostics["attempts"][0]["promptSnapshot"] == ("SECRET_VERIFY_PROMPT")
+    assert diagnostics["attempts"][0]["artemisOutput"] == {"verdict": "published"}
 
 
-def test_config_exposes_configured_album(
+def test_config_exposes_server_owned_device_and_worker_configuration(
     db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    now = datetime.now(UTC)
+    db_session.add(
+        PublishWorkerHeartbeat(
+            instance_id="TEST_worker",
+            hostname="TEST_host",
+            pid=123,
+            status="ready",
+            started_at=now,
+            heartbeat_at=now,
+        )
+    )
+    db_session.flush()
+    monkeypatch.setenv("ARTEMIS_DEVICE_SERIAL", "TEST_device")
     monkeypatch.setenv("TIKTOK_PUBLISH_ALBUM", "TEST_CAMPAIGN")
+    monkeypatch.setenv("ARTEMIS_PROFILE", "TEST_profile")
+    monkeypatch.setenv("ARTEMIS_VERIFICATION_LEVEL", "TEST_strict")
+    monkeypatch.setenv("PUBLISH_POLL_INTERVAL_SECONDS", "7.5")
+    monkeypatch.setenv("PUBLISH_TASK_LEASE_SECONDS", "41")
+    monkeypatch.setenv("PUBLISH_WORKER_HEARTBEAT_SECONDS", "9")
     payload = config(_request(role="readwrite"), db_session)
     assert payload["target"]["album"] == "TEST_CAMPAIGN"
+    assert payload["device"] == {
+        "status": "ready",
+        "message": "Worker 心跳正常，设备将在领取任务时再次检查",
+    }
+    assert payload["artemis"] == {
+        "profile": "TEST_profile",
+        "verificationLevel": "TEST_strict",
+    }
+    assert payload["workerTiming"] == {
+        "pollSeconds": 7.5,
+        "leaseSeconds": 41,
+        "heartbeatSeconds": 9.0,
+    }
+    assert payload["canWrite"] is True
