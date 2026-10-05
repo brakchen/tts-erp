@@ -47,17 +47,21 @@ def _context_parameters(
         len(price.as_tuple().digits) + len(str(quantity)) + 1
         for price, quantity in nonzero
     )
+    total_quantity_digits = len(str(total_quantity))
+    # The total quantity also bounds carries while summing distinct buckets;
+    # unlike a fixed allowance, this scales with the supported population.
     precision = max(
         80,
-        max_adjusted_product - min_exponent + 4,
-        max_product_digits + 16,
+        max_adjusted_product - min_exponent + total_quantity_digits + 1,
+        max_product_digits + total_quantity_digits,
     )
     if precision > MAX_PREC:
         raise ValueError("price exponent span exceeds Decimal context capacity")
 
-    # Division by total quantity can move the least significant exponent down.
-    emin = min(-999_999, min_exponent - len(str(total_quantity)) - 4)
-    emax = max(999_999, max_adjusted_product + 4)
+    # Division by total quantity can move the least significant exponent down;
+    # the same total-quantity bound covers sum carries in the upper direction.
+    emin = min(-999_999, min_exponent - total_quantity_digits - 1)
+    emax = max(999_999, max_adjusted_product + total_quantity_digits + 1)
     if emin < MIN_EMIN or emax > MAX_EMAX:
         raise ValueError("price exponent exceeds Decimal context capacity")
     return precision, emax, emin
