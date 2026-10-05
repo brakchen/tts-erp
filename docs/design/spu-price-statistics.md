@@ -45,7 +45,7 @@
 | `tts_erp_v2/static/js/spu-profitability-page.js` | 当前表列定义是平面 `COLUMN_DEFS`，共用 Tabulator kernel；summary 已有 Projected 区 | 采用 Tabulator 6.3.1 nested `columns` grouped header（实现必须用浏览器验证），而非第二张表或全局 toggle |
 | `/v2/pages/focused-spus` | focused membership 管理 endpoint 与 ROI analytics endpoint 分离；页面通过同一 analytics `/v2/analytics/spu-roi`，focused 请求带 `scope=focused` | 不向 focused membership GET 添加价格字段；价格只在 analytics response 返回 |
 
-未知的 upstream gift signal、数量域和 currency provenance 仍必须由窄 READ ONLY raw-payload probe / 上游契约核验；line eligibility 使用已批准的父订单 paid whitelist，保留 raw line status，不另造 line-paid enum。在核验前不能声称 gift/currency coverage 完整。
+`is_gift` 的 normalizer mapping 已由 owner 固定为 raw boolean `false→NOT_GIFT`、`true→GIFT`、absent/null/non-boolean→`UNKNOWN`；仍需用正/空/缺失 regression fixtures 覆盖分支，但不使用 zero/title/Miaoshou heuristic。quantity 与 currency provenance 仍按窄 READ ONLY/raw evidence 保持边界；line eligibility 使用已批准的父订单 paid whitelist，保留 raw line status，不另造 line-paid enum。
 
 ### 0.5 证据对齐表（当前 readiness gate）
 
@@ -56,18 +56,18 @@
 | paid source | parent review 的 production readback（2026-10-05 11:52 UTC；2176 TikTok orders / 2231 item keys；2230 与 Miaoshou 匹配；paid 2221 exact + 9 ≤0.5 VND）核验了 TikTok `line_items[].sale_price`；维护 parser 也将 `sale_price`（plain 或 dict amount/currency）写入 `unit_price`：`tts_erp_v2/jobs/tiktok/orders.py:244-251`，detail 复用 `_parse_order_payload`、`_parse_line_payload`、`_store_raw`：`tts_erp_v2/jobs/tiktok/order_detail.py:1-25,180-205` | parent-verified production observation，**not independently re-fetched by this lane**；Feishu business revision `247` 已批准 mapping。object/scalar 与 line/parent currency provenance 仍按窄 gate 记录，不能把 synthetic fixture 当唯一官方 contract |
 | original sale | 同一 parent production readback 在 2230/2230 matched items 中 `original_price` equal；证据来自 parent review readback（2026-10-05 11:52 UTC），本 lane 未独立抓取 | parent-verified production observation，**not independently re-fetched by this lane**；Feishu revision `247` 批准 `line_items[].original_price` authority。仍需在新 observation parser 中保留 raw presence/status，不得从 `origin_sale_price`、Miaoshou 或 payment 回填 |
 | quantity | parser 对缺字段当前默认 `Decimal(1)`，维护者注释记录 2026-09-06 观察 0/3686 lines 有 quantity、历史行一件并与 payment reconciliation；bounded direct sample §0.6 的 1015/1015 lines 也缺 quantity；代码/测试证据：`orders.py:257-271`、synthetic tests `tests/jobs_tiktok/test_orders_job.py:55-100,145-190` | one-piece default **PARTIAL but corroborated**；positive fractional upstream supply **UNKNOWN**。统计契约仍明确拒绝 fractional/zero/negative/nonfinite/bool 并记 diagnostic line count；不声称上游没有 fraction，也不以 universal-negative 证据阻塞整个功能。|
-| gift | bounded parser 没有 gift/not-gift mapping；§0.6 样本观察到 `is_gift=false` 1015/1015 且无 true/null/absent cases；zero、title、Miaoshou flag 都不是证据 | bounded false observation **VERIFIED for sample only**；gift absence/positive/null semantics remain **UNKNOWN**；`UNKNOWN` 必须保留并阻断正式 coverage，不能以字段缺失推断 `NOT_GIFT` |
+| gift | owner-approved normalizer mapping：raw boolean `is_gift=false→NOT_GIFT`、`true→GIFT`；absent/null/non-boolean→`UNKNOWN`；§0.6 样本观察到 false 1015/1015 且无其他 cases；zero、title、Miaoshou flag 都不是证据 | mapping **READY for implementation**；bounded production prevalence is only observed false. Unknown lines remain excluded with diagnostic coverage; regression fixtures must cover true/null/absent/non-boolean, but no global heuristic or readiness claim is added |
 | payment/status | 已批准的父订单 paid whitelist 是 `tts_erp_v2/db/constants.py::PAID_SALES_ORDER_STATUSES` 与业务文档 §4.1；parser 仅原样保留 `display_status`/`line_status`，不建立独立 line-paid enum | parent-order paid eligibility **VERIFIED**；line status 仍 raw-preserved。不得把 line status 当独立 paid whitelist；只有 source proof 支持时才增加实际 canceled-line override |
-| currency | parser 支持 line price currency 与已解析 parent/raw currency fallback；§0.6 search sample 1015/1015 line currencies present and agree with parent/payment currency | bounded provenance **PARTIAL but corroborated**；plain numeric sale price 只有经证实同源 parent currency 才能转换，否则 missing/invalid；不能猜 CNY，不能把 search-only sample当所有 endpoint contract |
-| population/refund | parent paid-order whitelist 已由 `PAID_SALES_ORDER_STATUSES`/业务 §4.1 固定；bounded source 仍未证明 gift absence semantics、currency provenance 或 refund/full-loss fixture linkage | 业务批准的 parent-paid/history-retention 目标保留；gift/currency 仍需窄 READ ONLY probe，refund 以显式 acceptance test 证明，不制造 coverage counter。 |
+| currency | owner-approved implementation uses explicit line currency only；§0.6 search sample 1015/1015 line currencies present and agree with parent/payment currency | bounded provenance **PARTIAL but corroborated**；缺失/blank line currency 只能计 `missingCurrencyQuantity`，不回退 parent currency、不计 FX unavailable；不能把 search-only sample 当所有 endpoint contract |
+| population/refund | parent paid-order whitelist 已由 `PAID_SALES_ORDER_STATUSES`/业务 §4.1 固定；owner gift mapping 已固定但 bounded source 只有 false prevalence；currency provenance/detail coverage 和 refund/full-loss fixture linkage 仍有限 | 业务批准的 parent-paid/history-retention 目标保留；gift mapping 可实现但未知分支排除并诊断，currency/detail 仍需窄 probe，refund 以显式 acceptance test 证明，不制造 coverage counter。 |
 | cost | `resolve_unit_cost` 读当前 `manual_product_costs(valid_to IS NULL, MANUAL_ENTRY)`：`tts_erp_v2/reporting/cost_snapshots.py:36-75`；`ProductCostSnapshot` 的真实字段/唯一性见 `cost_snapshots.py:94-127`, `db/models/reporting.py:41-80` | 不发明 `snapshotId`；实现只能使用当前 effective manual cost 或真实已存在 snapshot provenance |
 | live auth/process | `TTS_ERP_AUTH_MODE` 在 `app.py:362`/middleware 读取且默认 off；cookie 为 `tts_erp_session`：`middleware/session_auth.py:20-30`；Argon2id password helper：`accounts/passwords.py:1-65`；APScheduler 是独立 sync-worker 进程，bounded app scan 未找到 scheduler-disable flag | E2E 必须显式 enforce、真实 TEST login、同一 isolated DB；不得继承生产 env、发明 disable switch 或启动 sync-worker |
 
-`tests/jobs_tiktok/test_orders_job.py` 的 fixture 注释明确是 “realistic-ish” synthetic data；它只能验证 parser regression，不能关闭 gift/absence、quantity-domain、currency provenance 等上表 gates。原价/实付的 parent-verified readback 是 inherited evidence，不是本 lane 的新抓取。最小安全验证输入仍是：经授权取得并脱敏的 direct `/order/202309` raw captures（含 gift/absence semantics、quantity types、currency、display_status），加现有 paid-order mapping；本 lane 不抓取外部资料、不读 secrets、不启动服务、不操作 DB。
+`tests/jobs_tiktok/test_orders_job.py` 的 fixture 注释明确是 “realistic-ish” synthetic data；它只能验证 parser regression，不能冒充生产覆盖。owner-approved `is_gift` mapping 的 regression fixture 必须覆盖 true/null/absent/non-boolean；quantity-domain、currency provenance 和 detail parity 仍有 evidence boundary。原价/实付的 parent-verified readback 是 inherited evidence，不是本 lane 的新抓取。最小安全验证输入仍是：经授权取得并脱敏的 direct `/order/202309` raw captures，加现有 paid-order mapping；本 lane 不抓取外部资料、不读 secrets、不启动服务、不操作 DB。
 
 ### 0.6 有界 direct read-only shape evidence（2026-10-05 session runtime）
 
-本段记录父会话提供的真实只读探针结果；本 lane 未重新抓取。探针在 transaction 内执行 `SET TRANSACTION READ ONLY`、`statement_timeout=15000ms`、`lock_timeout=3000ms`，完成 rollback/close，未输出 credentials、IDs、prices、buyer fields 或 payload。样本是最新 1000 条 `integration.raw_records`，endpoint 仅 `/order/202309/orders/search`，共 1000 orders / 1015 line items；该 bounded result 没有 detail endpoint rows。
+本段记录父会话提供的真实只读探针结果；本 lane 未重新抓取。探针在 transaction 内执行 `SET TRANSACTION READ ONLY`、`statement_timeout=15000ms`、`lock_timeout=3000ms`，完成 rollback/close，未输出 credentials、IDs、prices、buyer fields 或 payload。样本是最新 1000 条 `integration.raw_records`，endpoint 仅 `/order/202309/orders/search`，共 1000 raw-record order captures / 1015 line items；这不是 1000 unique orders/dedup 声明，该 bounded result 也没有 detail endpoint rows。
 
 | 字段 / 观察 | 样本结果 | 可安全推导的边界 |
 | --- | --- | --- |
@@ -76,9 +76,9 @@
 | line currency | 1015/1015 present；与 parent order/payment currency agreement 1015/1015，disagreement/unknown 0 | 支持本样本 line-currency provenance；不猜缺失 currency，不把有限样本升级为所有 endpoint/历史 payload contract |
 | `quantity` | 1015/1015 missing/`NoneType`；未观察 fractional 或 invalid | 与维护者 3686-line one-piece observation 一致，可维持 `DEFAULT_ONE_PER_LINE`；不声称 upstream 不会提供 fraction，非整数仍按批准 integer-stat contract reject + line diagnostic |
 | `display_status` | 1015/1015 present；每条 parent/line pair identical。parent counts: IN_TRANSIT 739、DELIVERED 66、AWAITING_SHIPMENT 19、CANCELLED 20、COMPLETED 123、AWAITING_COLLECTION 31、UNPAID 2；未见 PARTIAL_SHIPPING | parent paid eligibility 仍只由 `PAID_SALES_ORDER_STATUSES` 决定（PARTIAL_SHIPPING 是 whitelist 成员但本样本未出现）；保留 raw line status，不创建 line-paid whitelist |
-| gift keys | `is_gift=false` 1015/1015；`gift_retail_price` present 且 non-null/non-boolean 1015/1015；无 true/null/absent `is_gift` | 只能记录本样本 observed false；不能由全为 false 推断 absence semantics 或 universal `NOT_GIFT`。gift positive/null/absent 仍 UNKNOWN，不能用 zero/title/Miaoshou 推导 |
+| gift keys | `is_gift=false` 1015/1015；`gift_retail_price` present 且 non-null/non-boolean 1015/1015；无 true/null/absent `is_gift` | 只能记录本样本 observed false；owner-approved mapping 仍要求 true→GIFT、absent/null/non-boolean→UNKNOWN 的 regression fixtures。不能由全为 false推断生产 universal prevalence，不能用 zero/title/Miaoshou 推导 |
 
-该探针将 scalar price shape 与本样本 line-currency agreement 的置信度提升为 **bounded observed evidence**，但没有关闭 gift 语义、detail producer parity、fractional upstream domain 或完整历史 population gates。metric 级 missing/invalid/partial 仍应由各自 field status 产生；它们不能被提升为全局 readiness，也不能为了 complete response 人工填充零。只有 `population_lines` / `coverage_by_reason` / `coverage_by_price` 定义的 producer 才能发出零计数。
+该探针将 scalar price shape 与本样本 line-currency agreement 的置信度提升为 **bounded observed evidence**；owner mapping 已足以实现 gift 分支，但生产正/空/缺失 prevalence、detail producer parity、fractional upstream domain 和完整历史 population 仍不能从该 sample 推断。metric 级 missing/invalid/partial 仍应由各自 field status 产生；它们不能被提升为全局 readiness，也不能为了 complete response 人工填充零。只有 `population_lines` / `coverage_by_reason` / `coverage_by_price` 定义的 producer 才能发出零计数。
 
 ## 1. 权威边界、非目标与不可变规则
 
@@ -138,10 +138,11 @@
 | `quantity_status` | enum NOT NULL | `OBSERVED` / `DEFAULT_ONE_PER_LINE` / `MISSING` / `INVALID_ZERO` / `INVALID_NEGATIVE` / `INVALID_NON_INTEGER` / `INVALID_NON_NUMERIC` |
 | `line_status_raw` | text NULL | 原始 line status，不将未知值改为 paid |
 | `parent_payment_status` | enum NOT NULL | Derived only from parent `PAID_SALES_ORDER_STATUSES` plus explicit parent status values; this is not an independent line-paid whitelist. `line_status_raw` remains the raw line field. |
-| `gift_status` | enum NOT NULL | `NOT_GIFT` / `GIFT` / `UNKNOWN` |
+| `raw_is_gift` | boolean NULL | raw `is_gift` only when JSON type is boolean; absent/null/non-boolean stays NULL with presence/type in canonical hash |
+| `gift_status` | enum NOT NULL | exact mapping `raw_is_gift=false→NOT_GIFT`, `true→GIFT`, absent/null/non-boolean→`UNKNOWN`; never inferred from `gift_retail_price`, zero, title or Miaoshou |
 | `original_price_native` | numeric(28,10) NULL | TikTok `original_price` 数值；只有 authority 字段可填 |
 | `paid_price_native` | numeric(28,10) NULL | TikTok `sale_price` 数值；只有 authority 字段可填 |
-| `currency` | text NULL | line price 的明确币种；父币种仅在已验证同币种 contract 时使用 |
+| `currency` | text NULL | line price 的明确币种；缺失/blank 不回退 parent currency，单独进入 `MISSING_CURRENCY`/coverage |
 | `original_price_status` / `paid_price_status` | enum NOT NULL | 每字段 `OBSERVED` / `MISSING` / `INVALID_NEGATIVE` / `INVALID_NON_NUMERIC` / `INVALID_CURRENCY` |
 | `created_at` / `updated_at` | timestamptz NOT NULL | local audit timestamps |
 
@@ -170,7 +171,7 @@ CREATE INDEX ix_solpo_spu_capture
 - `semantic_observation_hash` 的输入是 canonical JSON：每个 authority/raw 字段都保留 presence（absent/null/value）、JSON type、规范化 Decimal/text 值；再加入父订单 `shop_pk`、`order_pk`、`external_line_id`、继承的 payment status、currency 和 source version。它不加入 `raw_record_id`、capture time 或 endpoint，因此 `_store_raw` 每次重试产生新 capture ID 也不会产生第二 observation。
 - 唯一键 `(shop_pk, order_pk, external_line_id, semantic_observation_hash)` 冲突时保留首次 capture 的 `raw_record_id/source_endpoint/source_captured_at`，后续 raw id 只在 raw history 保留，并写 `DUPLICATE_SEMANTIC_OBSERVATION` 计数；不建立第二个 provenance bridge，也不更新首次来源。checkpoint 重放同样只能 no-op。
 - 同一 line 的 canonical **整条最新 observation** 按 `(source_order_version_at NULLS LAST, source_captured_at, semantic_observation_hash ASC)` 选最新；`ORDER_DETAIL` 与 `ORDER_SEARCH` 不因 endpoint 名称互相覆盖。相同 version 以较新 capture 胜出；version 与 capture 都相同则 hash 的确定性升序胜出，并记录 `EQUAL_VERSION_CONFLICT`。旧事务晚到时可以插入审计行，但不得成为 canonical。
-- `source_order_version_at IS NULL` 不等于一个新的 source version：producer 必须用既有 SyncIssue owner 写 `MISSING_SOURCE_VERSION`，确定性关联 `(shop_pk, order_pk, external_line_id, source_payload_hash)`，同一 issue key 去重、可重试，拿到非 null source version 后 resolve；不得新增 mirror boolean、独立 issue table 或静默把 null 排在新版本之前。
+- `source_order_version_at IS NULL` 不等于一个新的 source version：producer 使用既有 SyncIssue owner 写 `MISSING_SOURCE_VERSION`，将 `(shop_pk, order_pk, external_line_id, source_payload_hash)` 编码进该 issue 的 existing external-id/details 约定并允许 retry/resolve。当前 owner 没有原子 unique constraint；本文只承诺 bounded best-effort diagnostic，允许并发重复 issue，不把它当 canonical idempotence 或 observation 唯一性的保证；不得新增 mirror boolean/独立 issue table，亦不得静默把 null 排在新版本之前。
 - 最新 authority observation 的每个 price field status/value 都是该 metric 的唯一权威：新 payload `MISSING`/`INVALID` 时该 metric 为 null/not observed；旧 valid value 只留在 audit history，**不**做 last-known-valid 或 stale-price fallback。一个 valid→missing 两版本 fixture 只能贡献一次 missing line/valid quantity，不能同时贡献旧 observed 与新 missing。
 - quantity、payment status、gift status 是 eligibility 状态而非可回退金额：较新的明确 `CANCELLED`/`GIFT`/invalid quantity 必须使该 observation 不合格；未知状态不能自动继承为 paid/not-gift。退款、全损和售后同步不更新 price observation。
 - producer 需用数据库 `INSERT ... ON CONFLICT ... DO NOTHING` + canonical selection CTE，或同等事务锁/compare-and-set 保护 `(shop_pk, order_pk, external_line_id)`；sync version/token 不匹配时 rollback 当前 line 写入并记录 issue，不能部分提交订单。
@@ -178,17 +179,17 @@ CREATE INDEX ix_solpo_spu_capture
 ### 2.3 礼品、状态、数量与币种证据门
 
 - `gift_status=GIFT` 只有通过 TikTok 原始 payload 中已核验的 gift flag/赠品 line 结构或项目批准的明确映射才能设置；不要把 `price=0`、Miaoshou gift 或 SKU 名称猜成 gift。
-- `gift_status=UNKNOWN` 默认不进入正式 statistics，`unknownGiftQuantity/unknownGiftLineCount` 单独暴露并产生 warning；实现前必须补一个真实 raw fixture 与映射审查。若产品要把 unknown 纳入，必须先更新本文件而不是在代码中默选。
+- `gift_status=UNKNOWN` 默认不进入正式 statistics，`unknownGiftQuantity/unknownGiftLineCount` 单独暴露并产生 warning；normalizer 必须按 raw `is_gift` boolean/absent-null-nonboolean mapping 写入。true/null/absent/non-boolean fixtures 是 contract regression，不得改成 price/title/Miaoshou heuristic；这不阻塞已批准的 arithmetic slice。
 - payment eligibility 复用已批准的父订单 `PAID_SALES_ORDER_STATUSES`（`tts_erp_v2/db/constants.py` 与业务 §4.1）；不建立独立 line-paid whitelist。`line_status_raw` 始终保留，只有 source proof 支持时才增加实际 canceled-line override；父订单不在 paid whitelist 时按 mutually-exclusive `UNPAID`/`ON_HOLD`/`CANCELLED`/`UNKNOWN_STATUS` 分类，均不得 silently include，并记录对应 coverage。
 - 价格统计契约只接受有限正整数 physical units；0、负数、非有限、非数字、bool、fractional quantity 均拒绝，按 `INVALID_ZERO`/`INVALID_NEGATIVE`/`INVALID_NON_NUMERIC`/`INVALID_NON_INTEGER` 记录 **line count**，不制造物理件数。该规则是批准的统计算术边界，不声称上游永远不会发送 fraction，也不因等待一个 universal-negative 证据而阻塞整个设计；若 raw capture 发现 fraction，保留 raw、发诊断并按 invalid 排除。缺 quantity 可沿用维护者记录的每行一件语义（2026-09-06 观察 0/3686 lines 有 quantity），写 `DEFAULT_ONE_PER_LINE` 与 evidence/version；未来若显式 quantity 或 reconciliation 违反该语义，必须发 contradiction issue 并停该 line，不能 silent infer。
-- currency 必须来自 line price 的明确字段；plain numeric `sale_price` 的 currency 只能使用已验证且与该 line 同源的 order currency，否则 `INVALID_CURRENCY`。未知 FX、缺 currency、未找到同一 snapshot rate 均不转换、不聚合，绝不猜 CNY。
+- currency 必须来自 line price 的明确字段；plain numeric `sale_price` 也只使用该 line 的 explicit currency。缺失/blank 只记 `MISSING_CURRENCY`/`missingCurrencyQuantity`，不回退 parent currency、不计 `fxUnavailableQuantity`；已知但不支持的 currency、非正 rate 或缺失 rate 才进入 global `503 PRICE_FX_UNAVAILABLE`，绝不猜 CNY。
 - 本专项不使用 `plugin.order_details.origin_sale_price`、Miaoshou price、`payment.total_amount` 或 shipping 作为补偿来源。Miaoshou 仅可在核验报告中并排比较，不落为正式 observation。
 
 ## 3. Producer、解析、upsert 与安全回填
 
 ### 3.1 两条 TikTok producer 必须 parity
 
-`tts_erp_v2/jobs/tiktok/orders.py` 的 search producer 与 `tts_erp_v2/jobs/tiktok/order_detail.py` 的 detail producer 必须调用同一个 typed line normalizer（建议放在订单 intake 共享模块；不在两个 job 各复制一套 `_parse_line_payload`）。normalizer 接收 raw line、父订单 status/currency/version、`shop_pk/order_pk/raw_record_id`，输出完整 `PriceLineObservation`，包括 raw/effective quantity、原价/实付各自 status、gift/status/currency provenance 和 hash。
+`tts_erp_v2/jobs/tiktok/orders.py` 的 search producer 与 `tts_erp_v2/jobs/tiktok/order_detail.py` 的 detail producer 必须调用同一个 typed line normalizer（建议放在订单 intake 共享模块；不在两个 job 各复制一套 `_parse_line_payload`）。normalizer 接收 raw line、父订单 status/currency/version、`shop_pk/order_pk/raw_record_id`，输出冻结字段 `PriceLineObservation`：`raw_is_gift`、`gift_status`、`line_status_raw`、`parent_payment_status`、raw/effective quantity、原价/实付各自 status、explicit line currency provenance 和 hash。`raw_is_gift` 只接受 JSON boolean；`false→NOT_GIFT`、`true→GIFT`、absent/null/non-boolean→`UNKNOWN`。`gift_retail_price` 仅可留在 raw payload 审计，不能作为 mapping 输入。
 
 Parity 验收必须逐字段比较相同 fixture 的两个入口：
 
@@ -199,14 +200,14 @@ Parity 验收必须逐字段比较相同 fixture 的两个入口：
 
 ### 3.2 严格 idempotent upsert 流程
 
-1. 在同一同步事务中先持久化/定位 `integration.raw_records`，取得本次新的 `raw_record_id` 与 capture time；随后读取父 `sales_orders` 的 `order_pk`、`shop_pk`、已付款状态（复用 `PAID_SALES_ORDER_STATUSES`）、currency 与 source version。验证 line external id 属于该 parent；不得用另一个店的同名 id。source version 缺失时照常保留 raw-linked observation provenance，但同事务 upsert 既有 SyncIssue `MISSING_SOURCE_VERSION`，按 `(shop_pk, order_pk, external_line_id, source_payload_hash)` 去重并允许 retry/resolve。
+1. 在同一同步事务中先持久化/定位 `integration.raw_records`，取得本次新的 `raw_record_id` 与 capture time；随后读取父 `sales_orders` 的 `order_pk`、`shop_pk`、已付款状态（复用 `PAID_SALES_ORDER_STATUSES`）、currency 与 source version。验证 line external id 属于该 parent；不得用另一个店的同名 id。source version 缺失时照常保留 raw-linked observation provenance，并向既有 SyncIssue owner 发 `MISSING_SOURCE_VERSION` best-effort diagnostic，使用上述 encoded identity retry/resolve；并发重复 issue 不影响 observation 的 semantic unique key 或 canonical selection。
 2. 以 §2.2 的 canonical JSON 生成 `semantic_observation_hash`，包含字段 presence/type/normalized values 与继承父字段，但不含 raw id、capture time、endpoint；不同 raw capture 的同一语义必然相同 hash。
 3. 对每个 line 执行唯一键 `(shop_pk, order_pk, external_line_id, semantic_observation_hash)` 的 `INSERT ... ON CONFLICT DO NOTHING`。首次成功的 capture 固定为 observation provenance；冲突 capture 只保留 raw history 与 duplicate metric，绝不更新首次 raw id 或增加数量。
 4. canonical 读取使用具体 window CTE（见 §4.2）按 version/capture/hash 选择一条；同一 line 的较旧 replay 可插入不同语义审计行，但不能覆盖 canonical。相同 version/capture 的 hash 冲突按 hash ASC，记录 `EQUAL_VERSION_CONFLICT`。
 5. 一个订单所有 line 的 observation 成功后再 resolve 对应 sync issue；任一必须字段或事务冲突失败则回滚该订单的 observation 写入，保留 raw record 与 issue 供重试。
 6. 重试、checkpoint replay、orders/detail 双 producer 重复采集都必须只产生 no-op 或审计行；不得以重试次数、capture 时间或 Miaoshou 数据制造新价格。不同语义的较新 observation 才能改变 canonical 值，较新 missing/invalid 直接使对应 metric null。
 
-可观测 issue/status 至少包括：`PARSE_ERROR`、`MISSING_AUTHORITY_PRICE`、`INVALID_PRICE`、`MISSING_CURRENCY`、`INVALID_QUANTITY`、`UNKNOWN_GIFT_SIGNAL`、`UNKNOWN_LINE_STATUS`、`MISSING_SOURCE_VERSION`、`STALE_OBSERVATION_SKIPPED`、`FX_UNAVAILABLE`、`UPSERT_CONFLICT`。`MISSING_SOURCE_VERSION` 使用既有 SyncIssue owner 与上述 deterministic key 去重/retry/resolve，不新建镜像表；每类要有 raw/order/line/shop 维度计数，API 只暴露聚合后的安全计数，不暴露凭据或完整 buyer payload。
+可观测 issue/status 至少包括：`PARSE_ERROR`、`MISSING_AUTHORITY_PRICE`、`INVALID_PRICE`、`MISSING_CURRENCY`、`INVALID_QUANTITY`、`UNKNOWN_GIFT_SIGNAL`、`UNKNOWN_LINE_STATUS`、`MISSING_SOURCE_VERSION`、`STALE_OBSERVATION_SKIPPED`、`FX_UNAVAILABLE`、`UPSERT_CONFLICT`。`MISSING_SOURCE_VERSION` 使用既有 SyncIssue owner 与 encoded identity 做 best-effort retry/resolve；现有 owner 缺原子 unique constraint，因此并发重复 issue 是允许的诊断结果，不是 canonical idempotence 的替代或承诺；不新建镜像表。每类要有 raw/order/line/shop 维度计数，API 只暴露聚合后的安全计数，不暴露凭据或完整 buyer payload。
 
 ### 3.3 Backfill 设计（仅人工 guarded deploy）
 
@@ -247,13 +248,15 @@ class PriceMetric:
     estimated: bool
 ```
 
-`read_overview()` 在同一个 snapshot 创建 `PriceStatsBasis`（calculated_at、FX snapshot、当前 effective cost map、内部 scope selection），调用窄 `read_price_stats(session, basis, request)`，再由 HTTP adapter 将结果合入旧 envelope。价格 seam 不 import HTTP request、模板 DOM 或私有大 SQL function；利润 formula 不反向依赖价格 fields。`focused-spus` 只改变 `SpuSelection=FocusedSelection`，不复制统计。
+`read_overview()` 在同一个 snapshot 创建 `PriceStatsBasis`（calculated_at、现有 typed `FxBasis(snapshot_id, usd_cny, usd_vnd, as_of)`、当前 effective cost map、内部 scope selection），调用窄 `read_price_stats(session, basis, request)`，再由 HTTP adapter 将结果合入旧 envelope。价格 seam 不 import HTTP request、模板 DOM 或私有大 SQL function；利润 formula 不反向依赖价格 fields。`focused-spus` 只改变 `SpuSelection=FocusedSelection`，不复制统计。
 
 流程顺序：解析 shop/selection/window → 在事务内锁定 read-only `REPEATABLE READ` → push down shop/SPU/window/payment/status/gift predicates → materialize eligible line relation → 读取同一 FX/cost basis → CNY conversion → per-SPU and full-scope aggregation → apply independent sort/page only to items → serialize totals from unpaginated relation。
 
 ### 4.2 Eligibility relation 与 source selection
 
 逻辑 CTE（名称与列依赖必须保持具体；不得实现成不存在的 function/view）：
+
+在执行 SQL 前，backend 从同一个 `FxBasis`（`snapshot_id`, `usd_cny`, `usd_vnd`, `as_of`）构造 typed `fx_rates` bind arrays。转换只在私有 `decimal.Context` 中进行：固定 `prec`（至少 80 significant digits）、固定 `Emin/Emax`、`ROUND_HALF_EVEN`；`InvalidOperation`/`DivisionByZero`/`Overflow`/`Underflow` traps 开启，`Inexact`/`Rounded` traps 明确关闭以允许 rate division 后的有限 Decimal，并显式校验所有 inputs finite 且 positive（CNY identity 除外），不读写 ambient context；`CNY→1`、`USD→basis.usd_cny`、`VND→basis.usd_cny / basis.usd_vnd`。SQL 只 join 这些已校验的 rates 并执行 `native_amount * native_to_cny`，不得调用不存在的 `convert_to_cny` 或读取第二个 FX snapshot。
 
 ```sql
 WITH ranked_price_observations AS (
@@ -278,6 +281,14 @@ WITH ranked_price_observations AS (
     CAST(:cost_unit_costs_cny AS numeric[]),
     CAST(:cost_sources AS text[])
   ) AS u(spu_pk, unit_cost_used, cost_source)
+), fx_rates(currency, native_to_cny) AS (
+  -- Backend binds these from the same FxBasis after private Decimal conversion.
+  -- Supported rows are exactly CNY=1, USD=usd_cny, VND=usd_cny/usd_vnd.
+  SELECT u.currency, u.native_to_cny
+  FROM unnest(
+    CAST(:fx_currencies AS text[]),
+    CAST(:fx_native_to_cny AS numeric[])
+  ) AS u(currency, native_to_cny)
 ), selected_lines AS (
   SELECT o.shop_pk, l.order_pk, l.external_line_id, l.spu_pk,
          o.order_time, o.paid_at, o.status AS order_status
@@ -300,9 +311,11 @@ WITH ranked_price_observations AS (
              OR p.effective_quantity IS NULL OR p.effective_quantity <= 0
              OR p.effective_quantity <> trunc(p.effective_quantity)
              THEN 'INVALID_QUANTITY'
+           WHEN s.order_status IS NULL THEN 'UNKNOWN_STATUS'
            WHEN s.order_status = 'CANCELLED' THEN 'EXCLUDED_CANCELLED'
            WHEN s.order_status = 'ON_HOLD' THEN 'EXCLUDED_ON_HOLD'
            WHEN s.order_status = 'UNPAID' THEN 'EXCLUDED_UNPAID'
+           -- Exact expansion of PAID_SALES_ORDER_STATUSES; do not invent a line whitelist.
            WHEN s.order_status NOT IN ('AWAITING_SHIPMENT','PARTIAL_SHIPPING',
                                        'AWAITING_COLLECTION','IN_TRANSIT',
                                        'DELIVERED','COMPLETED')
@@ -326,6 +339,7 @@ WITH ranked_price_observations AS (
   LEFT JOIN cost_basis AS c ON c.spu_pk = s.spu_pk
 ), coverage_by_reason AS (
   SELECT
+    spu_pk,
     COUNT(*) AS selected_line_count,
     COUNT(*) FILTER (WHERE exclusion_reason = 'ELIGIBLE') AS eligible_line_count,
     COUNT(*) FILTER (WHERE exclusion_reason = 'EXCLUDED_UNPAID') AS excluded_unpaid_line_count,
@@ -345,6 +359,28 @@ WITH ranked_price_observations AS (
     COUNT(*) FILTER (WHERE exclusion_reason = 'MISSING_OBSERVATION') AS missing_observation_line_count,
     COALESCE(SUM(known_valid_quantity) FILTER (WHERE exclusion_reason NOT IN ('ELIGIBLE','MISSING_OBSERVATION','INVALID_QUANTITY')), 0) AS excluded_valid_quantity
   FROM population_lines
+  GROUP BY spu_pk
+), coverage_by_reason_total AS (
+  SELECT
+    COALESCE(SUM(selected_line_count), 0) AS selected_line_count,
+    COALESCE(SUM(eligible_line_count), 0) AS eligible_line_count,
+    COALESCE(SUM(excluded_unpaid_line_count), 0) AS excluded_unpaid_line_count,
+    COALESCE(SUM(excluded_on_hold_line_count), 0) AS excluded_on_hold_line_count,
+    COALESCE(SUM(excluded_cancelled_line_count), 0) AS excluded_cancelled_line_count,
+    COALESCE(SUM(excluded_gift_line_count), 0) AS excluded_gift_line_count,
+    COALESCE(SUM(unknown_gift_line_count), 0) AS unknown_gift_line_count,
+    COALESCE(SUM(unknown_status_line_count), 0) AS unknown_status_line_count,
+    COALESCE(SUM(eligible_quantity), 0) AS eligible_quantity,
+    COALESCE(SUM(excluded_unpaid_quantity), 0) AS excluded_unpaid_quantity,
+    COALESCE(SUM(excluded_on_hold_quantity), 0) AS excluded_on_hold_quantity,
+    COALESCE(SUM(excluded_cancelled_quantity), 0) AS excluded_cancelled_quantity,
+    COALESCE(SUM(excluded_gift_quantity), 0) AS excluded_gift_quantity,
+    COALESCE(SUM(unknown_gift_quantity), 0) AS unknown_gift_quantity,
+    COALESCE(SUM(unknown_status_quantity), 0) AS unknown_status_quantity,
+    COALESCE(SUM(invalid_quantity_line_count), 0) AS invalid_quantity_line_count,
+    COALESCE(SUM(missing_observation_line_count), 0) AS missing_observation_line_count,
+    COALESCE(SUM(excluded_valid_quantity), 0) AS excluded_valid_quantity
+  FROM coverage_by_reason
 ), scope_lines AS (
   SELECT p.*, c.selected_line_count, c.eligible_line_count,
          c.excluded_unpaid_line_count, c.excluded_on_hold_line_count,
@@ -357,40 +393,56 @@ WITH ranked_price_observations AS (
          c.invalid_quantity_line_count, c.missing_observation_line_count,
          c.excluded_valid_quantity
   FROM population_lines AS p
-  CROSS JOIN coverage_by_reason AS c
+  JOIN coverage_by_reason AS c ON c.spu_pk = p.spu_pk
   WHERE p.exclusion_reason = 'ELIGIBLE'
 ), converted_lines AS (
   SELECT s.*,
-         CASE WHEN s.original_price_status = 'OBSERVED'
-              THEN convert_to_cny(s.original_price_native, s.currency, :fx_snapshot)
+         CASE
+           WHEN s.original_price_status = 'OBSERVED'
+            AND s.currency IS NOT NULL AND btrim(s.currency) <> ''
+            AND fx.native_to_cny IS NOT NULL
+           THEN s.original_price_native * fx.native_to_cny
          END AS original_cny,
-         CASE WHEN s.paid_price_status = 'OBSERVED'
-              THEN convert_to_cny(s.paid_price_native, s.currency, :fx_snapshot)
-         END AS paid_cny
+         CASE
+           WHEN s.paid_price_status = 'OBSERVED'
+            AND s.currency IS NOT NULL AND btrim(s.currency) <> ''
+            AND fx.native_to_cny IS NOT NULL
+           THEN s.paid_price_native * fx.native_to_cny
+         END AS paid_cny,
+         fx.native_to_cny AS native_to_cny_rate
   FROM scope_lines AS s
+  LEFT JOIN fx_rates AS fx ON fx.currency = s.currency
 ), coverage_by_price AS (
-  SELECT
+  SELECT spu_pk,
     COALESCE(SUM(effective_quantity) FILTER (
       WHERE (original_price_status = 'OBSERVED' OR paid_price_status = 'OBSERVED')
-        AND (currency IS NULL OR currency = '')
+        AND (currency IS NULL OR btrim(currency) = '')
     ), 0) AS missing_currency_quantity,
     COALESCE(SUM(effective_quantity) FILTER (
-      WHERE (original_price_status = 'OBSERVED' AND original_cny IS NULL)
-         OR (paid_price_status = 'OBSERVED' AND paid_cny IS NULL)
+      WHERE (original_price_status = 'OBSERVED' OR paid_price_status = 'OBSERVED')
+        AND btrim(currency) <> '' AND currency IS NOT NULL
+        AND ((original_price_status = 'OBSERVED' AND original_cny IS NULL)
+          OR (paid_price_status = 'OBSERVED' AND paid_cny IS NULL))
     ), 0) AS fx_unavailable_quantity
   FROM converted_lines
+  GROUP BY spu_pk
+), coverage_by_price_total AS (
+  SELECT
+    COALESCE(SUM(missing_currency_quantity), 0) AS missing_currency_quantity,
+    COALESCE(SUM(fx_unavailable_quantity), 0) AS fx_unavailable_quantity
+  FROM coverage_by_price
 ), cny_lines AS (
   SELECT l.*, c.missing_currency_quantity, c.fx_unavailable_quantity
   FROM converted_lines AS l
-  CROSS JOIN coverage_by_price AS c
+  JOIN coverage_by_price AS c ON c.spu_pk = l.spu_pk
 )
 ```
 
-`population_lines` is the pre-eligibility LEFT JOIN relation: every selected legacy line is retained even when it has no canonical observation. Its `exclusion_reason` is mutually exclusive, and `known_valid_quantity` is populated only from a positive integral observation quantity. `coverage_by_reason` is the sole producer for line/exclusion counters and known-valid-unit sums: it counts each reason explicitly, emits zero for empty reasons, and asserts the diagnostic partition `selected_line_count = eligible + unpaid + on_hold + cancelled + gift + unknown_gift + unknown_status + invalid_quantity + missing_observation`. `MISSING_OBSERVATION` and `INVALID_QUANTITY` contribute line counts only; the wire does not invent unit quantities for them. `coverage_by_price` is the sole producer for currency/FX counters over eligible known units; it is joined to the response coverage and emits zero when no eligible observed price requires the counter. No counter uses a guessed quantity or a second refund join.
+`population_lines` is the pre-eligibility LEFT JOIN relation: every selected legacy line is retained even when it has no canonical observation. Its `exclusion_reason` is mutually exclusive, and `known_valid_quantity` is populated only from a positive integral observation quantity. `coverage_by_reason` groups by `spu_pk` and is the sole producer for per-SPU line/exclusion counters and known-valid-unit sums; it counts each reason explicitly, emits zero for empty reasons, and asserts the diagnostic partition `selected_line_count = eligible + unpaid + on_hold + cancelled + gift + unknown_gift + unknown_status + invalid_quantity + missing_observation`. `scope_lines` joins that relation by `spu_pk`, never a global CROSS JOIN. `coverage_by_reason_total` sums the grouped relation once for unpaginated totals. `MISSING_OBSERVATION` and `INVALID_QUANTITY` contribute line counts only; the wire does not invent unit quantities for them. `coverage_by_price` and `coverage_by_price_total` apply the same per-SPU/one-total-level split for currency/FX counters. No counter uses a guessed quantity or a second refund join.
 
 `ranked_price_observations` is the concrete canonical relation: it selects the newest authoritative whole observation, including newest missing/invalid fields; it never falls back to an older valid amount. `cost_basis` is the existing ROI current effective-cost map materialized as bound arrays by `spu_pk=l.spu_pk` in the same snapshot; `unit_cost_used`/`cost_source` are not observation columns. `o.shop_pk` is authoritative because `sales_order_lines` has no `shop_pk`. Parent status filters reuse existing ROI constants; exact local-time boundary comes from the common profitability module, not a second timezone map.
 
-When a price is missing/invalid, `cny_lines` keeps the valid quantity for that line so metric-specific missing/invalid price counts conserve units; when quantity itself is invalid, the row is absent from `scope_lines` and only its invalid-quantity line count is reported. FX conversion is attempted only for an `OBSERVED` field with verified currency; a missing/unknown rate is counted as global FX gap and follows the HTTP error policy rather than silently becoming zero.
+When a price is missing/invalid, `cny_lines` keeps the valid quantity for that line so metric-specific missing/invalid price counts conserve units; when quantity itself is invalid, the row is absent from `scope_lines` and only its invalid-quantity line count is reported. An observed price with blank/missing currency is classified `INVALID_CURRENCY` for that metric (therefore contributes its independent price `invalidQuantity`) and increments only population `missingCurrencyQuantity`; it does not increment `fxUnavailableQuantity`. A nonblank unsupported currency or non-positive/missing rate is `FX_UNAVAILABLE` and returns `503 PRICE_FX_UNAVAILABLE` rather than zero; only observed fields with a verified bound rate reach `native_amount * native_to_cny`.
 
 Purchase rows use `unit_cost_used` from this current ROI cost map. `MANUAL` is current observed cost; `DEFAULT_K1` is a CNY estimate and must set `estimated=true`/warning. A changed current cost changes purchase output in a new snapshot without changing historical TikTok price observations. No historical procurement distribution is invented.
 
@@ -531,7 +583,7 @@ Rules for this object:
 }
 ```
 
-The coverage object counts source population and exclusions, while each metric object counts only its own price-field coverage. `invalidQuantityLineCount` and `missingObservationLineCount` are line counts only; there is deliberately no physical-unit sum when quantity/observation is unknown. `excludedValidQuantity` counts known valid units excluded by the mutually-exclusive population classification. Every selected line belongs to exactly one classification: eligible, unpaid, on-hold, cancelled, unknown-status, gift, unknown-gift, invalid-quantity, or missing-observation; the producer must aggregate each reason from `population_lines` and emit zero for empty known reasons. If the implementation cannot establish a required mapping, response status is `503`/documented `422` rather than a misleading complete `200`.
+The coverage object counts source population and exclusions, while each metric object counts only its own price-field coverage. Item coverage is selected from `coverage_by_reason`/`coverage_by_price` by that item’s `spu_pk`; `totals.priceCoverage` is selected only from `coverage_by_reason_total`/`coverage_by_price_total`, never copied from an eligible item. `invalidQuantityLineCount` and `missingObservationLineCount` are line counts only; there is deliberately no physical-unit sum when quantity/observation is unknown. `excludedValidQuantity` counts known valid units excluded by the mutually-exclusive population classification. Every selected line belongs to exactly one classification: eligible, unpaid, on-hold, cancelled, unknown-status, gift, unknown-gift, invalid-quantity, or missing-observation; the producer must aggregate each reason from `population_lines` and emit zero for empty known reasons. If the implementation cannot establish a required mapping, response status is `503`/documented `422` rather than a misleading complete `200`.
 
 `meta` adds only:
 
@@ -575,6 +627,20 @@ The fixture has SPU A with purchase 10 × qty 1 and SPU B with purchase 40 × qt
   "meta":{"calculatedAt":"2026-10-05T12:00:00+00:00","priceCurrency":"CNY","priceFx":{"snapshotId":901,"asOfAt":"2026-10-05T11:59:00+00:00","conversionPolicy":"native_line_currency_to_cny_before_aggregation"},"priceCost":{"basisFingerprint":"sha256:response-local-cost-map-v1","asOfAt":"2026-10-05T12:00:00+00:00","defaultK1Cny":"40.0000","estimated":true},"priceSort":"paidPriceMedian"}
 }
 ```
+
+**Coverage isolation fixture (per-SPU, not global CROSS JOIN):** this contract test uses A with one eligible CNY line qty 1; B with one cancelled line qty 2 and one eligible line qty 4 whose explicit currency is blank. The expected coverage fragment is:
+
+```json
+{
+  "items": [
+    {"spu_pk":12,"priceCoverage":{"eligibleLineCount":1,"eligibleQuantity":1,"excludedUnpaidQuantity":0,"excludedOnHoldQuantity":0,"excludedCancelledQuantity":0,"excludedGiftQuantity":0,"unknownGiftQuantity":0,"unknownStatusQuantity":0,"invalidQuantityLineCount":0,"excludedValidQuantity":0,"missingCurrencyQuantity":0,"fxUnavailableQuantity":0,"missingObservationLineCount":0}},
+    {"spu_pk":13,"priceCoverage":{"eligibleLineCount":1,"eligibleQuantity":4,"excludedUnpaidQuantity":0,"excludedOnHoldQuantity":0,"excludedCancelledQuantity":2,"excludedGiftQuantity":0,"unknownGiftQuantity":0,"unknownStatusQuantity":0,"invalidQuantityLineCount":0,"excludedValidQuantity":2,"missingCurrencyQuantity":4,"fxUnavailableQuantity":0,"missingObservationLineCount":0}}
+  ],
+  "totals":{"priceCoverage":{"eligibleLineCount":2,"eligibleQuantity":5,"excludedUnpaidQuantity":0,"excludedOnHoldQuantity":0,"excludedCancelledQuantity":2,"excludedGiftQuantity":0,"unknownGiftQuantity":0,"unknownStatusQuantity":0,"invalidQuantityLineCount":0,"excludedValidQuantity":2,"missingCurrencyQuantity":4,"fxUnavailableQuantity":0,"missingObservationLineCount":0}}
+}
+```
+
+A must not inherit B’s cancelled/missing-currency counts. Totals sum the one `population_lines` relation: eligible quantities 1+4 and excluded valid quantity 2; the blank currency contributes only `missingCurrencyQuantity`, never `fxUnavailableQuantity`.
 
 **Focused page (same two SPUs, complete new contract):** the membership GET remains separate; only analytics carries prices.
 
@@ -696,7 +762,7 @@ Tabulator 6.3.1 支持 nested `columns` definitions；实现 lane 必须以 vend
 | gift/status | valid price × qty | excluded before metric; explicit exclusion count |
 | FX | 100 THB × 1 with fixed rate 0.2 | convert 20 CNY before mean/median |
 
-Use at least two SPUs with unequal quantities to prove totals are not average-of-SPU means/medians. Add an explicit acceptance test (for example `test_later_refund_or_full_loss_keeps_paid_observation`) where a paid line is later marked refunded/full-loss; assert the historical paid observation remains in the paid population. Do not join refund facts merely to manufacture a coverage counter. Add shipping/payment total values intentionally inconsistent and assert neither affects result. Add Miaoshou values intentionally different and assert they never appear in output.
+Use at least two SPUs with unequal quantities to prove totals are not average-of-SPU means/medians. Add a coverage-isolation fixture: SPU A has one eligible CNY line qty 1; SPU B has one cancelled line qty 2 and one eligible line qty 4 with blank currency. Assert A’s per-SPU exclusion/missing-currency counters remain zero, B reports only its cancelled quantity and missing-currency quantity, and totals are the one raw-population reaggregation (not copied global counters). Add an explicit acceptance test (for example `test_later_refund_or_full_loss_keeps_paid_observation`) where a paid line is later marked refunded/full-loss; assert the historical paid observation remains in the paid population. Do not join refund facts merely to manufacture a coverage counter. Add shipping/payment total values intentionally inconsistent and assert neither affects result. Add Miaoshou values intentionally different and assert they never appear in output.
 
 Expected core oracle for purchase A10 qty1 + B40 qty9:
 
@@ -717,7 +783,7 @@ Test odd/even ties, zero-vs-null, missing/invalid independent original vs paid c
 | domain/unit | independent oracle mean/median, cumulative SQL ranks, totals vs row averages, six sort IDs/null-last/tie-breaker, coverage statuses, snapshot metadata | `bash scripts/test_isolated.sh unit` / analytics domain |
 | HTTP/API | real FastAPI route + isolated DB; standard and `scope=focused`; empty/partial/default/error; totals invariant under q/sort/page/columns; legacy snake fields unchanged | `bash scripts/test_isolated.sh fast tests/api/test_spu_price_stats.py` after released ownership |
 | browser static | shared kernel/profile markup, aria, grouped columns contract | useful regression only, never E2E evidence |
-| live browser E2E | real Playwright browser → temporary uvicorn → actual API → same isolated DB; seed then authenticate; prices, sort, totals invariance, errors/retry, mobile | `bash scripts/test_isolated.sh e2e tests/browser/test_spu_price_stats_live.py`; collection must be >0 and unavailable browser/API is failure, not skip-green |
+| live browser E2E | real Playwright browser → temporary uvicorn → actual API → same isolated DB; seed then authenticate; prices, sort, totals invariance, errors/retry, mobile | `TTS_ERP_TEST_NO_DOTENV=1 bash scripts/test_isolated.sh e2e tests/browser/test_spu_price_stats_live.py`; pre-collection bootstrap sentinel must prove no `.env` import, collection >0, unavailable browser/API is failure, not skip-green |
 
 ### 7.3 Real E2E execution contract
 
@@ -734,10 +800,10 @@ pytestmark = (
 
 The fixture must:
 
-1. Let outer `scripts/test_isolated.sh` provide one ephemeral `TTS_ERP_DB_URL_TEST`; derive only a test-shaped `TTS_ERP_DB_URL` and pass **both variables with the identical outer ephemeral URL** to the child app. Use an explicit allowlisted environment (`TTS_ERP_AUTH_MODE=enforce`, deterministic test Fernet key, safe test settings), remove inherited service/proxy credentials, and do not let cwd/import-time dotenv load production `.env` values.
+1. The exact command is `TTS_ERP_TEST_NO_DOTENV=1 bash scripts/test_isolated.sh e2e tests/browser/test_spu_price_stats_live.py`. `tests/conftest.py` must check this sentinel before `_load_env()`; the separate bootstrap lane owns `tests/conftest.py` and `tests/test_no_dotenv_bootstrap.py`, whose regression test must prove a sentinel `.env` value is not imported. Let outer `scripts/test_isolated.sh` provide one ephemeral `TTS_ERP_DB_URL_TEST`; derive only a test-shaped `TTS_ERP_DB_URL` and pass **both variables with the identical outer ephemeral URL** to the child app. Use an explicit allowlisted environment (`TTS_ERP_AUTH_MODE=enforce`, deterministic test Fernet key, safe test settings), remove inherited service/proxy credentials, and preserve the existing default dotenv behavior when the sentinel is absent.
 2. Seed a `TEST_PRICE_<run-id>` user/account and fixture rows in that same DB through SQLAlchemy/psycopg before server launch, commit, then close. Obtain the browser cookie through the real `POST /v2/auth/login` TEST-user path; do not read/decrypt credentials directly. Cleanup only TEST rows. No `--keep-db` is needed for normal process lifetime because fixture cleanup occurs before wrapper exit; retain it only for human failure inspection.
 3. Start the app with `sys.executable -m uvicorn tts_erp_v2.app:app` on a random free loopback port; poll `/healthz`; capture stdout/stderr. Bounded source evidence places APScheduler in the separate `tts_erp_v2/sync_worker` process and found no scheduler-disable flag; do not invent a switch—verify the actual app lifespan before implementation and ensure the test child has no sync-worker/upstream process. Never monkeypatch the target route or call production `:9877`.
-4. Run `bash scripts/test_isolated.sh e2e tests/browser/test_spu_price_stats_live.py`; collection must report >0. A browser, app, auth, DB, or readiness failure must fail the test and be reported as a blocker, not be converted to `pytest.skip` or a green empty collection.
+4. Run `TTS_ERP_TEST_NO_DOTENV=1 bash scripts/test_isolated.sh e2e tests/browser/test_spu_price_stats_live.py`; collection must report >0. A browser, app, auth, DB, or readiness failure must fail the test and be reported as a blocker, not be converted to `pytest.skip` or a green empty collection.
 5. Launch Playwright Chromium headless; assert Prices box and grouped headers on both page routes, and feed the actual nested API payload (`priceStats.purchase|originalSale|paid`); verify all six mapped values render through the nested Tabulator fields. Trigger each of the six sorts and assert the corresponding independent `sortField` request (`purchasePriceMean`, `purchasePriceMedian`, `originalSalePriceMean`, `originalSalePriceMedian`, `paidPriceMean`, `paidPriceMedian`), plus `scope=focused` analytics mapping, empty/partial/null/estimate states, totals invariance under q/page/visible columns when facts/basis are unchanged, latest-response-wins race, API error/retry, keyboard tooltip/aria-sort, and mobile horizontal scroll/frozen first column.
 6. Always stop browser/server process group with bounded terminate→kill escalation, close logs, and preserve screenshot/trace/stdout on failure. The same isolated DB must be used by seed, child app (`TTS_ERP_DB_URL` and `_TEST`), API, and browser; no target-API mock is allowed.
 
@@ -781,6 +847,7 @@ Source grep, static string tests, mocked JSON render tests, existing canned brow
 | price math helper | `tts_erp_v2/analytics/spu_profitability/_price_math.py` plus its dedicated unit tests in the math lane worktree | standalone pure-Decimal weighted mean/median algorithm and oracle-facing contract only | DB/HTTP/UI policy, eligibility/filtering, duplicate implementation, or overwriting the helper by analytics/API |
 | analytics/API | `tts_erp_v2/analytics/spu_profitability/**`, `tts_erp_v2/analytics/spu_roi.py`, API adapter, `docs/api/external-api.md` when released | consume or compare the approved helper; typed price seam, SQL, wire, sort, snapshot | direct DOM, second focused calculation, replacing old profit fields, or duplicating `_price_math.py` |
 | shared UI | `tts_erp_v2/templates/pages/spu-profitability.html`, `static/js/spu-profitability-page.js`, `static/js/spu-roi.js`, `static/js/focused-spus.js`, relevant CSS | one Prices box, grouped columns, kernel races/a11y/mobile | price formula in browser, new global toggle, focused membership enrichment |
+| price-test-bootstrap | `tests/conftest.py`, `tests/test_no_dotenv_bootstrap.py` | pre-collection `TTS_ERP_TEST_NO_DOTENV=1` guard and sentinel `.env` regression; retain default dotenv behavior otherwise | production `.env` import in sentinel mode; unrelated fixture behavior |
 | real E2E | `tests/support/spu_price_stats_live.py`, `tests/browser/test_spu_price_stats_live.py` | cold-start uvicorn, isolated DB seed/auth/browser/network evidence | external :9877, mock-only proof, production env, optional/skipped acceptance |
 | integration-only | temporary integration worktree and final acceptance records | merge already reviewed lanes, run required checks, reconcile docs | modify component implementation while integrating |
 | this lane | `docs/design/spu-price-statistics.md` | companion design only | any source/test/application edit |
