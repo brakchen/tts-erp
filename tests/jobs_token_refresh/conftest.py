@@ -35,11 +35,12 @@ def _ensure_fernet_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 def _isolate_test_credentials(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Scope ``_query_due_credentials`` to TEST_-prefixed rows only.
 
-    Why: prod's ``integration.credentials`` holds 1 miaoshou row with
-    ``expires_at IS NULL`` (treated as 'due' by the conservative
-    due-window clause). Without this patch, tests that expect
-    ``scanned == 0`` see ``scanned == 1`` from that prod row,
-    regardless of whether they inserted their own TEST_-prefix rows.
+    Why: prod's ``integration.credentials`` holds rows with ``expires_at
+    IS NULL`` (treated as 'due' by the conservative due-window clause
+    only when ``created_at`` is older than ``STALE_THRESHOLD``). Without
+    this patch, tests that expect ``scanned == 0`` see ``scanned >= 1``
+    from those prod rows, regardless of whether they inserted their
+    own TEST_-prefix rows.
 
     The patch wraps ``tts_erp_v2.jobs.token_refresh._query_due_credentials``
     to filter by ``external_account_id LIKE 'TEST_%'``. Production
@@ -48,9 +49,9 @@ def _isolate_test_credentials(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]
 
     Note: the production function is module-level with explicit
     ``session`` as the first positional arg and ``providers``,
-    ``window``, ``now`` as keyword-only — see
-    ``token_refresh.py:92-120``. The wrapper preserves the same arity
-    and just post-filters the result.
+    ``window``, ``stale_threshold``, ``now`` as keyword-only — see
+    ``token_refresh.py``. The wrapper preserves the same arity and
+    just post-filters the result.
     """
     from tts_erp_v2.jobs import token_refresh as tr_module
 
@@ -61,9 +62,16 @@ def _isolate_test_credentials(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]
         *,
         providers: tuple[str, ...],
         window,
+        stale_threshold,
         now,
     ):
-        rows = original(session, providers=providers, window=window, now=now)
+        rows = original(
+            session,
+            providers=providers,
+            window=window,
+            stale_threshold=stale_threshold,
+            now=now,
+        )
         return [
             r
             for r in rows
