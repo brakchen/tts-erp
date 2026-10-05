@@ -86,6 +86,9 @@
     const file = state.file;
     const activeUpload = Boolean(state.upload?.xhr);
     $("publish-submit").disabled = !valid() || !!state.upload || state.creating;
+    const progress = $("publish-upload-progress");
+    progress.hidden = !activeUpload;
+    progress.value = state.upload?.progress || 0;
     const cancel = $("publish-upload-cancel");
     cancel.hidden = !activeUpload;
     cancel.disabled = !activeUpload;
@@ -138,11 +141,24 @@
     }
   }
 
+  function confirmPublish(file, caption) {
+    const dialog = $("publish-confirm-dialog");
+    if (!dialog?.showModal) return Promise.resolve(window.confirm(`确认将 ${file.name} 发布到 TikTok？\n\n${caption}`));
+    $("publish-confirm-file").textContent = `${file.name} · ${Math.ceil(file.size / 1024 / 1024 * 10) / 10} MB`;
+    $("publish-confirm-caption").textContent = caption;
+    $("publish-confirm-device").textContent = state.config.target.deviceSerialMasked || "—";
+    $("publish-confirm-album").textContent = state.config.target.album || "—";
+    dialog.showModal();
+    return new Promise((resolve) => {
+      dialog.addEventListener("close", () => resolve(dialog.returnValue === "confirm"), { once: true });
+    });
+  }
+
   async function create() {
     if (!valid() || state.creating) return;
     const caption = $("publish-caption").value;
     const file = state.file;
-    if (!window.confirm(`确认将 ${file.name} 发布到 TikTok？\n\n${caption}\n\n设备空闲时可能立即开始。`)) return;
+    if (!await confirmPublish(file, caption)) return;
     state.creating=true;
     const upload = { xhr: null, cancelled: false };
     state.upload = upload;
@@ -169,7 +185,11 @@
         xhr.open("PUT", ticket.upload.url);
         Object.entries(ticket.upload.headers || {}).forEach(([key, value]) => xhr.setRequestHeader(key, value));
         xhr.upload.onprogress = (event) => {
-          if (event.lengthComputable) $("publish-submit").textContent = `上传中 ${Math.round(event.loaded / event.total * 100)}%`;
+          if (event.lengthComputable) {
+            upload.progress = Math.round(event.loaded / event.total * 100);
+            $("publish-upload-progress").value = upload.progress;
+            $("publish-submit").textContent = `上传中 ${upload.progress}%`;
+          }
         };
         await new Promise((resolve, reject) => {
           xhr.onload = () => {
@@ -280,9 +300,10 @@
     retry: "重试",
     verify: "核验",
     retry_cleanup: "重试清理",
+    replace_upload: "重新上传",
     copy_artemis_id: "复制 Artemis ID",
   };
-  const CONFIRM_ACTIONS = new Set(["cancel", "retry", "verify", "retry_cleanup"]);
+  const CONFIRM_ACTIONS = new Set(["cancel", "retry", "verify", "retry_cleanup", "replace_upload"]);
 
   function resumeUpload(task) {
     if (task.status === "cancelled" || !(task.allowedActions || []).includes("continue_upload")) {
@@ -311,7 +332,16 @@
       }
       const endpoint = actionName === "retry_cleanup"
         ? `/tasks/${task.taskId}/cleanup/retry`
+        : actionName === "replace_upload"
+          ? `/tasks/${task.taskId}/replace-upload`
         : `/tasks/${task.taskId}/${actionName.replaceAll("_", "-")}`;
+      if (actionName === "replace_upload") {
+        const replaced = await request(endpoint, {
+          method: "POST",
+          body: JSON.stringify({ rowVersion: task.rowVersion }),
+        });
+        return resumeUpload(replaced);
+      }
       await request(endpoint, {
         method: "POST",
         body: JSON.stringify({ rowVersion: task.rowVersion }),
@@ -501,34 +531,57 @@
   }
 
   function renderDetail(detail) {
-      const drawer = $("publish-drawer-content");
-      drawer.replaceChildren();
-      const heading = document.createElement("h2");
-      heading.textContent = `${detail.filename} · ${detail.status}`;
-      drawer.append(heading);
-      const caption = document.createElement("p");
-      caption.textContent = detail.caption;
-      drawer.append(caption);
-      (detail.attempts || []).forEach((attempt) => {
-        const section = document.createElement("section");
-        section.className = "drawer-attempt";
-        const summary = document.createElement("div");
-        summary.textContent = `第 ${attempt.sequenceNo} 次 ${attempt.kind} · ${attempt.status}`;
-        const id = document.createElement("code");
-        id.textContent = attempt.artemisSessionId;
-        const copy = document.createElement("button");
-        copy.className = "btn-secondary drawer-action";
-        copy.textContent = "复制 Artemis ID";
-        copy.onclick = () => navigator.clipboard.writeText(attempt.artemisSessionId).then(() => notice("Artemis ID 已复制"));
-        section.append(summary, id, copy);
-        drawer.append(section);
-      });
-      if (detail.cleanup) {
-        const cleanup = document.createElement("section");
-        cleanup.className = "drawer-cleanup";
-        cleanup.textContent = `清理：设备 ${detail.cleanup.device.status} · spool ${detail.cleanup.spool.status} · 对象 ${detail.cleanup.object.status}`;
-        drawer.append(cleanup);
-      }
+    const drawer = $("publish-drawer-content");
+    drawer.replaceChildren();
+    const heading = document.createElement("h2");
+    heading.textContent = `${detail.filename} · ${detail.status}`;
+    drawer.append(heading);
+    const metadata = document.createElement("dl");
+    const fields = [
+      ["任务", `${detail.taskId} · ${detail.stage}`],
+      ["目标", `${detail.target?.appName || "TikTok"} · ${detail.target?.deviceSerialMasked || "—"} · ${detail.target?.album || "—"}`],
+      ["对象", `${detail.object?.bucket || "—"}/${detail.object?.key || "—"} · ETag ${detail.object?.etag || "—"}`],
+      ["文案", detail.caption || detail.captionPreview || ""],
+    ];
+    fields.forEach(([label, value]) => {
+      const term = document.createElement("dt");
+      term.textContent = label;
+      const description = document.createElement("dd");
+      description.textContent = value;
+      metadata.append(term, description);
+    });
+    drawer.append(metadata);
+    (detail.attempts || []).forEach((attempt) => {
+      const section = document.createElement("section");
+      section.className = "drawer-attempt";
+      const summary = document.createElement("div");
+      summary.textContent = `第 ${attempt.sequenceNo} 次 ${attempt.kind} · ${attempt.status} · ${attempt.startedAt || "—"} → ${attempt.finishedAt || "—"}`;
+      const diagnostic = document.createElement("p");
+      diagnostic.textContent = `错误：${attempt.error || "—"} · 重试分类：${attempt.retryClassification || "—"} · 可重试：${attempt.retrySafe == null ? "—" : attempt.retrySafe ? "是" : "否"}`;
+      const id = document.createElement("code");
+      id.textContent = attempt.artemisSessionId;
+      const copy = document.createElement("button");
+      copy.className = "btn-secondary drawer-action";
+      copy.textContent = "复制 Artemis ID";
+      copy.onclick = () => navigator.clipboard.writeText(attempt.artemisSessionId).then(() => notice("Artemis ID 已复制"));
+      section.append(summary, diagnostic, id, copy);
+      drawer.append(section);
+    });
+    if (detail.cleanup) {
+      const cleanup = document.createElement("section");
+      cleanup.className = "drawer-cleanup";
+      cleanup.textContent = `清理：设备 ${detail.cleanup.device.status}（${detail.cleanup.device.error || "—"}） · spool ${detail.cleanup.spool.status}（${detail.cleanup.spool.error || "—"}） · 对象 ${detail.cleanup.object.status}（${detail.cleanup.object.error || "—"}）`;
+      drawer.append(cleanup);
+    }
+    const actions = $("publish-drawer-actions");
+    actions.replaceChildren();
+    (detail.allowedActions || []).filter((action) => action !== "view" && action !== "copy_artemis_id").forEach((action) => {
+      const button = document.createElement("button");
+      button.className = "btn-secondary drawer-action";
+      button.textContent = ACTION_LABELS[action] || action;
+      button.onclick = () => runTaskAction(detail, action);
+      actions.append(button);
+    });
   }
 
   async function openDetail(id) {

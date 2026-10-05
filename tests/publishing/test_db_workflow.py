@@ -29,10 +29,11 @@ from tts_erp_v2.publishing.dispatcher import (
     _cleanup_success,
     _defer_for_device_cleanup,
     _mark_spool_cleanup,
+    _recover_terminal_publish_attempt,
     _safe_retry,
     dispatch_one,
 )
-from tts_erp_v2.publishing.domain import TaskStage, TaskStatus
+from tts_erp_v2.publishing.domain import AttemptStatus, TaskStage, TaskStatus
 from tts_erp_v2.publishing.object_store import VideoObjectStore
 from tts_erp_v2.publishing.repository import _lease_task, claim_one
 from tts_erp_v2.publishing.submission import (
@@ -782,6 +783,42 @@ def test_retry_rejects_missing_object_even_when_attempt_is_safe(
     with pytest.raises(ValueError, match="UPLOAD_REPLACEMENT_REQUIRED"):
         retry_task(db_session, task.public_id, cast(VideoObjectStore, MissingStore()))
     db_session.rollback()
+
+
+def test_crash_recovery_advances_terminal_publish_success() -> None:
+    task = _task(
+        status=TaskStatus.RUNNING.value,
+        stage=TaskStage.DISPATCHING_ARTEMIS.value,
+    )
+    task.attempts.append(
+        VideoPublishAttempt(
+            sequence_no=1,
+            kind="publish",
+            status=AttemptStatus.SUCCESS.value,
+            retry_safe=False,
+        )
+    )
+    assert _recover_terminal_publish_attempt(task) == "cleanup"
+    assert task.status == TaskStatus.SUCCEEDED.value
+    assert task.stage == TaskStage.CLEANING.value
+
+
+def test_crash_recovery_does_not_republish_ambiguous_terminal_failure() -> None:
+    task = _task(
+        status=TaskStatus.RUNNING.value,
+        stage=TaskStage.WAITING_ARTEMIS.value,
+    )
+    task.attempts.append(
+        VideoPublishAttempt(
+            sequence_no=1,
+            kind="publish",
+            status=AttemptStatus.FAILED.value,
+            retry_safe=None,
+        )
+    )
+    assert _recover_terminal_publish_attempt(task) == "terminal"
+    assert task.status == TaskStatus.NEEDS_REVIEW.value
+    assert task.stage == TaskStage.DONE.value
 
 
 def test_upload_ticket_replay_rejects_cross_user_owner(

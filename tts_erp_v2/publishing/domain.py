@@ -65,6 +65,7 @@ class AllowedAction(StrEnum):
     RETRY = "retry"
     VERIFY = "verify"
     RETRY_CLEANUP = "retry_cleanup"
+    REPLACE_UPLOAD = "replace_upload"
     COPY_ARTEMIS_ID = "copy_artemis_id"
 
 
@@ -174,12 +175,13 @@ def allowed_actions(task: Any) -> tuple[AllowedAction, ...]:
     ):
         attempts = getattr(task, "attempts", ()) or ()
         latest = max(attempts, key=lambda attempt: attempt.sequence_no, default=None)
-        if (
+        if task.object_deleted_at is not None:
+            actions.append(AllowedAction.REPLACE_UPLOAD)
+        elif (
             latest is not None
             and latest.kind == "publish"
             and latest.retry_safe is True
             and task.object_uploaded_at is not None
-            and task.object_deleted_at is None
         ):
             actions.append(AllowedAction.RETRY)
     elif task.status == TaskStatus.NEEDS_REVIEW:

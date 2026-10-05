@@ -33,6 +33,7 @@ from tts_erp_v2.publishing.submission import (
     cancel_task,
     confirm_upload,
     create_upload_ticket,
+    replace_upload,
     retry_task,
     upload_expires_at,
 )
@@ -107,6 +108,7 @@ def _snapshot(
     actions = allowed_actions(task)
     data = {
         "taskId": str(task.public_id),
+        "rowVersion": task.row_version,
         "filename": task.original_filename,
         "sizeBytes": task.size_bytes,
         "captionPreview": task.caption.splitlines()[0][:160] if task.caption else "",
@@ -543,6 +545,29 @@ def retry(
     try:
         return _snapshot(
             retry_task(session, task_id, store), expose_client_request_id=True
+        )
+    except LookupError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, {"code": str(exc), "message": str(exc)}
+        ) from exc
+
+
+@router.post("/tasks/{task_id}/replace-upload")
+def replace_upload_task(
+    task_id: UUID,
+    body: ActionIn,
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+) -> dict:
+    require_role_at_least(request, "readwrite")
+    _csrf(request)
+    task_snapshot = _task_for_actor(session, task_id, request, lock=True)
+    _require_row_version(task_snapshot, body.row_version)
+    try:
+        return _snapshot(
+            replace_upload(session, task_id), detail=True, expose_client_request_id=True
         )
     except LookupError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc

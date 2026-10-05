@@ -172,6 +172,25 @@ def confirm_upload(
     return task
 
 
+def replace_upload(session: Session, task_id: UUID) -> VideoPublishTask:
+    task = get_task(session, task_id, lock=True)
+    if task is None:
+        raise LookupError("TASK_NOT_FOUND")
+    if task.status != TaskStatus.FAILED.value or task.object_deleted_at is None:
+        raise ValueError("UPLOAD_REPLACEMENT_REQUIRED")
+    task.status = TaskStatus.PENDING.value
+    task.stage = TaskStage.AWAITING_UPLOAD.value
+    task.object_uploaded_at = None
+    task.object_deleted_at = None
+    task.object_etag = None
+    task.object_sha256 = None
+    task.last_error_code = None
+    task.last_error_message = None
+    task.row_version += 1
+    session.commit()
+    return task
+
+
 def cancel_task(
     session: Session, task_id: UUID, store: VideoObjectStore
 ) -> VideoPublishTask:
@@ -225,6 +244,8 @@ def retry_task(
         try:
             store.stat(task.object_key)
         except Exception as exc:
+            task.object_deleted_at = datetime.now(UTC)
+            session.commit()
             raise ValueError("UPLOAD_REPLACEMENT_REQUIRED") from exc
     if task.attempt_count >= int(os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3")):
         raise ValueError("RETRY_BUDGET_EXHAUSTED")

@@ -78,6 +78,42 @@ async def dispatch_one(deps: PublishDependencies) -> str:
     return "processed"
 
 
+def _recover_terminal_publish_attempt(task: VideoPublishTask) -> str | None:
+    """Advance a persisted terminal attempt before allowing a new publish."""
+    if task.stage not in {
+        TaskStage.DISPATCHING_ARTEMIS.value,
+        TaskStage.WAITING_ARTEMIS.value,
+        TaskStage.VERIFYING.value,
+    }:
+        return None
+    attempt = max(task.attempts, key=lambda a: a.sequence_no, default=None)
+    if attempt is not None and attempt.kind != AttemptKind.PUBLISH.value:
+        return None
+    if attempt is None or attempt.status not in {
+        AttemptStatus.SUCCESS.value,
+        AttemptStatus.FAILED.value,
+        AttemptStatus.REJECTED.value,
+        AttemptStatus.CANCELLED.value,
+    }:
+        return None
+    if attempt.status == AttemptStatus.SUCCESS.value:
+        task.status = TaskStatus.SUCCEEDED.value
+        task.stage = TaskStage.CLEANING.value
+        task.device_cleanup_status = "pending"
+        task.spool_cleanup_status = "pending"
+        task.object_cleanup_status = "pending"
+        return "cleanup"
+    task.last_error_code = attempt.retry_classification or "PUBLISH_ATTEMPT_TERMINAL"
+    task.status = (
+        TaskStatus.FAILED.value
+        if attempt.retry_safe is True
+        else TaskStatus.NEEDS_REVIEW.value
+    )
+    task.stage = TaskStage.DONE.value
+    release_lease(task)
+    return "terminal"
+
+
 async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
     local = deps.spool_dir / str(task_id) / "video.mp4"
     pre_artemis = True
@@ -85,6 +121,12 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
         with deps.session_factory() as session:
             task = _get(session, task_id)
             _assert_lease(task, deps.instance_id)
+            recovery = _recover_terminal_publish_attempt(task)
+            if recovery is not None:
+                session.commit()
+                if recovery == "cleanup":
+                    await _cleanup_success(task_id, deps)
+                return
             if task.stage in {
                 TaskStage.VERIFYING.value,
                 TaskStage.WAITING_ARTEMIS.value,

@@ -32,7 +32,7 @@ def test_upload_cancellation_aborts_xhr_and_handles_terminal_and_failed_cancel()
             replaceChildren(...nodes) { this.children = nodes; },
             append(...nodes) { this.children.push(...nodes); },
             addEventListener(type, handler) { this[`on${type}`] = handler; },
-            removeAttribute() {}, showModal() {}, close() {}, click() { this.clicked = true; },
+            removeAttribute() {}, close() {}, click() { this.clicked = true; },
           };
           created.push(node);
           return node;
@@ -43,6 +43,7 @@ def test_upload_cancellation_aborts_xhr_and_handles_terminal_and_failed_cancel()
           open(method, url) { this.method = method; this.url = url; }
           setRequestHeader(name, value) { this.headers[name] = value; }
           send(file) { this.file = file; }
+          progress(loaded, total) { if (this.upload.onprogress) this.upload.onprogress({ lengthComputable: true, loaded, total }); }
           abort() { this.abortCalls += 1; events.push("xhr.abort"); if (this.onabort) this.onabort(); }
           finish() { this.status = 200; if (this.onload) this.onload(); }
           fail() { if (this.onerror) this.onerror(); }
@@ -115,6 +116,8 @@ def test_upload_cancellation_aborts_xhr_and_handles_terminal_and_failed_cancel()
         await new Promise((resolve) => setImmediate(resolve));
         if (!FakeXHR.latest || cancel.hidden || cancel.disabled) throw new Error("cancel control was not shown for active upload");
         const firstXhr = FakeXHR.latest;
+        firstXhr.progress(5, 10);
+        if (elements.get("publish-upload-progress").value !== 50) throw new Error("upload progressbar did not expose value");
         await cancel.onclick();
         await firstRun;
         firstXhr.finish();

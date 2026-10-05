@@ -423,7 +423,7 @@ mutations must send `X-Requested-With: tts-erp`; API-key clients are exempt.
 | `POST /v2/video-publish/tasks/{task_id}/cancel` | readwrite | Cancels an unstarted task and schedules independent object cleanup. |
 | `POST /v2/video-publish/tasks/{task_id}/retry` | readwrite | Retries only a failed, retry-safe task within its attempt budget. |
 | `POST /v2/video-publish/tasks/{task_id}/verify` | readwrite | Requests verification for an ambiguous result. |
-| `POST /v2/video-publish/tasks/{task_id}/cleanup-retry` | readwrite | Retries eligible device, spool, or object cleanup without changing business status. |
+| `POST /v2/video-publish/tasks/{task_id}/cleanup/retry` | readwrite | Retries eligible device, spool, or object cleanup without changing business status. |
 
 ### SPU images (`/v2/spu-images/*`)
 
