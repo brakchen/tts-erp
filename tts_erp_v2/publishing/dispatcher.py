@@ -273,9 +273,10 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
             object_etag = task.object_etag
             size_bytes = task.size_bytes
             device_serial = task.target_device_serial
-            app_package = task.target_app_package
+            preflight_app_package = task.target_app_package
 
         if recovery_id is not None:
+            pre_artemis = False
             outcome = _apply_publish_command(
                 deps,
                 task_id,
@@ -292,6 +293,7 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
                 await _cleanup_success(task_id, deps)
             return
         if active_id is not None:
+            pre_artemis = False
             await _run_attempt(task_id, active_id, deps)
             return
         with deps.session_factory() as session:
@@ -359,7 +361,7 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
 
         async def preflight_device() -> None:
             await deps.adb.check_device(device_serial)
-            await deps.adb.check_package(device_serial, app_package)
+            await deps.adb.check_package(device_serial, preflight_app_package)
             await deps.adb.ensure_album_empty(device_serial)
 
         await _run_external(task_id, deps, preflight_device)
@@ -486,15 +488,12 @@ async def _run_attempt(
         )
     with deps.session_factory() as session:
         attempt = session.get(VideoPublishAttempt, attempt_id)
-        task = session.scalar(
-            select(VideoPublishTask).where(VideoPublishTask.public_id == task_id)
-        )
-        if attempt is None or task is None:
+        if attempt is None:
             raise LeaseLost(task_id)
         goal = attempt.prompt_snapshot
         session_id = attempt.artemis_session_id
         device_serial = attempt.device_serial
-        app_package = task.target_app_package
+        app_package = attempt.target_app_package
 
     result: ArtemisResult
     if should_submit:
@@ -763,6 +762,31 @@ async def _mark_failed(task_id: UUID, code: str, deps: PublishDependencies) -> N
 async def _mark_unexpected(
     task_id: UUID, error: str, deps: PublishDependencies
 ) -> None:
+    with deps.session_factory() as session:
+        task_pk = session.scalar(
+            select(VideoPublishTask.id).where(VideoPublishTask.public_id == task_id)
+        )
+        attempt_id = (
+            session.scalar(
+                select(VideoPublishAttempt.id)
+                .where(
+                    VideoPublishAttempt.task_id == task_pk,
+                    VideoPublishAttempt.status.in_(
+                        [
+                            AttemptStatus.CREATED.value,
+                            AttemptStatus.SUBMITTING.value,
+                            AttemptStatus.QUEUED.value,
+                            AttemptStatus.RUNNING.value,
+                            AttemptStatus.UNKNOWN.value,
+                        ]
+                    ),
+                )
+                .order_by(VideoPublishAttempt.sequence_no.desc())
+                .limit(1)
+            )
+            if task_pk is not None
+            else None
+        )
     try:
         _apply_publish_command(
             deps,
@@ -773,6 +797,7 @@ async def _mark_unexpected(
                 max_attempts=deps.max_attempts,
                 message=sanitize_text(error),
             ),
+            attempt_id=attempt_id,
         )
     except LeaseLost:
         return
@@ -890,7 +915,10 @@ async def _execute_cleanup(work: CleanupWork, deps: PublishDependencies) -> None
             spool_cleanup,
         )
         await run(
-            "object", lambda: asyncio.to_thread(deps.store.remove, work.object_key)
+            "object",
+            lambda: asyncio.to_thread(
+                deps.store.remove, work.object_key, work.object_etag
+            ),
         )
         await asyncio.to_thread(
             finish_cleanup_work, deps.session_factory, token, errors
@@ -901,7 +929,11 @@ async def _execute_cleanup(work: CleanupWork, deps: PublishDependencies) -> None
 
 
 async def _remove_spool(path: Path) -> None:
-    await asyncio.to_thread(path.unlink, missing_ok=True)
+    part = path.with_suffix(path.suffix + ".part")
+    for managed_path in (path, part):
+        await asyncio.to_thread(managed_path.unlink, missing_ok=True)
+        if managed_path.exists():
+            raise OSError(f"managed spool residue remains: {managed_path.name}")
     with contextlib.suppress(FileNotFoundError):
         await asyncio.to_thread(path.parent.rmdir)
 

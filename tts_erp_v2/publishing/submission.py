@@ -55,13 +55,46 @@ def configured_bucket() -> str:
     return os.environ.get("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video").strip()
 
 
-def upload_expires_at(store: VideoObjectStore) -> datetime:
+def upload_expires_at(
+    store: VideoObjectStore, *, database_time: datetime | None = None
+) -> datetime:
+    """Return the DB-anchored cleanup fence for one issued PUT ticket."""
     expiry = getattr(store, "default_expiry", None)
     if not isinstance(expiry, timedelta):
         expiry = timedelta(
             seconds=int(os.environ.get("TIKTOK_PUBLISH_UPLOAD_TTL_SECONDS", "900"))
         )
-    return datetime.now(UTC) + expiry
+    return (database_time or datetime.now(UTC)) + expiry
+
+
+def _issue_upload_ticket(
+    session: Session, task: VideoPublishTask, store: VideoObjectStore
+) -> tuple[str, datetime]:
+    """Persist the ticket expiry before exposing its external PUT capability."""
+    # URL creation is local and remains unobservable until this function returns.
+    # Anchor the persisted fence after signing so cleanup cannot run before the
+    # SDK-issued URL's lifetime ends.
+    url = _presign_put(store, task.object_key, task.content_type)
+    now = database_now(session)
+    expires_at = upload_expires_at(store, database_time=now)
+    task.object_upload_expires_at = max(
+        filter(None, (task.object_upload_expires_at, expires_at))
+    )
+    task.row_version += 1
+    session.commit()
+    return url, expires_at
+
+
+def refresh_upload_ticket(
+    session: Session, task_id: UUID, store: VideoObjectStore
+) -> tuple[VideoPublishTask, str, datetime]:
+    task = get_task(session, task_id, lock=True)
+    if task is None:
+        raise LookupError("TASK_NOT_FOUND")
+    if task.stage != TaskStage.AWAITING_UPLOAD.value:
+        raise ValueError("TASK_ACTION_NOT_ALLOWED")
+    url, expires_at = _issue_upload_ticket(session, task, store)
+    return task, url, expires_at
 
 
 class TaskConflict(ValueError):
@@ -160,11 +193,12 @@ def create_upload_ticket(
             raise ValueError("IDEMPOTENCY_PAYLOAD_MISMATCH")
         if existing.stage != TaskStage.AWAITING_UPLOAD.value:
             return existing, "", True
-        upload_url = _presign_put(store, existing.object_key, existing.content_type)
+        upload_url, _expires_at = _issue_upload_ticket(session, existing, store)
         return existing, upload_url, True
     task_id = uuid4()
-    key = f"video-publish/{datetime.now(UTC):%Y/%m}/{task_id}/{object_filename}"
+    generation = uuid4()
     now = database_now(session)
+    key = f"video-publish/{now:%Y/%m}/{task_id}/{generation}/{object_filename}"
     task = VideoPublishTask(
         public_id=task_id,
         client_request_id=command.client_request_id,
@@ -177,6 +211,7 @@ def create_upload_ticket(
         size_bytes=command.size_bytes,
         object_bucket=getattr(store, "bucket", _BUCKET),
         object_key=key,
+        object_generation=generation,
         status=TaskStatus.PENDING.value,
         stage=TaskStage.AWAITING_UPLOAD.value,
         stage_started_at=now,
@@ -213,18 +248,15 @@ def create_upload_ticket(
             raise ValueError("IDEMPOTENCY_PAYLOAD_MISMATCH") from None
         if winner.stage != TaskStage.AWAITING_UPLOAD.value:
             return winner, "", True
-        return (
-            winner,
-            _presign_put(store, winner.object_key, winner.content_type),
-            True,
-        )
+        upload_url, _expires_at = _issue_upload_ticket(session, winner, store)
+        return winner, upload_url, True
     emit_publish_event(
         "publish_task_created",
         task_id=task.public_id,
         stage=task.stage,
         outcome=task.status,
     )
-    upload_url = _presign_put(store, key, command.content_type)
+    upload_url, _expires_at = _issue_upload_ticket(session, task, store)
     return task, upload_url, False
 
 
@@ -300,8 +332,15 @@ def replace_upload(session: Session, task_id: UUID) -> VideoPublishTask:
     if not replace_upload_allowed(task):
         raise ValueError("RETRY_BUDGET_EXHAUSTED")
     now = database_now(session)
+    generation = uuid4()
     task.status = TaskStatus.PENDING.value
     set_task_stage(task, TaskStage.AWAITING_UPLOAD, now=now)
+    task.object_generation = generation
+    task.object_key = (
+        f"video-publish/{now:%Y/%m}/{task.public_id}/{generation}/"
+        f"{task.object_filename}"
+    )
+    task.object_upload_expires_at = None
     task.object_uploaded_at = None
     task.object_deleted_at = None
     task.object_etag = None
@@ -342,7 +381,9 @@ def cancel_task(
     task.completed_at = now
     task.row_version += 1
     release_lease(task)
-    task.object_cleanup_next_attempt_at = now
+    task.object_cleanup_next_attempt_at = max(
+        filter(None, (now, task.object_upload_expires_at))
+    )
     session.commit()
     return task
 

@@ -71,6 +71,9 @@ class VideoPublishTask(Base):
             "AND publish_budget_used <= attempt_count",
             name="video_publish_task_budget_check",
         ),
+        UniqueConstraint(
+            "object_generation", name="uq_video_publish_object_generation"
+        ),
         Index(
             "ix_video_publish_queue",
             "next_attempt_at",
@@ -136,6 +139,12 @@ class VideoPublishTask(Base):
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     object_bucket: Mapped[str] = mapped_column(Text, nullable=False)
     object_key: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    object_generation: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), nullable=False, server_default=text("gen_random_uuid()")
+    )
+    object_upload_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     object_etag: Mapped[str | None] = mapped_column(Text)
     object_sha256: Mapped[str | None] = mapped_column(Text)
     object_uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -296,6 +305,11 @@ class VideoPublishAttempt(Base):
     prompt_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
     device_serial: Mapped[str] = mapped_column(Text, nullable=False)
     device_path: Mapped[str | None] = mapped_column(Text)
+    target_app_package: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'com.zhiliaoapp.musically'"),
+    )
     artemis_output: Mapped[dict | None] = mapped_column(JSONB)
     artemis_error: Mapped[str | None] = mapped_column(Text)
     steps_count: Mapped[int | None] = mapped_column(Integer)

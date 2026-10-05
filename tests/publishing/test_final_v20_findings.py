@@ -122,7 +122,7 @@ async def test_spool_is_owned_before_download_rename_and_object_loss_recovery(
                 raise asyncio.CancelledError
             raise ObjectNotFound("TEST object lost after crash")
 
-        def remove(self, _key):
+        def remove(self, _key, _expected_etag=None):
             return None
 
     class Adb:

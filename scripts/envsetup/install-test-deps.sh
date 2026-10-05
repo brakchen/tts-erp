@@ -43,7 +43,10 @@ while [[ $# -gt 0 ]]; do
     --dry-run) DRY_RUN=1; shift ;;
     --check)   CHECK_ONLY=1; shift ;;
     --skip-apt) SKIP_APT=1; shift ;;
-    -h|--help) sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)
+      awk 'NR == 1 { next } /^set -euo pipefail$/ { exit } { sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"
+      exit 0
+      ;;
     *) echo "未知参数: $1（用 -h 看全部选项）" >&2; exit 2 ;;
   esac
 done

@@ -27,7 +27,7 @@ class VideoObjectStore(Protocol):
     def stat(self, key: str) -> dict: ...
     def download(self, key: str, destination: Path, expected_etag: str) -> str: ...
     def check_available(self) -> None: ...
-    def remove(self, key: str) -> None: ...
+    def remove(self, key: str, expected_etag: str | None = None) -> None: ...
 
 
 class MinioVideoStore:
@@ -95,5 +95,14 @@ class MinioVideoStore:
         if not self._client._sdk.bucket_exists(self._client.bucket):
             raise RuntimeError("PUBLISH_BUCKET_UNAVAILABLE")
 
-    def remove(self, key: str) -> None:
+    def remove(self, key: str, expected_etag: str | None = None) -> None:
+        if expected_etag:
+            try:
+                metadata = self._client.stat(key)
+            except ObjectNotFound:
+                return
+            actual = str(metadata.get("etag") or "").strip().strip('"')
+            expected = expected_etag.strip().strip('"')
+            if not actual or actual != expected:
+                raise ObjectVersionMismatch("CLEANUP_OBJECT_VERSION_MISMATCH")
         self._client.remove(key)

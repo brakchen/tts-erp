@@ -19,7 +19,7 @@
    ```
    `scripts/regen_schema.py` 只读不写库；它剥掉序列/`\restrict` 等噪音、给
    `CREATE TABLE`/`CREATE FUNCTION` 加 `IF NOT EXISTS`，使快照可重复执行。
-2. **生成源必须在当前 alembic head**（当前 head：`0064_publish_spool_ownership`）：
+2. **生成源必须在当前 alembic head**（当前 head：`0065_publish_generation_identity`）：
    ```bash
    docker exec postgres psql -U postgres -tAc "SELECT version_num FROM alembic_version" -d tts_erp_test_template
    ```
@@ -30,7 +30,7 @@
 4. 历史漂移教训（2026-08-25）：手维护的 schema.sql 曾漏 7 张表、列名写错，
    healthz/sync/db 三处互相矛盾——**只有"生成 + 同步"这条路是可靠的**。
 
-## 3. 数据结构索引（截至 migration 0064）
+## 3. 数据结构索引（截至 migration 0065）
 
 领域模型与表间关系见 [`docs/architecture/data-model-target-v3.md`](../architecture/data-model-target-v3.md)；
 「业务概念 ↔ 物理表字段」映射见 [`docs/business/spu-profitability.md`](../business/spu-profitability.md) 附录 A；
@@ -98,8 +98,8 @@
 [`docs/design/api-key-auth-design.md`](../design/api-key-auth-design.md)）。
 
 ### publishing —— TikTok 视频发布（3 表）
-`video_publish_tasks` 保存上传对象身份、任务状态、publish/cleanup 双 owner lease、下载副作用前登记的 `spool_path` 与三类资源清理状态；
-`video_publish_attempts` 是 append-only Artemis publish/verify 审计记录，`task_id / sequence_no / kind / related_attempt_id / artemis_session_id` 为不可变身份；
+`video_publish_tasks` 保存每次上传的 generation/key/PUT-ticket expiry、任务状态、publish/cleanup 双 owner lease、下载副作用前登记的 `spool_path` 与三类资源清理状态；
+`video_publish_attempts` 是 append-only Artemis publish/verify 审计记录，关系/session、Prompt、设备路径/序列号与 app package 构成不可变 submission identity；
 `worker_heartbeats` 保存发布 Worker 的受控 readiness 与设备探测状态。契约见
 [`docs/design/tiktok-video-publish.md`](../design/tiktok-video-publish.md)。
 

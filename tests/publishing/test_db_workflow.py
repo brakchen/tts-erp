@@ -146,15 +146,19 @@ def _add_verify_attempt(
     status: str = AttemptStatus.CREATED.value,
     prompt_snapshot: str = "TEST",
     output: dict | None = None,
+    publish_status: str = AttemptStatus.FAILED.value,
+    publish_prompt_snapshot: str = "TEST_PUBLISH",
+    publish_output: dict | None = None,
 ) -> VideoPublishAttempt:
     publish = VideoPublishAttempt(
         sequence_no=1,
         kind="publish",
-        status=AttemptStatus.FAILED.value,
+        status=publish_status,
         artemis_session_id=uuid4(),
         prompt_version="TEST_PUBLISH",
-        prompt_snapshot="TEST_PUBLISH",
+        prompt_snapshot=publish_prompt_snapshot,
         device_serial="TEST_device",
+        artemis_output=publish_output,
     )
     task.attempts.append(publish)
     session.add(task)
@@ -279,7 +283,7 @@ class _CleanupStore:
         self.fail = fail
         self.calls = 0
 
-    def remove(self, _key: str) -> None:
+    def remove(self, _key: str, _expected_etag: str | None = None) -> None:
         self.calls += 1
         if self.fail:
             raise RuntimeError("TEST_OBJECT_BUSY")
@@ -1550,7 +1554,7 @@ async def test_queued_worker_reaches_staging_and_terminal_success(
             path.write_bytes(b"TEST")
             return "sha256-test"
 
-        def remove(self, _key: str) -> None:
+        def remove(self, _key: str, _expected_etag: str | None = None) -> None:
             pass
 
     class Adb:
@@ -1941,11 +1945,10 @@ def test_diagnostics_are_admin_only_and_redacted_by_default(
         status=AttemptStatus.SUCCESS.value,
         prompt_snapshot="SECRET_VERIFY_PROMPT",
         output={"verdict": "published"},
+        publish_status=AttemptStatus.SUCCESS.value,
+        publish_prompt_snapshot="SECRET_PROMPT",
+        publish_output={"secret": "SECRET_OUTPUT"},
     )
-    publish_attempt = min(task.attempts, key=lambda attempt: attempt.sequence_no)
-    publish_attempt.status = AttemptStatus.SUCCESS.value
-    publish_attempt.prompt_snapshot = "SECRET_PROMPT"
-    publish_attempt.artemis_output = {"secret": "SECRET_OUTPUT"}
     db_session.flush()
     with pytest.raises(HTTPException) as denied:
         detail(

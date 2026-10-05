@@ -159,7 +159,9 @@ class CleanupWork:
     device_serial: str
     device_path: str | None
     spool_path: str | None
+    object_generation: UUID
     object_key: str
+    object_etag: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,7 +217,11 @@ def _cleanup_pending_values(
     for name, enabled in selected.items():
         if enabled and getattr(task, f"{name}_cleanup_status") == "not_started":
             values[f"{name}_cleanup_status"] = "pending"
-            values[f"{name}_cleanup_next_attempt_at"] = now
+            values[f"{name}_cleanup_next_attempt_at"] = (
+                max(filter(None, (now, task.object_upload_expires_at)))
+                if name == "object"
+                else now
+            )
     return values
 
 
@@ -275,6 +281,7 @@ def _new_publish_attempt(
         ),
         device_serial=task.target_device_serial,
         device_path=task.device_path,
+        target_app_package=task.target_app_package,
         started_at=now,
     )
     session.add(attempt)
@@ -322,6 +329,7 @@ def _new_verify_attempt(
         ),
         device_serial=task.target_device_serial,
         device_path=task.device_path,
+        target_app_package=task.target_app_package,
     )
     session.add(attempt)
     session.flush()
@@ -527,28 +535,20 @@ def commit_publish_transition(
                 last_error_message=code,
             )
             task_values.update(_stage_values(task, TaskStage.DONE.value, now))
-            if command.reason == "missing":
-                task_values.update(
-                    object_deleted_at=now,
-                    object_cleanup_status="succeeded",
-                    object_cleanup_error=None,
-                    object_cleanup_next_attempt_at=None,
-                    cleanup_intent=(
-                        CleanupIntent.PRESERVE_STATE.value
-                        if _has_outstanding_cleanup(task)
-                        else CleanupIntent.NONE.value
-                    ),
-                )
-            else:
-                task_values.update(
-                    cleanup_intent=CleanupIntent.PRESERVE_STATE.value,
-                    object_cleanup_status="pending",
-                    object_cleanup_error=None,
-                    object_cleanup_next_attempt_at=now,
-                    cleanup_lease_owner=None,
-                    cleanup_lease_expires_at=None,
-                    cleanup_heartbeat_at=None,
-                )
+            # Missing now is not permanent while a previously issued PUT ticket
+            # can still complete. Every recovery path remains tracked until the
+            # persisted generation expiry and one idempotent selector deletion.
+            task_values.update(
+                cleanup_intent=CleanupIntent.PRESERVE_STATE.value,
+                object_cleanup_status="pending",
+                object_cleanup_error=None,
+                object_cleanup_next_attempt_at=max(
+                    filter(None, (now, task.object_upload_expires_at))
+                ),
+                cleanup_lease_owner=None,
+                cleanup_lease_expires_at=None,
+                cleanup_heartbeat_at=None,
+            )
         elif isinstance(command, AdmissionRejected):
             if attempt is None:
                 raise LeaseLost(token.task_id)
@@ -600,6 +600,32 @@ def commit_publish_transition(
                         max_attempts=command.max_attempts,
                         retry_stage=command.retry_stage,
                         message=command.message,
+                    )
+                )
+            elif command.action == "unexpected" and attempt is not None:
+                # Keep the immutable session queryable. Recovery leases this same
+                # running task and polls the same attempt instead of creating one.
+                attempt_values = {
+                    "status": AttemptStatus.UNKNOWN.value,
+                    "artemis_error": sanitize_text(command.message or command.code),
+                    "last_polled_at": now,
+                }
+                task_values.update(
+                    status=TaskStatus.RUNNING.value,
+                    last_error_code="UNEXPECTED_WORKER_FAILURE",
+                    last_error_message=sanitize_text(command.message or command.code),
+                    completed_at=None,
+                    lease_owner=None,
+                    lease_expires_at=None,
+                    heartbeat_at=None,
+                )
+                task_values.update(
+                    _stage_values(
+                        task,
+                        TaskStage.VERIFYING.value
+                        if attempt.kind == AttemptKind.VERIFY.value
+                        else TaskStage.WAITING_ARTEMIS.value,
+                        now,
                     )
                 )
             else:
@@ -1071,7 +1097,9 @@ def claim_cleanup_work(
                 VideoPublishTask.target_device_serial,
                 VideoPublishTask.device_path,
                 VideoPublishTask.spool_path,
+                VideoPublishTask.object_generation,
                 VideoPublishTask.object_key,
+                VideoPublishTask.object_etag,
                 candidate.c.device_due,
                 candidate.c.spool_due,
                 candidate.c.object_due,
@@ -1102,7 +1130,9 @@ def claim_cleanup_work(
             device_serial=row.target_device_serial,
             device_path=row.device_path,
             spool_path=row.spool_path,
+            object_generation=row.object_generation,
             object_key=row.object_key,
+            object_etag=row.object_etag,
         )
         session.commit()
         return work
@@ -1542,7 +1572,9 @@ def schedule_retention_cleanup(
         task.cleanup_intent = CleanupIntent.PRESERVE_STATE.value
         task.object_cleanup_status = "pending"
         task.object_cleanup_error = None
-        task.object_cleanup_next_attempt_at = now
+        task.object_cleanup_next_attempt_at = max(
+            filter(None, (now, task.object_upload_expires_at))
+        )
         task.cleanup_lease_owner = None
         task.cleanup_lease_expires_at = None
         task.cleanup_heartbeat_at = None

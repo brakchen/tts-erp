@@ -35,13 +35,13 @@ Python 3.14 · FastAPI + uvicorn（`:9877`）· SQLAlchemy 2 + psycopg3 · Postg
 - 前缀取自 `TTS_ERP_EXTERNAL_PREFIX`，当前 `/tts`（仅在 `app.py` 构建时读一次 → `FastAPI(root_path=...)`；middleware/handlers 一律从 `scope["root_path"]` 派生）
 - **nginx 契约（2026-09-28 起）**：`/tts/` location 的 `proxy_pass` **不带尾斜杠**，完整前缀透传；app 侧 AuthMiddleware 会把不带前缀的请求归一化为带前缀（对两种转发模式都鲁棒），路由分类/匹配统一在 route-relative 路径上进行
 
-## 3. 测试 DB 隔离（2026-09-07）
+## 3. 测试 DB 隔离（2026-10-05）
 
-- **测试库**：`tts_erp_v3_test`（专用 test db，已 schema 一致）
-- **生产库**：`tts_erp`（仅 systemd API + 人工 dev 连接，永不被测试污染）
-- **隔离机制**：`.env.test`（gitignored）= `.env` 的 dbname 替身；`scripts/test.sh` 启动时 source 它
-- **数据导入**：`bash scripts/import_prod_to_test.sh --yes` 可按需把 prod 数据搬进 test db（multi-pass FK 处理，默认含 credentials 让 FK 走得通，prod Fernet key 不变所以仍可解密）
-- **安全护栏**：tests/conftest.py 检测到 `TTS_ERP_DB_URL` 指向 prod-shape dbname（`tts_erp` / `tts_erp_prod`）会往 stderr 打 WARNING；scripts/test.sh 会在 .env.test 缺失时直接退出
+- **唯一标准入口**：`bash scripts/test_isolated.sh <domain>`。测试入口从 `tts_erp_test_template` 克隆每次运行独占的 `tts_erp_test_<session>_<run>` 临时数据库，结束后删除该 clone；并发运行不会共享或清除彼此数据。
+- **模板刷新**：schema/migration 变化后执行 `bash scripts/test_isolated.sh --refresh-template fast`；刷新只把生产 schema 形状导入测试模板并升级到当前 Alembic head，不复制生产业务数据。
+- **硬生产护栏**：wrapper、底层 runner 与 pytest fixture 都拒绝 `tts_erp`、`tts_erp_prod` 等 production-shaped 数据库；命中即非零退出，不允许 warning-only 继续。
+- **禁止绕过**：不得直接调用底层 test runner 或 pytest；不得把长寿命共享测试库作为常规路径。只有隔离 clone 工具不可用且经明确决定时，才可按 `docs/guides/agent-testing.md` 的加锁降级流程执行。
+- **配置**：`.env.test` 只提供测试形连接基线；实际运行由隔离 wrapper 注入 clone 的 `TTS_ERP_DB_URL_TEST`。完整机制与故障处理见 `docs/guides/agent-testing.md`。
 
 ## 4. 数据库维护待办
 

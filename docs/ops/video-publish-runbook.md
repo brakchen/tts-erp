@@ -6,14 +6,14 @@
 
 ## 部署顺序
 
-1. 使用测试形数据库验证 video-publish migrations `0053`–`0063`，再由运维执行生产迁移。规范命令为 `bash scripts/test_isolated.sh --refresh-template fast tests/publishing`；禁止直接运行 pytest、禁止将测试指向生产形数据库，也不得把“因 schema 缺失而全部 skipped”当作迁移证据。PostgreSQL 18 服务端必须使用不早于服务端主版本的 `pg_dump`；仓库测试工具默认以 `PG_DOCKER=postgres` 直接使用服务端容器内客户端，因此规范命令无需临时 PATH shim。只有显式设置 `PG_DOCKER=` 时才使用宿主机客户端。
+1. 使用测试形数据库验证 video-publish migrations `0053`–`0065`，再由运维执行生产迁移。规范命令为 `bash scripts/test_isolated.sh --refresh-template fast tests/publishing`；禁止直接运行 pytest、禁止将测试指向生产形数据库，也不得把“因 schema 缺失而全部 skipped”当作迁移证据。PostgreSQL 18 服务端必须使用不早于服务端主版本的 `pg_dump`；仓库测试工具默认以 `PG_DOCKER=postgres` 直接使用服务端容器内客户端，因此规范命令无需临时 PATH shim。只有显式设置 `PG_DOCKER=` 时才使用宿主机客户端。
    `0058` 会在加约束前把旧的 pending/queued、pending/waiting_device 清理状态
    回填为显式 cleanup intent；含对象残留的歧义任务转为
    `needs_review/done + preserve_state` 并取消对象删除；取消后无任何待清理资源的终态行会归一为 `cleanup_intent=none`，以便人工核验。`0059` 回填当前阶段起始时间。
    `0060` 对齐基础索引/唯一约束，并约束 publish/verify 的 `related_attempt_id`
    形状及三个 cleanup status 枚举。`0061` 回填追加式 `attempt_count` 与独立
    `publish_budget_used`，加入同 task/publish related-attempt trigger、DESC attempt
-   索引和 Worker 设备实际探测字段。`0062` 将对象 key 的安全文件名与浏览器原 basename 分开，并通过 trigger 固化 attempt 的 `task_id/sequence_no/kind/related_attempt_id/artemis_session_id` 审计身份。`0063` 撤销历史自动 operator 授权并确保 admin 授权存在；operator 只能在最终人工验证后手工授权。上线前必须修复任何不满足约束的历史行。
+   索引和 Worker 设备实际探测字段。`0062` 将对象 key 的安全文件名与浏览器原 basename 分开，并通过 trigger 固化 attempt 的核心关系身份。`0063` 撤销历史自动 operator 授权并确保 admin 授权存在；operator 只能在最终人工验证后手工授权。`0064` 持久化下载前 spool ownership；`0065` 加入每次上传 generation、PUT ticket expiry、attempt app-package 快照，并把完整 Artemis submission tuple 纳入不可变 trigger。上线前必须修复任何不满足约束的历史行。
    生产执行前停止领取新任务、确认 worker 心跳停止，并按迁移顺序协调 API/worker 重启。
 2. 创建私有 `tiktok-video` bucket，并限制 `video-publish/*` 的 Get/Put/Delete/Head 权限；配置来源站点 PUT/HEAD CORS。
 3. 创建 `TTS_ERP_PUBLISH_SPOOL_DIR`（0700），设置 `ARTEMIS_BASE_URL`、`ARTEMIS_DEVICE_SERIAL`、`ARTEMIS_APP_PACKAGE`、`TIKTOK_PUBLISH_MINIO_BUCKET=tiktok-video` 和 MinIO 凭据。`MINIO_BUCKET` 必须与专用 bucket 相同；未配置设备序列号或 bucket 不匹配时 API 拒绝创建任务。按需覆盖 `ARTEMIS_PROFILE=pro`、`ARTEMIS_VERIFICATION_LEVEL=strict`、`PUBLISH_POLL_INTERVAL_SECONDS=2`、`PUBLISH_TASK_LEASE_SECONDS=30`、`PUBLISH_WORKER_HEARTBEAT_SECONDS=5`、`TIKTOK_PUBLISH_MAX_CAPTION_CHARS=4000` 与 `TIKTOK_PUBLISH_FAILED_RETENTION_DAYS=30`；API config 返回生效的非敏感 Artemis/轮询配置供运维核对。
@@ -27,7 +27,8 @@
 - confirm 后对象 ETag 已冻结；Worker 使用 `If-Match` 条件下载。`CONFIRMED_OBJECT_REPLACED` / `CONFIRMED_OBJECT_MISSING` 会在 ADB staging 和 attempt 创建前安全失败，禁止绕过后直接发布。
 - ADB push 前同时扫描专用相册文件系统与 MediaStore；任意受管 `tts_erp_*.mp4` 残留都会令任务进入 `waiting_device` 且不创建 Artemis attempt。cleanup selector 只删除数据库登记的精确 `device_path`，删除/重扫对应 MediaStore entry 并轮询至该路径不可见；未确认消失时保持 `device_cleanup_status=failed`。禁止通配删除或手工删除未知路径。
 - 结果不确定：必须先 verify；一次自动 verify 的 `not_published` 也只会进入 `needs_review/done`，绝不自动重新发布。`needs_review` 禁止普通 retry，只能由用户之后显式再次核验。
-- 设备文件、spool、MinIO 是独立清理状态。Worker 在任何下载副作用前先以 publish owner/version fence 持久化精确 `spool_path` 与 `spool_cleanup_status=pending`；文件尚不存在时 cleanup 也幂等成功。成功任务的清理失败只执行“重试清理”，不能改写业务成功。
+- 设备文件、spool、MinIO 是独立清理状态。Worker 在任何下载副作用前先以 publish owner/version fence 持久化精确 `spool_path` 与 `spool_cleanup_status=pending`；该 ownership 同时覆盖 exact final 与 exact sibling `.part`，cleanup 不用 wildcard 并逐个验证不存在。文件尚不存在时 cleanup 也幂等成功。成功任务的清理失败只执行“重试清理”，不能改写业务成功。
+- 每次初始上传/replacement 使用全新 `object_generation/object_key`，并保存该 generation 所有已签发 PUT URL 的最晚 expiry。取消、保留期或 replacement cleanup 只能在 PostgreSQL 时间到达 expiry 后领取，work 固定退休 generation/key/确认 ETag；过期 stale cleaner 删除旧 key，不能删除后续 replacement。
 - 设备清理失败时，Worker 会阻止后续任务领取/进入 staging，并按退避自动领取到期的成功任务重试；对象和 spool 清理失败也会独立按退避自动重试，不改变业务成功。任务详情的“重试清理”仅用于在无活动清理租约时立即提前触发重试；取消任务的对象清理失败同样保留 cancelled 状态并可恢复。
 - 页面智能刷新以 API 返回的未过滤运行/排队摘要决定节奏，不会因切换到成功/失败筛选而放慢待处理任务；awaiting-upload 草稿不计入排队，选择“关闭”时运行轨道显示“自动刷新已暂停”，重新启用后恢复轮询。
 - 上传中的“取消上传”只 abort 当前 XHR，不确认任务；草稿保留原 clientRequestId，可通过“继续上传”恢复。
@@ -36,7 +37,7 @@
 - `awaiting_upload` 超过 24 小时会自动转为 `cancelled/done` 并进入受保护的对象清理；`failed` 对象按 `TIKTOK_PUBLISH_FAILED_RETENTION_DAYS`（默认 30 天）保留。`needs_review` 对象不参加失败保留期删除，必须先完成人工判定。
 - Worker 启动时只扫描 spool 根目录下一层 UUID 目录；数据库证明对应任务已终态且完成超过 24 小时时，扫描器只原子调度/重开 `spool` 清理，随后由 cleanup selector 领取租约并执行删除。扫描器本身从不删除。未知目录、活跃任务目录、有效清理租约目录和无法读取数据库的目录全部保留；禁止手工 `rm -rf` spool 根目录。
 - Artemis output/error 在持久化前递归限深、限项、限长并清除 token、Authorization、cookie、secret、凭据和签名 URL 查询参数。日志只记录 task/attempt/stage/session 标识、稳定结果枚举、始终缺至少一个字符的设备掩码和计数，不记录文案、原始文件名、完整本地路径、Prompt、token 或原始 Artemis output。具备页面权限的只读调用方可用 `GET /v2/video-publish/metrics` 查看其可见范围内的 tasks-by-status、attempts-by-kind/status、queue/running/needs-review/cleanup、`currentStageAgeSeconds` 与 Worker heartbeat age 当前 gauge；admin 查看全局任务聚合。已完成 stage 时长只由 `publish_transition.duration_ms` 供外部 histogram 聚合；终态当前年龄不得称为 duration。指标响应不含文案、Prompt、output、完整设备 serial 或凭据。
-- 回滚时先移除页面权限、停止领取新任务；保留 running/needs_review 的对象和审计历史。`0054`–`0059` 的 state-bearing downgrade 在 `publishing.video_publish_tasks` 非空时拒绝执行；只有清空三张 publishing 表并经人工确认才允许回退。不得绕过保护直接删除 cleanup scheduling、owner、intent、lease 或 stage timing 列。`0060` 只移除约束/索引元数据；`0061` 含审计/设备状态字段、`0062` 含文件名语义与 attempt identity trigger，publishing 状态非空时拒绝 downgrade。`0063` downgrade 不会自动扩大 operator 权限；`0064` 在任一 `spool_path` 已登记时拒绝丢弃 side-effect ownership。它们仍须先在测试形数据库完成 roundtrip。
+- 回滚时先移除页面权限、停止领取新任务；保留 running/needs_review 的对象和审计历史。`0054`–`0059` 的 state-bearing downgrade 在 `publishing.video_publish_tasks` 非空时拒绝执行；只有清空三张 publishing 表并经人工确认才允许回退。不得绕过保护直接删除 cleanup scheduling、owner、intent、lease 或 stage timing 列。`0060` 只移除约束/索引元数据；`0061` 含审计/设备状态字段、`0062` 含文件名语义与 attempt identity trigger，publishing 状态非空时拒绝 downgrade。`0063` downgrade 不会自动扩大 operator 权限；`0064` 在任一 `spool_path` 已登记时拒绝丢弃 side-effect ownership；`0065` 在存在 task/attempt 时拒绝丢弃 generation、ticket expiry 或完整 attempt identity。它们仍须先在测试形数据库完成 roundtrip。
 
 ## 浏览器与无障碍验收
 

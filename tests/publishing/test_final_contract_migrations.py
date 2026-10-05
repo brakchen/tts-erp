@@ -105,6 +105,60 @@ def test_0064_spool_ownership_round_trip_and_downgrade_guard(db_engine) -> None:
             transaction.rollback()
 
 
+def test_0065_generation_identity_round_trip_and_downgrade_guard(db_engine) -> None:
+    migration = _load("0065_publish_generation_identity")
+    assert migration.down_revision == "0064_publish_spool_ownership"
+    with db_engine.connect() as conn:
+        transaction = conn.begin()
+        try:
+            migration.__dict__["op"] = Operations(MigrationContext.configure(conn))
+            migration.downgrade()
+            task_columns = {
+                row["name"]
+                for row in inspect(conn).get_columns(
+                    "video_publish_tasks", schema="publishing"
+                )
+            }
+            attempt_columns = {
+                row["name"]
+                for row in inspect(conn).get_columns(
+                    "video_publish_attempts", schema="publishing"
+                )
+            }
+            assert "object_generation" not in task_columns
+            assert "object_upload_expires_at" not in task_columns
+            assert "target_app_package" not in attempt_columns
+
+            migration.upgrade()
+            task_columns = {
+                row["name"]
+                for row in inspect(conn).get_columns(
+                    "video_publish_tasks", schema="publishing"
+                )
+            }
+            attempt_columns = {
+                row["name"]
+                for row in inspect(conn).get_columns(
+                    "video_publish_attempts", schema="publishing"
+                )
+            }
+            assert {"object_generation", "object_upload_expires_at"} <= task_columns
+            assert "target_app_package" in attempt_columns
+            assert "uq_video_publish_object_generation" in {
+                row["name"]
+                for row in inspect(conn).get_unique_constraints(
+                    "video_publish_tasks", schema="publishing"
+                )
+            }
+            _insert_task(conn)
+            savepoint = conn.begin_nested()
+            with pytest.raises(Exception, match="0065 downgrade refused"):
+                migration.downgrade()
+            savepoint.rollback()
+        finally:
+            transaction.rollback()
+
+
 def test_0061_revision_backfill_and_integrity_metadata(db_engine) -> None:
     migration = _load("0061_publish_safety")
     assert migration.down_revision == "0060_video_publish_invariants"

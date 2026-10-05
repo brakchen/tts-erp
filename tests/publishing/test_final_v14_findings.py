@@ -522,7 +522,7 @@ def test_conditional_download_fails_closed_on_replacement_or_missing(
             "CONFIRMED_OBJECT_REPLACED",
             True,
         ),
-        (ObjectNotFound("TEST/key"), "CONFIRMED_OBJECT_MISSING", False),
+        (ObjectNotFound("TEST/key"), "CONFIRMED_OBJECT_MISSING", True),
     ],
 )
 async def test_dispatch_exposes_replacement_after_confirmed_object_recovery(
@@ -536,7 +536,7 @@ async def test_dispatch_exposes_replacement_after_confirmed_object_recovery(
         def download(self, _key, _destination, _expected_etag):
             raise error
 
-        def remove(self, _key):
+        def remove(self, _key, _expected_etag=None):
             return None
 
     class Adb:

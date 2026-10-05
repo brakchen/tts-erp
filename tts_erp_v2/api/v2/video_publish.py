@@ -47,9 +47,9 @@ from tts_erp_v2.publishing.submission import (
     create_upload_ticket,
     max_caption_chars,
     max_video_bytes,
+    refresh_upload_ticket,
     replace_upload,
     retry_task,
-    upload_expires_at,
 )
 from tts_erp_v2.storage.minio_client import MinioClient
 
@@ -682,7 +682,7 @@ def create_task(
                 "method": "PUT",
                 "url": url,
                 "headers": {"Content-Type": body.content_type},
-                "expiresAt": upload_expires_at(store),
+                "expiresAt": task.object_upload_expires_at,
             },
         }
     )
@@ -707,7 +707,9 @@ def refresh_upload_url(
             ),
         )
     try:
-        upload_url = store.presign_put(task.object_key, task.content_type)
+        task, upload_url, expires_at = refresh_upload_ticket(
+            session, task.public_id, store
+        )
     except Exception as exc:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -725,7 +727,7 @@ def refresh_upload_url(
             "method": "PUT",
             "url": upload_url,
             "headers": {"Content-Type": task.content_type},
-            "expiresAt": upload_expires_at(store),
+            "expiresAt": expires_at,
         },
     }
 
@@ -997,8 +999,14 @@ def metrics(
         .filter(VideoPublishTask.device_cleanup_status == "failed")
         .label("device_failed"),
         func.count()
+        .filter(VideoPublishTask.spool_cleanup_status == "pending")
+        .label("spool_pending"),
+        func.count()
         .filter(VideoPublishTask.spool_cleanup_status == "failed")
         .label("spool_failed"),
+        func.count()
+        .filter(VideoPublishTask.object_cleanup_status == "pending")
+        .label("object_pending"),
         func.count()
         .filter(VideoPublishTask.object_cleanup_status == "failed")
         .label("object_failed"),
@@ -1076,7 +1084,9 @@ def metrics(
         "cleanup": {
             "devicePending": int(row.device_pending),
             "deviceFailed": int(row.device_failed),
+            "spoolPending": int(row.spool_pending),
             "spoolFailed": int(row.spool_failed),
+            "objectPending": int(row.object_pending),
             "objectFailed": int(row.object_failed),
         },
         "serverTime": datetime.now(UTC),
