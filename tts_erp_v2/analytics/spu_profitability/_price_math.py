@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, Inexact, Rounded, localcontext
+from decimal import (
+    MAX_EMAX,
+    MAX_PREC,
+    MIN_EMIN,
+    Decimal,
+    ROUND_HALF_EVEN,
+    localcontext,
+)
 from typing import Iterable
 
 
@@ -15,19 +22,46 @@ class WeightedPriceSummary:
     observed_line_count: int
 
 
-def _context_precision(
+def _context_parameters(
     prices: list[Decimal], quantities: list[int], total_quantity: int
-) -> int:
-    """Choose precision from inputs, rather than inheriting a caller's context.
+) -> tuple[int, int, int]:
+    """Return precision and exponent bounds derived solely from the inputs.
 
-    Prices are expected to originate from NUMERIC/native-to-CNY values (normally
-    at most a few dozen significant digits). The input-derived floor leaves
-    room for multiplication by large integer quantities, summation carry, and
-    a useful division result without quantizing the returned Decimal.
+    The precision spans every significant decimal position in the weighted
+    products, so adding widely separated finite prices does not discard the
+    smaller term. Values whose required span exceeds the Decimal module's
+    representable context are rejected instead of being silently rounded.
     """
-    max_price_digits = max(len(price.as_tuple().digits) for price in prices)
-    max_quantity_digits = max(len(str(quantity)) for quantity in quantities)
-    return max(80, max_price_digits + max_quantity_digits + len(str(total_quantity)) + 16)
+    nonzero = [price for price in prices if not price.is_zero()]
+    if not nonzero:
+        return 80, 999_999, -999_999
+
+    min_exponent = min(price.as_tuple().exponent for price in nonzero)
+    # Adding the quantity's digit count is conservative for a carry in price*q.
+    max_adjusted_product = max(
+        price.adjusted() + len(str(quantity))
+        for price, quantity in zip(prices, quantities, strict=True)
+        if not price.is_zero()
+    )
+    max_product_digits = max(
+        len(price.as_tuple().digits) + len(str(quantity)) + 1
+        for price, quantity in zip(prices, quantities, strict=True)
+        if not price.is_zero()
+    )
+    precision = max(
+        80,
+        max_adjusted_product - min_exponent + 4,
+        max_product_digits + 16,
+    )
+    if precision > MAX_PREC:
+        raise ValueError("price exponent span exceeds Decimal context capacity")
+
+    # Division by total quantity can move the least significant exponent down.
+    emin = min(-999_999, min_exponent - len(str(total_quantity)) - 4)
+    emax = max(999_999, max_adjusted_product + 4)
+    if emin < MIN_EMIN or emax > MAX_EMAX:
+        raise ValueError("price exponent exceeds Decimal context capacity")
+    return precision, emax, emin
 
 
 def _validate_observation(observation: object) -> tuple[Decimal, int]:
@@ -66,7 +100,8 @@ def summarize_weighted_prices(
     The iterable is consumed once into unique-price buckets. Median ranks are
     resolved against cumulative bucket quantities, and arithmetic runs in a
     private Decimal context sized from the inputs; the ambient context is not
-    changed. No output quantization is performed here.
+    used for precision, rounding, exponent bounds, flags, or traps. No output
+    quantization is performed here.
     """
     buckets: dict[Decimal, int] = {}
     prices: list[Decimal] = []
@@ -85,12 +120,17 @@ def summarize_weighted_prices(
     if not buckets:
         return WeightedPriceSummary(None, None, 0, 0)
 
+    precision, emax, emin = _context_parameters(prices, quantities, total_quantity)
     with localcontext() as context:
-        context.prec = _context_precision(prices, quantities, total_quantity)
-        # A recurring mean is valid; caller trap settings must not turn its
-        # precision-bound representation into an unrelated failure.
-        context.traps[Inexact] = False
-        context.traps[Rounded] = False
+        context.prec = precision
+        context.rounding = ROUND_HALF_EVEN
+        context.Emax = emax
+        context.Emin = emin
+        context.clamp = 0
+        context.clear_flags()
+        for signal in context.traps:
+            context.traps[signal] = False
+
         weighted_sum = sum(
             (price * quantity for price, quantity in buckets.items()),
             Decimal(0),
@@ -105,4 +145,6 @@ def summarize_weighted_prices(
                 + _price_at_rank(buckets, lower_rank + 1)
             ) / Decimal(2)
 
+    if not mean.is_finite() or not median.is_finite():
+        raise ValueError("price arithmetic exceeded Decimal context capacity")
     return WeightedPriceSummary(mean, median, total_quantity, line_count)

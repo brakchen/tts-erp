@@ -1,7 +1,16 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-from decimal import Decimal, getcontext, localcontext
+from decimal import (
+    Decimal,
+    Overflow,
+    ROUND_DOWN,
+    ROUND_HALF_EVEN,
+    ROUND_UP,
+    Subnormal,
+    Underflow,
+    getcontext,
+    localcontext,
+)
 from typing import Iterable
 
 import pytest
@@ -129,6 +138,62 @@ def test_decimal_results_do_not_depend_on_low_ambient_precision() -> None:
 
     assert result.mean_cny == D("2.055555555")
     assert result.median_cny == D("2.055555555")
+
+
+def test_recurring_mean_ignores_ambient_rounding_mode() -> None:
+    results = []
+    for rounding in (ROUND_DOWN, ROUND_UP):
+        with localcontext() as context:
+            context.prec = 12
+            context.rounding = rounding
+            results.append(summarize_weighted_prices([(D("0"), 1), (D("1"), 2)]).mean_cny)
+
+    with localcontext() as context:
+        context.prec = 80
+        context.rounding = ROUND_HALF_EVEN
+        expected = (D("1") * 2) / D(3)
+
+    assert results == [expected, expected]
+
+
+def test_valid_large_price_ignores_restricted_ambient_emax() -> None:
+    with localcontext() as context:
+        context.Emax = 2
+        context.traps[Overflow] = True
+        result = summarize_weighted_prices([(D("1000"), 1)])
+
+    assert result.mean_cny == D("1000")
+
+
+def test_valid_small_price_ignores_restricted_emin_and_subnormal_trap() -> None:
+    with localcontext() as context:
+        context.Emin = -2
+        context.traps[Subnormal] = True
+        context.traps[Underflow] = True
+        result = summarize_weighted_prices([(D("0.001"), 1)])
+
+    assert result.mean_cny == D("0.001")
+
+
+def test_inherited_flags_and_traps_do_not_affect_normal_calculation() -> None:
+    with localcontext() as context:
+        for signal in context.traps:
+            context.traps[signal] = True
+            context.flags[signal] = True
+        result = summarize_weighted_prices([(D("0"), 1), (D("1"), 2)])
+
+    assert result.mean_cny is not None
+    assert result.mean_cny.as_tuple().digits
+
+
+def test_wide_price_exponents_are_not_lost_in_weighted_sum() -> None:
+    with localcontext() as context:
+        context.prec = 256
+        expected = (D("1e100") + D("1e-100")) / D(2)
+
+    result = summarize_weighted_prices([(D("1e100"), 1), (D("1e-100"), 1)])
+
+    assert result.mean_cny == expected
 
 
 def test_result_is_immutable() -> None:
