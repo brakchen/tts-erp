@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from tts_erp_v2.db.constants import PAID_SALES_ORDER_STATUSES
 from tts_erp_v2.db.models.commerce import SalesOrderLinePriceObservation
 from tts_erp_v2.db.models.integration import SyncIssue
 
@@ -85,6 +86,12 @@ def _field(raw: dict[str, Any], name: str) -> tuple[Decimal | None, str, str | N
         value = value.get("amount")
     amount, status = _decimal(value)
     return amount, status, embedded_currency
+
+
+def _parent_payment_status(status: str | None) -> str:
+    if status in PAID_SALES_ORDER_STATUSES:
+        return status
+    return status or UNKNOWN
 
 
 def _canonical_value(raw: dict[str, Any], name: str) -> dict[str, Any]:
@@ -206,7 +213,7 @@ def normalize_price_line(
         effective_quantity=effective_quantity,
         quantity_status=quantity_status,
         line_status_raw=raw.get("display_status") or raw.get("line_status"),
-        parent_payment_status=parent_status or UNKNOWN,
+        parent_payment_status=_parent_payment_status(parent_status),
         gift_status=gift_status,
         original_price_native=original,
         paid_price_native=paid,
