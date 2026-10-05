@@ -31,6 +31,16 @@ def upgrade() -> None:
 def downgrade() -> None:
     # pi-lens-ignore: python-sql-injection
     op.execute(
+        text("""
+        DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM publishing.video_publish_tasks LIMIT 1) THEN
+                RAISE EXCEPTION '0057 downgrade refused: publishing.video_publish_tasks is not empty';
+            END IF;
+        END $$
+        """)
+    )
+    # pi-lens-ignore: python-sql-injection
+    op.execute(
         text(
             "ALTER TABLE publishing.video_publish_tasks DROP COLUMN created_by_key_hash"
         )

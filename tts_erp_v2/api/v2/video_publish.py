@@ -27,6 +27,7 @@ from tts_erp_v2.db.models.publishing import (
     VideoPublishAttempt,
     VideoPublishTask,
 )
+from tts_erp_v2.publishing.diagnostics import sanitize_artemis_output, sanitize_text
 from tts_erp_v2.publishing.domain import allowed_actions, cleanup_retryable_resources
 from tts_erp_v2.publishing.object_store import MinioVideoStore, VideoObjectStore
 from tts_erp_v2.publishing.repository import (
@@ -36,9 +37,12 @@ from tts_erp_v2.publishing.repository import (
 )
 from tts_erp_v2.publishing.submission import (
     CreateCommand,
+    TaskConflict,
     cancel_task,
     confirm_upload,
     create_upload_ticket,
+    max_caption_chars,
+    max_video_bytes,
     replace_upload,
     retry_task,
     upload_expires_at,
@@ -73,7 +77,7 @@ class CreateIn(BaseModel):
     filename: str = Field(min_length=1, max_length=255)
     content_type: str = Field(alias="contentType")
     size_bytes: int = Field(alias="sizeBytes", gt=0)
-    caption: str = Field(max_length=4000)
+    caption: str
 
     model_config = {"populate_by_name": True}
 
@@ -85,7 +89,7 @@ class ActionIn(BaseModel):
 
 
 def _attempt(a: VideoPublishAttempt, *, diagnostics: bool = False) -> dict:
-    output = a.artemis_output if diagnostics else None
+    output = sanitize_artemis_output(a.artemis_output) if diagnostics else None
     result = {
         "sequenceNo": a.sequence_no,
         "kind": a.kind,
@@ -94,7 +98,7 @@ def _attempt(a: VideoPublishAttempt, *, diagnostics: bool = False) -> dict:
         "stepsCount": a.steps_count,
         "retryClassification": a.retry_classification,
         "retrySafe": a.retry_safe,
-        "error": a.artemis_error,
+        "error": sanitize_text(a.artemis_error) if a.artemis_error else None,
         "startedAt": a.started_at,
         "finishedAt": a.finished_at,
     }
@@ -129,13 +133,28 @@ def _snapshot(
         "stage": task.stage,
         "operationalStage": operational_stage,
         "stageStartedAt": task.stage_started_at,
+        "operationalStageStartedAt": (
+            task.cleanup_heartbeat_at
+            or task.device_cleanup_next_attempt_at
+            or task.updated_at
+            if operational_stage == "cleaning"
+            else task.stage_started_at
+        ),
         "latestArtemisSessionId": str(latest.artemis_session_id) if latest else None,
+        "attemptCount": task.attempt_count,
         "publishAttemptCount": sum(a.kind == "publish" for a in attempts),
         "verifyAttemptCount": sum(a.kind == "verify" for a in attempts),
         "lastErrorCode": task.last_error_code,
         "lastErrorMessage": task.last_error_message,
         "createdAt": task.created_at,
         "updatedAt": task.updated_at,
+        "createdBy": (
+            f"user:{task.created_by_user_id}"
+            if task.created_by_user_id is not None
+            else "api-key"
+            if task.created_by_key_hash
+            else "system"
+        ),
         "startedAt": task.started_at,
         "allowedActions": [a.value for a in actions],
         "cleanupRetryableResources": list(cleanup_retryable_resources(task)),
@@ -243,7 +262,7 @@ def _require_row_version(task: VideoPublishTask, expected: int | None) -> None:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             _action_conflict(
-                task, "ROW_VERSION_CONFLICT", "任务已更新，请刷新后重试。"
+                task, "TASK_VERSION_CONFLICT", "任务已更新，请刷新后重试。"
             ),
         )
 
@@ -291,12 +310,9 @@ def config(request: Request, session: Annotated[Session, Depends(get_session)]) 
     return {
         "acceptedContentTypes": ["video/mp4"],
         "acceptedExtensions": [".mp4"],
-        "maxVideoBytes": int(
-            os.environ.get("TIKTOK_PUBLISH_MAX_VIDEO_BYTES", str(500 * 1024 * 1024))
-        ),
-        "maxCaptionCharacters": int(
-            os.environ.get("TIKTOK_PUBLISH_MAX_CAPTION_CHARS", "4000")
-        ),
+        "maxVideoBytes": max_video_bytes(),
+        "maxCaptionCharacters": max_caption_chars(),
+        "maxPublishAttempts": int(os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3")),
         "uploadUrlTtlSeconds": int(
             os.environ.get("TIKTOK_PUBLISH_UPLOAD_TTL_SECONDS", "900")
         ),
@@ -314,14 +330,14 @@ def config(request: Request, session: Annotated[Session, Depends(get_session)]) 
         },
         "device": {
             "status": (
-                "ready"
+                "configured"
                 if heartbeat and os.environ.get("ARTEMIS_DEVICE_SERIAL")
                 else "unconfigured"
                 if not os.environ.get("ARTEMIS_DEVICE_SERIAL")
                 else "unavailable"
             ),
             "message": (
-                "Worker 心跳正常，设备将在领取任务时再次检查"
+                "Worker 心跳正常；设备已配置，领取任务时检查在线与解锁状态"
                 if heartbeat and os.environ.get("ARTEMIS_DEVICE_SERIAL")
                 else "未配置设备序列号"
                 if not os.environ.get("ARTEMIS_DEVICE_SERIAL")
@@ -377,10 +393,15 @@ def create_task(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "TASK_NOT_FOUND") from exc
     except ValueError as exc:
         code = str(exc)
+        error_status = (
+            status.HTTP_413_CONTENT_TOO_LARGE
+            if code == "VIDEO_TOO_LARGE"
+            else status.HTTP_409_CONFLICT
+            if code == "IDEMPOTENCY_PAYLOAD_MISMATCH"
+            else status.HTTP_422_UNPROCESSABLE_ENTITY
+        )
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY
-            if code not in {"IDEMPOTENCY_PAYLOAD_MISMATCH"}
-            else status.HTTP_409_CONFLICT,
+            error_status,
             {"code": code, "message": code},
         ) from exc
     response.status_code = status.HTTP_200_OK if replay else status.HTTP_201_CREATED
@@ -411,7 +432,12 @@ def refresh_upload_url(
     _csrf(request)
     task = _task_for_actor(session, task_id, request)
     if task.stage != "awaiting_upload":
-        raise HTTPException(status.HTTP_409_CONFLICT, "TASK_ACTION_NOT_ALLOWED")
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            _action_conflict(
+                task, "TASK_ACTION_NOT_ALLOWED", "TASK_ACTION_NOT_ALLOWED"
+            ),
+        )
     return {
         **_snapshot(task, expose_client_request_id=True),
         "upload": {
@@ -433,16 +459,33 @@ def confirm(
 ) -> dict:
     require_role_at_least(request, "readwrite")
     _csrf(request)
-    task_snapshot = _task_for_actor(session, task_id, request, lock=True)
+    task_snapshot = _task_for_actor(session, task_id, request)
     _require_row_version(task_snapshot, body.row_version)
+    if task_snapshot.stage != "awaiting_upload":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            _action_conflict(
+                task_snapshot, "TASK_ACTION_NOT_ALLOWED", "TASK_ACTION_NOT_ALLOWED"
+            ),
+        )
     try:
-        task = confirm_upload(session, task_id, store)
+        task = confirm_upload(
+            session,
+            task_id,
+            store,
+            expected_version=task_snapshot.row_version,
+        )
     except LookupError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except TaskConflict as exc:
+        conflict = _action_conflict(exc.task, exc.code, exc.code)
+        session.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, conflict) from exc
     except ValueError as exc:
+        code = str(exc)
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            {"code": str(exc), "message": str(exc)},
+            {"code": code, "message": code},
         ) from exc
     return _snapshot(task, expose_client_request_id=True)
 
@@ -704,6 +747,7 @@ def retry_cleanup(
 ) -> dict:
     require_role_at_least(request, "readwrite")
     _csrf(request)
+    require_destructive_guard(request, op_name="video_publish.retry_cleanup")
     task = _task_for_actor(session, task_id, request, lock=True)
     _require_row_version(task, body.row_version)
     try:

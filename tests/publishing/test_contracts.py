@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi import Request, Response
+from sqlalchemy import Table
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.accounts.pages import required_page_permission
@@ -185,7 +186,14 @@ def test_destructive_guard_refuses_prod_shape_without_opt_in(
 
 def test_lease_renewal_extends_owner_heartbeat() -> None:
     task = SimpleNamespace(heartbeat_at=None, lease_expires_at=None, row_version=4)
-    touch_task(cast(Session, None), cast(VideoPublishTask, task), lease_seconds=45)
+    fake_session = SimpleNamespace(
+        scalar=lambda _query: __import__("datetime").datetime.now(
+            __import__("datetime").UTC
+        )
+    )
+    touch_task(
+        cast(Session, fake_session), cast(VideoPublishTask, task), lease_seconds=45
+    )
     assert task.heartbeat_at is not None
     assert task.lease_expires_at > task.heartbeat_at
     assert task.row_version == 5
@@ -211,6 +219,8 @@ def test_worker_wires_documented_artemis_and_timing_knobs() -> None:
     assert "PUBLISH_WORKER_POLL_SECONDS" not in source
     assert 'os.environ.get("PUBLISH_TASK_LEASE_SECONDS", "30")' in source
     assert 'os.environ.get("PUBLISH_WORKER_HEARTBEAT_SECONDS", "5")' in source
+    assert "await asyncio.to_thread(" in source
+    assert "_cleanup_orphan_spool" in source
 
 
 def test_queued_content_warning_is_immutable_and_immediate() -> None:
@@ -238,3 +248,48 @@ def test_frontend_keeps_idempotency_and_double_click_guards() -> None:
     assert "shared.queued ? 8" in source
     assert "function sharedPollState()" in source
     assert "localStorage.setItem(REFRESH_KEY, mode)" in source
+    assert (
+        '$("publish-caption").maxLength = state.config.maxCaptionCharacters' in source
+    )
+    assert "[5, 10, 30, 60]" in source
+    assert 'window.addEventListener("pagehide", destroy)' in source
+    assert "operationalStageStartedAt" in source
+    assert "publish-preview-metadata" in source
+    assert "task.createdBy" in source
+    assert "navigator.clipboard.writeText" in source
+    assert 'document.execCommand("copy")' in source
+
+
+def test_publish_model_metadata_matches_schema_indexes_and_constraints() -> None:
+    from tts_erp_v2.db.models.publishing import (
+        VideoPublishAttempt,
+        VideoPublishTask,
+    )
+
+    task_table = cast(Table, VideoPublishTask.__table__)
+    attempt_table = cast(Table, VideoPublishAttempt.__table__)
+    task_indexes = {str(index.name): index for index in task_table.indexes}
+    attempt_indexes = {str(index.name): index for index in attempt_table.indexes}
+    task_constraints = {str(constraint.name) for constraint in task_table.constraints}
+    attempt_constraints = {
+        str(constraint.name) for constraint in attempt_table.constraints
+    }
+    assert "DESC" in str(task_indexes["ix_video_publish_history"].expressions[0])
+    assert "DESC" in str(task_indexes["ix_video_publish_history"].expressions[1])
+    assert "ix_video_publish_cleanup_queue" in task_indexes
+    assert "ix_video_publish_attempt_task_seq" in attempt_indexes
+    assert "video_publish_task_cleanup_status_check" in task_constraints
+    assert "video_publish_attempt_related_check" in attempt_constraints
+    assert "uq_video_publish_attempt_task_seq" in attempt_constraints
+
+
+def test_publish_responsive_accessibility_contract_uses_existing_css() -> None:
+    css = (ROOT / "tts_erp_v2/static/css/video-publish.css").read_text()
+    template = (ROOT / "tts_erp_v2/templates/pages/video-publish.html").read_text()
+    assert "max-width:1440px" in css
+    assert "max-width:900px" in css
+    assert "max-width:390px" in css
+    assert "prefers-reduced-motion:reduce" in css
+    assert 'class="btn-icon drawer-close"' in template
+    assert 'id="publish-preview-metadata"' in template
+    assert 'maxlength="4000"' not in template

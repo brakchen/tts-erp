@@ -22,6 +22,7 @@ from tts_erp_v2.api.v2.video_publish import (
     current,
     detail,
     list_tasks,
+    refresh_upload_url,
     replace_upload_task,
     retry,
     retry_cleanup,
@@ -31,7 +32,11 @@ from tts_erp_v2.db.models.publishing import (
     VideoPublishAttempt,
     VideoPublishTask,
 )
-from tts_erp_v2.publishing.artemis_client import ArtemisResult
+from tts_erp_v2.publishing.artemis_client import (
+    ArtemisAdmissionRejected,
+    ArtemisResult,
+    ArtemisTransportError,
+)
 from tts_erp_v2.publishing.dispatcher import (
     LeaseLost,
     PublishDependencies,
@@ -50,7 +55,11 @@ from tts_erp_v2.publishing.domain import (
     transition_task,
 )
 from tts_erp_v2.publishing.object_store import VideoObjectStore
-from tts_erp_v2.publishing.repository import _lease_task, claim_one
+from tts_erp_v2.publishing.repository import (
+    _lease_task,
+    claim_one,
+    schedule_retention_cleanup,
+)
 from tts_erp_v2.publishing.submission import (
     CreateCommand,
     create_upload_ticket,
@@ -134,6 +143,42 @@ def _factory(db_session: Session):
         )
 
     return factory
+
+
+def _add_verify_attempt(
+    session: Session,
+    task: VideoPublishTask,
+    *,
+    status: str = AttemptStatus.CREATED.value,
+    prompt_snapshot: str = "TEST",
+    output: dict | None = None,
+) -> VideoPublishAttempt:
+    publish = VideoPublishAttempt(
+        sequence_no=1,
+        kind="publish",
+        status=AttemptStatus.FAILED.value,
+        artemis_session_id=uuid4(),
+        prompt_version="TEST_PUBLISH",
+        prompt_snapshot="TEST_PUBLISH",
+        device_serial="TEST_device",
+    )
+    task.attempts.append(publish)
+    session.add(task)
+    session.flush()
+    verify_attempt = VideoPublishAttempt(
+        sequence_no=2,
+        kind="verify",
+        related_attempt_id=publish.id,
+        status=status,
+        artemis_session_id=uuid4(),
+        prompt_version="TEST_VERIFY",
+        prompt_snapshot=prompt_snapshot,
+        device_serial="TEST_device",
+        artemis_output=output,
+    )
+    task.attempts.append(verify_attempt)
+    session.flush()
+    return verify_attempt
 
 
 def test_global_claim_and_expired_lease_takeover(db_session: Session) -> None:
@@ -774,6 +819,109 @@ def test_continue_upload_reuses_awaiting_upload_ticket(
     assert url.endswith(task.object_key)
 
 
+def test_upload_url_illegal_state_uses_structured_conflict(
+    db_session: Session,
+) -> None:
+    task = _task(status=TaskStatus.PENDING.value, stage=TaskStage.QUEUED.value)
+    db_session.add(task)
+    db_session.flush()
+    with pytest.raises(HTTPException) as exc_info:
+        refresh_upload_url(
+            task.public_id,
+            _request(),
+            db_session,
+            cast(VideoObjectStore, SimpleNamespace()),
+        )
+    assert exc_info.value.status_code == 409
+    assert cast(dict, exc_info.value.detail) == {
+        "code": "TASK_ACTION_NOT_ALLOWED",
+        "message": "TASK_ACTION_NOT_ALLOWED",
+        "rowVersion": task.row_version,
+        "allowedActions": ["view", "cancel"],
+    }
+
+
+def test_confirm_head_then_cas_detects_concurrent_task_update(
+    db_session: Session,
+) -> None:
+    task = _task(stage=TaskStage.AWAITING_UPLOAD.value)
+    db_session.add(task)
+    db_session.commit()
+    expected_version = task.row_version
+
+    class RacingStore:
+        def stat(self, _key: str) -> dict:
+            with Session(bind=db_session.get_bind()) as other:
+                # pi-lens-ignore: python-sql-injection
+                other.execute(
+                    text(
+                        "UPDATE publishing.video_publish_tasks "
+                        "SET row_version=row_version+1 WHERE id=:id"
+                    ),
+                    {"id": task.id},
+                )
+                other.commit()
+            return {"size": task.size_bytes, "content_type": task.content_type}
+
+    with pytest.raises(HTTPException) as exc_info:
+        confirm(
+            task.public_id,
+            ActionIn(rowVersion=expected_version),
+            _request(),
+            db_session,
+            cast(VideoObjectStore, RacingStore()),
+        )
+    assert exc_info.value.status_code == 409
+    assert cast(dict, exc_info.value.detail)["code"] == "TASK_VERSION_CONFLICT"
+    assert cast(dict, exc_info.value.detail)["rowVersion"] == expected_version + 1
+
+
+def test_create_declared_oversize_is_413_and_caption_limit_is_configured(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ARTEMIS_DEVICE_SERIAL", "TEST_device")
+    monkeypatch.setenv("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video")
+    monkeypatch.setenv("TIKTOK_PUBLISH_MAX_VIDEO_BYTES", "10")
+    monkeypatch.setenv("TIKTOK_PUBLISH_MAX_CAPTION_CHARS", "5000")
+
+    class Store:
+        bucket = "tiktok-video"
+
+        def presign_put(self, key: str, _content_type: str) -> str:
+            return f"https://upload.test/{key}"
+
+    with pytest.raises(HTTPException) as exc_info:
+        create_task(
+            CreateIn(
+                clientRequestId=uuid4(),
+                filename="TEST.mp4",
+                contentType="video/mp4",
+                sizeBytes=11,
+                caption="TEST",
+            ),
+            _request(role="readwrite"),
+            db_session,
+            cast(VideoObjectStore, Store()),
+            Response(),
+        )
+    assert exc_info.value.status_code == 413
+    created = create_task(
+        CreateIn(
+            clientRequestId=uuid4(),
+            filename="TEST.mp4",
+            contentType="video/mp4",
+            sizeBytes=4,
+            caption="x" * 4500,
+        ),
+        _request(role="readwrite"),
+        db_session,
+        cast(VideoObjectStore, Store()),
+        Response(),
+    )
+    assert len(created["caption"]) == 4500
+
+
 def test_confirm_rejects_stale_row_version(
     db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -800,7 +948,7 @@ def test_confirm_rejects_stale_row_version(
             cast(VideoObjectStore, UploadStore()),
         )
     assert exc_info.value.status_code == 409
-    assert cast(dict, exc_info.value.detail)["code"] == "ROW_VERSION_CONFLICT"
+    assert cast(dict, exc_info.value.detail)["code"] == "TASK_VERSION_CONFLICT"
     db_session.rollback()
 
 
@@ -1362,19 +1510,7 @@ async def test_verify_not_published_cleans_device_before_requeue(
     task = _task(status=TaskStatus.RUNNING.value, stage=TaskStage.VERIFYING.value)
     task.lease_owner = "verify-worker"
     task.lease_expires_at = datetime.now(UTC) + timedelta(minutes=1)
-    task.attempts.append(
-        VideoPublishAttempt(
-            sequence_no=1,
-            kind="verify",
-            status=AttemptStatus.CREATED.value,
-            artemis_session_id=uuid4(),
-            prompt_version="TEST",
-            prompt_snapshot="TEST",
-            device_serial="TEST_device",
-        )
-    )
-    db_session.add(task)
-    db_session.flush()
+    verify_attempt = _add_verify_attempt(db_session, task)
     db_session.commit()
     deps = cast(
         PublishDependencies,
@@ -1389,7 +1525,7 @@ async def test_verify_not_published_cleans_device_before_requeue(
             spool_dir=tmp_path,
         ),
     )
-    await _run_attempt(task.public_id, task.attempts[0].id, deps)
+    await _run_attempt(task.public_id, verify_attempt.id, deps)
     db_session.expire_all()
     assert task.status == TaskStatus.PENDING.value
     assert task.stage == TaskStage.WAITING_DEVICE.value
@@ -1421,19 +1557,7 @@ async def test_verify_published_is_terminal_and_not_reclaimable(
     task = _task(status=TaskStatus.RUNNING.value, stage=TaskStage.VERIFYING.value)
     task.lease_owner = "verify-worker"
     task.lease_expires_at = datetime.now(UTC) + timedelta(minutes=1)
-    task.attempts.append(
-        VideoPublishAttempt(
-            sequence_no=1,
-            kind="verify",
-            status=AttemptStatus.CREATED.value,
-            artemis_session_id=uuid4(),
-            prompt_version="TEST",
-            prompt_snapshot="TEST",
-            device_serial="TEST_device",
-        )
-    )
-    db_session.add(task)
-    db_session.flush()
+    verify_attempt = _add_verify_attempt(db_session, task)
     db_session.commit()
     deps = cast(
         PublishDependencies,
@@ -1448,7 +1572,7 @@ async def test_verify_published_is_terminal_and_not_reclaimable(
             spool_dir=tmp_path,
         ),
     )
-    await _run_attempt(task.public_id, task.attempts[0].id, deps)
+    await _run_attempt(task.public_id, verify_attempt.id, deps)
     db_session.expire_all()
     assert task.status == TaskStatus.SUCCEEDED.value
     assert task.stage == TaskStage.DONE.value
@@ -1832,6 +1956,31 @@ async def test_live_success_is_terminal_and_not_reclaimable(
     assert await dispatch_one(deps) == "no_task"
 
 
+def test_cleanup_retry_calls_http_destructive_guard_before_mutation(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task = _task(
+        status=TaskStatus.SUCCEEDED.value,
+        stage=TaskStage.DONE.value,
+        device_cleanup_status="failed",
+    )
+    db_session.add(task)
+    db_session.flush()
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "tts_erp_v2.api.v2.video_publish.require_destructive_guard",
+        lambda _request, *, op_name: calls.append(op_name),
+    )
+    retry_cleanup(
+        task.public_id,
+        ActionIn(rowVersion=task.row_version, resources=["device"]),
+        _request(),
+        db_session,
+    )
+    assert calls == ["video_publish.retry_cleanup"]
+
+
 def test_cleanup_retry_rejects_live_lease_and_requeues_expired_lease(
     db_session: Session,
 ) -> None:
@@ -1875,31 +2024,17 @@ def test_diagnostics_are_admin_only_and_redacted_by_default(
     db_session: Session,
 ) -> None:
     task = _task()
-    task.attempts.append(
-        VideoPublishAttempt(
-            sequence_no=1,
-            kind="publish",
-            status=AttemptStatus.SUCCESS.value,
-            artemis_session_id=uuid4(),
-            prompt_version="TEST",
-            prompt_snapshot="SECRET_PROMPT",
-            device_serial="TEST_device",
-            artemis_output={"secret": "SECRET_OUTPUT"},
-        )
+    _add_verify_attempt(
+        db_session,
+        task,
+        status=AttemptStatus.SUCCESS.value,
+        prompt_snapshot="SECRET_VERIFY_PROMPT",
+        output={"verdict": "published"},
     )
-    task.attempts.append(
-        VideoPublishAttempt(
-            sequence_no=2,
-            kind="verify",
-            status=AttemptStatus.SUCCESS.value,
-            artemis_session_id=uuid4(),
-            prompt_version="TEST_VERIFY",
-            prompt_snapshot="SECRET_VERIFY_PROMPT",
-            device_serial="TEST_device",
-            artemis_output={"verdict": "published"},
-        )
-    )
-    db_session.add(task)
+    publish_attempt = min(task.attempts, key=lambda attempt: attempt.sequence_no)
+    publish_attempt.status = AttemptStatus.SUCCESS.value
+    publish_attempt.prompt_snapshot = "SECRET_PROMPT"
+    publish_attempt.artemis_output = {"secret": "SECRET_OUTPUT"}
     db_session.flush()
     with pytest.raises(HTTPException) as denied:
         detail(
@@ -1963,8 +2098,8 @@ def test_config_exposes_server_owned_device_and_worker_configuration(
     payload = config(_request(role="readwrite"), db_session)
     assert payload["target"]["album"] == "TEST_CAMPAIGN"
     assert payload["device"] == {
-        "status": "ready",
-        "message": "Worker 心跳正常，设备将在领取任务时再次检查",
+        "status": "configured",
+        "message": "Worker 心跳正常；设备已配置，领取任务时检查在线与解锁状态",
     }
     assert payload["artemis"] == {
         "profile": "TEST_profile",
@@ -1976,3 +2111,327 @@ def test_config_exposes_server_owned_device_and_worker_configuration(
         "heartbeatSeconds": 9.0,
     }
     assert payload["canWrite"] is True
+
+
+@pytest.mark.parametrize("device_path", ["/sdcard/Movies/TEST/video.mp4", None])
+@pytest.mark.asyncio
+async def test_verify_not_published_at_exhausted_budget_is_terminal(
+    db_session: Session,
+    tmp_path: Path,
+    device_path: str | None,
+) -> None:
+    class VerifyArtemis:
+        async def submit(self, **kwargs):
+            return ArtemisResult(
+                kwargs["session_id"], "success", output={"verdict": "not_published"}
+            )
+
+    task = _task(
+        status=TaskStatus.RUNNING.value,
+        stage=TaskStage.VERIFYING.value,
+        device_path=device_path,
+    )
+    task.attempt_count = 3
+    task.lease_owner = "verify-budget-worker"
+    task.lease_expires_at = datetime.now(UTC) + timedelta(minutes=1)
+    publish_attempt = VideoPublishAttempt(
+        sequence_no=1,
+        kind="publish",
+        status=AttemptStatus.FAILED.value,
+        artemis_session_id=uuid4(),
+        prompt_version="TEST",
+        prompt_snapshot="TEST",
+        device_serial="TEST_device",
+    )
+    task.attempts.append(publish_attempt)
+    db_session.add(task)
+    db_session.flush()
+    verify_attempt = VideoPublishAttempt(
+        task_id=task.id,
+        sequence_no=2,
+        kind="verify",
+        status=AttemptStatus.CREATED.value,
+        artemis_session_id=uuid4(),
+        prompt_version="TEST",
+        prompt_snapshot="TEST",
+        device_serial="TEST_device",
+        related_attempt_id=publish_attempt.id,
+    )
+    db_session.add(verify_attempt)
+    db_session.flush()
+    db_session.commit()
+    deps = cast(
+        PublishDependencies,
+        SimpleNamespace(
+            session_factory=_factory(db_session),
+            instance_id="verify-budget-worker",
+            lease_seconds=30,
+            max_attempts=3,
+            adb=_CleanupAdb(),
+            store=_CleanupStore(),
+            artemis=VerifyArtemis(),
+            spool_dir=tmp_path,
+        ),
+    )
+    await _run_attempt(task.public_id, verify_attempt.id, deps)
+    db_session.expire_all()
+    assert task.status == TaskStatus.FAILED.value
+    assert task.stage == TaskStage.DONE.value
+    assert task.last_error_code == "retry_budget_exhausted"
+    assert task.lease_owner is None
+    if device_path:
+        assert task.cleanup_intent == "preserve_state"
+        assert task.device_cleanup_status == "pending"
+    else:
+        assert task.cleanup_intent == "none"
+
+
+def test_replace_upload_waits_for_device_and_spool_cleanup(db_session: Session) -> None:
+    for resource in ("device", "spool"):
+        task = _task(
+            status=TaskStatus.FAILED.value,
+            stage=TaskStage.DONE.value,
+            device_cleanup_status="failed" if resource == "device" else "succeeded",
+            spool_cleanup_status="failed" if resource == "spool" else "succeeded",
+            object_cleanup_status="failed",
+        )
+        task.object_deleted_at = datetime.now(UTC)
+        task.attempt_count = 1
+        db_session.add(task)
+        db_session.flush()
+        with pytest.raises(ValueError, match="CLEANUP_REQUIRED"):
+            replace_upload(db_session, task.public_id)
+        db_session.rollback()
+
+
+def test_confirm_illegal_state_is_structured_and_does_not_head(
+    db_session: Session,
+) -> None:
+    class Store:
+        def stat(self, _key: str) -> dict:
+            raise AssertionError("illegal state must not inspect object storage")
+
+    task = _task(status=TaskStatus.PENDING.value, stage=TaskStage.QUEUED.value)
+    db_session.add(task)
+    db_session.flush()
+    with pytest.raises(HTTPException) as exc_info:
+        confirm(
+            task.public_id,
+            ActionIn(rowVersion=task.row_version),
+            _request(),
+            db_session,
+            cast(VideoObjectStore, Store()),
+        )
+    assert exc_info.value.status_code == 409
+    assert cast(dict, exc_info.value.detail) == {
+        "code": "TASK_ACTION_NOT_ALLOWED",
+        "message": "TASK_ACTION_NOT_ALLOWED",
+        "rowVersion": task.row_version,
+        "allowedActions": ["view", "cancel"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_artemis_locked_admission_waits_without_consuming_budget(
+    db_session: Session,
+    tmp_path: Path,
+) -> None:
+    class LockedArtemis:
+        async def submit(self, **_kwargs):
+            raise ArtemisAdmissionRejected("DEVICE_LOCKED")
+
+    task = _task(
+        status=TaskStatus.RUNNING.value,
+        stage=TaskStage.DISPATCHING_ARTEMIS.value,
+    )
+    task.attempt_count = 1
+    task.lease_owner = "locked-worker"
+    task.lease_expires_at = datetime.now(UTC) + timedelta(minutes=1)
+    task.attempts.append(
+        VideoPublishAttempt(
+            sequence_no=1,
+            kind="publish",
+            status=AttemptStatus.CREATED.value,
+            artemis_session_id=uuid4(),
+            prompt_version="TEST",
+            prompt_snapshot="TEST",
+            device_serial="TEST_device",
+        )
+    )
+    db_session.add(task)
+    db_session.flush()
+    db_session.commit()
+    deps = cast(
+        PublishDependencies,
+        SimpleNamespace(
+            session_factory=_factory(db_session),
+            instance_id="locked-worker",
+            lease_seconds=30,
+            max_attempts=3,
+            artemis=LockedArtemis(),
+            spool_dir=tmp_path,
+        ),
+    )
+    await _run_attempt(task.public_id, task.attempts[0].id, deps)
+    db_session.expire_all()
+    assert task.attempt_count == 0
+    assert task.status == TaskStatus.PENDING.value
+    assert task.stage == TaskStage.WAITING_DEVICE.value
+    assert task.attempts[0].status == AttemptStatus.REJECTED.value
+    assert task.attempts[0].retry_safe is True
+
+
+@pytest.mark.asyncio
+async def test_same_session_resubmit_increments_transport_retry_count(
+    db_session: Session,
+    tmp_path: Path,
+) -> None:
+    class RecoveringArtemis:
+        def __init__(self) -> None:
+            self.submits = 0
+
+        async def submit(self, **kwargs):
+            self.submits += 1
+            if self.submits == 1:
+                raise ArtemisTransportError("TEST timeout")
+            return ArtemisResult(kwargs["session_id"], "queued")
+
+        async def get_task(self, session_id):
+            return ArtemisResult(session_id, "not_found")
+
+    task = _task(
+        status=TaskStatus.RUNNING.value,
+        stage=TaskStage.DISPATCHING_ARTEMIS.value,
+    )
+    task.attempt_count = 1
+    task.lease_owner = "retry-worker"
+    task.lease_expires_at = datetime.now(UTC) + timedelta(minutes=1)
+    task.attempts.append(
+        VideoPublishAttempt(
+            sequence_no=1,
+            kind="publish",
+            status=AttemptStatus.CREATED.value,
+            artemis_session_id=uuid4(),
+            prompt_version="TEST",
+            prompt_snapshot="TEST",
+            device_serial="TEST_device",
+        )
+    )
+    db_session.add(task)
+    db_session.flush()
+    db_session.commit()
+    deps = cast(
+        PublishDependencies,
+        SimpleNamespace(
+            session_factory=_factory(db_session),
+            instance_id="retry-worker",
+            lease_seconds=30,
+            max_attempts=3,
+            artemis=RecoveringArtemis(),
+            spool_dir=tmp_path,
+        ),
+    )
+    await _run_attempt(task.public_id, task.attempts[0].id, deps)
+    db_session.expire_all()
+    assert task.attempts[0].submit_retry_count == 1
+    assert task.attempts[0].status == AttemptStatus.QUEUED.value
+
+
+def test_attempt_result_preserves_audit_status_and_sanitizes_output() -> None:
+    from tts_erp_v2.publishing.dispatcher import _save_result
+
+    for status, expected in (("rejected", "rejected"), ("cancelled", "cancelled")):
+        attempt = SimpleNamespace()
+        _save_result(
+            cast(VideoPublishAttempt, attempt),
+            ArtemisResult(
+                uuid4(),
+                status,
+                output={
+                    "authorization": "Bearer TEST-secret",
+                    "nested": {"url": "https://example.test/video?token=TEST"},
+                },
+                error="Authorization: Bearer TEST-secret",
+            ),
+        )
+        assert attempt.status == expected
+        assert "TEST-secret" not in str(attempt.artemis_output)
+        assert "TEST" not in str(attempt.artemis_output)
+        assert "TEST-secret" not in str(attempt.artemis_error)
+
+
+def test_retention_schedules_abandoned_and_expired_failed_objects_only(
+    db_session: Session,
+) -> None:
+    old = datetime.now(UTC) - timedelta(days=40)
+    abandoned = _task(stage=TaskStage.AWAITING_UPLOAD.value)
+    abandoned.created_at = old
+    failed = _task(status=TaskStatus.FAILED.value)
+    failed.object_uploaded_at = old
+    failed.completed_at = old
+    needs_review = _task(status=TaskStatus.NEEDS_REVIEW.value)
+    needs_review.object_uploaded_at = old
+    needs_review.completed_at = old
+    db_session.add_all([abandoned, failed, needs_review])
+    db_session.flush()
+    db_session.expire_all()
+    assert schedule_retention_cleanup(db_session, failed_retention_days=30) == 2
+    assert abandoned.status == TaskStatus.CANCELLED.value
+    assert abandoned.stage == TaskStage.DONE.value
+    assert abandoned.object_cleanup_status == "pending"
+    assert failed.status == TaskStatus.FAILED.value
+    assert failed.object_cleanup_status == "pending"
+    assert needs_review.object_cleanup_status == "not_started"
+    assert schedule_retention_cleanup(db_session, failed_retention_days=30) == 0
+
+
+def test_lease_expiry_uses_database_time_despite_process_clock_skew(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tts_erp_v2.publishing import repository
+
+    task = _task(status=TaskStatus.RUNNING.value, stage=TaskStage.DOWNLOADING.value)
+    task.lease_owner = "old-worker"
+    task.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    db_session.add(task)
+    db_session.flush()
+
+    class SkewedDateTime:
+        @classmethod
+        def now(cls, _timezone):
+            return datetime(2000, 1, 1, tzinfo=UTC)
+
+    monkeypatch.setattr(repository, "datetime", SkewedDateTime)
+    leased = _lease_task(db_session, "new-worker", 30)
+    assert leased is not None
+    assert leased.lease_expires_at is not None
+    assert leased.lease_expires_at > datetime.now(UTC)
+
+
+def test_startup_orphan_spool_cleanup_is_db_proven_and_bounded(
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tts_erp_v2.publishing.worker import _cleanup_orphan_spool
+
+    old = datetime.now(UTC) - timedelta(days=2)
+    terminal = _task(status=TaskStatus.FAILED.value)
+    terminal.completed_at = old
+    active = _task(status=TaskStatus.PENDING.value, stage=TaskStage.QUEUED.value)
+    db_session.add_all([terminal, active])
+    db_session.flush()
+    db_session.commit()
+    for name in (str(terminal.public_id), str(active.public_id), "unknown"):
+        directory = tmp_path / name
+        directory.mkdir()
+        (directory / "video.mp4").write_bytes(b"TEST")
+    monkeypatch.setattr(
+        "tts_erp_v2.publishing.worker.require_destructive_script_guard",
+        lambda **_kwargs: None,
+    )
+    assert _cleanup_orphan_spool(_factory(db_session), tmp_path) == 1
+    assert not (tmp_path / str(terminal.public_id)).exists()
+    assert (tmp_path / str(active.public_id)).exists()
+    assert (tmp_path / "unknown").exists()

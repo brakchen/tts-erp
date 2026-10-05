@@ -17,6 +17,14 @@ class ArtemisSessionNotFound(ArtemisTransportError):
     pass
 
 
+class ArtemisAdmissionRejected(ArtemisTransportError):
+    """A pre-admission 409 that is safe to retry without budget use."""
+
+    def __init__(self, code: str = "DEVICE_LOCKED") -> None:
+        self.code = code
+        super().__init__(code)
+
+
 @dataclass(frozen=True, slots=True)
 class ArtemisResult:
     session_id: UUID
@@ -25,6 +33,7 @@ class ArtemisResult:
     error: str | None = None
     steps_count: int | None = None
     final_publish_observed: bool = False
+    same_session_resubmitted: bool = False
 
     @property
     def terminal(self) -> bool:
@@ -58,6 +67,15 @@ class ArtemisClient:
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
                 raise ArtemisSessionNotFound(str(exc)[:500]) from exc
+            if exc.response.status_code == 409:
+                try:
+                    detail = exc.response.json()
+                except ValueError:
+                    detail = {}
+                code = (
+                    detail.get("code") if isinstance(detail, dict) else None
+                ) or "DEVICE_LOCKED"
+                raise ArtemisAdmissionRejected(str(code)[:100]) from exc
             raise ArtemisTransportError(str(exc)[:500]) from exc
         except (httpx.HTTPError, ValueError) as exc:
             raise ArtemisTransportError(str(exc)[:500]) from exc

@@ -28,6 +28,13 @@ from tts_erp_v2.publishing.prompt import (
 )
 
 
+def _db_now(session: Session) -> datetime:
+    value = session.scalar(select(func.clock_timestamp()))
+    if value is None:
+        raise RuntimeError("DATABASE_TIME_UNAVAILABLE")
+    return value
+
+
 def get_task(
     session: Session, public_id: UUID, *, lock: bool = False
 ) -> VideoPublishTask | None:
@@ -104,14 +111,14 @@ def create_attempt(
 def _lease_task(
     session: Session, instance_id: str, lease_seconds: int
 ) -> VideoPublishTask | None:
-    now = datetime.now(UTC)
+    now = _db_now(session)
     task = session.scalars(
         select(VideoPublishTask)
         .where(
             VideoPublishTask.status == TaskStatus.RUNNING.value,
             (VideoPublishTask.lease_owner == instance_id)
             | (VideoPublishTask.lease_expires_at.is_(None))
-            | (VideoPublishTask.lease_expires_at < func.now()),
+            | (VideoPublishTask.lease_expires_at < func.clock_timestamp()),
         )
         .order_by(VideoPublishTask.id)
         .with_for_update(skip_locked=True)
@@ -151,10 +158,10 @@ def _lease_cleanup_task(
     device_only: bool | None = None,
 ) -> VideoPublishTask | None:
     """Lease explicit cleanup work without occupying the publish slot."""
-    now = datetime.now(UTC)
+    now = _db_now(session)
 
     def due(column):
-        return (column.is_(None)) | (column <= now)
+        return (column.is_(None)) | (column <= func.clock_timestamp())
 
     device_due = and_(
         VideoPublishTask.device_cleanup_status.in_(["pending", "failed"]),
@@ -184,7 +191,7 @@ def _lease_cleanup_task(
             resource_due,
             (VideoPublishTask.cleanup_lease_owner.is_(None))
             | (VideoPublishTask.cleanup_lease_expires_at.is_(None))
-            | (VideoPublishTask.cleanup_lease_expires_at < now),
+            | (VideoPublishTask.cleanup_lease_expires_at < func.clock_timestamp()),
         )
         .order_by(VideoPublishTask.cleanup_lease_expires_at, VideoPublishTask.id)
         .with_for_update(skip_locked=True)
@@ -234,7 +241,7 @@ def claim_one(
             ),
             VideoPublishTask.cleanup_intent == CleanupIntent.NONE.value,
             (VideoPublishTask.next_attempt_at.is_(None))
-            | (VideoPublishTask.next_attempt_at <= func.now()),
+            | (VideoPublishTask.next_attempt_at <= func.clock_timestamp()),
             VideoPublishTask.attempt_count < max_attempts,
         )
         .order_by(VideoPublishTask.queued_at, VideoPublishTask.id)
@@ -244,7 +251,7 @@ def claim_one(
     task = session.scalars(query).first()
     if task is None:
         return None
-    now = datetime.now(UTC)
+    now = _db_now(session)
     task.status = TaskStatus.RUNNING.value
     set_task_stage(task, TaskStage.DOWNLOADING, now=now)
     task.lease_owner = instance_id
@@ -268,10 +275,11 @@ def touch_task(
     stage: str | None = None,
     lease_seconds: int = 30,
 ) -> None:
-    task.heartbeat_at = datetime.now(UTC)
-    task.lease_expires_at = datetime.now(UTC) + timedelta(seconds=lease_seconds)
+    now = _db_now(session)
+    task.heartbeat_at = now
+    task.lease_expires_at = now + timedelta(seconds=lease_seconds)
     if stage:
-        set_task_stage(task, stage)
+        set_task_stage(task, stage, now=now)
     task.row_version += 1
 
 
@@ -284,17 +292,17 @@ def release_lease(task: VideoPublishTask) -> None:
 def renew_cleanup_lease(
     session: Session, task_id: UUID, instance_id: str, lease_seconds: int
 ) -> None:
-    now = datetime.now(UTC)
     result = session.execute(
         update(VideoPublishTask)
         .where(
             VideoPublishTask.public_id == task_id,
             VideoPublishTask.cleanup_lease_owner == instance_id,
-            VideoPublishTask.cleanup_lease_expires_at > now,
+            VideoPublishTask.cleanup_lease_expires_at > func.clock_timestamp(),
         )
         .values(
-            cleanup_heartbeat_at=now,
-            cleanup_lease_expires_at=now + timedelta(seconds=lease_seconds),
+            cleanup_heartbeat_at=func.clock_timestamp(),
+            cleanup_lease_expires_at=func.clock_timestamp()
+            + timedelta(seconds=lease_seconds),
             row_version=VideoPublishTask.row_version + 1,
         )
     )
@@ -319,7 +327,7 @@ def request_verification(session: Session, task_id: UUID) -> VideoPublishTask:
     task.status = TaskStatus.RUNNING.value
     set_task_stage(task, TaskStage.VERIFYING)
     task.lease_owner = "api-verification"
-    task.lease_expires_at = datetime.now(UTC) + timedelta(seconds=30)
+    task.lease_expires_at = _db_now(session) + timedelta(seconds=30)
     create_attempt(session, task, kind=AttemptKind.VERIFY, related=related)
     task.row_version += 1
     return task
@@ -333,7 +341,7 @@ def retry_cleanup_resources(
     now: datetime | None = None,
 ) -> tuple[str, ...]:
     """Reset only failed resources while preserving business status/stage."""
-    now = now or datetime.now(UTC)
+    now = now or _db_now(session)
     failed = cleanup_retryable_resources(task)
     if resources is not None:
         requested = tuple(dict.fromkeys(resources))
@@ -360,6 +368,70 @@ def retry_cleanup_resources(
     task.cleanup_heartbeat_at = None
     task.row_version += 1
     return failed
+
+
+def schedule_retention_cleanup(
+    session: Session,
+    *,
+    failed_retention_days: int | None = None,
+) -> int:
+    """Schedule only policy-proven MinIO deletion; execution remains guarded."""
+    now = _db_now(session)
+    retention_days = (
+        failed_retention_days
+        if failed_retention_days is not None
+        else int(os.environ.get("TIKTOK_PUBLISH_FAILED_RETENTION_DAYS", "30"))
+    )
+    abandoned_before = now - timedelta(hours=24)
+    failed_before = now - timedelta(days=max(0, retention_days))
+    tasks = list(
+        session.scalars(
+            select(VideoPublishTask)
+            .where(
+                VideoPublishTask.object_deleted_at.is_(None),
+                VideoPublishTask.object_cleanup_status.not_in(["pending", "failed"]),
+                or_(
+                    and_(
+                        VideoPublishTask.status == TaskStatus.PENDING.value,
+                        VideoPublishTask.stage == TaskStage.AWAITING_UPLOAD.value,
+                        VideoPublishTask.created_at <= abandoned_before,
+                    ),
+                    and_(
+                        VideoPublishTask.status == TaskStatus.FAILED.value,
+                        VideoPublishTask.stage == TaskStage.DONE.value,
+                        func.coalesce(
+                            VideoPublishTask.completed_at,
+                            VideoPublishTask.updated_at,
+                        )
+                        <= failed_before,
+                    ),
+                ),
+                (VideoPublishTask.cleanup_lease_owner.is_(None))
+                | (VideoPublishTask.cleanup_lease_expires_at.is_(None))
+                | (VideoPublishTask.cleanup_lease_expires_at < func.clock_timestamp()),
+            )
+            .order_by(VideoPublishTask.id)
+            .with_for_update(skip_locked=True)
+        )
+    )
+    for task in tasks:
+        if task.stage == TaskStage.AWAITING_UPLOAD.value:
+            task.status = TaskStatus.CANCELLED.value
+            set_task_stage(task, TaskStage.DONE, now=now)
+            task.completed_at = now
+            release_lease(task)
+            task.last_error_code = "abandoned_upload_expired"
+            task.last_error_message = "Upload was not confirmed within 24 hours"
+        task.cleanup_intent = CleanupIntent.PRESERVE_STATE.value
+        task.object_cleanup_status = "pending"
+        task.object_cleanup_error = None
+        task.object_cleanup_next_attempt_at = now
+        task.cleanup_lease_owner = None
+        task.cleanup_lease_expires_at = None
+        task.cleanup_heartbeat_at = None
+        task.row_version += 1
+    session.flush()
+    return len(tasks)
 
 
 def queue_task(task: VideoPublishTask, *, delay_seconds: int = 0) -> None:

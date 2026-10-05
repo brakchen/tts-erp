@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import httpx
 import pytest
 
-from tts_erp_v2.publishing.adb_device import AdbDevice
+from tts_erp_v2.publishing import artemis_client as artemis_module
+from tts_erp_v2.publishing.adb_device import AdbDevice, DeviceLocked
 from tts_erp_v2.publishing.artemis_client import (
     ArtemisClient,
     ArtemisResult,
@@ -30,6 +32,25 @@ def test_adb_adapter_uses_configured_album_path() -> None:
 
 
 @pytest.mark.asyncio
+async def test_adb_preflight_rejects_locked_device_without_admission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    device = AdbDevice()
+
+    async def fake_run(*args: str, timeout: float = 30) -> str:
+        del timeout
+        return (
+            "device\n"
+            if args[-1] == "get-state"
+            else "mDreamingLockscreen=true\nmShowingLockscreen=true\n"
+        )
+
+    monkeypatch.setattr(device, "_run", fake_run)
+    with pytest.raises(DeviceLocked, match="锁屏"):
+        await device.check_device("TEST_device")
+
+
+@pytest.mark.asyncio
 async def test_artemis_404_falls_back_to_global_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -47,6 +68,39 @@ async def test_artemis_404_falls_back_to_global_status(
     result = await client.get_task(session_id)
     assert result.status == "running"
     assert calls == [f"/api/sessions/{session_id}", "/api/status"]
+
+
+@pytest.mark.asyncio
+async def test_artemis_http_409_maps_to_typed_admission_rejection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def request(self, method: str, path: str, **_kwargs):
+            request = httpx.Request(method, f"https://artemis.test{path}")
+            return httpx.Response(
+                409,
+                request=request,
+                json={"code": "DEVICE_LOCKED"},
+            )
+
+    monkeypatch.setattr(
+        artemis_module.httpx,
+        "AsyncClient",
+        lambda **_kwargs: FakeAsyncClient(),
+    )
+    with pytest.raises(artemis_module.ArtemisAdmissionRejected, match="DEVICE_LOCKED"):
+        await ArtemisClient("https://artemis.test").submit(
+            goal="TEST",
+            session_id=__import__("uuid").uuid4(),
+            device_serial="TEST_device",
+            app_package="com.tiktok",
+        )
 
 
 def test_artemis_result_preserves_final_publish_observed() -> None:

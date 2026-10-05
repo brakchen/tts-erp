@@ -21,18 +21,23 @@ from tts_erp_v2.publishing.domain import (
     TaskStatus,
     plan_cleanup,
     replace_upload_allowed,
+    replacement_cleanup_pending,
     set_task_stage,
 )
 from tts_erp_v2.publishing.object_store import VideoObjectStore
 from tts_erp_v2.publishing.repository import get_task, queue_task, release_lease
 from tts_erp_v2.storage.minio_client import ObjectNotFound
 
-MAX_VIDEO_BYTES = int(
-    os.environ.get("TIKTOK_PUBLISH_MAX_VIDEO_BYTES", str(500 * 1024 * 1024))
-)
-MAX_CAPTION_CHARS = int(os.environ.get("TIKTOK_PUBLISH_MAX_CAPTION_CHARS", "4000"))
 _BUCKET = os.environ.get("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video")
 _PACKAGE = os.environ.get("ARTEMIS_APP_PACKAGE", "com.zhiliaoapp.musically")
+
+
+def max_video_bytes() -> int:
+    return int(os.environ.get("TIKTOK_PUBLISH_MAX_VIDEO_BYTES", str(500 * 1024 * 1024)))
+
+
+def max_caption_chars() -> int:
+    return int(os.environ.get("TIKTOK_PUBLISH_MAX_CAPTION_CHARS", "4000"))
 
 
 def configured_device_serial() -> str:
@@ -50,6 +55,13 @@ def upload_expires_at(store: VideoObjectStore) -> datetime:
             seconds=int(os.environ.get("TIKTOK_PUBLISH_UPLOAD_TTL_SECONDS", "900"))
         )
     return datetime.now(UTC) + expiry
+
+
+class TaskConflict(ValueError):
+    def __init__(self, code: str, task: VideoPublishTask) -> None:
+        super().__init__(code)
+        self.code = code
+        self.task = task
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,7 +96,7 @@ def create_upload_ticket(
         command.filename
     ).lower().endswith(".mp4"):
         raise ValueError("INVALID_VIDEO_TYPE")
-    if not 0 < command.size_bytes <= MAX_VIDEO_BYTES:
+    if not 0 < command.size_bytes <= max_video_bytes():
         raise ValueError("VIDEO_TOO_LARGE")
     if not caption.strip():
         raise ValueError("CAPTION_REQUIRED")
@@ -93,7 +105,7 @@ def create_upload_ticket(
         raise ValueError("DEVICE_NOT_CONFIGURED")
     if getattr(store, "bucket", configured_bucket()) != configured_bucket():
         raise ValueError("PUBLISH_BUCKET_MISMATCH")
-    if len(caption) > MAX_CAPTION_CHARS:
+    if len(caption) > max_caption_chars():
         raise ValueError("CAPTION_TOO_LONG")
     existing = session.scalar(
         select(VideoPublishTask).where(
@@ -188,28 +200,47 @@ def create_upload_ticket(
 
 
 def confirm_upload(
-    session: Session, task_id: UUID, store: VideoObjectStore
+    session: Session,
+    task_id: UUID,
+    store: VideoObjectStore,
+    *,
+    expected_version: int | None = None,
 ) -> VideoPublishTask:
-    task = get_task(session, task_id, lock=True)
-    if task is None:
+    """HEAD without a row lock, then CAS the still-awaiting task under lock."""
+    observed = get_task(session, task_id)
+    if observed is None:
         raise LookupError("TASK_NOT_FOUND")
-    if task.stage != TaskStage.AWAITING_UPLOAD.value:
-        return task
+    if observed.stage != TaskStage.AWAITING_UPLOAD.value:
+        raise ValueError("TASK_ACTION_NOT_ALLOWED")
+    if expected_version is None or observed.row_version != expected_version:
+        raise ValueError("TASK_VERSION_CONFLICT")
+    object_key = observed.object_key
+    size_bytes = observed.size_bytes
     try:
-        metadata = store.stat(task.object_key)
+        metadata = store.stat(object_key)
     except Exception as exc:
         raise ValueError("UPLOAD_NOT_FOUND") from exc
     if (
-        metadata.get("size") != task.size_bytes
+        metadata.get("size") != size_bytes
         or metadata.get("content_type", "video/mp4").split(";")[0].lower()
         != "video/mp4"
     ):
         raise ValueError("UPLOAD_SIZE_MISMATCH")
+
+    session.expire_all()
+    task = get_task(session, task_id, lock=True)
+    if task is None:
+        raise LookupError("TASK_NOT_FOUND")
+    if task.stage != TaskStage.AWAITING_UPLOAD.value:
+        raise TaskConflict("TASK_ACTION_NOT_ALLOWED", task)
+    if task.row_version != expected_version or task.object_key != object_key:
+        raise TaskConflict("TASK_VERSION_CONFLICT", task)
+    now = datetime.now(UTC)
     task.object_etag = metadata.get("etag")
-    task.object_uploaded_at = datetime.now(UTC)
+    task.object_uploaded_at = now
     task.status = TaskStatus.PENDING.value
-    set_task_stage(task, TaskStage.QUEUED)
-    task.queued_at = datetime.now(UTC)
+    set_task_stage(task, TaskStage.QUEUED, now=now)
+    task.queued_at = now
     task.row_version += 1
     session.commit()
     return task
@@ -221,6 +252,8 @@ def replace_upload(session: Session, task_id: UUID) -> VideoPublishTask:
         raise LookupError("TASK_NOT_FOUND")
     if task.status != TaskStatus.FAILED.value or task.object_deleted_at is None:
         raise ValueError("UPLOAD_REPLACEMENT_REQUIRED")
+    if replacement_cleanup_pending(task):
+        raise ValueError("CLEANUP_REQUIRED")
     if not replace_upload_allowed(task):
         raise ValueError("RETRY_BUDGET_EXHAUSTED")
     task.status = TaskStatus.PENDING.value
@@ -229,10 +262,11 @@ def replace_upload(session: Session, task_id: UUID) -> VideoPublishTask:
     task.object_deleted_at = None
     task.object_etag = None
     task.object_sha256 = None
-    task.object_cleanup_status = "not_started"
-    task.object_cleanup_error = None
-    task.object_cleanup_attempts = 0
-    task.object_cleanup_next_attempt_at = None
+    for name in ("device", "spool", "object"):
+        setattr(task, f"{name}_cleanup_status", "not_started")
+        setattr(task, f"{name}_cleanup_error", None)
+        setattr(task, f"{name}_cleanup_attempts", 0)
+        setattr(task, f"{name}_cleanup_next_attempt_at", None)
     task.cleanup_intent = CleanupIntent.NONE.value
     task.cleanup_lease_owner = None
     task.cleanup_lease_expires_at = None

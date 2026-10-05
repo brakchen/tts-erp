@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
+import shutil
 import socket
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 
+from tts_erp_v2.api.deps import require_destructive_script_guard
 from tts_erp_v2.db.base import get_session_factory
+from tts_erp_v2.db.models.publishing import VideoPublishTask
 from tts_erp_v2.publishing.adb_device import AdbDevice
 from tts_erp_v2.publishing.artemis_client import ArtemisClient
 from tts_erp_v2.publishing.dispatcher import (
@@ -22,11 +26,14 @@ from tts_erp_v2.publishing.dispatcher import (
 from tts_erp_v2.publishing.object_store import MinioVideoStore
 from tts_erp_v2.storage.minio_client import MinioClient
 
+logger = logging.getLogger(__name__)
+_TERMINAL_STATUSES = {"succeeded", "failed", "needs_review", "cancelled"}
+
 
 async def run() -> None:
     instance_id = str(uuid4())
     session_factory = get_session_factory()
-    _write_heartbeat(session_factory, instance_id, "starting")
+    await asyncio.to_thread(_write_heartbeat, session_factory, instance_id, "starting")
     store = MinioVideoStore(MinioClient.from_env())
     deps = PublishDependencies(
         session_factory=session_factory,
@@ -49,6 +56,7 @@ async def run() -> None:
         ),
     )
     deps.spool_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    await asyncio.to_thread(_cleanup_orphan_spool, session_factory, deps.spool_dir)
     heartbeat_task = asyncio.create_task(
         _heartbeat_loop(
             session_factory,
@@ -65,15 +73,66 @@ async def run() -> None:
     finally:
         heartbeat_task.cancel()
         await asyncio.gather(heartbeat_task, return_exceptions=True)
-        _write_heartbeat(session_factory, instance_id, "stopping")
+        await asyncio.to_thread(
+            _write_heartbeat, session_factory, instance_id, "stopping"
+        )
 
 
 async def _heartbeat_loop(
     session_factory, instance_id: str, interval_seconds: float
 ) -> None:
     while True:
-        _write_heartbeat(session_factory, instance_id, "ready")
+        await asyncio.to_thread(_write_heartbeat, session_factory, instance_id, "ready")
         await asyncio.sleep(interval_seconds)
+
+
+def _cleanup_orphan_spool(session_factory, spool_dir: Path) -> int:
+    """Delete only UUID task directories proven terminal and older than 24h."""
+    root = spool_dir.resolve()
+    with session_factory() as session:
+        database_now = session.scalar(select(func.now()))
+        if database_now is None:
+            return 0
+        cutoff = database_now - timedelta(hours=24)
+        removable: list[Path] = []
+        for entry in root.iterdir():
+            if not entry.is_dir() or entry.resolve().parent != root:
+                continue
+            try:
+                task_id = UUID(entry.name)
+            except ValueError:
+                logger.warning("preserving unrecognized publish spool directory")
+                continue
+            row = session.execute(
+                select(
+                    VideoPublishTask.status,
+                    VideoPublishTask.completed_at,
+                    VideoPublishTask.created_at,
+                ).where(VideoPublishTask.public_id == task_id)
+            ).one_or_none()
+            task_age = row.completed_at or row.created_at if row else None
+            if (
+                row
+                and task_age is not None
+                and row.status in _TERMINAL_STATUSES
+                and task_age <= cutoff
+            ):
+                removable.append(entry)
+    if not removable:
+        return 0
+    try:
+        require_destructive_script_guard(
+            script_name="video_publish.cleanup_orphan_spool",
+            confirmation=True,
+            dangerous=True,
+        )
+    except SystemExit:
+        logger.error("orphan spool cleanup blocked by destructive guard")
+        return 0
+    for entry in removable:
+        shutil.rmtree(entry)
+    logger.info("removed %d proven terminal orphan spool directories", len(removable))
+    return len(removable)
 
 
 def _write_heartbeat(session_factory, instance_id: str, state: str) -> None:

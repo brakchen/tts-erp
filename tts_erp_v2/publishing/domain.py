@@ -284,10 +284,20 @@ def classify_failure(
     return FailureClassification("session_missing", None, True)
 
 
+def replacement_cleanup_pending(task: Any) -> bool:
+    """Replacement cannot erase cleanup ownership for old local resources."""
+    return any(
+        getattr(task, f"{name}_cleanup_status", None)
+        in {CleanupStatus.PENDING.value, CleanupStatus.FAILED.value}
+        for name in ("device", "spool")
+    )
+
+
 def replace_upload_allowed(task: Any) -> bool:
     return (
         task.status == TaskStatus.FAILED.value
         and task.object_deleted_at is not None
+        and not replacement_cleanup_pending(task)
         and task.attempt_count < int(os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3"))
     )
 

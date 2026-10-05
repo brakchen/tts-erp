@@ -16,4 +16,4 @@
 
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| video-publish-design | TikTok 视频发布技术方案与 UI 交互 | 01a10600-8186-7668-b8bc-2ca85bd3f955 | `docs/video-publish-design` / `/home/schan/tts-erp/.worktrees/video-publish-design` | `docs/design/tiktok-video-publish.md` | ready | `a6925197db2d9cee6a1450ed4a2ecdc80731eb67` | `d7fa77c4a490feac9ab930b3a4ccd2cb1c7c0810` | 2026-10-04T09:47:24Z |
+| video-publish-design | TikTok 视频发布最终契约实现 | 01a10600-8186-7668-b8bc-2ca85bd3f955 | `docs/video-publish-design` / `/home/schan/tts-erp/.worktrees/video-publish-design` | `alembic/versions/005[3-9]*`, `alembic/versions/0060_video_publish_invariants.py`, `tts_erp_v2/publishing/`, `tts_erp_v2/api/v2/video_publish.py`, `tts_erp_v2/db/models/publishing.py`, `tts_erp_v2/static/{css,js}/video-publish.*`, `tts_erp_v2/templates/pages/video-publish.html`, `tests/publishing/`, `docs/{api,design,ops}/` | active | — | `f1bc1a5222a42d4dbadf8ffde94af27744418d2c` | 2026-10-05T06:30:56Z |

@@ -13,16 +13,18 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func, inspect, select, update
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, object_session, sessionmaker
 
 from tts_erp_v2.api.deps import require_destructive_script_guard
 from tts_erp_v2.db.models.publishing import VideoPublishAttempt, VideoPublishTask
 from tts_erp_v2.publishing.adb_device import AdbDevice, DeviceUnavailable
 from tts_erp_v2.publishing.artemis_client import (
+    ArtemisAdmissionRejected,
     ArtemisClient,
     ArtemisResult,
     ArtemisTransportError,
 )
+from tts_erp_v2.publishing.diagnostics import sanitize_artemis_output, sanitize_text
 from tts_erp_v2.publishing.domain import (
     AttemptKind,
     AttemptStatus,
@@ -42,6 +44,7 @@ from tts_erp_v2.publishing.repository import (
     has_pending_device_cleanup,
     release_lease,
     renew_cleanup_lease,
+    schedule_retention_cleanup,
     touch_task,
 )
 
@@ -67,6 +70,8 @@ class PublishDependencies:
 
 async def dispatch_one(deps: PublishDependencies) -> str:
     with deps.session_factory() as session:
+        schedule_retention_cleanup(session)
+        session.commit()
         task = _lease_task(session, deps.instance_id, deps.lease_seconds)
         if task is None:
             task = _lease_cleanup_task(
@@ -284,6 +289,28 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
         await _mark_spool_cleanup(task_id, deps, error=spool_error)
 
 
+async def _handle_admission_rejection(
+    task_id: UUID,
+    attempt_id: int,
+    code: str,
+    deps: PublishDependencies,
+) -> None:
+    """Persist a safe pre-admission rejection without consuming publish budget."""
+    with deps.session_factory() as session:
+        task = _get(session, task_id)
+        _assert_lease(task, deps.instance_id)
+        attempt = _require_attempt(session, attempt_id)
+        attempt.status = AttemptStatus.REJECTED.value
+        attempt.retry_classification = code.lower()
+        attempt.retry_safe = True
+        attempt.artemis_error = sanitize_text(code)
+        attempt.finished_at = datetime.now(UTC)
+        if attempt.kind == AttemptKind.PUBLISH.value:
+            task.attempt_count = max(0, task.attempt_count - 1)
+        session.commit()
+    await _safe_retry(task_id, code, deps, stage=TaskStage.WAITING_DEVICE.value)
+
+
 async def _run_attempt(
     task_id: UUID, attempt_id: int, deps: PublishDependencies
 ) -> None:
@@ -330,6 +357,9 @@ async def _run_attempt(
                     ),
                 ),
             )
+        except ArtemisAdmissionRejected as exc:
+            await _handle_admission_rejection(task_id, attempt_id, exc.code, deps)
+            return
         except ArtemisTransportError:
             try:
                 result = await _run_external(
@@ -339,6 +369,9 @@ async def _run_attempt(
                         deps, session_id, goal, device_serial, app_package
                     ),
                 )
+            except ArtemisAdmissionRejected as exc:
+                await _handle_admission_rejection(task_id, attempt_id, exc.code, deps)
+                return
             except ArtemisTransportError:
                 # Admission is still ambiguous; keep this session active and
                 # let the next dispatch cycle poll the same ID.
@@ -351,20 +384,24 @@ async def _run_attempt(
         except ArtemisTransportError:
             return
         if result.status in {"missing", "not_found"}:
-            result = await _run_external(
-                task_id,
-                deps,
-                lambda: deps.artemis.submit(
-                    goal=goal,
-                    session_id=session_id,
-                    device_serial=device_serial,
-                    app_package=app_package,
-                    profile=getattr(deps, "artemis_profile", "pro"),
-                    verification_level=getattr(
-                        deps, "artemis_verification_level", "strict"
+            try:
+                result = await _run_external(
+                    task_id,
+                    deps,
+                    lambda: deps.artemis.submit(
+                        goal=goal,
+                        session_id=session_id,
+                        device_serial=device_serial,
+                        app_package=app_package,
+                        profile=getattr(deps, "artemis_profile", "pro"),
+                        verification_level=getattr(
+                            deps, "artemis_verification_level", "strict"
+                        ),
                     ),
-                ),
-            )
+                )
+            except ArtemisAdmissionRejected as exc:
+                await _handle_admission_rejection(task_id, attempt_id, exc.code, deps)
+                return
     else:
         try:
             result = await _run_external(
@@ -387,6 +424,8 @@ async def _run_attempt(
         task = _get(session, task_id)
         _assert_lease(task, deps.instance_id)
         attempt.last_polled_at = datetime.now(UTC)
+        if result.same_session_resubmitted:
+            attempt.submit_retry_count += 1
         if should_submit or admission_probe:
             attempt.submitted_at = attempt.submitted_at or datetime.now(UTC)
         if not result.terminal:
@@ -417,7 +456,21 @@ async def _run_attempt(
                 session.commit()
                 await _cleanup_success(task_id, deps)
             elif verdict == "not_published":
-                if task.device_path:
+                terminal = task.attempt_count >= deps.max_attempts
+                if terminal:
+                    if task.device_path:
+                        transition_task(task, "SAFE_RETRY_EXHAUSTED")
+                        task.device_cleanup_status = "pending"
+                        task.device_cleanup_next_attempt_at = datetime.now(UTC)
+                    else:
+                        task.status = TaskStatus.FAILED.value
+                        set_task_stage(task, TaskStage.DONE)
+                        task.cleanup_intent = "none"
+                    task.last_error_code = "retry_budget_exhausted"
+                    task.last_error_message = "Publish retry budget is exhausted"
+                    task.next_attempt_at = None
+                    task.completed_at = datetime.now(UTC)
+                elif task.device_path:
                     transition_task(task, "VERIFY_NOT_PUBLISHED")
                     task.device_cleanup_status = "pending"
                     task.device_cleanup_next_attempt_at = datetime.now(UTC)
@@ -482,7 +535,7 @@ async def _query_after_submit_transport_error(
     """Probe admission before retrying POST, always reusing the same ID."""
     result = await deps.artemis.get_task(session_id)
     if result.status in {"missing", "not_found"}:
-        return await deps.artemis.submit(
+        result = await deps.artemis.submit(
             goal=goal,
             session_id=session_id,
             device_serial=device_serial,
@@ -490,6 +543,7 @@ async def _query_after_submit_transport_error(
             profile=getattr(deps, "artemis_profile", "pro"),
             verification_level=getattr(deps, "artemis_verification_level", "strict"),
         )
+        return dataclasses.replace(result, same_session_resubmitted=True)
     return result
 
 
@@ -593,11 +647,19 @@ async def _lease_heartbeat(
 
 
 def _assert_lease(task: VideoPublishTask, instance_id: str) -> None:
-    if (
-        task.lease_owner != instance_id
-        or task.lease_expires_at is None
-        or task.lease_expires_at <= datetime.now(UTC)
-    ):
+    session = object_session(task)
+    valid = (
+        session.scalar(
+            select(VideoPublishTask.id).where(
+                VideoPublishTask.id == task.id,
+                VideoPublishTask.lease_owner == instance_id,
+                VideoPublishTask.lease_expires_at > func.now(),
+            )
+        )
+        if session is not None
+        else None
+    )
+    if valid is None:
         raise LeaseLost(task.public_id)
 
 
@@ -609,13 +671,15 @@ def _require_attempt(session: Session, attempt_id: int) -> VideoPublishAttempt:
 
 
 def _save_result(attempt: VideoPublishAttempt, result: ArtemisResult) -> None:
-    attempt.status = (
-        AttemptStatus.SUCCESS.value
-        if result.status == "success"
-        else AttemptStatus.FAILED.value
-    )
-    attempt.artemis_output = result.output
-    attempt.artemis_error = result.error
+    status = result.status.lower()
+    attempt.status = {
+        "success": AttemptStatus.SUCCESS.value,
+        "rejected": AttemptStatus.REJECTED.value,
+        "cancelled": AttemptStatus.CANCELLED.value,
+        "canceled": AttemptStatus.CANCELLED.value,
+    }.get(status, AttemptStatus.FAILED.value)
+    attempt.artemis_output = sanitize_artemis_output(result.output)
+    attempt.artemis_error = sanitize_text(result.error) if result.error else None
     attempt.steps_count = result.steps_count
     attempt.finished_at = datetime.now(UTC)
 
@@ -659,7 +723,9 @@ async def _safe_retry(
             return
         expected_version = task.row_version
         terminal = task.attempt_count >= deps.max_attempts
-        now = datetime.now(UTC)
+        now = session.scalar(select(func.now()))
+        if now is None:
+            raise RuntimeError("DATABASE_TIME_UNAVAILABLE")
         delay = min(300, 5 * (2 ** min(task.attempt_count, 5)))
         cleanup_gate = task.device_path is not None and task.stage in {
             TaskStage.STAGING_DEVICE.value,
@@ -677,7 +743,7 @@ async def _safe_retry(
             task.status = (
                 TaskStatus.FAILED.value if terminal else TaskStatus.PENDING.value
             )
-            set_task_stage(task, TaskStage.DONE if terminal else stage)
+            set_task_stage(task, TaskStage.DONE if terminal else stage, now=now)
             task.cleanup_intent = "none"
         values = {
             "status": task.status,
@@ -704,6 +770,7 @@ async def _safe_retry(
             .where(
                 VideoPublishTask.public_id == task_id,
                 VideoPublishTask.lease_owner == deps.instance_id,
+                VideoPublishTask.lease_expires_at > func.now(),
                 VideoPublishTask.row_version == expected_version,
             )
             .values(**values)
@@ -726,6 +793,7 @@ async def _mark_failed(task_id: UUID, code: str, deps: PublishDependencies) -> N
             .where(
                 VideoPublishTask.public_id == task_id,
                 VideoPublishTask.lease_owner == deps.instance_id,
+                VideoPublishTask.lease_expires_at > func.now(),
                 VideoPublishTask.row_version == expected_version,
             )
             .values(
@@ -763,6 +831,7 @@ async def _mark_unexpected(
             .where(
                 VideoPublishTask.public_id == task_id,
                 VideoPublishTask.lease_owner == deps.instance_id,
+                VideoPublishTask.lease_expires_at > func.now(),
                 VideoPublishTask.row_version == expected_version,
             )
             .values(
@@ -957,6 +1026,7 @@ async def _execute_cleanup(
             .where(
                 VideoPublishTask.public_id == task_id,
                 VideoPublishTask.cleanup_lease_owner == deps.instance_id,
+                VideoPublishTask.cleanup_lease_expires_at > func.now(),
                 VideoPublishTask.row_version == expected_version,
             )
             .values(**values)
@@ -991,11 +1061,19 @@ async def _run_cleanup_external(
 
 
 def _assert_cleanup_lease(task: VideoPublishTask, instance_id: str) -> None:
-    if (
-        task.cleanup_lease_owner != instance_id
-        or task.cleanup_lease_expires_at is None
-        or task.cleanup_lease_expires_at <= datetime.now(UTC)
-    ):
+    session = object_session(task)
+    valid = (
+        session.scalar(
+            select(VideoPublishTask.id).where(
+                VideoPublishTask.id == task.id,
+                VideoPublishTask.cleanup_lease_owner == instance_id,
+                VideoPublishTask.cleanup_lease_expires_at > func.now(),
+            )
+        )
+        if session is not None
+        else None
+    )
+    if valid is None:
         raise LeaseLost(task.public_id)
 
 
@@ -1003,15 +1081,21 @@ async def _cleanup_success(task_id: UUID, deps: PublishDependencies) -> None:
     """Compatibility entry point; cleanup must first acquire its own lease."""
     with deps.session_factory() as session:
         task = _get(session, task_id)
-        if (
-            task.cleanup_lease_owner not in {None, deps.instance_id}
-            and task.cleanup_lease_expires_at is not None
-            and task.cleanup_lease_expires_at > datetime.now(UTC)
-        ):
+        active_other_owner = session.scalar(
+            select(VideoPublishTask.id).where(
+                VideoPublishTask.id == task.id,
+                VideoPublishTask.cleanup_lease_owner.is_not(None),
+                VideoPublishTask.cleanup_lease_owner != deps.instance_id,
+                VideoPublishTask.cleanup_lease_expires_at > func.now(),
+            )
+        )
+        if active_other_owner is not None:
             raise LeaseLost(task.public_id)
         if task.cleanup_intent == "none":
             raise ValueError("CLEANUP_PLAN_REQUIRED")
-        now = datetime.now(UTC)
+        now = session.scalar(select(func.now()))
+        if now is None:
+            raise RuntimeError("DATABASE_TIME_UNAVAILABLE")
         task.cleanup_lease_owner = deps.instance_id
         task.cleanup_lease_expires_at = now + timedelta(seconds=deps.lease_seconds)
         task.cleanup_heartbeat_at = now

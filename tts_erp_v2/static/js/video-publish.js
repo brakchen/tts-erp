@@ -26,6 +26,7 @@
     detailOpener: null,
     etags: new Map(),
     currentTask: null,
+    destroyed: false,
   };
 
   function notice(message, error) {
@@ -129,12 +130,19 @@
     const video = $("publish-video-preview");
     video.src = state.url;
     video.hidden = false;
+    video.onloadedmetadata = () => {
+      const duration = Number.isFinite(video.duration)
+        ? `${Math.round(video.duration)} 秒`
+        : "时长未知";
+      $("publish-preview-metadata").textContent = `${duration} · ${video.videoWidth || "?"}×${video.videoHeight || "?"}`;
+    };
     renderForm();
   }
 
   async function init() {
     try {
       state.config = await request("/config");
+      $("publish-caption").maxLength = state.config.maxCaptionCharacters;
       $("publish-size-hint").textContent = `MP4 · 最大 ${Math.round(state.config.maxVideoBytes / 1024 / 1024)} MB`;
       $("publish-target-device").textContent = state.config.target.deviceSerialMasked || "未配置";
       $("publish-target-album").textContent = state.config.target.album || "未配置";
@@ -304,7 +312,7 @@
     const detailButton = $("publish-rail-detail");
     if (task) {
       const attempt = task.currentAttempt;
-      const startedAt = task.stageStartedAt || attempt?.startedAt || task.startedAt;
+      const startedAt = task.operationalStageStartedAt || task.stageStartedAt || attempt?.startedAt || task.startedAt;
       const attemptCount = attempt?.kind === "verify" ? task.verifyAttemptCount : task.publishAttemptCount;
       const elapsed = startedAt ? `${Math.max(0, Math.floor((Date.now() - Date.parse(startedAt)) / 1000))} 秒` : "—";
       meta.textContent = `任务 ${task.taskId} · ${task.operationalStage || task.stage} · ${attempt?.kind || "—"} #${attemptCount || 0} · 开始 ${startedAt || "—"} · 已耗时 ${elapsed}`;
@@ -336,13 +344,20 @@
     copy_artemis_id: "复制 Artemis ID",
   };
   const CONFIRM_ACTIONS = new Set(["cancel", "retry", "verify", "retry_cleanup", "replace_upload"]);
-  const CONFIRM_MESSAGES = {
-    cancel: "取消会保留任务审计记录，并清理已生成的对象；确认取消？",
-    retry: "重试会复用已上传对象，并重新执行一次发布；不会自动确认模糊结果。确认重试？",
-    verify: "核验是只读检查，不会再次点击发布；确认开始核验？",
-    retry_cleanup: "仅重试已失败的清理资源，不会改变业务发布结果；确认重试清理？",
-    replace_upload: "原对象已删除，重新上传会创建新的发布输入；确认重新上传？",
-  };
+
+  function confirmationMessage(task, actionName) {
+    const attempt = task.currentAttempt || {};
+    const attemptId = attempt.artemisSessionId || task.latestArtemisSessionId || "尚未创建";
+    const failure = `${task.lastErrorCode || "无错误码"} / ${task.lastErrorMessage || "无错误详情"}`;
+    const budget = `${task.attemptCount ?? task.publishAttemptCount ?? 0}/${state.config?.maxPublishAttempts || 3}`;
+    return {
+      cancel: `取消任务 ${task.taskId}（阶段 ${task.stage}）会保留审计记录，并清理已生成的对象；确认取消？`,
+      retry: `重试任务 ${task.taskId}\n前次 Artemis ID：${attemptId}\n失败阶段：${task.stage}\n错误：${failure}\n发布预算：${budget}\n重试会复用已上传对象，且不会自动确认模糊结果。确认重试？`,
+      verify: `只读核验任务 ${task.taskId} 的发布 attempt ${attemptId}；不会进入上传页，不会再次点击发布。确认开始核验？`,
+      retry_cleanup: `仅重试任务 ${task.taskId} 的失败资源：${(task.cleanupRetryableResources || []).join("、") || "无"}；不会改变业务发布结果。确认重试清理？`,
+      replace_upload: `任务 ${task.taskId} 的原对象已删除；当前阶段 ${task.stage}，错误 ${failure}，预算 ${budget}。重新上传会创建新的发布输入。确认重新上传？`,
+    }[actionName] || `确认${ACTION_LABELS[actionName] || actionName}？`;
+  }
 
   function resumeUpload(task) {
     if (task.status === "cancelled" || !(task.allowedActions || []).includes("continue_upload")) {
@@ -357,13 +372,17 @@
     $("publish-video-file").click();
   }
 
-  async function runTaskAction(task, actionName) {
-    if (CONFIRM_ACTIONS.has(actionName) && !window.confirm(CONFIRM_MESSAGES[actionName] || `确认${ACTION_LABELS[actionName] || actionName}？`)) return;
+  async function runTaskAction(task, actionName, trigger = null) {
+    if (CONFIRM_ACTIONS.has(actionName)) {
+      const confirmed = window.confirm(confirmationMessage(task, actionName));
+      trigger?.focus?.();
+      if (!confirmed) return;
+    }
     try {
       if (actionName === "view") return openDetail(task.taskId);
       if (actionName === "copy_artemis_id") {
         const id = task.latestArtemisSessionId;
-        if (id) await navigator.clipboard.writeText(id);
+        if (id) await copyText(id);
         return;
       }
       if (actionName === "continue_upload") {
@@ -393,7 +412,7 @@
       });
       await refresh();
     } catch (error) {
-      if (error.status === 409 && error.code === "ROW_VERSION_CONFLICT") {
+      if (error.status === 409 && error.code === "TASK_VERSION_CONFLICT") {
         notice("任务已更新，已刷新最新状态", true);
         await refresh();
       } else {
@@ -409,7 +428,7 @@
     if (!payload.items.length) {
       const row = document.createElement("tr");
       const cell = document.createElement("td");
-      cell.colSpan = 5;
+      cell.colSpan = 9;
       cell.className = "op-empty";
       cell.textContent = "还没有发布任务。选择一个 MP4 并填写文案开始。";
       row.append(cell);
@@ -418,11 +437,20 @@
     }
     payload.items.forEach((task) => {
       const row = document.createElement("tr");
-      [task.status, task.filename, task.latestArtemisSessionId || "—", new Date(task.createdAt).toLocaleString()].forEach((value, index) => {
+      [
+        task.status,
+        task.stage,
+        task.captionPreview || "—",
+        task.filename,
+        `${task.publishAttemptCount || 0} / ${task.verifyAttemptCount || 0}`,
+        task.createdBy || "—",
+        task.latestArtemisSessionId || "—",
+        new Date(task.createdAt).toLocaleString(),
+      ].forEach((value, index) => {
         const cell = document.createElement("td");
-        cell.textContent = value;
-        cell.dataset.label = ["状态", "视频", "Artemis ID", "时间"][index] || "";
-        if (index === 2) cell.className = "artemis-cell";
+        cell.textContent = value ?? "—";
+        cell.dataset.label = ["状态", "阶段", "文案", "视频", "发布/核验", "创建者", "Artemis ID", "时间"][index] || "";
+        if (index === 6) cell.className = "artemis-cell";
         row.append(cell);
       });
       const actions = document.createElement("td");
@@ -432,7 +460,7 @@
         button.textContent = ACTION_LABELS[actionName] || actionName;
         button.onclick = () => {
         if (actionName === "view") state.detailOpener = button;
-        return runTaskAction(task, actionName);
+        return runTaskAction(task, actionName, button);
       };
         actions.append(button);
       });
@@ -522,8 +550,9 @@
   }
 
   function backoffSeconds(seconds, failures) {
-    if (document.hidden) seconds = Math.max(30, seconds * 4);
-    return Math.min(120, seconds * Math.pow(2, Math.min(failures, 3)));
+    if (failures > 0) seconds = [5, 10, 30, 60][Math.min(failures - 1, 3)];
+    if (document.hidden) seconds = Math.max(30, seconds);
+    return seconds;
   }
 
   function renderRefreshState(mode) {
@@ -540,7 +569,7 @@
     const mode = $("publish-refresh-mode").value;
     localStorage.setItem(REFRESH_KEY, mode);
     renderRefreshState(mode);
-    if (mode === "off") return;
+    if (mode === "off" || state.destroyed) return;
     scheduleCurrent(mode);
     scheduleList(mode);
     scheduleDetail(mode);
@@ -617,7 +646,7 @@
       const copy = document.createElement("button");
       copy.className = "btn-secondary drawer-action";
       copy.textContent = "复制 Artemis ID";
-      copy.onclick = () => navigator.clipboard.writeText(attempt.artemisSessionId).then(() => notice("Artemis ID 已复制"));
+      copy.onclick = () => copyText(attempt.artemisSessionId);
       section.append(summary, diagnostic, id, copy);
       if (attempt.promptSnapshot || attempt.artemisOutput) {
         const diagnostics = document.createElement("details");
@@ -642,7 +671,7 @@
       const button = document.createElement("button");
       button.className = "btn-secondary drawer-action";
       button.textContent = ACTION_LABELS[action] || action;
-      button.onclick = () => runTaskAction(detail, action);
+      button.onclick = () => runTaskAction(detail, action, button);
       actions.append(button);
     });
   }
@@ -680,14 +709,41 @@
     document.querySelectorAll("[data-task-filter]").forEach((node) => node.classList.toggle("is-active", node === button));
     refresh({ current: false });
   }));
+  async function copyText(value) {
+    try {
+      await navigator.clipboard.writeText(value);
+      notice("Artemis ID 已复制");
+    } catch {
+      const fallback = document.createElement("textarea");
+      fallback.value = value;
+      fallback.setAttribute("readonly", "");
+      document.body.append(fallback);
+      fallback.select();
+      const copied = document.execCommand("copy");
+      fallback.remove();
+      notice(copied ? "Artemis ID 已复制" : "复制失败，请手动选择 Artemis ID", !copied);
+    }
+  }
+
   document.querySelector("[data-copy-artemis-id]").addEventListener("click", (event) => {
     const id = event.currentTarget.dataset.copyArtemisId;
-    if (id) navigator.clipboard.writeText(id).then(() => notice("Artemis ID 已复制"));
+    if (id) copyText(id);
   });
   $("publish-video-drop").addEventListener("dragover", (event) => { event.preventDefault(); $("publish-video-drop").classList.add("is-dragging"); });
   $("publish-video-drop").addEventListener("dragleave", () => $("publish-video-drop").classList.remove("is-dragging"));
   $("publish-video-drop").addEventListener("drop", (event) => { event.preventDefault(); pick(event.dataTransfer.files[0]); $("publish-video-drop").classList.remove("is-dragging"); });
+  function destroy() {
+    state.destroyed = true;
+    clearTimeout(state.currentTimer);
+    clearTimeout(state.listTimer);
+    clearTimeout(state.detailTimer);
+    [state.currentChannel, state.listChannel, state.detailChannel].forEach((channel) => channel.controller?.abort());
+    state.upload?.xhr?.abort();
+    if (state.url) URL.revokeObjectURL(state.url);
+  }
+
   window.addEventListener("beforeunload", (event) => { if (state.upload) { event.preventDefault(); event.returnValue = ""; } });
+  window.addEventListener("pagehide", destroy);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) { refresh(); schedule(); } else schedule(); });
   init();
 })();

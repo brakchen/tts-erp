@@ -45,6 +45,12 @@ class AdbDevice:
         output = await self._run("-s", serial, "get-state")
         if output.strip() != "device":
             raise DeviceUnavailable("目标设备未在线")
+        lock_state = await self._run("-s", serial, "shell", "dumpsys", "window")
+        if re.search(
+            r"(?:mDreamingLockscreen|mShowingLockscreen|isStatusBarKeyguard)=true",
+            lock_state,
+        ):
+            raise DeviceLocked("目标设备仍处于锁屏状态")
 
     async def check_package(self, serial: str, package: str) -> None:
         output = await self._run("-s", serial, "shell", "pm", "path", package)

@@ -8,6 +8,7 @@ from uuid import UUID
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -35,7 +36,28 @@ class VideoPublishTask(Base):
                 "status = 'pending' AND stage IN ('queued','waiting_device')"
             ),
         ),
-        Index("ix_video_publish_history", "created_at", "id"),
+        Index(
+            "ix_video_publish_history",
+            text("created_at DESC"),
+            text("id DESC"),
+        ),
+        Index(
+            "ix_video_publish_cleanup_queue",
+            "cleanup_lease_expires_at",
+            "id",
+            postgresql_where=text(
+                "cleanup_intent <> 'none' AND "
+                "(device_cleanup_status IN ('pending','failed') OR "
+                "spool_cleanup_status IN ('pending','failed') OR "
+                "object_cleanup_status IN ('pending','failed'))"
+            ),
+        ),
+        CheckConstraint(
+            "device_cleanup_status IN ('not_started','pending','succeeded','failed') "
+            "AND spool_cleanup_status IN ('not_started','pending','succeeded','failed') "
+            "AND object_cleanup_status IN ('not_started','pending','succeeded','failed')",
+            name="video_publish_task_cleanup_status_check",
+        ),
         Index(
             "uq_video_publish_one_running",
             text("(1)"),
@@ -159,6 +181,11 @@ class VideoPublishAttempt(Base):
     __table_args__ = (
         UniqueConstraint(
             "task_id", "sequence_no", name="uq_video_publish_attempt_task_seq"
+        ),
+        CheckConstraint(
+            "(kind = 'publish' AND related_attempt_id IS NULL) OR "
+            "(kind = 'verify' AND related_attempt_id IS NOT NULL)",
+            name="video_publish_attempt_related_check",
         ),
         Index("ix_video_publish_attempt_task_seq", "task_id", "sequence_no"),
         Index(
