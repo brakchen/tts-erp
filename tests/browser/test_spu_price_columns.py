@@ -147,6 +147,7 @@ def test_price_tooltip_is_keyboard_openable_and_restores_focus(browser_renderer,
     text = page.locator("#ops-tip").inner_text()
     assert "TikTok" not in text
     assert "ROI 当前有效成本" in text
+    assert "计算时间：2026-10-06T00:00:00+00:00" in text
     page.keyboard.press("Escape")
     assert button.get_attribute("aria-expanded") == "false"
     assert page.evaluate("document.activeElement === document.querySelector('[data-price-tip=\\\"purchase\\\"]')")

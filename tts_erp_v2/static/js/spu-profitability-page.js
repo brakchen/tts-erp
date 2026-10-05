@@ -1220,7 +1220,8 @@
       "按件数加权平均值/中位数",
       "窗口：当前经营窗口；已付款且排除赠品",
       "覆盖：" + (stats.status || "unknown") + "，" + (stats.observedQuantity ?? 0) + "/" + (stats.eligibleQuantity ?? 0) + " 件",
-      "汇率快照：" + (fx.snapshotId ?? fx.snapshot_id ?? "—") + "；成本基准：" + (cost.basisFingerprint || "—"),
+      "币种：" + (meta.priceCurrency || "CNY") + "；汇率快照：" + (fx.snapshotId ?? fx.snapshot_id ?? "—"),
+      "成本基准：" + (cost.basisFingerprint || "—") + "；计算时间：" + (meta.calculatedAt || meta.calculated_at || "—"),
       metric === "purchase" && stats.estimated === true ? "≈ K1=40 CNY/件，非人工成本" : "",
     ].filter(Boolean).join("；");
   }
