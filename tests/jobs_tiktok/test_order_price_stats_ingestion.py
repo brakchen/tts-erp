@@ -462,6 +462,99 @@ def test_backfill_rejects_raw_capture_shared_by_two_shops(price_observation_sche
         assert counts["inserted"] == 0
 
 
+def test_backfill_rejects_header_line_and_fully_orphan_captures(
+    price_observation_schema, db_engine
+) -> None:
+    from tts_erp_v2.db.models import RawRecord, SalesOrder, SalesOrderLine
+
+    with Session(db_engine) as session:
+        account = _make_account(session, "ORPHAN")
+        header_raw = RawRecord(
+            endpoint="/order/202309/orders/search",
+            external_id="TEST_PRICE_ORPHAN_HEADER",
+            payload={
+                "order_id": "TEST_PRICE_ORPHAN_HEADER",
+                "update_time": 1_791_000_000,
+                "currency": "USD",
+                "line_items": [],
+            },
+            payload_hash="TEST_PRICE_ORPHAN_HEADER_RAW",
+        )
+        line_raw = RawRecord(
+            endpoint="/order/202309/orders/search",
+            external_id="TEST_PRICE_ORPHAN_LINE",
+            payload={
+                "order_id": "TEST_PRICE_ORPHAN_LINE",
+                "update_time": 1_791_000_000,
+                "currency": "USD",
+                "line_items": [
+                    {
+                        "line_id": "TEST_PRICE_ORPHAN_LINE_ID",
+                        "original_price": "10",
+                        "sale_price": "8",
+                        "currency": "USD",
+                        "is_gift": False,
+                    }
+                ],
+            },
+            payload_hash="TEST_PRICE_ORPHAN_LINE_RAW",
+        )
+        fully_orphan_raw = RawRecord(
+            endpoint="/order/202309/orders/search",
+            external_id="TEST_PRICE_ORPHAN_FULL",
+            payload={
+                "order_id": "TEST_PRICE_ORPHAN_FULL",
+                "line_items": [],
+            },
+            payload_hash="TEST_PRICE_ORPHAN_FULL_RAW",
+        )
+        session.add_all([header_raw, line_raw, fully_orphan_raw])
+        session.flush()
+        header_order = SalesOrder(
+            shop_pk=account.id,
+            order_id="TEST_PRICE_ORPHAN_HEADER",
+            status="AWAITING_SHIPMENT",
+            currency="USD",
+            order_modify_time=datetime.fromtimestamp(1_791_000_000, tz=UTC),
+            raw_record_id=header_raw.id,
+        )
+        line_order = SalesOrder(
+            shop_pk=account.id,
+            order_id="TEST_PRICE_ORPHAN_LINE",
+            status="AWAITING_SHIPMENT",
+            currency="USD",
+            order_modify_time=datetime.fromtimestamp(1_791_000_000, tz=UTC),
+            raw_record_id=header_raw.id,
+        )
+        session.add_all([header_order, line_order])
+        session.flush()
+        session.add(
+            SalesOrderLine(
+                order_pk=line_order.id,
+                external_line_id="TEST_PRICE_ORPHAN_LINE_ID",
+                quantity=1,
+                unit_price=Decimal("8"),
+                currency="USD",
+                raw_record_id=line_raw.id,
+            )
+        )
+        session.commit()
+        counts = _backfill_module()._run(
+            Namespace(
+                shop_pk=account.id,
+                dry_run=True,
+                start_raw_id=0,
+                end_raw_id=None,
+                batch_size=100,
+            )
+        )
+        assert counts["scanned"] == 0
+        assert counts["unmatched"] == 0
+        assert counts["inserted"] == 0
+        assert counts["duplicate_noop"] == 0
+        assert session.execute(select(SalesOrderLinePriceObservation)).scalars().all() == []
+
+
 def test_backfill_confirm_replay_is_idempotent(price_observation_schema, db_engine) -> None:
     with Session(db_engine) as session:
         account = _make_account(session, "REPLAY")
