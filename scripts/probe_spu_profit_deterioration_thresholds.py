@@ -19,7 +19,8 @@ import json
 import os
 import sys
 from collections import defaultdict
-from dataclasses import asdict, dataclass
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, fields, replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -67,6 +68,7 @@ class DailyFact:
     settled_net_vnd: Decimal = Decimal(0)
     settled_sales_vnd: Decimal = Decimal(0)
     unsettled_sales_vnd: Decimal = Decimal(0)
+    confirmed_unsettled_refund_vnd: Decimal = Decimal(0)
     refund_only_vnd: Decimal = Decimal(0)
     refund_return_vnd: Decimal = Decimal(0)
     refund_cancelled_vnd: Decimal = Decimal(0)
@@ -290,6 +292,7 @@ WITH bounded_keys AS MATERIALIZED (
            sum(settlement_vnd * line_gmv_vnd / NULLIF(gmv_vnd,0)) FILTER (WHERE is_settled) AS settled_net_vnd,
            sum(line_gmv_vnd) FILTER (WHERE is_settled) AS settled_sales_vnd,
            sum(line_gmv_vnd) FILTER (WHERE NOT coalesce(is_settled,false) AND status = ANY(CAST(:paid_statuses AS text[]))) AS unsettled_sales_vnd,
+           sum(coalesce(refund_only_vnd, 0) + coalesce(refund_return_vnd, 0)) FILTER (WHERE NOT coalesce(is_settled,false) AND status = ANY(CAST(:paid_statuses AS text[]))) AS confirmed_unsettled_refund_vnd,
            sum(refund_only_qty) FILTER (WHERE status = ANY(CAST(:paid_statuses AS text[]))) AS refund_only_qty,
            sum(refund_return_qty) FILTER (WHERE status = ANY(CAST(:paid_statuses AS text[]))) AS refund_return_qty,
            sum(refund_only_vnd) FILTER (WHERE status = ANY(CAST(:paid_statuses AS text[]))) AS refund_only_vnd,
@@ -377,6 +380,18 @@ def _decimal(value: Any) -> Decimal:
         return Decimal(0)
 
 
+def _daily_fact_from_row(row: Mapping[Any, Any]) -> DailyFact:
+    return DailyFact(
+        shop_pk=int(row["shop_pk"]), spu_pk=int(row["spu_pk"]), day=row["day"],
+        order_count=int(row["order_count"] or 0), cancelled_orders=int(row["cancelled_orders"] or 0),
+        domestic_cancelled_orders=int(row["domestic_cancelled_orders"] or 0), overseas_cancelled_orders=int(row["overseas_cancelled_orders"] or 0),
+        units_sold=_decimal(row["units_sold"]), full_loss_cancelled_qty=_decimal(row["full_loss_cancelled_qty"]), full_loss_qty=_decimal(row["full_loss_qty"]),
+        refund_order_count=int(row["refund_order_count"] or 0), refund_only_qty=_decimal(row["refund_only_qty"]), refund_return_qty=_decimal(row["refund_return_qty"]),
+        sales_vnd=_decimal(row["sales_vnd"]), settled_net_vnd=_decimal(row["settled_net_vnd"]), settled_sales_vnd=_decimal(row["settled_sales_vnd"]), unsettled_sales_vnd=_decimal(row["unsettled_sales_vnd"]), confirmed_unsettled_refund_vnd=_decimal(row["confirmed_unsettled_refund_vnd"]),
+        refund_only_vnd=_decimal(row["refund_only_vnd"]), refund_return_vnd=_decimal(row["refund_return_vnd"]), refund_cancelled_vnd=_decimal(row["refund_cancelled_vnd"]), cancelled_sales_vnd=_decimal(row["cancelled_sales_vnd"]),
+    )
+
+
 def _read_facts(session: Session, *, start_day: date, end_day: date, max_spus: int) -> list[DailyFact]:
     params = {
         "start_day": start_day,
@@ -395,23 +410,15 @@ def _read_facts(session: Session, *, start_day: date, end_day: date, max_spus: i
         key = (int(row["shop_pk"]), int(row["spu_pk"]))
         if key not in allowed:
             continue
-        day = row["day"]
-        facts[(key[0], key[1], day)] = DailyFact(
-            shop_pk=key[0], spu_pk=key[1], day=day,
-            order_count=int(row["order_count"] or 0), cancelled_orders=int(row["cancelled_orders"] or 0),
-            domestic_cancelled_orders=int(row["domestic_cancelled_orders"] or 0), overseas_cancelled_orders=int(row["overseas_cancelled_orders"] or 0),
-            units_sold=_decimal(row["units_sold"]), full_loss_cancelled_qty=_decimal(row["full_loss_cancelled_qty"]), full_loss_qty=_decimal(row["full_loss_qty"]),
-            refund_order_count=int(row["refund_order_count"] or 0), refund_only_qty=_decimal(row["refund_only_qty"]), refund_return_qty=_decimal(row["refund_return_qty"]),
-            sales_vnd=_decimal(row["sales_vnd"]), settled_net_vnd=_decimal(row["settled_net_vnd"]), settled_sales_vnd=_decimal(row["settled_sales_vnd"]), unsettled_sales_vnd=_decimal(row["unsettled_sales_vnd"]),
-            refund_only_vnd=_decimal(row["refund_only_vnd"]), refund_return_vnd=_decimal(row["refund_return_vnd"]), refund_cancelled_vnd=_decimal(row["refund_cancelled_vnd"]), cancelled_sales_vnd=_decimal(row["cancelled_sales_vnd"]),
-        )
+        fact = _daily_fact_from_row(row)
+        facts[(fact.shop_pk, fact.spu_pk, fact.day)] = fact
     for row in session.execute(_AD_SQL, {"endpoint": _AD_ENDPOINT, "start_day": start_day, "end_day": end_day, "max_spus": max_spus, "paid_statuses": list(PAID_SALES_ORDER_STATUSES)}).mappings():
         key = (int(row["shop_pk"]), int(row["spu_pk"]))
         if key not in allowed:
             continue
         k = (*key, row["day"])
         old = facts.get(k, DailyFact(shop_pk=key[0], spu_pk=key[1], day=row["day"]))
-        facts[k] = DailyFact(**{**asdict(old), "spend_usd": _decimal(row["spend_usd"]), "ad_orders": int(row["ad_orders"] or 0)})
+        facts[k] = replace(old, spend_usd=_decimal(row["spend_usd"]), ad_orders=int(row["ad_orders"] or 0))
     return list(facts.values())
 
 
@@ -458,10 +465,42 @@ def _costs_and_rates(
 
 def _aggregate(facts: list[DailyFact], *, key: tuple[int, int], start: date, end: date, costs: dict[int, Decimal], rates: dict[int, Decimal], usd_cny: Decimal, usd_vnd: Decimal) -> WindowMetric:
     rows = [row for row in facts if (row.shop_pk, row.spu_pk) == key and start <= row.day <= end]
-    total = {name: sum((getattr(row, name) for row in rows), Decimal(0)) for name in ("spend_usd", "units_sold", "full_loss_cancelled_qty", "full_loss_qty", "refund_only_qty", "refund_return_qty", "sales_vnd", "settled_net_vnd", "settled_sales_vnd", "unsettled_sales_vnd", "refund_only_vnd", "refund_return_vnd", "refund_cancelled_vnd", "cancelled_sales_vnd")}
+    total = {name: sum((getattr(row, name) for row in rows), Decimal(0)) for name in ("spend_usd", "units_sold", "full_loss_cancelled_qty", "full_loss_qty", "refund_only_qty", "refund_return_qty", "sales_vnd", "settled_net_vnd", "settled_sales_vnd", "unsettled_sales_vnd", "confirmed_unsettled_refund_vnd", "refund_only_vnd", "refund_return_vnd", "refund_cancelled_vnd", "cancelled_sales_vnd")}
     ints = {name: sum(getattr(row, name) for row in rows) for name in ("order_count", "cancelled_orders", "domestic_cancelled_orders", "overseas_cancelled_orders", "refund_order_count", "ad_orders")}
-    formula = calculate(FormulaInput(spend_usd=total["spend_usd"], ad_gmv_usd=Decimal(0), ad_orders=ints["ad_orders"], order_count=ints["order_count"], cancelled_orders=ints["cancelled_orders"], domestic_cancelled_orders=ints["domestic_cancelled_orders"], overseas_cancelled_orders=ints["overseas_cancelled_orders"], units_sold=int(total["units_sold"]), full_loss_cancelled_qty=int(total["full_loss_cancelled_qty"]), full_loss_qty=int(total["full_loss_qty"]), refund_order_count=ints["refund_order_count"], refund_only_qty=int(total["refund_only_qty"]), refund_return_qty=int(total["refund_return_qty"]), sales_vnd=total["sales_vnd"], settled_net_vnd=total["settled_net_vnd"], settled_sales_vnd=total["settled_sales_vnd"], unsettled_sales_vnd=total["unsettled_sales_vnd"], refund_only_vnd=total["refund_only_vnd"], refund_return_vnd=total["refund_return_vnd"], refund_cancelled_vnd=total["refund_cancelled_vnd"], cancelled_sales_vnd=total["cancelled_sales_vnd"], unit_cost_cny=costs.get(key[1], _DEFAULT_COST), usd_cny=usd_cny, usd_vnd=usd_vnd, unsettled_fee_rate=rates.get(key[0], _DEFAULT_FEE)))
+    formula = calculate(FormulaInput(spend_usd=total["spend_usd"], ad_gmv_usd=Decimal(0), ad_orders=ints["ad_orders"], order_count=ints["order_count"], cancelled_orders=ints["cancelled_orders"], domestic_cancelled_orders=ints["domestic_cancelled_orders"], overseas_cancelled_orders=ints["overseas_cancelled_orders"], units_sold=int(total["units_sold"]), full_loss_cancelled_qty=int(total["full_loss_cancelled_qty"]), full_loss_qty=int(total["full_loss_qty"]), refund_order_count=ints["refund_order_count"], refund_only_qty=int(total["refund_only_qty"]), refund_return_qty=int(total["refund_return_qty"]), sales_vnd=total["sales_vnd"], settled_net_vnd=total["settled_net_vnd"], settled_sales_vnd=total["settled_sales_vnd"], unsettled_sales_vnd=total["unsettled_sales_vnd"], confirmed_unsettled_refund_vnd=total["confirmed_unsettled_refund_vnd"], refund_only_vnd=total["refund_only_vnd"], refund_return_vnd=total["refund_return_vnd"], refund_cancelled_vnd=total["refund_cancelled_vnd"], cancelled_sales_vnd=total["cancelled_sales_vnd"], unit_cost_cny=costs.get(key[1], _DEFAULT_COST), usd_cny=usd_cny, usd_vnd=usd_vnd, unsettled_fee_rate=rates.get(key[0], _DEFAULT_FEE)))
     return WindowMetric(*key, start, end, formula.roi_real, formula.net_profit_cny, formula.spend_cny, formula.total_orders, ints["ad_orders"], len(rows))
+
+
+def self_check_formula_input_contract() -> None:
+    """Guard the probe adapter against required canonical FormulaInput drift."""
+    required = "confirmed_unsettled_refund_vnd"
+    if required not in {field.name for field in fields(DailyFact)} or required not in {field.name for field in fields(FormulaInput)}:
+        raise AssertionError("consumer contract missing confirmed_unsettled_refund_vnd")
+    required_expression = "sum(coalesce(refund_only_vnd, 0) + coalesce(refund_return_vnd, 0)) FILTER (WHERE NOT coalesce(is_settled,false) AND status = ANY(CAST(:paid_statuses AS text[]))) AS confirmed_unsettled_refund_vnd"
+    semantic_fragments = (
+        "WHERE c.status IN (:case_status_0, :case_status_1)",
+        "sum(cl.refund_amount) FILTER (WHERE c.case_type = 'REFUND_ONLY') AS refund_only_vnd",
+        "sum(cl.refund_amount) FILTER (WHERE c.case_type = 'RETURN_AND_REFUND') AS refund_return_vnd",
+        required_expression,
+        "sum(refund_cancelled_vnd) FILTER (WHERE status = 'CANCELLED') AS refund_cancelled_vnd",
+    )
+    if any(fragment not in _DAILY_SQL.text for fragment in semantic_fragments) or "refund_cancelled_vnd" in required_expression:
+        raise AssertionError("consumer SQL does not preserve completed/confirmed/cancellation refund separation")
+    row = {
+        "shop_pk": 1, "spu_pk": 2, "day": date(2026, 1, 1), "order_count": 1,
+        "cancelled_orders": 0, "domestic_cancelled_orders": 0, "overseas_cancelled_orders": 0,
+        "units_sold": Decimal(1), "full_loss_cancelled_qty": Decimal(0), "full_loss_qty": Decimal(0),
+        "refund_order_count": 0, "refund_only_qty": Decimal(0), "refund_return_qty": Decimal(0),
+        "sales_vnd": Decimal(100000), "settled_net_vnd": Decimal(0), "settled_sales_vnd": Decimal(0),
+        "unsettled_sales_vnd": Decimal(100000), required: Decimal(0),
+        "refund_only_vnd": Decimal(0), "refund_return_vnd": Decimal(0), "refund_cancelled_vnd": Decimal(0), "cancelled_sales_vnd": Decimal(0),
+    }
+    base = _daily_fact_from_row(row)
+    confirmed = _daily_fact_from_row({**row, required: Decimal(10000)})
+    base_metric = _aggregate([base], key=(1, 2), start=base.day, end=base.day, costs={1: Decimal(0)}, rates={1: Decimal(0)}, usd_cny=Decimal(7), usd_vnd=Decimal(25000))
+    confirmed_metric = _aggregate([confirmed], key=(1, 2), start=base.day, end=base.day, costs={1: Decimal(0)}, rates={1: Decimal(0)}, usd_cny=Decimal(7), usd_vnd=Decimal(25000))
+    if confirmed_metric.net_profit >= base_metric.net_profit:
+        raise AssertionError("confirmed unsettled refunds must reduce canonical net profit")
 
 
 def _distribution(values: list[Decimal]) -> dict[str, Any]:
@@ -648,6 +687,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     self_check_sql_scope()
     self_check_policy()
+    self_check_formula_input_contract()
     args = parse_args()
     if args.verify_artifact:
         verify_artifact(args.verify_artifact)
@@ -682,7 +722,7 @@ def main() -> int:
             else:
                 costs, rates, fee_sources, usd_cny, usd_vnd = {}, {}, {"shop_estimate": 0, "stale_fallback": 0, "baseline": 0}, _DEFAULT_USD_CNY, _DEFAULT_USD_VND
             result = _run_backtest(facts, anchor_start=anchor_start, anchor_end=anchor_end, costs=costs, rates=rates, usd_cny=usd_cny, usd_vnd=usd_vnd)
-            result["self_checks"] = {"sql_scope": "passed", "evaluability_boundaries": "passed"}
+            result["self_checks"] = {"sql_scope": "passed", "evaluability_boundaries": "passed", "formula_input_contract": "passed"}
             result.update({"generated_at": datetime.now(UTC).isoformat(), "snapshot": {"calculatedAt": snapshot_calculated_at.isoformat(), "transactionIsolation": isolation, "transactionReadOnly": read_only}, "provisionalLabel": "回测暂定", "provisionalStatus": "seed_fallback_only", "data_window": {"query_start": query_start.isoformat(), "anchor_start": anchor_start.isoformat(), "anchor_end": anchor_end.isoformat(), "observation_anchor": "T-2"}, "coverage": {"daily_fact_rows": len(facts), "shop_spu_count": len(keys), "shops": len({row.shop_pk for row in facts}), "manual_cost_share": float(Decimal(len(costs)) / Decimal(len(keys))) if keys else None, "fee_rate_source_counts": fee_sources, "fx_source": "fx.exchange_rates latest USD snapshot" if usd_cny != _DEFAULT_USD_CNY or usd_vnd != _DEFAULT_USD_VND else "fallback constants; inspect limitation"}, "provisional_defaults": {"fast_warning": _config_wire(AlertConfig(Decimal("0.20"), Decimal("0.20"), Decimal("0.25"), Decimal("100"), 3, 0)), "fast_critical": _config_wire(AlertConfig(Decimal("0.40"), Decimal("0.40"), Decimal("0.40"), Decimal("300"), 5, 0)), "confirmation_warning": _config_wire(AlertConfig(Decimal("0.15"), Decimal("0.15"), Decimal("0.20"), Decimal("100"), 3, 0)), "confirmation_critical": _config_wire(AlertConfig(Decimal("0.30"), Decimal("0.30"), Decimal("0.35"), Decimal("300"), 5, 0))}, "limitations": ["ROI and net profit are recomputed through analytics.spu_profitability._formula_v10.calculate after SQL aggregation; identifiers are intentionally omitted from output.", "The probe uses UTC calendar dates for bounded reproducibility; production alert implementation must apply each shop's IANA timezone before materialization.", "A latest FX snapshot and current effective manual cost/rate are used, matching the current profitability valuation basis rather than historical accounting valuation.", "Rows with no order facts are not counted; ad-only rows are retained only when they join an SPU fact. Missing ad_daily coverage can understate spend.", "Persistence/reversal requires contiguous anchor observations; this bounded report supplies candidate matrix and state counts but does not infer missing-day continuity."], "metric_definitions": {"usable_coverage": "shop x SPU daily fact keys with at least one paid/cancelled order in the bounded query window", "roi_decline": "(prior ROI - current ROI) / prior ROI only when prior ROI > 0; prior ROI <= 0 uses explicit state", "net_profit_decline": "(prior net profit - current net profit) / prior net profit only when prior net profit > 0", "sample_status": "unavailable when either comparison window has no required fact row; sample_insufficient when facts exist but ROI is null or warning gates fail; sufficient only when both ROI values are defined and gates pass", "sample_sufficient": "sample_status=sufficient; zero thresholds do not bypass missing/null ROI evaluability", "persistence": "a fast alert whose same-key shifted confirmation comparison remains an alert", "reversal_recovery": "for every fast-alert (anchor,shop×SPU), pair the same confirmation decision regardless of confirmation alert; recovered states loss_to_profit/recovery/roi_recovery are numerator, fast-alert count is denominator, zero denominator is null", "per_anchor_volume": "each anchor emits warning/critical/total; summaries include median, mean, max, anchor_count, anchor_total and 30_anchor_total when anchor_count=30"}})
     result["evidence_artifact"] = {
         "schemaVersion": "spu-profit-deterioration-backtest.v1",

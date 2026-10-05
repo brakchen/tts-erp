@@ -71,7 +71,7 @@ probe 行为：
 1. 未设置 URL、URL 无 database name、malformed URL、`tts_erp_test*`、`tts_erp_v3_test`、`tts_erp_test_template` 均 fail closed；生产形态库由共享 `tts_erp_v2.api.deps.is_prod_shaped_db()` 判定，覆盖 `tts_erp`、`tts_erp_prod`、`tts_erp_prod_*`，且必须显式传 `--confirm-read-only-production`。
 2. 复用 `analytics.spu_profitability._snapshot.consistent_read_snapshot`，在首条事实 SELECT 前建立 `REPEATABLE READ` + `READ ONLY`，并断言 `SHOW transaction_isolation=repeatable read`、`SHOW transaction_read_only=on`；随后设置事务本地 90 秒 statement timeout、2 秒 lock timeout，只发 SELECT/只读配置，绝不 commit 写入。
 3. 日期和 top shop×SPU 数量均参数化；`bounded_keys` CTE 以 `activity_orders DESC, shop_pk ASC, spu_pk ASC` 在 SQL 内先排序并 LIMIT，之后才读订单/广告事实；默认 anchor end 为当前日 T-2，最大回看 365 天。
-4. `scoped_order_lines` 在 `bounded_keys` 后按日期/key 限定订单行，并再次限定 `(so.status = ANY(CAST(:paid_statuses AS text[])) OR so.status = 'CANCELLED')`；`selected_orders`、sales/settlement 聚合以及 `refund_lines` 与两个 `full_loss_lines` UNION arms 必须只由此 scoped relation 派生，并在 scope 后再聚合。启动前 `self_check_sql_scope()` 对 bounded-key 与 scoped-order-line 两处 status predicate 及这些 CTE 关系做 executable regression guard；Python 纯函数负责窗口、canonical formula、evaluability/sample_status、状态、样本门槛和矩阵。
+4. `scoped_order_lines` 在 `bounded_keys` 后按日期/key 限定订单行，并再次限定 `(so.status = ANY(CAST(:paid_statuses AS text[])) OR so.status = 'CANCELLED')`；`selected_orders`、sales/settlement 聚合以及 `refund_lines` 与两个 `full_loss_lines` UNION arms 必须只由此 scoped relation 派生，并在 scope 后再聚合。已对齐当前 master 的 canonical `FormulaInput`：completed `REFUND_ONLY`/`RETURN_AND_REFUND` case-line refund amounts 仅在 settlement absent 时聚合为 `confirmed_unsettled_refund_vnd`，cancellation refund 不折入；SQL grouped alias、`DailyFact`、window aggregation、adapter mapping 及 formula contract self-check 必须保持完整。启动前 `self_check_sql_scope()` 对 bounded-key 与 scoped-order-line 两处 status predicate 及这些 CTE 关系做 executable regression guard；`self_check_formula_input_contract()` 防止 required consumer field 漂移；Python 纯函数负责窗口、canonical formula、evaluability/sample_status、状态、样本门槛和矩阵。
 5. JSON 只输出日期、计数、分布和比例，省略店铺/SPU 标识以及所有 row-level 数据；末尾保存 `sha256` canonical digest 的 immutable aggregate-only evidence artifact。
 
 执行结果（observed）：
@@ -92,7 +92,7 @@ probe 行为：
 
 - campaign：先按 SPU 和日聚合 `mixed_real_cost`、广告订单数，窗口再求和。
 - 销售：按订单行聚合金额/件数；订单数 `COUNT(DISTINCT order_pk)`。
-- 结算、售后、全损：按现有实现的订单/line 关系聚合，之后调用 `_formula_v10.calculate()`，而不是平均每日 ROI。
+- 结算、售后、全损：按现有实现的订单/line 关系聚合，之后调用 `_formula_v10.calculate()`，而不是平均每日 ROI。completed `REFUND_ONLY`/`RETURN_AND_REFUND` case-line refund amounts 在 settlement absent 时进入 `confirmed_unsettled_refund_vnd`；settled rows 不进入，`CANCELLATION`/`CANCEL` refund amounts 只保留在 cancellation field，不折入该字段。
 - 实际 ROI：canonical `roi_real`。广告消耗为 0 时 ROI 为 null，进入 `sample_insufficient`/不可判断，不补 0。
 - `net_profit` 使用同一次 aggregate 的公式结果。
 - prior ROI > 0 时：`roi_decline = (prior-current)/prior`；prior ROI ≤ 0 时只使用显式状态。
@@ -123,7 +123,7 @@ probe 行为：
 | reversal/recovery | 对每个 fast alert 的同一 `(anchor, shop×SPU)` 配对 confirmation decision，无论 confirmation 是否 alert；state 为 `loss_to_profit`/`recovery`/`roi_recovery` 即 numerator，fast alert 数为 denominator | denominator=0 返回 null；不能把 confirmation 未 alert 的配对丢出分母；当前 evidence 为真实 0 或比例，missing/unavailable 只按此配对口径解释 |
 | data limitations | ad_daily 缺失、FX/cost/rate current valuation、时区 | 明确记录，不把缺失当作正常值 |
 
-> 当前 probe 输出是阈值选择证据，不是最终生产物化逻辑。probe 已输出各窗口 current/previous 的 ROI、net-profit、ad-spend、order-count count/min/p25/median/p75/max、sample_status/state counts、per-anchor warning/critical volumes 与 recovery numerator/denominator/rate；`self_check_sql_scope()` 验证 bounded scoped CTE 仍包住 refund/full-loss facts；bounded query 为可重复性使用 UTC 日，生产实现必须使用每店 IANA timezone。
+> 当前 probe 输出是阈值选择证据，不是最终生产物化逻辑。probe 已输出各窗口 current/previous 的 ROI、net-profit、ad-spend、order-count count/min/p25/median/p75/max、sample_status/state counts、per-anchor warning/critical volumes 与 recovery numerator/denominator/rate；`self_check_sql_scope()` 验证 bounded scoped CTE 仍包住 refund/full-loss facts，`self_check_formula_input_contract()` 验证当前 master 所需 confirmed-unsettled-refund consumer path；bounded query 为可重复性使用 UTC 日，生产实现必须使用每店 IANA timezone。
 
 ### 2.4 默认层级与回测暂定取舍
 
@@ -138,16 +138,16 @@ probe 行为：
 
 本次默认 operational 摘要（aggregate，仅供设计审查）：
 
-- fast policy（每个 window 的 `anchor_count=30`）：1d fast warning summary median/mean/max=`0/0.4000/2`、`30_anchor_total=12`，critical=`0/0.0333/1`、`30_anchor_total=1`；confirmation warning=`0/0.3667/2`、`30_anchor_total=11`，critical=`0/0.0333/1`、`30_anchor_total=1`；recovery `0/13=0%`。3d fast warning=`1/1.1333/4`、`30_anchor_total=34`，critical=`0/0.6000/3`、`30_anchor_total=18`；confirmation warning=`1/1.2333/4`、`30_anchor_total=37`，critical=`0/0.5667/2`、`30_anchor_total=17`；recovery `7/52=13.4615%`。7d fast warning=`1/1.4333/5`、`30_anchor_total=43`，critical=`1/1.3000/4`、`30_anchor_total=39`；confirmation warning=`1/1.2333/5`、`30_anchor_total=37`，critical=`1/1.5000/4`、`30_anchor_total=45`；recovery `19/82=23.1707%`。
-- confirmation policy：1d fast warning/critical `30_anchor_total=12/2`，confirmation `30_anchor_total=10/2`，recovery `0/14=0%`；3d fast `33/20`、confirmation `35/19`（均为 `30_anchor_total`），recovery `7/53=13.2075%`；7d fast `40/42`、confirmation `35/47`（均为 `30_anchor_total`），recovery `19/82=23.1707%`。每组均同时输出 per-anchor rows 与 median/mean/max/anchor_count；这些 total 明确命名 `30_anchor_total`，不称 daily volume。
+- fast policy（每个 window 的 `anchor_count=30`）：1d fast warning summary median/mean/max=`0/0.4000/2`、`30_anchor_total=12`，critical=`0/0.0333/1`、`30_anchor_total=1`；confirmation warning=`0/0.3667/2`、`30_anchor_total=11`，critical=`0/0.0333/1`、`30_anchor_total=1`；recovery `0/13=0%`。3d fast warning=`1/1.1333/4`、`30_anchor_total=34`，critical=`0/0.5667/3`、`30_anchor_total=17`；confirmation warning=`1/1.2333/4`、`30_anchor_total=37`，critical=`0/0.5333/2`、`30_anchor_total=16`；recovery `6/51=11.7647%`。7d fast warning=`1/1.2667/5`、`30_anchor_total=38`，critical=`1/1.1000/4`、`30_anchor_total=33`；confirmation warning=`1/1.0667/5`、`30_anchor_total=32`，critical=`1/1.3000/4`、`30_anchor_total=39`；recovery `16/71=22.5352%`。
+- confirmation policy：1d fast warning/critical `30_anchor_total=12/2`，confirmation `30_anchor_total=10/2`，recovery `0/14=0%`；3d fast `33/19`、confirmation `35/18`（均为 `30_anchor_total`），recovery `6/52=11.5385%`；7d fast `35/36`、confirmation `30/41`（均为 `30_anchor_total`），recovery `16/71=22.5352%`。每组均同时输出 per-anchor rows 与 median/mean/max/anchor_count；这些 total 明确命名 `30_anchor_total`，不称 daily volume。
 - critical volume 来自独立 critical config 的实际 `severity=critical`；recovery numerator 配对 fast alert 的 confirmation state，即使 confirmation 本身不 alert 也保留在 denominator。
-- sample_status（默认 warning config；confirmation status 同时列出）：1d fast `sufficient/sample_insufficient/unavailable=46/4200/7`，confirmation `43/4002/208`；3d fast `192/4052/19`，confirmation `186/3763/314`；7d fast `285/3821/169`，confirmation `269/3499/507`。这些 unavailable/insufficient 均不进入 stable 或 alert。
+- sample_status（默认 warning config；confirmation status 同时列出）：1d fast `sufficient/sample_insufficient/unavailable=46/4200/7`，confirmation `43/4002/208`；3d fast `192/4052/19`，confirmation `186/3763/314`；7d fast `285/3821/169`，confirmation `269/3499/507`。这些 unavailable/insufficient 均不进入 stable 或 alert；本次 canonical confirmed-unsettled-refund 修复未改变样本可用性计数。
 - reversal/recovery 不是“永不恢复”的结论；它受观察期短、连续样本和 missing/unavailable facts 限制，denominator=0 时必须为 null。
-- 阈值推荐不因本次重算直接升级：四组值继续保持 **回测暂定** seed/fallback，原因是仍只有 30 anchors 且当前输出是 aggregate evidence；后续发布必须由配置平台和更长观察期决定。
+- 阈值推荐经本次 canonical confirmed-unsettled-refund 重算后仍不升级：四组值继续保持 **回测暂定** seed/fallback。3d/7d alert volume 与 recovery 已按新语义下降，但样本仍只有 30 anchors 且证据仍为 aggregate evidence；后续发布必须由配置平台和更长观察期决定。
 
 ### 2.5 Observed evidence vs assumptions
 
-Observed：上述日期范围、计数、FX 来源、cost coverage、fee-v2 freshness source counts、matrix/sample_status state counts、per-anchor warning/critical summary、persistence 与 paired recovery 数字，以及命令 exit 0。最新 sanitized artifact digest 为 `sha256:28aa727f1aa56d97854166b378e029b540b80f6c72e97c8dd1f659af877ece97`；artifact 标记 `immutable=true`、`aggregateOnly=true`、`rowLevelIdentifiers=omitted`，并含 `self_checks.sql_scope=passed`、`self_checks.evaluability_boundaries=passed`；独立 `--verify-artifact` 命令重新计算相同 stable digest input 并通过。
+Observed：上述日期范围、计数、FX 来源、cost coverage、fee-v2 freshness source counts、matrix/sample_status state counts、per-anchor warning/critical summary、persistence 与 paired recovery 数字，以及命令 exit 0。最新 sanitized artifact digest 为 `sha256:396511d04b029531a3fa038f38cf50e9ba4b34d3d7c389b7c753d45eda7b0b8b`；artifact 标记 `immutable=true`、`aggregateOnly=true`、`rowLevelIdentifiers=omitted`，并含 `self_checks.sql_scope=passed`、`self_checks.evaluability_boundaries=passed`、`self_checks.formula_input_contract=passed`；独立 `--verify-artifact` 命令重新计算相同 stable digest input 并通过。
 
 Assumptions/provisional：阈值四组默认、critical 规则、`minAdOrders=0`（广告订单计数的上游覆盖仍需治理）、UTC probe 日期、current cost/FX valuation、物化表方案和通知策略。它们必须在设计/配置中显式标记，不可包装成回测事实。
 
