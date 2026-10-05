@@ -15,7 +15,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models.publishing import VideoPublishTask
-from tts_erp_v2.publishing.domain import TaskStage, TaskStatus
+from tts_erp_v2.publishing.domain import (
+    CleanupIntent,
+    TaskStage,
+    TaskStatus,
+    plan_cleanup,
+)
 from tts_erp_v2.publishing.object_store import VideoObjectStore
 from tts_erp_v2.publishing.repository import get_task, queue_task, release_lease
 from tts_erp_v2.storage.minio_client import ObjectNotFound
@@ -240,24 +245,12 @@ def cancel_task(
         raise ValueError("TASK_ACTION_NOT_ALLOWED")
     task.status = TaskStatus.CANCELLED.value
     task.stage = TaskStage.DONE.value
+    plan_cleanup(task, CleanupIntent.PRESERVE_STATE, object=True)
     task.completed_at = datetime.now(UTC)
     task.row_version += 1
     release_lease(task)
-    task.object_cleanup_status = "pending"
+    task.object_cleanup_next_attempt_at = datetime.now(UTC)
     session.commit()
-    try:
-        store.remove(task.object_key)
-        task.object_cleanup_status = "succeeded"
-        task.object_deleted_at = datetime.now(UTC)
-        session.commit()
-    except Exception as exc:  # noqa: BLE001 - cleanup is independent of business result
-        task.object_cleanup_status = "failed"
-        task.object_cleanup_error = str(exc)[:500]
-        task.object_cleanup_attempts += 1
-        task.object_cleanup_next_attempt_at = datetime.now(UTC) + timedelta(
-            seconds=min(300, 5 * (2 ** min(task.object_cleanup_attempts - 1, 5)))
-        )
-        session.commit()
     return task
 
 
@@ -280,6 +273,8 @@ def retry_task(
             store.stat(task.object_key)
         except ObjectNotFound as exc:
             task.object_deleted_at = datetime.now(UTC)
+            task.object_cleanup_status = "succeeded"
+            task.row_version += 1
             session.commit()
             raise ValueError("UPLOAD_REPLACEMENT_REQUIRED") from exc
         except Exception as exc:

@@ -71,6 +71,9 @@ class VideoPublishTask(Base):
     object_sha256: Mapped[str | None] = mapped_column(Text)
     object_uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     object_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cleanup_intent: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'none'")
+    )
     status: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'pending'")
     )
@@ -84,6 +87,13 @@ class VideoPublishTask(Base):
     lease_owner: Mapped[str | None] = mapped_column(Text)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cleanup_lease_owner: Mapped[str | None] = mapped_column(Text)
+    cleanup_lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    cleanup_heartbeat_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     row_version: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("1")
     )

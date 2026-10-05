@@ -6,7 +6,7 @@ import os
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import Select, and_, func, or_, select
+from sqlalchemy import Select, and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -14,8 +14,10 @@ from tts_erp_v2.db.models.publishing import VideoPublishAttempt, VideoPublishTas
 from tts_erp_v2.publishing.domain import (
     AttemptKind,
     AttemptStatus,
+    CleanupIntent,
     TaskStage,
     TaskStatus,
+    cleanup_retryable_resources,
 )
 from tts_erp_v2.publishing.prompt import (
     PUBLISH_PROMPT_VERSION,
@@ -132,7 +134,7 @@ def has_pending_device_cleanup(session: Session) -> bool:
     return (
         session.scalar(
             select(VideoPublishTask.id).where(
-                VideoPublishTask.status == TaskStatus.SUCCEEDED.value,
+                VideoPublishTask.cleanup_intent != CleanupIntent.NONE.value,
                 VideoPublishTask.device_cleanup_status.in_(["pending", "failed"]),
             )
         )
@@ -143,69 +145,43 @@ def has_pending_device_cleanup(session: Session) -> bool:
 def _lease_cleanup_task(
     session: Session, instance_id: str, lease_seconds: int
 ) -> VideoPublishTask | None:
-    _lock_publish_slot(session)
-    if (
-        session.scalar(
-            select(VideoPublishTask.id)
-            .where(VideoPublishTask.status == TaskStatus.RUNNING.value)
-            .limit(1)
-        )
-        is not None
-    ):
-        return None
+    """Lease explicit cleanup work without occupying the publish slot."""
     now = datetime.now(UTC)
+
+    def due(column):
+        return (column.is_(None)) | (column <= now)
+
     task = session.scalars(
         select(VideoPublishTask)
         .where(
+            VideoPublishTask.cleanup_intent != CleanupIntent.NONE.value,
             or_(
                 and_(
-                    VideoPublishTask.status.in_(
-                        [TaskStatus.SUCCEEDED.value, TaskStatus.CANCELLED.value]
-                    ),
-                    or_(
-                        and_(
-                            VideoPublishTask.device_cleanup_status.in_(
-                                ["pending", "failed"]
-                            ),
-                            (VideoPublishTask.device_cleanup_next_attempt_at.is_(None))
-                            | (VideoPublishTask.device_cleanup_next_attempt_at <= now),
-                        ),
-                        and_(
-                            VideoPublishTask.object_cleanup_status.in_(
-                                ["pending", "failed"]
-                            ),
-                            (VideoPublishTask.object_cleanup_next_attempt_at.is_(None))
-                            | (VideoPublishTask.object_cleanup_next_attempt_at <= now),
-                        ),
-                    ),
+                    VideoPublishTask.device_cleanup_status.in_(["pending", "failed"]),
+                    due(VideoPublishTask.device_cleanup_next_attempt_at),
                 ),
                 and_(
-                    VideoPublishTask.status.in_(
-                        [
-                            TaskStatus.SUCCEEDED.value,
-                            TaskStatus.CANCELLED.value,
-                            TaskStatus.FAILED.value,
-                            TaskStatus.NEEDS_REVIEW.value,
-                        ]
-                    ),
                     VideoPublishTask.spool_cleanup_status.in_(["pending", "failed"]),
-                    (VideoPublishTask.spool_cleanup_next_attempt_at.is_(None))
-                    | (VideoPublishTask.spool_cleanup_next_attempt_at <= now),
+                    due(VideoPublishTask.spool_cleanup_next_attempt_at),
+                ),
+                and_(
+                    VideoPublishTask.object_cleanup_status.in_(["pending", "failed"]),
+                    due(VideoPublishTask.object_cleanup_next_attempt_at),
                 ),
             ),
-            (VideoPublishTask.lease_owner.is_(None))
-            | (VideoPublishTask.lease_expires_at.is_(None))
-            | (VideoPublishTask.lease_expires_at < now),
+            (VideoPublishTask.cleanup_lease_owner.is_(None))
+            | (VideoPublishTask.cleanup_lease_expires_at.is_(None))
+            | (VideoPublishTask.cleanup_lease_expires_at < now),
         )
-        .order_by(VideoPublishTask.device_cleanup_next_attempt_at, VideoPublishTask.id)
+        .order_by(VideoPublishTask.cleanup_lease_expires_at, VideoPublishTask.id)
         .with_for_update(skip_locked=True)
         .limit(1)
     ).first()
     if task is None:
         return None
-    task.lease_owner = instance_id
-    task.lease_expires_at = now + timedelta(seconds=lease_seconds)
-    task.heartbeat_at = now
+    task.cleanup_lease_owner = instance_id
+    task.cleanup_lease_expires_at = now + timedelta(seconds=lease_seconds)
+    task.cleanup_heartbeat_at = now
     task.row_version += 1
     session.flush()
     return task
@@ -284,12 +260,35 @@ def release_lease(task: VideoPublishTask) -> None:
     task.heartbeat_at = None
 
 
+def renew_cleanup_lease(
+    session: Session, task_id: UUID, instance_id: str, lease_seconds: int
+) -> None:
+    now = datetime.now(UTC)
+    result = session.execute(
+        update(VideoPublishTask)
+        .where(
+            VideoPublishTask.public_id == task_id,
+            VideoPublishTask.cleanup_lease_owner == instance_id,
+            VideoPublishTask.cleanup_lease_expires_at > now,
+        )
+        .values(
+            cleanup_heartbeat_at=now,
+            cleanup_lease_expires_at=now + timedelta(seconds=lease_seconds),
+            row_version=VideoPublishTask.row_version + 1,
+        )
+    )
+    if getattr(result, "rowcount", None) != 1:
+        raise ValueError("CLEANUP_LEASE_LOST")
+
+
 def request_verification(session: Session, task_id: UUID) -> VideoPublishTask:
     task = get_task(session, task_id, lock=True)
     if task is None:
         raise LookupError("TASK_NOT_FOUND")
     if task.status != TaskStatus.NEEDS_REVIEW.value:
         raise ValueError("TASK_ACTION_NOT_ALLOWED")
+    if task.device_cleanup_status in {"pending", "failed"}:
+        raise ValueError("DEVICE_CLEANUP_BLOCKED")
     related = next(
         (a for a in reversed(task.attempts) if a.kind == AttemptKind.PUBLISH.value),
         None,
@@ -305,8 +304,38 @@ def request_verification(session: Session, task_id: UUID) -> VideoPublishTask:
     return task
 
 
+def retry_cleanup_resources(
+    session: Session, task: VideoPublishTask, *, now: datetime | None = None
+) -> tuple[str, ...]:
+    """Reset only failed resources while preserving business status/stage."""
+    now = now or datetime.now(UTC)
+    failed = cleanup_retryable_resources(task)
+    if not failed:
+        raise ValueError("CLEANUP_RETRY_NOT_AVAILABLE")
+    if (
+        task.cleanup_lease_owner
+        and task.cleanup_lease_expires_at
+        and task.cleanup_lease_expires_at > now
+    ):
+        raise ValueError("CLEANUP_LEASE_BUSY")
+    if task.cleanup_intent == CleanupIntent.NONE.value:
+        task.cleanup_intent = CleanupIntent.PRESERVE_STATE.value
+    for name in failed:
+        setattr(task, f"{name}_cleanup_status", "pending")
+        setattr(task, f"{name}_cleanup_next_attempt_at", now)
+    task.cleanup_lease_owner = None
+    task.cleanup_lease_expires_at = None
+    task.cleanup_heartbeat_at = None
+    task.row_version += 1
+    return failed
+
+
 def queue_task(task: VideoPublishTask, *, delay_seconds: int = 0) -> None:
     task.status = TaskStatus.PENDING.value
+    task.cleanup_intent = CleanupIntent.NONE.value
+    task.cleanup_lease_owner = None
+    task.cleanup_lease_expires_at = None
+    task.cleanup_heartbeat_at = None
     task.stage = TaskStage.QUEUED.value
     task.queued_at = datetime.now(UTC)
     task.next_attempt_at = (

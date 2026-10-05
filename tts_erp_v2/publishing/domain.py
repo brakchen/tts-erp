@@ -54,6 +54,21 @@ class CleanupStatus(StrEnum):
     FAILED = "failed"
 
 
+class CleanupIntent(StrEnum):
+    NONE = "none"
+    FINALIZE_SUCCESS = "finalize_success"
+    REQUEUE_PUBLISH = "requeue_publish"
+    PRESERVE_STATE = "preserve_state"
+
+
+@dataclass(frozen=True, slots=True)
+class CleanupPlan:
+    intent: CleanupIntent
+    device: bool = False
+    spool: bool = False
+    object: bool = False
+
+
 class DomainTransitionError(ValueError):
     """Raised when a task command violates the publishing state machine."""
 
@@ -74,6 +89,51 @@ class FailureClassification:
     code: str
     retry_safe: bool | None
     requires_verification: bool = False
+
+
+def _set_cleanup_status(task: Any, name: str, status: CleanupStatus) -> None:
+    setattr(task, f"{name}_cleanup_status", status.value)
+    setattr(task, f"{name}_cleanup_next_attempt_at", None)
+
+
+def plan_cleanup(
+    task: Any,
+    intent: CleanupIntent,
+    *,
+    device: bool = False,
+    spool: bool = False,
+    object: bool = False,
+) -> CleanupPlan:
+    """Persist an explicit resource plan; never infer deletion from stage."""
+    task.cleanup_intent = intent.value
+    for name, selected in (("device", device), ("spool", spool), ("object", object)):
+        if (
+            selected
+            and getattr(task, f"{name}_cleanup_status")
+            == CleanupStatus.NOT_STARTED.value
+        ):
+            _set_cleanup_status(task, name, CleanupStatus.PENDING)
+    return CleanupPlan(intent, device=device, spool=spool, object=object)
+
+
+def apply_cleanup_result(task: Any, *, device_failed: bool = False) -> None:
+    """Apply the sole post-cleanup business transition."""
+    intent = CleanupIntent(getattr(task, "cleanup_intent", CleanupIntent.NONE.value))
+    if intent is CleanupIntent.REQUEUE_PUBLISH:
+        if device_failed:
+            task.status = TaskStatus.PENDING.value
+            task.stage = TaskStage.WAITING_DEVICE.value
+        else:
+            task.status = TaskStatus.PENDING.value
+            task.stage = TaskStage.QUEUED.value
+        return
+    if intent is CleanupIntent.FINALIZE_SUCCESS:
+        task.status = TaskStatus.SUCCEEDED.value
+        task.stage = TaskStage.DONE.value
+        return
+    if intent is CleanupIntent.PRESERVE_STATE:
+        task.stage = TaskStage.DONE.value
+        return
 
 
 def transition_task(task: Any, event: str) -> None:
@@ -133,6 +193,14 @@ def transition_task(task: Any, event: str) -> None:
     if result is None:
         raise DomainTransitionError(f"{event} is not allowed from {current}")
     task.status, task.stage = result
+    if event == "BUSINESS_SUCCESS_FINALIZED":
+        plan_cleanup(
+            task,
+            CleanupIntent.FINALIZE_SUCCESS,
+            device=True,
+            spool=True,
+            object=True,
+        )
 
 
 def classify_failure(
@@ -160,6 +228,17 @@ def classify_failure(
     return FailureClassification("session_missing", None, True)
 
 
+def cleanup_retryable_resources(task: Any) -> tuple[str, ...]:
+    """Single policy used by list snapshots and cleanup retry commands."""
+    if getattr(task, "status", None) == TaskStatus.RUNNING:
+        return ()
+    return tuple(
+        name
+        for name in ("device", "spool", "object")
+        if getattr(task, f"{name}_cleanup_status", None) == CleanupStatus.FAILED.value
+    )
+
+
 def allowed_actions(task: Any) -> tuple[AllowedAction, ...]:
     """Compute UI actions from persisted server state."""
     actions: list[AllowedAction] = [AllowedAction.VIEW]
@@ -184,12 +263,11 @@ def allowed_actions(task: Any) -> tuple[AllowedAction, ...]:
             and task.object_uploaded_at is not None
         ):
             actions.append(AllowedAction.RETRY)
-    elif task.status == TaskStatus.NEEDS_REVIEW:
+    elif task.status == TaskStatus.NEEDS_REVIEW and getattr(
+        task, "device_cleanup_status", None
+    ) not in {CleanupStatus.PENDING.value, CleanupStatus.FAILED.value}:
         actions.append(AllowedAction.VERIFY)
-    if any(
-        getattr(task, f"{name}_cleanup_status", None) == CleanupStatus.FAILED
-        for name in ("device", "spool", "object")
-    ):
+    if cleanup_retryable_resources(task):
         actions.append(AllowedAction.RETRY_CLEANUP)
     if getattr(task, "attempts", None):
         actions.append(AllowedAction.COPY_ARTEMIS_ID)

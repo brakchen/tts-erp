@@ -11,10 +11,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import false, or_, select, text, update
+from sqlalchemy import false, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from tts_erp_v2.access import Role
 from tts_erp_v2.api.deps import (
     caller_key_hash,
     get_session,
@@ -28,7 +29,11 @@ from tts_erp_v2.db.models.publishing import (
 )
 from tts_erp_v2.publishing.domain import allowed_actions
 from tts_erp_v2.publishing.object_store import MinioVideoStore, VideoObjectStore
-from tts_erp_v2.publishing.repository import _lock_publish_slot, request_verification
+from tts_erp_v2.publishing.repository import (
+    _lock_publish_slot,
+    request_verification,
+    retry_cleanup_resources,
+)
 from tts_erp_v2.publishing.submission import (
     CreateCommand,
     cancel_task,
@@ -214,16 +219,22 @@ def _task_for_actor(
     return task
 
 
+def _action_conflict(task: VideoPublishTask, code: str, message: str) -> dict:
+    return {
+        "code": code,
+        "message": message,
+        "rowVersion": task.row_version,
+        "allowedActions": [a.value for a in allowed_actions(task)],
+    }
+
+
 def _require_row_version(task: VideoPublishTask, expected: int | None) -> None:
     if expected is None or expected != task.row_version:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            {
-                "code": "ROW_VERSION_CONFLICT",
-                "message": "任务已更新，请刷新后重试。",
-                "rowVersion": task.row_version,
-                "allowedActions": [a.value for a in allowed_actions(task)],
-            },
+            _action_conflict(
+                task, "ROW_VERSION_CONFLICT", "任务已更新，请刷新后重试。"
+            ),
         )
 
 
@@ -259,9 +270,11 @@ def config(request: Request, session: Annotated[Session, Depends(get_session)]) 
     )
     heartbeat = heartbeat_row.heartbeat_at if heartbeat_row else None
     # Config deliberately does not expose credentials or signed URLs.
-    role = getattr(request.scope.get("access_grant"), "role", None)
-    role_name = getattr(role, "value", role) or request.scope.get("api_key_role")
-    actor_can_write = role_name in {"readwrite", "admin"}
+    grant = request.scope.get("access_grant")
+    actor_can_write = bool(
+        grant is not None
+        and getattr(grant, "allows", lambda _role: False)(Role.READWRITE)
+    ) or request.scope.get("api_key_role") in {"readwrite", "admin"}
     can_write = bool(os.environ.get("ARTEMIS_DEVICE_SERIAL")) and bool(
         heartbeat and actor_can_write
     )
@@ -567,7 +580,7 @@ def retry(
             status.HTTP_503_SERVICE_UNAVAILABLE
             if code == "OBJECT_STORE_UNAVAILABLE"
             else status.HTTP_409_CONFLICT,
-            {"code": code, "message": code},
+            _action_conflict(task_snapshot, code, code),
         ) from exc
 
 
@@ -614,17 +627,18 @@ def verify(
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(
-            status.HTTP_409_CONFLICT, {"code": str(exc), "message": str(exc)}
+            status.HTTP_409_CONFLICT,
+            _action_conflict(task_snapshot, str(exc), str(exc)),
         ) from exc
     except IntegrityError as exc:
         session.rollback()
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            {
-                "code": "VERIFY_ALREADY_RUNNING",
-                "message": "A verification attempt is already running",
-                "allowedActions": [],
-            },
+            _action_conflict(
+                task_snapshot,
+                "VERIFY_ALREADY_RUNNING",
+                "A verification attempt is already running",
+            ),
         ) from exc
 
 
@@ -637,63 +651,15 @@ def retry_cleanup(
 ) -> dict:
     require_role_at_least(request, "readwrite")
     _csrf(request)
-    _lock_publish_slot(session)
     task = _task_for_actor(session, task_id, request, lock=True)
     _require_row_version(task, body.row_version)
-    now = datetime.now(UTC)
-    if task.status not in {"succeeded", "cancelled"} and task.stage != "cleaning":
-        raise HTTPException(status.HTTP_409_CONFLICT, "CLEANUP_RETRY_NOT_AVAILABLE")
-    if (
-        task.lease_owner
-        and task.lease_expires_at is not None
-        and task.lease_expires_at > now
-    ):
-        raise HTTPException(status.HTTP_409_CONFLICT, "CLEANUP_LEASE_BUSY")
-    failed_names = [
-        name
-        for name in ("device", "spool", "object")
-        if getattr(task, f"{name}_cleanup_status") == "failed"
-    ]
-    if not failed_names:
-        raise HTTPException(status.HTTP_409_CONFLICT, "CLEANUP_RETRY_NOT_AVAILABLE")
-    active_publish = session.scalar(
-        select(VideoPublishTask.id)
-        .where(
-            VideoPublishTask.status == "running",
-            VideoPublishTask.id != task.id,
-        )
-        .limit(1)
-    )
-    if active_publish is not None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "PUBLISH_SLOT_BUSY")
-    expected_version = task.row_version
-    values: dict[str, object] = {
-        "status": task.status,
-        "stage": "cleaning",
-        "lease_owner": None,
-        "lease_expires_at": None,
-        "heartbeat_at": None,
-        "row_version": expected_version + 1,
-    }
-    for name in failed_names:
-        values[f"{name}_cleanup_status"] = "pending"
-        if name in {"device", "spool", "object"}:
-            values[f"{name}_cleanup_next_attempt_at"] = now
-    result = session.execute(
-        update(VideoPublishTask)
-        .where(
-            VideoPublishTask.public_id == task_id,
-            VideoPublishTask.row_version == expected_version,
-            or_(
-                VideoPublishTask.lease_owner.is_(None),
-                VideoPublishTask.lease_expires_at <= now,
-            ),
-        )
-        .values(**values)
-    )
-    if getattr(result, "rowcount", None) != 1:
-        session.rollback()
-        raise HTTPException(status.HTTP_409_CONFLICT, "CLEANUP_LEASE_BUSY")
+    try:
+        retry_cleanup_resources(session, task)
+    except ValueError as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            _action_conflict(task, str(exc), str(exc)),
+        ) from exc
     session.commit()
     return _snapshot(
         _task_for_actor(session, task_id, request),
