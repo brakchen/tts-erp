@@ -12,6 +12,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import false, or_, select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from tts_erp_v2.api.deps import (
@@ -121,6 +122,7 @@ def _snapshot(
         "lastErrorMessage": task.last_error_message,
         "createdAt": task.created_at,
         "updatedAt": task.updated_at,
+        "startedAt": task.started_at,
         "allowedActions": [a.value for a in actions],
     }
     if expose_client_request_id:
@@ -586,6 +588,7 @@ def verify(
 ) -> dict:
     require_role_at_least(request, "readwrite")
     _csrf(request)
+    _lock_publish_slot(session)
     task_snapshot = _task_for_actor(session, task_id, request, lock=True)
     _require_row_version(task_snapshot, body.row_version)
     try:
@@ -598,6 +601,9 @@ def verify(
         raise HTTPException(
             status.HTTP_409_CONFLICT, {"code": str(exc), "message": str(exc)}
         ) from exc
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "VERIFY_ALREADY_RUNNING") from exc
 
 
 @router.post("/tasks/{task_id}/cleanup/retry")

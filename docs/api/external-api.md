@@ -52,7 +52,7 @@ credential kinds:
 | SPU 实际 ROI 页面 (HTML) | `GET /v2/pages/spu-roi` | readonly (browser → 302 login) |
 | 重点关注 SPU 页面 (HTML) | `GET /v2/pages/focused-spus` | readonly (browser → 302 login) |
 | SPU image list / upload / delete | `GET /v2/spu-images`, `POST /v2/spu-images/upload-url`, `POST /v2/spu-images/{id}/confirm`, `DELETE /v2/spu-images/{id}` | readonly / readwrite |
-| TikTok video publish workflow | `GET /v2/video-publish/config`, `GET /v2/video-publish/tasks[/{id}]`, `POST /v2/video-publish/tasks`, upload-url, confirm, cancel, retry, verify, `/cleanup/retry` | readonly / readwrite; owner-scoped |
+| TikTok video publish workflow | `GET /v2/pages/video-publish`, `GET /v2/video-publish/config`, `GET /v2/video-publish/tasks[/{id}]`, `POST /v2/video-publish/tasks`, upload-url, confirm, cancel, retry, replace-upload, verify, `/cleanup/retry` | page:video-publish; readonly / readwrite API actions; owner-scoped |
 | Browser login / logout / whoami | `GET\|POST /v2/auth/login`, `POST /v2/auth/logout`, `GET /v2/auth/me` | public |
 | Change own password | `POST /v2/auth/change-password` | session user (cookie) |
 | User & role administration | `GET\|POST /v2/users`, `GET\|PATCH /v2/users/{id}`, `POST /v2/users/{id}/password`, `GET\|DELETE /v2/users/{id}/sessions[/{sessionId}]`, `GET\|POST /v2/roles`, `PATCH\|DELETE /v2/roles/{code}` | **admin** + `page:users` 权限点 |
@@ -413,12 +413,14 @@ mutations must send `X-Requested-With: tts-erp`; API-key clients are exempt.
 
 | Endpoint | Role | Notes |
 | --- | --- | --- |
+| `GET /v2/pages/video-publish` | page:video-publish | Browser publishing workbench; page access follows the authenticated page permission. |
 | `GET /v2/video-publish/config` | readonly | Limits and masked device/worker readiness; no credentials or signed URLs. |
 | `GET /v2/video-publish/tasks/current` | readonly | Current owner-visible task plus filter-independent polling summary. |
 | `GET /v2/video-publish/tasks` | readonly | Owner-scoped history; `status`, `limit`, and `cursor` filters. |
 | `GET /v2/video-publish/tasks/{task_id}` | readonly | Owner-scoped detail; `includeDiagnostics=true` requires admin. |
 | `POST /v2/video-publish/tasks` | readwrite | Creates an awaiting-upload task and short-lived presigned PUT ticket. |
 | `POST /v2/video-publish/tasks/{task_id}/upload-url` | readwrite | Refreshes an awaiting-upload ticket for the owner. |
+| `POST /v2/video-publish/tasks/{task_id}/replace-upload` | readwrite | Reopens a failed task whose object is confirmed absent so the owner can upload a replacement. |
 | `POST /v2/video-publish/tasks/{task_id}/confirm-upload` | readwrite | HEAD-verifies the object and queues the task. |
 | `POST /v2/video-publish/tasks/{task_id}/cancel` | readwrite | Cancels an unstarted task and schedules independent object cleanup. |
 | `POST /v2/video-publish/tasks/{task_id}/retry` | readwrite | Retries only a failed, retry-safe task within its attempt budget. |

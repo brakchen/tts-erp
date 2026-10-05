@@ -11,12 +11,14 @@ from typing import cast
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models.publishing import VideoPublishTask
 from tts_erp_v2.publishing.domain import TaskStage, TaskStatus
 from tts_erp_v2.publishing.object_store import VideoObjectStore
 from tts_erp_v2.publishing.repository import get_task, queue_task, release_lease
+from tts_erp_v2.storage.minio_client import ObjectNotFound
 
 MAX_VIDEO_BYTES = int(
     os.environ.get("TIKTOK_PUBLISH_MAX_VIDEO_BYTES", str(500 * 1024 * 1024))
@@ -139,7 +141,40 @@ def create_upload_ticket(
         target_app_package=_PACKAGE,
     )
     session.add(task)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        winner = session.scalar(
+            select(VideoPublishTask).where(
+                VideoPublishTask.client_request_id == command.client_request_id
+            )
+        )
+        if winner is None:
+            raise
+        owner_matches = (
+            winner.created_by_user_id == command.actor_user_id
+            and winner.created_by_key_hash == command.actor_key_hash
+            if command.actor_user_id is not None or command.actor_key_hash is not None
+            else winner.created_by_user_id is None
+            and winner.created_by_key_hash is None
+        )
+        if not owner_matches:
+            raise PermissionError("TASK_NOT_FOUND") from None
+        if (
+            winner.original_filename,
+            winner.content_type,
+            winner.size_bytes,
+            winner.caption,
+        ) != (filename, command.content_type, command.size_bytes, caption):
+            raise ValueError("IDEMPOTENCY_PAYLOAD_MISMATCH") from None
+        if winner.stage != TaskStage.AWAITING_UPLOAD.value:
+            return winner, "", True
+        return (
+            winner,
+            cast(str, store.presign_put(winner.object_key, winner.content_type)),
+            True,
+        )
     upload_url = cast(str, store.presign_put(key, command.content_type))
     return task, upload_url, False
 
@@ -243,10 +278,12 @@ def retry_task(
     if store is not None:
         try:
             store.stat(task.object_key)
-        except Exception as exc:
+        except ObjectNotFound as exc:
             task.object_deleted_at = datetime.now(UTC)
             session.commit()
             raise ValueError("UPLOAD_REPLACEMENT_REQUIRED") from exc
+        except Exception as exc:
+            raise ValueError("OBJECT_STORE_UNAVAILABLE") from exc
     if task.attempt_count >= int(os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3")):
         raise ValueError("RETRY_BUDGET_EXHAUSTED")
     queue_task(task)

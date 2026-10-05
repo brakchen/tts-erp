@@ -58,7 +58,7 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
         global.fetch = async (url, options) => {
           requests.push({ url, method: (options.method || "GET").toUpperCase(), signal: options.signal, headers: options.headers || {}, body: options.body });
           const payload = url.endsWith("/config")
-            ? { maxVideoBytes: 100, maxCaptionCharacters: 4000, target: { album: "TEST" }, device: {}, worker: {} }
+            ? { maxVideoBytes: 100, maxCaptionCharacters: 4000, target: { album: "TEST" }, device: {}, worker: { status: "ready" }, canWrite: true }
             : url.includes("/tasks/current") ? { task: { taskId: "running-1", filename: "TEST-running.mp4", stage: "downloading", status: "running" }, pollState: { running: true, queued: true } }
             : url.includes("/tasks/task-1")
               ? { taskId: "task-1", filename: "TEST.mp4", status: "succeeded", caption: "TEST", attempts: [{ sequenceNo: 1, kind: "publish", status: "success", artemisSessionId: "full-artemis-session-id" }], cleanup: { device: { status: "succeeded" }, spool: { status: "succeeded" }, object: { status: "failed" } } }

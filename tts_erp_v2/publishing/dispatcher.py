@@ -78,7 +78,9 @@ async def dispatch_one(deps: PublishDependencies) -> str:
     return "processed"
 
 
-def _recover_terminal_publish_attempt(task: VideoPublishTask) -> str | None:
+def _recover_terminal_publish_attempt(
+    task: VideoPublishTask,
+) -> str | tuple[str, int] | None:
     """Advance a persisted terminal attempt before allowing a new publish."""
     if task.stage not in {
         TaskStage.DISPATCHING_ARTEMIS.value,
@@ -104,14 +106,11 @@ def _recover_terminal_publish_attempt(task: VideoPublishTask) -> str | None:
         task.object_cleanup_status = "pending"
         return "cleanup"
     task.last_error_code = attempt.retry_classification or "PUBLISH_ATTEMPT_TERMINAL"
-    task.status = (
-        TaskStatus.FAILED.value
-        if attempt.retry_safe is True
-        else TaskStatus.NEEDS_REVIEW.value
-    )
-    task.stage = TaskStage.DONE.value
-    release_lease(task)
-    return "terminal"
+    if attempt.retry_safe is True:
+        return "safe_retry"
+    task.stage = TaskStage.VERIFYING.value
+    task.row_version = (task.row_version or 0) + 1
+    return ("verify", attempt.id)
 
 
 async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
@@ -126,6 +125,10 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
                 session.commit()
                 if recovery == "cleanup":
                     await _cleanup_success(task_id, deps)
+                elif recovery == "safe_retry":
+                    await _safe_retry(task_id, "RECOVERED_SAFE_FAILURE", deps)
+                elif isinstance(recovery, tuple):
+                    await _start_verify(task_id, recovery[1], deps)
                 return
             if task.stage in {
                 TaskStage.VERIFYING.value,
@@ -171,6 +174,11 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
                         TaskStatus.NEEDS_REVIEW.value,
                     }
                     and task.spool_cleanup_status in {"pending", "failed"}
+                )
+                or (
+                    task.status == TaskStatus.PENDING.value
+                    and task.device_path is not None
+                    and task.device_cleanup_status in {"pending", "failed"}
                 )
             ):
                 session.commit()
@@ -630,9 +638,25 @@ async def _safe_retry(
         terminal = task.attempt_count >= deps.max_attempts
         now = datetime.now(UTC)
         delay = min(300, 5 * (2 ** min(task.attempt_count, 5)))
+        cleanup_gate = (
+            not terminal
+            and task.device_path is not None
+            and task.stage
+            in {
+                TaskStage.STAGING_DEVICE.value,
+                TaskStage.DISPATCHING_ARTEMIS.value,
+                TaskStage.WAITING_ARTEMIS.value,
+                TaskStage.VERIFYING.value,
+                TaskStage.CLEANING.value,
+            }
+        )
         values = {
             "status": TaskStatus.FAILED.value if terminal else TaskStatus.PENDING.value,
-            "stage": TaskStage.DONE.value if terminal else stage,
+            "stage": TaskStage.DONE.value
+            if terminal
+            else TaskStage.CLEANING.value
+            if cleanup_gate
+            else stage,
             "last_error_code": error[:100],
             "last_error_message": error[:500],
             "queued_at": None if terminal else now,
@@ -642,6 +666,9 @@ async def _safe_retry(
             "heartbeat_at": None,
             "row_version": expected_version + 1,
         }
+        if cleanup_gate:
+            values["device_cleanup_status"] = "pending"
+            values["device_cleanup_next_attempt_at"] = now
         result = session.execute(
             update(VideoPublishTask)
             .where(
@@ -705,7 +732,12 @@ async def _mark_unexpected(
             )
             .values(
                 status=TaskStatus.NEEDS_REVIEW.value,
-                stage=TaskStage.DONE.value,
+                stage=TaskStage.CLEANING.value
+                if task.device_path
+                else TaskStage.DONE.value,
+                device_cleanup_status="pending"
+                if task.device_path
+                else task.device_cleanup_status,
                 last_error_code="UNEXPECTED_WORKER_FAILURE",
                 last_error_message=error[:500],
                 lease_owner=None,
@@ -781,13 +813,7 @@ async def _cleanup_success(task_id: UUID, deps: PublishDependencies) -> None:
         )
         device_needed = cleanup_business and task.device_cleanup_status != "succeeded"
         object_needed = cleanup_business and task.object_cleanup_status != "succeeded"
-        business_status = (
-            TaskStatus.CANCELLED.value
-            if task.status == TaskStatus.CANCELLED.value
-            else task.status
-            if task.status in {TaskStatus.FAILED.value, TaskStatus.NEEDS_REVIEW.value}
-            else TaskStatus.SUCCEEDED.value
-        )
+        business_status = task.status
         completed_at = task.completed_at or datetime.now(UTC)
         session.commit()
     guard_error = None
@@ -868,6 +894,14 @@ async def _cleanup_success(task_id: UUID, deps: PublishDependencies) -> None:
             )
             if not object_error:
                 values["object_deleted_at"] = datetime.now(UTC)
+        business_stage = (
+            TaskStage.WAITING_DEVICE.value
+            if task.status == TaskStatus.PENDING.value and device_error
+            else TaskStage.QUEUED.value
+            if task.status == TaskStatus.PENDING.value
+            else TaskStage.DONE.value
+        )
+        values["stage"] = business_stage
         result = session.execute(
             update(VideoPublishTask)
             .where(

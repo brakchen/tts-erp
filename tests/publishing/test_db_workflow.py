@@ -41,6 +41,7 @@ from tts_erp_v2.publishing.submission import (
     create_upload_ticket,
     retry_task,
 )
+from tts_erp_v2.storage.minio_client import ObjectNotFound
 
 
 def _task(
@@ -778,10 +779,43 @@ def test_retry_rejects_missing_object_even_when_attempt_is_safe(
 
     class MissingStore:
         def stat(self, _key: str) -> dict:
-            raise FileNotFoundError("TEST_missing")
+            raise ObjectNotFound("TEST_missing")
 
     with pytest.raises(ValueError, match="UPLOAD_REPLACEMENT_REQUIRED"):
         retry_task(db_session, task.public_id, cast(VideoObjectStore, MissingStore()))
+    db_session.rollback()
+
+
+def test_retry_preserves_retry_when_object_store_is_transiently_unavailable(
+    db_session: Session,
+) -> None:
+    task = _task(status=TaskStatus.FAILED.value)
+    task.attempt_count = 1
+    task.object_uploaded_at = datetime.now(UTC)
+    task.attempts.append(
+        VideoPublishAttempt(
+            sequence_no=1,
+            kind="publish",
+            artemis_session_id=uuid4(),
+            prompt_version="TEST",
+            prompt_snapshot="TEST",
+            device_serial="TEST_device",
+            retry_safe=True,
+        )
+    )
+    db_session.add(task)
+    db_session.flush()
+
+    class UnavailableStore:
+        def stat(self, _key: str) -> dict:
+            raise TimeoutError("TEST_store_timeout")
+
+    with pytest.raises(ValueError, match="OBJECT_STORE_UNAVAILABLE"):
+        retry_task(
+            db_session, task.public_id, cast(VideoObjectStore, UnavailableStore())
+        )
+    db_session.refresh(task)
+    assert task.object_deleted_at is None
     db_session.rollback()
 
 
@@ -816,9 +850,9 @@ def test_crash_recovery_does_not_republish_ambiguous_terminal_failure() -> None:
             retry_safe=None,
         )
     )
-    assert _recover_terminal_publish_attempt(task) == "terminal"
-    assert task.status == TaskStatus.NEEDS_REVIEW.value
-    assert task.stage == TaskStage.DONE.value
+    assert _recover_terminal_publish_attempt(task) == ("verify", task.attempts[0].id)
+    assert task.status == TaskStatus.RUNNING.value
+    assert task.stage == TaskStage.VERIFYING.value
 
 
 def test_upload_ticket_replay_rejects_cross_user_owner(

@@ -78,7 +78,7 @@ def test_upload_cancellation_aborts_xhr_and_handles_terminal_and_failed_cancel()
           }
           let payload;
           if (url.endsWith("/config")) {
-            payload = { maxVideoBytes: 100, maxCaptionCharacters: 4000, target: { album: "TEST" }, device: { message: "ready" }, worker: {} };
+            payload = { maxVideoBytes: 100, maxCaptionCharacters: 4000, target: { album: "TEST" }, device: { message: "ready" }, worker: { status: "ready" }, canWrite: true };
           } else if (url.includes("/tasks/current")) {
             payload = { task: null, pollState: { running: false, queued: false } };
           } else if (url.endsWith("/tasks") && method === "GET") {

@@ -81,6 +81,7 @@ PAGE_MIN_WRITE_TIER: dict[str, str] = {
     "users": "admin",
     "intercept-configs": "readwrite",
     "intercept-requests": "readwrite",
+    "video-publish": "readwrite",
 }
 
 

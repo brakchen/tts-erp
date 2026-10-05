@@ -85,7 +85,10 @@
   function renderForm() {
     const file = state.file;
     const activeUpload = Boolean(state.upload?.xhr);
-    $("publish-submit").disabled = !valid() || !!state.upload || state.creating;
+    const writeReady = Boolean(state.config?.canWrite) && state.config?.worker?.status === "ready";
+    $("publish-submit").disabled = !valid() || !writeReady || !!state.upload || state.creating;
+    const writeStatus = $("publish-write-status");
+    if (writeStatus) writeStatus.textContent = writeReady ? "" : state.config?.canWrite === false ? "发布设备未配置，当前为只读模式。" : "发布服务暂不可用，请稍后再试。";
     const progress = $("publish-upload-progress");
     progress.hidden = !activeUpload;
     progress.value = state.upload?.progress || 0;
@@ -146,6 +149,9 @@
     if (!dialog?.showModal) return Promise.resolve(window.confirm(`确认将 ${file.name} 发布到 TikTok？\n\n${caption}`));
     $("publish-confirm-file").textContent = `${file.name} · ${Math.ceil(file.size / 1024 / 1024 * 10) / 10} MB`;
     $("publish-confirm-caption").textContent = caption;
+    const preview = $("publish-confirm-preview");
+    preview.src = state.url || "";
+    preview.hidden = !state.url;
     $("publish-confirm-device").textContent = state.config.target.deviceSerialMasked || "—";
     $("publish-confirm-album").textContent = state.config.target.album || "—";
     dialog.showModal();
@@ -285,6 +291,19 @@
       else node.removeAttribute("aria-current");
     });
     $("publish-rail-summary").textContent = task ? `${task.filename || ""} · ${task.stage}` : "当前无运行任务";
+    const meta = $("publish-rail-meta");
+    const detailButton = $("publish-rail-detail");
+    if (task) {
+      const attempt = task.currentAttempt;
+      const startedAt = task.startedAt || attempt?.startedAt;
+      const elapsed = startedAt ? `${Math.max(0, Math.floor((Date.now() - Date.parse(startedAt)) / 1000))} 秒` : "—";
+      meta.textContent = `任务 ${task.taskId} · ${attempt?.kind || "—"} #${task.publishAttemptCount || 0} · 开始 ${startedAt || "—"} · 已耗时 ${elapsed}`;
+      detailButton.hidden = false;
+      detailButton.onclick = () => openDetail(task.taskId);
+    } else {
+      meta.textContent = "";
+      detailButton.hidden = true;
+    }
     const id = task?.currentAttempt?.artemisSessionId || task?.latestArtemisSessionId || "";
     $("active-artemis-id").textContent = id || "尚未创建";
     $("active-artemis-id").title = id;
@@ -445,7 +464,13 @@
     if (channel.controller) channel.controller.abort();
     channel.controller = new AbortController();
     try {
-      const detail = await request(`/tasks/${taskId}`, { signal: channel.controller.signal });
+      let detail;
+      try {
+        detail = await request(`/tasks/${taskId}?includeDiagnostics=true`, { signal: channel.controller.signal });
+      } catch (error) {
+        if (error.status !== 403) throw error;
+        detail = await request(`/tasks/${taskId}`, { signal: channel.controller.signal });
+      }
       if (generation !== channel.generation || taskId !== state.detailTaskId) return;
       channel.failures = 0;
       if (!detail.notModified) {
