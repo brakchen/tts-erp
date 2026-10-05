@@ -672,7 +672,7 @@ Source grep, static string tests, mocked JSON render tests, existing canned brow
 | integration-only | temporary integration worktree and final acceptance records | merge already reviewed lanes, run required checks, reconcile docs | modify component implementation while integrating |
 | this lane | `docs/design/spu-price-statistics.md` | companion design only | any source/test/application edit |
 
-Shared profitability/common docs and existing broad tests remain projection owner scope until an explicit successor release; this document only links to them and does not edit them.
+Projection owner changes are now present in the synchronized `origin/master` merge (lane HEAD includes merge `d0d5607`; this lane did not edit those source/common files). Price implementation still requires successor lanes to re-read the merged contracts and resolve any field/path drift before coding; this document only links to them and does not modify their ownership.
 
 ### 9.2 Dependency graph
 
@@ -704,5 +704,6 @@ Each handoff must include branch/HEAD/base, exact changed paths, commands and re
 ## 10. 当前文档交付记录
 
 - 本恢复运行只写本文件；未添加测试、未执行数据库/迁移/服务/浏览器、未声明 E2E 通过。
-- 计划验证：Markdown links/paths、JSON code blocks、SQL/Markdown structural checks、`git diff --check`；随后只 stage 本文件、提交并尝试 push `docs/spu-price-stats-design`。
-- 若 push 凭据或网络不可用，必须报告准确 local HEAD 与 unpushed 状态，不 force-push、不改 remote、不将未推送伪装成完成。
+- 已同步最新 `origin/master` 到本 lane 专属 worktree；同步带来的 projection/common source changes 是上游合并历史，不属于本 lane owned edits。后续实现者必须在各 successor lane 重新核对合并后的 API/types/UI seams。
+- 本轮验证：Markdown links/paths、JSON code blocks/duplicate keys、加权 oracle 数学、SQL/Markdown structural checks、`git diff --check`；只 stage 本文件并提交/推送 doc branch。
+- 若后续 push 凭据或网络不可用，必须报告准确 local HEAD 与 unpushed 状态，不 force-push、不改 remote、不将未推送伪装成完成。
