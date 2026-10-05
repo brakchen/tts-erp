@@ -288,7 +288,7 @@ def upgrade() -> None:
             (cleanup_intent = 'none' AND cleanup_lease_owner IS NULL AND cleanup_lease_expires_at IS NULL
                 AND ((status = 'running' AND lease_owner IS NOT NULL
                       AND stage IN ('downloading','staging_device','dispatching_artemis','waiting_artemis','verifying')
-                      AND device_cleanup_status IN ('pending','failed'))
+                      AND object_cleanup_status NOT IN ('pending','failed'))
                   OR (device_cleanup_status NOT IN ('pending','failed')
                       AND spool_cleanup_status NOT IN ('pending','failed')
                       AND object_cleanup_status NOT IN ('pending','failed')))) OR

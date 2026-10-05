@@ -56,8 +56,10 @@ def upgrade() -> None:
         RETURNS trigger LANGUAGE plpgsql AS $$
         BEGIN
             IF NEW.task_id IS DISTINCT FROM OLD.task_id
+               OR NEW.sequence_no IS DISTINCT FROM OLD.sequence_no
                OR NEW.kind IS DISTINCT FROM OLD.kind
-               OR NEW.related_attempt_id IS DISTINCT FROM OLD.related_attempt_id THEN
+               OR NEW.related_attempt_id IS DISTINCT FROM OLD.related_attempt_id
+               OR NEW.artemis_session_id IS DISTINCT FROM OLD.artemis_session_id THEN
                 RAISE EXCEPTION
                     'video publish attempt identity fields are immutable'
                     USING ERRCODE = '23514';
@@ -71,7 +73,8 @@ def upgrade() -> None:
     op.execute(
         text("""
         CREATE TRIGGER trg_video_publish_attempt_identity
-        BEFORE UPDATE OF task_id, kind, related_attempt_id
+        BEFORE UPDATE OF task_id, sequence_no, kind, related_attempt_id,
+                         artemis_session_id
         ON publishing.video_publish_attempts
         FOR EACH ROW
         EXECUTE FUNCTION publishing.fn_immutable_video_publish_attempt_identity()

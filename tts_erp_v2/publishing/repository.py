@@ -90,12 +90,18 @@ class AdvanceExecution:
     object_sha256: str | None = None
     device_path: str | None = None
     register_cleanup: bool = False
+    register_spool_cleanup: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class RecoverPersistedAttempt:
     max_attempts: int
     lease_seconds: int = 30
+
+
+@dataclass(frozen=True, slots=True)
+class InvalidateConfirmedObject:
+    reason: Literal["missing", "replaced", "etag_missing"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +119,7 @@ type PublishTransitionCommand = (
     | AdmissionRejected
     | AdvanceExecution
     | RecoverPersistedAttempt
+    | InvalidateConfirmedObject
     | OperationalFailure
 )
 
@@ -376,11 +383,26 @@ def _safe_retry_values(
             )
         )
     else:
+        spool_tracked = task.spool_cleanup_status in {"pending", "failed"}
         values.update(
             status=(TaskStatus.FAILED.value if terminal else TaskStatus.PENDING.value),
-            cleanup_intent=CleanupIntent.NONE.value,
+            cleanup_intent=(
+                CleanupIntent.PRESERVE_STATE.value
+                if spool_tracked and terminal
+                else CleanupIntent.REQUEUE_PUBLISH.value
+                if spool_tracked
+                else CleanupIntent.NONE.value
+            ),
             completed_at=now if terminal else None,
         )
+        if spool_tracked:
+            values.update(
+                spool_cleanup_status="pending",
+                spool_cleanup_next_attempt_at=now,
+                cleanup_lease_owner=None,
+                cleanup_lease_expires_at=None,
+                cleanup_heartbeat_at=None,
+            )
         values.update(
             _stage_values(
                 task,
@@ -420,6 +442,7 @@ def commit_publish_transition(
             "none"
         )
         verify_attempt_id: int | None = None
+        verify_attempt: VideoPublishAttempt | None = None
 
         if isinstance(command, PrepareAttempt):
             creating_publish = command.attempt_id is None
@@ -467,12 +490,55 @@ def commit_publish_transition(
                 task_values["object_sha256"] = command.object_sha256
             if command.device_path is not None:
                 task_values["device_path"] = command.device_path
+            if command.register_spool_cleanup:
+                task_values.update(
+                    spool_cleanup_status="pending",
+                    spool_cleanup_next_attempt_at=now,
+                )
             if command.register_cleanup:
                 task_values.update(
                     device_cleanup_status="pending",
                     device_cleanup_next_attempt_at=now,
-                    spool_cleanup_status="pending",
-                    spool_cleanup_next_attempt_at=now,
+                )
+        elif isinstance(command, InvalidateConfirmedObject):
+            code = {
+                "missing": "CONFIRMED_OBJECT_MISSING",
+                "replaced": "CONFIRMED_OBJECT_REPLACED",
+                "etag_missing": "CONFIRMED_OBJECT_ETAG_MISSING",
+            }[command.reason]
+            task_values.update(
+                status=TaskStatus.FAILED.value,
+                completed_at=now,
+                queued_at=None,
+                next_attempt_at=None,
+                lease_owner=None,
+                lease_expires_at=None,
+                heartbeat_at=None,
+                last_error_code=code,
+                last_error_message=code,
+            )
+            task_values.update(_stage_values(task, TaskStage.DONE.value, now))
+            if command.reason == "missing":
+                task_values.update(
+                    object_deleted_at=now,
+                    object_cleanup_status="succeeded",
+                    object_cleanup_error=None,
+                    object_cleanup_next_attempt_at=None,
+                    cleanup_intent=(
+                        CleanupIntent.PRESERVE_STATE.value
+                        if _has_outstanding_cleanup(task)
+                        else CleanupIntent.NONE.value
+                    ),
+                )
+            else:
+                task_values.update(
+                    cleanup_intent=CleanupIntent.PRESERVE_STATE.value,
+                    object_cleanup_status="pending",
+                    object_cleanup_error=None,
+                    object_cleanup_next_attempt_at=now,
+                    cleanup_lease_owner=None,
+                    cleanup_lease_expires_at=None,
+                    cleanup_heartbeat_at=None,
                 )
         elif isinstance(command, AdmissionRejected):
             if attempt is None:
@@ -630,64 +696,32 @@ def commit_publish_transition(
                         )
                         follow_up = "claim_device_cleanup"
                     elif verdict == "not_published":
-                        terminal = task.publish_budget_used >= max_attempts
-                        if task.device_path:
-                            task_values.update(
-                                status=(
-                                    TaskStatus.FAILED.value
-                                    if terminal
-                                    else TaskStatus.PENDING.value
-                                ),
-                                cleanup_intent=(
-                                    CleanupIntent.PRESERVE_STATE.value
-                                    if terminal
-                                    else CleanupIntent.REQUEUE_PUBLISH.value
-                                ),
-                                device_cleanup_status="pending",
-                                device_cleanup_next_attempt_at=now,
-                            )
-                            task_values.update(
-                                _stage_values(
-                                    task,
-                                    TaskStage.DONE.value
-                                    if terminal
-                                    else TaskStage.WAITING_DEVICE.value,
-                                    now,
-                                )
-                            )
-                        else:
-                            task_values.update(
-                                status=(
-                                    TaskStatus.FAILED.value
-                                    if terminal
-                                    else TaskStatus.PENDING.value
-                                ),
-                                cleanup_intent=CleanupIntent.NONE.value,
-                            )
-                            task_values.update(
-                                _stage_values(
-                                    task,
-                                    TaskStage.DONE.value
-                                    if terminal
-                                    else TaskStage.QUEUED.value,
-                                    now,
-                                )
-                            )
+                        # A single immediate negative cannot prove that an
+                        # ambiguous publish is absent; never auto-republish.
                         task_values.update(
-                            last_error_code=(
-                                "retry_budget_exhausted" if terminal else None
-                            ),
+                            status=TaskStatus.NEEDS_REVIEW.value,
+                            last_error_code="VERIFY_NOT_PUBLISHED",
                             last_error_message=(
-                                "Publish retry budget is exhausted"
-                                if terminal
-                                else None
+                                "Verification did not find the publication; "
+                                "manual review is required"
                             ),
-                            completed_at=now if terminal else None,
-                            queued_at=None if terminal else now,
+                            completed_at=now,
+                            queued_at=None,
                             next_attempt_at=None,
                             lease_owner=None,
                             lease_expires_at=None,
                             heartbeat_at=None,
+                        )
+                        task_values.update(
+                            _cleanup_pending_values(
+                                task,
+                                now,
+                                intent=CleanupIntent.PRESERVE_STATE.value,
+                                include_object=False,
+                            )
+                        )
+                        task_values.update(
+                            _stage_values(task, TaskStage.DONE.value, now)
                         )
                     else:
                         task_values.update(
@@ -833,19 +867,73 @@ def commit_publish_transition(
                 raise LeaseLost(token.task_id)
         if follow_up == "run_verify":
             assert attempt is not None
-            verify_attempt_id = _new_verify_attempt(session, task, attempt, now).id
+            verify_attempt = _new_verify_attempt(session, task, attempt, now)
+            verify_attempt_id = verify_attempt.id
         session.commit()
-        emit_publish_event(
-            "publish_transition",
-            task_id=token.task_id,
-            attempt_id=attempt.id if attempt is not None else None,
-            artemis_session_id=(
+        event_context = {
+            "task_id": token.task_id,
+            "attempt_id": attempt.id if attempt is not None else None,
+            "artemis_session_id": (
                 attempt.artemis_session_id if attempt is not None else None
             ),
-            attempt_kind=attempt.kind if attempt is not None else None,
-            stage=str(task_values.get("stage", task.stage)),
-            outcome=str(task_values.get("status", task.status)),
-        )
+            "attempt_kind": attempt.kind if attempt is not None else None,
+            "stage": str(task_values.get("stage", task.stage)),
+            "outcome": str(task_values.get("status", task.status)),
+            "device_serial": (
+                attempt.device_serial
+                if attempt is not None
+                else task.target_device_serial
+            ),
+            "duration_ms": (
+                max(0, int((now - task.stage_started_at).total_seconds() * 1000))
+                if task.stage_started_at is not None
+                else None
+            ),
+        }
+        emit_publish_event("publish_transition", **event_context)
+        if isinstance(command, PrepareAttempt):
+            if task.stage == TaskStage.STAGING_DEVICE.value:
+                emit_publish_event("device_stage_succeeded", **event_context)
+            emit_publish_event("artemis_attempt_created", **event_context)
+        if isinstance(
+            command, (ObserveAttempt, RecoverPersistedAttempt, AdmissionRejected)
+        ):
+            emit_publish_event("artemis_status_changed", **event_context)
+        if (
+            isinstance(command, ObserveAttempt)
+            and command.observation.same_session_resubmitted
+        ):
+            emit_publish_event("artemis_submit_retried", **event_context)
+        if follow_up == "run_verify" and verify_attempt is not None:
+            emit_publish_event(
+                "verification_started",
+                task_id=token.task_id,
+                attempt_id=verify_attempt.id,
+                artemis_session_id=verify_attempt.artemis_session_id,
+                attempt_kind=verify_attempt.kind,
+                stage=TaskStage.VERIFYING.value,
+                outcome=AttemptStatus.CREATED.value,
+                device_serial=verify_attempt.device_serial,
+            )
+        if (
+            isinstance(command, (ObserveAttempt, RecoverPersistedAttempt))
+            and attempt is not None
+            and attempt.kind == AttemptKind.VERIFY.value
+            and attempt_values is not None
+            and attempt_values.get("finished_at") is not None
+        ):
+            emit_publish_event("verification_finished", **event_context)
+        if isinstance(command, RecoverPersistedAttempt):
+            emit_publish_event("worker_recovered_task", **event_context)
+        if isinstance(command, InvalidateConfirmedObject):
+            emit_publish_event("confirmed_object_recovery", **event_context)
+        if str(task_values.get("status", task.status)) in {
+            TaskStatus.SUCCEEDED.value,
+            TaskStatus.FAILED.value,
+            TaskStatus.NEEDS_REVIEW.value,
+            TaskStatus.CANCELLED.value,
+        }:
+            emit_publish_event("publish_task_terminal", **event_context)
         retained = None
         if task_values.get("lease_owner", token.lease_owner) is not None:
             expected_status = (
@@ -1111,6 +1199,14 @@ def finish_cleanup_work(
             session.rollback()
             raise LeaseLost(token.task_id)
         session.commit()
+        for resource, error in resource_results.items():
+            emit_publish_event(
+                "cleanup_resource_finished",
+                task_id=token.task_id,
+                stage=stage,
+                outcome=f"{resource}:{'failed' if error else 'succeeded'}",
+                device_serial=task.target_device_serial,
+            )
         return CleanupOutcome(
             task_status=status,
             task_stage=stage,

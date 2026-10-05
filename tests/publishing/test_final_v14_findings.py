@@ -184,8 +184,18 @@ def test_0062_attempt_identity_is_immutable_but_lifecycle_is_mutable(db_engine) 
             )
             mutations = [
                 (
-                    "UPDATE publishing.video_publish_attempts SET task_id=:value, sequence_no=3 WHERE id=:id",
+                    "UPDATE publishing.video_publish_attempts SET task_id=:value WHERE id=:id",
                     task_ids[1],
+                    publish_id,
+                ),
+                (
+                    "UPDATE publishing.video_publish_attempts SET sequence_no=:value WHERE id=:id",
+                    3,
+                    publish_id,
+                ),
+                (
+                    "UPDATE publishing.video_publish_attempts SET artemis_session_id=:value WHERE id=:id",
+                    uuid4(),
                     publish_id,
                 ),
                 (
@@ -202,6 +212,7 @@ def test_0062_attempt_identity_is_immutable_but_lifecycle_is_mutable(db_engine) 
             for statement, value, attempt_id in mutations:
                 savepoint = conn.begin_nested()
                 with pytest.raises(Exception, match="identity fields are immutable"):
+                    # pi-lens-ignore: python-sql-injection
                     conn.execute(text(statement), {"value": value, "id": attempt_id})
                 savepoint.rollback()
             conn.execute(
@@ -504,21 +515,29 @@ def test_conditional_download_fails_closed_on_replacement_or_missing(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("error", "code"),
+    ("error", "code", "cleanup_required"),
     [
         (
             ObjectVersionMismatch("CONFIRMED_OBJECT_REPLACED"),
             "CONFIRMED_OBJECT_REPLACED",
+            True,
         ),
-        (ObjectNotFound("TEST/key"), "CONFIRMED_OBJECT_MISSING"),
+        (ObjectNotFound("TEST/key"), "CONFIRMED_OBJECT_MISSING", False),
     ],
 )
-async def test_dispatch_fails_before_attempt_when_confirmed_object_changed_or_missing(
-    db_session: Session, tmp_path: Path, error: Exception, code: str
+async def test_dispatch_exposes_replacement_after_confirmed_object_recovery(
+    db_session: Session,
+    tmp_path: Path,
+    error: Exception,
+    code: str,
+    cleanup_required: bool,
 ) -> None:
     class Store:
         def download(self, _key, _destination, _expected_etag):
             raise error
+
+        def remove(self, _key):
+            return None
 
     class Adb:
         def device_path(self, _task_id):
@@ -549,6 +568,16 @@ async def test_dispatch_fails_before_attempt_when_confirmed_object_changed_or_mi
     db_session.expire_all()
     assert (task.status, task.stage, task.last_error_code) == ("failed", "done", code)
     assert task.attempt_count == 0
+    first_actions = api._snapshot(task, summary_attempts=[])["allowedActions"]
+    if cleanup_required:
+        assert task.object_cleanup_status == "pending"
+        assert "replace_upload" not in first_actions
+        assert await dispatch_one(deps) == "processed"
+        db_session.expire_all()
+    assert task.object_deleted_at is not None
+    assert (
+        "replace_upload" in api._snapshot(task, summary_attempts=[])["allowedActions"]
+    )
     assert (
         db_session.scalar(
             select(func.count())
@@ -557,6 +586,46 @@ async def test_dispatch_fails_before_attempt_when_confirmed_object_changed_or_mi
         )
         == 0
     )
+
+
+@pytest.mark.asyncio
+async def test_download_size_mismatch_keeps_tracked_spool_cleanup(
+    db_session: Session, tmp_path: Path
+) -> None:
+    class Store:
+        def download(self, _key, destination, _expected_etag):
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(b"BAD")
+            return "TEST-sha256"
+
+    class Adb:
+        def device_path(self, _task_id):
+            raise AssertionError("device preflight must not begin")
+
+    task = _task(status="pending", stage="queued")
+    task.object_uploaded_at = datetime.now(UTC)
+    db_session.add(task)
+    db_session.commit()
+    deps = cast(
+        PublishDependencies,
+        SimpleNamespace(
+            session_factory=lambda: Session(
+                bind=db_session.get_bind(), join_transaction_mode="create_savepoint"
+            ),
+            instance_id="TEST-v18-size-worker",
+            lease_seconds=30,
+            max_attempts=3,
+            store=Store(),
+            adb=Adb(),
+            spool_dir=tmp_path,
+        ),
+    )
+    assert await dispatch_one(deps) == "processed"
+    db_session.expire_all()
+    assert (task.status, task.stage) == ("pending", "queued")
+    assert task.last_error_code == "WORKER_OPERATION_FAILED"
+    assert task.spool_cleanup_status == "pending"
+    assert task.cleanup_intent == "requeue_publish"
 
 
 @pytest.mark.asyncio
@@ -610,7 +679,14 @@ async def test_album_residue_stops_workflow_before_artemis_attempt(
     )
     assert await dispatch_one(deps) == "processed"
     db_session.expire_all()
-    assert (task.status, task.stage) == ("pending", "waiting_device")
+    assert (task.status, task.stage) == ("pending", "waiting_device"), (
+        task.last_error_code,
+        task.last_error_message,
+        task.spool_cleanup_status,
+        task.cleanup_intent,
+    )
+    assert task.spool_cleanup_status == "pending"
+    assert task.cleanup_intent == "requeue_publish"
     assert task.attempt_count == 0
     assert (
         db_session.scalar(

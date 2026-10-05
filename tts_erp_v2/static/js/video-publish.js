@@ -244,6 +244,13 @@
       });
       upload.taskId = ticket.taskId;
       upload.rowVersion = ticket.rowVersion;
+      if (ticket.idempotentReplay && ticket.stage !== "awaiting_upload") {
+        notice("任务已由服务端确认并进入处理流程");
+        clearForm();
+        state.clientRequestId = crypto.randomUUID();
+        await refresh();
+        return;
+      }
       if (ticket.upload?.url) {
         const xhr = new XMLHttpRequest();
         upload.xhr = xhr;
@@ -383,7 +390,7 @@
       const startedAt = task.operationalStageStartedAt || task.stageStartedAt || attempt?.startedAt || task.startedAt;
       const attemptCount = attempt?.kind === "verify" ? task.verifyAttemptCount : task.publishAttemptCount;
       const elapsed = startedAt ? `${Math.max(0, Math.floor((Date.now() - Date.parse(startedAt)) / 1000))} 秒` : "—";
-      meta.textContent = `任务 ${task.taskId} · ${task.operationalStage || task.stage} · ${attempt?.kind || "—"} #${attemptCount || 0} · 开始 ${startedAt || "—"} · 已耗时 ${elapsed}`;
+      meta.textContent = `任务 ${task.taskId} · ${task.operationalStage || task.stage} · ${attempt?.kindLabel || attempt?.kind || "—"} #${attemptCount || 0} · 开始 ${startedAt || "—"} · 已耗时 ${elapsed}`;
       detailButton.hidden = false;
       detailButton.onclick = () => {
         state.detailOpener = detailButton;
@@ -673,13 +680,12 @@
     if (channel.controller) channel.controller.abort();
     channel.controller = new AbortController();
     try {
-      let detail;
-      try {
-        detail = await request(`/tasks/${taskId}?includeDiagnostics=true`, { signal: channel.controller.signal });
-      } catch (error) {
-        if (error.status !== 403) throw error;
-        detail = await request(`/tasks/${taskId}`, { signal: channel.controller.signal });
-      }
+      const diagnostics = state.config?.canViewDiagnostics === true
+        ? "?includeDiagnostics=true"
+        : "";
+      const detail = await request(`/tasks/${taskId}${diagnostics}`, {
+        signal: channel.controller.signal,
+      });
       if (generation !== channel.generation || taskId !== state.detailTaskId) return;
       channel.failures = 0;
       if (!detail.notModified) {
@@ -790,7 +796,7 @@
       const section = document.createElement("section");
       section.className = "drawer-attempt";
       const summary = document.createElement("div");
-      summary.textContent = `第 ${attempt.sequenceNo} 次 ${attempt.kind} · ${attempt.status} · ${attempt.startedAt || "—"} → ${attempt.finishedAt || "—"}`;
+      summary.textContent = `第 ${attempt.sequenceNo} 次 ${attempt.kindLabel || attempt.kind} · ${attempt.status} · ${attempt.startedAt || "—"} → ${attempt.finishedAt || "—"}`;
       const diagnostic = document.createElement("p");
       diagnostic.textContent = `错误：${attempt.error || "—"} · 重试分类：${attempt.retryClassification || "—"} · 可重试：${attempt.retrySafe == null ? "—" : attempt.retrySafe ? "是" : "否"}`;
       const id = document.createElement("code");
@@ -911,7 +917,7 @@
 
   document.querySelector("[data-copy-artemis-id]").addEventListener("click", (event) => {
     const id = event.currentTarget.dataset.copyArtemisId;
-    if (id) copyText(id);
+    if (id) copyText(id, event.currentTarget);
   });
   $("publish-video-drop").addEventListener("dragover", (event) => { event.preventDefault(); $("publish-video-drop").classList.add("is-dragging"); });
   $("publish-video-drop").addEventListener("dragleave", () => $("publish-video-drop").classList.remove("is-dragging"));

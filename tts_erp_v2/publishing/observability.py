@@ -18,6 +18,8 @@ def emit_publish_event(
     attempt_kind: str | None = None,
     stage: str | None = None,
     outcome: str | None = None,
+    device_serial: str | None = None,
+    duration_ms: int | None = None,
 ) -> None:
     """Emit only controlled identifiers/enums, never content or diagnostics."""
     payload: dict[str, str | int | None] = {
@@ -30,6 +32,10 @@ def emit_publish_event(
         "attempt_kind": attempt_kind,
         "stage": stage,
         "outcome": outcome,
+        "device_serial_masked": (
+            f"{device_serial[:4]}…{device_serial[-4:]}" if device_serial else None
+        ),
+        "duration_ms": max(0, int(duration_ms)) if duration_ms is not None else None,
     }
     try:
         logger.info(json.dumps(payload, separators=(",", ":"), sort_keys=True))

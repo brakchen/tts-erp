@@ -470,8 +470,9 @@ completed | success | failed | cancelled | canceled | rejected
 - MinIO 下载失败；
 - ADB 推送或 MediaStore 确认失败；
 - 设备离线/锁屏，Artemis 尚未 admission；
-- Planner 失败且 `/steps` 为 0；
-- verify attempt 明确确认作品页和草稿箱都不存在目标内容。
+- Planner 失败且 `/steps` 为 0。
+
+即使单次 verify attempt 返回 `not_published`，也不能自动重排 publish：平台可能仍在处理已点击发布的内容，任务必须进入 `needs_review/done`，之后只能由用户显式再次核验。
 
 不得直接自动重试的情况：
 
@@ -993,7 +994,7 @@ FORM_EMPTY
 | 查看完整 Prompt/原始 Artemis output | admin |
 | 强制跳过核验直接重试 | v1 不提供 |
 
-`accounts/pages.py` 新增 `video-publish`，默认授权 `operator` 与 `admin`；viewer 默认不授权。访问策略对 GET 与写方法分别分类，不能把整个 prefix 粗暴设为 readwrite。
+`accounts/pages.py` 新增 `video-publish`，migration 与权限同步只自动授权 `admin`；`operator` 必须在全部发布门禁通过后由 admin 手工授权，`viewer` 默认不授权。访问策略对 GET 与写方法分别分类，不能把整个 prefix 粗暴设为 readwrite。
 
 ## 12. 模块与文件布局
 
@@ -1318,7 +1319,7 @@ bash scripts/test_isolated.sh ...
 | `publish_action_observed` | false | 不得直接重试，创建 verify attempt。 |
 | `session_missing` | null | 继续查询 `/api/status`，超时后 verify。 |
 | `verification_published` | false | 主任务成功。 |
-| `verification_not_published` | true | 在预算内自动重试 publish。 |
+| `verification_not_published` | null | 保守进入 `needs_review/done`；单次否定不得自动重试 publish，可由用户之后显式再次核验。 |
 | `verification_inconclusive` | null | 主任务 `needs_review`。 |
 | `retry_budget_exhausted` | false | 主任务 `failed`，不再自动重试。 |
 
@@ -1494,12 +1495,17 @@ async def execute_claimed(task):
         local_path = await object_store.download_atomic(task.object_ref, spool_dir)
         verify_size_and_sha256(local_path)
         transition_short_tx(
-            task, "DOWNLOAD_OK", sha256=..., device_path=...,
-            device_cleanup_status="pending", spool_cleanup_status="pending"
-        )  # ADB staging 前先登记唯一 cleanup owner 的责任
+            task, "DOWNLOAD_OK", sha256=...,
+            spool_cleanup_status="pending"
+        )  # 下载一成功即登记 spool；设备/package/相册 preflight 失败也不会失去 owner
 
         await adb.check_device(task.device_serial)
         await adb.check_package(task.device_serial, task.app_package)
+        await adb.ensure_album_empty(task.device_serial)
+        transition_short_tx(
+            task, "DEVICE_STAGE_START", device_path=...,
+            device_cleanup_status="pending"
+        )
         await adb.stage_video(local_path, task.device_path)
         await adb.verify_media_visible(task.device_serial, task.device_path)
         transition_short_tx(task, "MEDIA_VISIBLE")
@@ -2413,21 +2419,19 @@ GET /api/system/readiness 无 fatal
 
 ### 23.7 systemd unit
 
-示例路径按实际部署修改：
+检查并安装仓库中的 `scripts/systemd/tts-erp-publish.service` user unit；其内容与实际部署路径一致：
 
 ```ini
 [Unit]
 Description=ttsERP TikTok publish worker
-After=network-online.target postgresql.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=tts-erp
-Group=tts-erp
-WorkingDirectory=/opt/tts-erp
-EnvironmentFile=/etc/tts-erp/tts-erp.env
-ExecStart=/opt/tts-erp/.venv/bin/python -m tts_erp_v2.publishing.worker
+WorkingDirectory=%h/tts-erp
+EnvironmentFile=%h/tts-erp/.env
+ExecStart=%h/tts-erp/.venv/bin/python -m tts_erp_v2.publishing.worker
 Restart=always
 RestartSec=5
 TimeoutStopSec=30
@@ -2437,10 +2441,10 @@ PrivateTmp=true
 UMask=0077
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 ```
 
-如果 ADB 依赖宿主用户 USB/session 环境，使用项目既有 user service 模式，并确保 `PrivateDevices` 等 hardening 不阻断 USB/ADB。先在 staging 主机验证再收紧 sandbox。
+该 unit 以当前用户运行，以便继承其 USB/ADB 权限；确保 `PrivateDevices` 等 hardening 不阻断 USB/ADB。缺少 `ARTEMIS_DEVICE_SERIAL` 时 Worker 可启动但设备 readiness 为 `unknown`，API 创建任务会失败关闭；缺少 `ARTEMIS_BASE_URL` 或 `TTS_ERP_PUBLISH_SPOOL_DIR` 时 Worker 启动失败。先在 staging 主机验证再收紧 sandbox。
 
 常用命令：
 
@@ -2699,7 +2703,7 @@ Luna 每个 Phase 的输出必须包含：
 
 当前 migration head 为 `0063_publish_authz`（parent `0062_publish_attempt_identity`）。实现还明确保证：
 
-- verify 只有在 Artemis execution `success` 且 `verdict` 严格等于 `published`、`not_published` 或 `inconclusive` 时才采信；其他终态一律保守进入 `needs_review`；
+- verify 只有在 Artemis execution `success` 且 `verdict` 严格等于 `published`、`not_published` 或 `inconclusive` 时才采信；`published` 才确认成功，单次 `not_published` 与 `inconclusive` 均保守进入 `needs_review/done`，不得自动重新发布；其他终态同样进入 `needs_review`；
 - `cancelled`/`canceled` publish 与未知/格式错误的 Artemis 409 都是结果不确定，必须沿同 session 查询/核验，不能进入安全重发；
 - `attempt_count` 是追加式审计数，`publish_budget_used` 独立表达预算；
 - retention object cleanup pending/failed/leased 时，服务端不提供且拒绝 retry/replace；
@@ -2708,15 +2712,15 @@ Luna 每个 Phase 的输出必须包含：
 - 列表使用 `(created_at,id)` opaque keyset cursor，并只批量读取最新 attempt 与 publish/verify 计数；详情接口才加载完整 attempt 审计；
 - 409 错误返回 `code/message/retryable/requestId/rowVersion/allowedActions`，浏览器始终按服务端 allowedActions 重绘；
 - 0058 仅把成功 publish 或成功且 verdict=`published` 的 verify 视为发布确认；其他 verify 结果保留对象并进入 `needs_review`，且所有终态旧行都会清除 publish lease；
-- attempt 的 `task_id/kind/related_attempt_id` 插入后不可变，普通状态、结果、重试生命周期更新仍允许；
-- confirm 后的下载以保存的 ETag 执行条件 GET，单段/多段 ETag 不匹配或对象缺失都会在 staging/attempt 前失败；
+- attempt 的 `task_id/sequence_no/kind/related_attempt_id/artemis_session_id` 插入后不可变，普通状态、结果、重试生命周期更新仍允许；
+- confirm 后的下载以保存的 ETag 执行条件 GET；缺失对象在 fenced transition 后立即允许 replacement，ETag 不匹配先由 cleanup selector 跟踪删除旧 key、完成后再允许 replacement；两者都在 staging/attempt 前失败；
 - 原始浏览器 basename 与 object-key-safe 文件名分开持久化，续传按原始文件名和大小核对；
 - verify prompt 同时包含 caption、源文件/对象身份、预期最新发布时间窗及时间/缩略图比对要求；
 - ADB push 前必须确认受管相册无任意 `tts_erp_*.mp4` 残留；存在残留时不创建 Artemis attempt；
 - confirm-upload 在入队前要求非空字符串 ETag；缺失时返回可重试 `UPLOAD_ETAG_MISSING` 并保持 awaiting_upload；
 - 排队 snapshot 返回 `queuedAt/queuePosition/statusLabel/stageLabel`，列表批量计算队列位置；
 - needs_review 摘要同时返回 `relatedPublishAttempt`，核验 dialog 不能把最新 verify session 冒充待核验 publish session；
-- 结构化日志和 `/v2/video-publish/metrics` 只含受控标识、枚举与聚合，不含 caption/Prompt/output/secret；
+- 结构化日志覆盖 claim、download/stage、attempt、verification、terminal、cleanup/recovery commit boundary，设备身份仅掩码；`/v2/video-publish/metrics` 返回 owner-scoped status/attempt/stage/cleanup 聚合与 heartbeat age；两者都不含 caption/Prompt/output/secret；
 - migration/seed 仅自动授权 admin；operator 权限必须在最终人工验证后显式授予。
 
 390/768/1440 像素视觉检查、模拟器全流程、SIGTERM 恢复以及 staging-only 真机检查仍按 §26 保留为人工发布门禁；本文不声称已执行这些检查。

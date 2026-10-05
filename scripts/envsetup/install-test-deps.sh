@@ -91,8 +91,8 @@ if [[ ${#MISSING[@]} -gt 0 ]]; then
     echo
     echo "      sudo apt-get update && sudo apt-get install -y postgresql-client"
     echo
-    note "说明：宿主机客户端 16.x 对 Docker 里的 PostgreSQL 18.x 服务端完全够用"
-    note "（createdb/dropdb/psql 是协议层操作，版本向前兼容），无需安装 18 客户端。"
+    note "说明：createdb/dropdb/psql 可使用发行版客户端；pg_dump 必须不早于服务端主版本。"
+    note "模板刷新默认通过 PG_DOCKER=postgres 使用服务端容器内的兼容 pg_dump。"
     APT_BLOCKED=1
   fi
 fi

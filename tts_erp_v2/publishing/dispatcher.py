@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
+from time import monotonic
 from typing import Any
 from uuid import UUID
 
@@ -30,12 +31,14 @@ from tts_erp_v2.publishing.object_store import (
     ObjectVersionMismatch,
     VideoObjectStore,
 )
+from tts_erp_v2.publishing.observability import emit_publish_event
 from tts_erp_v2.publishing.repository import (
     AdmissionRejected,
     AdvanceExecution,
     AttemptObservation,
     CleanupClaimRequest,
     CleanupWork,
+    InvalidateConfirmedObject,
     LeaseLost,
     ObserveAttempt,
     OperationalFailure,
@@ -78,7 +81,15 @@ async def dispatch_one(deps: PublishDependencies) -> str:
         task = _lease_task(session, deps.instance_id, deps.lease_seconds)
         if task is not None:
             task_id = task.public_id
+            device_serial = task.target_device_serial
             session.commit()
+            emit_publish_event(
+                "publish_task_claimed",
+                task_id=task_id,
+                stage=task.stage,
+                outcome=task.status,
+                device_serial=device_serial,
+            )
         else:
             session.rollback()
             task_id = None
@@ -107,7 +118,15 @@ async def dispatch_one(deps: PublishDependencies) -> str:
         )
         if task is not None:
             task_id = task.public_id
+            device_serial = task.target_device_serial
             session.commit()
+            emit_publish_event(
+                "publish_task_claimed",
+                task_id=task_id,
+                stage=task.stage,
+                outcome=task.status,
+                device_serial=device_serial,
+            )
         else:
             session.rollback()
             task_id = None
@@ -300,6 +319,14 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
         )
         if not object_etag:
             raise ObjectVersionMismatch("CONFIRMED_OBJECT_ETAG_MISSING")
+        download_started = monotonic()
+        emit_publish_event(
+            "object_download_started",
+            task_id=task_id,
+            stage=TaskStage.DOWNLOADING.value,
+            outcome="started",
+            device_serial=device_serial,
+        )
         digest = await _run_external(
             task_id,
             deps,
@@ -307,8 +334,26 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
                 deps.store.download, object_key, local, object_etag
             ),
         )
+        _apply_publish_command(
+            deps,
+            task_id,
+            AdvanceExecution(
+                stage=TaskStage.DOWNLOADING.value,
+                lease_seconds=deps.lease_seconds,
+                object_sha256=digest,
+                register_spool_cleanup=True,
+            ),
+        )
         if local.stat().st_size != size_bytes:
             raise RuntimeError("DOWNLOAD_SIZE_MISMATCH")
+        emit_publish_event(
+            "object_download_succeeded",
+            task_id=task_id,
+            stage=TaskStage.DOWNLOADING.value,
+            outcome="succeeded",
+            device_serial=device_serial,
+            duration_ms=int((monotonic() - download_started) * 1000),
+        )
         device_path = deps.adb.device_path(task_id)
 
         async def preflight_device() -> None:
@@ -323,7 +368,6 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
             AdvanceExecution(
                 stage=TaskStage.STAGING_DEVICE.value,
                 lease_seconds=deps.lease_seconds,
-                object_sha256=digest,
                 device_path=device_path,
                 register_cleanup=True,
             ),
@@ -333,6 +377,13 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
             await deps.adb.stage_video(device_serial, local, device_path)
             await deps.adb.verify_media_visible(device_serial, device_path)
 
+        emit_publish_event(
+            "device_stage_started",
+            task_id=task_id,
+            stage=TaskStage.STAGING_DEVICE.value,
+            outcome="started",
+            device_serial=device_serial,
+        )
         await _run_external(task_id, deps, stage_device)
         outcome = _apply_publish_command(
             deps,
@@ -351,9 +402,16 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
     except LeaseLost:
         return
     except ObjectVersionMismatch as exc:
-        await _mark_failed(task_id, str(exc), deps)
+        reason = (
+            "etag_missing"
+            if str(exc) == "CONFIRMED_OBJECT_ETAG_MISSING"
+            else "replaced"
+        )
+        _apply_publish_command(deps, task_id, InvalidateConfirmedObject(reason=reason))
     except ObjectNotFound:
-        await _mark_failed(task_id, "CONFIRMED_OBJECT_MISSING", deps)
+        _apply_publish_command(
+            deps, task_id, InvalidateConfirmedObject(reason="missing")
+        )
     except DeviceUnavailable as exc:
         await _safe_retry(
             task_id,

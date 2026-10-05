@@ -1438,7 +1438,7 @@ async def test_state_owner_repair_red_cases(
 
 
 @pytest.mark.asyncio
-async def test_verify_not_published_cleans_device_before_requeue(
+async def test_verify_not_published_requires_review_without_requeue(
     db_session: Session,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1474,12 +1474,15 @@ async def test_verify_not_published_cleans_device_before_requeue(
     )
     await _run_attempt(task.public_id, verify_attempt.id, deps)
     db_session.expire_all()
-    assert task.status == TaskStatus.PENDING.value
-    assert task.stage == TaskStage.WAITING_DEVICE.value
-    assert task.cleanup_intent == "requeue_publish"
+    assert task.status == TaskStatus.NEEDS_REVIEW.value
+    assert task.stage == TaskStage.DONE.value
+    assert task.cleanup_intent == "preserve_state"
+    assert task.queued_at is None
+    assert task.last_error_code == "VERIFY_NOT_PUBLISHED"
     assert await dispatch_one(deps) == "processed"
     db_session.expire_all()
-    assert task.stage == TaskStage.QUEUED.value
+    assert task.status == TaskStatus.NEEDS_REVIEW.value
+    assert task.stage == TaskStage.DONE.value
     assert task.device_cleanup_status == "succeeded"
     assert task.object_cleanup_status == "not_started"
 
@@ -2025,7 +2028,7 @@ def test_config_exposes_server_owned_device_and_worker_configuration(
 
 @pytest.mark.parametrize("device_path", ["/sdcard/Movies/TEST/video.mp4", None])
 @pytest.mark.asyncio
-async def test_verify_not_published_at_exhausted_budget_is_terminal(
+async def test_verify_not_published_at_exhausted_budget_requires_review(
     db_session: Session,
     tmp_path: Path,
     device_path: str | None,
@@ -2086,15 +2089,14 @@ async def test_verify_not_published_at_exhausted_budget_is_terminal(
     )
     await _run_attempt(task.public_id, verify_attempt.id, deps)
     db_session.expire_all()
-    assert task.status == TaskStatus.FAILED.value
+    assert task.status == TaskStatus.NEEDS_REVIEW.value
     assert task.stage == TaskStage.DONE.value
-    assert task.last_error_code == "retry_budget_exhausted"
+    assert task.last_error_code == "VERIFY_NOT_PUBLISHED"
     assert task.lease_owner is None
+    assert task.cleanup_intent == "preserve_state"
+    assert task.spool_cleanup_status == "pending"
     if device_path:
-        assert task.cleanup_intent == "preserve_state"
         assert task.device_cleanup_status == "pending"
-    else:
-        assert task.cleanup_intent == "none"
 
 
 def test_replace_upload_waits_for_device_and_spool_cleanup(db_session: Session) -> None:

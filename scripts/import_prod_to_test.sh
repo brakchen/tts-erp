@@ -123,13 +123,14 @@ dst_plain="${DST_URL/postgresql+psycopg:\/\//postgresql://}"
 # ``rm`` can never reach it (it leaked ~15G of plain-text dumps that way).
 # Therefore dumps stream through stdout into the host file and restores
 # are fed over stdin (``docker exec -i`` keeps stdin attached).
-PG_DOCKER="${PG_DOCKER:-postgres}"
-if command -v pg_dump >/dev/null 2>&1 && command -v psql >/dev/null 2>&1; then
-  pg_dump() { command pg_dump "$@"; }
-  psql()   { command psql   "$@"; }
-else
+PG_DOCKER="${PG_DOCKER-postgres}"
+if [[ -n "$PG_DOCKER" ]]; then
+  # Prefer the server container so pg_dump is never older than PostgreSQL.
   pg_dump() { docker exec "$PG_DOCKER" pg_dump "$@"; }
   psql()   { docker exec -i "$PG_DOCKER" psql "$@"; }
+else
+  pg_dump() { command pg_dump "$@"; }
+  psql()   { command psql   "$@"; }
 fi
 
 # ── Safety: target must look like a test DB ──────────────────

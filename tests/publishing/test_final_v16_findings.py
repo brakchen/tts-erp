@@ -369,13 +369,42 @@ def test_metrics_are_read_only_bounded_and_contain_no_content(
     review.caption = "TEST_SECRET_CAPTION"
     review.cleanup_intent = "preserve_state"
     review.device_cleanup_status = "failed"
+    review.attempts.append(
+        VideoPublishAttempt(
+            sequence_no=1,
+            kind="publish",
+            artemis_session_id=uuid4(),
+            status="success",
+            prompt_version="TEST",
+            prompt_snapshot="TEST_SECRET_PROMPT",
+            device_serial="TEST_device",
+        )
+    )
     db_session.add_all([queued, review])
+    db_session.add(
+        api.PublishWorkerHeartbeat(
+            instance_id="TEST_metrics_worker",
+            hostname="TEST_host",
+            pid=123,
+            status="ready",
+            device_status="ready",
+            device_message="TEST ready",
+            started_at=datetime.now(UTC),
+            heartbeat_at=datetime.now(UTC),
+        )
+    )
     db_session.commit()
     payload = cast(Any, api).metrics(_request(role=Role.READONLY), db_session)
     assert payload["queueDepth"] >= 1
     assert payload["needsReview"] >= 1
     assert payload["cleanup"]["deviceFailed"] >= 1
-    assert "TEST_SECRET_CAPTION" not in json.dumps(payload, default=str)
+    assert payload["tasksByStatus"]["needs_review"] >= 1
+    assert payload["attemptsByKindStatus"]["publish"]["success"] >= 1
+    assert payload["stageDurationSeconds"]["done"]["count"] >= 1
+    assert payload["workerHeartbeatAgeSeconds"] is not None
+    serialized = json.dumps(payload, default=str)
+    assert "TEST_SECRET_CAPTION" not in serialized
+    assert "TEST_SECRET_PROMPT" not in serialized
 
 
 def test_observability_failure_never_changes_business_control_flow(
@@ -445,6 +474,8 @@ def test_structured_observability_contains_only_safe_identifiers(
         attempt_kind="publish",
         stage="waiting_artemis",
         outcome="running",
+        device_serial="TEST_DEVICE_12345678",
+        duration_ms=215,
     )
     entry = json.loads(caplog.records[-1].message)
     assert set(entry) == {
@@ -455,7 +486,12 @@ def test_structured_observability_contains_only_safe_identifiers(
         "attempt_kind",
         "stage",
         "outcome",
+        "device_serial_masked",
+        "duration_ms",
     }
+    assert entry["device_serial_masked"] == "TEST…5678"
+    assert entry["duration_ms"] == 215
+    assert "TEST_DEVICE_12345678" not in caplog.records[-1].message
     assert not {"caption", "prompt", "output", "token"}.intersection(entry)
 
 

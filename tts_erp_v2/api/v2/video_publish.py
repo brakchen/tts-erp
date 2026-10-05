@@ -604,6 +604,7 @@ def config(request: Request, session: Annotated[Session, Depends(get_session)]) 
             ),
         },
         "canWrite": can_write,
+        "canViewDiagnostics": _is_privileged(request),
         "writeBlockReason": None
         if can_write
         else "发布权限不足"
@@ -1005,10 +1006,72 @@ def metrics(
     if owner_clause is not None:
         query = query.where(owner_clause)
     row = session.execute(query).one()
+
+    task_counts_query = select(VideoPublishTask.status, func.count()).group_by(
+        VideoPublishTask.status
+    )
+    if owner_clause is not None:
+        task_counts_query = task_counts_query.where(owner_clause)
+    tasks_by_status = {
+        str(task_status): int(count)
+        for task_status, count in session.execute(task_counts_query)
+    }
+
+    attempts_query = (
+        select(VideoPublishAttempt.kind, VideoPublishAttempt.status, func.count())
+        .join(VideoPublishTask, VideoPublishTask.id == VideoPublishAttempt.task_id)
+        .group_by(VideoPublishAttempt.kind, VideoPublishAttempt.status)
+    )
+    if owner_clause is not None:
+        attempts_query = attempts_query.where(owner_clause)
+    attempts_by_kind_status: dict[str, dict[str, int]] = {}
+    for kind, attempt_status, count in session.execute(attempts_query):
+        attempts_by_kind_status.setdefault(str(kind), {})[str(attempt_status)] = int(
+            count
+        )
+
+    elapsed = func.extract(
+        "epoch", func.clock_timestamp() - VideoPublishTask.stage_started_at
+    )
+    durations_query = (
+        select(
+            VideoPublishTask.stage,
+            func.count(),
+            func.avg(elapsed),
+            func.max(elapsed),
+        )
+        .where(VideoPublishTask.stage_started_at.is_not(None))
+        .group_by(VideoPublishTask.stage)
+    )
+    if owner_clause is not None:
+        durations_query = durations_query.where(owner_clause)
+    stage_durations = {
+        str(stage_name): {
+            "count": int(count),
+            "average": float(average or 0),
+            "maximum": float(maximum or 0),
+        }
+        for stage_name, count, average, maximum in session.execute(durations_query)
+    }
+
+    heartbeat_age = session.scalar(
+        select(
+            func.extract(
+                "epoch",
+                func.clock_timestamp() - func.max(PublishWorkerHeartbeat.heartbeat_at),
+            )
+        )
+    )
     return {
         "queueDepth": int(row.queue_depth),
         "running": int(row.running),
         "needsReview": int(row.needs_review),
+        "tasksByStatus": tasks_by_status,
+        "attemptsByKindStatus": attempts_by_kind_status,
+        "stageDurationSeconds": stage_durations,
+        "workerHeartbeatAgeSeconds": (
+            max(0.0, float(heartbeat_age)) if heartbeat_age is not None else None
+        ),
         "cleanup": {
             "devicePending": int(row.device_pending),
             "deviceFailed": int(row.device_failed),
