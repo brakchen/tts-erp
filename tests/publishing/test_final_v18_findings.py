@@ -143,7 +143,7 @@ def test_expanded_metrics_are_owner_scoped_bounded_and_content_free(
     assert payload["queueDepth"] == 1
     assert payload["tasksByStatus"] == {"pending": 1}
     assert payload["attemptsByKindStatus"] == {"publish": {"failed": 1}}
-    assert payload["stageDurationSeconds"]["queued"]["count"] == 1
+    assert payload["currentStageAgeSeconds"]["queued"]["count"] == 1
     assert (
         len(
             [
@@ -207,7 +207,7 @@ def test_generated_schema_and_architecture_cover_publishing_head() -> None:
     schema_readme = (ROOT / "docs/schema/README.md").read_text()
     schema_sql = (ROOT / "docs/schema/schema_tts_erp.sql").read_text()
     process = (ROOT / "docs/architecture/process-architecture.md").read_text()
-    assert "0063_publish_authz" in schema_readme
+    assert "0064_publish_spool_ownership" in schema_readme
     assert "13 个业务 schema、71 张表" in schema_readme
     assert "### publishing" in schema_readme
     assert "CREATE SCHEMA publishing" in schema_sql

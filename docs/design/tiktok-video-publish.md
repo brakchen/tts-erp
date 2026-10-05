@@ -162,6 +162,7 @@ CREATE TABLE publishing.video_publish_tasks (
     target_device_serial  text NOT NULL,
     target_app_package    text NOT NULL,
     device_path           text,
+    spool_path            text,
 
     last_error_code       text,
     last_error_message    text,
@@ -349,7 +350,7 @@ v1 仅接受 MP4。具体大小上限由服务端配置并通过配置接口下�
 | 用户取消未运行任务 | 无 | 无 | 删除 |
 | 清理失败 | 后台重试 | 后台重试 | 后台重试 |
 
-确认发布后先尝试清理设备文件，再释放设备执行槽；设备残留未清除时，下一任务停在 `waiting_device`，不能在同一相册继续 staging。spool 与 MinIO 清理可在业务成功后后台重试。任一清理失败只更新对应的 `*_cleanup_status=failed`，不能覆盖 `status=succeeded`。
+确认发布后先尝试清理设备文件，再释放设备执行槽。设备清理必须只针对服务端生成的精确 `device_path`：删除文件、删除/重扫该 MediaStore entry，并以同一路径轮询查询直至目录项与 MediaStore 行都不存在；确认前失败保持 `device_cleanup_status=failed`。设备预检同时检查文件系统与 MediaStore 中的受管视频残留；任一处未清除时，下一任务停在 `waiting_device`，不能在同一相册继续 staging。spool 与 MinIO 清理可在业务成功后后台重试。任一清理失败不能覆盖 `status=succeeded`。
 
 ## 6. 调度、设备与 Artemis 契约
 
@@ -386,7 +387,7 @@ LIMIT 1;
 5. 比较设备文件大小；
 6. 触发 MediaStore 扫描；
 7. 查询 MediaStore，确认目标文件在 TTSERP 相册可见；
-8. 确认同一目录没有会干扰选择的其他活跃任务文件。
+8. 同时查询文件系统与 MediaStore，确认同一受管相册没有会干扰选择的其他 `tts_erp_*.mp4` 残留。
 
 ADB adapter 只暴露受控方法：
 
@@ -497,8 +498,8 @@ completed | success | failed | cancelled | canceled | rejected
 
 ```text
 已发布     → task succeeded → 清理
-明确未发布 → 新建 publish attempt（未超过上限时）
-无法判断   → task needs_review
+明确未发布 → task needs_review/done；单次 `not_published` 不得自动 publish/queued
+无法判断   → task needs_review/done
 ```
 
 人工只处理 `needs_review`，不参与普通失败与超时。
@@ -886,7 +887,7 @@ Prompt 快照和 Artemis 原始 output 默认折叠，仅 admin 或诊断权限�
 `failed` 且服务端返回 `retry` 时：
 
 1. 用户点击“重试原任务”；
-2. dialog 显示上一条 attempt 的失败阶段、错误、已尝试次数；
+2. dialog 显示上一条 attempt 的失败阶段、错误、`retryBudgetUsed/maxAttempts` 发布预算；追加式 `attemptCount` 只作审计，不得冒充已消耗预算；
 3. 明确说明“将使用原视频和原文案创建新的 Artemis 执行记录”；
 4. 用户确认后 POST `/retry`；
 5. 服务端原子检查状态并排队；
@@ -901,7 +902,7 @@ Prompt 快照和 Artemis 原始 output 默认折叠，仅 admin 或诊断权限�
 - 主按钮为“再次自动核验”，不是“人工检查”或“重新发布”；
 - 点击后显示只读说明：“核验只查看作品页和草稿箱，不会发布内容”；
 - verify attempt 运行时任务回到 `running/verifying`；
-- 已发布 → 成功；明确未发布 → 服务端按重试预算自动排队；仍无法判断 → 回到 `needs_review` 并展示原因。
+- 已发布 → 成功；明确未发布（单次 `not_published`）→ 回到 `needs_review/done`，不得自动 publish/queued；仍无法判断 → 回到 `needs_review/done` 并展示原因。
 
 ### 10.11 定时刷新、轮询与竞态
 
@@ -1023,9 +1024,7 @@ tts_erp_v2/static/js/video-publish.js
 tts_erp_v2/static/css/video-publish.css
 alembic/versions/0053_video_publish.py            # 实现时以实际 Alembic head 为准
 scripts/systemd/tts-erp-publish.service
-tests/publishing/
-tests/api/test_video_publish.py
-tests/browser/test_video_publish_page.py
+tests/publishing/                              # API/DB/adapter/Node 合同测试
 ```
 
 公共业务入口保持窄：
@@ -1492,12 +1491,14 @@ def claim_one(session, instance_id):
 async def execute_claimed(task):
     try:
         await heartbeat_task(task)
-        local_path = await object_store.download_atomic(task.object_ref, spool_dir)
-        verify_size_and_sha256(local_path)
+        local_path = spool_path_for(task.public_id)
         transition_short_tx(
-            task, "DOWNLOAD_OK", sha256=...,
+            task, "DOWNLOAD_START", spool_path=str(local_path),
             spool_cleanup_status="pending"
-        )  # 下载一成功即登记 spool；设备/package/相册 preflight 失败也不会失去 owner
+        )  # 在任何下载副作用前登记 owner；文件尚不存在时清理也必须幂等成功
+        local_path = await object_store.download_atomic(task.object_ref, local_path)
+        verify_size_and_sha256(local_path)
+        transition_short_tx(task, "DOWNLOAD_OK", sha256=...)
 
         await adb.check_device(task.device_serial)
         await adb.check_package(task.device_serial, task.app_package)
@@ -2479,7 +2480,7 @@ journalctl --user -u tts-erp-publish.service -f
 | `TTS_ERP_PUBLISH_SPOOL_DIR` | 是 | 无 | 本地 spool 根目录。 |
 | `ARTEMIS_BASE_URL` | 是 | 无 | Artemis daemon URL。 |
 | `ARTEMIS_TOKEN` | 视部署 | 无 | Artemis 鉴权 token。 |
-| `ARTEMIS_DEVICE_SERIAL` | 是 | 无 | 唯一目标设备。 |
+| `ARTEMIS_DEVICE_SERIAL` | API 创建任务必需 | 无 | 唯一目标设备；缺失时 Worker 仍启动但 readiness=`unknown`，API 创建失败关闭。 |
 | `ARTEMIS_APP_PACKAGE` | 否 | com.zhiliaoapp.musically | TikTok package。 |
 | `ARTEMIS_PROFILE` | 否 | pro | 执行 profile。 |
 | `ARTEMIS_VERIFICATION_LEVEL` | 否 | strict | Pro checker 强度。 |
@@ -2487,7 +2488,7 @@ journalctl --user -u tts-erp-publish.service -f
 | `PUBLISH_TASK_LEASE_SECONDS` | 否 | 30 | DB task lease。 |
 | `PUBLISH_WORKER_HEARTBEAT_SECONDS` | 否 | 5 | Worker 心跳周期。 |
 
-配置启动时校验；缺少 bucket/device/base URL/spool 时 Worker fail fast，API config 返回 worker unavailable，不静默使用危险默认值。
+Worker 启动直接要求 `ARTEMIS_BASE_URL` 与 `TTS_ERP_PUBLISH_SPOOL_DIR`，缺少任一项即失败；bucket 有受校验的 `tiktok-video` 默认值。缺少 `ARTEMIS_DEVICE_SERIAL` 时 Worker 仍可启动，设备 readiness=`unknown`，API 创建任务失败关闭；不得静默选择“第一台设备”。
 
 ### 23.10 部署顺序
 
@@ -2544,6 +2545,9 @@ journalctl --user -u tts-erp-publish.service -f
 publish_task_created
 upload_confirmed
 publish_task_claimed
+publish_transition  # stage=刚完成阶段；只有阶段完成时带受控 duration_ms
+object_download_started
+object_download_succeeded
 device_stage_started
 device_stage_succeeded
 artemis_attempt_created
@@ -2560,14 +2564,14 @@ worker_recovered_task
 
 若项目尚无 Prometheus，先通过结构化日志和只读状态 API提供；不要为本功能单独引入重型依赖。指标语义：
 
-- `video_publish_queue_depth` gauge；
-- `video_publish_running` gauge（0/1）；
-- `video_publish_tasks_total{status}` counter；
-- `video_publish_stage_duration_seconds{stage}` histogram；
-- `video_publish_artemis_attempts_total{kind,status}` counter；
-- `video_publish_needs_review` gauge；
-- `video_publish_cleanup_failed{resource}` gauge；
-- `video_publish_worker_heartbeat_age_seconds` gauge。
+- `queueDepth` / `running` / `needsReview`：当前 owner 可见范围的 gauge；
+- `tasksByStatus{status}`：当前任务状态快照 gauge，不是单调 counter；
+- `attemptsByKindStatus{kind,status}`：当前 attempt 快照 gauge，不是单调 counter；
+- `currentStageAgeSeconds{stage}`：当前仍处于各 stage 的数量/平均/最大年龄 gauge；终态 `done` 年龄会增长，不得称为已完成阶段 histogram；
+- `cleanup{resource}`：当前 pending/failed cleanup gauge；
+- `workerHeartbeatAgeSeconds`：Worker 心跳年龄 gauge。
+
+已完成阶段耗时不从当前任务年龄倒推。每次真实 stage 变化后的 `publish_transition` 事件以旧 stage 作为 `stage` 并携带受控、非负 `duration_ms`；外部采集器据此聚合 `video_publish_stage_duration_seconds{stage}` histogram。无 stage 变化的 transition 其 `duration_ms=null`，不得进入 histogram。
 
 ### 24.3 告警建议
 
@@ -2701,7 +2705,7 @@ Luna 每个 Phase 的输出必须包含：
 
 ## 28. 已实现的最终安全边界
 
-当前 migration head 为 `0063_publish_authz`（parent `0062_publish_attempt_identity`）。实现还明确保证：
+当前 migration head 为 `0064_publish_spool_ownership`（parent `0063_publish_authz`）。实现还明确保证：
 
 - verify 只有在 Artemis execution `success` 且 `verdict` 严格等于 `published`、`not_published` 或 `inconclusive` 时才采信；`published` 才确认成功，单次 `not_published` 与 `inconclusive` 均保守进入 `needs_review/done`，不得自动重新发布；其他终态同样进入 `needs_review`；
 - `cancelled`/`canceled` publish 与未知/格式错误的 Artemis 409 都是结果不确定，必须沿同 session 查询/核验，不能进入安全重发；

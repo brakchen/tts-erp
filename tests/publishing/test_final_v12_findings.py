@@ -548,6 +548,7 @@ async def test_slow_cleanup_renews_lease_until_operation_finishes(
         ("device",),
         "TEST_device",
         "/sdcard/Movies/TTSERP/tts_erp_TEST.mp4",
+        None,
         "TEST/object.mp4",
     )
     deps = cast(
@@ -827,6 +828,7 @@ async def test_cleanup_heartbeat_owner_loss_stops_finalization(
         ("device",),
         "TEST_device",
         "/sdcard/Movies/TTSERP/tts_erp_TEST.mp4",
+        None,
         "TEST/object.mp4",
     )
     deps = cast(

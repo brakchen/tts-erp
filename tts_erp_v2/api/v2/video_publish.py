@@ -38,6 +38,7 @@ from tts_erp_v2.publishing.repository import (
     request_verification,
     retry_cleanup_resources,
 )
+from tts_erp_v2.publishing.safe_values import mask_device_serial
 from tts_erp_v2.publishing.submission import (
     CreateCommand,
     TaskConflict,
@@ -284,7 +285,7 @@ def _snapshot(
 
 
 def _mask(value: str) -> str:
-    return value if len(value) <= 8 else f"{value[:4]}…{value[-4:]}"
+    return mask_device_serial(value)
 
 
 def _is_privileged(request: Request) -> bool:
@@ -1045,7 +1046,7 @@ def metrics(
     )
     if owner_clause is not None:
         durations_query = durations_query.where(owner_clause)
-    stage_durations = {
+    current_stage_ages = {
         str(stage_name): {
             "count": int(count),
             "average": float(average or 0),
@@ -1068,7 +1069,7 @@ def metrics(
         "needsReview": int(row.needs_review),
         "tasksByStatus": tasks_by_status,
         "attemptsByKindStatus": attempts_by_kind_status,
-        "stageDurationSeconds": stage_durations,
+        "currentStageAgeSeconds": current_stage_ages,
         "workerHeartbeatAgeSeconds": (
             max(0.0, float(heartbeat_age)) if heartbeat_age is not None else None
         ),

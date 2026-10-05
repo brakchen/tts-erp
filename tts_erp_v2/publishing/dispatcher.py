@@ -315,6 +315,8 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
             AdvanceExecution(
                 stage=TaskStage.DOWNLOADING.value,
                 lease_seconds=deps.lease_seconds,
+                spool_path=str(local),
+                register_spool_cleanup=True,
             ),
         )
         if not object_etag:
@@ -341,7 +343,6 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
                 stage=TaskStage.DOWNLOADING.value,
                 lease_seconds=deps.lease_seconds,
                 object_sha256=digest,
-                register_spool_cleanup=True,
             ),
         )
         if local.stat().st_size != size_bytes:
@@ -870,9 +871,23 @@ async def _execute_cleanup(work: CleanupWork, deps: PublishDependencies) -> None
                 work.device_serial, work.device_path or ""
             ),
         )
+        expected_spool_path = deps.spool_dir / str(work.task_id) / "video.mp4"
+        spool_path = Path(work.spool_path) if work.spool_path else expected_spool_path
+        if spool_path != expected_spool_path:
+
+            async def reject_unmanaged_spool() -> None:
+                raise ValueError("refusing to remove an unmanaged spool path")
+
+            spool_cleanup = reject_unmanaged_spool
+        else:
+
+            async def remove_managed_spool() -> None:
+                await _remove_spool(spool_path)
+
+            spool_cleanup = remove_managed_spool
         await run(
             "spool",
-            lambda: _remove_spool(deps.spool_dir / str(work.task_id) / "video.mp4"),
+            spool_cleanup,
         )
         await run(
             "object", lambda: asyncio.to_thread(deps.store.remove, work.object_key)
@@ -912,6 +927,16 @@ async def recover_active(deps: PublishDependencies) -> str:
             session.commit()
             return "no_active_task"
         task_id = task.public_id
+        stage = task.stage
+        status = task.status
+        device_serial = task.target_device_serial
         session.commit()
+    emit_publish_event(
+        "worker_recovered_task",
+        task_id=task_id,
+        stage=stage,
+        outcome=status,
+        device_serial=device_serial,
+    )
     await _execute(task_id, deps)
     return "recovered"

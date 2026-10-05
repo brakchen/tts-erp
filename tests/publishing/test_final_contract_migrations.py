@@ -67,6 +67,44 @@ def test_state_bearing_intermediate_downgrades_refuse_populated_table(
             transaction.rollback()
 
 
+def test_0064_spool_ownership_round_trip_and_downgrade_guard(db_engine) -> None:
+    migration = _load("0064_publish_spool_ownership")
+    assert migration.down_revision == "0063_publish_authz"
+    with db_engine.connect() as conn:
+        transaction = conn.begin()
+        try:
+            migration.__dict__["op"] = Operations(MigrationContext.configure(conn))
+            task_id = _insert_task(conn)
+            migration.downgrade()
+            assert "spool_path" not in {
+                row["name"]
+                for row in inspect(conn).get_columns(
+                    "video_publish_tasks", schema="publishing"
+                )
+            }
+            migration.upgrade()
+            assert "spool_path" in {
+                row["name"]
+                for row in inspect(conn).get_columns(
+                    "video_publish_tasks", schema="publishing"
+                )
+            }
+            # pi-lens-ignore: python-sql-injection
+            conn.execute(
+                text(
+                    "UPDATE publishing.video_publish_tasks "
+                    "SET spool_path=:path WHERE id=:id"
+                ),
+                {"path": "/TEST/spool/video.mp4", "id": task_id},
+            )
+            savepoint = conn.begin_nested()
+            with pytest.raises(Exception, match="0064 downgrade refused"):
+                migration.downgrade()
+            savepoint.rollback()
+        finally:
+            transaction.rollback()
+
+
 def test_0061_revision_backfill_and_integrity_metadata(db_engine) -> None:
     migration = _load("0061_publish_safety")
     assert migration.down_revision == "0060_video_publish_invariants"

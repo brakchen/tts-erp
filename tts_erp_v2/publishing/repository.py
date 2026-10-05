@@ -89,6 +89,7 @@ class AdvanceExecution:
     lease_seconds: int = 30
     object_sha256: str | None = None
     device_path: str | None = None
+    spool_path: str | None = None
     register_cleanup: bool = False
     register_spool_cleanup: bool = False
 
@@ -157,6 +158,7 @@ class CleanupWork:
     resources: tuple[str, ...]
     device_serial: str
     device_path: str | None
+    spool_path: str | None
     object_key: str
 
 
@@ -426,6 +428,8 @@ def commit_publish_transition(
         if task is None:
             raise LeaseLost(token.task_id)
         now = _db_now(session)
+        previous_stage = task.stage
+        previous_stage_started_at = task.stage_started_at
         attempt: VideoPublishAttempt | None = None
         if token.attempt_id is not None:
             attempt = session.scalar(
@@ -443,6 +447,7 @@ def commit_publish_transition(
         )
         verify_attempt_id: int | None = None
         verify_attempt: VideoPublishAttempt | None = None
+        inserted_attempt: VideoPublishAttempt | None = None
 
         if isinstance(command, PrepareAttempt):
             creating_publish = command.attempt_id is None
@@ -490,7 +495,11 @@ def commit_publish_transition(
                 task_values["object_sha256"] = command.object_sha256
             if command.device_path is not None:
                 task_values["device_path"] = command.device_path
+            if command.spool_path is not None:
+                task_values["spool_path"] = command.spool_path
             if command.register_spool_cleanup:
+                if command.spool_path is None and task.spool_path is None:
+                    raise ValueError("SPOOL_PATH_REQUIRED")
                 task_values.update(
                     spool_cleanup_status="pending",
                     spool_cleanup_next_attempt_at=now,
@@ -823,6 +832,12 @@ def commit_publish_transition(
                             _stage_values(task, TaskStage.DONE.value, now)
                         )
 
+        attempt_status_changed = bool(
+            attempt is not None
+            and attempt_values is not None
+            and "status" in attempt_values
+            and attempt_values["status"] != attempt.status
+        )
         new_version = token.row_version + 1
         task_values["row_version"] = new_version
         result = session.execute(
@@ -841,6 +856,7 @@ def commit_publish_transition(
             raise LeaseLost(token.task_id)
         if isinstance(command, PrepareAttempt) and command.attempt_id is None:
             attempt = _new_publish_attempt(session, task, now, command.max_attempts)
+            inserted_attempt = attempt
             token = PublishLeaseToken(
                 task_id=token.task_id,
                 lease_owner=token.lease_owner,
@@ -869,7 +885,10 @@ def commit_publish_transition(
             assert attempt is not None
             verify_attempt = _new_verify_attempt(session, task, attempt, now)
             verify_attempt_id = verify_attempt.id
+            inserted_attempt = verify_attempt
         session.commit()
+        next_stage = str(task_values.get("stage", task.stage))
+        stage_changed = next_stage != previous_stage
         event_context = {
             "task_id": token.task_id,
             "attempt_id": attempt.id if attempt is not None else None,
@@ -877,28 +896,45 @@ def commit_publish_transition(
                 attempt.artemis_session_id if attempt is not None else None
             ),
             "attempt_kind": attempt.kind if attempt is not None else None,
-            "stage": str(task_values.get("stage", task.stage)),
+            "stage": next_stage,
             "outcome": str(task_values.get("status", task.status)),
             "device_serial": (
                 attempt.device_serial
                 if attempt is not None
                 else task.target_device_serial
             ),
-            "duration_ms": (
-                max(0, int((now - task.stage_started_at).total_seconds() * 1000))
-                if task.stage_started_at is not None
-                else None
-            ),
+            "duration_ms": None,
         }
-        emit_publish_event("publish_transition", **event_context)
-        if isinstance(command, PrepareAttempt):
-            if task.stage == TaskStage.STAGING_DEVICE.value:
-                emit_publish_event("device_stage_succeeded", **event_context)
-            emit_publish_event("artemis_attempt_created", **event_context)
-        if isinstance(
-            command, (ObserveAttempt, RecoverPersistedAttempt, AdmissionRejected)
+        transition_context = dict(event_context)
+        if stage_changed and previous_stage_started_at is not None:
+            transition_context.update(
+                stage=previous_stage,
+                duration_ms=max(
+                    0, int((now - previous_stage_started_at).total_seconds() * 1000)
+                ),
+            )
+        emit_publish_event("publish_transition", **transition_context)
+        if (
+            isinstance(command, PrepareAttempt)
+            and previous_stage == TaskStage.STAGING_DEVICE.value
         ):
-            emit_publish_event("artemis_status_changed", **event_context)
+            emit_publish_event("device_stage_succeeded", **transition_context)
+        if inserted_attempt is not None:
+            emit_publish_event(
+                "artemis_attempt_created",
+                task_id=token.task_id,
+                attempt_id=inserted_attempt.id,
+                artemis_session_id=inserted_attempt.artemis_session_id,
+                attempt_kind=inserted_attempt.kind,
+                stage=next_stage,
+                outcome=inserted_attempt.status,
+                device_serial=inserted_attempt.device_serial,
+            )
+        if attempt_status_changed:
+            status_context = dict(event_context)
+            assert attempt_values is not None
+            status_context["outcome"] = str(attempt_values["status"])
+            emit_publish_event("artemis_status_changed", **status_context)
         if (
             isinstance(command, ObserveAttempt)
             and command.observation.same_session_resubmitted
@@ -923,8 +959,6 @@ def commit_publish_transition(
             and attempt_values.get("finished_at") is not None
         ):
             emit_publish_event("verification_finished", **event_context)
-        if isinstance(command, RecoverPersistedAttempt):
-            emit_publish_event("worker_recovered_task", **event_context)
         if isinstance(command, InvalidateConfirmedObject):
             emit_publish_event("confirmed_object_recovery", **event_context)
         if str(task_values.get("status", task.status)) in {
@@ -1036,6 +1070,7 @@ def claim_cleanup_work(
                 VideoPublishTask.cleanup_lease_expires_at,
                 VideoPublishTask.target_device_serial,
                 VideoPublishTask.device_path,
+                VideoPublishTask.spool_path,
                 VideoPublishTask.object_key,
                 candidate.c.device_due,
                 candidate.c.spool_due,
@@ -1066,6 +1101,7 @@ def claim_cleanup_work(
             resources=resources,
             device_serial=row.target_device_serial,
             device_path=row.device_path,
+            spool_path=row.spool_path,
             object_key=row.object_key,
         )
         session.commit()

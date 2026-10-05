@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/envscripts/envsetup/install-test-deps.sh — tts-erp 测试前置依赖一键安装（幂等，可重复执行）
+# scripts/envsetup/install-test-deps.sh — tts-erp 测试前置依赖一键安装（幂等，可重复执行）
 #
 # 目标：让 `bash scripts/test_isolated.sh ...` 在一台干净机器上能直接跑起来。
 #
@@ -9,11 +9,11 @@
 #   scripts/test_isolated.sh     唯一标准测试入口（克隆 tts_erp_test_template 跑临时库）
 #
 # 用法：
-#   bash scripts/envscripts/envsetup/install-test-deps.sh              # 交互式
-#   sudo bash scripts/envscripts/envsetup/install-test-deps.sh         # 一次性装完系统包 + venv 依赖
-#   bash scripts/envscripts/envsetup/install-test-deps.sh --dry-run    # 只打印将要执行的命令，不改动系统
-#   bash scripts/envscripts/envsetup/install-test-deps.sh --check      # 只做体检，不装任何东西
-#   bash scripts/envscripts/envsetup/install-test-deps.sh -h           # 全部选项
+#   bash scripts/envsetup/install-test-deps.sh              # 交互式
+#   sudo bash scripts/envsetup/install-test-deps.sh         # 一次性装完系统包 + venv 依赖
+#   bash scripts/envsetup/install-test-deps.sh --dry-run    # 只打印将要执行的命令，不改动系统
+#   bash scripts/envsetup/install-test-deps.sh --check      # 只做体检，不装任何东西
+#   bash scripts/envsetup/install-test-deps.sh -h           # 全部选项
 #
 # 会做什么：
 #   1 系统包     postgresql-client（psql / createdb / dropdb —— test_isolated.sh

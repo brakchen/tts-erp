@@ -425,7 +425,7 @@
     const attemptId = attempt.artemisSessionId || task.latestArtemisSessionId || "尚未创建";
     const relatedPublishId = task.relatedPublishAttempt?.artemisSessionId || attemptId;
     const failure = `${task.lastErrorCode || "无错误码"} / ${task.lastErrorMessage || "无错误详情"}`;
-    const budget = `${task.attemptCount ?? task.publishAttemptCount ?? 0}/${state.config?.maxPublishAttempts || 3}`;
+    const budget = `${task.retryBudgetUsed ?? 0}/${state.config?.maxPublishAttempts || 3}`;
     return {
       cancel: `取消任务 ${task.taskId}（阶段 ${task.stage}）会保留审计记录，并清理已生成的对象；确认取消？`,
       retry: `重试任务 ${task.taskId}\n前次 Artemis ID：${attemptId}\n失败阶段：${task.stage}\n错误：${failure}\n发布预算：${budget}\n重试会复用已上传对象，且不会自动确认模糊结果。确认重试？`,

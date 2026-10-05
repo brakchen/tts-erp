@@ -400,7 +400,7 @@ def test_metrics_are_read_only_bounded_and_contain_no_content(
     assert payload["cleanup"]["deviceFailed"] >= 1
     assert payload["tasksByStatus"]["needs_review"] >= 1
     assert payload["attemptsByKindStatus"]["publish"]["success"] >= 1
-    assert payload["stageDurationSeconds"]["done"]["count"] >= 1
+    assert payload["currentStageAgeSeconds"]["done"]["count"] >= 1
     assert payload["workerHeartbeatAgeSeconds"] is not None
     serialized = json.dumps(payload, default=str)
     assert "TEST_SECRET_CAPTION" not in serialized
@@ -525,11 +525,11 @@ def test_builtin_permission_seed_withholds_video_publish_from_operator(
     )
 
 
-def test_0063_is_live_linear_head_with_admin_only_default(
+def test_0064_is_live_linear_head_with_admin_only_default(
     db_session: Session,
 ) -> None:
     assert db_session.scalar(text("SELECT version_num FROM alembic_version")) == (
-        "0063_publish_authz"
+        "0064_publish_spool_ownership"
     )
     grants = set(
         db_session.execute(

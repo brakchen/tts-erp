@@ -77,7 +77,7 @@ APScheduler 调度器，JOBS 注册表在文件顶部 `NOTE`，以它为准，�
 
 13 schema SQLAlchemy 模型：
 
-- `publishing.py`：`publishing.video_publish_tasks / video_publish_attempts / worker_heartbeats`，分别保存任务与 cleanup owner 状态、不可变 attempt 身份和 Worker readiness；
+- `publishing.py`：`publishing.video_publish_tasks / video_publish_attempts / worker_heartbeats`，分别保存任务与 publish/cleanup owner 状态（下载前持久化 `spool_path`）、不可变 attempt 身份和 Worker readiness；设备 cleanup 只删除并轮询确认精确 filesystem/MediaStore 路径；
 - `miaoshou.py`：妙手 source-owned 包裹/采购价域 8 张表（package raw/header/item/gift、purchase raw/candidate、cursor、issue）；
 - `plugin.py`：插件 dump 的订单、物流、结算和广告表；
 - 订单/物流/结算 7 张：orders、order_lines、shipments、tracking_events、settlements、settlement_details、raw_log

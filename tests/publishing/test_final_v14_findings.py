@@ -515,7 +515,7 @@ def test_conditional_download_fails_closed_on_replacement_or_missing(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("error", "code", "cleanup_required"),
+    ("error", "code", "object_cleanup_required"),
     [
         (
             ObjectVersionMismatch("CONFIRMED_OBJECT_REPLACED"),
@@ -530,7 +530,7 @@ async def test_dispatch_exposes_replacement_after_confirmed_object_recovery(
     tmp_path: Path,
     error: Exception,
     code: str,
-    cleanup_required: bool,
+    object_cleanup_required: bool,
 ) -> None:
     class Store:
         def download(self, _key, _destination, _expected_etag):
@@ -569,11 +569,13 @@ async def test_dispatch_exposes_replacement_after_confirmed_object_recovery(
     assert (task.status, task.stage, task.last_error_code) == ("failed", "done", code)
     assert task.attempt_count == 0
     first_actions = api._snapshot(task, summary_attempts=[])["allowedActions"]
-    if cleanup_required:
-        assert task.object_cleanup_status == "pending"
-        assert "replace_upload" not in first_actions
-        assert await dispatch_one(deps) == "processed"
-        db_session.expire_all()
+    assert task.spool_cleanup_status == "pending"
+    assert task.object_cleanup_status == (
+        "pending" if object_cleanup_required else "succeeded"
+    )
+    assert "replace_upload" not in first_actions
+    assert await dispatch_one(deps) == "processed"
+    db_session.expire_all()
     assert task.object_deleted_at is not None
     assert (
         "replace_upload" in api._snapshot(task, summary_attempts=[])["allowedActions"]

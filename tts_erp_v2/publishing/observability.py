@@ -6,6 +6,8 @@ import json
 import logging
 from uuid import UUID
 
+from tts_erp_v2.publishing.safe_values import mask_device_serial
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,7 +35,7 @@ def emit_publish_event(
         "stage": stage,
         "outcome": outcome,
         "device_serial_masked": (
-            f"{device_serial[:4]}…{device_serial[-4:]}" if device_serial else None
+            mask_device_serial(device_serial) if device_serial else None
         ),
         "duration_ms": max(0, int(duration_ms)) if duration_ms is not None else None,
     }
