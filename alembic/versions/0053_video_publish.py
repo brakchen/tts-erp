@@ -134,7 +134,10 @@ def upgrade() -> None:
     # pi-lens-ignore: python-sql-injection
     op.execute(
         text(
-            "INSERT INTO security.role_permissions (role_code, permission_code) VALUES ('admin','page:video-publish'),('operator','page:video-publish') ON CONFLICT DO NOTHING"
+            "INSERT INTO security.role_permissions (role_code, permission_code) "
+            "SELECT 'admin','page:video-publish' "
+            "WHERE EXISTS (SELECT 1 FROM security.roles WHERE code='admin') "
+            "ON CONFLICT DO NOTHING"
         )
     )
 

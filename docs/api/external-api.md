@@ -405,8 +405,7 @@ page:users"}`。API key 凭证（admin 档）也可调用，不受页面权限�
 
 ### TikTok video publishing (`/v2/video-publish/*`)
 
-The browser-only publishing workflow stores tasks in the `publishing` schema and
-keeps Artemis/ADB server-side. `POST /tasks` returns `201` for a new upload
+The browser workbench and API-key publishing clients store tasks through the same owner-scoped API in the `publishing` schema; both keep Artemis/ADB server-side. `POST /tasks` returns `201` for a new upload
 票据 and `200` for an owned idempotent replay with the same payload; payload
 mismatches return `409`, and another owner receives `404 TASK_NOT_FOUND` without
 metadata. Task list/detail and state-changing operations are owner-scoped;
@@ -418,14 +417,15 @@ mutations must send `X-Requested-With: tts-erp`; API-key clients are exempt.
 | `GET /v2/pages/video-publish` | page:video-publish | Browser publishing workbench; page access follows the authenticated page permission. |
 | `GET /v2/video-publish/config` | readonly + page:video-publish | Limits, masked target, fresh Worker liveness, `writeBlockReason`, and server-owned readiness (`ready|busy|offline|locked|unknown`) covering ADB/unlock, TikTok package, Artemis, MinIO, and active device cleanup; offline/locked/busy is informational and does not disable queue creation. No credentials or signed URLs. API keys are exempt from page permission points. |
 | `GET /v2/video-publish/tasks/current` | readonly + page:video-publish | Current owner-visible task plus filter-independent polling summary. API keys are exempt from page permission points. |
-| `GET /v2/video-publish/tasks` | readonly + page:video-publish | Owner-scoped history; `status`, `limit`, and opaque `(created_at,id)` keyset `cursor` filters. API keys are exempt from page permission points. |
+| `GET /v2/video-publish/tasks` | readonly + page:video-publish | Owner-scoped history; `status`, `limit`, and opaque `(created_at,id)` keyset `cursor` filters. Queued snapshots include `queuedAt`, globally ordered `queuePosition`, and status/stage labels. API keys are exempt from page permission points. |
 | `GET /v2/video-publish/tasks/{task_id}` | readonly + page:video-publish | Owner-scoped detail; `includeDiagnostics=true` requires admin. API keys are exempt from page permission points. |
+| `GET /v2/video-publish/metrics` | readonly + page:video-publish | Content-free owner-visible queue/running/review/cleanup gauges; admin receives global aggregates. API keys are exempt from page permission points. |
 | `POST /v2/video-publish/tasks` | readwrite + page:video-publish | Creates an awaiting-upload task, preserves the bounded original browser basename separately from the object-key-safe filename, and returns a short-lived presigned PUT ticket. Presign failure is retryable `503 OBJECT_STORE_UNAVAILABLE` and leaves the task awaiting upload. API keys are exempt from page permission points. |
 | `POST /v2/video-publish/tasks/{task_id}/upload-url` | readwrite + page:video-publish | Refreshes an awaiting-upload ticket for the owner; presign failure is structured retryable `503 OBJECT_STORE_UNAVAILABLE` and does not change task state. API keys are exempt from page permission points. |
 | `POST /v2/video-publish/tasks/{task_id}/replace-upload` | readwrite + page:video-publish | Reopens a failed task whose object is confirmed absent so the owner can upload a replacement. API keys are exempt from page permission points. |
-| `POST /v2/video-publish/tasks/{task_id}/confirm-upload` | readwrite + page:video-publish | HEAD-verifies existence, exact size, explicit `video/mp4`, and stores the confirmed ETag. Worker download uses conditional `If-Match` against that exact single-part or multipart ETag, so replacement/missing objects fail before device staging or attempt creation. Storage transport failures are retryable 503, while missing/size/MIME errors have distinct stable codes. API keys are exempt from page permission points. |
+| `POST /v2/video-publish/tasks/{task_id}/confirm-upload` | readwrite + page:video-publish | HEAD-verifies existence, exact size, explicit `video/mp4`, and stores the confirmed ETag. Worker download uses conditional `If-Match` against that exact single-part or multipart ETag, so replacement/missing objects fail before device staging or attempt creation. Storage transport failures are retryable 503, while missing/size/MIME/blank-ETag validation errors have distinct stable retryable codes and leave the task awaiting upload. API keys are exempt from page permission points. |
 | `POST /v2/video-publish/tasks/{task_id}/cancel` | readwrite + page:video-publish | Cancels an unstarted task and schedules independent object cleanup. API keys are exempt from page permission points. |
-| `POST /v2/video-publish/tasks/{task_id}/retry` | readwrite + page:video-publish | Retries only a failed, retry-safe task within its attempt budget. API keys are exempt from page permission points. |
+| `POST /v2/video-publish/tasks/{task_id}/retry` | readwrite + page:video-publish | Retries only a failed, retry-safe task within its attempt budget and returns the new `queuedAt`/`queuePosition`. API keys are exempt from page permission points. |
 | `POST /v2/video-publish/tasks/{task_id}/verify` | readwrite + page:video-publish | Requests verification for an ambiguous result. API keys are exempt from page permission points. |
 | `POST /v2/video-publish/tasks/{task_id}/cleanup/retry` | readwrite + page:video-publish | Retries eligible device, spool, or object cleanup without changing business status. API keys are exempt from page permission points. |
 

@@ -1381,40 +1381,17 @@ API 返回以下稳定字符串，前端只按返回值显示按钮：
 
 ## 20. 后端核心逻辑
 
-### 20.1 Public service interface
+### 20.1 实际 service / handler owner
 
-```python
-@dataclass(frozen=True, slots=True)
-class CreatePublishTaskCommand:
-    actor_user_id: int | None
-    client_request_id: UUID
-    filename: str
-    content_type: str
-    size_bytes: int
-    caption: str
+- `publishing.submission.CreateCommand` 与 `create_upload_ticket()` 创建/幂等重放上传票据；
+- `publishing.submission.confirm_upload()`、`cancel_task()`、`retry_task()`、`replace_upload()` 持有对应任务写入；
+- `api.v2.video_publish.refresh_upload_url()` 只负责 owner 校验、预签名和 wire envelope；
+- `api.v2.video_publish.current()`、`list_tasks()`、`detail()` 持有 owner-scoped 只读查询与 snapshot；
+- `publishing.repository.request_verification()` 创建人工触发的 verify attempt；Worker 侧 task/attempt 结果只由 `commit_publish_transition()` 原子提交；
+- `publishing.dispatcher.dispatch_one()` 与 `recover_active()` 编排 adapter，但 adapter 不得自行修改数据库状态；
+- cleanup 删除只由 `claim_cleanup_work()` 领取的 executor 执行，并由 `renew_cleanup_work()` / `finish_cleanup_work()` fence。
 
-@dataclass(frozen=True, slots=True)
-class TaskSnapshot:
-    public_id: UUID
-    status: TaskStatus
-    stage: TaskStage
-    allowed_actions: tuple[AllowedAction, ...]
-    latest_artemis_session_id: UUID | None
-    row_version: int
-
-create_upload_ticket(session, command) -> UploadTicketOutcome
-refresh_upload_ticket(session, task_id, actor) -> UploadTicketOutcome
-confirm_upload(session, task_id, actor) -> TaskSnapshot
-cancel_task(session, task_id, actor) -> TaskSnapshot
-retry_task(session, task_id, actor) -> TaskSnapshot
-request_verification(session, task_id, actor) -> TaskSnapshot
-read_task(session, task_id, actor) -> TaskDetail
-list_tasks(session, query, actor) -> TaskPage
-dispatch_one(session_factory, dependencies) -> DispatchOutcome
-recover_active(session_factory, dependencies) -> RecoveryOutcome
-```
-
-FastAPI 只做 Pydantic wire 校验、鉴权和错误映射。MinIO、ADB、Artemis adapter 不得自行修改数据库状态。
+FastAPI 只做 Pydantic wire 校验、鉴权、owner scope 和错误映射，不虚构独立 service 名称。
 
 ### 20.2 创建上传任务
 
@@ -1815,7 +1792,7 @@ If-None-Match: "publish-current-a81f"
     "status": "running",
     "statusLabel": "执行中",
     "stage": "waiting_artemis",
-    "stageLabel": "Artemis 正在操作 TikTok",
+    "stageLabel": "等待 Artemis",
     "currentAttempt": {
       "sequenceNo": 1,
       "kind": "publish",
@@ -1857,7 +1834,7 @@ GET /v2/video-publish/tasks?status=failed&limit=30&cursor=eyJpZCI6MTAwNX0
       "latestArtemisSessionId": "c8af5a6c-4158-49c3-9141-13bc69b391d2",
       "lastErrorCode": "PLANNER_ZERO_STEPS",
       "lastErrorMessage": "Artemis Planner 未执行设备步骤。",
-      "createdByLabel": "运营 A",
+      "createdBy": "user:42",
       "createdAt": "2026-10-04T10:40:00Z",
       "updatedAt": "2026-10-04T10:50:00Z",
       "allowedActions": ["view", "retry", "copy_artemis_id"]
@@ -1936,7 +1913,7 @@ X-Requested-With: tts-erp
 {"rowVersion": 2}
 ```
 
-成功返回最新 snapshot。运行中的任务返回 409 `TASK_ALREADY_RUNNING`。
+成功返回最新 snapshot。不允许取消的阶段返回结构化 409 `TASK_ACTION_NOT_ALLOWED`。
 
 ### 21.11 Retry
 
@@ -1954,6 +1931,7 @@ X-Requested-With: tts-erp
   "status": "pending",
   "stage": "queued",
   "queuePosition": 2,
+  "queuedAt": "2026-10-04T10:55:00Z",
   "publishAttemptCount": 2,
   "latestArtemisSessionId": "c8af5a6c-4158-49c3-9141-13bc69b391d2",
   "allowedActions": ["view", "cancel"],
@@ -1998,6 +1976,8 @@ X-Requested-With: tts-erp
 | `IDEMPOTENCY_PAYLOAD_MISMATCH` | 409 | 否 | 生成新的 clientRequestId 后重新创建。 |
 | `UPLOAD_NOT_FOUND` | 422 | 是 | 重试上传。 |
 | `UPLOAD_SIZE_MISMATCH` | 422 | 是 | 重试上传。 |
+| `UPLOAD_MIME_MISSING` / `UPLOAD_MIME_MISMATCH` | 422 | 是 | 重新上传有效 MP4。 |
+| `UPLOAD_ETAG_MISSING` | 422 | 是 | 保持 awaiting_upload，重试上传/确认。 |
 | `UPLOAD_URL_EXPIRED` | 409 | 是 | 请求新 upload URL。 |
 | `TASK_ACTION_NOT_ALLOWED` | 409 | 取决于状态 | 按 allowedActions 重绘。 |
 | `TASK_VERSION_CONFLICT` | 409 | 是 | 重新 GET，再让用户确认动作。 |
@@ -2465,10 +2445,10 @@ WantedBy=multi-user.target
 常用命令：
 
 ```bash
-systemctl daemon-reload
-systemctl enable --now tts-erp-publish.service
-systemctl status tts-erp-publish.service
-journalctl -u tts-erp-publish.service -f
+systemctl --user daemon-reload
+systemctl --user enable --now tts-erp-publish.service
+systemctl --user status tts-erp-publish.service
+journalctl --user -u tts-erp-publish.service -f
 ```
 
 ### 23.8 NGINX 与路径前缀
@@ -2717,7 +2697,7 @@ Luna 每个 Phase 的输出必须包含：
 
 ## 28. 已实现的最终安全边界
 
-当前 migration head 为 `0062_publish_attempt_identity`（parent `0061_publish_safety`）。实现还明确保证：
+当前 migration head 为 `0063_publish_authz`（parent `0062_publish_attempt_identity`）。实现还明确保证：
 
 - verify 只有在 Artemis execution `success` 且 `verdict` 严格等于 `published`、`not_published` 或 `inconclusive` 时才采信；其他终态一律保守进入 `needs_review`；
 - `cancelled`/`canceled` publish 与未知/格式错误的 Artemis 409 都是结果不确定，必须沿同 session 查询/核验，不能进入安全重发；
@@ -2732,6 +2712,11 @@ Luna 每个 Phase 的输出必须包含：
 - confirm 后的下载以保存的 ETag 执行条件 GET，单段/多段 ETag 不匹配或对象缺失都会在 staging/attempt 前失败；
 - 原始浏览器 basename 与 object-key-safe 文件名分开持久化，续传按原始文件名和大小核对；
 - verify prompt 同时包含 caption、源文件/对象身份、预期最新发布时间窗及时间/缩略图比对要求；
-- ADB push 前必须确认受管相册无任意 `tts_erp_*.mp4` 残留；存在残留时不创建 Artemis attempt。
+- ADB push 前必须确认受管相册无任意 `tts_erp_*.mp4` 残留；存在残留时不创建 Artemis attempt；
+- confirm-upload 在入队前要求非空字符串 ETag；缺失时返回可重试 `UPLOAD_ETAG_MISSING` 并保持 awaiting_upload；
+- 排队 snapshot 返回 `queuedAt/queuePosition/statusLabel/stageLabel`，列表批量计算队列位置；
+- needs_review 摘要同时返回 `relatedPublishAttempt`，核验 dialog 不能把最新 verify session 冒充待核验 publish session；
+- 结构化日志和 `/v2/video-publish/metrics` 只含受控标识、枚举与聚合，不含 caption/Prompt/output/secret；
+- migration/seed 仅自动授权 admin；operator 权限必须在最终人工验证后显式授予。
 
 390/768/1440 像素视觉检查、模拟器全流程、SIGTERM 恢复以及 staging-only 真机检查仍按 §26 保留为人工发布门禁；本文不声称已执行这些检查。

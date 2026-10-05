@@ -6,20 +6,20 @@
 
 ## 部署顺序
 
-1. 使用测试形数据库验证 video-publish migrations `0053`–`0062`，再由运维执行生产迁移。规范命令为 `bash scripts/test_isolated.sh fast tests/publishing`；禁止直接运行 pytest、禁止将测试指向生产形数据库。
+1. 使用测试形数据库验证 video-publish migrations `0053`–`0063`，再由运维执行生产迁移。规范命令为 `bash scripts/test_isolated.sh --refresh-template fast tests/publishing`；禁止直接运行 pytest、禁止将测试指向生产形数据库，也不得把“因 schema 缺失而全部 skipped”当作迁移证据。PostgreSQL 18 服务端必须使用兼容的 PostgreSQL 18 `pg_dump`/`psql` 客户端；本机只有旧客户端时使用现有 postgres 容器 shim（把执行 `docker exec postgres pg_dump|psql` 的 shim 目录放到 `PATH` 首位）。
    `0058` 会在加约束前把旧的 pending/queued、pending/waiting_device 清理状态
    回填为显式 cleanup intent；含对象残留的歧义任务转为
    `needs_review/done + preserve_state` 并取消对象删除；取消后无任何待清理资源的终态行会归一为 `cleanup_intent=none`，以便人工核验。`0059` 回填当前阶段起始时间。
    `0060` 对齐基础索引/唯一约束，并约束 publish/verify 的 `related_attempt_id`
    形状及三个 cleanup status 枚举。`0061` 回填追加式 `attempt_count` 与独立
    `publish_budget_used`，加入同 task/publish related-attempt trigger、DESC attempt
-   索引和 Worker 设备实际探测字段。`0062` 将对象 key 的安全文件名与浏览器原 basename 分开，并通过 trigger 固化 attempt 的 `task_id/kind/related_attempt_id` 审计身份。上线前必须修复任何不满足约束的历史行。
+   索引和 Worker 设备实际探测字段。`0062` 将对象 key 的安全文件名与浏览器原 basename 分开，并通过 trigger 固化 attempt 的 `task_id/kind/related_attempt_id` 审计身份。`0063` 撤销历史自动 operator 授权并确保 admin 授权存在；operator 只能在最终人工验证后手工授权。上线前必须修复任何不满足约束的历史行。
    生产执行前停止领取新任务、确认 worker 心跳停止，并按迁移顺序协调 API/worker 重启。
 2. 创建私有 `tiktok-video` bucket，并限制 `video-publish/*` 的 Get/Put/Delete/Head 权限；配置来源站点 PUT/HEAD CORS。
 3. 创建 `TTS_ERP_PUBLISH_SPOOL_DIR`（0700），设置 `ARTEMIS_BASE_URL`、`ARTEMIS_DEVICE_SERIAL`、`ARTEMIS_APP_PACKAGE`、`TIKTOK_PUBLISH_MINIO_BUCKET=tiktok-video` 和 MinIO 凭据。`MINIO_BUCKET` 必须与专用 bucket 相同；未配置设备序列号或 bucket 不匹配时 API 拒绝创建任务。按需覆盖 `ARTEMIS_PROFILE=pro`、`ARTEMIS_VERIFICATION_LEVEL=strict`、`PUBLISH_POLL_INTERVAL_SECONDS=2`、`PUBLISH_TASK_LEASE_SECONDS=30`、`PUBLISH_WORKER_HEARTBEAT_SECONDS=5`、`TIKTOK_PUBLISH_MAX_CAPTION_CHARS=4000` 与 `TIKTOK_PUBLISH_FAILED_RETENTION_DAYS=30`；API config 返回生效的非敏感 Artemis/轮询配置供运维核对。
 4. 由运维安装 user unit：`install -m 0644 scripts/systemd/tts-erp-publish.service ~/.config/systemd/user/tts-erp-publish.service`，核对 unit 环境后执行 `systemctl --user daemon-reload` 和 `systemctl --user enable --now tts-erp-publish.service`。这些生产命令不得由开发/测试 agent 执行。生产环境如需调度或执行删除，须由运维在 API 与 publish worker 的服务环境显式设置 `ALLOW_PROD_DESTRUCTIVE=1`：API 用它授权取消/清理重试的删除调度，worker 用它授权 cleanup selector 领取后的设备、spool、MinIO 实际删除。启动 orphan 扫描只调和数据库清理计划，不直接删除文件。缺少 API 授权时 mutation 返回 403；缺少 worker 授权时对象保留并标记 cleanup failed，不会静默删除。启动后确认 `publishing.worker_heartbeats` 在 15 秒内为 ready，并检查综合 readiness 已探测 serial、ADB 解锁、TikTok package、Artemis 与 MinIO；设备 offline/locked/busy 仍允许创建排队任务。
 5. 仅用模拟器/fake adapter 做 staging dry-run；真机先只做 MediaStore dry-run。
-6. 给 operator/admin 授权 `page:video-publish`。首次真实发布必须由用户显式确认。
+6. migration 与 `sync-permissions` 只自动给 admin 授权 `page:video-publish`。完成模拟器、staging-only 与首次人工确认验证后，再由 admin 在“用户管理 → 角色”中手工把 `page:video-publish` 加给 operator；后续幂等 `sync-permissions` 不会自动增加或删除这项手工授权。首次真实发布必须由用户显式确认。
 
 ## 故障处理
 
@@ -35,8 +35,8 @@
 - Worker 重启会从 running task 继续读取原 session；不要删除数据库行或对象。
 - `awaiting_upload` 超过 24 小时会自动转为 `cancelled/done` 并进入受保护的对象清理；`failed` 对象按 `TIKTOK_PUBLISH_FAILED_RETENTION_DAYS`（默认 30 天）保留。`needs_review` 对象不参加失败保留期删除，必须先完成人工判定。
 - Worker 启动时只扫描 spool 根目录下一层 UUID 目录；数据库证明对应任务已终态且完成超过 24 小时时，扫描器只原子调度/重开 `spool` 清理，随后由 cleanup selector 领取租约并执行删除。扫描器本身从不删除。未知目录、活跃任务目录、有效清理租约目录和无法读取数据库的目录全部保留；禁止手工 `rm -rf` spool 根目录。
-- Artemis output/error 在持久化前递归限深、限项、限长并清除 token、Authorization、cookie、secret、凭据和签名 URL 查询参数。日志只记录任务/session 标识、稳定错误码和计数，不记录文案、原始文件名、完整本地路径、Prompt、token 或原始 Artemis output。
-- 回滚时先移除页面权限、停止领取新任务；保留 running/needs_review 的对象和审计历史。`0054`–`0059` 的 state-bearing downgrade 在 `publishing.video_publish_tasks` 非空时拒绝执行；只有清空三张 publishing 表并经人工确认才允许回退。不得绕过保护直接删除 cleanup scheduling、owner、intent、lease 或 stage timing 列。`0060` 只移除约束/索引元数据；`0061` 含审计/设备状态字段、`0062` 含文件名语义与 attempt identity trigger，publishing 状态非空时拒绝 downgrade。它们仍须先在测试形数据库完成 roundtrip。
+- Artemis output/error 在持久化前递归限深、限项、限长并清除 token、Authorization、cookie、secret、凭据和签名 URL 查询参数。日志只记录 task/attempt/stage/session 标识、稳定结果枚举和计数，不记录文案、原始文件名、完整本地路径、Prompt、token 或原始 Artemis output。具备页面权限的只读调用方可用 `GET /v2/video-publish/metrics` 查看其可见范围内的 `queueDepth/running/needsReview/cleanup` 聚合；admin 查看全局聚合。指标响应不含文案、Prompt、output 或凭据。
+- 回滚时先移除页面权限、停止领取新任务；保留 running/needs_review 的对象和审计历史。`0054`–`0059` 的 state-bearing downgrade 在 `publishing.video_publish_tasks` 非空时拒绝执行；只有清空三张 publishing 表并经人工确认才允许回退。不得绕过保护直接删除 cleanup scheduling、owner、intent、lease 或 stage timing 列。`0060` 只移除约束/索引元数据；`0061` 含审计/设备状态字段、`0062` 含文件名语义与 attempt identity trigger，publishing 状态非空时拒绝 downgrade。`0063` downgrade 不会自动扩大 operator 权限。它们仍须先在测试形数据库完成 roundtrip。
 
 ## 浏览器与无障碍验收
 

@@ -290,6 +290,12 @@ refresh_template() {
       TTS_ERP_DB_URL="$TEMPLATE_URL" "$alembic" stamp "$revision"
       echo "[isolated-test] upgrading template to worktree head"
       TTS_ERP_DB_URL="$TEMPLATE_URL" "$alembic" upgrade head
+      local python_bin="${alembic%/alembic}/python"
+      if [[ -x "$python_bin" ]]; then
+        echo "[isolated-test] seeding built-in test roles and permissions"
+        TTS_ERP_DB_URL="$TEMPLATE_URL" \
+          "$python_bin" -m tts_erp_v2.accounts.cli sync-permissions
+      fi
     else
       echo "[isolated-test] WARNING: prod alembic revision $revision is not present in this worktree;" >&2
       echo "                 leaving template at imported schema without alembic upgrade" >&2

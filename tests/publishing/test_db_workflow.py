@@ -406,7 +406,11 @@ def test_replace_upload_api_confirm_and_claim_round_trip(
 
     class UploadedStore:
         def stat(self, _key: str) -> dict:
-            return {"size": task.size_bytes, "content_type": task.content_type}
+            return {
+                "size": task.size_bytes,
+                "content_type": task.content_type,
+                "etag": "TEST-upload-etag",
+            }
 
     queued = confirm(
         task.public_id,
@@ -835,7 +839,11 @@ def test_confirm_head_then_cas_detects_concurrent_task_update(
                     {"id": task.id},
                 )
                 other.commit()
-            return {"size": task.size_bytes, "content_type": task.content_type}
+            return {
+                "size": task.size_bytes,
+                "content_type": task.content_type,
+                "etag": "TEST-racing-etag",
+            }
 
     with pytest.raises(HTTPException) as exc_info:
         confirm(

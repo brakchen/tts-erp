@@ -6,7 +6,7 @@
 ## 1. 技术栈
 
 Python 3.14 · FastAPI + uvicorn（`:9877`）· SQLAlchemy 2 + psycopg3 · PostgreSQL 容器（`:5432`，
-13 个业务 schema / 64 张业务表（v1 `public.*` 业务表 2026-09-05 归档删除；analytics 4 张僵尸表 migration 0007 drop；2026-09-11 `chrome_sync`→`plugin`、`analytics` 并入 `plugin`；2026-09-30 migration 0044 删除未接通的 `linkage` schema，migration 0045 新增 source-owned `miaoshou` schema）· APScheduler（独立 sync-worker 进程）· MinIO · Fernet 加密 · systemd user units。
+13 个非 public 业务 schema / 71 张业务表（v1 `public.*` 业务表 2026-09-05 归档删除；analytics 4 张僵尸表 migration 0007 drop；2026-09-11 `chrome_sync`→`plugin`、`analytics` 并入 `plugin`；2026-09-30 migration 0044 删除未接通的 `linkage` schema，migration 0045 新增 source-owned `miaoshou` schema）· APScheduler（独立 sync-worker 进程）· MinIO · Fernet 加密 · systemd user units。
 
 ## 2. 业务架构
 

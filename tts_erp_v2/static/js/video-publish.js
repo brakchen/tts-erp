@@ -27,6 +27,7 @@
     detailOpener: null,
     etags: new Map(),
     currentTask: null,
+    mutationBusy: new Set(),
     destroyed: false,
   };
 
@@ -40,6 +41,9 @@
 
   async function request(path, options = {}) {
     const method = (options.method || "GET").toUpperCase();
+    const conditional = options.conditional !== false;
+    const fetchOptions = { ...options };
+    delete fetchOptions.conditional;
     const headers = {
       ...(method !== "GET" ? {
         "Content-Type": "application/json",
@@ -47,12 +51,12 @@
       } : {}),
       ...(options.headers || {}),
     };
-    if (method === "GET" && state.etags.has(path)) {
+    if (method === "GET" && conditional && state.etags.has(path)) {
       headers["If-None-Match"] = state.etags.get(path);
     }
     const response = await fetch(api + path, {
       credentials: "same-origin",
-      ...options,
+      ...fetchOptions,
       headers,
     });
     if (response.status === 304) return { notModified: true };
@@ -76,7 +80,7 @@
       error.allowedActions = detail.detail?.allowedActions;
       throw error;
     }
-    if (method === "GET") {
+    if (method === "GET" && conditional) {
       const etag = response.headers.get("ETag");
       if (etag) state.etags.set(path, etag);
     }
@@ -101,6 +105,12 @@
     const lifecycleBusy = Boolean(state.upload) || state.creating;
     $("publish-video-file").disabled = lifecycleBusy;
     $("publish-caption").disabled = lifecycleBusy;
+    const reselect = $("publish-file-reselect");
+    const clear = $("publish-file-clear");
+    reselect.hidden = !file;
+    clear.hidden = !file;
+    reselect.disabled = lifecycleBusy;
+    clear.disabled = lifecycleBusy;
     const writeReady = Boolean(state.config?.canWrite) && state.config?.worker?.status === "ready";
     $("publish-submit").disabled = !valid() || !writeReady || !!state.upload || state.creating;
     const writeStatus = $("publish-write-status");
@@ -329,14 +339,30 @@
     });
   }
 
+  function clearSelection() {
+    if (state.upload || state.creating) return;
+    if (state.url) URL.revokeObjectURL(state.url);
+    state.file = null;
+    state.url = null;
+    $("publish-video-file").value = "";
+    $("publish-video-preview").hidden = true;
+    $("publish-video-preview").removeAttribute("src");
+    $("publish-preview-metadata").textContent = "";
+    $("publish-file-name").textContent = "";
+    renderForm();
+  }
+
   function clearForm() {
     if (state.url) URL.revokeObjectURL(state.url);
     state.file = null;
     state.url = null;
     state.clientRequestId = null;
     state.resumeTask = null;
+    $("publish-video-file").value = "";
     $("publish-video-preview").hidden = true;
     $("publish-video-preview").removeAttribute("src");
+    $("publish-preview-metadata").textContent = "";
+    $("publish-file-name").textContent = "";
     $("publish-caption").value = "";
     renderForm();
   }
@@ -380,7 +406,7 @@
     continue_upload: "继续上传",
     cancel: "取消",
     retry: "重试",
-    verify: "核验",
+    verify: "再次自动核验",
     retry_cleanup: "重试清理",
     replace_upload: "重新上传",
     copy_artemis_id: "复制 Artemis ID",
@@ -390,12 +416,13 @@
   function confirmationMessage(task, actionName) {
     const attempt = task.currentAttempt || {};
     const attemptId = attempt.artemisSessionId || task.latestArtemisSessionId || "尚未创建";
+    const relatedPublishId = task.relatedPublishAttempt?.artemisSessionId || attemptId;
     const failure = `${task.lastErrorCode || "无错误码"} / ${task.lastErrorMessage || "无错误详情"}`;
     const budget = `${task.attemptCount ?? task.publishAttemptCount ?? 0}/${state.config?.maxPublishAttempts || 3}`;
     return {
       cancel: `取消任务 ${task.taskId}（阶段 ${task.stage}）会保留审计记录，并清理已生成的对象；确认取消？`,
       retry: `重试任务 ${task.taskId}\n前次 Artemis ID：${attemptId}\n失败阶段：${task.stage}\n错误：${failure}\n发布预算：${budget}\n重试会复用已上传对象，且不会自动确认模糊结果。确认重试？`,
-      verify: `只读核验任务 ${task.taskId} 的发布 attempt ${attemptId}；不会进入上传页，不会再次点击发布。确认开始核验？`,
+      verify: `只读核验任务 ${task.taskId} 的发布 attempt ${relatedPublishId}；只查看作品页和草稿箱，不会进入上传页，不会再次点击发布。确认开始核验？`,
       retry_cleanup: `仅重试任务 ${task.taskId} 的失败资源：${(task.cleanupRetryableResources || []).join("、") || "无"}；不会改变业务发布结果。确认重试清理？`,
       replace_upload: `任务 ${task.taskId} 的原对象已删除；当前阶段 ${task.stage}，错误 ${failure}，预算 ${budget}。重新上传会创建新的发布输入。确认重新上传？`,
     }[actionName] || `确认${ACTION_LABELS[actionName] || actionName}？`;
@@ -407,9 +434,13 @@
       notice("当前浏览器不支持安全确认对话框，操作已取消。", true);
       return Promise.resolve(false);
     }
-    $("publish-action-title").textContent = `${ACTION_LABELS[actionName] || actionName}确认`;
+    $("publish-action-title").textContent = actionName === "verify"
+      ? "再次自动核验"
+      : `${ACTION_LABELS[actionName] || actionName}确认`;
     $("publish-action-evidence").textContent = confirmationMessage(task, actionName);
-    $("publish-action-confirm").textContent = `确认${ACTION_LABELS[actionName] || "操作"}`;
+    $("publish-action-confirm").textContent = actionName === "verify"
+      ? "开始核验"
+      : `确认${ACTION_LABELS[actionName] || "操作"}`;
     return showConfirmationDialog(dialog).then((confirmed) => {
       trigger?.focus?.();
       return confirmed;
@@ -429,21 +460,38 @@
     $("publish-video-file").click();
   }
 
+  const NON_MUTATING_ACTIONS = new Set(["view", "copy_artemis_id", "continue_upload"]);
+
+  function setTaskMutationBusy(taskId, actionName, busy) {
+    const key = `${taskId}:${actionName}`;
+    if (busy) state.mutationBusy.add(key);
+    else state.mutationBusy.delete(key);
+    const taskBusy = Array.from(state.mutationBusy).some((item) => item.startsWith(`${taskId}:`));
+    document.querySelectorAll("[data-task-mutation]").forEach((button) => {
+      if (button.dataset.taskId === taskId) button.disabled = taskBusy;
+    });
+  }
+
   async function runTaskAction(task, actionName, trigger = null) {
-    if (CONFIRM_ACTIONS.has(actionName)) {
-      const confirmed = await confirmTaskAction(task, actionName, trigger);
-      if (!confirmed) return;
+    const mutation = !NON_MUTATING_ACTIONS.has(actionName);
+    const key = `${task.taskId}:${actionName}`;
+    if (mutation && state.mutationBusy.has(key)) return;
+    if (mutation) {
+      setTaskMutationBusy(task.taskId, actionName, true);
+      if (trigger) trigger.disabled = true;
     }
     try {
+      if (CONFIRM_ACTIONS.has(actionName)) {
+        const confirmed = await confirmTaskAction(task, actionName, trigger);
+        if (!confirmed) return;
+      }
       if (actionName === "view") return openDetail(task.taskId);
       if (actionName === "copy_artemis_id") {
         const id = task.latestArtemisSessionId;
-        if (id) await copyText(id);
+        if (id) await copyText(id, trigger);
         return;
       }
-      if (actionName === "continue_upload") {
-        return resumeUpload(task);
-      }
+      if (actionName === "continue_upload") return resumeUpload(task);
       const endpoint = actionName === "retry_cleanup"
         ? `/tasks/${task.taskId}/cleanup/retry`
         : actionName === "replace_upload"
@@ -483,6 +531,11 @@
       } else {
         notice(error.message, true);
       }
+    } finally {
+      if (mutation) {
+        setTaskMutationBusy(task.taskId, actionName, false);
+        if (trigger) trigger.disabled = false;
+      }
     }
   }
 
@@ -510,8 +563,10 @@
     state.listChannel.items.forEach((task) => {
       const row = document.createElement("tr");
       [
-        task.status,
-        task.stage,
+        task.queuePosition
+          ? `${task.statusLabel || task.status} · 前面 ${Math.max(0, task.queuePosition - 1)} 个任务`
+          : task.statusLabel || task.status,
+        task.stageLabel || task.stage,
         task.captionPreview || "—",
         task.filename,
         `${task.publishAttemptCount || 0} / ${task.verifyAttemptCount || 0}`,
@@ -522,14 +577,31 @@
         const cell = document.createElement("td");
         cell.textContent = value ?? "—";
         cell.dataset.label = ["状态", "阶段", "文案", "视频", "发布/核验", "创建者", "Artemis ID", "时间"][index] || "";
-        if (index === 6) cell.className = "artemis-cell";
+        if (index === 6) {
+          cell.className = "artemis-cell";
+          const id = task.latestArtemisSessionId;
+          if (id) {
+            const code = document.createElement("code");
+            code.textContent = id;
+            const copy = document.createElement("button");
+            copy.className = "btn-secondary artemis-copy";
+            copy.textContent = "复制";
+            copy.onclick = () => copyText(id, copy);
+            cell.replaceChildren(code, copy);
+          }
+        }
         row.append(cell);
       });
       const actions = document.createElement("td");
-      (task.allowedActions || []).forEach((actionName) => {
+      (task.allowedActions || []).filter((actionName) => actionName !== "copy_artemis_id").forEach((actionName) => {
         const button = document.createElement("button");
         button.className = "btn-secondary";
         button.textContent = ACTION_LABELS[actionName] || actionName;
+        if (!NON_MUTATING_ACTIONS.has(actionName)) {
+          button.dataset.taskMutation = "true";
+          button.dataset.taskId = task.taskId;
+          button.disabled = Array.from(state.mutationBusy).some((key) => key.startsWith(`${task.taskId}:`));
+        }
         button.onclick = () => {
         if (actionName === "view") state.detailOpener = button;
         return runTaskAction(task, actionName, button);
@@ -573,7 +645,10 @@
       if (state.filter) params.set("status", state.filter);
       if (append && channel.nextCursor) params.set("cursor", channel.nextCursor);
       const query = params.toString() ? `?${params}` : "";
-      const list = await request(`/tasks${query}`, { signal: channel.controller.signal });
+      const list = await request(`/tasks${query}`, {
+        signal: channel.controller.signal,
+        conditional: !append,
+      });
       if (generation !== channel.generation) return;
       channel.failures = 0;
       if (!list.notModified) {
@@ -585,6 +660,8 @@
       if (error.name === "AbortError" || generation !== channel.generation) return;
       channel.failures += 1;
       notice("任务列表刷新失败，正在退避重试", true);
+    } finally {
+      if (append) $("publish-load-more").disabled = false;
     }
   }
 
@@ -721,7 +798,7 @@
       const copy = document.createElement("button");
       copy.className = "btn-secondary drawer-action";
       copy.textContent = "复制 Artemis ID";
-      copy.onclick = () => copyText(attempt.artemisSessionId);
+      copy.onclick = () => copyText(attempt.artemisSessionId, copy);
       section.append(summary, diagnostic, id, copy);
       if (attempt.promptSnapshot || attempt.artemisOutput) {
         const diagnostics = document.createElement("details");
@@ -746,6 +823,9 @@
       const button = document.createElement("button");
       button.className = "btn-secondary drawer-action";
       button.textContent = ACTION_LABELS[action] || action;
+      button.dataset.taskMutation = "true";
+      button.dataset.taskId = detail.taskId;
+      button.disabled = Array.from(state.mutationBusy).some((key) => key.startsWith(`${detail.taskId}:`));
       button.onclick = () => runTaskAction(detail, action, button);
       actions.append(button);
     });
@@ -765,6 +845,8 @@
   }
 
   $("publish-video-file").addEventListener("change", (event) => pick(event.target.files[0]));
+  $("publish-file-reselect").addEventListener("click", () => $("publish-video-file").click());
+  $("publish-file-clear").addEventListener("click", clearSelection);
   $("publish-caption").addEventListener("input", () => {
     if (!state.upload && !state.creating) renderForm();
   });
@@ -800,20 +882,31 @@
     event.currentTarget.disabled = true;
     await refreshList({ append: true });
   });
-  async function copyText(value) {
+  async function copyText(value, trigger = null) {
+    let copied = false;
     try {
       await navigator.clipboard.writeText(value);
-      notice("Artemis ID 已复制");
+      copied = true;
     } catch {
       const fallback = document.createElement("textarea");
       fallback.value = value;
       fallback.setAttribute("readonly", "");
       document.body.append(fallback);
       fallback.select();
-      const copied = document.execCommand("copy");
+      copied = document.execCommand("copy");
       fallback.remove();
-      notice(copied ? "Artemis ID 已复制" : "复制失败，请手动选择 Artemis ID", !copied);
     }
+    notice(copied ? "Artemis ID 已复制" : "复制失败，请手动选择完整 ID", !copied);
+    if (copied && trigger) {
+      const original = trigger.textContent;
+      trigger.textContent = "已复制";
+      trigger.disabled = true;
+      setTimeout(() => {
+        trigger.textContent = original;
+        trigger.disabled = false;
+      }, 1500);
+    }
+    return copied;
   }
 
   document.querySelector("[data-copy-artemis-id]").addEventListener("click", (event) => {

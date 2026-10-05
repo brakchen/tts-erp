@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, false, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, aliased, selectinload
 
 from tts_erp_v2.access import Role
 from tts_erp_v2.api.deps import (
@@ -101,6 +101,7 @@ def _attempt(a: VideoPublishAttempt, *, diagnostics: bool = False) -> dict:
     result = {
         "sequenceNo": a.sequence_no,
         "kind": a.kind,
+        "kindLabel": "正式发布" if a.kind == "publish" else "自动核验",
         "artemisSessionId": str(a.artemis_session_id),
         "status": a.status,
         "stepsCount": a.steps_count,
@@ -124,6 +125,8 @@ def _snapshot(
     summary_attempts: list[VideoPublishAttempt] | None = None,
     publish_attempt_count: int | None = None,
     verify_attempt_count: int | None = None,
+    related_publish_attempt: VideoPublishAttempt | None = None,
+    queue_position: int | None = None,
 ) -> dict:
     attempts = sorted(
         summary_attempts if summary_attempts is not None else task.attempts,
@@ -131,6 +134,19 @@ def _snapshot(
         reverse=True,
     )
     latest = attempts[0] if attempts else None
+    if related_publish_attempt is None and latest is not None:
+        if latest.kind == "publish":
+            related_publish_attempt = latest
+        elif latest.related_attempt_id is not None:
+            related_publish_attempt = next(
+                (
+                    attempt
+                    for attempt in attempts
+                    if attempt.id == latest.related_attempt_id
+                    and attempt.kind == "publish"
+                ),
+                None,
+            )
     actions = allowed_actions(
         task,
         latest_attempt=latest,
@@ -152,7 +168,28 @@ def _snapshot(
         "sizeBytes": task.size_bytes,
         "captionPreview": task.caption.splitlines()[0][:160] if task.caption else "",
         "status": task.status,
+        "statusLabel": {
+            "pending": "排队",
+            "running": "执行中",
+            "succeeded": "成功",
+            "failed": "失败",
+            "needs_review": "需核验",
+            "cancelled": "已取消",
+        }.get(task.status, task.status),
         "stage": task.stage,
+        "stageLabel": {
+            "awaiting_upload": "等待上传",
+            "queued": "队列中",
+            "waiting_device": "等待设备",
+            "downloading": "下载视频",
+            "staging_device": "写入相册",
+            "dispatching_artemis": "提交 Artemis",
+            "waiting_artemis": "等待 Artemis",
+            "verifying": "自动核验",
+            "done": "已完成",
+        }.get(task.stage, task.stage),
+        "queuedAt": task.queued_at,
+        "queuePosition": queue_position,
         "operationalStage": operational_stage,
         "stageStartedAt": task.stage_started_at,
         "operationalStageStartedAt": (
@@ -200,6 +237,8 @@ def _snapshot(
         data["caption"] = task.caption
     if latest:
         data["currentAttempt"] = _attempt(latest)
+    if related_publish_attempt is not None:
+        data["relatedPublishAttempt"] = _attempt(related_publish_attempt)
     if detail:
         data.update(
             {
@@ -378,7 +417,10 @@ def _decode_cursor(value: str) -> tuple[datetime, int]:
 
 def _attempt_summaries(
     session: Session, tasks: list[VideoPublishTask]
-) -> dict[int, tuple[list[VideoPublishAttempt], int, int]]:
+) -> dict[
+    int,
+    tuple[list[VideoPublishAttempt], int, int, VideoPublishAttempt | None],
+]:
     task_ids = [task.id for task in tasks]
     if not task_ids:
         return {}
@@ -407,26 +449,71 @@ def _attempt_summaries(
         .group_by(VideoPublishAttempt.task_id)
         .subquery()
     )
+    related = aliased(VideoPublishAttempt)
     latest = {
-        attempt.task_id: attempt
-        for attempt in session.scalars(
-            select(VideoPublishAttempt).join(
+        attempt.task_id: (
+            attempt,
+            attempt if attempt.kind == "publish" else related_attempt,
+        )
+        for attempt, related_attempt in session.execute(
+            select(VideoPublishAttempt, related)
+            .join(
                 latest_sequence,
                 and_(
                     VideoPublishAttempt.task_id == latest_sequence.c.task_id,
                     VideoPublishAttempt.sequence_no == latest_sequence.c.sequence_no,
                 ),
             )
+            .outerjoin(related, VideoPublishAttempt.related_attempt_id == related.id)
         )
     }
     return {
         task_id: (
-            [latest[task_id]] if task_id in latest else [],
+            [latest[task_id][0]] if task_id in latest else [],
             counts.get(task_id, (0, 0))[0],
             counts.get(task_id, (0, 0))[1],
+            latest[task_id][1] if task_id in latest else None,
         )
         for task_id in task_ids
     }
+
+
+def _queue_positions(session: Session, tasks: list[VideoPublishTask]) -> dict[int, int]:
+    task_ids = [
+        task.id
+        for task in tasks
+        if task.status == "pending"
+        and task.stage in {"queued", "waiting_device"}
+        and task.queued_at is not None
+    ]
+    if not task_ids:
+        return {}
+    ranked = (
+        select(
+            VideoPublishTask.id.label("task_id"),
+            func.row_number()
+            .over(order_by=(VideoPublishTask.queued_at, VideoPublishTask.id))
+            .label("position"),
+        )
+        .where(
+            VideoPublishTask.status == "pending",
+            VideoPublishTask.stage.in_(["queued", "waiting_device"]),
+            VideoPublishTask.queued_at.is_not(None),
+        )
+        .subquery()
+    )
+    return {
+        int(row.task_id): int(row.position)
+        for row in session.execute(
+            select(ranked.c.task_id, ranked.c.position).where(
+                ranked.c.task_id.in_(task_ids)
+            )
+        )
+    }
+
+
+def _queue_position(session: Session, task: VideoPublishTask) -> int | None:
+    return _queue_positions(session, [task]).get(task.id)
 
 
 def _etag(payload: object) -> str:
@@ -703,6 +790,7 @@ def confirm(
                     "UPLOAD_SIZE_MISMATCH",
                     "UPLOAD_MIME_MISSING",
                     "UPLOAD_MIME_MISMATCH",
+                    "UPLOAD_ETAG_MISSING",
                     "TASK_VERSION_CONFLICT",
                 },
                 task=task_snapshot
@@ -710,7 +798,11 @@ def confirm(
                 else None,
             ),
         ) from exc
-    return _snapshot(task, expose_client_request_id=True)
+    return _snapshot(
+        task,
+        expose_client_request_id=True,
+        queue_position=_queue_position(session, task),
+    )
 
 
 def _task(session: Session, task_id: UUID, *, lock: bool = False) -> VideoPublishTask:
@@ -782,9 +874,11 @@ def current(
     task = session.scalar(current_query)
     poll_state = _poll_state(session)
     summary = _attempt_summaries(session, [task]) if task else {}
-    attempts, publish_count, verify_count = summary.get(
-        task.id if task else 0, ([], 0, 0)
-    )
+    current_summary = summary.get(task.id if task else 0)
+    attempts = current_summary[0] if current_summary else []
+    publish_count = current_summary[1] if current_summary else 0
+    verify_count = current_summary[2] if current_summary else 0
+    related_publish = current_summary[3] if current_summary else None
     payload = {
         "task": (
             _snapshot(
@@ -793,6 +887,7 @@ def current(
                 summary_attempts=attempts,
                 publish_attempt_count=publish_count,
                 verify_attempt_count=verify_count,
+                related_publish_attempt=related_publish,
             )
             if task
             else None
@@ -848,6 +943,7 @@ def list_tasks(
     has_more = len(fetched) > limit
     rows = fetched[:limit]
     summaries = _attempt_summaries(session, rows)
+    queue_positions = _queue_positions(session, rows)
     payload = {
         "items": [
             _snapshot(
@@ -856,6 +952,8 @@ def list_tasks(
                 summary_attempts=summaries[task.id][0],
                 publish_attempt_count=summaries[task.id][1],
                 verify_attempt_count=summaries[task.id][2],
+                related_publish_attempt=summaries[task.id][3],
+                queue_position=queue_positions.get(task.id),
             )
             for task in rows
         ],
@@ -872,6 +970,55 @@ def list_tasks(
     return cached if cached is not None else payload
 
 
+@router.get("/metrics")
+def metrics(
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+) -> dict:
+    """Return content-free operational gauges at the caller's visibility scope."""
+    require_role_at_least(request, "readonly")
+    query = select(
+        func.count()
+        .filter(
+            VideoPublishTask.status == "pending",
+            VideoPublishTask.stage.in_(["queued", "waiting_device"]),
+        )
+        .label("queue_depth"),
+        func.count().filter(VideoPublishTask.status == "running").label("running"),
+        func.count()
+        .filter(VideoPublishTask.status == "needs_review")
+        .label("needs_review"),
+        func.count()
+        .filter(VideoPublishTask.device_cleanup_status == "pending")
+        .label("device_pending"),
+        func.count()
+        .filter(VideoPublishTask.device_cleanup_status == "failed")
+        .label("device_failed"),
+        func.count()
+        .filter(VideoPublishTask.spool_cleanup_status == "failed")
+        .label("spool_failed"),
+        func.count()
+        .filter(VideoPublishTask.object_cleanup_status == "failed")
+        .label("object_failed"),
+    ).select_from(VideoPublishTask)
+    owner_clause = _owner_clause(request)
+    if owner_clause is not None:
+        query = query.where(owner_clause)
+    row = session.execute(query).one()
+    return {
+        "queueDepth": int(row.queue_depth),
+        "running": int(row.running),
+        "needsReview": int(row.needs_review),
+        "cleanup": {
+            "devicePending": int(row.device_pending),
+            "deviceFailed": int(row.device_failed),
+            "spoolFailed": int(row.spool_failed),
+            "objectFailed": int(row.object_failed),
+        },
+        "serverTime": datetime.now(UTC),
+    }
+
+
 @router.get("/tasks/{task_id}", response_model=None)
 def detail(
     task_id: UUID,
@@ -882,11 +1029,13 @@ def detail(
 ) -> dict | Response:
     if include_diagnostics:
         require_role_at_least(request, "admin")
+    task = _task_for_actor(session, task_id, request)
     payload = _snapshot(
-        _task_for_actor(session, task_id, request),
+        task,
         detail=True,
         diagnostics=include_diagnostics,
         expose_client_request_id=True,
+        queue_position=_queue_position(session, task),
     )
     cached = _conditional(request, response, payload)
     return cached if cached is not None else payload
@@ -936,8 +1085,11 @@ def retry(
     task_snapshot = _task_for_actor(session, task_id, request, lock=True)
     _require_row_version(request, task_snapshot, body.row_version)
     try:
+        task = retry_task(session, task_id, store)
         return _snapshot(
-            retry_task(session, task_id, store), expose_client_request_id=True
+            task,
+            expose_client_request_id=True,
+            queue_position=_queue_position(session, task),
         )
     except LookupError as exc:
         raise HTTPException(

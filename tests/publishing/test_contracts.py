@@ -55,6 +55,7 @@ def test_detail_api_returns_304_for_matching_etag(
     )
     monkeypatch.setattr(video_publish, "_task", lambda session, task_id: object())
     monkeypatch.setattr(video_publish, "_snapshot", lambda task, **kwargs: payload)
+    monkeypatch.setattr(video_publish, "_queue_position", lambda session, task: None)
     response = video_publish.detail(
         uuid4(), request, cast(Session, None), Response(), include_diagnostics=False
     )

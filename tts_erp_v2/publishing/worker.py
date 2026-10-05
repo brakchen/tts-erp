@@ -111,12 +111,6 @@ async def _probe_device_readiness(
                         SELECT 1 FROM publishing.video_publish_tasks
                         WHERE cleanup_intent <> 'none'
                           AND device_cleanup_status IN ('pending','failed')
-                          AND (
-                            device_cleanup_next_attempt_at IS NULL
-                            OR device_cleanup_next_attempt_at <= clock_timestamp()
-                            OR (cleanup_lease_owner IS NOT NULL
-                                AND cleanup_lease_expires_at > clock_timestamp())
-                          )
                     )
                     """)
                 )

@@ -10,7 +10,9 @@ from urllib.parse import urlsplit, urlunsplit
 
 _REDACTED = "[REDACTED]"
 _SECRET_KEY = re.compile(
-    r"(?:authorization|cookie|password|passwd|secret|token|credential|api[_-]?key)",
+    r"(?:minio[_-]?secret[_-]?key|client[_-]?secret|access[_-]?token|"
+    r"refresh[_-]?token|api[_-]?key|session[_-]?id|proxy[_-]?authorization|"
+    r"set[_-]?cookie|authorization|cookie|password|passwd|secret|token|credential)",
     re.IGNORECASE,
 )
 _BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
@@ -19,8 +21,10 @@ _SECRET_HEADER = re.compile(
     r"(\s*:\s*)[^\r\n]+"
 )
 _SECRET_ASSIGNMENT = re.compile(
-    r"(?i)\b(authorization|proxy-authorization|cookie|set-cookie|password|passwd|"
-    r"secret|token|credential|api[_-]?key|session(?:[_-]?id)?)\b"
+    r"(?i)(?<![A-Za-z0-9])(minio[_-]?secret[_-]?key|client[_-]?secret|"
+    r"access[_-]?token|refresh[_-]?token|api[_-]?key|session[_-]?id|"
+    r"proxy[_-]?authorization|set[_-]?cookie|authorization|cookie|password|"
+    r"passwd|secret|token|credential)(?![A-Za-z0-9])"
     r"(\s*(?:=|:)\s*)"
     r"(?:\"[^\"\r\n]*\"|'[^'\r\n]*'|[^\s,;]+)"
 )

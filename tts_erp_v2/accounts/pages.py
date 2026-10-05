@@ -57,7 +57,7 @@ BUILTIN_ROLES: dict[str, tuple[str, tuple[str, ...]]] = {
     "admin": ("admin", tuple(p.page_id for p in PAGES)),
     "operator": (
         "readwrite",
-        tuple(p.page_id for p in PAGES if p.page_id != "users"),
+        tuple(p.page_id for p in PAGES if p.page_id not in {"users", "video-publish"}),
     ),
     "viewer": (
         "readonly",

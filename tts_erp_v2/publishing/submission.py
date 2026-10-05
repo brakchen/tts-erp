@@ -26,6 +26,7 @@ from tts_erp_v2.publishing.domain import (
     set_task_stage,
 )
 from tts_erp_v2.publishing.object_store import VideoObjectStore
+from tts_erp_v2.publishing.observability import emit_publish_event
 from tts_erp_v2.publishing.repository import (
     database_now,
     get_task,
@@ -217,6 +218,12 @@ def create_upload_ticket(
             _presign_put(store, winner.object_key, winner.content_type),
             True,
         )
+    emit_publish_event(
+        "publish_task_created",
+        task_id=task.public_id,
+        stage=task.stage,
+        outcome=task.status,
+    )
     upload_url = _presign_put(store, key, command.content_type)
     return task, upload_url, False
 
@@ -251,6 +258,9 @@ def confirm_upload(
         raise ValueError("UPLOAD_MIME_MISSING")
     if content_type.split(";", 1)[0].strip().lower() != "video/mp4":
         raise ValueError("UPLOAD_MIME_MISMATCH")
+    etag = metadata.get("etag")
+    if not isinstance(etag, str) or not etag.strip():
+        raise ValueError("UPLOAD_ETAG_MISSING")
 
     session.expire_all()
     task = get_task(session, task_id, lock=True)
@@ -261,13 +271,19 @@ def confirm_upload(
     if task.row_version != expected_version or task.object_key != object_key:
         raise TaskConflict("TASK_VERSION_CONFLICT", task)
     now = database_now(session)
-    task.object_etag = metadata.get("etag")
+    task.object_etag = etag.strip()
     task.object_uploaded_at = now
     task.status = TaskStatus.PENDING.value
     set_task_stage(task, TaskStage.QUEUED, now=now)
     task.queued_at = now
     task.row_version += 1
     session.commit()
+    emit_publish_event(
+        "upload_confirmed",
+        task_id=task.public_id,
+        stage=task.stage,
+        outcome=task.status,
+    )
     return task
 
 

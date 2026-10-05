@@ -27,6 +27,7 @@ from tts_erp_v2.publishing.domain import (
     cleanup_retryable_resources,
     set_task_stage,
 )
+from tts_erp_v2.publishing.observability import emit_publish_event
 from tts_erp_v2.publishing.prompt import (
     PUBLISH_PROMPT_VERSION,
     VERIFY_PROMPT_VERSION,
@@ -834,6 +835,17 @@ def commit_publish_transition(
             assert attempt is not None
             verify_attempt_id = _new_verify_attempt(session, task, attempt, now).id
         session.commit()
+        emit_publish_event(
+            "publish_transition",
+            task_id=token.task_id,
+            attempt_id=attempt.id if attempt is not None else None,
+            artemis_session_id=(
+                attempt.artemis_session_id if attempt is not None else None
+            ),
+            attempt_kind=attempt.kind if attempt is not None else None,
+            stage=str(task_values.get("stage", task.stage)),
+            outcome=str(task_values.get("status", task.status)),
+        )
         retained = None
         if task_values.get("lease_owner", token.lease_owner) is not None:
             expected_status = (
