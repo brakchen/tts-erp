@@ -47,6 +47,24 @@
 
 未知的 upstream gift signal、数量域、line status 映射和 currency provenance 必须由原始 payload fixture / 上游契约核验；在核验前不能声称覆盖率完整。
 
+### 0.5 证据对齐表（当前 readiness gate）
+
+以下是本轮 bounded source review 的**事实边界**，不是把目标设计误写成已验证行为：
+
+| 主题 | 当前证据与引用 | 状态 / 对实现的约束 |
+| --- | --- | --- |
+| paid source | maintained `_parse_line_payload` 将 `sale_price`（plain 或 dict amount/currency）写入 `unit_price`，并把 `display_status` fallback 到 `line_status`：`tts_erp_v2/jobs/tiktok/orders.py:244-279`；detail 复用 `_parse_order_payload`、`_parse_line_payload`、`_store_raw`：`tts_erp_v2/jobs/tiktok/order_detail.py:1-25,180-205` | parser mapping **VERIFIED**；上游究竟允许哪种 shape、currency 是否总在 line 上仍 **PARTIAL**，不能把 synthetic object fixture 当官方 contract |
+| original sale | bounded search 未找到 maintained TikTok `original_price` parser/fixture | **UNKNOWN**；只能新增 evidence-gated extraction，不能从 `origin_sale_price`、Miaoshou 或 payment 回填 |
+| quantity | parser 对缺字段当前默认 `Decimal(1)`，维护者注释记录 2026-09-06 观察 0/3686 lines 有 quantity、历史行一件并与 payment reconciliation；代码/测试证据：`orders.py:257-271`、synthetic tests `tests/jobs_tiktok/test_orders_job.py:55-100,145-190` | one-piece default **PARTIAL**；positive fractional validity **UNKNOWN**。实现前必须拿 redacted official/raw evidence；不要把 `effective_quantity` 的整数 check 当已验证上游事实 |
+| gift | bounded parser 没有 gift/not-gift mapping；zero、title、Miaoshou flag 都不是证据 | gift semantics **UNKNOWN**；`UNKNOWN` 必须保留并阻断正式 coverage，不能以字段缺失推断 `NOT_GIFT` |
+| payment/status | parser 原样复制 `display_status`，没有 paid/on-hold/cancelled whitelist；seller-center `sku_display_status` 文档不证明 direct `/order/202309` values | paid whitelist **UNKNOWN**；目标必须在实现前提供 raw status→ROI paid mapping，不能直接把 parser status 当白名单 |
+| currency | parser 支持 line price currency 与已解析 parent/raw currency fallback，但 direct source provenance 尚未由 official payload contract 完成闭合 | currency **PARTIAL**；plain numeric sale price 只有经证实同源 parent currency 才能转换，否则 missing/invalid；不能猜 CNY |
+| population/refund | bounded source 未证明 weighted paid non-gift population 的 direct status/gift semantics 或 refund/full-loss retention | 业务批准的目标仍保留，但实现 readiness **BLOCKED**，必须用真实 redacted raw fixtures/API DB tests 证明 |
+| cost | `resolve_unit_cost` 读当前 `manual_product_costs(valid_to IS NULL, MANUAL_ENTRY)`：`tts_erp_v2/reporting/cost_snapshots.py:36-75`；`ProductCostSnapshot` 的真实字段/唯一性见 `cost_snapshots.py:94-127`, `db/models/reporting.py:41-80` | 不发明 `snapshotId`；实现只能使用当前 effective manual cost 或真实已存在 snapshot provenance |
+| live auth/process | `TTS_ERP_AUTH_MODE` 在 `app.py:362`/middleware 读取且默认 off；cookie 为 `tts_erp_session`：`middleware/session_auth.py:20-30`；Argon2id password helper：`accounts/passwords.py:1-65`；APScheduler 是独立 sync-worker 进程，bounded app scan 未找到 scheduler-disable flag | E2E 必须显式 enforce、真实 TEST login、同一 isolated DB；不得继承生产 env、发明 disable switch 或启动 sync-worker |
+
+`tests/jobs_tiktok/test_orders_job.py` 的 fixture 注释明确是 “realistic-ish” synthetic data；它只能验证 parser regression，不能关闭上表 UNKNOWN。最小安全验证输入是：经授权取得并脱敏的 direct `/order/202309` raw captures（含 original_price、gift/absence semantics、quantity types、currency、display_status），加维护的 paid-status mapping；本 lane 不抓取外部资料、不读 secrets、不启动服务、不操作 DB。
+
 ## 1. 权威边界、非目标与不可变规则
 
 ### 1.1 Authority 与名词
@@ -145,8 +163,8 @@ CREATE INDEX ix_solpo_spu_capture
 
 - `gift_status=GIFT` 只有通过 TikTok 原始 payload 中已核验的 gift flag/赠品 line 结构或项目批准的明确映射才能设置；不要把 `price=0`、Miaoshou gift 或 SKU 名称猜成 gift。
 - `gift_status=UNKNOWN` 默认不进入正式 statistics，`unknownGiftQuantity/unknownGiftLineCount` 单独暴露并产生 warning；实现前必须补一个真实 raw fixture 与映射审查。若产品要把 unknown 纳入，必须先更新本文件而不是在代码中默选。
-- payment 白名单复用现有 ROI 已付款状态；明确 `UNPAID`、`ON_HOLD`、`CANCELLED` 排除。`UNKNOWN` line/order status 不得 silently include；记录 `unknownStatus` coverage 并让 API 返回 partial/error policy。
-- quantity 必须是有限正整数；缺 quantity 仅可沿用已有 TikTok “每 line 一件”的核验规则，保存 `DEFAULT_ONE_PER_LINE` 和 evidence/version。0、负数、非数字、非整数均排除并按数量状态统计；若上游证明允许小数，先修改中位数定义与本文再实现。
+- payment 白名单的**目标**必须复用现有 ROI 已付款状态，但当前 parser 只原样复制 `display_status`，没有 direct `/order/202309` 的映射证据（见 §0.5）。在 mapping 通过审查前，明确 `UNPAID`、`ON_HOLD`、`CANCELLED` 及 unknown 均不得 silently include；记录 `unknownStatus` coverage 并让 API 返回 partial/error policy。
+- 目标实现暂以有限正整数作为 median 的前置条件，但这不是当前上游事实：缺 quantity 仅可在 raw evidence 继续支持“每 line 一件”后沿用 `DEFAULT_ONE_PER_LINE`，保存 evidence/version；0、负数、非数字排除，非整数在 evidence 闭合前进入 `INVALID_NON_INTEGER`/readiness blocker，不得声称 fractional 已被拒或接受。若上游证明允许小数，先修改中位数定义与本文再实现。
 - currency 必须来自 line price 的明确字段；plain numeric `sale_price` 的 currency 只能使用已验证且与该 line 同源的 order currency，否则 `INVALID_CURRENCY`。未知 FX、缺 currency、未找到同一 snapshot rate 均不转换、不聚合，绝不猜 CNY。
 - 本专项不使用 `plugin.order_details.origin_sale_price`、Miaoshou price、`payment.total_amount` 或 shipping 作为补偿来源。Miaoshou 仅可在核验报告中并排比较，不落为正式 observation。
 
@@ -159,8 +177,8 @@ CREATE INDEX ix_solpo_spu_capture
 Parity 验收必须逐字段比较相同 fixture 的两个入口：
 
 - line id/product id/SKU、原价、实付、currency、quantity、gift/status、source version、SPU resolution 结果一致；只有 `source_endpoint` 与 raw record provenance 可以不同。
-- `sale_price` 兼容 plain numeric 与已验证 object shape；原价必须从同一 `line_items[]` raw element 的 `original_price` 读取，不能从 payment 或 order detail price module 拼装。
-- 缺 `quantity` 的现有默认 1 逻辑只有在 fixture 继续证明“每行一件”时才能保留；它必须在 status 与 metrics 中可见，不能伪装成 observed quantity。
+- maintained parser currently accepts plain numeric and dict `sale_price` shapes (`orders.py:244-251`), but upstream shape/currency remains partial; implementation must add evidence before calling either shape an official contract. 原价必须从同一 `line_items[]` raw element 的 `original_price` 读取，不能从 payment 或 order detail price module 拼装。
+- 缺 `quantity` 的现有默认 1 逻辑来自维护者观察注释（`orders.py:257-271`），只能在 official/raw evidence 复核后保留；它必须在 status 与 metrics 中可见，不能伪装成 observed quantity。现有 object `sale_price` tests 是 synthetic regression fixtures，不是 upstream contract。
 - line parser 错误按 line issue 记录并继续其它 lines；缺少 order id/line id/raw record provenance 是 producer 级失败，不能写一条无来源的统计行。
 
 ### 3.2 严格 idempotent upsert 流程
@@ -624,7 +642,7 @@ The fixture must:
 
 1. Let outer `scripts/test_isolated.sh` provide one ephemeral `TTS_ERP_DB_URL_TEST`; derive only a test-shaped `TTS_ERP_DB_URL` and pass **both variables with the identical outer ephemeral URL** to the child app. Use an explicit allowlisted environment (`TTS_ERP_AUTH_MODE=enforce`, deterministic test Fernet key, safe test settings), remove inherited service/proxy credentials, and do not let cwd/import-time dotenv load production `.env` values.
 2. Seed a `TEST_PRICE_<run-id>` user/account and fixture rows in that same DB through SQLAlchemy/psycopg before server launch, commit, then close. Obtain the browser cookie through the real `POST /v2/auth/login` TEST-user path; do not read/decrypt credentials directly. Cleanup only TEST rows. No `--keep-db` is needed for normal process lifetime because fixture cleanup occurs before wrapper exit; retain it only for human failure inspection.
-3. Start the app with `sys.executable -m uvicorn tts_erp_v2.app:app` on a random free loopback port; poll `/healthz`; capture stdout/stderr. Source inspection confirms `tts_erp_v2/app.py` has no scheduler startup hook, so do not invent a scheduler-disable switch: verify the actual app lifespan and ensure the test child has no sync-worker/upstream process. Never monkeypatch the target route or call production `:9877`.
+3. Start the app with `sys.executable -m uvicorn tts_erp_v2.app:app` on a random free loopback port; poll `/healthz`; capture stdout/stderr. Bounded source evidence places APScheduler in the separate `tts_erp_v2/sync_worker` process and found no scheduler-disable flag; do not invent a switch—verify the actual app lifespan before implementation and ensure the test child has no sync-worker/upstream process. Never monkeypatch the target route or call production `:9877`.
 4. Run `bash scripts/test_isolated.sh e2e tests/browser/test_spu_price_stats_live.py`; collection must report >0. A browser, app, auth, DB, or readiness failure must fail the test and be reported as a blocker, not be converted to `pytest.skip` or a green empty collection.
 5. Launch Playwright Chromium headless; assert Prices box and grouped headers on both page routes, independent six sorts, `scope=focused` analytics mapping, empty/partial/null/estimate states, totals invariance under q/page/visible columns when facts/basis are unchanged, latest-response-wins race, API error/retry, keyboard tooltip/aria-sort, and mobile horizontal scroll/frozen first column.
 6. Always stop browser/server process group with bounded terminate→kill escalation, close logs, and preserve screenshot/trace/stdout on failure. The same isolated DB must be used by seed, child app (`TTS_ERP_DB_URL` and `_TEST`), API, and browser; no target-API mock is allowed.
@@ -706,4 +724,5 @@ Each handoff must include branch/HEAD/base, exact changed paths, commands and re
 - 本恢复运行只写本文件；未添加测试、未执行数据库/迁移/服务/浏览器、未声明 E2E 通过。
 - 已同步最新 `origin/master` 到本 lane 专属 worktree；同步带来的 projection/common source changes 是上游合并历史，不属于本 lane owned edits。后续实现者必须在各 successor lane 重新核对合并后的 API/types/UI seams。
 - 本轮验证：Markdown links/paths、JSON code blocks/duplicate keys、加权 oracle 数学、SQL/Markdown structural checks、`git diff --check`；只 stage 本文件并提交/推送 doc branch。
+- source-evidence alignment：sale parser mapping 可引用，detail parser reuse/raw capture/cost/auth facts有路径引用；original_price、gift、direct paid-status、fractional quantity、完整 currency/population semantics 保持 UNKNOWN/PARTIAL，未宣称 implementation readiness。后续只能在授权脱敏 raw fixture/维护 enum mapping 后关闭 gates。
 - 若后续 push 凭据或网络不可用，必须报告准确 local HEAD 与 unpushed 状态，不 force-push、不改 remote、不将未推送伪装成完成。
