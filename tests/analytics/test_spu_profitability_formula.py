@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import UTC, date, datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -13,6 +15,7 @@ from tts_erp_v2.analytics.spu_profitability._formula_v10 import (
     calculate_order_metrics,
     calculate_projection,
 )
+from tts_erp_v2.analytics.spu_profitability._projection import ProjectionPolicy
 from tts_erp_v2.analytics.spu_profitability._types import ProjectionStatus
 
 pytestmark = [pytest.mark.domain_reporting, pytest.mark.layer_unit]
@@ -58,6 +61,28 @@ def _inputs(**overrides) -> FormulaInput:
     }
     values.update(overrides)
     return FormulaInput(**values)
+
+
+def test_projection_policy_uses_shop_local_mature_window() -> None:
+    calculated_at = datetime(2026, 10, 8, 1, 0, tzinfo=UTC)
+
+    thirty = ProjectionPolicy(lookback_days=30).window(
+        calculated_at, ZoneInfo("Asia/Ho_Chi_Minh")
+    )
+    ninety = ProjectionPolicy(lookback_days=90).window(
+        calculated_at, ZoneInfo("Asia/Ho_Chi_Minh")
+    )
+
+    assert thirty.as_of == date(2026, 10, 7)
+    assert thirty.sample_start == date(2026, 9, 1)
+    assert thirty.sample_end == date(2026, 9, 30)
+    assert ninety.sample_start == date(2026, 7, 3)
+    assert ninety.sample_end == date(2026, 9, 30)
+
+
+def test_projection_policy_rejects_unsupported_lookback() -> None:
+    with pytest.raises(ValueError, match="30 or 90"):
+        ProjectionPolicy(lookback_days=60)
 
 
 def test_v10_order_metrics_use_one_shared_order_dimension_formula() -> None:

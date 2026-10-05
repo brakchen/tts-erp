@@ -12,9 +12,18 @@
   <link rel="stylesheet" href="../../static/vendor/tabulator.min.css">
   <link rel="stylesheet" href="../../static/css/spu-roi.css?v={{ css_version('spu-roi.css') }}">
   {% if profile_id == "focused-spus" %}<link rel="stylesheet" href="../../static/css/focused-spus.css?v={{ css_version('focused-spus.css') }}">{% endif %}
-  <style data-page-profile="{{ profile_id }}">
-      {{ sidebar_css(current_page) }}
-  </style>
+  <script type="application/json" id="sidebar-css-payload">{{ sidebar_css(current_page) }}</script>
+  <script>
+    (() => {
+      const payload = document.getElementById("sidebar-css-payload");
+      if (!payload || !payload.textContent.trim()) return;
+      const style = document.createElement("style");
+      style.dataset.pageProfile = "{{ profile_id }}";
+      style.textContent = payload.textContent;
+      document.head.appendChild(style);
+      payload.remove();
+    })();
+  </script>
 </head>
 <body>
   {{ sidebar(current_page) }}
@@ -129,8 +138,14 @@
           </div>
         </div>
         <div class="col">
-          <div class="op-counter-group h-100">
+          <div class="op-counter-group h-100" id="projection-basis-card">
             <div class="op-counter-group-label">预测依据</div>
+            <div class="op-projection-window" aria-live="polite">
+              <div>预测样本窗口：<strong id="projection-sample-window">—</strong></div>
+              <div>成熟滞后 / 截止：<strong id="projection-maturity-as-of">—</strong></div>
+              <div>样本数 / 全损数 / 全损率：<strong id="projection-basis-counts">—</strong></div>
+              <div>状态：<strong id="projection-basis-status">—</strong></div>
+            </div>
             <div class="row g-0 row-cols-2">
               <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预测状态<span class="op-hint" data-tip="只预测所选日期范围内尚未送达的未结算风险订单；可预测、无未结算订单或样本不足由后端判定">?</span></span><span class="op-counter-num" id="sum-projection-status">—</span></span></div>
               <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">已完结样本单<span class="op-hint" data-tip="已结算、已送达或结果已确定的国内取消订单；大盘按订单全局去重">?</span></span><span class="op-counter-num" id="sum-projection-completed-basis-orders">—</span></span></div>
@@ -189,6 +204,13 @@
           <label class="visually-hidden" for="filter-w-end">截止日</label>
           <input id="filter-w-end" type="date" class="form-control form-control-sm" aria-label="销售/退款截止日期（空 = 不限）">
         </div>
+        <label class="op-projection-control mb-0" for="filter-projection-lookback-days">
+          <span>预测样本</span>
+          <select id="filter-projection-lookback-days" class="form-select form-select-sm" aria-label="预测样本天数">
+            <option value="30" selected>30 天</option>
+            <option value="90">90 天</option>
+          </select>
+        </label>
         <button type="button" class="op-more-toggle" id="btn-toolbar-more" aria-expanded="false" aria-controls="toolbar-more">更多</button>
       </div>
       <div class="op-more-panel" id="toolbar-more" hidden>

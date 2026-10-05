@@ -13,6 +13,7 @@ is an existing client contract.  The canonical business rubric is
 from __future__ import annotations
 
 import logging
+from dataclasses import fields, replace
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
@@ -28,6 +29,7 @@ from tts_erp_v2.analytics.spu_profitability._formula_v10 import (
     calculate_order_metrics,
     calculate_projection,
 )
+from tts_erp_v2.analytics.spu_profitability._projection import ProjectionPolicy
 from tts_erp_v2.analytics.spu_profitability._selection import resolve_selected_spus
 from tts_erp_v2.analytics.spu_profitability._types import (
     FormulaStatus,
@@ -36,6 +38,7 @@ from tts_erp_v2.analytics.spu_profitability._types import (
     ProfitabilityBasis,
     ProfitabilityOverview,
     ProfitabilityTotals,
+    ProjectionBasis,
     ProjectionStatus,
     ReportingTimezoneUnavailable,
     ShopFeeRateEntry,
@@ -257,6 +260,11 @@ _SQL_ROI_PROJECTION = text(
                so.status,
                so.status = ANY(CAST(:paid_statuses AS text[])) AS is_paid,
                settled.order_pk IS NOT NULL AS is_settled,
+               coalesce(so.order_time, so.paid_at) >= CAST(:projection_sample_start AS timestamptz)
+                   AND coalesce(so.order_time, so.paid_at) < CAST(:projection_sample_end AS timestamptz)
+                   AS is_projection_sample,
+               coalesce(so.order_time, so.paid_at) < CAST(:projection_as_of_end AS timestamptz)
+                   AS is_projection_as_of,
                coalesce(settled.customer_refund_vnd, 0) AS customer_refund_vnd,
                og.order_gmv_vnd,
                greatest(
@@ -352,6 +360,8 @@ _SQL_ROI_PROJECTION = text(
                sl.quantity * sl.unit_price AS line_sales_vnd,
                orders.is_paid,
                orders.is_settled,
+               orders.is_projection_sample,
+               orders.is_projection_as_of,
                orders.is_delivery_terminal,
                orders.is_terminal_full_loss,
                orders.is_completed,
@@ -401,46 +411,56 @@ _SQL_ROI_PROJECTION = text(
         WHERE sl.spu_pk = ANY(CAST(:selected_pks AS bigint[]))
     )
     SELECT spu_pk,
-           count(DISTINCT order_pk) FILTER (WHERE is_paid AND is_settled)
+           count(DISTINCT order_pk) FILTER (
+               WHERE is_paid AND is_settled AND is_projection_sample)
                AS projection_basis_order_count,
-           coalesce(sum(quantity) FILTER (WHERE is_paid AND is_settled), 0)
+           coalesce(sum(quantity) FILTER (
+               WHERE is_paid AND is_settled AND is_projection_sample), 0)
                AS projection_basis_qty,
            coalesce(sum(line_sales_vnd) FILTER (
-               WHERE is_paid AND is_settled), 0)
+               WHERE is_paid AND is_settled AND is_projection_sample), 0)
                AS projection_basis_sales_vnd,
            coalesce(sum(basis_refund_amount) FILTER (
-               WHERE is_paid AND is_settled), 0)
+               WHERE is_paid AND is_settled AND is_projection_sample), 0)
                AS projection_basis_refund_amount_vnd,
            count(DISTINCT order_pk) FILTER (
-               WHERE (is_paid AND is_delivery_terminal)
-                  OR is_terminal_full_loss)
+               WHERE is_projection_sample
+                 AND ((is_paid AND is_delivery_terminal)
+                      OR is_terminal_full_loss))
                AS projection_terminal_basis_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid AND is_delivery_terminal)
+               WHERE is_projection_sample
+                 AND is_paid AND is_delivery_terminal)
                AS projection_full_loss_basis_order_count,
            coalesce(sum(line_sales_vnd) FILTER (
-               WHERE (is_paid AND is_delivery_terminal)
-                  OR is_terminal_full_loss), 0)
+               WHERE is_projection_sample
+                 AND ((is_paid AND is_delivery_terminal)
+                      OR is_terminal_full_loss)), 0)
                AS projection_terminal_basis_sales_vnd,
            coalesce(sum(line_sales_vnd) FILTER (
-               WHERE is_terminal_full_loss), 0)
+               WHERE is_projection_sample AND is_terminal_full_loss), 0)
                AS projection_terminal_full_loss_sales_vnd,
-           count(DISTINCT order_pk) FILTER (WHERE is_terminal_full_loss)
+           count(DISTINCT order_pk) FILTER (
+               WHERE is_projection_sample AND is_terminal_full_loss)
                AS projection_terminal_full_loss_order_count,
            coalesce(sum(terminal_full_loss_qty) FILTER (
-               WHERE is_terminal_full_loss), 0)
+               WHERE is_projection_sample AND is_terminal_full_loss), 0)
                AS projection_terminal_full_loss_qty,
-           count(DISTINCT order_pk) FILTER (WHERE is_completed)
+           count(DISTINCT order_pk) FILTER (
+               WHERE is_projection_sample AND is_completed)
                AS projection_completed_basis_order_count,
-           count(DISTINCT order_pk) FILTER (WHERE is_completed_full_loss)
+           count(DISTINCT order_pk) FILTER (
+               WHERE is_projection_sample AND is_completed_full_loss)
                AS projection_completed_full_loss_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid
+               WHERE is_projection_sample
+                 AND is_paid
                  AND is_delivery_terminal
                  AND is_delivered_full_loss)
                AS projection_basis_full_loss_order_count,
            coalesce(sum(delivered_full_loss_qty) FILTER (
-               WHERE is_paid AND is_delivery_terminal), 0)
+               WHERE is_projection_sample
+                 AND is_paid AND is_delivery_terminal), 0)
                AS projection_basis_full_loss_qty,
            count(DISTINCT order_pk) FILTER (WHERE is_paid AND NOT is_settled)
                AS unsettled_order_count,
@@ -546,6 +566,11 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
                so.status,
                so.status = ANY(CAST(:paid_statuses AS text[])) AS is_paid,
                settled.order_pk IS NOT NULL AS is_settled,
+               coalesce(so.order_time, so.paid_at) >= CAST(:projection_sample_start AS timestamptz)
+                   AND coalesce(so.order_time, so.paid_at) < CAST(:projection_sample_end AS timestamptz)
+                   AS is_projection_sample,
+               coalesce(so.order_time, so.paid_at) < CAST(:projection_as_of_end AS timestamptz)
+                   AS is_projection_as_of,
                og.order_gmv_vnd,
                greatest(
                    abs(coalesce(settled.customer_refund_vnd, 0)),
@@ -636,6 +661,8 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
         SELECT sl.order_pk,
                orders.is_paid,
                orders.is_settled,
+               orders.is_projection_sample,
+               orders.is_projection_as_of,
                orders.is_delivery_terminal,
                orders.is_terminal_full_loss,
                orders.is_completed,
@@ -660,23 +687,30 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
         LEFT JOIN completed_cases cc ON cc.sales_order_line_id = sl.id
         WHERE sl.spu_pk = ANY(CAST(:selected_pks AS bigint[]))
     )
-    SELECT count(DISTINCT order_pk) FILTER (WHERE is_paid AND is_settled)
+    SELECT count(DISTINCT order_pk) FILTER (
+               WHERE is_paid AND is_settled AND is_projection_sample)
                AS projection_basis_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE (is_paid AND is_delivery_terminal)
-                  OR is_terminal_full_loss)
+               WHERE is_projection_sample
+                 AND ((is_paid AND is_delivery_terminal)
+                      OR is_terminal_full_loss))
                AS projection_terminal_basis_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid AND is_delivery_terminal)
+               WHERE is_projection_sample
+                 AND is_paid AND is_delivery_terminal)
                AS projection_full_loss_basis_order_count,
-           count(DISTINCT order_pk) FILTER (WHERE is_terminal_full_loss)
+           count(DISTINCT order_pk) FILTER (
+               WHERE is_projection_sample AND is_terminal_full_loss)
                AS projection_terminal_full_loss_order_count,
-           count(DISTINCT order_pk) FILTER (WHERE is_completed)
+           count(DISTINCT order_pk) FILTER (
+               WHERE is_projection_sample AND is_completed)
                AS projection_completed_basis_order_count,
-           count(DISTINCT order_pk) FILTER (WHERE is_completed_full_loss)
+           count(DISTINCT order_pk) FILTER (
+               WHERE is_projection_sample AND is_completed_full_loss)
                AS projection_completed_full_loss_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid
+               WHERE is_projection_sample
+                 AND is_paid
                  AND is_delivery_terminal
                  AND is_delivered_full_loss)
                AS projection_basis_full_loss_order_count,
@@ -1409,6 +1443,8 @@ def _query_spu_roi(
     only_spu_pk: int | None = None,
     w_start: date | None = None,
     w_end: date | None = None,
+    projection_lookback_days: int = 30,
+    projection_base_only: bool = False,
 ) -> ProfitabilityOverview:
     # 费率解析优先级（2026-09-29 用户拍板）：页面覆写 > 店铺实测 > 全局基线。
     # 覆写时全 scope 统一；否则逐店取 reporting.shop_fee_rate_estimates 的
@@ -1433,6 +1469,18 @@ def _query_spu_roi(
         # when old shop rows lack region metadata; windowed reads fail closed.
         reporting_timezone = UTC
     ws_dt, we_dt = _window_dates(w_start, w_end, reporting_timezone)
+    projection_policy = ProjectionPolicy(lookback_days=projection_lookback_days)
+    projection_window = projection_policy.window(calculated_at, reporting_timezone)
+    projection_sample_start, projection_sample_end = _window_dates(
+        projection_window.sample_start,
+        projection_window.sample_end,
+        reporting_timezone,
+    )
+    _, projection_as_of_end = _window_dates(
+        projection_window.as_of,
+        projection_window.as_of,
+        reporting_timezone,
+    )
     ad_start, ad_end = _ad_window_dates(w_start, w_end)
     paid_statuses = list(PAID_SALES_ORDER_STATUSES)
     st0, st1 = _CASE_COMPLETED_STATUSES
@@ -1576,6 +1624,11 @@ def _query_spu_roi(
             _SQL_ROI_PROJECTION,
             {
                 **common_fact_params,
+                "ws": None,
+                "we": projection_as_of_end,
+                "projection_sample_start": projection_sample_start,
+                "projection_sample_end": projection_sample_end,
+                "projection_as_of_end": projection_as_of_end,
                 "paid_statuses": paid_statuses,
                 "st0": st0,
                 "st1": st1,
@@ -2324,6 +2377,11 @@ def _query_spu_roi(
                 _SQL_ROI_PROJECTION_SCOPE_COUNTS,
                 {
                     "selected_pks": spu_pks_in_scope,
+                    "ws": None,
+                    "we": projection_as_of_end,
+                    "projection_sample_start": projection_sample_start,
+                    "projection_sample_end": projection_sample_end,
+                    "projection_as_of_end": projection_as_of_end,
                     "paid_statuses": paid_statuses,
                     "st0": st0,
                     "st1": st1,
@@ -2338,8 +2396,6 @@ def _query_spu_roi(
                     "returned_to_seller_action_code": (
                         _TRACK_ACTION_CODE_RETURNED_TO_SELLER
                     ),
-                    "ws": ws_dt,
-                    "we": we_dt,
                 },
             )
             .mappings()
@@ -2544,6 +2600,26 @@ def _query_spu_roi(
         ),
         Decimal(0),
     )
+    projection_totals_source = None
+    if (w_start is not None or w_end is not None) and not projection_base_only:
+        projection_totals_source = _query_spu_roi(
+            sess,
+            q=None,
+            shop_pk=shop_pk,
+            selection=selection,
+            active_only=active_only,
+            include_without_activity=include_without_activity,
+            sort_field=sort_field,
+            ascending=ascending,
+            limit=1,
+            offset=0,
+            fee_rate=fee_rate,
+            calculated_at=calculated_at,
+            only_spu_pk=only_spu_pk,
+            projection_lookback_days=projection_lookback_days,
+            projection_base_only=True,
+        ).totals
+
     dashboard_projection = calculate_projection(
         ProjectionInput(
             projection_basis_order_count=total_projection_basis_order_count,
@@ -2811,6 +2887,15 @@ def _query_spu_roi(
         ),
     )
 
+    if projection_totals_source is not None:
+        projection_fields = {
+            field.name: getattr(projection_totals_source, field.name)
+            for field in fields(ProfitabilityTotals)
+            if field.name.startswith("projection")
+            or field.name.startswith("projected")
+        }
+        totals = replace(totals, **projection_fields)
+
     # meta（§4 v7）
     window_row = sess.execute(_SQL_ROI_WINDOW).mappings().first()
     data_window_row = (
@@ -2870,6 +2955,32 @@ def _query_spu_roi(
         else:
             meta_fee_source, meta_fee_rate = "mixed", FEE_RATE_BASELINE
 
+    projection_warnings: list[str] = []
+    if dashboard_projection.status is ProjectionStatus.INSUFFICIENT_SAMPLE:
+        projection_warnings.append("projection_insufficient_sample")
+    elif dashboard_projection.status is ProjectionStatus.NO_UNSETTLED_ORDERS:
+        projection_warnings.append("projection_no_unsettled_orders")
+    if shop_pk is None:
+        projection_scope = "all shops plus applied SPU selection"
+    elif selection.__class__.__name__ == "ActivitySelection":
+        projection_scope = f"shop_pk={shop_pk}"
+    else:
+        projection_scope = f"shop_pk={shop_pk} plus applied SPU selection"
+    projection_basis = ProjectionBasis(
+        status=dashboard_projection.status,
+        warnings=tuple(projection_warnings),
+        as_of=projection_window.as_of,
+        lookback_days=projection_policy.lookback_days,
+        maturity_lag_days=projection_policy.maturity_lag_days,
+        sample_start=projection_window.sample_start,
+        sample_end=projection_window.sample_end,
+        basis_order_count=total_projection_completed_basis_order_count,
+        basis_full_loss_order_count=total_projection_completed_full_loss_order_count,
+        completed_full_loss_rate=dashboard_projection.completed_full_loss_rate,
+        scope_description=projection_scope,
+        calculated_at=calculated_at,
+    )
+
     basis = ProfitabilityBasis(
         calculated_at=calculated_at,
         fx=fx_basis,
@@ -2891,6 +3002,7 @@ def _query_spu_roi(
         unattributed_refund_lines=_row_int(unattributed["n"]) if unattributed else 0,
         warnings=tuple(warnings),
         fee_per_shop=tuple(fee_per_shop),
+        projection=projection_basis,
     )
 
     page = plain[offset : offset + limit]

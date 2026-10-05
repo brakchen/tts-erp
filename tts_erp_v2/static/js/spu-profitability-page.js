@@ -277,6 +277,7 @@
     if (PAGE_LIMITS.has(saved.limit)) state.limit = saved.limit;
     if (supportsSortField(saved.sort)) state.sort = saved.sort;
     if (saved.order === "asc" || saved.order === "desc") state.order = saved.order;
+    if (saved.projectionLookbackDays === 90) state.projectionLookbackDays = 90;
   }
 
   function persistPagePreferences() {
@@ -294,6 +295,7 @@
           limit: state.limit,
           sort: state.sort,
           order: state.order,
+          projectionLookbackDays: state.projectionLookbackDays,
         }),
       );
     } catch {
@@ -355,6 +357,7 @@
     wStart: "", // 日期范围 yyyy-mm-dd(""=不限)
     wEnd: "",
     datesTouched: false, // 仅用户主动选过日期时为 true；自动 T-1 不算用户选择
+    projectionLookbackDays: 30,
     feeRate: null, // 页面覆写费率(小数),null = 店铺实测/服务端基线
     feeCardDismissed: false, // 用户点 ✕ 关闭置顶费率横幅后为 true：本次页面生命周期内不再自动弹出
     // D7 行内 accordion: 一次只展开一行; D6 tab 懒加载缓存,主表筛选变化时清空
@@ -846,7 +849,7 @@
       if (!values.month || !values.day || values.hour == null || !values.minute)
         return "—";
       return `${values.month}-${values.day} ${values.hour}:${values.minute}`;
-    } catch (e) {
+    } catch {
       return "—";
     }
   }
@@ -1014,7 +1017,7 @@
       },
     });
     // 用 table.on 订阅（与 dataSorting 同一机制）；6.3 对 options 回调的订阅不可靠。
-    state.table.on("rowClick", (e, row) => {
+    state.table.on("rowClick", (_e, row) => {
       var it = row.getData();
       if (!it || !it.spu_pk) return;
       openDrillPanel(row.getElement(), it);
@@ -1302,6 +1305,29 @@
     setTextIfPresent(
       "#sum-projection-status",
       projectionStatusLabel(totals.projection_status),
+    );
+    var projection = meta.projection || {};
+    setTextIfPresent(
+      "#projection-sample-window",
+      projection.sample_start && projection.sample_end
+        ? `${projection.sample_start} ~ ${projection.sample_end}（${projection.lookback_days || state.projectionLookbackDays} 天）`
+        : "—",
+    );
+    setTextIfPresent(
+      "#projection-maturity-as-of",
+      projection.maturity_lag_days != null && projection.as_of
+        ? `${projection.maturity_lag_days} 天 / ${projection.as_of}`
+        : "—",
+    );
+    setTextIfPresent(
+      "#projection-basis-counts",
+      projection.basis_order_count != null
+        ? `${projection.basis_order_count} / ${projection.basis_full_loss_order_count || 0} / ${fmtPct(projection.completed_full_loss_rate)}`
+        : "—",
+    );
+    setTextIfPresent(
+      "#projection-basis-status",
+      projectionStatusLabel(projection.status || totals.projection_status),
     );
     setTextIfPresent(
       "#sum-projection-completed-basis-orders",
@@ -2272,6 +2298,8 @@
     state.loadController = controller;
     hideTip(); // 重拉前收起可能悬浮的说明气泡
     state.loading = true;
+    var projectionControl = $("#filter-projection-lookback-days");
+    if (projectionControl) projectionControl.disabled = true;
     tableShowPlaceholder("加载中…");
     var feeParam = null;
     if (state.feeRate !== null && state.feeRate !== "") {
@@ -2293,6 +2321,7 @@
       "w_start",
       "w_end",
       "fee_rate",
+      "projection_lookback_days",
     ]);
     Object.keys(selectionParams || {}).forEach((key) => {
       if (protectedKeys.has(key)) throw new Error(`selection cannot override ${key}`);
@@ -2310,6 +2339,7 @@
           w_start: state.wStart || null,
           w_end: state.wEnd || null,
           fee_rate: feeParam,
+          projection_lookback_days: state.projectionLookbackDays,
         },
         selectionParams || {},
       ),
@@ -2319,6 +2349,7 @@
         if (state.loadVersion !== loadVersion) return;
         state.loading = false;
         state.loadController = null;
+        if (projectionControl) projectionControl.disabled = false;
         render(payload);
         updateSpuSelectionUi();
       })
@@ -2326,6 +2357,7 @@
         if (state.loadVersion !== loadVersion) return;
         state.loading = false;
         state.loadController = null;
+        if (projectionControl) projectionControl.disabled = false;
         updateSpuSelectionUi();
         if (
           (err && err.name === "AbortError") ||
@@ -2860,6 +2892,14 @@
     $("#filter-w-end").addEventListener("change", (e) =>
       _dateFieldChanged("end", e),
     );
+    var projectionInput = $("#filter-projection-lookback-days");
+    if (projectionInput) {
+      projectionInput.addEventListener("change", (e) => {
+        state.projectionLookbackDays = Number(e.target.value) === 90 ? 90 : 30;
+        persistPagePreferences();
+        load();
+      });
+    }
 
     var refresh = $("#btn-refresh");
     if (refresh) {
@@ -2922,6 +2962,8 @@
     if (limitInput) limitInput.value = String(state.limit);
     var includeInput = $("#filter-include-all");
     if (includeInput) includeInput.checked = state.includeAll;
+    var projectionInput = $("#filter-projection-lookback-days");
+    if (projectionInput) projectionInput.value = String(state.projectionLookbackDays);
     syncDateInputsFromState();
     enhanceDateRangeControl();
     mounted = true;

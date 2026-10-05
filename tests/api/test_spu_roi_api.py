@@ -1269,6 +1269,15 @@ def test_spu_roi_requires_auth(api_client):
     assert api_client.get("/v2/analytics/spu-roi").status_code == 401
 
 
+def test_spu_roi_rejects_invalid_projection_lookback(api_client, readonly_key):
+    response = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+        params={"projection_lookback_days": 60},
+    )
+    assert response.status_code == 422, response.text
+
+
 def test_spu_roi_readonly_and_admin_ok(api_client, readonly_key, admin_key):
     r = api_client.get(
         "/v2/analytics/spu-roi",
@@ -1789,7 +1798,7 @@ def test_spu_roi_projection_with_no_unsettled_orders_matches_current_result(
     assert body["totals"]["projected_net_profit"] == body["totals"]["net_profit"]
 
 
-def test_spu_roi_projection_basis_and_target_follow_order_time_window(
+def test_spu_roi_projection_window_is_independent_of_reporting_window(
     api_client, readonly_key, db_engine
 ):
     with Session(db_engine) as sess:
@@ -1804,11 +1813,22 @@ def test_spu_roi_projection_basis_and_target_follow_order_time_window(
         sess.commit()
 
     headers = {"Authorization": f"Bearer {readonly_key}"}
-    all_time = api_client.get(
+    default_response = api_client.get(
         "/v2/analytics/spu-roi",
         headers=headers,
         params={"q": "TEST_ROI_SPU_PROJECTION"},
-    ).json()["items"][0]
+    )
+    assert default_response.status_code == 200, default_response.text
+    assert default_response.json()["meta"]["projection"]["lookback_days"] == 30
+
+    all_time = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=headers,
+        params={
+            "q": "TEST_ROI_SPU_PROJECTION",
+            "projection_lookback_days": 90,
+        },
+    ).json()
     september = api_client.get(
         "/v2/analytics/spu-roi",
         headers=headers,
@@ -1816,15 +1836,30 @@ def test_spu_roi_projection_basis_and_target_follow_order_time_window(
             "q": "TEST_ROI_SPU_PROJECTION",
             "w_start": "2026-09-01",
             "w_end": "2026-09-30",
+            "projection_lookback_days": 90,
         },
-    ).json()["items"][0]
+    ).json()
 
-    assert all_time["projection_status"] == "available"
-    assert all_time["projection_basis_order_count"] == 1
-    assert september["projection_status"] == "insufficient_sample"
-    assert september["projection_basis_order_count"] == 0
-    assert september["unsettled_order_count"] == 2
-    assert september["unresolved_unsettled_order_count"] == 2
+    all_time_item = all_time["items"][0]
+    september_item = september["items"][0]
+    assert all_time_item["projection_status"] == "available"
+    assert all_time_item["projection_basis_order_count"] == 1
+    assert september_item["projection_status"] == "available"
+    assert september_item["projection_basis_order_count"] == 1
+    assert september_item["unsettled_order_count"] == 2
+    assert september_item["unresolved_unsettled_order_count"] == 2
+    projection_keys = set(all_time["meta"]["projection"]) - {"calculated_at"}
+    assert {
+        key: all_time["meta"]["projection"][key] for key in projection_keys
+    } == {
+        key: september["meta"]["projection"][key] for key in projection_keys
+    }
+    for key in (
+        "projected_net_profit",
+        "projected_net_revenue",
+        "projected_future_full_loss_qty",
+    ):
+        assert all_time["totals"][key] == september["totals"][key]
 
 
 def test_profitability_public_interface_returns_typed_consistent_result(
@@ -2843,6 +2878,7 @@ def test_spu_roi_date_window_uses_shop_local_midnights(api_client, readonly_key,
     gb_start, gb_end = profitability_impl._window_dates(
         spring_forward, spring_forward, ZoneInfo("Europe/London")
     )
+    assert gb_start is not None and gb_end is not None
     assert gb_end - gb_start == timedelta(hours=23)
 
     with Session(db_engine) as sess:
