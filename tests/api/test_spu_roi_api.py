@@ -33,7 +33,7 @@ from typing import TypeVar
 from zoneinfo import ZoneInfo
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.analytics.spu_profitability import (
@@ -1269,6 +1269,15 @@ def test_spu_roi_requires_auth(api_client):
     assert api_client.get("/v2/analytics/spu-roi").status_code == 401
 
 
+def test_spu_roi_rejects_invalid_projection_lookback(api_client, readonly_key):
+    response = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+        params={"projection_lookback_days": 60},
+    )
+    assert response.status_code == 422, response.text
+
+
 def test_spu_roi_readonly_and_admin_ok(api_client, readonly_key, admin_key):
     r = api_client.get(
         "/v2/analytics/spu-roi",
@@ -1398,7 +1407,7 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert item["cpa"] == cny4_from_usd("2")
 
     # 物流终态样本独立于结算：一笔成功送达、没有拒收全损，风险率为 0。
-    assert item["projection_status"] == "available"
+    assert item["projection_status"] == "no_unsettled_orders"
     assert item["projection_terminal_basis_order_count"] == 1
     assert item["projection_terminal_full_loss_order_count"] == 0
     assert item["projection_terminal_full_loss_qty"] == 0
@@ -1483,10 +1492,10 @@ def test_spu_roi_projects_undelivered_loss_from_terminal_delivery_outcomes(
     expected_future_refund = risk_sales_after_fee * completed_full_loss_rate
     expected_unsettled_net = risk_sales_after_fee - expected_future_refund
 
-    assert item["projection_basis_order_count"] == 2
-    assert item["projection_terminal_basis_order_count"] == 3
+    assert item["projection_basis_order_count"] == 3
+    assert item["projection_terminal_basis_order_count"] == 4
     assert item["projection_terminal_basis_sales"] == m4(
-        Decimal(300_000) * vnd_cny
+        Decimal(400_000) * vnd_cny
     )
     assert item["projection_terminal_full_loss_sales"] == m4(
         Decimal(100_000) * vnd_cny
@@ -1496,13 +1505,13 @@ def test_spu_roi_projects_undelivered_loss_from_terminal_delivery_outcomes(
     assert item["projection_completed_basis_order_count"] == 6
     assert item["projection_completed_full_loss_order_count"] == 3
     assert item["completed_full_loss_rate"] == "0.5000"
-    assert item["projection_full_loss_basis_order_count"] == 2
+    assert item["projection_full_loss_basis_order_count"] == 3
     assert item["projection_basis_full_loss_order_count"] == 0
     assert item["projection_basis_full_loss_qty"] == 0
-    assert item["pre_delivery_full_loss_rate"] == "0.3333"
+    assert item["pre_delivery_full_loss_rate"] == "0.2500"
     assert item["delivered_full_loss_rate"] == "0.0000"
     assert item["settled_full_loss_rate"] == "0.0000"
-    assert item["projection_refund_amount_rate"] == "0.3333"
+    assert item["projection_refund_amount_rate"] == "0.2500"
     assert Decimal(item["projected_future_full_loss_order_count"]) == Decimal("0.5")
     assert Decimal(item["projected_future_full_loss_qty"]) == Decimal(1)
     assert Decimal(item["projected_future_refund_amount"]) == (
@@ -1789,7 +1798,7 @@ def test_spu_roi_projection_with_no_unsettled_orders_matches_current_result(
     assert body["totals"]["projected_net_profit"] == body["totals"]["net_profit"]
 
 
-def test_spu_roi_projection_basis_and_target_follow_order_time_window(
+def test_spu_roi_projection_window_is_independent_of_reporting_window(
     api_client, readonly_key, db_engine
 ):
     with Session(db_engine) as sess:
@@ -1804,11 +1813,22 @@ def test_spu_roi_projection_basis_and_target_follow_order_time_window(
         sess.commit()
 
     headers = {"Authorization": f"Bearer {readonly_key}"}
-    all_time = api_client.get(
+    default_response = api_client.get(
         "/v2/analytics/spu-roi",
         headers=headers,
         params={"q": "TEST_ROI_SPU_PROJECTION"},
-    ).json()["items"][0]
+    )
+    assert default_response.status_code == 200, default_response.text
+    assert default_response.json()["meta"]["projection"]["lookback_days"] == 30
+
+    all_time = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=headers,
+        params={
+            "q": "TEST_ROI_SPU_PROJECTION",
+            "projection_lookback_days": 90,
+        },
+    ).json()
     september = api_client.get(
         "/v2/analytics/spu-roi",
         headers=headers,
@@ -1816,15 +1836,314 @@ def test_spu_roi_projection_basis_and_target_follow_order_time_window(
             "q": "TEST_ROI_SPU_PROJECTION",
             "w_start": "2026-09-01",
             "w_end": "2026-09-30",
+            "projection_lookback_days": 90,
         },
-    ).json()["items"][0]
+    ).json()
 
-    assert all_time["projection_status"] == "available"
-    assert all_time["projection_basis_order_count"] == 1
-    assert september["projection_status"] == "insufficient_sample"
-    assert september["projection_basis_order_count"] == 0
-    assert september["unsettled_order_count"] == 2
-    assert september["unresolved_unsettled_order_count"] == 2
+    all_time_item = all_time["items"][0]
+    september_item = september["items"][0]
+    assert all_time_item["projection_status"] == "available"
+    assert all_time_item["projection_basis_order_count"] == 1
+    assert september_item["projection_status"] == "available"
+    assert september_item["projection_basis_order_count"] == 1
+    assert september_item["unsettled_order_count"] == 2
+    assert september_item["unresolved_unsettled_order_count"] == 2
+    projection_keys = set(all_time["meta"]["projection"]) - {"calculated_at"}
+    assert {
+        key: all_time["meta"]["projection"][key] for key in projection_keys
+    } == {
+        key: september["meta"]["projection"][key] for key in projection_keys
+    }
+    for key in (
+        "projected_net_profit",
+        "projected_net_revenue",
+        "projected_future_full_loss_qty",
+    ):
+        assert all_time["totals"][key] == september["totals"][key]
+    assert "projection_low_sample" in all_time["meta"]["projection"]["warnings"]
+
+
+def test_projection_scope_is_independent_when_reporting_window_has_no_activity(
+    api_client, readonly_key, db_engine
+):
+    with Session(db_engine) as sess:
+        _seed_projection_scenario(sess)
+        sess.commit()
+
+    headers = {"Authorization": f"Bearer {readonly_key}"}
+    params = {"q": "TEST_ROI_SPU_PROJECTION", "projection_lookback_days": 90}
+    unrestricted = api_client.get(
+        "/v2/analytics/spu-roi", headers=headers, params=params
+    ).json()
+    excluded = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=headers,
+        params={
+            **params,
+            "w_start": "2027-01-01",
+            "w_end": "2027-01-31",
+            "include_all": "true",
+        },
+    ).json()
+
+    assert excluded["items"]
+    projection_total_keys = {
+        key
+        for key in unrestricted["totals"]
+        if key.startswith(
+            (
+                "projection",
+                "projected",
+                "unsettled",
+                "delivered_unsettled",
+                "full_loss_exposure",
+                "confirmed_full_loss_exposure",
+                "confirmed_unsettled",
+                "unresolved_",
+            )
+        )
+        or key
+        in {
+            "completed_full_loss_rate",
+            "delivered_full_loss_rate",
+            "settled_full_loss_rate",
+        }
+    }
+    assert {
+        key: excluded["totals"][key] for key in projection_total_keys
+    } == {key: unrestricted["totals"][key] for key in projection_total_keys}
+    projection_keys = set(unrestricted["meta"]["projection"]) - {"calculated_at"}
+    assert {
+        key: excluded["meta"]["projection"][key] for key in projection_keys
+    } == {
+        key: unrestricted["meta"]["projection"][key] for key in projection_keys
+    }
+
+
+def test_paid_cancelled_returned_order_is_strict_full_loss_sample(
+    api_client, readonly_key, db_engine
+):
+    with Session(db_engine) as sess:
+        _seed_terminal_delivery_risk_scenario(sess)
+        sess.commit()
+
+    response = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+        params={"q": "TEST_ROI_SPU_TERMINAL_DELIVERY_RISK"},
+    )
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["projection_terminal_full_loss_order_count"] == 1
+    assert item["projection_completed_full_loss_order_count"] >= 1
+
+
+def test_projection_excludes_unpaid_cancelled_returned_order_from_strict_sample(
+    api_client, readonly_key, db_engine
+):
+    with Session(db_engine) as sess:
+        spu_pk = _seed_terminal_delivery_risk_scenario(sess)
+        shop_pk = sess.execute(
+            text(
+                "SELECT shop_pk FROM commerce.products_spu WHERE id = :spu_pk"
+            ),
+            {"spu_pk": spu_pk},
+        ).scalar_one()
+        sess.commit()
+        baseline = api_client.get(
+            "/v2/analytics/spu-roi",
+            headers={"Authorization": f"Bearer {readonly_key}"},
+            params={"q": "TEST_ROI_SPU_TERMINAL_DELIVERY_RISK"},
+        ).json()["items"][0]
+        order_pk = _seed_order_line(
+            sess,
+            shop_pk=shop_pk,
+            spu_pk=spu_pk,
+            order_id="TEST_ORDER_UNPAID_CANCELLED_RETURNED",
+            status="CANCELLED",
+            line_ext="TEST_LINE_UNPAID_CANCELLED_RETURNED",
+            qty="1",
+            unit_price="100000",
+            paid=False,
+        )
+        shipment_id = sess.execute(
+            text(
+                "INSERT INTO fulfillment.shipments ("
+                " order_pk, external_package_id, status"
+                ") VALUES (:order_pk, 'TEST_PKG_UNPAID_CANCELLED_RETURNED',"
+                " 'RETURNED_TO_SELLER') RETURNING id"
+            ),
+            {"order_pk": order_pk},
+        ).scalar_one()
+        sess.execute(
+            text(
+                "INSERT INTO fulfillment.tracking_events ("
+                " shipment_id, external_event_key, action_code, event_at, description"
+                ") VALUES (:shipment_id, 'TEST_EVENT_UNPAID_CANCELLED_RETURNED',"
+                " 80101, now(), 'returned to seller')"
+            ),
+            {"shipment_id": shipment_id},
+        )
+        sess.commit()
+
+    response = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+        params={"q": "TEST_ROI_SPU_TERMINAL_DELIVERY_RISK"},
+    )
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["projection_completed_full_loss_order_count"] == baseline[
+        "projection_completed_full_loss_order_count"
+    ]
+    assert item["projection_terminal_full_loss_order_count"] == baseline[
+        "projection_terminal_full_loss_order_count"
+    ]
+
+
+def test_paid_non_cancelled_returned_order_is_completed_full_loss_not_risk(
+    api_client, readonly_key, db_engine
+):
+    with Session(db_engine) as sess:
+        spu_pk = _seed_terminal_delivery_risk_scenario(sess)
+        shop_pk = sess.execute(
+            text(
+                "SELECT shop_pk FROM commerce.products_spu WHERE id = :spu_pk"
+            ),
+            {"spu_pk": spu_pk},
+        ).scalar_one()
+        sess.commit()
+        baseline = api_client.get(
+            "/v2/analytics/spu-roi",
+            headers={"Authorization": f"Bearer {readonly_key}"},
+            params={"q": "TEST_ROI_SPU_TERMINAL_DELIVERY_RISK"},
+        ).json()["items"][0]
+        order_pk = _seed_order_line(
+            sess,
+            shop_pk=shop_pk,
+            spu_pk=spu_pk,
+            order_id="TEST_ORDER_PAID_RETURNED_NON_CANCELLED",
+            status="IN_TRANSIT",
+            line_ext="TEST_LINE_PAID_RETURNED_NON_CANCELLED",
+            qty="1",
+            unit_price="100000",
+            paid=True,
+        )
+        shipment_id = sess.execute(
+            text(
+                "INSERT INTO fulfillment.shipments ("
+                " order_pk, external_package_id, status"
+                ") VALUES (:order_pk, 'TEST_PKG_PAID_RETURNED_NON_CANCELLED',"
+                " 'RETURNED_TO_SELLER') RETURNING id"
+            ),
+            {"order_pk": order_pk},
+        ).scalar_one()
+        sess.execute(
+            text(
+                "INSERT INTO fulfillment.tracking_events ("
+                " shipment_id, external_event_key, action_code, event_at, description"
+                ") VALUES (:shipment_id, 'TEST_EVENT_PAID_RETURNED_NON_CANCELLED',"
+                " 80101, now(), 'returned to seller')"
+            ),
+            {"shipment_id": shipment_id},
+        )
+        sess.commit()
+
+    response = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+        params={"q": "TEST_ROI_SPU_TERMINAL_DELIVERY_RISK"},
+    )
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["projection_completed_full_loss_order_count"] > baseline[
+        "projection_completed_full_loss_order_count"
+    ]
+    assert item["full_loss_exposure_unsettled_order_count"] == baseline[
+        "full_loss_exposure_unsettled_order_count"
+    ]
+
+
+def test_projection_totals_are_scope_stable_when_one_spu_leaves_reporting_rows(
+    api_client, readonly_key, db_engine
+):
+    with Session(db_engine) as sess:
+        first_spu = _seed_projection_scenario(sess)
+        shop_pk = sess.execute(
+            text("SELECT shop_pk FROM commerce.products_spu WHERE id = :spu_pk"),
+            {"spu_pk": first_spu},
+        ).scalar_one()
+        second_spu = _seed_spu(sess, shop_pk, "TEST_ROI_SPU_PROJECTION_SECOND")
+        second_order = _seed_order_line(
+            sess,
+            shop_pk=shop_pk,
+            spu_pk=second_spu,
+            order_id="TEST_ORDER_PROJECTION_SECOND",
+            status=PAID_ORDER_STATUS,
+            line_ext="TEST_LINE_PROJECTION_SECOND",
+            qty="1",
+            unit_price="100000",
+            paid=True,
+        )
+        sess.execute(
+            text(
+                "UPDATE commerce.sales_orders SET order_time = "
+                "'2026-08-01T08:00:00+00:00' WHERE id = :order_pk"
+            ),
+            {"order_pk": second_order},
+        )
+        _seed_settlement(
+            sess,
+            order_pk=second_order,
+            external_id="TEST_TXN_PROJECTION_SECOND",
+            amount_vnd="100000",
+        )
+        sess.commit()
+
+    headers = {"Authorization": f"Bearer {readonly_key}"}
+    base_params = {
+        "shop_pk": shop_pk,
+        "projection_lookback_days": 90,
+    }
+    query_count = 0
+
+    def count_query(*_args) -> None:
+        nonlocal query_count
+        query_count += 1
+
+    event.listen(db_engine, "before_cursor_execute", count_query)
+    try:
+        all_dates = api_client.get(
+            "/v2/analytics/spu-roi", headers=headers, params=base_params
+        ).json()
+    finally:
+        event.remove(db_engine, "before_cursor_execute", count_query)
+    assert query_count <= 30
+    narrowed = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=headers,
+        params={
+            **base_params,
+            "w_start": "2026-09-01",
+            "w_end": "2026-09-30",
+        },
+    ).json()
+
+    projection_fields = {
+        key
+        for key in all_dates["totals"]
+        if key.startswith(("projection", "projected", "unsettled", "delivered_unsettled", "full_loss_exposure", "confirmed_full_loss_exposure", "confirmed_unsettled", "unresolved_"))
+        or key in {"completed_full_loss_rate", "delivered_full_loss_rate", "settled_full_loss_rate"}
+    }
+    assert {
+        key: narrowed["totals"][key] for key in projection_fields
+    } == {key: all_dates["totals"][key] for key in projection_fields}
+    projection_meta_keys = set(all_dates["meta"]["projection"]) - {"calculated_at"}
+    assert {
+        key: narrowed["meta"]["projection"][key] for key in projection_meta_keys
+    } == {
+        key: all_dates["meta"]["projection"][key] for key in projection_meta_keys
+    }
 
 
 def test_profitability_public_interface_returns_typed_consistent_result(
@@ -2843,6 +3162,7 @@ def test_spu_roi_date_window_uses_shop_local_midnights(api_client, readonly_key,
     gb_start, gb_end = profitability_impl._window_dates(
         spring_forward, spring_forward, ZoneInfo("Europe/London")
     )
+    assert gb_start is not None and gb_end is not None
     assert gb_end - gb_start == timedelta(hours=23)
 
     with Session(db_engine) as sess:

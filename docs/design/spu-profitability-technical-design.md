@@ -1,8 +1,8 @@
 # SPU 盈利技术方案
 
-> **文档状态：目标实现方案；可直接交给开发模型实施。**
+> **文档状态：当前实现契约（30/90 独立预测已交付）；可用于维护和验收。**
 >
-> 本文是页面、HTTP adapter、领域 module、查询和部署的技术事实；业务口径、公式、日期边界、字段业务含义和验收口径的唯一权威仍是 [`../business/spu-profitability.md`](../business/spu-profitability.md)。本文只引用该文，不复制公式。当前代码行为与目标行为分开标注；目标契约不能当作当前已上线契约。
+> 本文是页面、HTTP adapter、领域 module、查询和部署的技术事实；业务口径、公式、日期边界、字段业务含义和验收口径的唯一权威仍是 [`../business/spu-profitability.md`](../business/spu-profitability.md)。本文只引用该文，不复制公式。30/90 独立预测、basis metadata 和竞态保护是当前代码行为；v9 兼容字段仍单独标注。
 >
 > 代码基线：`tts_erp_v2.analytics.spu_profitability`、`tts_erp_v2.analytics.spu_roi`、`tts_erp_v2/templates/pages/spu-profitability.html`、`static/js/spu-profitability-page.js`，以及当前测试。所有路径均相对仓库根。
 
@@ -13,7 +13,7 @@
 | 内容 | 唯一来源 | 本文处理方式 |
 | --- | --- | --- |
 | 指标概念、计算公式、退款/全损/预测口径、日期业务边界 | `docs/business/spu-profitability.md` | 只引用章节，不重新定义 |
-| HTTP 参数、响应字段、状态码和 wire 精度 | 本文目标契约；当前兼容细节以 `tts_erp_v2/api/v2` 实现为准 | 逐项列出当前/目标 |
+| HTTP 参数、响应字段、状态码和 wire 精度 | 本文当前契约；兼容细节以 `tts_erp_v2/api/v2` 实现为准 | 逐项列出当前兼容 wire 与产品读取规则 |
 | 页面结构、控件和交互 | `spu-profitability.html`、`spu-profitability-page.js`、CSS | 按源码描述 |
 | 深模块接口、查询流程和依赖方向 | `analytics/spu_profitability/` | 约束实现位置 |
 | 历史公式、旧页面设计和迁移记录 | `docs/archive/` | 不作为现行依据 |
@@ -41,14 +41,14 @@
 | --- | --- | --- |
 | 深模块 | `read_overview()`、`explain_spu()`；SQL 在 `_implementation.py`，纯公式在 `_formula_v10.py` | 保持公开 seam，补齐投影 policy 和 basis 传递 |
 | 经营窗口 | `w_start/w_end` 进入主表、广告和证据查询 | 店铺本地日半开区间；主表和证据保持此行为 |
-| 预测窗口 | 当前 SQL 的预测也受 `w_start/w_end` 影响；没有 HTTP `projection_lookback_days` | 预测使用 `A=T-1`、7 天成熟等待期和 30/90 日样本，忽略经营日期 |
+| 预测窗口 | 当前实现使用店铺本地 `A=T-1`、7 天成熟等待期和 `projection_lookback_days=30|90`，独立于 `w_start/w_end` | 已交付；预测样本、风险池、totals/meta basis 均走独立 projection aggregate |
 | 预测行字段 | `SpuProfitability` 与 wire row 仍包含大量 projection 字段 | 兼容字段可保留但页面不展示；目标新客户端只读取 `totals`/`meta.projection` |
 | 当前未结算收入 | 当前实现仍有历史 SPU 退款率兼容路径 | 按 business 文档目标口径：只扣已确认退款，未来损失仅进 projection |
-| 全损判定 | 代码仍保留 v9 兼容字段和历史诊断 | 权威预测分子使用已完结订单严格全损率；旧诊断只标兼容 |
+| 全损判定 | v9 兼容字段和历史诊断继续输出；预测严格分子要求 paid/payment evidence + terminal 80101 或其他业务规定的严格证据 | 已交付；UNPAID/ON_HOLD 取消单不得因 80101 stray event 进入严格样本，paid-then-cancelled 可进入 |
 | 快照时间 | overview 共享 `basis.calculated_at`；detail payload 当前自行取 `datetime.now(UTC)` | `explain_spu()` 的结果、四路 evidence 和 basis 共享同一 `calculated_at` |
 | API 文档 | external-api 混有详细盈利契约及 archive 引用 | external-api 仅保留导航、鉴权和稳定性索引，详细契约集中到本文 |
 
-开发时不得把“当前实现”当作目标已完成；每一项目标差异需在相应代码和测试阶段落地。
+v9 兼容字段不得被新客户端当作 SPU 预测产品语义；projection totals、rates、warnings、status 和 meta 必须来自同一 date-independent projection aggregate。
 
 ## 2. 用户旅程和页面信息架构
 
@@ -58,7 +58,7 @@
 2. 页面加载店铺列表、当前用户、枚举映射、主表和店铺同步新鲜度。没有有效 `shop_pk` 时显示“请选择店铺”对话框，不自动跳首页。
 3. 用户在页头“店铺”切换店铺；切换会取消旧请求、清空 SPU 草稿/钻取缓存并重新加载。
 4. 用户可在“SPU”多选中搜索、选择或粘贴逗号分隔的 SPU；“清空”只清草稿和已应用范围，“查询”才提交范围。精确 SPU 范围同时约束当前大盘和预测大盘。
-5. 用户选择经营日期起止日。默认页面 profile 是 `t-1`，但自动填入的覆盖日期不算用户主动选择；日期只改变当前事实和证据。目标实现的 30/90 日预测切换只改变大盘预测。
+5. 用户选择经营日期起止日。默认页面 profile 是 `t-1`，但自动填入的覆盖日期不算用户主动选择；日期只改变当前事实和证据。已交付的 30/90 日预测切换只改变大盘预测，保留经营日期。
 6. 用户展开“更多”，可填写本次请求费率覆写或勾选“含无活动”；覆写不持久化，含无活动只控制活动目录行集合。
 7. 用户点击列头排序、分页或每页条数。排序和分页只改变 `items`；`totals` 始终是完整业务范围。
 8. 用户点击任意 SPU 行展开 accordion：利润构成不请求；订单·物流、结算、售后、广告 tab 首次激活时懒加载，并按 `(spu_pk, tab, 窗口)` 缓存。
@@ -119,8 +119,8 @@ Bootstrap `container-fluid`、`row-cols-*` 和 `table-responsive` 负责断点�
 | 国内取消 | 国内取消量、国内取消率 | `domestic_cancelled_order_count`, `cancel_rate` | 海外取消不重复进入取消率 |
 | 利润 | 净利润、实际 ROI | `net_profit`, `roi_real` | `profit_status=loss` 红色；ROI null 显示 `—` |
 | ROI | 实际保本 ROI、广告系统实际 ROI、广告系统保本 ROI | `roi_breakeven`, `ad_system_actual_roi`, `ad_system_breakeven_roi` | `estimated_known_costs` 前缀 `≈`；无解显示 `—` |
-| 预测依据 | 预测状态、已完结样本单、已完结严格全损单、已完结订单严格全损率 | `projection_status`, `projection_completed_basis_order_count`, `projection_completed_full_loss_order_count`, `completed_full_loss_rate` | 目标契约只来自 totals；状态中文仅由后端/固定枚举映射，不改变值 |
-| 未结算预测对象 | 未结算订单、未结算已送达订单、待完结风险订单、预计未来新增严格全损件 | `unsettled_order_count`, `delivered_unsettled_order_count`, `full_loss_exposure_unsettled_order_count`, `projected_future_full_loss_qty` | 目标契约；样本不足时依赖投影的值为 `—`，不是 0 |
+| 预测依据 | 预测状态、已完结样本单、已完结严格全损单、已完结订单严格全损率 | `projection_status`, `projection_completed_basis_order_count`, `projection_completed_full_loss_order_count`, `completed_full_loss_rate` | 当前契约只来自 totals；状态中文仅由后端/固定枚举映射，不改变值 |
+| 未结算预测对象 | 未结算订单、未结算已送达订单、待完结风险订单、预计未来新增严格全损件 | `unsettled_order_count`, `delivered_unsettled_order_count`, `full_loss_exposure_unsettled_order_count`, `projected_future_full_loss_qty` | 当前契约；样本不足时依赖投影的值为 `—`，不是 0 |
 | 预计 | 预计净收入、预计净利润、预计 ROI、预计保本 ROI、预计广告系统 ROI、预计广告系统保本 ROI | `projected_*` | `projection_status=insufficient_sample` 时显示 `—`；无风险池时显示无未结算状态 |
 
 ### 3.3 工具栏控件
@@ -131,7 +131,7 @@ Bootstrap `container-fluid`、`row-cols-*` 和 `table-responsive` 负责断点�
 | `#btn-spu-clear` | “清空” | 有草稿、已应用范围或校验任务且已选店铺时启用；取消校验并清 scope | 清空后 scope 为空，重新加载 activity；未选店铺 disabled |
 | `#btn-spu-apply` | “查询” | 已选店铺、无 loading/校验、草稿与已应用集合不同时启用；click 应用 selection、清 q、offset=0、重拉 overview | 成功保留选择并更新 URL/local state；422 保留草稿、显示错误 |
 | 日期 `#filter-w-start/end` | 起始日期/截止日期 | 输入合法 `YYYY-MM-DD` 且 start≤end；change 设置 `datesTouched`、offset=0、重拉 | 空值=不限制；非法顺序显示错误；成功在 meta.window 回显；当前实现按店铺时区，未知 region 422 |
-| 预测样本切换（目标） | “预测样本：30 天 / 90 天” | overview 成功后可用；只改变 `projection_lookback_days`、保留经营日期和行分页 | 30 默认；切换期间 disabled/loading；422 显示参数错误；当前模板无该控件，前端实施时加到日期行，不得伪装当前可用 |
+| 预测样本切换 | “预测样本：30 天 / 90 天” | overview 成功后可用；只改变 `projection_lookback_days`、保留经营日期和行分页 | 30 默认；切换期间 disabled/loading；422 显示参数错误；响应竞态按 load version 丢弃旧结果 |
 | `#btn-toolbar-more` | “更多” | click 切换 `aria-expanded` 和 `#toolbar-more` | 面板展开/收起保持字段值 |
 | 费率 `#filter-fee` | “费率覆写”，placeholder“留空=实测” | 可输入非负有限 Decimal；随下一次 overview 请求发送 `fee_rate`，不持久化 | 非法/负值 422；成功在 meta.fee.override 回显 |
 | `#filter-include-all` | “含无活动” | change 重拉；控制 activity catalog 行，不改变业务 formula | 默认 false；空活动时 `items=[]` 但 totals 按 scope 返回 |
@@ -140,7 +140,7 @@ Bootstrap `container-fluid`、`row-cols-*` 和 `table-responsive` 负责断点�
 | 行展开 | 主表任意 SPU 行 | click/键盘 Enter 展开或收起；一次只保留一行；切换行先关闭旧 panel | loading/empty/error/partial/success 由 drill panel 显示；筛选变化强制收起 |
 | 分页/每页 | “每页显示” 50/100/200，页码 | 改 limit 或页码设置 offset 重拉；生成的上一页/下一页/页码按钮均为 button | `total=0` 显示空状态；页码超范围后端返回空页且 totals 仍完整；无上一页/下一页时 disabled |
 
-分页、列开关和 Tabulator 行操作是 JS 动态生成的控件，不能只在 HTML 静态 shell 检查。动态按钮必须有可见焦点、`aria-label`/文本、disabled 状态和键盘等价事件。当前源码的 `spu-profitability-page.js` 没有 projection toggle；这是明确的目标 UI 改造，不得仅改文案假装已支持。
+分页、列开关和 Tabulator 行操作是 JS 动态生成的控件，不能只在 HTML 静态 shell 检查。动态按钮必须有可见焦点、`aria-label`/文本、disabled 状态和键盘等价事件。预测样本控件由 HTML 提供，`spu-profitability-page.js` 负责 30/90 切换、请求参数、加载禁用和 stale 响应保护；它只改变大盘预测，不改变经营日期。
 
 ### 3.4 主表行与钻取
 
@@ -170,7 +170,7 @@ Bootstrap `container-fluid`、`row-cols-*` 和 `table-responsive` 负责断点�
 
 ### 4.2 状态模型
 
-`state` 当前实际包含：`q`、`spuIds`、`spuSelectionVersion`、`pendingSpuIds`、`spuResolveControllers`、`limit`、`includeAll`、`shopPk`、`shops`、`shopsByPk`、`shopRegion`、`reportingTimeZone`、`wStart`、`wEnd`、`datesTouched`、`feeRate`、`openDrillRow`、`drillCache`、`table`、`sort`、`order`、`offset`、`loading`、`loadVersion`、`loadController`、`freshnessTimer`、`selectionQueryable`、`meta`、`enumMap`。目标增加 `projectionLookbackDays: 30|90`，并把它纳入 URL、请求 key、local preference 和钻取缓存失效条件。
+`state` 当前实际包含：`q`、`spuIds`、`spuSelectionVersion`、`pendingSpuIds`、`spuResolveControllers`、`limit`、`includeAll`、`shopPk`、`shops`、`shopsByPk`、`shopRegion`、`reportingTimeZone`、`wStart`、`wEnd`、`datesTouched`、`projectionLookbackDays: 30|90`、`feeRate`、`openDrillRow`、`drillCache`、`table`、`sort`、`order`、`offset`、`loading`、`loadVersion`、`loadController`、`freshnessTimer`、`selectionQueryable`、`meta`、`enumMap`。该状态值纳入主请求参数和 stale 校验，并持久化为页面 local preference；切换只重拉大盘预测。
 
 每次主表请求生成不可复用的 `loadVersion` 和 `AbortController`；成功/失败回调先校验 version。AbortError 静默忽略，非 Abort 错误显示状态并保留可重试输入。请求参数只来自 state，q/分页/排序不改变 selection 或 totals。金额/日期格式化集中在 formatter，使用后端精度，不把 parseFloat 结果回传服务器。
 
@@ -180,7 +180,7 @@ Bootstrap `container-fluid`、`row-cols-*` 和 `table-responsive` 负责断点�
 - 日期/费率/排序/分页快速连续变更：abort上一 overview；只有最后 version 可写 DOM。
 - 粘贴 SPU：每批有独立 controller；“清空”递增 selection version 并 abort 全批。
 - 钻取：tab controller 绑定 cache key；主表筛选变化清 cache；失败不写成功 cache。
-- 接收 response 时校验 `shopPk`、scope fingerprint、window 和 projection days；任何不一致按 stale 丢弃。
+- 每次 overview 请求捕获单调递增的 `loadVersion` 和 `AbortController`；发起新请求时 abort 旧请求。成功和失败回调都比较其捕获的 version 与当前 `state.loadVersion`，不一致的结果直接丢弃。带参数感知延迟的 Chromium 测试已验证：旧的 30 天响应不能覆盖最终的 90 天 DOM。
 - 401 跳转登录；422 显示可修正字段错误；429 读取 Retry-After；503 FX 缺失显示“汇率数据暂不可用，请稍后重试”；5xx 显示 request id（如响应提供）。
 
 ## 5. 后端入口和领域流程
@@ -214,7 +214,7 @@ HTTP adapter负责鉴权矩阵外的参数校验、异常到 HTTP mapping、Deci
 4. 在快照内解析 selection catalog，得到 selected SPU PK、seller IDs、商品维度和活动过滤。空 focused set 继续返回空 overview，不回退整店。
 5. 读取同一 FX snapshot、当前有效人工成本（缺失使用 K1）、店铺 fee-v2 快照/页面 override/0.308 baseline、广告、订单行、结算、售后、物流和同期统计。
 6. 订单行按 `spu_pk` 聚合金额/件数；订单事实用 `COUNT(DISTINCT order_pk)`。大盘先建立 selected scope 的完整订单关系，再做全局去重；绝不对分页行求和。
-7. 计算当前值和目标 projection 分开：当前窗口绑定 `w_start/w_end`；projection 按店铺当地 `T-1`、7 天成熟期和 30/90 样本得到 basis，再作用于风险池。当前和预测不共享“当前日期”过滤器。
+7. 计算当前值和 projection 分开：当前窗口绑定 `w_start/w_end`；projection 按店铺当地 `T-1`、7 天成熟期和 30/90 样本得到 basis，再作用于风险池。当前和预测不共享“当前日期”过滤器。
 8. 领域返回 Decimal、date、datetime、Enum；adapter 产生 `{items,total,totals,meta}`，前端只渲染。
 9. `explain_spu` 在一个新快照中重算目标 SPU 与所选 evidence，结果和 evidence 共用 `calculated_at`、FX basis 和 rubric version。
 
@@ -254,7 +254,7 @@ HTTP adapter负责鉴权矩阵外的参数校验、异常到 HTTP mapping、Deci
 | `shop_pk` | int≥1 | 内部店铺 PK |
 | `fee_rate` | string Decimal | 页面临时覆写；有限、非负 |
 | `w_start`/`w_end` | ISO date | 经营窗口；店铺当地日含结束日 |
-| `projection_lookback_days` | **目标参数** `30|90`，默认30 | 仅 prediction；当前 adapter 尚未接受，开发后加入 |
+| `projection_lookback_days` | `30|90`，默认30 | 当前 adapter 已接受；仅 prediction，非法值 422；不复用 `w_start/w_end` |
 
 当前请求示例：
 
@@ -272,7 +272,7 @@ X-API-Key: ttserp_ro_...
 
 ### 6.3 主端点响应：当前兼容 wire
 
-当前 adapter 的成功 envelope 是 `{items, total, totals, meta}`。当前 `items[]` 序列化的是完整 `SpuProfitability` dataclass 加五个 computed properties，因此仍包含历史 SPU 行级 projection 字段；当前 adapter 不接受 `projection_lookback_days`，也没有完整的 `meta.projection.sample_*` 契约。下面只示意当前兼容事实，不是目标响应：
+当前 adapter 的成功 envelope 是 `{items, total, totals, meta}`。当前 `items[]` 仍序列化完整 `SpuProfitability` dataclass 加 computed properties，因此保留历史 SPU 行级 projection 兼容字段；新客户端不得把这些行字段当作产品预测。当前 adapter 已接受 `projection_lookback_days`，并返回 `meta.projection` 的 status、warning、as-of、30/90 sample window、maturity、basis counts 和 strict rate。下面示意兼容 wire：
 
 ```json
 {
@@ -300,11 +300,11 @@ X-API-Key: ttserp_ro_...
 }
 ```
 
-兼容字段只为已部署 consumer 和旧页面保留。新客户端不得读取 `items[].projection_*`、`items[].projected_*` 或把兼容 `meta.projection` 当成支持 30/90 日切换的完整 basis；预测展示必须等待目标 wire。示例中的 `meta.projection.full_loss_rate_source` 描述目标预测使用的已完结严格全损率，不会重新定义 stable wire 的兼容 `full_loss_rate`。
+兼容字段只为已部署 consumer 和旧页面保留。新客户端不得读取 `items[].projection_*`、`items[].projected_*`；预测展示读取 `totals` 与 `meta.projection` 的当前 30/90 basis。示例中的 `meta.projection.full_loss_rate_source` 描述当前预测使用的已完结严格全损率，不会重新定义 stable wire 的兼容 `full_loss_rate`。
 
-### 6.4 主端点响应：目标 wire（目标契约）
+### 6.4 主端点响应：产品读取 wire 约束
 
-目标主端点仍使用 `{items,total,totals,meta}`，但 `items[]` 只承载当前 SPU 行字段和当前 computed status；**不得包含任何 SPU 行级 `projection_*` 或 `projected_*` 字段**。预测只在 `totals` 和 `meta.projection` 出现。以下是目标形状，不能在当前 adapter 未改造前作为已上线响应：
+当前主端点仍使用 `{items,total,totals,meta}`；`items[]` 的 projection 字段仅作为 v9 兼容 wire 保留，产品展示和新客户端不得读取。预测权威值只在 `totals` 和 `meta.projection` 出现；projection totals/rates/warnings/status/meta 均来自同一 date-independent projection aggregate。以下字段约束是当前客户端应遵守的 wire 形状：
 
 ```json
 {
@@ -337,7 +337,7 @@ X-API-Key: ttserp_ro_...
 }
 ```
 
-目标 `projection_lookback_days=30|90` 仅影响目标 `totals` prediction 和 `meta.projection` basis；`w_start/w_end` 仍只影响当前事实和 evidence。目标 wire 与当前兼容 wire 并存期间，adapter 必须显式版本/能力切换或保持旧字段，不得把目标字段伪装为当前可用。
+`projection_lookback_days=30|90` 仅影响 `totals` prediction 和 `meta.projection` basis；`w_start/w_end` 仍只影响当前事实和 evidence。当前兼容 wire 与产品展示并存期间，adapter 保持旧 row fields，但不得把它们当作新的 SPU 预测语义。
 
 ### 6.5 四个钻取端点
 
@@ -481,7 +481,7 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 
 字段矩阵直接按 `SpuProfitability`、`ProfitabilityTotals` dataclass 和 adapter 的 `_row_payload()`/`_totals_payload()` 生成规则整理。`SpuProfitability` 字段只出现在 `items[]`；`ProfitabilityTotals` 字段只出现在 `totals`；两者交集才同时出现。computed properties 不属于 dataclass 字段，单独列出。不得把 row-only 字段写成 totals，也不得把 totals-only 字段写成 row。业务含义/公式仍以 business 文档为准。
 
-**当前 stable wire 的全损字段必须按 v9 兼容口径解读，不得称为严格全损。** 源码 `_formula_v10.calculate_order_metrics()` 明确为 `full_loss_order_count = refund_order_count + overseas_cancelled_order_count`，其中 `refund_order_count` 是已完成退款订单（可包含部分退款），`full_loss_rate = full_loss_order_count / total_orders`。源码 `_SQL_ROI_FULL_LOSS` 的 `full_loss_qty` 是已完成 `REFUND_ONLY`/`RETURN_AND_REFUND` case lines 的 `quantity` 加上海外取消（`CANCELLED` 且命中 action `38301`）订单行的 `quantity`，因此也可能包含部分退款件数；`full_loss_qty_rate` 继续使用当前代码的件数分母。该兼容语义对应 [business §11.4（第 4 项）](../business/spu-profitability.md#11-当前实现与目标契约的已知差异)，目标严格全损会排除部分退款；目标实现切换前，stable wire 不能解释为严格全损。带 `projection_` 的目标预测字段若明确标注“严格全损”，则遵循目标契约，不回写当前兼容字段。
+**当前 stable wire 的全损字段必须按 v9 兼容口径解读，不得称为严格全损。** 源码 `_formula_v10.calculate_order_metrics()` 明确为 `full_loss_order_count = refund_order_count + overseas_cancelled_order_count`，其中 `refund_order_count` 是已完成退款订单（可包含部分退款），`full_loss_rate = full_loss_order_count / total_orders`。源码 `_SQL_ROI_FULL_LOSS` 的 `full_loss_qty` 是已完成 `REFUND_ONLY`/`RETURN_AND_REFUND` case lines 的 `quantity` 加上海外取消（`CANCELLED` 且命中 action `38301`）订单行的 `quantity`，因此也可能包含部分退款件数；`full_loss_qty_rate` 继续使用当前代码的件数分母。该兼容语义对应 [business §11.4（第 4 项）](../business/spu-profitability.md#11-当前实现与目标契约的已知差异)，stable wire 不能解释为严格全损。带 `projection_` 的当前预测字段若明确标注“严格全损”，则遵循已交付的严格预测契约，不回写当前兼容字段。
 
 序列化规则：Decimal 全部是 JSON string；`_MONEY_FIELDS` 为 4 位，`_RATIO_FIELDS` 为 2 位，`_FOUR_DECIMAL_RATIO_FIELDS` 为 4 位，totals 的 `refund_rate`/`full_loss_rate`/`cancel_rate` 也为 4 位；未进入这些集合的 Decimal（当前为预测数量）由 adapter `str()` 原样输出。date/datetime 为 ISO 字符串，int/bool 为 JSON 原生类型，Enum 为其 code string。
 
@@ -579,13 +579,13 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 | `projection_terminal_full_loss_order_count` | `items[] + totals` | JSON int | 预测诊断：物流终态严格全损订单数；不回写 stable `full_loss_order_count` | 非 null |
 | `projection_terminal_full_loss_qty` | `items[] + totals` | JSON int | 预测诊断：物流终态严格全损件数；不回写 stable `full_loss_qty` | 非 null |
 | `projection_completed_basis_order_count` | `items[] + totals` | JSON int | 已完结预测分母订单数 | 非 null |
-| `projection_completed_full_loss_order_count` | `items[] + totals` | JSON int | **目标预测字段**：已完结严格全损分子订单数；不等同于 stable `full_loss_order_count` | 非 null |
+| `projection_completed_full_loss_order_count` | `items[] + totals` | JSON int | **当前预测字段**：已完结严格全损分子订单数；不等同于 stable `full_loss_order_count` | 非 null |
 | `projection_full_loss_basis_order_count` | `items[] + totals` | JSON int | 兼容物流全损样本分母 | 非 null |
 | `projection_basis_full_loss_order_count` | `items[] + totals` | JSON int | 兼容已送达退款样本订单数 | 非 null |
 | `projection_basis_full_loss_qty` | `items[] + totals` | JSON int | 兼容已送达退款样本全损件数，可能含部分退款；不等同于目标严格全损件数 | 非 null |
 | `projection_refund_amount_rate` | `items[] + totals` | JSON string（ratio，4 位） | 兼容预测退款金额率 | 可 null |
 | `pre_delivery_full_loss_rate` | `items[] + totals` | JSON string（ratio，4 位） | 兼容送达前全损率 | 可 null |
-| `completed_full_loss_rate` | `items[] + totals` | JSON string（ratio，4 位） | **目标预测字段**：已完结订单严格全损率；不等同于 stable `full_loss_rate` | 可 null |
+| `completed_full_loss_rate` | `items[] + totals` | JSON string（ratio，4 位） | **当前预测字段**：已完结订单严格全损率；不等同于 stable `full_loss_rate` | 可 null |
 | `delivered_full_loss_rate` | `items[] + totals` | JSON string（ratio，4 位） | 兼容已送达全损率 | 可 null |
 | `settled_full_loss_rate` | `items[] + totals` | JSON string（ratio，4 位） | 兼容已结算全损率 | 可 null |
 | `projection_full_loss_qty_rate` | `items[] + totals` | JSON string（ratio，4 位） | 兼容件数预测率 | 可 null |
@@ -606,10 +606,10 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 | `confirmed_unsettled_full_loss_qty` | `items[] + totals` | JSON int | 预测风险池外未结算已确认全损件数；属于 projection 诊断 | 非 null |
 | `projected_future_refund_amount` | `items[] + totals` | JSON string（money，4 位） | 预计未来退款金额 | 可 null |
 | `projected_terminal_refund_amount` | `items[] + totals` | JSON string（money，4 位） | 预计终局退款金额 | 可 null |
-| `projected_future_full_loss_order_count` | `items[] + totals` | JSON string（Decimal，adapter 原样 str，不提前取整） | 目标预测的预计未来新增严格全损订单数 | 可 null |
-| `projected_future_full_loss_qty` | `items[] + totals` | JSON string（Decimal，adapter 原样 str，不提前取整） | 目标预测的预计未来新增严格全损件数 | 可 null |
-| `projected_terminal_full_loss_qty` | `items[] + totals` | JSON string（Decimal，adapter 原样 str，不提前取整） | 目标预测的预计终局严格全损件数 | 可 null |
-| `projected_full_loss_cost` | `items[] + totals` | JSON string（money，4 位） | 目标预测的预计终局严格全损货损 | 可 null |
+| `projected_future_full_loss_order_count` | `items[] + totals` | JSON string（Decimal，adapter 原样 str，不提前取整） | 当前预测的预计未来新增严格全损订单数 | 可 null |
+| `projected_future_full_loss_qty` | `items[] + totals` | JSON string（Decimal，adapter 原样 str，不提前取整） | 当前预测的预计未来新增严格全损件数 | 可 null |
+| `projected_terminal_full_loss_qty` | `items[] + totals` | JSON string（Decimal，adapter 原样 str，不提前取整） | 当前预测的预计终局严格全损件数 | 可 null |
+| `projected_full_loss_cost` | `items[] + totals` | JSON string（money，4 位） | 当前预测的预计终局严格全损货损 | 可 null |
 | `projected_unsettled_net` | `items[] + totals` | JSON string（money，4 位） | 预计未结算净收入 | 可 null |
 | `projected_net_revenue` | `items[] + totals` | JSON string（money，4 位） | 预计净收入 | 可 null |
 | `projected_net_profit` | `items[] + totals` | JSON string（money，4 位） | 预计净利润 | 可 null |
@@ -641,10 +641,10 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 - `currency.display` 固定 `CNY`；`native.ad=USD`、`native.sales_refund=VND`、`native.cost=CNY`。
 - `fx`：`snapshot_id` int、`usd_cny/cny_usd/usd_vnd/cny_vnd/vnd_cny` Decimal 字符串、`as_of/as_of_at`、`source=fx-cache`。缺完整 snapshot 返回 503。
 - `fee`：`mode` 是旧 alias（override/baseline）；`source=user_override|shop_estimate|baseline|mixed`；`rate`/`override` 4 位；`degraded` bool；`fallback_message`；`per_shop[]` 的 `shop_pk/shop_name/rate/source/fallback_reason/estimate`。
-- `window`：广告和 coverage 的首尾日期、窗口说明；目标还需明确 `w_start/w_end` 本地解释。
+- `window`：广告和 coverage 的首尾日期、窗口说明，并明确 `w_start/w_end` 的店铺本地解释。
 - `warnings[]`：当前代码实际可能有 `default_unit_cost_used`、`unsettled_orders_estimated`、projection warning；未知 warning 原样显示。
 - `presentation`：`rubric_label`、退款警戒阈值、默认成本/未结算提示、`pnl_hints`；前端只显示。
-- `projection` 目标至少包含 `status`、`lookback_days`、`maturity_lag_days`、`as_of`、`sample_start/end`、basis counts、范围说明、warning 和 status labels；当前没有完整字段，不能把当前 meta 当目标契约。
+- `projection` 当前包含 `status`、`lookback_days`、`maturity_lag_days`、`as_of`、`sample_start/end`、basis counts、范围说明、warning 和 status labels；预测展示以该 meta 与 totals 为准。
 
 ### 7.1 实际稳定代码值
 
@@ -751,15 +751,15 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 | page/e2e | `tests/e2e/test_spu_roi_smoke.py` |
 | deployment context | `docs/architecture/process-architecture.md`、`docs/guides/commands-reference.md` |
 
-### 10.2 分阶段顺序
+### 10.2 交付状态与维护顺序
 
-1. **契约和类型**：新增 projection policy（30/90）、明确 basis/meta 类型、保留兼容 wire；先写参数/错误/枚举测试。
-2. **快照和查询范围**：把经营窗口与 projection sample/risk window 分开；确认 shop timezone、selected SPU、订单去重和排序稳定。
-3. **领域公式接线**：仅调用 `_formula_v10.py` 和 business 文档目标口径；移除当前窗口退款率驱动当前未结算收入的错误路径；保持当前/预测字段隔离。
-4. **HTTP adapter**：加入 `projection_lookback_days`，序列化 meta projection，统一 drill 的 calculated_at；旧字段仅作兼容。
-5. **前端**：加入 30/90 toggle、状态/错误/stale 呈现、请求竞态、钻取缓存 key 和无障碍检查；不复制公式。
-6. **文档和导航**：本方案作为技术唯一入口，external-api 只保留索引；README、docs README、schema README、e2e 注释改链接。
-7. **验证和发布**：isolated tests、diff/link/引用检查、人工页面检查，再由部署方重启 API；不得自动生产迁移。
+1. **契约和类型（已交付）**：projection policy（30/90）、basis/meta 类型和兼容 wire 已锁定。
+2. **快照和查询范围（已交付）**：经营窗口与 projection sample/risk window 分开；projection aggregate 复用同一 snapshot、selection/catalog，避免递归完整 overview。
+3. **领域公式接线（已交付）**：projection 使用严格 completed sample 和 canonical paid/payment evidence；v9 兼容 fields 保留但隔离。
+4. **HTTP adapter（已交付）**：`projection_lookback_days`、meta projection、warnings/status 和 422 校验已生效。
+5. **前端（已交付）**：30/90 toggle、状态/错误/stale 呈现、请求竞态和可见 basis card 已覆盖。
+6. **文档和导航（当前任务）**：业务文档记录当前行为与兼容差异；本方案作为技术入口，external-api 只保留索引。
+7. **维护验证**：每次修改运行 isolated domain/API/browser tests、fast suite、diagnostics 和页面竞态检查；不得自动生产迁移。
 
 ## 11. 测试、验收和可观测性矩阵
 
@@ -769,7 +769,7 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 | 时间 | shop local date 半开区间；经营日期改变当前不改变 projection；样本 `[A-(D+6),A-7]` 的 30/90 选择；未知时区失败 |
 | scope | activity/exact/focused；空 focused 不回退；SPU 选择同时约束当前和 prediction；q/分页/排序不改变 totals |
 | 去重 | 多 SPU 同订单 totals 订单全局去重；金额按行；退款/取消/全损订单各按订单去重 |
-| 当前 | 已结算不再扣费；未结算不乘当前窗口退款率；确认退款不重复；0 ad/无解返回 null |
+| 当前 | 已结算不再扣费；当前净收入的历史退款率兼容路径仍待按业务口径收敛（见 business §11）；0 ad/无解返回 null |
 | 预测 | 已完结订单分母/严格全损分子；国内取消入分母不入全损；已送达未结算排除风险池；0 样本 insufficient；1–9 warning；不自动 30→90 |
 | 精度 | money 4 位；ratio 2 位；rate 4 位；预测数量 Decimal 不提前取整；null 不变 0 |
 | HTTP | readonly/admin 200；无 key 401；角色/页面权限 403；unknown SPU 404；invalid 422；FX missing 503；429 Retry-After |
@@ -792,7 +792,7 @@ bash scripts/test_isolated.sh fast
 
 ## 12. 未决风险与明确处理
 
-1. **当前 projection 仍受经营窗口影响**：在代码完成前，任何页面文案必须称其为当前实现；目标测试先锁定窗口隔离，再移除旧路径。
+1. **projection 窗口隔离已交付**：projection sample、risk pool、totals/rates/warnings/status 和 `meta.projection` 独立于经营 `w_start/w_end`；后续变更必须保持该契约。
 2. **当前 wire rubric/meta 分层不一致**：主表 overview basis 为 v10，而四个 drill payload 仍含 v9；保持旧字段直至版本化，新增目标字段必须显式标“目标契约”，不能覆盖旧字段含义。
 3. **当前 drill `_detail_*` 自行生成 computed_at**：目标必须把 snapshot basis 传入，避免 UI 声称证据与行同一快照。
 4. **广告日表覆盖缺口**：实现只读 `plugin.ad_daily`；数据新鲜度和 coverage 必须在页面呈现，不得用 `ad_today` 偷拼历史。
