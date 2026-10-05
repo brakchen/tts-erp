@@ -38,7 +38,7 @@ PRICE_FIELDS = ("original_price", "sale_price")
 
 def _decimal(value: Any) -> tuple[Decimal | None, str]:
     if value is None:
-        return None, MISSING
+        return None, NULL
     if isinstance(value, bool):
         return None, INVALID_NON_NUMERIC
     if isinstance(value, float) and not math.isfinite(value):
@@ -236,9 +236,9 @@ def upsert_price_observation(
     stmt = pg_insert(SalesOrderLinePriceObservation).values(observation.as_insert_values())
     stmt = stmt.on_conflict_do_nothing(
         index_elements=["shop_pk", "order_pk", "external_line_id", "semantic_observation_hash"]
-    )
+    ).returning(SalesOrderLinePriceObservation.id)
     result = session.execute(stmt)
-    return bool(result.rowcount)
+    return result.first() is not None
 
 
 def record_price_issue(

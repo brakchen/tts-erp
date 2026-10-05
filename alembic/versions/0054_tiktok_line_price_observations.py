@@ -5,7 +5,7 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision: str = "0054_tiktok_line_price_observations"
+revision: str = "0054_tiktok_price_obs"
 down_revision: str | None = "0052_user_accounts"
 branch_labels: str | None = None
 depends_on: str | None = None
@@ -61,9 +61,18 @@ def upgrade() -> None:
         ["shop_pk", "spu_pk", "source_captured_at"],
         schema="commerce",
     )
+    op.execute(
+        "CREATE TRIGGER trg_commerce_sales_order_line_price_observations_touch "
+        "BEFORE UPDATE ON commerce.sales_order_line_price_observations "
+        "FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at()"
+    )
 
 
 def downgrade() -> None:
+    op.execute(
+        "DROP TRIGGER IF EXISTS trg_commerce_sales_order_line_price_observations_touch "
+        "ON commerce.sales_order_line_price_observations"
+    )
     op.drop_index("ix_solpo_spu_capture", table_name="sales_order_line_price_observations", schema="commerce")
     op.drop_index("ix_solpo_line_version", table_name="sales_order_line_price_observations", schema="commerce")
     op.drop_table("sales_order_line_price_observations", schema="commerce")

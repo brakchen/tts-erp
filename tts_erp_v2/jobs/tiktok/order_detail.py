@@ -69,6 +69,10 @@ AUTO_ISSUE_TYPES: tuple[str, ...] = ("PARSE_ERROR", "UNKNOWN_ORDER", "UNKNOWN_LI
 AUTO_BATCH_SIZE: int = 50
 
 
+def detail_response_matches_request(requested_order_id: str, response_order_id: str) -> bool:
+    return requested_order_id == response_order_id
+
+
 def _auto_collect_order_ids(
     session: Session,
     *,
@@ -241,6 +245,19 @@ def run(
                 details={"error": str(e), "raw": _safe_truncate(raw)},
             )
             continue
+        if not detail_response_matches_request(order_id, fields["order_id"]):
+            rows_failed += 1
+            record_sync_issue(
+                session,
+                job_name=JOB_NAME,
+                issue_type="RESPONSE_ORDER_ID_MISMATCH",
+                external_id=order_id,
+                details={
+                    "requested_order_id": order_id,
+                    "response_order_id": fields["order_id"],
+                },
+            )
+            continue
 
         raw_row = _store_raw(
             session,
@@ -331,5 +348,6 @@ __all__ = [
     "AUTO_ISSUE_TYPES",
     "DETAIL_ENDPOINT",
     "JOB_NAME",
+    "detail_response_matches_request",
     "run",
 ]
