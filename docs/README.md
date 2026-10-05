@@ -12,7 +12,7 @@
 | [`api/`](api/) | 端点与协议契约（对外约定，live contract） | [`api/external-api.md`](api/external-api.md)、[`api/dumps-data-contract.md`](api/dumps-data-contract.md) |
 | [`reference/`](reference/) | 事实参考手册：枚举值、接口目录、上游平台资料 | [`reference/enums/`](reference/enums/)、[`reference/tiktok-seller-center-api-catalog.md`](reference/tiktok-seller-center-api-catalog.md) |
 | [`architecture/`](architecture/) | 系统结构、数据模型、ADR、退役记录 | [`architecture/architecture-overview.md`](architecture/architecture-overview.md)、[`architecture/adr/`](architecture/adr/) |
-| [`design/`](design/) | 已落地的技术方案 / 模块设计（含实现决策） | [`design/spu-profitability-module.md`](design/spu-profitability-module.md) |
+| [`design/`](design/) | 已落地的技术方案 / 模块设计（含实现决策） | [`design/spu-profitability-technical-design.md`](design/spu-profitability-technical-design.md) |
 | [`plans/`](plans/) | **尚未落地**的方案、草案、待评审提案 | [`plans/plugin-sourced-shop-analytics.md`](plans/plugin-sourced-shop-analytics.md) |
 | [`guides/`](guides/) | 流程、操作、排障指南（agent 流程、测试、命令、常见坑） | [`guides/agent-safety.md`](guides/agent-safety.md)、[`guides/common-bugs.md`](guides/common-bugs.md) |
 | [`ops/`](ops/) | 部署、运行维护、备份、事故复盘 | [`ops/tts-erp.md`](ops/tts-erp.md)、[`ops/incident-reports/`](ops/incident-reports/) |

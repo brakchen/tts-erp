@@ -18,7 +18,7 @@
 | --- | --- | --- |
 | 飞书《SPU-ROI 计算口径》 | 业务概念、指标含义、高层公式、产品行为 | SQL、表字段、wire 精度、兼容路径 |
 | 本文 | 开发细则、时间算法、状态映射、数据源、聚合、精度、验收约束 | 与飞书竞争的另一套业务定义 |
-| `docs/design/spu-profitability-module.md` | deep module 接口、依赖方向、一致性快照 | 重复公式 |
+| `docs/design/spu-profitability-technical-design.md` | deep module 接口、依赖方向、一致性快照 | 重复公式 |
 | `docs/api/external-api.md` | HTTP 参数、响应字段和稳定性 | 独立发明盈利口径 |
 | `docs/archive/` | 历史决策和排障证据 | 现行计算依据 |
 
@@ -743,7 +743,7 @@ warning：
 | --- | --- |
 | 业务口径权威 | 飞书《SPU-ROI 计算口径》 |
 | 本开发契约 | `docs/business/spu-profitability.md` |
-| deep module 接口 | `docs/design/spu-profitability-module.md` |
+| deep module 接口 | `docs/design/spu-profitability-technical-design.md` |
 | HTTP 契约 | `docs/api/external-api.md` |
 | 领域入口 | `tts_erp_v2/analytics/spu_profitability/__init__.py` |
 | 领域类型 | `tts_erp_v2/analytics/spu_profitability/_types.py` |
