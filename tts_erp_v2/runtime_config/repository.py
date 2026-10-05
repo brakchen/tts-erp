@@ -18,6 +18,7 @@ from tts_erp_v2.proxy.token_service import encrypt
 from tts_erp_v2.runtime_config.validation import (
     ConfigValidationError,
     iter_secret_references,
+    validate_spu_deterioration_alert_runtime_mutation,
 )
 
 
@@ -34,7 +35,9 @@ def locked_item(session: Session, config_key: str) -> RuntimeConfigItem | None:
     ).scalar_one_or_none()
 
 
-def published_revision(session: Session, item: RuntimeConfigItem) -> RuntimeConfigRevision | None:
+def published_revision(
+    session: Session, item: RuntimeConfigItem
+) -> RuntimeConfigRevision | None:
     if item.published_version is None:
         return None
     return session.execute(
@@ -55,6 +58,9 @@ def publish(
     actor: str,
 ) -> RuntimeConfigRevision:
     """Publish while the caller holds ``locked_item``'s row lock."""
+    validate_spu_deterioration_alert_runtime_mutation(
+        item.config_key, payload=payload, rollout=rollout
+    )
     ensure_secret_references_exist(session, payload)
     for rule in rollout:
         ensure_secret_references_exist(session, rule["payload"])
@@ -88,7 +94,9 @@ def ensure_secret_references_exist(session: Session, value: Any) -> None:
     ).scalars()
     missing = names - set(rows)
     if missing:
-        raise KeyError(f"referenced active secrets do not exist: {', '.join(sorted(missing))}")
+        raise KeyError(
+            f"referenced active secrets do not exist: {', '.join(sorted(missing))}"
+        )
 
 
 def secret_is_referenced_by_active_config(session: Session, name: str) -> bool:

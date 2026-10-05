@@ -117,6 +117,39 @@ def validate_payload(payload: Any, schema: dict[str, Any], *, path: str = "$") -
             raise ConfigValidationError(f"{path}: must be <= {maximum}")
 
 
+def validate_spu_deterioration_alert_runtime_mutation(
+    config_key: str,
+    *,
+    payload: dict[str, Any] | None = None,
+    rollout: list[dict[str, Any]] | None = None,
+    draft_rollout: list[dict[str, Any]] | None = None,
+) -> None:
+    """Validate the global alert key without changing generic rollout semantics."""
+    if config_key != "analytics.spu_profit_deterioration_alert.v1":
+        return
+    if payload is not None:
+        from tts_erp_v2.analytics.spu_deterioration_alert.config import (
+            validate_alert_config,
+        )
+
+        try:
+            validate_alert_config(payload)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ConfigValidationError(str(exc)) from exc
+        if "rollout" in payload or "draftRollout" in payload:
+            raise ConfigValidationError(
+                "alert payload cannot contain rollout or draftRollout"
+            )
+    if rollout:
+        raise ConfigValidationError(
+            "rollout is not supported for the global deterioration alert"
+        )
+    if draft_rollout:
+        raise ConfigValidationError(
+            "draftRollout is not supported for the global deterioration alert"
+        )
+
+
 def validate_rollout(rollout: Any, schema: dict[str, Any]) -> list[dict[str, Any]]:
     """Validate ordered basis-point rollout rules and their alternate payloads."""
     if not isinstance(rollout, list):

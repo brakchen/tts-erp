@@ -57,6 +57,7 @@ from tts_erp_v2.api.v2 import (
     order_sync,
     pages,
     reporting,
+    spu_deterioration_alert,
     spu_images,
     sync_status,
     tiktok_shop,
@@ -132,6 +133,7 @@ def _build_routes(app: FastAPI) -> None:
     app.include_router(analytics.roi_router)
     # SPU ROI 钻取面板四端点（D6 拍板：每 tab 一懒加载端点）
     app.include_router(analytics.drilldown_router)
+    app.include_router(spu_deterioration_alert.router)
     # sync-worker 周期作业同步状态（GET /v2/sync/status, readonly）——
     # dashboard「数据同步状态」卡片数据源，只读 integration.sync_jobs。
     app.include_router(sync_status.router)
