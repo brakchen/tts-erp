@@ -1,0 +1,51 @@
+{
+  "protocolVersion": 4,
+  "requestId": "TEST_cross-analytics-opt-request",
+  "scope": {
+    "sellerId": "TEST_cross-seller",
+    "advertiserId": "TEST_cross-advertiser"
+  },
+  "dump": {
+    "kind": "daily",
+    "endpoint": "/oec_ads/shopping/v1/oec/stat/campaign_opt_log_list",
+    "campaignId": "TEST_cross-campaign",
+    "method": "POST",
+    "day": "2026-10-02",
+    "rows": [
+      {
+        "change_id": "TEST_cross-evt-001",
+        "campaign_id": "TEST_cross-campaign",
+        "change_type": "BUDGET",
+        "old_value": "100.00",
+        "new_value": "150.00",
+        "modified_at": "2026-10-02T12:00:00Z"
+      }
+    ],
+    "request": {
+      "url": "https://seller.tiktokshopglobalselling.com/api/v1/oec_ads/shopping/v1/oec/stat/campaign_opt_log_list",
+      "body": {
+        "campaign_id": "TEST_cross-campaign",
+        "page": 1,
+        "page_size": 10
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "msg": "",
+        "code": 0,
+        "data": {
+          "logs": [],
+          "pagination": {
+            "page": 1,
+            "page_count": 1,
+            "total_count": 0
+          }
+        },
+        "extra": null
+      }
+    },
+    "createdAt": "2026-10-02T11:00:45.993Z",
+    "source": "tiktok-shop-data-sync"
+  }
+}

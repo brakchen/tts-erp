@@ -285,8 +285,17 @@ _SQL_ROI_PROJECTION = text(
                coalesce(so.order_time, so.paid_at) >= CAST(:projection_sample_start AS timestamptz)
                    AND coalesce(so.order_time, so.paid_at) < CAST(:projection_sample_end AS timestamptz)
                    AS is_projection_sample,
-               coalesce(so.order_time, so.paid_at) < CAST(:projection_as_of_end AS timestamptz)
-                   AS is_projection_as_of,
+               (
+                   coalesce(so.order_time, so.paid_at) < CAST(:projection_as_of_end AS timestamptz)
+                   AND (
+                       CAST(:projection_target_start AS timestamptz) IS NULL
+                       OR coalesce(so.order_time, so.paid_at) >= CAST(:projection_target_start AS timestamptz)
+                   )
+                   AND (
+                       CAST(:projection_target_end AS timestamptz) IS NULL
+                       OR coalesce(so.order_time, so.paid_at) < CAST(:projection_target_end AS timestamptz)
+                   )
+               ) AS is_projection_target,
                coalesce(settled.customer_refund_vnd, 0) AS customer_refund_vnd,
                og.order_gmv_vnd,
                greatest(
@@ -390,7 +399,7 @@ _SQL_ROI_PROJECTION = text(
                orders.is_paid,
                orders.is_settled,
                orders.is_projection_sample,
-               orders.is_projection_as_of,
+               orders.is_projection_target,
                orders.is_delivery_terminal,
                orders.is_terminal_full_loss,
                orders.is_completed,
@@ -492,79 +501,94 @@ _SQL_ROI_PROJECTION = text(
                WHERE is_projection_sample
                  AND is_paid AND is_delivery_terminal), 0)
                AS projection_basis_full_loss_qty,
-           count(DISTINCT order_pk) FILTER (WHERE is_paid AND NOT is_settled AND status <> 'CANCELLED')
+           count(DISTINCT order_pk) FILTER (
+               WHERE is_projection_target
+                 AND is_paid AND NOT is_settled AND status <> 'CANCELLED')
                AS unsettled_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_delivery_terminal
                  AND NOT is_terminal_full_loss)
                AS full_loss_exposure_unsettled_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid AND NOT is_settled AND status <> 'CANCELLED'
+               WHERE is_projection_target
+                 AND is_paid AND NOT is_settled AND status <> 'CANCELLED'
                  AND unresolved_qty > 0)
                AS unresolved_unsettled_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_delivery_terminal
                  AND unresolved_full_loss_qty > 0)
                AS unresolved_full_loss_exposure_order_count,
            coalesce(sum(confirmed_refund_amount) FILTER (
-               WHERE is_paid AND NOT is_settled AND status <> 'CANCELLED'), 0)
+               WHERE is_projection_target
+                 AND is_paid AND NOT is_settled AND status <> 'CANCELLED'), 0)
                AS confirmed_unsettled_refund_amount_vnd,
            coalesce(sum(confirmed_refund_amount) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_delivery_terminal
                  AND NOT is_terminal_full_loss), 0)
                AS confirmed_full_loss_exposure_refund_amount_vnd,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_terminal_full_loss
                  AND confirmed_full_loss_qty > 0)
                AS confirmed_unsettled_full_loss_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_delivery_terminal
                  AND confirmed_full_loss_qty > 0)
                AS confirmed_full_loss_exposure_order_count,
            coalesce(sum(confirmed_full_loss_qty) FILTER (
-               WHERE is_paid AND NOT is_settled AND status <> 'CANCELLED'), 0)
+               WHERE is_projection_target
+                 AND is_paid AND NOT is_settled AND status <> 'CANCELLED'), 0)
                AS confirmed_unsettled_full_loss_qty,
            coalesce(sum(confirmed_full_loss_qty) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_delivery_terminal
                  AND NOT is_terminal_full_loss), 0)
                AS confirmed_full_loss_exposure_qty,
            coalesce(sum(unresolved_qty) FILTER (
-               WHERE is_paid AND NOT is_settled AND status <> 'CANCELLED'), 0)
+               WHERE is_projection_target
+                 AND is_paid AND NOT is_settled AND status <> 'CANCELLED'), 0)
                AS unresolved_unsettled_qty,
            coalesce(sum(unresolved_full_loss_qty) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_delivery_terminal
                  AND NOT is_terminal_full_loss), 0)
                AS unresolved_full_loss_exposure_qty,
            coalesce(sum(line_sales_vnd) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_delivery_terminal
                  AND NOT is_terminal_full_loss), 0)
                AS full_loss_exposure_unsettled_sales_vnd,
            coalesce(sum(unresolved_qty * unit_price) FILTER (
-               WHERE is_paid AND NOT is_settled AND status <> 'CANCELLED'), 0)
+               WHERE is_projection_target
+                 AND is_paid AND NOT is_settled AND status <> 'CANCELLED'), 0)
                AS unresolved_unsettled_sales_vnd
     FROM line_facts
     GROUP BY spu_pk
@@ -629,8 +653,17 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
                coalesce(so.order_time, so.paid_at) >= CAST(:projection_sample_start AS timestamptz)
                    AND coalesce(so.order_time, so.paid_at) < CAST(:projection_sample_end AS timestamptz)
                    AS is_projection_sample,
-               coalesce(so.order_time, so.paid_at) < CAST(:projection_as_of_end AS timestamptz)
-                   AS is_projection_as_of,
+               (
+                   coalesce(so.order_time, so.paid_at) < CAST(:projection_as_of_end AS timestamptz)
+                   AND (
+                       CAST(:projection_target_start AS timestamptz) IS NULL
+                       OR coalesce(so.order_time, so.paid_at) >= CAST(:projection_target_start AS timestamptz)
+                   )
+                   AND (
+                       CAST(:projection_target_end AS timestamptz) IS NULL
+                       OR coalesce(so.order_time, so.paid_at) < CAST(:projection_target_end AS timestamptz)
+                   )
+               ) AS is_projection_target,
                og.order_gmv_vnd,
                greatest(
                    abs(coalesce(settled.customer_refund_vnd, 0)),
@@ -729,7 +762,7 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
                orders.is_paid,
                orders.is_settled,
                orders.is_projection_sample,
-               orders.is_projection_as_of,
+               orders.is_projection_target,
                orders.is_delivery_terminal,
                orders.is_terminal_full_loss,
                orders.is_completed,
@@ -782,35 +815,42 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
                  AND is_delivery_terminal
                  AND is_delivered_full_loss)
                AS projection_basis_full_loss_order_count,
-           count(DISTINCT order_pk) FILTER (WHERE is_paid AND NOT is_settled AND status <> 'CANCELLED')
+           count(DISTINCT order_pk) FILTER (
+               WHERE is_projection_target
+                 AND is_paid AND NOT is_settled AND status <> 'CANCELLED')
                AS unsettled_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_delivery_terminal
                  AND NOT is_terminal_full_loss)
                AS full_loss_exposure_unsettled_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_terminal_full_loss
                  AND confirmed_full_loss_qty > 0)
                AS confirmed_unsettled_full_loss_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_delivery_terminal
                  AND confirmed_full_loss_qty > 0)
                AS confirmed_full_loss_exposure_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid AND NOT is_settled AND status <> 'CANCELLED'
+               WHERE is_projection_target
+                 AND is_paid AND NOT is_settled AND status <> 'CANCELLED'
                  AND unresolved_qty > 0)
                AS unresolved_unsettled_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_delivery_terminal
@@ -1519,21 +1559,24 @@ def _projection_scope_aggregate(
     paid_statuses: list[str],
     st0: str,
     st1: str,
+    window_start: datetime | None,
+    window_end: datetime | None,
+    ad_start: date | None,
+    ad_end: date | None,
     projection_map: dict[int, Mapping[str, Any]],
     projection_counts_row: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    """Aggregate projection facts without rebuilding a profitability overview.
+    """Aggregate projection facts for the selected reporting window.
 
-    The current-window maps stay owned by ``_query_spu_roi``. This helper only
-    loads the all-time facts needed to feed the projection formula, so reporting
-    dates cannot remove a selected SPU from the projection source and no second
-    full overview is recursively constructed.
+    Mature sample facts stay independent in ``projection_map`` while current
+    facts and unsettled forecast targets follow the reporting dates. The helper
+    avoids recursively rebuilding a second profitability overview.
     """
     common = {
         "selected_pks": selected_pks,
         "selected_seller_ids": selected_seller_ids,
-        "ws": None,
-        "we": None,
+        "ws": window_start,
+        "we": window_end,
     }
 
     def grouped(sql, extra: dict[str, Any]) -> dict[int, Mapping[str, Any]]:
@@ -1548,7 +1591,7 @@ def _projection_scope_aggregate(
             if row["spu_pk"] is not None
         }
 
-    ad_map = grouped(_SQL_ROI_AD, {"ad_start": None, "ad_end": None})
+    ad_map = grouped(_SQL_ROI_AD, {"ad_start": ad_start, "ad_end": ad_end})
     sales_map = grouped(
         _SQL_ROI_SALES,
         {"paid_statuses": paid_statuses, "st0": st0, "st1": st1},
@@ -2120,6 +2163,8 @@ def _query_spu_roi(
                 "projection_sample_start": projection_sample_start,
                 "projection_sample_end": projection_sample_end,
                 "projection_as_of_end": projection_as_of_end,
+                "projection_target_start": ws_dt,
+                "projection_target_end": we_dt,
                 "paid_statuses": paid_statuses,
                 "st0": st0,
                 "st1": st1,
@@ -2879,6 +2924,8 @@ def _query_spu_roi(
                     "projection_sample_start": projection_sample_start,
                     "projection_sample_end": projection_sample_end,
                     "projection_as_of_end": projection_as_of_end,
+                    "projection_target_start": ws_dt,
+                    "projection_target_end": we_dt,
                     "paid_statuses": paid_statuses,
                     "st0": st0,
                     "st1": st1,
@@ -3109,6 +3156,8 @@ def _query_spu_roi(
                     "projection_sample_start": projection_sample_start,
                     "projection_sample_end": projection_sample_end,
                     "projection_as_of_end": projection_as_of_end,
+                    "projection_target_start": ws_dt,
+                    "projection_target_end": we_dt,
                     "paid_statuses": paid_statuses,
                     "st0": st0,
                     "st1": st1,
@@ -3141,6 +3190,10 @@ def _query_spu_roi(
             paid_statuses=paid_statuses,
             st0=st0,
             st1=st1,
+            window_start=ws_dt,
+            window_end=we_dt,
+            ad_start=ad_start,
+            ad_end=ad_end,
             projection_map=cast(dict[int, Mapping[str, Any]], projection_map),
             projection_counts_row=cast(
                 Mapping[str, Any] | None, projection_scope_counts_row

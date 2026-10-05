@@ -1,0 +1,51 @@
+{
+  "protocolVersion": 1,
+  "requestId": "TEST_cross-after-sales-request",
+  "scope": {
+    "sellerId": "TEST_cross-seller",
+    "shopId": "TEST_cross-seller"
+  },
+  "dump": {
+    "domain": "after_sales",
+    "endpoint": "https://seller.tiktokshopglobalselling.com/return_refund/202309/cancellations/search",
+    "method": "POST",
+    "request": {
+      "params": null,
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "code": 0,
+        "message": "success",
+        "data": {
+          "cancellations": [
+            {
+              "cancel_id": "TEST_cross-cancel",
+              "cancel_type": "BUYER_CANCEL",
+              "cancel_status": "CANCELLATION_REQUEST_COMPLETE",
+              "order_id": "TEST_cross-order",
+              "reason": "Changed mind",
+              "request_time": "2026-09-15T10:00:00Z",
+              "complete_time": "2026-09-15T12:00:00Z",
+              "cancel_line_items": [
+                {
+                  "id": "TEST_cross-cancel-line",
+                  "order_line_item_id": "TEST_cross-sku",
+                  "sku_id": "TEST_cross-sku",
+                  "product_id": "TEST_cross-product",
+                  "quantity": 1,
+                  "refund_amount": {
+                    "amount": "100000",
+                    "currency": "VND"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "createdAt": "2026-10-04T15:23:17.074Z"
+  }
+}

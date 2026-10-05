@@ -1299,7 +1299,7 @@
         : (roiAdStatus === "estimated_known_costs" ? "≈" : "") +
           fmtRatio(roiAdValue);
 
-    // 预测由后端基于店铺/已应用 SPU 范围及本地 as-of 计算，独立于报表日期窗口。
+    // 预测由后端按本地 as-of 独立生成样本；预测对象和最终值跟随经营窗口。
     // StaticFiles 会即时读取新 JS，而 HTML 模板要等 API 进程重启才更新；
     // 部署窗口内新 hook 可能暂时不存在，不能让整页渲染因此中断。
     setTextIfPresent(
@@ -1310,24 +1310,8 @@
     setTextIfPresent(
       "#projection-sample-window",
       projection.sample_start && projection.sample_end
-        ? `${projection.sample_start} ~ ${projection.sample_end}（${projection.lookback_days || state.projectionLookbackDays} 天）`
+        ? `${projection.sample_start} ~ ${projection.sample_end}`
         : "—",
-    );
-    setTextIfPresent(
-      "#projection-maturity-as-of",
-      projection.maturity_lag_days != null && projection.as_of
-        ? `${projection.maturity_lag_days} 天 / ${projection.as_of}`
-        : "—",
-    );
-    setTextIfPresent(
-      "#projection-basis-counts",
-      projection.basis_order_count != null
-        ? `${projection.basis_order_count} / ${projection.basis_full_loss_order_count || 0} / ${fmtPct(projection.completed_full_loss_rate)}`
-        : "—",
-    );
-    setTextIfPresent(
-      "#projection-basis-status",
-      projectionStatusLabel(projection.status || totals.projection_status),
     );
     setTextIfPresent(
       "#sum-projection-completed-basis-orders",
