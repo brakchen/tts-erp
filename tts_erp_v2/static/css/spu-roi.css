@@ -397,13 +397,15 @@ a:hover {
 /* 日期范围沿用浏览器原生 date picker，并用 Bootstrap input-group / btn-group
    组成一个紧凑的账期控件；不引入第三方日期库。 */
 .op-date-range-col {
- flex: 1 1 34rem;
- max-width: 42rem;
- min-width: min(100%, 24rem);
+ min-width: 0;
+ flex: 1 1 auto;
 }
 .op-date-range {
- border: 1px solid var(--rule);
- background: rgba(255, 255, 255, 0.14);
+ display: flex;
+ flex-wrap: wrap;
+ align-items: center;
+ gap: 8px 12px;
+ min-width: 0;
 }
 .op-date-range__heading {
  min-height: 31px;
@@ -435,11 +437,19 @@ a:hover {
  --bs-btn-hover-color: var(--ink);
  --bs-btn-hover-bg: var(--paper-deep);
  --bs-btn-hover-border-color: var(--accent);
- --bs-btn-active-color: var(--bs-white);
- --bs-btn-active-bg: var(--accent);
- --bs-btn-active-border-color: var(--accent);
+ --bs-btn-active-color: var(--ink);
+ --bs-btn-active-bg: transparent;
+ --bs-btn-active-border-color: var(--ink);
  border-radius: 0;
+ font-family: var(--sans);
+ font-size: 13px;
  white-space: nowrap;
+}
+.op-date-presets .btn.active {
+ color: var(--ink);
+ background: transparent;
+ border-color: var(--ink);
+ box-shadow: none;
 }
 .op-toolbar .form-check-input {
  border-color: var(--rule);
@@ -511,14 +521,78 @@ a:hover {
  text-overflow: ellipsis;
  white-space: nowrap;
 }
-/* SPU 筛选是一个完整的操作单元：标签、输入、动作与辅助文本共享边界，
-   不再把输入和按钮散落在同一工具栏行的不同列里。 */
+/* SPU、日期、更多各自成行，不再套第二层卡片。 */
+.op-tool-row {
+ display: flex;
+ flex-wrap: wrap;
+ align-items: center;
+ gap: 8px 12px;
+}
+.op-tool-row + .op-tool-row,
+.op-tool-row + .op-more-panel {
+ margin-top: 10px;
+}
+.op-tool-kicker {
+ color: var(--muted);
+ font-family: var(--sans);
+ font-size: 13px;
+ white-space: nowrap;
+}
+.op-tool-spu {
+ flex: 1 1 16rem;
+ min-width: min(100%, 16rem);
+}
 .op-spu-filter {
- border-color: var(--rule) !important;
- background: rgba(255, 255, 255, 0.12);
+ border: 0;
+ background: transparent;
 }
 .op-spu-filter__header {
- min-height: 18px;
+ min-height: 0;
+}
+.op-more-toggle {
+ border: 0;
+ background: transparent;
+ color: var(--muted);
+ font-family: var(--sans);
+ font-size: 13px;
+ padding: 0;
+}
+.op-more-toggle:hover,
+.op-more-toggle[aria-expanded="true"] {
+ color: var(--ink);
+}
+.op-more-panel {
+ display: flex;
+ flex-wrap: wrap;
+ align-items: center;
+ gap: 8px 12px;
+ margin-top: 10px;
+}
+.op-more-panel[hidden] {
+ display: none !important;
+}
+.op-fee-override {
+ width: 8.5rem;
+ font-family: var(--sans);
+ font-size: 13px;
+}
+.op-more-check {
+ display: inline-flex;
+ align-items: center;
+ gap: 6px;
+ color: var(--ink-soft);
+ font-family: var(--sans);
+ font-size: 13px;
+}
+.op-table-meta {
+ display: flex;
+ justify-content: flex-end;
+ padding-bottom: 6px;
+}
+.op-date-input-groups {
+ display: flex;
+ flex-wrap: wrap;
+ gap: 8px;
 }
 .op-spu-selection-count {
  color: var(--muted);

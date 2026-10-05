@@ -2641,20 +2641,17 @@
     var endCol = end.parentElement;
     if (startCol.parentElement !== endCol.parentElement) return;
 
-    var wrapper = el("div", { class: "col-12 col-lg-auto op-date-range-col" });
+    var wrapper = el("div", { class: "op-date-range-col" });
     var control = el("div", {
-      class: "op-date-range p-2",
+      class: "op-date-range",
       "aria-labelledby": "date-range-label",
       "aria-describedby": "date-range-help",
     });
-    var heading = el("div", {
-      class: "op-date-range__heading d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2",
-    });
-    heading.appendChild(
+    control.appendChild(
       el("span", {
         id: "date-range-label",
-        class: "form-label op-fld-label mb-0",
-        text: "日期范围",
+        class: "op-tool-kicker",
+        text: "日期",
       }),
     );
     var presets = el("div", {
@@ -2679,14 +2676,13 @@
       button.addEventListener("click", () => applyDatePreset(item[0]));
       presets.appendChild(button);
     });
-    heading.appendChild(presets);
+    control.appendChild(presets);
 
-    var inputRow = el("div", { class: "row g-2 op-date-input-groups" });
+    var inputRow = el("div", { class: "op-date-input-groups" });
     [
       ["起始", start],
       ["截止", end],
     ].forEach((item) => {
-      var column = el("div", { class: "col-12 col-sm-6" });
       var inputGroup = el("div", {
         class: "input-group input-group-sm op-date-input-group",
         role: "group",
@@ -2696,25 +2692,56 @@
         el("span", { class: "input-group-text", text: item[0] }),
       );
       inputGroup.appendChild(item[1]);
-      column.appendChild(inputGroup);
-      inputRow.appendChild(column);
+      inputRow.appendChild(inputGroup);
     });
     start.setAttribute("aria-describedby", "date-range-help");
     end.setAttribute("aria-describedby", "date-range-help");
-    control.appendChild(heading);
+    var help = el("span", {
+      id: "date-range-help",
+      class: "op-date-range__help visually-hidden",
+      text: dateRangeHelpText(),
+    });
+    var hint = el("span", {
+      class: "op-hint",
+      role: "note",
+      tabindex: "0",
+      "data-tip": dateRangeHelpText(),
+      "aria-label": "日期范围说明",
+      text: "?",
+    });
     control.appendChild(inputRow);
-    control.appendChild(
-      el("div", {
-        id: "date-range-help",
-        class: "form-text op-date-range__help mt-2",
-        text: dateRangeHelpText(),
-      }),
-    );
+    control.appendChild(hint);
+    control.appendChild(help);
     wrapper.appendChild(control);
     startCol.parentElement.insertBefore(wrapper, startCol);
     startCol.remove();
     endCol.remove();
     updateDatePresetUi();
+  }
+
+  function toolbarMoreInUse() {
+    var fee = $("#filter-fee");
+    var include = $("#filter-include-all");
+    return Boolean(
+      (fee && fee.value.trim()) ||
+        (include && include.checked) ||
+        state.includeAll ||
+        (state.feeRate !== null && state.feeRate !== ""),
+    );
+  }
+
+  function setToolbarMoreOpen(open) {
+    var button = $("#btn-toolbar-more");
+    var panel = $("#toolbar-more");
+    if (!button || !panel) return;
+    panel.hidden = !open;
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+    button.textContent =
+      toolbarMoreInUse() && !open ? "更多 · 已设置" : "更多";
+  }
+
+  function syncToolbarMore() {
+    if (toolbarMoreInUse()) setToolbarMoreOpen(true);
   }
 
   // ---------- 交互绑定 ----------
@@ -2834,10 +2861,21 @@
       _dateFieldChanged("end", e),
     );
 
-    $("#btn-refresh").addEventListener("click", () => {
-      load();
-      loadFreshness();
-    });
+    var refresh = $("#btn-refresh");
+    if (refresh) {
+      refresh.addEventListener("click", () => {
+        load();
+        loadFreshness();
+      });
+    }
+    var moreButton = $("#btn-toolbar-more");
+    if (moreButton) {
+      moreButton.addEventListener("click", () => {
+        var panel = $("#toolbar-more");
+        setToolbarMoreOpen(panel ? panel.hidden : false);
+      });
+    }
+    syncToolbarMore();
     if (state.freshnessTimer) clearInterval(state.freshnessTimer);
     state.freshnessTimer = setInterval(loadFreshness, 60000);
     $("#pager-pages").addEventListener("click", (event) => {
