@@ -168,53 +168,44 @@
 
     <!-- 工具栏:原生 select multiple 由 Tom Select Bootstrap 5 主题增强；不自研多选组件。 -->
     <section class="op-toolbar px-3 px-lg-4 py-3" id="toolbar">
-      <div class="op-spu-filter border p-2 p-lg-3 mb-3" id="selection-slot">
-        <div class="op-spu-filter__header d-flex flex-wrap align-items-center justify-content-between gap-1 mb-2">
-          <label class="form-label op-fld-label mb-0" for="filter-spu-ids">SPU 筛选</label>
-          <span class="op-spu-selection-count" id="spu-selection-count">已选择 0 个</span>
+      <div class="op-tool-row op-spu-filter" id="selection-slot">
+        <div class="op-spu-filter__header">
+          <label class="op-tool-kicker mb-0" for="filter-spu-ids">SPU</label>
         </div>
-        <div class="row g-2 align-items-center">
-          <div class="col-12 col-xl">
-            <select id="filter-spu-ids" class="form-select" multiple aria-label="批量选择 SPU" disabled></select>
-          </div>
-          <div class="col-6 col-sm-auto d-grid">
-            <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-spu-clear" disabled>清空</button>
-          </div>
-          <div class="col-6 col-sm-auto d-grid">
-            <button type="button" class="btn btn-sm btn-primary" id="btn-spu-apply" disabled>查询</button>
-          </div>
+        <div class="op-tool-spu">
+          <select id="filter-spu-ids" class="form-select" multiple aria-label="批量选择 SPU" title="支持搜索或批量粘贴中英文逗号分隔的 SPU；最多 100 个。" disabled></select>
         </div>
-        <div class="form-text op-spu-help mt-2">支持搜索或批量粘贴中英文逗号分隔的 SPU；最多 100 个。</div>
+        <span class="op-spu-selection-count" id="spu-selection-count">已选择 0 个</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-spu-clear" disabled>清空</button>
+        <button type="button" class="btn btn-sm btn-primary" id="btn-spu-apply" disabled>查询</button>
         <div class="invalid-feedback" id="spu-filter-feedback"></div>
       </div>
-      <div class="row g-2 g-lg-3 align-items-end">
-        <div class="col-6 col-md-3 col-xl-2" data-tip="日期范围（销售/退款/广告同口径裁剪；空 = 全历史）">
-          <label class="form-label op-fld-label mb-1" for="filter-w-start">起始日</label>
+      <div class="op-tool-row op-tool-row--window">
+        <div data-tip="日期范围（销售/退款/广告同口径裁剪；空 = 全历史）">
+          <label class="visually-hidden" for="filter-w-start">起始日</label>
           <input id="filter-w-start" type="date" class="form-control form-control-sm" aria-label="销售/退款起始日期（空 = 不限）">
         </div>
-        <div class="col-6 col-md-3 col-xl-2" data-tip="销售/退款日期范围（空 = 全历史；含当日）">
-          <label class="form-label op-fld-label mb-1" for="filter-w-end">截止日</label>
+        <div data-tip="销售/退款日期范围（空 = 全历史；含当日）">
+          <label class="visually-hidden" for="filter-w-end">截止日</label>
           <input id="filter-w-end" type="date" class="form-control form-control-sm" aria-label="销售/退款截止日期（空 = 不限）">
         </div>
-        <div class="col-6 col-md-3 col-xl-1" data-tip="平台佣金费率 r̂：默认用店铺实测（每24h按该店近180天已结算订单 Σ|FEE|/Σ行GMV 重算；行GMV=客户实付金额，非折扣前挂牌价。窗口内只要有一单已结算即产出），无可用实测的店铺回退基线 30.8%；在此填数可临时覆写（仅影响本页请求，不写回店铺）">
-          <label class="form-label op-fld-label mb-1" for="filter-fee">临时覆写费率 %</label>
-          <input id="filter-fee" type="text" class="form-control form-control-sm" placeholder="30.8" inputmode="decimal" autocomplete="off" aria-label="临时覆写平台佣金费率（留空则用店铺实测/全局基线）">
-        </div>
-        <div class="col-12 col-md-6 col-xl-auto">
-          <div class="form-check d-flex align-items-center gap-2 mb-0 py-2" data-tip="默认只列出当前窗口内有广告或销售/退款活动的 SPU；勾选后，处于 ACTIVE 状态但没有任意活动（无投放 / 未出单）的 SPU 也会一并列出——这类行的 ROI / 金额显示 — 或「无投放」">
-            <input id="filter-include-all" type="checkbox" class="form-check-input mt-0" aria-label="含无活动 SPU">
-            <label class="form-check-label op-fld-label mb-0" for="filter-include-all">含无活动</label>
-            <span class="op-hint" role="note" tabindex="0" aria-label="含无活动 SPU 的说明">?</span>
-          </div>
-        </div>
-        <div class="col-12 col-sm-auto d-grid">
-          <button type="button" class="btn btn-sm op-btn" id="btn-refresh">刷新</button>
-        </div>
-        <div class="col-12 col-xl text-xl-end ms-xl-auto">
-          <span class="op-sortable-note" id="sort-note">默认排序：实际 ROI ↑（最亏在前）</span>
-        </div>
+        <button type="button" class="op-more-toggle" id="btn-toolbar-more" aria-expanded="false" aria-controls="toolbar-more">更多</button>
+      </div>
+      <div class="op-more-panel" id="toolbar-more" hidden>
+        <label class="op-tool-kicker mb-0" for="filter-fee">费率覆写</label>
+        <input id="filter-fee" type="text" class="form-control form-control-sm op-fee-override" placeholder="留空=实测" inputmode="decimal" autocomplete="off" aria-label="临时覆写平台佣金费率（留空则用店铺实测/全局基线）">
+        <span class="op-hint" role="note" tabindex="0" data-tip="只影响本页本次计算，不写回店铺。留空则用上方费率条里的实测或基线。" aria-label="费率覆写说明">?</span>
+        <label class="op-more-check mb-0" for="filter-include-all">
+          <input id="filter-include-all" type="checkbox" class="form-check-input mt-0" aria-label="含无活动 SPU">
+          含无活动
+        </label>
+        <span class="op-hint" role="note" tabindex="0" data-tip="默认只列出当前窗口内有广告或销售/退款的 SPU。勾选后，没有投放也没出单的在售 SPU 也会列出。" aria-label="含无活动 SPU 的说明">?</span>
       </div>
     </section>
+
+    <div class="op-table-meta px-3 px-lg-4">
+      <span class="op-sortable-note" id="sort-note">默认排序：实际 ROI ↑（最亏在前）</span>
+    </div>
 
     <!-- 主表 9 指标与大盘 v10 同口径：广告消耗 / 广告系统实际ROI / 广告系统保本ROI / 有效销售 / 总单量 / 有效单量 / 取消率 / 全损率 / 净利润 -->
     <div class="op-table-wrap px-3 px-lg-4" tabindex="0" aria-label="SPU ROI 明细，可横向滚动">

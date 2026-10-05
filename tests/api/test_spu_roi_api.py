@@ -3585,11 +3585,13 @@ def test_spu_roi_page_toolbar_shop_and_date_filters(api_client, readonly_key):
     assert " multiple " in body
     assert 'id="btn-spu-apply"' in body
     assert 'id="btn-spu-clear"' in body
-    # SPU 输入、已选计数与操作按钮是同一个视觉/操作容器，不能散落在工具栏。
-    assert 'class="op-spu-filter border p-2 p-lg-3 mb-3"' in body
-    assert 'class="op-spu-filter__header' in body
-    assert 'class="row g-2 align-items-center"' in body
+    # SPU 输入、已选计数与操作按钮仍在同一个容器里；说明收进 title。
+    assert 'id="selection-slot"' in body
+    assert 'class="op-tool-row op-spu-filter"' in body
     assert "支持搜索或批量粘贴" in body
+    assert 'id="toolbar-more"' in body
+    assert 'id="btn-toolbar-more"' in body
+    assert 'id="btn-refresh"' not in body
     assert "tom-select.bootstrap5.min.css" in body
     assert "tom-select.complete.min.js" in body
     assert 'id="filter-q"' not in body
@@ -3606,7 +3608,7 @@ def test_spu_roi_page_toolbar_shop_and_date_filters(api_client, readonly_key):
     # 含无活动 hover 问号解释(? 悬停出现,data-tip 委托)
     assert "含无活动" in body
     assert 'class="op-hint"' in body
-    assert "没有任意活动" in body
+    assert "没有投放也没出单" in body
     # 概览 10 格: sum-refund / sum-loss 仍存在;M13b 已迁钻取面板
     assert "sum-refund" in body
     assert "sum-loss" in body
@@ -3774,8 +3776,8 @@ def test_spu_roi_page_uses_bootstrap_responsive_layout(api_client, readonly_key)
     for fragment in (
         "container-fluid px-3 px-lg-4 py-3 op-main",
         "row-cols-1 row-cols-md-2 row-cols-xl-3 row-cols-xxl-4",
-        "row g-2 g-lg-3 align-items-end",
-        "col-12 col-xl",
+        "op-tool-row",
+        "col-12 col-lg-auto",
         "op-tabulator",
         "nav nav-tabs flex-nowrap overflow-x-auto op-drill-tabs",
     ):
