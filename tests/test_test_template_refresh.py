@@ -12,6 +12,7 @@ ISOLATED = REPO_ROOT / "scripts/test_isolated.sh"
 
 SOURCE_URL = "postgresql://tester@db/source_db"
 TARGET_URL = "postgresql://tester@db/tts_erp_test_template"
+_UNSET = object()
 
 
 def _script(path: Path, body: str) -> None:
@@ -109,7 +110,13 @@ def _fake_tools(tmp_path: Path, *, host_major: int = 18, server_major: int = 18)
     return tools, trace
 
 
-def _run_import(tmp_path: Path, *, pg_docker: str | None, host_major: int = 18, server_major: int = 18) -> subprocess.CompletedProcess[str]:
+def _run_import(
+    tmp_path: Path,
+    *,
+    pg_docker: str | None | object = _UNSET,
+    host_major: int = 18,
+    server_major: int = 18,
+) -> subprocess.CompletedProcess[str]:
     tools, trace = _fake_tools(tmp_path, host_major=host_major, server_major=server_major)
     env = os.environ.copy()
     env.update(
@@ -120,7 +127,9 @@ def _run_import(tmp_path: Path, *, pg_docker: str | None, host_major: int = 18, 
             "PATH": f"{tools}:{env['PATH']}",
         }
     )
-    if pg_docker is None:
+    if pg_docker is _UNSET:
+        env.pop("PG_DOCKER", None)
+    elif pg_docker is None:
         env["PG_DOCKER"] = ""
     else:
         env["PG_DOCKER"] = pg_docker
@@ -136,6 +145,17 @@ def _run_import(tmp_path: Path, *, pg_docker: str | None, host_major: int = 18, 
 
 def _trace(tmp_path: Path) -> str:
     return (tmp_path / "trace.log").read_text()
+
+
+def test_unset_pg_docker_defaults_to_configured_container(tmp_path: Path) -> None:
+    result = _run_import(tmp_path, host_major=16, server_major=18)
+
+    assert result.returncode == 0, result.stderr
+    trace = _trace(tmp_path)
+    assert "docker exec postgres pg_dump" in trace
+    assert "docker exec -i postgres psql" in trace
+    assert "host pg_dump" not in trace
+    assert "host psql" not in trace
 
 
 def test_host_client_server_mismatch_fails_before_target_mutation(tmp_path: Path) -> None:
