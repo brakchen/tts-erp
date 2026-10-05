@@ -180,7 +180,7 @@ Bootstrap `container-fluid`、`row-cols-*` 和 `table-responsive` 负责断点�
 - 日期/费率/排序/分页快速连续变更：abort上一 overview；只有最后 version 可写 DOM。
 - 粘贴 SPU：每批有独立 controller；“清空”递增 selection version 并 abort 全批。
 - 钻取：tab controller 绑定 cache key；主表筛选变化清 cache；失败不写成功 cache。
-- 接收 response 时校验 `shopPk`、scope fingerprint、window 和 projection days；任何不一致按 stale 丢弃。
+- 每次 overview 请求捕获单调递增的 `loadVersion` 和 `AbortController`；发起新请求时 abort 旧请求。成功和失败回调都比较其捕获的 version 与当前 `state.loadVersion`，不一致的结果直接丢弃。带参数感知延迟的 Chromium 测试已验证：旧的 30 天响应不能覆盖最终的 90 天 DOM。
 - 401 跳转登录；422 显示可修正字段错误；429 读取 Retry-After；503 FX 缺失显示“汇率数据暂不可用，请稍后重试”；5xx 显示 request id（如响应提供）。
 
 ## 5. 后端入口和领域流程
