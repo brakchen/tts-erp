@@ -18,6 +18,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.analytics.spu_profitability import _implementation
+from tts_erp_v2.analytics.spu_profitability._projection import ProjectionPolicy
 from tts_erp_v2.analytics.spu_profitability._snapshot import consistent_read_snapshot
 from tts_erp_v2.analytics.spu_profitability._types import (
     REFUND_RATE_ALERT_THRESHOLD,
@@ -35,6 +36,7 @@ from tts_erp_v2.analytics.spu_profitability._types import (
     ProfitabilityOverview,
     ProfitabilityTotals,
     ProfitScope,
+    ProjectionBasis,
     ReportingTimezoneUnavailable,
     RowView,
     SnapshotIsolationUnavailable,
@@ -58,6 +60,8 @@ __all__ = [
     "FxRateUnavailable",
     "ProfitScope",
     "ProfitabilityBasis",
+    "ProjectionBasis",
+    "ProjectionPolicy",
     "ProfitabilityError",
     "ProfitabilityEvidence",
     "ProfitabilityOverview",
@@ -85,6 +89,7 @@ def _read_overview_in_snapshot(
     only_spu_pk: int | None = None,
     fee_rate: Decimal | None = None,
     legacy_include_all: bool | None = None,
+    projection_lookback_days: int = 30,
 ) -> ProfitabilityOverview:
     return _implementation._query_spu_roi(
         session,
@@ -110,6 +115,7 @@ def _read_overview_in_snapshot(
         only_spu_pk=only_spu_pk,
         w_start=scope.start_date,
         w_end=scope.end_date,
+        projection_lookback_days=projection_lookback_days,
     )
 
 
@@ -118,6 +124,7 @@ def read_overview(
     *,
     scope: ProfitScope,
     view: RowView,
+    projection_lookback_days: int = 30,
 ) -> ProfitabilityOverview:
     """Read one typed v10 profitability overview from a consistent snapshot."""
 
@@ -127,6 +134,7 @@ def read_overview(
             scope=scope,
             view=view,
             calculated_at=calculated_at,
+            projection_lookback_days=projection_lookback_days,
         )
 
 

@@ -26,6 +26,7 @@ from tts_erp_v2.analytics.spu_profitability import (
     FocusedSelection,
     FxRateUnavailable,
     ProfitScope,
+    ProjectionPolicy,
     ReportingTimezoneUnavailable,
     RowView,
     SortDirection,
@@ -152,7 +153,8 @@ _FEE_FALLBACK_MESSAGE = (
     "由后端按全局基线估算"
 )
 _PROJECTION_NOTE = (
-    "只预测同一订单时间窗口内尚未送达的未结算订单。已完结样本包括已结算、已送达"
+    "按店铺及已应用 SPU 范围，截至店铺本地 as-of 日期预测尚未送达的未结算订单；"
+    "预测样本窗口独立于报表日期范围。已完结样本包括已结算、已送达"
     "以及结果已确定的国内取消订单；全损分子包括终局物流全损，以及到达海外或送达后"
     "最终全额退款的订单。跨境业务没有海外仓，后者无法重新入库销售；国内取消进入"
     "分母但不进入全损分子。该已完结订单全损率同时用于预测风险订单数、件数和收入折损。"
@@ -338,6 +340,67 @@ def _meta_payload(
             "native": {"ad": "USD", "sales_refund": "VND", "cost": "CNY"},
         },
         "projection": {
+            "status": (
+                basis.projection.status.value
+                if basis.projection is not None
+                else None
+            ),
+            "warnings": (
+                list(basis.projection.warnings)
+                if basis.projection is not None
+                else []
+            ),
+            "as_of": (
+                basis.projection.as_of.isoformat()
+                if basis.projection is not None
+                else None
+            ),
+            "lookback_days": (
+                basis.projection.lookback_days
+                if basis.projection is not None
+                else 30
+            ),
+            "maturity_lag_days": (
+                basis.projection.maturity_lag_days
+                if basis.projection is not None
+                else 7
+            ),
+            "sample_start": (
+                basis.projection.sample_start.isoformat()
+                if basis.projection is not None
+                else None
+            ),
+            "sample_end": (
+                basis.projection.sample_end.isoformat()
+                if basis.projection is not None
+                else None
+            ),
+            "basis_order_count": (
+                basis.projection.basis_order_count
+                if basis.projection is not None
+                else 0
+            ),
+            "basis_full_loss_order_count": (
+                basis.projection.basis_full_loss_order_count
+                if basis.projection is not None
+                else 0
+            ),
+            "completed_full_loss_rate": (
+                _fmt_rate(basis.projection.completed_full_loss_rate)
+                if basis.projection is not None
+                and basis.projection.completed_full_loss_rate is not None
+                else None
+            ),
+            "scope": (
+                basis.projection.scope_description
+                if basis.projection is not None
+                else "shop_pk scope"
+            ),
+            "calculated_at": (
+                _iso_utc(basis.projection.calculated_at)
+                if basis.projection is not None
+                else _iso_utc(basis.calculated_at)
+            ),
             "note": _PROJECTION_NOTE,
             "date_attribution": "COALESCE(order_time, paid_at)",
             "refund_sample": (
@@ -351,11 +414,11 @@ def _meta_payload(
                 "兼容诊断字段：旧物流终态金额率，不参与当前预测"
             ),
             "full_loss_rate_source": "已完结全损订单数 ÷ 全部已完结订单数",
-            "target": "同一日期范围内尚未送达的未结算风险订单，已确认结果只扣一次",
+            "target": "店铺及已应用 SPU 范围内，截至本地 as-of 尚未送达的未结算风险订单，已确认结果只扣一次",
             "refund_target": "待完结风险订单费后收入 × 已完结订单全损率",
             "full_loss_target": (
                 "尚未送达的未结算订单；订单状态 DELIVERED/COMPLETED，或物流状态、"
-                "delivered_at、50101 事件任一确认已送达时排除"
+                "delivered_at、50101 事件任一确认已送达时排除；80101 退回卖家证据视为终局全损"
             ),
             "status_labels": {
                 "available": "可预测",
@@ -461,6 +524,7 @@ def list_spu_roi(
     fee_rate: str | None = Query(default=None, max_length=20),
     w_start: date | None = Query(default=None),  # noqa: B008
     w_end: date | None = Query(default=None),  # noqa: B008
+    projection_lookback_days: int = Query(default=30),
 ) -> Any:
     try:
         sort_field = SortField(sort)
@@ -469,6 +533,10 @@ def list_spu_roi(
             status_code=422,
             detail=f"sort must be one of {tuple(field.value for field in SortField)}",
         ) from exc
+    try:
+        ProjectionPolicy(lookback_days=projection_lookback_days)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     fee_value = _parse_fee_rate(fee_rate)
     try:
         parsed_spu_ids = parse_spu_ids(spu_ids)
@@ -506,6 +574,7 @@ def list_spu_roi(
             scope=profit_scope,
             view=view,
             fee_rate=fee_value,
+            projection_lookback_days=projection_lookback_days,
         )
     except FxRateUnavailable:
         return _fx_error(request)

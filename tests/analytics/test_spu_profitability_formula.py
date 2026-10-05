@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import UTC, date, datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -12,6 +14,10 @@ from tts_erp_v2.analytics.spu_profitability._formula_v10 import (
     calculate,
     calculate_order_metrics,
     calculate_projection,
+)
+from tts_erp_v2.analytics.spu_profitability._projection import (
+    ProjectionPolicy,
+    projection_warning_codes,
 )
 from tts_erp_v2.analytics.spu_profitability._types import ProjectionStatus
 
@@ -58,6 +64,43 @@ def _inputs(**overrides) -> FormulaInput:
     }
     values.update(overrides)
     return FormulaInput(**values)
+
+
+def test_projection_policy_uses_shop_local_mature_window() -> None:
+    calculated_at = datetime(2026, 10, 8, 1, 0, tzinfo=UTC)
+
+    thirty = ProjectionPolicy(lookback_days=30).window(
+        calculated_at, ZoneInfo("Asia/Ho_Chi_Minh")
+    )
+    ninety = ProjectionPolicy(lookback_days=90).window(
+        calculated_at, ZoneInfo("Asia/Ho_Chi_Minh")
+    )
+
+    assert thirty.as_of == date(2026, 10, 7)
+    assert thirty.sample_start == date(2026, 9, 1)
+    assert thirty.sample_end == date(2026, 9, 30)
+    assert ninety.sample_start == date(2026, 7, 3)
+    assert ninety.sample_end == date(2026, 9, 30)
+
+
+@pytest.mark.parametrize(
+    ("status", "completed_count", "expected"),
+    [
+        (ProjectionStatus.INSUFFICIENT_SAMPLE, 0, ("projection_insufficient_sample",)),
+        (ProjectionStatus.AVAILABLE, 1, ("projection_low_sample",)),
+        (ProjectionStatus.AVAILABLE, 9, ("projection_low_sample",)),
+        (ProjectionStatus.AVAILABLE, 10, ()),
+    ],
+)
+def test_projection_warning_codes_cover_sample_boundaries(
+    status: ProjectionStatus, completed_count: int, expected: tuple[str, ...]
+) -> None:
+    assert projection_warning_codes(status, completed_count) == expected
+
+
+def test_projection_policy_rejects_unsupported_lookback() -> None:
+    with pytest.raises(ValueError, match="30 or 90"):
+        ProjectionPolicy(lookback_days=60)
 
 
 def test_v10_order_metrics_use_one_shared_order_dimension_formula() -> None:
@@ -246,6 +289,19 @@ def _projection_inputs(**overrides) -> ProjectionInput:
     }
     values.update(overrides)
     return ProjectionInput(**values)
+
+
+def test_projection_uses_no_risk_status_for_delivered_unsettled_orders() -> None:
+    result = calculate_projection(
+        _projection_inputs(
+            unsettled_order_count=3,
+            full_loss_exposure_unsettled_order_count=0,
+            projection_completed_basis_order_count=0,
+            projection_completed_full_loss_order_count=0,
+        )
+    )
+
+    assert result.status is ProjectionStatus.NO_UNSETTLED_ORDERS
 
 
 def test_projection_uses_completed_order_full_loss_rate_and_current_profit_delta() -> None:
@@ -454,6 +510,7 @@ def test_projection_without_unsettled_orders_matches_current_actual_result() -> 
     result = calculate_projection(
         _projection_inputs(
             unsettled_order_count=0,
+            full_loss_exposure_unsettled_order_count=0,
             confirmed_unsettled_full_loss_order_count=0,
             confirmed_unsettled_full_loss_qty=Decimal(0),
             unresolved_unsettled_order_count=0,
