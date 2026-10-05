@@ -706,7 +706,7 @@ warning：
 
 1. `items[]` / 领域行类型仍携带历史 SPU 行级 projection 字段；产品展示和新客户端只读取 `totals` 与 `meta.projection`，这些字段仅为 v9/v10 兼容 consumer 保留；
 2. 当前值仍保留历史 SPU 退款率兼容路径和 v9 `full_loss_qty/full_loss_rate` 诊断字段；严格全损预测分子不复用这些兼容字段；
-3. 未结算收入的旧 wire 字段仍按兼容 serializer 输出；当前值只扣确认退款，未来风险损失只进入 projection 结果；
+3. 未结算收入的旧 wire 字段仍按兼容 serializer 输出；当前净收入仍保留历史 SPU 退款率兼容路径，尚未按目标口径完全收敛；目标口径是只扣确认退款，未来风险损失只进入 projection 结果；
 4. 部分接口历史文档仍可能引用 `docs/archive/` 的 M 码和旧 v9 口径，业务计算不得以 archive 为准。
 
 当前已经生效的预测契约：
