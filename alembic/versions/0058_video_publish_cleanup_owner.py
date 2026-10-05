@@ -142,6 +142,49 @@ def upgrade() -> None:
           AND stage <> 'done'
     """)
     )
+    # Legacy publish continuations were persisted before cleanup ownership was
+    # explicit. Requeue only device/spool residue; object residue is
+    # conservative needs-review because publication safety is unproven.
+    # pi-lens-ignore: python-sql-injection
+    op.execute(
+        text("""
+        UPDATE publishing.video_publish_tasks
+        SET status = CASE
+                WHEN object_cleanup_status IN ('pending','failed') THEN 'needs_review'
+                ELSE status END,
+            stage = CASE
+                WHEN object_cleanup_status IN ('pending','failed') THEN 'done'
+                WHEN device_cleanup_status IN ('pending','failed') THEN 'waiting_device'
+                ELSE stage END,
+            cleanup_intent = CASE
+                WHEN object_cleanup_status IN ('pending','failed') THEN 'preserve_state'
+                ELSE 'requeue_publish' END,
+            lease_owner = NULL, lease_expires_at = NULL, heartbeat_at = NULL,
+            cleanup_lease_owner = NULL, cleanup_lease_expires_at = NULL,
+            cleanup_heartbeat_at = NULL
+        WHERE status = 'pending'
+          AND stage IN ('queued','waiting_device')
+          AND (device_cleanup_status IN ('pending','failed')
+            OR spool_cleanup_status IN ('pending','failed')
+            OR object_cleanup_status IN ('pending','failed'))
+    """)
+    )
+    # Legacy rows without cleanup work must remain claimable with no cleanup
+    # ownership; any stale lease is not safe to carry across the migration.
+    # pi-lens-ignore: python-sql-injection
+    op.execute(
+        text("""
+        UPDATE publishing.video_publish_tasks
+        SET cleanup_intent = 'none', lease_owner = NULL,
+            lease_expires_at = NULL, heartbeat_at = NULL,
+            cleanup_lease_owner = NULL, cleanup_lease_expires_at = NULL,
+            cleanup_heartbeat_at = NULL
+        WHERE status = 'pending' AND stage IN ('queued','waiting_device')
+          AND device_cleanup_status NOT IN ('pending','failed')
+          AND spool_cleanup_status NOT IN ('pending','failed')
+          AND object_cleanup_status NOT IN ('pending','failed')
+    """)
+    )
     # pi-lens-ignore: python-sql-injection
     op.execute(
         text("""

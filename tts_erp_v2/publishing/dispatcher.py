@@ -996,7 +996,7 @@ async def _cleanup_success(task_id: UUID, deps: PublishDependencies) -> None:
         task.cleanup_heartbeat_at = now
         task.row_version += 1
         session.commit()
-    await _execute_cleanup(task_id, deps)
+    await _execute_cleanup(task_id, deps, scope="device")
 
 
 async def _start_verify(

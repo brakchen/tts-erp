@@ -250,6 +250,53 @@ class _CleanupStore:
 
 
 @pytest.mark.asyncio
+async def test_success_cleanup_releases_device_gate_before_background_cleanup(
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "tts_erp_v2.publishing.dispatcher.require_destructive_script_guard",
+        lambda **_kwargs: None,
+    )
+    task_a = _task(
+        status=TaskStatus.SUCCEEDED.value,
+        stage=TaskStage.DONE.value,
+        device_cleanup_status="pending",
+        spool_cleanup_status="pending",
+        object_cleanup_status="pending",
+    )
+    task_a.cleanup_intent = "finalize_success"
+    task_b = _task()
+    db_session.add_all([task_a, task_b])
+    db_session.flush()
+    db_session.commit()
+    adb = _CleanupAdb()
+    store = _CleanupStore(fail=True)
+    deps = cast(
+        PublishDependencies,
+        SimpleNamespace(
+            session_factory=_factory(db_session),
+            instance_id="success-worker",
+            lease_seconds=30,
+            max_attempts=3,
+            adb=adb,
+            store=store,
+            spool_dir=tmp_path,
+        ),
+    )
+
+    await _cleanup_success(task_a.public_id, deps)
+    db_session.expire_all()
+    assert adb.calls == 1
+    assert store.calls == 0
+    assert task_a.device_cleanup_status == "succeeded"
+    assert task_a.spool_cleanup_status == "pending"
+    assert task_a.object_cleanup_status == "pending"
+    assert claim_one(db_session, "next-publish") is not None
+    db_session.rollback()
+
+
 async def test_worker_automatically_retries_due_cleanup_with_backoff(
     db_session: Session,
     tmp_path: Path,
@@ -1214,6 +1261,8 @@ async def test_verify_published_is_terminal_and_not_reclaimable(
     assert task.status == TaskStatus.SUCCEEDED.value
     assert task.stage == TaskStage.DONE.value
     assert task.lease_owner is None
+    assert task.cleanup_intent == "finalize_success"
+    assert await dispatch_one(deps) == "processed"
     assert await dispatch_one(deps) == "no_task"
 
 
@@ -1282,6 +1331,7 @@ async def test_queued_worker_reaches_staging_and_terminal_success(
     db_session.expire_all()
     assert task.status == TaskStatus.SUCCEEDED.value
     assert task.stage == TaskStage.DONE.value
+    assert await dispatch_one(deps) == "processed"
     assert await dispatch_one(deps) == "no_task"
 
 
@@ -1581,11 +1631,12 @@ async def test_live_success_is_terminal_and_not_reclaimable(
     db_session.expire_all()
     assert task.status == TaskStatus.SUCCEEDED.value
     assert task.stage == TaskStage.DONE.value
-    assert task.cleanup_intent == "none"
+    assert task.cleanup_intent == "finalize_success"
     assert task.attempts[0].started_at is not None
     assert task.attempts[0].submitted_at is not None
     assert task.attempts[0].last_polled_at is not None
     assert task.lease_owner is None
+    assert await dispatch_one(deps) == "processed"
     assert await dispatch_one(deps) == "no_task"
 
 
