@@ -1,0 +1,68 @@
+{
+  "protocolVersion": 1,
+  "requestId": "TEST_cross-order-request",
+  "scope": {
+    "sellerId": "TEST_cross-seller",
+    "shopId": "TEST_cross-seller"
+  },
+  "dump": {
+    "domain": "orders",
+    "endpoint": "https://seller.tiktokshopglobalselling.com/api/fulfillment/order/list",
+    "method": "POST",
+    "request": {
+      "params": null,
+      "body": {
+        "search_condition": {
+          "condition_list": {}
+        },
+        "offset": 0,
+        "count": 20,
+        "sort_info": "6",
+        "search_cursor": "",
+        "pagination_type": 0
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "code": 0,
+        "message": "success",
+        "data": {
+          "main_orders": [
+            {
+              "main_order_id": "TEST_cross-order",
+              "order_status_module": {
+                "order_status": "DELIVERED"
+              },
+              "price_module": {
+                "payment": {
+                  "amount": "200000",
+                  "currency": "VND"
+                },
+                "total_amount": {
+                  "amount": "200000",
+                  "currency": "VND"
+                }
+              },
+              "sku_module": [
+                {
+                  "sku_id": "TEST_cross-sku",
+                  "product_id": "TEST_cross-product",
+                  "product_name": "TEST product",
+                  "sku_name": "TEST variant",
+                  "quantity": 2,
+                  "sale_price": {
+                    "amount": "100000",
+                    "currency": "VND"
+                  },
+                  "sku_order_status": "DELIVERED"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "createdAt": "2026-10-04T10:35:47.637Z"
+  }
+}
