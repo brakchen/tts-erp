@@ -200,6 +200,24 @@ def upgrade() -> None:
           AND object_cleanup_status IN ('pending','failed')
     """)
     )
+    # Object cancellation can leave a terminal ambiguous row with no resource
+    # work. Such rows must not retain an unclaimable cleanup owner state.
+    # pi-lens-ignore: python-sql-injection
+    op.execute(
+        text("""
+        UPDATE publishing.video_publish_tasks
+        SET cleanup_intent = 'none',
+            cleanup_lease_owner = NULL,
+            cleanup_lease_expires_at = NULL,
+            cleanup_heartbeat_at = NULL
+        WHERE status IN ('succeeded','failed','needs_review','cancelled')
+          AND stage = 'done'
+          AND cleanup_intent = 'preserve_state'
+          AND device_cleanup_status NOT IN ('pending','failed')
+          AND spool_cleanup_status NOT IN ('pending','failed')
+          AND object_cleanup_status NOT IN ('pending','failed')
+    """)
+    )
     # pi-lens-ignore: python-sql-injection
     op.execute(
         text("""

@@ -1485,7 +1485,10 @@ async def execute_claimed(task):
         await heartbeat_task(task)
         local_path = await object_store.download_atomic(task.object_ref, spool_dir)
         verify_size_and_sha256(local_path)
-        transition_short_tx(task, "DOWNLOAD_OK", sha256=...)
+        transition_short_tx(
+            task, "DOWNLOAD_OK", sha256=..., device_path=...,
+            device_cleanup_status="pending", spool_cleanup_status="pending"
+        )  # ADB staging 前先登记唯一 cleanup owner 的责任
 
         await adb.check_device(task.device_serial)
         await adb.check_package(task.device_serial, task.app_package)
@@ -1501,11 +1504,9 @@ async def execute_claimed(task):
         await schedule_retry_or_fail(task, exc)
     except BaseException as exc:
         await persist_unexpected_failure_without_losing_session(task, exc)
-    finally:
-        await remove_local_spool_best_effort(task)
 ```
 
-每个外部调用前后都以短事务写 stage/heartbeat。网络和 ADB 调用期间不得占用数据库连接。
+每个外部调用前后都以短事务写 stage/heartbeat。网络和 ADB 调用期间不得占用数据库连接。执行协程不直接删除已登记 spool；设备、spool、MinIO 只由 cleanup selector 领取独立租约后执行。
 
 ### 20.7 创建并提交 Artemis attempt
 
@@ -1603,11 +1604,12 @@ verify 结果必须解析为受控枚举，不接收任意自然语言作为状�
 清理操作逐项幂等：
 
 ```python
-async def cleanup_task(task):
-    await cleanup_one("device", lambda: adb.remove(task.device_path))
-    await cleanup_one("spool", lambda: unlink_if_exists(task.spool_path))
-    if task.status == "succeeded" or task.status == "cancelled":
-        await cleanup_one("object", lambda: object_store.remove(task.object_key))
+async def cleanup_task(work):
+    # work 由单条 CTE / UPDATE ... RETURNING 原子领取，包含明确 due resources。
+    await cleanup_one("device", lambda: adb.remove(work.device_path))
+    await cleanup_one("spool", lambda: unlink_if_exists(work.spool_path))
+    await cleanup_one("object", lambda: object_store.remove(work.object_key))
+    finish_cleanup_work(work.token, resource_results)  # owner/expiry/version CAS
 ```
 
 失败/needs_review 的 MinIO 对象默认保留。awaiting_upload 超过 24 小时自动取消并删除；failed 对象按 `TIKTOK_PUBLISH_FAILED_RETENTION_DAYS` 保留，过期删除前仍保留任务和 attempt 审计记录。
@@ -1615,8 +1617,10 @@ async def cleanup_task(task):
 ### 20.11 Repository 与事务规则
 
 - PostgreSQL 使用既有 SQLAlchemy 2 sync session；异步 Worker 用线程边界或短同步函数，不跨 `await` 持有 Session；
+- publish observation 只通过 `commit_publish_transition()` 提交，task 与 attempt 在同一 owner/DB-expiry/rowVersion CAS 事务中完成；自动 verify 也在该事务创建；
+- cleanup 只通过 `claim_cleanup_work()` 原子领取显式 due resources，并由 `finish_cleanup_work()` 在同一 owner/DB-expiry/rowVersion fence 下写结果；
 - repository 方法不自行吞异常；domain service 决定 rollback、错误码和状态；
-- 所有时间判断使用数据库 `now()`，避免多主机时钟漂移；
+- 所有租约、deadline、retry、完成和 retention 时间判断使用单次读取的 PostgreSQL `clock_timestamp()`，避免多主机时钟漂移；
 - 列表查询使用 lateral/subquery 取最新 attempt，避免 N+1；
 - caption、Prompt、output 不进入普通应用日志；
 - attempt/history 永不物理覆盖；只追加新执行记录并更新当前状态字段。
@@ -2361,7 +2365,7 @@ CORS 示例（origin 按实际域名替换）：
 - spool 所在磁盘预留至少 `2 × maxVideoBytes + safety margin`；
 - 日志不打印完整本地路径中的原始用户文件名。
 
-启动时扫描 orphan spool：只删除能在 DB 中证明已终态且超过保留窗的任务目录，禁止 `rm -rf` 整个根目录。
+启动时扫描 orphan spool：只对 DB 中证明已终态且超过保留窗的任务原子调度/重开 spool cleanup；扫描器不删除目录，实际删除仍由 cleanup selector 独占。未知或活跃目录保留，禁止 `rm -rf` 整个根目录。
 
 ### 23.5 ADB 与手机
 

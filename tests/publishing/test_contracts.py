@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session
 from tts_erp_v2.accounts.pages import required_page_permission
 from tts_erp_v2.api.v2 import video_publish
 from tts_erp_v2.api.v2.video_publish import _conditional, _etag
-from tts_erp_v2.db.models.publishing import VideoPublishTask
 from tts_erp_v2.publishing.artemis_client import ArtemisResult
 from tts_erp_v2.publishing.dispatcher import (
     PublishDependencies,
@@ -22,7 +21,6 @@ from tts_erp_v2.publishing.dispatcher import (
 )
 from tts_erp_v2.publishing.domain import classify_failure
 from tts_erp_v2.publishing.object_store import MinioVideoStore
-from tts_erp_v2.publishing.repository import touch_task
 from tts_erp_v2.storage.minio_client import MinioClient
 
 ROOT = Path(__file__).parents[2]
@@ -184,31 +182,27 @@ def test_destructive_guard_refuses_prod_shape_without_opt_in(
         )
 
 
-def test_lease_renewal_extends_owner_heartbeat() -> None:
-    task = SimpleNamespace(heartbeat_at=None, lease_expires_at=None, row_version=4)
-    fake_session = SimpleNamespace(
-        scalar=lambda _query: __import__("datetime").datetime.now(
-            __import__("datetime").UTC
-        )
-    )
-    touch_task(
-        cast(Session, fake_session), cast(VideoPublishTask, task), lease_seconds=45
-    )
-    assert task.heartbeat_at is not None
-    assert task.lease_expires_at > task.heartbeat_at
-    assert task.row_version == 5
-
-
 def test_concurrency_and_migration_contracts_include_active_protection() -> None:
     repository = (ROOT / "tts_erp_v2/publishing/repository.py").read_text()
     migration = (ROOT / "alembic/versions/0053_video_publish.py").read_text()
     assert "with_for_update(skip_locked=True)" in repository
-    assert "with_for_update=True" in repository
-    dispatcher = (ROOT / "tts_erp_v2/publishing/dispatcher.py").read_text()
-    assert "VideoPublishTask.row_version == version" in dispatcher
+    assert ".with_for_update()" in repository
+    assert "def commit_publish_transition(" in repository
+    assert "VideoPublishTask.lease_expires_at > now" in repository
+    assert "VideoPublishTask.row_version == token.row_version" in repository
+    assert 'cte("cleanup_candidate")' in repository
     assert (
         "status IN ('created','submitting','queued','running','unknown')" in migration
     )
+
+
+def test_tracked_spool_deletion_has_one_cleanup_executor_owner() -> None:
+    dispatcher = (ROOT / "tts_erp_v2/publishing/dispatcher.py").read_text()
+    worker = (ROOT / "tts_erp_v2/publishing/worker.py").read_text()
+    assert "_mark_spool_cleanup" not in dispatcher
+    assert "shutil.rmtree" not in worker
+    assert "unlink(" not in worker
+    assert dispatcher.count('await run(\n        "spool"') == 1
 
 
 def test_worker_wires_documented_artemis_and_timing_knobs() -> None:

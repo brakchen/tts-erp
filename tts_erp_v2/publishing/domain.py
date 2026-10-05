@@ -127,23 +127,25 @@ def set_task_stage(
         task.stage_started_at = now or datetime.now(UTC)
 
 
-def apply_cleanup_result(task: Any, *, device_failed: bool = False) -> None:
+def apply_cleanup_result(
+    task: Any, *, device_failed: bool = False, now: datetime | None = None
+) -> None:
     """Apply the sole post-cleanup business transition."""
     intent = CleanupIntent(getattr(task, "cleanup_intent", CleanupIntent.NONE.value))
     if intent is CleanupIntent.REQUEUE_PUBLISH:
         if device_failed:
             task.status = TaskStatus.PENDING.value
-            set_task_stage(task, TaskStage.WAITING_DEVICE)
+            set_task_stage(task, TaskStage.WAITING_DEVICE, now=now)
         else:
             task.status = TaskStatus.PENDING.value
-            set_task_stage(task, TaskStage.QUEUED)
+            set_task_stage(task, TaskStage.QUEUED, now=now)
         return
     if intent is CleanupIntent.FINALIZE_SUCCESS:
         task.status = TaskStatus.SUCCEEDED.value
-        set_task_stage(task, TaskStage.DONE)
+        set_task_stage(task, TaskStage.DONE, now=now)
         return
     if intent is CleanupIntent.PRESERVE_STATE:
-        set_task_stage(task, TaskStage.DONE)
+        set_task_stage(task, TaskStage.DONE, now=now)
         return
 
 
@@ -337,9 +339,13 @@ def allowed_actions(task: Any) -> tuple[AllowedAction, ...]:
             and task.object_uploaded_at is not None
         ):
             actions.append(AllowedAction.RETRY)
-    elif task.status == TaskStatus.NEEDS_REVIEW and getattr(
-        task, "device_cleanup_status", None
-    ) not in {CleanupStatus.PENDING.value, CleanupStatus.FAILED.value}:
+    elif (
+        task.status == TaskStatus.NEEDS_REVIEW
+        and getattr(task, "cleanup_intent", CleanupIntent.NONE.value)
+        == CleanupIntent.NONE.value
+        and getattr(task, "device_cleanup_status", None)
+        not in {CleanupStatus.PENDING.value, CleanupStatus.FAILED.value}
+    ):
         actions.append(AllowedAction.VERIFY)
     if cleanup_retryable_resources(task):
         actions.append(AllowedAction.RETRY_CLEANUP)

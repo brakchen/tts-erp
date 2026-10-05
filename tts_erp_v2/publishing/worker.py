@@ -5,15 +5,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import shutil
 import socket
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select, text
+from sqlalchemy import select, text
 
-from tts_erp_v2.api.deps import require_destructive_script_guard
 from tts_erp_v2.db.base import get_session_factory
 from tts_erp_v2.db.models.publishing import VideoPublishTask
 from tts_erp_v2.publishing.adb_device import AdbDevice
@@ -24,10 +21,10 @@ from tts_erp_v2.publishing.dispatcher import (
     recover_active,
 )
 from tts_erp_v2.publishing.object_store import MinioVideoStore
+from tts_erp_v2.publishing.repository import schedule_spool_reconciliation
 from tts_erp_v2.storage.minio_client import MinioClient
 
 logger = logging.getLogger(__name__)
-_TERMINAL_STATUSES = {"succeeded", "failed", "needs_review", "cancelled"}
 
 
 async def run() -> None:
@@ -87,63 +84,39 @@ async def _heartbeat_loop(
 
 
 def _cleanup_orphan_spool(session_factory, spool_dir: Path) -> int:
-    """Delete only UUID task directories proven terminal and older than 24h."""
+    """Reconcile tracked terminal residue; never delete from the startup scan."""
     root = spool_dir.resolve()
-    with session_factory() as session:
-        database_now = session.scalar(select(func.now()))
-        if database_now is None:
-            return 0
-        cutoff = database_now - timedelta(hours=24)
-        removable: list[Path] = []
-        for entry in root.iterdir():
-            if not entry.is_dir() or entry.resolve().parent != root:
-                continue
-            try:
-                task_id = UUID(entry.name)
-            except ValueError:
-                logger.warning("preserving unrecognized publish spool directory")
-                continue
-            row = session.execute(
-                select(
-                    VideoPublishTask.status,
-                    VideoPublishTask.completed_at,
-                    VideoPublishTask.created_at,
-                ).where(VideoPublishTask.public_id == task_id)
-            ).one_or_none()
-            task_age = row.completed_at or row.created_at if row else None
-            if (
-                row
-                and task_age is not None
-                and row.status in _TERMINAL_STATUSES
-                and task_age <= cutoff
-            ):
-                removable.append(entry)
-    if not removable:
-        return 0
-    try:
-        require_destructive_script_guard(
-            script_name="video_publish.cleanup_orphan_spool",
-            confirmation=True,
-            dangerous=True,
-        )
-    except SystemExit:
-        logger.error("orphan spool cleanup blocked by destructive guard")
-        return 0
-    for entry in removable:
-        shutil.rmtree(entry)
-    logger.info("removed %d proven terminal orphan spool directories", len(removable))
-    return len(removable)
+    scheduled = 0
+    for entry in root.iterdir():
+        if not entry.is_dir() or entry.resolve().parent != root:
+            continue
+        try:
+            task_id = UUID(entry.name)
+        except ValueError:
+            logger.warning("preserving unrecognized publish spool directory")
+            continue
+        with session_factory() as session:
+            known = session.scalar(
+                select(VideoPublishTask.id).where(VideoPublishTask.public_id == task_id)
+            )
+        if known is None:
+            logger.warning("preserving untracked publish spool directory %s", task_id)
+            continue
+        if schedule_spool_reconciliation(session_factory, task_id):
+            scheduled += 1
+    if scheduled:
+        logger.info("scheduled %d tracked spool residue cleanup task(s)", scheduled)
+    return scheduled
 
 
 def _write_heartbeat(session_factory, instance_id: str, state: str) -> None:
-    now = datetime.now(UTC)
     with session_factory() as session:
         session.execute(
             text(
                 """
             INSERT INTO publishing.worker_heartbeats
               (instance_id, hostname, pid, status, started_at, heartbeat_at)
-            VALUES (:id, :host, :pid, :status, :now, :now)
+            VALUES (:id, :host, :pid, :status, clock_timestamp(), clock_timestamp())
             ON CONFLICT (instance_id) DO UPDATE SET
               status = EXCLUDED.status, heartbeat_at = EXCLUDED.heartbeat_at,
               updated_at = now()
@@ -154,7 +127,6 @@ def _write_heartbeat(session_factory, instance_id: str, state: str) -> None:
                 "host": socket.gethostname(),
                 "pid": os.getpid(),
                 "status": state,
-                "now": now,
             },
         )
         session.commit()

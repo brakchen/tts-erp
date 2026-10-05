@@ -25,7 +25,12 @@ from tts_erp_v2.publishing.domain import (
     set_task_stage,
 )
 from tts_erp_v2.publishing.object_store import VideoObjectStore
-from tts_erp_v2.publishing.repository import get_task, queue_task, release_lease
+from tts_erp_v2.publishing.repository import (
+    database_now,
+    get_task,
+    queue_task,
+    release_lease,
+)
 from tts_erp_v2.storage.minio_client import ObjectNotFound
 
 _BUCKET = os.environ.get("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video")
@@ -143,6 +148,7 @@ def create_upload_ticket(
     task_id = uuid4()
     filename = safe_filename(command.filename)
     key = f"video-publish/{datetime.now(UTC):%Y/%m}/{task_id}/{filename}"
+    now = database_now(session)
     task = VideoPublishTask(
         public_id=task_id,
         client_request_id=command.client_request_id,
@@ -156,7 +162,7 @@ def create_upload_ticket(
         object_key=key,
         status=TaskStatus.PENDING.value,
         stage=TaskStage.AWAITING_UPLOAD.value,
-        stage_started_at=datetime.now(UTC),
+        stage_started_at=now,
         target_device_serial=device_serial,
         target_app_package=_PACKAGE,
     )
@@ -235,7 +241,7 @@ def confirm_upload(
         raise TaskConflict("TASK_ACTION_NOT_ALLOWED", task)
     if task.row_version != expected_version or task.object_key != object_key:
         raise TaskConflict("TASK_VERSION_CONFLICT", task)
-    now = datetime.now(UTC)
+    now = database_now(session)
     task.object_etag = metadata.get("etag")
     task.object_uploaded_at = now
     task.status = TaskStatus.PENDING.value
@@ -256,8 +262,9 @@ def replace_upload(session: Session, task_id: UUID) -> VideoPublishTask:
         raise ValueError("CLEANUP_REQUIRED")
     if not replace_upload_allowed(task):
         raise ValueError("RETRY_BUDGET_EXHAUSTED")
+    now = database_now(session)
     task.status = TaskStatus.PENDING.value
-    set_task_stage(task, TaskStage.AWAITING_UPLOAD)
+    set_task_stage(task, TaskStage.AWAITING_UPLOAD, now=now)
     task.object_uploaded_at = None
     task.object_deleted_at = None
     task.object_etag = None
@@ -291,13 +298,14 @@ def cancel_task(
         TaskStage.WAITING_DEVICE.value,
     }:
         raise ValueError("TASK_ACTION_NOT_ALLOWED")
+    now = database_now(session)
     task.status = TaskStatus.CANCELLED.value
-    set_task_stage(task, TaskStage.DONE)
+    set_task_stage(task, TaskStage.DONE, now=now)
     plan_cleanup(task, CleanupIntent.PRESERVE_STATE, object=True)
-    task.completed_at = datetime.now(UTC)
+    task.completed_at = now
     task.row_version += 1
     release_lease(task)
-    task.object_cleanup_next_attempt_at = datetime.now(UTC)
+    task.object_cleanup_next_attempt_at = now
     session.commit()
     return task
 
@@ -320,7 +328,7 @@ def retry_task(
         try:
             store.stat(task.object_key)
         except ObjectNotFound as exc:
-            task.object_deleted_at = datetime.now(UTC)
+            task.object_deleted_at = database_now(session)
             task.object_cleanup_status = "succeeded"
             task.row_version += 1
             session.commit()
@@ -329,7 +337,7 @@ def retry_task(
             raise ValueError("OBJECT_STORE_UNAVAILABLE") from exc
     if task.attempt_count >= int(os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3")):
         raise ValueError("RETRY_BUDGET_EXHAUSTED")
-    queue_task(task)
+    queue_task(session, task)
     task.row_version += 1
     session.commit()
     return task

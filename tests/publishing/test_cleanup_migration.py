@@ -8,6 +8,9 @@ import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from tts_erp_v2.publishing.repository import request_verification
 
 MIGRATION = (
     Path(__file__).parents[2] / "alembic/versions/0058_video_publish_cleanup_owner.py"
@@ -108,7 +111,7 @@ def test_0058_backfills_legacy_pending_cleanup_states(db_engine) -> None:
             assert actual["object"] == (
                 "needs_review",
                 "done",
-                "preserve_state",
+                "none",
                 None,
                 None,
             )
@@ -171,6 +174,85 @@ def test_0058_ambiguous_running_rows_retain_minio(db_engine, legacy_stage: str) 
                 "not_started",
                 None,
             )
+        finally:
+            transaction.rollback()
+
+
+def test_0058_no_work_ambiguous_row_can_request_manual_verification(db_engine) -> None:
+    migration = _load_migration()
+    with db_engine.connect() as conn:
+        transaction = conn.begin()
+        try:
+            migration.__dict__["op"] = Operations(MigrationContext.configure(conn))
+            migration.downgrade()
+            # pi-lens-ignore: python-sql-injection
+            task_id = conn.execute(
+                text(
+                    """
+                    INSERT INTO publishing.video_publish_tasks (
+                        client_request_id, caption, original_filename, content_type,
+                        size_bytes, object_bucket, object_key, status, stage,
+                        target_device_serial, target_app_package, device_path,
+                        device_cleanup_status, spool_cleanup_status,
+                        object_cleanup_status
+                    ) VALUES (
+                        :client_request_id, 'TEST_caption', 'TEST_video.mp4',
+                        'video/mp4', 4, 'tiktok-video', :object_key, 'running',
+                        'done', 'TEST_device', 'com.tiktok', '/sdcard/TEST/video.mp4',
+                        'succeeded', 'succeeded', 'pending'
+                    ) RETURNING id
+                    """
+                ),
+                {
+                    "client_request_id": uuid4(),
+                    "object_key": f"TEST/no-work-{uuid4()}.mp4",
+                },
+            ).scalar_one()
+            # pi-lens-ignore: python-sql-injection
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO publishing.video_publish_attempts (
+                        task_id, sequence_no, kind, artemis_session_id, status,
+                        prompt_version, prompt_snapshot, device_serial
+                    ) VALUES (
+                        :task_id, 1, 'publish', :session_id, 'failed',
+                        'TEST', 'TEST', 'TEST_device'
+                    )
+                    """
+                ),
+                {"task_id": task_id, "session_id": uuid4()},
+            )
+            migration.upgrade()
+            # pi-lens-ignore: python-sql-injection
+            row = conn.execute(
+                text(
+                    """
+                    SELECT public_id, status, stage, cleanup_intent,
+                           object_cleanup_status, object_deleted_at
+                    FROM publishing.video_publish_tasks WHERE id = :id
+                    """
+                ),
+                {"id": task_id},
+            ).one()
+            assert row[1:] == (
+                "needs_review",
+                "done",
+                "none",
+                "not_started",
+                None,
+            )
+            session = Session(bind=conn, join_transaction_mode="create_savepoint")
+            try:
+                task = request_verification(session, row.public_id)
+                session.flush()
+                assert (task.status, task.stage, task.cleanup_intent) == (
+                    "running",
+                    "verifying",
+                    "none",
+                )
+            finally:
+                session.close()
         finally:
             transaction.rollback()
 
