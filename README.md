@@ -99,7 +99,7 @@ explain_spu(session, *, scope, spu_pk, evidence) -> SpuProfitExplanation
 - `reporting.product_profit_daily` 是旧版粗略毛利快照，不是 SPU 盈利真相源。
 
 详细决策见
-[`docs/design/spu-profitability-module.md`](docs/design/spu-profitability-module.md)。
+[`docs/design/spu-profitability-technical-design.md`](docs/design/spu-profitability-technical-design.md)。
 
 ## 主要 module 与 interface
 

@@ -16,7 +16,7 @@ def test_reporting_coverage():
 
 
 def test_reporting_profit_daily():
-    """旧版粗略毛利日报（只读；新消费者禁止，见 docs/design/spu-profitability-module.md §5）。"""
+    """旧版粗略毛利日报（只读；新消费者禁止，见 docs/design/spu-profitability-technical-design.md §5）。"""
     status, body = request_json("GET", "/v2/reporting/profit-daily")
     assert status == 200, body
     assert isinstance(body, list), body
