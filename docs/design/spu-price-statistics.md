@@ -438,7 +438,7 @@ WITH ranked_price_observations AS (
 )
 ```
 
-`population_lines` is the pre-eligibility LEFT JOIN relation: every selected legacy line is retained even when it has no canonical observation. Its `exclusion_reason` is mutually exclusive, and `known_valid_quantity` is populated only from a positive integral observation quantity. `coverage_by_reason` groups by `spu_pk` and is the sole producer for per-SPU line/exclusion counters and known-valid-unit sums; it counts each reason explicitly, emits zero for empty reasons, and asserts the diagnostic partition `selected_line_count = eligible + unpaid + on_hold + cancelled + gift + unknown_gift + unknown_status + invalid_quantity + missing_observation`. `scope_lines` joins that relation by `spu_pk`, never a global CROSS JOIN. `coverage_by_reason_total` sums the grouped relation once for unpaginated totals. `MISSING_OBSERVATION` and `INVALID_QUANTITY` contribute line counts only; the wire does not invent unit quantities for them. `coverage_by_price` and `coverage_by_price_total` apply the same per-SPU/one-total-level split for currency/FX counters. No counter uses a guessed quantity or a second refund join.
+`population_lines` is the pre-eligibility LEFT JOIN relation: every selected legacy line is retained even when it has no canonical observation. Its `exclusion_reason` is mutually exclusive, and `known_valid_quantity` is populated only from a positive integral observation quantity. `coverage_by_reason` groups by `spu_pk` and is the sole producer for per-SPU line/exclusion counters and known-valid-unit sums; it counts each reason explicitly, emits zero for empty reasons, and asserts the diagnostic partition `selected_line_count = eligible + unpaid + on_hold + cancelled + gift + unknown_gift + unknown_status + invalid_quantity + missing_observation`. `scope_lines` joins that relation by `spu_pk`, never a global coverage fan-out. `coverage_by_reason_total` sums the grouped relation once for unpaginated totals. `MISSING_OBSERVATION` and `INVALID_QUANTITY` contribute line counts only; the wire does not invent unit quantities for them. `coverage_by_price` and `coverage_by_price_total` apply the same per-SPU/one-total-level split for currency/FX counters. No counter uses a guessed quantity or a second refund join.
 
 `ranked_price_observations` is the concrete canonical relation: it selects the newest authoritative whole observation, including newest missing/invalid fields; it never falls back to an older valid amount. `cost_basis` is the existing ROI current effective-cost map materialized as bound arrays by `spu_pk=l.spu_pk` in the same snapshot; `unit_cost_used`/`cost_source` are not observation columns. `o.shop_pk` is authoritative because `sales_order_lines` has no `shop_pk`. Parent status filters reuse existing ROI constants; exact local-time boundary comes from the common profitability module, not a second timezone map.
 
@@ -628,7 +628,7 @@ The fixture has SPU A with purchase 10 × qty 1 and SPU B with purchase 40 × qt
 }
 ```
 
-**Coverage isolation fixture (per-SPU, not global CROSS JOIN):** this contract test uses A with one eligible CNY line qty 1; B with one cancelled line qty 2 and one eligible line qty 4 whose explicit currency is blank. The expected coverage fragment is:
+**Coverage isolation fixture (per-SPU, not global coverage fan-out):** this contract test uses A with one eligible CNY line qty 1; B with one cancelled line qty 2 and one eligible line qty 4 whose explicit currency is blank. The expected coverage fragment is:
 
 ```json
 {
@@ -854,7 +854,7 @@ Source grep, static string tests, mocked JSON render tests, existing canned brow
 
 **Math slice handoff（separate owner, arithmetic-ready only）：** `feature/spu-price-math` HEAD `8a235fa15aafbffb6edea354b9cd3d1da0e8101b` owns `tts_erp_v2/analytics/spu_profitability/_price_math.py` and `tests/analytics/test_spu_price_math.py`, and was pushed to `origin/feature/spu-price-math`. Its handoff reports the exact GREEN command `bash scripts/test_isolated.sh unit tests/analytics/test_spu_price_math.py -vv` (23 passed in 0.90s), required `bash scripts/test_isolated.sh fast` (1638 passed, 15 skipped, 0 failed), and compileall/diff checks; Ruff was unavailable and no lint result is claimed. Analytics/API must consume or compare this helper, not duplicate/overwrite it; this evidence does not establish data/API/UI/producer readiness.
 
-Projection owner changes are now present in the synchronized `origin/master` merge (lane HEAD includes merge `d0d5607`; this lane did not edit those source/common files). Price implementation still requires successor lanes to re-read the merged contracts and resolve any field/path drift before coding; this document only links to them and does not modify their ownership.
+Projection owner changes are now present in the synchronized `origin/master` merge (current synchronized master `c2e607b`, lane sync merge `dc4ae88`; this lane did not edit those source/common files). Price implementation still requires successor lanes to re-read the merged contracts and resolve any field/path drift before coding; this document only links to them and does not modify their ownership.
 
 ### 9.2 Dependency graph
 
@@ -886,7 +886,7 @@ Each handoff must include branch/HEAD/base, exact changed paths, commands and re
 ## 10. 当前文档交付记录
 
 - 本恢复运行只写本文件；未添加测试、未执行数据库/迁移/服务/浏览器、未声明 E2E 通过。
-- 已同步最新 `origin/master` 到本 lane 专属 worktree；同步带来的 projection/common source changes 是上游合并历史，不属于本 lane owned edits。后续实现者必须在各 successor lane 重新核对合并后的 API/types/UI seams。
+- 已同步当前 `origin/master` `c2e607b` 到本 lane 专属 worktree（sync merge `dc4ae88`）；同步带来的 projection/common source changes 是上游合并历史，不属于本 lane owned edits。后续实现者必须在各 successor lane 重新核对合并后的 API/types/UI seams。
 - 本轮验证：Markdown links/paths、JSON code blocks/duplicate keys、加权 oracle 数学、SQL/Markdown structural checks、`git diff --check`；只 stage 本文件并提交/推送 doc branch。
 - source-evidence alignment：parent review inherited production readback（2026-10-05 11:52 UTC，2176 orders/2231 item keys，original 2230/2230 equal，paid 2221 exact + 9 ≤0.5 VND）与 Feishu revision `247` 支持 authority；本 lane 未独立 re-fetch。后续 direct read-only shape probe（search-only，1000 orders/1015 lines）观察 original/sale scalar strings 1015/1015、line currency 1015/1015 且与 parent/payment agreement 1015/1015、quantity missing 1015/1015、parent/line display status pair identical 1015/1015、`is_gift=false` 1015/1015；这些是 bounded observed facts，不是 universal contract，detail endpoint 未覆盖。父订单 paid whitelist 复用 `PAID_SALES_ORDER_STATUSES`/业务 §4.1，line status 仍 raw-preserved。gift absence/positive/null semantics、detail parity与完整 currency contract仍需窄 READ ONLY/fixture probe；metric partial/missing 是 per-field diagnostics，不转为全局 readiness。Math slice handoff 已记录于 §9.1；本 lane 不宣称整体 implementation readiness。
 - 若后续 push 凭据或网络不可用，必须报告准确 local HEAD 与 unpushed 状态，不 force-push、不改 remote、不将未推送伪装成完成。
