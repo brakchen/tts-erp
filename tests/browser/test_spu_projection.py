@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import re
 import time
 from collections.abc import Callable
 from typing import Any, cast
@@ -74,9 +73,11 @@ def test_projection_control_is_visible_and_switches_only_projection(browser_rend
     assert page.locator("#filter-w-start").input_value() == reporting_start
     assert page.locator("#filter-w-end").input_value() == reporting_end
     card = page.locator("#projection-basis-card")
-    assert "2026-07-03 ~ 2026-09-30（90 天）" in card.inner_text()
-    assert "7 天 / 2026-10-08" in card.inner_text()
-    assert "90 / 9 / 10%" in card.inner_text()
+    window = card.locator(".op-projection-window")
+    assert window.inner_text() == "预测样本窗口：2026-07-03 ~ 2026-09-30"
+    assert page.locator("#projection-maturity-as-of").count() == 0
+    assert page.locator("#projection-basis-counts").count() == 0
+    assert page.locator("#projection-basis-status").count() == 0
 
     page.evaluate(
         """() => {
@@ -88,5 +89,4 @@ def test_projection_control_is_visible_and_switches_only_projection(browser_rend
         }"""
     )
     page.wait_for_timeout(700)
-    assert "2026-07-03 ~ 2026-09-30（90 天）" in card.inner_text()
-    assert re.search(r"预测样本窗口", card.inner_text())
+    assert window.inner_text() == "预测样本窗口：2026-07-03 ~ 2026-09-30"
