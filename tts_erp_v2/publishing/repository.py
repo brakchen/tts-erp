@@ -6,7 +6,7 @@ import os
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import Select, and_, func, or_, select, update
+from sqlalchemy import Select, and_, func, inspect, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -193,6 +193,13 @@ def _lease_cleanup_task(
         return None
     task.cleanup_lease_owner = instance_id
     task.cleanup_lease_expires_at = now + timedelta(seconds=lease_seconds)
+    inspect(task).info["cleanup_scope"] = (
+        "device"
+        if device_only is True
+        else "background"
+        if device_only is False
+        else "all"
+    )
     task.cleanup_heartbeat_at = now
     task.row_version += 1
     session.flush()
@@ -224,6 +231,7 @@ def claim_one(
             VideoPublishTask.stage.in_(
                 [TaskStage.QUEUED.value, TaskStage.WAITING_DEVICE.value]
             ),
+            VideoPublishTask.cleanup_intent == CleanupIntent.NONE.value,
             (VideoPublishTask.next_attempt_at.is_(None))
             | (VideoPublishTask.next_attempt_at <= func.now()),
             VideoPublishTask.attempt_count < max_attempts,

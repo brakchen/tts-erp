@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, inspect, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from tts_erp_v2.api.deps import require_destructive_script_guard
@@ -28,6 +28,7 @@ from tts_erp_v2.publishing.domain import (
     AttemptStatus,
     TaskStage,
     TaskStatus,
+    apply_cleanup_result,
     classify_failure,
     transition_task,
 )
@@ -89,9 +90,10 @@ async def dispatch_one(deps: PublishDependencies) -> str:
             return "no_task"
         task_id = task.public_id
         cleanup_claimed = task.cleanup_lease_owner == deps.instance_id
+        cleanup_scope = inspect(task).info.get("cleanup_scope", "all")
         session.commit()
     if cleanup_claimed:
-        await _execute_cleanup(task_id, deps)
+        await _execute_cleanup(task_id, deps, scope=cleanup_scope)
     else:
         await _execute(task_id, deps)
     return "processed"
@@ -825,8 +827,10 @@ async def _mark_spool_cleanup(
         session.commit()
 
 
-async def _execute_cleanup(task_id: UUID, deps: PublishDependencies) -> None:
-    """Execute only resources explicitly pending/failed under cleanup ownership."""
+async def _execute_cleanup(
+    task_id: UUID, deps: PublishDependencies, *, scope: str = "all"
+) -> None:
+    """Execute only the leased, explicit, due cleanup resource scope."""
     with deps.session_factory() as session:
         task = _get(session, task_id)
         _assert_cleanup_lease(task, deps.instance_id)
@@ -835,11 +839,21 @@ async def _execute_cleanup(task_id: UUID, deps: PublishDependencies) -> None:
             task.device_path,
             task.object_key,
         )
+        now = datetime.now(UTC)
+
+        def due(name: str) -> bool:
+            status = getattr(task, f"{name}_cleanup_status")
+            retry_at = getattr(task, f"{name}_cleanup_next_attempt_at")
+            return status in {"pending", "failed"} and (
+                retry_at is None or retry_at <= now
+            )
+
         resources = {
-            "device": task.device_cleanup_status in {"pending", "failed"}
+            "device": scope in {"device", "all"}
+            and due("device")
             and bool(device_path),
-            "spool": task.spool_cleanup_status in {"pending", "failed"},
-            "object": task.object_cleanup_status in {"pending", "failed"},
+            "spool": scope in {"background", "all"} and due("spool"),
+            "object": scope in {"background", "all"} and due("object"),
         }
         intent = task.cleanup_intent
         expected_version = task.row_version
@@ -901,6 +915,9 @@ async def _execute_cleanup(task_id: UUID, deps: PublishDependencies) -> None:
                 if name == "object":
                     values["object_deleted_at"] = now
         device_failed = values.get("device_cleanup_status") == "failed"
+        for name in errors:
+            setattr(task, f"{name}_cleanup_status", values[f"{name}_cleanup_status"])
+        apply_cleanup_result(task, device_failed=device_failed)
         remaining = any(
             values.get(
                 f"{name}_cleanup_status", getattr(task, f"{name}_cleanup_status")
@@ -912,18 +929,7 @@ async def _execute_cleanup(task_id: UUID, deps: PublishDependencies) -> None:
             values["cleanup_intent"] = "none"
         values["status"] = task.status
         values["stage"] = task.stage
-        if intent == "requeue_publish" and not device_failed:
-            values["status"] = TaskStatus.PENDING.value
-            values["stage"] = TaskStage.QUEUED.value
-            values["next_attempt_at"] = None
-        elif intent == "requeue_publish" and device_failed:
-            values["status"] = TaskStatus.PENDING.value
-            values["stage"] = TaskStage.WAITING_DEVICE.value
-            values["next_attempt_at"] = now + timedelta(
-                seconds=_cleanup_retry_delay(task.device_cleanup_attempts)
-            )
-        elif intent in {"finalize_success", "preserve_state"}:
-            values["stage"] = TaskStage.DONE.value
+        if intent in {"finalize_success", "preserve_state"}:
             values["completed_at"] = task.completed_at or now
         result = session.execute(
             update(VideoPublishTask)

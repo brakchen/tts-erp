@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import HTTPException, Request, Response
@@ -1217,6 +1217,74 @@ async def test_verify_published_is_terminal_and_not_reclaimable(
     assert await dispatch_one(deps) == "no_task"
 
 
+@pytest.mark.asyncio
+async def test_queued_worker_reaches_staging_and_terminal_success(
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "tts_erp_v2.publishing.dispatcher.require_destructive_script_guard",
+        lambda **_kwargs: None,
+    )
+
+    class Store:
+        def download(self, _key: str, path: Path) -> str:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"TEST")
+            return "sha256-test"
+
+        def remove(self, _key: str) -> None:
+            pass
+
+    class Adb:
+        def device_path(self, _task_id: UUID) -> str:
+            return "/sdcard/TEST/video.mp4"
+
+        async def check_device(self, _serial: str) -> None:
+            pass
+
+        async def check_package(self, _serial: str, _package: str) -> None:
+            pass
+
+        async def stage_video(self, _serial: str, _local: Path, _device: str) -> None:
+            pass
+
+        async def verify_media_visible(self, _serial: str, _device: str) -> None:
+            pass
+
+        async def remove_staged_video(self, _serial: str, _device: str) -> None:
+            pass
+
+    class Artemis:
+        async def submit(self, **kwargs):
+            return ArtemisResult(kwargs["session_id"], "success")
+
+    task = _task()
+    task.object_uploaded_at = datetime.now(UTC)
+    db_session.add(task)
+    db_session.flush()
+    db_session.commit()
+    deps = cast(
+        PublishDependencies,
+        SimpleNamespace(
+            session_factory=_factory(db_session),
+            instance_id="pipeline-worker",
+            lease_seconds=30,
+            max_attempts=3,
+            adb=Adb(),
+            store=Store(),
+            artemis=Artemis(),
+            spool_dir=tmp_path,
+        ),
+    )
+    assert await dispatch_one(deps) == "processed"
+    db_session.expire_all()
+    assert task.status == TaskStatus.SUCCEEDED.value
+    assert task.stage == TaskStage.DONE.value
+    assert await dispatch_one(deps) == "no_task"
+
+
 def test_selector_priority_gates_device_but_not_background_cleanup(
     db_session: Session,
 ) -> None:
@@ -1308,6 +1376,8 @@ async def test_pre_device_spool_failure_is_retryable(
             instance_id="spool-worker",
             lease_seconds=30,
             max_attempts=3,
+            adb=_CleanupAdb(),
+            store=_CleanupStore(),
             spool_dir=tmp_path,
         ),
     )
@@ -1316,6 +1386,15 @@ async def test_pre_device_spool_failure_is_retryable(
     db_session.expire_all()
     assert task.spool_cleanup_status == "failed"
     assert task.cleanup_intent == "requeue_publish"
+    task.spool_cleanup_next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
+    task.next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
+    db_session.commit()
+    assert await dispatch_one(deps) == "processed"
+    db_session.expire_all()
+    assert task.cleanup_intent == "none"
+    assert task.stage == TaskStage.QUEUED.value
+    assert claim_one(db_session, "next-publish") is not None
+    db_session.rollback()
 
 
 @pytest.mark.parametrize(
