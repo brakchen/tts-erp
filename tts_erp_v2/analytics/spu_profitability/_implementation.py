@@ -29,7 +29,10 @@ from tts_erp_v2.analytics.spu_profitability._formula_v10 import (
     calculate_order_metrics,
     calculate_projection,
 )
-from tts_erp_v2.analytics.spu_profitability._projection import ProjectionPolicy
+from tts_erp_v2.analytics.spu_profitability._projection import (
+    ProjectionPolicy,
+    projection_warning_codes,
+)
 from tts_erp_v2.analytics.spu_profitability._selection import resolve_selected_spus
 from tts_erp_v2.analytics.spu_profitability._types import (
     FormulaStatus,
@@ -292,8 +295,7 @@ _SQL_ROI_PROJECTION = text(
                    )
                ) AS is_delivery_terminal,
                (
-                   so.status = 'CANCELLED'
-                   AND EXISTS (
+                   EXISTS (
                        SELECT 1
                        FROM fulfillment.shipments sh
                        JOIN fulfillment.tracking_events te
@@ -333,8 +335,12 @@ _SQL_ROI_PROJECTION = text(
     ),
     completed_orders AS (
         SELECT exposed_orders.*,
-               (is_settled OR is_delivery_terminal OR status = 'CANCELLED')
-                   AS is_completed
+               (
+                   is_settled
+                   OR is_delivery_terminal
+                   OR is_terminal_full_loss
+                   OR status = 'CANCELLED'
+               ) AS is_completed
         FROM exposed_orders
     ),
     classified_orders AS (
@@ -465,7 +471,10 @@ _SQL_ROI_PROJECTION = text(
            count(DISTINCT order_pk) FILTER (WHERE is_paid AND NOT is_settled)
                AS unsettled_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid AND NOT is_settled AND NOT is_delivery_terminal)
+               WHERE is_paid
+                 AND NOT is_settled
+                 AND NOT is_delivery_terminal
+                 AND NOT is_terminal_full_loss)
                AS full_loss_exposure_unsettled_order_count,
            count(DISTINCT order_pk) FILTER (
                WHERE is_paid AND NOT is_settled AND unresolved_qty > 0)
@@ -480,10 +489,16 @@ _SQL_ROI_PROJECTION = text(
                WHERE is_paid AND NOT is_settled), 0)
                AS confirmed_unsettled_refund_amount_vnd,
            coalesce(sum(confirmed_refund_amount) FILTER (
-               WHERE is_paid AND NOT is_settled AND NOT is_delivery_terminal), 0)
+               WHERE is_paid
+                 AND NOT is_settled
+                 AND NOT is_delivery_terminal
+                 AND NOT is_terminal_full_loss), 0)
                AS confirmed_full_loss_exposure_refund_amount_vnd,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid AND NOT is_settled AND confirmed_full_loss_qty > 0)
+               WHERE is_paid
+                 AND NOT is_settled
+                 AND NOT is_terminal_full_loss
+                 AND confirmed_full_loss_qty > 0)
                AS confirmed_unsettled_full_loss_order_count,
            count(DISTINCT order_pk) FILTER (
                WHERE is_paid
@@ -495,16 +510,25 @@ _SQL_ROI_PROJECTION = text(
                WHERE is_paid AND NOT is_settled), 0)
                AS confirmed_unsettled_full_loss_qty,
            coalesce(sum(confirmed_full_loss_qty) FILTER (
-               WHERE is_paid AND NOT is_settled AND NOT is_delivery_terminal), 0)
+               WHERE is_paid
+                 AND NOT is_settled
+                 AND NOT is_delivery_terminal
+                 AND NOT is_terminal_full_loss), 0)
                AS confirmed_full_loss_exposure_qty,
            coalesce(sum(unresolved_qty) FILTER (
                WHERE is_paid AND NOT is_settled), 0)
                AS unresolved_unsettled_qty,
            coalesce(sum(unresolved_full_loss_qty) FILTER (
-               WHERE is_paid AND NOT is_settled AND NOT is_delivery_terminal), 0)
+               WHERE is_paid
+                 AND NOT is_settled
+                 AND NOT is_delivery_terminal
+                 AND NOT is_terminal_full_loss), 0)
                AS unresolved_full_loss_exposure_qty,
            coalesce(sum(line_sales_vnd) FILTER (
-               WHERE is_paid AND NOT is_settled AND NOT is_delivery_terminal), 0)
+               WHERE is_paid
+                 AND NOT is_settled
+                 AND NOT is_delivery_terminal
+                 AND NOT is_terminal_full_loss), 0)
                AS full_loss_exposure_unsettled_sales_vnd,
            coalesce(sum(unresolved_qty * unit_price) FILTER (
                WHERE is_paid AND NOT is_settled), 0)
@@ -597,8 +621,7 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
                    )
                ) AS is_delivery_terminal,
                (
-                   so.status = 'CANCELLED'
-                   AND EXISTS (
+                   EXISTS (
                        SELECT 1
                        FROM fulfillment.shipments sh
                        JOIN fulfillment.tracking_events te
@@ -638,8 +661,12 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
     ),
     completed_orders AS (
         SELECT exposed_orders.*,
-               (is_settled OR is_delivery_terminal OR status = 'CANCELLED')
-                   AS is_completed
+               (
+                   is_settled
+                   OR is_delivery_terminal
+                   OR is_terminal_full_loss
+                   OR status = 'CANCELLED'
+               ) AS is_completed
         FROM exposed_orders
     ),
     classified_orders AS (
@@ -717,10 +744,16 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
            count(DISTINCT order_pk) FILTER (WHERE is_paid AND NOT is_settled)
                AS unsettled_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid AND NOT is_settled AND NOT is_delivery_terminal)
+               WHERE is_paid
+                 AND NOT is_settled
+                 AND NOT is_delivery_terminal
+                 AND NOT is_terminal_full_loss)
                AS full_loss_exposure_unsettled_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid AND NOT is_settled AND confirmed_full_loss_qty > 0)
+               WHERE is_paid
+                 AND NOT is_settled
+                 AND NOT is_terminal_full_loss
+                 AND confirmed_full_loss_qty > 0)
                AS confirmed_unsettled_full_loss_order_count,
            count(DISTINCT order_pk) FILTER (
                WHERE is_paid
@@ -2600,25 +2633,46 @@ def _query_spu_roi(
         ),
         Decimal(0),
     )
-    projection_totals_source = None
-    if (w_start is not None or w_end is not None) and not projection_base_only:
-        projection_totals_source = _query_spu_roi(
+    projection_overview_source = None
+    projection_totals_source: ProfitabilityTotals | None = None
+    if not projection_base_only:
+        projection_overview_source = _query_spu_roi(
             sess,
-            q=None,
+            q=catalog_q,
             shop_pk=shop_pk,
             selection=selection,
             active_only=active_only,
-            include_without_activity=include_without_activity,
+            include_without_activity=True,
             sort_field=sort_field,
             ascending=ascending,
-            limit=1,
+            limit=max(1, len(cats)),
             offset=0,
             fee_rate=fee_rate,
             calculated_at=calculated_at,
             only_spu_pk=only_spu_pk,
             projection_lookback_days=projection_lookback_days,
             projection_base_only=True,
-        ).totals
+        )
+        projection_totals_source = projection_overview_source.totals
+        projection_item_sources = {
+            item.spu_pk: item for item in projection_overview_source.items
+        }
+        for row in plain:
+            source_item = projection_item_sources.get(row["spu_pk"])
+            if source_item is None:
+                continue
+            for field in fields(SpuProfitability):
+                if (
+                    field.name.startswith("projection")
+                    or field.name.startswith("projected")
+                    or field.name.startswith("unsettled")
+                    or field.name.startswith("delivered_unsettled")
+                    or field.name.startswith("full_loss_exposure")
+                    or field.name.startswith("confirmed_full_loss_exposure")
+                    or field.name.startswith("confirmed_unsettled")
+                    or field.name.startswith("unresolved_")
+                ):
+                    row[field.name] = getattr(source_item, field.name)
 
     dashboard_projection = calculate_projection(
         ProjectionInput(
@@ -2891,8 +2945,16 @@ def _query_spu_roi(
         projection_fields = {
             field.name: getattr(projection_totals_source, field.name)
             for field in fields(ProfitabilityTotals)
-            if field.name.startswith("projection")
-            or field.name.startswith("projected")
+            if (
+                field.name.startswith("projection")
+                or field.name.startswith("projected")
+                or field.name.startswith("unsettled")
+                or field.name.startswith("delivered_unsettled")
+                or field.name.startswith("full_loss_exposure")
+                or field.name.startswith("confirmed_full_loss_exposure")
+                or field.name.startswith("confirmed_unsettled")
+                or field.name.startswith("unresolved_")
+            )
         }
         totals = replace(totals, **projection_fields)
 
@@ -2955,11 +3017,13 @@ def _query_spu_roi(
         else:
             meta_fee_source, meta_fee_rate = "mixed", FEE_RATE_BASELINE
 
-    projection_warnings: list[str] = []
-    if dashboard_projection.status is ProjectionStatus.INSUFFICIENT_SAMPLE:
-        projection_warnings.append("projection_insufficient_sample")
-    elif dashboard_projection.status is ProjectionStatus.NO_UNSETTLED_ORDERS:
-        projection_warnings.append("projection_no_unsettled_orders")
+    projection_totals = projection_totals_source or totals
+    projection_warnings = list(
+        projection_warning_codes(
+            projection_totals.projection_status,
+            projection_totals.projection_completed_basis_order_count,
+        )
+    )
     if shop_pk is None:
         projection_scope = "all shops plus applied SPU selection"
     elif selection.__class__.__name__ == "ActivitySelection":
@@ -2967,16 +3031,16 @@ def _query_spu_roi(
     else:
         projection_scope = f"shop_pk={shop_pk} plus applied SPU selection"
     projection_basis = ProjectionBasis(
-        status=dashboard_projection.status,
+        status=projection_totals.projection_status,
         warnings=tuple(projection_warnings),
         as_of=projection_window.as_of,
         lookback_days=projection_policy.lookback_days,
         maturity_lag_days=projection_policy.maturity_lag_days,
         sample_start=projection_window.sample_start,
         sample_end=projection_window.sample_end,
-        basis_order_count=total_projection_completed_basis_order_count,
-        basis_full_loss_order_count=total_projection_completed_full_loss_order_count,
-        completed_full_loss_rate=dashboard_projection.completed_full_loss_rate,
+        basis_order_count=projection_totals.projection_completed_basis_order_count,
+        basis_full_loss_order_count=projection_totals.projection_completed_full_loss_order_count,
+        completed_full_loss_rate=projection_totals.completed_full_loss_rate,
         scope_description=projection_scope,
         calculated_at=calculated_at,
     )

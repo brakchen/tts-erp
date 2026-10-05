@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, tzinfo
 
+from tts_erp_v2.analytics.spu_profitability._types import ProjectionStatus
+
 
 @dataclass(frozen=True, slots=True)
 class ProjectionWindow:
@@ -13,6 +15,19 @@ class ProjectionWindow:
     as_of: date
     sample_start: date
     sample_end: date
+
+
+def projection_warning_codes(
+    status: ProjectionStatus, completed_basis_order_count: int
+) -> tuple[str, ...]:
+    warnings: list[str] = []
+    if status is ProjectionStatus.INSUFFICIENT_SAMPLE:
+        warnings.append("projection_insufficient_sample")
+    elif status is ProjectionStatus.NO_UNSETTLED_ORDERS:
+        warnings.append("projection_no_unsettled_orders")
+    if 1 <= completed_basis_order_count <= 9:
+        warnings.append("projection_low_sample")
+    return tuple(warnings)
 
 
 @dataclass(frozen=True, slots=True)

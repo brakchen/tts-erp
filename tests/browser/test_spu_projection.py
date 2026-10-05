@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import copy
 import re
+import time
 from collections.abc import Callable
 from typing import Any, cast
+from urllib.parse import parse_qs
 
 import pytest
 
@@ -18,10 +21,29 @@ def test_projection_control_is_visible_and_switches_only_projection(browser_rend
         Callable[[str], Any], browser_conftest._mock_payload  # type: ignore[attr-defined]
     )
 
-    def mock_payload(path: str):
+    def mock_payload(path: str, query: str = ""):
         if path.endswith("/v2/commerce/channel-product-options"):
             return {"items": [{"spu_id": "TEST_SPU_000", "title": "测试 SPU"}], "queryable": True}
-        return original_mock_payload(path)
+        payload = original_mock_payload(path)
+        if path.endswith("/v2/analytics/spu-roi"):
+            lookback = int(parse_qs(query).get("projection_lookback_days", [30])[0])
+            time.sleep(0.2 if lookback == 30 else 0.01)
+            payload = copy.deepcopy(payload)
+            payload["meta"]["projection"] = {
+                "status": "available",
+                "warnings": [],
+                "as_of": "2026-10-08",
+                "lookback_days": lookback,
+                "maturity_lag_days": 7,
+                "sample_start": "2026-07-03" if lookback == 90 else "2026-09-01",
+                "sample_end": "2026-09-30" if lookback == 90 else "2026-09-30",
+                "basis_order_count": lookback,
+                "basis_full_loss_order_count": lookback // 10,
+                "completed_full_loss_rate": "0.1000",
+                "scope": "shop_pk=7",
+            }
+            payload["totals"]["projection_status"] = "available"
+        return payload
 
     monkeypatch.setattr(browser_conftest, "_mock_payload", mock_payload)
     page = browser_renderer.open("/v2/pages/spu-roi")
@@ -51,4 +73,20 @@ def test_projection_control_is_visible_and_switches_only_projection(browser_rend
     assert any("projection_lookback_days=90" in url for url in projection_requests)
     assert page.locator("#filter-w-start").input_value() == reporting_start
     assert page.locator("#filter-w-end").input_value() == reporting_end
-    assert re.search(r"预测样本窗口", page.locator("#projection-basis-card").inner_text())
+    card = page.locator("#projection-basis-card")
+    assert "2026-07-03 ~ 2026-09-30（90 天）" in card.inner_text()
+    assert "7 天 / 2026-10-08" in card.inner_text()
+    assert "90 / 9 / 10%" in card.inner_text()
+
+    page.evaluate(
+        """() => {
+          const control = document.querySelector('#filter-projection-lookback-days');
+          control.value = '30';
+          control.dispatchEvent(new Event('change', {bubbles: true}));
+          control.value = '90';
+          control.dispatchEvent(new Event('change', {bubbles: true}));
+        }"""
+    )
+    page.wait_for_timeout(700)
+    assert "2026-07-03 ~ 2026-09-30（90 天）" in card.inner_text()
+    assert re.search(r"预测样本窗口", card.inner_text())

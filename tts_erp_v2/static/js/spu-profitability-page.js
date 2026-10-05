@@ -1299,7 +1299,7 @@
         : (roiAdStatus === "estimated_known_costs" ? "≈" : "") +
           fmtRatio(roiAdValue);
 
-    // 预测由后端基于同一日期窗口计算；当前实际卡片保持不变。
+    // 预测由后端基于店铺/已应用 SPU 范围及本地 as-of 计算，独立于报表日期窗口。
     // StaticFiles 会即时读取新 JS，而 HTML 模板要等 API 进程重启才更新；
     // 部署窗口内新 hook 可能暂时不存在，不能让整页渲染因此中断。
     setTextIfPresent(

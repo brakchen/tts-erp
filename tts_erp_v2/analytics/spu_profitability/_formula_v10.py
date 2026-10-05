@@ -264,7 +264,7 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
     )
     current_ad_max_spend = inputs.current_net_revenue_cny - inputs.cogs_total_cny
 
-    if inputs.unsettled_order_count <= 0:
+    if inputs.full_loss_exposure_unsettled_order_count <= 0:
         projected_roi_real = (
             current_nc_prime / inputs.spend_cny if inputs.spend_cny != 0 else None
         )

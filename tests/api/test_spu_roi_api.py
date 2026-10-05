@@ -1407,7 +1407,7 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert item["cpa"] == cny4_from_usd("2")
 
     # 物流终态样本独立于结算：一笔成功送达、没有拒收全损，风险率为 0。
-    assert item["projection_status"] == "available"
+    assert item["projection_status"] == "no_unsettled_orders"
     assert item["projection_terminal_basis_order_count"] == 1
     assert item["projection_terminal_full_loss_order_count"] == 0
     assert item["projection_terminal_full_loss_qty"] == 0
@@ -1860,6 +1860,102 @@ def test_spu_roi_projection_window_is_independent_of_reporting_window(
         "projected_future_full_loss_qty",
     ):
         assert all_time["totals"][key] == september["totals"][key]
+    assert "projection_low_sample" in all_time["meta"]["projection"]["warnings"]
+
+
+def test_projection_scope_is_independent_when_reporting_window_has_no_activity(
+    api_client, readonly_key, db_engine
+):
+    with Session(db_engine) as sess:
+        _seed_projection_scenario(sess)
+        sess.commit()
+
+    headers = {"Authorization": f"Bearer {readonly_key}"}
+    params = {"q": "TEST_ROI_SPU_PROJECTION", "projection_lookback_days": 90}
+    unrestricted = api_client.get(
+        "/v2/analytics/spu-roi", headers=headers, params=params
+    ).json()
+    excluded = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=headers,
+        params={
+            **params,
+            "w_start": "2027-01-01",
+            "w_end": "2027-01-31",
+            "include_all": "true",
+        },
+    ).json()
+
+    assert excluded["items"]
+    for key in (
+        "projection_status",
+        "unsettled_order_count",
+        "delivered_unsettled_order_count",
+        "full_loss_exposure_unsettled_order_count",
+        "projection_basis_order_count",
+        "projection_completed_basis_order_count",
+        "projected_net_profit",
+    ):
+        assert excluded["items"][0][key] == unrestricted["items"][0][key]
+    projection_keys = set(unrestricted["meta"]["projection"]) - {"calculated_at"}
+    assert {
+        key: excluded["meta"]["projection"][key] for key in projection_keys
+    } == {
+        key: unrestricted["meta"]["projection"][key] for key in projection_keys
+    }
+
+
+def test_paid_non_cancelled_returned_order_is_completed_full_loss_not_risk(
+    api_client, readonly_key, db_engine
+):
+    with Session(db_engine) as sess:
+        spu_pk = _seed_terminal_delivery_risk_scenario(sess)
+        shop_pk = sess.execute(
+            text(
+                "SELECT shop_pk FROM commerce.products_spu WHERE id = :spu_pk"
+            ),
+            {"spu_pk": spu_pk},
+        ).scalar_one()
+        order_pk = _seed_order_line(
+            sess,
+            shop_pk=shop_pk,
+            spu_pk=spu_pk,
+            order_id="TEST_ORDER_PAID_RETURNED_NON_CANCELLED",
+            status="IN_TRANSIT",
+            line_ext="TEST_LINE_PAID_RETURNED_NON_CANCELLED",
+            qty="1",
+            unit_price="100000",
+            paid=True,
+        )
+        shipment_id = sess.execute(
+            text(
+                "INSERT INTO fulfillment.shipments ("
+                " order_pk, external_package_id, status"
+                ") VALUES (:order_pk, 'TEST_PKG_PAID_RETURNED_NON_CANCELLED',"
+                " 'RETURNED_TO_SELLER') RETURNING id"
+            ),
+            {"order_pk": order_pk},
+        ).scalar_one()
+        sess.execute(
+            text(
+                "INSERT INTO fulfillment.tracking_events ("
+                " shipment_id, external_event_key, action_code, event_at, description"
+                ") VALUES (:shipment_id, 'TEST_EVENT_PAID_RETURNED_NON_CANCELLED',"
+                " 80101, now(), 'returned to seller')"
+            ),
+            {"shipment_id": shipment_id},
+        )
+        sess.commit()
+
+    response = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+        params={"q": "TEST_ROI_SPU_TERMINAL_DELIVERY_RISK"},
+    )
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["projection_completed_full_loss_order_count"] >= 2
+    assert item["full_loss_exposure_unsettled_order_count"] == 1
 
 
 def test_profitability_public_interface_returns_typed_consistent_result(
