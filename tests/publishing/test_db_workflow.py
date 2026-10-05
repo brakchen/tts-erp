@@ -254,6 +254,10 @@ async def test_worker_automatically_retries_due_cleanup_with_backoff(
     db_session.expire_all()
     assert task.device_cleanup_status == "succeeded"
     assert task.device_cleanup_next_attempt_at is None
+    assert task.status == TaskStatus.SUCCEEDED.value
+    assert task.stage == TaskStage.DONE.value
+    assert store.calls == 1
+    assert task.attempt_count == 0
 
 
 @pytest.mark.asyncio
@@ -1048,7 +1052,7 @@ def test_cleanup_retry_rejects_live_lease_and_requeues_expired_lease(
         _request(),
         db_session,
     )
-    assert result["status"] == TaskStatus.RUNNING.value
+    assert result["status"] == TaskStatus.SUCCEEDED.value
     assert result["stage"] == TaskStage.CLEANING.value
     assert result["cleanup"]["device"]["status"] == "pending"
     assert task.lease_owner is None
@@ -1058,5 +1062,5 @@ def test_config_exposes_configured_album(
     db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TIKTOK_PUBLISH_ALBUM", "TEST_CAMPAIGN")
-    payload = config(db_session)
+    payload = config(_request(role="readwrite"), db_session)
     assert payload["target"]["album"] == "TEST_CAMPAIGN"

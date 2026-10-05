@@ -114,6 +114,8 @@ async def evaluate_access(
         detail = f"requires {needed.value}"
     else:
         # 页面级权限（设计 §7.1）：仅会话用户受约束；API key 走角色矩阵不变。
+        # page:video-publish intentionally scopes this browser workbench and its
+        # owner-scoped video-publish data APIs as a documented page exception.
         needed_page = required_page_permission(request.route_path)
         if (
             needed_page is not None

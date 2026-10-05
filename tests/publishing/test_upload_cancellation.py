@@ -32,6 +32,7 @@ def test_upload_cancellation_aborts_xhr_and_handles_terminal_and_failed_cancel()
             replaceChildren(...nodes) { this.children = nodes; },
             append(...nodes) { this.children.push(...nodes); },
             addEventListener(type, handler) { this[`on${type}`] = handler; },
+            setAttribute(name, value) { this[name] = value; },
             removeAttribute() {}, close() {}, click() { this.clicked = true; },
           };
           created.push(node);
@@ -115,9 +116,11 @@ def test_upload_cancellation_aborts_xhr_and_handles_terminal_and_failed_cancel()
         if (uploadConfirmations !== 1) throw new Error("upload did not require pre-upload confirmation");
         await new Promise((resolve) => setImmediate(resolve));
         if (!FakeXHR.latest || cancel.hidden || cancel.disabled) throw new Error("cancel control was not shown for active upload");
+        if (!fileInput.disabled || !caption.disabled) throw new Error("upload lifecycle did not lock form controls");
         const firstXhr = FakeXHR.latest;
         firstXhr.progress(5, 10);
-        if (elements.get("publish-upload-progress").value !== 50) throw new Error("upload progressbar did not expose value");
+        const progress = elements.get("publish-upload-progress");
+        if (progress.value !== 50 || progress["aria-valuenow"] !== "50" || progress["aria-valuetext"] !== "50%") throw new Error("upload progressbar did not expose accessible value");
         await cancel.onclick();
         await firstRun;
         firstXhr.finish();

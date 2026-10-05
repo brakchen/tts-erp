@@ -23,6 +23,7 @@
     resumeTask: null,
     detail: null,
     detailTaskId: null,
+    detailOpener: null,
     etags: new Map(),
     currentTask: null,
   };
@@ -85,6 +86,9 @@
   function renderForm() {
     const file = state.file;
     const activeUpload = Boolean(state.upload?.xhr);
+    const lifecycleBusy = Boolean(state.upload) || state.creating;
+    $("publish-video-file").disabled = lifecycleBusy;
+    $("publish-caption").disabled = lifecycleBusy;
     const writeReady = Boolean(state.config?.canWrite) && state.config?.worker?.status === "ready";
     $("publish-submit").disabled = !valid() || !writeReady || !!state.upload || state.creating;
     const writeStatus = $("publish-write-status");
@@ -92,6 +96,8 @@
     const progress = $("publish-upload-progress");
     progress.hidden = !activeUpload;
     progress.value = state.upload?.progress || 0;
+    progress.setAttribute("aria-valuenow", String(progress.value));
+    progress.setAttribute("aria-valuetext", `${progress.value}%`);
     const cancel = $("publish-upload-cancel");
     cancel.hidden = !activeUpload;
     cancel.disabled = !activeUpload;
@@ -102,6 +108,7 @@
   }
 
   function pick(file) {
+    if (state.upload || state.creating) return;
     if (!file) return;
     state.file = file;
     if (!state.resumeTask) state.clientRequestId = crypto.randomUUID();
@@ -146,7 +153,7 @@
 
   function confirmPublish(file, caption) {
     const dialog = $("publish-confirm-dialog");
-    if (!dialog?.showModal) return Promise.resolve(window.confirm(`确认将 ${file.name} 发布到 TikTok？\n\n${caption}`));
+    if (!dialog?.showModal) return Promise.resolve(window.confirm(`确认上传 ${file.name} 并加入发布队列？\n\n设备空闲时可能立即开始发布。\n\n${caption}`));
     $("publish-confirm-file").textContent = `${file.name} · ${Math.ceil(file.size / 1024 / 1024 * 10) / 10} MB`;
     $("publish-confirm-caption").textContent = caption;
     const preview = $("publish-confirm-preview");
@@ -194,6 +201,8 @@
           if (event.lengthComputable) {
             upload.progress = Math.round(event.loaded / event.total * 100);
             $("publish-upload-progress").value = upload.progress;
+            $("publish-upload-progress").setAttribute("aria-valuenow", String(upload.progress));
+            $("publish-upload-progress").setAttribute("aria-valuetext", `${upload.progress}%`);
             $("publish-submit").textContent = `上传中 ${upload.progress}%`;
           }
         };
@@ -299,7 +308,10 @@
       const elapsed = startedAt ? `${Math.max(0, Math.floor((Date.now() - Date.parse(startedAt)) / 1000))} 秒` : "—";
       meta.textContent = `任务 ${task.taskId} · ${attempt?.kind || "—"} #${task.publishAttemptCount || 0} · 开始 ${startedAt || "—"} · 已耗时 ${elapsed}`;
       detailButton.hidden = false;
-      detailButton.onclick = () => openDetail(task.taskId);
+      detailButton.onclick = () => {
+        state.detailOpener = detailButton;
+        return openDetail(task.taskId);
+      };
     } else {
       meta.textContent = "";
       detailButton.hidden = true;
@@ -404,7 +416,10 @@
         const button = document.createElement("button");
         button.className = "btn-secondary";
         button.textContent = ACTION_LABELS[actionName] || actionName;
-        button.onclick = () => runTaskAction(task, actionName);
+        button.onclick = () => {
+        if (actionName === "view") state.detailOpener = button;
+        return runTaskAction(task, actionName);
+      };
         actions.append(button);
       });
       row.append(actions);
@@ -621,16 +636,21 @@
   }
 
   $("publish-video-file").addEventListener("change", (event) => pick(event.target.files[0]));
-  $("publish-caption").addEventListener("input", renderForm);
+  $("publish-caption").addEventListener("input", () => {
+    if (!state.upload && !state.creating) renderForm();
+  });
   $("publish-submit").addEventListener("click", create);
   $("publish-upload-cancel").addEventListener("click", cancelUpload);
   $("publish-refresh-now").addEventListener("click", async () => { await refresh(); schedule(); });
   $("publish-refresh-mode").addEventListener("change", schedule);
   $("publish-drawer-close").addEventListener("click", () => {
     $("publish-task-drawer").close();
+    const opener = state.detailOpener;
+    state.detailOpener = null;
     state.detailTaskId = null;
     state.detail = null;
     clearTimeout(state.detailTimer);
+    opener?.focus?.();
   });
   document.querySelectorAll("[data-task-filter]").forEach((button) => button.addEventListener("click", () => {
     state.filter = button.dataset.taskFilter;

@@ -246,7 +246,7 @@ def _conditional(
 
 
 @router.get("/config")
-def config(session: Annotated[Session, Depends(get_session)]) -> dict:
+def config(request: Request, session: Annotated[Session, Depends(get_session)]) -> dict:
     heartbeat_row = session.scalar(
         select(PublishWorkerHeartbeat)
         .where(
@@ -259,6 +259,12 @@ def config(session: Annotated[Session, Depends(get_session)]) -> dict:
     )
     heartbeat = heartbeat_row.heartbeat_at if heartbeat_row else None
     # Config deliberately does not expose credentials or signed URLs.
+    role = getattr(request.scope.get("access_grant"), "role", None)
+    role_name = getattr(role, "value", role) or request.scope.get("api_key_role")
+    actor_can_write = role_name in {"readwrite", "admin"}
+    can_write = bool(os.environ.get("ARTEMIS_DEVICE_SERIAL")) and bool(
+        heartbeat and actor_can_write
+    )
     return {
         "acceptedContentTypes": ["video/mp4"],
         "acceptedExtensions": [".mp4"],
@@ -284,7 +290,12 @@ def config(session: Annotated[Session, Depends(get_session)]) -> dict:
             "lastHeartbeatAt": heartbeat,
         },
         "device": {"status": "unknown", "message": "发布服务将在任务执行前检查设备"},
-        "canWrite": bool(os.environ.get("ARTEMIS_DEVICE_SERIAL")),
+        "canWrite": can_write,
+        "writeBlockReason": None
+        if can_write
+        else "发布权限不足"
+        if not actor_can_write
+        else "发布服务或设备不可用",
         "serverTime": datetime.now(UTC),
     }
 
@@ -551,8 +562,12 @@ def retry(
     except LookupError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     except ValueError as exc:
+        code = str(exc)
         raise HTTPException(
-            status.HTTP_409_CONFLICT, {"code": str(exc), "message": str(exc)}
+            status.HTTP_503_SERVICE_UNAVAILABLE
+            if code == "OBJECT_STORE_UNAVAILABLE"
+            else status.HTTP_409_CONFLICT,
+            {"code": code, "message": code},
         ) from exc
 
 
@@ -603,7 +618,14 @@ def verify(
         ) from exc
     except IntegrityError as exc:
         session.rollback()
-        raise HTTPException(status.HTTP_409_CONFLICT, "VERIFY_ALREADY_RUNNING") from exc
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            {
+                "code": "VERIFY_ALREADY_RUNNING",
+                "message": "A verification attempt is already running",
+                "allowedActions": [],
+            },
+        ) from exc
 
 
 @router.post("/tasks/{task_id}/cleanup/retry")
@@ -646,7 +668,7 @@ def retry_cleanup(
         raise HTTPException(status.HTTP_409_CONFLICT, "PUBLISH_SLOT_BUSY")
     expected_version = task.row_version
     values: dict[str, object] = {
-        "status": "cancelled" if task.status == "cancelled" else "running",
+        "status": task.status,
         "stage": "cleaning",
         "lease_owner": None,
         "lease_expires_at": None,

@@ -24,7 +24,7 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
             textContent: "", value: "", disabled: false, hidden: false,
             style: {}, dataset: {}, classList: { toggle() {} },
             querySelectorAll() { return []; }, replaceChildren() {}, append() {},
-            addEventListener(type, handler) { this[`on${type}`] = handler; }, removeAttribute() {}, showModal() {}, close() {}, click() { if (this.id === "publish-video-file") filePickerClicks += 1; },
+            addEventListener(type, handler) { this[`on${type}`] = handler; }, setAttribute(name, value) { this[name] = value; }, removeAttribute() {}, showModal() {}, close() {}, click() { if (this.id === "publish-video-file") filePickerClicks += 1; },
           };
           created.push(node);
           return node;
