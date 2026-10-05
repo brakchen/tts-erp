@@ -102,7 +102,8 @@ a:hover {
  border: 1px solid var(--rule-soft);
  background: color-mix(in srgb, var(--paper) 72%, white);
  color: var(--muted);
- font-size: 12px;
+ font-family: var(--sans);
+ font-size: 13px;
  line-height: 1.45;
  white-space: nowrap;
 }
@@ -115,11 +116,12 @@ a:hover {
  flex: none;
 }
 .op-freshness-label {
- letter-spacing: 0.04em;
+ font-family: var(--sans);
+ font-size: 13px;
 }
 .op-freshness-time {
- font-family: var(--mono);
- font-size: 12px;
+ font-family: var(--sans);
+ font-size: 13px;
  font-variant-numeric: tabular-nums;
  color: var(--ink);
 }
@@ -235,8 +237,9 @@ a:hover {
  border: 1px solid var(--rule-soft);
  background: color-mix(in srgb, var(--paper) 78%, white);
  color: var(--ink-soft);
+ font-family: var(--sans);
  font-size: 13px;
- line-height: 1.4;
+ line-height: 1.45;
 }
 .op-fee-bar[data-source="shop_estimate"] {
  border-color: color-mix(in srgb, var(--ok) 32%, var(--rule));
@@ -250,9 +253,9 @@ a:hover {
  background: color-mix(in srgb, var(--danger) 7%, var(--paper));
 }
 .op-fee-source {
- font-size: 12px;
- font-weight: 600;
- letter-spacing: 0.08em;
+ font-family: var(--sans);
+ font-size: 13px;
+ font-weight: 400;
  color: var(--ok);
 }
 .op-fee-bar[data-source="user_override"] .op-fee-source {
@@ -263,18 +266,20 @@ a:hover {
  color: var(--danger);
 }
 .op-fee-rate {
- font-family: var(--mono);
- font-size: 14px;
+ font-family: var(--sans);
+ font-size: 13px;
  font-variant-numeric: tabular-nums;
  color: var(--ink);
 }
 .op-fee-meta {
+ font-family: var(--sans);
  color: var(--muted);
- font-size: 12px;
+ font-size: 13px;
 }
 .op-fee-fallback {
+ font-family: var(--sans);
  color: var(--danger);
- font-size: 12px;
+ font-size: 13px;
 }
 
 /* ═══ 结余带 ═══ */
