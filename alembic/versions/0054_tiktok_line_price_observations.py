@@ -5,7 +5,7 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision: str = "0053_tiktok_line_price_observations"
+revision: str = "0054_tiktok_line_price_observations"
 down_revision: str | None = "0052_user_accounts"
 branch_labels: str | None = None
 depends_on: str | None = None
