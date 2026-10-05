@@ -1,0 +1,49 @@
+{
+  "protocolVersion": 1,
+  "requestId": "TEST_cross-logistics-request",
+  "scope": {
+    "sellerId": "TEST_cross-seller",
+    "shopId": "TEST_cross-seller"
+  },
+  "dump": {
+    "domain": "logistics",
+    "endpoint": "https://seller.tiktokshopglobalselling.com/api/v1/fulfillment/logistic_detail/list",
+    "method": "GET",
+    "request": {
+      "params": null,
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "code": 0,
+        "message": "success",
+        "data": {
+          "package_list": [
+            {
+              "main_order_id": "TEST_cross-order",
+              "package_id": "TEST_cross-pkg",
+              "tracking_no": "TEST_TRACK",
+              "logistic_supplier": "VNPost",
+              "logistic_detail": {
+                "track_list": [
+                  {
+                    "time": "2026-10-01T10:00:00Z",
+                    "track_status": "Picked up"
+                  },
+                  {
+                    "time": "2026-10-02T15:00:00Z",
+                    "track_status": "Delivered",
+                    "action_code": 50101
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "createdAt": "2026-10-04T12:13:47.196Z",
+    "mainOrderId": "TEST_cross-order"
+  }
+}

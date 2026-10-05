@@ -1,0 +1,50 @@
+{
+  "protocolVersion": 1,
+  "requestId": "TEST_cross-order-history-request",
+  "scope": {
+    "sellerId": "TEST_cross-seller",
+    "shopId": "TEST_cross-seller"
+  },
+  "dump": {
+    "domain": "order_history",
+    "endpoint": "https://seller.tiktokshopglobalselling.com/api/v1/fulfillment/order/history",
+    "method": "GET",
+    "request": {
+      "params": null,
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "code": 0,
+        "message": "success",
+        "data": {
+          "order_history": [
+            {
+              "description": "Order created",
+              "timestamp": 1759560000,
+              "detail": "created"
+            },
+            {
+              "description": "Paid",
+              "timestamp": 1759563600,
+              "detail": "paid"
+            },
+            {
+              "description": "Shipped",
+              "timestamp": 1759646400,
+              "detail": "shipped"
+            },
+            {
+              "description": "Delivered",
+              "timestamp": 1759732800,
+              "detail": "delivered"
+            }
+          ]
+        }
+      }
+    },
+    "createdAt": "2026-10-04T15:21:10.247Z",
+    "mainOrderId": "TEST_cross-order"
+  }
+}
