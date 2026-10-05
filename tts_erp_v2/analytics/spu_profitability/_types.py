@@ -249,6 +249,22 @@ class ShopFeeRateEntry:
 
 
 @dataclass(frozen=True, slots=True)
+class ProjectionBasis:
+    status: ProjectionStatus
+    warnings: tuple[str, ...]
+    as_of: date
+    lookback_days: int
+    maturity_lag_days: int
+    sample_start: date
+    sample_end: date
+    basis_order_count: int
+    basis_full_loss_order_count: int
+    completed_full_loss_rate: Decimal | None
+    scope_description: str
+    calculated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class ProfitabilityBasis:
     calculated_at: datetime
     fx: FxBasis
@@ -263,6 +279,7 @@ class ProfitabilityBasis:
     display_currency: str = "CNY"
     warnings: tuple[str, ...] = ()
     fee_per_shop: tuple[ShopFeeRateEntry, ...] = ()
+    projection: ProjectionBasis | None = None
 
 
 @dataclass(frozen=True, slots=True)
