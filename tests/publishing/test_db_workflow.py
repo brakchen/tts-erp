@@ -44,6 +44,7 @@ from tts_erp_v2.publishing.dispatcher import (
     _run_attempt,
     _safe_retry,
     dispatch_one,
+    run_background_cleanup_batch,
 )
 from tts_erp_v2.publishing.domain import AttemptStatus, TaskStage, TaskStatus
 from tts_erp_v2.publishing.object_store import VideoObjectStore
@@ -583,7 +584,7 @@ async def test_worker_automatically_retries_object_cleanup_with_backoff(
             spool_dir=tmp_path,
         ),
     )
-    await dispatch_one(deps)
+    assert await run_background_cleanup_batch(deps, limit=1) == 1
     db_session.expire_all()
     assert store.calls == 1
     assert task.object_cleanup_attempts == 1
@@ -593,7 +594,7 @@ async def test_worker_automatically_retries_object_cleanup_with_backoff(
     store.fail = False
     task.object_cleanup_next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
     db_session.commit()
-    await dispatch_one(deps)
+    assert await run_background_cleanup_batch(deps, limit=1) == 1
     db_session.expire_all()
     assert task.object_cleanup_status == "succeeded"
     assert task.object_cleanup_next_attempt_at is None
@@ -633,7 +634,7 @@ async def test_cancelled_object_cleanup_supports_auto_and_manual_retry(
             spool_dir=tmp_path,
         ),
     )
-    await dispatch_one(deps)
+    assert await run_background_cleanup_batch(deps, limit=1) == 1
     db_session.expire_all()
     assert task.status == TaskStatus.CANCELLED.value
     assert task.object_cleanup_status == "failed"
@@ -656,9 +657,9 @@ async def test_cancelled_object_cleanup_supports_auto_and_manual_retry(
     next_attempt = task.object_cleanup_next_attempt_at
     assert next_attempt is not None
     assert next_attempt <= datetime.now(UTC)
-    dispatch_result = await dispatch_one(deps)
+    processed = await run_background_cleanup_batch(deps, limit=1)
     db_session.expire_all()
-    assert dispatch_result == "processed"
+    assert processed == 1
     assert task.status == TaskStatus.CANCELLED.value
     assert task.object_cleanup_status == "succeeded"
 
@@ -704,7 +705,7 @@ async def test_spool_unlink_failure_persists_and_retries_with_fencing(
         original_unlink(path, missing_ok=missing_ok)
 
     monkeypatch.setattr(Path, "unlink", fail_video_unlink)
-    await dispatch_one(deps)
+    assert await run_background_cleanup_batch(deps, limit=1) == 1
     db_session.expire_all()
     assert task.status == TaskStatus.SUCCEEDED.value
     assert task.spool_cleanup_status == "failed"
@@ -713,7 +714,7 @@ async def test_spool_unlink_failure_persists_and_retries_with_fencing(
     task.spool_cleanup_next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
     db_session.commit()
     monkeypatch.setattr(Path, "unlink", original_unlink)
-    await dispatch_one(deps)
+    assert await run_background_cleanup_batch(deps, limit=1) == 1
     db_session.expire_all()
     assert task.spool_cleanup_status == "succeeded"
     assert task.spool_cleanup_next_attempt_at is None
@@ -892,6 +893,18 @@ def test_create_declared_oversize_is_413_and_caption_limit_is_configured(
             Response(),
         )
     assert exc_info.value.status_code == 413
+    db_session.add(
+        PublishWorkerHeartbeat(
+            instance_id="TEST-create-worker",
+            hostname="TEST-host",
+            pid=2424,
+            status="ready",
+            device_status="ready",
+            started_at=datetime.now(UTC),
+            heartbeat_at=datetime.now(UTC),
+        )
+    )
+    db_session.commit()
     created = create_task(
         CreateIn(
             clientRequestId=uuid4(),
@@ -1418,6 +1431,7 @@ async def test_state_owner_repair_red_cases(
     db_session.flush()
     assert claim_one(db_session, "owner") is not None
     task.stage = TaskStage.STAGING_DEVICE.value
+    task.device_path = "/sdcard/Movies/TEST/video.mp4"
     db_session.commit()
     deps = cast(
         PublishDependencies,
@@ -1532,7 +1546,7 @@ async def test_verify_published_is_terminal_and_not_reclaimable(
     assert task.stage == TaskStage.DONE.value
     assert task.lease_owner is None
     assert task.cleanup_intent == "finalize_success"
-    assert await dispatch_one(deps) == "processed"
+    assert await run_background_cleanup_batch(deps, limit=1) == 1
     assert await dispatch_one(deps) == "no_task"
 
 
@@ -1618,7 +1632,7 @@ async def test_queued_worker_reaches_staging_and_terminal_success(
     assert task.status == TaskStatus.SUCCEEDED.value
     assert task.stage == TaskStage.DONE.value
     assert adb.cleanup_registered_before_stage is True
-    assert await dispatch_one(deps) == "processed"
+    assert await run_background_cleanup_batch(deps, limit=1) == 1
     assert await dispatch_one(deps) == "no_task"
 
 
@@ -1669,6 +1683,7 @@ async def test_terminal_safe_retry_preserves_state_and_cleans_device(
     db_session.flush()
     assert claim_one(db_session, "terminal-worker", max_attempts=1) is not None
     task.stage = TaskStage.STAGING_DEVICE.value
+    task.device_path = "/sdcard/Movies/TEST/video.mp4"
     task.attempt_count = 1
     task.publish_budget_used = 1
     db_session.commit()
@@ -1867,7 +1882,7 @@ async def test_live_success_is_terminal_and_not_reclaimable(
     assert task.attempts[0].submitted_at is not None
     assert task.attempts[0].last_polled_at is not None
     assert task.lease_owner is None
-    assert await dispatch_one(deps) == "processed"
+    assert await run_background_cleanup_batch(deps, limit=1) == 1
     assert await dispatch_one(deps) == "no_task"
 
 

@@ -240,8 +240,8 @@ def test_cancel_defers_object_cleanup_until_persisted_put_expiry(
     db_session.execute(
         text(
             "UPDATE publishing.video_publish_tasks "
-            "SET object_upload_expires_at = clock_timestamp() - interval '1 second', "
-            "object_cleanup_next_attempt_at = clock_timestamp() - interval '1 second' "
+            "SET object_upload_expires_at = clock_timestamp() - interval '16 minutes', "
+            "object_cleanup_next_attempt_at = clock_timestamp() - interval '16 minutes' "
             "WHERE id = :task_id"
         ),
         {"task_id": task.id},
@@ -262,7 +262,7 @@ def test_cleanup_work_keeps_retired_generation_identity(
 ) -> None:
     task = _task(status="cancelled", stage="done")
     retired_key = task.object_key
-    task.object_upload_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    task.object_upload_expires_at = datetime.now(UTC) - timedelta(minutes=16)
     task.cleanup_intent = "preserve_state"
     task.object_cleanup_status = "pending"
     task.object_cleanup_next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
@@ -293,7 +293,7 @@ async def test_stale_cleaner_can_only_delete_its_retired_generation(
     db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     task = _task(status="failed", stage="done")
-    task.object_upload_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    task.object_upload_expires_at = datetime.now(UTC) - timedelta(minutes=16)
     task.cleanup_intent = "preserve_state"
     task.object_cleanup_status = "pending"
     task.object_cleanup_next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
@@ -546,6 +546,14 @@ def test_attempt_submission_snapshot_fields_are_immutable_in_postgresql(
             "UPDATE publishing.video_publish_attempts SET target_app_package=:value WHERE id=:attempt_id",
             "com.test.mutated",
         ),
+        (
+            "UPDATE publishing.video_publish_attempts SET artemis_profile=:value WHERE id=:attempt_id",
+            "TEST-mutated-profile",
+        ),
+        (
+            "UPDATE publishing.video_publish_attempts SET artemis_verification_level=:value WHERE id=:attempt_id",
+            "TEST-mutated-verification",
+        ),
     )
     for statement, value in mutations:
         with pytest.raises(Exception, match="identity fields are immutable"):
@@ -596,7 +604,7 @@ def test_v22_docs_and_layout_match_shipped_contracts() -> None:
     assert "artemis-client==" not in design
     assert "tests/api/test_video_publish.py" not in design
     assert "tests/browser/test_video_publish_page.py" not in design
-    assert "0053`–`0065" in runbook
+    assert "0053`–`0066" in runbook
     assert "bash scripts/test_isolated.sh" in architecture
     assert "scripts/test.sh" not in architecture
     assert "tts_erp_v3_test" not in architecture

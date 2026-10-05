@@ -11,7 +11,7 @@ from datetime import timedelta
 from pathlib import Path
 from time import monotonic
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
@@ -134,18 +134,27 @@ async def dispatch_one(deps: PublishDependencies) -> str:
         await _execute(task_id, deps)
         return "processed"
 
-    work = claim_cleanup_work(
-        deps.session_factory,
-        CleanupClaimRequest(
-            owner=deps.instance_id,
-            lease_seconds=deps.lease_seconds,
-            scope="background",
-        ),
-    )
-    if work is not None:
-        await _execute_cleanup(work, deps)
-        return "processed"
     return "no_task"
+
+
+async def run_background_cleanup_batch(deps: PublishDependencies, *, limit: int) -> int:
+    """Process a bounded background-only cleanup batch outside publish dispatch."""
+    processed = 0
+    for _ in range(max(0, limit)):
+        work = await asyncio.to_thread(
+            claim_cleanup_work,
+            deps.session_factory,
+            CleanupClaimRequest(
+                owner=deps.instance_id,
+                lease_seconds=deps.lease_seconds,
+                scope="background",
+            ),
+        )
+        if work is None:
+            break
+        await _execute_cleanup(work, deps)
+        processed += 1
+    return processed
 
 
 def _publish_token(
@@ -202,7 +211,6 @@ def _apply_publish_command(
 
 
 async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
-    local = deps.spool_dir / str(task_id) / "video.mp4"
     pre_artemis = True
     try:
         with deps.session_factory() as session:
@@ -274,6 +282,7 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
             size_bytes = task.size_bytes
             device_serial = task.target_device_serial
             preflight_app_package = task.target_app_package
+            persisted_execution_generation = task.execution_generation
 
         if recovery_id is not None:
             pre_artemis = False
@@ -311,12 +320,15 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
             )
             return
 
+        execution_generation = persisted_execution_generation or uuid4()
+        local = deps.spool_dir / str(task_id) / str(execution_generation) / "video.mp4"
         _apply_publish_command(
             deps,
             task_id,
             AdvanceExecution(
                 stage=TaskStage.DOWNLOADING.value,
                 lease_seconds=deps.lease_seconds,
+                execution_generation=execution_generation,
                 spool_path=str(local),
                 register_spool_cleanup=True,
             ),
@@ -357,7 +369,7 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
             device_serial=device_serial,
             duration_ms=int((monotonic() - download_started) * 1000),
         )
-        device_path = deps.adb.device_path(task_id)
+        device_path = deps.adb.device_path(execution_generation)
 
         async def preflight_device() -> None:
             await deps.adb.check_device(device_serial)
@@ -394,6 +406,10 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
             PrepareAttempt(
                 lease_seconds=deps.lease_seconds,
                 max_attempts=deps.max_attempts,
+                artemis_profile=getattr(deps, "artemis_profile", "pro"),
+                artemis_verification_level=getattr(
+                    deps, "artemis_verification_level", "strict"
+                ),
             ),
         )
         if outcome.retained_token is None or outcome.retained_token.attempt_id is None:
@@ -494,6 +510,8 @@ async def _run_attempt(
         session_id = attempt.artemis_session_id
         device_serial = attempt.device_serial
         app_package = attempt.target_app_package
+        artemis_profile = attempt.artemis_profile
+        artemis_verification_level = attempt.artemis_verification_level
 
     result: ArtemisResult
     if should_submit:
@@ -506,10 +524,8 @@ async def _run_attempt(
                     session_id=session_id,
                     device_serial=device_serial,
                     app_package=app_package,
-                    profile=getattr(deps, "artemis_profile", "pro"),
-                    verification_level=getattr(
-                        deps, "artemis_verification_level", "strict"
-                    ),
+                    profile=artemis_profile,
+                    verification_level=artemis_verification_level,
                 ),
             )
         except ArtemisAdmissionRejected as exc:
@@ -521,7 +537,13 @@ async def _run_attempt(
                     task_id,
                     deps,
                     lambda: _query_after_submit_transport_error(
-                        deps, session_id, goal, device_serial, app_package
+                        deps,
+                        session_id,
+                        goal,
+                        device_serial,
+                        app_package,
+                        artemis_profile,
+                        artemis_verification_level,
                     ),
                 )
             except ArtemisAdmissionRejected as exc:
@@ -546,10 +568,8 @@ async def _run_attempt(
                         session_id=session_id,
                         device_serial=device_serial,
                         app_package=app_package,
-                        profile=getattr(deps, "artemis_profile", "pro"),
-                        verification_level=getattr(
-                            deps, "artemis_verification_level", "strict"
-                        ),
+                        profile=artemis_profile,
+                        verification_level=artemis_verification_level,
                     ),
                 )
                 result = dataclasses.replace(result, same_session_resubmitted=True)
@@ -625,6 +645,8 @@ async def _query_after_submit_transport_error(
     goal: str,
     device_serial: str,
     app_package: str,
+    artemis_profile: str,
+    artemis_verification_level: str,
 ) -> ArtemisResult:
     result = await deps.artemis.get_task(session_id)
     if result.status in {"missing", "not_found"}:
@@ -633,8 +655,8 @@ async def _query_after_submit_transport_error(
             session_id=session_id,
             device_serial=device_serial,
             app_package=app_package,
-            profile=getattr(deps, "artemis_profile", "pro"),
-            verification_level=getattr(deps, "artemis_verification_level", "strict"),
+            profile=artemis_profile,
+            verification_level=artemis_verification_level,
         )
         return dataclasses.replace(result, same_session_resubmitted=True)
     return result
@@ -896,7 +918,10 @@ async def _execute_cleanup(work: CleanupWork, deps: PublishDependencies) -> None
                 work.device_serial, work.device_path or ""
             ),
         )
-        expected_spool_path = deps.spool_dir / str(work.task_id) / "video.mp4"
+        expected_spool_path = deps.spool_dir / str(work.task_id)
+        if work.execution_generation is not None:
+            expected_spool_path /= str(work.execution_generation)
+        expected_spool_path /= "video.mp4"
         spool_path = Path(work.spool_path) if work.spool_path else expected_spool_path
         if spool_path != expected_spool_path:
 
@@ -908,6 +933,9 @@ async def _execute_cleanup(work: CleanupWork, deps: PublishDependencies) -> None
 
             async def remove_managed_spool() -> None:
                 await _remove_spool(spool_path)
+                if work.execution_generation is not None:
+                    with contextlib.suppress(OSError):
+                        await asyncio.to_thread(spool_path.parent.parent.rmdir)
 
             spool_cleanup = remove_managed_spool
         await run(

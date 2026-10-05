@@ -26,6 +26,7 @@ from tts_erp_v2.publishing.dispatcher import (
     PublishDependencies,
     dispatch_one,
     recover_active,
+    run_background_cleanup_batch,
 )
 from tts_erp_v2.publishing.repository import (
     AdvanceExecution,
@@ -147,7 +148,8 @@ async def test_spool_is_owned_before_download_rename_and_object_loss_recovery(
     with pytest.raises(asyncio.CancelledError):
         await dispatch_one(deps)
     db_session.expire_all()
-    destination = tmp_path / str(task_id) / "video.mp4"
+    assert task.spool_path is not None
+    destination = Path(task.spool_path)
     assert destination.exists()
     assert task.status == "running"
     assert task.spool_cleanup_status == "pending"
@@ -160,7 +162,7 @@ async def test_spool_is_owned_before_download_rename_and_object_loss_recovery(
     assert task.spool_cleanup_status == "pending"
     assert task.cleanup_intent == "preserve_state"
 
-    assert await dispatch_one(deps) == "processed"
+    assert await run_background_cleanup_batch(deps, limit=1) == 1
     db_session.expire_all()
     assert not destination.exists()
     assert task.spool_cleanup_status == "succeeded"

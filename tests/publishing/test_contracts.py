@@ -153,6 +153,8 @@ async def test_transport_recovery_queries_before_same_session_resubmit() -> None
         "goal",
         "device",
         "com.tiktok",
+        "TEST_profile",
+        "TEST_verification",
     )
     assert result.status == "queued"
     assert artemis.calls == [

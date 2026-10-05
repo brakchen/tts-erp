@@ -207,7 +207,7 @@ def test_generated_schema_and_architecture_cover_publishing_head() -> None:
     schema_readme = (ROOT / "docs/schema/README.md").read_text()
     schema_sql = (ROOT / "docs/schema/schema_tts_erp.sql").read_text()
     process = (ROOT / "docs/architecture/process-architecture.md").read_text()
-    assert "0065_publish_generation_identity" in schema_readme
+    assert "0066_publish_execution_fences" in schema_readme
     assert "13 个业务 schema、71 张表" in schema_readme
     assert "### publishing" in schema_readme
     assert "CREATE SCHEMA publishing" in schema_sql

@@ -74,7 +74,7 @@ bash prod-switch/postswitch-smoke.sh
 ### Lane 1 — `chore/agents-md-prod-data-rule`（无 migration，docs-only）
 
 - **改动面**：`AGENTS.md` §6 加"严禁删 prod 数据"条款（文本见 §6）
-- **测试**：文档-only，**不跑** `scripts/test.sh`
+- **测试**：文档-only，只做链接与 Markdown 校验
 - **策略**：master WT 直改 + 原子 commit
 
 ### Lane 2 — `chore/rename-chrome-sync-to-plugin`（migration **0023**）
@@ -99,7 +99,7 @@ ALTER SCHEMA chrome_sync RENAME TO plugin;
 - `docs/schema/schema_tts_erp.sql`（regen）
 - 文档：`docs/api/external-api.md`、`docs/archive/chrome-ext-order-sync-design.md`、`AGENTS.md` §1/§8
 
-**测试**：`flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast`
+**测试**：`bash scripts/test_isolated.sh fast`
 **注**：历史 migration `0016`（`CREATE SCHEMA chrome_sync`）**必须保留** —— 0023 依赖它建好的 schema
 
 ### Lane 3 — `chore/move-analytics-to-plugin`（migration **0024**，原 lane 3+4 合并）
@@ -211,10 +211,8 @@ ALTER TABLE commerce.shops DROP COLUMN data_source;
 ### 4.6 prod 迁移协议（用户手动）
 
 ```bash
-# agent 只做这些（test 库）：
-set -a; . ./.env.test; set +a
-.venv/bin/alembic upgrade head            # → tts_erp_v3_test
-flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast
+# agent 只做 isolated ephemeral test 验证：
+bash scripts/test_isolated.sh --refresh-template fast
 
 # 用户在自选时机做这些（prod）—— agent 绝不代跑：
 cd /home/schan/tts-erp
@@ -229,9 +227,9 @@ systemctl --user restart tts-erp.service tts-erp-sync.service
 
 - ✅ **`.env.test` 已创建**（`.env` 整份复制 + `sed 's|/tts_erp\b|/tts_erp_v3_test|'`，权限 0600）
 - ✅ 已验证：`bash -c 'set -a; . ./.env.test; set +a; echo $TTS_ERP_DB_URL'` → `tts_erp_v3_test`
-- ✅ 已验证：`flock -n /tmp/tts-erp-test.lock bash scripts/test.sh api tests/api/test_analytics_dumps_v4.py` → **13 passed**，prod 零改动
+- ✅ 已验证：`bash scripts/test_isolated.sh api tests/api/test_analytics_dumps_v4.py` → **13 passed**，prod 零改动
 
-**⚠️ 纪律红线（本 session 亲测教训）**：**永远不要用裸 `.venv/bin/pytest`** —— 它读 `.env` = **prod**！只能用 `bash scripts/test.sh <...>`（会自动 source `.env.test`）。
+**⚠️ 纪律红线**：测试只可经 `bash scripts/test_isolated.sh ...` 进入 ephemeral clone；不得绕过 wrapper 或使用共享库。
 
 ## 6. AGENTS.md §6 新增条款（lane 1 直接复用）
 

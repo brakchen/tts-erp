@@ -171,8 +171,7 @@ validated DumpIntakeRequest
 ### Narrow tests
 
 ```bash
-flock -n /tmp/tts-erp-test.lock \
-  bash scripts/test.sh fast \
+bash scripts/test_isolated.sh fast \
   tests/api/test_order_sync_contract.py \
   tests/plugin/orders/test_intake.py \
   tests/plugin/orders/test_parser.py \
@@ -192,7 +191,7 @@ flock -n /tmp/tts-erp-test.lock \
 
 ### Completion
 
-- 运行 `bash scripts/test.sh fast` 并与当前 master stable baseline 比较；零新增稳定失败。
+- 运行 `bash scripts/test_isolated.sh fast` 并与当前 master stable baseline 比较；零新增稳定失败。
 - LSP / diff check 为零。
 - reviewer + fixer 闭环完成。
 - 只提交并推送 lane branch；**未经用户 review 不 merge master**。

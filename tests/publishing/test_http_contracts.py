@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from tts_erp_v2.api import deps
 from tts_erp_v2.api.v2 import video_publish
-from tts_erp_v2.db.models.publishing import VideoPublishTask
+from tts_erp_v2.db.models.publishing import PublishWorkerHeartbeat, VideoPublishTask
 
 
 class _UploadStore:
@@ -51,6 +51,18 @@ def test_upload_ticket_http_statuses_and_foreign_replay_denial(
             request.scope["api_key_hash"] = request.headers.get("X-Test-Key", "key-a")
         return await call_next(request)
 
+    db_session.add(
+        PublishWorkerHeartbeat(
+            instance_id="TEST-http-worker",
+            hostname="TEST-host",
+            pid=2424,
+            status="ready",
+            device_status="ready",
+            started_at=datetime.now(UTC),
+            heartbeat_at=datetime.now(UTC),
+        )
+    )
+    db_session.commit()
     store = _UploadStore(db_session)
     app.dependency_overrides[deps.get_session] = lambda: db_session
     app.dependency_overrides[video_publish.get_session] = lambda: db_session

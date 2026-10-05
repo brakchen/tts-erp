@@ -150,7 +150,9 @@ CREATE OR REPLACE FUNCTION publishing.fn_immutable_video_publish_attempt_identit
                OR NEW.prompt_snapshot IS DISTINCT FROM OLD.prompt_snapshot
                OR NEW.device_serial IS DISTINCT FROM OLD.device_serial
                OR NEW.device_path IS DISTINCT FROM OLD.device_path
-               OR NEW.target_app_package IS DISTINCT FROM OLD.target_app_package THEN
+               OR NEW.target_app_package IS DISTINCT FROM OLD.target_app_package
+               OR NEW.artemis_profile IS DISTINCT FROM OLD.artemis_profile
+               OR NEW.artemis_verification_level IS DISTINCT FROM OLD.artemis_verification_level THEN
                 RAISE EXCEPTION
                     'video publish attempt identity fields are immutable'
                     USING ERRCODE = '23514';
@@ -1653,6 +1655,8 @@ CREATE TABLE IF NOT EXISTS publishing.video_publish_attempts (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     target_app_package text DEFAULT 'com.zhiliaoapp.musically'::text NOT NULL,
+    artemis_profile text DEFAULT 'pro'::text NOT NULL,
+    artemis_verification_level text DEFAULT 'strict'::text NOT NULL,
     CONSTRAINT video_publish_attempt_kind_check CHECK ((kind = ANY (ARRAY['publish'::text, 'verify'::text]))),
     CONSTRAINT video_publish_attempt_related_check CHECK ((((kind = 'publish'::text) AND (related_attempt_id IS NULL)) OR ((kind = 'verify'::text) AND (related_attempt_id IS NOT NULL)))),
     CONSTRAINT video_publish_attempt_status_check CHECK ((status = ANY (ARRAY['created'::text, 'submitting'::text, 'queued'::text, 'running'::text, 'success'::text, 'failed'::text, 'rejected'::text, 'cancelled'::text, 'unknown'::text])))
@@ -1723,6 +1727,7 @@ CREATE TABLE IF NOT EXISTS publishing.video_publish_tasks (
     spool_path text,
     object_generation uuid DEFAULT gen_random_uuid() NOT NULL,
     object_upload_expires_at timestamp with time zone,
+    execution_generation uuid,
     CONSTRAINT video_publish_task_budget_check CHECK (((attempt_count >= 0) AND (publish_budget_used >= 0) AND (publish_budget_used <= attempt_count))),
     CONSTRAINT video_publish_task_cleanup_intent_check CHECK ((cleanup_intent = ANY (ARRAY['none'::text, 'finalize_success'::text, 'requeue_publish'::text, 'preserve_state'::text]))),
     CONSTRAINT video_publish_task_cleanup_owner_check CHECK ((((cleanup_intent = 'none'::text) AND (cleanup_lease_owner IS NULL) AND (cleanup_lease_expires_at IS NULL) AND (((status = 'running'::text) AND (lease_owner IS NOT NULL) AND (stage = ANY (ARRAY['downloading'::text, 'staging_device'::text, 'dispatching_artemis'::text, 'waiting_artemis'::text, 'verifying'::text])) AND (object_cleanup_status <> ALL (ARRAY['pending'::text, 'failed'::text]))) OR ((device_cleanup_status <> ALL (ARRAY['pending'::text, 'failed'::text])) AND (spool_cleanup_status <> ALL (ARRAY['pending'::text, 'failed'::text])) AND (object_cleanup_status <> ALL (ARRAY['pending'::text, 'failed'::text]))))) OR ((cleanup_intent = 'finalize_success'::text) AND (status = 'succeeded'::text) AND (stage = 'done'::text)) OR ((cleanup_intent = 'requeue_publish'::text) AND (status = 'pending'::text) AND (stage = ANY (ARRAY['queued'::text, 'waiting_device'::text])) AND (object_cleanup_status <> ALL (ARRAY['pending'::text, 'failed'::text]))) OR ((cleanup_intent = 'preserve_state'::text) AND (status = ANY (ARRAY['succeeded'::text, 'failed'::text, 'needs_review'::text, 'cancelled'::text])) AND (stage = 'done'::text)))),
@@ -2597,6 +2602,12 @@ ALTER TABLE ONLY publishing.video_publish_attempts
     ADD CONSTRAINT uq_video_publish_attempt_task_seq UNIQUE (task_id, sequence_no);
 
 
+-- Name: video_publish_tasks uq_video_publish_execution_generation; Type: CONSTRAINT; Schema: publishing; Owner: -
+
+ALTER TABLE ONLY publishing.video_publish_tasks
+    ADD CONSTRAINT uq_video_publish_execution_generation UNIQUE (execution_generation);
+
+
 -- Name: video_publish_tasks uq_video_publish_object_generation; Type: CONSTRAINT; Schema: publishing; Owner: -
 
 ALTER TABLE ONLY publishing.video_publish_tasks
@@ -3464,7 +3475,7 @@ CREATE OR REPLACE TRIGGER trg_procurement_spu_images_touch BEFORE UPDATE ON proc
 
 -- Name: video_publish_attempts trg_video_publish_attempt_identity; Type: TRIGGER; Schema: publishing; Owner: -
 
-CREATE OR REPLACE TRIGGER trg_video_publish_attempt_identity BEFORE UPDATE OF task_id, sequence_no, kind, related_attempt_id, artemis_session_id, prompt_version, prompt_snapshot, device_serial, device_path, target_app_package ON publishing.video_publish_attempts FOR EACH ROW EXECUTE FUNCTION publishing.fn_immutable_video_publish_attempt_identity();
+CREATE OR REPLACE TRIGGER trg_video_publish_attempt_identity BEFORE UPDATE OF task_id, sequence_no, kind, related_attempt_id, artemis_session_id, prompt_version, prompt_snapshot, device_serial, device_path, target_app_package, artemis_profile, artemis_verification_level ON publishing.video_publish_attempts FOR EACH ROW EXECUTE FUNCTION publishing.fn_immutable_video_publish_attempt_identity();
 
 
 -- Name: video_publish_attempts trg_video_publish_attempt_related; Type: TRIGGER; Schema: publishing; Owner: -

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -153,6 +154,54 @@ def test_0065_generation_identity_round_trip_and_downgrade_guard(db_engine) -> N
             _insert_task(conn)
             savepoint = conn.begin_nested()
             with pytest.raises(Exception, match="0065 downgrade refused"):
+                migration.downgrade()
+            savepoint.rollback()
+        finally:
+            transaction.rollback()
+
+
+def test_0066_fences_populated_0065_rows_and_extends_attempt_identity(
+    db_engine,
+) -> None:
+    migration = _load("0066_publish_execution_fences")
+    assert migration.down_revision == "0065_publish_generation_identity"
+    with db_engine.connect() as conn:
+        transaction = conn.begin()
+        try:
+            migration.__dict__["op"] = Operations(MigrationContext.configure(conn))
+            migration.downgrade()
+            task_id = _insert_task(conn)
+            # pi-lens-ignore: python-sql-injection
+            before = conn.execute(text("SELECT clock_timestamp()")).scalar_one()
+
+            migration.upgrade()
+
+            task_columns = {
+                row["name"]
+                for row in inspect(conn).get_columns(
+                    "video_publish_tasks", schema="publishing"
+                )
+            }
+            attempt_columns = {
+                row["name"]
+                for row in inspect(conn).get_columns(
+                    "video_publish_attempts", schema="publishing"
+                )
+            }
+            assert "execution_generation" in task_columns
+            assert {"artemis_profile", "artemis_verification_level"} <= attempt_columns
+            # pi-lens-ignore: python-sql-injection
+            expiry = conn.execute(
+                text(
+                    "SELECT object_upload_expires_at "
+                    "FROM publishing.video_publish_tasks WHERE id=:id"
+                ),
+                {"id": task_id},
+            ).scalar_one()
+            assert expiry >= before + timedelta(days=7)
+
+            savepoint = conn.begin_nested()
+            with pytest.raises(Exception, match="0066 downgrade refused"):
                 migration.downgrade()
             savepoint.rollback()
         finally:

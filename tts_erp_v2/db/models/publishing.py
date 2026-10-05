@@ -74,6 +74,9 @@ class VideoPublishTask(Base):
         UniqueConstraint(
             "object_generation", name="uq_video_publish_object_generation"
         ),
+        UniqueConstraint(
+            "execution_generation", name="uq_video_publish_execution_generation"
+        ),
         Index(
             "ix_video_publish_queue",
             "next_attempt_at",
@@ -183,6 +186,7 @@ class VideoPublishTask(Base):
     )
     target_device_serial: Mapped[str] = mapped_column(Text, nullable=False)
     target_app_package: Mapped[str] = mapped_column(Text, nullable=False)
+    execution_generation: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     device_path: Mapped[str | None] = mapped_column(Text)
     spool_path: Mapped[str | None] = mapped_column(Text)
     last_error_code: Mapped[str | None] = mapped_column(Text)
@@ -309,6 +313,12 @@ class VideoPublishAttempt(Base):
         Text,
         nullable=False,
         server_default=text("'com.zhiliaoapp.musically'"),
+    )
+    artemis_profile: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'pro'")
+    )
+    artemis_verification_level: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'strict'")
     )
     artemis_output: Mapped[dict | None] = mapped_column(JSONB)
     artemis_error: Mapped[str | None] = mapped_column(Text)

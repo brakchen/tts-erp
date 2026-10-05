@@ -67,6 +67,8 @@ class PrepareAttempt:
     attempt_id: int | None = None
     lease_seconds: int = 30
     max_attempts: int = 3
+    artemis_profile: str = "pro"
+    artemis_verification_level: str = "strict"
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +89,7 @@ class AdmissionRejected:
 class AdvanceExecution:
     stage: str
     lease_seconds: int = 30
+    execution_generation: UUID | None = None
     object_sha256: str | None = None
     device_path: str | None = None
     spool_path: str | None = None
@@ -157,6 +160,7 @@ class CleanupWork:
     token: CleanupLeaseToken
     resources: tuple[str, ...]
     device_serial: str
+    execution_generation: UUID | None
     device_path: str | None
     spool_path: str | None
     object_generation: UUID
@@ -170,6 +174,9 @@ class CleanupOutcome:
     task_stage: str
     cleanup_intent: str
     row_version: int
+
+
+OBJECT_UPLOAD_COMPLETION_GRACE = timedelta(minutes=15)
 
 
 def database_now(session: Session) -> datetime:
@@ -253,6 +260,9 @@ def _new_publish_attempt(
     task: VideoPublishTask,
     now: datetime,
     max_attempts: int,
+    *,
+    artemis_profile: str,
+    artemis_verification_level: str,
 ) -> VideoPublishAttempt:
     if task.publish_budget_used >= max_attempts:
         raise ValueError("RETRY_BUDGET_EXHAUSTED")
@@ -282,6 +292,8 @@ def _new_publish_attempt(
         device_serial=task.target_device_serial,
         device_path=task.device_path,
         target_app_package=task.target_app_package,
+        artemis_profile=artemis_profile,
+        artemis_verification_level=artemis_verification_level,
         started_at=now,
     )
     session.add(attempt)
@@ -330,6 +342,8 @@ def _new_verify_attempt(
         device_serial=task.target_device_serial,
         device_path=task.device_path,
         target_app_package=task.target_app_package,
+        artemis_profile=related.artemis_profile,
+        artemis_verification_level=related.artemis_verification_level,
     )
     session.add(attempt)
     session.flush()
@@ -499,6 +513,8 @@ def commit_publish_transition(
                 lease_expires_at=now + timedelta(seconds=command.lease_seconds),
             )
             task_values.update(_stage_values(task, command.stage, now))
+            if command.execution_generation is not None:
+                task_values["execution_generation"] = command.execution_generation
             if command.object_sha256 is not None:
                 task_values["object_sha256"] = command.object_sha256
             if command.device_path is not None:
@@ -881,7 +897,14 @@ def commit_publish_transition(
             session.rollback()
             raise LeaseLost(token.task_id)
         if isinstance(command, PrepareAttempt) and command.attempt_id is None:
-            attempt = _new_publish_attempt(session, task, now, command.max_attempts)
+            attempt = _new_publish_attempt(
+                session,
+                task,
+                now,
+                command.max_attempts,
+                artemis_profile=command.artemis_profile,
+                artemis_verification_level=command.artemis_verification_level,
+            )
             inserted_attempt = attempt
             token = PublishLeaseToken(
                 task_id=token.task_id,
@@ -1046,9 +1069,17 @@ def claim_cleanup_work(
             VideoPublishTask.spool_cleanup_status,
             VideoPublishTask.spool_cleanup_next_attempt_at,
         )
-        object_due = due(
-            VideoPublishTask.object_cleanup_status,
-            VideoPublishTask.object_cleanup_next_attempt_at,
+        object_due = and_(
+            due(
+                VideoPublishTask.object_cleanup_status,
+                VideoPublishTask.object_cleanup_next_attempt_at,
+            ),
+            or_(
+                VideoPublishTask.object_upload_expires_at.is_(None),
+                VideoPublishTask.object_upload_expires_at
+                + OBJECT_UPLOAD_COMPLETION_GRACE
+                <= now,
+            ),
         )
         resource_due = (
             device_due if request.scope == "device" else or_(spool_due, object_due)
@@ -1095,6 +1126,7 @@ def claim_cleanup_work(
                 VideoPublishTask.row_version,
                 VideoPublishTask.cleanup_lease_expires_at,
                 VideoPublishTask.target_device_serial,
+                VideoPublishTask.execution_generation,
                 VideoPublishTask.device_path,
                 VideoPublishTask.spool_path,
                 VideoPublishTask.object_generation,
@@ -1128,6 +1160,7 @@ def claim_cleanup_work(
             ),
             resources=resources,
             device_serial=row.target_device_serial,
+            execution_generation=row.execution_generation,
             device_path=row.device_path,
             spool_path=row.spool_path,
             object_generation=row.object_generation,
@@ -1431,6 +1464,9 @@ def claim_one(
         return None
     task.status = TaskStatus.RUNNING.value
     set_task_stage(task, TaskStage.DOWNLOADING, now=now)
+    task.execution_generation = uuid4()
+    task.device_path = None
+    task.spool_path = None
     task.lease_owner = instance_id
     task.lease_expires_at = now + timedelta(seconds=lease_seconds)
     task.heartbeat_at = now

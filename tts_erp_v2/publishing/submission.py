@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
@@ -37,6 +38,7 @@ from tts_erp_v2.storage.minio_client import ObjectNotFound
 
 _BUCKET = os.environ.get("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video")
 _PACKAGE = os.environ.get("ARTEMIS_APP_PACKAGE", "com.zhiliaoapp.musically")
+MAX_UPLOAD_TICKET_TTL = timedelta(days=7)
 
 
 def max_video_bytes() -> int:
@@ -64,6 +66,8 @@ def upload_expires_at(
         expiry = timedelta(
             seconds=int(os.environ.get("TIKTOK_PUBLISH_UPLOAD_TTL_SECONDS", "900"))
         )
+    if expiry <= timedelta(0) or expiry > MAX_UPLOAD_TICKET_TTL:
+        raise ValueError("UPLOAD_TTL_EXCEEDS_SAFE_MAX")
     return (database_time or datetime.now(UTC)) + expiry
 
 
@@ -92,7 +96,7 @@ def refresh_upload_ticket(
     if task is None:
         raise LookupError("TASK_NOT_FOUND")
     if task.stage != TaskStage.AWAITING_UPLOAD.value:
-        raise ValueError("TASK_ACTION_NOT_ALLOWED")
+        raise TaskConflict("TASK_ACTION_NOT_ALLOWED", task)
     url, expires_at = _issue_upload_ticket(session, task, store)
     return task, url, expires_at
 
@@ -144,7 +148,11 @@ def _presign_put(store: VideoObjectStore, key: str, content_type: str) -> str:
 
 
 def create_upload_ticket(
-    session: Session, command: CreateCommand, store: VideoObjectStore
+    session: Session,
+    command: CreateCommand,
+    store: VideoObjectStore,
+    *,
+    new_task_ready: Callable[[], bool] | None = None,
 ) -> tuple[VideoPublishTask, str, bool]:
     caption = normalize_caption(command.caption)
     browser_filename = original_basename(command.filename)
@@ -165,9 +173,9 @@ def create_upload_ticket(
     if len(caption) > max_caption_chars():
         raise ValueError("CAPTION_TOO_LONG")
     existing = session.scalar(
-        select(VideoPublishTask).where(
-            VideoPublishTask.client_request_id == command.client_request_id
-        )
+        select(VideoPublishTask)
+        .where(VideoPublishTask.client_request_id == command.client_request_id)
+        .with_for_update()
     )
     if existing:
         owner_matches = (
@@ -195,6 +203,8 @@ def create_upload_ticket(
             return existing, "", True
         upload_url, _expires_at = _issue_upload_ticket(session, existing, store)
         return existing, upload_url, True
+    if new_task_ready is not None and not new_task_ready():
+        raise ValueError("PUBLISH_WORKER_UNAVAILABLE")
     task_id = uuid4()
     generation = uuid4()
     now = database_now(session)
@@ -224,9 +234,9 @@ def create_upload_ticket(
     except IntegrityError:
         session.rollback()
         winner = session.scalar(
-            select(VideoPublishTask).where(
-                VideoPublishTask.client_request_id == command.client_request_id
-            )
+            select(VideoPublishTask)
+            .where(VideoPublishTask.client_request_id == command.client_request_id)
+            .with_for_update()
         )
         if winner is None:
             raise
@@ -256,7 +266,9 @@ def create_upload_ticket(
         stage=task.stage,
         outcome=task.status,
     )
-    upload_url, _expires_at = _issue_upload_ticket(session, task, store)
+    task, upload_url, _expires_at = refresh_upload_ticket(
+        session, task.public_id, store
+    )
     return task, upload_url, False
 
 
@@ -323,12 +335,14 @@ def replace_upload(session: Session, task_id: UUID) -> VideoPublishTask:
     task = get_task(session, task_id, lock=True)
     if task is None:
         raise LookupError("TASK_NOT_FOUND")
-    if task.status != TaskStatus.FAILED.value or task.object_deleted_at is None:
+    if task.status != TaskStatus.FAILED.value:
         raise ValueError("UPLOAD_REPLACEMENT_REQUIRED")
     if replacement_cleanup_pending(task):
         raise ValueError("CLEANUP_REQUIRED")
     if object_cleanup_blocks_input(task):
         raise ValueError("OBJECT_CLEANUP_IN_PROGRESS")
+    if task.object_deleted_at is None:
+        raise ValueError("UPLOAD_REPLACEMENT_REQUIRED")
     if not replace_upload_allowed(task):
         raise ValueError("RETRY_BUDGET_EXHAUSTED")
     now = database_now(session)
@@ -408,8 +422,16 @@ def retry_task(
         try:
             store.stat(task.object_key)
         except ObjectNotFound as exc:
-            task.object_deleted_at = database_now(session)
-            task.object_cleanup_status = "succeeded"
+            now = database_now(session)
+            task.cleanup_intent = CleanupIntent.PRESERVE_STATE.value
+            task.object_cleanup_status = "pending"
+            task.object_cleanup_error = None
+            task.object_cleanup_next_attempt_at = max(
+                filter(None, (now, task.object_upload_expires_at))
+            )
+            task.cleanup_lease_owner = None
+            task.cleanup_lease_expires_at = None
+            task.cleanup_heartbeat_at = None
             task.row_version += 1
             session.commit()
             raise ValueError("UPLOAD_REPLACEMENT_REQUIRED") from exc

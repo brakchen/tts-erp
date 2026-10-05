@@ -535,9 +535,8 @@ def _conditional(
     return None
 
 
-@router.get("/config")
-def config(request: Request, session: Annotated[Session, Depends(get_session)]) -> dict:
-    heartbeat_row = session.scalar(
+def _fresh_ready_worker(session: Session) -> PublishWorkerHeartbeat | None:
+    return session.scalar(
         select(PublishWorkerHeartbeat)
         .where(
             PublishWorkerHeartbeat.status == "ready",
@@ -547,6 +546,11 @@ def config(request: Request, session: Annotated[Session, Depends(get_session)]) 
         .order_by(PublishWorkerHeartbeat.heartbeat_at.desc())
         .limit(1)
     )
+
+
+@router.get("/config")
+def config(request: Request, session: Annotated[Session, Depends(get_session)]) -> dict:
+    heartbeat_row = _fresh_ready_worker(session)
     heartbeat = heartbeat_row.heartbeat_at if heartbeat_row else None
     configured_serial = bool(os.environ.get("ARTEMIS_DEVICE_SERIAL"))
     device_status = (
@@ -640,21 +644,32 @@ def create_task(
                 actor_key_hash=caller_key_hash(request),
             ),
             store,
+            new_task_ready=lambda: _fresh_ready_worker(session) is not None,
         )
     except PermissionError as exc:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
             _error_detail(request, "TASK_NOT_FOUND", "TASK_NOT_FOUND", retryable=False),
         ) from exc
+    except TaskConflict as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            _action_conflict(request, exc.task, exc.code, exc.code),
+        ) from exc
     except ValueError as exc:
         code = str(exc)
         error_status = (
             status.HTTP_503_SERVICE_UNAVAILABLE
-            if code == "OBJECT_STORE_UNAVAILABLE"
+            if code in {"OBJECT_STORE_UNAVAILABLE", "PUBLISH_WORKER_UNAVAILABLE"}
             else status.HTTP_413_CONTENT_TOO_LARGE
             if code == "VIDEO_TOO_LARGE"
             else status.HTTP_409_CONFLICT
-            if code == "IDEMPOTENCY_PAYLOAD_MISMATCH"
+            if code
+            in {
+                "IDEMPOTENCY_PAYLOAD_MISMATCH",
+                "TASK_ACTION_NOT_ALLOWED",
+                "TASK_VERSION_CONFLICT",
+            }
             else status.HTTP_422_UNPROCESSABLE_CONTENT
         )
         raise HTTPException(
@@ -666,6 +681,7 @@ def create_task(
                 retryable=code
                 in {
                     "OBJECT_STORE_UNAVAILABLE",
+                    "PUBLISH_WORKER_UNAVAILABLE",
                     "VIDEO_TOO_LARGE",
                     "CAPTION_REQUIRED",
                     "CAPTION_TOO_LONG",
@@ -710,6 +726,25 @@ def refresh_upload_url(
         task, upload_url, expires_at = refresh_upload_ticket(
             session, task.public_id, store
         )
+    except ValueError as exc:
+        code = str(exc)
+        if code in {"TASK_ACTION_NOT_ALLOWED", "TASK_VERSION_CONFLICT"}:
+            session.expire_all()
+            current = _task_for_actor(session, task_id, request)
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                _action_conflict(request, current, code, code),
+            ) from exc
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            _error_detail(
+                request,
+                "OBJECT_STORE_UNAVAILABLE",
+                "OBJECT_STORE_UNAVAILABLE",
+                retryable=True,
+                task=task,
+            ),
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,

@@ -19,6 +19,7 @@ from tts_erp_v2.publishing.dispatcher import (
     PublishDependencies,
     dispatch_one,
     recover_active,
+    run_background_cleanup_batch,
 )
 from tts_erp_v2.publishing.object_store import MinioVideoStore
 from tts_erp_v2.publishing.repository import schedule_spool_reconciliation
@@ -63,6 +64,18 @@ async def run() -> None:
         ),
         name="publish-heartbeat",
     )
+    background_cleanup_task = asyncio.create_task(
+        _background_cleanup_loop(
+            deps,
+            batch_size=int(
+                os.environ.get("PUBLISH_BACKGROUND_CLEANUP_BATCH_SIZE", "1")
+            ),
+            interval_seconds=float(
+                os.environ.get("PUBLISH_BACKGROUND_CLEANUP_INTERVAL_SECONDS", "1")
+            ),
+        ),
+        name="publish-background-cleanup",
+    )
     try:
         await recover_active(deps)
         while True:
@@ -70,10 +83,30 @@ async def run() -> None:
             await asyncio.sleep(deps.poll_seconds)
     finally:
         heartbeat_task.cancel()
-        await asyncio.gather(heartbeat_task, return_exceptions=True)
+        background_cleanup_task.cancel()
+        await asyncio.gather(
+            heartbeat_task, background_cleanup_task, return_exceptions=True
+        )
         await asyncio.to_thread(
             _write_heartbeat, session_factory, instance_id, "stopping"
         )
+
+
+async def _background_cleanup_loop(
+    deps: PublishDependencies,
+    *,
+    batch_size: int,
+    interval_seconds: float,
+) -> None:
+    """Continuously drain bounded spool/object work independently of publishing."""
+    while True:
+        try:
+            await run_background_cleanup_batch(deps, limit=max(1, batch_size))
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - keep cleanup service alive after transient faults
+            logger.warning("background publish cleanup iteration failed")
+        await asyncio.sleep(max(0.05, interval_seconds))
 
 
 async def _heartbeat_loop(

@@ -11,7 +11,7 @@ This document contains detailed safety procedures referenced by the root `AGENTS
 
 - `is_prod_shaped_db()` in `tts_erp_v2.api.deps` is the single source of truth for production-shaped database detection.
 - An unset `TTS_ERP_DB_URL` is treated as production-shaped (fail closed).
-- Tests should enter through `scripts/test_isolated.sh`, which clones a per-run test DB and delegates to `scripts/test.sh` with `TTS_ERP_DB_URL_TEST` set. Direct `scripts/test.sh` runs are the shared-DB fallback and must be serialized.
+- Tests enter only through `scripts/test_isolated.sh`, which clones a per-run test DB and sets `TTS_ERP_DB_URL_TEST`; agents have no shared-database fallback.
 - `tests/conftest.py` hard-exits with status 2 when pytest would target a production-shaped database. This is not a warning-only check.
 - `TTS_ERP_TEST_OFF=1` bypasses the test guard and risks live data. Agents must not set it.
 

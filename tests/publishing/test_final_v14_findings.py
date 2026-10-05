@@ -24,7 +24,11 @@ from tts_erp_v2.db.models.publishing import (
 )
 from tts_erp_v2.publishing.adb_device import AdbDevice, ManagedAlbumNotEmpty
 from tts_erp_v2.publishing.diagnostics import sanitize_text
-from tts_erp_v2.publishing.dispatcher import PublishDependencies, dispatch_one
+from tts_erp_v2.publishing.dispatcher import (
+    PublishDependencies,
+    dispatch_one,
+    run_background_cleanup_batch,
+)
 from tts_erp_v2.publishing.domain import CleanupIntent
 from tts_erp_v2.publishing.object_store import (
     MinioVideoStore,
@@ -215,6 +219,7 @@ def test_0062_attempt_identity_is_immutable_but_lifecycle_is_mutable(db_engine) 
                     # pi-lens-ignore: python-sql-injection
                     conn.execute(text(statement), {"value": value, "id": attempt_id})
                 savepoint.rollback()
+            # pi-lens-ignore: python-sql-injection
             conn.execute(
                 text("""
                 UPDATE publishing.video_publish_attempts
@@ -366,6 +371,7 @@ def test_presign_failure_is_structured_and_keeps_awaiting_upload(
 ) -> None:
     monkeypatch.setenv("ARTEMIS_DEVICE_SERIAL", "TEST_device")
     monkeypatch.setenv("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video")
+    monkeypatch.setattr(api, "_fresh_ready_worker", lambda _session: object())
     body = api.CreateIn(
         clientRequestId=uuid4(),
         filename="TEST video.mp4",
@@ -574,7 +580,7 @@ async def test_dispatch_exposes_replacement_after_confirmed_object_recovery(
         "pending" if object_cleanup_required else "succeeded"
     )
     assert "replace_upload" not in first_actions
-    assert await dispatch_one(deps) == "processed"
+    assert await run_background_cleanup_batch(deps, limit=1) == 1
     db_session.expire_all()
     assert task.object_deleted_at is not None
     assert (

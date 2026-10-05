@@ -163,6 +163,7 @@ CREATE TABLE publishing.video_publish_tasks (
 
     target_device_serial  text NOT NULL,
     target_app_package    text NOT NULL,
+    execution_generation  uuid UNIQUE,
     device_path           text,
     spool_path            text,
 
@@ -252,6 +253,8 @@ CREATE TABLE publishing.video_publish_attempts (
     device_serial         text NOT NULL,
     device_path           text,
     target_app_package    text NOT NULL,
+    artemis_profile       text NOT NULL,
+    artemis_verification_level text NOT NULL,
 
     artemis_output        jsonb,
     artemis_error         text,
@@ -330,7 +333,7 @@ object key：
 video-publish/YYYY/MM/<task_public_id>/<sanitized_filename>.mp4
 ```
 
-数据库保存 `object_bucket + object_generation + object_key + object_etag`，并持久化该 generation 已签发 PUT ticket 的最晚 `object_upload_expires_at`；预签名 URL 本身只在响应中短暂存在。初次上传和每次 replacement 都生成从未复用的新 generation/key。取消、保留期和 replacement 的对象清理使用 PostgreSQL 时间，必须等该 generation 的所有已签发 PUT ticket 过期后才可领取；cleanup work 快照并只删除退休 generation 的 key/已确认 ETag，旧 cleaner 永远不能触及新 generation。MinIO 必须为 ttsERP 页面来源配置仅允许 PUT/HEAD 所需 header 的 CORS；浏览器 URL 通过既有 `MINIO_PUBLIC_HOST` 重写，不能把服务器内部 `127.0.0.1` 地址返回给远端浏览器。
+数据库保存 `object_bucket + object_generation + object_key + object_etag`，并持久化该 generation 已签发 PUT ticket 的最晚 `object_upload_expires_at`；预签名 URL 本身只在响应中短暂存在。初次上传和每次 replacement 都生成从未复用的新 generation/key。既有任务的每次 PUT ticket 签发先锁定 task row，锁内校验 stage/generation、签名并把 expiry 以单调 `max` 持久化后才返回 URL；失去 stage 的请求不暴露已签 URL而返回结构化 conflict/retry。票据 TTL 不得超过 MinIO/SigV4 的 7 天硬上限。取消、保留期和 replacement 的对象清理使用 PostgreSQL 时间；selector 除 `object_cleanup_next_attempt_at` 外独立要求 `object_upload_expires_at + 15 minutes completion grace <= clock_timestamp()`。cleanup work 快照并只删除退休 generation 的 key/已确认 ETag；missing object 同样保持 pending 到该屏障后执行幂等 absence/delete，旧 cleaner 永远不能触及新 generation。MinIO 必须为 ttsERP 页面来源配置仅允许 PUT/HEAD 所需 header 的 CORS；浏览器 URL 通过既有 `MINIO_PUBLIC_HOST` 重写，不能把服务器内部 `127.0.0.1` 地址返回给远端浏览器。
 
 ### 5.2 校验
 
@@ -1217,8 +1220,9 @@ bash scripts/test_isolated.sh ...
 | `row_version` | int, 非空 | Repository | 乐观并发版本；每次状态转换 `+1`，写入使用 compare-and-swap。 |
 | `target_device_serial` | text, 非空 | API config | 创建时固定的 ADB serial 快照；普通用户不可修改。 |
 | `target_app_package` | text, 非空 | API config | 创建时固定的 package 快照。 |
-| `device_path` | text, 可空 | Worker | 实际 staging 路径；下载前为空。 |
-| `spool_path` | text, 可空 | Worker | 下载副作用前登记的 exact final；ownership 同时覆盖其 exact sibling `.part`。 |
+| `execution_generation` | uuid, 可空唯一 | Worker claim | 每轮下载/staging 前分配的不可变资源 generation；迁移前旧行可空。 |
+| `device_path` | text, 可空 | Worker | `tts_erp_<execution_generation>.mp4` 精确 staging 路径。 |
+| `spool_path` | text, 可空 | Worker | `<spool>/<task>/<execution_generation>/video.mp4`；ownership 同时覆盖 exact sibling `.part`。 |
 | `last_error_code` | text, 可空 | Domain service | 面向机器的稳定错误码；成功重试后保留历史在 attempt，主表清空。 |
 | `last_error_message` | text, 可空 | Domain service | 已清洗的运营可读错误；不得含密钥、预签名 URL 或堆栈。 |
 | `*_cleanup_status` | enum text, 非空 | Cleanup service | 分别描述设备、spool、对象清理。 |
@@ -1246,7 +1250,9 @@ bash scripts/test_isolated.sh ...
 | `prompt_snapshot` | text, 非空 | 本次实际提交文本；仅 admin/诊断权限可查看。 |
 | `device_serial` | text, 非空 | 本次调用的精确设备 serial。 |
 | `device_path` | text, 可空 | publish 对应设备文件；verify 通常为空。 |
-| `target_app_package` | text, 非空 | 本次调用的精确 app package 快照；dispatch/resubmit 不读取可变 task/config。 |
+| `target_app_package` | text, 非空 | 本次调用的精确 app package 快照。 |
+| `artemis_profile` | text, 非空 | 本次 submit/resubmit 的 profile 快照。 |
+| `artemis_verification_level` | text, 非空 | 本次 submit/resubmit 的 verification level 快照；dispatch/resubmit 不读取可变 task/config。 |
 | `artemis_output` | jsonb, 可空 | 有界、已清洗的 session 结果摘要；禁止无限保存全部 trace。 |
 | `artemis_error` | text, 可空 | Artemis 返回的已清洗错误。 |
 | `steps_count` | int, 可空 | 从 `/steps` 得到的数量；用于安全重试分类。 |
@@ -2716,19 +2722,20 @@ Luna 每个 Phase 的输出必须包含：
 
 ## 28. 已实现的最终安全边界
 
-当前 migration head 为 `0065_publish_generation_identity`（parent `0064_publish_spool_ownership`）。实现还明确保证：
+当前 migration head 为 `0066_publish_execution_fences`（parent `0065_publish_generation_identity`）。实现还明确保证：
 
 - verify 只有在 Artemis execution `success` 且 `verdict` 严格等于 `published`、`not_published` 或 `inconclusive` 时才采信；`published` 才确认成功，单次 `not_published` 与 `inconclusive` 均保守进入 `needs_review/done`，不得自动重新发布；其他终态同样进入 `needs_review`；
 - `cancelled`/`canceled` publish 与未知/格式错误的 Artemis 409 都是结果不确定，必须沿同 session 查询/核验，不能进入安全重发；
 - `attempt_count` 是追加式审计数，`publish_budget_used` 独立表达预算；
 - retention object cleanup pending/failed/leased 时，服务端不提供且拒绝 retry/replace；
-- cleanup 删除期间持续续租，失去 owner 后旧 Worker 不写完成结果；
-- Worker 心跳持久化 ADB 实际探测的 `ready|busy|offline|locked|unknown`，API 不再从 serial 配置推断设备 ready；
+- cleanup 删除期间持续续租，失去 owner 后旧 Worker 不写完成结果；每轮执行先持久化唯一 `execution_generation`，spool final/`.part` 与 device filename 都含该值，因此已开始的旧 cleaner 即使稍后恢复也只能命中退休路径；
+- spool/object 由独立有界后台 cleanup coroutine 使用短 DB session 与 cleanup lease 处理，持续发布队列不会饿死清理，慢 MinIO 删除也不进入 publish-critical loop；
+- Worker 心跳持久化 ADB 实际探测的 `ready|busy|offline|locked|unknown`；真正新建任务要求近期 ready 心跳并在缺失时返回结构化 503，已有幂等任务仍可读取/重放；
 - 列表使用 `(created_at,id)` opaque keyset cursor，并只批量读取最新 attempt 与 publish/verify 计数；详情接口才加载完整 attempt 审计；
 - 409 错误返回 `code/message/retryable/requestId/rowVersion/allowedActions`，浏览器始终按服务端 allowedActions 重绘；
 - 0058 仅把成功 publish 或成功且 verdict=`published` 的 verify 视为发布确认；其他 verify 结果保留对象并进入 `needs_review`，且所有终态旧行都会清除 publish lease；
-- attempt 的 `task_id/sequence_no/kind/related_attempt_id/artemis_session_id/prompt_version/prompt_snapshot/device_serial/device_path/target_app_package` 插入后不可变；dispatch/resubmit 只读 attempt 快照，普通状态、结果、重试生命周期更新仍允许；
-- confirm 后的下载以保存的 ETag 执行条件 GET；缺失对象在 fenced transition 后立即允许 replacement，ETag 不匹配先由 cleanup selector 跟踪删除旧 key、完成后再允许 replacement；两者都在 staging/attempt 前失败；
+- attempt 的 `task_id/sequence_no/kind/related_attempt_id/artemis_session_id/prompt_version/prompt_snapshot/device_serial/device_path/target_app_package/artemis_profile/artemis_verification_level` 插入后不可变；dispatch/resubmit 只读 attempt 快照，普通状态、结果、重试生命周期更新仍允许；
+- confirm 后的下载以保存的 ETag 执行条件 GET；缺失对象和 ETag 不匹配都先由 cleanup selector 跟踪退休 key，且 missing 也必须等 PUT expiry + completion grace 后幂等确认 absence，完成后才允许 replacement；两者都在 staging/attempt 前失败；
 - 原始浏览器 basename 与 object-key-safe 文件名分开持久化，续传按原始文件名和大小核对；
 - verify prompt 同时包含 caption、源文件/对象身份、预期最新发布时间窗及时间/缩略图比对要求；
 - ADB push 前必须确认受管相册无任意 `tts_erp_*.mp4` 残留；存在残留时不创建 Artemis attempt；
@@ -2736,6 +2743,6 @@ Luna 每个 Phase 的输出必须包含：
 - 排队 snapshot 返回 `queuedAt/queuePosition/statusLabel/stageLabel`，列表批量计算队列位置；
 - needs_review 摘要同时返回 `relatedPublishAttempt`，核验 dialog 不能把最新 verify session 冒充待核验 publish session；
 - 结构化日志覆盖 claim、download/stage、attempt、verification、terminal、cleanup/recovery commit boundary，设备身份仅掩码；`/v2/video-publish/metrics` 返回 owner-scoped status/attempt/stage/cleanup 聚合与 heartbeat age；两者都不含 caption/Prompt/output/secret；
-- migration/seed 仅自动授权 admin；operator 权限必须在最终人工验证后显式授予。
+- migration/seed 仅自动授权 admin；operator session 权限必须在最终人工验证后显式授予；API key 默认也只有 admin tier 可访问 `/v2/video-publish/*`，未来 readwrite key 放行只能通过文档化的 `TTS_ERP_VIDEO_PUBLISH_ALLOW_READWRITE_API_KEYS=1` feature gate。
 
 390/768/1440 像素视觉检查、模拟器全流程、SIGTERM 恢复以及 staging-only 真机检查仍按 §26 保留为人工发布门禁；本文不声称已执行这些检查。
