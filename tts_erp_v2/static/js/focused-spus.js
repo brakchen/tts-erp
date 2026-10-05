@@ -509,6 +509,12 @@
       ],
       columnIds: [
         "product",
+        "purchasePriceMean",
+        "purchasePriceMedian",
+        "originalSalePriceMean",
+        "originalSalePriceMedian",
+        "paidPriceMean",
+        "paidPriceMedian",
         "spend",
         "ad-actual-roi",
         "ad-breakeven-roi",

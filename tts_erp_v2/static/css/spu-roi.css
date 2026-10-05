@@ -314,6 +314,69 @@ a:hover {
 .op-counter-group .col + .col .op-counter-item {
  border-left: 1px solid var(--rule-soft);
 }
+
+/* Price summary intentionally remains one group with three metric rows. */
+.op-price-summary-title {
+ display: flex;
+ align-items: center;
+ gap: 6px;
+}
+.op-price-tip {
+ border: 1px solid var(--rule);
+ border-radius: 50%;
+ background: transparent;
+ color: var(--muted);
+ font: inherit;
+ font-size: 12px;
+ line-height: 1.2;
+ width: 18px;
+ height: 18px;
+ padding: 0;
+ cursor: pointer;
+}
+.op-price-tip:hover,
+.op-price-tip[aria-expanded="true"] {
+ color: var(--accent);
+ border-color: var(--accent);
+}
+.op-price-summary-status {
+ margin-left: auto;
+ color: var(--muted);
+ font-size: 12px;
+ font-weight: 400;
+}
+.op-price-summary-head,
+.op-price-summary-row {
+ display: grid;
+ grid-template-columns: minmax(7rem, 1.2fr) repeat(2, minmax(5.5rem, 1fr));
+ align-items: center;
+}
+.op-price-summary-head {
+ padding: 4px 10px;
+ color: var(--muted);
+ font-size: 12px;
+ text-align: right;
+}
+.op-price-summary-row {
+ min-height: 34px;
+ padding: 4px 10px;
+ border-top: 1px solid var(--rule-soft);
+}
+.op-price-summary-row > span:not(.op-price-summary-label) {
+ text-align: right;
+ font-variant-numeric: tabular-nums;
+}
+.op-price-summary-label {
+ min-width: 0;
+ color: var(--ink-soft);
+ font-size: 13px;
+}
+.op-price-status {
+ display: block;
+ color: var(--muted);
+ font-size: 11px;
+ line-height: 1.25;
+}
 .op-counter-label {
  width: 100%;
  max-width: none;
@@ -680,6 +743,7 @@ a:hover {
     面板/大盘卡片左右外凸 22.5px，看起来表格没对齐。 */
  background: var(--paper);
  border-bottom: 1px solid var(--rule);
+ overflow-x: auto;
 }
 .op-table-wrap:focus-visible {
  outline-offset: -2px;
@@ -687,8 +751,15 @@ a:hover {
 .op-tabulator {
  background: var(--paper);
  border: 0;
+ min-width: 980px;
  font-size: 14px;
  font-variant-numeric: tabular-nums;
+}
+.op-tabulator .tabulator-header .tabulator-col[tabulator-field^="priceStats."] {
+ min-width: 104px;
+}
+.op-tabulator .tabulator-header .tabulator-col.tabulator-col-group {
+ min-width: 208px;
 }
 .op-tabulator .tabulator-header {
  background: var(--paper);
