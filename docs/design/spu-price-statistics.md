@@ -82,7 +82,7 @@
 
 ### 2.1 采用独立 immutable observation 表
 
-不要把新价格字段塞进现有 `unit_price` 以改变旧语义；新增表（建议名称）`commerce.sales_order_line_price_observations`，一行对应一次原始 TikTok line observation。正式 migration revision **由实施 lane 根据当前 Alembic head 生成，本文不猜编号**；migration 文件必须 additive，先建 enum/check/index，再让 producer/API 能读空表。
+不要把新价格字段塞进现有 `unit_price` 以改变旧语义；新增表 `commerce.sales_order_line_price_observations` 是唯一规范化价格 observation owner。现有 raw history 只保存原始 payload，`sales_order_lines` 只有可变当前行（且 `raw_record_id` 会随重采覆盖），两者都不能提供可查询的版本化字段状态，因此“给 line 加两个字段”仍会丢失 valid→missing/invalid 版本审计；新增一张 observation 表是最小能满足版本、状态、去重和 provenance 的方案。旧 `unit_price`、`plugin.order_details.origin_sale_price` 和 Miaoshou 字段均不是第二个 authority，价格聚合只读本表/当前成本 map。正式 migration revision **由实施 lane 根据当前 Alembic head 生成，本文不猜编号**；migration 文件必须 additive，先建 enum/check/index，再让 producer/API 能读空表。
 
 建议字段（SQLAlchemy 类型是约束，不是可直接执行的 migration）：
 
@@ -92,10 +92,12 @@
 | `shop_pk` | bigint NOT NULL | 站内 shop FK；与 line/order 同店 |
 | `order_pk` | bigint NOT NULL | 父销售订单 FK |
 | `external_line_id` | text NOT NULL | TikTok `line_items[].line_id`/`id` 归一化后的业务键 |
-| `raw_record_id` | bigint NOT NULL | `integration.raw_records.id`；不可用时 producer 失败，不造 provenance |
-| `source_endpoint` | enum `ORDER_SEARCH`/`ORDER_DETAIL` NOT NULL | 证明来自 TikTok orders 或 order_detail |
+| `raw_record_id` | bigint NOT NULL | 首次保留的 `integration.raw_records.id`；不可用时 producer 失败，不造 provenance；后续重复 capture 不替换它 |
+| `source_endpoint` | enum `ORDER_SEARCH`/`ORDER_DETAIL` NOT NULL | 首次保留 capture 的 TikTok producer 来源；重复 endpoint 不产生第二 observation |
 | `source_payload_hash` | text NOT NULL | canonical raw line hash，用于重复 payload 审计 |
-| `source_order_version_at` | timestamptz NULL | 父订单 `order_modify_time` / source version；缺失时按 NULL 规则处理 |
+| `semantic_observation_hash` | char(64) NOT NULL | SHA-256 identity；包含 line 字段 presence/type/normalized values 与继承的 parent status/currency/version，不含 raw id、capture time、endpoint |
+| `source_order_version_at` | timestamptz NULL | 父订单 `order_modify_time` / source version；缺失时记录 `MISSING_SOURCE_VERSION`，不能凭空当作新版本 |
+
 | `source_captured_at` | timestamptz NOT NULL | raw record capture time |
 | `spu_pk` | bigint NULL | producer 当时解析到的商品；未命中不把行伪造到其它 SPU |
 | `raw_quantity` | numeric(20,8) NULL | authority payload quantity 原值（不把默认 1 写回 raw） |
@@ -114,15 +116,17 @@
 
 ```sql
 -- 逻辑约束；实际 revision 由实施者命名，不能复制为未经校验的版本号
-UNIQUE (shop_pk, order_pk, external_line_id, raw_record_id);
+UNIQUE (shop_pk, order_pk, external_line_id, semantic_observation_hash);
 CHECK (effective_quantity IS NULL OR effective_quantity > 0);
 CHECK (original_price_native IS NULL OR original_price_native >= 0);
 CHECK (paid_price_native IS NULL OR paid_price_native >= 0);
 CHECK (source_endpoint IN ('ORDER_SEARCH', 'ORDER_DETAIL'));
-CREATE INDEX ... ON commerce.sales_order_line_price_observations
+CREATE INDEX ix_solpo_line_version
+  ON commerce.sales_order_line_price_observations
     (shop_pk, order_pk, external_line_id, source_order_version_at DESC,
-     source_captured_at DESC, raw_record_id DESC);
-CREATE INDEX ... ON commerce.sales_order_line_price_observations
+     source_captured_at DESC, semantic_observation_hash ASC);
+CREATE INDEX ix_solpo_spu_capture
+  ON commerce.sales_order_line_price_observations
     (shop_pk, spu_pk, source_captured_at);
 ```
 
@@ -130,12 +134,12 @@ CREATE INDEX ... ON commerce.sales_order_line_price_observations
 
 ### 2.2 Observation selection 与新旧竞态
 
-- 同一 raw payload 重试命中唯一键后必须 no-op（或只更新相同 provenance 的 `updated_at`），不能增大数量。
-- 同一 line 的 **有效 authority 字段** 按 `(source_order_version_at NULLS LAST, source_captured_at, raw_record_id)` 选最新；`ORDER_DETAIL` 与 `ORDER_SEARCH` 不得因为 endpoint 名称互相覆盖。若 version 相同，capture 较新胜出；完全相同 hash 幂等。
-- 较旧事务晚到时使用事务内 upsert 条件（版本/捕获时间比较）拒绝覆盖较新 canonical observation，并写 `STALE_OBSERVATION_SKIPPED` sync metric；不能仅依赖 Python 先查再写。
-- 新 payload 缺某一价格字段时，不删除该 line 以前的有效字段：保留字段级 latest-valid 值，同时将最新 payload 的 status 与 missing counter 留在 observation 审计中。一个**明确 invalid** 的新字段不得被当成 0；在没有任何 valid 值时该 metric 不可用。
+- `semantic_observation_hash` 的输入是 canonical JSON：每个 authority/raw 字段都保留 presence（absent/null/value）、JSON type、规范化 Decimal/text 值；再加入父订单 `shop_pk`、`order_pk`、`external_line_id`、继承的 payment status、currency 和 source version。它不加入 `raw_record_id`、capture time 或 endpoint，因此 `_store_raw` 每次重试产生新 capture ID 也不会产生第二 observation。
+- 唯一键 `(shop_pk, order_pk, external_line_id, semantic_observation_hash)` 冲突时保留首次 capture 的 `raw_record_id/source_endpoint/source_captured_at`，后续 raw id 只在 raw history 保留，并写 `DUPLICATE_SEMANTIC_OBSERVATION` 计数；不建立第二个 provenance bridge，也不更新首次来源。checkpoint 重放同样只能 no-op。
+- 同一 line 的 canonical **整条最新 observation** 按 `(source_order_version_at NULLS LAST, source_captured_at, semantic_observation_hash ASC)` 选最新；`ORDER_DETAIL` 与 `ORDER_SEARCH` 不因 endpoint 名称互相覆盖。相同 version 以较新 capture 胜出；version 与 capture 都相同则 hash 的确定性升序胜出，并记录 `EQUAL_VERSION_CONFLICT`。旧事务晚到时可以插入审计行，但不得成为 canonical。
+- 最新 authority observation 的每个 price field status/value 都是该 metric 的唯一权威：新 payload `MISSING`/`INVALID` 时该 metric 为 null/not observed；旧 valid value 只留在 audit history，**不**做 last-known-valid 或 stale-price fallback。一个 valid→missing 两版本 fixture 只能贡献一次 missing line/valid quantity，不能同时贡献旧 observed 与新 missing。
 - quantity、payment status、gift status 是 eligibility 状态而非可回退金额：较新的明确 `CANCELLED`/`GIFT`/invalid quantity 必须使该 observation 不合格；未知状态不能自动继承为 paid/not-gift。退款、全损和售后同步不更新 price observation。
-- producer 需用数据库条件 upsert/compare-and-set 或事务锁保护 `(shop_pk, order_pk, external_line_id)`；sync version/token 不匹配时 rollback 当前 line 写入并记录 issue，不能部分提交订单。
+- producer 需用数据库 `INSERT ... ON CONFLICT ... DO NOTHING` + canonical selection CTE，或同等事务锁/compare-and-set 保护 `(shop_pk, order_pk, external_line_id)`；sync version/token 不匹配时 rollback 当前 line 写入并记录 issue，不能部分提交订单。
 
 ### 2.3 礼品、状态、数量与币种证据门
 
@@ -161,12 +165,12 @@ Parity 验收必须逐字段比较相同 fixture 的两个入口：
 
 ### 3.2 严格 idempotent upsert 流程
 
-1. 在同一同步事务中先持久化/定位 `integration.raw_records`，取得 `raw_record_id` 与 capture time；canonical hash 由稳定 JSON/raw line 计算，不包含本地时间。
-2. 读取父 `sales_orders` 的 `order_pk`、已付款状态、order version 和 `shop_pk`，验证 line 的 external id 属于该 parent；不得用另一个店的同名 id。
-3. 对每个 line 生成 observation；用唯一键插入；若键存在且 hash、版本、字段相同则 no-op；若同 key payload 变更，保留不可变 raw provenance 并只更新同一 observation 的审计状态（或插入新 raw-linked row，二者必须由 migration contract 固定）。
-4. 对 canonical latest-valid 视图执行 compare-and-set：数据库条件同时比较 source version/captured_at/raw id；晚到旧写只能产生 stale metric，不能覆写新值。
-5. 一个订单所有 line 的观测成功后再 resolve 对应 sync issue；任一必须字段或事务冲突失败则回滚该订单的统计写入，保留 raw record 与 issue 供重试。
-6. 重试必须是同一 raw payload 的幂等操作；不得以重试次数、capture 时间或 Miaoshou 数据制造新价格。
+1. 在同一同步事务中先持久化/定位 `integration.raw_records`，取得本次新的 `raw_record_id` 与 capture time；随后读取父 `sales_orders` 的 `order_pk`、`shop_pk`、已付款状态、currency 与 source version。验证 line external id 属于该 parent；不得用另一个店的同名 id。
+2. 以 §2.2 的 canonical JSON 生成 `semantic_observation_hash`，包含字段 presence/type/normalized values 与继承父字段，但不含 raw id、capture time、endpoint；不同 raw capture 的同一语义必然相同 hash。
+3. 对每个 line 执行唯一键 `(shop_pk, order_pk, external_line_id, semantic_observation_hash)` 的 `INSERT ... ON CONFLICT DO NOTHING`。首次成功的 capture 固定为 observation provenance；冲突 capture 只保留 raw history 与 duplicate metric，绝不更新首次 raw id 或增加数量。
+4. canonical 读取使用具体 window CTE（见 §4.2）按 version/capture/hash 选择一条；同一 line 的较旧 replay 可插入不同语义审计行，但不能覆盖 canonical。相同 version/capture 的 hash 冲突按 hash ASC，记录 `EQUAL_VERSION_CONFLICT`。
+5. 一个订单所有 line 的 observation 成功后再 resolve 对应 sync issue；任一必须字段或事务冲突失败则回滚该订单的 observation 写入，保留 raw record 与 issue 供重试。
+6. 重试、checkpoint replay、orders/detail 双 producer 重复采集都必须只产生 no-op 或审计行；不得以重试次数、capture 时间或 Miaoshou 数据制造新价格。不同语义的较新 observation 才能改变 canonical 值，较新 missing/invalid 直接使对应 metric null。
 
 可观测 issue/status 至少包括：`PARSE_ERROR`、`MISSING_AUTHORITY_PRICE`、`INVALID_PRICE`、`MISSING_CURRENCY`、`INVALID_QUANTITY`、`UNKNOWN_GIFT_SIGNAL`、`UNKNOWN_LINE_STATUS`、`STALE_OBSERVATION_SKIPPED`、`FX_UNAVAILABLE`、`UPSERT_CONFLICT`。每类要有 raw/order/line/shop 维度计数，API 只暴露聚合后的安全计数，不暴露凭据或完整 buyer payload。
 
@@ -178,7 +182,7 @@ Parity 验收必须逐字段比较相同 fixture 的两个入口：
 
 **批次与恢复：** 先按 raw record id 升序分页（keyset，不用 offset），每批短事务；dry-run 输出 eligible/missing/invalid/gift/status/fx/unmatched/stale 数量与 sample ids；real mode 每批 commit 后 checkpoint `(shop_pk, raw_record_id)`。同一 checkpoint 重跑必须幂等，进程中止可从最后成功批次恢复，禁止整库 DELETE/TRUNCATE。
 
-**并发与新鲜度：** backfill 写入前比较 raw version/capture 与同步 worker 当前 canonical version；线上更新较新时 backfill stale-skip，不覆盖新 producer 写入。使用数据库唯一约束 + 条件 upsert，冲突捕获后 rollback 当前 batch、指数退避重试有限次数；持续失败进入 `BACKFILL_RETRY_EXHAUSTED`，不吞错。每批记录 `scanned/inserted/updated/noop/stale_skip/unmatched/invalid/unknown_gift/fx_missing/retried/failed`，完成前必须有 reconciliation report。
+**并发与新鲜度：** backfill 写入前比较 raw version/capture 与同步 worker 当前 canonical version；线上更新较新时 backfill stale-skip，不覆盖新 producer 写入。使用语义唯一约束 + canonical selection CTE，冲突捕获后 rollback 当前 batch、指数退避重试有限次数；持续失败进入 `BACKFILL_RETRY_EXHAUSTED`，不吞错。每批记录 `scanned/inserted/duplicate_noop/stale_skip/unmatched/invalid/unknown_gift/fx_missing/retried/failed`，完成前必须有 reconciliation report；duplicate raw captures 和 checkpoint replay 的数量必须保持不变。
 
 **缺口与停止门：** 任一 shop 的 raw coverage、unknown gift、unknown status、currency/FX 缺口未解释时，backfill 状态为 `INCOMPLETE`，不可宣布完成。只允许 additive schema/observation insert；不删除旧 raw、不改原 line 价格、不把回填值标作实时 observation。生产部署、API/sync-worker restart、回填确认和 rollback 均 human-only guarded。
 
@@ -203,33 +207,58 @@ class PriceMetric:
     eligible_quantity: int
     observed_quantity: int
     missing_quantity: int
-    invalid_quantity: int
+    invalid_price_quantity: int
     status: PriceCoverageStatus
     source: PriceSource
     estimated: bool
 ```
 
-`read_overview()` 在同一个 snapshot 创建 `PriceStatsBasis`（calculated_at、FX snapshot、cost snapshot、scope fingerprint），调用窄 `read_price_stats(session, basis, request)`，再由 HTTP adapter 将结果合入旧 envelope。价格 seam 不 import HTTP request、模板 DOM 或私有大 SQL function；利润 formula 不反向依赖价格 fields。`focused-spus` 只改变 `SpuSelection=FocusedSelection`，不复制统计。
+`read_overview()` 在同一个 snapshot 创建 `PriceStatsBasis`（calculated_at、FX snapshot、当前 effective cost map、内部 scope selection），调用窄 `read_price_stats(session, basis, request)`，再由 HTTP adapter 将结果合入旧 envelope。价格 seam 不 import HTTP request、模板 DOM 或私有大 SQL function；利润 formula 不反向依赖价格 fields。`focused-spus` 只改变 `SpuSelection=FocusedSelection`，不复制统计。
 
 流程顺序：解析 shop/selection/window → 在事务内锁定 read-only `REPEATABLE READ` → push down shop/SPU/window/payment/status/gift predicates → materialize eligible line relation → 读取同一 FX/cost basis → CNY conversion → per-SPU and full-scope aggregation → apply independent sort/page only to items → serialize totals from unpaginated relation。
 
 ### 4.2 Eligibility relation 与 source selection
 
-逻辑 CTE（名字可调整但依赖必须保留）：
+逻辑 CTE（名称与列依赖必须保持具体；不得实现成不存在的 function/view）：
 
 ```sql
-WITH scope_lines AS (
-  SELECT l.order_pk, l.external_line_id, l.spu_pk,
+WITH ranked_price_observations AS (
+  SELECT p.*,
+         row_number() OVER (
+           PARTITION BY p.shop_pk, p.order_pk, p.external_line_id
+           ORDER BY p.source_order_version_at DESC NULLS LAST,
+                    p.source_captured_at DESC,
+                    p.semantic_observation_hash ASC
+         ) AS canonical_rank
+  FROM commerce.sales_order_line_price_observations AS p
+), canonical_price_observations AS (
+  SELECT *
+  FROM ranked_price_observations
+  WHERE canonical_rank = 1
+), cost_basis(spu_pk, unit_cost_used, cost_source) AS (
+  -- These arrays are materialized from the existing current ROI effective-cost
+  -- map in the same read snapshot; no historical cost is persisted here.
+  SELECT u.spu_pk, u.unit_cost_used, u.cost_source
+  FROM unnest(
+    CAST(:cost_spu_pks AS bigint[]),
+    CAST(:cost_unit_costs_cny AS numeric[]),
+    CAST(:cost_sources AS text[])
+  ) AS u(spu_pk, unit_cost_used, cost_source)
+), scope_lines AS (
+  SELECT o.shop_pk, l.order_pk, l.external_line_id, l.spu_pk,
          o.order_time, o.paid_at, o.status AS order_status,
          p.effective_quantity, p.original_price_native, p.paid_price_native,
          p.original_price_status, p.paid_price_status, p.currency,
          p.gift_status, p.quantity_status, p.payment_status,
-         p.cost_unit_cny, p.cost_source
+         c.unit_cost_used, c.cost_source
   FROM commerce.sales_order_lines AS l
   JOIN commerce.sales_orders AS o ON o.id = l.order_pk
-  JOIN LATERAL latest_line_price_observation(l.shop_pk, l.order_pk,
-                                               l.external_line_id) AS p ON true
-  WHERE l.shop_pk = :shop_pk
+  JOIN canonical_price_observations AS p
+    ON p.shop_pk = o.shop_pk
+   AND p.order_pk = l.order_pk
+   AND p.external_line_id = l.external_line_id
+  JOIN cost_basis AS c ON c.spu_pk = l.spu_pk
+  WHERE o.shop_pk = :shop_pk
     AND l.spu_pk = ANY(:selected_spu_pks)
     AND COALESCE(o.order_time, o.paid_at) >= :window_start_utc
     AND COALESCE(o.order_time, o.paid_at) < :window_end_exclusive_utc
@@ -242,15 +271,21 @@ WITH scope_lines AS (
     AND p.effective_quantity > 0
 ), cny_lines AS (
   SELECT s.*,
-         convert_to_cny(s.original_price_native, s.currency, :fx_snapshot) AS original_cny,
-         convert_to_cny(s.paid_price_native, s.currency, :fx_snapshot) AS paid_cny
+         CASE WHEN s.original_price_status = 'OBSERVED'
+              THEN convert_to_cny(s.original_price_native, s.currency, :fx_snapshot)
+         END AS original_cny,
+         CASE WHEN s.paid_price_status = 'OBSERVED'
+              THEN convert_to_cny(s.paid_price_native, s.currency, :fx_snapshot)
+         END AS paid_cny
   FROM scope_lines AS s
 )
 ```
 
-`latest_line_price_observation` 必须是可审查的 SQL/typed query，不是 hidden fallback；它选择 field-level latest valid plus latest status according to §2.2 and returns provenance. Parent order status filters are reused from existing ROI constants; exact local-time boundary comes from the common profitability module, not a second timezone map.
+`ranked_price_observations` is the concrete canonical relation: it selects the newest authoritative whole observation, including newest missing/invalid fields; it never falls back to an older valid amount. `cost_basis` is the existing ROI current effective-cost map materialized as bound arrays by `spu_pk=l.spu_pk` in the same snapshot; `unit_cost_used`/`cost_source` are not observation columns. `o.shop_pk` is authoritative because `sales_order_lines` has no `shop_pk`. Parent status filters reuse existing ROI constants; exact local-time boundary comes from the common profitability module, not a second timezone map.
 
-Purchase rows use `cost_unit_cny = unit_cost_used` from the current ROI cost map for the same basis. `MANUAL` is observed current cost; `DEFAULT_K1` is a CNY estimate and must set `estimated=true`/warning. No historical procurement distribution is invented.
+When a price is missing/invalid, `cny_lines` keeps the valid quantity for that line so metric-specific missing/invalid price counts conserve units; when quantity itself is invalid, the row is absent from `scope_lines` and only its invalid-quantity line count is reported. FX conversion is attempted only for an `OBSERVED` field with verified currency; a missing/unknown rate is counted as global FX gap and follows the HTTP error policy rather than silently becoming zero.
+
+Purchase rows use `unit_cost_used` from this current ROI cost map. `MANUAL` is current observed cost; `DEFAULT_K1` is a CNY estimate and must set `estimated=true`/warning. A changed current cost changes purchase output in a new snapshot without changing historical TikTok price observations. No historical procurement distribution is invented.
 
 ### 4.3 Quantity-weighted mean and median without row explosion
 
@@ -305,8 +340,8 @@ The implementation may replace this with a more efficient equivalent, but must r
 
 - `items` are SPU aggregates after full-scope computation; `totals.priceStats` is recomputed directly from all selected raw eligible observations, never from `items` means/medians and never from visible rows.
 - A metric with no eligible quantity has `mean=null`, `median=null`, `status=no_samples`; zero is returned only for a real observed zero price.
-- `observedQuantity + missingQuantity + invalidQuantity` must equal the eligible quantity universe for that metric (with separate excluded gift/status/quantity counters); if source has unknown gift/status, return `partial` plus explicit unknown counters, not a fake complete percentage.
-- Query `q`, page `limit/offset`, sort, and visible-column toggles only affect `items`; `total`, `totals`, `calculatedAt`, FX and cost basis remain invariant. Empty focused membership is an intentional empty selection, never a full-shop fallback.
+- 对每个 metric，`observedQuantity + missingQuantity + invalidPriceQuantity` 必须等于该 metric 的 valid-quantity universe；price invalid 使用有效 quantity 计数。invalid quantity 本身没有物理件数，不得求和或填 arbitrary positive value，只在 `priceCoverage.invalidQuantityLineCount` 计行数；gift/status 排除的 valid units 用 `excludedValidQuantity` 计数。
+- Query `q` affects the matched row `items` and row `total` only; page `limit/offset`, sort, and visible-column toggles affect presentation/items only. Business `totals`, price coverage, calculatedAt/FX/cost basis remain invariant under q/sort/page/visible-column transformations when the underlying facts and read basis are unchanged. Empty focused membership is an intentional empty selection, never a full-shop fallback.
 - New sort identifiers are exactly `purchasePriceMean`, `purchasePriceMedian`, `originalSalePriceMean`, `originalSalePriceMedian`, `paidPriceMean`, `paidPriceMedian`. Nulls sort last in both directions, then stable `spend` and `spu_pk ASC`; sort must occur before page slicing and return the identifier in meta.
 
 ## 5. HTTP wire contract
@@ -370,7 +405,7 @@ Rules for this object:
 
 - `mean`/`median` are CNY money strings with exactly four fractional digits or JSON `null`; no sample means both null, never `"0.0000"`.
 - Counts are integers in JSON; quantities are integer units under the current verified parser rule. `coverageRatio` is a four-decimal string, null only when `eligibleQuantity=0`.
-- `eligibleQuantity` is the paid/non-gift/valid-quantity population before this metric’s price validity; `observedQuantity`, `missingQuantity`, `invalidQuantity` are independent per metric. Line counts are likewise metric-specific. Gift/status/FX/quantity exclusions that prevent entering the metric universe are reported in `priceCoverage` below, not silently added to missing price.
+- `eligibleQuantity` is the paid/non-gift/valid-quantity population before this metric’s price validity; `observedQuantity`, `missingQuantity`, `invalidQuantity` are independent per metric and `invalidQuantity` means invalid **price** units, not invalid physical quantity. Line counts are likewise metric-specific. Invalid physical quantity has no unit count and appears only as `priceCoverage.invalidQuantityLineCount`; gift/status/FX exclusions that prevent entering the metric universe are reported in `priceCoverage`, not silently added to missing price.
 - `source` enum is exactly `roi_unit_cost`, `tiktok_line_item_original_price`, `tiktok_line_item_sale_price`, or `none`. `status` enum is exactly `complete`, `partial`, `no_samples`, `unavailable`; `estimated=true` is only permitted for purchase with any `DEFAULT_K1` cost. No prices are returned with `source=none` and non-null values.
 - `priceCoverage` is added alongside `priceStats` in `items[]`/`totals` for explicit population exclusions:
 
@@ -381,14 +416,15 @@ Rules for this object:
     "excludedUnpaidQuantity": 0, "excludedOnHoldQuantity": 1,
     "excludedCancelledQuantity": 1, "excludedGiftQuantity": 2,
     "unknownGiftQuantity": 0, "unknownStatusQuantity": 0,
-    "invalidQuantity": 0, "missingCurrencyQuantity": 0,
+    "invalidQuantityLineCount": 0, "excludedValidQuantity": 0,
+    "missingCurrencyQuantity": 0,
     "fxUnavailableQuantity": 0,
     "historicalRefundRetainedQuantity": 10
   }
 }
 ```
 
-The coverage object counts source population and exclusions, while each metric object counts only its own price-field coverage. `historicalRefundRetainedQuantity` is informational evidence, not an extra population. If the implementation cannot establish a required mapping, response status is `503`/documented `422` rather than a misleading complete `200`.
+The coverage object counts source population and exclusions, while each metric object counts only its own price-field coverage. `invalidQuantityLineCount` is a line count only; there is deliberately no invalid physical-unit sum. `excludedValidQuantity` counts valid units excluded by gift/status/payment gates. `historicalRefundRetainedQuantity` is informational evidence, not an extra population. If the implementation cannot establish a required mapping, response status is `503`/documented `422` rather than a misleading complete `200`.
 
 `meta` adds only:
 
@@ -401,52 +437,66 @@ The coverage object counts source population and exclusions, while each metric o
     "conversionPolicy": "native_line_currency_to_cny_before_aggregation"
   },
   "priceCost": {
-    "snapshotId": 77, "asOfAt": "2026-10-05T12:00:00+00:00",
+    "basisFingerprint": "sha256:response-local-cost-map-v1",
+    "asOfAt": "2026-10-05T12:00:00+00:00",
     "defaultK1Cny": "40.0000", "estimated": true
   },
   "priceSort": "paidPriceMedian"
 }
 ```
 
-Existing `computed_at` and other legacy snake fields remain for compatibility; clients should use `calculatedAt` for this feature once present. `calculatedAt`, FX snapshot and cost snapshot must be identical throughout one response.
+Existing `computed_at` and other legacy snake fields remain for compatibility; clients should use `calculatedAt` for this feature once present. `calculatedAt`, FX snapshot and cost basis must be identical throughout one response. Across separate HTTP requests they may legitimately advance or change when facts, rates, or current costs change; invariance claims are conditional on the same unchanged read basis. `basisFingerprint` is an opaque response-local digest of the ordered `(spu_pk, unit_cost_used, cost_source)` map and `calculatedAt`; it is not a persisted cost snapshot id or a new table. It lets logs correlate one response without claiming a historical procurement snapshot.
 
 ### 5.3 Mutually consistent examples
 
-**Normal standard page, mixed manual/default cost (abbreviated legacy metrics are still present in the real envelope):**
+**Normal standard page, two-SPU weighted example (legacy snake fields remain alongside these fields):**
 
 ```http
 GET /v2/analytics/spu-roi?shop_pk=314&w_start=2026-10-04&w_end=2026-10-04&sort=paidPriceMedian&order=asc&limit=50&offset=0
 ```
 
+The fixture has SPU A with purchase 10 × qty 1 and SPU B with purchase 40 × qty 9. A uses `MANUAL`, B uses `DEFAULT_K1`; each row therefore has mean=median cost, while totals are purchase mean 37 and median 40. Original sale is 20 × 1 plus 50 × 9; paid is 18 × 1 plus 45 × 9.
+
 ```json
 {
-  "items": [{
-    "spu_pk": 12, "spu_id": "A", "spend": "0.0000",
-    "priceStats": {
-      "purchase": {"mean":"37.0000","median":"40.0000","eligibleQuantity":10,"observedQuantity":10,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":2,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"roi_unit_cost","estimated":true},
-      "originalSale": {"mean":"55.0000","median":"60.0000","eligibleQuantity":10,"observedQuantity":10,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":2,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"tiktok_line_item_original_price","estimated":false},
-      "paid": {"mean":"49.0000","median":"54.0000","eligibleQuantity":10,"observedQuantity":10,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":2,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"tiktok_line_item_sale_price","estimated":false}
-    },
-    "priceCoverage": {"eligibleLineCount":2,"eligibleQuantity":10,"excludedUnpaidQuantity":0,"excludedOnHoldQuantity":0,"excludedCancelledQuantity":0,"excludedGiftQuantity":0,"unknownGiftQuantity":0,"unknownStatusQuantity":0,"invalidQuantity":0,"missingCurrencyQuantity":0,"fxUnavailableQuantity":0,"historicalRefundRetainedQuantity":10}
-  }],
-  "total": 1,
-  "totals": {"priceStats": {"purchase": {"mean":"37.0000","median":"40.0000","eligibleQuantity":10,"observedQuantity":10,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":2,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"roi_unit_cost","estimated":true},"originalSale": {"mean":"55.0000","median":"60.0000","eligibleQuantity":10,"observedQuantity":10,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":2,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"tiktok_line_item_original_price","estimated":false},"paid": {"mean":"49.0000","median":"54.0000","eligibleQuantity":10,"observedQuantity":10,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":2,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"tiktok_line_item_sale_price","estimated":false}},"priceCoverage":{"eligibleLineCount":2,"eligibleQuantity":10,"excludedUnpaidQuantity":0,"excludedOnHoldQuantity":0,"excludedCancelledQuantity":0,"excludedGiftQuantity":0,"unknownGiftQuantity":0,"unknownStatusQuantity":0,"invalidQuantity":0,"missingCurrencyQuantity":0,"fxUnavailableQuantity":0,"historicalRefundRetainedQuantity":10}},
-  "meta": {"calculatedAt":"2026-10-05T12:00:00+00:00","priceCurrency":"CNY","priceFx":{"snapshotId":901,"asOfAt":"2026-10-05T11:59:00+00:00","conversionPolicy":"native_line_currency_to_cny_before_aggregation"},"priceCost":{"snapshotId":77,"asOfAt":"2026-10-05T12:00:00+00:00","defaultK1Cny":"40.0000","estimated":true},"priceSort":"paidPriceMedian"}
+  "items": [
+    {"spu_pk":12,"spu_id":"A","priceStats":{"purchase":{"mean":"10.0000","median":"10.0000","eligibleQuantity":1,"observedQuantity":1,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":1,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"roi_unit_cost","estimated":false},"originalSale":{"mean":"20.0000","median":"20.0000","eligibleQuantity":1,"observedQuantity":1,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":1,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"tiktok_line_item_original_price","estimated":false},"paid":{"mean":"18.0000","median":"18.0000","eligibleQuantity":1,"observedQuantity":1,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":1,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"tiktok_line_item_sale_price","estimated":false}},"priceCoverage":{"eligibleLineCount":1,"eligibleQuantity":1,"excludedUnpaidQuantity":0,"excludedOnHoldQuantity":0,"excludedCancelledQuantity":0,"excludedGiftQuantity":0,"unknownGiftQuantity":0,"unknownStatusQuantity":0,"invalidQuantityLineCount":0,"excludedValidQuantity":0,"missingCurrencyQuantity":0,"fxUnavailableQuantity":0,"historicalRefundRetainedQuantity":1}},
+    {"spu_pk":13,"spu_id":"B","priceStats":{"purchase":{"mean":"40.0000","median":"40.0000","eligibleQuantity":9,"observedQuantity":9,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":1,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"roi_unit_cost","estimated":true},"originalSale":{"mean":"50.0000","median":"50.0000","eligibleQuantity":9,"observedQuantity":9,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":1,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"tiktok_line_item_original_price","estimated":false},"paid":{"mean":"45.0000","median":"45.0000","eligibleQuantity":9,"observedQuantity":9,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":1,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"tiktok_line_item_sale_price","estimated":false}},"priceCoverage":{"eligibleLineCount":1,"eligibleQuantity":9,"excludedUnpaidQuantity":0,"excludedOnHoldQuantity":0,"excludedCancelledQuantity":0,"excludedGiftQuantity":0,"unknownGiftQuantity":0,"unknownStatusQuantity":0,"invalidQuantityLineCount":0,"excludedValidQuantity":0,"missingCurrencyQuantity":0,"fxUnavailableQuantity":0,"historicalRefundRetainedQuantity":9}}
+  ],
+  "total":2,
+  "totals":{"priceStats":{"purchase":{"mean":"37.0000","median":"40.0000","eligibleQuantity":10,"observedQuantity":10,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":2,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"roi_unit_cost","estimated":true},"originalSale":{"mean":"47.0000","median":"50.0000","eligibleQuantity":10,"observedQuantity":10,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":2,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"tiktok_line_item_original_price","estimated":false},"paid":{"mean":"42.3000","median":"45.0000","eligibleQuantity":10,"observedQuantity":10,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":2,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"tiktok_line_item_sale_price","estimated":false}},"priceCoverage":{"eligibleLineCount":2,"eligibleQuantity":10,"excludedUnpaidQuantity":0,"excludedOnHoldQuantity":0,"excludedCancelledQuantity":0,"excludedGiftQuantity":0,"unknownGiftQuantity":0,"unknownStatusQuantity":0,"invalidQuantityLineCount":0,"excludedValidQuantity":0,"missingCurrencyQuantity":0,"fxUnavailableQuantity":0,"historicalRefundRetainedQuantity":10}},
+  "meta":{"calculatedAt":"2026-10-05T12:00:00+00:00","priceCurrency":"CNY","priceFx":{"snapshotId":901,"asOfAt":"2026-10-05T11:59:00+00:00","conversionPolicy":"native_line_currency_to_cny_before_aggregation"},"priceCost":{"basisFingerprint":"sha256:response-local-cost-map-v1","asOfAt":"2026-10-05T12:00:00+00:00","defaultK1Cny":"40.0000","estimated":true},"priceSort":"paidPriceMedian"}
 }
 ```
 
-**Focused page:** request is `GET /v2/analytics/spu-roi?shop_pk=314&scope=focused&...`; it has the same response shape and totals over the applied focused membership only. The membership GET is separate and must not be expected to carry `priceStats`.
+**Focused page (same two SPUs, complete new contract):** the membership GET remains separate; only analytics carries prices.
 
-**Empty focused scope:** `200` with `items:[]`, `total:0`, totals `priceStats` all three `{mean:null,median:null,eligibleQuantity:0,observedQuantity:0,missingQuantity:0,invalidQuantity:0,observedLineCount:0,missingLineCount:0,invalidLineCount:0,coverageRatio:null,status:"no_samples",source:"none",estimated:false}`, zero coverage counts, and unchanged snapshot metadata. It must not fall back to all shop SPUs.
+```http
+GET /v2/analytics/spu-roi?shop_pk=314&scope=focused&w_start=2026-10-04&w_end=2026-10-04&sort=paidPriceMedian&order=asc&limit=50&offset=0
+```
 
-**Partial coverage:** a valid paid population of quantity 10 with original price observed for quantity 9 and absent for quantity 1 returns original `mean`/`median` from 9 observed units, `missingQuantity:1`, `coverageRatio:"0.9000"`, `status:"partial"`; paid and purchase statuses are independently complete if their fields/costs are valid.
+```json
+{"items":[{"spu_pk":12,"spu_id":"A","priceStats":{"purchase":{"mean":"10.0000","median":"10.0000","eligibleQuantity":1,"observedQuantity":1,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":1,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"roi_unit_cost","estimated":false},"originalSale":{"mean":"20.0000","median":"20.0000","eligibleQuantity":1,"observedQuantity":1,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":1,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"tiktok_line_item_original_price","estimated":false},"paid":{"mean":"18.0000","median":"18.0000","eligibleQuantity":1,"observedQuantity":1,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":1,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"tiktok_line_item_sale_price","estimated":false}},"priceCoverage":{"eligibleLineCount":1,"eligibleQuantity":1,"excludedUnpaidQuantity":0,"excludedOnHoldQuantity":0,"excludedCancelledQuantity":0,"excludedGiftQuantity":0,"unknownGiftQuantity":0,"unknownStatusQuantity":0,"invalidQuantityLineCount":0,"excludedValidQuantity":0,"missingCurrencyQuantity":0,"fxUnavailableQuantity":0,"historicalRefundRetainedQuantity":1}},{"spu_pk":13,"spu_id":"B","priceStats":{"purchase":{"mean":"40.0000","median":"40.0000","eligibleQuantity":9,"observedQuantity":9,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":1,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"roi_unit_cost","estimated":true},"originalSale":{"mean":"50.0000","median":"50.0000","eligibleQuantity":9,"observedQuantity":9,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":1,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"tiktok_line_item_original_price","estimated":false},"paid":{"mean":"45.0000","median":"45.0000","eligibleQuantity":9,"observedQuantity":9,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":1,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"tiktok_line_item_sale_price","estimated":false}},"priceCoverage":{"eligibleLineCount":1,"eligibleQuantity":9,"excludedUnpaidQuantity":0,"excludedOnHoldQuantity":0,"excludedCancelledQuantity":0,"excludedGiftQuantity":0,"unknownGiftQuantity":0,"unknownStatusQuantity":0,"invalidQuantityLineCount":0,"excludedValidQuantity":0,"missingCurrencyQuantity":0,"fxUnavailableQuantity":0,"historicalRefundRetainedQuantity":9}}],"total":2,"totals":{"priceStats":{"purchase":{"mean":"37.0000","median":"40.0000","eligibleQuantity":10,"observedQuantity":10,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":2,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"roi_unit_cost","estimated":true},"originalSale":{"mean":"47.0000","median":"50.0000","eligibleQuantity":10,"observedQuantity":10,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":2,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"tiktok_line_item_original_price","estimated":false},"paid":{"mean":"42.3000","median":"45.0000","eligibleQuantity":10,"observedQuantity":10,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":2,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"tiktok_line_item_sale_price","estimated":false}},"priceCoverage":{"eligibleLineCount":2,"eligibleQuantity":10,"excludedUnpaidQuantity":0,"excludedOnHoldQuantity":0,"excludedCancelledQuantity":0,"excludedGiftQuantity":0,"unknownGiftQuantity":0,"unknownStatusQuantity":0,"invalidQuantityLineCount":0,"excludedValidQuantity":0,"missingCurrencyQuantity":0,"fxUnavailableQuantity":0,"historicalRefundRetainedQuantity":10}},"meta":{"calculatedAt":"2026-10-05T12:00:00+00:00","priceCurrency":"CNY","priceFx":{"snapshotId":901,"asOfAt":"2026-10-05T11:59:00+00:00","conversionPolicy":"native_line_currency_to_cny_before_aggregation"},"priceCost":{"basisFingerprint":"sha256:response-local-cost-map-v1","asOfAt":"2026-10-05T12:00:00+00:00","defaultK1Cny":"40.0000","estimated":true},"priceSort":"paidPriceMedian"}}
+```
 
-**Default-cost estimate:** purchase values use `unit_cost_used="40.0000"`, `source:"roi_unit_cost"`, `estimated:true`, and an explicit warning/cost metadata; this is not a TikTok purchase price and does not create a historical procurement distribution.
+**Empty focused scope (complete envelope):**
+
+```json
+{"items":[],"total":0,"totals":{"priceStats":{"purchase":{"mean":null,"median":null,"eligibleQuantity":0,"observedQuantity":0,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":0,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":null,"status":"no_samples","source":"none","estimated":false},"originalSale":{"mean":null,"median":null,"eligibleQuantity":0,"observedQuantity":0,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":0,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":null,"status":"no_samples","source":"none","estimated":false},"paid":{"mean":null,"median":null,"eligibleQuantity":0,"observedQuantity":0,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":0,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":null,"status":"no_samples","source":"none","estimated":false}},"priceCoverage":{"eligibleLineCount":0,"eligibleQuantity":0,"excludedUnpaidQuantity":0,"excludedOnHoldQuantity":0,"excludedCancelledQuantity":0,"excludedGiftQuantity":0,"unknownGiftQuantity":0,"unknownStatusQuantity":0,"invalidQuantityLineCount":0,"excludedValidQuantity":0,"missingCurrencyQuantity":0,"fxUnavailableQuantity":0,"historicalRefundRetainedQuantity":0}},"meta":{"calculatedAt":"2026-10-05T12:00:00+00:00","priceCurrency":"CNY","priceFx":{"snapshotId":901,"asOfAt":"2026-10-05T11:59:00+00:00","conversionPolicy":"native_line_currency_to_cny_before_aggregation"},"priceCost":{"basisFingerprint":"sha256:response-local-cost-map-v1","asOfAt":"2026-10-05T12:00:00+00:00","defaultK1Cny":"40.0000","estimated":false},"priceSort":"paidPriceMedian"}}
+```
+
+**Partial coverage (two SPUs, original price missing on B):** valid paid quantity is 10; original has one observed unit and nine missing units, so only original is partial. Purchase and paid remain complete.
+
+```json
+{"items":[{"spu_pk":12,"spu_id":"A","priceStats":{"purchase":{"mean":"10.0000","median":"10.0000","eligibleQuantity":1,"observedQuantity":1,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":1,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"roi_unit_cost","estimated":false},"originalSale":{"mean":"20.0000","median":"20.0000","eligibleQuantity":1,"observedQuantity":1,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":1,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"tiktok_line_item_original_price","estimated":false},"paid":{"mean":"18.0000","median":"18.0000","eligibleQuantity":1,"observedQuantity":1,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":1,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"tiktok_line_item_sale_price","estimated":false}},"priceCoverage":{"eligibleLineCount":1,"eligibleQuantity":1,"excludedUnpaidQuantity":0,"excludedOnHoldQuantity":0,"excludedCancelledQuantity":0,"excludedGiftQuantity":0,"unknownGiftQuantity":0,"unknownStatusQuantity":0,"invalidQuantityLineCount":0,"excludedValidQuantity":0,"missingCurrencyQuantity":0,"fxUnavailableQuantity":0,"historicalRefundRetainedQuantity":1}},{"spu_pk":13,"spu_id":"B","priceStats":{"purchase":{"mean":"40.0000","median":"40.0000","eligibleQuantity":9,"observedQuantity":9,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":1,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"roi_unit_cost","estimated":true},"originalSale":{"mean":null,"median":null,"eligibleQuantity":9,"observedQuantity":0,"missingQuantity":9,"invalidQuantity":0,"observedLineCount":0,"missingLineCount":1,"invalidLineCount":0,"coverageRatio":"0.0000","status":"partial","source":"tiktok_line_item_original_price","estimated":false},"paid":{"mean":"45.0000","median":"45.0000","eligibleQuantity":9,"observedQuantity":9,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":1,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"tiktok_line_item_sale_price","estimated":false}},"priceCoverage":{"eligibleLineCount":1,"eligibleQuantity":9,"excludedUnpaidQuantity":0,"excludedOnHoldQuantity":0,"excludedCancelledQuantity":0,"excludedGiftQuantity":0,"unknownGiftQuantity":0,"unknownStatusQuantity":0,"invalidQuantityLineCount":0,"excludedValidQuantity":0,"missingCurrencyQuantity":0,"fxUnavailableQuantity":0,"historicalRefundRetainedQuantity":9}}],"total":2,"totals":{"priceStats":{"purchase":{"mean":"37.0000","median":"40.0000","eligibleQuantity":10,"observedQuantity":10,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":2,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"roi_unit_cost","estimated":true},"originalSale":{"mean":"20.0000","median":"20.0000","eligibleQuantity":10,"observedQuantity":1,"missingQuantity":9,"invalidQuantity":0,"observedLineCount":1,"missingLineCount":1,"invalidLineCount":0,"coverageRatio":"0.1000","status":"partial","source":"tiktok_line_item_original_price","estimated":false},"paid":{"mean":"42.3000","median":"45.0000","eligibleQuantity":10,"observedQuantity":10,"missingQuantity":0,"invalidQuantity":0,"observedLineCount":2,"missingLineCount":0,"invalidLineCount":0,"coverageRatio":"1.0000","status":"complete","source":"tiktok_line_item_sale_price","estimated":false}},"priceCoverage":{"eligibleLineCount":2,"eligibleQuantity":10,"excludedUnpaidQuantity":0,"excludedOnHoldQuantity":0,"excludedCancelledQuantity":0,"excludedGiftQuantity":0,"unknownGiftQuantity":0,"unknownStatusQuantity":0,"invalidQuantityLineCount":0,"excludedValidQuantity":0,"missingCurrencyQuantity":0,"fxUnavailableQuantity":0,"historicalRefundRetainedQuantity":10}},"meta":{"calculatedAt":"2026-10-05T12:00:00+00:00","priceCurrency":"CNY","priceFx":{"snapshotId":901,"asOfAt":"2026-10-05T11:59:00+00:00","conversionPolicy":"native_line_currency_to_cny_before_aggregation"},"priceCost":{"basisFingerprint":"sha256:response-local-cost-map-v1","asOfAt":"2026-10-05T12:00:00+00:00","defaultK1Cny":"40.0000","estimated":true},"priceSort":"paidPriceMedian"}}
+```
+
+**Default-cost estimate (same two-SPU envelope, cost provenance explicit):** the normal and focused examples already include the complete default-cost behavior: B’s purchase metric is `40.0000/40.0000`, `source:"roi_unit_cost"`, `estimated:true`, while its TikTok original/paid metrics remain `50.0000/50.0000` and `45.0000/45.0000`. A changed current cost map changes only purchase values in a later response; it never rewrites these TikTok observations.
 
 **Error:** missing FX for a non-CNY observed line returns `503` with no partial 200:
 
 ```json
-{"requestId":"req-price-901","error":{"code":"PRICE_FX_UNAVAILABLE","message":"price currency cannot be converted in the read snapshot","details":{"currency":"THB","snapshotId":901}}}
+{"code":"PRICE_FX_UNAVAILABLE","message":"price currency cannot be converted in the read snapshot","requestId":"req-price-901","retryable":true}
 ```
 
 The error must not expose raw payloads, credentials or buyer data. Existing HTTP error envelope/request-id conventions remain authoritative.
@@ -495,17 +545,17 @@ paidPriceMean / paidPriceMedian
 - 点击任意六个子列标题发送完整当前 query，仅更改 `sort/order`；sort icon 与 `aria-sort="ascending|descending|none"` 只标记当前 active column，其他列为 none。null-last 由服务端完成，Tabulator 不做本地重新排序。
 - 标题可聚焦，Enter/Space 与 click 等效；加载期间保持 focus、显示 pending，响应返回后更新 header label/aria-sort，不跳焦点。
 - 每个 Prices 行 tooltip button 位于 label 右侧、可 Tab 到达，有 `aria-label`（例如“查看 Paid 价格统计口径”）和 `aria-expanded`；click/Enter/Space 打开，Escape 关闭并把焦点还给 button，点击 outside 关闭；移动端不依赖 hover。异步刷新重绘不得留下幽灵 tooltip 或把焦点送到 body。
-- Tooltip 文本至少包含 authority、weight、window、coverage/status、FX/cost snapshot；不得把 tooltip 当作唯一错误通道。
+- Tooltip 文本至少包含 authority、weight、window、coverage/status、FX snapshot 与 current-cost-basis tuple；不得把 tooltip 当作唯一错误通道。
 
 ### 6.3 两个 profile 与状态竞态
 
 共享 kernel 的 `renderSummary(payload)`、`COLUMN_DEFS`/nested columns、formatters、request cancellation、stale response guard 只维护一份。profile 仅声明 `id`, endpoint selection (`standard` / `scope=focused`), default includeAll, default visible columns 和 page path。
 
-以下事件都递增 `loadVersion` 并 abort 前一个 overview：shop 切换、SPU apply/clear、日期 start/end、搜索 q、排序、分页、refresh。response 写 DOM 前校验：`loadVersion`、shop_pk、applied scope fingerprint、window、FX/cost snapshot key；不匹配按 stale 丢弃，不能用旧 price box 覆盖新 window。
+以下事件都递增 `loadVersion` 并 abort 前一个 overview：shop 切换、SPU apply/clear、日期 start/end、搜索 q、排序、分页、refresh。dispatch 时捕获不可变的本地 request identity：`loadVersion`、shop_pk、applied-selection hash、operating window、q、page/limit、sort/order；response 写 DOM 前逐项与当前 client state 比较，不匹配按 stale 丢弃，不能用旧 price box 覆盖新 window。FX/cost 不是请求前可知的 key，只检查该次 response 内 `calculatedAt`、FX tuple、cost basis tuple 的一致性。
 
-- `q` 只影响 `items`，价格 totals 不重算；sort/page/limit/visible toggle 只影响 rows/DOM。用户快速 page→sort→date 时只允许最后一个 response 成为可见状态。
+- `q` 只影响匹配行与 `total`，价格 business totals 不重算；sort/page/limit/visible toggle 只影响 rows/DOM。用户快速 page→sort→date 时只允许最后一个 response 成为可见状态。
 - loading 时 Prices box 显示 skeleton/“加载中”，不得保留上一窗口数字冒充新结果；success 替换为 snapshot 数字；empty focused 显示 no samples；partial 显示 warning + 可解释计数；503 FX/422 参数错误/5xx requestId 显示同一 box 的可读 error 与 retry。
-- 清空 focused membership 后仍请求 `scope=focused`，得到空 totals；不能因为 focused GET 返回空而请求整店 analytics。切换 focused membership 的 mutation queue 完成后重新请求 analytics，并丢弃旧 scope fingerprint 的 response。
+- 清空 focused membership 后仍请求 `scope=focused`，得到空 totals；不能因为 focused GET 返回空而请求整店 analytics。切换 focused membership 的 mutation queue 完成后递增 `appliedSelectionVersion`、重新请求 analytics，并丢弃旧 selection version 的 response；不新增 server fingerprint contract。
 - refresh、日期 apply、search、column toggle 和 row expand 不改变已应用 selection；row drill cache 失效只在 shop/scope/window/cost/FX 变化时清除。价格不进入 projection toggle 的 cache key，但 operating window 必须进入。
 
 ### 6.4 响应式与表格列显隐
@@ -555,18 +605,29 @@ Test odd/even ties, zero-vs-null, missing/invalid independent original vs paid c
 | domain/unit | independent oracle mean/median, cumulative SQL ranks, totals vs row averages, six sort IDs/null-last/tie-breaker, coverage statuses, snapshot metadata | `bash scripts/test_isolated.sh unit` / analytics domain |
 | HTTP/API | real FastAPI route + isolated DB; standard and `scope=focused`; empty/partial/default/error; totals invariant under q/sort/page/columns; legacy snake fields unchanged | `bash scripts/test_isolated.sh fast tests/api/test_spu_price_stats.py` after released ownership |
 | browser static | shared kernel/profile markup, aria, grouped columns contract | useful regression only, never E2E evidence |
-| live browser E2E | real Playwright browser → temporary uvicorn → actual API → same isolated DB; seed then authenticate; prices, sort, totals invariance, errors/retry, mobile | dedicated command through `bash scripts/test_isolated.sh e2e ...`; no external :9877 |
+| live browser E2E | real Playwright browser → temporary uvicorn → actual API → same isolated DB; seed then authenticate; prices, sort, totals invariance, errors/retry, mobile | `bash scripts/test_isolated.sh e2e tests/browser/test_spu_price_stats_live.py`; collection must be >0 and unavailable browser/API is failure, not skip-green |
 
 ### 7.3 Real E2E execution contract
 
-The live test files are `tests/browser/test_spu_price_stats_live.py` and `tests/support/spu_price_stats_live.py` after explicit release (projection owner released these paths; this doc lane still does not edit them). The fixture must:
+The live test files are `tests/browser/test_spu_price_stats_live.py` and `tests/support/spu_price_stats_live.py` after explicit release (projection owner released these paths; this doc lane still does not edit them). The test module must declare the verified registry markers exactly:
 
-1. Let outer `scripts/test_isolated.sh` provide an ephemeral `TTS_ERP_DB_URL_TEST`; derive only a test-shaped `TTS_ERP_DB_URL`, set `TTS_ERP_AUTH_MODE=enforce` and deterministic test Fernet key, and strip production/service secrets.
-2. Seed the same isolated database via SQLAlchemy/psycopg before server launch, commit, then close; use `TEST_PRICE_<run-id>` identifiers and cleanup only those rows. No `--keep-db` is needed for normal process lifetime because fixture cleanup occurs before wrapper exit; retain it only for human failure inspection.
-3. Start `python -m uvicorn tts_erp_v2.app:app` on a random free localhost port with a verified no-scheduler/no-upstream test mode; poll `/healthz`; fail as an environment blocker if app lifespan cannot be safely disabled, never monkeypatch the target route or call production `:9877`.
-4. Create a test readonly credential/cookie through the real auth path; do not read/decrypt credentials directly. Browser navigation must be same-origin and capture actual network responses.
-5. Launch Playwright Chromium headless; assert Prices box and grouped headers on both page routes, independent six sorts, scope=focused mapping, empty/partial/null/estimate states, totals invariance under q/page/visible columns, latest-response-wins race, API error/retry, keyboard tooltip/aria-sort, and mobile horizontal scroll/frozen first column.
-6. Always stop browser/server with bounded timeout and preserve screenshot/trace/stdout on failure. If Chromium or required service support is unavailable, the dedicated E2E is **blocked**, not skipped or called optional acceptance evidence.
+```python
+pytestmark = (
+    pytest.mark.domain_e2e,
+    pytest.mark.requires_service,
+    pytest.mark.requires_browser,
+    pytest.mark.requires_db,
+)
+```
+
+The fixture must:
+
+1. Let outer `scripts/test_isolated.sh` provide one ephemeral `TTS_ERP_DB_URL_TEST`; derive only a test-shaped `TTS_ERP_DB_URL` and pass **both variables with the identical outer ephemeral URL** to the child app. Use an explicit allowlisted environment (`TTS_ERP_AUTH_MODE=enforce`, deterministic test Fernet key, safe test settings), remove inherited service/proxy credentials, and do not let cwd/import-time dotenv load production `.env` values.
+2. Seed a `TEST_PRICE_<run-id>` user/account and fixture rows in that same DB through SQLAlchemy/psycopg before server launch, commit, then close. Obtain the browser cookie through the real `POST /v2/auth/login` TEST-user path; do not read/decrypt credentials directly. Cleanup only TEST rows. No `--keep-db` is needed for normal process lifetime because fixture cleanup occurs before wrapper exit; retain it only for human failure inspection.
+3. Start the app with `sys.executable -m uvicorn tts_erp_v2.app:app` on a random free loopback port; poll `/healthz`; capture stdout/stderr. Source inspection confirms `tts_erp_v2/app.py` has no scheduler startup hook, so do not invent a scheduler-disable switch: verify the actual app lifespan and ensure the test child has no sync-worker/upstream process. Never monkeypatch the target route or call production `:9877`.
+4. Run `bash scripts/test_isolated.sh e2e tests/browser/test_spu_price_stats_live.py`; collection must report >0. A browser, app, auth, DB, or readiness failure must fail the test and be reported as a blocker, not be converted to `pytest.skip` or a green empty collection.
+5. Launch Playwright Chromium headless; assert Prices box and grouped headers on both page routes, independent six sorts, `scope=focused` analytics mapping, empty/partial/null/estimate states, totals invariance under q/page/visible columns when facts/basis are unchanged, latest-response-wins race, API error/retry, keyboard tooltip/aria-sort, and mobile horizontal scroll/frozen first column.
+6. Always stop browser/server process group with bounded terminate→kill escalation, close logs, and preserve screenshot/trace/stdout on failure. The same isolated DB must be used by seed, child app (`TTS_ERP_DB_URL` and `_TEST`), API, and browser; no target-API mock is allowed.
 
 Source grep, static string tests, mocked JSON render tests, existing canned browser fixtures, and existing external-service smoke tests are regression evidence only; none proves DB/API/browser full-stack behavior.
 
@@ -582,7 +643,7 @@ Source grep, static string tests, mocked JSON render tests, existing canned brow
 
 ### 8.2 观测与完成门
 
-发布 runbook 必须记录 migration revision（由实际 head 生成）、producer/API/UI commit、calculatedAt/FX/cost snapshot、每 shop coverage 和 open sync issues。完成门：
+发布 runbook 必须记录 migration revision（由实际 head 生成）、producer/API/UI commit、response-local calculatedAt/FX/cost-basis tuple、每 shop coverage 和 open sync issues。完成门：
 
 - schema migration 成功且无 destructive statements；
 - orders/detail parity fixture 通过；
@@ -633,9 +694,9 @@ No child should modify public common files before the projection owner releases 
 
 - **Gate 0 — design:** this file reviewed for current-vs-target facts, exact wire fields, SQL median, raw provenance, no fallback, and evidence boundary. Commit `docs: ...价格统计技术方案` on this branch.
 - **Gate 1 — data:** handwritten parser parity and test-shaped migration tests RED/GREEN; commit only owned data paths; dry-run/backfill remains human-only.
-- **Gate 2 — backend:** numeric oracle + isolated HTTP/DB tests; prove totals reaggregation and snapshot/FX/cost consistency; commit backend paths only.
+- **Gate 2 — backend:** numeric oracle + isolated HTTP/DB tests; prove totals reaggregation and same-response FX/current-cost-basis consistency; commit backend paths only.
 - **Gate 3 — UI:** real browser contract verifies nested grouped Tabulator headers and accessible interactions on both profiles; commit shared UI paths only.
-- **Gate 4 — E2E/review:** dedicated live test uses actual isolated DB/API/browser. A missing browser, scheduler-disable path, or DB isolation is blocker; do not skip to green.
+- **Gate 4 — E2E/review:** dedicated live test uses actual isolated DB/API/browser. A missing browser, verified app lifespan, or DB isolation is blocker; do not skip to green.
 - **Gate 5 — integration:** fresh Terra review findings are fixed by original component writer, then integration-only merge checks exact commit set, `git diff --check`, isolated fast and dedicated E2E evidence. Production deploy/backfill stays human-owned.
 
 Each handoff must include branch/HEAD/base, exact changed paths, commands and results, test DB identity, residual risks, no staged foreign files, and whether push succeeded. This doc lane does not mark application components ready or claim final acceptance.
