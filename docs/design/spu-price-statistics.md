@@ -1,6 +1,6 @@
 # SPU 价格统计（采购价 / 原价 / 实付价）专项技术方案
 
-> **状态：待实现（文档组件；不是代码、迁移或发布批准）**  
+> **状态：待实现（文档组件；不是代码、迁移或发布批准）**
 > 本文只定义 `/v2/pages/spu-roi` 与 `/v2/pages/focused-spus` 共用价格统计组件的实现契约。公共盈利业务真相仍由 [`../business/spu-profitability.md`](../business/spu-profitability.md) 与飞书《SPU-ROI 计算口径》拥有；公共深模块方案由 [`spu-profitability-technical-design.md`](spu-profitability-technical-design.md) 拥有。本专项不是第二套盈利口径，发布后应由维护者把本文件链接合并进公共技术方案。
 >
 > **外部依据声明：** 父会话提供飞书价格章节 readback revision `247`；本会话没有独立抓取外部 Feishu 页面，不把本地 revision `246` 当作“价格章节不存在”的证据。本文将已批准的价格范围与当前代码事实分开标注；若飞书后续修订，先修契约再实现。
