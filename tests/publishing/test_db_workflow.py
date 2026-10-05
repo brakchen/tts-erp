@@ -37,7 +37,12 @@ from tts_erp_v2.publishing.dispatcher import (
     _safe_retry,
     dispatch_one,
 )
-from tts_erp_v2.publishing.domain import AttemptStatus, TaskStage, TaskStatus
+from tts_erp_v2.publishing.domain import (
+    AttemptStatus,
+    TaskStage,
+    TaskStatus,
+    transition_task,
+)
 from tts_erp_v2.publishing.object_store import VideoObjectStore
 from tts_erp_v2.publishing.repository import _lease_task, claim_one
 from tts_erp_v2.publishing.submission import (
@@ -1157,6 +1162,221 @@ async def test_verify_not_published_cleans_device_before_requeue(
     assert task.object_cleanup_status == "not_started"
 
 
+@pytest.mark.asyncio
+async def test_verify_published_is_terminal_and_not_reclaimable(
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "tts_erp_v2.publishing.dispatcher.require_destructive_script_guard",
+        lambda **_kwargs: None,
+    )
+
+    class PublishedVerify:
+        async def submit(self, **kwargs):
+            return ArtemisResult(
+                kwargs["session_id"], "success", output={"verdict": "published"}
+            )
+
+    task = _task(status=TaskStatus.RUNNING.value, stage=TaskStage.VERIFYING.value)
+    task.lease_owner = "verify-worker"
+    task.lease_expires_at = datetime.now(UTC) + timedelta(minutes=1)
+    task.attempts.append(
+        VideoPublishAttempt(
+            sequence_no=1,
+            kind="verify",
+            status=AttemptStatus.CREATED.value,
+            artemis_session_id=uuid4(),
+            prompt_version="TEST",
+            prompt_snapshot="TEST",
+            device_serial="TEST_device",
+        )
+    )
+    db_session.add(task)
+    db_session.flush()
+    db_session.commit()
+    deps = cast(
+        PublishDependencies,
+        SimpleNamespace(
+            session_factory=_factory(db_session),
+            instance_id="verify-worker",
+            lease_seconds=30,
+            max_attempts=3,
+            adb=_CleanupAdb(),
+            store=_CleanupStore(),
+            artemis=PublishedVerify(),
+            spool_dir=tmp_path,
+        ),
+    )
+    await _run_attempt(task.public_id, task.attempts[0].id, deps)
+    db_session.expire_all()
+    assert task.status == TaskStatus.SUCCEEDED.value
+    assert task.stage == TaskStage.DONE.value
+    assert task.lease_owner is None
+    assert await dispatch_one(deps) == "no_task"
+
+
+def test_selector_priority_gates_device_but_not_background_cleanup(
+    db_session: Session,
+) -> None:
+    device = _task(
+        status=TaskStatus.SUCCEEDED.value,
+        stage=TaskStage.DONE.value,
+        device_cleanup_status="failed",
+    )
+    background = _task(
+        status=TaskStatus.SUCCEEDED.value,
+        stage=TaskStage.DONE.value,
+        device_cleanup_status="succeeded",
+        object_cleanup_status="failed",
+    )
+    queued = _task()
+    db_session.add_all([device, background, queued])
+    db_session.flush()
+    from tts_erp_v2.publishing.repository import _lease_cleanup_task
+
+    claimed = _lease_cleanup_task(db_session, "selector", 30, device_only=True)
+    assert claimed is not None and claimed.id == device.id
+    db_session.commit()
+    device = db_session.get(VideoPublishTask, device.id)
+    assert device is not None
+    device.device_cleanup_status = "succeeded"
+    device.cleanup_intent = "none"
+    device.cleanup_lease_owner = None
+    device.cleanup_lease_expires_at = None
+    db_session.commit()
+    assert claim_one(db_session, "publisher") is not None
+    db_session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_terminal_safe_retry_preserves_state_and_cleans_device(
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "tts_erp_v2.publishing.dispatcher.require_destructive_script_guard",
+        lambda **_kwargs: None,
+    )
+    task = _task()
+    db_session.add(task)
+    db_session.flush()
+    assert claim_one(db_session, "terminal-worker", max_attempts=1) is not None
+    task.stage = TaskStage.STAGING_DEVICE.value
+    task.attempt_count = 1
+    db_session.commit()
+    deps = cast(
+        PublishDependencies,
+        SimpleNamespace(
+            session_factory=_factory(db_session),
+            instance_id="terminal-worker",
+            lease_seconds=30,
+            max_attempts=1,
+            adb=_CleanupAdb(),
+            store=_CleanupStore(),
+            spool_dir=tmp_path,
+        ),
+    )
+    await _safe_retry(task.public_id, "BUDGET_EXHAUSTED", deps)
+    db_session.expire_all()
+    assert task.status == TaskStatus.FAILED.value
+    assert task.stage == TaskStage.DONE.value
+    assert task.cleanup_intent == "preserve_state"
+    assert task.device_cleanup_status == "pending"
+    assert await dispatch_one(deps) == "processed"
+    db_session.expire_all()
+    assert task.device_cleanup_status == "succeeded"
+    assert task.object_cleanup_status == "not_started"
+
+
+@pytest.mark.asyncio
+async def test_pre_device_spool_failure_is_retryable(
+    db_session: Session,
+    tmp_path: Path,
+) -> None:
+    task = _task()
+    db_session.add(task)
+    db_session.flush()
+    assert claim_one(db_session, "spool-worker") is not None
+    db_session.commit()
+    deps = cast(
+        PublishDependencies,
+        SimpleNamespace(
+            session_factory=_factory(db_session),
+            instance_id="spool-worker",
+            lease_seconds=30,
+            max_attempts=3,
+            spool_dir=tmp_path,
+        ),
+    )
+    await _safe_retry(task.public_id, "DOWNLOAD_FAILED", deps)
+    await _mark_spool_cleanup(task.public_id, deps, error="TEST_SPOOL_BUSY")
+    db_session.expire_all()
+    assert task.spool_cleanup_status == "failed"
+    assert task.cleanup_intent == "requeue_publish"
+
+
+@pytest.mark.parametrize(
+    ("status", "stage", "event", "expected_status", "expected_stage", "intent"),
+    [
+        ("pending", "queued", "CLAIM", "running", "downloading", "none"),
+        (
+            "running",
+            "waiting_artemis",
+            "ARTEMIS_SUCCESS",
+            "succeeded",
+            "done",
+            "finalize_success",
+        ),
+        (
+            "running",
+            "verifying",
+            "VERIFY_NOT_PUBLISHED",
+            "pending",
+            "waiting_device",
+            "requeue_publish",
+        ),
+        (
+            "running",
+            "staging_device",
+            "SAFE_RETRY_EXHAUSTED",
+            "failed",
+            "done",
+            "preserve_state",
+        ),
+    ],
+)
+def test_domain_transition_table(
+    status: str,
+    stage: str,
+    event: str,
+    expected_status: str,
+    expected_stage: str,
+    intent: str,
+) -> None:
+    task = _task(status=status, stage=stage)
+    transition_task(task, event)
+    assert (task.status, task.stage, task.cleanup_intent) == (
+        expected_status,
+        expected_stage,
+        intent,
+    )
+
+
+def test_database_rejects_pending_cleanup_with_none_intent(
+    db_session: Session,
+) -> None:
+    task = _task(status=TaskStatus.SUCCEEDED.value, stage=TaskStage.DONE.value)
+    task.cleanup_intent = "none"
+    task.device_cleanup_status = "failed"
+    db_session.add(task)
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+    db_session.rollback()
+
+
 def test_database_rejects_illegal_business_and_cleanup_combinations(
     db_session: Session,
 ) -> None:
@@ -1178,6 +1398,57 @@ def test_database_rejects_illegal_business_and_cleanup_combinations(
     with pytest.raises(IntegrityError):
         db_session.flush()
     db_session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_takeover_during_external_call_fences_final_write(
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "tts_erp_v2.publishing.dispatcher.require_destructive_script_guard",
+        lambda **_kwargs: None,
+    )
+    task = _task(
+        status=TaskStatus.SUCCEEDED.value,
+        stage=TaskStage.DONE.value,
+        device_cleanup_status="failed",
+    )
+    task.device_cleanup_next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
+    db_session.add(task)
+    db_session.flush()
+    from tts_erp_v2.publishing.repository import _lease_cleanup_task
+
+    assert _lease_cleanup_task(db_session, "worker-a", 30) is not None
+    db_session.commit()
+    task = db_session.get(VideoPublishTask, task.id)
+    assert task is not None
+
+    class TakeoverAdb(_CleanupAdb):
+        async def remove_staged_video(self, _serial: str, _path: str) -> None:
+            task.cleanup_lease_owner = "worker-b"
+            task.cleanup_lease_expires_at = datetime.now(UTC) + timedelta(minutes=1)
+            task.row_version += 1
+            db_session.commit()
+
+    deps = cast(
+        PublishDependencies,
+        SimpleNamespace(
+            session_factory=_factory(db_session),
+            instance_id="worker-a",
+            lease_seconds=30,
+            max_attempts=3,
+            adb=TakeoverAdb(),
+            store=_CleanupStore(),
+            spool_dir=tmp_path,
+        ),
+    )
+    with pytest.raises(LeaseLost):
+        await _cleanup_success(task.public_id, deps)
+    db_session.expire_all()
+    assert task.cleanup_lease_owner == "worker-b"
+    assert task.device_cleanup_status == "failed"
 
 
 @pytest.mark.asyncio

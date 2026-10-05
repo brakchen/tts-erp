@@ -26,11 +26,10 @@ from tts_erp_v2.publishing.artemis_client import (
 from tts_erp_v2.publishing.domain import (
     AttemptKind,
     AttemptStatus,
-    CleanupIntent,
     TaskStage,
     TaskStatus,
     classify_failure,
-    plan_cleanup,
+    transition_task,
 )
 from tts_erp_v2.publishing.object_store import VideoObjectStore
 from tts_erp_v2.publishing.repository import (
@@ -65,13 +64,25 @@ async def dispatch_one(deps: PublishDependencies) -> str:
     with deps.session_factory() as session:
         task = _lease_task(session, deps.instance_id, deps.lease_seconds)
         if task is None:
-            task = _lease_cleanup_task(session, deps.instance_id, deps.lease_seconds)
+            task = _lease_cleanup_task(
+                session,
+                deps.instance_id,
+                deps.lease_seconds,
+                device_only=True,
+            )
         if task is None:
             task = claim_one(
                 session,
                 deps.instance_id,
                 lease_seconds=deps.lease_seconds,
                 max_attempts=deps.max_attempts,
+            )
+        if task is None:
+            task = _lease_cleanup_task(
+                session,
+                deps.instance_id,
+                deps.lease_seconds,
+                device_only=False,
             )
         if task is None:
             session.commit()
@@ -107,15 +118,7 @@ def _recover_terminal_publish_attempt(
     }:
         return None
     if attempt.status == AttemptStatus.SUCCESS.value:
-        task.status = TaskStatus.SUCCEEDED.value
-        task.stage = TaskStage.DONE.value
-        plan_cleanup(
-            task,
-            CleanupIntent.FINALIZE_SUCCESS,
-            device=True,
-            spool=True,
-            object=True,
-        )
+        transition_task(task, "ARTEMIS_SUCCESS")
         release_lease(task)
         task.completed_at = task.completed_at or datetime.now(UTC)
         task.row_version = (task.row_version or 0) + 1
@@ -391,39 +394,33 @@ async def _run_attempt(
             verdict = (result.output or {}).get("verdict", "inconclusive")
             _save_result(attempt, result)
             if verdict == "published":
-                task.status = TaskStatus.SUCCEEDED.value
-                task.stage = TaskStage.DONE.value
-                plan_cleanup(
-                    task,
-                    CleanupIntent.FINALIZE_SUCCESS,
-                    device=True,
-                    spool=True,
-                    object=True,
-                )
+                transition_task(task, "VERIFY_PUBLISHED")
                 task.completed_at = datetime.now(UTC)
                 release_lease(task)
                 task.row_version += 1
                 session.commit()
                 await _cleanup_success(task_id, deps)
             elif verdict == "not_published":
-                task.status = TaskStatus.PENDING.value
                 if task.device_path:
-                    task.stage = TaskStage.WAITING_DEVICE.value
-                    task.cleanup_intent = "requeue_publish"
+                    transition_task(task, "VERIFY_NOT_PUBLISHED")
                     task.device_cleanup_status = "pending"
                     task.device_cleanup_next_attempt_at = datetime.now(UTC)
                 else:
+                    task.status = TaskStatus.PENDING.value
                     task.stage = TaskStage.QUEUED.value
                     task.cleanup_intent = "none"
                 release_lease(task)
                 task.row_version += 1
                 session.commit()
             else:
-                task.status = TaskStatus.NEEDS_REVIEW.value
-                task.stage = TaskStage.DONE.value
-                task.cleanup_intent = "preserve_state" if task.device_path else "none"
                 if task.device_path:
+                    transition_task(task, "INCONCLUSIVE")
                     task.device_cleanup_status = "pending"
+                else:
+                    task.status = TaskStatus.NEEDS_REVIEW.value
+                    task.stage = TaskStage.DONE.value
+                    task.cleanup_intent = "none"
+                if task.device_path:
                     task.device_cleanup_next_attempt_at = datetime.now(UTC)
                 release_lease(task)
                 task.row_version += 1
@@ -432,15 +429,7 @@ async def _run_attempt(
 
         if result.status == "success":
             _save_result(attempt, result)
-            task.status = TaskStatus.SUCCEEDED.value
-            task.stage = TaskStage.DONE.value
-            plan_cleanup(
-                task,
-                CleanupIntent.FINALIZE_SUCCESS,
-                device=True,
-                spool=True,
-                object=True,
-            )
+            transition_task(task, "ARTEMIS_SUCCESS")
             task.completed_at = datetime.now(UTC)
             release_lease(task)
             task.row_version += 1
@@ -654,30 +643,28 @@ async def _safe_retry(
         terminal = task.attempt_count >= deps.max_attempts
         now = datetime.now(UTC)
         delay = min(300, 5 * (2 ** min(task.attempt_count, 5)))
-        cleanup_gate = (
-            not terminal
-            and task.device_path is not None
-            and task.stage
-            in {
-                TaskStage.STAGING_DEVICE.value,
-                TaskStage.DISPATCHING_ARTEMIS.value,
-                TaskStage.WAITING_ARTEMIS.value,
-                TaskStage.VERIFYING.value,
-                TaskStage.CLEANING.value,
-            }
-        )
+        cleanup_gate = task.device_path is not None and task.stage in {
+            TaskStage.STAGING_DEVICE.value,
+            TaskStage.DISPATCHING_ARTEMIS.value,
+            TaskStage.WAITING_ARTEMIS.value,
+            TaskStage.VERIFYING.value,
+            TaskStage.CLEANING.value,
+        }
+        if cleanup_gate:
+            transition_task(
+                task,
+                "SAFE_RETRY_EXHAUSTED" if terminal else "SAFE_RETRY",
+            )
+        else:
+            task.status = (
+                TaskStatus.FAILED.value if terminal else TaskStatus.PENDING.value
+            )
+            task.stage = TaskStage.DONE.value if terminal else stage
+            task.cleanup_intent = "none"
         values = {
-            "status": TaskStatus.FAILED.value if terminal else TaskStatus.PENDING.value,
-            "stage": TaskStage.DONE.value
-            if terminal
-            else TaskStage.WAITING_DEVICE.value
-            if cleanup_gate
-            else stage,
-            "cleanup_intent": "preserve_state"
-            if terminal and cleanup_gate
-            else "requeue_publish"
-            if cleanup_gate
-            else "none",
+            "status": task.status,
+            "stage": task.stage,
+            "cleanup_intent": task.cleanup_intent,
             "last_error_code": error[:100],
             "last_error_message": error[:500],
             "queued_at": None if terminal else now,
@@ -791,6 +778,37 @@ async def _mark_spool_cleanup(
             session.rollback()
             return
         expected_version = task.row_version
+        values: dict[str, Any] = {
+            "spool_cleanup_status": "failed" if error else "succeeded",
+            "spool_cleanup_error": error,
+            "spool_cleanup_attempts": task.spool_cleanup_attempts + (1 if error else 0),
+            "spool_cleanup_next_attempt_at": (
+                datetime.now(UTC)
+                + timedelta(seconds=_cleanup_retry_delay(task.spool_cleanup_attempts))
+                if error
+                else None
+            ),
+            "row_version": expected_version + 1,
+        }
+        if error and task.cleanup_intent == "none":
+            if task.status == TaskStatus.PENDING.value:
+                values["cleanup_intent"] = "requeue_publish"
+            elif task.status in {
+                TaskStatus.SUCCEEDED.value,
+                TaskStatus.FAILED.value,
+                TaskStatus.NEEDS_REVIEW.value,
+                TaskStatus.CANCELLED.value,
+            }:
+                values["cleanup_intent"] = "preserve_state"
+            else:
+                values.update(
+                    status=TaskStatus.NEEDS_REVIEW.value,
+                    stage=TaskStage.DONE.value,
+                    cleanup_intent="preserve_state",
+                    lease_owner=None,
+                    lease_expires_at=None,
+                    heartbeat_at=None,
+                )
         result = session.execute(
             update(VideoPublishTask)
             .where(
@@ -799,21 +817,7 @@ async def _mark_spool_cleanup(
                 (VideoPublishTask.lease_owner == deps.instance_id)
                 | (VideoPublishTask.lease_owner.is_(None)),
             )
-            .values(
-                spool_cleanup_status="failed" if error else "succeeded",
-                spool_cleanup_error=error,
-                spool_cleanup_attempts=task.spool_cleanup_attempts
-                + (1 if error else 0),
-                spool_cleanup_next_attempt_at=(
-                    datetime.now(UTC)
-                    + timedelta(
-                        seconds=_cleanup_retry_delay(task.spool_cleanup_attempts)
-                    )
-                    if error
-                    else None
-                ),
-                row_version=expected_version + 1,
-            )
+            .values(**values)
         )
         if getattr(result, "rowcount", None) != 1:
             session.rollback()
@@ -979,15 +983,7 @@ async def _cleanup_success(task_id: UUID, deps: PublishDependencies) -> None:
         ):
             raise LeaseLost(task.public_id)
         if task.cleanup_intent == "none":
-            task.cleanup_intent = (
-                "finalize_success"
-                if task.status == TaskStatus.SUCCEEDED.value
-                else "preserve_state"
-            )
-            for name in ("device", "spool", "object"):
-                if getattr(task, f"{name}_cleanup_status") == "not_started":
-                    setattr(task, f"{name}_cleanup_status", "pending")
-            task.row_version += 1
+            raise ValueError("CLEANUP_PLAN_REQUIRED")
         now = datetime.now(UTC)
         task.cleanup_lease_owner = deps.instance_id
         task.cleanup_lease_expires_at = now + timedelta(seconds=deps.lease_seconds)

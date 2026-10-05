@@ -167,7 +167,15 @@ def transition_task(task: Any, event: str) -> None:
         (
             (TaskStatus.RUNNING.value, TaskStage.WAITING_ARTEMIS.value),
             "ARTEMIS_SUCCESS",
-        ): (TaskStatus.RUNNING.value, TaskStage.CLEANING.value),
+        ): (TaskStatus.SUCCEEDED.value, TaskStage.DONE.value),
+        (
+            (TaskStatus.RUNNING.value, TaskStage.DISPATCHING_ARTEMIS.value),
+            "ARTEMIS_SUCCESS",
+        ): (TaskStatus.SUCCEEDED.value, TaskStage.DONE.value),
+        (
+            (TaskStatus.RUNNING.value, TaskStage.VERIFYING.value),
+            "VERIFY_PUBLISHED",
+        ): (TaskStatus.SUCCEEDED.value, TaskStage.DONE.value),
         (
             (TaskStatus.RUNNING.value, TaskStage.WAITING_ARTEMIS.value),
             "AMBIGUOUS_FAILURE",
@@ -177,9 +185,41 @@ def transition_task(task: Any, event: str) -> None:
             TaskStage.DONE.value,
         ),
         (
-            (TaskStatus.RUNNING.value, TaskStage.CLEANING.value),
-            "BUSINESS_SUCCESS_FINALIZED",
-        ): (TaskStatus.SUCCEEDED.value, TaskStage.DONE.value),
+            (TaskStatus.RUNNING.value, TaskStage.VERIFYING.value),
+            "VERIFY_NOT_PUBLISHED",
+        ): (TaskStatus.PENDING.value, TaskStage.WAITING_DEVICE.value),
+        (
+            (TaskStatus.RUNNING.value, TaskStage.STAGING_DEVICE.value),
+            "SAFE_RETRY",
+        ): (TaskStatus.PENDING.value, TaskStage.WAITING_DEVICE.value),
+        (
+            (TaskStatus.RUNNING.value, TaskStage.DISPATCHING_ARTEMIS.value),
+            "SAFE_RETRY",
+        ): (TaskStatus.PENDING.value, TaskStage.WAITING_DEVICE.value),
+        (
+            (TaskStatus.RUNNING.value, TaskStage.WAITING_ARTEMIS.value),
+            "SAFE_RETRY",
+        ): (TaskStatus.PENDING.value, TaskStage.WAITING_DEVICE.value),
+        (
+            (TaskStatus.RUNNING.value, TaskStage.VERIFYING.value),
+            "SAFE_RETRY",
+        ): (TaskStatus.PENDING.value, TaskStage.WAITING_DEVICE.value),
+        (
+            (TaskStatus.RUNNING.value, TaskStage.STAGING_DEVICE.value),
+            "SAFE_RETRY_EXHAUSTED",
+        ): (TaskStatus.FAILED.value, TaskStage.DONE.value),
+        (
+            (TaskStatus.RUNNING.value, TaskStage.DISPATCHING_ARTEMIS.value),
+            "SAFE_RETRY_EXHAUSTED",
+        ): (TaskStatus.FAILED.value, TaskStage.DONE.value),
+        (
+            (TaskStatus.RUNNING.value, TaskStage.WAITING_ARTEMIS.value),
+            "SAFE_RETRY_EXHAUSTED",
+        ): (TaskStatus.FAILED.value, TaskStage.DONE.value),
+        (
+            (TaskStatus.RUNNING.value, TaskStage.VERIFYING.value),
+            "SAFE_RETRY_EXHAUSTED",
+        ): (TaskStatus.FAILED.value, TaskStage.DONE.value),
         ((TaskStatus.FAILED.value, TaskStage.DONE.value), "USER_RETRY"): (
             TaskStatus.PENDING.value,
             TaskStage.QUEUED.value,
@@ -193,7 +233,7 @@ def transition_task(task: Any, event: str) -> None:
     if result is None:
         raise DomainTransitionError(f"{event} is not allowed from {current}")
     task.status, task.stage = result
-    if event == "BUSINESS_SUCCESS_FINALIZED":
+    if event in {"ARTEMIS_SUCCESS", "VERIFY_PUBLISHED", "BUSINESS_SUCCESS_FINALIZED"}:
         plan_cleanup(
             task,
             CleanupIntent.FINALIZE_SUCCESS,
@@ -201,6 +241,10 @@ def transition_task(task: Any, event: str) -> None:
             spool=True,
             object=True,
         )
+    elif event in {"SAFE_RETRY", "VERIFY_NOT_PUBLISHED"}:
+        plan_cleanup(task, CleanupIntent.REQUEUE_PUBLISH, device=True)
+    elif event in {"SAFE_RETRY_EXHAUSTED", "INCONCLUSIVE"}:
+        plan_cleanup(task, CleanupIntent.PRESERVE_STATE, device=True)
 
 
 def classify_failure(

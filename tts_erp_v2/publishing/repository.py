@@ -143,7 +143,11 @@ def has_pending_device_cleanup(session: Session) -> bool:
 
 
 def _lease_cleanup_task(
-    session: Session, instance_id: str, lease_seconds: int
+    session: Session,
+    instance_id: str,
+    lease_seconds: int,
+    *,
+    device_only: bool | None = None,
 ) -> VideoPublishTask | None:
     """Lease explicit cleanup work without occupying the publish slot."""
     now = datetime.now(UTC)
@@ -151,24 +155,32 @@ def _lease_cleanup_task(
     def due(column):
         return (column.is_(None)) | (column <= now)
 
+    device_due = and_(
+        VideoPublishTask.device_cleanup_status.in_(["pending", "failed"]),
+        due(VideoPublishTask.device_cleanup_next_attempt_at),
+    )
+    background_due = or_(
+        and_(
+            VideoPublishTask.spool_cleanup_status.in_(["pending", "failed"]),
+            due(VideoPublishTask.spool_cleanup_next_attempt_at),
+        ),
+        and_(
+            VideoPublishTask.object_cleanup_status.in_(["pending", "failed"]),
+            due(VideoPublishTask.object_cleanup_next_attempt_at),
+        ),
+    )
+    resource_due = (
+        device_due
+        if device_only is True
+        else background_due
+        if device_only is False
+        else or_(device_due, background_due)
+    )
     task = session.scalars(
         select(VideoPublishTask)
         .where(
             VideoPublishTask.cleanup_intent != CleanupIntent.NONE.value,
-            or_(
-                and_(
-                    VideoPublishTask.device_cleanup_status.in_(["pending", "failed"]),
-                    due(VideoPublishTask.device_cleanup_next_attempt_at),
-                ),
-                and_(
-                    VideoPublishTask.spool_cleanup_status.in_(["pending", "failed"]),
-                    due(VideoPublishTask.spool_cleanup_next_attempt_at),
-                ),
-                and_(
-                    VideoPublishTask.object_cleanup_status.in_(["pending", "failed"]),
-                    due(VideoPublishTask.object_cleanup_next_attempt_at),
-                ),
-            ),
+            resource_due,
             (VideoPublishTask.cleanup_lease_owner.is_(None))
             | (VideoPublishTask.cleanup_lease_expires_at.is_(None))
             | (VideoPublishTask.cleanup_lease_expires_at < now),

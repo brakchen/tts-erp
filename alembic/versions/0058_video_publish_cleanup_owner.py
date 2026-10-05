@@ -49,9 +49,27 @@ def upgrade() -> None:
     # pi-lens-ignore: python-sql-injection
     op.execute(
         text("""
-        UPDATE publishing.video_publish_tasks
-        SET status = 'succeeded', stage = 'done', cleanup_intent = 'finalize_success'
-        WHERE status = 'running' AND stage = 'done'
+        UPDATE publishing.video_publish_tasks AS t
+        SET status = 'succeeded', stage = 'done', cleanup_intent = CASE
+                WHEN device_cleanup_status IN ('pending','failed')
+                  OR spool_cleanup_status IN ('pending','failed')
+                  OR object_cleanup_status IN ('pending','failed')
+                THEN 'finalize_success' ELSE 'none' END,
+            lease_owner = NULL, lease_expires_at = NULL, heartbeat_at = NULL
+        WHERE t.status = 'running' AND t.stage = 'done'
+          AND (SELECT a.status FROM publishing.video_publish_attempts AS a
+               WHERE a.task_id = t.id ORDER BY a.sequence_no DESC LIMIT 1) = 'success'
+    """)
+    )
+    # Rows without a confirming terminal attempt are ambiguous and must not be
+    # upgraded into a successful business result.
+    # pi-lens-ignore: python-sql-injection
+    op.execute(
+        text("""
+        UPDATE publishing.video_publish_tasks AS t
+        SET status = 'needs_review', stage = 'done', cleanup_intent = 'preserve_state',
+            lease_owner = NULL, lease_expires_at = NULL, heartbeat_at = NULL
+        WHERE t.status = 'running' AND t.stage = 'done'
     """)
     )
     # pi-lens-ignore: python-sql-injection
@@ -71,10 +89,47 @@ def upgrade() -> None:
     """)
     )
     # pi-lens-ignore: python-sql-injection
+    # A legacy cleaning row with a confirmed publish/verify success keeps the
+    # success result and gets an explicit finalize plan. Other rows are ambiguous.
+    # pi-lens-ignore: python-sql-injection
+    op.execute(
+        text("""
+        UPDATE publishing.video_publish_tasks AS t
+        SET device_cleanup_status = CASE
+                WHEN t.device_path IS NOT NULL AND t.device_cleanup_status = 'not_started' THEN 'pending'
+                ELSE t.device_cleanup_status END,
+            spool_cleanup_status = CASE
+                WHEN t.spool_cleanup_status = 'not_started' THEN 'pending'
+                ELSE t.spool_cleanup_status END,
+            object_cleanup_status = CASE
+                WHEN t.object_cleanup_status = 'not_started' THEN 'pending'
+                ELSE t.object_cleanup_status END
+        WHERE t.status = 'running' AND t.stage = 'cleaning'
+          AND (SELECT a.status FROM publishing.video_publish_attempts AS a
+               WHERE a.task_id = t.id ORDER BY a.sequence_no DESC LIMIT 1) = 'success'
+    """)
+    )
+    # pi-lens-ignore: python-sql-injection
+    op.execute(
+        text("""
+        UPDATE publishing.video_publish_tasks AS t
+        SET status = 'succeeded', stage = 'done', cleanup_intent = CASE
+                WHEN device_cleanup_status IN ('pending','failed')
+                  OR spool_cleanup_status IN ('pending','failed')
+                  OR object_cleanup_status IN ('pending','failed')
+                THEN 'finalize_success' ELSE 'none' END,
+            lease_owner = NULL, lease_expires_at = NULL, heartbeat_at = NULL
+        WHERE t.status = 'running' AND t.stage = 'cleaning'
+          AND (SELECT a.status FROM publishing.video_publish_attempts AS a
+               WHERE a.task_id = t.id ORDER BY a.sequence_no DESC LIMIT 1) = 'success'
+    """)
+    )
+    # pi-lens-ignore: python-sql-injection
     op.execute(
         text("""
         UPDATE publishing.video_publish_tasks
-        SET status = 'needs_review', stage = 'done', cleanup_intent = 'preserve_state'
+        SET status = 'needs_review', stage = 'done', cleanup_intent = 'preserve_state',
+            lease_owner = NULL, lease_expires_at = NULL, heartbeat_at = NULL
         WHERE status = 'running' AND stage = 'cleaning'
     """)
     )
@@ -133,7 +188,10 @@ def upgrade() -> None:
         text("""
         ALTER TABLE publishing.video_publish_tasks
         ADD CONSTRAINT video_publish_task_cleanup_owner_check CHECK (
-            (cleanup_intent = 'none' AND cleanup_lease_owner IS NULL AND cleanup_lease_expires_at IS NULL) OR
+            (cleanup_intent = 'none' AND cleanup_lease_owner IS NULL AND cleanup_lease_expires_at IS NULL
+                AND device_cleanup_status NOT IN ('pending','failed')
+                AND spool_cleanup_status NOT IN ('pending','failed')
+                AND object_cleanup_status NOT IN ('pending','failed')) OR
             (cleanup_intent = 'finalize_success' AND status = 'succeeded' AND stage = 'done') OR
             (cleanup_intent = 'requeue_publish' AND status = 'pending' AND stage IN ('queued','waiting_device')
                 AND object_cleanup_status NOT IN ('pending','failed')) OR
