@@ -1,0 +1,91 @@
+{
+  "protocolVersion": 4,
+  "requestId": "TEST_cross-analytics-today-request",
+  "scope": {
+    "sellerId": "TEST_cross-seller",
+    "advertiserId": "TEST_cross-advertiser"
+  },
+  "dump": {
+    "kind": "today",
+    "endpoint": "/oec_ads/shopping/v1/oec/stat/post_product_list",
+    "campaignId": "TEST_cross-campaign",
+    "method": "POST",
+    "day": "2026-09-19",
+    "rows": [
+      {
+        "product_id": "TEST_cross-product",
+        "product_name": "TEST product",
+        "product_status": "available",
+        "mixed_real_cost": "4.21",
+        "product_picture": "https://example.test/TEST_cross-product.jpg",
+        "gmv_max_bid_type": "1",
+        "onsite_roi2_shopping_sku": "0",
+        "onsite_roi2_shopping_value": "0.00",
+        "onsite_mixed_real_roi2_shopping": "0.00",
+        "mixed_real_cost_per_onsite_roi2_shopping_sku": "0.00"
+      }
+    ],
+    "request": {
+      "url": "https://seller.tiktokshopglobalselling.com/oec_ads/shopping/v1/oec/stat/post_product_list",
+      "body": {
+        "page": 1,
+        "end_time": "2026-09-19",
+        "page_size": 10,
+        "order_type": 1,
+        "query_list": [
+          "product_name",
+          "campaign_id",
+          "product_id",
+          "product_status",
+          "product_picture",
+          "session_info",
+          "campaign_no_bid_budget",
+          "gmv_max_bid_type",
+          "campaign_target_roi_budget_mode",
+          "campaign_target_roi_budget",
+          "active_creative_boost_count",
+          "mixed_real_cost",
+          "onsite_roi2_shopping_sku",
+          "mixed_real_cost_per_onsite_roi2_shopping_sku",
+          "onsite_roi2_shopping_value",
+          "onsite_mixed_real_roi2_shopping",
+          "spu_bi_appeal_info"
+        ],
+        "start_time": "2026-09-19",
+        "campaign_id": "TEST_cross-campaign",
+        "order_field": "onsite_roi2_shopping_value"
+      }
+    },
+    "response": {
+      "body": {
+        "msg": "",
+        "code": 0,
+        "data": {
+          "table": [
+            {
+              "product_id": "TEST_cross-product",
+              "product_name": "TEST product",
+              "product_status": "available",
+              "mixed_real_cost": "4.21",
+              "product_picture": "https://example.test/TEST_cross-product.jpg",
+              "gmv_max_bid_type": "1",
+              "onsite_roi2_shopping_sku": "0",
+              "onsite_roi2_shopping_value": "0.00",
+              "onsite_mixed_real_roi2_shopping": "0.00",
+              "mixed_real_cost_per_onsite_roi2_shopping_sku": "0.00"
+            }
+          ],
+          "pagination": {
+            "page": 1,
+            "page_count": 1,
+            "total_count": 1
+          }
+        },
+        "extra": null
+      },
+      "status": 200
+    },
+    "createdAt": "2026-09-19T10:52:43.609Z",
+    "source": "tiktok-shop-data-sync"
+  }
+}
