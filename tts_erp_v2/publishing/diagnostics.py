@@ -14,6 +14,16 @@ _SECRET_KEY = re.compile(
     re.IGNORECASE,
 )
 _BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
+_SECRET_HEADER = re.compile(
+    r"(?im)\b(authorization|proxy-authorization|cookie|set-cookie)\b"
+    r"(\s*:\s*)[^\r\n]+"
+)
+_SECRET_ASSIGNMENT = re.compile(
+    r"(?i)\b(authorization|proxy-authorization|cookie|set-cookie|password|passwd|"
+    r"secret|token|credential|api[_-]?key|session(?:[_-]?id)?)\b"
+    r"(\s*(?:=|:)\s*)"
+    r"(?:\"[^\"\r\n]*\"|'[^'\r\n]*'|[^\s,;]+)"
+)
 _URL = re.compile(r"https?://[^\s<>\"']+")
 _MAX_DEPTH = 6
 _MAX_ITEMS = 100
@@ -25,6 +35,12 @@ def sanitize_text(value: object) -> str:
     """Remove credential-bearing text and bound persisted error strings."""
     text = str(value)
     text = _BEARER.sub("Bearer [REDACTED]", text)
+    text = _SECRET_HEADER.sub(
+        lambda match: f"{match.group(1)}{match.group(2)}{_REDACTED}", text
+    )
+    text = _SECRET_ASSIGNMENT.sub(
+        lambda match: f"{match.group(1)}{match.group(2)}{_REDACTED}", text
+    )
 
     def clean_url(match: re.Match[str]) -> str:
         raw = match.group(0)

@@ -84,6 +84,9 @@ class ArtemisClient:
         except (httpx.HTTPError, ValueError) as exc:
             raise ArtemisTransportError("ARTEMIS_TRANSPORT_ERROR") from exc
 
+    async def check_available(self) -> None:
+        await self._request("GET", "/api/status")
+
     async def submit(
         self,
         *,

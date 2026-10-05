@@ -88,19 +88,36 @@ def normalize_caption(value: str) -> str:
     return value
 
 
+def original_basename(filename: str) -> str:
+    """Return the bounded browser basename without object-key sanitization."""
+    name = PurePosixPath(filename.replace("\\", "/")).name
+    if not name or name in {".", ".."} or "\x00" in name:
+        raise ValueError("INVALID_VIDEO_FILENAME")
+    return name[:255]
+
+
 def safe_filename(filename: str) -> str:
-    name = PurePosixPath(filename).name
+    name = original_basename(filename)
     stem = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._")
     return (stem or "video.mp4")[:180]
+
+
+def _presign_put(store: VideoObjectStore, key: str, content_type: str) -> str:
+    try:
+        return cast(str, store.presign_put(key, content_type))
+    except Exception as exc:
+        raise ValueError("OBJECT_STORE_UNAVAILABLE") from exc
 
 
 def create_upload_ticket(
     session: Session, command: CreateCommand, store: VideoObjectStore
 ) -> tuple[VideoPublishTask, str, bool]:
     caption = normalize_caption(command.caption)
-    if command.content_type != "video/mp4" or not safe_filename(
-        command.filename
-    ).lower().endswith(".mp4"):
+    browser_filename = original_basename(command.filename)
+    object_filename = safe_filename(browser_filename)
+    if command.content_type != "video/mp4" or not browser_filename.lower().endswith(
+        ".mp4"
+    ):
         raise ValueError("INVALID_VIDEO_TYPE")
     if not 0 < command.size_bytes <= max_video_bytes():
         raise ValueError("VIDEO_TOO_LARGE")
@@ -134,7 +151,7 @@ def create_upload_ticket(
             existing.size_bytes,
             existing.caption,
         ) != (
-            safe_filename(command.filename),
+            browser_filename,
             command.content_type,
             command.size_bytes,
             caption,
@@ -142,13 +159,10 @@ def create_upload_ticket(
             raise ValueError("IDEMPOTENCY_PAYLOAD_MISMATCH")
         if existing.stage != TaskStage.AWAITING_UPLOAD.value:
             return existing, "", True
-        upload_url = cast(
-            str, store.presign_put(existing.object_key, existing.content_type)
-        )
+        upload_url = _presign_put(store, existing.object_key, existing.content_type)
         return existing, upload_url, True
     task_id = uuid4()
-    filename = safe_filename(command.filename)
-    key = f"video-publish/{datetime.now(UTC):%Y/%m}/{task_id}/{filename}"
+    key = f"video-publish/{datetime.now(UTC):%Y/%m}/{task_id}/{object_filename}"
     now = database_now(session)
     task = VideoPublishTask(
         public_id=task_id,
@@ -156,7 +170,8 @@ def create_upload_ticket(
         created_by_user_id=command.actor_user_id,
         created_by_key_hash=command.actor_key_hash,
         caption=caption,
-        original_filename=filename,
+        original_filename=browser_filename,
+        object_filename=object_filename,
         content_type=command.content_type,
         size_bytes=command.size_bytes,
         object_bucket=getattr(store, "bucket", _BUCKET),
@@ -193,16 +208,16 @@ def create_upload_ticket(
             winner.content_type,
             winner.size_bytes,
             winner.caption,
-        ) != (filename, command.content_type, command.size_bytes, caption):
+        ) != (browser_filename, command.content_type, command.size_bytes, caption):
             raise ValueError("IDEMPOTENCY_PAYLOAD_MISMATCH") from None
         if winner.stage != TaskStage.AWAITING_UPLOAD.value:
             return winner, "", True
         return (
             winner,
-            cast(str, store.presign_put(winner.object_key, winner.content_type)),
+            _presign_put(store, winner.object_key, winner.content_type),
             True,
         )
-    upload_url = cast(str, store.presign_put(key, command.content_type))
+    upload_url = _presign_put(store, key, command.content_type)
     return task, upload_url, False
 
 

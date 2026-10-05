@@ -32,6 +32,7 @@ def test_upload_cancellation_aborts_xhr_and_handles_terminal_and_failed_cancel()
             replaceChildren(...nodes) { this.children = nodes; },
             append(...nodes) { this.children.push(...nodes); },
             addEventListener(type, handler) { this[`on${type}`] = handler; },
+            removeEventListener(type, handler) { if (this[`on${type}`] === handler) this[`on${type}`] = null; },
             setAttribute(name, value) { this[name] = value; },
             removeAttribute() {}, close() {}, click() { this.clicked = true; },
             showModal() { this.returnValue = "confirm"; uploadConfirmations += 1; setImmediate(() => this.onclose?.()); },

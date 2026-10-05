@@ -619,7 +619,8 @@ def test_device_config_uses_server_probe_state(
         "status": "locked",
         "message": "Device is locked",
     }
-    assert payload["canWrite"] is False
+    assert payload["canWrite"] is True
+    assert payload["writeBlockReason"] is None
 
 
 @pytest.mark.asyncio
@@ -632,8 +633,21 @@ async def test_worker_heartbeat_probe_reports_locked_device_without_raw_error(
         async def check_device(self, _serial):
             raise DeviceLocked("Bearer TEST_SECRET")
 
+    class NoCleanupSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def scalar(self, _query):
+            return False
+
     status_value, message = await _probe_device_readiness(
-        cast(PublishDependencies, SimpleNamespace(adb=Adb()))
+        cast(
+            PublishDependencies,
+            SimpleNamespace(adb=Adb(), session_factory=NoCleanupSession),
+        )
     )
     assert status_value == "locked"
     assert message == "设备在线但仍处于锁屏状态"

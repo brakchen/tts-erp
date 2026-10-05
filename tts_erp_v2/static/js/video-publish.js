@@ -104,7 +104,7 @@
     const writeReady = Boolean(state.config?.canWrite) && state.config?.worker?.status === "ready";
     $("publish-submit").disabled = !valid() || !writeReady || !!state.upload || state.creating;
     const writeStatus = $("publish-write-status");
-    if (writeStatus) writeStatus.textContent = writeReady ? "" : state.config?.canWrite === false ? "发布设备未配置，当前为只读模式。" : "发布服务暂不可用，请稍后再试。";
+    if (writeStatus) writeStatus.textContent = writeReady ? "" : (state.config?.writeBlockReason || "发布服务暂不可用，请稍后再试。");
     const progress = $("publish-upload-progress");
     progress.hidden = !activeUpload;
     progress.value = state.upload?.progress || 0;
@@ -181,6 +181,20 @@
     }
   }
 
+  function showConfirmationDialog(dialog) {
+    dialog.returnValue = "cancel";
+    return new Promise((resolve) => {
+      const onCancel = () => { dialog.returnValue = "cancel"; };
+      const onClose = () => {
+        dialog.removeEventListener("cancel", onCancel);
+        resolve(dialog.returnValue === "confirm");
+      };
+      dialog.addEventListener("cancel", onCancel);
+      dialog.addEventListener("close", onClose, { once: true });
+      dialog.showModal();
+    });
+  }
+
   function confirmPublish(file, caption) {
     const dialog = $("publish-confirm-dialog");
     if (!dialog?.showModal) {
@@ -194,10 +208,7 @@
     preview.hidden = !state.url;
     $("publish-confirm-device").textContent = state.config.target.deviceSerialMasked || "—";
     $("publish-confirm-album").textContent = state.config.target.album || "—";
-    dialog.showModal();
-    return new Promise((resolve) => {
-      dialog.addEventListener("close", () => resolve(dialog.returnValue === "confirm"), { once: true });
-    });
+    return showConfirmationDialog(dialog);
   }
 
   async function create() {
@@ -399,12 +410,9 @@
     $("publish-action-title").textContent = `${ACTION_LABELS[actionName] || actionName}确认`;
     $("publish-action-evidence").textContent = confirmationMessage(task, actionName);
     $("publish-action-confirm").textContent = `确认${ACTION_LABELS[actionName] || "操作"}`;
-    dialog.showModal();
-    return new Promise((resolve) => {
-      dialog.addEventListener("close", () => {
-        trigger?.focus?.();
-        resolve(dialog.returnValue === "confirm");
-      }, { once: true });
+    return showConfirmationDialog(dialog).then((confirmed) => {
+      trigger?.focus?.();
+      return confirmed;
     });
   }
 
@@ -748,7 +756,9 @@
     try {
       await refreshDetail();
       if (state.detail?.taskId === id) {
-        $("publish-task-drawer").showModal();
+        const drawer = $("publish-task-drawer");
+        drawer.returnValue = "cancel";
+        drawer.showModal();
         schedule();
       }
     } catch (error) { notice(error.message, true); }
@@ -763,11 +773,19 @@
   $("publish-refresh-now").addEventListener("click", async () => { await refresh(); schedule(); });
   $("publish-refresh-mode").addEventListener("change", schedule);
   $("publish-drawer-close").addEventListener("click", () => {
-    $("publish-task-drawer").close();
+    $("publish-task-drawer").close("cancel");
+  });
+  $("publish-task-drawer").addEventListener("cancel", () => {
+    $("publish-task-drawer").returnValue = "cancel";
+  });
+  $("publish-task-drawer").addEventListener("close", () => {
     const opener = state.detailOpener;
     state.detailOpener = null;
     state.detailTaskId = null;
     state.detail = null;
+    state.detailChannel.generation += 1;
+    state.detailChannel.controller?.abort();
+    state.detailChannel.controller = null;
     clearTimeout(state.detailTimer);
     opener?.focus?.();
   });

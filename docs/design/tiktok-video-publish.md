@@ -127,9 +127,11 @@ CREATE TABLE publishing.video_publish_tasks (
     public_id             uuid NOT NULL DEFAULT gen_random_uuid() UNIQUE,
     client_request_id     uuid NOT NULL UNIQUE,
     created_by_user_id    bigint,
+    created_by_key_hash   text,
 
     caption               text NOT NULL,
     original_filename     text NOT NULL,
+    object_filename       text NOT NULL,
     content_type          text NOT NULL,
     size_bytes            bigint NOT NULL,
 
@@ -140,8 +142,14 @@ CREATE TABLE publishing.video_publish_tasks (
     object_uploaded_at    timestamptz,
     object_deleted_at     timestamptz,
 
+    cleanup_intent        text NOT NULL DEFAULT 'none',
+    cleanup_lease_owner   text,
+    cleanup_lease_expires_at timestamptz,
+    cleanup_heartbeat_at  timestamptz,
+
     status                text NOT NULL,
     stage                 text NOT NULL,
+    stage_started_at      timestamptz NOT NULL DEFAULT now(),
     attempt_count         integer NOT NULL DEFAULT 0,
     publish_budget_used   integer NOT NULL DEFAULT 0,
     next_attempt_at       timestamptz,
@@ -160,10 +168,16 @@ CREATE TABLE publishing.video_publish_tasks (
 
     device_cleanup_status text NOT NULL DEFAULT 'not_started',
     device_cleanup_error  text,
+    device_cleanup_attempts integer NOT NULL DEFAULT 0,
+    device_cleanup_next_attempt_at timestamptz,
     spool_cleanup_status  text NOT NULL DEFAULT 'not_started',
     spool_cleanup_error   text,
+    spool_cleanup_attempts integer NOT NULL DEFAULT 0,
+    spool_cleanup_next_attempt_at timestamptz,
     object_cleanup_status text NOT NULL DEFAULT 'not_started',
     object_cleanup_error  text,
+    object_cleanup_attempts integer NOT NULL DEFAULT 0,
+    object_cleanup_next_attempt_at timestamptz,
 
     queued_at             timestamptz,
     started_at            timestamptz,
@@ -190,9 +204,11 @@ staging_device
 dispatching_artemis
 waiting_artemis
 verifying
-cleaning
 done
 ```
+
+`cleaning` 仅是 0058 迁移识别并归一化的旧值；当前 status/stage 组合约束不允许
+`running/cleaning`，业务结果直接进入终态 `*/done`，随后由独立 cleanup lease 执行资源清理。
 
 三个 `*_cleanup_status` 使用同一取值：
 
@@ -256,7 +272,7 @@ CREATE TABLE publishing.video_publish_attempts (
 ```sql
 CREATE UNIQUE INDEX uq_video_publish_task_active_attempt
 ON publishing.video_publish_attempts (task_id)
-WHERE status IN ('submitting', 'queued', 'running');
+WHERE status IN ('created', 'submitting', 'queued', 'running', 'unknown');
 ```
 
 `related_attempt_id` 用于表达“这次 verify 在核验哪次 publish”。
@@ -282,6 +298,8 @@ CREATE TABLE publishing.worker_heartbeats (
     hostname      text NOT NULL,
     pid           integer NOT NULL,
     status        text NOT NULL, -- starting | ready | stopping
+    device_status text NOT NULL DEFAULT 'unknown',
+    device_message text,
     version       text,
     started_at    timestamptz NOT NULL,
     heartbeat_at  timestamptz NOT NULL,
@@ -289,7 +307,7 @@ CREATE TABLE publishing.worker_heartbeats (
 );
 ```
 
-Worker 每 5 秒 upsert 自己的行；API 以 `heartbeat_at >= now() - interval '15 seconds'` 判定 ready。超过 5 分钟的终止实例可由 Worker 自身或运维清理。心跳表只表达进程存活，不替代设备、Artemis 和 MinIO 的独立 readiness。
+Worker 每 5 秒 upsert 自己的行；API 以 `heartbeat_at >= now() - interval '15 seconds'` 判定进程可用。`device_status/device_message` 是 Worker 对配置 serial、ADB 在线/解锁、TikTok package、Artemis、MinIO 及设备清理占用的有界综合探测；设备 offline/locked/busy 不阻止有权限用户创建排队任务，Worker 不可用或必需配置缺失才写阻断原因。超过 5 分钟的终止实例可由 Worker 自身或运维清理。
 
 ## 5. 上传与对象生命周期
 
@@ -490,7 +508,7 @@ Prompt 在 `tts_erp_v2/publishing/prompt.py` 中版本化；用户不能编辑�
 
 ```python
 PUBLISH_PROMPT_VERSION = "tiktok-video-publish-v1"
-VERIFY_PROMPT_VERSION = "tiktok-video-verify-v1"
+VERIFY_PROMPT_VERSION = "tiktok-video-verify-v2"
 ```
 
 文案以 JSON 字符串嵌入，明确声明为数据而非指令，保留换行、emoji 和话题标签。每次执行把最终 Prompt 快照写入 attempt，便于审计和复现。
@@ -506,7 +524,7 @@ VERIFY_PROMPT_VERSION = "tiktok-video-verify-v1"
 - 成功与失败的可观察条件；
 - 不修改账号设置、不离开锁定 App。
 
-核验 Prompt 必须明确禁止任何发布动作。
+核验 Prompt 必须明确禁止任何发布动作，并包含 caption、原始 basename、已确认 ETag/SHA 身份、相关 publish attempt 的预期最新发布时间窗，以及比较最新作品发布时间和缩略图的指令；任一识别证据不足时必须返回 `inconclusive`。
 
 ## 9. HTTP API
 
@@ -783,7 +801,7 @@ MINIO ●━━━━ 手机相册 ●━━━━ Artemis ◉━━━━ TikTo
 | dispatching_artemis | Artemis | 正在创建手机自动化任务 |
 | waiting_artemis | Artemis/TikTok | Artemis 正在操作 TikTok |
 | verifying | TikTok | 正在核验是否已经发布 |
-| cleaning | 清理 | 已确认发布，正在删除临时视频 |
+| `operationalStage=cleaning` | 清理 | 业务状态已终态；API 根据正交 cleanup 状态计算的展示阶段，不是持久化 task stage。 |
 | done | 全部完成 | 轨道收起，任务进入历史记录 |
 
 节点状态必须同时使用图形、文字和 `aria-current="step"`，不能只靠颜色。阶段切换采用一次 150–200ms 的轨道填充过渡；`prefers-reduced-motion` 下关闭动画。
@@ -1164,9 +1182,11 @@ bash scripts/test_isolated.sh ...
 | `id` | bigint, 非空 | DB | 内部主键，不暴露给普通前端。 |
 | `public_id` | uuid, 非空唯一 | DB | ttsERP 任务 ID，出现在 URL、日志和 UI；不可与 Artemis ID 混用。 |
 | `client_request_id` | uuid, 非空唯一 | 浏览器→API | 创建幂等键；同一用户重放相同请求返回原任务。全局唯一即可，响应需标记是否 replay。 |
-| `created_by_user_id` | bigint, 可空 | API | 创建人 FK；API key 或历史导入可为空。 |
+| `created_by_user_id` | bigint, 可空 | API | 创建用户标识；当前是审计值、**非 FK**，API key 或历史导入可为空。 |
+| `created_by_key_hash` | text, 可空 | API | API-key 创建者的不可逆 key hash；与 user id 共同用于 owner scope。 |
 | `caption` | text, 非空 | 用户 | 原样发布文案；规范化 CRLF→LF、拒绝 NUL，不自动删运营备注。 |
-| `original_filename` | text, 非空 | 用户 | 浏览器文件名，仅展示；不得直接拼接本地或设备路径。 |
+| `original_filename` | text, 非空 | 用户 | 有界浏览器 basename，用于展示和续传时文件名/大小核对；不得直接拼接对象、本地或设备路径。 |
+| `object_filename` | text, 非空 | API | 仅用于 object key 的 ASCII 安全 basename；与 `original_filename` 分开保存。 |
 | `content_type` | text, 非空 | 用户+confirm | v1 固定 `video/mp4`；confirm 重新核对对象元数据。 |
 | `size_bytes` | bigint, 非空 | 用户+confirm | 创建时声明，confirm 必须与 MinIO 实际大小相同。 |
 | `object_bucket` | text, 非空 | API | 创建时从服务端配置快照，v1 为 `tiktok-video`。 |
@@ -1175,8 +1195,13 @@ bash scripts/test_isolated.sh ...
 | `object_sha256` | text, 可空 | Worker | 下载后计算的内容摘要；用于诊断与后续重复视频识别，不作为 UI 操作 ID。 |
 | `object_uploaded_at` | timestamptz, 可空 | confirm | HEAD 校验成功时间。 |
 | `object_deleted_at` | timestamptz, 可空 | cleanup | MinIO 删除成功时间；删除幂等，404 也视为成功。 |
+| `cleanup_intent` | enum text, 非空 | Repository | `none/finalize_success/requeue_publish/preserve_state`；决定资源清理后业务状态是否变化。 |
+| `cleanup_lease_owner` | text, 可空 | Cleanup selector | 与 publish lease 正交的清理 owner。 |
+| `cleanup_lease_expires_at` | timestamptz, 可空 | Cleanup selector | 数据库时间控制的清理租约截止。 |
+| `cleanup_heartbeat_at` | timestamptz, 可空 | Cleanup selector | 慢外部删除期间持续更新的清理心跳。 |
 | `status` | enum text, 非空 | Domain service | 业务状态，含义见 §18.4。 |
 | `stage` | enum text, 非空 | Domain service | 当前细分阶段，含义见 §18.5。 |
+| `stage_started_at` | timestamptz, 非空 | Repository | 当前 stage 的数据库时间起点。 |
 | `attempt_count` | int, 非空 | Domain service | 追加式审计计数：已创建的 `kind=publish` 数量，永不因 admission refund 递减。 |
 | `publish_budget_used` | int, 非空 | Domain service | 已消耗的正式发布预算；只有白名单内、已证明发生在 admission 前的设备 locked/busy 拒绝可退款。verify 不计入。 |
 | `next_attempt_at` | timestamptz, 可空 | Dispatcher | 退避截止时间；为空表示可立即领取。 |
@@ -1191,6 +1216,8 @@ bash scripts/test_isolated.sh ...
 | `last_error_message` | text, 可空 | Domain service | 已清洗的运营可读错误；不得含密钥、预签名 URL 或堆栈。 |
 | `*_cleanup_status` | enum text, 非空 | Cleanup service | 分别描述设备、spool、对象清理。 |
 | `*_cleanup_error` | text, 可空 | Cleanup service | 对应位置最近一次清理错误；成功后清空。 |
+| `*_cleanup_attempts` | int, 非空 | Cleanup service | 对应资源的清理尝试次数。 |
+| `*_cleanup_next_attempt_at` | timestamptz, 可空 | Cleanup service | 数据库时间控制的下一次清理退避截止。 |
 | `queued_at` | timestamptz, 可空 | confirm/retry | 最近一次进入发布队列时间，队列排序真相源。 |
 | `started_at` | timestamptz, 可空 | Worker | 第一次进入 running 的时间，不因后续 verify 覆盖。 |
 | `completed_at` | timestamptz, 可空 | Domain service | 进入 succeeded/failed/cancelled/needs_review 终止等待态的时间；重新排队时清空。 |
@@ -1205,7 +1232,7 @@ bash scripts/test_isolated.sh ...
 | `task_id` | bigint, 非空 | 父任务 FK，禁止级联删除历史。 |
 | `sequence_no` | int, 非空 | 父任务内所有 Artemis 调用的递增序号；publish/verify 共用序列。 |
 | `kind` | enum text, 非空 | `publish` 正式发布；`verify` 只读核验。 |
-| `related_attempt_id` | bigint, 可空 | verify 必须指向被核验的 publish；publish 为空。 |
+| `related_attempt_id` | bigint, 可空 | verify 必须指向同 task 的 publish；publish 为空。`task_id/kind/related_attempt_id` 插入后由 0062 trigger 保证不可变。 |
 | `artemis_session_id` | uuid, 非空唯一 | Artemis 任务 ID；在调用前由 ttsERP 生成并持久化。 |
 | `status` | enum text, 非空 | attempt 生命周期，见 §18.6。 |
 | `prompt_version` | text, 非空 | 固定模板版本，便于回溯行为变化。 |
@@ -1232,6 +1259,8 @@ bash scripts/test_isolated.sh ...
 | `hostname` | 运行主机，排障时定位 systemd 实例。 |
 | `pid` | 当前进程 PID，仅诊断。 |
 | `status` | `starting/ready/stopping`。 |
+| `device_status` | `ready/busy/offline/locked/unknown` 综合 readiness。 |
+| `device_message` | 不含密钥/原始异常的有界运营说明。 |
 | `version` | 部署版本或 git SHA。 |
 | `started_at` | 本实例启动时间。 |
 | `heartbeat_at` | 最近心跳；超过 15 秒视为 unavailable。 |
@@ -1260,8 +1289,9 @@ bash scripts/test_isolated.sh ...
 | `dispatching_artemis` | running | attempt 已落库，正在幂等提交 `/api/run`。 |
 | `waiting_artemis` | running | Artemis 已接收，持续轮询 session。 |
 | `verifying` | running | verify attempt 检查作品页/草稿箱。 |
-| `cleaning` | running | 已确认业务结果，正在释放设备文件与执行槽。 |
-| `done` | succeeded/failed/needs_review/cancelled | 本轮业务流程结束。 |
+| `done` | succeeded/failed/needs_review/cancelled | 本轮业务流程结束；设备/spool/对象清理由正交 cleanup 状态继续表达。 |
+
+`cleaning` 只作为 0058 识别的旧迁移输入保留在基础 stage 枚举中，当前合法 status/stage 组合不会产生 `running/cleaning`。
 
 ### 18.6 `AttemptStatus`
 
@@ -1330,20 +1360,19 @@ API 返回以下稳定字符串，前端只按返回值显示按钮：
 | running/staging_device | `MEDIA_VISIBLE` | running/dispatching_artemis | 写 device_path、device cleanup pending。 |
 | running/dispatching_artemis | `ATTEMPT_CREATED` | running/dispatching_artemis | insert attempt，生成 session ID。 |
 | running/dispatching_artemis | `ARTEMIS_ADMITTED` | running/waiting_artemis | attempt queued/running。 |
-| running/waiting_artemis | `ARTEMIS_SUCCESS` | running/cleaning | attempt success，开始清理。 |
+| running/waiting_artemis | `ARTEMIS_SUCCESS` | succeeded/done | attempt success；同事务写 cleanup intent，设备清理由 selector 领取。 |
 | running/waiting_artemis | `SAFE_FAILURE_RETRY` | pending/queued | attempt failed，释放 lease，设置退避。 |
 | running/waiting_artemis | `AMBIGUOUS_FAILURE` | running/verifying | attempt unknown，创建 verify。 |
-| running/verifying | `FOUND_PUBLISHED` | running/cleaning | verify success，业务成功。 |
+| running/verifying | `FOUND_PUBLISHED` | succeeded/done | verify success；同事务写 cleanup intent。 |
 | running/verifying | `CONFIRMED_ABSENT` | pending/queued | verify success，释放 lease并重试 publish。 |
 | running/verifying | `INCONCLUSIVE` | needs_review/done | 释放 lease，保留对象。 |
-| running/cleaning | `BUSINESS_SUCCESS_FINALIZED` | succeeded/done | completed_at，释放 lease；后台继续非设备清理。 |
 | 任意 pending | `USER_CANCEL` | cancelled/done | 清理对象；运行态不允许普通取消。 |
 | failed | `USER_RETRY` | pending/queued | 校验对象/预算，清主表错误和 completed_at。 |
-| needs_review | `USER_VERIFY` | running/verifying | 获取全局槽并创建 verify attempt。 |
+| needs_review | `USER_VERIFY` | running/verifying | 获取全局数据库槽并创建 verify attempt；API 不伪造 Worker lease，由真实 Worker 随后领取。 |
 
 额外不变量：
 
-- `status=running` 必须有 `lease_owner/lease_expires_at`；非 running 必须清空 lease；
+- Worker 已领取的 running 执行必须同时匹配 `lease_owner/lease_expires_at/row_version`；刚由 API 创建、等待真实 Worker 领取的 `running/verifying` 可暂时无 publish lease；非 running 必须清空 publish lease；
 - `stage=waiting_artemis/verifying` 必须能解析出一条活跃 attempt；
 - `kind=verify` 必须有 `related_attempt_id`；
 - `status=succeeded` 后禁止创建新的 publish attempt；
@@ -2256,7 +2285,7 @@ copyArtemisId
 | running/dispatching_artemis | 提交 Artemis | accent |
 | running/waiting_artemis | 手机执行中 | accent |
 | running/verifying | 自动核验中 | accent |
-| running/cleaning | 清理中 | accent |
+| terminal/done + `operationalStage=cleaning` | 清理中 | accent |
 | succeeded/done | 已发布 | ok |
 | failed/done | 失败 | danger |
 | needs_review/done | 需确认 | warn |
@@ -2688,7 +2717,7 @@ Luna 每个 Phase 的输出必须包含：
 
 ## 28. 已实现的最终安全边界
 
-当前 migration head 为 `0061_publish_safety`（parent `0060_video_publish_invariants`）。实现还明确保证：
+当前 migration head 为 `0062_publish_attempt_identity`（parent `0061_publish_safety`）。实现还明确保证：
 
 - verify 只有在 Artemis execution `success` 且 `verdict` 严格等于 `published`、`not_published` 或 `inconclusive` 时才采信；其他终态一律保守进入 `needs_review`；
 - `cancelled`/`canceled` publish 与未知/格式错误的 Artemis 409 都是结果不确定，必须沿同 session 查询/核验，不能进入安全重发；
@@ -2698,6 +2727,11 @@ Luna 每个 Phase 的输出必须包含：
 - Worker 心跳持久化 ADB 实际探测的 `ready|busy|offline|locked|unknown`，API 不再从 serial 配置推断设备 ready；
 - 列表使用 `(created_at,id)` opaque keyset cursor，并只批量读取最新 attempt 与 publish/verify 计数；详情接口才加载完整 attempt 审计；
 - 409 错误返回 `code/message/retryable/requestId/rowVersion/allowedActions`，浏览器始终按服务端 allowedActions 重绘；
-- 0058 仅把成功 publish 或成功且 verdict=`published` 的 verify 视为发布确认；其他 verify 结果保留对象并进入 `needs_review`。
+- 0058 仅把成功 publish 或成功且 verdict=`published` 的 verify 视为发布确认；其他 verify 结果保留对象并进入 `needs_review`，且所有终态旧行都会清除 publish lease；
+- attempt 的 `task_id/kind/related_attempt_id` 插入后不可变，普通状态、结果、重试生命周期更新仍允许；
+- confirm 后的下载以保存的 ETag 执行条件 GET，单段/多段 ETag 不匹配或对象缺失都会在 staging/attempt 前失败；
+- 原始浏览器 basename 与 object-key-safe 文件名分开持久化，续传按原始文件名和大小核对；
+- verify prompt 同时包含 caption、源文件/对象身份、预期最新发布时间窗及时间/缩略图比对要求；
+- ADB push 前必须确认受管相册无任意 `tts_erp_*.mp4` 残留；存在残留时不创建 Artemis attempt。
 
 390/768/1440 像素视觉检查、模拟器全流程、SIGTERM 恢复以及 staging-only 真机检查仍按 §26 保留为人工发布门禁；本文不声称已执行这些检查。

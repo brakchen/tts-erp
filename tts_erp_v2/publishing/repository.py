@@ -276,6 +276,7 @@ def _new_verify_attempt(
     session: Session,
     task: VideoPublishTask,
     related: VideoPublishAttempt,
+    now: datetime,
 ) -> VideoPublishAttempt:
     latest = (
         session.scalar(
@@ -294,7 +295,20 @@ def _new_verify_attempt(
         status=AttemptStatus.CREATED.value,
         prompt_version=VERIFY_PROMPT_VERSION,
         prompt_snapshot=build_verify_prompt(
-            caption=task.caption, app_package=task.target_app_package
+            caption=task.caption,
+            app_package=task.target_app_package,
+            source_filename=task.original_filename,
+            object_identity=(
+                f"etag:{task.object_etag or 'unknown'} "
+                f"sha256:{task.object_sha256 or 'not-yet-recorded'}"
+            ),
+            expected_publish_after=(
+                related.submitted_at
+                or related.started_at
+                or task.object_uploaded_at
+                or now
+            ).isoformat(),
+            expected_publish_before=now.isoformat(),
         ),
         device_serial=task.target_device_serial,
         device_path=task.device_path,
@@ -818,7 +832,7 @@ def commit_publish_transition(
                 raise LeaseLost(token.task_id)
         if follow_up == "run_verify":
             assert attempt is not None
-            verify_attempt_id = _new_verify_attempt(session, task, attempt).id
+            verify_attempt_id = _new_verify_attempt(session, task, attempt, now).id
         session.commit()
         retained = None
         if task_values.get("lease_owner", token.lease_owner) is not None:
@@ -1287,7 +1301,7 @@ def request_verification(session: Session, task_id: UUID) -> VideoPublishTask:
     task.lease_owner = None
     task.lease_expires_at = None
     task.heartbeat_at = None
-    _new_verify_attempt(session, task, related)
+    _new_verify_attempt(session, task, related, now)
     task.row_version += 1
     return task
 

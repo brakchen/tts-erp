@@ -25,7 +25,7 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
             textContent: "", value: "", disabled: false, hidden: false, tagName: "",
             style: {}, dataset: {}, classList: { toggle() {} },
             querySelectorAll() { return []; }, replaceChildren() {}, append() {},
-            addEventListener(type, handler) { this[`on${type}`] = handler; }, setAttribute(name, value) { this[name] = value; }, removeAttribute() {},
+            addEventListener(type, handler) { this[`on${type}`] = handler; }, removeEventListener(type, handler) { if (this[`on${type}`] === handler) this[`on${type}`] = null; }, setAttribute(name, value) { this[name] = value; }, removeAttribute() {},
             showModal() {
               if (this.id === "publish-action-dialog") {
                 confirmCalls += 1;
@@ -110,6 +110,15 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
         }
         const cleanupRequest = mutationRequests.find((request) => request.url.endsWith("/cleanup/retry"));
         if (!cleanupRequest || JSON.stringify(JSON.parse(cleanupRequest.body).resources) !== JSON.stringify(["object"])) throw new Error("cleanup retry was not resource scoped");
+        const actionDialog = elements.get("publish-action-dialog");
+        const postsBeforeEscape = requests.filter((request) => request.method === "POST").length;
+        actionDialog.showModal = function() {
+          this.oncancel?.({});
+          setImmediate(() => this.onclose?.());
+        };
+        await created.find((node) => node.textContent === "重试").onclick();
+        const postsAfterEscape = requests.filter((request) => request.method === "POST").length;
+        if (postsAfterEscape !== postsBeforeEscape) throw new Error("reopened dialog Escape reused stale confirmation");
         const view = created.find((node) => node.textContent === "查看");
         if (!view) throw new Error("detail trigger was not rendered");
         await view.onclick();

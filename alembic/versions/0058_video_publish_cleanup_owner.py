@@ -151,6 +151,18 @@ def upgrade() -> None:
           AND stage <> 'done'
     """)
     )
+    # Every terminal legacy row is normalized away from publish ownership,
+    # including rows whose stage was already done and whose stale lease did not
+    # participate in one of the running/cleaning conversions above.
+    # pi-lens-ignore: python-sql-injection
+    op.execute(
+        text("""
+        UPDATE publishing.video_publish_tasks
+        SET lease_owner = NULL, lease_expires_at = NULL, heartbeat_at = NULL
+        WHERE status IN ('succeeded','failed','needs_review','cancelled')
+          AND stage = 'done'
+    """)
+    )
     # Legacy publish continuations were persisted before cleanup ownership was
     # explicit. Requeue only device/spool residue; object residue is
     # conservative needs-review because publication safety is unproven.

@@ -361,6 +361,53 @@ def test_0058_verify_backfill_requires_successful_published_verdict(
             transaction.rollback()
 
 
+@pytest.mark.parametrize(
+    "terminal_status", ["succeeded", "failed", "needs_review", "cancelled"]
+)
+def test_0058_clears_stale_publish_lease_from_every_terminal_row(
+    db_engine, terminal_status: str
+) -> None:
+    migration = _load_migration()
+    with db_engine.connect() as conn:
+        transaction = conn.begin()
+        try:
+            migration.__dict__["op"] = Operations(MigrationContext.configure(conn))
+            migration.downgrade()
+            # pi-lens-ignore: python-sql-injection
+            task_id = conn.scalar(
+                text("""
+                INSERT INTO publishing.video_publish_tasks (
+                    client_request_id, caption, original_filename, content_type,
+                    size_bytes, object_bucket, object_key, status, stage,
+                    target_device_serial, target_app_package, lease_owner,
+                    lease_expires_at, heartbeat_at
+                ) VALUES (
+                    :request_id, 'TEST', 'TEST.mp4', 'video/mp4', 4,
+                    'tiktok-video', :object_key, :terminal_status, 'done',
+                    'TEST_device', 'com.tiktok', 'stale-publish-worker',
+                    now() + interval '1 hour', now()
+                ) RETURNING id
+                """),
+                {
+                    "request_id": uuid4(),
+                    "object_key": f"TEST/stale-{uuid4()}.mp4",
+                    "terminal_status": terminal_status,
+                },
+            )
+            migration.upgrade()
+            # pi-lens-ignore: python-sql-injection
+            lease = conn.execute(
+                text("""
+                SELECT lease_owner, lease_expires_at, heartbeat_at
+                FROM publishing.video_publish_tasks WHERE id=:id
+                """),
+                {"id": task_id},
+            ).one()
+            assert lease == (None, None, None)
+        finally:
+            transaction.rollback()
+
+
 def test_0058_downgrade_refuses_populated_table(db_engine) -> None:
     migration = _load_migration()
     with db_engine.connect() as conn:

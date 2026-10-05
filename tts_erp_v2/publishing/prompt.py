@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 PUBLISH_PROMPT_VERSION = "tiktok-video-publish-v1"
-VERIFY_PROMPT_VERSION = "tiktok-video-verify-v1"
+VERIFY_PROMPT_VERSION = "tiktok-video-verify-v2"
 
 
 def build_publish_prompt(
@@ -24,12 +24,28 @@ def build_publish_prompt(
     )
 
 
-def build_verify_prompt(*, caption: str, app_package: str) -> str:
+def build_verify_prompt(
+    *,
+    caption: str,
+    app_package: str,
+    source_filename: str = "unknown",
+    object_identity: str = "unknown",
+    expected_publish_after: str = "unknown",
+    expected_publish_before: str = "unknown",
+) -> str:
     caption_data = json.dumps(caption, ensure_ascii=False)
+    filename_data = json.dumps(source_filename, ensure_ascii=False)
+    identity_data = json.dumps(object_identity, ensure_ascii=False)
     return (
         "You are verifying a TikTok result inside the locked TikTok app only.\n"
         f"App package: {app_package}. Caption data to identify: {caption_data}\n"
+        f"Source filename data: {filename_data}. Confirmed object identity: {identity_data}.\n"
+        f"Expected newest publish window: {expected_publish_after} through "
+        f"{expected_publish_before}.\n"
         "Open the current account's published works page and, if necessary, drafts.\n"
+        "Compare the newest post's publish time, caption, and thumbnail against the "
+        "target; do not decide from a reused caption alone. If time or thumbnail "
+        "cannot be compared, return inconclusive.\n"
         "Do not open the upload flow, do not select a video, and never click Publish.\n"
         'Return JSON only: {"verdict":"published|not_published|inconclusive","evidence":"bounded text"}.'
     )

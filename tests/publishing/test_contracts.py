@@ -108,13 +108,13 @@ def test_minio_download_streams_to_private_spool(tmp_path: Path) -> None:
         def release_conn(self) -> None:
             pass
 
-    sdk = SimpleNamespace(get_object=lambda bucket, key: Body())
+    sdk = SimpleNamespace(get_object=lambda bucket, key, request_headers=None: Body())
     client = cast(
         MinioClient,
         SimpleNamespace(bucket="tiktok-video", _sdk=sdk),
     )
     destination = tmp_path / "video.mp4"
-    digest = MinioVideoStore(client).download("video-key", destination)
+    digest = MinioVideoStore(client).download("video-key", destination, "TEST-etag")
     assert destination.read_bytes() == b"video"
     assert digest == hashlib.sha256(b"video").hexdigest()
 

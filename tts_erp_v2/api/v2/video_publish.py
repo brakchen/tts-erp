@@ -131,7 +131,13 @@ def _snapshot(
         reverse=True,
     )
     latest = attempts[0] if attempts else None
-    actions = allowed_actions(task, latest_attempt=latest)
+    actions = allowed_actions(
+        task,
+        latest_attempt=latest,
+        has_attempts=(
+            bool(attempts) or bool(publish_attempt_count) or bool(verify_attempt_count)
+        ),
+    )
     operational_stage = (
         "cleaning"
         if task.device_cleanup_status in {"pending", "failed"}
@@ -142,6 +148,7 @@ def _snapshot(
         "taskId": str(task.public_id),
         "rowVersion": task.row_version,
         "filename": task.original_filename,
+        "objectFilename": task.object_filename,
         "sizeBytes": task.size_bytes,
         "captionPreview": task.caption.splitlines()[0][:160] if task.caption else "",
         "status": task.status,
@@ -472,9 +479,7 @@ def config(request: Request, session: Annotated[Session, Depends(get_session)]) 
         grant is not None
         and getattr(grant, "allows", lambda _role: False)(Role.READWRITE)
     ) or request.scope.get("api_key_role") in {"readwrite", "admin"}
-    can_write = bool(
-        heartbeat and actor_can_write and device_status in {"ready", "busy"}
-    )
+    can_write = bool(heartbeat and actor_can_write and configured_serial)
     return {
         "acceptedContentTypes": ["video/mp4"],
         "acceptedExtensions": [".mp4"],
@@ -516,7 +521,9 @@ def config(request: Request, session: Annotated[Session, Depends(get_session)]) 
         if can_write
         else "发布权限不足"
         if not actor_can_write
-        else "发布服务或设备不可用",
+        else "发布设备未配置"
+        if not configured_serial
+        else "发布 Worker 不可用",
         "serverTime": datetime.now(UTC),
     }
 
@@ -553,7 +560,9 @@ def create_task(
     except ValueError as exc:
         code = str(exc)
         error_status = (
-            status.HTTP_413_CONTENT_TOO_LARGE
+            status.HTTP_503_SERVICE_UNAVAILABLE
+            if code == "OBJECT_STORE_UNAVAILABLE"
+            else status.HTTP_413_CONTENT_TOO_LARGE
             if code == "VIDEO_TOO_LARGE"
             else status.HTTP_409_CONFLICT
             if code == "IDEMPOTENCY_PAYLOAD_MISMATCH"
@@ -566,7 +575,12 @@ def create_task(
                 code,
                 code,
                 retryable=code
-                in {"VIDEO_TOO_LARGE", "CAPTION_REQUIRED", "CAPTION_TOO_LONG"},
+                in {
+                    "OBJECT_STORE_UNAVAILABLE",
+                    "VIDEO_TOO_LARGE",
+                    "CAPTION_REQUIRED",
+                    "CAPTION_TOO_LONG",
+                },
             ),
         ) from exc
     response.status_code = status.HTTP_200_OK if replay else status.HTTP_201_CREATED
@@ -603,11 +617,24 @@ def refresh_upload_url(
                 request, task, "TASK_ACTION_NOT_ALLOWED", "TASK_ACTION_NOT_ALLOWED"
             ),
         )
+    try:
+        upload_url = store.presign_put(task.object_key, task.content_type)
+    except Exception as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            _error_detail(
+                request,
+                "OBJECT_STORE_UNAVAILABLE",
+                "OBJECT_STORE_UNAVAILABLE",
+                retryable=True,
+                task=task,
+            ),
+        ) from exc
     return {
         **_snapshot(task, expose_client_request_id=True),
         "upload": {
             "method": "PUT",
-            "url": store.presign_put(task.object_key, task.content_type),
+            "url": upload_url,
             "headers": {"Content-Type": task.content_type},
             "expiresAt": upload_expires_at(store),
         },

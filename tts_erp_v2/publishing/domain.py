@@ -211,12 +211,19 @@ def cleanup_retryable_resources(task: Any) -> tuple[str, ...]:
 
 
 _LATEST_ATTEMPT_UNSET = object()
+_HAS_ATTEMPTS_UNSET = object()
 
 
 def allowed_actions(
-    task: Any, *, latest_attempt: Any = _LATEST_ATTEMPT_UNSET
+    task: Any,
+    *,
+    latest_attempt: Any = _LATEST_ATTEMPT_UNSET,
+    has_attempts: Any = _HAS_ATTEMPTS_UNSET,
 ) -> tuple[AllowedAction, ...]:
-    """Compute UI actions from persisted server state."""
+    """Compute UI actions without lazy loading when a summary is supplied."""
+    attempts = None
+    if latest_attempt is _LATEST_ATTEMPT_UNSET or has_attempts is _HAS_ATTEMPTS_UNSET:
+        attempts = getattr(task, "attempts", ()) or ()
     actions: list[AllowedAction] = [AllowedAction.VIEW]
     if task.status == TaskStatus.PENDING and task.stage == TaskStage.AWAITING_UPLOAD:
         actions += [AllowedAction.CONTINUE_UPLOAD, AllowedAction.CANCEL]
@@ -233,7 +240,7 @@ def allowed_actions(
     ):
         latest = (
             max(
-                getattr(task, "attempts", ()) or (),
+                attempts or (),
                 key=lambda attempt: attempt.sequence_no,
                 default=None,
             )
@@ -259,6 +266,6 @@ def allowed_actions(
         actions.append(AllowedAction.VERIFY)
     if cleanup_retryable_resources(task):
         actions.append(AllowedAction.RETRY_CLEANUP)
-    if getattr(task, "attempts", None):
+    if bool(attempts) if has_attempts is _HAS_ATTEMPTS_UNSET else bool(has_attempts):
         actions.append(AllowedAction.COPY_ARTEMIS_ID)
     return tuple(actions)

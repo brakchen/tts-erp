@@ -1533,7 +1533,8 @@ async def test_queued_worker_reaches_staging_and_terminal_success(
     )
 
     class Store:
-        def download(self, _key: str, path: Path) -> str:
+        def download(self, _key: str, path: Path, expected_etag: str) -> str:
+            assert expected_etag == "TEST-etag"
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"TEST")
             return "sha256-test"
@@ -1552,6 +1553,9 @@ async def test_queued_worker_reaches_staging_and_terminal_success(
             pass
 
         async def check_package(self, _serial: str, _package: str) -> None:
+            pass
+
+        async def ensure_album_empty(self, _serial: str) -> None:
             pass
 
         async def stage_video(self, _serial: str, _local: Path, _device: str) -> None:
@@ -1576,6 +1580,7 @@ async def test_queued_worker_reaches_staging_and_terminal_success(
 
     task = _task()
     task.object_uploaded_at = datetime.now(UTC)
+    task.object_etag = "TEST-etag"
     db_session.add(task)
     db_session.flush()
     db_session.commit()

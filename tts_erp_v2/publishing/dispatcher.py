@@ -26,7 +26,10 @@ from tts_erp_v2.publishing.artemis_client import (
 )
 from tts_erp_v2.publishing.diagnostics import sanitize_artemis_output, sanitize_text
 from tts_erp_v2.publishing.domain import AttemptStatus, TaskStage
-from tts_erp_v2.publishing.object_store import VideoObjectStore
+from tts_erp_v2.publishing.object_store import (
+    ObjectVersionMismatch,
+    VideoObjectStore,
+)
 from tts_erp_v2.publishing.repository import (
     AdmissionRejected,
     AdvanceExecution,
@@ -50,6 +53,7 @@ from tts_erp_v2.publishing.repository import (
     renew_cleanup_work,
     schedule_retention_cleanup,
 )
+from tts_erp_v2.storage.minio_client import ObjectNotFound
 
 
 @dataclass(slots=True)
@@ -247,6 +251,7 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
             else:
                 active_id = None
             object_key = task.object_key
+            object_etag = task.object_etag
             size_bytes = task.size_bytes
             device_serial = task.target_device_serial
             app_package = task.target_app_package
@@ -293,14 +298,25 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
                 lease_seconds=deps.lease_seconds,
             ),
         )
+        if not object_etag:
+            raise ObjectVersionMismatch("CONFIRMED_OBJECT_ETAG_MISSING")
         digest = await _run_external(
             task_id,
             deps,
-            lambda: asyncio.to_thread(deps.store.download, object_key, local),
+            lambda: asyncio.to_thread(
+                deps.store.download, object_key, local, object_etag
+            ),
         )
         if local.stat().st_size != size_bytes:
             raise RuntimeError("DOWNLOAD_SIZE_MISMATCH")
         device_path = deps.adb.device_path(task_id)
+
+        async def preflight_device() -> None:
+            await deps.adb.check_device(device_serial)
+            await deps.adb.check_package(device_serial, app_package)
+            await deps.adb.ensure_album_empty(device_serial)
+
+        await _run_external(task_id, deps, preflight_device)
         _apply_publish_command(
             deps,
             task_id,
@@ -314,8 +330,6 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
         )
 
         async def stage_device() -> None:
-            await deps.adb.check_device(device_serial)
-            await deps.adb.check_package(device_serial, app_package)
             await deps.adb.stage_video(device_serial, local, device_path)
             await deps.adb.verify_media_visible(device_serial, device_path)
 
@@ -336,6 +350,10 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
         )
     except LeaseLost:
         return
+    except ObjectVersionMismatch as exc:
+        await _mark_failed(task_id, str(exc), deps)
+    except ObjectNotFound:
+        await _mark_failed(task_id, "CONFIRMED_OBJECT_MISSING", deps)
     except DeviceUnavailable as exc:
         await _safe_retry(
             task_id,
@@ -661,6 +679,22 @@ async def _safe_retry(
                 max_attempts=deps.max_attempts,
                 retry_stage=stage,
                 message=sanitize_text(message) if message else None,
+            ),
+        )
+    except LeaseLost:
+        return
+
+
+async def _mark_failed(task_id: UUID, code: str, deps: PublishDependencies) -> None:
+    try:
+        _apply_publish_command(
+            deps,
+            task_id,
+            OperationalFailure(
+                action="failed",
+                code=code,
+                max_attempts=deps.max_attempts,
+                message=code,
             ),
         )
     except LeaseLost:

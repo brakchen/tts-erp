@@ -129,6 +129,9 @@ class VideoPublishTask(Base):
     created_by_key_hash: Mapped[str | None] = mapped_column(Text)
     caption: Mapped[str] = mapped_column(Text, nullable=False)
     original_filename: Mapped[str] = mapped_column(Text, nullable=False)
+    object_filename: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'video.mp4'")
+    )
     content_type: Mapped[str] = mapped_column(Text, nullable=False)
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     object_bucket: Mapped[str] = mapped_column(Text, nullable=False)

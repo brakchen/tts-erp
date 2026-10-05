@@ -101,6 +101,33 @@ async def _probe_device_readiness(
     serial = os.environ.get("ARTEMIS_DEVICE_SERIAL", "").strip()
     if not serial:
         return "unknown", "未配置设备序列号"
+
+    def cleanup_is_busy() -> bool:
+        with deps.session_factory() as session:
+            return bool(
+                session.scalar(
+                    text("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM publishing.video_publish_tasks
+                        WHERE cleanup_intent <> 'none'
+                          AND device_cleanup_status IN ('pending','failed')
+                          AND (
+                            device_cleanup_next_attempt_at IS NULL
+                            OR device_cleanup_next_attempt_at <= clock_timestamp()
+                            OR (cleanup_lease_owner IS NOT NULL
+                                AND cleanup_lease_expires_at > clock_timestamp())
+                          )
+                    )
+                    """)
+                )
+            )
+
+    try:
+        cleaning = await asyncio.to_thread(cleanup_is_busy)
+    except Exception:  # noqa: BLE001 - never persist database diagnostics
+        return "unknown", "发布数据库状态不可用"
+    if cleaning:
+        return "busy", "当前正在执行或等待设备清理"
     try:
         await deps.adb.check_device(serial)
     except DeviceLocked:
@@ -109,8 +136,22 @@ async def _probe_device_readiness(
         return "offline", "设备离线或 ADB 探测失败"
     except Exception:  # noqa: BLE001 - readiness text never persists raw diagnostics
         return "unknown", "设备探测返回未知错误"
+    try:
+        await deps.adb.check_package(
+            serial, os.environ.get("ARTEMIS_APP_PACKAGE", "com.zhiliaoapp.musically")
+        )
+    except Exception:  # noqa: BLE001 - never persist package probe diagnostics
+        return "unknown", "TikTok 应用不可用或包探测失败"
+    try:
+        await deps.artemis.check_available()
+    except Exception:  # noqa: BLE001 - never persist endpoint/token diagnostics
+        return "unknown", "Artemis 服务不可用"
+    try:
+        await asyncio.to_thread(deps.store.check_available)
+    except Exception:  # noqa: BLE001 - never persist object-store diagnostics
+        return "unknown", "视频对象存储不可用"
 
-    def is_busy() -> bool:
+    def publish_is_busy() -> bool:
         with deps.session_factory() as session:
             return (
                 session.scalar(
@@ -121,9 +162,13 @@ async def _probe_device_readiness(
                 is not None
             )
 
-    if await asyncio.to_thread(is_busy):
+    try:
+        running = await asyncio.to_thread(publish_is_busy)
+    except Exception:  # noqa: BLE001 - never persist database diagnostics
+        return "unknown", "发布数据库状态不可用"
+    if running:
         return "busy", "设备在线且已解锁，当前正在执行发布或核验"
-    return "ready", "设备在线、已解锁且当前空闲"
+    return "ready", "设备、TikTok、Artemis 与对象存储均可用且当前空闲"
 
 
 def _cleanup_orphan_spool(session_factory, spool_dir: Path) -> int:

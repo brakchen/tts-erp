@@ -15,6 +15,10 @@ class DeviceLocked(DeviceUnavailable):
     pass
 
 
+class ManagedAlbumNotEmpty(DeviceUnavailable):
+    pass
+
+
 class AdbDevice:
     def __init__(self, adb_binary: str = "adb", *, album: str = "TTSERP") -> None:
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", album):
@@ -56,6 +60,27 @@ class AdbDevice:
         output = await self._run("-s", serial, "shell", "pm", "path", package)
         if "package:" not in output:
             raise DeviceUnavailable("TikTok 未安装")
+
+    async def ensure_album_empty(self, serial: str) -> None:
+        """Refuse staging while any managed video remains in the album."""
+        await self._run("-s", serial, "shell", "mkdir", "-p", self.album_directory)
+        output = await self._run(
+            "-s",
+            serial,
+            "shell",
+            "find",
+            self.album_directory,
+            "-maxdepth",
+            "1",
+            "-type",
+            "f",
+            "-name",
+            "tts_erp_*.mp4",
+            "-print",
+        )
+        paths = [line.strip() for line in output.splitlines() if line.strip()]
+        if paths:
+            raise ManagedAlbumNotEmpty("managed video residue requires cleanup")
 
     async def stage_video(
         self, serial: str, local_path: Path, device_path: str
