@@ -70,10 +70,6 @@ class CleanupPlan:
     object: bool = False
 
 
-class DomainTransitionError(ValueError):
-    """Raised when a task command violates the publishing state machine."""
-
-
 class AllowedAction(StrEnum):
     VIEW = "view"
     CONTINUE_UPLOAD = "continue_upload"
@@ -149,118 +145,6 @@ def apply_cleanup_result(
         return
 
 
-def transition_task(task: Any, event: str) -> None:
-    """Apply the approved business transition without accepting arbitrary states."""
-    current = (str(task.status), str(task.stage))
-    transitions = {
-        (
-            (TaskStatus.PENDING.value, TaskStage.AWAITING_UPLOAD.value),
-            "UPLOAD_CONFIRMED",
-        ): (TaskStatus.PENDING.value, TaskStage.QUEUED.value),
-        ((TaskStatus.PENDING.value, TaskStage.QUEUED.value), "CLAIM"): (
-            TaskStatus.RUNNING.value,
-            TaskStage.DOWNLOADING.value,
-        ),
-        ((TaskStatus.PENDING.value, TaskStage.WAITING_DEVICE.value), "DEVICE_READY"): (
-            TaskStatus.PENDING.value,
-            TaskStage.QUEUED.value,
-        ),
-        ((TaskStatus.RUNNING.value, TaskStage.DOWNLOADING.value), "DOWNLOAD_OK"): (
-            TaskStatus.RUNNING.value,
-            TaskStage.STAGING_DEVICE.value,
-        ),
-        ((TaskStatus.RUNNING.value, TaskStage.STAGING_DEVICE.value), "MEDIA_VISIBLE"): (
-            TaskStatus.RUNNING.value,
-            TaskStage.DISPATCHING_ARTEMIS.value,
-        ),
-        (
-            (TaskStatus.RUNNING.value, TaskStage.DISPATCHING_ARTEMIS.value),
-            "ARTEMIS_ADMITTED",
-        ): (TaskStatus.RUNNING.value, TaskStage.WAITING_ARTEMIS.value),
-        (
-            (TaskStatus.RUNNING.value, TaskStage.WAITING_ARTEMIS.value),
-            "ARTEMIS_SUCCESS",
-        ): (TaskStatus.SUCCEEDED.value, TaskStage.DONE.value),
-        (
-            (TaskStatus.RUNNING.value, TaskStage.DISPATCHING_ARTEMIS.value),
-            "ARTEMIS_SUCCESS",
-        ): (TaskStatus.SUCCEEDED.value, TaskStage.DONE.value),
-        (
-            (TaskStatus.RUNNING.value, TaskStage.VERIFYING.value),
-            "VERIFY_PUBLISHED",
-        ): (TaskStatus.SUCCEEDED.value, TaskStage.DONE.value),
-        (
-            (TaskStatus.RUNNING.value, TaskStage.WAITING_ARTEMIS.value),
-            "AMBIGUOUS_FAILURE",
-        ): (TaskStatus.RUNNING.value, TaskStage.VERIFYING.value),
-        ((TaskStatus.RUNNING.value, TaskStage.VERIFYING.value), "INCONCLUSIVE"): (
-            TaskStatus.NEEDS_REVIEW.value,
-            TaskStage.DONE.value,
-        ),
-        (
-            (TaskStatus.RUNNING.value, TaskStage.VERIFYING.value),
-            "VERIFY_NOT_PUBLISHED",
-        ): (TaskStatus.PENDING.value, TaskStage.WAITING_DEVICE.value),
-        (
-            (TaskStatus.RUNNING.value, TaskStage.STAGING_DEVICE.value),
-            "SAFE_RETRY",
-        ): (TaskStatus.PENDING.value, TaskStage.WAITING_DEVICE.value),
-        (
-            (TaskStatus.RUNNING.value, TaskStage.DISPATCHING_ARTEMIS.value),
-            "SAFE_RETRY",
-        ): (TaskStatus.PENDING.value, TaskStage.WAITING_DEVICE.value),
-        (
-            (TaskStatus.RUNNING.value, TaskStage.WAITING_ARTEMIS.value),
-            "SAFE_RETRY",
-        ): (TaskStatus.PENDING.value, TaskStage.WAITING_DEVICE.value),
-        (
-            (TaskStatus.RUNNING.value, TaskStage.VERIFYING.value),
-            "SAFE_RETRY",
-        ): (TaskStatus.PENDING.value, TaskStage.WAITING_DEVICE.value),
-        (
-            (TaskStatus.RUNNING.value, TaskStage.STAGING_DEVICE.value),
-            "SAFE_RETRY_EXHAUSTED",
-        ): (TaskStatus.FAILED.value, TaskStage.DONE.value),
-        (
-            (TaskStatus.RUNNING.value, TaskStage.DISPATCHING_ARTEMIS.value),
-            "SAFE_RETRY_EXHAUSTED",
-        ): (TaskStatus.FAILED.value, TaskStage.DONE.value),
-        (
-            (TaskStatus.RUNNING.value, TaskStage.WAITING_ARTEMIS.value),
-            "SAFE_RETRY_EXHAUSTED",
-        ): (TaskStatus.FAILED.value, TaskStage.DONE.value),
-        (
-            (TaskStatus.RUNNING.value, TaskStage.VERIFYING.value),
-            "SAFE_RETRY_EXHAUSTED",
-        ): (TaskStatus.FAILED.value, TaskStage.DONE.value),
-        ((TaskStatus.FAILED.value, TaskStage.DONE.value), "USER_RETRY"): (
-            TaskStatus.PENDING.value,
-            TaskStage.QUEUED.value,
-        ),
-        ((TaskStatus.NEEDS_REVIEW.value, TaskStage.DONE.value), "USER_VERIFY"): (
-            TaskStatus.RUNNING.value,
-            TaskStage.VERIFYING.value,
-        ),
-    }
-    result = transitions.get((current, event))
-    if result is None:
-        raise DomainTransitionError(f"{event} is not allowed from {current}")
-    task.status = result[0]
-    set_task_stage(task, result[1])
-    if event in {"ARTEMIS_SUCCESS", "VERIFY_PUBLISHED", "BUSINESS_SUCCESS_FINALIZED"}:
-        plan_cleanup(
-            task,
-            CleanupIntent.FINALIZE_SUCCESS,
-            device=True,
-            spool=True,
-            object=True,
-        )
-    elif event in {"SAFE_RETRY", "VERIFY_NOT_PUBLISHED"}:
-        plan_cleanup(task, CleanupIntent.REQUEUE_PUBLISH, device=True)
-    elif event in {"SAFE_RETRY_EXHAUSTED", "INCONCLUSIVE"}:
-        plan_cleanup(task, CleanupIntent.PRESERVE_STATE, device=True)
-
-
 def classify_failure(
     *,
     artemis_status: str,
@@ -273,11 +157,11 @@ def classify_failure(
         return FailureClassification("publish_action_observed", False, True)
     if session_missing:
         return FailureClassification("session_missing", None, True)
-    if steps_count == 0:
-        return FailureClassification("planner_zero_steps", True)
     status = artemis_status.lower()
     if status in {"rejected", "cancelled", "canceled"}:
-        return FailureClassification("admission_rejected", True)
+        return FailureClassification("ambiguous_terminal_execution", None, True)
+    if steps_count == 0:
+        return FailureClassification("planner_zero_steps", True)
     if status in {"failed", "error"}:
         # A failed transport/execution report does not prove that the final
         # publish action was not observed. Only an explicit zero-step result
@@ -295,12 +179,23 @@ def replacement_cleanup_pending(task: Any) -> bool:
     )
 
 
+def object_cleanup_blocks_input(task: Any) -> bool:
+    """Retention deletion must finish before retry or replacement mutates input."""
+    return (
+        getattr(task, "object_cleanup_status", None)
+        in {CleanupStatus.PENDING.value, CleanupStatus.FAILED.value}
+        or getattr(task, "cleanup_lease_owner", None) is not None
+    )
+
+
 def replace_upload_allowed(task: Any) -> bool:
     return (
         task.status == TaskStatus.FAILED.value
         and task.object_deleted_at is not None
         and not replacement_cleanup_pending(task)
-        and task.attempt_count < int(os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3"))
+        and not object_cleanup_blocks_input(task)
+        and getattr(task, "publish_budget_used", task.attempt_count)
+        < int(os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3"))
     )
 
 
@@ -315,7 +210,12 @@ def cleanup_retryable_resources(task: Any) -> tuple[str, ...]:
     )
 
 
-def allowed_actions(task: Any) -> tuple[AllowedAction, ...]:
+_LATEST_ATTEMPT_UNSET = object()
+
+
+def allowed_actions(
+    task: Any, *, latest_attempt: Any = _LATEST_ATTEMPT_UNSET
+) -> tuple[AllowedAction, ...]:
     """Compute UI actions from persisted server state."""
     actions: list[AllowedAction] = [AllowedAction.VIEW]
     if task.status == TaskStatus.PENDING and task.stage == TaskStage.AWAITING_UPLOAD:
@@ -325,11 +225,21 @@ def allowed_actions(task: Any) -> tuple[AllowedAction, ...]:
         TaskStage.WAITING_DEVICE,
     }:
         actions.append(AllowedAction.CANCEL)
-    elif task.status == TaskStatus.FAILED and task.attempt_count < int(
-        os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3")
+    elif (
+        task.status == TaskStatus.FAILED
+        and getattr(task, "publish_budget_used", task.attempt_count)
+        < int(os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3"))
+        and not object_cleanup_blocks_input(task)
     ):
-        attempts = getattr(task, "attempts", ()) or ()
-        latest = max(attempts, key=lambda attempt: attempt.sequence_no, default=None)
+        latest = (
+            max(
+                getattr(task, "attempts", ()) or (),
+                key=lambda attempt: attempt.sequence_no,
+                default=None,
+            )
+            if latest_attempt is _LATEST_ATTEMPT_UNSET
+            else latest_attempt
+        )
         if replace_upload_allowed(task):
             actions.append(AllowedAction.REPLACE_UPLOAD)
         elif (

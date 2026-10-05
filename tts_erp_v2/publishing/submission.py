@@ -19,6 +19,7 @@ from tts_erp_v2.publishing.domain import (
     CleanupIntent,
     TaskStage,
     TaskStatus,
+    object_cleanup_blocks_input,
     plan_cleanup,
     replace_upload_allowed,
     replacement_cleanup_pending,
@@ -224,14 +225,17 @@ def confirm_upload(
     size_bytes = observed.size_bytes
     try:
         metadata = store.stat(object_key)
-    except Exception as exc:
+    except ObjectNotFound as exc:
         raise ValueError("UPLOAD_NOT_FOUND") from exc
-    if (
-        metadata.get("size") != size_bytes
-        or metadata.get("content_type", "video/mp4").split(";")[0].lower()
-        != "video/mp4"
-    ):
+    except Exception as exc:
+        raise ValueError("OBJECT_STORE_UNAVAILABLE") from exc
+    if metadata.get("size") != size_bytes:
         raise ValueError("UPLOAD_SIZE_MISMATCH")
+    content_type = metadata.get("content_type")
+    if not isinstance(content_type, str) or not content_type.strip():
+        raise ValueError("UPLOAD_MIME_MISSING")
+    if content_type.split(";", 1)[0].strip().lower() != "video/mp4":
+        raise ValueError("UPLOAD_MIME_MISMATCH")
 
     session.expire_all()
     task = get_task(session, task_id, lock=True)
@@ -260,6 +264,8 @@ def replace_upload(session: Session, task_id: UUID) -> VideoPublishTask:
         raise ValueError("UPLOAD_REPLACEMENT_REQUIRED")
     if replacement_cleanup_pending(task):
         raise ValueError("CLEANUP_REQUIRED")
+    if object_cleanup_blocks_input(task):
+        raise ValueError("OBJECT_CLEANUP_IN_PROGRESS")
     if not replace_upload_allowed(task):
         raise ValueError("RETRY_BUDGET_EXHAUSTED")
     now = database_now(session)
@@ -318,6 +324,8 @@ def retry_task(
         raise LookupError("TASK_NOT_FOUND")
     if task.status != TaskStatus.FAILED.value:
         raise ValueError("TASK_ACTION_NOT_ALLOWED")
+    if object_cleanup_blocks_input(task):
+        raise ValueError("OBJECT_CLEANUP_IN_PROGRESS")
     attempts = task.attempts or []
     latest = max(attempts, key=lambda attempt: attempt.sequence_no, default=None)
     if latest is None or latest.kind != "publish" or latest.retry_safe is not True:
@@ -335,7 +343,9 @@ def retry_task(
             raise ValueError("UPLOAD_REPLACEMENT_REQUIRED") from exc
         except Exception as exc:
             raise ValueError("OBJECT_STORE_UNAVAILABLE") from exc
-    if task.attempt_count >= int(os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3")):
+    if task.publish_budget_used >= int(
+        os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3")
+    ):
         raise ValueError("RETRY_BUDGET_EXHAUSTED")
     queue_task(session, task)
     task.row_version += 1

@@ -1,6 +1,6 @@
 # TikTok 视频发布工作流技术方案
 
-> 状态：Proposed
+> 状态：Implemented（真实设备与响应式视觉检查仍是发布前人工门禁）
 >
 > 日期：2026-10-04
 >
@@ -143,6 +143,7 @@ CREATE TABLE publishing.video_publish_tasks (
     status                text NOT NULL,
     stage                 text NOT NULL,
     attempt_count         integer NOT NULL DEFAULT 0,
+    publish_budget_used   integer NOT NULL DEFAULT 0,
     next_attempt_at       timestamptz,
 
     lease_owner           text,
@@ -1176,7 +1177,8 @@ bash scripts/test_isolated.sh ...
 | `object_deleted_at` | timestamptz, 可空 | cleanup | MinIO 删除成功时间；删除幂等，404 也视为成功。 |
 | `status` | enum text, 非空 | Domain service | 业务状态，含义见 §18.4。 |
 | `stage` | enum text, 非空 | Domain service | 当前细分阶段，含义见 §18.5。 |
-| `attempt_count` | int, 非空 | Domain service | 已创建的 `kind=publish` 数量；verify 不计入正式发布重试额度。 |
+| `attempt_count` | int, 非空 | Domain service | 追加式审计计数：已创建的 `kind=publish` 数量，永不因 admission refund 递减。 |
+| `publish_budget_used` | int, 非空 | Domain service | 已消耗的正式发布预算；只有白名单内、已证明发生在 admission 前的设备 locked/busy 拒绝可退款。verify 不计入。 |
 | `next_attempt_at` | timestamptz, 可空 | Dispatcher | 退避截止时间；为空表示可立即领取。 |
 | `lease_owner` | text, 可空 | Worker | 当前领取实例 ID；业务终态和 pending 时必须为空。 |
 | `lease_expires_at` | timestamptz, 可空 | Worker | 崩溃恢复租约；运行时每次 heartbeat 向后延长。 |
@@ -2683,3 +2685,19 @@ Luna 每个 Phase 的输出必须包含：
 - 未验证的真实设备风险；
 - 是否改变本方案中的 API、字段或枚举；
 - 当前分支/commit，且未经 review 不合并 master。
+
+## 28. 已实现的最终安全边界
+
+当前 migration head 为 `0061_publish_safety`（parent `0060_video_publish_invariants`）。实现还明确保证：
+
+- verify 只有在 Artemis execution `success` 且 `verdict` 严格等于 `published`、`not_published` 或 `inconclusive` 时才采信；其他终态一律保守进入 `needs_review`；
+- `cancelled`/`canceled` publish 与未知/格式错误的 Artemis 409 都是结果不确定，必须沿同 session 查询/核验，不能进入安全重发；
+- `attempt_count` 是追加式审计数，`publish_budget_used` 独立表达预算；
+- retention object cleanup pending/failed/leased 时，服务端不提供且拒绝 retry/replace；
+- cleanup 删除期间持续续租，失去 owner 后旧 Worker 不写完成结果；
+- Worker 心跳持久化 ADB 实际探测的 `ready|busy|offline|locked|unknown`，API 不再从 serial 配置推断设备 ready；
+- 列表使用 `(created_at,id)` opaque keyset cursor，并只批量读取最新 attempt 与 publish/verify 计数；详情接口才加载完整 attempt 审计；
+- 409 错误返回 `code/message/retryable/requestId/rowVersion/allowedActions`，浏览器始终按服务端 allowedActions 重绘；
+- 0058 仅把成功 publish 或成功且 verdict=`published` 的 verify 视为发布确认；其他 verify 结果保留对象并进入 `needs_review`。
+
+390/768/1440 像素视觉检查、模拟器全流程、SIGTERM 恢复以及 staging-only 真机检查仍按 §26 保留为人工发布门禁；本文不声称已执行这些检查。

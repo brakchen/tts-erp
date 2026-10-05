@@ -339,13 +339,20 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
     except DeviceUnavailable as exc:
         await _safe_retry(
             task_id,
-            f"DEVICE_UNAVAILABLE:{exc}",
+            "DEVICE_UNAVAILABLE",
             deps,
             stage=TaskStage.WAITING_DEVICE.value,
+            message=str(exc),
         )
-    except Exception as exc:  # noqa: BLE001 - persist worker failures
+    except Exception as exc:  # noqa: BLE001 - persist sanitized worker failures
         if pre_artemis:
-            await _safe_retry(task_id, str(exc), deps, stage=TaskStage.QUEUED.value)
+            await _safe_retry(
+                task_id,
+                "WORKER_OPERATION_FAILED",
+                deps,
+                stage=TaskStage.QUEUED.value,
+                message=str(exc),
+            )
         else:
             await _mark_unexpected(task_id, str(exc), deps)
 
@@ -473,6 +480,10 @@ async def _run_attempt(
             except ArtemisAdmissionRejected as exc:
                 await _handle_admission_rejection(task_id, attempt_id, exc.code, deps)
                 return
+            except ArtemisTransportError:
+                # This same-session submit may have been admitted. Preserve the
+                # active attempt for a later query; never enter business retry.
+                return
     else:
         try:
             result = await _run_external(
@@ -494,8 +505,13 @@ async def _run_attempt(
         kind = session.scalar(
             select(VideoPublishAttempt.kind).where(VideoPublishAttempt.id == attempt_id)
         )
+    candidate_verdict = (result.output or {}).get("verdict")
     verdict = (
-        (result.output or {}).get("verdict", "inconclusive")
+        candidate_verdict
+        if kind == "verify"
+        and result.status == "success"
+        and candidate_verdict in {"published", "not_published", "inconclusive"}
+        else "inconclusive"
         if kind == "verify" and result.terminal
         else None
     )
@@ -629,10 +645,11 @@ async def _lease_heartbeat(
 
 async def _safe_retry(
     task_id: UUID,
-    error: str,
+    code: str,
     deps: PublishDependencies,
     *,
     stage: str = TaskStage.QUEUED.value,
+    message: str | None = None,
 ) -> None:
     try:
         _apply_publish_command(
@@ -640,22 +657,10 @@ async def _safe_retry(
             task_id,
             OperationalFailure(
                 action="safe_retry",
-                code=error,
+                code=code,
                 max_attempts=deps.max_attempts,
                 retry_stage=stage,
-            ),
-        )
-    except LeaseLost:
-        return
-
-
-async def _mark_failed(task_id: UUID, code: str, deps: PublishDependencies) -> None:
-    try:
-        _apply_publish_command(
-            deps,
-            task_id,
-            OperationalFailure(
-                action="failed", code=code, max_attempts=deps.max_attempts
+                message=sanitize_text(message) if message else None,
             ),
         )
     except LeaseLost:
@@ -670,11 +675,71 @@ async def _mark_unexpected(
             deps,
             task_id,
             OperationalFailure(
-                action="unexpected", code=error, max_attempts=deps.max_attempts
+                action="unexpected",
+                code="UNEXPECTED_WORKER_FAILURE",
+                max_attempts=deps.max_attempts,
+                message=sanitize_text(error),
             ),
         )
     except LeaseLost:
         return
+
+
+async def _cleanup_lease_heartbeat(
+    holder: list,
+    deps: PublishDependencies,
+    lost: asyncio.Event,
+) -> None:
+    try:
+        while True:
+            await asyncio.sleep(max(0.05, min(5, deps.lease_seconds / 3)))
+            try:
+                holder[0] = await asyncio.to_thread(
+                    renew_cleanup_work,
+                    deps.session_factory,
+                    holder[0],
+                    deps.lease_seconds,
+                )
+            except LeaseLost:
+                lost.set()
+                return
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 - caller treats renewal failure as owner loss
+        lost.set()
+
+
+async def _run_cleanup_external(
+    token,
+    deps: PublishDependencies,
+    operation: Callable[[], Awaitable[Any]],
+):
+    holder = [
+        await asyncio.to_thread(
+            renew_cleanup_work,
+            deps.session_factory,
+            token,
+            deps.lease_seconds,
+        )
+    ]
+    lost = asyncio.Event()
+    heartbeat = asyncio.create_task(
+        _cleanup_lease_heartbeat(holder, deps, lost),
+        name="cleanup-lease-heartbeat",
+    )
+    operation_error: BaseException | None = None
+    try:
+        await operation()
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - fence before reporting resource error
+        operation_error = exc
+    finally:
+        heartbeat.cancel()
+        await asyncio.gather(heartbeat, return_exceptions=True)
+    if lost.is_set():
+        raise LeaseLost(token.task_id)
+    return holder[0], operation_error
 
 
 async def _execute_cleanup(work: CleanupWork, deps: PublishDependencies) -> None:
@@ -698,25 +763,34 @@ async def _execute_cleanup(work: CleanupWork, deps: PublishDependencies) -> None
         if guard_error is not None:
             errors[name] = guard_error
             return
-        token = renew_cleanup_work(deps.session_factory, token, deps.lease_seconds)
-        try:
-            await operation()
+        token, operation_error = await _run_cleanup_external(token, deps, operation)
+        if operation_error is None:
             errors[name] = None
-        except Exception as exc:  # noqa: BLE001 - persisted per-resource
-            errors[name] = str(exc)[:500]
+        else:
+            errors[name] = (
+                f"CLEANUP_{name.upper()}_FAILED: {sanitize_text(operation_error)}"
+            )[:2000]
 
-    await run(
-        "device",
-        lambda: deps.adb.remove_staged_video(
-            work.device_serial, work.device_path or ""
-        ),
-    )
-    await run(
-        "spool",
-        lambda: _remove_spool(deps.spool_dir / str(work.task_id) / "video.mp4"),
-    )
-    await run("object", lambda: asyncio.to_thread(deps.store.remove, work.object_key))
-    finish_cleanup_work(deps.session_factory, token, errors)
+    try:
+        await run(
+            "device",
+            lambda: deps.adb.remove_staged_video(
+                work.device_serial, work.device_path or ""
+            ),
+        )
+        await run(
+            "spool",
+            lambda: _remove_spool(deps.spool_dir / str(work.task_id) / "video.mp4"),
+        )
+        await run(
+            "object", lambda: asyncio.to_thread(deps.store.remove, work.object_key)
+        )
+        await asyncio.to_thread(
+            finish_cleanup_work, deps.session_factory, token, errors
+        )
+    except LeaseLost:
+        # A takeover owns reconciliation. This worker must not finalize.
+        return
 
 
 async def _remove_spool(path: Path) -> None:

@@ -38,7 +38,6 @@ from tts_erp_v2.publishing.artemis_client import (
     ArtemisTransportError,
 )
 from tts_erp_v2.publishing.dispatcher import (
-    LeaseLost,
     PublishDependencies,
     _cleanup_success,
     _execute_cleanup,
@@ -46,12 +45,7 @@ from tts_erp_v2.publishing.dispatcher import (
     _safe_retry,
     dispatch_one,
 )
-from tts_erp_v2.publishing.domain import (
-    AttemptStatus,
-    TaskStage,
-    TaskStatus,
-    transition_task,
-)
+from tts_erp_v2.publishing.domain import AttemptStatus, TaskStage, TaskStatus
 from tts_erp_v2.publishing.object_store import VideoObjectStore
 from tts_erp_v2.publishing.repository import (
     CleanupClaimRequest,
@@ -345,14 +339,15 @@ def test_replace_upload_resets_object_cleanup_and_rejects_exhausted_budget(
     task = _task(
         status=TaskStatus.FAILED.value,
         stage=TaskStage.DONE.value,
-        object_cleanup_status="failed",
+        object_cleanup_status="succeeded",
     )
     task.object_deleted_at = datetime.now(UTC)
-    task.object_cleanup_error = "TEST_OBJECT_BUSY"
+    task.object_cleanup_error = None
     task.object_cleanup_attempts = 4
-    task.object_cleanup_next_attempt_at = datetime.now(UTC)
-    task.cleanup_intent = "preserve_state"
+    task.object_cleanup_next_attempt_at = None
+    task.cleanup_intent = "none"
     task.attempt_count = 3
+    task.publish_budget_used = 3
     db_session.add(task)
     db_session.flush()
     with pytest.raises(ValueError, match="RETRY_BUDGET_EXHAUSTED"):
@@ -362,14 +357,15 @@ def test_replace_upload_resets_object_cleanup_and_rejects_exhausted_budget(
     task = _task(
         status=TaskStatus.FAILED.value,
         stage=TaskStage.DONE.value,
-        object_cleanup_status="failed",
+        object_cleanup_status="succeeded",
     )
     task.object_deleted_at = datetime.now(UTC)
-    task.object_cleanup_error = "TEST_OBJECT_BUSY"
+    task.object_cleanup_error = None
     task.object_cleanup_attempts = 4
-    task.object_cleanup_next_attempt_at = datetime.now(UTC)
-    task.cleanup_intent = "preserve_state"
+    task.object_cleanup_next_attempt_at = None
+    task.cleanup_intent = "none"
     task.attempt_count = 1
+    task.publish_budget_used = 1
     db_session.add(task)
     db_session.flush()
     replaced = replace_upload(db_session, task.public_id)
@@ -389,11 +385,12 @@ def test_replace_upload_api_confirm_and_claim_round_trip(
     task = _task(
         status=TaskStatus.FAILED.value,
         stage=TaskStage.DONE.value,
-        object_cleanup_status="failed",
+        object_cleanup_status="succeeded",
     )
     task.object_deleted_at = datetime.now(UTC)
-    task.cleanup_intent = "preserve_state"
+    task.cleanup_intent = "none"
     task.attempt_count = 1
+    task.publish_budget_used = 1
     task.stage_started_at = datetime(2026, 10, 5, tzinfo=UTC)
     db_session.add(task)
     db_session.flush()
@@ -434,6 +431,7 @@ def test_replace_upload_conflict_is_structured_when_budget_is_exhausted(
     task = _task(status=TaskStatus.FAILED.value, stage=TaskStage.DONE.value)
     task.object_deleted_at = datetime.now(UTC)
     task.attempt_count = 3
+    task.publish_budget_used = 3
     db_session.add(task)
     db_session.flush()
     with pytest.raises(HTTPException) as exc_info:
@@ -444,12 +442,12 @@ def test_replace_upload_conflict_is_structured_when_budget_is_exhausted(
             db_session,
         )
     assert exc_info.value.status_code == 409
-    assert cast(dict, exc_info.value.detail) == {
-        "code": "RETRY_BUDGET_EXHAUSTED",
-        "message": "RETRY_BUDGET_EXHAUSTED",
-        "rowVersion": task.row_version,
-        "allowedActions": ["view"],
-    }
+    conflict = cast(dict, exc_info.value.detail)
+    assert conflict["code"] == "RETRY_BUDGET_EXHAUSTED"
+    assert conflict["retryable"] is False
+    assert conflict["requestId"]
+    assert conflict["rowVersion"] == task.row_version
+    assert conflict["allowedActions"] == ["view"]
     db_session.rollback()
 
 
@@ -702,7 +700,7 @@ async def test_spool_unlink_failure_persists_and_retries_with_fencing(
     db_session.expire_all()
     assert task.status == TaskStatus.SUCCEEDED.value
     assert task.spool_cleanup_status == "failed"
-    assert task.spool_cleanup_error == "TEST_SPOOL_BUSY"
+    assert task.spool_cleanup_error == "CLEANUP_SPOOL_FAILED: TEST_SPOOL_BUSY"
     assert task.spool_cleanup_attempts == 1
     task.spool_cleanup_next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
     db_session.commit()
@@ -809,12 +807,12 @@ def test_upload_url_illegal_state_uses_structured_conflict(
             cast(VideoObjectStore, SimpleNamespace()),
         )
     assert exc_info.value.status_code == 409
-    assert cast(dict, exc_info.value.detail) == {
-        "code": "TASK_ACTION_NOT_ALLOWED",
-        "message": "TASK_ACTION_NOT_ALLOWED",
-        "rowVersion": task.row_version,
-        "allowedActions": ["view", "cancel"],
-    }
+    conflict = cast(dict, exc_info.value.detail)
+    assert conflict["code"] == "TASK_ACTION_NOT_ALLOWED"
+    assert conflict["retryable"] is False
+    assert conflict["requestId"]
+    assert conflict["rowVersion"] == task.row_version
+    assert conflict["allowedActions"] == ["view", "cancel"]
 
 
 def test_confirm_head_then_cas_detects_concurrent_task_update(
@@ -1032,8 +1030,9 @@ def test_api_key_b_cannot_list_detail_or_replay_key_a_task(
             Response(),
             include_diagnostics=False,
         )
-    assert detail_error.value.status_code == 404
-    assert detail_error.value.detail == "TASK_NOT_FOUND"
+        assert detail_error.value.status_code == 404
+        assert cast(dict, detail_error.value.detail)["code"] == "TASK_NOT_FOUND"
+
     session_request = _request(
         role="readwrite",
         user_id=2,
@@ -1048,7 +1047,7 @@ def test_api_key_b_cannot_list_detail_or_replay_key_a_task(
             include_diagnostics=False,
         )
     assert session_error.value.status_code == 404
-    assert session_error.value.detail == "TASK_NOT_FOUND"
+    assert cast(dict, session_error.value.detail)["code"] == "TASK_NOT_FOUND"
     store = UploadStore()
     with pytest.raises(HTTPException) as replay_error:
         create_task(
@@ -1065,7 +1064,7 @@ def test_api_key_b_cannot_list_detail_or_replay_key_a_task(
             Response(),
         )
     assert replay_error.value.status_code == 404
-    assert replay_error.value.detail == "TASK_NOT_FOUND"
+    assert cast(dict, replay_error.value.detail)["code"] == "TASK_NOT_FOUND"
     assert store.presign_calls == 0
 
 
@@ -1255,7 +1254,7 @@ def test_api_upload_replay_hides_cross_user_task(
             Response(),
         )
     assert exc_info.value.status_code == 404
-    assert exc_info.value.detail == "TASK_NOT_FOUND"
+    assert cast(dict, exc_info.value.detail)["code"] == "TASK_NOT_FOUND"
 
 
 def test_filtered_task_list_exposes_unfiltered_poll_state(db_session: Session) -> None:
@@ -1341,7 +1340,7 @@ def test_task_list_and_detail_are_owner_scoped(
             include_diagnostics=False,
         )
     assert exc_info.value.status_code == 404
-    assert exc_info.value.detail == "TASK_NOT_FOUND"
+    assert cast(dict, exc_info.value.detail)["code"] == "TASK_NOT_FOUND"
 
 
 def test_awaiting_upload_is_not_reported_as_queued_poll_work(
@@ -1651,6 +1650,7 @@ async def test_terminal_safe_retry_preserves_state_and_cleans_device(
     assert claim_one(db_session, "terminal-worker", max_attempts=1) is not None
     task.stage = TaskStage.STAGING_DEVICE.value
     task.attempt_count = 1
+    task.publish_budget_used = 1
     db_session.commit()
     deps = cast(
         PublishDependencies,
@@ -1703,53 +1703,6 @@ async def test_pre_device_spool_failure_is_retryable(
     assert task.spool_cleanup_status == "not_started"
     assert task.cleanup_intent == "none"
     assert task.stage == TaskStage.QUEUED.value
-
-
-@pytest.mark.parametrize(
-    ("status", "stage", "event", "expected_status", "expected_stage", "intent"),
-    [
-        ("pending", "queued", "CLAIM", "running", "downloading", "none"),
-        (
-            "running",
-            "waiting_artemis",
-            "ARTEMIS_SUCCESS",
-            "succeeded",
-            "done",
-            "finalize_success",
-        ),
-        (
-            "running",
-            "verifying",
-            "VERIFY_NOT_PUBLISHED",
-            "pending",
-            "waiting_device",
-            "requeue_publish",
-        ),
-        (
-            "running",
-            "staging_device",
-            "SAFE_RETRY_EXHAUSTED",
-            "failed",
-            "done",
-            "preserve_state",
-        ),
-    ],
-)
-def test_domain_transition_table(
-    status: str,
-    stage: str,
-    event: str,
-    expected_status: str,
-    expected_stage: str,
-    intent: str,
-) -> None:
-    task = _task(status=status, stage=stage)
-    transition_task(task, event)
-    assert (task.status, task.stage, task.cleanup_intent) == (
-        expected_status,
-        expected_stage,
-        intent,
-    )
 
 
 def test_database_rejects_pending_cleanup_with_none_intent(
@@ -1832,8 +1785,7 @@ async def test_cleanup_takeover_during_external_call_fences_final_write(
             spool_dir=tmp_path,
         ),
     )
-    with pytest.raises(LeaseLost):
-        await _execute_cleanup(work, deps)
+    await _execute_cleanup(work, deps)
     db_session.expire_all()
     assert task.cleanup_lease_owner == "worker-b"
     assert task.device_cleanup_status == "failed"
@@ -2026,6 +1978,8 @@ def test_config_exposes_server_owned_device_and_worker_configuration(
             hostname="TEST_host",
             pid=123,
             status="ready",
+            device_status="ready",
+            device_message="设备在线、已解锁且当前空闲",
             started_at=now,
             heartbeat_at=now,
         )
@@ -2041,8 +1995,8 @@ def test_config_exposes_server_owned_device_and_worker_configuration(
     payload = config(_request(role="readwrite"), db_session)
     assert payload["target"]["album"] == "TEST_CAMPAIGN"
     assert payload["device"] == {
-        "status": "configured",
-        "message": "Worker 心跳正常；设备已配置，领取任务时检查在线与解锁状态",
+        "status": "ready",
+        "message": "设备在线、已解锁且当前空闲",
     }
     assert payload["artemis"] == {
         "profile": "TEST_profile",
@@ -2075,6 +2029,7 @@ async def test_verify_not_published_at_exhausted_budget_is_terminal(
         device_path=device_path,
     )
     task.attempt_count = 3
+    task.publish_budget_used = 3
     task.lease_owner = "verify-budget-worker"
     task.lease_expires_at = datetime.now(UTC) + timedelta(minutes=1)
     publish_attempt = VideoPublishAttempt(
@@ -2166,12 +2121,12 @@ def test_confirm_illegal_state_is_structured_and_does_not_head(
             cast(VideoObjectStore, Store()),
         )
     assert exc_info.value.status_code == 409
-    assert cast(dict, exc_info.value.detail) == {
-        "code": "TASK_ACTION_NOT_ALLOWED",
-        "message": "TASK_ACTION_NOT_ALLOWED",
-        "rowVersion": task.row_version,
-        "allowedActions": ["view", "cancel"],
-    }
+    conflict = cast(dict, exc_info.value.detail)
+    assert conflict["code"] == "TASK_ACTION_NOT_ALLOWED"
+    assert conflict["retryable"] is False
+    assert conflict["requestId"]
+    assert conflict["rowVersion"] == task.row_version
+    assert conflict["allowedActions"] == ["view", "cancel"]
 
 
 @pytest.mark.asyncio
@@ -2188,6 +2143,7 @@ async def test_artemis_locked_admission_waits_without_consuming_budget(
         stage=TaskStage.DISPATCHING_ARTEMIS.value,
     )
     task.attempt_count = 1
+    task.publish_budget_used = 1
     task.lease_owner = "locked-worker"
     task.lease_expires_at = datetime.now(UTC) + timedelta(minutes=1)
     task.attempts.append(
@@ -2217,7 +2173,8 @@ async def test_artemis_locked_admission_waits_without_consuming_budget(
     )
     await _run_attempt(task.public_id, task.attempts[0].id, deps)
     db_session.expire_all()
-    assert task.attempt_count == 0
+    assert task.attempt_count == 1
+    assert task.publish_budget_used == 0
     assert task.status == TaskStatus.PENDING.value
     assert task.stage == TaskStage.WAITING_DEVICE.value
     assert task.attempts[0].status == AttemptStatus.REJECTED.value
@@ -2247,6 +2204,7 @@ async def test_same_session_resubmit_increments_transport_retry_count(
         stage=TaskStage.DISPATCHING_ARTEMIS.value,
     )
     task.attempt_count = 1
+    task.publish_budget_used = 1
     task.lease_owner = "retry-worker"
     task.lease_expires_at = datetime.now(UTC) + timedelta(minutes=1)
     task.attempts.append(

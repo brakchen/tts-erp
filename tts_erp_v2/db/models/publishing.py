@@ -27,6 +27,50 @@ from tts_erp_v2.db.base import Base
 class VideoPublishTask(Base):
     __tablename__ = "video_publish_tasks"
     __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending','running','succeeded','failed','needs_review','cancelled')",
+            name="video_publish_task_status_check",
+        ),
+        CheckConstraint(
+            "stage IN ('awaiting_upload','queued','waiting_device','downloading',"
+            "'staging_device','dispatching_artemis','waiting_artemis','verifying',"
+            "'cleaning','done')",
+            name="video_publish_task_stage_check",
+        ),
+        CheckConstraint("size_bytes > 0", name="video_publish_task_size_check"),
+        CheckConstraint(
+            "cleanup_intent IN ('none','finalize_success','requeue_publish','preserve_state')",
+            name="video_publish_task_cleanup_intent_check",
+        ),
+        CheckConstraint(
+            "(status = 'pending' AND stage IN ('awaiting_upload','queued','waiting_device')) OR "
+            "(status = 'running' AND stage IN ('downloading','staging_device',"
+            "'dispatching_artemis','waiting_artemis','verifying')) OR "
+            "(status IN ('succeeded','failed','needs_review','cancelled') AND stage = 'done')",
+            name="video_publish_task_status_stage_check",
+        ),
+        CheckConstraint(
+            "(cleanup_intent = 'none' AND cleanup_lease_owner IS NULL AND "
+            "cleanup_lease_expires_at IS NULL AND ((status = 'running' AND "
+            "lease_owner IS NOT NULL AND stage IN ('downloading','staging_device',"
+            "'dispatching_artemis','waiting_artemis','verifying') AND "
+            "device_cleanup_status IN ('pending','failed')) OR "
+            "(device_cleanup_status NOT IN ('pending','failed') AND "
+            "spool_cleanup_status NOT IN ('pending','failed') AND "
+            "object_cleanup_status NOT IN ('pending','failed')))) OR "
+            "(cleanup_intent = 'finalize_success' AND status = 'succeeded' AND stage = 'done') OR "
+            "(cleanup_intent = 'requeue_publish' AND status = 'pending' AND "
+            "stage IN ('queued','waiting_device') AND "
+            "object_cleanup_status NOT IN ('pending','failed')) OR "
+            "(cleanup_intent = 'preserve_state' AND "
+            "status IN ('succeeded','failed','needs_review','cancelled') AND stage = 'done')",
+            name="video_publish_task_cleanup_owner_check",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0 AND publish_budget_used >= 0 "
+            "AND publish_budget_used <= attempt_count",
+            name="video_publish_task_budget_check",
+        ),
         Index(
             "ix_video_publish_queue",
             "next_attempt_at",
@@ -108,6 +152,9 @@ class VideoPublishTask(Base):
     attempt_count: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("0")
     )
+    publish_budget_used: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     lease_owner: Mapped[str | None] = mapped_column(Text)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -179,6 +226,15 @@ class VideoPublishTask(Base):
 class VideoPublishAttempt(Base):
     __tablename__ = "video_publish_attempts"
     __table_args__ = (
+        CheckConstraint(
+            "kind IN ('publish','verify')",
+            name="video_publish_attempt_kind_check",
+        ),
+        CheckConstraint(
+            "status IN ('created','submitting','queued','running','success','failed',"
+            "'rejected','cancelled','unknown')",
+            name="video_publish_attempt_status_check",
+        ),
         UniqueConstraint(
             "task_id", "sequence_no", name="uq_video_publish_attempt_task_seq"
         ),
@@ -187,7 +243,11 @@ class VideoPublishAttempt(Base):
             "(kind = 'verify' AND related_attempt_id IS NOT NULL)",
             name="video_publish_attempt_related_check",
         ),
-        Index("ix_video_publish_attempt_task_seq", "task_id", "sequence_no"),
+        Index(
+            "ix_video_publish_attempt_task_seq",
+            "task_id",
+            text("sequence_no DESC"),
+        ),
         Index(
             "ix_video_publish_attempt_status",
             "status",
@@ -260,12 +320,26 @@ class VideoPublishAttempt(Base):
 
 class PublishWorkerHeartbeat(Base):
     __tablename__ = "worker_heartbeats"
-    __table_args__ = ({"schema": "publishing"},)
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('starting','ready','stopping')",
+            name="worker_heartbeat_status_check",
+        ),
+        CheckConstraint(
+            "device_status IN ('ready','busy','offline','locked','unknown')",
+            name="worker_heartbeat_device_status_check",
+        ),
+        {"schema": "publishing"},
+    )
     instance_id: Mapped[str] = mapped_column(Text, primary_key=True)
     hostname: Mapped[str] = mapped_column(Text, nullable=False)
     pid: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[str | None] = mapped_column(Text)
+    device_status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'unknown'")
+    )
+    device_message: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

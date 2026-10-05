@@ -34,6 +34,7 @@ def test_upload_cancellation_aborts_xhr_and_handles_terminal_and_failed_cancel()
             addEventListener(type, handler) { this[`on${type}`] = handler; },
             setAttribute(name, value) { this[name] = value; },
             removeAttribute() {}, close() {}, click() { this.clicked = true; },
+            showModal() { this.returnValue = "confirm"; uploadConfirmations += 1; setImmediate(() => this.onclose?.()); },
           };
           created.push(node);
           return node;
@@ -66,7 +67,6 @@ def test_upload_cancellation_aborts_xhr_and_handles_terminal_and_failed_cancel()
         global.crypto = { randomUUID: () => "generated-id" };
         global.URL = { createObjectURL: () => "blob:test", revokeObjectURL() {} };
         global.localStorage = { getItem: () => null, setItem() {} };
-        global.confirm = () => { uploadConfirmations += 1; return true; };
         global.navigator = { clipboard: { writeText: async () => {} } };
         global.setTimeout = (callback, delay) => { timers.push(callback); return timers.length; };
         global.clearTimeout = () => {};

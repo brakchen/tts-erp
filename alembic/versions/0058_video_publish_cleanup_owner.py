@@ -57,8 +57,11 @@ def upgrade() -> None:
                 THEN 'finalize_success' ELSE 'none' END,
             lease_owner = NULL, lease_expires_at = NULL, heartbeat_at = NULL
         WHERE t.status = 'running' AND t.stage = 'done'
-          AND (SELECT a.status FROM publishing.video_publish_attempts AS a
-               WHERE a.task_id = t.id ORDER BY a.sequence_no DESC LIMIT 1) = 'success'
+          AND (SELECT (a.kind = 'publish' AND a.status = 'success') OR
+                      (a.kind = 'verify' AND a.status = 'success'
+                       AND a.artemis_output ->> 'verdict' = 'published')
+               FROM publishing.video_publish_attempts AS a
+               WHERE a.task_id = t.id ORDER BY a.sequence_no DESC LIMIT 1) IS TRUE
     """)
     )
     # Rows without a confirming terminal attempt are ambiguous and must not be
@@ -89,8 +92,8 @@ def upgrade() -> None:
     """)
     )
     # pi-lens-ignore: python-sql-injection
-    # A legacy cleaning row with a confirmed publish/verify success keeps the
-    # success result and gets an explicit finalize plan. Other rows are ambiguous.
+    # A legacy cleaning row keeps success only for a successful publish, or a
+    # successful verify whose exact verdict is published. Other rows are ambiguous.
     # pi-lens-ignore: python-sql-injection
     op.execute(
         text("""
@@ -105,8 +108,11 @@ def upgrade() -> None:
                 WHEN t.object_cleanup_status = 'not_started' THEN 'pending'
                 ELSE t.object_cleanup_status END
         WHERE t.status = 'running' AND t.stage = 'cleaning'
-          AND (SELECT a.status FROM publishing.video_publish_attempts AS a
-               WHERE a.task_id = t.id ORDER BY a.sequence_no DESC LIMIT 1) = 'success'
+          AND (SELECT (a.kind = 'publish' AND a.status = 'success') OR
+                      (a.kind = 'verify' AND a.status = 'success'
+                       AND a.artemis_output ->> 'verdict' = 'published')
+               FROM publishing.video_publish_attempts AS a
+               WHERE a.task_id = t.id ORDER BY a.sequence_no DESC LIMIT 1) IS TRUE
     """)
     )
     # pi-lens-ignore: python-sql-injection
@@ -120,8 +126,11 @@ def upgrade() -> None:
                 THEN 'finalize_success' ELSE 'none' END,
             lease_owner = NULL, lease_expires_at = NULL, heartbeat_at = NULL
         WHERE t.status = 'running' AND t.stage = 'cleaning'
-          AND (SELECT a.status FROM publishing.video_publish_attempts AS a
-               WHERE a.task_id = t.id ORDER BY a.sequence_no DESC LIMIT 1) = 'success'
+          AND (SELECT (a.kind = 'publish' AND a.status = 'success') OR
+                      (a.kind = 'verify' AND a.status = 'success'
+                       AND a.artemis_output ->> 'verdict' = 'published')
+               FROM publishing.video_publish_attempts AS a
+               WHERE a.task_id = t.id ORDER BY a.sequence_no DESC LIMIT 1) IS TRUE
     """)
     )
     # pi-lens-ignore: python-sql-injection

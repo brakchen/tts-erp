@@ -257,6 +257,110 @@ def test_0058_no_work_ambiguous_row_can_request_manual_verification(db_engine) -
             transaction.rollback()
 
 
+@pytest.mark.parametrize(
+    ("verify_status", "verdict", "expected_status", "expected_intent"),
+    [
+        ("success", "published", "succeeded", "finalize_success"),
+        ("success", "not_published", "needs_review", "preserve_state"),
+        ("success", "inconclusive", "needs_review", "preserve_state"),
+        ("failed", "published", "needs_review", "preserve_state"),
+    ],
+)
+def test_0058_verify_backfill_requires_successful_published_verdict(
+    db_engine,
+    verify_status: str,
+    verdict: str,
+    expected_status: str,
+    expected_intent: str,
+) -> None:
+    migration = _load_migration()
+    with db_engine.connect() as conn:
+        transaction = conn.begin()
+        try:
+            migration.__dict__["op"] = Operations(MigrationContext.configure(conn))
+            migration.downgrade()
+            # pi-lens-ignore: python-sql-injection
+            task_id = conn.execute(
+                text(
+                    """
+                    INSERT INTO publishing.video_publish_tasks (
+                        client_request_id, caption, original_filename, content_type,
+                        size_bytes, object_bucket, object_key, status, stage,
+                        target_device_serial, target_app_package, device_path,
+                        device_cleanup_status, spool_cleanup_status,
+                        object_cleanup_status
+                    ) VALUES (
+                        :client_request_id, 'TEST_caption', 'TEST_video.mp4',
+                        'video/mp4', 4, 'tiktok-video', :object_key, 'running',
+                        'cleaning', 'TEST_device', 'com.tiktok', '/sdcard/TEST/video.mp4',
+                        'pending', 'pending', 'pending'
+                    ) RETURNING id
+                    """
+                ),
+                {
+                    "client_request_id": uuid4(),
+                    "object_key": f"TEST/verify-backfill-{uuid4()}.mp4",
+                },
+            ).scalar_one()
+            # pi-lens-ignore: python-sql-injection
+            publish_id = conn.execute(
+                text(
+                    """
+                    INSERT INTO publishing.video_publish_attempts (
+                        task_id, sequence_no, kind, artemis_session_id, status,
+                        prompt_version, prompt_snapshot, device_serial
+                    ) VALUES (
+                        :task_id, 1, 'publish', :session_id, 'failed',
+                        'TEST', 'TEST', 'TEST_device'
+                    ) RETURNING id
+                    """
+                ),
+                {"task_id": task_id, "session_id": uuid4()},
+            ).scalar_one()
+            # pi-lens-ignore: python-sql-injection
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO publishing.video_publish_attempts (
+                        task_id, sequence_no, kind, related_attempt_id,
+                        artemis_session_id, status, prompt_version,
+                        prompt_snapshot, device_serial, artemis_output
+                    ) VALUES (
+                        :task_id, 2, 'verify', :publish_id, :session_id,
+                        :status, 'TEST', 'TEST', 'TEST_device',
+                        CAST(:output AS JSONB)
+                    )
+                    """
+                ),
+                {
+                    "task_id": task_id,
+                    "publish_id": publish_id,
+                    "session_id": uuid4(),
+                    "status": verify_status,
+                    "output": f'{{"verdict":"{verdict}"}}',
+                },
+            )
+            migration.upgrade()
+            # pi-lens-ignore: python-sql-injection
+            migrated = conn.execute(
+                text(
+                    """
+                    SELECT status, stage, cleanup_intent, object_deleted_at
+                    FROM publishing.video_publish_tasks WHERE id = :id
+                    """
+                ),
+                {"id": task_id},
+            ).one()
+            assert migrated == (
+                expected_status,
+                "done",
+                expected_intent,
+                None,
+            )
+        finally:
+            transaction.rollback()
+
+
 def test_0058_downgrade_refuses_populated_table(db_engine) -> None:
     migration = _load_migration()
     with db_engine.connect() as conn:

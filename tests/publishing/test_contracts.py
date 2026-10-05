@@ -202,7 +202,7 @@ def test_tracked_spool_deletion_has_one_cleanup_executor_owner() -> None:
     assert "_mark_spool_cleanup" not in dispatcher
     assert "shutil.rmtree" not in worker
     assert "unlink(" not in worker
-    assert dispatcher.count('await run(\n        "spool"') == 1
+    assert dispatcher.count('await run(\n            "spool"') == 1
 
 
 def test_worker_wires_documented_artemis_and_timing_knobs() -> None:
@@ -242,9 +242,8 @@ def test_frontend_keeps_idempotency_and_double_click_guards() -> None:
     assert "shared.queued ? 8" in source
     assert "function sharedPollState()" in source
     assert "localStorage.setItem(REFRESH_KEY, mode)" in source
-    assert (
-        '$("publish-caption").maxLength = state.config.maxCaptionCharacters' in source
-    )
+    assert "Array.from(value).length" in source
+    assert ".maxLength =" not in source
     assert "[5, 10, 30, 60]" in source
     assert 'window.addEventListener("pagehide", destroy)' in source
     assert "operationalStageStartedAt" in source

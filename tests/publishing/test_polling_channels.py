@@ -25,7 +25,16 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
             textContent: "", value: "", disabled: false, hidden: false, tagName: "",
             style: {}, dataset: {}, classList: { toggle() {} },
             querySelectorAll() { return []; }, replaceChildren() {}, append() {},
-            addEventListener(type, handler) { this[`on${type}`] = handler; }, setAttribute(name, value) { this[name] = value; }, removeAttribute() {}, showModal() {}, close() {}, click() { if (this.id === "publish-video-file") filePickerClicks += 1; },
+            addEventListener(type, handler) { this[`on${type}`] = handler; }, setAttribute(name, value) { this[name] = value; }, removeAttribute() {},
+            showModal() {
+              if (this.id === "publish-action-dialog") {
+                confirmCalls += 1;
+                confirmMessages.push(elements.get("publish-action-evidence").textContent);
+                this.returnValue = "confirm";
+                setImmediate(() => this.onclose?.());
+              }
+            },
+            close() {}, click() { if (this.id === "publish-video-file") filePickerClicks += 1; },
           };
           created.push(node);
           return node;
@@ -52,7 +61,6 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
         global.crypto = { randomUUID: () => "00000000-0000-0000-0000-000000000000" };
         global.URL = { createObjectURL: () => "blob:test", revokeObjectURL() {} };
         global.localStorage = { getItem: () => null, setItem() {} };
-        global.confirm = (message) => { confirmCalls += 1; confirmMessages.push(message); return true; };
         global.navigator.clipboard = { writeText: async () => {} };
         global.setTimeout = (callback, delay) => { timers.push(callback); delays.push(delay); return timers.length; };
         global.clearTimeout = () => {};

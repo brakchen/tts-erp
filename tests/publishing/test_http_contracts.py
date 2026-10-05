@@ -87,7 +87,9 @@ def test_upload_ticket_http_statuses_and_foreign_replay_denial(
             headers={"X-Test-Key": "key-b"},
         )
         assert foreign.status_code == 404
-        assert foreign.json() == {"detail": "TASK_NOT_FOUND"}
+        assert foreign.json()["detail"]["code"] == "TASK_NOT_FOUND"
+        assert foreign.json()["detail"]["retryable"] is False
+        assert foreign.json()["detail"]["requestId"]
 
         cookie_payload = {
             **payload,
@@ -99,7 +101,8 @@ def test_upload_ticket_http_statuses_and_foreign_replay_denial(
             headers={"X-Test-Cookie": "1"},
         )
         assert cookie_denied.status_code == 403
-        assert "X-Requested-With" in cookie_denied.json()["detail"]
+        assert cookie_denied.json()["detail"]["code"] == "CSRF_HEADER_REQUIRED"
+        assert "X-Requested-With" in cookie_denied.json()["detail"]["message"]
         cookie_allowed = client.post(
             "/v2/video-publish/tasks",
             json=cookie_payload,

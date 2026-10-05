@@ -93,11 +93,11 @@ shop_cipher = cred.shop_cipher
   （含 `api_tier`）、`permissions`（页面权限点 `page:<id>`）、
   `role_permissions`、`user_roles`、`user_sessions`（服务端会话）
 - **页面级权限**：权限点 `page:<page_id>` 与侧边栏页面一一对应，单一清单在
-  `tts_erp_v2/accounts/pages.py`（13 个页面，含 `page:users` 用户管理）；
+  `tts_erp_v2/accounts/pages.py`（14 个页面，含 `page:users` 用户管理与 `page:video-publish` 视频发布）；
   `GET /v2/pages/<id>` 要求会话权限集含 `page:<id>`，缺失 → 403 页面
   （已登录但无权限 ≠ 未登录）；`/v2/users*` / `/v2/roles*` 归属 `page:users`
 - **侧边栏按权限过滤**：服务端渲染时按会话 `pages` 过滤入口，无权限页面不出现在
-  菜单（API key / auth off 时全量显示）；页面内全部操作不设权限点
+  菜单（API key / auth off 时全量显示）；页面内 API 通常复用角色矩阵，视频发布数据/API 还要求 `page:video-publish`
 - **api_tier 复用既有角色矩阵**：会话用户取其角色的 `api_tier`
   （`readonly|readwrite|admin`，取最高档）代入同一张 `required_role()` 比较；
   `/v2/users` `/v2/roles` 等未列路径默认 admin 档（fail-closed）

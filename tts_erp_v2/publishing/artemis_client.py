@@ -8,6 +8,8 @@ from uuid import UUID
 
 import httpx
 
+_SAFE_PRE_ADMISSION_CODES = frozenset({"DEVICE_LOCKED", "DEVICE_BUSY"})
+
 
 class ArtemisTransportError(RuntimeError):
     pass
@@ -66,19 +68,21 @@ class ArtemisClient:
                 return payload if isinstance(payload, dict) else {}
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
-                raise ArtemisSessionNotFound(str(exc)[:500]) from exc
+                raise ArtemisSessionNotFound("ARTEMIS_SESSION_NOT_FOUND") from exc
             if exc.response.status_code == 409:
                 try:
                     detail = exc.response.json()
                 except ValueError:
-                    detail = {}
-                code = (
-                    detail.get("code") if isinstance(detail, dict) else None
-                ) or "DEVICE_LOCKED"
-                raise ArtemisAdmissionRejected(str(code)[:100]) from exc
-            raise ArtemisTransportError(str(exc)[:500]) from exc
+                    detail = None
+                code = detail.get("code") if isinstance(detail, dict) else None
+                if isinstance(code, str) and code in _SAFE_PRE_ADMISSION_CODES:
+                    raise ArtemisAdmissionRejected(code) from exc
+                raise ArtemisTransportError("ARTEMIS_HTTP_409_AMBIGUOUS") from exc
+            raise ArtemisTransportError(
+                f"ARTEMIS_HTTP_{exc.response.status_code}"
+            ) from exc
         except (httpx.HTTPError, ValueError) as exc:
-            raise ArtemisTransportError(str(exc)[:500]) from exc
+            raise ArtemisTransportError("ARTEMIS_TRANSPORT_ERROR") from exc
 
     async def submit(
         self,

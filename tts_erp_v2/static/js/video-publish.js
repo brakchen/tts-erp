@@ -14,10 +14,11 @@
     listTimer: null,
     detailTimer: null,
     currentChannel: { controller: null, generation: 0, failures: 0 },
-    listChannel: { controller: null, generation: 0, failures: 0, items: [] },
+    listChannel: { controller: null, generation: 0, failures: 0, items: [], nextCursor: null },
     pollState: { running: false, cleaning: false, queued: false },
     detailChannel: { controller: null, generation: 0, failures: 0 },
     upload: null,
+    uploadConflictActions: [],
     creating: false,
     clientRequestId: null,
     resumeTask: null,
@@ -31,8 +32,10 @@
 
   function notice(message, error) {
     const n = $("publish-notice");
-    n.textContent = message;
+    n.textContent = String(message || "").slice(0, 500);
     n.style.color = error ? "var(--danger)" : "var(--accent)";
+    n.setAttribute("role", error ? "alert" : "status");
+    n.setAttribute("aria-live", error ? "assertive" : "polite");
   }
 
   async function request(path, options = {}) {
@@ -67,6 +70,10 @@
       const error = Error(detail.detail?.message || detail.detail?.code || detail.detail || "请求失败");
       error.status = response.status;
       error.code = detail.detail?.code;
+      error.retryable = detail.detail?.retryable;
+      error.requestId = detail.detail?.requestId;
+      error.rowVersion = detail.detail?.rowVersion;
+      error.allowedActions = detail.detail?.allowedActions;
       throw error;
     }
     if (method === "GET") {
@@ -77,11 +84,15 @@
     return response.json();
   }
 
+  function codePointLength(value) {
+    return Array.from(value).length;
+  }
+
   function valid() {
+    const captionLength = codePointLength($("publish-caption").value);
     return state.config && state.file && state.file.type === "video/mp4" &&
       state.file.size <= state.config.maxVideoBytes &&
-      $("publish-caption").value.length > 0 &&
-      $("publish-caption").value.length <= state.config.maxCaptionCharacters;
+      captionLength > 0 && captionLength <= state.config.maxCaptionCharacters;
   }
 
   function renderForm() {
@@ -102,15 +113,26 @@
     const cancel = $("publish-upload-cancel");
     cancel.hidden = !activeUpload;
     cancel.disabled = !activeUpload;
-    $("publish-caption-count").textContent = `${$("publish-caption").value.length} / ${state.config?.maxCaptionCharacters || 4000}`;
+    const captionLength = codePointLength($("publish-caption").value);
+    const overLimit = captionLength > (state.config?.maxCaptionCharacters || 4000);
+    $("publish-caption-count").textContent = `${captionLength} / ${state.config?.maxCaptionCharacters || 4000}`;
+    $("publish-caption-count").classList.toggle("is-danger", overLimit);
     $("publish-summary-file").textContent = file ? `${file.name} · ${Math.ceil(file.size / 1024 / 1024 * 10) / 10} MB` : "—";
-    $("publish-summary-caption").textContent = `${$("publish-caption").value.length} 字`;
+    $("publish-summary-caption").textContent = `${captionLength} 字`;
     if (file) $("publish-file-name").textContent = file.name;
   }
 
   function pick(file) {
     if (state.upload || state.creating) return;
     if (!file) return;
+    if (state.resumeTask && (
+      file.name !== state.resumeTask.filename || file.size !== state.resumeTask.sizeBytes
+    )) {
+      notice(`请选择原文件 ${state.resumeTask.filename}（${state.resumeTask.sizeBytes} 字节）`, true);
+      state.file = null;
+      renderForm();
+      return;
+    }
     state.file = file;
     if (!state.resumeTask) state.clientRequestId = crypto.randomUUID();
     if (file.type !== "video/mp4" || !file.name.toLowerCase().endsWith(".mp4")) {
@@ -142,7 +164,7 @@
   async function init() {
     try {
       state.config = await request("/config");
-      $("publish-caption").maxLength = state.config.maxCaptionCharacters;
+      $("publish-caption").dataset.maxCodePoints = String(state.config.maxCaptionCharacters);
       $("publish-size-hint").textContent = `MP4 · 最大 ${Math.round(state.config.maxVideoBytes / 1024 / 1024)} MB`;
       $("publish-target-device").textContent = state.config.target.deviceSerialMasked || "未配置";
       $("publish-target-album").textContent = state.config.target.album || "未配置";
@@ -161,7 +183,10 @@
 
   function confirmPublish(file, caption) {
     const dialog = $("publish-confirm-dialog");
-    if (!dialog?.showModal) return Promise.resolve(window.confirm(`确认上传 ${file.name} 并加入发布队列？\n\n设备空闲时可能立即开始发布。\n\n${caption}`));
+    if (!dialog?.showModal) {
+      notice("当前浏览器不支持安全确认对话框，无法提交。", true);
+      return Promise.resolve(false);
+    }
     $("publish-confirm-file").textContent = `${file.name} · ${Math.ceil(file.size / 1024 / 1024 * 10) / 10} MB`;
     $("publish-confirm-caption").textContent = caption;
     const preview = $("publish-confirm-preview");
@@ -255,6 +280,12 @@
             notice(refreshError.message, true);
           }
         }
+      } else if (error.status === 409) {
+        if (Array.isArray(error.allowedActions)) {
+          state.uploadConflictActions = error.allowedActions;
+        }
+        notice("上传任务状态已变化，已刷新服务端允许动作", true);
+        await refresh();
       } else {
         notice(error.message, true);
       }
@@ -359,6 +390,24 @@
     }[actionName] || `确认${ACTION_LABELS[actionName] || actionName}？`;
   }
 
+  function confirmTaskAction(task, actionName, trigger) {
+    const dialog = $("publish-action-dialog");
+    if (!dialog?.showModal) {
+      notice("当前浏览器不支持安全确认对话框，操作已取消。", true);
+      return Promise.resolve(false);
+    }
+    $("publish-action-title").textContent = `${ACTION_LABELS[actionName] || actionName}确认`;
+    $("publish-action-evidence").textContent = confirmationMessage(task, actionName);
+    $("publish-action-confirm").textContent = `确认${ACTION_LABELS[actionName] || "操作"}`;
+    dialog.showModal();
+    return new Promise((resolve) => {
+      dialog.addEventListener("close", () => {
+        trigger?.focus?.();
+        resolve(dialog.returnValue === "confirm");
+      }, { once: true });
+    });
+  }
+
   function resumeUpload(task) {
     if (task.status === "cancelled" || !(task.allowedActions || []).includes("continue_upload")) {
       notice("任务已取消，不能继续上传", true);
@@ -374,8 +423,7 @@
 
   async function runTaskAction(task, actionName, trigger = null) {
     if (CONFIRM_ACTIONS.has(actionName)) {
-      const confirmed = window.confirm(confirmationMessage(task, actionName));
-      trigger?.focus?.();
+      const confirmed = await confirmTaskAction(task, actionName, trigger);
       if (!confirmed) return;
     }
     try {
@@ -412,8 +460,17 @@
       });
       await refresh();
     } catch (error) {
-      if (error.status === 409 && error.code === "TASK_VERSION_CONFLICT") {
-        notice("任务已更新，已刷新最新状态", true);
+      if (error.status === 409) {
+        if (Array.isArray(error.allowedActions)) {
+          task.allowedActions = error.allowedActions;
+          if (Number.isInteger(error.rowVersion)) task.rowVersion = error.rowVersion;
+          if (state.detail?.taskId === task.taskId) {
+            state.detail.allowedActions = error.allowedActions;
+            state.detail.rowVersion = task.rowVersion;
+            renderDetail(state.detail);
+          }
+        }
+        notice("任务状态已更新，已按服务端允许动作刷新", true);
         await refresh();
       } else {
         notice(error.message, true);
@@ -421,11 +478,18 @@
     }
   }
 
-  function renderTasks(payload) {
-    state.listChannel.items = payload.items || [];
+  function renderTasks(payload, { append = false } = {}) {
+    const incoming = payload.items || [];
+    state.listChannel.items = append
+      ? [...state.listChannel.items, ...incoming]
+      : incoming;
+    state.listChannel.nextCursor = payload.nextCursor || null;
+    const loadMore = $("publish-load-more");
+    loadMore.hidden = !state.listChannel.nextCursor;
+    loadMore.disabled = false;
     const body = $("publish-task-list");
     body.replaceChildren();
-    if (!payload.items.length) {
+    if (!state.listChannel.items.length) {
       const row = document.createElement("tr");
       const cell = document.createElement("td");
       cell.colSpan = 9;
@@ -435,7 +499,7 @@
       body.append(row);
       return;
     }
-    payload.items.forEach((task) => {
+    state.listChannel.items.forEach((task) => {
       const row = document.createElement("tr");
       [
         task.status,
@@ -491,19 +555,22 @@
     }
   }
 
-  async function refreshList() {
+  async function refreshList({ append = false } = {}) {
     const channel = state.listChannel;
     const generation = ++channel.generation;
     if (channel.controller) channel.controller.abort();
     channel.controller = new AbortController();
     try {
-      const query = state.filter ? `?status=${encodeURIComponent(state.filter)}` : "";
+      const params = new URLSearchParams();
+      if (state.filter) params.set("status", state.filter);
+      if (append && channel.nextCursor) params.set("cursor", channel.nextCursor);
+      const query = params.toString() ? `?${params}` : "";
       const list = await request(`/tasks${query}`, { signal: channel.controller.signal });
       if (generation !== channel.generation) return;
       channel.failures = 0;
       if (!list.notModified) {
         state.pollState = list.pollState || { running: false, cleaning: false, queued: false };
-        renderTasks(list);
+        renderTasks(list, { append });
       }
       $("publish-last-refreshed").textContent = `上次刷新 ${new Date().toLocaleTimeString()}`;
     } catch (error) {
@@ -706,9 +773,15 @@
   });
   document.querySelectorAll("[data-task-filter]").forEach((button) => button.addEventListener("click", () => {
     state.filter = button.dataset.taskFilter;
+    state.listChannel.nextCursor = null;
     document.querySelectorAll("[data-task-filter]").forEach((node) => node.classList.toggle("is-active", node === button));
     refresh({ current: false });
   }));
+  $("publish-load-more").addEventListener("click", async (event) => {
+    if (!state.listChannel.nextCursor) return;
+    event.currentTarget.disabled = true;
+    await refreshList({ append: true });
+  });
   async function copyText(value) {
     try {
       await navigator.clipboard.writeText(value);

@@ -13,7 +13,7 @@ from sqlalchemy import select, text
 
 from tts_erp_v2.db.base import get_session_factory
 from tts_erp_v2.db.models.publishing import VideoPublishTask
-from tts_erp_v2.publishing.adb_device import AdbDevice
+from tts_erp_v2.publishing.adb_device import AdbDevice, DeviceLocked, DeviceUnavailable
 from tts_erp_v2.publishing.artemis_client import ArtemisClient
 from tts_erp_v2.publishing.dispatcher import (
     PublishDependencies,
@@ -59,6 +59,7 @@ async def run() -> None:
             session_factory,
             instance_id,
             float(os.environ.get("PUBLISH_WORKER_HEARTBEAT_SECONDS", "5")),
+            deps,
         ),
         name="publish-heartbeat",
     )
@@ -76,11 +77,53 @@ async def run() -> None:
 
 
 async def _heartbeat_loop(
-    session_factory, instance_id: str, interval_seconds: float
+    session_factory,
+    instance_id: str,
+    interval_seconds: float,
+    deps: PublishDependencies,
 ) -> None:
     while True:
-        await asyncio.to_thread(_write_heartbeat, session_factory, instance_id, "ready")
+        device_status, device_message = await _probe_device_readiness(deps)
+        await asyncio.to_thread(
+            _write_heartbeat,
+            session_factory,
+            instance_id,
+            "ready",
+            device_status,
+            device_message,
+        )
         await asyncio.sleep(interval_seconds)
+
+
+async def _probe_device_readiness(
+    deps: PublishDependencies,
+) -> tuple[str, str]:
+    serial = os.environ.get("ARTEMIS_DEVICE_SERIAL", "").strip()
+    if not serial:
+        return "unknown", "未配置设备序列号"
+    try:
+        await deps.adb.check_device(serial)
+    except DeviceLocked:
+        return "locked", "设备在线但仍处于锁屏状态"
+    except DeviceUnavailable:
+        return "offline", "设备离线或 ADB 探测失败"
+    except Exception:  # noqa: BLE001 - readiness text never persists raw diagnostics
+        return "unknown", "设备探测返回未知错误"
+
+    def is_busy() -> bool:
+        with deps.session_factory() as session:
+            return (
+                session.scalar(
+                    select(VideoPublishTask.id)
+                    .where(VideoPublishTask.status == "running")
+                    .limit(1)
+                )
+                is not None
+            )
+
+    if await asyncio.to_thread(is_busy):
+        return "busy", "设备在线且已解锁，当前正在执行发布或核验"
+    return "ready", "设备在线、已解锁且当前空闲"
 
 
 def _cleanup_orphan_spool(session_factory, spool_dir: Path) -> int:
@@ -109,16 +152,27 @@ def _cleanup_orphan_spool(session_factory, spool_dir: Path) -> int:
     return scheduled
 
 
-def _write_heartbeat(session_factory, instance_id: str, state: str) -> None:
+def _write_heartbeat(
+    session_factory,
+    instance_id: str,
+    state: str,
+    device_status: str = "unknown",
+    device_message: str | None = None,
+) -> None:
     with session_factory() as session:
         session.execute(
             text(
                 """
             INSERT INTO publishing.worker_heartbeats
-              (instance_id, hostname, pid, status, started_at, heartbeat_at)
-            VALUES (:id, :host, :pid, :status, clock_timestamp(), clock_timestamp())
+              (instance_id, hostname, pid, status, device_status, device_message,
+               started_at, heartbeat_at)
+            VALUES (:id, :host, :pid, :status, :device_status, :device_message,
+                    clock_timestamp(), clock_timestamp())
             ON CONFLICT (instance_id) DO UPDATE SET
-              status = EXCLUDED.status, heartbeat_at = EXCLUDED.heartbeat_at,
+              status = EXCLUDED.status,
+              device_status = EXCLUDED.device_status,
+              device_message = EXCLUDED.device_message,
+              heartbeat_at = EXCLUDED.heartbeat_at,
               updated_at = now()
         """
             ),
@@ -127,6 +181,8 @@ def _write_heartbeat(session_factory, instance_id: str, state: str) -> None:
                 "host": socket.gethostname(),
                 "pid": os.getpid(),
                 "status": state,
+                "device_status": device_status,
+                "device_message": device_message,
             },
         )
         session.commit()

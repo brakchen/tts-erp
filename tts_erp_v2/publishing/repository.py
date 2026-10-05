@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from tts_erp_v2.db.models.publishing import VideoPublishAttempt, VideoPublishTask
+from tts_erp_v2.publishing.diagnostics import sanitize_artemis_output, sanitize_text
 from tts_erp_v2.publishing.domain import (
     AttemptKind,
     AttemptStatus,
@@ -55,9 +56,7 @@ class AttemptObservation:
     steps_count: int | None = None
     final_publish_observed: bool = False
     same_session_resubmitted: bool = False
-    sanitized_output: dict[str, Any] | list[Any] | str | int | float | bool | None = (
-        None
-    )
+    sanitized_output: dict[str, Any] | None = None
     sanitized_error: str | None = None
     submitted: bool = False
 
@@ -104,6 +103,7 @@ class OperationalFailure:
     code: str
     max_attempts: int
     retry_stage: str = TaskStage.QUEUED.value
+    message: str | None = None
 
 
 type PublishTransitionCommand = (
@@ -182,6 +182,13 @@ def _stage_values(task: VideoPublishTask, stage: str, now: datetime) -> dict[str
     }
 
 
+def _has_outstanding_cleanup(task: VideoPublishTask) -> bool:
+    return any(
+        getattr(task, f"{name}_cleanup_status") in {"pending", "failed"}
+        for name in ("device", "spool", "object")
+    )
+
+
 def _cleanup_pending_values(
     task: VideoPublishTask,
     now: datetime,
@@ -213,8 +220,12 @@ def _attempt_terminal_values(
             "cancelled": AttemptStatus.CANCELLED.value,
             "canceled": AttemptStatus.CANCELLED.value,
         }.get(status, AttemptStatus.FAILED.value),
-        "artemis_output": observation.sanitized_output,
-        "artemis_error": observation.sanitized_error,
+        "artemis_output": sanitize_artemis_output(observation.sanitized_output),
+        "artemis_error": (
+            sanitize_text(observation.sanitized_error)
+            if observation.sanitized_error
+            else None
+        ),
         "steps_count": observation.steps_count,
         "finished_at": now,
         "last_polled_at": now,
@@ -227,7 +238,7 @@ def _new_publish_attempt(
     now: datetime,
     max_attempts: int,
 ) -> VideoPublishAttempt:
-    if task.attempt_count >= max_attempts:
+    if task.publish_budget_used >= max_attempts:
         raise ValueError("RETRY_BUDGET_EXHAUSTED")
     latest = (
         session.scalar(
@@ -301,8 +312,11 @@ def _safe_retry_values(
     max_attempts: int,
     retry_stage: str,
     attempt_count: int | None = None,
+    message: str | None = None,
 ) -> dict[str, Any]:
-    consumed_attempts = task.attempt_count if attempt_count is None else attempt_count
+    consumed_attempts = (
+        task.publish_budget_used if attempt_count is None else attempt_count
+    )
     terminal = consumed_attempts >= max_attempts
     cleanup_gate = task.device_path is not None and task.stage in {
         TaskStage.STAGING_DEVICE.value,
@@ -312,8 +326,8 @@ def _safe_retry_values(
         TaskStage.CLEANING.value,
     }
     values: dict[str, Any] = {
-        "last_error_code": code[:100],
-        "last_error_message": code[:500],
+        "last_error_code": sanitize_text(code)[:100],
+        "last_error_message": sanitize_text(message or code),
         "lease_owner": None,
         "lease_expires_at": None,
         "heartbeat_at": None,
@@ -413,7 +427,10 @@ def commit_publish_transition(
                 )
             )
             if creating_publish:
-                task_values["attempt_count"] = task.attempt_count + 1
+                task_values.update(
+                    attempt_count=task.attempt_count + 1,
+                    publish_budget_used=task.publish_budget_used + 1,
+                )
             else:
                 assert attempt is not None
                 attempt_values = {
@@ -445,28 +462,44 @@ def commit_publish_transition(
         elif isinstance(command, AdmissionRejected):
             if attempt is None:
                 raise LeaseLost(token.task_id)
+            code = sanitize_text(command.code)[:100]
             attempt_values = {
                 "status": AttemptStatus.REJECTED.value,
-                "retry_classification": command.code.lower(),
-                "retry_safe": True,
-                "artemis_error": command.code[:2000],
+                "retry_classification": code.lower(),
+                "retry_safe": attempt.kind == AttemptKind.PUBLISH.value,
+                "artemis_error": code,
                 "finished_at": now,
                 "last_polled_at": now,
             }
-            refunded_attempts = task.attempt_count
-            if attempt.kind == AttemptKind.PUBLISH.value:
-                refunded_attempts = max(0, task.attempt_count - 1)
-                task_values["attempt_count"] = refunded_attempts
-            task_values.update(
-                _safe_retry_values(
-                    task,
-                    now,
-                    code=command.code,
-                    max_attempts=command.max_attempts,
-                    retry_stage=TaskStage.WAITING_DEVICE.value,
-                    attempt_count=refunded_attempts,
+            if attempt.kind == AttemptKind.VERIFY.value:
+                task_values.update(
+                    status=TaskStatus.NEEDS_REVIEW.value,
+                    cleanup_intent=(
+                        CleanupIntent.PRESERVE_STATE.value
+                        if _has_outstanding_cleanup(task)
+                        else CleanupIntent.NONE.value
+                    ),
+                    last_error_code="VERIFY_ADMISSION_REJECTED",
+                    last_error_message=code,
+                    completed_at=now,
+                    lease_owner=None,
+                    lease_expires_at=None,
+                    heartbeat_at=None,
                 )
-            )
+                task_values.update(_stage_values(task, TaskStage.DONE.value, now))
+            else:
+                refunded_budget = max(0, task.publish_budget_used - 1)
+                task_values["publish_budget_used"] = refunded_budget
+                task_values.update(
+                    _safe_retry_values(
+                        task,
+                        now,
+                        code=code,
+                        max_attempts=command.max_attempts,
+                        retry_stage=TaskStage.WAITING_DEVICE.value,
+                        attempt_count=refunded_budget,
+                    )
+                )
         elif isinstance(command, OperationalFailure):
             if command.action == "safe_retry":
                 task_values.update(
@@ -476,6 +509,7 @@ def commit_publish_transition(
                         code=command.code,
                         max_attempts=command.max_attempts,
                         retry_stage=command.retry_stage,
+                        message=command.message,
                     )
                 )
             else:
@@ -487,26 +521,21 @@ def commit_publish_transition(
                     ),
                     cleanup_intent=(
                         CleanupIntent.PRESERVE_STATE.value
-                        if task.device_path
+                        if _has_outstanding_cleanup(task)
                         else CleanupIntent.NONE.value
                     ),
                     last_error_code=(
-                        command.code
+                        sanitize_text(command.code)[:100]
                         if command.action == "failed"
                         else "UNEXPECTED_WORKER_FAILURE"
                     ),
-                    last_error_message=command.code[:500],
+                    last_error_message=sanitize_text(command.message or command.code),
                     completed_at=now,
                     lease_owner=None,
                     lease_expires_at=None,
                     heartbeat_at=None,
                 )
                 task_values.update(_stage_values(task, TaskStage.DONE.value, now))
-                if task.device_path:
-                    task_values.update(
-                        device_cleanup_status="pending",
-                        device_cleanup_next_attempt_at=now,
-                    )
         else:
             observation = (
                 command.observation if isinstance(command, ObserveAttempt) else None
@@ -558,7 +587,13 @@ def commit_publish_transition(
                 attempt_values = _attempt_terminal_values(observation, now)
                 attempt_values.update(common_attempt)
                 if attempt.kind == AttemptKind.VERIFY.value:
-                    verdict = observation.verdict or "inconclusive"
+                    verdict = (
+                        observation.verdict
+                        if observation.status == AttemptStatus.SUCCESS.value
+                        and observation.verdict
+                        in {"published", "not_published", "inconclusive"}
+                        else "inconclusive"
+                    )
                     if verdict == "published":
                         task_values.update(
                             status=TaskStatus.SUCCEEDED.value,
@@ -580,7 +615,7 @@ def commit_publish_transition(
                         )
                         follow_up = "claim_device_cleanup"
                     elif verdict == "not_published":
-                        terminal = task.attempt_count >= max_attempts
+                        terminal = task.publish_budget_used >= max_attempts
                         if task.device_path:
                             task_values.update(
                                 status=(
@@ -644,9 +679,11 @@ def commit_publish_transition(
                             status=TaskStatus.NEEDS_REVIEW.value,
                             cleanup_intent=(
                                 CleanupIntent.PRESERVE_STATE.value
-                                if task.device_path
+                                if _has_outstanding_cleanup(task)
                                 else CleanupIntent.NONE.value
                             ),
+                            last_error_code="VERIFY_INCONCLUSIVE",
+                            last_error_message="Verification did not confirm publication",
                             completed_at=now,
                             lease_owner=None,
                             lease_expires_at=None,
@@ -655,11 +692,6 @@ def commit_publish_transition(
                         task_values.update(
                             _stage_values(task, TaskStage.DONE.value, now)
                         )
-                        if task.device_path:
-                            task_values.update(
-                                device_cleanup_status="pending",
-                                device_cleanup_next_attempt_at=now,
-                            )
                 elif observation.status == "success":
                     task_values.update(
                         status=TaskStatus.SUCCEEDED.value,
@@ -993,7 +1025,13 @@ def finish_cleanup_work(
             status = "failed" if error else "succeeded"
             projected[name] = status
             values[f"{name}_cleanup_status"] = status
-            values[f"{name}_cleanup_error"] = error
+            if error:
+                safe_error = sanitize_text(error)
+                if not safe_error.startswith("CLEANUP_"):
+                    safe_error = f"CLEANUP_{name.upper()}_FAILED: {safe_error}"
+                values[f"{name}_cleanup_error"] = safe_error[:2000]
+            else:
+                values[f"{name}_cleanup_error"] = None
             if error:
                 attempts = getattr(task, f"{name}_cleanup_attempts") + 1
                 values[f"{name}_cleanup_attempts"] = attempts
@@ -1194,7 +1232,7 @@ def claim_one(
             VideoPublishTask.cleanup_intent == CleanupIntent.NONE.value,
             (VideoPublishTask.next_attempt_at.is_(None))
             | (VideoPublishTask.next_attempt_at <= now),
-            VideoPublishTask.attempt_count < max_attempts,
+            VideoPublishTask.publish_budget_used < max_attempts,
         )
         .order_by(VideoPublishTask.queued_at, VideoPublishTask.id)
         .with_for_update(skip_locked=True)
@@ -1244,9 +1282,11 @@ def request_verification(session: Session, task_id: UUID) -> VideoPublishTask:
     now = _db_now(session)
     task.status = TaskStatus.RUNNING.value
     set_task_stage(task, TaskStage.VERIFYING, now=now)
-    task.lease_owner = "api-verification"
-    task.lease_expires_at = now + timedelta(seconds=30)
-    task.heartbeat_at = now
+    # Reserving the global running row prevents another publish claim. Leaving
+    # the execution lease empty lets the real worker claim this verify now.
+    task.lease_owner = None
+    task.lease_expires_at = None
+    task.heartbeat_at = None
     _new_verify_attempt(session, task, related)
     task.row_version += 1
     return task

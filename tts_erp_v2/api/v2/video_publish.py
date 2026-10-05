@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import os
@@ -11,7 +13,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import false, select, text
+from sqlalchemy import and_, false, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -22,6 +24,7 @@ from tts_erp_v2.api.deps import (
     require_destructive_guard,
     require_role_at_least,
 )
+from tts_erp_v2.api.v2._common import request_id
 from tts_erp_v2.db.models.publishing import (
     PublishWorkerHeartbeat,
     VideoPublishAttempt,
@@ -68,7 +71,12 @@ def _csrf(request: Request) -> None:
     ):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "cookie-authed POST must set header X-Requested-With: tts-erp",
+            _error_detail(
+                request,
+                "CSRF_HEADER_REQUIRED",
+                "cookie-authed POST must set header X-Requested-With: tts-erp",
+                retryable=False,
+            ),
         )
 
 
@@ -113,10 +121,17 @@ def _snapshot(
     detail: bool = False,
     diagnostics: bool = False,
     expose_client_request_id: bool = False,
+    summary_attempts: list[VideoPublishAttempt] | None = None,
+    publish_attempt_count: int | None = None,
+    verify_attempt_count: int | None = None,
 ) -> dict:
-    attempts = sorted(task.attempts, key=lambda a: a.sequence_no, reverse=True)
+    attempts = sorted(
+        summary_attempts if summary_attempts is not None else task.attempts,
+        key=lambda a: a.sequence_no,
+        reverse=True,
+    )
     latest = attempts[0] if attempts else None
-    actions = allowed_actions(task)
+    actions = allowed_actions(task, latest_attempt=latest)
     operational_stage = (
         "cleaning"
         if task.device_cleanup_status in {"pending", "failed"}
@@ -142,10 +157,23 @@ def _snapshot(
         ),
         "latestArtemisSessionId": str(latest.artemis_session_id) if latest else None,
         "attemptCount": task.attempt_count,
-        "publishAttemptCount": sum(a.kind == "publish" for a in attempts),
-        "verifyAttemptCount": sum(a.kind == "verify" for a in attempts),
-        "lastErrorCode": task.last_error_code,
-        "lastErrorMessage": task.last_error_message,
+        "retryBudgetUsed": task.publish_budget_used,
+        "publishAttemptCount": (
+            publish_attempt_count
+            if publish_attempt_count is not None
+            else sum(a.kind == "publish" for a in attempts)
+        ),
+        "verifyAttemptCount": (
+            verify_attempt_count
+            if verify_attempt_count is not None
+            else sum(a.kind == "verify" for a in attempts)
+        ),
+        "lastErrorCode": (
+            sanitize_text(task.last_error_code)[:100] if task.last_error_code else None
+        ),
+        "lastErrorMessage": (
+            sanitize_text(task.last_error_message) if task.last_error_message else None
+        ),
         "createdAt": task.created_at,
         "updatedAt": task.updated_at,
         "createdBy": (
@@ -187,15 +215,21 @@ def _snapshot(
                 "cleanup": {
                     "device": {
                         "status": task.device_cleanup_status,
-                        "error": task.device_cleanup_error,
+                        "error": sanitize_text(task.device_cleanup_error)
+                        if task.device_cleanup_error
+                        else None,
                     },
                     "spool": {
                         "status": task.spool_cleanup_status,
-                        "error": task.spool_cleanup_error,
+                        "error": sanitize_text(task.spool_cleanup_error)
+                        if task.spool_cleanup_error
+                        else None,
                     },
                     "object": {
                         "status": task.object_cleanup_status,
-                        "error": task.object_cleanup_error,
+                        "error": sanitize_text(task.object_cleanup_error)
+                        if task.object_cleanup_error
+                        else None,
                     },
                 },
             }
@@ -242,29 +276,150 @@ def _owns_task(task: VideoPublishTask, request: Request) -> bool:
 def _task_for_actor(
     session: Session, task_id: UUID, request: Request, *, lock: bool = False
 ) -> VideoPublishTask:
-    task = _task(session, task_id, lock=True) if lock else _task(session, task_id)
+    try:
+        task = _task(session, task_id, lock=True) if lock else _task(session, task_id)
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_404_NOT_FOUND:
+            raise
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            _error_detail(request, "TASK_NOT_FOUND", "TASK_NOT_FOUND", retryable=False),
+        ) from exc
     if not _owns_task(task, request):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "TASK_NOT_FOUND")
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            _error_detail(request, "TASK_NOT_FOUND", "TASK_NOT_FOUND", retryable=False),
+        )
     return task
 
 
-def _action_conflict(task: VideoPublishTask, code: str, message: str) -> dict:
-    return {
+def _error_detail(
+    request: Request,
+    code: str,
+    message: str,
+    *,
+    retryable: bool,
+    task: VideoPublishTask | None = None,
+) -> dict:
+    detail = {
         "code": code,
-        "message": message,
-        "rowVersion": task.row_version,
-        "allowedActions": [a.value for a in allowed_actions(task)],
+        "message": sanitize_text(message),
+        "retryable": retryable,
+        "requestId": request_id(request),
     }
+    if task is not None:
+        detail.update(
+            rowVersion=task.row_version,
+            allowedActions=[a.value for a in allowed_actions(task)],
+        )
+    return detail
 
 
-def _require_row_version(task: VideoPublishTask, expected: int | None) -> None:
+def _action_conflict(
+    request: Request,
+    task: VideoPublishTask,
+    code: str,
+    message: str,
+    *,
+    retryable: bool = False,
+) -> dict:
+    return _error_detail(request, code, message, retryable=retryable, task=task)
+
+
+def _require_row_version(
+    request: Request, task: VideoPublishTask, expected: int | None
+) -> None:
     if expected is None or expected != task.row_version:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             _action_conflict(
-                task, "TASK_VERSION_CONFLICT", "任务已更新，请刷新后重试。"
+                request,
+                task,
+                "TASK_VERSION_CONFLICT",
+                "任务已更新，请刷新后重试。",
+                retryable=True,
             ),
         )
+
+
+def _encode_cursor(created_at: datetime, task_id: int) -> str:
+    raw = json.dumps(
+        {"createdAt": created_at.isoformat(), "id": task_id},
+        separators=(",", ":"),
+    ).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _decode_cursor(value: str) -> tuple[datetime, int]:
+    try:
+        padded = value + "=" * (-len(value) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded).decode())
+        created_at = datetime.fromisoformat(payload["createdAt"])
+        task_id = int(payload["id"])
+        if created_at.tzinfo is None or task_id <= 0:
+            raise ValueError
+        return created_at, task_id
+    except (
+        ValueError,
+        TypeError,
+        KeyError,
+        json.JSONDecodeError,
+        binascii.Error,
+    ) as exc:
+        raise ValueError("INVALID_CURSOR") from exc
+
+
+def _attempt_summaries(
+    session: Session, tasks: list[VideoPublishTask]
+) -> dict[int, tuple[list[VideoPublishAttempt], int, int]]:
+    task_ids = [task.id for task in tasks]
+    if not task_ids:
+        return {}
+    counts = {
+        row.task_id: (int(row.publish_count), int(row.verify_count))
+        for row in session.execute(
+            select(
+                VideoPublishAttempt.task_id,
+                func.count()
+                .filter(VideoPublishAttempt.kind == "publish")
+                .label("publish_count"),
+                func.count()
+                .filter(VideoPublishAttempt.kind == "verify")
+                .label("verify_count"),
+            )
+            .where(VideoPublishAttempt.task_id.in_(task_ids))
+            .group_by(VideoPublishAttempt.task_id)
+        )
+    }
+    latest_sequence = (
+        select(
+            VideoPublishAttempt.task_id.label("task_id"),
+            func.max(VideoPublishAttempt.sequence_no).label("sequence_no"),
+        )
+        .where(VideoPublishAttempt.task_id.in_(task_ids))
+        .group_by(VideoPublishAttempt.task_id)
+        .subquery()
+    )
+    latest = {
+        attempt.task_id: attempt
+        for attempt in session.scalars(
+            select(VideoPublishAttempt).join(
+                latest_sequence,
+                and_(
+                    VideoPublishAttempt.task_id == latest_sequence.c.task_id,
+                    VideoPublishAttempt.sequence_no == latest_sequence.c.sequence_no,
+                ),
+            )
+        )
+    }
+    return {
+        task_id: (
+            [latest[task_id]] if task_id in latest else [],
+            counts.get(task_id, (0, 0))[0],
+            counts.get(task_id, (0, 0))[1],
+        )
+        for task_id in task_ids
+    }
 
 
 def _etag(payload: object) -> str:
@@ -298,14 +453,27 @@ def config(request: Request, session: Annotated[Session, Depends(get_session)]) 
         .limit(1)
     )
     heartbeat = heartbeat_row.heartbeat_at if heartbeat_row else None
+    configured_serial = bool(os.environ.get("ARTEMIS_DEVICE_SERIAL"))
+    device_status = (
+        heartbeat_row.device_status
+        if heartbeat_row is not None and configured_serial
+        else "unknown"
+    )
+    device_message = (
+        sanitize_text(heartbeat_row.device_message)
+        if heartbeat_row is not None and heartbeat_row.device_message
+        else "未配置设备序列号"
+        if not configured_serial
+        else "Worker 未报告近期设备探测结果"
+    )
     # Config deliberately does not expose credentials or signed URLs.
     grant = request.scope.get("access_grant")
     actor_can_write = bool(
         grant is not None
         and getattr(grant, "allows", lambda _role: False)(Role.READWRITE)
     ) or request.scope.get("api_key_role") in {"readwrite", "admin"}
-    can_write = bool(os.environ.get("ARTEMIS_DEVICE_SERIAL")) and bool(
-        heartbeat and actor_can_write
+    can_write = bool(
+        heartbeat and actor_can_write and device_status in {"ready", "busy"}
     )
     return {
         "acceptedContentTypes": ["video/mp4"],
@@ -329,20 +497,8 @@ def config(request: Request, session: Annotated[Session, Depends(get_session)]) 
             "lastHeartbeatAt": heartbeat,
         },
         "device": {
-            "status": (
-                "configured"
-                if heartbeat and os.environ.get("ARTEMIS_DEVICE_SERIAL")
-                else "unconfigured"
-                if not os.environ.get("ARTEMIS_DEVICE_SERIAL")
-                else "unavailable"
-            ),
-            "message": (
-                "Worker 心跳正常；设备已配置，领取任务时检查在线与解锁状态"
-                if heartbeat and os.environ.get("ARTEMIS_DEVICE_SERIAL")
-                else "未配置设备序列号"
-                if not os.environ.get("ARTEMIS_DEVICE_SERIAL")
-                else "Worker 不可用"
-            ),
+            "status": device_status,
+            "message": device_message,
         },
         "artemis": {
             "profile": os.environ.get("ARTEMIS_PROFILE", "pro"),
@@ -390,7 +546,10 @@ def create_task(
             store,
         )
     except PermissionError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "TASK_NOT_FOUND") from exc
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            _error_detail(request, "TASK_NOT_FOUND", "TASK_NOT_FOUND", retryable=False),
+        ) from exc
     except ValueError as exc:
         code = str(exc)
         error_status = (
@@ -398,11 +557,17 @@ def create_task(
             if code == "VIDEO_TOO_LARGE"
             else status.HTTP_409_CONFLICT
             if code == "IDEMPOTENCY_PAYLOAD_MISMATCH"
-            else status.HTTP_422_UNPROCESSABLE_ENTITY
+            else status.HTTP_422_UNPROCESSABLE_CONTENT
         )
         raise HTTPException(
             error_status,
-            {"code": code, "message": code},
+            _error_detail(
+                request,
+                code,
+                code,
+                retryable=code
+                in {"VIDEO_TOO_LARGE", "CAPTION_REQUIRED", "CAPTION_TOO_LONG"},
+            ),
         ) from exc
     response.status_code = status.HTTP_200_OK if replay else status.HTTP_201_CREATED
     data = _snapshot(task, expose_client_request_id=True)
@@ -435,7 +600,7 @@ def refresh_upload_url(
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             _action_conflict(
-                task, "TASK_ACTION_NOT_ALLOWED", "TASK_ACTION_NOT_ALLOWED"
+                request, task, "TASK_ACTION_NOT_ALLOWED", "TASK_ACTION_NOT_ALLOWED"
             ),
         )
     return {
@@ -460,12 +625,15 @@ def confirm(
     require_role_at_least(request, "readwrite")
     _csrf(request)
     task_snapshot = _task_for_actor(session, task_id, request)
-    _require_row_version(task_snapshot, body.row_version)
+    _require_row_version(request, task_snapshot, body.row_version)
     if task_snapshot.stage != "awaiting_upload":
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             _action_conflict(
-                task_snapshot, "TASK_ACTION_NOT_ALLOWED", "TASK_ACTION_NOT_ALLOWED"
+                request,
+                task_snapshot,
+                "TASK_ACTION_NOT_ALLOWED",
+                "TASK_ACTION_NOT_ALLOWED",
             ),
         )
     try:
@@ -476,16 +644,44 @@ def confirm(
             expected_version=task_snapshot.row_version,
         )
     except LookupError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            _error_detail(request, "TASK_NOT_FOUND", "TASK_NOT_FOUND", retryable=False),
+        ) from exc
     except TaskConflict as exc:
-        conflict = _action_conflict(exc.task, exc.code, exc.code)
+        conflict = _action_conflict(
+            request, exc.task, exc.code, exc.code, retryable=True
+        )
         session.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, conflict) from exc
     except ValueError as exc:
         code = str(exc)
+        error_status = (
+            status.HTTP_503_SERVICE_UNAVAILABLE
+            if code == "OBJECT_STORE_UNAVAILABLE"
+            else status.HTTP_409_CONFLICT
+            if code in {"TASK_ACTION_NOT_ALLOWED", "TASK_VERSION_CONFLICT"}
+            else status.HTTP_422_UNPROCESSABLE_CONTENT
+        )
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            {"code": code, "message": code},
+            error_status,
+            _error_detail(
+                request,
+                code,
+                code,
+                retryable=code
+                in {
+                    "OBJECT_STORE_UNAVAILABLE",
+                    "UPLOAD_NOT_FOUND",
+                    "UPLOAD_SIZE_MISMATCH",
+                    "UPLOAD_MIME_MISSING",
+                    "UPLOAD_MIME_MISMATCH",
+                    "TASK_VERSION_CONFLICT",
+                },
+                task=task_snapshot
+                if error_status == status.HTTP_409_CONFLICT
+                else None,
+            ),
         ) from exc
     return _snapshot(task, expose_client_request_id=True)
 
@@ -550,7 +746,6 @@ def current(
                 & VideoPublishTask.device_cleanup_status.in_(["pending", "failed"])
             )
         )
-        .options(selectinload(VideoPublishTask.attempts))
         .order_by(VideoPublishTask.id)
         .limit(1)
     )
@@ -559,8 +754,22 @@ def current(
         current_query = current_query.where(owner_clause)
     task = session.scalar(current_query)
     poll_state = _poll_state(session)
+    summary = _attempt_summaries(session, [task]) if task else {}
+    attempts, publish_count, verify_count = summary.get(
+        task.id if task else 0, ([], 0, 0)
+    )
     payload = {
-        "task": _snapshot(task, expose_client_request_id=True) if task else None,
+        "task": (
+            _snapshot(
+                task,
+                expose_client_request_id=True,
+                summary_attempts=attempts,
+                publish_attempt_count=publish_count,
+                verify_attempt_count=verify_count,
+            )
+            if task
+            else None
+        ),
         "pollState": poll_state,
         "suggestedPollSeconds": 2 if task else 30,
         "serverTime": datetime.now(UTC),
@@ -576,13 +785,10 @@ def list_tasks(
     response: Response,
     status_filter: str | None = Query(default=None, alias="status"),
     limit: int = Query(default=30, ge=1, le=100),
-    cursor: int | None = Query(default=None),
+    cursor: str | None = Query(default=None),
 ) -> dict | Response:
-    query = (
-        select(VideoPublishTask)
-        .options(selectinload(VideoPublishTask.attempts))
-        .order_by(VideoPublishTask.created_at.desc(), VideoPublishTask.id.desc())
-        .limit(limit)
+    query = select(VideoPublishTask).order_by(
+        VideoPublishTask.created_at.desc(), VideoPublishTask.id.desc()
     )
     owner_clause = _owner_clause(request)
     if owner_clause is not None:
@@ -590,12 +796,48 @@ def list_tasks(
     if status_filter:
         query = query.where(VideoPublishTask.status == status_filter)
     if cursor:
-        query = query.where(VideoPublishTask.id < cursor)
-    rows = list(session.scalars(query))
+        try:
+            cursor_created_at, cursor_id = _decode_cursor(cursor)
+        except ValueError as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                _error_detail(
+                    request,
+                    "INVALID_CURSOR",
+                    "INVALID_CURSOR",
+                    retryable=False,
+                ),
+            ) from exc
+        query = query.where(
+            or_(
+                VideoPublishTask.created_at < cursor_created_at,
+                and_(
+                    VideoPublishTask.created_at == cursor_created_at,
+                    VideoPublishTask.id < cursor_id,
+                ),
+            )
+        )
+    fetched = list(session.scalars(query.limit(limit + 1)))
+    has_more = len(fetched) > limit
+    rows = fetched[:limit]
+    summaries = _attempt_summaries(session, rows)
     payload = {
-        "items": [_snapshot(t, expose_client_request_id=True) for t in rows],
+        "items": [
+            _snapshot(
+                task,
+                expose_client_request_id=True,
+                summary_attempts=summaries[task.id][0],
+                publish_attempt_count=summaries[task.id][1],
+                verify_attempt_count=summaries[task.id][2],
+            )
+            for task in rows
+        ],
         "pollState": _poll_state(session),
-        "nextCursor": rows[-1].id if len(rows) == limit else None,
+        "nextCursor": (
+            _encode_cursor(rows[-1].created_at, rows[-1].id)
+            if has_more and rows
+            else None
+        ),
         "totalApprox": len(rows),
         "serverTime": datetime.now(UTC),
     }
@@ -635,7 +877,7 @@ def cancel(
     _csrf(request)
     require_destructive_guard(request, op_name="video_publish.cancel_object")
     task_snapshot = _task_for_actor(session, task_id, request, lock=True)
-    _require_row_version(task_snapshot, body.row_version)
+    _require_row_version(request, task_snapshot, body.row_version)
     try:
         return _snapshot(
             cancel_task(session, task_id, store),
@@ -643,11 +885,14 @@ def cancel(
             expose_client_request_id=True,
         )
     except LookupError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            _error_detail(request, "TASK_NOT_FOUND", "TASK_NOT_FOUND", retryable=False),
+        ) from exc
     except ValueError as exc:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            _action_conflict(task_snapshot, str(exc), str(exc)),
+            _action_conflict(request, task_snapshot, str(exc), str(exc)),
         ) from exc
 
 
@@ -662,20 +907,29 @@ def retry(
     require_role_at_least(request, "readwrite")
     _csrf(request)
     task_snapshot = _task_for_actor(session, task_id, request, lock=True)
-    _require_row_version(task_snapshot, body.row_version)
+    _require_row_version(request, task_snapshot, body.row_version)
     try:
         return _snapshot(
             retry_task(session, task_id, store), expose_client_request_id=True
         )
     except LookupError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            _error_detail(request, "TASK_NOT_FOUND", "TASK_NOT_FOUND", retryable=False),
+        ) from exc
     except ValueError as exc:
         code = str(exc)
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE
             if code == "OBJECT_STORE_UNAVAILABLE"
             else status.HTTP_409_CONFLICT,
-            _action_conflict(task_snapshot, code, code),
+            _action_conflict(
+                request,
+                task_snapshot,
+                code,
+                code,
+                retryable=code == "OBJECT_STORE_UNAVAILABLE",
+            ),
         ) from exc
 
 
@@ -689,17 +943,20 @@ def replace_upload_task(
     require_role_at_least(request, "readwrite")
     _csrf(request)
     task_snapshot = _task_for_actor(session, task_id, request, lock=True)
-    _require_row_version(task_snapshot, body.row_version)
+    _require_row_version(request, task_snapshot, body.row_version)
     try:
         return _snapshot(
             replace_upload(session, task_id), detail=True, expose_client_request_id=True
         )
     except LookupError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            _error_detail(request, "TASK_NOT_FOUND", "TASK_NOT_FOUND", retryable=False),
+        ) from exc
     except ValueError as exc:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            _action_conflict(task_snapshot, str(exc), str(exc)),
+            _action_conflict(request, task_snapshot, str(exc), str(exc)),
         ) from exc
 
 
@@ -714,23 +971,27 @@ def verify(
     _csrf(request)
     _lock_publish_slot(session)
     task_snapshot = _task_for_actor(session, task_id, request, lock=True)
-    _require_row_version(task_snapshot, body.row_version)
+    _require_row_version(request, task_snapshot, body.row_version)
     try:
         task = request_verification(session, task_id)
         session.commit()
         return _snapshot(task, detail=True, expose_client_request_id=True)
     except LookupError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            _error_detail(request, "TASK_NOT_FOUND", "TASK_NOT_FOUND", retryable=False),
+        ) from exc
     except ValueError as exc:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            _action_conflict(task_snapshot, str(exc), str(exc)),
+            _action_conflict(request, task_snapshot, str(exc), str(exc)),
         ) from exc
     except IntegrityError as exc:
         session.rollback()
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             _action_conflict(
+                request,
                 task_snapshot,
                 "VERIFY_ALREADY_RUNNING",
                 "A verification attempt is already running",
@@ -749,13 +1010,13 @@ def retry_cleanup(
     _csrf(request)
     require_destructive_guard(request, op_name="video_publish.retry_cleanup")
     task = _task_for_actor(session, task_id, request, lock=True)
-    _require_row_version(task, body.row_version)
+    _require_row_version(request, task, body.row_version)
     try:
         retry_cleanup_resources(session, task, resources=body.resources)
     except ValueError as exc:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            _action_conflict(task, str(exc), str(exc)),
+            _action_conflict(request, task, str(exc), str(exc)),
         ) from exc
     session.commit()
     return _snapshot(

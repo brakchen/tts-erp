@@ -416,18 +416,20 @@ mutations must send `X-Requested-With: tts-erp`; API-key clients are exempt.
 | Endpoint | Role | Notes |
 | --- | --- | --- |
 | `GET /v2/pages/video-publish` | page:video-publish | Browser publishing workbench; page access follows the authenticated page permission. |
-| `GET /v2/video-publish/config` | readonly + page:video-publish | Limits and masked device/worker readiness; no credentials or signed URLs. API keys are exempt from page permission points. |
+| `GET /v2/video-publish/config` | readonly + page:video-publish | Limits, masked target, Worker liveness, and server-owned ADB probe state (`ready|busy|offline|locked|unknown`); no credentials or signed URLs. API keys are exempt from page permission points. |
 | `GET /v2/video-publish/tasks/current` | readonly + page:video-publish | Current owner-visible task plus filter-independent polling summary. API keys are exempt from page permission points. |
-| `GET /v2/video-publish/tasks` | readonly + page:video-publish | Owner-scoped history; `status`, `limit`, and `cursor` filters. API keys are exempt from page permission points. |
+| `GET /v2/video-publish/tasks` | readonly + page:video-publish | Owner-scoped history; `status`, `limit`, and opaque `(created_at,id)` keyset `cursor` filters. API keys are exempt from page permission points. |
 | `GET /v2/video-publish/tasks/{task_id}` | readonly + page:video-publish | Owner-scoped detail; `includeDiagnostics=true` requires admin. API keys are exempt from page permission points. |
 | `POST /v2/video-publish/tasks` | readwrite + page:video-publish | Creates an awaiting-upload task and short-lived presigned PUT ticket. API keys are exempt from page permission points. |
 | `POST /v2/video-publish/tasks/{task_id}/upload-url` | readwrite + page:video-publish | Refreshes an awaiting-upload ticket for the owner. API keys are exempt from page permission points. |
 | `POST /v2/video-publish/tasks/{task_id}/replace-upload` | readwrite + page:video-publish | Reopens a failed task whose object is confirmed absent so the owner can upload a replacement. API keys are exempt from page permission points. |
-| `POST /v2/video-publish/tasks/{task_id}/confirm-upload` | readwrite + page:video-publish | HEAD-verifies the object and queues the task. API keys are exempt from page permission points. |
+| `POST /v2/video-publish/tasks/{task_id}/confirm-upload` | readwrite + page:video-publish | HEAD-verifies existence, exact size, and explicit `video/mp4`; storage transport failures are retryable 503, while missing/size/MIME errors have distinct stable codes. API keys are exempt from page permission points. |
 | `POST /v2/video-publish/tasks/{task_id}/cancel` | readwrite + page:video-publish | Cancels an unstarted task and schedules independent object cleanup. API keys are exempt from page permission points. |
 | `POST /v2/video-publish/tasks/{task_id}/retry` | readwrite + page:video-publish | Retries only a failed, retry-safe task within its attempt budget. API keys are exempt from page permission points. |
 | `POST /v2/video-publish/tasks/{task_id}/verify` | readwrite + page:video-publish | Requests verification for an ambiguous result. API keys are exempt from page permission points. |
 | `POST /v2/video-publish/tasks/{task_id}/cleanup/retry` | readwrite + page:video-publish | Retries eligible device, spool, or object cleanup without changing business status. API keys are exempt from page permission points. |
+
+Publishing errors use `code`, `message`, `retryable`, and `requestId`. Stateful 409 responses additionally include `rowVersion` and `allowedActions`; clients must redraw actions from that response rather than infer them locally. `attemptCount`/`publishAttemptCount` are append-only created publish-attempt counts, while `retryBudgetUsed` is the independently refundable budget counter.
 
 ### SPU images (`/v2/spu-images/*`)
 
