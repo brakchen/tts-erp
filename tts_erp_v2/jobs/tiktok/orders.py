@@ -44,7 +44,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -56,6 +56,7 @@ from tts_erp_v2.db.models import (
     SyncIssue,
 )
 from tts_erp_v2.jobs.tiktok import spu_link
+from tts_erp_v2.jobs.tiktok.order_prices import persist_price_observation
 from tts_erp_v2.sync_worker.job_runner import JobResult
 
 # Upstream path (TikTok 202309 spec). Frozen string so it appears
@@ -292,6 +293,16 @@ def _to_decimal(value: Any) -> Decimal | None:
 # ─── Upserts ──────────────────────────────────────────────────────
 
 
+def incoming_order_is_stale(
+    incoming_version: datetime | None,
+    current_version: datetime | None,
+) -> bool:
+    """Return whether a payload may not replace the current order snapshot."""
+    return current_version is not None and (
+        incoming_version is None or incoming_version < current_version
+    )
+
+
 def _upsert_sales_order(
     session: Session,
     *,
@@ -307,16 +318,27 @@ def _upsert_sales_order(
     stmt = pg_insert(SalesOrder).values(**insert_values)
     update_cols = {k: insert_values[k] for k in fields}
     update_cols["raw_record_id"] = raw_record_id
+    incoming_version = fields.get("order_modify_time")
+    if incoming_version is None:
+        freshness = SalesOrder.order_modify_time.is_(None)
+    else:
+        freshness = or_(
+            SalesOrder.order_modify_time.is_(None),
+            SalesOrder.order_modify_time <= incoming_version,
+        )
     stmt = stmt.on_conflict_do_update(
         index_elements=["shop_pk", "order_id"],
         set_=update_cols,
+        where=freshness,
     )
     session.execute(stmt)
     row = session.execute(
-        select(SalesOrder).where(
+        select(SalesOrder)
+        .where(
             SalesOrder.shop_pk == shop_pk,
             SalesOrder.order_id == fields["order_id"],
         )
+        .execution_options(populate_existing=True)
     ).scalar_one()
     return row
 
@@ -460,6 +482,17 @@ def run(
             fields=fields,
             raw_record_id=raw_row.id,
         )
+        if incoming_order_is_stale(
+            fields.get("order_modify_time"), sales_order.order_modify_time
+        ):
+            _record_issue(
+                session,
+                job_name=JOB_NAME,
+                issue_type="STALE_OBSERVATION_SKIPPED",
+                external_id=order_external_id,
+                details={"reason": "older_or_missing_source_version"},
+            )
+            continue
 
         for raw_line in raw.get("line_items") or []:
             try:
@@ -492,6 +525,19 @@ def run(
                 order_pk=sales_order.id,
                 fields=line_fields,
                 raw_record_id=raw_row.id,
+            )
+            persist_price_observation(
+                session,
+                raw_line=raw_line,
+                shop_pk=account.id,
+                order_pk=sales_order.id,
+                raw_record_id=raw_row.id,
+                source_endpoint="ORDER_SEARCH",
+                source_captured_at=raw_row.captured_at,
+                source_order_version_at=fields.get("order_modify_time"),
+                parent_status=fields.get("status"),
+                parent_currency=fields.get("currency"),
+                spu_pk=line_fields.get("spu_pk"),
             )
 
         rows_inserted += 1
@@ -544,6 +590,7 @@ __all__ = [
     "JOB_NAME",
     "ParseError",
     "ProxyCall",
+    "incoming_order_is_stale",
     "UpstreamJobError",
     "run",
 ]
