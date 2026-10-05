@@ -4666,8 +4666,9 @@ def test_spu_roi_frontend_only_displays_backend_profitability() -> None:
     assert "footnotes" not in src  # 页脚区块已删（2026-10-02）
     assert 'roiAdStatus === "estimated_known_costs"' in src
     assert "ad_system_max_ad_spend" not in src  # 前端不重算，只展示后端 ROI
-    assert 'meta.currency.display) || "CNY"' in src
-    assert "全表 USD" not in src
+    assert 'meta.currency.display) || "CNY"' not in src
+    assert "全表" not in src
+    assert "fx.as_of_at" in src
     assert "0.308" not in src
     assert "盈利 v10" not in src
     assert "settledCount > 0" not in src
@@ -4764,6 +4765,7 @@ def test_spu_roi_meta_uses_live_fx_rates(api_client, readonly_key, monkeypatch):
         "cny_vnd": format(Decimal(26000) / usd_cny, "f"),
         "vnd_cny": format(usd_cny / Decimal(26000), "f"),
         "as_of": "2026-09-06",
+        "as_of_at": "2026-09-06T00:00:01+00:00",
         "snapshot_id": 999_000_001,
         "source": "fx-cache",
     }

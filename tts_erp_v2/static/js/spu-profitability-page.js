@@ -851,6 +851,25 @@
     }
   }
 
+  function renderFxFreshness(fx) {
+    var item = document.querySelector('#data-freshness [data-source="fx"]');
+    if (!item) return;
+    var timeEl = item.querySelector("time");
+    var iso = fx && fx.as_of_at;
+    item.dataset.severity = "unknown";
+    if (timeEl) {
+      timeEl.textContent = iso ? fmtFreshnessTime(iso) : "—";
+      if (iso) timeEl.setAttribute("datetime", iso);
+      else timeEl.removeAttribute("datetime");
+    }
+    if (iso) {
+      var ago = fmtAgo(iso);
+      item.setAttribute("title", ago ? "汇率快照 · " + ago : "汇率快照");
+    } else {
+      item.setAttribute("title", "尚未取得汇率快照");
+    }
+  }
+
   function fmtAgo(iso) {
     var d = new Date(iso);
     if (isNaN(d.getTime())) return "";
@@ -1052,7 +1071,7 @@
       var pager = document.querySelector("main .op-pager");
       if (summaries) summaries.hidden = true;
       if (pager) pager.hidden = true;
-      $("#sum-stamp").textContent = "";
+      renderFxFreshness(null);
     }
     tableShowPlaceholder(
       `${esc(msg)} · <a href="#" id="retry-link">重试</a>`,
@@ -1075,7 +1094,7 @@
     if (summaries) summaries.hidden = true;
     if (pager) pager.hidden = true;
     if (feeCard) feeCard.hidden = true;
-    $("#sum-stamp").textContent = "";
+    renderFxFreshness(null);
     renderEmpty(profile && profile.emptySelectionMessage);
   }
 
@@ -1341,12 +1360,7 @@
       "#sum-projected-ad-breakeven-roi",
       fmtRatio(totals.projected_ad_system_breakeven_roi),
     );
-    var rubricLabel =
-      (meta.presentation && meta.presentation.rubric_label) ||
-      meta.rubric_version ||
-      "";
-    $("#sum-stamp").textContent =
-      `全表 ${(meta.currency && meta.currency.display) || "CNY"} · 数据库汇率快照 ${meta.fx ? meta.fx.as_of : ""} · ${rubricLabel}`;
+    renderFxFreshness(meta.fx);
 
     // 表格（Tabulator）
     closeDrillPanel();

@@ -158,6 +158,7 @@ def _mock_payload(path: str) -> dict[str, Any] | list[Any]:
             "meta": {"currency": {"display": "CNY"}, "computed_at": _NOW,
                      "rubric_version": "v10", "reporting_timezone": "Asia/Ho_Chi_Minh",
                      "window": {"first_day": "2026-09-01", "last_day": "2026-09-30"},
+                     "fx": {"as_of": "2026-10-05", "as_of_at": _NOW},
                      "presentation": {"rubric_label": "盈利 v10"}},
         }
     if path.endswith("/v2/intercept/requests/stats"):
