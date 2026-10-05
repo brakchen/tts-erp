@@ -75,6 +75,24 @@ def test_projection_control_is_visible_and_switches_only_projection(browser_rend
     card = page.locator("#projection-basis-card")
     window = card.locator(".op-projection-window")
     assert window.inner_text() == "预测样本窗口：2026-07-03 ~ 2026-09-30"
+    title = card.locator(".op-counter-group-label")
+    assert title.inner_text() == "预测依据 · 预测样本窗口：2026-07-03 ~ 2026-09-30"
+    assert title.locator(".op-projection-window").count() == 1
+    assert title.evaluate(
+        """title => {
+          const window = title.querySelector('.op-projection-window');
+          const dates = title.querySelector('#projection-sample-window');
+          const reference = document.querySelector('.op-counter-group-label');
+          const properties = ['fontFamily', 'fontSize', 'fontWeight', 'color', 'letterSpacing'];
+          const sameStyle = element => properties.every(
+            property => getComputedStyle(element)[property] === getComputedStyle(reference)[property]
+          );
+          const titleText = document.createRange();
+          titleText.selectNode(title.firstChild);
+          return [title, window, dates].every(sameStyle)
+            && Math.abs(titleText.getBoundingClientRect().top - dates.getBoundingClientRect().top) < 1;
+        }"""
+    )
     assert page.locator("#projection-maturity-as-of").count() == 0
     assert page.locator("#projection-basis-counts").count() == 0
     assert page.locator("#projection-basis-status").count() == 0
