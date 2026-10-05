@@ -1098,16 +1098,19 @@
     renderEmpty(profile && profile.emptySelectionMessage);
   }
 
-  // 费率来源中文标签（meta.fee.source）
+  // 费率来源。页头已经选了店铺，这里只标口径，不重复店名和费率。
   var FEE_SOURCE_LABEL = {
-    user_override: "页面覆写",
-    shop_estimate: "店铺实测",
-    baseline: "全局基线",
-    mixed: "混合口径",
+    user_override: "覆写",
+    shop_estimate: "实测",
+    baseline: "基线",
+    mixed: "混合",
   };
 
-  // 店铺费率状态卡（feature/shop-fee-rate）：把后端 meta.fee 的口径如实呈现
-  // —— 来源 / 实测样本量 / 覆盖率 / 快照日期 / 降级原因。
+  function fmtFeeDay(value) {
+    var match = String(value || "").match(/^\d{4}-(\d{2})-(\d{2})/);
+    return match ? match[1] + "-" + match[2] : "";
+  }
+
   // 只用 textContent 写入，不引入 innerHTML 的 XSS 面。
   function renderFeeCard(fee) {
     var card = $("#fee-card");
@@ -1117,53 +1120,45 @@
       return;
     }
     var rateNum = parseFloat(fee.rate);
-    $("#fee-card-source").textContent =
-      FEE_SOURCE_LABEL[fee.source] || fee.source || "—";
+    var source = fee.source || "";
+    card.dataset.source = source;
+    $("#fee-card-source").textContent = FEE_SOURCE_LABEL[source] || source || "—";
     $("#fee-card-rate").textContent = Number.isFinite(rateNum)
-      ? (rateNum * 100).toFixed(2) + "%"
-      : "—";
+      ? "佣金 " + (rateNum * 100).toFixed(2) + "%"
+      : "佣金 —";
 
-    // 逐店铺明细：实测口径列样本量/覆盖率/窗口/快照日；基线口径说明降级原因。
+    var shops = fee.per_shop || [];
     var parts = [];
-    (fee.per_shop || []).forEach((s) => {
-      var name = s.shop_name || String(s.shop_pk);
+    shops.forEach((s) => {
+      var prefix = shops.length > 1 ? (s.shop_name || String(s.shop_pk)) + " " : "";
       if (s.source === "shop_estimate" && s.estimate) {
         var kept = (parseFloat(s.estimate.kept_share) * 100).toFixed(1);
+        var day = fmtFeeDay(s.estimate.calculated_on);
         parts.push(
-          name +
-            " 实测 " +
-            (parseFloat(s.rate) * 100).toFixed(2) +
-            "%（未退款订单 " +
+          prefix +
             s.estimate.kept_order_count +
-            " 单 · 占窗口 GMV " +
+            " 单 · 覆盖 " +
             kept +
-            "% · 近 " +
-            s.estimate.lookback_days +
-            " 天 · " +
-            String(s.estimate.calculated_on) +
-            " 重算）",
+            "%" +
+            (day ? " · " + day : ""),
         );
       } else if (s.source === "baseline") {
         parts.push(
-          name +
-            " 回退基线（" +
-            (s.fallback_reason === "stale_estimate"
-              ? "快照已过期"
-              : "无可用实测样本") +
-            "）",
+          prefix +
+            (s.fallback_reason === "stale_estimate" ? "快照过期" : "无样本"),
         );
-      } else if (s.source === "user_override") {
-        parts.push(name + " 页面覆写");
       }
-      // source === "mixed" 不会出现在 per_shop（那是聚合层标记）
     });
     var estEl = $("#fee-card-estimate");
     estEl.textContent = parts.join(" · ");
     estEl.hidden = parts.length === 0;
+    estEl.title = parts.length ? "样本数，以及占窗口销售额的比例" : "";
 
     var fbEl = $("#fee-card-fallback");
-    fbEl.textContent = fee.degraded ? fee.fallback_message || "" : "";
+    fbEl.textContent = fee.degraded ? "已回退基线" : "";
     fbEl.hidden = !fee.degraded;
+    if (fee.degraded && fee.fallback_message) fbEl.title = fee.fallback_message;
+    else fbEl.removeAttribute("title");
 
     // 用户已点 ✕ 关闭 → 内容照常更新但不重新弹出
     card.hidden = state.feeCardDismissed;
