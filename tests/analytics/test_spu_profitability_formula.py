@@ -53,6 +53,7 @@ def _inputs(**overrides) -> FormulaInput:
         "settled_net_vnd": Decimal(0),
         "settled_sales_vnd": Decimal(0),
         "unsettled_sales_vnd": Decimal("2633000"),
+        "confirmed_unsettled_refund_vnd": Decimal(0),
         "refund_only_vnd": Decimal(0),
         "refund_return_vnd": Decimal("526600"),
         "refund_cancelled_vnd": Decimal(0),
@@ -128,7 +129,7 @@ def test_v10_formula_keeps_exact_domain_decimals() -> None:
     ad_gmv_cny = cny_from_usd("80")
     sales_cny = cny_from_vnd("2633000")
     refund_cny = cny_from_vnd("526600")
-    net_revenue_cny = sales_cny * Decimal("0.692") * Decimal("0.8")
+    net_revenue_cny = sales_cny * Decimal("0.692")
     max_ad_spend_cny = net_revenue_cny - Decimal(200)
 
     assert result.spend_cny == spend_cny
@@ -161,6 +162,24 @@ def test_v10_formula_keeps_exact_domain_decimals() -> None:
     assert result.full_loss_qty_rate == Decimal("0.2")
 
 
+def test_v10_formula_current_unsettled_net_uses_only_confirmed_refund() -> None:
+    assert "confirmed_unsettled_refund_vnd" in FormulaInput.__dataclass_fields__
+
+    result = calculate(
+        _inputs(
+            sales_vnd=Decimal("2633000"),
+            unsettled_sales_vnd=Decimal("2633000"),
+            refund_return_vnd=Decimal("526600"),
+            confirmed_unsettled_refund_vnd=Decimal("263300"),
+        )
+    )
+
+    vnd_per_cny = Decimal(26330) / USD_CNY
+    expected = Decimal("2369700") * Decimal("0.692") / vnd_per_cny
+    assert result.unsettled_net_cny == expected
+    assert result.net_revenue_cny == expected
+
+
 def test_v10_formula_uses_settlement_as_actual_net_revenue() -> None:
     result = calculate(
         _inputs(
@@ -186,6 +205,7 @@ def test_v10_formula_refund_only_reduces_kept_cogs_for_breakeven() -> None:
             refund_return_qty=0,
             sales_vnd=Decimal("2633000"),
             unsettled_sales_vnd=Decimal("2633000"),
+            confirmed_unsettled_refund_vnd=Decimal("263300"),
             refund_only_vnd=Decimal("263300"),
             refund_return_vnd=Decimal(0),
             full_loss_qty=1,
@@ -224,7 +244,7 @@ def test_v10_formula_marks_undefined_roi_without_ad_spend() -> None:
     assert result.cpa_cny is None
     assert result.roi_l0 is None
     assert result.ad_system_actual_roi is None
-    expected_net_revenue = cny_from_vnd("2633000") * Decimal("0.692") * Decimal("0.8")
+    expected_net_revenue = cny_from_vnd("2633000") * Decimal("0.692")
     assert result.ad_system_breakeven_roi == (
         cny_from_usd("80") / (expected_net_revenue - Decimal(200))
     )

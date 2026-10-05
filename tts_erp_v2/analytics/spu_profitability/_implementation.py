@@ -169,6 +169,17 @@ _SQL_ROI_SALES = text(
         JOIN commerce.sales_order_lines sl ON sl.order_pk = selected.order_pk
         GROUP BY sl.order_pk
     ),
+    confirmed_refunds AS (
+        SELECT cl.sales_order_line_id,
+               coalesce(sum(cl.refund_amount), 0) AS confirmed_refund_vnd
+        FROM after_sales.cases c
+        JOIN after_sales.case_lines cl ON cl.case_id = c.id
+        JOIN commerce.sales_order_lines sl ON sl.id = cl.sales_order_line_id
+        WHERE c.status IN (:st0, :st1)
+          AND c.case_type IN ('REFUND_ONLY', 'RETURN_AND_REFUND')
+          AND sl.spu_pk = ANY(CAST(:selected_pks AS bigint[]))
+        GROUP BY cl.sales_order_line_id
+    ),
     lines AS (
         SELECT sl.spu_pk,
                sl.order_pk,
@@ -176,12 +187,14 @@ _SQL_ROI_SALES = text(
                sl.quantity * sl.unit_price AS line_gmv_vnd,
                og.order_gmv_vnd,
                os.settlement_vnd,
+               coalesce(cr.confirmed_refund_vnd, 0) AS confirmed_refund_vnd,
                (coalesce(so.order_time, so.paid_at)
                 AT TIME ZONE 'UTC')::date AS event_day
         FROM commerce.sales_order_lines sl
         JOIN commerce.sales_orders so ON so.id = sl.order_pk
         JOIN order_gmv og ON og.order_pk = sl.order_pk
         LEFT JOIN order_settlement os ON os.order_pk = sl.order_pk
+        LEFT JOIN confirmed_refunds cr ON cr.sales_order_line_id = sl.id
         WHERE sl.spu_pk = ANY(CAST(:selected_pks AS bigint[]))
           AND so.status = ANY(CAST(:paid_statuses AS text[]))
           /* 窗口裁剪：下单时间 order_time 优先（COALESCE(order_time, paid_at)）UTC 日 */
@@ -200,6 +213,8 @@ _SQL_ROI_SALES = text(
                FILTER (WHERE settlement_vnd IS NOT NULL)                 AS settled_sales_vnd,
            sum(line_gmv_vnd)
                FILTER (WHERE settlement_vnd IS NULL)                     AS unsettled_sales_vnd,
+           coalesce(sum(confirmed_refund_vnd)
+               FILTER (WHERE settlement_vnd IS NULL), 0)                 AS confirmed_unsettled_refund_vnd,
            count(DISTINCT order_pk)
                FILTER (WHERE settlement_vnd IS NOT NULL)                 AS settled_order_count
     FROM lines
@@ -1534,7 +1549,10 @@ def _projection_scope_aggregate(
         }
 
     ad_map = grouped(_SQL_ROI_AD, {"ad_start": None, "ad_end": None})
-    sales_map = grouped(_SQL_ROI_SALES, {"paid_statuses": paid_statuses})
+    sales_map = grouped(
+        _SQL_ROI_SALES,
+        {"paid_statuses": paid_statuses, "st0": st0, "st1": st1},
+    )
     full_loss_map = grouped(
         _SQL_ROI_FULL_LOSS,
         {
@@ -1645,6 +1663,9 @@ def _projection_scope_aggregate(
                 settled_net_vnd=row_decimal(sales, "settled_net_vnd"),
                 settled_sales_vnd=row_decimal(sales, "settled_sales_vnd"),
                 unsettled_sales_vnd=row_decimal(sales, "unsettled_sales_vnd"),
+                confirmed_unsettled_refund_vnd=row_decimal(
+                    sales, "confirmed_unsettled_refund_vnd"
+                ),
                 refund_only_vnd=row_decimal(refunds, "refund_only_amount"),
                 refund_return_vnd=row_decimal(refunds, "refund_return_amount"),
                 refund_cancelled_vnd=row_decimal(
@@ -2015,7 +2036,12 @@ def _query_spu_roi(
     sales_rows = (
         sess.execute(
             _SQL_ROI_SALES,
-            {**common_fact_params, "paid_statuses": paid_statuses},
+            {
+                **common_fact_params,
+                "paid_statuses": paid_statuses,
+                "st0": st0,
+                "st1": st1,
+            },
         )
         .mappings()
         .all()
@@ -2158,6 +2184,11 @@ def _query_spu_roi(
         )
         unsettled_sales_vnd = (
             Decimal(sales["unsettled_sales_vnd"] or 0) if sales else Decimal(0)
+        )
+        confirmed_unsettled_refund_vnd = (
+            Decimal(sales["confirmed_unsettled_refund_vnd"] or 0)
+            if sales
+            else Decimal(0)
         )
         settled_order_count = _row_int(sales["settled_order_count"]) if sales else 0
 
@@ -2385,6 +2416,7 @@ def _query_spu_roi(
                 settled_net_vnd=settled_net_vnd,
                 settled_sales_vnd=settled_sales_vnd,
                 unsettled_sales_vnd=unsettled_sales_vnd,
+                confirmed_unsettled_refund_vnd=confirmed_unsettled_refund_vnd,
                 refund_only_vnd=refund_only_vnd,
                 refund_return_vnd=refund_return_vnd,
                 refund_cancelled_vnd=refund_cancelled_vnd,
