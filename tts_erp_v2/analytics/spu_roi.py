@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum
 from typing import Any, Literal
@@ -249,6 +249,13 @@ def _estimate_payload(estimate) -> dict[str, Any] | None:
     }
 
 
+def _iso_utc(ts: datetime) -> str:
+    """Serialize a UTC-semantic timestamp with an offset so the page can format it."""
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    return ts.astimezone(UTC).isoformat()
+
+
 def _meta_payload(
     result, scope: ProfitScope, fee_rate: Decimal | None
 ) -> dict[str, Any]:
@@ -271,6 +278,7 @@ def _meta_payload(
             "cny_vnd": format(basis.fx.usd_vnd / basis.fx.usd_cny, "f"),
             "vnd_cny": format(basis.fx.usd_cny / basis.fx.usd_vnd, "f"),
             "as_of": basis.fx.as_of.date().isoformat(),
+            "as_of_at": _iso_utc(basis.fx.as_of),
             "snapshot_id": basis.fx.snapshot_id,
             "source": "fx-cache",
         },
