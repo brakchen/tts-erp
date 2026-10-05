@@ -986,7 +986,7 @@
 
   function priceCell(cell) {
     var value = cell.getValue();
-    if (value === null || value === undefined || value === "") return "—";
+    if (value === null || value === undefined || (typeof value === "string" && value.trim() === "")) return "—";
     var number = Number(value);
     if (!Number.isFinite(number)) return "—";
     var metric = cell.getColumn().getDefinition().priceMetric;
@@ -1114,9 +1114,13 @@
       },
     });
     // 用 table.on 订阅（与 dataSorting 同一机制）；6.3 对 options 回调的订阅不可靠。
+    var lastDrillClick = { spuPk: null, at: 0 };
     state.table.on("rowClick", (_e, row) => {
       var it = row.getData();
       if (!it || !it.spu_pk) return;
+      var now = Date.now();
+      if (lastDrillClick.spuPk === it.spu_pk && now - lastDrillClick.at < 300) return;
+      lastDrillClick = { spuPk: it.spu_pk, at: now };
       openDrillPanel(row.getElement(), it);
     });
     // 表头点击只改状态并触发服务端重取（本地排序对同字段幂等）。
@@ -1230,6 +1234,8 @@
     if (!box) return;
     box.hidden = false;
     box.setAttribute("aria-busy", "true");
+    var status = document.getElementById("price-summary-status");
+    if (status) status.textContent = "加载中…";
     ["purchase", "originalSale", "paid"].forEach((metric) => {
       ["mean", "median"].forEach((kind) => {
         var cell = document.getElementById("price-" + metric + "-" + kind);
@@ -1267,15 +1273,24 @@
     var totals = payload.totals || {};
     var statsByMetric = totals.priceStats || {};
     var meta = payload.meta || {};
+    var summaryStatus = document.getElementById("price-summary-status");
+    if (summaryStatus) summaryStatus.textContent = "已加载 · " + ["purchase", "originalSale", "paid"].map((metric) => {
+      var status = (statsByMetric[metric] || {}).status || "不可用";
+      var label = status === "complete" ? "完整" : status === "partial" ? "部分覆盖" : status === "no_samples" ? "无样本" : status;
+      return priceMetricLabel(metric) + "：" + label;
+    }).join("；");
     ["purchase", "originalSale", "paid"].forEach((metric) => {
       var stats = statsByMetric[metric] || {};
       ["mean", "median"].forEach((kind) => {
         var cell = document.getElementById("price-" + metric + "-" + kind);
         if (!cell) return;
         var value = stats[kind];
-        var text = value === null || value === undefined || value === "" ? "—" : String(value);
-        var number = Number(value);
-        if (Number.isFinite(number)) text = (metric === "purchase" && stats.estimated === true ? "≈" : "") + number.toFixed(4);
+        var missing = value === null || value === undefined || value === "";
+        var text = missing ? "—" : String(value);
+        if (!missing) {
+          var number = Number(value);
+          if (Number.isFinite(number)) text = (metric === "purchase" && stats.estimated === true ? "≈" : "") + number.toFixed(4);
+        }
         cell.textContent = text;
         cell.setAttribute("aria-label", priceMetricLabel(metric) + " " + (kind === "mean" ? "平均值" : "中位数") + " CNY " + text);
       });
@@ -2609,6 +2624,10 @@
     }
   }
   var priceTooltipsWired = false;
+  var tooltipsWired = false;
+  function isPriceTip(anchor) {
+    return Boolean(anchor && anchor.classList && anchor.classList.contains("op-price-tip"));
+  }
   function wirePriceTooltips() {
     if (priceTooltipsWired) return;
     priceTooltipsWired = true;
@@ -2633,22 +2652,29 @@
     });
   }
   function wireTooltips() {
+    if (tooltipsWired) return;
+    tooltipsWired = true;
     document.addEventListener("mouseover", (e) => {
+      if (isPriceTip(tipAnchor)) return;
       var hit = tipHit(e.target);
       if (hit) {
+        if (isPriceTip(hit.el)) return;
         if (hit.el !== tipAnchor) showTip(hit.el, hit.text);
       } else {
         hideTip();
       }
     });
     document.addEventListener("mouseout", (e) => {
-      if (!tipAnchor) return;
+      if (!tipAnchor || isPriceTip(tipAnchor)) return;
       var rel = tipHit(e.relatedTarget);
       if (!rel) hideTip(); // 指针离开所有 data-tip 区域
     });
     window.addEventListener("scroll", hideTip, true); // capture: 容器内滚动也收起,防错位
     window.addEventListener("resize", hideTip);
-    document.addEventListener("click", hideTip);
+    document.addEventListener("click", (e) => {
+      if (e.target && e.target.closest && e.target.closest(".op-price-tip")) return;
+      hideTip();
+    });
   }
 
   // Lightbox:click 主图(spu-img[data-zoom])→ 全屏叠层;点背景(非放大图
