@@ -1807,7 +1807,10 @@ def test_spu_roi_projection_window_is_independent_of_reporting_window(
             text(
                 "UPDATE commerce.sales_orders SET order_time = "
                 "'2026-08-01T08:00:00+00:00' "
-                "WHERE order_id = 'TEST_ORDER_PROJECTION_SETTLED'"
+                "WHERE order_id IN ("
+                "'TEST_ORDER_PROJECTION_SETTLED', "
+                "'TEST_ORDER_PROJECTION_PARTIAL'"
+                ")"
             )
         )
         sess.commit()
@@ -1848,6 +1851,14 @@ def test_spu_roi_projection_window_is_independent_of_reporting_window(
     assert september_item["projection_basis_order_count"] == 1
     assert september_item["unsettled_order_count"] == 2
     assert september_item["unresolved_unsettled_order_count"] == 2
+    one_minus_fee = Decimal(1) - FEE_BASELINE
+    vnd_cny = USD_CNY / USD_VND
+    assert all_time_item["unsettled_net"] == m4(
+        Decimal(500_000) * one_minus_fee * vnd_cny
+    )
+    assert september_item["unsettled_net"] == m4(
+        Decimal(400_000) * one_minus_fee * vnd_cny
+    )
     projection_keys = set(all_time["meta"]["projection"]) - {"calculated_at"}
     assert {
         key: all_time["meta"]["projection"][key] for key in projection_keys
