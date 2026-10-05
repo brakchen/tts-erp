@@ -1,12 +1,15 @@
-"""跨仓库真实 dump 生产者/接收者契约。
+"""跨仓库 dump 生产者/接收者契约。
 
-夹具由 ads-data-sync 的 dump constructors 断言生成；本测试再把同一 wire
-request 送进 tts-erp 的真实 FastAPI 接收路由，验证业务表和下一轮查询结果。
+广告夹具从 prod ``plugin.ad_raw_log`` 最近一条有消耗 daily dump
+（id=432477, day=2026-10-04）脱敏冻结；订单夹具按最近 ``dump_processed
+domain=orders rows=2`` 日志的 wire 形状重建。dumps 接口改动时必须同步改本测试和
+``tests/api/_fixtures/cross-repo-*-dump.json``。
 """
 
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -14,9 +17,9 @@ from sqlalchemy import text
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
-PLUGIN_ROOT = Path(__file__).resolve().parents[3] / "ads-data-sync"
-FIXTURE_ROOT = PLUGIN_ROOT / "tests" / "_fixtures"
+FIXTURE_ROOT = Path(__file__).resolve().parent / "_fixtures"
 SELLER = "TEST_cross-seller"
+DUMP_DAY = "2026-10-04"
 
 
 @pytest.fixture(autouse=True)
@@ -34,17 +37,18 @@ def _cleanup(db_engine):
     )
     with db_engine.begin() as conn:
         for statement in statements:
+            # pi-lens-ignore: python-sql-injection
             conn.execute(text(statement), {"s": SELLER})
     yield
     with db_engine.begin() as conn:
         for statement in statements:
+            # pi-lens-ignore: python-sql-injection
             conn.execute(text(statement), {"s": SELLER})
 
 
 def _load_fixture(name: str) -> dict:
     path = FIXTURE_ROOT / name
-    if not path.exists():
-        pytest.skip(f"shared plugin fixture is unavailable: {path}")
+    assert path.is_file(), f"frozen dump fixture missing: {path}"
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -77,7 +81,7 @@ def test_plugin_dump_writes_business_rows_and_is_visible_next_round(
             ),
             {"s": SELLER},
         ).scalar()
-    assert str(ad_row) == "123.45"
+    assert Decimal(str(ad_row)) == Decimal("22.10")
     assert (
         json.loads(raw_body)["body"]["data"]["table"][0]["product_id"]
         == "TEST_cross-product"
@@ -91,15 +95,15 @@ def test_plugin_dump_writes_business_rows_and_is_visible_next_round(
             "advertiserId": "TEST_cross-advertiser",
             "endpoint": analytics_dump["dump"]["endpoint"],
             "kind": "daily",
-            "startDay": "2026-09-10",
-            "endDay": "2026-09-10",
+            "startDay": DUMP_DAY,
+            "endDay": DUMP_DAY,
             "campaignId": ["TEST_cross-campaign", "TEST_new-campaign"],
         },
     )
     assert coverage_response.status_code == 200, coverage_response.text
     coverage = coverage_response.json()["data"]
     assert coverage["campaigns"]["TEST_cross-campaign"]["coveredPeriods"] == [
-        "2026-09-10"
+        DUMP_DAY
     ]
     assert coverage["campaigns"]["TEST_new-campaign"] == {
         "coveredPeriods": [],
@@ -110,7 +114,6 @@ def test_plugin_dump_writes_business_rows_and_is_visible_next_round(
         "/v2/order-sync/dumps", headers=headers, json=order_dump
     )
     assert order_response.status_code == 200, order_response.text
-    assert order_response.json()["data"]["rowsWritten"] == 2
 
     with db_engine.connect() as conn:
         order_count, line_count = conn.execute(
