@@ -17,4 +17,4 @@
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | video-publish-design | TikTok 视频发布技术方案与 UI 交互 | 01a10600-8186-7668-b8bc-2ca85bd3f955 | `docs/video-publish-design` / `/home/schan/tts-erp/.worktrees/video-publish-design` | `docs/design/tiktok-video-publish.md` | ready | `a6925197db2d9cee6a1450ed4a2ecdc80731eb67` | `d7fa77c4a490feac9ab930b3a4ccd2cb1c7c0810` | 2026-10-04T09:47:24Z |
-| spu-profitability-contract | 按飞书权威口径重写盈利开发契约 | 01a10af5-a470fa3c | `docs/spu-profitability-contract` / `/home/schan/tts-erp/.worktrees/spu-profitability-contract` | `docs/business/spu-profitability.md` | active | | | 2026-10-05T09:13:15Z |
+| spu-profitability-contract | 按飞书权威口径重写盈利开发契约 | 01a10af5-a470fa3c | `docs/spu-profitability-contract` / `/home/schan/tts-erp/.worktrees/spu-profitability-contract` | `docs/business/spu-profitability.md` | ready | `4b25fc6daa103c311fe439b084966f056f336119` | `fcdf01ac7d922c14c0461426520c7344f70d693e` | 2026-10-05T09:15:21Z |
