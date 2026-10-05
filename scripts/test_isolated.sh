@@ -265,15 +265,27 @@ prod_alembic_revision() {
 
 refresh_template() {
   echo "[isolated-test] refreshing template DB: $TEMPLATE_DB"
-  drop_db "$TEMPLATE_DB"
-  create_empty_db "$TEMPLATE_DB"
 
-  local prod_url revision alembic
+  local prod_url revision alembic template_exists=0
   prod_url="$(source_prod_url)"
   [[ -n "$prod_url" ]] || fail "cannot resolve production schema source URL from TTS_ERP_DB_URL_PROD_SOURCE, .env, or ../../.env"
 
+  # Keep an existing template intact until the importer has completed its
+  # client/server/source preflight and generated the schema dump. If the DB is
+  # missing, preflight against the source first, then create the empty target.
+  if db_exists "$TEMPLATE_DB"; then
+    template_exists=1
+  else
+    TTS_ERP_DB_URL="$prod_url" \
+      TTS_ERP_DB_URL_TEST="$TEMPLATE_URL" \
+      PG_DOCKER="$PG_DOCKER_VALUE" \
+      bash scripts/import_prod_to_test.sh --schema-only --preflight-only --yes
+    create_empty_db "$TEMPLATE_DB"
+  fi
+
   # Run the existing guarded importer with an explicit source URL so worktrees
-  # do not need a writable .env symlink.
+  # do not need a writable .env symlink. The importer generates the dump before
+  # it drops target-side objects; a restore failure can still be mid-restore.
   TTS_ERP_DB_URL="$prod_url" \
     TTS_ERP_DB_URL_TEST="$TEMPLATE_URL" \
     PG_DOCKER="$PG_DOCKER_VALUE" \
