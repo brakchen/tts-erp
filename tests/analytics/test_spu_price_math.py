@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from decimal import (
     Decimal,
+    Inexact,
     Overflow,
     ROUND_DOWN,
     ROUND_HALF_EVEN,
@@ -196,6 +197,19 @@ def test_wide_price_exponents_are_not_lost_in_weighted_sum() -> None:
     assert result.mean_cny == expected
 
 
+def test_coalesced_quantity_digits_are_included_in_precision_bound() -> None:
+    rows = [(D("1e100"), 9)] * 22_222 + [(D("1"), 2)]
+    with localcontext() as context:
+        context.prec = 120
+        expected = (D("1e100") * D(199_998) + D(2)) / D(200_000)
+
+    result = summarize_weighted_prices(rows)
+
+    assert result.mean_cny == expected
+    assert result.mean_cny is not None
+    assert result.mean_cny != D("9.9999e99")
+
+
 def test_result_is_immutable() -> None:
     result = summarize_weighted_prices([(D("2"), 1)])
 
@@ -228,10 +242,23 @@ def test_invalid_input_does_not_partially_return_statistics() -> None:
 
 
 def test_no_global_decimal_context_mutation() -> None:
-    before = getcontext().copy()
-    summarize_weighted_prices([(D("1"), 1), (D("3"), 1)])
-    after = getcontext()
+    with localcontext() as context:
+        context.prec = 17
+        context.rounding = ROUND_UP
+        context.Emax = 77
+        context.Emin = -88
+        context.clamp = 1
+        context.traps[Overflow] = True
+        context.flags[Inexact] = True
+        before = context.copy()
 
-    assert after.prec == before.prec
-    assert after.rounding == before.rounding
-    assert after.traps == before.traps
+        summarize_weighted_prices([(D("1"), 1), (D("3"), 1)])
+
+        after = context
+        assert after.prec == before.prec
+        assert after.rounding == before.rounding
+        assert after.Emax == before.Emax
+        assert after.Emin == before.Emin
+        assert after.clamp == before.clamp
+        assert after.traps == before.traps
+        assert after.flags == before.flags

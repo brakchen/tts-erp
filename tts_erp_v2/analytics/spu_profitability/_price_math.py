@@ -23,7 +23,7 @@ class WeightedPriceSummary:
 
 
 def _context_parameters(
-    prices: list[Decimal], quantities: list[int], total_quantity: int
+    buckets: dict[Decimal, int], total_quantity: int
 ) -> tuple[int, int, int]:
     """Return precision and exponent bounds derived solely from the inputs.
 
@@ -32,21 +32,20 @@ def _context_parameters(
     smaller term. Values whose required span exceeds the Decimal module's
     representable context are rejected instead of being silently rounded.
     """
-    nonzero = [price for price in prices if not price.is_zero()]
+    nonzero = [(price, quantity) for price, quantity in buckets.items() if not price.is_zero()]
     if not nonzero:
         return 80, 999_999, -999_999
 
-    min_exponent = min(price.as_tuple().exponent for price in nonzero)
-    # Adding the quantity's digit count is conservative for a carry in price*q.
+    min_exponent = min(price.as_tuple().exponent for price, _ in nonzero)
+    # Use coalesced bucket quantities: arithmetic multiplies by these values,
+    # which may have more digits than any individual input line quantity.
     max_adjusted_product = max(
         price.adjusted() + len(str(quantity))
-        for price, quantity in zip(prices, quantities, strict=True)
-        if not price.is_zero()
+        for price, quantity in nonzero
     )
     max_product_digits = max(
         len(price.as_tuple().digits) + len(str(quantity)) + 1
-        for price, quantity in zip(prices, quantities, strict=True)
-        if not price.is_zero()
+        for price, quantity in nonzero
     )
     precision = max(
         80,
@@ -104,23 +103,19 @@ def summarize_weighted_prices(
     quantization is performed here.
     """
     buckets: dict[Decimal, int] = {}
-    prices: list[Decimal] = []
-    quantities: list[int] = []
     total_quantity = 0
     line_count = 0
 
     for observation in observations:
         price, quantity = _validate_observation(observation)
         buckets[price] = buckets.get(price, 0) + quantity
-        prices.append(price)
-        quantities.append(quantity)
         total_quantity += quantity
         line_count += 1
 
     if not buckets:
         return WeightedPriceSummary(None, None, 0, 0)
 
-    precision, emax, emin = _context_parameters(prices, quantities, total_quantity)
+    precision, emax, emin = _context_parameters(buckets, total_quantity)
     with localcontext() as context:
         context.prec = precision
         context.rounding = ROUND_HALF_EVEN
