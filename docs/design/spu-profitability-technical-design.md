@@ -43,7 +43,7 @@
 | 经营窗口 | `w_start/w_end` 进入主表、广告和证据查询 | 店铺本地日半开区间；主表和证据保持此行为 |
 | 预测窗口 | 当前实现使用店铺本地 `A=T-1`、7 天成熟等待期和 `projection_lookback_days=30|90`，独立于 `w_start/w_end` | 已交付；预测样本、风险池、totals/meta basis 均走独立 projection aggregate |
 | 预测行字段 | `SpuProfitability` 与 wire row 仍包含大量 projection 字段 | 兼容字段可保留但页面不展示；目标新客户端只读取 `totals`/`meta.projection` |
-| 当前未结算收入 | 当前实现仍有历史 SPU 退款率兼容路径 | 按 business 文档目标口径：只扣已确认退款，未来损失仅进 projection |
+| 当前未结算收入 | 已按经营窗口聚合未结算销售与已确认退款 | 已交付：只扣同一经营窗口内未结算订单的已确认退款；未来损失仅进 projection |
 | 全损判定 | v9 兼容字段和历史诊断继续输出；预测严格分子要求 paid/payment evidence + terminal 80101 或其他业务规定的严格证据 | 已交付；UNPAID/ON_HOLD 取消单不得因 80101 stray event 进入严格样本，paid-then-cancelled 可进入 |
 | 快照时间 | overview 共享 `basis.calculated_at`；detail payload 当前自行取 `datetime.now(UTC)` | `explain_spu()` 的结果、四路 evidence 和 basis 共享同一 `calculated_at` |
 | API 文档 | external-api 混有详细盈利契约及 archive 引用 | external-api 仅保留导航、鉴权和稳定性索引，详细契约集中到本文 |
@@ -769,7 +769,7 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 | 时间 | shop local date 半开区间；经营日期改变当前不改变 projection；样本 `[A-(D+6),A-7]` 的 30/90 选择；未知时区失败 |
 | scope | activity/exact/focused；空 focused 不回退；SPU 选择同时约束当前和 prediction；q/分页/排序不改变 totals |
 | 去重 | 多 SPU 同订单 totals 订单全局去重；金额按行；退款/取消/全损订单各按订单去重 |
-| 当前 | 已结算不再扣费；当前净收入的历史退款率兼容路径仍待按业务口径收敛（见 business §11）；0 ad/无解返回 null |
+| 当前 | 已结算不再扣费；未结算只扣同一经营窗口内已确认且尚未反映的退款，不乘当前退款率或预测 `p`；0 ad/无解返回 null |
 | 预测 | 已完结订单分母/严格全损分子；国内取消入分母不入全损；已送达未结算排除风险池；0 样本 insufficient；1–9 warning；不自动 30→90 |
 | 精度 | money 4 位；ratio 2 位；rate 4 位；预测数量 Decimal 不提前取整；null 不变 0 |
 | HTTP | readonly/admin 200；无 key 401；角色/页面权限 403；unknown SPU 404；invalid 422；FX missing 503；429 Retry-After |
