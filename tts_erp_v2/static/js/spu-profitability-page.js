@@ -367,6 +367,7 @@
     loading: false,
     loadVersion: 0, // 仅最新主表请求可写入页面
     loadController: null,
+    freshnessTimer: null,
     selectionQueryable: true,
     meta: {}, // 后端拥有业务状态、阈值与公式说明；前端只渲染
     enumMap: {}, // 枚举中文化映射,page load 时从 /v2/config/enum-map 获取
@@ -738,6 +739,127 @@
         }
       })
       .catch(() => {});
+  }
+
+  // ---------- 数据同步时间（广告 / 订单 / 物流 / 妙手） ----------
+  var FRESHNESS_KEYS = ["ads", "orders", "logistics", "miaoshou"];
+
+  function loadFreshness() {
+    var root = $("#data-freshness");
+    if (!root || !state.shopPk) return Promise.resolve();
+    var shopPk = state.shopPk;
+    return fetch(
+      `${PREFIX}/v2/sync/freshness?shop_pk=${encodeURIComponent(shopPk)}`,
+      {
+        credentials: "include",
+        headers: { Accept: "application/json" },
+      },
+    )
+      .then((r) => {
+        if (r.status === 401) return null;
+        if (!r.ok) throw new Error(`freshness HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data) => {
+        if (data && String(state.shopPk) === String(shopPk)) renderFreshness(data);
+      })
+      .catch(() => {
+        if (String(state.shopPk) !== String(shopPk)) return;
+        markFreshnessUnavailable("同步时间加载失败");
+      });
+  }
+
+  function renderFreshness(data) {
+    var byKey = {};
+    ((data && data.sources) || []).forEach((source) => {
+      if (source && source.key) byKey[source.key] = source;
+    });
+    FRESHNESS_KEYS.forEach((key) => renderFreshnessItem(key, byKey[key] || null));
+  }
+
+  function renderFreshnessItem(key, source) {
+    var item = document.querySelector(
+      '#data-freshness [data-source="' + key + '"]',
+    );
+    if (!item) return;
+    var severity = (source && source.severity) || "unknown";
+    if (["ok", "warn", "crit", "unknown"].indexOf(severity) < 0)
+      severity = "unknown";
+    item.dataset.severity = severity;
+    var timeEl = item.querySelector("time");
+    var syncedAt = source && source.synced_at;
+    if (timeEl) {
+      timeEl.textContent = syncedAt ? fmtFreshnessTime(syncedAt) : "—";
+      if (syncedAt) timeEl.setAttribute("datetime", syncedAt);
+      else timeEl.removeAttribute("datetime");
+    }
+    var tip = freshnessTip(source);
+    if (tip) item.setAttribute("title", tip);
+    else item.removeAttribute("title");
+  }
+
+  function markFreshnessUnavailable(message) {
+    FRESHNESS_KEYS.forEach((key) => {
+      var item = document.querySelector(
+        '#data-freshness [data-source="' + key + '"]',
+      );
+      if (!item) return;
+      item.dataset.severity = "unknown";
+      var timeEl = item.querySelector("time");
+      if (timeEl) {
+        timeEl.textContent = "—";
+        timeEl.removeAttribute("datetime");
+      }
+      item.setAttribute("title", message);
+    });
+  }
+
+  function freshnessTip(source) {
+    if (!source) return "尚未取得同步时间";
+    var parts = [];
+    if (source.detail) parts.push(source.detail);
+    if (source.job_name) parts.push(source.job_name);
+    if (source.synced_at) {
+      var ago = fmtAgo(source.synced_at);
+      if (ago) parts.push(ago);
+    }
+    if (source.scope === "system") parts.push("全账号");
+    return parts.join(" · ");
+  }
+
+  function fmtFreshnessTime(iso) {
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return "—";
+    try {
+      var parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: state.reportingTimeZone || undefined,
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      }).formatToParts(d);
+      var values = {};
+      parts.forEach((part) => {
+        if (part.type !== "literal") values[part.type] = part.value;
+      });
+      if (!values.month || !values.day || values.hour == null || !values.minute)
+        return "—";
+      return `${values.month}-${values.day} ${values.hour}:${values.minute}`;
+    } catch (e) {
+      return "—";
+    }
+  }
+
+  function fmtAgo(iso) {
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    var mins = Math.max(0, Math.round((Date.now() - d.getTime()) / 60000));
+    if (mins < 1) return "刚刚";
+    if (mins < 60) return `${mins} 分钟前`;
+    var hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours} 小时前`;
+    return `${Math.floor(hours / 24)} 天前`;
   }
 
   // ---------- 渲染 ----------
@@ -1982,6 +2104,7 @@
     closeDrillPanel();
     state.shopPk = pk;
     setShopPkInUrl(pk);
+    loadFreshness();
     if (
       requiresShopReportingTimeZone() &&
       !applyShopReportingContext(pk)
@@ -2077,6 +2200,7 @@
           }
           persistPagePreferences();
           if (!selectionAdapter) resetSpuSelectForShop();
+          loadFreshness();
         } else {
           // URL 与页面偏好均无 shop_pk → 弹窗让用户选店铺。
           showShopModal(shops, "");
@@ -2701,7 +2825,12 @@
       _dateFieldChanged("end", e),
     );
 
-    $("#btn-refresh").addEventListener("click", () => load());
+    $("#btn-refresh").addEventListener("click", () => {
+      load();
+      loadFreshness();
+    });
+    if (state.freshnessTimer) clearInterval(state.freshnessTimer);
+    state.freshnessTimer = setInterval(loadFreshness, 60000);
     $("#pager-pages").addEventListener("click", (event) => {
       var button = event.target.closest("button[data-page]");
       if (!button || button.disabled || state.loading) return;
@@ -2755,6 +2884,10 @@
       reload: load,
       destroy: () => {
         if (state.loadController) state.loadController.abort();
+        if (state.freshnessTimer) {
+          clearInterval(state.freshnessTimer);
+          state.freshnessTimer = null;
+        }
         cancelPendingSpuResolutions();
         closeDrillPanel();
         closeLightbox();

@@ -433,6 +433,10 @@ def _run_tiktok_job_for_shop(
             _row, result = run_with_sync_job(
                 session,
                 job_name=spec.job_name,
+                # shop_id lives in extra so /v2/sync/freshness can show this
+                # shop's last success without a schema change. Historical
+                # rows predate the field and fall back to sync_cursors.
+                extra={"shop_id": shop_id},
                 inner=mod.run,
                 inner_kwargs={
                     "proxy_call": proxy_call,

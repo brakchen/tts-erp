@@ -86,6 +86,18 @@ function mockJson(url) {
     return JSON.stringify({ authenticated: true, role: "admin" });
   if (u.endsWith("/v2/admin/shops"))
     return JSON.stringify({ items: [], total: 0 });
+  if (u.endsWith("/v2/sync/freshness"))
+    return JSON.stringify({
+      server_time: NOW,
+      shop_pk: 7,
+      shop_id: "TEST_shop",
+      sources: [
+        { key: "ads", label: "广告", synced_at: NOW, scope: "shop", basis: "rows", severity: "ok", detail: "该店广告事实最近写入" },
+        { key: "orders", label: "订单", synced_at: NOW, scope: "shop", basis: "job", job_name: "tiktok.orders", severity: "ok", detail: "最近一次成功同步" },
+        { key: "logistics", label: "物流", synced_at: NOW, scope: "shop", basis: "job", job_name: "tiktok.logistics", severity: "ok", detail: "最近一次成功同步" },
+        { key: "miaoshou", label: "妙手", synced_at: NOW, scope: "system", basis: "job", job_name: "miaoshou.packages", severity: "ok", detail: "最近成功：miaoshou.packages" },
+      ],
+    });
   if (u.endsWith("/v2/sync/status"))
     return JSON.stringify({
       server_time: NOW,

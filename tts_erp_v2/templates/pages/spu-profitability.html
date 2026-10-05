@@ -28,13 +28,23 @@
           <h1 class="op-title mb-0">{{ title }}</h1>
         </div>
         <div class="col-12 col-lg-auto">
-          <div class="op-header-meta d-flex flex-column flex-sm-row align-items-stretch align-items-sm-center justify-content-sm-end gap-2 gap-sm-3">
-            <label class="op-shop mb-0" for="shop-switcher">
-              <span>店铺</span>
-              <select id="shop-switcher" name="shop_pk" class="form-select form-select-sm op-shop-select" aria-label="当前店铺"></select>
-            </label>
-            <span class="op-identity" id="ops-identity"></span>
-            <span class="op-scope-note" id="sum-stamp">ROI · 账页</span>
+          <div class="op-header-meta align-items-sm-end">
+            <div class="op-header-tools justify-content-sm-end">
+              <label class="op-shop mb-0" for="shop-switcher">
+                <span>店铺</span>
+                <select id="shop-switcher" name="shop_pk" class="form-select form-select-sm op-shop-select" aria-label="当前店铺"></select>
+              </label>
+              <span class="op-identity" id="ops-identity"></span>
+            </div>
+            <div class="op-freshness align-items-sm-end" id="data-freshness" aria-live="polite">
+              <p class="op-scope-note text-sm-end" id="sum-stamp">ROI · 账页</p>
+              <ul class="op-freshness-times justify-content-sm-end" aria-label="数据同步时间">
+                <li data-source="ads" data-severity="unknown"><span class="op-freshness-dot" aria-hidden="true"></span><span class="op-freshness-label">广告</span><time class="op-freshness-time">—</time></li>
+                <li data-source="orders" data-severity="unknown"><span class="op-freshness-dot" aria-hidden="true"></span><span class="op-freshness-label">订单</span><time class="op-freshness-time">—</time></li>
+                <li data-source="logistics" data-severity="unknown"><span class="op-freshness-dot" aria-hidden="true"></span><span class="op-freshness-label">物流</span><time class="op-freshness-time">—</time></li>
+                <li data-source="miaoshou" data-severity="unknown"><span class="op-freshness-dot" aria-hidden="true"></span><span class="op-freshness-label">妙手</span><time class="op-freshness-time">—</time></li>
+              </ul>
+            </div>
           </div>
         </div>
       </div>

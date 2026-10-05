@@ -121,6 +121,21 @@ def test_run_with_sync_job_accepts_credential_id(db_session) -> None:
     assert row.credential_id == cred.id
 
 
+def test_run_with_sync_job_records_shop_id_extra(db_session) -> None:
+    """TikTok fan-out stamps shop_id so freshness can attribute the run."""
+
+    def _inner(session):
+        return JobResult(rows_total=1)
+
+    row, _ = run_with_sync_job(
+        db_session,
+        job_name="tiktok.orders",
+        extra={"shop_id": "TEST_freshness_shop"},
+        inner=_inner,
+    )
+    assert row.extra == {"shop_id": "TEST_freshness_shop"}
+
+
 # ─── Failure path ──────────────────────────────────────────────────
 
 

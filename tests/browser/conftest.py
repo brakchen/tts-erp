@@ -181,6 +181,26 @@ def _mock_payload(path: str) -> dict[str, Any] | list[Any]:
     if path.endswith("/v2/sync/status"):
         return {"server_time": _NOW, "jobs": [], "total_spus": 1234,
                 "missing_cost_spus": 89, "shop_count": 12, "auth_mode": "enforce"}
+    if path.endswith("/v2/sync/freshness"):
+        return {
+            "server_time": _NOW,
+            "shop_pk": 7,
+            "shop_id": "TEST_shop",
+            "sources": [
+                {"key": "ads", "label": "广告", "synced_at": _NOW,
+                 "scope": "shop", "basis": "rows", "severity": "ok",
+                 "detail": "该店广告事实最近写入"},
+                {"key": "orders", "label": "订单", "synced_at": _NOW,
+                 "scope": "shop", "basis": "job", "job_name": "tiktok.orders",
+                 "severity": "ok", "detail": "最近一次成功同步"},
+                {"key": "logistics", "label": "物流", "synced_at": "2026-09-01T00:00:00+00:00",
+                 "scope": "shop", "basis": "job", "job_name": "tiktok.logistics",
+                 "severity": "crit", "detail": "最近一次成功同步"},
+                {"key": "miaoshou", "label": "妙手", "synced_at": _NOW,
+                 "scope": "system", "basis": "job", "job_name": "miaoshou.packages",
+                 "severity": "warn", "detail": "最近成功：miaoshou.packages"},
+            ],
+        }
     if path.endswith("/v2/reporting/coverage"):
         return {"costed_spus": 1145, "linked_spus": 1200, "total_spus": 1234,
                 "coverage_rate": "0.928", "as_of": "2026-10-01"}
