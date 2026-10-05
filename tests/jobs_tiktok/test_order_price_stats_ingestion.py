@@ -42,6 +42,47 @@ def _backfill_module():
     return module
 
 
+@pytest.fixture(autouse=True)
+def _cleanup_price_test_rows(db_engine):
+    yield
+    if not inspect(db_engine).has_table(
+        "sales_order_line_price_observations", schema="commerce"
+    ):
+        return
+    with db_engine.begin() as connection:
+        connection.execute(
+            text(
+                "DELETE FROM commerce.sales_order_line_price_observations "
+                "WHERE order_pk IN (SELECT id FROM commerce.sales_orders "
+                "WHERE order_id LIKE 'TEST_PRICE_%')"
+            )
+        )
+        connection.execute(
+            text(
+                "DELETE FROM commerce.sales_order_lines WHERE order_pk IN "
+                "(SELECT id FROM commerce.sales_orders WHERE order_id LIKE 'TEST_PRICE_%')"
+            )
+        )
+        connection.execute(
+            text("DELETE FROM commerce.sales_orders WHERE order_id LIKE 'TEST_PRICE_%'")
+        )
+        connection.execute(
+            text("DELETE FROM integration.raw_records WHERE external_id LIKE 'TEST_PRICE_%'")
+        )
+        connection.execute(
+            text("DELETE FROM integration.sync_issues WHERE external_id LIKE 'TEST_PRICE_%'")
+        )
+        connection.execute(
+            text("DELETE FROM commerce.shops WHERE shop_id LIKE 'TEST_PRICE_SHOP_%'")
+        )
+        connection.execute(
+            text(
+                "DELETE FROM integration.credentials "
+                "WHERE external_account_id LIKE 'TEST_PRICE_CRED_%'"
+            )
+        )
+
+
 @pytest.fixture
 def price_observation_schema(db_engine):
     """Apply this lane's migration inside the isolated test clone."""
