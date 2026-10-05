@@ -4671,6 +4671,9 @@ def test_spu_roi_frontend_only_displays_backend_profitability() -> None:
     assert "fx.as_of_at" in src
     assert "0.308" not in src
     assert "盈利 v10" not in src
+    assert "未退款订单" not in src
+    assert "占窗口 GMV" not in src
+    assert 'shop_estimate: "实测"' in src
     assert "settledCount > 0" not in src
     assert "state.meta.presentation" in src
 

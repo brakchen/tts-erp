@@ -225,6 +225,58 @@ a:hover {
  user-select: none;
 }
 
+/* 佣金费率条：正常是纸色事实，不是告警。回退基线才用危险色。 */
+.op-fee-bar {
+ display: flex;
+ flex-wrap: wrap;
+ align-items: center;
+ gap: 6px 14px;
+ padding: 7px 12px;
+ border: 1px solid var(--rule-soft);
+ background: color-mix(in srgb, var(--paper) 78%, white);
+ color: var(--ink-soft);
+ font-size: 13px;
+ line-height: 1.4;
+}
+.op-fee-bar[data-source="shop_estimate"] {
+ border-color: color-mix(in srgb, var(--ok) 32%, var(--rule));
+}
+.op-fee-bar[data-source="user_override"] {
+ border-color: color-mix(in srgb, var(--accent) 42%, var(--rule));
+}
+.op-fee-bar[data-source="baseline"],
+.op-fee-bar[data-source="mixed"] {
+ border-color: color-mix(in srgb, var(--danger) 46%, var(--rule));
+ background: color-mix(in srgb, var(--danger) 7%, var(--paper));
+}
+.op-fee-source {
+ font-size: 12px;
+ font-weight: 600;
+ letter-spacing: 0.08em;
+ color: var(--ok);
+}
+.op-fee-bar[data-source="user_override"] .op-fee-source {
+ color: var(--accent);
+}
+.op-fee-bar[data-source="baseline"] .op-fee-source,
+.op-fee-bar[data-source="mixed"] .op-fee-source {
+ color: var(--danger);
+}
+.op-fee-rate {
+ font-family: var(--mono);
+ font-size: 14px;
+ font-variant-numeric: tabular-nums;
+ color: var(--ink);
+}
+.op-fee-meta {
+ color: var(--muted);
+ font-size: 12px;
+}
+.op-fee-fallback {
+ color: var(--danger);
+ font-size: 12px;
+}
+
 /* ═══ 结余带 ═══ */
 .op-counter {
  border-bottom: 1px solid var(--rule);
