@@ -87,6 +87,14 @@ class ArtemisClient:
     async def check_available(self) -> None:
         await self._request("GET", "/api/status")
 
+    async def list_devices(self) -> list[dict]:
+        """Live device list from Artemis (design §21.15) for the page picker."""
+        payload = await self._request("GET", "/api/devices")
+        devices = payload.get("devices")
+        if not isinstance(devices, list):
+            return []
+        return [item for item in devices if isinstance(item, dict)]
+
     async def submit(
         self,
         *,

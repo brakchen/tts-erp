@@ -2,3 +2,4 @@
 @media(min-width:721px) and (max-width:900px){.publish-main{padding:20px}.publish-workbench{grid-template-columns:minmax(0,3fr) minmax(260px,2fr);gap:18px}.publish-rail-section,.publish-workbench,.publish-history{padding:18px}#publish-task-drawer{width:min(560px,72vw)}}
 @media(max-width:390px){.publish-main{padding:12px}.publish-rail-section,.publish-workbench,.publish-history{padding:12px}.history-toolbar>div{align-items:stretch}.history-toolbar select,.history-toolbar button{width:100%}#publish-task-drawer{padding:18px;width:100vw}.filter-tabs button{flex:1 1 42%}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+#publish-device-select{width:100%;max-width:28rem;margin-top:6px;border:1px solid var(--rule);border-radius:var(--radius);background:var(--paper);color:var(--ink);padding:9px;font-family:var(--sans)}

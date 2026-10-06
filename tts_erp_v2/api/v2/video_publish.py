@@ -30,6 +30,7 @@ from tts_erp_v2.db.models.publishing import (
     VideoPublishAttempt,
     VideoPublishTask,
 )
+from tts_erp_v2.publishing.artemis_client import ArtemisClient, ArtemisTransportError
 from tts_erp_v2.publishing.diagnostics import sanitize_artemis_output, sanitize_text
 from tts_erp_v2.publishing.domain import allowed_actions, cleanup_retryable_resources
 from tts_erp_v2.publishing.object_store import VideoObjectStore, video_store_from_env
@@ -86,6 +87,7 @@ class CreateIn(BaseModel):
     content_type: str = Field(alias="contentType")
     size_bytes: int = Field(alias="sizeBytes", gt=0)
     caption: str
+    device_serial: str | None = Field(default=None, alias="deviceSerial")
 
     model_config = {"populate_by_name": True}
 
@@ -620,6 +622,45 @@ def config(request: Request, session: Annotated[Session, Depends(get_session)]) 
     }
 
 
+@router.get("/devices")
+async def devices(request: Request) -> dict:
+    """Live Artemis device list for the page picker (design §21.15)."""
+    base_url = os.environ.get("ARTEMIS_BASE_URL", "").strip()
+    if not base_url:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            _error_detail(
+                request, "ARTEMIS_UNREACHABLE", "ARTEMIS_UNREACHABLE", retryable=True
+            ),
+        )
+    client = ArtemisClient(base_url, token=os.environ.get("ARTEMIS_TOKEN") or None)
+    try:
+        raw = await client.list_devices()
+    except ArtemisTransportError as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            _error_detail(
+                request, "ARTEMIS_UNREACHABLE", "ARTEMIS_UNREACHABLE", retryable=True
+            ),
+        ) from exc
+    # Only whitelisted fields: never forward active_task_desc / session ids.
+    return {
+        "devices": [
+            {
+                "serial": item["serial"][:64],
+                "serialMasked": mask_device_serial(item["serial"]),
+                "model": sanitize_text(str(item.get("model") or ""))[:64],
+                "product": sanitize_text(str(item.get("product") or ""))[:64],
+                "state": str(item.get("state") or "unknown")[:32],
+                "isBusy": bool(item.get("is_busy")),
+                "isEmulator": bool(item.get("is_emulator")),
+            }
+            for item in raw
+            if isinstance(item.get("serial"), str) and item["serial"]
+        ]
+    }
+
+
 @router.post("/tasks", status_code=status.HTTP_201_CREATED)
 def create_task(
     body: CreateIn,
@@ -639,6 +680,7 @@ def create_task(
                 content_type=body.content_type,
                 size_bytes=body.size_bytes,
                 caption=body.caption,
+                device_serial=body.device_serial,
                 actor_user_id=request.scope.get("user_id"),
                 actor_key_hash=caller_key_hash(request),
             ),

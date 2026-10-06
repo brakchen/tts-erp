@@ -39,6 +39,7 @@ from tts_erp_v2.storage.minio_client import ObjectNotFound
 _BUCKET = os.environ.get("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video")
 _PACKAGE = os.environ.get("ARTEMIS_APP_PACKAGE", "com.zhiliaoapp.musically")
 MAX_UPLOAD_TICKET_TTL = timedelta(days=7)
+_DEVICE_SERIAL_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 
 
 def max_video_bytes() -> int:
@@ -115,6 +116,7 @@ class CreateCommand:
     content_type: str
     size_bytes: int
     caption: str
+    device_serial: str | None = None
     actor_user_id: int | None = None
     actor_key_hash: str | None = None
 
@@ -165,9 +167,14 @@ def create_upload_ticket(
         raise ValueError("VIDEO_TOO_LARGE")
     if not caption.strip():
         raise ValueError("CAPTION_REQUIRED")
-    device_serial = configured_device_serial()
-    if not device_serial:
-        raise ValueError("DEVICE_NOT_CONFIGURED")
+    if command.device_serial is None:
+        device_serial = configured_device_serial()
+        if not device_serial:
+            raise ValueError("DEVICE_NOT_CONFIGURED")
+    else:
+        device_serial = command.device_serial.strip()
+        if not _DEVICE_SERIAL_RE.fullmatch(device_serial):
+            raise ValueError("DEVICE_SERIAL_INVALID")
     if getattr(store, "bucket", configured_bucket()) != configured_bucket():
         raise ValueError("PUBLISH_BUCKET_MISMATCH")
     if len(caption) > max_caption_chars():

@@ -1757,6 +1757,8 @@ X-Requested-With: tts-erp
 
 相同 `clientRequestId` 但 payload 不同返回 409 `IDEMPOTENCY_PAYLOAD_MISMATCH`。
 
+可选字段 `deviceSerial`（string，缺省不发送）指定目标设备。缺省或 `null` 时回退到配置的 `ARTEMIS_DEVICE_SERIAL`；显式提供时必须匹配 `^[A-Za-z0-9._:-]{1,64}$`，空串或非法字符返回 422 `DEVICE_SERIAL_INVALID`。创建时不探测设备在线状态——未知/离线设备由 Artemis 在提交阶段拒绝（§411），offline/locked/busy 仍允许排队。页面从 §21.15 的设备列表选择后随创建请求发送；列表接口不可用时前端省略该字段并回退配置设备。相同幂等键重放以已存在任务为准（重放不校验 `deviceSerial`，响应中的 `target.deviceSerialMasked` 是任务实际设备的快照）。
+
 ### 21.4 浏览器 PUT MinIO
 
 ```http
@@ -1997,6 +1999,7 @@ X-Requested-With: tts-erp
 | `VIDEO_TOO_LARGE` | 413 | 是 | 重新选择较小文件。 |
 | `CAPTION_REQUIRED` | 422 | 是 | 聚焦文案框。 |
 | `CAPTION_TOO_LONG` | 422 | 是 | 展示上限并聚焦文案框。 |
+| `DEVICE_SERIAL_INVALID` | 422 | 否 | 重新选择设备。 |
 | `IDEMPOTENCY_PAYLOAD_MISMATCH` | 409 | 否 | 生成新的 clientRequestId 后重新创建。 |
 | `UPLOAD_NOT_FOUND` | 422 | 是 | 重试上传。 |
 | `UPLOAD_SIZE_MISMATCH` | 422 | 是 | 重试上传。 |
@@ -2017,6 +2020,34 @@ X-Requested-With: tts-erp
 | `RETRY_BUDGET_EXHAUSTED` | 409 | 否 | 查看历史，不再自动重试。 |
 | `CLEANUP_FAILED` | 503 | 是 | 显示重试清理。 |
 
+### 21.15 设备列表
+
+```http
+GET /v2/video-publish/devices
+```
+
+代理 Artemis `GET /api/devices`，供页面设备选择器展示当前可选设备：
+
+```json
+{
+  "devices": [
+    {
+      "serial": "D123084100AC",
+      "serialMasked": "D123…00AC",
+      "model": "NX712J",
+      "product": "CN_PQ82A11",
+      "state": "device",
+      "isBusy": false,
+      "isEmulator": false
+    }
+  ]
+}
+```
+
+- 选择面返回精确 `serial`：创建请求必须回传它（§21.3），且该端点与 `/config` 同属 `page:video-publish` 已授权面；任务列表/详情/指标继续只返回掩码。不透传 `active_task_desc`、`active_session_id` 等可能含文案或会话信息的字段。
+- Artemis 不可达或未配置 `ARTEMIS_BASE_URL` 时返回 503 `ARTEMIS_UNREACHABLE`（可重试）；前端此时隐藏选择器并回退配置设备。
+- 设备 offline/locked/busy 不阻止展示与创建排队任务。
+
 ## 22. 前端实现规格
 
 ### 22.1 页面组件树
@@ -2034,6 +2065,7 @@ VideoPublishPage
 ├── SubmissionWorkbench
 │   ├── VideoPickerAndPreview
 │   ├── CaptionEditor
+│   ├── DevicePicker
 │   ├── DispatchSummary
 │   └── SubmitFooter
 ├── TaskHistory
@@ -2062,6 +2094,7 @@ VideoPublishPage
 | --- | --- | --- |
 | 页面 notice | `#publish-notice` | 全局非阻塞提示，`aria-live=polite`。 |
 | 设备状态 | `#publish-device-status` | ready/busy/offline/locked/unknown。 |
+| 设备选择 | `#publish-device-select` | select：首项为配置默认设备，其余来自 §21.15 实时列表；列表不可用时仅剩默认项。 |
 | 刷新模式 | `#publish-refresh-mode` | select：smart/2/5/10/30/off。 |
 | 上次刷新 | `#publish-last-refreshed` | 服务端时间和本地展示。 |
 | 立即刷新 | `#publish-refresh-now` | 手动执行 current/list/detail refresh。 |

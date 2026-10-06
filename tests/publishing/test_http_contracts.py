@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
@@ -15,6 +15,8 @@ from tts_erp_v2.db.models.publishing import (
     VideoPublishAttempt,
     VideoPublishTask,
 )
+from tts_erp_v2.publishing.artemis_client import ArtemisClient, ArtemisTransportError
+from tts_erp_v2.publishing.safe_values import mask_device_serial
 
 
 class _UploadStore:
@@ -301,3 +303,171 @@ def test_verify_http_contract_blocks_on_global_cleanup_and_running_task(
         delete(VideoPublishTask).where(VideoPublishTask.id == cleanup_pk)
     )
     db_session.commit()
+
+
+def test_create_task_device_serial_override_default_and_invalid(
+    db_session: Session, monkeypatch
+) -> None:
+    """POST /tasks honours optional deviceSerial (design §21.3): an explicit
+    serial is snapshotted onto the task, omission falls back to
+    ARTEMIS_DEVICE_SERIAL, and malformed or explicitly-empty serials fail with
+    422 DEVICE_SERIAL_INVALID. Replaying the idempotency key without
+    deviceSerial keeps the original task and its device snapshot."""
+    monkeypatch.setenv("ARTEMIS_DEVICE_SERIAL", "TEST_device")
+    monkeypatch.setenv("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video")
+    monkeypatch.setenv("TIKTOK_PUBLISH_UPLOAD_TTL_SECONDS", "120")
+    app = FastAPI()
+    app.include_router(video_publish.router)
+
+    @app.middleware("http")
+    async def test_auth(request: Request, call_next):
+        request.scope["auth_method"] = "bearer"
+        request.scope["api_key_role"] = "readwrite"
+        request.scope["api_key_hash"] = "key-a"
+        return await call_next(request)
+
+    db_session.add(
+        PublishWorkerHeartbeat(
+            instance_id="TEST-device-worker",
+            hostname="TEST-host",
+            pid=2425,
+            status="ready",
+            device_status="ready",
+            started_at=datetime.now(UTC),
+            heartbeat_at=datetime.now(UTC),
+        )
+    )
+    db_session.commit()
+    store = _UploadStore(db_session)
+    app.dependency_overrides[deps.get_session] = lambda: db_session
+    app.dependency_overrides[video_publish.get_session] = lambda: db_session
+    app.dependency_overrides[video_publish.get_store] = lambda: store
+
+    def payload(request_id: str, **extra) -> dict:
+        return {
+            "clientRequestId": request_id,
+            "filename": "TEST_device.mp4",
+            "contentType": "video/mp4",
+            "sizeBytes": 4,
+            "caption": "TEST_device_caption",
+            **extra,
+        }
+
+    def task_for(request_id: str) -> VideoPublishTask:
+        return db_session.scalar(
+            select(VideoPublishTask).where(
+                VideoPublishTask.client_request_id == UUID(request_id)
+            )
+        )
+
+    with TestClient(app) as client:
+        override_id = "00000000-0000-0000-0000-000000000d01"
+        override = client.post(
+            "/v2/video-publish/tasks",
+            json=payload(override_id, deviceSerial="TEST_other_device"),
+        )
+        assert override.status_code == 201
+        assert task_for(override_id).target_device_serial == "TEST_other_device"
+
+        default_id = "00000000-0000-0000-0000-000000000d02"
+        default = client.post("/v2/video-publish/tasks", json=payload(default_id))
+        assert default.status_code == 201
+        assert task_for(default_id).target_device_serial == "TEST_device"
+
+        invalid_id = "00000000-0000-0000-0000-000000000d03"
+        invalid = client.post(
+            "/v2/video-publish/tasks",
+            json=payload(invalid_id, deviceSerial="bad serial!"),
+        )
+        assert invalid.status_code == 422
+        assert invalid.json()["detail"]["code"] == "DEVICE_SERIAL_INVALID"
+        assert invalid.json()["detail"]["retryable"] is False
+
+        empty_id = "00000000-0000-0000-0000-000000000d04"
+        empty = client.post(
+            "/v2/video-publish/tasks",
+            json=payload(empty_id, deviceSerial=""),
+        )
+        assert empty.status_code == 422
+        assert empty.json()["detail"]["code"] == "DEVICE_SERIAL_INVALID"
+
+        replay = client.post("/v2/video-publish/tasks", json=payload(override_id))
+        assert replay.status_code == 200
+        assert replay.json()["idempotentReplay"] is True
+        assert task_for(override_id).target_device_serial == "TEST_other_device"
+
+    app.dependency_overrides.clear()
+
+
+def test_devices_endpoint_proxies_artemis_and_fails_closed(
+    db_session: Session, monkeypatch
+) -> None:
+    """GET /devices (design §21.15) proxies Artemis GET /api/devices with the
+    exact serial plus its masked twin, never forwards task/session text, and
+    maps an unreachable or unconfigured Artemis to 503 ARTEMIS_UNREACHABLE."""
+    monkeypatch.setenv("ARTEMIS_BASE_URL", "http://artemis.test:8001")
+    app = FastAPI()
+    app.include_router(video_publish.router)
+
+    @app.middleware("http")
+    async def test_auth(request: Request, call_next):
+        request.scope["auth_method"] = "bearer"
+        request.scope["api_key_role"] = "readwrite"
+        request.scope["api_key_hash"] = "key-a"
+        return await call_next(request)
+
+    app.dependency_overrides[deps.get_session] = lambda: db_session
+    app.dependency_overrides[video_publish.get_session] = lambda: db_session
+
+    async def fake_request(self, method, path, **kwargs):
+        assert (method, path) == ("GET", "/api/devices")
+        return {
+            "devices": [
+                {
+                    "serial": "TEST_device_A",
+                    "state": "device",
+                    "model": "NX712J",
+                    "product": "CN_TEST",
+                    "is_emulator": False,
+                    "is_busy": True,
+                    "active_pid": 42,
+                    "active_task_desc": "TEST prompt secret",
+                    "active_session_id": "TEST-session",
+                    "acquired_at": None,
+                }
+            ]
+        }
+
+    monkeypatch.setattr(ArtemisClient, "_request", fake_request)
+    with TestClient(app) as client:
+        ok = client.get("/v2/video-publish/devices")
+        assert ok.status_code == 200
+        devices = ok.json()["devices"]
+        assert len(devices) == 1
+        device = devices[0]
+        assert device["serial"] == "TEST_device_A"
+        assert device["serialMasked"] == mask_device_serial("TEST_device_A")
+        assert device["model"] == "NX712J"
+        assert device["product"] == "CN_TEST"
+        assert device["state"] == "device"
+        assert device["isBusy"] is True
+        assert device["isEmulator"] is False
+        assert "activeTaskDesc" not in device
+        assert "activeSessionId" not in device
+
+        async def fail_request(self, method, path, **kwargs):
+            raise ArtemisTransportError("ARTEMIS_TRANSPORT_ERROR")
+
+        monkeypatch.setattr(ArtemisClient, "_request", fail_request)
+        down = client.get("/v2/video-publish/devices")
+        assert down.status_code == 503
+        detail = down.json()["detail"]
+        assert detail["code"] == "ARTEMIS_UNREACHABLE"
+        assert detail["retryable"] is True
+
+        monkeypatch.delenv("ARTEMIS_BASE_URL")
+        unconfigured = client.get("/v2/video-publish/devices")
+        assert unconfigured.status_code == 503
+        assert unconfigured.json()["detail"]["code"] == "ARTEMIS_UNREACHABLE"
+
+    app.dependency_overrides.clear()

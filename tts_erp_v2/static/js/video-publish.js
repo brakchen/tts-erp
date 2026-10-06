@@ -7,6 +7,8 @@
   const REFRESH_KEY = "tts-erp.video-publish.refresh-preference";
   const state = {
     config: null,
+    devices: [],
+    deviceSerial: "",
     file: null,
     url: null,
     filter: "",
@@ -105,6 +107,7 @@
     const lifecycleBusy = Boolean(state.upload) || state.creating;
     $("publish-video-file").disabled = lifecycleBusy;
     $("publish-caption").disabled = lifecycleBusy;
+    $("publish-device-select").disabled = lifecycleBusy;
     const reselect = $("publish-file-reselect");
     const clear = $("publish-file-clear");
     reselect.hidden = !file;
@@ -177,6 +180,47 @@
     renderForm();
   }
 
+  async function loadDevices() {
+    try {
+      const data = await request("/devices");
+      const select = $("publish-device-select");
+      if (!data.notModified) {
+        state.devices = Array.isArray(data.devices) ? data.devices : [];
+        const fallback = document.createElement("option");
+        fallback.value = "";
+        fallback.textContent = `默认 · ${state.config.target.deviceSerialMasked || "未配置"}`;
+        select.replaceChildren(fallback);
+        state.devices.forEach((device) => {
+          const option = document.createElement("option");
+          option.value = device.serial;
+          const busy = device.isBusy ? " · 忙" : "";
+          option.textContent = `${device.serialMasked} · ${device.model || device.product || "未知机型"}${busy}`;
+          select.append(option);
+        });
+        select.onchange = () => {
+          state.deviceSerial = select.value;
+          renderDeviceTarget();
+        };
+      }
+      select.hidden = false;
+      select.disabled = false;
+    } catch (error) {
+      notice(`设备列表暂不可用，使用默认设备（${error.message}）`, true);
+    }
+  }
+
+  function currentDeviceMasked() {
+    if (state.deviceSerial) {
+      const device = state.devices.find((item) => item.serial === state.deviceSerial);
+      return device ? device.serialMasked : state.deviceSerial;
+    }
+    return state.config?.target?.deviceSerialMasked || "未配置";
+  }
+
+  function renderDeviceTarget() {
+    $("publish-target-device").textContent = currentDeviceMasked();
+  }
+
   async function init() {
     try {
       state.config = await request("/config");
@@ -189,6 +233,7 @@
       if (saved && ["off", "smart", "2", "5", "10", "30"].includes(saved)) {
         $("publish-refresh-mode").value = saved;
       }
+      await loadDevices();
       renderForm();
       await refresh();
       schedule();
@@ -222,7 +267,7 @@
     const preview = $("publish-confirm-preview");
     preview.src = state.url || "";
     preview.hidden = !state.url;
-    $("publish-confirm-device").textContent = state.config.target.deviceSerialMasked || "—";
+    $("publish-confirm-device").textContent = currentDeviceMasked();
     $("publish-confirm-album").textContent = state.config.target.album || "—";
     return showConfirmationDialog(dialog);
   }
@@ -246,6 +291,7 @@
           contentType: "video/mp4",
           sizeBytes: file.size,
           caption,
+          ...(state.deviceSerial ? { deviceSerial: state.deviceSerial } : {}),
         }),
       });
       upload.taskId = ticket.taskId;
