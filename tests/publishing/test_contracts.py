@@ -112,6 +112,8 @@ def test_video_store_from_env_binds_dedicated_bucket(
     monkeypatch.setenv("MINIO_BUCKET", "tts-erp-spu-images")
     monkeypatch.setenv("MINIO_SECURE", "false")
     monkeypatch.setenv("MINIO_REGION", "us-east-1")
+    # worktree 默认不带 .env（gitignored），必须自带完整必填项才能跨环境复现
+    monkeypatch.setenv("MINIO_PRESIGN_EXPIRY_SECONDS", "900")
     monkeypatch.setenv("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video")
 
     store = video_store_from_env()
