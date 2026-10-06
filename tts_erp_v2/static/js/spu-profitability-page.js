@@ -1254,6 +1254,12 @@
   function renderPriceMessage(message) {
     var box = document.getElementById("price-summary");
     if (!box) return;
+    if (state.priceCapability === false) {
+      // 已知不支持：box 维持隐藏。否则一次加载失败会让 box 以"加载失败 · …"
+      // 冒出来，又被下一次成功响应的 renderPriceStats() 隐藏(同类 appear→disappear)。
+      box.hidden = true;
+      return;
+    }
     box.hidden = false;
     box.setAttribute("aria-busy", "false");
     var status = document.getElementById("price-summary-status");

@@ -474,3 +474,68 @@ def test_supported_price_payload_shows_loading_then_values_on_next_load(
     value_at = max(i for i, s in enumerate(timeline) if s["purchaseMean"] == "≈11.0000")
     assert loading_at < value_at, timeline
     assert page.locator("#price-purchase-mean").inner_text() == "≈11.0000"
+
+
+# ── 已知 capability=false 后的一次 5xx 不得让价格 box 冒出来 ───────────────────
+#
+# 现场：legacy 部署(响应不含 nested `priceStats`)下 `state.priceCapability` 落为
+# false，`#price-summary` 已隐藏。此后一次加载失败会走 `renderError()` →
+# `renderPriceMessage()`，那里无条件 `box.hidden = false`，box 以"加载失败 · …"
+# 冒出来；下一通用响应再被 `renderPriceStats()` 隐藏——与
+# `renderPriceLoading()` 写下的"未知或已知不支持：不显示 box"直接冲突。
+#
+# 失败信息与 retry 入口保留在表体(`#retry-link`)，不丢设计 §6.3 的 error + retry。
+# 探针通过 `add_init_script` 拦 `window.fetch`：`/v2/analytics/spu-roi` 首通放行
+# (真实 200 无 priceStats)，`arm` 后一律回 503——DOM 真实断言，不 grep 源码。
+_PRICE_CAPABILITY_FALSE_5XX_JS = """(() => {
+  const nativeFetch = window.fetch.bind(window);
+  const track = window.__priceCapabilityFalse = { calls: [], arm: false, injected: 0 };
+  window.fetch = function (input, init) {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (url.indexOf('/v2/analytics/spu-roi') < 0) return nativeFetch(input, init);
+    track.calls.push(url);
+    if (!track.arm) return nativeFetch(input, init);
+    track.injected += 1;
+    return Promise.resolve(new Response(
+      JSON.stringify({ detail: 'TEST_price_upstream_503' }),
+      { status: 503, headers: { 'Content-Type': 'application/json' } },
+    ));
+  };
+})();
+"""
+
+
+def test_capability_false_with_5xx_keeps_price_summary_hidden(browser_renderer):
+    """已知 capability=false 后再吃一次 5xx：价格 box 保持 hidden，不写"加载失败"。"""
+    page = browser_renderer.open("/v2/pages/spu-roi?shop_pk=7")
+    page.add_init_script(_PRICE_CAPABILITY_FALSE_5XX_JS)
+    # add_init_script 只对之后的导航生效，重载一次让探针在文档脚本之前装好。
+    page.reload(wait_until="domcontentloaded")
+    # 首次 200(真实 legacy 载荷，无 priceStats)渲染完 → capability 落为 false。
+    page.locator(".tabulator-row").first.wait_for(state="visible")
+    assert page.locator("#price-summary").is_hidden()
+    assert page.evaluate("() => window.__priceCapabilityFalse.calls.length") >= 1
+
+    page.evaluate("() => { window.__priceCapabilityFalse.arm = true; }")
+    page.evaluate(
+        """() => {
+          const input = document.querySelector('#filter-w-start');
+          input.value = '2026-09-11';
+          input.dispatchEvent(new Event('change', {bubbles: true}));
+        }"""
+    )
+    # 表体出现错误占位 + retry 入口 = 5xx 真的走到了 renderError()，用例非空转。
+    page.locator("#retry-link").wait_for(state="visible")
+    assert page.evaluate("() => window.__priceCapabilityFalse.injected") >= 1
+    assert "TEST_price_upstream_503" in page.evaluate("() => document.body.textContent")
+
+    assert page.locator("#price-summary").is_hidden()
+    assert page.evaluate(
+        "() => document.getElementById('price-summary-status').textContent"
+    ) == ""
+    assert "加载失败" not in page.evaluate(
+        "() => document.getElementById('price-summary').textContent"
+    )
+    assert "加载失败" not in page.evaluate(
+        "() => document.getElementById('price-purchase-mean').textContent"
+    )
