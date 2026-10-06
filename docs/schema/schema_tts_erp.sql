@@ -80,6 +80,11 @@ CREATE SCHEMA plugin;
 CREATE SCHEMA procurement;
 
 
+-- Name: publishing; Type: SCHEMA; Schema: -; Owner: -
+
+CREATE SCHEMA publishing;
+
+
 -- Name: reporting; Type: SCHEMA; Schema: -; Owner: -
 
 CREATE SCHEMA reporting;
@@ -128,6 +133,58 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+
+
+-- Name: fn_immutable_video_publish_attempt_identity(); Type: FUNCTION; Schema: publishing; Owner: -
+
+CREATE OR REPLACE FUNCTION publishing.fn_immutable_video_publish_attempt_identity() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+        BEGIN
+            IF NEW.task_id IS DISTINCT FROM OLD.task_id
+               OR NEW.sequence_no IS DISTINCT FROM OLD.sequence_no
+               OR NEW.kind IS DISTINCT FROM OLD.kind
+               OR NEW.related_attempt_id IS DISTINCT FROM OLD.related_attempt_id
+               OR NEW.artemis_session_id IS DISTINCT FROM OLD.artemis_session_id
+               OR NEW.prompt_version IS DISTINCT FROM OLD.prompt_version
+               OR NEW.prompt_snapshot IS DISTINCT FROM OLD.prompt_snapshot
+               OR NEW.device_serial IS DISTINCT FROM OLD.device_serial
+               OR NEW.device_path IS DISTINCT FROM OLD.device_path
+               OR NEW.target_app_package IS DISTINCT FROM OLD.target_app_package
+               OR NEW.artemis_profile IS DISTINCT FROM OLD.artemis_profile
+               OR NEW.artemis_verification_level IS DISTINCT FROM OLD.artemis_verification_level THEN
+                RAISE EXCEPTION
+                    'video publish attempt identity fields are immutable'
+                    USING ERRCODE = '23514';
+            END IF;
+            RETURN NEW;
+        END
+        $$;
+
+
+-- Name: fn_validate_video_publish_related_attempt(); Type: FUNCTION; Schema: publishing; Owner: -
+
+CREATE OR REPLACE FUNCTION publishing.fn_validate_video_publish_related_attempt() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+        DECLARE related_task_id bigint;
+        DECLARE related_kind text;
+        BEGIN
+            IF NEW.kind = 'verify' THEN
+                SELECT task_id, kind INTO related_task_id, related_kind
+                FROM publishing.video_publish_attempts
+                WHERE id = NEW.related_attempt_id;
+                IF related_task_id IS NULL
+                   OR related_task_id <> NEW.task_id
+                   OR related_kind <> 'publish' THEN
+                    RAISE EXCEPTION
+                        'verify related attempt must reference a publish attempt in the same task'
+                        USING ERRCODE = '23514';
+                END IF;
+            END IF;
+            RETURN NEW;
+        END
+        $$;
 
 
 
@@ -1571,6 +1628,141 @@ CREATE TABLE IF NOT EXISTS public.alembic_version (
 );
 
 
+-- Name: video_publish_attempts; Type: TABLE; Schema: publishing; Owner: -
+
+CREATE TABLE IF NOT EXISTS publishing.video_publish_attempts (
+    id bigint NOT NULL,
+    task_id bigint NOT NULL,
+    sequence_no integer NOT NULL,
+    kind text NOT NULL,
+    related_attempt_id bigint,
+    artemis_session_id uuid NOT NULL,
+    status text DEFAULT 'created'::text NOT NULL,
+    prompt_version text NOT NULL,
+    prompt_snapshot text NOT NULL,
+    device_serial text NOT NULL,
+    device_path text,
+    artemis_output jsonb,
+    artemis_error text,
+    steps_count integer,
+    submit_retry_count integer DEFAULT 0 NOT NULL,
+    last_polled_at timestamp with time zone,
+    retry_classification text,
+    retry_safe boolean,
+    submitted_at timestamp with time zone,
+    started_at timestamp with time zone,
+    finished_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    target_app_package text DEFAULT 'com.zhiliaoapp.musically'::text NOT NULL,
+    artemis_profile text DEFAULT 'pro'::text NOT NULL,
+    artemis_verification_level text DEFAULT 'strict'::text NOT NULL,
+    CONSTRAINT video_publish_attempt_kind_check CHECK ((kind = ANY (ARRAY['publish'::text, 'verify'::text]))),
+    CONSTRAINT video_publish_attempt_related_check CHECK ((((kind = 'publish'::text) AND (related_attempt_id IS NULL)) OR ((kind = 'verify'::text) AND (related_attempt_id IS NOT NULL)))),
+    CONSTRAINT video_publish_attempt_status_check CHECK ((status = ANY (ARRAY['created'::text, 'submitting'::text, 'queued'::text, 'running'::text, 'success'::text, 'failed'::text, 'rejected'::text, 'cancelled'::text, 'unknown'::text])))
+);
+
+
+
+ALTER TABLE publishing.video_publish_attempts ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME publishing.video_publish_attempts_id_seq
+);
+
+
+-- Name: video_publish_tasks; Type: TABLE; Schema: publishing; Owner: -
+
+CREATE TABLE IF NOT EXISTS publishing.video_publish_tasks (
+    id bigint NOT NULL,
+    public_id uuid DEFAULT gen_random_uuid() NOT NULL,
+    client_request_id uuid NOT NULL,
+    created_by_user_id bigint,
+    caption text NOT NULL,
+    original_filename text NOT NULL,
+    content_type text NOT NULL,
+    size_bytes bigint NOT NULL,
+    object_bucket text NOT NULL,
+    object_key text NOT NULL,
+    object_etag text,
+    object_sha256 text,
+    object_uploaded_at timestamp with time zone,
+    object_deleted_at timestamp with time zone,
+    status text DEFAULT 'pending'::text NOT NULL,
+    stage text DEFAULT 'awaiting_upload'::text NOT NULL,
+    attempt_count integer DEFAULT 0 NOT NULL,
+    next_attempt_at timestamp with time zone,
+    lease_owner text,
+    lease_expires_at timestamp with time zone,
+    heartbeat_at timestamp with time zone,
+    row_version integer DEFAULT 1 NOT NULL,
+    target_device_serial text NOT NULL,
+    target_app_package text NOT NULL,
+    device_path text,
+    last_error_code text,
+    last_error_message text,
+    device_cleanup_status text DEFAULT 'not_started'::text NOT NULL,
+    device_cleanup_error text,
+    spool_cleanup_status text DEFAULT 'not_started'::text NOT NULL,
+    spool_cleanup_error text,
+    object_cleanup_status text DEFAULT 'not_started'::text NOT NULL,
+    object_cleanup_error text,
+    queued_at timestamp with time zone,
+    started_at timestamp with time zone,
+    completed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    device_cleanup_attempts integer DEFAULT 0 NOT NULL,
+    device_cleanup_next_attempt_at timestamp with time zone,
+    object_cleanup_attempts integer DEFAULT 0 NOT NULL,
+    object_cleanup_next_attempt_at timestamp with time zone,
+    spool_cleanup_attempts integer DEFAULT 0 NOT NULL,
+    spool_cleanup_next_attempt_at timestamp with time zone,
+    created_by_key_hash text,
+    cleanup_intent text DEFAULT 'none'::text NOT NULL,
+    cleanup_lease_owner text,
+    cleanup_lease_expires_at timestamp with time zone,
+    cleanup_heartbeat_at timestamp with time zone,
+    stage_started_at timestamp with time zone DEFAULT now() NOT NULL,
+    publish_budget_used integer DEFAULT 0 NOT NULL,
+    object_filename text DEFAULT 'video.mp4'::text NOT NULL,
+    spool_path text,
+    object_generation uuid DEFAULT gen_random_uuid() NOT NULL,
+    object_upload_expires_at timestamp with time zone,
+    execution_generation uuid,
+    CONSTRAINT video_publish_task_budget_check CHECK (((attempt_count >= 0) AND (publish_budget_used >= 0) AND (publish_budget_used <= attempt_count))),
+    CONSTRAINT video_publish_task_cleanup_intent_check CHECK ((cleanup_intent = ANY (ARRAY['none'::text, 'finalize_success'::text, 'requeue_publish'::text, 'preserve_state'::text]))),
+    CONSTRAINT video_publish_task_cleanup_owner_check CHECK ((((cleanup_intent = 'none'::text) AND (cleanup_lease_owner IS NULL) AND (cleanup_lease_expires_at IS NULL) AND (((status = 'running'::text) AND (lease_owner IS NOT NULL) AND (stage = ANY (ARRAY['downloading'::text, 'staging_device'::text, 'dispatching_artemis'::text, 'waiting_artemis'::text, 'verifying'::text])) AND (object_cleanup_status <> ALL (ARRAY['pending'::text, 'failed'::text]))) OR ((device_cleanup_status <> ALL (ARRAY['pending'::text, 'failed'::text])) AND (spool_cleanup_status <> ALL (ARRAY['pending'::text, 'failed'::text])) AND (object_cleanup_status <> ALL (ARRAY['pending'::text, 'failed'::text]))))) OR ((cleanup_intent = 'finalize_success'::text) AND (status = 'succeeded'::text) AND (stage = 'done'::text)) OR ((cleanup_intent = 'requeue_publish'::text) AND (status = 'pending'::text) AND (stage = ANY (ARRAY['queued'::text, 'waiting_device'::text])) AND (object_cleanup_status <> ALL (ARRAY['pending'::text, 'failed'::text]))) OR ((cleanup_intent = 'preserve_state'::text) AND (status = ANY (ARRAY['succeeded'::text, 'failed'::text, 'needs_review'::text, 'cancelled'::text])) AND (stage = 'done'::text)))),
+    CONSTRAINT video_publish_task_cleanup_status_check CHECK (((device_cleanup_status = ANY (ARRAY['not_started'::text, 'pending'::text, 'succeeded'::text, 'failed'::text])) AND (spool_cleanup_status = ANY (ARRAY['not_started'::text, 'pending'::text, 'succeeded'::text, 'failed'::text])) AND (object_cleanup_status = ANY (ARRAY['not_started'::text, 'pending'::text, 'succeeded'::text, 'failed'::text])))),
+    CONSTRAINT video_publish_task_size_check CHECK ((size_bytes > 0)),
+    CONSTRAINT video_publish_task_stage_check CHECK ((stage = ANY (ARRAY['awaiting_upload'::text, 'queued'::text, 'waiting_device'::text, 'downloading'::text, 'staging_device'::text, 'dispatching_artemis'::text, 'waiting_artemis'::text, 'verifying'::text, 'cleaning'::text, 'done'::text]))),
+    CONSTRAINT video_publish_task_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'running'::text, 'succeeded'::text, 'failed'::text, 'needs_review'::text, 'cancelled'::text]))),
+    CONSTRAINT video_publish_task_status_stage_check CHECK ((((status = 'pending'::text) AND (stage = ANY (ARRAY['awaiting_upload'::text, 'queued'::text, 'waiting_device'::text]))) OR ((status = 'running'::text) AND (stage = ANY (ARRAY['downloading'::text, 'staging_device'::text, 'dispatching_artemis'::text, 'waiting_artemis'::text, 'verifying'::text]))) OR ((status = ANY (ARRAY['succeeded'::text, 'failed'::text, 'needs_review'::text, 'cancelled'::text])) AND (stage = 'done'::text))))
+);
+
+
+
+ALTER TABLE publishing.video_publish_tasks ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME publishing.video_publish_tasks_id_seq
+);
+
+
+-- Name: worker_heartbeats; Type: TABLE; Schema: publishing; Owner: -
+
+CREATE TABLE IF NOT EXISTS publishing.worker_heartbeats (
+    instance_id text NOT NULL,
+    hostname text NOT NULL,
+    pid integer NOT NULL,
+    status text NOT NULL,
+    version text,
+    started_at timestamp with time zone NOT NULL,
+    heartbeat_at timestamp with time zone NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    device_status text DEFAULT 'unknown'::text NOT NULL,
+    device_message text,
+    CONSTRAINT worker_heartbeat_device_status_check CHECK ((device_status = ANY (ARRAY['ready'::text, 'busy'::text, 'offline'::text, 'locked'::text, 'unknown'::text]))),
+    CONSTRAINT worker_heartbeat_status_check CHECK ((status = ANY (ARRAY['starting'::text, 'ready'::text, 'stopping'::text])))
+);
+
+
 -- Name: focused_spus; Type: TABLE; Schema: reporting; Owner: -
 
 CREATE TABLE IF NOT EXISTS reporting.focused_spus (
@@ -2404,6 +2596,66 @@ ALTER TABLE ONLY public.alembic_version
     ADD CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num);
 
 
+-- Name: video_publish_attempts uq_video_publish_attempt_task_seq; Type: CONSTRAINT; Schema: publishing; Owner: -
+
+ALTER TABLE ONLY publishing.video_publish_attempts
+    ADD CONSTRAINT uq_video_publish_attempt_task_seq UNIQUE (task_id, sequence_no);
+
+
+-- Name: video_publish_tasks uq_video_publish_execution_generation; Type: CONSTRAINT; Schema: publishing; Owner: -
+
+ALTER TABLE ONLY publishing.video_publish_tasks
+    ADD CONSTRAINT uq_video_publish_execution_generation UNIQUE (execution_generation);
+
+
+-- Name: video_publish_tasks uq_video_publish_object_generation; Type: CONSTRAINT; Schema: publishing; Owner: -
+
+ALTER TABLE ONLY publishing.video_publish_tasks
+    ADD CONSTRAINT uq_video_publish_object_generation UNIQUE (object_generation);
+
+
+-- Name: video_publish_attempts video_publish_attempts_artemis_session_id_key; Type: CONSTRAINT; Schema: publishing; Owner: -
+
+ALTER TABLE ONLY publishing.video_publish_attempts
+    ADD CONSTRAINT video_publish_attempts_artemis_session_id_key UNIQUE (artemis_session_id);
+
+
+-- Name: video_publish_attempts video_publish_attempts_pkey; Type: CONSTRAINT; Schema: publishing; Owner: -
+
+ALTER TABLE ONLY publishing.video_publish_attempts
+    ADD CONSTRAINT video_publish_attempts_pkey PRIMARY KEY (id);
+
+
+-- Name: video_publish_tasks video_publish_tasks_client_request_id_key; Type: CONSTRAINT; Schema: publishing; Owner: -
+
+ALTER TABLE ONLY publishing.video_publish_tasks
+    ADD CONSTRAINT video_publish_tasks_client_request_id_key UNIQUE (client_request_id);
+
+
+-- Name: video_publish_tasks video_publish_tasks_object_key_key; Type: CONSTRAINT; Schema: publishing; Owner: -
+
+ALTER TABLE ONLY publishing.video_publish_tasks
+    ADD CONSTRAINT video_publish_tasks_object_key_key UNIQUE (object_key);
+
+
+-- Name: video_publish_tasks video_publish_tasks_pkey; Type: CONSTRAINT; Schema: publishing; Owner: -
+
+ALTER TABLE ONLY publishing.video_publish_tasks
+    ADD CONSTRAINT video_publish_tasks_pkey PRIMARY KEY (id);
+
+
+-- Name: video_publish_tasks video_publish_tasks_public_id_key; Type: CONSTRAINT; Schema: publishing; Owner: -
+
+ALTER TABLE ONLY publishing.video_publish_tasks
+    ADD CONSTRAINT video_publish_tasks_public_id_key UNIQUE (public_id);
+
+
+-- Name: worker_heartbeats worker_heartbeats_pkey; Type: CONSTRAINT; Schema: publishing; Owner: -
+
+ALTER TABLE ONLY publishing.worker_heartbeats
+    ADD CONSTRAINT worker_heartbeats_pkey PRIMARY KEY (instance_id);
+
+
 -- Name: focused_spus pk_focused_spus; Type: CONSTRAINT; Schema: reporting; Owner: -
 
 ALTER TABLE ONLY reporting.focused_spus
@@ -2936,6 +3188,41 @@ CREATE INDEX IF NOT EXISTS ix_spu_images_product_status ON procurement.spu_image
 CREATE UNIQUE INDEX uq_manual_costs_one_open ON procurement.manual_product_costs USING btree (spu_pk) WHERE (valid_to IS NULL);
 
 
+-- Name: ix_video_publish_attempt_status; Type: INDEX; Schema: publishing; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_video_publish_attempt_status ON publishing.video_publish_attempts USING btree (status, updated_at) WHERE (status = ANY (ARRAY['created'::text, 'submitting'::text, 'queued'::text, 'running'::text, 'unknown'::text]));
+
+
+-- Name: ix_video_publish_attempt_task_seq; Type: INDEX; Schema: publishing; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_video_publish_attempt_task_seq ON publishing.video_publish_attempts USING btree (task_id, sequence_no DESC);
+
+
+-- Name: ix_video_publish_cleanup_queue; Type: INDEX; Schema: publishing; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_video_publish_cleanup_queue ON publishing.video_publish_tasks USING btree (cleanup_lease_expires_at, id) WHERE ((cleanup_intent <> 'none'::text) AND ((device_cleanup_status = ANY (ARRAY['pending'::text, 'failed'::text])) OR (spool_cleanup_status = ANY (ARRAY['pending'::text, 'failed'::text])) OR (object_cleanup_status = ANY (ARRAY['pending'::text, 'failed'::text]))));
+
+
+-- Name: ix_video_publish_history; Type: INDEX; Schema: publishing; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_video_publish_history ON publishing.video_publish_tasks USING btree (created_at DESC, id DESC);
+
+
+-- Name: ix_video_publish_queue; Type: INDEX; Schema: publishing; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_video_publish_queue ON publishing.video_publish_tasks USING btree (next_attempt_at, queued_at, id) WHERE ((status = 'pending'::text) AND (stage = ANY (ARRAY['queued'::text, 'waiting_device'::text])));
+
+
+-- Name: uq_video_publish_one_running; Type: INDEX; Schema: publishing; Owner: -
+
+CREATE UNIQUE INDEX uq_video_publish_one_running ON publishing.video_publish_tasks USING btree ((1)) WHERE (status = 'running'::text);
+
+
+-- Name: uq_video_publish_task_active_attempt; Type: INDEX; Schema: publishing; Owner: -
+
+CREATE UNIQUE INDEX uq_video_publish_task_active_attempt ON publishing.video_publish_attempts USING btree (task_id) WHERE (status = ANY (ARRAY['created'::text, 'submitting'::text, 'queued'::text, 'running'::text, 'unknown'::text]));
+
+
 -- Name: ix_cost_snapshots_method; Type: INDEX; Schema: reporting; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_cost_snapshots_method ON reporting.product_cost_snapshots USING btree (cost_method);
@@ -3184,6 +3471,31 @@ CREATE OR REPLACE TRIGGER trg_procurement_procurement_products_touch BEFORE UPDA
 -- Name: spu_images trg_procurement_spu_images_touch; Type: TRIGGER; Schema: procurement; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_procurement_spu_images_touch BEFORE UPDATE ON procurement.spu_images FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: video_publish_attempts trg_video_publish_attempt_identity; Type: TRIGGER; Schema: publishing; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_video_publish_attempt_identity BEFORE UPDATE OF task_id, sequence_no, kind, related_attempt_id, artemis_session_id, prompt_version, prompt_snapshot, device_serial, device_path, target_app_package, artemis_profile, artemis_verification_level ON publishing.video_publish_attempts FOR EACH ROW EXECUTE FUNCTION publishing.fn_immutable_video_publish_attempt_identity();
+
+
+-- Name: video_publish_attempts trg_video_publish_attempt_related; Type: TRIGGER; Schema: publishing; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_video_publish_attempt_related BEFORE INSERT OR UPDATE OF kind, task_id, related_attempt_id ON publishing.video_publish_attempts FOR EACH ROW EXECUTE FUNCTION publishing.fn_validate_video_publish_related_attempt();
+
+
+-- Name: video_publish_attempts trg_video_publish_attempts_touch; Type: TRIGGER; Schema: publishing; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_video_publish_attempts_touch BEFORE UPDATE ON publishing.video_publish_attempts FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: video_publish_tasks trg_video_publish_tasks_touch; Type: TRIGGER; Schema: publishing; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_video_publish_tasks_touch BEFORE UPDATE ON publishing.video_publish_tasks FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: worker_heartbeats trg_worker_heartbeats_touch; Type: TRIGGER; Schema: publishing; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_worker_heartbeats_touch BEFORE UPDATE ON publishing.worker_heartbeats FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
 -- Name: focused_spus trg_reporting_focused_spus_touch; Type: TRIGGER; Schema: reporting; Owner: -
@@ -3539,6 +3851,18 @@ ALTER TABLE ONLY procurement.spu_images
 
 ALTER TABLE ONLY procurement.spu_images
     ADD CONSTRAINT spu_images_uploaded_by_key_id_fkey FOREIGN KEY (uploaded_by_key_id) REFERENCES security.api_keys(id) ON DELETE SET NULL;
+
+
+-- Name: video_publish_attempts video_publish_attempts_related_attempt_id_fkey; Type: FK CONSTRAINT; Schema: publishing; Owner: -
+
+ALTER TABLE ONLY publishing.video_publish_attempts
+    ADD CONSTRAINT video_publish_attempts_related_attempt_id_fkey FOREIGN KEY (related_attempt_id) REFERENCES publishing.video_publish_attempts(id) ON DELETE RESTRICT;
+
+
+-- Name: video_publish_attempts video_publish_attempts_task_id_fkey; Type: FK CONSTRAINT; Schema: publishing; Owner: -
+
+ALTER TABLE ONLY publishing.video_publish_attempts
+    ADD CONSTRAINT video_publish_attempts_task_id_fkey FOREIGN KEY (task_id) REFERENCES publishing.video_publish_tasks(id) ON DELETE RESTRICT;
 
 
 -- Name: focused_spus fk_focused_spus_product; Type: FK CONSTRAINT; Schema: reporting; Owner: -

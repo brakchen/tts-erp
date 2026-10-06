@@ -11,6 +11,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
+    CheckConstraint,
     Date,
     ForeignKey,
     Index,
@@ -272,3 +273,47 @@ class SalesOrderLine(Base):
         server_default=text("now()"),
         onupdate=text("now()"),
     )
+
+
+class SalesOrderLinePriceObservation(Base):
+    """Immutable TikTok authority prices captured for one order line."""
+
+    __tablename__ = "sales_order_line_price_observations"
+    __table_args__ = (
+        UniqueConstraint(
+            "shop_pk", "order_pk", "external_line_id", "semantic_observation_hash",
+            name="uq_solpo_line_semantic",
+        ),
+        CheckConstraint("effective_quantity IS NULL OR effective_quantity > 0", name="ck_solpo_effective_quantity_positive"),
+        CheckConstraint("original_price_native IS NULL OR original_price_native >= 0", name="ck_solpo_original_price_nonnegative"),
+        CheckConstraint("paid_price_native IS NULL OR paid_price_native >= 0", name="ck_solpo_paid_price_nonnegative"),
+        CheckConstraint("source_endpoint IN ('ORDER_SEARCH', 'ORDER_DETAIL')", name="ck_solpo_source_endpoint"),
+        Index("ix_solpo_line_version", "shop_pk", "order_pk", "external_line_id", "source_order_version_at", "source_captured_at", "semantic_observation_hash"),
+        Index("ix_solpo_spu_capture", "shop_pk", "spu_pk", "source_captured_at"),
+        {"schema": "commerce"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, server_default=text("generate_always_as_identity()"))
+    shop_pk: Mapped[int] = mapped_column(BigInteger, ForeignKey("commerce.shops.id", ondelete="RESTRICT"), nullable=False)
+    order_pk: Mapped[int] = mapped_column(BigInteger, ForeignKey("commerce.sales_orders.id", ondelete="RESTRICT"), nullable=False)
+    external_line_id: Mapped[str] = mapped_column(Text, nullable=False)
+    raw_record_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("integration.raw_records.id", ondelete="RESTRICT"), nullable=False)
+    source_endpoint: Mapped[str] = mapped_column(Text, nullable=False)
+    source_payload_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    semantic_observation_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    source_order_version_at: Mapped[datetime | None]
+    source_captured_at: Mapped[datetime] = mapped_column(nullable=False)
+    spu_pk: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("commerce.products_spu.id", ondelete="SET NULL"))
+    raw_quantity: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    effective_quantity: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    quantity_status: Mapped[str] = mapped_column(Text, nullable=False)
+    line_status_raw: Mapped[str | None] = mapped_column(Text)
+    parent_payment_status: Mapped[str] = mapped_column(Text, nullable=False)
+    gift_status: Mapped[str] = mapped_column(Text, nullable=False)
+    original_price_native: Mapped[Decimal | None] = mapped_column(Numeric(28, 10))
+    paid_price_native: Mapped[Decimal | None] = mapped_column(Numeric(28, 10))
+    currency: Mapped[str | None] = mapped_column(Text)
+    original_price_status: Mapped[str] = mapped_column(Text, nullable=False)
+    paid_price_status: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+    updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"), onupdate=text("now()"))

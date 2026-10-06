@@ -1,0 +1,67 @@
+{
+  "protocolVersion": 1,
+  "requestId": "TEST_cross-statements-list-request",
+  "scope": {
+    "sellerId": "TEST_cross-seller",
+    "shopId": "TEST_cross-seller"
+  },
+  "dump": {
+    "domain": "statements",
+    "endpoint": "https://seller.tiktokshopglobalselling.com/api/v1/pay/statement/list/detail",
+    "method": "GET",
+    "request": {
+      "params": null,
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "code": 0,
+        "message": "success",
+        "data": {
+          "statement_records": [
+            {
+              "statement_id": "TEST_cross-statement",
+              "statement_version": 0,
+              "bill_period": "2026-09-01~2026-09-07",
+              "settlement_time": "2026-09-08T00:00:00Z",
+              "settlement_id": "TEST_cross-settle",
+              "payment_id": "TEST_cross-pay",
+              "payment_status": 2,
+              "statement_type": 1,
+              "settle_amount": {
+                "amount": "1000000",
+                "currency": "VND"
+              },
+              "earning_amount": {
+                "amount": "900000",
+                "currency": "VND"
+              },
+              "fee_amount": {
+                "amount": "100000",
+                "currency": "VND"
+              },
+              "adjust_amount": {
+                "amount": "0",
+                "currency": "VND"
+              },
+              "payable_amount": {
+                "amount": "900000",
+                "currency": "VND"
+              },
+              "shipping_amount": {
+                "amount": "50000",
+                "currency": "VND"
+              },
+              "total_reserve_amount": {
+                "amount": "0",
+                "currency": "VND"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "createdAt": "2026-10-04T15:23:17.074Z"
+  }
+}

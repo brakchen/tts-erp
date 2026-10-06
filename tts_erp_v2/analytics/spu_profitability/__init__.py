@@ -18,6 +18,15 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.analytics.spu_profitability import _implementation
+from tts_erp_v2.analytics.spu_profitability._price_stats import (
+    PriceCoverage,
+    PriceCoverageStatus,
+    PriceMetric,
+    PriceSource,
+    PriceStatsOverview,
+    SpuPriceStats,
+    is_price_sort_field,
+)
 from tts_erp_v2.analytics.spu_profitability._projection import ProjectionPolicy
 from tts_erp_v2.analytics.spu_profitability._snapshot import consistent_read_snapshot
 from tts_erp_v2.analytics.spu_profitability._types import (
@@ -30,6 +39,7 @@ from tts_erp_v2.analytics.spu_profitability._types import (
     FormulaStatus,
     FxBasis,
     FxRateUnavailable,
+    PriceFxUnavailable,
     ProfitabilityBasis,
     ProfitabilityError,
     ProfitabilityEvidence,
@@ -62,6 +72,12 @@ __all__ = [
     "ProfitabilityBasis",
     "ProjectionBasis",
     "ProjectionPolicy",
+    "PriceCoverage",
+    "PriceCoverageStatus",
+    "PriceFxUnavailable",
+    "PriceMetric",
+    "PriceSource",
+    "PriceStatsOverview",
     "ProfitabilityError",
     "ProfitabilityEvidence",
     "ProfitabilityOverview",
@@ -74,8 +90,10 @@ __all__ = [
     "SpuNotFound",
     "SpuProfitExplanation",
     "SpuProfitability",
+    "SpuPriceStats",
     "SpuSelection",
     "explain_spu",
+    "is_price_sort_field",
     "read_overview",
 ]
 

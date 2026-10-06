@@ -165,7 +165,7 @@ python3 api_keys.py rotate --prefix ttserp_rw_Kx9vQ2mP         # = create 同名
 ## 7. 部署与灰度计划
 
 1. **P0 建表**：`cat schema.sql | docker exec -i postgres psql -U postgres -d tts_erp`（幂等，无影响）
-2. **P1 上线 off 模式**：部署 `auth.py` + 中间件 + CLI，`TTS_ERP_AUTH_MODE=off`，`restart.sh`，全量 pytest + smoke —— 行为零变化
+2. **P1 上线 off 模式**：部署 `auth.py` + 中间件 + CLI，`TTS_ERP_AUTH_MODE=off`，人工重启，并以 `bash scripts/test_isolated.sh fast` + smoke 验证行为零变化
 3. **P2 创建 key 并改造调用方**：建 cron 服务 key（readwrite）写入 .env；建好人工 key；改 sync_cron.py / smoke
 4. **P3 shadow 观察 24h+**：`shadow` 模式跑至少一天（覆盖多个 cron 周期），`grep would-deny logs/stderr.log` 应为空
 5. **P4 enforce**：改 `enforce`，重启，smoke + 一轮 cron 实测
@@ -175,7 +175,7 @@ python3 api_keys.py rotate --prefix ttserp_rw_Kx9vQ2mP         # = create 同名
 
 ## 8. 测试计划（`tests/middleware/test_auth.py`）
 
-沿用现有 pytest + TestClient + TEST_ 哨兵模式：
+沿用现有 TestClient + `TEST_` 哨兵模式，执行只经 isolated runner：
 
 - 无 header → 401；畸形 header → 401
 - 伪造 key → 401（且日志有记录）

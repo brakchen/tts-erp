@@ -28,6 +28,7 @@
 #   scripts/import_prod_to_test.sh --tables commerce.shops,commerce.products_spu
 #   scripts/import_prod_to_test.sh --row-limit 1000   # cap per-table rows
 #   scripts/import_prod_to_test.sh --schema-only   # drop+recreate, no data
+#   scripts/import_prod_to_test.sh --preflight-only # validate tools/source; no target changes
 #   scripts/import_prod_to_test.sh --dry-run       # print plan, do nothing
 #
 # Environment
@@ -54,6 +55,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TABLES_FILTER=""
 ROW_LIMIT=""
 SCHEMA_ONLY=0
+PREFLIGHT_ONLY=0
 DRY_RUN=0
 ASSUME_YES=0
 INCLUDE_SENSITIVE=0
@@ -68,6 +70,7 @@ while [[ $# -gt 0 ]]; do
     --tables) TABLES_FILTER="${2:-}"; shift 2 ;;
     --row-limit) ROW_LIMIT="${2:-}"; shift 2 ;;
     --schema-only) SCHEMA_ONLY=1; shift ;;
+    --preflight-only) PREFLIGHT_ONLY=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     --yes|-y) ASSUME_YES=1; shift ;;
     --include-sensitive) INCLUDE_SENSITIVE=1; shift ;;
@@ -123,13 +126,33 @@ dst_plain="${DST_URL/postgresql+psycopg:\/\//postgresql://}"
 # ``rm`` can never reach it (it leaked ~15G of plain-text dumps that way).
 # Therefore dumps stream through stdout into the host file and restores
 # are fed over stdin (``docker exec -i`` keeps stdin attached).
-PG_DOCKER="${PG_DOCKER:-postgres}"
-if command -v pg_dump >/dev/null 2>&1 && command -v psql >/dev/null 2>&1; then
-  pg_dump() { command pg_dump "$@"; }
-  psql()   { command psql   "$@"; }
+
+#
+# Keep this selection contract aligned with scripts/test_isolated.sh:
+# PG_DOCKER unset means the postgres container; an explicitly empty value
+# means host clients. In particular, host clients must not silently override
+# an explicitly configured container.
+PG_DOCKER_DEFAULT="postgres"
+PG_DOCKER_VALUE="${PG_DOCKER-$PG_DOCKER_DEFAULT}"
+if [[ -n "$PG_DOCKER_VALUE" ]]; then
+  command -v docker >/dev/null 2>&1 || {
+    echo "[import] preflight failed: PG_DOCKER=$PG_DOCKER_VALUE requires docker" >&2
+    exit 1
+  }
+  pg_dump() { docker exec "$PG_DOCKER_VALUE" pg_dump "$@"; }
+  psql()   { docker exec -i "$PG_DOCKER_VALUE" psql "$@"; }
 else
-  pg_dump() { docker exec "$PG_DOCKER" pg_dump "$@"; }
-  psql()   { docker exec -i "$PG_DOCKER" psql "$@"; }
+  command -v pg_dump >/dev/null 2>&1 || {
+    echo "[import] preflight failed: PG_DOCKER='' requires host pg_dump" >&2
+    exit 1
+  }
+  command -v psql >/dev/null 2>&1 || {
+    echo "[import] preflight failed: PG_DOCKER='' requires host psql" >&2
+    exit 1
+  }
+  pg_dump() { command pg_dump "$@"; }
+  psql()   { command psql "$@"; }
+
 fi
 
 # ── Safety: target must look like a test DB ──────────────────
@@ -151,6 +174,42 @@ if [[ "$DST_DB" != *test* && "$DST_DB" != *_v3* ]]; then
   echo "         Refusing to bulk-load into a non-test DB to avoid prod corruption." >&2
   exit 3
 fi
+
+# ── Client/server compatibility preflight ───────────────────
+# This runs before any target-side DROP or restore. A host PostgreSQL client
+# from an older major cannot dump a newer server (for example 16 -> 18), and
+# must fail while the existing test template is still intact.
+version_major() {
+  local output="$1" version
+  version="$(printf '%s\n' "$output" | grep -Eo '[0-9]+\.[0-9]+' | head -1 || true)"
+  [[ "$version" =~ ^([0-9]+)\. ]] || return 1
+  printf '%s\n' "${BASH_REMATCH[1]}"
+}
+
+preflight_fail() {
+  echo "[import] preflight failed: $*" >&2
+  exit 1
+}
+
+dump_version="$(pg_dump --version 2>&1)" || preflight_fail "pg_dump is unavailable or failed"
+psql_version="$(psql --version 2>&1)" || preflight_fail "psql is unavailable or failed"
+dump_major="$(version_major "$dump_version")" || preflight_fail "cannot determine pg_dump client major"
+psql_major="$(version_major "$psql_version")" || preflight_fail "cannot determine psql client major"
+server_version_num="$(psql --no-psqlrc --tuples-only --no-align --quiet \
+  --command "SHOW server_version_num" "$src_plain" 2>/dev/null)" || \
+  preflight_fail "cannot query source PostgreSQL server version"
+server_version_num="$(printf '%s' "$server_version_num" | tr -d '[:space:]')"
+[[ "$server_version_num" =~ ^[0-9]+$ ]] || \
+  preflight_fail "source PostgreSQL server version is invalid"
+if (( server_version_num >= 10000 )); then
+  server_major=$((server_version_num / 10000))
+else
+  server_major="$server_version_num"
+fi
+if [[ "$dump_major" != "$server_major" || "$psql_major" != "$server_major" ]]; then
+  preflight_fail "PostgreSQL major mismatch: pg_dump=$dump_major, psql=$psql_major, server=$server_major"
+fi
+echo "[import] preflight: PostgreSQL client/server major $server_major"
 
 # ── Table list & sensitive handling ────────────────────────
 # Sensitive tables that hold production secrets. The user almost
@@ -266,6 +325,11 @@ for t in "${ALL_TABLES[@]}"; do
 done
 ALL_TABLES=("${existing[@]}")
 
+if [[ $PREFLIGHT_ONLY -eq 1 ]]; then
+  echo "[import] preflight-only complete; target was not modified."
+  exit 0
+fi
+
 # ── Plan & confirm ──────────────────────────────────────────
 echo "[import] source: $SRC_DB"
 echo "[import] target: $DST_DB"
@@ -307,6 +371,27 @@ fi
 # wrapper, psql closing stdin early triggers SIGPIPE on pg_dump and
 # the pipeline fails with rc=141. Dumping to a temp file then
 # restoring avoids that entirely.
+SCHEMA_DUMP="$(mktemp --suffix=.sql)"
+trap 'rm -f "$SCHEMA_DUMP"' EXIT
+
+# Generate the complete schema dump before touching the target. This closes the
+# refresh failure window where a client/version/source error left an existing
+# template empty. The restore itself is intentionally still a normal psql
+# restore (not a new staging framework); a mid-restore failure can leave a
+# partially replaced target and is reported as such below.
+echo "[import] preflight: generating schema dump before target changes..."
+if ! pg_dump \
+    --schema-only \
+    --no-owner \
+    --no-privileges \
+    --clean \
+    --if-exists \
+    "$src_plain" > "$SCHEMA_DUMP" 2> /tmp/import_schema.log; then
+  echo "[import] pg_dump --schema-only FAILED; target was not modified; see /tmp/import_schema.log tail:" >&2
+  tail -20 /tmp/import_schema.log >&2
+  exit 4
+fi
+
 echo "[import] (1/2) dropping + recreating schema in target from prod..."
 # If the target had an unmerged Miaoshou migration, its foreign keys can block
 # pg_dump --clean from dropping production tables. The source has no Miaoshou
@@ -325,27 +410,13 @@ else
     fi
   done
 fi
-SCHEMA_DUMP="$(mktemp --suffix=.sql)"
-trap 'rm -f "$SCHEMA_DUMP"' EXIT
-
-if ! pg_dump \
-    --schema-only \
-    --no-owner \
-    --no-privileges \
-    --clean \
-    --if-exists \
-    "$src_plain" > "$SCHEMA_DUMP" 2> /tmp/import_schema.log; then
-  echo "[import] pg_dump --schema-only FAILED; see /tmp/import_schema.log tail:" >&2
-  tail -20 /tmp/import_schema.log >&2
-  exit 4
-fi
 
 if ! psql \
     --no-psqlrc \
     --set ON_ERROR_STOP=1 \
     --quiet \
     "$dst_plain" < "$SCHEMA_DUMP" > /tmp/import_schema.log 2>&1; then
-  echo "[import] psql schema restore FAILED; see /tmp/import_schema.log tail:" >&2
+  echo "[import] psql schema restore FAILED; target may be partially replaced; see /tmp/import_schema.log tail:" >&2
   tail -20 /tmp/import_schema.log >&2
   exit 4
 fi

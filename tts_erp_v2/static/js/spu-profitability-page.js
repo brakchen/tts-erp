@@ -77,14 +77,33 @@
     { columnId: "net-profit", field: "net_profit", title: "净利润", sortField: "net_profit", tip: "净利润 v7(M18):已结算 SETTLEMENT + 未结算 ×(1−r̂)×(1−退款率) − 货本含全损取消 − 广告;r̂=店铺实测(近180天已结算单 Σ|FEE|/Σ行GMV,每24h重算,有一单已结算即产出)或基线30.8%;负值红字。Red/green 仅按净利判(C3 拍板,删 ROI<1 硬亏档)" },
   ];
 
+  // Price fields stay nested so the browser never becomes a second statistics calculator.
+  function priceDef(columnId, field, title, sortField, metric) {
+    return { columnId: columnId, field: field, title: title, sortField: sortField, metric: metric };
+  }
+  var PRICE_COLUMN_DEFS = [
+    priceDef("purchasePriceMean", "priceStats.purchase.mean", "平均值", "purchasePriceMean", "purchase"),
+    priceDef("purchasePriceMedian", "priceStats.purchase.median", "中位数", "purchasePriceMedian", "purchase"),
+    priceDef("originalSalePriceMean", "priceStats.originalSale.mean", "平均值", "originalSalePriceMean", "originalSale"),
+    priceDef("originalSalePriceMedian", "priceStats.originalSale.median", "中位数", "originalSalePriceMedian", "originalSale"),
+    priceDef("paidPriceMean", "priceStats.paid.mean", "平均值", "paidPriceMean", "paid"),
+    priceDef("paidPriceMedian", "priceStats.paid.median", "中位数", "paidPriceMedian", "paid"),
+  ];
+  var PRICE_GROUPS = [
+    { title: "采购价", metric: "purchase", defs: PRICE_COLUMN_DEFS.slice(0, 2) },
+    { title: "销售价", metric: "originalSale", defs: PRICE_COLUMN_DEFS.slice(2, 4) },
+    { title: "实付价", metric: "paid", defs: PRICE_COLUMN_DEFS.slice(4, 6) },
+  ];
+  var TABLE_LEAF_DEFS = COLUMN_DEFS.concat(PRICE_COLUMN_DEFS);
+
   function supportsSortField(field) {
     if (!field) return false;
     if (field === DEFAULT_SORT) return true;
-    return COLUMN_DEFS.some((def) => def.sortField === field);
+    return TABLE_LEAF_DEFS.some((def) => def.sortField === field);
   }
 
   function sortLabel(field) {
-    var matched = COLUMN_DEFS.find((def) => def.sortField === field);
+    var matched = TABLE_LEAF_DEFS.find((def) => def.sortField === field);
     return matched ? matched.title : SORT_LABEL[field] || field;
   }
 
@@ -373,6 +392,7 @@
     freshnessTimer: null,
     selectionQueryable: true,
     meta: {}, // 后端拥有业务状态、阈值与公式说明；前端只渲染
+    priceCapability: false, // 仅由实际响应中的 nested priceStats 推导
     enumMap: {}, // 枚举中文化映射,page load 时从 /v2/config/enum-map 获取
   };
   var lastTotal = 0;
@@ -410,6 +430,12 @@
   ]);
   var ALLOWED_COLUMNS = new Set([
     "product",
+    "purchasePriceMean",
+    "purchasePriceMedian",
+    "originalSalePriceMean",
+    "originalSalePriceMedian",
+    "paidPriceMean",
+    "paidPriceMedian",
     "spend",
     "ad-actual-roi",
     "ad-breakeven-roi",
@@ -446,13 +472,17 @@
     });
     var columns = selectedViewIds("columnIds", ALLOWED_COLUMNS);
     if (state.table) {
-      COLUMN_DEFS.forEach((def) => {
+      TABLE_LEAF_DEFS.forEach((def) => {
         var col = state.table.getColumn(def.field);
         if (!col) return;
-        if (columns.has(def.columnId)) col.show();
+        var visible = columns.has(def.columnId);
+        if (PRICE_COLUMN_DEFS.indexOf(def) >= 0) visible = visible && state.priceCapability;
+        if (visible) col.show();
         else col.hide();
       });
     }
+    var priceSummary = document.getElementById("price-summary");
+    if (priceSummary) priceSummary.hidden = !state.priceCapability;
     var tabs = selectedViewIds("drillTabIds", ALLOWED_DRILL_TABS);
     document.querySelectorAll(".op-drill-tab[data-tab]").forEach((tab) => {
       tab.hidden = !tabs.has(tab.getAttribute("data-tab"));
@@ -954,6 +984,17 @@
       : text;
   }
 
+  function priceCell(cell) {
+    var value = cell.getValue();
+    if (value === null || value === undefined || (typeof value === "string" && value.trim() === "")) return "—";
+    var number = Number(value);
+    if (!Number.isFinite(number)) return "—";
+    var metric = cell.getColumn().getDefinition().priceMetric;
+    var stats = (cell.getData().priceStats || {})[metric] || {};
+    var prefix = metric === "purchase" && stats.estimated === true ? "≈" : "";
+    return prefix + number.toFixed(4);
+  }
+
   var CELL_FORMATTERS = {
     spu_id: productCellFormatter,
     spend: moneyCell,
@@ -979,24 +1020,80 @@
     }
   }
 
+  function syncPriceHeaderA11y() {
+    var root = document.getElementById("rows");
+    if (!root) return;
+    root.querySelectorAll(".tabulator-col[tabulator-field]").forEach((header) => {
+      var field = header.getAttribute("tabulator-field");
+      var def = TABLE_LEAF_DEFS.find((item) => item.field === field);
+      if (!def || !def.sortField) return;
+      header.setAttribute("tabindex", "0");
+      header.setAttribute("aria-sort", state.sort === def.sortField ? (state.order === "asc" ? "ascending" : "descending") : "none");
+      if (header.dataset.priceKeyboardBound === "1") return;
+      header.dataset.priceKeyboardBound = "1";
+      header.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        header.click();
+      });
+    });
+  }
+
+  function priceColumn(def) {
+    return {
+      title: def.title,
+      field: def.field,
+      columnId: def.columnId,
+      priceMetric: def.metric,
+      headerSort: true,
+      headerTooltip: def.metric + "价格统计（服务端排序）",
+      headerHozAlign: "right",
+      hozAlign: "right",
+      minWidth: 104,
+      widthGrow: 1,
+      formatter: priceCell,
+    };
+  }
+
   function buildTable() {
     var host = document.getElementById("rows");
     if (!host || state.table) return;
-    var columns = COLUMN_DEFS.map((def) => ({
-      title: def.title,
-      field: def.field,
-      headerSort: Boolean(def.sortField),
-      headerTooltip: def.tip || undefined,
-      headerHozAlign: def.columnId === "product" ? "left" : "right",
-      hozAlign: def.columnId === "product" ? "left" : "right",
-      frozen: def.columnId === "product",
-      minWidth: def.columnId === "product" ? 170 : 120,
-      // fitColumns 把余量按 widthGrow 分给各列：商品列标题长，多吃 3 份。
-      widthGrow: def.columnId === "product" ? 3 : 1,
-      formatter: CELL_FORMATTERS[def.field],
-    }));
+    var product = COLUMN_DEFS[0];
+    var def = product;
+    var columns = [
+      {
+        title: product.title,
+        field: product.field,
+        columnId: product.columnId,
+        headerSort: false,
+        headerHozAlign: "left",
+        hozAlign: "left",
+        frozen: true,
+        minWidth: 170,
+        widthGrow: def.columnId === "product" ? 3 : 1,
+        formatter: CELL_FORMATTERS[product.field],
+      },
+      ...PRICE_GROUPS.map((group) => ({
+        title: group.title,
+        headerSort: false,
+        headerHozAlign: "center",
+        columns: group.defs.map(priceColumn),
+      })),
+      ...COLUMN_DEFS.slice(1).map((def) => ({
+        title: def.title,
+        field: def.field,
+        columnId: def.columnId,
+        headerSort: Boolean(def.sortField),
+        headerTooltip: def.tip || undefined,
+        headerHozAlign: "right",
+        hozAlign: "right",
+        minWidth: 120,
+        widthGrow: 1,
+        formatter: CELL_FORMATTERS[def.field],
+      })),
+    ];
     // 默认排序可能是不对应任何列的字段（如 roi_real）：无列可标时跳过 initialSort。
-    var initialDef = COLUMN_DEFS.find((d) => d.sortField === state.sort);
+    var initialDef = TABLE_LEAF_DEFS.find((d) => d.sortField === state.sort);
     state.table = new Tabulator(host, {
       columns: columns,
       // 默认 fitData 只按内容定宽，宽屏下表体右侧留大片空白（表头/行背景
@@ -1017,9 +1114,13 @@
       },
     });
     // 用 table.on 订阅（与 dataSorting 同一机制）；6.3 对 options 回调的订阅不可靠。
+    var lastDrillClick = { spuPk: null, at: 0 };
     state.table.on("rowClick", (_e, row) => {
       var it = row.getData();
       if (!it || !it.spu_pk) return;
+      var now = Date.now();
+      if (lastDrillClick.spuPk === it.spu_pk && now - lastDrillClick.at < 300) return;
+      lastDrillClick = { spuPk: it.spu_pk, at: now };
       openDrillPanel(row.getElement(), it);
     });
     // 表头点击只改状态并触发服务端重取（本地排序对同字段幂等）。
@@ -1027,7 +1128,7 @@
       if (_applyingServerSort) return;
       var s = sorters && sorters[0];
       if (!s) return;
-      var def = COLUMN_DEFS.find((d) => d.field === s.field);
+      var def = TABLE_LEAF_DEFS.find((d) => d.field === s.field);
       if (!def || !def.sortField) return;
       var dir = s.dir === "asc" ? "asc" : "desc";
       // 内部 clearData/replaceData 在排序列激活时会重派发本事件；幂等跳过。
@@ -1040,6 +1141,7 @@
       // 进行中的本地排序重渲染（styleRow 报 undefined.add）。
       setTimeout(() => load(), 0);
     });
+    syncPriceHeaderA11y();
     // 错误占位里的「重试」链接（placeholder 是 innerHTML 注入，走委托）。
     host.addEventListener("click", (e) => {
       var link = e.target.closest && e.target.closest("#retry-link");
@@ -1065,9 +1167,11 @@
   function updateSortNote() {
     $("#sort-note").textContent =
       `当前排序：${sortLabel(state.sort)}${state.order === "asc" ? " ↑" : " ↓"}`;
+    syncPriceHeaderA11y();
   }
 
   function renderError(msg, wholePage) {
+    renderPriceMessage(msg);
     closeDrillPanel();
     if (wholePage) {
       var summaries = $("#summaries");
@@ -1099,6 +1203,106 @@
     if (feeCard) feeCard.hidden = true;
     renderFxFreshness(null);
     renderEmpty(profile && profile.emptySelectionMessage);
+  }
+
+  function priceMetricLabel(metric) {
+    return { purchase: "采购价", originalSale: "销售价", paid: "实付价" }[metric] || metric;
+  }
+  function priceFeatureSupported(payload, items) {
+    return Boolean(
+      payload &&
+        ((payload.totals && payload.totals.priceStats) ||
+          items.some((item) => item && item.priceStats)),
+    );
+  }
+  function priceMetricTip(metric, stats, meta) {
+    var authority = metric === "purchase" ? "ROI 当前有效成本" : "TikTok line_items." + (metric === "originalSale" ? "original_price" : "sale_price");
+    var fx = meta.priceFx || meta.priceFX || {};
+    var cost = meta.priceCost || {};
+    return [
+      "来源：" + authority,
+      "按件数加权平均值/中位数",
+      "窗口：当前经营窗口；已付款且排除赠品",
+      "覆盖：" + (stats.status || "unknown") + "，" + (stats.observedQuantity ?? 0) + "/" + (stats.eligibleQuantity ?? 0) + " 件",
+      "币种：" + (meta.priceCurrency || "CNY") + "；汇率快照：" + (fx.snapshotId ?? fx.snapshot_id ?? "—"),
+      "成本基准：" + (cost.basisFingerprint || "—") + "；计算时间：" + (meta.calculatedAt || meta.calculated_at || "—"),
+      metric === "purchase" && stats.estimated === true ? "≈ K1=40 CNY/件，非人工成本" : "",
+    ].filter(Boolean).join("；");
+  }
+  function renderPriceLoading() {
+    var box = document.getElementById("price-summary");
+    if (!box) return;
+    box.hidden = false;
+    box.setAttribute("aria-busy", "true");
+    var status = document.getElementById("price-summary-status");
+    if (status) status.textContent = "加载中…";
+    ["purchase", "originalSale", "paid"].forEach((metric) => {
+      ["mean", "median"].forEach((kind) => {
+        var cell = document.getElementById("price-" + metric + "-" + kind);
+        if (cell) cell.textContent = "加载中…";
+      });
+    });
+  }
+  function renderPriceMessage(message) {
+    var box = document.getElementById("price-summary");
+    if (!box) return;
+    box.hidden = false;
+    box.setAttribute("aria-busy", "false");
+    var status = document.getElementById("price-summary-status");
+    if (status) status.textContent = message;
+    ["purchase", "originalSale", "paid"].forEach((metric) => {
+      ["mean", "median"].forEach((kind) => {
+        var cell = document.getElementById("price-" + metric + "-" + kind);
+        if (cell) cell.textContent = "—";
+      });
+    });
+  }
+  function renderPriceStats(payload, items) {
+    var supported = priceFeatureSupported(payload, items);
+    state.priceCapability = supported;
+    var box = document.getElementById("price-summary");
+    if (!supported) {
+      if (box) box.hidden = true;
+      applyViewProfile();
+      return;
+    }
+    if (box) {
+      box.hidden = false;
+      box.setAttribute("aria-busy", "false");
+    }
+    var totals = payload.totals || {};
+    var statsByMetric = totals.priceStats || {};
+    var meta = payload.meta || {};
+    var summaryStatus = document.getElementById("price-summary-status");
+    if (summaryStatus) summaryStatus.textContent = "已加载 · " + ["purchase", "originalSale", "paid"].map((metric) => {
+      var status = (statsByMetric[metric] || {}).status || "不可用";
+      var label = status === "complete" ? "完整" : status === "partial" ? "部分覆盖" : status === "no_samples" ? "无样本" : status;
+      return priceMetricLabel(metric) + "：" + label;
+    }).join("；");
+    ["purchase", "originalSale", "paid"].forEach((metric) => {
+      var stats = statsByMetric[metric] || {};
+      ["mean", "median"].forEach((kind) => {
+        var cell = document.getElementById("price-" + metric + "-" + kind);
+        if (!cell) return;
+        var value = stats[kind];
+        var missing = value === null || value === undefined || value === "";
+        var text = missing ? "—" : String(value);
+        if (!missing) {
+          var number = Number(value);
+          if (Number.isFinite(number)) text = (metric === "purchase" && stats.estimated === true ? "≈" : "") + number.toFixed(4);
+        }
+        cell.textContent = text;
+        cell.setAttribute("aria-label", priceMetricLabel(metric) + " " + (kind === "mean" ? "平均值" : "中位数") + " CNY " + text);
+      });
+      var status = document.getElementById("price-status-" + metric);
+      if (status) status.textContent = stats.status === "complete" ? "完整" : stats.status === "partial" ? "部分覆盖" : stats.status === "no_samples" ? "无样本" : (stats.status || "不可用");
+      var tip = document.querySelector('[data-price-tip="' + metric + '"]');
+      if (tip) {
+        tip.setAttribute("data-tip", priceMetricTip(metric, stats, meta));
+        tip.setAttribute("aria-expanded", "false");
+      }
+    });
+    applyViewProfile();
   }
 
   // 费率来源。页头已经选了店铺，这里只标口径，不重复店名和费率。
@@ -1248,6 +1452,7 @@
     var meta = payload.meta || {};
     state.meta = meta;
     lastTotal = payload.total || 0;
+    renderPriceStats(payload, items);
 
     // 结余带(全部由后端 totals 提供，前端只做格式化，禁止前端计算)
     // 总单量 = 有效订单 + 取消订单(后端全局 distinct)
@@ -1299,7 +1504,7 @@
         : (roiAdStatus === "estimated_known_costs" ? "≈" : "") +
           fmtRatio(roiAdValue);
 
-    // 预测由后端基于店铺/已应用 SPU 范围及本地 as-of 计算，独立于报表日期窗口。
+    // 预测由后端按本地 as-of 独立生成样本；预测对象和最终值跟随经营窗口。
     // StaticFiles 会即时读取新 JS，而 HTML 模板要等 API 进程重启才更新；
     // 部署窗口内新 hook 可能暂时不存在，不能让整页渲染因此中断。
     setTextIfPresent(
@@ -1310,24 +1515,8 @@
     setTextIfPresent(
       "#projection-sample-window",
       projection.sample_start && projection.sample_end
-        ? `${projection.sample_start} ~ ${projection.sample_end}（${projection.lookback_days || state.projectionLookbackDays} 天）`
+        ? `${projection.sample_start} ~ ${projection.sample_end}`
         : "—",
-    );
-    setTextIfPresent(
-      "#projection-maturity-as-of",
-      projection.maturity_lag_days != null && projection.as_of
-        ? `${projection.maturity_lag_days} 天 / ${projection.as_of}`
-        : "—",
-    );
-    setTextIfPresent(
-      "#projection-basis-counts",
-      projection.basis_order_count != null
-        ? `${projection.basis_order_count} / ${projection.basis_full_loss_order_count || 0} / ${fmtPct(projection.completed_full_loss_rate)}`
-        : "—",
-    );
-    setTextIfPresent(
-      "#projection-basis-status",
-      projectionStatusLabel(projection.status || totals.projection_status),
     );
     setTextIfPresent(
       "#sum-projection-completed-basis-orders",
@@ -1395,7 +1584,7 @@
           );
       _withSortSuppressed(() => {
         // 只有存在对应列时才镜像表头箭头（roi_real 等服务端字段无列）。
-        var sortDef = COLUMN_DEFS.find((d) => d.sortField === state.sort);
+        var sortDef = TABLE_LEAF_DEFS.find((d) => d.sortField === state.sort);
         if (sortDef) state.table.setSort(sortDef.field, state.order);
         else state.table.setSort([]);
         state.table.replaceData(items);
@@ -2301,6 +2490,7 @@
     var projectionControl = $("#filter-projection-lookback-days");
     if (projectionControl) projectionControl.disabled = true;
     tableShowPlaceholder("加载中…");
+    renderPriceLoading();
     var feeParam = null;
     if (state.feeRate !== null && state.feeRate !== "") {
       var f = parseFloat(state.feeRate);
@@ -2391,14 +2581,20 @@
   var tipAnchor = null;
   function ensureTip() {
     if (!tipEl) {
-      tipEl = document.createElement("div");
-      tipEl.id = "ops-tip";
-      tipEl.setAttribute("role", "tooltip");
-      document.body.appendChild(tipEl);
+      tipEl = document.getElementById("ops-tip");
+      if (!tipEl) {
+        tipEl = document.createElement("div");
+        tipEl.id = "ops-tip";
+        tipEl.setAttribute("role", "tooltip");
+        document.body.appendChild(tipEl);
+      }
     }
     return tipEl;
   }
   function hideTip() {
+    if (tipAnchor && tipAnchor.classList && tipAnchor.classList.contains("op-price-tip")) {
+      tipAnchor.setAttribute("aria-expanded", "false");
+    }
     tipAnchor = null;
     if (tipEl) tipEl.hidden = true;
   }
@@ -2423,24 +2619,62 @@
     tip.style.left = x + "px";
     tip.style.top = y + "px";
     tipAnchor = anchor;
+    if (anchor.classList && anchor.classList.contains("op-price-tip")) {
+      anchor.setAttribute("aria-expanded", "true");
+    }
+  }
+  var priceTooltipsWired = false;
+  var tooltipsWired = false;
+  function isPriceTip(anchor) {
+    return Boolean(anchor && anchor.classList && anchor.classList.contains("op-price-tip"));
+  }
+  function wirePriceTooltips() {
+    if (priceTooltipsWired) return;
+    priceTooltipsWired = true;
+    document.addEventListener("click", (event) => {
+      var button = event.target && event.target.closest ? event.target.closest(".op-price-tip") : null;
+      if (button) {
+        event.preventDefault();
+        if (button.getAttribute("aria-expanded") === "true") {
+          hideTip();
+        } else {
+          showTip(button, button.getAttribute("data-tip") || "");
+        }
+        return;
+      }
+      if (tipAnchor && tipAnchor.classList && tipAnchor.classList.contains("op-price-tip")) hideTip();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || !tipAnchor || !tipAnchor.classList || !tipAnchor.classList.contains("op-price-tip")) return;
+      var button = tipAnchor;
+      hideTip();
+      button.focus();
+    });
   }
   function wireTooltips() {
+    if (tooltipsWired) return;
+    tooltipsWired = true;
     document.addEventListener("mouseover", (e) => {
+      if (isPriceTip(tipAnchor)) return;
       var hit = tipHit(e.target);
       if (hit) {
+        if (isPriceTip(hit.el)) return;
         if (hit.el !== tipAnchor) showTip(hit.el, hit.text);
       } else {
         hideTip();
       }
     });
     document.addEventListener("mouseout", (e) => {
-      if (!tipAnchor) return;
+      if (!tipAnchor || isPriceTip(tipAnchor)) return;
       var rel = tipHit(e.relatedTarget);
       if (!rel) hideTip(); // 指针离开所有 data-tip 区域
     });
     window.addEventListener("scroll", hideTip, true); // capture: 容器内滚动也收起,防错位
     window.addEventListener("resize", hideTip);
-    document.addEventListener("click", hideTip);
+    document.addEventListener("click", (e) => {
+      if (e.target && e.target.closest && e.target.closest(".op-price-tip")) return;
+      hideTip();
+    });
   }
 
   // Lightbox:click 主图(spu-img[data-zoom])→ 全屏叠层;点背景(非放大图
@@ -2938,6 +3172,7 @@
     // 列头排序由 Tabulator 驱动（COLUMN_DEFS.sortField → 服务端重取，见 buildTable）。
 
     wireTooltips(); // 悬停说明气泡(data-tip 委托,含重渲染后的新行)
+    wirePriceTooltips();
     wireZoom(); // 主图点击放大(委托)
     loadMe();
     // 店铺必选:先加载店铺,再加载数据;loadShops 内部处理 shop_pk 校验 + 选择弹窗

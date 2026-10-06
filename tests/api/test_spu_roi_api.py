@@ -1798,7 +1798,7 @@ def test_spu_roi_projection_with_no_unsettled_orders_matches_current_result(
     assert body["totals"]["projected_net_profit"] == body["totals"]["net_profit"]
 
 
-def test_spu_roi_projection_window_is_independent_of_reporting_window(
+def test_projection_sample_is_independent_but_target_follows_reporting_window(
     api_client, readonly_key, db_engine
 ):
     with Session(db_engine) as sess:
@@ -1846,11 +1846,30 @@ def test_spu_roi_projection_window_is_independent_of_reporting_window(
     all_time_item = all_time["items"][0]
     september_item = september["items"][0]
     assert all_time_item["projection_status"] == "available"
-    assert all_time_item["projection_basis_order_count"] == 1
     assert september_item["projection_status"] == "available"
+
+    # The mature 90-day sample remains independent from the selected reporting
+    # dates, but only unsettled orders in the selected dates are forecast.
+    for key in (
+        "sample_start",
+        "sample_end",
+        "lookback_days",
+        "maturity_lag_days",
+        "as_of",
+        "basis_order_count",
+        "basis_full_loss_order_count",
+        "completed_full_loss_rate",
+    ):
+        assert all_time["meta"]["projection"][key] == september["meta"][
+            "projection"
+        ][key]
+    assert all_time_item["projection_basis_order_count"] == 1
     assert september_item["projection_basis_order_count"] == 1
-    assert september_item["unsettled_order_count"] == 2
-    assert september_item["unresolved_unsettled_order_count"] == 2
+    assert all_time_item["unsettled_order_count"] == 2
+    assert september_item["unsettled_order_count"] == 1
+    assert all_time_item["unresolved_unsettled_order_count"] == 2
+    assert september_item["unresolved_unsettled_order_count"] == 1
+
     one_minus_fee = Decimal(1) - FEE_BASELINE
     vnd_cny = USD_CNY / USD_VND
     assert all_time_item["unsettled_net"] == m4(
@@ -1859,22 +1878,16 @@ def test_spu_roi_projection_window_is_independent_of_reporting_window(
     assert september_item["unsettled_net"] == m4(
         Decimal(400_000) * one_minus_fee * vnd_cny
     )
-    projection_keys = set(all_time["meta"]["projection"]) - {"calculated_at"}
-    assert {
-        key: all_time["meta"]["projection"][key] for key in projection_keys
-    } == {
-        key: september["meta"]["projection"][key] for key in projection_keys
-    }
-    for key in (
-        "projected_net_profit",
-        "projected_net_revenue",
-        "projected_future_full_loss_qty",
-    ):
-        assert all_time["totals"][key] == september["totals"][key]
+    assert all_time["totals"]["projected_net_profit"] != september["totals"][
+        "projected_net_profit"
+    ]
+    assert september["totals"]["projected_net_profit"] == september["totals"][
+        "net_profit"
+    ]
     assert "projection_low_sample" in all_time["meta"]["projection"]["warnings"]
 
 
-def test_projection_scope_is_independent_when_reporting_window_has_no_activity(
+def test_projection_target_is_empty_when_reporting_window_has_no_activity(
     api_client, readonly_key, db_engine
 ):
     with Session(db_engine) as sess:
@@ -1898,37 +1911,30 @@ def test_projection_scope_is_independent_when_reporting_window_has_no_activity(
     ).json()
 
     assert excluded["items"]
-    projection_total_keys = {
-        key
-        for key in unrestricted["totals"]
-        if key.startswith(
-            (
-                "projection",
-                "projected",
-                "unsettled",
-                "delivered_unsettled",
-                "full_loss_exposure",
-                "confirmed_full_loss_exposure",
-                "confirmed_unsettled",
-                "unresolved_",
-            )
-        )
-        or key
-        in {
-            "completed_full_loss_rate",
-            "delivered_full_loss_rate",
-            "settled_full_loss_rate",
-        }
-    }
-    assert {
-        key: excluded["totals"][key] for key in projection_total_keys
-    } == {key: unrestricted["totals"][key] for key in projection_total_keys}
-    projection_keys = set(unrestricted["meta"]["projection"]) - {"calculated_at"}
-    assert {
-        key: excluded["meta"]["projection"][key] for key in projection_keys
-    } == {
-        key: unrestricted["meta"]["projection"][key] for key in projection_keys
-    }
+    # The fixed mature sample remains available, but a reporting window with no
+    # orders has no current forecast target or future adjustment.
+    for key in (
+        "sample_start",
+        "sample_end",
+        "lookback_days",
+        "maturity_lag_days",
+        "as_of",
+        "basis_order_count",
+        "basis_full_loss_order_count",
+        "completed_full_loss_rate",
+    ):
+        assert unrestricted["meta"]["projection"][key] == excluded["meta"][
+            "projection"
+        ][key]
+    assert excluded["totals"]["projection_basis_order_count"] == unrestricted[
+        "totals"
+    ]["projection_basis_order_count"]
+    assert excluded["totals"]["unsettled_order_count"] == 0
+    assert excluded["totals"]["full_loss_exposure_unsettled_order_count"] == 0
+    assert excluded["totals"]["projection_status"] == "no_unsettled_orders"
+    assert excluded["totals"]["projected_net_profit"] == excluded["totals"][
+        "net_profit"
+    ]
 
 
 def test_paid_cancelled_returned_order_is_strict_full_loss_sample(
@@ -2075,7 +2081,7 @@ def test_paid_non_cancelled_returned_order_is_completed_full_loss_not_risk(
     ]
 
 
-def test_projection_totals_are_scope_stable_when_one_spu_leaves_reporting_rows(
+def test_projection_sample_keeps_selected_spus_when_one_has_no_window_activity(
     api_client, readonly_key, db_engine
 ):
     with Session(db_engine) as sess:
@@ -2129,7 +2135,10 @@ def test_projection_totals_are_scope_stable_when_one_spu_leaves_reporting_rows(
         ).json()
     finally:
         event.remove(db_engine, "before_cursor_execute", count_query)
-    assert query_count <= 30
+    # 31 = 30 个既有语句 + 价格观察表的 to_regclass capability 探测一条
+    # （`_price_stats._SQL_PRICE_OBSERVATION_TABLE_EXISTS`，与 _implementation.py
+    # 的既有探测约定一致）；预算仍用于拦住按 date/SPU 重查的回归。
+    assert query_count <= 31
     narrowed = api_client.get(
         "/v2/analytics/spu-roi",
         headers=headers,
@@ -2140,21 +2149,28 @@ def test_projection_totals_are_scope_stable_when_one_spu_leaves_reporting_rows(
         },
     ).json()
 
-    projection_fields = {
-        key
-        for key in all_dates["totals"]
-        if key.startswith(("projection", "projected", "unsettled", "delivered_unsettled", "full_loss_exposure", "confirmed_full_loss_exposure", "confirmed_unsettled", "unresolved_"))
-        or key in {"completed_full_loss_rate", "delivered_full_loss_rate", "settled_full_loss_rate"}
-    }
-    assert {
-        key: narrowed["totals"][key] for key in projection_fields
-    } == {key: all_dates["totals"][key] for key in projection_fields}
-    projection_meta_keys = set(all_dates["meta"]["projection"]) - {"calculated_at"}
-    assert {
-        key: narrowed["meta"]["projection"][key] for key in projection_meta_keys
-    } == {
-        key: all_dates["meta"]["projection"][key] for key in projection_meta_keys
-    }
+    # The second SPU still contributes to the selected-scope mature sample, but
+    # its August current facts do not enter September projected final results.
+    for key in (
+        "sample_start",
+        "sample_end",
+        "lookback_days",
+        "basis_order_count",
+        "basis_full_loss_order_count",
+        "completed_full_loss_rate",
+    ):
+        assert all_dates["meta"]["projection"][key] == narrowed["meta"][
+            "projection"
+        ][key]
+    assert narrowed["totals"]["projection_basis_order_count"] == all_dates[
+        "totals"
+    ]["projection_basis_order_count"]
+    assert narrowed["totals"]["unsettled_order_count"] == all_dates["totals"][
+        "unsettled_order_count"
+    ]
+    assert narrowed["totals"]["projected_net_profit"] != all_dates["totals"][
+        "projected_net_profit"
+    ]
 
 
 def test_profitability_public_interface_returns_typed_consistent_result(

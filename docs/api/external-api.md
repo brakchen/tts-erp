@@ -54,6 +54,7 @@ credential kinds:
 | SPU 利润劣化告警主表 | `GET /v2/analytics/spu-profit-deterioration` | readonly — 逐字段契约见本文《Analytics — SPU 利润劣化告警》；设计/回测见 [`../design/spu-profit-deterioration-alert.md`](../design/spu-profit-deterioration-alert.md) |
 | SPU 利润劣化告警页面 (HTML) | `GET /v2/pages/spu-profit-deterioration` | readonly (browser → 302 login)；阈值设置抽屉只读 `meta.effectiveConfig` |
 | SPU image list / upload / delete | `GET /v2/spu-images`, `POST /v2/spu-images/upload-url`, `POST /v2/spu-images/{id}/confirm`, `DELETE /v2/spu-images/{id}` | readonly / readwrite |
+| TikTok video publish workflow | `GET /v2/pages/video-publish`, `GET /v2/video-publish/config`, `GET /v2/video-publish/tasks[/{id}]`, `POST /v2/video-publish/tasks`, upload-url, confirm, cancel, retry, replace-upload, verify, `/cleanup/retry` | session: page:video-publish + readonly/readwrite action tier; API key: admin by default; owner-scoped |
 | Browser login / logout / whoami | `GET\|POST /v2/auth/login`, `POST /v2/auth/logout`, `GET /v2/auth/me` | public |
 | Change own password | `POST /v2/auth/change-password` | session user (cookie) |
 | User & role administration | `GET\|POST /v2/users`, `GET\|PATCH /v2/users/{id}`, `POST /v2/users/{id}/password`, `GET\|DELETE /v2/users/{id}/sessions[/{sessionId}]`, `GET\|POST /v2/roles`, `PATCH\|DELETE /v2/roles/{code}` | **admin** + `page:users` 权限点 |
@@ -102,7 +103,8 @@ Two credential families share one authorization layer
    登录、登出、会话管理见 [Browser session login](#browser-session-login)；
    设计基准 [`user-account-authz-design.md`](../design/user-account-authz-design.md)。
    会话用户的授权档位取其角色的 `api_tier`（`readonly|readwrite|admin`），
-   走**同一张路由角色矩阵**；页面路由还要求对应的 `page:<id>` 权限点。
+   走**同一张路由角色矩阵**；页面路由以及视频发布 API 还要求对应的
+   `page:<id>` 权限点（视频发布为 `page:video-publish`）。
 2. **API key（程序化访问，不变）** — `Authorization: Bearer <key>` 或
    `X-API-Key: <key>`，两 header 形态：
 
@@ -134,8 +136,9 @@ route-relative path and therefore also covers `/tts/docs` deployments.
 - `401 invalid, disabled or expired api key` — credential not recognised
 - `403 requires <role>` — key recognised but lacks the role for this path
 - `403 requires page:<id>` — session user lacks the page permission point
-  (page routes and the `/v2/users*` / `/v2/roles*` APIs, which map to
-  `page:users`); API-key credentials are not subject to page permission points
+  (page routes, `/v2/video-publish*` → `page:video-publish`, and the
+  `/v2/users*` / `/v2/roles*` APIs, which map to `page:users`); API-key
+  credentials are not subject to page permission points
 
 The mode is set by env `TTS_ERP_AUTH_MODE=off|shadow|enforce`. In
 `enforce` (production default since 2026-08-20) the service returns the
@@ -404,6 +407,34 @@ page:users"}`。API key 凭证（admin 档）也可调用，不受页面权限�
 | `GET /v2/admin/shops/unregistered` | **readwrite** | 列出在 `plugin.*` 插件数据里出现、但 `commerce.shops` 无行的 shop_id → `{candidates: [{shop_id, sources}]}`；注册页的候选清单。 |
 | `PATCH /v2/admin/shops/{shop_pk}` | **readwrite** | 更新店铺元信息或原子配置 `service_id/app_key/app_secret`。App pair 按 service_id 共享并加密；App Key/Secret 必须成对。只改 service_id 时目标 App pair 必须已存在（否则 409），防止生成必然失败的授权链接。`credential_id`/`status` 不可修改。 |
 
+### TikTok video publishing (`/v2/video-publish/*`)
+
+The browser workbench and API-key publishing clients store tasks through the same owner-scoped API in the `publishing` schema; both keep Artemis/ADB server-side. `POST /tasks` returns `201` for a new upload
+票据 and `200` for an owned idempotent replay with the same payload; payload
+mismatches return `409`, and another owner receives `404 TASK_NOT_FOUND` without
+metadata. Task list/detail and state-changing operations are owner-scoped;
+explicit admin access is the documented operational exception. Cookie-authored
+mutations must send `X-Requested-With: tts-erp`; API-key clients are exempt from CSRF/page-permission checks but `/v2/video-publish/*` requires an **admin-tier API key by default**, including reads. `TTS_ERP_VIDEO_PUBLISH_ALLOW_READWRITE_API_KEYS=1` is an explicit future rollout feature gate and must remain unset until a separate documented approval; session role/page-permission behavior is unchanged.
+
+| Endpoint | Role | Notes |
+| --- | --- | --- |
+| `GET /v2/pages/video-publish` | page:video-publish | Browser publishing workbench; page access follows the authenticated page permission. |
+| `GET /v2/video-publish/config` | readonly + page:video-publish | Limits, masked target, fresh Worker liveness, admin-only `canViewDiagnostics`, `writeBlockReason`, and server-owned readiness (`ready|busy|offline|locked|unknown`) covering ADB/unlock, TikTok package, Artemis, MinIO, and active device cleanup; offline/locked/busy is informational and does not disable queue creation. No credentials or signed URLs. API keys are exempt from page permission points. |
+| `GET /v2/video-publish/tasks/current` | readonly + page:video-publish | Current owner-visible task plus filter-independent polling summary. API keys are exempt from page permission points. |
+| `GET /v2/video-publish/tasks` | readonly + page:video-publish | Owner-scoped history; `status`, `limit`, and opaque `(created_at,id)` keyset `cursor` filters. Queued snapshots include `queuedAt`, globally ordered `queuePosition`, and status/stage labels. API keys are exempt from page permission points. |
+| `GET /v2/video-publish/tasks/{task_id}` | readonly + page:video-publish | Owner-scoped detail; `includeDiagnostics=true` requires admin. API keys are exempt from page permission points. |
+| `GET /v2/video-publish/metrics` | readonly + page:video-publish | Content-free owner-visible current gauges: tasks-by-status, attempts-by-kind/status, queue/running/review, cleanup `devicePending/deviceFailed/spoolPending/spoolFailed/objectPending/objectFailed`, `currentStageAgeSeconds`, and Worker-heartbeat age; these snapshots are not monotonic counters or completed-stage histograms. Completed-stage duration is emitted as controlled `duration_ms` on `publish_transition`. Admin receives global task aggregates. API keys are exempt from page permission points. |
+| `POST /v2/video-publish/tasks` | readwrite + page:video-publish | A genuinely new task requires a fresh ready Worker heartbeat or returns retryable `503 PUBLISH_WORKER_UNAVAILABLE`; owned idempotent retrieval/replay remains available without Worker readiness. Creation allocates a unique upload generation/key, persists expiry, and returns a short-lived PUT ticket. Presign failure is retryable `503 OBJECT_STORE_UNAVAILABLE`. API keys are exempt from page permission points but remain admin-tier by default. |
+| `POST /v2/video-publish/tasks/{task_id}/upload-url` | readwrite + page:video-publish | Under a task-row lock, revalidates awaiting-upload/generation, signs, persists the monotonic maximum expiry and advances `rowVersion` before exposing the URL. A stage race returns structured 409 and discards the unreturned URL; presign failure is retryable `503 OBJECT_STORE_UNAVAILABLE`. API keys are exempt from page permission points but remain admin-tier by default. |
+| `POST /v2/video-publish/tasks/{task_id}/replace-upload` | readwrite + page:video-publish | After retired-generation cleanup has completed, reopens a failed task with a never-reused generation/key so the owner can upload a replacement. API keys are exempt from page permission points. |
+| `POST /v2/video-publish/tasks/{task_id}/confirm-upload` | readwrite + page:video-publish | HEAD-verifies existence, exact size, explicit `video/mp4`, and stores the confirmed ETag. Worker download uses conditional `If-Match` against that exact single-part or multipart ETag, so replacement/missing objects fail before device staging or attempt creation. Storage transport failures are retryable 503, while missing/size/MIME/blank-ETag validation errors have distinct stable retryable codes and leave the task awaiting upload. A later Worker-observed missing/replaced object remains selector-owned until ticket expiry plus completion grace and post-expiry idempotent cleanup/absence verification complete; only then is replacement exposed. API keys are exempt from page permission points. |
+| `POST /v2/video-publish/tasks/{task_id}/cancel` | readwrite + page:video-publish | Cancels an unstarted task and schedules generation-bound cleanup; selector independently waits for latest persisted PUT expiry plus 15-minute completion grace using PostgreSQL time. API keys are exempt from page permission points but remain admin-tier by default. |
+| `POST /v2/video-publish/tasks/{task_id}/retry` | readwrite + page:video-publish | Retries only a failed, retry-safe task within its attempt budget and returns the new `queuedAt`/`queuePosition`. API keys are exempt from page permission points. |
+| `POST /v2/video-publish/tasks/{task_id}/verify` | readwrite + page:video-publish | Requests verification for an ambiguous result. API keys are exempt from page permission points. |
+| `POST /v2/video-publish/tasks/{task_id}/cleanup/retry` | readwrite + page:video-publish | Retries eligible device, spool, or object cleanup without changing business status. API keys are exempt from page permission points. |
+
+Publishing errors use `code`, `message`, `retryable`, and `requestId`. Stateful 409 responses additionally include `rowVersion` and `allowedActions`; clients must redraw actions from that response rather than infer them locally. `attemptCount`/`publishAttemptCount` are append-only created publish-attempt counts, while `retryBudgetUsed` is the independently refundable budget counter.
+
 ### SPU images (`/v2/spu-images/*`)
 
 Presigned MinIO upload flow (server never proxies bytes; design:
@@ -451,7 +482,7 @@ SPU 盈利主端点和四个懒加载钻取端点是稳定的 readonly API。完
 
 | Endpoint | Role | Purpose |
 | --- | --- | --- |
-| `GET /v2/analytics/spu-roi` | readonly | SPU 盈利主表、完整范围 `totals` 与 meta |
+| `GET /v2/analytics/spu-roi` | readonly | SPU 盈利主表、完整范围 `totals` 与 meta。带 `shop_pk` 时同一响应额外返回件数加权的 `items[].priceStats`/`priceCoverage` 与 `totals.priceStats`/`totals.priceCoverage`（采购/原价/实付 × 均值/中位数，CNY 四位小数或 `null`），并接受六个独立排序标识 `purchasePriceMean`、`purchasePriceMedian`、`originalSalePriceMean`、`originalSalePriceMedian`、`paidPriceMean`、`paidPriceMedian`；契约见 [`../design/spu-price-statistics.md`](../design/spu-price-statistics.md) |
 | `GET /v2/analytics/spu-roi/{spu_pk}/orders` | readonly | 订单与物流证据 |
 | `GET /v2/analytics/spu-roi/{spu_pk}/settlements` | readonly | 结算组件证据 |
 | `GET /v2/analytics/spu-roi/{spu_pk}/cases` | readonly | 售后证据 |

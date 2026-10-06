@@ -1,0 +1,20 @@
+[Unit]
+Description=ttsERP TikTok publish worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/tts-erp
+EnvironmentFile=%h/tts-erp/.env
+ExecStart=%h/tts-erp/.venv/bin/python -m tts_erp_v2.publishing.worker
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=default.target

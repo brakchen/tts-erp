@@ -9,12 +9,13 @@ all current business tables. Public schema and legacy tables are explicitly igno
 from __future__ import annotations
 
 import configparser
+from contextlib import suppress
 import os
 import sys
 from logging.config import fileConfig
 from pathlib import Path
 
-from alembic import context
+from alembic import context  # pyright: ignore[reportAttributeAccessIssue]
 from sqlalchemy import engine_from_config, pool
 
 # ── Project root on path so we can import tts_erp_v2.db.models ───────
@@ -57,10 +58,8 @@ class _NoOpInterpolation(configparser.BasicInterpolation):
 
 config = context.config
 if hasattr(config, "file_config") and config.file_config is not None:
-    try:
+    with suppress(Exception):
         config.file_config._interpolation = _NoOpInterpolation()  # type: ignore[attr-defined]
-    except Exception:
-        pass
 
 # Override sqlalchemy.url from env BEFORE engine_from_config reads it.
 # Force the +psycopg driver since the .env URL doesn't specify a driver
@@ -99,7 +98,8 @@ require_destructive_script_guard(
 config.set_main_option("sqlalchemy.url", _db_url)
 # Also patch the configparser-stored value directly, since
 # engine_from_config reads via get_section which reads file_config fresh.
-config.file_config.set("alembic", "sqlalchemy.url", _db_url)
+if config.file_config is not None:
+    config.file_config.set("alembic", "sqlalchemy.url", _db_url)
 
 # Logger config from original ini (re-applied because we may have stomped on it).
 if context.config.config_file_name is not None:
@@ -117,6 +117,7 @@ OWNED_SCHEMAS = (
     "finance",
     "reporting",
     "security",
+    "publishing",
 )
 
 
@@ -124,9 +125,7 @@ def include_object(object_, name, type_, reflected, compare_to):
     """Only manage objects in the current tts_erp_v2 business schemas."""
     if type_ == "table":
         schema = getattr(object_, "schema", None)
-        if schema is None or schema in OWNED_SCHEMAS:
-            return True
-        return False
+        return bool(schema is None or schema in OWNED_SCHEMAS)
     if type_ in {"index", "unique_constraint", "foreign_key_constraint"}:
         tbl = getattr(object_, "table", None)
         if tbl is not None:

@@ -203,7 +203,7 @@ empty body 改 PERMANENT 是 §5.3 物流 0 行事故的**根本修复**——pl
 | 文件 | `tts_erp_v2/api/v2/order_sync.py`（domain 字段 + if/elif 链）<br>`tests/api/test_order_sync_contract.py`（+2 case）<br>`docs/api/dumps-data-contract.md`（§2.1 VALID_DOMAINS 表加 `after_sales` 行 + §3 路由表解 orphan） |
 | 改动量 | ~15 行 order_sync.py + 30 行测试 + 2 行文档 |
 | 风险 | 低（purely additive） |
-| 验证 | `bash scripts/test.sh fast` 0 新 fail；prod 端点带 `domain=after_sales` 的 dump（人工 curl）返 200 + rowsWritten>0 |
+| 验证 | `bash scripts/test_isolated.sh fast` 0 新 fail；prod 端点带 `domain=after_sales` 的 dump（人工 curl）返 200 + rowsWritten>0 |
 | 收尾 | merge → push |
 
 ### 3.2 Lane B：`fix/logistics-empty-response`（P0-2）
@@ -333,7 +333,7 @@ chrome-plugins 仓 E-frontend → 本仓 Lane E merge
 
 | Lane | 必须通过 |
 | --- | --- |
-| A | `bash scripts/test.sh fast` 0 新 fail；prod curl `domain=after_sales` 返 200 |
+| A | `bash scripts/test_isolated.sh fast` 0 新 fail；prod curl `domain=after_sales` 返 200 |
 | B | test 库：`response_body=None` → 422 + `code=EMPTY_RESPONSE_BODY` |
 | C | test 库：`rowsWritten=0` 必落 `plugin_logs`；prod 监控 24h 看到 statements 域样本 |
 | D | 一次性脚本：`--dry-run` 预览与 `plugin.intercepted_requests` 行数匹配；`--confirm` 实跑后 `plugin.settlements > 0` |

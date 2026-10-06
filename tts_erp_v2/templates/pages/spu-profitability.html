@@ -139,15 +139,9 @@
         </div>
         <div class="col">
           <div class="op-counter-group h-100" id="projection-basis-card">
-            <div class="op-counter-group-label">预测依据</div>
-            <div class="op-projection-window" aria-live="polite">
-              <div>预测样本窗口：<strong id="projection-sample-window">—</strong></div>
-              <div>成熟滞后 / 截止：<strong id="projection-maturity-as-of">—</strong></div>
-              <div>样本数 / 全损数 / 全损率：<strong id="projection-basis-counts">—</strong></div>
-              <div>状态：<strong id="projection-basis-status">—</strong></div>
-            </div>
+            <div class="op-counter-group-label">预测依据 · <span class="op-projection-window" aria-live="polite">预测样本窗口：<span id="projection-sample-window">—</span></span></div>
             <div class="row g-0 row-cols-2">
-              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预测状态<span class="op-hint" data-tip="按店铺及已应用 SPU 范围，截至本地 as-of 日期预测尚未送达的未结算风险订单；预测样本窗口独立于报表日期范围，由后端判定状态">?</span></span><span class="op-counter-num" id="sum-projection-status">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预测状态<span class="op-hint" data-tip="按店铺、已应用 SPU 和所选经营窗口，预测截至本地 as-of 日期尚未送达的未结算风险订单；独立 30/90 天成熟样本只提供风险率">?</span></span><span class="op-counter-num" id="sum-projection-status">—</span></span></div>
               <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">已完结样本单<span class="op-hint" data-tip="已结算、已送达或结果已确定的国内取消订单；大盘按订单全局去重">?</span></span><span class="op-counter-num" id="sum-projection-completed-basis-orders">—</span></span></div>
               <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">已完结全损单<span class="op-hint" data-tip="终局物流全损，或商品已到达海外/已送达后最终全额退款；国内取消不计全损">?</span></span><span class="op-counter-num" id="sum-projection-completed-loss-orders">—</span></span></div>
               <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">已完结订单全损率<span class="op-hint" data-tip="已完结全损单 ÷ 全部已完结样本单；用于预测待完结风险订单数、件数和收入折损">?</span></span><span class="op-counter-num" id="sum-projection-full-loss-rate">—</span></span></div>
@@ -175,6 +169,33 @@
               <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预计保本ROI<span class="op-hint" data-tip="预计 NC′ ÷ (预计 NC′ − 预计保留货本)；分母小于等于 0 或样本不足时显示 —">?</span></span><span class="op-counter-num" id="sum-projected-breakeven-roi">—</span></span></div>
               <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预计广告系统ROI<span class="op-hint" data-tip="预计广告归因GMV ÷ 广告消耗；没有订单级广告归因映射时，广告归因GMV保持当前值，不乘全损率">?</span></span><span class="op-counter-num" id="sum-projected-ad-roi">—</span></span></div>
               <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预计广告系统保本ROI<span class="op-hint" data-tip="预计广告归因GMV ÷ 预计最大可承受广告费；分母小于等于 0 时显示 —">?</span></span><span class="op-counter-num" id="sum-projected-ad-breakeven-roi">—</span></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="col" id="price-summary" hidden aria-live="polite" aria-busy="true">
+          <div class="op-counter-group h-100 op-price-summary">
+            <div class="op-counter-group-label op-price-summary-title">
+              价格
+              <button type="button" class="op-price-tip" data-price-tip="prices" data-tip="当前经营窗口、已付款、按件数加权；原价/实付来自 TikTok line item" aria-label="查看价格统计口径" aria-expanded="false">?</button>
+              <span class="op-price-summary-status" id="price-summary-status">加载中…</span>
+            </div>
+            <div class="row g-0 row-cols-2 op-price-summary-head" aria-hidden="true">
+              <div class="col"></div><div class="col">平均值</div><div class="col">中位数</div>
+            </div>
+            <div class="op-price-summary-row">
+              <span class="op-price-summary-label">采购价 <button type="button" class="op-price-tip" data-price-tip="purchase" data-tip="采购价统计口径" aria-label="查看采购价统计口径" aria-expanded="false">?</button><span class="op-price-status" id="price-status-purchase"></span></span>
+              <span class="op-counter-num" id="price-purchase-mean" aria-label="采购价平均值 CNY">—</span>
+              <span class="op-counter-num" id="price-purchase-median" aria-label="采购价中位数 CNY">—</span>
+            </div>
+            <div class="op-price-summary-row">
+              <span class="op-price-summary-label">销售价 <button type="button" class="op-price-tip" data-price-tip="originalSale" data-tip="销售价统计口径" aria-label="查看销售价统计口径" aria-expanded="false">?</button><span class="op-price-status" id="price-status-originalSale"></span></span>
+              <span class="op-counter-num" id="price-originalSale-mean" aria-label="销售价平均值 CNY">—</span>
+              <span class="op-counter-num" id="price-originalSale-median" aria-label="销售价中位数 CNY">—</span>
+            </div>
+            <div class="op-price-summary-row">
+              <span class="op-price-summary-label">实付价 <button type="button" class="op-price-tip" data-price-tip="paid" data-tip="实付价统计口径" aria-label="查看实付价统计口径" aria-expanded="false">?</button><span class="op-price-status" id="price-status-paid"></span></span>
+              <span class="op-counter-num" id="price-paid-mean" aria-label="实付价平均值 CNY">—</span>
+              <span class="op-counter-num" id="price-paid-median" aria-label="实付价中位数 CNY">—</span>
             </div>
           </div>
         </div>

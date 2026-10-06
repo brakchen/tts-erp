@@ -25,6 +25,10 @@ from tts_erp_v2.analytics.spu_profitability import (
     EvidenceRequest,
     FocusedSelection,
     FxRateUnavailable,
+    PriceCoverage,
+    PriceFxUnavailable,
+    PriceMetric,
+    PriceStatsOverview,
     ProfitScope,
     ProjectionPolicy,
     ReportingTimezoneUnavailable,
@@ -32,7 +36,9 @@ from tts_erp_v2.analytics.spu_profitability import (
     SortDirection,
     SortField,
     SpuNotFound,
+    SpuPriceStats,
     explain_spu,
+    is_price_sort_field,
 )
 from tts_erp_v2.analytics.spu_profitability._compat import read_legacy_overview
 from tts_erp_v2.api.deps import get_session
@@ -232,6 +238,75 @@ def _totals_payload(totals) -> dict[str, Any]:
         }
     )
     return payload
+
+
+def _price_metric_payload(metric: PriceMetric) -> dict[str, Any]:
+    """一个价格的 wire 对象：CNY 四位小数字符串或 null + 独立字段覆盖计数。"""
+    return {
+        "mean": _fmt(metric.mean_cny, _MONEY_Q),
+        "median": _fmt(metric.median_cny, _MONEY_Q),
+        "eligibleQuantity": metric.eligible_quantity,
+        "observedQuantity": metric.observed_quantity,
+        "missingQuantity": metric.missing_quantity,
+        "invalidQuantity": metric.invalid_quantity,
+        "observedLineCount": metric.observed_line_count,
+        "missingLineCount": metric.missing_line_count,
+        "invalidLineCount": metric.invalid_line_count,
+        "coverageRatio": _fmt(metric.coverage_ratio, _MONEY_Q),
+        "status": metric.status.value,
+        "source": metric.source.value,
+        "estimated": metric.estimated,
+    }
+
+
+def _price_stats_payload(stats: SpuPriceStats) -> dict[str, Any]:
+    return {
+        "purchase": _price_metric_payload(stats.purchase),
+        "originalSale": _price_metric_payload(stats.original_sale),
+        "paid": _price_metric_payload(stats.paid),
+    }
+
+
+def _price_coverage_payload(coverage: PriceCoverage) -> dict[str, Any]:
+    """人口分类计数（互斥）；不算物理件数的不确定量只出行数。"""
+    return {
+        "eligibleLineCount": coverage.eligible_line_count,
+        "eligibleQuantity": coverage.eligible_quantity,
+        "excludedUnpaidQuantity": coverage.excluded_unpaid_quantity,
+        "excludedOnHoldQuantity": coverage.excluded_on_hold_quantity,
+        "excludedCancelledQuantity": coverage.excluded_cancelled_quantity,
+        "excludedGiftQuantity": coverage.excluded_gift_quantity,
+        "unknownGiftQuantity": coverage.unknown_gift_quantity,
+        "unknownStatusQuantity": coverage.unknown_status_quantity,
+        "invalidQuantityLineCount": coverage.invalid_quantity_line_count,
+        "excludedValidQuantity": coverage.excluded_valid_quantity,
+        "missingCurrencyQuantity": coverage.missing_currency_quantity,
+        "fxUnavailableQuantity": coverage.fx_unavailable_quantity,
+        "missingObservationLineCount": coverage.missing_observation_line_count,
+    }
+
+
+def _price_meta(
+    result, price_stats: PriceStatsOverview, price_sort: str | None
+) -> dict[str, Any]:
+    """价格模块的 meta 片段（与结果同一读快照的 calculatedAt/FX/成本基准）。"""
+    basis = result.basis
+    return {
+        "calculatedAt": _iso_utc(basis.calculated_at),
+        "priceCurrency": "CNY",
+        "priceFx": {
+            "snapshotId": basis.fx.snapshot_id,
+            "asOfAt": _iso_utc(basis.fx.as_of),
+            "conversionPolicy": "native_line_currency_to_cny_before_aggregation",
+        },
+        "priceCost": {
+            "basisFingerprint": price_stats.cost_basis_fingerprint,
+            "asOfAt": _iso_utc(basis.calculated_at),
+            "defaultK1Cny": _fmt(price_stats.default_k1_cny, _MONEY_Q),
+            "estimated": price_stats.cost_basis_estimated,
+        },
+        "priceSort": price_sort,
+    }
 
 
 def _estimate_payload(estimate) -> dict[str, Any] | None:
@@ -443,12 +518,30 @@ def _meta_payload(
     }
 
 
-def _overview_payload(result, scope: ProfitScope, fee_rate: Decimal | None) -> dict:
+def _overview_payload(
+    result, scope: ProfitScope, fee_rate: Decimal | None, price_sort: str | None = None
+) -> dict:
+    price_stats: PriceStatsOverview | None = result.price_stats
+    items: list[dict[str, Any]] = []
+    for row in result.items:
+        payload = _row_payload(row)
+        if price_stats is not None:
+            stats = price_stats.by_spu.get(row.spu_pk)
+            if stats is not None:
+                payload["priceStats"] = _price_stats_payload(stats)
+                payload["priceCoverage"] = _price_coverage_payload(stats.coverage)
+        items.append(payload)
+    totals = _totals_payload(result.totals)
+    meta = _meta_payload(result, scope, fee_rate)
+    if price_stats is not None:
+        totals["priceStats"] = _price_stats_payload(price_stats.totals)
+        totals["priceCoverage"] = _price_coverage_payload(price_stats.totals.coverage)
+        meta.update(_price_meta(result, price_stats, price_sort))
     return {
-        "items": [_row_payload(row) for row in result.items],
+        "items": items,
         "total": result.total,
-        "totals": _totals_payload(result.totals),
-        "meta": _meta_payload(result, scope, fee_rate),
+        "totals": totals,
+        "meta": meta,
     }
 
 
@@ -578,9 +671,22 @@ def list_spu_roi(
         )
     except FxRateUnavailable:
         return _fx_error(request)
+    except PriceFxUnavailable:
+        return error_response(
+            status=503,
+            code="PRICE_FX_UNAVAILABLE",
+            message="价格币种无法在本次读取快照内换算为 CNY",
+            request_id=request_id(request),
+            retryable=True,
+        )
     except ReportingTimezoneUnavailable as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return _overview_payload(result, profit_scope, fee_value)
+    return _overview_payload(
+        result,
+        profit_scope,
+        fee_value,
+        sort_field.value if is_price_sort_field(sort_field.value) else None,
+    )
 
 
 drilldown_router = APIRouter(prefix="/v2/analytics/spu-roi", tags=["analytics"])

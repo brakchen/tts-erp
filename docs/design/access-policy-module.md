@@ -451,7 +451,7 @@ module import/test 时验证：
 实现阶段必须：
 
 1. 先跑 auth/middleware 窄测试；
-2. 使用 `flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast`；
+2. 使用 `bash scripts/test_isolated.sh fast`；
 3. 与 implementation 前 master baseline 比较，新增稳定失败必须为 0；
 4. LSP 0 diagnostics；
 5. `git diff --check` 通过；

@@ -1,0 +1,61 @@
+{
+  "protocolVersion": 1,
+  "requestId": "TEST_cross-order-details-request",
+  "scope": {
+    "sellerId": "TEST_cross-seller",
+    "shopId": "TEST_cross-seller"
+  },
+  "dump": {
+    "domain": "order_details",
+    "endpoint": "https://seller.tiktokshopglobalselling.com/api/fulfillment/order/get",
+    "method": "POST",
+    "request": {
+      "params": null,
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "code": 0,
+        "message": "success",
+        "data": {
+          "main_order": [
+            {
+              "main_order_id": "TEST_cross-order",
+              "trade_order_module": {
+                "create_time": 1759560000,
+                "payment_time": 1759563600,
+                "pay_method": "BANK",
+                "sale_region": "VN",
+                "fulfillment_type": 1
+              },
+              "price_module": {
+                "sub_total": {
+                  "price_val": "200000"
+                },
+                "grand_total": {
+                  "price_val": "200000"
+                },
+                "shipping_fee": {
+                  "price_val": "0"
+                }
+              },
+              "order_status_module": [
+                {
+                  "main_order_status": 104,
+                  "sku_display_status": 140
+                }
+              ],
+              "delivery_module": [
+                {}
+              ],
+              "buyer_info_module": {},
+              "reverse_module": []
+            }
+          ]
+        }
+      }
+    },
+    "createdAt": "2026-10-04T15:20:01.808Z"
+  }
+}

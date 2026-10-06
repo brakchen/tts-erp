@@ -1,204 +1,119 @@
 # Test split by domain
 
-The pytest suite at `tests/` + `tests/` is tagged with **domain** +
-**layer** markers so you can run a single business slice without paying
-for the full ~10k LOC run.
+The suite under `tests/` uses **domain** and **layer** markers so a business slice can run through the repository's isolated test entry point.
 
-## Why split?
+## Safety boundary
 
-- **Speed.** A typical `pytest` over everything takes minutes because
-  the suite touches the business schemas + the FastAPI app + SDKs. A
-  single domain (`domain_commerce`, `domain_api`, …) usually runs in
-  single-digit seconds.
-- **Signal-to-noise.** A failure in `domain_finance` shouldn't block
-  iteration on an unrelated domain.
-- **Selective CI.** CI / pre-push hooks can run only the slice that
-  the changed file belongs to (see "Mapping files to domains" below).
+For agents, every test command must start with:
+
+```bash
+bash scripts/test_isolated.sh
+```
+
+This wrapper clones `tts_erp_test_template` into a per-run ephemeral `tts_erp_test_*` database, delegates marker selection internally, and drops the clone afterward. Do not bypass it with a low-level runner, a shared long-lived database, or a bare Python test command. Production-shaped databases are always forbidden.
+
+Historical migration suites under `docs/archive/migrate-v1-to-v2-2026-08-29/` are archival evidence only and must never be executed.
 
 ## Taxonomy
 
-Every test file carries one or more of these markers via
-`pytestmark = pytest.mark.<name>` at module level, so you don't need
-to think about it per-test.
+Every test file carries one or more module-level markers.
 
 ### Business domains
 
-| Marker                  | What it covers                                                                  |
-| ----------------------- | ------------------------------------------------------------------------------- |
-| `domain_miaoshou`       | 妙手 SDK / callbacks / jobs / silent truncation                                  |
-| `domain_commerce`       | TikTok 订单/商品同步 (`orders_job`, `order_detail_job`, `products_job`)          |
-| `domain_finance`        | 财务/对账 (`finance_job`) + 利润/成本报表 (`profit_daily`, `cost_snapshots`)    |
-| `domain_logistics`      | 物流追踪 (`logistics_job`)                                                       |
-| `domain_after_sales`    | 退货/取消 (`after_sales_job` + `migrate_after_sales`)                            |
-| `domain_reporting`      | 报表 (`profit` / `coverage` / `cost`)                                            |
-| `domain_api`            | FastAPI 路由 / auth / middleware (`api/*`)                                       |
-| `domain_proxy`          | 出站代理层 (`signing`, `token_service`)                                          |
-| `domain_migration`      | v1→v2 数据迁移                                                                   |
-| `domain_middleware`     | 中间件 (`access_log` 等)                                                          |
-| `domain_sync`           | 同步 worker (`sync_worker/*`)                                                    |
-| `domain_models`         | 模型 smoke (`test_models_smoke.py`)                                              |
-| `domain_token_refresh`  | token 续期 (`jobs_token_refresh/*`)                                              |
-| `domain_sdk`            | SDK 自身测试 (`miaoshou/endpoints/test_tools.py`)                                |
-| `domain_e2e`            | 端到端 smoke，需要 live `:9877` 服务                                             |
-| `domain_browser`        | 浏览器渲染回归（多视口溢出 / 字体栈）：本分支渲染 + 本地静态服务，**不需要** `:9877`，随 `fast` 跑 |
+| Marker | What it covers |
+| --- | --- |
+| `domain_miaoshou` | 妙手 SDK / callbacks / jobs |
+| `domain_commerce` | TikTok 订单/商品同步 |
+| `domain_finance` | 财务/对账与利润/成本报表 |
+| `domain_logistics` | 物流追踪 |
+| `domain_after_sales` | 退货/取消 |
+| `domain_reporting` | 报表 |
+| `domain_api` | FastAPI routes, auth, middleware |
+| `domain_proxy` | 出站代理、签名和 token service |
+| `domain_middleware` | 中间件 |
+| `domain_sync` | 同步 Worker |
+| `domain_models` | ORM/model smoke tests |
+| `domain_token_refresh` | Token renewal jobs |
+| `domain_sdk` | SDK tests |
+| `domain_e2e` | Live `:9877` read-only smoke tests |
+| `domain_browser` | Local browser-render regressions; included by `fast` |
 
-### Layers (orthogonal)
+`domain_migration` refers only to historical migration coverage and is excluded from agent execution.
 
-| Marker              | Meaning                                                                |
-| ------------------- | ---------------------------------------------------------------------- |
-| `layer_unit`        | pure helpers, no DB / no fixtures (very fast, ≤ 100ms / test)          |
-| `layer_integration` | uses DB / fixtures / `TestClient` (default)                            |
-| `slow`              | ≥ 1 s per test (migration tests, e2e)                                  |
-| `requires_db`       | needs `TTS_ERP_DB_URL` env var (most `tests/` tests)                |
-| `requires_service`  | needs live `:9877` service (`domain_e2e`)                              |
-| `requires_browser`  | needs playwright + chromium（缺失时用例 skip；`-m 'not requires_browser'` 可排除） |
+### Layers
 
-## Common invocations
+| Marker | Meaning |
+| --- | --- |
+| `layer_unit` | Pure helpers without database fixtures |
+| `layer_integration` | Database, fixtures, or `TestClient` |
+| `slow` | Slow tests |
+| `requires_db` | Requires the isolated PostgreSQL clone |
+| `requires_service` | Requires a live local service |
+| `requires_browser` | Requires Playwright and Chromium |
 
-The recommended way is `scripts/test.sh` — it handles `pytest -m` quoting
-and falls back to the parent repo's venv when running in a worktree.
+## Canonical invocations
 
 ```bash
-# Default: everything except slow + requires_service (~unit + integration)
-scripts/test.sh
+# Fast suite
+bash scripts/test_isolated.sh fast
 
-# Only pure unit tests (sub-second)
-scripts/test.sh unit
+# Pure unit layer
+bash scripts/test_isolated.sh unit
 
-# Single business domain (prefix optional)
-scripts/test.sh commerce
-scripts/test.sh domain_miaoshou
-scripts/test.sh finance
+# One business domain
+bash scripts/test_isolated.sh commerce
+bash scripts/test_isolated.sh miaoshou
+bash scripts/test_isolated.sh finance
 
-# Everything, including slow / e2e
-scripts/test.sh all
+# One file or test while retaining isolation
+bash scripts/test_isolated.sh fast tests/api/test_auth_login.py
+bash scripts/test_isolated.sh fast tests/api/test_auth_login.py::test_login_sets_cookie
 
-# Coverage report
-scripts/test.sh coverage
+# Browser and live read-only e2e domains
+bash scripts/test_isolated.sh browser
+bash scripts/test_isolated.sh e2e
+
+# Refresh a stale template before the selected safe suite
+bash scripts/test_isolated.sh --refresh-template fast
 ```
 
-If you want to call `pytest` directly:
+There is no agent `all` or `coverage` path. Those selections include historical or service-dependent behavior outside the safe agent contract.
 
-```bash
-# Single domain, skip slow
-.venv/bin/pytest -q -m "domain_commerce and not slow"
+## Browser gates
 
-# All integration but no DB
-.venv/bin/pytest -q -m "integration and not requires_db"
+| Layer | Location | Isolated command | Protects |
+| --- | --- | --- | --- |
+| Static lint | `tests/api/test_style_tokens.py` | `bash scripts/test_isolated.sh fast` | Unapproved font-family literals |
+| Browser | `tests/browser/` | `bash scripts/test_isolated.sh browser` | Multi-viewport overflow and computed font stacks |
+| Live e2e | `tests/e2e/` | `bash scripts/test_isolated.sh e2e` | Read-only deployed contracts |
 
-# Only layer_unit (fastest)
-.venv/bin/pytest -q -m "layer_unit"
-
-# Only slow / DB-bound tests
-.venv/bin/pytest -q -m "slow or requires_db"
-```
-
-## Gotchas
-
-- **`pytest -m ""` runs nothing.** An empty marker expression is treated
-  as "no tests selected", not "all tests". If you mean "all tests", drop
-  the `-m` flag entirely:
-
-  ```bash
-  # WRONG: collects 0 tests
-  .venv/bin/pytest -m ""
-
-  # RIGHT: collects everything
-  .venv/bin/pytest
-  .venv/bin/pytest -m "not slow and not requires_service"
-  ```
-
-- **`requires_db` vs `requires_service` are separate.** Most `tests/`
-  tests need a Postgres reachable via `TTS_ERP_DB_URL`. The `domain_e2e`
-  suite additionally needs `:9877` running locally. Run them with:
-
-  ```bash
-  scripts/test.sh e2e                    # :9877 must be up
-  TTS_ERP_DB_URL=... scripts/test.sh migration   # PG must be reachable
-  ```
-
-- **渲染回归有三层闸（lane `render-gates`，2026-10-04）**。HTTP 形状冒烟看不见
-  渲染态：当天的「筛选条 1440 把查询按钮顶出页面」与「Bootstrap `--bs-font-monospace`
-  旁路出第 4 套字体」，在当时 `fast` 与 e2e 下都是**绿的**。分工：
-
-  | 层 | 位置 | 命令 | 拦什么 |
-  | --- | --- | --- | --- |
-  | 静态 lint | `tests/api/test_style_tokens.py` | `fast`（已含） | 源码里出现 tokens 之外的 `font-family` 字面量（无浏览器也能拦） |
-  | 浏览器层 | `tests/browser/`（`domain_browser`） | `fast`（已含）/ `test_isolated.sh browser` | 13 页 @1440 横向溢出、广告日明细多视口、computed 字体栈 ⊆ tokens 三套栈 |
-  | live e2e | `tests/e2e/`（`domain_e2e`） | `test_isolated.sh e2e`（需 `:9877`） | 必须真数据/真契约：排序闭环、日期列契约、只读约束 |
-
-  两层浏览器断言共用 `tests/render_support.py`（JS 片段 + Renderer 单一来源，
-  避免两份实现漂移）；浏览器层渲染本分支 Jinja + 本地静态服务 + mock，
-  因此**任何人跑 `fast` 都会跑到**，不必记得开服务。
-  需要 `.venv` 里有 `playwright`（已入 `dev` extra）+ `playwright install chromium`，
-  缺失时用例 skip 不硬失败。用例只发 GET（页面加载期的语义只读 POST 在
-  `render_support.READ_ONLY_POST_SUFFIXES` 白名单里），收尾断言写请求数为 0。
-
-- **Worktrees.** `chore/*` worktrees don't carry their own `.venv` — the
-  script falls back to `/home/schan/tts-erp/.venv/bin/pytest` when
-  `./.venv/bin/pytest` is missing.
-- **Migration tests — ARCHIVED（2026-09-03）。** `tests/migration/` 和
-  `scripts/migrate_v1_to_v2/` 已 git mv 到
-  `docs/archive/migrate-v1-to-v2-2026-08-29/`,原位只留 README 指针（见
-  `tests/MIGRATION_TESTS_ARCHIVED.md` 和 `docs/archive/migrate-v1-to-v2-archived.md`）。
-  迁移在 2026-08-29 切流时已执行完毕,这两个目录是 08-31 22h 全线停摆事故的根因,
-  归档是 `docs/guides/test-domains.md:134` 原计划的"DOC 计划删除"动作。
-  下面这段三层闸的描述作历史保留,方便复盘:
-  - **NOT autouse**：`_ensure_migrations_applied` fixture opt-in;`scripts/test.sh migration`
-    默认跑 dry-run,不重写生产库。
-  - **默认 excluded（2026-08-31）**:`pyproject.toml addopts` 带 `-m 'not domain_migration'`,
-    裸 `pytest` 跳整目录。原因:`test_reconcile.py` autouse 全量重放迁移对 PROD 写,
-    在全量跑时与早 test 持锁冲突(无 `statement_timeout`),在 60% 处卡住整套。
-  - **需显式 opt-in（2026-08-31）**:`TTS_ERP_ALLOW_PROD_MIGRATION=1`
-    - `-m domain_migration` 才解开。三层闸:
-    (1) `tests/migration/conftest.py` module-level skip;(2)
-    `_ensure_migrations_applied` session fixture 再检;(3)
-    `scripts.migrate_v1_to_v2.common.require_prod_guard(dry_run=False)` 抛 `SystemExit(2)`。
-  - **SQL 锁定**:`migrate_shops._UPSERT_CREDENTIAL` 不再 `ON CONFLICT DO UPDATE`
-    覆盖 `ciphertext` / `company_secret_ciphertext`(只 INSERT 写),
-    由 `tests/migration/test_migrate_shops.py::TestUpsertCredentialSql`
-    字符串断言锁定。08-30 incident 闭环:autouse fixture 把 v2 JSON-envelope
-    `integration.credentials.ciphertext` 写成 legacy `Fernet(raw_access_token)` 格式,
-    同步 worker 停摆 22h。
+Browser tests render the current worktree's Jinja and static assets with local mocks. Missing Playwright/Chromium may produce documented skips; publishing's canonical gate requires zero publishing skips.
 
 ## Mapping files to domains
 
-Quick lookup for "which slice do I run after editing X":
+| Edited area | Isolated command |
+| --- | --- |
+| `tts_erp_v2/jobs/tiktok/orders.py` | `bash scripts/test_isolated.sh commerce` |
+| `tts_erp_v2/jobs/tiktok/finance.py` | `bash scripts/test_isolated.sh finance` |
+| `tts_erp_v2/jobs/tiktok/logistics.py` | `bash scripts/test_isolated.sh logistics` |
+| `tts_erp_v2/jobs/tiktok/after_sales.py` | `bash scripts/test_isolated.sh after_sales` |
+| `tts_erp_v2/jobs/miaoshou/*.py` | `bash scripts/test_isolated.sh miaoshou` |
+| `tts_erp_v2/api/**/*.py` | `bash scripts/test_isolated.sh api` |
+| `tts_erp_v2/middleware/*.py` | `bash scripts/test_isolated.sh middleware` |
+| `tts_erp_v2/reporting/*.py` | `bash scripts/test_isolated.sh reporting finance` |
+| `tts_erp_v2/proxy/*.py` | `bash scripts/test_isolated.sh proxy` |
+| `miaoshou/miaoshou_signing.py` | `bash scripts/test_isolated.sh miaoshou unit` |
+| `tests/browser/**` | `bash scripts/test_isolated.sh browser` |
+| CSS/templates | `bash scripts/test_isolated.sh fast` then optional isolated `e2e` |
 
-| You edited…                                 | Run                                  |
-| ------------------------------------------- | ------------------------------------ |
-| `tts_erp_v2/jobs/tiktok/orders.py`          | `scripts/test.sh commerce`           |
-| `tts_erp_v2/jobs/tiktok/finance.py`         | `scripts/test.sh finance`            |
-| `tts_erp_v2/jobs/tiktok/logistics.py`       | `scripts/test.sh logistics`          |
-| `tts_erp_v2/jobs/tiktok/after_sales.py`     | `scripts/test.sh after_sales`        |
-| `tts_erp_v2/jobs/miaoshou/*.py`             | `scripts/test.sh miaoshou`           |
-| `tts_erp_v2/api/**/*.py`                    | `scripts/test.sh api`                |
-| `tts_erp_v2/middleware/*.py`                | `scripts/test.sh middleware`         |
-| `tts_erp_v2/reporting/*.py`                 | `scripts/test.sh reporting finance`   |
-| `tts_erp_v2/proxy/*.py`                     | `scripts/test.sh proxy`              |
-| `scripts/migrate_v1_to_v2/*.py`             | `scripts/test.sh migration`          |
-| `miaoshou/miaoshou_signing.py`              | `scripts/test.sh miaoshou unit`      |
-| `tests/e2e/**`（live 冒烟）                 | `scripts/test.sh e2e`（需 :9877 在跑） |
-| `tests/browser/**`（渲染冒烟）               | `scripts/test.sh browser`（无服务；`fast` 已含） |
-| `tts_erp_v2/static/css/**`、页面模板         | `scripts/test.sh fast`（浏览器层：溢出/字体栈 + 静态 lint）+ `scripts/test.sh e2e`（真数据复核） |
-| `scripts/probe_ui_*.js`                      | `scripts/test.sh api tests/api/test_ad_daily.py`（mock 契约静态锁） |
+## Adding tests
 
-## Adding new tests
-
-When you add a new test file, set the module-level marker so it joins
-the right slice:
+Use the narrowest public seam and a module-level domain marker:
 
 ```python
 import pytest
 
 pytestmark = pytest.mark.domain_<your_domain>
-# add layer markers only if you know the test is unit/slow/etc.
 ```
 
-For files that mix multiple domains (rare), mark the file with the
-dominant one and use per-test `pytest.mark.domain_*` for the outliers.
-Keep `addopts = "-ra -q"` working — no stdout noise.
-
-If your test needs the DB, also add `pytest.mark.requires_db`; if it
-needs the live `:9877` service, add `pytest.mark.requires_service`. The
-default `scripts/test.sh` invocation skips both.
+Add `requires_db`, `requires_service`, or `requires_browser` only when the behavior actually needs it. Prefix test-owned data with `TEST_`, keep fixtures owner-scoped, and run the narrow slice before the canonical fast gate.

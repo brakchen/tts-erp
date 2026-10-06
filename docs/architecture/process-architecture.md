@@ -9,6 +9,7 @@
 
 - **`tts-erp.service`**：uvicorn API，cwd=仓库根，`EnvironmentFile=.env`
 - **`tts-erp-sync.service`**：APScheduler worker，安装脚本 `prod-switch/install-sync-worker.sh`
+- **`tts-erp-publish.service`**：单设备 TikTok 发布 Worker；主循环保持 recovery/device-cleanup/publish 顺序，独立有界后台 coroutine 用短 DB session/cleanup lease 推进 spool 与 MinIO cleanup，慢对象删除不阻塞发布；user unit 为 `scripts/systemd/tts-erp-publish.service`
 - **`tts-erp-watchdog.timer`**：每 10min 巡检 → `logs/watchdog.log`
 - **`tts-erp-logrotate.timer`**：每 6h 检查 `logs/{stdout,stderr,watchdog}.log`，
   > 20MB 则滚动（`scripts/logrotate/tts-erp.conf`，copytruncate 适配 systemd
@@ -31,7 +32,8 @@ tts_erp_v2/
 ├── sync_worker/         # APScheduler；JOBS 注册表 + 调度状态（顶部 NOTE，以它为准）；
 │                        #   operator controls use readwrite-gated /v2/pages/sync-jobs;
 │                        #   manual trigger is readwrite+, enable/disable is admin
-├── db/models/           # 12 schema SQLAlchemy 模型 — miaoshou.py 为妙手 source-owned 包裹/采购价域 8 张表；
+├── db/models/           # 13 schema SQLAlchemy 模型 — publishing.py 为视频发布任务/attempt/Worker 心跳；
+│                        #   miaoshou.py 为妙手 source-owned 包裹/采购价域 8 张表；
 │                        #   plugin.py 为插件 dump 的结构化表：订单/物流/结算 7 张
 │                        #   （orders/order_lines/shipments/tracking_events/settlements/
 │                        #   settlement_details/raw_log，原 chrome_sync.py）+ 广告 5 张（ad_today/ad_daily/
@@ -42,6 +44,7 @@ tts_erp_v2/
 │                        #   （原 tts_erp_v2/analytics/{domain,repository}.py）
 ├── analytics/ reporting/ storage/
 │                        # analytics/ 只留读侧（spu_roi.py ROI 看板，读 plugin.ad_*）
+├── publishing/          # 视频发布状态机、owner-fenced repository、dispatcher、受控 adapters 与 Worker
 └── static/
 
 miaoshou/                # 妙手 SDK 包（独立包：client + miaoshou_signing.py；无 HTTP 路由，进程内用）
@@ -72,8 +75,9 @@ APScheduler 调度器，JOBS 注册表在文件顶部 `NOTE`，以它为准，�
 
 ### 3.3 db/models/
 
-12 schema SQLAlchemy 模型：
+13 schema SQLAlchemy 模型：
 
+- `publishing.py`：`publishing.video_publish_tasks / video_publish_attempts / worker_heartbeats`，分别保存任务与 publish/cleanup owner 状态（每轮 execution generation、下载前 generation-scoped `spool_path`、上传 generation/key/PUT expiry 独立）、含 profile/verification level 的完整不可变 attempt submission 身份和 Worker readiness；spool cleanup 精确处理退休 final/`.part`，对象 cleanup 固定退休 generation 并受 expiry+grace DB-time gate，设备 cleanup 只删除退休 generation 的精确 filesystem/MediaStore 路径；
 - `miaoshou.py`：妙手 source-owned 包裹/采购价域 8 张表（package raw/header/item/gift、purchase raw/candidate、cursor、issue）；
 - `plugin.py`：插件 dump 的订单、物流、结算和广告表；
 - 订单/物流/结算 7 张：orders、order_lines、shipments、tracking_events、settlements、settlement_details、raw_log

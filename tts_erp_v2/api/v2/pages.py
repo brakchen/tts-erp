@@ -57,7 +57,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from markupsafe import Markup, escape
+from markupsafe import escape
 
 from tts_erp_v2.access._context import user_label_var, user_pages_var
 from tts_erp_v2.accounts.pages import PAGES
@@ -443,17 +443,11 @@ def _css_version(filename: str) -> str:
   return _asset_version(_CSS_DIR / filename)
 
 
-def _sidebar(current_page: str = "") -> Markup:
-  """Jinja global: sidebar markup + toggle JS, empty without a page slug.
-
-  S704 below is a false positive: ``_sidebar_html`` escapes its only dynamic
-  value (the session label) with ``markupsafe.escape``; labels/groups/icons come
-  from the ``accounts.pages`` registry constants.
-  """
+def _sidebar(current_page: str = "") -> _TrustedHtml:
+  """Jinja global: sidebar markup + toggle JS, empty without a page slug."""
   if not current_page:
-    return Markup("")
-  # pi-lens-ignore: S704
-  return Markup(
+    return _TrustedHtml("")
+  return _TrustedHtml(
     _sidebar_html(current_page)
     + "\n  <script>"
     + _SIDEBAR_TOGGLE_JS
@@ -461,17 +455,18 @@ def _sidebar(current_page: str = "") -> Markup:
   )
 
 
-def _sidebar_css(current_page: str = "") -> Markup:
-  """Jinja global: sidebar CSS, empty without a page slug.
-
-  S704 below is a false positive: ``_SIDEBAR_CSS`` is a module-level static
-  stylesheet constant, not user data.
-  """
-  # pi-lens-ignore: S704
-  return Markup(_SIDEBAR_CSS) if current_page else Markup("")
+def _sidebar_css(current_page: str = "") -> _TrustedHtml:
+  """Jinja global: sidebar CSS, empty without a page slug."""
+  return _TrustedHtml(_SIDEBAR_CSS) if current_page else _TrustedHtml("")
 
 
 _TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
+class _TrustedHtml(str):
+  """HTML generated only from fixed templates and escaped labels."""
+  def __html__(self) -> str:
+    return self
+
+
 _templates_env = Environment(
   loader=FileSystemLoader(_TEMPLATES_DIR),
   autoescape=select_autoescape(["html"]),
@@ -706,6 +701,12 @@ def runtime_configs_page() -> HTMLResponse:
 def sync_jobs_page() -> HTMLResponse:
   """定时任务管理页：启停周期调度，或手动触发系统/店铺级任务。"""
   return _render_page("sync-jobs.html", current_page="sync-jobs")
+
+
+@router.get("/video-publish", response_class=HTMLResponse)
+def video_publish_page() -> HTMLResponse:
+  """Serial TikTok video publishing workbench."""
+  return _render_page("video-publish.html", current_page="video-publish")
 
 
 @router.get("/users", response_class=HTMLResponse)

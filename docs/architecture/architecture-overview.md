@@ -6,7 +6,7 @@
 ## 1. 技术栈
 
 Python 3.14 · FastAPI + uvicorn（`:9877`）· SQLAlchemy 2 + psycopg3 · PostgreSQL 容器（`:5432`，
-12 个业务 schema / 65 张业务表（v1 `public.*` 业务表 2026-09-05 归档删除；analytics 4 张僵尸表 migration 0007 drop；2026-09-11 `chrome_sync`→`plugin`、`analytics` 并入 `plugin`；2026-09-30 migration 0044 删除未接通的 `linkage` schema，migration 0045 新增 source-owned `miaoshou` schema）· APScheduler（独立 sync-worker 进程）· MinIO · Fernet 加密 · systemd user units。
+13 个非 public 业务 schema / 71 张业务表（v1 `public.*` 业务表 2026-09-05 归档删除；analytics 4 张僵尸表 migration 0007 drop；2026-09-11 `chrome_sync`→`plugin`、`analytics` 并入 `plugin`；2026-09-30 migration 0044 删除未接通的 `linkage` schema，migration 0045 新增 source-owned `miaoshou` schema）· APScheduler（独立 sync-worker 进程）· MinIO · Fernet 加密 · systemd user units。
 
 ## 2. 业务架构
 
@@ -35,13 +35,13 @@ Python 3.14 · FastAPI + uvicorn（`:9877`）· SQLAlchemy 2 + psycopg3 · Postg
 - 前缀取自 `TTS_ERP_EXTERNAL_PREFIX`，当前 `/tts`（仅在 `app.py` 构建时读一次 → `FastAPI(root_path=...)`；middleware/handlers 一律从 `scope["root_path"]` 派生）
 - **nginx 契约（2026-09-28 起）**：`/tts/` location 的 `proxy_pass` **不带尾斜杠**，完整前缀透传；app 侧 AuthMiddleware 会把不带前缀的请求归一化为带前缀（对两种转发模式都鲁棒），路由分类/匹配统一在 route-relative 路径上进行
 
-## 3. 测试 DB 隔离（2026-09-07）
+## 3. 测试 DB 隔离（2026-10-05）
 
-- **测试库**：`tts_erp_v3_test`（专用 test db，已 schema 一致）
-- **生产库**：`tts_erp`（仅 systemd API + 人工 dev 连接，永不被测试污染）
-- **隔离机制**：`.env.test`（gitignored）= `.env` 的 dbname 替身；`scripts/test.sh` 启动时 source 它
-- **数据导入**：`bash scripts/import_prod_to_test.sh --yes` 可按需把 prod 数据搬进 test db（multi-pass FK 处理，默认含 credentials 让 FK 走得通，prod Fernet key 不变所以仍可解密）
-- **安全护栏**：tests/conftest.py 检测到 `TTS_ERP_DB_URL` 指向 prod-shape dbname（`tts_erp` / `tts_erp_prod`）会往 stderr 打 WARNING；scripts/test.sh 会在 .env.test 缺失时直接退出
+- **唯一标准入口**：`bash scripts/test_isolated.sh <domain>`。测试入口从 `tts_erp_test_template` 克隆每次运行独占的 `tts_erp_test_<session>_<run>` 临时数据库，结束后删除该 clone；并发运行不会共享或清除彼此数据。
+- **模板刷新**：schema/migration 变化后执行 `bash scripts/test_isolated.sh --refresh-template fast`；刷新只把生产 schema 形状导入测试模板并升级到当前 Alembic head，不复制生产业务数据。
+- **硬生产护栏**：隔离 wrapper、底层 runner 与测试 fixture 都拒绝 `tts_erp`、`tts_erp_prod` 等 production-shaped 数据库；命中即非零退出，不允许 warning-only 继续。
+- **禁止绕过**：Agent 只能调用隔离 wrapper；不得直接调用底层 runner，不得使用长寿命共享测试库，也不存在 clone 工具不可用时的降级路径。依赖失败时停止并修复前置条件。
+- **配置**：`.env.test` 只提供测试形连接基线；实际运行由隔离 wrapper 注入 clone 的 `TTS_ERP_DB_URL_TEST`。完整机制与故障处理见 `docs/guides/agent-testing.md`。
 
 ## 4. 数据库维护待办
 
@@ -93,11 +93,11 @@ shop_cipher = cred.shop_cipher
   （含 `api_tier`）、`permissions`（页面权限点 `page:<id>`）、
   `role_permissions`、`user_roles`、`user_sessions`（服务端会话）
 - **页面级权限**：权限点 `page:<page_id>` 与侧边栏页面一一对应，单一清单在
-  `tts_erp_v2/accounts/pages.py`（13 个页面，含 `page:users` 用户管理）；
+  `tts_erp_v2/accounts/pages.py`（14 个页面，含 `page:users` 用户管理与 `page:video-publish` 视频发布）；
   `GET /v2/pages/<id>` 要求会话权限集含 `page:<id>`，缺失 → 403 页面
   （已登录但无权限 ≠ 未登录）；`/v2/users*` / `/v2/roles*` 归属 `page:users`
 - **侧边栏按权限过滤**：服务端渲染时按会话 `pages` 过滤入口，无权限页面不出现在
-  菜单（API key / auth off 时全量显示）；页面内全部操作不设权限点
+  菜单（API key / auth off 时全量显示）；页面内 API 通常复用角色矩阵，视频发布数据/API 还要求 `page:video-publish`
 - **api_tier 复用既有角色矩阵**：会话用户取其角色的 `api_tier`
   （`readonly|readwrite|admin`，取最高档）代入同一张 `required_role()` 比较；
   `/v2/users` `/v2/roles` 等未列路径默认 admin 档（fail-closed）
@@ -140,7 +140,7 @@ curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" \
 
 ### 6.2 改 app.py / middleware 后验证
 
-`bash prod-switch/postswitch-smoke.sh`（7 步冒烟）+ `.venv/bin/pytest tests/ -q`（含 middleware/ + api/ 契约测试）。
+`bash prod-switch/postswitch-smoke.sh`（7 步冒烟）+ `bash scripts/test_isolated.sh fast`（含 middleware/ + api/ 契约测试；测试仍只通过隔离入口）。
 
 ### 6.3 已拆除、不要再找
 

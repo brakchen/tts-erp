@@ -30,6 +30,14 @@ from tts_erp_v2.analytics.spu_profitability._formula_v10 import (
     calculate_order_metrics,
     calculate_projection,
 )
+from tts_erp_v2.analytics.spu_profitability._price_stats import (
+    PriceStatsBasis,
+    PriceStatsOverview,
+    PriceStatsRequest,
+    is_price_sort_field,
+    price_sort_value,
+    read_price_stats,
+)
 from tts_erp_v2.analytics.spu_profitability._projection import (
     ProjectionPolicy,
     projection_warning_codes,
@@ -285,8 +293,17 @@ _SQL_ROI_PROJECTION = text(
                coalesce(so.order_time, so.paid_at) >= CAST(:projection_sample_start AS timestamptz)
                    AND coalesce(so.order_time, so.paid_at) < CAST(:projection_sample_end AS timestamptz)
                    AS is_projection_sample,
-               coalesce(so.order_time, so.paid_at) < CAST(:projection_as_of_end AS timestamptz)
-                   AS is_projection_as_of,
+               (
+                   coalesce(so.order_time, so.paid_at) < CAST(:projection_as_of_end AS timestamptz)
+                   AND (
+                       CAST(:projection_target_start AS timestamptz) IS NULL
+                       OR coalesce(so.order_time, so.paid_at) >= CAST(:projection_target_start AS timestamptz)
+                   )
+                   AND (
+                       CAST(:projection_target_end AS timestamptz) IS NULL
+                       OR coalesce(so.order_time, so.paid_at) < CAST(:projection_target_end AS timestamptz)
+                   )
+               ) AS is_projection_target,
                coalesce(settled.customer_refund_vnd, 0) AS customer_refund_vnd,
                og.order_gmv_vnd,
                greatest(
@@ -390,7 +407,7 @@ _SQL_ROI_PROJECTION = text(
                orders.is_paid,
                orders.is_settled,
                orders.is_projection_sample,
-               orders.is_projection_as_of,
+               orders.is_projection_target,
                orders.is_delivery_terminal,
                orders.is_terminal_full_loss,
                orders.is_completed,
@@ -492,79 +509,94 @@ _SQL_ROI_PROJECTION = text(
                WHERE is_projection_sample
                  AND is_paid AND is_delivery_terminal), 0)
                AS projection_basis_full_loss_qty,
-           count(DISTINCT order_pk) FILTER (WHERE is_paid AND NOT is_settled AND status <> 'CANCELLED')
+           count(DISTINCT order_pk) FILTER (
+               WHERE is_projection_target
+                 AND is_paid AND NOT is_settled AND status <> 'CANCELLED')
                AS unsettled_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_delivery_terminal
                  AND NOT is_terminal_full_loss)
                AS full_loss_exposure_unsettled_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid AND NOT is_settled AND status <> 'CANCELLED'
+               WHERE is_projection_target
+                 AND is_paid AND NOT is_settled AND status <> 'CANCELLED'
                  AND unresolved_qty > 0)
                AS unresolved_unsettled_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_delivery_terminal
                  AND unresolved_full_loss_qty > 0)
                AS unresolved_full_loss_exposure_order_count,
            coalesce(sum(confirmed_refund_amount) FILTER (
-               WHERE is_paid AND NOT is_settled AND status <> 'CANCELLED'), 0)
+               WHERE is_projection_target
+                 AND is_paid AND NOT is_settled AND status <> 'CANCELLED'), 0)
                AS confirmed_unsettled_refund_amount_vnd,
            coalesce(sum(confirmed_refund_amount) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_delivery_terminal
                  AND NOT is_terminal_full_loss), 0)
                AS confirmed_full_loss_exposure_refund_amount_vnd,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_terminal_full_loss
                  AND confirmed_full_loss_qty > 0)
                AS confirmed_unsettled_full_loss_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_delivery_terminal
                  AND confirmed_full_loss_qty > 0)
                AS confirmed_full_loss_exposure_order_count,
            coalesce(sum(confirmed_full_loss_qty) FILTER (
-               WHERE is_paid AND NOT is_settled AND status <> 'CANCELLED'), 0)
+               WHERE is_projection_target
+                 AND is_paid AND NOT is_settled AND status <> 'CANCELLED'), 0)
                AS confirmed_unsettled_full_loss_qty,
            coalesce(sum(confirmed_full_loss_qty) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_delivery_terminal
                  AND NOT is_terminal_full_loss), 0)
                AS confirmed_full_loss_exposure_qty,
            coalesce(sum(unresolved_qty) FILTER (
-               WHERE is_paid AND NOT is_settled AND status <> 'CANCELLED'), 0)
+               WHERE is_projection_target
+                 AND is_paid AND NOT is_settled AND status <> 'CANCELLED'), 0)
                AS unresolved_unsettled_qty,
            coalesce(sum(unresolved_full_loss_qty) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_delivery_terminal
                  AND NOT is_terminal_full_loss), 0)
                AS unresolved_full_loss_exposure_qty,
            coalesce(sum(line_sales_vnd) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_delivery_terminal
                  AND NOT is_terminal_full_loss), 0)
                AS full_loss_exposure_unsettled_sales_vnd,
            coalesce(sum(unresolved_qty * unit_price) FILTER (
-               WHERE is_paid AND NOT is_settled AND status <> 'CANCELLED'), 0)
+               WHERE is_projection_target
+                 AND is_paid AND NOT is_settled AND status <> 'CANCELLED'), 0)
                AS unresolved_unsettled_sales_vnd
     FROM line_facts
     GROUP BY spu_pk
@@ -629,8 +661,17 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
                coalesce(so.order_time, so.paid_at) >= CAST(:projection_sample_start AS timestamptz)
                    AND coalesce(so.order_time, so.paid_at) < CAST(:projection_sample_end AS timestamptz)
                    AS is_projection_sample,
-               coalesce(so.order_time, so.paid_at) < CAST(:projection_as_of_end AS timestamptz)
-                   AS is_projection_as_of,
+               (
+                   coalesce(so.order_time, so.paid_at) < CAST(:projection_as_of_end AS timestamptz)
+                   AND (
+                       CAST(:projection_target_start AS timestamptz) IS NULL
+                       OR coalesce(so.order_time, so.paid_at) >= CAST(:projection_target_start AS timestamptz)
+                   )
+                   AND (
+                       CAST(:projection_target_end AS timestamptz) IS NULL
+                       OR coalesce(so.order_time, so.paid_at) < CAST(:projection_target_end AS timestamptz)
+                   )
+               ) AS is_projection_target,
                og.order_gmv_vnd,
                greatest(
                    abs(coalesce(settled.customer_refund_vnd, 0)),
@@ -729,7 +770,7 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
                orders.is_paid,
                orders.is_settled,
                orders.is_projection_sample,
-               orders.is_projection_as_of,
+               orders.is_projection_target,
                orders.is_delivery_terminal,
                orders.is_terminal_full_loss,
                orders.is_completed,
@@ -782,35 +823,42 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
                  AND is_delivery_terminal
                  AND is_delivered_full_loss)
                AS projection_basis_full_loss_order_count,
-           count(DISTINCT order_pk) FILTER (WHERE is_paid AND NOT is_settled AND status <> 'CANCELLED')
+           count(DISTINCT order_pk) FILTER (
+               WHERE is_projection_target
+                 AND is_paid AND NOT is_settled AND status <> 'CANCELLED')
                AS unsettled_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_delivery_terminal
                  AND NOT is_terminal_full_loss)
                AS full_loss_exposure_unsettled_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_terminal_full_loss
                  AND confirmed_full_loss_qty > 0)
                AS confirmed_unsettled_full_loss_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_delivery_terminal
                  AND confirmed_full_loss_qty > 0)
                AS confirmed_full_loss_exposure_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid AND NOT is_settled AND status <> 'CANCELLED'
+               WHERE is_projection_target
+                 AND is_paid AND NOT is_settled AND status <> 'CANCELLED'
                  AND unresolved_qty > 0)
                AS unresolved_unsettled_order_count,
            count(DISTINCT order_pk) FILTER (
-               WHERE is_paid
+               WHERE is_projection_target
+                 AND is_paid
                  AND NOT is_settled
                  AND status <> 'CANCELLED'
                  AND NOT is_delivery_terminal
@@ -1519,21 +1567,24 @@ def _projection_scope_aggregate(
     paid_statuses: list[str],
     st0: str,
     st1: str,
+    window_start: datetime | None,
+    window_end: datetime | None,
+    ad_start: date | None,
+    ad_end: date | None,
     projection_map: dict[int, Mapping[str, Any]],
     projection_counts_row: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    """Aggregate projection facts without rebuilding a profitability overview.
+    """Aggregate projection facts for the selected reporting window.
 
-    The current-window maps stay owned by ``_query_spu_roi``. This helper only
-    loads the all-time facts needed to feed the projection formula, so reporting
-    dates cannot remove a selected SPU from the projection source and no second
-    full overview is recursively constructed.
+    Mature sample facts stay independent in ``projection_map`` while current
+    facts and unsettled forecast targets follow the reporting dates. The helper
+    avoids recursively rebuilding a second profitability overview.
     """
     common = {
         "selected_pks": selected_pks,
         "selected_seller_ids": selected_seller_ids,
-        "ws": None,
-        "we": None,
+        "ws": window_start,
+        "we": window_end,
     }
 
     def grouped(sql, extra: dict[str, Any]) -> dict[int, Mapping[str, Any]]:
@@ -1548,7 +1599,7 @@ def _projection_scope_aggregate(
             if row["spu_pk"] is not None
         }
 
-    ad_map = grouped(_SQL_ROI_AD, {"ad_start": None, "ad_end": None})
+    ad_map = grouped(_SQL_ROI_AD, {"ad_start": ad_start, "ad_end": ad_end})
     sales_map = grouped(
         _SQL_ROI_SALES,
         {"paid_statuses": paid_statuses, "st0": st0, "st1": st1},
@@ -2120,6 +2171,8 @@ def _query_spu_roi(
                 "projection_sample_start": projection_sample_start,
                 "projection_sample_end": projection_sample_end,
                 "projection_as_of_end": projection_as_of_end,
+                "projection_target_start": ws_dt,
+                "projection_target_end": we_dt,
                 "paid_statuses": paid_statuses,
                 "st0": st0,
                 "st1": st1,
@@ -2147,6 +2200,29 @@ def _query_spu_roi(
 
     # 成本链批量解析（D1）
     cost_map = _resolve_costs_batch(sess, selected_pks)
+
+    # 价格统计与利润共用一个读快照、一份已解析的 SPU 选择、一份当前有效成本 map。
+    # 无单一店铺（legacy 跨店读）时无法按 shop_pk 限定价格观察，返回 None，
+    # 由 HTTP adapter 省略价格字段（能力探测），不猜测范围。
+    price_stats: PriceStatsOverview | None = (
+        read_price_stats(
+            sess,
+            basis=PriceStatsBasis(
+                calculated_at=calculated_at,
+                fx=fx_basis,
+                unit_costs_cny=cost_map,
+                default_k1_cny=K1_DEFAULT_CNY,
+            ),
+            request=PriceStatsRequest(
+                shop_pk=shop_pk,
+                selected_spu_pks=tuple(selected_pks),
+                window_start_utc=ws_dt,
+                window_end_exclusive_utc=we_dt,
+            ),
+        )
+        if shop_pk is not None
+        else None
+    )
 
     plain: list[dict] = []
     total_spend = Decimal(0)
@@ -2775,7 +2851,10 @@ def _query_spu_roi(
 
     # 排序（None 沉底；spend 后以 spu_pk ASC 最终决胜，分页稳定）。
     def _key(r: dict) -> tuple[bool, Decimal, Decimal, int]:
-        v = r[sort_field]
+        if is_price_sort_field(sort_field):
+            v = price_sort_value(price_stats, sort_field, int(r["spu_pk"]))
+        else:
+            v = r[sort_field]
         if v is None:
             return (True, Decimal(0), Decimal(0), int(r["spu_pk"]))
         primary = v if ascending else -v
@@ -2879,6 +2958,8 @@ def _query_spu_roi(
                     "projection_sample_start": projection_sample_start,
                     "projection_sample_end": projection_sample_end,
                     "projection_as_of_end": projection_as_of_end,
+                    "projection_target_start": ws_dt,
+                    "projection_target_end": we_dt,
                     "paid_statuses": paid_statuses,
                     "st0": st0,
                     "st1": st1,
@@ -3109,6 +3190,8 @@ def _query_spu_roi(
                     "projection_sample_start": projection_sample_start,
                     "projection_sample_end": projection_sample_end,
                     "projection_as_of_end": projection_as_of_end,
+                    "projection_target_start": ws_dt,
+                    "projection_target_end": we_dt,
                     "paid_statuses": paid_statuses,
                     "st0": st0,
                     "st1": st1,
@@ -3141,6 +3224,10 @@ def _query_spu_roi(
             paid_statuses=paid_statuses,
             st0=st0,
             st1=st1,
+            window_start=ws_dt,
+            window_end=we_dt,
+            ad_start=ad_start,
+            ad_end=ad_end,
             projection_map=cast(dict[int, Mapping[str, Any]], projection_map),
             projection_counts_row=cast(
                 Mapping[str, Any] | None, projection_scope_counts_row
@@ -3537,6 +3624,7 @@ def _query_spu_roi(
         total=len(plain),
         totals=totals,
         basis=basis,
+        price_stats=price_stats,
     )
 
 
