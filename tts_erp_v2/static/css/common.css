@@ -237,6 +237,23 @@ html .uplot { font-family: var(--sans); }
 }
 .btn-icon:hover { opacity: 0.7; }
 
+/* ── 原生 <dialog> 模态框 ───────────────────────────────────────
+ * 单一 owner：表面、遮罩、标题层级、底部动作行。页面模板不得再内联这些规则
+ * （见本文件头部约定），页面只保留自己特有的内部排版。
+ * 2026-10-06 从 shops.html 的内联 <style> 迁入（取值逐条照搬，渲染不变），
+ * video-publish 的确认框从此与店铺凭证框共用一套外观。 */
+.op-dialog {
+  width: min(520px, calc(100vw - 32px));
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink);
+  padding: 22px 24px;
+}
+.op-dialog::backdrop { background: rgba(27, 24, 20, 0.48); }
+.op-dialog h2 { margin: 0 0 6px; font-family: var(--serif); font-size: 20px; }
+.op-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+
 /* ── 响应式 ───────────────────────────────────────────── */
 
 @media (max-width: 720px) {

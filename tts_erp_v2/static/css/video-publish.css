@@ -3,3 +3,18 @@
 @media(max-width:390px){.publish-main{padding:12px}.publish-rail-section,.publish-workbench,.publish-history{padding:12px}.history-toolbar>div{align-items:stretch}.history-toolbar select,.history-toolbar button{width:100%}#publish-task-drawer{padding:18px;width:100vw}.filter-tabs button{flex:1 1 42%}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 #publish-device-select{width:100%;max-width:28rem;margin-top:6px;border:1px solid var(--rule);border-radius:var(--radius);background:var(--paper);color:var(--ink);padding:9px;font-family:var(--sans)}
+/* 确认类 dialog（提交确认 / 任务操作确认）的内部排版。
+   表面、遮罩、标题层级已由 common.css 的 .op-dialog 统一提供（两个 dialog 都带
+   class="op-dialog"）；原生 <dialog> 的 UA 默认样式不消费本站令牌，所以本页只补
+   自己特有的部分：长文案可滚、两列动作行、文件/文案/设备网格。 */
+#publish-confirm-dialog,#publish-action-dialog{max-height:calc(100vh - 48px);overflow:auto}
+#publish-confirm-dialog>form,#publish-action-dialog>form{display:grid;grid-template-columns:1fr auto;column-gap:10px;margin:0}
+#publish-confirm-dialog h2,#publish-action-dialog h2{grid-column:1/-1;line-height:1.35}
+#publish-confirm-preview{grid-column:1/-1;max-width:100%;max-height:220px;margin:12px 0 0;background:var(--ink)}
+.publish-confirm-warning{grid-column:1/-1;margin:12px 0 0;color:var(--muted);font-size:13px;line-height:1.6}
+#publish-confirm-dialog dl{grid-column:1/-1;display:grid;grid-template-columns:80px 1fr;gap:6px 10px;margin:14px 0 0;font-size:14px}
+#publish-confirm-dialog dt{color:var(--muted);font-family:var(--mono);font-size:12px}
+#publish-confirm-dialog dd{margin:0;overflow-wrap:anywhere}
+#publish-confirm-dialog button:first-of-type,#publish-action-dialog button:first-of-type{grid-column:1;justify-self:start;margin-top:20px}
+#publish-confirm-dialog button:last-of-type,#publish-action-dialog button:last-of-type{grid-column:2;justify-self:end;margin-top:20px}
+@media(max-width:720px){#publish-confirm-dialog,#publish-action-dialog{padding:18px 16px}#publish-confirm-dialog button:first-of-type,#publish-action-dialog button:first-of-type,#publish-confirm-dialog button:last-of-type,#publish-action-dialog button:last-of-type{min-height:44px}}
