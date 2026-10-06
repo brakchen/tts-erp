@@ -237,6 +237,82 @@ drop_db() {
     pg_exec dropdb -U postgres --if-exists "$db" >/dev/null 2>&1 || true
 }
 
+# Drop tables that exist in the template DB but not in the prod source DB.
+# Necessary because pg_dump --clean uses DROP TABLE IF EXISTS (no CASCADE),
+# and a template-only table FK to a prod table would block the restore.
+drop_template_only_tables() {
+  local prod_url="$1" template_url="$2"
+  local prod_plain template_plain
+  prod_plain="$(plain_pg_url "$prod_url")"
+  template_plain="$(plain_pg_url "$template_url")"
+  local diff
+  diff="$(
+    SOURCE_URL="$prod_plain" TARGET_URL="$template_plain" \
+      PG_DOCKER_VALUE="$PG_DOCKER_VALUE" python3 - <<'PY'
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+
+source_url = os.environ["SOURCE_URL"]
+target_url = os.environ["TARGET_URL"]
+pg_docker = os.environ["PG_DOCKER_VALUE"]
+
+
+def run_psql(url: str) -> str:
+    if pg_docker:
+        out = subprocess.run(
+            ["docker", "exec", pg_docker, "psql",
+             "--no-psqlrc", "--tuples-only", "--no-align", "--quiet",
+             "--command",
+             "SELECT table_schema || '.' || table_name FROM information_schema.tables "
+             "WHERE table_type='BASE TABLE' AND table_schema NOT IN ('pg_catalog','information_schema')",
+             url],
+            check=False, capture_output=True, text=True,
+        )
+    else:
+        out = subprocess.run(
+            ["psql",
+             "--no-psqlrc", "--tuples-only", "--no-align", "--quiet",
+             "--command",
+             "SELECT table_schema || '.' || table_name FROM information_schema.tables "
+             "WHERE table_type='BASE TABLE' AND table_schema NOT IN ('pg_catalog','information_schema')",
+             url],
+            check=False, capture_output=True, text=True,
+        )
+    return out.stdout
+
+
+def parse_tables(text: str) -> set[str]:
+    tables: set[str] = set()
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or re.fullmatch(r"\d+ rows?", line):
+            continue
+        if "." in line:
+            tables.add(line)
+    return tables
+
+
+src = parse_tables(run_psql(source_url))
+tgt = parse_tables(run_psql(target_url))
+for name in sorted(tgt - src):
+    print(name)
+PY
+  )" || return 0
+  [[ -z "$diff" ]] && return 0
+  echo "[isolated-test] dropping template-only tables before schema restore (CASCADE):"
+  while IFS= read -r tbl; do
+    [[ -z "$tbl" ]] && continue
+    [[ "$tbl" =~ ^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    echo "[isolated-test]   - $tbl"
+    TTS_ERP_DB_URL="$template_url" pg_exec psql --no-psqlrc --set ON_ERROR_STOP=1 --quiet \
+      --command "DROP TABLE IF EXISTS $tbl CASCADE" "$(plain_pg_url "$template_url")" \
+      >/dev/null 2>&1 || true
+  done <<< "$diff"
+}
+
 source_prod_url() {
   if [[ -n "${TTS_ERP_DB_URL_PROD_SOURCE:-}" ]]; then
     printf '%s\n' "$TTS_ERP_DB_URL_PROD_SOURCE"
@@ -266,7 +342,7 @@ prod_alembic_revision() {
 refresh_template() {
   echo "[isolated-test] refreshing template DB: $TEMPLATE_DB"
 
-  local prod_url revision alembic template_exists=0
+  local prod_url revision alembic
   prod_url="$(source_prod_url)"
   [[ -n "$prod_url" ]] || fail "cannot resolve production schema source URL from TTS_ERP_DB_URL_PROD_SOURCE, .env, or ../../.env"
 
@@ -274,7 +350,13 @@ refresh_template() {
   # client/server/source preflight and generated the schema dump. If the DB is
   # missing, preflight against the source first, then create the empty target.
   if db_exists "$TEMPLATE_DB"; then
-    template_exists=1
+    # A merged worktree may carry tables/FKs that prod has not applied yet
+    # (e.g. a SPU-price observation lane). Their FKs to a prod table block
+    # pg_dump --clean from dropping that prod table. Drop such template-only
+    # tables with CASCADE before the importer runs so the schema restore does
+    # not fail mid-restore. The tables are recreated later by alembic upgrade
+    # head when the migration runs.
+    drop_template_only_tables "$prod_url" "$TEMPLATE_URL"
   else
     TTS_ERP_DB_URL="$prod_url" \
       TTS_ERP_DB_URL_TEST="$TEMPLATE_URL" \
@@ -292,7 +374,9 @@ refresh_template() {
     bash scripts/import_prod_to_test.sh --schema-only --yes
 
   revision="$(prod_alembic_revision "$prod_url")"
-  alembic=".venv/bin/alembic"
+  # 与 alembic 同源的 python 解释器用于 seed_builtin_roles；测试可通过
+  # TTS_ERP_TEST_{ALEMBIC,PYTHON}_BIN 注入假二进制以在隔离环境下回归验证。
+  alembic="${TTS_ERP_TEST_ALEMBIC_BIN:-.venv/bin/alembic}"
   if [[ ! -x "$alembic" ]]; then
     alembic="/home/schan/tts-erp/.venv/bin/alembic"
   fi
@@ -302,6 +386,14 @@ refresh_template() {
       TTS_ERP_DB_URL="$TEMPLATE_URL" "$alembic" stamp "$revision"
       echo "[isolated-test] upgrading template to worktree head"
       TTS_ERP_DB_URL="$TEMPLATE_URL" "$alembic" upgrade head
+      # 迁移 0052 的 roles/permissions INSERT 被 stamp 跳过；用同源 python 幂等
+      # seed 内置角色/权限（不 seed 用户，由部署者用 CLI 创建）。
+      python_bin="${TTS_ERP_TEST_PYTHON_BIN:-.venv/bin/python}"
+      if [[ ! -x "$python_bin" ]]; then
+        python_bin="/home/schan/tts-erp/.venv/bin/python"
+      fi
+      echo "[isolated-test] seeding built-in roles/permissions against $TEMPLATE_URL"
+      TTS_ERP_DB_URL="$TEMPLATE_URL" "$python_bin" -m tts_erp_v2.accounts.cli sync-permissions
     else
       echo "[isolated-test] WARNING: prod alembic revision $revision is not present in this worktree;" >&2
       echo "                 leaving template at imported schema without alembic upgrade" >&2
