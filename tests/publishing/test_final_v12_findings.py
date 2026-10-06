@@ -106,6 +106,8 @@ def _verify_task(db_session: Session) -> tuple[VideoPublishTask, VideoPublishAtt
         prompt_version="TEST",
         prompt_snapshot="TEST",
         device_serial="TEST_device",
+        artemis_profile="TEST-test_final_v12_findings-profile",
+        artemis_verification_level="TEST-test_final_v12_findings-verification",
     )
     task.attempts.append(publish)
     db_session.add(task)
@@ -119,6 +121,8 @@ def _verify_task(db_session: Session) -> tuple[VideoPublishTask, VideoPublishAtt
         prompt_version="TEST",
         prompt_snapshot="TEST",
         device_serial="TEST_device",
+        artemis_profile="TEST-profile",
+        artemis_verification_level="TEST-verification",
     )
     task.attempts.append(verify)
     task.attempt_count = 1
@@ -306,6 +310,8 @@ def test_publish_admission_refunds_budget_without_rewriting_audit_count(
         prompt_version="TEST",
         prompt_snapshot="TEST",
         device_serial="TEST_device",
+        artemis_profile="TEST-profile",
+        artemis_verification_level="TEST-verification",
     )
     task.attempts.append(publish)
     task.attempt_count = 1
@@ -349,6 +355,8 @@ def test_retention_cleanup_suppresses_and_rejects_retry(db_session: Session) -> 
             prompt_version="TEST",
             prompt_snapshot="TEST",
             device_serial="TEST_device",
+            artemis_profile="TEST-test_final_v12_findings-profile",
+            artemis_verification_level="TEST-test_final_v12_findings-verification",
         )
     )
     db_session.add(task)
@@ -491,6 +499,8 @@ def test_user_verification_is_immediately_claimable(db_session: Session) -> None
             prompt_version="TEST",
             prompt_snapshot="TEST",
             device_serial="TEST_device",
+            artemis_profile="TEST-test_final_v12_findings-profile",
+            artemis_verification_level="TEST-test_final_v12_findings-verification",
         )
     )
     db_session.add(task)
@@ -674,6 +684,8 @@ def test_related_verify_attempt_must_reference_publish_in_same_task(
         prompt_version="TEST",
         prompt_snapshot="TEST",
         device_serial="TEST_device",
+        artemis_profile="TEST-test_final_v12_findings-profile",
+        artemis_verification_level="TEST-test_final_v12_findings-verification",
     )
     first.attempts.append(publish)
     db_session.add_all([first, second])
@@ -688,6 +700,8 @@ def test_related_verify_attempt_must_reference_publish_in_same_task(
             prompt_version="TEST",
             prompt_snapshot="TEST",
             device_serial="TEST_device",
+            artemis_profile="TEST-profile",
+            artemis_verification_level="TEST-verification",
         )
     )
     with pytest.raises(Exception, match="related attempt"):
@@ -757,6 +771,8 @@ async def test_recovery_resubmit_transport_ambiguity_preserves_same_attempt(
         prompt_version="TEST",
         prompt_snapshot="TEST",
         device_serial="TEST_device",
+        artemis_profile="TEST-profile",
+        artemis_verification_level="TEST-verification",
         submitted_at=None,
     )
     task.attempts.append(attempt)
@@ -874,6 +890,8 @@ def test_api_defensively_sanitizes_legacy_task_attempt_and_cleanup_errors(
             prompt_version="TEST",
             prompt_snapshot="TEST",
             device_serial="TEST_device",
+            artemis_profile="TEST-test_final_v12_findings-profile",
+            artemis_verification_level="TEST-test_final_v12_findings-verification",
             artemis_error=diagnostic,
         )
     )

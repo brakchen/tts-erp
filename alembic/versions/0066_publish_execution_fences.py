@@ -21,6 +21,47 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    # A 0065 worker may already own unversioned spool/device paths or an
+    # in-flight Artemis session. Neither identity can be reconstructed after
+    # the fact, so deployment must drain these rows instead of guessing.
+    # pi-lens-ignore: python-sql-injection
+    op.execute(
+        text("""
+        DO $$ BEGIN
+            IF EXISTS (
+                SELECT 1 FROM publishing.video_publish_tasks
+                WHERE status = 'running'
+            ) THEN
+                RAISE EXCEPTION
+                    '0066 upgrade refused: drain every running task before migration';
+            END IF;
+            IF EXISTS (
+                SELECT 1 FROM publishing.video_publish_attempts
+                WHERE status IN ('created','submitting','queued','running','unknown')
+            ) THEN
+                RAISE EXCEPTION
+                    '0066 upgrade refused: resolve every active attempt before migration';
+            END IF;
+            IF EXISTS (
+                SELECT 1 FROM publishing.video_publish_tasks
+                WHERE spool_path IS NOT NULL OR device_path IS NOT NULL
+            ) THEN
+                RAISE EXCEPTION
+                    '0066 upgrade refused: reconcile every legacy spool/device path before migration';
+            END IF;
+            IF EXISTS (
+                SELECT 1 FROM publishing.video_publish_tasks
+                WHERE object_upload_expires_at IS NULL
+                  AND object_deleted_at IS NOT NULL
+                  AND (status NOT IN ('succeeded','failed','needs_review','cancelled')
+                       OR stage <> 'done')
+            ) THEN
+                RAISE EXCEPTION
+                    '0066 upgrade refused: reconcile nonterminal deleted object generation before migration';
+            END IF;
+        END $$
+        """)
+    )
     op.add_column(
         "video_publish_tasks",
         sa.Column("execution_generation", postgresql.UUID(as_uuid=True)),
@@ -32,36 +73,76 @@ def upgrade() -> None:
         ["execution_generation"],
         schema="publishing",
     )
-    # 0053–0064 did not persist PUT-ticket expiry. Fence every undeleted row
-    # that reaches 0066 without one for the documented maximum historical TTL.
-    # The selector adds a further completion grace before destructive cleanup.
+    # 0053–0064 did not persist PUT-ticket expiry. Fence every generation that
+    # reaches 0066 without one, including a generation previously considered
+    # deleted: an old ticket may complete after that observation. Previously
+    # deleted terminal generations are reopened for generation-bound,
+    # idempotent selector cleanup after the maximum TTL plus selector grace.
     # pi-lens-ignore: python-sql-injection
     op.execute(
         text("""
-        UPDATE publishing.video_publish_tasks
-        SET object_upload_expires_at = clock_timestamp() + interval '7 days'
-        WHERE object_deleted_at IS NULL
-          AND object_upload_expires_at IS NULL
+        WITH historical_fence AS (
+            SELECT clock_timestamp() + interval '7 days' AS expires_at
+        )
+        UPDATE publishing.video_publish_tasks AS task
+        SET object_upload_expires_at = historical_fence.expires_at,
+            object_deleted_at = CASE
+                WHEN task.object_deleted_at IS NOT NULL THEN NULL
+                ELSE task.object_deleted_at
+            END,
+            cleanup_intent = CASE
+                WHEN task.object_deleted_at IS NOT NULL THEN 'preserve_state'
+                ELSE task.cleanup_intent
+            END,
+            object_cleanup_status = CASE
+                WHEN task.object_deleted_at IS NOT NULL THEN 'pending'
+                ELSE task.object_cleanup_status
+            END,
+            object_cleanup_error = CASE
+                WHEN task.object_deleted_at IS NOT NULL
+                    THEN 'HISTORICAL_PUT_CAPABILITY_REOPENED'
+                ELSE task.object_cleanup_error
+            END,
+            object_cleanup_next_attempt_at = CASE
+                WHEN task.object_deleted_at IS NOT NULL
+                    THEN historical_fence.expires_at
+                ELSE task.object_cleanup_next_attempt_at
+            END,
+            cleanup_lease_owner = CASE
+                WHEN task.object_deleted_at IS NOT NULL THEN NULL
+                ELSE task.cleanup_lease_owner
+            END,
+            cleanup_lease_expires_at = CASE
+                WHEN task.object_deleted_at IS NOT NULL THEN NULL
+                ELSE task.cleanup_lease_expires_at
+            END,
+            cleanup_heartbeat_at = CASE
+                WHEN task.object_deleted_at IS NOT NULL THEN NULL
+                ELSE task.cleanup_heartbeat_at
+            END
+        FROM historical_fence
+        WHERE task.object_upload_expires_at IS NULL
         """)
     )
+    # Legacy terminal attempts retain honest unknown snapshots. Active attempts
+    # were rejected above; every new attempt begins active and is constrained to
+    # carry both exact values before it can be inserted.
     op.add_column(
         "video_publish_attempts",
-        sa.Column(
-            "artemis_profile",
-            sa.Text(),
-            nullable=False,
-            server_default=sa.text("'pro'"),
-        ),
+        sa.Column("artemis_profile", sa.Text()),
         schema="publishing",
     )
     op.add_column(
         "video_publish_attempts",
-        sa.Column(
-            "artemis_verification_level",
-            sa.Text(),
-            nullable=False,
-            server_default=sa.text("'strict'"),
-        ),
+        sa.Column("artemis_verification_level", sa.Text()),
+        schema="publishing",
+    )
+    op.create_check_constraint(
+        "video_publish_attempt_active_snapshot_check",
+        "video_publish_attempts",
+        "status NOT IN ('created','submitting','queued','running','unknown') OR "
+        "(NULLIF(BTRIM(artemis_profile), '') IS NOT NULL AND "
+        "NULLIF(BTRIM(artemis_verification_level), '') IS NOT NULL)",
         schema="publishing",
     )
     # pi-lens-ignore: python-sql-injection
@@ -153,6 +234,13 @@ def downgrade() -> None:
         FOR EACH ROW
         EXECUTE FUNCTION publishing.fn_immutable_video_publish_attempt_identity()
         """)
+    )
+    # pi-lens-ignore: python-sql-injection
+    op.execute(
+        text(
+            "ALTER TABLE publishing.video_publish_attempts "
+            "DROP CONSTRAINT IF EXISTS video_publish_attempt_active_snapshot_check"
+        )
     )
     op.drop_column(
         "video_publish_attempts", "artemis_verification_level", schema="publishing"

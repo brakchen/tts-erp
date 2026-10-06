@@ -244,36 +244,33 @@ curl -sS http://127.0.0.1:9877/healthz | jq
 ```
 
 完整部署说明见 [`docs/ops/tts-erp.md`](docs/ops/tts-erp.md)。数据库 migration 的生产执行由人工运维
-完成；agent 只能在 `tts_erp_v3_test` 验证 migration。
+完成；agent 只能通过隔离测试入口在 `tts_erp_test_template` 的一次性 ephemeral clone 上验证 migration。
 
 ## 测试
 
-测试的唯一入口是 `scripts/test.sh`。运行前必须准备 gitignored 的 `.env.test`，
-其中 `TTS_ERP_DB_URL`（或显式设置的 `TTS_ERP_DB_URL_TEST`）必须指向专用数据库
-`tts_erp_v3_test`。脚本仅在该文件存在且未直接设置 `TTS_ERP_DB_URL_TEST` 时加载它；
-`tests/conftest.py` 会拒绝已识别的 production-shaped 数据库。
+Agent 测试的唯一入口是 `scripts/test_isolated.sh`。它从只维护 schema 的
+`tts_erp_test_template` 克隆每次运行独占的 `tts_erp_test_*` 临时数据库，注入测试连接，
+执行后删除 clone；没有共享数据库或直接底层 runner 的降级路径。
 
 ```bash
 # 日常快速套件
-flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast
+bash scripts/test_isolated.sh fast
 
-# 会访问共享测试库的单域套件也必须加锁
-flock -n /tmp/tts-erp-test.lock bash scripts/test.sh api
-flock -n /tmp/tts-erp-test.lock bash scripts/test.sh commerce
-flock -n /tmp/tts-erp-test.lock bash scripts/test.sh reporting
+# 单域 / 单文件
+bash scripts/test_isolated.sh api
+bash scripts/test_isolated.sh fast tests/api/test_pages.py
 
-# 纯 unit layer
-bash scripts/test.sh unit
+# migration/schema 变化后先刷新模板
+bash scripts/test_isolated.sh --refresh-template fast
 ```
 
 安全规则：
 
-- 不直接运行 `pytest`；
+- 只使用上面的隔离入口和它创建的 ephemeral clone；
 - 不让测试连接 `tts_erp`、`tts_erp_prod` 或其他 production-shaped 数据库；
 - 不设置 `TTS_ERP_TEST_OFF=1` 绕过隔离；
-- agent 不运行 `scripts/test.sh all`、`coverage` 或归档 migration suite；
-- 测试数据使用 `TEST_` 前缀；
-- 共享测试库运行通过 `/tmp/tts-erp-test.lock` 串行化。
+- 不选择完整历史、覆盖率或归档 migration 套件；
+- 测试数据使用 `TEST_` 前缀。
 
 详见 [`docs/guides/agent-testing.md`](docs/guides/agent-testing.md)。
 

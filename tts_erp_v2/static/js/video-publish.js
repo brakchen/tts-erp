@@ -578,7 +578,7 @@
         task.filename,
         `${task.publishAttemptCount || 0} / ${task.verifyAttemptCount || 0}`,
         task.createdBy || "—",
-        task.latestArtemisSessionId || "—",
+        task.latestArtemisSessionId || "尚未创建",
         new Date(task.createdAt).toLocaleString(),
       ].forEach((value, index) => {
         const cell = document.createElement("td");

@@ -260,6 +260,12 @@ class VideoPublishAttempt(Base):
             "(kind = 'verify' AND related_attempt_id IS NOT NULL)",
             name="video_publish_attempt_related_check",
         ),
+        CheckConstraint(
+            "status NOT IN ('created','submitting','queued','running','unknown') OR "
+            "(NULLIF(BTRIM(artemis_profile), '') IS NOT NULL AND "
+            "NULLIF(BTRIM(artemis_verification_level), '') IS NOT NULL)",
+            name="video_publish_attempt_active_snapshot_check",
+        ),
         Index(
             "ix_video_publish_attempt_task_seq",
             "task_id",
@@ -314,12 +320,8 @@ class VideoPublishAttempt(Base):
         nullable=False,
         server_default=text("'com.zhiliaoapp.musically'"),
     )
-    artemis_profile: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'pro'")
-    )
-    artemis_verification_level: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'strict'")
-    )
+    artemis_profile: Mapped[str | None] = mapped_column(Text)
+    artemis_verification_level: Mapped[str | None] = mapped_column(Text)
     artemis_output: Mapped[dict | None] = mapped_column(JSONB)
     artemis_error: Mapped[str | None] = mapped_column(Text)
     steps_count: Mapped[int | None] = mapped_column(Integer)

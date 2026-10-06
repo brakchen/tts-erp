@@ -305,6 +305,8 @@ def test_attempt_events_only_report_real_insert_and_status_change(
         prompt_version="TEST",
         prompt_snapshot="TEST",
         device_serial="SHORT7",
+        artemis_profile="TEST-v20-profile",
+        artemis_verification_level="TEST-v20-verification",
         started_at=datetime.now(UTC),
     )
     task.attempts.append(attempt)
@@ -523,8 +525,11 @@ def test_test_dependency_help_uses_real_path_and_accurate_pg_client_contract() -
     help_text = (ROOT / "scripts/envsetup/install-test-deps.sh").read_text()
     assert "scripts/envscripts" not in help_text
     assert "bash scripts/envsetup/install-test-deps.sh --check" in help_text
-    assert "模板刷新默认" in help_text
-    assert "pg_dump 必须不早于服务端主版本" in help_text
+    assert "默认通过 PG_DOCKER=postgres 使用容器内 PostgreSQL 客户端" in help_text
+    assert (
+        "PG_DOCKER 已显式置空；这是人工选择的宿主机工具模式，不是测试 fallback"
+        in help_text
+    )
 
 
 def test_implemented_layout_and_deployment_docs_match_checked_in_files() -> None:

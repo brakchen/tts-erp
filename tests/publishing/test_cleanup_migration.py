@@ -178,7 +178,15 @@ def test_0058_ambiguous_running_rows_retain_minio(db_engine, legacy_stage: str) 
             transaction.rollback()
 
 
-def test_0058_no_work_ambiguous_row_can_request_manual_verification(db_engine) -> None:
+def test_0058_no_work_ambiguous_row_blocks_legacy_manual_verification(
+    db_engine,
+) -> None:
+    """0066 contract: legacy attempts with unknown profile/verification must not
+    be resubmitted under the same session, including via request_verification.
+    The task stays needs_review; the immutability trigger prevents supplying a
+    different identity, so recovery must come from a new publish attempt created
+    with explicit values.
+    """
     migration = _load_migration()
     with db_engine.connect() as conn:
         transaction = conn.begin()
@@ -244,13 +252,24 @@ def test_0058_no_work_ambiguous_row_can_request_manual_verification(db_engine) -
             )
             session = Session(bind=conn, join_transaction_mode="create_savepoint")
             try:
-                task = request_verification(session, row.public_id)
-                session.flush()
-                assert (task.status, task.stage, task.cleanup_intent) == (
-                    "running",
-                    "verifying",
-                    "none",
-                )
+                with pytest.raises(ValueError, match="VERIFY_SNAPSHOT_UNKNOWN"):
+                    request_verification(session, row.public_id)
+                session.rollback()
+                # The identity fields are immutable, so attempts cannot be
+                # backfilled to fake provenance; the trigger blocks any UPDATE.
+                with pytest.raises(Exception, match="identity fields are immutable"):
+                    # pi-lens-ignore: python-sql-injection
+                    conn.execute(
+                        text(
+                            """
+                            UPDATE publishing.video_publish_attempts
+                            SET artemis_profile='TEST_pro',
+                                artemis_verification_level='TEST_strict'
+                            WHERE task_id = :task_id
+                            """
+                        ),
+                        {"task_id": task_id},
+                    )
             finally:
                 session.close()
         finally:

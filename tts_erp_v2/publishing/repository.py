@@ -1050,6 +1050,16 @@ def claim_cleanup_work(
 ) -> CleanupWork | None:
     """Atomically select and lease one explicit, database-time-due cleanup row."""
     with session_factory() as session:
+        if request.scope == "device":
+            _lock_publish_slot(session)
+            running_task = session.scalar(
+                select(VideoPublishTask.id)
+                .where(VideoPublishTask.status == TaskStatus.RUNNING.value)
+                .limit(1)
+            )
+            if running_task is not None:
+                session.rollback()
+                return None
         clock = select(func.clock_timestamp().label("database_now")).cte(
             "cleanup_clock"
         )
@@ -1488,6 +1498,7 @@ def release_lease(task: VideoPublishTask) -> None:
 
 
 def request_verification(session: Session, task_id: UUID) -> VideoPublishTask:
+    _lock_publish_slot(session)
     task = get_task(session, task_id, lock=True)
     if task is None:
         raise LookupError("TASK_NOT_FOUND")
@@ -1497,12 +1508,25 @@ def request_verification(session: Session, task_id: UUID) -> VideoPublishTask:
         raise ValueError("CLEANUP_REQUIRED")
     if task.device_cleanup_status in {"pending", "failed"}:
         raise ValueError("DEVICE_CLEANUP_BLOCKED")
+    if has_pending_device_cleanup(session):
+        raise ValueError("DEVICE_CLEANUP_BLOCKED")
+    if (
+        session.scalar(
+            select(VideoPublishTask.id)
+            .where(VideoPublishTask.status == TaskStatus.RUNNING.value)
+            .limit(1)
+        )
+        is not None
+    ):
+        raise ValueError("DEVICE_BUSY")
     related = next(
         (a for a in reversed(task.attempts) if a.kind == AttemptKind.PUBLISH.value),
         None,
     )
     if related is None:
         raise ValueError("VERIFY_NOT_AVAILABLE")
+    if related.artemis_profile is None or related.artemis_verification_level is None:
+        raise ValueError("VERIFY_SNAPSHOT_UNKNOWN")
     now = _db_now(session)
     task.status = TaskStatus.RUNNING.value
     set_task_stage(task, TaskStage.VERIFYING, now=now)

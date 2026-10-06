@@ -112,6 +112,8 @@ def test_stale_publish_token_cannot_commit_any_observation(
             prompt_version="TEST",
             prompt_snapshot="TEST",
             device_serial="TEST_device",
+            artemis_profile="TEST_pro",
+            artemis_verification_level="TEST_strict",
         )
         session.add(attempt)
         session.commit()
@@ -167,6 +169,8 @@ def test_attempt_failure_rolls_back_task_transition_atomically(
         prompt_version="TEST",
         prompt_snapshot="TEST",
         device_serial="TEST_device",
+        artemis_profile="TEST_pro",
+        artemis_verification_level="TEST_strict",
     )
     task.attempts.append(attempt)
     with factory() as session:

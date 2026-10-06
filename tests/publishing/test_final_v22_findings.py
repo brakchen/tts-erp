@@ -392,6 +392,8 @@ def _active_attempt(task: VideoPublishTask, *, package: str) -> VideoPublishAtte
         device_serial="TESTV22SERIAL",
         device_path="/sdcard/Movies/TTSERP/tts_erp_test.mp4",
         target_app_package=package,
+        artemis_profile="TEST-v22-profile",
+        artemis_verification_level="TEST-v22-verification",
         started_at=datetime.now(UTC),
     )
 

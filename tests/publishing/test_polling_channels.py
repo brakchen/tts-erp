@@ -86,7 +86,7 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
             : url.includes("/tasks/current") ? { task: { taskId: "running-1", filename: "TEST-running.mp4", stage: "verifying", operationalStage: "verifying", stageStartedAt: "2026-10-04T00:00:00Z", status: "running", publishAttemptCount: 2, verifyAttemptCount: 1, currentAttempt: { kind: "verify", kindLabel: "自动核验", artemisSessionId: "verify-session-id", startedAt: "2026-10-04T00:00:01Z" } }, pollState: { running: true, cleaning: false, queued: true } }
             : url.includes("/tasks/task-1")
               ? { taskId: "task-1", filename: "TEST.mp4", status: "succeeded", caption: "TEST", attempts: [{ sequenceNo: 1, kind: "publish", kindLabel: "正式发布", status: "success", artemisSessionId: "full-artemis-session-id", promptSnapshot: "SECRET_PROMPT", artemisOutput: { verdict: "published" } }], cleanup: { device: { status: "succeeded" }, spool: { status: "succeeded" }, object: { status: "failed" } } }
-              : { items: [{ taskId: "task-1", status: "needs_review", filename: "TEST.mp4", latestArtemisSessionId: "verify-session-id", relatedPublishAttempt: { artemisSessionId: "publish-session-id" }, rowVersion: 3, createdAt: "2026-10-04T00:00:00Z", clientRequestId: "client-1", caption: "TEST caption", cleanupRetryableResources: ["object"], allowedActions: ["view", "continue_upload", "cancel", "retry", "verify", "retry_cleanup", "copy_artemis_id"] }], nextCursor: "cursor-2", pollState: { running: true, cleaning: false, queued: true } };
+              : { items: [{ taskId: "task-1", status: "needs_review", filename: "TEST.mp4", latestArtemisSessionId: "verify-session-id", relatedPublishAttempt: { artemisSessionId: "publish-session-id" }, rowVersion: 3, createdAt: "2026-10-04T00:00:00Z", clientRequestId: "client-1", caption: "TEST caption", cleanupRetryableResources: ["object"], allowedActions: ["view", "continue_upload", "cancel", "retry", "verify", "retry_cleanup", "copy_artemis_id"] }, { taskId: "task-2", status: "pending", stage: "queued", filename: "TEST-queued.mp4", latestArtemisSessionId: null, rowVersion: 1, createdAt: "2026-10-04T00:00:01Z", clientRequestId: "client-2", caption: "TEST queued", allowedActions: ["view", "cancel"] }], nextCursor: "cursor-2", pollState: { running: true, cleaning: false, queued: true } };
           return { status: 200, ok: true, headers: { get: () => '\"TEST-etag\"' }, json: async () => payload };
         };
         vm.runInThisContext(source);
@@ -111,6 +111,8 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
         for (const label of expectedLabels) {
           if (!created.some((node) => node.textContent === label)) throw new Error(`missing action ${label}`);
         }
+        const uncreatedAttempt = created.find((node) => node.className === "artemis-cell" && node.textContent === "尚未创建");
+        if (!uncreatedAttempt) throw new Error("queued task without an Artemis ID did not render 尚未创建");
         const adjacentCopy = created.find((node) => node.textContent === "复制");
         if (!adjacentCopy) throw new Error("Artemis copy control was not rendered in the ID cell");
         await adjacentCopy.onclick();

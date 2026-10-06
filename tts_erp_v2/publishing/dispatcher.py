@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 from time import monotonic
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select, update
@@ -512,6 +512,10 @@ async def _run_attempt(
         app_package = attempt.target_app_package
         artemis_profile = attempt.artemis_profile
         artemis_verification_level = attempt.artemis_verification_level
+        if artemis_profile is None or artemis_verification_level is None:
+            raise RuntimeError("ATTEMPT_SNAPSHOT_INCOMPLETE")
+        artemis_profile = cast(str, artemis_profile)
+        artemis_verification_level = cast(str, artemis_verification_level)
 
     result: ArtemisResult
     if should_submit:

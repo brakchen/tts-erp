@@ -16,11 +16,12 @@
 #   bash scripts/envsetup/install-test-deps.sh -h           # 全部选项
 #
 # 会做什么：
-#   1 系统包     postgresql-client（psql / createdb / dropdb —— test_isolated.sh
-#                建临时测试库 clone 必需）
+#   1 数据库工具 默认通过 PG_DOCKER=postgres 使用容器内 PostgreSQL 客户端；
+#                只有人工显式设置 PG_DOCKER= 时才检查/安装宿主机客户端
 #   2 venv 依赖  pytest / pytest-asyncio / pytest-cov + pyproject 的 dev 依赖（tinycss2）
-#   3 .env.test  缺失时按 .env 的连接串生成，库名固定 tts_erp_v3_test
-#   4 体检       测试库存在性（tts_erp_test_template / tts_erp_v3_test）
+#   3 .env.test  缺失时按 .env 的连接 authority 生成 inert 测试基线 URL；
+#                isolated runner 每次都会把库名改成 template/ephemeral clone
+#   4 体检       容器客户端与 tts_erp_test_template；不存在共享库 fallback
 #
 # 安全约束（AGENTS.md §3、docs/guides/agent-safety.md）：
 #   * 只装工具与测试依赖，**绝不**对任何数据库执行 DELETE/TRUNCATE/DROP/alembic。
@@ -36,6 +37,7 @@ cd "$REPO"
 DRY_RUN=0
 CHECK_ONLY=0
 SKIP_APT=0
+PG_DOCKER_VALUE="${PG_DOCKER-postgres}"
 
 # ---------- 选项 ----------
 while [[ $# -gt 0 ]]; do
@@ -68,34 +70,48 @@ echo "   仓库: $REPO"
 echo "   模式: $MODE"
 echo
 
-# ---------- 1. 系统包：PostgreSQL 客户端 ----------
-echo "-- 1/4 PostgreSQL 客户端工具（test_isolated.sh 建临时库需要 psql/createdb/dropdb）"
+# ---------- 1. PostgreSQL 客户端 ----------
+echo "-- 1/4 PostgreSQL 客户端工具"
 MISSING=()
-for bin in psql createdb dropdb; do
-  if command -v "$bin" >/dev/null 2>&1; then
-    ok "$bin 已就绪 ($(command -v "$bin"))"
+if [[ -n "$PG_DOCKER_VALUE" ]]; then
+  note "默认通过 PG_DOCKER=postgres 使用容器内 PostgreSQL 客户端"
+  if ! command -v docker >/dev/null 2>&1; then
+    err "docker 缺失；无法访问 PostgreSQL 容器"
+    MISSING+=("docker")
+  elif docker exec "$PG_DOCKER_VALUE" sh -c 'command -v psql && command -v createdb && command -v dropdb && command -v pg_dump' >/dev/null 2>&1; then
+    ok "容器 $PG_DOCKER_VALUE 内 psql/createdb/dropdb/pg_dump 已就绪"
   else
-    err "$bin 缺失"
-    MISSING+=("$bin")
+    err "容器 $PG_DOCKER_VALUE 不可用或缺少 PostgreSQL 客户端"
+    MISSING+=("container-postgresql-client")
   fi
-done
+else
+  warn "PG_DOCKER 已显式置空；这是人工选择的宿主机工具模式，不是测试 fallback"
+  for bin in psql createdb dropdb pg_dump; do
+    if command -v "$bin" >/dev/null 2>&1; then
+      ok "$bin 已就绪 ($(command -v "$bin"))"
+    else
+      err "$bin 缺失"
+      MISSING+=("$bin")
+    fi
+  done
+fi
 
 if [[ ${#MISSING[@]} -gt 0 ]]; then
-  if [[ $CHECK_ONLY -eq 1 || $SKIP_APT -eq 1 ]]; then
+  if [[ -n "$PG_DOCKER_VALUE" ]]; then
+    err "先修复 Docker/PostgreSQL 容器；不得切换到共享数据库或其他测试入口"
+  elif [[ $CHECK_ONLY -eq 1 || $SKIP_APT -eq 1 ]]; then
     warn "缺少 ${MISSING[*]}；跳过安装"
   elif [[ $DRY_RUN -eq 1 ]]; then
     note "[dry-run] 将执行: sudo apt-get update && sudo apt-get install -y postgresql-client"
   elif [[ $EUID -eq 0 ]]; then
-    ok "以 root 运行，直接安装 postgresql-client"
+    ok "以 root 运行，安装显式宿主机模式所需 postgresql-client"
     apt-get update -qq
     DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql-client
   else
-    err "安装 postgresql-client 需要 root 权限。请手动执行下面这条命令后重跑本脚本："
+    err "显式宿主机模式安装 postgresql-client 需要 root 权限："
     echo
     echo "      sudo apt-get update && sudo apt-get install -y postgresql-client"
     echo
-    note "说明：createdb/dropdb/psql 可使用发行版客户端；pg_dump 必须不早于服务端主版本。"
-    note "模板刷新默认通过 PG_DOCKER=postgres 使用服务端容器内的兼容 pg_dump。"
     APT_BLOCKED=1
   fi
 fi
@@ -137,17 +153,17 @@ import re, pathlib
 env = pathlib.Path('$REPO/.env').read_text()
 url = re.search(r'^TTS_ERP_DB_URL=(.*)\$', env, re.M).group(1).strip().strip('\"').strip(\"'\")
 base = url.rsplit('/', 1)[0]
-test_url = base + '/tts_erp_v3_test'
+test_url = base + '/tts_erp_test_base'
 p = pathlib.Path('$ENV_TEST')
 p.write_text(
-    '# 测试专用连接串（gitignored）。库名固定 tts_erp_v3_test，绝不能指向 tts_erp/tts_erp_prod。\\n'
+    '# 隔离 runner 的连接 authority 基线（gitignored）；不会作为实际测试库。\\n'
     f'TTS_ERP_DB_URL_TEST={test_url}\\n'
     f'TTS_ERP_DB_URL={test_url}\\n',
     encoding='utf-8')
 p.chmod(0o600)
 print('        已生成 .env.test ->', test_url.rsplit('/',1)[1])
 PY"
-    ok ".env.test 已生成（0600，指向 tts_erp_v3_test）"
+    ok ".env.test 已生成（0600，实际运行会改写为 ephemeral clone）"
   fi
 fi
 echo
@@ -175,7 +191,7 @@ if not url:
     sys.exit(0)
 admin = url.rsplit('/', 1)[0] + '/postgres'
 admin = admin.replace('postgresql+psycopg://', 'postgresql://')
-need = ['tts_erp_test_template', 'tts_erp_v3_test']
+need = ['tts_erp_test_template']
 with psycopg.connect(admin) as c:
     have = {r[0] for r in c.execute(\"SELECT datname FROM pg_database\").fetchall()}
 for db in need:
@@ -198,4 +214,4 @@ echo "        bash scripts/test_isolated.sh fast tests/api/test_pages.py   # 单
 echo
 note "说明：scripts/test_isolated.sh 是**唯一标准**测试入口（每个会话克隆"
 note "tts_erp_test_template 成一次性 tts_erp_test_* 库，跑完 drop，并发安全）。"
-note "scripts/test.sh 直连常驻库的 shared-DB 回退路径已弃用，勿再作为常规入口。"
+note "依赖失败时修复 template/container；不存在共享库或直接 runner fallback。"

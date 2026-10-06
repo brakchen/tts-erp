@@ -25,10 +25,10 @@
 ## 3. Non-negotiable safety boundaries
 
 - Never run tests against `tts_erp`, `tts_erp_prod`, or any prod-shaped database name.
-- Run tests only through `bash scripts/test_isolated.sh ...`; do not invoke pytest directly and do not call `scripts/test.sh` directly. The direct shared-DB path is deprecated — see `docs/guides/agent-testing.md`.
-- Agents must not run `bash scripts/test.sh all`, `bash scripts/test.sh coverage`, or migration suites archived under `docs/archive/migrate-v1-to-v2-2026-08-29/`. These paths include or restore production-touching migration behavior.
+- Run tests only through `bash scripts/test_isolated.sh ...`; it must create an ephemeral clone for every run. There is no direct-runner or shared-database fallback.
+- Agents must not select full-history, coverage, or archived migration suites under `docs/archive/migrate-v1-to-v2-2026-08-29/`. These paths include or restore production-touching migration behavior.
 - Never execute `DELETE`, `TRUNCATE`, `DROP`, or irreversible `UPDATE` against production data without the documented guard and explicit human authorization.
-- Never run `alembic upgrade` against production. Agents may validate migrations only against test-shaped databases (`tts_erp_test_template`, ephemeral `tts_erp_test_*`, or shared fallback `tts_erp_v3_test`); production migration and restart are human-operated.
+- Never run `alembic upgrade` against production. Agents may validate migrations only through the isolated runner against `tts_erp_test_template` and its ephemeral `tts_erp_test_*` clones; production migration and restart are human-operated.
 - Do not add a destructive HTTP, CLI, migration, or job path without the shared guard from `tts_erp_v2.api.deps`.
 - Credentials must go through `tts_erp_v2.proxy.token_service`; never query legacy `oauth_tokens` or decrypt `integration.credentials` directly.
 - Do not reintroduce v1 `public.*` business tables or remove `public.fn_touch_updated_at()`.
@@ -84,9 +84,9 @@ cred = load_credentials(session, provider="tiktok", external_account_id=shop_id)
 | Service status | `systemctl --user status tts-erp{,-sync}.service` |
 | API logs | `journalctl --user -u tts-erp -n 50` |
 
-- `scripts/test_isolated.sh` is the default agent entry point: it clones `tts_erp_test_template` into a per-session ephemeral DB, sets `TTS_ERP_DB_URL_TEST`, delegates to `scripts/test.sh`, then drops the clone.
+- `scripts/test_isolated.sh` is the sole agent entry point: it clones `tts_erp_test_template` into a per-session ephemeral DB, injects `TTS_ERP_DB_URL_TEST`, runs the selected scope, then drops the clone.
 - Refresh the template with `bash scripts/test_isolated.sh --refresh-template fast` when migrations/schema change or the template is missing/stale.
-- `scripts/test.sh` is only the low-level pytest wrapper that `test_isolated.sh` delegates to. **Calling it directly is deprecated**: it reuses the long-lived shared `tts_erp_v3_test` with no ephemeral clone, so concurrent runs delete each other's `TEST_` rows. Use `scripts/test_isolated.sh`. Falling back to it requires a deliberate decision (e.g. `createdb` unavailable) plus `flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast`, and the reason must be recorded.
+- If template cloning or its prerequisites fail, stop and repair them with `bash scripts/envsetup/install-test-deps.sh --check`; do not substitute another runner or database.
 - Full command reference: `docs/guides/commands-reference.md`.
 
 ### 5.1 Reuse-first implementation policy
@@ -133,29 +133,7 @@ Do not reimplement functionality that a suitable maintained dependency already p
 - Commit messages use `feat/fix/chore/docs/style/merge` plus a concise Chinese description.
 - In a worktree, never use `git add -A`, `git add .`, or `-A`-style wildcards for staging. They sweep in the worktree's `.venv` symlink, `.env*`, and other gitignored-but-not-protected local files, and the resulting commit will silently wipe a teammate's real venv on merge checkout. Always stage with explicit file paths (e.g. `git add tts_erp_v2/.../spu-roi.js tests/...`). If you used `-A`, run `git status` before `git commit` and unstage anything that is not your own change.
 
-### 7.1 pi-lens 测试运行器（`spawn python ENOENT`）
-
-pi-lens 的 `test-runner-client.js::resolveExec()` 解析 pytest 的顺序是：
-
-1. `<cwd>/node_modules/.bin/pytest` —— Node 生态假设，Python 项目没有；
-2. `findGlobalBinary("pytest")` —— **只遍历 npm/pnpm/yarn/bun 的 global bin，
-   完全不看 `PATH`**（所以放个 `pytest` 到 PATH 上是无效的）；
-3. 回退硬编码 `{ command: "python", args: ["-m","pytest",…] }`。
-
-本机 PATH 上只有 `python3`（无 `python`），第 3 步就报 `spawn python ENOENT`。
-
-修法：放一个 **venv 感知的 `python` shim** 到 **Pi 进程 PATH 首位目录**
-`/home/schan/.pi/agent/bin/`（`~/.local/bin` 不够 —— 它只写在 `~/.profile` /
-`~/.bashrc`，Pi 启动时不加载）。shim 从 `cwd` 向上找最近的
-`.venv/bin/python` 并 `exec`，于是 `python -m pytest` 用的是项目自己 venv 的
-解释器（依赖完整），而不是只有标准库的系统 `python3`。
-
-同一目录下也放了一个 `pytest` shim（对直接调用的场景有用，但不是本问题的关键路径）。
-
-这与 `scripts/test.sh` 的 worktree 自动建 `.venv` 软链是两回事：后者保证 venv 存在，
-前者保证 pi-lens 能找得到它。
-
-### 7.2 pi-lens 抑制注释的正确写法
+### 7.1 pi-lens 抑制注释的正确写法
 
 `pi-lens-ignore` 必须写在被标记行的 **紧邻上一行**（`docs/dispositions.md`），
 **行尾注释无效**；而且规则 id 必须**精确**，`— 原因` 后缀会让匹配失败：

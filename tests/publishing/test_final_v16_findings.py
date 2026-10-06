@@ -260,6 +260,8 @@ def test_needs_review_summary_exposes_related_publish_not_latest_verify(
         prompt_version="TEST",
         prompt_snapshot="TEST",
         device_serial="TEST_device",
+        artemis_profile="TEST-v16-profile",
+        artemis_verification_level="TEST-v16-verification",
     )
     db_session.add(publish)
     db_session.flush()

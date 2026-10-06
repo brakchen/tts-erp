@@ -176,9 +176,11 @@ def test_0062_attempt_identity_is_immutable_but_lifecycle_is_mutable(db_engine) 
                 text("""
                 INSERT INTO publishing.video_publish_attempts (
                   task_id, sequence_no, kind, related_attempt_id, artemis_session_id,
-                  status, prompt_version, prompt_snapshot, device_serial
+                  status, prompt_version, prompt_snapshot, device_serial,
+                  artemis_profile, artemis_verification_level
                 ) VALUES (:task_id, 2, 'verify', :publish_id, :session_id, 'created',
-                  'TEST', 'TEST', 'TEST_device') RETURNING id
+                  'TEST', 'TEST', 'TEST_device',
+                  'TEST-v14-profile', 'TEST-v14-verification') RETURNING id
                 """),
                 {
                     "task_id": task_ids[0],

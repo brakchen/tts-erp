@@ -159,6 +159,8 @@ def _add_verify_attempt(
         prompt_version="TEST_PUBLISH",
         prompt_snapshot=publish_prompt_snapshot,
         device_serial="TEST_device",
+        artemis_profile="TEST_PUBLISH",
+        artemis_verification_level="TEST_PUBLISH_strict",
         artemis_output=publish_output,
     )
     task.attempts.append(publish)
@@ -173,6 +175,8 @@ def _add_verify_attempt(
         prompt_version="TEST_VERIFY",
         prompt_snapshot=prompt_snapshot,
         device_serial="TEST_device",
+        artemis_profile="TEST_VERIFY",
+        artemis_verification_level="TEST_VERIFY_strict",
         artemis_output=output,
     )
     task.attempts.append(verify_attempt)
@@ -1119,6 +1123,8 @@ def test_admin_or_bypass_can_view_and_operate_cross_owner_task(
             prompt_version="TEST",
             prompt_snapshot="TEST",
             device_serial="TEST_device",
+            artemis_profile="TEST-test_db_workflow-profile",
+            artemis_verification_level="TEST-test_db_workflow-verification",
             retry_safe=True,
         )
     )
@@ -1171,6 +1177,8 @@ def test_retry_rejects_missing_object_even_when_attempt_is_safe(
             prompt_version="TEST",
             prompt_snapshot="TEST",
             device_serial="TEST_device",
+            artemis_profile="TEST-test_db_workflow-profile",
+            artemis_verification_level="TEST-test_db_workflow-verification",
             retry_safe=True,
         )
     )
@@ -1200,6 +1208,8 @@ def test_retry_preserves_retry_when_object_store_is_transiently_unavailable(
             prompt_version="TEST",
             prompt_snapshot="TEST",
             device_serial="TEST_device",
+            artemis_profile="TEST-test_db_workflow-profile",
+            artemis_verification_level="TEST-test_db_workflow-verification",
             retry_safe=True,
         )
     )
@@ -1855,6 +1865,8 @@ async def test_live_success_is_terminal_and_not_reclaimable(
             prompt_version="TEST",
             prompt_snapshot="TEST",
             device_serial="TEST_device",
+            artemis_profile="TEST-profile",
+            artemis_verification_level="TEST-verification",
         )
     )
     db_session.add(task)
@@ -2074,6 +2086,8 @@ async def test_verify_not_published_at_exhausted_budget_requires_review(
         prompt_version="TEST",
         prompt_snapshot="TEST",
         device_serial="TEST_device",
+        artemis_profile="TEST-test_db_workflow-profile",
+        artemis_verification_level="TEST-test_db_workflow-verification",
     )
     task.attempts.append(publish_attempt)
     db_session.add(task)
@@ -2087,6 +2101,8 @@ async def test_verify_not_published_at_exhausted_budget_requires_review(
         prompt_version="TEST",
         prompt_snapshot="TEST",
         device_serial="TEST_device",
+        artemis_profile="TEST-profile",
+        artemis_verification_level="TEST-verification",
         related_attempt_id=publish_attempt.id,
     )
     db_session.add(verify_attempt)
@@ -2188,6 +2204,8 @@ async def test_artemis_locked_admission_waits_without_consuming_budget(
             prompt_version="TEST",
             prompt_snapshot="TEST",
             device_serial="TEST_device",
+            artemis_profile="TEST-profile",
+            artemis_verification_level="TEST-verification",
         )
     )
     db_session.add(task)
@@ -2249,6 +2267,8 @@ async def test_same_session_resubmit_increments_transport_retry_count(
             prompt_version="TEST",
             prompt_snapshot="TEST",
             device_serial="TEST_device",
+            artemis_profile="TEST-profile",
+            artemis_verification_level="TEST-verification",
         )
     )
     db_session.add(task)

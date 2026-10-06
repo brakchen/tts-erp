@@ -39,8 +39,8 @@ Python 3.14 · FastAPI + uvicorn（`:9877`）· SQLAlchemy 2 + psycopg3 · Postg
 
 - **唯一标准入口**：`bash scripts/test_isolated.sh <domain>`。测试入口从 `tts_erp_test_template` 克隆每次运行独占的 `tts_erp_test_<session>_<run>` 临时数据库，结束后删除该 clone；并发运行不会共享或清除彼此数据。
 - **模板刷新**：schema/migration 变化后执行 `bash scripts/test_isolated.sh --refresh-template fast`；刷新只把生产 schema 形状导入测试模板并升级到当前 Alembic head，不复制生产业务数据。
-- **硬生产护栏**：wrapper、底层 runner 与 pytest fixture 都拒绝 `tts_erp`、`tts_erp_prod` 等 production-shaped 数据库；命中即非零退出，不允许 warning-only 继续。
-- **禁止绕过**：不得直接调用底层 test runner 或 pytest；不得把长寿命共享测试库作为常规路径。只有隔离 clone 工具不可用且经明确决定时，才可按 `docs/guides/agent-testing.md` 的加锁降级流程执行。
+- **硬生产护栏**：隔离 wrapper、底层 runner 与测试 fixture 都拒绝 `tts_erp`、`tts_erp_prod` 等 production-shaped 数据库；命中即非零退出，不允许 warning-only 继续。
+- **禁止绕过**：Agent 只能调用隔离 wrapper；不得直接调用底层 runner，不得使用长寿命共享测试库，也不存在 clone 工具不可用时的降级路径。依赖失败时停止并修复前置条件。
 - **配置**：`.env.test` 只提供测试形连接基线；实际运行由隔离 wrapper 注入 clone 的 `TTS_ERP_DB_URL_TEST`。完整机制与故障处理见 `docs/guides/agent-testing.md`。
 
 ## 4. 数据库维护待办
@@ -140,7 +140,7 @@ curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" \
 
 ### 6.2 改 app.py / middleware 后验证
 
-`bash prod-switch/postswitch-smoke.sh`（7 步冒烟）+ `bash scripts/test_isolated.sh fast`（含 middleware/ + api/ 契约测试；禁止直接调用 pytest）。
+`bash prod-switch/postswitch-smoke.sh`（7 步冒烟）+ `bash scripts/test_isolated.sh fast`（含 middleware/ + api/ 契约测试；测试仍只通过隔离入口）。
 
 ### 6.3 已拆除、不要再找
 

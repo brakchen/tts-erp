@@ -224,7 +224,11 @@ def test_pg18_tooling_and_deployment_docs_are_self_contained() -> None:
     installer = (ROOT / "scripts/envsetup/install-test-deps.sh").read_text()
     design = (ROOT / "docs/design/tiktok-video-publish.md").read_text()
     assert 'if [[ -n "$PG_DOCKER" ]]' in importer
-    assert "pg_dump 必须不早于服务端主版本" in installer
+    assert "默认通过 PG_DOCKER=postgres 使用容器内 PostgreSQL 客户端" in installer
+    assert (
+        "PG_DOCKER 已显式置空；这是人工选择的宿主机工具模式，不是测试 fallback"
+        in installer
+    )
     assert "User=" not in design
     assert "WantedBy=default.target" in design
     assert "systemctl --user enable --now tts-erp-publish.service" in design

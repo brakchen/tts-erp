@@ -84,7 +84,7 @@
   │
   ├─ PostgreSQL 原子领取全局唯一任务
   ├─ MinIO 下载到本地 spool，校验对象
-  ├─ ADB 推送到 /sdcard/Movies/TTSERP/<task_uuid>.mp4
+  ├─ ADB 推送到 /sdcard/Movies/TTSERP/tts_erp_<execution_generation>.mp4
   ├─ MediaStore 扫描并确认相册可见
   ├─ POST Artemis /api/run（固定 session_id + device_serial）
   ├─ GET /api/sessions/{session_id} 持续查询
@@ -1251,8 +1251,8 @@ bash scripts/test_isolated.sh ...
 | `device_serial` | text, 非空 | 本次调用的精确设备 serial。 |
 | `device_path` | text, 可空 | publish 对应设备文件；verify 通常为空。 |
 | `target_app_package` | text, 非空 | 本次调用的精确 app package 快照。 |
-| `artemis_profile` | text, 非空 | 本次 submit/resubmit 的 profile 快照。 |
-| `artemis_verification_level` | text, 非空 | 本次 submit/resubmit 的 verification level 快照；dispatch/resubmit 不读取可变 task/config。 |
+| `artemis_profile` | text；active/new 非空，terminal legacy 可空 | 本次 submit/resubmit 的 profile 快照；0065 predecessor 终态审计行保留诚实 unknown/null，绝不猜默认值或恢复为 active。 |
+| `artemis_verification_level` | text；active/new 非空，terminal legacy 可空 | 本次 submit/resubmit 的 verification level 快照；dispatch/resubmit 不读取可变 task/config。 |
 | `artemis_output` | jsonb, 可空 | 有界、已清洗的 session 结果摘要；禁止无限保存全部 trace。 |
 | `artemis_error` | text, 可空 | Artemis 返回的已清洗错误。 |
 | `steps_count` | int, 可空 | 从 `/steps` 得到的数量；用于安全重试分类。 |
@@ -1382,7 +1382,7 @@ API 返回以下稳定字符串，前端只按返回值显示按钮：
 | running/verifying | `INCONCLUSIVE` | needs_review/done | 释放 lease，保留对象。 |
 | 任意 pending | `USER_CANCEL` | cancelled/done | 清理对象；运行态不允许普通取消。 |
 | failed | `USER_RETRY` | pending/queued | 校验对象/预算，清主表错误和 completed_at。 |
-| needs_review | `USER_VERIFY` | running/verifying | 获取全局数据库槽并创建 verify attempt；API 不伪造 Worker lease，由真实 Worker 随后领取。 |
+| needs_review | `USER_VERIFY` | running/verifying | 在同一事务取得全局 PostgreSQL advisory/device slot，确认不存在其他 running task，也不存在全局 pending/failed/leased device cleanup 后创建 verify attempt；API 不伪造 Worker lease，由真实 Worker 随后领取。 |
 
 额外不变量：
 
@@ -1401,7 +1401,7 @@ API 返回以下稳定字符串，前端只按返回值显示按钮：
 - `publishing.submission.confirm_upload()`、`cancel_task()`、`retry_task()`、`replace_upload()` 持有对应任务写入；
 - `api.v2.video_publish.refresh_upload_url()` 只负责 owner 校验和 wire envelope；`submission.refresh_upload_ticket()` 在返回 URL 前以 PostgreSQL 时间持久化该 generation 的 ticket expiry；
 - `api.v2.video_publish.current()`、`list_tasks()`、`detail()` 持有 owner-scoped 只读查询与 snapshot；
-- `publishing.repository.request_verification()` 创建人工触发的 verify attempt；Worker 侧 task/attempt 结果只由 `commit_publish_transition()` 原子提交；
+- `publishing.repository.request_verification()` 与 device cleanup selector 使用同一事务 advisory/device slot：verification 在创建 attempt 前检查全局 running/cleanup，device selector 在领取 lease 前检查全局 running；持久化的 running 状态与 pending/failed cleanup 状态让 advisory lock 释放后的物理设备操作继续互斥；Worker 侧 task/attempt 结果只由 `commit_publish_transition()` 原子提交；
 - `publishing.dispatcher.dispatch_one()` 与 `recover_active()` 编排 adapter，但 adapter 不得自行修改数据库状态；
 - cleanup 删除只由 `claim_cleanup_work()` 领取的 executor 执行，并由 `renew_cleanup_work()` / `finish_cleanup_work()` fence。
 
@@ -1575,9 +1575,9 @@ async def submit_idempotently(attempt):
             goal=attempt.prompt_snapshot,
             task_id=str(attempt.artemis_session_id),
             device_serial=attempt.device_serial,
-            profile=config.profile,
-            locked_app_package=config.app_package,
-            verification_level=config.verification_level,
+            profile=attempt.artemis_profile,
+            locked_app_package=attempt.target_app_package,
+            verification_level=attempt.artemis_verification_level,
         )
     except TransportError:
         # 先 GET 同一 ID；仍未知时才用相同 ID 重提。
@@ -2395,7 +2395,7 @@ CORS 示例（origin 按实际域名替换）：
 
 - 目录 owner 为 publish service 用户，权限 `0700`；
 - 文件 `0600`；
-- 每任务目录 `<task_public_id>/video.mp4.part|video.mp4`；
+- 每次 execution 的目录 `<task_public_id>/<execution_generation>/video.mp4.part|video.mp4`，设备文件同样使用唯一 `tts_erp_<execution_generation>.mp4`；
 - 先写 `.part`，fsync 后原子 rename；登记的 `spool_path` 同时拥有该精确 final 与精确 sibling `.part`，process kill 后 selector 必须幂等删除并验证两者；
 - spool 所在磁盘预留至少 `2 × maxVideoBytes + safety margin`；
 - 日志不打印完整本地路径中的原始用户文件名。
@@ -2734,7 +2734,7 @@ Luna 每个 Phase 的输出必须包含：
 - 列表使用 `(created_at,id)` opaque keyset cursor，并只批量读取最新 attempt 与 publish/verify 计数；详情接口才加载完整 attempt 审计；
 - 409 错误返回 `code/message/retryable/requestId/rowVersion/allowedActions`，浏览器始终按服务端 allowedActions 重绘；
 - 0058 仅把成功 publish 或成功且 verdict=`published` 的 verify 视为发布确认；其他 verify 结果保留对象并进入 `needs_review`，且所有终态旧行都会清除 publish lease；
-- attempt 的 `task_id/sequence_no/kind/related_attempt_id/artemis_session_id/prompt_version/prompt_snapshot/device_serial/device_path/target_app_package/artemis_profile/artemis_verification_level` 插入后不可变；dispatch/resubmit 只读 attempt 快照，普通状态、结果、重试生命周期更新仍允许；
+- attempt 的 `task_id/sequence_no/kind/related_attempt_id/artemis_session_id/prompt_version/prompt_snapshot/device_serial/device_path/target_app_package/artemis_profile/artemis_verification_level` 插入后不可变；active/new attempt 必须具有非空 profile/verification 快照，0065 predecessor 的 terminal history 可诚实保留 null 且不得恢复 active/resubmit；dispatch/resubmit 只读 attempt 快照，普通状态、结果、重试生命周期更新仍允许；
 - confirm 后的下载以保存的 ETag 执行条件 GET；缺失对象和 ETag 不匹配都先由 cleanup selector 跟踪退休 key，且 missing 也必须等 PUT expiry + completion grace 后幂等确认 absence，完成后才允许 replacement；两者都在 staging/attempt 前失败；
 - 原始浏览器 basename 与 object-key-safe 文件名分开持久化，续传按原始文件名和大小核对；
 - verify prompt 同时包含 caption、源文件/对象身份、预期最新发布时间窗及时间/缩略图比对要求；
