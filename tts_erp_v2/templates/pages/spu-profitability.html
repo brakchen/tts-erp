@@ -172,6 +172,33 @@
             </div>
           </div>
         </div>
+        <div class="col" id="price-summary" hidden aria-live="polite" aria-busy="true">
+          <div class="op-counter-group h-100 op-price-summary">
+            <div class="op-counter-group-label op-price-summary-title">
+              价格
+              <button type="button" class="op-price-tip" data-price-tip="prices" data-tip="当前经营窗口、已付款、按件数加权；原价/实付来自 TikTok line item" aria-label="查看价格统计口径" aria-expanded="false">?</button>
+              <span class="op-price-summary-status" id="price-summary-status">加载中…</span>
+            </div>
+            <div class="row g-0 row-cols-2 op-price-summary-head" aria-hidden="true">
+              <div class="col"></div><div class="col">平均值</div><div class="col">中位数</div>
+            </div>
+            <div class="op-price-summary-row">
+              <span class="op-price-summary-label">采购价 <button type="button" class="op-price-tip" data-price-tip="purchase" data-tip="采购价统计口径" aria-label="查看采购价统计口径" aria-expanded="false">?</button><span class="op-price-status" id="price-status-purchase"></span></span>
+              <span class="op-counter-num" id="price-purchase-mean" aria-label="采购价平均值 CNY">—</span>
+              <span class="op-counter-num" id="price-purchase-median" aria-label="采购价中位数 CNY">—</span>
+            </div>
+            <div class="op-price-summary-row">
+              <span class="op-price-summary-label">销售价 <button type="button" class="op-price-tip" data-price-tip="originalSale" data-tip="销售价统计口径" aria-label="查看销售价统计口径" aria-expanded="false">?</button><span class="op-price-status" id="price-status-originalSale"></span></span>
+              <span class="op-counter-num" id="price-originalSale-mean" aria-label="销售价平均值 CNY">—</span>
+              <span class="op-counter-num" id="price-originalSale-median" aria-label="销售价中位数 CNY">—</span>
+            </div>
+            <div class="op-price-summary-row">
+              <span class="op-price-summary-label">实付价 <button type="button" class="op-price-tip" data-price-tip="paid" data-tip="实付价统计口径" aria-label="查看实付价统计口径" aria-expanded="false">?</button><span class="op-price-status" id="price-status-paid"></span></span>
+              <span class="op-counter-num" id="price-paid-mean" aria-label="实付价平均值 CNY">—</span>
+              <span class="op-counter-num" id="price-paid-median" aria-label="实付价中位数 CNY">—</span>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
