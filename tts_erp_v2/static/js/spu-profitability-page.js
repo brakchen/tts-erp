@@ -1116,13 +1116,16 @@
       },
     });
     // 用 table.on 订阅（与 dataSorting 同一机制）；6.3 对 options 回调的订阅不可靠。
-    var lastDrillClick = { spuPk: null, at: 0 };
-    state.table.on("rowClick", (_e, row) => {
+    // 用原生事件身份去重，WeakSet 持有已处理事件；不依赖时钟分辨率，Firefox
+    // resistFingerprinting 粗化 timeStamp 也不会误吞用户连点。同一原生点击被 Tabulator
+    // 从 frozen/main 两侧 row 重复派发时只忽略一次；不认 "spu_pk + 时间窗口" 是因为
+    // 后者会把用户「点关闭 → 立刻点开同一行」的合法快速 toggle 一起吞掉。
+    var handledDrillEvents = new WeakSet();
+    state.table.on("rowClick", (e, row) => {
       var it = row.getData();
       if (!it || !it.spu_pk) return;
-      var now = Date.now();
-      if (lastDrillClick.spuPk === it.spu_pk && now - lastDrillClick.at < 300) return;
-      lastDrillClick = { spuPk: it.spu_pk, at: now };
+      if (e && handledDrillEvents.has(e)) return;
+      if (e) handledDrillEvents.add(e);
       openDrillPanel(row.getElement(), it);
     });
     // 表头点击只改状态并触发服务端重取（本地排序对同字段幂等）。

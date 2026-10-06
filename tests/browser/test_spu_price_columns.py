@@ -208,7 +208,12 @@ def test_price_tooltip_survives_lazy_drill_cycles(browser_renderer, monkeypatch)
         page.keyboard.press("Escape")
         assert button.get_attribute("aria-expanded") == "false"
         assert page.evaluate("document.activeElement === document.querySelector('[data-price-tip=\\\"purchase\\\"]')")
-        row.click()
+        # 收尾回到「drill 已关闭」：Escape 关 tooltip 时页面级 Escape 已把 drill 收起，
+        # 只有还开着才需要点行收起。旧版（rowClick 用 spu_pk+300ms 拦重复）下这次
+        # row.click() 反被吞掉，靠上一轮残留的 drill 撑过下一轮的可见性断言，是误测。
+        if page.locator(".op-drill-row").count():
+            row.click()
+        assert page.locator(".op-drill-row").count() == 0
         page.wait_for_timeout(40)
 
 
@@ -539,3 +544,125 @@ def test_capability_false_with_5xx_keeps_price_summary_hidden(browser_renderer):
     assert "加载失败" not in page.evaluate(
         "() => document.getElementById('price-purchase-mean').textContent"
     )
+
+
+# ── drill 行点击：去重只认原生事件身份，不得吞掉合法快速 toggle ────────────────
+#
+# 现场：`rowClick` 曾用「同一 spu_pk + 300ms」拦 Tabulator 的重复派发，结果把用户
+# 「点关闭 → 立刻点开同一行」的合法快速 toggle 一起吞掉（第二、三次点击被丢弃，
+# drill 关不掉也重不开）。修复换成原生事件身份（`WeakSet` 持有已处理事件，不依赖
+# 时钟分辨率）：只有同一原生事件对象被 frozen/main 两侧 row 重复派发时才忽略，
+# 用户级连点（各自是不同事件对象）一律照办。
+_DRILL_CLICK_HELPERS_JS = """(() => {
+  window.__drillClicks = [];
+  window.__drillClickRow = () => {
+    const row = document.querySelector('.tabulator-row');
+    window.__drillClicks.push(Date.now());
+    row.click();
+  };
+})();
+"""
+
+
+def test_drill_same_row_close_then_reopen_works(browser_renderer, monkeypatch):
+    """关闭后 <300ms 内重开同一行：drill 必须能重开（300ms 防重不得吞合法 toggle）。"""
+    page = _open_with_supported_payload(browser_renderer, monkeypatch, "/v2/pages/spu-roi")
+    page.locator(".tabulator-row").first.wait_for(state="visible")
+    page.evaluate(_DRILL_CLICK_HELPERS_JS)
+
+    page.evaluate("() => window.__drillClickRow()")  # 打开
+    drill = page.locator(".op-drill-row")
+    drill.wait_for(state="visible")
+    assert drill.locator(".op-drill-body").inner_text().strip() != ""
+    page.wait_for_timeout(20)
+
+    page.evaluate("() => window.__drillClickRow()")  # 同一行再点一次 = 关闭
+    assert page.locator(".op-drill-row").count() == 0
+    page.wait_for_timeout(20)
+
+    page.evaluate("() => window.__drillClickRow()")  # 立即重开
+    drill = page.locator(".op-drill-row")
+    drill.wait_for(state="visible")
+    assert drill.locator(".op-drill-body").inner_text().strip() != ""
+
+    # 三次点击确实都落在 300ms 内：用例覆盖的就是「用户级快速 toggle」。
+    marks = page.evaluate("() => window.__drillClicks")
+    assert len(marks) == 3, marks
+    assert marks[2] - marks[0] < 300, marks
+
+
+def test_drill_tabulator_frozen_row_duplicate_event_still_deduplicated(
+    browser_renderer, monkeypatch
+):
+    """同一原生 click 被重复派发两次（frozen+main 双发）：drill 只开一次，不被关掉。"""
+    page = _open_with_supported_payload(browser_renderer, monkeypatch, "/v2/pages/spu-roi")
+    page.locator(".tabulator-row").first.wait_for(state="visible")
+    observed = page.evaluate(
+        """() => {
+          const row = document.querySelector('.tabulator-row');
+          let nativeSeen = 0;
+          row.addEventListener('click', () => { nativeSeen += 1; });
+          const ev = new MouseEvent('click', {bubbles: true});
+          row.dispatchEvent(ev);   // frozen 侧派发
+          row.dispatchEvent(ev);   // main 侧派发：同一原生事件对象再来一次
+          const drill = document.querySelector('.op-drill-row');
+          return {
+            nativeSeen: nativeSeen,
+            drills: document.querySelectorAll('.op-drill-row').length,
+            bodyText: drill ? drill.querySelector('.op-drill-body').innerText.trim() : '',
+          };
+        }"""
+    )
+    # 原生事件确实投递了两次：没有这条断言，用例可能在「事件根本没到」上空转。
+    assert observed["nativeSeen"] == 2, observed
+    # 去重生效：第二次派发既没有重复插入 drill，也没有把它当成"再点一次"关掉。
+    assert observed["drills"] == 1, observed
+    assert observed["bodyText"] != "", observed
+    assert page.locator(".op-drill-row").count() == 1
+
+
+def test_drill_dedup_follows_event_identity_not_reused_time_stamp(browser_renderer, monkeypatch):
+    """timeStamp 被强行复用时，去重只认原生事件身份，不认时钟值。
+
+    本用例刻意不区分守卫实现（WeakSet 身份守卫与旧的 timeStamp + 50ms 兜底窗口都会过），
+    价值在于钉住语义边界：
+      * 同一原生事件立即再派发（frozen/main 双发路径）：必须去重，drill 仍只有一份；
+      * 换一个事件对象、timeStamp 强行复用成同一个值、间隔 ≥100ms 再派发：不得去重，
+        同一行再点一次必须照常 toggle（最坏情况下 Firefox resistFingerprinting 把
+        timeStamp 粗化到 100ms，用户两次点击就会拿到同一个 timeStamp）。
+    """
+    page = _open_with_supported_payload(browser_renderer, monkeypatch, "/v2/pages/spu-roi")
+    page.locator(".tabulator-row").first.wait_for(state="visible")
+
+    immediate = page.evaluate(
+        """() => {
+          const row = document.querySelector('.tabulator-row');
+          let nativeSeen = 0;
+          row.addEventListener('click', () => { nativeSeen += 1; });
+          const ev = new MouseEvent('click', {bubbles: true});
+          Object.defineProperty(ev, 'timeStamp', {value: 1234.5});
+          row.dispatchEvent(ev);
+          row.dispatchEvent(ev);  // 立即再派发：同一 timeStamp + 同一事件对象
+          return {
+            nativeSeen: nativeSeen,
+            drillRowCount: document.querySelectorAll('.op-drill-row').length,
+          };
+        }"""
+    )
+    # 事件确实投递了两次：否则本条断言可能只是在"事件没到"上空转。
+    assert immediate["nativeSeen"] == 2, immediate
+    assert immediate["drillRowCount"] == 1, immediate
+
+    page.wait_for_timeout(150)  # 远超旧实现的 50ms 同帧兜底窗口
+    after_gap = page.evaluate(
+        """() => {
+          const row = document.querySelector('.tabulator-row');
+          const ev = new MouseEvent('click', {bubbles: true});
+          Object.defineProperty(ev, 'timeStamp', {value: 1234.5});
+          row.dispatchEvent(ev);
+          return document.querySelectorAll('.op-drill-row').length;
+        }"""
+    )
+    # 复用同一 timeStamp 的新事件必须被当成新点击：同一行 toggle 关闭会得到 0；
+    # 唯一不允许的结果是仍为 1（被吞掉，drill 数原地不动）。
+    assert after_gap != 1, after_gap
