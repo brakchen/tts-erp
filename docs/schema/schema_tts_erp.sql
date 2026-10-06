@@ -35,6 +35,11 @@ SELECT pg_catalog.set_config('search_path', '', false);
 CREATE SCHEMA after_sales;
 
 
+-- Name: analytics; Type: SCHEMA; Schema: -; Owner: -
+
+CREATE SCHEMA analytics;
+
+
 -- Name: commerce; Type: SCHEMA; Schema: -; Owner: -
 
 CREATE SCHEMA commerce;
@@ -237,6 +242,50 @@ ALTER TABLE after_sales.cases ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 );
 
 
+-- Name: spu_deterioration_alerts; Type: TABLE; Schema: analytics; Owner: -
+
+CREATE TABLE IF NOT EXISTS analytics.spu_deterioration_alerts (
+    id bigint NOT NULL,
+    shop_pk bigint NOT NULL,
+    spu_pk bigint NOT NULL,
+    anchor_date date NOT NULL,
+    window_days smallint NOT NULL,
+    layer text NOT NULL,
+    severity text NOT NULL,
+    state text NOT NULL,
+    sample_status text NOT NULL,
+    prior_roi numeric(24,12),
+    current_roi numeric(24,12),
+    roi_decline numeric(24,12),
+    prior_net_profit_cny numeric(24,6),
+    current_net_profit_cny numeric(24,6),
+    net_profit_decline numeric(24,12),
+    previous_spend_cny numeric(24,6),
+    current_spend_cny numeric(24,6),
+    previous_order_count integer,
+    current_order_count integer,
+    previous_ad_orders integer,
+    current_ad_orders integer,
+    effective_config_source text NOT NULL,
+    effective_config_version integer,
+    effective_config_updated_at timestamp with time zone,
+    effective_config_updated_by text,
+    config_payload_hash text NOT NULL,
+    basis_calculated_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT spu_deterioration_alerts_layer_check CHECK ((layer = ANY (ARRAY['fast'::text, 'confirmation'::text]))),
+    CONSTRAINT spu_deterioration_alerts_sample_status_check CHECK ((sample_status = ANY (ARRAY['sufficient'::text, 'sample_insufficient'::text, 'unavailable'::text]))),
+    CONSTRAINT spu_deterioration_alerts_severity_check CHECK ((severity = ANY (ARRAY['none'::text, 'warning'::text, 'critical'::text]))),
+    CONSTRAINT spu_deterioration_alerts_window_days_check CHECK ((window_days = ANY (ARRAY[1, 3, 7])))
+);
+
+
+
+ALTER TABLE analytics.spu_deterioration_alerts ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME analytics.spu_deterioration_alerts_id_seq
+);
+
+
 -- Name: shops; Type: TABLE; Schema: commerce; Owner: -
 
 CREATE TABLE IF NOT EXISTS commerce.shops (
@@ -308,6 +357,46 @@ CREATE TABLE IF NOT EXISTS commerce.products_spu (
 
 ALTER TABLE commerce.products_spu ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME commerce.channel_products_id_seq
+);
+
+
+-- Name: sales_order_line_price_observations; Type: TABLE; Schema: commerce; Owner: -
+
+CREATE TABLE IF NOT EXISTS commerce.sales_order_line_price_observations (
+    id bigint NOT NULL,
+    shop_pk bigint NOT NULL,
+    order_pk bigint NOT NULL,
+    external_line_id text NOT NULL,
+    raw_record_id bigint NOT NULL,
+    source_endpoint text NOT NULL,
+    source_payload_hash text CONSTRAINT sales_order_line_price_observation_source_payload_hash_not_null NOT NULL,
+    semantic_observation_hash text CONSTRAINT sales_order_line_price_obser_semantic_observation_hash_not_null NOT NULL,
+    source_order_version_at timestamp with time zone,
+    source_captured_at timestamp with time zone NOT NULL,
+    spu_pk bigint,
+    raw_quantity numeric(20,8),
+    effective_quantity numeric(20,8),
+    quantity_status text NOT NULL,
+    line_status_raw text,
+    parent_payment_status text CONSTRAINT sales_order_line_price_observati_parent_payment_status_not_null NOT NULL,
+    gift_status text NOT NULL,
+    original_price_native numeric(28,10),
+    paid_price_native numeric(28,10),
+    currency text,
+    original_price_status text CONSTRAINT sales_order_line_price_observati_original_price_status_not_null NOT NULL,
+    paid_price_status text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_solpo_effective_quantity_positive CHECK (((effective_quantity IS NULL) OR (effective_quantity > (0)::numeric))),
+    CONSTRAINT ck_solpo_original_price_nonnegative CHECK (((original_price_native IS NULL) OR (original_price_native >= (0)::numeric))),
+    CONSTRAINT ck_solpo_paid_price_nonnegative CHECK (((paid_price_native IS NULL) OR (paid_price_native >= (0)::numeric))),
+    CONSTRAINT ck_solpo_source_endpoint CHECK ((source_endpoint = ANY (ARRAY['ORDER_SEARCH'::text, 'ORDER_DETAIL'::text])))
+);
+
+
+
+ALTER TABLE commerce.sales_order_line_price_observations ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME commerce.sales_order_line_price_observations_id_seq
 );
 
 
@@ -1655,8 +1744,9 @@ CREATE TABLE IF NOT EXISTS publishing.video_publish_attempts (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     target_app_package text DEFAULT 'com.zhiliaoapp.musically'::text NOT NULL,
-    artemis_profile text DEFAULT 'pro'::text NOT NULL,
-    artemis_verification_level text DEFAULT 'strict'::text NOT NULL,
+    artemis_profile text,
+    artemis_verification_level text,
+    CONSTRAINT video_publish_attempt_active_snapshot_check CHECK (((status <> ALL (ARRAY['created'::text, 'submitting'::text, 'queued'::text, 'running'::text, 'unknown'::text])) OR ((NULLIF(btrim(artemis_profile), ''::text) IS NOT NULL) AND (NULLIF(btrim(artemis_verification_level), ''::text) IS NOT NULL)))),
     CONSTRAINT video_publish_attempt_kind_check CHECK ((kind = ANY (ARRAY['publish'::text, 'verify'::text]))),
     CONSTRAINT video_publish_attempt_related_check CHECK ((((kind = 'publish'::text) AND (related_attempt_id IS NULL)) OR ((kind = 'verify'::text) AND (related_attempt_id IS NOT NULL)))),
     CONSTRAINT video_publish_attempt_status_check CHECK ((status = ANY (ARRAY['created'::text, 'submitting'::text, 'queued'::text, 'running'::text, 'success'::text, 'failed'::text, 'rejected'::text, 'cancelled'::text, 'unknown'::text])))
@@ -2002,6 +2092,18 @@ ALTER TABLE ONLY after_sales.cases
     ADD CONSTRAINT uq_cases_account_ext UNIQUE (shop_pk, external_case_id);
 
 
+-- Name: spu_deterioration_alerts spu_deterioration_alerts_pkey; Type: CONSTRAINT; Schema: analytics; Owner: -
+
+ALTER TABLE ONLY analytics.spu_deterioration_alerts
+    ADD CONSTRAINT spu_deterioration_alerts_pkey PRIMARY KEY (id);
+
+
+-- Name: spu_deterioration_alerts uq_spu_deterioration_alert_anchor; Type: CONSTRAINT; Schema: analytics; Owner: -
+
+ALTER TABLE ONLY analytics.spu_deterioration_alerts
+    ADD CONSTRAINT uq_spu_deterioration_alert_anchor UNIQUE (shop_pk, spu_pk, anchor_date, window_days, layer);
+
+
 -- Name: shops channel_accounts_pkey; Type: CONSTRAINT; Schema: commerce; Owner: -
 
 ALTER TABLE ONLY commerce.shops
@@ -2018,6 +2120,12 @@ ALTER TABLE ONLY commerce.products_sku
 
 ALTER TABLE ONLY commerce.products_spu
     ADD CONSTRAINT channel_products_pkey PRIMARY KEY (id);
+
+
+-- Name: sales_order_line_price_observations sales_order_line_price_observations_pkey; Type: CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.sales_order_line_price_observations
+    ADD CONSTRAINT sales_order_line_price_observations_pkey PRIMARY KEY (id);
 
 
 -- Name: sales_order_lines sales_order_lines_pkey; Type: CONSTRAINT; Schema: commerce; Owner: -
@@ -2060,6 +2168,12 @@ ALTER TABLE ONLY commerce.sales_order_lines
 
 ALTER TABLE ONLY commerce.sales_orders
     ADD CONSTRAINT uq_sales_orders_account_ext UNIQUE (shop_pk, order_id);
+
+
+-- Name: sales_order_line_price_observations uq_solpo_line_semantic; Type: CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.sales_order_line_price_observations
+    ADD CONSTRAINT uq_solpo_line_semantic UNIQUE (shop_pk, order_pk, external_line_id, semantic_observation_hash);
 
 
 -- Name: enum_map enum_map_pkey; Type: CONSTRAINT; Schema: config; Owner: -
@@ -2773,6 +2887,21 @@ CREATE INDEX IF NOT EXISTS ix_cases_case_type_status ON after_sales.cases USING 
 CREATE INDEX IF NOT EXISTS ix_cases_sales_order ON after_sales.cases USING btree (order_pk);
 
 
+-- Name: ix_spu_deterioration_alert_latest; Type: INDEX; Schema: analytics; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_spu_deterioration_alert_latest ON analytics.spu_deterioration_alerts USING btree (anchor_date, severity);
+
+
+-- Name: ix_spu_deterioration_alert_severity; Type: INDEX; Schema: analytics; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_spu_deterioration_alert_severity ON analytics.spu_deterioration_alerts USING btree (severity, window_days);
+
+
+-- Name: ix_spu_deterioration_alert_shop; Type: INDEX; Schema: analytics; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_spu_deterioration_alert_shop ON analytics.spu_deterioration_alerts USING btree (shop_pk, anchor_date);
+
+
 -- Name: ix_channel_accounts_status; Type: INDEX; Schema: commerce; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_channel_accounts_status ON commerce.shops USING btree (status);
@@ -2811,6 +2940,16 @@ CREATE INDEX IF NOT EXISTS ix_sales_orders_paid_at ON commerce.sales_orders USIN
 -- Name: ix_sales_orders_status; Type: INDEX; Schema: commerce; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_sales_orders_status ON commerce.sales_orders USING btree (status);
+
+
+-- Name: ix_solpo_line_version; Type: INDEX; Schema: commerce; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_solpo_line_version ON commerce.sales_order_line_price_observations USING btree (shop_pk, order_pk, external_line_id, source_order_version_at, source_captured_at, semantic_observation_hash);
+
+
+-- Name: ix_solpo_spu_capture; Type: INDEX; Schema: commerce; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_solpo_spu_capture ON commerce.sales_order_line_price_observations USING btree (shop_pk, spu_pk, source_captured_at);
 
 
 -- Name: ix_enum_map_type; Type: INDEX; Schema: config; Owner: -
@@ -3293,6 +3432,11 @@ CREATE OR REPLACE TRIGGER trg_commerce_channel_product_variants_touch BEFORE UPD
 CREATE OR REPLACE TRIGGER trg_commerce_channel_products_touch BEFORE UPDATE ON commerce.products_spu FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
+-- Name: sales_order_line_price_observations trg_commerce_sales_order_line_price_observations_touch; Type: TRIGGER; Schema: commerce; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_commerce_sales_order_line_price_observations_touch BEFORE UPDATE ON commerce.sales_order_line_price_observations FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
 -- Name: sales_order_lines trg_commerce_sales_order_lines_touch; Type: TRIGGER; Schema: commerce; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_commerce_sales_order_lines_touch BEFORE UPDATE ON commerce.sales_order_lines FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
@@ -3583,6 +3727,18 @@ ALTER TABLE ONLY after_sales.cases
     ADD CONSTRAINT cases_sales_order_id_fkey FOREIGN KEY (order_pk) REFERENCES commerce.sales_orders(id) ON DELETE RESTRICT;
 
 
+-- Name: spu_deterioration_alerts fk_spu_deterioration_alert_shop; Type: FK CONSTRAINT; Schema: analytics; Owner: -
+
+ALTER TABLE ONLY analytics.spu_deterioration_alerts
+    ADD CONSTRAINT fk_spu_deterioration_alert_shop FOREIGN KEY (shop_pk) REFERENCES commerce.shops(id) ON DELETE RESTRICT;
+
+
+-- Name: spu_deterioration_alerts fk_spu_deterioration_alert_spu; Type: FK CONSTRAINT; Schema: analytics; Owner: -
+
+ALTER TABLE ONLY analytics.spu_deterioration_alerts
+    ADD CONSTRAINT fk_spu_deterioration_alert_spu FOREIGN KEY (spu_pk) REFERENCES commerce.products_spu(id) ON DELETE RESTRICT;
+
+
 -- Name: shops channel_accounts_credential_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
 
 ALTER TABLE ONLY commerce.shops
@@ -3611,6 +3767,30 @@ ALTER TABLE ONLY commerce.products_spu
 
 ALTER TABLE ONLY commerce.products_spu
     ADD CONSTRAINT channel_products_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
+
+
+-- Name: sales_order_line_price_observations sales_order_line_price_observations_order_pk_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.sales_order_line_price_observations
+    ADD CONSTRAINT sales_order_line_price_observations_order_pk_fkey FOREIGN KEY (order_pk) REFERENCES commerce.sales_orders(id) ON DELETE RESTRICT;
+
+
+-- Name: sales_order_line_price_observations sales_order_line_price_observations_raw_record_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.sales_order_line_price_observations
+    ADD CONSTRAINT sales_order_line_price_observations_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE RESTRICT;
+
+
+-- Name: sales_order_line_price_observations sales_order_line_price_observations_shop_pk_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.sales_order_line_price_observations
+    ADD CONSTRAINT sales_order_line_price_observations_shop_pk_fkey FOREIGN KEY (shop_pk) REFERENCES commerce.shops(id) ON DELETE RESTRICT;
+
+
+-- Name: sales_order_line_price_observations sales_order_line_price_observations_spu_pk_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -
+
+ALTER TABLE ONLY commerce.sales_order_line_price_observations
+    ADD CONSTRAINT sales_order_line_price_observations_spu_pk_fkey FOREIGN KEY (spu_pk) REFERENCES commerce.products_spu(id) ON DELETE SET NULL;
 
 
 -- Name: sales_order_lines sales_order_lines_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: commerce; Owner: -

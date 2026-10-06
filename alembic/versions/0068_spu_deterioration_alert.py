@@ -148,6 +148,8 @@ def _seed_runtime_config(connection) -> None:
 
 
 def upgrade() -> None:
+    # analytics schema 在 0024 已并入 plugin（生产/模板库均无此 schema），此处幂等重建。
+    op.execute("CREATE SCHEMA IF NOT EXISTS analytics")
     op.execute(
         """
         CREATE TABLE analytics.spu_deterioration_alerts (

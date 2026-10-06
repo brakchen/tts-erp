@@ -7,7 +7,7 @@
 
 | 文件 | 是什么 |
 | --- | --- |
-| [`schema_tts_erp.sql`](schema_tts_erp.sql) | 全库 DDL 快照（幂等、可对空库重放）：13 个业务 schema、71 张表 + `public.alembic_version`。由 `scripts/regen_schema.py` 生成，**禁止手改** |
+| [`schema_tts_erp.sql`](schema_tts_erp.sql) | 全库 DDL 快照（幂等、可对空库重放）：14 个业务 schema、73 张表 + `public.alembic_version`。由 `scripts/regen_schema.py` 生成，**禁止手改** |
 | [`schema_storage.sql`](schema_storage.sql) | `procurement.spu_images`（SPU 图片元数据）的补丁式幂等 DDL，不走 ORM；测试在 `tests/api/conftest.py` 会用到它描述的表 |
 
 ## 2. 维护规则（怎么保持"是现在的数据结构"）
@@ -19,7 +19,7 @@
    ```
    `scripts/regen_schema.py` 只读不写库；它剥掉序列/`\restrict` 等噪音、给
    `CREATE TABLE`/`CREATE FUNCTION` 加 `IF NOT EXISTS`，使快照可重复执行。
-2. **生成源必须在当前 alembic head**（当前 head：`0066_publish_execution_fences`）：
+2. **生成源必须在当前 alembic head**（当前 head：`0068_spu_deterioration_alert`）：
    ```bash
    docker exec postgres psql -U postgres -tAc "SELECT version_num FROM alembic_version" -d tts_erp_test_template
    ```
@@ -30,7 +30,7 @@
 4. 历史漂移教训（2026-08-25）：手维护的 schema.sql 曾漏 7 张表、列名写错，
    healthz/sync/db 三处互相矛盾——**只有"生成 + 同步"这条路是可靠的**。
 
-## 3. 数据结构索引（截至 migration 0066）
+## 3. 数据结构索引（截至 migration 0068）
 
 领域模型与表间关系见 [`docs/architecture/data-model-target-v3.md`](../architecture/data-model-target-v3.md)；
 「业务概念 ↔ 物理表字段」映射见 [`docs/business/spu-profitability.md`](../business/spu-profitability.md) 附录 A；
@@ -38,12 +38,13 @@
 [`docs/architecture/adr/0003-commerce-naming-refactor.md`](../architecture/adr/0003-commerce-naming-refactor.md)
 （内部主键 `shop_pk` / `spu_pk`；时间双字段约定见 ADR-0001）。
 
-### commerce —— TikTok 商品与销售（5 表）
+### commerce —— TikTok 商品与销售（6 表）
 | 表 | 含义 |
 | --- | --- |
 | `shops` | 店铺注册表；`credential_id` 是否为空区分 API / plugin 两条采集链路 |
 | `products_spu` / `products_sku` | 商品维度（SPU / SKU）；`spu_pk` 是全库 ROI、成本、广告关联的枢纽 |
 | `sales_orders` / `sales_order_lines` | 订单头 / 订单行；行 GMV = `quantity × unit_price`（客户实付）；窗口归属用 `COALESCE(order_time, paid_at)` |
+| `sales_order_line_price_observations` | 订单行价格观测快照（来源版本 + 抓取时间 + 语义哈希去重） |
 
 ### finance —— 结算与到账（4 表）
 | 表 | 含义 |
@@ -102,6 +103,12 @@
 `video_publish_attempts` 是 append-only Artemis publish/verify 审计记录，关系/session、Prompt、设备路径/序列号、app package、profile 与 verification level 构成不可变 submission identity；
 `worker_heartbeats` 保存发布 Worker 的受控 readiness 与设备探测状态。契约见
 [`docs/design/tiktok-video-publish.md`](../design/tiktok-video-publish.md)。
+
+### analytics —— 派生分析物化结果（1 表）
+`spu_deterioration_alerts`：SPU 利润劣化预警的物化决策快照，shop × SPU × anchor_date × window_days × layer 唯一，
+含 severity/state、样本充分性与生效配置版本留证；由 sync-worker 的 `spu_deterioration_alert` job 每日物化，API 只读。
+（历史 analytics 4 张僵尸表 0007 drop、0024 并入 plugin；0068 重建该 schema。）
+契约见 [`docs/design/spu-profit-deterioration-alert.md`](../design/spu-profit-deterioration-alert.md)。
 
 ### 全库约定
 - **FK 策略**：同步镜像表不带外键，写入为幂等 upsert，父行先于子行；仅历史例外已清理。
