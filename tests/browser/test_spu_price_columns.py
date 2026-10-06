@@ -343,3 +343,134 @@ def test_mobile_price_table_scrolls_without_document_overflow(browser_renderer, 
         })"""
     )
     assert report == {"documentOverflow": False, "tableOverflow": True, "productFrozen": True}
+
+
+# ── "加载中…" 闪现回归（2026-10-06 用户反馈"闪现一下就不见了"）─────────────
+#
+# 现场：`#price-summary` 默认 hidden。`renderPriceLoading()` 曾在每次请求开始时
+# 无条件 unhide 并写 "加载中…"，响应不带 nested `priceStats` 时
+# `renderPriceStats()` 立刻 `hidden = true`，于是 box 闪一下就没。
+#
+# 加载态只能在 capability 已知为 true 时出现。断言取**响应到达前**的真实 DOM：
+# `load()` 在同一个同步块里先调 `renderPriceLoading()` 再发 spu-roi 请求，所以
+# fetch 被调用的那一瞬间就是加载态定论点——由 `add_init_script` 注入的探针采样，
+# 不 grep 源码。
+_PRICE_FLASH_PROBE_JS = """(() => {
+  const probe = window.__priceFlashProbe = {
+    requestSnapshots: [],  // 每个 spu-roi 请求发出瞬间(响应到达前)的 DOM
+    snapshots: [],         // box 每次 DOM 变更后的采样(时间线)
+    responses: 0,          // 已到达的 spu-roi 响应数
+  };
+  const snapshot = () => {
+    const box = document.getElementById('price-summary');
+    const status = document.getElementById('price-summary-status');
+    const cell = document.getElementById('price-purchase-mean');
+    return {
+      hidden: box ? box.hidden : null,
+      status: status ? status.textContent : null,
+      purchaseMean: cell ? cell.textContent : null,
+    };
+  };
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    const isPriceRequest = url.indexOf('/v2/analytics/spu-roi') >= 0;
+    if (isPriceRequest) probe.requestSnapshots.push(snapshot());
+    const response = nativeFetch(input, init);
+    if (isPriceRequest) response.then(() => { probe.responses += 1; }, () => {});
+    return response;
+  };
+  window.addEventListener('DOMContentLoaded', () => {
+    const box = document.getElementById('price-summary');
+    if (!box) return;
+    new MutationObserver(() => probe.snapshots.push(snapshot())).observe(box, {
+      attributes: true, subtree: true, childList: true, characterData: true,
+    });
+  });
+})();
+"""
+
+
+def _conftest_mock_payload() -> Callable[..., Any]:
+    """conftest 的 canned 载荷：本层共用但其名带下划线，集中一处取用。"""
+    return cast(Callable[..., Any], vars(browser_conftest)["_mock_payload"])
+
+
+def test_first_load_keeps_price_summary_hidden_without_price_stats(browser_renderer):
+    """响应无 priceStats 时：响应到达前 box 就保持 hidden，全程不出现 "加载中…"。"""
+    page = browser_renderer.open("/v2/pages/spu-roi?shop_pk=7")
+    # add_init_script 只对之后的导航生效，重载一次让探针在文档脚本之前装好。
+    page.add_init_script(_PRICE_FLASH_PROBE_JS)
+    page.reload(wait_until="domcontentloaded")
+    page.wait_for_function(
+        "() => window.__priceFlashProbe && window.__priceFlashProbe.responses >= 1"
+    )
+    page.wait_for_timeout(250)  # 让响应后的渲染跑完，扩大观察窗口
+
+    probe = page.evaluate("() => window.__priceFlashProbe")
+    assert probe["requestSnapshots"], "页面没发 spu-roi 请求，探针没覆盖到加载态"
+    inflight = probe["requestSnapshots"][0]
+    assert inflight["hidden"] is True, inflight
+    assert inflight["status"] == "", inflight
+    assert "加载中…" not in (inflight["purchaseMean"] or "")
+    assert probe["snapshots"], "探针没采到任何变更，断言窗口没覆盖到加载态"
+    assert all(snap["hidden"] is True for snap in probe["snapshots"]), probe["snapshots"]
+    assert page.locator("#price-summary").is_hidden()
+    assert "加载中…" not in page.evaluate(
+        "() => document.getElementById('price-summary').textContent"
+    )
+
+
+def test_supported_price_payload_shows_loading_then_values_on_next_load(
+    browser_renderer, monkeypatch
+):
+    """已知支持后再次加载（切窗口）：先短暂显示 "加载中…"，响应后出现数值。"""
+    original = _conftest_mock_payload()
+
+    def mock_payload(request_path: str, query: str = ""):
+        if request_path.endswith("/v2/commerce/channel-product-options"):
+            return {"items": [{"spu_id": "TEST_SPU_000", "title": "测试 SPU"}], "queryable": True}
+        if request_path.endswith("/v2/analytics/spu-roi"):
+            payload = _nested_payload(original)
+            start = parse_qs(query).get("w_start", [""])[0]
+            value = "11.0000" if start == "2026-09-11" else "37.0000"
+            payload["totals"]["priceStats"]["purchase"]["mean"] = value
+            for item in payload["items"]:
+                item["priceStats"]["purchase"]["mean"] = value
+            return payload
+        return original(request_path, query)
+
+    monkeypatch.setattr(browser_conftest, "_mock_payload", mock_payload)
+    page = browser_renderer.open("/v2/pages/spu-roi?shop_pk=7")
+    page.locator("#price-summary").wait_for(state="visible")
+    assert page.locator("#price-purchase-mean").inner_text() == "≈37.0000"
+
+    page.add_init_script(_PRICE_FLASH_PROBE_JS)
+    page.reload(wait_until="domcontentloaded")
+    page.wait_for_function(
+        "() => window.__priceFlashProbe && window.__priceFlashProbe.responses >= 1"
+    )
+    page.locator("#price-summary").wait_for(state="visible")
+
+    page.evaluate(
+        """() => {
+          const input = document.querySelector('#filter-w-start');
+          input.value = '2026-09-11';
+          input.dispatchEvent(new Event('change', {bubbles: true}));
+        }"""
+    )
+    page.wait_for_function(
+        "() => document.getElementById('price-purchase-mean').textContent === '≈11.0000'"
+    )
+
+    probe = page.evaluate("() => window.__priceFlashProbe")
+    assert len(probe["requestSnapshots"]) >= 2, probe["requestSnapshots"]
+    inflight = probe["requestSnapshots"][-1]
+    assert inflight["hidden"] is False
+    assert inflight["status"] == "加载中…"
+    assert inflight["purchaseMean"] == "加载中…"
+    timeline = probe["snapshots"]
+    loading_at = max(i for i, s in enumerate(timeline) if s["status"] == "加载中…")
+    value_at = max(i for i, s in enumerate(timeline) if s["purchaseMean"] == "≈11.0000")
+    assert loading_at < value_at, timeline
+    assert page.locator("#price-purchase-mean").inner_text() == "≈11.0000"
