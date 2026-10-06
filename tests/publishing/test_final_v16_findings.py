@@ -531,7 +531,7 @@ def test_0066_is_live_linear_head_with_admin_only_default(
     db_session: Session,
 ) -> None:
     assert db_session.scalar(text("SELECT version_num FROM alembic_version")) == (
-        "0067_merge_price_and_publish"
+        "0068_spu_deterioration_alert"
     )
     grants = set(
         db_session.execute(
@@ -589,5 +589,5 @@ def test_architecture_inventory_is_derived_from_live_schema(
         GROUP BY table_schema
         """)
     ).all()
-    assert len(rows) == 13
-    assert sum(int(row[1]) for row in rows) == 72
+    assert len(rows) == 14
+    assert sum(int(row[1]) for row in rows) == 73

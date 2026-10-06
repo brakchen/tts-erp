@@ -143,10 +143,134 @@ _SPU_ITEMS = [
 ]
 
 
+# 告警页：盈利系之外的自带 profile（不共用 spu-profitability-page kernel）。
+# 显式登记到渲染页表，让共享渲染门槛（tests/browser/test_render_smoke.py）也能
+# 覆盖它的多视口横向溢出与字体栈。
+_ALERT_SLUG = "spu-profit-deterioration"
+
+_ALERT_ITEMS = [
+    {
+        "shopPk": 7,
+        "spuPk": 1000 + i,
+        "windowDays": days,
+        "layer": layer,
+        "severity": severity,
+        "state": "roi_deterioration" if severity != "none" else "stable",
+        "sampleStatus": "sufficient" if severity != "none" else "unavailable",
+        "previousRoi": "1.1200" if severity != "none" else None,
+        "currentRoi": "0.8400" if severity != "none" else None,
+        "roiDecline": "0.2500" if severity != "none" else None,
+        "previousNetProfitCny": "420.0000" if severity != "none" else None,
+        "currentNetProfitCny": "290.0000" if severity != "none" else None,
+        "netProfitDecline": "0.3095" if severity != "none" else None,
+        "previousSpendCny": "500.0000" if severity != "none" else None,
+        "currentSpendCny": "510.0000" if severity != "none" else None,
+        "previousOrderCount": 18,
+        "currentOrderCount": 16,
+        "previousAdOrderCount": 12,
+        "currentAdOrderCount": 11,
+        "anchorDate": "2026-10-03",
+        "basisCalculatedAt": _NOW,
+        "configSource": "runtime_config",
+        "configVersion": 3,
+        "provisionalLabel": None,
+        "warningCode": "ROI_AND_NET_PROFIT_DETERIORATED"
+        if severity != "none"
+        else "DATA_STALE",
+        "warningText": "实际 ROI 与净利润比较恶化" if severity != "none" else None,
+        "drilldown": {
+            "profitabilityUrl": f"/v2/analytics/spu-roi?shop_pk=7&spu_pk={1000 + i}",
+            "pageUrl": "/v2/pages/spu-roi",
+        },
+    }
+    for i, (days, layer, severity) in enumerate(
+        [(1, "fast", "critical"), (3, "fast", "warning"), (7, "confirmation", "none")]
+    )
+]
+
+
+def _alert_block(warning: str, critical: str) -> dict[str, Any]:
+    def pair(value: str) -> dict[str, Any]:
+        return {
+            "roiAbsDelta": value,
+            "roiRelativeDecline": value,
+            "netProfitDecline": value,
+            "minSpendCny": "100",
+            "minOrders": 3,
+            "minAdOrders": 1,
+        }
+
+    return {
+        "warning": pair(warning),
+        "critical": pair(critical),
+    }
+
+
+def _alert_thresholds() -> dict[str, Any]:
+    return {
+        "enabled": True,
+        "maturityDays": 7,
+        "fast": {days: _alert_block("0.2", "0.4") for days in ("1", "3", "7")},
+        "confirmation": {days: _alert_block("0.1", "0.3") for days in ("1", "3", "7")},
+    }
+
+
+def _alert_payload() -> dict[str, Any]:
+    return {
+        "items": _ALERT_ITEMS,
+        "total": len(_ALERT_ITEMS),
+        "totals": {
+            "warningCount": 1,
+            "criticalCount": 1,
+            "insufficientSampleCount": 1,
+            "shopSpuCount": len(_ALERT_ITEMS),
+        },
+        "meta": {
+            "requestId": "TEST_render_gate",
+            "enabled": True,
+            "anchorDate": "2026-10-03",
+            "batchThrough": "2026-10-03",
+            "maturityDays": 7,
+            "calculatedAt": _NOW,
+            "stale": False,
+            "coverage": {"materialized": True, "stale": False, "missingWindowCount": 0},
+            "config": {
+                "key": "analytics.spu_profit_deterioration_alert.v1",
+                "source": "runtime_config",
+                "version": 3,
+                "updatedAt": _NOW,
+                "updatedBy": "TEST_config_publisher",
+                "validation": "passed",
+            },
+            "effectiveConfig": {
+                "source": "runtime_config",
+                "version": 3,
+                "updatedAt": _NOW,
+                "updatedBy": "TEST_config_publisher",
+                "validation": "passed",
+                "enabled": True,
+                "maturityDays": 7,
+                "thresholds": _alert_thresholds(),
+                "payloadHash": "TEST_render_gate_hash",
+                "provisionalLabel": None,
+                "drawer": {
+                    "mode": "published_effective_readonly_safe",
+                    "canEdit": False,
+                    "draftIncluded": False,
+                    "rolloutIncluded": False,
+                    "secretsIncluded": False,
+                },
+            },
+        },
+    }
+
+
 def _mock_payload(path: str, query: str = "") -> dict[str, Any] | list[Any]:
     """/v2/** 的 canned 只读载荷；没列到的接口给空集合，页面照常渲染外壳。"""
     if path.endswith("/v2/auth/me"):
         return {"authenticated": True, "role": "admin"}
+    if path.endswith("/v2/analytics/spu-profit-deterioration"):
+        return _alert_payload()
     if path.endswith("/v2/commerce/channel-accounts"):
         return [{"id": 7, "platform": "tiktok", "shop_id": "749486486860415",
                  "account_name": "QA 店 7", "region": "VN", "status": "active"}]
@@ -249,6 +373,9 @@ def _render_pages(out: Path) -> None:
             )
         )
         (out / f"{slug}.html").write_bytes(resp.body)
+    (out / f"{_ALERT_SLUG}.html").write_bytes(
+        _render_page(f"{_ALERT_SLUG}.html", current_page=_ALERT_SLUG).body
+    )
     (out / "ad-daily.html").write_bytes(ad_daily_page().body)
 
 
@@ -257,7 +384,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     rendered_dir: Path
 
-    def do_POST(self) -> None:  # noqa: N802 - http.server 命名约定
+    def do_POST(self) -> None:
         """页面加载期的只读 POST（如 schema/preview）也要有 JSON 应答，
         否则 501 会让页面 JS 报错、渲染出残缺布局，巡检就失真了。"""
         length = int(self.headers.get("Content-Length") or 0)
@@ -266,7 +393,7 @@ class _Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         self._send(json.dumps(_mock_payload(path)).encode("utf-8"), _MIME[".json"])
 
-    def do_GET(self) -> None:  # noqa: N802 - http.server 命名约定
+    def do_GET(self) -> None:
         path = self.path.split("?", 1)[0]
         if path.startswith("/v2/pages/") and not path.endswith((".css", ".js")):
             name = path[len("/v2/pages/"):].strip("/") or "index"
@@ -333,7 +460,7 @@ def browser_renderer(site_url: str) -> Any:
     pw = sync_playwright().start()
     try:
         browser = pw.chromium.launch(headless=True)
-    except Exception as exc:  # pragma: no cover - 环境相关
+    except Exception as exc:  # noqa: BLE001 — chromium 启动失败一律 skip
         pw.stop()
         pytest.skip(f"chromium 启动失败: {exc}")
     instance = Renderer(browser, site_url)

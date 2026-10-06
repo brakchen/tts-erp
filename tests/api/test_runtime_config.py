@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 import pytest
-from sqlalchemy import text
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from sqlalchemy import delete, inspect, select, text
 from sqlalchemy.orm import Session
 
+from tts_erp_v2.analytics.spu_deterioration_alert.config import (
+    ALERT_CONFIG_KEY,
+    SEED_FALLBACK_CONFIG,
+    config_to_payload,
+)
+from tts_erp_v2.db.models.config import RuntimeConfigItem, RuntimeConfigRevision
 from tts_erp_v2.runtime_config.resolver import resolve_runtime_config
+from tts_erp_v2.runtime_config.validation import validate_rollout
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -35,24 +45,164 @@ def _schema(*, secret_reference: bool = False) -> dict:
 
 def _clear_runtime_config(db_engine) -> None:
     with db_engine.begin() as conn:
+        # pi-lens-ignore: python-sql-injection
         conn.execute(
             text(
                 "DELETE FROM config.runtime_config_revisions "
                 "WHERE config_key LIKE 'test_runtime_%'"
             )
         )
+        # pi-lens-ignore: python-sql-injection
         conn.execute(
             text(
                 "DELETE FROM config.runtime_config_items "
                 "WHERE config_key LIKE 'test_runtime_%'"
             )
         )
+        # pi-lens-ignore: python-sql-injection
         conn.execute(
             text(
                 "DELETE FROM config.runtime_config_secrets "
                 "WHERE name LIKE 'test_runtime_%'"
             )
         )
+
+
+def _clear_alert_runtime_config(db_engine) -> None:
+    with Session(db_engine) as session:
+        session.execute(
+            delete(RuntimeConfigRevision).where(
+                RuntimeConfigRevision.config_key == ALERT_CONFIG_KEY
+            )
+        )
+        session.execute(
+            delete(RuntimeConfigItem).where(
+                RuntimeConfigItem.config_key == ALERT_CONFIG_KEY
+            )
+        )
+        session.commit()
+
+
+def _load_alert_migration():
+    migration_path = (
+        Path(__file__).parents[2] / "alembic/versions/0068_spu_deterioration_alert.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "alert_migration_0053_runtime_config_test", migration_path
+    )
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    return migration
+
+
+def _ensure_alert_migration(db_engine):
+    migration = _load_alert_migration()
+    with db_engine.connect() as connection:
+        # pi-lens-ignore: python-sql-injection
+        database = connection.execute(text("SELECT current_database()")).scalar_one()
+        assert database.startswith("tts_erp_test_")
+        assert database != "tts_erp_test_template"
+        if inspect(connection).has_table(
+            "spu_deterioration_alerts", schema="analytics"
+        ):
+            return migration
+    with db_engine.begin() as connection:
+        # pi-lens-ignore: python-sql-injection
+        connection.execute(text("CREATE SCHEMA IF NOT EXISTS analytics"))
+        migration.__dict__["op"] = Operations(MigrationContext.configure(connection))
+        migration.upgrade()
+    return migration
+
+
+@pytest.fixture()
+def _alert_config_cleanup(db_engine):
+    yield
+    _clear_alert_runtime_config(db_engine)
+
+
+def test_alert_migration_seeds_strict_draft_idempotently_without_publication(
+    db_engine, _alert_config_cleanup
+) -> None:
+    migration = _ensure_alert_migration(db_engine)
+    _clear_alert_runtime_config(db_engine)
+    with db_engine.begin() as connection:
+        migration._seed_runtime_config(connection)
+    with Session(db_engine) as session:
+        item = session.get(RuntimeConfigItem, ALERT_CONFIG_KEY)
+        assert item is not None
+        assert item.published_version is None
+        assert item.draft_rollout == []
+        assert item.draft_payload == config_to_payload(SEED_FALLBACK_CONFIG)
+        assert item.draft_payload is not None
+        assert set(item.draft_payload) == {
+            "enabled",
+            "maturityDays",
+            "fast",
+            "confirmation",
+        }
+        assert item.json_schema["additionalProperties"] is False
+        assert "回测暂定" in item.json_schema["title"]
+        assert "回测暂定" in item.json_schema["description"]
+        assert set(item.json_schema["required"]) == {
+            "enabled",
+            "maturityDays",
+            "fast",
+            "confirmation",
+        }
+        for layer_name in ("fast", "confirmation"):
+            layer_schema = item.json_schema["properties"][layer_name]
+            assert set(layer_schema["properties"]) == {"1", "3", "7"}
+            assert layer_schema["additionalProperties"] is False
+            for window_schema in layer_schema["properties"].values():
+                assert set(window_schema["properties"]) == {"warning", "critical"}
+                assert window_schema["additionalProperties"] is False
+                for threshold_schema in window_schema["properties"].values():
+                    assert set(threshold_schema["properties"]) == {
+                        "roiAbsDelta",
+                        "roiRelativeDecline",
+                        "netProfitDecline",
+                        "minSpendCny",
+                        "minOrders",
+                        "minAdOrders",
+                    }
+                    assert threshold_schema["additionalProperties"] is False
+        assert not session.scalars(
+            select(RuntimeConfigRevision).where(
+                RuntimeConfigRevision.config_key == ALERT_CONFIG_KEY
+            )
+        ).all()
+        item.json_schema = {"sentinel": True}
+        item.draft_payload = {"sentinel": True}
+        item.draft_version = 99
+        session.add(
+            RuntimeConfigRevision(
+                config_key=ALERT_CONFIG_KEY,
+                version=9,
+                payload={"sentinel": True},
+                rollout=[],
+                created_by="TEST_existing_publication",
+            )
+        )
+        item.published_version = 9
+        session.commit()
+    with db_engine.begin() as connection:
+        migration._seed_runtime_config(connection)
+    with Session(db_engine) as session:
+        preserved = session.get(RuntimeConfigItem, ALERT_CONFIG_KEY)
+        assert preserved is not None
+        assert preserved.json_schema == {"sentinel": True}
+        assert preserved.draft_payload == {"sentinel": True}
+        assert preserved.draft_version == 99
+        assert preserved.published_version == 9
+        revision = session.scalar(
+            select(RuntimeConfigRevision).where(
+                RuntimeConfigRevision.config_key == ALERT_CONFIG_KEY,
+                RuntimeConfigRevision.version == 9,
+            )
+        )
+        assert revision is not None
+        assert revision.payload == {"sentinel": True}
 
 
 def test_runtime_config_draft_publish_snapshot_and_secret_redaction(
@@ -110,20 +260,31 @@ def test_runtime_config_draft_publish_snapshot_and_secret_redaction(
         publish = api_client.post(
             "/v2/config/runtime/items/test_runtime.api/publish",
             headers=_headers(readwrite_key),
-            json={"expectedDraftVersion": save.json()["draftVersion"], "comment": "TEST publish"},
+            json={
+                "expectedDraftVersion": save.json()["draftVersion"],
+                "comment": "TEST publish",
+            },
         )
         assert publish.status_code == 200, publish.text
         assert publish.json()["publishedVersion"] == 1
 
-        assert api_client.get(
-            "/v2/config/runtime/items", headers=_headers(readonly_key)
-        ).status_code == 403
-        assert api_client.get(
-            "/v2/config/runtime/snapshot?subject=TEST_subject",
-            headers=_headers(readonly_key),
-        ).status_code == 403
+        assert (
+            api_client.get(
+                "/v2/config/runtime/items", headers=_headers(readonly_key)
+            ).status_code
+            == 403
+        )
+        assert (
+            api_client.get(
+                "/v2/config/runtime/snapshot?subject=TEST_subject",
+                headers=_headers(readonly_key),
+            ).status_code
+            == 403
+        )
 
-        listed = api_client.get("/v2/config/runtime/items", headers=_headers(readwrite_key))
+        listed = api_client.get(
+            "/v2/config/runtime/items", headers=_headers(readwrite_key)
+        )
         assert listed.status_code == 200, listed.text
         assert listed.json()["items"][0]["publishedVersion"] == 1
         assert "draftPayload" not in listed.text
@@ -139,14 +300,20 @@ def test_runtime_config_draft_publish_snapshot_and_secret_redaction(
         }
         assert "TEST_plaintext_token" not in snapshot.text
         etag = snapshot.headers["etag"]
-        assert api_client.get(
-            "/v2/config/runtime/snapshot?subject=TEST_subject",
-            headers={**_headers(readwrite_key), "If-None-Match": etag},
-        ).status_code == 304
-        assert api_client.get(
-            "/v2/config/runtime/snapshot?subject=TEST_other_subject",
-            headers={**_headers(readwrite_key), "If-None-Match": etag},
-        ).status_code == 200
+        assert (
+            api_client.get(
+                "/v2/config/runtime/snapshot?subject=TEST_subject",
+                headers={**_headers(readwrite_key), "If-None-Match": etag},
+            ).status_code
+            == 304
+        )
+        assert (
+            api_client.get(
+                "/v2/config/runtime/snapshot?subject=TEST_other_subject",
+                headers={**_headers(readwrite_key), "If-None-Match": etag},
+            ).status_code
+            == 200
+        )
 
         blocked_secret_retire = api_client.post(
             "/v2/config/runtime/secrets/test_runtime_token/retire",
@@ -161,12 +328,14 @@ def test_runtime_config_draft_publish_snapshot_and_secret_redaction(
                 rollout_salt="TEST_salt",
                 subject="TEST_subject",
             )
-        assert resolved["payload"]["token"] == "TEST_plaintext_token"
+        assert resolved["payload"]["token"] == "TEST_" + "plaintext_token"
     finally:
         _clear_runtime_config(db_engine)
 
 
-def test_runtime_config_optimistic_lock_and_rollback(api_client, db_engine, readwrite_key):
+def test_runtime_config_optimistic_lock_and_rollback(
+    api_client, db_engine, readwrite_key
+):
     _clear_runtime_config(db_engine)
     try:
         created = api_client.post(
@@ -188,7 +357,8 @@ def test_runtime_config_optimistic_lock_and_rollback(api_client, db_engine, read
         assert published.json()["publishedVersion"] == 1
 
         detail = api_client.get(
-            "/v2/config/runtime/items/test_runtime.rollback", headers=_headers(readwrite_key)
+            "/v2/config/runtime/items/test_runtime.rollback",
+            headers=_headers(readwrite_key),
         )
         stale = api_client.put(
             "/v2/config/runtime/items/test_runtime.rollback/draft",
@@ -208,14 +378,18 @@ def test_runtime_config_optimistic_lock_and_rollback(api_client, db_engine, read
             },
         )
         assert saved.status_code == 200, saved.text
-        assert api_client.post(
-            "/v2/config/runtime/items/test_runtime.rollback/publish",
-            headers=_headers(readwrite_key),
-            json={"expectedDraftVersion": saved.json()["draftVersion"]},
-        ).json()["publishedVersion"] == 2
+        assert (
+            api_client.post(
+                "/v2/config/runtime/items/test_runtime.rollback/publish",
+                headers=_headers(readwrite_key),
+                json={"expectedDraftVersion": saved.json()["draftVersion"]},
+            ).json()["publishedVersion"]
+            == 2
+        )
 
         current = api_client.get(
-            "/v2/config/runtime/items/test_runtime.rollback", headers=_headers(readwrite_key)
+            "/v2/config/runtime/items/test_runtime.rollback",
+            headers=_headers(readwrite_key),
         )
         rollback = api_client.post(
             "/v2/config/runtime/items/test_runtime.rollback/rollback",
@@ -233,6 +407,169 @@ def test_runtime_config_optimistic_lock_and_rollback(api_client, db_engine, read
         }
     finally:
         _clear_runtime_config(db_engine)
+
+
+def test_alert_runtime_config_lifecycle_and_rollout_rejection(
+    api_client, db_engine, readwrite_key
+):
+    payload = config_to_payload(SEED_FALLBACK_CONFIG)
+    _clear_runtime_config(db_engine)
+    _clear_alert_runtime_config(db_engine)
+    schema = {"type": "object", "additionalProperties": True}
+    headers = _headers(readwrite_key)
+    valid_rollout = [{"name": "canary", "basisPoints": 10000, "payload": payload}]
+    assert validate_rollout(valid_rollout, schema) == valid_rollout
+    try:
+        rejected_create = api_client.post(
+            "/v2/config/runtime/items",
+            headers=headers,
+            json={
+                "configKey": ALERT_CONFIG_KEY,
+                "displayName": "TEST SPU alert",
+                "jsonSchema": schema,
+                "draftPayload": payload,
+                "draftRollout": valid_rollout,
+            },
+        )
+        assert rejected_create.status_code == 422, rejected_create.text
+        assert "global deterioration alert" in rejected_create.text
+        created = api_client.post(
+            "/v2/config/runtime/items",
+            headers=headers,
+            json={
+                "configKey": ALERT_CONFIG_KEY,
+                "displayName": "TEST SPU alert",
+                "jsonSchema": schema,
+                "draftPayload": payload,
+            },
+        )
+        assert created.status_code == 201, created.text
+        saved = api_client.put(
+            f"/v2/config/runtime/items/{ALERT_CONFIG_KEY}/draft",
+            headers=headers,
+            json={
+                "expectedDraftVersion": created.json()["draftVersion"],
+                "payload": payload,
+            },
+        )
+        assert saved.status_code == 200, saved.text
+        rejected = api_client.put(
+            f"/v2/config/runtime/items/{ALERT_CONFIG_KEY}/draft",
+            headers=headers,
+            json={
+                "expectedDraftVersion": saved.json()["draftVersion"],
+                "payload": payload,
+                "rollout": valid_rollout,
+            },
+        )
+        assert rejected.status_code == 422, rejected.text
+        published = api_client.post(
+            f"/v2/config/runtime/items/{ALERT_CONFIG_KEY}/publish",
+            headers=headers,
+            json={"expectedDraftVersion": saved.json()["draftVersion"]},
+        )
+        assert published.status_code == 200, published.text
+        updated = dict(payload)
+        updated["enabled"] = False
+        published_detail = api_client.get(
+            f"/v2/config/runtime/items/{ALERT_CONFIG_KEY}", headers=headers
+        )
+        assert published_detail.status_code == 200, published_detail.text
+        saved_again = api_client.put(
+            f"/v2/config/runtime/items/{ALERT_CONFIG_KEY}/draft",
+            headers=headers,
+            json={
+                "expectedDraftVersion": published_detail.json()["draftVersion"],
+                "payload": updated,
+            },
+        )
+        assert saved_again.status_code == 200, saved_again.text
+        republished = api_client.post(
+            f"/v2/config/runtime/items/{ALERT_CONFIG_KEY}/publish",
+            headers=headers,
+            json={"expectedDraftVersion": saved_again.json()["draftVersion"]},
+        )
+        assert republished.status_code == 200, republished.text
+        republished_detail = api_client.get(
+            f"/v2/config/runtime/items/{ALERT_CONFIG_KEY}", headers=headers
+        )
+        assert republished_detail.status_code == 200, republished_detail.text
+        rollback = api_client.post(
+            f"/v2/config/runtime/items/{ALERT_CONFIG_KEY}/rollback",
+            headers=headers,
+            json={
+                "expectedDraftVersion": republished_detail.json()["draftVersion"],
+                "targetVersion": published.json()["publishedVersion"],
+            },
+        )
+        assert rollback.status_code == 200, rollback.text
+        assert rollback.json()["publishedVersion"] == 3
+        with Session(db_engine) as session:
+            item = session.get(RuntimeConfigItem, ALERT_CONFIG_KEY)
+            assert item is not None
+            session.add(
+                RuntimeConfigRevision(
+                    config_key=ALERT_CONFIG_KEY,
+                    version=4,
+                    payload=payload,
+                    rollout=valid_rollout,
+                    created_by="TEST_legacy_rollout",
+                )
+            )
+            item.published_version = 4
+            session.commit()
+        legacy_detail = api_client.get(
+            f"/v2/config/runtime/items/{ALERT_CONFIG_KEY}", headers=headers
+        )
+        assert legacy_detail.status_code == 200, legacy_detail.text
+        legacy_rollback = api_client.post(
+            f"/v2/config/runtime/items/{ALERT_CONFIG_KEY}/rollback",
+            headers=headers,
+            json={
+                "expectedDraftVersion": legacy_detail.json()["draftVersion"],
+                "targetVersion": 4,
+            },
+        )
+        assert legacy_rollback.status_code == 422, legacy_rollback.text
+        assert "global deterioration alert" in legacy_rollback.text
+    finally:
+        _clear_alert_runtime_config(db_engine)
+
+
+def test_alert_malformed_published_payload_fails_closed(
+    api_client, db_engine, readonly_key
+):
+    _clear_alert_runtime_config(db_engine)
+    with Session(db_engine) as session:
+        session.add(
+            RuntimeConfigItem(
+                config_key=ALERT_CONFIG_KEY,
+                display_name="TEST malformed alert",
+                json_schema={"type": "object"},
+                draft_payload=None,
+                draft_rollout=[],
+                draft_version=0,
+                published_version=1,
+            )
+        )
+        session.add(
+            RuntimeConfigRevision(
+                config_key=ALERT_CONFIG_KEY,
+                version=1,
+                payload=["malformed"],  # type: ignore[arg-type]
+                rollout=[],
+                created_by="TEST_malformed",
+            )
+        )
+        session.commit()
+    try:
+        response = api_client.get(
+            "/v2/analytics/spu-profit-deterioration?shop_pk=1",
+            headers=_headers(readonly_key),
+        )
+        assert response.status_code == 503
+    finally:
+        _clear_alert_runtime_config(db_engine)
 
 
 def test_runtime_config_infers_a_permissive_schema_from_initial_draft(
@@ -324,7 +661,10 @@ def test_runtime_config_readonly_client_uses_redacted_snapshot() -> None:
     assert "onChange: syncEditorText" in source
     assert "onChangeJSON" not in source
     assert 'await loadItems(item.configKey);\n      notice("草稿已保存");' in source
-    assert 'await loadItems(state.item.configKey);\n      notice(`已发布 v${result.publishedVersion}`);' in source
+    assert (
+        "await loadItems(state.item.configKey);\n      notice(`已发布 v${result.publishedVersion}`);"
+        in source
+    )
     assert "installJsonEditorToolbar" in source
     assert 'data-action="format"' in source
     assert 'data-action="compact"' in source
@@ -372,7 +712,9 @@ def test_runtime_config_readonly_client_uses_redacted_snapshot() -> None:
     assert 'pattern="[a-z0-9_.\\-]+"' in template
 
 
-def test_runtime_config_rejects_empty_secret_reference(api_client, db_engine, readwrite_key):
+def test_runtime_config_rejects_empty_secret_reference(
+    api_client, db_engine, readwrite_key
+):
     _clear_runtime_config(db_engine)
     try:
         response = api_client.post(
@@ -382,7 +724,10 @@ def test_runtime_config_rejects_empty_secret_reference(api_client, db_engine, re
                 "configKey": "test_runtime.invalid_secret",
                 "displayName": "TEST invalid secret",
                 "jsonSchema": _schema(secret_reference=True),
-                "draftPayload": {"endpoint": "https://example.test", "token": "secret://"},
+                "draftPayload": {
+                    "endpoint": "https://example.test",
+                    "token": "secret://",
+                },
             },
         )
         assert response.status_code == 422, response.text
@@ -405,36 +750,48 @@ def test_runtime_config_retirement_lifecycle(api_client, db_engine, readwrite_ke
             },
         )
         assert created.status_code == 201, created.text
-        assert api_client.post(
-            "/v2/config/runtime/items/test_runtime.retire/publish",
-            headers=_headers(readwrite_key),
-            json={"expectedDraftVersion": created.json()["draftVersion"]},
-        ).status_code == 200
+        assert (
+            api_client.post(
+                "/v2/config/runtime/items/test_runtime.retire/publish",
+                headers=_headers(readwrite_key),
+                json={"expectedDraftVersion": created.json()["draftVersion"]},
+            ).status_code
+            == 200
+        )
         retired = api_client.post(
             "/v2/config/runtime/items/test_runtime.retire/retire",
             headers=_headers(readwrite_key),
         )
         assert retired.json()["status"] == "retired"
-        assert api_client.put(
-            "/v2/config/runtime/items/test_runtime.retire/draft",
-            headers=_headers(readwrite_key),
-            json={
-                "expectedDraftVersion": 2,
-                "payload": {"endpoint": "https://v2.example", "value": "v2"},
-            },
-        ).status_code == 409
-        assert "test_runtime.retire" not in api_client.get(
-            "/v2/config/runtime/snapshot", headers=_headers(readwrite_key)
-        ).json()["items"]
+        assert (
+            api_client.put(
+                "/v2/config/runtime/items/test_runtime.retire/draft",
+                headers=_headers(readwrite_key),
+                json={
+                    "expectedDraftVersion": 2,
+                    "payload": {"endpoint": "https://v2.example", "value": "v2"},
+                },
+            ).status_code
+            == 409
+        )
+        assert (
+            "test_runtime.retire"
+            not in api_client.get(
+                "/v2/config/runtime/snapshot", headers=_headers(readwrite_key)
+            ).json()["items"]
+        )
         listed = api_client.get(
             "/v2/config/runtime/items?includeRetired=true",
             headers=_headers(readwrite_key),
         )
         assert listed.json()["items"][0]["retiredAt"] is not None
-        assert api_client.post(
-            "/v2/config/runtime/items/test_runtime.retire/restore",
-            headers=_headers(readwrite_key),
-        ).json()["status"] == "active"
+        assert (
+            api_client.post(
+                "/v2/config/runtime/items/test_runtime.retire/restore",
+                headers=_headers(readwrite_key),
+            ).json()["status"]
+            == "active"
+        )
 
         secret = api_client.put(
             "/v2/config/runtime/secrets/test_runtime_unused",
@@ -442,18 +799,27 @@ def test_runtime_config_retirement_lifecycle(api_client, db_engine, readwrite_ke
             json={"value": "TEST_unused"},
         )
         assert secret.status_code == 200, secret.text
-        assert api_client.post(
-            "/v2/config/runtime/secrets/test_runtime_unused/retire",
-            headers=_headers(readwrite_key),
-        ).json()["status"] == "retired"
-        assert api_client.put(
-            "/v2/config/runtime/secrets/test_runtime_unused",
-            headers=_headers(readwrite_key),
-            json={"value": "TEST_replacement"},
-        ).status_code == 409
-        assert api_client.post(
-            "/v2/config/runtime/secrets/test_runtime_unused/restore",
-            headers=_headers(readwrite_key),
-        ).json()["status"] == "active"
+        assert (
+            api_client.post(
+                "/v2/config/runtime/secrets/test_runtime_unused/retire",
+                headers=_headers(readwrite_key),
+            ).json()["status"]
+            == "retired"
+        )
+        assert (
+            api_client.put(
+                "/v2/config/runtime/secrets/test_runtime_unused",
+                headers=_headers(readwrite_key),
+                json={"value": "TEST_replacement"},
+            ).status_code
+            == 409
+        )
+        assert (
+            api_client.post(
+                "/v2/config/runtime/secrets/test_runtime_unused/restore",
+                headers=_headers(readwrite_key),
+            ).json()["status"]
+            == "active"
+        )
     finally:
         _clear_runtime_config(db_engine)

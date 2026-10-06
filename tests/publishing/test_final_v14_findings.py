@@ -949,7 +949,7 @@ def test_registry_and_docs_cover_v14_contracts() -> None:
     assert "cleanup_lease_owner" in design
     assert "stage_started_at" in design
     assert "device_status" in design
-    assert "13 个非 public 业务 schema / 71 张业务表" in architecture
+    assert "14 个非 public 业务 schema / 73 张业务表" in architecture
     assert (
         "bash scripts/test_isolated.sh --refresh-template fast tests/publishing"
         in runbook

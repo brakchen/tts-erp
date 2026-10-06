@@ -207,14 +207,14 @@ def test_generated_schema_and_architecture_cover_publishing_head() -> None:
     schema_readme = (ROOT / "docs/schema/README.md").read_text()
     schema_sql = (ROOT / "docs/schema/schema_tts_erp.sql").read_text()
     process = (ROOT / "docs/architecture/process-architecture.md").read_text()
-    assert "0066_publish_execution_fences" in schema_readme
-    assert "13 个业务 schema、71 张表" in schema_readme
+    assert "0068_spu_deterioration_alert" in schema_readme
+    assert "14 个业务 schema、73 张表" in schema_readme
     assert "### publishing" in schema_readme
     assert "CREATE SCHEMA publishing" in schema_sql
     assert "CREATE TABLE IF NOT EXISTS publishing.video_publish_tasks" in schema_sql
     assert "CREATE TABLE IF NOT EXISTS publishing.video_publish_attempts" in schema_sql
     assert "CREATE TABLE IF NOT EXISTS publishing.worker_heartbeats" in schema_sql
-    assert "13 schema SQLAlchemy" in process
+    assert "14 schema SQLAlchemy" in process
     assert "tts-erp-publish.service" in process
     assert "publishing.py" in process
 

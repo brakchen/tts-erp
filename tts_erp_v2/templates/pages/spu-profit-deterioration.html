@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>利润劣化告警 · tts-erp</title>
+  <!-- Relative path: resolves to /static/... locally and /tts/static/... behind NGINX. Do not make absolute. -->
+  <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
+  <link rel="stylesheet" href="../../static/css/tokens.css?v={{ css_version('tokens.css') }}">
+  <link rel="stylesheet" href="../../static/css/common.css?v={{ css_version('common.css') }}">
+  <link rel="stylesheet" href="../../static/css/spu-profit-deterioration.css?v={{ css_version('spu-profit-deterioration.css') }}">
+  <script type="application/json" id="sidebar-css-payload">{{ sidebar_css(current_page) }}</script>
+  <script>
+    (() => {
+      const payload = document.getElementById("sidebar-css-payload");
+      if (!payload || !payload.textContent.trim()) return;
+      const style = document.createElement("style");
+      style.dataset.pageProfile = "spu-profit-deterioration";
+      style.textContent = payload.textContent;
+      document.head.appendChild(style);
+      payload.remove();
+    })();
+  </script>
+</head>
+<body>
+  {{ sidebar(current_page) }}
+
+  <header class="op-header">
+    <div class="container-fluid px-3 px-lg-4 py-3">
+      <div class="row g-3 align-items-center">
+        <div class="col">
+          <div class="op-eyebrow mb-1">TikTok Shop · Analytics</div>
+          <h1 class="op-title mb-0">利润劣化告警</h1>
+          <p class="op-scope-note mb-0" id="page-anchor-note">服务端物化快照的只读视图；浏览器不计算 ROI、净利润或阈值。</p>
+          <!-- 新鲜度提示：由 meta.calculatedAt / basisCalculatedAt / anchorDate 驱动；新快照到达时显示「快照已更新」。 -->
+          <p class="op-freshness mb-0 mt-1" id="alert-freshness" data-kind="loading"
+            role="status" aria-live="polite">快照新鲜度：等待首次加载…</p>
+        </div>
+        <div class="col-12 col-lg-auto">
+          <div class="op-header-tools justify-content-sm-end">
+            <span class="op-identity" id="ops-identity"></span>
+            <button type="button" class="btn-primary" id="btn-settings"
+              aria-haspopup="dialog" aria-expanded="false" aria-controls="settings-drawer">阈值设置</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="container-fluid px-3 px-lg-4 pb-5" id="alert-page">
+    <!-- 告警横幅：counts + anchor + config source。颜色只是辅助，图标与文字是主信号。 -->
+    <section class="alert-banner mt-3 mb-0" id="alert-banner" data-kind="loading"
+      role="status" aria-live="polite" aria-atomic="false">
+      <span class="alert-banner__icon" id="alert-banner-icon" aria-hidden="true">i</span>
+      <span class="alert-banner__body">
+        <strong class="alert-banner__text" id="alert-banner-text">正在加载告警…</strong>
+        <span class="alert-banner__meta mono" id="alert-banner-meta"></span>
+      </span>
+      <span class="badge alert-badge alert-badge--provisional" id="alert-banner-provisional" hidden>回测暂定</span>
+    </section>
+
+    <!-- 筛选：改变即刷新，并写回 URL query（totals 语义仍由服务端决定）。 -->
+    <section class="op-toolbar py-3" id="toolbar" aria-label="告警筛选">
+      <div class="d-flex flex-wrap align-items-end gap-3">
+        <label class="op-filter" for="filter-shop">
+          <span class="op-fld-label">店铺</span>
+          <select id="filter-shop" class="form-select form-select-sm" aria-label="店铺"></select>
+        </label>
+        <label class="op-filter" for="filter-spu-ids">
+          <span class="op-fld-label">SPU scope（内部 spu_pk）</span>
+          <input id="filter-spu-ids" type="text" class="form-control form-control-sm op-spu-scope"
+            placeholder="留空 = 全部；如 1001,1002" autocomplete="off" inputmode="numeric"
+            aria-label="SPU 精确范围（内部 spu_pk，逗号分隔，最多 100 个）"
+            aria-describedby="filter-spu-feedback">
+        </label>
+        <div class="op-filter">
+          <span class="op-fld-label" id="window-days-label">比较窗口</span>
+          <div class="op-window-tabs" role="group" aria-labelledby="window-days-label" id="filter-window-days">
+            <button type="button" class="op-window-tab is-active" data-window-days="" aria-pressed="true">全部</button>
+            <button type="button" class="op-window-tab" data-window-days="1" aria-pressed="false">1 天</button>
+            <button type="button" class="op-window-tab" data-window-days="3" aria-pressed="false">3 天</button>
+            <button type="button" class="op-window-tab" data-window-days="7" aria-pressed="false">7 天</button>
+          </div>
+        </div>
+        <label class="op-filter" for="filter-layer">
+          <span class="op-fld-label">层级</span>
+          <select id="filter-layer" class="form-select form-select-sm" aria-label="计算层级">
+            <option value="all" selected>全部</option>
+            <option value="fast">快层 fast</option>
+            <option value="confirmation">确认层 confirmation</option>
+          </select>
+        </label>
+        <label class="op-filter" for="filter-state">
+          <span class="op-fld-label">状态 state</span>
+          <select id="filter-state" class="form-select form-select-sm" aria-label="告警状态 state">
+            <option value="all" selected>全部</option>
+            <option value="profit_to_loss">profit_to_loss（盈利转亏损）</option>
+            <option value="loss_expanding">loss_expanding（亏损扩大）</option>
+            <option value="loss_to_profit">loss_to_profit（亏损转盈利）</option>
+            <option value="roi_deterioration">roi_deterioration（ROI 劣化）</option>
+            <option value="net_profit_deterioration">net_profit_deterioration（净利润劣化）</option>
+            <option value="roi_recovery">roi_recovery（ROI 回升）</option>
+            <option value="recovery">recovery（恢复）</option>
+            <option value="stable">stable（稳定）</option>
+            <option value="sample_insufficient">sample_insufficient（样本不足）</option>
+            <option value="unavailable">unavailable（数据不可用）</option>
+          </select>
+        </label>
+        <label class="op-filter" for="filter-severity">
+          <span class="op-fld-label">严重度</span>
+          <select id="filter-severity" class="form-select form-select-sm" aria-label="严重度">
+            <option value="all" selected>全部</option>
+            <option value="none">none（无告警）</option>
+            <option value="warning">warning（告警）</option>
+            <option value="critical">critical（严重告警）</option>
+          </select>
+        </label>
+        <label class="op-filter" for="filter-sample">
+          <span class="op-fld-label">样本</span>
+          <select id="filter-sample" class="form-select form-select-sm" aria-label="样本状态">
+            <option value="all" selected>全部</option>
+            <option value="sufficient">sufficient（样本充足）</option>
+            <option value="sample_insufficient">sample_insufficient（样本不足）</option>
+            <option value="unavailable">unavailable（数据不可用）</option>
+          </select>
+        </label>
+        <label class="op-filter" for="filter-anchor-date">
+          <span class="op-fld-label">Anchor 日期</span>
+          <input id="filter-anchor-date" type="date" class="form-control form-control-sm" aria-label="Anchor 日期（空 = 最新物化 anchor）">
+        </label>
+        <button type="button" class="btn-secondary" id="btn-refresh">刷新</button>
+      </div>
+      <p class="op-scope-note op-spu-feedback mt-2 mb-0" id="filter-spu-feedback"
+        data-kind="" role="status" aria-live="polite"></p>
+      <p class="op-scope-note mt-2 mb-0" id="filter-echo">
+        筛选条件会写回 URL query；服务端 totals 始终按完整 scope 计算，不等于当前页可见行。
+      </p>
+    </section>
+
+    <!-- 全量 totals（服务端按完整 scope 计算）。 -->
+    <section class="alert-totals" id="alert-totals" aria-label="全量统计">
+      <span class="alert-totals__item">全部行 <strong class="mono" id="total-rows">—</strong></span>
+      <span class="alert-totals__item" data-kind="warning">告警 <strong class="mono" id="total-warning">—</strong></span>
+      <span class="alert-totals__item" data-kind="critical">严重告警 <strong class="mono" id="total-critical">—</strong></span>
+      <span class="alert-totals__item" data-kind="sample">样本不足 / 不可用 <strong class="mono" id="total-insufficient">—</strong></span>
+      <span class="alert-totals__item">涉及 SPU <strong class="mono" id="total-spus">—</strong></span>
+    </section>
+
+    <!-- 结果状态面板：loading / empty / sample / unavailable / stale / disabled / error -->
+    <section class="alert-status" id="alert-status" role="status" aria-live="polite" data-kind="loading">
+      正在加载告警…
+    </section>
+
+    <!-- 行点击展开的 summary card：只照抄服务端字段，浏览器不重算百分比。 -->
+    <section class="alert-summary" id="alert-summary" hidden aria-labelledby="alert-summary-title">
+      <div class="alert-summary__head">
+        <h2 class="alert-summary__title" id="alert-summary-title">SPU 明细</h2>
+        <button type="button" class="btn-secondary" id="btn-summary-close"
+          aria-label="关闭 SPU 明细">关闭</button>
+      </div>
+      <p class="alert-summary__meta mono" id="alert-summary-meta"></p>
+      <dl class="alert-summary__grid" id="alert-summary-grid"></dl>
+      <footer class="alert-summary__foot" id="alert-summary-foot"></footer>
+    </section>
+
+    <div class="d-none d-lg-block table-responsive" id="alert-table-wrap">
+      <table class="op-table alert-table" id="alert-table" aria-label="SPU 利润劣化告警明细">
+        <thead>
+          <tr>
+            <th class="op-th" scope="col">状态</th>
+            <th class="op-th" scope="col">SPU</th>
+            <th class="op-th" scope="col">窗口</th>
+            <th class="op-th" scope="col">层级</th>
+            <th class="op-th" scope="col">样本</th>
+            <th class="op-th" scope="col">上期 ROI</th>
+            <th class="op-th" scope="col">本期 ROI</th>
+            <th class="op-th" scope="col">ROI 降幅</th>
+            <th class="op-th" scope="col">上期净利润(CNY)</th>
+            <th class="op-th" scope="col">本期净利润(CNY)</th>
+            <th class="op-th" scope="col">净利润降幅</th>
+            <th class="op-th" scope="col">上期消耗(CNY)</th>
+            <th class="op-th" scope="col">本期消耗(CNY)</th>
+            <th class="op-th" scope="col">订单(上→本)</th>
+            <th class="op-th" scope="col">广告订单(上→本)</th>
+            <th class="op-th" scope="col">Anchor</th>
+            <th class="op-th" scope="col">配置</th>
+            <th class="op-th" scope="col">证据</th>
+          </tr>
+        </thead>
+        <tbody id="alert-rows"></tbody>
+        <tfoot id="alert-tfoot"></tfoot>
+      </table>
+    </div>
+
+    <div class="alert-cards d-lg-none" id="alert-cards" aria-label="SPU 利润劣化告警卡片列表"></div>
+
+    <section class="op-pager py-3" aria-label="告警分页">
+      <div class="d-flex flex-column flex-lg-row align-items-center justify-content-between gap-2">
+        <label class="op-fld-label d-flex align-items-center gap-2 mb-0" for="filter-limit">
+          每页显示
+          <select id="filter-limit" class="form-select form-select-sm op-pager-limit" aria-label="每页条数">
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="200">200</option>
+          </select>
+        </label>
+        <span class="op-pager-page" id="alert-pager-label" aria-live="polite">—</span>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn-secondary" id="alert-pager-prev" aria-label="上一页">上一页</button>
+          <button type="button" class="btn-secondary" id="alert-pager-next" aria-label="下一页">下一页</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- 阈值设置抽屉：唯一数据源 = 主响应的 meta.effectiveConfig（readonly-safe published 投影）。 -->
+  <dialog class="op-drawer" id="settings-drawer" aria-labelledby="drawer-title">
+    <div class="op-drawer__head">
+      <div>
+        <h2 class="op-drawer__title" id="drawer-title">阈值设置</h2>
+        <p class="op-drawer__sub" id="drawer-config-key">analytics.spu_profit_deterioration_alert.v1</p>
+      </div>
+      <button type="button" class="btn-secondary" id="drawer-close" aria-label="关闭阈值设置">关闭</button>
+    </div>
+
+    <div class="op-drawer__body" id="drawer-body">
+      <p class="op-drawer__meta" id="drawer-meta" aria-live="polite">正在读取有效配置…</p>
+      <p class="op-drawer__meta" id="drawer-payload-hash"></p>
+      <p class="alert-badge alert-badge--provisional" id="drawer-provisional" hidden>回测暂定</p>
+
+      <section class="op-drawer__note" id="drawer-readonly-note" hidden>
+        <strong>只读会话：</strong>输入已禁用。本抽屉只显示
+        <code>meta.effectiveConfig</code>（已发布的有效投影，不含 draft、rollout 或 secret）。
+        <a href="../../v2/pages/runtime-configs" id="drawer-runtime-link">前往运行配置页（只读）</a>
+        查看版本与审计。
+      </section>
+
+      <section id="drawer-editor" hidden>
+        <div class="op-drawer__actions" id="drawer-actions">
+          <button type="button" class="btn-secondary" id="btn-reset">重置（恢复已发布 payload）</button>
+          <button type="button" class="btn-secondary" id="btn-load-backtest">载入回测暂定</button>
+          <span class="op-scope-note" id="drawer-action-note"></span>
+        </div>
+        <p class="op-scope-note mb-2">
+          单位：<code>roiAbsDelta</code> 为 ROI 绝对差，<code>roiRelativeDecline</code>/<code>netProfitDecline</code>
+          为 0..1 比例，<code>minSpendCny</code> 为 CNY，<code>minOrders</code>/<code>minAdOrders</code> 为整数。
+          保存草稿与发布都由现有运行配置端点校验；本页不复制阈值公式。
+        </p>
+        <div id="drawer-thresholds"></div>
+      </section>
+
+      <p class="op-drawer__error" id="drawer-form-status" role="status" aria-live="polite"></p>
+      <button type="button" class="btn-secondary" id="btn-drawer-reload" hidden>重新加载草稿版本</button>
+    </div>
+
+    <div class="op-drawer__foot">
+      <button type="button" class="btn-secondary" id="btn-drawer-cancel">取消 / 关闭</button>
+      <div class="op-drawer__foot-right">
+        <button type="button" class="btn-secondary" id="btn-publish" disabled>发布新版本</button>
+        <button type="button" class="btn-primary" id="btn-draft-save" disabled>保存草稿</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="../../static/js/spu-profit-deterioration.js?v={{ js_version('spu-profit-deterioration.js') }}" defer></script>
+</body>
+</html>

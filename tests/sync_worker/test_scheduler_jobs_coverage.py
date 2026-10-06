@@ -73,6 +73,7 @@ EXPECTED_JOB_INTERVALS = {
     "spu.image_mirror": 1800,
     "fx.sync": 3600,
     "analytics.shop_fee_rate": 86400,
+    "analytics.spu_profit_deterioration_alert": 86400,
 }
 
 
@@ -80,7 +81,7 @@ def test_jobs_registry_has_expected_count() -> None:
     """19 jobs total — keeps us honest if a new one slips in unannounced."""
     # 6 TikTok + 13 system jobs, including the source-owned purchase-price
     # cleaner and excluding the retired EWM purchase-order sync.
-    assert len(JOBS) == 19
+    assert len(JOBS) == 20
 
 
 @pytest.mark.parametrize(
@@ -201,7 +202,14 @@ def test_overdue_first_runs_tolerates_unavailable_history() -> None:
     def _raise():
         raise RuntimeError("list mode does not open DB sessions")
 
-    assert _overdue_first_runs(_raise, now=datetime.now(UTC), jitter_seconds=30) == {}
+    assert (
+        _overdue_first_runs(  # type: ignore[arg-type]
+            _raise,  # type: ignore[arg-type]
+            now=datetime.now(UTC),
+            jitter_seconds=30,
+        )
+        == {}
+    )
 
 
 def test_build_scheduler_passes_catchup_next_run_time(monkeypatch) -> None:

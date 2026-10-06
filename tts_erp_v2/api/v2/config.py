@@ -44,6 +44,7 @@ from tts_erp_v2.runtime_config.validation import (
     validate_payload,
     validate_rollout,
     validate_schema,
+    validate_spu_deterioration_alert_runtime_mutation,
 )
 
 router = APIRouter(prefix="/v2/config", tags=["config"])
@@ -284,7 +285,7 @@ def _detail_out(sess: Session, item: RuntimeConfigItem) -> dict[str, Any]:
     }
 
 
-def _validation_error(exc: ConfigValidationError | KeyError) -> HTTPException:
+def _validation_error(exc: ConfigValidationError | KeyError | ValueError) -> HTTPException:
     return HTTPException(status_code=422, detail=str(exc))
 
 
@@ -342,6 +343,9 @@ def create_runtime_config_item(
             body.draft_rollout = validate_rollout(body.draft_rollout, json_schema)
         elif body.draft_rollout:
             raise ConfigValidationError("draftRollout requires draftPayload")
+        validate_spu_deterioration_alert_runtime_mutation(
+            body.config_key, payload=body.draft_payload, draft_rollout=body.draft_rollout
+        )
     except ConfigValidationError as exc:
         raise _validation_error(exc) from exc
     item = RuntimeConfigItem(
@@ -385,6 +389,9 @@ def save_runtime_config_draft(
     try:
         validate_payload(body.payload, item.json_schema)
         rollout = validate_rollout(body.rollout, item.json_schema)
+        validate_spu_deterioration_alert_runtime_mutation(
+            config_key, payload=body.payload, rollout=rollout
+        )
     except ConfigValidationError as exc:
         raise _validation_error(exc) from exc
     item.draft_payload = body.payload

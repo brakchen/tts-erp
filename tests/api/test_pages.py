@@ -18,6 +18,15 @@ from pathlib import Path
 
 import pytest
 
+from tts_erp_v2.access._policy import required_role
+from tts_erp_v2.access._types import Role
+from tts_erp_v2.accounts.pages import (
+    ALL_PERMISSION_CODES,
+    PAGE_BY_ID,
+    PAGE_MIN_WRITE_TIER,
+    PAGES,
+    required_page_permission,
+)
 from tts_erp_v2.api.v2.pages import (
     _SIDEBAR_CSS,
     _SIDEBAR_TOGGLE_JS,
@@ -289,6 +298,163 @@ def test_shops_page_js_manages_service_app_credentials() -> None:
 def test_shops_page_requires_some_auth(api_client):
     r = api_client.get("/v2/pages/shops")
     assert r.status_code == 401
+
+
+def test_spu_profit_deterioration_page_shell_and_sidebar(api_client, readonly_key):
+    """告警页是只读 HTML shell：路由、侧边栏入口、抽屉与外链资产齐备。"""
+    r = api_client.get(
+        "/v2/pages/spu-profit-deterioration",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"].startswith("text/html")
+    body = r.text
+    assert "利润劣化告警" in body
+    assert "../../static/css/spu-profit-deterioration.css?v=" in body
+    assert "/static/js/spu-profit-deterioration.js?v=" in body
+    assert 'href="../../v2/pages/spu-profit-deterioration"' in body
+    assert 'title="利润劣化告警" aria-current="page"' in body
+    # 阈值设置抽屉 + 告警横幅 + 筛选 + 状态面板（aria-live）都在 HTML 里。
+    assert 'id="btn-settings"' in body
+    assert 'id="settings-drawer"' in body
+    assert 'id="alert-banner"' in body
+    assert 'id="alert-status" role="status" aria-live="polite"' in body
+    assert 'id="filter-window-days"' in body
+    assert 'id="filter-sample"' in body
+    assert 'id="alert-rows"' in body
+    assert 'id="alert-cards"' in body
+    # design §6.1/§6.2 的新接线也必须随 HTML 下发（不靠 JS 注入）。
+    assert 'id="filter-spu-ids"' in body
+    assert 'id="filter-state"' in body
+    assert 'id="alert-summary"' in body
+    assert 'id="alert-freshness" data-kind="loading"' in body
+    assert 'href="/static/' not in body
+    assert 'src="/static/' not in body
+
+
+def test_spu_profit_deterioration_page_permission_gate(
+    api_client, readonly_key, readwrite_key, admin_key
+):
+    """页面本身是 readonly；抽屉的草稿/发布是另一条 readwrite 路由。
+
+    告警页不得比同级 SPU ROI 页更严（否则 readonly 岗看不到告警），而
+    ``/v2/config/runtime/items/...`` 必须继续是 readwrite——否则 readonly
+    会话能从抽屉改运行时权威配置。
+    """
+    key = f"Bearer {readonly_key}"
+    assert (
+        api_client.get(
+            "/v2/pages/spu-profit-deterioration", headers={"Authorization": key}
+        ).status_code
+        == 200
+    )
+    for elevated in (readwrite_key, admin_key):
+        assert (
+            api_client.get(
+                "/v2/pages/spu-profit-deterioration",
+                headers={"Authorization": f"Bearer {elevated}"},
+            ).status_code
+            == 200
+        )
+    # 匿名 → 401（任何 /v2/* 都需要 readonly+）。
+    assert api_client.get("/v2/pages/spu-profit-deterioration").status_code == 401
+
+    item = "/v2/config/runtime/items/analytics.spu_profit_deterioration_alert.v1"
+    assert required_role("GET", "/v2/pages/spu-profit-deterioration") == Role.READONLY
+    assert required_role("PUT", f"{item}/draft") == Role.READWRITE
+    assert required_role("POST", f"{item}/publish") == Role.READWRITE
+    readonly_publish = api_client.post(
+        f"{item}/publish", json={"expectedDraftVersion": 1, "comment": "TEST"}
+    )
+    assert readonly_publish.status_code == 401, readonly_publish.text
+
+
+def test_spu_profit_deterioration_page_state_dropdown_matches_documented_enum(api_client, readonly_key):
+    """state 下拉的每个 option 都必须是被服务端接受的枚举值（design §6.1）。"""
+    body = api_client.get(
+        "/v2/pages/spu-profit-deterioration",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    ).text
+    options = re.findall(r'<option value="([a-z_]+)"', body)
+    documented = [
+        "all",
+        "profit_to_loss",
+        "loss_expanding",
+        "loss_to_profit",
+        "roi_deterioration",
+        "net_profit_deterioration",
+        "roi_recovery",
+        "recovery",
+        "stable",
+        "sample_insufficient",
+        "unavailable",
+    ]
+    state_block = body[body.index('id="filter-state"'): body.index('id="filter-severity"')]
+    assert re.findall(r'<option value="([a-z_]+)"', state_block) == documented
+    assert set(documented) <= set(options)
+
+
+def test_spu_profit_deterioration_page_requires_some_auth(api_client):
+    r = api_client.get("/v2/pages/spu-profit-deterioration")
+    assert r.status_code == 401, r.text
+
+
+def test_spu_profit_deterioration_page_registry_entry():
+    """页面注册表 = 侧边栏/权限点唯一来源；权限点交给现有幂等种子机制。
+
+    新增页面只需 ``PAGES`` 加一行；``page:spu-profit-deterioration`` 会自动进入
+    ``ALL_PERMISSION_CODES``，由既有 ``python -m tts_erp_v2.accounts.cli
+    sync-permissions``（``service.seed_builtin_roles``，幂等）补 permissions 行
+    并给内置角色授权——不新增 alembic revision。
+    """
+    page = PAGE_BY_ID["spu-profit-deterioration"]
+    assert page.label == "利润劣化告警"
+    assert page.group == "经营分析"
+    assert page.permission_code == "page:spu-profit-deterioration"
+    assert page.permission_code in ALL_PERMISSION_CODES
+    assert required_page_permission("/v2/pages/spu-profit-deterioration") == (
+        "page:spu-profit-deterioration"
+    )
+    # 只读页面：路由矩阵给 readonly，与 SPU ROI 页同级，不进 PAGE_MIN_WRITE_TIER。
+    assert required_role("GET", "/v2/pages/spu-profit-deterioration") == Role.READONLY
+    assert "spu-profit-deterioration" not in PAGE_MIN_WRITE_TIER
+    # 侧边栏顺序：经营分析组内紧邻 SPU ROI。
+    order = [defn.page_id for defn in PAGES]
+    assert order.index("spu-profit-deterioration") == order.index("spu-roi") + 1
+    body = _sidebar_html("spu-profit-deterioration")
+    assert body.index("SPU ROI") < body.index("利润劣化告警")
+    assert body.index("利润劣化告警") < body.index("广告日明细")
+
+
+def test_spu_profit_deterioration_page_assets_cover_all_documented_states():
+    """页面 JS/CSS 必须覆盖文档要求的状态与非颜色告警信号。"""
+    root = Path(__file__).resolve().parents[2] / "tts_erp_v2" / "static"
+    js = (root / "js" / "spu-profit-deterioration.js").read_text(encoding="utf-8")
+    css = (root / "css" / "spu-profit-deterioration.css").read_text(encoding="utf-8")
+
+    assert "/analytics/spu-profit-deterioration" in js
+    # 抽屉唯一数据源 = meta.effectiveConfig；编辑走现有 runtime 端点。
+    assert "meta.effectiveConfig" in js
+    assert "/config/runtime/items/" in js and "/draft" in js and "/publish" in js
+    # enabled / maturityDays 读 effectiveConfig 的**顶层**字段（docs 的消费方约定），
+    # 不得从 thresholds 里取——thresholds 只是同一份 payload 的重复投影。
+    assert "eff.enabled" in js and "eff.maturityDays" in js
+    assert "thresholds.enabled" not in js
+    assert "thresholds.maturityDays" not in js
+    # 只渲染主响应里的 readonly-safe 投影，不渲染 draft / rollout / 明文 secret。
+    assert "drawer.draftIncluded" in js
+    assert "回测暂定" in js
+    for state in ("sample_insufficient", "unavailable", "stale", "disabled", "正在加载告警"):
+        assert state in js, state
+    # 硬规则：浏览器不算业务公式、不硬编码 effective 阈值。
+    for forbidden in ("roiReal", "net_profit =", "calculateRoi", "0.20", "0.40"):
+        assert forbidden not in js, forbidden
+    # 非颜色告警信号：图标 + 徽章 + 行处理（斜纹背景、边框样式）。
+    assert "alert-icon" in js and "alert-badge" in js
+    assert "repeating-linear-gradient" in css
+    assert ".alert-row--sample" in css and ".alert-card--sample" in css
+    assert ".alert-row--unavailable" in css and ".alert-card--unavailable" in css
+    assert "dashed var(--muted)" in css
 
 
 def test_endpoints_index_lists_included_router_routes(api_client):

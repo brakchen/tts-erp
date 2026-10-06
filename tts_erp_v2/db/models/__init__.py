@@ -13,6 +13,7 @@ from tts_erp_v2.db.models.after_sales import (
     Case,
     CaseLine,
 )
+from tts_erp_v2.db.models.analytics import SpuDeteriorationAlert
 from tts_erp_v2.db.models.commerce import (
     ChannelAccount,
     ChannelProduct,
@@ -155,6 +156,7 @@ __all__ = [
     "SettlementTransaction",
     "Shipment",
     "ShopFeeRateEstimate",
+    "SpuDeteriorationAlert",
     "SyncCursor",
     "SyncIssue",
     "SyncJob",

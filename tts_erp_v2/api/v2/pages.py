@@ -553,6 +553,21 @@ def focused_spus_page() -> HTMLResponse:
   )
 
 
+@router.get("/spu-profit-deterioration", response_class=HTMLResponse)
+def spu_profit_deterioration_page() -> HTMLResponse:
+  """SPU 利润劣化告警页（只读展示）：路线/权限/侧边栏同 SPU ROI 页。
+
+  HTML shell 只做骨架:标题/告警横幅/筛选/表格与卡片列表/分页/阈值设置抽屉;
+  数据与业务判断全部消费 GET /v2/analytics/spu-profit-deterioration(只读)。
+  服务端只发布已物化快照与 effective config,浏览器不计算 ROI/净利润/阈值。
+  行为在 static/js/spu-profit-deterioration.js,样式在
+  static/css/spu-profit-deterioration.css。
+  """
+  return _render_page(
+    "spu-profit-deterioration.html", current_page="spu-profit-deterioration"
+  )
+
+
 @router.get("/manual-costs", response_class=HTMLResponse)
 def manual_costs_page() -> HTMLResponse:
   """Manual cost entry workbench (main-image mirror display).

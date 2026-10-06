@@ -12,10 +12,25 @@ runtime-configs 的裸 ``<code>`` 命中 Bootstrap SFMono 栈 —— 两个问�
 from __future__ import annotations
 
 import pytest
-from conftest import token_font_stacks  # noqa: F401 - 供本模块断言使用
-from render_support import PAGE_SLUGS, font_stacks, normalize_stack, overflow_report, page_path
+from render_support import (
+    PAGE_SLUGS,
+    font_stacks,
+    normalize_stack,
+    overflow_report,
+    page_path,
+)
 
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
+
+# ``token_font_stacks`` 是 tests/browser/conftest.py 里的 fixture，由测试函数
+# 同名参数注入（同 tests/e2e/test_ui_render_smoke.py 的写法），无需模块级 import。
+
+# 共享渲染门槛的页面清单。``render_support.PAGE_SLUGS`` 由渲染回归 lane 拥有，
+# 新页面在自己的 lane 里只做“加一项”的登记：告警页由此进入同一套横向溢出 +
+# 字体栈断言，而不是另起一套只跑一次的检查。页面本体由 tests/browser/conftest.py
+# 的 ``_render_pages`` 登记并提供 canned 只读载荷。
+ALERT_SLUG = "spu-profit-deterioration"
+GATE_SLUGS = [*PAGE_SLUGS, ALERT_SLUG]
 
 
 def _assert_no_overflow(page, label: str) -> None:
@@ -29,9 +44,9 @@ def _assert_no_overflow(page, label: str) -> None:
     )
 
 
-@pytest.mark.parametrize("slug", PAGE_SLUGS)
+@pytest.mark.parametrize("slug", GATE_SLUGS)
 def test_page_has_no_horizontal_overflow(browser_renderer, slug):
-    """13 个页面在常见笔记本宽度（1440）不横向溢出。"""
+    """共享门槛清单里的页面在常见笔记本宽度（1440）不横向溢出。"""
     page = browser_renderer.open(page_path(slug))
     _assert_no_overflow(page, f"{slug}@1440")
 
@@ -43,7 +58,21 @@ def test_ad_daily_has_no_horizontal_overflow_at_any_viewport(browser_renderer, w
     _assert_no_overflow(page, f"ad-daily@{width}")
 
 
-@pytest.mark.parametrize("slug", PAGE_SLUGS)
+@pytest.mark.parametrize("width", [390, 768, 1280, 1920])
+def test_spu_deterioration_alert_has_no_horizontal_overflow_at_any_viewport(
+    browser_renderer, width
+):
+    """告警页逐宽度断言：18 列表格 + 9 个筛选控件的组合条是最易溢出的新布局。"""
+    page = browser_renderer.open(f"/v2/pages/{ALERT_SLUG}", width=width)
+    # 等待信号必须与视口无关：< lg 断点下表格容器是 d-none（走卡片列表），
+    # 所以用始终可见的状态面板，而不是只在宽屏可见的表格行。
+    page.wait_for_selector(
+        "#alert-status:not([data-kind='loading'])", timeout=10_000
+    )
+    _assert_no_overflow(page, f"{ALERT_SLUG}@{width}")
+
+
+@pytest.mark.parametrize("slug", GATE_SLUGS)
 def test_page_font_stacks_come_only_from_tokens(browser_renderer, token_font_stacks, slug):
     """页面上每一段文字的 computed font-family 必须是 tokens 的三套栈之一。"""
     page = browser_renderer.open(page_path(slug))
