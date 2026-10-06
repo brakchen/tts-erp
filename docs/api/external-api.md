@@ -448,7 +448,7 @@ SPU 盈利主端点和四个懒加载钻取端点是稳定的 readonly API。完
 
 | Endpoint | Role | Purpose |
 | --- | --- | --- |
-| `GET /v2/analytics/spu-roi` | readonly | SPU 盈利主表、完整范围 `totals` 与 meta |
+| `GET /v2/analytics/spu-roi` | readonly | SPU 盈利主表、完整范围 `totals` 与 meta。带 `shop_pk` 时同一响应额外返回件数加权的 `items[].priceStats`/`priceCoverage` 与 `totals.priceStats`/`totals.priceCoverage`（采购/原价/实付 × 均值/中位数，CNY 四位小数或 `null`），并接受六个独立排序标识 `purchasePriceMean`、`purchasePriceMedian`、`originalSalePriceMean`、`originalSalePriceMedian`、`paidPriceMean`、`paidPriceMedian`；契约见 [`../design/spu-price-statistics.md`](../design/spu-price-statistics.md) |
 | `GET /v2/analytics/spu-roi/{spu_pk}/orders` | readonly | 订单与物流证据 |
 | `GET /v2/analytics/spu-roi/{spu_pk}/settlements` | readonly | 结算组件证据 |
 | `GET /v2/analytics/spu-roi/{spu_pk}/cases` | readonly | 售后证据 |

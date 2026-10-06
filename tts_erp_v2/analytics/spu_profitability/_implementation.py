@@ -30,6 +30,14 @@ from tts_erp_v2.analytics.spu_profitability._formula_v10 import (
     calculate_order_metrics,
     calculate_projection,
 )
+from tts_erp_v2.analytics.spu_profitability._price_stats import (
+    PriceStatsBasis,
+    PriceStatsOverview,
+    PriceStatsRequest,
+    is_price_sort_field,
+    price_sort_value,
+    read_price_stats,
+)
 from tts_erp_v2.analytics.spu_profitability._projection import (
     ProjectionPolicy,
     projection_warning_codes,
@@ -2193,6 +2201,29 @@ def _query_spu_roi(
     # 成本链批量解析（D1）
     cost_map = _resolve_costs_batch(sess, selected_pks)
 
+    # 价格统计与利润共用一个读快照、一份已解析的 SPU 选择、一份当前有效成本 map。
+    # 无单一店铺（legacy 跨店读）时无法按 shop_pk 限定价格观察，返回 None，
+    # 由 HTTP adapter 省略价格字段（能力探测），不猜测范围。
+    price_stats: PriceStatsOverview | None = (
+        read_price_stats(
+            sess,
+            basis=PriceStatsBasis(
+                calculated_at=calculated_at,
+                fx=fx_basis,
+                unit_costs_cny=cost_map,
+                default_k1_cny=K1_DEFAULT_CNY,
+            ),
+            request=PriceStatsRequest(
+                shop_pk=shop_pk,
+                selected_spu_pks=tuple(selected_pks),
+                window_start_utc=ws_dt,
+                window_end_exclusive_utc=we_dt,
+            ),
+        )
+        if shop_pk is not None
+        else None
+    )
+
     plain: list[dict] = []
     total_spend = Decimal(0)
     total_net_revenue_cny = Decimal(0)
@@ -2820,7 +2851,10 @@ def _query_spu_roi(
 
     # 排序（None 沉底；spend 后以 spu_pk ASC 最终决胜，分页稳定）。
     def _key(r: dict) -> tuple[bool, Decimal, Decimal, int]:
-        v = r[sort_field]
+        if is_price_sort_field(sort_field):
+            v = price_sort_value(price_stats, sort_field, int(r["spu_pk"]))
+        else:
+            v = r[sort_field]
         if v is None:
             return (True, Decimal(0), Decimal(0), int(r["spu_pk"]))
         primary = v if ascending else -v
@@ -3590,6 +3624,7 @@ def _query_spu_roi(
         total=len(plain),
         totals=totals,
         basis=basis,
+        price_stats=price_stats,
     )
 
 
