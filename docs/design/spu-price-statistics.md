@@ -1,6 +1,6 @@
 # SPU 价格统计（采购价 / 原价 / 实付价）专项技术方案
 
-> **状态：待实现（文档组件；不是代码、迁移或发布批准）**
+> **状态：已交付（backend da908da + P2 加固，approve-with-notes；生产迁移/部署/回填仍为 human-only，不由本文批准）**
 > 本文只定义 `/v2/pages/spu-roi` 与 `/v2/pages/focused-spus` 共用价格统计组件的实现契约。公共盈利业务真相仍由 [`../business/spu-profitability.md`](../business/spu-profitability.md) 与飞书《SPU-ROI 计算口径》拥有；公共深模块方案由 [`spu-profitability-technical-design.md`](spu-profitability-technical-design.md) 拥有。本专项不是第二套盈利口径，发布后应由维护者把本文件链接合并进公共技术方案。
 >
 > **外部依据声明：** 父会话提供飞书价格章节 readback revision `247`；本会话没有独立抓取外部 Feishu 页面，不把本地 revision `246` 当作“价格章节不存在”的证据。本文将已批准的价格范围与当前代码事实分开标注；若飞书后续修订，先修契约再实现。
@@ -441,7 +441,7 @@ WITH ranked_price_observations AS (
 )
 ```
 
-`population_lines` is the pre-eligibility LEFT JOIN relation: every selected legacy line is retained even when it has no canonical observation. Its `exclusion_reason` is mutually exclusive, and `known_valid_quantity` is populated only from a positive integral observation quantity. `coverage_by_reason` groups by `spu_pk` and is the sole producer for per-SPU line/exclusion counters and known-valid-unit sums; it counts each reason explicitly, emits zero for empty reasons, and asserts the diagnostic partition `selected_line_count = eligible + unpaid + on_hold + cancelled + gift + unknown_gift + unknown_status + invalid_quantity + missing_observation`. `scope_spus` is the item universe, so an SPU with only excluded lines still receives an item row with its coverage and `no_samples`; item serialization must not derive the universe only from eligible `scope_lines`. `scope_lines` joins coverage by `spu_pk`, never a global coverage fan-out. `coverage_by_reason_total` sums the grouped relation once for unpaginated totals. `MISSING_OBSERVATION` and `INVALID_QUANTITY` contribute line counts only; the wire does not invent unit quantities for them. `coverage_by_price` and `coverage_by_price_total` apply the same per-SPU/one-total-level split for currency/FX counters. No counter uses a guessed quantity or a second refund join.
+`population_lines` is the pre-eligibility LEFT JOIN relation: every selected legacy line is retained even when it has no canonical observation. Its `exclusion_reason` is mutually exclusive, and `known_valid_quantity` is populated only from a positive integral observation quantity. **Design order (approved; do not re-classify):** an unpaid/on-hold/cancelled line that has no canonical observation is deliberately counted as `MISSING_OBSERVATION` rather than `EXCLUDED_UNPAID`/`EXCLUDED_ON_HOLD`/`EXCLUDED_CANCELLED` — observation-missing is evaluated before parent-order-status classification — so a later reviewer must not report that ordering as a mis-classification. `coverage_by_reason` groups by `spu_pk` and is the sole producer for per-SPU line/exclusion counters and known-valid-unit sums; it counts each reason explicitly, emits zero for empty reasons, and asserts the diagnostic partition `selected_line_count = eligible + unpaid + on_hold + cancelled + gift + unknown_gift + unknown_status + invalid_quantity + missing_observation`. `scope_spus` is the item universe, so an SPU with only excluded lines still receives an item row with its coverage and `no_samples`; item serialization must not derive the universe only from eligible `scope_lines`. `scope_lines` joins coverage by `spu_pk`, never a global coverage fan-out. `coverage_by_reason_total` sums the grouped relation once for unpaginated totals. `MISSING_OBSERVATION` and `INVALID_QUANTITY` contribute line counts only; the wire does not invent unit quantities for them. `coverage_by_price` and `coverage_by_price_total` apply the same per-SPU/one-total-level split for currency/FX counters. No counter uses a guessed quantity or a second refund join.
 
 `ranked_price_observations` is the concrete canonical relation: it selects the newest authoritative whole observation, including newest missing/invalid fields; it never falls back to an older valid amount. `cost_basis` is the existing ROI current effective-cost map materialized as bound arrays by `spu_pk=l.spu_pk` in the same snapshot; `unit_cost_used`/`cost_source` are not observation columns. `o.shop_pk` is authoritative because `sales_order_lines` has no `shop_pk`. Parent status filters reuse existing ROI constants; exact local-time boundary comes from the common profitability module, not a second timezone map.
 
@@ -673,7 +673,7 @@ GET /v2/analytics/spu-roi?shop_pk=314&scope=focused&w_start=2026-10-04&w_end=202
 **Error:** missing FX for a non-CNY observed line returns `503` with no partial 200:
 
 ```json
-{"code":"PRICE_FX_UNAVAILABLE","message":"price currency cannot be converted in the read snapshot","requestId":"req-price-901","retryable":true}
+{"code":"PRICE_FX_UNAVAILABLE","message":"价格币种无法在本次读取快照内换算为 CNY","requestId":"req-price-901","retryable":true}
 ```
 
 The error must not expose raw payloads, credentials or buyer data. Existing HTTP error envelope/request-id conventions remain authoritative.
@@ -764,7 +764,6 @@ Tabulator 6.3.1 支持 nested `columns` definitions；实现 lane 必须以 vend
 | missing | absent × 1 | metric missing count +1, never zero |
 | invalid | -1 / non-numeric | invalid count, excluded |
 | gift/status | valid price × qty | excluded before metric; explicit exclusion count |
-| FX | 100 THB × 1 with fixed rate 0.2 | convert 20 CNY before mean/median |
 
 Use at least two SPUs with unequal quantities to prove totals are not average-of-SPU means/medians. Add a coverage-isolation fixture: SPU A has one eligible CNY line qty 1; SPU B has one cancelled line qty 2 and one eligible line qty 4 with blank currency. Assert A’s per-SPU exclusion/missing-currency counters remain zero, B reports only its cancelled quantity and missing-currency quantity, and totals are the one raw-population reaggregation (not copied global counters). Add an explicit acceptance test (for example `test_later_refund_or_full_loss_keeps_paid_observation`) where a paid line is later marked refunded/full-loss; assert the historical paid observation remains in the paid population. Do not join refund facts merely to manufacture a coverage counter. Add shipping/payment total values intentionally inconsistent and assert neither affects result. Add Miaoshou values intentionally different and assert they never appear in output.
 
@@ -857,6 +856,8 @@ Source grep, static string tests, mocked JSON render tests, existing canned brow
 | this lane | `docs/design/spu-price-statistics.md` | companion design only | any source/test/application edit |
 
 **Math slice handoff（separate owner, arithmetic-ready only）：** `feature/spu-price-math` HEAD `8a235fa15aafbffb6edea354b9cd3d1da0e8101b` owns `tts_erp_v2/analytics/spu_profitability/_price_math.py` and `tests/analytics/test_spu_price_math.py`, and was pushed to `origin/feature/spu-price-math`. Its handoff reports the exact GREEN command `bash scripts/test_isolated.sh unit tests/analytics/test_spu_price_math.py -vv` (23 passed in 0.90s), required `bash scripts/test_isolated.sh fast` (1638 passed, 15 skipped, 0 failed), and compileall/diff checks; Ruff was unavailable and no lint result is claimed. Analytics/API must consume or compare this helper, not duplicate/overwrite it; this evidence does not establish data/API/UI/producer readiness.
+
+**Backend slice handoff（已交付，approve-with-notes + P2 加固）：** worktree `.worktrees/spu-price-backend`，commit `da908da` 实现 §4.2–§4.4 的六指标、互斥覆盖计数、同一读快照的 FX/当前成本基准与六个价格排序标识；后续 P2 加固提交加入 observation 表 capability 探测（`to_regclass`，缺失时由 adapter 省略价格字段而不是整页 500）与 `OBSERVED` + NULL 单价的 `invalid` 归并。验证命令 `bash scripts/test_isolated.sh unit tests/analytics/test_spu_price_stats_domain.py`（15 passed）、`bash scripts/test_isolated.sh fast tests/api/test_spu_price_stats.py`（19 passed）与全量 `bash scripts/test_isolated.sh fast`（`da908da` 基线 1753 passed / 0 failed / 0 error / 14 skipped；本次加固后 1756 passed / 0 failed / 0 error / 14 skipped，skip 仅退役 Miaoshou 用例）均为 GREEN；本段只记录 backend 实现与测试证据，不宣称 data/UI/E2E 就绪，生产迁移/部署/回填仍 human-only。
 
 Projection owner changes are now present in the synchronized `origin/master` merge (current synchronized master `77c7ace`, lane sync merge `0400808`; this lane did not edit those source/common files). Price implementation still requires successor lanes to re-read the merged contracts and resolve any field/path drift before coding; this document only links to them and does not modify their ownership.
 

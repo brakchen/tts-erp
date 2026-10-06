@@ -483,8 +483,11 @@ FROM (
            known_valid_quantity,
            CASE
                WHEN field_status = 'OBSERVED'
+                AND native_price IS NOT NULL
                 AND currency IS NOT NULL AND btrim(currency) <> ''
                  THEN 'OBSERVED'
+               WHEN field_status = 'OBSERVED' AND native_price IS NULL
+                 THEN 'INVALID'
                WHEN field_status = 'OBSERVED' THEN 'INVALID_CURRENCY'
                WHEN field_status IN ('MISSING', 'NULL') THEN 'MISSING'
                ELSE 'INVALID'
@@ -514,6 +517,15 @@ GROUP BY GROUPING SETS (
     (metric, klass, native_price, currency)
 )
 """
+
+# Table-existence probe for the price observation relation.  ``to_regclass``
+# returns NULL instead of raising, and the caller's read is a real transaction
+# (``consistent_read_snapshot``), so a missing relation must never be probed with
+# try/except: a failed statement would poison the whole snapshot.  Same
+# convention as ``_implementation._SQL_SHOP_FEE_TABLE_EXISTS``.
+_SQL_PRICE_OBSERVATION_TABLE_EXISTS = text(
+    "SELECT to_regclass('commerce.sales_order_line_price_observations') IS NOT NULL"
+)
 
 # pi-lens-ignore: python-sql-injection
 _SQL_PRICE_COVERAGE = text(_POPULATION_CTE + _COVERAGE_SELECT)
@@ -615,8 +627,17 @@ def read_price_stats(
     *,
     basis: PriceStatsBasis,
     request: PriceStatsRequest,
-) -> PriceStatsOverview:
-    """Read one price-statistics overview inside the caller's read snapshot."""
+) -> PriceStatsOverview | None:
+    """Read one price-statistics overview inside the caller's read snapshot.
+
+    Returns ``None`` when the observation relation is absent (migration 0054 not
+    applied): the price module is then unavailable as a whole and the HTTP
+    adapter omits the price fields instead of failing the page.  The probe is a
+    ``to_regclass`` capability check, never try/except, because this read shares
+    the caller's transaction.
+    """
+    if not session.execute(_SQL_PRICE_OBSERVATION_TABLE_EXISTS).scalar():
+        return None
     rates = native_to_cny_rates(basis.fx)
     params = {
         "shop_pk": request.shop_pk,

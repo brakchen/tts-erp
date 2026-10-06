@@ -2135,7 +2135,10 @@ def test_projection_sample_keeps_selected_spus_when_one_has_no_window_activity(
         ).json()
     finally:
         event.remove(db_engine, "before_cursor_execute", count_query)
-    assert query_count <= 30
+    # 31 = 30 个既有语句 + 价格观察表的 to_regclass capability 探测一条
+    # （`_price_stats._SQL_PRICE_OBSERVATION_TABLE_EXISTS`，与 _implementation.py
+    # 的既有探测约定一致）；预算仍用于拦住按 date/SPU 重查的回归。
+    assert query_count <= 31
     narrowed = api_client.get(
         "/v2/analytics/spu-roi",
         headers=headers,

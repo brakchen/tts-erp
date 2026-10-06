@@ -31,6 +31,14 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from tts_erp_v2.analytics.spu_profitability import _price_stats
+from tts_erp_v2.analytics.spu_profitability._price_stats import (
+    PriceCoverageStatus,
+    PriceStatsBasis,
+    PriceStatsRequest,
+    read_price_stats,
+)
+from tts_erp_v2.analytics.spu_profitability._types import FxBasis
 from tts_erp_v2.db.models import (
     ChannelAccount,
     ChannelProduct,
@@ -1685,3 +1693,147 @@ def test_price_stats_match_focused_and_exact_spu_scope(
     # focused totals 只聚合已应用 SPU 范围，不复制整店 totals
     assert focused["totals"]["priceStats"]["paid"]["eligibleQuantity"] == 1
     assert whole["totals"]["priceStats"]["paid"]["eligibleQuantity"] == 10
+
+
+# ─── 7. 加固：capability 探测与 NULL 价格 ─────────────────────────
+
+
+def _observed_null_price_fixture(db_engine) -> tuple[int, int]:
+    """已付款行：original 有价、paid 状态 OBSERVED 但单价 NULL。"""
+    with Session(db_engine) as sess:
+        shop = _seed_shop(sess, "TEST_PRICE_SHOP_NULLPRICE")
+        spu = _seed_spu(sess, shop, "TEST_PRICE_SPU_NULLPRICE")
+        _seed_manual_cost(sess, spu, "10")
+        order = _seed_order(
+            sess, shop, order_id="TEST_PRICE_NULLPRICE_ORDER", status=PAID_STATUS
+        )
+        line = _seed_line(
+            sess, order, spu, line_ext="TEST_PRICE_NULLPRICE_LINE", qty="2"
+        )
+        _seed_observation(
+            sess,
+            shop=shop,
+            order=order,
+            line_ext=line.external_line_id,
+            spu=spu,
+            qty="2",
+            original="10",
+            paid=None,
+            original_status="OBSERVED",
+            paid_status="OBSERVED",
+        )
+        _commit(sess)
+        return shop.id, spu.id
+
+
+def test_read_price_stats_null_native_price_is_invalid_not_observed(db_engine):
+    """domain 层：OBSERVED + NULL native price 记 invalid，不抛 ValueError。"""
+    shop_pk, spu_pk = _observed_null_price_fixture(db_engine)
+    with Session(db_engine) as sess:
+        overview = read_price_stats(
+            sess,
+            basis=PriceStatsBasis(
+                calculated_at=datetime(2026, 10, 5, 12, 0, tzinfo=UTC),
+                fx=FxBasis(
+                    snapshot_id=901,
+                    usd_cny=USD_CNY,
+                    cny_usd=Decimal(1) / USD_CNY,
+                    usd_vnd=USD_VND,
+                    as_of=datetime(2026, 10, 5, 11, 59, tzinfo=UTC),
+                ),
+                unit_costs_cny={},
+                default_k1_cny=Decimal(40),
+            ),
+            request=PriceStatsRequest(
+                shop_pk=shop_pk,
+                selected_spu_pks=(spu_pk,),
+                window_start_utc=None,
+                window_end_exclusive_utc=None,
+            ),
+        )
+
+    assert overview is not None
+    stats = overview.by_spu[spu_pk]
+    assert stats.paid.observed_quantity == 0
+    assert stats.paid.invalid_quantity == 2
+    assert stats.paid.invalid_line_count == 1
+    assert stats.paid.mean_cny is None
+    assert stats.paid.median_cny is None
+    assert stats.paid.status is PriceCoverageStatus.PARTIAL
+    # 同一 eligible 行的 original 字段仍是观察值：分类是 per-field，不是 per-line
+    assert stats.original_sale.observed_quantity == 2
+    assert stats.original_sale.mean_cny == Decimal(10)
+
+
+def test_price_stats_observed_null_native_price_returns_200(
+    api_client, readonly_key, db_engine
+):
+    """接口层：OBSERVED + NULL 单价不得抛未捕获 ValueError（整页 500）。"""
+    shop_pk = _observed_null_price_fixture(db_engine)[0]
+
+    body = _get(api_client, readonly_key, shop_pk=shop_pk, w_start=DAY, w_end=DAY)
+
+    item = _items(body)["TEST_PRICE_SPU_NULLPRICE"]
+    paid = _metric(item, "paid")
+    assert paid["mean"] is None
+    assert paid["median"] is None
+    assert paid["observedQuantity"] == 0
+    assert paid["invalidQuantity"] == 2
+    assert paid["invalidLineCount"] == 1
+    assert paid["eligibleQuantity"] == 2
+    assert paid["status"] == "partial"
+    assert _metric(item, "originalSale")["mean"] == "10.0000"
+    assert item["priceCoverage"]["eligibleQuantity"] == 2
+
+
+def test_price_stats_fields_omitted_when_observation_table_missing(
+    api_client, readonly_key, db_engine, monkeypatch
+):
+    """0054 未应用（capability 探测为假）→ 200 且省略价格字段，不是整页 500。"""
+    with Session(db_engine) as sess:
+        shop = _seed_shop(sess, "TEST_PRICE_SHOP_NOTABLE")
+        spu = _seed_spu(sess, shop, "TEST_PRICE_SPU_NOTABLE")
+        _seed_manual_cost(sess, spu, "10")
+        order = _seed_order(
+            sess, shop, order_id="TEST_PRICE_NOTABLE_ORDER", status=PAID_STATUS
+        )
+        line = _seed_line(
+            sess, order, spu, line_ext="TEST_PRICE_NOTABLE_LINE", qty="2"
+        )
+        _seed_observation(
+            sess,
+            shop=shop,
+            order=order,
+            line_ext=line.external_line_id,
+            spu=spu,
+            qty="2",
+            original="20",
+            paid="18",
+        )
+        _commit(sess)
+        shop_pk = shop.id
+
+    # 注入「观察表不存在」：探测语句走 read_price_stats 的同一分支。
+    monkeypatch.setattr(
+        _price_stats,
+        "_SQL_PRICE_OBSERVATION_TABLE_EXISTS",
+        text(
+            "SELECT to_regclass("
+            "'commerce.sales_order_line_price_observations_absent')"
+            " IS NOT NULL"
+        ),
+    )
+
+    body = _get(api_client, readonly_key, shop_pk=shop_pk, w_start=DAY, w_end=DAY)
+
+    # 利润部分照常返回（价格模块缺失不得影响同一页面的利润字段）
+    item = _items(body)["TEST_PRICE_SPU_NOTABLE"]
+    assert "priceStats" not in item
+    assert "priceCoverage" not in item
+    assert "net_profit" in item
+    assert "priceStats" not in body["totals"]
+    assert "priceCoverage" not in body["totals"]
+    # 没有价格快照时不得声明一个不存在的 CNY 基准/排序回传
+    assert "priceFx" not in body["meta"]
+    assert "priceCost" not in body["meta"]
+    assert "priceSort" not in body["meta"]

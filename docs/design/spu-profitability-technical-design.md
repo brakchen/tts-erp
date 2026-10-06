@@ -652,7 +652,7 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 | --- | --- | --- | --- |
 | selection | `activity`（`ActivitySelection`）、`exact_ids`、`focused` | 活动范围、精确 SPU、重点关注 | Python 类型；未知 selection 422 |
 | evidence | `orders`、`settlements`、`cases`、`ads` | 订单物流、结算、售后、广告 | `EvidenceKind`；未知 tab 不发请求 |
-| sort | `roi_real`,`spend`,`ad_system_actual_roi`,`ad_system_breakeven_roi`,`refund_rate`,`refund_rate_qty`,`cancel_rate`,`net_profit`,`sales`,`effective_sales`,`gmv_sales`,`ad_count`,`gmv_ad`,`order_count`,`total_orders`,`effective_order_count`,`cancelled_order_count`,`units_sold`,`refund_net_amount`,`return_loss`,`roi_breakeven`,`full_loss_rate` | 对应后端排序字段 | `SortField` 当前全集；未知 422 |
+| sort | `roi_real`,`spend`,`ad_system_actual_roi`,`ad_system_breakeven_roi`,`refund_rate`,`refund_rate_qty`,`cancel_rate`,`net_profit`,`sales`,`effective_sales`,`gmv_sales`,`ad_count`,`gmv_ad`,`order_count`,`total_orders`,`effective_order_count`,`cancelled_order_count`,`units_sold`,`refund_net_amount`,`return_loss`,`roi_breakeven`,`full_loss_rate`,`purchasePriceMean`,`purchasePriceMedian`,`originalSalePriceMean`,`originalSalePriceMedian`,`paidPriceMean`,`paidPriceMedian` | 对应后端排序字段 | `SortField` 当前全集；末尾六个是件数加权价格列标识（null 双向沉底，无 `shop_pk` 时省略价格字段并忽略该排序），契约见 [`spu-price-statistics.md`](spu-price-statistics.md) §4.4 / [`../api/external-api.md`](../api/external-api.md)；未知 422 |
 | order | `asc`,`desc` | 升序、降序 | `SortDirection`；目标未知 422 |
 | formula status | `calculated`,`estimated_known_costs` | 已覆盖成本、已知成本下限估算 | `FormulaStatus`；未知 raw code + warning |
 | projection | `available`,`no_unsettled_orders`,`insufficient_sample` | 可预测、无未结算订单、样本不足 | `ProjectionStatus`；未知 raw code，不当 0 |
