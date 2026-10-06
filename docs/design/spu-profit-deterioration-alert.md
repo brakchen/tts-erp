@@ -294,7 +294,7 @@ Field/enum semantics：
 - `state`：明确状态枚举；`sampleStatus`：`sufficient|sample_insufficient|unavailable`；缺 facts/ROI/gates 的 item 不能是 `stable`。API sample filter 必须接受并校验 `sufficient|sample_insufficient|unavailable|all`，且逐项匹配 `sampleStatus`。
 - ROI/net-profit/spend：后端 Decimal wire string；null 代表无解/不足样本；order counts 为 int。
 - `configSource`：runtime_config/seed_fallback；`basisCalculatedAt` 是同一只读 snapshot 的 UTC 时间。`provisionalLabel` 在 seed fallback 时必须是 literal `回测暂定`，published runtime config 为 null 或显式非暂定说明。`effectiveConfig` 是 drawer 唯一 readonly-safe complete projection：完整 published effective values 可供展示，但 `draftIncluded=false`、`rolloutIncluded=false`、`secretsIncluded=false` 是契约字段；`meta.config` 仅为 summary metadata。
-- `warningCode`：`ROI_AND_NET_PROFIT_DETERIORATED`、`PROFIT_TO_LOSS`、`LOSS_EXPANDING`、`SAMPLE_INSUFFICIENT`、`DATA_STALE`、`CONFIG_FALLBACK`；未知 code 原样显示并记录 warning。
+- `warningCode`：`ROI_AND_NET_PROFIT_DETERIORATED`、`PROFIT_TO_LOSS`、`LOSS_EXPANDING`、`SAMPLE_INSUFFICIENT`、`DATA_STALE`；未知 code 原样显示并记录 warning。
 - `drilldown`：服务端生成的相对 URL；前端不得自行拼业务公式。
 
 ### 5.2 Settings/effective endpoint
@@ -324,6 +324,28 @@ runtime-config sidecar 的 `rollout`/`draftRollout` 只存在 mutation/history w
 - refresh：保留 filters，重新获取同一 endpoint；当新 snapshot 到达时提示“已更新”。
 - settings save/reset：遵循 runtime optimistic lock；保存草稿后显示 draft version；发布后刷新 effective values 和 audit metadata。
 
+### 6.2.1 实现注记（已交付的接线细节）
+
+以上 §6.1/§6.2 的要求在 `static/js/spu-profit-deterioration.js` 中的具体落地口径：
+
+- **SPU scope**：`#filter-spu-ids` 粘贴式精确范围，接受逗号串或重复 `spu_ids`，只接受**内部 `spu_pk` 正整数**（与
+  §5 的 `spu_ids` wire 契约一致，不接受上游 `spu_id`），上限 100 与服务端一致。非法或超限输入**不静默放宽**为全 SPU：
+  保持原 scope、把原因写进 `#filter-spu-feedback`、且不发请求。URL 回写用逗号串（与盈利页同一习惯），发 API 时展开为
+  重复参数 `spu_ids=`。服务端 `totals` 仍按完整 scope 计算，因此 SPU scope 只收窄 `items`。
+- **state 下拉**：枚举只维护一处（模板 `<option>`），JS 从 DOM 读合法值，不在 JS 硬编码第二份清单。页面一次只发一个
+  `state=`；端点参数本身可重复（多值 OR），由 API 层测试固定。
+- **row click summary card**：点整行或行内「明细」按钮展开 `#alert-summary`，列出上期/本期 ROI、净利润、消耗、
+  订单数、广告订单数、降幅、`state`、`sampleStatus`、`anchorDate`、`basisCalculatedAt`、`configSource`/`configVersion`
+  与 `warningCode`/`warningText`。全部照抄服务端 Decimal wire string，null 仍显示「—」；JS 不算任何百分比。
+- **新鲜度提示**：`#alert-freshness` 只读 `meta.calculatedAt`、首行 `basisCalculatedAt` 与 `meta.anchorDate`；
+  快照三元组变化即视为新快照，文案变为「快照已更新：…」，否则显示「快照新鲜度：…」。刷新期间不重置上一份快照 key。
+- **drill CTA**：主 CTA「查看利润详情」指向服务端 `drilldown.pageUrl`（`/v2/pages/spu-roi` + `shop_pk`/`spu_pk`）；
+  原始 JSON（`drilldown.profitabilityUrl`）降为次要链接。服务端未下发 `pageUrl` 时主 CTA 退回 JSON 端点，不给死链。
+- **配置字段口径**：`enabled` / `maturityDays` 一律读 `meta.effectiveConfig` 的**顶层**字段，不从
+  `thresholds` 取（`thresholds` 是完整 published payload，两者同源；见 `docs/api/external-api.md` 的消费方约定）。
+- **抽屉渲染竞态**：`settings-drawer` 的 `data-rendered` 标志**只**由阈值表格渲染成功时置位。首个载荷到达前就打开抽屉
+  不会把抽屉永久标成已渲染，配置投影到达后会补上表格（`tests/browser` 有专门用例固定这个时序）。
+
 ### 6.3 Strong warning visuals
 
 每个 warning row/card/banner 同时包含：
@@ -345,6 +367,27 @@ runtime-config sidecar 的 `rollout`/`draftRollout` 只存在 mutation/history w
 3. seed 插入 config item/schema/draft，确认后通过 runtime config 页面发布；所有 seed 值显示“回测暂定”。
 4. 发布 API/page/static 后重启 API；新增/修改 `jobs/` 或 `sync_worker/` 后执行 `systemctl --user restart tts-erp-sync.service`。本设计阶段不执行生产 restart。
 5. 检查 `/endpoints`、API health、sync job last success、page permission 和 config version。
+
+#### 7.1.1 页面与阈值设置抽屉上线清单（人工执行）
+
+实现层（`GET /v2/pages/spu-profit-deterioration`、`static/js|css/spu-profit-deterioration.*`、阈值设置抽屉）已完成，但不包含任何生产动作。上线时以下步骤全部由**人**执行，agent 不代为执行：
+
+1. **权限点种子（不新增 alembic revision）**：新增页面只需在 `tts_erp_v2/accounts/pages.py` 的 `PAGES` 加一行；
+   `page:spu-profit-deterioration` 自动进入 `ALL_PERMISSION_CODES`。部署后在目标库跑既有幂等命令
+   `python -m tts_erp_v2.accounts.cli sync-permissions`（即 `accounts.service.seed_builtin_roles`），
+   它会补 `security.permissions` 行并给内置角色授权：`admin`/`operator` 自动包含新页面，`viewer` 是显式白名单，
+   如需只读岗也能看告警页，由运维在用户管理页或 `edit-role` 显式授予。0053 之后不再新增 revision，避免迁移 DAG 出现新 head。
+2. **配置发布**：key `analytics.spu_profit_deterioration_alert.v1` 的首次发布必须由**人**在运行配置页面/端点执行。
+   在发布之前，API 与页面一直显示 `source=seed_fallback` 和字面量“回测暂定”。agent 不执行生产 publish。
+3. **重启 sync worker（必需）**：告警快照由 sync worker 的 `analytics.spu_deterioration_alert` job 写入，
+   任何 `tts_erp_v2/jobs/` 或 `tts_erp_v2/sync_worker/` 的变更后必须
+   `systemctl --user restart tts-erp-sync.service`；不重启就没有新的 anchor，页面只能看到旧快照，
+   且 `read_alerts()` 会以 stale `503` 拒绝，而不是返回伪装成空结果的 `200`。API/静态资源变更后另行重启 API（`bash restart.sh`）。
+4. **破坏性重算开关**：`ALLOW_PROD_SPU_DETERIORATION_ALERT_REPLACE` 是人工设置的生产环境变量，
+   用于显式批准生产形态库上的替换写。它只能由运维在明确批准后设置；页面、API、job 与 agent 都不得自行设置或绕过。
+5. **验收顺序**：`/endpoints` 出现新路由 → 页面 `200` + 侧边栏“利润劣化告警”入口（经营分析组）→
+   权限点行为（无权限会话 `403`、readonly 抽屉全 disabled）→ `meta.effectiveConfig` 的版本/审计/`payloadHash` →
+   sync job 最近成功时间与 anchor freshness。
 
 ### 7.2 Rollback
 

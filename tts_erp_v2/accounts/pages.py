@@ -27,6 +27,7 @@ PAGES: tuple[PageDef, ...] = (
     PageDef("dashboard", "台", "控制台", "总览"),
     PageDef("focused-spus", "关", "重点关注 SPU", "经营分析"),
     PageDef("spu-roi", "益", "SPU ROI", "经营分析"),
+    PageDef("spu-profit-deterioration", "警", "利润劣化告警", "经营分析"),
     PageDef("ad-daily", "广", "广告日明细", "经营分析"),
     PageDef("manual-costs", "采", "采购工作台", "基础设置"),
     PageDef("shops", "店", "店铺注册", "基础设置"),

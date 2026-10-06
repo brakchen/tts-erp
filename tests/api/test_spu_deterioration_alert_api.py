@@ -488,6 +488,108 @@ def test_missing_stale_and_mismatched_snapshots_fail_closed(
     assert mismatch.status_code == 503
 
 
+def test_page_wired_filters_reject_invalid_enums_and_over_cap_spu_ids(
+    api_client, readonly_key, materialized_alert_scope
+) -> None:
+    """页面新接线的两个筛选（SPU scope / state）在服务端必须是硬 422。
+
+    ``spu_ids`` 超过 100 个或含非正整数时必须被拒，而不是静默放宽为全 SPU；
+    ``state`` 必须是文档枚举内的一个可重复值。这两条正是前端
+    “不静默放宽 / 422 可读”行为的服务端下半。
+    """
+    shop_pk, spu_pk = materialized_alert_scope
+    headers = {"Authorization": f"Bearer {readonly_key}"}
+    base = "/v2/analytics/spu-profit-deterioration"
+    over_cap = "&".join(f"spu_ids={spu_pk}" for _ in range(101))
+
+    for query, reason in (
+        ("&state=not_a_state", "state 枚举外的值"),
+        ("&state=STABLE", "state 大小写必须原样"),
+        ("&sample=not_a_sample", "sample 枚举外的值"),
+        ("&layer=not_a_layer", "layer 枚举外的值"),
+        ("&severity=not_a_severity", "severity 枚举外的值"),
+        (f"&{over_cap}", "spu_ids 超过 100 个上限"),
+        ("&spu_ids=0", "spu_ids 含非正整数"),
+        ("&spu_ids=-1", "spu_ids 含负数"),
+        ("&spu_ids=abc", "spu_ids 含非整数"),
+    ):
+        response = api_client.get(f"{base}?shop_pk={shop_pk}{query}", headers=headers)
+        assert response.status_code == 422, (reason, response.status_code, response.text)
+
+    # 合法边界：恰好 100 个 id 与枚举内的 state 都必须被接受。
+    at_cap = "&".join(f"spu_ids={spu_pk}" for _ in range(100))
+    accepted = api_client.get(
+        f"{base}?shop_pk={shop_pk}&{at_cap}&state=roi_deterioration", headers=headers
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["total"] == 2
+
+
+def test_state_filter_is_repeatable_and_narrows_items(
+    api_client, readonly_key, materialized_alert_scope
+) -> None:
+    shop_pk, _ = materialized_alert_scope
+    headers = {"Authorization": f"Bearer {readonly_key}"}
+    only = api_client.get(
+        "/v2/analytics/spu-profit-deterioration",
+        params=[("shop_pk", shop_pk), ("state", "roi_deterioration")],
+        headers=headers,
+    )
+    assert only.status_code == 200, only.text
+    assert only.json()["items"]
+    assert all(item["state"] == "roi_deterioration" for item in only.json()["items"])
+
+    # 可重复：多个 state 是 OR 语义，totals 仍按完整 scope。
+    both = api_client.get(
+        "/v2/analytics/spu-profit-deterioration",
+        params=[
+            ("shop_pk", shop_pk),
+            ("state", "roi_deterioration"),
+            ("state", "unavailable"),
+        ],
+        headers=headers,
+    )
+    assert both.status_code == 200, both.text
+    assert {item["state"] for item in both.json()["items"]} == {
+        "roi_deterioration",
+        "unavailable",
+    }
+    assert both.json()["totals"]["shopSpuCount"] == 1
+
+
+def test_effective_config_drawer_projection_is_the_only_threshold_source(
+    api_client, readonly_key, materialized_alert_scope
+) -> None:
+    """抽屉只读 meta.effectiveConfig：顶层 enabled/maturityDays 与 thresholds 同源。
+
+    抽屉 JS 读的是顶层 ``enabled`` / ``maturityDays``，所以这两个字段必须与
+    ``thresholds``（完整 published payload）里的同名字段一致；投影不得携带
+    draft / rollout / 明文 secret。
+    """
+    shop_pk, _ = materialized_alert_scope
+    response = api_client.get(
+        f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert response.status_code == 200, response.text
+    effective = response.json()["meta"]["effectiveConfig"]
+    assert effective["enabled"] is True
+    assert effective["maturityDays"] == 7
+    thresholds = effective["thresholds"]
+    assert thresholds["enabled"] == effective["enabled"]
+    assert thresholds["maturityDays"] == effective["maturityDays"]
+    assert set(thresholds) >= {"enabled", "maturityDays", "fast", "confirmation"}
+    assert effective["drawer"] == {
+        "mode": "published_effective_readonly_safe",
+        "canEdit": False,
+        "draftIncluded": False,
+        "rolloutIncluded": False,
+        "secretsIncluded": False,
+    }
+    for forbidden in ("draft", "draftPayload", "rollout", "secrets", "secret"):
+        assert forbidden not in effective, forbidden
+
+
 def test_disabled_published_config_returns_safe_empty_scope(
     api_client, readonly_key, db_engine, materialized_alert_scope
 ) -> None:

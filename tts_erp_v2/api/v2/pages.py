@@ -444,9 +444,15 @@ def _css_version(filename: str) -> str:
 
 
 def _sidebar(current_page: str = "") -> Markup:
-  """Jinja global: sidebar markup + toggle JS, empty without a page slug."""
+  """Jinja global: sidebar markup + toggle JS, empty without a page slug.
+
+  S704 below is a false positive: ``_sidebar_html`` escapes its only dynamic
+  value (the session label) with ``markupsafe.escape``; labels/groups/icons come
+  from the ``accounts.pages`` registry constants.
+  """
   if not current_page:
     return Markup("")
+  # pi-lens-ignore: S704
   return Markup(
     _sidebar_html(current_page)
     + "\n  <script>"
@@ -456,7 +462,12 @@ def _sidebar(current_page: str = "") -> Markup:
 
 
 def _sidebar_css(current_page: str = "") -> Markup:
-  """Jinja global: sidebar CSS, empty without a page slug."""
+  """Jinja global: sidebar CSS, empty without a page slug.
+
+  S704 below is a false positive: ``_SIDEBAR_CSS`` is a module-level static
+  stylesheet constant, not user data.
+  """
+  # pi-lens-ignore: S704
   return Markup(_SIDEBAR_CSS) if current_page else Markup("")
 
 
@@ -544,6 +555,21 @@ def focused_spus_page() -> HTMLResponse:
       profile_id="focused-spus",
       entrypoint_js="focused-spus.js",
     )
+  )
+
+
+@router.get("/spu-profit-deterioration", response_class=HTMLResponse)
+def spu_profit_deterioration_page() -> HTMLResponse:
+  """SPU 利润劣化告警页（只读展示）：路线/权限/侧边栏同 SPU ROI 页。
+
+  HTML shell 只做骨架:标题/告警横幅/筛选/表格与卡片列表/分页/阈值设置抽屉;
+  数据与业务判断全部消费 GET /v2/analytics/spu-profit-deterioration(只读)。
+  服务端只发布已物化快照与 effective config,浏览器不计算 ROI/净利润/阈值。
+  行为在 static/js/spu-profit-deterioration.js,样式在
+  static/css/spu-profit-deterioration.css。
+  """
+  return _render_page(
+    "spu-profit-deterioration.html", current_page="spu-profit-deterioration"
   )
 
 

@@ -73,7 +73,7 @@ def list_spu_profit_deterioration(
     window_days: Annotated[list[int] | None, Query(alias="window_days")] = None,
     layer: Annotated[str, Query()] = "all",
     severity: Annotated[str, Query()] = "all",
-    state: list[str] | None = None,
+    state: Annotated[list[str] | None, Query(alias="state")] = None,
     sample: str = Query(default="all"),
     anchor_date: date | None = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
